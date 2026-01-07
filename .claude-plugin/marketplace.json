@@ -5,23 +5,31 @@
   },
   "metadata": {
     "description": "Multi-LLM review system and external LLM infrastructure plugins",
-    "version": "1.0.0"
+    "version": "1.1.0"
   },
   "plugins": [
     {
       "name": "review",
       "source": "./plugins/review",
       "description": "다양한 LLM(Claude, Codex, Gemini)을 사용한 문서 리뷰 시스템",
-      "version": "0.1.0",
-      "keywords": ["review", "multi-llm", "document"],
+      "version": "0.2.0",
+      "keywords": [
+        "review",
+        "multi-llm",
+        "document"
+      ],
       "category": "productivity"
     },
     {
       "name": "external-llm",
       "source": "./plugins/external-llm",
       "description": "외부 LLM(OpenAI Codex, Google Gemini) 호출 인프라",
-      "version": "0.1.0",
-      "keywords": ["codex", "gemini", "external-llm"],
+      "version": "0.2.0",
+      "keywords": [
+        "codex",
+        "gemini",
+        "external-llm"
+      ],
       "category": "integration"
     }
   ]
