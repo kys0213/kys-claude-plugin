@@ -1,0 +1,12 @@
+# Output directories
+.review-output/
+
+# Local settings
+*.local.md
+
+# OS files
+.DS_Store
+
+# Environment
+.env
+.env.local

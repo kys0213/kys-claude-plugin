@@ -1,0 +1,8 @@
+{
+  "name": "external-llm",
+  "version": "0.1.0",
+  "description": "외부 LLM(OpenAI Codex, Google Gemini) 호출 인프라",
+  "author": {
+    "name": "kys0213"
+  }
+}
