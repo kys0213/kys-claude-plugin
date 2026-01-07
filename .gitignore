@@ -10,3 +10,10 @@
 # Environment
 .env
 .env.local
+
+# Node.js
+node_modules/
+
+# Temporary files
+.new_version
+tmp.json

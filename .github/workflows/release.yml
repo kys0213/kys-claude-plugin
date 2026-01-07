@@ -1,0 +1,147 @@
+name: Auto Version Bump
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+    # version bump 커밋은 다시 트리거하지 않음
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Get commit info and determine bump type
+        id: bump_info
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 마지막 커밋 메시지에서 PR 번호 추출
+          COMMIT_MSG=$(git log -1 --format=%s)
+          echo "Commit message: $COMMIT_MSG"
+
+          PR_NUMBER=$(echo "$COMMIT_MSG" | grep -oE '#[0-9]+' | tr -d '#' | head -1)
+
+          if [ -n "$PR_NUMBER" ]; then
+            echo "Found PR #$PR_NUMBER"
+            PR_TITLE=$(gh pr view "$PR_NUMBER" --json title -q '.title' 2>/dev/null || echo "")
+          else
+            PR_TITLE="$COMMIT_MSG"
+          fi
+
+          echo "PR Title: $PR_TITLE"
+
+          # bump 타입 결정
+          if echo "$PR_TITLE" | grep -qE '^major(\(.+\))?:'; then
+            BUMP_TYPE="major"
+          elif echo "$PR_TITLE" | grep -qE '^feat(\(.+\))?:'; then
+            BUMP_TYPE="minor"
+          elif echo "$PR_TITLE" | grep -qE '^fix(\(.+\))?:'; then
+            BUMP_TYPE="patch"
+          else
+            BUMP_TYPE="none"
+          fi
+
+          echo "Bump type: $BUMP_TYPE"
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          echo "pr_title=$PR_TITLE" >> $GITHUB_OUTPUT
+
+      - name: Bump versions
+        if: steps.bump_info.outputs.bump_type != 'none'
+        run: |
+          BUMP_TYPE="${{ steps.bump_info.outputs.bump_type }}"
+
+          echo "Bumping version: $BUMP_TYPE"
+
+          # 버전 bump 함수
+          bump_version() {
+            local version="$1"
+            local type="$2"
+
+            IFS='.' read -r major minor patch <<< "${version%-*}"
+
+            case "$type" in
+              major) echo "$((major + 1)).0.0" ;;
+              minor) echo "$major.$((minor + 1)).0" ;;
+              patch) echo "$major.$minor.$((patch + 1))" ;;
+            esac
+          }
+
+          # marketplace.json 버전 업데이트
+          MARKETPLACE=".claude-plugin/marketplace.json"
+          if [ -f "$MARKETPLACE" ]; then
+            CURRENT_VERSION=$(jq -r '.metadata.version // "0.0.0"' "$MARKETPLACE")
+            NEW_VERSION=$(bump_version "$CURRENT_VERSION" "$BUMP_TYPE")
+
+            echo "marketplace.json metadata.version: $CURRENT_VERSION -> $NEW_VERSION"
+
+            # metadata.version 업데이트
+            jq --arg v "$NEW_VERSION" '.metadata.version = $v' "$MARKETPLACE" > tmp.json && mv tmp.json "$MARKETPLACE"
+
+            # 각 플러그인 버전도 업데이트
+            PLUGIN_COUNT=$(jq '.plugins | length' "$MARKETPLACE")
+            for i in $(seq 0 $((PLUGIN_COUNT - 1))); do
+              PLUGIN_NAME=$(jq -r ".plugins[$i].name" "$MARKETPLACE")
+              PLUGIN_VERSION=$(jq -r ".plugins[$i].version // \"0.0.0\"" "$MARKETPLACE")
+              NEW_PLUGIN_VERSION=$(bump_version "$PLUGIN_VERSION" "$BUMP_TYPE")
+
+              echo "  plugins[$i] ($PLUGIN_NAME): $PLUGIN_VERSION -> $NEW_PLUGIN_VERSION"
+
+              jq --arg v "$NEW_PLUGIN_VERSION" --argjson i "$i" '.plugins[$i].version = $v' "$MARKETPLACE" > tmp.json && mv tmp.json "$MARKETPLACE"
+            done
+          fi
+
+          # 각 plugin.json 버전 업데이트
+          for plugin_json in $(find plugins -name "plugin.json" -path "*/.claude-plugin/*"); do
+            CURRENT_VERSION=$(jq -r '.version // "0.0.0"' "$plugin_json")
+            NEW_VERSION=$(bump_version "$CURRENT_VERSION" "$BUMP_TYPE")
+
+            echo "$plugin_json: $CURRENT_VERSION -> $NEW_VERSION"
+
+            jq --arg v "$NEW_VERSION" '.version = $v' "$plugin_json" > tmp.json && mv tmp.json "$plugin_json"
+          done
+
+          # 새 버전 저장
+          echo "$NEW_VERSION" > .new_version
+
+      - name: Commit and push version bump
+        if: steps.bump_info.outputs.bump_type != 'none'
+        run: |
+          NEW_VERSION=$(cat .new_version)
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+          git commit -m "chore: bump version to $NEW_VERSION [skip ci]" || echo "No changes to commit"
+          git push
+
+      - name: Create release tag
+        if: steps.bump_info.outputs.bump_type != 'none'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEW_VERSION=$(cat .new_version)
+
+          git tag "v$NEW_VERSION"
+          git push origin "v$NEW_VERSION"
+
+          gh release create "v$NEW_VERSION" \
+            --title "Release v$NEW_VERSION" \
+            --generate-notes
+
+          echo "✓ Created release v$NEW_VERSION"

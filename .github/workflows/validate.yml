@@ -1,0 +1,53 @@
+name: Validate Plugin
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'plugins/**'
+      - '.claude-plugin/**'
+      - 'common/**'
+      - 'scripts/validate/**'
+      - 'package.json'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run plugin validation
+        run: npm run validate -- --verbose
+
+      - name: Check PR title format
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          echo "PR Title: $PR_TITLE"
+
+          # Conventional Commits 형식 검증
+          if ! echo "$PR_TITLE" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|major)(\(.+\))?: .+'; then
+            echo "::error::PR title must follow Conventional Commits format"
+            echo ""
+            echo "Expected format: type(scope): description"
+            echo "Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert, major"
+            echo ""
+            echo "Examples:"
+            echo "  feat: add new review command"
+            echo "  fix(review): correct path resolution"
+            echo "  major: breaking API changes"
+            exit 1
+          fi
+
+          echo "✓ PR title format is valid"

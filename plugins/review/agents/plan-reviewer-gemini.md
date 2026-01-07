@@ -57,7 +57,7 @@ plans를 리뷰해줘
 프롬프트를 **그대로** 스크립트에 전달합니다:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/../../../common/scripts/call-gemini.sh "
+${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-gemini.sh "
 컨텍스트:
 - 프로젝트: 소설 집필 시스템
 - 관점: 기술 리뷰어

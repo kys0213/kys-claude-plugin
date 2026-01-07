@@ -25,7 +25,7 @@ Google Gemini CLI를 사용하여 임의의 프롬프트를 실행하는 범용 
 ## 스크립트 호출
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/../../../common/scripts/call-gemini.sh "[프롬프트]"
+${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-gemini.sh "[프롬프트]"
 ```
 
 스크립트가 자동으로:
