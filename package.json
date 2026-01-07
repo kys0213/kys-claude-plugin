@@ -1,20 +1,13 @@
 {
   "name": "kys-claude-plugin",
   "version": "1.0.0",
-  "description": "Claude Code plugin validation tools",
-  "type": "module",
+  "description": "Claude Code plugin collection",
   "scripts": {
-    "validate": "node scripts/validate/index.js",
-    "validate:specs": "node scripts/validate/index.js --specs-only",
-    "validate:paths": "node scripts/validate/index.js --paths-only",
-    "validate:versions": "node scripts/validate/index.js --versions-only"
-  },
-  "devDependencies": {
-    "unified": "^11.0.4",
-    "remark-parse": "^11.0.0",
-    "remark-frontmatter": "^5.0.0",
-    "yaml": "^2.3.4",
-    "glob": "^10.3.10",
-    "chalk": "^5.3.0"
+    "build": "make build",
+    "validate": "make validate",
+    "validate:specs": "make validate-specs",
+    "validate:paths": "make validate-paths",
+    "validate:versions": "make validate-versions",
+    "detect": "make detect"
   }
 }
