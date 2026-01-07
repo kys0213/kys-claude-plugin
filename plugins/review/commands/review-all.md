@@ -71,9 +71,9 @@ Error: 'pattern'에 맞는 파일을 찾을 수 없습니다.
 **동일한 프롬프트**를 3개 Agent에 병렬 전달:
 
 ```
-Task(subagent_type="plan-reviewer-claude", prompt=PROMPT, run_in_background=true)
-Task(subagent_type="plan-reviewer-codex", prompt=PROMPT, run_in_background=true)
-Task(subagent_type="plan-reviewer-gemini", prompt=PROMPT, run_in_background=true)
+Task(subagent_type="claude", prompt=PROMPT, run_in_background=true)
+Task(subagent_type="codex", prompt=PROMPT, run_in_background=true)
+Task(subagent_type="gemini", prompt=PROMPT, run_in_background=true)
 ```
 
 각 Agent가 처리:
@@ -157,4 +157,4 @@ Task(subagent_type="plan-reviewer-gemini", prompt=PROMPT, run_in_background=true
 
 - **API 필요**: Codex, Gemini CLI 설치 필요
 - **시간 소요**: 약 2-3분
-- **중요한 리뷰에 사용**: 일상적 리뷰는 /review-claude 권장
+- **중요한 리뷰에 사용**: 범용 종합 리뷰용 (특정 대상은 /review-plan, /review-code 사용)

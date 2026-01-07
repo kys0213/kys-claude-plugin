@@ -1,17 +1,17 @@
 ---
-name: plan-reviewer-claude
+name: claude
 description: Claude를 사용하여 문서를 리뷰하는 에이전트. 자연어 프롬프트를 해석하여 적절한 관점으로 문서를 분석합니다.
 whenToUse: |
   다음 상황에서 이 에이전트를 사용하세요:
-  - /review-claude 커맨드 실행 시
+  - /review-plan, /review-code 등 리뷰 커맨드 실행 시 (Claude용)
   - 사용자가 "Claude로 리뷰해줘" 요청 시
   - 빠른 리뷰가 필요할 때 (즉시 실행)
 
   <example>
-  사용자: "/review-claude"
-  assistant: "plan-reviewer-claude 에이전트를 실행하여 기본 리뷰를 수행합니다."
+  사용자: "/review-plan"
+  assistant: "claude, codex, gemini 에이전트를 병렬 실행하여 리뷰합니다."
   <commentary>
-  기본 관점(기술 리뷰어)과 기본 파일(plans/*.md)로 리뷰
+  3개 LLM 에이전트가 동시에 리뷰 수행
   </commentary>
   </example>
 
@@ -38,16 +38,18 @@ tools: ["Read", "Glob"]
 MainAgent로부터 다음 형식의 자연어 프롬프트를 받습니다:
 
 ```
+리뷰 종류: [plan | code | pr | ...]
+
 컨텍스트:
 - 프로젝트: 소설 집필 시스템
 - 관점: 기술 리뷰어
 
 대상 파일:
-- plans/file1.md
-- plans/file2.md
+- path/to/file1.md
+- path/to/file2.md
 
 사용자 요청:
-plans를 리뷰해줘
+[원래 사용자 요청]
 
 위 파일들을 리뷰해주세요.
 ```
@@ -57,8 +59,8 @@ plans를 리뷰해줘
 "대상 파일:" 섹션에서 파일 경로를 추출하고 각 파일을 읽습니다:
 
 ```
-Read plans/file1.md
-Read plans/file2.md
+Read path/to/file1.md
+Read path/to/file2.md
 ```
 
 **환각 방지**:
@@ -122,7 +124,7 @@ Read plans/file2.md
 ```
 Error: 다음 파일을 찾을 수 없습니다.
 
-- plans/nonexistent.md
+- path/to/nonexistent.md
 
 리뷰할 파일이 없어 작업을 중단합니다.
 ```
