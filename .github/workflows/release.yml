@@ -50,7 +50,7 @@ jobs:
             BUMP_TYPE="major"
           elif echo "$PR_TITLE" | grep -qE '^feat(\(.+\))?:'; then
             BUMP_TYPE="minor"
-          elif echo "$PR_TITLE" | grep -qE '^fix(\(.+\))?:'; then
+          elif echo "$PR_TITLE" | grep -qE '^(fix|refactor)(\(.+\))?:'; then
             BUMP_TYPE="patch"
           else
             BUMP_TYPE="none"
