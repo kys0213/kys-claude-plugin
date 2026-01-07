@@ -53,3 +53,44 @@ jobs:
           fi
 
           echo "✓ PR title format is valid"
+
+      - name: Check version bump prefix for code changes
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # plugins 또는 common 디렉토리에 변경이 있는지 확인
+          CHANGED_FILES=$(gh pr diff ${{ github.event.pull_request.number }} --name-only)
+
+          HAS_CODE_CHANGES=false
+          if echo "$CHANGED_FILES" | grep -qE '^(plugins/|common/)'; then
+            HAS_CODE_CHANGES=true
+          fi
+
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          echo ""
+          echo "Has code changes in plugins/ or common/: $HAS_CODE_CHANGES"
+
+          if [ "$HAS_CODE_CHANGES" = "true" ]; then
+            # 버전업을 트리거하는 prefix인지 확인 (feat, fix, refactor, major)
+            if ! echo "$PR_TITLE" | grep -qE '^(feat|fix|refactor|major)(\(.+\))?:'; then
+              echo ""
+              echo "::error::Code changes in plugins/ or common/ require a version bump prefix"
+              echo ""
+              echo "Your PR title: $PR_TITLE"
+              echo ""
+              echo "Version bump prefixes:"
+              echo "  major: breaking changes (bumps major version)"
+              echo "  feat:  new features (bumps minor version)"
+              echo "  fix:   bug fixes (bumps patch version)"
+              echo "  refactor: code refactoring (bumps patch version)"
+              echo ""
+              echo "Non-version prefixes (docs, style, test, ci, chore, etc.) are only"
+              echo "allowed for changes that don't affect plugins/ or common/ directories."
+              exit 1
+            fi
+            echo "✓ Version bump prefix is valid for code changes"
+          else
+            echo "✓ No code changes in plugins/ or common/, any prefix is allowed"
+          fi
