@@ -31,6 +31,18 @@
         "external-llm"
       ],
       "category": "integration"
+    },
+    {
+      "name": "git-utils",
+      "source": "./plugins/git-utils",
+      "description": "Git 브랜치 관리 유틸리티 - 새 브랜치 생성 및 기본 브랜치 동기화",
+      "version": "0.1.0",
+      "keywords": [
+        "git",
+        "branch",
+        "sync"
+      ],
+      "category": "productivity"
     }
   ]
 }
