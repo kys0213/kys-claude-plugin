@@ -1,4 +1,4 @@
-.PHONY: help build validate detect clean
+.PHONY: help build test validate detect clean
 
 BINARY := bin/validate
 
@@ -7,6 +7,7 @@ help:
 	@echo "사용 가능한 명령어:"
 	@echo ""
 	@echo "  make build           Go 바이너리 빌드"
+	@echo "  make test            Go 테스트 실행"
 	@echo "  make validate        플러그인 검증 (전체)"
 	@echo "  make validate-specs  스펙 검증만"
 	@echo "  make validate-paths  경로 검증만"
@@ -25,6 +26,11 @@ build:
 	@mkdir -p bin
 	@cd tools/validate && go build -o ../../$(BINARY) .
 	@echo "Built: $(BINARY)"
+
+# Go 테스트
+test:
+	@echo "Running tests..."
+	@cd tools/validate && go test -v ./...
 
 # 검증 (바이너리가 없으면 빌드)
 validate: $(BINARY)
