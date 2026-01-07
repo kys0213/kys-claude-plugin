@@ -2,6 +2,19 @@
 
 Claude Code 플러그인 모음
 
+## 빠른 설치
+
+```bash
+# 마켓플레이스 추가
+/plugin marketplace add kys0213/kys-claude-plugin
+
+# review 플러그인 설치 (다중 LLM 문서 리뷰)
+/plugin install review@kys-claude-plugin
+
+# external-llm 플러그인 설치 (외부 LLM 호출)
+/plugin install external-llm@kys-claude-plugin
+```
+
 ## 구조
 
 ```
@@ -44,17 +57,6 @@ claude --plugin-dir /path/to/plugins/review
 **사용:**
 ```bash
 claude --plugin-dir /path/to/plugins/external-llm
-```
-
-## 마켓플레이스로 설치
-
-```bash
-# 마켓플레이스 추가
-/plugin marketplace add kys0213/kys-claude-plugin
-
-# 플러그인 설치
-/plugin install review@kys-claude-plugin
-/plugin install external-llm@kys-claude-plugin
 ```
 
 ## 개발
