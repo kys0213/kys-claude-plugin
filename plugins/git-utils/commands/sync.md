@@ -1,5 +1,5 @@
 ---
-name: sync
+name: git-sync
 description: Switch to default branch and sync with latest remote changes
 allowed-tools:
   - Bash
@@ -47,9 +47,9 @@ Switch to the default branch (main/master) and pull the latest changes from remo
 
 ## Example Usage
 
-- `/sync` - Switch to default branch and pull latest
+- `/git-sync` - Switch to default branch and pull latest
 
 ## Notes
 
 - This command is useful before creating new branches to ensure you're starting from the latest code
-- Works well in combination with `/new-branch` command
+- Works well in combination with `/new-git-branch` command

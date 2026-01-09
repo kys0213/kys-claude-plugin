@@ -1,5 +1,5 @@
 ---
-name: new-branch
+name: new-git-branch
 description: Create a new git branch from a base branch with latest changes
 argument-hint: "[baseBranch]"
 allowed-tools:
@@ -53,8 +53,8 @@ Create a new git branch based on the specified base branch (or default branch if
 
 ## Example Usage
 
-- `/new-branch` - Create branch from default branch (main/master)
-- `/new-branch develop` - Create branch from develop branch
+- `/new-git-branch` - Create branch from default branch (main/master)
+- `/new-git-branch develop` - Create branch from develop branch
 
 ## Notes
 
