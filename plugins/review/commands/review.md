@@ -1,5 +1,5 @@
 ---
-name: review
+name: multi-review
 description: Claude, Codex, Gemini 3개 LLM으로 동시에 문서를 리뷰합니다
 argument-hint: "[리뷰 요청 사항]"
 allowed-tools: ["Task", "Glob"]
@@ -13,19 +13,19 @@ Claude, OpenAI Codex, Google Gemini 3개 LLM을 모두 사용하여 문서를 �
 
 ```bash
 # 기본 리뷰 (plans/*.md)
-/review
+/multi-review
 
 # 대상 지정
-/review "plans 리뷰해줘"
-/review "src 코드 리뷰해줘"
-/review "시놉시스 평가해줘"
+/multi-review "plans 리뷰해줘"
+/multi-review "src 코드 리뷰해줘"
+/multi-review "시놉시스 평가해줘"
 
 # 관점 지정
-/review "staff+ 엔지니어 관점으로 plans를 리뷰해줘"
-/review "보안 관점에서 api 코드 리뷰해줘"
+/multi-review "staff+ 엔지니어 관점으로 plans를 리뷰해줘"
+/multi-review "보안 관점에서 api 코드 리뷰해줘"
 
 # 복합 요청
-/review "웹소설 편집자 관점에서 시놉시스와 1-3화를 평가해줘"
+/multi-review "웹소설 편집자 관점에서 시놉시스와 1-3화를 평가해줘"
 ```
 
 ## 핵심 워크플로우
