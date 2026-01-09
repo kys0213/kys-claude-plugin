@@ -20,3 +20,4 @@ bin/
 # Temporary files
 .new_version
 tmp.json
+tools/bumpversion/bumpversion

@@ -20,10 +20,15 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          node-version: '20'
+          go-version: '1.21'
+
+      - name: Build bumpversion tool
+        run: |
+          cd tools/bumpversion
+          go build -o ../../bumpversion .
 
       - name: Get commit info and determine bump type
         id: bump_info
@@ -64,58 +69,18 @@ jobs:
         if: steps.bump_info.outputs.bump_type != 'none'
         run: |
           BUMP_TYPE="${{ steps.bump_info.outputs.bump_type }}"
+          PR_TITLE="${{ steps.bump_info.outputs.pr_title }}"
 
           echo "Bumping version: $BUMP_TYPE"
+          echo "PR Title: $PR_TITLE"
 
-          # 버전 bump 함수
-          bump_version() {
-            local version="$1"
-            local type="$2"
+          # 변경된 플러그인만 버전 범프 (Go 도구 사용)
+          # main 브랜치의 이전 커밋과 비교하여 변경된 플러그인 감지
+          ./bumpversion --base=HEAD~1 --type="$BUMP_TYPE" --verbose
 
-            IFS='.' read -r major minor patch <<< "${version%-*}"
-
-            case "$type" in
-              major) echo "$((major + 1)).0.0" ;;
-              minor) echo "$major.$((minor + 1)).0" ;;
-              patch) echo "$major.$minor.$((patch + 1))" ;;
-            esac
-          }
-
-          # marketplace.json 버전 업데이트
-          MARKETPLACE=".claude-plugin/marketplace.json"
-          if [ -f "$MARKETPLACE" ]; then
-            CURRENT_VERSION=$(jq -r '.metadata.version // "0.0.0"' "$MARKETPLACE")
-            NEW_VERSION=$(bump_version "$CURRENT_VERSION" "$BUMP_TYPE")
-
-            echo "marketplace.json metadata.version: $CURRENT_VERSION -> $NEW_VERSION"
-
-            # metadata.version 업데이트
-            jq --arg v "$NEW_VERSION" '.metadata.version = $v' "$MARKETPLACE" > tmp.json && mv tmp.json "$MARKETPLACE"
-
-            # 각 플러그인 버전도 업데이트
-            PLUGIN_COUNT=$(jq '.plugins | length' "$MARKETPLACE")
-            for i in $(seq 0 $((PLUGIN_COUNT - 1))); do
-              PLUGIN_NAME=$(jq -r ".plugins[$i].name" "$MARKETPLACE")
-              PLUGIN_VERSION=$(jq -r ".plugins[$i].version // \"0.0.0\"" "$MARKETPLACE")
-              NEW_PLUGIN_VERSION=$(bump_version "$PLUGIN_VERSION" "$BUMP_TYPE")
-
-              echo "  plugins[$i] ($PLUGIN_NAME): $PLUGIN_VERSION -> $NEW_PLUGIN_VERSION"
-
-              jq --arg v "$NEW_PLUGIN_VERSION" --argjson i "$i" '.plugins[$i].version = $v' "$MARKETPLACE" > tmp.json && mv tmp.json "$MARKETPLACE"
-            done
-          fi
-
-          # 각 plugin.json 버전 업데이트
-          for plugin_json in $(find plugins -name "plugin.json" -path "*/.claude-plugin/*"); do
-            CURRENT_VERSION=$(jq -r '.version // "0.0.0"' "$plugin_json")
-            NEW_VERSION=$(bump_version "$CURRENT_VERSION" "$BUMP_TYPE")
-
-            echo "$plugin_json: $CURRENT_VERSION -> $NEW_VERSION"
-
-            jq --arg v "$NEW_VERSION" '.version = $v' "$plugin_json" > tmp.json && mv tmp.json "$plugin_json"
-          done
-
-          # 새 버전 저장
+          # marketplace.json에서 가장 높은 버전을 새 버전으로 사용
+          NEW_VERSION=$(jq -r '[.plugins[].version] | max' .claude-plugin/marketplace.json)
+          echo "New version: $NEW_VERSION"
           echo "$NEW_VERSION" > .new_version
 
       - name: Commit and push version bump
