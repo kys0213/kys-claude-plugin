@@ -1,8 +1,0 @@
-{
-  "author": {
-    "name": "kys0213"
-  },
-  "description": "다양한 LLM(Claude, Codex, Gemini)을 사용한 문서 리뷰 시스템",
-  "name": "review",
-  "version": "0.3.1"
-}

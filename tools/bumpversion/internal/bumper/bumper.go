@@ -84,17 +84,30 @@ func (b *Bumper) bumpPlugin(pkg changes.Package, bumpType BumpType, marketplace 
 		Plugin: pkg.Name,
 	}
 
+	// Check if plugin has strict: false in marketplace.json
+	isStrictFalse := b.isPluginStrictFalse(marketplace, pkg.Name)
+
 	// Find plugin.json path
 	pluginJSONPath := filepath.Join(b.RepoRoot, pkg.Path, ".claude-plugin", "plugin.json")
 	result.PluginJSON = pluginJSONPath
 
-	// Read current version from plugin.json
-	pluginData, err := b.loadJSON(pluginJSONPath)
-	if err != nil {
-		return result, fmt.Errorf("failed to load plugin.json: %w", err)
+	var currentVersion string
+	var pluginData map[string]interface{}
+
+	if isStrictFalse {
+		// For strict: false plugins, read version from marketplace.json
+		currentVersion = b.getMarketplacePluginVersion(marketplace, pkg.Name)
+		result.PluginJSON = "(managed by marketplace.json)"
+	} else {
+		// Read current version from plugin.json
+		var err error
+		pluginData, err = b.loadJSON(pluginJSONPath)
+		if err != nil {
+			return result, fmt.Errorf("failed to load plugin.json: %w", err)
+		}
+		currentVersion, _ = pluginData["version"].(string)
 	}
 
-	currentVersion, _ := pluginData["version"].(string)
 	if currentVersion == "" {
 		currentVersion = "0.0.0"
 	}
@@ -108,10 +121,12 @@ func (b *Bumper) bumpPlugin(pkg changes.Package, bumpType BumpType, marketplace 
 	result.NewVersion = newVersion
 
 	if !b.DryRun {
-		// Update plugin.json
-		pluginData["version"] = newVersion
-		if err := b.saveJSON(pluginJSONPath, pluginData); err != nil {
-			return result, fmt.Errorf("failed to save plugin.json: %w", err)
+		// Update plugin.json only if not strict: false
+		if !isStrictFalse {
+			pluginData["version"] = newVersion
+			if err := b.saveJSON(pluginJSONPath, pluginData); err != nil {
+				return result, fmt.Errorf("failed to save plugin.json: %w", err)
+			}
 		}
 
 		// Update marketplace.json
@@ -122,6 +137,53 @@ func (b *Bumper) bumpPlugin(pkg changes.Package, bumpType BumpType, marketplace 
 	}
 
 	return result, nil
+}
+
+// isPluginStrictFalse checks if a plugin has strict: false in marketplace.json
+func (b *Bumper) isPluginStrictFalse(marketplace map[string]interface{}, pluginName string) bool {
+	plugins, ok := marketplace["plugins"].([]interface{})
+	if !ok {
+		return false
+	}
+
+	for _, p := range plugins {
+		plugin, ok := p.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		name, _ := plugin["name"].(string)
+		if name == pluginName {
+			strict, ok := plugin["strict"].(bool)
+			// strict defaults to true, so only return true if explicitly set to false
+			return ok && !strict
+		}
+	}
+
+	return false
+}
+
+// getMarketplacePluginVersion gets the version of a plugin from marketplace.json
+func (b *Bumper) getMarketplacePluginVersion(marketplace map[string]interface{}, pluginName string) string {
+	plugins, ok := marketplace["plugins"].([]interface{})
+	if !ok {
+		return ""
+	}
+
+	for _, p := range plugins {
+		plugin, ok := p.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		name, _ := plugin["name"].(string)
+		if name == pluginName {
+			version, _ := plugin["version"].(string)
+			return version
+		}
+	}
+
+	return ""
 }
 
 func (b *Bumper) loadMarketplace() (map[string]interface{}, error) {

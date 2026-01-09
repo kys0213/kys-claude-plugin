@@ -138,6 +138,10 @@ func validateDocumentPaths(filePath string, repoRoot string) []Result {
 	fileDir := filepath.Dir(filePath)
 	pluginRoot := findPluginRoot(fileDir)
 
+	// Convert to absolute paths for proper resolution
+	absRepoRoot, _ := filepath.Abs(repoRoot)
+	absPluginRoot, _ := filepath.Abs(pluginRoot)
+
 	paths, err := parser.ExtractPluginRootPaths(filePath)
 	if err != nil {
 		results = append(results, Result{
@@ -154,14 +158,14 @@ func validateDocumentPaths(filePath string, repoRoot string) []Result {
 			continue
 		}
 
-		result := validatePluginRootPath(p.Value, pluginRoot, filePath)
+		result := validatePluginRootPath(p.Value, absPluginRoot, absRepoRoot, filePath)
 		results = append(results, result)
 	}
 
 	return results
 }
 
-func validatePluginRootPath(pathStr string, pluginRoot string, sourceFile string) Result {
+func validatePluginRootPath(pathStr string, pluginRoot string, repoRoot string, sourceFile string) Result {
 	// Replace ${CLAUDE_PLUGIN_ROOT} with actual path
 	resolvedPath := pluginRootPattern.ReplaceAllString(pathStr, pluginRoot)
 
@@ -169,6 +173,42 @@ func validatePluginRootPath(pathStr string, pluginRoot string, sourceFile string
 	resolvedPath = filepath.Clean(resolvedPath)
 
 	exists := fileExists(resolvedPath)
+
+	// For strict: false plugins, paths with ../../ may reference files outside plugin root
+	// but should still be within the repo root.
+	// Try resolving relative to repo root if direct resolution fails.
+	if !exists && strings.Contains(pathStr, "../") {
+		// Extract the path after ${CLAUDE_PLUGIN_ROOT} and count ../ levels
+		afterRoot := strings.TrimPrefix(pathStr, "${CLAUDE_PLUGIN_ROOT}")
+		afterRoot = strings.TrimPrefix(afterRoot, "/")
+
+		// Count ../  and get remaining path parts
+		parts := strings.Split(afterRoot, "/")
+		upCount := 0
+		var remainingParts []string
+		for _, part := range parts {
+			if part == ".." {
+				upCount++
+			} else if part != "" && part != "." {
+				remainingParts = append(remainingParts, part)
+			}
+		}
+
+		// Calculate plugin depth from repo root
+		pluginRelToRepo, err := filepath.Rel(repoRoot, pluginRoot)
+		if err == nil {
+			pluginDepth := strings.Count(pluginRelToRepo, string(filepath.Separator)) + 1
+
+			// If ../ count equals plugin depth, the target is at repo root level
+			if upCount == pluginDepth && len(remainingParts) > 0 {
+				altPath := filepath.Join(repoRoot, filepath.Join(remainingParts...))
+				if fileExists(altPath) {
+					exists = true
+					resolvedPath = altPath
+				}
+			}
+		}
+	}
 
 	return Result{
 		File:           sourceFile,
@@ -230,6 +270,12 @@ func validateMarketplaceSources(marketplacePath string, repoRoot string) []Resul
 			continue
 		}
 
+		// Check if strict: false (plugin.json not required)
+		strict := true // default is true
+		if strictVal, ok := plugin["strict"].(bool); ok {
+			strict = strictVal
+		}
+
 		// ./plugins/review -> absolute path
 		pluginPath := filepath.Join(repoRoot, strings.TrimPrefix(source, "./"))
 		pluginJSON := filepath.Join(pluginPath, ".claude-plugin", "plugin.json")
@@ -246,7 +292,8 @@ func validateMarketplaceSources(marketplacePath string, repoRoot string) []Resul
 				Valid:          false,
 				Error:          "Plugin directory not found: " + source,
 			})
-		} else if !jsonExists {
+		} else if !jsonExists && strict {
+			// Only require plugin.json when strict is true (default)
 			results = append(results, Result{
 				File:           marketplacePath,
 				Type:           "marketplace-source",
