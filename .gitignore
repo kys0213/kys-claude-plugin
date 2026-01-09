@@ -16,6 +16,7 @@ node_modules/
 
 # Go binaries
 bin/
+bumpversion
 
 # Temporary files
 .new_version

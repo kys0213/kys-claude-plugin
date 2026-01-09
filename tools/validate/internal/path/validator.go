@@ -230,6 +230,12 @@ func validateMarketplaceSources(marketplacePath string, repoRoot string) []Resul
 			continue
 		}
 
+		// Check if strict: false (plugin.json not required)
+		strict := true // default is true
+		if strictVal, ok := plugin["strict"].(bool); ok {
+			strict = strictVal
+		}
+
 		// ./plugins/review -> absolute path
 		pluginPath := filepath.Join(repoRoot, strings.TrimPrefix(source, "./"))
 		pluginJSON := filepath.Join(pluginPath, ".claude-plugin", "plugin.json")
@@ -246,7 +252,8 @@ func validateMarketplaceSources(marketplacePath string, repoRoot string) []Resul
 				Valid:          false,
 				Error:          "Plugin directory not found: " + source,
 			})
-		} else if !jsonExists {
+		} else if !jsonExists && strict {
+			// Only require plugin.json when strict is true (default)
 			results = append(results, Result{
 				File:           marketplacePath,
 				Type:           "marketplace-source",
