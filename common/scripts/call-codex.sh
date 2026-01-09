@@ -61,7 +61,7 @@ fi
 
 # Codex CLI 호출
 echo "OpenAI Codex 호출 중..." >&2
-echo "$FULL_PROMPT" | codex exec - > "$OUTPUT_FILE" 2>&1
+echo "$FULL_PROMPT" | codex exec --skip-git-repo-check - > "$OUTPUT_FILE" 2>&1
 
 # 파일 경로 반환 (stdout)
 echo "$OUTPUT_FILE"
