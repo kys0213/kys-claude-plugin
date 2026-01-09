@@ -85,6 +85,34 @@ npm run validate:versions  # 버전 검증
   - `major:` → MAJOR 버전 bump (0.1.0 → 1.0.0)
 - **Merge 시**: 자동 버전 bump 및 릴리스 태그 생성
 
+## Claude Code 문서
+
+| 기능 | 링크 |
+|------|------|
+| Skills | https://code.claude.com/docs/en/skills |
+| Subagents | https://code.claude.com/docs/en/sub-agents |
+| Slash Commands | https://code.claude.com/docs/en/slash-commands |
+| Hooks | https://code.claude.com/docs/en/hooks-guide |
+| Plugins | https://code.claude.com/docs/en/plugins |
+| Plugins Reference | https://code.claude.com/docs/en/plugins-reference |
+| Plugin Marketplaces | https://code.claude.com/docs/en/plugin-marketplaces |
+| Discover Plugins | https://code.claude.com/docs/en/discover-plugins |
+
+### Marketplace 참고 자료
+
+| 자료 | 링크 |
+|------|------|
+| 공식 Marketplace 예시 | https://github.com/anthropics/claude-code/blob/main/.claude-plugin/marketplace.json |
+| 공식 플러그인 모음 | https://github.com/anthropics/claude-plugins-official |
+| Marketplace Schema | https://anthropic.com/claude-code/marketplace.schema.json |
+
+### marketplace.json `strict` 필드
+
+| 값 | 의미 |
+|----|------|
+| `strict: true` (기본값) | 플러그인에 자체 `plugin.json` 필요, marketplace 필드는 보조 |
+| `strict: false` | `plugin.json` 불필요, marketplace 엔트리가 전체 매니페스트 역할 |
+
 ## 요구사항
 
 - Claude Code CLI
