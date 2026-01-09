@@ -1,8 +1,8 @@
 {
-  "name": "git-utils",
-  "version": "0.2.0",
-  "description": "Git branch management utilities - create branches and sync with default branch",
   "author": {
     "name": "kys0213"
-  }
+  },
+  "description": "Git branch management utilities - create branches and sync with default branch",
+  "name": "git-utils",
+  "version": "0.2.1"
 }

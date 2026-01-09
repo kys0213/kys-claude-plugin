@@ -1,48 +1,48 @@
 {
-  "name": "kys-claude-plugin",
-  "owner": {
-    "name": "kys0213"
-  },
   "metadata": {
     "description": "Multi-LLM review system and external LLM infrastructure plugins",
     "version": "1.2.0"
   },
+  "name": "kys-claude-plugin",
+  "owner": {
+    "name": "kys0213"
+  },
   "plugins": [
     {
-      "name": "review",
-      "source": "./plugins/review",
+      "category": "productivity",
       "description": "다양한 LLM(Claude, Codex, Gemini)을 사용한 문서 리뷰 시스템",
-      "version": "0.3.0",
       "keywords": [
         "review",
         "multi-llm",
         "document"
       ],
-      "category": "productivity"
+      "name": "review",
+      "source": "./plugins/review",
+      "version": "0.3.1"
     },
     {
-      "name": "external-llm",
-      "source": "./plugins/external-llm",
+      "category": "integration",
       "description": "외부 LLM(OpenAI Codex, Google Gemini) 호출 인프라",
-      "version": "0.3.0",
       "keywords": [
         "codex",
         "gemini",
         "external-llm"
       ],
-      "category": "integration"
+      "name": "external-llm",
+      "source": "./plugins/external-llm",
+      "version": "0.3.0"
     },
     {
-      "name": "git-utils",
-      "source": "./plugins/git-utils",
+      "category": "productivity",
       "description": "Git 브랜치 관리 유틸리티 - 새 브랜치 생성 및 기본 브랜치 동기화",
-      "version": "0.2.0",
       "keywords": [
         "git",
         "branch",
         "sync"
       ],
-      "category": "productivity"
+      "name": "git-utils",
+      "source": "./plugins/git-utils",
+      "version": "0.2.1"
     }
   ]
 }
