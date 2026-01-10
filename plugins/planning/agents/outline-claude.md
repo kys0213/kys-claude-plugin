@@ -1,19 +1,6 @@
 ---
 name: outline-claude
-description: Claude를 사용하여 요구사항 기반 아키텍처 설계를 수행하는 에이전트
-whenToUse: |
-  다음 상황에서 이 에이전트를 사용하세요:
-  - /outline 커맨드의 Phase 1에서 Claude 설계 담당
-  - 요구사항 기반 아키텍처 설계 요청 시
-
-  <example>
-  사용자: "/outline 실시간 채팅 시스템 설계"
-  assistant: "3개 LLM 에이전트를 병렬 실행하여 설계합니다."
-  <commentary>
-  outline-claude, outline-codex, outline-gemini가 동시에 설계 수행
-  </commentary>
-  </example>
-
+description: (내부용) /outline 커맨드에서 호출되는 Claude 아키텍처 설계 에이전트
 model: inherit
 color: purple
 tools: ["Read", "Glob"]
