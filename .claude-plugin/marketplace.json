@@ -43,6 +43,20 @@
       "name": "git-utils",
       "source": "./plugins/git-utils",
       "version": "0.2.1"
+    },
+    {
+      "category": "productivity",
+      "description": "상위 레벨 설계를 위한 멀티 LLM 플래닝 - 3개 LLM의 다양한 관점 통합",
+      "keywords": [
+        "planning",
+        "architecture",
+        "design",
+        "multi-llm"
+      ],
+      "name": "planning",
+      "source": "./plugins/planning",
+      "strict": false,
+      "version": "0.1.0"
     }
   ]
 }
