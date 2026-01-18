@@ -15,7 +15,7 @@ whenToUse: |
   </commentary>
   </example>
 
-model: inherit
+model: sonnet
 color: purple
 tools: ["Read", "Glob"]
 ---

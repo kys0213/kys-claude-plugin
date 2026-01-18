@@ -15,7 +15,7 @@ whenToUse: |
   </commentary>
   </example>
 
-model: inherit
+model: haiku
 color: green
 tools: ["Bash", "Read"]
 ---
