@@ -243,6 +243,14 @@ Worker용 hooks.json 템플릿을 생성합니다:
   "notification": {
     "method": "notification"
   },
+  "planning": {
+    "reviewers": {
+      "mode": "single",
+      "providers": ["claude"]
+    },
+    "autoSave": true,
+    "maxIterations": 5
+  },
   "agents": {
     "enabled": ["code-reviewer", "qa-agent", "security-auditor"],
     "custom": [],
@@ -255,6 +263,41 @@ Worker용 hooks.json 템플릿을 생성합니다:
   "completion": {
     "requiredChecks": ["lint", "typecheck", "test"],
     "coverageThreshold": 80
+  }
+}
+```
+
+### planning 섹션 상세
+
+스펙 정제 과정의 리뷰어 설정을 관리합니다:
+
+| 필드 | 설명 | 기본값 |
+|------|------|--------|
+| `reviewers.mode` | 리뷰 모드 (`single` / `multi-llm`) | `single` |
+| `reviewers.providers` | 사용할 LLM 목록 | `["claude"]` |
+| `autoSave` | 각 단계 자동 파일 저장 | `true` |
+| `maxIterations` | 최대 반복 횟수 | `5` |
+
+**Single 모드 (기본)**
+```json
+{
+  "planning": {
+    "reviewers": {
+      "mode": "single",
+      "providers": ["claude"]
+    }
+  }
+}
+```
+
+**Multi-LLM 모드** (Codex, Gemini 환경 설정 필요)
+```json
+{
+  "planning": {
+    "reviewers": {
+      "mode": "multi-llm",
+      "providers": ["claude", "codex", "gemini"]
+    }
   }
 }
 ```
