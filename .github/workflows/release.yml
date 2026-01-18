@@ -83,6 +83,16 @@ jobs:
           echo "New version: $NEW_VERSION"
           echo "$NEW_VERSION" > .new_version
 
+      - name: Verify version consistency
+        if: steps.bump_info.outputs.bump_type != 'none'
+        run: |
+          echo "Verifying version consistency before push..."
+          make build
+          make validate-versions || {
+            echo "::error::Version consistency check failed after bump"
+            exit 1
+          }
+
       - name: Commit and push version bump
         if: steps.bump_info.outputs.bump_type != 'none'
         run: |
@@ -94,17 +104,6 @@ jobs:
           git add -A
           git commit -m "chore: bump version to $NEW_VERSION [skip ci]" || echo "No changes to commit"
           git push
-
-      - name: Verify version consistency
-        if: steps.bump_info.outputs.bump_type != 'none'
-        run: |
-          echo "Verifying version consistency after bump..."
-          cd tools/validate && go build -o ../../validate .
-          cd ../..
-          ./validate --versions-only . || {
-            echo "::error::Version consistency check failed after bump"
-            exit 1
-          }
 
       - name: Create release tag
         if: steps.bump_info.outputs.bump_type != 'none'
