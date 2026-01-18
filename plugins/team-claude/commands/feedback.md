@@ -2,7 +2,7 @@
 name: team-claude:feedback
 description: Worker에 피드백 전달 - 리뷰 결과나 추가 지시사항 전달
 argument-hint: "<task-id> \"<feedback>\""
-allowed-tools: ["Read", "Write", "Bash"]
+allowed-tools: ["Read", "Write", "Bash", "AskUserQuestion"]
 ---
 
 # Team Claude 피드백 커맨드

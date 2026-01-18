@@ -2,7 +2,7 @@
 name: team-claude:review
 description: 완료된 Task 코드 리뷰 - 에이전트 기반 자동 리뷰 및 피드백 생성
 argument-hint: "<task-id> [--agents=<agent-list>]"
-allowed-tools: ["Task", "Read", "Bash", "Glob", "Grep", "Write"]
+allowed-tools: ["Task", "Read", "Bash", "Glob", "Grep", "Write", "AskUserQuestion"]
 ---
 
 # Team Claude 리뷰 커맨드

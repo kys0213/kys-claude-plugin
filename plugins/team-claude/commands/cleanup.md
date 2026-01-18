@@ -2,7 +2,7 @@
 name: team-claude:cleanup
 description: Worktree 및 리소스 정리 - 완료된 Task의 worktree와 브랜치 제거
 argument-hint: "[task-id | --all | --completed]"
-allowed-tools: ["Bash", "Read", "Write"]
+allowed-tools: ["Bash", "Read", "Write", "AskUserQuestion"]
 ---
 
 # Team Claude 정리 커맨드

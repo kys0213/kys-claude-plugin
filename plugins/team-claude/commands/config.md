@@ -2,7 +2,7 @@
 name: team-claude:config
 description: Team Claude 설정 조회 및 수정 - get, set, list, reset 작업 지원
 argument-hint: "<action> [key] [value]"
-allowed-tools: ["Read", "Write", "Bash"]
+allowed-tools: ["Read", "Write", "Bash", "AskUserQuestion"]
 ---
 
 # Team Claude 설정 관리 커맨드

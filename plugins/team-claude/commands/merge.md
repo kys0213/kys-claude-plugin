@@ -2,7 +2,7 @@
 name: team-claude:merge
 description: 완료된 Task PR 머지 - 최종 검증 후 base branch로 머지
 argument-hint: "<task-id> [--squash] [--no-delete-branch]"
-allowed-tools: ["Bash", "Read", "Write"]
+allowed-tools: ["Bash", "Read", "Write", "AskUserQuestion"]
 ---
 
 # Team Claude 머지 커맨드

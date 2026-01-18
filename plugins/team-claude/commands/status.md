@@ -2,7 +2,7 @@
 name: team-claude:status
 description: Worker 상태 조회 - 전체 또는 특정 Task의 진행 상황 확인
 argument-hint: "[task-id]"
-allowed-tools: ["Read", "Bash", "Glob"]
+allowed-tools: ["Read", "Bash", "Glob", "AskUserQuestion"]
 ---
 
 # Team Claude 상태 조회 커맨드

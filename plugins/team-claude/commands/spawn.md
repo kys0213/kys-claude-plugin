@@ -2,7 +2,7 @@
 name: team-claude:spawn
 description: Worker Claude 생성 및 실행 - Git worktree 생성, 터미널 세션 생성, Claude 실행
 argument-hint: "<task-id> [task-id...]"
-allowed-tools: ["Bash", "Read", "Write", "Glob"]
+allowed-tools: ["Bash", "Read", "Write", "Glob", "AskUserQuestion"]
 ---
 
 # Team Claude Worker 생성 커맨드
