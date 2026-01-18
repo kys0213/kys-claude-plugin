@@ -243,13 +243,60 @@ Worker용 hooks.json 템플릿을 생성합니다:
   "notification": {
     "method": "notification"
   },
+  "agents": {
+    "enabled": ["code-reviewer", "qa-agent", "security-auditor"],
+    "custom": [],
+    "overrides": {}
+  },
   "review": {
     "autoLevel": "semi-auto",
-    "agents": ["code-reviewer", "qa-agent"]
+    "requireApproval": true
   },
   "completion": {
     "requiredChecks": ["lint", "typecheck", "test"],
     "coverageThreshold": 80
+  }
+}
+```
+
+### agents 섹션 상세
+
+에이전트는 계층화된 구조로 관리됩니다:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    에이전트 해석 순서                         │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1. 프로젝트 로컬 (최우선)                                   │
+│     .team-claude/agents/{name}.md                          │
+│                                                             │
+│  2. 플러그인 기본                                            │
+│     plugins/team-claude/agents/{name}.md                   │
+│                                                             │
+│  동일 이름 → 로컬이 플러그인 기본을 오버라이드               │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+| 필드 | 설명 |
+|------|------|
+| `enabled` | 활성화된 에이전트 목록 (리뷰 시 사용됨) |
+| `custom` | 사용자가 추가한 커스텀 에이전트 이름 목록 |
+| `overrides` | 기본 에이전트 설정 오버라이드 (예: 모델 변경) |
+
+**오버라이드 예시:**
+
+```json
+{
+  "agents": {
+    "enabled": ["code-reviewer", "qa-agent"],
+    "custom": ["payment-expert"],
+    "overrides": {
+      "code-reviewer": {
+        "model": "opus"
+      }
+    }
   }
 }
 ```

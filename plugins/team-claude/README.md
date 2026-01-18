@@ -18,6 +18,7 @@
 | `/team-claude:init` | 프로젝트 초기 설정 |
 | `/team-claude:setup` | 설정 변경 위자드 |
 | `/team-claude:config` | 개별 설정 조회/수정 |
+| `/team-claude:agent` | 에이전트 관리 (추가/활성화/커스터마이징) |
 | `/team-claude:plan` | 요구사항 → 스펙 정제 |
 | `/team-claude:spawn` | Worker 생성 및 실행 |
 | `/team-claude:status` | Worker 상태 조회 |
@@ -25,6 +26,43 @@
 | `/team-claude:feedback` | Worker에 피드백 전달 |
 | `/team-claude:merge` | PR 머지 |
 | `/team-claude:cleanup` | Worktree 정리 |
+
+## 에이전트 계층 구조
+
+에이전트는 `.claude` 파일처럼 계층화된 구조로 관리됩니다:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    에이전트 해석 순서                         │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1. 프로젝트 로컬 (최우선)                                   │
+│     .team-claude/agents/my-custom-agent.md                 │
+│                                                             │
+│  2. 플러그인 기본                                            │
+│     plugins/team-claude/agents/code-reviewer.md            │
+│                                                             │
+│  동일 이름 → 로컬이 플러그인 기본을 오버라이드               │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 커스텀 에이전트 추가
+
+```bash
+# 새 에이전트 생성 (대화형)
+/team-claude:agent add payment-expert
+
+# 기본 에이전트 커스터마이징 (로컬 복사)
+/team-claude:agent customize code-reviewer
+
+# 에이전트 활성화/비활성화
+/team-claude:agent enable domain-expert
+/team-claude:agent disable security-auditor
+
+# 에이전트 목록
+/team-claude:agent list
+```
 
 ## 워크플로우
 

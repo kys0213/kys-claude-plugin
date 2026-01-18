@@ -208,12 +208,46 @@ notification.method       # 알림 방식
 notification.slack.webhookUrl   # Slack 웹훅 URL
 notification.slack.channel      # Slack 채널
 
+agents.enabled            # 활성화된 에이전트 목록
+agents.custom             # 커스텀 에이전트 목록
+agents.overrides          # 에이전트 설정 오버라이드
+
 review.autoLevel          # 자동화 레벨
-review.agents             # 사용할 에이전트 목록
 review.requireApproval    # 승인 필요 여부
 
 completion.requiredChecks       # 필수 체크 항목
 completion.coverageThreshold    # 커버리지 기준
+```
+
+---
+
+## 에이전트 설정 관리
+
+에이전트 관련 설정은 `/team-claude:agent` 커맨드 사용을 권장합니다.
+
+```bash
+# 에이전트 목록
+/team-claude:agent list
+
+# 에이전트 추가
+/team-claude:agent add payment-expert
+
+# 에이전트 활성화/비활성화
+/team-claude:agent enable domain-expert
+/team-claude:agent disable security-auditor
+```
+
+config 명령어로 직접 수정도 가능합니다:
+
+```bash
+# 활성화된 에이전트 확인
+/team-claude:config get agents.enabled
+
+# 에이전트 목록 직접 수정
+/team-claude:config set agents.enabled '["code-reviewer", "qa-agent"]'
+
+# 에이전트 모델 오버라이드
+/team-claude:config set agents.overrides.code-reviewer.model opus
 ```
 
 ---
