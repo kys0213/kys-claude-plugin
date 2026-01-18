@@ -57,6 +57,21 @@
       "source": "./plugins/planning",
       "strict": false,
       "version": "0.2.0"
+    },
+    {
+      "category": "productivity",
+      "description": "멀티 에이전트 협업 시스템 - Git worktree 기반 독립 Worker Claude 관리",
+      "keywords": [
+        "multi-agent",
+        "worktree",
+        "collaboration",
+        "orchestration",
+        "worker"
+      ],
+      "name": "team-claude",
+      "source": "./plugins/team-claude",
+      "strict": false,
+      "version": "0.1.0"
     }
   ]
 }
