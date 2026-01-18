@@ -1,0 +1,188 @@
+---
+name: setup
+description: Team Claude 초기 설정 위자드 - 대화형으로 서버, Worker, 알림, 리뷰 설정을 구성합니다
+argument-hint: "[--reset]"
+allowed-tools: ["Bash", "Read", "Write", "AskUserQuestion"]
+---
+
+# Team Claude Setup Wizard
+
+대화형으로 Team Claude 설정을 구성합니다.
+
+## 실행 흐름
+
+```
+1. 기존 설정 확인
+    │
+    ├── 있음 → 수정/유지 선택
+    └── 없음 → 새로 설정
+    │
+    ▼
+2. 단계별 설정 (5단계)
+    │
+    ▼
+3. 설정 저장 및 서버 시작 안내
+```
+
+## 설정 단계
+
+### Step 1/5: 서버 설정
+
+`AskUserQuestion`으로 다음 항목 질문:
+
+| 항목 | 설명 | 기본값 |
+|------|------|--------|
+| port | 서버 포트 | 3847 |
+| worktree.root | Worktree 저장 경로 | ../worktrees |
+
+**질문 예시:**
+```
+서버 포트를 설정합니다.
+- 3847 (기본값)
+- 3000
+- 8080
+- 직접 입력
+```
+
+### Step 2/5: Worker 설정
+
+| 항목 | 설명 | 기본값 |
+|------|------|--------|
+| worker.maxConcurrent | 동시 Worker 최대 수 | 5 |
+| worker.timeout | 타임아웃 (분) | 30 |
+
+**질문 예시:**
+```
+동시에 실행할 Worker 최대 수를 설정합니다.
+- 3개 (소규모 프로젝트)
+- 5개 (기본값)
+- 10개 (대규모 프로젝트)
+```
+
+### Step 3/5: 알림 설정
+
+| 항목 | 설명 | 기본값 |
+|------|------|--------|
+| notification.method | 알림 방식 | file |
+
+**질문 예시:**
+```
+Worker 완료 알림 방식을 선택합니다.
+- file (기본값) - .team-claude/notifications/ 에 파일로 기록
+- notification - 시스템 알림 (macOS/Linux)
+- slack - Slack 웹훅
+- webhook - 커스텀 웹훅
+```
+
+### Step 4/5: 리뷰 설정
+
+| 항목 | 설명 | 기본값 |
+|------|------|--------|
+| review.autoLevel | 자동화 레벨 | semi-auto |
+
+**질문 예시:**
+```
+리뷰 자동화 레벨을 선택합니다.
+
+- manual: 수동 리뷰
+  Worker 완료 후 /team-claude:review로 직접 리뷰
+
+- semi-auto (기본값): 반자동
+  완료 시 자동 리뷰, 피드백은 수동 전달
+
+- full-auto: 완전 자동
+  리뷰 + 피드백까지 자동 (승인만 수동)
+  ⚠️ Worker 무한 루프 주의
+```
+
+### Step 5/5: Worker 템플릿
+
+| 항목 | 설명 | 기본값 |
+|------|------|--------|
+| worker.defaultTemplate | 기본 템플릿 | standard |
+
+**질문 예시:**
+```
+기본 Worker 템플릿을 선택합니다.
+
+- minimal: 최소 지시, 자유도 높음
+- standard (기본값): TDD + 커밋 컨벤션
+- strict: 린트/테스트 통과 필수
+```
+
+## 설정 저장
+
+모든 단계 완료 후:
+
+1. `.team-claude/config.json`에 설정 저장
+2. 설정 요약 출력
+3. 서버 시작 안내
+
+```bash
+# 설정 저장
+curl -X POST http://localhost:3847/config/import \
+  -H "Content-Type: application/json" \
+  -d '{"config": {...}, "scope": "project"}'
+```
+
+## 출력 형식
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║              Team Claude Setup Complete                      ║
+╠══════════════════════════════════════════════════════════════╣
+║                                                              ║
+║  📁 설정 파일: .team-claude/config.json                       ║
+║                                                              ║
+║  ⚙️  설정 요약:                                               ║
+║    • 서버 포트: 3847                                          ║
+║    • Worktree 경로: ../worktrees                             ║
+║    • 최대 Worker: 5                                          ║
+║    • 알림 방식: file                                          ║
+║    • 리뷰 레벨: semi-auto                                     ║
+║    • 기본 템플릿: standard                                    ║
+║                                                              ║
+╠══════════════════════════════════════════════════════════════╣
+║  다음 단계:                                                   ║
+║                                                              ║
+║  1. 서버 시작:                                                ║
+║     bash plugins/team-claude/scripts/install-server.sh --start ║
+║                                                              ║
+║  2. Worker 생성:                                              ║
+║     /team-claude:spawn <feature-name>                        ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+## 사용 예시
+
+```bash
+# 초기 설정
+/team-claude:setup
+
+# 설정 초기화 후 재설정
+/team-claude:setup --reset
+
+# 특정 섹션만 재설정
+/team-claude:config reset notification
+/team-claude:setup
+```
+
+## 설정 파일 위치
+
+| 스코프 | 경로 | 용도 |
+|--------|------|------|
+| Global | ~/.team-claude/config.json | 모든 프로젝트 공통 |
+| Project | .team-claude/config.json | 현재 프로젝트 전용 |
+
+## 주의사항
+
+- 설정은 **Project 스코프**에 저장됩니다 (팀 공유 가능)
+- Global 설정은 `/team-claude:config set --global` 사용
+- 민감 정보 (Slack webhook 등)는 환경변수 사용 권장
+
+## 관련 커맨드
+
+- `/team-claude:config` - 개별 설정 조회/수정
+- `/team-claude:template` - 템플릿 관리
+- `/team-claude:rules` - 리뷰 규칙 관리

@@ -1,0 +1,10 @@
+{
+  "name": "team-claude",
+  "version": "0.2.0",
+  "description": "Multi-agent collaboration system with worktree isolation and interactive configuration",
+  "author": {
+    "name": "김용성"
+  },
+  "keywords": ["multi-agent", "worktree", "collaboration", "orchestration", "worker"],
+  "strict": false
+}
