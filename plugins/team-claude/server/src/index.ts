@@ -7,6 +7,7 @@ import { statusRouter } from "./routes/status";
 import { feedbackRouter } from "./routes/feedback";
 import { diffRouter } from "./routes/diff";
 import { workersRouter } from "./routes/workers";
+import { configRouter } from "./routes/config";
 
 const app = new Hono();
 
@@ -41,6 +42,7 @@ app.route("/status", statusRouter);
 app.route("/feedback", feedbackRouter);
 app.route("/diff", diffRouter);
 app.route("/workers", workersRouter);
+app.route("/config", configRouter);
 
 // Error handler
 app.onError((err, c) => {
@@ -84,6 +86,10 @@ console.log(`  - POST /feedback   - Send feedback to worker`);
 console.log(`  - GET  /diff/:id   - Get worktree diff summary`);
 console.log(`  - GET  /workers    - List workers`);
 console.log(`  - POST /workers    - Register worker`);
+console.log(`  - GET  /config     - Get configuration`);
+console.log(`  - POST /config/set - Set configuration value`);
+console.log(`  - GET  /config/templates - List templates`);
+console.log(`  - GET  /config/rules     - List review rules`);
 console.log(``);
 
 export default {
