@@ -95,6 +95,17 @@ jobs:
           git commit -m "chore: bump version to $NEW_VERSION [skip ci]" || echo "No changes to commit"
           git push
 
+      - name: Verify version consistency
+        if: steps.bump_info.outputs.bump_type != 'none'
+        run: |
+          echo "Verifying version consistency after bump..."
+          cd tools/validate && go build -o ../../validate .
+          cd ../..
+          ./validate --versions-only . || {
+            echo "::error::Version consistency check failed after bump"
+            exit 1
+          }
+
       - name: Create release tag
         if: steps.bump_info.outputs.bump_type != 'none'
         env:
