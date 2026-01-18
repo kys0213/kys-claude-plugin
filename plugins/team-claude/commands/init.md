@@ -1,0 +1,359 @@
+---
+name: team-claude:init
+description: Team Claude 프로젝트 초기 설정 - 프로젝트 분석, 에이전트 구성, 완료 기준 정의
+argument-hint: ""
+allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion"]
+---
+
+# Team Claude 초기화 커맨드
+
+프로젝트를 분석하고 Team Claude 협업 환경을 구성합니다.
+
+## 워크플로우
+
+```
+1. 프로젝트 자동 분석
+   │
+   ▼
+2. UserAskQuestion 인터뷰
+   │
+   ▼
+3. 에이전트 그룹 생성
+   │
+   ▼
+4. 완료 기준 및 Hook 설정
+   │
+   ▼
+5. 설정 파일 저장
+```
+
+---
+
+## Step 1: 프로젝트 자동 분석
+
+다음 파일들을 분석하여 프로젝트 특성을 파악합니다:
+
+### 분석 대상
+
+1. **package.json** (존재 시)
+   - name, dependencies, devDependencies
+   - scripts (test, lint, build 등)
+
+2. **tsconfig.json** (존재 시)
+   - strict 모드 여부
+   - 타겟 버전
+
+3. **.eslintrc* / .prettierrc** (존재 시)
+   - 코드 스타일 규칙
+
+4. **디렉토리 구조**
+   - src/, tests/, lib/ 등 구조 파악
+   - 모놀리스 vs 모노레포 판단
+
+5. **기존 .team-claude/** (존재 시)
+   - 이미 초기화된 경우 재설정 여부 확인
+
+### 분석 결과 정리
+
+```markdown
+## 프로젝트 분석 결과
+
+- **이름**: [프로젝트명]
+- **언어**: TypeScript / JavaScript / Python / ...
+- **프레임워크**: React / Next.js / Express / ...
+- **테스트**: Jest / Vitest / pytest / ...
+- **린트**: ESLint / Prettier / ...
+- **구조**: 모놀리스 / 모노레포
+```
+
+---
+
+## Step 2: UserAskQuestion 인터뷰
+
+프로젝트 분석 결과를 바탕으로 추가 정보를 수집합니다.
+
+### 질문 항목
+
+**Q1: 프로젝트 도메인**
+```
+이 프로젝트의 도메인 영역은 무엇인가요?
+- 이커머스/결제
+- 금융/핀테크
+- 소셜/커뮤니티
+- SaaS/B2B
+- 기타 (직접 입력)
+```
+
+**Q2: 품질 우선순위**
+```
+가장 중요한 품질 속성은 무엇인가요? (복수 선택 가능)
+- 성능 (응답 속도, 처리량)
+- 안정성 (에러 처리, 복구)
+- 보안 (인증, 권한, 데이터 보호)
+- 유지보수성 (코드 품질, 테스트)
+```
+
+**Q3: 터미널 환경**
+```
+Worker를 실행할 터미널 환경은 무엇인가요?
+- iTerm2 (탭/분할 지원)
+- tmux (세션 관리)
+- Terminal.app (기본)
+- 수동 (직접 터미널 열기)
+```
+
+**Q4: 알림 방식**
+```
+작업 완료 알림을 어떻게 받으시겠습니까?
+- macOS 시스템 알림
+- Slack 웹훅
+- 알림 없음
+```
+
+---
+
+## Step 3: 에이전트 그룹 생성
+
+도메인과 품질 우선순위에 따라 적절한 에이전트를 구성합니다.
+
+### 기본 에이전트 (항상 포함)
+
+1. **Code Reviewer** - 코드 품질, 컨벤션 검토
+2. **QA Agent** - 테스트 케이스 도출, 커버리지 검토
+
+### 도메인별 에이전트
+
+| 도메인 | 추가 에이전트 |
+|--------|--------------|
+| 이커머스/결제 | Payment Expert, Fraud Detection |
+| 금융/핀테크 | Compliance Expert, Risk Analyst |
+| 소셜/커뮤니티 | UX Reviewer, Scalability Expert |
+| SaaS/B2B | API Design Expert, Integration Specialist |
+
+### 품질별 에이전트
+
+| 품질 속성 | 추가 에이전트 |
+|-----------|--------------|
+| 성능 | Performance Analyst |
+| 안정성 | Reliability Expert |
+| 보안 | Security Auditor |
+| 유지보수성 | Architecture Reviewer |
+
+---
+
+## Step 4: 완료 기준 및 Hook 설정
+
+### 완료 기준 (completion criteria)
+
+```json
+{
+  "requiredChecks": ["lint", "typecheck", "test"],
+  "coverageThreshold": 80,
+  "reviewApproval": true
+}
+```
+
+### Hook 설정
+
+Worker용 hooks.json 템플릿을 생성합니다:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".team-claude/hooks/worker-complete.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".team-claude/hooks/worker-needs-help.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+---
+
+## Step 5: 설정 파일 저장
+
+### 생성되는 디렉토리 구조
+
+```
+.team-claude/
+├── config.json              # 메인 설정
+├── agents/                  # 에이전트 프롬프트
+│   ├── code-reviewer.md
+│   ├── qa-agent.md
+│   ├── security-auditor.md  # (보안 선택 시)
+│   └── domain-expert.md     # (도메인별)
+├── criteria/
+│   └── completion.json      # 완료 기준
+├── hooks/
+│   ├── hooks.json           # Worker용 hook 설정
+│   ├── worker-complete.sh
+│   └── worker-needs-help.sh
+├── templates/
+│   └── worker-task.md       # Task 스펙 템플릿
+└── specs/                   # (plan 커맨드에서 생성)
+    ├── outline.md
+    ├── contracts/
+    └── tasks/
+```
+
+### config.json 스키마
+
+```json
+{
+  "version": "1.0",
+  "project": {
+    "name": "[프로젝트명]",
+    "domain": "[도메인]",
+    "language": "[언어]",
+    "framework": "[프레임워크]"
+  },
+  "server": {
+    "port": 3847,
+    "host": "localhost"
+  },
+  "worktree": {
+    "root": "../worktrees",
+    "branchPrefix": "feature/"
+  },
+  "worker": {
+    "maxConcurrent": 5,
+    "timeout": 1800
+  },
+  "terminal": {
+    "type": "iterm2",
+    "layout": "tabs"
+  },
+  "notification": {
+    "method": "notification"
+  },
+  "agents": {
+    "enabled": ["code-reviewer", "qa-agent", "security-auditor"],
+    "custom": [],
+    "overrides": {}
+  },
+  "review": {
+    "autoLevel": "semi-auto",
+    "requireApproval": true
+  },
+  "completion": {
+    "requiredChecks": ["lint", "typecheck", "test"],
+    "coverageThreshold": 80
+  }
+}
+```
+
+### agents 섹션 상세
+
+에이전트는 계층화된 구조로 관리됩니다:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    에이전트 해석 순서                         │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1. 프로젝트 로컬 (최우선)                                   │
+│     .team-claude/agents/{name}.md                          │
+│                                                             │
+│  2. 플러그인 기본                                            │
+│     plugins/team-claude/agents/{name}.md                   │
+│                                                             │
+│  동일 이름 → 로컬이 플러그인 기본을 오버라이드               │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+| 필드 | 설명 |
+|------|------|
+| `enabled` | 활성화된 에이전트 목록 (리뷰 시 사용됨) |
+| `custom` | 사용자가 추가한 커스텀 에이전트 이름 목록 |
+| `overrides` | 기본 에이전트 설정 오버라이드 (예: 모델 변경) |
+
+**오버라이드 예시:**
+
+```json
+{
+  "agents": {
+    "enabled": ["code-reviewer", "qa-agent"],
+    "custom": ["payment-expert"],
+    "overrides": {
+      "code-reviewer": {
+        "model": "opus"
+      }
+    }
+  }
+}
+```
+
+---
+
+## 실행 절차
+
+1. **프로젝트 분석 실행**
+   - Glob으로 설정 파일 탐색
+   - Read로 내용 분석
+
+2. **인터뷰 실행**
+   - AskUserQuestion으로 4개 질문
+   - 답변 기반으로 설정 구성
+
+3. **디렉토리 및 파일 생성**
+   - Bash로 디렉토리 생성
+   - Write로 설정 파일 작성
+
+4. **완료 메시지 출력**
+
+```
+🔧 Team Claude 초기화 완료
+
+📁 생성된 설정:
+  .team-claude/
+  ├── config.json
+  ├── agents/ (3개 에이전트)
+  ├── criteria/
+  ├── hooks/
+  └── templates/
+
+📊 구성된 에이전트:
+  • Code Reviewer - 코드 품질 검토
+  • QA Agent - 테스트 케이스 도출
+  • Security Auditor - 보안 검토
+
+다음 단계: /team-claude:plan "요구사항"
+```
+
+---
+
+## 재초기화
+
+이미 `.team-claude/`가 존재하는 경우:
+
+```
+⚠️ Team Claude가 이미 초기화되어 있습니다.
+
+현재 설정:
+  - 도메인: 이커머스/결제
+  - 에이전트: 3개
+  - 터미널: iTerm2
+
+재초기화하시겠습니까? 기존 설정이 백업됩니다.
+- 예, 재초기화
+- 아니오, 기존 설정 유지
+- 설정만 수정 (/team-claude:setup 실행)
+```

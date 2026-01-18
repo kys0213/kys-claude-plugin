@@ -57,6 +57,21 @@
       "source": "./plugins/planning",
       "strict": false,
       "version": "0.2.0"
+    },
+    {
+      "category": "productivity",
+      "description": "멀티 에이전트 협업 시스템 - Worker 병렬 실행, Contract 기반 개발, 실시간 상태 관리",
+      "keywords": [
+        "team",
+        "multi-agent",
+        "collaboration",
+        "worker",
+        "orchestration"
+      ],
+      "name": "team-claude",
+      "source": "./plugins/team-claude",
+      "strict": false,
+      "version": "0.1.0"
     }
   ]
 }
