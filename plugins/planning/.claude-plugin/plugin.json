@@ -1,6 +1,6 @@
 {
   "name": "planning",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "상위 레벨 설계를 위한 멀티 LLM 플래닝 플러그인",
   "author": {
     "name": "kys0213"

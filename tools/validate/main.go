@@ -17,6 +17,7 @@ var (
 	specsOnly    = flag.Bool("specs-only", false, "Run only spec validation")
 	pathsOnly    = flag.Bool("paths-only", false, "Run only path validation")
 	versionsOnly = flag.Bool("versions-only", false, "Run only version validation")
+	skipVersions = flag.Bool("skip-versions", false, "Skip version validation (for CI)")
 	verbose      = flag.Bool("verbose", false, "Verbose output")
 	shortVerbose = flag.Bool("v", false, "Verbose output (short)")
 )
@@ -86,8 +87,8 @@ func main() {
 		fmt.Println()
 	}
 
-	// 3. Version validation
-	if runAll || *versionsOnly {
+	// 3. Version validation (skip in CI - versions are auto-bumped on merge)
+	if (runAll || *versionsOnly) && !*skipVersions {
 		cyan.Println("🏷️  [3/3] Validating Versions...")
 		gray.Println("    Checking semver format, consistency")
 		fmt.Println()

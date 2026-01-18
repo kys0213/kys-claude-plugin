@@ -30,7 +30,7 @@ jobs:
         run: make test
 
       - name: Run plugin validation
-        run: make validate
+        run: make validate-ci
 
       - name: Check PR title format
         env:
