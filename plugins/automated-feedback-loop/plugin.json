@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "description": "자동화된 피드백 루프: 설계는 인간-에이전트 협업, 구현/테스트는 자율 에이전트 위임",
   "commands": [
+    "commands/init.md",
+    "commands/setup.md",
+    "commands/config.md",
     "commands/architect.md",
     "commands/delegate.md",
     "commands/checkpoint.md",
     "commands/loop-status.md"
   ],
+  "configFile": ".claude/afl.yaml",
   "agents": [
     "agents/spec-validator.md",
     "agents/test-oracle.md",
