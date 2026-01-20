@@ -507,3 +507,142 @@ async apply(code: string, orderId: string): Promise<ApplyResult> {
 | `retryDelay` | 재시도 간 대기 시간 (ms) | `5000` |
 | `parallelWorkers` | 동시 실행 Worker 수 | `3` |
 | `escalationThreshold` | 에스컬레이션 트리거 횟수 | `3` |
+
+---
+
+## 서버 연동 (실제 동작)
+
+delegate 명령은 AFL 서버와 연동하여 실제로 Worker Claude를 실행합니다.
+
+### 사전 조건
+
+1. AFL 서버가 실행 중이어야 합니다:
+   ```bash
+   # 서버 상태 확인
+   curl -s http://localhost:7890/health
+   ```
+
+2. 서버가 없으면 설치/실행:
+   ```bash
+   /afl:setup server
+   ```
+
+### 실행 흐름
+
+```
+/afl:delegate coupon-service
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  1. Git Worktree 생성                                           │
+│                                                                 │
+│  git worktree add .afl/worktrees/coupon-service \               │
+│    -b afl/coupon-service                                        │
+│                                                                 │
+│  결과:                                                          │
+│  .afl/worktrees/coupon-service/                                 │
+│    ├── (프로젝트 전체 복사)                                     │
+│    ├── CLAUDE.md  ← Worker에게 전달할 지시서                    │
+│    └── .afl-task.json  ← 메타데이터                             │
+└─────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  2. CLAUDE.md 생성                                              │
+│                                                                 │
+│  # Task: coupon-service                                         │
+│                                                                 │
+│  ## Objective                                                   │
+│  쿠폰 서비스 로직을 구현하세요.                                 │
+│                                                                 │
+│  ## Success Criteria                                            │
+│  - [ ] CouponService.validate() 구현                            │
+│  - [ ] CouponService.apply() 구현                               │
+│  - [ ] 중복 적용 방지 로직                                      │
+│                                                                 │
+│  ## Validation                                                  │
+│  pytest tests/test_coupon_service.py                            │
+│                                                                 │
+│  ## References                                                  │
+│  - architecture.md 참조                                         │
+│  - contracts.md 참조                                            │
+└─────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  3. 서버에 태스크 등록                                          │
+│                                                                 │
+│  POST http://localhost:7890/tasks                               │
+│  {                                                              │
+│    "checkpoint_id": "coupon-service",                           │
+│    "checkpoint_name": "쿠폰 서비스 로직",                       │
+│    "worktree_path": "/abs/path/.afl/worktrees/coupon-service",  │
+│    "validation_command": "pytest tests/test_coupon_service.py", │
+│    "max_retries": 3                                             │
+│  }                                                              │
+│                                                                 │
+│  Response: { "task_id": "abc123", "status": "queued" }          │
+└─────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  4. 서버가 Worker 실행 (iTerm 새 탭)                            │
+│                                                                 │
+│  서버 내부:                                                     │
+│  - osascript로 iTerm 새 탭 열기                                 │
+│  - cd /worktree/path                                            │
+│  - claude --print "CLAUDE.md 참조하여 구현"                     │
+│                                                                 │
+│  사용자가 iTerm 탭에서 Worker 작업 내용 확인 가능               │
+└─────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  5. 자동 피드백 루프 (서버가 관리)                              │
+│                                                                 │
+│  Worker 완료 → Validation 실행 → 결과 확인                      │
+│                                                                 │
+│  실패 시:                                                       │
+│  - CLAUDE.md에 피드백 추가                                      │
+│  - Worker 재실행 (최대 N회)                                     │
+│                                                                 │
+│  성공 시:                                                       │
+│  - 결과 저장                                                    │
+│  - Main Claude에 알림                                           │
+└─────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  6. Main Claude가 결과 폴링                                     │
+│                                                                 │
+│  GET http://localhost:7890/tasks/abc123                         │
+│  {                                                              │
+│    "status": "completed",                                       │
+│    "final_result": "pass",                                      │
+│    "iterations": [...]                                          │
+│  }                                                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Worktree 관리
+
+```bash
+# 생성된 worktree 목록
+git worktree list
+
+# 완료 후 정리
+git worktree remove .afl/worktrees/coupon-service
+
+# 모든 AFL worktree 정리
+git worktree list | grep ".afl/worktrees" | awk '{print $1}' | xargs -I{} git worktree remove {}
+```
+
+### 실시간 모니터링
+
+```bash
+# 태스크 상태 실시간 스트리밍
+curl -N http://localhost:7890/tasks/abc123/stream
+
+# 또는 CLI에서
+watch -n 1 'curl -s http://localhost:7890/tasks/abc123 | jq ".status, .current_iteration"'
+```

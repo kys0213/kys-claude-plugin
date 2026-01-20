@@ -21,6 +21,7 @@ allowed-tools: ["Read", "Write", "AskUserQuestion", "Bash", "Glob"]
 /afl:setup validation
 /afl:setup notification
 /afl:setup agents
+/afl:setup server     # 서버 설정 및 설치
 ```
 
 ---
@@ -272,6 +273,123 @@ method [현재: system]:
 
 선택 (예: 1,2,3):
 >
+```
+
+### /afl:setup server
+
+AFL 로컬 서버를 설치하고 설정합니다.
+
+```
+━━━ 서버 설정 ━━━
+
+AFL 서버는 Worker Claude들을 관리하고 피드백 루프를 자동화합니다.
+```
+
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: "Worker 실행 방식을 선택하세요",
+    header: "Executor",
+    options: [
+      { label: "iTerm2 (권장)", description: "새 탭에서 실행 - 작업 과정이 보임" },
+      { label: "Terminal.app", description: "macOS 기본 터미널 사용" },
+      { label: "Headless", description: "백그라운드 실행 - 로그로만 확인" }
+    ],
+    multiSelect: false
+  }]
+})
+```
+
+터미널 선택 후:
+
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: "서버 포트를 선택하세요",
+    header: "Port",
+    options: [
+      { label: "7890 (기본값)", description: "http://localhost:7890" },
+      { label: "8080", description: "일반적인 개발 포트" },
+      { label: "직접 입력", description: "커스텀 포트 지정" }
+    ],
+    multiSelect: false
+  }]
+})
+```
+
+#### 서버 설치
+
+Bun이 설치되어 있으면:
+
+```bash
+# 의존성 설치
+cd plugins/automated-feedback-loop/server && bun install
+
+# 서버 빌드 (단일 바이너리)
+bun build src/index.ts --compile --outfile ~/.local/bin/afl-server
+```
+
+Bun이 없으면 먼저 설치 안내:
+
+```
+⚠️ Bun이 설치되어 있지 않습니다.
+
+Bun은 빠른 JavaScript 런타임으로, AFL 서버 실행에 필요합니다.
+```
+
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: "Bun을 설치할까요?",
+    header: "Install",
+    options: [
+      { label: "예, 설치 (권장)", description: "curl로 자동 설치" },
+      { label: "아니오", description: "직접 설치 후 다시 실행" }
+    ],
+    multiSelect: false
+  }]
+})
+```
+
+설치 명령:
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+#### 서버 시작/중지
+
+```
+━━━ 서버 상태 ━━━
+
+  상태: 🔴 중지됨
+  포트: 7890
+  Executor: iterm
+```
+
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: "서버를 시작할까요?",
+    header: "Server",
+    options: [
+      { label: "시작", description: "afl-server를 백그라운드로 실행" },
+      { label: "나중에", description: "수동으로 시작" }
+    ],
+    multiSelect: false
+  }]
+})
+```
+
+시작 명령:
+```bash
+# 환경 변수와 함께 서버 시작
+AFL_PORT=7890 AFL_EXECUTOR=iterm nohup afl-server > ~/.afl/server.log 2>&1 &
+echo $! > ~/.afl/server.pid
+```
+
+서버 상태 확인:
+```bash
+curl -s http://localhost:7890/health | jq
 ```
 
 ---
