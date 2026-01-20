@@ -2,342 +2,431 @@
 
 자동화된 피드백 루프를 통한 인간-에이전트 협업 시스템
 
-## 핵심 철학
+## Quick Start
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    HUMAN-AGENT COLLABORATION                        │
-│                                                                     │
-│   ┌───────────────────┐         ┌───────────────────────────────┐  │
-│   │   ARCHITECT LOOP  │         │    AUTONOMOUS DELEGATION      │  │
-│   │   (인간 + 에이전트)│         │    (에이전트 자율 실행)        │  │
-│   │                   │         │                               │  │
-│   │  • 스펙 설계      │ ──────▶ │  • 구현                       │  │
-│   │  • 아키텍처 결정  │         │  • 테스트                     │  │
-│   │  • 기준점 정의    │ ◀────── │  • 검증                       │  │
-│   │                   │  피드백  │                               │  │
-│   └───────────────────┘         └───────────────────────────────┘  │
-│                                                                     │
-│   사람이 집중: "무엇을" + "왜"     에이전트가 집중: "어떻게"        │
-└─────────────────────────────────────────────────────────────────────┘
+```bash
+# 1. 초기화 (프로젝트 분석)
+/afl:init
+
+# 2. 설계 시작 (인간-에이전트 협업)
+/afl:architect "쿠폰 할인 기능 개발"
+
+# 3. 구현 위임 (자율 에이전트)
+/afl:delegate --all
+
+# 4. 상태 확인
+/afl:loop-status
 ```
 
-## 핵심 개념
+---
 
-### 1. Checkpoint (기준점)
+## 전체 워크플로우
 
-구현과 테스트의 **성공/실패 기준**을 명확히 정의합니다.
+```mermaid
+flowchart TB
+    subgraph Phase1["🧑‍💻 PHASE 1: 설계 (인간 + 에이전트)"]
+        A["/afl:architect 요구사항"] --> B["에이전트: 스펙 초안 제안"]
+        B --> C{"인간: 검토"}
+        C -->|피드백| B
+        C -->|승인| D["Checkpoint 생성 및 저장"]
+    end
+
+    subgraph Phase2["🤖 PHASE 2: 구현 (자율 에이전트)"]
+        E["/afl:delegate"] --> F["Worker: 구현 시작"]
+        F --> G["자동 검증<br/>(validation command)"]
+        G --> H{"통과?"}
+        H -->|Yes| I["다음 Checkpoint"]
+        H -->|No| J["Test Oracle: 실패 분석"]
+        J --> K["자동 피드백 생성"]
+        K --> L{"재시도<br/>횟수?"}
+        L -->|"< max"| F
+        L -->|">= max"| M["⚠️ 에스컬레이션"]
+    end
+
+    subgraph Phase3["📋 PHASE 3: 완료"]
+        N["모든 Checkpoint 통과"]
+        O["Impl Reviewer: 품질 검토"]
+        P["완료 보고"]
+    end
+
+    D --> E
+    I --> G
+    I -->|"모두 완료"| N
+    N --> O
+    O --> P
+    M -->|"설계 재검토"| A
+
+    style Phase1 fill:#e1f5fe
+    style Phase2 fill:#fff3e0
+    style Phase3 fill:#e8f5e9
+```
+
+---
+
+## Checkpoint 생명주기
+
+### 언제 생성되나?
+
+```mermaid
+sequenceDiagram
+    participant H as 인간
+    participant A as 에이전트
+    participant F as 파일시스템
+
+    H->>A: /afl:architect "요구사항"
+
+    loop 설계 루프
+        A->>H: 아키텍처 옵션 제안
+        H->>A: 피드백/선택
+        A->>H: 수정된 스펙 제안
+    end
+
+    A->>H: Checkpoint 초안 제안
+    Note over A,H: criteria + validation 정의
+
+    H->>A: Checkpoint 승인
+    A->>F: .claude/afl.yaml 저장
+    A->>F: .afl/sessions/{id}/specs/checkpoints.yaml 저장
+
+    Note over F: Checkpoint 확정!
+```
+
+### 저장 위치
+
+```
+.claude/
+└── afl.yaml                    # 전역 설정
+
+.afl/
+└── sessions/
+    └── {session-id}/
+        ├── meta.json           # 세션 정보
+        ├── specs/
+        │   ├── architecture.md # 아키텍처 설계
+        │   ├── contracts.md    # 인터페이스 정의
+        │   └── checkpoints.yaml # ⭐ Checkpoint 정의
+        └── delegations/
+            └── {checkpoint-id}/
+                ├── status.json
+                └── iterations/
+                    └── {n}/
+                        ├── result.json
+                        └── feedback.md
+```
+
+---
+
+## 자동 피드백 루프 상세
+
+### 어떻게 동작하나?
+
+```mermaid
+flowchart LR
+    subgraph Trigger["트리거"]
+        A["Worker 구현 완료"]
+    end
+
+    subgraph Validation["자동 검증"]
+        B["validation.command 실행"]
+        C["expected 결과와 비교"]
+    end
+
+    subgraph Analysis["실패 분석 (Test Oracle)"]
+        D["테스트 출력 파싱"]
+        E["실패 원인 분류"]
+        F["관련 코드 분석"]
+    end
+
+    subgraph Feedback["피드백 생성"]
+        G["구체적 수정 제안"]
+        H["코드 예시 포함"]
+    end
+
+    subgraph Retry["재시도"]
+        I["Worker에 피드백 전달"]
+        J["재구현"]
+    end
+
+    A --> B --> C
+    C -->|실패| D --> E --> F --> G --> H --> I --> J
+    J --> B
+    C -->|성공| K["✅ 완료"]
+
+    style Trigger fill:#e3f2fd
+    style Validation fill:#fff8e1
+    style Analysis fill:#fce4ec
+    style Feedback fill:#f3e5f5
+    style Retry fill:#e8f5e9
+```
+
+### 실패 원인 분류
+
+```mermaid
+flowchart TD
+    A["검증 실패"] --> B{"원인 분류"}
+
+    B --> C["NOT_IMPLEMENTED<br/>구현 누락"]
+    B --> D["LOGIC_ERROR<br/>로직 오류"]
+    B --> E["TYPE_ERROR<br/>타입/컴파일 오류"]
+    B --> F["DESIGN_MISMATCH<br/>설계 불일치"]
+    B --> G["ENV_ISSUE<br/>환경 문제"]
+
+    C --> H["자동 재시도"]
+    D --> H
+    E --> H
+    F --> I["⚠️ 에스컬레이션<br/>(설계 재검토 필요)"]
+    G --> I
+
+    style C fill:#c8e6c9
+    style D fill:#c8e6c9
+    style E fill:#c8e6c9
+    style F fill:#ffcdd2
+    style G fill:#ffcdd2
+```
+
+---
+
+## Checkpoint 구조
 
 ```yaml
+# .afl/sessions/{session-id}/specs/checkpoints.yaml
+
+session: abc12345
+created_at: 2024-01-15T10:00:00Z
+approved_at: 2024-01-15T11:30:00Z
+
 checkpoints:
-  - name: "쿠폰 적용 API"
-    type: "api"
+  - id: coupon-model
+    name: "쿠폰 도메인 모델"
+    type: implementation
+    dependencies: []              # 의존성 없음 = 먼저 실행
+    criteria:                     # 성공 기준 (사람이 정의)
+      - "Coupon 엔티티 생성"
+      - "CouponRepository 구현"
+    validation:                   # 자동 검증 방법
+      command: "pytest tests/test_coupon_model.py"
+      expected: "passed"
+      timeout: 30000
+
+  - id: coupon-service
+    name: "쿠폰 서비스 로직"
+    type: implementation
+    dependencies: [coupon-model]  # coupon-model 완료 후 실행
     criteria:
-      - "POST /coupons/apply 가 200 응답"
-      - "중복 적용 시 409 응답"
-      - "만료된 쿠폰은 400 응답"
+      - "validate() 구현"
+      - "apply() 구현"
+      - "중복 적용 방지"
     validation:
-      command: "npm run test:e2e -- --grep 'coupon'"
-      expectedOutput: "3 passing"
+      command: "pytest tests/test_coupon_service.py"
+      expected: "3 passed"
+      timeout: 30000
+
+  - id: coupon-api
+    name: "쿠폰 API"
+    type: api
+    dependencies: [coupon-service]
+    criteria:
+      - "POST /coupons/validate - 200/400"
+      - "POST /coupons/apply - 200/409"
+    validation:
+      command: "pytest tests/test_coupon_api.py -v"
+      expected: "passed"
+      timeout: 60000
 ```
 
-### 2. Architect Loop (설계 루프)
+---
 
-인간이 에이전트와 **대화형으로** 설계를 정제합니다.
+## 실행 순서 (의존성 기반)
 
-```
-인간: "쿠폰 시스템 만들어줘"
-    │
-    ▼
-┌─────────────────────────────────────────┐
-│  에이전트: 스펙 초안 제안               │
-│  • 도메인 모델 제안                     │
-│  • 아키텍처 옵션 제시                   │
-│  • 트레이드오프 분석                    │
-└─────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────┐
-│  인간: 검토 및 피드백                   │
-│  • "쿠폰 중복 적용은 안돼"              │
-│  • "만료일 기준은 UTC로"                │
-│  • 아키텍처 결정                        │
-└─────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────┐
-│  에이전트: 피드백 반영 및 재제안        │
-│  • 수정된 스펙                          │
-│  • 검증 기준점 (Checkpoint) 제안        │
-└─────────────────────────────────────────┘
-    │
-    ▼ (인간 승인 시)
+```mermaid
+flowchart LR
+    subgraph Round1["Round 1 (병렬 가능)"]
+        A["coupon-model"]
+    end
 
-Checkpoint 확정 → 구현 위임 가능
+    subgraph Round2["Round 2"]
+        B["coupon-service"]
+    end
+
+    subgraph Round3["Round 3"]
+        C["coupon-api"]
+    end
+
+    subgraph Round4["Round 4"]
+        D["coupon-integration"]
+    end
+
+    A --> B --> C --> D
+
+    style Round1 fill:#e3f2fd
+    style Round2 fill:#e8f5e9
+    style Round3 fill:#fff3e0
+    style Round4 fill:#fce4ec
 ```
 
-### 3. Delegation (위임)
+---
 
-확정된 Checkpoint를 기준으로 **자율 에이전트가 구현**합니다.
+## 명령어 요약
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    AUTONOMOUS EXECUTION                          │
-│                                                                  │
-│   Checkpoint 기반 구현                                           │
-│   ┌──────────┐     ┌──────────┐     ┌──────────┐               │
-│   │   구현   │────▶│  자동    │────▶│  통과?   │               │
-│   │  에이전트 │     │  검증    │     │          │               │
-│   └──────────┘     └──────────┘     └────┬─────┘               │
-│                                          │                       │
-│                     ┌────────────────────┴────────────────┐     │
-│                     │                                     │     │
-│                     ▼ NO                                  ▼ YES │
-│              ┌──────────────┐                     ┌────────────┐│
-│              │ 자동 피드백   │                     │  완료 보고 ││
-│              │ + 재시도     │                     │  (인간에게) ││
-│              └──────┬───────┘                     └────────────┘│
-│                     │                                            │
-│                     └──────▶ 최대 N회 반복                       │
-│                                                                  │
-│   실패 시: 인간에게 에스컬레이션 (설계 문제 가능성)              │
-└─────────────────────────────────────────────────────────────────┘
-```
+| 명령어 | 용도 | 인간 개입 |
+|--------|------|----------|
+| `/afl:init` | 프로젝트 분석, 설정 생성 | 초기 1회 |
+| `/afl:config` | 설정 조회 및 변경 | 필요시 |
+| `/afl:setup` | 대화형 설정 변경 | 필요시 |
+| `/afl:architect` | 설계 루프 (스펙, Checkpoint 정의) | **적극 참여** |
+| `/afl:delegate` | 구현 위임 | 시작만 |
+| `/afl:checkpoint` | Checkpoint 관리 | 필요시 |
+| `/afl:loop-status` | 피드백 루프 상태 확인 | 모니터링 |
 
-## 명령어
+---
 
-### `/afl:architect` - 설계 루프
+## 에이전트 역할
 
-인간과 에이전트가 협업하여 스펙/아키텍처를 설계합니다.
+```mermaid
+flowchart TB
+    subgraph Design["설계 단계"]
+        SV["Spec Validator<br/>스펙 일관성 검증"]
+    end
 
-```bash
-# 새 설계 시작
-/afl:architect "결제 시스템에 쿠폰 기능 추가"
+    subgraph Implementation["구현 단계"]
+        TO["Test Oracle<br/>실패 분석 + 피드백 생성"]
+    end
 
-# 기존 설계 재개
-/afl:architect --resume <session-id>
+    subgraph Review["검토 단계"]
+        IR["Impl Reviewer<br/>품질 검토"]
+    end
+
+    SV -->|"Checkpoint 승인 전"| TO
+    TO -->|"모든 Checkpoint 통과"| IR
+
+    style SV fill:#e1f5fe
+    style TO fill:#fff3e0
+    style IR fill:#e8f5e9
 ```
 
-**출력 산출물:**
-- `specs/architecture.md` - 아키텍처 설계
-- `specs/contracts.md` - 인터페이스 정의
-- `specs/checkpoints.yaml` - 검증 기준점
+| 에이전트 | 역할 | 호출 시점 |
+|----------|------|----------|
+| **Spec Validator** | 스펙 문서 일관성 검증 | Checkpoint 승인 전 |
+| **Test Oracle** | 테스트 실패 분석, 피드백 생성 | 검증 실패 시 |
+| **Impl Reviewer** | 구현 품질 검토 | Checkpoint 통과 후 |
 
-### `/afl:delegate` - 구현 위임
+---
 
-확정된 스펙을 자율 에이전트에게 위임합니다.
+## 설정 파일
 
-```bash
-# 특정 체크포인트 구현 위임
-/afl:delegate checkpoint-coupon-api
+```yaml
+# .claude/afl.yaml
 
-# 전체 구현 위임 (병렬)
-/afl:delegate --all
+project:
+  language: python              # 자동 감지
+  framework: fastapi
+  test_command: pytest
+  build_command: poetry build
+
+feedback_loop:
+  mode: auto                    # auto | semi-auto | manual
+  max_iterations: 5             # 최대 재시도 횟수
+
+validation:
+  method: test                  # test | script | manual
+  timeout: 120000
+
+notification:
+  method: system                # system | slack | none
+
+agents:
+  spec_validator: true
+  test_oracle: true
+  impl_reviewer: true
 ```
 
-**자동 실행 흐름:**
-1. 에이전트가 구현 시작
-2. Checkpoint 기준으로 자동 검증
-3. 실패 시 자동 피드백 + 재시도
-4. 성공/최종실패 시 인간에게 보고
-
-### `/afl:checkpoint` - 기준점 관리
-
-```bash
-# 체크포인트 목록
-/afl:checkpoint --list
-
-# 특정 체크포인트 검증
-/afl:checkpoint validate coupon-api
-
-# 체크포인트 추가
-/afl:checkpoint add "새 기준점 설명"
-```
-
-### `/afl:loop-status` - 피드백 루프 상태
-
-```bash
-/afl:loop-status
-
-# 출력 예시:
-# 🔄 Active Feedback Loops
-#
-# checkpoint-coupon-api
-#   Status: iteration 2/5
-#   Last: ❌ Test failed: "중복 적용 시 409 응답"
-#   Action: Auto-retry in progress
-#
-# checkpoint-admin-ui
-#   Status: ✅ Completed
-#   Result: All 5 checkpoints passed
-```
-
-## 워크플로우
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                     FULL WORKFLOW                                    │
-│                                                                      │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │  PHASE 1: ARCHITECT LOOP (인간 + 에이전트)                  │    │
-│  │                                                             │    │
-│  │  /afl:architect "요구사항"                                  │    │
-│  │      │                                                      │    │
-│  │      ▼                                                      │    │
-│  │  ┌──────────┐    ┌──────────┐    ┌──────────┐              │    │
-│  │  │ 스펙 초안 │───▶│ 인간검토 │───▶│ 피드백   │              │    │
-│  │  └──────────┘    └──────────┘    └────┬─────┘              │    │
-│  │       ▲                               │                     │    │
-│  │       └───────────────────────────────┘                     │    │
-│  │                    (반복)                                   │    │
-│  │                       │                                     │    │
-│  │                       ▼ (승인 시)                           │    │
-│  │              ┌────────────────┐                             │    │
-│  │              │ Checkpoints    │                             │    │
-│  │              │ 확정           │                             │    │
-│  │              └────────────────┘                             │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                          │                                           │
-│                          ▼                                           │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │  PHASE 2: AUTONOMOUS DELEGATION (에이전트 자율)             │    │
-│  │                                                             │    │
-│  │  /afl:delegate --all                                        │    │
-│  │      │                                                      │    │
-│  │      ▼                                                      │    │
-│  │  ┌──────────────────────────────────────────────────────┐  │    │
-│  │  │  Checkpoint 1: coupon-api                            │  │    │
-│  │  │  ┌────────┐   ┌────────┐   ┌────────┐               │  │    │
-│  │  │  │ 구현   │──▶│ 검증   │──▶│ 통과?  │               │  │    │
-│  │  │  └────────┘   └────────┘   └───┬────┘               │  │    │
-│  │  │                                │                     │  │    │
-│  │  │                    ┌───────────┴───────────┐        │  │    │
-│  │  │                    ▼ NO                    ▼ YES    │  │    │
-│  │  │              ┌──────────┐           ┌──────────┐   │  │    │
-│  │  │              │자동피드백│           │ 다음     │   │  │    │
-│  │  │              │+ 재시도  │           │Checkpoint│   │  │    │
-│  │  │              └──────────┘           └──────────┘   │  │    │
-│  │  └──────────────────────────────────────────────────────┘  │    │
-│  │                                                             │    │
-│  │  최대 N회 실패 → 인간에게 에스컬레이션                      │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                          │                                           │
-│                          ▼                                           │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │  PHASE 3: COMPLETION (결과 보고)                            │    │
-│  │                                                             │    │
-│  │  • 모든 Checkpoint 통과 → 완료 보고                        │    │
-│  │  • 일부 실패 → 실패 분석 + 설계 재검토 제안                │    │
-│  │  • /afl:architect --resume 로 설계 루프 재진입 가능        │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-## 기존 team-claude와의 차이점
-
-| 측면 | team-claude | automated-feedback-loop |
-|------|-------------|-------------------------|
-| 설계 단계 | 단방향 (제안 → 승인) | **양방향 대화형 루프** |
-| 구현 검증 | 수동 리뷰 요청 | **자동 Checkpoint 검증** |
-| 실패 처리 | 수동 피드백 | **자동 피드백 + 재시도** |
-| 인간 개입 | 매 단계 | **설계만 + 에스컬레이션 시** |
-| 기준점 | 암묵적 | **명시적 Checkpoint** |
-
-## 설정
-
-```json
-{
-  "autoFeedbackLoop": {
-    "enabled": true,
-    "maxIterations": 5,
-    "checkpointValidation": true,
-    "autoRouteOnComplete": true
-  },
-  "architectLoop": {
-    "requireHumanApproval": ["architecture", "contracts", "checkpoints"],
-    "autoProgress": ["implementation", "test"]
-  },
-  "delegation": {
-    "autoValidateOnComplete": true,
-    "autoRetryOnFail": true,
-    "maxRetries": 3
-  }
-}
-```
+---
 
 ## 사용 시나리오
 
-### 시나리오 1: 새 기능 개발
+### 정상 플로우
 
-```bash
-# 1. 설계 루프 시작
-/afl:architect "사용자 알림 시스템 개발"
+```mermaid
+sequenceDiagram
+    participant H as 인간
+    participant A as 에이전트
+    participant W as Worker
 
-# 2. 대화를 통해 스펙 정제
-#    - 에이전트: "푸시 알림과 이메일 중 어떤 것을 우선할까요?"
-#    - 인간: "푸시 우선, 이메일은 폴백"
-#    - 에이전트: "재시도 로직은 어떻게 할까요?"
-#    - 인간: "3회 재시도, 지수 백오프"
+    H->>A: /afl:architect "쿠폰 기능"
 
-# 3. Checkpoint 승인 후 위임
-/afl:delegate --all
+    loop 설계 협업
+        A->>H: 옵션 제안
+        H->>A: 선택/피드백
+    end
 
-# 4. 자동 실행 모니터링
-/afl:loop-status
+    A->>H: Checkpoint 제안
+    H->>A: 승인 ✅
+
+    H->>A: /afl:delegate --all
+    A->>W: Checkpoint 1 구현 요청
+    W->>A: 구현 완료
+    A->>A: 자동 검증 ✅
+
+    A->>W: Checkpoint 2 구현 요청
+    W->>A: 구현 완료
+    A->>A: 자동 검증 ✅
+
+    A->>H: 🎉 모든 Checkpoint 완료!
 ```
 
-### 시나리오 2: 실패 후 설계 재검토
+### 실패 → 자동 재시도 플로우
 
-```bash
-# 구현이 3회 실패 후 에스컬레이션
-#
-# ⚠️ Checkpoint 실패: notification-retry
-#
-# 실패 원인 분석:
-#   - 테스트: "지수 백오프 3회 재시도"
-#   - 실패: 타임아웃 발생
-#   - 추정: 백오프 간격이 너무 길거나 외부 서비스 문제
-#
-# 제안:
-#   1. 백오프 간격 조정 (설계 변경)
-#   2. 테스트 타임아웃 증가 (테스트 변경)
-#   3. 모킹으로 대체 (테스트 방식 변경)
+```mermaid
+sequenceDiagram
+    participant A as 에이전트
+    participant W as Worker
+    participant TO as Test Oracle
 
-# 설계 루프로 재진입
-/afl:architect --resume <session-id>
+    A->>W: Checkpoint 구현 요청
+    W->>A: 구현 완료
+    A->>A: 자동 검증 ❌ 실패
+
+    A->>TO: 실패 분석 요청
+    TO->>A: 피드백 생성
+
+    A->>W: 피드백 + 재구현 요청
+    W->>A: 수정 완료
+    A->>A: 자동 검증 ✅ 통과
+
+    A->>A: 다음 Checkpoint로...
 ```
 
-## 파일 구조
+### 실패 → 에스컬레이션 플로우
 
+```mermaid
+sequenceDiagram
+    participant H as 인간
+    participant A as 에이전트
+    participant W as Worker
+
+    loop 3회 재시도
+        A->>W: 구현 요청
+        W->>A: 완료
+        A->>A: 검증 ❌
+        A->>W: 피드백 + 재시도
+    end
+
+    A->>H: ⚠️ 에스컬레이션!<br/>설계 문제 가능성
+
+    Note over H,A: 실패 분석 리포트 제공
+
+    H->>A: /afl:architect --resume
+    Note over H,A: 설계 재검토...
 ```
-.afl/
-├── sessions/
-│   └── {session-id}/
-│       ├── meta.json           # 세션 메타정보
-│       ├── conversation.md     # 설계 대화 기록
-│       ├── specs/
-│       │   ├── architecture.md
-│       │   ├── contracts.md
-│       │   └── checkpoints.yaml
-│       └── delegations/
-│           └── {checkpoint-id}/
-│               ├── status.json
-│               ├── iterations/
-│               │   ├── 1/
-│               │   │   ├── result.json
-│               │   │   └── feedback.md
-│               │   └── 2/
-│               │       └── ...
-│               └── final-result.json
-```
 
-## 컨텍스트 엔지니어링 원칙
+---
 
-| 원칙 | 구현 |
+## 핵심 원칙
+
+| 원칙 | 설명 |
 |------|------|
-| **사람은 "무엇을"과 "왜"에 집중** | Architect Loop에서 스펙/기준 정의 |
-| **에이전트는 "어떻게"에 집중** | Delegation에서 자율 구현 |
-| **기준점으로 모호성 제거** | Checkpoint로 성공/실패 명확히 정의 |
-| **실패는 학습 기회** | 자동 분석 + 설계 재검토 유도 |
-| **불필요한 개입 최소화** | 구현은 자동, 설계만 인간 참여 |
+| **인간은 "무엇"과 "왜"** | 스펙, 아키텍처, 성공 기준 정의 |
+| **에이전트는 "어떻게"** | 구현, 테스트, 자동 검증 |
+| **명시적 Checkpoint** | 모호한 "완료"를 검증 가능한 기준으로 |
+| **자동 피드백 루프** | 실패 시 자동 분석 + 재시도 |
+| **적절한 에스컬레이션** | 설계 문제는 인간에게 |
