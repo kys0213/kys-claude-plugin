@@ -510,24 +510,212 @@ async apply(code: string, orderId: string): Promise<ApplyResult> {
 
 ---
 
-## 서버 연동 (실제 동작)
+## 실제 실행 워크플로우
 
-delegate 명령은 AFL 서버와 연동하여 실제로 Worker Claude를 실행합니다.
+이 섹션은 Main Claude가 따라야 할 **구체적인 실행 지침**입니다.
 
-### 사전 조건
+### Step 0: 사전 조건 확인
 
-1. AFL 서버가 실행 중이어야 합니다:
-   ```bash
-   # 서버 상태 확인
-   curl -s http://localhost:7890/health
-   ```
+```bash
+# 서버 상태 확인
+curl -s http://localhost:7890/health
+```
 
-2. 서버가 없으면 설치/실행:
-   ```bash
-   /afl:setup server
-   ```
+서버가 응답하지 않으면:
+```
+⚠️ AFL 서버가 실행 중이지 않습니다.
 
-### 실행 흐름
+/afl:setup server 를 먼저 실행하세요.
+```
+
+### Step 1: Checkpoint 정보 로드
+
+`.afl/sessions/{session-id}/checkpoints/{checkpoint-id}.json` 에서 checkpoint 정보를 읽습니다.
+
+```json
+{
+  "id": "coupon-service",
+  "name": "쿠폰 서비스 로직",
+  "description": "쿠폰 검증 및 적용 로직 구현",
+  "criteria": [
+    "CouponService.validate() 구현",
+    "CouponService.apply() 구현",
+    "중복 적용 방지 로직"
+  ],
+  "validation": {
+    "command": "pytest tests/test_coupon_service.py",
+    "expected": "passed"
+  },
+  "dependencies": ["coupon-model"]
+}
+```
+
+### Step 2: Git Worktree 생성
+
+```bash
+# Worktree 디렉토리 생성
+mkdir -p .afl/worktrees
+
+# Worktree 생성 (현재 브랜치 기반)
+git worktree add .afl/worktrees/{checkpoint-id} -b afl/{checkpoint-id}
+```
+
+실패 시 (브랜치 이미 존재):
+```bash
+git worktree add .afl/worktrees/{checkpoint-id} afl/{checkpoint-id}
+```
+
+### Step 3: CLAUDE.md 생성
+
+Worktree 루트에 Worker Claude가 읽을 지시서를 생성합니다.
+
+```markdown
+# Task: {checkpoint-id}
+
+## Objective
+
+{checkpoint.description}
+
+## Success Criteria
+
+다음 기준을 **모두** 충족해야 합니다:
+
+{criteria를 체크리스트로 변환}
+- [ ] {criteria[0]}
+- [ ] {criteria[1]}
+- [ ] ...
+
+## Validation
+
+구현 완료 후 다음 명령어로 검증하세요:
+
+```bash
+{validation.command}
+```
+
+예상 결과: `{validation.expected}`
+
+## Context
+
+### 프로젝트 구조
+{관련 파일 구조 요약}
+
+### 관련 파일
+{checkpoint와 관련된 주요 파일 목록}
+
+### 참고 문서
+- `.afl/sessions/{session-id}/architecture.md`
+- `.afl/sessions/{session-id}/contracts.md`
+
+## Instructions
+
+1. 이 CLAUDE.md 파일의 지시사항을 따르세요
+2. Success Criteria의 각 항목을 순서대로 구현하세요
+3. 구현 후 Validation 명령어를 실행하여 확인하세요
+4. 모든 테스트가 통과하면 변경사항을 커밋하세요
+
+## Constraints
+
+- 스펙에 명시되지 않은 기능은 추가하지 마세요
+- 기존 코드 스타일을 따르세요
+- 기존 테스트가 깨지지 않도록 하세요
+```
+
+Write 도구로 `.afl/worktrees/{checkpoint-id}/CLAUDE.md` 에 저장합니다.
+
+### Step 4: 서버에 태스크 등록
+
+```bash
+curl -X POST http://localhost:7890/tasks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "checkpoint_id": "{checkpoint-id}",
+    "checkpoint_name": "{checkpoint.name}",
+    "worktree_path": "{absolute-path-to-worktree}",
+    "validation_command": "{validation.command}",
+    "max_retries": 3
+  }'
+```
+
+응답:
+```json
+{ "task_id": "abc123", "status": "queued" }
+```
+
+`task_id`를 저장합니다.
+
+### Step 5: 진행 상황 모니터링
+
+태스크가 완료될 때까지 주기적으로 상태를 확인합니다:
+
+```bash
+curl -s http://localhost:7890/tasks/{task_id}
+```
+
+상태에 따른 출력:
+
+**진행 중:**
+```
+🔄 coupon-service: 2/3회 시도 중...
+   마지막 실패: "CouponService.validate() 테스트 실패"
+```
+
+**완료:**
+```
+✅ coupon-service: 완료 (2회 시도)
+```
+
+**실패 (최대 재시도 초과):**
+```
+❌ coupon-service: 실패 (3/3회 시도)
+   에스컬레이션 필요
+```
+
+### Step 6: 결과 처리
+
+#### 성공 시
+
+```bash
+# Worktree의 변경사항을 메인 브랜치로 머지
+cd .afl/worktrees/{checkpoint-id}
+git push origin afl/{checkpoint-id}
+
+# (선택) Worktree 정리
+cd ../..
+git worktree remove .afl/worktrees/{checkpoint-id}
+```
+
+사용자에게 보고:
+```
+✅ coupon-service 구현 완료
+
+  시도 횟수: 2회
+  브랜치: afl/coupon-service
+
+  다음 단계:
+  - /afl:delegate coupon-api (다음 checkpoint)
+  - git merge afl/coupon-service (메인에 머지)
+```
+
+#### 실패 시 (에스컬레이션)
+
+```
+⚠️ coupon-service 에스컬레이션
+
+  시도 횟수: 3/3 (최대 도달)
+
+  반복 실패 원인:
+  {서버에서 받은 iterations 분석}
+
+  권장 조치:
+  1. 설계 재검토: /afl:architect --resume {session-id}
+  2. 수동 구현: 직접 .afl/worktrees/coupon-service 에서 작업
+  3. Checkpoint 수정: 기준이 너무 엄격한지 확인
+
+  상세 로그: .afl/worktrees/coupon-service/.afl-result/
+```
+
+### 실행 흐름 요약
 
 ```
 /afl:delegate coupon-service
