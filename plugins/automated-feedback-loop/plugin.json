@@ -1,0 +1,44 @@
+{
+  "name": "automated-feedback-loop",
+  "version": "0.2.0",
+  "description": "자동화된 피드백 루프: Contract 기반 설계, Worker 자율 RALPH, Semi-Auto 머지",
+  "commands": [
+    "commands/init.md",
+    "commands/setup.md",
+    "commands/config.md",
+    "commands/architect.md",
+    "commands/delegate.md",
+    "commands/merge.md",
+    "commands/checkpoint.md",
+    "commands/loop-status.md"
+  ],
+  "configFile": ".claude/afl.yaml",
+  "agents": [
+    "agents/spec-validator.md",
+    "agents/test-oracle.md",
+    "agents/impl-reviewer.md",
+    "agents/conflict-analyzer.md"
+  ],
+  "hooks": "hooks/hooks.json",
+  "skills": [
+    "skills/feedback-routing/SKILL.md"
+  ],
+  "dependencies": ["team-claude"],
+  "config": {
+    "autoFeedbackLoop": {
+      "enabled": true,
+      "maxIterations": 5,
+      "checkpointValidation": true,
+      "autoRouteOnComplete": true
+    },
+    "architectLoop": {
+      "requireHumanApproval": ["architecture", "contracts", "checkpoints"],
+      "autoProgress": ["implementation", "test"]
+    },
+    "delegation": {
+      "autoValidateOnComplete": true,
+      "autoRetryOnFail": true,
+      "maxRetries": 3
+    }
+  }
+}
