@@ -1,13 +1,14 @@
 {
   "name": "automated-feedback-loop",
-  "version": "0.1.0",
-  "description": "자동화된 피드백 루프: 설계는 인간-에이전트 협업, 구현/테스트는 자율 에이전트 위임",
+  "version": "0.2.0",
+  "description": "자동화된 피드백 루프: Contract 기반 설계, Worker 자율 RALPH, Semi-Auto 머지",
   "commands": [
     "commands/init.md",
     "commands/setup.md",
     "commands/config.md",
     "commands/architect.md",
     "commands/delegate.md",
+    "commands/merge.md",
     "commands/checkpoint.md",
     "commands/loop-status.md"
   ],
@@ -15,7 +16,8 @@
   "agents": [
     "agents/spec-validator.md",
     "agents/test-oracle.md",
-    "agents/impl-reviewer.md"
+    "agents/impl-reviewer.md",
+    "agents/conflict-analyzer.md"
   ],
   "hooks": "hooks/hooks.json",
   "skills": [

@@ -115,21 +115,52 @@ allowed-tools: ["Task", "Read", "Write", "Glob", "Grep", "AskUserQuestion", "Bas
         │
         ▼
 ┌───────────────────────────────────────────────────────────────┐
-│  STEP 4: Checkpoint 정의                                      │
+│  STEP 4: Contract 정의 (Interface + Test Code)               │
+│                                                               │
+│  각 Task별로:                                                │
+│  • Interface 정의 (타입, API 스펙)                           │
+│  • Contract Test 작성 (TDD - 구현 전에 테스트 먼저!)         │
+│                                                               │
+│  산출물:                                                     │
+│  .afl/sessions/{session-id}/contracts/                       │
+│    ├── coupon-model/                                         │
+│    │   ├── interface.ts                                      │
+│    │   └── contract.test.ts                                  │
+│    └── coupon-service/                                       │
+│        ├── interface.ts                                      │
+│        └── contract.test.ts                                  │
+│                                                               │
+│  테스트를 프로젝트 테스트 디렉토리에도 복사:                │
+│    tests/contracts/test_coupon_model_contract.py             │
+└───────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌───────────────────────────────────────────────────────────────┐
+│  STEP 5: Checkpoint 정의                                      │
 │                                                               │
 │  • 각 구현 단위별 검증 기준 정의                             │
-│  • 테스트 명령어/예상 결과 명시                              │
+│  • validation.command = Contract Test 실행                   │
 │  • AskUserQuestion으로 Checkpoint 승인 요청                  │
 └───────────────────────────────────────────────────────────────┘
         │
         ▼
 ┌───────────────────────────────────────────────────────────────┐
-│  STEP 5: 산출물 확정                                          │
+│  STEP 6: 공유 테스트 환경 확인 (필요시)                      │
 │                                                               │
-│  저장 위치: .afl/sessions/{session-id}/specs/                │
+│  여러 Task가 공통 환경을 사용하는 경우:                      │
+│  • DB 스키마, fixtures, Docker 등                            │
+│  • prerequisite task로 등록                                  │
+│  • 병렬 실행 전에 먼저 완료                                  │
+└───────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌───────────────────────────────────────────────────────────────┐
+│  STEP 7: 산출물 확정                                          │
+│                                                               │
+│  저장 위치: .afl/sessions/{session-id}/                      │
 │  • architecture.md - 아키텍처 설계                           │
-│  • contracts.md - 인터페이스 정의                            │
-│  • checkpoints.yaml - 검증 기준점                            │
+│  • contracts/ - Interface + Test Code                        │
+│  • checkpoints/ - Task 정의 (JSON)                           │
 └───────────────────────────────────────────────────────────────┘
         │
         ▼
@@ -238,9 +269,152 @@ AskUserQuestion({
 
 ---
 
-## STEP 4: Checkpoint 정의 형식
+## STEP 4: Contract 정의 (핵심!)
 
-### checkpoints.yaml 구조
+### Contract = Interface + Test Code
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Contract 기반 병렬화의 핵심                                                │
+│                                                                             │
+│  • 각 Worker는 다른 Worker의 "구현"에 의존하지 않음                         │
+│  • 오직 "계약"(Interface + Test)에만 의존                                   │
+│  • 따라서 병렬 실행 가능                                                    │
+│                                                                             │
+│  TDD 방식:                                                                  │
+│  • 구현 전에 테스트 먼저 작성                                               │
+│  • Worker는 이 테스트를 통과시키는 것이 목표                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Interface 정의 예시
+
+```typescript
+// .afl/sessions/{session-id}/contracts/coupon-model/interface.ts
+
+export interface Coupon {
+  id: string;
+  code: string;
+  discountType: 'percent' | 'fixed';
+  discountValue: number;
+  expiresAt: Date;
+  usageLimit: number;
+  usedCount: number;
+}
+
+export interface CouponRepository {
+  save(coupon: Coupon): Promise<Coupon>;
+  findByCode(code: string): Promise<Coupon | null>;
+  findById(id: string): Promise<Coupon | null>;
+  incrementUsedCount(id: string): Promise<void>;
+}
+```
+
+### Contract Test 작성 예시
+
+```python
+# tests/contracts/test_coupon_model_contract.py
+# Worker가 이 테스트를 통과해야 Task 완료
+
+import pytest
+from datetime import datetime, timedelta
+
+class TestCouponModelContract:
+    """
+    Coupon Model Contract Tests
+
+    이 테스트는 architect 단계에서 작성됩니다.
+    Worker는 이 테스트를 통과시키는 구현을 작성합니다.
+    """
+
+    def test_coupon_entity_has_required_fields(self):
+        """Coupon 엔티티는 필수 필드를 가져야 함"""
+        from src.models.coupon import Coupon
+
+        coupon = Coupon(
+            code="SUMMER2024",
+            discount_type="percent",
+            discount_value=10,
+            expires_at=datetime.now() + timedelta(days=30)
+        )
+
+        assert coupon.code == "SUMMER2024"
+        assert coupon.discount_type == "percent"
+        assert coupon.discount_value == 10
+        assert coupon.expires_at is not None
+
+    def test_coupon_validates_discount_range(self):
+        """percent 타입은 0-100 범위만 허용"""
+        from src.models.coupon import Coupon
+
+        with pytest.raises(ValueError):
+            Coupon(
+                code="INVALID",
+                discount_type="percent",
+                discount_value=150  # > 100% 는 에러
+            )
+
+    def test_repository_save_and_find(self):
+        """Repository는 저장 후 조회 가능해야 함"""
+        from src.repositories.coupon_repository import CouponRepository
+        from src.models.coupon import Coupon
+
+        repo = CouponRepository()
+        coupon = Coupon(code="TEST", discount_type="fixed", discount_value=1000)
+
+        repo.save(coupon)
+        found = repo.find_by_code("TEST")
+
+        assert found is not None
+        assert found.code == "TEST"
+
+    def test_repository_returns_none_for_expired(self):
+        """만료된 쿠폰 조회 시 None 반환"""
+        from src.repositories.coupon_repository import CouponRepository
+        from src.models.coupon import Coupon
+
+        repo = CouponRepository()
+        expired_coupon = Coupon(
+            code="EXPIRED",
+            discount_type="percent",
+            discount_value=10,
+            expires_at=datetime.now() - timedelta(days=1)  # 어제 만료
+        )
+        repo.save(expired_coupon)
+
+        found = repo.find_by_code("EXPIRED")
+        assert found is None  # 만료된 쿠폰은 조회되지 않음
+```
+
+### 공유 테스트 환경 처리
+
+여러 Task가 공통 환경을 사용하는 경우:
+
+```yaml
+# 환경 설정 Task (prerequisite)
+prerequisites:
+  - id: db-setup
+    name: "테스트 DB 환경 구축"
+    type: environment
+    script: |
+      docker-compose up -d postgres-test
+      alembic upgrade head
+      python scripts/seed_test_data.py
+```
+
+```
+실행 순서:
+1. db-setup (환경 구축)
+2. coupon-model, user-service (병렬 - Round 1)
+3. coupon-service (Round 2)
+4. coupon-api (Round 3)
+```
+
+---
+
+## STEP 5: Checkpoint 정의 형식
+
+### checkpoint JSON 구조
 
 ```yaml
 session: abc12345
