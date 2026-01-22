@@ -1,13 +1,13 @@
 ---
 name: team-claude:init
-description: Team Claude 프로젝트 초기 설정 - 프로젝트 분석, 에이전트 구성, 완료 기준 정의
+description: Team Claude 초기 설정 - 프로젝트 분석 및 환경 구성
 argument-hint: ""
 allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion"]
 ---
 
 # Team Claude 초기화 커맨드
 
-프로젝트를 분석하고 Team Claude 협업 환경을 구성합니다.
+프로젝트를 분석하고 Team Claude 환경을 구성합니다.
 
 ## 워크플로우
 
@@ -15,16 +15,16 @@ allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion"]
 1. 프로젝트 자동 분석
    │
    ▼
-2. UserAskQuestion 인터뷰
+2. 언어/프레임워크 감지
    │
    ▼
-3. 에이전트 그룹 생성
+3. 인터뷰 (AskUserQuestion)
    │
    ▼
-4. 완료 기준 및 Hook 설정
+4. 설정 파일 생성
    │
    ▼
-5. 설정 파일 저장
+5. Hook 설정
 ```
 
 ---
@@ -33,184 +33,127 @@ allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion"]
 
 다음 파일들을 분석하여 프로젝트 특성을 파악합니다:
 
-### 분석 대상
+### 언어 감지
 
-1. **package.json** (존재 시)
-   - name, dependencies, devDependencies
-   - scripts (test, lint, build 등)
-
-2. **tsconfig.json** (존재 시)
-   - strict 모드 여부
-   - 타겟 버전
-
-3. **.eslintrc* / .prettierrc** (존재 시)
-   - 코드 스타일 규칙
-
-4. **디렉토리 구조**
-   - src/, tests/, lib/ 등 구조 파악
-   - 모놀리스 vs 모노레포 판단
-
-5. **기존 .team-claude/** (존재 시)
-   - 이미 초기화된 경우 재설정 여부 확인
+| 감지 파일 | 언어 | 테스트 도구 | 빌드 도구 |
+|-----------|------|------------|----------|
+| `package.json` | JavaScript/TypeScript | Jest, Vitest, Mocha | npm, yarn, pnpm |
+| `pyproject.toml`, `setup.py` | Python | pytest, unittest | pip, poetry |
+| `go.mod` | Go | go test | go build |
+| `Cargo.toml` | Rust | cargo test | cargo build |
+| `pom.xml` | Java | JUnit, TestNG | Maven |
+| `build.gradle` | Java/Kotlin | JUnit | Gradle |
+| `*.csproj` | C# | xUnit, NUnit | dotnet |
+| `Gemfile` | Ruby | RSpec, Minitest | bundler |
+| `mix.exs` | Elixir | ExUnit | mix |
 
 ### 분석 결과 정리
 
 ```markdown
 ## 프로젝트 분석 결과
 
-- **이름**: [프로젝트명]
-- **언어**: TypeScript / JavaScript / Python / ...
-- **프레임워크**: React / Next.js / Express / ...
-- **테스트**: Jest / Vitest / pytest / ...
-- **린트**: ESLint / Prettier / ...
-- **구조**: 모놀리스 / 모노레포
+- **언어**: {detected_language}
+- **프레임워크**: {detected_framework}
+- **테스트 도구**: {test_tool}
+- **빌드 도구**: {build_tool}
+- **린터**: {linter}
+- **구조**: {project_structure}
 ```
 
 ---
 
-## Step 2: UserAskQuestion 인터뷰
+## Step 2: 인터뷰 (AskUserQuestion)
 
-프로젝트 분석 결과를 바탕으로 추가 정보를 수집합니다.
+### Q1: 프로젝트 도메인
 
-### 질문 항목
-
-**Q1: 프로젝트 도메인**
-```
-이 프로젝트의 도메인 영역은 무엇인가요?
-- 이커머스/결제
-- 금융/핀테크
-- 소셜/커뮤니티
-- SaaS/B2B
-- 기타 (직접 입력)
-```
-
-**Q2: 품질 우선순위**
-```
-가장 중요한 품질 속성은 무엇인가요? (복수 선택 가능)
-- 성능 (응답 속도, 처리량)
-- 안정성 (에러 처리, 복구)
-- 보안 (인증, 권한, 데이터 보호)
-- 유지보수성 (코드 품질, 테스트)
-```
-
-**Q3: 터미널 환경**
-```
-Worker를 실행할 터미널 환경은 무엇인가요?
-- iTerm2 (탭/분할 지원)
-- tmux (세션 관리)
-- Terminal.app (기본)
-- 수동 (직접 터미널 열기)
-```
-
-**Q4: 알림 방식**
-```
-작업 완료 알림을 어떻게 받으시겠습니까?
-- macOS 시스템 알림
-- Slack 웹훅
-- 알림 없음
-```
-
----
-
-## Step 3: 에이전트 그룹 생성
-
-도메인과 품질 우선순위에 따라 적절한 에이전트를 구성합니다.
-
-### 기본 에이전트 (항상 포함)
-
-1. **Code Reviewer** - 코드 품질, 컨벤션 검토
-2. **QA Agent** - 테스트 케이스 도출, 커버리지 검토
-
-### 도메인별 에이전트
-
-| 도메인 | 추가 에이전트 |
-|--------|--------------|
-| 이커머스/결제 | Payment Expert, Fraud Detection |
-| 금융/핀테크 | Compliance Expert, Risk Analyst |
-| 소셜/커뮤니티 | UX Reviewer, Scalability Expert |
-| SaaS/B2B | API Design Expert, Integration Specialist |
-
-### 품질별 에이전트
-
-| 품질 속성 | 추가 에이전트 |
-|-----------|--------------|
-| 성능 | Performance Analyst |
-| 안정성 | Reliability Expert |
-| 보안 | Security Auditor |
-| 유지보수성 | Architecture Reviewer |
-
----
-
-## Step 4: 완료 기준 및 Hook 설정
-
-### 완료 기준 (completion criteria)
-
-```json
-{
-  "requiredChecks": ["lint", "typecheck", "test"],
-  "coverageThreshold": 80,
-  "reviewApproval": true
-}
-```
-
-### Hook 설정
-
-Worker용 hooks.json 템플릿을 생성합니다:
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".team-claude/hooks/worker-complete.sh"
-          }
-        ]
-      }
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: "이 프로젝트의 도메인 영역은 무엇인가요?",
+    header: "Domain",
+    options: [
+      { label: "이커머스/결제", description: "상품, 주문, 결제 관련" },
+      { label: "금융/핀테크", description: "계좌, 거래, 투자 관련" },
+      { label: "SaaS/B2B", description: "기업용 서비스" },
+      { label: "소비자 앱", description: "일반 사용자 대상 서비스" }
     ],
-    "PreToolUse": [
-      {
-        "matcher": "AskUserQuestion",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".team-claude/hooks/worker-needs-help.sh"
-          }
-        ]
-      }
-    ]
-  }
-}
+    multiSelect: false
+  }]
+})
+```
+
+### Q2: 피드백 루프 설정
+
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: "자동 피드백 루프 설정을 어떻게 하시겠습니까?",
+    header: "Feedback Loop",
+    options: [
+      { label: "자동 (권장)", description: "실패 시 자동 분석 + 재시도 (최대 5회)" },
+      { label: "반자동", description: "실패 시 분석만, 재시도는 수동" },
+      { label: "수동", description: "모든 검증 후 수동 개입" }
+    ],
+    multiSelect: false
+  }]
+})
+```
+
+### Q3: Checkpoint 검증 방식
+
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: "Checkpoint 검증은 어떻게 하시겠습니까?",
+    header: "Validation",
+    options: [
+      { label: "테스트 명령어 (권장)", description: "npm test, pytest 등 실행" },
+      { label: "커스텀 스크립트", description: "직접 작성한 검증 스크립트" },
+      { label: "수동 확인", description: "사람이 직접 확인" }
+    ],
+    multiSelect: false
+  }]
+})
+```
+
+### Q4: 알림 방식
+
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: "작업 완료/에스컬레이션 알림을 어떻게 받으시겠습니까?",
+    header: "Notification",
+    options: [
+      { label: "시스템 알림 (권장)", description: "OS 알림 센터" },
+      { label: "Slack 웹훅", description: "Slack 채널로 알림" },
+      { label: "알림 없음", description: "로그로만 확인" }
+    ],
+    multiSelect: false
+  }]
+})
 ```
 
 ---
 
-## Step 5: 설정 파일 저장
+## Step 3: 설정 파일 생성
 
 ### 생성되는 디렉토리 구조
 
 ```
 .team-claude/
 ├── config.json              # 메인 설정
-├── agents/                  # 에이전트 프롬프트
-│   ├── code-reviewer.md
-│   ├── qa-agent.md
-│   ├── security-auditor.md  # (보안 선택 시)
-│   └── domain-expert.md     # (도메인별)
-├── criteria/
-│   └── completion.json      # 완료 기준
-├── hooks/
-│   ├── hooks.json           # Worker용 hook 설정
-│   ├── worker-complete.sh
-│   └── worker-needs-help.sh
-├── templates/
-│   └── worker-task.md       # Task 스펙 템플릿
-└── specs/                   # (plan 커맨드에서 생성)
-    ├── outline.md
-    ├── contracts/
-    └── tasks/
+├── sessions/                # 세션 데이터
+│   └── index.json
+├── state/                   # 런타임 상태
+│   └── current-delegation.json
+├── hooks/                   # Hook 스크립트
+│   ├── on-worker-complete.sh
+│   ├── on-validation-complete.sh
+│   ├── on-worker-question.sh
+│   └── on-worker-idle.sh
+└── templates/               # 템플릿
+    ├── checkpoint.yaml
+    └── delegation-spec.md
 ```
 
 ### config.json 스키마
@@ -219,215 +162,92 @@ Worker용 hooks.json 템플릿을 생성합니다:
 {
   "version": "1.0",
   "project": {
-    "name": "[프로젝트명]",
-    "domain": "[도메인]",
-    "language": "[언어]",
-    "framework": "[프레임워크]"
+    "name": "{project_name}",
+    "language": "{detected_language}",
+    "framework": "{detected_framework}",
+    "domain": "{selected_domain}"
   },
-  "server": {
-    "port": 3847,
-    "host": "localhost"
+  "detection": {
+    "testCommand": "{auto_detected_test_command}",
+    "buildCommand": "{auto_detected_build_command}",
+    "lintCommand": "{auto_detected_lint_command}"
   },
-  "worktree": {
-    "root": "../worktrees",
-    "branchPrefix": "feature/"
+  "feedbackLoop": {
+    "mode": "auto",
+    "maxIterations": 5,
+    "autoRetryDelay": 5000,
+    "escalationThreshold": 3
   },
-  "worker": {
-    "maxConcurrent": 5,
-    "timeout": 1800
-  },
-  "terminal": {
-    "type": "iterm2",
-    "layout": "tabs"
+  "validation": {
+    "method": "test_command",
+    "timeout": 120000
   },
   "notification": {
-    "method": "notification"
+    "method": "system",
+    "slack": {
+      "webhookUrl": "",
+      "channel": ""
+    }
   },
-  "planning": {
-    "reviewers": {
-      "mode": "single",
-      "providers": ["claude"]
-    },
-    "autoSave": true,
-    "maxIterations": 5
+  "architectLoop": {
+    "requireHumanApproval": ["architecture", "contracts", "checkpoints"],
+    "autoProgress": ["implementation", "test"]
   },
   "agents": {
-    "enabled": ["code-reviewer", "qa-agent", "security-auditor"],
-    "custom": [],
-    "overrides": {}
-  },
-  "review": {
-    "autoLevel": "semi-auto",
-    "requireApproval": true
-  },
-  "completion": {
-    "requiredChecks": ["lint", "typecheck", "test"],
-    "coverageThreshold": 80
-  },
-  "cleanup": {
-    "autoAnalyze": true,
-    "suggestImprovements": true,
-    "autoApply": false,
-    "keepRetrospectives": true,
-    "patternThreshold": 3,
-    "retrospectivePath": ".team-claude/retrospectives/"
+    "specValidator": true,
+    "testOracle": true,
+    "implReviewer": true
   }
 }
-```
-
-### planning 섹션 상세
-
-스펙 정제 과정의 리뷰어 설정을 관리합니다:
-
-| 필드 | 설명 | 기본값 |
-|------|------|--------|
-| `reviewers.mode` | 리뷰 모드 (`single` / `multi-llm`) | `single` |
-| `reviewers.providers` | 사용할 LLM 목록 | `["claude"]` |
-| `autoSave` | 각 단계 자동 파일 저장 | `true` |
-| `maxIterations` | 최대 반복 횟수 | `5` |
-
-**Single 모드 (기본)**
-```json
-{
-  "planning": {
-    "reviewers": {
-      "mode": "single",
-      "providers": ["claude"]
-    }
-  }
-}
-```
-
-**Multi-LLM 모드** (Codex, Gemini 환경 설정 필요)
-```json
-{
-  "planning": {
-    "reviewers": {
-      "mode": "multi-llm",
-      "providers": ["claude", "codex", "gemini"]
-    }
-  }
-}
-```
-
-### agents 섹션 상세
-
-에이전트는 계층화된 구조로 관리됩니다:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    에이전트 해석 순서                         │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  1. 프로젝트 로컬 (최우선)                                   │
-│     .team-claude/agents/{name}.md                          │
-│                                                             │
-│  2. 플러그인 기본                                            │
-│     plugins/team-claude/agents/{name}.md                   │
-│                                                             │
-│  동일 이름 → 로컬이 플러그인 기본을 오버라이드               │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-| 필드 | 설명 |
-|------|------|
-| `enabled` | 활성화된 에이전트 목록 (리뷰 시 사용됨) |
-| `custom` | 사용자가 추가한 커스텀 에이전트 이름 목록 |
-| `overrides` | 기본 에이전트 설정 오버라이드 (예: 모델 변경) |
-
-**오버라이드 예시:**
-
-```json
-{
-  "agents": {
-    "enabled": ["code-reviewer", "qa-agent"],
-    "custom": ["payment-expert"],
-    "overrides": {
-      "code-reviewer": {
-        "model": "opus"
-      }
-    }
-  }
-}
-```
-
-### cleanup 섹션 상세
-
-작업 완료 후 회고 및 개선 프로세스를 설정합니다:
-
-| 필드 | 설명 | 기본값 |
-|------|------|--------|
-| `autoAnalyze` | 정리 시 자동으로 작업 분석 수행 | `true` |
-| `suggestImprovements` | 에이전트/스킬/문서 개선 제안 표시 | `true` |
-| `autoApply` | 개선 사항 자동 적용 (확인 없이) | `false` |
-| `keepRetrospectives` | 회고 보고서 보존 | `true` |
-| `patternThreshold` | 패턴 감지 최소 반복 횟수 | `3` |
-| `retrospectivePath` | 회고 보고서 저장 경로 | `.team-claude/retrospectives/` |
-
-**cleanup 워크플로우:**
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Cleanup & Retrospective                  │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  PHASE 1: 작업 분석                                          │
-│     - 커밋 히스토리, 변경 파일, 리뷰 피드백 분석             │
-│     - 반복 패턴 감지                                         │
-│                                                             │
-│  PHASE 2: 개선 제안                                          │
-│     - 🤖 에이전트: 신규 생성 / 기존 개선                     │
-│     - ⚡ 스킬: 반복 작업 자동화                              │
-│     - 📚 문서: 가이드라인 추가                               │
-│     - ⚙️ 설정: config.json 최적화                            │
-│                                                             │
-│  PHASE 3: 개선 적용 (선택적)                                  │
-│     - AskUserQuestion으로 적용 항목 선택                     │
-│     - 선택된 개선 사항 자동 생성/수정                        │
-│                                                             │
-│  PHASE 4: 리소스 정리                                        │
-│     - Worktree, 브랜치, 상태 파일 정리                       │
-│     - 회고 보고서 저장                                       │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 실행 절차
+## Step 4: Hook 설정
 
-1. **프로젝트 분석 실행**
-   - Glob으로 설정 파일 탐색
-   - Read로 내용 분석
+플러그인의 hook 스크립트를 프로젝트로 복사합니다:
 
-2. **인터뷰 실행**
-   - AskUserQuestion으로 4개 질문
-   - 답변 기반으로 설정 구성
+```bash
+# Hook 스크립트 복사
+cp -r {plugin_path}/hooks/scripts/* .team-claude/hooks/
 
-3. **디렉토리 및 파일 생성**
-   - Bash로 디렉토리 생성
-   - Write로 설정 파일 작성
+# 실행 권한 부여
+chmod +x .team-claude/hooks/*.sh
+```
 
-4. **완료 메시지 출력**
+---
+
+## 완료 메시지
 
 ```
-🔧 Team Claude 초기화 완료
+✅ Team Claude 초기화 완료
 
 📁 생성된 설정:
   .team-claude/
   ├── config.json
-  ├── agents/ (3개 에이전트)
-  ├── criteria/
-  ├── hooks/
+  ├── sessions/
+  ├── state/
+  ├── hooks/ (4개 스크립트)
   └── templates/
 
-📊 구성된 에이전트:
-  • Code Reviewer - 코드 품질 검토
-  • QA Agent - 테스트 케이스 도출
-  • Security Auditor - 보안 검토
+📊 감지된 프로젝트 정보:
+  • 언어: {language}
+  • 프레임워크: {framework}
+  • 테스트: {test_command}
+  • 도메인: {domain}
 
-다음 단계: /team-claude:plan "요구사항"
+⚙️ 설정:
+  • 피드백 루프: {feedback_mode}
+  • 최대 재시도: {max_iterations}회
+  • 알림: {notification_method}
+
+다음 단계:
+  1. 설계 루프 시작:
+     /team-claude:architect "요구사항"
+
+  2. 설정 변경:
+     /team-claude:config list
+     /team-claude:setup
 ```
 
 ---
@@ -436,16 +256,93 @@ Worker용 hooks.json 템플릿을 생성합니다:
 
 이미 `.team-claude/`가 존재하는 경우:
 
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: "AFL이 이미 초기화되어 있습니다. 어떻게 하시겠습니까?",
+    header: "Reinit",
+    options: [
+      { label: "재초기화", description: "기존 설정 백업 후 재설정" },
+      { label: "유지", description: "기존 설정 유지" },
+      { label: "설정만 수정", description: "/team-claude:setup 실행" }
+    ],
+    multiSelect: false
+  }]
+})
 ```
-⚠️ Team Claude가 이미 초기화되어 있습니다.
 
-현재 설정:
-  - 도메인: 이커머스/결제
-  - 에이전트: 3개
-  - 터미널: iTerm2
+---
 
-재초기화하시겠습니까? 기존 설정이 백업됩니다.
-- 예, 재초기화
-- 아니오, 기존 설정 유지
-- 설정만 수정 (/team-claude:setup 실행)
+## 언어별 기본 설정
+
+### JavaScript/TypeScript
+
+```json
+{
+  "detection": {
+    "testCommand": "npm test",
+    "buildCommand": "npm run build",
+    "lintCommand": "npm run lint"
+  }
+}
+```
+
+### Python
+
+```json
+{
+  "detection": {
+    "testCommand": "pytest",
+    "buildCommand": "python -m build",
+    "lintCommand": "ruff check ."
+  }
+}
+```
+
+### Go
+
+```json
+{
+  "detection": {
+    "testCommand": "go test ./...",
+    "buildCommand": "go build ./...",
+    "lintCommand": "golangci-lint run"
+  }
+}
+```
+
+### Rust
+
+```json
+{
+  "detection": {
+    "testCommand": "cargo test",
+    "buildCommand": "cargo build",
+    "lintCommand": "cargo clippy"
+  }
+}
+```
+
+### Java (Maven)
+
+```json
+{
+  "detection": {
+    "testCommand": "mvn test",
+    "buildCommand": "mvn package",
+    "lintCommand": "mvn checkstyle:check"
+  }
+}
+```
+
+### Java (Gradle)
+
+```json
+{
+  "detection": {
+    "testCommand": "./gradlew test",
+    "buildCommand": "./gradlew build",
+    "lintCommand": "./gradlew check"
+  }
+}
 ```

@@ -1,283 +1,213 @@
 ---
 name: team-claude:config
-description: Team Claude 설정 조회 및 수정 - get, set, list, reset 작업 지원
-argument-hint: "<action> [key] [value]"
-allowed-tools: ["Read", "Write", "Bash", "AskUserQuestion"]
+description: Team Claude 설정 조회 및 변경 - 현재 설정 확인 후 대화형으로 변경
+argument-hint: ""
+allowed-tools: ["Read", "Write", "AskUserQuestion", "Bash"]
 ---
 
-# Team Claude 설정 관리 커맨드
+# Config 커맨드
 
-개별 설정 값을 조회하거나 수정합니다.
+현재 설정을 보여주고, 원하면 바로 변경할 수 있습니다.
 
 ## 사용법
 
 ```bash
-# 전체 설정 보기
-/team-claude:config list
-
-# 특정 값 조회
-/team-claude:config get <key>
-
-# 값 변경
-/team-claude:config set <key> <value>
-
-# 섹션 초기화
-/team-claude:config reset <section>
+/team-claude:config
 ```
-
-## Arguments
-
-| Argument | 필수 | 설명 |
-|----------|------|------|
-| action | O | get, set, list, reset |
-| key | △ | 설정 키 (점 표기법) |
-| value | △ | 설정 값 (set 시) |
 
 ---
 
-## Action: list
+## 설정 파일 위치
 
-전체 설정을 트리 형태로 출력합니다.
+```
+.claude/team-claude.yaml
+```
 
-### 출력 예시
+---
+
+## 실행 절차
+
+```
+1. 현재 설정 출력
+       │
+       ▼
+2. AskUserQuestion: "변경하시겠습니까?"
+       │
+       ├─ 아니오 → 종료
+       │
+       └─ 예 → 어떤 섹션?
+                  │
+                  ▼
+            3. 해당 섹션 변경 (AskUserQuestion)
+                  │
+                  ▼
+            4. 저장 및 완료
+```
+
+---
+
+## Step 1: 현재 설정 출력
 
 ```
 📋 Team Claude 설정
 
-project:
-  name: my-project
-  domain: ecommerce
-  language: TypeScript
+━━━ 프로젝트 ━━━
+  language:      python
+  framework:     fastapi
+  test_command:  pytest
+  build_command: poetry build
 
-server:
-  port: 3847
-  host: localhost
+━━━ 피드백 루프 ━━━
+  mode:           auto
+  max_iterations: 5
+  retry_delay:    5000ms
 
-worktree:
-  root: ../worktrees
-  branchPrefix: feature/
+━━━ 검증 ━━━
+  method:  test
+  timeout: 120000ms
 
-worker:
-  maxConcurrent: 5
-  timeout: 1800
+━━━ 알림 ━━━
+  method: system
 
-terminal:
-  type: iterm2
-  layout: tabs
-
-notification:
-  method: notification
-
-review:
-  autoLevel: semi-auto
-  agents:
-    - code-reviewer
-    - qa-agent
-    - security-auditor
-
-completion:
-  requiredChecks:
-    - lint
-    - typecheck
-    - test
-  coverageThreshold: 80
+━━━ 에이전트 ━━━
+  ✓ spec_validator
+  ✓ test_oracle
+  ✓ impl_reviewer
 ```
 
 ---
 
-## Action: get
+## Step 2: 변경 여부 확인
 
-특정 설정 값을 조회합니다. 점 표기법으로 중첩된 값에 접근합니다.
-
-### 예시
-
-```bash
-/team-claude:config get terminal.type
-# 출력: iterm2
-
-/team-claude:config get worker.maxConcurrent
-# 출력: 5
-
-/team-claude:config get review.agents
-# 출력: ["code-reviewer", "qa-agent", "security-auditor"]
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: "설정을 변경하시겠습니까?",
+    header: "Config",
+    options: [
+      { label: "아니오", description: "현재 설정 유지" },
+      { label: "예, 변경", description: "설정 변경 진행" }
+    ],
+    multiSelect: false
+  }]
+})
 ```
 
 ---
 
-## Action: set
+## Step 3: 섹션 선택 (변경 시)
 
-설정 값을 변경합니다.
-
-### 예시
-
-```bash
-# 숫자 값
-/team-claude:config set worker.maxConcurrent 3
-
-# 문자열 값
-/team-claude:config set terminal.type tmux
-
-# 배열 값 (JSON 형식)
-/team-claude:config set review.agents '["code-reviewer", "qa-agent"]'
-
-# 불리언 값
-/team-claude:config set review.requireApproval true
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: "어떤 설정을 변경하시겠습니까?",
+    header: "Section",
+    options: [
+      { label: "프로젝트", description: "언어, 테스트 명령어 등" },
+      { label: "피드백 루프", description: "모드, 재시도 횟수" },
+      { label: "검증", description: "검증 방식, 타임아웃" },
+      { label: "알림", description: "알림 방식" }
+    ],
+    multiSelect: true
+  }]
+})
 ```
 
-### 유효성 검사
+---
 
-설정 값 변경 시 다음을 검사합니다:
+## Step 4: 섹션별 변경
 
-| 키 | 유효한 값 |
-|----|----------|
-| terminal.type | iterm2, tmux, terminal, manual |
-| terminal.layout | tabs, split |
-| notification.method | notification, slack, none |
-| review.autoLevel | manual, semi-auto, full-auto |
-| worker.maxConcurrent | 1-10 |
-| completion.coverageThreshold | 0-100 |
+선택한 섹션에 대해 AskUserQuestion으로 변경 진행합니다.
 
-### 출력 예시
+### 피드백 루프 변경 예시
+
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: "피드백 루프 모드를 선택하세요",
+    header: "Mode",
+    options: [
+      { label: "auto (권장)", description: "실패 시 자동 분석 + 재시도" },
+      { label: "semi-auto", description: "분석만 자동, 재시도는 수동" },
+      { label: "manual", description: "모든 단계 수동 확인" }
+    ],
+    multiSelect: false
+  }, {
+    question: "최대 재시도 횟수는?",
+    header: "Iterations",
+    options: [
+      { label: "3회", description: "빠른 에스컬레이션" },
+      { label: "5회 (권장)", description: "균형잡힌 설정" },
+      { label: "10회", description: "끈질기게 시도" }
+    ],
+    multiSelect: false
+  }]
+})
+```
+
+### 알림 변경 예시
+
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: "알림 방식을 선택하세요",
+    header: "Notification",
+    options: [
+      { label: "시스템 알림 (권장)", description: "OS 알림 센터" },
+      { label: "Slack", description: "Slack 웹훅" },
+      { label: "없음", description: "알림 비활성화" }
+    ],
+    multiSelect: false
+  }]
+})
+```
+
+---
+
+## Step 5: 완료
 
 ```
 ✅ 설정 변경 완료
 
-  worker.maxConcurrent: 5 → 3
-```
-
----
-
-## Action: reset
-
-특정 섹션을 기본값으로 초기화합니다.
-
-### 사용 가능한 섹션
-
-- server
-- worktree
-- worker
-- terminal
-- notification
-- review
-- completion
-
-### 예시
-
-```bash
-/team-claude:config reset terminal
-```
-
-### 출력 예시
-
-```
-🔄 terminal 섹션 초기화 완료
-
 변경 사항:
-  type: tmux → iterm2
-  layout: split → tabs
+  feedback_loop.mode: auto → semi-auto
+  notification.method: system → slack
+
+저장됨: .claude/team-claude.yaml
 ```
 
 ---
 
-## 설정 키 전체 목록
+## 설정 파일이 없을 때
 
-```
-project.name              # 프로젝트명
-project.domain            # 도메인 영역
-project.language          # 주 언어
-project.framework         # 프레임워크
-
-server.port               # 서버 포트 (기본: 3847)
-server.host               # 서버 호스트 (기본: localhost)
-server.timeout            # 타임아웃 ms (기본: 60000)
-
-worktree.root             # worktree 루트 경로
-worktree.branchPrefix     # 브랜치 접두사
-worktree.cleanupOnMerge   # 머지 시 정리 여부
-
-worker.maxConcurrent      # 동시 Worker 수
-worker.timeout            # Worker 타임아웃 (초)
-worker.defaultTemplate    # 기본 템플릿
-
-terminal.type             # 터미널 종류
-terminal.layout           # 레이아웃
-terminal.maxPanes         # 최대 pane 수
-terminal.sessionName      # 세션명
-
-notification.method       # 알림 방식
-notification.slack.webhookUrl   # Slack 웹훅 URL
-notification.slack.channel      # Slack 채널
-
-agents.enabled            # 활성화된 에이전트 목록
-agents.custom             # 커스텀 에이전트 목록
-agents.overrides          # 에이전트 설정 오버라이드
-
-review.autoLevel          # 자동화 레벨
-review.requireApproval    # 승인 필요 여부
-
-completion.requiredChecks       # 필수 체크 항목
-completion.coverageThreshold    # 커버리지 기준
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: "설정 파일이 없습니다. 생성할까요?",
+    header: "Create",
+    options: [
+      { label: "예, 생성 (권장)", description: "프로젝트 분석 후 기본 설정 생성" },
+      { label: "/team-claude:init 실행", description: "전체 초기화 위자드 실행" }
+    ],
+    multiSelect: false
+  }]
+})
 ```
 
 ---
 
-## 에이전트 설정 관리
+## 설정 키 설명
 
-에이전트 관련 설정은 `/team-claude:agent` 커맨드 사용을 권장합니다.
-
-```bash
-# 에이전트 목록
-/team-claude:agent list
-
-# 에이전트 추가
-/team-claude:agent add payment-expert
-
-# 에이전트 활성화/비활성화
-/team-claude:agent enable domain-expert
-/team-claude:agent disable security-auditor
-```
-
-config 명령어로 직접 수정도 가능합니다:
-
-```bash
-# 활성화된 에이전트 확인
-/team-claude:config get agents.enabled
-
-# 에이전트 목록 직접 수정
-/team-claude:config set agents.enabled '["code-reviewer", "qa-agent"]'
-
-# 에이전트 모델 오버라이드
-/team-claude:config set agents.overrides.code-reviewer.model opus
-```
-
----
-
-## 에러 처리
-
-### 설정 파일 없음
-
-```
-❌ Team Claude가 초기화되지 않았습니다.
-
-먼저 /team-claude:init 을 실행해주세요.
-```
-
-### 잘못된 키
-
-```
-❌ 알 수 없는 설정 키: terminal.invalid
-
-사용 가능한 키:
-  terminal.type
-  terminal.layout
-  terminal.maxPanes
-  terminal.sessionName
-```
-
-### 잘못된 값
-
-```
-❌ 유효하지 않은 값: terminal.type = "invalid"
-
-허용되는 값: iterm2, tmux, terminal, manual
-```
+| 섹션 | 키 | 설명 |
+|------|-----|------|
+| **project** | language | 프로젝트 언어 (자동 감지) |
+| | test_command | 테스트 실행 명령어 |
+| | build_command | 빌드 명령어 |
+| **feedback_loop** | mode | `auto` / `semi-auto` / `manual` |
+| | max_iterations | 최대 재시도 횟수 |
+| **validation** | method | `test` / `script` / `manual` |
+| | timeout | 검증 타임아웃 (ms) |
+| **notification** | method | `system` / `slack` / `none` |
+| **agents** | spec_validator | 스펙 검증 에이전트 |
+| | test_oracle | 테스트 분석 에이전트 |
+| | impl_reviewer | 구현 검토 에이전트 |

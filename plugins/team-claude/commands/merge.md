@@ -1,323 +1,348 @@
 ---
 name: team-claude:merge
-description: 완료된 Task PR 머지 - 최종 검증 후 base branch로 머지
-argument-hint: "<task-id> [--squash] [--no-delete-branch]"
-allowed-tools: ["Bash", "Read", "Write", "AskUserQuestion"]
+description: Semi-Auto 머지 - Worker PR들을 epic 브랜치로 머지 (conflict 시 사용자 확인)
+argument-hint: "[--session <session-id>] [--dry-run]"
+allowed-tools: ["Task", "Read", "Write", "Bash", "Grep", "AskUserQuestion"]
 ---
 
-# Team Claude 머지 커맨드
+# Merge Command
 
-완료되고 리뷰된 Task를 base branch로 머지합니다.
+모든 Worker PR을 epic 브랜치로 순차 머지합니다.
+Conflict 발생 시 Conflict Analysis Agent가 분석하고 사용자에게 질문합니다.
+
+## 핵심 원칙
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SEMI-AUTO MERGE                                                            │
+│                                                                             │
+│  기본: 자동 머지                                                            │
+│  • conflict 없으면 자동으로 진행                                            │
+│  • 테스트 통과 확인 후 머지                                                 │
+│                                                                             │
+│  Conflict 발생 시: 사용자 확인                                              │
+│  • Conflict Analysis Agent가 분석                                           │
+│  • 양쪽 변경 의도 파악                                                      │
+│  • 해결 방안 제시                                                           │
+│  • 사용자가 최종 선택                                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ## 사용법
 
 ```bash
-# 기본 머지
-/team-claude:merge task-coupon-service
+# 현재 세션의 모든 PR 머지
+/team-claude:merge
 
-# squash 머지
-/team-claude:merge task-coupon-service --squash
+# 특정 세션 머지
+/team-claude:merge --session abc12345
 
-# 브랜치 유지
-/team-claude:merge task-coupon-service --no-delete-branch
+# 드라이런 (실제 머지 없이 확인만)
+/team-claude:merge --dry-run
 ```
-
-## Arguments
-
-| Argument | 필수 | 설명 |
-|----------|------|------|
-| task-id | O | 머지할 Task ID |
-| --squash | X | squash merge (기본: false) |
-| --no-delete-branch | X | 머지 후 브랜치 유지 |
 
 ---
 
-## 머지 프로세스
+## 실행 절차
 
 ```
-/team-claude:merge task-coupon-service
+/team-claude:merge
         │
         ▼
 ┌───────────────────────────────────────────────────────────────┐
-│                     1. 머지 조건 확인                          │
+│  STEP 1: PR 목록 수집                                         │
 │                                                               │
-│  • Task 상태: completed                                       │
-│  • 리뷰 상태: approved (차단 항목 없음)                        │
-│  • 필수 체크: lint, typecheck, test 통과                      │
+│  • .team-claude-result.json 파일들에서 PR URL 수집                    │
+│  • 또는 gh pr list로 team-claude/* 브랜치 PR 조회                     │
+│  • 의존성 순서대로 정렬                                       │
 └───────────────────────────────────────────────────────────────┘
         │
         ▼
 ┌───────────────────────────────────────────────────────────────┐
-│                     2. 최종 검증                               │
+│  STEP 2: 순차적 머지 시도                                     │
 │                                                               │
-│  • 충돌 확인: git merge-base                                  │
-│  • CI 체크 실행 (설정된 경우)                                  │
+│  각 PR에 대해:                                                │
+│  1. git fetch origin team-claude/{task}                               │
+│  2. git merge team-claude/{task} --no-commit                          │
+│  3. conflict 확인                                             │
+│     • 없으면 → 커밋 후 다음 PR                                │
+│     • 있으면 → STEP 3 (Conflict 해결)                         │
+└───────────────────────────────────────────────────────────────┘
+        │
+        ▼ (conflict 발생 시)
+┌───────────────────────────────────────────────────────────────┐
+│  STEP 3: Conflict 분석 (Task tool)                            │
+│                                                               │
+│  Conflict Analysis Agent 호출:                                │
+│  • git diff --name-only --diff-filter=U (conflict 파일 목록)  │
+│  • 각 파일에 대해:                                            │
+│    - git log로 양쪽 변경 이력 분석                            │
+│    - 연결된 코드 탐색                                         │
+│    - 양쪽 의도 추론                                           │
+│    - 해결 방안 제시                                           │
 └───────────────────────────────────────────────────────────────┘
         │
         ▼
 ┌───────────────────────────────────────────────────────────────┐
-│                     3. 머지 실행                               │
+│  STEP 4: 사용자에게 질문                                      │
 │                                                               │
-│  • git checkout main                                          │
-│  • git merge feature/task-coupon-service [--squash]          │
-│  • git push                                                   │
+│  각 conflict에 대해 AskUserQuestion:                          │
+│  • 분석 결과 설명                                             │
+│  • 선택지 제공:                                               │
+│    - 분석 결과 적용 (권장)                                    │
+│    - 버전 A 유지                                              │
+│    - 버전 B 유지                                              │
+│    - 직접 수정                                                │
 └───────────────────────────────────────────────────────────────┘
         │
         ▼
 ┌───────────────────────────────────────────────────────────────┐
-│                     4. 정리                                    │
+│  STEP 5: 해결 적용                                            │
 │                                                               │
-│  • 브랜치 삭제 (--no-delete-branch 없으면)                    │
-│  • Worktree 제거 (cleanupOnMerge 설정에 따라)                 │
-│  • 상태 업데이트                                               │
+│  선택에 따라:                                                 │
+│  • 분석 결과 적용 → 제안된 코드로 파일 수정                   │
+│  • 버전 유지 → git checkout --ours/--theirs                   │
+│  • 직접 수정 → 사용자에게 안내 후 대기                        │
+│                                                               │
+│  git add . && git commit                                      │
+└───────────────────────────────────────────────────────────────┘
+        │
+        ▼ (모든 PR 완료 후)
+┌───────────────────────────────────────────────────────────────┐
+│  STEP 6: epic → main PR 생성                                  │
+│                                                               │
+│  gh pr create \                                               │
+│    --base main \                                              │
+│    --head epic/{feature} \                                    │
+│    --title "feat: {feature description}"                      │
 └───────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Step 1: 머지 조건 확인
+## Conflict 분석 상세
 
-### 상태 확인
+### 분석 요청 형식
 
-```
-🔍 머지 조건 확인: task-coupon-service
+```markdown
+## Conflict 분석 요청
 
-  ✅ Task 상태: completed
-  ✅ 리뷰 상태: approved
-  ✅ 차단 항목: 없음
-  ✅ 필수 체크:
-     - lint: ✅ 통과
-     - typecheck: ✅ 통과
-     - test: ✅ 통과 (커버리지 87%)
+파일: src/services/coupon.ts
+브랜치 A: team-claude/coupon-model
+브랜치 B: team-claude/coupon-service
 
-모든 조건 충족. 머지를 진행합니다.
-```
+### 충돌 부분
 
-### 조건 미충족 시
-
-```
-❌ 머지 조건 미충족: task-coupon-service
-
-  ✅ Task 상태: completed
-  ❌ 리뷰 상태: 미리뷰
-  ⬜ 필수 체크: 미확인
-
-먼저 리뷰를 완료해주세요:
-  /team-claude:review task-coupon-service
-```
-
-또는:
-
-```
-❌ 머지 조건 미충족: task-coupon-service
-
-  ✅ Task 상태: completed
-  ⚠️ 리뷰 상태: 차단 항목 있음
-
-차단 항목:
-  - [Security] 하드코딩된 시크릿 발견
-
-피드백 전달 후 재리뷰가 필요합니다:
-  /team-claude:feedback task-coupon-service "시크릿을 환경변수로 이동"
-```
-
----
-
-## Step 2: 최종 검증
-
-### 충돌 확인
-
-```bash
-git fetch origin main
-git merge-base --is-ancestor origin/main feature/task-coupon-service
-```
-
-충돌 시:
-
-```
-⚠️ 충돌 발생 가능성
-
-feature/task-coupon-service와 main 사이에 충돌이 있을 수 있습니다.
-
-충돌 파일:
-  - src/types/index.ts
-
-해결 방법:
-  1. Worker worktree에서 rebase:
-     cd ../worktrees/task-coupon-service
-     git rebase origin/main
-     (충돌 해결)
-     git rebase --continue
-
-  2. 수동 머지 진행
-
-계속하시겠습니까? [y/N]
-```
-
-### CI 체크 (선택)
-
-```
-🔄 CI 체크 실행 중...
-
-  lint: ✅ 통과
-  typecheck: ✅ 통과
-  test: ✅ 통과 (87% 커버리지)
-  build: ✅ 통과
-
-모든 체크 통과. 머지를 진행합니다.
-```
-
----
-
-## Step 3: 머지 실행
-
-### 일반 머지
-
-```bash
-git checkout main
-git pull origin main
-git merge feature/task-coupon-service --no-ff -m "Merge feature/task-coupon-service: CouponService 구현"
-git push origin main
-```
-
-### Squash 머지
-
-```bash
-git checkout main
-git pull origin main
-git merge feature/task-coupon-service --squash
-git commit -m "feat(coupon): implement CouponService (#task-coupon-service)
-
-- Add CouponService with validate/apply methods
-- Add unit tests (87% coverage)
-- Add rate limiting for security"
-git push origin main
-```
-
----
-
-## Step 4: 정리
-
-### 브랜치 삭제
-
-```bash
-# 로컬 브랜치 삭제
-git branch -d feature/task-coupon-service
-
-# 원격 브랜치 삭제
-git push origin --delete feature/task-coupon-service
-```
-
-### Worktree 제거
-
-```bash
-git worktree remove ../worktrees/task-coupon-service
-```
-
-### 상태 업데이트
-
-```json
-{
-  "task-coupon-service": {
-    "status": "merged",
-    "mergedAt": "2024-01-15T12:00:00Z",
-    "mergedTo": "main",
-    "squash": false
+```diff
+<<<<<<< HEAD
+  private validateExpiry(coupon: Coupon): boolean {
+    return coupon.expiresAt > new Date();
   }
+=======
+  private validateExpiry(coupon: Coupon): ValidationResult {
+    if (coupon.expiresAt <= new Date()) {
+      return { valid: false, reason: 'EXPIRED' };
+    }
+    return { valid: true };
+  }
+>>>>>>> team-claude/coupon-service
+```
+
+분석해주세요:
+1. 각 브랜치의 변경 의도
+2. 연결된 코드 영향
+3. 권장 해결 방안
+```
+
+### 분석 결과 형식
+
+```markdown
+## Conflict 분석 결과
+
+### 파일: src/services/coupon.ts:45
+
+#### 브랜치 A (team-claude/coupon-model)
+**변경 내용**: validateExpiry가 boolean 반환
+**의도**: 단순한 만료 체크
+**관련 커밋**: "feat: add basic coupon validation"
+
+#### 브랜치 B (team-claude/coupon-service)
+**변경 내용**: validateExpiry가 ValidationResult 반환
+**의도**: 상세한 에러 정보 제공 (이유 포함)
+**관련 커밋**: "feat: add detailed validation result"
+
+#### 영향 분석
+- `CouponService.validate()` 에서 호출됨
+- `CouponController` 에서 응답 생성에 사용
+- 테스트 3개가 이 메서드에 의존
+
+#### 권장 해결
+
+브랜치 B의 `ValidationResult` 방식이 더 상세한 정보를 제공합니다.
+기존 boolean 반환을 기대하는 코드는 `result.valid`로 변환 가능합니다.
+
+```typescript
+// 권장 병합 코드
+private validateExpiry(coupon: Coupon): ValidationResult {
+  if (coupon.expiresAt <= new Date()) {
+    return { valid: false, reason: 'EXPIRED' };
+  }
+  return { valid: true };
+}
+
+// 하위 호환성이 필요하면:
+private isExpired(coupon: Coupon): boolean {
+  return this.validateExpiry(coupon).valid;
 }
 ```
+```
 
 ---
 
-## 최종 출력
+## AskUserQuestion 사용
 
-### 성공
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: `src/services/coupon.ts:45 충돌을 어떻게 해결할까요?
+
+분석 결과:
+- coupon-model: boolean 반환 (단순)
+- coupon-service: ValidationResult 반환 (상세)
+
+권장: ValidationResult 방식 (상세 에러 정보 제공)`,
+    header: "Conflict",
+    options: [
+      {
+        label: "분석 결과 적용 (권장)",
+        description: "ValidationResult 방식 + 하위 호환 메서드 추가"
+      },
+      {
+        label: "coupon-model 유지",
+        description: "boolean 반환 방식 유지"
+      },
+      {
+        label: "coupon-service 유지",
+        description: "ValidationResult만 유지 (하위 호환 없음)"
+      },
+      {
+        label: "직접 수정",
+        description: "편집기에서 직접 해결"
+      }
+    ],
+    multiSelect: false
+  }]
+})
+```
+
+---
+
+## 출력 예시
+
+### 머지 시작
 
 ```
-✅ Task-coupon-service 머지 완료
+🔀 Team Claude Merge 시작
 
-  branch: feature/task-coupon-service → main
-  commits: 3
-  files: +2, ~1
+  세션: abc12345 (쿠폰 할인 기능)
+  Epic 브랜치: epic/coupon-feature
 
-  브랜치 삭제됨: feature/task-coupon-service
-  worktree 정리됨: ../worktrees/task-coupon-service
+━━━ 머지할 PR 목록 ━━━
 
-남은 작업:
-  - task-coupon-repository: 🔄 진행 중
-  - task-api-endpoint: ⏳ 대기 중
+  1. team-claude/coupon-model    → PR #123 (✅ 테스트 통과)
+  2. team-claude/coupon-service  → PR #124 (✅ 테스트 통과)
+  3. team-claude/coupon-api      → PR #125 (✅ 테스트 통과)
 
-의존성 업데이트:
-  task-api-endpoint의 의존성이 충족되었습니다.
-  자동 시작하시겠습니까? [Y/n]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-### 의존성 자동 시작
-
-머지 후 대기 중이던 Task가 시작 가능해지면:
+### Conflict 발생
 
 ```
-🔔 의존성 충족 알림
+⚠️ Conflict 발생: team-claude/coupon-service
 
-task-api-endpoint의 의존성이 모두 충족되었습니다:
-  ✅ task-coupon-service (merged)
-  ✅ task-coupon-repository (merged)
+  충돌 파일:
+  • src/services/coupon.ts (1개 충돌)
+  • src/types/validation.ts (2개 충돌)
 
-자동으로 시작합니다...
+━━━ Conflict 분석 중... ━━━
 
-🚀 Worker 시작: task-api-endpoint
-  worktree: ../worktrees/task-api-endpoint
-  branch: feature/task-api-endpoint
+  [Conflict Analysis Agent 실행]
+```
+
+### 머지 완료
+
+```
+✅ Team Claude Merge 완료
+
+━━━ 결과 ━━━
+
+  ✅ team-claude/coupon-model     자동 머지
+  ✅ team-claude/coupon-service   3개 conflict 해결 (사용자 확인)
+  ✅ team-claude/coupon-api       자동 머지
+
+━━━ Epic 브랜치 상태 ━━━
+
+  브랜치: epic/coupon-feature
+  커밋 수: 12
+  변경 파일: 15
+
+━━━ 다음 단계 ━━━
+
+  main PR 생성:
+    gh pr create --base main --head epic/coupon-feature
+
+  또는 직접 머지:
+    git checkout main && git merge epic/coupon-feature
 ```
 
 ---
 
 ## 에러 처리
 
-### 머지 충돌
+### PR 미완료
 
 ```
-❌ 머지 실패: 충돌 발생
+⚠️ 일부 PR이 아직 완료되지 않았습니다
 
-충돌 파일:
-  - src/types/index.ts (양쪽에서 수정)
+  ✅ team-claude/coupon-model    PR #123 (merged)
+  🔄 team-claude/coupon-service  PR #124 (open - 작업 중)
+  ⏸️ team-claude/coupon-api      대기 중
 
-해결 방법:
-  1. 수동 해결:
-     cd ../worktrees/task-coupon-service
-     git rebase origin/main
-     # 충돌 해결
-     git rebase --continue
-
-  2. Worker에게 해결 요청:
-     /team-claude:feedback task-coupon-service "main과 충돌 해결 필요"
+머지를 진행하려면 모든 PR이 완료되어야 합니다.
+/team-claude:loop-status 로 진행 상황을 확인하세요.
 ```
 
-### 권한 부족
+### 테스트 실패
 
 ```
-❌ 푸시 실패: 권한 부족
+❌ PR 테스트 실패: team-claude/coupon-service
 
-main 브랜치에 직접 푸시할 권한이 없습니다.
+  실패한 테스트:
+  • test_coupon_service_validate (AssertionError)
+  • test_coupon_apply_duplicate (TimeoutError)
 
-대안:
-  1. PR 생성:
-     gh pr create --base main --head feature/task-coupon-service
-
-  2. 관리자에게 요청
+테스트가 통과해야 머지할 수 있습니다.
+Worker가 자동으로 재시도 중이거나, 에스컬레이션이 필요할 수 있습니다.
 ```
 
 ---
 
-## 머지 취소
+## 설정
 
-머지 직후 문제 발견 시:
+```yaml
+# .claude/team-claude.yaml
 
-```bash
-# 로컬 머지 취소 (푸시 전)
-git reset --hard HEAD~1
-
-# 푸시 후 revert
-git revert HEAD
-git push
+merge:
+  auto_merge: true              # conflict 없으면 자동 머지
+  require_tests_pass: true      # 테스트 통과 필수
+  conflict_strategy: ask        # ask | auto | ours | theirs
+  create_main_pr: true          # 완료 후 main PR 자동 생성
 ```
+
+| 설정 | 설명 | 기본값 |
+|-----|------|--------|
+| `auto_merge` | conflict 없으면 자동 머지 | `true` |
+| `require_tests_pass` | 머지 전 테스트 통과 필수 | `true` |
+| `conflict_strategy` | conflict 해결 전략 | `ask` |
+| `create_main_pr` | 완료 후 main PR 생성 | `true` |
