@@ -271,20 +271,171 @@ AskUserQuestion({
 
 ## STEP 4: Contract 정의 (핵심!)
 
-### Contract = Interface + Test Code
+### Contract = Interface + Test Code + Test Scenarios
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  Contract 기반 병렬화의 핵심                                                │
+│  Contract 기반 자동 검증의 핵심                                              │
 │                                                                             │
-│  • 각 Worker는 다른 Worker의 "구현"에 의존하지 않음                         │
-│  • 오직 "계약"(Interface + Test)에만 의존                                   │
-│  • 따라서 병렬 실행 가능                                                    │
+│  Contract 3요소:                                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  1. Interface       - 타입/시그니처 정의                            │   │
+│  │  2. Test Code       - TDD 테스트 코드 (실행 가능)                   │   │
+│  │  3. Test Scenarios  - 구체적인 입출력 케이스 (자동 검증용)          │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  Test Scenarios가 있어야:                                                   │
+│  • Worker가 정확히 무엇을 구현해야 하는지 명확                              │
+│  • 서버가 자동으로 검증 가능                                                │
+│  • 피드백 루프에서 어떤 케이스가 실패했는지 정확히 파악                      │
 │                                                                             │
 │  TDD 방식:                                                                  │
 │  • 구현 전에 테스트 먼저 작성                                               │
 │  • Worker는 이 테스트를 통과시키는 것이 목표                                │
 └─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Test Scenarios 정의 (자동 검증 루프의 핵심!)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  왜 Test Scenarios가 필요한가?                                               │
+│                                                                             │
+│  추상적 Criteria만으로는 자동 검증이 불가능:                                 │
+│                                                                             │
+│  ❌ BAD: "validate()가 유효한 쿠폰에 대해 true 반환"                        │
+│     → Worker: "유효한 쿠폰이 뭔데?"                                         │
+│     → Server: "어떤 입력으로 테스트하지?"                                   │
+│                                                                             │
+│  ✅ GOOD: 구체적인 입출력 시나리오 정의                                     │
+│     → Worker: 이 케이스들을 통과시키면 됨                                   │
+│     → Server: 이 케이스들로 자동 검증 가능                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**각 Criterion에 대한 Test Scenarios 형식:**
+
+```yaml
+# .team-claude/sessions/{session-id}/contracts/coupon-service/scenarios.yaml
+
+criteria:
+  - id: valid-coupon-returns-true
+    description: "validate()가 유효한 쿠폰에 대해 true 반환"
+    scenarios:
+      - name: "percent discount coupon"
+        given:
+          coupon:
+            code: "SAVE10"
+            discount_type: "percent"
+            discount_value: 10
+            expires_at: "2025-12-31"
+          order:
+            total: 10000
+        when: "coupon.validate(order)"
+        then:
+          valid: true
+          discount_amount: 1000
+
+      - name: "fixed amount discount"
+        given:
+          coupon:
+            code: "FLAT500"
+            discount_type: "fixed"
+            discount_value: 500
+        when: "coupon.validate(order)"
+        then:
+          valid: true
+          discount_amount: 500
+
+  - id: expired-coupon-returns-false
+    description: "validate()가 만료된 쿠폰에 대해 false 반환"
+    scenarios:
+      - name: "expired yesterday"
+        given:
+          coupon:
+            code: "EXPIRED"
+            expires_at: "yesterday"  # 상대 날짜 지원
+        when: "coupon.validate(order)"
+        then:
+          valid: false
+          error_type: "CouponExpired"
+
+      - name: "expires today but already used"
+        given:
+          coupon:
+            code: "LASTDAY"
+            expires_at: "today"
+            usage_limit: 1
+            used_count: 1
+        when: "coupon.validate(order)"
+        then:
+          valid: false
+          error_type: "CouponExhausted"
+
+  - id: duplicate-application-fails
+    description: "중복 적용 시 에러 발생"
+    scenarios:
+      - name: "same coupon applied twice to same order"
+        given:
+          coupon: { code: "ONCE" }
+          order: { id: "order-1" }
+          existing_usage: { coupon_code: "ONCE", order_id: "order-1" }
+        when: "couponService.apply(coupon, order)"
+        then:
+          success: false
+          error_type: "DuplicateApplication"
+          error_message: "이미 적용된 쿠폰입니다"
+
+      - name: "same coupon to different order is OK"
+        given:
+          coupon: { code: "MULTI" }
+          order: { id: "order-2" }
+          existing_usage: { coupon_code: "MULTI", order_id: "order-1" }
+        when: "couponService.apply(coupon, order)"
+        then:
+          success: true
+```
+
+**Edge Cases 시나리오 (필수!):**
+
+```yaml
+edge_cases:
+  - id: boundary-discount-percent
+    description: "경계값 테스트 - 할인율"
+    scenarios:
+      - name: "0% discount"
+        given: { discount_value: 0 }
+        then: { discount_amount: 0 }
+      - name: "100% discount"
+        given: { discount_value: 100, order_total: 5000 }
+        then: { discount_amount: 5000 }
+      - name: "negative discount rejected"
+        given: { discount_value: -10 }
+        then: { error_type: "InvalidDiscount" }
+      - name: "over 100% rejected"
+        given: { discount_value: 150 }
+        then: { error_type: "InvalidDiscount" }
+
+  - id: concurrent-application
+    description: "동시성 테스트 - 동시에 같은 쿠폰 적용"
+    scenarios:
+      - name: "race condition handling"
+        given:
+          coupon: { code: "RACE", usage_limit: 1 }
+          concurrent_requests: 2
+        then:
+          one_succeeds: true
+          one_fails_with: "CouponExhausted"
+
+  - id: null-and-empty
+    description: "Null/Empty 처리"
+    scenarios:
+      - name: "null coupon code"
+        given: { code: null }
+        then: { error_type: "InvalidInput" }
+      - name: "empty coupon code"
+        given: { code: "" }
+        then: { error_type: "InvalidInput" }
 ```
 
 ### Interface 정의 예시
@@ -414,72 +565,251 @@ prerequisites:
 
 ## STEP 5: Checkpoint 정의 형식
 
-### checkpoint JSON 구조
+### Checkpoint = Criteria + Test Scenarios + Validation
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Checkpoint 구성 요소                                                        │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  criteria[]       - 충족해야 할 조건 (추상적 설명)                  │   │
+│  │       │                                                             │   │
+│  │       ▼                                                             │   │
+│  │  scenarios[]      - 각 criterion의 구체적 테스트 케이스             │   │
+│  │       │             (given → when → then 형식)                      │   │
+│  │       ▼                                                             │   │
+│  │  validation       - 테스트 실행 방법                                │   │
+│  │       │             (command, timeout, success_pattern)             │   │
+│  │       ▼                                                             │   │
+│  │  auto_verify()    - 서버가 자동으로 검증 루프 실행                  │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  이 구조가 있어야 "자동화된 피드백 루프"가 가능!                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### checkpoint YAML 구조 (Test Scenarios 포함)
 
 ```yaml
+# .team-claude/sessions/{session-id}/checkpoints/coupon-service.yaml
+
+id: coupon-service
+name: "쿠폰 서비스 로직"
+type: implementation
+description: "쿠폰 검증 및 적용 로직"
+dependencies: [coupon-model]
+
+# 검증 방법
+validation:
+  # 테스트 실행 명령어
+  command: "npm run test -- --grep 'CouponService'"
+  # 성공 판정 패턴 (정규식)
+  success_pattern: "\\d+ passing"
+  # 실패 판정 패턴
+  failure_patterns:
+    - "failing"
+    - "Error:"
+    - "AssertionError"
+  timeout: 30000
+
+# 충족 조건 + 구체적 시나리오
+criteria:
+  - id: valid-coupon-validation
+    description: "validate()가 유효한 쿠폰에 대해 true 반환"
+    # 이 criterion을 검증하는 구체적 시나리오들
+    scenarios:
+      - name: "10% 할인 쿠폰 적용"
+        given:
+          coupon:
+            code: "SAVE10"
+            discount_type: "percent"
+            discount_value: 10
+            expires_at: "+30days"
+          order:
+            id: "order-1"
+            total: 10000
+        when: "couponService.validate(coupon, order)"
+        then:
+          returns: true
+          discount_amount: 1000
+
+      - name: "고정 금액 할인 쿠폰"
+        given:
+          coupon:
+            code: "FLAT1000"
+            discount_type: "fixed"
+            discount_value: 1000
+          order:
+            total: 5000
+        when: "couponService.validate(coupon, order)"
+        then:
+          returns: true
+          discount_amount: 1000
+
+  - id: expired-coupon-validation
+    description: "validate()가 만료된 쿠폰에 대해 false 반환"
+    scenarios:
+      - name: "어제 만료된 쿠폰"
+        given:
+          coupon:
+            code: "EXPIRED"
+            expires_at: "-1days"
+        when: "couponService.validate(coupon, order)"
+        then:
+          returns: false
+          error:
+            type: "CouponExpired"
+            message_contains: "만료"
+
+      - name: "사용 횟수 초과 쿠폰"
+        given:
+          coupon:
+            code: "LIMITED"
+            usage_limit: 10
+            used_count: 10
+        when: "couponService.validate(coupon, order)"
+        then:
+          returns: false
+          error:
+            type: "CouponExhausted"
+
+  - id: apply-discount
+    description: "apply()가 주문 금액에서 할인 적용"
+    scenarios:
+      - name: "10% 할인 적용"
+        given:
+          coupon: { code: "SAVE10", discount_type: "percent", discount_value: 10 }
+          order: { id: "order-1", total: 10000 }
+        when: "couponService.apply(coupon, order)"
+        then:
+          success: true
+          order:
+            discount_amount: 1000
+            final_total: 9000
+          coupon:
+            used_count_increased: true
+
+      - name: "최소 주문금액 미달 시 실패"
+        given:
+          coupon: { code: "MIN5000", min_order_amount: 5000 }
+          order: { total: 3000 }
+        when: "couponService.apply(coupon, order)"
+        then:
+          success: false
+          error:
+            type: "MinOrderAmountNotMet"
+            message_contains: "5000"
+
+  - id: duplicate-prevention
+    description: "중복 적용 시 에러 발생"
+    scenarios:
+      - name: "같은 주문에 같은 쿠폰 재적용 시도"
+        given:
+          coupon: { code: "ONCE" }
+          order: { id: "order-1" }
+          # 이미 적용된 상태 (setup 데이터)
+          setup:
+            - "couponService.apply({ code: 'ONCE' }, { id: 'order-1' })"
+        when: "couponService.apply(coupon, order)"
+        then:
+          success: false
+          error:
+            type: "DuplicateApplication"
+            message: "이미 적용된 쿠폰입니다"
+
+      - name: "다른 주문에는 같은 쿠폰 적용 가능"
+        given:
+          coupon: { code: "MULTI" }
+          order: { id: "order-2" }
+          setup:
+            - "couponService.apply({ code: 'MULTI' }, { id: 'order-1' })"
+        when: "couponService.apply(coupon, order)"
+        then:
+          success: true
+
+# Edge Cases (필수!)
+edge_cases:
+  - id: boundary-values
+    scenarios:
+      - name: "0% 할인"
+        given: { discount_value: 0, order_total: 10000 }
+        then: { discount_amount: 0, final_total: 10000 }
+      - name: "100% 할인"
+        given: { discount_value: 100, order_total: 10000 }
+        then: { discount_amount: 10000, final_total: 0 }
+      - name: "할인액이 주문금액 초과 (fixed)"
+        given: { discount_type: "fixed", discount_value: 5000, order_total: 3000 }
+        then: { discount_amount: 3000, final_total: 0 }  # 최대 주문금액까지만
+
+  - id: invalid-inputs
+    scenarios:
+      - name: "존재하지 않는 쿠폰 코드"
+        given: { code: "NOTEXIST" }
+        then: { error_type: "CouponNotFound" }
+      - name: "null 쿠폰 코드"
+        given: { code: null }
+        then: { error_type: "InvalidInput" }
+      - name: "빈 문자열 쿠폰 코드"
+        given: { code: "" }
+        then: { error_type: "InvalidInput" }
+
+# 테스트 데이터 (Fixture)
+test_fixtures:
+  coupons:
+    - code: "SAVE10"
+      discount_type: "percent"
+      discount_value: 10
+      expires_at: "+30days"
+      usage_limit: 100
+    - code: "FLAT1000"
+      discount_type: "fixed"
+      discount_value: 1000
+    - code: "EXPIRED"
+      expires_at: "-1days"
+    - code: "LIMITED"
+      usage_limit: 10
+      used_count: 10
+```
+
+### 전체 Checkpoints 요약
+
+```yaml
+# .team-claude/sessions/{session-id}/checkpoints.yaml
+
 session: abc12345
 created_at: 2024-01-15T10:00:00Z
 approved_at: 2024-01-15T11:30:00Z
 approved_by: human
 
+# 요약 (상세는 각 checkpoint 파일에)
 checkpoints:
   - id: coupon-model
     name: "쿠폰 도메인 모델"
-    type: implementation
-    description: "Coupon 엔티티 및 Repository 구현"
     dependencies: []
-    criteria:
-      - "Coupon 엔티티가 code, discount, expiresAt 필드를 가짐"
-      - "CouponRepository가 findByCode 메서드 구현"
-      - "만료된 쿠폰 조회 시 null 반환"
-    validation:
-      command: "npm run test -- --grep 'CouponRepository'"
-      expected: "passing"
-      timeout: 30000
+    scenarios_count: 8
+    edge_cases_count: 4
+    file: "./coupon-model.yaml"
 
   - id: coupon-service
     name: "쿠폰 서비스 로직"
-    type: implementation
-    description: "쿠폰 검증 및 적용 로직"
     dependencies: [coupon-model]
-    criteria:
-      - "validate()가 유효한 쿠폰에 대해 true 반환"
-      - "validate()가 만료된 쿠폰에 대해 false 반환"
-      - "apply()가 주문 금액에서 할인 적용"
-      - "중복 적용 시 에러 발생"
-    validation:
-      command: "npm run test -- --grep 'CouponService'"
-      expected: "4 passing"
-      timeout: 30000
+    scenarios_count: 12
+    edge_cases_count: 6
+    file: "./coupon-service.yaml"
 
   - id: coupon-api
     name: "쿠폰 API 엔드포인트"
-    type: api
-    description: "REST API 엔드포인트"
     dependencies: [coupon-service]
-    criteria:
-      - "POST /coupons/validate - 200 with valid coupon"
-      - "POST /coupons/validate - 400 with expired coupon"
-      - "POST /coupons/apply - 200 and discount applied"
-      - "POST /coupons/apply - 409 on duplicate application"
-    validation:
-      command: "npm run test:e2e -- --grep 'coupon'"
-      expected: "4 passing"
-      timeout: 60000
+    scenarios_count: 8
+    edge_cases_count: 4
+    file: "./coupon-api.yaml"
 
   - id: coupon-integration
     name: "통합 테스트"
-    type: integration
-    description: "주문 플로우와 쿠폰 통합"
     dependencies: [coupon-api]
-    criteria:
-      - "주문 생성 시 쿠폰 적용 가능"
-      - "할인된 금액으로 결제 진행"
-      - "쿠폰 사용 후 재사용 불가"
-    validation:
-      command: "npm run test:integration"
-      expected: "passing"
-      timeout: 120000
+    scenarios_count: 5
+    edge_cases_count: 2
+    file: "./coupon-integration.yaml"
 ```
 
 ---
@@ -496,10 +826,132 @@ checkpoints:
 │       ├── conversation.md           # 대화 기록 (전체)
 │       ├── decisions.json            # 결정 사항 목록
 │       │
+│       ├── contracts/                # Interface + Test Code
+│       │   ├── coupon-model/
+│       │   │   ├── interface.ts      # 타입/시그니처
+│       │   │   └── contract.test.ts  # TDD 테스트 코드
+│       │   └── coupon-service/
+│       │       ├── interface.ts
+│       │       └── contract.test.ts
+│       │
+│       ├── checkpoints/              # Checkpoint 정의 (시나리오 포함!)
+│       │   ├── checkpoints.yaml      # 전체 요약
+│       │   ├── coupon-model.yaml     # 개별 checkpoint + scenarios
+│       │   ├── coupon-service.yaml
+│       │   ├── coupon-api.yaml
+│       │   └── coupon-integration.yaml
+│       │
 │       └── specs/
-│           ├── architecture.md       # 아키텍처 설계
-│           ├── contracts.md          # 인터페이스 정의
-│           └── checkpoints.yaml      # 검증 기준점
+│           └── architecture.md       # 아키텍처 설계
+```
+
+---
+
+## 자동 검증 루프에서 Scenarios 활용
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Delegate → Server → Worker → Validation 흐름                               │
+│                                                                             │
+│  1. /team-claude:delegate coupon-service                                    │
+│     │                                                                       │
+│     ▼                                                                       │
+│  2. Server가 coupon-service.yaml 로드                                       │
+│     │  - criteria[]                                                         │
+│     │  - scenarios[]  ← 구체적 테스트 케이스                                │
+│     │  - test_fixtures[]                                                    │
+│     │                                                                       │
+│     ▼                                                                       │
+│  3. Worker용 CLAUDE.md 생성                                                 │
+│     │  - scenarios를 체크리스트로 변환                                      │
+│     │  - "이 케이스들을 통과시켜야 함" 명시                                 │
+│     │                                                                       │
+│     ▼                                                                       │
+│  4. Worker 실행 → 구현 완료                                                 │
+│     │                                                                       │
+│     ▼                                                                       │
+│  5. Server가 validation.command 실행                                        │
+│     │  - 테스트 실행 결과 수집                                              │
+│     │  - 각 scenario별 pass/fail 판정                                       │
+│     │                                                                       │
+│     ▼                                                                       │
+│  6. 결과 분석                                                               │
+│     │  ✅ 모든 scenarios 통과 → 완료!                                       │
+│     │  ❌ 일부 실패 → 구체적 피드백 생성                                    │
+│     │                                                                       │
+│     ▼ (실패 시)                                                             │
+│  7. 피드백 생성 (어떤 scenario가 왜 실패했는지)                              │
+│     │                                                                       │
+│     │  ## Iteration 1 - FAILED                                              │
+│     │                                                                       │
+│     │  ❌ Scenario: "같은 주문에 같은 쿠폰 재적용 시도"                      │
+│     │     Expected: error.type = "DuplicateApplication"                     │
+│     │     Actual: success = true (에러 없이 적용됨)                         │
+│     │                                                                       │
+│     │  💡 Hint: apply() 메서드에서 기존 적용 여부 체크 필요                 │
+│     │                                                                       │
+│     ▼                                                                       │
+│  8. Worker 재실행 (피드백 반영)                                             │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### CLAUDE.md에 Scenarios 포함 예시
+
+Worker에게 전달되는 CLAUDE.md:
+
+```markdown
+# Task: coupon-service
+
+## Objective
+쿠폰 검증 및 적용 로직 구현
+
+## Test Scenarios (모두 통과해야 함!)
+
+### Criterion 1: validate()가 유효한 쿠폰에 대해 true 반환
+
+| # | Scenario | Input | Expected |
+|---|----------|-------|----------|
+| 1 | 10% 할인 쿠폰 | code="SAVE10", order.total=10000 | valid=true, discount=1000 |
+| 2 | 고정 금액 할인 | code="FLAT1000", order.total=5000 | valid=true, discount=1000 |
+
+### Criterion 2: 만료된 쿠폰 처리
+
+| # | Scenario | Input | Expected |
+|---|----------|-------|----------|
+| 3 | 어제 만료 | expires_at=yesterday | valid=false, error=CouponExpired |
+| 4 | 사용 횟수 초과 | used_count >= usage_limit | valid=false, error=CouponExhausted |
+
+### Criterion 3: 중복 적용 방지
+
+| # | Scenario | Input | Expected |
+|---|----------|-------|----------|
+| 5 | 같은 주문 재적용 | 이미 적용된 상태 | error=DuplicateApplication |
+| 6 | 다른 주문 적용 | 다른 order_id | success=true |
+
+### Edge Cases
+
+| # | Scenario | Input | Expected |
+|---|----------|-------|----------|
+| 7 | 0% 할인 | discount_value=0 | discount_amount=0 |
+| 8 | 100% 할인 | discount_value=100 | discount_amount=order.total |
+| 9 | null 쿠폰 코드 | code=null | error=InvalidInput |
+
+## Test Fixtures
+
+테스트에 사용할 데이터가 이미 준비되어 있습니다:
+- `SAVE10`: 10% 할인, 30일 후 만료
+- `FLAT1000`: 1000원 할인
+- `EXPIRED`: 어제 만료
+- `LIMITED`: 사용 횟수 초과 (10/10)
+
+## Validation Command
+
+```bash
+npm run test -- --grep 'CouponService'
+```
+
+모든 scenarios가 통과하면 완료입니다.
 ```
 
 ### meta.json 구조
