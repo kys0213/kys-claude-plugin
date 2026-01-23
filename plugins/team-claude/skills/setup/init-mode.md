@@ -141,6 +141,111 @@ cp -r ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/* .team-claude/hooks/
 chmod +x .team-claude/hooks/*.sh
 ```
 
+### 프로젝트 hooks 설정
+
+`.claude/settings.local.json`에 hooks 설정을 추가합니다:
+
+```bash
+# .claude 디렉토리 생성
+mkdir -p .claude
+
+# 기존 settings.local.json이 있으면 병합, 없으면 생성
+if [ -f .claude/settings.local.json ]; then
+  # 기존 파일에 hooks 병합
+  jq '.hooks = {
+    "Stop": [
+      {
+        "type": "command",
+        "command": ".team-claude/hooks/on-worker-complete.sh"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".team-claude/hooks/on-worker-question.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".team-claude/hooks/on-validation-complete.sh",
+            "condition": "tool_input.command.includes('\''test'\'')"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".team-claude/hooks/on-worker-idle.sh"
+          }
+        ]
+      }
+    ]
+  }' .claude/settings.local.json > .claude/settings.local.json.tmp
+  mv .claude/settings.local.json.tmp .claude/settings.local.json
+else
+  # 새로 생성
+  cat > .claude/settings.local.json << 'EOF'
+{
+  "hooks": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": ".team-claude/hooks/on-worker-complete.sh"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".team-claude/hooks/on-worker-question.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".team-claude/hooks/on-validation-complete.sh",
+            "condition": "tool_input.command.includes('test')"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".team-claude/hooks/on-worker-idle.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+EOF
+fi
+```
+
 ---
 
 ## 완료 메시지
@@ -157,7 +262,8 @@ chmod +x .team-claude/hooks/*.sh
   └── agents/
 
   .claude/
-  └── team-claude.yaml
+  ├── team-claude.yaml
+  └── settings.local.json (hooks 설정)
 
 📊 감지된 프로젝트 정보:
   • 언어: {language}
