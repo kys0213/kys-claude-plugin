@@ -1,37 +1,8 @@
----
-name: team-claude:init
-description: Team Claude 초기 설정 - 프로젝트 분석 및 환경 구성
-argument-hint: ""
-allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion"]
----
+# 초기화 모드
 
-# Team Claude 초기화 커맨드
-
-프로젝트를 분석하고 Team Claude 환경을 구성합니다.
-
-## 워크플로우
-
-```
-1. 프로젝트 자동 분석
-   │
-   ▼
-2. 언어/프레임워크 감지
-   │
-   ▼
-3. 인터뷰 (AskUserQuestion)
-   │
-   ▼
-4. 설정 파일 생성
-   │
-   ▼
-5. Hook 설정
-```
-
----
+`.claude/team-claude.yaml`이 없을 때 자동 진입합니다.
 
 ## Step 1: 프로젝트 자동 분석
-
-다음 파일들을 분석하여 프로젝트 특성을 파악합니다:
 
 ### 언어 감지
 
@@ -44,12 +15,10 @@ allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion"]
 | `pom.xml` | Java | JUnit, TestNG | Maven |
 | `build.gradle` | Java/Kotlin | JUnit | Gradle |
 | `*.csproj` | C# | xUnit, NUnit | dotnet |
-| `Gemfile` | Ruby | RSpec, Minitest | bundler |
-| `mix.exs` | Elixir | ExUnit | mix |
 
-### 분석 결과 정리
+### 분석 결과 출력
 
-```markdown
+```
 ## 프로젝트 분석 결과
 
 - **언어**: {detected_language}
@@ -57,7 +26,6 @@ allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion"]
 - **테스트 도구**: {test_tool}
 - **빌드 도구**: {build_tool}
 - **린터**: {linter}
-- **구조**: {project_structure}
 ```
 
 ---
@@ -88,7 +56,7 @@ AskUserQuestion({
 AskUserQuestion({
   questions: [{
     question: "자동 피드백 루프 설정을 어떻게 하시겠습니까?",
-    header: "Feedback Loop",
+    header: "Feedback",
     options: [
       { label: "자동 (권장)", description: "실패 시 자동 분석 + 재시도 (최대 5회)" },
       { label: "반자동", description: "실패 시 분석만, 재시도는 수동" },
@@ -137,79 +105,37 @@ AskUserQuestion({
 
 ## Step 3: 설정 파일 생성
 
-### 생성되는 디렉토리 구조
+### 생성되는 디렉토리
 
 ```
 .team-claude/
-├── config.json              # 메인 설정
-├── sessions/                # 세션 데이터
+├── sessions/
 │   └── index.json
-├── state/                   # 런타임 상태
+├── state/
 │   └── current-delegation.json
-├── hooks/                   # Hook 스크립트
+├── hooks/
 │   ├── on-worker-complete.sh
 │   ├── on-validation-complete.sh
 │   ├── on-worker-question.sh
 │   └── on-worker-idle.sh
-└── templates/               # 템플릿
-    ├── checkpoint.yaml
-    └── delegation-spec.md
-```
+├── templates/
+│   ├── checkpoint.yaml
+│   └── delegation-spec.md
+└── agents/              # 커스텀 에이전트용
 
-### config.json 스키마
-
-```json
-{
-  "version": "1.0",
-  "project": {
-    "name": "{project_name}",
-    "language": "{detected_language}",
-    "framework": "{detected_framework}",
-    "domain": "{selected_domain}"
-  },
-  "detection": {
-    "testCommand": "{auto_detected_test_command}",
-    "buildCommand": "{auto_detected_build_command}",
-    "lintCommand": "{auto_detected_lint_command}"
-  },
-  "feedbackLoop": {
-    "mode": "auto",
-    "maxIterations": 5,
-    "autoRetryDelay": 5000,
-    "escalationThreshold": 3
-  },
-  "validation": {
-    "method": "test_command",
-    "timeout": 120000
-  },
-  "notification": {
-    "method": "system",
-    "slack": {
-      "webhookUrl": "",
-      "channel": ""
-    }
-  },
-  "architectLoop": {
-    "requireHumanApproval": ["architecture", "contracts", "checkpoints"],
-    "autoProgress": ["implementation", "test"]
-  },
-  "agents": {
-    "specValidator": true,
-    "testOracle": true,
-    "implReviewer": true
-  }
-}
+.claude/
+└── team-claude.yaml     # 메인 설정
 ```
 
 ---
 
 ## Step 4: Hook 설정
 
-플러그인의 hook 스크립트를 프로젝트로 복사합니다:
+플러그인의 hook 스크립트를 프로젝트로 복사:
 
 ```bash
 # Hook 스크립트 복사
-cp -r {plugin_path}/hooks/scripts/* .team-claude/hooks/
+cp -r ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/* .team-claude/hooks/
 
 # 실행 권한 부여
 chmod +x .team-claude/hooks/*.sh
@@ -224,11 +150,14 @@ chmod +x .team-claude/hooks/*.sh
 
 📁 생성된 설정:
   .team-claude/
-  ├── config.json
   ├── sessions/
   ├── state/
   ├── hooks/ (4개 스크립트)
-  └── templates/
+  ├── templates/
+  └── agents/
+
+  .claude/
+  └── team-claude.yaml
 
 📊 감지된 프로젝트 정보:
   • 언어: {language}
@@ -242,29 +171,23 @@ chmod +x .team-claude/hooks/*.sh
   • 알림: {notification_method}
 
 다음 단계:
-  1. 설계 루프 시작:
-     /team-claude:architect "요구사항"
-
-  2. 설정 변경:
-     /team-claude:config list
-     /team-claude:setup
+  /team-claude:architect "요구사항"
 ```
 
 ---
 
 ## 재초기화
 
-이미 `.team-claude/`가 존재하는 경우:
+이미 설정이 존재하는 경우:
 
 ```typescript
 AskUserQuestion({
   questions: [{
-    question: "AFL이 이미 초기화되어 있습니다. 어떻게 하시겠습니까?",
+    question: "Team Claude가 이미 초기화되어 있습니다. 어떻게 하시겠습니까?",
     header: "Reinit",
     options: [
       { label: "재초기화", description: "기존 설정 백업 후 재설정" },
-      { label: "유지", description: "기존 설정 유지" },
-      { label: "설정만 수정", description: "/team-claude:setup 실행" }
+      { label: "유지", description: "기존 설정 유지하고 메인 메뉴로" }
     ],
     multiSelect: false
   }]
@@ -277,72 +200,36 @@ AskUserQuestion({
 
 ### JavaScript/TypeScript
 
-```json
-{
-  "detection": {
-    "testCommand": "npm test",
-    "buildCommand": "npm run build",
-    "lintCommand": "npm run lint"
-  }
-}
+```yaml
+project:
+  test_command: npm test
+  build_command: npm run build
+  lint_command: npm run lint
 ```
 
 ### Python
 
-```json
-{
-  "detection": {
-    "testCommand": "pytest",
-    "buildCommand": "python -m build",
-    "lintCommand": "ruff check ."
-  }
-}
+```yaml
+project:
+  test_command: pytest
+  build_command: python -m build
+  lint_command: ruff check .
 ```
 
 ### Go
 
-```json
-{
-  "detection": {
-    "testCommand": "go test ./...",
-    "buildCommand": "go build ./...",
-    "lintCommand": "golangci-lint run"
-  }
-}
+```yaml
+project:
+  test_command: go test ./...
+  build_command: go build ./...
+  lint_command: golangci-lint run
 ```
 
 ### Rust
 
-```json
-{
-  "detection": {
-    "testCommand": "cargo test",
-    "buildCommand": "cargo build",
-    "lintCommand": "cargo clippy"
-  }
-}
-```
-
-### Java (Maven)
-
-```json
-{
-  "detection": {
-    "testCommand": "mvn test",
-    "buildCommand": "mvn package",
-    "lintCommand": "mvn checkstyle:check"
-  }
-}
-```
-
-### Java (Gradle)
-
-```json
-{
-  "detection": {
-    "testCommand": "./gradlew test",
-    "buildCommand": "./gradlew build",
-    "lintCommand": "./gradlew check"
-  }
-}
+```yaml
+project:
+  test_command: cargo test
+  build_command: cargo build
+  lint_command: cargo clippy
 ```

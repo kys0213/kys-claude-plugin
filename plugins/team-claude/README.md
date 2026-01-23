@@ -350,11 +350,21 @@ Phase 4: MERGE (Main Agent - Semi-Auto)
 
 | 명령어 | 용도 | 인간 개입 |
 |--------|------|----------|
-| `/team-claude:setup` | 서버 설정 및 실행 | 초기 1회 |
+| `/team-claude:setup` | 환경 설정 (초기화, 설정, 에이전트, 서버) | **HITL 대화형** |
 | `/team-claude:architect` | 설계 + Contract + Test Code 작성 | **적극 참여** |
 | `/team-claude:delegate` | Worker에게 구현 위임 | 시작만 |
 | `/team-claude:merge` | PR 머지 (conflict 시 사용자 확인) | **conflict 시 참여** |
 | `/team-claude:loop-status` | 진행 상황 확인 | 모니터링 |
+| `/team-claude:checkpoint` | 작업 체크포인트 관리 | 필요시 |
+
+### /team-claude:setup 상세
+
+HITL(Human-in-the-Loop) 기반 대화형 환경 설정:
+
+- **초기화**: 프로젝트 분석 + 4개 질문 인터뷰
+- **설정 관리**: 조회/수정 (전체 위자드 또는 섹션별)
+- **에이전트 관리**: 생성(7단계 HITL)/수정/삭제/활성화
+- **서버 관리**: 설치/시작/중지
 
 ---
 
