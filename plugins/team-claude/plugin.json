@@ -3,9 +3,6 @@
   "version": "0.2.0",
   "description": "팀 클루드: Contract 기반 설계, Worker 자율 RALPH, Semi-Auto 머지",
   "commands": [
-    "commands/init.md",
-    "commands/setup.md",
-    "commands/config.md",
     "commands/architect.md",
     "commands/delegate.md",
     "commands/merge.md",
@@ -21,7 +18,8 @@
   ],
   "hooks": "hooks/hooks.json",
   "skills": [
-    "skills/feedback-routing/SKILL.md"
+    "skills/feedback-routing/SKILL.md",
+    "skills/setup/SKILL.md"
   ],
   "dependencies": [],
   "config": {
