@@ -9,6 +9,33 @@ allowed-tools: ["Task", "Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestio
 
 확정된 Checkpoint를 **자율 에이전트**에게 위임합니다.
 
+## 스크립트 도구
+
+> **중요**: Worktree 및 세션 관리는 결정적 스크립트를 통해 수행합니다.
+
+```bash
+# 스크립트 위치
+SCRIPTS_DIR="./plugins/team-claude/scripts"
+
+# Worktree 생성 (checkpoint-id 기반)
+WORKTREE_PATH=$(${SCRIPTS_DIR}/tc-worktree.sh create coupon-service)
+
+# Worktree 목록 조회
+${SCRIPTS_DIR}/tc-worktree.sh list
+
+# Worktree 삭제
+${SCRIPTS_DIR}/tc-worktree.sh delete coupon-service
+
+# 모든 team-claude worktree 정리
+${SCRIPTS_DIR}/tc-worktree.sh cleanup
+
+# 세션 정보 조회
+${SCRIPTS_DIR}/tc-session.sh show {session-id}
+
+# 세션 상태 업데이트
+${SCRIPTS_DIR}/tc-session.sh update {session-id} status delegating
+```
+
 ## 핵심 원칙
 
 ```
@@ -550,20 +577,22 @@ curl -s http://localhost:7890/health
 }
 ```
 
-### Step 2: Git Worktree 생성
+### Step 2: Git Worktree 생성 (tc-worktree.sh 사용)
 
 ```bash
-# Worktree 디렉토리 생성
-mkdir -p .team-claude/worktrees
+# tc-worktree.sh가 자동으로 처리:
+# - 디렉토리 생성
+# - 브랜치 존재 여부 확인
+# - worktree 생성
 
-# Worktree 생성 (현재 브랜치 기반)
-git worktree add .team-claude/worktrees/{checkpoint-id} -b team-claude/{checkpoint-id}
+WORKTREE_PATH=$(./plugins/team-claude/scripts/tc-worktree.sh create {checkpoint-id})
+echo "Worktree 생성됨: ${WORKTREE_PATH}"
 ```
 
-실패 시 (브랜치 이미 존재):
-```bash
-git worktree add .team-claude/worktrees/{checkpoint-id} team-claude/{checkpoint-id}
-```
+스크립트가 자동으로 처리하는 내용:
+- `.team-claude/worktrees/` 디렉토리 생성
+- `team-claude/{checkpoint-id}` 브랜치 생성 (없으면)
+- 기존 브랜치가 있으면 해당 브랜치로 worktree 생성
 
 ### Step 3: CLAUDE.md 생성
 
@@ -812,17 +841,20 @@ git worktree remove .team-claude/worktrees/{checkpoint-id}
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Worktree 관리
+### Worktree 관리 (tc-worktree.sh 사용)
 
 ```bash
 # 생성된 worktree 목록
-git worktree list
+./plugins/team-claude/scripts/tc-worktree.sh list
+
+# 특정 worktree 경로 확인
+./plugins/team-claude/scripts/tc-worktree.sh path coupon-service
 
 # 완료 후 정리
-git worktree remove .team-claude/worktrees/coupon-service
+./plugins/team-claude/scripts/tc-worktree.sh delete coupon-service
 
-# 모든 AFL worktree 정리
-git worktree list | grep ".team-claude/worktrees" | awk '{print $1}' | xargs -I{} git worktree remove {}
+# 모든 team-claude worktree 일괄 정리
+./plugins/team-claude/scripts/tc-worktree.sh cleanup
 ```
 
 ### 실시간 모니터링

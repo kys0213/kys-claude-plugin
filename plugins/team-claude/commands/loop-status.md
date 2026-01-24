@@ -9,6 +9,24 @@ allowed-tools: ["Read", "Glob", "Bash"]
 
 현재 진행 중인 피드백 루프 상태를 조회합니다.
 
+## 스크립트 도구
+
+> **중요**: 세션 및 Worktree 상태 조회는 결정적 스크립트를 통해 수행합니다.
+
+```bash
+# 스크립트 위치
+SCRIPTS_DIR="./plugins/team-claude/scripts"
+
+# 세션 목록 조회
+${SCRIPTS_DIR}/tc-session.sh list
+
+# 세션 상세 정보
+${SCRIPTS_DIR}/tc-session.sh show {session-id}
+
+# 현재 활성 Worktree 조회
+${SCRIPTS_DIR}/tc-worktree.sh list
+```
+
 ## 사용법
 
 ```bash
@@ -23,6 +41,36 @@ allowed-tools: ["Read", "Glob", "Bash"]
 
 # 특정 Checkpoint 상세
 /team-claude:loop-status --detail coupon-service
+```
+
+## 스크립트 기반 조회
+
+### 기본 상태 조회
+
+```bash
+# 모든 세션 목록
+./plugins/team-claude/scripts/tc-session.sh list
+
+# 특정 세션 상세
+./plugins/team-claude/scripts/tc-session.sh show {session-id}
+
+# 활성 Worktree (진행 중인 구현)
+./plugins/team-claude/scripts/tc-worktree.sh list
+```
+
+### 세션 메타데이터 직접 조회
+
+스크립트 출력이 충분하지 않은 경우 메타 파일을 직접 읽을 수 있습니다:
+
+```bash
+# 세션 메타 정보
+cat .team-claude/sessions/{session-id}/meta.json | jq .
+
+# 위임 상태
+cat .team-claude/sessions/{session-id}/delegations/status.json | jq .
+
+# 특정 checkpoint 상태
+cat .team-claude/sessions/{session-id}/delegations/{checkpoint-id}/status.json | jq .
 ```
 
 ---
