@@ -71,7 +71,7 @@
       "name": "team-claude",
       "source": "./plugins/team-claude",
       "strict": false,
-      "version": "0.3.0"
+      "version": "0.3.1"
     }
   ]
 }
