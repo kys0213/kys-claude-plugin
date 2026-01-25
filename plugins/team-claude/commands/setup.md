@@ -40,6 +40,19 @@ ${SCRIPTS_DIR}/tc-config.sh path
 /team-claude:setup
         │
         ▼
+┌─────────────────────────────────┐
+│  Phase 0: 의존성 확인           │
+│  yq, jq, git 설치 여부          │
+└─────────────────────────────────┘
+        │
+   ┌────┴────┐
+   미설치     설치됨
+   │         │
+   ▼         │
+설치 옵션    │
+선택        │
+   │         │
+   ▼         ▼
 .claude/team-claude.yaml 존재?
         │
    ┌────┴────┐
@@ -56,6 +69,62 @@ ${SCRIPTS_DIR}/tc-config.sh path
 ```
 
 ## 실행 절차
+
+### Phase 0: 의존성 확인
+
+setup 시작 전에 필수 도구들이 설치되어 있는지 확인합니다.
+
+**필수 의존성:**
+- `yq` - YAML 파싱 (tc-config.sh에서 사용)
+- `jq` - JSON 파싱 (tc-session.sh에서 사용)
+- `git` - 버전 관리 (tc-worktree.sh에서 사용)
+
+```bash
+# 의존성 상태 확인
+source ./plugins/team-claude/scripts/lib/common.sh
+print_dependency_status
+
+# 누락된 의존성 확인
+if ! check_dependencies; then
+  echo "일부 의존성이 누락되었습니다."
+fi
+```
+
+**미설치 시 처리:**
+
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: "누락된 의존성을 설치할까요?",
+    header: "Dependencies",
+    options: [
+      { label: "자동 설치 (Recommended)", description: "brew를 사용하여 누락된 도구 설치" },
+      { label: "수동 설치", description: "설치 명령어를 안내받고 직접 설치" },
+      { label: "건너뛰기", description: "일부 기능이 제한될 수 있음" }
+    ],
+    multiSelect: false
+  }]
+})
+```
+
+**자동 설치 선택 시:**
+
+```bash
+source ./plugins/team-claude/scripts/lib/common.sh
+install_all_dependencies
+```
+
+**수동 설치 선택 시:**
+
+```
+누락된 도구 설치 방법:
+
+  yq:  brew install yq
+  jq:  brew install jq
+  git: xcode-select --install
+
+설치 후 /team-claude:setup을 다시 실행하세요.
+```
 
 ### Phase 1: 상태 감지
 

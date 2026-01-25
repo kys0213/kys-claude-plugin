@@ -47,6 +47,93 @@ require_git() {
 }
 
 # ============================================================================
+# 의존성 확인 및 설치 (setup용)
+# ============================================================================
+
+# 의존성 상태 확인 (exit 없이)
+# 반환: 0=모두 설치됨, 1=일부 미설치
+check_dependencies() {
+  local missing=()
+
+  command -v yq &>/dev/null || missing+=("yq")
+  command -v jq &>/dev/null || missing+=("jq")
+  command -v git &>/dev/null || missing+=("git")
+
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    return 0
+  else
+    echo "${missing[*]}"
+    return 1
+  fi
+}
+
+# 의존성 설치 (brew 사용)
+install_dependency() {
+  local dep="$1"
+
+  if ! command -v brew &>/dev/null; then
+    err "Homebrew가 설치되어 있지 않습니다."
+    err "https://brew.sh 에서 설치 후 다시 시도하세요."
+    return 1
+  fi
+
+  info "${dep} 설치 중..."
+  if brew install "$dep"; then
+    ok "${dep} 설치 완료"
+    return 0
+  else
+    err "${dep} 설치 실패"
+    return 1
+  fi
+}
+
+# 모든 누락된 의존성 설치
+install_all_dependencies() {
+  local missing
+  if missing=$(check_dependencies); then
+    ok "모든 의존성이 설치되어 있습니다."
+    return 0
+  fi
+
+  for dep in $missing; do
+    if [[ "$dep" == "git" ]]; then
+      err "git은 수동으로 설치해야 합니다."
+      err "Xcode Command Line Tools: xcode-select --install"
+      continue
+    fi
+    install_dependency "$dep" || return 1
+  done
+
+  return 0
+}
+
+# 의존성 상태 출력 (human readable)
+print_dependency_status() {
+  echo "━━━ 의존성 상태 ━━━"
+  echo
+
+  if command -v yq &>/dev/null; then
+    ok "yq: $(yq --version 2>/dev/null | head -1)"
+  else
+    err "yq: 미설치"
+  fi
+
+  if command -v jq &>/dev/null; then
+    ok "jq: $(jq --version 2>/dev/null)"
+  else
+    err "jq: 미설치"
+  fi
+
+  if command -v git &>/dev/null; then
+    ok "git: $(git --version 2>/dev/null)"
+  else
+    err "git: 미설치"
+  fi
+
+  echo
+}
+
+# ============================================================================
 # 유틸리티 함수
 # ============================================================================
 
