@@ -1,8 +1,8 @@
 {
-  "name": "team-claude",
-  "version": "0.2.0",
-  "description": "팀 클루드: Contract 기반 설계, Worker 자율 RALPH, Semi-Auto 머지",
   "author": {
     "name": "kys0213"
-  }
+  },
+  "description": "팀 클루드: Contract 기반 설계, Worker 자율 RALPH, Semi-Auto 머지",
+  "name": "team-claude",
+  "version": "0.3.0"
 }
