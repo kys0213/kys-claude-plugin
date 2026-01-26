@@ -1,3 +1,8 @@
+---
+name: workflow-prerequisites
+description: Team Claude 커맨드 실행 전 전제조건을 확인하는 공유 로직
+---
+
 # Workflow Prerequisites Skill
 
 이 스킬은 Team Claude 커맨드 실행 전 전제조건을 확인하는 공유 로직을 제공합니다.
