@@ -5,7 +5,16 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEAM_CLAUDE_ROOT="${SCRIPT_DIR}/../.."
 STATE_FILE=".team-claude/state/current-delegation.json"
+
+# common.sh에서 서버 URL 함수 로드
+# shellcheck source=../../scripts/lib/common.sh
+source "${TEAM_CLAUDE_ROOT}/scripts/lib/common.sh" 2>/dev/null || {
+  # common.sh 로드 실패 시 기본값 사용
+  get_server_url() { echo "http://localhost:7890"; }
+}
+SERVER_URL=$(get_server_url)
 
 # 현재 세션 정보
 SESSION_ID=$(jq -r '.sessionId' "$STATE_FILE" 2>/dev/null || echo "")
@@ -48,8 +57,8 @@ if [ $EXIT_CODE -eq 0 ]; then
     fi
 
     # 서버 알림
-    if curl -s http://localhost:3847/health &>/dev/null; then
-        curl -X POST http://localhost:3847/checkpoint-passed \
+    if curl -s "${SERVER_URL}/health" &>/dev/null; then
+        curl -X POST "${SERVER_URL}/checkpoint-passed" \
             -H "Content-Type: application/json" \
             -d "{\"sessionId\": \"$SESSION_ID\", \"checkpoint\": \"$CHECKPOINT_ID\"}"
     fi
@@ -64,8 +73,8 @@ else
         jq ".status = \"retrying\" | .iteration = $((ITERATION + 1))" "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
 
         # 피드백 생성 요청 (Main Claude에게)
-        if curl -s http://localhost:3847/health &>/dev/null; then
-            curl -X POST http://localhost:3847/generate-feedback \
+        if curl -s "${SERVER_URL}/health" &>/dev/null; then
+            curl -X POST "${SERVER_URL}/generate-feedback" \
                 -H "Content-Type: application/json" \
                 -d "{\"sessionId\": \"$SESSION_ID\", \"checkpoint\": \"$CHECKPOINT_ID\", \"iteration\": $ITERATION, \"output\": $(echo "$VALIDATION_OUTPUT" | jq -Rs .)}"
         fi
