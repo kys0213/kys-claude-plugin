@@ -7,7 +7,33 @@ allowed-tools: ["Task", "Read", "Write", "Glob", "Grep", "AskUserQuestion", "Bas
 
 # Architect Loop Command
 
+> **먼저 읽기**: `${CLAUDE_PLUGIN_ROOT}/INFRASTRUCTURE.md`
+
 인간과 에이전트가 **대화형으로** 스펙과 아키텍처를 설계합니다.
+
+---
+
+## PREREQUISITES CHECK
+
+```bash
+SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
+
+# 설정 파일 존재 확인
+if ! ${SCRIPTS}/tc-config.sh show &>/dev/null; then
+  echo "❌ 설정 파일이 없습니다."
+  echo "'/team-claude:setup'을 먼저 실행하세요."
+  exit 1
+fi
+
+# 상태 파일 존재 확인
+if ! ${SCRIPTS}/tc-state.sh check &>/dev/null; then
+  echo "❌ 상태 파일이 없습니다."
+  echo "'/team-claude:setup'을 먼저 실행하세요."
+  exit 1
+fi
+```
+
+---
 
 ## 핵심 원칙
 
@@ -65,6 +91,11 @@ ${SCRIPTS_DIR}/tc-session.sh show {session-id}
 # 세션 상태 업데이트
 ${SCRIPTS_DIR}/tc-session.sh update {session-id} status designing
 ${SCRIPTS_DIR}/tc-session.sh update {session-id} phase checkpoint_review
+
+# 워크플로우 상태 관리
+${SCRIPTS_DIR}/tc-state.sh transition designing
+${SCRIPTS_DIR}/tc-state.sh set-session {session-id}
+${SCRIPTS_DIR}/tc-state.sh transition checkpoints_approved
 ```
 
 ---
@@ -79,8 +110,12 @@ ${SCRIPTS_DIR}/tc-session.sh update {session-id} phase checkpoint_review
 │  STEP 1: 세션 초기화 (tc-session.sh 사용)                     │
 │                                                               │
 │  Bash로 실행:                                                 │
-│  SESSION_ID=$(./plugins/team-claude/scripts/tc-session.sh \  │
-│               create "요구사항 제목")                         │
+│  SCRIPTS="./plugins/team-claude/scripts"                      │
+│  SESSION_ID=$(${SCRIPTS}/tc-session.sh create "요구사항 제목")│
+│                                                               │
+│  상태 전이:                                                   │
+│  ${SCRIPTS}/tc-state.sh transition designing                  │
+│  ${SCRIPTS}/tc-state.sh set-session ${SESSION_ID}             │
 │                                                               │
 │  결과: session-id (8자리), 디렉토리 자동 생성                 │
 └───────────────────────────────────────────────────────────────┘
@@ -167,6 +202,11 @@ ${SCRIPTS_DIR}/tc-session.sh update {session-id} phase checkpoint_review
 │  • 각 구현 단위별 검증 기준 정의                             │
 │  • validation.command = Contract Test 실행                   │
 │  • AskUserQuestion으로 Checkpoint 승인 요청                  │
+│                                                               │
+│  승인 시 상태 전이:                                          │
+│  ${SCRIPTS}/tc-state.sh transition checkpoints_approved       │
+│  ${SCRIPTS}/tc-session.sh update ${SESSION_ID} \              │
+│    checkpointsApproved true                                   │
 └───────────────────────────────────────────────────────────────┘
         │
         ▼
