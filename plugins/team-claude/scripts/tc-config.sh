@@ -103,6 +103,16 @@ EOF
   ensure_dir "${root}/.team-claude/agents"
 
   ok ".team-claude 디렉토리 구조 생성됨"
+
+  # hooks 스크립트 복사
+  local plugin_hooks_dir="${SCRIPT_DIR}/../hooks/scripts"
+  if [[ -d "$plugin_hooks_dir" ]]; then
+    cp -r "${plugin_hooks_dir}/"* "${root}/.team-claude/hooks/" 2>/dev/null || true
+    chmod +x "${root}/.team-claude/hooks/"*.sh 2>/dev/null || true
+    ok "Hook 스크립트 복사됨"
+  else
+    warn "Hook 스크립트 소스 디렉토리를 찾을 수 없습니다: ${plugin_hooks_dir}"
+  fi
 }
 
 # ============================================================================
