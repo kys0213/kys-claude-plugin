@@ -8,6 +8,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEAM_CLAUDE_ROOT="${SCRIPT_DIR}/../.."
 STATE_FILE=".team-claude/state/current-delegation.json"
 
+# common.sh에서 서버 URL 함수 로드
+# shellcheck source=../../scripts/lib/common.sh
+source "${TEAM_CLAUDE_ROOT}/scripts/lib/common.sh" 2>/dev/null || {
+  # common.sh 로드 실패 시 기본값 사용
+  get_server_url() { echo "http://localhost:7890"; }
+}
+SERVER_URL=$(get_server_url)
+
 # 현재 세션 및 checkpoint 정보 로드
 if [ ! -f "$STATE_FILE" ]; then
     echo "No active delegation found"
@@ -34,8 +42,8 @@ fi
 echo "Triggering validation for checkpoint: $CHECKPOINT_ID"
 
 # 서버가 실행 중이면 HTTP 알림
-if curl -s -o /dev/null -w "%{http_code}" http://localhost:3847/health 2>/dev/null | grep -q "200"; then
-    curl -X POST http://localhost:3847/validate \
+if curl -s -o /dev/null -w "%{http_code}" "${SERVER_URL}/health" 2>/dev/null | grep -q "200"; then
+    curl -X POST "${SERVER_URL}/validate" \
         -H "Content-Type: application/json" \
         -d "{\"sessionId\": \"$SESSION_ID\", \"checkpoint\": \"$CHECKPOINT_ID\", \"iteration\": $ITERATION}"
 fi

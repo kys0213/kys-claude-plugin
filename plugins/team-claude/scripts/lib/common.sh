@@ -13,6 +13,35 @@ WORKTREES_DIR=".team-claude/worktrees"
 SESSIONS_INDEX="${SESSIONS_DIR}/index.json"
 
 # ============================================================================
+# 서버 상수
+# ============================================================================
+TC_SERVER_DEFAULT_PORT=7890
+TC_SERVER_BINARY="${HOME}/.claude/team-claude-server"
+TC_SERVER_PID_FILE="${HOME}/.claude/team-claude-server.pid"
+TC_SERVER_LOG_FILE="${HOME}/.claude/team-claude-server.log"
+
+# 서버 포트 가져오기 (설정 파일에서 또는 기본값)
+get_server_port() {
+  # 설정 파일에서 포트 읽기 시도
+  if [[ -f "$CONFIG_FILE" ]] && command -v yq &>/dev/null; then
+    local port
+    port=$(yq -r '.server.port // empty' "$CONFIG_FILE" 2>/dev/null || echo "")
+    if [[ -n "$port" && "$port" != "null" ]]; then
+      echo "$port"
+      return
+    fi
+  fi
+  echo "$TC_SERVER_DEFAULT_PORT"
+}
+
+# 서버 URL 가져오기
+get_server_url() {
+  local port
+  port=$(get_server_port)
+  echo "http://localhost:${port}"
+}
+
+# ============================================================================
 # 색상 출력
 # ============================================================================
 info()  { echo -e "\033[0;34m[INFO]\033[0m $*"; }

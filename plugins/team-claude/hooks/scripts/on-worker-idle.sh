@@ -4,7 +4,17 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEAM_CLAUDE_ROOT="${SCRIPT_DIR}/../.."
 STATE_FILE=".team-claude/state/current-delegation.json"
+
+# common.sh에서 서버 URL 함수 로드
+# shellcheck source=../../scripts/lib/common.sh
+source "${TEAM_CLAUDE_ROOT}/scripts/lib/common.sh" 2>/dev/null || {
+  # common.sh 로드 실패 시 기본값 사용
+  get_server_url() { echo "http://localhost:7890"; }
+}
+SERVER_URL=$(get_server_url)
 
 # 현재 세션 정보
 SESSION_ID=$(jq -r '.sessionId' "$STATE_FILE" 2>/dev/null || echo "unknown")
@@ -32,8 +42,8 @@ if [ -z "$LAST_NOTIFIED" ] || [ $((CURRENT_TIME - LAST_NOTIFIED)) -gt 300 ]; the
 fi
 
 # 서버 상태 업데이트
-if curl -s http://localhost:3847/health &>/dev/null; then
-    curl -X POST http://localhost:3847/worker-idle \
+if curl -s "${SERVER_URL}/health" &>/dev/null; then
+    curl -X POST "${SERVER_URL}/worker-idle" \
         -H "Content-Type: application/json" \
         -d "{\"sessionId\": \"$SESSION_ID\", \"checkpoint\": \"$CHECKPOINT_ID\"}"
 fi

@@ -109,6 +109,18 @@ AskUserQuestion({
 
 ## 서버 설치/빌드
 
+### tc-server.sh 사용 (권장)
+
+```bash
+SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
+
+# 전체 설치 (의존성 + 빌드)
+${SCRIPTS}/tc-server.sh install
+
+# 빌드만
+${SCRIPTS}/tc-server.sh build
+```
+
 ### Bun 확인
 
 ```bash
@@ -144,17 +156,17 @@ AskUserQuestion({
 curl -fsSL https://bun.sh/install | bash
 ```
 
-### 서버 빌드
+### 수동 빌드 (tc-server.sh 대신)
 
 ```bash
 # 의존성 설치
 cd plugins/team-claude/server && bun install
 
 # 서버 빌드 (단일 바이너리)
-bun build src/index.ts --compile --outfile ~/.local/bin/team-claude-server
+bun build src/index.ts --compile --outfile ~/.claude/team-claude-server
 
 # 실행 권한
-chmod +x ~/.local/bin/team-claude-server
+chmod +x ~/.claude/team-claude-server
 ```
 
 ### 빌드 완료
@@ -162,8 +174,8 @@ chmod +x ~/.local/bin/team-claude-server
 ```
 ✅ 서버 빌드 완료
 
-  바이너리: ~/.local/bin/team-claude-server
-  버전: 1.0.0
+  바이너리: ~/.claude/team-claude-server
+  버전: 0.1.0
 
 서버를 지금 시작하시겠습니까?
 ```
@@ -171,6 +183,18 @@ chmod +x ~/.local/bin/team-claude-server
 ---
 
 ## 서버 시작
+
+### tc-server.sh 사용 (권장)
+
+```bash
+SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
+
+# 서버 시작
+${SCRIPTS}/tc-server.sh start
+
+# 서버 시작 보장 (미실행 시 시작, health 체크)
+${SCRIPTS}/tc-server.sh ensure
+```
 
 ### 시작 확인
 
@@ -188,19 +212,15 @@ AskUserQuestion({
 })
 ```
 
-### 시작 명령
+### 수동 시작 (tc-server.sh 대신)
 
 ```bash
-# 로그 디렉토리 생성
-mkdir -p ~/.team-claude
-
 # 환경 변수와 함께 서버 시작
 TEAM_CLAUDE_PORT=7890 \
-TEAM_CLAUDE_EXECUTOR=iterm \
-nohup team-claude-server > ~/.team-claude/server.log 2>&1 &
+nohup ~/.claude/team-claude-server >> ~/.claude/team-claude-server.log 2>&1 &
 
 # PID 저장
-echo $! > ~/.team-claude/server.pid
+echo $! > ~/.claude/team-claude-server.pid
 ```
 
 ### 시작 확인
@@ -218,7 +238,7 @@ curl -s http://localhost:7890/health | jq
   상태: 🟢 실행 중
   PID: 12345
   URL: http://localhost:7890
-  로그: ~/.team-claude/server.log
+  로그: ~/.claude/team-claude-server.log
 
 서버가 정상적으로 시작되었습니다.
 ```
@@ -226,6 +246,18 @@ curl -s http://localhost:7890/health | jq
 ---
 
 ## 서버 중지
+
+### tc-server.sh 사용 (권장)
+
+```bash
+SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
+
+# 서버 중지
+${SCRIPTS}/tc-server.sh stop
+
+# 서버 재시작
+${SCRIPTS}/tc-server.sh restart
+```
 
 ### 중지 확인
 
@@ -243,14 +275,14 @@ AskUserQuestion({
 })
 ```
 
-### 중지 명령
+### 수동 중지 (tc-server.sh 대신)
 
 ```bash
 # PID 파일에서 프로세스 종료
-kill $(cat ~/.team-claude/server.pid)
+kill $(cat ~/.claude/team-claude-server.pid)
 
 # PID 파일 삭제
-rm ~/.team-claude/server.pid
+rm ~/.claude/team-claude-server.pid
 ```
 
 ### 중지 완료
@@ -269,14 +301,16 @@ rm ~/.team-claude/server.pid
 ## 로그 확인
 
 ```bash
-# 실시간 로그 확인
-tail -f ~/.team-claude/server.log
+SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
 
-# 최근 50줄
-tail -50 ~/.team-claude/server.log
+# tc-server.sh 사용
+${SCRIPTS}/tc-server.sh logs       # 최근 100줄
+${SCRIPTS}/tc-server.sh logs -f    # 실시간 스트리밍
 
-# 에러만 확인
-grep -i error ~/.team-claude/server.log
+# 수동으로 확인
+tail -f ~/.claude/team-claude-server.log
+tail -50 ~/.claude/team-claude-server.log
+grep -i error ~/.claude/team-claude-server.log
 ```
 
 ---
