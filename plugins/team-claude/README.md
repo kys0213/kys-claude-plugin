@@ -2,20 +2,45 @@
 
 멀티 에이전트 협업 시스템: Contract 기반 설계, Worker 자율 RALPH, Semi-Auto 머지
 
+> **중요**: Claude가 기존 인프라를 사용하도록 [INFRASTRUCTURE.md](./INFRASTRUCTURE.md)를 먼저 읽어야 합니다.
+
 ## Quick Start
 
 ```bash
-# 1. 서버 설정 및 실행
-/team-claude:setup server
+# 1. 환경 설정 (의존성 설치 + 서버 빌드 + 상태 초기화)
+/team-claude:setup
 
 # 2. 설계 시작 (인간-에이전트 협업)
 /team-claude:architect "쿠폰 할인 기능 개발"
 
 # 3. 구현 위임 (자율 에이전트)
-/team-claude:delegate --all
+/team-claude:delegate --session <session-id> --all
 
 # 4. 머지 (Semi-Auto)
-/team-claude:merge
+/team-claude:merge --session <session-id>
+```
+
+## 스크립트 도구
+
+모든 명령어는 결정적 스크립트를 사용합니다:
+
+```bash
+SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
+
+# 설정 관리
+${SCRIPTS}/tc-config.sh init/get/set/show
+
+# 세션 관리
+${SCRIPTS}/tc-session.sh create/list/show/update
+
+# Worktree 관리
+${SCRIPTS}/tc-worktree.sh create/list/delete
+
+# 워크플로우 상태
+${SCRIPTS}/tc-state.sh init/check/require/transition
+
+# 서버 관리
+${SCRIPTS}/tc-server.sh status/start/stop/ensure/install
 ```
 
 ---

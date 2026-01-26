@@ -8,6 +8,7 @@
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
     "build": "bun build src/index.ts --compile --outfile team-claude-server",
+    "build:global": "mkdir -p ~/.claude && bun build src/index.ts --compile --outfile ~/.claude/team-claude-server",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

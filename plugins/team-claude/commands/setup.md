@@ -6,6 +6,8 @@ allowed-tools: ["Read", "Write", "Glob", "Bash", "AskUserQuestion"]
 
 # Team Claude Setup
 
+> **먼저 읽기**: `${CLAUDE_PLUGIN_ROOT}/INFRASTRUCTURE.md`
+
 단일 진입점으로 모든 환경 설정을 관리합니다.
 
 ## 스크립트 도구
@@ -32,6 +34,16 @@ ${SCRIPTS_DIR}/tc-config.sh show
 
 # 설정 파일 경로
 ${SCRIPTS_DIR}/tc-config.sh path
+
+# 상태 관리
+${SCRIPTS_DIR}/tc-state.sh init
+${SCRIPTS_DIR}/tc-state.sh check
+${SCRIPTS_DIR}/tc-state.sh transition setup
+
+# 서버 관리
+${SCRIPTS_DIR}/tc-server.sh install
+${SCRIPTS_DIR}/tc-server.sh status
+${SCRIPTS_DIR}/tc-server.sh start
 ```
 
 ## 워크플로우
@@ -42,7 +54,7 @@ ${SCRIPTS_DIR}/tc-config.sh path
         ▼
 ┌─────────────────────────────────┐
 │  Phase 0: 의존성 확인           │
-│  yq, jq, git 설치 여부          │
+│  yq, jq, git, bun 설치 여부     │
 └─────────────────────────────────┘
         │
    ┌────┴────┐
@@ -61,11 +73,26 @@ ${SCRIPTS_DIR}/tc-config.sh path
    ▼         ▼
 초기화     메인 메뉴
 모드       │
-           ├── 설정 조회
-           ├── 설정 수정
-           ├── 에이전트 관리
-           ├── 서버 관리
-           └── 종료
+   │       ├── 설정 조회
+   │       ├── 설정 수정
+   │       ├── 에이전트 관리
+   │       ├── 서버 관리
+   │       └── 종료
+   │
+   ▼
+┌─────────────────────────────────┐
+│  Phase 1: 상태 초기화           │
+│  tc-state.sh init               │
+└─────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────┐
+│  Phase 2: 서버 빌드 (필요시)    │
+│  tc-server.sh install           │
+└─────────────────────────────────┘
+        │
+        ▼
+설정 위자드 → 완료
 ```
 
 ## 실행 절차
@@ -78,6 +105,7 @@ setup 시작 전에 필수 도구들이 설치되어 있는지 확인합니다.
 - `yq` - YAML 파싱 (tc-config.sh에서 사용)
 - `jq` - JSON 파싱 (tc-session.sh에서 사용)
 - `git` - 버전 관리 (tc-worktree.sh에서 사용)
+- `bun` - 서버 빌드/실행 (tc-server.sh에서 사용)
 
 ```bash
 # 의존성 상태 확인
@@ -141,6 +169,43 @@ fi
 
 - **없음** → [초기화 모드](./reference/setup/init-mode.md) 진입 (`tc-config.sh init` 실행)
 - **있음** → 메인 메뉴 표시
+
+### Phase 1.5: 상태 초기화 (초기화 모드에서)
+
+설정 파일 생성 후 워크플로우 상태를 초기화합니다:
+
+```bash
+SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
+
+# 상태 파일 초기화
+${SCRIPTS}/tc-state.sh init
+
+# 상태 전이: idle → setup
+${SCRIPTS}/tc-state.sh transition setup
+```
+
+### Phase 1.6: 서버 빌드 (초기화 모드에서)
+
+서버 바이너리가 없으면 빌드합니다:
+
+```bash
+# 서버 바이너리 존재 확인
+if [[ ! -f "${HOME}/.claude/team-claude-server" ]]; then
+  echo "서버 빌드가 필요합니다."
+  ${SCRIPTS}/tc-server.sh install
+fi
+```
+
+**bun 미설치 시 안내:**
+
+```
+bun이 설치되어 있지 않습니다.
+
+설치 방법:
+  curl -fsSL https://bun.sh/install | bash
+
+설치 후 '/team-claude:setup'을 다시 실행하세요.
+```
 
 ### Phase 2: 메인 메뉴 (설정 존재 시)
 
