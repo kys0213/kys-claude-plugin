@@ -172,7 +172,7 @@ func validatePluginRootPath(pathStr string, pluginRoot string, repoRoot string, 
 	// Normalize path (handle ../)
 	resolvedPath = filepath.Clean(resolvedPath)
 
-	exists := fileExists(resolvedPath)
+	exists := fileOrDirExists(resolvedPath)
 
 	// For strict: false plugins, paths with ../../ may reference files outside plugin root
 	// but should still be within the repo root.
@@ -331,6 +331,11 @@ func findPluginRoot(startDir string) string {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+func fileOrDirExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func dirExists(path string) bool {
