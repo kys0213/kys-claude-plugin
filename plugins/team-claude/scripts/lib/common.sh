@@ -5,12 +5,9 @@
 set -euo pipefail
 
 # ============================================================================
-# 경로 상수
+# 경로 상수 (전역)
 # ============================================================================
-CONFIG_FILE=".claude/team-claude.yaml"
-SESSIONS_DIR=".team-claude/sessions"
-WORKTREES_DIR=".team-claude/worktrees"
-SESSIONS_INDEX="${SESSIONS_DIR}/index.json"
+TC_DATA_ROOT="${HOME}/.team-claude"
 
 # ============================================================================
 # 서버 상수
@@ -20,12 +17,53 @@ TC_SERVER_BINARY="${HOME}/.claude/team-claude-server"
 TC_SERVER_PID_FILE="${HOME}/.claude/team-claude-server.pid"
 TC_SERVER_LOG_FILE="${HOME}/.claude/team-claude-server.log"
 
+# ============================================================================
+# 프로젝트 식별
+# ============================================================================
+
+# 프로젝트 해시 생성 (git root 경로 기반)
+get_project_hash() {
+  local root
+  root=$(find_git_root)
+  echo -n "$root" | md5sum | cut -c1-12
+}
+
+# 프로젝트 데이터 디렉토리 (~/.team-claude/{hash}/)
+get_project_data_dir() {
+  local hash
+  hash=$(get_project_hash)
+  echo "${TC_DATA_ROOT}/${hash}"
+}
+
+# 설정 파일 경로 (~/.team-claude/{hash}/team-claude.yaml)
+get_config_path() {
+  echo "$(get_project_data_dir)/team-claude.yaml"
+}
+
+# 세션 디렉토리 경로
+get_sessions_dir() {
+  echo "$(get_project_data_dir)/sessions"
+}
+
+# Worktrees 디렉토리 경로
+get_worktrees_dir() {
+  echo "$(get_project_data_dir)/worktrees"
+}
+
+# State 디렉토리 경로
+get_state_dir() {
+  echo "$(get_project_data_dir)/state"
+}
+
 # 서버 포트 가져오기 (설정 파일에서 또는 기본값)
 get_server_port() {
+  local config_path
+  config_path=$(get_config_path)
+
   # 설정 파일에서 포트 읽기 시도
-  if [[ -f "$CONFIG_FILE" ]] && command -v yq &>/dev/null; then
+  if [[ -f "$config_path" ]] && command -v yq &>/dev/null; then
     local port
-    port=$(yq -r '.server.port // empty' "$CONFIG_FILE" 2>/dev/null || echo "")
+    port=$(yq -r '.server.port // empty' "$config_path" 2>/dev/null || echo "")
     if [[ -n "$port" && "$port" != "null" ]]; then
       echo "$port"
       return
@@ -186,17 +224,17 @@ timestamp() {
 
 # 설정 파일 존재 확인
 config_exists() {
-  local root
-  root=$(find_git_root)
-  [[ -f "${root}/${CONFIG_FILE}" ]]
+  local config_path
+  config_path=$(get_config_path)
+  [[ -f "$config_path" ]]
 }
 
 # 세션 디렉토리 존재 확인
 session_exists() {
   local session_id="$1"
-  local root
-  root=$(find_git_root)
-  [[ -d "${root}/${SESSIONS_DIR}/${session_id}" ]]
+  local sessions_dir
+  sessions_dir=$(get_sessions_dir)
+  [[ -d "${sessions_dir}/${session_id}" ]]
 }
 
 # 디렉토리 안전 생성

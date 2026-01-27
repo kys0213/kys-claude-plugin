@@ -108,25 +108,25 @@ AskUserQuestion({
 ### 생성되는 디렉토리
 
 ```
-.claude/
-├── team-claude.yaml       # 메인 설정
-├── settings.local.json    # hooks 설정 (레포별)
-├── agents/                # 프로젝트 에이전트 정의
-└── hooks/                 # hook 스크립트
+~/.team-claude/{project-hash}/     # 전역 데이터 (프로젝트별 격리)
+├── team-claude.yaml               # 프로젝트 설정
+├── sessions/
+│   └── index.json
+├── state/
+│   └── workflow.json
+└── worktrees/
+
+<project>/.claude/                 # Claude Code 표준 디렉토리
+├── settings.local.json            # hooks 설정 (레포별)
+├── agents/                        # 프로젝트 에이전트 정의
+└── hooks/                         # hook 스크립트
     ├── on-worker-complete.sh
     ├── on-validation-complete.sh
     ├── on-worker-question.sh
     └── on-worker-idle.sh
-
-.team-claude/              # 런타임 데이터
-├── sessions/
-│   └── index.json
-├── state/
-│   └── current-delegation.json
-└── templates/
-    ├── checkpoint.yaml
-    └── delegation-spec.md
 ```
+
+**프로젝트 해시**: git root 경로의 md5 해시 앞 12자리
 
 ---
 
@@ -191,16 +191,16 @@ chmod +x .claude/hooks/*.sh
 ✅ Team Claude 초기화 완료
 
 📁 생성된 설정:
+  ~/.team-claude/{hash}/
+  ├── team-claude.yaml (설정)
+  ├── sessions/
+  ├── state/
+  └── worktrees/
+
   .claude/
-  ├── team-claude.yaml
   ├── settings.local.json (hooks 설정)
   ├── agents/
   └── hooks/ (4개 스크립트)
-
-  .team-claude/ (런타임 데이터)
-  ├── sessions/
-  ├── state/
-  └── templates/
 
 📊 감지된 프로젝트 정보:
   • 언어: {language}

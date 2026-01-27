@@ -115,7 +115,13 @@ cmd_init() {
   require_yq
   local root
   root=$(find_git_root)
-  local config_path="${root}/${CONFIG_FILE}"
+
+  # 프로젝트 데이터 디렉토리 (~/.team-claude/{hash}/)
+  local data_dir
+  data_dir=$(get_project_data_dir)
+  local config_path="${data_dir}/team-claude.yaml"
+  local project_hash
+  project_hash=$(get_project_hash)
 
   if [[ -f "$config_path" ]]; then
     err "설정 파일이 이미 존재합니다: ${config_path}"
@@ -123,8 +129,11 @@ cmd_init() {
     exit 1
   fi
 
-  # .claude 디렉토리 생성
-  ensure_dir "$(dirname "$config_path")"
+  # ~/.team-claude/{hash}/ 디렉토리 구조 생성
+  ensure_dir "${data_dir}"
+  ensure_dir "${data_dir}/sessions"
+  ensure_dir "${data_dir}/state"
+  ensure_dir "${data_dir}/worktrees"
 
   # 프로젝트 이름 추출 (디렉토리 이름)
   local project_name
@@ -133,6 +142,11 @@ cmd_init() {
   # 기본 설정 파일 생성
   cat > "$config_path" << EOF
 version: "1.0"
+
+# 프로젝트 메타 (자동 생성)
+_meta:
+  project_root: "${root}"
+  project_hash: "${project_hash}"
 
 project:
   name: "${project_name}"
@@ -172,13 +186,7 @@ agents:
 EOF
 
   ok "설정 파일 생성됨: ${config_path}"
-
-  # .team-claude 디렉토리 구조 생성 (런타임 데이터)
-  ensure_dir "${root}/.team-claude/sessions"
-  ensure_dir "${root}/.team-claude/state"
-  ensure_dir "${root}/.team-claude/templates"
-
-  ok ".team-claude 디렉토리 구조 생성됨"
+  info "프로젝트 해시: ${project_hash}"
 
   # .claude/agents 디렉토리 생성 (프로젝트 에이전트 정의)
   ensure_dir "${root}/.claude/agents"
@@ -216,9 +224,8 @@ cmd_get() {
     exit 1
   fi
 
-  local root
-  root=$(find_git_root)
-  local config_path="${root}/${CONFIG_FILE}"
+  local config_path
+  config_path=$(get_config_path)
 
   if [[ ! -f "$config_path" ]]; then
     err "설정 파일이 없습니다: ${config_path}"
@@ -252,9 +259,8 @@ cmd_set() {
     exit 1
   fi
 
-  local root
-  root=$(find_git_root)
-  local config_path="${root}/${CONFIG_FILE}"
+  local config_path
+  config_path=$(get_config_path)
 
   if [[ ! -f "$config_path" ]]; then
     err "설정 파일이 없습니다: ${config_path}"
@@ -273,9 +279,8 @@ cmd_set() {
 # ============================================================================
 cmd_show() {
   require_yq
-  local root
-  root=$(find_git_root)
-  local config_path="${root}/${CONFIG_FILE}"
+  local config_path
+  config_path=$(get_config_path)
 
   if [[ ! -f "$config_path" ]]; then
     err "설정 파일이 없습니다: ${config_path}"
@@ -290,9 +295,7 @@ cmd_show() {
 # path - 설정 파일 경로 출력
 # ============================================================================
 cmd_path() {
-  local root
-  root=$(find_git_root)
-  echo "${root}/${CONFIG_FILE}"
+  get_config_path
 }
 
 # ============================================================================
@@ -301,54 +304,65 @@ cmd_path() {
 cmd_verify() {
   local root
   root=$(find_git_root)
+  local data_dir
+  data_dir=$(get_project_data_dir)
+  local config_path
+  config_path=$(get_config_path)
+  local project_hash
+  project_hash=$(get_project_hash)
   local errors=0
   local warnings=0
 
   echo ""
   echo "━━━ Team Claude 환경 검증 ━━━"
   echo ""
+  info "프로젝트: ${root}"
+  info "해시: ${project_hash}"
+  info "데이터: ${data_dir}"
+  echo ""
 
   # --- 1. 설정 파일 검증 ---
   echo "📁 설정 파일"
-  if [[ -f "${root}/${CONFIG_FILE}" ]]; then
-    echo -e "  \033[0;32m✓\033[0m ${CONFIG_FILE}"
+  if [[ -f "$config_path" ]]; then
+    echo -e "  \033[0;32m✓\033[0m ~/.team-claude/${project_hash}/team-claude.yaml"
   else
-    echo -e "  \033[0;31m✗\033[0m ${CONFIG_FILE} (누락)"
+    echo -e "  \033[0;31m✗\033[0m ~/.team-claude/${project_hash}/team-claude.yaml (누락)"
     ((errors++))
   fi
   echo ""
 
-  # --- 2. 디렉토리 구조 검증 ---
-  echo "📂 디렉토리 구조"
-
-  # .claude 디렉토리 (설정 + hook 스크립트)
-  if [[ -d "${root}/.claude/agents" ]]; then
-    echo -e "  \033[0;32m✓\033[0m .claude/agents"
-  else
-    echo -e "  \033[0;33m⚠\033[0m .claude/agents (선택 - tc-agent init으로 생성)"
-    ((warnings++))
-  fi
-
-  if [[ -d "${root}/.claude/hooks" ]]; then
-    echo -e "  \033[0;32m✓\033[0m .claude/hooks"
-  else
-    echo -e "  \033[0;31m✗\033[0m .claude/hooks (누락)"
-    ((errors++))
-  fi
-
-  # .team-claude 런타임 디렉토리
-  local tc_dirs=("sessions" "state" "templates")
-  for dir in "${tc_dirs[@]}"; do
-    if [[ -d "${root}/.team-claude/${dir}" ]]; then
-      echo -e "  \033[0;32m✓\033[0m .team-claude/${dir}"
+  # --- 2. 전역 데이터 디렉토리 검증 (~/.team-claude/{hash}/) ---
+  echo "📂 전역 데이터 (~/.team-claude/${project_hash}/)"
+  local global_dirs=("sessions" "state" "worktrees")
+  for dir in "${global_dirs[@]}"; do
+    if [[ -d "${data_dir}/${dir}" ]]; then
+      echo -e "  \033[0;32m✓\033[0m ${dir}"
     else
-      echo -e "  \033[0;31m✗\033[0m .team-claude/${dir} (누락)"
+      echo -e "  \033[0;31m✗\033[0m ${dir} (누락)"
       ((errors++))
     fi
   done
   echo ""
 
-  # --- 3. Hook 스크립트 검증 ---
+  # --- 3. 프로젝트 디렉토리 검증 (.claude/) ---
+  echo "📂 프로젝트 디렉토리 (.claude/)"
+
+  if [[ -d "${root}/.claude/agents" ]]; then
+    echo -e "  \033[0;32m✓\033[0m agents"
+  else
+    echo -e "  \033[0;33m⚠\033[0m agents (선택 - tc-agent init으로 생성)"
+    ((warnings++))
+  fi
+
+  if [[ -d "${root}/.claude/hooks" ]]; then
+    echo -e "  \033[0;32m✓\033[0m hooks"
+  else
+    echo -e "  \033[0;31m✗\033[0m hooks (누락)"
+    ((errors++))
+  fi
+  echo ""
+
+  # --- 4. Hook 스크립트 검증 ---
   echo "🪝 Hook 스크립트 (.claude/hooks/)"
   local hooks=("on-worker-complete.sh" "on-validation-complete.sh" "on-worker-question.sh" "on-worker-idle.sh")
   for hook in "${hooks[@]}"; do
@@ -367,7 +381,7 @@ cmd_verify() {
   done
   echo ""
 
-  # --- 4. 의존성 검증 ---
+  # --- 5. 의존성 검증 ---
   echo "🔧 의존성"
   local deps=("yq" "jq" "git" "bun")
   for dep in "${deps[@]}"; do
@@ -392,7 +406,7 @@ cmd_verify() {
   done
   echo ""
 
-  # --- 5. 서버 바이너리 검증 ---
+  # --- 6. 서버 바이너리 검증 ---
   echo "🖥️  서버"
   local server_path="${HOME}/.claude/team-claude-server"
   if [[ -f "$server_path" ]]; then

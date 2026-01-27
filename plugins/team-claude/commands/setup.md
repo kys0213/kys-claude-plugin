@@ -301,15 +301,21 @@ ${SCRIPTS}/tc-config.sh verify
 ```
 ━━━ Team Claude 환경 검증 ━━━
 
-📁 설정 파일
-  ✓ .claude/team-claude.yaml
+[INFO] 프로젝트: /home/user/my-project
+[INFO] 해시: a1b2c3d4e5f6
+[INFO] 데이터: ~/.team-claude/a1b2c3d4e5f6
 
-📂 디렉토리 구조
-  ✓ .claude/agents (프로젝트 에이전트)
-  ✓ .claude/hooks (hook 스크립트)
-  ✓ .team-claude/sessions
-  ✓ .team-claude/state
-  ✓ .team-claude/templates
+📁 설정 파일
+  ✓ ~/.team-claude/a1b2c3d4e5f6/team-claude.yaml
+
+📂 전역 데이터 (~/.team-claude/a1b2c3d4e5f6/)
+  ✓ sessions
+  ✓ state
+  ✓ worktrees
+
+📂 프로젝트 디렉토리 (.claude/)
+  ✓ agents
+  ✓ hooks
 
 🪝 Hook 스크립트 (.claude/hooks/)
   ✓ on-worker-complete.sh
