@@ -33,6 +33,82 @@ EOF
 }
 
 # ============================================================================
+# setup_local_hooks - .claude/settings.local.json에 hooks 설정 추가
+# ============================================================================
+setup_local_hooks() {
+  require_jq
+  local root="$1"
+  local settings_file="${root}/.claude/settings.local.json"
+
+  # Team Claude hooks 정의
+  local tc_hooks
+  tc_hooks=$(cat << 'HOOKS_EOF'
+{
+  "hooks": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": ".claude/hooks/on-worker-complete.sh"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/on-worker-question.sh"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/on-worker-idle.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+HOOKS_EOF
+)
+
+  if [[ -f "$settings_file" ]]; then
+    # 기존 settings.local.json이 있으면 hooks 병합
+    local existing
+    existing=$(cat "$settings_file")
+
+    # 기존에 hooks가 있는지 확인
+    if echo "$existing" | jq -e '.hooks' > /dev/null 2>&1; then
+      # hooks가 있으면 병합 (기존 hooks 유지 + tc_hooks 추가)
+      local merged
+      merged=$(echo "$existing" | jq --argjson tc_hooks "$tc_hooks" '
+        .hooks.Stop = ((.hooks.Stop // []) + $tc_hooks.hooks.Stop) |
+        .hooks.PreToolUse = ((.hooks.PreToolUse // []) + $tc_hooks.hooks.PreToolUse) |
+        .hooks.Notification = ((.hooks.Notification // []) + $tc_hooks.hooks.Notification)
+      ')
+      echo "$merged" > "$settings_file"
+      ok "기존 settings.local.json에 hooks 병합됨"
+    else
+      # hooks가 없으면 추가
+      local merged
+      merged=$(echo "$existing" | jq --argjson tc_hooks "$tc_hooks" '. + $tc_hooks')
+      echo "$merged" > "$settings_file"
+      ok "settings.local.json에 hooks 추가됨"
+    fi
+  else
+    # settings.local.json이 없으면 새로 생성
+    echo "$tc_hooks" | jq '.' > "$settings_file"
+    ok "settings.local.json 생성됨 (hooks 포함)"
+  fi
+}
+
+# ============================================================================
 # init - 기본 설정 파일 생성
 # ============================================================================
 cmd_init() {
@@ -100,7 +176,6 @@ EOF
   # .team-claude 디렉토리 구조 생성 (런타임 데이터)
   ensure_dir "${root}/.team-claude/sessions"
   ensure_dir "${root}/.team-claude/state"
-  ensure_dir "${root}/.team-claude/hooks"
   ensure_dir "${root}/.team-claude/templates"
 
   ok ".team-claude 디렉토리 구조 생성됨"
@@ -110,15 +185,19 @@ EOF
 
   ok ".claude/agents 디렉토리 생성됨"
 
-  # hooks 스크립트 복사
+  # hooks 스크립트를 .claude/hooks/에 복사
+  ensure_dir "${root}/.claude/hooks"
   local plugin_hooks_dir="${SCRIPT_DIR}/../hooks/scripts"
   if [[ -d "$plugin_hooks_dir" ]]; then
-    cp -r "${plugin_hooks_dir}/"* "${root}/.team-claude/hooks/" 2>/dev/null || true
-    chmod +x "${root}/.team-claude/hooks/"*.sh 2>/dev/null || true
-    ok "Hook 스크립트 복사됨"
+    cp -r "${plugin_hooks_dir}/"* "${root}/.claude/hooks/" 2>/dev/null || true
+    chmod +x "${root}/.claude/hooks/"*.sh 2>/dev/null || true
+    ok "Hook 스크립트 복사됨: .claude/hooks/"
   else
     warn "Hook 스크립트 소스 디렉토리를 찾을 수 없습니다: ${plugin_hooks_dir}"
   fi
+
+  # .claude/settings.local.json에 hooks 설정 추가
+  setup_local_hooks "$root"
 
   # 환경 검증 실행
   cmd_verify || true
@@ -242,8 +321,23 @@ cmd_verify() {
   # --- 2. 디렉토리 구조 검증 ---
   echo "📂 디렉토리 구조"
 
+  # .claude 디렉토리 (설정 + hook 스크립트)
+  if [[ -d "${root}/.claude/agents" ]]; then
+    echo -e "  \033[0;32m✓\033[0m .claude/agents"
+  else
+    echo -e "  \033[0;33m⚠\033[0m .claude/agents (선택 - tc-agent init으로 생성)"
+    ((warnings++))
+  fi
+
+  if [[ -d "${root}/.claude/hooks" ]]; then
+    echo -e "  \033[0;32m✓\033[0m .claude/hooks"
+  else
+    echo -e "  \033[0;31m✗\033[0m .claude/hooks (누락)"
+    ((errors++))
+  fi
+
   # .team-claude 런타임 디렉토리
-  local tc_dirs=("sessions" "state" "hooks" "templates")
+  local tc_dirs=("sessions" "state" "templates")
   for dir in "${tc_dirs[@]}"; do
     if [[ -d "${root}/.team-claude/${dir}" ]]; then
       echo -e "  \033[0;32m✓\033[0m .team-claude/${dir}"
@@ -252,21 +346,13 @@ cmd_verify() {
       ((errors++))
     fi
   done
-
-  # .claude/agents 에이전트 정의 디렉토리
-  if [[ -d "${root}/.claude/agents" ]]; then
-    echo -e "  \033[0;32m✓\033[0m .claude/agents"
-  else
-    echo -e "  \033[0;33m⚠\033[0m .claude/agents (선택 - tc-agent init으로 생성)"
-    ((warnings++))
-  fi
   echo ""
 
   # --- 3. Hook 스크립트 검증 ---
-  echo "🪝 Hook 스크립트"
+  echo "🪝 Hook 스크립트 (.claude/hooks/)"
   local hooks=("on-worker-complete.sh" "on-validation-complete.sh" "on-worker-question.sh" "on-worker-idle.sh")
   for hook in "${hooks[@]}"; do
-    local hook_path="${root}/.team-claude/hooks/${hook}"
+    local hook_path="${root}/.claude/hooks/${hook}"
     if [[ -f "$hook_path" ]]; then
       if [[ -x "$hook_path" ]]; then
         echo -e "  \033[0;32m✓\033[0m ${hook}"

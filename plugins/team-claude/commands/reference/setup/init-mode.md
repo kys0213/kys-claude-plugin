@@ -108,142 +108,79 @@ AskUserQuestion({
 ### 생성되는 디렉토리
 
 ```
-.team-claude/
+.claude/
+├── team-claude.yaml       # 메인 설정
+├── settings.local.json    # hooks 설정 (레포별)
+├── agents/                # 프로젝트 에이전트 정의
+└── hooks/                 # hook 스크립트
+    ├── on-worker-complete.sh
+    ├── on-validation-complete.sh
+    ├── on-worker-question.sh
+    └── on-worker-idle.sh
+
+.team-claude/              # 런타임 데이터
 ├── sessions/
 │   └── index.json
 ├── state/
 │   └── current-delegation.json
-├── hooks/
-│   ├── on-worker-complete.sh
-│   ├── on-validation-complete.sh
-│   ├── on-worker-question.sh
-│   └── on-worker-idle.sh
-├── templates/
-│   ├── checkpoint.yaml
-│   └── delegation-spec.md
-└── agents/              # 커스텀 에이전트용
-
-.claude/
-└── team-claude.yaml     # 메인 설정
+└── templates/
+    ├── checkpoint.yaml
+    └── delegation-spec.md
 ```
 
 ---
 
 ## Step 4: Hook 설정
 
-플러그인의 hook 스크립트를 프로젝트로 복사:
+`tc-config init` 명령이 자동으로 처리합니다:
+
+1. 플러그인의 hook 스크립트를 `.claude/hooks/`에 복사
+2. `.claude/settings.local.json`에 hooks 설정 추가/병합
+
+### 수동 설정 (참고용)
 
 ```bash
 # Hook 스크립트 복사
-cp -r ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/* .team-claude/hooks/
-
-# 실행 권한 부여
-chmod +x .team-claude/hooks/*.sh
+mkdir -p .claude/hooks
+cp -r ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/* .claude/hooks/
+chmod +x .claude/hooks/*.sh
 ```
 
-### 프로젝트 hooks 설정
+### 생성되는 settings.local.json
 
-`.claude/settings.local.json`에 hooks 설정을 추가합니다:
-
-```bash
-# .claude 디렉토리 생성
-mkdir -p .claude
-
-# 기존 settings.local.json이 있으면 병합, 없으면 생성
-if [ -f .claude/settings.local.json ]; then
-  # 기존 파일에 hooks 병합
-  jq '.hooks = {
-    "Stop": [
-      {
-        "type": "command",
-        "command": ".team-claude/hooks/on-worker-complete.sh"
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "AskUserQuestion",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".team-claude/hooks/on-worker-question.sh"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".team-claude/hooks/on-validation-complete.sh",
-            "condition": "tool_input.command.includes('\''test'\'')"
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "idle_prompt",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".team-claude/hooks/on-worker-idle.sh"
-          }
-        ]
-      }
-    ]
-  }' .claude/settings.local.json > .claude/settings.local.json.tmp
-  mv .claude/settings.local.json.tmp .claude/settings.local.json
-else
-  # 새로 생성
-  cat > .claude/settings.local.json << 'EOF'
+```json
 {
   "hooks": {
     "Stop": [
       {
         "type": "command",
-        "command": ".team-claude/hooks/on-worker-complete.sh"
+        "command": ".claude/hooks/on-worker-complete.sh"
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "AskUserQuestion",
+        "matcher": "Task",
         "hooks": [
           {
             "type": "command",
-            "command": ".team-claude/hooks/on-worker-question.sh"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".team-claude/hooks/on-validation-complete.sh",
-            "condition": "tool_input.command.includes('test')"
+            "command": ".claude/hooks/on-worker-question.sh"
           }
         ]
       }
     ],
     "Notification": [
       {
-        "matcher": "idle_prompt",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
-            "command": ".team-claude/hooks/on-worker-idle.sh"
+            "command": ".claude/hooks/on-worker-idle.sh"
           }
         ]
       }
     ]
   }
 }
-EOF
-fi
 ```
 
 ---
@@ -254,16 +191,16 @@ fi
 ✅ Team Claude 초기화 완료
 
 📁 생성된 설정:
-  .team-claude/
-  ├── sessions/
-  ├── state/
-  ├── hooks/ (4개 스크립트)
-  ├── templates/
-  └── agents/
-
   .claude/
   ├── team-claude.yaml
-  └── settings.local.json (hooks 설정)
+  ├── settings.local.json (hooks 설정)
+  ├── agents/
+  └── hooks/ (4개 스크립트)
+
+  .team-claude/ (런타임 데이터)
+  ├── sessions/
+  ├── state/
+  └── templates/
 
 📊 감지된 프로젝트 정보:
   • 언어: {language}

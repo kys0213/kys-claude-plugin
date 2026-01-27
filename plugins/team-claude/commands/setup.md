@@ -305,13 +305,13 @@ ${SCRIPTS}/tc-config.sh verify
   ✓ .claude/team-claude.yaml
 
 📂 디렉토리 구조
+  ✓ .claude/agents (프로젝트 에이전트)
+  ✓ .claude/hooks (hook 스크립트)
   ✓ .team-claude/sessions
   ✓ .team-claude/state
-  ✓ .team-claude/hooks
   ✓ .team-claude/templates
-  ✓ .claude/agents (프로젝트 에이전트)
 
-🪝 Hook 스크립트
+🪝 Hook 스크립트 (.claude/hooks/)
   ✓ on-worker-complete.sh
   ✓ on-validation-complete.sh
   ✓ on-worker-question.sh
