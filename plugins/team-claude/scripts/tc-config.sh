@@ -97,14 +97,18 @@ EOF
 
   ok "설정 파일 생성됨: ${config_path}"
 
-  # .team-claude 디렉토리 구조 생성
+  # .team-claude 디렉토리 구조 생성 (런타임 데이터)
   ensure_dir "${root}/.team-claude/sessions"
   ensure_dir "${root}/.team-claude/state"
   ensure_dir "${root}/.team-claude/hooks"
   ensure_dir "${root}/.team-claude/templates"
-  ensure_dir "${root}/.team-claude/agents"
 
   ok ".team-claude 디렉토리 구조 생성됨"
+
+  # .claude/agents 디렉토리 생성 (프로젝트 에이전트 정의)
+  ensure_dir "${root}/.claude/agents"
+
+  ok ".claude/agents 디렉토리 생성됨"
 
   # hooks 스크립트 복사
   local plugin_hooks_dir="${SCRIPT_DIR}/../hooks/scripts"
@@ -237,8 +241,10 @@ cmd_verify() {
 
   # --- 2. 디렉토리 구조 검증 ---
   echo "📂 디렉토리 구조"
-  local dirs=("sessions" "state" "hooks" "templates" "agents")
-  for dir in "${dirs[@]}"; do
+
+  # .team-claude 런타임 디렉토리
+  local tc_dirs=("sessions" "state" "hooks" "templates")
+  for dir in "${tc_dirs[@]}"; do
     if [[ -d "${root}/.team-claude/${dir}" ]]; then
       echo -e "  \033[0;32m✓\033[0m .team-claude/${dir}"
     else
@@ -246,6 +252,14 @@ cmd_verify() {
       ((errors++))
     fi
   done
+
+  # .claude/agents 에이전트 정의 디렉토리
+  if [[ -d "${root}/.claude/agents" ]]; then
+    echo -e "  \033[0;32m✓\033[0m .claude/agents"
+  else
+    echo -e "  \033[0;33m⚠\033[0m .claude/agents (선택 - tc-agent init으로 생성)"
+    ((warnings++))
+  fi
   echo ""
 
   # --- 3. Hook 스크립트 검증 ---

@@ -309,7 +309,7 @@ ${SCRIPTS}/tc-config.sh verify
   ✓ .team-claude/state
   ✓ .team-claude/hooks
   ✓ .team-claude/templates
-  ✓ .team-claude/agents
+  ✓ .claude/agents (프로젝트 에이전트)
 
 🪝 Hook 스크립트
   ✓ on-worker-complete.sh
