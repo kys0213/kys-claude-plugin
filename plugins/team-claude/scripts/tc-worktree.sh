@@ -45,7 +45,8 @@ cmd_create() {
 
   local root
   root=$(find_git_root)
-  local worktrees_dir="${root}/${WORKTREES_DIR}"
+  local worktrees_dir
+  worktrees_dir=$(get_worktrees_dir)
   local worktree_path="${worktrees_dir}/${checkpoint_id}"
   local branch_name="team-claude/${checkpoint_id}"
 
@@ -92,6 +93,8 @@ cmd_list() {
   require_git
   local root
   root=$(find_git_root)
+  local worktrees_dir
+  worktrees_dir=$(get_worktrees_dir)
 
   echo ""
   echo "━━━ Team Claude Worktrees ━━━"
@@ -101,7 +104,7 @@ cmd_list() {
   local has_worktrees=false
 
   while IFS= read -r line; do
-    if [[ "$line" == *".team-claude/worktrees"* ]]; then
+    if [[ "$line" == *"${worktrees_dir}"* ]]; then
       has_worktrees=true
       local path branch
       path=$(echo "$line" | awk '{print $1}')
@@ -126,7 +129,7 @@ cmd_list() {
   local first=true
 
   while IFS= read -r line; do
-    if [[ "$line" == *".team-claude/worktrees"* ]]; then
+    if [[ "$line" == *"${worktrees_dir}"* ]]; then
       local path branch
       path=$(echo "$line" | awk '{print $1}')
       branch=$(echo "$line" | grep -o '\[.*\]' | tr -d '[]')
@@ -161,7 +164,9 @@ cmd_delete() {
 
   local root
   root=$(find_git_root)
-  local worktree_path="${root}/${WORKTREES_DIR}/${checkpoint_id}"
+  local worktrees_dir
+  worktrees_dir=$(get_worktrees_dir)
+  local worktree_path="${worktrees_dir}/${checkpoint_id}"
   local branch_name="team-claude/${checkpoint_id}"
 
   if [[ ! -d "$worktree_path" ]]; then
@@ -190,6 +195,8 @@ cmd_cleanup() {
   require_git
   local root
   root=$(find_git_root)
+  local worktrees_dir
+  worktrees_dir=$(get_worktrees_dir)
 
   echo ""
   echo "━━━ Team Claude Worktree 정리 ━━━"
@@ -198,7 +205,7 @@ cmd_cleanup() {
   local cleaned=0
 
   while IFS= read -r line; do
-    if [[ "$line" == *".team-claude/worktrees"* ]]; then
+    if [[ "$line" == *"${worktrees_dir}"* ]]; then
       local path
       path=$(echo "$line" | awk '{print $1}')
       local checkpoint_id
@@ -225,7 +232,6 @@ cmd_cleanup() {
   fi
 
   # 디렉토리가 비어있으면 삭제
-  local worktrees_dir="${root}/${WORKTREES_DIR}"
   if [[ -d "$worktrees_dir" ]] && [[ -z "$(ls -A "$worktrees_dir" 2>/dev/null)" ]]; then
     rmdir "$worktrees_dir" 2>/dev/null || true
   fi
@@ -243,9 +249,9 @@ cmd_path() {
     exit 1
   fi
 
-  local root
-  root=$(find_git_root)
-  local worktree_path="${root}/${WORKTREES_DIR}/${checkpoint_id}"
+  local worktrees_dir
+  worktrees_dir=$(get_worktrees_dir)
+  local worktree_path="${worktrees_dir}/${checkpoint_id}"
 
   if [[ ! -d "$worktree_path" ]]; then
     err "Worktree를 찾을 수 없습니다: ${worktree_path}"

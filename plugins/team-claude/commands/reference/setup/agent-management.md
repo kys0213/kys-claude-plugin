@@ -52,11 +52,11 @@ AskUserQuestion({
 
   ✅ payment_expert (활성화)
      결제 도메인 전문가 - PG 연동, 금액 계산 검증
-     위치: .team-claude/agents/payment-expert.md
+     위치: .claude/agents/payment-expert.md
 
   ✅ security_auditor (활성화)
      보안 취약점 검토, OWASP 체크리스트
-     위치: .team-claude/agents/security-auditor.md
+     위치: .claude/agents/security-auditor.md
 ```
 
 목록 조회 후:
@@ -283,7 +283,7 @@ AskUserQuestion({
 ```
 ✅ 에이전트 생성 완료
 
-📄 파일: .team-claude/agents/payment-expert.md
+📄 파일: .claude/agents/payment-expert.md
 
 ━━━ 생성된 에이전트 요약 ━━━
 
@@ -331,7 +331,7 @@ AskUserQuestion({
 ━━━ 기본 정보 ━━━
   타입: 커스텀
   상태: ✅ 활성화됨
-  위치: .team-claude/agents/payment-expert.md
+  위치: .claude/agents/payment-expert.md
   생성일: 2024-01-23
 
 ━━━ 설정 ━━━
@@ -422,7 +422,7 @@ AskUserQuestion({
     + 부분 환불 금액 계산 정확성
     + PG사별 응답 포맷 호환성
 
-저장됨: .team-claude/agents/payment-expert.md
+저장됨: .claude/agents/payment-expert.md
 ```
 
 ---
@@ -466,7 +466,7 @@ AskUserQuestion({
 ```
 ✅ 에이전트 삭제 완료
 
-  삭제됨: .team-claude/agents/payment-expert.md
+  삭제됨: .claude/agents/payment-expert.md
   설정에서 제거됨: agents.custom, agents.enabled
 
 현재 활성 에이전트: 4개
@@ -511,7 +511,7 @@ AskUserQuestion({
 
 복사됨:
   원본: plugins/team-claude/agents/spec-validator.md
-  대상: .team-claude/agents/spec-validator.md
+  대상: .claude/agents/spec-validator.md
 
 이제 로컬 버전이 우선 적용됩니다.
 수정하시겠습니까?
@@ -527,7 +527,7 @@ AskUserQuestion({
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  1. 프로젝트 로컬 (최우선)                                   │
-│     .team-claude/agents/{name}.md                          │
+│     .claude/agents/{name}.md                          │
 │                                                             │
 │  2. 플러그인 기본                                            │
 │     plugins/team-claude/agents/{name}.md                   │

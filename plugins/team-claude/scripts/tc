@@ -1,0 +1,24 @@
+#!/bin/bash
+# Team Claude - CLI Runner
+# bun으로 직접 실행
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/common.sh"
+
+CLI_SRC_DIR="${SCRIPT_DIR}/../cli"
+
+# bun 확인
+if ! command -v bun &>/dev/null; then
+  err "bun이 설치되어 있지 않습니다."
+  err "설치: curl -fsSL https://bun.sh/install | bash"
+  exit 1
+fi
+
+# 의존성 설치 (최초 1회)
+if [[ ! -d "${CLI_SRC_DIR}/node_modules" ]]; then
+  info "의존성 설치 중..."
+  (cd "$CLI_SRC_DIR" && bun install --silent)
+fi
+
+# 실행
+exec bun run "${CLI_SRC_DIR}/src/index.ts" "$@"

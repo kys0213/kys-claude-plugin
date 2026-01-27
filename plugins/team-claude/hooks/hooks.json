@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".team-claude/hooks/on-worker-complete.sh"
+            "command": ".claude/hooks/on-worker-complete.sh"
           }
         ]
       }
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".team-claude/hooks/on-worker-question.sh"
+            "command": ".claude/hooks/on-worker-question.sh"
           }
         ]
       }
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".team-claude/hooks/on-validation-complete.sh",
+            "command": ".claude/hooks/on-validation-complete.sh",
             "condition": "tool_input.command.includes('test')"
           }
         ]
@@ -46,7 +46,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".team-claude/hooks/on-worker-idle.sh"
+            "command": ".claude/hooks/on-worker-idle.sh"
           }
         ]
       }

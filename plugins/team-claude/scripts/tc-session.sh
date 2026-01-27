@@ -44,10 +44,9 @@ cmd_create() {
     exit 1
   fi
 
-  local root
-  root=$(find_git_root)
-  local sessions_dir="${root}/${SESSIONS_DIR}"
-  local index_path="${root}/${SESSIONS_INDEX}"
+  local sessions_dir
+  sessions_dir=$(get_sessions_dir)
+  local index_path="${sessions_dir}/index.json"
 
   # sessions 디렉토리 생성
   ensure_dir "$sessions_dir"
@@ -118,9 +117,9 @@ EOF
 # ============================================================================
 cmd_list() {
   require_jq
-  local root
-  root=$(find_git_root)
-  local index_path="${root}/${SESSIONS_INDEX}"
+  local sessions_dir
+  sessions_dir=$(get_sessions_dir)
+  local index_path="${sessions_dir}/index.json"
 
   if [[ ! -f "$index_path" ]]; then
     info "세션이 없습니다."
@@ -164,9 +163,9 @@ cmd_show() {
     exit 1
   fi
 
-  local root
-  root=$(find_git_root)
-  local session_dir="${root}/${SESSIONS_DIR}/${session_id}"
+  local sessions_dir
+  sessions_dir=$(get_sessions_dir)
+  local session_dir="${sessions_dir}/${session_id}"
   local meta_path="${session_dir}/meta.json"
 
   if [[ ! -f "$meta_path" ]]; then
@@ -250,10 +249,10 @@ cmd_delete() {
     exit 1
   fi
 
-  local root
-  root=$(find_git_root)
-  local session_dir="${root}/${SESSIONS_DIR}/${session_id}"
-  local index_path="${root}/${SESSIONS_INDEX}"
+  local sessions_dir
+  sessions_dir=$(get_sessions_dir)
+  local session_dir="${sessions_dir}/${session_id}"
+  local index_path="${sessions_dir}/index.json"
 
   if [[ ! -d "$session_dir" ]]; then
     err "세션을 찾을 수 없습니다: ${session_id}"
@@ -287,9 +286,9 @@ cmd_update() {
     exit 1
   fi
 
-  local root
-  root=$(find_git_root)
-  local meta_path="${root}/${SESSIONS_DIR}/${session_id}/meta.json"
+  local sessions_dir
+  sessions_dir=$(get_sessions_dir)
+  local meta_path="${sessions_dir}/${session_id}/meta.json"
 
   if [[ ! -f "$meta_path" ]]; then
     err "세션을 찾을 수 없습니다: ${session_id}"
@@ -306,7 +305,7 @@ cmd_update() {
 
   # index.json에서도 status 업데이트 (status 변경 시)
   if [[ "$key" == "status" ]]; then
-    local index_path="${root}/${SESSIONS_INDEX}"
+    local index_path="${sessions_dir}/index.json"
     if [[ -f "$index_path" ]]; then
       jq --arg id "$session_id" --arg status "$value" \
         '(.sessions[] | select(.id == $id)).status = $status' "$index_path" > "${index_path}.tmp"
