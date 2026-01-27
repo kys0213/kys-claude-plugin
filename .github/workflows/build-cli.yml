@@ -1,0 +1,130 @@
+name: Build CLI
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v0.4.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+            bun_target: bun-linux-x64
+          - os: macos-latest
+            target: darwin-x64
+            bun_target: bun-darwin-x64
+          - os: macos-14
+            target: darwin-arm64
+            bun_target: bun-darwin-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: plugins/team-claude/cli
+        run: bun install
+
+      - name: Build for ${{ matrix.target }}
+        working-directory: plugins/team-claude/cli
+        run: |
+          bun build src/index.ts --compile --target=${{ matrix.bun_target }} --outfile dist/tc-${{ matrix.target }}
+          chmod +x dist/tc-${{ matrix.target }}
+
+      - name: Run tests (native only)
+        working-directory: plugins/team-claude/cli
+        if: |
+          (matrix.target == 'linux-x64' && runner.os == 'Linux') ||
+          (matrix.target == 'darwin-arm64' && runner.os == 'macOS' && runner.arch == 'ARM64') ||
+          (matrix.target == 'darwin-x64' && runner.os == 'macOS' && runner.arch == 'X64')
+        run: ./dist/tc-${{ matrix.target }} test all
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tc-${{ matrix.target }}
+          path: plugins/team-claude/cli/dist/tc-${{ matrix.target }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          for dir in artifacts/tc-*; do
+            target=$(basename "$dir")
+            cp "$dir/$target" "release/$target"
+            chmod +x "release/$target"
+          done
+          ls -la release/
+
+      - name: Get tag name
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          files: release/*
+          fail_on_unmatched_files: false
+          body: |
+            ## tc CLI Binaries
+
+            ### Quick Install
+
+            **Linux (x64)**
+            ```bash
+            curl -fsSL https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/tc-linux-x64 -o ~/.claude/tc
+            chmod +x ~/.claude/tc
+            ```
+
+            **macOS (Apple Silicon)**
+            ```bash
+            curl -fsSL https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/tc-darwin-arm64 -o ~/.claude/tc
+            chmod +x ~/.claude/tc
+            ```
+
+            **macOS (Intel)**
+            ```bash
+            curl -fsSL https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/tc-darwin-x64 -o ~/.claude/tc
+            chmod +x ~/.claude/tc
+            ```
+
+            ### Usage
+            ```bash
+            tc config info
+            tc config verify
+            tc test all
+            ```
