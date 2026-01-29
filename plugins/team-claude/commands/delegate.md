@@ -104,10 +104,46 @@ Worktree 루트에 Worker Claude 지시서를 작성합니다:
 - 아키텍처: .team-claude/sessions/{session-id}/specs/architecture.md
 - 계약: .team-claude/sessions/{session-id}/specs/contracts.md
 
-## Instructions
-1. Success Criteria를 순서대로 구현
-2. Validation 명령어로 확인
-3. 모든 테스트 통과 시 커밋
+## 🔄 RALPH: 자율 피드백 루프 (Multi-LLM 리뷰 통합)
+
+### 실행 루프
+
+repeat:
+  1. 구현 (Success Criteria 기준)
+  2. Multi-LLM 리뷰 (/ralph-review) - 선택적
+     - 첫 구현 후 권장
+     - Claude, Codex, Gemini 3개 LLM 병렬 리뷰
+     - Critical 이슈가 있으면 수정
+  3. Validation 명령어 실행
+  4. 결과 확인
+     - ✅ 통과 → 커밋 후 PR 생성
+     - ❌ 실패 → 에러 분석 후 수정
+until 통과 or 최대 재시도 초과
+
+### /ralph-review 사용 가이드
+
+구현 완료 후 테스트 전에 실행:
+\`\`\`bash
+/ralph-review
+\`\`\`
+
+리뷰 결과에서:
+- **Critical 이슈**: 반드시 수정 후 진행
+- **Important 이슈**: 가능하면 수정
+- **Nice-to-have**: 시간 여유가 있으면 수정
+
+### Context 80% 도달 시
+
+Hook에서 경고 메시지가 오면:
+1. .team-claude-checkpoint.md에 진행 상황 저장
+2. /clear 실행
+3. CLAUDE.md + checkpoint 읽고 이어서 작업
+
+### 완료 시
+
+1. 변경사항 커밋
+2. PR 생성: gh pr create --base epic/{feature} --head team-claude/{task}
+3. .team-claude-result.json 생성
 ```
 
 Write 도구로 `${WORKTREE_PATH}/CLAUDE.md`에 저장합니다.
@@ -341,4 +377,8 @@ delegation:
   maxRetries: 3
   retryDelay: 5000
   parallelWorkers: 3
+
+feedback_loop:
+  multi_llm_review: true       # Multi-LLM 리뷰 활성화
+  review_on_retry: false       # 재시도 시에도 리뷰 (기본: 첫 구현만)
 ```

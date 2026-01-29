@@ -1,7 +1,7 @@
 {
   "name": "review",
-  "version": "0.3.3",
-  "description": "다양한 LLM(Claude, Codex, Gemini)을 사용한 문서 리뷰 시스템",
+  "version": "0.4.0",
+  "description": "다양한 LLM(Claude, Codex, Gemini)을 사용한 문서/코드 리뷰 시스템 - RALPH 피드백 루프 지원",
   "author": {
     "name": "kys0213"
   }

@@ -54,8 +54,9 @@ ${SCRIPTS}/tc-server.sh status/start/stop/ensure/install
 │     • Architect: 설계, Contract + Test Code 정의                            │
 │     • Conflict: 사용자 최종 판단                                            │
 │                                                                             │
-│  2. Worker 자율 완결 (RALPH)                                                │
+│  2. Worker 자율 완결 (RALPH + Multi-LLM 리뷰)                               │
 │     • 서버 개입 없이 내부에서 피드백 루프                                   │
+│     • 구현 후 3개 LLM 리뷰로 코드 품질 향상 (/ralph-review)                 │
 │     • Context 관리도 자체 처리 (/clear + checkpoint)                        │
 │     • 완료 시 PR 생성                                                       │
 │                                                                             │
@@ -193,26 +194,29 @@ Phase 2: DELEGATE (Main Agent → Workers 위임)
 
 
 ═══════════════════════════════════════════════════════════════════════════════
-Phase 3: WORKER (자율 RALPH 루프 - 서버 개입 없음!)
+Phase 3: WORKER (자율 RALPH 루프 + Multi-LLM 리뷰)
 ═══════════════════════════════════════════════════════════════════════════════
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  Worker Claude (iTerm 새 탭에서 독립 실행)                                  │
 │                                                                             │
 │  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │                         자율 RALPH 루프                               │ │
+│  │                    자율 RALPH 루프 (Multi-LLM 리뷰)                   │ │
 │  │                                                                       │ │
-│  │  ┌─────────┐     ┌─────────┐     ┌─────────┐     ┌─────────┐        │ │
-│  │  │ 구현    │ ──► │ 검증    │ ──► │ 분석    │ ──► │ 수정    │        │ │
-│  │  │         │     │(Contract│     │ (실패시)│     │         │        │ │
-│  │  │         │     │  Test)  │     │         │     │         │        │ │
-│  │  └─────────┘     └─────────┘     └─────────┘     └────┬────┘        │ │
-│  │       ▲                                               │              │ │
-│  │       └───────────────────────────────────────────────┘              │ │
+│  │  ┌─────────┐  ┌───────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐  │ │
+│  │  │ 구현    │─►│ /ralph-   │─►│ 검증    │─►│ 분석    │─►│ 수정    │  │ │
+│  │  │         │  │  review   │  │(Contract│  │ (실패시)│  │         │  │ │
+│  │  │         │  │           │  │  Test)  │  │         │  │         │  │ │
+│  │  └─────────┘  │ Claude ─┐ │  └─────────┘  └─────────┘  └────┬────┘  │ │
+│  │       ▲       │ Codex ──┼─│                                  │       │ │
+│  │       │       │ Gemini ─┘ │                                  │       │ │
+│  │       │       └───────────┘                                  │       │ │
+│  │       └──────────────────────────────────────────────────────┘       │ │
 │  │                        (통과할 때까지 반복)                           │ │
 │  └───────────────────────────────────────────────────────────────────────┘ │
 │                                                                             │
 │  Worker가 스스로:                                                           │
+│  • /ralph-review로 3개 LLM 코드 리뷰 (구현 후, 테스트 전)                   │
 │  • Contract Test 실행 + 실패 분석 + 재시도                                  │
 │  • Context 80% → checkpoint + /clear                                        │
 │  • 성공 시 PR 생성 (→ epic 브랜치로)                                        │
@@ -414,17 +418,43 @@ main
 ## Worker RALPH 지침 (CLAUDE.md에 포함)
 
 ```markdown
-## 🔄 RALPH: 자율 피드백 루프
+## 🔄 RALPH: 자율 피드백 루프 (Multi-LLM 리뷰 통합)
 
 ### 실행 루프
 
 repeat:
   1. 구현 (Success Criteria 기준)
-  2. Contract Test 실행 (validation command)
-  3. 결과 확인
+  2. Multi-LLM 리뷰 (/ralph-review) ← NEW!
+     - Claude, Codex, Gemini 3개 LLM 병렬 리뷰
+     - Critical 이슈 있으면 수정
+  3. Contract Test 실행 (validation command)
+  4. 결과 확인
      - ✅ 통과 → PR 생성 후 종료
      - ❌ 실패 → 에러 분석 후 수정
 until 통과 or 최대 재시도 초과
+
+### Multi-LLM 리뷰 단계 상세
+
+```
+구현 완료
+    │
+    ▼
+/ralph-review (선택적)
+    │
+    ├─── Claude ──┐
+    ├─── Codex  ──┼─→ 종합 피드백
+    └─── Gemini ──┘
+    │
+    ▼
+Critical 이슈?
+    ├─ Yes → 수정 후 재리뷰
+    └─ No  → 테스트로 진행
+```
+
+**Multi-LLM 리뷰 활성화 조건**:
+- 설정에서 `multi_llm_review: true`
+- 또는 Worker가 판단하여 필요시 수동 실행
+- 첫 구현 완료 후 권장, 재시도 시에는 선택적
 
 ### Context 80% 도달 시
 
@@ -459,6 +489,8 @@ server:
 feedback_loop:
   max_iterations: 3
   context_checkpoint_threshold: 80   # Context % 임계값
+  multi_llm_review: true             # Multi-LLM 리뷰 활성화
+  review_on_retry: false             # 재시도 시에도 리뷰 (기본: 첫 구현만)
 
 merge:
   auto_merge: true         # conflict 없으면 자동 머지
