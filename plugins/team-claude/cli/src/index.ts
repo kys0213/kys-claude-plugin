@@ -29,6 +29,7 @@ import { createFlowCommand } from "./commands/flow";
 import { createPsmCommand } from "./commands/psm";
 import { createHudCommand } from "./commands/hud";
 import { createHookCommand } from "./commands/hook";
+import { createServerCommand } from "./commands/server";
 
 const program = new Command();
 
@@ -45,6 +46,7 @@ program.addCommand(createFlowCommand());
 program.addCommand(createPsmCommand());
 program.addCommand(createHudCommand());
 program.addCommand(createHookCommand());
+program.addCommand(createServerCommand());
 
 // 기본 동작: 도움말
 program.action(() => {
