@@ -30,6 +30,11 @@ import { createPsmCommand } from "./commands/psm";
 import { createHudCommand } from "./commands/hud";
 import { createHookCommand } from "./commands/hook";
 import { createServerCommand } from "./commands/server";
+import { createSessionCommand } from "./commands/session";
+import { createStateCommand } from "./commands/state";
+import { createWorktreeCommand } from "./commands/worktree";
+import { createReviewCommand } from "./commands/review";
+import { createAgentCommand } from "./commands/agent";
 
 const program = new Command();
 
@@ -47,6 +52,11 @@ program.addCommand(createPsmCommand());
 program.addCommand(createHudCommand());
 program.addCommand(createHookCommand());
 program.addCommand(createServerCommand());
+program.addCommand(createSessionCommand());
+program.addCommand(createStateCommand());
+program.addCommand(createWorktreeCommand());
+program.addCommand(createReviewCommand());
+program.addCommand(createAgentCommand());
 
 // 기본 동작: 도움말
 program.action(() => {
