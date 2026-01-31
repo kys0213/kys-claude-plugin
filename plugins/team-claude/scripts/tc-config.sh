@@ -190,8 +190,79 @@ EOF
 
   # .claude/agents 디렉토리 생성 (프로젝트 에이전트 정의)
   ensure_dir "${root}/.claude/agents"
-
   ok ".claude/agents 디렉토리 생성됨"
+
+  # ============================================================================
+  # Flow/PSM/HUD 초기화 (v0.5.0+)
+  # ============================================================================
+
+  # Flow 상태 초기화
+  local state_dir="${data_dir}/state"
+  local workflow_state="${state_dir}/workflow.json"
+  if [[ ! -f "$workflow_state" ]]; then
+    cat > "$workflow_state" << 'STATE_EOF'
+{
+  "currentSession": null,
+  "lastUpdated": null,
+  "status": "idle"
+}
+STATE_EOF
+    ok "Flow 상태 초기화됨: ${workflow_state}"
+  fi
+
+  # PSM 인덱스 초기화
+  local psm_index="${data_dir}/psm-index.json"
+  if [[ ! -f "$psm_index" ]]; then
+    cat > "$psm_index" << 'PSM_EOF'
+{
+  "sessions": [],
+  "createdAt": null,
+  "lastUpdated": null
+}
+PSM_EOF
+    ok "PSM 인덱스 초기화됨: ${psm_index}"
+  fi
+
+  # Flow/PSM/Keywords 설정 추가 (team-claude.yaml에)
+  if command -v yq &>/dev/null; then
+    # flow 설정이 없으면 추가
+    if [[ "$(yq eval '.flow' "$config_path")" == "null" ]]; then
+      yq eval -i '.flow.defaultMode = "assisted"' "$config_path"
+      yq eval -i '.flow.autoReview.enabled = true' "$config_path"
+      yq eval -i '.flow.autoReview.maxIterations = 5' "$config_path"
+      yq eval -i '.flow.escalation.onMaxIterations = true' "$config_path"
+      yq eval -i '.flow.escalation.onConflict = true' "$config_path"
+      ok "Flow 설정 추가됨"
+    fi
+
+    # psm 설정이 없으면 추가
+    if [[ "$(yq eval '.psm' "$config_path")" == "null" ]]; then
+      yq eval -i '.psm.parallelLimit = 4' "$config_path"
+      yq eval -i '.psm.autoCleanup = true' "$config_path"
+      yq eval -i '.psm.conflictCheck.enabled = true' "$config_path"
+      yq eval -i '.psm.conflictCheck.action = "warn"' "$config_path"
+      ok "PSM 설정 추가됨"
+    fi
+
+    # keywords 설정이 없으면 추가
+    if [[ "$(yq eval '.keywords' "$config_path")" == "null" ]]; then
+      yq eval -i '.keywords.enabled = true' "$config_path"
+      yq eval -i '.keywords.aliases.auto = "autopilot"' "$config_path"
+      yq eval -i '.keywords.aliases.ap = "autopilot"' "$config_path"
+      yq eval -i '.keywords.aliases.sp = "spec"' "$config_path"
+      yq eval -i '.keywords.aliases.im = "impl"' "$config_path"
+      ok "Magic Keywords 설정 추가됨"
+    fi
+
+    # swarm 설정이 없으면 추가
+    if [[ "$(yq eval '.swarm' "$config_path")" == "null" ]]; then
+      yq eval -i '.swarm.enabled = true' "$config_path"
+      yq eval -i '.swarm.maxParallel = 4' "$config_path"
+      yq eval -i '.swarm.conflictCheck.enabled = true' "$config_path"
+      yq eval -i '.swarm.conflictCheck.action = "warn"' "$config_path"
+      ok "Swarm 설정 추가됨"
+    fi
+  fi
 
   # hooks 스크립트를 .claude/hooks/에 복사
   ensure_dir "${root}/.claude/hooks"

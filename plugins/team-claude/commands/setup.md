@@ -80,6 +80,8 @@ ${SCRIPTS_DIR}/tc-server.sh start
    │       ├── 설정 수정
    │       ├── 에이전트 관리
    │       ├── 서버 관리
+   │       ├── Flow/PSM 설정    ← NEW
+   │       ├── HUD 설정         ← NEW
    │       └── 종료
    │
    ▼
@@ -90,14 +92,28 @@ ${SCRIPTS_DIR}/tc-server.sh start
         │
         ▼
 ┌─────────────────────────────────┐
-│  Phase 2: 서버 빌드 (필요시)    │
+│  Phase 2: Flow/PSM/HUD 초기화   │  ← NEW
+│  • workflow.json 생성            │
+│  • psm-index.json 생성           │
+│  • flow/psm/swarm/keywords 설정  │
+└─────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────┐
+│  Phase 3: 서버 빌드 (필요시)    │
 │  tc-server.sh install           │
 └─────────────────────────────────┘
         │
         ▼
 ┌─────────────────────────────────┐
-│  Phase 3: 환경 검증             │
+│  Phase 4: 환경 검증             │
 │  tc-config.sh verify            │
+└─────────────────────────────────┘
+        │
+        ▼
+┌─────────────────────────────────┐
+│  Phase 5: HUD 설정 안내 (선택)  │  ← NEW
+│  statusline 설정 방법 안내       │
 └─────────────────────────────────┘
         │
         ▼
@@ -254,6 +270,70 @@ ${SCRIPTS}/tc-state.sh init
 ${SCRIPTS}/tc-state.sh transition setup
 ```
 
+### Phase 1.6: Flow/PSM/HUD 초기화 (v0.5.0+)
+
+`tc-config.sh init`이 자동으로 다음을 생성합니다:
+
+**생성되는 파일:**
+
+```bash
+~/.team-claude/{project-hash}/
+├── state/
+│   └── workflow.json    # Flow 상태 (currentSession, status)
+└── psm-index.json       # PSM 세션 인덱스
+```
+
+**team-claude.yaml에 추가되는 설정:**
+
+```yaml
+# Flow 설정
+flow:
+  defaultMode: assisted        # autopilot | assisted | manual
+  autoReview:
+    enabled: true
+    maxIterations: 5
+  escalation:
+    onMaxIterations: true
+    onConflict: true
+
+# PSM 설정
+psm:
+  parallelLimit: 4
+  autoCleanup: true
+  conflictCheck:
+    enabled: true
+    action: warn               # warn | block | ignore
+
+# Swarm 설정
+swarm:
+  enabled: true
+  maxParallel: 4
+  conflictCheck:
+    enabled: true
+    action: warn
+
+# Magic Keywords 설정
+keywords:
+  enabled: true
+  aliases:
+    auto: autopilot
+    ap: autopilot
+    sp: spec
+    im: impl
+```
+
+**수동 초기화 (필요시):**
+
+```bash
+# TypeScript CLI 사용
+tc flow status          # Flow 상태 확인
+tc psm list             # PSM 세션 목록
+
+# 또는 Shell 스크립트
+${SCRIPTS}/tc-flow.sh status
+${SCRIPTS}/tc-psm.sh list
+```
+
 ### Phase 1.6: 서버 빌드 (초기화 모드에서)
 
 서버 바이너리가 없으면 빌드합니다:
@@ -349,6 +429,8 @@ AskUserQuestion({
       { label: "설정 수정", description: "대화형 위자드로 설정 변경" },
       { label: "에이전트 관리", description: "에이전트 생성/수정/삭제/활성화" },
       { label: "서버 관리", description: "서버 설치/시작/중지" },
+      { label: "Flow/PSM 설정", description: "자동화 워크플로우 설정" },
+      { label: "HUD 설정", description: "Statusline HUD 설정" },
       { label: "종료", description: "설정 메뉴 종료" }
     ],
     multiSelect: false
@@ -364,6 +446,8 @@ AskUserQuestion({
 | 현재 설정 보기 / 설정 수정 | [config-management.md](./reference/setup/config-management.md) |
 | 에이전트 관리 | [agent-management.md](./reference/setup/agent-management.md) |
 | 서버 관리 | [server-management.md](./reference/setup/server-management.md) |
+| Flow/PSM 설정 | [flow-psm-setup.md](#flowpsm-설정) (아래 참조) |
+| HUD 설정 | [hud.md](./hud.md) |
 
 **인프라 진단 선택 시:**
 
@@ -473,9 +557,122 @@ agents:
 └── team-claude.yaml         # 메인 설정
 ```
 
+---
+
+## Flow/PSM 설정
+
+Flow와 PSM의 상세 설정을 변경합니다.
+
+### Flow 모드 설정
+
+```typescript
+AskUserQuestion({
+  questions: [{
+    question: "기본 실행 모드를 선택하세요",
+    header: "Flow Mode",
+    options: [
+      { label: "autopilot", description: "전체 자동화 (Spec→Impl→Merge)" },
+      { label: "assisted", description: "각 단계에서 사용자 확인 (기본값)" },
+      { label: "manual", description: "수동 제어" }
+    ],
+    multiSelect: false
+  }]
+})
+```
+
+**설정 적용:**
+
+```bash
+tc config set flow.defaultMode autopilot
+# 또는
+${SCRIPTS}/tc-config.sh set flow.defaultMode autopilot
+```
+
+### PSM 설정
+
+```bash
+# 병렬 세션 최대 수
+tc config set psm.parallelLimit 4
+
+# 완료 후 자동 정리
+tc config set psm.autoCleanup true
+
+# 충돌 체크
+tc config set psm.conflictCheck.action warn  # warn | block | ignore
+```
+
+### Magic Keywords 설정
+
+```bash
+# Keywords 활성화/비활성화
+tc config set keywords.enabled true
+
+# 커스텀 alias 추가
+tc config set keywords.aliases.auto autopilot
+tc config set keywords.aliases.s swarm
+```
+
+### Swarm 설정
+
+```bash
+# 최대 병렬 서브에이전트 수
+tc config set swarm.maxParallel 4
+
+# 충돌 체크
+tc config set swarm.conflictCheck.action warn
+```
+
+---
+
+## HUD 설정
+
+Statusline에 워크플로우 상태를 표시합니다.
+
+### 설정 안내
+
+```bash
+# HUD 설정 안내 표시
+tc hud setup
+# 또는
+/team-claude:hud setup
+```
+
+### 빠른 설정
+
+```bash
+# 1. 스크립트 복사 (선택 - Shell 버전 사용시)
+cp ${CLAUDE_PLUGIN_ROOT}/scripts/tc-hud.sh ~/.claude/tc-hud.sh
+chmod +x ~/.claude/tc-hud.sh
+
+# 2. Claude Code 설정 (~/.claude/settings.json)
+{
+  "statusLine": {
+    "type": "command",
+    "command": "tc hud output",  // TypeScript CLI 사용
+    "padding": 0
+  }
+}
+```
+
+### HUD 테스트
+
+```bash
+# HUD 출력 테스트
+tc hud output
+
+# 예상 출력 (워크플로우 활성화시):
+# 🚀 auto │ 📋 spec ████████░░ 80% │ 🌳 2/3 │ ⏱️ 5m23s
+```
+
+---
+
 ## Reference Files
 
 - [init-mode.md](./reference/setup/init-mode.md) - 초기화 모드 (프로젝트 분석, 인터뷰)
 - [config-management.md](./reference/setup/config-management.md) - 설정 조회/수정
 - [agent-management.md](./reference/setup/agent-management.md) - 에이전트 CRUD (HITL)
 - [server-management.md](./reference/setup/server-management.md) - 서버 관리
+- [flow.md](./flow.md) - Flow 통합 워크플로우
+- [psm.md](./psm.md) - PSM 병렬 세션 관리
+- [swarm.md](./swarm.md) - Swarm 내부 병렬 에이전트
+- [hud.md](./hud.md) - HUD Statusline 설정
