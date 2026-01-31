@@ -24,7 +24,9 @@ interface CLIResult {
 }
 
 async function runTC(args: string, cwd?: string): Promise<CLIResult> {
-  const result = await $`bun run ${TC_CLI} ${args.split(" ")}`
+  // 셸을 통해 실행하여 따옴표가 포함된 인자를 올바르게 처리
+  const cmd = `bun run ${TC_CLI} ${args}`;
+  const result = await $`bash -c ${cmd}`
     .cwd(cwd || process.cwd())
     .quiet()
     .nothrow();

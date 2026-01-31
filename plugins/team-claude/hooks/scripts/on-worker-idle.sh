@@ -1,51 +1,26 @@
 #!/bin/bash
 # on-worker-idle.sh
-# Worker가 60초 이상 대기 상태일 때 알림을 보냅니다.
+# Worker 대기 상태 알림 - tc hook으로 위임
+#
+# 이 스크립트는 tc CLI의 래퍼입니다.
+# 실제 로직은 cli/src/commands/hook.ts에서 처리됩니다.
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEAM_CLAUDE_ROOT="${SCRIPT_DIR}/../.."
-STATE_FILE=".team-claude/state/current-delegation.json"
+# Context 사용률 (환경 변수 또는 기본값)
+CONTEXT_PERCENT="${CONTEXT_PERCENT:-50}"
 
-# common.sh에서 서버 URL 함수 로드
-# shellcheck source=../../scripts/lib/common.sh
-source "${TEAM_CLAUDE_ROOT}/scripts/lib/common.sh" 2>/dev/null || {
-  # common.sh 로드 실패 시 기본값 사용
-  get_server_url() { echo "http://localhost:7890"; }
-}
-SERVER_URL=$(get_server_url)
-
-# 현재 세션 정보
-SESSION_ID=$(jq -r '.sessionId' "$STATE_FILE" 2>/dev/null || echo "unknown")
-CHECKPOINT_ID=$(jq -r '.currentCheckpoint' "$STATE_FILE" 2>/dev/null || echo "unknown")
-
-echo "Worker idle detected: $CHECKPOINT_ID"
-
-# 마지막 idle 시간 업데이트
-jq '.lastIdleAt = "'"$(date -u +"%Y-%m-%dT%H:%M:%SZ")"'"' "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null && mv "${STATE_FILE}.tmp" "$STATE_FILE"
-
-# 알림 (너무 자주 보내지 않도록 체크 필요)
-LAST_NOTIFIED=$(jq -r '.lastIdleNotified // ""' "$STATE_FILE" 2>/dev/null || echo "")
-CURRENT_TIME=$(date +%s)
-
-# 5분에 한 번만 알림
-if [ -z "$LAST_NOTIFIED" ] || [ $((CURRENT_TIME - LAST_NOTIFIED)) -gt 300 ]; then
-    if command -v osascript &> /dev/null; then
-        osascript -e "display notification \"Worker가 대기 중입니다\" with title \"Team Claude: Worker Idle\""
-    elif command -v notify-send &> /dev/null; then
-        notify-send "Team Claude: Worker Idle" "Worker가 대기 중: $CHECKPOINT_ID"
-    fi
-
-    # 알림 시간 기록
-    jq ".lastIdleNotified = $CURRENT_TIME" "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+# tc CLI 경로 확인
+TC_CLI=""
+if command -v tc &>/dev/null; then
+  TC_CLI="tc"
+elif command -v bun &>/dev/null; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  TC_CLI="bun run ${SCRIPT_DIR}/../../cli/src/index.ts"
+else
+  echo "Error: tc CLI or bun not found"
+  exit 1
 fi
 
-# 서버 상태 업데이트
-if curl -s "${SERVER_URL}/health" &>/dev/null; then
-    curl -X POST "${SERVER_URL}/worker-idle" \
-        -H "Content-Type: application/json" \
-        -d "{\"sessionId\": \"$SESSION_ID\", \"checkpoint\": \"$CHECKPOINT_ID\"}"
-fi
-
-echo "Idle notification sent"
+# tc hook worker-idle 호출
+exec $TC_CLI hook worker-idle --percent "$CONTEXT_PERCENT"
