@@ -1,10 +1,32 @@
 # Team Claude Plugin
 
-멀티 에이전트 협업 시스템: Contract 기반 설계, Worker 자율 RALPH, Semi-Auto 머지
+멀티 에이전트 협업 시스템: **자동화 워크플로우**, PSM 병렬 세션, Contract 기반 설계, RALPH Loop
 
 > **중요**: Claude가 기존 인프라를 사용하도록 [INFRASTRUCTURE.md](./INFRASTRUCTURE.md)를 먼저 읽어야 합니다.
 
+## What's New in v0.5.0
+
+- **`/team-claude:flow`** - 통합 워크플로우 (autopilot/assisted/manual 모드)
+- **`/team-claude:psm`** - PSM (Parallel Session Manager) - git worktree 기반 병렬 세션
+- **`/team-claude:swarm`** - Swarm Mode - 내부 서브에이전트 병렬 실행
+- **`/team-claude:hud`** - HUD (Heads-Up Display) - statusline에 워크플로우 상태 표시
+- **Magic Keywords** - `autopilot:`, `spec:`, `swarm:`, `autopilot+swarm:` 등 키워드 기반 실행
+- **Auto-Review Loop** - 스펙/코드 자동 리뷰 및 피드백 루프
+
 ## Quick Start
+
+```bash
+# 1. 환경 설정
+/team-claude:setup
+
+# 2. 전체 자동화 워크플로우 (autopilot 모드)
+/team-claude:flow "쿠폰 할인 기능 개발" --mode autopilot
+
+# 또는 Magic Keyword 사용
+autopilot: 쿠폰 할인 기능 개발
+```
+
+### 기존 방식 (단계별)
 
 ```bash
 # 1. 환경 설정 (의존성 설치 + 서버 빌드 + 상태 초기화)
@@ -20,12 +42,33 @@
 /team-claude:merge --session <session-id>
 ```
 
+### 병렬 세션 (PSM)
+
+```bash
+# 여러 기능 병렬 개발
+/team-claude:psm new auth-feature
+/team-claude:psm new payment-feature
+/team-claude:psm new notification-feature
+
+# 병렬 실행
+/team-claude:psm parallel auth-feature payment-feature notification-feature
+
+# 상태 확인
+/team-claude:psm status
+```
+
 ## 스크립트 도구
 
 모든 명령어는 결정적 스크립트를 사용합니다:
 
 ```bash
 SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
+
+# 자동화 워크플로우 (신규)
+${SCRIPTS}/tc-flow.sh start/resume/status/parse-keyword
+${SCRIPTS}/tc-psm.sh new/list/status/switch/parallel/cleanup
+${SCRIPTS}/tc-review.sh spec/code
+${SCRIPTS}/tc-hud.sh              # Statusline HUD
 
 # 설정 관리
 ${SCRIPTS}/tc-config.sh init/get/set/show
@@ -373,6 +416,37 @@ Phase 4: MERGE (Main Agent - Semi-Auto)
 
 ## 명령어 요약
 
+### 자동화 워크플로우 (신규)
+
+| 명령어 | 용도 | 인간 개입 |
+|--------|------|----------|
+| `/team-claude:flow` | 통합 자동화 워크플로우 | 모드에 따라 다름 |
+| `/team-claude:psm` | PSM 병렬 세션 관리 (worktree 기반) | 시작/모니터링 |
+| `/team-claude:swarm` | Swarm 내부 병렬 에이전트 | 시작/결과확인 |
+| `/team-claude:hud` | HUD statusline 설정 | 설정만 |
+
+### Magic Keywords
+
+| Keyword | 설명 | 예시 |
+|---------|------|------|
+| `autopilot:` | 전체 자동화 | `autopilot: 쿠폰 기능 추가` |
+| `swarm:` | 내부 병렬 에이전트 | `swarm: model, service, api 구현` |
+| `autopilot+swarm:` | 자동화 + swarm 전략 | `autopilot+swarm: 쿠폰 기능` |
+| `spec:` | 스펙 단계만 | `spec: 결제 시스템 설계` |
+| `impl:` | 구현 단계만 | `impl: --session abc123` |
+| `parallel:` | 병렬 실행 | `parallel: task1, task2` |
+| `ralph:` | 자율 루프 | `ralph: 테스트 통과까지` |
+
+### 구현 전략 (--impl-strategy)
+
+| 전략 | 설명 | 적합한 경우 |
+|------|------|------------|
+| `psm` | git worktree 격리 | 큰 독립 기능, 장기 작업 |
+| `swarm` | 내부 서브에이전트 | 작은 태스크, 빠른 구현 |
+| `sequential` | 순차 실행 | 의존성 많은 경우 |
+
+### 기본 명령어
+
 | 명령어 | 용도 | 인간 개입 |
 |--------|------|----------|
 | `/team-claude:setup` | 환경 설정 (초기화, 설정, 에이전트, 서버) | **HITL 대화형** |
@@ -463,4 +537,46 @@ feedback_loop:
 merge:
   auto_merge: true         # conflict 없으면 자동 머지
   conflict_strategy: ask   # ask | ours | theirs
+
+# 자동화 워크플로우 설정 (신규)
+flow:
+  defaultMode: assisted    # autopilot | assisted | manual
+
+  autoReview:
+    enabled: true
+    maxIterations: 5
+    specReviewer: spec-reviewer
+    codeReviewer: code-reviewer
+
+  escalation:
+    onMaxIterations: true
+    onConflict: true
+    onError: true
+
+# PSM 설정 (신규)
+psm:
+  parallelLimit: 4         # 최대 병렬 세션 수
+  autoCleanup: true        # 완료 후 자동 정리
+  conflictCheck:
+    enabled: true
+    action: warn           # warn | block | ignore
+
+# Magic Keywords 설정 (신규)
+keywords:
+  enabled: true
+  aliases:
+    auto: autopilot
+    ap: autopilot
+    sp: spec
+    im: impl
+    rv: review
+    pl: parallel
+    rl: ralph
 ```
+
+---
+
+## 추가 문서
+
+- [AUTOMATED-WORKFLOW.md](./docs/AUTOMATED-WORKFLOW.md) - 자동화 워크플로우 상세 문서
+- [INFRASTRUCTURE.md](./INFRASTRUCTURE.md) - 인프라 가이드
