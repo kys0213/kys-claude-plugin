@@ -5,14 +5,16 @@
 
 import { Command } from "commander";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, basename } from "path";
 import { execSync } from "child_process";
 import chalk from "chalk";
+import YAML from "yaml";
 import {
   getProjectDataDir,
   getStateDir,
   getSessionsDir,
   findGitRoot,
+  getProjectHash,
   readJsonFile,
   writeJsonFile,
 } from "../lib/common";
@@ -74,6 +76,151 @@ function getPluginRoot(): string {
   // CLI가 실행되는 위치 기준으로 플러그인 루트 찾기
   const cliDir = dirname(dirname(__dirname));
   return dirname(cliDir); // plugins/team-claude
+}
+
+// 기본 설정 생성
+function createDefaultConfig(gitRoot: string): Record<string, unknown> {
+  const projectName = basename(gitRoot);
+  const projectHash = getProjectHash();
+
+  return {
+    version: "1.0",
+    _meta: {
+      project_root: gitRoot,
+      project_hash: projectHash,
+    },
+    project: {
+      name: projectName,
+      language: "",
+      framework: "",
+      domain: "",
+      test_command: "",
+      build_command: "",
+      lint_command: "",
+    },
+    feedback_loop: {
+      mode: "auto",
+      max_iterations: 5,
+      auto_retry_delay: 5000,
+    },
+    validation: {
+      method: "test",
+      timeout: 120000,
+    },
+    notification: {
+      method: "system",
+      slack: {
+        webhook_url: "",
+        channel: "",
+      },
+    },
+    server: {
+      port: 7890,
+      executor: "iterm",
+    },
+    agents: {
+      enabled: ["spec_validator", "test_oracle", "impl_reviewer"],
+      custom: [],
+      overrides: {},
+    },
+    // Flow 설정 (v0.5.0+)
+    flow: {
+      defaultMode: "assisted",
+      autoReview: {
+        enabled: true,
+        maxIterations: 5,
+      },
+      escalation: {
+        onMaxIterations: true,
+        onConflict: true,
+      },
+    },
+    // PSM 설정 (v0.5.0+)
+    psm: {
+      parallelLimit: 4,
+      autoCleanup: true,
+      conflictCheck: {
+        enabled: true,
+        action: "warn",
+      },
+    },
+    // Swarm 설정 (v0.5.0+)
+    swarm: {
+      enabled: true,
+      maxParallel: 4,
+      conflictCheck: {
+        enabled: true,
+        action: "warn",
+      },
+    },
+    // Magic Keywords 설정 (v0.5.0+)
+    keywords: {
+      enabled: true,
+      aliases: {
+        auto: "autopilot",
+        ap: "autopilot",
+        sp: "spec",
+        im: "impl",
+      },
+    },
+  };
+}
+
+// YAML 설정 파일에 누락된 설정 추가
+function ensureConfigSettings(configPath: string): void {
+  if (!existsSync(configPath)) return;
+
+  try {
+    const content = readFileSync(configPath, "utf-8");
+    const config = YAML.parse(content) as Record<string, unknown>;
+    let updated = false;
+
+    // flow 설정 추가
+    if (!config.flow) {
+      config.flow = {
+        defaultMode: "assisted",
+        autoReview: { enabled: true, maxIterations: 5 },
+        escalation: { onMaxIterations: true, onConflict: true },
+      };
+      updated = true;
+    }
+
+    // psm 설정 추가
+    if (!config.psm) {
+      config.psm = {
+        parallelLimit: 4,
+        autoCleanup: true,
+        conflictCheck: { enabled: true, action: "warn" },
+      };
+      updated = true;
+    }
+
+    // swarm 설정 추가
+    if (!config.swarm) {
+      config.swarm = {
+        enabled: true,
+        maxParallel: 4,
+        conflictCheck: { enabled: true, action: "warn" },
+      };
+      updated = true;
+    }
+
+    // keywords 설정 추가
+    if (!config.keywords) {
+      config.keywords = {
+        enabled: true,
+        aliases: { auto: "autopilot", ap: "autopilot", sp: "spec", im: "impl" },
+      };
+      updated = true;
+    }
+
+    if (updated) {
+      writeFileSync(configPath, YAML.stringify(config, { indent: 2 }));
+      console.log(chalk.green("  ✓ Flow/PSM/Swarm/Keywords settings added"));
+    }
+  } catch (e) {
+    console.log(chalk.yellow("  ⚠ Could not update config settings"));
+  }
 }
 
 // ============================================================================
@@ -275,26 +422,23 @@ async function initSetup(options: { force?: boolean }): Promise<void> {
     console.log(chalk.gray("  - settings.local.json already exists"));
   }
 
-  // 6. tc-config.sh init 호출 (team-claude.yaml 생성)
+  // 6. team-claude.yaml 생성 (TypeScript로 직접 생성)
   const configPath = join(dataDir, "team-claude.yaml");
-  if (!existsSync(configPath)) {
-    const scriptPath = join(getPluginRoot(), "scripts", "tc-config.sh");
-    if (existsSync(scriptPath)) {
-      try {
-        execSync(`bash "${scriptPath}" init`, {
-          cwd: gitRoot,
-          stdio: "inherit",
-        });
-      } catch {
-        console.log(
-          chalk.yellow(
-            "  ⚠ Could not run tc-config.sh init. Run manually if needed."
-          )
-        );
-      }
-    }
+  if (!existsSync(configPath) || options.force) {
+    const config = createDefaultConfig(gitRoot);
+    writeFileSync(configPath, YAML.stringify(config, { indent: 2 }));
+    console.log(chalk.green("  ✓ team-claude.yaml created"));
   } else {
     console.log(chalk.gray("  - team-claude.yaml already exists"));
+    // 기존 설정에 누락된 flow/psm/swarm/keywords 추가
+    ensureConfigSettings(configPath);
+  }
+
+  // 7. .claude/agents 디렉토리 생성
+  const agentsDir = join(gitRoot, ".claude", "agents");
+  if (!existsSync(agentsDir)) {
+    ensureDir(agentsDir);
+    console.log(chalk.green("  ✓ .claude/agents created"));
   }
 
   console.log();
