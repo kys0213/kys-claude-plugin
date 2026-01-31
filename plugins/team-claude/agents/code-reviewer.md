@@ -1,3 +1,10 @@
+---
+name: code-reviewer
+description: 코드 자동 리뷰 에이전트 - 구현 코드의 품질을 자동으로 검토
+model: sonnet
+tools: ["Read", "Glob", "Grep", "Bash"]
+---
+
 # Code Reviewer Agent
 
 > 코드 자동 리뷰 에이전트 - 구현 코드의 품질을 자동으로 검토
