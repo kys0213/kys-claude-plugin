@@ -9,6 +9,7 @@
 - **`/team-claude:flow`** - 통합 워크플로우 (autopilot/assisted/manual 모드)
 - **`/team-claude:psm`** - PSM (Parallel Session Manager) - git worktree 기반 병렬 세션
 - **`/team-claude:swarm`** - Swarm Mode - 내부 서브에이전트 병렬 실행
+- **`/team-claude:hud`** - HUD (Heads-Up Display) - statusline에 워크플로우 상태 표시
 - **Magic Keywords** - `autopilot:`, `spec:`, `swarm:`, `autopilot+swarm:` 등 키워드 기반 실행
 - **Auto-Review Loop** - 스펙/코드 자동 리뷰 및 피드백 루프
 
@@ -67,6 +68,7 @@ SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
 ${SCRIPTS}/tc-flow.sh start/resume/status/parse-keyword
 ${SCRIPTS}/tc-psm.sh new/list/status/switch/parallel/cleanup
 ${SCRIPTS}/tc-review.sh spec/code
+${SCRIPTS}/tc-hud.sh              # Statusline HUD
 
 # 설정 관리
 ${SCRIPTS}/tc-config.sh init/get/set/show
@@ -421,6 +423,7 @@ Phase 4: MERGE (Main Agent - Semi-Auto)
 | `/team-claude:flow` | 통합 자동화 워크플로우 | 모드에 따라 다름 |
 | `/team-claude:psm` | PSM 병렬 세션 관리 (worktree 기반) | 시작/모니터링 |
 | `/team-claude:swarm` | Swarm 내부 병렬 에이전트 | 시작/결과확인 |
+| `/team-claude:hud` | HUD statusline 설정 | 설정만 |
 
 ### Magic Keywords
 
