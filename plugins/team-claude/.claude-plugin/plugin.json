@@ -2,7 +2,7 @@
   "author": {
     "name": "kys0213"
   },
-  "description": "팀 클루드: Contract 기반 설계, Worker 자율 RALPH, Semi-Auto 머지",
+  "description": "팀 클루드: 자동화 워크플로우, PSM 병렬 세션, Contract 기반 설계, RALPH Loop",
   "name": "team-claude",
-  "version": "0.4.0"
+  "version": "0.5.0"
 }
