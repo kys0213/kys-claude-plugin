@@ -6,8 +6,8 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { execSync } from "child_process";
-import { join } from "path";
-import { existsSync, readdirSync } from "fs";
+import { join, dirname } from "path";
+import { existsSync, readdirSync, writeFileSync, mkdirSync } from "fs";
 import {
   getProjectDataDir,
   getWorktreesDir,
@@ -118,6 +118,77 @@ function execGit(args: string, cwd?: string): string {
 }
 
 // ============================================================================
+// PSM Hooks 설치 (worktree별)
+// ============================================================================
+
+function getPluginRoot(): string {
+  // CLI 실행 위치에서 plugins/team-claude 찾기
+  const cliDir = dirname(dirname(__dirname));
+  return dirname(cliDir);
+}
+
+function installPsmHooks(worktreePath: string): void {
+  const hooksDir = join(worktreePath, ".claude", "hooks");
+  const pluginHooksDir = join(getPluginRoot(), "hooks", "scripts");
+
+  // hooks 디렉토리 생성
+  if (!existsSync(hooksDir)) {
+    mkdirSync(hooksDir, { recursive: true });
+  }
+
+  // hooks 복사
+  if (existsSync(pluginHooksDir)) {
+    try {
+      execSync(`cp -r "${pluginHooksDir}/"* "${hooksDir}/" 2>/dev/null`, {
+        stdio: "ignore",
+      });
+      execSync(`chmod +x "${hooksDir}/"*.sh 2>/dev/null`, { stdio: "ignore" });
+    } catch {
+      // 복사 실패해도 계속 진행
+    }
+  }
+
+  // settings.local.json 생성 (hooks 설정)
+  const settingsPath = join(worktreePath, ".claude", "settings.local.json");
+  if (!existsSync(settingsPath)) {
+    const hooksConfig = {
+      hooks: {
+        Stop: [
+          {
+            type: "command",
+            command: ".claude/hooks/on-worker-complete.sh",
+          },
+        ],
+        PreToolUse: [
+          {
+            matcher: "Task",
+            hooks: [
+              {
+                type: "command",
+                command: ".claude/hooks/on-worker-question.sh",
+              },
+            ],
+          },
+        ],
+        Notification: [
+          {
+            matcher: ".*",
+            hooks: [
+              {
+                type: "command",
+                command: ".claude/hooks/on-worker-idle.sh",
+              },
+            ],
+          },
+        ],
+      },
+    };
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    writeFileSync(settingsPath, JSON.stringify(hooksConfig, null, 2));
+  }
+}
+
+// ============================================================================
 // 명령어: new
 // ============================================================================
 
@@ -183,6 +254,9 @@ async function cmdNew(
     log.err(err.message);
     process.exit(1);
   }
+
+  // PSM Hooks 설치 (worktree에)
+  installPsmHooks(worktreePath);
 
   // 세션 메타데이터 생성
   const sessionMetaDir = join(worktreePath, ".team-claude-session");

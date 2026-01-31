@@ -43,7 +43,6 @@ interface SetupStatus {
   configExists: boolean;
   stateInitialized: boolean;
   psmInitialized: boolean;
-  hooksInstalled: boolean;
   serverInstalled: boolean;
   dependencies: {
     yq: boolean;
@@ -236,7 +235,6 @@ function checkSetupStatus(): SetupStatus {
     configExists: existsSync(join(dataDir, "team-claude.yaml")),
     stateInitialized: existsSync(join(stateDir, "workflow.json")),
     psmInitialized: existsSync(join(dataDir, "psm-index.json")),
-    hooksInstalled: existsSync(join(gitRoot, ".claude", "hooks")),
     serverInstalled: existsSync(
       join(process.env.HOME || "", ".claude", "team-claude-server")
     ),
@@ -267,9 +265,6 @@ function printStatus(status: SetupStatus): void {
   console.log("📁 Configuration");
   console.log(
     `  ${status.configExists ? chalk.green("✓") : chalk.red("✗")} team-claude.yaml`
-  );
-  console.log(
-    `  ${status.hooksInstalled ? chalk.green("✓") : chalk.red("✗")} hooks/`
   );
   console.log();
 
@@ -359,70 +354,7 @@ async function initSetup(options: { force?: boolean }): Promise<void> {
     console.log(chalk.gray("  - PSM index already exists"));
   }
 
-  // 4. Hooks 복사
-  const hooksDir = join(gitRoot, ".claude", "hooks");
-  const pluginHooksDir = join(getPluginRoot(), "hooks", "scripts");
-
-  if (!existsSync(hooksDir)) {
-    ensureDir(hooksDir);
-    if (existsSync(pluginHooksDir)) {
-      try {
-        execSync(`cp -r "${pluginHooksDir}/"* "${hooksDir}/" 2>/dev/null`, {
-          stdio: "ignore",
-        });
-        execSync(`chmod +x "${hooksDir}/"*.sh 2>/dev/null`, { stdio: "ignore" });
-        console.log(chalk.green("  ✓ Hooks installed"));
-      } catch {
-        console.log(chalk.yellow("  ⚠ Could not copy hooks"));
-      }
-    }
-  } else {
-    console.log(chalk.gray("  - Hooks already exist"));
-  }
-
-  // 5. settings.local.json 설정
-  const settingsPath = join(gitRoot, ".claude", "settings.local.json");
-  if (!existsSync(settingsPath)) {
-    const hooksConfig = {
-      hooks: {
-        Stop: [
-          {
-            type: "command",
-            command: ".claude/hooks/on-worker-complete.sh",
-          },
-        ],
-        PreToolUse: [
-          {
-            matcher: "Task",
-            hooks: [
-              {
-                type: "command",
-                command: ".claude/hooks/on-worker-question.sh",
-              },
-            ],
-          },
-        ],
-        Notification: [
-          {
-            matcher: ".*",
-            hooks: [
-              {
-                type: "command",
-                command: ".claude/hooks/on-worker-idle.sh",
-              },
-            ],
-          },
-        ],
-      },
-    };
-    ensureDir(dirname(settingsPath));
-    writeFileSync(settingsPath, JSON.stringify(hooksConfig, null, 2));
-    console.log(chalk.green("  ✓ settings.local.json created"));
-  } else {
-    console.log(chalk.gray("  - settings.local.json already exists"));
-  }
-
-  // 6. team-claude.yaml 생성 (TypeScript로 직접 생성)
+  // 4. team-claude.yaml 생성 (TypeScript로 직접 생성)
   const configPath = join(dataDir, "team-claude.yaml");
   if (!existsSync(configPath) || options.force) {
     const config = createDefaultConfig(gitRoot);
@@ -434,7 +366,7 @@ async function initSetup(options: { force?: boolean }): Promise<void> {
     ensureConfigSettings(configPath);
   }
 
-  // 7. .claude/agents 디렉토리 생성
+  // 5. .claude/agents 디렉토리 생성
   const agentsDir = join(gitRoot, ".claude", "agents");
   if (!existsSync(agentsDir)) {
     ensureDir(agentsDir);

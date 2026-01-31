@@ -4,6 +4,7 @@
 # Local settings
 *.local.md
 .claude/settings.local.json
+.claude/hooks/
 
 # OS files
 .DS_Store
