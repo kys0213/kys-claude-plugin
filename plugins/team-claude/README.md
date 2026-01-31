@@ -8,7 +8,8 @@
 
 - **`/team-claude:flow`** - 통합 워크플로우 (autopilot/assisted/manual 모드)
 - **`/team-claude:psm`** - PSM (Parallel Session Manager) - git worktree 기반 병렬 세션
-- **Magic Keywords** - `autopilot:`, `spec:`, `impl:`, `parallel:` 등 키워드 기반 실행
+- **`/team-claude:swarm`** - Swarm Mode - 내부 서브에이전트 병렬 실행
+- **Magic Keywords** - `autopilot:`, `spec:`, `swarm:`, `autopilot+swarm:` 등 키워드 기반 실행
 - **Auto-Review Loop** - 스펙/코드 자동 리뷰 및 피드백 루프
 
 ## Quick Start
@@ -418,17 +419,28 @@ Phase 4: MERGE (Main Agent - Semi-Auto)
 | 명령어 | 용도 | 인간 개입 |
 |--------|------|----------|
 | `/team-claude:flow` | 통합 자동화 워크플로우 | 모드에 따라 다름 |
-| `/team-claude:psm` | PSM 병렬 세션 관리 | 시작/모니터링 |
+| `/team-claude:psm` | PSM 병렬 세션 관리 (worktree 기반) | 시작/모니터링 |
+| `/team-claude:swarm` | Swarm 내부 병렬 에이전트 | 시작/결과확인 |
 
 ### Magic Keywords
 
 | Keyword | 설명 | 예시 |
 |---------|------|------|
 | `autopilot:` | 전체 자동화 | `autopilot: 쿠폰 기능 추가` |
+| `swarm:` | 내부 병렬 에이전트 | `swarm: model, service, api 구현` |
+| `autopilot+swarm:` | 자동화 + swarm 전략 | `autopilot+swarm: 쿠폰 기능` |
 | `spec:` | 스펙 단계만 | `spec: 결제 시스템 설계` |
 | `impl:` | 구현 단계만 | `impl: --session abc123` |
 | `parallel:` | 병렬 실행 | `parallel: task1, task2` |
 | `ralph:` | 자율 루프 | `ralph: 테스트 통과까지` |
+
+### 구현 전략 (--impl-strategy)
+
+| 전략 | 설명 | 적합한 경우 |
+|------|------|------------|
+| `psm` | git worktree 격리 | 큰 독립 기능, 장기 작업 |
+| `swarm` | 내부 서브에이전트 | 작은 태스크, 빠른 구현 |
+| `sequential` | 순차 실행 | 의존성 많은 경우 |
 
 ### 기본 명령어
 

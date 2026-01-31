@@ -73,7 +73,23 @@ fi
 
 # 시뮬레이션 (dry-run)
 /team-claude:flow "새 기능" --dry-run
+
+# 구현 전략 선택 (신규)
+/team-claude:flow "기능 설명" --impl-strategy swarm    # 내부 서브에이전트 병렬
+/team-claude:flow "기능 설명" --impl-strategy psm      # git worktree 병렬 (기본)
+/team-claude:flow "기능 설명" --impl-strategy sequential  # 순차 실행
+
+# Magic Keyword 조합
+autopilot+swarm: 쿠폰 기능 추가
 ```
+
+### 구현 전략 (--impl-strategy)
+
+| 전략 | 설명 | 적합한 경우 |
+|------|------|------------|
+| `psm` | git worktree 기반 격리 | 큰 독립 기능, 장기 작업 |
+| `swarm` | 내부 서브에이전트 병렬 | 작은 태스크, 빠른 구현 |
+| `sequential` | 순차 실행 | 의존성 많은 경우 |
 
 ---
 

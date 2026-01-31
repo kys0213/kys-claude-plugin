@@ -24,12 +24,18 @@ Commands:
 Options:
   --mode <mode>              실행 모드 (autopilot|assisted|manual)
   --phase <phase>            특정 단계만 (spec|impl|merge)
+  --impl-strategy <strategy> 구현 전략 (psm|swarm|sequential)
   --dry-run                  시뮬레이션만
 
 Modes:
   autopilot   전체 자동화 (에스컬레이션 시에만 HITL)
   assisted    단계별 확인 (각 단계 완료 시 HITL)
   manual      기존 방식 (모든 결정에 HITL)
+
+Impl Strategies:
+  psm         git worktree 기반 병렬 (기본값)
+  swarm       내부 서브에이전트 병렬
+  sequential  순차 실행
 
 Examples:
   tc-flow start "쿠폰 기능 추가" --mode autopilot
@@ -58,6 +64,15 @@ declare -A MAGIC_KEYWORDS=(
   ["pl"]="parallel"
   ["ralph"]="ralph"
   ["rl"]="ralph"
+  ["swarm"]="swarm"
+  ["sw"]="swarm"
+)
+
+# 구현 전략 (impl-strategy)
+declare -A IMPL_STRATEGIES=(
+  ["psm"]="psm"           # git worktree 기반
+  ["swarm"]="swarm"       # 내부 서브에이전트 병렬
+  ["sequential"]="sequential"  # 순차 실행
 )
 
 # Magic Keyword 파싱
@@ -105,6 +120,7 @@ init_flow_state() {
   local session_id="$1"
   local mode="${2:-assisted}"
   local requirement="$3"
+  local impl_strategy="${4:-psm}"
 
   require_jq
 
@@ -117,6 +133,7 @@ init_flow_state() {
 {
   "sessionId": "${session_id}",
   "mode": "${mode}",
+  "implStrategy": "${impl_strategy}",
   "requirement": $(echo "$requirement" | jq -R .),
   "status": "started",
   "currentPhase": "spec",
@@ -129,6 +146,7 @@ init_flow_state() {
     },
     "impl": {
       "status": "pending",
+      "strategy": "${impl_strategy}",
       "iterations": 0,
       "startedAt": null,
       "completedAt": null
@@ -215,6 +233,7 @@ cmd_start() {
   local requirement=""
   local mode="assisted"
   local phase=""
+  local impl_strategy="psm"
   local dry_run=false
 
   # 인자 파싱
@@ -226,6 +245,10 @@ cmd_start() {
         ;;
       --phase)
         phase="$2"
+        shift 2
+        ;;
+      --impl-strategy)
+        impl_strategy="$2"
         shift 2
         ;;
       --dry-run)
@@ -247,14 +270,26 @@ cmd_start() {
     esac
   done
 
-  # Magic Keyword 처리
+  # Magic Keyword 처리 (예: "autopilot+swarm: 요구사항")
   local keyword
   keyword=$(parse_magic_keyword "$requirement")
 
   if [[ -n "$keyword" ]]; then
-    mode="$keyword"
+    # + 로 조합된 키워드 처리 (예: autopilot+swarm)
+    if [[ "$keyword" == *"+"* ]]; then
+      local parts
+      IFS='+' read -ra parts <<< "$keyword"
+      mode="${parts[0]}"
+      if [[ "${parts[1]}" == "swarm" || "${parts[1]}" == "psm" || "${parts[1]}" == "sequential" ]]; then
+        impl_strategy="${parts[1]}"
+      fi
+    elif [[ "$keyword" == "swarm" ]]; then
+      impl_strategy="swarm"
+    else
+      mode="$keyword"
+    fi
     requirement=$(extract_message "$requirement")
-    info "Magic Keyword 감지: $keyword"
+    info "Magic Keyword 감지: mode=$mode, impl_strategy=$impl_strategy"
   fi
 
   if [[ -z "$requirement" ]]; then
@@ -274,10 +309,22 @@ cmd_start() {
       ;;
   esac
 
+  # 구현 전략 검증
+  case "$impl_strategy" in
+    psm|swarm|sequential)
+      ;;
+    *)
+      err "유효하지 않은 구현 전략: $impl_strategy"
+      err "사용 가능: psm, swarm, sequential"
+      exit 1
+      ;;
+  esac
+
   echo ""
   echo "🚀 Automated Workflow 시작"
   echo ""
   echo "  모드: ${mode}"
+  echo "  구현 전략: ${impl_strategy}"
   echo "  요구사항: ${requirement}"
   if [[ -n "$phase" ]]; then
     echo "  단계: ${phase}"
@@ -304,7 +351,7 @@ cmd_start() {
   ok "세션 생성됨: ${session_id}"
 
   # Flow 상태 초기화
-  init_flow_state "$session_id" "$mode" "$requirement"
+  init_flow_state "$session_id" "$mode" "$requirement" "$impl_strategy"
 
   # 워크플로우 상태 업데이트
   "${SCRIPT_DIR}/tc-state.sh" transition flow_started 2>/dev/null || true
@@ -312,6 +359,21 @@ cmd_start() {
 
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+
+  # 구현 전략 안내
+  echo "🔧 구현 전략: ${impl_strategy^^}"
+  case "$impl_strategy" in
+    psm)
+      echo "   → git worktree 기반 격리 환경에서 병렬 실행"
+      ;;
+    swarm)
+      echo "   → 내부 서브에이전트를 통한 병렬 실행 (같은 코드베이스)"
+      ;;
+    sequential)
+      echo "   → 순차적으로 하나씩 실행"
+      ;;
+  esac
   echo ""
 
   # 모드에 따른 안내
@@ -368,6 +430,7 @@ cmd_start() {
 {
   "sessionId": "${session_id}",
   "mode": "${mode}",
+  "implStrategy": "${impl_strategy}",
   "status": "started"
 }
 EOF
