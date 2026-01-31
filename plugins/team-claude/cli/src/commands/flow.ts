@@ -101,6 +101,7 @@ function initFlowState(
       },
       merge: {
         status: "pending",
+        iterations: 0,
         startedAt: null,
         completedAt: null,
       },

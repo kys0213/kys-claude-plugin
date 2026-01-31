@@ -7,7 +7,14 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { execSync } from "child_process";
 import { join, dirname } from "path";
-import { existsSync, readdirSync, writeFileSync, mkdirSync } from "fs";
+import {
+  existsSync,
+  readdirSync,
+  writeFileSync,
+  readFileSync,
+  mkdirSync,
+  copyFileSync,
+} from "fs";
 import {
   getProjectDataDir,
   getWorktreesDir,
@@ -127,6 +134,48 @@ function getPluginRoot(): string {
   return dirname(cliDir);
 }
 
+// PSM hook 파일 목록
+const PSM_HOOK_FILES = [
+  "on-worker-complete.sh",
+  "on-worker-idle.sh",
+  "on-worker-question.sh",
+  "on-validation-complete.sh",
+];
+
+// PSM hooks 설정 (settings.local.json용)
+function getPsmHooksConfig(): Record<string, unknown[]> {
+  return {
+    Stop: [
+      {
+        type: "command",
+        command: ".claude/hooks/on-worker-complete.sh",
+      },
+    ],
+    PreToolUse: [
+      {
+        matcher: "Task",
+        hooks: [
+          {
+            type: "command",
+            command: ".claude/hooks/on-worker-question.sh",
+          },
+        ],
+      },
+    ],
+    Notification: [
+      {
+        matcher: ".*",
+        hooks: [
+          {
+            type: "command",
+            command: ".claude/hooks/on-worker-idle.sh",
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function installPsmHooks(worktreePath: string): void {
   const hooksDir = join(worktreePath, ".claude", "hooks");
   const pluginHooksDir = join(getPluginRoot(), "hooks", "scripts");
@@ -136,56 +185,83 @@ function installPsmHooks(worktreePath: string): void {
     mkdirSync(hooksDir, { recursive: true });
   }
 
-  // hooks 복사
+  // PSM hook 파일 개별 복사 (기존 파일 보존)
   if (existsSync(pluginHooksDir)) {
-    try {
-      execSync(`cp -r "${pluginHooksDir}/"* "${hooksDir}/" 2>/dev/null`, {
-        stdio: "ignore",
-      });
-      execSync(`chmod +x "${hooksDir}/"*.sh 2>/dev/null`, { stdio: "ignore" });
-    } catch {
-      // 복사 실패해도 계속 진행
+    for (const hookFile of PSM_HOOK_FILES) {
+      const srcPath = join(pluginHooksDir, hookFile);
+      const destPath = join(hooksDir, hookFile);
+
+      // 소스 파일이 존재하고, 대상 파일이 없을 때만 복사
+      if (existsSync(srcPath) && !existsSync(destPath)) {
+        try {
+          copyFileSync(srcPath, destPath);
+          execSync(`chmod +x "${destPath}" 2>/dev/null`, { stdio: "ignore" });
+        } catch {
+          // 복사 실패해도 계속 진행
+        }
+      }
     }
   }
 
-  // settings.local.json 생성 (hooks 설정)
+  // settings.local.json 병합 (기존 설정 보존)
   const settingsPath = join(worktreePath, ".claude", "settings.local.json");
-  if (!existsSync(settingsPath)) {
-    const hooksConfig = {
-      hooks: {
-        Stop: [
-          {
-            type: "command",
-            command: ".claude/hooks/on-worker-complete.sh",
-          },
-        ],
-        PreToolUse: [
-          {
-            matcher: "Task",
-            hooks: [
-              {
-                type: "command",
-                command: ".claude/hooks/on-worker-question.sh",
-              },
-            ],
-          },
-        ],
-        Notification: [
-          {
-            matcher: ".*",
-            hooks: [
-              {
-                type: "command",
-                command: ".claude/hooks/on-worker-idle.sh",
-              },
-            ],
-          },
-        ],
-      },
-    };
-    mkdirSync(dirname(settingsPath), { recursive: true });
-    writeFileSync(settingsPath, JSON.stringify(hooksConfig, null, 2));
+  mkdirSync(dirname(settingsPath), { recursive: true });
+
+  let existingSettings: Record<string, unknown> = {};
+
+  // 기존 설정 읽기
+  if (existsSync(settingsPath)) {
+    try {
+      const content = readFileSync(settingsPath, "utf-8");
+      existingSettings = JSON.parse(content) as Record<string, unknown>;
+    } catch {
+      // JSON 파싱 실패시 빈 객체로 시작
+      existingSettings = {};
+    }
   }
+
+  // hooks 설정 병합
+  const existingHooks = (existingSettings.hooks || {}) as Record<
+    string,
+    unknown[]
+  >;
+  const psmHooks = getPsmHooksConfig();
+
+  // 각 hook 타입별로 병합 (기존 hooks 보존하면서 PSM hooks 추가)
+  for (const [hookType, psmHookEntries] of Object.entries(psmHooks)) {
+    const existingEntries = existingHooks[hookType] || [];
+
+    // PSM hook이 이미 추가되어 있는지 확인 (command로 체크)
+    const psmCommands = psmHookEntries.map((entry) => {
+      const e = entry as Record<string, unknown>;
+      return e.command || (e.hooks as Array<{ command: string }>)?.[0]?.command;
+    });
+
+    const filteredPsmEntries = psmHookEntries.filter((entry) => {
+      const e = entry as Record<string, unknown>;
+      const cmd =
+        e.command || (e.hooks as Array<{ command: string }>)?.[0]?.command;
+
+      // 이미 동일한 command가 있으면 추가하지 않음
+      return !existingEntries.some((existing) => {
+        const ex = existing as Record<string, unknown>;
+        const existingCmd =
+          ex.command ||
+          (ex.hooks as Array<{ command: string }>)?.[0]?.command;
+        return existingCmd === cmd;
+      });
+    });
+
+    if (filteredPsmEntries.length > 0) {
+      existingHooks[hookType] = [...existingEntries, ...filteredPsmEntries];
+    } else if (!existingHooks[hookType] && existingEntries.length === 0) {
+      existingHooks[hookType] = psmHookEntries;
+    }
+  }
+
+  existingSettings.hooks = existingHooks;
+
+  writeFileSync(settingsPath, JSON.stringify(existingSettings, null, 2));
 }
 
 // ============================================================================
