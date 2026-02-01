@@ -19,6 +19,10 @@
  *   tc psm new               PSM 세션 생성
  *   tc psm list              PSM 세션 목록
  *   tc hud output            HUD 출력 (statusline용)
+ *   tc doctor                자가 진단
+ *   tc doctor --fix          자가 진단 및 자동 수정
+ *   tc doctor --json         JSON 형식 출력
+ *   tc doctor --category <cat>  특정 카테고리만 검사
  */
 
 import { Command } from "commander";
@@ -29,6 +33,7 @@ import { createFlowCommand } from "./commands/flow";
 import { createPsmCommand } from "./commands/psm";
 import { createHudCommand } from "./commands/hud";
 import { createHookCommand } from "./commands/hook";
+import { createDoctorCommand } from "./commands/doctor";
 
 const program = new Command();
 
@@ -45,6 +50,7 @@ program.addCommand(createFlowCommand());
 program.addCommand(createPsmCommand());
 program.addCommand(createHudCommand());
 program.addCommand(createHookCommand());
+program.addCommand(createDoctorCommand());
 
 // 기본 동작: 도움말
 program.action(() => {
