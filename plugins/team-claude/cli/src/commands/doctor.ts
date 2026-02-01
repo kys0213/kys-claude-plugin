@@ -75,6 +75,25 @@ function checkCommandWithWhich(cmd: string): boolean {
   }
 }
 
+function checkBunAtCommonPaths(): boolean {
+  const homedir = process.env.HOME || "";
+  const commonPaths = [
+    `${homedir}/.bun/bin/bun`,
+    "/usr/local/bin/bun",
+    "/opt/homebrew/bin/bun",
+  ];
+
+  for (const path of commonPaths) {
+    try {
+      const result = Bun.spawnSync([path, "--version"]);
+      if (result.exitCode === 0) return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+
 /**
  * 인프라 검사: yq, jq, git, bun, curl 설치 여부
  */
@@ -83,7 +102,10 @@ export function checkInfrastructure(): DiagnosticCheck[] {
   const commands = ["yq", "jq", "git", "bun", "curl"];
 
   for (const cmd of commands) {
-    const installed = checkCommand(cmd) || checkCommandWithWhich(cmd);
+    const installed =
+      checkCommand(cmd) ||
+      checkCommandWithWhich(cmd) ||
+      (cmd === "bun" && checkBunAtCommonPaths());
     checks.push({
       category: "infrastructure",
       name: cmd,
