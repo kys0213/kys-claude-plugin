@@ -1,5 +1,6 @@
 # Output directories
 .review-output/
+.team-claude/
 
 # Local settings
 *.local.md
