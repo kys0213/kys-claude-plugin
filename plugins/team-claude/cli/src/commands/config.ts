@@ -149,20 +149,39 @@ async function verifyEnvironment(): Promise<VerifyResult> {
     errors++;
   }
 
-  // Hook 스크립트
-  const hooks = [
+  // tc hook CLI 검증 (tc CLI가 PATH에 있는지 확인)
+  const tcCommands = [
+    "worker-complete",
+    "worker-idle",
+    "worker-question",
+    "validation-complete",
+  ];
+
+  // tc CLI 존재 여부 확인
+  try {
+    Bun.spawnSync(["tc", "--version"]);
+    checks.push({ name: "tc CLI", status: "ok" });
+
+    for (const cmd of tcCommands) {
+      checks.push({ name: `tc hook ${cmd}`, status: "ok" });
+    }
+  } catch {
+    checks.push({ name: "tc CLI", status: "error", message: "미설치 (bun run build 필요)" });
+    errors++;
+  }
+
+  // 레거시 .sh 스크립트 경고
+  const legacyHooks = [
     "on-worker-complete.sh",
     "on-validation-complete.sh",
     "on-worker-question.sh",
     "on-worker-idle.sh",
   ];
-  for (const hook of hooks) {
+  for (const hook of legacyHooks) {
     const hookPath = `${ctx.hooksDir}/${hook}`;
     if (existsSync(hookPath)) {
-      checks.push({ name: `hook/${hook}`, status: "ok" });
-    } else {
-      checks.push({ name: `hook/${hook}`, status: "error", message: "누락" });
-      errors++;
+      checks.push({ name: `legacy/${hook}`, status: "warning", message: "제거 권장" });
+      warnings++;
     }
   }
 

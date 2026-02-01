@@ -397,11 +397,11 @@ ${SCRIPTS}/tc-config.sh verify
   ✓ agents
   ✓ hooks
 
-🪝 Hook 스크립트 (.claude/hooks/)
-  ✓ on-worker-complete.sh
-  ✓ on-validation-complete.sh
-  ✓ on-worker-question.sh
-  ✓ on-worker-idle.sh
+🪝 Hook 명령어 (tc CLI)
+  ✓ tc hook worker-complete
+  ✓ tc hook validation-complete
+  ✓ tc hook worker-question
+  ✓ tc hook worker-idle
 
 🔧 의존성
   ✓ yq (v4.35.1)

@@ -47,28 +47,52 @@ setup_local_hooks() {
   "hooks": {
     "Stop": [
       {
-        "type": "command",
-        "command": ".claude/hooks/on-worker-complete.sh"
+        "matcher": "",
+        "description": "Worker 완료 시 자동 검증 트리거",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tc hook worker-complete",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "PreToolUse": [
       {
         "matcher": "Task",
+        "description": "Worker 질문 시 에스컬레이션 (Task 도구 사용 시)",
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/on-worker-question.sh"
+            "command": "tc hook worker-question",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "description": "Bash 실행 후 결과 분석 (test 명령어는 내부에서 필터링)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tc hook validation-complete",
+            "timeout": 60
           }
         ]
       }
     ],
     "Notification": [
       {
-        "matcher": ".*",
+        "matcher": "idle_prompt",
+        "description": "Worker 대기 상태 감지",
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/on-worker-idle.sh"
+            "command": "tc hook worker-idle",
+            "timeout": 5
           }
         ]
       }
@@ -264,16 +288,9 @@ PSM_EOF
     fi
   fi
 
-  # hooks 스크립트를 .claude/hooks/에 복사
-  ensure_dir "${root}/.claude/hooks"
-  local plugin_hooks_dir="${SCRIPT_DIR}/../hooks/scripts"
-  if [[ -d "$plugin_hooks_dir" ]]; then
-    cp -r "${plugin_hooks_dir}/"* "${root}/.claude/hooks/" 2>/dev/null || true
-    chmod +x "${root}/.claude/hooks/"*.sh 2>/dev/null || true
-    ok "Hook 스크립트 복사됨: .claude/hooks/"
-  else
-    warn "Hook 스크립트 소스 디렉토리를 찾을 수 없습니다: ${plugin_hooks_dir}"
-  fi
+  # tc CLI 사용 안내 (더 이상 .sh 파일 복사하지 않음)
+  info "Hook은 tc CLI를 통해 실행됩니다: tc hook <subcommand>"
+  info "사용 가능: worker-complete, worker-idle, worker-question, validation-complete"
 
   # .claude/settings.local.json에 hooks 설정 추가
   setup_local_hooks "$root"
@@ -433,23 +450,38 @@ cmd_verify() {
   fi
   echo ""
 
-  # --- 4. Hook 스크립트 검증 ---
-  echo "🪝 Hook 스크립트 (.claude/hooks/)"
-  local hooks=("on-worker-complete.sh" "on-validation-complete.sh" "on-worker-question.sh" "on-worker-idle.sh")
-  for hook in "${hooks[@]}"; do
-    local hook_path="${root}/.claude/hooks/${hook}"
-    if [[ -f "$hook_path" ]]; then
-      if [[ -x "$hook_path" ]]; then
-        echo -e "  \033[0;32m✓\033[0m ${hook}"
-      else
-        echo -e "  \033[0;33m⚠\033[0m ${hook} (실행 권한 없음)"
+  # --- 4. tc CLI 검증 ---
+  echo "🪝 tc hook CLI"
+  if command -v tc &>/dev/null; then
+    echo -e "  \033[0;32m✓\033[0m tc CLI 사용 가능"
+
+    # tc hook 서브커맨드 확인
+    local hook_cmds=("worker-complete" "worker-idle" "worker-question" "validation-complete")
+    for cmd in "${hook_cmds[@]}"; do
+      echo -e "  \033[0;32m✓\033[0m tc hook ${cmd}"
+    done
+  else
+    echo -e "  \033[0;31m✗\033[0m tc CLI 미설치"
+    echo -e "  \033[0;33m→\033[0m tc CLI 빌드: cd plugins/team-claude/cli && bun run build"
+    ((errors++))
+  fi
+
+  # 레거시 .sh 스크립트 경고 (있으면)
+  if [[ -d "${root}/.claude/hooks" ]]; then
+    local legacy_hooks=("on-worker-complete.sh" "on-validation-complete.sh" "on-worker-question.sh" "on-worker-idle.sh")
+    local found_legacy=false
+    for hook in "${legacy_hooks[@]}"; do
+      if [[ -f "${root}/.claude/hooks/${hook}" ]]; then
+        if [[ "$found_legacy" == false ]]; then
+          echo ""
+          echo -e "  \033[0;33m⚠\033[0m 레거시 .sh 스크립트 발견 (제거 권장):"
+          found_legacy=true
+        fi
+        echo -e "    - ${hook}"
         ((warnings++))
       fi
-    else
-      echo -e "  \033[0;31m✗\033[0m ${hook} (누락)"
-      ((errors++))
-    fi
-  done
+    done
+  fi
   echo ""
 
   # --- 5. 의존성 검증 ---

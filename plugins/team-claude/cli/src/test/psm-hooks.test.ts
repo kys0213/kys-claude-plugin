@@ -18,39 +18,72 @@ import { execSync } from "child_process";
 // 테스트용 PSM hooks 로직 (psm.ts에서 추출)
 // ============================================================================
 
-const PSM_HOOK_FILES = [
+// Legacy hook files - used for backward compatibility warning tests
+const LEGACY_HOOK_FILES = [
   "on-worker-complete.sh",
   "on-worker-idle.sh",
   "on-worker-question.sh",
   "on-validation-complete.sh",
 ];
 
+// tc CLI hook commands - the new standard
+const TC_HOOK_COMMANDS = [
+  "tc hook worker-complete",
+  "tc hook worker-idle",
+  "tc hook worker-question",
+  "tc hook validation-complete",
+];
+
 function getPsmHooksConfig(): Record<string, unknown[]> {
   return {
     Stop: [
       {
-        type: "command",
-        command: ".claude/hooks/on-worker-complete.sh",
+        matcher: "",
+        description: "Worker 완료 시 자동 검증 트리거",
+        hooks: [
+          {
+            type: "command",
+            command: "tc hook worker-complete",
+            timeout: 30,
+          },
+        ],
       },
     ],
     PreToolUse: [
       {
         matcher: "Task",
+        description: "Worker 질문 시 에스컬레이션 (Task 도구 사용 시)",
         hooks: [
           {
             type: "command",
-            command: ".claude/hooks/on-worker-question.sh",
+            command: "tc hook worker-question",
+            timeout: 10,
+          },
+        ],
+      },
+    ],
+    PostToolUse: [
+      {
+        matcher: "Bash",
+        description: "Bash 실행 후 결과 분석 (test 명령어는 내부에서 필터링)",
+        hooks: [
+          {
+            type: "command",
+            command: "tc hook validation-complete",
+            timeout: 60,
           },
         ],
       },
     ],
     Notification: [
       {
-        matcher: ".*",
+        matcher: "idle_prompt",
+        description: "Worker 대기 상태 감지",
         hooks: [
           {
             type: "command",
-            command: ".claude/hooks/on-worker-idle.sh",
+            command: "tc hook worker-idle",
+            timeout: 5,
           },
         ],
       },
@@ -108,21 +141,6 @@ function mergeSettingsWithPsmHooks(
   return existingSettings;
 }
 
-/**
- * Hook 파일 복사 시뮬레이션 (기존 파일 보존)
- */
-function simulateHookFileCopy(
-  existingFiles: string[],
-  psmFiles: string[]
-): string[] {
-  const result = [...existingFiles];
-  for (const file of psmFiles) {
-    if (!result.includes(file)) {
-      result.push(file);
-    }
-  }
-  return result;
-}
 
 // ============================================================================
 // 테스트 케이스: settings.local.json 병합
@@ -137,6 +155,7 @@ describe("PSM Hooks - settings.local.json 병합", () => {
 
     expect(hooks.Stop).toHaveLength(1);
     expect(hooks.PreToolUse).toHaveLength(1);
+    expect(hooks.PostToolUse).toHaveLength(1);
     expect(hooks.Notification).toHaveLength(1);
   });
 
@@ -146,6 +165,7 @@ describe("PSM Hooks - settings.local.json 병합", () => {
     const hooks = result.hooks as Record<string, unknown[]>;
     expect(hooks.Stop).toHaveLength(1);
     expect(hooks.PreToolUse).toHaveLength(1);
+    expect(hooks.PostToolUse).toHaveLength(1);
     expect(hooks.Notification).toHaveLength(1);
   });
 
@@ -188,15 +208,17 @@ describe("PSM Hooks - settings.local.json 병합", () => {
       )
     ).toBe(true);
     expect(
-      hooks.Stop.some(
-        (h) =>
-          (h as { command: string }).command ===
-          ".claude/hooks/on-worker-complete.sh"
-      )
+      hooks.Stop.some((entry) => {
+        const e = entry as { hooks?: Array<{ command: string }> };
+        return e.hooks?.some((h) => h.command === "tc hook worker-complete");
+      })
     ).toBe(true);
 
     // PreToolUse: 기존 1개 + PSM 1개 = 2개
     expect(hooks.PreToolUse).toHaveLength(2);
+
+    // PostToolUse: PSM 1개만 추가
+    expect(hooks.PostToolUse).toHaveLength(1);
 
     // Notification: PSM 1개만 추가
     expect(hooks.Notification).toHaveLength(1);
@@ -207,8 +229,13 @@ describe("PSM Hooks - settings.local.json 병합", () => {
       hooks: {
         Stop: [
           {
-            type: "command",
-            command: ".claude/hooks/on-worker-complete.sh",
+            matcher: "",
+            hooks: [
+              {
+                type: "command",
+                command: "tc hook worker-complete",
+              },
+            ],
           },
         ],
         PreToolUse: [
@@ -217,7 +244,7 @@ describe("PSM Hooks - settings.local.json 병합", () => {
             hooks: [
               {
                 type: "command",
-                command: ".claude/hooks/on-worker-question.sh",
+                command: "tc hook worker-question",
               },
             ],
           },
@@ -231,7 +258,8 @@ describe("PSM Hooks - settings.local.json 병합", () => {
     // 중복 추가되지 않아야 함
     expect(hooks.Stop).toHaveLength(1);
     expect(hooks.PreToolUse).toHaveLength(1);
-    // Notification은 기존에 없으므로 추가됨
+    // PostToolUse와 Notification은 기존에 없으므로 추가됨
+    expect(hooks.PostToolUse).toHaveLength(1);
     expect(hooks.Notification).toHaveLength(1);
   });
 
@@ -249,11 +277,16 @@ describe("PSM Hooks - settings.local.json 병합", () => {
       hooks: {
         Stop: [
           {
-            type: "command",
-            command: ".claude/hooks/on-worker-complete.sh",
+            matcher: "",
+            hooks: [
+              {
+                type: "command",
+                command: "tc hook worker-complete",
+              },
+            ],
           },
         ],
-        // PreToolUse와 Notification은 없음
+        // PreToolUse, PostToolUse, Notification은 없음
       },
     });
 
@@ -264,13 +297,19 @@ describe("PSM Hooks - settings.local.json 병합", () => {
     expect(hooks.Stop).toHaveLength(1);
     // 나머지는 추가됨
     expect(hooks.PreToolUse).toHaveLength(1);
+    expect(hooks.PostToolUse).toHaveLength(1);
     expect(hooks.Notification).toHaveLength(1);
   });
 
   test("다른 hook 타입 보존", () => {
     const existing = JSON.stringify({
       hooks: {
-        PostToolUse: [{ type: "command", command: ".claude/hooks/post-tool.sh" }],
+        PostToolUse: [
+          {
+            matcher: "Write",
+            hooks: [{ type: "command", command: ".claude/hooks/post-write.sh" }],
+          },
+        ],
         CustomHook: [{ type: "command", command: ".claude/hooks/custom.sh" }],
       },
     });
@@ -278,8 +317,8 @@ describe("PSM Hooks - settings.local.json 병합", () => {
     const result = mergeSettingsWithPsmHooks(existing);
     const hooks = result.hooks as Record<string, unknown[]>;
 
-    // 기존 다른 hook 타입 보존
-    expect(hooks.PostToolUse).toHaveLength(1);
+    // 기존 다른 hook 타입 보존 - PostToolUse에 기존 1개 + PSM 1개 = 2개
+    expect(hooks.PostToolUse).toHaveLength(2);
     expect(hooks.CustomHook).toHaveLength(1);
 
     // PSM hooks 추가
@@ -290,39 +329,8 @@ describe("PSM Hooks - settings.local.json 병합", () => {
 });
 
 // ============================================================================
-// 테스트 케이스: Hook 파일 복사
+// 테스트 케이스: Hook 파일 복사 (REMOVED - no longer copying .sh files)
 // ============================================================================
-
-describe("PSM Hooks - 파일 복사 로직", () => {
-  test("빈 디렉토리에 PSM hook 파일 복사", () => {
-    const existingFiles: string[] = [];
-    const result = simulateHookFileCopy(existingFiles, PSM_HOOK_FILES);
-
-    expect(result).toHaveLength(4);
-    expect(result).toContain("on-worker-complete.sh");
-    expect(result).toContain("on-worker-idle.sh");
-    expect(result).toContain("on-worker-question.sh");
-    expect(result).toContain("on-validation-complete.sh");
-  });
-
-  test("기존 파일 보존 (덮어쓰기 방지)", () => {
-    const existingFiles = ["on-worker-complete.sh", "custom-hook.sh"];
-    const result = simulateHookFileCopy(existingFiles, PSM_HOOK_FILES);
-
-    // 기존 파일 + 새 PSM 파일 (중복 제외)
-    expect(result).toHaveLength(5); // 2 existing + 3 new PSM files
-    expect(result).toContain("custom-hook.sh");
-    expect(result).toContain("on-worker-complete.sh");
-  });
-
-  test("모든 PSM hook 파일이 이미 있는 경우", () => {
-    const existingFiles = [...PSM_HOOK_FILES, "extra-hook.sh"];
-    const result = simulateHookFileCopy(existingFiles, PSM_HOOK_FILES);
-
-    // 변경 없음
-    expect(result).toHaveLength(5);
-  });
-});
 
 // ============================================================================
 // 통합 테스트: 실제 파일 시스템
@@ -388,48 +396,11 @@ describe("PSM Hooks - 파일 시스템 통합 테스트", () => {
 
     expect(settings.hooks.Stop).toBeDefined();
     expect(settings.hooks.PreToolUse).toBeDefined();
+    expect(settings.hooks.PostToolUse).toBeDefined();
     expect(settings.hooks.Notification).toBeDefined();
   });
 
-  test("hook 파일 개별 복사 (기존 파일 보존)", () => {
-    const hooksDir = join(testDir, ".claude", "hooks");
-
-    // 기존 hook 파일 생성
-    writeFileSync(
-      join(hooksDir, "on-worker-complete.sh"),
-      "#!/bin/bash\n# Custom version\necho 'custom'"
-    );
-    writeFileSync(
-      join(hooksDir, "my-custom-hook.sh"),
-      "#!/bin/bash\necho 'my hook'"
-    );
-
-    // PSM hook 파일 복사 시뮬레이션
-    const srcHooks = ["on-worker-complete.sh", "on-worker-idle.sh"];
-    for (const hookFile of srcHooks) {
-      const destPath = join(hooksDir, hookFile);
-      if (!existsSync(destPath)) {
-        writeFileSync(destPath, `#!/bin/bash\n# PSM version of ${hookFile}`);
-      }
-    }
-
-    // 검증: on-worker-complete.sh는 덮어쓰지 않음
-    const content = readFileSync(
-      join(hooksDir, "on-worker-complete.sh"),
-      "utf-8"
-    );
-    expect(content).toContain("Custom version");
-
-    // 검증: on-worker-idle.sh는 새로 생성됨
-    const idleContent = readFileSync(
-      join(hooksDir, "on-worker-idle.sh"),
-      "utf-8"
-    );
-    expect(idleContent).toContain("PSM version");
-
-    // 검증: 기존 커스텀 hook 보존
-    expect(existsSync(join(hooksDir, "my-custom-hook.sh"))).toBe(true);
-  });
+  // REMOVED: hook 파일 개별 복사 테스트 - no longer copying .sh files with tc CLI
 });
 
 // ============================================================================
@@ -450,6 +421,8 @@ describe("PSM Hooks - Edge Cases", () => {
 
     expect(hooks.Stop).toHaveLength(1);
     expect(hooks.PreToolUse).toHaveLength(1);
+    expect(hooks.PostToolUse).toHaveLength(1);
+    expect(hooks.Notification).toHaveLength(1);
   });
 
   test("hooks가 null인 경우", () => {
@@ -468,7 +441,7 @@ describe("PSM Hooks - Edge Cases", () => {
           {
             matcher: "Task",
             hooks: [
-              { type: "command", command: ".claude/hooks/on-worker-question.sh" },
+              { type: "command", command: "tc hook worker-question" },
             ],
           },
           {
@@ -490,7 +463,12 @@ describe("PSM Hooks - Edge Cases", () => {
     const existing = JSON.stringify({
       hooks: {
         Stop: [
-          { type: "command", command: ".claude/hooks/different-stop.sh" },
+          {
+            matcher: "",
+            hooks: [
+              { type: "command", command: ".claude/hooks/different-stop.sh" },
+            ],
+          },
         ],
       },
     });
