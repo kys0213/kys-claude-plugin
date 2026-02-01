@@ -5,7 +5,6 @@
 
 import { Command } from "commander";
 import { join } from "path";
-import { existsSync } from "fs";
 import {
   getProjectDataDir,
   getSessionsDir,
@@ -252,14 +251,10 @@ HUD는 Claude Code의 statusline에 워크플로우 상태를 표시합니다.
 
 설치 방법:
 
-1. 스크립트 복사:
-   cp plugins/team-claude/scripts/tc-hud.sh ~/.claude/tc-hud.sh
-   chmod +x ~/.claude/tc-hud.sh
-
-2. 또는 TypeScript 버전 사용:
+1. tc CLI 사용:
    tc hud output
 
-3. Claude Code 설정 (~/.claude/settings.json):
+2. Claude Code 설정 (~/.claude/settings.json):
    {
      "statusLine": {
        "type": "command",
@@ -272,9 +267,9 @@ HUD는 Claude Code의 statusline에 워크플로우 상태를 표시합니다.
    ~/.claude/statusline.sh에서:
 
    #!/bin/bash
-   existing=\$(your_existing_statusline)
-   tc_hud=\$(tc hud output 2>/dev/null)
-   echo "\${existing} │ \${tc_hud}"
+   existing=${'$'}(your_existing_statusline)
+   tc_hud=${'$'}(tc hud output 2>/dev/null)
+   echo "${'$'}{existing} │ ${'$'}{tc_hud}"
 `);
 }
 

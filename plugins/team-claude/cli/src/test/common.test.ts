@@ -6,7 +6,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
-import { execSync } from "child_process";
+import { homedir } from "os";
 import {
   findGitRoot,
   getProjectHash,
@@ -37,7 +37,7 @@ import {
 
 describe("경로 상수", () => {
   test("TC_DATA_ROOT는 ~/.team-claude", () => {
-    expect(TC_DATA_ROOT).toBe(`${process.env.HOME}/.team-claude`);
+    expect(TC_DATA_ROOT).toBe(`${homedir()}/.team-claude`);
   });
 
   test("TC_SERVER_DEFAULT_PORT는 7890", () => {

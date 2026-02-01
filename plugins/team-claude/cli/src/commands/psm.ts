@@ -13,6 +13,7 @@ import {
   writeFileSync,
   readFileSync,
   mkdirSync,
+  rmSync,
 } from "fs";
 import {
   getProjectDataDir,
@@ -191,11 +192,6 @@ function installPsmHooks(worktreePath: string): void {
     const existingEntries = existingHooks[hookType] || [];
 
     // PSM hook이 이미 추가되어 있는지 확인 (command로 체크)
-    const psmCommands = psmHookEntries.map((entry) => {
-      const e = entry as Record<string, unknown>;
-      return e.command || (e.hooks as Array<{ command: string }>)?.[0]?.command;
-    });
-
     const filteredPsmEntries = psmHookEntries.filter((entry) => {
       const e = entry as Record<string, unknown>;
       const cmd =
@@ -251,7 +247,7 @@ async function cmdNew(
 
   ensureDir(worktreesDir);
 
-  const root = findGitRoot();
+  const _root = findGitRoot();
 
   // 기준 브랜치 결정
   let baseBranch: string;
@@ -657,7 +653,7 @@ async function cmdCleanup(
         execGit(`worktree remove "${session.worktreePath}" --force`, root);
       } catch {
         log.warn("git worktree remove 실패, 수동 삭제...");
-        execSync(`rm -rf "${session.worktreePath}"`);
+        rmSync(session.worktreePath, { recursive: true, force: true });
         execGit("worktree prune", root);
       }
     }
@@ -678,7 +674,7 @@ async function cmdCleanup(
         try {
           execGit(`worktree remove "${session.worktreePath}" --force`, root);
         } catch {
-          execSync(`rm -rf "${session.worktreePath}"`);
+          rmSync(session.worktreePath, { recursive: true, force: true });
         }
       }
 
@@ -704,7 +700,7 @@ async function cmdCleanup(
         try {
           execGit(`worktree remove "${session.worktreePath}" --force`, root);
         } catch {
-          execSync(`rm -rf "${session.worktreePath}"`);
+          rmSync(session.worktreePath, { recursive: true, force: true });
         }
       }
 

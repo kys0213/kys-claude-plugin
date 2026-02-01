@@ -4,6 +4,18 @@
 
 > **중요**: Claude가 기존 인프라를 사용하도록 [INFRASTRUCTURE.md](./INFRASTRUCTURE.md)를 먼저 읽어야 합니다.
 
+## Runtime Requirements
+
+This plugin requires [Bun](https://bun.sh) runtime (v1.0+) for the Team Claude CLI and server components.
+
+### Installation
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+After installing Bun, you can proceed with the setup steps below.
+
 ## What's New in v0.5.0
 
 - **`/team-claude:flow`** - 통합 워크플로우 (autopilot/assisted/manual 모드)
@@ -57,33 +69,34 @@ autopilot: 쿠폰 할인 기능 개발
 /team-claude:psm status
 ```
 
-## 스크립트 도구
+## CLI 도구
 
-모든 명령어는 결정적 스크립트를 사용합니다:
+모든 명령어는 `tc` CLI를 사용합니다:
 
 ```bash
-SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-
-# 자동화 워크플로우 (신규)
-${SCRIPTS}/tc-flow.sh start/resume/status/parse-keyword
-${SCRIPTS}/tc-psm.sh new/list/status/switch/parallel/cleanup
-${SCRIPTS}/tc-review.sh spec/code
-${SCRIPTS}/tc-hud.sh              # Statusline HUD
+# 자동화 워크플로우
+tc flow start/resume/status/parse-keyword
+tc psm new/list/status/switch/parallel/cleanup
+tc review spec/code
+tc hud              # Statusline HUD
 
 # 설정 관리
-${SCRIPTS}/tc-config.sh init/get/set/show
+tc config init/get/set/show
 
 # 세션 관리
-${SCRIPTS}/tc-session.sh create/list/show/update
+tc session create/list/show/update
 
 # Worktree 관리
-${SCRIPTS}/tc-worktree.sh create/list/delete
+tc worktree create/list/delete
 
 # 워크플로우 상태
-${SCRIPTS}/tc-state.sh init/check/require/transition
+tc state init/check/require/transition
 
 # 서버 관리
-${SCRIPTS}/tc-server.sh status/start/stop/ensure/install
+tc server status/start/stop/ensure/install
+
+# 에이전트 관리
+tc agent create/list/delete/status
 ```
 
 ---
@@ -216,7 +229,7 @@ Phase 2: DELEGATE (Main Agent → Workers 위임)
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  Main Agent: 각 Task별 Worktree + CLAUDE.md 생성                            │
 │                                                                             │
-│  git worktree add .team-claude/worktrees/coupon-model -b team-claude/coupon-model           │
+│  tc worktree create coupon-model team-claude/coupon-model                   │
 │                                                                             │
 │  .team-claude/worktrees/coupon-model/                                               │
 │    ├── CLAUDE.md              ← Worker 지시서 + RALPH 루프 지침             │
@@ -287,10 +300,10 @@ Phase 3: WORKER (자율 RALPH 루프 - 서버 개입 없음!)
   │                                                                         │
   │  gh pr create \                                                         │
   │    --base epic/coupon-feature \                                         │
-  │    --head team-claude/coupon-model \                                            │
+  │    --head team-claude/coupon-model \                                    │
   │    --title "feat(coupon): implement Coupon model"                       │
   │                                                                         │
-  │  .team-claude-result.json:                                                      │
+  │  .team-claude-result.json:                                              │
   │  { "status": "completed", "pr_url": "...", "attempts": 2 }              │
   └─────────────────────────────────────────────────────────────────────────┘
 

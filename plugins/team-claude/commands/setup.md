@@ -10,43 +10,37 @@ allowed-tools: ["Read", "Write", "Glob", "Bash", "AskUserQuestion"]
 
 단일 진입점으로 모든 환경 설정을 관리합니다.
 
-## 스크립트 도구
+## tc CLI 도구
 
-> **중요**: 설정 관리는 결정적 스크립트를 통해 수행합니다. LLM이 직접 YAML을 파싱하지 않습니다.
+> **중요**: 설정 관리는 결정적 CLI를 통해 수행합니다. LLM이 직접 YAML을 파싱하지 않습니다.
 
 ```bash
-# 스크립트 위치
-SCRIPTS_DIR="./plugins/team-claude/scripts"
-
 # 설정 초기화
-${SCRIPTS_DIR}/tc-config.sh init
+tc setup init
 
 # 설정 값 읽기
-${SCRIPTS_DIR}/tc-config.sh get project.name
-${SCRIPTS_DIR}/tc-config.sh get feedback_loop.mode
+tc config get project.name
+tc config get feedback_loop.mode
 
 # 설정 값 쓰기
-${SCRIPTS_DIR}/tc-config.sh set project.language python
-${SCRIPTS_DIR}/tc-config.sh set feedback_loop.max_iterations 5
+tc config set project.language python
+tc config set feedback_loop.max_iterations 5
 
 # 전체 설정 보기
-${SCRIPTS_DIR}/tc-config.sh show
-
-# 설정 파일 경로
-${SCRIPTS_DIR}/tc-config.sh path
+tc config show
 
 # 환경 검증
-${SCRIPTS_DIR}/tc-config.sh verify
+tc doctor
 
 # 상태 관리
-${SCRIPTS_DIR}/tc-state.sh init
-${SCRIPTS_DIR}/tc-state.sh check
-${SCRIPTS_DIR}/tc-state.sh transition setup
+tc state init
+tc state check
+tc state transition setup
 
 # 서버 관리
-${SCRIPTS_DIR}/tc-server.sh install
-${SCRIPTS_DIR}/tc-server.sh status
-${SCRIPTS_DIR}/tc-server.sh start
+tc server install
+tc server status
+tc server start
 ```
 
 ## 워크플로우
@@ -87,7 +81,7 @@ ${SCRIPTS_DIR}/tc-server.sh start
    ▼
 ┌─────────────────────────────────┐
 │  Phase 1: 상태 초기화           │
-│  tc-state.sh init               │
+│  tc state init                  │
 └─────────────────────────────────┘
         │
         ▼
@@ -101,13 +95,13 @@ ${SCRIPTS_DIR}/tc-server.sh start
         ▼
 ┌─────────────────────────────────┐
 │  Phase 3: 서버 빌드 (필요시)    │
-│  tc-server.sh install           │
+│  tc server install              │
 └─────────────────────────────────┘
         │
         ▼
 ┌─────────────────────────────────┐
 │  Phase 4: 환경 검증             │
-│  tc-config.sh verify            │
+│  tc doctor                      │
 └─────────────────────────────────┘
         │
         ▼
@@ -129,18 +123,14 @@ setup 시작 전에 전체 인프라 상태를 확인합니다. 이 단계에서
 **전체 인프라 체크:**
 
 ```bash
-# 인프라 전체 상태 확인 (human-readable)
-source ./plugins/team-claude/scripts/lib/common.sh
-source ./plugins/team-claude/scripts/lib/prerequisites.sh
-print_infrastructure_status
-```
+# 인프라 전체 상태 확인
+tc doctor
 
-**JSON 형태로 상태 확인 (프로그래밍용):**
+# 의존성만 확인
+tc doctor --dependencies
 
-```bash
-source ./plugins/team-claude/scripts/lib/common.sh
-source ./plugins/team-claude/scripts/lib/prerequisites.sh
-check_infrastructure
+# JSON 형태로 상태 확인 (프로그래밍용)
+tc doctor --json
 ```
 
 **확인 항목:**
@@ -152,21 +142,9 @@ check_infrastructure
 | `git` | 버전 관리 | `xcode-select --install` |
 | `curl` | HTTP 통신 | 대부분 기본 설치됨 |
 | `bun` | 서버 빌드/실행 | `curl -fsSL https://bun.sh/install \| bash` |
-| Server Binary | 컴파일된 서버 | `tc-server install` |
-| Server Running | 서버 실행 상태 | `tc-server start` |
+| Server Binary | 컴파일된 서버 | `tc server install` |
+| Server Running | 서버 실행 상태 | `tc server start` |
 | iTerm2 (macOS) | 터미널 자동화 | `brew install --cask iterm2` (선택) |
-
-**의존성 상태만 확인:**
-
-```bash
-source ./plugins/team-claude/scripts/lib/common.sh
-print_dependency_status
-
-# 누락된 의존성 확인
-if ! check_dependencies; then
-  echo "일부 의존성이 누락되었습니다."
-fi
-```
 
 **미설치 시 처리:**
 
@@ -188,16 +166,14 @@ AskUserQuestion({
 **자동 설치 선택 시:**
 
 ```bash
-source ./plugins/team-claude/scripts/lib/common.sh
-install_all_dependencies
+# brew로 CLI 도구 설치
+brew install yq jq
 
-# bun 별도 설치 (Homebrew 없이)
-if ! command -v bun &>/dev/null; then
-  curl -fsSL https://bun.sh/install | bash
-fi
+# bun 설치
+curl -fsSL https://bun.sh/install | bash
 
 # 서버 빌드 및 설치
-./plugins/team-claude/scripts/tc-server.sh install
+tc server install
 ```
 
 **수동 설치 선택 시:**
@@ -216,7 +192,7 @@ fi
    # 설치 후 터미널 재시작
 
 4. Team Claude Server:
-   ./plugins/team-claude/scripts/tc-server.sh install
+   tc server install
 
 5. (선택) iTerm2 - 터미널 자동화용:
    brew install --cask iterm2
@@ -230,7 +206,7 @@ fi
 
 ```bash
 # Worktree만 생성 (서버 없이)
-./plugins/team-claude/scripts/tc-worktree.sh create <checkpoint-id>
+tc worktree create <checkpoint-id>
 
 # 수동으로 Worker 실행
 cd .team-claude/worktrees/<checkpoint-id>
@@ -242,18 +218,18 @@ claude --print "CLAUDE.md를 읽고 지시사항을 수행하세요"
 
 ### Phase 1: 상태 감지
 
-`.claude/team-claude.yaml` 존재 여부 확인 (tc-config.sh 사용):
+`.claude/team-claude.yaml` 존재 여부 확인:
 
 ```bash
 # 설정 파일 존재 확인
-if ./plugins/team-claude/scripts/tc-config.sh show &>/dev/null; then
+if tc config show &>/dev/null; then
   echo "설정 존재 → 메인 메뉴"
 else
   echo "설정 없음 → 초기화 모드"
 fi
 ```
 
-- **없음** → [초기화 모드](./reference/setup/init-mode.md) 진입 (`tc-config.sh init` 실행)
+- **없음** → [초기화 모드](./reference/setup/init-mode.md) 진입 (`tc setup init` 실행)
 - **있음** → 메인 메뉴 표시
 
 ### Phase 1.5: 상태 초기화 (초기화 모드에서)
@@ -261,18 +237,16 @@ fi
 설정 파일 생성 후 워크플로우 상태를 초기화합니다:
 
 ```bash
-SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-
 # 상태 파일 초기화
-${SCRIPTS}/tc-state.sh init
+tc state init
 
 # 상태 전이: idle → setup
-${SCRIPTS}/tc-state.sh transition setup
+tc state transition setup
 ```
 
 ### Phase 1.6: Flow/PSM/HUD 초기화 (v0.5.0+)
 
-`tc-config.sh init`이 자동으로 다음을 생성합니다:
+`tc setup init`이 자동으로 다음을 생성합니다:
 
 **생성되는 파일:**
 
@@ -325,13 +299,11 @@ keywords:
 **수동 초기화 (필요시):**
 
 ```bash
-# TypeScript CLI 사용
-tc flow status          # Flow 상태 확인
-tc psm list             # PSM 세션 목록
+# Flow 상태 확인
+tc flow status
 
-# 또는 Shell 스크립트
-${SCRIPTS}/tc-flow.sh status
-${SCRIPTS}/tc-psm.sh list
+# PSM 세션 목록
+tc psm list
 ```
 
 ### Phase 1.6: 서버 빌드 (초기화 모드에서)
@@ -342,7 +314,7 @@ ${SCRIPTS}/tc-psm.sh list
 # 서버 바이너리 존재 확인
 if [[ ! -f "${HOME}/.claude/team-claude-server" ]]; then
   echo "서버 빌드가 필요합니다."
-  ${SCRIPTS}/tc-server.sh install
+  tc server install
 fi
 ```
 
@@ -363,7 +335,7 @@ bun이 설치되어 있지 않습니다.
 
 ```bash
 # 환경 검증 실행 (cmd_init에서 자동 호출됨)
-${SCRIPTS}/tc-config.sh verify
+tc doctor
 ```
 
 **검증 항목:**
@@ -397,11 +369,11 @@ ${SCRIPTS}/tc-config.sh verify
   ✓ agents
   ✓ hooks
 
-🪝 Hook 스크립트 (.claude/hooks/)
-  ✓ on-worker-complete.sh
-  ✓ on-validation-complete.sh
-  ✓ on-worker-question.sh
-  ✓ on-worker-idle.sh
+🪝 Hook 명령어 (tc CLI)
+  ✓ tc hook worker-complete
+  ✓ tc hook validation-complete
+  ✓ tc hook worker-question
+  ✓ tc hook worker-idle
 
 🔧 의존성
   ✓ yq (v4.35.1)
@@ -410,7 +382,7 @@ ${SCRIPTS}/tc-config.sh verify
   ⚠ bun (미설치 - 서버 빌드에 필요)
 
 🖥️  서버
-  ⚠ team-claude-server (미설치 - tc-server.sh install 실행 필요)
+  ⚠ team-claude-server (미설치 - tc server install 실행 필요)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠ 경고 2개 (선택적 항목)
@@ -442,7 +414,7 @@ AskUserQuestion({
 
 | 선택 | Reference / Action |
 |------|-----------|
-| 인프라 진단 | `print_infrastructure_status` 실행 (아래 참조) |
+| 인프라 진단 | `tc doctor` 실행 |
 | 현재 설정 보기 / 설정 수정 | [config-management.md](./reference/setup/config-management.md) |
 | 에이전트 관리 | [agent-management.md](./reference/setup/agent-management.md) |
 | 서버 관리 | [server-management.md](./reference/setup/server-management.md) |
@@ -452,9 +424,7 @@ AskUserQuestion({
 **인프라 진단 선택 시:**
 
 ```bash
-source ./plugins/team-claude/scripts/lib/common.sh
-source ./plugins/team-claude/scripts/lib/prerequisites.sh
-print_infrastructure_status
+tc doctor
 ```
 
 출력 예시:
@@ -584,8 +554,6 @@ AskUserQuestion({
 
 ```bash
 tc config set flow.defaultMode autopilot
-# 또는
-${SCRIPTS}/tc-config.sh set flow.defaultMode autopilot
 ```
 
 ### PSM 설정
@@ -640,15 +608,11 @@ tc hud setup
 ### 빠른 설정
 
 ```bash
-# 1. 스크립트 복사 (선택 - Shell 버전 사용시)
-cp ${CLAUDE_PLUGIN_ROOT}/scripts/tc-hud.sh ~/.claude/tc-hud.sh
-chmod +x ~/.claude/tc-hud.sh
-
-# 2. Claude Code 설정 (~/.claude/settings.json)
+# Claude Code 설정 (~/.claude/settings.json)
 {
   "statusLine": {
     "type": "command",
-    "command": "tc hud output",  // TypeScript CLI 사용
+    "command": "tc hud output",
     "padding": 0
   }
 }

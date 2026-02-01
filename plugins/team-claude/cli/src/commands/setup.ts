@@ -7,6 +7,7 @@ import { Command } from "commander";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
 import { join, dirname, basename } from "path";
 import { execSync } from "child_process";
+import { homedir } from "os";
 import chalk from "chalk";
 import YAML from "yaml";
 import {
@@ -15,7 +16,6 @@ import {
   getSessionsDir,
   findGitRoot,
   getProjectHash,
-  readJsonFile,
   writeJsonFile,
 } from "../lib/common";
 
@@ -69,12 +69,6 @@ function checkCommand(cmd: string): boolean {
   } catch {
     return false;
   }
-}
-
-function getPluginRoot(): string {
-  // CLI가 실행되는 위치 기준으로 플러그인 루트 찾기
-  const cliDir = dirname(dirname(__dirname));
-  return dirname(cliDir); // plugins/team-claude
 }
 
 // 기본 설정 생성
@@ -217,7 +211,7 @@ function ensureConfigSettings(configPath: string): void {
       writeFileSync(configPath, YAML.stringify(config, { indent: 2 }));
       console.log(chalk.green("  ✓ Flow/PSM/Swarm/Keywords settings added"));
     }
-  } catch (e) {
+  } catch {
     console.log(chalk.yellow("  ⚠ Could not update config settings"));
   }
 }
@@ -229,14 +223,13 @@ function ensureConfigSettings(configPath: string): void {
 function checkSetupStatus(): SetupStatus {
   const dataDir = getProjectDataDir();
   const stateDir = getStateDir();
-  const gitRoot = findGitRoot();
 
   return {
     configExists: existsSync(join(dataDir, "team-claude.yaml")),
     stateInitialized: existsSync(join(stateDir, "workflow.json")),
     psmInitialized: existsSync(join(dataDir, "psm-index.json")),
     serverInstalled: existsSync(
-      join(process.env.HOME || "", ".claude", "team-claude-server")
+      join(homedir(), ".claude", "team-claude-server")
     ),
     dependencies: {
       yq: checkCommand("yq"),
@@ -489,18 +482,13 @@ async function cmdHud(): Promise<void> {
 }
 
 async function cmdVerify(): Promise<void> {
-  const scriptPath = join(getPluginRoot(), "scripts", "tc-config.sh");
-  if (existsSync(scriptPath)) {
-    try {
-      execSync(`bash "${scriptPath}" verify`, {
-        cwd: findGitRoot(),
-        stdio: "inherit",
-      });
-    } catch {
-      process.exit(1);
-    }
-  } else {
-    console.error("tc-config.sh not found");
+  // tc doctor를 호출하여 환경 검증
+  try {
+    execSync("tc doctor", {
+      cwd: findGitRoot(),
+      stdio: "inherit",
+    });
+  } catch {
     process.exit(1);
   }
 }

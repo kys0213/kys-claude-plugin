@@ -4,11 +4,9 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import {
-  getProjectDataDir,
-  getWorktreesDir,
   ensureDir,
   timestamp,
   readJsonFile,

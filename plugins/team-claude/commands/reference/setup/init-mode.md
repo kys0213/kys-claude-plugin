@@ -117,13 +117,8 @@ AskUserQuestion({
 └── worktrees/
 
 <project>/.claude/                 # Claude Code 표준 디렉토리
-├── settings.local.json            # hooks 설정 (레포별)
-├── agents/                        # 프로젝트 에이전트 정의
-└── hooks/                         # hook 스크립트
-    ├── on-worker-complete.sh
-    ├── on-validation-complete.sh
-    ├── on-worker-question.sh
-    └── on-worker-idle.sh
+├── settings.local.json            # hooks 설정 (tc CLI 명령어 사용)
+└── agents/                        # 프로젝트 에이전트 정의
 ```
 
 **프로젝트 해시**: git root 경로의 md5 해시 앞 12자리
@@ -134,17 +129,13 @@ AskUserQuestion({
 
 `tc-config init` 명령이 자동으로 처리합니다:
 
-1. 플러그인의 hook 스크립트를 `.claude/hooks/`에 복사
-2. `.claude/settings.local.json`에 hooks 설정 추가/병합
+1. `.claude/settings.local.json`에 tc CLI hook 설정 추가/병합
 
-### 수동 설정 (참고용)
-
-```bash
-# Hook 스크립트 복사
-mkdir -p .claude/hooks
-cp -r ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/* .claude/hooks/
-chmod +x .claude/hooks/*.sh
-```
+Hook은 tc CLI를 통해 실행됩니다:
+- `tc hook worker-complete` - Worker 완료 시 검증 트리거
+- `tc hook worker-idle` - Worker 대기 상태 감지
+- `tc hook worker-question` - Worker 질문 에스컬레이션
+- `tc hook validation-complete` - 검증 완료 처리
 
 ### 생성되는 settings.local.json
 
@@ -154,7 +145,7 @@ chmod +x .claude/hooks/*.sh
     "Stop": [
       {
         "type": "command",
-        "command": ".claude/hooks/on-worker-complete.sh"
+        "command": "tc hook worker-complete"
       }
     ],
     "PreToolUse": [
@@ -163,7 +154,7 @@ chmod +x .claude/hooks/*.sh
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/on-worker-question.sh"
+            "command": "tc hook worker-question"
           }
         ]
       }
@@ -174,7 +165,7 @@ chmod +x .claude/hooks/*.sh
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/hooks/on-worker-idle.sh"
+            "command": "tc hook worker-idle"
           }
         ]
       }
@@ -199,8 +190,7 @@ chmod +x .claude/hooks/*.sh
 
   .claude/
   ├── settings.local.json (hooks 설정)
-  ├── agents/
-  └── hooks/ (4개 스크립트)
+  └── agents/
 
 📊 감지된 프로젝트 정보:
   • 언어: {language}

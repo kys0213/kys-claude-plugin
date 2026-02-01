@@ -16,35 +16,27 @@ description: Team Claude 커맨드 실행 전 전제조건을 확인하는 공�
 
 ---
 
-## 전제조건 체크 스크립트
+## 전제조건 체크
 
-### 스크립트 위치
+### tc CLI 사용
 
-```bash
-SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-```
-
-### 공통 체크 함수
-
-`${SCRIPTS}/lib/prerequisites.sh` 파일을 source하여 사용:
+tc CLI를 통해 전제조건을 확인합니다:
 
 ```bash
-source ${SCRIPTS}/lib/prerequisites.sh
-
 # 설정 파일 존재 확인
-prereq_config_exists
+tc config show &>/dev/null
 
 # 상태 파일 존재 확인
-prereq_state_exists
+tc state check &>/dev/null
 
 # 서버 healthy 확인
-prereq_server_healthy
+tc server ensure
 
 # 세션 존재 확인
-prereq_session_exists "abc12345"
+tc session show "abc12345"
 
 # Checkpoint 승인 확인
-prereq_checkpoints_approved "abc12345"
+tc state get phase  # checkpoints_approved 확인
 ```
 
 ---
@@ -61,13 +53,13 @@ prereq_checkpoints_approved "abc12345"
 
 ```bash
 # 1. 설정 파일 존재
-${SCRIPTS}/tc-config.sh show &>/dev/null || {
+tc config show &>/dev/null || {
   echo "'/team-claude:setup'을 먼저 실행하세요."
   exit 1
 }
 
 # 2. 상태 파일 존재
-${SCRIPTS}/tc-state.sh check &>/dev/null || {
+tc state check &>/dev/null || {
   echo "'/team-claude:setup'을 먼저 실행하세요."
   exit 1
 }
@@ -77,33 +69,33 @@ ${SCRIPTS}/tc-state.sh check &>/dev/null || {
 
 ```bash
 # 1. 워크플로우 상태 확인
-${SCRIPTS}/tc-state.sh require checkpoints_approved
+tc state require checkpoints_approved
 
 # 2. 서버 실행 보장
-${SCRIPTS}/tc-server.sh ensure
+tc server ensure
 ```
 
 ### /team-claude:checkpoint
 
 ```bash
 # 1. 설정 파일 존재
-${SCRIPTS}/tc-config.sh show &>/dev/null
+tc config show &>/dev/null
 
 # 2. 세션 존재 (세션 지정 시)
-${SCRIPTS}/tc-session.sh show ${SESSION_ID}
+tc session show ${SESSION_ID}
 ```
 
 ### /team-claude:merge
 
 ```bash
 # 1. 설정 파일 존재
-${SCRIPTS}/tc-config.sh show &>/dev/null
+tc config show &>/dev/null
 
 # 2. 세션 존재
-${SCRIPTS}/tc-session.sh show ${SESSION_ID}
+tc session show ${SESSION_ID}
 
 # 3. 위임 완료 상태 (권장)
-${SCRIPTS}/tc-state.sh get phase  # delegating 또는 이후
+tc state get phase  # delegating 또는 이후
 ```
 
 ---
@@ -192,22 +184,13 @@ completed ◀──────────────────────�
 ## 복합 체크 함수 사용
 
 ```bash
-source ${SCRIPTS}/lib/prerequisites.sh
+# tc doctor를 사용하여 전제조건 확인
+tc doctor
 
-# delegate 전 모든 체크
-if ! check_delegate_prerequisites "${SESSION_ID}" "${SCRIPTS}"; then
-  exit 1
-fi
-
-# architect 전 체크
-if ! check_architect_prerequisites "${SCRIPTS}"; then
-  exit 1
-fi
-
-# merge 전 체크
-if ! check_merge_prerequisites "${SESSION_ID}" "${SCRIPTS}"; then
-  exit 1
-fi
+# 또는 개별 체크
+tc config show &>/dev/null && \
+tc state check &>/dev/null && \
+tc server ensure
 ```
 
 ---
@@ -216,8 +199,7 @@ fi
 
 ```bash
 # 전체 상태 출력
-source ${SCRIPTS}/lib/prerequisites.sh
-print_prerequisites_status "${SESSION_ID}"
+tc doctor
 
 # 출력 예:
 # ━━━ Prerequisites Status ━━━

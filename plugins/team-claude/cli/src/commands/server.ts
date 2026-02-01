@@ -1,92 +1,51 @@
 /**
- * tc server - 서버 라이프사이클 관리 커맨드
- *
- * 글로벌 서버의 시작, 중지, 상태 확인 등을 처리합니다.
+ * server 명령어 - Team Claude MCP 서버 관리
  */
 
 import { Command } from "commander";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { log, printSection, printStatus, icon } from "../lib/utils";
+import { ProjectContext } from "../lib/context";
+import { existsSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
-import { execSync, spawn } from "child_process";
-import { $ } from "bun";
 
-// ============================================================================
-// 상수
-// ============================================================================
-
-const CLAUDE_DIR = join(homedir(), ".claude");
-const SERVER_BINARY = join(CLAUDE_DIR, "team-claude-server");
-const PID_FILE = join(CLAUDE_DIR, "team-claude-server.pid");
-const LOG_FILE = join(CLAUDE_DIR, "team-claude-server.log");
+// Cross-platform: os.homedir() 사용 (Windows 호환)
+const SERVER_BINARY = join(homedir(), ".claude", "team-claude-server");
+const PID_FILE = join(homedir(), ".claude", "team-claude-server.pid");
+const LOG_FILE = join(homedir(), ".claude", "team-claude-server.log");
 const DEFAULT_PORT = 7890;
 
-// ============================================================================
-// 타입 정의
-// ============================================================================
-
 interface ServerStatus {
-  running: boolean;
+  binaryExists: boolean;
+  processRunning: boolean;
   healthy: boolean;
   pid?: number;
   port: number;
-  binaryExists: boolean;
-  uptime?: string;
 }
 
-interface CLIOutput<T> {
-  success: boolean;
-  data?: T;
-  error?: {
-    code: string;
-    message: string;
-  };
-  meta?: {
-    timestamp: string;
-    duration_ms: number;
-  };
-}
-
-// ============================================================================
-// 유틸리티 함수
-// ============================================================================
-
-function ensureDir(dir: string): void {
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-}
-
-function timestamp(): string {
-  return new Date().toISOString();
-}
-
-function getServerSourceDir(): string {
-  // CLI가 위치한 디렉토리 기준으로 server 디렉토리 찾기
-  return join(dirname(dirname(dirname(import.meta.dir))), "server");
-}
-
-function getPort(): number {
-  // TODO: 설정 파일에서 포트 읽기
-  return DEFAULT_PORT;
-}
-
-function getPid(): number | null {
-  if (!existsSync(PID_FILE)) {
-    return null;
-  }
+async function getPort(): Promise<number> {
   try {
-    const pid = parseInt(readFileSync(PID_FILE, "utf-8").trim(), 10);
+    await ProjectContext.getInstance();
+    // TODO: Read from team-claude.yaml config
+    return DEFAULT_PORT;
+  } catch {
+    return DEFAULT_PORT;
+  }
+}
+
+async function getPid(): Promise<number | null> {
+  try {
+    const file = Bun.file(PID_FILE);
+    if (!(await file.exists())) return null;
+    const content = await file.text();
+    const pid = parseInt(content.trim(), 10);
     return isNaN(pid) ? null : pid;
   } catch {
     return null;
   }
 }
 
-function isRunning(): boolean {
-  const pid = getPid();
-  if (!pid) return false;
-
+async function isProcessRunning(pid: number): Promise<boolean> {
   try {
     process.kill(pid, 0);
     return true;
@@ -95,444 +54,349 @@ function isRunning(): boolean {
   }
 }
 
-async function isHealthy(): Promise<boolean> {
-  const port = getPort();
+async function isHealthy(port: number): Promise<boolean> {
   try {
-    const response = await fetch(`http://localhost:${port}/health`);
+    const response = await fetch(`http://localhost:${port}/health`, {
+      signal: AbortSignal.timeout(2000),
+    });
     return response.ok;
   } catch {
     return false;
   }
 }
 
-function formatUptime(startTime: number): string {
-  const seconds = Math.floor((Date.now() - startTime) / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-  const hours = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  return `${hours}h ${mins}m`;
-}
-
-function outputResult<T>(data: T, json: boolean, startTime: number): void {
-  if (json) {
-    const output: CLIOutput<T> = {
-      success: true,
-      data,
-      meta: {
-        timestamp: timestamp(),
-        duration_ms: Date.now() - startTime,
-      },
-    };
-    console.log(JSON.stringify(output, null, 2));
-  }
-}
-
-// ============================================================================
-// status 핸들러
-// ============================================================================
-
-async function handleStatus(options: { json?: boolean }): Promise<void> {
-  const startTime = Date.now();
-  const json = options.json ?? false;
-
-  const port = getPort();
-  const pid = getPid();
-  const running = isRunning();
-  const healthy = await isHealthy();
+async function getServerStatus(): Promise<ServerStatus> {
+  const port = await getPort();
   const binaryExists = existsSync(SERVER_BINARY);
+  const pid = await getPid();
+  const processRunning = pid ? await isProcessRunning(pid) : false;
+  const healthy = processRunning ? await isHealthy(port) : false;
 
-  const status: ServerStatus = {
-    running,
-    healthy,
-    pid: pid ?? undefined,
-    port,
+  return {
     binaryExists,
+    processRunning,
+    healthy,
+    pid: pid || undefined,
+    port,
   };
-
-  if (json) {
-    outputResult(status, true, startTime);
-  } else {
-    console.log("");
-    console.log("━━━ Team Claude Server Status ━━━");
-    console.log("");
-    console.log(`  Binary: ${SERVER_BINARY}`);
-    console.log(`  Port: ${port}`);
-    console.log("");
-
-    if (binaryExists) {
-      console.log("[OK] Binary: 설치됨");
-    } else {
-      console.log("[ERR] Binary: 미설치 (tc server build 실행 필요)");
-    }
-
-    if (running) {
-      console.log(`[OK] Process: 실행 중 (PID: ${pid})`);
-    } else {
-      console.log("[ERR] Process: 중지됨");
-    }
-
-    if (healthy) {
-      console.log("[OK] Health: OK");
-    } else {
-      console.log("[ERR] Health: 응답 없음");
-    }
-
-    console.log("");
-    console.log(running && healthy ? "running" : "stopped");
-  }
-
-  if (!(running && healthy)) {
-    process.exitCode = 1;
-  }
 }
 
-// ============================================================================
-// start 핸들러
-// ============================================================================
+async function getServerSourceDir(): Promise<string> {
+  // Find server directory relative to CLI
+  const cliDir = dirname(dirname(dirname(__dirname)));
+  return join(cliDir, "server");
+}
 
-async function handleStart(options: {
-  port?: string;
-  json?: boolean;
-}): Promise<void> {
-  const startTime = Date.now();
-  const json = options.json ?? false;
-  const port = options.port ? parseInt(options.port, 10) : getPort();
+async function startServer(): Promise<void> {
+  const status = await getServerStatus();
 
-  // 이미 실행 중인지 확인
-  if (isRunning() && (await isHealthy())) {
-    if (json) {
-      outputResult({ status: "already_running", port }, true, startTime);
-    } else {
-      console.log("[INFO] 서버가 이미 실행 중입니다.");
-    }
-    return;
-  }
-
-  // 바이너리 확인
-  if (!existsSync(SERVER_BINARY)) {
-    if (json) {
-      console.log(
-        JSON.stringify({
-          success: false,
-          error: {
-            code: "BINARY_NOT_FOUND",
-            message: `서버 바이너리가 없습니다: ${SERVER_BINARY}`,
-          },
-        })
-      );
-    } else {
-      console.error(`[ERR] 서버 바이너리가 없습니다: ${SERVER_BINARY}`);
-      console.error("[ERR] 'tc server build'를 먼저 실행하세요.");
-    }
+  if (!status.binaryExists) {
+    log.err("서버 바이너리가 없습니다. 'tc server install'을 먼저 실행하세요.");
     process.exit(1);
   }
 
-  ensureDir(CLAUDE_DIR);
-
-  if (!json) {
-    console.log(`[INFO] 서버 시작 중... (port: ${port})`);
+  if (status.processRunning && status.healthy) {
+    log.info("서버가 이미 실행 중입니다.");
+    return;
   }
 
-  // 백그라운드 실행
-  const child = spawn(SERVER_BINARY, [], {
-    detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, TEAM_CLAUDE_PORT: String(port) },
+  if (status.processRunning && !status.healthy) {
+    log.warn("서버 프로세스가 있지만 응답이 없습니다. 재시작합니다...");
+    await stopServer();
+    await Bun.sleep(1000);
+  }
+
+  printSection("Team Claude 서버 시작");
+
+  // 로그 파일에 append 모드로 열기
+  const logFileHandle = Bun.file(LOG_FILE);
+
+  const proc = Bun.spawn([SERVER_BINARY], {
+    stdout: logFileHandle,
+    stderr: logFileHandle,
+    stdin: "ignore",
+    env: {
+      ...process.env,
+      TEAM_CLAUDE_PORT: String(status.port),
+    },
   });
 
-  // 로그 파일에 출력 리다이렉트
-  const { appendFileSync } = await import("fs");
-  child.stdout?.on("data", (data) => appendFileSync(LOG_FILE, data));
-  child.stderr?.on("data", (data) => appendFileSync(LOG_FILE, data));
+  // PID 저장
+  await Bun.write(PID_FILE, String(proc.pid));
 
-  child.unref();
-  const pid = child.pid!;
-  writeFileSync(PID_FILE, String(pid));
+  // 프로세스 분리
+  proc.unref();
 
-  // 시작 대기 (최대 10초)
-  let attempts = 0;
-  while (attempts < 20) {
-    if (await isHealthy()) {
-      if (json) {
-        outputResult({ status: "started", pid, port }, true, startTime);
-      } else {
-        console.log(`[OK] 서버 시작됨 (PID: ${pid}, Port: ${port})`);
-      }
+  // Health check 대기
+  log.info(`서버 시작 중... (포트: ${status.port})`);
+  for (let i = 0; i < 20; i++) {
+    await Bun.sleep(500);
+    if (await isHealthy(status.port)) {
+      printStatus("서버 시작됨", true);
+      log.info(`PID: ${proc.pid}`);
+      log.info(`로그: ${LOG_FILE}`);
       return;
     }
-    await Bun.sleep(500);
-    attempts++;
   }
 
-  if (json) {
-    console.log(
-      JSON.stringify({
-        success: false,
-        error: {
-          code: "START_TIMEOUT",
-          message: "서버 시작 실패 (timeout)",
-        },
-      })
-    );
-  } else {
-    console.error("[ERR] 서버 시작 실패 (timeout)");
-    console.error("[ERR] 로그 확인: tc server logs");
-  }
+  log.err("서버 시작 실패 (타임아웃)");
+  log.err(`로그 확인: tc server logs`);
   process.exit(1);
 }
 
-// ============================================================================
-// stop 핸들러
-// ============================================================================
+async function stopServer(): Promise<void> {
+  const pid = await getPid();
 
-async function handleStop(options: { json?: boolean }): Promise<void> {
-  const startTime = Date.now();
-  const json = options.json ?? false;
-
-  if (!isRunning()) {
-    if (json) {
-      outputResult({ status: "not_running" }, true, startTime);
-    } else {
-      console.log("[INFO] 서버가 실행 중이지 않습니다.");
-    }
+  if (!pid) {
+    log.info("PID 파일이 없습니다. 서버가 실행 중이지 않습니다.");
     return;
   }
 
-  const pid = getPid()!;
-
-  if (!json) {
-    console.log(`[INFO] 서버 중지 중... (PID: ${pid})`);
+  if (!(await isProcessRunning(pid))) {
+    log.info("서버 프로세스가 실행 중이지 않습니다. PID 파일 정리 중...");
+    await Bun.write(PID_FILE, "");
+    return;
   }
 
-  // SIGTERM 전송
+  printSection("Team Claude 서버 중지");
+  log.info(`PID ${pid}에 SIGTERM 전송 중...`);
+
   try {
     process.kill(pid, "SIGTERM");
-  } catch {
-    // 이미 종료됨
-  }
 
-  // 종료 대기 (최대 5초)
-  let attempts = 0;
-  while (attempts < 10) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      // 프로세스 종료됨
-      try {
-        const { unlinkSync } = await import("fs");
-        unlinkSync(PID_FILE);
-      } catch {}
-
-      if (json) {
-        outputResult({ status: "stopped", pid }, true, startTime);
-      } else {
-        console.log("[OK] 서버 중지됨");
+    // 최대 5초 대기
+    for (let i = 0; i < 10; i++) {
+      await Bun.sleep(500);
+      if (!(await isProcessRunning(pid))) {
+        printStatus("서버 정상 중지됨", true);
+        await Bun.write(PID_FILE, "");
+        return;
       }
-      return;
     }
-    await Bun.sleep(500);
-    attempts++;
-  }
 
-  // 강제 종료
-  if (!json) {
-    console.log("[WARN] SIGKILL 전송...");
-  }
-
-  try {
+    // 강제 종료
+    log.warn("정상 종료 타임아웃. SIGKILL 전송 중...");
     process.kill(pid, "SIGKILL");
-  } catch {}
+    await Bun.sleep(500);
 
-  try {
-    const { unlinkSync } = await import("fs");
-    unlinkSync(PID_FILE);
-  } catch {}
-
-  if (json) {
-    outputResult({ status: "killed", pid }, true, startTime);
-  } else {
-    console.log("[OK] 서버 강제 중지됨");
+    if (!(await isProcessRunning(pid))) {
+      printStatus("서버 강제 종료됨", true);
+      await Bun.write(PID_FILE, "");
+    } else {
+      log.err("서버 중지 실패");
+      process.exit(1);
+    }
+  } catch (error) {
+    log.err(`서버 중지 실패: ${error}`);
+    process.exit(1);
   }
 }
 
-// ============================================================================
-// restart 핸들러
-// ============================================================================
-
-async function handleRestart(options: { json?: boolean }): Promise<void> {
-  await handleStop({ json: false });
+async function restartServer(): Promise<void> {
+  await stopServer();
   await Bun.sleep(1000);
-  await handleStart(options);
+  await startServer();
 }
 
-// ============================================================================
-// logs 핸들러
-// ============================================================================
+async function ensureServer(): Promise<void> {
+  const status = await getServerStatus();
 
-async function handleLogs(options: {
-  follow?: boolean;
-  lines?: string;
-}): Promise<void> {
-  if (!existsSync(LOG_FILE)) {
-    console.log("[INFO] 로그 파일이 없습니다.");
+  if (status.healthy) {
+    log.info(`서버가 이미 healthy 상태입니다 (PID: ${status.pid})`);
+    console.log("already_running");
     return;
   }
 
-  const lines = options.lines ? parseInt(options.lines, 10) : 100;
+  if (status.processRunning) {
+    log.warn("서버가 실행 중이지만 unhealthy 상태입니다. 재시작합니다...");
+    await restartServer();
+    return;
+  }
 
-  if (options.follow) {
-    // tail -f 실행
-    const child = spawn("tail", ["-f", LOG_FILE], {
-      stdio: "inherit",
+  log.info("서버가 실행 중이지 않습니다. 시작합니다...");
+  await startServer();
+  console.log("started");
+}
+
+async function installServer(): Promise<void> {
+  printSection("Team Claude 서버 설치");
+
+  const serverDir = await getServerSourceDir();
+
+  if (!existsSync(serverDir)) {
+    log.err(`서버 소스를 찾을 수 없습니다: ${serverDir}`);
+    process.exit(1);
+  }
+
+  log.info("의존성 설치 중...");
+  const install = Bun.spawn(["bun", "install"], {
+    cwd: serverDir,
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  const installCode = await install.exited;
+
+  if (installCode !== 0) {
+    log.err("의존성 설치 실패");
+    process.exit(1);
+  }
+
+  printStatus("의존성 설치 완료", true);
+  await buildServer();
+}
+
+async function buildServer(): Promise<void> {
+  printSection("Team Claude 서버 빌드");
+
+  const serverDir = await getServerSourceDir();
+
+  if (!existsSync(serverDir)) {
+    log.err(`서버 소스를 찾을 수 없습니다: ${serverDir}`);
+    process.exit(1);
+  }
+
+  log.info("서버 빌드 중...");
+  const build = Bun.spawn(
+    ["bun", "build", "src/index.ts", "--compile", "--outfile", SERVER_BINARY],
+    {
+      cwd: serverDir,
+      stdout: "inherit",
+      stderr: "inherit",
+    }
+  );
+  const buildCode = await build.exited;
+
+  if (buildCode !== 0) {
+    log.err("서버 빌드 실패");
+    process.exit(1);
+  }
+
+  printStatus("서버 빌드 완료", true);
+  log.info(`바이너리: ${SERVER_BINARY}`);
+}
+
+async function showLogs(follow: boolean): Promise<void> {
+  if (!existsSync(LOG_FILE)) {
+    log.err(`로그 파일이 없습니다: ${LOG_FILE}`);
+    process.exit(1);
+  }
+
+  if (follow) {
+    log.info(`로그 추적 중 (Ctrl+C로 종료)...`);
+    const tail = Bun.spawn(["tail", "-f", LOG_FILE], {
+      stdout: "inherit",
+      stderr: "inherit",
     });
-    child.on("error", (err) => {
-      console.error(`[ERR] 로그 확인 실패: ${err.message}`);
-    });
+    await tail.exited;
   } else {
-    const result = await $`tail -${lines} ${LOG_FILE}`.quiet().nothrow();
-    console.log(result.stdout.toString());
+    const content = await Bun.file(LOG_FILE).text();
+    console.log(content);
   }
 }
 
-// ============================================================================
-// build 핸들러
-// ============================================================================
+async function showStatus(): Promise<void> {
+  const status = await getServerStatus();
 
-async function handleBuild(options: { json?: boolean }): Promise<void> {
-  const startTime = Date.now();
-  const json = options.json ?? false;
+  printSection("Team Claude 서버 상태");
 
-  const serverSourceDir = getServerSourceDir();
+  console.log(`  바이너리: ${SERVER_BINARY}`);
+  console.log(`  포트: ${status.port}`);
+  console.log();
 
-  if (!existsSync(serverSourceDir)) {
-    if (json) {
-      console.log(
-        JSON.stringify({
-          success: false,
-          error: {
-            code: "SOURCE_NOT_FOUND",
-            message: `서버 소스를 찾을 수 없습니다: ${serverSourceDir}`,
-          },
-        })
-      );
-    } else {
-      console.error(`[ERR] 서버 소스를 찾을 수 없습니다: ${serverSourceDir}`);
-    }
-    process.exit(1);
+  if (status.binaryExists) {
+    printStatus("Binary", true);
+  } else {
+    printStatus("Binary", false, "미설치 (tc server install 필요)");
   }
 
-  ensureDir(CLAUDE_DIR);
-
-  if (!json) {
-    console.log("[INFO] 서버 빌드 중...");
+  if (status.processRunning) {
+    printStatus(`Process (PID: ${status.pid})`, true);
+  } else {
+    printStatus("Process", false, "중지됨");
   }
 
-  try {
-    // 의존성 설치 (필요한 경우)
-    const nodeModulesPath = join(serverSourceDir, "node_modules");
-    if (!existsSync(nodeModulesPath)) {
-      if (!json) {
-        console.log("[INFO] 의존성 설치 중...");
-      }
-      await $`bun install`.cwd(serverSourceDir).quiet();
-    }
+  if (status.healthy) {
+    printStatus("Health", true);
+  } else {
+    printStatus("Health", false, "응답 없음");
+  }
 
-    // 빌드
-    await $`bun build src/index.ts --compile --outfile ${SERVER_BINARY}`
-      .cwd(serverSourceDir)
-      .quiet();
+  console.log();
 
-    // 실행 권한 부여
-    const { chmodSync } = await import("fs");
-    chmodSync(SERVER_BINARY, 0o755);
-
-    if (json) {
-      outputResult(
-        { status: "built", binary: SERVER_BINARY },
-        true,
-        startTime
-      );
-    } else {
-      console.log(`[OK] 서버 빌드 완료: ${SERVER_BINARY}`);
-    }
-  } catch (error) {
-    if (json) {
-      console.log(
-        JSON.stringify({
-          success: false,
-          error: {
-            code: "BUILD_FAILED",
-            message: error instanceof Error ? error.message : String(error),
-          },
-        })
-      );
-    } else {
-      console.error("[ERR] 빌드 실패");
-      console.error(error);
-    }
-    process.exit(1);
+  if (status.healthy) {
+    console.log(`${icon.check} 서버가 정상 실행 중입니다.`);
+    console.log("running");
+  } else if (status.processRunning) {
+    console.log(`${icon.cross} 서버가 실행 중이지만 응답하지 않습니다.`);
+    console.log("unhealthy");
+  } else if (status.binaryExists) {
+    console.log(`${icon.warn} 서버가 중지되어 있습니다.`);
+    console.log("stopped");
+  } else {
+    console.log(`${icon.cross} 서버가 설치되어 있지 않습니다.`);
+    console.log("not_installed");
   }
 }
-
-// ============================================================================
-// 커맨드 생성
-// ============================================================================
 
 export function createServerCommand(): Command {
-  const server = new Command("server")
-    .description("서버 라이프사이클 관리")
-    .addHelpText(
-      "after",
-      `
-Examples:
-  tc server status          서버 상태 확인
-  tc server start           서버 시작
-  tc server stop            서버 중지
-  tc server restart         서버 재시작
-  tc server logs            최근 로그 보기
-  tc server logs -f         로그 실시간 보기
-  tc server build           서버 빌드
-`
-    );
+  const cmd = new Command("server").description("Team Claude MCP 서버 관리");
 
-  server
+  cmd
     .command("status")
     .description("서버 상태 확인")
-    .option("--json", "JSON 형식으로 출력")
-    .action(handleStatus);
+    .action(async () => {
+      await showStatus();
+    });
 
-  server
+  cmd
     .command("start")
-    .description("서버 시작")
-    .option("--port <port>", "포트 지정")
-    .option("--json", "JSON 형식으로 출력")
-    .action(handleStart);
+    .description("서버 백그라운드 시작")
+    .action(async () => {
+      await startServer();
+    });
 
-  server
+  cmd
     .command("stop")
     .description("서버 중지")
-    .option("--json", "JSON 형식으로 출력")
-    .action(handleStop);
+    .action(async () => {
+      await stopServer();
+    });
 
-  server
+  cmd
     .command("restart")
     .description("서버 재시작")
-    .option("--json", "JSON 형식으로 출력")
-    .action(handleRestart);
+    .action(async () => {
+      await restartServer();
+    });
 
-  server
+  cmd
+    .command("ensure")
+    .description("서버 실행 확인 (미실행 시 시작)")
+    .action(async () => {
+      await ensureServer();
+    });
+
+  cmd
+    .command("install")
+    .description("의존성 설치 및 서버 빌드")
+    .action(async () => {
+      await installServer();
+    });
+
+  cmd
+    .command("build")
+    .description("서버 빌드만 실행")
+    .action(async () => {
+      await buildServer();
+    });
+
+  cmd
     .command("logs")
     .description("서버 로그 확인")
-    .option("-f, --follow", "실시간 로그 보기")
-    .option("--lines <n>", "표시할 줄 수", "100")
-    .action(handleLogs);
+    .option("-f, --follow", "로그 추적")
+    .action(async (opts) => {
+      await showLogs(opts.follow || false);
+    });
 
-  server
-    .command("build")
-    .description("서버 빌드")
-    .option("--json", "JSON 형식으로 출력")
-    .action(handleBuild);
-
-  return server;
+  return cmd;
 }

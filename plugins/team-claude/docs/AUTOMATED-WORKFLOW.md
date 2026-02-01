@@ -48,22 +48,22 @@ git worktree 기반 병렬 세션 관리:
 
 ```bash
 # 새 세션 생성 (worktree 자동 생성)
-psm new "feature-name"
+tc psm new "feature-name"
 
 # 세션 목록
-psm list
+tc psm list
 
 # 세션 상태 확인
-psm status
+tc psm status
 
 # 특정 세션으로 전환
-psm switch feature-name
+tc psm switch feature-name
 
 # 병렬 실행
-psm parallel session1 session2 session3
+tc psm parallel session1 session2 session3
 
 # 세션 정리
-psm cleanup [session-name]
+tc psm cleanup [session-name]
 ```
 
 ### 3. Magic Keywords
@@ -108,10 +108,11 @@ plugins/team-claude/
 │   ├── flow.md                    # 통합 워크플로우 명령
 │   └── psm.md                     # PSM 명령
 │
-├── scripts/
-│   ├── tc-psm.sh                  # PSM CLI
-│   ├── tc-flow.sh                 # Flow orchestrator
-│   └── tc-review.sh               # Auto-review runner
+├── cli/
+│   └── tc                         # tc CLI (통합 명령어)
+│       ├── psm                    # PSM 기능
+│       ├── flow                   # Flow orchestrator
+│       └── review                 # Auto-review runner
 │
 ├── agents/
 │   ├── spec-reviewer.md           # 스펙 자동 리뷰어
@@ -273,15 +274,15 @@ autopilot: 결제 시스템에 쿠폰 기능 추가
 
 ```bash
 # 여러 기능 병렬 개발
-psm new coupon-feature
-psm new notification-system
-psm new user-profile
+tc psm new coupon-feature
+tc psm new notification-system
+tc psm new user-profile
 
 # 병렬 실행
-psm parallel coupon-feature notification-system user-profile
+tc psm parallel coupon-feature notification-system user-profile
 
 # 상태 모니터링
-psm status
+tc psm status
 ```
 
 ### Example 4: Magic Keywords
@@ -330,13 +331,13 @@ interface FlowResult {
 ### PSM Commands
 
 ```bash
-psm new <name> [--from <session>]   # 새 세션
-psm list [--status <status>]        # 목록
-psm status [session]                # 상태
-psm switch <session>                # 전환
-psm parallel <sessions...>          # 병렬 실행
-psm cleanup [session]               # 정리
-psm export <session> <path>         # 내보내기
+tc psm new <name> [--from <session>]   # 새 세션
+tc psm list [--status <status>]        # 목록
+tc psm status [session]                # 상태
+tc psm switch <session>                # 전환
+tc psm parallel <sessions...>          # 병렬 실행
+tc psm cleanup [session]               # 정리
+tc psm export <session> <path>         # 내보내기
 ```
 
 ### Magic Keywords
@@ -367,11 +368,14 @@ interface KeywordHandler {
 │        └──▶ /team-claude:merge (머지 단계)                                 │
 │                  └──▶ conflict-resolver                                    │
 │                                                                              │
-│  PSM                                                                        │
+│  tc CLI                                                                     │
 │        │                                                                    │
-│        └──▶ tc-worktree.sh (git worktree 관리)                             │
-│        └──▶ tc-session.sh (세션 관리)                                      │
-│        └──▶ tc-server.sh (태스크 서버)                                     │
+│        ├──▶ tc psm (PSM 관리)                                              │
+│        ├──▶ tc worktree (git worktree 관리)                                │
+│        ├──▶ tc session (세션 관리)                                         │
+│        ├──▶ tc server (태스크 서버)                                        │
+│        ├──▶ tc flow (워크플로우 오케스트레이션)                            │
+│        └──▶ tc review (자동 리뷰)                                          │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 

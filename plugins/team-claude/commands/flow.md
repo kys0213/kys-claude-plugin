@@ -37,17 +37,15 @@ allowed-tools: ["Task", "Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestio
 ## PREREQUISITES CHECK
 
 ```bash
-SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-
 # 1. 설정 확인
-if ! ${SCRIPTS}/tc-config.sh show &>/dev/null; then
+if ! tc config show &>/dev/null; then
   echo "❌ 설정 파일이 없습니다."
   echo "'/team-claude:setup'을 먼저 실행하세요."
   exit 1
 fi
 
 # 2. 상태 초기화 확인
-if ! ${SCRIPTS}/tc-state.sh check &>/dev/null; then
+if ! tc state check &>/dev/null; then
   echo "❌ 상태 파일이 없습니다."
   echo "'/team-claude:setup'을 먼저 실행하세요."
   exit 1
@@ -119,12 +117,12 @@ autopilot+swarm: 쿠폰 기능 추가
 │  STEP 1: 세션 초기화                                              │
 │                                                                   │
 │  새 세션:                                                         │
-│  SESSION_ID=$(${SCRIPTS}/tc-session.sh create "요구사항 제목")    │
-│  ${SCRIPTS}/tc-state.sh transition flow_started                   │
-│  ${SCRIPTS}/tc-state.sh set-session ${SESSION_ID}                 │
+│  SESSION_ID=$(tc session create "요구사항 제목")                  │
+│  tc state transition flow_started                                │
+│  tc state set-session ${SESSION_ID}                              │
 │                                                                   │
 │  기존 세션 재개:                                                  │
-│  ${SCRIPTS}/tc-session.sh show ${SESSION_ID}                      │
+│  tc session show ${SESSION_ID}                                    │
 │  현재 상태에서 계속 진행                                          │
 └───────────────────────────────────────────────────────────────────┘
         │
@@ -380,22 +378,20 @@ extract_message() {
 ## 스크립트 도구
 
 ```bash
-SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-
 # Flow 실행
-${SCRIPTS}/tc-flow.sh start "요구사항" --mode autopilot
-${SCRIPTS}/tc-flow.sh resume ${SESSION_ID}
-${SCRIPTS}/tc-flow.sh status ${SESSION_ID}
+tc flow start "요구사항" --mode autopilot
+tc flow resume ${SESSION_ID}
+tc flow status ${SESSION_ID}
 
 # PSM (Parallel Session Manager)
-${SCRIPTS}/tc-psm.sh new "feature-name"
-${SCRIPTS}/tc-psm.sh list
-${SCRIPTS}/tc-psm.sh parallel session1 session2
-${SCRIPTS}/tc-psm.sh status
+tc psm new "feature-name"
+tc psm list
+tc psm parallel session1 session2
+tc psm status
 
 # 리뷰
-${SCRIPTS}/tc-review.sh spec ${SESSION_ID}
-${SCRIPTS}/tc-review.sh code ${CHECKPOINT_ID}
+tc review spec ${SESSION_ID}
+tc review code ${CHECKPOINT_ID}
 ```
 
 ---

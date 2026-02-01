@@ -16,10 +16,8 @@ Checkpoint(검증 기준점)를 관리합니다.
 ## PREREQUISITES CHECK
 
 ```bash
-SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-
 # 1. 설정 파일 존재 확인
-if ! ${SCRIPTS}/tc-config.sh show &>/dev/null; then
+if ! tc config show &>/dev/null; then
   echo "❌ 설정 파일이 없습니다."
   echo "'/team-claude:setup'을 먼저 실행하세요."
   exit 1
@@ -27,7 +25,7 @@ fi
 
 # 2. 세션 지정 시 세션 존재 확인
 if [[ -n "${SESSION_ID}" ]]; then
-  if ! ${SCRIPTS}/tc-session.sh show ${SESSION_ID} &>/dev/null; then
+  if ! tc session show ${SESSION_ID} &>/dev/null; then
     echo "❌ 세션을 찾을 수 없습니다: ${SESSION_ID}"
     exit 1
   fi

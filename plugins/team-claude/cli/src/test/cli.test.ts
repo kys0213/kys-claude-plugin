@@ -5,9 +5,8 @@
  * 실행: bun test src/test/cli.test.ts
  */
 
-import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { $ } from "bun";
-import { existsSync, rmSync, mkdirSync } from "fs";
 import { join } from "path";
 
 // CLI 실행 경로
@@ -77,7 +76,7 @@ describe("tc config", () => {
 
   test("tc config verify - 환경 검증", async () => {
     const result = await runCli("config verify");
-    const output = result.stdout.toString();
+    const _output = result.stdout.toString();
 
     // 검증 결과 출력 (성공 또는 실패)
     expect(result.exitCode).toBeDefined();
@@ -214,7 +213,7 @@ describe("tc psm", () => {
 
   test("tc psm list --status active", async () => {
     const result = await runCli("psm list --status active");
-    const output = result.stdout.toString();
+    const _output = result.stdout.toString();
 
     expect(result.exitCode).toBe(0);
   });
@@ -237,7 +236,7 @@ describe("tc psm", () => {
 
   test("tc psm new - 유효하지 않은 세션 이름 (특수문자)", async () => {
     const result = await $`bun ${CLI_PATH} psm new invalid_name`.quiet().nothrow();
-    const output = result.stderr.toString() + result.stdout.toString();
+    const _output = result.stderr.toString() + result.stdout.toString();
 
     expect(result.exitCode).not.toBe(0);
   });
