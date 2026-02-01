@@ -13,6 +13,7 @@ import {
   writeFileSync,
   readFileSync,
   mkdirSync,
+  rmSync,
 } from "fs";
 import {
   getProjectDataDir,
@@ -657,7 +658,7 @@ async function cmdCleanup(
         execGit(`worktree remove "${session.worktreePath}" --force`, root);
       } catch {
         log.warn("git worktree remove 실패, 수동 삭제...");
-        execSync(`rm -rf "${session.worktreePath}"`);
+        rmSync(session.worktreePath, { recursive: true, force: true });
         execGit("worktree prune", root);
       }
     }
@@ -678,7 +679,7 @@ async function cmdCleanup(
         try {
           execGit(`worktree remove "${session.worktreePath}" --force`, root);
         } catch {
-          execSync(`rm -rf "${session.worktreePath}"`);
+          rmSync(session.worktreePath, { recursive: true, force: true });
         }
       }
 
@@ -704,7 +705,7 @@ async function cmdCleanup(
         try {
           execGit(`worktree remove "${session.worktreePath}" --force`, root);
         } catch {
-          execSync(`rm -rf "${session.worktreePath}"`);
+          rmSync(session.worktreePath, { recursive: true, force: true });
         }
       }
 
