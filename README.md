@@ -15,6 +15,18 @@ Claude Code 플러그인 모음
 /plugin install external-llm@kys-claude-plugin
 ```
 
+## Runtime Requirements
+
+This project requires [Bun](https://bun.sh) runtime (v1.0+) for the following components:
+- `plugins/team-claude/cli` - Team Claude CLI tool
+- `plugins/team-claude/server` - Team Claude MCP server
+
+### Installation
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
 ## 구조
 
 ```

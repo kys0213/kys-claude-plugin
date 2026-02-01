@@ -4,6 +4,18 @@
 
 > **중요**: Claude가 기존 인프라를 사용하도록 [INFRASTRUCTURE.md](./INFRASTRUCTURE.md)를 먼저 읽어야 합니다.
 
+## Runtime Requirements
+
+This plugin requires [Bun](https://bun.sh) runtime (v1.0+) for the Team Claude CLI and server components.
+
+### Installation
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+After installing Bun, you can proceed with the setup steps below.
+
 ## What's New in v0.5.0
 
 - **`/team-claude:flow`** - 통합 워크플로우 (autopilot/assisted/manual 모드)
