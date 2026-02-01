@@ -13,7 +13,6 @@ import {
   writeFileSync,
   readFileSync,
   mkdirSync,
-  copyFileSync,
 } from "fs";
 import {
   getProjectDataDir,
@@ -128,82 +127,42 @@ function execGit(args: string, cwd?: string): string {
 // PSM Hooks 설치 (worktree별)
 // ============================================================================
 
-function getPluginRoot(): string {
-  // CLI 실행 위치에서 plugins/team-claude 찾기
-  const cliDir = dirname(dirname(__dirname));
-  return dirname(cliDir);
-}
-
-// PSM hook 파일 목록
-const PSM_HOOK_FILES = [
-  "on-worker-complete.sh",
-  "on-worker-idle.sh",
-  "on-worker-question.sh",
-  "on-validation-complete.sh",
-];
-
-// PSM hooks 설정 (settings.local.json용)
+// PSM hooks 설정 (settings.local.json용) - CLI 호출 사용
 function getPsmHooksConfig(): Record<string, unknown[]> {
   return {
     Stop: [
       {
-        type: "command",
-        command: ".claude/hooks/on-worker-complete.sh",
+        matcher: "",
+        description: "Worker 완료 시 자동 검증 트리거",
+        hooks: [{ type: "command", command: "tc hook worker-complete", timeout: 30 }],
       },
     ],
     PreToolUse: [
       {
         matcher: "Task",
-        hooks: [
-          {
-            type: "command",
-            command: ".claude/hooks/on-worker-question.sh",
-          },
-        ],
+        description: "Worker 질문 시 에스컬레이션",
+        hooks: [{ type: "command", command: "tc hook worker-question", timeout: 10 }],
+      },
+    ],
+    PostToolUse: [
+      {
+        matcher: "Bash",
+        description: "Bash 실행 후 결과 분석",
+        hooks: [{ type: "command", command: "tc hook validation-complete", timeout: 60 }],
       },
     ],
     Notification: [
       {
-        matcher: ".*",
-        hooks: [
-          {
-            type: "command",
-            command: ".claude/hooks/on-worker-idle.sh",
-          },
-        ],
+        matcher: "idle_prompt",
+        description: "Worker 대기 상태 감지",
+        hooks: [{ type: "command", command: "tc hook worker-idle", timeout: 5 }],
       },
     ],
   };
 }
 
 function installPsmHooks(worktreePath: string): void {
-  const hooksDir = join(worktreePath, ".claude", "hooks");
-  const pluginHooksDir = join(getPluginRoot(), "hooks", "scripts");
-
-  // hooks 디렉토리 생성
-  if (!existsSync(hooksDir)) {
-    mkdirSync(hooksDir, { recursive: true });
-  }
-
-  // PSM hook 파일 개별 복사 (기존 파일 보존)
-  if (existsSync(pluginHooksDir)) {
-    for (const hookFile of PSM_HOOK_FILES) {
-      const srcPath = join(pluginHooksDir, hookFile);
-      const destPath = join(hooksDir, hookFile);
-
-      // 소스 파일이 존재하고, 대상 파일이 없을 때만 복사
-      if (existsSync(srcPath) && !existsSync(destPath)) {
-        try {
-          copyFileSync(srcPath, destPath);
-          execSync(`chmod +x "${destPath}" 2>/dev/null`, { stdio: "ignore" });
-        } catch {
-          // 복사 실패해도 계속 진행
-        }
-      }
-    }
-  }
-
-  // settings.local.json 병합 (기존 설정 보존)
+  // settings.local.json에 hooks 설정 추가 (CLI 호출 사용)
   const settingsPath = join(worktreePath, ".claude", "settings.local.json");
   mkdirSync(dirname(settingsPath), { recursive: true });
 
