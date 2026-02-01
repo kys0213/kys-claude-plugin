@@ -7,6 +7,7 @@ import { Command } from "commander";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
 import { join, dirname, basename } from "path";
 import { execSync } from "child_process";
+import { homedir } from "os";
 import chalk from "chalk";
 import YAML from "yaml";
 import {
@@ -236,7 +237,7 @@ function checkSetupStatus(): SetupStatus {
     stateInitialized: existsSync(join(stateDir, "workflow.json")),
     psmInitialized: existsSync(join(dataDir, "psm-index.json")),
     serverInstalled: existsSync(
-      join(process.env.HOME || "", ".claude", "team-claude-server")
+      join(homedir(), ".claude", "team-claude-server")
     ),
     dependencies: {
       yq: checkCommand("yq"),

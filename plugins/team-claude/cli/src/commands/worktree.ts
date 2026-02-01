@@ -5,10 +5,31 @@
 
 import { Command } from "commander";
 import { execSync } from "child_process";
-import { existsSync, readdirSync } from "fs";
+import { existsSync, readdirSync, rmSync, rmdirSync } from "fs";
 import { join, basename } from "path";
 import { getWorktreesDir, findGitRoot, ensureDir } from "../lib/common";
 import { log } from "../lib/utils";
+
+// ============================================================================
+// 입력 검증
+// ============================================================================
+
+/**
+ * Checkpoint ID 유효성 검사
+ * - Path traversal 공격 방지
+ * - 허용: 알파벳, 숫자, 하이픈, 언더스코어
+ */
+function validateCheckpointId(id: string): boolean {
+  if (!id || typeof id !== "string") return false;
+  // 안전한 문자만 허용 (알파벳, 숫자, 하이픈, 언더스코어)
+  const safePattern = /^[a-zA-Z0-9_-]+$/;
+  if (!safePattern.test(id)) return false;
+  // Path traversal 패턴 차단
+  if (id.includes("..") || id.includes("/") || id.includes("\\")) return false;
+  // 최대 길이 제한
+  if (id.length > 128) return false;
+  return true;
+}
 
 // ============================================================================
 // 타입 정의
@@ -80,6 +101,12 @@ async function cmdCreate(checkpointId: string): Promise<void> {
     process.exit(1);
   }
 
+  if (!validateCheckpointId(checkpointId)) {
+    log.err("유효하지 않은 Checkpoint ID입니다.");
+    log.err("허용: 알파벳, 숫자, 하이픈(-), 언더스코어(_)");
+    process.exit(1);
+  }
+
   const root = findGitRoot();
   const worktreesDir = getWorktreesDir();
   const worktreePath = join(worktreesDir, checkpointId);
@@ -145,6 +172,12 @@ async function cmdDelete(checkpointId: string): Promise<void> {
     process.exit(1);
   }
 
+  if (!validateCheckpointId(checkpointId)) {
+    log.err("유효하지 않은 Checkpoint ID입니다.");
+    log.err("허용: 알파벳, 숫자, 하이픈(-), 언더스코어(_)");
+    process.exit(1);
+  }
+
   const root = findGitRoot();
   const worktreesDir = getWorktreesDir();
   const worktreePath = join(worktreesDir, checkpointId);
@@ -161,7 +194,8 @@ async function cmdDelete(checkpointId: string): Promise<void> {
   } catch {
     log.warn("git worktree remove 실패, 수동 삭제 시도...");
     try {
-      execSync(`rm -rf "${worktreePath}"`);
+      // 보안: execSync 대신 Node.js fs API 사용
+      rmSync(worktreePath, { recursive: true, force: true });
       execGit("worktree prune", root);
     } catch (error: unknown) {
       const err = error as Error;
@@ -208,7 +242,8 @@ async function cmdCleanup(options: { dryRun?: boolean }): Promise<void> {
     } catch {
       log.warn("git worktree remove 실패, 수동 삭제...");
       try {
-        execSync(`rm -rf "${worktree.path}"`);
+        // 보안: execSync 대신 Node.js fs API 사용
+        rmSync(worktree.path, { recursive: true, force: true });
       } catch {
         log.err(`삭제 실패: ${worktree.checkpointId}`);
         continue;
@@ -237,7 +272,8 @@ async function cmdCleanup(options: { dryRun?: boolean }): Promise<void> {
       try {
         const files = readdirSync(worktreesDir);
         if (files.length === 0) {
-          execSync(`rmdir "${worktreesDir}"`);
+          // 보안: execSync 대신 Node.js fs API 사용
+          rmdirSync(worktreesDir);
         }
       } catch {
         // 디렉토리 삭제 실패는 무시
@@ -256,6 +292,12 @@ async function cmdPath(checkpointId: string): Promise<void> {
   if (!checkpointId) {
     log.err("Checkpoint ID를 지정하세요.");
     log.err("사용법: tc worktree path <checkpoint-id>");
+    process.exit(1);
+  }
+
+  if (!validateCheckpointId(checkpointId)) {
+    log.err("유효하지 않은 Checkpoint ID입니다.");
+    log.err("허용: 알파벳, 숫자, 하이픈(-), 언더스코어(_)");
     process.exit(1);
   }
 

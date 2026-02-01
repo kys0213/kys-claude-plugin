@@ -5,6 +5,7 @@
 import { createHash } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join, basename } from "path";
+import { homedir } from "os";
 import { $ } from "bun";
 
 // 전역 캐시 (프로세스 수명 동안 유지)
@@ -23,7 +24,7 @@ export class ProjectContext {
     this.gitRoot = gitRoot;
     this.projectHash = this.computeHash(gitRoot);
     this.dataDir = join(
-      process.env.HOME || "~",
+      homedir(),
       ".team-claude",
       this.projectHash
     );

@@ -4,6 +4,7 @@
 
 import { Command } from "commander";
 import { existsSync, readFileSync, unlinkSync, readdirSync } from "fs";
+import { homedir } from "os";
 import YAML from "yaml";
 import * as readline from "readline";
 import { ProjectContext, timestamp } from "../lib/context";
@@ -100,7 +101,7 @@ export function checkInfrastructure(): DiagnosticCheck[] {
  */
 export function checkServer(): DiagnosticCheck[] {
   const checks: DiagnosticCheck[] = [];
-  const serverPath = `${process.env.HOME}/.claude/team-claude-server`;
+  const serverPath = `${homedir()}/.claude/team-claude-server`;
 
   // 바이너리 존재 여부
   const binaryExists = existsSync(serverPath);
@@ -580,7 +581,7 @@ export async function fixLegacyHooks(
  */
 export function fixServer(): FixResult[] {
   const results: FixResult[] = [];
-  const serverPath = `${process.env.HOME}/.claude/team-claude-server`;
+  const serverPath = `${homedir()}/.claude/team-claude-server`;
 
   if (!existsSync(serverPath)) {
     // 서버 설치

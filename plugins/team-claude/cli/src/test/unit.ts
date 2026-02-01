@@ -3,6 +3,7 @@
  */
 
 import { existsSync } from "fs";
+import { homedir } from "os";
 import { ProjectContext, generateId, timestamp } from "../lib/context";
 import { TestResult, measureAsync } from "../lib/utils";
 
@@ -53,7 +54,7 @@ test("ProjectContext.projectHash - 12자리 해시", async () => {
 
 test("ProjectContext.dataDir - 데이터 디렉토리 경로", async () => {
   const ctx = await ProjectContext.getInstance();
-  const expected = `${process.env.HOME}/.team-claude/${ctx.projectHash}`;
+  const expected = `${homedir()}/.team-claude/${ctx.projectHash}`;
   if (ctx.dataDir !== expected) {
     throw new Error(`dataDir 경로 불일치: ${ctx.dataDir} !== ${expected}`);
   }

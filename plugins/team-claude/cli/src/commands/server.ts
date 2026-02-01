@@ -7,10 +7,12 @@ import { log, printSection, printStatus, icon } from "../lib/utils";
 import { ProjectContext } from "../lib/context";
 import { existsSync } from "fs";
 import { join, dirname } from "path";
+import { homedir } from "os";
 
-const SERVER_BINARY = `${process.env.HOME}/.claude/team-claude-server`;
-const PID_FILE = `${process.env.HOME}/.claude/team-claude-server.pid`;
-const LOG_FILE = `${process.env.HOME}/.claude/team-claude-server.log`;
+// Cross-platform: os.homedir() 사용 (Windows 호환)
+const SERVER_BINARY = join(homedir(), ".claude", "team-claude-server");
+const PID_FILE = join(homedir(), ".claude", "team-claude-server.pid");
+const LOG_FILE = join(homedir(), ".claude", "team-claude-server.log");
 const DEFAULT_PORT = 7890;
 
 interface ServerStatus {
