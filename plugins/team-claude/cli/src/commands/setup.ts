@@ -373,6 +373,62 @@ async function initSetup(options: { force?: boolean }): Promise<void> {
     console.log(chalk.green("  ✓ .claude/agents created"));
   }
 
+  // 6. .claude/settings.local.json에 hooks 설정 추가
+  const settingsPath = join(gitRoot, ".claude", "settings.local.json");
+  ensureDir(dirname(settingsPath));
+
+  let settings: Record<string, unknown> = {};
+  if (existsSync(settingsPath)) {
+    try {
+      settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    } catch {
+      settings = {};
+    }
+  }
+
+  // hooks 설정이 없거나 force일 때만 추가
+  if (!settings.hooks || options.force) {
+    settings.hooks = {
+      Stop: [
+        {
+          description: "Worker 완료 시 자동 검증 트리거",
+          hooks: [{ type: "command", command: "tc hook worker-complete" }],
+        },
+      ],
+      PreToolUse: [
+        {
+          matcher: "AskUserQuestion",
+          description: "Worker 질문 시 에스컬레이션",
+          hooks: [{ type: "command", command: "tc hook worker-question" }],
+        },
+      ],
+      PostToolUse: [
+        {
+          matcher: "Bash",
+          description: "검증 명령어 실행 후 결과 분석",
+          hooks: [
+            {
+              type: "command",
+              command: "tc hook validation-complete",
+              condition: "tool_input.command.includes('test')",
+            },
+          ],
+        },
+      ],
+      Notification: [
+        {
+          matcher: "idle_prompt",
+          description: "Worker 대기 상태 감지",
+          hooks: [{ type: "command", command: "tc hook worker-idle" }],
+        },
+      ],
+    };
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    console.log(chalk.green("  ✓ Hooks configured (tc hook commands)"));
+  } else {
+    console.log(chalk.gray("  - Hooks already configured"));
+  }
+
   console.log();
   console.log(chalk.green("━━━ Setup Complete ━━━"));
   console.log();

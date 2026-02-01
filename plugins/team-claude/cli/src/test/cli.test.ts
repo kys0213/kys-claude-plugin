@@ -275,6 +275,15 @@ describe("tc setup", () => {
 
     expect(result.exitCode).toBe(0);
   });
+
+  test("tc setup init - hooks 설정 포함", async () => {
+    const result = await runCli("setup init");
+    const output = result.stdout.toString();
+
+    expect(result.exitCode).toBe(0);
+    // hooks 설정이 tc hook 명령어로 설정됨
+    expect(output).toMatch(/[Hh]ooks/);
+  });
 });
 
 // ============================================================================
@@ -416,6 +425,61 @@ describe("출력 형식", () => {
     // CI 환경에서는 컬러 비활성화될 수 있음
     const result = await runCli("--help");
     expect(result.exitCode).toBe(0);
+  });
+});
+
+// ============================================================================
+// tc hook 테스트
+// ============================================================================
+
+describe("tc hook", () => {
+  test("tc hook --help", async () => {
+    const result = await runCli("hook --help");
+    const output = result.stdout.toString();
+
+    expect(result.exitCode).toBe(0);
+    expect(output).toContain("hook");
+    expect(output).toContain("worker-complete");
+    expect(output).toContain("worker-idle");
+    expect(output).toContain("worker-question");
+    expect(output).toContain("validation-complete");
+  });
+
+  test("tc hook worker-complete - delegation 없으면 종료", async () => {
+    const result = await runCli("hook worker-complete");
+    const output = result.stdout.toString();
+
+    // delegation 상태 파일이 없으면 정상 종료
+    expect(result.exitCode).toBe(0);
+    expect(output).toContain("No active delegation");
+  });
+
+  test("tc hook worker-idle - delegation 없어도 정상 종료", async () => {
+    const result = await runCli("hook worker-idle");
+
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("tc hook worker-question - stdin 없으면 정상 종료", async () => {
+    const result = await runCli("hook worker-question");
+
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("tc hook validation-complete - stdin 없으면 정상 종료", async () => {
+    const result = await runCli("hook validation-complete");
+
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("tc hook generate-config - hooks.json 출력", async () => {
+    const result = await runCli("hook generate-config");
+    const output = result.stdout.toString();
+
+    expect(result.exitCode).toBe(0);
+    expect(output).toContain("hooks");
+    expect(output).toContain("Stop");
+    expect(output).toContain("tc hook");
   });
 });
 
