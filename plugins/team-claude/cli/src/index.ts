@@ -34,6 +34,9 @@ import { createPsmCommand } from "./commands/psm";
 import { createHudCommand } from "./commands/hud";
 import { createHookCommand } from "./commands/hook";
 import { createDoctorCommand } from "./commands/doctor";
+import { createServerCommand } from "./commands/server";
+import { createStateCommand } from "./commands/state";
+import { createSessionCommand } from "./commands/session";
 
 const program = new Command();
 
@@ -51,6 +54,9 @@ program.addCommand(createPsmCommand());
 program.addCommand(createHudCommand());
 program.addCommand(createHookCommand());
 program.addCommand(createDoctorCommand());
+program.addCommand(createServerCommand());
+program.addCommand(createStateCommand());
+program.addCommand(createSessionCommand());
 
 // 기본 동작: 도움말
 program.action(() => {
