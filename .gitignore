@@ -1,6 +1,11 @@
 # Output directories
 .review-output/
 .team-claude/
+.omc/
+
+# Build artifacts
+tsconfig.tsbuildinfo
+*.tsbuildinfo
 
 # Local settings
 *.local.md
