@@ -7,7 +7,6 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { execSync } from "child_process";
 import {
   findGitRoot,
   getProjectHash,

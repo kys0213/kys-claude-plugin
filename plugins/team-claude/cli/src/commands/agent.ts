@@ -7,7 +7,7 @@ import { existsSync, readdirSync } from "fs";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import matter from "gray-matter";
-import { log, printSection, printStatus, printKV, icon } from "../lib/utils";
+import { log, printSection, printKV, icon } from "../lib/utils";
 import { ProjectContext } from "../lib/context";
 import { homedir } from "os";
 

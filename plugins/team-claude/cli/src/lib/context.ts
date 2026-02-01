@@ -3,7 +3,7 @@
  */
 
 import { createHash } from "crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync } from "fs";
 import { join, basename } from "path";
 import { homedir } from "os";
 import { $ } from "bun";
@@ -191,24 +191,7 @@ export class ProjectContext {
 }
 
 // ============================================================================
-// 유틸리티 함수
+// 유틸리티 함수 (common.ts에서 재내보내기)
 // ============================================================================
 
-/**
- * 8자리 랜덤 ID 생성
- */
-export function generateId(): string {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  let result = "";
-  for (let i = 0; i < 8; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-}
-
-/**
- * ISO 8601 타임스탬프 생성
- */
-export function timestamp(): string {
-  return new Date().toISOString();
-}
+export { generateId, timestamp } from "./common";

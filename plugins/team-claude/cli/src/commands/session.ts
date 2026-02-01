@@ -4,10 +4,10 @@
 
 import { Command } from "commander";
 import { existsSync, mkdirSync, readdirSync, rmSync } from "fs";
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { randomBytes } from "crypto";
-import { log, printSection, printStatus, printKV, icon } from "../lib/utils";
+import { log, printSection, printKV, icon } from "../lib/utils";
 import { ProjectContext } from "../lib/context";
 
 interface Session {

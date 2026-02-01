@@ -6,7 +6,7 @@
  */
 
 import { spawn, type Subprocess } from "bun";
-import { mkdir, writeFile, readFile, unlink, appendFile } from "fs/promises";
+import { mkdir, writeFile, readFile, appendFile } from "fs/promises";
 import { join, dirname } from "path";
 import type {
   WorkerExecutor,
@@ -154,7 +154,6 @@ export class HeadlessExecutor implements WorkerExecutor {
   }
 
   async cleanup(taskId: string): Promise<void> {
-    const task = this.runningTasks.get(taskId);
     this.runningTasks.delete(taskId);
 
     // 로그 파일은 유지 (디버깅용)
@@ -180,7 +179,7 @@ export class HeadlessExecutor implements WorkerExecutor {
     stream: ReadableStream<Uint8Array> | null,
     logFile: string,
     chunks: string[],
-    prefix: string
+    _prefix: string
   ): Promise<void> {
     if (!stream) return;
 

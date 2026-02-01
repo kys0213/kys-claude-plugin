@@ -12,27 +12,10 @@ import {
   rmSync,
 } from "fs";
 import { join } from "path";
-import { execSync } from "child_process";
 
 // ============================================================================
 // 테스트용 PSM hooks 로직 (psm.ts에서 추출)
 // ============================================================================
-
-// Legacy hook files - used for backward compatibility warning tests
-const LEGACY_HOOK_FILES = [
-  "on-worker-complete.sh",
-  "on-worker-idle.sh",
-  "on-worker-question.sh",
-  "on-validation-complete.sh",
-];
-
-// tc CLI hook commands - the new standard
-const TC_HOOK_COMMANDS = [
-  "tc hook worker-complete",
-  "tc hook worker-idle",
-  "tc hook worker-question",
-  "tc hook validation-complete",
-];
 
 function getPsmHooksConfig(): Record<string, unknown[]> {
   return {

@@ -3,7 +3,7 @@
  */
 
 import { Command } from "commander";
-import { existsSync, readFileSync, unlinkSync, readdirSync } from "fs";
+import { existsSync, readFileSync, unlinkSync, readdirSync, writeFileSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import YAML from "yaml";
 import * as readline from "readline";
@@ -459,7 +459,6 @@ export function fixMissingDirectories(ctx: ProjectContext): FixResult[] {
  */
 export function fixCorruptedState(ctx: ProjectContext): FixResult[] {
   const results: FixResult[] = [];
-  const { writeFileSync, mkdirSync } = require("fs");
 
   // stateDir 확인
   if (!existsSync(ctx.stateDir)) {
@@ -795,7 +794,7 @@ export function createDoctorCommand(): Command {
       const ctx = await ProjectContext.getInstance();
 
       // 모든 검사 실행
-      let allChecks: DiagnosticCheck[] = [];
+      const allChecks: DiagnosticCheck[] = [];
 
       const categoryFilter = opts.category as string | undefined;
 

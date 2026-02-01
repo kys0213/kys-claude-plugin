@@ -5,7 +5,7 @@
 import { Command } from "commander";
 import { runUnitTests } from "../test/unit";
 import { runIntegrationTests } from "../test/integration";
-import { printTestResults, printSection, log, TestResult } from "../lib/utils";
+import { printTestResults, printSection, TestResult } from "../lib/utils";
 
 export function createTestCommand(): Command {
   const cmd = new Command("test")

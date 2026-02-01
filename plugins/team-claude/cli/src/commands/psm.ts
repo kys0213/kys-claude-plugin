@@ -192,11 +192,6 @@ function installPsmHooks(worktreePath: string): void {
     const existingEntries = existingHooks[hookType] || [];
 
     // PSM hook이 이미 추가되어 있는지 확인 (command로 체크)
-    const psmCommands = psmHookEntries.map((entry) => {
-      const e = entry as Record<string, unknown>;
-      return e.command || (e.hooks as Array<{ command: string }>)?.[0]?.command;
-    });
-
     const filteredPsmEntries = psmHookEntries.filter((entry) => {
       const e = entry as Record<string, unknown>;
       const cmd =
@@ -252,7 +247,7 @@ async function cmdNew(
 
   ensureDir(worktreesDir);
 
-  const root = findGitRoot();
+  const _root = findGitRoot();
 
   // 기준 브랜치 결정
   let baseBranch: string;

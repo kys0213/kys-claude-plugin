@@ -16,7 +16,6 @@ import {
   getSessionsDir,
   findGitRoot,
   getProjectHash,
-  readJsonFile,
   writeJsonFile,
 } from "../lib/common";
 
@@ -70,12 +69,6 @@ function checkCommand(cmd: string): boolean {
   } catch {
     return false;
   }
-}
-
-function getPluginRoot(): string {
-  // CLI가 실행되는 위치 기준으로 플러그인 루트 찾기
-  const cliDir = dirname(dirname(__dirname));
-  return dirname(cliDir); // plugins/team-claude
 }
 
 // 기본 설정 생성
@@ -218,7 +211,7 @@ function ensureConfigSettings(configPath: string): void {
       writeFileSync(configPath, YAML.stringify(config, { indent: 2 }));
       console.log(chalk.green("  ✓ Flow/PSM/Swarm/Keywords settings added"));
     }
-  } catch (e) {
+  } catch {
     console.log(chalk.yellow("  ⚠ Could not update config settings"));
   }
 }
@@ -230,7 +223,6 @@ function ensureConfigSettings(configPath: string): void {
 function checkSetupStatus(): SetupStatus {
   const dataDir = getProjectDataDir();
   const stateDir = getStateDir();
-  const gitRoot = findGitRoot();
 
   return {
     configExists: existsSync(join(dataDir, "team-claude.yaml")),

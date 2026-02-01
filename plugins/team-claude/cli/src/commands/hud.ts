@@ -5,7 +5,6 @@
 
 import { Command } from "commander";
 import { join } from "path";
-import { existsSync } from "fs";
 import {
   getProjectDataDir,
   getSessionsDir,
@@ -268,9 +267,9 @@ HUD는 Claude Code의 statusline에 워크플로우 상태를 표시합니다.
    ~/.claude/statusline.sh에서:
 
    #!/bin/bash
-   existing=\$(your_existing_statusline)
-   tc_hud=\$(tc hud output 2>/dev/null)
-   echo "\${existing} │ \${tc_hud}"
+   existing=${'$'}(your_existing_statusline)
+   tc_hud=${'$'}(tc hud output 2>/dev/null)
+   echo "${'$'}{existing} │ ${'$'}{tc_hud}"
 `);
 }
 

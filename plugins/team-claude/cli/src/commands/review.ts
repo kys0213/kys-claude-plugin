@@ -3,10 +3,10 @@
  */
 
 import { Command } from "commander";
-import { existsSync, readdirSync } from "fs";
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { existsSync } from "fs";
+import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
-import { log, printSection, printStatus, printKV, icon } from "../lib/utils";
+import { log, printSection, printKV } from "../lib/utils";
 import { ProjectContext } from "../lib/context";
 
 interface ReviewResult {
@@ -155,7 +155,7 @@ async function specCommand(
   console.log("━━━ Auto-Review Loop ━━━");
   console.log();
 
-  let iteration = 1;
+  const iteration = 1;
   let finalResult: "PASS" | "WARN" | "FAIL" = "PASS";
 
   while (iteration <= maxIterations) {
@@ -275,7 +275,7 @@ async function codeCommand(
   console.log("━━━ Auto-Review Loop ━━━");
   console.log();
 
-  let iteration = 1;
+  const iteration = 1;
   let finalResult: "PASS" | "WARN" | "FAIL" = "PASS";
 
   while (iteration <= maxIterations) {

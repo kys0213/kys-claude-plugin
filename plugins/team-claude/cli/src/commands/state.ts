@@ -7,7 +7,7 @@ import { existsSync } from "fs";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { ProjectContext } from "../lib/context";
-import { log, printSection, printStatus, icon } from "../lib/utils";
+import { log, printSection } from "../lib/utils";
 
 interface WorkflowState {
   phase:
@@ -330,8 +330,6 @@ async function setServerCommand(running: string): Promise<void> {
 // ============================================================================
 
 async function resetCommand(): Promise<void> {
-  const statePath = await getStateFilePath();
-
   const state = createDefaultState();
   await writeState(state);
 

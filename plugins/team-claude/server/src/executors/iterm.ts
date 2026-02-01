@@ -32,12 +32,6 @@ export class ITermExecutor implements WorkerExecutor {
     }
 
     try {
-      // iTerm2가 설치되어 있는지 확인
-      const result =
-        await $`osascript -e 'tell application "System Events" to (name of processes) contains "iTerm2"'`
-          .quiet()
-          .nothrow();
-
       // 설치 여부만 확인 (실행 중이 아니어도 됨)
       const appExists =
         await $`test -d "/Applications/iTerm.app"`.quiet().nothrow();

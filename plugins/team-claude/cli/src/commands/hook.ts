@@ -4,17 +4,15 @@
  */
 
 import { Command } from "commander";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync } from "fs";
 import { join } from "path";
 import {
   findGitRoot,
-  getStateDir,
   readJsonFile,
   writeJsonFile,
   timestamp,
   TC_SERVER_DEFAULT_PORT,
 } from "../lib/common";
-import { log } from "../lib/utils";
 
 // ============================================================================
 // 타입 정의

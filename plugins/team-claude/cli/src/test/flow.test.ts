@@ -4,7 +4,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, rmSync } from "fs";
 import { join } from "path";
 import {
   getSessionsDir,

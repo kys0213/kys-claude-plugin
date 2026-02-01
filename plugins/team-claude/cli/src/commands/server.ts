@@ -25,7 +25,7 @@ interface ServerStatus {
 
 async function getPort(): Promise<number> {
   try {
-    const ctx = await ProjectContext.getInstance();
+    await ProjectContext.getInstance();
     // TODO: Read from team-claude.yaml config
     return DEFAULT_PORT;
   } catch {
