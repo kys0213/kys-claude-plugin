@@ -218,12 +218,21 @@ async function cmdValidationComplete(): Promise<void> {
     // stdin 파싱 실패 시 빈 객체
   }
 
+  // test 명령어가 아니면 무시 (condition 대체 로직)
+  const toolInput = hookData.tool_input as { command?: string } | undefined;
+  const command = toolInput?.command || "";
+  if (!command.includes("test")) {
+    // test 명령어가 아니면 조용히 종료
+    return;
+  }
+
   const state = getDelegationState();
   const sessionId = state?.sessionId || "unknown";
   const checkpoint = state?.currentCheckpoint || "unknown";
 
   // 검증 결과 분석 (exit_code 기반)
-  const exitCode = (hookData as { tool_result?: { exit_code?: number } })?.tool_result?.exit_code;
+  const toolResult = hookData.tool_result as { exit_code?: number } | undefined;
+  const exitCode = toolResult?.exit_code;
   const passed = exitCode === 0;
 
   console.log(`Validation complete: ${checkpoint} (${passed ? "PASSED" : "FAILED"})`);
@@ -257,27 +266,31 @@ async function cmdValidationComplete(): Promise<void> {
 // ============================================================================
 
 function cmdGenerateConfig(): void {
+  // Claude Code 공식 문서 형식에 맞춤
   const config = {
     hooks: {
       Stop: [
         {
+          matcher: "",
           description: "Worker 완료 시 자동 검증 트리거",
           hooks: [
             {
               type: "command",
               command: "tc hook worker-complete",
+              timeout: 30,
             },
           ],
         },
       ],
       PreToolUse: [
         {
-          matcher: "AskUserQuestion",
-          description: "Worker 질문 시 에스컬레이션",
+          matcher: "Task",
+          description: "Worker 질문 시 에스컬레이션 (Task 도구 사용 시)",
           hooks: [
             {
               type: "command",
               command: "tc hook worker-question",
+              timeout: 10,
             },
           ],
         },
@@ -285,12 +298,12 @@ function cmdGenerateConfig(): void {
       PostToolUse: [
         {
           matcher: "Bash",
-          description: "검증 명령어 실행 후 결과 분석",
+          description: "Bash 실행 후 결과 분석 (test 명령어는 내부에서 필터링)",
           hooks: [
             {
               type: "command",
               command: "tc hook validation-complete",
-              condition: "tool_input.command.includes('test')",
+              timeout: 60,
             },
           ],
         },
@@ -303,6 +316,7 @@ function cmdGenerateConfig(): void {
             {
               type: "command",
               command: "tc hook worker-idle",
+              timeout: 5,
             },
           ],
         },
