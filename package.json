@@ -1,6 +1,7 @@
 {
   "name": "kys-claude-plugin",
   "version": "1.0.0",
+  "type": "module",
   "description": "Claude Code plugin collection",
   "scripts": {
     "build": "make build",
@@ -8,6 +9,22 @@
     "validate:specs": "make validate-specs",
     "validate:paths": "make validate-paths",
     "validate:versions": "make validate-versions",
-    "detect": "make detect"
+    "detect": "make detect",
+    "lint": "eslint 'plugins/**/*.ts'",
+    "lint:fix": "eslint 'plugins/**/*.ts' --fix",
+    "typecheck": "tsc --build",
+    "prepare": "husky",
+    "check": "npm run lint && npm run typecheck"
+  },
+  "lint-staged": {
+    "*.ts": "eslint --fix"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "eslint": "^9.39.2",
+    "globals": "^17.3.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
+    "typescript-eslint": "^8.54.0"
   }
 }

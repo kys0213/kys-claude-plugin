@@ -1,0 +1,7 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./plugins/team-claude/cli" },
+    { "path": "./plugins/team-claude/server" }
+  ]
+}
