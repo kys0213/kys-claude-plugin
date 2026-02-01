@@ -2,8 +2,23 @@
 # Team Claude - Configuration Management
 # 설정 파일 관리 스크립트
 
+# ============================================================================
+# DEPRECATED: This script is deprecated and will be removed in v1.0.0
+# Use the tc CLI instead:
+#   tc-config.sh init    →  tc config init / tc setup
+#   tc-config.sh get     →  tc config get
+#   tc-config.sh set     →  tc config set
+#   tc-config.sh show    →  tc config show
+#   tc-config.sh path    →  tc config path
+#   tc-config.sh verify  →  tc config verify
+# ============================================================================
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
+
+warn_deprecated() {
+  echo "[DEPRECATED] ${1:-This script is deprecated}. Use 'tc ${2:-<command>}' instead." >&2
+}
 
 # ============================================================================
 # 사용법
@@ -547,6 +562,8 @@ cmd_verify() {
 # 메인
 # ============================================================================
 main() {
+  warn_deprecated "tc-config.sh is deprecated" "config"
+
   local command="${1:-}"
   shift || true
 

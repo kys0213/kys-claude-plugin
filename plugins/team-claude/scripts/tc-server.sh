@@ -2,8 +2,25 @@
 # Team Claude - Server Lifecycle Management
 # 글로벌 서버 라이프사이클 관리 + Health 모니터링
 
+# ============================================================================
+# DEPRECATED: This script is deprecated and will be removed in v1.0.0
+# Use the tc CLI instead:
+#   tc-server.sh status   →  tc server status
+#   tc-server.sh start    →  tc server start
+#   tc-server.sh stop     →  tc server stop
+#   tc-server.sh restart  →  tc server restart
+#   tc-server.sh ensure   →  tc server ensure
+#   tc-server.sh build    →  tc server build
+#   tc-server.sh install  →  tc server install
+#   tc-server.sh logs     →  tc server logs
+# ============================================================================
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
+
+warn_deprecated() {
+  echo "[DEPRECATED] ${1:-This script is deprecated}. Use 'tc ${2:-<command>}' instead." >&2
+}
 
 # ============================================================================
 # 상수
@@ -362,6 +379,8 @@ cmd_logs() {
 # 메인
 # ============================================================================
 main() {
+  warn_deprecated "tc-server.sh is deprecated" "server"
+
   local command="${1:-}"
   shift || true
 

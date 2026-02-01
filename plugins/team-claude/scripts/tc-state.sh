@@ -2,8 +2,25 @@
 # Team Claude - Workflow State Management
 # 프로젝트별 워크플로우 상태 관리 스크립트
 
+# ============================================================================
+# DEPRECATED: This script is deprecated and will be removed in v1.0.0
+# Use the tc CLI instead:
+#   tc-state.sh init         →  tc state init
+#   tc-state.sh check        →  tc state check
+#   tc-state.sh get          →  tc state get
+#   tc-state.sh require      →  tc state require
+#   tc-state.sh transition   →  tc state transition
+#   tc-state.sh set-session  →  tc state set-session
+#   tc-state.sh set-server   →  tc state set-server
+#   tc-state.sh reset        →  tc state reset
+# ============================================================================
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
+
+warn_deprecated() {
+  echo "[DEPRECATED] ${1:-This script is deprecated}. Use 'tc ${2:-<command>}' instead." >&2
+}
 
 # ============================================================================
 # 상수
@@ -413,6 +430,8 @@ cmd_reset() {
 # 메인
 # ============================================================================
 main() {
+  warn_deprecated "tc-state.sh is deprecated" "state"
+
   local command="${1:-}"
   shift || true
 
