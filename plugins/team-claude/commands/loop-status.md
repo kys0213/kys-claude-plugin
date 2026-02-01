@@ -14,17 +14,14 @@ allowed-tools: ["Read", "Glob", "Bash"]
 > **중요**: 세션 및 Worktree 상태 조회는 결정적 스크립트를 통해 수행합니다.
 
 ```bash
-# 스크립트 위치
-SCRIPTS_DIR="./plugins/team-claude/scripts"
-
 # 세션 목록 조회
-${SCRIPTS_DIR}/tc-session.sh list
+tc session list
 
 # 세션 상세 정보
-${SCRIPTS_DIR}/tc-session.sh show {session-id}
+tc session show {session-id}
 
 # 현재 활성 Worktree 조회
-${SCRIPTS_DIR}/tc-worktree.sh list
+tc worktree list
 ```
 
 ## 사용법
@@ -49,13 +46,13 @@ ${SCRIPTS_DIR}/tc-worktree.sh list
 
 ```bash
 # 모든 세션 목록
-./plugins/team-claude/scripts/tc-session.sh list
+tc session list
 
 # 특정 세션 상세
-./plugins/team-claude/scripts/tc-session.sh show {session-id}
+tc session show {session-id}
 
 # 활성 Worktree (진행 중인 구현)
-./plugins/team-claude/scripts/tc-worktree.sh list
+tc worktree list
 ```
 
 ### 세션 메타데이터 직접 조회

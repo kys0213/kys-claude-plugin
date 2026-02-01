@@ -45,7 +45,7 @@ allowed-tools: ["Bash", "Read", "Write", "Edit"]
 /team-claude:hud reset
 
 # 직접 statusline 스크립트 실행 (테스트용)
-${CLAUDE_PLUGIN_ROOT}/scripts/tc-hud.sh
+tc hud
 ```
 
 ---
@@ -179,9 +179,8 @@ hud:
 ### 1. Statusline 스크립트 설치
 
 ```bash
-# 스크립트 복사
-cp ${CLAUDE_PLUGIN_ROOT}/scripts/tc-hud.sh ~/.claude/tc-hud.sh
-chmod +x ~/.claude/tc-hud.sh
+# tc CLI가 설치되어 있으면 자동으로 사용 가능
+# tc hud 명령어로 직접 실행 가능
 ```
 
 ### 2. Claude Code 설정
@@ -191,7 +190,7 @@ chmod +x ~/.claude/tc-hud.sh
 {
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/tc-hud.sh",
+    "command": "tc hud",
     "padding": 0
   }
 }
@@ -208,7 +207,7 @@ chmod +x ~/.claude/tc-hud.sh
 existing_status=$(your_existing_statusline)
 
 # Team Claude HUD 추가
-tc_status=$(~/.claude/tc-hud.sh 2>/dev/null)
+tc_status=$(tc hud 2>/dev/null)
 
 # 합쳐서 출력
 echo "${existing_status} │ ${tc_status}"
@@ -247,7 +246,7 @@ echo "${existing_status} │ ${tc_status}"
 ┌───────────────────────────────────────────────────────────────────┐
 │  STEP 3: 스크립트 설치                                            │
 │                                                                   │
-│  1. tc-hud.sh를 ~/.claude/에 복사                                │
+│  1. tc CLI 확인 (자동 사용)                                       │
 │  2. settings.json 업데이트                                        │
 │  3. 테스트 실행                                                   │
 └───────────────────────────────────────────────────────────────────┘
@@ -314,7 +313,7 @@ HUD는 다음 파일들에서 상태를 읽습니다:
 cc_status=$(ccstatusline "$@")
 
 # Team Claude HUD
-tc_status=$(~/.claude/tc-hud.sh 2>/dev/null)
+tc_status=$(tc hud 2>/dev/null)
 
 # 결합
 if [[ -n "$tc_status" ]]; then
@@ -334,7 +333,7 @@ fi
 hud_status=$(claude-hud "$@")
 
 # Team Claude 추가
-tc_status=$(~/.claude/tc-hud.sh 2>/dev/null)
+tc_status=$(tc hud 2>/dev/null)
 
 if [[ -n "$tc_status" ]]; then
   echo "${hud_status} │ ${tc_status}"

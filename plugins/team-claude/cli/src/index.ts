@@ -37,6 +37,9 @@ import { createDoctorCommand } from "./commands/doctor";
 import { createServerCommand } from "./commands/server";
 import { createStateCommand } from "./commands/state";
 import { createSessionCommand } from "./commands/session";
+import { createAgentCommand } from "./commands/agent";
+import { createWorktreeCommand } from "./commands/worktree";
+import { createReviewCommand } from "./commands/review";
 
 const program = new Command();
 
@@ -57,6 +60,9 @@ program.addCommand(createDoctorCommand());
 program.addCommand(createServerCommand());
 program.addCommand(createStateCommand());
 program.addCommand(createSessionCommand());
+program.addCommand(createAgentCommand());
+program.addCommand(createWorktreeCommand());
+program.addCommand(createReviewCommand());
 
 // 기본 동작: 도움말
 program.action(() => {

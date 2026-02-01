@@ -17,10 +17,8 @@ Conflict 발생 시 Conflict Analysis Agent가 분석하고 사용자에게 질�
 ## PREREQUISITES CHECK
 
 ```bash
-SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-
 # 1. 설정 파일 존재 확인
-if ! ${SCRIPTS}/tc-config.sh show &>/dev/null; then
+if ! tc config show &>/dev/null; then
   echo "❌ 설정 파일이 없습니다."
   echo "'/team-claude:setup'을 먼저 실행하세요."
   exit 1
@@ -28,14 +26,14 @@ fi
 
 # 2. 세션 존재 확인
 if [[ -n "${SESSION_ID}" ]]; then
-  if ! ${SCRIPTS}/tc-session.sh show ${SESSION_ID} &>/dev/null; then
+  if ! tc session show ${SESSION_ID} &>/dev/null; then
     echo "❌ 세션을 찾을 수 없습니다: ${SESSION_ID}"
     exit 1
   fi
 fi
 
 # 3. 위임 상태 확인 (권장)
-PHASE=$(${SCRIPTS}/tc-state.sh get phase 2>/dev/null)
+PHASE=$(tc state get phase 2>/dev/null)
 if [[ "$PHASE" != "delegating" && "$PHASE" != "merging" && "$PHASE" != "completed" ]]; then
   echo "⚠️ 현재 phase: ${PHASE}"
   echo "'/team-claude:delegate'로 구현 위임이 완료되어야 합니다."
@@ -151,8 +149,8 @@ fi
 │    --title "feat: {feature description}"                      │
 │                                                               │
 │  상태 전이:                                                   │
-│  ${SCRIPTS}/tc-state.sh transition completed                  │
-│  ${SCRIPTS}/tc-session.sh update ${SESSION_ID} status merged  │
+│  tc state transition completed                                │
+│  tc session update ${SESSION_ID} status merged                │
 └───────────────────────────────────────────────────────────────┘
 ```
 

@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync } from "fs";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { randomBytes } from "crypto";
-import { log, printSection, printStatus, icon } from "../lib/utils";
+import { log, printSection, printStatus, printKV, icon } from "../lib/utils";
 import { ProjectContext } from "../lib/context";
 
 interface Session {
@@ -114,10 +114,10 @@ async function createCommand(title: string): Promise<void> {
   await writeSession(session);
 
   printSection("세션 생성됨");
-  printStatus("ID", id);
-  printStatus("제목", title);
-  printStatus("상태", session.status);
-  printStatus("생성일", session.createdAt);
+  printKV("ID", id);
+  printKV("제목", title);
+  printKV("상태", session.status);
+  printKV("생성일", session.createdAt);
   log.ok(`${icon.check} 세션이 성공적으로 생성되었습니다.`);
 
   // 세션 ID 출력 (스크립트에서 사용 가능)
@@ -172,17 +172,17 @@ async function showCommand(id: string): Promise<void> {
   }
 
   printSection("세션 상세");
-  printStatus("ID", session.id);
-  printStatus("제목", session.title);
-  printStatus("상태", session.status);
-  printStatus("생성일", session.createdAt);
-  printStatus("수정일", session.updatedAt);
+  printKV("ID", session.id);
+  printKV("제목", session.title);
+  printKV("상태", session.status);
+  printKV("생성일", session.createdAt);
+  printKV("수정일", session.updatedAt);
 
   if (session.metadata && Object.keys(session.metadata).length > 0) {
     console.log();
     printSection("메타데이터");
     for (const [key, value] of Object.entries(session.metadata)) {
-      printStatus(key, JSON.stringify(value));
+      printKV(key, JSON.stringify(value));
     }
   }
 }
@@ -253,8 +253,8 @@ async function updateCommand(
   await writeSession(session);
 
   log.ok(`${icon.check} 세션 ${id} 업데이트됨`);
-  printStatus("변경된 필드", key);
-  printStatus("새 값", value);
+  printKV("변경된 필드", key);
+  printKV("새 값", value);
 }
 
 // ============================================================================

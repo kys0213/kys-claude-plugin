@@ -16,17 +16,15 @@ allowed-tools: ["Task", "Read", "Write", "Glob", "Grep", "AskUserQuestion", "Bas
 ## PREREQUISITES CHECK
 
 ```bash
-SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-
 # 설정 파일 존재 확인
-if ! ${SCRIPTS}/tc-config.sh show &>/dev/null; then
+if ! tc config show &>/dev/null; then
   echo "❌ 설정 파일이 없습니다."
   echo "'/team-claude:setup'을 먼저 실행하세요."
   exit 1
 fi
 
 # 상태 파일 존재 확인
-if ! ${SCRIPTS}/tc-state.sh check &>/dev/null; then
+if ! tc state check &>/dev/null; then
   echo "❌ 상태 파일이 없습니다."
   echo "'/team-claude:setup'을 먼저 실행하세요."
   exit 1
@@ -76,26 +74,23 @@ fi
 > **중요**: 세션 관리는 결정적 스크립트를 통해 수행합니다. LLM이 직접 파일을 생성하지 않습니다.
 
 ```bash
-# 스크립트 위치
-SCRIPTS_DIR="./plugins/team-claude/scripts"
-
 # 세션 목록 조회
-${SCRIPTS_DIR}/tc-session.sh list
+tc session list
 
 # 새 세션 생성 (session-id 반환)
-${SCRIPTS_DIR}/tc-session.sh create "{요구사항 제목}"
+tc session create "{요구사항 제목}"
 
 # 세션 상세 정보
-${SCRIPTS_DIR}/tc-session.sh show {session-id}
+tc session show {session-id}
 
 # 세션 상태 업데이트
-${SCRIPTS_DIR}/tc-session.sh update {session-id} status designing
-${SCRIPTS_DIR}/tc-session.sh update {session-id} phase checkpoint_review
+tc session update {session-id} status designing
+tc session update {session-id} phase checkpoint_review
 
 # 워크플로우 상태 관리
-${SCRIPTS_DIR}/tc-state.sh transition designing
-${SCRIPTS_DIR}/tc-state.sh set-session {session-id}
-${SCRIPTS_DIR}/tc-state.sh transition checkpoints_approved
+tc state transition designing
+tc state set-session {session-id}
+tc state transition checkpoints_approved
 ```
 
 ---
@@ -107,15 +102,14 @@ ${SCRIPTS_DIR}/tc-state.sh transition checkpoints_approved
         │
         ▼
 ┌───────────────────────────────────────────────────────────────┐
-│  STEP 1: 세션 초기화 (tc-session.sh 사용)                     │
+│  STEP 1: 세션 초기화 (tc CLI 사용)                            │
 │                                                               │
 │  Bash로 실행:                                                 │
-│  SCRIPTS="./plugins/team-claude/scripts"                      │
-│  SESSION_ID=$(${SCRIPTS}/tc-session.sh create "요구사항 제목")│
+│  SESSION_ID=$(tc session create "요구사항 제목")              │
 │                                                               │
 │  상태 전이:                                                   │
-│  ${SCRIPTS}/tc-state.sh transition designing                  │
-│  ${SCRIPTS}/tc-state.sh set-session ${SESSION_ID}             │
+│  tc state transition designing                                │
+│  tc state set-session ${SESSION_ID}                           │
 │                                                               │
 │  결과: session-id (8자리), 디렉토리 자동 생성                 │
 └───────────────────────────────────────────────────────────────┘
@@ -204,8 +198,8 @@ ${SCRIPTS_DIR}/tc-state.sh transition checkpoints_approved
 │  • AskUserQuestion으로 Checkpoint 승인 요청                  │
 │                                                               │
 │  승인 시 상태 전이:                                          │
-│  ${SCRIPTS}/tc-state.sh transition checkpoints_approved       │
-│  ${SCRIPTS}/tc-session.sh update ${SESSION_ID} \              │
+│  tc state transition checkpoints_approved                     │
+│  tc session update ${SESSION_ID} \                            │
 │    checkpointsApproved true                                   │
 └───────────────────────────────────────────────────────────────┘
         │
@@ -556,32 +550,32 @@ checkpoints:
 
 ```bash
 # 1. 기존 세션 확인
-./plugins/team-claude/scripts/tc-session.sh list
+tc session list
 
 # 2. 새 세션 생성
-SESSION_ID=$(./plugins/team-claude/scripts/tc-session.sh create "쿠폰 할인 기능")
+SESSION_ID=$(tc session create "쿠폰 할인 기능")
 echo "생성된 세션: ${SESSION_ID}"
 
 # 3. 세션 상태 확인
-./plugins/team-claude/scripts/tc-session.sh show ${SESSION_ID}
+tc session show ${SESSION_ID}
 ```
 
 ### 기존 세션 재개
 
 ```bash
 # 세션 목록에서 ID 확인
-./plugins/team-claude/scripts/tc-session.sh list
+tc session list
 
 # 세션 상세 정보 확인
-./plugins/team-claude/scripts/tc-session.sh show abc12345
+tc session show abc12345
 ```
 
 ### 세션 상태 업데이트
 
 ```bash
 # Checkpoint 승인 후
-./plugins/team-claude/scripts/tc-session.sh update abc12345 phase checkpoint_approved
-./plugins/team-claude/scripts/tc-session.sh update abc12345 status ready_for_delegation
+tc session update abc12345 phase checkpoint_approved
+tc session update abc12345 status ready_for_delegation
 ```
 
 ---
@@ -591,9 +585,9 @@ echo "생성된 세션: ${SESSION_ID}"
 ```
 .team-claude/
 ├── sessions/
-│   ├── index.json                    # 전체 세션 목록 (tc-session.sh가 관리)
+│   ├── index.json                    # 전체 세션 목록 (tc session이 관리)
 │   │
-│   └── abc12345/                     # session-id (tc-session.sh create로 생성)
+│   └── abc12345/                     # session-id (tc session create로 생성)
 │       ├── meta.json                 # 세션 메타정보
 │       ├── conversation.md           # 대화 기록 (전체)
 │       ├── decisions.json            # 결정 사항 목록

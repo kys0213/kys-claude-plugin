@@ -106,12 +106,12 @@ async function startServer(): Promise<void> {
 
   printSection("Team Claude 서버 시작");
 
-  const logFile = Bun.file(LOG_FILE);
-  const logWriter = logFile.writer();
+  // 로그 파일에 append 모드로 열기
+  const logFileHandle = Bun.file(LOG_FILE);
 
   const proc = Bun.spawn([SERVER_BINARY], {
-    stdout: logWriter,
-    stderr: logWriter,
+    stdout: logFileHandle,
+    stderr: logFileHandle,
     stdin: "ignore",
     env: {
       ...process.env,

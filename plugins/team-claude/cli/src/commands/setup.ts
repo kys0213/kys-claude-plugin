@@ -489,18 +489,13 @@ async function cmdHud(): Promise<void> {
 }
 
 async function cmdVerify(): Promise<void> {
-  const scriptPath = join(getPluginRoot(), "scripts", "tc-config.sh");
-  if (existsSync(scriptPath)) {
-    try {
-      execSync(`bash "${scriptPath}" verify`, {
-        cwd: findGitRoot(),
-        stdio: "inherit",
-      });
-    } catch {
-      process.exit(1);
-    }
-  } else {
-    console.error("tc-config.sh not found");
+  // tc doctor를 호출하여 환경 검증
+  try {
+    execSync("tc doctor", {
+      cwd: findGitRoot(),
+      stdio: "inherit",
+    });
+  } catch {
     process.exit(1);
   }
 }

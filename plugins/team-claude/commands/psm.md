@@ -262,30 +262,28 @@ git worktree 기반으로 여러 세션을 병렬로 관리합니다.
 ## 스크립트
 
 ```bash
-SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-
 # 새 세션
-${SCRIPTS}/tc-psm.sh new "feature-name"
-${SCRIPTS}/tc-psm.sh new "feature-v2" --from "feature"
+tc psm new "feature-name"
+tc psm new "feature-v2" --from "feature"
 
 # 목록
-${SCRIPTS}/tc-psm.sh list
-${SCRIPTS}/tc-psm.sh list --status active
+tc psm list
+tc psm list --status active
 
 # 상태
-${SCRIPTS}/tc-psm.sh status
-${SCRIPTS}/tc-psm.sh status "feature-name"
+tc psm status
+tc psm status "feature-name"
 
 # 전환
-${SCRIPTS}/tc-psm.sh switch "feature-name"
+tc psm switch "feature-name"
 
 # 병렬 실행
-${SCRIPTS}/tc-psm.sh parallel session1 session2 session3
+tc psm parallel session1 session2 session3
 
 # 정리
-${SCRIPTS}/tc-psm.sh cleanup
-${SCRIPTS}/tc-psm.sh cleanup "feature-name"
-${SCRIPTS}/tc-psm.sh cleanup --all
+tc psm cleanup
+tc psm cleanup "feature-name"
+tc psm cleanup --all
 ```
 
 ---

@@ -109,16 +109,14 @@ AskUserQuestion({
 
 ## 서버 설치/빌드
 
-### tc-server.sh 사용 (권장)
+### tc CLI 사용 (권장)
 
 ```bash
-SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-
 # 전체 설치 (의존성 + 빌드)
-${SCRIPTS}/tc-server.sh install
+tc server install
 
 # 빌드만
-${SCRIPTS}/tc-server.sh build
+tc server build
 ```
 
 ### Bun 확인
@@ -156,7 +154,7 @@ AskUserQuestion({
 curl -fsSL https://bun.sh/install | bash
 ```
 
-### 수동 빌드 (tc-server.sh 대신)
+### 수동 빌드 (tc CLI 대신)
 
 ```bash
 # 의존성 설치
@@ -184,16 +182,14 @@ chmod +x ~/.claude/team-claude-server
 
 ## 서버 시작
 
-### tc-server.sh 사용 (권장)
+### tc CLI 사용 (권장)
 
 ```bash
-SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-
 # 서버 시작
-${SCRIPTS}/tc-server.sh start
+tc server start
 
 # 서버 시작 보장 (미실행 시 시작, health 체크)
-${SCRIPTS}/tc-server.sh ensure
+tc server ensure
 ```
 
 ### 시작 확인
@@ -212,7 +208,7 @@ AskUserQuestion({
 })
 ```
 
-### 수동 시작 (tc-server.sh 대신)
+### 수동 시작 (tc CLI 대신)
 
 ```bash
 # 환경 변수와 함께 서버 시작
@@ -247,16 +243,14 @@ curl -s http://localhost:7890/health | jq
 
 ## 서버 중지
 
-### tc-server.sh 사용 (권장)
+### tc CLI 사용 (권장)
 
 ```bash
-SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-
 # 서버 중지
-${SCRIPTS}/tc-server.sh stop
+tc server stop
 
 # 서버 재시작
-${SCRIPTS}/tc-server.sh restart
+tc server restart
 ```
 
 ### 중지 확인
@@ -275,7 +269,7 @@ AskUserQuestion({
 })
 ```
 
-### 수동 중지 (tc-server.sh 대신)
+### 수동 중지 (tc CLI 대신)
 
 ```bash
 # PID 파일에서 프로세스 종료
@@ -301,11 +295,9 @@ rm ~/.claude/team-claude-server.pid
 ## 로그 확인
 
 ```bash
-SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-
-# tc-server.sh 사용
-${SCRIPTS}/tc-server.sh logs       # 최근 100줄
-${SCRIPTS}/tc-server.sh logs -f    # 실시간 스트리밍
+# tc CLI 사용
+tc server logs       # 최근 100줄
+tc server logs -f    # 실시간 스트리밍
 
 # 수동으로 확인
 tail -f ~/.claude/team-claude-server.log

@@ -16,10 +16,8 @@ allowed-tools: ["Task", "Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestio
 **모든 동작 전에 이것을 실행하세요:**
 
 ```bash
-SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-
 # 1. 워크플로우 상태 확인
-${SCRIPTS}/tc-state.sh require checkpoints_approved
+tc state require checkpoints_approved
 if [[ $? -ne 0 ]]; then
   echo "❌ Checkpoint가 아직 승인되지 않았습니다."
   echo "'/team-claude:architect'에서 Checkpoint를 승인하세요."
@@ -27,7 +25,7 @@ if [[ $? -ne 0 ]]; then
 fi
 
 # 2. 서버 실행 보장
-SERVER_STATUS=$(${SCRIPTS}/tc-server.sh ensure)
+SERVER_STATUS=$(tc server ensure)
 if [[ "$SERVER_STATUS" == "started" ]]; then
   echo "🚀 서버가 자동으로 시작되었습니다. (http://localhost:7890)"
 fi
@@ -46,7 +44,7 @@ SESSION_ID="<세션 ID>"
 CHECKPOINT_ID="<체크포인트 ID>"
 
 # 세션 정보 확인
-${SCRIPTS}/tc-session.sh show ${SESSION_ID}
+tc session show ${SESSION_ID}
 
 # Checkpoint 파일 읽기
 cat .team-claude/sessions/${SESSION_ID}/checkpoints/${CHECKPOINT_ID}.json
@@ -70,12 +68,12 @@ Checkpoint JSON 구조:
 ### Step 2: Git Worktree 생성
 
 ```bash
-# tc-worktree.sh가 자동으로 처리:
+# tc worktree가 자동으로 처리:
 # - 디렉토리 생성
 # - 브랜치 생성/체크아웃
 # - worktree 설정
 
-WORKTREE_PATH=$(${SCRIPTS}/tc-worktree.sh create ${CHECKPOINT_ID})
+WORKTREE_PATH=$(tc worktree create ${CHECKPOINT_ID})
 echo "Worktree 생성됨: ${WORKTREE_PATH}"
 ```
 
@@ -135,10 +133,10 @@ curl -X POST http://localhost:7890/tasks \
 
 ```bash
 # 세션 상태 업데이트
-${SCRIPTS}/tc-session.sh update ${SESSION_ID} status delegating
+tc session update ${SESSION_ID} status delegating
 
 # 워크플로우 상태 업데이트
-${SCRIPTS}/tc-state.sh transition delegating
+tc state transition delegating
 ```
 
 ### Step 6: 진행 모니터링
@@ -199,25 +197,23 @@ curl -N http://localhost:7890/tasks/{task_id}/stream
 ## 스크립트 도구
 
 ```bash
-SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-
 # Worktree 관리
-${SCRIPTS}/tc-worktree.sh create {checkpoint-id}
-${SCRIPTS}/tc-worktree.sh list
-${SCRIPTS}/tc-worktree.sh delete {checkpoint-id}
-${SCRIPTS}/tc-worktree.sh cleanup
+tc worktree create {checkpoint-id}
+tc worktree list
+tc worktree delete {checkpoint-id}
+tc worktree cleanup
 
 # 세션 관리
-${SCRIPTS}/tc-session.sh show {session-id}
-${SCRIPTS}/tc-session.sh update {session-id} status delegating
+tc session show {session-id}
+tc session update {session-id} status delegating
 
 # 상태 관리
-${SCRIPTS}/tc-state.sh check
-${SCRIPTS}/tc-state.sh transition delegating
+tc state check
+tc state transition delegating
 
 # 서버 관리
-${SCRIPTS}/tc-server.sh ensure
-${SCRIPTS}/tc-server.sh status
+tc server ensure
+tc server status
 ```
 
 ---
