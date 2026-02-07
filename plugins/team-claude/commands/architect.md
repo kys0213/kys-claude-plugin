@@ -225,19 +225,18 @@ tc state transition checkpoints_approved
         │
         ▼
 ┌───────────────────────────────────────────────────────────────┐
-│  STEP 8: Multi-Review RALPH 스펙 정제                         │
+│  STEP 8: 동적 관점 Multi-Review RALPH 스펙 정제               │
 │                                                               │
 │  /team-claude:spec-refine --session {session-id} 자동 호출    │
 │                                                               │
-│  3개 LLM(Claude, Codex, Gemini) 병렬 리뷰 + RALPH 루프:     │
+│  Perspective Planner가 스펙을 분석하여 최적 관점을 동적 결정  │
+│  후, 다수 LLM(Claude, Codex, Gemini)에 분배하여 병렬 리뷰:  │
 │  ┌─────────────────────────────────────────────────────────┐ │
-│  │  1. 3-LLM 병렬 리뷰 (각 관점별 평가)                   │ │
-│  │     • Claude: 아키텍처 깊이, 완전성, 의존성             │ │
-│  │     • Codex:  구현 가능성, Contract 실행성              │ │
-│  │     • Gemini: 대안 설계, 리스크, 확장성                 │ │
-│  │  2. 합의 분석 (CONSENSUS/MAJORITY/MINORITY)             │ │
-│  │  3. 통합 점수 산출 (가중 평균)                          │ │
-│  │  4. PASS → 다음 단계 / FAIL → 자동 정제 후 재리뷰      │ │
+│  │  1. Perspective Planner: 스펙 도메인/리스크 분석        │ │
+│  │     → 디자이너, PM, CTO, 보안, DBA 등 관점 자동 선택   │ │
+│  │  2. 선택된 관점을 LLM 엔진에 분배 → 병렬 리뷰          │ │
+│  │  3. 합의 분석 (CONSENSUS/MAJORITY/MINORITY)             │ │
+│  │  4. PASS → 다음 단계 / FAIL → 자동 정제 후 관점 재선정 │ │
 │  └─────────────────────────────────────────────────────────┘ │
 │                                                               │
 │  결과:                                                        │
