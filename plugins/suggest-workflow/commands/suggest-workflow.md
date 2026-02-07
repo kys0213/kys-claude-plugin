@@ -29,14 +29,14 @@ Rust CLI를 사용합니다:
 
 ## 옵션
 
-- `--source <history|projects>`: 데이터 소스 (기본: projects)
+- `--source <history|projects>`: 데이터 소스 (기본: projects) - `history` source is (planned - not yet implemented)
 - `--threshold N`: 최소 반복 횟수 (기본: 5)
 - `--top N`: 상위 N개 결과만 표시 (기본: 10)
 - `--project PATH`: 프로젝트 경로 (기본: 현재 디렉토리)
-- `--report`: 마크다운 리포트 생성
+- `--report`: 마크다운 리포트 생성 (planned - not yet implemented)
 - `--format <text|json>`: 출력 형식 (기본: text)
 - `--decay`: 시간 감쇠 가중치 활성화
-- `--gap-tolerant`: 갭 허용 시퀀스 매칭
+- `--gap-tolerant`: 갭 허용 시퀀스 매칭 (planned - not yet implemented)
 
 ## 출력 예시
 
