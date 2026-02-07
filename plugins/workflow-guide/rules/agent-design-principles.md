@@ -1,7 +1,11 @@
 ---
 paths:
-  - ".claude/{commands,agents,skills}/**/*.md"
-  - "{commands,agents,skills}/**/*.md"
+  - ".claude/commands/**/*.md"
+  - ".claude/agents/**/*.md"
+  - ".claude/skills/**/*.md"
+  - "commands/**/*.md"
+  - "agents/**/*.md"
+  - "skills/**/*.md"
 ---
 
 # Agent Design Principles
