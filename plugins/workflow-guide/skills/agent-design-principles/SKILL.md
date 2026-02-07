@@ -1,6 +1,7 @@
 ---
 name: agent-design-principles
 description: 레이어드 아키텍처 기반 에이전트 설계 원칙 - Skill, Sub-agent, Slash Command 구조화 가이드
+user-invocable: false
 ---
 
 # Agent Design Principles Skill
