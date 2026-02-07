@@ -32,6 +32,17 @@ jobs:
       - name: Run plugin validation
         run: make validate-ci
 
+      - name: Setup Rust
+        if: contains(github.event.pull_request.title, 'suggest-workflow') || github.event.pull_request.head.ref == 'feat/add-suggest-workflow'
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Rust check and test
+        if: contains(github.event.pull_request.title, 'suggest-workflow') || github.event.pull_request.head.ref == 'feat/add-suggest-workflow'
+        working-directory: plugins/suggest-workflow/cli
+        run: |
+          cargo check
+          cargo test
+
       - name: Check PR title format
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}

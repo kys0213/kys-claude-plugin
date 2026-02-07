@@ -30,3 +30,6 @@ bumpversion
 .new_version
 tmp.json
 tools/bumpversion/bumpversion
+
+# Rust build artifacts (suggest-workflow)
+plugins/suggest-workflow/cli/target/

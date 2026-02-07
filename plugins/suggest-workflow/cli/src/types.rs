@@ -1,0 +1,97 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionEntry {
+    #[serde(rename = "type")]
+    pub entry_type: String,
+    pub message: Option<Message>,
+    pub name: Option<String>,
+    pub input: Option<serde_json::Value>,
+    pub output: Option<String>,
+    pub timestamp: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Message {
+    pub content: Content,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Content {
+    Text(String),
+    Array(Vec<ContentItem>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentItem {
+    #[serde(rename = "type")]
+    pub item_type: String,
+    pub text: Option<String>,
+    pub name: Option<String>,
+    pub id: Option<String>,
+    pub input: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolUse {
+    pub name: String,
+    pub timestamp: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub display: String,
+    pub timestamp: i64,
+    pub project: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolSequence {
+    pub tools: Vec<String>,
+    pub count: usize,
+    pub sessions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkflowAnalysisResult {
+    pub total_sequences: usize,
+    pub unique_sequences: usize,
+    pub top_sequences: Vec<ToolSequence>,
+    pub tool_usage_stats: Vec<(String, usize)>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PromptFrequency {
+    pub prompt: String,
+    pub count: usize,
+    pub weighted_count: f64,
+    pub last_used: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PromptAnalysisResult {
+    pub total: usize,
+    pub unique: usize,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub top_prompts: Vec<PromptFrequency>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TacitPattern {
+    #[serde(rename = "type")]
+    pub pattern_type: String,
+    pub pattern: String,
+    pub normalized: String,
+    pub examples: Vec<String>,
+    pub count: usize,
+    pub bm25_score: f64,
+    pub confidence: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TacitAnalysisResult {
+    pub total: usize,
+    pub patterns: Vec<TacitPattern>,
+}

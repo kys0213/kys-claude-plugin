@@ -1,0 +1,23 @@
+{
+  "name": "suggest-workflow",
+  "version": "0.6.0",
+  "description": "세션 분석 기반 워크플로우 제안 - Claude Code 활용 최적화",
+  "author": {
+    "name": "kys0213"
+  },
+  "keywords": [
+    "workflow",
+    "suggestion",
+    "analysis",
+    "optimization",
+    "session"
+  ],
+  "commands": [
+    "./commands/suggest-workflow.md",
+    "./commands/suggest-skill.md",
+    "./commands/setup.md"
+  ],
+  "agents": [
+    "./agents/workflow-analyzer.md"
+  ]
+}

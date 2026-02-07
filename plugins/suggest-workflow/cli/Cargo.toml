@@ -1,0 +1,33 @@
+[package]
+name = "suggest-workflow"
+version = "0.5.0"
+edition = "2021"
+authors = ["Claude Code Plugin"]
+description = "Session analysis and workflow suggestion CLI"
+
+[[bin]]
+name = "suggest-workflow"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+lindera = { version = "2.1", features = ["lindera-ko-dic", "embed-ko-dic"], optional = true }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+regex = "1.10"
+walkdir = "2.5"
+
+[features]
+default = []
+lindera-korean = ["lindera"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[dependencies.once_cell]
+version = "1.19"
