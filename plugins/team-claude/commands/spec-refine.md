@@ -493,6 +493,247 @@ Spec Refine 완료
 
 ---
 
+## 상태 모델 (SpecRefineState)
+
+> 타입 정의: `cli/src/lib/common.ts`
+
+spec-refine의 핵심은 **iteration 간 전달되는 상태(`carry`)**입니다.
+Planner가 다음 관점을 결정하려면, 이전에 뭐가 문제였고 뭐가 해결됐는지 알아야 합니다.
+
+### 상태 파일 위치
+
+```
+${SESSION_DIR}/refine-state.json
+```
+
+### 상태 전이 다이어그램
+
+```
+┌────────┐
+│  idle  │ ── spec-refine 시작 ──▶ ┌─────────┐
+└────────┘                          │ running │
+                                    └────┬────┘
+                                         │
+          ┌──────────────────────────────┘
+          │
+          ▼
+    ┌─────────────┐
+    │  iteration  │◀─────────────────────────────┐
+    │  시작       │                               │
+    └──────┬──────┘                               │
+           │                                      │
+    ┌──────▼──────┐                               │
+    │  Planner    │ ◀── carry.unresolvedIssues    │
+    │  관점 결정  │ ◀── carry.perspectiveHistory  │
+    └──────┬──────┘                               │
+           │                                      │
+    ┌──────▼──────┐                               │
+    │  병렬 리뷰  │                               │
+    └──────┬──────┘                               │
+           │                                      │
+    ┌──────▼──────┐                               │
+    │  합의 분석  │ ──▶ consensusIssues           │
+    │  점수 산출  │ ──▶ weightedScore             │
+    └──────┬──────┘                               │
+           │                                      │
+     ┌─────┼─────┐                                │
+     │     │     │                                │
+     ▼     ▼     ▼                                │
+   PASS  WARN  FAIL                               │
+     │     │     │                                │
+     │     │     ▼                                │
+     │     │  ┌──────────┐                        │
+     │     │  │  정제    │                        │
+     │     │  │  carry   │ ──── update ──────────▶│
+     │     │  │  업데이트│                        │
+     │     │  └──────────┘                        │
+     │     │                                      │
+     ▼     ▼                                      │
+  ┌────────────┐         ┌─────────────┐          │
+  │  passed /  │         │  escalated  │◀── max   │
+  │  warned    │         │             │   iter ──┘
+  └────────────┘         └─────────────┘
+```
+
+### 상태 구조
+
+```typescript
+interface SpecRefineState {
+  sessionId: string;
+  status: "idle" | "running" | "passed" | "warned" | "failed" | "escalated";
+
+  // 설정
+  config: {
+    maxIterations: number;    // 최대 반복 횟수 (기본 5)
+    passThreshold: number;    // 통과 점수 (기본 80)
+    warnThreshold: number;    // 경고 점수 (기본 60)
+    maxPerspectives: number;  // 최대 관점 수 (기본 4)
+  };
+
+  // 현재 반복
+  currentIteration: number;
+  iterations: RefineIteration[];  // 모든 반복의 상세 기록
+
+  // ━━━ 핵심: 반복 간 전달 상태 ━━━
+  carry: {
+    unresolvedIssues: ConsensusIssue[];  // → Planner 입력
+    resolvedIssues: ConsensusIssue[];    // → 관점 제외 근거
+    scoreHistory: number[];              // → 개선 추세 판단
+    perspectiveHistory: string[][];      // → 중복 관점 방지
+  };
+
+  // 타임스탬프
+  startedAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+```
+
+### carry 필드 상세
+
+| 필드 | 누가 쓰는가 | 누가 읽는가 | 용도 |
+|------|-------------|-------------|------|
+| `unresolvedIssues` | 합의 분석 (PHASE C) | Perspective Planner (PHASE A) | 미해결 이슈 영역의 관점 선택, 가중치 상향 |
+| `resolvedIssues` | 정제 (PHASE E) | Perspective Planner (PHASE A) | 해결된 영역의 관점 제외/교체 |
+| `scoreHistory` | 합의 분석 (PHASE C) | 판정 (PHASE D) | 점수 개선 추세로 에스컬레이션 판단 |
+| `perspectiveHistory` | Planner (PHASE A) | Planner (PHASE A) | 이전과 동일한 관점 조합 방지 |
+
+### 상태 라이프사이클
+
+#### 1. 초기화 (spec-refine 시작)
+
+```json
+{
+  "sessionId": "abc12345",
+  "status": "running",
+  "config": { "maxIterations": 5, "passThreshold": 80, "warnThreshold": 60, "maxPerspectives": 4 },
+  "currentIteration": 0,
+  "iterations": [],
+  "carry": {
+    "unresolvedIssues": [],
+    "resolvedIssues": [],
+    "scoreHistory": [],
+    "perspectiveHistory": []
+  },
+  "startedAt": "2026-02-07T10:00:00Z",
+  "updatedAt": "2026-02-07T10:00:00Z",
+  "completedAt": null
+}
+```
+
+#### 2. Iteration 1 완료 후 (FAIL)
+
+```json
+{
+  "status": "running",
+  "currentIteration": 1,
+  "iterations": [{
+    "iteration": 1,
+    "perspectives": [
+      { "role": "보안 전문가", "engine": "codex", "weight": 0.30, "..." : "..." },
+      { "role": "PM", "engine": "gemini", "weight": 0.25, "..." : "..." },
+      { "role": "DBA", "engine": "claude", "weight": 0.25, "..." : "..." },
+      { "role": "QA 엔지니어", "engine": "claude", "weight": 0.20, "..." : "..." }
+    ],
+    "reviews": [
+      { "perspective": "보안 전문가", "score": 65, "..." : "..." },
+      { "perspective": "PM", "score": 80, "..." : "..." },
+      { "perspective": "DBA", "score": 75, "..." : "..." },
+      { "perspective": "QA 엔지니어", "score": 70, "..." : "..." }
+    ],
+    "consensusIssues": [
+      {
+        "summary": "Contract Test 에러 경로 누락",
+        "level": "consensus",
+        "agreedBy": ["보안 전문가", "PM", "DBA", "QA 엔지니어"],
+        "resolved": false
+      },
+      {
+        "summary": "데이터 모델 정규화 필요",
+        "level": "majority",
+        "agreedBy": ["보안 전문가", "DBA", "QA 엔지니어"],
+        "resolved": false
+      }
+    ],
+    "weightedScore": 72.25,
+    "verdict": "fail",
+    "refinementActions": [
+      "contracts.md: 에러 경로 테스트 5개 추가",
+      "architecture.md: 쿠폰-주문 데이터 모델 정규화"
+    ]
+  }],
+  "carry": {
+    "unresolvedIssues": [
+      { "summary": "Contract Test 에러 경로 누락", "level": "consensus", "resolved": false }
+    ],
+    "resolvedIssues": [
+      { "summary": "데이터 모델 정규화 필요", "level": "majority", "resolved": true, "resolvedAt": "iteration-1" }
+    ],
+    "scoreHistory": [72.25],
+    "perspectiveHistory": [["보안 전문가", "PM", "DBA", "QA 엔지니어"]]
+  }
+}
+```
+
+#### 3. Iteration 2 - Planner가 carry를 읽음
+
+```
+Planner 입력:
+  unresolvedIssues: ["Contract Test 에러 경로 누락" (consensus)]
+  resolvedIssues: ["데이터 모델 정규화" (majority, iteration-1에서 해결)]
+  scoreHistory: [72.25]
+  perspectiveHistory: [["보안 전문가", "PM", "DBA", "QA 엔지니어"]]
+
+Planner 판단:
+  - 에러 경로 누락이 미해결 → 보안 전문가 유지 + 가중치 상향 (0.30→0.40)
+  - 데이터 모델은 해결됨 → DBA 제외
+  - PM 관점은 80점으로 양호 → 제외
+  - 보안 수정의 영향도를 볼 새 관점 필요 → 백엔드 엔지니어 추가
+  - QA는 회귀 테스트 검증 위해 유지
+
+Planner 출력:
+  1. 보안 전문가    (codex,  w=0.40)
+  2. 백엔드 엔지니어 (claude, w=0.35)
+  3. QA 엔지니어    (claude, w=0.25)
+```
+
+#### 4. PASS 시 최종 상태
+
+```json
+{
+  "status": "passed",
+  "currentIteration": 2,
+  "carry": {
+    "unresolvedIssues": [],
+    "resolvedIssues": [
+      { "summary": "데이터 모델 정규화", "resolved": true, "resolvedAt": "iteration-1" },
+      { "summary": "Contract Test 에러 경로", "resolved": true, "resolvedAt": "iteration-2" }
+    ],
+    "scoreHistory": [72.25, 85.5],
+    "perspectiveHistory": [
+      ["보안 전문가", "PM", "DBA", "QA 엔지니어"],
+      ["보안 전문가", "백엔드 엔지니어", "QA 엔지니어"]
+    ]
+  },
+  "completedAt": "2026-02-07T10:15:00Z"
+}
+```
+
+### 에스컬레이션 판단 기준
+
+```
+scoreHistory를 기반으로 판단:
+
+1. 점수 정체: 최근 2회 점수 차이 < 3점 → "자동 정제로 개선 불가"
+2. 점수 하락: 이전보다 낮아짐 → "정제가 역효과"
+3. 동일 이슈 반복: unresolvedIssues에 3회 이상 동일 이슈 → "구조적 문제"
+4. 최대 반복 도달: currentIteration >= maxIterations
+
+→ 위 조건 충족 시 status = "escalated"
+```
+
+---
+
 ## 설정
 
 ```yaml
