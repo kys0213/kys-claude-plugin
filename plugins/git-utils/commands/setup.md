@@ -125,6 +125,8 @@ cat > ~/.git-workflow-env << 'ENV'
 # GitHub host (비어있으면 github.com)
 export GH_HOST="{gh_host_or_empty}"
 ENV
+
+chmod 600 ~/.git-workflow-env
 ```
 
 - github.com 선택 시: `GH_HOST=""` (비어있으면 gh CLI가 기본값 사용)
