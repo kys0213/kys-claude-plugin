@@ -1,3 +1,9 @@
+---
+paths:
+  - ".claude/{commands,agents,skills}/**/*.md"
+  - "{commands,agents,skills}/**/*.md"
+---
+
 # Agent Design Principles
 
 > 레이어드 아키텍처에 익숙한 개발자를 위한 에이전트 설계 원칙
