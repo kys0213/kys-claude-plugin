@@ -178,7 +178,7 @@ tools:
 분석을 실행하려면 다음 Bash 명령을 사용합니다:
 
 ```bash
-bun run plugins/suggest-workflow/bin/cli.ts \
+${CLAUDE_PLUGIN_ROOT}/cli/target/release/suggest-workflow workflow \
   --source {source} \
   --threshold {threshold} \
   --top {top} \
