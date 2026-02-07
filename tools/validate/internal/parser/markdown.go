@@ -71,7 +71,7 @@ func ExtractPluginRootPaths(filePath string) ([]PathInfo, error) {
 	defer file.Close()
 
 	var paths []PathInfo
-	pluginRootPattern := regexp.MustCompile(`\$\{CLAUDE_PLUGIN_ROOT\}[^\s"'\` + "`" + `]+`)
+	pluginRootPattern := regexp.MustCompile(`\$\{CLAUDE_PLUGIN_ROOT\}[^\s"')\` + "`" + `]+`)
 
 	scanner := bufio.NewScanner(file)
 	lineNum := 0
