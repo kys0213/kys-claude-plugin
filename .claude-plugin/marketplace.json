@@ -72,6 +72,20 @@
       "source": "./plugins/team-claude",
       "strict": false,
       "version": "0.8.1"
+    },
+    {
+      "category": "productivity",
+      "description": "레이어드 아키텍처 기반 에이전트 설계 원칙 가이드 - 깨진 유리창 효과 방지",
+      "keywords": [
+        "workflow",
+        "design-principles",
+        "layered-architecture",
+        "agent-design"
+      ],
+      "name": "workflow-guide",
+      "source": "./plugins/workflow-guide",
+      "strict": false,
+      "version": "0.1.0"
     }
   ]
 }

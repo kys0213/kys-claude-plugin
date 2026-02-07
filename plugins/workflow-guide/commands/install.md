@@ -1,0 +1,225 @@
+---
+name: workflow-guide:install
+description: 프로젝트에 에이전트 설계 원칙 룰을 설치합니다
+argument-hint: "[--force]"
+allowed-tools:
+  - Read
+  - Write
+  - Bash
+  - Glob
+  - AskUserQuestion
+---
+
+# Workflow Guide Install Command
+
+프로젝트의 `.claude/rules/` 디렉토리에 에이전트 설계 원칙 룰 파일을 설치합니다.
+
+> 참고: [소프트웨어 3.0 시대를 맞이하며](https://toss.tech/article/software-3-0-era) 블로그의 원칙을 기반으로 합니다.
+
+## Execution Steps
+
+### Step 1: 현재 프로젝트 상태 확인
+
+```bash
+# .claude/rules 디렉토리 확인
+ls .claude/rules/ 2>/dev/null
+```
+
+- `.claude/rules/` 디렉토리가 없으면 생성
+- 이미 `agent-design-principles.md` 파일이 존재하면:
+  - `$ARGUMENTS`에 `--force`가 있으면 덮어쓰기
+  - 없으면 `AskUserQuestion`으로 덮어쓸지 확인
+
+### Step 2: 기존 워크플로우 파일 탐색
+
+프로젝트에 이미 존재하는 에이전트 관련 파일을 탐색합니다:
+
+```
+Glob: .claude/commands/**/*.md
+Glob: .claude/agents/**/*.md
+Glob: .claude/skills/**/SKILL.md
+```
+
+탐색 결과를 기반으로 룰 파일에 프로젝트 맞춤 예시를 포함할 수 있습니다.
+
+### Step 3: 룰 파일 생성
+
+아래 내용을 `.claude/rules/agent-design-principles.md`에 Write 도구로 작성합니다:
+
+```markdown
+# Agent Design Principles
+
+> 레이어드 아키텍처에 익숙한 개발자를 위한 에이전트 설계 원칙
+> ref: https://toss.tech/article/software-3-0-era
+
+## 레이어드 아키텍처 매핑
+
+에이전트 구성 요소는 전통적인 레이어드 아키텍처와 1:1로 대응됩니다.
+새로운 Skill, Sub-agent, Slash Command를 만들 때 이 매핑을 기준으로 설계하세요.
+
+| 에이전트 구성 요소 | 레이어드 아키텍처 | 역할 |
+|---|---|---|
+| **Slash Command** | Controller | 사용자 요청의 진입점. 입력을 파싱하고 적절한 Sub-agent에게 위임 |
+| **Sub-agent** | Service Layer | 여러 Skill을 조합하여 워크플로우를 완성. 별도 Context로 독립 동작 |
+| **Skill** | Domain / Repository | 단일 책임 원칙(SRP)을 따르는 재사용 가능한 기능 단위 |
+| **MCP** | Adapter | 외부 시스템과의 인터페이스. Adapter Pattern 적용 |
+| **CLAUDE.md** | Config (package.json) | 잘 변하지 않는 프로젝트 원칙만 기록 |
+
+---
+
+## Slash Command 설계 원칙 (Controller)
+
+1. **진입점 역할만 수행**: 비즈니스 로직을 직접 구현하지 않음
+2. **입력 파싱과 위임**: 사용자 인자를 파싱하고 적절한 Sub-agent/Skill에 위임
+3. **allowed-tools 최소화**: 필요한 도구만 명시적으로 허용
+4. **멱등성 고려**: 같은 명령을 여러 번 실행해도 안전하게 설계
+
+```yaml
+# Good: 역할이 명확한 Command
+---
+name: review
+description: 코드 리뷰를 실행합니다
+allowed-tools: ["Task", "Glob"]  # 최소한의 도구
+---
+# Step 1: 파일 수집 (Glob)
+# Step 2: Sub-agent에 위임 (Task)
+# Step 3: 결과 취합
+```
+
+```yaml
+# Bad: Command에 로직이 직접 구현됨
+---
+name: review
+allowed-tools: ["Read", "Write", "Bash", "Glob", "Grep", "Task", ...]  # 모든 도구
+---
+# 파일을 직접 읽고, 분석하고, 결과를 쓰고...
+```
+
+---
+
+## Sub-agent 설계 원칙 (Service Layer)
+
+1. **Skill 조합자**: 여러 Skill을 조합하여 하나의 워크플로우를 완성
+2. **독립적 Context**: 각 Sub-agent는 별도의 Context Window를 가짐 (별도 스레드)
+3. **model 선택 기준**:
+   - `opus`: 복잡한 추론, 설계 판단이 필요한 경우
+   - `sonnet`: 일반적인 코드 분석, 리뷰
+   - `haiku`: 단순 분류, 파싱, 변환
+4. **tools 최소 권한**: 필요한 도구만 부여
+
+```yaml
+# Good: 역할이 명확하고 model이 적절한 Agent
+---
+name: code-reviewer
+model: sonnet        # 코드 분석에 적합
+tools: ["Read", "Glob", "Grep"]  # 읽기 전용
+---
+```
+
+```yaml
+# Bad: 과도한 권한의 Agent
+---
+name: helper
+model: opus          # 단순 작업에 opus는 낭비
+tools: ["Read", "Write", "Bash", "Glob", "Grep", "Task"]  # 모든 권한
+---
+```
+
+---
+
+## Skill 설계 원칙 (Domain / SRP)
+
+1. **단일 책임**: 하나의 Skill은 하나의 관심사만 다룸
+2. **재사용성**: 여러 Command/Agent에서 참조 가능하도록 설계
+3. **Skill 폭발 주의**: Claude는 시작 시 모든 Skill 메타데이터를 로드함
+   - Skill이 20개면 20개의 description이 항상 Context를 점유
+   - 과도한 분리는 Class Explosion과 같은 문제를 야기
+4. **정적 지식만 포함**: 동적으로 변하는 정보는 대화로 전달
+
+```
+# Good: 응집도 높은 Skill
+skills/
+  auth-patterns/SKILL.md        # 인증 관련 패턴
+  error-handling/SKILL.md       # 에러 처리 컨벤션
+
+# Bad: 과도하게 분리된 Skill (Class Explosion)
+skills/
+  jwt-validation/SKILL.md
+  jwt-refresh/SKILL.md
+  jwt-revocation/SKILL.md
+  session-create/SKILL.md
+  session-validate/SKILL.md
+  session-expire/SKILL.md
+```
+
+---
+
+## 토큰 관리 원칙 (Memory Management)
+
+전통 서버에서 RAM을 관리하듯, 에이전트에서는 토큰을 관리해야 합니다.
+
+### Context Window 소비 구조
+
+```
+Context Window (200K tokens)
+├── System Prompt (고정)
+├── CLAUDE.md (고정)
+├── Skill descriptions (고정) ← Skill 수에 비례
+├── 대화 히스토리 (누적)
+├── MCP 응답 (가변)
+└── 파일 내용 (가변)
+```
+
+### 최적화 전략
+
+1. **Glob으로 경로만 수집, 내용은 Sub-agent가 읽기**
+   ```
+   MainAgent: Glob → 파일 경로 목록
+   SubAgent: Read → 실제 파일 내용 (별도 Context)
+   ```
+
+2. **결정적 로직은 스크립트로 분리**
+   ```bash
+   # Bad: LLM이 컨벤션을 매번 해석
+   "브랜치명은 feat/xxx 형식으로..."
+
+   # Good: 스크립트가 캡슐화
+   bash scripts/create-branch.sh feat my-feature
+   ```
+
+3. **CLAUDE.md에는 정적 원칙만**
+   - 기술 스택, 코딩 컨벤션, 빌드 명령어 등
+   - 현재 작업 이슈, 오늘의 우선순위 등은 대화로 전달
+
+---
+
+## 안티패턴 체크리스트
+
+새로운 워크플로우를 만들 때 아래 항목을 확인하세요:
+
+- [ ] Slash Command가 직접 로직을 구현하고 있지 않은가? (Controller에 Service 로직)
+- [ ] Sub-agent에 불필요하게 높은 model을 사용하고 있지 않은가?
+- [ ] Skill이 과도하게 분리되어 있지 않은가? (Class Explosion)
+- [ ] allowed-tools / tools에 불필요한 도구가 포함되어 있지 않은가?
+- [ ] CLAUDE.md에 동적으로 변하는 정보를 넣고 있지 않은가?
+- [ ] LLM이 판단할 필요 없는 결정적 로직을 프롬프트로 설명하고 있지 않은가?
+- [ ] 파일 내용을 MainAgent에서 직접 읽고 있지 않은가? (토큰 낭비)
+```
+
+### Step 4: 결과 확인
+
+설치 완료 후 안내 메시지를 출력합니다:
+
+```
+설치 완료: .claude/rules/agent-design-principles.md
+
+이 룰은 Claude가 새로운 Skill, Sub-agent, Slash Command를 만들 때 자동으로 참조합니다.
+
+주요 원칙:
+• Slash Command = Controller (진입점만, 로직 위임)
+• Sub-agent = Service Layer (Skill 조합, 독립 Context)
+• Skill = SRP (단일 책임, 폭발 주의)
+• 토큰 = 메모리 (Glob 경로만, 스크립트 분리, CLAUDE.md 정적만)
+
+ref: https://toss.tech/article/software-3-0-era
+```
