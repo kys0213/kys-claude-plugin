@@ -17,7 +17,7 @@
       "name": "review",
       "source": "./plugins/review",
       "strict": false,
-      "version": "0.3.3"
+      "version": "0.3.4"
     },
     {
       "category": "integration",
@@ -30,7 +30,7 @@
       "name": "external-llm",
       "source": "./plugins/external-llm",
       "strict": false,
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     {
       "category": "productivity",
@@ -48,7 +48,7 @@
       ],
       "name": "git-utils",
       "source": "./plugins/git-utils",
-      "version": "2.0.0"
+      "version": "2.0.1"
     },
     {
       "category": "productivity",
@@ -62,7 +62,7 @@
       "name": "planning",
       "source": "./plugins/planning",
       "strict": false,
-      "version": "0.2.0"
+      "version": "0.2.1"
     },
     {
       "category": "productivity",
@@ -77,7 +77,7 @@
       "name": "team-claude",
       "source": "./plugins/team-claude",
       "strict": false,
-      "version": "0.8.1"
+      "version": "0.8.2"
     },
     {
       "category": "productivity",
@@ -91,7 +91,7 @@
       "name": "workflow-guide",
       "source": "./plugins/workflow-guide",
       "strict": false,
-      "version": "0.2.0"
+      "version": "0.2.1"
     },
     {
       "category": "productivity",
@@ -105,7 +105,7 @@
       ],
       "name": "suggest-workflow",
       "source": "./plugins/suggest-workflow",
-      "version": "0.7.0"
+      "version": "0.7.1"
     }
   ]
 }
