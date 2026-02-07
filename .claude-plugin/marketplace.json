@@ -92,6 +92,20 @@
       "source": "./plugins/workflow-guide",
       "strict": false,
       "version": "0.2.0"
+    },
+    {
+      "category": "productivity",
+      "description": "세션 분석 기반 워크플로우 제안 - Claude Code 활용 최적화",
+      "keywords": [
+        "workflow",
+        "suggestion",
+        "analysis",
+        "optimization",
+        "session"
+      ],
+      "name": "suggest-workflow",
+      "source": "./plugins/suggest-workflow",
+      "version": "0.6.0"
     }
   ]
 }
