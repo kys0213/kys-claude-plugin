@@ -32,12 +32,21 @@ jobs:
       - name: Run plugin validation
         run: make validate-ci
 
+      - name: Check for suggest-workflow changes
+        id: check_sw
+        run: |
+          if git diff --name-only origin/main...HEAD | grep -q '^plugins/suggest-workflow/'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Setup Rust
-        if: contains(github.event.pull_request.title, 'suggest-workflow') || github.event.pull_request.head.ref == 'feat/add-suggest-workflow'
+        if: steps.check_sw.outputs.changed == 'true'
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: Rust check and test
-        if: contains(github.event.pull_request.title, 'suggest-workflow') || github.event.pull_request.head.ref == 'feat/add-suggest-workflow'
+        if: steps.check_sw.outputs.changed == 'true'
         working-directory: plugins/suggest-workflow/cli
         run: |
           cargo check
