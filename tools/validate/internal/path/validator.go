@@ -28,6 +28,7 @@ type Results struct {
 }
 
 var pluginRootPattern = regexp.MustCompile(`\$\{CLAUDE_PLUGIN_ROOT\}`)
+var markdownLinkRegex = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
 
 // Validate runs all path validations
 func Validate(repoRoot string) (*Results, error) {
@@ -80,6 +81,41 @@ func Validate(repoRoot string) (*Results, error) {
 	if _, err := os.Stat(marketplaceFile); err == nil {
 		sourceResults := validateMarketplaceSources(marketplaceFile, repoRoot)
 		for _, r := range sourceResults {
+			if r.Valid {
+				results.Passed = append(results.Passed, r)
+			} else {
+				results.Failed = append(results.Failed, r)
+			}
+		}
+	}
+
+	// 5. Strict path encapsulation check
+	pluginJSONFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "**/plugin.json")
+	for _, file := range pluginJSONFiles {
+		// Skip marketplace.json's plugin.json
+		fullPath := filepath.Join(repoRoot, file)
+		if strings.Contains(file, "marketplace") {
+			continue
+		}
+		encapResults := validateStrictEncapsulation(fullPath, repoRoot)
+		for _, r := range encapResults {
+			if r.Valid {
+				results.Passed = append(results.Passed, r)
+			} else {
+				results.Failed = append(results.Failed, r)
+			}
+		}
+	}
+
+	// 6. Markdown internal link validation (skip node_modules)
+	allMdFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "plugins/**/*.md")
+	for _, file := range allMdFiles {
+		if strings.Contains(file, "node_modules/") {
+			continue
+		}
+		fullPath := filepath.Join(repoRoot, file)
+		linkResults := validateMarkdownLinks(fullPath)
+		for _, r := range linkResults {
 			if r.Valid {
 				results.Passed = append(results.Passed, r)
 			} else {
@@ -348,4 +384,130 @@ func errorIfNotExists(exists bool, errMsg string) string {
 		return ""
 	}
 	return errMsg
+}
+
+func validateStrictEncapsulation(pluginJSONPath string, repoRoot string) []Result {
+	var results []Result
+
+	content, err := os.ReadFile(pluginJSONPath)
+	if err != nil {
+		return results
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(content, &data); err != nil {
+		return results
+	}
+
+	// Check strict field (default false - strict is opt-in)
+	strict := false
+	if strictVal, ok := data["strict"].(bool); ok {
+		strict = strictVal
+	}
+
+	if !strict {
+		return results
+	}
+
+	// Plugin root is parent of .claude-plugin/
+	pluginRoot := filepath.Dir(filepath.Dir(pluginJSONPath))
+
+	// Find all md files in the plugin
+	mdPatterns := []string{"agents/*.md", "commands/*.md", "skills/*/*.md", "hooks/*.md"}
+	for _, pattern := range mdPatterns {
+		absPattern := filepath.Join(pluginRoot, pattern)
+		matches, _ := filepath.Glob(absPattern)
+		for _, match := range matches {
+			paths, err := parser.ExtractPluginRootPaths(match)
+			if err != nil {
+				continue
+			}
+			for _, p := range paths {
+				pathValue := strings.Replace(p.Value, "${CLAUDE_PLUGIN_ROOT}", "", 1)
+				// Strip leading separator after ${CLAUDE_PLUGIN_ROOT} removal
+				pathValue = strings.TrimPrefix(pathValue, "/")
+
+				if strings.Contains(pathValue, "../") {
+					results = append(results, Result{
+						File:           match,
+						Type:           "strict-encapsulation",
+						ReferencedPath: p.Value,
+						Valid:          false,
+						Error:          "Strict plugin cannot reference parent directory: " + p.Value,
+					})
+				}
+
+				// Detect absolute paths NOT using ${CLAUDE_PLUGIN_ROOT}
+				// e.g. raw "/usr/local/bin/script" in content
+				if !strings.HasPrefix(p.Value, "${CLAUDE_PLUGIN_ROOT}") && strings.HasPrefix(p.Value, "/") {
+					results = append(results, Result{
+						File:           match,
+						Type:           "strict-encapsulation",
+						ReferencedPath: p.Value,
+						Valid:          false,
+						Error:          "Strict plugin cannot use absolute paths: " + p.Value,
+					})
+				}
+			}
+		}
+	}
+
+	return results
+}
+
+func validateMarkdownLinks(filePath string) []Result {
+	var results []Result
+
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return results
+	}
+
+	fileDir := filepath.Dir(filePath)
+	lines := strings.Split(string(content), "\n")
+	inCodeBlock := false
+
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			inCodeBlock = !inCodeBlock
+			continue
+		}
+		if inCodeBlock {
+			continue
+		}
+
+		matches := markdownLinkRegex.FindAllStringSubmatch(line, -1)
+		for _, match := range matches {
+			if len(match) < 3 {
+				continue
+			}
+			linkPath := match[2]
+
+			// Skip external URLs, anchors, mailto, and plugin root paths
+			if strings.HasPrefix(linkPath, "http://") || strings.HasPrefix(linkPath, "https://") ||
+				strings.HasPrefix(linkPath, "mailto:") || strings.HasPrefix(linkPath, "#") ||
+				strings.Contains(linkPath, "${CLAUDE_PLUGIN_ROOT}") {
+				continue
+			}
+
+			// Remove anchor from path (e.g., ./file.md#section)
+			if idx := strings.Index(linkPath, "#"); idx > 0 {
+				linkPath = linkPath[:idx]
+			}
+
+			resolved := filepath.Join(fileDir, linkPath)
+			exists := fileOrDirExists(resolved)
+
+			results = append(results, Result{
+				File:           filePath,
+				Type:           "markdown-link",
+				ReferencedPath: match[2],
+				ResolvedPath:   resolved,
+				Valid:          exists,
+				Error:          errorIfNotExists(exists, "Linked file not found: "+match[2]),
+			})
+		}
+	}
+
+	return results
 }
