@@ -1,5 +1,4 @@
 ---
-name: git-sync
 description: 지정한 브랜치(또는 기본 브랜치)로 전환 후 최신 상태로 동기화
 argument-hint: "[branch] [--force]"
 allowed-tools:

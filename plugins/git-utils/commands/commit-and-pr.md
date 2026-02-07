@@ -1,5 +1,4 @@
 ---
-name: commit-and-pr
 description: "변경사항을 커밋하고 PR을 생성합니다"
 argument-hint: "[commit message]"
 allowed-tools:

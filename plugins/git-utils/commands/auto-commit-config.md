@@ -1,5 +1,4 @@
 ---
-name: auto-commit-config
 description: 자동 커밋 설정을 변경합니다. 프로젝트(.claude/) 또는 사용자(~/.claude/) 범위의 hook을 관리합니다.
 allowed-tools:
   - Read

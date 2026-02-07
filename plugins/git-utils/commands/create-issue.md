@@ -1,5 +1,4 @@
 ---
-name: create-issue
 description: "GitHub issue를 생성합니다"
 argument-hint: "[title]"
 allowed-tools:

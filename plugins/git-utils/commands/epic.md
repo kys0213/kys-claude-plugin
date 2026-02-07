@@ -1,5 +1,4 @@
 ---
-name: epic
 description: "Epic 계획서 기반 서브태스크 분해 및 병렬 작업 관리"
 argument-hint: "[init <name>|plan|next|status]"
 allowed-tools:

@@ -1,5 +1,4 @@
 ---
-name: branch-status
 description: "현재 브랜치의 변경사항을 분석하고 남은 작업을 리포트합니다"
 argument-hint: "[--diff-only|--tasks-only]"
 allowed-tools:

@@ -1,5 +1,4 @@
 ---
-name: team-claude:setup
 description: Team Claude 환경 설정 - 초기화, 설정 관리, 에이전트 관리, 서버 관리
 allowed-tools: ["Read", "Write", "Glob", "Bash", "AskUserQuestion"]
 ---

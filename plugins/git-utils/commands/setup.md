@@ -1,5 +1,4 @@
 ---
-name: setup
 description: git-workflow 플러그인 초기 설정. GitHub 환경, 자동 커밋 hook 등을 사용자/프로젝트 단위로 설정합니다.
 allowed-tools:
   - Read

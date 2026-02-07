@@ -1,5 +1,4 @@
 ---
-name: workflow-analyzer
 description: "세션 히스토리 분석 에이전트. 반복 패턴을 아키텍처 레이어별로 분류하여 제안."
 model: sonnet
 tools:

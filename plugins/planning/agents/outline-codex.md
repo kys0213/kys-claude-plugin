@@ -1,5 +1,4 @@
 ---
-name: outline-codex
 description: (내부용) /outline 커맨드에서 호출되는 Codex 아키텍처 설계 에이전트
 model: haiku
 color: blue

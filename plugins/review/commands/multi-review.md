@@ -1,5 +1,4 @@
 ---
-name: multi-review
 description: Claude, Codex, Gemini 3개 LLM으로 동시에 문서를 리뷰합니다
 argument-hint: "[리뷰 요청 사항]"
 allowed-tools: ["Task", "Glob"]

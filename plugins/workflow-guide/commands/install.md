@@ -1,5 +1,4 @@
 ---
-name: workflow-guide:install
 description: 프로젝트에 에이전트 설계 원칙 룰을 설치합니다
 argument-hint: "[--force]"
 allowed-tools:

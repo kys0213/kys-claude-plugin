@@ -1,5 +1,4 @@
 ---
-name: team-claude:architect
 description: 설계 루프 - 인간과 에이전트가 대화형으로 스펙/아키텍처를 협업 설계
 argument-hint: "<요구사항> | --resume <session-id> | --list"
 allowed-tools: ["Task", "Read", "Write", "Glob", "Grep", "AskUserQuestion", "Bash"]

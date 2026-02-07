@@ -1,5 +1,4 @@
 ---
-name: git-branch
 description: default 브랜치 또는 지정한 base 브랜치를 최신화 후 신규 브랜치 생성
 argument-hint: "[new-branch] [base-branch]"
 allowed-tools:

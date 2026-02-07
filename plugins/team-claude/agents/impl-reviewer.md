@@ -1,5 +1,4 @@
 ---
-name: impl-reviewer
 description: 구현 검토 에이전트 - 완료된 구현의 품질 검토 (언어 무관)
 model: sonnet
 tools: ["Read", "Glob", "Grep"]

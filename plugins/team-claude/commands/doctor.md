@@ -1,5 +1,4 @@
 ---
-name: team-claude:doctor
 description: Team Claude 자가 진단 및 자동 수정
 allowed-tools: ["Read", "Bash", "AskUserQuestion"]
 ---

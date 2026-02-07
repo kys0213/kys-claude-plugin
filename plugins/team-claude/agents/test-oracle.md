@@ -1,5 +1,4 @@
 ---
-name: test-oracle
 description: 테스트 오라클 에이전트 - Checkpoint 검증 결과 분석 및 피드백 생성 (언어 무관)
 model: sonnet
 tools: ["Read", "Glob", "Grep", "Bash"]

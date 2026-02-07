@@ -1,5 +1,4 @@
 ---
-name: team-claude:swarm
 description: Swarm Mode - 여러 서브에이전트에게 태스크를 병렬로 위임
 argument-hint: "<tasks...> | --from-checkpoints <session-id>"
 allowed-tools: ["Task", "Bash", "Read", "Write", "Glob", "Grep", "Edit"]

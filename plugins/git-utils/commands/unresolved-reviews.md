@@ -1,5 +1,4 @@
 ---
-name: unresolved-reviews
 description: "PR의 미해결 리뷰 코멘트를 조회합니다"
 argument-hint: "[PR_NUMBER]"
 allowed-tools:

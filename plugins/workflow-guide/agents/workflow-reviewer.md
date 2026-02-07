@@ -1,5 +1,4 @@
 ---
-name: workflow-reviewer
 description: 워크플로우 파일(Command, Agent, Skill) 설계 원칙 준수 여부를 리뷰합니다
 model: sonnet
 tools: ["Read", "Glob", "Grep"]

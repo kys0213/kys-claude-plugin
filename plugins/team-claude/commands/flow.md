@@ -1,5 +1,4 @@
 ---
-name: team-claude:flow
 description: 통합 워크플로우 - 스펙 설계부터 구현, 머지까지 자동화된 워크플로우 실행
 argument-hint: "<요구사항> | --session <id> [--mode autopilot|assisted|manual]"
 allowed-tools: ["Task", "Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion"]
