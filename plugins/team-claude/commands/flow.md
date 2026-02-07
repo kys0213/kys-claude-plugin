@@ -149,14 +149,21 @@ autopilot+swarm: 쿠폰 기능 추가
 │      • 의존성 그래프 생성                                         │
 │      • 검증 기준 정의                                             │
 │                                                                   │
-│  1.5 Auto-Review Loop (autopilot/assisted)                        │
+│  1.5 Multi-Review RALPH Loop (autopilot/assisted)                 │
+│      /team-claude:spec-refine --session ${SESSION_ID} 호출        │
 │      ┌────────────────────────────────────────────────────────┐  │
-│      │  SPEC_REVIEW_LOOP:                                      │  │
-│      │    1. spec-reviewer 에이전트 호출                       │  │
-│      │    2. 피드백 분석                                       │  │
-│      │    3. 피드백 없음 → 통과                                │  │
-│      │    4. 피드백 있음 → 수정 후 1로 돌아감                  │  │
-│      │    5. 최대 반복(5) 도달 → 에스컬레이션                  │  │
+│      │  SPEC_REFINE_LOOP:                                      │  │
+│      │    1. 3-LLM 병렬 리뷰 (Claude, Codex, Gemini)          │  │
+│      │       • Claude: 아키텍처 깊이, 완전성, 의존성          │  │
+│      │       • Codex:  구현 가능성, Contract 실행성            │  │
+│      │       • Gemini: 대안 설계, 리스크, 확장성               │  │
+│      │    2. 합의 분석                                          │  │
+│      │       • CONSENSUS (3/3): 반드시 반영                    │  │
+│      │       • MAJORITY  (2/3): 강력 권장, 자동 반영           │  │
+│      │       • MINORITY  (1/3): 기록만                         │  │
+│      │    3. 통합 점수 (가중 평균) ≥ 80 → 통과                 │  │
+│      │    4. FAIL → 자동 정제 후 1로 돌아감                    │  │
+│      │    5. 최대 반복 도달 → 에스컬레이션                     │  │
 │      └────────────────────────────────────────────────────────┘  │
 │                                                                   │
 │  1.6 HITL 확인 (assisted/manual)                                  │
@@ -244,39 +251,46 @@ autopilot+swarm: 쿠폰 기능 추가
 
 ## Auto-Review Loop 상세
 
-### Spec Review
+### Spec Review (Multi-Review RALPH)
 
 ```markdown
-## 🔍 Spec Review (자동)
+## Spec Review - 3-LLM 병렬 리뷰 + RALPH 자동 정제
 
-### 검토 항목
+/team-claude:spec-refine 커맨드를 통해 실행됩니다.
 
-1. **완전성 (Completeness)**
-   - 모든 요구사항이 스펙에 반영되었는가?
-   - 누락된 엣지 케이스가 있는가?
+### 리뷰 관점 (3개 LLM 병렬)
 
-2. **일관성 (Consistency)**
-   - 기존 아키텍처와 일관되는가?
-   - 용어 사용이 일관되는가?
+1. **Claude (가중치 0.40)** - 아키텍처 깊이
+   - 완전성, 일관성, 의존성 그래프, 테스트 가능성, 구현 가능성
+   - 기존 spec-reviewer 에이전트 사용
 
-3. **테스트 가능성 (Testability)**
-   - 각 기준이 검증 가능한가?
-   - Contract Test가 충분한가?
+2. **Codex (가중치 0.35)** - 구현 현실성
+   - Contract 실행 가능성, 코드 품질, 테스트 충분성
+   - Checkpoint 독립성, 검증 명령어 정확성
 
-4. **의존성 (Dependencies)**
-   - 의존성 그래프가 올바른가?
-   - 순환 의존성이 없는가?
+3. **Gemini (가중치 0.25)** - 대안 및 리스크
+   - 대안 설계, 리스크 분석, 확장성
+   - 누락 패턴, 트레이드오프 명시성
 
-### 피드백 형식
+### 합의 분석
 
-- ✅ PASS: 검토 통과
-- ⚠️ WARN: 개선 권장 (자동 진행)
-- ❌ FAIL: 수정 필요 (수정 후 재검토)
+- CONSENSUS (3/3 동의): 반드시 수정 → 자동 반영
+- MAJORITY  (2/3 동의): 강력 권장 → 자동 반영
+- MINORITY  (1/3 제기): 기록만 → 향후 고려사항
+
+### 판정 기준
+
+- 통합 점수 ≥ 80 → PASS
+- CONSENSUS 이슈 0개 + 점수 ≥ 60 → WARN (사용자 확인 후 진행)
+- 그 외 → FAIL (자동 정제 후 재리뷰)
 
 ### 예시
 
-❌ FAIL: Checkpoint `coupon-api`의 의존성에 `coupon-service`가 누락됨
-   → 제안: dependencies에 "coupon-service" 추가
+Iteration 1: 통합 점수 75.5 (FAIL)
+  CONSENSUS: Contract Test 에러 케이스 누락 → 자동 추가
+  MAJORITY:  의존성 그래프 단순화 → 자동 반영
+
+Iteration 2: 통합 점수 87.1 (PASS)
 ```
 
 ### Code Review
@@ -515,10 +529,30 @@ tc review code ${CHECKPOINT_ID}
 flow:
   defaultMode: assisted
 
+  specRefine:
+    enabled: true
+    maxIterations: 5
+    passThreshold: 80
+    reviewers:
+      claude:
+        enabled: true
+        weight: 0.40
+        agent: spec-reviewer
+      codex:
+        enabled: true
+        weight: 0.35
+        agent: spec-reviewer-codex
+      gemini:
+        enabled: true
+        weight: 0.25
+        agent: spec-reviewer-gemini
+    consensus:
+      autoApplyConsensus: true   # 3/3 동의 이슈 자동 반영
+      autoApplyMajority: true    # 2/3 동의 이슈 자동 반영
+
   autoReview:
     enabled: true
     maxIterations: 5
-    specReviewer: spec-reviewer
     codeReviewer: code-reviewer
 
   escalation:
