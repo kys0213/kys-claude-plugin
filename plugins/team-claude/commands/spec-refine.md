@@ -734,6 +734,96 @@ scoreHistory를 기반으로 판단:
 
 ---
 
+## Hook 연동 (결정적 실행 보장)
+
+> 구현: `cli/src/commands/hook.ts`, 설정: `hooks/hooks.json`
+
+LLM이 상태 전이를 자발적으로 하길 기대하면 비결정적입니다.
+Hook이 이벤트를 감지하고 상태를 **자동으로** 업데이트합니다.
+
+### Hook 목록
+
+| Hook | 트리거 | 명령어 | 역할 |
+|------|--------|--------|------|
+| `PostToolUse(Task)` | 리뷰 에이전트 완료 | `tc hook refine-review-complete` | 리뷰 수집 추적, 전체 완료 알림 |
+| `PostToolUse(Bash)` | call-codex/gemini 완료 | `tc hook refine-review-complete` | 외부 LLM 리뷰 수집 추적 |
+| `PostToolUse(Write)` | specs/ 파일 수정 | `tc hook refine-spec-modified` | 정제 액션 자동 기록 |
+| `Stop` | iteration 종료 | `tc hook refine-iteration-end` | carry 업데이트, 에스컬레이션 판단 |
+
+### Hook이 강제하는 전이
+
+```
+LLM이 하는 것           Hook이 하는 것
+─────────────────────   ──────────────────────────────────
+Planner 호출            (LLM)
+리뷰 에이전트 호출      (LLM)
+                        → refine-review-complete:
+                          리뷰 카운트 추적
+                          전체 완료 시 알림
+합의 분석               (LLM)
+판정                    (LLM, 상태에 verdict 기록)
+스펙 파일 수정          (LLM)
+                        → refine-spec-modified:
+                          정제 액션 자동 기록
+iteration 종료          → refine-iteration-end:
+                          carry.scoreHistory 업데이트
+                          carry.perspectiveHistory 업데이트
+                          carry.unresolvedIssues 분류
+                          carry.resolvedIssues 분류
+                          에스컬레이션 판단 (자동)
+                          status 전이 (passed/escalated/fail)
+                          OS 알림
+```
+
+### 핵심: LLM은 실행만, Hook은 상태 관리
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  LLM의 책임 (실행):                                          │
+│  • Planner 호출하여 관점 생성                                │
+│  • 리뷰 에이전트/스크립트 호출                               │
+│  • 리뷰 결과를 합의 분석                                     │
+│  • verdict를 refine-state.json에 기록                        │
+│  • FAIL 시 스펙 파일 수정 (정제)                             │
+│                                                              │
+│  Hook의 책임 (상태):                                         │
+│  • 리뷰 완료 카운트 추적 (refine-review-complete)            │
+│  • 스펙 수정 액션 기록 (refine-spec-modified)                │
+│  • carry 업데이트 - 이슈 분류, 점수/관점 이력                │
+│  • 에스컬레이션 판단 - 정체/하락/반복 감지                   │
+│  • status 전이 - passed/warned/escalated                     │
+│  • OS 알림                                                   │
+│                                                              │
+│  분리 이유:                                                   │
+│  • LLM이 carry를 직접 조작하면 실수할 수 있음                │
+│  • 에스컬레이션은 규칙 기반이므로 코드가 더 정확             │
+│  • Hook은 매번 확실하게 실행됨 (LLM의 "깜빡함" 없음)        │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 에스컬레이션 자동 판단 (refine-iteration-end)
+
+```typescript
+// Hook이 자동으로 판단하는 에스컬레이션 조건:
+
+// 1. 점수 정체 (최근 2회 차이 < 3점)
+if (Math.abs(scoreHistory[-1] - scoreHistory[-2]) < 3) → escalate
+
+// 2. 점수 하락
+if (scoreHistory[-1] < scoreHistory[-2]) → escalate
+
+// 3. 동일 이슈 3회 이상 반복
+if (unresolvedIssues.some(issue => appearances >= 3)) → escalate
+
+// 4. 최대 반복 도달
+if (currentIteration >= maxIterations) → escalate
+```
+
+LLM이 "한 번 더 해볼까?" 하고 고민할 필요 없이,
+Hook이 `status = "escalated"`로 바꿔버리면 LLM은 그냥 에스컬레이션 리포트를 출력합니다.
+
+---
+
 ## 설정
 
 ```yaml
