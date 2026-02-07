@@ -1,8 +1,8 @@
 {
-  "name": "workflow-guide",
-  "version": "0.1.0",
-  "description": "Skill, Sub-agent, Slash Command 구조화 원칙 가이드 - 레이어드 아키텍처 기반 에이전트 설계",
   "author": {
     "name": "kys0213"
-  }
+  },
+  "description": "Skill, Sub-agent, Slash Command 구조화 원칙 가이드 - 레이어드 아키텍처 기반 에이전트 설계",
+  "name": "workflow-guide",
+  "version": "0.2.0"
 }

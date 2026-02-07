@@ -85,7 +85,7 @@
       "name": "workflow-guide",
       "source": "./plugins/workflow-guide",
       "strict": false,
-      "version": "0.1.0"
+      "version": "0.2.0"
     }
   ]
 }
