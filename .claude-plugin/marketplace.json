@@ -34,15 +34,21 @@
     },
     {
       "category": "productivity",
-      "description": "Git 브랜치 관리 유틸리티 - 새 브랜치 생성 및 기본 브랜치 동기화",
+      "description": "Git 워크플로우 자동화 - 브랜치, 커밋, PR, 머지, 동기화, conflict 해결, Issue 관리",
       "keywords": [
         "git",
         "branch",
-        "sync"
+        "sync",
+        "pr",
+        "commit",
+        "merge",
+        "workflow",
+        "conflict",
+        "issue"
       ],
       "name": "git-utils",
       "source": "./plugins/git-utils",
-      "version": "0.2.1"
+      "version": "1.0.0"
     },
     {
       "category": "productivity",

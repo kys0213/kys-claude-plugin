@@ -1,8 +1,40 @@
 {
+  "name": "git-utils",
+  "version": "1.0.0",
+  "description": "Git workflow automation (branch, commit, PR, merge, sync, conflict resolution, issue management)",
   "author": {
     "name": "kys0213"
   },
-  "description": "Git branch management utilities - create branches and sync with default branch",
-  "name": "git-utils",
-  "version": "0.2.1"
+  "keywords": [
+    "git",
+    "pr",
+    "commit",
+    "merge",
+    "branch",
+    "workflow",
+    "sync",
+    "conflict",
+    "rebase",
+    "issue",
+    "ci",
+    "check"
+  ],
+  "skills": [
+    "./skills"
+  ],
+  "commands": [
+    "./commands/git-sync.md",
+    "./commands/git-branch.md",
+    "./commands/git-resolve.md",
+    "./commands/commit-and-pr.md",
+    "./commands/merge-pr.md",
+    "./commands/create-issue.md",
+    "./commands/prioritize-issues.md",
+    "./commands/epic.md",
+    "./commands/unresolved-reviews.md",
+    "./commands/check-ci.md",
+    "./commands/branch-status.md",
+    "./commands/setup.md",
+    "./commands/auto-commit-config.md"
+  ]
 }
