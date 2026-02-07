@@ -12,24 +12,20 @@ set -e
 
 BRANCH_NAME=$(git branch --show-current)
 
-# Pattern 1: prefix/TICKET or prefix/ticket (e.g., feat/WAD-0212, feat/wad-0212)
-if [[ $BRANCH_NAME =~ ^[a-z]+/([A-Za-z]+-[0-9]+)$ ]]; then
-  JIRA_TICKET="${BASH_REMATCH[1]}"
-  # Convert to uppercase
-  JIRA_TICKET=$(echo "$JIRA_TICKET" | tr '[:lower:]' '[:upper:]')
-  echo "$JIRA_TICKET"
+# Pattern 1: prefix/TICKET-123 or prefix/TICKET-123/description
+if [[ $BRANCH_NAME =~ ^[a-z]+[-/]([A-Za-z]+-[0-9]+) ]]; then
+  TICKET="${BASH_REMATCH[1]}"
+  echo "${TICKET^^}"
   exit 0
-# Pattern 2: Direct TICKET (e.g., WAD-0212)
-elif [[ $BRANCH_NAME =~ ^([A-Z]+-[0-9]+)$ ]]; then
-  JIRA_TICKET="${BASH_REMATCH[1]}"
-  echo "$JIRA_TICKET"
+# Pattern 2: TICKET-123 anywhere in branch name
+elif [[ $BRANCH_NAME =~ ([A-Z]+-[0-9]+) ]]; then
+  TICKET="${BASH_REMATCH[1]}"
+  echo "$TICKET"
   exit 0
-# Pattern 3: Direct lowercase ticket (e.g., wad-0212) - less common but supported
-elif [[ $BRANCH_NAME =~ ^([a-z]+-[0-9]+)$ ]]; then
-  JIRA_TICKET="${BASH_REMATCH[1]}"
-  # Convert to uppercase
-  JIRA_TICKET=$(echo "$JIRA_TICKET" | tr '[:lower:]' '[:upper:]')
-  echo "$JIRA_TICKET"
+# Pattern 3: lowercase ticket anywhere
+elif [[ $BRANCH_NAME =~ ([a-z]+-[0-9]+) ]]; then
+  TICKET="${BASH_REMATCH[1]}"
+  echo "${TICKET^^}"
   exit 0
 else
   exit 1
