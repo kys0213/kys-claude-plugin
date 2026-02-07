@@ -1,5 +1,4 @@
 ---
-name: conflict-analyzer
 description: Git merge conflict 분석 에이전트 - 변경 이력과 의도를 분석하여 해결 방안 제시
 model: sonnet
 tools: ["Read", "Bash", "Grep", "Glob"]

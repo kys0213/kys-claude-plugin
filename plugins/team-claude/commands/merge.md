@@ -1,5 +1,4 @@
 ---
-name: team-claude:merge
 description: Semi-Auto 머지 - Worker PR들을 epic 브랜치로 머지 (conflict 시 사용자 확인)
 argument-hint: "[--session <session-id>] [--dry-run]"
 allowed-tools: ["Task", "Read", "Write", "Bash", "Grep", "AskUserQuestion"]

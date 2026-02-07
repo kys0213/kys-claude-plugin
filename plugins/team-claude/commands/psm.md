@@ -1,5 +1,4 @@
 ---
-name: team-claude:psm
 description: PSM (Parallel Session Manager) - git worktree 기반 병렬 세션 관리
 argument-hint: "new <name> | list | switch <name> | parallel <names...> | status | cleanup"
 allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion"]

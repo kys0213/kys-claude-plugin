@@ -1,5 +1,4 @@
 ---
-name: invoke-codex
 description: OpenAI Codex CLI를 사용하여 임의의 프롬프트를 실행합니다
 argument-hint: "[프롬프트]"
 allowed-tools: ["Bash", "Read", "Glob"]

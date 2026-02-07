@@ -1,5 +1,4 @@
 ---
-name: team-claude:hud
 description: HUD (Heads-Up Display) - 워크플로우 상태를 statusline에 표시
 argument-hint: "setup | config | reset"
 allowed-tools: ["Bash", "Read", "Write", "Edit"]

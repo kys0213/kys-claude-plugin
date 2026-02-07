@@ -1,5 +1,4 @@
 ---
-name: outline
 description: 요구사항 기반 상위 레벨 설계 - 3개 LLM으로 아키텍처를 분석하고 ASCII 다이어그램으로 도식화합니다
 argument-hint: "[설계 요청 사항]"
 allowed-tools: ["Task", "Glob", "AskUserQuestion"]

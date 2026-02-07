@@ -1,5 +1,4 @@
 ---
-name: team-claude:loop-status
 description: 피드백 루프 상태 조회 - 현재 진행 중인 자율 실행 상태 확인
 argument-hint: "[--session <session-id>] [--watch]"
 allowed-tools: ["Read", "Glob", "Bash"]

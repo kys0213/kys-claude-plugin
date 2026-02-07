@@ -1,5 +1,4 @@
 ---
-name: codex
 description: OpenAI Codex를 사용하여 문서를 리뷰하는 에이전트. 자연어 프롬프트를 스크립트에 전달합니다.
 whenToUse: |
   다음 상황에서 이 에이전트를 사용하세요:

@@ -1,5 +1,4 @@
 ---
-name: spec-reviewer
 description: 스펙 자동 리뷰 에이전트 - 설계 문서의 품질을 자동으로 검토
 model: sonnet
 tools: ["Read", "Glob", "Grep"]

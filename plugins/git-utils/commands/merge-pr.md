@@ -1,5 +1,4 @@
 ---
-name: merge-pr
 description: "현재 브랜치의 PR을 머지하고 기본 브랜치로 동기화합니다"
 argument-hint: "[PR_NUMBER]"
 allowed-tools:

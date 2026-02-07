@@ -1,5 +1,4 @@
 ---
-name: prioritize-issues
 description: "열린 issue를 분석하여 우선순위가 높은 작업을 추천합니다"
 argument-hint: "[--limit N]"
 allowed-tools:

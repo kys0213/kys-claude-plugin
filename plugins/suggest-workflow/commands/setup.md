@@ -1,5 +1,4 @@
 ---
-name: setup
 description: Build suggest-workflow Rust CLI
 ---
 

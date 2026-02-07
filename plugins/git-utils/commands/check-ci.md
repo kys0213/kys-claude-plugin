@@ -1,5 +1,4 @@
 ---
-name: check-ci
 description: "PR의 CI/CD 실패 로그를 분석합니다"
 argument-hint: "[PR_NUMBER]"
 allowed-tools:

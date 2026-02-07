@@ -1,5 +1,4 @@
 ---
-name: suggest-skill
 description: 프롬프트에서 암묵지를 추출하여 skill로 제안
 ---
 

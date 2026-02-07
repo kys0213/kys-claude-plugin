@@ -1,5 +1,4 @@
 ---
-name: git-resolve
 description: Rebase conflict 발생 시 파일별로 충돌을 하나씩 리뷰하며 해결
 argument-hint: "[--continue|--abort|--skip]"
 allowed-tools:

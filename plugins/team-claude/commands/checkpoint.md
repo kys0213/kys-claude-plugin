@@ -1,5 +1,4 @@
 ---
-name: team-claude:checkpoint
 description: Checkpoint 관리 - 검증 기준점 조회, 추가, 검증
 argument-hint: "--list | validate <checkpoint-id> | add <description>"
 allowed-tools: ["Bash", "Read", "Write", "Glob", "AskUserQuestion"]

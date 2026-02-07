@@ -1,5 +1,4 @@
 ---
-name: team-claude:delegate
 description: 구현 위임 - 확정된 Checkpoint를 자율 에이전트에게 위임하여 자동 구현/검증
 argument-hint: "<checkpoint-id> | --session <session-id> [--all]"
 allowed-tools: ["Task", "Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion"]

@@ -1,5 +1,4 @@
 ---
-name: suggest-workflow
 description: 세션 분석 기반 워크플로우 제안 - Claude Code 활용 최적화
 ---
 
