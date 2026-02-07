@@ -104,7 +104,7 @@ echo ""
 if [ -n "$DESCRIPTION" ]; then
   PR_URL=$(gh pr create --base "$DEFAULT_BRANCH" --title "$PR_TITLE" --body "$DESCRIPTION")
 else
-  PR_URL=$(gh pr create --base "$DEFAULT_BRANCH" --title "$PR_TITLE")
+  PR_URL=$(gh pr create --base "$DEFAULT_BRANCH" --title "$PR_TITLE" --body "")
 fi
 
 echo ""
