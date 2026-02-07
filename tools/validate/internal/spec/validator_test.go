@@ -3,6 +3,7 @@ package spec
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -92,14 +93,14 @@ tools: ["Read", "Write"]
 			wantErr: false,
 		},
 		{
-			name: "missing name",
+			name: "agent without name",
 			content: `---
 description: A test agent
 ---
 
 # My Agent
 `,
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name: "invalid model",
@@ -177,6 +178,27 @@ name: my-command
 			wantErr: true,
 		},
 		{
+			name: "valid command without name",
+			content: `---
+description: A test command
+---
+
+# My Command
+`,
+			wantErr: false,
+		},
+		{
+			name: "command with qualified name",
+			content: `---
+name: plugin:my-command
+description: A test command
+---
+
+# My Command
+`,
+			wantErr: false,
+		},
+		{
 			name: "allowed-tools not array",
 			content: `---
 name: my-command
@@ -198,6 +220,55 @@ allowed-tools: "Task"
 			}
 
 			result := validateCommandMD(filePath)
+
+			if tt.wantErr && result.Valid {
+				t.Errorf("Expected validation to fail, but it passed")
+			}
+			if !tt.wantErr && !result.Valid {
+				t.Errorf("Expected validation to pass, but it failed: %v", result.Errors)
+			}
+		})
+	}
+}
+
+func TestValidateSkillMD(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		content string
+		wantErr bool
+	}{
+		{
+			name: "skill without name still fails",
+			content: `---
+description: A test skill
+---
+
+` + strings.Repeat("line\n", 60),
+			wantErr: true,
+		},
+		{
+			name: "valid skill with name",
+			content: `---
+name: my-skill
+description: A test skill
+---
+
+` + strings.Repeat("line\n", 60),
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filePath := filepath.Join(tmpDir, "SKILL.md")
+			if err := os.WriteFile(filePath, []byte(tt.content), 0644); err != nil {
+				t.Fatalf("Failed to write test file: %v", err)
+			}
+
+			results := &Results{}
+			result := validateSkillMD(filePath, results)
 
 			if tt.wantErr && result.Valid {
 				t.Errorf("Expected validation to fail, but it passed")

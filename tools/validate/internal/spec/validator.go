@@ -302,7 +302,7 @@ func validateAgentMD(filePath string) Result {
 		return result
 	}
 
-	errors := parser.ValidateFrontmatter(parsed.Frontmatter, []string{"name", "description"})
+	errors := parser.ValidateFrontmatter(parsed.Frontmatter, []string{"description"})
 	result.Errors = append(result.Errors, errors...)
 
 	// tools must be array
@@ -342,7 +342,7 @@ func validateCommandMD(filePath string) Result {
 		return result
 	}
 
-	errors := parser.ValidateFrontmatter(parsed.Frontmatter, []string{"name", "description"})
+	errors := parser.ValidateFrontmatter(parsed.Frontmatter, []string{"description"})
 	result.Errors = append(result.Errors, errors...)
 
 	// allowed-tools must be array
