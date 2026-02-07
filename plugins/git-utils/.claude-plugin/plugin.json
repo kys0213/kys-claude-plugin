@@ -1,27 +1,7 @@
 {
-  "name": "git-utils",
-  "version": "1.0.0",
-  "description": "Git workflow automation (branch, commit, PR, merge, sync, conflict resolution, issue management)",
   "author": {
     "name": "kys0213"
   },
-  "keywords": [
-    "git",
-    "pr",
-    "commit",
-    "merge",
-    "branch",
-    "workflow",
-    "sync",
-    "conflict",
-    "rebase",
-    "issue",
-    "ci",
-    "check"
-  ],
-  "skills": [
-    "./skills"
-  ],
   "commands": [
     "./commands/git-sync.md",
     "./commands/git-branch.md",
@@ -36,5 +16,25 @@
     "./commands/branch-status.md",
     "./commands/setup.md",
     "./commands/auto-commit-config.md"
-  ]
+  ],
+  "description": "Git workflow automation (branch, commit, PR, merge, sync, conflict resolution, issue management)",
+  "keywords": [
+    "git",
+    "pr",
+    "commit",
+    "merge",
+    "branch",
+    "workflow",
+    "sync",
+    "conflict",
+    "rebase",
+    "issue",
+    "ci",
+    "check"
+  ],
+  "name": "git-utils",
+  "skills": [
+    "./skills"
+  ],
+  "version": "2.0.0"
 }
