@@ -10,20 +10,14 @@ use crate::parsers::{
 };
 use crate::analyzers::{
     analyze_workflows, analyze_prompts, analyze_tacit_knowledge,
+    build_transition_matrix, analyze_repetition, analyze_trends,
+    analyze_files, link_sessions,
     AnalysisDepth, DepthConfig, StopwordSet,
 };
 use crate::analyzers::tool_classifier::classify_tool;
 
-const CACHE_VERSION: &str = "1.0.0";
+const CACHE_VERSION: &str = "2.0.0";
 const CACHE_DIR_NAME: &str = "suggest-workflow-cache";
-
-// Seed keywords for classifying prompt types in summaries
-const DIRECTIVE_KEYWORDS: &[&str] = &[
-    "항상", "반드시", "무조건", "절대", "꼭", "always", "must", "never",
-];
-const CORRECTION_KEYWORDS: &[&str] = &[
-    "말고", "대신", "아니라", "아니야", "틀렸", "instead",
-];
 
 /// Generate cache files for a project.
 /// All summaries are regenerated every time to ensure consistency
@@ -139,7 +133,7 @@ fn get_cache_dir(encoded_name: &str) -> Result<PathBuf> {
         .join(encoded_name))
 }
 
-// --- Session summary generation ---
+// --- Session summary generation (rule-free) ---
 
 fn generate_session_summary(
     session_id: &str,
@@ -149,13 +143,12 @@ fn generate_session_summary(
     let sessions = vec![(session_id.to_string(), entries.to_vec())];
     let history_entries = adapt_to_history_entries(&sessions, project_path);
 
-    // Prompts with type classification
+    // Prompts — no type classification (delegated to Phase 2 LLM)
     let prompts: Vec<SummaryPrompt> = history_entries
         .iter()
         .map(|e| SummaryPrompt {
             text: e.display.clone(),
             timestamp: e.timestamp,
-            prompt_type: classify_prompt_type(&e.display),
         })
         .collect();
 
@@ -169,43 +162,64 @@ fn generate_session_summary(
     let tool_use_count = tool_uses.len();
     let tool_sequences = build_sequence_strings(&tool_uses, &classified);
 
-    // Directives and corrections (deduplicated)
-    let directives: Vec<String> = prompts
-        .iter()
-        .filter(|p| p.prompt_type.as_deref() == Some("directive"))
-        .map(|p| truncate_str(&p.text, 120))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-
-    let corrections: Vec<String> = prompts
-        .iter()
-        .filter(|p| p.prompt_type.as_deref() == Some("correction"))
-        .map(|p| truncate_str(&p.text, 120))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-
     // Mutated files
     let files_mutated = extract_mutated_files(&tool_uses);
 
-    // Static signals
+    // Per-file edit counts (pure counting)
+    let mut file_edit_counts: HashMap<String, usize> = HashMap::new();
+    for tool in &tool_uses {
+        if matches!(tool.name.as_str(), "Edit" | "Write" | "NotebookEdit") {
+            if let Some(input) = &tool.input {
+                let path = input
+                    .get("file_path")
+                    .or_else(|| input.get("notebook_path"))
+                    .and_then(|v| v.as_str());
+                if let Some(p) = path {
+                    *file_edit_counts.entry(p.to_string()).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    let mut file_edit_vec: Vec<(String, usize)> = file_edit_counts.into_iter().collect();
+    file_edit_vec.sort_by(|a, b| b.1.cmp(&a.1));
+
+    // Tool transition counts within session
+    let mut transitions: HashMap<(String, String), usize> = HashMap::new();
+    for pair in classified.windows(2) {
+        *transitions
+            .entry((pair[0].clone(), pair[1].clone()))
+            .or_insert(0) += 1;
+    }
+    let mut transition_vec: Vec<(String, String, usize)> = transitions
+        .into_iter()
+        .map(|((from, to), count)| (from, to, count))
+        .collect();
+    transition_vec.sort_by(|a, b| b.2.cmp(&a.2));
+
+    // Max consecutive same tool
+    let max_consecutive = max_consecutive_same(&classified);
+
+    // Unique tools
     let unique_tools: HashSet<&str> = classified.iter().map(|s| s.as_str()).collect();
-    let static_signals = StaticSignals {
-        has_directive: !directives.is_empty(),
-        has_correction: !corrections.is_empty(),
-        prompt_density: match prompts.len() {
-            0..=10 => "low",
-            11..=30 => "medium",
-            _ => "high",
-        }
-        .to_string(),
-        workflow_complexity: match unique_tools.len() {
-            0..=4 => "simple",
-            5..=8 => "medium",
-            _ => "complex",
-        }
-        .to_string(),
+
+    // Average prompt length
+    let avg_prompt_length = if prompts.is_empty() {
+        0.0
+    } else {
+        let total_len: usize = prompts.iter().map(|p| p.text.chars().count()).sum();
+        total_len as f64 / prompts.len() as f64
+    };
+
+    // Pure quantitative stats
+    let stats = SessionStats {
+        prompt_count: prompts.len(),
+        unique_tool_count: unique_tools.len(),
+        total_tool_uses: tool_use_count,
+        files_edited_count: files_mutated.len(),
+        avg_prompt_length: (avg_prompt_length * 10.0).round() / 10.0,
+        max_consecutive_same_tool: max_consecutive,
+        tool_transitions: transition_vec,
+        file_edit_counts: file_edit_vec,
     };
 
     SessionSummary {
@@ -213,26 +227,28 @@ fn generate_session_summary(
         prompts,
         tool_use_count,
         tool_sequences,
-        directives,
-        corrections,
         files_mutated,
-        static_signals,
+        stats,
     }
 }
 
-fn classify_prompt_type(text: &str) -> Option<String> {
-    let lower = text.to_lowercase();
-    for keyword in DIRECTIVE_KEYWORDS {
-        if lower.contains(keyword) {
-            return Some("directive".to_string());
+fn max_consecutive_same(tools: &[String]) -> usize {
+    if tools.is_empty() {
+        return 0;
+    }
+    let mut max_count = 1;
+    let mut current_count = 1;
+    for i in 1..tools.len() {
+        if tools[i] == tools[i - 1] {
+            current_count += 1;
+            if current_count > max_count {
+                max_count = current_count;
+            }
+        } else {
+            current_count = 1;
         }
     }
-    for keyword in CORRECTION_KEYWORDS {
-        if lower.contains(keyword) {
-            return Some("correction".to_string());
-        }
-    }
-    None
+    max_count
 }
 
 fn build_sequence_strings(tool_uses: &[ToolUse], classified: &[String]) -> Vec<String> {
@@ -293,7 +309,7 @@ fn extract_mutated_files(tool_uses: &[ToolUse]) -> Vec<String> {
     files.into_iter().collect()
 }
 
-// --- Meta builder ---
+// --- Meta builder (quantitative tags only) ---
 
 fn build_meta_from_summary(
     session_id: &str,
@@ -328,22 +344,19 @@ fn build_meta_from_summary(
     tool_vec.sort_by(|a, b| b.1.cmp(&a.1));
     let dominant_tools: Vec<String> = tool_vec.into_iter().take(5).map(|(name, _)| name).collect();
 
-    // Tags
+    // Quantitative tags — based on numbers only, no keyword matching
     let mut tags = Vec::new();
     if prompt_count > 20 {
         tags.push("high-activity".to_string());
     }
-    if summary.static_signals.has_directive {
-        tags.push("has-directives".to_string());
-    }
-    if summary.static_signals.has_correction {
-        tags.push("has-corrections".to_string());
-    }
     if summary.files_mutated.len() > 10 {
         tags.push("many-file-changes".to_string());
     }
-    if summary.static_signals.workflow_complexity == "complex" {
+    if summary.stats.unique_tool_count > 8 {
         tags.push("complex-workflow".to_string());
+    }
+    if summary.stats.max_consecutive_same_tool >= 5 {
+        tags.push("high-repetition".to_string());
     }
 
     CacheSessionMeta {
@@ -364,7 +377,7 @@ fn build_meta_from_summary(
     }
 }
 
-// --- Analysis snapshot ---
+// --- Analysis snapshot (includes new statistical analyzers) ---
 
 fn generate_analysis_snapshot(
     sessions: &[(String, Vec<SessionEntry>)],
@@ -378,30 +391,39 @@ fn generate_analysis_snapshot(
     cache_dir: &Path,
     stopwords: &StopwordSet,
 ) -> Result<()> {
+    // Existing analyses
     let workflow_result = analyze_workflows(sessions, threshold, top, 2, 5);
     let prompt_result = analyze_prompts(history_entries, decay, 14.0);
     let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, 14.0, stopwords);
+
+    // New statistical analyses (rule-free)
+    let transition_result = build_transition_matrix(sessions);
+    let repetition_result = analyze_repetition(sessions);
+    let trend_result = analyze_trends(sessions, history_entries);
+    let file_result = analyze_files(sessions, top);
+    let link_result = link_sessions(sessions);
 
     let snapshot = serde_json::json!({
         "analyzedAt": Utc::now().to_rfc3339(),
         "depth": depth.to_string(),
         "project": project_path,
+        "cacheVersion": CACHE_VERSION,
+
+        // Existing analyses
         "promptAnalysis": serde_json::to_value(&prompt_result)?,
         "workflowAnalysis": serde_json::to_value(&workflow_result)?,
         "tacitKnowledge": serde_json::to_value(&skill_result)?,
+
+        // New statistical analyses
+        "toolTransitions": serde_json::to_value(&transition_result)?,
+        "repetitionStats": serde_json::to_value(&repetition_result)?,
+        "weeklyTrends": serde_json::to_value(&trend_result)?,
+        "fileAnalysis": serde_json::to_value(&file_result)?,
+        "sessionLinks": serde_json::to_value(&link_result)?,
     });
 
     let json = serde_json::to_string_pretty(&snapshot)?;
     fs::write(cache_dir.join("analysis-snapshot.json"), &json)?;
 
     Ok(())
-}
-
-fn truncate_str(s: &str, max_chars: usize) -> String {
-    if s.chars().count() > max_chars {
-        let truncated: String = s.chars().take(max_chars - 3).collect();
-        format!("{}...", truncated)
-    } else {
-        s.to_string()
-    }
 }

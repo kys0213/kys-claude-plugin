@@ -13,8 +13,8 @@ use commands::analyze::{AnalysisScope, AnalysisFocus};
 
 #[derive(Parser)]
 #[command(name = "suggest-workflow")]
-#[command(version = "1.1.0")]
-#[command(about = "Analyze Claude session patterns — unified workflow + skill analysis with multi-query BM25")]
+#[command(version = "2.0.0")]
+#[command(about = "Analyze Claude session patterns — structural statistics extraction for LLM interpretation")]
 struct Cli {
     /// Analysis scope: project (single) or global (cross-project)
     #[arg(long, default_value = "project")]

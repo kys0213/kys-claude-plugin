@@ -220,6 +220,10 @@ fn test_clustering_different_topics_separate() {
 // TYPE CLASSIFICATION TESTS
 // ============================================================================
 
+// Type classification is now delegated to Phase 2 (LLM).
+// These tests verify that patterns are still detected as clusters
+// with their content preserved for LLM classification.
+
 #[test]
 fn test_type_classification_directive() {
     let entries = vec![
@@ -232,14 +236,12 @@ fn test_type_classification_directive() {
 
     let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0, &StopwordSet::builtin());
 
-    let has_directive = result.patterns.iter().any(|p| {
-        p.pattern_type == "directive" ||
-        p.pattern.contains("항상") ||
-        p.pattern.contains("반드시") ||
-        p.pattern.contains("꼭")
+    // Pattern should be detected as a cluster (type classification is Phase 2's job)
+    let has_pattern = result.patterns.iter().any(|p| {
+        p.pattern_type == "cluster" && p.pattern.contains("타입")
     });
 
-    assert!(has_directive, "Should identify directive patterns");
+    assert!(has_pattern, "Should detect pattern cluster containing directive-like prompts");
 }
 
 #[test]
@@ -255,12 +257,11 @@ fn test_type_classification_convention() {
     let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0, &StopwordSet::builtin());
 
     let has_convention = result.patterns.iter().any(|p| {
-        p.pattern_type == "convention" ||
-        p.pattern.contains("camelCase") ||
-        p.pattern.contains("snake_case")
+        p.pattern_type == "cluster" &&
+        (p.pattern.contains("camelCase") || p.pattern.contains("snake_case"))
     });
 
-    assert!(has_convention, "Should identify convention patterns");
+    assert!(has_convention, "Should detect pattern cluster containing convention-like prompts");
 }
 
 #[test]
@@ -276,12 +277,11 @@ fn test_type_classification_preference() {
     let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0, &StopwordSet::builtin());
 
     let has_preference = result.patterns.iter().any(|p| {
-        p.pattern_type == "preference" ||
-        p.pattern.contains("선호") ||
-        p.pattern.contains("좋아")
+        p.pattern_type == "cluster" &&
+        p.pattern.contains("async/await")
     });
 
-    assert!(has_preference, "Should identify preference patterns");
+    assert!(has_preference, "Should detect pattern cluster containing preference-like prompts");
 }
 
 #[test]
