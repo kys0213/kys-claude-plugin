@@ -1,16 +1,10 @@
 use crate::analyzers::bm25::BM25Ranker;
 use crate::analyzers::depth::DepthConfig;
+use crate::analyzers::stopwords::StopwordSet;
 use crate::analyzers::tacit::tokenize;
 use crate::tokenizer::KoreanTokenizer;
 use std::sync::LazyLock;
 use std::collections::HashSet;
-
-static STOPWORDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
-    ["응", "네", "좋아", "그래", "알겠어", "해줘", "해", "하자", "고마워", "감사", "ok", "yes"]
-        .iter()
-        .copied()
-        .collect()
-});
 
 static KOREAN_TOKENIZER: LazyLock<Option<KoreanTokenizer>> = LazyLock::new(|| {
     KoreanTokenizer::new().ok()
@@ -36,20 +30,20 @@ pub struct DecomposedQuery {
 }
 
 /// Extract nouns from text using the Korean tokenizer
-fn extract_nouns(text: &str) -> Vec<String> {
+fn extract_nouns(text: &str, stopwords: &StopwordSet) -> Vec<String> {
     if let Some(ref tokenizer) = *KOREAN_TOKENIZER {
         let nouns = tokenizer.extract_nouns(text);
         if !nouns.is_empty() {
             return nouns
                 .into_iter()
                 .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty() && !STOPWORDS.contains(s.as_str()))
+                .filter(|s| !s.is_empty() && !stopwords.contains(s.as_str()))
                 .collect();
         }
     }
 
     // Fallback: same as tokenize (no POS info available)
-    tokenize(text)
+    tokenize(text, stopwords)
 }
 
 /// Split text into clauses/sentences
@@ -100,8 +94,9 @@ pub fn decompose_query(
     text: &str,
     config: &DepthConfig,
     bm25_ranker: &BM25Ranker,
+    stopwords: &StopwordSet,
 ) -> DecomposedQuery {
-    let original_tokens = tokenize(text);
+    let original_tokens = tokenize(text, stopwords);
 
     if original_tokens.is_empty() {
         return DecomposedQuery {
@@ -121,7 +116,7 @@ pub fn decompose_query(
                 if sub_queries.len() >= remaining {
                     break;
                 }
-                let clause_tokens = tokenize(clause);
+                let clause_tokens = tokenize(clause, stopwords);
                 if !clause_tokens.is_empty() && clause_tokens != original_tokens {
                     sub_queries.push(clause_tokens);
                 }
@@ -139,7 +134,7 @@ pub fn decompose_query(
 
     // 3. Noun extraction query
     if sub_queries.len() < remaining && config.noun_extraction {
-        let nouns = extract_nouns(text);
+        let nouns = extract_nouns(text, stopwords);
         if !nouns.is_empty() && nouns != original_tokens {
             // Deduplicate against existing sub-queries
             let nouns_set: HashSet<_> = nouns.iter().collect();
@@ -182,8 +177,13 @@ mod tests {
     use super::*;
     use crate::analyzers::depth::AnalysisDepth;
 
+    fn test_stopwords() -> StopwordSet {
+        StopwordSet::builtin()
+    }
+
     fn make_ranker(docs: &[&str]) -> BM25Ranker {
-        let tokenized: Vec<Vec<String>> = docs.iter().map(|d| tokenize(d)).collect();
+        let sw = test_stopwords();
+        let tokenized: Vec<Vec<String>> = docs.iter().map(|d| tokenize(d, &sw)).collect();
         BM25Ranker::new(&tokenized, 1.5, 0.75)
     }
 
@@ -212,7 +212,7 @@ mod tests {
     fn test_decompose_short_text_no_split() {
         let ranker = make_ranker(&["타입 명시", "에러 처리"]);
         let config = AnalysisDepth::Normal.resolve();
-        let result = decompose_query("타입 명시", &config, &ranker);
+        let result = decompose_query("타입 명시", &config, &ranker, &test_stopwords());
         // Short text: no sentence splitting, might still get IDF/noun queries
         assert!(!result.original.is_empty());
     }
@@ -231,6 +231,7 @@ mod tests {
             "항상 타입을 명시하고 그리고 에러 핸들링도 꼭 해줘 그리고 테스트도 작성해줘",
             &config,
             &ranker,
+            &test_stopwords(),
         );
         assert!(result.is_decomposed(), "Long text should produce sub-queries");
         assert!(result.all_queries().len() > 1);
@@ -245,15 +246,18 @@ mod tests {
         ];
         let ranker = make_ranker(docs);
 
+        let sw = test_stopwords();
         let narrow = decompose_query(
             "항상 타입을 명시하고 그리고 에러도 처리하고 그리고 테스트도 작성해줘",
             &AnalysisDepth::Narrow.resolve(),
             &ranker,
+            &sw,
         );
         let wide = decompose_query(
             "항상 타입을 명시하고 그리고 에러도 처리하고 그리고 테스트도 작성해줘",
             &AnalysisDepth::Wide.resolve(),
             &ranker,
+            &sw,
         );
 
         assert!(
@@ -266,7 +270,7 @@ mod tests {
     fn test_decompose_empty() {
         let ranker = make_ranker(&["hello"]);
         let config = AnalysisDepth::Normal.resolve();
-        let result = decompose_query("", &config, &ranker);
+        let result = decompose_query("", &config, &ranker, &test_stopwords());
         assert!(result.original.is_empty());
         assert!(result.sub_queries.is_empty());
     }
@@ -275,7 +279,7 @@ mod tests {
     fn test_all_queries_includes_original() {
         let ranker = make_ranker(&["타입 명시"]);
         let config = AnalysisDepth::Normal.resolve();
-        let result = decompose_query("타입을 명시해줘", &config, &ranker);
+        let result = decompose_query("타입을 명시해줘", &config, &ranker, &test_stopwords());
         let all = result.all_queries();
         assert!(!all.is_empty());
         assert_eq!(all[0], result.original, "First query should be original");

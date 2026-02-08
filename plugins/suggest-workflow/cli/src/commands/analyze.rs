@@ -1,12 +1,13 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use rayon::prelude::*;
 use crate::parsers::{
     parse_session, list_sessions, resolve_project_path, adapt_to_history_entries,
 };
 use crate::parsers::projects::list_projects;
 use crate::analyzers::{
     analyze_workflows, analyze_prompts, analyze_tacit_knowledge,
-    AnalysisDepth, DepthConfig,
+    AnalysisDepth, DepthConfig, StopwordSet,
 };
 
 /// Analysis scope
@@ -64,16 +65,26 @@ pub fn run(
     top: usize,
     format: &str,
     decay: bool,
+    date_range: Option<(i64, i64)>,
+    stopwords: &StopwordSet,
 ) -> Result<()> {
     let depth_config = depth.resolve();
 
     match scope {
         AnalysisScope::Project => {
-            run_project_analysis(project_path, &depth_config, &depth, focus, threshold, top, format, decay)
+            run_project_analysis(project_path, &depth_config, &depth, focus, threshold, top, format, decay, date_range, stopwords)
         }
         AnalysisScope::Global => {
-            run_global_analysis(&depth_config, &depth, focus, threshold, top, format, decay)
+            run_global_analysis(&depth_config, &depth, focus, threshold, top, format, decay, date_range, stopwords)
         }
+    }
+}
+
+/// Filter history entries by date range
+fn apply_date_filter(entries: Vec<crate::types::HistoryEntry>, date_range: Option<(i64, i64)>) -> Vec<crate::types::HistoryEntry> {
+    match date_range {
+        Some((since, until)) => entries.into_iter().filter(|e| e.timestamp >= since && e.timestamp <= until).collect(),
+        None => entries,
     }
 }
 
@@ -87,6 +98,8 @@ fn run_project_analysis(
     top: usize,
     format: &str,
     decay: bool,
+    date_range: Option<(i64, i64)>,
+    stopwords: &StopwordSet,
 ) -> Result<()> {
     let resolved_path = resolve_project_path(project_path)
         .with_context(|| format!(
@@ -98,23 +111,24 @@ fn run_project_analysis(
     eprintln!("Depth: {} | Focus: {:?}", depth, focus);
 
     let (sessions, history_entries) = load_sessions_from_dir(&resolved_path, project_path)?;
+    let history_entries = apply_date_filter(history_entries, date_range);
 
     if sessions.is_empty() {
         eprintln!("No session files found.");
         std::process::exit(2);
     }
 
-    eprintln!("Loaded {} sessions", sessions.len());
+    eprintln!("Loaded {} sessions ({} prompts after date filter)", sessions.len(), history_entries.len());
 
     if format == "json" {
         print_json_output(
             &sessions, &history_entries, depth_config, depth, focus,
-            threshold, top, decay, project_path, None,
+            threshold, top, decay, project_path, None, stopwords,
         )
     } else {
         print_text_output(
             &sessions, &history_entries, depth_config, depth, focus,
-            threshold, top, decay, None,
+            threshold, top, decay, None, stopwords,
         )
     }
 }
@@ -128,6 +142,8 @@ fn run_global_analysis(
     top: usize,
     format: &str,
     decay: bool,
+    date_range: Option<(i64, i64)>,
+    stopwords: &StopwordSet,
 ) -> Result<()> {
     let project_dirs = list_projects(None)?;
     if project_dirs.is_empty() {
@@ -168,6 +184,8 @@ fn run_global_analysis(
         }
     }
 
+    let all_history = apply_date_filter(all_history, date_range);
+
     if all_history.is_empty() {
         eprintln!("No prompts found across any projects.");
         std::process::exit(2);
@@ -189,12 +207,12 @@ fn run_global_analysis(
     if format == "json" {
         print_json_output(
             &all_sessions, &all_history, depth_config, depth, focus,
-            threshold, top, decay, "global", global_info.as_ref(),
+            threshold, top, decay, "global", global_info.as_ref(), stopwords,
         )
     } else {
         print_text_output(
             &all_sessions, &all_history, depth_config, depth, focus,
-            threshold, top, decay, global_info.as_ref(),
+            threshold, top, decay, global_info.as_ref(), stopwords,
         )
     }
 }
@@ -214,22 +232,25 @@ struct GlobalInfo {
 }
 
 /// Load sessions and history entries from a project directory.
+/// Uses rayon for parallel JSONL parsing across session files.
 fn load_sessions_from_dir(
     project_dir: &Path,
     project_label: &str,
 ) -> Result<(Vec<(String, Vec<crate::types::SessionEntry>)>, Vec<crate::types::HistoryEntry>)> {
     let session_files = list_sessions(project_dir)?;
-    let mut sessions = Vec::new();
 
-    for session_file in &session_files {
-        let entries = parse_session(session_file)?;
-        let session_id = session_file
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
-            .to_string();
-        sessions.push((session_id, entries));
-    }
+    let sessions: Vec<(String, Vec<crate::types::SessionEntry>)> = session_files
+        .par_iter()
+        .filter_map(|session_file| {
+            let entries = parse_session(session_file).ok()?;
+            let session_id = session_file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            Some((session_id, entries))
+        })
+        .collect();
 
     let history_entries = adapt_to_history_entries(&sessions, project_label);
     Ok((sessions, history_entries))
@@ -259,6 +280,7 @@ fn print_text_output(
     top: usize,
     decay: bool,
     global_info: Option<&GlobalInfo>,
+    stopwords: &StopwordSet,
 ) -> Result<()> {
     // Header
     if let Some(info) = global_info {
@@ -306,7 +328,7 @@ fn print_text_output(
 
     // Skill/tacit knowledge analysis
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Skill {
-        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config);
+        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, 14.0, stopwords);
 
         println!("--- Tacit Knowledge Analysis ---\n");
         println!("Detected patterns: {}\n", skill_result.patterns.len());
@@ -383,6 +405,7 @@ fn print_json_output(
     decay: bool,
     project_path: &str,
     global_info: Option<&GlobalInfo>,
+    stopwords: &StopwordSet,
 ) -> Result<()> {
     let mut output = serde_json::json!({
         "analyzedAt": chrono::Utc::now().to_rfc3339(),
@@ -414,7 +437,7 @@ fn print_json_output(
     }
 
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Skill {
-        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config);
+        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, 14.0, stopwords);
         output["tacitKnowledge"] = serde_json::to_value(&skill_result)?;
     }
 

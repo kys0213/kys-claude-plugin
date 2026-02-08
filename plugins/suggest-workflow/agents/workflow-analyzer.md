@@ -58,10 +58,15 @@ tools:
 ## 분석 파라미터
 
 호출 시 전달받는 파라미터:
-- `source`: 'history' | 'projects'
-- `threshold`: 최소 반복 횟수 (기본: 5)
+- `scope`: `project` | `global` (기본: project)
+- `depth`: `narrow` | `normal` | `wide` (기본: normal)
+- `focus`: `all` | `workflow` | `skill` (기본: all)
+- `threshold`: 최소 반복 횟수 (기본: 3)
 - `top`: 상위 N개 결과 (기본: 10)
-- `projectPath`: 현재 프로젝트 경로 (projects 소스 시)
+- `projectPath`: 현재 프로젝트 경로
+- `decay`: 시간 감쇠 가중치 on/off
+- `since`/`until`: 날짜 범위 필터 (YYYY-MM-DD)
+- `exclude-words`: 분석 제외 노이즈 단어
 
 ## 분석 체크리스트
 
@@ -177,27 +182,27 @@ tools:
 분석을 실행하려면 다음 Bash 명령을 사용합니다:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/cli/target/release/suggest-workflow workflow \
-  --source {source} \
+${CLAUDE_PLUGIN_ROOT}/cli/target/release/suggest-workflow \
+  --project "$(pwd)" \
+  --scope {scope} \
+  --depth {depth} \
+  --focus {focus} \
   --threshold {threshold} \
   --top {top} \
-  --project "$(pwd)" \
-  --report
+  --format json
 ```
 
-### CLI 출력 해석
+### CLI 출력 형식
 
-CLI는 3가지 출력 형식을 지원합니다:
 - **기본 (text)**: 간결한 텍스트 요약 → stdout
-- **--report**: 마크다운 리포트 파일 생성 → `.omc/reports/`
 - **--format json**: JSON 구조화 데이터 → stdout
 
-CLI stdout 출력을 읽고, 결과를 사용자에게 AskUserQuestion으로 제시하세요.
+CLI stdout 출력을 읽고, 결과를 사용자에게 제시하세요.
 
 ## 중요 원칙
 
 1. **threshold 적용**: 지정된 최소 빈도 이상만 포함
 2. **top N 제한**: 지정된 개수만 표시
 3. **아키텍처 분류 필수**: 모든 패턴에 레이어 지정
-4. **신뢰도 계산**: (빈도 / 최대빈도) * 100
+4. **신뢰도 계산**: BM25 corpus scoring(35%) + 빈도(30%) + 일관성(15%) + 최신성(20%, decay 모드 시) 복합 계산
 5. **프라이버시 주의**: 민감 정보 필터링

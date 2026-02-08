@@ -44,6 +44,9 @@ ${CLAUDE_PLUGIN_ROOT}/cli/target/release/suggest-workflow \
 | `--top` | N | 10 | 상위 N개 결과 |
 | `--format` | `text`, `json` | `text` | 출력 형식 |
 | `--decay` | flag | off | 시간 감쇠 가중치 |
+| `--since` | YYYY-MM-DD | - | 분석 시작 날짜 |
+| `--until` | YYYY-MM-DD | - | 분석 종료 날짜 |
+| `--exclude-words` | WORD,WORD,... | - | 분석에서 제외할 노이즈 단어 (쉼표 구분) |
 
 ## 탐색 깊이 (--depth)
 

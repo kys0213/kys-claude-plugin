@@ -6,8 +6,10 @@ pub mod tool_classifier;
 pub mod suffix_miner;
 pub mod depth;
 pub mod query_decomposer;
+pub mod stopwords;
 
 pub use workflow::analyze_workflows;
 pub use prompt::analyze_prompts;
 pub use tacit::analyze_tacit_knowledge;
 pub use depth::{AnalysisDepth, DepthConfig};
+pub use stopwords::StopwordSet;

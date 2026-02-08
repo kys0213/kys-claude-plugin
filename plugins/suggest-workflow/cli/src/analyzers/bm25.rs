@@ -16,9 +16,10 @@ pub struct BM25Ranker {
     b: f64,
     avg_dl: f64,
     idf: HashMap<String, f64>,
-    _doc_count: usize,
+    documents: Vec<Vec<String>>,
 }
 
+#[allow(dead_code)]
 impl BM25Ranker {
     pub fn new(documents: &[Vec<String>], k1: f64, b: f64) -> Self {
         let doc_count = documents.len();
@@ -51,7 +52,7 @@ impl BM25Ranker {
             b,
             avg_dl,
             idf,
-            _doc_count: doc_count,
+            documents: documents.to_vec(),
         }
     }
 
@@ -121,6 +122,46 @@ impl BM25Ranker {
                 }
             }
         }
+    }
+
+    /// Score query terms against a specific document.
+    /// Unlike `score_query()` (self-scoring), this measures how relevant
+    /// a query is to an independent document in the corpus.
+    pub fn score_against_document(&self, query_tokens: &[String], document: &[String]) -> f64 {
+        if query_tokens.is_empty() || document.is_empty() {
+            return 0.0;
+        }
+
+        let dl = document.len() as f64;
+
+        // Count term frequency in document
+        let mut doc_tf: HashMap<&String, usize> = HashMap::new();
+        for term in document {
+            *doc_tf.entry(term).or_insert(0) += 1;
+        }
+
+        let mut score = 0.0;
+        // Deduplicate query terms for scoring
+        let query_unique: HashSet<&String> = query_tokens.iter().collect();
+        for term in query_unique {
+            if let (Some(&idf), Some(&freq)) = (self.idf.get(term), doc_tf.get(term)) {
+                let numerator = freq as f64 * (self.k1 + 1.0);
+                let denominator = freq as f64 + self.k1 * (1.0 - self.b + self.b * (dl / self.avg_dl));
+                score += idf * (numerator / denominator);
+            }
+        }
+
+        score
+    }
+
+    /// Score query against all documents in the corpus and return the max score.
+    /// This measures how well the query matches the most relevant document,
+    /// providing a corpus-relative relevance score instead of self-scoring.
+    pub fn score_against_corpus(&self, query_tokens: &[String]) -> f64 {
+        self.documents
+            .iter()
+            .map(|doc| self.score_against_document(query_tokens, doc))
+            .fold(0.0_f64, f64::max)
     }
 
     /// Extract high-IDF tokens from a query — the most discriminative terms.
