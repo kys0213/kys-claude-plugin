@@ -50,10 +50,26 @@
 | `tc psm` | PSM 워크플로우 | `tc psm init` |
 | `tc agent` | Agent 실행 | `tc agent architect` |
 | `tc review` | 코드 리뷰 | `tc review start` |
+| `tc hook` | Hook 이벤트 핸들러 | `tc hook refine-iteration-end` |
 
 ---
 
 ## CLI 명령어 상세
+
+### tc hook - Hook 이벤트 핸들러
+
+```bash
+# Worker 관련 (기존)
+tc hook worker-complete            # Worker 완료 시 검증 트리거
+tc hook worker-question            # Worker 질문 시 에스컬레이션
+tc hook worker-idle                # Worker 대기 상태 감지
+tc hook validation-complete        # Bash 실행 후 결과 분석
+
+# Spec Refine 관련 (신규)
+tc hook refine-review-complete     # 리뷰 에이전트/스크립트 완료 감지
+tc hook refine-spec-modified       # 스펙 파일 수정 → 정제 액션 기록
+tc hook refine-iteration-end       # carry 업데이트 + 에스컬레이션 판단
+```
 
 ### tc config - 설정 관리
 
@@ -265,6 +281,133 @@ tc server start
 # 해결: architect에서 승인
 /team-claude:architect --resume <session-id>
 ```
+
+---
+
+## Spec Refine Hook 아키텍처
+
+> 설정: `hooks/hooks.json` | 구현: `cli/src/commands/hook.ts` | 타입: `cli/src/lib/common.ts`
+
+### Hook 등록 현황
+
+`hooks.json`에 등록된 spec-refine 관련 hook:
+
+| Event | Matcher | 명령어 | Timeout | 역할 |
+|-------|---------|--------|---------|------|
+| `PostToolUse` | `Bash` | `tc hook refine-review-complete` | 30s | call-codex/call-gemini 완료 시 리뷰 수집 카운트 |
+| `PostToolUse` | `Task` | `tc hook refine-review-complete` | 30s | Claude 리뷰 에이전트 완료 시 리뷰 수집 카운트 |
+| `PostToolUse` | `Write` | `tc hook refine-spec-modified` | 10s | specs/ 파일 수정 감지 → 정제 액션 자동 기록 |
+| `Stop` | (all) | `tc hook refine-iteration-end` | 30s | carry 업데이트 + 에스컬레이션 판단 + status 전이 |
+
+### 상태 파일
+
+```
+.team-claude/sessions/{session-id}/refine-state.json
+```
+
+`SpecRefineState` 타입 (`cli/src/lib/common.ts`):
+
+```
+{
+  sessionId, status,
+  config: { maxIterations, passThreshold, warnThreshold, maxPerspectives },
+  currentIteration, iterations[],
+  carry: {
+    unresolvedIssues[],    // → Perspective Planner 입력
+    resolvedIssues[],      // → 관점 제외 근거
+    scoreHistory[],        // → 에스컬레이션 판단 (Hook)
+    perspectiveHistory[]   // → 중복 관점 방지
+  }
+}
+```
+
+### Hook 상세
+
+#### `refine-review-complete` (PostToolUse: Bash, Task)
+
+```
+트리거 조건:
+  Bash: stdout에 "call-codex" 또는 "call-gemini" 포함
+  Task: 프롬프트에 "리뷰" 또는 "review" 포함
+
+동작:
+  1. refine-state.json 읽기
+  2. 현재 iteration의 reviews[] 카운트
+  3. perspectives[] 수 대비 완료율 계산
+  4. 모든 리뷰 완료 시 → 알림 메시지 출력
+```
+
+#### `refine-spec-modified` (PostToolUse: Write)
+
+```
+트리거 조건:
+  Write 대상 파일이 specs/ 디렉토리 내 파일
+
+동작:
+  1. refine-state.json 읽기
+  2. 현재 iteration의 refinementActions[]에 수정 파일 경로 기록
+  3. 상태 업데이트
+```
+
+#### `refine-iteration-end` (Stop)
+
+```
+트리거 조건:
+  spec-refine 실행 중 (status == "running") Stop 이벤트
+
+동작:
+  1. refine-state.json 읽기
+  2. 현재 iteration의 결과 분석:
+     a. carry.scoreHistory에 weightedScore 추가
+     b. carry.perspectiveHistory에 관점 목록 추가
+     c. consensusIssues에서 미해결/해결 분류 → carry 업데이트
+  3. 에스컬레이션 판단:
+     - 점수 정체: |최근 2회 차이| < 3점
+     - 점수 하락: 이전보다 낮아짐
+     - 이슈 반복: 동일 이슈 3회 이상 미해결
+     - 최대 반복: currentIteration >= maxIterations
+  4. status 전이:
+     - verdict == "pass" → status = "passed"
+     - verdict == "warn" → status = "warned"
+     - 에스컬레이션 조건 충족 → status = "escalated"
+  5. OS 알림 (완료/에스컬레이션)
+```
+
+### Hook-LLM 역할 분리
+
+```
+┌──────────────────────────────┐  ┌──────────────────────────────┐
+│  LLM (실행)                   │  │  Hook (상태 관리)             │
+│                              │  │                              │
+│  • Planner 호출              │  │                              │
+│  • 리뷰 에이전트 호출        │  │  • 리뷰 카운트 추적          │
+│  • 합의 분석 수행            │  │                              │
+│  • verdict 기록              │  │                              │
+│  • 스펙 파일 수정 (정제)     │  │  • 정제 액션 기록            │
+│  • (iteration 종료)          │  │  • carry 업데이트             │
+│                              │  │  • 에스컬레이션 자동 판단    │
+│                              │  │  • status 전이               │
+└──────────────────────────────┘  └──────────────────────────────┘
+
+분리 이유:
+  1. LLM이 carry를 직접 조작하면 실수 가능성
+  2. 에스컬레이션은 규칙 기반 → 코드가 더 정확
+  3. Hook은 매번 확실하게 실행됨 (LLM의 "깜빡함" 없음)
+```
+
+### 워크플로우 상태 전이 (spec-refine)
+
+```
+idle → running → [iteration loop] → passed / warned / escalated
+```
+
+| 현재 Status | 다음 Status | 트리거 | Hook |
+|------------|------------|--------|------|
+| idle | running | `/team-claude:spec-refine` 시작 | (LLM) |
+| running | running | iteration FAIL + 정제 | refine-iteration-end |
+| running | passed | iteration PASS | refine-iteration-end |
+| running | warned | iteration WARN | refine-iteration-end |
+| running | escalated | 에스컬레이션 조건 충족 | refine-iteration-end |
 
 ---
 

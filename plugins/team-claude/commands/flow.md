@@ -148,14 +148,20 @@ autopilot+swarm: 쿠폰 기능 추가
 │      • 의존성 그래프 생성                                         │
 │      • 검증 기준 정의                                             │
 │                                                                   │
-│  1.5 Auto-Review Loop (autopilot/assisted)                        │
+│  1.5 Dynamic Perspective Multi-Review RALPH (autopilot/assisted)   │
+│      /team-claude:spec-refine --session ${SESSION_ID} 호출        │
 │      ┌────────────────────────────────────────────────────────┐  │
-│      │  SPEC_REVIEW_LOOP:                                      │  │
-│      │    1. spec-reviewer 에이전트 호출                       │  │
-│      │    2. 피드백 분석                                       │  │
-│      │    3. 피드백 없음 → 통과                                │  │
-│      │    4. 피드백 있음 → 수정 후 1로 돌아감                  │  │
-│      │    5. 최대 반복(5) 도달 → 에스컬레이션                  │  │
+│      │  SPEC_REFINE_LOOP:                                      │  │
+│      │    1. Perspective Planner: 스펙 도메인/리스크 분석       │  │
+│      │       → 최적 관점 동적 생성 (PM, 보안, DBA, QA 등)     │  │
+│      │    2. 선택된 관점을 LLM 엔진에 분배 → 병렬 리뷰         │  │
+│      │    3. 합의 분석                                          │  │
+│      │       • CONSENSUS (N/N): 반드시 반영                    │  │
+│      │       • MAJORITY  (≥N/2): 강력 권장, 자동 반영          │  │
+│      │       • MINORITY  (<N/2): 기록만                        │  │
+│      │    4. 통합 점수 (가중 평균) ≥ 80 → 통과                 │  │
+│      │    5. FAIL → 자동 정제 후 관점 재선정 → 1로 돌아감      │  │
+│      │    6. 최대 반복 도달 → 에스컬레이션                     │  │
 │      └────────────────────────────────────────────────────────┘  │
 │                                                                   │
 │  1.6 HITL 확인 (assisted/manual)                                  │
@@ -243,39 +249,58 @@ autopilot+swarm: 쿠폰 기능 추가
 
 ## Auto-Review Loop 상세
 
-### Spec Review
+### Spec Review (Dynamic Perspective Multi-Review RALPH)
 
 ```markdown
-## 🔍 Spec Review (자동)
+## Spec Review - 동적 관점 멀티 리뷰 + RALPH 자동 정제
 
-### 검토 항목
+/team-claude:spec-refine 커맨드를 통해 실행됩니다.
 
-1. **완전성 (Completeness)**
-   - 모든 요구사항이 스펙에 반영되었는가?
-   - 누락된 엣지 케이스가 있는가?
+### 동적 관점 결정 (Perspective Planner)
 
-2. **일관성 (Consistency)**
-   - 기존 아키텍처와 일관되는가?
-   - 용어 사용이 일관되는가?
+스펙 내용을 분석하여 최적의 리뷰 관점을 자동 선택합니다.
+관점은 고정이 아니라 스펙의 도메인, 리스크, 이해관계자에 따라 달라집니다.
 
-3. **테스트 가능성 (Testability)**
-   - 각 기준이 검증 가능한가?
-   - Contract Test가 충분한가?
+예시:
+- 결제 시스템 → 보안 전문가, PM, DBA, QA
+- 디자인 시스템 → 디자이너, 프론트엔드, 접근성 전문가, 주니어 개발자
+- 데이터 파이프라인 → 데이터 엔지니어, DevOps, DBA, 비즈니스 분석가
 
-4. **의존성 (Dependencies)**
-   - 의존성 그래프가 올바른가?
-   - 순환 의존성이 없는가?
+### LLM 엔진 분배
 
-### 피드백 형식
+각 관점은 적합한 LLM 엔진에 할당됩니다:
+- **Claude**: 깊이 있는 분석, 코드베이스 참조가 필요한 관점
+- **Codex**: 구현 가능성, 코드 품질 중심 관점
+- **Gemini**: 대안 제시, 리스크 발굴 중심 관점
 
-- ✅ PASS: 검토 통과
-- ⚠️ WARN: 개선 권장 (자동 진행)
-- ❌ FAIL: 수정 필요 (수정 후 재검토)
+### 합의 분석 (N개 관점 기준)
+
+- CONSENSUS (N/N 동의): 반드시 수정 → 자동 반영
+- MAJORITY  (≥N/2 동의): 강력 권장 → 자동 반영
+- MINORITY  (<N/2 제기): 기록만 → 향후 고려사항
+
+### 판정 기준
+
+- 통합 점수 ≥ 80 → PASS
+- CONSENSUS 이슈 0개 + 점수 ≥ 60 → WARN (사용자 확인 후 진행)
+- 그 외 → FAIL (자동 정제 후 관점 재선정하여 재리뷰)
+
+### 재시도 시 관점 적응
+
+FAIL → 정제 후 재리뷰 시, Perspective Planner가:
+- 미해결 이슈 영역의 관점 가중치를 상향
+- 해결된 영역의 관점은 제외하거나 교체
+- 새로운 각도의 관점을 추가
 
 ### 예시
 
-❌ FAIL: Checkpoint `coupon-api`의 의존성에 `coupon-service`가 누락됨
-   → 제안: dependencies에 "coupon-service" 추가
+Iteration 1 (관점: 보안, PM, DBA, QA):
+  통합 점수 72.25 (FAIL)
+  CONSENSUS: Contract Test 에러 경로 누락 → 자동 보강
+  MAJORITY:  데이터 모델 정규화 → 자동 반영
+
+Iteration 2 (관점 재선정: 보안(강화), 백엔드, QA):
+  통합 점수 85.5 (PASS)
 ```
 
 ### Code Review
@@ -514,10 +539,31 @@ tc review code ${CHECKPOINT_ID}
 flow:
   defaultMode: assisted
 
+  specRefine:
+    enabled: true
+    maxIterations: 5
+    passThreshold: 80
+    maxPerspectives: 4            # Planner가 생성할 최대 관점 수
+    planner:
+      agent: perspective-planner  # 관점 결정 에이전트
+      adaptOnRetry: true          # 재시도 시 관점 재선정
+    engines:
+      claude:
+        enabled: true
+        agent: spec-reviewer
+      codex:
+        enabled: true
+        script: "common/scripts/call-codex.sh"
+      gemini:
+        enabled: true
+        script: "common/scripts/call-gemini.sh"
+    consensus:
+      autoApplyConsensus: true    # 전원 동의 이슈 자동 반영
+      autoApplyMajority: true     # 과반 동의 이슈 자동 반영
+
   autoReview:
     enabled: true
     maxIterations: 5
-    specReviewer: spec-reviewer
     codeReviewer: code-reviewer
 
   escalation:

@@ -11,6 +11,17 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "matcher": "",
+        "description": "spec-refine iteration 종료 시 carry 업데이트 및 에스컬레이션 판단",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tc hook refine-iteration-end",
+            "timeout": 30
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -35,6 +46,39 @@
             "type": "command",
             "command": "tc hook validation-complete",
             "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "description": "spec-refine: 외부 LLM 리뷰 스크립트 완료 감지 (call-codex/call-gemini)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tc hook refine-review-complete",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Task",
+        "description": "spec-refine: Claude 리뷰 에이전트 완료 감지 (Task 도구)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tc hook refine-review-complete",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "description": "spec-refine: 스펙 파일 수정 감지 → 정제 액션 기록",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tc hook refine-spec-modified",
+            "timeout": 10
           }
         ]
       }
