@@ -26,6 +26,8 @@ const CORRECTION_KEYWORDS: &[&str] = &[
 ];
 
 /// Generate cache files for a project.
+/// All summaries are regenerated every time to ensure consistency
+/// with the current code version (no stale cache risk).
 /// Outputs the cache directory path to stdout.
 pub fn run(
     project_path: &str,
@@ -52,18 +54,6 @@ pub fn run(
 
     eprintln!("Cache: {}", cache_dir.display());
 
-    // Load existing cache index for incremental processing
-    let existing_index = load_existing_index(&cache_dir);
-    let existing_sizes: HashMap<String, u64> = existing_index
-        .as_ref()
-        .map(|idx| {
-            idx.sessions
-                .iter()
-                .map(|s| (s.id.clone(), s.file_size))
-                .collect()
-        })
-        .unwrap_or_default();
-
     let session_files = list_sessions(&resolved_path)?;
     if session_files.is_empty() {
         eprintln!("No sessions found.");
@@ -73,8 +63,6 @@ pub fn run(
     let mut session_metas: Vec<CacheSessionMeta> = Vec::new();
     let mut all_sessions: Vec<(String, Vec<SessionEntry>)> = Vec::new();
     let mut total_prompts = 0;
-    let mut new_count = 0;
-    let mut cached_count = 0;
 
     for session_file in &session_files {
         let session_id = session_file
@@ -87,27 +75,13 @@ pub fn run(
             .map(|m| m.len())
             .unwrap_or(0);
 
-        // Parse session (always needed for analysis snapshot)
         let entries = parse_session(session_file)?;
 
-        // Check if summary is cached (JSONL is append-only → size match = unchanged)
+        // Always regenerate summary (no incremental cache)
+        let summary = generate_session_summary(&session_id, &entries, project_path);
         let summary_path = sessions_dir.join(format!("{}.summary.json", session_id));
-        let is_cached = existing_sizes
-            .get(&session_id)
-            .map_or(false, |&cached_size| {
-                cached_size == file_size && summary_path.exists()
-            });
-
-        let summary = if is_cached {
-            cached_count += 1;
-            load_summary(&summary_path)?
-        } else {
-            let s = generate_session_summary(&session_id, &entries, project_path);
-            let json = serde_json::to_string_pretty(&s)?;
-            fs::write(&summary_path, &json)?;
-            new_count += 1;
-            s
-        };
+        let json = serde_json::to_string_pretty(&summary)?;
+        fs::write(&summary_path, &json)?;
 
         let meta = build_meta_from_summary(&session_id, session_file, file_size, &summary);
         total_prompts += meta.prompt_count;
@@ -115,10 +89,7 @@ pub fn run(
         all_sessions.push((session_id, entries));
     }
 
-    eprintln!(
-        "Sessions: {} new, {} cached, {} total",
-        new_count, cached_count, session_metas.len()
-    );
+    eprintln!("Generated {} session summaries", session_metas.len());
 
     // Generate analysis snapshot
     let depth_config = depth.resolve();
@@ -151,7 +122,6 @@ pub fn run(
     fs::write(cache_dir.join("index.json"), &index_json)?;
 
     eprintln!("Cache generated successfully.");
-    // Output cache directory path for downstream consumers
     println!("{}", cache_dir.display());
 
     Ok(())
@@ -165,19 +135,6 @@ fn get_cache_dir(encoded_name: &str) -> Result<PathBuf> {
         .join(".claude")
         .join(CACHE_DIR_NAME)
         .join(encoded_name))
-}
-
-fn load_existing_index(cache_dir: &Path) -> Option<CacheIndex> {
-    let path = cache_dir.join("index.json");
-    let content = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&content).ok()
-}
-
-fn load_summary(path: &Path) -> Result<SessionSummary> {
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read summary: {}", path.display()))?;
-    serde_json::from_str(&content)
-        .with_context(|| format!("Failed to parse summary: {}", path.display()))
 }
 
 // --- Session summary generation ---
@@ -321,7 +278,6 @@ fn extract_mutated_files(tool_uses: &[ToolUse]) -> Vec<String> {
     for tool in tool_uses {
         if matches!(tool.name.as_str(), "Edit" | "Write" | "NotebookEdit") {
             if let Some(input) = &tool.input {
-                // Edit/Write use "file_path", NotebookEdit uses "notebook_path"
                 let path = input
                     .get("file_path")
                     .or_else(|| input.get("notebook_path"))
