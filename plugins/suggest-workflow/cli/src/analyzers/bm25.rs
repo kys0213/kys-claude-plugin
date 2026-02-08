@@ -1,5 +1,16 @@
 use std::collections::{HashMap, HashSet};
 
+/// Strategy for combining scores from multiple queries
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MultiQueryStrategy {
+    /// Use the highest score among all sub-queries
+    Max,
+    /// Average all sub-query scores
+    Avg,
+    /// Weighted average: first query gets base weight, additional queries get decaying weights
+    WeightedAvg,
+}
+
 pub struct BM25Ranker {
     k1: f64,
     b: f64,
@@ -67,5 +78,74 @@ impl BM25Ranker {
         }
 
         score
+    }
+
+    /// Score multiple queries and combine using the given strategy.
+    /// Each element in `queries` is a separate set of tokens (a sub-query).
+    /// Empty queries are filtered out before scoring.
+    pub fn score_multi_query(
+        &self,
+        queries: &[Vec<String>],
+        strategy: MultiQueryStrategy,
+    ) -> f64 {
+        let scores: Vec<f64> = queries
+            .iter()
+            .filter(|q| !q.is_empty())
+            .map(|q| self.score_query(q))
+            .collect();
+
+        if scores.is_empty() {
+            return 0.0;
+        }
+
+        match strategy {
+            MultiQueryStrategy::Max => {
+                scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+            }
+            MultiQueryStrategy::Avg => {
+                scores.iter().sum::<f64>() / scores.len() as f64
+            }
+            MultiQueryStrategy::WeightedAvg => {
+                // First (original) query gets weight 1.0, subsequent queries decay by 0.6x
+                let mut total_weight = 0.0;
+                let mut weighted_sum = 0.0;
+                for (i, &score) in scores.iter().enumerate() {
+                    let weight = 0.6_f64.powi(i as i32);
+                    weighted_sum += score * weight;
+                    total_weight += weight;
+                }
+                if total_weight > 0.0 {
+                    weighted_sum / total_weight
+                } else {
+                    0.0
+                }
+            }
+        }
+    }
+
+    /// Extract high-IDF tokens from a query — the most discriminative terms.
+    /// Returns tokens sorted by IDF descending, limited to `top_k`.
+    /// This enables "reverse refinement": distilling a long prompt into
+    /// the terms that carry the most information for BM25 scoring.
+    pub fn extract_high_idf_tokens(&self, tokens: &[String], top_k: usize) -> Vec<String> {
+        if tokens.is_empty() || top_k == 0 {
+            return Vec::new();
+        }
+
+        let mut token_idf: Vec<(String, f64)> = tokens
+            .iter()
+            .filter_map(|t| {
+                self.idf.get(t).map(|&idf| (t.clone(), idf))
+            })
+            .collect();
+
+        // Deduplicate
+        token_idf.sort_by(|a, b| a.0.cmp(&b.0));
+        token_idf.dedup_by(|a, b| a.0 == b.0);
+
+        // Sort by IDF descending
+        token_idf.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        token_idf.into_iter().take(top_k).map(|(t, _)| t).collect()
     }
 }
