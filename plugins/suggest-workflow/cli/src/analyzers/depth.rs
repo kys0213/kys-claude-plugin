@@ -13,6 +13,7 @@ pub enum AnalysisDepth {
 
 /// Resolved parameters from an AnalysisDepth preset
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct DepthConfig {
     /// Minimum token count before sentence splitting kicks in
     pub sentence_split_min_tokens: usize,

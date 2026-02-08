@@ -29,6 +29,7 @@ PR 타이틀은 반드시 Conventional Commits 형식을 따릅니다:
 - `planning` - Planning 플러그인
 - `review` - Review 플러그인
 - `external-llm` - External LLM 플러그인
+- `suggest-workflow` - Suggest Workflow 플러그인
 - `git-utils` - Git Utils 플러그인
 - `cli` - tc CLI
 - `hooks` - Hook 스크립트
@@ -51,6 +52,33 @@ docs(planning): update architecture diagram
 ci: add GitHub Actions for CLI build
 chore(cli): update dependencies
 ```
+
+### 코드 변경 시 PR 타이틀 제약 (CI 검증)
+
+`plugins/` 또는 `common/` 디렉토리에 코드 변경이 포함된 PR은 **반드시 버전 범프를 트리거하는 type**을 사용해야 합니다:
+
+| 허용 Type | 버전 범프 |
+|-----------|----------|
+| `feat` | minor |
+| `fix` | patch |
+| `refactor` | patch |
+| `major` | major |
+
+`docs`, `ci`, `chore`, `test`, `style`, `perf`, `build`, `revert` 등은 `plugins/` 또는 `common/` 변경이 **없을 때만** 사용 가능합니다.
+
+```
+# plugins/ 변경 포함 PR
+✅ refactor(suggest-workflow): improve Rust logic
+✅ fix(team-claude): resolve path issue
+✅ feat(review): add multi-LLM support
+
+# plugins/ 변경 포함 PR — CI 실패
+❌ chore(suggest-workflow): update dependencies  # 버전 범프 prefix 아님
+❌ perf(team-claude): optimize startup           # perf는 버전 범프 미지원
+❌ docs(review): update README                   # docs는 버전 범프 미지원
+```
+
+> **주의**: CI의 `validate.yml`에서 `Check version bump prefix for code changes` 단계로 검증됩니다. PR 생성 시 변경 대상 디렉토리를 확인하고 적절한 type을 선택하세요.
 
 ### 잘못된 예시
 
