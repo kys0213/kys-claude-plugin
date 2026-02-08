@@ -178,7 +178,8 @@ func validateDocumentPaths(filePath string, repoRoot string) []Result {
 	absRepoRoot, _ := filepath.Abs(repoRoot)
 	absPluginRoot, _ := filepath.Abs(pluginRoot)
 
-	paths, err := parser.ExtractPluginRootPaths(filePath)
+	// Skip code blocks and inline code — paths there are documentation/examples (e.g. build artifacts)
+	paths, err := parser.ExtractPluginRootPathsSkipCode(filePath)
 	if err != nil {
 		results = append(results, Result{
 			File:  filePath,

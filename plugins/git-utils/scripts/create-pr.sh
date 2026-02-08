@@ -73,7 +73,7 @@ if ! gh auth status $GH_AUTH_ARGS > /dev/null 2>&1; then
   echo "  1. Login with web browser:" >&2
   echo "     gh auth login" >&2
   echo "" >&2
-  echo "  2. Login with token:" >&2
+  echo "  2. Token-based login" >&2
   echo "     gh auth login --with-token < your-token.txt" >&2
   echo "" >&2
   echo "For more information, visit: https://cli.github.com/manual/gh_auth_login" >&2
