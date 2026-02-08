@@ -96,3 +96,63 @@ pub struct TacitAnalysisResult {
     pub total: usize,
     pub patterns: Vec<TacitPattern>,
 }
+
+// --- Cache types ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheIndex {
+    pub project: String,
+    pub project_encoded: String,
+    pub last_updated: String,
+    pub cache_version: String,
+    pub sessions: Vec<CacheSessionMeta>,
+    pub total_prompts: usize,
+    pub total_sessions: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheSessionMeta {
+    pub id: String,
+    pub file: String,
+    pub file_size: u64,
+    pub prompt_count: usize,
+    pub tool_use_count: usize,
+    pub first_timestamp: Option<String>,
+    pub last_timestamp: Option<String>,
+    pub duration_minutes: Option<i64>,
+    pub dominant_tools: Vec<String>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSummary {
+    pub id: String,
+    pub prompts: Vec<SummaryPrompt>,
+    pub tool_use_count: usize,
+    pub tool_sequences: Vec<String>,
+    pub directives: Vec<String>,
+    pub corrections: Vec<String>,
+    pub files_mutated: Vec<String>,
+    pub static_signals: StaticSignals,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SummaryPrompt {
+    pub text: String,
+    pub timestamp: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StaticSignals {
+    pub has_directive: bool,
+    pub has_correction: bool,
+    pub prompt_density: String,
+    pub workflow_complexity: String,
+}

@@ -12,7 +12,7 @@ use commands::analyze::{AnalysisScope, AnalysisFocus};
 
 #[derive(Parser)]
 #[command(name = "suggest-workflow")]
-#[command(version = "1.0.0")]
+#[command(version = "1.1.0")]
 #[command(about = "Analyze Claude session patterns — unified workflow + skill analysis with multi-query BM25")]
 struct Cli {
     /// Analysis scope: project (single) or global (cross-project)
@@ -46,16 +46,17 @@ struct Cli {
     /// Enable temporal decay weighting
     #[arg(long)]
     decay: bool,
+
+    /// Generate cache files for Claude semantic analysis (Phase 2).
+    /// Outputs cache directory path to stdout.
+    #[arg(long)]
+    cache: bool,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let scope: AnalysisScope = cli.scope.parse()
-        .map_err(|e: String| anyhow::anyhow!(e))?;
     let depth: AnalysisDepth = cli.depth.parse()
-        .map_err(|e: String| anyhow::anyhow!(e))?;
-    let focus: AnalysisFocus = cli.focus.parse()
         .map_err(|e: String| anyhow::anyhow!(e))?;
 
     let project_path = match cli.project {
@@ -65,6 +66,21 @@ fn main() -> Result<()> {
             .to_string_lossy()
             .to_string(),
     };
+
+    if cli.cache {
+        return commands::cache::run(
+            &project_path,
+            &depth,
+            cli.threshold,
+            cli.top,
+            cli.decay,
+        );
+    }
+
+    let scope: AnalysisScope = cli.scope.parse()
+        .map_err(|e: String| anyhow::anyhow!(e))?;
+    let focus: AnalysisFocus = cli.focus.parse()
+        .map_err(|e: String| anyhow::anyhow!(e))?;
 
     commands::analyze::run(
         scope,
