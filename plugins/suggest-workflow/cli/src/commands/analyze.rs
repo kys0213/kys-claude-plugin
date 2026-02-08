@@ -1,0 +1,440 @@
+use anyhow::{Context, Result};
+use std::path::PathBuf;
+use crate::parsers::{
+    parse_session, list_sessions, resolve_project_path, adapt_to_history_entries,
+};
+use crate::parsers::projects::list_projects;
+use crate::analyzers::{
+    analyze_workflows, analyze_prompts, analyze_tacit_knowledge,
+    AnalysisDepth, DepthConfig,
+};
+
+/// Analysis scope
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AnalysisScope {
+    /// Single project analysis
+    Project,
+    /// Cross-project global analysis
+    Global,
+}
+
+impl std::str::FromStr for AnalysisScope {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "project" => Ok(AnalysisScope::Project),
+            "global" => Ok(AnalysisScope::Global),
+            _ => Err(format!("invalid scope '{}': expected project or global", s)),
+        }
+    }
+}
+
+/// Analysis focus
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AnalysisFocus {
+    /// Run all analyses
+    All,
+    /// Workflow/tool sequence analysis only
+    Workflow,
+    /// Tacit knowledge/skill analysis only
+    Skill,
+}
+
+impl std::str::FromStr for AnalysisFocus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "all" => Ok(AnalysisFocus::All),
+            "workflow" => Ok(AnalysisFocus::Workflow),
+            "skill" => Ok(AnalysisFocus::Skill),
+            _ => Err(format!("invalid focus '{}': expected all, workflow, or skill", s)),
+        }
+    }
+}
+
+/// Unified analysis entry point
+pub fn run(
+    scope: AnalysisScope,
+    depth: AnalysisDepth,
+    focus: AnalysisFocus,
+    project_path: &str,
+    threshold: usize,
+    top: usize,
+    format: &str,
+    decay: bool,
+) -> Result<()> {
+    let depth_config = depth.resolve();
+
+    match scope {
+        AnalysisScope::Project => {
+            run_project_analysis(project_path, &depth_config, &depth, focus, threshold, top, format, decay)
+        }
+        AnalysisScope::Global => {
+            run_global_analysis(&depth_config, &depth, focus, threshold, top, format, decay)
+        }
+    }
+}
+
+/// Single-project analysis
+fn run_project_analysis(
+    project_path: &str,
+    depth_config: &DepthConfig,
+    depth: &AnalysisDepth,
+    focus: AnalysisFocus,
+    threshold: usize,
+    top: usize,
+    format: &str,
+    decay: bool,
+) -> Result<()> {
+    let resolved_path = resolve_project_path(project_path)
+        .with_context(|| format!(
+            "Project not found: {}\nExpected to find encoded directory under ~/.claude/projects/",
+            project_path
+        ))?;
+
+    eprintln!("Analyzing project: {}", resolved_path.display());
+    eprintln!("Depth: {} | Focus: {:?}", depth, focus);
+
+    let (sessions, history_entries) = load_project_data(&resolved_path, project_path)?;
+
+    if format == "json" {
+        print_json_output(
+            &sessions, &history_entries, depth_config, depth, focus,
+            threshold, top, decay, project_path, None,
+        )
+    } else {
+        print_text_output(
+            &sessions, &history_entries, depth_config, depth, focus,
+            threshold, top, decay, None,
+        )
+    }
+}
+
+/// Global cross-project analysis
+fn run_global_analysis(
+    depth_config: &DepthConfig,
+    depth: &AnalysisDepth,
+    focus: AnalysisFocus,
+    threshold: usize,
+    top: usize,
+    format: &str,
+    decay: bool,
+) -> Result<()> {
+    let project_dirs = list_projects(None)?;
+    if project_dirs.is_empty() {
+        eprintln!("No projects found in ~/.claude/projects/");
+        std::process::exit(2);
+    }
+
+    eprintln!("Global analysis: {} projects found", project_dirs.len());
+    eprintln!("Depth: {} | Focus: {:?}", depth, focus);
+
+    let home = std::env::var("HOME").context("HOME not set")?;
+    let projects_base = PathBuf::from(&home).join(".claude").join("projects");
+
+    let mut all_sessions = Vec::new();
+    let mut all_history = Vec::new();
+    let mut project_stats: Vec<ProjectStats> = Vec::new();
+
+    for dir_name in &project_dirs {
+        let project_dir = projects_base.join(dir_name);
+        let project_label = decode_project_name(dir_name);
+
+        match load_project_data_raw(&project_dir, &project_label) {
+            Ok((sessions, history)) => {
+                let prompt_count = history.len();
+                if prompt_count > 0 {
+                    project_stats.push(ProjectStats {
+                        name: project_label.clone(),
+                        prompt_count,
+                        session_count: sessions.len(),
+                    });
+                }
+                all_sessions.extend(sessions);
+                all_history.extend(history);
+            }
+            Err(e) => {
+                eprintln!("Warning: skipping {}: {}", dir_name, e);
+            }
+        }
+    }
+
+    if all_history.is_empty() {
+        eprintln!("No prompts found across any projects.");
+        std::process::exit(2);
+    }
+
+    eprintln!(
+        "Loaded {} prompts from {} projects ({} sessions)",
+        all_history.len(),
+        project_stats.len(),
+        all_sessions.len(),
+    );
+
+    let global_info = Some(GlobalInfo {
+        project_count: project_stats.len(),
+        total_prompts: all_history.len(),
+        projects: project_stats,
+    });
+
+    if format == "json" {
+        print_json_output(
+            &all_sessions, &all_history, depth_config, depth, focus,
+            threshold, top, decay, "global", global_info.as_ref(),
+        )
+    } else {
+        print_text_output(
+            &all_sessions, &all_history, depth_config, depth, focus,
+            threshold, top, decay, global_info.as_ref(),
+        )
+    }
+}
+
+// --- Data loading helpers ---
+
+struct ProjectStats {
+    name: String,
+    prompt_count: usize,
+    session_count: usize,
+}
+
+struct GlobalInfo {
+    project_count: usize,
+    total_prompts: usize,
+    projects: Vec<ProjectStats>,
+}
+
+fn load_project_data(
+    resolved_path: &PathBuf,
+    project_path: &str,
+) -> Result<(Vec<(String, Vec<crate::types::SessionEntry>)>, Vec<crate::types::HistoryEntry>)> {
+    let session_files = list_sessions(resolved_path)?;
+    if session_files.is_empty() {
+        eprintln!("No session files found.");
+        std::process::exit(2);
+    }
+
+    let mut sessions = Vec::new();
+    for session_file in &session_files {
+        let entries = parse_session(session_file)?;
+        let session_id = session_file
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        sessions.push((session_id, entries));
+    }
+
+    eprintln!("Loaded {} sessions", sessions.len());
+
+    let history_entries = adapt_to_history_entries(&sessions, project_path);
+    Ok((sessions, history_entries))
+}
+
+fn load_project_data_raw(
+    project_dir: &PathBuf,
+    project_label: &str,
+) -> Result<(Vec<(String, Vec<crate::types::SessionEntry>)>, Vec<crate::types::HistoryEntry>)> {
+    let session_files = list_sessions(project_dir)?;
+    let mut sessions = Vec::new();
+
+    for session_file in &session_files {
+        let entries = parse_session(session_file)?;
+        let session_id = session_file
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        sessions.push((session_id, entries));
+    }
+
+    let history_entries = adapt_to_history_entries(&sessions, project_label);
+    Ok((sessions, history_entries))
+}
+
+fn decode_project_name(encoded: &str) -> String {
+    // Encoded format: "-home-user-project-name" → "/home/user/project-name"
+    // Simple heuristic: replace leading "-" with "/" and internal "-" with "/"
+    if encoded.starts_with('-') {
+        format!("/{}", &encoded[1..].replace('-', "/"))
+    } else {
+        encoded.to_string()
+    }
+}
+
+// --- Output formatting ---
+
+fn print_text_output(
+    sessions: &[(String, Vec<crate::types::SessionEntry>)],
+    history_entries: &[crate::types::HistoryEntry],
+    depth_config: &DepthConfig,
+    depth: &AnalysisDepth,
+    focus: AnalysisFocus,
+    threshold: usize,
+    top: usize,
+    decay: bool,
+    global_info: Option<&GlobalInfo>,
+) -> Result<()> {
+    // Header
+    if let Some(info) = global_info {
+        println!("\n=== Global Analysis ({} projects, {} prompts) ===", info.project_count, info.total_prompts);
+    } else {
+        println!("\n=== Project Analysis ===");
+    }
+    println!("Depth: {} | Multi-query: {:?}\n", depth, depth_config.multi_query_strategy);
+
+    // Workflow analysis
+    if focus == AnalysisFocus::All || focus == AnalysisFocus::Workflow {
+        let workflow_result = analyze_workflows(sessions, threshold, top, 2, 5);
+        let prompt_result = analyze_prompts(history_entries, decay, 14.0);
+
+        println!("--- Workflow Analysis ---\n");
+        println!("Total prompts: {} | Unique: {}", prompt_result.total, prompt_result.unique);
+        if let Some(start) = &prompt_result.start_date {
+            println!("Period: {} ~ {}", start, prompt_result.end_date.as_deref().unwrap_or("N/A"));
+        }
+
+        if !prompt_result.top_prompts.is_empty() {
+            println!("\nTop Prompts:");
+            for (i, p) in prompt_result.top_prompts.iter().take(top).enumerate() {
+                let display: String = p.prompt.chars().take(60).collect();
+                println!("  {}. [{}x] {}", i + 1, p.count, display);
+            }
+        }
+
+        println!("\nTotal sequences: {} | Unique: {}", workflow_result.total_sequences, workflow_result.unique_sequences);
+        if !workflow_result.top_sequences.is_empty() {
+            println!("\nTop Tool Sequences:");
+            for (i, seq) in workflow_result.top_sequences.iter().enumerate() {
+                println!("  {}. [{}x] {}", i + 1, seq.count, seq.tools.join(" → "));
+            }
+        }
+
+        if !workflow_result.tool_usage_stats.is_empty() {
+            println!("\nTool Usage:");
+            for (i, (tool, count)) in workflow_result.tool_usage_stats.iter().take(10).enumerate() {
+                println!("  {}. {}: {}x", i + 1, tool, count);
+            }
+        }
+        println!();
+    }
+
+    // Skill/tacit knowledge analysis
+    if focus == AnalysisFocus::All || focus == AnalysisFocus::Skill {
+        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config);
+
+        println!("--- Tacit Knowledge Analysis ---\n");
+        println!("Detected patterns: {}\n", skill_result.patterns.len());
+
+        if skill_result.patterns.is_empty() {
+            println!("No patterns found with threshold >= {}", threshold);
+        } else {
+            println!("{:<4} {:<30} {:<12} {:<8} {:<10}", "#", "Pattern", "Type", "Count", "Confidence");
+            println!("{}", "-".repeat(70));
+
+            for (i, pattern) in skill_result.patterns.iter().enumerate() {
+                let truncated = if pattern.pattern.chars().count() > 30 {
+                    let s: String = pattern.pattern.chars().take(27).collect();
+                    format!("{}...", s)
+                } else {
+                    pattern.pattern.clone()
+                };
+
+                let char_count = truncated.chars().count();
+                let padded = if char_count < 30 {
+                    format!("{}{}", truncated, " ".repeat(30 - char_count))
+                } else {
+                    truncated
+                };
+
+                println!(
+                    "{:<4} {} {:<12} {:<8} {:<10.0}%",
+                    i + 1, padded, pattern.pattern_type, pattern.count,
+                    pattern.confidence * 100.0
+                );
+            }
+
+            // Examples for top patterns
+            println!("\n\nExample Prompts:\n");
+            for (i, pattern) in skill_result.patterns.iter().take(3).enumerate() {
+                println!("{}. {} ({}x, {:.0}% confidence)",
+                    i + 1, pattern.pattern, pattern.count, pattern.confidence * 100.0
+                );
+                println!("   Type: {}", pattern.pattern_type);
+                println!("   BM25: {:.2}", pattern.bm25_score);
+                for (j, example) in pattern.examples.iter().take(3).enumerate() {
+                    let oneline = example.replace('\n', " ");
+                    let display: String = oneline.chars().take(70).collect();
+                    println!("     {}. {}", j + 1, display);
+                }
+                println!();
+            }
+        }
+    }
+
+    // Global project breakdown
+    if let Some(info) = global_info {
+        println!("--- Project Breakdown ---\n");
+        let mut sorted = info.projects.iter().collect::<Vec<_>>();
+        sorted.sort_by(|a, b| b.prompt_count.cmp(&a.prompt_count));
+        for stat in sorted.iter().take(20) {
+            let short_name: String = stat.name.split('/').last().unwrap_or(&stat.name).to_string();
+            println!("  {}: {} prompts, {} sessions", short_name, stat.prompt_count, stat.session_count);
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
+fn print_json_output(
+    sessions: &[(String, Vec<crate::types::SessionEntry>)],
+    history_entries: &[crate::types::HistoryEntry],
+    depth_config: &DepthConfig,
+    depth: &AnalysisDepth,
+    focus: AnalysisFocus,
+    threshold: usize,
+    top: usize,
+    decay: bool,
+    project_path: &str,
+    global_info: Option<&GlobalInfo>,
+) -> Result<()> {
+    let mut output = serde_json::json!({
+        "analyzedAt": chrono::Utc::now().to_rfc3339(),
+        "depth": depth.to_string(),
+        "scope": if global_info.is_some() { "global" } else { "project" },
+    });
+
+    if global_info.is_none() {
+        output["projectPath"] = serde_json::json!(project_path);
+    }
+
+    if let Some(info) = global_info {
+        output["globalSummary"] = serde_json::json!({
+            "projectCount": info.project_count,
+            "totalPrompts": info.total_prompts,
+            "projects": info.projects.iter().map(|p| serde_json::json!({
+                "name": p.name,
+                "promptCount": p.prompt_count,
+                "sessionCount": p.session_count,
+            })).collect::<Vec<_>>(),
+        });
+    }
+
+    if focus == AnalysisFocus::All || focus == AnalysisFocus::Workflow {
+        let workflow_result = analyze_workflows(sessions, threshold, top, 2, 5);
+        let prompt_result = analyze_prompts(history_entries, decay, 14.0);
+        output["promptAnalysis"] = serde_json::to_value(&prompt_result)?;
+        output["workflowAnalysis"] = serde_json::to_value(&workflow_result)?;
+    }
+
+    if focus == AnalysisFocus::All || focus == AnalysisFocus::Skill {
+        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config);
+        output["tacitKnowledge"] = serde_json::to_value(&skill_result)?;
+    }
+
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
