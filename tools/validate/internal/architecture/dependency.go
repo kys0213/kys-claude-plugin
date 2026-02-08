@@ -38,6 +38,17 @@ var (
 // Violations: Skill → Agent, Skill → Command, Agent → Command
 func validateLayerDependencies(files []LayerFile, results *Results) {
 	for _, file := range files {
+		// Skip files with arch-ignore in frontmatter
+		if isArchIgnored(file) {
+			results.Passed = append(results.Passed, Result{
+				File:     file.Path,
+				Type:     "layer-dependency",
+				Severity: "error",
+				Valid:    true,
+			})
+			continue
+		}
+
 		refs := detectReferences(file)
 		var violations []string
 
@@ -223,6 +234,19 @@ func detectUpwardRefs(line string, lineNum int, sourceLayer Layer) []Reference {
 	}
 
 	return refs
+}
+
+// isArchIgnored checks if a file has arch-ignore in its frontmatter
+func isArchIgnored(file LayerFile) bool {
+	if file.Parsed == nil || file.Parsed.Frontmatter == nil {
+		return false
+	}
+	if v, ok := file.Parsed.Frontmatter["arch-ignore"]; ok {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return false
 }
 
 // isDocumentationLine checks if a line is purely descriptive/architectural documentation

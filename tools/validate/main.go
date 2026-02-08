@@ -42,6 +42,7 @@ func main() {
 	cyan := color.New(color.FgCyan, color.Bold)
 	gray := color.New(color.FgHiBlack)
 	green := color.New(color.FgGreen)
+	yellow := color.New(color.FgYellow)
 	red := color.New(color.FgRed)
 
 	fmt.Println()
@@ -51,7 +52,7 @@ func main() {
 	fmt.Println()
 	gray.Printf("Repository: %s\n\n", repoRoot)
 
-	var totalPassed, totalFailed int
+	var totalPassed, totalFailed, totalWarnings int
 
 	// 1. Spec validation
 	if runAll || *specsOnly {
@@ -119,9 +120,10 @@ func main() {
 			os.Exit(1)
 		}
 
-		printArchResults(results.Passed, results.Failed, repoRoot, isVerbose)
+		printArchResults(results.Passed, results.Failed, results.Warnings, repoRoot, isVerbose)
 		totalPassed += len(results.Passed)
 		totalFailed += len(results.Failed)
+		totalWarnings += len(results.Warnings)
 		fmt.Println()
 	}
 
@@ -130,6 +132,9 @@ func main() {
 	bold.Println("  Summary")
 	bold.Println("========================================")
 	green.Printf("  ✓ Passed: %d\n", totalPassed)
+	if totalWarnings > 0 {
+		yellow.Printf("  ⚠ Warnings: %d\n", totalWarnings)
+	}
 	red.Printf("  ✗ Failed: %d\n", totalFailed)
 	fmt.Println()
 
@@ -209,27 +214,30 @@ func printPathResults(passed []path.Result, failed []path.Result, repoRoot strin
 	}
 }
 
-func printArchResults(passed []architecture.Result, failed []architecture.Result, repoRoot string, verbose bool) {
+func printArchResults(passed []architecture.Result, failed []architecture.Result, warnings []architecture.Result, repoRoot string, verbose bool) {
 	red := color.New(color.FgRed)
 	yellow := color.New(color.FgYellow)
 	green := color.New(color.FgGreen)
 	gray := color.New(color.FgHiBlack)
 
-	// Print failures
+	// Print errors (hard failures)
 	for _, result := range failed {
 		shortPath := strings.Replace(result.File, repoRoot, ".", 1)
-		if result.Severity == "warning" {
-			yellow.Printf("  ⚠ %s\n", shortPath)
-		} else {
-			red.Printf("  ✗ %s\n", shortPath)
-		}
+		red.Printf("  ✗ %s\n", shortPath)
 		gray.Printf("    Type: %s\n", result.Type)
 		for _, err := range result.Errors {
-			if result.Severity == "warning" {
-				yellow.Printf("    → %s\n", err)
-			} else {
-				red.Printf("    → %s\n", err)
-			}
+			red.Printf("    → %s\n", err)
+		}
+		fmt.Println()
+	}
+
+	// Print warnings (non-blocking)
+	for _, result := range warnings {
+		shortPath := strings.Replace(result.File, repoRoot, ".", 1)
+		yellow.Printf("  ⚠ %s\n", shortPath)
+		gray.Printf("    Type: %s\n", result.Type)
+		for _, err := range result.Errors {
+			yellow.Printf("    → %s\n", err)
 		}
 		fmt.Println()
 	}

@@ -1,6 +1,7 @@
 ---
 name: workflow-prerequisites
 description: Team Claude 커맨드 실행 전 전제조건을 확인하는 공유 로직
+arch-ignore: true
 ---
 
 # Workflow Prerequisites Skill

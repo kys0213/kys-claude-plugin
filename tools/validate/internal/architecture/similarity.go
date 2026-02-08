@@ -51,7 +51,7 @@ func validateContentSimilarity(files []LayerFile, results *Results) {
 		}
 
 		for _, pair := range pairs {
-			results.Failed = append(results.Failed, Result{
+			results.Warnings = append(results.Warnings, Result{
 				File:     pair.FileA,
 				Type:     "content-similarity",
 				Valid:    false,

@@ -44,8 +44,9 @@ type Result struct {
 
 // Results contains all architecture validation results
 type Results struct {
-	Passed []Result
-	Failed []Result
+	Passed   []Result
+	Failed   []Result
+	Warnings []Result
 }
 
 // LayerFile represents a parsed file with its detected layer

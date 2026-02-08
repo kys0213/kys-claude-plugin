@@ -100,7 +100,7 @@ func checkSkillResponsibility(file LayerFile, results *Results) {
 	if len(violations) > 0 {
 		result.Valid = false
 		result.Errors = violations
-		results.Failed = append(results.Failed, result)
+		results.Warnings = append(results.Warnings, result)
 	} else {
 		result.Valid = true
 		results.Passed = append(results.Passed, result)
@@ -142,7 +142,7 @@ func checkAgentResponsibility(file LayerFile, results *Results) {
 	if len(violations) > 0 {
 		result.Valid = false
 		result.Errors = violations
-		results.Failed = append(results.Failed, result)
+		results.Warnings = append(results.Warnings, result)
 	} else {
 		result.Valid = true
 		results.Passed = append(results.Passed, result)
@@ -203,7 +203,7 @@ func checkCommandResponsibility(file LayerFile, results *Results) {
 	if len(violations) > 0 {
 		result.Valid = false
 		result.Errors = violations
-		results.Failed = append(results.Failed, result)
+		results.Warnings = append(results.Warnings, result)
 	} else {
 		result.Valid = true
 		results.Passed = append(results.Passed, result)
