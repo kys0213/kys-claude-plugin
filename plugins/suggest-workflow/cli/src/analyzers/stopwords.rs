@@ -1,0 +1,97 @@
+use std::collections::HashSet;
+use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
+
+/// Built-in default noise words (fallback when no config file exists)
+const BUILTIN_NOISE_WORDS: &[&str] = &[
+    "응", "네", "좋아", "그래", "알겠어", "해줘", "해", "하자", "고마워", "감사",
+    "ok", "yes", "y", "sure", "thanks", "ㅇ", "ㅇㅇ", "넵",
+];
+
+/// Config file format for project-specific stopwords
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StopwordsConfig {
+    /// Custom stopwords added by Claude or user
+    pub words: Vec<String>,
+    /// Who last updated this file
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_by: Option<String>,
+    /// When this file was last updated
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+/// Resolved stopwords set — merged from built-in defaults, config file, and CLI args
+#[derive(Debug, Clone)]
+pub struct StopwordSet {
+    words: HashSet<String>,
+}
+
+impl StopwordSet {
+    /// Build from built-in defaults only
+    pub fn builtin() -> Self {
+        Self {
+            words: BUILTIN_NOISE_WORDS.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    /// Build from defaults + config file + CLI extra words
+    pub fn load(extra_words: &[String]) -> Self {
+        let mut words: HashSet<String> = BUILTIN_NOISE_WORDS
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        // Load from config file
+        if let Some(config) = load_config_file() {
+            for word in config.words {
+                words.insert(word);
+            }
+        }
+
+        // Add CLI extra words
+        for word in extra_words {
+            words.insert(word.clone());
+        }
+
+        Self { words }
+    }
+
+    pub fn contains(&self, word: &str) -> bool {
+        self.words.contains(word)
+    }
+
+    pub fn as_set(&self) -> &HashSet<String> {
+        &self.words
+    }
+}
+
+/// Default config file path: ~/.claude/suggest-workflow/stopwords.json
+fn config_file_path() -> Option<PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    Some(PathBuf::from(home).join(".claude").join("suggest-workflow").join("stopwords.json"))
+}
+
+/// Load stopwords config from file, returns None if file doesn't exist or is invalid
+fn load_config_file() -> Option<StopwordsConfig> {
+    let path = config_file_path()?;
+    let content = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+/// Save stopwords config to the default path (used by Claude agents)
+#[allow(dead_code)]
+pub fn save_config(config: &StopwordsConfig) -> anyhow::Result<()> {
+    let path = config_file_path()
+        .ok_or_else(|| anyhow::anyhow!("HOME not set"))?;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let json = serde_json::to_string_pretty(config)?;
+    std::fs::write(&path, json)?;
+    eprintln!("Saved stopwords config to {}", path.display());
+    Ok(())
+}

@@ -8,7 +8,7 @@ mod analyzers;
 mod tokenizer;
 mod types;
 
-use analyzers::AnalysisDepth;
+use analyzers::{AnalysisDepth, StopwordSet};
 use commands::analyze::{AnalysisScope, AnalysisFocus};
 
 #[derive(Parser)]
@@ -56,6 +56,11 @@ struct Cli {
     #[arg(long)]
     until: Option<String>,
 
+    /// Additional words to exclude from analysis (comma-separated).
+    /// Merged with built-in defaults and ~/.claude/suggest-workflow/stopwords.json
+    #[arg(long, value_delimiter = ',')]
+    exclude_words: Vec<String>,
+
     /// Generate cache files for Claude semantic analysis (Phase 2).
     /// Outputs cache directory path to stdout.
     #[arg(long)]
@@ -96,6 +101,9 @@ fn main() -> Result<()> {
         (None, None) => None,
     };
 
+    // Build stopword set from defaults + config file + CLI
+    let stopwords = StopwordSet::load(&cli.exclude_words);
+
     if cli.cache {
         return commands::cache::run(
             &project_path,
@@ -103,6 +111,7 @@ fn main() -> Result<()> {
             cli.threshold,
             cli.top,
             cli.decay,
+            &stopwords,
         );
     }
 
@@ -121,5 +130,6 @@ fn main() -> Result<()> {
         &cli.format,
         cli.decay,
         date_range,
+        &stopwords,
     )
 }

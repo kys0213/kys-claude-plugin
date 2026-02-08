@@ -10,7 +10,7 @@ use crate::parsers::{
 };
 use crate::analyzers::{
     analyze_workflows, analyze_prompts, analyze_tacit_knowledge,
-    AnalysisDepth, DepthConfig,
+    AnalysisDepth, DepthConfig, StopwordSet,
 };
 use crate::analyzers::tool_classifier::classify_tool;
 
@@ -35,6 +35,7 @@ pub fn run(
     threshold: usize,
     top: usize,
     decay: bool,
+    stopwords: &StopwordSet,
 ) -> Result<()> {
     let resolved_path = resolve_project_path(project_path)
         .with_context(|| format!(
@@ -105,6 +106,7 @@ pub fn run(
         decay,
         project_path,
         &cache_dir,
+        stopwords,
     )?;
 
     // Write index
@@ -374,10 +376,11 @@ fn generate_analysis_snapshot(
     decay: bool,
     project_path: &str,
     cache_dir: &Path,
+    stopwords: &StopwordSet,
 ) -> Result<()> {
     let workflow_result = analyze_workflows(sessions, threshold, top, 2, 5);
     let prompt_result = analyze_prompts(history_entries, decay, 14.0);
-    let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, 14.0);
+    let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, 14.0, stopwords);
 
     let snapshot = serde_json::json!({
         "analyzedAt": Utc::now().to_rfc3339(),

@@ -5,6 +5,7 @@ use crate::analyzers::bm25::BM25Ranker;
 use crate::analyzers::suffix_miner::SuffixMiner;
 use crate::analyzers::depth::DepthConfig;
 use crate::analyzers::query_decomposer::decompose_query;
+use crate::analyzers::stopwords::StopwordSet;
 use crate::tokenizer::KoreanTokenizer;
 
 // --- Type seed keywords (minimal hardcoding) ---
@@ -23,18 +24,7 @@ const TYPE_BOOST: &[(&str, f64)] = &[
     ("preference", 0.05),
 ];
 
-// --- Stopwords & tokenizer ---
-
-/// Unified set: used both for tokenization stopword filtering and
-/// confirmation prompt detection. Single source of truth (fixes #5 dedup).
-const NOISE_WORDS: &[&str] = &[
-    "응", "네", "좋아", "그래", "알겠어", "해줘", "해", "하자", "고마워", "감사",
-    "ok", "yes", "y", "sure", "thanks", "ㅇ", "ㅇㅇ", "넵",
-];
-
-static STOPWORDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
-    NOISE_WORDS.iter().copied().collect()
-});
+// --- Tokenizer ---
 
 static KOREAN_TOKENIZER: LazyLock<Option<KoreanTokenizer>> = LazyLock::new(|| {
     KoreanTokenizer::new().ok()
@@ -119,21 +109,21 @@ fn get_type_boost(pattern_type: &str) -> f64 {
 
 // --- Tokenization (kept from original) ---
 
-pub fn tokenize(text: &str) -> Vec<String> {
+pub fn tokenize(text: &str, stopwords: &StopwordSet) -> Vec<String> {
     if let Some(ref tokenizer) = *KOREAN_TOKENIZER {
         let tokens = tokenizer.tokenize(text);
         if !tokens.is_empty() {
             return tokens
                 .into_iter()
                 .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty() && !STOPWORDS.contains(s.as_str()))
+                .filter(|s| !s.is_empty() && !stopwords.contains(s.as_str()))
                 .collect();
         }
     }
 
     text.split_whitespace()
         .map(|s| s.trim().to_lowercase())
-        .filter(|s| !s.is_empty() && !STOPWORDS.contains(s.as_str()))
+        .filter(|s| !s.is_empty() && !stopwords.contains(s.as_str()))
         .collect()
 }
 
@@ -304,12 +294,12 @@ fn calculate_confidence(
 
 // --- Prompt filtering ---
 
-fn is_meaningful_prompt(prompt: &str) -> bool {
+fn is_meaningful_prompt(prompt: &str, stopwords: &StopwordSet) -> bool {
     let trimmed = prompt.trim();
     if trimmed.chars().count() < MIN_PROMPT_LENGTH {
         return false;
     }
-    if STOPWORDS.contains(trimmed) {
+    if stopwords.contains(trimmed) {
         return false;
     }
     if trimmed.starts_with('<') {
@@ -339,6 +329,7 @@ pub fn analyze_tacit_knowledge(
     depth_config: &DepthConfig,
     decay: bool,
     decay_half_life_days: f64,
+    stopwords: &StopwordSet,
 ) -> TacitAnalysisResult {
     if entries.is_empty() {
         return TacitAnalysisResult {
@@ -350,7 +341,7 @@ pub fn analyze_tacit_knowledge(
     // Step 1: Filter meaningful prompts
     let meaningful: Vec<&HistoryEntry> = entries
         .iter()
-        .filter(|e| is_meaningful_prompt(&e.display))
+        .filter(|e| is_meaningful_prompt(&e.display, stopwords))
         .collect();
 
     if meaningful.is_empty() {
@@ -383,7 +374,7 @@ pub fn analyze_tacit_knowledge(
     // Step 4: Build BM25 ranker from ORIGINAL texts (pre-normalization)
     let all_documents: Vec<Vec<String>> = meaningful
         .iter()
-        .map(|e| tokenize(&e.display))
+        .map(|e| tokenize(&e.display, stopwords))
         .collect();
     let bm25_ranker = BM25Ranker::new(&all_documents, 1.5, 0.75);
 
@@ -414,7 +405,7 @@ pub fn analyze_tacit_knowledge(
         }
 
         // Multi-query BM25: decompose representative and score against corpus
-        let decomposed = decompose_query(&representative, depth_config, &bm25_ranker);
+        let decomposed = decompose_query(&representative, depth_config, &bm25_ranker, stopwords);
         let bm25_score = if decomposed.original.is_empty() {
             0.0
         } else if decomposed.is_decomposed() {
