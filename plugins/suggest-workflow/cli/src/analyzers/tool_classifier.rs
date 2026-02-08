@@ -12,6 +12,7 @@ static LINT_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b(eslint|prettier|biome|rubocop|flake8|ruff|clippy|golangci-lint)\b").unwrap()
 });
 
+#[allow(dead_code)]
 pub struct ClassifiedTool {
     pub original_name: String,
     pub classified_name: String,
