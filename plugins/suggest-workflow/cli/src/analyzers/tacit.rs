@@ -23,13 +23,17 @@ const TYPE_BOOST: &[(&str, f64)] = &[
     ("preference", 0.05),
 ];
 
-// --- Stopwords & tokenizer (kept from original) ---
+// --- Stopwords & tokenizer ---
+
+/// Unified set: used both for tokenization stopword filtering and
+/// confirmation prompt detection. Single source of truth (fixes #5 dedup).
+const NOISE_WORDS: &[&str] = &[
+    "응", "네", "좋아", "그래", "알겠어", "해줘", "해", "하자", "고마워", "감사",
+    "ok", "yes", "y", "sure", "thanks", "ㅇ", "ㅇㅇ", "넵",
+];
 
 static STOPWORDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
-    ["응", "네", "좋아", "그래", "알겠어", "해줘", "해", "하자", "고마워", "감사", "ok", "yes"]
-        .iter()
-        .copied()
-        .collect()
+    NOISE_WORDS.iter().copied().collect()
 });
 
 static KOREAN_TOKENIZER: LazyLock<Option<KoreanTokenizer>> = LazyLock::new(|| {
@@ -38,17 +42,6 @@ static KOREAN_TOKENIZER: LazyLock<Option<KoreanTokenizer>> = LazyLock::new(|| {
 
 /// Minimum character length for a prompt to be considered meaningful
 const MIN_PROMPT_LENGTH: usize = 5;
-
-/// Stopword-only or confirmation prompts to filter out
-static CONFIRMATION_PROMPTS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
-    [
-        "응", "네", "좋아", "그래", "알겠어", "해줘", "해", "하자", "고마워", "감사",
-        "ok", "yes", "y", "sure", "thanks", "ㅇ", "ㅇㅇ", "넵",
-    ]
-    .iter()
-    .copied()
-    .collect()
-});
 
 // --- Internal types ---
 
@@ -316,7 +309,7 @@ fn is_meaningful_prompt(prompt: &str) -> bool {
     if trimmed.chars().count() < MIN_PROMPT_LENGTH {
         return false;
     }
-    if CONFIRMATION_PROMPTS.contains(trimmed) {
+    if STOPWORDS.contains(trimmed) {
         return false;
     }
     if trimmed.starts_with('<') {

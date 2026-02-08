@@ -1,5 +1,6 @@
 use clap::Parser;
 use anyhow::{Context, Result};
+use chrono::NaiveDate;
 
 mod commands;
 mod parsers;
@@ -47,6 +48,14 @@ struct Cli {
     #[arg(long)]
     decay: bool,
 
+    /// Filter: only include entries after this date (YYYY-MM-DD)
+    #[arg(long)]
+    since: Option<String>,
+
+    /// Filter: only include entries before this date (YYYY-MM-DD)
+    #[arg(long)]
+    until: Option<String>,
+
     /// Generate cache files for Claude semantic analysis (Phase 2).
     /// Outputs cache directory path to stdout.
     #[arg(long)]
@@ -65,6 +74,26 @@ fn main() -> Result<()> {
             .context("failed to get current directory")?
             .to_string_lossy()
             .to_string(),
+    };
+
+    // Parse date range filters
+    let since_ms = cli.since.as_deref().map(|s| {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d")
+            .map(|d| d.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis())
+            .map_err(|e| anyhow::anyhow!("invalid --since date '{}': {} (expected YYYY-MM-DD)", s, e))
+    }).transpose()?;
+
+    let until_ms = cli.until.as_deref().map(|s| {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d")
+            .map(|d| d.and_hms_opt(23, 59, 59).unwrap().and_utc().timestamp_millis())
+            .map_err(|e| anyhow::anyhow!("invalid --until date '{}': {} (expected YYYY-MM-DD)", s, e))
+    }).transpose()?;
+
+    let date_range = match (since_ms, until_ms) {
+        (Some(s), Some(u)) => Some((s, u)),
+        (Some(s), None) => Some((s, i64::MAX)),
+        (None, Some(u)) => Some((i64::MIN, u)),
+        (None, None) => None,
     };
 
     if cli.cache {
@@ -91,5 +120,6 @@ fn main() -> Result<()> {
         cli.top,
         &cli.format,
         cli.decay,
+        date_range,
     )
 }

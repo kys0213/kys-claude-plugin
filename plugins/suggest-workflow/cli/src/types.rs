@@ -4,10 +4,16 @@ use serde::{Deserialize, Serialize};
 pub struct SessionEntry {
     #[serde(rename = "type")]
     pub entry_type: String,
+    #[serde(default)]
     pub message: Option<Message>,
+    #[serde(default)]
     pub name: Option<String>,
+    #[serde(default)]
     pub input: Option<serde_json::Value>,
+    /// Skipped during deserialization — never accessed, avoids parsing large assistant outputs.
+    #[serde(skip_deserializing)]
     pub output: Option<String>,
+    #[serde(default)]
     pub timestamp: Option<String>,
 }
 
@@ -27,9 +33,13 @@ pub enum Content {
 pub struct ContentItem {
     #[serde(rename = "type")]
     pub item_type: String,
+    #[serde(default)]
     pub text: Option<String>,
+    #[serde(default)]
     pub name: Option<String>,
+    #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
     pub input: Option<serde_json::Value>,
 }
 
