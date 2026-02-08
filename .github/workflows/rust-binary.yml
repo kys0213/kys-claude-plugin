@@ -11,29 +11,8 @@ permissions:
 jobs:
   build:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: suggest-workflow-linux-x86_64
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            artifact: suggest-workflow-linux-aarch64
-            cross: true
-          - os: macos-13
-            target: x86_64-apple-darwin
-            artifact: suggest-workflow-darwin-x86_64
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact: suggest-workflow-darwin-aarch64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: suggest-workflow-windows-x86_64
-
-    runs-on: ${{ matrix.os }}
-    name: Build ${{ matrix.artifact }}
+    runs-on: macos-latest
+    name: Build suggest-workflow (darwin-aarch64)
 
     steps:
       - name: Checkout repository
@@ -53,38 +32,18 @@ jobs:
 
       - name: Setup Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          target: ${{ matrix.target }}
-
-      - name: Install cross-compilation tools (Linux aarch64)
-        if: matrix.cross
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Build release binary
         working-directory: plugins/suggest-workflow/cli
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-        run: cargo build --release --features lindera-korean --target ${{ matrix.target }}
+        run: cargo build --release --features lindera-korean
 
-      - name: Package binary (unix)
-        if: runner.os != 'Windows'
+      - name: Package binary
         run: |
-          cd plugins/suggest-workflow/cli/target/${{ matrix.target }}/release
-          tar czf ${{ github.workspace }}/${{ matrix.artifact }}.tar.gz suggest-workflow
-          echo "asset=${{ github.workspace }}/${{ matrix.artifact }}.tar.gz" >> $GITHUB_ENV
-
-      - name: Package binary (windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          cd plugins/suggest-workflow/cli/target/${{ matrix.target }}/release
-          Compress-Archive -Path suggest-workflow.exe -DestinationPath ${{ github.workspace }}/${{ matrix.artifact }}.zip
-          echo "asset=${{ github.workspace }}/${{ matrix.artifact }}.zip" >> $env:GITHUB_ENV
+          cd plugins/suggest-workflow/cli/target/release
+          tar czf ${{ github.workspace }}/suggest-workflow-darwin-aarch64.tar.gz suggest-workflow
 
       - name: Upload to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ steps.release.outputs.tag }} "${{ env.asset }}" --clobber
+          gh release upload ${{ steps.release.outputs.tag }} suggest-workflow-darwin-aarch64.tar.gz --clobber
