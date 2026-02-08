@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 /// A suffix discovered from corpus analysis
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct DiscoveredSuffix {
     pub text: String,
     pub frequency: usize,
@@ -10,6 +11,7 @@ pub struct DiscoveredSuffix {
 
 /// A prompt after suffix normalization
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct NormalizedPrompt {
     pub content: String,    // suffix removed
     pub suffix: String,     // the removed suffix

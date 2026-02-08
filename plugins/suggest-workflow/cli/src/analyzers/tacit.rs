@@ -1,5 +1,5 @@
-use once_cell::sync::Lazy;
-use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use crate::types::{HistoryEntry, TacitPattern, TacitAnalysisResult};
 use crate::analyzers::bm25::BM25Ranker;
 use crate::analyzers::suffix_miner::SuffixMiner;
@@ -25,14 +25,14 @@ const TYPE_BOOST: &[(&str, f64)] = &[
 
 // --- Stopwords & tokenizer (kept from original) ---
 
-static STOPWORDS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
+static STOPWORDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     ["응", "네", "좋아", "그래", "알겠어", "해줘", "해", "하자", "고마워", "감사", "ok", "yes"]
         .iter()
         .copied()
         .collect()
 });
 
-static KOREAN_TOKENIZER: Lazy<Option<KoreanTokenizer>> = Lazy::new(|| {
+static KOREAN_TOKENIZER: LazyLock<Option<KoreanTokenizer>> = LazyLock::new(|| {
     KoreanTokenizer::new().ok()
 });
 
@@ -40,7 +40,7 @@ static KOREAN_TOKENIZER: Lazy<Option<KoreanTokenizer>> = Lazy::new(|| {
 const MIN_PROMPT_LENGTH: usize = 5;
 
 /// Stopword-only or confirmation prompts to filter out
-static CONFIRMATION_PROMPTS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
+static CONFIRMATION_PROMPTS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     [
         "응", "네", "좋아", "그래", "알겠어", "해줘", "해", "하자", "고마워", "감사",
         "ok", "yes", "y", "sure", "thanks", "ㅇ", "ㅇㅇ", "넵",
@@ -61,6 +61,24 @@ struct ClusterEntry {
 
 // --- Boundary matching for seed keywords ---
 
+/// Check if a character is a word boundary (whitespace or any Unicode punctuation).
+fn is_boundary_char(c: char) -> bool {
+    c.is_whitespace() || c.is_ascii_punctuation() || unicode_punctuation(c)
+}
+
+/// Check Unicode General_Category for punctuation beyond ASCII.
+fn unicode_punctuation(c: char) -> bool {
+    matches!(c,
+        '\u{2000}'..='\u{206F}' |  // General Punctuation (…·†‡, hyphens, dashes, bullets)
+        '\u{3000}'..='\u{303F}' |  // CJK Symbols and Punctuation (。、「」etc.)
+        '\u{FE30}'..='\u{FE4F}' |  // CJK Compatibility Forms
+        '\u{FF01}'..='\u{FF0F}' |  // Fullwidth punctuation (！～／)
+        '\u{FF1A}'..='\u{FF20}' |  // Fullwidth colon to @
+        '\u{FF3B}'..='\u{FF40}' |  // Fullwidth brackets
+        '\u{FF5B}'..='\u{FF65}'    // Fullwidth braces, halfwidth forms
+    )
+}
+
 /// Check if seed appears at a word boundary in text.
 /// For Korean: at least one side must be whitespace/punctuation/string boundary.
 /// This avoids false positives from substring matches.
@@ -71,10 +89,10 @@ fn contains_at_boundary(text: &str, seed: &str) -> bool {
     while let Some(pos) = text_lower[search_from..].find(&seed_lower) {
         let abs_pos = search_from + pos;
         let before_ok = abs_pos == 0 || text_lower[..abs_pos]
-            .ends_with(|c: char| c.is_whitespace() || c.is_ascii_punctuation());
+            .ends_with(is_boundary_char);
         let after_pos = abs_pos + seed_lower.len();
         let after_ok = after_pos >= text_lower.len() || text_lower[after_pos..]
-            .starts_with(|c: char| c.is_whitespace() || c.is_ascii_punctuation());
+            .starts_with(is_boundary_char);
         if before_ok || after_ok {
             return true;
         }
@@ -108,7 +126,7 @@ fn get_type_boost(pattern_type: &str) -> f64 {
 
 // --- Tokenization (kept from original) ---
 
-fn tokenize(text: &str) -> Vec<String> {
+pub fn tokenize(text: &str) -> Vec<String> {
     if let Some(ref tokenizer) = *KOREAN_TOKENIZER {
         let tokens = tokenizer.tokenize(text);
         if !tokens.is_empty() {
@@ -136,16 +154,16 @@ fn char_bigrams(s: &str) -> HashSet<(char, char)> {
     chars.windows(2).map(|w| (w[0], w[1])).collect()
 }
 
-fn char_bigram_similarity(a: &str, b: &str) -> f64 {
-    let bigrams_a = char_bigrams(a);
-    let bigrams_b = char_bigrams(b);
-
+fn bigram_similarity_precomputed(
+    bigrams_a: &HashSet<(char, char)>,
+    bigrams_b: &HashSet<(char, char)>,
+) -> f64 {
     if bigrams_a.is_empty() && bigrams_b.is_empty() {
-        return if a == b { 1.0 } else { 0.0 };
+        return 0.0;
     }
 
-    let intersection = bigrams_a.intersection(&bigrams_b).count();
-    let union = bigrams_a.union(&bigrams_b).count();
+    let intersection = bigrams_a.intersection(bigrams_b).count();
+    let union = bigrams_a.union(bigrams_b).count();
 
     if union == 0 { 0.0 } else { intersection as f64 / union as f64 }
 }
@@ -154,7 +172,7 @@ fn char_bigram_similarity(a: &str, b: &str) -> f64 {
 
 /// Cluster normalized texts using:
 /// Phase 1: Exact match grouping (O(n))
-/// Phase 2: Jaccard similarity on char bigrams (O(k²), k = unique normalized, max 500)
+/// Phase 2: Jaccard similarity on precomputed char bigrams (O(k²), k = unique normalized, max 500)
 /// Short strings (< 4 chars) skip Phase 2 bigram comparison.
 fn cluster_normalized(
     entries: &[ClusterEntry],
@@ -176,20 +194,29 @@ fn cluster_normalized(
         representatives.truncate(500);
     }
 
-    // Phase 2: Merge similar groups via char bigram Jaccard
-    let mut clusters: Vec<(String, Vec<ClusterEntry>)> = Vec::new();
+    // Precompute bigrams for all representatives (fixes P2: repeated bigram computation)
+    let precomputed_bigrams: Vec<HashSet<(char, char)>> = representatives
+        .iter()
+        .map(|(text, _)| char_bigrams(text))
+        .collect();
 
-    for (repr_text, group) in representatives {
+    // Phase 2: Merge similar groups via precomputed char bigram Jaccard
+    let mut clusters: Vec<(usize, Vec<ClusterEntry>)> = Vec::new(); // (original_index, entries)
+
+    for (i, (repr_text, group)) in representatives.into_iter().enumerate() {
         let repr_chars_count = repr_text.chars().count();
         let mut merged = false;
 
         // Short strings (< 4 chars): only exact match (already grouped in Phase 1)
         if repr_chars_count >= 4 {
-            for (cluster_repr, cluster_entries) in clusters.iter_mut() {
-                if cluster_repr.chars().count() < 4 {
+            for (cluster_idx, cluster_entries) in clusters.iter_mut() {
+                if precomputed_bigrams[*cluster_idx].is_empty() {
                     continue;
                 }
-                let sim = char_bigram_similarity(&repr_text, cluster_repr);
+                let sim = bigram_similarity_precomputed(
+                    &precomputed_bigrams[i],
+                    &precomputed_bigrams[*cluster_idx],
+                );
                 if sim >= similarity_threshold {
                     cluster_entries.extend(group.clone());
                     merged = true;
@@ -199,7 +226,7 @@ fn cluster_normalized(
         }
 
         if !merged {
-            clusters.push((repr_text, group));
+            clusters.push((i, group));
         }
     }
 
@@ -237,16 +264,17 @@ fn calculate_consistency(timestamps: &[i64]) -> f64 {
 
 fn calculate_confidence(
     count: usize,
-    total_prompts: usize,
+    meaningful_count: usize,
     timestamps: &[i64],
     bm25_score: f64,
     pattern_type: &str,
 ) -> f64 {
-    if count == 0 || total_prompts == 0 {
+    if count == 0 || meaningful_count == 0 {
         return 0.0;
     }
 
-    let frequency_score = (count as f64 / total_prompts as f64).min(1.0);
+    // B5 fix: use meaningful prompt count as denominator instead of total entries
+    let frequency_score = (count as f64 / meaningful_count as f64).min(1.0);
     let consistency_score = calculate_consistency(timestamps);
     let normalized_bm25 = 1.0 / (1.0 + (-bm25_score / 5.0).exp());
 
@@ -311,6 +339,8 @@ pub fn analyze_tacit_knowledge(
             patterns: Vec::new(),
         };
     }
+
+    let meaningful_count = meaningful.len();
 
     // Step 2: Mine suffixes from corpus
     let prompt_texts: Vec<&str> = meaningful.iter().map(|e| e.display.as_str()).collect();
@@ -382,21 +412,21 @@ pub fn analyze_tacit_knowledge(
             .map(|(t, _)| t)
             .unwrap_or("general");
 
-        // Calculate confidence with type boost and clamping
+        // B5 fix: pass meaningful_count instead of entries.len()
         let timestamps: Vec<i64> = cluster.iter().map(|e| e.timestamp).collect();
         let confidence = calculate_confidence(
             cluster.len(),
-            entries.len(),
+            meaningful_count,
             &timestamps,
             bm25_score,
             dominant_type,
         );
 
-        // Collect unique examples (up to 5)
+        // B4 fix: use BTreeSet for deterministic example ordering
         let examples: Vec<String> = cluster
             .iter()
             .map(|e| e.original.clone())
-            .collect::<HashSet<_>>()
+            .collect::<BTreeSet<_>>()
             .into_iter()
             .take(5)
             .collect();

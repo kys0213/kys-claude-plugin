@@ -1,17 +1,18 @@
 use crate::analyzers::bm25::BM25Ranker;
 use crate::analyzers::depth::DepthConfig;
+use crate::analyzers::tacit::tokenize;
 use crate::tokenizer::KoreanTokenizer;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use std::collections::HashSet;
 
-static STOPWORDS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
+static STOPWORDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     ["응", "네", "좋아", "그래", "알겠어", "해줘", "해", "하자", "고마워", "감사", "ok", "yes"]
         .iter()
         .copied()
         .collect()
 });
 
-static KOREAN_TOKENIZER: Lazy<Option<KoreanTokenizer>> = Lazy::new(|| {
+static KOREAN_TOKENIZER: LazyLock<Option<KoreanTokenizer>> = LazyLock::new(|| {
     KoreanTokenizer::new().ok()
 });
 
@@ -32,25 +33,6 @@ pub struct DecomposedQuery {
     pub original: Vec<String>,
     /// Sub-queries generated from decomposition
     pub sub_queries: Vec<Vec<String>>,
-}
-
-/// Tokenize text with stopword filtering
-fn tokenize(text: &str) -> Vec<String> {
-    if let Some(ref tokenizer) = *KOREAN_TOKENIZER {
-        let tokens = tokenizer.tokenize(text);
-        if !tokens.is_empty() {
-            return tokens
-                .into_iter()
-                .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty() && !STOPWORDS.contains(s.as_str()))
-                .collect();
-        }
-    }
-
-    text.split_whitespace()
-        .map(|s| s.trim().to_lowercase())
-        .filter(|s| !s.is_empty() && !STOPWORDS.contains(s.as_str()))
-        .collect()
 }
 
 /// Extract nouns from text using the Korean tokenizer

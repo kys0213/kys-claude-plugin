@@ -16,7 +16,7 @@ pub struct BM25Ranker {
     b: f64,
     avg_dl: f64,
     idf: HashMap<String, f64>,
-    doc_count: usize,
+    _doc_count: usize,
 }
 
 impl BM25Ranker {
@@ -51,7 +51,7 @@ impl BM25Ranker {
             b,
             avg_dl,
             idf,
-            doc_count,
+            _doc_count: doc_count,
         }
     }
 

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use crate::parsers::{
     parse_session, list_sessions, resolve_project_path, adapt_to_history_entries,
 };
@@ -97,7 +97,14 @@ fn run_project_analysis(
     eprintln!("Analyzing project: {}", resolved_path.display());
     eprintln!("Depth: {} | Focus: {:?}", depth, focus);
 
-    let (sessions, history_entries) = load_project_data(&resolved_path, project_path)?;
+    let (sessions, history_entries) = load_sessions_from_dir(&resolved_path, project_path)?;
+
+    if sessions.is_empty() {
+        eprintln!("No session files found.");
+        std::process::exit(2);
+    }
+
+    eprintln!("Loaded {} sessions", sessions.len());
 
     if format == "json" {
         print_json_output(
@@ -142,7 +149,7 @@ fn run_global_analysis(
         let project_dir = projects_base.join(dir_name);
         let project_label = decode_project_name(dir_name);
 
-        match load_project_data_raw(&project_dir, &project_label) {
+        match load_sessions_from_dir(&project_dir, &project_label) {
             Ok((sessions, history)) => {
                 let prompt_count = history.len();
                 if prompt_count > 0 {
@@ -206,35 +213,9 @@ struct GlobalInfo {
     projects: Vec<ProjectStats>,
 }
 
-fn load_project_data(
-    resolved_path: &PathBuf,
-    project_path: &str,
-) -> Result<(Vec<(String, Vec<crate::types::SessionEntry>)>, Vec<crate::types::HistoryEntry>)> {
-    let session_files = list_sessions(resolved_path)?;
-    if session_files.is_empty() {
-        eprintln!("No session files found.");
-        std::process::exit(2);
-    }
-
-    let mut sessions = Vec::new();
-    for session_file in &session_files {
-        let entries = parse_session(session_file)?;
-        let session_id = session_file
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
-            .to_string();
-        sessions.push((session_id, entries));
-    }
-
-    eprintln!("Loaded {} sessions", sessions.len());
-
-    let history_entries = adapt_to_history_entries(&sessions, project_path);
-    Ok((sessions, history_entries))
-}
-
-fn load_project_data_raw(
-    project_dir: &PathBuf,
+/// Load sessions and history entries from a project directory.
+fn load_sessions_from_dir(
+    project_dir: &Path,
     project_label: &str,
 ) -> Result<(Vec<(String, Vec<crate::types::SessionEntry>)>, Vec<crate::types::HistoryEntry>)> {
     let session_files = list_sessions(project_dir)?;
@@ -255,10 +236,12 @@ fn load_project_data_raw(
 }
 
 fn decode_project_name(encoded: &str) -> String {
-    // Encoded format: "-home-user-project-name" → "/home/user/project-name"
-    // Simple heuristic: replace leading "-" with "/" and internal "-" with "/"
+    // Claude encodes paths by replacing "/" with "-", but this is lossy:
+    //   /home/user/my-project → -home-user-my-project
+    // We cannot distinguish original hyphens from encoded slashes.
+    // Use the encoded name directly as a display label (stripping leading dash).
     if encoded.starts_with('-') {
-        format!("/{}", &encoded[1..].replace('-', "/"))
+        encoded[1..].to_string()
     } else {
         encoded.to_string()
     }
