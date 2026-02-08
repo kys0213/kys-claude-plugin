@@ -118,6 +118,7 @@ pub fn extract_tool_sequence(entries: &[SessionEntry]) -> Vec<ToolUse> {
                 tools.push(ToolUse {
                     name: name.clone(),
                     timestamp,
+                    input: entry.input.clone(),
                 });
             }
             continue;
@@ -137,6 +138,7 @@ pub fn extract_tool_sequence(entries: &[SessionEntry]) -> Vec<ToolUse> {
                                 tools.push(ToolUse {
                                     name: name.clone(),
                                     timestamp,
+                                    input: item.input.clone(),
                                 });
                             }
                         }

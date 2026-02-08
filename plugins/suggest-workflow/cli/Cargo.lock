@@ -1846,7 +1846,6 @@ dependencies = [
  "chrono",
  "clap",
  "lindera",
- "once_cell",
  "regex",
  "serde",
  "serde_json",
