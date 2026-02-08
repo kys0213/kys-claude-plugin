@@ -62,8 +62,17 @@ func ParseMarkdown(filePath string) (*ParseResult, error) {
 	return result, nil
 }
 
-// ExtractPluginRootPaths extracts ${CLAUDE_PLUGIN_ROOT} paths from content
+// ExtractPluginRootPaths extracts ${CLAUDE_PLUGIN_ROOT} paths from all content
 func ExtractPluginRootPaths(filePath string) ([]PathInfo, error) {
+	return extractPluginRootPaths(filePath, false)
+}
+
+// ExtractPluginRootPathsSkipCode extracts ${CLAUDE_PLUGIN_ROOT} paths, skipping code blocks and inline code
+func ExtractPluginRootPathsSkipCode(filePath string) ([]PathInfo, error) {
+	return extractPluginRootPaths(filePath, true)
+}
+
+func extractPluginRootPaths(filePath string, skipCode bool) ([]PathInfo, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -72,14 +81,33 @@ func ExtractPluginRootPaths(filePath string) ([]PathInfo, error) {
 
 	var paths []PathInfo
 	pluginRootPattern := regexp.MustCompile(`\$\{CLAUDE_PLUGIN_ROOT\}[^\s"')\` + "`" + `]+`)
+	inlineCodePattern := regexp.MustCompile("`[^`]+`")
 
 	scanner := bufio.NewScanner(file)
 	lineNum := 0
+	inCodeBlock := false
 	for scanner.Scan() {
 		lineNum++
 		line := scanner.Text()
 
-		matches := pluginRootPattern.FindAllString(line, -1)
+		if skipCode {
+			// Skip paths inside code blocks (e.g. bash examples referencing build artifacts)
+			if strings.HasPrefix(strings.TrimSpace(line), "```") {
+				inCodeBlock = !inCodeBlock
+				continue
+			}
+			if inCodeBlock {
+				continue
+			}
+		}
+
+		lineForMatch := line
+		if skipCode {
+			// Strip inline code (backtick-enclosed) before matching — these are documentation references
+			lineForMatch = inlineCodePattern.ReplaceAllString(line, "")
+		}
+
+		matches := pluginRootPattern.FindAllString(lineForMatch, -1)
 		for _, match := range matches {
 			paths = append(paths, PathInfo{
 				Type:  "pluginRootPath",

@@ -11,7 +11,7 @@ description: 프롬프트에서 암묵지를 추출하여 skill로 제안
 Rust CLI를 사용합니다:
 
 ```bash
-{plugin_path}/cli/target/release/suggest-workflow skill \
+${CLAUDE_PLUGIN_ROOT}/cli/target/release/suggest-workflow skill \
   --project "$(pwd)" \
   --threshold 3 \
   --top 10 \

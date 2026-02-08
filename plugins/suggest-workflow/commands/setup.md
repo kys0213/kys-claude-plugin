@@ -21,7 +21,7 @@ This command builds the Rust CLI binary for suggest-workflow.
 ## Execution
 
 ```bash
-cd {plugin_path}/cli
+cd ${CLAUDE_PLUGIN_ROOT}/cli
 
 # Check Rust installation
 if ! command -v cargo &> /dev/null; then
@@ -52,6 +52,6 @@ After building, test the binary:
 ## Output
 
 The compiled binary will be at:
-- `{plugin_path}/cli/target/release/suggest-workflow`
+- `${CLAUDE_PLUGIN_ROOT}/cli/target/release/suggest-workflow`
 
 Binary size: ~5-10MB (optimized with LTO and strip)
