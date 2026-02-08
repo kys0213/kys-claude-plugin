@@ -82,6 +82,7 @@ pub fn parse_session(session_path: &Path) -> Result<Vec<SessionEntry>> {
 }
 
 /// Extract user prompts from session entries
+#[allow(dead_code)]
 pub fn extract_user_prompts(entries: &[SessionEntry]) -> Vec<String> {
     entries.iter()
         .filter(|e| e.entry_type == "user")
@@ -118,6 +119,7 @@ pub fn extract_tool_sequence(entries: &[SessionEntry]) -> Vec<ToolUse> {
                 tools.push(ToolUse {
                     name: name.clone(),
                     timestamp,
+                    input: entry.input.clone(),
                 });
             }
             continue;
@@ -137,6 +139,7 @@ pub fn extract_tool_sequence(entries: &[SessionEntry]) -> Vec<ToolUse> {
                                 tools.push(ToolUse {
                                     name: name.clone(),
                                     timestamp,
+                                    input: item.input.clone(),
                                 });
                             }
                         }

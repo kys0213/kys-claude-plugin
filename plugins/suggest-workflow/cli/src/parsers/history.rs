@@ -1,10 +1,11 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use anyhow::{Context, Result};
 use crate::types::HistoryEntry;
 
 /// Parse Claude history.jsonl file
+#[allow(dead_code)]
 pub fn parse_history_file(path: Option<&str>) -> Result<Vec<HistoryEntry>> {
     let file_path = if let Some(p) = path {
         PathBuf::from(p)
@@ -43,6 +44,7 @@ pub fn parse_history_file(path: Option<&str>) -> Result<Vec<HistoryEntry>> {
 }
 
 /// Filter history entries by project path
+#[allow(dead_code)]
 pub fn filter_by_project(entries: &[HistoryEntry], project: &str) -> Vec<HistoryEntry> {
     entries.iter()
         .filter(|e| e.project == project)
@@ -51,6 +53,7 @@ pub fn filter_by_project(entries: &[HistoryEntry], project: &str) -> Vec<History
 }
 
 /// Filter by date range (timestamps in milliseconds)
+#[allow(dead_code)]
 pub fn filter_by_date_range(
     entries: &[HistoryEntry],
     start: i64,
@@ -63,6 +66,7 @@ pub fn filter_by_date_range(
 }
 
 /// Get unique project paths
+#[allow(dead_code)]
 pub fn get_unique_projects(entries: &[HistoryEntry]) -> Vec<String> {
     let mut projects: Vec<_> = entries.iter()
         .map(|e| e.project.clone())

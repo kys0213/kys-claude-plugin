@@ -37,6 +37,7 @@ pub struct ContentItem {
 pub struct ToolUse {
     pub name: String,
     pub timestamp: Option<i64>,
+    pub input: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

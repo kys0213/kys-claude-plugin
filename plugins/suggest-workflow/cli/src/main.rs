@@ -1,5 +1,5 @@
 use clap::Parser;
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 mod commands;
 mod parsers;
@@ -58,12 +58,13 @@ fn main() -> Result<()> {
     let focus: AnalysisFocus = cli.focus.parse()
         .map_err(|e: String| anyhow::anyhow!(e))?;
 
-    let project_path = cli.project.unwrap_or_else(|| {
-        std::env::current_dir()
-            .unwrap()
+    let project_path = match cli.project {
+        Some(p) => p,
+        None => std::env::current_dir()
+            .context("failed to get current directory")?
             .to_string_lossy()
-            .to_string()
-    });
+            .to_string(),
+    };
 
     commands::analyze::run(
         scope,

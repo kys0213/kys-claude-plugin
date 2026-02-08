@@ -61,7 +61,16 @@ pub fn analyze_prompts(
         })
         .collect();
 
-    top_prompts.sort_by(|a, b| b.count.cmp(&a.count));
+    if decay {
+        top_prompts.sort_by(|a, b| {
+            b.weighted_count
+                .partial_cmp(&a.weighted_count)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.count.cmp(&a.count))
+        });
+    } else {
+        top_prompts.sort_by(|a, b| b.count.cmp(&a.count));
+    }
 
     let start_date = if earliest != i64::MAX {
         DateTime::from_timestamp_millis(earliest)

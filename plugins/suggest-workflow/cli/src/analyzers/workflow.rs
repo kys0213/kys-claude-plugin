@@ -1,19 +1,26 @@
-use std::collections::HashMap;
-use crate::types::{SessionEntry, ToolSequence, WorkflowAnalysisResult};
+use std::collections::{HashMap, HashSet};
+use crate::types::{SessionEntry, ToolUse, ToolSequence, WorkflowAnalysisResult};
 use crate::parsers::extract_tool_sequence;
 use crate::analyzers::tool_classifier::classify_tool;
 
 const DEFAULT_TIME_WINDOW: i64 = 5 * 60 * 1000; // 5 minutes in milliseconds
 
-/// Extract tool sequences from session entries
-pub fn extract_tool_sequences(
-    entries: &[SessionEntry],
+/// Classify tool uses into named sequences, passing input for Bash sub-classification
+fn classify_tool_uses(tool_uses: &[ToolUse]) -> Vec<String> {
+    tool_uses
+        .iter()
+        .map(|t| classify_tool(&t.name, t.input.as_ref()).classified_name)
+        .collect()
+}
+
+/// Extract tool sequences from pre-classified tool names with time-based grouping
+fn extract_sequences_from_classified(
+    tool_uses: &[ToolUse],
+    classified_names: &[String],
     min_length: usize,
     max_length: usize,
 ) -> Vec<Vec<String>> {
-    let tool_uses = extract_tool_sequence(entries);
-
-    if tool_uses.len() < min_length {
+    if classified_names.len() < min_length {
         return Vec::new();
     }
 
@@ -21,12 +28,11 @@ pub fn extract_tool_sequences(
     let mut work_units: Vec<Vec<String>> = Vec::new();
     let mut current_unit: Vec<String> = Vec::new();
 
-    for (i, tool) in tool_uses.iter().enumerate() {
-        let classified = classify_tool(&tool.name, None);
-        current_unit.push(classified.classified_name);
+    for (i, name) in classified_names.iter().enumerate() {
+        current_unit.push(name.clone());
 
         if i < tool_uses.len() - 1 {
-            if let (Some(curr_ts), Some(next_ts)) = (tool.timestamp, tool_uses[i + 1].timestamp) {
+            if let (Some(curr_ts), Some(next_ts)) = (tool_uses[i].timestamp, tool_uses[i + 1].timestamp) {
                 let time_diff = next_ts - curr_ts;
                 if time_diff > DEFAULT_TIME_WINDOW {
                     if current_unit.len() >= min_length {
@@ -58,27 +64,29 @@ pub fn extract_tool_sequences(
 /// Find common sequences across sessions
 fn find_common_sequences(
     sequences: &[Vec<String>],
-    session_ids: &[String],
+    session_indices: &[usize],
+    session_names: &[String],
     min_occurrence: usize,
 ) -> Vec<ToolSequence> {
-    let mut sequence_map: HashMap<String, (usize, Vec<String>)> = HashMap::new();
+    let mut sequence_map: HashMap<String, (usize, HashSet<usize>)> = HashMap::new();
 
-    for (seq, session_id) in sequences.iter().zip(session_ids.iter()) {
-        let key = seq.join("->");
-        let entry = sequence_map.entry(key).or_insert((0, Vec::new()));
+    for (seq, &session_idx) in sequences.iter().zip(session_indices.iter()) {
+        let key = seq.join("\x1F");
+        let entry = sequence_map.entry(key).or_insert_with(|| (0, HashSet::new()));
         entry.0 += 1;
-        if !entry.1.contains(session_id) {
-            entry.1.push(session_id.clone());
-        }
+        entry.1.insert(session_idx);
     }
 
     let mut results: Vec<ToolSequence> = sequence_map
         .into_iter()
         .filter(|(_, (count, _))| *count >= min_occurrence)
-        .map(|(key, (count, sessions))| ToolSequence {
-            tools: key.split("->").map(String::from).collect(),
+        .map(|(key, (count, session_idxs))| ToolSequence {
+            tools: key.split('\x1F').map(String::from).collect(),
             count,
-            sessions,
+            sessions: session_idxs
+                .into_iter()
+                .map(|idx| session_names[idx].clone())
+                .collect(),
         })
         .collect();
 
@@ -103,33 +111,41 @@ pub fn analyze_workflows(
         };
     }
 
+    let session_names: Vec<String> = sessions.iter().map(|(id, _)| id.clone()).collect();
     let mut all_sequences = Vec::new();
-    let mut all_session_ids = Vec::new();
+    let mut all_session_indices = Vec::new();
     let mut tool_usage: HashMap<String, usize> = HashMap::new();
 
-    for (session_id, entries) in sessions {
-        let sequences = extract_tool_sequences(entries, min_length, max_length);
+    for (session_idx, (_session_id, entries)) in sessions.iter().enumerate() {
+        // Extract tool uses once per session (fixes P1: double extraction)
+        let tool_uses = extract_tool_sequence(entries);
+        let classified_names = classify_tool_uses(&tool_uses);
+
+        // Count individual tool usage from the same classified result
+        for name in &classified_names {
+            *tool_usage.entry(name.clone()).or_insert(0) += 1;
+        }
+
+        // Extract sequences from already-classified names
+        let sequences = extract_sequences_from_classified(
+            &tool_uses, &classified_names, min_length, max_length,
+        );
 
         for seq in sequences {
             all_sequences.push(seq);
-            all_session_ids.push(session_id.clone());
-        }
-
-        // Count individual tool usage
-        let tool_uses = extract_tool_sequence(entries);
-        for tool in tool_uses {
-            let classified = classify_tool(&tool.name, None);
-            *tool_usage.entry(classified.classified_name).or_insert(0) += 1;
+            all_session_indices.push(session_idx);
         }
     }
 
-    let common_sequences = find_common_sequences(&all_sequences, &all_session_ids, threshold);
+    let common_sequences = find_common_sequences(
+        &all_sequences, &all_session_indices, &session_names, threshold,
+    );
     let top_sequences = common_sequences.into_iter().take(top).collect();
 
     let unique_sequences = all_sequences
         .iter()
-        .map(|seq| seq.join("->"))
-        .collect::<std::collections::HashSet<_>>()
+        .map(|seq| seq.join("\x1F"))
+        .collect::<HashSet<_>>()
         .len();
 
     let mut tool_usage_vec: Vec<(String, usize)> = tool_usage.into_iter().collect();

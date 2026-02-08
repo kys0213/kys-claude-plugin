@@ -1,7 +1,7 @@
-use suggest_workflow::analyzers::suffix_miner::{SuffixMiner, DiscoveredSuffix, NormalizedPrompt};
+use suggest_workflow::analyzers::suffix_miner::SuffixMiner;
 use suggest_workflow::analyzers::tacit::analyze_tacit_knowledge;
 use suggest_workflow::analyzers::depth::{AnalysisDepth, DepthConfig};
-use suggest_workflow::types::{HistoryEntry, TacitPattern, TacitAnalysisResult};
+use suggest_workflow::types::{HistoryEntry, TacitPattern};
 
 /// Helper to construct HistoryEntry with display and timestamp
 fn make_entry(display: &str, ts: i64) -> HistoryEntry {
