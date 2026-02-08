@@ -11,6 +11,9 @@ description: 세션 분석 기반 워크플로우 제안 - Claude Code 활용 �
 Rust CLI를 사용합니다:
 
 ```bash
+# 바이너리가 없으면 자동 다운로드/빌드
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh
+
 ${CLAUDE_PLUGIN_ROOT}/cli/target/release/suggest-workflow workflow \
   --source projects \
   --project "$(pwd)" \
