@@ -48,7 +48,7 @@
       ],
       "name": "git-utils",
       "source": "./plugins/git-utils",
-      "version": "2.0.1"
+      "version": "2.0.2"
     },
     {
       "category": "productivity",
@@ -105,7 +105,7 @@
       ],
       "name": "suggest-workflow",
       "source": "./plugins/suggest-workflow",
-      "version": "0.7.1"
+      "version": "0.7.2"
     }
   ]
 }
