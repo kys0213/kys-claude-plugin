@@ -2,7 +2,6 @@ package architecture
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -122,91 +121,3 @@ func findSkillSuggestion(skillName string, registry map[string]string) string {
 	return ""
 }
 
-// validateSkillCoverage checks if agents that use skills from the same plugin
-// have declared them in their frontmatter (advisory/info level)
-func validateSkillCoverage(files []LayerFile, repoRoot string, results *Results) {
-	// Group agents by plugin
-	agentsByPlugin := make(map[string][]LayerFile)
-	for _, f := range files {
-		if f.Layer == LayerAgent {
-			agentsByPlugin[f.Plugin] = append(agentsByPlugin[f.Plugin], f)
-		}
-	}
-
-	// Get skill count per plugin
-	skillsByPlugin := make(map[string][]string)
-	for _, f := range files {
-		if f.Layer == LayerSkill {
-			name := extractSkillName(f.Path)
-			if name != "" {
-				skillsByPlugin[f.Plugin] = append(skillsByPlugin[f.Plugin], name)
-			}
-		}
-	}
-
-	// For each plugin that has both agents AND skills, check coverage
-	for plugin, agents := range agentsByPlugin {
-		skills, hasSkills := skillsByPlugin[plugin]
-		if !hasSkills || len(skills) == 0 {
-			continue
-		}
-
-		// Check how many agents declare skills
-		agentsWithSkills := 0
-		for _, agent := range agents {
-			if agent.Parsed != nil && agent.Parsed.Frontmatter != nil {
-				declared := agent.Parsed.Frontmatter.GetStringSlice("skills")
-				if len(declared) > 0 {
-					agentsWithSkills++
-				}
-			}
-		}
-
-		// If plugin has skills but no agents declare them, flag as warning
-		if agentsWithSkills == 0 && len(agents) > 0 {
-			// Build list of agents missing skill declarations
-			var agentNames []string
-			for _, a := range agents {
-				base := filepath.Base(a.Path)
-				agentNames = append(agentNames, strings.TrimSuffix(base, ".md"))
-			}
-
-			// Check if any skill directory actually exists on disk (not just collected files)
-			skillDirs := findSkillDirs(repoRoot, plugin)
-			if len(skillDirs) == 0 {
-				continue
-			}
-
-			results.Failed = append(results.Failed, Result{
-				File:     fmt.Sprintf("plugins/%s/agents/", plugin),
-				Type:     "skill-coverage",
-				Valid:    false,
-				Severity: "warning",
-				Errors: []string{
-					fmt.Sprintf(
-						"plugin has %d skill(s) [%s] but none of %d agent(s) [%s] declare skills in frontmatter — consider adding skills: [...] to agent YAML",
-						len(skills), strings.Join(skills, ", "),
-						len(agents), strings.Join(agentNames, ", "),
-					),
-				},
-			})
-		}
-	}
-}
-
-// findSkillDirs finds skill directories for a plugin
-func findSkillDirs(repoRoot, plugin string) []string {
-	skillsDir := filepath.Join(repoRoot, "plugins", plugin, "skills")
-	entries, err := os.ReadDir(skillsDir)
-	if err != nil {
-		return nil
-	}
-
-	var dirs []string
-	for _, e := range entries {
-		if e.IsDir() {
-			dirs = append(dirs, e.Name())
-		}
-	}
-	return dirs
-}

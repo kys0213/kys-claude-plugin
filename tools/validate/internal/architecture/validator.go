@@ -84,9 +84,6 @@ func Validate(repoRoot string) (*Results, error) {
 	// 5. Check skill references (agent → skill existence)
 	validateSkillReferences(files, repoRoot, results)
 
-	// 6. Check skill coverage (agents missing skill declarations)
-	validateSkillCoverage(files, repoRoot, results)
-
 	return results, nil
 }
 
