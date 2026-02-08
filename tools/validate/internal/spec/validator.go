@@ -177,8 +177,9 @@ func validatePluginJSON(filePath string) Result {
 	}
 
 	// Validate command files exist
+	// plugin.json is inside .claude-plugin/, so resolve commands relative to plugin root (parent of .claude-plugin/)
 	if commands, ok := data["commands"].([]interface{}); ok {
-		pluginDir := filepath.Dir(filePath)
+		pluginDir := filepath.Dir(filepath.Dir(filePath))
 		for _, cmd := range commands {
 			cmdPath, ok := cmd.(string)
 			if !ok {
