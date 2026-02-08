@@ -1,2 +1,1 @@
-pub mod workflow;
-pub mod skill;
+pub mod analyze;

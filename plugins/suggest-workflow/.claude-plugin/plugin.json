@@ -6,18 +6,19 @@
     "name": "kys0213"
   },
   "commands": [
-    "./commands/suggest-workflow.md",
-    "./commands/suggest-skill.md",
+    "./commands/suggest-analyze.md",
     "./commands/setup.md"
   ],
-  "description": "세션 분석 기반 워크플로우 제안 - Claude Code 활용 최적화",
+  "description": "세션 분석 기반 통합 워크플로우/스킬 제안 - Multi-query BM25 기반 Claude Code 활용 최적화",
   "keywords": [
     "workflow",
     "suggestion",
     "analysis",
     "optimization",
-    "session"
+    "session",
+    "bm25",
+    "multi-query"
   ],
   "name": "suggest-workflow",
-  "version": "0.8.0"
+  "version": "1.0.0"
 }

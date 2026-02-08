@@ -3,6 +3,8 @@ use std::collections::{HashMap, HashSet};
 use crate::types::{HistoryEntry, TacitPattern, TacitAnalysisResult};
 use crate::analyzers::bm25::BM25Ranker;
 use crate::analyzers::suffix_miner::SuffixMiner;
+use crate::analyzers::depth::DepthConfig;
+use crate::analyzers::query_decomposer::decompose_query;
 use crate::tokenizer::KoreanTokenizer;
 
 // --- Type seed keywords (minimal hardcoding) ---
@@ -275,20 +277,20 @@ fn is_meaningful_prompt(prompt: &str) -> bool {
 
 // --- Main analysis function ---
 
-/// Data-driven tacit knowledge analysis pipeline:
+/// Data-driven tacit knowledge analysis pipeline with multi-query BM25:
 /// 1. Filter meaningful prompts
 /// 2. Mine frequent suffixes from corpus
 /// 3. Normalize prompts (strip suffixes)
-/// 4. Cluster normalized texts via char bigram similarity
-/// 5. Score clusters with BM25 + frequency + consistency
-/// 6. Label types via seed keywords
-/// 7. Rank by confidence
+/// 4. Build BM25 ranker and decompose queries per DepthConfig
+/// 5. Cluster normalized texts via char bigram similarity
+/// 6. Score clusters with multi-query BM25 + frequency + consistency
+/// 7. Label types via seed keywords
+/// 8. Rank by confidence
 pub fn analyze_tacit_knowledge(
     entries: &[HistoryEntry],
     threshold: usize,
     top_n: usize,
-    clustering: bool,
-    similarity_threshold: f64,
+    depth_config: &DepthConfig,
 ) -> TacitAnalysisResult {
     if entries.is_empty() {
         return TacitAnalysisResult {
@@ -335,19 +337,10 @@ pub fn analyze_tacit_knowledge(
         .collect();
     let bm25_ranker = BM25Ranker::new(&all_documents, 1.5, 0.75);
 
-    // Step 5: Cluster normalized texts
-    let clusters = if clustering {
-        cluster_normalized(&cluster_entries, similarity_threshold)
-    } else {
-        // No clustering: group by exact normalized content
-        let mut exact_groups: HashMap<String, Vec<ClusterEntry>> = HashMap::new();
-        for entry in &cluster_entries {
-            exact_groups.entry(entry.normalized_content.clone()).or_default().push(entry.clone());
-        }
-        exact_groups.into_values().collect()
-    };
+    // Step 5: Cluster normalized texts (using depth-driven similarity threshold)
+    let clusters = cluster_normalized(&cluster_entries, depth_config.similarity_threshold);
 
-    // Step 6: Score and rank clusters
+    // Step 6: Score and rank clusters with multi-query BM25
     let mut patterns = Vec::new();
     for cluster in clusters {
         if cluster.len() < threshold {
@@ -364,12 +357,17 @@ pub fn analyze_tacit_knowledge(
             continue;
         }
 
-        // BM25 score using original text tokens
-        let tokens = tokenize(&representative);
-        let bm25_score = if tokens.is_empty() {
+        // Multi-query BM25: decompose representative and score all sub-queries
+        let decomposed = decompose_query(&representative, depth_config, &bm25_ranker);
+        let bm25_score = if decomposed.original.is_empty() {
             0.0
+        } else if decomposed.is_decomposed() {
+            bm25_ranker.score_multi_query(
+                &decomposed.all_queries(),
+                depth_config.multi_query_strategy,
+            )
         } else {
-            bm25_ranker.score_query(&tokens)
+            bm25_ranker.score_query(&decomposed.original)
         };
 
         // Classify type using original prompts (seed matching on full text)
