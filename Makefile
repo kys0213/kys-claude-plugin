@@ -12,6 +12,7 @@ help:
 	@echo "  make validate-ci     CI용 검증 (버전 제외)"
 	@echo "  make validate-specs  스펙 검증만"
 	@echo "  make validate-paths  경로 검증만"
+	@echo "  make validate-arch   아키텍처 검증만 (레이어 의존성, 유사도, 책임)"
 	@echo "  make detect          변경된 패키지 감지"
 	@echo "  make detect-from REF=<ref>  특정 ref 기준 변경 감지"
 	@echo "  make clean           빌드 결과물 정리"
@@ -45,6 +46,9 @@ validate-paths: $(BINARY)
 
 validate-versions: $(BINARY)
 	@./$(BINARY) --versions-only .
+
+validate-arch: $(BINARY)
+	@./$(BINARY) --arch-only .
 
 # CI용 검증 (버전 검증 제외 - 머지 시점에 자동 범프)
 validate-ci: $(BINARY)

@@ -9,6 +9,7 @@
     "validate:specs": "make validate-specs",
     "validate:paths": "make validate-paths",
     "validate:versions": "make validate-versions",
+    "validate:arch": "make validate-arch",
     "detect": "make detect",
     "lint": "eslint 'plugins/**/*.ts'",
     "lint:fix": "eslint 'plugins/**/*.ts' --fix",

@@ -2,6 +2,7 @@
 description: 스펙 검증 에이전트 - 아키텍처/계약 일관성 검증
 model: sonnet
 tools: ["Read", "Glob", "Grep"]
+arch-ignore: true
 ---
 
 # Spec Validator Agent

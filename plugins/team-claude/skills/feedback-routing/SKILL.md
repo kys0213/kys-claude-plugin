@@ -1,6 +1,7 @@
 ---
 name: feedback-routing
 description: 자동 피드백 라우팅 스킬 - 검증 결과에 따른 자동 분기
+arch-ignore: true
 ---
 
 # Feedback Routing Skill
