@@ -53,7 +53,7 @@ CACHE_DIR=$(${CLAUDE_PLUGIN_ROOT}/cli/target/release/suggest-workflow \
 | 필드 | 설명 |
 |------|------|
 | `id` | 세션 ID |
-| `fileSize` | 원본 JSONL 파일 크기 (캐시 무효화용) |
+| `fileSize` | 원본 JSONL 파일 크기 |
 | `promptCount` | 프롬프트 수 |
 | `toolUseCount` | 도구 사용 횟수 |
 | `firstTimestamp` | 세션 시작 시각 |
@@ -74,12 +74,10 @@ CACHE_DIR=$(${CLAUDE_PLUGIN_ROOT}/cli/target/release/suggest-workflow \
 | `filesMutated[]` | 수정된 파일 경로 |
 | `staticSignals` | 정적 시그널 (밀도, 복잡도 등) |
 
-## 증분 캐싱
+## 캐시 전략
 
-JSONL은 append-only 특성을 가지므로, **파일 크기 비교**로 캐시 유효성을 판단합니다:
-
-- 파일 크기 동일 → 캐시 유효 (파싱 스킵)
-- 파일 크기 변경 → 캐시 무효 (재파싱 + 요약 재생성)
+캐시는 매 실행 시 **전체 재생성**됩니다.
+코드 버전에 따라 분석 로직이 달라질 수 있으므로, 항상 최신 결과를 보장합니다.
 
 ## 옵션
 
@@ -90,3 +88,4 @@ JSONL은 append-only 특성을 가지므로, **파일 크기 비교**로 캐시 
 | `--threshold` | N | 3 | 최소 반복 횟수 |
 | `--top` | N | 10 | 상위 N개 결과 |
 | `--decay` | flag | off | 시간 감쇠 가중치 |
+| `--exclude-words` | WORD,WORD,... | - | 분석에서 제외할 노이즈 단어 (쉼표 구분) |

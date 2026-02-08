@@ -15,10 +15,14 @@ Rust CLI의 빈도 기반 정적 분석을 보완하여, 패턴의 **의도**, *
 ## 핵심 원칙
 
 **Phase 1 (Rust CLI) 이 이미 완료한 것**:
-- 프롬프트 빈도 분석
-- 도구 시퀀스 패턴 탐지
-- BM25 기반 암묵지 클러스터링
-- 세션별 요약 생성
+- 프롬프트 빈도 분석 (suffix normalization 적용)
+- 도구 시퀀스 패턴 탐지 (maximal sequence mining)
+- Multi-query BM25 corpus scoring 기반 암묵지 클러스터링
+- Best-match clustering + 빈도 기반 대표 선정
+- Temporal decay 기반 최신성 반영
+- 구성 가능한 stopwords 필터링
+- Rayon 병렬 세션 파싱
+- 세션별 요약 생성 (매 실행 시 전체 재생성)
 
 **Phase 2 (이 에이전트) 가 추가로 하는 것**:
 - 패턴의 의도와 맥락 이해
@@ -33,7 +37,7 @@ Rust CLI의 빈도 기반 정적 분석을 보완하여, 패턴의 **의도**, *
 ### Step 1: 캐시 생성 및 읽기
 
 ```bash
-# 캐시 생성 (없거나 오래된 경우)
+# 캐시 생성 (매번 전체 재생성으로 최신 결과 보장)
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh
 CACHE_DIR=$(${CLAUDE_PLUGIN_ROOT}/cli/target/release/suggest-workflow \
   --project "$(pwd)" --cache)
