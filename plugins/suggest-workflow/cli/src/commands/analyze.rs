@@ -306,7 +306,7 @@ fn print_text_output(
 
     // Skill/tacit knowledge analysis
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Skill {
-        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config);
+        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, 14.0);
 
         println!("--- Tacit Knowledge Analysis ---\n");
         println!("Detected patterns: {}\n", skill_result.patterns.len());
@@ -414,7 +414,7 @@ fn print_json_output(
     }
 
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Skill {
-        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config);
+        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, 14.0);
         output["tacitKnowledge"] = serde_json::to_value(&skill_result)?;
     }
 

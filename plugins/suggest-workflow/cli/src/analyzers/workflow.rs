@@ -90,8 +90,31 @@ fn find_common_sequences(
         })
         .collect();
 
-    results.sort_by(|a, b| b.count.cmp(&a.count));
-    results
+    // Maximal sequence mining: remove subsequences contained in longer sequences
+    // A shorter sequence is redundant if a longer sequence with >= its count contains it
+    results.sort_by(|a, b| b.tools.len().cmp(&a.tools.len()).then_with(|| b.count.cmp(&a.count)));
+    let mut maximal: Vec<ToolSequence> = Vec::new();
+    for candidate in results {
+        let is_subsequence = maximal.iter().any(|longer| {
+            longer.tools.len() > candidate.tools.len()
+                && longer.count >= candidate.count
+                && is_contiguous_subsequence(&candidate.tools, &longer.tools)
+        });
+        if !is_subsequence {
+            maximal.push(candidate);
+        }
+    }
+
+    maximal.sort_by(|a, b| b.count.cmp(&a.count));
+    maximal
+}
+
+/// Check if `short` is a contiguous subsequence of `long`
+fn is_contiguous_subsequence(short: &[String], long: &[String]) -> bool {
+    if short.len() > long.len() {
+        return false;
+    }
+    long.windows(short.len()).any(|window| window == short)
 }
 
 /// Analyze workflows across multiple sessions

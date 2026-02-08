@@ -200,16 +200,16 @@ fn cluster_normalized(
         .map(|(text, _)| char_bigrams(text))
         .collect();
 
-    // Phase 2: Merge similar groups via precomputed char bigram Jaccard
+    // Phase 2: Merge similar groups via precomputed char bigram Jaccard (best-match)
     let mut clusters: Vec<(usize, Vec<ClusterEntry>)> = Vec::new(); // (original_index, entries)
 
     for (i, (repr_text, group)) in representatives.into_iter().enumerate() {
         let repr_chars_count = repr_text.chars().count();
-        let mut merged = false;
+        let mut best_match: Option<(usize, f64)> = None; // (cluster_position, similarity)
 
         // Short strings (< 4 chars): only exact match (already grouped in Phase 1)
         if repr_chars_count >= 4 {
-            for (cluster_idx, cluster_entries) in clusters.iter_mut() {
+            for (pos, (cluster_idx, _)) in clusters.iter().enumerate() {
                 if precomputed_bigrams[*cluster_idx].is_empty() {
                     continue;
                 }
@@ -218,14 +218,16 @@ fn cluster_normalized(
                     &precomputed_bigrams[*cluster_idx],
                 );
                 if sim >= similarity_threshold {
-                    cluster_entries.extend(group.clone());
-                    merged = true;
-                    break;
+                    if best_match.map_or(true, |(_, best_sim)| sim > best_sim) {
+                        best_match = Some((pos, sim));
+                    }
                 }
             }
         }
 
-        if !merged {
+        if let Some((pos, _)) = best_match {
+            clusters[pos].1.extend(group);
+        } else {
             clusters.push((i, group));
         }
     }
@@ -262,12 +264,28 @@ fn calculate_consistency(timestamps: &[i64]) -> f64 {
     1.0 / (1.0 + cv)
 }
 
+/// Calculate recency score based on the most recent timestamp.
+/// Uses exponential decay: score = exp(-age_days / half_life_days)
+fn calculate_recency(timestamps: &[i64], now_ms: i64, half_life_days: f64) -> f64 {
+    if timestamps.is_empty() || half_life_days <= 0.0 {
+        return 0.0;
+    }
+    let most_recent = timestamps.iter().cloned().max().unwrap_or(0);
+    let age_ms = (now_ms - most_recent).max(0) as f64;
+    let age_days = age_ms / (1000.0 * 60.0 * 60.0 * 24.0);
+    // Exponential decay: half_life_days controls how fast old patterns lose relevance
+    (-age_days * (2.0_f64.ln()) / half_life_days).exp()
+}
+
 fn calculate_confidence(
     count: usize,
     meaningful_count: usize,
     timestamps: &[i64],
     bm25_score: f64,
     pattern_type: &str,
+    decay: bool,
+    now_ms: i64,
+    decay_half_life_days: f64,
 ) -> f64 {
     if count == 0 || meaningful_count == 0 {
         return 0.0;
@@ -278,7 +296,14 @@ fn calculate_confidence(
     let consistency_score = calculate_consistency(timestamps);
     let normalized_bm25 = 1.0 / (1.0 + (-bm25_score / 5.0).exp());
 
-    let base = (frequency_score * 0.4) + (consistency_score * 0.2) + (normalized_bm25 * 0.4);
+    let base = if decay {
+        let recency = calculate_recency(timestamps, now_ms, decay_half_life_days);
+        // With decay: frequency 30%, consistency 15%, BM25 35%, recency 20%
+        (frequency_score * 0.30) + (consistency_score * 0.15) + (normalized_bm25 * 0.35) + (recency * 0.20)
+    } else {
+        (frequency_score * 0.4) + (consistency_score * 0.2) + (normalized_bm25 * 0.4)
+    };
+
     let type_boost = get_type_boost(pattern_type);
 
     (base + type_boost).min(1.0) // Always clamp to [0, 1]
@@ -319,6 +344,8 @@ pub fn analyze_tacit_knowledge(
     threshold: usize,
     top_n: usize,
     depth_config: &DepthConfig,
+    decay: bool,
+    decay_half_life_days: f64,
 ) -> TacitAnalysisResult {
     if entries.is_empty() {
         return TacitAnalysisResult {
@@ -377,27 +404,58 @@ pub fn analyze_tacit_knowledge(
             continue;
         }
 
-        // Use first entry's normalized content as representative
-        let representative = cluster
-            .first()
-            .map(|e| e.normalized_content.clone())
-            .unwrap_or_default();
+        // Use most frequent normalized content as representative
+        let representative = {
+            let mut freq: HashMap<&str, usize> = HashMap::new();
+            for entry in &cluster {
+                *freq.entry(entry.normalized_content.as_str()).or_insert(0) += 1;
+            }
+            freq.into_iter()
+                .max_by_key(|(_, count)| *count)
+                .map(|(text, _)| text.to_string())
+                .unwrap_or_default()
+        };
 
         if representative.trim().is_empty() {
             continue;
         }
 
-        // Multi-query BM25: decompose representative and score all sub-queries
+        // Multi-query BM25: decompose representative and score against corpus
         let decomposed = decompose_query(&representative, depth_config, &bm25_ranker);
         let bm25_score = if decomposed.original.is_empty() {
             0.0
         } else if decomposed.is_decomposed() {
-            bm25_ranker.score_multi_query(
-                &decomposed.all_queries(),
-                depth_config.multi_query_strategy,
-            )
+            // Score each sub-query against corpus and combine
+            let queries = decomposed.all_queries();
+            let scores: Vec<f64> = queries
+                .iter()
+                .filter(|q| !q.is_empty())
+                .map(|q| bm25_ranker.score_against_corpus(q))
+                .collect();
+            if scores.is_empty() {
+                0.0
+            } else {
+                match depth_config.multi_query_strategy {
+                    crate::analyzers::bm25::MultiQueryStrategy::Max => {
+                        scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+                    }
+                    crate::analyzers::bm25::MultiQueryStrategy::Avg => {
+                        scores.iter().sum::<f64>() / scores.len() as f64
+                    }
+                    crate::analyzers::bm25::MultiQueryStrategy::WeightedAvg => {
+                        let mut total_weight = 0.0;
+                        let mut weighted_sum = 0.0;
+                        for (i, &score) in scores.iter().enumerate() {
+                            let weight = 0.6_f64.powi(i as i32);
+                            weighted_sum += score * weight;
+                            total_weight += weight;
+                        }
+                        if total_weight > 0.0 { weighted_sum / total_weight } else { 0.0 }
+                    }
+                }
+            }
         } else {
-            bm25_ranker.score_query(&decomposed.original)
+            bm25_ranker.score_against_corpus(&decomposed.original)
         };
 
         // Classify type using original prompts (seed matching on full text)
@@ -414,12 +472,16 @@ pub fn analyze_tacit_knowledge(
 
         // B5 fix: pass meaningful_count instead of entries.len()
         let timestamps: Vec<i64> = cluster.iter().map(|e| e.timestamp).collect();
+        let now_ms = chrono::Utc::now().timestamp_millis();
         let confidence = calculate_confidence(
             cluster.len(),
             meaningful_count,
             &timestamps,
             bm25_score,
             dominant_type,
+            decay,
+            now_ms,
+            decay_half_life_days,
         );
 
         // B4 fix: use BTreeSet for deterministic example ordering

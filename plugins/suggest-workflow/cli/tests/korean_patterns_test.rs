@@ -183,7 +183,7 @@ fn test_clustering_similar_prompts_group_together() {
         make_entry("타입 명시하세요", 5000),
     ];
 
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 
     assert!(!result.patterns.is_empty(), "Should find patterns");
 
@@ -202,7 +202,7 @@ fn test_clustering_different_topics_separate() {
         make_entry("에러를 처리하세요", 6000),
     ];
 
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 
     let pattern_texts: Vec<String> = result.patterns.iter()
         .map(|p| p.pattern.clone())
@@ -229,7 +229,7 @@ fn test_type_classification_directive() {
         make_entry("타입 명시해주세요", 5000),
     ];
 
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 
     let has_directive = result.patterns.iter().any(|p| {
         p.pattern_type == "directive" ||
@@ -251,7 +251,7 @@ fn test_type_classification_convention() {
         make_entry("snake_case로 작성해주세요", 5000),
     ];
 
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 
     let has_convention = result.patterns.iter().any(|p| {
         p.pattern_type == "convention" ||
@@ -272,7 +272,7 @@ fn test_type_classification_preference() {
         make_entry("async/await가 좋아요", 5000),
     ];
 
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 
     let has_preference = result.patterns.iter().any(|p| {
         p.pattern_type == "preference" ||
@@ -294,7 +294,7 @@ fn test_type_classification_correction() {
         make_entry("잘못됐어 다시 해줘", 6000),
     ];
 
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 
     if result.patterns.is_empty() {
         assert!(result.total == entries.len(), "Should process all entries");
@@ -324,7 +324,7 @@ fn test_full_pipeline_korean_prompts() {
         make_entry("코드 리뷰해줘", 10000),
     ];
 
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 
     assert!(result.patterns.len() > 0, "Should produce patterns");
     assert_eq!(result.total, entries.len(), "Should count all entries");
@@ -353,7 +353,7 @@ fn test_full_pipeline_with_bm25_ranking() {
         make_entry("에러를 처리하세요", 8000),
     ];
 
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 
     assert!(!result.patterns.is_empty(), "Should find patterns");
 
@@ -378,7 +378,7 @@ fn test_full_pipeline_confidence_calculation() {
         make_entry("에러 처리해주세요", 5000),
     ];
 
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 
     if result.patterns.len() >= 2 {
         let higher_count_pattern = result.patterns.iter()
@@ -406,7 +406,7 @@ fn test_full_pipeline_respects_min_threshold() {
         make_entry("코드 리뷰해줘", 4000),
     ];
 
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 
     for p in &result.patterns {
         assert!(
@@ -432,7 +432,7 @@ fn test_full_pipeline_respects_max_patterns() {
     ];
 
     let max_patterns = 3;
-    let result = analyze_tacit_knowledge(&entries, 2, max_patterns, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, max_patterns, &default_config(), false, 14.0);
 
     assert!(
         result.patterns.len() <= max_patterns,
@@ -455,7 +455,7 @@ fn test_depth_narrow_produces_results() {
     ];
 
     let config = AnalysisDepth::Narrow.resolve();
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &config);
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &config, false, 14.0);
 
     assert_eq!(result.total, entries.len());
     // Narrow has higher similarity threshold so may find fewer patterns
@@ -473,8 +473,8 @@ fn test_depth_wide_finds_more_patterns() {
         make_entry("주석 추가해줘", 7000),
     ];
 
-    let narrow = analyze_tacit_knowledge(&entries, 2, 10, &AnalysisDepth::Narrow.resolve());
-    let wide = analyze_tacit_knowledge(&entries, 2, 10, &AnalysisDepth::Wide.resolve());
+    let narrow = analyze_tacit_knowledge(&entries, 2, 10, &AnalysisDepth::Narrow.resolve(), false, 14.0);
+    let wide = analyze_tacit_knowledge(&entries, 2, 10, &AnalysisDepth::Wide.resolve(), false, 14.0);
 
     // Wide (lower similarity threshold) should merge more clusters → potentially fewer but larger patterns
     // Or with lower thresholds, discover more. Just verify both work.
@@ -524,7 +524,7 @@ fn test_byte_safety_mixed_unicode() {
         make_entry("🔥🔥🔥", 5000),
     ];
 
-    let _result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let _result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 }
 
 #[test]
@@ -535,7 +535,7 @@ fn test_byte_safety_zero_width_chars() {
         make_entry("타입을 명시해줘", 3000),
     ];
 
-    let _result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let _result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 }
 
 #[test]
@@ -547,7 +547,7 @@ fn test_byte_safety_long_korean_text() {
         make_entry("에러 처리해줘", 3000),
     ];
 
-    let _result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let _result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 }
 
 // ============================================================================
@@ -557,7 +557,7 @@ fn test_byte_safety_long_korean_text() {
 #[test]
 fn test_edge_case_empty_input() {
     let entries: Vec<HistoryEntry> = vec![];
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 
     assert_eq!(result.total, 0, "Should handle empty input");
     assert!(result.patterns.is_empty(), "Should produce no patterns for empty input");
@@ -569,7 +569,7 @@ fn test_edge_case_single_prompt() {
         make_entry("타입을 명시해줘", 1000),
     ];
 
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 
     assert_eq!(result.total, 1, "Should count single entry");
     assert!(
@@ -588,7 +588,7 @@ fn test_edge_case_all_confirmation_prompts() {
         make_entry("확인", 5000),
     ];
 
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 
     assert_eq!(result.total, entries.len());
     for p in &result.patterns {
@@ -606,7 +606,7 @@ fn test_edge_case_identical_prompts() {
         make_entry("타입을 명시해줘", 5000),
     ];
 
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
 
     assert!(!result.patterns.is_empty(), "Should find pattern from identical prompts");
 
@@ -626,7 +626,7 @@ fn test_edge_case_very_short_prompts() {
         make_entry("주석", 4000),
     ];
 
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
     assert_eq!(result.total, entries.len());
 }
 
@@ -640,7 +640,7 @@ fn test_edge_case_prompts_with_only_whitespace() {
         make_entry("에러 처리해줘", 5000),
     ];
 
-    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config());
+    let result = analyze_tacit_knowledge(&entries, 2, 10, &default_config(), false, 14.0);
     assert_eq!(result.total, entries.len());
 }
 
@@ -652,8 +652,8 @@ fn test_edge_case_similarity_threshold_variation() {
         make_entry("에러 처리해줘", 3000),
     ];
 
-    let result_high = analyze_tacit_knowledge(&entries, 2, 10, &config_with_similarity(0.9));
-    let result_low = analyze_tacit_knowledge(&entries, 2, 10, &config_with_similarity(0.1));
+    let result_high = analyze_tacit_knowledge(&entries, 2, 10, &config_with_similarity(0.9), false, 14.0);
+    let result_low = analyze_tacit_knowledge(&entries, 2, 10, &config_with_similarity(0.1), false, 14.0);
 
     // Higher similarity threshold = stricter clustering = more groups
     // Lower similarity threshold = more aggressive merging = fewer groups

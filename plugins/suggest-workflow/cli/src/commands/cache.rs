@@ -377,7 +377,7 @@ fn generate_analysis_snapshot(
 ) -> Result<()> {
     let workflow_result = analyze_workflows(sessions, threshold, top, 2, 5);
     let prompt_result = analyze_prompts(history_entries, decay, 14.0);
-    let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config);
+    let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, 14.0);
 
     let snapshot = serde_json::json!({
         "analyzedAt": Utc::now().to_rfc3339(),
