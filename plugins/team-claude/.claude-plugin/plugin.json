@@ -4,5 +4,5 @@
   },
   "description": "팀 클루드: 자동화 워크플로우, PSM 병렬 세션, Contract 기반 설계, RALPH Loop",
   "name": "team-claude",
-  "version": "0.8.2"
+  "version": "0.9.0"
 }
