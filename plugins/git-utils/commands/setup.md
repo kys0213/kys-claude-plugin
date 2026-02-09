@@ -174,22 +174,27 @@ hook 설치 범위를 선택하세요.
 
 ## Step 5: Hook 스크립트 생성
 
+> Step 1에서 감지한 기본 브랜치(`DEFAULT_BRANCH`)를 hook 스크립트에 bake-in합니다.
+> 기본 브랜치가 변경되면 `/setup` 또는 `/auto-commit-config`를 재실행하세요.
+
 ### 프로젝트 범위 선택 시
 
 ```bash
 # 프로젝트 절대경로
 PROJECT_DIR=$(pwd)
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+# Step 1에서 감지한 기본 브랜치
+DEFAULT_BRANCH=$("${PLUGIN_ROOT}/scripts/detect-default-branch.sh")
 
 # 디렉토리 생성
 mkdir -p .claude/hooks
 
-# template → placeholder 치환 → 프로젝트에 생성
+# Auto-Commit Hook
 sed \
   -e "s|{project_dir}|$PROJECT_DIR|g" \
   -e "s|{commit_script_path}|$PLUGIN_ROOT/scripts/commit.sh|g" \
-  -e "s|{detect_default_branch_path}|$PLUGIN_ROOT/scripts/detect-default-branch.sh|g" \
   -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
+  -e "s|{default_branch}|$DEFAULT_BRANCH|g" \
   "${PLUGIN_ROOT}/scripts/auto-commit-hook.sh" > .claude/hooks/auto-commit-hook.sh
 
 chmod +x .claude/hooks/auto-commit-hook.sh
@@ -199,17 +204,18 @@ chmod +x .claude/hooks/auto-commit-hook.sh
 
 ```bash
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+DEFAULT_BRANCH=$("${PLUGIN_ROOT}/scripts/detect-default-branch.sh")
 
 # 디렉토리 생성
 mkdir -p ~/.claude/hooks
 
-# template → placeholder 치환 → 사용자 디렉토리에 생성
+# Auto-Commit Hook
 # PROJECT_DIR은 동적 변수로 치환 (single quote로 escape)
 sed \
   -e 's|{project_dir}|${CLAUDE_PROJECT_DIR:-.}|g' \
   -e "s|{commit_script_path}|$PLUGIN_ROOT/scripts/commit.sh|g" \
-  -e "s|{detect_default_branch_path}|$PLUGIN_ROOT/scripts/detect-default-branch.sh|g" \
   -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
+  -e "s|{default_branch}|$DEFAULT_BRANCH|g" \
   "${PLUGIN_ROOT}/scripts/auto-commit-hook.sh" > ~/.claude/hooks/auto-commit-hook.sh
 
 chmod +x ~/.claude/hooks/auto-commit-hook.sh
@@ -217,17 +223,15 @@ chmod +x ~/.claude/hooks/auto-commit-hook.sh
 
 ## Step 5-1: Default Branch Guard 스크립트 생성
 
-> Default Branch Guard를 선택한 경우에만 실행합니다. 범위는 Step 4에서 선택한 값을 공유합니다.
+> Default Branch Guard를 선택한 경우에만 실행합니다. 범위와 `DEFAULT_BRANCH`는 Step 5에서 공유합니다.
 
 ### 프로젝트 범위 선택 시
 
 ```bash
-PROJECT_DIR=$(pwd)
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
-
 sed \
   -e "s|{project_dir}|$PROJECT_DIR|g" \
   -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
+  -e "s|{default_branch}|$DEFAULT_BRANCH|g" \
   "${PLUGIN_ROOT}/scripts/default-branch-guard-hook.sh" > .claude/hooks/default-branch-guard-hook.sh
 
 chmod +x .claude/hooks/default-branch-guard-hook.sh
@@ -236,11 +240,10 @@ chmod +x .claude/hooks/default-branch-guard-hook.sh
 ### 사용자 범위 선택 시
 
 ```bash
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
-
 sed \
   -e 's|{project_dir}|${CLAUDE_PROJECT_DIR:-.}|g' \
   -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
+  -e "s|{default_branch}|$DEFAULT_BRANCH|g" \
   "${PLUGIN_ROOT}/scripts/default-branch-guard-hook.sh" > ~/.claude/hooks/default-branch-guard-hook.sh
 
 chmod +x ~/.claude/hooks/default-branch-guard-hook.sh

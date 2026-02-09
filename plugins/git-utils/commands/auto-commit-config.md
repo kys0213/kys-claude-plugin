@@ -171,12 +171,13 @@ hook 스크립트를 최신 template으로 재생성합니다.
 ```bash
 PROJECT_DIR=$(pwd)
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+DEFAULT_BRANCH=$("${PLUGIN_ROOT}/scripts/detect-default-branch.sh")
 
 sed \
   -e "s|{project_dir}|$PROJECT_DIR|g" \
   -e "s|{commit_script_path}|$PLUGIN_ROOT/scripts/commit.sh|g" \
-  -e "s|{detect_default_branch_path}|$PLUGIN_ROOT/scripts/detect-default-branch.sh|g" \
   -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
+  -e "s|{default_branch}|$DEFAULT_BRANCH|g" \
   "${PLUGIN_ROOT}/scripts/auto-commit-hook.sh" > .claude/hooks/auto-commit-hook.sh
 
 chmod +x .claude/hooks/auto-commit-hook.sh
@@ -191,12 +192,13 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
 
 ```bash
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+DEFAULT_BRANCH=$("${PLUGIN_ROOT}/scripts/detect-default-branch.sh")
 
 sed \
   -e 's|{project_dir}|${CLAUDE_PROJECT_DIR:-.}|g' \
   -e "s|{commit_script_path}|$PLUGIN_ROOT/scripts/commit.sh|g" \
-  -e "s|{detect_default_branch_path}|$PLUGIN_ROOT/scripts/detect-default-branch.sh|g" \
   -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
+  -e "s|{default_branch}|$DEFAULT_BRANCH|g" \
   "${PLUGIN_ROOT}/scripts/auto-commit-hook.sh" > ~/.claude/hooks/auto-commit-hook.sh
 
 chmod +x ~/.claude/hooks/auto-commit-hook.sh
@@ -213,12 +215,10 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
 **프로젝트 범위:**
 
 ```bash
-PROJECT_DIR=$(pwd)
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
-
 sed \
   -e "s|{project_dir}|$PROJECT_DIR|g" \
   -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
+  -e "s|{default_branch}|$DEFAULT_BRANCH|g" \
   "${PLUGIN_ROOT}/scripts/default-branch-guard-hook.sh" > .claude/hooks/default-branch-guard-hook.sh
 
 chmod +x .claude/hooks/default-branch-guard-hook.sh
@@ -232,11 +232,10 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
 **사용자 범위:**
 
 ```bash
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
-
 sed \
   -e 's|{project_dir}|${CLAUDE_PROJECT_DIR:-.}|g' \
   -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
+  -e "s|{default_branch}|$DEFAULT_BRANCH|g" \
   "${PLUGIN_ROOT}/scripts/default-branch-guard-hook.sh" > ~/.claude/hooks/default-branch-guard-hook.sh
 
 chmod +x ~/.claude/hooks/default-branch-guard-hook.sh

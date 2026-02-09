@@ -9,8 +9,8 @@ INPUT=$(cat)
 # ===== Settings (baked in at setup time) =====
 PROJECT_DIR="{project_dir}"
 COMMIT_SCRIPT="{commit_script_path}"
-DEFAULT_BRANCH_SCRIPT="{detect_default_branch_path}"
 CREATE_BRANCH_SCRIPT="{create_branch_script_path}"
+DEFAULT_BRANCH="{default_branch}"
 # =============================================
 
 cd "$PROJECT_DIR" 2>/dev/null || exit 0
@@ -49,7 +49,6 @@ fi
 CHANGED_COUNT=$(echo "$CHANGES" | wc -l | tr -d ' ')
 
 # Guard 5: 기본 브랜치 확인 → 변경사항이 있으면 브랜치 생성 제안
-DEFAULT_BRANCH=$("$DEFAULT_BRANCH_SCRIPT" 2>/dev/null || { git show-ref --verify --quiet refs/heads/master 2>/dev/null && echo master || echo main; })
 if [ "$CURRENT_BRANCH" = "$DEFAULT_BRANCH" ]; then
   echo "[Auto-Commit] ⚠ 기본 브랜치($DEFAULT_BRANCH)에서 ${CHANGED_COUNT}개 파일이 변경되었습니다." >&2
   echo "기본 브랜치에 직접 커밋하는 것은 권장하지 않습니다." >&2

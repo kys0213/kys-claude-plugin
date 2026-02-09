@@ -9,6 +9,7 @@ INPUT=$(cat)
 # ===== Settings (baked in at setup time) =====
 PROJECT_DIR="{project_dir}"
 CREATE_BRANCH_SCRIPT="{create_branch_script_path}"
+DEFAULT_BRANCH="{default_branch}"
 # =============================================
 
 cd "$PROJECT_DIR" 2>/dev/null || exit 0
@@ -24,20 +25,6 @@ GIT_DIR=$(git rev-parse --git-dir 2>/dev/null) || exit 0
 # Guard 3: detached HEAD → 패스
 CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || true)
 [ -z "$CURRENT_BRANCH" ] && exit 0
-
-# Guard 4: 기본 브랜치 감지 (네트워크 호출 없이 로컬만 사용)
-DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
-if [ -z "$DEFAULT_BRANCH" ]; then
-  if git show-ref --verify --quiet refs/remotes/origin/main 2>/dev/null; then
-    DEFAULT_BRANCH="main"
-  elif git show-ref --verify --quiet refs/remotes/origin/develop 2>/dev/null; then
-    DEFAULT_BRANCH="develop"
-  elif git show-ref --verify --quiet refs/remotes/origin/master 2>/dev/null; then
-    DEFAULT_BRANCH="master"
-  fi
-fi
-# 감지 실패 시 패스 (차단하지 않음)
-[ -z "$DEFAULT_BRANCH" ] && exit 0
 
 # 기본 브랜치가 아니면 패스
 [ "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ] && exit 0
