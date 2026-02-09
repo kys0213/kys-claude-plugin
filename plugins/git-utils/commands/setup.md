@@ -54,13 +54,15 @@ git-workflow를 설정합니다.
 옵션:
 1. **GitHub 환경 설정** - GH_HOST, 인증 등 gh CLI 환경변수 (Enterprise 사용 시 필수)
 2. **Auto-Commit Hook** - 세션 종료 시 미커밋 변경사항 감지 및 커밋 요청
-3. **모두 설정 (Recommended)** - 위 항목 모두 설정
+3. **Default Branch Guard** - 기본 브랜치에서 파일 수정 시 즉시 브랜치 생성 제안 (PreToolUse)
+4. **모두 설정 (Recommended)** - 위 항목 모두 설정
 
-> 향후 추가 기능(예: pre-push 검증, branch 보호 등)이 이 단계에서 선택지로 추가됩니다.
+> 향후 추가 기능(예: pre-push 검증 등)이 이 단계에서 선택지로 추가됩니다.
 
 선택에 따라 해당 섹션만 실행합니다:
 - GitHub 환경 설정 → Step 3으로
 - Auto-Commit Hook → Step 4로
+- Default Branch Guard → Step 4로 (범위 선택 공유)
 - 모두 설정 → Step 3 → Step 4 순서로
 
 ---
@@ -165,12 +167,15 @@ hook 설치 범위를 선택하세요.
 | 항목 | 프로젝트 | 사용자 |
 |------|----------|--------|
 | settings.json 위치 | `.claude/settings.json` | `~/.claude/settings.json` |
-| hook 스크립트 위치 | `.claude/hooks/auto-commit-hook.sh` | `~/.claude/hooks/auto-commit-hook.sh` |
+| hook 스크립트 위치 | `.claude/hooks/` | `~/.claude/hooks/` |
 | PROJECT_DIR | 절대경로 bake-in | `${CLAUDE_PROJECT_DIR:-.}` (동적) |
 | 팀 공유 | git commit으로 공유 가능 | 불가 (개인 설정) |
 | 적용 범위 | 이 프로젝트만 | 모든 프로젝트 (git repo인 경우만 동작) |
 
 ## Step 5: Hook 스크립트 생성
+
+> **프로젝트 범위**: Step 1에서 감지한 기본 브랜치를 bake-in합니다. 변경 시 `/setup` 재실행.
+> **사용자 범위**: 기본 브랜치를 비워두고 런타임에 프로젝트별로 감지합니다.
 
 ### 프로젝트 범위 선택 시
 
@@ -178,15 +183,18 @@ hook 설치 범위를 선택하세요.
 # 프로젝트 절대경로
 PROJECT_DIR=$(pwd)
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
+# Step 1에서 감지한 기본 브랜치를 bake-in
+DEFAULT_BRANCH=$("${PLUGIN_ROOT}/scripts/detect-default-branch.sh")
 
 # 디렉토리 생성
 mkdir -p .claude/hooks
 
-# template → placeholder 치환 → 프로젝트에 생성
+# Auto-Commit Hook
 sed \
   -e "s|{project_dir}|$PROJECT_DIR|g" \
   -e "s|{commit_script_path}|$PLUGIN_ROOT/scripts/commit.sh|g" \
-  -e "s|{detect_default_branch_path}|$PLUGIN_ROOT/scripts/detect-default-branch.sh|g" \
+  -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
+  -e "s|{default_branch}|$DEFAULT_BRANCH|g" \
   "${PLUGIN_ROOT}/scripts/auto-commit-hook.sh" > .claude/hooks/auto-commit-hook.sh
 
 chmod +x .claude/hooks/auto-commit-hook.sh
@@ -200,20 +208,51 @@ PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
 # 디렉토리 생성
 mkdir -p ~/.claude/hooks
 
-# template → placeholder 치환 → 사용자 디렉토리에 생성
-# PROJECT_DIR은 동적 변수로 치환 (single quote로 escape)
+# Auto-Commit Hook
+# PROJECT_DIR은 동적 변수, DEFAULT_BRANCH는 비워서 런타임 감지
 sed \
   -e 's|{project_dir}|${CLAUDE_PROJECT_DIR:-.}|g' \
   -e "s|{commit_script_path}|$PLUGIN_ROOT/scripts/commit.sh|g" \
-  -e "s|{detect_default_branch_path}|$PLUGIN_ROOT/scripts/detect-default-branch.sh|g" \
+  -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
+  -e "s|{default_branch}||g" \
   "${PLUGIN_ROOT}/scripts/auto-commit-hook.sh" > ~/.claude/hooks/auto-commit-hook.sh
 
 chmod +x ~/.claude/hooks/auto-commit-hook.sh
 ```
 
-## Step 6: settings.json에 Hook 등록
+## Step 5-1: Default Branch Guard 스크립트 생성
+
+> Default Branch Guard를 선택한 경우에만 실행합니다. 범위는 Step 5에서 공유합니다.
 
 ### 프로젝트 범위 선택 시
+
+```bash
+sed \
+  -e "s|{project_dir}|$PROJECT_DIR|g" \
+  -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
+  -e "s|{default_branch}|$DEFAULT_BRANCH|g" \
+  "${PLUGIN_ROOT}/scripts/default-branch-guard-hook.sh" > .claude/hooks/default-branch-guard-hook.sh
+
+chmod +x .claude/hooks/default-branch-guard-hook.sh
+```
+
+### 사용자 범위 선택 시
+
+```bash
+sed \
+  -e 's|{project_dir}|${CLAUDE_PROJECT_DIR:-.}|g' \
+  -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
+  -e "s|{default_branch}||g" \
+  "${PLUGIN_ROOT}/scripts/default-branch-guard-hook.sh" > ~/.claude/hooks/default-branch-guard-hook.sh
+
+chmod +x ~/.claude/hooks/default-branch-guard-hook.sh
+```
+
+## Step 6: settings.json에 Hook 등록
+
+### Auto-Commit Hook 등록
+
+#### 프로젝트 범위 선택 시
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
@@ -222,13 +261,36 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
   --timeout=10
 ```
 
-### 사용자 범위 선택 시
+#### 사용자 범위 선택 시
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
   Stop "*" \
   "bash $HOME/.claude/hooks/auto-commit-hook.sh" \
   --timeout=10 \
+  --project-dir="$HOME"
+```
+
+### Default Branch Guard 등록
+
+> Default Branch Guard를 선택한 경우에만 실행합니다.
+
+#### 프로젝트 범위 선택 시
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
+  PreToolUse "Write|Edit" \
+  "bash ./.claude/hooks/default-branch-guard-hook.sh" \
+  --timeout=5
+```
+
+#### 사용자 범위 선택 시
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
+  PreToolUse "Write|Edit" \
+  "bash $HOME/.claude/hooks/default-branch-guard-hook.sh" \
+  --timeout=5 \
   --project-dir="$HOME"
 ```
 
@@ -242,17 +304,22 @@ helper 스크립트가 처리하는 내용:
 ### 프로젝트 범위
 
 ```
-auto-commit hook이 프로젝트에 설정되었습니다!
+hook이 프로젝트에 설정되었습니다!
 
 생성된 파일:
-├─ .claude/hooks/auto-commit-hook.sh (Stop hook 스크립트)
+├─ .claude/hooks/auto-commit-hook.sh (Stop hook - 선택 시)
+├─ .claude/hooks/default-branch-guard-hook.sh (PreToolUse hook - 선택 시)
 └─ .claude/settings.json (hook 등록)
 
-동작 방식:
+Auto-Commit Hook:
 ├─ 세션 종료 시 미커밋 변경사항 감지
-├─ 변경사항 있으면 커밋 요청 후 재시도
-├─ 기본 브랜치({default_branch})에서는 건너뜀
+├─ feature 브랜치: 변경사항 있으면 커밋 요청 후 재시도
+├─ 기본 브랜치({default_branch}): 변경사항 있으면 브랜치 생성 제안
 └─ rebase/merge/conflict/non-git 상태에서는 건너뜀
+
+Default Branch Guard:
+├─ Write/Edit 시 기본 브랜치 감지 → 즉시 브랜치 생성 제안
+└─ 작업 시작 전 조기 차단으로 안전한 워크플로우 보장
 
 설정을 변경하려면 /auto-commit-config를 실행하세요.
 
@@ -262,18 +329,23 @@ auto-commit hook이 프로젝트에 설정되었습니다!
 ### 사용자 범위
 
 ```
-auto-commit hook이 사용자 설정에 등록되었습니다!
+hook이 사용자 설정에 등록되었습니다!
 
 생성된 파일:
-├─ ~/.claude/hooks/auto-commit-hook.sh (Stop hook 스크립트)
+├─ ~/.claude/hooks/auto-commit-hook.sh (Stop hook - 선택 시)
+├─ ~/.claude/hooks/default-branch-guard-hook.sh (PreToolUse hook - 선택 시)
 └─ ~/.claude/settings.json (hook 등록)
 
-동작 방식:
+Auto-Commit Hook:
 ├─ 모든 프로젝트의 세션 종료 시 미커밋 변경사항 감지
-├─ 변경사항 있으면 커밋 요청 후 재시도
-├─ 기본 브랜치에서는 건너뜀
+├─ feature 브랜치: 변경사항 있으면 커밋 요청 후 재시도
+├─ 기본 브랜치: 변경사항 있으면 브랜치 생성 제안
 ├─ git 저장소가 아닌 프로젝트에서는 자동 건너뜀
 └─ rebase/merge/conflict 상태에서는 건너뜀
+
+Default Branch Guard:
+├─ Write/Edit 시 기본 브랜치 감지 → 즉시 브랜치 생성 제안
+└─ 작업 시작 전 조기 차단으로 안전한 워크플로우 보장
 
 설정을 변경하려면 /auto-commit-config를 실행하세요.
 ```
@@ -283,8 +355,9 @@ auto-commit hook이 사용자 설정에 등록되었습니다!
 이미 hook이 설치된 경우 (프로젝트 또는 사용자 범위):
 
 ```
-기존 auto-commit hook이 발견되었습니다.
-위치: {detected_path}
+기존 hook이 발견되었습니다.
+├─ auto-commit-hook.sh: {detected_path or "없음"}
+└─ default-branch-guard-hook.sh: {detected_path or "없음"}
 
 옵션:
 1. 덮어쓰기 - 최신 설정으로 재생성
@@ -303,19 +376,20 @@ auto-commit hook이 사용자 설정에 등록되었습니다!
 └─ 기본 브랜치: main
 
 어떤 기능을 설정하시겠습니까?
-[Auto-Commit] [취소]
+[Auto-Commit] [Default Branch Guard] [모두 설정] [취소]
 
-> Auto-Commit 선택
+> 모두 설정 선택
 
 hook 설치 범위를 선택하세요.
 [프로젝트 (Recommended)] [사용자]
 
 > 프로젝트 선택
 
-auto-commit hook이 프로젝트에 설정되었습니다!
+hook이 프로젝트에 설정되었습니다!
 
 생성된 파일:
 ├─ .claude/hooks/auto-commit-hook.sh
+├─ .claude/hooks/default-branch-guard-hook.sh
 └─ .claude/settings.json
 
 설정을 변경하려면 /auto-commit-config를 실행하세요.

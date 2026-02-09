@@ -369,10 +369,34 @@ const config = { timeout: 5000, retries: 3 };
 2. fallback: `chore: auto-commit session changes`
 
 ### 제외 조건
-- 기본 브랜치(main/master)에서는 절대 커밋하지 않음
+- 기본 브랜치(main/master)에서는 브랜치 생성을 먼저 제안 (직접 커밋 금지)
 - .env, credentials, *.key 등 민감 파일은 커밋하지 않음
 - detached HEAD, rebase/merge 진행 중에는 커밋하지 않음
 - conflict이 존재하면 커밋하지 않음
 
 ### Stop Hook 루프 동작
+
+**feature 브랜치:**
 hook이 block → Claude가 stderr 메시지를 읽음 → commit.sh로 커밋 → 재시도 시 hook pass
+
+**기본 브랜치 (main/master):**
+hook이 block → Claude가 stderr 메시지를 읽음 → 새 브랜치 생성 제안 → 브랜치 이동 후 커밋 → 재시도 시 hook pass
+
+---
+
+## Default Branch Guard (PreToolUse Hook)
+
+기본 브랜치에서 Write/Edit 도구 사용 시 **즉시 차단**하고 브랜치 생성을 제안합니다.
+Stop Hook은 세션 종료 시점의 안전망이고, Branch Guard는 **작업 시작 전** 조기 차단입니다.
+
+### 동작 방식
+1. Write 또는 Edit 도구 호출 시 PreToolUse hook 실행
+2. 현재 브랜치가 기본 브랜치(main/master)인지 확인
+3. 기본 브랜치이면 exit 2로 도구 실행 차단
+4. Claude가 stderr 메시지를 읽고 `create-branch.sh`로 새 브랜치 생성
+5. 브랜치 이동 후 재시도 시 hook pass
+
+### 특징
+- 네트워크 호출 없이 로컬 캐시만 사용 (빠름)
+- rebase/merge/detached HEAD 상태에서는 건너뜀
+- 기본 브랜치 감지 실패 시 차단하지 않음 (안전)

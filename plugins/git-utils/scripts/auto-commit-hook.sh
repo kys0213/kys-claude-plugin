@@ -9,13 +9,29 @@ INPUT=$(cat)
 # ===== Settings (baked in at setup time) =====
 PROJECT_DIR="{project_dir}"
 COMMIT_SCRIPT="{commit_script_path}"
-DEFAULT_BRANCH_SCRIPT="{detect_default_branch_path}"
+CREATE_BRANCH_SCRIPT="{create_branch_script_path}"
+DEFAULT_BRANCH="{default_branch}"
 # =============================================
 
 cd "$PROJECT_DIR" 2>/dev/null || exit 0
 
 # Guard 1: git repo 확인
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
+
+# DEFAULT_BRANCH가 비어있으면 런타임 감지 (사용자 범위: 프로젝트마다 다를 수 있음)
+if [ -z "$DEFAULT_BRANCH" ]; then
+  DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+  if [ -z "$DEFAULT_BRANCH" ]; then
+    if git show-ref --verify --quiet refs/remotes/origin/main 2>/dev/null; then
+      DEFAULT_BRANCH="main"
+    elif git show-ref --verify --quiet refs/remotes/origin/develop 2>/dev/null; then
+      DEFAULT_BRANCH="develop"
+    elif git show-ref --verify --quiet refs/remotes/origin/master 2>/dev/null; then
+      DEFAULT_BRANCH="master"
+    fi
+  fi
+  [ -z "$DEFAULT_BRANCH" ] && exit 0
+fi
 
 # Guard 2: 특수 상태 확인 (rebase/merge/conflict)
 GIT_DIR=$(git rev-parse --git-dir 2>/dev/null) || exit 0
@@ -39,21 +55,29 @@ if [ -z "$CURRENT_BRANCH" ]; then
   exit 0
 fi
 
-# Guard 4: 기본 브랜치 확인
-DEFAULT_BRANCH=$("$DEFAULT_BRANCH_SCRIPT" 2>/dev/null || { git show-ref --verify --quiet refs/heads/master 2>/dev/null && echo master || echo main; })
-if [ "$CURRENT_BRANCH" = "$DEFAULT_BRANCH" ]; then
-  echo "[Auto-Commit] 기본 브랜치($DEFAULT_BRANCH)에서는 자동 커밋을 건너뜁니다." >&2
-  exit 0
-fi
-
-# Guard 5: 변경사항 확인
+# Guard 4: 변경사항 확인
 CHANGES=$(git status --porcelain 2>/dev/null || true)
 if [ -z "$CHANGES" ]; then
   exit 0
 fi
 
-# 변경사항 있음 → 커밋 요청 (blocking)
 CHANGED_COUNT=$(echo "$CHANGES" | wc -l | tr -d ' ')
+
+# Guard 5: 기본 브랜치 확인 → 변경사항이 있으면 브랜치 생성 제안
+if [ "$CURRENT_BRANCH" = "$DEFAULT_BRANCH" ]; then
+  echo "[Auto-Commit] ⚠ 기본 브랜치($DEFAULT_BRANCH)에서 ${CHANGED_COUNT}개 파일이 변경되었습니다." >&2
+  echo "기본 브랜치에 직접 커밋하는 것은 권장하지 않습니다." >&2
+  echo "" >&2
+  echo "새 브랜치를 먼저 생성해주세요:" >&2
+  echo "  git stash && $CREATE_BRANCH_SCRIPT <branch-name> && git stash pop" >&2
+  echo "" >&2
+  echo "예시:" >&2
+  echo "  git stash && $CREATE_BRANCH_SCRIPT feat/my-feature && git stash pop" >&2
+  echo "  git stash && $CREATE_BRANCH_SCRIPT fix/bug-fix && git stash pop" >&2
+  exit 2
+fi
+
+# 변경사항 있음 (feature 브랜치) → 커밋 요청 (blocking)
 echo "[Auto-Commit] ${CHANGED_COUNT}개 파일에 미커밋 변경사항이 있습니다." >&2
 echo "git add -u && $COMMIT_SCRIPT <type> <description> 으로 커밋 후 종료해주세요." >&2
 exit 2
