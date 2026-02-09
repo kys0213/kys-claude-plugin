@@ -8,22 +8,6 @@ use crate::analyzers::query_decomposer::decompose_query;
 use crate::analyzers::stopwords::StopwordSet;
 use crate::tokenizer::KoreanTokenizer;
 
-// --- Type seed keywords (minimal hardcoding) ---
-
-const TYPE_SEEDS: &[(&str, &[&str])] = &[
-    ("directive",  &["항상", "반드시", "무조건", "절대", "꼭", "always", "must", "never"]),
-    ("convention", &["컨벤션", "규칙", "스타일", "포맷", "convention", "standard"]),
-    ("correction", &["말고", "대신", "아니라", "아니야", "틀렸", "instead"]),
-    ("preference", &["좋아", "선호", "나아", "prefer", "better"]),
-];
-
-const TYPE_BOOST: &[(&str, f64)] = &[
-    ("directive", 0.10),
-    ("convention", 0.08),
-    ("correction", 0.06),
-    ("preference", 0.05),
-];
-
 // --- Tokenizer ---
 
 static KOREAN_TOKENIZER: LazyLock<Option<KoreanTokenizer>> = LazyLock::new(|| {
@@ -42,72 +26,7 @@ struct ClusterEntry {
     timestamp: i64,
 }
 
-// --- Boundary matching for seed keywords ---
-
-/// Check if a character is a word boundary (whitespace or any Unicode punctuation).
-fn is_boundary_char(c: char) -> bool {
-    c.is_whitespace() || c.is_ascii_punctuation() || unicode_punctuation(c)
-}
-
-/// Check Unicode General_Category for punctuation beyond ASCII.
-fn unicode_punctuation(c: char) -> bool {
-    matches!(c,
-        '\u{2000}'..='\u{206F}' |  // General Punctuation (…·†‡, hyphens, dashes, bullets)
-        '\u{3000}'..='\u{303F}' |  // CJK Symbols and Punctuation (。、「」etc.)
-        '\u{FE30}'..='\u{FE4F}' |  // CJK Compatibility Forms
-        '\u{FF01}'..='\u{FF0F}' |  // Fullwidth punctuation (！～／)
-        '\u{FF1A}'..='\u{FF20}' |  // Fullwidth colon to @
-        '\u{FF3B}'..='\u{FF40}' |  // Fullwidth brackets
-        '\u{FF5B}'..='\u{FF65}'    // Fullwidth braces, halfwidth forms
-    )
-}
-
-/// Check if seed appears at a word boundary in text.
-/// For Korean: at least one side must be whitespace/punctuation/string boundary.
-/// This avoids false positives from substring matches.
-fn contains_at_boundary(text: &str, seed: &str) -> bool {
-    let text_lower = text.to_lowercase();
-    let seed_lower = seed.to_lowercase();
-    let mut search_from = 0;
-    while let Some(pos) = text_lower[search_from..].find(&seed_lower) {
-        let abs_pos = search_from + pos;
-        let before_ok = abs_pos == 0 || text_lower[..abs_pos]
-            .ends_with(is_boundary_char);
-        let after_pos = abs_pos + seed_lower.len();
-        let after_ok = after_pos >= text_lower.len() || text_lower[after_pos..]
-            .starts_with(is_boundary_char);
-        if before_ok || after_ok {
-            return true;
-        }
-        // Move past this occurrence
-        search_from = abs_pos + seed_lower.len();
-        if search_from >= text_lower.len() {
-            break;
-        }
-    }
-    false
-}
-
-/// Classify text type by seed keywords. Priority: directive > convention > correction > preference.
-/// Returns "general" if no seed matches.
-fn classify_type(text: &str) -> &'static str {
-    for (type_name, seeds) in TYPE_SEEDS {
-        if seeds.iter().any(|seed| contains_at_boundary(text, seed)) {
-            return type_name;
-        }
-    }
-    "general"
-}
-
-fn get_type_boost(pattern_type: &str) -> f64 {
-    TYPE_BOOST
-        .iter()
-        .find(|(t, _)| *t == pattern_type)
-        .map(|(_, b)| *b)
-        .unwrap_or(0.0)
-}
-
-// --- Tokenization (kept from original) ---
+// --- Tokenization ---
 
 pub fn tokenize(text: &str, stopwords: &StopwordSet) -> Vec<String> {
     if let Some(ref tokenizer) = *KOREAN_TOKENIZER {
@@ -177,7 +96,7 @@ fn cluster_normalized(
         representatives.truncate(500);
     }
 
-    // Precompute bigrams for all representatives (fixes P2: repeated bigram computation)
+    // Precompute bigrams for all representatives
     let precomputed_bigrams: Vec<HashSet<(char, char)>> = representatives
         .iter()
         .map(|(text, _)| char_bigrams(text))
@@ -218,7 +137,7 @@ fn cluster_normalized(
     clusters.into_iter().map(|(_, entries)| entries).collect()
 }
 
-// --- Scoring ---
+// --- Scoring (pure statistical — no rule-based type boost) ---
 
 fn calculate_consistency(timestamps: &[i64]) -> f64 {
     if timestamps.len() < 2 {
@@ -256,16 +175,16 @@ fn calculate_recency(timestamps: &[i64], now_ms: i64, half_life_days: f64) -> f6
     let most_recent = timestamps.iter().cloned().max().unwrap_or(0);
     let age_ms = (now_ms - most_recent).max(0) as f64;
     let age_days = age_ms / (1000.0 * 60.0 * 60.0 * 24.0);
-    // Exponential decay: half_life_days controls how fast old patterns lose relevance
     (-age_days * (2.0_f64.ln()) / half_life_days).exp()
 }
 
+/// Pure statistical confidence: frequency + consistency + BM25 + recency.
+/// No rule-based type boost — classification is delegated to Phase 2 (LLM).
 fn calculate_confidence(
     count: usize,
     meaningful_count: usize,
     timestamps: &[i64],
     bm25_score: f64,
-    pattern_type: &str,
     decay: bool,
     now_ms: i64,
     decay_half_life_days: f64,
@@ -274,22 +193,18 @@ fn calculate_confidence(
         return 0.0;
     }
 
-    // B5 fix: use meaningful prompt count as denominator instead of total entries
     let frequency_score = (count as f64 / meaningful_count as f64).min(1.0);
     let consistency_score = calculate_consistency(timestamps);
     let normalized_bm25 = 1.0 / (1.0 + (-bm25_score / 5.0).exp());
 
     let base = if decay {
         let recency = calculate_recency(timestamps, now_ms, decay_half_life_days);
-        // With decay: frequency 30%, consistency 15%, BM25 35%, recency 20%
         (frequency_score * 0.30) + (consistency_score * 0.15) + (normalized_bm25 * 0.35) + (recency * 0.20)
     } else {
-        (frequency_score * 0.4) + (consistency_score * 0.2) + (normalized_bm25 * 0.4)
+        (frequency_score * 0.40) + (consistency_score * 0.20) + (normalized_bm25 * 0.40)
     };
 
-    let type_boost = get_type_boost(pattern_type);
-
-    (base + type_boost).min(1.0) // Always clamp to [0, 1]
+    base.min(1.0)
 }
 
 // --- Prompt filtering ---
@@ -320,8 +235,7 @@ fn is_meaningful_prompt(prompt: &str, stopwords: &StopwordSet) -> bool {
 /// 4. Build BM25 ranker and decompose queries per DepthConfig
 /// 5. Cluster normalized texts via char bigram similarity
 /// 6. Score clusters with multi-query BM25 + frequency + consistency
-/// 7. Label types via seed keywords
-/// 8. Rank by confidence
+/// 7. Rank by confidence (no rule-based type classification)
 pub fn analyze_tacit_knowledge(
     entries: &[HistoryEntry],
     threshold: usize,
@@ -409,7 +323,6 @@ pub fn analyze_tacit_knowledge(
         let bm25_score = if decomposed.original.is_empty() {
             0.0
         } else if decomposed.is_decomposed() {
-            // Score each sub-query against corpus and combine
             let queries = decomposed.all_queries();
             let scores: Vec<f64> = queries
                 .iter()
@@ -442,19 +355,7 @@ pub fn analyze_tacit_knowledge(
             bm25_ranker.score_against_corpus(&decomposed.original)
         };
 
-        // Classify type using original prompts (seed matching on full text)
-        let mut type_counts: HashMap<&str, usize> = HashMap::new();
-        for entry in &cluster {
-            let t = classify_type(&entry.original);
-            *type_counts.entry(t).or_insert(0) += 1;
-        }
-        let dominant_type = type_counts
-            .into_iter()
-            .max_by_key(|(_, c)| *c)
-            .map(|(t, _)| t)
-            .unwrap_or("general");
-
-        // B5 fix: pass meaningful_count instead of entries.len()
+        // Pure statistical confidence — no type-based boost
         let timestamps: Vec<i64> = cluster.iter().map(|e| e.timestamp).collect();
         let now_ms = chrono::Utc::now().timestamp_millis();
         let confidence = calculate_confidence(
@@ -462,13 +363,12 @@ pub fn analyze_tacit_knowledge(
             meaningful_count,
             &timestamps,
             bm25_score,
-            dominant_type,
             decay,
             now_ms,
             decay_half_life_days,
         );
 
-        // B4 fix: use BTreeSet for deterministic example ordering
+        // Deterministic example ordering via BTreeSet
         let examples: Vec<String> = cluster
             .iter()
             .map(|e| e.original.clone())
@@ -486,7 +386,7 @@ pub fn analyze_tacit_knowledge(
         };
 
         patterns.push(TacitPattern {
-            pattern_type: dominant_type.to_string(),
+            pattern_type: "cluster".to_string(),
             pattern: display_pattern,
             normalized: representative.trim().to_lowercase(),
             examples,

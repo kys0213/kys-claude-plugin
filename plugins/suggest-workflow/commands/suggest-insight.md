@@ -1,18 +1,18 @@
 ---
-description: 정적 분석 캐시 기반 Claude 시맨틱 인사이트 분석
+description: 구조적 통계 캐시 기반 Claude 시맨틱 인사이트 분석
 ---
 
 # Suggest Insight
 
-정적 분석 결과(캐시)를 기반으로 Claude가 세션을 선별적으로 심층 분석합니다.
-단순 빈도 통계를 넘어 **의도 파악, 습관 변화 추적, 모순 감지** 등 시맨틱 분석을 수행합니다.
+Rust CLI가 추출한 구조적 통계(캐시)를 기반으로 Claude가 시맨틱 해석을 수행합니다.
+Rust는 **순수 연산만** 수행하고, **의미 해석과 분류는 LLM이** 담당합니다.
 
 ## 2-Phase 아키텍처
 
 ```
-Phase 1: Rust CLI (빠른 정적 분석 → 캐시 생성)
+Phase 1: Rust CLI (구조적 통계 추출 → 캐시, 룰 0개)
     ↓ index.json + session summaries + analysis-snapshot.json
-Phase 2: Claude (선별된 세션만 시맨틱 분석)  ← 이 커맨드
+Phase 2: Claude (통계 해석 + 분류 + 인사이트)  ← 이 커맨드
 ```
 
 ## 사용법
@@ -33,46 +33,33 @@ CACHE_DIR=$(${CLAUDE_PLUGIN_ROOT}/cli/target/release/suggest-workflow \
 ~/.claude/suggest-workflow-cache/{project-encoded}/
   ├── index.json                    # 세션 메타 인덱스
   ├── sessions/
-  │   ├── {session-id}.summary.json # 세션별 요약 (프롬프트, 도구, 시그널)
+  │   ├── {session-id}.summary.json # 세션별 통계 요약
   │   └── ...
-  └── analysis-snapshot.json        # 정적 분석 스냅샷
+  └── analysis-snapshot.json        # 전체 분석 스냅샷 (8개 분석 축)
 ```
 
-### index.json 필드
+### analysis-snapshot.json 분석 축
 
-| 필드 | 설명 |
-|------|------|
-| `project` | 프로젝트 경로 |
-| `lastUpdated` | 마지막 캐시 갱신 시각 |
-| `totalPrompts` | 전체 프롬프트 수 |
-| `totalSessions` | 전체 세션 수 |
-| `sessions[]` | 세션별 메타데이터 배열 |
-
-### 세션 메타데이터 필드
-
-| 필드 | 설명 |
-|------|------|
-| `id` | 세션 ID |
-| `fileSize` | 원본 JSONL 파일 크기 |
-| `promptCount` | 프롬프트 수 |
-| `toolUseCount` | 도구 사용 횟수 |
-| `firstTimestamp` | 세션 시작 시각 |
-| `lastTimestamp` | 세션 종료 시각 |
-| `durationMinutes` | 세션 지속 시간(분) |
-| `dominantTools` | 주요 사용 도구 Top 5 |
-| `tags` | 세션 태그 (high-activity, has-directives 등) |
+| 분석 | 키 | 설명 |
+|------|-----|------|
+| 프롬프트 빈도 | `promptAnalysis` | Top 반복 프롬프트 |
+| 도구 시퀀스 | `workflowAnalysis` | 공통 시퀀스 패턴 |
+| 프롬프트 클러스터 | `tacitKnowledge` | BM25 클러스터 (type=cluster, LLM이 분류) |
+| **도구 전이 행렬** | `toolTransitions` | A→B 전이 확률 |
+| **반복/이상치** | `repetitionStats` | 파일 편집 이상치 (mean±σ), 루프 감지 |
+| **주간 트렌드** | `weeklyTrends` | 도구별 주간 카운트 + 선형 회귀 기울기 |
+| **파일 핫스팟** | `fileAnalysis` | 파일별 편집 횟수, co-change 그룹 |
+| **세션 연결** | `sessionLinks` | 파일 겹침 Jaccard + 시간 근접 |
 
 ### 세션 요약 필드 (summary.json)
 
 | 필드 | 설명 |
 |------|------|
-| `prompts[]` | 사용자 프롬프트 + 타임스탬프 + 타입 |
+| `prompts[]` | 사용자 프롬프트 + 타임스탬프 |
 | `toolUseCount` | 총 도구 사용 횟수 |
 | `toolSequences[]` | 도구 시퀀스 문자열 (예: `"Read → Edit → Bash:test"`) |
-| `directives[]` | 지시사항 프롬프트 |
-| `corrections[]` | 교정 프롬프트 |
 | `filesMutated[]` | 수정된 파일 경로 |
-| `staticSignals` | 정적 시그널 (밀도, 복잡도 등) |
+| `stats` | 순수 정량 통계 (프롬프트 수, 도구 수, 전이 횟수, 파일 편집 수 등) |
 
 ## 캐시 전략
 
@@ -84,7 +71,7 @@ CACHE_DIR=$(${CLAUDE_PLUGIN_ROOT}/cli/target/release/suggest-workflow \
 | 옵션 | 값 | 기본값 | 설명 |
 |------|----|--------|------|
 | `--project` | PATH | cwd | 프로젝트 경로 |
-| `--depth` | `narrow`, `normal`, `wide` | `normal` | 정적 분석 깊이 |
+| `--depth` | `narrow`, `normal`, `wide` | `normal` | 클러스터링 깊이 |
 | `--threshold` | N | 3 | 최소 반복 횟수 |
 | `--top` | N | 10 | 상위 N개 결과 |
 | `--decay` | flag | off | 시간 감쇠 가중치 |
