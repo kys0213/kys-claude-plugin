@@ -187,6 +187,7 @@ sed \
   -e "s|{project_dir}|$PROJECT_DIR|g" \
   -e "s|{commit_script_path}|$PLUGIN_ROOT/scripts/commit.sh|g" \
   -e "s|{detect_default_branch_path}|$PLUGIN_ROOT/scripts/detect-default-branch.sh|g" \
+  -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
   "${PLUGIN_ROOT}/scripts/auto-commit-hook.sh" > .claude/hooks/auto-commit-hook.sh
 
 chmod +x .claude/hooks/auto-commit-hook.sh
@@ -206,6 +207,7 @@ sed \
   -e 's|{project_dir}|${CLAUDE_PROJECT_DIR:-.}|g' \
   -e "s|{commit_script_path}|$PLUGIN_ROOT/scripts/commit.sh|g" \
   -e "s|{detect_default_branch_path}|$PLUGIN_ROOT/scripts/detect-default-branch.sh|g" \
+  -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
   "${PLUGIN_ROOT}/scripts/auto-commit-hook.sh" > ~/.claude/hooks/auto-commit-hook.sh
 
 chmod +x ~/.claude/hooks/auto-commit-hook.sh
@@ -250,8 +252,8 @@ auto-commit hook이 프로젝트에 설정되었습니다!
 
 동작 방식:
 ├─ 세션 종료 시 미커밋 변경사항 감지
-├─ 변경사항 있으면 커밋 요청 후 재시도
-├─ 기본 브랜치({default_branch})에서는 건너뜀
+├─ feature 브랜치: 변경사항 있으면 커밋 요청 후 재시도
+├─ 기본 브랜치({default_branch}): 변경사항 있으면 브랜치 생성 제안
 └─ rebase/merge/conflict/non-git 상태에서는 건너뜀
 
 설정을 변경하려면 /auto-commit-config를 실행하세요.
@@ -270,8 +272,8 @@ auto-commit hook이 사용자 설정에 등록되었습니다!
 
 동작 방식:
 ├─ 모든 프로젝트의 세션 종료 시 미커밋 변경사항 감지
-├─ 변경사항 있으면 커밋 요청 후 재시도
-├─ 기본 브랜치에서는 건너뜀
+├─ feature 브랜치: 변경사항 있으면 커밋 요청 후 재시도
+├─ 기본 브랜치: 변경사항 있으면 브랜치 생성 제안
 ├─ git 저장소가 아닌 프로젝트에서는 자동 건너뜀
 └─ rebase/merge/conflict 상태에서는 건너뜀
 

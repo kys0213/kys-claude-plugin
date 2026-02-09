@@ -135,6 +135,7 @@ sed \
   -e "s|{project_dir}|$PROJECT_DIR|g" \
   -e "s|{commit_script_path}|$PLUGIN_ROOT/scripts/commit.sh|g" \
   -e "s|{detect_default_branch_path}|$PLUGIN_ROOT/scripts/detect-default-branch.sh|g" \
+  -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
   "${PLUGIN_ROOT}/scripts/auto-commit-hook.sh" > .claude/hooks/auto-commit-hook.sh
 
 chmod +x .claude/hooks/auto-commit-hook.sh
@@ -155,6 +156,7 @@ sed \
   -e 's|{project_dir}|${CLAUDE_PROJECT_DIR:-.}|g' \
   -e "s|{commit_script_path}|$PLUGIN_ROOT/scripts/commit.sh|g" \
   -e "s|{detect_default_branch_path}|$PLUGIN_ROOT/scripts/detect-default-branch.sh|g" \
+  -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
   "${PLUGIN_ROOT}/scripts/auto-commit-hook.sh" > ~/.claude/hooks/auto-commit-hook.sh
 
 chmod +x ~/.claude/hooks/auto-commit-hook.sh

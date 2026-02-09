@@ -369,10 +369,15 @@ const config = { timeout: 5000, retries: 3 };
 2. fallback: `chore: auto-commit session changes`
 
 ### 제외 조건
-- 기본 브랜치(main/master)에서는 절대 커밋하지 않음
+- 기본 브랜치(main/master)에서는 브랜치 생성을 먼저 제안 (직접 커밋 금지)
 - .env, credentials, *.key 등 민감 파일은 커밋하지 않음
 - detached HEAD, rebase/merge 진행 중에는 커밋하지 않음
 - conflict이 존재하면 커밋하지 않음
 
 ### Stop Hook 루프 동작
+
+**feature 브랜치:**
 hook이 block → Claude가 stderr 메시지를 읽음 → commit.sh로 커밋 → 재시도 시 hook pass
+
+**기본 브랜치 (main/master):**
+hook이 block → Claude가 stderr 메시지를 읽음 → 새 브랜치 생성 제안 → 브랜치 이동 후 커밋 → 재시도 시 hook pass
