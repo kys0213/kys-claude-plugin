@@ -17,6 +17,21 @@ cd "$PROJECT_DIR" 2>/dev/null || exit 0
 # Guard 1: git repo 확인
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 
+# DEFAULT_BRANCH가 비어있으면 런타임 감지 (사용자 범위: 프로젝트마다 다를 수 있음)
+if [ -z "$DEFAULT_BRANCH" ]; then
+  DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+  if [ -z "$DEFAULT_BRANCH" ]; then
+    if git show-ref --verify --quiet refs/remotes/origin/main 2>/dev/null; then
+      DEFAULT_BRANCH="main"
+    elif git show-ref --verify --quiet refs/remotes/origin/develop 2>/dev/null; then
+      DEFAULT_BRANCH="develop"
+    elif git show-ref --verify --quiet refs/remotes/origin/master 2>/dev/null; then
+      DEFAULT_BRANCH="master"
+    fi
+  fi
+  [ -z "$DEFAULT_BRANCH" ] && exit 0
+fi
+
 # Guard 2: 특수 상태 확인 (rebase/merge) → 패스
 GIT_DIR=$(git rev-parse --git-dir 2>/dev/null) || exit 0
 [ -d "$GIT_DIR/rebase-merge" ] || [ -d "$GIT_DIR/rebase-apply" ] && exit 0
