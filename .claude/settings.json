@@ -1,13 +1,23 @@
 {
   "hooks": {
-    "Stop": [
+    "PreToolUse": [
       {
-        "matcher": "*",
+        "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",
-            "command": "bash ./.claude/hooks/auto-commit-hook.sh",
-            "timeout": 10
+            "command": "bash ./.claude/hooks/default-branch-guard-hook.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ./.claude/hooks/default-branch-guard-commit-hook.sh",
+            "timeout": 5
           }
         ]
       }

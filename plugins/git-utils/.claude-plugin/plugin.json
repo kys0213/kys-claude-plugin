@@ -15,7 +15,7 @@
     "./commands/check-ci.md",
     "./commands/branch-status.md",
     "./commands/setup.md",
-    "./commands/auto-commit-config.md"
+    "./commands/hook-config.md"
   ],
   "description": "Git workflow automation (branch, commit, PR, merge, sync, conflict resolution, issue management)",
   "keywords": [

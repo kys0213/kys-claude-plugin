@@ -350,47 +350,19 @@ const config = { timeout: 5000, retries: 3 };
 
 ---
 
-## 자동 커밋 전략 (Auto-Commit Rule)
-
-태스크 완료 시 자동으로 커밋합니다. 별도의 커밋 요청이 필요 없습니다.
-
-### 커밋 타이밍
-- TODO/태스크 하나가 완료될 때마다 커밋
-- 세션 종료 전 미커밋 변경사항이 있으면 반드시 커밋
-- Stop Hook이 미커밋 변경사항을 감지하면 커밋 후 재시도
-
-### 커밋 실행 방법
-1. `git status`로 변경사항 확인
-2. 변경사항이 있으면 `git add -u` (tracked files만 스테이징)
-3. `commit.sh` 스크립트로 커밋 (type + description 자동 추론)
-
-### 커밋 메시지 전략
-1. 완료된 태스크/TODO 내용에서 type과 description 추론
-2. fallback: `chore: auto-commit session changes`
-
-### 제외 조건
-- 기본 브랜치(main/master)에서는 브랜치 생성을 먼저 제안 (직접 커밋 금지)
-- .env, credentials, *.key 등 민감 파일은 커밋하지 않음
-- detached HEAD, rebase/merge 진행 중에는 커밋하지 않음
-- conflict이 존재하면 커밋하지 않음
-
-### Stop Hook 루프 동작
-
-**feature 브랜치:**
-hook이 block → Claude가 stderr 메시지를 읽음 → commit.sh로 커밋 → 재시도 시 hook pass
-
-**기본 브랜치 (main/master):**
-hook이 block → Claude가 stderr 메시지를 읽음 → 새 브랜치 생성 제안 → 브랜치 이동 후 커밋 → 재시도 시 hook pass
-
----
-
 ## Default Branch Guard (PreToolUse Hook)
 
-기본 브랜치에서 Write/Edit 도구 사용 시 **즉시 차단**하고 브랜치 생성을 제안합니다.
-Stop Hook은 세션 종료 시점의 안전망이고, Branch Guard는 **작업 시작 전** 조기 차단입니다.
+기본 브랜치에서 Write/Edit 도구 사용 또는 git commit 시도 시 **즉시 차단**하고 브랜치 생성을 제안합니다.
+
+### 보호 범위
+
+| Hook | Matcher | 차단 대상 |
+|------|---------|----------|
+| Write/Edit Guard | `Write\|Edit` | 파일 생성/수정 |
+| Commit Guard | `Bash` | `git commit` 명령 |
 
 ### 동작 방식
-1. Write 또는 Edit 도구 호출 시 PreToolUse hook 실행
+1. Write, Edit 또는 Bash(git commit) 도구 호출 시 PreToolUse hook 실행
 2. 현재 브랜치가 기본 브랜치(main/master)인지 확인
 3. 기본 브랜치이면 exit 2로 도구 실행 차단
 4. Claude가 stderr 메시지를 읽고 `create-branch.sh`로 새 브랜치 생성
@@ -400,3 +372,4 @@ Stop Hook은 세션 종료 시점의 안전망이고, Branch Guard는 **작업 �
 - 네트워크 호출 없이 로컬 캐시만 사용 (빠름)
 - rebase/merge/detached HEAD 상태에서는 건너뜀
 - 기본 브랜치 감지 실패 시 차단하지 않음 (안전)
+- Bash hook은 `git commit` 명령만 차단하고 다른 명령은 통과
