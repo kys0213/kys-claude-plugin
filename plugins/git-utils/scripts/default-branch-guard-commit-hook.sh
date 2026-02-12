@@ -40,7 +40,14 @@ if [ -z "$DEFAULT_BRANCH" ]; then
       DEFAULT_BRANCH="master"
     fi
   fi
-  [ -z "$DEFAULT_BRANCH" ] && exit 0
+  # 런타임 감지 실패 시 현재 브랜치가 기본 브랜치 후보면 차단
+  if [ -z "$DEFAULT_BRANCH" ]; then
+    CURRENT=$(git branch --show-current 2>/dev/null || true)
+    case "$CURRENT" in
+      main|master|develop) DEFAULT_BRANCH="$CURRENT" ;;
+      *) exit 0 ;;
+    esac
+  fi
 fi
 
 # Guard 2: 특수 상태 확인 (rebase/merge) → 패스
