@@ -2,21 +2,11 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Write",
+        "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",
-            "command": "bash ./.claude/hooks/protect-default-branch.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ./.claude/hooks/protect-default-branch.sh",
+            "command": "bash ./.claude/hooks/default-branch-guard-hook.sh",
             "timeout": 5
           }
         ]
@@ -26,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ./.claude/hooks/protect-default-branch-commit.sh",
+            "command": "bash ./.claude/hooks/default-branch-guard-commit-hook.sh",
             "timeout": 5
           }
         ]
