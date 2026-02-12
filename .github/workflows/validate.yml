@@ -45,6 +45,16 @@ jobs:
         if: steps.check_sw.outputs.changed == 'true'
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
+      - name: Rust fmt check
+        if: steps.check_sw.outputs.changed == 'true'
+        working-directory: plugins/suggest-workflow/cli
+        run: cargo fmt --check
+
+      - name: Rust clippy
+        if: steps.check_sw.outputs.changed == 'true'
+        working-directory: plugins/suggest-workflow/cli
+        run: cargo clippy -- -D warnings
+
       - name: Rust check and test
         if: steps.check_sw.outputs.changed == 'true'
         working-directory: plugins/suggest-workflow/cli
