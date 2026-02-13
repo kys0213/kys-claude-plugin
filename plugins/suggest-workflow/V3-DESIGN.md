@@ -89,7 +89,7 @@ suggest-workflow index [--project <path>] [--full]
   # 새로/변경된 세션만 파싱하여 DB에 upsert
 
 # 쿼리
-suggest-workflow query [--db <path>] [--perspective <name>] [options]
+suggest-workflow query [--project <path>] [--perspective <name>] [options]
   # 사전 정의된 perspective 또는 커스텀 필터로 조회
   # 결과는 항상 JSON (stdout) → 파이프 체이닝 가능
 
@@ -99,6 +99,60 @@ suggest-workflow analyze [기존 옵션들...]
 suggest-workflow cache [기존 옵션들...]
   # v2 호환. 내부적으로 index 후 snapshot JSON 생성
 ```
+
+### 3-3. DB 경로 resolve 규칙
+
+`index`와 `query` 모두 동일한 로직으로 DB 파일 위치를 결정한다:
+
+```
+우선순위:
+  1. --db <path>          직접 DB 파일 경로 지정 (고급, 테스트/디버깅)
+  2. --project <path>     프로젝트 경로 → 인코딩 → DB 경로 계산
+  3. (생략)               cwd를 project로 사용 (v2와 동일한 기본값)
+```
+
+내부 resolve 흐름:
+
+```rust
+fn resolve_db_path(db: Option<&str>, project: Option<&str>) -> Result<PathBuf> {
+    // 1) 직접 DB 경로 지정
+    if let Some(db_path) = db {
+        return Ok(PathBuf::from(db_path));
+    }
+
+    // 2) 프로젝트 경로 → DB 경로 계산
+    let project_path = match project {
+        Some(p) => p.to_string(),
+        None => std::env::current_dir()?.to_string_lossy().to_string(), // 3) cwd 사용
+    };
+
+    let encoded = resolve_project_path(&project_path)?;
+    let encoded_name = encoded.file_name().unwrap().to_str().unwrap();
+    let home = std::env::var("HOME")?;
+    Ok(PathBuf::from(home)
+        .join(".claude")
+        .join("suggest-workflow-index")
+        .join(encoded_name)
+        .join("index.db"))
+}
+```
+
+사용 예시:
+
+```bash
+# 가장 일반적: cwd 기준 자동 resolve
+cd /home/user/my-project
+suggest-workflow index                                    # → DB 생성
+suggest-workflow query --perspective tool-frequency        # → 같은 DB 조회
+
+# 명시적 프로젝트 지정 (cwd와 다른 프로젝트 분석)
+suggest-workflow query --project /home/user/other-project --perspective trends
+
+# 직접 DB 경로 (고급: 디버깅, 백업 DB 분석 등)
+suggest-workflow query --db /tmp/debug-index.db --perspective hotfiles
+```
+
+`--project`와 `--db`를 동시에 지정하면 `--db`가 우선한다 (명시적 > 암묵적).
 
 ---
 
