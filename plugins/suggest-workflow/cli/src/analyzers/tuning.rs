@@ -53,12 +53,16 @@ pub struct TuningConfig {
     pub max_clusters: usize,
 
     // -- Repetition / outlier detection --
-    /// Z-score threshold for file-edit outlier detection
+    /// Z-score threshold for file-edit outlier detection (also sets BH FDR alpha)
     pub z_score_threshold: f64,
     /// Maximum subsequence length for loop detection
     pub loop_max_seq_length: usize,
     /// Minimum consecutive repetitions to report a loop
     pub loop_min_repeats: usize,
+
+    // -- Trend analysis --
+    /// Minimum R² to report a tool trend as meaningful (0.0–1.0)
+    pub min_trend_r_squared: f64,
 }
 
 impl Default for TuningConfig {
@@ -90,6 +94,8 @@ impl Default for TuningConfig {
             z_score_threshold: 2.0,
             loop_max_seq_length: 3,
             loop_min_repeats: 2,
+
+            min_trend_r_squared: 0.3,
         }
     }
 }

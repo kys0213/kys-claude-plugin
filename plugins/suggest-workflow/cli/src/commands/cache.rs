@@ -402,7 +402,7 @@ fn generate_analysis_snapshot(
     // New statistical analyses (rule-free)
     let transition_result = build_transition_matrix(sessions);
     let repetition_result = analyze_repetition(sessions, tuning);
-    let trend_result = analyze_trends(sessions, history_entries);
+    let trend_result = analyze_trends(sessions, history_entries, tuning);
     let file_result = analyze_files(sessions, top);
     let link_result = link_sessions(sessions);
 

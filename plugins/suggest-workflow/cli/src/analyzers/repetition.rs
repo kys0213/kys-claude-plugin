@@ -64,24 +64,44 @@ pub fn analyze_repetition(
         });
     }
 
-    // Statistical outlier detection for file edits (mean + 2σ)
+    // Statistical outlier detection for file edits with Benjamini-Hochberg FDR correction.
+    // BH controls the false discovery rate when testing many files simultaneously:
+    // without correction, z >= 2.0 on 1000 files yields ~50 false positives;
+    // BH keeps the expected proportion of false discoveries ≤ α.
     let edit_counts: Vec<f64> = all_file_edits.iter().map(|(_, _, c)| *c as f64).collect();
     let (mean, std_dev) = mean_stddev(&edit_counts);
 
     let file_edit_outliers: Vec<FileEditOutlier> = if std_dev > 0.0 {
-        all_file_edits
+        // Step 1: compute z-scores and p-values for all candidates
+        let mut candidates: Vec<(usize, f64, f64)> = all_file_edits  // (index, z, p)
             .iter()
-            .filter_map(|(session_id, file, count)| {
+            .enumerate()
+            .filter_map(|(i, (_, _, count))| {
                 let z = (*count as f64 - mean) / std_dev;
-                if z >= tuning.z_score_threshold {
-                    Some(FileEditOutlier {
-                        file: file.clone(),
-                        edit_count: *count,
-                        session_id: session_id.clone(),
-                        z_score: (z * 100.0).round() / 100.0,
-                    })
+                if z > 0.0 {
+                    let p = 1.0 - normal_cdf_approx(z);
+                    Some((i, z, p))
                 } else {
                     None
+                }
+            })
+            .collect();
+
+        // Step 2: BH procedure — derive α from z_score_threshold
+        let alpha = 1.0 - normal_cdf_approx(tuning.z_score_threshold);
+        let significant = benjamini_hochberg(&mut candidates, alpha);
+
+        // Step 3: build outlier results from significant indices
+        significant
+            .iter()
+            .map(|&idx| {
+                let (session_id, file, count) = &all_file_edits[idx];
+                let z = (*count as f64 - mean) / std_dev;
+                FileEditOutlier {
+                    file: file.clone(),
+                    edit_count: *count,
+                    session_id: session_id.clone(),
+                    z_score: (z * 100.0).round() / 100.0,
                 }
             })
             .collect()
@@ -149,6 +169,48 @@ fn max_consecutive_same(tools: &[String]) -> (usize, Option<String>) {
     }
 
     (max_count, Some(max_tool))
+}
+
+/// Approximate standard normal CDF using Abramowitz & Stegun formula 26.2.17.
+/// Absolute error < 7.5×10⁻⁸ for all z.
+fn normal_cdf_approx(z: f64) -> f64 {
+    if z < -8.0 { return 0.0; }
+    if z > 8.0 { return 1.0; }
+    let t = 1.0 / (1.0 + 0.2316419 * z.abs());
+    let pdf = 0.398_942_280_401_432_7 * (-z * z / 2.0).exp(); // 1/√(2π) × e^(-z²/2)
+    let poly = t * (0.319_381_530
+        + t * (-0.356_563_782
+        + t * (1.781_477_937
+        + t * (-1.821_255_978
+        + t * 1.330_274_429))));
+    if z >= 0.0 { 1.0 - pdf * poly } else { pdf * poly }
+}
+
+/// Benjamini-Hochberg procedure for controlling False Discovery Rate.
+/// Input: `candidates` = [(original_index, z_score, p_value)].
+/// Returns the original indices of items that survive correction at level `alpha`.
+fn benjamini_hochberg(candidates: &mut [(usize, f64, f64)], alpha: f64) -> Vec<usize> {
+    if candidates.is_empty() || alpha <= 0.0 {
+        return Vec::new();
+    }
+
+    let m = candidates.len();
+
+    // Sort by p-value ascending
+    candidates.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Find largest rank k where p(k) ≤ (k/m) × α
+    let mut max_k = 0;
+    for (rank_0, &(_, _, p)) in candidates.iter().enumerate() {
+        let rank = rank_0 + 1; // 1-indexed
+        let bh_threshold = (rank as f64 / m as f64) * alpha;
+        if p <= bh_threshold {
+            max_k = rank;
+        }
+    }
+
+    // All items with rank ≤ max_k are significant
+    candidates.iter().take(max_k).map(|&(idx, _, _)| idx).collect()
 }
 
 fn mean_stddev(values: &[f64]) -> (f64, f64) {

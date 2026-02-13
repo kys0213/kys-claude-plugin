@@ -189,6 +189,8 @@ pub struct ToolTrend {
     pub tool: String,
     pub weekly_counts: Vec<usize>,
     pub trend_slope: f64,
+    /// Coefficient of determination (0.0–1.0). Low R² means the linear trend is unreliable.
+    pub r_squared: f64,
 }
 
 /// File hotspot analysis
