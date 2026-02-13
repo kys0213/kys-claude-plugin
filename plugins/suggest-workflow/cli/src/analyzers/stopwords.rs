@@ -29,13 +29,6 @@ pub struct StopwordSet {
 }
 
 impl StopwordSet {
-    /// Build from built-in defaults only
-    pub fn builtin() -> Self {
-        Self {
-            words: BUILTIN_NOISE_WORDS.iter().map(|s| s.to_string()).collect(),
-        }
-    }
-
     /// Build from defaults + config file + CLI extra words
     pub fn load(extra_words: &[String]) -> Self {
         let mut words: HashSet<String> = BUILTIN_NOISE_WORDS
@@ -61,10 +54,6 @@ impl StopwordSet {
     pub fn contains(&self, word: &str) -> bool {
         self.words.contains(word)
     }
-
-    pub fn as_set(&self) -> &HashSet<String> {
-        &self.words
-    }
 }
 
 /// Default config file path: ~/.claude/suggest-workflow/stopwords.json
@@ -80,18 +69,3 @@ fn load_config_file() -> Option<StopwordsConfig> {
     serde_json::from_str(&content).ok()
 }
 
-/// Save stopwords config to the default path (used by Claude agents)
-#[allow(dead_code)]
-pub fn save_config(config: &StopwordsConfig) -> anyhow::Result<()> {
-    let path = config_file_path()
-        .ok_or_else(|| anyhow::anyhow!("HOME not set"))?;
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let json = serde_json::to_string_pretty(config)?;
-    std::fs::write(&path, json)?;
-    eprintln!("Saved stopwords config to {}", path.display());
-    Ok(())
-}

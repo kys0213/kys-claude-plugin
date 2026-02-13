@@ -178,7 +178,7 @@ mod tests {
     use crate::analyzers::depth::AnalysisDepth;
 
     fn test_stopwords() -> StopwordSet {
-        StopwordSet::builtin()
+        StopwordSet::load(&[])
     }
 
     fn make_ranker(docs: &[&str]) -> BM25Ranker {
