@@ -283,7 +283,54 @@ CREATE TABLE session_links (
 
 ## 5. 인크리멘털 인덱싱
 
-### 5-1. 변경 감지
+### 5-1. DB 존재 여부에 따른 분기
+
+```
+suggest-workflow index --project /path/to/project
+
+┌─ index.db 존재하는가?
+│
+├─ NO (첫 실행)
+│   1. DB 파일 생성 + 스키마 초기화 (CREATE TABLE)
+│   2. JSONL 전체 파싱 → 원시 데이터 INSERT
+│   3. 파생 테이블 계산
+│   4. 완료 (== --full과 동일)
+│
+├─ YES + 스키마 버전 일치
+│   1. DB 열기
+│   2. 변경 감지 → 변경된 세션만 재파싱 (인크리멘털)
+│   3. 파생 테이블 재계산
+│   4. 완료
+│
+└─ YES + 스키마 버전 불일치 (v3.0 DB에 v3.1 코드 등)
+    1. 자동 마이그레이션 시도 (ALTER TABLE 등)
+    2. 마이그레이션 불가 시 → 경고 출력 + --full 안내
+    3. --full 시 DB 삭제 후 재생성
+```
+
+스키마 버전은 `meta` 테이블의 `schema_version` 값으로 관리:
+
+```sql
+SELECT value FROM meta WHERE key = 'schema_version';
+-- 기대값: "3"  (v3.0 초기)
+-- 불일치 시 마이그레이션 로직 실행
+```
+
+### 5-2. v2 JSON 캐시와의 관계
+
+```
+~/.claude/suggest-workflow-cache/   ← v2 (JSON, 기존)
+~/.claude/suggest-workflow-index/   ← v3 (SQLite, 신규)
+```
+
+- **경로가 다르므로 충돌 없이 공존**
+- v2 캐시에서 v3 DB로의 마이그레이션은 **불가**:
+  - v2 요약본(`*.summary.json`)에는 개별 tool input이 없음 (B2 수정에 필수)
+  - v2 snapshot은 집계 결과물이지 원시 데이터가 아님
+- v3 첫 `index`는 항상 **JSONL 원본에서 풀 파싱**
+- v2 캐시는 v3 안정화 후 Phase D에서 deprecated (삭제는 사용자 판단)
+
+### 5-3. 변경 감지
 
 ```rust
 /// 세션 파일이 변경되었는지 판단
@@ -304,34 +351,38 @@ fn is_session_changed(db: &Connection, file_path: &Path) -> bool {
 }
 ```
 
-### 5-2. 인덱싱 흐름
+### 5-4. 인덱싱 흐름 (인크리멘털)
 
 ```
 suggest-workflow index --project /path/to/project
 
-1. DB 파일 열기/생성 (~/.claude/suggest-workflow-index/{encoded}/index.db)
-2. 세션 파일 목록 스캔
-3. 각 세션에 대해:
+1. DB 파일 열기 (없으면 생성 + 스키마 초기화)
+2. 스키마 버전 확인 → 필요 시 마이그레이션
+3. 세션 파일 목록 스캔
+4. 각 세션에 대해:
    a. 변경 감지 (size + mtime)
    b. 변경된 세션만:
       - DB에서 해당 세션 데이터 DELETE (CASCADE)
       - JSONL 파싱
       - 원시 데이터 INSERT (sessions, prompts, tool_uses, file_edits, keywords)
-4. 삭제된 세션 감지 (DB에 있지만 파일 없음) → DELETE
-5. 파생 테이블 재계산 (전체)
+   c. 변경 없는 세션 → skip (로그에 "N sessions unchanged" 표시)
+5. 삭제된 세션 감지 (DB에 있지만 파일 없음) → DELETE
+6. 파생 테이블 재계산 (전체)
    - tool_transitions: tool_uses에서 집계
    - weekly_buckets: tool_uses + prompts에서 집계
    - file_hotspots: file_edits에서 집계
    - session_links: file_edits에서 Jaccard 계산
-6. FTS5 인덱스 리빌드
-7. meta.last_indexed_at 업데이트
+7. FTS5 인덱스 리빌드
+8. meta.last_indexed_at 업데이트
+9. stderr 요약: "Indexed: 3 new, 1 updated, 46 unchanged, 0 deleted"
 ```
 
-### 5-3. `--full` 옵션
+### 5-5. `--full` 옵션
 
 ```bash
 suggest-workflow index --project /path --full
-# DB 전체 드롭 후 재생성. 스키마 변경 시 또는 디버깅 용.
+# 기존 DB 파일 삭제 후 처음부터 재생성.
+# 용도: 스키마 변경, DB 손상, 디버깅
 ```
 
 ---
