@@ -7,6 +7,7 @@ use crate::parsers::{
 use crate::parsers::projects::list_projects;
 use crate::analyzers::{
     analyze_workflows, analyze_prompts, analyze_tacit_knowledge,
+    build_dependency_graph,
     AnalysisDepth, DepthConfig, StopwordSet, TuningConfig,
 };
 
@@ -327,6 +328,59 @@ fn print_text_output(
                 println!("  {}. {}: {}x", i + 1, tool, count);
             }
         }
+        // Dependency graph
+        let dep_graph = build_dependency_graph(sessions, top, tuning);
+        println!("--- Tool Dependency Graph ---\n");
+        println!("Nodes: {} | Edges: {} | Cycles: {}\n",
+            dep_graph.nodes.len(), dep_graph.edges.len(), dep_graph.cycles.len());
+
+        if !dep_graph.nodes.is_empty() {
+            println!("Top Nodes (by usage):");
+            println!("{:<20} {:<8} {:<8} {:<8} {:<8} {:<10} {:<10}",
+                "Tool", "Uses", "Fanout", "Fanin", "AvgPos", "Entry%", "Terminal%");
+            println!("{}", "-".repeat(72));
+            for node in dep_graph.nodes.iter().take(top) {
+                println!("{:<20} {:<8} {:<8} {:<8} {:<8.2} {:<10.0} {:<10.0}",
+                    truncate_str(&node.tool, 20), node.total_uses, node.fanout, node.fanin,
+                    node.avg_position, node.entry_rate * 100.0, node.terminal_rate * 100.0);
+            }
+            println!();
+        }
+
+        if !dep_graph.edges.is_empty() {
+            println!("Top Edges (by frequency):");
+            println!("{:<20} {:<20} {:<6} {:<8} {:<8} {:<10}",
+                "From", "To", "Count", "P(→)", "P(←)", "Commit%");
+            println!("{}", "-".repeat(72));
+            for edge in dep_graph.edges.iter().take(top) {
+                println!("{:<20} {:<20} {:<6} {:<8.2} {:<8.2} {:<10.0}",
+                    truncate_str(&edge.from, 20), truncate_str(&edge.to, 20),
+                    edge.count, edge.probability, edge.reverse_probability,
+                    edge.commit_reachable_rate * 100.0);
+            }
+            println!();
+        }
+
+        if !dep_graph.cycles.is_empty() {
+            println!("Detected Cycles:");
+            for (i, cycle) in dep_graph.cycles.iter().take(5).enumerate() {
+                println!("  {}. [{}x, avg {:.1} iter] {}",
+                    i + 1, cycle.occurrence_count, cycle.avg_iterations,
+                    cycle.tools.join(" ↔ "));
+            }
+            println!();
+        }
+
+        if !dep_graph.critical_paths.is_empty() {
+            println!("Critical Paths:");
+            for (i, path) in dep_graph.critical_paths.iter().take(5).enumerate() {
+                println!("  {}. [{}x, {:.0}% commit] {}",
+                    i + 1, path.frequency, path.commit_rate * 100.0,
+                    path.path.join(" → "));
+            }
+            println!();
+        }
+
         println!();
     }
 
@@ -398,6 +452,15 @@ fn print_text_output(
     Ok(())
 }
 
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.chars().count() > max {
+        let truncated: String = s.chars().take(max - 2).collect();
+        format!("{}..", truncated)
+    } else {
+        s.to_string()
+    }
+}
+
 fn print_json_output(
     sessions: &[(String, Vec<crate::types::SessionEntry>)],
     history_entries: &[crate::types::HistoryEntry],
@@ -438,8 +501,10 @@ fn print_json_output(
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Workflow {
         let workflow_result = analyze_workflows(sessions, threshold, top, tuning.min_seq_length, tuning.max_seq_length, tuning.time_window_minutes);
         let prompt_result = analyze_prompts(history_entries, decay, tuning.decay_half_life_days);
+        let dep_graph = build_dependency_graph(sessions, top, tuning);
         output["promptAnalysis"] = serde_json::to_value(&prompt_result)?;
         output["workflowAnalysis"] = serde_json::to_value(&workflow_result)?;
+        output["dependencyGraph"] = serde_json::to_value(&dep_graph)?;
     }
 
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Skill {

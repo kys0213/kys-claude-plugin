@@ -11,7 +11,7 @@ use crate::parsers::{
 use crate::analyzers::{
     analyze_workflows, analyze_prompts, analyze_tacit_knowledge,
     build_transition_matrix, analyze_repetition, analyze_trends,
-    analyze_files, link_sessions,
+    analyze_files, link_sessions, build_dependency_graph,
     AnalysisDepth, DepthConfig, StopwordSet, TuningConfig,
 };
 use crate::analyzers::tool_classifier::classify_tool;
@@ -405,6 +405,7 @@ fn generate_analysis_snapshot(
     let trend_result = analyze_trends(sessions, history_entries, tuning);
     let file_result = analyze_files(sessions, top);
     let link_result = link_sessions(sessions);
+    let dep_graph_result = build_dependency_graph(sessions, top, tuning);
 
     let snapshot = serde_json::json!({
         "analyzedAt": Utc::now().to_rfc3339(),
@@ -424,6 +425,7 @@ fn generate_analysis_snapshot(
         "weeklyTrends": serde_json::to_value(&trend_result)?,
         "fileAnalysis": serde_json::to_value(&file_result)?,
         "sessionLinks": serde_json::to_value(&link_result)?,
+        "dependencyGraph": serde_json::to_value(&dep_graph_result)?,
     });
 
     let json = serde_json::to_string_pretty(&snapshot)?;
