@@ -56,9 +56,7 @@ impl BM25Ranker {
     }
 
     /// Score query terms against a specific document.
-    /// Unlike `score_query()` (self-scoring), this measures how relevant
-    /// a query is to an independent document in the corpus.
-    pub fn score_against_document(&self, query_tokens: &[String], document: &[String]) -> f64 {
+    fn score_against_document(&self, query_tokens: &[String], document: &[String]) -> f64 {
         if query_tokens.is_empty() || document.is_empty() {
             return 0.0;
         }

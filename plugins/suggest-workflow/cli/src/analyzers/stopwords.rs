@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 /// Built-in default noise words (fallback when no config file exists)
 const BUILTIN_NOISE_WORDS: &[&str] = &[
@@ -8,18 +8,12 @@ const BUILTIN_NOISE_WORDS: &[&str] = &[
     "ok", "yes", "y", "sure", "thanks", "ㅇ", "ㅇㅇ", "넵",
 ];
 
-/// Config file format for project-specific stopwords
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Config file format for project-specific stopwords.
+/// Extra fields in the JSON file are ignored via deny_unknown_fields=false (serde default).
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StopwordsConfig {
-    /// Custom stopwords added by Claude or user
-    pub words: Vec<String>,
-    /// Who last updated this file
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_by: Option<String>,
-    /// When this file was last updated
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<String>,
+struct StopwordsConfig {
+    words: Vec<String>,
 }
 
 /// Resolved stopwords set — merged from built-in defaults, config file, and CLI args

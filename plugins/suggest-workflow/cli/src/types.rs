@@ -38,8 +38,6 @@ pub struct ContentItem {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
     pub input: Option<serde_json::Value>,
 }
 
