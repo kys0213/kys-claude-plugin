@@ -5,11 +5,13 @@ use crate::types::{
 };
 use crate::parsers::extract_tool_sequence;
 use crate::analyzers::tool_classifier::classify_tool;
+use crate::analyzers::tuning::TuningConfig;
 
 /// Detect repetition patterns and statistical outliers across sessions.
-/// Uses mean ± σ from the data itself — no hardcoded thresholds.
+/// Uses mean ± σ from the data itself — thresholds driven by TuningConfig.
 pub fn analyze_repetition(
     sessions: &[(String, Vec<SessionEntry>)],
+    tuning: &TuningConfig,
 ) -> RepetitionResult {
     let mut all_file_edits: Vec<(String, String, usize)> = Vec::new(); // (session_id, file, count)
     let mut all_loops: Vec<ToolLoop> = Vec::new();
@@ -42,7 +44,7 @@ pub fn analyze_repetition(
         }
 
         // Detect consecutive loops: find repeated subsequences
-        detect_loops(&classified, session_id, &mut all_loops);
+        detect_loops(&classified, session_id, &mut all_loops, tuning.loop_max_seq_length, tuning.loop_min_repeats);
 
         // Session-level repetition stats
         let total_tool_uses = classified.len();
@@ -71,7 +73,7 @@ pub fn analyze_repetition(
             .iter()
             .filter_map(|(session_id, file, count)| {
                 let z = (*count as f64 - mean) / std_dev;
-                if z >= 2.0 {
+                if z >= tuning.z_score_threshold {
                     Some(FileEditOutlier {
                         file: file.clone(),
                         edit_count: *count,
@@ -96,9 +98,9 @@ pub fn analyze_repetition(
     }
 }
 
-/// Detect repeating subsequences of length 2-3 in tool sequences.
-fn detect_loops(classified: &[String], session_id: &str, loops: &mut Vec<ToolLoop>) {
-    for seq_len in 2..=3 {
+/// Detect repeating subsequences in tool sequences.
+fn detect_loops(classified: &[String], session_id: &str, loops: &mut Vec<ToolLoop>, max_seq_length: usize, min_repeats: usize) {
+    for seq_len in 2..=max_seq_length {
         if classified.len() < seq_len * 2 {
             continue;
         }
@@ -111,7 +113,7 @@ fn detect_loops(classified: &[String], session_id: &str, loops: &mut Vec<ToolLoo
                 repeat_count += 1;
                 j += seq_len;
             }
-            if repeat_count >= 2 {
+            if repeat_count >= min_repeats {
                 loops.push(ToolLoop {
                     sequence: pattern.to_vec(),
                     repeat_count,

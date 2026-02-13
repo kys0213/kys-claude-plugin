@@ -12,7 +12,7 @@ use crate::analyzers::{
     analyze_workflows, analyze_prompts, analyze_tacit_knowledge,
     build_transition_matrix, analyze_repetition, analyze_trends,
     analyze_files, link_sessions,
-    AnalysisDepth, DepthConfig, StopwordSet,
+    AnalysisDepth, DepthConfig, StopwordSet, TuningConfig,
 };
 use crate::analyzers::tool_classifier::classify_tool;
 
@@ -30,6 +30,7 @@ pub fn run(
     top: usize,
     decay: bool,
     stopwords: &StopwordSet,
+    tuning: &TuningConfig,
 ) -> Result<()> {
     let resolved_path = resolve_project_path(project_path)
         .with_context(|| format!(
@@ -101,6 +102,7 @@ pub fn run(
         project_path,
         &cache_dir,
         stopwords,
+        tuning,
     )?;
 
     // Write index
@@ -390,15 +392,16 @@ fn generate_analysis_snapshot(
     project_path: &str,
     cache_dir: &Path,
     stopwords: &StopwordSet,
+    tuning: &TuningConfig,
 ) -> Result<()> {
     // Existing analyses
-    let workflow_result = analyze_workflows(sessions, threshold, top, 2, 5);
-    let prompt_result = analyze_prompts(history_entries, decay, 14.0);
-    let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, 14.0, stopwords);
+    let workflow_result = analyze_workflows(sessions, threshold, top, tuning.min_seq_length, tuning.max_seq_length, tuning.time_window_minutes);
+    let prompt_result = analyze_prompts(history_entries, decay, tuning.decay_half_life_days);
+    let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, tuning, stopwords);
 
     // New statistical analyses (rule-free)
     let transition_result = build_transition_matrix(sessions);
-    let repetition_result = analyze_repetition(sessions);
+    let repetition_result = analyze_repetition(sessions, tuning);
     let trend_result = analyze_trends(sessions, history_entries);
     let file_result = analyze_files(sessions, top);
     let link_result = link_sessions(sessions);
@@ -408,6 +411,7 @@ fn generate_analysis_snapshot(
         "depth": depth.to_string(),
         "project": project_path,
         "cacheVersion": CACHE_VERSION,
+        "tuning": serde_json::to_value(tuning).unwrap_or_default(),
 
         // Existing analyses
         "promptAnalysis": serde_json::to_value(&prompt_result)?,

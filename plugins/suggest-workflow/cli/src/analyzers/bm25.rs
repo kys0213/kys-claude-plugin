@@ -84,10 +84,12 @@ impl BM25Ranker {
     /// Score multiple queries and combine using the given strategy.
     /// Each element in `queries` is a separate set of tokens (a sub-query).
     /// Empty queries are filtered out before scoring.
+    /// `decay_factor` controls the weight decay for WeightedAvg (weight = decay^i).
     pub fn score_multi_query(
         &self,
         queries: &[Vec<String>],
         strategy: MultiQueryStrategy,
+        decay_factor: f64,
     ) -> f64 {
         let scores: Vec<f64> = queries
             .iter()
@@ -107,11 +109,11 @@ impl BM25Ranker {
                 scores.iter().sum::<f64>() / scores.len() as f64
             }
             MultiQueryStrategy::WeightedAvg => {
-                // First (original) query gets weight 1.0, subsequent queries decay by 0.6x
+                // First (original) query gets weight 1.0, subsequent queries decay
                 let mut total_weight = 0.0;
                 let mut weighted_sum = 0.0;
                 for (i, &score) in scores.iter().enumerate() {
-                    let weight = 0.6_f64.powi(i as i32);
+                    let weight = decay_factor.powi(i as i32);
                     weighted_sum += score * weight;
                     total_weight += weight;
                 }

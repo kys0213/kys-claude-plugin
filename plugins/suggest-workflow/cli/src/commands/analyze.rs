@@ -7,7 +7,7 @@ use crate::parsers::{
 use crate::parsers::projects::list_projects;
 use crate::analyzers::{
     analyze_workflows, analyze_prompts, analyze_tacit_knowledge,
-    AnalysisDepth, DepthConfig, StopwordSet,
+    AnalysisDepth, DepthConfig, StopwordSet, TuningConfig,
 };
 
 /// Analysis scope
@@ -67,15 +67,16 @@ pub fn run(
     decay: bool,
     date_range: Option<(i64, i64)>,
     stopwords: &StopwordSet,
+    tuning: &TuningConfig,
 ) -> Result<()> {
     let depth_config = depth.resolve();
 
     match scope {
         AnalysisScope::Project => {
-            run_project_analysis(project_path, &depth_config, &depth, focus, threshold, top, format, decay, date_range, stopwords)
+            run_project_analysis(project_path, &depth_config, &depth, focus, threshold, top, format, decay, date_range, stopwords, tuning)
         }
         AnalysisScope::Global => {
-            run_global_analysis(&depth_config, &depth, focus, threshold, top, format, decay, date_range, stopwords)
+            run_global_analysis(&depth_config, &depth, focus, threshold, top, format, decay, date_range, stopwords, tuning)
         }
     }
 }
@@ -100,6 +101,7 @@ fn run_project_analysis(
     decay: bool,
     date_range: Option<(i64, i64)>,
     stopwords: &StopwordSet,
+    tuning: &TuningConfig,
 ) -> Result<()> {
     let resolved_path = resolve_project_path(project_path)
         .with_context(|| format!(
@@ -123,12 +125,12 @@ fn run_project_analysis(
     if format == "json" {
         print_json_output(
             &sessions, &history_entries, depth_config, depth, focus,
-            threshold, top, decay, project_path, None, stopwords,
+            threshold, top, decay, project_path, None, stopwords, tuning,
         )
     } else {
         print_text_output(
             &sessions, &history_entries, depth_config, depth, focus,
-            threshold, top, decay, None, stopwords,
+            threshold, top, decay, None, stopwords, tuning,
         )
     }
 }
@@ -144,6 +146,7 @@ fn run_global_analysis(
     decay: bool,
     date_range: Option<(i64, i64)>,
     stopwords: &StopwordSet,
+    tuning: &TuningConfig,
 ) -> Result<()> {
     let project_dirs = list_projects(None)?;
     if project_dirs.is_empty() {
@@ -207,12 +210,12 @@ fn run_global_analysis(
     if format == "json" {
         print_json_output(
             &all_sessions, &all_history, depth_config, depth, focus,
-            threshold, top, decay, "global", global_info.as_ref(), stopwords,
+            threshold, top, decay, "global", global_info.as_ref(), stopwords, tuning,
         )
     } else {
         print_text_output(
             &all_sessions, &all_history, depth_config, depth, focus,
-            threshold, top, decay, global_info.as_ref(), stopwords,
+            threshold, top, decay, global_info.as_ref(), stopwords, tuning,
         )
     }
 }
@@ -281,6 +284,7 @@ fn print_text_output(
     decay: bool,
     global_info: Option<&GlobalInfo>,
     stopwords: &StopwordSet,
+    tuning: &TuningConfig,
 ) -> Result<()> {
     // Header
     if let Some(info) = global_info {
@@ -292,8 +296,8 @@ fn print_text_output(
 
     // Workflow analysis
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Workflow {
-        let workflow_result = analyze_workflows(sessions, threshold, top, 2, 5);
-        let prompt_result = analyze_prompts(history_entries, decay, 14.0);
+        let workflow_result = analyze_workflows(sessions, threshold, top, tuning.min_seq_length, tuning.max_seq_length, tuning.time_window_minutes);
+        let prompt_result = analyze_prompts(history_entries, decay, tuning.decay_half_life_days);
 
         println!("--- Workflow Analysis ---\n");
         println!("Total prompts: {} | Unique: {}", prompt_result.total, prompt_result.unique);
@@ -328,7 +332,7 @@ fn print_text_output(
 
     // Skill/tacit knowledge analysis
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Skill {
-        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, 14.0, stopwords);
+        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, tuning, stopwords);
 
         println!("--- Tacit Knowledge Analysis ---\n");
         println!("Detected patterns: {}\n", skill_result.patterns.len());
@@ -406,11 +410,13 @@ fn print_json_output(
     project_path: &str,
     global_info: Option<&GlobalInfo>,
     stopwords: &StopwordSet,
+    tuning: &TuningConfig,
 ) -> Result<()> {
     let mut output = serde_json::json!({
         "analyzedAt": chrono::Utc::now().to_rfc3339(),
         "depth": depth.to_string(),
         "scope": if global_info.is_some() { "global" } else { "project" },
+        "tuning": serde_json::to_value(tuning).unwrap_or_default(),
     });
 
     if global_info.is_none() {
@@ -430,14 +436,14 @@ fn print_json_output(
     }
 
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Workflow {
-        let workflow_result = analyze_workflows(sessions, threshold, top, 2, 5);
-        let prompt_result = analyze_prompts(history_entries, decay, 14.0);
+        let workflow_result = analyze_workflows(sessions, threshold, top, tuning.min_seq_length, tuning.max_seq_length, tuning.time_window_minutes);
+        let prompt_result = analyze_prompts(history_entries, decay, tuning.decay_half_life_days);
         output["promptAnalysis"] = serde_json::to_value(&prompt_result)?;
         output["workflowAnalysis"] = serde_json::to_value(&workflow_result)?;
     }
 
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Skill {
-        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, 14.0, stopwords);
+        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, tuning, stopwords);
         output["tacitKnowledge"] = serde_json::to_value(&skill_result)?;
     }
 

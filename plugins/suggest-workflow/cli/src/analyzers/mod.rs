@@ -7,6 +7,7 @@ pub mod suffix_miner;
 pub mod depth;
 pub mod query_decomposer;
 pub mod stopwords;
+pub mod tuning;
 
 // Statistical analyzers (rule-free)
 pub mod transition;
@@ -20,6 +21,7 @@ pub use prompt::analyze_prompts;
 pub use tacit::analyze_tacit_knowledge;
 pub use depth::{AnalysisDepth, DepthConfig};
 pub use stopwords::StopwordSet;
+pub use tuning::TuningConfig;
 
 pub use transition::build_transition_matrix;
 pub use repetition::analyze_repetition;

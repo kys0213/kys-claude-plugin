@@ -8,7 +8,7 @@ mod analyzers;
 mod tokenizer;
 mod types;
 
-use analyzers::{AnalysisDepth, StopwordSet};
+use analyzers::{AnalysisDepth, StopwordSet, TuningConfig};
 use commands::analyze::{AnalysisScope, AnalysisFocus};
 
 #[derive(Parser)]
@@ -65,10 +65,45 @@ struct Cli {
     /// Outputs cache directory path to stdout.
     #[arg(long)]
     cache: bool,
+
+    /// Path to a JSON tuning config file (overrides default magic numbers).
+    /// Use --tuning-defaults to print the default template.
+    #[arg(long)]
+    tuning: Option<String>,
+
+    /// Print default tuning config as JSON and exit
+    #[arg(long)]
+    tuning_defaults: bool,
+
+    /// Override: BM25 k1 parameter (term-frequency saturation)
+    #[arg(long)]
+    bm25_k1: Option<f64>,
+
+    /// Override: BM25 b parameter (document-length normalization)
+    #[arg(long)]
+    bm25_b: Option<f64>,
+
+    /// Override: time window in minutes for workflow sequence splitting
+    #[arg(long)]
+    time_window: Option<u64>,
+
+    /// Override: half-life in days for temporal decay
+    #[arg(long)]
+    decay_half_life: Option<f64>,
+
+    /// Override: z-score threshold for outlier detection
+    #[arg(long)]
+    z_threshold: Option<f64>,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // --tuning-defaults: print template and exit
+    if cli.tuning_defaults {
+        TuningConfig::print_defaults();
+        return Ok(());
+    }
 
     let depth: AnalysisDepth = cli.depth.parse()
         .map_err(|e: String| anyhow::anyhow!(e))?;
@@ -104,6 +139,20 @@ fn main() -> Result<()> {
     // Build stopword set from defaults + config file + CLI
     let stopwords = StopwordSet::load(&cli.exclude_words);
 
+    // Build tuning config: file → defaults → CLI overrides
+    let mut tuning = match &cli.tuning {
+        Some(path) => TuningConfig::load_from_file(std::path::Path::new(path))
+            .map_err(|e| anyhow::anyhow!(e))?,
+        None => TuningConfig::default(),
+    };
+    tuning.apply_overrides(
+        cli.bm25_k1,
+        cli.bm25_b,
+        cli.time_window,
+        cli.decay_half_life,
+        cli.z_threshold,
+    );
+
     if cli.cache {
         return commands::cache::run(
             &project_path,
@@ -112,6 +161,7 @@ fn main() -> Result<()> {
             cli.top,
             cli.decay,
             &stopwords,
+            &tuning,
         );
     }
 
@@ -131,5 +181,6 @@ fn main() -> Result<()> {
         cli.decay,
         date_range,
         &stopwords,
+        &tuning,
     )
 }

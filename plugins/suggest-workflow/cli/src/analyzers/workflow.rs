@@ -3,7 +3,10 @@ use crate::types::{SessionEntry, ToolUse, ToolSequence, WorkflowAnalysisResult};
 use crate::parsers::extract_tool_sequence;
 use crate::analyzers::tool_classifier::classify_tool;
 
-const DEFAULT_TIME_WINDOW: i64 = 5 * 60 * 1000; // 5 minutes in milliseconds
+/// Convert time_window_minutes to milliseconds (called with TuningConfig value)
+fn time_window_ms(minutes: u64) -> i64 {
+    minutes as i64 * 60 * 1000
+}
 
 /// Classify tool uses into named sequences, passing input for Bash sub-classification
 fn classify_tool_uses(tool_uses: &[ToolUse]) -> Vec<String> {
@@ -19,6 +22,7 @@ fn extract_sequences_from_classified(
     classified_names: &[String],
     min_length: usize,
     max_length: usize,
+    time_window: i64,
 ) -> Vec<Vec<String>> {
     if classified_names.len() < min_length {
         return Vec::new();
@@ -34,7 +38,7 @@ fn extract_sequences_from_classified(
         if i < tool_uses.len() - 1 {
             if let (Some(curr_ts), Some(next_ts)) = (tool_uses[i].timestamp, tool_uses[i + 1].timestamp) {
                 let time_diff = next_ts - curr_ts;
-                if time_diff > DEFAULT_TIME_WINDOW {
+                if time_diff > time_window {
                     if current_unit.len() >= min_length {
                         work_units.push(current_unit.clone());
                     }
@@ -124,6 +128,7 @@ pub fn analyze_workflows(
     top: usize,
     min_length: usize,
     max_length: usize,
+    time_window_minutes: u64,
 ) -> WorkflowAnalysisResult {
     if sessions.is_empty() {
         return WorkflowAnalysisResult {
@@ -134,6 +139,7 @@ pub fn analyze_workflows(
         };
     }
 
+    let time_window = time_window_ms(time_window_minutes);
     let session_names: Vec<String> = sessions.iter().map(|(id, _)| id.clone()).collect();
     let mut all_sequences = Vec::new();
     let mut all_session_indices = Vec::new();
@@ -151,7 +157,7 @@ pub fn analyze_workflows(
 
         // Extract sequences from already-classified names
         let sequences = extract_sequences_from_classified(
-            &tool_uses, &classified_names, min_length, max_length,
+            &tool_uses, &classified_names, min_length, max_length, time_window,
         );
 
         for seq in sequences {
