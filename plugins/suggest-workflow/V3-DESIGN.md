@@ -332,21 +332,41 @@ SELECT value FROM meta WHERE key = 'schema_version';
 
 ### 5-3. 변경 감지
 
-```rust
-/// 세션 파일이 변경되었는지 판단
-fn is_session_changed(db: &Connection, file_path: &Path) -> bool {
-    let meta = fs::metadata(file_path);
-    let current_size = meta.len();
-    let current_mtime = meta.modified().as_millis();
+호출부 (`commands/index.rs`) — Repository trait만 사용:
 
-    match db.query_row(
-        "SELECT file_size, file_mtime FROM sessions WHERE file_path = ?",
-        [file_path.to_str()],
-        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
-    ) {
-        Ok((saved_size, saved_mtime)) =>
-            current_size != saved_size || current_mtime != saved_mtime,
-        Err(_) => true, // 신규 세션
+```rust
+// commands/index.rs — rusqlite 의존 없음
+fn index_session(repo: &dyn IndexRepository, file_path: &Path) -> Result<bool> {
+    let meta = fs::metadata(file_path)?;
+    let size = meta.len();
+    let mtime = meta.modified()?.duration_since(UNIX_EPOCH)?.as_millis() as i64;
+
+    if !repo.is_session_changed(file_path, size, mtime)? {
+        return Ok(false); // 변경 없음 → skip
+    }
+
+    let session_data = parse_jsonl(file_path)?;
+    repo.upsert_session(&session_data)?;
+    Ok(true)
+}
+```
+
+구현부 (`db/sqlite.rs`) — rusqlite 사용은 여기서만:
+
+```rust
+// db/sqlite.rs
+impl IndexRepository for SqliteStore {
+    fn is_session_changed(&self, file_path: &Path, size: u64, mtime: i64) -> Result<bool> {
+        match self.conn.query_row(
+            "SELECT file_size, file_mtime FROM sessions WHERE file_path = ?1",
+            params![file_path.to_str()],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        ) {
+            Ok((saved_size, saved_mtime)) =>
+                Ok(size as i64 != saved_size || mtime != saved_mtime),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(true), // 신규 세션
+            Err(e) => Err(e.into()),
+        }
     }
 }
 ```
@@ -425,39 +445,182 @@ suggest-workflow query --perspective sequences --min-count 3
 suggest-workflow query --perspective clusters --depth normal
 ```
 
-### 6-2. Perspective 내부 구현 (SQL 매핑)
+### 6-2. Repository 패턴
 
-각 perspective는 파라미터화된 SQL 템플릿으로 구현:
+`rusqlite` 의존성을 `db/` 모듈 안에 격리하고, CLI commands는 trait만 의존한다.
+
+#### 설계 원칙
+
+```
+commands/index.rs  ──→  IndexRepository (trait)  ←── db/sqlite.rs (impl)
+commands/query.rs  ──→  QueryRepository (trait)  ←── db/sqlite.rs (impl)
+                                                      ↓
+                                                  rusqlite (여기서만 import)
+```
+
+- `rusqlite`는 `db/` 모듈 **외부에서 절대 import하지 않는다**
+- Commands는 Repository trait의 메서드만 호출
+- SQL은 `.sql` 파일로 분리하여 `include_str!`로 로드
+- 모든 쿼리는 파라미터 바인딩(`?1`, `?2`) 사용 (SQL injection 방지)
+
+#### Repository trait 정의
 
 ```rust
-fn perspective_tool_frequency(top: usize) -> String {
-    format!(r#"
-        SELECT classified_name as tool,
-               COUNT(*) as frequency,
-               COUNT(DISTINCT session_id) as sessions
-        FROM tool_uses
-        GROUP BY classified_name
-        ORDER BY frequency DESC
-        LIMIT {}
-    "#, top)
+// db/repository.rs — trait 정의 (rusqlite 의존 없음)
+
+use crate::types::*;
+use anyhow::Result;
+use std::path::Path;
+
+/// 인덱싱(쓰기) 작업
+pub trait IndexRepository {
+    /// DB 초기화 (스키마 생성, 마이그레이션)
+    fn initialize(&self) -> Result<()>;
+
+    /// 세션 변경 여부 확인 (size + mtime 비교)
+    fn is_session_changed(&self, file_path: &Path, size: u64, mtime: i64) -> Result<bool>;
+
+    /// 세션 데이터 upsert (기존 데이터 DELETE 후 INSERT)
+    fn upsert_session(&self, session: &SessionData) -> Result<()>;
+
+    /// 삭제된 세션 제거 (DB에 있지만 파일 없음)
+    fn remove_stale_sessions(&self, existing_paths: &[&Path]) -> Result<u64>;
+
+    /// 파생 테이블 재계산 (transitions, weekly_buckets, hotspots, links)
+    fn rebuild_derived_tables(&self) -> Result<()>;
+
+    /// 메타 정보 업데이트
+    fn update_meta(&self, key: &str, value: &str) -> Result<()>;
+
+    /// 스키마 버전 조회
+    fn schema_version(&self) -> Result<u32>;
 }
 
-fn perspective_transitions(tool: &str) -> String {
-    format!(r#"
-        SELECT to_tool, count, probability
-        FROM tool_transitions
-        WHERE from_tool = '{}'
-        ORDER BY probability DESC
-    "#, tool)
+/// 쿼리(읽기) 작업 — 각 perspective가 하나의 메서드
+pub trait QueryRepository {
+    fn tool_frequency(&self, opts: &QueryOpts) -> Result<serde_json::Value>;
+    fn transitions(&self, tool: &str, opts: &QueryOpts) -> Result<serde_json::Value>;
+    fn trends(&self, opts: &QueryOpts) -> Result<serde_json::Value>;
+    fn repetition(&self, z_threshold: f64, opts: &QueryOpts) -> Result<serde_json::Value>;
+    fn prompts(&self, search: &str, opts: &QueryOpts) -> Result<serde_json::Value>;
+    fn hotfiles(&self, opts: &QueryOpts) -> Result<serde_json::Value>;
+    fn session_links(&self, min_overlap: f64, opts: &QueryOpts) -> Result<serde_json::Value>;
+    fn dependency_graph(&self, opts: &QueryOpts) -> Result<serde_json::Value>;
+    fn sequences(&self, min_count: u32, opts: &QueryOpts) -> Result<serde_json::Value>;
+    fn clusters(&self, depth: &str, opts: &QueryOpts) -> Result<serde_json::Value>;
+    fn raw_sql(&self, sql: &str) -> Result<serde_json::Value>;
 }
 
-fn perspective_trends(since: &str) -> String {
-    format!(r#"
-        SELECT week_start, tool_name, count, session_count
-        FROM weekly_buckets
-        WHERE week_start >= '{}'
-        ORDER BY week_start, count DESC
-    "#, since)
+/// 공통 필터 옵션
+pub struct QueryOpts {
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub tool: Option<String>,
+    pub session: Option<String>,
+    pub top: Option<u32>,
+    pub min_count: Option<u32>,
+}
+```
+
+#### SQLite 구현
+
+```rust
+// db/sqlite.rs — rusqlite 의존은 이 파일(과 db/ 내부)에만 존재
+
+use rusqlite::Connection;
+use crate::db::repository::{IndexRepository, QueryRepository, QueryOpts};
+
+pub struct SqliteStore {
+    conn: Connection,
+}
+
+impl SqliteStore {
+    pub fn open(db_path: &Path) -> Result<Self> { ... }
+}
+
+impl IndexRepository for SqliteStore { ... }
+impl QueryRepository for SqliteStore { ... }
+```
+
+#### SQL 파일 분리
+
+```rust
+// db/sqlite.rs 내부에서 SQL 로드
+const TOOL_FREQUENCY_SQL: &str = include_str!("queries/tool_frequency.sql");
+const TRANSITIONS_SQL: &str = include_str!("queries/transitions.sql");
+const TRENDS_SQL: &str = include_str!("queries/trends.sql");
+// ...
+
+impl QueryRepository for SqliteStore {
+    fn tool_frequency(&self, opts: &QueryOpts) -> Result<serde_json::Value> {
+        let top = opts.top.unwrap_or(10);
+        let mut stmt = self.conn.prepare(TOOL_FREQUENCY_SQL)?;
+        let rows = stmt.query_map(params![top], |row| { ... })?;
+        Ok(serde_json::to_value(rows.collect::<Vec<_>>()?)?)
+    }
+}
+```
+
+```sql
+-- db/queries/tool_frequency.sql
+SELECT classified_name AS tool,
+       COUNT(*) AS frequency,
+       COUNT(DISTINCT session_id) AS sessions
+FROM tool_uses
+GROUP BY classified_name
+ORDER BY frequency DESC
+LIMIT ?1
+```
+
+```sql
+-- db/queries/transitions.sql
+SELECT to_tool, count, probability
+FROM tool_transitions
+WHERE from_tool = ?1
+ORDER BY probability DESC
+```
+
+```sql
+-- db/queries/trends.sql
+SELECT week_start, tool_name, count, session_count
+FROM weekly_buckets
+WHERE week_start >= ?1
+ORDER BY week_start, count DESC
+```
+
+#### Command에서의 사용
+
+```rust
+// commands/query.rs — rusqlite를 import하지 않음
+use crate::db::repository::QueryRepository;
+
+pub fn run_query(repo: &dyn QueryRepository, perspective: &str, opts: QueryOpts) -> Result<()> {
+    let result = match perspective {
+        "tool-frequency" => repo.tool_frequency(&opts)?,
+        "transitions"    => repo.transitions(opts.tool.as_deref().unwrap_or(""), &opts)?,
+        "trends"         => repo.trends(&opts)?,
+        // ...
+        _ => anyhow::bail!("unknown perspective: {}", perspective),
+    };
+    println!("{}", serde_json::to_string_pretty(&result)?);
+    Ok(())
+}
+```
+
+```rust
+// main.rs — 조립(wiring)만 여기서
+use crate::db::sqlite::SqliteStore;
+
+fn main() -> Result<()> {
+    let args = Cli::parse();
+    let db_path = resolve_db_path(&args)?;
+    let store = SqliteStore::open(&db_path)?;
+
+    match args.command {
+        Command::Index(opts) => commands::index::run_index(&store, opts),
+        Command::Query(opts) => commands::query::run_query(&store, &opts.perspective, opts.into()),
+        // ...
+    }
 }
 ```
 
@@ -620,18 +783,30 @@ Phase D: v2 캐시 형식 deprecated
 
 ```
 cli/src/
-├── main.rs                    # clap subcommand 라우팅
-├── types.rs                   # 공통 타입
-├── db/                        # [신규] SQLite 레이어
+├── main.rs                    # clap subcommand 라우팅 + 의존성 조립(wiring)
+├── types.rs                   # 공통 타입 (SessionData, Transition 등)
+├── db/                        # [신규] 저장소 레이어
+│   ├── mod.rs                 # pub use repository, sqlite
+│   ├── repository.rs          # trait 정의 (IndexRepository, QueryRepository)
+│   │                          #   → rusqlite 의존 없음, 순수 인터페이스
+│   ├── sqlite.rs              # SqliteStore: trait 구현체
+│   │                          #   → rusqlite는 이 파일에서만 import
+│   ├── schema.rs              # 테이블 생성 DDL (include_str!로 로드)
+│   ├── migrate.rs             # 스키마 버전 관리
+│   └── queries/               # [신규] SQL 파일 분리
+│       ├── schema.sql         # CREATE TABLE DDL
+│       ├── tool_frequency.sql
+│       ├── transitions.sql
+│       ├── trends.sql
+│       ├── repetition.sql
+│       ├── hotfiles.sql
+│       ├── session_links.sql
+│       ├── sequences.sql
+│       └── ...
+├── commands/                  # rusqlite 의존 없음 — trait만 사용
 │   ├── mod.rs
-│   ├── schema.rs              # 테이블 생성, 마이그레이션
-│   ├── write.rs               # 인덱싱 (INSERT/DELETE)
-│   ├── read.rs                # perspective 쿼리
-│   └── migrate.rs             # 스키마 버전 관리
-├── commands/
-│   ├── mod.rs
-│   ├── index.rs               # [신규] 인덱싱 커맨드
-│   ├── query.rs               # [신규] 쿼리 커맨드
+│   ├── index.rs               # [신규] fn run_index(repo: &dyn IndexRepository, ...)
+│   ├── query.rs               # [신규] fn run_query(repo: &dyn QueryRepository, ...)
 │   ├── analyze.rs             # [유지] v2 호환
 │   └── cache.rs               # [유지] v2 호환
 ├── analyzers/                 # 기존 유지 (Phase B에서 점진적 DB 기반 전환)
@@ -641,6 +816,16 @@ cli/src/
 └── tokenizer/                 # 기존 유지
     ├── ...
 ```
+
+**의존성 방향** (단방향):
+```
+commands/ ──→ db/repository.rs (trait)
+                    ↑
+main.rs ──→ db/sqlite.rs (impl) ──→ rusqlite
+```
+
+`commands/`는 `db/repository.rs`의 trait만 알고, 구체 구현(`sqlite.rs`)과 `rusqlite`는 모른다.
+`main.rs`만 구체 구현을 알고 조립(wiring)한다.
 
 ---
 
@@ -658,18 +843,20 @@ cli/src/
 
 ## 13. 구현 순서 (권장)
 
-### Sprint 1: 기반
+### Sprint 1: 기반 (Repository 스캐폴딩)
 
 1. `rusqlite` 의존성 추가 + 빌드 확인
-2. `db/schema.rs` — 테이블 생성
-3. `db/write.rs` — 원시 데이터 인서트 (sessions, prompts, tool_uses, file_edits)
-4. `commands/index.rs` — 기본 인덱싱 (전체 빌드)
+2. `db/repository.rs` — `IndexRepository`, `QueryRepository` trait 정의
+3. `db/queries/schema.sql` — DDL 분리
+4. `db/sqlite.rs` — `SqliteStore` 구현체 (스키마 초기화 + 원시 데이터 INSERT)
+5. `commands/index.rs` — 기본 인덱싱 (`&dyn IndexRepository`만 의존)
 
 ### Sprint 2: 쿼리
 
-5. `db/read.rs` — perspective 쿼리 구현 (tool-frequency, transitions, trends 등)
-6. `commands/query.rs` — 쿼리 커맨드 + JSON 출력
-7. main.rs에 서브커맨드 라우팅 추가
+6. `db/queries/*.sql` — perspective별 SQL 파일 작성
+7. `db/sqlite.rs` — `QueryRepository` 구현 (`include_str!` + 파라미터 바인딩)
+8. `commands/query.rs` — 쿼리 커맨드 (`&dyn QueryRepository`만 의존)
+9. `main.rs` — 서브커맨드 라우팅 + `SqliteStore` 조립(wiring)
 
 ### Sprint 3: 인크리멘털 + 파생
 
@@ -710,6 +897,9 @@ cli/src/
 | 결정 | 선택 | 근거 |
 |------|------|------|
 | 스토리지 | SQLite (rusqlite bundled) | 유연한 SQL, ~600KB, 단일 파일 |
+| DB 접근 패턴 | Repository 패턴 (trait 추상화) | rusqlite 의존성 격리, commands에서 DB 구현 모름 |
+| SQL 관리 | `.sql` 파일 분리 + `include_str!` | 에디터 하이라이팅, 관심사 분리 |
+| 쿼리 안전성 | 파라미터 바인딩 (`?1`, `?2`) | SQL injection 방지 |
 | 쿼리 인터페이스 | perspective 기반 + 커스텀 SQL | 일반 사용은 쉽게, 고급은 자유롭게 |
 | 인크리멘털 전략 | size + mtime 변경 감지 | 단순하고 신뢰성 있음 |
 | 파생 테이블 | 전체 재계산 | 데이터 규모가 작아 충분히 빠름 |
