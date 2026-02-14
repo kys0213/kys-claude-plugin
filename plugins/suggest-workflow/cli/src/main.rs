@@ -315,6 +315,27 @@ fn run_legacy(cli: LegacyArgs) -> Result<()> {
     );
 
     if cli.cache {
+        // v3: Run index first to populate SQLite DB
+        let db_path = resolve_db_path(None, &project_path)?;
+        let sessions_dir = resolve_sessions_dir(&project_path)?;
+
+        if sessions_dir.exists() {
+            let store = db::SqliteStore::open(&db_path)?;
+            commands::index::run(&store, &sessions_dir)?;
+            eprintln!("Index DB: {}", db_path.display());
+
+            return commands::cache::run(
+                &project_path,
+                &depth,
+                cli.threshold,
+                cli.top,
+                cli.decay,
+                &stopwords,
+                &tuning,
+                Some(&store as &dyn db::QueryRepository),
+            );
+        }
+
         return commands::cache::run(
             &project_path,
             &depth,
@@ -323,6 +344,7 @@ fn run_legacy(cli: LegacyArgs) -> Result<()> {
             cli.decay,
             &stopwords,
             &tuning,
+            None,
         );
     }
 
