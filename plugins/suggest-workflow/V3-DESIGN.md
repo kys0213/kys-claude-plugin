@@ -1228,3 +1228,320 @@ main.rs ──→ db/sqlite.rs (impl) ──→ rusqlite
 | 파생 테이블 | 전체 재계산 | 데이터 규모가 작아 충분히 빠름 |
 | v2 호환 | 기존 CLI 인터페이스 유지 | 점진적 마이그레이션 |
 | Phase 2 연동 | query 서브커맨드 | 에이전트가 필요한 것만 요청 |
+
+---
+
+## 16. 테스트 계획 (블랙박스)
+
+v3 CLI는 **블랙박스 테스트** 중심으로 검증한다.
+내부 구현(Repository, SQLite 스키마 등)을 직접 검증하지 않고, CLI 바이너리의 **입력(fixture + 옵션) → 출력(stdout JSON, stderr, exit code)** 만 확인한다.
+
+### 16-1. 테스트 의존성
+
+```toml
+[dev-dependencies]
+assert_cmd = "2.0"      # CLI 바이너리 실행 + 검증
+predicates = "3.1"      # stdout/stderr 매칭
+tempfile = "3.14"       # 임시 디렉토리 (테스트 격리)
+serde_json = "1.0"      # JSON 출력 파싱
+```
+
+### 16-2. Fixture 전략
+
+```
+cli/tests/
+├── fixtures/
+│   ├── sessions/                    # 테스트용 JSONL 파일
+│   │   ├── minimal.jsonl            # 프롬프트 1개, tool_use 1개 (최소)
+│   │   ├── multi_tool.jsonl         # 다양한 도구 사용 (Edit, Bash, Read 등)
+│   │   ├── bash_classified.jsonl    # Bash 분류 가능 (git, test, npm 등)
+│   │   ├── file_edits.jsonl         # Edit/Write로 파일 편집 포함
+│   │   ├── empty.jsonl              # 빈 파일 (프롬프트 0개)
+│   │   └── malformed.jsonl          # 잘못된 JSON 라인 포함
+│   └── custom_queries/
+│       ├── valid_select.sql         # 유효한 SELECT 쿼리
+│       └── has_insert.sql           # INSERT 포함 (거부돼야 함)
+```
+
+fixture는 **실제 Claude 세션 JSONL 구조를 최소화**한 것.
+각 fixture는 **어떤 테스트 시나리오를 위한 것인지** 파일명에 드러나야 한다.
+
+### 16-3. 테스트 헬퍼
+
+```rust
+// tests/helpers/mod.rs
+
+use assert_cmd::Command;
+use tempfile::TempDir;
+use std::path::PathBuf;
+
+/// 임시 프로젝트 디렉토리 생성 + fixture JSONL 복사
+pub fn setup_project(fixtures: &[&str]) -> (TempDir, PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    let sessions_dir = tmp.path().join(".claude").join("projects").join("test");
+    std::fs::create_dir_all(&sessions_dir).unwrap();
+
+    for fixture in fixtures {
+        let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/sessions")
+            .join(fixture);
+        let dest = sessions_dir.join(fixture);
+        std::fs::copy(&src, &dest).unwrap();
+    }
+
+    let project_path = tmp.path().to_path_buf();
+    (tmp, project_path)
+}
+
+/// suggest-workflow CLI 커맨드 빌드
+pub fn cli() -> Command {
+    Command::cargo_bin("suggest-workflow").unwrap()
+}
+```
+
+### 16-4. 테스트 케이스
+
+#### A. `index` 서브커맨드
+
+| # | 시나리오 | 입력 | 검증 |
+|---|---------|------|------|
+| A1 | 첫 인덱싱 | fixture 3개 + `index` | exit 0, stderr에 "Indexed: 3 new" 포함 |
+| A2 | 인크리멘털 (변경 없음) | A1 후 다시 `index` | stderr에 "0 new, 0 updated, 3 unchanged" |
+| A3 | 인크리멘털 (1개 변경) | A1 후 fixture 1개 수정 → `index` | stderr에 "1 updated, 2 unchanged" |
+| A4 | 인크리멘털 (1개 추가) | A1 후 fixture 1개 추가 → `index` | stderr에 "1 new, 3 unchanged" |
+| A5 | 인크리멘털 (1개 삭제) | A1 후 fixture 1개 삭제 → `index` | stderr에 "1 deleted, 2 unchanged" |
+| A6 | `--full` 재구축 | A1 후 `index --full` | stderr에 "Indexed: 3 new" (전체 재구축) |
+| A7 | 빈 프로젝트 | fixture 0개 + `index` | exit 0, stderr에 "0 new" |
+| A8 | malformed JSONL | `malformed.jsonl` + `index` | exit 0 (에러 세션 skip), stderr에 경고 |
+
+```rust
+#[test]
+fn a1_first_index_creates_db() {
+    let (_tmp, project) = setup_project(&[
+        "minimal.jsonl",
+        "multi_tool.jsonl",
+        "bash_classified.jsonl",
+    ]);
+
+    cli().args(["index", "--project", project.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("3 new"));
+}
+
+#[test]
+fn a2_incremental_skips_unchanged() {
+    let (_tmp, project) = setup_project(&["minimal.jsonl"]);
+
+    // 첫 인덱싱
+    cli().args(["index", "--project", project.to_str().unwrap()])
+        .assert().success();
+
+    // 두 번째 — 변경 없음
+    cli().args(["index", "--project", project.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("0 new"))
+        .stderr(predicates::str::contains("1 unchanged"));
+}
+```
+
+#### B. `query --perspective` (빌트인 perspective)
+
+| # | 시나리오 | 입력 | 검증 |
+|---|---------|------|------|
+| B1 | tool-frequency 기본 | `query --perspective tool-frequency` | exit 0, stdout가 valid JSON 배열, `tool` + `frequency` 키 존재 |
+| B2 | tool-frequency --param top=3 | `--param top=3` | JSON 배열 길이 ≤ 3 |
+| B3 | transitions (required param) | `--perspective transitions --param tool=Edit` | exit 0, `to_tool` + `probability` 키 존재 |
+| B4 | transitions (param 누락) | `--perspective transitions` (--param 없음) | exit ≠ 0, stderr에 "missing required param" |
+| B5 | trends 기본 | `--perspective trends` | exit 0, `week_start` 키 존재 |
+| B6 | trends --param since | `--param since=2026-02-01` | 반환된 모든 `week_start` ≥ 2026-02-01 |
+| B7 | hotfiles | `--perspective hotfiles` | exit 0, `file_path` + `edit_count` 키 존재 |
+| B8 | 존재하지 않는 perspective | `--perspective nonexistent` | exit ≠ 0, stderr에 "unknown perspective" |
+| B9 | 빈 DB 쿼리 | 인덱싱 없이 바로 `query` | exit ≠ 0 또는 빈 배열 |
+
+```rust
+#[test]
+fn b1_tool_frequency_returns_valid_json() {
+    let (_tmp, project) = setup_project(&["multi_tool.jsonl"]);
+    cli().args(["index", "--project", project.to_str().unwrap()])
+        .assert().success();
+
+    let output = cli()
+        .args(["query", "--project", project.to_str().unwrap(),
+               "--perspective", "tool-frequency"])
+        .assert()
+        .success()
+        .get_output().stdout.clone();
+
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let arr = json.as_array().unwrap();
+    assert!(!arr.is_empty());
+    assert!(arr[0].get("tool").is_some());
+    assert!(arr[0].get("frequency").is_some());
+}
+
+#[test]
+fn b4_transitions_missing_required_param() {
+    let (_tmp, project) = setup_project(&["multi_tool.jsonl"]);
+    cli().args(["index", "--project", project.to_str().unwrap()])
+        .assert().success();
+
+    cli().args(["query", "--project", project.to_str().unwrap(),
+                "--perspective", "transitions"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("missing required param"));
+}
+```
+
+#### C. `query --list-perspectives`
+
+| # | 시나리오 | 검증 |
+|---|---------|------|
+| C1 | 목록 출력 | exit 0, 모든 빌트인 perspective 이름이 출력에 포함 |
+| C2 | 파라미터 정보 | 각 perspective의 `--param` 이름과 required/default 정보 표시 |
+
+```rust
+#[test]
+fn c1_list_perspectives_shows_all_builtins() {
+    let (_tmp, project) = setup_project(&["minimal.jsonl"]);
+    cli().args(["index", "--project", project.to_str().unwrap()])
+        .assert().success();
+
+    let assert = cli()
+        .args(["query", "--project", project.to_str().unwrap(),
+               "--list-perspectives"])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(stderr.contains("tool-frequency"));
+    assert!(stderr.contains("transitions"));
+    assert!(stderr.contains("trends"));
+    assert!(stderr.contains("hotfiles"));
+}
+```
+
+#### D. `query --sql-file` (커스텀 SQL)
+
+| # | 시나리오 | 입력 | 검증 |
+|---|---------|------|------|
+| D1 | 유효한 SELECT | `valid_select.sql` | exit 0, stdout가 valid JSON |
+| D2 | INSERT 포함 SQL | `has_insert.sql` | exit ≠ 0, stderr에 거부 메시지 |
+| D3 | 존재하지 않는 파일 | `--sql-file /tmp/nope.sql` | exit ≠ 0, stderr에 파일 에러 |
+| D4 | 빈 SQL 파일 | 빈 `.sql` 파일 | exit ≠ 0, stderr에 에러 |
+
+```rust
+#[test]
+fn d1_custom_sql_file_returns_json() {
+    let (_tmp, project) = setup_project(&["multi_tool.jsonl"]);
+    cli().args(["index", "--project", project.to_str().unwrap()])
+        .assert().success();
+
+    // 커스텀 SQL 파일 작성
+    let sql_file = _tmp.path().join("custom.sql");
+    std::fs::write(&sql_file,
+        "SELECT classified_name, COUNT(*) as cnt FROM tool_uses GROUP BY classified_name"
+    ).unwrap();
+
+    let output = cli()
+        .args(["query", "--project", project.to_str().unwrap(),
+               "--sql-file", sql_file.to_str().unwrap()])
+        .assert()
+        .success()
+        .get_output().stdout.clone();
+
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert!(json.as_array().is_some());
+}
+
+#[test]
+fn d2_sql_file_with_insert_rejected() {
+    let (_tmp, project) = setup_project(&["minimal.jsonl"]);
+    cli().args(["index", "--project", project.to_str().unwrap()])
+        .assert().success();
+
+    let sql_file = _tmp.path().join("bad.sql");
+    std::fs::write(&sql_file,
+        "INSERT INTO sessions (id) VALUES ('hacked')"
+    ).unwrap();
+
+    cli().args(["query", "--project", project.to_str().unwrap(),
+                "--sql-file", sql_file.to_str().unwrap()])
+        .assert()
+        .failure();
+}
+```
+
+#### E. DB 경로 resolve
+
+| # | 시나리오 | 입력 | 검증 |
+|---|---------|------|------|
+| E1 | `--project` 지정 | `--project /tmp/test-proj` | 해당 프로젝트의 인코딩된 경로에 DB 생성 |
+| E2 | `--db` 직접 지정 | `--db /tmp/test.db` | 지정된 경로에 DB 생성 |
+| E3 | `--project` 생략 | cwd에서 실행 | cwd 기준 DB 경로 사용 |
+| E4 | `--db` + `--project` 동시 | 둘 다 지정 | `--db`가 우선 |
+
+#### F. 출력 형식 + 파이프
+
+| # | 시나리오 | 검증 |
+|---|---------|------|
+| F1 | stdout는 valid JSON | 모든 query 출력이 `serde_json::from_slice` 성공 |
+| F2 | stderr는 사람 읽기용 | 로그, 경고, 에러는 stderr로 출력 |
+| F3 | exit code 규칙 | 성공=0, 사용자 에러(param 누락 등)=1, 내부 에러=2 |
+
+#### G. v2 호환 (Sprint 4 이후)
+
+| # | 시나리오 | 검증 |
+|---|---------|------|
+| G1 | `analyze` 커맨드 | v2와 동일한 JSON 형식 출력 |
+| G2 | `cache` 커맨드 | `analysis-snapshot.json` 생성 |
+
+### 16-5. 테스트 실행
+
+```bash
+# 전체 블랙박스 테스트
+cargo test --test '*'
+
+# 특정 카테고리
+cargo test --test blackbox_index      # A: index 테스트
+cargo test --test blackbox_query      # B+C+D: query 테스트
+cargo test --test blackbox_resolve    # E: DB 경로 테스트
+
+# 특정 테스트
+cargo test --test blackbox_query b4_transitions_missing_required_param
+```
+
+### 16-6. 테스트 파일 구조
+
+```
+cli/tests/
+├── fixtures/
+│   ├── sessions/
+│   │   ├── minimal.jsonl
+│   │   ├── multi_tool.jsonl
+│   │   ├── bash_classified.jsonl
+│   │   ├── file_edits.jsonl
+│   │   ├── empty.jsonl
+│   │   └── malformed.jsonl
+│   └── custom_queries/
+│       ├── valid_select.sql
+│       └── has_insert.sql
+├── helpers/
+│   └── mod.rs                      # setup_project(), cli()
+├── blackbox_index.rs               # A1~A8
+├── blackbox_query.rs               # B1~B9, C1~C2, D1~D4
+├── blackbox_resolve.rs             # E1~E4
+├── blackbox_output.rs              # F1~F3
+└── blackbox_v2_compat.rs           # G1~G2 (Sprint 4 이후)
+```
+
+### 16-7. 스프린트별 테스트 범위
+
+| 스프린트 | 테스트 케이스 | 비고 |
+|---------|-------------|------|
+| Sprint 1 | A1, A7, A8 | 기본 인덱싱만 |
+| Sprint 2 | B1~B9, C1~C2, D1~D4 | perspective + 커스텀 SQL |
+| Sprint 3 | A2~A6, E1~E4 | 인크리멘털 + 경로 resolve |
+| Sprint 4 | G1~G2, F1~F3 | v2 호환 + 출력 규격 |
