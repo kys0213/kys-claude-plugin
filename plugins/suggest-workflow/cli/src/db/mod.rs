@@ -1,3 +1,4 @@
+pub mod migrate;
 pub mod perspectives;
 pub mod repository;
 pub mod schema;

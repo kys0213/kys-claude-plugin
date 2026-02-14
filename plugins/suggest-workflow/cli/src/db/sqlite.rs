@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use std::path::Path;
 
+use super::migrate;
 use super::perspectives;
 use super::repository::*;
 use super::schema;
@@ -31,15 +32,25 @@ impl SqliteStore {
 
 impl IndexRepository for SqliteStore {
     fn initialize(&self) -> Result<()> {
-        self.conn
-            .execute_batch(schema::DDL)
-            .context("failed to initialize schema")?;
+        match migrate::check_and_migrate(&self.conn)? {
+            migrate::MigrateResult::Fresh => {
+                // First run: create all tables
+                self.conn
+                    .execute_batch(schema::DDL)
+                    .context("failed to initialize schema")?;
 
-        // Insert schema_version if not present
-        self.conn.execute(
-            "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?1)",
-            params![schema::SCHEMA_VERSION.to_string()],
-        )?;
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?1)",
+                    params![schema::SCHEMA_VERSION.to_string()],
+                )?;
+            }
+            migrate::MigrateResult::UpToDate => {
+                // Schema matches, nothing to do
+            }
+            migrate::MigrateResult::Migrated { from, to } => {
+                eprintln!("Schema migrated: v{} → v{}", from, to);
+            }
+        }
 
         Ok(())
     }
