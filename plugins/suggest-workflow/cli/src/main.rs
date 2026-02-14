@@ -30,6 +30,8 @@ struct Cli {
 enum Command {
     /// Index session data into SQLite (v3)
     Index(IndexArgs),
+    /// Query indexed data via perspectives or custom SQL (v3)
+    Query(QueryArgs),
 }
 
 #[derive(clap::Args)]
@@ -43,6 +45,28 @@ struct IndexArgs {
     /// Full rebuild: delete existing DB and re-index everything
     #[arg(long)]
     full: bool,
+}
+
+#[derive(clap::Args)]
+struct QueryArgs {
+    /// Project path (defaults to current directory)
+    #[arg(long)]
+    project: Option<String>,
+    /// Direct DB file path (overrides --project based resolution)
+    #[arg(long)]
+    db: Option<PathBuf>,
+    /// Perspective name to query
+    #[arg(long)]
+    perspective: Option<String>,
+    /// Parameters for perspective queries (key=value)
+    #[arg(long = "param", value_name = "KEY=VALUE")]
+    params: Vec<String>,
+    /// Path to a custom SQL file (SELECT only)
+    #[arg(long)]
+    sql_file: Option<PathBuf>,
+    /// List all available perspectives
+    #[arg(long)]
+    list_perspectives: bool,
 }
 
 #[derive(clap::Args)]
@@ -132,6 +156,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Some(Command::Index(args)) => run_index(args),
+        Some(Command::Query(args)) => run_query(args),
         None => run_legacy(cli.legacy),
     }
 }
@@ -159,6 +184,42 @@ fn run_index(args: IndexArgs) -> Result<()> {
 
     eprintln!("DB: {}", db_path.display());
     commands::index::run(&store, &sessions_dir)
+}
+
+// --- v3: query subcommand ---
+
+fn run_query(args: QueryArgs) -> Result<()> {
+    let project_path = match &args.project {
+        Some(p) => p.clone(),
+        None => std::env::current_dir()
+            .context("failed to get current directory")?
+            .to_string_lossy()
+            .to_string(),
+    };
+
+    let db_path = resolve_db_path(args.db.as_deref(), &project_path)?;
+
+    if !db_path.exists() {
+        anyhow::bail!(
+            "index DB not found: {}\nRun 'suggest-workflow index' first.",
+            db_path.display()
+        );
+    }
+
+    let store = db::SqliteStore::open(&db_path)?;
+
+    if args.list_perspectives {
+        return commands::query::list(&store);
+    }
+
+    let params = commands::query::parse_params(&args.params)?;
+
+    commands::query::run(
+        &store,
+        args.perspective.as_deref(),
+        args.sql_file.as_deref(),
+        params,
+    )
 }
 
 fn resolve_db_path(db: Option<&std::path::Path>, project_path: &str) -> Result<PathBuf> {

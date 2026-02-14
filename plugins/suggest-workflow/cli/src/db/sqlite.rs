@@ -2,11 +2,13 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use std::path::Path;
 
+use super::perspectives;
 use super::repository::*;
 use super::schema;
 
 pub struct SqliteStore {
     conn: Connection,
+    perspectives: Vec<PerspectiveInfo>,
 }
 
 impl SqliteStore {
@@ -21,7 +23,9 @@ impl SqliteStore {
 
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
 
-        Ok(Self { conn })
+        let perspectives = perspectives::register_perspectives();
+
+        Ok(Self { conn, perspectives })
     }
 }
 
@@ -218,6 +222,25 @@ impl IndexRepository for SqliteStore {
              GROUP BY week_start, classified_name;",
         )?;
 
+        // session_links: sessions sharing edited files
+        tx.execute_batch(
+            "INSERT INTO session_links (session_a, session_b, shared_files, overlap_ratio, time_gap_minutes)
+             SELECT a.session_id, b.session_id,
+                    COUNT(DISTINCT a.file_path) AS shared_files,
+                    CAST(COUNT(DISTINCT a.file_path) AS REAL) /
+                        MAX(
+                            (SELECT COUNT(DISTINCT file_path) FROM file_edits WHERE session_id = a.session_id),
+                            (SELECT COUNT(DISTINCT file_path) FROM file_edits WHERE session_id = b.session_id)
+                        ) AS overlap_ratio,
+                    ABS(COALESCE(sa.first_ts, 0) - COALESCE(sb.first_ts, 0)) / 60000 AS time_gap_minutes
+             FROM file_edits a
+             JOIN file_edits b ON a.file_path = b.file_path AND a.session_id < b.session_id
+             JOIN sessions sa ON sa.id = a.session_id
+             JOIN sessions sb ON sb.id = b.session_id
+             GROUP BY a.session_id, b.session_id
+             HAVING shared_files >= 1;",
+        )?;
+
         tx.commit()?;
         Ok(())
     }
@@ -243,15 +266,36 @@ impl IndexRepository for SqliteStore {
     }
 }
 
+// --- QueryRepository implementation ---
+
 impl QueryRepository for SqliteStore {
     fn list_perspectives(&self) -> Result<Vec<PerspectiveInfo>> {
-        // Sprint 2
-        Ok(vec![])
+        Ok(self.perspectives.clone())
     }
 
-    fn query(&self, _perspective: &str, _params: &QueryParams) -> Result<serde_json::Value> {
-        // Sprint 2
-        anyhow::bail!("query subcommand not yet implemented (Sprint 2)")
+    fn query(&self, perspective: &str, params: &QueryParams) -> Result<serde_json::Value> {
+        let info = self
+            .perspectives
+            .iter()
+            .find(|p| p.name == perspective)
+            .ok_or_else(|| anyhow::anyhow!("unknown perspective: {}", perspective))?;
+
+        // Validate required parameters
+        for param_def in &info.params {
+            if param_def.required && !params.contains_key(&param_def.name) {
+                anyhow::bail!(
+                    "missing required param: --param {}=<value>",
+                    param_def.name
+                );
+            }
+        }
+
+        // Replace :name with ?N and build bind values
+        let (bound_sql, bind_values) = bind_named_params(&info.sql, &info.params, params)?;
+
+        // Execute and collect results as JSON
+        let mut stmt = self.conn.prepare(&bound_sql)?;
+        stmt_to_json(&mut stmt, &bind_values)
     }
 
     fn execute_sql(&self, sql: &str) -> Result<serde_json::Value> {
@@ -262,33 +306,93 @@ impl QueryRepository for SqliteStore {
         }
 
         let mut stmt = self.conn.prepare(sql)?;
-        let column_names: Vec<String> = stmt
-            .column_names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-
-        let rows = stmt.query_map([], |row| {
-            let mut map = serde_json::Map::new();
-            for (i, name) in column_names.iter().enumerate() {
-                let val: rusqlite::types::Value = row.get(i)?;
-                let json_val = match val {
-                    rusqlite::types::Value::Null => serde_json::Value::Null,
-                    rusqlite::types::Value::Integer(n) => serde_json::Value::Number(n.into()),
-                    rusqlite::types::Value::Real(f) => {
-                        serde_json::Number::from_f64(f)
-                            .map(serde_json::Value::Number)
-                            .unwrap_or(serde_json::Value::Null)
-                    }
-                    rusqlite::types::Value::Text(s) => serde_json::Value::String(s),
-                    rusqlite::types::Value::Blob(_) => serde_json::Value::Null,
-                };
-                map.insert(name.clone(), json_val);
-            }
-            Ok(serde_json::Value::Object(map))
-        })?;
-
-        let result: Vec<serde_json::Value> = rows.collect::<Result<Vec<_>, _>>()?;
-        Ok(serde_json::Value::Array(result))
+        stmt_to_json(&mut stmt, &[])
     }
+}
+
+/// Replace `:name` placeholders with `?N` positional params and build bind values array.
+fn bind_named_params(
+    sql: &str,
+    defs: &[ParamDef],
+    params: &QueryParams,
+) -> Result<(String, Vec<rusqlite::types::Value>)> {
+    let mut bound_sql = sql.to_string();
+    let mut values = Vec::new();
+
+    for (i, def) in defs.iter().enumerate() {
+        let raw_value = params
+            .get(&def.name)
+            .cloned()
+            .or_else(|| def.default.clone())
+            .ok_or_else(|| anyhow::anyhow!("missing param: {}", def.name))?;
+
+        let placeholder = format!(":{}", def.name);
+        bound_sql = bound_sql.replace(&placeholder, &format!("?{}", i + 1));
+        values.push(coerce_value(&raw_value, &def.param_type)?);
+    }
+
+    Ok((bound_sql, values))
+}
+
+/// Coerce a string value to the appropriate rusqlite Value based on ParamType.
+fn coerce_value(raw: &str, param_type: &ParamType) -> Result<rusqlite::types::Value> {
+    match param_type {
+        ParamType::Integer => {
+            let n: i64 = raw
+                .parse()
+                .with_context(|| format!("expected integer, got '{}'", raw))?;
+            Ok(rusqlite::types::Value::Integer(n))
+        }
+        ParamType::Float => {
+            let f: f64 = raw
+                .parse()
+                .with_context(|| format!("expected float, got '{}'", raw))?;
+            Ok(rusqlite::types::Value::Real(f))
+        }
+        ParamType::Text => Ok(rusqlite::types::Value::Text(raw.to_string())),
+        ParamType::Date => {
+            // Validate YYYY-MM-DD format
+            chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+                .with_context(|| format!("expected date YYYY-MM-DD, got '{}'", raw))?;
+            Ok(rusqlite::types::Value::Text(raw.to_string()))
+        }
+    }
+}
+
+/// Execute a prepared statement with bind values and return results as JSON array.
+fn stmt_to_json(
+    stmt: &mut rusqlite::Statement,
+    bind_values: &[rusqlite::types::Value],
+) -> Result<serde_json::Value> {
+    let column_names: Vec<String> = stmt
+        .column_names()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    let params: Vec<&dyn rusqlite::types::ToSql> = bind_values
+        .iter()
+        .map(|v| v as &dyn rusqlite::types::ToSql)
+        .collect();
+
+    let rows = stmt.query_map(params.as_slice(), |row| {
+        let mut map = serde_json::Map::new();
+        for (i, name) in column_names.iter().enumerate() {
+            let val: rusqlite::types::Value = row.get(i)?;
+            let json_val = match val {
+                rusqlite::types::Value::Null => serde_json::Value::Null,
+                rusqlite::types::Value::Integer(n) => serde_json::Value::Number(n.into()),
+                rusqlite::types::Value::Real(f) => serde_json::Number::from_f64(f)
+                    .map(serde_json::Value::Number)
+                    .unwrap_or(serde_json::Value::Null),
+                rusqlite::types::Value::Text(s) => serde_json::Value::String(s),
+                rusqlite::types::Value::Blob(_) => serde_json::Value::Null,
+            };
+            map.insert(name.clone(), json_val);
+        }
+        Ok(serde_json::Value::Object(map))
+    })?;
+
+    let result: Vec<serde_json::Value> = rows.collect::<Result<Vec<_>, _>>()?;
+    Ok(serde_json::Value::Array(result))
 }
