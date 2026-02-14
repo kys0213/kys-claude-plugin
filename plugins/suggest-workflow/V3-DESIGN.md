@@ -650,23 +650,120 @@ SELECT classified_name AS tool,
        ...
 ```
 
+#### Perspective 등록: `build.rs` 자동 수집
+
+`.sql` 파일만 추가하면 자동으로 perspective로 등록되게 하려면,
+`PERSPECTIVE_SQLS` 배열을 수동 관리하지 않고 `build.rs`에서 `queries/*.sql` 파일을 자동 수집한다.
+
+```rust
+// build.rs
+use std::fs;
+use std::path::Path;
+
+fn main() {
+    let queries_dir = Path::new("src/db/queries");
+    let mut entries: Vec<String> = Vec::new();
+
+    for entry in fs::read_dir(queries_dir).expect("queries/ 디렉토리 없음") {
+        let entry = entry.unwrap();
+        let path = entry.path();
+
+        // schema.sql은 DDL이므로 제외
+        if path.extension().map_or(false, |e| e == "sql")
+            && path.file_stem().map_or(false, |n| n != "schema")
+        {
+            let file_name = path.file_name().unwrap().to_str().unwrap();
+            entries.push(file_name.to_string());
+        }
+    }
+
+    entries.sort(); // 결정적 순서
+
+    // generated_perspectives.rs 생성
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    let dest = Path::new(&out_dir).join("generated_perspectives.rs");
+
+    let code = format!(
+        "const PERSPECTIVE_SQLS: &[&str] = &[\n{}\n];\n",
+        entries.iter()
+            .map(|f| format!("    include_str!(\"queries/{}\"),", f))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+
+    fs::write(&dest, code).unwrap();
+
+    // queries/ 디렉토리 변경 시 재빌드 트리거
+    println!("cargo:rerun-if-changed=src/db/queries");
+}
+```
+
+```rust
+// db/sqlite.rs — 자동 생성된 배열 포함
+include!(concat!(env!("OUT_DIR"), "/generated_perspectives.rs"));
+// → const PERSPECTIVE_SQLS: &[&str] = &[ ... ]; 가 자동 생성됨
+```
+
+**결과**: `queries/` 디렉토리에 `.sql` 파일을 추가/삭제하면 빌드 시 자동 반영. 수동 등록 불필요.
+
+#### `@param` ↔ `:param` 일관성 검증
+
+`.sql` 파일의 헤더(`@param`)와 SQL 본문(`:param`)이 불일치하면 런타임 에러 발생.
+이를 **빌드 타임에 잡기 위해** `build.rs`에서 검증한다:
+
+```rust
+// build.rs (검증 로직 추가)
+fn validate_perspective_sql(file_path: &Path, content: &str) {
+    let header_params = parse_header_params(content);  // @param에서 추출
+    let body_params = parse_body_params(content);      // :name에서 추출
+
+    // 1. SQL 본문에서 사용하는 :name이 @param에 선언되지 않은 경우
+    for bp in &body_params {
+        if !header_params.contains(bp) {
+            panic!(
+                "{}:{}: SQL에서 :{} 사용하지만 @param 헤더에 선언 없음",
+                file_path.display(), bp, bp
+            );
+        }
+    }
+
+    // 2. @param에 선언했지만 SQL 본문에서 사용하지 않는 경우
+    for hp in &header_params {
+        if !body_params.contains(hp) {
+            panic!(
+                "{}:{}: @param {}이 선언됐지만 SQL 본문에서 :{} 미사용",
+                file_path.display(), hp, hp, hp
+            );
+        }
+    }
+
+    // 3. @name, @description 필수 헤더 존재 확인
+    if !content.contains("-- @name ") {
+        panic!("{}: @name 헤더 누락", file_path.display());
+    }
+    if !content.contains("-- @description ") {
+        panic!("{}: @description 헤더 누락", file_path.display());
+    }
+}
+```
+
+**검증 시점 정리**:
+
+| 검증 항목 | 시점 | 방법 |
+|-----------|------|------|
+| `.sql` 파일 자동 등록 | 빌드 | `build.rs` glob → `include_str!` 생성 |
+| `@param` ↔ `:param` 일치 | 빌드 | `build.rs` 파싱 + `panic!` |
+| `@name`, `@description` 필수 | 빌드 | `build.rs` 검증 |
+| required param 누락 | 런타임 | `query()` 호출 시 검증 |
+| param 타입 불일치 | 런타임 | `coerce_value()` 에러 |
+
 #### 런타임 로드 흐름
 
 ```rust
 // db/sqlite.rs
 
-/// 컴파일 타임에 모든 .sql 파일 로드
-const PERSPECTIVE_SQLS: &[&str] = &[
-    include_str!("queries/tool_frequency.sql"),
-    include_str!("queries/transitions.sql"),
-    include_str!("queries/trends.sql"),
-    include_str!("queries/hotfiles.sql"),
-    include_str!("queries/repetition.sql"),
-    include_str!("queries/session_links.sql"),
-    include_str!("queries/sequences.sql"),
-    include_str!("queries/clusters.sql"),
-    include_str!("queries/dependency_graph.sql"),
-];
+// build.rs가 생성한 배열 포함
+include!(concat!(env!("OUT_DIR"), "/generated_perspectives.rs"));
 
 impl SqliteStore {
     /// .sql 헤더 파싱 → PerspectiveInfo + SQL 본문 분리
@@ -691,7 +788,7 @@ impl QueryRepository for SqliteStore {
         // 1. 필수 파라미터 검증
         for param_def in &info.params {
             if param_def.required && !params.contains_key(&param_def.name) {
-                anyhow::bail!("missing required param: --{}", param_def.name);
+                anyhow::bail!("missing required param: --param {}=<value>", param_def.name);
             }
         }
 
@@ -1092,39 +1189,43 @@ Phase D: v2 캐시 형식 deprecated
 ## 11. 파일 구조 변경
 
 ```
-cli/src/
-├── main.rs                    # clap subcommand 라우팅 + 의존성 조립(wiring)
-├── types.rs                   # 공통 타입 (SessionData, Transition 등)
-├── db/                        # [신규] 저장소 레이어
-│   ├── mod.rs                 # pub use repository, sqlite
-│   ├── repository.rs          # trait 정의 (IndexRepository, QueryRepository)
-│   │                          #   → rusqlite 의존 없음, 순수 인터페이스
-│   ├── sqlite.rs              # SqliteStore: trait 구현체
-│   │                          #   → rusqlite는 이 파일에서만 import
-│   ├── schema.rs              # 테이블 생성 DDL (include_str!로 로드)
-│   ├── migrate.rs             # 스키마 버전 관리
-│   └── queries/               # [신규] SQL 파일 분리
-│       ├── schema.sql         # CREATE TABLE DDL
-│       ├── tool_frequency.sql
-│       ├── transitions.sql
-│       ├── trends.sql
-│       ├── repetition.sql
-│       ├── hotfiles.sql
-│       ├── session_links.sql
-│       ├── sequences.sql
-│       └── ...
-├── commands/                  # rusqlite 의존 없음 — trait만 사용
-│   ├── mod.rs
-│   ├── index.rs               # [신규] fn run_index(repo: &dyn IndexRepository, ...)
-│   ├── query.rs               # [신규] fn run_query(repo: &dyn QueryRepository, ...)
-│   ├── analyze.rs             # [유지] v2 호환
-│   └── cache.rs               # [유지] v2 호환
-├── analyzers/                 # 기존 유지 (Phase B에서 점진적 DB 기반 전환)
-│   ├── ...
-├── parsers/                   # 기존 유지
-│   ├── ...
-└── tokenizer/                 # 기존 유지
-    ├── ...
+cli/
+├── build.rs                       # [신규] queries/*.sql 자동 수집 + @param ↔ :param 검증
+├── Cargo.toml
+└── src/
+    ├── main.rs                    # clap subcommand 라우팅 + 의존성 조립(wiring)
+    ├── types.rs                   # 공통 타입 (SessionData, Transition 등)
+    ├── db/                        # [신규] 저장소 레이어
+    │   ├── mod.rs                 # pub use repository, sqlite
+    │   ├── repository.rs          # trait 정의 (IndexRepository, QueryRepository)
+    │   │                          #   → rusqlite 의존 없음, 순수 인터페이스
+    │   ├── sqlite.rs              # SqliteStore: trait 구현체
+    │   │                          #   → rusqlite는 이 파일에서만 import
+    │   │                          #   → include!(generated_perspectives.rs) 로 .sql 자동 로드
+    │   ├── schema.rs              # 테이블 생성 DDL (include_str!로 로드)
+    │   ├── migrate.rs             # 스키마 버전 관리
+    │   └── queries/               # [신규] perspective SQL (파일 추가 = perspective 추가)
+    │       ├── schema.sql         # CREATE TABLE DDL (perspective 아님, build.rs에서 제외)
+    │       ├── tool_frequency.sql # @name tool-frequency  @param top:int=10
+    │       ├── transitions.sql    # @name transitions     @param tool:text
+    │       ├── trends.sql         # @name trends          @param since:date=2026-01-01
+    │       ├── repetition.sql     # @name repetition      @param z_threshold:float=2.0
+    │       ├── hotfiles.sql       # @name hotfiles        @param top:int=20
+    │       ├── session_links.sql
+    │       ├── sequences.sql
+    │       └── ...                # ← 여기에 .sql 추가하면 자동 등록
+    ├── commands/                  # rusqlite 의존 없음 — trait만 사용
+    │   ├── mod.rs
+    │   ├── index.rs               # fn run_index(repo: &dyn IndexRepository, ...)
+    │   ├── query.rs               # fn run_query(repo: &dyn QueryRepository, ...)
+    │   ├── analyze.rs             # [유지] v2 호환
+    │   └── cache.rs               # [유지] v2 호환
+    ├── analyzers/                 # 기존 유지 (Phase B에서 점진적 DB 기반 전환)
+    │   ├── ...
+    ├── parsers/                   # 기존 유지
+    │   ├── ...
+    └── tokenizer/                 # 기존 유지
+        ├── ...
 ```
 
 **의존성 방향** (단방향):
@@ -1163,11 +1264,12 @@ main.rs ──→ db/sqlite.rs (impl) ──→ rusqlite
 
 ### Sprint 2: 쿼리 (동적 perspective)
 
-6. `db/queries/*.sql` — perspective별 SQL 파일 작성 (`@name`, `@param` 헤더 포함)
-7. `.sql` 헤더 파서 구현 (`parse_perspective_sql`) — `@` 메타데이터 → `PerspectiveInfo` 변환
-8. `db/sqlite.rs` — `QueryRepository` 구현 (named param 치환 + 동적 디스패치)
-9. `commands/query.rs` — 쿼리 커맨드 (`--perspective`, `--param`, `--list-perspectives`, `--sql-file`)
-10. `main.rs` — 서브커맨드 라우팅 + `SqliteStore` 조립(wiring)
+6. `build.rs` — `queries/*.sql` 자동 수집 + `@param` ↔ `:param` 빌드 타임 검증
+7. `db/queries/*.sql` — perspective별 SQL 파일 작성 (`@name`, `@param` 헤더 포함)
+8. `.sql` 헤더 파서 구현 (`parse_perspective_sql`) — `@` 메타데이터 → `PerspectiveInfo` 변환
+9. `db/sqlite.rs` — `QueryRepository` 구현 (named param 치환 + 동적 디스패치)
+10. `commands/query.rs` — 쿼리 커맨드 (`--perspective`, `--param`, `--list-perspectives`, `--sql-file`)
+11. `main.rs` — 서브커맨드 라우팅 + `SqliteStore` 조립(wiring)
 
 ### Sprint 3: 인크리멘털 + 파생
 
