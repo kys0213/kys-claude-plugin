@@ -89,9 +89,16 @@ suggest-workflow index [--project <path>] [--full]
   # 새로/변경된 세션만 파싱하여 DB에 upsert
 
 # 쿼리
-suggest-workflow query [--project <path>] [--perspective <name>] [options]
-  # 사전 정의된 perspective 또는 커스텀 필터로 조회
+suggest-workflow query [--project <path>] [--perspective <name>] [--param key=value]... [options]
+  # perspective 이름 + 동적 파라미터로 조회
+  # --param은 .sql 헤더에 정의된 파라미터를 전달 (복수 가능)
   # 결과는 항상 JSON (stdout) → 파이프 체이닝 가능
+
+suggest-workflow query --sql-file <path>
+  # 커스텀 .sql 파일 실행 (SELECT만 허용)
+
+suggest-workflow query --list-perspectives
+  # 사용 가능한 perspective 목록 + 파라미터 정의 출력
 
 # 기존 호환 (v2 → v3 마이그레이션 경로)
 suggest-workflow analyze [기존 옵션들...]
@@ -411,38 +418,44 @@ suggest-workflow index --project /path --full
 
 ### 6-1. Perspective 기반 쿼리
 
-사전 정의된 분석 관점(perspective)으로 빠르게 조회:
+사전 정의된 분석 관점(perspective)으로 빠르게 조회.
+perspective별 파라미터는 `--param key=value`로 전달한다. (생략 시 `.sql` 헤더의 default 값 사용)
 
 ```bash
-# 도구 사용 빈도 (Top 10)
-suggest-workflow query --perspective tool-frequency --top 10
+# 사용 가능한 perspective 목록 확인
+suggest-workflow query --list-perspectives
 
-# 도구 전이 (특정 도구 기준)
-suggest-workflow query --perspective transitions --tool "Bash:git"
+# 도구 사용 빈도 (Top 10, default)
+suggest-workflow query --perspective tool-frequency
+suggest-workflow query --perspective tool-frequency --param top=20
 
-# 주간 트렌드
-suggest-workflow query --perspective trends --since 2026-01-01
+# 도구 전이 (특정 도구 기준, tool은 required)
+suggest-workflow query --perspective transitions --param tool="Bash:git"
 
-# 반복/이상치
-suggest-workflow query --perspective repetition --z-threshold 2.0
+# 주간 트렌드 (default: 2026-01-01부터)
+suggest-workflow query --perspective trends
+suggest-workflow query --perspective trends --param since=2026-02-01
 
-# 프롬프트 검색
-suggest-workflow query --perspective prompts --search "테스트"
+# 반복/이상치 (default: z-score 2.0)
+suggest-workflow query --perspective repetition --param z_threshold=3.0
+
+# 프롬프트 검색 (search는 required)
+suggest-workflow query --perspective prompts --param search="테스트"
 
 # 파일 핫스팟
-suggest-workflow query --perspective hotfiles --top 20
+suggest-workflow query --perspective hotfiles --param top=30
 
 # 세션 연결
-suggest-workflow query --perspective session-links --min-overlap 0.5
+suggest-workflow query --perspective session-links --param min_overlap=0.5
 
 # 의존성 그래프
-suggest-workflow query --perspective dependency-graph --top 15
+suggest-workflow query --perspective dependency-graph --param top=15
 
 # 시퀀스 패턴
-suggest-workflow query --perspective sequences --min-count 3
+suggest-workflow query --perspective sequences --param min_count=3
 
 # 프롬프트 클러스터 (BM25 기반)
-suggest-workflow query --perspective clusters --depth normal
+suggest-workflow query --perspective clusters --param depth=normal
 ```
 
 ### 6-2. Repository 패턴
@@ -468,8 +481,8 @@ commands/query.rs  ──→  QueryRepository (trait)  ←── db/sqlite.rs (i
 ```rust
 // db/repository.rs — trait 정의 (rusqlite 의존 없음)
 
-use crate::types::*;
 use anyhow::Result;
+use std::collections::HashMap;
 use std::path::Path;
 
 /// 인덱싱(쓰기) 작업
@@ -496,31 +509,43 @@ pub trait IndexRepository {
     fn schema_version(&self) -> Result<u32>;
 }
 
-/// 쿼리(읽기) 작업 — 각 perspective가 하나의 메서드
+/// 쿼리(읽기) 작업 — perspective를 이름 + 파라미터로 동적 디스패치
 pub trait QueryRepository {
-    fn tool_frequency(&self, opts: &QueryOpts) -> Result<serde_json::Value>;
-    fn transitions(&self, tool: &str, opts: &QueryOpts) -> Result<serde_json::Value>;
-    fn trends(&self, opts: &QueryOpts) -> Result<serde_json::Value>;
-    fn repetition(&self, z_threshold: f64, opts: &QueryOpts) -> Result<serde_json::Value>;
-    fn prompts(&self, search: &str, opts: &QueryOpts) -> Result<serde_json::Value>;
-    fn hotfiles(&self, opts: &QueryOpts) -> Result<serde_json::Value>;
-    fn session_links(&self, min_overlap: f64, opts: &QueryOpts) -> Result<serde_json::Value>;
-    fn dependency_graph(&self, opts: &QueryOpts) -> Result<serde_json::Value>;
-    fn sequences(&self, min_count: u32, opts: &QueryOpts) -> Result<serde_json::Value>;
-    fn clusters(&self, depth: &str, opts: &QueryOpts) -> Result<serde_json::Value>;
+    /// 등록된 perspective 목록 조회 (--list-perspectives 용)
+    fn list_perspectives(&self) -> Result<Vec<PerspectiveInfo>>;
+
+    /// perspective 이름 + 동적 파라미터로 실행
+    fn query(&self, perspective: &str, params: &QueryParams) -> Result<serde_json::Value>;
+
     /// 커스텀 SQL 실행 (.sql 파일에서 읽은 내용 전달, SELECT만 허용)
     fn execute_sql(&self, sql: &str) -> Result<serde_json::Value>;
 }
 
-/// 공통 필터 옵션
-pub struct QueryOpts {
-    pub since: Option<String>,
-    pub until: Option<String>,
-    pub tool: Option<String>,
-    pub session: Option<String>,
-    pub top: Option<u32>,
-    pub min_count: Option<u32>,
+/// perspective 메타데이터 (.sql 파일 헤더에서 파싱)
+pub struct PerspectiveInfo {
+    pub name: String,
+    pub description: String,
+    pub params: Vec<ParamDef>,
 }
+
+/// 파라미터 정의
+pub struct ParamDef {
+    pub name: String,
+    pub param_type: ParamType,
+    pub required: bool,
+    pub default: Option<String>,
+    pub description: String,
+}
+
+pub enum ParamType {
+    Integer,
+    Float,
+    Text,
+    Date,  // YYYY-MM-DD
+}
+
+/// 쿼리 실행 시 전달되는 동적 파라미터
+pub type QueryParams = HashMap<String, String>;
 ```
 
 #### SQLite 구현
@@ -543,79 +568,213 @@ impl IndexRepository for SqliteStore { ... }
 impl QueryRepository for SqliteStore { ... }
 ```
 
-#### SQL 파일 분리
+#### SQL 파일 형식 (메타데이터 헤더 + SQL)
 
-```rust
-// db/sqlite.rs 내부에서 SQL 로드
-const TOOL_FREQUENCY_SQL: &str = include_str!("queries/tool_frequency.sql");
-const TRANSITIONS_SQL: &str = include_str!("queries/transitions.sql");
-const TRENDS_SQL: &str = include_str!("queries/trends.sql");
-// ...
+각 `.sql` 파일은 `-- @` 헤더로 perspective 이름, 설명, 파라미터를 자기 기술(self-describing)한다.
+런타임에 헤더를 파싱하여 `PerspectiveInfo`를 구성하므로, **새 perspective 추가 = `.sql` 파일 1개 추가. 코드 변경 없음.**
 
-impl QueryRepository for SqliteStore {
-    fn tool_frequency(&self, opts: &QueryOpts) -> Result<serde_json::Value> {
-        let top = opts.top.unwrap_or(10);
-        let mut stmt = self.conn.prepare(TOOL_FREQUENCY_SQL)?;
-        let rows = stmt.query_map(params![top], |row| { ... })?;
-        Ok(serde_json::to_value(rows.collect::<Vec<_>>()?)?)
-    }
-}
+헤더 규칙:
+
 ```
+-- @name <perspective-name>          # 필수. CLI에서 --perspective 값으로 사용
+-- @description <설명>               # 필수. --list-perspectives에 표시
+-- @param <name>:<type>[=<default>]  <설명>
+--   type: int, float, text, date
+--   default가 있으면 optional, 없으면 required
+-- SQL 본문에서 :name 으로 참조 → 런타임에 ?N 파라미터 바인딩으로 치환
+```
+
+예시 `.sql` 파일들:
 
 ```sql
 -- db/queries/tool_frequency.sql
+-- @name tool-frequency
+-- @description 도구 사용 빈도 (분류명 기준)
+-- @param top:int=10  상위 N개
+
 SELECT classified_name AS tool,
        COUNT(*) AS frequency,
        COUNT(DISTINCT session_id) AS sessions
 FROM tool_uses
 GROUP BY classified_name
 ORDER BY frequency DESC
-LIMIT ?1
+LIMIT :top
 ```
 
 ```sql
 -- db/queries/transitions.sql
+-- @name transitions
+-- @description 특정 도구 이후 전이 확률
+-- @param tool:text  기준 도구 (예: Bash:git, Edit)
+
 SELECT to_tool, count, probability
 FROM tool_transitions
-WHERE from_tool = ?1
+WHERE from_tool = :tool
 ORDER BY probability DESC
 ```
 
 ```sql
 -- db/queries/trends.sql
+-- @name trends
+-- @description 주간 도구 사용 트렌드
+-- @param since:date=2026-01-01  시작 날짜
+
 SELECT week_start, tool_name, count, session_count
 FROM weekly_buckets
-WHERE week_start >= ?1
+WHERE week_start >= :since
 ORDER BY week_start, count DESC
+```
+
+```sql
+-- db/queries/hotfiles.sql
+-- @name hotfiles
+-- @description 자주 편집되는 파일 핫스팟
+-- @param top:int=20  상위 N개
+
+SELECT file_path, edit_count, session_count
+FROM file_hotspots
+ORDER BY edit_count DESC
+LIMIT :top
+```
+
+```sql
+-- db/queries/repetition.sql
+-- @name repetition
+-- @description 반복/이상치 탐지 (z-score 기반)
+-- @param z_threshold:float=2.0  z-score 임계값
+
+SELECT classified_name AS tool,
+       COUNT(*) AS frequency,
+       AVG(COUNT(*)) OVER () AS mean,
+       -- z-score 계산은 서브쿼리로
+       ...
+```
+
+#### 런타임 로드 흐름
+
+```rust
+// db/sqlite.rs
+
+/// 컴파일 타임에 모든 .sql 파일 로드
+const PERSPECTIVE_SQLS: &[&str] = &[
+    include_str!("queries/tool_frequency.sql"),
+    include_str!("queries/transitions.sql"),
+    include_str!("queries/trends.sql"),
+    include_str!("queries/hotfiles.sql"),
+    include_str!("queries/repetition.sql"),
+    include_str!("queries/session_links.sql"),
+    include_str!("queries/sequences.sql"),
+    include_str!("queries/clusters.sql"),
+    include_str!("queries/dependency_graph.sql"),
+];
+
+impl SqliteStore {
+    /// .sql 헤더 파싱 → PerspectiveInfo + SQL 본문 분리
+    fn load_perspectives() -> Vec<(PerspectiveInfo, String)> {
+        PERSPECTIVE_SQLS.iter()
+            .map(|raw| parse_perspective_sql(raw))
+            .collect()
+    }
+}
+
+impl QueryRepository for SqliteStore {
+    fn list_perspectives(&self) -> Result<Vec<PerspectiveInfo>> {
+        Ok(Self::load_perspectives().into_iter().map(|(info, _)| info).collect())
+    }
+
+    fn query(&self, perspective: &str, params: &QueryParams) -> Result<serde_json::Value> {
+        let (info, sql_template) = Self::load_perspectives()
+            .into_iter()
+            .find(|(info, _)| info.name == perspective)
+            .ok_or_else(|| anyhow::anyhow!("unknown perspective: {}", perspective))?;
+
+        // 1. 필수 파라미터 검증
+        for param_def in &info.params {
+            if param_def.required && !params.contains_key(&param_def.name) {
+                anyhow::bail!("missing required param: --{}", param_def.name);
+            }
+        }
+
+        // 2. :name → ?N 치환 + 바인딩 값 배열 구성
+        let (bound_sql, bind_values) = bind_named_params(&sql_template, &info.params, params)?;
+
+        // 3. 실행
+        let mut stmt = self.conn.prepare(&bound_sql)?;
+        let rows = stmt_to_json(&mut stmt, &bind_values)?;
+        Ok(rows)
+    }
+}
+```
+
+#### Named parameter 치환
+
+SQL 본문의 `:name`을 `?N`으로 변환하고, 바인딩 값 배열을 구성:
+
+```rust
+/// ":top" → "?1", ":tool" → "?2" 등으로 치환
+fn bind_named_params(
+    sql: &str,
+    defs: &[ParamDef],
+    params: &QueryParams,
+) -> Result<(String, Vec<rusqlite::types::Value>)> {
+    let mut bound_sql = sql.to_string();
+    let mut values = Vec::new();
+
+    for (i, def) in defs.iter().enumerate() {
+        let value = params.get(&def.name)
+            .cloned()
+            .or_else(|| def.default.clone())
+            .ok_or_else(|| anyhow::anyhow!("missing param: {}", def.name))?;
+
+        bound_sql = bound_sql.replace(
+            &format!(":{}", def.name),
+            &format!("?{}", i + 1),
+        );
+        values.push(coerce_value(&value, &def.param_type)?);
+    }
+
+    Ok((bound_sql, values))
+}
 ```
 
 #### Command에서의 사용
 
 ```rust
 // commands/query.rs — rusqlite를 import하지 않음
-use crate::db::repository::QueryRepository;
+use crate::db::repository::{QueryRepository, QueryParams};
 
 pub fn run_query(
     repo: &dyn QueryRepository,
     perspective: Option<&str>,
     sql_file: Option<&Path>,
-    opts: QueryOpts,
+    params: QueryParams,           // --param key=value로 수집된 동적 파라미터
 ) -> Result<()> {
     let result = match (perspective, sql_file) {
-        // --sql-file: 파일에서 SQL 읽어서 실행
+        // --sql-file: 커스텀 SQL 파일 실행
         (_, Some(path)) => {
             let sql = std::fs::read_to_string(path)?;
             repo.execute_sql(&sql)?
         }
-        // --perspective: 사전 정의 쿼리
-        (Some("tool-frequency"), _) => repo.tool_frequency(&opts)?,
-        (Some("transitions"), _)    => repo.transitions(opts.tool.as_deref().unwrap_or(""), &opts)?,
-        (Some("trends"), _)         => repo.trends(&opts)?,
-        // ...
-        (Some(name), _) => anyhow::bail!("unknown perspective: {}", name),
+        // --perspective: 이름으로 동적 디스패치 (match arm 추가 불필요)
+        (Some(name), _) => repo.query(name, &params)?,
         (None, None)     => anyhow::bail!("--perspective or --sql-file required"),
     };
     println!("{}", serde_json::to_string_pretty(&result)?);
+    Ok(())
+}
+
+// --list-perspectives: 사용 가능한 perspective 목록 출력
+pub fn list_perspectives(repo: &dyn QueryRepository) -> Result<()> {
+    let perspectives = repo.list_perspectives()?;
+    for p in &perspectives {
+        eprintln!("  {} — {}", p.name, p.description);
+        for param in &p.params {
+            let req = if param.required { "required" } else {
+                &format!("default: {}", param.default.as_deref().unwrap_or("none"))
+            };
+            eprintln!("    --{}: {} ({})", param.name, param.description, req);
+        }
+    }
     Ok(())
 }
 ```
@@ -637,19 +796,28 @@ fn main() -> Result<()> {
 }
 ```
 
-### 6-3. 공통 필터 옵션
-
-모든 perspective에 적용 가능한 공통 필터:
+### 6-3. CLI 옵션 구조
 
 ```bash
---since YYYY-MM-DD        # 시작 날짜
---until YYYY-MM-DD        # 종료 날짜
---tool <name>             # 도구 이름 필터 (LIKE 패턴 지원)
---session <id>            # 특정 세션만
---top N                   # 상위 N개
---min-count N             # 최소 빈도
---format json|csv|table   # 출력 형식 (기본: json)
+suggest-workflow query [글로벌 옵션] [perspective 옵션]
+
+# 글로벌 옵션 (query 서브커맨드 레벨)
+--project <path>              # DB 경로 resolve
+--db <path>                   # 직접 DB 파일 지정
+--format json|csv|table       # 출력 형식 (기본: json)
+
+# perspective 선택 (택일)
+--perspective <name>          # 사전 정의된 perspective 실행
+--sql-file <path>             # 커스텀 SQL 파일 실행
+--list-perspectives           # perspective 목록 출력
+
+# perspective 파라미터 (동적, 복수 가능)
+--param key=value             # .sql 헤더에 정의된 파라미터 전달
 ```
+
+`--param`은 각 `.sql` 파일 헤더의 `@param` 정의에 대응한다.
+공통적으로 자주 쓰이는 파라미터(top, since, tool 등)도 perspective `.sql` 파일에서 개별 선언하므로,
+별도의 "공통 필터"가 아닌 **perspective가 필요한 파라미터를 스스로 선언**하는 구조.
 
 ### 6-4. 파이프 체이닝
 
@@ -719,11 +887,14 @@ v3: agent가 query 서브커맨드를 필요한 만큼 호출 → 필요한 관�
 # Step 1: 인덱스 업데이트
 suggest-workflow index --project "$(pwd)"
 
-# Step 2: 필요한 관점별로 쿼리
-TOOL_FREQ=$(suggest-workflow query --perspective tool-frequency --top 15)
-TRANSITIONS=$(suggest-workflow query --perspective transitions --tool "Edit")
-TRENDS=$(suggest-workflow query --perspective trends --since 2026-01-01)
-HOTFILES=$(suggest-workflow query --perspective hotfiles --top 10)
+# Step 2: 사용 가능한 perspective 확인
+suggest-workflow query --list-perspectives
+
+# Step 3: 필요한 관점별로 쿼리 (--param으로 동적 파라미터 전달)
+TOOL_FREQ=$(suggest-workflow query --perspective tool-frequency --param top=15)
+TRANSITIONS=$(suggest-workflow query --perspective transitions --param tool="Edit")
+TRENDS=$(suggest-workflow query --perspective trends --param since=2026-01-01)
+HOTFILES=$(suggest-workflow query --perspective hotfiles --param top=10)
 REPETITION=$(suggest-workflow query --perspective repetition)
 CLUSTERS=$(suggest-workflow query --perspective clusters)
 
@@ -885,12 +1056,13 @@ main.rs ──→ db/sqlite.rs (impl) ──→ rusqlite
 4. `db/sqlite.rs` — `SqliteStore` 구현체 (스키마 초기화 + 원시 데이터 INSERT)
 5. `commands/index.rs` — 기본 인덱싱 (`&dyn IndexRepository`만 의존)
 
-### Sprint 2: 쿼리
+### Sprint 2: 쿼리 (동적 perspective)
 
-6. `db/queries/*.sql` — perspective별 SQL 파일 작성
-7. `db/sqlite.rs` — `QueryRepository` 구현 (`include_str!` + 파라미터 바인딩)
-8. `commands/query.rs` — 쿼리 커맨드 (`&dyn QueryRepository`만 의존)
-9. `main.rs` — 서브커맨드 라우팅 + `SqliteStore` 조립(wiring)
+6. `db/queries/*.sql` — perspective별 SQL 파일 작성 (`@name`, `@param` 헤더 포함)
+7. `.sql` 헤더 파서 구현 (`parse_perspective_sql`) — `@` 메타데이터 → `PerspectiveInfo` 변환
+8. `db/sqlite.rs` — `QueryRepository` 구현 (named param 치환 + 동적 디스패치)
+9. `commands/query.rs` — 쿼리 커맨드 (`--perspective`, `--param`, `--list-perspectives`, `--sql-file`)
+10. `main.rs` — 서브커맨드 라우팅 + `SqliteStore` 조립(wiring)
 
 ### Sprint 3: 인크리멘털 + 파생
 
@@ -933,8 +1105,10 @@ main.rs ──→ db/sqlite.rs (impl) ──→ rusqlite
 | 스토리지 | SQLite (rusqlite bundled) | 유연한 SQL, ~600KB, 단일 파일 |
 | DB 접근 패턴 | Repository 패턴 (trait 추상화) | rusqlite 의존성 격리, commands에서 DB 구현 모름 |
 | SQL 관리 | `.sql` 파일 분리 + `include_str!` | 에디터 하이라이팅, 관심사 분리 |
-| 쿼리 안전성 | 파라미터 바인딩 (`?1`, `?2`) | SQL injection 방지 |
-| 쿼리 인터페이스 | perspective 기반 + 커스텀 SQL | 일반 사용은 쉽게, 고급은 자유롭게 |
+| perspective 확장 | `.sql` 헤더 메타데이터 (`@name`, `@param`) | 코드 변경 없이 `.sql` 파일 추가만으로 perspective 추가 |
+| 파라미터 전달 | `--param key=value` (동적) | perspective별 고유 파라미터를 유연하게 지원 |
+| 쿼리 안전성 | named param (`:name` → `?N`) 바인딩 | SQL injection 방지 |
+| 커스텀 쿼리 | `--sql-file` (파일 기반) | 쉘 이스케이핑 회피, Phase 2 에이전트 친화적 |
 | 인크리멘털 전략 | size + mtime 변경 감지 | 단순하고 신뢰성 있음 |
 | 파생 테이블 | 전체 재계산 | 데이터 규모가 작아 충분히 빠름 |
 | v2 호환 | 기존 CLI 인터페이스 유지 | 점진적 마이그레이션 |
