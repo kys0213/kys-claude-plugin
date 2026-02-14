@@ -1,21 +1,52 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
+use std::path::PathBuf;
 
 mod commands;
 mod parsers;
 mod analyzers;
 mod tokenizer;
 mod types;
+mod db;
 
 use analyzers::{AnalysisDepth, StopwordSet, TuningConfig};
 use commands::analyze::{AnalysisScope, AnalysisFocus};
 
 #[derive(Parser)]
 #[command(name = "suggest-workflow")]
-#[command(version = "2.0.0")]
+#[command(version = "3.0.0")]
 #[command(about = "Analyze Claude session patterns — structural statistics extraction for LLM interpretation")]
+#[command(args_conflicts_with_subcommands = true)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+
+    #[command(flatten)]
+    legacy: LegacyArgs,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Index session data into SQLite (v3)
+    Index(IndexArgs),
+}
+
+#[derive(clap::Args)]
+struct IndexArgs {
+    /// Project path (defaults to current directory)
+    #[arg(long)]
+    project: Option<String>,
+    /// Direct DB file path (overrides --project based resolution)
+    #[arg(long)]
+    db: Option<PathBuf>,
+    /// Full rebuild: delete existing DB and re-index everything
+    #[arg(long)]
+    full: bool,
+}
+
+#[derive(clap::Args)]
+struct LegacyArgs {
     /// Analysis scope: project (single) or global (cross-project)
     #[arg(long, default_value = "project")]
     scope: String,
@@ -99,6 +130,75 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    match cli.command {
+        Some(Command::Index(args)) => run_index(args),
+        None => run_legacy(cli.legacy),
+    }
+}
+
+// --- v3: index subcommand ---
+
+fn run_index(args: IndexArgs) -> Result<()> {
+    let project_path = match &args.project {
+        Some(p) => p.clone(),
+        None => std::env::current_dir()
+            .context("failed to get current directory")?
+            .to_string_lossy()
+            .to_string(),
+    };
+
+    let db_path = resolve_db_path(args.db.as_deref(), &project_path)?;
+
+    // --full: delete existing DB
+    if args.full {
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    let sessions_dir = resolve_sessions_dir(&project_path)?;
+    let store = db::SqliteStore::open(&db_path)?;
+
+    eprintln!("DB: {}", db_path.display());
+    commands::index::run(&store, &sessions_dir)
+}
+
+fn resolve_db_path(db: Option<&std::path::Path>, project_path: &str) -> Result<PathBuf> {
+    if let Some(db_path) = db {
+        return Ok(db_path.to_path_buf());
+    }
+
+    let encoded = encode_project_path(project_path)?;
+    let home = std::env::var("HOME").context("HOME not set")?;
+    Ok(PathBuf::from(home)
+        .join(".claude")
+        .join("suggest-workflow-index")
+        .join(&encoded)
+        .join("index.db"))
+}
+
+fn resolve_sessions_dir(project_path: &str) -> Result<PathBuf> {
+    let encoded = encode_project_path(project_path)?;
+    let home = std::env::var("HOME").context("HOME not set")?;
+    Ok(PathBuf::from(home)
+        .join(".claude")
+        .join("projects")
+        .join(&encoded))
+}
+
+fn encode_project_path(raw_path: &str) -> Result<String> {
+    let normalized = std::path::Path::new(raw_path)
+        .canonicalize()
+        .with_context(|| format!("cannot resolve project path: {}", raw_path))?
+        .to_string_lossy()
+        .to_string()
+        .trim_end_matches('/')
+        .to_string();
+
+    Ok(format!("-{}", normalized[1..].replace('/', "-")))
+}
+
+// --- v2: legacy flat args ---
+
+fn run_legacy(cli: LegacyArgs) -> Result<()> {
     // --tuning-defaults: print template and exit
     if cli.tuning_defaults {
         TuningConfig::print_defaults();
