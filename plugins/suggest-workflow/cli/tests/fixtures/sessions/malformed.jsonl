@@ -1,0 +1,4 @@
+{"type":"user","message":{"content":"valid prompt here"},"timestamp":"2026-02-13T10:00:00+00:00"}
+{this is not valid json at all!!!
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/test.txt"}}]},"timestamp":"2026-02-13T10:00:01+00:00"}
+{"truncated json": "missing closing brace

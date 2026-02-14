@@ -81,29 +81,6 @@ pub fn parse_session(session_path: &Path) -> Result<Vec<SessionEntry>> {
     Ok(entries)
 }
 
-/// Extract user prompts from session entries
-#[allow(dead_code)]
-pub fn extract_user_prompts(entries: &[SessionEntry]) -> Vec<String> {
-    entries.iter()
-        .filter(|e| e.entry_type == "user")
-        .filter_map(|e| e.message.as_ref())
-        .filter_map(|m| match &m.content {
-            Content::Text(text) => Some(text.clone()),
-            Content::Array(items) => {
-                let texts: Vec<String> = items.iter()
-                    .filter(|item| item.item_type == "text")
-                    .filter_map(|item| item.text.clone())
-                    .collect();
-                if texts.is_empty() {
-                    None
-                } else {
-                    Some(texts.join("\n"))
-                }
-            }
-        })
-        .collect()
-}
-
 /// Extract tool usage sequence from session entries
 pub fn extract_tool_sequence(entries: &[SessionEntry]) -> Vec<ToolUse> {
     let mut tools = Vec::new();

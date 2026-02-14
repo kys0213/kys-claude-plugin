@@ -19,7 +19,6 @@ pub struct BM25Ranker {
     documents: Vec<Vec<String>>,
 }
 
-#[allow(dead_code)]
 impl BM25Ranker {
     pub fn new(documents: &[Vec<String>], k1: f64, b: f64) -> Self {
         let doc_count = documents.len();
@@ -56,78 +55,8 @@ impl BM25Ranker {
         }
     }
 
-    pub fn score_query(&self, query_tokens: &[String]) -> f64 {
-        if query_tokens.is_empty() {
-            return 0.0;
-        }
-
-        let dl = query_tokens.len() as f64;
-        let mut score = 0.0;
-
-        // Count term frequency in query
-        let mut tf: HashMap<String, usize> = HashMap::new();
-        for term in query_tokens {
-            *tf.entry(term.clone()).or_insert(0) += 1;
-        }
-
-        for (term, freq) in tf {
-            if let Some(&idf) = self.idf.get(&term) {
-                let numerator = freq as f64 * (self.k1 + 1.0);
-                let denominator = freq as f64 + self.k1 * (1.0 - self.b + self.b * (dl / self.avg_dl));
-                score += idf * (numerator / denominator);
-            }
-        }
-
-        score
-    }
-
-    /// Score multiple queries and combine using the given strategy.
-    /// Each element in `queries` is a separate set of tokens (a sub-query).
-    /// Empty queries are filtered out before scoring.
-    pub fn score_multi_query(
-        &self,
-        queries: &[Vec<String>],
-        strategy: MultiQueryStrategy,
-    ) -> f64 {
-        let scores: Vec<f64> = queries
-            .iter()
-            .filter(|q| !q.is_empty())
-            .map(|q| self.score_query(q))
-            .collect();
-
-        if scores.is_empty() {
-            return 0.0;
-        }
-
-        match strategy {
-            MultiQueryStrategy::Max => {
-                scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
-            }
-            MultiQueryStrategy::Avg => {
-                scores.iter().sum::<f64>() / scores.len() as f64
-            }
-            MultiQueryStrategy::WeightedAvg => {
-                // First (original) query gets weight 1.0, subsequent queries decay by 0.6x
-                let mut total_weight = 0.0;
-                let mut weighted_sum = 0.0;
-                for (i, &score) in scores.iter().enumerate() {
-                    let weight = 0.6_f64.powi(i as i32);
-                    weighted_sum += score * weight;
-                    total_weight += weight;
-                }
-                if total_weight > 0.0 {
-                    weighted_sum / total_weight
-                } else {
-                    0.0
-                }
-            }
-        }
-    }
-
     /// Score query terms against a specific document.
-    /// Unlike `score_query()` (self-scoring), this measures how relevant
-    /// a query is to an independent document in the corpus.
-    pub fn score_against_document(&self, query_tokens: &[String], document: &[String]) -> f64 {
+    fn score_against_document(&self, query_tokens: &[String], document: &[String]) -> f64 {
         if query_tokens.is_empty() || document.is_empty() {
             return 0.0;
         }

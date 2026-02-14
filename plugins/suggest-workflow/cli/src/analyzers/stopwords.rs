@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 /// Built-in default noise words (fallback when no config file exists)
 const BUILTIN_NOISE_WORDS: &[&str] = &[
@@ -8,18 +8,12 @@ const BUILTIN_NOISE_WORDS: &[&str] = &[
     "ok", "yes", "y", "sure", "thanks", "ㅇ", "ㅇㅇ", "넵",
 ];
 
-/// Config file format for project-specific stopwords
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Config file format for project-specific stopwords.
+/// Extra fields in the JSON file are ignored via deny_unknown_fields=false (serde default).
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StopwordsConfig {
-    /// Custom stopwords added by Claude or user
-    pub words: Vec<String>,
-    /// Who last updated this file
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_by: Option<String>,
-    /// When this file was last updated
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<String>,
+struct StopwordsConfig {
+    words: Vec<String>,
 }
 
 /// Resolved stopwords set — merged from built-in defaults, config file, and CLI args
@@ -29,13 +23,6 @@ pub struct StopwordSet {
 }
 
 impl StopwordSet {
-    /// Build from built-in defaults only
-    pub fn builtin() -> Self {
-        Self {
-            words: BUILTIN_NOISE_WORDS.iter().map(|s| s.to_string()).collect(),
-        }
-    }
-
     /// Build from defaults + config file + CLI extra words
     pub fn load(extra_words: &[String]) -> Self {
         let mut words: HashSet<String> = BUILTIN_NOISE_WORDS
@@ -61,10 +48,6 @@ impl StopwordSet {
     pub fn contains(&self, word: &str) -> bool {
         self.words.contains(word)
     }
-
-    pub fn as_set(&self) -> &HashSet<String> {
-        &self.words
-    }
 }
 
 /// Default config file path: ~/.claude/suggest-workflow/stopwords.json
@@ -80,18 +63,3 @@ fn load_config_file() -> Option<StopwordsConfig> {
     serde_json::from_str(&content).ok()
 }
 
-/// Save stopwords config to the default path (used by Claude agents)
-#[allow(dead_code)]
-pub fn save_config(config: &StopwordsConfig) -> anyhow::Result<()> {
-    let path = config_file_path()
-        .ok_or_else(|| anyhow::anyhow!("HOME not set"))?;
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let json = serde_json::to_string_pretty(config)?;
-    std::fs::write(&path, json)?;
-    eprintln!("Saved stopwords config to {}", path.display());
-    Ok(())
-}

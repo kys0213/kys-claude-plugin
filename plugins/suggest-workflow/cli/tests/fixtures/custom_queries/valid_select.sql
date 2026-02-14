@@ -1,0 +1,1 @@
+SELECT classified_name, COUNT(*) as cnt FROM tool_uses GROUP BY classified_name ORDER BY cnt DESC

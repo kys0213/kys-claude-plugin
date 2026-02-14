@@ -38,8 +38,6 @@ pub struct ContentItem {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
     pub input: Option<serde_json::Value>,
 }
 
@@ -189,6 +187,8 @@ pub struct ToolTrend {
     pub tool: String,
     pub weekly_counts: Vec<usize>,
     pub trend_slope: f64,
+    /// Coefficient of determination (0.0–1.0). Low R² means the linear trend is unreliable.
+    pub r_squared: f64,
 }
 
 /// File hotspot analysis
@@ -230,6 +230,80 @@ pub struct SessionLink {
     pub shared_files: Vec<String>,
     pub file_overlap_ratio: f64,
     pub time_gap_minutes: Option<i64>,
+}
+
+// --- Tool dependency graph types ---
+
+/// Tool dependency graph with node/edge metrics, cycle detection, and critical paths.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DependencyGraphResult {
+    pub nodes: Vec<DependencyNode>,
+    pub edges: Vec<DependencyEdge>,
+    pub cycles: Vec<ToolCycle>,
+    pub critical_paths: Vec<CriticalPath>,
+    pub total_transitions: usize,
+    pub unique_tools: usize,
+}
+
+/// Per-tool node metrics in the dependency graph.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DependencyNode {
+    pub tool: String,
+    /// Total usage count across all sessions
+    pub total_uses: usize,
+    /// Number of distinct successor tools
+    pub fanout: usize,
+    /// Number of distinct predecessor tools
+    pub fanin: usize,
+    /// Average normalized position in work unit (0.0 = start, 1.0 = end)
+    pub avg_position: f64,
+    /// Fraction of work units where this tool appears as the last tool
+    pub terminal_rate: f64,
+    /// Fraction of work units where this tool appears as the first tool
+    pub entry_rate: f64,
+}
+
+/// Enriched edge in the dependency graph.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DependencyEdge {
+    pub from: String,
+    pub to: String,
+    pub count: usize,
+    /// P(to | from) — forward conditional probability
+    pub probability: f64,
+    /// P(from | to) — reverse conditional probability
+    pub reverse_probability: f64,
+    /// Fraction of work units containing this edge that also contain a Bash:git step
+    pub commit_reachable_rate: f64,
+    /// Average number of steps from this edge to end of the work unit
+    pub avg_steps_to_end: f64,
+}
+
+/// A cycle detected in the tool dependency graph via Tarjan's SCC.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCycle {
+    /// Tools forming the cycle
+    pub tools: Vec<String>,
+    /// Number of sessions where this cycle pattern appeared in actual sequences
+    pub occurrence_count: usize,
+    /// Average consecutive repetitions when the cycle occurs
+    pub avg_iterations: f64,
+}
+
+/// A frequently observed start-to-end path through work units.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CriticalPath {
+    /// Ordered tool sequence
+    pub path: Vec<String>,
+    /// How many work units followed this exact path
+    pub frequency: usize,
+    /// Fraction of these work units that contained a Bash:git step
+    pub commit_rate: f64,
 }
 
 // --- Cache types ---

@@ -157,8 +157,7 @@ pub fn decompose_query(
     }
 }
 
-/// Convenience: build all query variants (original + sub-queries) as a flat list
-/// suitable for `BM25Ranker::score_multi_query`.
+/// Convenience: build all query variants (original + sub-queries) as a flat list.
 impl DecomposedQuery {
     pub fn all_queries(&self) -> Vec<Vec<String>> {
         let mut all = vec![self.original.clone()];
@@ -178,7 +177,7 @@ mod tests {
     use crate::analyzers::depth::AnalysisDepth;
 
     fn test_stopwords() -> StopwordSet {
-        StopwordSet::builtin()
+        StopwordSet::load(&[])
     }
 
     fn make_ranker(docs: &[&str]) -> BM25Ranker {

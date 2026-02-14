@@ -6,6 +6,7 @@ use crate::analyzers::suffix_miner::SuffixMiner;
 use crate::analyzers::depth::DepthConfig;
 use crate::analyzers::query_decomposer::decompose_query;
 use crate::analyzers::stopwords::StopwordSet;
+use crate::analyzers::tuning::TuningConfig;
 use crate::tokenizer::KoreanTokenizer;
 
 // --- Tokenizer ---
@@ -79,6 +80,7 @@ fn bigram_similarity_precomputed(
 fn cluster_normalized(
     entries: &[ClusterEntry],
     similarity_threshold: f64,
+    max_clusters: usize,
 ) -> Vec<Vec<ClusterEntry>> {
     // Phase 1: Group by exact normalized content
     let mut exact_groups: HashMap<String, Vec<ClusterEntry>> = HashMap::new();
@@ -91,9 +93,9 @@ fn cluster_normalized(
     let mut representatives: Vec<(String, Vec<ClusterEntry>)> = exact_groups.into_iter().collect();
     representatives.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
 
-    // Truncate to max_k=500 if needed (drop lowest frequency groups)
-    if representatives.len() > 500 {
-        representatives.truncate(500);
+    // Truncate to max_clusters if needed (drop lowest frequency groups)
+    if representatives.len() > max_clusters {
+        representatives.truncate(max_clusters);
     }
 
     // Precompute bigrams for all representatives
@@ -180,6 +182,7 @@ fn calculate_recency(timestamps: &[i64], now_ms: i64, half_life_days: f64) -> f6
 
 /// Pure statistical confidence: frequency + consistency + BM25 + recency.
 /// No rule-based type boost — classification is delegated to Phase 2 (LLM).
+/// All weights and parameters are driven by TuningConfig.
 fn calculate_confidence(
     count: usize,
     meaningful_count: usize,
@@ -187,7 +190,7 @@ fn calculate_confidence(
     bm25_score: f64,
     decay: bool,
     now_ms: i64,
-    decay_half_life_days: f64,
+    tuning: &TuningConfig,
 ) -> f64 {
     if count == 0 || meaningful_count == 0 {
         return 0.0;
@@ -195,13 +198,18 @@ fn calculate_confidence(
 
     let frequency_score = (count as f64 / meaningful_count as f64).min(1.0);
     let consistency_score = calculate_consistency(timestamps);
-    let normalized_bm25 = 1.0 / (1.0 + (-bm25_score / 5.0).exp());
+    let normalized_bm25 = 1.0 / (1.0 + (-bm25_score / tuning.bm25_sigmoid_k).exp());
 
     let base = if decay {
-        let recency = calculate_recency(timestamps, now_ms, decay_half_life_days);
-        (frequency_score * 0.30) + (consistency_score * 0.15) + (normalized_bm25 * 0.35) + (recency * 0.20)
+        let recency = calculate_recency(timestamps, now_ms, tuning.decay_half_life_days);
+        (frequency_score * tuning.decay_weight_frequency)
+            + (consistency_score * tuning.decay_weight_consistency)
+            + (normalized_bm25 * tuning.decay_weight_bm25)
+            + (recency * tuning.decay_weight_recency)
     } else {
-        (frequency_score * 0.40) + (consistency_score * 0.20) + (normalized_bm25 * 0.40)
+        (frequency_score * tuning.weight_frequency)
+            + (consistency_score * tuning.weight_consistency)
+            + (normalized_bm25 * tuning.weight_bm25)
     };
 
     base.min(1.0)
@@ -242,7 +250,7 @@ pub fn analyze_tacit_knowledge(
     top_n: usize,
     depth_config: &DepthConfig,
     decay: bool,
-    decay_half_life_days: f64,
+    tuning: &TuningConfig,
     stopwords: &StopwordSet,
 ) -> TacitAnalysisResult {
     if entries.is_empty() {
@@ -290,10 +298,10 @@ pub fn analyze_tacit_knowledge(
         .iter()
         .map(|e| tokenize(&e.display, stopwords))
         .collect();
-    let bm25_ranker = BM25Ranker::new(&all_documents, 1.5, 0.75);
+    let bm25_ranker = BM25Ranker::new(&all_documents, tuning.bm25_k1, tuning.bm25_b);
 
     // Step 5: Cluster normalized texts (using depth-driven similarity threshold)
-    let clusters = cluster_normalized(&cluster_entries, depth_config.similarity_threshold);
+    let clusters = cluster_normalized(&cluster_entries, depth_config.similarity_threshold, tuning.max_clusters);
 
     // Step 6: Score and rank clusters with multi-query BM25
     let mut patterns = Vec::new();
@@ -343,7 +351,7 @@ pub fn analyze_tacit_knowledge(
                         let mut total_weight = 0.0;
                         let mut weighted_sum = 0.0;
                         for (i, &score) in scores.iter().enumerate() {
-                            let weight = 0.6_f64.powi(i as i32);
+                            let weight = tuning.multi_query_decay.powi(i as i32);
                             weighted_sum += score * weight;
                             total_weight += weight;
                         }
@@ -365,7 +373,7 @@ pub fn analyze_tacit_knowledge(
             bm25_score,
             decay,
             now_ms,
-            decay_half_life_days,
+            tuning,
         );
 
         // Deterministic example ordering via BTreeSet

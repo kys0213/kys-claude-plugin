@@ -91,10 +91,7 @@ npm run validate:versions  # 버전 검증
 ### CI/CD
 
 - **PR 생성 시**: 자동으로 스펙, 경로, 버전 검증
-- **PR 타이틀 규칙**: Conventional Commits 형식
-  - `feat:` → MINOR 버전 bump (0.1.0 → 0.2.0)
-  - `fix:` → PATCH 버전 bump (0.1.0 → 0.1.1)
-  - `major:` → MAJOR 버전 bump (0.1.0 → 1.0.0)
+- **PR 타이틀 규칙**: Conventional Commits 형식 (상세: `.claude/rules/git-workflow.md`)
 - **Merge 시**: 자동 버전 bump 및 릴리스 태그 생성
 
 ## Claude Code 문서

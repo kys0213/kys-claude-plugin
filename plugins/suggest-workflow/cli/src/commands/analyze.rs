@@ -7,7 +7,8 @@ use crate::parsers::{
 use crate::parsers::projects::list_projects;
 use crate::analyzers::{
     analyze_workflows, analyze_prompts, analyze_tacit_knowledge,
-    AnalysisDepth, DepthConfig, StopwordSet,
+    build_dependency_graph,
+    AnalysisDepth, DepthConfig, StopwordSet, TuningConfig,
 };
 
 /// Analysis scope
@@ -67,15 +68,16 @@ pub fn run(
     decay: bool,
     date_range: Option<(i64, i64)>,
     stopwords: &StopwordSet,
+    tuning: &TuningConfig,
 ) -> Result<()> {
     let depth_config = depth.resolve();
 
     match scope {
         AnalysisScope::Project => {
-            run_project_analysis(project_path, &depth_config, &depth, focus, threshold, top, format, decay, date_range, stopwords)
+            run_project_analysis(project_path, &depth_config, &depth, focus, threshold, top, format, decay, date_range, stopwords, tuning)
         }
         AnalysisScope::Global => {
-            run_global_analysis(&depth_config, &depth, focus, threshold, top, format, decay, date_range, stopwords)
+            run_global_analysis(&depth_config, &depth, focus, threshold, top, format, decay, date_range, stopwords, tuning)
         }
     }
 }
@@ -100,6 +102,7 @@ fn run_project_analysis(
     decay: bool,
     date_range: Option<(i64, i64)>,
     stopwords: &StopwordSet,
+    tuning: &TuningConfig,
 ) -> Result<()> {
     let resolved_path = resolve_project_path(project_path)
         .with_context(|| format!(
@@ -123,12 +126,12 @@ fn run_project_analysis(
     if format == "json" {
         print_json_output(
             &sessions, &history_entries, depth_config, depth, focus,
-            threshold, top, decay, project_path, None, stopwords,
+            threshold, top, decay, project_path, None, stopwords, tuning,
         )
     } else {
         print_text_output(
             &sessions, &history_entries, depth_config, depth, focus,
-            threshold, top, decay, None, stopwords,
+            threshold, top, decay, None, stopwords, tuning,
         )
     }
 }
@@ -144,6 +147,7 @@ fn run_global_analysis(
     decay: bool,
     date_range: Option<(i64, i64)>,
     stopwords: &StopwordSet,
+    tuning: &TuningConfig,
 ) -> Result<()> {
     let project_dirs = list_projects(None)?;
     if project_dirs.is_empty() {
@@ -207,12 +211,12 @@ fn run_global_analysis(
     if format == "json" {
         print_json_output(
             &all_sessions, &all_history, depth_config, depth, focus,
-            threshold, top, decay, "global", global_info.as_ref(), stopwords,
+            threshold, top, decay, "global", global_info.as_ref(), stopwords, tuning,
         )
     } else {
         print_text_output(
             &all_sessions, &all_history, depth_config, depth, focus,
-            threshold, top, decay, global_info.as_ref(), stopwords,
+            threshold, top, decay, global_info.as_ref(), stopwords, tuning,
         )
     }
 }
@@ -281,6 +285,7 @@ fn print_text_output(
     decay: bool,
     global_info: Option<&GlobalInfo>,
     stopwords: &StopwordSet,
+    tuning: &TuningConfig,
 ) -> Result<()> {
     // Header
     if let Some(info) = global_info {
@@ -292,8 +297,8 @@ fn print_text_output(
 
     // Workflow analysis
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Workflow {
-        let workflow_result = analyze_workflows(sessions, threshold, top, 2, 5);
-        let prompt_result = analyze_prompts(history_entries, decay, 14.0);
+        let workflow_result = analyze_workflows(sessions, threshold, top, tuning.min_seq_length, tuning.max_seq_length, tuning.time_window_minutes);
+        let prompt_result = analyze_prompts(history_entries, decay, tuning.decay_half_life_days);
 
         println!("--- Workflow Analysis ---\n");
         println!("Total prompts: {} | Unique: {}", prompt_result.total, prompt_result.unique);
@@ -323,12 +328,65 @@ fn print_text_output(
                 println!("  {}. {}: {}x", i + 1, tool, count);
             }
         }
+        // Dependency graph
+        let dep_graph = build_dependency_graph(sessions, top, tuning);
+        println!("--- Tool Dependency Graph ---\n");
+        println!("Nodes: {} | Edges: {} | Cycles: {}\n",
+            dep_graph.nodes.len(), dep_graph.edges.len(), dep_graph.cycles.len());
+
+        if !dep_graph.nodes.is_empty() {
+            println!("Top Nodes (by usage):");
+            println!("{:<20} {:<8} {:<8} {:<8} {:<8} {:<10} {:<10}",
+                "Tool", "Uses", "Fanout", "Fanin", "AvgPos", "Entry%", "Terminal%");
+            println!("{}", "-".repeat(72));
+            for node in dep_graph.nodes.iter().take(top) {
+                println!("{:<20} {:<8} {:<8} {:<8} {:<8.2} {:<10.0} {:<10.0}",
+                    truncate_str(&node.tool, 20), node.total_uses, node.fanout, node.fanin,
+                    node.avg_position, node.entry_rate * 100.0, node.terminal_rate * 100.0);
+            }
+            println!();
+        }
+
+        if !dep_graph.edges.is_empty() {
+            println!("Top Edges (by frequency):");
+            println!("{:<20} {:<20} {:<6} {:<8} {:<8} {:<10}",
+                "From", "To", "Count", "P(→)", "P(←)", "Commit%");
+            println!("{}", "-".repeat(72));
+            for edge in dep_graph.edges.iter().take(top) {
+                println!("{:<20} {:<20} {:<6} {:<8.2} {:<8.2} {:<10.0}",
+                    truncate_str(&edge.from, 20), truncate_str(&edge.to, 20),
+                    edge.count, edge.probability, edge.reverse_probability,
+                    edge.commit_reachable_rate * 100.0);
+            }
+            println!();
+        }
+
+        if !dep_graph.cycles.is_empty() {
+            println!("Detected Cycles:");
+            for (i, cycle) in dep_graph.cycles.iter().take(5).enumerate() {
+                println!("  {}. [{}x, avg {:.1} iter] {}",
+                    i + 1, cycle.occurrence_count, cycle.avg_iterations,
+                    cycle.tools.join(" ↔ "));
+            }
+            println!();
+        }
+
+        if !dep_graph.critical_paths.is_empty() {
+            println!("Critical Paths:");
+            for (i, path) in dep_graph.critical_paths.iter().take(5).enumerate() {
+                println!("  {}. [{}x, {:.0}% commit] {}",
+                    i + 1, path.frequency, path.commit_rate * 100.0,
+                    path.path.join(" → "));
+            }
+            println!();
+        }
+
         println!();
     }
 
     // Skill/tacit knowledge analysis
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Skill {
-        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, 14.0, stopwords);
+        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, tuning, stopwords);
 
         println!("--- Tacit Knowledge Analysis ---\n");
         println!("Detected patterns: {}\n", skill_result.patterns.len());
@@ -394,6 +452,15 @@ fn print_text_output(
     Ok(())
 }
 
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.chars().count() > max {
+        let truncated: String = s.chars().take(max - 2).collect();
+        format!("{}..", truncated)
+    } else {
+        s.to_string()
+    }
+}
+
 fn print_json_output(
     sessions: &[(String, Vec<crate::types::SessionEntry>)],
     history_entries: &[crate::types::HistoryEntry],
@@ -406,11 +473,13 @@ fn print_json_output(
     project_path: &str,
     global_info: Option<&GlobalInfo>,
     stopwords: &StopwordSet,
+    tuning: &TuningConfig,
 ) -> Result<()> {
     let mut output = serde_json::json!({
         "analyzedAt": chrono::Utc::now().to_rfc3339(),
         "depth": depth.to_string(),
         "scope": if global_info.is_some() { "global" } else { "project" },
+        "tuning": serde_json::to_value(tuning).unwrap_or_default(),
     });
 
     if global_info.is_none() {
@@ -430,14 +499,16 @@ fn print_json_output(
     }
 
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Workflow {
-        let workflow_result = analyze_workflows(sessions, threshold, top, 2, 5);
-        let prompt_result = analyze_prompts(history_entries, decay, 14.0);
+        let workflow_result = analyze_workflows(sessions, threshold, top, tuning.min_seq_length, tuning.max_seq_length, tuning.time_window_minutes);
+        let prompt_result = analyze_prompts(history_entries, decay, tuning.decay_half_life_days);
+        let dep_graph = build_dependency_graph(sessions, top, tuning);
         output["promptAnalysis"] = serde_json::to_value(&prompt_result)?;
         output["workflowAnalysis"] = serde_json::to_value(&workflow_result)?;
+        output["dependencyGraph"] = serde_json::to_value(&dep_graph)?;
     }
 
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Skill {
-        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, 14.0, stopwords);
+        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, tuning, stopwords);
         output["tacitKnowledge"] = serde_json::to_value(&skill_result)?;
     }
 

@@ -13,7 +13,6 @@ pub enum AnalysisDepth {
 
 /// Resolved parameters from an AnalysisDepth preset
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct DepthConfig {
     /// Minimum token count before sentence splitting kicks in
     pub sentence_split_min_tokens: usize,
@@ -25,8 +24,6 @@ pub struct DepthConfig {
     pub noun_extraction: bool,
     /// Similarity threshold for clustering
     pub similarity_threshold: f64,
-    /// Minimum project appearances for global scope patterns
-    pub global_min_projects: usize,
     /// Multi-query score combination strategy
     pub multi_query_strategy: MultiQueryStrategy,
 }
@@ -40,7 +37,6 @@ impl AnalysisDepth {
                 max_sub_queries: 2,
                 noun_extraction: false,
                 similarity_threshold: 0.8,
-                global_min_projects: 3,
                 multi_query_strategy: MultiQueryStrategy::Max,
             },
             AnalysisDepth::Normal => DepthConfig {
@@ -49,7 +45,6 @@ impl AnalysisDepth {
                 max_sub_queries: 4,
                 noun_extraction: true,
                 similarity_threshold: 0.7,
-                global_min_projects: 2,
                 multi_query_strategy: MultiQueryStrategy::WeightedAvg,
             },
             AnalysisDepth::Wide => DepthConfig {
@@ -58,7 +53,6 @@ impl AnalysisDepth {
                 max_sub_queries: 8,
                 noun_extraction: true,
                 similarity_threshold: 0.5,
-                global_min_projects: 1,
                 multi_query_strategy: MultiQueryStrategy::Avg,
             },
         }

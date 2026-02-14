@@ -5,11 +5,13 @@ use crate::types::{
 };
 use crate::parsers::extract_tool_sequence;
 use crate::analyzers::tool_classifier::classify_tool;
+use crate::analyzers::tuning::TuningConfig;
 
 /// Aggregate statistics by ISO week. Pure temporal grouping — no rules.
 pub fn analyze_trends(
     sessions: &[(String, Vec<SessionEntry>)],
     history_entries: &[HistoryEntry],
+    tuning: &TuningConfig,
 ) -> TrendResult {
     // Build per-session file sets for weekly file counting
     let mut session_files: HashMap<String, HashSet<String>> = HashMap::new();
@@ -102,14 +104,16 @@ pub fn analyze_trends(
         })
         .collect();
 
-    // Compute tool trends (linear regression slope over weeks)
-    let tool_trends = compute_tool_trends(&weeks);
+    // Compute tool trends (linear regression slope + R² over weeks)
+    let tool_trends = compute_tool_trends(&weeks, tuning.min_trend_r_squared);
 
     TrendResult { weeks, tool_trends }
 }
 
-/// Compute per-tool weekly counts and a simple linear regression slope.
-fn compute_tool_trends(weeks: &[WeeklyBucket]) -> Vec<ToolTrend> {
+/// Compute per-tool weekly counts with linear regression slope and R².
+/// Trends with R² below `min_r_squared` have their slope zeroed out to avoid
+/// reporting noise as a meaningful trend.
+fn compute_tool_trends(weeks: &[WeeklyBucket], min_r_squared: f64) -> Vec<ToolTrend> {
     if weeks.len() < 2 {
         return Vec::new();
     }
@@ -137,25 +141,40 @@ fn compute_tool_trends(weeks: &[WeeklyBucket]) -> Vec<ToolTrend> {
             })
             .collect();
 
-        // Simple linear regression: y = a + b*x
+        // Linear regression: y = a + b*x
         let x_mean = (n - 1.0) / 2.0;
         let y_mean = weekly_counts.iter().sum::<usize>() as f64 / n;
 
-        let mut numerator = 0.0;
-        let mut denominator = 0.0;
+        let mut ss_xy = 0.0; // Σ(xi - x̄)(yi - ȳ)
+        let mut ss_xx = 0.0; // Σ(xi - x̄)²
+        let mut ss_tot = 0.0; // Σ(yi - ȳ)²  (total sum of squares)
         for (i, &count) in weekly_counts.iter().enumerate() {
             let x_diff = i as f64 - x_mean;
             let y_diff = count as f64 - y_mean;
-            numerator += x_diff * y_diff;
-            denominator += x_diff * x_diff;
+            ss_xy += x_diff * y_diff;
+            ss_xx += x_diff * x_diff;
+            ss_tot += y_diff * y_diff;
         }
 
-        let slope = if denominator > 0.0 { numerator / denominator } else { 0.0 };
+        let slope = if ss_xx > 0.0 { ss_xy / ss_xx } else { 0.0 };
+
+        // R² = 1 - SS_res / SS_tot
+        // SS_res = SS_tot - slope² × SS_xx  (algebraic identity)
+        let r_squared = if ss_tot > 0.0 {
+            let ss_res = ss_tot - slope * slope * ss_xx;
+            (1.0 - ss_res / ss_tot).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        // If the fit is too weak, zero the slope so it's not mistaken for a real trend
+        let effective_slope = if r_squared >= min_r_squared { slope } else { 0.0 };
 
         trends.push(ToolTrend {
             tool,
             weekly_counts,
-            trend_slope: (slope * 100.0).round() / 100.0,
+            trend_slope: (effective_slope * 100.0).round() / 100.0,
+            r_squared: (r_squared * 1000.0).round() / 1000.0,
         });
     }
 

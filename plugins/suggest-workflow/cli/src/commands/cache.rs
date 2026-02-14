@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use crate::types::*;
+use crate::db::repository::QueryRepository;
 use crate::parsers::{
     parse_session, list_sessions, resolve_project_path,
     adapt_to_history_entries, extract_tool_sequence,
@@ -11,8 +12,8 @@ use crate::parsers::{
 use crate::analyzers::{
     analyze_workflows, analyze_prompts, analyze_tacit_knowledge,
     build_transition_matrix, analyze_repetition, analyze_trends,
-    analyze_files, link_sessions,
-    AnalysisDepth, DepthConfig, StopwordSet,
+    analyze_files, link_sessions, build_dependency_graph,
+    AnalysisDepth, DepthConfig, StopwordSet, TuningConfig,
 };
 use crate::analyzers::tool_classifier::classify_tool;
 
@@ -30,6 +31,8 @@ pub fn run(
     top: usize,
     decay: bool,
     stopwords: &StopwordSet,
+    tuning: &TuningConfig,
+    db: Option<&dyn QueryRepository>,
 ) -> Result<()> {
     let resolved_path = resolve_project_path(project_path)
         .with_context(|| format!(
@@ -101,6 +104,8 @@ pub fn run(
         project_path,
         &cache_dir,
         stopwords,
+        tuning,
+        db,
     )?;
 
     // Write index
@@ -390,36 +395,80 @@ fn generate_analysis_snapshot(
     project_path: &str,
     cache_dir: &Path,
     stopwords: &StopwordSet,
+    tuning: &TuningConfig,
+    db: Option<&dyn QueryRepository>,
 ) -> Result<()> {
-    // Existing analyses
-    let workflow_result = analyze_workflows(sessions, threshold, top, 2, 5);
-    let prompt_result = analyze_prompts(history_entries, decay, 14.0);
-    let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, 14.0, stopwords);
+    // Complex analyses (always in-memory — no DB equivalent yet)
+    let workflow_result = analyze_workflows(sessions, threshold, top, tuning.min_seq_length, tuning.max_seq_length, tuning.time_window_minutes);
+    let prompt_result = analyze_prompts(history_entries, decay, tuning.decay_half_life_days);
+    let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, tuning, stopwords);
+    let dep_graph_result = build_dependency_graph(sessions, top, tuning);
 
-    // New statistical analyses (rule-free)
-    let transition_result = build_transition_matrix(sessions);
-    let repetition_result = analyze_repetition(sessions);
-    let trend_result = analyze_trends(sessions, history_entries);
-    let file_result = analyze_files(sessions, top);
-    let link_result = link_sessions(sessions);
+    // Statistical analyses: use DB queries when available, fall back to in-memory
+    let (transition_val, repetition_val, trend_val, file_val, link_val) = if let Some(repo) = db {
+        let transitions = repo.execute_sql(
+            "SELECT from_tool, to_tool, count, ROUND(probability, 4) AS probability \
+             FROM tool_transitions ORDER BY count DESC",
+        )?;
+        let trends = repo.execute_sql(
+            "SELECT week_start, tool_name, count, session_count \
+             FROM weekly_buckets ORDER BY week_start, count DESC",
+        )?;
+        let files = repo.execute_sql(
+            "SELECT file_path, edit_count, session_count \
+             FROM file_hotspots ORDER BY edit_count DESC",
+        )?;
+        let links = repo.execute_sql(
+            "SELECT session_a, session_b, shared_files, \
+                    ROUND(overlap_ratio, 3) AS overlap_ratio, time_gap_minutes \
+             FROM session_links ORDER BY overlap_ratio DESC",
+        )?;
+        let repetition = repo.execute_sql(
+            "SELECT session_id, classified_name AS tool, \
+                    COUNT(*) AS count \
+             FROM tool_uses \
+             GROUP BY session_id, classified_name \
+             ORDER BY count DESC",
+        )?;
+
+        eprintln!("Analysis: using SQLite DB for statistical sections");
+        (transitions, repetition, trends, files, links)
+    } else {
+        let transition_result = build_transition_matrix(sessions);
+        let repetition_result = analyze_repetition(sessions, tuning);
+        let trend_result = analyze_trends(sessions, history_entries, tuning);
+        let file_result = analyze_files(sessions, top);
+        let link_result = link_sessions(sessions);
+
+        (
+            serde_json::to_value(&transition_result)?,
+            serde_json::to_value(&repetition_result)?,
+            serde_json::to_value(&trend_result)?,
+            serde_json::to_value(&file_result)?,
+            serde_json::to_value(&link_result)?,
+        )
+    };
 
     let snapshot = serde_json::json!({
         "analyzedAt": Utc::now().to_rfc3339(),
         "depth": depth.to_string(),
         "project": project_path,
         "cacheVersion": CACHE_VERSION,
+        "dataSource": if db.is_some() { "sqlite" } else { "legacy" },
+        "tuning": serde_json::to_value(tuning).unwrap_or_default(),
 
-        // Existing analyses
+        // Complex analyses (always in-memory)
         "promptAnalysis": serde_json::to_value(&prompt_result)?,
         "workflowAnalysis": serde_json::to_value(&workflow_result)?,
         "tacitKnowledge": serde_json::to_value(&skill_result)?,
+        "dependencyGraph": serde_json::to_value(&dep_graph_result)?,
 
-        // New statistical analyses
-        "toolTransitions": serde_json::to_value(&transition_result)?,
-        "repetitionStats": serde_json::to_value(&repetition_result)?,
-        "weeklyTrends": serde_json::to_value(&trend_result)?,
-        "fileAnalysis": serde_json::to_value(&file_result)?,
-        "sessionLinks": serde_json::to_value(&link_result)?,
+        // Statistical analyses (DB-backed when available)
+        "toolTransitions": transition_val,
+        "repetitionStats": repetition_val,
+        "weeklyTrends": trend_val,
+        "fileAnalysis": file_val,
+        "sessionLinks": link_val,
     });
 
     let json = serde_json::to_string_pretty(&snapshot)?;

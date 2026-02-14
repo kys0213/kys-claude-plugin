@@ -1,0 +1,2 @@
+{"type":"user","message":{"content":"analyze this code"},"timestamp":"2026-02-10T10:00:00+00:00"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"I'll analyze the code."},{"type":"tool_use","name":"Read","input":{"file_path":"/home/user/project/main.rs"}}]},"timestamp":"2026-02-10T10:00:01+00:00"}
