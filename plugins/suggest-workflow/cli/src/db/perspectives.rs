@@ -77,10 +77,13 @@ pub fn register_perspectives() -> Vec<PerspectiveInfo> {
                 LIMIT :top"
                 .into(),
         },
-        // repetition: Anomaly detection via z-score on per-session tool counts
+        // repetition: Anomaly detection via z-score² on per-session tool counts
+        // Uses z² comparison to avoid SQRT (not available in SQLite without extensions).
+        // z² = (x - mean)² / variance; filter: z² >= threshold²
+        // deviation_score = sign(x - mean) * z² for signed anomaly direction
         PerspectiveInfo {
             name: "repetition".into(),
-            description: "반복/이상치 탐지 (z-score 기반)".into(),
+            description: "반복/이상치 탐지 (z-score² 기반)".into(),
             params: vec![ParamDef {
                 name: "z_threshold".into(),
                 param_type: ParamType::Float,
@@ -90,19 +93,22 @@ pub fn register_perspectives() -> Vec<PerspectiveInfo> {
             }],
             sql: "\
                 SELECT session_id, classified_name AS tool, cnt, \
-                       ROUND((cnt - avg_cnt) / CASE WHEN std_cnt < 0.001 THEN 1.0 ELSE std_cnt END, 2) AS z_score \
+                       ROUND((cnt - avg_cnt) * ABS(cnt - avg_cnt) \
+                             / CASE WHEN var_cnt < 0.001 THEN 1.0 ELSE var_cnt END, 2) AS deviation_score \
                 FROM ( \
                     SELECT session_id, classified_name, \
                            COUNT(*) AS cnt, \
                            AVG(COUNT(*)) OVER (PARTITION BY classified_name) AS avg_cnt, \
-                           SQRT(AVG(COUNT(*) * COUNT(*)) OVER (PARTITION BY classified_name) \
-                                - AVG(COUNT(*)) OVER (PARTITION BY classified_name) \
-                                * AVG(COUNT(*)) OVER (PARTITION BY classified_name)) AS std_cnt \
+                           AVG(COUNT(*) * COUNT(*)) OVER (PARTITION BY classified_name) \
+                           - AVG(COUNT(*)) OVER (PARTITION BY classified_name) \
+                           * AVG(COUNT(*)) OVER (PARTITION BY classified_name) AS var_cnt \
                     FROM tool_uses \
                     GROUP BY session_id, classified_name \
                 ) sub \
-                WHERE ABS((cnt - avg_cnt) / CASE WHEN std_cnt < 0.001 THEN 1.0 ELSE std_cnt END) >= :z_threshold \
-                ORDER BY z_score DESC"
+                WHERE (cnt - avg_cnt) * (cnt - avg_cnt) \
+                      / CASE WHEN var_cnt < 0.001 THEN 1.0 ELSE var_cnt END \
+                      >= :z_threshold * :z_threshold \
+                ORDER BY ABS(deviation_score) DESC"
                 .into(),
         },
         // prompts: Search prompts by keyword
