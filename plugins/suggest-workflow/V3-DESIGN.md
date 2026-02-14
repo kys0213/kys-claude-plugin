@@ -91,7 +91,7 @@ suggest-workflow index [--project <path>] [--full]
 # 쿼리
 suggest-workflow query [--project <path>] [--perspective <name>] [--param key=value]... [options]
   # perspective 이름 + 동적 파라미터로 조회
-  # --param은 .sql 헤더에 정의된 파라미터를 전달 (복수 가능)
+  # --param은 perspective에 정의된 파라미터를 전달 (복수 가능)
   # 결과는 항상 JSON (stdout) → 파이프 체이닝 가능
 
 suggest-workflow query --sql-file <path>
@@ -419,7 +419,7 @@ suggest-workflow index --project /path --full
 ### 6-1. Perspective 기반 쿼리
 
 사전 정의된 분석 관점(perspective)으로 빠르게 조회.
-perspective별 파라미터는 `--param key=value`로 전달한다. (생략 시 `.sql` 헤더의 default 값 사용)
+perspective별 파라미터는 `--param key=value`로 전달한다. (생략 시 Rust 코드에 정의된 default 값 사용)
 
 ```bash
 # 사용 가능한 perspective 목록 확인
@@ -473,8 +473,9 @@ commands/query.rs  ──→  QueryRepository (trait)  ←── db/sqlite.rs (i
 
 - `rusqlite`는 `db/` 모듈 **외부에서 절대 import하지 않는다**
 - Commands는 Repository trait의 메서드만 호출
-- SQL은 `.sql` 파일로 분리하여 `include_str!`로 로드
+- 빌트인 perspective SQL은 **Rust 코드에 직접 정의** (`register_perspectives()`)
 - 모든 쿼리는 파라미터 바인딩(`?1`, `?2`) 사용 (SQL injection 방지)
+- 커스텀 쿼리는 Phase 2 에이전트가 **레포별로 `.sql` 파일을 작성**하여 `--sql-file`로 전달
 
 #### Repository trait 정의
 
@@ -521,11 +522,12 @@ pub trait QueryRepository {
     fn execute_sql(&self, sql: &str) -> Result<serde_json::Value>;
 }
 
-/// perspective 메타데이터 (.sql 파일 헤더에서 파싱)
+/// perspective 메타데이터 (Rust 코드에서 직접 정의)
 pub struct PerspectiveInfo {
     pub name: String,
     pub description: String,
     pub params: Vec<ParamDef>,
+    pub sql: String,
 }
 
 /// 파라미터 정의
@@ -554,235 +556,146 @@ pub type QueryParams = HashMap<String, String>;
 // db/sqlite.rs — rusqlite 의존은 이 파일(과 db/ 내부)에만 존재
 
 use rusqlite::Connection;
-use crate::db::repository::{IndexRepository, QueryRepository, QueryOpts};
+use crate::db::repository::{IndexRepository, QueryRepository};
 
 pub struct SqliteStore {
     conn: Connection,
+    perspectives: Vec<PerspectiveInfo>,
 }
 
 impl SqliteStore {
-    pub fn open(db_path: &Path) -> Result<Self> { ... }
+    pub fn open(db_path: &Path) -> Result<Self> {
+        let conn = Connection::open(db_path)?;
+        let perspectives = register_perspectives();
+        Ok(Self { conn, perspectives })
+    }
 }
 
 impl IndexRepository for SqliteStore { ... }
 impl QueryRepository for SqliteStore { ... }
 ```
 
-#### SQL 파일 형식 (메타데이터 헤더 + SQL)
+#### Perspective 등록: Rust 코드에서 직접 정의
 
-각 `.sql` 파일은 `-- @` 헤더로 perspective 이름, 설명, 파라미터를 자기 기술(self-describing)한다.
-런타임에 헤더를 파싱하여 `PerspectiveInfo`를 구성하므로, **새 perspective 추가 = `.sql` 파일 1개 추가. 코드 변경 없음.**
-
-헤더 규칙:
-
-```
--- @name <perspective-name>          # 필수. CLI에서 --perspective 값으로 사용
--- @description <설명>               # 필수. --list-perspectives에 표시
--- @param <name>:<type>[=<default>]  <설명>
---   type: int, float, text, date
---   default가 있으면 optional, 없으면 required
--- SQL 본문에서 :name 으로 참조 → 런타임에 ?N 파라미터 바인딩으로 치환
-```
-
-예시 `.sql` 파일들:
-
-```sql
--- db/queries/tool_frequency.sql
--- @name tool-frequency
--- @description 도구 사용 빈도 (분류명 기준)
--- @param top:int=10  상위 N개
-
-SELECT classified_name AS tool,
-       COUNT(*) AS frequency,
-       COUNT(DISTINCT session_id) AS sessions
-FROM tool_uses
-GROUP BY classified_name
-ORDER BY frequency DESC
-LIMIT :top
-```
-
-```sql
--- db/queries/transitions.sql
--- @name transitions
--- @description 특정 도구 이후 전이 확률
--- @param tool:text  기준 도구 (예: Bash:git, Edit)
-
-SELECT to_tool, count, probability
-FROM tool_transitions
-WHERE from_tool = :tool
-ORDER BY probability DESC
-```
-
-```sql
--- db/queries/trends.sql
--- @name trends
--- @description 주간 도구 사용 트렌드
--- @param since:date=2026-01-01  시작 날짜
-
-SELECT week_start, tool_name, count, session_count
-FROM weekly_buckets
-WHERE week_start >= :since
-ORDER BY week_start, count DESC
-```
-
-```sql
--- db/queries/hotfiles.sql
--- @name hotfiles
--- @description 자주 편집되는 파일 핫스팟
--- @param top:int=20  상위 N개
-
-SELECT file_path, edit_count, session_count
-FROM file_hotspots
-ORDER BY edit_count DESC
-LIMIT :top
-```
-
-```sql
--- db/queries/repetition.sql
--- @name repetition
--- @description 반복/이상치 탐지 (z-score 기반)
--- @param z_threshold:float=2.0  z-score 임계값
-
-SELECT classified_name AS tool,
-       COUNT(*) AS frequency,
-       AVG(COUNT(*)) OVER () AS mean,
-       -- z-score 계산은 서브쿼리로
-       ...
-```
-
-#### Perspective 등록: `build.rs` 자동 수집
-
-`.sql` 파일만 추가하면 자동으로 perspective로 등록되게 하려면,
-`PERSPECTIVE_SQLS` 배열을 수동 관리하지 않고 `build.rs`에서 `queries/*.sql` 파일을 자동 수집한다.
+빌트인 perspective는 `register_perspectives()` 함수에서 이름, 설명, 파라미터, SQL을 모두 Rust 코드로 정의한다.
+**CLI 바이너리 안에 `.sql` 파일이 포함되지 않는다.** 커스텀 쿼리만 Phase 2 에이전트가 레포별로 `.sql` 파일을 작성하여 `--sql-file`로 전달한다.
 
 ```rust
-// build.rs
-use std::fs;
-use std::path::Path;
+// db/perspectives.rs — 빌트인 perspective 등록
 
-fn main() {
-    let queries_dir = Path::new("src/db/queries");
-    let mut entries: Vec<String> = Vec::new();
+use crate::db::repository::{PerspectiveInfo, ParamDef, ParamType};
 
-    for entry in fs::read_dir(queries_dir).expect("queries/ 디렉토리 없음") {
-        let entry = entry.unwrap();
-        let path = entry.path();
-
-        // schema.sql은 DDL이므로 제외
-        if path.extension().map_or(false, |e| e == "sql")
-            && path.file_stem().map_or(false, |n| n != "schema")
-        {
-            let file_name = path.file_name().unwrap().to_str().unwrap();
-            entries.push(file_name.to_string());
-        }
-    }
-
-    entries.sort(); // 결정적 순서
-
-    // generated_perspectives.rs 생성
-    let out_dir = std::env::var("OUT_DIR").unwrap();
-    let dest = Path::new(&out_dir).join("generated_perspectives.rs");
-
-    let code = format!(
-        "const PERSPECTIVE_SQLS: &[&str] = &[\n{}\n];\n",
-        entries.iter()
-            .map(|f| format!("    include_str!(\"queries/{}\"),", f))
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-
-    fs::write(&dest, code).unwrap();
-
-    // queries/ 디렉토리 변경 시 재빌드 트리거
-    println!("cargo:rerun-if-changed=src/db/queries");
+pub fn register_perspectives() -> Vec<PerspectiveInfo> {
+    vec![
+        PerspectiveInfo {
+            name: "tool-frequency".into(),
+            description: "도구 사용 빈도 (분류명 기준)".into(),
+            params: vec![
+                ParamDef {
+                    name: "top".into(),
+                    param_type: ParamType::Integer,
+                    required: false,
+                    default: Some("10".into()),
+                    description: "상위 N개".into(),
+                },
+            ],
+            sql: "\
+                SELECT classified_name AS tool, \
+                       COUNT(*) AS frequency, \
+                       COUNT(DISTINCT session_id) AS sessions \
+                FROM tool_uses \
+                GROUP BY classified_name \
+                ORDER BY frequency DESC \
+                LIMIT :top".into(),
+        },
+        PerspectiveInfo {
+            name: "transitions".into(),
+            description: "특정 도구 이후 전이 확률".into(),
+            params: vec![
+                ParamDef {
+                    name: "tool".into(),
+                    param_type: ParamType::Text,
+                    required: true,
+                    default: None,
+                    description: "기준 도구 (예: Bash:git, Edit)".into(),
+                },
+            ],
+            sql: "\
+                SELECT to_tool, count, probability \
+                FROM tool_transitions \
+                WHERE from_tool = :tool \
+                ORDER BY probability DESC".into(),
+        },
+        PerspectiveInfo {
+            name: "trends".into(),
+            description: "주간 도구 사용 트렌드".into(),
+            params: vec![
+                ParamDef {
+                    name: "since".into(),
+                    param_type: ParamType::Date,
+                    required: false,
+                    default: Some("2026-01-01".into()),
+                    description: "시작 날짜".into(),
+                },
+            ],
+            sql: "\
+                SELECT week_start, tool_name, count, session_count \
+                FROM weekly_buckets \
+                WHERE week_start >= :since \
+                ORDER BY week_start, count DESC".into(),
+        },
+        PerspectiveInfo {
+            name: "hotfiles".into(),
+            description: "자주 편집되는 파일 핫스팟".into(),
+            params: vec![
+                ParamDef {
+                    name: "top".into(),
+                    param_type: ParamType::Integer,
+                    required: false,
+                    default: Some("20".into()),
+                    description: "상위 N개".into(),
+                },
+            ],
+            sql: "\
+                SELECT file_path, edit_count, session_count \
+                FROM file_hotspots \
+                ORDER BY edit_count DESC \
+                LIMIT :top".into(),
+        },
+        PerspectiveInfo {
+            name: "repetition".into(),
+            description: "반복/이상치 탐지 (z-score 기반)".into(),
+            params: vec![
+                ParamDef {
+                    name: "z_threshold".into(),
+                    param_type: ParamType::Float,
+                    required: false,
+                    default: Some("2.0".into()),
+                    description: "z-score 임계값".into(),
+                },
+            ],
+            sql: "/* z-score 기반 이상치 탐지 SQL */".into(),
+        },
+        // session-links, sequences, prompts, clusters, dependency-graph 등 추가
+    ]
 }
 ```
 
-```rust
-// db/sqlite.rs — 자동 생성된 배열 포함
-include!(concat!(env!("OUT_DIR"), "/generated_perspectives.rs"));
-// → const PERSPECTIVE_SQLS: &[&str] = &[ ... ]; 가 자동 생성됨
-```
+**perspective 추가 방법**: `register_perspectives()`에 `PerspectiveInfo` 항목 1개 추가. 그 외 변경 불필요.
 
-**결과**: `queries/` 디렉토리에 `.sql` 파일을 추가/삭제하면 빌드 시 자동 반영. 수동 등록 불필요.
-
-#### `@param` ↔ `:param` 일관성 검증
-
-`.sql` 파일의 헤더(`@param`)와 SQL 본문(`:param`)이 불일치하면 런타임 에러 발생.
-이를 **빌드 타임에 잡기 위해** `build.rs`에서 검증한다:
-
-```rust
-// build.rs (검증 로직 추가)
-fn validate_perspective_sql(file_path: &Path, content: &str) {
-    let header_params = parse_header_params(content);  // @param에서 추출
-    let body_params = parse_body_params(content);      // :name에서 추출
-
-    // 1. SQL 본문에서 사용하는 :name이 @param에 선언되지 않은 경우
-    for bp in &body_params {
-        if !header_params.contains(bp) {
-            panic!(
-                "{}:{}: SQL에서 :{} 사용하지만 @param 헤더에 선언 없음",
-                file_path.display(), bp, bp
-            );
-        }
-    }
-
-    // 2. @param에 선언했지만 SQL 본문에서 사용하지 않는 경우
-    for hp in &header_params {
-        if !body_params.contains(hp) {
-            panic!(
-                "{}:{}: @param {}이 선언됐지만 SQL 본문에서 :{} 미사용",
-                file_path.display(), hp, hp, hp
-            );
-        }
-    }
-
-    // 3. @name, @description 필수 헤더 존재 확인
-    if !content.contains("-- @name ") {
-        panic!("{}: @name 헤더 누락", file_path.display());
-    }
-    if !content.contains("-- @description ") {
-        panic!("{}: @description 헤더 누락", file_path.display());
-    }
-}
-```
-
-**검증 시점 정리**:
-
-| 검증 항목 | 시점 | 방법 |
-|-----------|------|------|
-| `.sql` 파일 자동 등록 | 빌드 | `build.rs` glob → `include_str!` 생성 |
-| `@param` ↔ `:param` 일치 | 빌드 | `build.rs` 파싱 + `panic!` |
-| `@name`, `@description` 필수 | 빌드 | `build.rs` 검증 |
-| required param 누락 | 런타임 | `query()` 호출 시 검증 |
-| param 타입 불일치 | 런타임 | `coerce_value()` 에러 |
-
-#### 런타임 로드 흐름
+#### QueryRepository 구현
 
 ```rust
 // db/sqlite.rs
 
-// build.rs가 생성한 배열 포함
-include!(concat!(env!("OUT_DIR"), "/generated_perspectives.rs"));
-
-impl SqliteStore {
-    /// .sql 헤더 파싱 → PerspectiveInfo + SQL 본문 분리
-    fn load_perspectives() -> Vec<(PerspectiveInfo, String)> {
-        PERSPECTIVE_SQLS.iter()
-            .map(|raw| parse_perspective_sql(raw))
-            .collect()
-    }
-}
-
 impl QueryRepository for SqliteStore {
     fn list_perspectives(&self) -> Result<Vec<PerspectiveInfo>> {
-        Ok(Self::load_perspectives().into_iter().map(|(info, _)| info).collect())
+        Ok(self.perspectives.clone())
     }
 
     fn query(&self, perspective: &str, params: &QueryParams) -> Result<serde_json::Value> {
-        let (info, sql_template) = Self::load_perspectives()
-            .into_iter()
-            .find(|(info, _)| info.name == perspective)
+        let info = self.perspectives.iter()
+            .find(|p| p.name == perspective)
             .ok_or_else(|| anyhow::anyhow!("unknown perspective: {}", perspective))?;
 
         // 1. 필수 파라미터 검증
@@ -793,7 +706,7 @@ impl QueryRepository for SqliteStore {
         }
 
         // 2. :name → ?N 치환 + 바인딩 값 배열 구성
-        let (bound_sql, bind_values) = bind_named_params(&sql_template, &info.params, params)?;
+        let (bound_sql, bind_values) = bind_named_params(&info.sql, &info.params, params)?;
 
         // 3. 실행
         let mut stmt = self.conn.prepare(&bound_sql)?;
@@ -1017,8 +930,8 @@ suggest-workflow analyze --scope project --format json   # 기존 인터페이�
 suggest-workflow cache                                    # v2 스냅샷 생성
 ```
 
-`--param`은 각 `.sql` 파일 헤더의 `@param` 정의에 대응한다.
-공통적으로 자주 쓰이는 파라미터(top, since, tool 등)도 perspective `.sql` 파일에서 개별 선언하므로,
+`--param`은 각 perspective의 Rust 코드(`register_perspectives()`)에 정의된 `ParamDef`에 대응한다.
+공통적으로 자주 쓰이는 파라미터(top, since, tool 등)도 perspective별로 개별 선언하므로,
 별도의 "공통 필터"가 아닌 **perspective가 필요한 파라미터를 스스로 선언**하는 구조.
 
 ### 6-4. 파이프 체이닝
@@ -1032,9 +945,12 @@ suggest-workflow query --perspective transitions --tool "Bash:git" \
   xargs -I {} suggest-workflow query --perspective sequences --include-tool {}
 ```
 
-### 6-5. 커스텀 SQL (고급)
+### 6-5. 커스텀 SQL (Phase 2 에이전트용)
 
-Phase 2 에이전트가 사전 정의 perspective로 부족할 때, `.sql` 파일을 작성하여 전달:
+빌트인 perspective만으로는 레포별 특성에 맞는 분석이 어려울 수 있다.
+Phase 2 에이전트(Claude)가 **분석 대상 레포에 맞는 커스텀 쿼리를 직접 작성**하여 `--sql-file`로 전달한다.
+
+**CLI 내부에는 `.sql` 파일이 없다.** `.sql` 파일은 오직 Phase 2 에이전트가 런타임에 생성하는 것.
 
 ```bash
 suggest-workflow query --sql-file /tmp/custom-query.sql
@@ -1043,9 +959,10 @@ suggest-workflow query --sql-file /tmp/custom-query.sql
 Phase 2 에이전트의 사용 흐름:
 
 ```
-1. Write 도구로 .sql 파일 작성 (쉘 이스케이핑 걱정 없음)
-2. --sql-file로 전달
-3. JSON 결과 수신
+1. 빌트인 perspective 결과를 먼저 확인
+2. 더 깊은 분석이 필요하면 Write 도구로 .sql 파일 작성 (쉘 이스케이핑 걱정 없음)
+3. --sql-file로 전달 → JSON 결과 수신
+4. 레포 특성에 맞는 인사이트 도출
 ```
 
 예시 `.sql` 파일:
@@ -1107,7 +1024,7 @@ CLUSTERS=$(suggest-workflow query --perspective clusters)
 
 1. **토큰 절약**: 필요한 데이터만 가져옴 (analysis-snapshot.json 전체 대비 1/10~1/5)
 2. **탐색적 분석**: 한 쿼리 결과를 보고 "이 부분 더 파보자" 가능
-3. **새 관점 추가 용이**: SQL 템플릿 하나 추가 = 새 perspective
+3. **새 관점 추가 용이**: `register_perspectives()`에 항목 1개 추가 = 새 perspective
 
 ---
 
@@ -1190,30 +1107,20 @@ Phase D: v2 캐시 형식 deprecated
 
 ```
 cli/
-├── build.rs                       # [신규] queries/*.sql 자동 수집 + @param ↔ :param 검증
 ├── Cargo.toml
 └── src/
     ├── main.rs                    # clap subcommand 라우팅 + 의존성 조립(wiring)
     ├── types.rs                   # 공통 타입 (SessionData, Transition 등)
     ├── db/                        # [신규] 저장소 레이어
-    │   ├── mod.rs                 # pub use repository, sqlite
+    │   ├── mod.rs                 # pub use repository, sqlite, perspectives
     │   ├── repository.rs          # trait 정의 (IndexRepository, QueryRepository)
     │   │                          #   → rusqlite 의존 없음, 순수 인터페이스
     │   ├── sqlite.rs              # SqliteStore: trait 구현체
     │   │                          #   → rusqlite는 이 파일에서만 import
-    │   │                          #   → include!(generated_perspectives.rs) 로 .sql 자동 로드
-    │   ├── schema.rs              # 테이블 생성 DDL (include_str!로 로드)
-    │   ├── migrate.rs             # 스키마 버전 관리
-    │   └── queries/               # [신규] perspective SQL (파일 추가 = perspective 추가)
-    │       ├── schema.sql         # CREATE TABLE DDL (perspective 아님, build.rs에서 제외)
-    │       ├── tool_frequency.sql # @name tool-frequency  @param top:int=10
-    │       ├── transitions.sql    # @name transitions     @param tool:text
-    │       ├── trends.sql         # @name trends          @param since:date=2026-01-01
-    │       ├── repetition.sql     # @name repetition      @param z_threshold:float=2.0
-    │       ├── hotfiles.sql       # @name hotfiles        @param top:int=20
-    │       ├── session_links.sql
-    │       ├── sequences.sql
-    │       └── ...                # ← 여기에 .sql 추가하면 자동 등록
+    │   ├── perspectives.rs        # [신규] register_perspectives() — 빌트인 perspective 등록
+    │   │                          #   → 이름, 설명, 파라미터, SQL을 Rust 코드로 정의
+    │   ├── schema.rs              # 테이블 생성 DDL
+    │   └── migrate.rs             # 스키마 버전 관리
     ├── commands/                  # rusqlite 의존 없음 — trait만 사용
     │   ├── mod.rs
     │   ├── index.rs               # fn run_index(repo: &dyn IndexRepository, ...)
@@ -1233,10 +1140,14 @@ cli/
 commands/ ──→ db/repository.rs (trait)
                     ↑
 main.rs ──→ db/sqlite.rs (impl) ──→ rusqlite
+                    ↑
+              db/perspectives.rs (빌트인 SQL + 파라미터 정의)
 ```
 
 `commands/`는 `db/repository.rs`의 trait만 알고, 구체 구현(`sqlite.rs`)과 `rusqlite`는 모른다.
 `main.rs`만 구체 구현을 알고 조립(wiring)한다.
+빌트인 perspective SQL은 `perspectives.rs`에서 Rust 코드로 직접 정의한다. **CLI 바이너리 안에 `.sql` 파일 없음.**
+커스텀 SQL 파일은 Phase 2 에이전트가 레포별로 런타임에 작성 → `--sql-file`로 전달.
 
 ---
 
@@ -1258,38 +1169,36 @@ main.rs ──→ db/sqlite.rs (impl) ──→ rusqlite
 
 1. `rusqlite` 의존성 추가 + 빌드 확인
 2. `db/repository.rs` — `IndexRepository`, `QueryRepository` trait 정의
-3. `db/queries/schema.sql` — DDL 분리
+3. `db/schema.rs` — DDL 정의
 4. `db/sqlite.rs` — `SqliteStore` 구현체 (스키마 초기화 + 원시 데이터 INSERT)
 5. `commands/index.rs` — 기본 인덱싱 (`&dyn IndexRepository`만 의존)
 
-### Sprint 2: 쿼리 (동적 perspective)
+### Sprint 2: 쿼리 (perspective 시스템)
 
-6. `build.rs` — `queries/*.sql` 자동 수집 + `@param` ↔ `:param` 빌드 타임 검증
-7. `db/queries/*.sql` — perspective별 SQL 파일 작성 (`@name`, `@param` 헤더 포함)
-8. `.sql` 헤더 파서 구현 (`parse_perspective_sql`) — `@` 메타데이터 → `PerspectiveInfo` 변환
-9. `db/sqlite.rs` — `QueryRepository` 구현 (named param 치환 + 동적 디스패치)
-10. `commands/query.rs` — 쿼리 커맨드 (`--perspective`, `--param`, `--list-perspectives`, `--sql-file`)
-11. `main.rs` — 서브커맨드 라우팅 + `SqliteStore` 조립(wiring)
+6. `db/perspectives.rs` — `register_perspectives()` 빌트인 perspective 등록 (SQL + 파라미터를 Rust 코드에 직접 정의)
+7. `db/sqlite.rs` — `QueryRepository` 구현 (named param 치환 + 동적 디스패치)
+8. `commands/query.rs` — 쿼리 커맨드 (`--perspective`, `--param`, `--list-perspectives`, `--sql-file`)
+9. `main.rs` — 서브커맨드 라우팅 + `SqliteStore` 조립(wiring)
 
 ### Sprint 3: 인크리멘털 + 파생
 
-8. 인크리멘털 인덱싱 (변경 감지, 선택적 파싱)
-9. 파생 테이블 계산 (transitions, weekly_buckets, hotspots, links)
-10. `db/migrate.rs` — 스키마 버전 관리
+10. 인크리멘털 인덱싱 (변경 감지, 선택적 파싱)
+11. 파생 테이블 계산 (transitions, weekly_buckets, hotspots, links)
+12. `db/migrate.rs` — 스키마 버전 관리
 
 ### Sprint 4: 통합
 
-11. `analyze` 커맨드 내부를 DB 기반으로 전환
-12. `cache` 커맨드 → index + snapshot 추출로 전환
-13. Phase 2 에이전트 업데이트 (workflow-insight.md)
-14. B2/B3 등 기존 버그 수정
+13. `analyze` 커맨드 내부를 DB 기반으로 전환
+14. `cache` 커맨드 → index + snapshot 추출로 전환
+15. Phase 2 에이전트 업데이트 (workflow-insight.md)
+16. B2/B3 등 기존 버그 수정
 
 ### Sprint 5: 고급 기능
 
-15. FTS5 프롬프트 검색
-16. 프롬프트 클러스터링 (BM25 → DB 기반)
-17. `--sql` 커스텀 쿼리 지원
-18. 글로벌 인덱스
+17. FTS5 프롬프트 검색
+18. 프롬프트 클러스터링 (BM25 → DB 기반)
+19. `--sql-file` 커스텀 쿼리 — Phase 2 에이전트가 레포별 `.sql` 작성
+20. 글로벌 인덱스
 
 ---
 
@@ -1311,11 +1220,10 @@ main.rs ──→ db/sqlite.rs (impl) ──→ rusqlite
 |------|------|------|
 | 스토리지 | SQLite (rusqlite bundled) | 유연한 SQL, ~600KB, 단일 파일 |
 | DB 접근 패턴 | Repository 패턴 (trait 추상화) | rusqlite 의존성 격리, commands에서 DB 구현 모름 |
-| SQL 관리 | `.sql` 파일 분리 + `include_str!` | 에디터 하이라이팅, 관심사 분리 |
-| perspective 확장 | `.sql` 헤더 메타데이터 (`@name`, `@param`) | 코드 변경 없이 `.sql` 파일 추가만으로 perspective 추가 |
+| 빌트인 perspective | Rust 코드에 직접 정의 (`register_perspectives()`) | Repository에서 프로그래밍적으로 파라미터 결정, `.sql` 파일 불필요 |
+| 커스텀 쿼리 | `--sql-file` (Phase 2 에이전트가 레포별 작성) | CLI 안에 `.sql` 없음, 에이전트가 분석 레포에 맞게 쿼리 작성 |
 | 파라미터 전달 | `--param key=value` (동적) | perspective별 고유 파라미터를 유연하게 지원 |
 | 쿼리 안전성 | named param (`:name` → `?N`) 바인딩 | SQL injection 방지 |
-| 커스텀 쿼리 | `--sql-file` (파일 기반) | 쉘 이스케이핑 회피, Phase 2 에이전트 친화적 |
 | 인크리멘털 전략 | size + mtime 변경 감지 | 단순하고 신뢰성 있음 |
 | 파생 테이블 | 전체 재계산 | 데이터 규모가 작아 충분히 빠름 |
 | v2 호환 | 기존 CLI 인터페이스 유지 | 점진적 마이그레이션 |
