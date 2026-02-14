@@ -779,40 +779,145 @@ pub fn list_perspectives(repo: &dyn QueryRepository) -> Result<()> {
 }
 ```
 
+#### clap 구조 (main.rs)
+
 ```rust
-// main.rs — 조립(wiring)만 여기서
-use crate::db::sqlite::SqliteStore;
+// main.rs
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+
+#[derive(Parser)]
+#[command(name = "suggest-workflow", version = "3.0.0")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// 세션 데이터 인덱싱
+    Index(IndexArgs),
+    /// 인덱스 쿼리
+    Query(QueryArgs),
+    /// [v2 호환] 분석 실행
+    Analyze(LegacyAnalyzeArgs),
+    /// [v2 호환] 캐시 생성
+    Cache(LegacyCacheArgs),
+}
+
+#[derive(clap::Args)]
+struct IndexArgs {
+    #[arg(long)]
+    project: Option<String>,
+    #[arg(long)]
+    db: Option<PathBuf>,
+    /// 전체 재구축 (기존 DB 삭제)
+    #[arg(long)]
+    full: bool,
+}
+
+#[derive(clap::Args)]
+struct QueryArgs {
+    #[arg(long)]
+    project: Option<String>,
+    #[arg(long)]
+    db: Option<PathBuf>,
+
+    /// perspective 이름 (예: tool-frequency, transitions)
+    #[arg(long)]
+    perspective: Option<String>,
+
+    /// 커스텀 SQL 파일 경로
+    #[arg(long)]
+    sql_file: Option<PathBuf>,
+
+    /// 사용 가능한 perspective 목록 출력
+    #[arg(long)]
+    list_perspectives: bool,
+
+    /// 동적 파라미터 (복수 가능): --param top=10 --param tool="Bash:git"
+    #[arg(long = "param", value_parser = parse_key_val)]
+    params: Vec<(String, String)>,
+
+    /// 출력 형식
+    #[arg(long, default_value = "json")]
+    format: String,
+}
+
+/// "key=value" 문자열을 (String, String) 튜플로 파싱
+fn parse_key_val(s: &str) -> Result<(String, String), String> {
+    let pos = s.find('=')
+        .ok_or_else(|| format!("invalid param (expected key=value): '{}'", s))?;
+    Ok((s[..pos].to_string(), s[pos + 1..].to_string()))
+}
 
 fn main() -> Result<()> {
-    let args = Cli::parse();
-    let db_path = resolve_db_path(&args)?;
-    let store = SqliteStore::open(&db_path)?;
+    let cli = Cli::parse();
 
-    match args.command {
-        Command::Index(opts) => commands::index::run_index(&store, opts),
-        Command::Query(opts) => commands::query::run_query(&store, &opts.perspective, opts.into()),
-        // ...
+    match cli.command {
+        Command::Index(args) => {
+            let db_path = resolve_db_path(args.db.as_deref(), args.project.as_deref())?;
+            let store = SqliteStore::open(&db_path)?;
+            commands::index::run_index(&store, args.full)
+        }
+        Command::Query(args) => {
+            let db_path = resolve_db_path(args.db.as_deref(), args.project.as_deref())?;
+            let store = SqliteStore::open(&db_path)?;
+
+            if args.list_perspectives {
+                return commands::query::list_perspectives(&store);
+            }
+
+            // Vec<(String, String)> → HashMap<String, String>
+            let params: QueryParams = args.params.into_iter().collect();
+
+            commands::query::run_query(
+                &store,
+                args.perspective.as_deref(),
+                args.sql_file.as_deref(),
+                params,
+            )
+        }
+        Command::Analyze(args) => { /* v2 호환: 내부적으로 index → query 위임 */ }
+        Command::Cache(args)   => { /* v2 호환: 내부적으로 index → snapshot 추출 */ }
     }
 }
 ```
 
-### 6-3. CLI 옵션 구조
+### 6-3. CLI 사용 예시 (end-to-end)
 
 ```bash
-suggest-workflow query [글로벌 옵션] [perspective 옵션]
+# ── 인덱싱 ──
+suggest-workflow index                              # cwd 기준 인크리멘털
+suggest-workflow index --project /path/to/repo      # 다른 프로젝트
+suggest-workflow index --full                       # DB 삭제 후 전체 재구축
 
-# 글로벌 옵션 (query 서브커맨드 레벨)
---project <path>              # DB 경로 resolve
---db <path>                   # 직접 DB 파일 지정
---format json|csv|table       # 출력 형식 (기본: json)
+# ── perspective 목록 확인 ──
+suggest-workflow query --list-perspectives
+#   tool-frequency — 도구 사용 빈도 (분류명 기준)
+#     --top: 상위 N개 (default: 10)
+#   transitions — 특정 도구 이후 전이 확률
+#     --tool: 기준 도구 (required)
+#   trends — 주간 도구 사용 트렌드
+#     --since: 시작 날짜 (default: 2026-01-01)
+#   ...
 
-# perspective 선택 (택일)
---perspective <name>          # 사전 정의된 perspective 실행
---sql-file <path>             # 커스텀 SQL 파일 실행
---list-perspectives           # perspective 목록 출력
+# ── perspective 쿼리 ──
+suggest-workflow query --perspective tool-frequency                     # default 파라미터 사용
+suggest-workflow query --perspective tool-frequency --param top=5       # top 오버라이드
+suggest-workflow query --perspective transitions --param tool="Bash:git"  # required 파라미터
+suggest-workflow query --perspective trends --param since=2026-02-01
 
-# perspective 파라미터 (동적, 복수 가능)
---param key=value             # .sql 헤더에 정의된 파라미터 전달
+# ── 커스텀 SQL ──
+suggest-workflow query --sql-file /tmp/my-query.sql
+
+# ── 파이프 체이닝 ──
+suggest-workflow query --perspective tool-frequency --param top=5 \
+  | jq '.[].tool' -r
+
+# ── v2 호환 ──
+suggest-workflow analyze --scope project --format json   # 기존 인터페이스 유지
+suggest-workflow cache                                    # v2 스냅샷 생성
 ```
 
 `--param`은 각 `.sql` 파일 헤더의 `@param` 정의에 대응한다.
