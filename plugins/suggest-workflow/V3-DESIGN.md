@@ -508,7 +508,8 @@ pub trait QueryRepository {
     fn dependency_graph(&self, opts: &QueryOpts) -> Result<serde_json::Value>;
     fn sequences(&self, min_count: u32, opts: &QueryOpts) -> Result<serde_json::Value>;
     fn clusters(&self, depth: &str, opts: &QueryOpts) -> Result<serde_json::Value>;
-    fn raw_sql(&self, sql: &str) -> Result<serde_json::Value>;
+    /// 커스텀 SQL 실행 (.sql 파일에서 읽은 내용 전달, SELECT만 허용)
+    fn execute_sql(&self, sql: &str) -> Result<serde_json::Value>;
 }
 
 /// 공통 필터 옵션
@@ -594,13 +595,25 @@ ORDER BY week_start, count DESC
 // commands/query.rs — rusqlite를 import하지 않음
 use crate::db::repository::QueryRepository;
 
-pub fn run_query(repo: &dyn QueryRepository, perspective: &str, opts: QueryOpts) -> Result<()> {
-    let result = match perspective {
-        "tool-frequency" => repo.tool_frequency(&opts)?,
-        "transitions"    => repo.transitions(opts.tool.as_deref().unwrap_or(""), &opts)?,
-        "trends"         => repo.trends(&opts)?,
+pub fn run_query(
+    repo: &dyn QueryRepository,
+    perspective: Option<&str>,
+    sql_file: Option<&Path>,
+    opts: QueryOpts,
+) -> Result<()> {
+    let result = match (perspective, sql_file) {
+        // --sql-file: 파일에서 SQL 읽어서 실행
+        (_, Some(path)) => {
+            let sql = std::fs::read_to_string(path)?;
+            repo.execute_sql(&sql)?
+        }
+        // --perspective: 사전 정의 쿼리
+        (Some("tool-frequency"), _) => repo.tool_frequency(&opts)?,
+        (Some("transitions"), _)    => repo.transitions(opts.tool.as_deref().unwrap_or(""), &opts)?,
+        (Some("trends"), _)         => repo.trends(&opts)?,
         // ...
-        _ => anyhow::bail!("unknown perspective: {}", perspective),
+        (Some(name), _) => anyhow::bail!("unknown perspective: {}", name),
+        (None, None)     => anyhow::bail!("--perspective or --sql-file required"),
     };
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
@@ -651,22 +664,43 @@ suggest-workflow query --perspective transitions --tool "Bash:git" \
 
 ### 6-5. 커스텀 SQL (고급)
 
-Phase 2 에이전트가 사전 정의 perspective로 부족할 때:
+Phase 2 에이전트가 사전 정의 perspective로 부족할 때, `.sql` 파일을 작성하여 전달:
 
 ```bash
-suggest-workflow query --sql "
-  SELECT t1.classified_name as tool, COUNT(*) as freq,
-         AVG(CASE WHEN t2.classified_name LIKE 'Bash:%' THEN 1.0 ELSE 0.0 END) as bash_follow_rate
-  FROM tool_uses t1
-  LEFT JOIN tool_uses t2
-    ON t1.session_id = t2.session_id AND t2.seq_order = t1.seq_order + 1
-  GROUP BY t1.classified_name
-  HAVING freq >= 5
-  ORDER BY freq DESC
-"
+suggest-workflow query --sql-file /tmp/custom-query.sql
 ```
 
-**보안**: `--sql`은 SELECT만 허용 (INSERT/UPDATE/DELETE/DROP 차단).
+Phase 2 에이전트의 사용 흐름:
+
+```
+1. Write 도구로 .sql 파일 작성 (쉘 이스케이핑 걱정 없음)
+2. --sql-file로 전달
+3. JSON 결과 수신
+```
+
+예시 `.sql` 파일:
+
+```sql
+-- /tmp/custom-query.sql
+SELECT t1.classified_name as tool,
+       COUNT(*) as freq,
+       AVG(CASE WHEN t2.classified_name LIKE 'Bash:%' THEN 1.0 ELSE 0.0 END) as bash_follow_rate
+FROM tool_uses t1
+LEFT JOIN tool_uses t2
+  ON t1.session_id = t2.session_id AND t2.seq_order = t1.seq_order + 1
+GROUP BY t1.classified_name
+HAVING freq >= 5
+ORDER BY freq DESC
+```
+
+실행:
+
+```bash
+suggest-workflow query --sql-file /tmp/custom-query.sql
+# → JSON 출력 (stdout)
+```
+
+**보안**: `--sql-file`은 SELECT만 허용 (INSERT/UPDATE/DELETE/DROP 차단). 파일 내용을 파싱하여 DML/DDL 포함 시 즉시 에러 반환.
 
 ---
 
