@@ -348,6 +348,15 @@ fn run_legacy(cli: LegacyArgs) -> Result<()> {
         );
     }
 
+    // v3: Run index to populate SQLite DB (analyze also benefits from up-to-date DB)
+    let db_path = resolve_db_path(None, &project_path)?;
+    let sessions_dir = resolve_sessions_dir(&project_path)?;
+
+    if sessions_dir.exists() {
+        let store = db::SqliteStore::open(&db_path)?;
+        commands::index::run(&store, &sessions_dir)?;
+    }
+
     let scope: AnalysisScope = cli.scope.parse()
         .map_err(|e: String| anyhow::anyhow!(e))?;
     let focus: AnalysisFocus = cli.focus.parse()
