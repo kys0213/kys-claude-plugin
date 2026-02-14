@@ -25,6 +25,11 @@ rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
 default = []
 lindera-korean = ["lindera"]
 
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+tempfile = "3.14"
+
 [profile.release]
 opt-level = 3
 lto = true
