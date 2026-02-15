@@ -1,6 +1,6 @@
 # Team Claude Plugin
 
-멀티 에이전트 협업 시스템: **자동화 워크플로우**, PSM 병렬 세션, Contract 기반 설계, RALPH Loop
+**Contract-first TDD 방법론**: 동적 관점 멀티 리뷰 + RALPH 루프로 고품질 스펙을 생성하여 안전한 병렬 실행을 가능하게 합니다.
 
 > **중요**: Claude가 기존 인프라를 사용하도록 [INFRASTRUCTURE.md](./INFRASTRUCTURE.md)를 먼저 읽어야 합니다.
 
@@ -207,6 +207,54 @@ Phase 1: ARCHITECT (Main Agent + 사용자 협업)
 │      found = repo.find_by_code("SUMMER2024")                                │
 │      assert found is not None                                               │
 └─────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+Phase 1.5: SPEC REFINE (동적 관점 멀티 리뷰 RALPH 루프)
+═══════════════════════════════════════════════════════════════════════════════
+
+/team-claude:spec-refine --session {session-id}
+        │
+        ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  동적 관점 멀티 리뷰 + RALPH 자동 정제                                      │
+│                                                                             │
+│  Contract 품질이 병렬 실행의 안전성을 결정합니다.                            │
+│  스펙 단계에서 최대한 높은 품질을 확보하는 것이 핵심입니다.                  │
+│                                                                             │
+│  WHILE iteration < maxIterations:                                           │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │                                                                       │ │
+│  │  [A] Perspective Planner                                             │ │
+│  │      스펙을 분석하여 동적으로 관점 결정                              │ │
+│  │      (PM, 보안 전문가, DBA, CTO, 디자이너, QA 등)                   │ │
+│  │      이전 carry.unresolvedIssues 기반으로 관점 조정                  │ │
+│  │                                                                       │ │
+│  │  [B] 병렬 리뷰                                                       │ │
+│  │      관점별로 Claude/Codex/Gemini에 분배하여 병렬 실행               │ │
+│  │                                                                       │ │
+│  │  [C] 합의 분석 (Consensus Analysis)                                  │ │
+│  │      N/N 동의 → CONSENSUS (반드시 반영)                              │ │
+│  │      ≥N/2 동의 → MAJORITY (강력 권장)                               │ │
+│  │      <N/2 제기 → MINORITY (기록만)                                  │ │
+│  │                                                                       │ │
+│  │  [D] 판정                                                            │ │
+│  │      PASS (≥80) / WARN (≥60, CONSENSUS 0) / FAIL                   │ │
+│  │                                                                       │ │
+│  │  [E] 자동 정제 (FAIL 시)                                            │ │
+│  │      CONSENSUS/MAJORITY 이슈 자동 반영 → 다음 iteration             │ │
+│  │                                                                       │ │
+│  └───────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│  Hook이 상태를 결정적으로 관리:                                             │
+│  • refine-review-complete: 리뷰 수집 추적                                  │
+│  • refine-spec-modified: 정제 액션 기록                                    │
+│  • refine-iteration-end: carry 업데이트 + 에스컬레이션 판단               │
+│                                                                             │
+│  → 자세한 내용: /team-claude:spec-refine 커맨드 참조                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼  PASS 또는 WARN(사용자 승인)
 
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -464,6 +512,7 @@ Phase 4: MERGE (Main Agent - Semi-Auto)
 |--------|------|----------|
 | `/team-claude:setup` | 환경 설정 (초기화, 설정, 에이전트, 서버) | **HITL 대화형** |
 | `/team-claude:architect` | 설계 + Contract + Test Code 작성 | **적극 참여** |
+| `/team-claude:spec-refine` | 동적 관점 멀티 리뷰 RALPH 스펙 정제 | 자동 (WARN 시 확인) |
 | `/team-claude:delegate` | Worker에게 구현 위임 | 시작만 |
 | `/team-claude:merge` | PR 머지 (conflict 시 사용자 확인) | **conflict 시 참여** |
 | `/team-claude:loop-status` | 진행 상황 확인 | 모니터링 |
@@ -585,6 +634,136 @@ keywords:
     rv: review
     pl: parallel
     rl: ralph
+```
+
+---
+
+## Spec Refine: Hook 기반 상태 관리
+
+> 상세 커맨드 문서: `commands/spec-refine.md`
+> 관점 결정 에이전트: `agents/perspective-planner.md`
+> 타입 정의: `cli/src/lib/common.ts`
+> Hook 구현: `cli/src/commands/hook.ts`
+
+### 핵심 아이디어
+
+LLM이 **실행**(Planner 호출, 리뷰 실행, 합의 분석, 스펙 수정)을 담당하고,
+Hook이 **상태 관리**(carry 업데이트, 에스컬레이션 판단, status 전이)를 담당합니다.
+
+```
+LLM의 책임 (실행)                Hook의 책임 (상태)
+──────────────────────           ──────────────────────────────
+Planner 호출 → 관점 생성
+리뷰 에이전트 호출                → refine-review-complete: 리뷰 수집 카운트
+합의 분석 + 판정
+스펙 파일 수정 (정제)             → refine-spec-modified: 정제 액션 기록
+iteration 종료                   → refine-iteration-end:
+                                    carry 업데이트 (이슈/점수/관점 이력)
+                                    에스컬레이션 판단 (정체/하락/반복/최대)
+                                    status 전이 (passed/warned/escalated)
+```
+
+### 등록된 Hook
+
+| Event | Matcher | Hook 명령어 | 역할 |
+|-------|---------|------------|------|
+| `PostToolUse` | `Task` | `tc hook refine-review-complete` | Claude 리뷰 에이전트 완료 감지 |
+| `PostToolUse` | `Bash` | `tc hook refine-review-complete` | call-codex/call-gemini 완료 감지 |
+| `PostToolUse` | `Write` | `tc hook refine-spec-modified` | specs/ 파일 수정 → 정제 액션 기록 |
+| `Stop` | (all) | `tc hook refine-iteration-end` | carry 업데이트 + 에스컬레이션 판단 |
+
+### 상태 모델 (SpecRefineState)
+
+상태 파일: `.team-claude/sessions/{session-id}/refine-state.json`
+
+```
+┌────────┐                        ┌─────────┐
+│  idle  │ ── spec-refine 시작 ─▶ │ running │
+└────────┘                        └────┬────┘
+                                       │
+    ┌──────────────────────────────────┘
+    ▼
+┌──────────┐                              ┌──────────┐
+│ iteration│◀──── FAIL + 정제 ────────────│ 판정     │
+│  (A→E)   │────▶ 합의분석 → 점수 ──────▶│          │
+└──────────┘                              └──┬───┬───┘
+                                             │   │
+                                        PASS │   │ 에스컬레이션
+                                             ▼   ▼
+                                       ┌────────┐ ┌───────────┐
+                                       │ passed │ │ escalated │
+                                       │/warned │ │           │
+                                       └────────┘ └───────────┘
+```
+
+**carry 필드** (iteration 간 전달):
+
+| 필드 | Writer | Reader | 용도 |
+|------|--------|--------|------|
+| `unresolvedIssues` | 합의 분석 (C) | Planner (A) | 미해결 이슈 영역 관점 선택 |
+| `resolvedIssues` | 정제 (E) | Planner (A) | 해결된 영역 관점 제외 |
+| `scoreHistory` | 합의 분석 (C) | 에스컬레이션 (Hook) | 점수 추세로 정체/하락 감지 |
+| `perspectiveHistory` | Planner (A) | Planner (A) | 동일 관점 조합 방지 |
+
+### 에스컬레이션 조건 (Hook이 자동 판단)
+
+```
+1. 점수 정체:  |scoreHistory[-1] - scoreHistory[-2]| < 3점
+2. 점수 하락:  scoreHistory[-1] < scoreHistory[-2]
+3. 이슈 반복:  동일 unresolvedIssue 3회 이상 등장
+4. 최대 반복:  currentIteration >= maxIterations
+```
+
+### 전체 플로우 시퀀스
+
+```
+spec-refine 시작
+│
+├─ 상태 초기화: status=running, carry={empty}
+│
+│  ┌── Iteration 1 ─────────────────────────────────────────────────┐
+│  │                                                                 │
+│  │  [A] Perspective Planner (LLM)                                 │
+│  │      입력: carry.unresolvedIssues + carry.perspectiveHistory    │
+│  │      출력: perspectives[] (role, engine, weight, focus)         │
+│  │                                                                 │
+│  │  [B] 병렬 리뷰 (LLM)                                           │
+│  │      Claude관점 → Task 에이전트                                 │
+│  │      Codex관점  → Bash(call-codex.sh)                          │
+│  │      Gemini관점 → Bash(call-gemini.sh)                         │
+│  │      ──── Hook: refine-review-complete (리뷰 수집 추적) ────   │
+│  │                                                                 │
+│  │  [C] 합의 분석 (LLM)                                           │
+│  │      이슈 분류: CONSENSUS / MAJORITY / MINORITY                │
+│  │      가중 평균 점수 산출                                        │
+│  │                                                                 │
+│  │  [D] 판정 (LLM → refine-state.json에 verdict 기록)             │
+│  │                                                                 │
+│  │  [E] FAIL → 자동 정제 (LLM)                                    │
+│  │      CONSENSUS 이슈 반영 + MAJORITY 이슈 반영                  │
+│  │      ──── Hook: refine-spec-modified (정제 액션 기록) ────     │
+│  │                                                                 │
+│  └─────────────────────────────────────────────────────────────────┘
+│  │
+│  │  ──── Hook: refine-iteration-end ────
+│  │  carry.scoreHistory.push(weightedScore)
+│  │  carry.perspectiveHistory.push(roles[])
+│  │  carry.unresolvedIssues 분류 (미해결 이슈 갱신)
+│  │  carry.resolvedIssues 분류 (해결된 이슈 갱신)
+│  │  에스컬레이션 판단: 정체? 하락? 반복? 최대?
+│  │  → escalated면 status="escalated" + 사용자 알림
+│  │  → passed면 status="passed"
+│  │
+│  ┌── Iteration 2 (carry 기반 관점 재선정) ──────────────────────┐
+│  │  Planner가 carry.unresolvedIssues를 읽어                      │
+│  │  미해결 영역 관점 유지 + 가중치 상향                           │
+│  │  해결된 영역 관점 제외 + 새 관점 추가                          │
+│  │  ...                                                           │
+│  └────────────────────────────────────────────────────────────────┘
+│
+├─ PASS → status="passed", 다음 단계 진행
+├─ WARN → status="warned", 사용자 확인 후 진행
+└─ ESCALATED → status="escalated", 수동 개입 요청
 ```
 
 ---

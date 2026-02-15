@@ -187,6 +187,98 @@ export const MAGIC_KEYWORDS: Record<string, string> = {
 export const IMPL_STRATEGIES = ["psm", "swarm", "sequential"] as const;
 export type ImplStrategy = (typeof IMPL_STRATEGIES)[number];
 
+// ============================================================================
+// Spec Refine 상태 타입
+// ============================================================================
+
+/** 리뷰 관점 정의 */
+export interface Perspective {
+  role: string; // "보안 전문가", "PM", "DBA" 등
+  reason: string; // 이 관점을 선택한 이유
+  focus: string[]; // 집중 영역 목록
+  engine: "claude" | "codex" | "gemini";
+  weight: number; // 0.0 ~ 1.0, 합계 = 1.0
+}
+
+/** 개별 리뷰 결과 */
+export interface ReviewResult {
+  perspective: string; // role 이름
+  engine: "claude" | "codex" | "gemini";
+  score: number; // 0-100
+  issues: {
+    critical: string[];
+    important: string[];
+    niceToHave: string[];
+  };
+  suggestions: string[]; // 구체적 개선 제안
+  reviewFile: string; // 결과 파일 경로
+}
+
+/** 이슈의 합의 수준 */
+export interface ConsensusIssue {
+  summary: string; // 이슈 요약
+  level: "consensus" | "majority" | "minority";
+  agreedBy: string[]; // 동의한 관점 목록
+  details: Record<string, string>; // 관점별 원문
+  resolved: boolean; // 정제 후 해결 여부
+  resolvedAt?: string; // 해결 시점 (iteration)
+}
+
+/** 단일 반복(iteration)의 상태 */
+export interface RefineIteration {
+  iteration: number;
+  startedAt: string;
+  completedAt: string | null;
+
+  // PHASE A: 관점 결정
+  perspectives: Perspective[];
+  plannerReasoning: string; // Planner가 왜 이 관점을 선택했는지
+
+  // PHASE B: 리뷰 결과
+  reviews: ReviewResult[];
+
+  // PHASE C: 합의 분석
+  consensusIssues: ConsensusIssue[];
+  weightedScore: number; // 가중 평균 점수
+
+  // PHASE D: 판정
+  verdict: "pass" | "warn" | "fail";
+
+  // PHASE E: 정제 (fail인 경우)
+  refinementActions: string[]; // 수행한 정제 작업 목록
+}
+
+/** spec-refine 전체 상태 */
+export interface SpecRefineState {
+  sessionId: string;
+  status: "idle" | "running" | "passed" | "warned" | "failed" | "escalated";
+
+  // 설정
+  config: {
+    maxIterations: number;
+    passThreshold: number;
+    warnThreshold: number;
+    maxPerspectives: number;
+  };
+
+  // 반복 이력
+  currentIteration: number;
+  iterations: RefineIteration[];
+
+  // 반복 간 전달 상태 (이것이 핵심)
+  carry: {
+    unresolvedIssues: ConsensusIssue[]; // 미해결 이슈 → 다음 Planner 입력
+    resolvedIssues: ConsensusIssue[]; // 해결된 이슈 → 관점 제외 근거
+    scoreHistory: number[]; // 점수 추이 → 개선 추세 판단
+    perspectiveHistory: string[][]; // 관점 이력 → 중복 방지
+  };
+
+  // 타임스탬프
+  startedAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
 /**
  * Magic Keyword 파싱
  */
