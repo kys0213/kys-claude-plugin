@@ -49,7 +49,7 @@ CHANGES=$(git status --porcelain)
 
 # 브랜치 미지정 시 기본 브랜치 사용
 if [ -z "$TARGET_BRANCH" ]; then
-  TARGET_BRANCH=$(${CLAUDE_PLUGIN_ROOT}/scripts/detect-default-branch.sh)
+  TARGET_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo 'main')
 fi
 ```
 
@@ -187,7 +187,7 @@ fi
 
 ## Notes
 
-- 브랜치 미지정 시 기본 브랜치(main/master)로 이동 (`detect-default-branch.sh`로 자동 감지)
+- 브랜치 미지정 시 기본 브랜치(main/master)로 이동 (자동 감지)
 - `--force`와 브랜치 이름은 순서 무관하게 사용 가능
 - `--force`는 stash만 하고 변경사항을 버리지 않음
 - stash된 변경사항은 `git stash list`로 확인 가능

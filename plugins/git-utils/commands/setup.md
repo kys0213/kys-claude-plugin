@@ -33,7 +33,7 @@ git-workflow는 git 저장소에서만 동작합니다.
 **git 저장소인 경우**, 기본 브랜치를 감지합니다:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/detect-default-branch.sh
+git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo 'main'
 ```
 
 기존 환경 파일도 확인합니다:
@@ -177,82 +177,36 @@ hook 설치 범위를 선택하세요.
 
 ### 프로젝트 범위 선택 시
 
+`git-utils guard`가 직접 guard 역할을 수행하므로 별도의 hook 스크립트 파일을 생성할 필요 없이, `git-utils guard` 명령을 hook으로 등록합니다.
+
 ```bash
-# 프로젝트 절대경로
 PROJECT_DIR=$(pwd)
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
-# Step 1에서 감지한 기본 브랜치를 bake-in
-DEFAULT_BRANCH=$("${PLUGIN_ROOT}/scripts/detect-default-branch.sh")
-
-# 디렉토리 생성
-mkdir -p .claude/hooks
-
-# Write/Edit Guard Hook
-sed \
-  -e "s|{project_dir}|$PROJECT_DIR|g" \
-  -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
-  -e "s|{default_branch}|$DEFAULT_BRANCH|g" \
-  "${PLUGIN_ROOT}/scripts/default-branch-guard-hook.sh" > .claude/hooks/default-branch-guard-hook.sh
-
-chmod +x .claude/hooks/default-branch-guard-hook.sh
-
-# Bash Commit Guard Hook
-sed \
-  -e "s|{project_dir}|$PROJECT_DIR|g" \
-  -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
-  -e "s|{default_branch}|$DEFAULT_BRANCH|g" \
-  "${PLUGIN_ROOT}/scripts/default-branch-guard-commit-hook.sh" > .claude/hooks/default-branch-guard-commit-hook.sh
-
-chmod +x .claude/hooks/default-branch-guard-commit-hook.sh
+DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo 'main')
 ```
 
 ### 사용자 범위 선택 시
 
-```bash
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
-
-# 디렉토리 생성
-mkdir -p ~/.claude/hooks
-
-# Write/Edit Guard Hook
-# PROJECT_DIR은 동적 변수, DEFAULT_BRANCH는 비워서 런타임 감지
-sed \
-  -e 's|{project_dir}|${CLAUDE_PROJECT_DIR:-.}|g' \
-  -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
-  -e "s|{default_branch}||g" \
-  "${PLUGIN_ROOT}/scripts/default-branch-guard-hook.sh" > ~/.claude/hooks/default-branch-guard-hook.sh
-
-chmod +x ~/.claude/hooks/default-branch-guard-hook.sh
-
-# Bash Commit Guard Hook
-sed \
-  -e 's|{project_dir}|${CLAUDE_PROJECT_DIR:-.}|g' \
-  -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
-  -e "s|{default_branch}||g" \
-  "${PLUGIN_ROOT}/scripts/default-branch-guard-commit-hook.sh" > ~/.claude/hooks/default-branch-guard-commit-hook.sh
-
-chmod +x ~/.claude/hooks/default-branch-guard-commit-hook.sh
-```
+사용자 범위에서는 `--project-dir`을 동적으로 설정하고, 기본 브랜치를 런타임에 감지합니다.
 
 ## Step 6: settings.json에 Hook 등록
+
+`git-utils hook register` CLI로 hook을 등록합니다.
 
 ### Write/Edit Guard 등록
 
 #### 프로젝트 범위 선택 시
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
-  PreToolUse "Write|Edit" \
-  "bash ./.claude/hooks/default-branch-guard-hook.sh" \
+git-utils hook register PreToolUse "Write|Edit" \
+  "git-utils guard write --project-dir=$PROJECT_DIR --create-branch-script='git-utils branch' --default-branch=$DEFAULT_BRANCH" \
   --timeout=5
 ```
 
 #### 사용자 범위 선택 시
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
-  PreToolUse "Write|Edit" \
-  "bash $HOME/.claude/hooks/default-branch-guard-hook.sh" \
+git-utils hook register PreToolUse "Write|Edit" \
+  "git-utils guard write --project-dir=\${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch'" \
   --timeout=5 \
   --project-dir="$HOME"
 ```
@@ -262,23 +216,21 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
 #### 프로젝트 범위 선택 시
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
-  PreToolUse "Bash" \
-  "bash ./.claude/hooks/default-branch-guard-commit-hook.sh" \
+git-utils hook register PreToolUse "Bash" \
+  "git-utils guard commit --project-dir=$PROJECT_DIR --create-branch-script='git-utils branch' --default-branch=$DEFAULT_BRANCH" \
   --timeout=5
 ```
 
 #### 사용자 범위 선택 시
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
-  PreToolUse "Bash" \
-  "bash $HOME/.claude/hooks/default-branch-guard-commit-hook.sh" \
+git-utils hook register PreToolUse "Bash" \
+  "git-utils guard commit --project-dir=\${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch'" \
   --timeout=5 \
   --project-dir="$HOME"
 ```
 
-helper 스크립트가 처리하는 내용:
+`git-utils hook register`가 자동 처리하는 내용:
 - settings.json 파일이 없으면 생성
 - 기존 hook 배열에 새 hook 추가 (덮어쓰지 않음)
 - 동일한 command가 이미 있으면 업데이트
@@ -290,10 +242,10 @@ helper 스크립트가 처리하는 내용:
 ```
 Default Branch Guard가 프로젝트에 설정되었습니다!
 
-생성된 파일:
-├─ .claude/hooks/default-branch-guard-hook.sh (Write/Edit 차단)
-├─ .claude/hooks/default-branch-guard-commit-hook.sh (git commit 차단)
-└─ .claude/settings.json (hook 등록)
+설정된 hook:
+├─ PreToolUse (Write|Edit) → git-utils guard write
+├─ PreToolUse (Bash) → git-utils guard commit
+└─ .claude/settings.json (hook 등록됨)
 
 Default Branch Guard:
 ├─ Write/Edit 시 기본 브랜치({default_branch}) 감지 → 즉시 브랜치 생성 제안
@@ -310,10 +262,10 @@ Default Branch Guard:
 ```
 Default Branch Guard가 사용자 설정에 등록되었습니다!
 
-생성된 파일:
-├─ ~/.claude/hooks/default-branch-guard-hook.sh (Write/Edit 차단)
-├─ ~/.claude/hooks/default-branch-guard-commit-hook.sh (git commit 차단)
-└─ ~/.claude/settings.json (hook 등록)
+설정된 hook:
+├─ PreToolUse (Write|Edit) → git-utils guard write
+├─ PreToolUse (Bash) → git-utils guard commit
+└─ ~/.claude/settings.json (hook 등록됨)
 
 Default Branch Guard:
 ├─ Write/Edit 시 기본 브랜치 감지 → 즉시 브랜치 생성 제안
@@ -326,15 +278,20 @@ Default Branch Guard:
 
 ## 기존 설정 감지
 
-이미 hook이 설치된 경우 (프로젝트 또는 사용자 범위):
+이미 hook이 설치된 경우 `git-utils hook list`로 확인합니다:
+
+```bash
+git-utils hook list PreToolUse
+git-utils hook list PreToolUse --project-dir="$HOME"
+```
 
 ```
 기존 hook이 발견되었습니다.
-├─ default-branch-guard-hook.sh: {detected_path or "없음"}
-└─ default-branch-guard-commit-hook.sh: {detected_path or "없음"}
+├─ Write/Edit Guard: {detected or "없음"}
+└─ Commit Guard: {detected or "없음"}
 
 옵션:
-1. 덮어쓰기 - 최신 설정으로 재생성
+1. 덮어쓰기 - 최신 설정으로 재등록
 2. 취소 - 기존 설정 유지
 ```
 
@@ -361,10 +318,10 @@ hook 설치 범위를 선택하세요.
 
 Default Branch Guard가 프로젝트에 설정되었습니다!
 
-생성된 파일:
-├─ .claude/hooks/default-branch-guard-hook.sh
-├─ .claude/hooks/default-branch-guard-commit-hook.sh
-└─ .claude/settings.json
+설정된 hook:
+├─ PreToolUse (Write|Edit) → git-utils guard write
+├─ PreToolUse (Bash) → git-utils guard commit
+└─ .claude/settings.json (hook 등록됨)
 
 설정을 변경하려면 /hook-config를 실행하세요.
 ```
