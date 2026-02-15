@@ -20,6 +20,15 @@
 //   hook     <register|unregister|list> [args...] [--timeout=<n>] [--project-dir=<p>]
 // ============================================================
 
+import { createGitService, createJiraService, createGitHubService, createGuardService } from './core';
+import { createCommitCommand } from './commands/commit';
+import { createBranchCommand } from './commands/branch';
+import { createPrCommand } from './commands/pr';
+import { createReviewsCommand } from './commands/reviews';
+import { createHookCommand } from './commands/hook';
+import type { CommitType, GuardTarget } from './types';
+import { readFile } from 'node:fs/promises';
+
 /** plugin.json과 동기화 — build 시점에 bake됩니다 */
 export const VERSION = '3.0.0-alpha.0';
 
@@ -74,6 +83,17 @@ Run 'git-utils <command> --help' for command-specific usage.
   `.trim());
 }
 
+// -- Result output helper --
+
+function output(result: { ok: boolean; data?: any; error?: string }): void {
+  if (result.ok) {
+    console.log(JSON.stringify(result.data, null, 2));
+  } else {
+    console.error(`Error: ${result.error}`);
+    process.exit(1);
+  }
+}
+
 // -- Subcommand dispatch --
 
 async function main(): Promise<void> {
@@ -98,30 +118,136 @@ async function main(): Promise<void> {
 
   const parsed = parseArgs(args.slice(1));
 
-  // 각 command 모듈은 Step 3(TDD 구현)에서 연결됩니다.
-  // 현재는 라우팅 구조만 정의합니다.
-  switch (command) {
-    case 'commit':
-      // → src/commands/commit.ts
-      break;
-    case 'branch':
-      // → src/commands/branch.ts
-      break;
-    case 'pr':
-      // → src/commands/pr.ts
-      break;
-    case 'reviews':
-      // → src/commands/reviews.ts
-      break;
-    case 'guard':
-      // → src/commands/guard.ts
-      break;
-    case 'hook':
-      // → src/commands/hook.ts
-      break;
-  }
+  // Lazy service creation (only when needed)
+  const git = createGitService();
+  const jira = createJiraService();
+  const github = createGitHubService();
 
-  console.log(`[stub] command=${command}, args=`, parsed);
+  switch (command) {
+    case 'commit': {
+      const cmd = createCommitCommand({ git, jira });
+      const result = await cmd.run({
+        type: parsed.positional[0] as CommitType,
+        description: parsed.positional[1] || '',
+        scope: parsed.flags['scope'] as string | undefined,
+        body: parsed.flags['body'] as string | undefined,
+        skipAdd: parsed.flags['skip-add'] === true,
+      });
+      output(result);
+      break;
+    }
+
+    case 'branch': {
+      const cmd = createBranchCommand({ git });
+      const result = await cmd.run({
+        branchName: parsed.positional[0] || '',
+        baseBranch: parsed.flags['base'] as string | undefined,
+      });
+      output(result);
+      break;
+    }
+
+    case 'pr': {
+      const cmd = createPrCommand({ git, jira, github });
+      const result = await cmd.run({
+        title: parsed.positional[0] || '',
+        description: parsed.flags['description'] as string | undefined,
+      });
+      output(result);
+      break;
+    }
+
+    case 'reviews': {
+      const cmd = createReviewsCommand({ github });
+      const prNum = parsed.positional[0] ? parseInt(parsed.positional[0], 10) : undefined;
+      const result = await cmd.run({ prNumber: prNum });
+      output(result);
+      break;
+    }
+
+    case 'guard': {
+      const guard = createGuardService(git);
+      const target = parsed.positional[0] as GuardTarget;
+      if (!target || !['write', 'commit'].includes(target)) {
+        console.error('Usage: git-utils guard <write|commit> --project-dir=<p> --create-branch-script=<s>');
+        process.exit(1);
+      }
+
+      // Read stdin for hook JSON (Claude hook provides tool input)
+      let toolCommand: string | undefined;
+      if (target === 'commit') {
+        try {
+          const stdin = await readFile('/dev/stdin', 'utf-8');
+          const hookInput = JSON.parse(stdin);
+          toolCommand = hookInput?.tool_input?.command;
+        } catch {
+          // stdin not available or not JSON
+        }
+      }
+
+      const result = await guard.check({
+        target,
+        projectDir: (parsed.flags['project-dir'] as string) || process.cwd(),
+        createBranchScript: (parsed.flags['create-branch-script'] as string) || 'git-utils branch',
+        defaultBranch: parsed.flags['default-branch'] as string | undefined,
+        toolCommand,
+      });
+
+      if (!result.allowed) {
+        console.error(result.reason);
+        process.exit(2);
+      }
+      break;
+    }
+
+    case 'hook': {
+      const hookCmd = createHookCommand({
+        fs: {
+          readFile: async (p) => Bun.file(p).text(),
+          writeFile: async (p, c) => { await Bun.write(p, c); },
+          exists: async (p) => {
+            const { existsSync } = await import('node:fs');
+            return existsSync(p);
+          },
+          mkdir: async (p) => {
+            const { mkdirSync } = await import('node:fs');
+            mkdirSync(p, { recursive: true });
+          },
+        },
+      });
+
+      const sub = parsed.positional[0];
+      const projectDir = parsed.flags['project-dir'] as string | undefined;
+
+      if (sub === 'register') {
+        const result = await hookCmd.register({
+          hookType: parsed.positional[1] || '',
+          matcher: parsed.positional[2] || '',
+          command: parsed.positional[3] || '',
+          timeout: parsed.flags['timeout'] ? Number(parsed.flags['timeout']) : undefined,
+          projectDir,
+        });
+        output(result);
+      } else if (sub === 'unregister') {
+        const result = await hookCmd.unregister({
+          hookType: parsed.positional[1] || '',
+          command: parsed.positional[2] || '',
+          projectDir,
+        });
+        output(result);
+      } else if (sub === 'list') {
+        const result = await hookCmd.list({
+          hookType: parsed.positional[1] || undefined,
+          projectDir,
+        });
+        output(result);
+      } else {
+        console.error('Usage: git-utils hook <register|unregister|list> [args...]');
+        process.exit(1);
+      }
+      break;
+    }
+  }
 }
 
 // bun에서 직접 실행할 때만 main() 호출 (import 시에는 실행 안 함)

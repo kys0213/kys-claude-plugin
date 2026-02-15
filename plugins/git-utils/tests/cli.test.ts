@@ -101,8 +101,10 @@ describe('CLI routing', () => {
   });
 
   test('유효한 command면 해당 핸들러로 dispatch', async () => {
-    const { stdout, exitCode } = await runCli(['commit', 'feat', 'test']);
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain('command=commit');
+    // Use commit with empty description to test dispatch without side effects
+    // (validation error before git operations)
+    const { stderr, exitCode } = await runCli(['commit', 'feat', '']);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Description is required');
   });
 });

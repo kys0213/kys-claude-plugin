@@ -1,6 +1,11 @@
-export type { CommitCommand, CommitDeps } from './commit';
-export type { BranchCommand, BranchDeps } from './branch';
-export type { PrCommand, PrDeps } from './pr';
-export type { ReviewsCommand, ReviewsDeps } from './reviews';
+export type { CommitDeps } from './commit';
+export { createCommitCommand } from './commit';
+export type { BranchDeps } from './branch';
+export { createBranchCommand } from './branch';
+export type { PrDeps } from './pr';
+export { createPrCommand } from './pr';
+export type { ReviewsDeps } from './reviews';
+export { createReviewsCommand } from './reviews';
 export type { GuardCommand, GuardCommandDeps } from './guard';
 export type { HookCommandInterface, HookCommandDeps } from './hook';
+export { createHookCommand } from './hook';
