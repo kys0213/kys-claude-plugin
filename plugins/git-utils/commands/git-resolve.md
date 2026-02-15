@@ -68,7 +68,7 @@ if [ ! -d "$REBASE_DIR" ]; then
   echo ""
   echo "To start a rebase:"
   echo "  git fetch origin"
-  echo '  git rebase origin/$(detect-default-branch.sh)'
+  echo '  git rebase origin/main  # (or your default branch)'
   exit 0
 fi
 ```

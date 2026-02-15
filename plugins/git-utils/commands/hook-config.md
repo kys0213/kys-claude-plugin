@@ -13,16 +13,14 @@ allowed-tools:
 
 ## Step 1: 현재 설정 확인
 
-프로젝트와 사용자 범위 모두에서 hook을 탐색합니다:
+`git-utils hook list`로 프로젝트와 사용자 범위의 hook을 탐색합니다:
 
 ```bash
 # 프로젝트 범위 확인
-cat .claude/hooks/default-branch-guard-hook.sh 2>/dev/null
-cat .claude/hooks/default-branch-guard-commit-hook.sh 2>/dev/null
+git-utils hook list PreToolUse
 
 # 사용자 범위 확인
-cat ~/.claude/hooks/default-branch-guard-hook.sh 2>/dev/null
-cat ~/.claude/hooks/default-branch-guard-commit-hook.sh 2>/dev/null
+git-utils hook list PreToolUse --project-dir="$HOME"
 ```
 
 ### 설정이 없는 경우
@@ -48,23 +46,11 @@ hook이 두 범위에서 발견되었습니다.
 
 ## Step 2: 현재 설정 파싱
 
-선택된 범위에서 설정 상태를 확인합니다:
+`git-utils hook list` 결과(JSON)에서 설정 상태를 파악합니다.
 
-```bash
-# 범위 판별
-HOOKS_DIR="{selected_hooks_dir}"
-
-# 각 hook 존재 여부
-WRITE_GUARD_EXISTS=$([ -f "$HOOKS_DIR/default-branch-guard-hook.sh" ] && echo "활성화" || echo "없음")
-COMMIT_GUARD_EXISTS=$([ -f "$HOOKS_DIR/default-branch-guard-commit-hook.sh" ] && echo "활성화" || echo "없음")
-
-if [[ "$HOOKS_DIR" == "$HOME"* ]]; then
-  SCOPE="사용자 (모든 프로젝트)"
-else
-  PROJECT_DIR=$(grep '^PROJECT_DIR=' "$HOOKS_DIR/default-branch-guard-hook.sh" 2>/dev/null | cut -d'"' -f2 || true)
-  SCOPE="프로젝트 ($PROJECT_DIR)"
-fi
-```
+- `git-utils guard write` 포함 hook → Write/Edit Guard 활성화
+- `git-utils guard commit` 포함 hook → Commit Guard 활성화
+- 프로젝트 범위 vs 사용자 범위는 `--project-dir` 유무로 판별
 
 ## Step 3: 관리할 hook 선택
 
@@ -107,22 +93,16 @@ hook 스크립트와 settings.json 등록을 모두 제거합니다.
 **프로젝트 범위:**
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" unregister \
-  PreToolUse \
-  "bash ./.claude/hooks/default-branch-guard-hook.sh"
-
-rm -f .claude/hooks/default-branch-guard-hook.sh
+git-utils hook unregister PreToolUse \
+  "git-utils guard write --project-dir=$PROJECT_DIR --create-branch-script='git-utils branch' --default-branch=$DEFAULT_BRANCH"
 ```
 
 **사용자 범위:**
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" unregister \
-  PreToolUse \
-  "bash $HOME/.claude/hooks/default-branch-guard-hook.sh" \
+git-utils hook unregister PreToolUse \
+  "git-utils guard write --project-dir=\${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch'" \
   --project-dir="$HOME"
-
-rm -f ~/.claude/hooks/default-branch-guard-hook.sh
 ```
 
 #### Commit Guard 비활성화
@@ -130,22 +110,16 @@ rm -f ~/.claude/hooks/default-branch-guard-hook.sh
 **프로젝트 범위:**
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" unregister \
-  PreToolUse \
-  "bash ./.claude/hooks/default-branch-guard-commit-hook.sh"
-
-rm -f .claude/hooks/default-branch-guard-commit-hook.sh
+git-utils hook unregister PreToolUse \
+  "git-utils guard commit --project-dir=$PROJECT_DIR --create-branch-script='git-utils branch' --default-branch=$DEFAULT_BRANCH"
 ```
 
 **사용자 범위:**
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" unregister \
-  PreToolUse \
-  "bash $HOME/.claude/hooks/default-branch-guard-commit-hook.sh" \
+git-utils hook unregister PreToolUse \
+  "git-utils guard commit --project-dir=\${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch'" \
   --project-dir="$HOME"
-
-rm -f ~/.claude/hooks/default-branch-guard-commit-hook.sh
 ```
 
 완료 메시지:
@@ -154,7 +128,6 @@ rm -f ~/.claude/hooks/default-branch-guard-commit-hook.sh
 hook이 비활성화되었습니다.
 
 제거된 항목:
-├─ {hook_path} (삭제됨)
 └─ {settings_path} (hook 제거됨)
 
 다시 활성화하려면 /setup을 실행하세요.
@@ -170,39 +143,18 @@ hook 스크립트를 최신 template으로 재생성합니다.
 
 ```bash
 PROJECT_DIR=$(pwd)
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
-DEFAULT_BRANCH=$("${PLUGIN_ROOT}/scripts/detect-default-branch.sh")
+DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo 'main')
 
-sed \
-  -e "s|{project_dir}|$PROJECT_DIR|g" \
-  -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
-  -e "s|{default_branch}|$DEFAULT_BRANCH|g" \
-  "${PLUGIN_ROOT}/scripts/default-branch-guard-hook.sh" > .claude/hooks/default-branch-guard-hook.sh
-
-chmod +x .claude/hooks/default-branch-guard-hook.sh
-
-node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
-  PreToolUse "Write|Edit" \
-  "bash ./.claude/hooks/default-branch-guard-hook.sh" \
+git-utils hook register PreToolUse "Write|Edit" \
+  "git-utils guard write --project-dir=$PROJECT_DIR --create-branch-script='git-utils branch' --default-branch=$DEFAULT_BRANCH" \
   --timeout=5
 ```
 
 **사용자 범위:**
 
 ```bash
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
-
-sed \
-  -e 's|{project_dir}|${CLAUDE_PROJECT_DIR:-.}|g' \
-  -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
-  -e "s|{default_branch}||g" \
-  "${PLUGIN_ROOT}/scripts/default-branch-guard-hook.sh" > ~/.claude/hooks/default-branch-guard-hook.sh
-
-chmod +x ~/.claude/hooks/default-branch-guard-hook.sh
-
-node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
-  PreToolUse "Write|Edit" \
-  "bash $HOME/.claude/hooks/default-branch-guard-hook.sh" \
+git-utils hook register PreToolUse "Write|Edit" \
+  "git-utils guard write --project-dir=\${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch'" \
   --timeout=5 \
   --project-dir="$HOME"
 ```
@@ -212,34 +164,16 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
 **프로젝트 범위:**
 
 ```bash
-sed \
-  -e "s|{project_dir}|$PROJECT_DIR|g" \
-  -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
-  -e "s|{default_branch}|$DEFAULT_BRANCH|g" \
-  "${PLUGIN_ROOT}/scripts/default-branch-guard-commit-hook.sh" > .claude/hooks/default-branch-guard-commit-hook.sh
-
-chmod +x .claude/hooks/default-branch-guard-commit-hook.sh
-
-node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
-  PreToolUse "Bash" \
-  "bash ./.claude/hooks/default-branch-guard-commit-hook.sh" \
+git-utils hook register PreToolUse "Bash" \
+  "git-utils guard commit --project-dir=$PROJECT_DIR --create-branch-script='git-utils branch' --default-branch=$DEFAULT_BRANCH" \
   --timeout=5
 ```
 
 **사용자 범위:**
 
 ```bash
-sed \
-  -e 's|{project_dir}|${CLAUDE_PROJECT_DIR:-.}|g' \
-  -e "s|{create_branch_script_path}|$PLUGIN_ROOT/scripts/create-branch.sh|g" \
-  -e "s|{default_branch}||g" \
-  "${PLUGIN_ROOT}/scripts/default-branch-guard-commit-hook.sh" > ~/.claude/hooks/default-branch-guard-commit-hook.sh
-
-chmod +x ~/.claude/hooks/default-branch-guard-commit-hook.sh
-
-node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
-  PreToolUse "Bash" \
-  "bash $HOME/.claude/hooks/default-branch-guard-commit-hook.sh" \
+git-utils hook register PreToolUse "Bash" \
+  "git-utils guard commit --project-dir=\${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch'" \
   --timeout=5 \
   --project-dir="$HOME"
 ```
@@ -249,9 +183,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/register-hook.js" register \
 ```
 hook이 재설정되었습니다!
 
-갱신된 파일:
-├─ {hook_path} (재생성됨)
-└─ {settings_path} (확인됨)
+갱신된 항목:
+└─ {settings_path} (hook 재등록됨)
 ```
 
 ## 예시 실행 흐름
@@ -277,7 +210,6 @@ hook이 재설정되었습니다!
 hook이 비활성화되었습니다.
 
 제거된 항목:
-├─ .claude/hooks/default-branch-guard-commit-hook.sh (삭제됨)
 └─ .claude/settings.json (PreToolUse Bash hook 제거됨)
 
 다시 활성화하려면 /setup을 실행하세요.
@@ -303,8 +235,6 @@ hook이 비활성화되었습니다.
 
 hook이 재설정되었습니다!
 
-갱신된 파일:
-├─ ~/.claude/hooks/default-branch-guard-hook.sh (재생성됨)
-├─ ~/.claude/hooks/default-branch-guard-commit-hook.sh (재생성됨)
-└─ ~/.claude/settings.json (확인됨)
+갱신된 항목:
+└─ ~/.claude/settings.json (hook 재등록됨)
 ```

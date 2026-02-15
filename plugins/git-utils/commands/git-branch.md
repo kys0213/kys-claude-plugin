@@ -13,7 +13,7 @@ default 브랜치 또는 지정한 base 브랜치를 최신화한 후 신규 브
 ## Context
 
 - Current branch: !`git branch --show-current`
-- Default branch: !`${CLAUDE_PLUGIN_ROOT}/scripts/detect-default-branch.sh`
+- Default branch: !`git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo 'main'`
 - Has uncommitted changes: !`git status --short`
 
 ## Usage
@@ -56,13 +56,15 @@ multiSelect: false
   - 리팩토링 → `refactor/`
   - 문서 → `docs/`
 
-### Step 2: 스크립트 실행
+### Step 2: git-utils CLI 실행
 
-브랜치 이름이 확보되면 스크립트를 실행합니다:
+브랜치 이름이 확보되면 `git-utils branch` 명령을 실행합니다:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/create-branch.sh <new-branch> [base-branch]
+git-utils branch <new-branch> [--base=<base-branch>]
 ```
+
+**출력 (JSON):** `{ "branchName": "...", "baseBranch": "..." }`
 
 ### 인자 처리
 
@@ -112,7 +114,7 @@ Changed files:
 
 ## Notes
 
-- base 브랜치 미지정 시 자동으로 default 브랜치 감지 (detect-default-branch.sh 사용)
+- base 브랜치 미지정 시 `git-utils branch`가 자동으로 default 브랜치 감지
 - base 브랜치가 원격에만 존재하면 자동으로 tracking 브랜치 생성
 - uncommitted changes가 있으면 작업 중단 (안전 모드)
 - 대화 맥락이 있으면 적절한 브랜치 이름을 추천
