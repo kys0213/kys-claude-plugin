@@ -1,26 +1,66 @@
 // ============================================================
 // commit command (← commit.sh)
 // ============================================================
-// CLI: bun run src/cli.ts commit <type> <description> [--scope=<s>] [--body=<b>] [--skip-add]
-//
-// 동작:
-//   1. 현재 브랜치에서 Jira 티켓 감지
-//   2. 티켓 있으면: [WAD-0212] feat: description
-//      없으면:     feat(scope): description
-//   3. --skip-add 아니면 git add -u
-//   4. git commit 실행
-//
-// 기존 commit.sh 대비 개선:
-//   - 인자 순서 의존 → named flag로 전환 (--scope, --body)
-//   - JiraService 주입으로 테스트 용이
-// ============================================================
 
-import type { Command, CommitInput, CommitOutput } from '../types';
-import type { GitService, JiraService } from '../core';
+import type { Command, CommitInput, CommitOutput, Result, COMMIT_TYPES } from '../types';
+import type { GitService } from '../core/git';
+import type { JiraService } from '../core/jira';
 
 export interface CommitDeps {
   git: GitService;
   jira: JiraService;
 }
 
-export type CommitCommand = Command<CommitInput, CommitOutput>;
+const VALID_TYPES = new Set(['feat', 'fix', 'docs', 'style', 'refactor', 'test', 'chore', 'perf']);
+
+export function createCommitCommand(deps: CommitDeps) {
+  return {
+    name: 'commit',
+    description: 'Smart commit with Jira ticket detection',
+
+    async run(input: CommitInput): Promise<Result<CommitOutput>> {
+      // Validate
+      if (!VALID_TYPES.has(input.type)) {
+        return { ok: false, error: `Invalid commit type: ${input.type}` };
+      }
+      if (!input.description || input.description.trim() === '') {
+        return { ok: false, error: 'Description is required' };
+      }
+
+      // Detect Jira ticket
+      const branch = await deps.git.getCurrentBranch();
+      const ticket = deps.jira.detectTicket(branch);
+
+      // Format subject
+      let subject: string;
+      if (ticket) {
+        subject = `[${ticket.normalized}] ${input.type}: ${input.description}`;
+      } else if (input.scope) {
+        subject = `${input.type}(${input.scope}): ${input.description}`;
+      } else {
+        subject = `${input.type}: ${input.description}`;
+      }
+
+      // Build full message
+      let message = subject;
+      if (input.body) {
+        message += `\n\n${input.body}`;
+      }
+      message += '\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)';
+      message += '\nCo-Authored-By: Claude <noreply@anthropic.com>';
+
+      // Stage + commit
+      if (!input.skipAdd) {
+        await deps.git.addTracked();
+      }
+
+      try {
+        await deps.git.commit(message);
+      } catch (e) {
+        return { ok: false, error: (e as Error).message };
+      }
+
+      return { ok: true, data: { subject, jiraTicket: ticket?.normalized } };
+    },
+  };
+}

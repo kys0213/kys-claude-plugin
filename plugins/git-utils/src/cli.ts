@@ -124,7 +124,10 @@ async function main(): Promise<void> {
   console.log(`[stub] command=${command}, args=`, parsed);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// bun에서 직접 실행할 때만 main() 호출 (import 시에는 실행 안 함)
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

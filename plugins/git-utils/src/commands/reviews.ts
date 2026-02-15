@@ -1,23 +1,42 @@
 // ============================================================
 // reviews command (← unresolved-reviews.sh)
 // ============================================================
-// CLI: bun run src/cli.ts reviews [pr-number]
-//
-// 동작:
-//   1. PR 번호 결정 (인자 or 현재 브랜치에서 자동 감지)
-//   2. gh api graphql로 리뷰 쓰레드 조회
-//   3. JSON 출력
-//
-// 기존 unresolved-reviews.sh 대비 개선:
-//   - GraphQL 쿼리를 TypeScript 내 관리
-//   - GitHubService 주입으로 테스트 가능
-// ============================================================
 
-import type { Command, ReviewsInput, ReviewsOutput } from '../types';
-import type { GitHubService } from '../core';
+import type { Result, ReviewsInput, ReviewsOutput } from '../types';
+import type { GitHubService } from '../core/github';
 
 export interface ReviewsDeps {
   github: GitHubService;
 }
 
-export type ReviewsCommand = Command<ReviewsInput, ReviewsOutput>;
+export function createReviewsCommand(deps: ReviewsDeps) {
+  return {
+    name: 'reviews',
+    description: 'Query unresolved PR review threads',
+
+    async run(input: ReviewsInput): Promise<Result<ReviewsOutput>> {
+      let prNumber = input.prNumber;
+
+      if (!prNumber) {
+        prNumber = await deps.github.detectCurrentPrNumber() ?? undefined;
+        if (!prNumber) {
+          return { ok: false, error: 'No PR found. Provide a PR number or checkout a PR branch.' };
+        }
+      }
+
+      try {
+        const result = await deps.github.getReviewThreads(prNumber);
+        return {
+          ok: true,
+          data: {
+            prTitle: result.prTitle,
+            prUrl: result.prUrl,
+            threads: result.threads,
+          },
+        };
+      } catch (e) {
+        return { ok: false, error: (e as Error).message };
+      }
+    },
+  };
+}
