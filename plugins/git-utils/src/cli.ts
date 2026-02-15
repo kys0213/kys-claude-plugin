@@ -4,8 +4,12 @@
 // ============================================================
 // 기존 9개 스크립트를 하나의 CLI로 통합합니다.
 //
+// Install:
+//   /setup 실행 시 bun build --compile → ~/.local/bin/git-utils
+//
 // Usage:
-//   bun run src/cli.ts <command> [subcommand] [args...] [options...]
+//   git-utils <command> [subcommand] [args...] [options...]
+//   git-utils --version
 //
 // Commands:
 //   commit   <type> <description> [--scope=<s>] [--body=<b>] [--skip-add]
@@ -15,6 +19,9 @@
 //   guard    <write|commit> --project-dir=<p> --create-branch-script=<s> [--default-branch=<b>]
 //   hook     <register|unregister|list> [args...] [--timeout=<n>] [--project-dir=<p>]
 // ============================================================
+
+/** plugin.json과 동기화 — build 시점에 bake됩니다 */
+export const VERSION = '3.0.0-alpha.0';
 
 const COMMANDS = ['commit', 'branch', 'pr', 'reviews', 'guard', 'hook'] as const;
 type CommandName = (typeof COMMANDS)[number];
@@ -74,6 +81,11 @@ async function main(): Promise<void> {
 
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     printUsage();
+    process.exit(0);
+  }
+
+  if (args[0] === '--version' || args[0] === '-v') {
+    console.log(`git-utils v${VERSION}`);
     process.exit(0);
   }
 

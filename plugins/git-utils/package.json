@@ -6,7 +6,8 @@
     "dev": "bun run src/cli.ts",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "build": "bun build src/cli.ts --outdir dist --target bun",
+    "build": "bun build --compile src/cli.ts --outfile dist/git-utils",
+    "install-cli": "bun run src/installer.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
