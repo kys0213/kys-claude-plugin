@@ -19,6 +19,64 @@ Phase 1: DESIGN ─→ Phase 2: REVIEW ─→ Phase 3: IMPLEMENT ─→ Phase 4:
 2. **Multi-LLM 합의**: 설계와 리뷰에서 Claude + Codex + Gemini 3개 LLM의 관점 활용
 3. **상황별 구현 전략**: 태스크 규모에 따라 Direct / Subagent / Agent Teams 자동 선택
 4. **git-utils 연동**: 브랜치, PR, 머지를 git-utils 플러그인에 위임
+5. **상태 지속성**: `.develop-workflow/state.yaml`로 세션 재개 및 compaction 대응
+
+---
+
+## Step 0: 세션 재개 확인
+
+워크플로우 시작 시 **반드시** `.develop-workflow/state.yaml` 존재 여부를 확인합니다.
+
+```
+/develop 실행
+    │
+    ├── .develop-workflow/state.yaml 존재?
+    │   │
+    │   ├── Yes → 상태 읽기 → 사용자에게 보고
+    │   │         "이전 세션이 있습니다: Phase IMPLEMENT, cp-2 진행 중 (iteration 1/3)"
+    │   │         AskUserQuestion: "이어서 진행할까요?"
+    │   │         ├── 이어서 → 해당 Phase/Checkpoint부터 재개
+    │   │         └── 처음부터 → state.yaml 삭제 후 새로 시작
+    │   │
+    │   └── No → 새 워크플로우 시작
+    │
+    ▼
+Phase 1부터 (또는 재개 지점부터) 실행
+```
+
+### state.yaml 형식
+
+```yaml
+# .develop-workflow/state.yaml
+phase: IMPLEMENT                # DESIGN | REVIEW | IMPLEMENT | MERGE | DONE
+strategy: subagent              # direct | subagent | agent-teams (Phase 3 진입 시 기록)
+feature: "실시간 채팅 기능"       # 사용자 요청 요약
+started_at: "2026-02-16T10:00:00"
+updated_at: "2026-02-16T11:30:00"
+
+checkpoints:
+  cp-1: { status: passed, iteration: 2 }
+  cp-2: { status: in_progress, iteration: 1 }
+  cp-3: { status: pending, iteration: 0 }
+```
+
+### 상태 기록 시점
+
+state.yaml은 다음 시점에 **Write tool로 갱신**합니다:
+
+| 시점 | 기록 내용 |
+|------|----------|
+| Phase 전환 | `phase` 필드 업데이트 |
+| Checkpoint 시작 | 해당 CP `status: in_progress` |
+| RALPH iteration 완료 | `iteration` 카운트 증가, `status` 업데이트 |
+| Checkpoint 통과 | `status: passed` |
+| Checkpoint 실패 (재시도 초과) | `status: escalated` |
+| 워크플로우 완료 | `phase: DONE` |
+
+> **주의**: state.yaml 기록은 가볍게 유지합니다. 피드백 상세나 설계 내용은 기록하지 않습니다.
+> 실패 원인은 다시 분석하면 되므로 "어디까지 했는지"만 추적합니다.
+
+---
 
 ## 전체 워크플로우
 
@@ -68,6 +126,16 @@ Phase 1: DESIGN ─→ Phase 2: REVIEW ─→ Phase 3: IMPLEMENT ─→ Phase 4:
 ## Phase 1: DESIGN
 
 `/design` 커맨드의 전체 프로세스를 실행합니다.
+
+**진입 시 상태 기록**:
+```yaml
+# Write .develop-workflow/state.yaml
+phase: DESIGN
+feature: "{사용자 요청 요약}"
+started_at: "{현재 시각}"
+updated_at: "{현재 시각}"
+checkpoints: {}
+```
 
 ### Step 1.1: 요구사항 수집
 
@@ -141,6 +209,16 @@ checkpoints:
 
 `/multi-review` 커맨드로 설계 문서를 검증합니다.
 
+**진입 시 상태 기록**:
+```yaml
+# Edit .develop-workflow/state.yaml → phase 업데이트
+phase: REVIEW
+updated_at: "{현재 시각}"
+checkpoints:              # Phase 1에서 정의된 Checkpoint들 초기화
+  cp-1: { status: pending, iteration: 0 }
+  cp-2: { status: pending, iteration: 0 }
+```
+
 ### Step 2.1: Multi-LLM 스펙 리뷰
 
 설계 결과물에 대해 3개 LLM 리뷰를 **병렬** 실행합니다.
@@ -171,6 +249,17 @@ Critical 이슈가 없으면: Phase 3로 진행
 ## Phase 3: IMPLEMENT
 
 `/implement` 커맨드로 구현을 실행합니다.
+
+**진입 시 상태 기록**:
+```yaml
+# Edit .develop-workflow/state.yaml → phase + strategy 업데이트
+phase: IMPLEMENT
+strategy: "{선택된 전략}"
+updated_at: "{현재 시각}"
+```
+
+> Phase 3에서는 RALPH iteration마다 state.yaml을 갱신합니다.
+> 상세 로직은 `/implement` 커맨드의 "상태 관리" 섹션을 참조하세요.
 
 ### Step 3.1: 브랜치 생성
 
@@ -289,6 +378,13 @@ Claude Code 공식 Agent Teams 기능을 활용합니다.
 
 ## Phase 4: MERGE
 
+**진입 시 상태 기록**:
+```yaml
+# Edit .develop-workflow/state.yaml → phase 업데이트
+phase: MERGE
+updated_at: "{현재 시각}"
+```
+
 ### Step 4.1: Multi-LLM 코드 리뷰
 
 구현 결과물에 대해 `/multi-review`로 코드 리뷰 실행:
@@ -327,6 +423,17 @@ CI 실패 시:
 # 머지
 /merge-pr
 ```
+
+### Step 4.5: 워크플로우 완료
+
+```yaml
+# Edit .develop-workflow/state.yaml → 완료 기록
+phase: DONE
+updated_at: "{현재 시각}"
+```
+
+> **정리**: 워크플로우 완료 후 `.develop-workflow/state.yaml`은 유지합니다.
+> 다음 `/develop` 실행 시 DONE 상태를 감지하면 "이전 워크플로우가 완료되었습니다. 새로 시작합니다."로 처리합니다.
 
 ---
 
