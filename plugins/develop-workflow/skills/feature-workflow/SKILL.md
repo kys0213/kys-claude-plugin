@@ -8,6 +8,32 @@ version: 1.0.0
 
 이 스킬은 `/develop` 워크플로우의 각 Phase에서 따라야 할 원칙과 모범 사례를 제공합니다.
 
+## 상태 감지 (CRITICAL)
+
+### SessionStart 훅
+
+세션 시작/재개 시 `detect-ralph-state.sh` 훅이 자동 실행됩니다.
+훅 출력에 "진행 중인 워크플로우 감지"가 포함되면:
+
+1. `.develop-workflow/state.yaml`을 Read tool로 읽기
+2. 사용자에게 현재 상태 보고
+3. 이어서 진행할지 `AskUserQuestion`으로 확인
+
+### Compaction 대응
+
+컨텍스트 압축 후 RALPH 워크플로우 진행 상황이 불명확해지면:
+
+1. **즉시** `.develop-workflow/state.yaml`을 Read tool로 읽기
+2. 현재 Phase, Checkpoint 상태, iteration 확인
+3. passed는 건너뛰고 in_progress부터 재개
+
+**감지 신호**: 다음 중 하나라도 해당하면 state.yaml을 재확인합니다:
+- RALPH 워크플로우를 실행 중이었는데 현재 Phase/Checkpoint가 기억나지 않을 때
+- Checkpoint 번호나 iteration 횟수가 불확실할 때
+- "이전 컨텍스트가 요약되었습니다" 류의 메시지가 보일 때
+
+---
+
 ## 핵심 원칙
 
 ### 1. Human decides What & Why, Agent decides How
