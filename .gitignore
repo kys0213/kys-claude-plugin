@@ -1,6 +1,5 @@
 # Output directories
 .review-output/
-.team-claude/
 .omc/
 
 # Build artifacts

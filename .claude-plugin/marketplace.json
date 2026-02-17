@@ -55,21 +55,6 @@
     },
     {
       "category": "productivity",
-      "description": "멀티 에이전트 협업 시스템 - Worker 병렬 실행, Contract 기반 개발, 실시간 상태 관리",
-      "keywords": [
-        "team",
-        "multi-agent",
-        "collaboration",
-        "worker",
-        "orchestration"
-      ],
-      "name": "team-claude",
-      "source": "./plugins/team-claude",
-      "strict": false,
-      "version": "0.9.0"
-    },
-    {
-      "category": "productivity",
       "description": "레이어드 아키텍처 기반 에이전트 설계 원칙 가이드 - 깨진 유리창 효과 방지",
       "keywords": [
         "workflow",
