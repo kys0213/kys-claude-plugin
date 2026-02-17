@@ -1,0 +1,15 @@
+{
+  "author": {
+    "name": "kys0213"
+  },
+  "description": "통합 개발 워크플로우: 설계 → 리뷰 → 구현 → 머지를 하나의 파이프라인으로",
+  "name": "develop-workflow",
+  "version": "0.1.0",
+  "commands": [
+    "./commands/setup.md",
+    "./commands/design.md",
+    "./commands/develop.md",
+    "./commands/implement.md",
+    "./commands/multi-review.md"
+  ]
+}
