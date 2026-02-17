@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "description": "Multi-LLM review system and external LLM infrastructure plugins",
+  "description": "통합 개발 워크플로우, 외부 LLM 인프라, Git 자동화 등 Claude Code 플러그인 모음",
   "name": "kys-claude-plugin",
   "owner": {
     "name": "kys0213"
@@ -8,16 +8,19 @@
   "plugins": [
     {
       "category": "productivity",
-      "description": "다양한 LLM(Claude, Codex, Gemini)을 사용한 문서 리뷰 시스템",
+      "description": "통합 개발 워크플로우: 설계 → 리뷰 → 구현을 하나의 파이프라인으로 (멀티 LLM 지원)",
       "keywords": [
+        "develop",
+        "workflow",
+        "design",
         "review",
+        "planning",
         "multi-llm",
-        "document"
+        "architecture"
       ],
-      "name": "review",
-      "source": "./plugins/review",
-      "strict": false,
-      "version": "0.3.4"
+      "name": "develop-workflow",
+      "source": "./plugins/develop-workflow",
+      "version": "0.2.0"
     },
     {
       "category": "integration",
@@ -49,20 +52,6 @@
       "name": "git-utils",
       "source": "./plugins/git-utils",
       "version": "2.3.2"
-    },
-    {
-      "category": "productivity",
-      "description": "상위 레벨 설계를 위한 멀티 LLM 플래닝 - 3개 LLM의 다양한 관점 통합",
-      "keywords": [
-        "planning",
-        "architecture",
-        "design",
-        "multi-llm"
-      ],
-      "name": "planning",
-      "source": "./plugins/planning",
-      "strict": false,
-      "version": "0.2.1"
     },
     {
       "category": "productivity",

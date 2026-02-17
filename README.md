@@ -8,8 +8,8 @@ Claude Code 플러그인 모음
 # 마켓플레이스 추가
 /plugin marketplace add kys0213/kys-claude-plugin
 
-# review 플러그인 설치 (다중 LLM 문서 리뷰)
-/plugin install review@kys-claude-plugin
+# develop-workflow 플러그인 설치 (설계/리뷰/구현 통합 워크플로우)
+/plugin install develop-workflow@kys-claude-plugin
 
 # external-llm 플러그인 설치 (외부 LLM 호출)
 /plugin install external-llm@kys-claude-plugin
@@ -37,25 +37,30 @@ kys-claude-plugin/
 │       └── call-gemini.sh
 │
 └── plugins/
-    ├── review/            # 다중 LLM 리뷰 시스템
-    └── external-llm/      # 외부 LLM 호출 인프라
+    ├── develop-workflow/   # 통합 개발 워크플로우 (설계/리뷰/구현)
+    ├── external-llm/      # 외부 LLM 호출 인프라
+    ├── git-utils/         # Git 워크플로우 자동화
+    ├── suggest-workflow/  # 세션 분석 기반 워크플로우 제안
+    ├── team-claude/       # 멀티 에이전트 협업 시스템
+    └── workflow-guide/    # 에이전트 설계 원칙 가이드
 ```
 
 ## 플러그인
 
-### review
+### develop-workflow
 
-다양한 LLM(Claude, Codex, Gemini)을 사용한 문서 리뷰 시스템
+통합 개발 워크플로우: 설계 → 리뷰 → 구현을 하나의 파이프라인으로 (멀티 LLM 지원)
 
 **Commands:**
-- `/review-claude` - Claude로 문서 리뷰
-- `/review-codex` - OpenAI Codex로 문서 리뷰
-- `/review-gemini` - Google Gemini로 문서 리뷰
-- `/review-all` - 3개 LLM 종합 리뷰
+- `/outline` - 상위 레벨 아키텍처 설계 (멀티 LLM)
+- `/design` - Contract 기반 상세 설계 (멀티 LLM)
+- `/develop` - 전체 워크플로우 (설계 → 리뷰 → 구현)
+- `/implement` - 구현 단계
+- `/multi-review` - 멀티 LLM 코드 리뷰
 
 **사용:**
 ```bash
-claude --plugin-dir /path/to/plugins/review
+claude --plugin-dir /path/to/plugins/develop-workflow
 ```
 
 ### external-llm
@@ -126,8 +131,8 @@ npm run validate:versions  # 버전 검증
 
 - Claude Code CLI
 - Node.js 20+ (개발 시)
-- (선택) OpenAI Codex CLI - `/review-codex`, `/invoke-codex` 사용 시
-- (선택) Google Gemini CLI - `/review-gemini`, `/invoke-gemini` 사용 시
+- (선택) OpenAI Codex CLI - `/invoke-codex` 사용 시
+- (선택) Google Gemini CLI - `/invoke-gemini` 사용 시
 
 ## 작성자
 

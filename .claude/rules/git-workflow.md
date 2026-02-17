@@ -26,8 +26,7 @@ PR 타이틀은 반드시 Conventional Commits 형식을 따릅니다:
 이 프로젝트의 주요 scope:
 
 - `team-claude` - Team Claude 플러그인
-- `planning` - Planning 플러그인
-- `review` - Review 플러그인
+- `develop-workflow` - Develop Workflow 플러그인 (설계/리뷰/구현 통합)
 - `external-llm` - External LLM 플러그인
 - `suggest-workflow` - Suggest Workflow 플러그인
 - `git-utils` - Git Utils 플러그인
@@ -48,7 +47,7 @@ PR 타이틀은 반드시 Conventional Commits 형식을 따릅니다:
 feat(team-claude): add tc CLI for project testing
 fix(hooks): resolve path issue in settings.local.json
 refactor(scripts): simplify tc-config init logic
-docs(planning): update architecture diagram
+docs(develop-workflow): update architecture diagram
 ci: add GitHub Actions for CLI build
 chore(cli): update dependencies
 ```
@@ -70,12 +69,12 @@ chore(cli): update dependencies
 # plugins/ 변경 포함 PR
 ✅ refactor(suggest-workflow): improve Rust logic
 ✅ fix(team-claude): resolve path issue
-✅ feat(review): add multi-LLM support
+✅ feat(develop-workflow): add multi-LLM support
 
 # plugins/ 변경 포함 PR — CI 실패
 ❌ chore(suggest-workflow): update dependencies  # 버전 범프 prefix 아님
 ❌ perf(team-claude): optimize startup           # perf는 버전 범프 미지원
-❌ docs(review): update README                   # docs는 버전 범프 미지원
+❌ docs(develop-workflow): update README          # docs는 버전 범프 미지원
 ```
 
 > **주의**: CI의 `validate.yml`에서 `Check version bump prefix for code changes` 단계로 검증됩니다. PR 생성 시 변경 대상 디렉토리를 확인하고 적절한 type을 선택하세요.
