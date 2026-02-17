@@ -90,7 +90,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # plugins 또는 common 디렉토리에 변경이 있는지 확인
-          CHANGED_FILES=$(gh pr diff ${{ github.event.pull_request.number }} --name-only)
+          CHANGED_FILES=$(gh pr view ${{ github.event.pull_request.number }} --json files -q '.files[].path')
 
           HAS_CODE_CHANGES=false
           if echo "$CHANGED_FILES" | grep -qE '^(plugins/|common/)'; then
