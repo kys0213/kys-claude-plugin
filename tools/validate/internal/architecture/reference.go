@@ -88,7 +88,7 @@ func buildSkillRegistry(files []LayerFile) map[string]string {
 }
 
 // extractSkillName extracts the skill name from a skill file path
-// "plugins/team-claude/skills/feedback-routing/SKILL.md" → "feedback-routing"
+// "plugins/develop-workflow/skills/feedback-routing/SKILL.md" → "feedback-routing"
 // "plugins/git-utils/skills/SKILL.md" → "git" (uses plugin name or directory)
 func extractSkillName(path string) string {
 	normalized := filepath.ToSlash(path)

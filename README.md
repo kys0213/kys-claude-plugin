@@ -15,18 +15,6 @@ Claude Code 플러그인 모음
 /plugin install external-llm@kys-claude-plugin
 ```
 
-## Runtime Requirements
-
-This project requires [Bun](https://bun.sh) runtime (v1.0+) for the following components:
-- `plugins/team-claude/cli` - Team Claude CLI tool
-- `plugins/team-claude/server` - Team Claude MCP server
-
-### Installation
-
-```bash
-curl -fsSL https://bun.sh/install | bash
-```
-
 ## 구조
 
 ```
@@ -41,7 +29,6 @@ kys-claude-plugin/
     ├── external-llm/      # 외부 LLM 호출 인프라
     ├── git-utils/         # Git 워크플로우 자동화
     ├── suggest-workflow/  # 세션 분석 기반 워크플로우 제안
-    ├── team-claude/       # 멀티 에이전트 협업 시스템
     └── workflow-guide/    # 에이전트 설계 원칙 가이드
 ```
 

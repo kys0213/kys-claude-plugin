@@ -25,12 +25,10 @@ PR 타이틀은 반드시 Conventional Commits 형식을 따릅니다:
 
 이 프로젝트의 주요 scope:
 
-- `team-claude` - Team Claude 플러그인
 - `develop-workflow` - Develop Workflow 플러그인 (설계/리뷰/구현 통합)
 - `external-llm` - External LLM 플러그인
 - `suggest-workflow` - Suggest Workflow 플러그인
 - `git-utils` - Git Utils 플러그인
-- `cli` - tc CLI
 - `hooks` - Hook 스크립트
 - `scripts` - 셸 스크립트
 
@@ -44,7 +42,7 @@ PR 타이틀은 반드시 Conventional Commits 형식을 따릅니다:
 ### 예시
 
 ```
-feat(team-claude): add tc CLI for project testing
+feat(develop-workflow): add multi-LLM support
 fix(hooks): resolve path issue in settings.local.json
 refactor(scripts): simplify tc-config init logic
 docs(develop-workflow): update architecture diagram
@@ -68,12 +66,12 @@ chore(cli): update dependencies
 ```
 # plugins/ 변경 포함 PR
 ✅ refactor(suggest-workflow): improve Rust logic
-✅ fix(team-claude): resolve path issue
+✅ fix(git-utils): resolve path issue
 ✅ feat(develop-workflow): add multi-LLM support
 
 # plugins/ 변경 포함 PR — CI 실패
 ❌ chore(suggest-workflow): update dependencies  # 버전 범프 prefix 아님
-❌ perf(team-claude): optimize startup           # perf는 버전 범프 미지원
+❌ perf(git-utils): optimize startup              # perf는 버전 범프 미지원
 ❌ docs(develop-workflow): update README          # docs는 버전 범프 미지원
 ```
 
@@ -84,8 +82,8 @@ chore(cli): update dependencies
 ```
 ❌ Update stuff                    # type 없음
 ❌ feat: Add new feature.          # 마침표, 대문자
-❌ FEAT(team-claude): add feature  # type 대문자
-❌ feat(team-claude) add feature   # 콜론 없음
+❌ FEAT(git-utils): add feature    # type 대문자
+❌ feat(git-utils) add feature     # 콜론 없음
 ```
 
 ## 커밋 메시지 규칙

@@ -129,7 +129,7 @@ func collectLayerFiles(repoRoot string) ([]LayerFile, error) {
 	return files, nil
 }
 
-// extractPluginName extracts plugin name from a relative path like "plugins/team-claude/commands/flow.md"
+// extractPluginName extracts plugin name from a relative path like "plugins/develop-workflow/commands/flow.md"
 func extractPluginName(relPath string) string {
 	parts := strings.Split(filepath.ToSlash(relPath), "/")
 	if len(parts) >= 2 && parts[0] == "plugins" {
