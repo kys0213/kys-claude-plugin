@@ -39,14 +39,17 @@ plugins/autonomous/
 │   ├── pr-reviewer.md           # PR 코드 리뷰 (multi-LLM)
 │   └── conflict-resolver.md     # 머지 충돌 해결
 │
-├── cli/                         # Rust 코어 엔진
+├── cli/                         # Rust 단일 바이너리 (daemon + client)
 │   ├── Cargo.toml
 │   └── src/
-│       ├── main.rs              # CLI 진입점
+│       ├── main.rs              # CLI 진입점 (clap subcommands)
 │       ├── lib.rs               # 모듈 export
 │       ├── daemon/
-│       │   ├── mod.rs           # 데몬 시작/중지/상태
-│       │   └── pid.rs           # PID 파일 관리
+│       │   ├── mod.rs           # 데몬 시작/중지 (단일 인스턴스 보장)
+│       │   ├── pid.rs           # PID 파일 관리 (~/.autonomous/daemon.pid)
+│       │   └── socket.rs        # Unix domain socket IPC 서버
+│       ├── client/
+│       │   └── mod.rs           # CLI → daemon IPC 클라이언트
 │       ├── scanner/
 │       │   ├── mod.rs           # GitHub API 스캐너
 │       │   ├── issues.rs        # 이슈 감지
@@ -249,24 +252,81 @@ CREATE INDEX idx_consumer_logs_repo ON consumer_logs(repo_id, started_at);
 
 ---
 
-## 5. CLI 서브커맨드
+## 5. CLI 아키텍처 (단일 바이너리, daemon + client)
+
+### 동작 모델
 
 ```
-autonomous start              # 데몬 시작 (백그라운드)
-autonomous stop               # 데몬 중지
-autonomous status             # 상태 요약 출력
-autonomous dashboard          # 대시보드 서버 시작 (localhost:9800)
+단일 바이너리 `autonomous` 가 daemon 모드와 client 모드를 모두 수행:
 
+  autonomous start     → daemon 모드로 fork (단일 인스턴스)
+  autonomous status    → client 모드: IPC로 daemon에 질의
+  autonomous dashboard → client 모드: SQLite 직접 읽기 + TUI 표시
+```
+
+### IPC (프로세스 간 통신)
+
+```
+~/.autonomous/
+├── autonomous.db       # SQLite (daemon + client 공유)
+├── daemon.pid          # PID 파일 (단일 인스턴스 보장)
+└── daemon.sock         # Unix domain socket (제어 명령용)
+```
+
+- **읽기 전용 (status, queue list, logs, dashboard)**: SQLite 직접 읽기 (IPC 불필요)
+- **제어 명령 (start, stop, retry)**: Unix domain socket으로 daemon에 전달
+- **데이터 변경 (repo add/remove, config)**: SQLite 직접 쓰기 → daemon이 polling으로 감지
+
+### 서브커맨드
+
+```
+# 데몬 제어 (→ IPC)
+autonomous start              # 데몬 시작 (백그라운드 fork, 단일 인스턴스)
+autonomous stop               # 데몬 중지
+autonomous restart             # 데몬 재시작
+
+# 상태 조회 (→ SQLite 직접 읽기)
+autonomous status             # 데몬 상태 + 전체 레포 요약
+autonomous dashboard          # TUI 대시보드
+
+# 레포 관리 (→ SQLite 직접 쓰기)
 autonomous repo add <url>     # 레포 등록 (대화형 설정)
 autonomous repo list          # 등록된 레포 목록
 autonomous repo config <name> # 레포 설정 변경
 autonomous repo remove <name> # 레포 제거
 
+# 큐 관리 (→ SQLite 읽기 + IPC)
 autonomous queue list <repo>  # 큐 상태 확인
-autonomous queue retry <id>   # 실패 항목 재시도
+autonomous queue retry <id>   # 실패 항목 재시도 (→ IPC로 daemon에 통지)
 autonomous queue clear <repo> # 큐 비우기
 
+# 로그 조회 (→ SQLite 직접 읽기)
 autonomous logs <repo>        # 실행 로그 조회
+```
+
+### 셸 환경 등록 (/auto-setup 시 자동)
+
+`/auto-setup` 실행 시 셸 프로필에 환경변수 + alias 등록:
+
+```bash
+# ~/.bashrc 또는 ~/.zshrc에 추가
+export AUTONOMOUS_HOME="$HOME/.autonomous"
+export PATH="$HOME/.local/bin:$PATH"
+
+# 단축 명령어
+alias auto="autonomous"
+alias auto-s="autonomous status"
+alias auto-d="autonomous dashboard"
+alias auto-q="autonomous queue list"
+```
+
+등록 후 터미널에서 바로 사용 가능:
+```bash
+auto-s                    # 상태 확인
+auto-d                    # TUI 대시보드
+auto-q org/my-repo        # 큐 확인
+auto start                # 데몬 시작
+auto stop                 # 데몬 중지
 ```
 
 ---
