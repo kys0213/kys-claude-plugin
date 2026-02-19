@@ -17,6 +17,7 @@ autonomous (오케스트레이터)
 - **분석/구현 품질은 기존 플러그인에 위임**: 플러그인이 진화하면 자동으로 품질 향상
 - **레포별 독립 설정**: concurrency, 스캔 주기, 워크플로우 선택 가능
 - **단일 바이너리**: Rust 데몬 + 내장 대시보드, 추가 의존성 없음
+- **사람과 동일한 환경**: `claude -p`는 워크트리 cwd에서 실행하여 해당 레포의 `.claude/`, `CLAUDE.md`, 설치된 플러그인이 그대로 적용됨. `--plugin-dir` 등 별도 지정 없음. 사람이 직접 레포를 열어 작업하는 것과 100% 동일한 환경에서 동작하여 디버깅 및 이슈 재현이 용이
 
 ---
 
@@ -405,9 +406,8 @@ tools: ["Read", "Glob", "Grep", "Edit", "Bash"]
   │
   ├── 2단계: 구현 (status: processing)
   │   실행: cd <worktree> && claude -p \
-  │         "/develop implement based on analysis: <report>" \
-  │         --plugin-dir <develop-workflow> \
-  │         --plugin-dir <git-utils>
+  │         "/develop implement based on analysis: <report>"
+  │   → 레포에 설치된 플러그인이 cwd 기반으로 자동 적용
   │   결과: PR 생성됨 → pr_number 저장
   │   → status: done
   │
@@ -422,17 +422,13 @@ tools: ["Read", "Glob", "Grep", "Edit", "Bash"]
   ├── 1단계: 리뷰 (status: reviewing)
   │   워크트리: ~/.autonomous/workspaces/<repo>/pr-<num>
   │   실행: cd <worktree> && git checkout <head_branch>
-  │   실행: claude -p "/multi-review" \
-  │         --plugin-dir <develop-workflow> \
-  │         --plugin-dir <external-llm> \
-  │         --output-format json
+  │   실행: claude -p "/multi-review" --output-format json
+  │   → 레포에 설치된 플러그인이 cwd 기반으로 자동 적용
   │   결과: GitHub에 리뷰 코멘트 게시, review_comment 저장
   │   → status: review_done
   │
   ├── 2단계: 개선 (status: improving)
-  │   실행: claude -p \
-  │         "/develop implement review feedback: <review_comment>" \
-  │         --plugin-dir <develop-workflow>
+  │   실행: claude -p "/develop implement review feedback: <review_comment>"
   │   → status: improved
   │
   ├── 3단계: 재리뷰 → 머지 판단
@@ -449,14 +445,10 @@ tools: ["Read", "Glob", "Grep", "Edit", "Bash"]
 [merge_queue: pending] → 가져오기
   │
   ├── 실행 (status: merging)
-  │   실행: cd <worktree> && claude -p \
-  │         "/merge-pr <pr_number>" \
-  │         --plugin-dir <git-utils>
+  │   실행: cd <worktree> && claude -p "/merge-pr <pr_number>"
   │
   ├── 충돌 시 (status: conflict)
-  │   실행: claude -p \
-  │         "Resolve merge conflicts for PR #<num>" \
-  │         --plugin-dir <git-utils>
+  │   실행: claude -p "Resolve merge conflicts for PR #<num>"
   │   → 해결 후 재시도
   │
   ├── 성공: status: done
@@ -592,7 +584,7 @@ cp target/release/autonomous ~/.local/bin/
 - **marketplace.json**: 플러그인 1개 추가 (신규)
 - **rust-binary.yml**: autonomous 빌드 step 추가
 - **validate.yml**: autonomous 경로 추가 (자동 감지될 수 있음)
-- **기존 플러그인 코드 변경 없음**: autonomous는 `claude -p` + `--plugin-dir`로 기존 커맨드를 외부에서 호출
+- **기존 플러그인 코드 변경 없음**: autonomous는 레포 워크트리의 cwd에서 `claude -p`를 실행하여 기존 커맨드를 호출 (레포에 설치된 플러그인이 자동 적용)
 
 ### 외부 의존성
 - **GitHub Personal Access Token**: Scanner가 GitHub API 호출 시 필요
