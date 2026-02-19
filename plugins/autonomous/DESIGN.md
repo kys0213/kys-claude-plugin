@@ -576,27 +576,24 @@ cp target/release/autonomous ~/.local/bin/
   "source": "./plugins/autonomous",
   "category": "automation",
   "description": "이벤트 기반 자율 개발 오케스트레이터 - Issue 분석, PR 리뷰, 자동 머지",
-  "keywords": ["autonomous", "monitor", "queue", "dashboard", "automation"],
-  "dependencies": {
-    "required": ["develop-workflow", "git-utils"],
-    "recommended": ["external-llm"]
-  }
+  "keywords": ["autonomous", "monitor", "queue", "dashboard", "automation"]
 }
 ```
 
-### plugin.json 의존성 체크
-```json
-{
-  "name": "autonomous",
-  "version": "0.1.0",
-  "dependencies": {
-    "required": ["develop-workflow", "git-utils"],
-    "recommended": ["external-llm"]
-  }
-}
+### 의존성 체크 (Rust CLI 내부 로직)
+
+plugin.json 스키마에 `dependencies` 필드가 없으므로, 의존성 체크는 **Rust CLI(`autonomous repo add`)** 내부에서 처리:
+
+```rust
+// src/config/dependencies.rs
+const REQUIRED_PLUGINS: &[&str] = &["develop-workflow", "git-utils"];
+const RECOMMENDED_PLUGINS: &[&str] = &["external-llm"];
+
+// ~/.claude/plugins/ 경로를 스캔하여 설치 여부 확인
+fn check_plugin_dependencies() -> DependencyReport { ... }
 ```
 
-`/auto-setup` 실행 시 CLI가 user 레벨 플러그인 설치 경로(`~/.claude/plugins/` 등)를 스캔하여:
+`autonomous repo add` 또는 `/auto-setup` 실행 시:
 - **required** 미설치 → 경고 + 설치 명령어 안내, 계속 진행 여부 확인
 - **recommended** 미설치 → 정보성 안내 (multi-LLM 분석 불가 등)
 
