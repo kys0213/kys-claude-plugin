@@ -157,7 +157,7 @@ CREATE TABLE repo_configs (
     pr_concurrency      INTEGER NOT NULL DEFAULT 1,
     merge_concurrency   INTEGER NOT NULL DEFAULT 1,
     model               TEXT NOT NULL DEFAULT 'sonnet',
-    issue_workflow       TEXT NOT NULL DEFAULT '/develop',
+    issue_workflow       TEXT NOT NULL DEFAULT 'multi-llm',  -- multi-llm | single
     pr_workflow          TEXT NOT NULL DEFAULT '/multi-review',
     filter_labels       TEXT DEFAULT NULL,       -- JSON array, NULL = 전체
     ignore_authors      TEXT DEFAULT '["dependabot","renovate"]',  -- JSON array
@@ -293,7 +293,7 @@ allowed-tools: ["AskUserQuestion", "Bash"]
 2. AskUserQuestion → 감시 대상 (Issues / PRs / 둘 다)
 3. AskUserQuestion → 스캔 주기 (1분/5분/15분/커스텀)
 4. AskUserQuestion → Consumer 처리량 (Issue/PR/Merge 각각)
-5. AskUserQuestion → 워크플로우 선택 (Issue: /develop or /design, PR: /multi-review or 단일)
+5. AskUserQuestion → 워크플로우 선택 (Issue 분석: multi-LLM or 단일, PR 리뷰: /multi-review or 단일)
 6. AskUserQuestion → 필터 (전체 / 특정 라벨 / 작성자 제외)
 7. Bash → `autonomous repo add <url> --config '<json>'`
 8. 설정 요약 출력
@@ -345,13 +345,17 @@ allowed-tools: ["Bash"]
 
 ```yaml
 ---
-description: (internal) Issue Consumer가 호출 - 이슈를 분석하고 구현 리포트 생성
+description: (internal) Issue Consumer가 호출 - Multi-LLM 병렬 분석으로 이슈 리포트 생성
 model: sonnet
-tools: ["Read", "Glob", "Grep", "Bash"]
+tools: ["Read", "Glob", "Grep", "Bash", "Task"]
 ---
 ```
 
-역할: `claude -p`로 실행될 때 이슈 본문을 분석하여 영향 범위, 구현 방향, 체크포인트를 구조화된 리포트로 생성
+역할: Claude + Codex + Gemini를 병렬 호출하여 이슈를 다각도로 분석
+- Claude: `claude -p`로 코드베이스 기반 분석
+- Codex: `common/scripts/call-codex.sh`로 병렬 분석
+- Gemini: `common/scripts/call-gemini.sh`로 병렬 분석
+- 3개 결과를 종합하여 구조화된 리포트 생성 (공통 의견, 상충 의견, 영향 범위, 체크포인트)
 
 ### pr-reviewer.md
 
@@ -386,14 +390,17 @@ tools: ["Read", "Glob", "Grep", "Edit", "Bash"]
 ```
 [issue_queue: pending] → 가져오기
   │
-  ├── 1단계: 분석 (status: analyzing)
+  ├── 1단계: Multi-LLM 병렬 분석 (status: analyzing)
   │   워크트리: ~/.autonomous/workspaces/<repo>/issue-<num>
-  │   실행: cd <worktree> && claude -p \
-  │         "Analyze issue #<num>: <title>\n<body>\nProvide structured report" \
-  │         --plugin-dir <develop-workflow> \
-  │         --plugin-dir <external-llm> \
-  │         --output-format json
-  │   결과: analysis_report 컬럼에 저장
+  │   병렬 실행:
+  │     ├── Claude:  claude -p "Analyze issue #<num>: <title>\n<body>" \
+  │     │            --output-format json
+  │     ├── Codex:   common/scripts/call-codex.sh <분석 프롬프트>
+  │     └── Gemini:  common/scripts/call-gemini.sh <분석 프롬프트>
+  │   결과: 3개 분석 결과를 종합하여 analysis_report에 저장
+  │     - 공통 의견 → 높은 확신도
+  │     - 상충 의견 → 플래그 표시
+  │     - 영향 범위, 구현 방향, 체크포인트 구조화
   │   → status: ready
   │
   ├── 2단계: 구현 (status: processing)
