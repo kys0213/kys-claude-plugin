@@ -582,29 +582,23 @@ cp target/release/autonomous ~/.local/bin/
 
 ### 의존성 체크 (/auto-setup 커맨드 내 LLM 지침)
 
-플러그인 설치 경로는 Claude 내부 구현에 의존하므로, Rust CLI가 아닌
-**`/auto-setup` 슬래시 커맨드 실행 시 LLM이 직접 검증**:
+`/auto-setup` 커맨드에서 LLM이 마켓플레이스명 + 플러그인명으로 설치 여부를 확인:
 
 ```markdown
-# /auto-setup 커맨드 내 지침 (commands/auto-setup.md)
-
 ## 의존성 검증 (Step 2)
 
-레포 등록 전에 다음 플러그인이 User Scope로 설치되어 있는지 확인하세요:
+다음 플러그인이 `kys-claude-plugin` 마켓플레이스에서 User Scope로 설치되어 있는지 확인하세요:
 
-- **필수**: `develop-workflow`, `git-utils`
-  → 미설치 시: 사용자에게 경고하고 설치 명령어 안내
-  → `/plugin install develop-workflow@kys-claude-plugin`
-- **권장**: `external-llm` (multi-LLM 분석 사용 시)
-  → 미설치 시: multi-LLM 분석이 Claude 단일 모델로 fallback됨을 안내
+| 구분 | 플러그인 | 마켓플레이스 |
+|------|---------|-------------|
+| 필수 | `develop-workflow` | `kys-claude-plugin` |
+| 필수 | `git-utils` | `kys-claude-plugin` |
+| 권장 | `external-llm` | `kys-claude-plugin` |
 
-설치 확인이 완료되지 않으면 다음 단계로 진행하지 마세요.
+미설치 시 안내:
+- 필수 → 경고 + `/plugin install <name>@kys-claude-plugin`
+- 권장 → multi-LLM 분석이 Claude 단일 모델로 fallback됨을 안내
 ```
-
-이점:
-- Claude 내부 플러그인 경로에 의존하지 않음
-- LLM이 현재 세션에서 사용 가능한 커맨드를 직접 확인 가능
-- Rust CLI는 플러그인 시스템을 전혀 알 필요 없음 (관심사 분리)
 
 ---
 
