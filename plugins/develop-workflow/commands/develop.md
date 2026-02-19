@@ -356,12 +356,7 @@ Checkpoint 목록을 분석하여 구현 전략을 결정합니다:
 
 메인 에이전트가 직접 Checkpoint를 순차 실행합니다.
 
-각 Checkpoint에 대해 RALPH 패턴 적용:
-1. **R**ead: Contract와 테스트 코드 읽기
-2. **A**nalyze: 요구사항 분석
-3. **L**earn: 기존 코드베이스 패턴 학습
-4. **P**atch: 구현 코드 작성
-5. **H**alt: 검증 명령어 실행 → Pass면 다음, Fail이면 R부터 반복
+각 Checkpoint에 대해 `ralph-pattern` Skill의 루프와 재시도 정책을 적용합니다.
 
 ### Step 3.3b: Subagent 구현
 
@@ -376,7 +371,7 @@ Task(prompt="Checkpoint 2 구현: ...", run_in_background=true)
 Task(prompt="Checkpoint 3 구현: ...", run_in_background=true)  # depends on 1,2
 ```
 
-각 Subagent에게 RALPH 패턴과 Contract(Interface + Test)를 프롬프트로 주입합니다.
+각 Subagent에게 `ralph-pattern` Skill의 내용과 Contract(Interface + Test)를 프롬프트로 주입합니다.
 
 **충돌 방지**:
 - 각 Subagent에 `allowed_files` / `forbidden_files` 지정
@@ -395,12 +390,7 @@ Claude Code 공식 Agent Teams 기능을 활용합니다.
 - [Checkpoint 2 담당] {contract, tests, allowed_files}
 - ...
 
-각 팀원은 다음 RALPH 패턴을 따르세요:
-1. Contract과 테스트 코드를 먼저 읽으세요
-2. 기존 코드베이스 패턴을 학습하세요
-3. 구현 코드를 작성하세요
-4. 검증 명령어를 실행하세요
-5. 실패하면 분석하고 수정하세요
+각 팀원은 `ralph-pattern` Skill을 따르세요.
 
 팀원별 계획 승인을 요구합니다.
 서로 다른 파일을 소유하도록 합니다.

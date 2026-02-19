@@ -115,22 +115,11 @@ state.yaml 읽기
 
 ## RALPH 패턴
 
-모든 전략에서 공통으로 적용되는 구현-검증 루프입니다.
+`ralph-pattern` Skill을 따릅니다. 각 전략에서 Skill의 루프와 재시도 정책을 적용하세요.
 
-```
-┌─→ R: Read     - Contract, 테스트, 기존 코드 읽기
-│   A: Analyze  - 요구사항 분석, 패턴 파악
-│   L: Learn    - 코드베이스 컨벤션 학습
-│   P: Patch    - 구현 코드 작성
-│   H: Halt     - 검증 실행
-│       │
-│       ├── Pass → state.yaml 갱신 (passed) → 다음 Checkpoint
-│       └── Fail → state.yaml 갱신 (iteration++) → 원인 분석
-│                   │
-└───────────────────┘ (최대 3회)
-```
-
-최대 재시도(기본 3회) 초과 시 state.yaml에 `escalated` 기록 후 사용자에게 에스컬레이션합니다.
+- Pass → state.yaml 갱신 (`passed`) → 다음 Checkpoint
+- Fail → state.yaml 갱신 (`iteration++`) → 원인 분석 → R부터 재시작
+- 최대 재시도(기본 3회) 초과 → state.yaml에 `escalated` 기록 후 사용자에게 에스컬레이션
 
 ---
 

@@ -2,7 +2,6 @@
 description: (내부용) 테스트 실패를 분석하고 구체적 수정 피드백을 생성하는 에이전트 (언어 무관)
 model: sonnet
 tools: ["Read", "Glob", "Grep", "Bash"]
-skills: ["ralph-pattern"]
 ---
 
 # Test Oracle Agent
