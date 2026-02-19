@@ -580,22 +580,31 @@ cp target/release/autonomous ~/.local/bin/
 }
 ```
 
-### 의존성 체크 (Rust CLI 내부 로직)
+### 의존성 체크 (/auto-setup 커맨드 내 LLM 지침)
 
-plugin.json 스키마에 `dependencies` 필드가 없으므로, 의존성 체크는 **Rust CLI(`autonomous repo add`)** 내부에서 처리:
+플러그인 설치 경로는 Claude 내부 구현에 의존하므로, Rust CLI가 아닌
+**`/auto-setup` 슬래시 커맨드 실행 시 LLM이 직접 검증**:
 
-```rust
-// src/config/dependencies.rs
-const REQUIRED_PLUGINS: &[&str] = &["develop-workflow", "git-utils"];
-const RECOMMENDED_PLUGINS: &[&str] = &["external-llm"];
+```markdown
+# /auto-setup 커맨드 내 지침 (commands/auto-setup.md)
 
-// ~/.claude/plugins/ 경로를 스캔하여 설치 여부 확인
-fn check_plugin_dependencies() -> DependencyReport { ... }
+## 의존성 검증 (Step 2)
+
+레포 등록 전에 다음 플러그인이 User Scope로 설치되어 있는지 확인하세요:
+
+- **필수**: `develop-workflow`, `git-utils`
+  → 미설치 시: 사용자에게 경고하고 설치 명령어 안내
+  → `/plugin install develop-workflow@kys-claude-plugin`
+- **권장**: `external-llm` (multi-LLM 분석 사용 시)
+  → 미설치 시: multi-LLM 분석이 Claude 단일 모델로 fallback됨을 안내
+
+설치 확인이 완료되지 않으면 다음 단계로 진행하지 마세요.
 ```
 
-`autonomous repo add` 또는 `/auto-setup` 실행 시:
-- **required** 미설치 → 경고 + 설치 명령어 안내, 계속 진행 여부 확인
-- **recommended** 미설치 → 정보성 안내 (multi-LLM 분석 불가 등)
+이점:
+- Claude 내부 플러그인 경로에 의존하지 않음
+- LLM이 현재 세션에서 사용 가능한 커맨드를 직접 확인 가능
+- Rust CLI는 플러그인 시스템을 전혀 알 필요 없음 (관심사 분리)
 
 ---
 
