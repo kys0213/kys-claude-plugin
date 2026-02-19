@@ -16,7 +16,7 @@ autonomous (오케스트레이터)
 - **Monitor 자체는 얇게**: 이벤트 감지, 큐 관리, 세션 실행만 담당
 - **분석/구현 품질은 기존 플러그인에 위임**: 플러그인이 진화하면 자동으로 품질 향상
 - **레포별 독립 설정**: concurrency, 스캔 주기, 워크플로우 선택 가능
-- **단일 바이너리**: Rust 데몬 + 내장 대시보드, 추가 의존성 없음
+- **단일 바이너리**: Rust 데몬 + TUI 대시보드, 추가 의존성 없음
 - **사람과 동일한 환경**: `claude -p`는 워크트리 cwd에서 실행하여 해당 레포의 `.claude/`, `CLAUDE.md`, 설치된 플러그인이 그대로 적용됨. `--plugin-dir` 등 별도 지정 없음. 사람이 직접 레포를 열어 작업하는 것과 100% 동일한 환경에서 동작하여 디버깅 및 이슈 재현이 용이
 
 ---
@@ -66,19 +66,13 @@ plugins/autonomous/
 │       ├── session/
 │       │   ├── mod.rs           # claude -p 세션 실행
 │       │   └── output.rs        # 세션 출력 파싱
-│       ├── dashboard/
-│       │   ├── mod.rs           # axum 라우터
-│       │   ├── api.rs           # REST API 핸들러
-│       │   ├── ws.rs            # WebSocket (실시간 로그)
-│       │   └── assets.rs        # 정적 파일 서빙 (include_bytes!)
+│       ├── tui/
+│       │   ├── mod.rs           # TUI 앱 루프
+│       │   ├── views.rs         # 화면 레이아웃 (repos, queues, logs)
+│       │   └── events.rs        # 키보드/마우스 이벤트 처리
 │       └── config/
 │           ├── mod.rs           # 설정 로드/저장
 │           └── models.rs        # 설정 모델
-│
-├── dashboard-ui/                # 내장 프론트엔드
-│   ├── index.html
-│   ├── app.js                   # vanilla JS (빌드 도구 불필요)
-│   └── style.css
 │
 └── README.md
 ```
@@ -107,9 +101,9 @@ tokio = { version = "1", features = ["full"] }
 # HTTP client (GitHub API)
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 
-# Web server (dashboard)
-axum = { version = "0.8", features = ["ws"] }
-tower-http = { version = "0.6", features = ["cors", "fs"] }
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
 
 # Database
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -335,14 +329,13 @@ allowed-tools: ["AskUserQuestion", "Bash"]
 
 ```yaml
 ---
-description: 자율 개발 대시보드를 브라우저에서 엽니다
+description: 자율 개발 TUI 대시보드를 터미널에서 엽니다
 allowed-tools: ["Bash"]
 ---
 ```
 
 **흐름:**
-1. `autonomous dashboard` (백그라운드 시작)
-2. `open http://localhost:9800` (브라우저 열기)
+1. `autonomous dashboard` (TUI 실행)
 
 ---
 
@@ -463,83 +456,50 @@ tools: ["Read", "Glob", "Grep", "Edit", "Bash"]
 
 ---
 
-## 9. Dashboard REST API
+## 9. TUI 대시보드
 
-Base: `http://localhost:9800/api`
+`autonomous dashboard` 실행 시 ratatui 기반 터미널 UI 표시.
 
-### 레포 관리
+### 키바인딩
 ```
-GET    /repos                    # 레포 목록 + 큐 카운트 요약
-POST   /repos                    # 레포 등록
-GET    /repos/:id                # 레포 상세
-PUT    /repos/:id/config         # 설정 변경
-DELETE /repos/:id                # 레포 제거
-POST   /repos/:id/toggle         # 활성화/비활성화 토글
-```
-
-### 큐 조회
-```
-GET    /repos/:id/queues/issues  # 이슈 큐 목록 (status 필터)
-GET    /repos/:id/queues/prs     # PR 큐 목록
-GET    /repos/:id/queues/merges  # 머지 큐 목록
-POST   /queues/:queue_type/:item_id/retry  # 재시도
+Tab       - 패널 전환 (Repos → Queues → Logs)
+j/k       - 목록 상/하 이동
+Enter     - 상세 보기
+r         - 실패 항목 재시도
+q         - 종료
+?         - 도움말
 ```
 
-### 로그
-```
-GET    /repos/:id/logs           # 실행 로그 (페이지네이션)
-GET    /logs/:id                 # 로그 상세 (stdout/stderr)
-```
-
-### 데몬 상태
-```
-GET    /status                   # 데몬 상태 + 전체 통계
-POST   /start                    # 데몬 시작
-POST   /stop                     # 데몬 중지
-```
-
-### WebSocket
-```
-WS     /ws/logs                  # 실시간 로그 스트리밍
-WS     /ws/events                # 큐 상태 변경 이벤트
-```
-
----
-
-## 10. Dashboard UI
-
-단일 페이지, vanilla JS (빌드 도구 없음), `include_bytes!`로 바이너리에 임베딩.
-
+### 레이아웃
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Autonomous Dashboard                    [Start] [Stop] │
+│  autonomous v0.1.0          ● daemon running    [?]help │
 ├──────────┬──────────────────────────────────────────────┤
 │          │                                              │
-│ Repos    │  org/repo-a                    ● Running     │
+│ Repos    │  Queues: org/repo-a              ● enabled   │
 │          │  ┌─────────────────────────────────────┐     │
-│ ● repo-a │  │ Issues  [3 pending] [1 processing]  │     │
-│ ○ repo-b │  │ PRs     [2 pending] [0 processing]  │     │
-│ + Add    │  │ Merges  [1 pending]                  │     │
+│ > repo-a │  │ Issues  ██░░░  3 pending  1 active  │     │
+│   repo-b │  │ PRs     █░░░░  2 pending  0 active  │     │
+│          │  │ Merges  ░░░░░  1 pending             │     │
 │          │  └─────────────────────────────────────┘     │
+│          │  Scan: 5m | Issue×2 PR×1 Merge×1 | sonnet   │
 │          │                                              │
-│          │  Recent Activity                             │
-│          │  ┌─────────────────────────────────────┐     │
-│          │  │ 14:32 issue-42 analyzing → ready     │     │
-│          │  │ 14:30 pr-15   reviewing              │     │
-│          │  │ 14:28 pr-12   merged ✓               │     │
-│          │  │ 14:25 issue-41 done ✓ → PR #18       │     │
-│          │  └─────────────────────────────────────┘     │
+│          ├──────────────────────────────────────────────┤
+│          │  Activity Log (실시간)                        │
+│          │  14:32 issue-42  analyzing → ready            │
+│          │  14:30 pr-15    reviewing                     │
+│          │  14:28 pr-12    merged ✓                      │
+│          │  14:25 issue-41 done ✓ → PR #18               │
+│          │  14:20 issue-40 failed ✗ "timeout"            │
 │          │                                              │
-│          │  Consumer Logs (실시간)                       │
-│          │  ┌─────────────────────────────────────┐     │
-│          │  │ [issue-worker-1] claude -p "/devel…  │     │
-│          │  │ [pr-worker-1] claude -p "/multi-r…   │     │
-│          │  └─────────────────────────────────────┘     │
-│          │                                              │
-│          │  Settings                    [Edit Config]   │
-│          │  Scan: 5m | Issue×2 PR×1 Merge×1 | sonnet  │
 └──────────┴──────────────────────────────────────────────┘
 ```
+
+### 장점 (vs 웹 대시보드)
+- 별도 서버/포트 불필요
+- 바이너리 크기 최소화 (axum, tower-http, HTML/JS/CSS 제거)
+- 터미널 환경에서 바로 확인 가능
+- SQLite에서 직접 읽어 표시 (데몬 프로세스와 DB 공유)
 
 ---
 
@@ -641,10 +601,10 @@ cp target/release/autonomous ~/.local/bin/
 9. 슬래시 커맨드 (auto-setup, auto, auto-config)
 10. 에이전트 파일
 
-### Phase 3: 대시보드
-11. axum REST API
-12. WebSocket 실시간 로그
-13. Dashboard UI (HTML/JS/CSS)
+### Phase 3: TUI 대시보드
+11. ratatui 기본 레이아웃 (repos, queues, logs 패널)
+12. 실시간 로그 스트리밍 (SQLite polling)
+13. 키바인딩 (탐색, 재시도, 상세 보기)
 
 ### Phase 4: 배포
 14. CI/CD 통합 (rust-binary.yml)
