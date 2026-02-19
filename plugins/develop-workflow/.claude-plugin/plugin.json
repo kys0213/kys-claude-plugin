@@ -4,7 +4,7 @@
   },
   "description": "통합 개발 워크플로우: 설계 → 리뷰 → 구현 → 머지를 하나의 파이프라인으로",
   "name": "develop-workflow",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "commands": [
     "./commands/setup.md",
     "./commands/outline.md",
