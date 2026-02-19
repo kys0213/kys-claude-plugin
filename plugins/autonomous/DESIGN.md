@@ -281,20 +281,22 @@ autonomous logs <repo>        # 실행 로그 조회
 
 ### /auto-setup (위자드)
 
+> **이 플러그인은 반드시 User Scope로 설치**해야 합니다.
+> 사용자가 모니터링하려는 레포 디렉토리에서 `/auto-setup`을 호출하면 위자드가 시작됩니다.
+
 ```yaml
 ---
-description: 자율 개발 모니터링을 위한 레포 등록 및 설정 위자드
-argument-hint: "[repository-url]"
+description: 현재 레포를 자율 개발 모니터링 대상으로 등록합니다
 allowed-tools: ["AskUserQuestion", "Bash"]
 ---
 ```
 
 **흐름:**
-1. AskUserQuestion → 레포 URL 입력 (또는 인자에서 받기)
-2. **필수 플러그인 의존성 체크** → user 레벨에 설치되어 있는지 검증
+1. `git remote get-url origin`으로 현재 레포 URL 자동 감지
+2. **필수 플러그인 의존성 체크** → `kys-claude-plugin` 마켓플레이스에서 User Scope로 설치 여부 확인
    - 필수: `develop-workflow`, `git-utils`
    - 권장: `external-llm` (multi-LLM 사용 시)
-   - 미설치 시 경고 + 설치 안내 출력, 계속 진행 여부 확인
+   - 미설치 시 경고 + 설치 안내, 계속 진행 여부 확인
 3. AskUserQuestion → 감시 대상 (Issues / PRs / 둘 다)
 4. AskUserQuestion → 스캔 주기 (1분/5분/15분/커스텀)
 5. AskUserQuestion → Consumer 처리량 (Issue/PR/Merge 각각)
