@@ -291,13 +291,17 @@ allowed-tools: ["AskUserQuestion", "Bash"]
 
 **흐름:**
 1. AskUserQuestion → 레포 URL 입력 (또는 인자에서 받기)
-2. AskUserQuestion → 감시 대상 (Issues / PRs / 둘 다)
-3. AskUserQuestion → 스캔 주기 (1분/5분/15분/커스텀)
-4. AskUserQuestion → Consumer 처리량 (Issue/PR/Merge 각각)
-5. AskUserQuestion → 워크플로우 선택 (Issue 분석: multi-LLM or 단일, PR 리뷰: /multi-review or 단일)
-6. AskUserQuestion → 필터 (전체 / 특정 라벨 / 작성자 제외)
-7. Bash → `autonomous repo add <url> --config '<json>'`
-8. 설정 요약 출력
+2. **필수 플러그인 의존성 체크** → user 레벨에 설치되어 있는지 검증
+   - 필수: `develop-workflow`, `git-utils`
+   - 권장: `external-llm` (multi-LLM 사용 시)
+   - 미설치 시 경고 + 설치 안내 출력, 계속 진행 여부 확인
+3. AskUserQuestion → 감시 대상 (Issues / PRs / 둘 다)
+4. AskUserQuestion → 스캔 주기 (1분/5분/15분/커스텀)
+5. AskUserQuestion → Consumer 처리량 (Issue/PR/Merge 각각)
+6. AskUserQuestion → 워크플로우 선택 (Issue 분석: multi-LLM or 단일, PR 리뷰: /multi-review or 단일)
+7. AskUserQuestion → 필터 (전체 / 특정 라벨 / 작성자 제외)
+8. Bash → `autonomous repo add <url> --config '<json>'`
+9. 설정 요약 출력
 
 ### /auto
 
@@ -572,9 +576,29 @@ cp target/release/autonomous ~/.local/bin/
   "source": "./plugins/autonomous",
   "category": "automation",
   "description": "이벤트 기반 자율 개발 오케스트레이터 - Issue 분석, PR 리뷰, 자동 머지",
-  "keywords": ["autonomous", "monitor", "queue", "dashboard", "automation"]
+  "keywords": ["autonomous", "monitor", "queue", "dashboard", "automation"],
+  "dependencies": {
+    "required": ["develop-workflow", "git-utils"],
+    "recommended": ["external-llm"]
+  }
 }
 ```
+
+### plugin.json 의존성 체크
+```json
+{
+  "name": "autonomous",
+  "version": "0.1.0",
+  "dependencies": {
+    "required": ["develop-workflow", "git-utils"],
+    "recommended": ["external-llm"]
+  }
+}
+```
+
+`/auto-setup` 실행 시 CLI가 user 레벨 플러그인 설치 경로(`~/.claude/plugins/` 등)를 스캔하여:
+- **required** 미설치 → 경고 + 설치 명령어 안내, 계속 진행 여부 확인
+- **recommended** 미설치 → 정보성 안내 (multi-LLM 분석 불가 등)
 
 ---
 
