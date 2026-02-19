@@ -1,6 +1,12 @@
-# RALPH 패턴 주입용 지침
+---
+name: ralph-pattern
+description: RALPH 구현-검증 루프 패턴. Read → Analyze → Learn → Patch → Halt 사이클과 재시도 정책, 에스컬레이션 조건을 정의합니다.
+version: 1.0.0
+---
 
-이 템플릿은 Direct/Subagent/Agent Teams 모든 전략에서 공통으로 주입되는 구현 패턴입니다.
+# RALPH 패턴
+
+모든 구현 전략(Direct/Subagent/Agent Teams)에서 공통으로 적용되는 구현-검증 루프입니다.
 
 ## RALPH Loop
 
