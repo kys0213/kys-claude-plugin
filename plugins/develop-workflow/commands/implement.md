@@ -51,59 +51,60 @@ Contract(Interface + Test Code)를 기반으로 구현을 실행합니다. 태�
 
 ## 상태 관리
 
-RALPH 루프의 진행 상황을 `.develop-workflow/state.yaml`에 기록합니다.
+RALPH 루프의 진행 상황을 `.develop-workflow/state.json`에 기록합니다.
 compaction이나 세션 재개 시 "어디까지 했는지"를 복원하기 위함입니다.
 
 ### 상태 기록 규칙
 
 ```
 Checkpoint 시작
-    │ → state.yaml: cp-N status를 in_progress로, iteration을 1로
+    │ → state.json: cp-N status를 in_progress로, iteration을 1로
     │
     ▼
 RALPH iteration 실행
     │
     ├── Pass
-    │   → state.yaml: cp-N status를 passed로
+    │   → state.json: cp-N status를 passed로
     │   → 다음 Checkpoint
     │
     └── Fail
-        → state.yaml: cp-N iteration 증가
+        → state.json: cp-N iteration 증가
         │
         ├── iteration < max_retries
         │   → 다음 RALPH iteration
         │
         └── iteration >= max_retries
-            → state.yaml: cp-N status를 escalated로
+            → state.json: cp-N status를 escalated로
             → 사용자에게 에스컬레이션
 ```
 
 ### 기록 예시
 
 Checkpoint 시작 시:
-```yaml
-# Edit .develop-workflow/state.yaml
-checkpoints:
-  cp-1: { status: in_progress, iteration: 1 }
+```json
+// Edit .develop-workflow/state.json
+{ "checkpoints": { "cp-1": { "status": "in_progress", "iteration": 1 } } }
 ```
 
 RALPH 실패 후 재시도:
-```yaml
-checkpoints:
-  cp-1: { status: in_progress, iteration: 2 }
+```json
+{ "checkpoints": { "cp-1": { "status": "in_progress", "iteration": 2 } } }
 ```
 
 Checkpoint 통과:
-```yaml
-checkpoints:
-  cp-1: { status: passed, iteration: 2 }
-  cp-2: { status: in_progress, iteration: 1 }   # 다음 CP 시작
+```json
+{
+  "checkpoints": {
+    "cp-1": { "status": "passed", "iteration": 2 },
+    "cp-2": { "status": "in_progress", "iteration": 1 }
+  }
+}
 ```
 
 ### 세션 재개 시
 
 ```
-state.yaml 읽기
+state.json 읽기
     │
     ├── passed 항목 → 건너뜀
     ├── in_progress 항목 → 해당 iteration부터 RALPH 재개
@@ -124,13 +125,13 @@ state.yaml 읽기
 │   P: Patch    - 구현 코드 작성
 │   H: Halt     - 검증 실행
 │       │
-│       ├── Pass → state.yaml 갱신 (passed) → 다음 Checkpoint
-│       └── Fail → state.yaml 갱신 (iteration++) → 원인 분석
+│       ├── Pass → state.json 갱신 (status: passed) → 다음 Checkpoint
+│       └── Fail → state.json 갱신 (iteration++) → 원인 분석
 │                   │
 └───────────────────┘ (최대 3회)
 ```
 
-최대 재시도(기본 3회) 초과 시 state.yaml에 `escalated` 기록 후 사용자에게 에스컬레이션합니다.
+최대 재시도(기본 3회) 초과 시 state.json에 `escalated` 기록 후 사용자에게 에스컬레이션합니다.
 
 ---
 

@@ -20,8 +20,9 @@ Phase 1: DESIGN ─→ Phase 2: REVIEW ─→ Phase 3: IMPLEMENT ─→ Phase 4:
 3. **Multi-LLM 합의**: 설계와 리뷰에서 Claude + Codex + Gemini 3개 LLM의 관점 활용
 4. **상황별 구현 전략**: 태스크 규모에 따라 Direct / Subagent / Agent Teams 자동 선택
 5. **git-utils 연동**: 브랜치, PR, 머지를 git-utils 플러그인에 위임
-6. **상태 지속성**: `.develop-workflow/state.yaml`로 세션 재개 및 compaction 대응
-7. **암묵지의 명시화**: 맥락, 컨벤션, 암묵지를 CLAUDE.md / rules / 설정 파일에 축적하여 자동화 품질을 점진적으로 향상
+6. **상태 지속성**: `.develop-workflow/state.json`으로 세션 재개 및 compaction 대응
+7. **Gate 기반 Phase 차단**: Hook이 `state.json`의 gates를 검증하여 Phase 전환을 물리적으로 제어
+8. **암묵지의 명시화**: 맥락, 컨벤션, 암묵지를 CLAUDE.md / rules / 설정 파일에 축적하여 자동화 품질을 점진적으로 향상
 
 ---
 
@@ -57,17 +58,25 @@ Phase 1: DESIGN ──────→ Phase 2: REVIEW ──→ Phase 3: IMPLEME
 
 ## Step 0: 세션 재개 확인
 
-워크플로우 시작 시 **반드시** `.develop-workflow/state.yaml` 존재 여부를 확인합니다.
+워크플로우 시작 시 **반드시** `.develop-workflow/state.json` 존재 여부를 확인합니다.
 
 ```
 /develop 실행
     │
-    ├── .develop-workflow/state.yaml 존재?
+    ├── .develop-workflow/state.json 존재?
     │   │
-    │   ├── Yes (phase: DONE) → "이전 워크플로우 완료. 새로 시작합니다." → state.yaml 삭제
+    │   ├── Yes (phase: DONE) → "이전 워크플로우 완료. 새로 시작합니다." → state.json 삭제
     │   │
-    │   ├── Yes (진행 중) → 상태 읽기 → 자동으로 해당 Phase/Checkpoint부터 재개
-    │   │         로그: "세션 재개: Phase IMPLEMENT, cp-2 진행 중 (iteration 1/3)"
+    │   ├── Yes (진행 중) → 상태 + gates 읽기
+    │   │         │
+    │   │         ▼
+    │   │     사용자에게 보고:
+    │   │     "이전 세션: '{feature}', Phase {phase}"
+    │   │     "Gates: review_clean_pass={}, architect_verified={}, re_review_clean={}"
+    │   │     "Checkpoints: cp-1 passed, cp-2 in_progress (iter 1/3)"
+    │   │         │
+    │   │         ├── AskUserQuestion: "이어서 진행" → 해당 지점부터 재개
+    │   │         └── AskUserQuestion: "처음부터"   → state.json 삭제 → 새 워크플로우
     │   │
     │   └── No → 새 워크플로우 시작
     │
@@ -75,39 +84,65 @@ Phase 1: DESIGN ──────→ Phase 2: REVIEW ──→ Phase 3: IMPLEME
 Phase 1부터 (또는 재개 지점부터) 실행
 ```
 
-> **자동 재개**: 이전 세션이 있으면 사용자 확인 없이 자동으로 이어서 진행합니다.
+> **세션 재개**: 이전 세션이 있으면 사용자에게 현재 상태를 보고하고 이어서 진행할지 묻습니다.
 > DONE 상태면 새 워크플로우를 시작합니다.
 
-### state.yaml 형식
+### state.json 형식
 
-```yaml
-# .develop-workflow/state.yaml
-phase: IMPLEMENT                # DESIGN | REVIEW | IMPLEMENT | MERGE | DONE
-strategy: subagent              # direct | subagent | agent-teams (Phase 3 진입 시 기록)
-feature: "실시간 채팅 기능"       # 사용자 요청 요약
-started_at: "2026-02-16T10:00:00"
-updated_at: "2026-02-16T11:30:00"
-
-checkpoints:
-  cp-1: { status: passed, iteration: 2 }
-  cp-2: { status: in_progress, iteration: 1 }
-  cp-3: { status: pending, iteration: 0 }
+```json
+{
+  "phase": "IMPLEMENT",
+  "strategy": "subagent",
+  "feature": "실시간 채팅 기능",
+  "started_at": "2026-02-16T10:00:00",
+  "updated_at": "2026-02-16T11:30:00",
+  "gates": {
+    "review_clean_pass": true,
+    "architect_verified": false,
+    "re_review_clean": false
+  },
+  "checkpoints": {
+    "cp-1": { "status": "passed", "iteration": 2 },
+    "cp-2": { "status": "in_progress", "iteration": 1 },
+    "cp-3": { "status": "pending", "iteration": 0 }
+  }
+}
 ```
+
+### Gates (Phase Gate)
+
+`develop-phase-gate.cjs` hook이 PreToolUse 시점에 `state.json`의 gates를 검증합니다.
+Gate 조건이 미충족이면 Write/Edit/Bash가 물리적으로 차단됩니다.
+
+| Gate | 설정 시점 | 용도 |
+|------|----------|------|
+| `review_clean_pass` | Phase 2 리뷰에서 Blocking 이슈 0개 | Phase 3 IMPLEMENT 진입 허용 |
+| `architect_verified` | Phase 3 Architect 검증 통과 | Phase 4 MERGE 진입 허용 |
+| `re_review_clean` | Phase 4 코드 리뷰 clean pass | PR 생성/push 허용 |
+
+**Gate 검증 매트릭스**:
+
+| Phase | Matcher | 필수 Gate | 차단 대상 |
+|-------|---------|-----------|----------|
+| IMPLEMENT | Write\|Edit | `review_clean_pass` | 파일 수정 |
+| MERGE | Write\|Edit | `review_clean_pass` + `architect_verified` | 파일 수정 |
+| MERGE | Bash (git push/gh pr/git commit) | `re_review_clean` | 종료 명령 |
 
 ### 상태 기록 시점
 
-state.yaml은 다음 시점에 **Write tool로 갱신**합니다:
+state.json은 다음 시점에 **Write/Edit tool로 갱신**합니다:
 
 | 시점 | 기록 내용 |
 |------|----------|
 | Phase 전환 | `phase` 필드 업데이트 |
+| Gate 충족 | `gates.{gate_name}: true` |
 | Checkpoint 시작 | 해당 CP `status: in_progress` |
 | RALPH iteration 완료 | `iteration` 카운트 증가, `status` 업데이트 |
 | Checkpoint 통과 | `status: passed` |
 | Checkpoint 실패 (재시도 초과) | `status: escalated` |
 | 워크플로우 완료 | `phase: DONE` |
 
-> **주의**: state.yaml 기록은 가볍게 유지합니다. 피드백 상세나 설계 내용은 기록하지 않습니다.
+> **주의**: state.json 기록은 가볍게 유지합니다. 피드백 상세나 설계 내용은 기록하지 않습니다.
 > 실패 원인은 다시 분석하면 되므로 "어디까지 했는지"만 추적합니다.
 
 ---
@@ -163,13 +198,20 @@ state.yaml은 다음 시점에 **Write tool로 갱신**합니다:
 `/design` 커맨드의 전체 프로세스를 실행합니다.
 
 **진입 시 상태 기록**:
-```yaml
-# Write .develop-workflow/state.yaml
-phase: DESIGN
-feature: "{사용자 요청 요약}"
-started_at: "{현재 시각}"
-updated_at: "{현재 시각}"
-checkpoints: {}
+```json
+// Write .develop-workflow/state.json
+{
+  "phase": "DESIGN",
+  "feature": "{사용자 요청 요약}",
+  "started_at": "{현재 시각}",
+  "updated_at": "{현재 시각}",
+  "gates": {
+    "review_clean_pass": false,
+    "architect_verified": false,
+    "re_review_clean": false
+  },
+  "checkpoints": {}
+}
 ```
 
 ### Step 1.1: 요구사항 수집 (HITL #1-a)
@@ -254,13 +296,16 @@ checkpoints:
 `/multi-review` 커맨드로 설계 문서를 검증합니다.
 
 **진입 시 상태 기록**:
-```yaml
-# Edit .develop-workflow/state.yaml → phase 업데이트
-phase: REVIEW
-updated_at: "{현재 시각}"
-checkpoints:              # Phase 1에서 정의된 Checkpoint들 초기화
-  cp-1: { status: pending, iteration: 0 }
-  cp-2: { status: pending, iteration: 0 }
+```json
+// Edit .develop-workflow/state.json → phase 업데이트
+{
+  "phase": "REVIEW",
+  "updated_at": "{현재 시각}",
+  "checkpoints": {
+    "cp-1": { "status": "pending", "iteration": 0 },
+    "cp-2": { "status": "pending", "iteration": 0 }
+  }
+}
 ```
 
 ### Step 2.1: Multi-LLM 스펙 리뷰
@@ -273,6 +318,14 @@ Task(subagent_type="reviewer-codex", prompt=REVIEW_PROMPT, run_in_background=tru
 Task(subagent_type="reviewer-gemini", prompt=REVIEW_PROMPT, run_in_background=true)
 ```
 
+각 리뷰어는 이슈를 다음 3단계로 분류합니다:
+
+| 레벨 | 설명 | 처리 |
+|------|------|------|
+| **Blocking** | 구현 불가 / 보안 / 성능 심각 | Phase 3 진입 차단 |
+| **Warning** | 개선 권장하지만 구현 가능 | 에이전트가 자동 판단 |
+| **Info** | 참고 사항 | 기록만 |
+
 ### Step 2.2: 컨센서스 분석
 
 - **3/3 합의**: 높은 신뢰도 → 반드시 반영
@@ -281,12 +334,29 @@ Task(subagent_type="reviewer-gemini", prompt=REVIEW_PROMPT, run_in_background=tr
 
 ### Step 2.3: 자동 피드백 루프
 
-Critical 이슈가 있으면:
-1. 이슈 내용을 분석하여 수정 방향을 **자동 결정**
-2. Phase 1.2로 돌아가서 설계 자동 수정
-3. 최대 2회 반복 후 Phase 3로 진행
+```
+리뷰 결과
+    │
+    ├── Blocking 이슈 있음 → Phase 1.2로 돌아가서 설계 자동 수정
+    │   │                    (최대 2회 반복)
+    │   │
+    │   └── 수정 후 Step 2.1 재실행 (리뷰 재실행)
+    │
+    ├── Warning만 있음 → 에이전트가 자동 판단하여 반영/무시
+    │
+    └── Blocking 0개 (clean pass)
+        │
+        ▼
+    ✅ gates.review_clean_pass = true → Phase 3 진입 허용
+```
 
-Critical 이슈가 없으면: Phase 3로 진행
+**Gate 설정**: Blocking 이슈가 0개일 때만 `review_clean_pass` gate를 `true`로 설정합니다.
+이 gate가 `false`인 상태에서는 Phase 3에서 파일 수정이 hook에 의해 물리적으로 차단됩니다.
+
+```json
+// Edit .develop-workflow/state.json → gate 업데이트
+{ "gates": { "review_clean_pass": true } }
+```
 
 > **HITL 없음**: 리뷰 피드백은 에이전트가 자동으로 반영합니다.
 > 컨센서스 분석 결과는 Step 1.5 설계 승인 시 사용자에게 이미 확인받은 범위 내에서 처리됩니다.
@@ -298,14 +368,19 @@ Critical 이슈가 없으면: Phase 3로 진행
 `/implement` 커맨드로 구현을 실행합니다.
 
 **진입 시 상태 기록**:
-```yaml
-# Edit .develop-workflow/state.yaml → phase + strategy 업데이트
-phase: IMPLEMENT
-strategy: "{선택된 전략}"
-updated_at: "{현재 시각}"
+```json
+// Edit .develop-workflow/state.json → phase + strategy 업데이트
+{
+  "phase": "IMPLEMENT",
+  "strategy": "{선택된 전략}",
+  "updated_at": "{현재 시각}"
+}
 ```
 
-> Phase 3에서는 RALPH iteration마다 state.yaml을 갱신합니다.
+> **Gate 검증**: `review_clean_pass`가 `true`여야 Phase 3에서 파일 수정 가능.
+> Hook이 자동으로 차단하므로 gate 없이는 코드 작성이 물리적으로 불가합니다.
+
+> Phase 3에서는 RALPH iteration마다 state.json을 갱신합니다.
 > 상세 로직은 `/implement` 커맨드의 "상태 관리" 섹션을 참조하세요.
 
 ### Step 3.1: 브랜치 생성
@@ -422,6 +497,17 @@ Claude Code 공식 Agent Teams 기능을 활용합니다.
 3. 최대 3회 자동 재시도
 4. 3회 실패 시에만 `AskUserQuestion`으로 사용자에게 에스컬레이션 (유일한 예외적 HITL)
 
+### Step 3.5: Architect 검증 + Gate 설정
+
+전체 검증 통과 후 `architect_verified` gate를 설정합니다:
+
+```json
+// Edit .develop-workflow/state.json → gate 업데이트
+{ "gates": { "architect_verified": true } }
+```
+
+이 gate가 `true`여야 Phase 4 MERGE에서 파일 수정이 가능합니다.
+
 > **거의 자동**: 대부분의 경우 RALPH 패턴이 자동으로 해결합니다.
 > 에스컬레이션은 구현 불가능한 상황에서만 발생하는 안전장치입니다.
 
@@ -430,10 +516,12 @@ Claude Code 공식 Agent Teams 기능을 활용합니다.
 ## Phase 4: MERGE
 
 **진입 시 상태 기록**:
-```yaml
-# Edit .develop-workflow/state.yaml → phase 업데이트
-phase: MERGE
-updated_at: "{현재 시각}"
+```json
+// Edit .develop-workflow/state.json → phase 업데이트
+{
+  "phase": "MERGE",
+  "updated_at": "{현재 시각}"
+}
 ```
 
 ### Step 4.1: Multi-LLM 코드 리뷰 + 사용자 확인 (HITL #2)
@@ -444,13 +532,44 @@ updated_at: "{현재 시각}"
 /multi-review "구현된 코드를 엔지니어 관점으로 리뷰해줘"
 ```
 
-리뷰 결과를 `AskUserQuestion`으로 사용자에게 제시합니다:
-- 리뷰 요약 (합의/분쟁 사항)
-- 수정 필요 여부
-- **승인 시**: Step 4.2로 진행
-- **수정 요청 시**: Phase 3로 돌아가서 수정 후 재리뷰
+리뷰 결과를 이슈 레벨별로 분류합니다:
 
-> **HITL #2**: 머지 전 최종 품질 게이트. RALPH 완료 후 코드 리뷰 결과를 사용자가 확인합니다.
+| 레벨 | 설명 | 처리 |
+|------|------|------|
+| **Blocking** | 머지 불가 / 보안 / 심각한 버그 | PR 생성 차단 |
+| **Warning** | 개선 권장 | 에이전트가 자동 판단 |
+| **Info** | 참고 사항 | 기록만 |
+
+```
+리뷰 결과
+    │
+    ├── Blocking 이슈 있음
+    │   │
+    │   ▼
+    │   자동 수정 시도 (RALPH 패턴)
+    │   │
+    │   └── 수정 후 Step 4.1 재실행 (리뷰 재실행, 최대 2회)
+    │
+    └── Blocking 0개 (clean pass)
+        │
+        ▼
+    ✅ gates.re_review_clean = true
+        │
+        ▼
+    리뷰 요약을 AskUserQuestion으로 사용자에게 제시
+    ├── 승인 → Step 4.2로 진행
+    └── 수정 요청 → gates.re_review_clean = false → 수정 후 Step 4.1 재실행
+```
+
+**Gate 설정**: Blocking 이슈가 0개일 때 `re_review_clean` gate를 `true`로 설정합니다.
+이 gate가 `false`인 상태에서는 `git push`, `gh pr create`, `git commit`이 hook에 의해 물리적으로 차단됩니다.
+
+```json
+// Edit .develop-workflow/state.json → gate 업데이트
+{ "gates": { "re_review_clean": true } }
+```
+
+> **HITL #2**: 머지 전 최종 품질 게이트. 리뷰 clean pass 후 사용자가 최종 확인합니다.
 
 ### Step 4.2: Commit & PR
 
@@ -460,6 +579,8 @@ git-utils 활용:
 # 커밋 및 PR 생성
 /commit-and-pr
 ```
+
+> **Gate 필수**: `re_review_clean`이 `true`여야 커밋/PR 생성이 가능합니다.
 
 ### Step 4.3: CI 확인
 
@@ -485,13 +606,15 @@ CI 실패 시:
 
 ### Step 4.5: 워크플로우 완료
 
-```yaml
-# Edit .develop-workflow/state.yaml → 완료 기록
-phase: DONE
-updated_at: "{현재 시각}"
+```json
+// Edit .develop-workflow/state.json → 완료 기록
+{
+  "phase": "DONE",
+  "updated_at": "{현재 시각}"
+}
 ```
 
-> **정리**: 워크플로우 완료 후 `.develop-workflow/state.yaml`은 유지합니다.
+> **정리**: 워크플로우 완료 후 `.develop-workflow/state.json`은 유지합니다.
 > 다음 `/develop` 실행 시 DONE 상태를 감지하면 "이전 워크플로우가 완료되었습니다. 새로 시작합니다."로 처리합니다.
 
 ---

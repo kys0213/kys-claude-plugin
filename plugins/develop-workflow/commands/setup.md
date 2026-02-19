@@ -86,7 +86,7 @@ hook 설치 범위를 선택하세요.
 | settings.json 위치 | `.claude/settings.json` | `~/.claude/settings.json` |
 | hook 스크립트 경로 | 상대경로 (`./plugins/...`) | 절대경로 bake-in |
 | 팀 공유 | git commit으로 공유 가능 | 불가 (개인 설정) |
-| 적용 범위 | 이 프로젝트만 | 모든 프로젝트 (state.yaml 없으면 자동 스킵) |
+| 적용 범위 | 이 프로젝트만 | 모든 프로젝트 (state.json 없으면 자동 스킵) |
 
 ## Step 4: Hook 등록
 
@@ -125,9 +125,9 @@ develop-workflow hook이 프로젝트에 설정되었습니다!
 └─ .claude/settings.json (hook 등록됨)
 
 SessionStart Hook:
-├─ 세션 시작 시 .develop-workflow/state.yaml 감지
+├─ 세션 시작 시 .develop-workflow/state.json 감지
 ├─ 진행 중인 워크플로우가 있으면 상태를 표시
-└─ state.yaml이 없으면 자동 스킵
+└─ state.json이 없으면 자동 스킵
 
 .claude/ 디렉토리를 git에 커밋하면 팀과 설정을 공유할 수 있습니다.
 ```
@@ -142,9 +142,9 @@ develop-workflow hook이 사용자 설정에 등록되었습니다!
 └─ ~/.claude/settings.json (hook 등록됨)
 
 SessionStart Hook:
-├─ 세션 시작 시 .develop-workflow/state.yaml 감지
+├─ 세션 시작 시 .develop-workflow/state.json 감지
 ├─ 진행 중인 워크플로우가 있으면 상태를 표시
-└─ state.yaml이 없으면 자동 스킵 (git 저장소가 아니어도 안전)
+└─ state.json이 없으면 자동 스킵 (git 저장소가 아니어도 안전)
 ```
 
 ## 예시 실행 흐름

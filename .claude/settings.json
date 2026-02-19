@@ -8,6 +8,11 @@
             "type": "command",
             "command": "bash ./.claude/hooks/default-branch-guard-hook.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node ./plugins/develop-workflow/hooks/develop-phase-gate.cjs",
+            "timeout": 5
           }
         ]
       },
@@ -17,6 +22,11 @@
           {
             "type": "command",
             "command": "bash ./.claude/hooks/default-branch-guard-commit-hook.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node ./plugins/develop-workflow/hooks/develop-phase-gate.cjs",
             "timeout": 5
           }
         ]
