@@ -32,8 +32,11 @@ AskUserQuestion으로 변경할 항목을 선택:
 - 워크플로우 선택
 - 필터 설정
 - 활성화/비활성화
+- **레포 삭제**
 
 ### Step 4: 설정 적용
+
+#### 설정 변경인 경우
 
 변경된 설정을 CLI에 전달:
 
@@ -42,3 +45,25 @@ autonomous repo config <name> --update '<json>'
 ```
 
 변경 결과를 사용자에게 요약 출력합니다.
+
+#### 레포 삭제인 경우
+
+1. 선택된 레포의 큐 현황을 표시합니다:
+
+```bash
+autonomous queue list <name>
+```
+
+2. 활성 큐 아이템(pending/processing 상태)이 있으면 **경고**를 표시합니다.
+
+3. AskUserQuestion으로 최종 삭제 확인:
+   - "정말 삭제하시겠습니까? 관련된 모든 데이터(큐, 로그, 스캔 기록)가 함께 삭제됩니다."
+   - 선택지: 삭제 진행 / 취소
+
+4. 확인 시 삭제 실행:
+
+```bash
+autonomous repo remove <name>
+```
+
+5. 삭제 결과를 출력합니다.
