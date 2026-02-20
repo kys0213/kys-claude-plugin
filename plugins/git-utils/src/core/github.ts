@@ -5,8 +5,23 @@
 // gh CLI 호출을 타입 안전한 인터페이스로 추상화합니다.
 // ============================================================
 
+import { readFileSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 import type { ReviewThread } from '../types';
 import { exec, execOrThrow } from './shell';
+
+/** ~/.git-workflow-env 에서 GH_HOST를 읽어 반환 */
+function loadGhHost(): string | undefined {
+  try {
+    const envPath = join(homedir(), '.git-workflow-env');
+    const content = readFileSync(envPath, 'utf-8');
+    const match = content.match(/^export\s+GH_HOST="(.+)"/m);
+    return match?.[1] || undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export interface GitHubService {
   /** gh auth status 확인 */
@@ -60,14 +75,17 @@ query($owner: String!, $repo: String!, $number: Int!) {
 `;
 
 export function createGitHubService(cwd?: string): GitHubService {
-  const opts = cwd ? { cwd } : undefined;
+  const ghHost = loadGhHost();
+  const env = ghHost ? { GH_HOST: ghHost } : undefined;
+  const opts = { ...(cwd ? { cwd } : {}), ...(env ? { env } : {}) };
+  const execOpts = Object.keys(opts).length > 0 ? opts : undefined;
 
   async function gh(...args: string[]): Promise<string> {
-    return execOrThrow(['gh', ...args], opts);
+    return execOrThrow(['gh', ...args], execOpts);
   }
 
   async function ghSafe(...args: string[]): Promise<{ stdout: string; exitCode: number }> {
-    const result = await exec(['gh', ...args], opts);
+    const result = await exec(['gh', ...args], execOpts);
     return { stdout: result.stdout, exitCode: result.exitCode };
   }
 

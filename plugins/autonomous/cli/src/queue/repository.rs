@@ -78,8 +78,8 @@ impl RepoRepository for Database {
         )?;
 
         conn.execute(
-            "INSERT INTO repo_configs (repo_id, scan_interval_secs, scan_targets, issue_concurrency, pr_concurrency, merge_concurrency, model, issue_workflow, pr_workflow, filter_labels, ignore_authors, workspace_strategy) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT INTO repo_configs (repo_id, scan_interval_secs, scan_targets, issue_concurrency, pr_concurrency, merge_concurrency, model, issue_workflow, pr_workflow, filter_labels, ignore_authors, workspace_strategy, gh_host) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             rusqlite::params![
                 id,
                 config.scan_interval_secs,
@@ -93,6 +93,7 @@ impl RepoRepository for Database {
                 config.filter_labels.as_ref().map(|l| serde_json::to_string(l).unwrap_or_default()),
                 serde_json::to_string(&config.ignore_authors)?,
                 config.workspace_strategy,
+                config.gh_host,
             ],
         )?;
 
@@ -163,7 +164,7 @@ impl RepoRepository for Database {
     fn repo_find_enabled(&self) -> Result<Vec<EnabledRepo>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT r.id, r.url, r.name, c.scan_targets, c.scan_interval_secs, c.filter_labels, c.ignore_authors \
+            "SELECT r.id, r.url, r.name, c.scan_targets, c.scan_interval_secs, c.filter_labels, c.ignore_authors, c.gh_host \
              FROM repositories r JOIN repo_configs c ON r.id = c.repo_id \
              WHERE r.enabled = 1",
         )?;
@@ -177,6 +178,7 @@ impl RepoRepository for Database {
                 scan_interval_secs: row.get(4)?,
                 filter_labels: row.get(5)?,
                 ignore_authors: row.get(6)?,
+                gh_host: row.get(7)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)

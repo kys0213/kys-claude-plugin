@@ -13,6 +13,8 @@ pub struct RepoConfig {
     pub filter_labels: Option<Vec<String>>,
     pub ignore_authors: Vec<String>,
     pub workspace_strategy: String,
+    /// GitHub Enterprise 호스트 (None이면 github.com)
+    pub gh_host: Option<String>,
 }
 
 impl Default for RepoConfig {
@@ -29,6 +31,7 @@ impl Default for RepoConfig {
             filter_labels: None,
             ignore_authors: vec!["dependabot".into(), "renovate".into()],
             workspace_strategy: "worktree".into(),
+            gh_host: None,
         }
     }
 }

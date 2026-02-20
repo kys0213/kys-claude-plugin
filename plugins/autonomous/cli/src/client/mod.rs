@@ -36,6 +36,32 @@ pub fn status(db: &Database) -> Result<String> {
     Ok(output)
 }
 
+/// URL에서 GitHub 호스트 추출
+/// - https://github.com/org/repo → None (기본 github.com)
+/// - https://github.mycompany.com/org/repo → Some("github.mycompany.com")
+/// - git@github.mycompany.com:org/repo.git → Some("github.mycompany.com")
+/// - https://gitlab.com/org/repo → None (GitHub이 아니면 패스)
+fn extract_gh_host(url: &str) -> Option<String> {
+    let host = if url.starts_with("git@") {
+        // git@github.mycompany.com:org/repo.git
+        url.strip_prefix("git@")
+            .and_then(|s| s.split(':').next())
+            .map(|s| s.to_string())
+    } else {
+        // https://github.mycompany.com/org/repo
+        url.split("://")
+            .nth(1)
+            .and_then(|s| s.split('/').next())
+            .map(|s| s.to_string())
+    };
+
+    match host {
+        Some(h) if h == "github.com" => None,
+        Some(h) if h.contains("github") => Some(h),
+        _ => None, // GitHub이 아닌 호스트는 패스
+    }
+}
+
 /// 레포 등록
 pub fn repo_add(db: &Database, url: &str, config_json: Option<&str>) -> Result<()> {
     // URL에서 이름 추출 (예: https://github.com/org/repo -> org/repo)
@@ -50,11 +76,20 @@ pub fn repo_add(db: &Database, url: &str, config_json: Option<&str>) -> Result<(
         .collect::<Vec<_>>()
         .join("/");
 
-    let config: RepoConfig = if let Some(json) = config_json {
+    let mut config: RepoConfig = if let Some(json) = config_json {
         serde_json::from_str(json)?
     } else {
         RepoConfig::default()
     };
+
+    // URL에서 GitHub Enterprise 호스트 자동 감지
+    if config.gh_host.is_none() {
+        config.gh_host = extract_gh_host(url);
+    }
+
+    if let Some(ref host) = config.gh_host {
+        println!("detected GitHub Enterprise: {host}");
+    }
 
     db.repo_add(url, &name, &config)?;
 

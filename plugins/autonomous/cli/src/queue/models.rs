@@ -134,6 +134,7 @@ pub struct EnabledRepo {
     pub scan_interval_secs: i64,
     pub filter_labels: Option<String>,
     pub ignore_authors: String,
+    pub gh_host: Option<String>,
 }
 
 pub struct PendingIssue {

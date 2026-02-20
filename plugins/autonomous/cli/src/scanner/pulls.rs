@@ -33,10 +33,11 @@ pub async fn scan(
     repo_id: &str,
     repo_name: &str,
     ignore_authors: &[String],
+    gh_host: Option<&str>,
 ) -> Result<()> {
     let since = db.cursor_get_last_seen(repo_id, "pulls")?;
 
-    let args = vec![
+    let mut args = vec![
         "api".to_string(),
         format!("repos/{repo_name}/pulls"),
         "--paginate".to_string(),
@@ -45,6 +46,12 @@ pub async fn scan(
         "-f".to_string(), "direction=desc".to_string(),
         "-f".to_string(), "per_page=30".to_string(),
     ];
+
+    // GitHub Enterprise: --hostname 추가
+    if let Some(host) = gh_host {
+        args.push("--hostname".to_string());
+        args.push(host.to_string());
+    }
 
     let output = tokio::process::Command::new("gh")
         .args(&args)

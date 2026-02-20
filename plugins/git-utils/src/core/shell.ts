@@ -14,12 +14,13 @@ export interface ExecResult {
  */
 export async function exec(
   command: string[],
-  options?: { cwd?: string },
+  options?: { cwd?: string; env?: Record<string, string> },
 ): Promise<ExecResult> {
   const proc = Bun.spawn(command, {
     stdout: 'pipe',
     stderr: 'pipe',
     cwd: options?.cwd,
+    env: options?.env ? { ...process.env, ...options.env } : undefined,
   });
 
   const [stdout, stderr] = await Promise.all([
@@ -41,7 +42,7 @@ export async function exec(
  */
 export async function execOrThrow(
   command: string[],
-  options?: { cwd?: string },
+  options?: { cwd?: string; env?: Record<string, string> },
 ): Promise<string> {
   const result = await exec(command, options);
   if (result.exitCode !== 0) {

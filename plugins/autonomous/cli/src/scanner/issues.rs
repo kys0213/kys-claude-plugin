@@ -33,6 +33,7 @@ pub async fn scan(
     repo_name: &str,
     ignore_authors: &[String],
     filter_labels: &Option<Vec<String>>,
+    gh_host: Option<&str>,
 ) -> Result<()> {
     // 마지막 스캔 시점 이후의 이슈만
     let since = db.cursor_get_last_seen(repo_id, "issues")?;
@@ -50,6 +51,12 @@ pub async fn scan(
     if let Some(ref s) = since {
         args.push("-f".to_string());
         args.push(format!("since={s}"));
+    }
+
+    // GitHub Enterprise: --hostname 추가
+    if let Some(host) = gh_host {
+        args.push("--hostname".to_string());
+        args.push(host.to_string());
     }
 
     let output = tokio::process::Command::new("gh")
