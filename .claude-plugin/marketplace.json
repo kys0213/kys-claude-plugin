@@ -94,6 +94,21 @@
       "name": "autonomous",
       "source": "./plugins/autonomous",
       "version": "0.2.4"
+    },
+    {
+      "category": "productivity",
+      "description": "마켓플레이스 플러그인 이슈 제보 - 대화 맥락 기반 자동 추론",
+      "keywords": [
+        "issue",
+        "report",
+        "marketplace",
+        "feedback",
+        "bug",
+        "enhancement"
+      ],
+      "name": "marketplace-issue",
+      "source": "./plugins/marketplace-issue",
+      "version": "0.1.0"
     }
   ]
 }

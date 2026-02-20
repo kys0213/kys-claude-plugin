@@ -1,0 +1,19 @@
+{
+  "author": {
+    "name": "kys0213"
+  },
+  "commands": [
+    "./commands/report-issue.md"
+  ],
+  "description": "마켓플레이스 플러그인 이슈 제보 - 대화 맥락 기반 자동 추론",
+  "keywords": [
+    "issue",
+    "report",
+    "marketplace",
+    "feedback",
+    "bug",
+    "enhancement"
+  ],
+  "name": "marketplace-issue",
+  "version": "0.1.0"
+}
