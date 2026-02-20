@@ -25,7 +25,8 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
             pr_workflow         TEXT NOT NULL DEFAULT '/multi-review',
             filter_labels       TEXT DEFAULT NULL,
             ignore_authors      TEXT DEFAULT '[\"dependabot\",\"renovate\"]',
-            workspace_strategy  TEXT NOT NULL DEFAULT 'worktree'
+            workspace_strategy  TEXT NOT NULL DEFAULT 'worktree',
+            gh_host             TEXT DEFAULT NULL
         );
 
         CREATE TABLE IF NOT EXISTS scan_cursors (

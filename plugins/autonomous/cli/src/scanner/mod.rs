@@ -24,16 +24,18 @@ pub async fn scan_all(db: &Database) -> Result<()> {
 
         tracing::info!("scanning {}...", repo.name);
 
+        let gh_host = repo.gh_host.as_deref();
+
         for target in &targets {
             match target.as_str() {
                 "issues" => {
-                    if let Err(e) = issues::scan(db, &repo.id, &repo.name, &ignore, &labels).await
+                    if let Err(e) = issues::scan(db, &repo.id, &repo.name, &ignore, &labels, gh_host).await
                     {
                         tracing::error!("issue scan error for {}: {e}", repo.name);
                     }
                 }
                 "pulls" => {
-                    if let Err(e) = pulls::scan(db, &repo.id, &repo.name, &ignore).await {
+                    if let Err(e) = pulls::scan(db, &repo.id, &repo.name, &ignore, gh_host).await {
                         tracing::error!("PR scan error for {}: {e}", repo.name);
                     }
                 }
