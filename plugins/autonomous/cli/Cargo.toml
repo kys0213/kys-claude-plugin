@@ -3,6 +3,10 @@ name = "autonomous"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "autonomous"
+path = "src/lib.rs"
+
 [[bin]]
 name = "autonomous"
 path = "src/main.rs"
