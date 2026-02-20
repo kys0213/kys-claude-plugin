@@ -101,11 +101,41 @@ impl RepoRepository for Database {
 
     fn repo_remove(&self, name: &str) -> Result<()> {
         let conn = self.conn();
+        let repo_id_query = "(SELECT id FROM repositories WHERE name = ?1)";
+
+        // 관련 큐 아이템 삭제
         conn.execute(
-            "DELETE FROM repo_configs WHERE repo_id = (SELECT id FROM repositories WHERE name = ?1)",
+            &format!("DELETE FROM issue_queue WHERE repo_id = {repo_id_query}"),
+            rusqlite::params![name],
+        )?;
+        conn.execute(
+            &format!("DELETE FROM pr_queue WHERE repo_id = {repo_id_query}"),
+            rusqlite::params![name],
+        )?;
+        conn.execute(
+            &format!("DELETE FROM merge_queue WHERE repo_id = {repo_id_query}"),
+            rusqlite::params![name],
+        )?;
+
+        // 스캔 커서 삭제
+        conn.execute(
+            &format!("DELETE FROM scan_cursors WHERE repo_id = {repo_id_query}"),
+            rusqlite::params![name],
+        )?;
+
+        // Consumer 로그 삭제
+        conn.execute(
+            &format!("DELETE FROM consumer_logs WHERE repo_id = {repo_id_query}"),
+            rusqlite::params![name],
+        )?;
+
+        // 설정 및 레포 삭제
+        conn.execute(
+            &format!("DELETE FROM repo_configs WHERE repo_id = {repo_id_query}"),
             rusqlite::params![name],
         )?;
         conn.execute("DELETE FROM repositories WHERE name = ?1", rusqlite::params![name])?;
+
         Ok(())
     }
 
