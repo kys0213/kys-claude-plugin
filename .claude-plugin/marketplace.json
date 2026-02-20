@@ -80,6 +80,20 @@
       "name": "suggest-workflow",
       "source": "./plugins/suggest-workflow",
       "version": "2.1.0"
+    },
+    {
+      "category": "automation",
+      "description": "이벤트 기반 자율 개발 오케스트레이터 - Issue 분석, PR 리뷰, 자동 머지",
+      "keywords": [
+        "autonomous",
+        "monitor",
+        "queue",
+        "dashboard",
+        "automation"
+      ],
+      "name": "autonomous",
+      "source": "./plugins/autonomous",
+      "version": "0.1.0"
     }
   ]
 }
