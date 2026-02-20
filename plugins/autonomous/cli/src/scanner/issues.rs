@@ -41,6 +41,7 @@ pub async fn scan(
     let mut args = vec![
         "api".to_string(),
         format!("repos/{repo_name}/issues"),
+        "--method".to_string(), "GET".to_string(),
         "--paginate".to_string(),
         "-f".to_string(), "state=open".to_string(),
         "-f".to_string(), "sort=updated".to_string(),

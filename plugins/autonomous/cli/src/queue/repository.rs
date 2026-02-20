@@ -191,12 +191,17 @@ impl RepoRepository for Database {
         conn.execute(
             "UPDATE repo_configs SET \
              scan_interval_secs = ?2, issue_concurrency = ?3, pr_concurrency = ?4, merge_concurrency = ?5, \
-             model = ?6, issue_workflow = ?7, pr_workflow = ?8, workspace_strategy = ?9 \
+             model = ?6, issue_workflow = ?7, pr_workflow = ?8, workspace_strategy = ?9, \
+             scan_targets = ?10, filter_labels = ?11, ignore_authors = ?12, gh_host = ?13 \
              WHERE repo_id = (SELECT id FROM repositories WHERE name = ?1)",
             rusqlite::params![
                 name, config.scan_interval_secs, config.issue_concurrency,
                 config.pr_concurrency, config.merge_concurrency, config.model,
                 config.issue_workflow, config.pr_workflow, config.workspace_strategy,
+                serde_json::to_string(&config.scan_targets)?,
+                config.filter_labels.as_ref().map(|l| serde_json::to_string(l).unwrap_or_default()),
+                serde_json::to_string(&config.ignore_authors)?,
+                config.gh_host,
             ],
         )?;
         conn.execute(

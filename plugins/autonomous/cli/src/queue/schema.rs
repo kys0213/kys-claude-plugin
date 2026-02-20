@@ -108,5 +108,11 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_consumer_logs_repo ON consumer_logs(repo_id, started_at);
         ",
     )?;
+
+    // Migration: add gh_host column to existing repo_configs tables.
+    // ALTER TABLE ADD COLUMN fails if the column already exists,
+    // so we silently ignore the error.
+    let _ = conn.execute("ALTER TABLE repo_configs ADD COLUMN gh_host TEXT DEFAULT NULL", []);
+
     Ok(())
 }
