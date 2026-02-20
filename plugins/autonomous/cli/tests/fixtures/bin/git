@@ -1,0 +1,30 @@
+#!/bin/bash
+# Fake git binary for testing
+# Behavior controlled by environment variables:
+#   GIT_MOCK_EXIT_CODE - exit code (default: 0)
+
+exit_code="${GIT_MOCK_EXIT_CODE:-0}"
+
+case "$1" in
+    clone)
+        # Create the target directory to simulate clone
+        target="${@: -1}"
+        mkdir -p "$target"
+        mkdir -p "$target/.git"
+        exit "$exit_code"
+        ;;
+    worktree)
+        if [ "$2" = "add" ]; then
+            target="$3"
+            mkdir -p "$target"
+            mkdir -p "$target/.git"
+        fi
+        exit "$exit_code"
+        ;;
+    pull)
+        exit "$exit_code"
+        ;;
+    *)
+        exit "$exit_code"
+        ;;
+esac

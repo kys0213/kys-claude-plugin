@@ -68,7 +68,7 @@ pub fn render(f: &mut Frame, db: &Database, state: &AppState) {
 }
 
 fn render_header(f: &mut Frame, area: Rect, db: &Database) {
-    let home = crate::config::autonomous_home();
+    let home = crate::config::autodev_home();
     let running = crate::daemon::pid::is_running(&home);
     let status = if running {
         Span::styled("● running", Style::default().fg(Color::Green))
@@ -83,7 +83,7 @@ fn render_header(f: &mut Frame, area: Rect, db: &Database) {
 
     let header = Paragraph::new(Line::from(vec![
         Span::styled(
-            " autonomous v0.1.0 ",
+            " autodev v0.1.0 ",
             Style::default().add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),

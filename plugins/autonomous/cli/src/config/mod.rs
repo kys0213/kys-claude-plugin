@@ -2,17 +2,17 @@ pub mod models;
 
 use std::path::PathBuf;
 
-/// ~/.autonomous 경로 반환
-pub fn autonomous_home() -> PathBuf {
-    let home = std::env::var("AUTONOMOUS_HOME")
+/// ~/.autodev 경로 반환
+pub fn autodev_home() -> PathBuf {
+    let home = std::env::var("AUTODEV_HOME")
         .unwrap_or_else(|_| {
             let home = std::env::var("HOME").expect("HOME not set");
-            format!("{home}/.autonomous")
+            format!("{home}/.autodev")
         });
     PathBuf::from(home)
 }
 
 /// 워크스페이스 기본 경로
 pub fn workspaces_path() -> PathBuf {
-    autonomous_home().join("workspaces")
+    autodev_home().join("workspaces")
 }

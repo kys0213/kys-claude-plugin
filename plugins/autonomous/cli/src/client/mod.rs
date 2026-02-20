@@ -10,10 +10,10 @@ pub fn status(db: &Database) -> Result<String> {
     let mut output = String::new();
 
     // 데몬 상태
-    let home = crate::config::autonomous_home();
+    let home = crate::config::autodev_home();
     let running = crate::daemon::pid::is_running(&home);
     output.push_str(&format!(
-        "autonomous daemon: {}\n\n",
+        "autodev daemon: {}\n\n",
         if running { "● running" } else { "○ stopped" }
     ));
 
@@ -76,7 +76,7 @@ pub fn repo_list(db: &Database) -> Result<String> {
     }
 
     if output.is_empty() {
-        output.push_str("No repositories registered. Use 'autonomous repo add <url>' to add one.\n");
+        output.push_str("No repositories registered. Use 'autodev repo add <url>' to add one.\n");
     }
 
     Ok(output)

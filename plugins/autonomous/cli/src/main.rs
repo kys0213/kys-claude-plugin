@@ -12,7 +12,7 @@ mod tui;
 mod workspace;
 
 #[derive(Parser)]
-#[command(name = "autonomous", version, about = "이벤트 기반 자율 개발 오케스트레이터")]
+#[command(name = "autodev", version, about = "GitHub 이슈 → PR 자동화 에이전트")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -101,15 +101,15 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("autonomous=info".parse()?),
+                .add_directive("autodev=info".parse()?),
         )
         .init();
 
     let cli = Cli::parse();
-    let home = config::autonomous_home();
+    let home = config::autodev_home();
     std::fs::create_dir_all(&home)?;
 
-    let db_path = home.join("autonomous.db");
+    let db_path = home.join("autodev.db");
     let db = queue::Database::open(&db_path)?;
     db.initialize()?;
 

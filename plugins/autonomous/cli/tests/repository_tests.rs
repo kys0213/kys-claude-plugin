@@ -1,7 +1,7 @@
-use autonomous::config::models::RepoConfig;
-use autonomous::queue::models::*;
-use autonomous::queue::repository::*;
-use autonomous::queue::Database;
+use autodev::config::models::RepoConfig;
+use autodev::queue::models::*;
+use autodev::queue::repository::*;
+use autodev::queue::Database;
 use std::path::Path;
 
 // ─── Helpers ───

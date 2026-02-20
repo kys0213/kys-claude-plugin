@@ -1,0 +1,233 @@
+use assert_cmd::Command;
+use predicates::prelude::*;
+use tempfile::TempDir;
+
+/// AUTODEV_HOME을 tempdir로 설정한 CLI 명령어 실행 헬퍼
+fn autodev(home: &TempDir) -> Command {
+    let mut cmd = Command::cargo_bin("autodev").unwrap();
+    cmd.env("AUTODEV_HOME", home.path());
+    cmd
+}
+
+// ═══════════════════════════════════════════════
+// 1. status
+// ═══════════════════════════════════════════════
+
+#[test]
+fn status_shows_stopped_when_no_daemon() {
+    let home = TempDir::new().unwrap();
+    autodev(&home)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("stopped"));
+}
+
+#[test]
+fn status_shows_no_repos_initially() {
+    let home = TempDir::new().unwrap();
+    autodev(&home)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("no repositories registered"));
+}
+
+// ═══════════════════════════════════════════════
+// 2. repo add / list / config / remove
+// ═══════════════════════════════════════════════
+
+#[test]
+fn repo_add_then_list() {
+    let home = TempDir::new().unwrap();
+
+    // add
+    autodev(&home)
+        .args(["repo", "add", "https://github.com/org/myrepo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("registered: org/myrepo"));
+
+    // list
+    autodev(&home)
+        .args(["repo", "list"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("org/myrepo")
+                .and(predicate::str::contains("https://github.com/org/myrepo")),
+        );
+}
+
+#[test]
+fn repo_add_with_git_suffix() {
+    let home = TempDir::new().unwrap();
+
+    autodev(&home)
+        .args(["repo", "add", "https://github.com/org/myrepo.git"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("registered: org/myrepo"));
+}
+
+#[test]
+fn repo_add_duplicate_fails() {
+    let home = TempDir::new().unwrap();
+
+    autodev(&home)
+        .args(["repo", "add", "https://github.com/org/myrepo"])
+        .assert()
+        .success();
+
+    autodev(&home)
+        .args(["repo", "add", "https://github.com/org/myrepo"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn repo_list_empty() {
+    let home = TempDir::new().unwrap();
+    autodev(&home)
+        .args(["repo", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No repositories registered"));
+}
+
+#[test]
+fn repo_config_shows_defaults() {
+    let home = TempDir::new().unwrap();
+
+    autodev(&home)
+        .args(["repo", "add", "https://github.com/org/myrepo"])
+        .assert()
+        .success();
+
+    autodev(&home)
+        .args(["repo", "config", "org/myrepo"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("scan_interval: 300s")
+                .and(predicate::str::contains("issue_concurrency: 1")),
+        );
+}
+
+#[test]
+fn repo_remove_then_list_empty() {
+    let home = TempDir::new().unwrap();
+
+    autodev(&home)
+        .args(["repo", "add", "https://github.com/org/myrepo"])
+        .assert()
+        .success();
+
+    autodev(&home)
+        .args(["repo", "remove", "org/myrepo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("removed: org/myrepo"));
+
+    autodev(&home)
+        .args(["repo", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No repositories registered"));
+}
+
+// ═══════════════════════════════════════════════
+// 3. queue
+// ═══════════════════════════════════════════════
+
+#[test]
+fn queue_list_empty() {
+    let home = TempDir::new().unwrap();
+
+    autodev(&home)
+        .args(["repo", "add", "https://github.com/org/myrepo"])
+        .assert()
+        .success();
+
+    autodev(&home)
+        .args(["queue", "list", "org/myrepo"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Issue Queue:")
+                .and(predicate::str::contains("PR Queue:"))
+                .and(predicate::str::contains("Merge Queue:")),
+        );
+}
+
+#[test]
+fn queue_retry_nonexistent() {
+    let home = TempDir::new().unwrap();
+
+    autodev(&home)
+        .args(["queue", "retry", "nonexistent-id"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("not found"));
+}
+
+// ═══════════════════════════════════════════════
+// 4. logs
+// ═══════════════════════════════════════════════
+
+#[test]
+fn logs_empty() {
+    let home = TempDir::new().unwrap();
+
+    autodev(&home)
+        .arg("logs")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No logs found"));
+}
+
+// ═══════════════════════════════════════════════
+// 5. 잘못된 명령어
+// ═══════════════════════════════════════════════
+
+#[test]
+fn unknown_command_fails() {
+    let home = TempDir::new().unwrap();
+    autodev(&home)
+        .arg("nonexistent")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn no_args_shows_help() {
+    let home = TempDir::new().unwrap();
+    autodev(&home)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Usage"));
+}
+
+// ═══════════════════════════════════════════════
+// 6. status after repo add (integration)
+// ═══════════════════════════════════════════════
+
+#[test]
+fn status_shows_repo_after_add() {
+    let home = TempDir::new().unwrap();
+
+    autodev(&home)
+        .args(["repo", "add", "https://github.com/org/myrepo"])
+        .assert()
+        .success();
+
+    autodev(&home)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("org/myrepo")
+                .and(predicate::str::contains("issues:0"))
+                .and(predicate::str::contains("prs:0")),
+        );
+}

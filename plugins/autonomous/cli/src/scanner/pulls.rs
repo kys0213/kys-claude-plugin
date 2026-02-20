@@ -34,29 +34,29 @@ pub async fn scan(
     repo_name: &str,
     ignore_authors: &[String],
 ) -> Result<()> {
-    let token = std::env::var("GITHUB_TOKEN")
-        .or_else(|_| get_gh_token())
-        .map_err(|_| anyhow::anyhow!("GITHUB_TOKEN not set"))?;
-
     let since = db.cursor_get_last_seen(repo_id, "pulls")?;
-    let url = format!(
-        "https://api.github.com/repos/{repo_name}/pulls?state=open&sort=updated&direction=desc&per_page=30"
-    );
 
-    let client = reqwest::Client::new();
-    let response = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("User-Agent", "autonomous-cli")
-        .header("Accept", "application/vnd.github.v3+json")
-        .send()
+    let args = vec![
+        "api".to_string(),
+        format!("repos/{repo_name}/pulls"),
+        "--paginate".to_string(),
+        "-f".to_string(), "state=open".to_string(),
+        "-f".to_string(), "sort=updated".to_string(),
+        "-f".to_string(), "direction=desc".to_string(),
+        "-f".to_string(), "per_page=30".to_string(),
+    ];
+
+    let output = tokio::process::Command::new("gh")
+        .args(&args)
+        .output()
         .await?;
 
-    if !response.status().is_success() {
-        anyhow::bail!("GitHub API error: {}", response.status());
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("gh api error: {stderr}");
     }
 
-    let prs: Vec<GitHubPR> = response.json().await?;
+    let prs: Vec<GitHubPR> = serde_json::from_slice(&output.stdout)?;
     let mut latest_updated = since;
 
     for pr in &prs {
@@ -101,15 +101,4 @@ pub async fn scan(
     }
 
     Ok(())
-}
-
-fn get_gh_token() -> Result<String, anyhow::Error> {
-    let output = std::process::Command::new("gh")
-        .args(["auth", "token"])
-        .output()?;
-    if output.status.success() {
-        Ok(String::from_utf8(output.stdout)?.trim().to_string())
-    } else {
-        anyhow::bail!("gh auth token failed")
-    }
 }

@@ -15,17 +15,17 @@ pub async fn start(home: &Path) -> Result<()> {
         bail!("daemon is already running (pid: {})", pid::read_pid(home).unwrap_or(0));
     }
 
-    info!("starting autonomous daemon...");
+    info!("starting autodev daemon...");
 
     // PID 기록
     pid::write_pid(home)?;
 
     // DB 열기
-    let db_path = home.join("autonomous.db");
+    let db_path = home.join("autodev.db");
     let db = Database::open(&db_path)?;
     db.initialize()?;
 
-    println!("autonomous daemon started (pid: {})", std::process::id());
+    println!("autodev daemon started (pid: {})", std::process::id());
 
     // 메인 루프: scanner + consumer (inline - rusqlite is not Sync)
     tokio::select! {
@@ -60,6 +60,6 @@ pub fn stop(home: &Path) -> Result<()> {
         .status()?;
 
     pid::remove_pid(home);
-    println!("autonomous daemon stopped (pid: {pid})");
+    println!("autodev daemon stopped (pid: {pid})");
     Ok(())
 }
