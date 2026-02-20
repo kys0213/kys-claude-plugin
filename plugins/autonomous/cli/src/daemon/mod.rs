@@ -6,6 +6,7 @@ use anyhow::{bail, Result};
 use tracing::info;
 
 use crate::queue::Database;
+use crate::queue::repository::QueueAdmin;
 use crate::scanner;
 use crate::consumer;
 
@@ -24,6 +25,20 @@ pub async fn start(home: &Path) -> Result<()> {
     let db_path = home.join("autodev.db");
     let db = Database::open(&db_path)?;
     db.initialize()?;
+
+    // 시작 시 stuck 상태 복구: 이전 데몬이 비정상 종료되어 중간 상태에 남은 항목 복구
+    match db.queue_reset_stuck() {
+        Ok(n) if n > 0 => info!("recovered {n} stuck items → pending"),
+        Err(e) => tracing::error!("stuck recovery failed: {e}"),
+        _ => {}
+    }
+
+    // failed 항목 자동 재시도 (최대 3회)
+    match db.queue_auto_retry_failed(3) {
+        Ok(n) if n > 0 => info!("auto-retrying {n} failed items"),
+        Err(e) => tracing::error!("auto-retry failed: {e}"),
+        _ => {}
+    }
 
     println!("autodev daemon started (pid: {})", std::process::id());
 

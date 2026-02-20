@@ -41,6 +41,7 @@ pub async fn scan(
         "api".to_string(),
         format!("repos/{repo_name}/pulls"),
         "--paginate".to_string(),
+        "--method".to_string(), "GET".to_string(),
         "-f".to_string(), "state=open".to_string(),
         "-f".to_string(), "sort=updated".to_string(),
         "-f".to_string(), "direction=desc".to_string(),
