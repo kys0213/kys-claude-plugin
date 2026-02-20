@@ -17,6 +17,18 @@ autonomous 데몬의 시작, 중지, 상태를 제어합니다.
 
 ## 실행
 
+### Step 0: CLI 버전 확인
+
+명령 실행 전 `ensure-binary.sh`로 바이너리가 최신인지 확인합니다:
+
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh
+```
+
+실패 시 바이너리 설치/업데이트를 안내하고 중단합니다.
+
+### Step 1: 명령 실행
+
 인자에 따라 적절한 `autonomous` CLI 명령을 실행하세요:
 
 1. 인자가 `start`인 경우:

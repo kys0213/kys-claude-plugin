@@ -85,46 +85,22 @@ fi
 
 설치 확인이 완료되지 않으면 다음 단계로 진행하지 마세요.
 
-### Step 3: CLI 설치 확인
+### Step 3: CLI 설치 및 버전 확인
 
-`autonomous` 바이너리가 설치되어 있는지 확인합니다:
-
-```bash
-command -v autonomous
-```
-
-설치되어 있지 않으면 플러그인의 `cli/` 디렉토리에서 빌드합니다:
-
-1. Rust 툴체인 확인:
+플러그인의 `ensure-binary.sh` 스크립트로 `autonomous` CLI 바이너리의 설치 및 버전을 확인합니다.
+이 스크립트는 `plugin.json` 버전과 설치된 바이너리 버전을 비교하여 신규 설치, 업데이트, 스킵을 자동으로 결정합니다.
 
 ```bash
-command -v cargo
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh
 ```
 
-`cargo`가 없으면 사용자에게 [Rust 설치](https://rustup.rs/)를 안내하고 중단합니다.
+- **바이너리 미설치** → 자동 빌드 + `~/.local/bin/autonomous`에 설치
+- **설치 버전 < 플러그인 버전** → 재빌드 + 설치
+- **설치 버전 >= 플러그인 버전** → 스킵
 
-2. CLI 빌드:
-
-autonomous 플러그인의 `cli/` 디렉토리 경로를 찾아 빌드합니다.
-
-```bash
-cargo build --release --manifest-path <plugin-dir>/cli/Cargo.toml
-```
-
-3. 바이너리 설치:
-
-```bash
-mkdir -p ~/.local/bin
-cp <plugin-dir>/cli/target/release/autodev ~/.local/bin/autonomous
-```
-
-4. 설치 확인:
-
-```bash
-autonomous --help
-```
-
-실패 시 `~/.local/bin`이 `$PATH`에 포함되어 있는지 확인하고, 포함되어 있지 않으면 Step 10(셸 환경 등록)에서 함께 등록될 것임을 안내합니다. 이미 설치되어 있으면 이 단계를 건너뜁니다.
+실패 시:
+- `cargo`가 없으면 [Rust 설치](https://rustup.rs/)를 안내하고 중단합니다.
+- `~/.local/bin`이 `$PATH`에 포함되어 있지 않으면 Step 10(셸 환경 등록)에서 함께 등록될 것임을 안내합니다.
 
 ### Step 4: 감시 대상 설정
 
