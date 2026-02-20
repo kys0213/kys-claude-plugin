@@ -23,14 +23,9 @@ PR 타이틀은 반드시 Conventional Commits 형식을 따릅니다:
 
 ### Scope (권장)
 
-이 프로젝트의 주요 scope:
-
-- `develop-workflow` - Develop Workflow 플러그인 (설계/리뷰/구현 통합)
-- `external-llm` - External LLM 플러그인
-- `suggest-workflow` - Suggest Workflow 플러그인
-- `git-utils` - Git Utils 플러그인
-- `hooks` - Hook 스크립트
-- `scripts` - 셸 스크립트
+- **플러그인 변경**: `plugins/` 하위 디렉토리 이름을 scope로 사용
+  - 예: `plugins/develop-workflow/` → `feat(develop-workflow): ...`
+- **플러그인 외 변경**: `hooks`, `scripts`, `common` 등 해당 디렉토리 이름을 scope로 사용
 
 ### Description (필수)
 

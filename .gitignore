@@ -29,5 +29,6 @@ bumpversion
 tmp.json
 tools/bumpversion/bumpversion
 
-# Rust build artifacts (suggest-workflow)
+# Rust build artifacts
 plugins/suggest-workflow/cli/target/
+plugins/autonomous/cli/target/

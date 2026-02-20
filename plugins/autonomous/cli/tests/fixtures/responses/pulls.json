@@ -1,0 +1,20 @@
+[
+  {
+    "number": 100,
+    "title": "feat: add user settings page",
+    "body": "Implements user settings",
+    "user": {"login": "alice"},
+    "head": {"ref": "feat/user-settings"},
+    "base": {"ref": "main"},
+    "updated_at": "2025-01-15T14:00:00Z"
+  },
+  {
+    "number": 101,
+    "title": "chore: bump dependencies",
+    "body": null,
+    "user": {"login": "renovate"},
+    "head": {"ref": "renovate/deps"},
+    "base": {"ref": "main"},
+    "updated_at": "2025-01-15T15:00:00Z"
+  }
+]

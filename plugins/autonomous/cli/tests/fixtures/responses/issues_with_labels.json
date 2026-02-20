@@ -1,0 +1,20 @@
+[
+  {
+    "number": 50,
+    "title": "Bug with label",
+    "body": "Has the bug label",
+    "labels": [{"name": "bug"}, {"name": "critical"}],
+    "user": {"login": "alice"},
+    "updated_at": "2025-01-15T10:00:00Z",
+    "pull_request": null
+  },
+  {
+    "number": 51,
+    "title": "Feature without matching label",
+    "body": "No matching label",
+    "labels": [{"name": "enhancement"}],
+    "user": {"login": "bob"},
+    "updated_at": "2025-01-15T11:00:00Z",
+    "pull_request": null
+  }
+]
