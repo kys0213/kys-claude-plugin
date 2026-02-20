@@ -1,4 +1,9 @@
 {
+  "agents": [
+    "./agents/issue-analyzer.md",
+    "./agents/pr-reviewer.md",
+    "./agents/conflict-resolver.md"
+  ],
   "author": {
     "name": "kys0213"
   },
@@ -8,12 +13,7 @@
     "./commands/auto-config.md",
     "./commands/auto-dashboard.md"
   ],
-  "agents": [
-    "./agents/issue-analyzer.md",
-    "./agents/pr-reviewer.md",
-    "./agents/conflict-resolver.md"
-  ],
   "description": "이벤트 기반 자율 개발 오케스트레이터 - Issue 분석, PR 리뷰, 자동 머지",
   "name": "autonomous",
-  "version": "0.1.0"
+  "version": "0.2.0"
 }
