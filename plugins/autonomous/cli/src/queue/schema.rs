@@ -51,6 +51,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
             branch_name     TEXT,
             pr_number       INTEGER,
             error_message   TEXT,
+            retry_count     INTEGER NOT NULL DEFAULT 0,
             created_at      TEXT NOT NULL,
             updated_at      TEXT NOT NULL
         );
@@ -68,6 +69,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
             status          TEXT NOT NULL DEFAULT 'pending',
             worker_id       TEXT,
             error_message   TEXT,
+            retry_count     INTEGER NOT NULL DEFAULT 0,
             created_at      TEXT NOT NULL,
             updated_at      TEXT NOT NULL
         );
@@ -83,6 +85,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
             conflict_files  TEXT,
             worker_id       TEXT,
             error_message   TEXT,
+            retry_count     INTEGER NOT NULL DEFAULT 0,
             created_at      TEXT NOT NULL,
             updated_at      TEXT NOT NULL
         );

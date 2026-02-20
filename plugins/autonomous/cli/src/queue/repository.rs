@@ -62,6 +62,8 @@ pub trait ConsumerLogRepository {
 pub trait QueueAdmin {
     fn queue_retry(&self, id: &str) -> Result<bool>;
     fn queue_clear(&self, repo_name: &str) -> Result<()>;
+    fn queue_reset_stuck(&self) -> Result<u64>;
+    fn queue_auto_retry_failed(&self, max_retries: i64) -> Result<u64>;
 }
 
 // ─── SQLite implementations ───
@@ -190,13 +192,24 @@ impl RepoRepository for Database {
 
         conn.execute(
             "UPDATE repo_configs SET \
-             scan_interval_secs = ?2, issue_concurrency = ?3, pr_concurrency = ?4, merge_concurrency = ?5, \
-             model = ?6, issue_workflow = ?7, pr_workflow = ?8, workspace_strategy = ?9 \
+             scan_interval_secs = ?2, scan_targets = ?3, issue_concurrency = ?4, pr_concurrency = ?5, \
+             merge_concurrency = ?6, model = ?7, issue_workflow = ?8, pr_workflow = ?9, \
+             filter_labels = ?10, ignore_authors = ?11, workspace_strategy = ?12, gh_host = ?13 \
              WHERE repo_id = (SELECT id FROM repositories WHERE name = ?1)",
             rusqlite::params![
-                name, config.scan_interval_secs, config.issue_concurrency,
-                config.pr_concurrency, config.merge_concurrency, config.model,
-                config.issue_workflow, config.pr_workflow, config.workspace_strategy,
+                name,
+                config.scan_interval_secs,
+                serde_json::to_string(&config.scan_targets)?,
+                config.issue_concurrency,
+                config.pr_concurrency,
+                config.merge_concurrency,
+                config.model,
+                config.issue_workflow,
+                config.pr_workflow,
+                config.filter_labels.as_ref().map(|l| serde_json::to_string(l).unwrap_or_default()),
+                serde_json::to_string(&config.ignore_authors)?,
+                config.workspace_strategy,
+                config.gh_host,
             ],
         )?;
         conn.execute(
@@ -650,5 +663,52 @@ impl QueueAdmin for Database {
             )?;
         }
         Ok(())
+    }
+
+    fn queue_reset_stuck(&self) -> Result<u64> {
+        let now = Utc::now().to_rfc3339();
+        let conn = self.conn();
+        let mut total = 0u64;
+
+        let stuck_states = [
+            ("issue_queue", &["analyzing", "processing", "ready"] as &[&str]),
+            ("pr_queue", &["reviewing"]),
+            ("merge_queue", &["merging", "conflict"]),
+        ];
+
+        for (table, states) in &stuck_states {
+            let placeholders: Vec<String> = states.iter().map(|s| format!("'{s}'")).collect();
+            let in_clause = placeholders.join(",");
+            let affected = conn.execute(
+                &format!(
+                    "UPDATE {table} SET status = 'pending', worker_id = NULL, error_message = NULL, updated_at = ?1 \
+                     WHERE status IN ({in_clause})"
+                ),
+                rusqlite::params![now],
+            )?;
+            total += affected as u64;
+        }
+
+        Ok(total)
+    }
+
+    fn queue_auto_retry_failed(&self, max_retries: i64) -> Result<u64> {
+        let now = Utc::now().to_rfc3339();
+        let conn = self.conn();
+        let mut total = 0u64;
+
+        for table in &["issue_queue", "pr_queue", "merge_queue"] {
+            let affected = conn.execute(
+                &format!(
+                    "UPDATE {table} SET status = 'pending', error_message = NULL, worker_id = NULL, \
+                     retry_count = retry_count + 1, updated_at = ?1 \
+                     WHERE status = 'failed' AND retry_count < ?2"
+                ),
+                rusqlite::params![now, max_retries],
+            )?;
+            total += affected as u64;
+        }
+
+        Ok(total)
     }
 }
