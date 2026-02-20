@@ -12,16 +12,6 @@ pub fn autonomous_home() -> PathBuf {
     PathBuf::from(home)
 }
 
-/// PID 파일 경로
-pub fn pid_path() -> PathBuf {
-    autonomous_home().join("daemon.pid")
-}
-
-/// Unix socket 경로
-pub fn socket_path() -> PathBuf {
-    autonomous_home().join("daemon.sock")
-}
-
 /// 워크스페이스 기본 경로
 pub fn workspaces_path() -> PathBuf {
     autonomous_home().join("workspaces")

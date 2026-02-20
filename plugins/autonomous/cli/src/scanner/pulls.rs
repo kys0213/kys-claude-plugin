@@ -1,8 +1,8 @@
 use anyhow::Result;
-use chrono::Utc;
 use serde::Deserialize;
-use uuid::Uuid;
 
+use crate::queue::models::*;
+use crate::queue::repository::*;
 use crate::queue::Database;
 
 #[derive(Debug, Deserialize)]
@@ -38,7 +38,7 @@ pub async fn scan(
         .or_else(|_| get_gh_token())
         .map_err(|_| anyhow::anyhow!("GITHUB_TOKEN not set"))?;
 
-    let since = get_last_seen(db, repo_id)?;
+    let since = db.cursor_get_last_seen(repo_id, "pulls")?;
     let url = format!(
         "https://api.github.com/repos/{repo_name}/pulls?state=open&sort=updated&direction=desc&per_page=30"
     );
@@ -57,8 +57,6 @@ pub async fn scan(
     }
 
     let prs: Vec<GitHubPR> = response.json().await?;
-    let conn = db.conn();
-    let now = Utc::now().to_rfc3339();
     let mut latest_updated = since;
 
     for pr in &prs {
@@ -75,31 +73,20 @@ pub async fn scan(
         }
 
         // 이미 큐에 있는지 확인
-        let exists: bool = conn.query_row(
-            "SELECT COUNT(*) > 0 FROM pr_queue WHERE repo_id = ?1 AND github_number = ?2",
-            rusqlite::params![repo_id, pr.number],
-            |row| row.get(0),
-        )?;
+        let exists = db.pr_exists(repo_id, pr.number)?;
 
         if !exists {
-            let id = Uuid::new_v4().to_string();
+            let item = NewPrItem {
+                repo_id: repo_id.to_string(),
+                github_number: pr.number,
+                title: pr.title.clone(),
+                body: pr.body.clone(),
+                author: pr.user.login.clone(),
+                head_branch: pr.head.ref_name.clone(),
+                base_branch: pr.base.ref_name.clone(),
+            };
 
-            conn.execute(
-                "INSERT INTO pr_queue (id, repo_id, github_number, title, body, author, head_branch, base_branch, status, created_at, updated_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, ?9)",
-                rusqlite::params![
-                    id,
-                    repo_id,
-                    pr.number,
-                    pr.title,
-                    pr.body,
-                    pr.user.login,
-                    pr.head.ref_name,
-                    pr.base.ref_name,
-                    now,
-                ],
-            )?;
-
+            db.pr_insert(&item)?;
             tracing::info!("queued PR #{}: {}", pr.number, pr.title);
         }
 
@@ -110,22 +97,10 @@ pub async fn scan(
 
     // 스캔 커서 업데이트
     if let Some(last_seen) = latest_updated {
-        conn.execute(
-            "INSERT OR REPLACE INTO scan_cursors (repo_id, target, last_seen, last_scan) VALUES (?1, 'pulls', ?2, ?3)",
-            rusqlite::params![repo_id, last_seen, now],
-        )?;
+        db.cursor_upsert(repo_id, "pulls", &last_seen)?;
     }
 
     Ok(())
-}
-
-fn get_last_seen(db: &Database, repo_id: &str) -> Result<Option<String>> {
-    let result = db.conn().query_row(
-        "SELECT last_seen FROM scan_cursors WHERE repo_id = ?1 AND target = 'pulls'",
-        rusqlite::params![repo_id],
-        |row| row.get(0),
-    );
-    Ok(result.ok())
 }
 
 fn get_gh_token() -> Result<String, anyhow::Error> {

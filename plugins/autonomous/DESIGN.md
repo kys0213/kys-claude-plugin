@@ -39,33 +39,31 @@ plugins/autonomous/
 │   ├── pr-reviewer.md           # PR 코드 리뷰 (multi-LLM)
 │   └── conflict-resolver.md     # 머지 충돌 해결
 │
-├── cli/                         # Rust 단일 바이너리 (daemon + client)
+├── cli/                         # Rust 단일 바이너리 (daemon + CLI)
 │   ├── Cargo.toml
 │   └── src/
 │       ├── main.rs              # CLI 진입점 (clap subcommands)
-│       ├── lib.rs               # 모듈 export
 │       ├── daemon/
 │       │   ├── mod.rs           # 데몬 시작/중지 (단일 인스턴스 보장)
-│       │   ├── pid.rs           # PID 파일 관리 (~/.autonomous/daemon.pid)
-│       │   └── socket.rs        # Unix domain socket IPC 서버
+│       │   └── pid.rs           # PID 파일 관리 (~/.autonomous/daemon.pid)
 │       ├── client/
-│       │   └── mod.rs           # CLI → daemon IPC 클라이언트
+│       │   └── mod.rs           # CLI 조회/관리 (SQLite 직접 접근)
 │       ├── scanner/
 │       │   ├── mod.rs           # GitHub API 스캐너
 │       │   ├── issues.rs        # 이슈 감지
 │       │   └── pulls.rs         # PR 감지
 │       ├── queue/
-│       │   ├── mod.rs           # 큐 매니저
+│       │   ├── mod.rs           # Database 구조체 + re-exports
 │       │   ├── schema.rs        # SQLite 스키마 초기화
-│       │   └── models.rs        # 큐 아이템 모델
+│       │   ├── models.rs        # 데이터 모델 (입출력 타입 포함)
+│       │   └── repository.rs    # Repository trait 정의 + SQLite 구현
 │       ├── consumer/
 │       │   ├── mod.rs           # Consumer 매니저 (워커 풀)
 │       │   ├── issue.rs         # Issue Consumer
 │       │   ├── pr.rs            # PR Consumer
 │       │   └── merge.rs         # Merge Consumer
 │       ├── workspace/
-│       │   ├── mod.rs           # 워크스페이스 매니저
-│       │   └── worktree.rs      # git worktree 관리
+│       │   └── mod.rs           # 워크스페이스 매니저 (git worktree)
 │       ├── session/
 │       │   ├── mod.rs           # claude -p 세션 실행
 │       │   └── output.rs        # 세션 출력 파싱
@@ -252,37 +250,38 @@ CREATE INDEX idx_consumer_logs_repo ON consumer_logs(repo_id, started_at);
 
 ---
 
-## 5. CLI 아키텍처 (단일 바이너리, daemon + client)
+## 5. CLI 아키텍처 (단일 바이너리, daemon + CLI)
 
 ### 동작 모델
 
 ```
-단일 바이너리 `autonomous` 가 daemon 모드와 client 모드를 모두 수행:
+단일 바이너리 `autonomous` 가 daemon 모드와 CLI 모드를 모두 수행:
 
-  autonomous start     → daemon 모드로 fork (단일 인스턴스)
-  autonomous status    → client 모드: IPC로 daemon에 질의
-  autonomous dashboard → client 모드: SQLite 직접 읽기 + TUI 표시
+  autonomous start     → daemon 모드 (단일 인스턴스, 포그라운드)
+  autonomous stop      → PID 파일로 SIGTERM 전송
+  autonomous status    → SQLite 직접 읽기
+  autonomous dashboard → SQLite 직접 읽기 + TUI 표시
 ```
 
-### IPC (프로세스 간 통신)
+### 공유 상태 (소켓 없음)
 
 ```
 ~/.autonomous/
-├── autonomous.db       # SQLite (daemon + client 공유)
-├── daemon.pid          # PID 파일 (단일 인스턴스 보장)
-└── daemon.sock         # Unix domain socket (제어 명령용)
+├── autonomous.db       # SQLite WAL (daemon + CLI 공유, 동시 읽기 허용)
+└── daemon.pid          # PID 파일 (단일 인스턴스 보장 + stop 시 kill)
 ```
 
-- **읽기 전용 (status, queue list, logs, dashboard)**: SQLite 직접 읽기 (IPC 불필요)
-- **제어 명령 (start, stop, retry)**: Unix domain socket으로 daemon에 전달
-- **데이터 변경 (repo add/remove, config)**: SQLite 직접 쓰기 → daemon이 polling으로 감지
+- **모든 조회 (status, queue, logs, dashboard)**: SQLite 직접 읽기
+- **모든 데이터 변경 (repo add/remove, config, retry, clear)**: SQLite 직접 쓰기
+- **데몬 중지 (stop)**: PID 파일 읽기 → `kill <pid>` (SIGTERM)
+- **소켓 불필요**: SQLite WAL 모드가 reader/writer 동시 접근을 보장
 
 ### 서브커맨드
 
 ```
-# 데몬 제어 (→ IPC)
-autonomous start              # 데몬 시작 (백그라운드 fork, 단일 인스턴스)
-autonomous stop               # 데몬 중지
+# 데몬 제어
+autonomous start              # 데몬 시작 (포그라운드, 단일 인스턴스)
+autonomous stop               # 데몬 중지 (PID → SIGTERM)
 autonomous restart             # 데몬 재시작
 
 # 상태 조회 (→ SQLite 직접 읽기)
@@ -295,9 +294,9 @@ autonomous repo list          # 등록된 레포 목록
 autonomous repo config <name> # 레포 설정 변경
 autonomous repo remove <name> # 레포 제거
 
-# 큐 관리 (→ SQLite 읽기 + IPC)
+# 큐 관리 (→ SQLite 직접 읽기/쓰기)
 autonomous queue list <repo>  # 큐 상태 확인
-autonomous queue retry <id>   # 실패 항목 재시도 (→ IPC로 daemon에 통지)
+autonomous queue retry <id>   # 실패 항목 재시도
 autonomous queue clear <repo> # 큐 비우기
 
 # 로그 조회 (→ SQLite 직접 읽기)
@@ -327,6 +326,105 @@ auto-d                    # TUI 대시보드
 auto-q org/my-repo        # 큐 확인
 auto start                # 데몬 시작
 auto stop                 # 데몬 중지
+```
+
+---
+
+## 5.1. Repository 패턴
+
+DB 접근 로직을 trait으로 추상화하여 consumer/scanner/client에서 raw SQL을 직접 사용하지 않도록 분리.
+
+### trait 정의 (`queue/repository.rs`)
+
+```rust
+/// 레포지토리 관리
+pub trait RepoRepository {
+    fn add(&self, url: &str, name: &str, config: &RepoConfig) -> Result<String>;
+    fn remove(&self, name: &str) -> Result<()>;
+    fn list_with_config(&self) -> Result<Vec<RepoWithConfig>>;
+    fn find_enabled_with_config(&self) -> Result<Vec<EnabledRepo>>;
+    fn update_config(&self, name: &str, config: &RepoConfig) -> Result<()>;
+    fn get_config(&self, name: &str) -> Result<String>;
+    fn count(&self) -> Result<i64>;
+    fn status_summary(&self) -> Result<Vec<RepoStatusRow>>;
+}
+
+/// 이슈 큐
+pub trait IssueQueueRepository {
+    fn insert(&self, item: &NewIssueItem) -> Result<String>;
+    fn exists(&self, repo_id: &str, github_number: i64) -> Result<bool>;
+    fn find_pending(&self, limit: u32) -> Result<Vec<PendingIssue>>;
+    fn update_status(&self, id: &str, status: &str, fields: StatusFields) -> Result<()>;
+    fn mark_failed(&self, id: &str, error: &str) -> Result<()>;
+    fn count_active(&self) -> Result<i64>;
+}
+
+/// PR 큐
+pub trait PrQueueRepository {
+    fn insert(&self, item: &NewPrItem) -> Result<String>;
+    fn exists(&self, repo_id: &str, github_number: i64) -> Result<bool>;
+    fn find_pending(&self, limit: u32) -> Result<Vec<PendingPr>>;
+    fn update_status(&self, id: &str, status: &str, fields: StatusFields) -> Result<()>;
+    fn mark_failed(&self, id: &str, error: &str) -> Result<()>;
+    fn count_active(&self) -> Result<i64>;
+}
+
+/// 머지 큐
+pub trait MergeQueueRepository {
+    fn insert(&self, item: &NewMergeItem) -> Result<String>;
+    fn find_pending(&self, limit: u32) -> Result<Vec<PendingMerge>>;
+    fn update_status(&self, id: &str, status: &str, fields: StatusFields) -> Result<()>;
+    fn mark_failed(&self, id: &str, error: &str) -> Result<()>;
+    fn count_active(&self) -> Result<i64>;
+}
+
+/// 스캔 커서
+pub trait ScanCursorRepository {
+    fn get_last_seen(&self, repo_id: &str, target: &str) -> Result<Option<String>>;
+    fn upsert(&self, repo_id: &str, target: &str, last_seen: &str) -> Result<()>;
+    fn should_scan(&self, repo_id: &str, interval_secs: i64) -> Result<bool>;
+}
+
+/// Consumer 실행 로그
+pub trait ConsumerLogRepository {
+    fn insert(&self, log: &NewConsumerLog) -> Result<()>;
+    fn recent(&self, repo: Option<&str>, limit: usize) -> Result<Vec<LogEntry>>;
+}
+```
+
+### 설계 원칙
+
+- **Database 구조체가 모든 trait을 구현** (`impl RepoRepository for Database { ... }`)
+- **Consumer/Scanner/Client는 trait 메서드만 호출** → SQL 로직에 의존하지 않음
+- **입력용/출력용 모델 분리**: `NewIssueItem` (insert용) vs `PendingIssue` (query용) vs `IssueQueueItem` (full model)
+- **in-memory SQLite (`:memory:`)로 블랙박스 테스트 가능** → mock 불필요
+
+---
+
+## 5.2. 테스트 전략 (블랙박스)
+
+in-memory SQLite DB를 사용하여 repository 레이어를 블랙박스 테스트.
+
+### 테스트 카테고리
+
+| 카테고리 | 시나리오 |
+|---------|---------|
+| **레포 CRUD** | 등록/중복URL/이름추출/삭제/설정변경 |
+| **이슈 큐** | 삽입/중복감지/상태전이(pending→analyzing→ready→done)/실패처리 |
+| **PR 큐** | 삽입/중복감지/상태전이(pending→reviewing→review_done)/실패처리 |
+| **머지 큐** | 삽입/상태전이(pending→merging→done\|conflict)/충돌→재시도 |
+| **스캔 커서** | 초기스캔(이력없음)/간격미달시skip/간격초과시scan/커서업데이트 |
+| **Consumer 로그** | 삽입/조회(레포필터)/limit제한/시간순정렬 |
+| **경계값** | 빈큐에서find_pending/limit=0/초장문title/NULL body/음수github_number |
+| **동시성** | count_active 정확도/pending+active 혼재 시 조회 |
+| **재시도** | failed→pending 전환/done항목은retry불가/존재하지않는ID |
+| **큐 비우기** | done+failed만 삭제/pending+active는 유지 |
+
+### 테스트 파일 위치
+
+```
+cli/tests/
+└── repository_tests.rs    # 통합 테스트 (in-memory SQLite)
 ```
 
 ---
@@ -641,7 +739,7 @@ cp target/release/autonomous ~/.local/bin/
 ### 보안 고려
 - GitHub token은 환경변수(`GITHUB_TOKEN`) 또는 `gh auth` 활용
 - `claude -p`의 `--dangerously-skip-permissions`는 사용하지 않음
-- Dashboard는 localhost만 바인딩 (0.0.0.0 아님)
+- Dashboard는 TUI (터미널 내) → 네트워크 노출 없음
 
 ---
 

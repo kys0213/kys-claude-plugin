@@ -1,8 +1,8 @@
 use anyhow::Result;
-use chrono::Utc;
 use serde::Deserialize;
-use uuid::Uuid;
 
+use crate::queue::models::*;
+use crate::queue::repository::*;
 use crate::queue::Database;
 
 #[derive(Debug, Deserialize)]
@@ -39,7 +39,7 @@ pub async fn scan(
         .map_err(|_| anyhow::anyhow!("GITHUB_TOKEN not set and gh auth not available"))?;
 
     // 마지막 스캔 시점 이후의 이슈만
-    let since = get_last_seen(db, repo_id, "issues")?;
+    let since = db.cursor_get_last_seen(repo_id, "issues")?;
     let url = format!(
         "https://api.github.com/repos/{repo_name}/issues?state=open&sort=updated&direction=desc&per_page=30{}",
         since.as_ref().map(|s| format!("&since={s}")).unwrap_or_default()
@@ -59,8 +59,6 @@ pub async fn scan(
     }
 
     let issues: Vec<GitHubIssue> = response.json().await?;
-    let conn = db.conn();
-    let now = Utc::now().to_rfc3339();
     let mut latest_updated = since;
 
     for issue in &issues {
@@ -83,33 +81,23 @@ pub async fn scan(
         }
 
         // 이미 큐에 있는지 확인
-        let exists: bool = conn.query_row(
-            "SELECT COUNT(*) > 0 FROM issue_queue WHERE repo_id = ?1 AND github_number = ?2",
-            rusqlite::params![repo_id, issue.number],
-            |row| row.get(0),
-        )?;
+        let exists = db.issue_exists(repo_id, issue.number)?;
 
         if !exists {
-            let id = Uuid::new_v4().to_string();
             let labels_json = serde_json::to_string(
                 &issue.labels.iter().map(|l| &l.name).collect::<Vec<_>>(),
             )?;
 
-            conn.execute(
-                "INSERT INTO issue_queue (id, repo_id, github_number, title, body, labels, author, status, created_at, updated_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8, ?8)",
-                rusqlite::params![
-                    id,
-                    repo_id,
-                    issue.number,
-                    issue.title,
-                    issue.body,
-                    labels_json,
-                    issue.user.login,
-                    now,
-                ],
-            )?;
+            let item = NewIssueItem {
+                repo_id: repo_id.to_string(),
+                github_number: issue.number,
+                title: issue.title.clone(),
+                body: issue.body.clone(),
+                labels: labels_json,
+                author: issue.user.login.clone(),
+            };
 
+            db.issue_insert(&item)?;
             tracing::info!("queued issue #{}: {}", issue.number, issue.title);
         }
 
@@ -121,22 +109,10 @@ pub async fn scan(
 
     // 스캔 커서 업데이트
     if let Some(last_seen) = latest_updated {
-        conn.execute(
-            "INSERT OR REPLACE INTO scan_cursors (repo_id, target, last_seen, last_scan) VALUES (?1, 'issues', ?2, ?3)",
-            rusqlite::params![repo_id, last_seen, now],
-        )?;
+        db.cursor_upsert(repo_id, "issues", &last_seen)?;
     }
 
     Ok(())
-}
-
-fn get_last_seen(db: &Database, repo_id: &str, target: &str) -> Result<Option<String>> {
-    let result = db.conn().query_row(
-        "SELECT last_seen FROM scan_cursors WHERE repo_id = ?1 AND target = ?2",
-        rusqlite::params![repo_id, target],
-        |row| row.get(0),
-    );
-    Ok(result.ok())
 }
 
 /// `gh auth token`으로 토큰 획득
