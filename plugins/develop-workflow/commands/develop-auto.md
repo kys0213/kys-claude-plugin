@@ -10,8 +10,8 @@ allowed-tools: ["Task", "Glob", "Grep", "Read", "Write", "Edit", "Bash"]
 외부에서 제공된 분석 리포트를 요구사항으로 사용하며, 모든 판단을 에이전트가 자율적으로 수행합니다.
 
 ```
-Phase 1: DESIGN ─→ Phase 2: REVIEW ─→ Phase 3: IMPLEMENT ─→ Phase 4: MERGE
- (자동 설계)         (자동 리뷰)         (자동 구현)             (자동 머지)
+Phase 1: DESIGN ─→ Phase 2: REVIEW ─→ Phase 3: IMPLEMENT ─→ Phase 4: PR
+ (자동 설계)         (자동 리뷰)         (자동 구현)            (PR 생성)
 ```
 
 > **대화형 워크플로우와의 차이**: `/develop`는 HITL(Human-in-the-Loop) 2곳에서 사용자 확인을 받습니다.
@@ -146,12 +146,13 @@ Consumer 분석 리포트
                       │ (자동)
                       ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Phase 4: MERGE (자동)                                       │
+│  Phase 4: PR (자동)                                          │
 │  ├── Multi-LLM 코드 리뷰 → clean pass 시 자동 승인          │
-│  ├── git-utils: /commit-and-pr                               │
-│  ├── git-utils: /check-ci                                    │
-│  └── git-utils: /merge-pr                                    │
+│  └── git-utils: /commit-and-pr                               │
 └─────────────────────────────────────────────────────────────┘
+    │
+    ▼ (워크플로우 종료 — 머지는 Consumer merge.rs가 별도 처리)
+```
 ```
 
 ---
@@ -413,18 +414,21 @@ Claude Code 공식 Agent Teams 기능을 활용합니다.
 
 ---
 
-## Phase 4: MERGE
+## Phase 4: PR
+
+> **머지는 하지 않습니다.** `/develop-auto`는 PR 생성까지만 수행합니다.
+> 머지는 Consumer의 `merge.rs`가 별도 큐로 처리합니다 (리뷰 승인 후).
 
 **진입 시 상태 기록**:
 ```json
 // Edit .develop-workflow/state.json → phase 업데이트
 {
-  "phase": "MERGE",
+  "phase": "PR",
   "updated_at": "{현재 시각}"
 }
 ```
 
-### Step 4.1: Multi-LLM 코드 리뷰 + 자동 승인
+### Step 4.1: Multi-LLM 코드 리뷰 + 자동 수정
 
 구현 결과물에 대해 `/multi-review`로 코드 리뷰 실행:
 
@@ -445,17 +449,15 @@ Claude Code 공식 Agent Teams 기능을 활용합니다.
     └── Blocking 0개 (clean pass)
         │
         ▼
-    ✅ gates.re_review_clean = true → 자동 승인 → Step 4.2로 진행
+    ✅ gates.re_review_clean = true → Step 4.2로 진행
 ```
-
-> **HITL 없음**: clean pass 시 자동으로 머지 프로세스를 진행합니다.
 
 ```json
 // Edit .develop-workflow/state.json → gate 업데이트
 { "gates": { "re_review_clean": true } }
 ```
 
-### Step 4.2: Commit & PR
+### Step 4.2: Commit & PR 생성
 
 git-utils 활용:
 
@@ -465,26 +467,9 @@ git-utils 활용:
 
 > **Gate 필수**: `re_review_clean`이 `true`여야 커밋/PR 생성이 가능합니다.
 
-### Step 4.3: CI 확인
+### Step 4.3: 워크플로우 완료
 
-```bash
-/check-ci
-```
-
-CI 실패 시:
-1. 실패 원인 분석
-2. 수정 후 재커밋
-3. 최대 3회 재시도
-4. 3회 실패 시 워크플로우 abort
-
-### Step 4.4: 최종 확인
-
-```bash
-/unresolved-reviews
-/merge-pr
-```
-
-### Step 4.5: 워크플로우 완료
+PR 생성 후 워크플로우를 완료합니다.
 
 ```json
 // Edit .develop-workflow/state.json → 완료 기록
@@ -493,6 +478,8 @@ CI 실패 시:
   "updated_at": "{현재 시각}"
 }
 ```
+
+> **이후 흐름**: Consumer가 PR 번호를 감지 → 리뷰 큐(`pr.rs`)로 등록 → 리뷰 승인 후 머지 큐(`merge.rs`)로 이동
 
 ---
 
@@ -542,7 +529,3 @@ develop:
 | Phase 3 | `/git-branch` | feature 브랜치 생성 |
 | Phase 3 | `/branch-status` | 브랜치 상태 확인 |
 | Phase 4 | `/commit-and-pr` | 커밋 + PR 생성 |
-| Phase 4 | `/check-ci` | CI 결과 확인 |
-| Phase 4 | `/unresolved-reviews` | 미해결 리뷰 확인 |
-| Phase 4 | `/merge-pr` | PR 머지 |
-| Phase 4 | `/git-resolve` | 충돌 해결 |
