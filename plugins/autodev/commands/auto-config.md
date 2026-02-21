@@ -15,13 +15,13 @@ allowed-tools: ["AskUserQuestion", "Bash"]
 인자가 있으면 해당 레포를, 없으면 등록된 레포 목록을 보여주고 선택:
 
 ```bash
-autonomous repo list
+autodev repo list
 ```
 
 ### Step 2: 현재 설정 표시
 
 ```bash
-autonomous repo config <name>
+autodev repo config <name>
 ```
 
 ### Step 3: 변경할 항목 선택
@@ -41,7 +41,7 @@ AskUserQuestion으로 변경할 항목을 선택:
 변경된 설정을 CLI에 전달:
 
 ```bash
-autonomous repo config <name> --update '<json>'
+autodev repo config <name> --update '<json>'
 ```
 
 변경 결과를 사용자에게 요약 출력합니다.
@@ -51,7 +51,7 @@ autonomous repo config <name> --update '<json>'
 1. 선택된 레포의 큐 현황을 표시합니다:
 
 ```bash
-autonomous queue list <name>
+autodev queue list <name>
 ```
 
 2. 활성 큐 아이템(pending/processing 상태)이 있으면 **경고**를 표시합니다.
@@ -63,7 +63,7 @@ autonomous queue list <name>
 4. 확인 시 삭제 실행:
 
 ```bash
-autonomous repo remove <name>
+autodev repo remove <name>
 ```
 
 5. 삭제 결과를 출력합니다.

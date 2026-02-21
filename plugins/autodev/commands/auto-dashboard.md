@@ -10,7 +10,7 @@ ratatui 기반 터미널 대시보드를 실행합니다.
 ## 실행
 
 ```bash
-autonomous dashboard
+autodev dashboard
 ```
 
 ## 키바인딩

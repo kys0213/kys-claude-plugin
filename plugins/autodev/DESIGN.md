@@ -5,7 +5,7 @@
 기존 플러그인 생태계(`develop-workflow`, `git-utils`, `external-llm`)를 이벤트 기반으로 자동 실행하는 오케스트레이션 레이어.
 
 ```
-autonomous (오케스트레이터)
+autodev (오케스트레이터)
   ├── develop-workflow  → /develop, /multi-review
   ├── git-utils         → /merge-pr, /commit-and-pr
   └── external-llm      → /invoke-codex, /invoke-gemini
@@ -24,7 +24,7 @@ autonomous (오케스트레이터)
 ## 2. 플러그인 디렉토리 구조
 
 ```
-plugins/autonomous/
+plugins/autodev/
 ├── .claude-plugin/
 │   └── plugin.json
 │
@@ -45,7 +45,7 @@ plugins/autonomous/
 │       ├── main.rs              # CLI 진입점 (clap subcommands)
 │       ├── daemon/
 │       │   ├── mod.rs           # 데몬 시작/중지 (단일 인스턴스 보장)
-│       │   └── pid.rs           # PID 파일 관리 (~/.autonomous/daemon.pid)
+│       │   └── pid.rs           # PID 파일 관리 (~/.autodev/daemon.pid)
 │       ├── client/
 │       │   └── mod.rs           # CLI 조회/관리 (SQLite 직접 접근)
 │       ├── scanner/
@@ -84,12 +84,12 @@ plugins/autonomous/
 
 ```toml
 [package]
-name = "autonomous"
+name = "autodev"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "autonomous"
+name = "autodev"
 path = "src/main.rs"
 
 [dependencies]
@@ -131,7 +131,7 @@ strip = true
 
 ## 4. SQLite 스키마
 
-DB 경로: `~/.autonomous/autonomous.db`
+DB 경로: `~/.autodev/autodev.db`
 
 ```sql
 -- 등록된 레포지토리
@@ -255,19 +255,19 @@ CREATE INDEX idx_consumer_logs_repo ON consumer_logs(repo_id, started_at);
 ### 동작 모델
 
 ```
-단일 바이너리 `autonomous` 가 daemon 모드와 CLI 모드를 모두 수행:
+단일 바이너리 `autodev` 가 daemon 모드와 CLI 모드를 모두 수행:
 
-  autonomous start     → daemon 모드 (단일 인스턴스, 포그라운드)
-  autonomous stop      → PID 파일로 SIGTERM 전송
-  autonomous status    → SQLite 직접 읽기
-  autonomous dashboard → SQLite 직접 읽기 + TUI 표시
+  autodev start     → daemon 모드 (단일 인스턴스, 포그라운드)
+  autodev stop      → PID 파일로 SIGTERM 전송
+  autodev status    → SQLite 직접 읽기
+  autodev dashboard → SQLite 직접 읽기 + TUI 표시
 ```
 
 ### 공유 상태 (소켓 없음)
 
 ```
-~/.autonomous/
-├── autonomous.db       # SQLite WAL (daemon + CLI 공유, 동시 읽기 허용)
+~/.autodev/
+├── autodev.db       # SQLite WAL (daemon + CLI 공유, 동시 읽기 허용)
 └── daemon.pid          # PID 파일 (단일 인스턴스 보장 + stop 시 kill)
 ```
 
@@ -280,27 +280,27 @@ CREATE INDEX idx_consumer_logs_repo ON consumer_logs(repo_id, started_at);
 
 ```
 # 데몬 제어
-autonomous start              # 데몬 시작 (포그라운드, 단일 인스턴스)
-autonomous stop               # 데몬 중지 (PID → SIGTERM)
-autonomous restart             # 데몬 재시작
+autodev start              # 데몬 시작 (포그라운드, 단일 인스턴스)
+autodev stop               # 데몬 중지 (PID → SIGTERM)
+autodev restart             # 데몬 재시작
 
 # 상태 조회 (→ SQLite 직접 읽기)
-autonomous status             # 데몬 상태 + 전체 레포 요약
-autonomous dashboard          # TUI 대시보드
+autodev status             # 데몬 상태 + 전체 레포 요약
+autodev dashboard          # TUI 대시보드
 
 # 레포 관리 (→ SQLite 직접 쓰기)
-autonomous repo add <url>     # 레포 등록 (대화형 설정)
-autonomous repo list          # 등록된 레포 목록
-autonomous repo config <name> # 레포 설정 변경
-autonomous repo remove <name> # 레포 제거
+autodev repo add <url>     # 레포 등록 (대화형 설정)
+autodev repo list          # 등록된 레포 목록
+autodev repo config <name> # 레포 설정 변경
+autodev repo remove <name> # 레포 제거
 
 # 큐 관리 (→ SQLite 직접 읽기/쓰기)
-autonomous queue list <repo>  # 큐 상태 확인
-autonomous queue retry <id>   # 실패 항목 재시도
-autonomous queue clear <repo> # 큐 비우기
+autodev queue list <repo>  # 큐 상태 확인
+autodev queue retry <id>   # 실패 항목 재시도
+autodev queue clear <repo> # 큐 비우기
 
 # 로그 조회 (→ SQLite 직접 읽기)
-autonomous logs <repo>        # 실행 로그 조회
+autodev logs <repo>        # 실행 로그 조회
 ```
 
 ### 셸 환경 등록 (/auto-setup 시 자동)
@@ -309,14 +309,14 @@ autonomous logs <repo>        # 실행 로그 조회
 
 ```bash
 # ~/.bashrc 또는 ~/.zshrc에 추가
-export AUTONOMOUS_HOME="$HOME/.autonomous"
+export AUTONOMOUS_HOME="$HOME/.autodev"
 export PATH="$HOME/.local/bin:$PATH"
 
 # 단축 명령어
-alias auto="autonomous"
-alias auto-s="autonomous status"
-alias auto-d="autonomous dashboard"
-alias auto-q="autonomous queue list"
+alias auto="autodev"
+alias auto-s="autodev status"
+alias auto-d="autodev dashboard"
+alias auto-q="autodev queue list"
 ```
 
 등록 후 터미널에서 바로 사용 가능:
@@ -454,7 +454,7 @@ allowed-tools: ["AskUserQuestion", "Bash"]
 5. AskUserQuestion → Consumer 처리량 (Issue/PR/Merge 각각)
 6. AskUserQuestion → 워크플로우 선택 (Issue 분석: multi-LLM or 단일, PR 리뷰: /multi-review or 단일)
 7. AskUserQuestion → 필터 (전체 / 특정 라벨 / 작성자 제외)
-8. Bash → `autonomous repo add <url> --config '<json>'`
+8. Bash → `autodev repo add <url> --config '<json>'`
 9. 설정 요약 출력
 
 ### /auto
@@ -469,9 +469,9 @@ allowed-tools: ["Bash"]
 
 **흐름:**
 - 인자 없음 → 현재 상태 요약 + 시작/중지 제안
-- `start` → `autonomous start`
-- `stop` → `autonomous stop`
-- `status` → `autonomous status` (각 레포별 큐 현황)
+- `start` → `autodev start`
+- `stop` → `autodev stop`
+- `status` → `autodev status` (각 레포별 큐 현황)
 
 ### /auto-config
 
@@ -493,7 +493,7 @@ allowed-tools: ["Bash"]
 ```
 
 **흐름:**
-1. `autonomous dashboard` (TUI 실행)
+1. `autodev dashboard` (TUI 실행)
 
 ---
 
@@ -549,7 +549,7 @@ tools: ["Read", "Glob", "Grep", "Edit", "Bash"]
 [issue_queue: pending] → 가져오기
   │
   ├── 1단계: Multi-LLM 병렬 분석 (status: analyzing)
-  │   워크트리: ~/.autonomous/workspaces/<repo>/issue-<num>
+  │   워크트리: ~/.autodev/workspaces/<repo>/issue-<num>
   │   병렬 실행:
   │     ├── Claude:  claude -p "Analyze issue #<num>: <title>\n<body>" \
   │     │            --output-format json
@@ -577,7 +577,7 @@ tools: ["Read", "Glob", "Grep", "Edit", "Bash"]
 [pr_queue: pending] → 가져오기
   │
   ├── 1단계: 리뷰 (status: reviewing)
-  │   워크트리: ~/.autonomous/workspaces/<repo>/pr-<num>
+  │   워크트리: ~/.autodev/workspaces/<repo>/pr-<num>
   │   실행: cd <worktree> && git checkout <head_branch>
   │   실행: claude -p "/multi-review" --output-format json
   │   → 레포에 설치된 플러그인이 cwd 기반으로 자동 적용
@@ -616,7 +616,7 @@ tools: ["Read", "Glob", "Grep", "Edit", "Bash"]
 
 ## 9. TUI 대시보드
 
-`autonomous dashboard` 실행 시 ratatui 기반 터미널 UI 표시.
+`autodev dashboard` 실행 시 ratatui 기반 터미널 UI 표시.
 
 ### 키바인딩
 ```
@@ -631,7 +631,7 @@ q         - 종료
 ### 레이아웃
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  autonomous v0.1.0          ● daemon running    [?]help │
+│  autodev v0.1.0          ● daemon running    [?]help │
 ├──────────┬──────────────────────────────────────────────┤
 │          │                                              │
 │ Repos    │  Queues: org/repo-a              ● enabled   │
@@ -665,38 +665,38 @@ q         - 종료
 
 ### 로컬 개발
 ```bash
-cd plugins/autonomous/cli
+cd plugins/autodev/cli
 cargo build --release
-cp target/release/autonomous ~/.local/bin/
+cp target/release/autodev ~/.local/bin/
 ```
 
 ### 플러그인 설치
 ```bash
 # marketplace에서 설치
-/plugin install autonomous@kys-claude-plugin
+/plugin install autodev@kys-claude-plugin
 
 # 바이너리는 /auto-setup 실행 시 자동 빌드 or GitHub Release에서 다운로드
 ```
 
 ### CI/CD (rust-binary.yml 확장)
 ```yaml
-# 기존 suggest-workflow 빌드에 autonomous 추가
-- name: Build autonomous
+# 기존 suggest-workflow 빌드에 autodev 추가
+- name: Build autodev
   run: |
-    cd plugins/autonomous/cli
+    cd plugins/autodev/cli
     cargo build --release
-    tar czf autonomous-${{ matrix.target }}.tar.gz autonomous
+    tar czf autodev-${{ matrix.target }}.tar.gz autodev
 ```
 
 ### marketplace.json 추가
 ```json
 {
-  "name": "autonomous",
+  "name": "autodev",
   "version": "0.1.0",
-  "source": "./plugins/autonomous",
+  "source": "./plugins/autodev",
   "category": "automation",
   "description": "이벤트 기반 자율 개발 오케스트레이터 - Issue 분석, PR 리뷰, 자동 머지",
-  "keywords": ["autonomous", "monitor", "queue", "dashboard", "automation"]
+  "keywords": ["autodev", "monitor", "queue", "dashboard", "automation"]
 }
 ```
 
@@ -726,9 +726,9 @@ cp target/release/autonomous ~/.local/bin/
 
 ### 기존 코드 영향
 - **marketplace.json**: 플러그인 1개 추가 (신규)
-- **rust-binary.yml**: autonomous 빌드 step 추가
-- **validate.yml**: autonomous 경로 추가 (자동 감지될 수 있음)
-- **기존 플러그인 코드 변경 없음**: autonomous는 레포 워크트리의 cwd에서 `claude -p`를 실행하여 기존 커맨드를 호출 (레포에 설치된 플러그인이 자동 적용)
+- **rust-binary.yml**: autodev 빌드 step 추가
+- **validate.yml**: autodev 경로 추가 (자동 감지될 수 있음)
+- **기존 플러그인 코드 변경 없음**: autodev는 레포 워크트리의 cwd에서 `claude -p`를 실행하여 기존 커맨드를 호출 (레포에 설치된 플러그인이 자동 적용)
 
 ### 외부 의존성
 - **GitHub Personal Access Token**: Scanner가 GitHub API 호출 시 필요

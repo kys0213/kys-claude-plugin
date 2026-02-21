@@ -85,14 +85,14 @@
       "category": "automation",
       "description": "이벤트 기반 자율 개발 오케스트레이터 - Issue 분석, PR 리뷰, 자동 머지",
       "keywords": [
-        "autonomous",
+        "autodev",
         "monitor",
         "queue",
         "dashboard",
         "automation"
       ],
-      "name": "autonomous",
-      "source": "./plugins/autonomous",
+      "name": "autodev",
+      "source": "./plugins/autodev",
       "version": "0.2.6"
     }
   ]

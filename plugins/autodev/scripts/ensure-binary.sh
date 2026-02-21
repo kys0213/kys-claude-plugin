@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ensure-binary.sh — autonomous CLI 바이너리 버전 확인 및 조건부 빌드/설치
+# ensure-binary.sh — autodev CLI 바이너리 버전 확인 및 조건부 빌드/설치
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -7,7 +7,7 @@ PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CLI_DIR="$PLUGIN_DIR/cli"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 INSTALL_DIR="$HOME/.local/bin"
-BINARY_NAME="autonomous"
+BINARY_NAME="autodev"
 BINARY_PATH="$INSTALL_DIR/$BINARY_NAME"
 
 # --- Helper: SemVer 비교 ---
@@ -66,7 +66,7 @@ fi
 # --- 2. 설치된 바이너리 버전 확인 ---
 INSTALLED_VERSION=""
 if command -v "$BINARY_NAME" &> /dev/null; then
-  # autonomous --version → "autodev 0.2.2" 형태
+  # autodev --version → "autodev 0.2.2" 형태
   INSTALLED_VERSION=$("$BINARY_NAME" --version 2>/dev/null | awk '{print $NF}' || echo "")
 fi
 
@@ -74,7 +74,7 @@ fi
 ACTION=""
 if [ -z "$INSTALLED_VERSION" ]; then
   ACTION="install"
-  echo "autonomous CLI not found. Installing v${PLUGIN_VERSION}..."
+  echo "autodev CLI not found. Installing v${PLUGIN_VERSION}..."
 else
   set +e
   compare_semver "$INSTALLED_VERSION" "$PLUGIN_VERSION"
@@ -83,9 +83,9 @@ else
 
   if [ "$CMP" -eq 2 ]; then
     ACTION="update"
-    echo "autonomous CLI outdated: v${INSTALLED_VERSION} → v${PLUGIN_VERSION}. Rebuilding..."
+    echo "autodev CLI outdated: v${INSTALLED_VERSION} → v${PLUGIN_VERSION}. Rebuilding..."
   else
-    echo "autonomous CLI is up to date (v${INSTALLED_VERSION})."
+    echo "autodev CLI is up to date (v${INSTALLED_VERSION})."
     exit 0
   fi
 fi
@@ -98,7 +98,7 @@ if ! command -v cargo &> /dev/null; then
 fi
 
 # --- 5. 빌드 ---
-echo "Building autonomous CLI..."
+echo "Building autodev CLI..."
 cargo build --release --manifest-path "$CLI_DIR/Cargo.toml"
 
 # --- 6. 설치 ---
@@ -110,9 +110,9 @@ chmod +x "$BINARY_PATH"
 if "$BINARY_PATH" --version &> /dev/null; then
   NEW_VERSION=$("$BINARY_PATH" --version 2>/dev/null | awk '{print $NF}')
   if [ "$ACTION" = "install" ]; then
-    echo "autonomous CLI installed successfully (v${NEW_VERSION})."
+    echo "autodev CLI installed successfully (v${NEW_VERSION})."
   else
-    echo "autonomous CLI updated successfully: v${INSTALLED_VERSION} → v${NEW_VERSION}."
+    echo "autodev CLI updated successfully: v${INSTALLED_VERSION} → v${NEW_VERSION}."
   fi
 else
   echo "ERROR: Installation verification failed." >&2

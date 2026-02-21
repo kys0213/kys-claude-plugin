@@ -21,7 +21,7 @@ fn e1_filtered_sessions_by_prompt_pattern() {
     let (tmp, project) = setup_project(&[
         "minimal.jsonl",
         "multi_tool.jsonl",
-        "autonomous_session.jsonl",
+        "autodev_session.jsonl",
     ]);
     index_project(&tmp, &project);
 
@@ -33,7 +33,7 @@ fn e1_filtered_sessions_by_prompt_pattern() {
             "--perspective",
             "filtered-sessions",
             "--param",
-            "prompt_pattern=[autonomous]",
+            "prompt_pattern=[autodev]",
         ])
         .assert()
         .success()
@@ -43,10 +43,10 @@ fn e1_filtered_sessions_by_prompt_pattern() {
 
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
     let arr = json.as_array().unwrap();
-    assert_eq!(arr.len(), 1, "should find exactly one autonomous session");
+    assert_eq!(arr.len(), 1, "should find exactly one autodev session");
     assert!(arr[0].get("first_prompt").is_some());
     let first_prompt = arr[0]["first_prompt"].as_str().unwrap();
-    assert!(first_prompt.contains("[autonomous]"));
+    assert!(first_prompt.contains("[autodev]"));
 }
 
 // --- E2: filtered-sessions returns empty for non-matching pattern ---
@@ -63,7 +63,7 @@ fn e2_filtered_sessions_no_match() {
             "--perspective",
             "filtered-sessions",
             "--param",
-            "prompt_pattern=[autonomous]",
+            "prompt_pattern=[autodev]",
         ])
         .assert()
         .success()
@@ -73,7 +73,7 @@ fn e2_filtered_sessions_no_match() {
 
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
     let arr = json.as_array().unwrap();
-    assert!(arr.is_empty(), "should find no autonomous sessions");
+    assert!(arr.is_empty(), "should find no autodev sessions");
 }
 
 // --- E3: --session-filter on tool-frequency limits to filtered sessions ---
@@ -82,7 +82,7 @@ fn e3_session_filter_on_tool_frequency() {
     let (tmp, project) = setup_project(&[
         "minimal.jsonl",
         "multi_tool.jsonl",
-        "autonomous_session.jsonl",
+        "autodev_session.jsonl",
     ]);
     index_project(&tmp, &project);
 
@@ -101,7 +101,7 @@ fn e3_session_filter_on_tool_frequency() {
         .stdout
         .clone();
 
-    // Query tool-frequency filtered to autonomous sessions only
+    // Query tool-frequency filtered to autodev sessions only
     let output_filtered = cli_with_home(&tmp)
         .args([
             "query",
@@ -110,7 +110,7 @@ fn e3_session_filter_on_tool_frequency() {
             "--perspective",
             "tool-frequency",
             "--session-filter",
-            "first_prompt_snippet LIKE '[autonomous]%'",
+            "first_prompt_snippet LIKE '[autodev]%'",
         ])
         .assert()
         .success()
@@ -126,7 +126,7 @@ fn e3_session_filter_on_tool_frequency() {
 
     // Filtered results should have fewer or equal entries
     assert!(filtered_arr.len() <= all_arr.len());
-    // Filtered should have at least some results (autonomous session has tools)
+    // Filtered should have at least some results (autodev session has tools)
     assert!(!filtered_arr.is_empty());
 }
 
@@ -136,7 +136,7 @@ fn e4_session_filter_on_sessions() {
     let (tmp, project) = setup_project(&[
         "minimal.jsonl",
         "multi_tool.jsonl",
-        "autonomous_session.jsonl",
+        "autodev_session.jsonl",
     ]);
     index_project(&tmp, &project);
 
@@ -148,7 +148,7 @@ fn e4_session_filter_on_sessions() {
             "--perspective",
             "sessions",
             "--session-filter",
-            "first_prompt_snippet LIKE '[autonomous]%'",
+            "first_prompt_snippet LIKE '[autodev]%'",
         ])
         .assert()
         .success()
@@ -158,7 +158,7 @@ fn e4_session_filter_on_sessions() {
 
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
     let arr = json.as_array().unwrap();
-    assert_eq!(arr.len(), 1, "should return only the autonomous session");
+    assert_eq!(arr.len(), 1, "should return only the autodev session");
 }
 
 // --- E5: --session-filter with invalid SQL is rejected ---
@@ -216,7 +216,7 @@ fn e5_session_filter_rejects_dangerous_sql() {
 // --- E6: --session-filter without {SF} markers is silently ignored ---
 #[test]
 fn e6_session_filter_on_derived_perspective() {
-    let (tmp, project) = setup_project(&["multi_tool.jsonl", "autonomous_session.jsonl"]);
+    let (tmp, project) = setup_project(&["multi_tool.jsonl", "autodev_session.jsonl"]);
     index_project(&tmp, &project);
 
     // transitions is a derived-table perspective without {SF} markers
@@ -231,7 +231,7 @@ fn e6_session_filter_on_derived_perspective() {
             "--param",
             "tool=Edit",
             "--session-filter",
-            "first_prompt_snippet LIKE '[autonomous]%'",
+            "first_prompt_snippet LIKE '[autodev]%'",
         ])
         .assert()
         .success();
@@ -240,7 +240,7 @@ fn e6_session_filter_on_derived_perspective() {
 // --- E7: first_prompt_snippet is populated after indexing ---
 #[test]
 fn e7_first_prompt_snippet_populated() {
-    let (tmp, project) = setup_project(&["autonomous_session.jsonl"]);
+    let (tmp, project) = setup_project(&["autodev_session.jsonl"]);
     index_project(&tmp, &project);
 
     let output = cli_with_home(&tmp)
@@ -251,7 +251,7 @@ fn e7_first_prompt_snippet_populated() {
             "--perspective",
             "filtered-sessions",
             "--param",
-            "prompt_pattern=[autonomous]",
+            "prompt_pattern=[autodev]",
         ])
         .assert()
         .success()
@@ -264,7 +264,7 @@ fn e7_first_prompt_snippet_populated() {
     assert_eq!(arr.len(), 1);
 
     let first_prompt = arr[0]["first_prompt"].as_str().unwrap();
-    assert!(first_prompt.starts_with("[autonomous] fix:"));
+    assert!(first_prompt.starts_with("[autodev] fix:"));
 }
 
 // --- E8: list-perspectives includes filtered-sessions ---

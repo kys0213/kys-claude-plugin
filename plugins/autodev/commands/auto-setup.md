@@ -87,14 +87,14 @@ fi
 
 ### Step 3: CLI 설치 및 버전 확인
 
-플러그인의 `ensure-binary.sh` 스크립트로 `autonomous` CLI 바이너리의 설치 및 버전을 확인합니다.
+플러그인의 `ensure-binary.sh` 스크립트로 `autodev` CLI 바이너리의 설치 및 버전을 확인합니다.
 이 스크립트는 `plugin.json` 버전과 설치된 바이너리 버전을 비교하여 신규 설치, 업데이트, 스킵을 자동으로 결정합니다.
 
 ```bash
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh
 ```
 
-- **바이너리 미설치** → 자동 빌드 + `~/.local/bin/autonomous`에 설치
+- **바이너리 미설치** → 자동 빌드 + `~/.local/bin/autodev`에 설치
 - **설치 버전 < 플러그인 버전** → 재빌드 + 설치
 - **설치 버전 >= 플러그인 버전** → 스킵
 
@@ -142,10 +142,10 @@ Step 1.5에서 Enterprise가 감지된 경우 `gh_host` 필드를 config JSON에
 
 ```bash
 # 일반 GitHub
-autonomous repo add <url> --config '<json>'
+autodev repo add <url> --config '<json>'
 
 # GitHub Enterprise (gh_host 포함)
-autonomous repo add <url> --config '{"gh_host": "github.mycompany.com", ...}'
+autodev repo add <url> --config '{"gh_host": "github.mycompany.com", ...}'
 ```
 
 ### Step 10: 셸 환경 등록
@@ -154,13 +154,13 @@ autonomous repo add <url> --config '{"gh_host": "github.mycompany.com", ...}'
 
 ```bash
 # ~/.bashrc 또는 ~/.zshrc에 추가
-export AUTONOMOUS_HOME="$HOME/.autonomous"
+export AUTONOMOUS_HOME="$HOME/.autodev"
 export PATH="$HOME/.local/bin:$PATH"
 
-alias auto="autonomous"
-alias auto-s="autonomous status"
-alias auto-d="autonomous dashboard"
-alias auto-q="autonomous queue list"
+alias auto="autodev"
+alias auto-s="autodev status"
+alias auto-d="autodev dashboard"
+alias auto-q="autodev queue list"
 ```
 
 ### Step 11: 설정 요약
