@@ -26,6 +26,7 @@ pub struct ConsumerConfig {
     pub filter_labels: Option<Vec<String>>,
     pub ignore_authors: Vec<String>,
     pub gh_host: Option<String>,
+    pub confidence_threshold: f64,
 }
 
 impl Default for ConsumerConfig {
@@ -42,6 +43,7 @@ impl Default for ConsumerConfig {
             filter_labels: None,
             ignore_authors: vec!["dependabot".into(), "renovate".into()],
             gh_host: None,
+            confidence_threshold: 0.7,
         }
     }
 }

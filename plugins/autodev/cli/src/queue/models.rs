@@ -142,6 +142,17 @@ pub struct PendingIssue {
     pub repo_url: String,
 }
 
+/// ready 상태 이슈 (구현 단계용 — analysis_report 포함)
+pub struct ReadyIssue {
+    pub id: String,
+    pub repo_id: String,
+    pub repo_name: String,
+    pub github_number: i64,
+    pub title: String,
+    pub analysis_report: Option<String>,
+    pub repo_url: String,
+}
+
 pub struct PendingPr {
     pub id: String,
     pub repo_id: String,

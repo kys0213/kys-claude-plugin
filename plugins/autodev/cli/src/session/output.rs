@@ -18,3 +18,38 @@ pub fn parse_output(stdout: &str) -> String {
         stdout.to_string()
     }
 }
+
+/// 이슈 분석 결과 구조체
+#[derive(Debug, Clone, Deserialize)]
+pub struct AnalysisResult {
+    /// "implement" | "needs_clarification" | "wontfix"
+    pub verdict: String,
+    /// 0.0 ~ 1.0
+    pub confidence: f64,
+    pub summary: String,
+    /// needs_clarification일 때 질문 목록
+    #[serde(default)]
+    pub questions: Vec<String>,
+    /// wontfix 사유
+    pub reason: Option<String>,
+    /// 전체 분석 리포트 (구현 단계에서 사용)
+    pub report: String,
+}
+
+/// claude -p 분석 결과를 AnalysisResult로 파싱 시도
+/// 1차: stdout가 claude JSON envelope이면 result 필드 추출 후 파싱
+/// 2차: stdout 자체를 직접 파싱
+/// 실패 시 None 반환 (호출측에서 fallback 처리)
+pub fn parse_analysis(stdout: &str) -> Option<AnalysisResult> {
+    // claude --output-format json 결과: { "result": "<escaped json string>" }
+    if let Ok(envelope) = serde_json::from_str::<ClaudeJsonOutput>(stdout) {
+        if let Some(inner) = envelope.result {
+            if let Ok(analysis) = serde_json::from_str::<AnalysisResult>(&inner) {
+                return Some(analysis);
+            }
+        }
+    }
+
+    // 직접 파싱 시도 (claude가 raw JSON을 반환한 경우)
+    serde_json::from_str::<AnalysisResult>(stdout).ok()
+}
