@@ -66,17 +66,26 @@ scan 발견 → autodev:wip → 분석(claude -p)
   실패 시 → 라벨 제거 → 다음 tick 재시도
 ```
 
-### PR: 리뷰 → 개선 → 재리뷰 → 머지
+### PR: 리뷰 → 개선 → 재리뷰
 
 ```
 scan 발견 → autodev:wip → 리뷰(/multi-review)
-  ├─ approve → 머지(/merge-pr) → autodev:done
+  ├─ approve → autodev:done (리뷰 완료)
   └─ request_changes → 인라인 댓글
        → 자동 개선(claude -p /develop implement feedback)
        → 재리뷰(/multi-review)
-       → approve 될 때까지 반복
-       → 머지 → autodev:done
+       → approve 될 때까지 반복 → autodev:done
   실패 시 → 라벨 제거 → 다음 tick 재시도
+```
+
+### Merge: 별도 큐
+
+```
+merge scan: approved + 라벨 없는 PR 발견 (사람/autodev approve 모두)
+  → autodev:wip → 머지(/merge-pr)
+  ├─ success → autodev:done
+  ├─ conflict → 자동 해결 시도 → 재머지
+  └─ failure → 라벨 제거 → 재시도
 ```
 
 ### Knowledge Extraction

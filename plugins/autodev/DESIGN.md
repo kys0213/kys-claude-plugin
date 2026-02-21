@@ -73,19 +73,25 @@ daemon process
 ActiveItems: HashMap<String, Phase>
 
 key = "{type}:{repo}:{number}"
-예: "issue:org/repo:42", "pr:org/repo:15"
+예: "issue:org/repo:42", "pr:org/repo:15", "merge:org/repo:15"
 
-Phase:
-  Pending       → scan에서 등록됨, 아직 처리 시작 안함
+Phase (Issue):
+  Pending       → scan에서 등록됨
   Analyzing     → 분석 프롬프트 실행중
   Ready         → 분석 완료, 구현 대기
   Implementing  → 구현 프롬프트 실행중
+
+Phase (PR — 리뷰):
+  Pending       → scan에서 등록됨
   Reviewing     → PR 리뷰 실행중
   ReviewDone    → 리뷰 완료, 개선 대기
   Improving     → 리뷰 피드백 반영 구현중
   Improved      → 개선 완료, 재리뷰 대기
-  MergeReady    → approve 완료, 머지 대기
+
+Phase (Merge — 별도 큐):
+  Pending       → merge scan에서 등록됨
   Merging       → 머지 실행중
+  Conflict      → 충돌 해결 시도중
 ```
 
 ---
@@ -205,10 +211,14 @@ daemon start
     │    (다음 tick의 scan에서 자연스럽게 재발견)
     │
     ├─ 2. scan()
-    │    "open + autodev 라벨 없는 이슈/PR" 조회
-    │    for each item:
-    │      gh label add "autodev:wip"
-    │      active.insert(id, Pending)
+    │    2a. issue/pr scan:
+    │      "open + autodev 라벨 없는 이슈/PR" 조회
+    │      → autodev:wip 라벨 + active.insert(id, Pending)
+    │
+    │    2b. merge scan:
+    │      "open + approved + autodev 라벨 없는 PR" 조회
+    │      (사람 approve, autodev approve, CI 통과 등)
+    │      → autodev:wip 라벨 + active.insert("merge:...", Pending)
     │
     ├─ 3. process()
     │    for each (id, phase) in active:
@@ -285,28 +295,44 @@ gh api: "autodev:wip" 라벨이 있는 open 이슈/PR 조회
 
 ### scan()
 
-GitHub API에서 라벨이 없는 새 이슈/PR을 발견하여 active에 등록한다.
+3가지 소스에서 새 작업을 발견하여 active에 등록한다.
 
 ```
 scan()
   │
-  ▼
-gh api repos/{repo}/issues?state=open
+  ├── 2a. issue/pr scan
+  │   gh api repos/{repo}/issues?state=open
+  │   gh api repos/{repo}/pulls?state=open
+  │   │
+  │   필터:
+  │     • autodev 라벨 없는 것만 (wip/done/skip 모두 제외)
+  │     • filter_labels 매칭 (설정된 경우)
+  │     • ignore_authors 제외
+  │   │
+  │   for each item:
+  │     id = "{type}:{repo}:{number}"
+  │     ├─ active.contains(id)? → skip
+  │     └─ NO → gh label add "autodev:wip"
+  │             active.insert(id, Pending)
   │
-  ▼
-필터:
-  • autodev 라벨 없는 것만 (wip/done/skip 모두 제외)
-  • filter_labels 매칭 (설정된 경우)
-  • ignore_authors 제외
-  │
-  for each item:
-    id = "{type}:{repo}:{number}"
-    │
-    ├─ active.contains(id)?
-    │    YES → skip
-    │    NO  → gh label add "autodev:wip"
-    │          active.insert(id, Pending)
+  └── 2b. merge scan
+      gh api repos/{repo}/pulls?state=open
+      │
+      필터:
+        • approved 상태 (사람 or autodev가 approve)
+        • CI checks 통과 (설정된 경우)
+        • autodev 라벨 없는 것만
+        • auto_merge 설정이 활성화된 레포만
+      │
+      for each item:
+        id = "merge:{repo}:{number}"
+        ├─ active.contains(id)? → skip
+        └─ NO → gh label add "autodev:wip"
+                active.insert(id, Pending)
 ```
+
+> **merge scan의 소스**: autodev가 리뷰하여 approve한 PR + 사람이 approve한 PR 모두 대상.
+> `auto_merge: true` 설정이 있는 레포에서만 동작한다.
 
 ### Issue Flow
 
@@ -363,10 +389,11 @@ process() — Issue
 ### PR Flow - 리뷰 → 개선 → 재리뷰 사이클
 
 리뷰 결과를 JSON으로 받아 verdict에 따라 결정적으로 분기한다.
-`request_changes` 시 자동으로 피드백을 반영하고, 재리뷰 후 approve되면 머지로 진행한다.
+`request_changes` 시 자동으로 피드백을 반영하고, 재리뷰 후 approve되면 리뷰 완료.
+머지는 별도 Merge Flow가 담당한다.
 
 ```
-process() — PR
+process() — PR (리뷰 전용)
   │
   ├─ Pending
   │    워크트리 준비 (head_branch checkout)
@@ -383,7 +410,9 @@ process() — PR
   │    │
   │    ├─ approve
   │    │    gh pr review --approve -b "{summary}"
-  │    │    phase → MergeReady
+  │    │    wip → autodev:done
+  │    │    active.remove("pr:...", id)
+  │    │    (다음 tick의 merge scan이 이 PR을 발견 → 머지 큐 진입)
   │    │
   │    └─ request_changes
   │         POST /pulls/{N}/reviews
@@ -404,30 +433,51 @@ process() — PR
   │    ├─ success → phase → Improved
   │    └─ failure → wip 제거, active.remove(id) → 재시도
   │
-  ├─ Improved
-  │    재리뷰: run_claude(/multi-review, json)
-  │    phase → Reviewing (반복)
-  │    │
-  │    (Reviewing에서 approve 나올 때까지 사이클 반복)
+  └─ Improved
+       재리뷰: run_claude(/multi-review, json)
+       phase → Reviewing (반복)
+       (Reviewing에서 approve 나올 때까지 사이클 반복)
+```
+
+### Merge Flow - 별도 큐
+
+approved 상태의 PR을 발견하여 순차적으로 머지한다.
+autodev가 approve한 PR, 사람이 approve한 PR 모두 대상.
+
+```
+merge scan에서 발견된 approved PR
   │
-  ├─ MergeReady
+  ▼
+process() — Merge
+  │
+  ├─ Pending
+  │    워크트리 준비
+  │    CI checks 통과 확인 (설정된 경우)
   │    run_claude(/merge-pr {N})
   │    phase → Merging
   │
-  └─ Merging (완료 대기)
+  ├─ Merging (완료 대기)
+  │    │
+  │    ├─ success
+  │    │    wip → autodev:done
+  │    │    active.remove(id)
+  │    │
+  │    ├─ conflict
+  │    │    run_claude(conflict resolution)
+  │    │    phase → Conflict
+  │    │
+  │    └─ other failure
+  │         wip 제거, active.remove(id) → 재시도
+  │
+  └─ Conflict (충돌 해결 대기)
        │
-       ├─ success
-       │    wip → autodev:done
-       │    active.remove(id)
-       │
-       ├─ conflict
-       │    run_claude(conflict resolution)
-       │    ├─ 해결 → wip → autodev:done
-       │    └─ 실패 → wip 제거, active.remove(id) → 재시도
-       │
-       └─ failure
-            wip 제거, active.remove(id) → 재시도
+       ├─ 해결 성공 → 재머지 시도 → phase → Merging
+       └─ 해결 실패 → wip 제거, active.remove(id) → 재시도
 ```
+
+> **순서 보장**: merge scan에서 발견된 PR은 `created_at` 순으로 처리하여
+> 먼저 approve된 PR부터 머지한다. 선행 PR 머지 후 base branch가 변경되면
+> 후속 PR은 자연스럽게 conflict → 자동 해결 or 재시도.
 
 ---
 
@@ -620,6 +670,8 @@ repos:
     ignore_authors: [dependabot, renovate]
     model: sonnet
     confidence_threshold: 0.7
+    auto_merge: true               # approved PR 자동 머지
+    merge_require_ci: true         # CI checks 통과 필수
 
 daemon:
   tick_interval_secs: 10
@@ -962,9 +1014,9 @@ per-task이 놓치는 것:               daily가 발견:
 │                            │                                      │
 │  ┌─────────────────────────────────────────────────────────────┐ │
 │  │ 2. SCAN                                                     │ │
-│  │    gh api: open + autodev 라벨 없는 이슈/PR 조회             │ │
-│  │    → autodev:wip 라벨 추가                                   │ │
-│  │    → active.insert(id, Pending)                             │ │
+│  │    2a. issue/pr: 라벨 없는 이슈/PR → wip + active            │ │
+│  │    2b. merge: approved + 라벨 없는 PR → wip + active         │ │
+│  │        (사람 approve + autodev approve 모두 대상)             │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 │                            │                                      │
 │  ┌─────────────────────────────────────────────────────────────┐ │
@@ -977,13 +1029,18 @@ per-task이 놓치는 것:               daily가 발견:
 │  │    success → autodev:done → [Knowledge Extraction]          │ │
 │  │    failure → 라벨 제거 (재시도)                                │ │
 │  │                                                             │ │
-│  │  PRs:                                                       │ │
+│  │  PRs (리뷰):                                                │ │
 │  │    Pending → Reviewing → verdict 분기                        │ │
-│  │      approve → MergeReady → Merging → done                  │ │
+│  │      approve → autodev:done (리뷰 완료)                      │ │
 │  │      request_changes → ReviewDone → Improving → Improved    │ │
 │  │        → 재리뷰 (Reviewing 반복)                              │ │
 │  │    success → autodev:done → [Knowledge Extraction]          │ │
 │  │    failure → 라벨 제거 (재시도)                                │ │
+│  │                                                             │ │
+│  │  Merges (별도 큐):                                           │ │
+│  │    approved PR 발견 (사람/autodev approve 모두)               │ │
+│  │    Pending → Merging → done | Conflict → 해결 → 재시도       │ │
+│  │    success → autodev:done                                   │ │
 │  │                                                             │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 │                            │                                      │
@@ -1014,8 +1071,10 @@ per-task이 놓치는 것:               daily가 발견:
 |------|-----------|----------|
 | Issue | `Pending → Analyzing → Ready → Implementing → done` | `(없음) → wip → done` |
 | Issue | `Pending → Analyzing → skip` (clarify/wontfix) | `(없음) → wip → skip` |
-| PR | `Pending → Reviewing → MergeReady → Merging → done` | `(없음) → wip → done` |
-| PR | `Pending → Reviewing → ReviewDone → Improving → Improved → Reviewing (반복)` | `wip` 유지 |
+| PR (리뷰) | `Pending → Reviewing → approve → done` | `(없음) → wip → done` |
+| PR (리뷰) | `Pending → Reviewing → ReviewDone → Improving → Improved → Reviewing (반복)` | `wip` 유지 |
+| Merge | `Pending → Merging → done` | `(없음) → wip → done` |
+| Merge | `Pending → Merging → Conflict → Merging (재시도)` | `wip` 유지 |
 
 ---
 
