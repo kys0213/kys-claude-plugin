@@ -15,8 +15,9 @@ autodev (오케스트레이터)
 
 - **Monitor 자체는 얇게**: 이벤트 감지, 라벨 관리, 세션 실행만 담당
 - **분석/구현 품질은 기존 플러그인에 위임**: 플러그인이 진화하면 자동으로 품질 향상
-- **GitHub = SSOT**: 라벨이 영속 상태, 인메모리는 현재 처리중인 작업만 추적
-- **SQLite 없음**: 상태는 GitHub 라벨, 추적은 인메모리 HashMap, 로그는 파일
+- **GitHub 라벨 = SSOT**: 작업 완료 상태의 유일한 영속 마커 (`autodev:done`, `autodev:skip`)
+- **SQLite = 영속 관리**: 레포 등록, scan 커서(API 최적화), 실행 로그(감사) — 작업 큐는 저장하지 않음
+- **In-Memory StateQueue = 작업 큐**: 상태별 큐로 이벤트 드리븐 처리, 휘발성 (재시작 시 bounded reconciliation으로 자동 복구)
 - **단일 바이너리**: Rust 데몬 + TUI 대시보드, 추가 의존성 없음
 - **사람과 동일한 환경**: `claude -p`는 워크트리 cwd에서 실행하여 해당 레포의 `.claude/`, `CLAUDE.md`, 설치된 플러그인이 그대로 적용됨
 
@@ -24,31 +25,50 @@ autodev (오케스트레이터)
 
 ## 2. 아키텍처
 
-### 상태 관리: GitHub 라벨 + 인메모리
+### 3-Tier 상태 관리
 
 ```
-GitHub (SSOT, 영속)
-  │
-  │  gh api (조회/댓글/라벨/PR)
-  ▼
-daemon process
-  │
-  ├─ ActiveItems: HashMap<WorkId, Phase>   ← 인메모리, 휘발
-  │    "issue:owner/repo:42" → Analyzing
-  │    "issue:owner/repo:99" → Ready
-  │    "pr:owner/repo:10"   → Processing
-  │
-  └─ 로그: append-only 파일 (~/.autodev/daemon.log)
+┌─────────────────────────────────────────────┐
+│        GitHub Labels (SSOT, 영속)            │
+│  autodev:done — 완료 (유일한 영속 완료 마커)   │
+│  autodev:skip — HITL 대기                    │
+│  autodev:wip  — 처리중                       │
+│  (없음)       — 미처리 → scan 대상            │
+│                                              │
+│  역할: 재시작 시 reconciliation의 기준         │
+│        "라벨 없는 open 건 = 미처리"            │
+└──────────────────┬──────────────────────────┘
+                   │ gh api
+┌──────────────────▼──────────────────────────┐
+│            SQLite (영속 관리)                 │
+│  repositories   — 레포 등록/활성화 관리        │
+│  scan_cursors   — incremental scan 최적화용   │
+│                   (일관성 보장 아님, 순수 최적화)│
+│  consumer_logs  — 실행 로그/감사 추적          │
+└──────────────────┬──────────────────────────┘
+                   │
+┌──────────────────▼──────────────────────────┐
+│       In-Memory StateQueue (휘발)            │
+│  issues:  StateQueue<IssueItem>              │
+│  prs:     StateQueue<PrItem>                 │
+│  merges:  StateQueue<MergeItem>              │
+│                                              │
+│  index: HashMap<WorkId, State>               │
+│  — scan 시 중복 적재 방지 (O(1) lookup)       │
+│  — consumer는 상태별 큐를 watch하여 처리       │
+│                                              │
+│  재시작 시: bounded reconciliation으로 복구    │
+└──────────────────────────────────────────────┘
 ```
 
 ### GitHub 라벨
 
-| 라벨 | 의미 |
-|------|------|
-| (없음) | 미처리 → scan 대상 |
-| `autodev:wip` | 데몬이 처리중 |
-| `autodev:done` | 처리 완료 |
-| `autodev:skip` | clarify/wontfix 등으로 건너뜀 |
+| 라벨 | 의미 | 영속성 |
+|------|------|--------|
+| (없음) | 미처리 → scan 대상 | - |
+| `autodev:wip` | 데몬이 처리중 | 크래시 시 orphan → recovery() 정리 |
+| `autodev:done` | 처리 완료 | **영속 완료 마커** (reconciliation 기준) |
+| `autodev:skip` | clarify/wontfix 등으로 건너뜀 | **영속 제외 마커** |
 
 ### 라벨 상태 전이
 
@@ -67,32 +87,113 @@ daemon process
                                    (없음)  ← 재시도
 ```
 
-### 인메모리 ActiveItems
+### SQLite Schema
+
+```sql
+-- 레포 등록/관리 (CLI로 관리, 영속 필요)
+CREATE TABLE repositories (
+    id          TEXT PRIMARY KEY,
+    url         TEXT NOT NULL UNIQUE,
+    name        TEXT NOT NULL,        -- "org/repo"
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+-- Scan 커서 (API 최적화 전용, 일관성 보장 아님)
+-- 정상 운영: since 파라미터로 API 응답 크기 축소
+-- 재시작 시: reconcile_window_hours만큼 되감아서 사용
+CREATE TABLE scan_cursors (
+    repo_id     TEXT NOT NULL REFERENCES repositories(id),
+    target      TEXT NOT NULL,           -- "issues" | "pulls"
+    last_seen   TEXT NOT NULL,           -- RFC3339: 마지막으로 본 항목의 updated_at
+    last_scan   TEXT NOT NULL,           -- RFC3339: 마지막 scan 실행 시점
+    PRIMARY KEY (repo_id, target)
+);
+
+-- 실행 로그 (감사/디버깅/knowledge extraction 소스)
+CREATE TABLE consumer_logs (
+    id          TEXT PRIMARY KEY,
+    repo_id     TEXT NOT NULL REFERENCES repositories(id),
+    queue_type  TEXT NOT NULL,           -- "issue" | "pr" | "merge"
+    item_key    TEXT NOT NULL,           -- "issue:org/repo:42"
+    worker_id   TEXT NOT NULL,
+    command     TEXT NOT NULL,
+    stdout      TEXT,
+    stderr      TEXT,
+    exit_code   INTEGER,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    duration_ms INTEGER
+);
+CREATE INDEX idx_consumer_logs_repo ON consumer_logs(repo_id, started_at);
+```
+
+> **작업 큐 테이블 없음**: issue_queue, pr_queue, merge_queue는 In-Memory StateQueue로 대체.
+> SQLite는 레포 관리 + API 최적화 + 로그 기록만 담당한다.
+
+### In-Memory StateQueue
+
+```rust
+/// 상태별 큐: consumer가 특정 상태의 아이템을 pop하여 처리
+struct StateQueue<T: HasId> {
+    queues: HashMap<State, VecDeque<T>>,
+}
+
+impl<T: HasId> StateQueue<T> {
+    fn push(&mut self, state: State, item: T);
+    fn pop(&mut self, state: State) -> Option<T>;        // consumer가 꺼냄
+    fn transit(&mut self, from: State, to: State, id: &str); // 상태 전이
+    fn remove(&mut self, id: &str) -> Option<T>;         // done/HITL 시 제거
+    fn len(&self, state: State) -> usize;                // 큐 깊이
+}
+
+/// 전체 작업 큐 (dedup index 포함)
+struct TaskQueues {
+    issues: StateQueue<IssueItem>,
+    prs:    StateQueue<PrItem>,
+    merges: StateQueue<MergeItem>,
+
+    // Dedup + state lookup: O(1)
+    // scan 시 이미 큐에 있는 아이템은 skip
+    index: HashMap<WorkId, State>,
+}
+
+// WorkId = "{type}:{repo}:{number}"
+// 예: "issue:org/repo:42", "pr:org/repo:15", "merge:org/repo:15"
+```
+
+### Phase 정의
 
 ```
-ActiveItems: HashMap<String, Phase>
-
-key = "{type}:{repo}:{number}"
-예: "issue:org/repo:42", "pr:org/repo:15", "merge:org/repo:15"
-
-Phase (Issue):
+Issue Phase:
   Pending       → scan에서 등록됨
   Analyzing     → 분석 프롬프트 실행중
   Ready         → 분석 완료, 구현 대기
   Implementing  → 구현 프롬프트 실행중
 
-Phase (PR — 리뷰):
+PR Phase (리뷰):
   Pending       → scan에서 등록됨
   Reviewing     → PR 리뷰 실행중
   ReviewDone    → 리뷰 완료, 개선 대기
   Improving     → 리뷰 피드백 반영 구현중
   Improved      → 개선 완료, 재리뷰 대기
 
-Phase (Merge — 별도 큐):
+Merge Phase:
   Pending       → merge scan에서 등록됨
   Merging       → 머지 실행중
   Conflict      → 충돌 해결 시도중
 ```
+
+### 큐에서 제거되는 시점
+
+| 조건 | 동작 | 이유 |
+|------|------|------|
+| **done** | queue.remove() + `autodev:done` 라벨 | 작업 완료 |
+| **skip** | queue.remove() + `autodev:skip` 라벨 | HITL 대기 (clarify/wontfix) |
+| **failure** | queue.remove() + wip 라벨 제거 | 다음 scan에서 재발견 → 재시도 |
+
+> done/skip 시에만 영속 라벨이 붙으므로, 재시작 시 reconciliation에서 자연스럽게 필터링된다.
 
 ---
 
@@ -128,8 +229,10 @@ plugins/autodev/
 │       │   ├── issue.rs         # Issue 처리 (분석 → 구현)
 │       │   ├── pr.rs            # PR 처리 (리뷰 → 개선)
 │       │   └── merge.rs         # Merge 처리
-│       ├── active/
-│       │   └── mod.rs           # ActiveItems (HashMap 관리)
+│       ├── queue/
+│       │   ├── mod.rs           # TaskQueues (StateQueue + dedup index)
+│       │   ├── schema.rs        # SQLite 스키마 (repositories, scan_cursors, consumer_logs)
+│       │   └── repository.rs    # 레포/커서/로그 DB 쿼리
 │       ├── github/
 │       │   └── mod.rs           # GitHub API + 라벨 관리
 │       ├── workspace/
@@ -172,6 +275,9 @@ tokio = { version = "1", features = ["full"] }
 # HTTP client (GitHub API)
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 
+# SQLite (레포 관리 + scan 커서 + 실행 로그)
+rusqlite = { version = "0.32", features = ["bundled"] }
+
 # TUI
 ratatui = "0.29"
 crossterm = "0.28"
@@ -182,6 +288,7 @@ serde_json = "1"
 
 # Utils
 chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -194,7 +301,8 @@ codegen-units = 1
 strip = true
 ```
 
-> SQLite(rusqlite), uuid 의존성 제거. GitHub 라벨이 SSOT이므로 로컬 DB 불필요.
+> SQLite는 **레포 관리 + scan 커서(최적화) + 실행 로그(감사)** 전용.
+> 작업 큐는 In-Memory StateQueue로 처리하며 SQLite에 저장하지 않는다.
 
 ---
 
@@ -203,70 +311,118 @@ strip = true
 ```
 daemon start
 │
+├─ 0. startup_reconcile()        ← 최초 1회만 실행
+│    SQLite에서 enabled 레포 로드
+│    scan_cursors.last_seen - reconcile_window_hours (기본 24h) 이후의
+│    open 이슈/PR을 GitHub API로 조회
+│    autodev:done/skip 라벨이 있는 건 skip
+│    나머지 → memory StateQueue[Pending]에 적재
+│    cursor를 현재 시점으로 갱신
+│
 └─ loop (매 tick)
     │
     ├─ 1. recovery()
-    │    "autodev:wip 라벨 + active에 없는 이슈" 조회
+    │    "autodev:wip 라벨 + queue에 없는 이슈" 조회
     │    → autodev:wip 라벨 제거
     │    (다음 tick의 scan에서 자연스럽게 재발견)
     │
-    ├─ 2. scan()
-    │    2a. issue/pr scan:
-    │      "open + autodev 라벨 없는 이슈/PR" 조회
-    │      → autodev:wip 라벨 + active.insert(id, Pending)
+    ├─ 2. scan()                  ← scan_interval 경과 시에만
+    │    cursor 기반 incremental scan (since 파라미터)
+    │    이미 queue.index에 있는 아이템은 skip (O(1) dedup)
+    │    신규 아이템만 → wip 라벨 + queue.push(Pending)
     │
-    │    2b. merge scan:
-    │      "open + approved + autodev 라벨 없는 PR" 조회
-    │      (사람 approve, autodev approve, CI 통과 등)
-    │      → autodev:wip 라벨 + active.insert("merge:...", Pending)
+    ├─ 3. consume()               ← 매 tick 실행
+    │    queue[Pending]에 아이템 있으면 pop → 처리 시작
+    │    queue[Ready]에 아이템 있으면 pop → 구현 시작
+    │    (상태별 큐를 순회하며 이벤트 드리븐 처리)
+    │    처리 완료 → queue.remove() + 라벨 전이
+    │    pre-flight API 호출 불필요 (scan 시점에 open 확인 완료)
     │
-    ├─ 3. process()
-    │    for each (id, phase) in active:
-    │
-    │      Pending ─────────────────────────────┐
-    │        분석 프롬프트 실행                    │
-    │        phase → Analyzing                   │
-    │                                            │
-    │      Analyzing ───────────────────────────┐│
-    │        완료 대기                            ││
-    │        verdict:                            ││
-    │        ├─ implement → phase → Ready        ││
-    │        ├─ clarify   ──┐                    ││
-    │        └─ wontfix   ──┤                    ││
-    │                       ▼                    ││
-    │                   GitHub 댓글               ││
-    │                   wip → autodev:skip       ││
-    │                   active.remove(id)        ││
-    │                                            ││
-    │      Ready ───────────────────────────────┐││
-    │        구현 프롬프트 실행                    │││
-    │        phase → Implementing               │││
-    │                                           │││
-    │      Implementing ────────────────────────┘││
-    │        완료 대기                             ││
-    │        result:                              ││
-    │        ├─ success                           ││
-    │        │    GitHub PR 생성                   ││
-    │        │    wip → autodev:done              ││
-    │        │    active.remove(id)               ││
-    │        └─ failure                           ││
-    │             wip 라벨 제거 (라벨 없음)         ││
-    │             active.remove(id)               ││
-    │             (다음 tick에 재시도)              ││
-    │                                             ││
-    └─ 4. sleep(interval)                         ││
-                                                  ▼▼
-                                        다음 tick으로
+    └─ 4. sleep(tick_interval)
 ```
+
+### Startup Reconciliation (Bounded Recovery)
+
+재시작 시 메모리 큐를 복구하는 메커니즘.
+cursor를 일관성 보장에 사용하지 않고, **GitHub 라벨을 source of truth**로 삼는다.
+
+```
+startup_reconcile()
+  │
+  ▼
+repos = db.repo_find_enabled()
+
+for repo in repos:
+  │
+  ├─ 1. safe_since 계산
+  │    last_seen = db.cursor_get_last_seen(repo.id, target)
+  │    safe_since = last_seen - reconcile_window_hours  (기본 24h)
+  │    (cursor가 없으면 now - 24h)
+  │
+  ├─ 2. GitHub API 조회 (bounded)
+  │    gh api repos/{repo}/issues?state=open&since={safe_since}
+  │    gh api repos/{repo}/pulls?state=open&since={safe_since}
+  │
+  ├─ 3. 라벨 기반 필터
+  │    autodev:done 라벨 → skip (이미 완료)
+  │    autodev:skip 라벨 → skip (HITL 대기)
+  │    autodev:wip 라벨  → wip 제거 후 큐 적재 (orphan 정리 겸용)
+  │    라벨 없음          → 큐 적재 (미처리)
+  │
+  ├─ 4. memory queue 적재
+  │    queue.push(Pending, item)
+  │    queue.index.insert(work_id, Pending)
+  │
+  └─ 5. cursor 갱신
+       db.cursor_upsert(repo.id, target, now)
+```
+
+**왜 bounded (24h) 인가:**
+
+| 방식 | API 비용 | 안전성 | 적합성 |
+|------|---------|--------|--------|
+| Full scan (since 없음) | 높음 (전체 open 건) | 완벽 | 이슈가 많은 레포에서 비효율 |
+| Cursor 그대로 사용 | 낮음 | **갭 발생 가능** | 위험 |
+| **Cursor - 24h (bounded)** | 중간 (24h 윈도우) | 충분 | 대부분의 crash-restart 커버 |
+
+```yaml
+# 설정으로 조절 가능
+daemon:
+  reconcile_window_hours: 24   # 재시작 시 복구 윈도우 (기본 24h)
+```
+
+> 24h 이상 데몬이 죽어있었다면 운영 이슈로, 별도 알림/모니터링이 필요하다.
 
 ### 타이밍 예시 (scan_interval_secs: 300)
 
 ```
-tick  0s:  recovery + scan ✓ (첫 실행)  + process
-tick 10s:  recovery + scan SKIP         + process
-tick 20s:  recovery + scan SKIP         + process
+startup:   reconcile (since=cursor-24h) + queue 복구
+
+tick  0s:  recovery + scan ✓ (첫 실행)  + consume
+tick 10s:  recovery + scan SKIP         + consume
+tick 20s:  recovery + scan SKIP         + consume
 ...
-tick 300s: recovery + scan ✓ (5분 경과) + process
+tick 300s: recovery + scan ✓ (5분 경과) + consume
+```
+
+### Cursor의 역할 (최적화 전용)
+
+```
+┌────────────────────────────────────────────────────────┐
+│ cursor는 "일관성 보장"이 아니라 "API 최적화"만 담당한다  │
+│                                                        │
+│ 정상 운영:                                              │
+│   scan(since=cursor) → API 응답 크기 축소               │
+│   cursor 전진 → 다음 scan에서 중복 응답 방지             │
+│                                                        │
+│ 재시작:                                                 │
+│   reconcile(since=cursor-24h) → 안전 마진으로 복구       │
+│   GitHub 라벨로 실제 완료 여부 판별                       │
+│   cursor가 틀려도 라벨이 맞으면 OK                        │
+│                                                        │
+│ 일관성 보장 = GitHub 라벨 (SSOT)                         │
+│ API 최적화 = scan_cursors (보조)                         │
+└────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -295,25 +451,37 @@ gh api: "autodev:wip" 라벨이 있는 open 이슈/PR 조회
 
 ### scan()
 
-3가지 소스에서 새 작업을 발견하여 active에 등록한다.
+cursor 기반 incremental scan으로 신규 아이템만 발견하여 memory queue에 적재한다.
+**pre-flight API 호출 없음** — scan 시점에 open 상태가 확인되므로 consumer에서 재확인 불필요.
 
 ```
 scan()
   │
-  ├── 2a. issue/pr scan
-  │   gh api repos/{repo}/issues?state=open
-  │   gh api repos/{repo}/pulls?state=open
+  repos = db.repo_find_enabled()
+  │
+  for repo in repos:
+  │
+  ├─ should_scan = db.cursor_should_scan(repo.id, scan_interval_secs)
+  │  NO → skip (아직 interval 미경과)
+  │
+  ├── 2a. issue/pr scan (incremental)
+  │   since = db.cursor_get_last_seen(repo.id, "issues")
+  │   gh api repos/{repo}/issues?state=open&since={since}&sort=updated
+  │   gh api repos/{repo}/pulls?state=open&since={since}&sort=updated
   │   │
   │   필터:
-  │     • autodev 라벨 없는 것만 (wip/done/skip 모두 제외)
+  │     • queue.index에 이미 있으면 skip (O(1) dedup)
+  │     • autodev 라벨 있으면 skip (done/skip/wip 모두)
   │     • filter_labels 매칭 (설정된 경우)
   │     • ignore_authors 제외
   │   │
-  │   for each item:
+  │   for each new_item:
   │     id = "{type}:{repo}:{number}"
-  │     ├─ active.contains(id)? → skip
-  │     └─ NO → gh label add "autodev:wip"
-  │             active.insert(id, Pending)
+  │     gh label add "autodev:wip"
+  │     queue.push(Pending, item)
+  │     queue.index.insert(id, Pending)
+  │   │
+  │   cursor 전진: db.cursor_upsert(repo.id, "issues", latest_updated_at)
   │
   └── 2b. merge scan
       gh api repos/{repo}/pulls?state=open
@@ -321,18 +489,32 @@ scan()
       필터:
         • approved 상태 (사람 or autodev가 approve)
         • CI checks 통과 (설정된 경우)
+        • queue.index에 이미 있으면 skip
         • autodev 라벨 없는 것만
         • auto_merge 설정이 활성화된 레포만
       │
       for each item:
         id = "merge:{repo}:{number}"
-        ├─ active.contains(id)? → skip
-        └─ NO → gh label add "autodev:wip"
-                active.insert(id, Pending)
+        gh label add "autodev:wip"
+        queue.merges.push(Pending, item)
+        queue.index.insert(id, Pending)
 ```
 
 > **merge scan의 소스**: autodev가 리뷰하여 approve한 PR + 사람이 approve한 PR 모두 대상.
 > `auto_merge: true` 설정이 있는 레포에서만 동작한다.
+
+### API 호출 비용 비교
+
+```
+Before (DB 큐 방식):
+  scan:     N repos × 2 API calls / 300초       (incremental)
+  consumer: M items × 1~2 pre-flight calls / 10초 (매 tick마다!)
+
+After (Memory StateQueue 방식):
+  scan:     N repos × 2 API calls / 300초       (incremental, 동일)
+  consumer: 0 API calls                          (메모리에서 직접 처리)
+  startup:  N repos × 2 API calls × 1회          (bounded reconciliation)
+```
 
 ### Issue Flow
 
@@ -546,8 +728,14 @@ autodev start              # 데몬 시작 (포그라운드, 단일 인스턴스
 autodev stop               # 데몬 중지 (PID → SIGTERM)
 autodev restart            # 데몬 재시작
 
-# 상태 조회 (→ GitHub API 직접 조회)
-autodev status             # 데몬 상태 + active items 요약
+# 레포 관리 (→ SQLite repositories 테이블)
+autodev repo add <url>     # 레포 등록 (URL에서 name 자동 추출)
+autodev repo list          # 등록된 레포 목록 (enabled/disabled 표시)
+autodev repo config <name> # 레포별 설정 확인 (글로벌 + 워크스페이스 merge 결과)
+autodev repo remove <name> # 레포 제거
+
+# 상태 조회
+autodev status             # 데몬 상태 + 큐 깊이 요약 + 레포별 통계
 autodev dashboard          # TUI 대시보드
 
 # 설정 관리 (→ YAML 파일)
@@ -559,8 +747,13 @@ autodev config edit        # 설정 편집
 
 ```
 ~/.autodev/
-├── config.yaml          # 설정 파일
+├── config.yaml          # 글로벌 설정 파일
+├── autodev.db           # SQLite (repositories, scan_cursors, consumer_logs)
 ├── daemon.pid           # PID 파일 (단일 인스턴스 보장)
+├── workspaces/          # 레포별 워크스페이스
+│   └── {org}/{repo}/
+│       ├── main/        # base clone
+│       └── issue-42/    # worktree
 └── logs/
     ├── daemon.2026-02-21.log   # 일자별 롤링
     ├── daemon.2026-02-20.log
@@ -675,6 +868,7 @@ repos:
 
 daemon:
   tick_interval_secs: 10
+  reconcile_window_hours: 24     # 재시작 시 복구 윈도우 (기본 24h)
   log_dir: ~/.autodev/logs
   log_retention_days: 30
   daily_report_hour: 6           # 매일 06:00에 일일 리포트 생성
@@ -1005,42 +1199,60 @@ per-task이 놓치는 것:               daily가 발견:
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
+│                        DAEMON STARTUP                             │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │ 0. STARTUP RECONCILE (최초 1회)                              │ │
+│  │    SQLite에서 enabled 레포 로드                               │ │
+│  │    since = cursor - reconcile_window_hours (24h)             │ │
+│  │    GitHub API 조회 (bounded)                                 │ │
+│  │    라벨 필터: done/skip → skip, wip → 정리 후 적재, 없음 → 적재│ │
+│  │    → memory StateQueue[Pending] 복구 완료                     │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────┐
 │                          DAEMON LOOP                              │
 │                                                                   │
 │  ┌─────────────────────────────────────────────────────────────┐ │
 │  │ 1. RECOVERY                                                 │ │
-│  │    autodev:wip + active에 없음 → wip 라벨 제거               │ │
+│  │    autodev:wip + queue에 없음 → wip 라벨 제거                │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 │                            │                                      │
 │  ┌─────────────────────────────────────────────────────────────┐ │
-│  │ 2. SCAN                                                     │ │
-│  │    2a. issue/pr: 라벨 없는 이슈/PR → wip + active            │ │
-│  │    2b. merge: approved + 라벨 없는 PR → wip + active         │ │
-│  │        (사람 approve + autodev approve 모두 대상)             │ │
+│  │ 2. SCAN (cursor 기반 incremental, interval 경과 시만)        │ │
+│  │    since=cursor → GitHub API → 신규만 필터                   │ │
+│  │    queue.index dedup (O(1)) → 중복 skip                     │ │
+│  │    2a. issue/pr: 신규 → wip + queue.push(Pending)           │ │
+│  │    2b. merge: approved + 신규 → wip + queue.push(Pending)   │ │
+│  │    cursor 전진                                               │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 │                            │                                      │
 │  ┌─────────────────────────────────────────────────────────────┐ │
-│  │ 3. PROCESS                                                  │ │
+│  │ 3. CONSUME (매 tick, 이벤트 드리븐)                          │ │
+│  │    queue에서 pop → 처리 → 상태 전이 또는 완료                  │
+│  │    pre-flight API 호출 없음 (scan에서 이미 확인)              │ │
 │  │                                                             │ │
 │  │  Issues:                                                    │ │
-│  │    Pending → Analyzing → verdict 분기                        │ │
-│  │      implement → Ready → Implementing → PR 생성              │ │
-│  │      clarify/wontfix → 댓글 + autodev:skip                  │ │
-│  │    success → autodev:done → [Knowledge Extraction]          │ │
-│  │    failure → 라벨 제거 (재시도)                                │ │
+│  │    queue[Pending] pop → Analyzing → verdict 분기             │ │
+│  │      implement → queue[Ready] → Implementing → PR 생성      │ │
+│  │      clarify/wontfix → 댓글 + autodev:skip + queue.remove() │ │
+│  │    success → autodev:done + queue.remove()                  │ │
+│  │              → [Knowledge Extraction]                       │ │
+│  │    failure → 라벨 제거 + queue.remove() (다음 scan에서 재발견) │ │
 │  │                                                             │ │
 │  │  PRs (리뷰):                                                │ │
-│  │    Pending → Reviewing → verdict 분기                        │ │
-│  │      approve → autodev:done (리뷰 완료)                      │ │
+│  │    queue[Pending] pop → Reviewing → verdict 분기             │ │
+│  │      approve → autodev:done + queue.remove()                │ │
 │  │      request_changes → ReviewDone → Improving → Improved    │ │
 │  │        → 재리뷰 (Reviewing 반복)                              │ │
-│  │    success → autodev:done → [Knowledge Extraction]          │ │
-│  │    failure → 라벨 제거 (재시도)                                │ │
+│  │    success → autodev:done + queue.remove()                  │ │
+│  │              → [Knowledge Extraction]                       │ │
+│  │    failure → 라벨 제거 + queue.remove() (재시도)              │ │
 │  │                                                             │ │
 │  │  Merges (별도 큐):                                           │ │
-│  │    approved PR 발견 (사람/autodev approve 모두)               │ │
-│  │    Pending → Merging → done | Conflict → 해결 → 재시도       │ │
-│  │    success → autodev:done                                   │ │
+│  │    queue[Pending] pop → Merging → done | Conflict → 재시도   │ │
+│  │    success → autodev:done + queue.remove()                  │ │
 │  │                                                             │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 │                            │                                      │
@@ -1083,10 +1295,12 @@ per-task이 놓치는 것:               daily가 발견:
 | 구성요소 | 역할 |
 |---------|------|
 | **GitHub 라벨** | 영속 상태 (SSOT) — `autodev:wip`, `autodev:done`, `autodev:skip` |
-| **ActiveItems (HashMap)** | 현재 처리중인 작업 + Phase 추적 (휘발) |
+| **SQLite** | 영속 관리 — repositories, scan_cursors(최적화), consumer_logs(감사) |
+| **In-Memory StateQueue** | 상태별 작업 큐 (이벤트 드리븐, 휘발) + dedup index |
+| **startup_reconcile()** | 재시작 시 bounded window(24h)로 메모리 큐 복구, 라벨 기반 필터 |
 | **recovery()** | 크래시 후 orphan wip 정리 |
-| **scan()** | 라벨 없는 이슈/PR 발견 → wip 라벨 + active 등록 |
-| **process()** | Phase별 작업 실행 → done/skip/재시도 |
+| **scan()** | cursor 기반 incremental scan → 신규만 큐 적재 |
+| **consume()** | 상태별 큐에서 pop → 처리 → 라벨 전이 (pre-flight API 불필요) |
 | **Knowledge Extraction (per-task)** | done 전이 시 해당 세션 분석 → 즉시 피드백 |
 | **Knowledge Extraction (daily)** | 매일 전일 로그 전체 분석 → 일일 리포트 + 크로스 태스크 패턴 |
 | **daemon.YYYY-MM-DD.log** | 일자별 롤링 로그 (30일 보존) |
