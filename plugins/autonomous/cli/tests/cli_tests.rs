@@ -109,8 +109,8 @@ fn repo_config_shows_defaults() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("scan_interval: 300s")
-                .and(predicate::str::contains("issue_concurrency: 1")),
+            predicate::str::contains("Effective config for org/myrepo")
+                .and(predicate::str::contains("scan_interval_secs")),
         );
 }
 

@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use autodev::config::models::RepoConfig;
 use autodev::queue::repository::*;
 use autodev::queue::Database;
 use serial_test::serial;
@@ -30,7 +29,7 @@ fn open_memory_db() -> Database {
 }
 
 fn add_repo(db: &Database, url: &str, name: &str) -> String {
-    db.repo_add(url, name, &RepoConfig::default()).expect("add repo")
+    db.repo_add(url, name).expect("add repo")
 }
 
 fn setup_env(response_file: &str) {
@@ -58,7 +57,7 @@ async fn scan_issues_queues_new_items() {
     setup_env("issues.json");
 
     let ignore = vec!["dependabot".to_string()];
-    autodev::scanner::issues::scan(&db, &repo_id, "org/repo", &ignore, &None)
+    autodev::scanner::issues::scan(&db, &repo_id, "org/repo", &ignore, &None, None)
         .await
         .unwrap();
 
@@ -76,7 +75,7 @@ async fn scan_issues_skips_pr_linked() {
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
     setup_env("issues.json");
 
-    autodev::scanner::issues::scan(&db, &repo_id, "org/repo", &[], &None)
+    autodev::scanner::issues::scan(&db, &repo_id, "org/repo", &[], &None, None)
         .await
         .unwrap();
 
@@ -92,7 +91,7 @@ async fn scan_issues_filters_by_label() {
     setup_env("issues_with_labels.json");
 
     let labels = Some(vec!["bug".to_string()]);
-    autodev::scanner::issues::scan(&db, &repo_id, "org/repo", &[], &labels)
+    autodev::scanner::issues::scan(&db, &repo_id, "org/repo", &[], &labels, None)
         .await
         .unwrap();
 
@@ -110,12 +109,12 @@ async fn scan_issues_no_duplicates() {
 
     let ignore = vec!["dependabot".to_string()];
 
-    autodev::scanner::issues::scan(&db, &repo_id, "org/repo", &ignore, &None)
+    autodev::scanner::issues::scan(&db, &repo_id, "org/repo", &ignore, &None, None)
         .await
         .unwrap();
     let count_first = db.issue_find_pending(100).unwrap().len();
 
-    autodev::scanner::issues::scan(&db, &repo_id, "org/repo", &ignore, &None)
+    autodev::scanner::issues::scan(&db, &repo_id, "org/repo", &ignore, &None, None)
         .await
         .unwrap();
     let count_second = db.issue_find_pending(100).unwrap().len();
@@ -134,7 +133,7 @@ async fn scan_issues_updates_cursor() {
     assert!(db.cursor_get_last_seen(&repo_id, "issues").unwrap().is_none());
 
     let ignore = vec!["dependabot".to_string()];
-    autodev::scanner::issues::scan(&db, &repo_id, "org/repo", &ignore, &None)
+    autodev::scanner::issues::scan(&db, &repo_id, "org/repo", &ignore, &None, None)
         .await
         .unwrap();
 
@@ -153,7 +152,7 @@ async fn scan_issues_empty_response() {
     std::env::remove_var("GH_MOCK_RESPONSE_FILE");
     std::env::remove_var("GH_MOCK_EXIT_CODE");
 
-    autodev::scanner::issues::scan(&db, &repo_id, "org/repo", &[], &None)
+    autodev::scanner::issues::scan(&db, &repo_id, "org/repo", &[], &None, None)
         .await
         .unwrap();
 
@@ -173,7 +172,7 @@ async fn scan_prs_queues_new_items() {
     setup_env("pulls.json");
 
     let ignore = vec!["renovate".to_string()];
-    autodev::scanner::pulls::scan(&db, &repo_id, "org/repo", &ignore)
+    autodev::scanner::pulls::scan(&db, &repo_id, "org/repo", &ignore, None)
         .await
         .unwrap();
 
@@ -189,12 +188,12 @@ async fn scan_prs_no_duplicates() {
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
     setup_env("pulls.json");
 
-    autodev::scanner::pulls::scan(&db, &repo_id, "org/repo", &[])
+    autodev::scanner::pulls::scan(&db, &repo_id, "org/repo", &[], None)
         .await
         .unwrap();
     let first = db.pr_find_pending(100).unwrap().len();
 
-    autodev::scanner::pulls::scan(&db, &repo_id, "org/repo", &[])
+    autodev::scanner::pulls::scan(&db, &repo_id, "org/repo", &[], None)
         .await
         .unwrap();
     let second = db.pr_find_pending(100).unwrap().len();
@@ -210,7 +209,7 @@ async fn scan_prs_checks_pending_data() {
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
     setup_env("pulls.json");
 
-    autodev::scanner::pulls::scan(&db, &repo_id, "org/repo", &[])
+    autodev::scanner::pulls::scan(&db, &repo_id, "org/repo", &[], None)
         .await
         .unwrap();
 
@@ -234,7 +233,7 @@ async fn scan_issues_gh_failure_returns_error() {
     std::env::set_var("PATH", path_with_fake_bin());
     std::env::set_var("GH_MOCK_EXIT_CODE", "1");
 
-    let result = autodev::scanner::issues::scan(&db, &repo_id, "org/repo", &[], &None).await;
+    let result = autodev::scanner::issues::scan(&db, &repo_id, "org/repo", &[], &None, None).await;
     assert!(result.is_err());
     cleanup_env();
 }

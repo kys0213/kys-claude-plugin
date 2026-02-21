@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use autodev::config::models::RepoConfig;
 use autodev::queue::models::*;
 use autodev::queue::repository::*;
 use autodev::queue::Database;
@@ -25,7 +24,7 @@ fn open_memory_db() -> Database {
 }
 
 fn add_repo(db: &Database, url: &str, name: &str) -> String {
-    db.repo_add(url, name, &RepoConfig::default()).expect("add repo")
+    db.repo_add(url, name).expect("add repo")
 }
 
 fn setup_env(tmpdir: &tempfile::TempDir) {
