@@ -891,3 +891,202 @@ fn repo_status_summary_with_mixed_queues() {
     assert_eq!(summary[0].pr_pending, 1);
     assert_eq!(summary[0].merge_pending, 0);
 }
+
+// ═══════════════════════════════════════════════
+// 9. 데이터 정합성: 중복 방지 (INSERT OR IGNORE + UNIQUE)
+// ═══════════════════════════════════════════════
+
+#[test]
+fn issue_duplicate_insert_is_ignored() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    let item = NewIssueItem {
+        repo_id: repo_id.clone(),
+        github_number: 42,
+        title: "First".into(),
+        body: None,
+        labels: "[]".into(),
+        author: "user1".into(),
+    };
+    db.issue_insert(&item).unwrap();
+
+    // 동일한 repo_id + github_number로 재삽입 → 에러 없이 무시
+    let item2 = NewIssueItem {
+        repo_id: repo_id.clone(),
+        github_number: 42,
+        title: "Duplicate".into(),
+        body: None,
+        labels: "[]".into(),
+        author: "user2".into(),
+    };
+    db.issue_insert(&item2).unwrap(); // should not panic
+
+    // 원본만 남아있어야 함
+    let list = db.issue_list("org/test-repo", 20).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].title, "First");
+}
+
+#[test]
+fn pr_duplicate_insert_is_ignored() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    let item = NewPrItem {
+        repo_id: repo_id.clone(),
+        github_number: 10,
+        title: "First PR".into(),
+        body: None,
+        author: "dev1".into(),
+        head_branch: "feat".into(),
+        base_branch: "main".into(),
+    };
+    db.pr_insert(&item).unwrap();
+
+    let item2 = NewPrItem {
+        repo_id: repo_id.clone(),
+        github_number: 10,
+        title: "Duplicate PR".into(),
+        body: None,
+        author: "dev2".into(),
+        head_branch: "feat2".into(),
+        base_branch: "main".into(),
+    };
+    db.pr_insert(&item2).unwrap();
+
+    let list = db.pr_list("org/test-repo", 20).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].title, "First PR");
+}
+
+#[test]
+fn merge_duplicate_insert_is_ignored() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    let item = NewMergeItem {
+        repo_id: repo_id.clone(),
+        pr_number: 15,
+        title: "First merge".into(),
+        head_branch: "feat".into(),
+        base_branch: "main".into(),
+    };
+    db.merge_insert(&item).unwrap();
+
+    let item2 = NewMergeItem {
+        repo_id: repo_id.clone(),
+        pr_number: 15,
+        title: "Duplicate merge".into(),
+        head_branch: "feat2".into(),
+        base_branch: "main".into(),
+    };
+    db.merge_insert(&item2).unwrap();
+
+    let list = db.merge_list("org/test-repo", 20).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].title, "First merge");
+}
+
+#[test]
+fn merge_exists_check() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    assert!(!db.merge_exists(&repo_id, 15).unwrap());
+
+    let item = NewMergeItem {
+        repo_id: repo_id.clone(),
+        pr_number: 15,
+        title: "Merge".into(),
+        head_branch: "feat".into(),
+        base_branch: "main".into(),
+    };
+    db.merge_insert(&item).unwrap();
+
+    assert!(db.merge_exists(&repo_id, 15).unwrap());
+    assert!(!db.merge_exists(&repo_id, 999).unwrap());
+}
+
+// ═══════════════════════════════════════════════
+// 10. retry_count 추적
+// ═══════════════════════════════════════════════
+
+#[test]
+fn issue_mark_failed_increments_retry_count() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    let item = NewIssueItem {
+        repo_id: repo_id.clone(),
+        github_number: 1,
+        title: "Retry count test".into(),
+        body: None,
+        labels: "[]".into(),
+        author: "user1".into(),
+    };
+    let id = db.issue_insert(&item).unwrap();
+
+    // 첫 번째 실패 → retry_count = 1
+    db.issue_mark_failed(&id, "error 1").unwrap();
+
+    let retry_count: i64 = db.conn().query_row(
+        "SELECT retry_count FROM issue_queue WHERE id = ?1",
+        rusqlite::params![id],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(retry_count, 1);
+
+    // retry → pending, retry_count는 유지
+    db.queue_retry(&id).unwrap();
+
+    // 두 번째 실패 → retry_count = 2
+    db.issue_mark_failed(&id, "error 2").unwrap();
+
+    let retry_count: i64 = db.conn().query_row(
+        "SELECT retry_count FROM issue_queue WHERE id = ?1",
+        rusqlite::params![id],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(retry_count, 2);
+}
+
+// ═══════════════════════════════════════════════
+// 11. 원자적 상태 업데이트
+// ═══════════════════════════════════════════════
+
+#[test]
+fn issue_update_status_atomic_fields() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    let item = NewIssueItem {
+        repo_id: repo_id.clone(),
+        github_number: 1,
+        title: "Atomic test".into(),
+        body: None,
+        labels: "[]".into(),
+        author: "user1".into(),
+    };
+    let id = db.issue_insert(&item).unwrap();
+
+    // worker_id와 analysis_report를 동시에 설정
+    db.issue_update_status(
+        &id,
+        "ready",
+        &StatusFields {
+            worker_id: Some("w1".into()),
+            analysis_report: Some("report".into()),
+            ..Default::default()
+        },
+    ).unwrap();
+
+    let (worker_id, report): (Option<String>, Option<String>) = db.conn().query_row(
+        "SELECT worker_id, analysis_report FROM issue_queue WHERE id = ?1",
+        rusqlite::params![id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap();
+
+    assert_eq!(worker_id.as_deref(), Some("w1"));
+    assert_eq!(report.as_deref(), Some("report"));
+}
