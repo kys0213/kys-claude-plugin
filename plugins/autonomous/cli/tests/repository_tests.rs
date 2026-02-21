@@ -1,4 +1,3 @@
-use autodev::config::models::RepoConfig;
 use autodev::queue::models::*;
 use autodev::queue::repository::*;
 use autodev::queue::Database;
@@ -13,17 +12,12 @@ fn open_memory_db() -> Database {
 }
 
 fn add_test_repo(db: &Database) -> String {
-    db.repo_add(
-        "https://github.com/org/test-repo",
-        "org/test-repo",
-        &RepoConfig::default(),
-    )
-    .expect("add repo")
+    db.repo_add("https://github.com/org/test-repo", "org/test-repo")
+        .expect("add repo")
 }
 
 fn add_test_repo_with_url(db: &Database, url: &str, name: &str) -> String {
-    db.repo_add(url, name, &RepoConfig::default())
-        .expect("add repo")
+    db.repo_add(url, name).expect("add repo")
 }
 
 // ═══════════════════════════════════════════════
@@ -47,7 +41,6 @@ fn repo_add_duplicate_url_fails() {
     let result = db.repo_add(
         "https://github.com/org/test-repo",
         "org/test-repo",
-        &RepoConfig::default(),
     );
     assert!(result.is_err());
 }
@@ -78,21 +71,21 @@ fn repo_remove_nonexistent_is_ok() {
 }
 
 #[test]
-fn repo_list_with_config() {
+fn repo_list() {
     let db = open_memory_db();
     add_test_repo(&db);
 
-    let list = db.repo_list_with_config().unwrap();
+    let list = db.repo_list().unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].name, "org/test-repo");
-    assert_eq!(list[0].scan_interval_secs, 300); // default
-    assert_eq!(list[0].issue_concurrency, 1); // default
+    assert_eq!(list[0].url, "https://github.com/org/test-repo");
+    assert!(list[0].enabled);
 }
 
 #[test]
 fn repo_list_empty() {
     let db = open_memory_db();
-    let list = db.repo_list_with_config().unwrap();
+    let list = db.repo_list().unwrap();
     assert!(list.is_empty());
 }
 
@@ -104,31 +97,6 @@ fn repo_find_enabled() {
     let enabled = db.repo_find_enabled().unwrap();
     assert_eq!(enabled.len(), 1);
     assert_eq!(enabled[0].name, "org/test-repo");
-}
-
-#[test]
-fn repo_update_config() {
-    let db = open_memory_db();
-    add_test_repo(&db);
-
-    let mut config = RepoConfig::default();
-    config.scan_interval_secs = 60;
-    config.issue_concurrency = 3;
-    db.repo_update_config("org/test-repo", &config).unwrap();
-
-    let list = db.repo_list_with_config().unwrap();
-    assert_eq!(list[0].scan_interval_secs, 60);
-    assert_eq!(list[0].issue_concurrency, 3);
-}
-
-#[test]
-fn repo_get_config() {
-    let db = open_memory_db();
-    add_test_repo(&db);
-
-    let config_str = db.repo_get_config("org/test-repo").unwrap();
-    assert!(config_str.contains("scan_interval: 300s"));
-    assert!(config_str.contains("issue_concurrency: 1"));
 }
 
 #[test]

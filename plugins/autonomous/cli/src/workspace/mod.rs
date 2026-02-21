@@ -3,22 +3,23 @@ use std::path::PathBuf;
 use anyhow::Result;
 
 use crate::config;
+use crate::config::Env;
 
 /// 레포의 base clone 경로
-pub fn repo_base_path(repo_name: &str) -> PathBuf {
+pub fn repo_base_path(env: &dyn Env, repo_name: &str) -> PathBuf {
     let sanitized = repo_name.replace('/', "-");
-    config::workspaces_path().join(&sanitized).join("main")
+    config::workspaces_path(env).join(&sanitized).join("main")
 }
 
 /// 작업별 worktree 경로
-pub fn worktree_path(repo_name: &str, task_id: &str) -> PathBuf {
+pub fn worktree_path(env: &dyn Env, repo_name: &str, task_id: &str) -> PathBuf {
     let sanitized = repo_name.replace('/', "-");
-    config::workspaces_path().join(&sanitized).join(task_id)
+    config::workspaces_path(env).join(&sanitized).join(task_id)
 }
 
 /// 레포가 아직 클론되지 않았으면 클론
-pub async fn ensure_cloned(repo_url: &str, repo_name: &str) -> Result<PathBuf> {
-    let base = repo_base_path(repo_name);
+pub async fn ensure_cloned(env: &dyn Env, repo_url: &str, repo_name: &str) -> Result<PathBuf> {
+    let base = repo_base_path(env, repo_name);
 
     if !base.exists() {
         std::fs::create_dir_all(base.parent().unwrap())?;
@@ -48,12 +49,13 @@ pub async fn ensure_cloned(repo_url: &str, repo_name: &str) -> Result<PathBuf> {
 
 /// 작업용 worktree 생성
 pub async fn create_worktree(
+    env: &dyn Env,
     repo_name: &str,
     task_id: &str,
     branch: Option<&str>,
 ) -> Result<PathBuf> {
-    let base = repo_base_path(repo_name);
-    let wt_path = worktree_path(repo_name, task_id);
+    let base = repo_base_path(env, repo_name);
+    let wt_path = worktree_path(env, repo_name, task_id);
 
     if wt_path.exists() {
         return Ok(wt_path);
@@ -85,9 +87,9 @@ pub async fn create_worktree(
 }
 
 /// worktree 제거
-pub async fn remove_worktree(repo_name: &str, task_id: &str) -> Result<()> {
-    let base = repo_base_path(repo_name);
-    let wt_path = worktree_path(repo_name, task_id);
+pub async fn remove_worktree(env: &dyn Env, repo_name: &str, task_id: &str) -> Result<()> {
+    let base = repo_base_path(env, repo_name);
+    let wt_path = worktree_path(env, repo_name, task_id);
 
     if wt_path.exists() {
         tokio::process::Command::new("git")

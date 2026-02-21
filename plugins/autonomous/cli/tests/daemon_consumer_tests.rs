@@ -1,10 +1,37 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use autodev::config::models::RepoConfig;
+use autodev::config::Env;
 use autodev::queue::models::*;
 use autodev::queue::repository::*;
 use autodev::queue::Database;
 use serial_test::serial;
+
+// ─── TestEnv ───
+
+struct TestEnv {
+    vars: HashMap<String, String>,
+}
+
+impl TestEnv {
+    fn new(tmpdir: &tempfile::TempDir) -> Self {
+        let mut vars = HashMap::new();
+        vars.insert(
+            "AUTODEV_HOME".to_string(),
+            tmpdir.path().to_str().unwrap().to_string(),
+        );
+        Self { vars }
+    }
+}
+
+impl Env for TestEnv {
+    fn var(&self, key: &str) -> Result<String, std::env::VarError> {
+        self.vars
+            .get(key)
+            .cloned()
+            .ok_or(std::env::VarError::NotPresent)
+    }
+}
 
 // ─── Helpers ───
 
@@ -25,12 +52,11 @@ fn open_memory_db() -> Database {
 }
 
 fn add_repo(db: &Database, url: &str, name: &str) -> String {
-    db.repo_add(url, name, &RepoConfig::default()).expect("add repo")
+    db.repo_add(url, name).expect("add repo")
 }
 
-fn setup_env(tmpdir: &tempfile::TempDir) {
+fn setup_subprocess_env() {
     std::env::set_var("PATH", path_with_fake_bin());
-    std::env::set_var("AUTODEV_HOME", tmpdir.path());
     std::env::remove_var("CLAUDE_MOCK_EXIT_CODE");
     std::env::remove_var("CLAUDE_MOCK_STDERR");
     std::env::remove_var("GIT_MOCK_EXIT_CODE");
@@ -75,13 +101,14 @@ fn insert_pending_pr(db: &Database, repo_id: &str, number: i64, title: &str) -> 
 #[serial]
 async fn issue_consumer_success_transitions_to_done() {
     let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
     insert_pending_issue(&db, &repo_id, 42, "Bug: test issue");
 
-    setup_env(&tmpdir);
+    setup_subprocess_env();
 
-    autodev::consumer::issue::process_pending(&db)
+    autodev::consumer::issue::process_pending(&db, &env)
         .await
         .expect("process_pending should succeed");
 
@@ -101,14 +128,15 @@ async fn issue_consumer_success_transitions_to_done() {
 #[serial]
 async fn issue_consumer_claude_failure_marks_failed() {
     let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
     insert_pending_issue(&db, &repo_id, 99, "Will fail");
 
-    setup_env(&tmpdir);
+    setup_subprocess_env();
     std::env::set_var("CLAUDE_MOCK_EXIT_CODE", "1");
 
-    autodev::consumer::issue::process_pending(&db)
+    autodev::consumer::issue::process_pending(&db, &env)
         .await
         .expect("should handle failure gracefully");
 
@@ -129,13 +157,14 @@ async fn issue_consumer_claude_failure_marks_failed() {
 #[serial]
 async fn pr_consumer_success_transitions_to_review_done() {
     let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
     insert_pending_pr(&db, &repo_id, 100, "feat: add settings");
 
-    setup_env(&tmpdir);
+    setup_subprocess_env();
 
-    autodev::consumer::pr::process_pending(&db)
+    autodev::consumer::pr::process_pending(&db, &env)
         .await
         .expect("process_pending should succeed");
 
@@ -156,14 +185,15 @@ async fn pr_consumer_success_transitions_to_review_done() {
 #[serial]
 async fn pr_consumer_claude_failure_marks_failed() {
     let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
     insert_pending_pr(&db, &repo_id, 200, "will fail");
 
-    setup_env(&tmpdir);
+    setup_subprocess_env();
     std::env::set_var("CLAUDE_MOCK_EXIT_CODE", "1");
 
-    autodev::consumer::pr::process_pending(&db)
+    autodev::consumer::pr::process_pending(&db, &env)
         .await
         .expect("should handle failure");
 
@@ -181,6 +211,7 @@ async fn pr_consumer_claude_failure_marks_failed() {
 #[serial]
 async fn issue_consumer_processes_up_to_limit() {
     let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
@@ -188,10 +219,10 @@ async fn issue_consumer_processes_up_to_limit() {
         insert_pending_issue(&db, &repo_id, i, &format!("Issue #{i}"));
     }
 
-    setup_env(&tmpdir);
+    setup_subprocess_env();
 
     // process_pending has hardcoded limit of 5
-    autodev::consumer::issue::process_pending(&db)
+    autodev::consumer::issue::process_pending(&db, &env)
         .await
         .expect("should process batch");
 
@@ -208,15 +239,16 @@ async fn issue_consumer_processes_up_to_limit() {
 #[serial]
 async fn process_all_handles_issues_and_prs() {
     let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     insert_pending_issue(&db, &repo_id, 1, "Issue");
     insert_pending_pr(&db, &repo_id, 10, "PR");
 
-    setup_env(&tmpdir);
+    setup_subprocess_env();
 
-    autodev::consumer::process_all(&db)
+    autodev::consumer::process_all(&db, &env)
         .await
         .expect("process_all should succeed");
 

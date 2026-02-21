@@ -56,19 +56,13 @@ enum RepoAction {
     Add {
         /// 레포 URL
         url: String,
-        /// JSON 설정
-        #[arg(long)]
-        config: Option<String>,
     },
     /// 등록된 레포 목록
     List,
-    /// 레포 설정 변경
+    /// 레포 설정 확인 (YAML 기반)
     Config {
         /// 레포 이름 (org/repo)
         name: String,
-        /// JSON 설정 업데이트
-        #[arg(long)]
-        update: Option<String>,
     },
     /// 레포 제거
     Remove {
@@ -106,7 +100,8 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let home = config::autodev_home();
+    let env = config::RealEnv;
+    let home = config::autodev_home(&env);
     std::fs::create_dir_all(&home)?;
 
     let db_path = home.join("autodev.db");
@@ -114,27 +109,27 @@ async fn main() -> Result<()> {
     db.initialize()?;
 
     match cli.command {
-        Commands::Start => daemon::start(&home).await?,
+        Commands::Start => daemon::start(&home, &env).await?,
         Commands::Stop => daemon::stop(&home)?,
         Commands::Restart => {
             daemon::stop(&home).ok();
-            daemon::start(&home).await?;
+            daemon::start(&home, &env).await?;
         }
         Commands::Status => {
-            let status = client::status(&db)?;
+            let status = client::status(&db, &env)?;
             println!("{status}");
         }
         Commands::Dashboard => tui::run(&db).await?,
         Commands::Repo { action } => match action {
-            RepoAction::Add { url, config: cfg } => {
-                client::repo_add(&db, &url, cfg.as_deref())?;
+            RepoAction::Add { url } => {
+                client::repo_add(&db, &url)?;
             }
             RepoAction::List => {
                 let list = client::repo_list(&db)?;
                 println!("{list}");
             }
-            RepoAction::Config { name, update } => {
-                client::repo_config(&db, &name, update.as_deref())?;
+            RepoAction::Config { name } => {
+                client::repo_config(&env, &name)?;
             }
             RepoAction::Remove { name } => {
                 client::repo_remove(&db, &name)?;

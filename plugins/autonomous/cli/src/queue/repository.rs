@@ -4,17 +4,14 @@ use uuid::Uuid;
 
 use super::models::*;
 use super::Database;
-use crate::config::models::RepoConfig;
 
 // ─── Repository traits ───
 
 pub trait RepoRepository {
-    fn repo_add(&self, url: &str, name: &str, config: &RepoConfig) -> Result<String>;
+    fn repo_add(&self, url: &str, name: &str) -> Result<String>;
     fn repo_remove(&self, name: &str) -> Result<()>;
-    fn repo_list_with_config(&self) -> Result<Vec<RepoWithConfig>>;
+    fn repo_list(&self) -> Result<Vec<RepoInfo>>;
     fn repo_find_enabled(&self) -> Result<Vec<EnabledRepo>>;
-    fn repo_update_config(&self, name: &str, config: &RepoConfig) -> Result<()>;
-    fn repo_get_config(&self, name: &str) -> Result<String>;
     fn repo_count(&self) -> Result<i64>;
     fn repo_status_summary(&self) -> Result<Vec<RepoStatusRow>>;
 }
@@ -69,7 +66,7 @@ pub trait QueueAdmin {
 // ─── SQLite implementations ───
 
 impl RepoRepository for Database {
-    fn repo_add(&self, url: &str, name: &str, config: &RepoConfig) -> Result<String> {
+    fn repo_add(&self, url: &str, name: &str) -> Result<String> {
         let conn = self.conn();
         let now = Utc::now().to_rfc3339();
         let id = Uuid::new_v4().to_string();
@@ -77,26 +74,6 @@ impl RepoRepository for Database {
         conn.execute(
             "INSERT INTO repositories (id, url, name, enabled, created_at, updated_at) VALUES (?1, ?2, ?3, 1, ?4, ?4)",
             rusqlite::params![id, url, name, now],
-        )?;
-
-        conn.execute(
-            "INSERT INTO repo_configs (repo_id, scan_interval_secs, scan_targets, issue_concurrency, pr_concurrency, merge_concurrency, model, issue_workflow, pr_workflow, filter_labels, ignore_authors, workspace_strategy, gh_host) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-            rusqlite::params![
-                id,
-                config.scan_interval_secs,
-                serde_json::to_string(&config.scan_targets)?,
-                config.issue_concurrency,
-                config.pr_concurrency,
-                config.merge_concurrency,
-                config.model,
-                config.issue_workflow,
-                config.pr_workflow,
-                config.filter_labels.as_ref().map(|l| serde_json::to_string(l).unwrap_or_default()),
-                serde_json::to_string(&config.ignore_authors)?,
-                config.workspace_strategy,
-                config.gh_host,
-            ],
         )?;
 
         Ok(id)
@@ -132,32 +109,23 @@ impl RepoRepository for Database {
             rusqlite::params![name],
         )?;
 
-        // 설정 및 레포 삭제
-        conn.execute(
-            &format!("DELETE FROM repo_configs WHERE repo_id = {repo_id_query}"),
-            rusqlite::params![name],
-        )?;
+        // 레포 삭제
         conn.execute("DELETE FROM repositories WHERE name = ?1", rusqlite::params![name])?;
 
         Ok(())
     }
 
-    fn repo_list_with_config(&self) -> Result<Vec<RepoWithConfig>> {
+    fn repo_list(&self) -> Result<Vec<RepoInfo>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT r.name, r.url, r.enabled, c.scan_interval_secs, c.issue_concurrency, c.pr_concurrency, c.merge_concurrency \
-             FROM repositories r JOIN repo_configs c ON r.id = c.repo_id ORDER BY r.name",
+            "SELECT name, url, enabled FROM repositories ORDER BY name",
         )?;
 
         let rows = stmt.query_map([], |row| {
-            Ok(RepoWithConfig {
+            Ok(RepoInfo {
                 name: row.get(0)?,
                 url: row.get(1)?,
                 enabled: row.get(2)?,
-                scan_interval_secs: row.get(3)?,
-                issue_concurrency: row.get(4)?,
-                pr_concurrency: row.get(5)?,
-                merge_concurrency: row.get(6)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -166,9 +134,7 @@ impl RepoRepository for Database {
     fn repo_find_enabled(&self) -> Result<Vec<EnabledRepo>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
-            "SELECT r.id, r.url, r.name, c.scan_targets, c.scan_interval_secs, c.filter_labels, c.ignore_authors, c.gh_host \
-             FROM repositories r JOIN repo_configs c ON r.id = c.repo_id \
-             WHERE r.enabled = 1",
+            "SELECT id, url, name FROM repositories WHERE enabled = 1",
         )?;
 
         let rows = stmt.query_map([], |row| {
@@ -176,64 +142,9 @@ impl RepoRepository for Database {
                 id: row.get(0)?,
                 url: row.get(1)?,
                 name: row.get(2)?,
-                scan_targets: row.get(3)?,
-                scan_interval_secs: row.get(4)?,
-                filter_labels: row.get(5)?,
-                ignore_authors: row.get(6)?,
-                gh_host: row.get(7)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }
-
-    fn repo_update_config(&self, name: &str, config: &RepoConfig) -> Result<()> {
-        let conn = self.conn();
-        let now = Utc::now().to_rfc3339();
-
-        conn.execute(
-            "UPDATE repo_configs SET \
-             scan_interval_secs = ?2, scan_targets = ?3, issue_concurrency = ?4, pr_concurrency = ?5, \
-             merge_concurrency = ?6, model = ?7, issue_workflow = ?8, pr_workflow = ?9, \
-             filter_labels = ?10, ignore_authors = ?11, workspace_strategy = ?12, gh_host = ?13 \
-             WHERE repo_id = (SELECT id FROM repositories WHERE name = ?1)",
-            rusqlite::params![
-                name,
-                config.scan_interval_secs,
-                serde_json::to_string(&config.scan_targets)?,
-                config.issue_concurrency,
-                config.pr_concurrency,
-                config.merge_concurrency,
-                config.model,
-                config.issue_workflow,
-                config.pr_workflow,
-                config.filter_labels.as_ref().map(|l| serde_json::to_string(l).unwrap_or_default()),
-                serde_json::to_string(&config.ignore_authors)?,
-                config.workspace_strategy,
-                config.gh_host,
-            ],
-        )?;
-        conn.execute(
-            "UPDATE repositories SET updated_at = ?2 WHERE name = ?1",
-            rusqlite::params![name, now],
-        )?;
-        Ok(())
-    }
-
-    fn repo_get_config(&self, name: &str) -> Result<String> {
-        let conn = self.conn();
-        let mut stmt = conn.prepare(
-            "SELECT c.scan_interval_secs, c.issue_concurrency, c.pr_concurrency, c.merge_concurrency, c.model, c.issue_workflow, c.pr_workflow, c.workspace_strategy \
-             FROM repo_configs c JOIN repositories r ON r.id = c.repo_id WHERE r.name = ?1",
-        )?;
-        let config = stmt.query_row(rusqlite::params![name], |row| {
-            Ok(format!(
-                "scan_interval: {}s\nissue_concurrency: {}\npr_concurrency: {}\nmerge_concurrency: {}\nmodel: {}\nissue_workflow: {}\npr_workflow: {}\nworkspace_strategy: {}",
-                row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?,
-                row.get::<_, String>(6)?, row.get::<_, String>(7)?,
-            ))
-        })?;
-        Ok(config)
     }
 
     fn repo_count(&self) -> Result<i64> {

@@ -130,11 +130,6 @@ pub struct EnabledRepo {
     pub id: String,
     pub url: String,
     pub name: String,
-    pub scan_targets: String,
-    pub scan_interval_secs: i64,
-    pub filter_labels: Option<String>,
-    pub ignore_authors: String,
-    pub gh_host: Option<String>,
 }
 
 pub struct PendingIssue {
@@ -176,14 +171,10 @@ pub struct RepoStatusRow {
     pub merge_pending: i64,
 }
 
-pub struct RepoWithConfig {
+pub struct RepoInfo {
     pub name: String,
     pub url: String,
     pub enabled: bool,
-    pub scan_interval_secs: i64,
-    pub issue_concurrency: i64,
-    pub pr_concurrency: i64,
-    pub merge_concurrency: i64,
 }
 
 pub struct QueueListItem {

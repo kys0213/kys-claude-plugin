@@ -1,16 +1,16 @@
 use anyhow::Result;
 
-use crate::config::models::RepoConfig;
-use crate::queue::models::*;
+use crate::config;
+use crate::config::Env;
 use crate::queue::repository::*;
 use crate::queue::Database;
 
 /// 상태 요약
-pub fn status(db: &Database) -> Result<String> {
+pub fn status(db: &Database, env: &dyn Env) -> Result<String> {
     let mut output = String::new();
 
     // 데몬 상태
-    let home = crate::config::autodev_home();
+    let home = config::autodev_home(env);
     let running = crate::daemon::pid::is_running(&home);
     output.push_str(&format!(
         "autodev daemon: {}\n\n",
@@ -36,34 +36,8 @@ pub fn status(db: &Database) -> Result<String> {
     Ok(output)
 }
 
-/// URL에서 GitHub 호스트 추출
-/// - https://github.com/org/repo → None (기본 github.com)
-/// - https://github.mycompany.com/org/repo → Some("github.mycompany.com")
-/// - git@github.mycompany.com:org/repo.git → Some("github.mycompany.com")
-/// - https://gitlab.com/org/repo → None (GitHub이 아니면 패스)
-fn extract_gh_host(url: &str) -> Option<String> {
-    let host = if url.starts_with("git@") {
-        // git@github.mycompany.com:org/repo.git
-        url.strip_prefix("git@")
-            .and_then(|s| s.split(':').next())
-            .map(|s| s.to_string())
-    } else {
-        // https://github.mycompany.com/org/repo
-        url.split("://")
-            .nth(1)
-            .and_then(|s| s.split('/').next())
-            .map(|s| s.to_string())
-    };
-
-    match host {
-        Some(h) if h == "github.com" => None,
-        Some(h) if h.contains("github") => Some(h),
-        _ => None, // GitHub이 아닌 호스트는 패스
-    }
-}
-
 /// 레포 등록
-pub fn repo_add(db: &Database, url: &str, config_json: Option<&str>) -> Result<()> {
+pub fn repo_add(db: &Database, url: &str) -> Result<()> {
     // URL에서 이름 추출 (예: https://github.com/org/repo -> org/repo)
     let name = url
         .trim_end_matches('/')
@@ -76,38 +50,21 @@ pub fn repo_add(db: &Database, url: &str, config_json: Option<&str>) -> Result<(
         .collect::<Vec<_>>()
         .join("/");
 
-    let mut config: RepoConfig = if let Some(json) = config_json {
-        serde_json::from_str(json)?
-    } else {
-        RepoConfig::default()
-    };
-
-    // URL에서 GitHub Enterprise 호스트 자동 감지
-    if config.gh_host.is_none() {
-        config.gh_host = extract_gh_host(url);
-    }
-
-    if let Some(ref host) = config.gh_host {
-        println!("detected GitHub Enterprise: {host}");
-    }
-
-    db.repo_add(url, &name, &config)?;
+    db.repo_add(url, &name)?;
 
     println!("registered: {name} ({url})");
+    println!("config: edit ~/.develop-workflow.yaml (global) or <repo>/.develop-workflow.yaml (per-repo)");
     Ok(())
 }
 
 /// 레포 목록
 pub fn repo_list(db: &Database) -> Result<String> {
-    let repos = db.repo_list_with_config()?;
+    let repos = db.repo_list()?;
     let mut output = String::new();
 
     for r in &repos {
         let icon = if r.enabled { "●" } else { "○" };
-        output.push_str(&format!(
-            "{icon} {}\n  {}\n  scan: {}s | issue×{} pr×{} merge×{}\n\n",
-            r.name, r.url, r.scan_interval_secs, r.issue_concurrency, r.pr_concurrency, r.merge_concurrency
-        ));
+        output.push_str(&format!("{icon} {}\n  {}\n\n", r.name, r.url));
     }
 
     if output.is_empty() {
@@ -117,16 +74,38 @@ pub fn repo_list(db: &Database) -> Result<String> {
     Ok(output)
 }
 
-/// 레포 설정 변경
-pub fn repo_config(db: &Database, name: &str, update_json: Option<&str>) -> Result<()> {
-    if let Some(json) = update_json {
-        let config: RepoConfig = serde_json::from_str(json)?;
-        db.repo_update_config(name, &config)?;
-        println!("updated config for {name}");
+/// 레포 설정 표시 (YAML 기반)
+pub fn repo_config(env: &dyn Env, name: &str) -> Result<()> {
+    // 글로벌 설정
+    let global_path = config::loader::global_config_path(env);
+    println!("Global config: {}", global_path.display());
+
+    if global_path.exists() {
+        println!("  (exists)");
     } else {
-        let config = db.repo_get_config(name)?;
-        println!("{name}:\n{config}");
+        println!("  (not found — using defaults)");
     }
+
+    // 워크스페이스에서 레포별 설정 탐색
+    let ws = config::workspaces_path(env).join(name);
+    let repo_config_path = ws.join(".develop-workflow.yaml");
+    println!("\nRepo config: {}", repo_config_path.display());
+
+    if repo_config_path.exists() {
+        println!("  (exists)");
+    } else {
+        println!("  (not found — using global/defaults)");
+    }
+
+    // 최종 머지 결과 표시
+    let merged = if ws.exists() {
+        config::loader::load_merged(env, Some(&ws))
+    } else {
+        config::loader::load_merged(env, None)
+    };
+
+    let yaml = serde_yaml::to_string(&merged)?;
+    println!("\nEffective config for {name}:\n---\n{yaml}");
 
     Ok(())
 }

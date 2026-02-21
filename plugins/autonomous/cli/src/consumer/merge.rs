@@ -2,6 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use uuid::Uuid;
 
+use crate::config::Env;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::Database;
@@ -9,7 +10,7 @@ use crate::session;
 use crate::workspace;
 
 /// pending 머지 처리
-pub async fn process_pending(db: &Database) -> Result<()> {
+pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
     let items = db.merge_find_pending(1)?;
 
     for item in items {
@@ -26,12 +27,12 @@ pub async fn process_pending(db: &Database) -> Result<()> {
 
         // 워크스페이스 준비
         let task_id = format!("merge-pr-{}", item.pr_number);
-        if let Err(e) = workspace::ensure_cloned(&item.repo_url, &item.repo_name).await {
+        if let Err(e) = workspace::ensure_cloned(env, &item.repo_url, &item.repo_name).await {
             db.merge_mark_failed(&item.id, &format!("clone failed: {e}"))?;
             continue;
         }
 
-        let wt_path = match workspace::create_worktree(&item.repo_name, &task_id, None).await {
+        let wt_path = match workspace::create_worktree(env, &item.repo_name, &task_id, None).await {
             Ok(p) => p,
             Err(e) => {
                 db.merge_mark_failed(&item.id, &format!("worktree failed: {e}"))?;
@@ -40,7 +41,7 @@ pub async fn process_pending(db: &Database) -> Result<()> {
         };
 
         // 머지 실행
-        let prompt = format!("/merge-pr {}", item.pr_number);
+        let prompt = format!("/git-utils:merge-pr {}", item.pr_number);
         let started = Utc::now().to_rfc3339();
 
         let result = session::run_claude(&wt_path, &prompt, None).await;
@@ -57,7 +58,7 @@ pub async fn process_pending(db: &Database) -> Result<()> {
                     queue_type: "merge".to_string(),
                     queue_item_id: item.id.clone(),
                     worker_id: worker_id.clone(),
-                    command: format!("claude -p \"/merge-pr {}\"", item.pr_number),
+                    command: format!("claude -p \"/git-utils:merge-pr {}\"", item.pr_number),
                     stdout: res.stdout.clone(),
                     stderr: res.stderr.clone(),
                     exit_code: res.exit_code,
@@ -71,7 +72,7 @@ pub async fn process_pending(db: &Database) -> Result<()> {
                     tracing::info!("PR #{} merged successfully", item.pr_number);
 
                     // worktree 정리
-                    let _ = workspace::remove_worktree(&item.repo_name, &task_id).await;
+                    let _ = workspace::remove_worktree(env, &item.repo_name, &task_id).await;
                 } else if res.stdout.contains("conflict") || res.stderr.contains("conflict") {
                     // 충돌 발생 - 해결 시도
                     db.merge_update_status(&item.id, "conflict", &StatusFields::default())?;
