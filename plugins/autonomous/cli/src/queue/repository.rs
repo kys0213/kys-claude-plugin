@@ -60,7 +60,7 @@ pub trait ConsumerLogRepository {
 pub trait QueueAdmin {
     fn queue_retry(&self, id: &str) -> Result<bool>;
     fn queue_clear(&self, repo_name: &str) -> Result<()>;
-    fn queue_reset_stuck(&self) -> Result<u64>;
+    fn queue_reset_stuck(&self, threshold_secs: i64) -> Result<u64>;
     fn queue_auto_retry_failed(&self, max_retries: i64) -> Result<u64>;
 }
 
@@ -182,8 +182,13 @@ impl IssueQueueRepository for Database {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
         self.conn().execute(
-            "INSERT OR IGNORE INTO issue_queue (id, repo_id, github_number, title, body, labels, author, status, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8, ?8)",
+            "INSERT INTO issue_queue (id, repo_id, github_number, title, body, labels, author, status, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8, ?8) \
+             ON CONFLICT(repo_id, github_number) DO UPDATE SET \
+             title = excluded.title, body = excluded.body, labels = excluded.labels, \
+             author = excluded.author, status = 'pending', error_message = NULL, \
+             worker_id = NULL, retry_count = 0, updated_at = excluded.updated_at \
+             WHERE status IN ('done', 'failed')",
             rusqlite::params![id, item.repo_id, item.github_number, item.title, item.body, item.labels, item.author, now],
         )?;
         Ok(id)
@@ -191,7 +196,8 @@ impl IssueQueueRepository for Database {
 
     fn issue_exists(&self, repo_id: &str, github_number: i64) -> Result<bool> {
         let exists: bool = self.conn().query_row(
-            "SELECT COUNT(*) > 0 FROM issue_queue WHERE repo_id = ?1 AND github_number = ?2",
+            "SELECT COUNT(*) > 0 FROM issue_queue WHERE repo_id = ?1 AND github_number = ?2 \
+             AND status NOT IN ('done', 'failed')",
             rusqlite::params![repo_id, github_number],
             |row| row.get(0),
         )?;
@@ -278,8 +284,14 @@ impl PrQueueRepository for Database {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
         self.conn().execute(
-            "INSERT OR IGNORE INTO pr_queue (id, repo_id, github_number, title, body, author, head_branch, base_branch, status, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, ?9)",
+            "INSERT INTO pr_queue (id, repo_id, github_number, title, body, author, head_branch, base_branch, status, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, ?9) \
+             ON CONFLICT(repo_id, github_number) DO UPDATE SET \
+             title = excluded.title, body = excluded.body, author = excluded.author, \
+             head_branch = excluded.head_branch, base_branch = excluded.base_branch, \
+             status = 'pending', error_message = NULL, worker_id = NULL, \
+             retry_count = 0, updated_at = excluded.updated_at \
+             WHERE status IN ('done', 'failed')",
             rusqlite::params![id, item.repo_id, item.github_number, item.title, item.body, item.author, item.head_branch, item.base_branch, now],
         )?;
         Ok(id)
@@ -287,7 +299,8 @@ impl PrQueueRepository for Database {
 
     fn pr_exists(&self, repo_id: &str, github_number: i64) -> Result<bool> {
         let exists: bool = self.conn().query_row(
-            "SELECT COUNT(*) > 0 FROM pr_queue WHERE repo_id = ?1 AND github_number = ?2",
+            "SELECT COUNT(*) > 0 FROM pr_queue WHERE repo_id = ?1 AND github_number = ?2 \
+             AND status NOT IN ('done', 'failed')",
             rusqlite::params![repo_id, github_number],
             |row| row.get(0),
         )?;
@@ -375,8 +388,14 @@ impl MergeQueueRepository for Database {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
         self.conn().execute(
-            "INSERT OR IGNORE INTO merge_queue (id, repo_id, pr_number, title, head_branch, base_branch, status, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?7)",
+            "INSERT INTO merge_queue (id, repo_id, pr_number, title, head_branch, base_branch, status, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?7) \
+             ON CONFLICT(repo_id, pr_number) DO UPDATE SET \
+             title = excluded.title, head_branch = excluded.head_branch, \
+             base_branch = excluded.base_branch, status = 'pending', \
+             error_message = NULL, worker_id = NULL, retry_count = 0, \
+             updated_at = excluded.updated_at \
+             WHERE status IN ('done', 'failed')",
             rusqlite::params![id, item.repo_id, item.pr_number, item.title, item.head_branch, item.base_branch, now],
         )?;
         Ok(id)
@@ -384,7 +403,8 @@ impl MergeQueueRepository for Database {
 
     fn merge_exists(&self, repo_id: &str, pr_number: i64) -> Result<bool> {
         let exists: bool = self.conn().query_row(
-            "SELECT COUNT(*) > 0 FROM merge_queue WHERE repo_id = ?1 AND pr_number = ?2",
+            "SELECT COUNT(*) > 0 FROM merge_queue WHERE repo_id = ?1 AND pr_number = ?2 \
+             AND status NOT IN ('done', 'failed')",
             rusqlite::params![repo_id, pr_number],
             |row| row.get(0),
         )?;
@@ -583,8 +603,10 @@ impl QueueAdmin for Database {
         Ok(())
     }
 
-    fn queue_reset_stuck(&self) -> Result<u64> {
-        let now = Utc::now().to_rfc3339();
+    fn queue_reset_stuck(&self, threshold_secs: i64) -> Result<u64> {
+        let now = Utc::now();
+        let cutoff = (now - chrono::Duration::seconds(threshold_secs)).to_rfc3339();
+        let now_str = now.to_rfc3339();
         let conn = self.conn();
         let mut total = 0u64;
 
@@ -600,9 +622,9 @@ impl QueueAdmin for Database {
             let affected = conn.execute(
                 &format!(
                     "UPDATE {table} SET status = 'pending', worker_id = NULL, error_message = NULL, updated_at = ?1 \
-                     WHERE status IN ({in_clause})"
+                     WHERE status IN ({in_clause}) AND updated_at <= ?2"
                 ),
-                rusqlite::params![now],
+                rusqlite::params![now_str, cutoff],
             )?;
             total += affected as u64;
         }

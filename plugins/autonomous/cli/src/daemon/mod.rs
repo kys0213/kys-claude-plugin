@@ -5,7 +5,7 @@ use std::path::Path;
 use anyhow::{bail, Result};
 use tracing::info;
 
-use crate::config::Env;
+use crate::config::{self, Env};
 use crate::queue::Database;
 use crate::queue::repository::QueueAdmin;
 use crate::scanner;
@@ -22,13 +22,17 @@ pub async fn start(home: &Path, env: &dyn Env) -> Result<()> {
     // PID 기록
     pid::write_pid(home)?;
 
+    // 설정 로드
+    let cfg = config::loader::load_merged(env, None);
+    let stuck_threshold = cfg.consumer.stuck_threshold_secs as i64;
+
     // DB 열기
     let db_path = home.join("autodev.db");
     let db = Database::open(&db_path)?;
     db.initialize()?;
 
     // 시작 시 stuck 상태 복구: 이전 데몬이 비정상 종료되어 중간 상태에 남은 항목 복구
-    match db.queue_reset_stuck() {
+    match db.queue_reset_stuck(stuck_threshold) {
         Ok(n) if n > 0 => info!("recovered {n} stuck items → pending"),
         Err(e) => tracing::error!("stuck recovery failed: {e}"),
         _ => {}
