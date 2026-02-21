@@ -13,6 +13,7 @@ pub struct SessionData {
     pub last_ts: Option<i64>,
     pub prompt_count: usize,
     pub tool_use_count: usize,
+    pub first_prompt_snippet: Option<String>,
     pub prompts: Vec<PromptData>,
     pub tool_uses: Vec<ToolUseData>,
     pub file_edits: Vec<FileEditData>,
@@ -88,6 +89,6 @@ pub trait IndexRepository {
 
 pub trait QueryRepository {
     fn list_perspectives(&self) -> Result<Vec<PerspectiveInfo>>;
-    fn query(&self, perspective: &str, params: &QueryParams) -> Result<serde_json::Value>;
+    fn query(&self, perspective: &str, params: &QueryParams, session_filter: Option<&str>) -> Result<serde_json::Value>;
     fn execute_sql(&self, sql: &str) -> Result<serde_json::Value>;
 }

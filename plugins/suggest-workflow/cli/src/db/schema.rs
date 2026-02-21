@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 pub const DDL: &str = "
 -- 메타 정보
@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_ts        INTEGER,
     prompt_count   INTEGER NOT NULL DEFAULT 0,
     tool_use_count INTEGER NOT NULL DEFAULT 0,
+    first_prompt_snippet TEXT,
     indexed_at     TEXT NOT NULL
 );
 

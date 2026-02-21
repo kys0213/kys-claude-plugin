@@ -9,6 +9,7 @@ pub fn run(
     perspective: Option<&str>,
     sql_file: Option<&Path>,
     params: QueryParams,
+    session_filter: Option<&str>,
 ) -> Result<()> {
     let result = match (perspective, sql_file) {
         // --sql-file takes priority
@@ -22,7 +23,7 @@ pub fn run(
             repo.execute_sql(trimmed)?
         }
         // Named perspective
-        (Some(name), None) => repo.query(name, &params)?,
+        (Some(name), None) => repo.query(name, &params, session_filter)?,
         // Neither
         (None, None) => anyhow::bail!("--perspective or --sql-file required"),
     };

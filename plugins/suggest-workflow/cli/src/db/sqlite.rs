@@ -84,8 +84,8 @@ impl IndexRepository for SqliteStore {
 
         // Insert session
         tx.execute(
-            "INSERT INTO sessions (id, file_path, file_size, file_mtime, first_ts, last_ts, prompt_count, tool_use_count, indexed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO sessions (id, file_path, file_size, file_mtime, first_ts, last_ts, prompt_count, tool_use_count, first_prompt_snippet, indexed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 &session.id,
                 &session.file_path,
@@ -95,6 +95,7 @@ impl IndexRepository for SqliteStore {
                 session.last_ts,
                 session.prompt_count as i64,
                 session.tool_use_count as i64,
+                &session.first_prompt_snippet,
                 &now,
             ],
         )?;
@@ -284,7 +285,7 @@ impl QueryRepository for SqliteStore {
         Ok(self.perspectives.clone())
     }
 
-    fn query(&self, perspective: &str, params: &QueryParams) -> Result<serde_json::Value> {
+    fn query(&self, perspective: &str, params: &QueryParams, session_filter: Option<&str>) -> Result<serde_json::Value> {
         let info = self
             .perspectives
             .iter()
@@ -301,8 +302,16 @@ impl QueryRepository for SqliteStore {
             }
         }
 
+        // Validate session filter if provided
+        if let Some(filter) = session_filter {
+            validate_session_filter(filter)?;
+        }
+
+        // Apply session filter: expand {SF:column} placeholders
+        let filtered_sql = apply_session_filter(&info.sql, session_filter);
+
         // Replace :name with ?N and build bind values
-        let (bound_sql, bind_values) = bind_named_params(&info.sql, &info.params, params)?;
+        let (bound_sql, bind_values) = bind_named_params(&filtered_sql, &info.params, params)?;
 
         // Execute and collect results as JSON
         let mut stmt = self.conn.prepare(&bound_sql)?;
@@ -319,6 +328,45 @@ impl QueryRepository for SqliteStore {
         let mut stmt = self.conn.prepare(sql)?;
         stmt_to_json(&mut stmt, &[])
     }
+}
+
+/// Validate that a session filter string is safe to inject into SQL.
+fn validate_session_filter(filter: &str) -> Result<()> {
+    if filter.contains(';') {
+        anyhow::bail!("session filter must not contain semicolons");
+    }
+    let upper = filter.trim().to_uppercase();
+    for keyword in &["DROP ", "CREATE ", "ALTER ", "INSERT ", "DELETE ", "UPDATE "] {
+        if upper.contains(keyword) {
+            anyhow::bail!("session filter must not contain DDL/DML keywords");
+        }
+    }
+    Ok(())
+}
+
+/// Expand `{SF:column}` placeholders in perspective SQL.
+///
+/// - If `filter` is None: remove all `{SF:...}` markers.
+/// - If `filter` is Some: replace `{SF:col}` with `AND col IN (SELECT id FROM sessions WHERE <filter>)`.
+fn apply_session_filter(sql: &str, filter: Option<&str>) -> String {
+    let mut result = sql.to_string();
+    loop {
+        let start = match result.find("{SF:") {
+            Some(pos) => pos,
+            None => break,
+        };
+        let end = match result[start..].find('}') {
+            Some(offset) => start + offset + 1,
+            None => break,
+        };
+        let column = result[start + 4..end - 1].to_string();
+        let replacement = match filter {
+            Some(f) => format!("AND {} IN (SELECT id FROM sessions WHERE {})", column, f),
+            None => String::new(),
+        };
+        result = format!("{}{}{}", &result[..start], replacement, &result[end..]);
+    }
+    result
 }
 
 /// Replace `:name` placeholders with `?N` positional params and build bind values array.

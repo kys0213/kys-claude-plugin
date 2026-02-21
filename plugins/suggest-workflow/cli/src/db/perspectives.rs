@@ -3,6 +3,7 @@ use super::repository::{ParamDef, ParamType, PerspectiveInfo};
 pub fn register_perspectives() -> Vec<PerspectiveInfo> {
     vec![
         // tool-frequency: Top N tools by usage count
+        // Supports --session-filter via {SF:session_id}
         PerspectiveInfo {
             name: "tool-frequency".into(),
             description: "도구 사용 빈도 (분류명 기준)".into(),
@@ -18,12 +19,14 @@ pub fn register_perspectives() -> Vec<PerspectiveInfo> {
                        COUNT(*) AS frequency, \
                        COUNT(DISTINCT session_id) AS sessions \
                 FROM tool_uses \
+                WHERE 1=1 {SF:session_id} \
                 GROUP BY classified_name \
                 ORDER BY frequency DESC \
                 LIMIT :top"
                 .into(),
         },
         // transitions: Tools that follow a specific tool
+        // Derived table — session filter not applicable
         PerspectiveInfo {
             name: "transitions".into(),
             description: "특정 도구 이후 전이 확률".into(),
@@ -42,6 +45,7 @@ pub fn register_perspectives() -> Vec<PerspectiveInfo> {
                 .into(),
         },
         // trends: Weekly tool usage trends
+        // Derived table — session filter not applicable
         PerspectiveInfo {
             name: "trends".into(),
             description: "주간 도구 사용 트렌드".into(),
@@ -60,6 +64,7 @@ pub fn register_perspectives() -> Vec<PerspectiveInfo> {
                 .into(),
         },
         // hotfiles: Most frequently edited files
+        // Derived table — session filter not applicable
         PerspectiveInfo {
             name: "hotfiles".into(),
             description: "자주 편집되는 파일 핫스팟".into(),
@@ -78,9 +83,7 @@ pub fn register_perspectives() -> Vec<PerspectiveInfo> {
                 .into(),
         },
         // repetition: Anomaly detection via z-score² on per-session tool counts
-        // Uses z² comparison to avoid SQRT (not available in SQLite without extensions).
-        // z² = (x - mean)² / variance; filter: z² >= threshold²
-        // deviation_score = sign(x - mean) * z² for signed anomaly direction
+        // Supports --session-filter via {SF:session_id}
         PerspectiveInfo {
             name: "repetition".into(),
             description: "반복/이상치 탐지 (z-score² 기반)".into(),
@@ -103,6 +106,7 @@ pub fn register_perspectives() -> Vec<PerspectiveInfo> {
                            - AVG(COUNT(*)) OVER (PARTITION BY classified_name) \
                            * AVG(COUNT(*)) OVER (PARTITION BY classified_name) AS var_cnt \
                     FROM tool_uses \
+                    WHERE 1=1 {SF:session_id} \
                     GROUP BY session_id, classified_name \
                 ) sub \
                 WHERE (cnt - avg_cnt) * (cnt - avg_cnt) \
@@ -112,6 +116,7 @@ pub fn register_perspectives() -> Vec<PerspectiveInfo> {
                 .into(),
         },
         // prompts: Search prompts by keyword
+        // Supports --session-filter via {SF:p.session_id}
         PerspectiveInfo {
             name: "prompts".into(),
             description: "프롬프트 키워드 검색".into(),
@@ -135,12 +140,13 @@ pub fn register_perspectives() -> Vec<PerspectiveInfo> {
                 SELECT p.session_id, p.timestamp, p.char_count, \
                        SUBSTR(p.text, 1, 200) AS snippet \
                 FROM prompts p \
-                WHERE p.text LIKE '%' || :search || '%' \
+                WHERE p.text LIKE '%' || :search || '%' {SF:p.session_id} \
                 ORDER BY p.timestamp DESC \
                 LIMIT :top"
                 .into(),
         },
         // session-links: Sessions sharing edited files
+        // Derived table — session filter not applicable
         PerspectiveInfo {
             name: "session-links".into(),
             description: "파일 공유 기반 세션 연결".into(),
@@ -161,6 +167,7 @@ pub fn register_perspectives() -> Vec<PerspectiveInfo> {
                 .into(),
         },
         // sequences: Common tool sequences (bigrams)
+        // Derived table — session filter not applicable
         PerspectiveInfo {
             name: "sequences".into(),
             description: "자주 등장하는 도구 시퀀스 (2-gram)".into(),
@@ -180,6 +187,7 @@ pub fn register_perspectives() -> Vec<PerspectiveInfo> {
                 .into(),
         },
         // sessions: Session overview
+        // Supports --session-filter via {SF:id}
         PerspectiveInfo {
             name: "sessions".into(),
             description: "세션 목록 및 요약".into(),
@@ -196,7 +204,47 @@ pub fn register_perspectives() -> Vec<PerspectiveInfo> {
                        datetime(last_ts / 1000, 'unixepoch', 'localtime') AS ended_at, \
                        ROUND((last_ts - first_ts) / 60000.0, 1) AS duration_minutes \
                 FROM sessions \
-                WHERE first_ts IS NOT NULL \
+                WHERE first_ts IS NOT NULL {SF:id} \
+                ORDER BY first_ts DESC \
+                LIMIT :top"
+                .into(),
+        },
+        // filtered-sessions: Find sessions by first prompt pattern
+        PerspectiveInfo {
+            name: "filtered-sessions".into(),
+            description: "첫 프롬프트 패턴으로 세션 검색".into(),
+            params: vec![
+                ParamDef {
+                    name: "prompt_pattern".into(),
+                    param_type: ParamType::Text,
+                    required: true,
+                    default: None,
+                    description: "첫 프롬프트 검색 패턴".into(),
+                },
+                ParamDef {
+                    name: "since".into(),
+                    param_type: ParamType::Date,
+                    required: false,
+                    default: Some("2020-01-01".into()),
+                    description: "시작 날짜 (YYYY-MM-DD)".into(),
+                },
+                ParamDef {
+                    name: "top".into(),
+                    param_type: ParamType::Integer,
+                    required: false,
+                    default: Some("50".into()),
+                    description: "상위 N개".into(),
+                },
+            ],
+            sql: "\
+                SELECT id, prompt_count, tool_use_count, \
+                       SUBSTR(first_prompt_snippet, 1, 100) AS first_prompt, \
+                       datetime(first_ts / 1000, 'unixepoch', 'localtime') AS started_at, \
+                       datetime(last_ts / 1000, 'unixepoch', 'localtime') AS ended_at, \
+                       ROUND((last_ts - first_ts) / 60000.0, 1) AS duration_minutes \
+                FROM sessions \
+                WHERE first_prompt_snippet LIKE '%' || :prompt_pattern || '%' \
+                  AND datetime(first_ts / 1000, 'unixepoch') >= :since \
                 ORDER BY first_ts DESC \
                 LIMIT :top"
                 .into(),

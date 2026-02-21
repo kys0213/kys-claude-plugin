@@ -107,6 +107,10 @@ fn extract_session_data(file_path: &Path, size: u64, mtime: i64) -> Result<Sessi
         .map(|p| p.timestamp)
         .or_else(|| tool_uses.last().and_then(|t| t.timestamp));
 
+    let first_prompt_snippet = prompts
+        .first()
+        .map(|p| p.text.chars().take(500).collect::<String>());
+
     Ok(SessionData {
         id: session_id,
         file_path: file_path.to_string_lossy().to_string(),
@@ -116,6 +120,7 @@ fn extract_session_data(file_path: &Path, size: u64, mtime: i64) -> Result<Sessi
         last_ts,
         prompt_count: prompts.len(),
         tool_use_count: tool_uses.len(),
+        first_prompt_snippet,
         prompts,
         tool_uses,
         file_edits,
