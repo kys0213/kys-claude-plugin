@@ -20,7 +20,7 @@
       ],
       "name": "develop-workflow",
       "source": "./plugins/develop-workflow",
-      "version": "0.6.0"
+      "version": "0.6.1"
     },
     {
       "category": "integration",
@@ -93,7 +93,7 @@
       ],
       "name": "autonomous",
       "source": "./plugins/autonomous",
-      "version": "0.2.4"
+      "version": "0.2.5"
     }
   ]
 }
