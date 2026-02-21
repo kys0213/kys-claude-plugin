@@ -13,8 +13,8 @@ use crate::workspace;
 
 /// pending 이슈 처리
 pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
-    // concurrency 설정에 따라 처리할 이슈 수 결정
-    let items = db.issue_find_pending(5)?;
+    let cfg = config::loader::load_merged(env, None);
+    let items = db.issue_find_pending(cfg.consumer.issue_concurrency)?;
 
     for item in items {
         let worker_id = Uuid::new_v4().to_string();

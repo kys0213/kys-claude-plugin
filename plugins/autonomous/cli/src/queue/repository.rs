@@ -38,6 +38,7 @@ pub trait PrQueueRepository {
 
 pub trait MergeQueueRepository {
     fn merge_insert(&self, item: &NewMergeItem) -> Result<String>;
+    fn merge_exists(&self, repo_id: &str, pr_number: i64) -> Result<bool>;
     fn merge_find_pending(&self, limit: u32) -> Result<Vec<PendingMerge>>;
     fn merge_update_status(&self, id: &str, status: &str, fields: &StatusFields) -> Result<()>;
     fn merge_mark_failed(&self, id: &str, error: &str) -> Result<()>;
@@ -181,7 +182,7 @@ impl IssueQueueRepository for Database {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
         self.conn().execute(
-            "INSERT INTO issue_queue (id, repo_id, github_number, title, body, labels, author, status, created_at, updated_at) \
+            "INSERT OR IGNORE INTO issue_queue (id, repo_id, github_number, title, body, labels, author, status, created_at, updated_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8, ?8)",
             rusqlite::params![id, item.repo_id, item.github_number, item.title, item.body, item.labels, item.author, now],
         )?;
@@ -221,31 +222,29 @@ impl IssueQueueRepository for Database {
 
     fn issue_update_status(&self, id: &str, status: &str, fields: &StatusFields) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        let conn = self.conn();
-
-        if let Some(ref worker_id) = fields.worker_id {
-            conn.execute(
-                "UPDATE issue_queue SET status = ?2, worker_id = ?3, updated_at = ?4 WHERE id = ?1",
-                rusqlite::params![id, status, worker_id, now],
-            )?;
-        } else if let Some(ref report) = fields.analysis_report {
-            conn.execute(
-                "UPDATE issue_queue SET status = ?2, analysis_report = ?3, updated_at = ?4 WHERE id = ?1",
-                rusqlite::params![id, status, report, now],
-            )?;
-        } else {
-            conn.execute(
-                "UPDATE issue_queue SET status = ?2, updated_at = ?3 WHERE id = ?1",
-                rusqlite::params![id, status, now],
-            )?;
-        }
+        self.conn().execute(
+            "UPDATE issue_queue SET status = ?2, \
+             worker_id = COALESCE(?3, worker_id), \
+             analysis_report = COALESCE(?4, analysis_report), \
+             error_message = COALESCE(?5, error_message), \
+             updated_at = ?6 \
+             WHERE id = ?1",
+            rusqlite::params![
+                id, status,
+                fields.worker_id.as_ref(),
+                fields.analysis_report.as_ref(),
+                fields.error_message.as_ref(),
+                now
+            ],
+        )?;
         Ok(())
     }
 
     fn issue_mark_failed(&self, id: &str, error: &str) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         self.conn().execute(
-            "UPDATE issue_queue SET status = 'failed', error_message = ?2, updated_at = ?3 WHERE id = ?1",
+            "UPDATE issue_queue SET status = 'failed', error_message = ?2, \
+             retry_count = retry_count + 1, updated_at = ?3 WHERE id = ?1",
             rusqlite::params![id, error, now],
         )?;
         tracing::error!("issue {id} failed: {error}");
@@ -279,7 +278,7 @@ impl PrQueueRepository for Database {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
         self.conn().execute(
-            "INSERT INTO pr_queue (id, repo_id, github_number, title, body, author, head_branch, base_branch, status, created_at, updated_at) \
+            "INSERT OR IGNORE INTO pr_queue (id, repo_id, github_number, title, body, author, head_branch, base_branch, status, created_at, updated_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9, ?9)",
             rusqlite::params![id, item.repo_id, item.github_number, item.title, item.body, item.author, item.head_branch, item.base_branch, now],
         )?;
@@ -320,31 +319,29 @@ impl PrQueueRepository for Database {
 
     fn pr_update_status(&self, id: &str, status: &str, fields: &StatusFields) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        let conn = self.conn();
-
-        if let Some(ref worker_id) = fields.worker_id {
-            conn.execute(
-                "UPDATE pr_queue SET status = ?2, worker_id = ?3, updated_at = ?4 WHERE id = ?1",
-                rusqlite::params![id, status, worker_id, now],
-            )?;
-        } else if let Some(ref comment) = fields.review_comment {
-            conn.execute(
-                "UPDATE pr_queue SET status = ?2, review_comment = ?3, updated_at = ?4 WHERE id = ?1",
-                rusqlite::params![id, status, comment, now],
-            )?;
-        } else {
-            conn.execute(
-                "UPDATE pr_queue SET status = ?2, updated_at = ?3 WHERE id = ?1",
-                rusqlite::params![id, status, now],
-            )?;
-        }
+        self.conn().execute(
+            "UPDATE pr_queue SET status = ?2, \
+             worker_id = COALESCE(?3, worker_id), \
+             review_comment = COALESCE(?4, review_comment), \
+             error_message = COALESCE(?5, error_message), \
+             updated_at = ?6 \
+             WHERE id = ?1",
+            rusqlite::params![
+                id, status,
+                fields.worker_id.as_ref(),
+                fields.review_comment.as_ref(),
+                fields.error_message.as_ref(),
+                now
+            ],
+        )?;
         Ok(())
     }
 
     fn pr_mark_failed(&self, id: &str, error: &str) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         self.conn().execute(
-            "UPDATE pr_queue SET status = 'failed', error_message = ?2, updated_at = ?3 WHERE id = ?1",
+            "UPDATE pr_queue SET status = 'failed', error_message = ?2, \
+             retry_count = retry_count + 1, updated_at = ?3 WHERE id = ?1",
             rusqlite::params![id, error, now],
         )?;
         tracing::error!("PR {id} failed: {error}");
@@ -378,11 +375,20 @@ impl MergeQueueRepository for Database {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
         self.conn().execute(
-            "INSERT INTO merge_queue (id, repo_id, pr_number, title, head_branch, base_branch, status, created_at, updated_at) \
+            "INSERT OR IGNORE INTO merge_queue (id, repo_id, pr_number, title, head_branch, base_branch, status, created_at, updated_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?7)",
             rusqlite::params![id, item.repo_id, item.pr_number, item.title, item.head_branch, item.base_branch, now],
         )?;
         Ok(id)
+    }
+
+    fn merge_exists(&self, repo_id: &str, pr_number: i64) -> Result<bool> {
+        let exists: bool = self.conn().query_row(
+            "SELECT COUNT(*) > 0 FROM merge_queue WHERE repo_id = ?1 AND pr_number = ?2",
+            rusqlite::params![repo_id, pr_number],
+            |row| row.get(0),
+        )?;
+        Ok(exists)
     }
 
     fn merge_find_pending(&self, limit: u32) -> Result<Vec<PendingMerge>> {
@@ -409,26 +415,27 @@ impl MergeQueueRepository for Database {
 
     fn merge_update_status(&self, id: &str, status: &str, fields: &StatusFields) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        let conn = self.conn();
-
-        if let Some(ref worker_id) = fields.worker_id {
-            conn.execute(
-                "UPDATE merge_queue SET status = ?2, worker_id = ?3, updated_at = ?4 WHERE id = ?1",
-                rusqlite::params![id, status, worker_id, now],
-            )?;
-        } else {
-            conn.execute(
-                "UPDATE merge_queue SET status = ?2, updated_at = ?3 WHERE id = ?1",
-                rusqlite::params![id, status, now],
-            )?;
-        }
+        self.conn().execute(
+            "UPDATE merge_queue SET status = ?2, \
+             worker_id = COALESCE(?3, worker_id), \
+             error_message = COALESCE(?4, error_message), \
+             updated_at = ?5 \
+             WHERE id = ?1",
+            rusqlite::params![
+                id, status,
+                fields.worker_id.as_ref(),
+                fields.error_message.as_ref(),
+                now
+            ],
+        )?;
         Ok(())
     }
 
     fn merge_mark_failed(&self, id: &str, error: &str) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         self.conn().execute(
-            "UPDATE merge_queue SET status = 'failed', error_message = ?2, updated_at = ?3 WHERE id = ?1",
+            "UPDATE merge_queue SET status = 'failed', error_message = ?2, \
+             retry_count = retry_count + 1, updated_at = ?3 WHERE id = ?1",
             rusqlite::params![id, error, now],
         )?;
         tracing::error!("merge {id} failed: {error}");

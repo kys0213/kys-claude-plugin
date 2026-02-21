@@ -11,7 +11,8 @@ use crate::workspace;
 
 /// pending 머지 처리
 pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
-    let items = db.merge_find_pending(1)?;
+    let cfg = crate::config::loader::load_merged(env, None);
+    let items = db.merge_find_pending(cfg.consumer.merge_concurrency)?;
 
     for item in items {
         let worker_id = Uuid::new_v4().to_string();

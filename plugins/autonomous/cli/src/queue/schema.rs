@@ -95,5 +95,52 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_consumer_logs_repo ON consumer_logs(repo_id, started_at);
         ",
     )?;
+
+    // 기존 DB에 중복 데이터가 있을 수 있으므로 먼저 정리 후 UNIQUE 인덱스 생성
+    migrate_unique_constraints(conn)?;
+
+    Ok(())
+}
+
+/// 기존 DB 마이그레이션: 중복 제거 후 UNIQUE 인덱스 추가
+fn migrate_unique_constraints(conn: &Connection) -> Result<()> {
+    // 이미 인덱스가 존재하면 스킵 (CREATE UNIQUE INDEX IF NOT EXISTS)
+    // 중복 데이터가 있으면 인덱스 생성이 실패하므로 먼저 정리
+    let tables = [
+        ("issue_queue", "github_number"),
+        ("pr_queue", "github_number"),
+        ("merge_queue", "pr_number"),
+    ];
+
+    for (table, number_col) in &tables {
+        let idx_name = format!("idx_{table}_unique");
+
+        // 인덱스가 이미 존재하는지 확인
+        let exists: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='index' AND name=?1",
+            rusqlite::params![idx_name],
+            |row| row.get(0),
+        )?;
+
+        if exists {
+            continue;
+        }
+
+        // 중복 제거: 각 (repo_id, number) 그룹에서 가장 오래된 항목만 유지
+        conn.execute(
+            &format!(
+                "DELETE FROM {table} WHERE rowid NOT IN (\
+                 SELECT MIN(rowid) FROM {table} GROUP BY repo_id, {number_col})"
+            ),
+            [],
+        )?;
+
+        // UNIQUE 인덱스 생성
+        conn.execute(
+            &format!("CREATE UNIQUE INDEX {idx_name} ON {table}(repo_id, {number_col})"),
+            [],
+        )?;
+    }
+
     Ok(())
 }

@@ -12,7 +12,8 @@ use crate::workspace;
 
 /// pending PR 처리
 pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
-    let items = db.pr_find_pending(5)?;
+    let cfg = config::loader::load_merged(env, None);
+    let items = db.pr_find_pending(cfg.consumer.pr_concurrency)?;
 
     for item in items {
         let worker_id = Uuid::new_v4().to_string();

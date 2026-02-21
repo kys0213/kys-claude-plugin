@@ -221,13 +221,13 @@ async fn issue_consumer_processes_up_to_limit() {
 
     setup_subprocess_env();
 
-    // process_pending has hardcoded limit of 5
+    // process_pending uses config issue_concurrency (default: 1)
     autodev::consumer::issue::process_pending(&db, &env)
         .await
         .expect("should process batch");
 
     let remaining = db.issue_find_pending(100).unwrap();
-    assert_eq!(remaining.len(), 5);
+    assert_eq!(remaining.len(), 9); // default concurrency=1 → 1 processed, 9 remain
     cleanup_env();
 }
 
