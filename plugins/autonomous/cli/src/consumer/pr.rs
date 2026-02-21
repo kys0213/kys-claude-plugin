@@ -16,6 +16,13 @@ pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
     let items = db.pr_find_pending(cfg.consumer.pr_concurrency)?;
 
     for item in items {
+        // Pre-flight: GitHub에서 PR이 리뷰 대상인지 확인 (open + not approved)
+        if !super::github::is_pr_reviewable(&item.repo_name, item.github_number, cfg.consumer.gh_host.as_deref()).await {
+            db.pr_update_status(&item.id, "done", &StatusFields::default())?;
+            tracing::info!("PR #{} is closed or already approved, skipping", item.github_number);
+            continue;
+        }
+
         let worker_id = Uuid::new_v4().to_string();
 
         db.pr_update_status(

@@ -1,3 +1,4 @@
+pub mod github;
 pub mod issue;
 pub mod merge;
 pub mod pr;

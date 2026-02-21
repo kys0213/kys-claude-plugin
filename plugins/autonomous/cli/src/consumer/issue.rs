@@ -17,6 +17,13 @@ pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
     let items = db.issue_find_pending(cfg.consumer.issue_concurrency)?;
 
     for item in items {
+        // Pre-flight: GitHub에서 이슈가 아직 open인지 확인
+        if !super::github::is_issue_open(&item.repo_name, item.github_number, cfg.consumer.gh_host.as_deref()).await {
+            db.issue_update_status(&item.id, "done", &StatusFields::default())?;
+            tracing::info!("issue #{} is closed on GitHub, skipping", item.github_number);
+            continue;
+        }
+
         let worker_id = Uuid::new_v4().to_string();
 
         // status → analyzing

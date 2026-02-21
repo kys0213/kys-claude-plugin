@@ -15,6 +15,13 @@ pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
     let items = db.merge_find_pending(cfg.consumer.merge_concurrency)?;
 
     for item in items {
+        // Pre-flight: GitHub에서 PR이 아직 머지 가능한 상태인지 확인
+        if !super::github::is_pr_mergeable(&item.repo_name, item.pr_number, cfg.consumer.gh_host.as_deref()).await {
+            db.merge_update_status(&item.id, "done", &StatusFields::default())?;
+            tracing::info!("PR #{} is closed or already merged, skipping", item.pr_number);
+            continue;
+        }
+
         let worker_id = Uuid::new_v4().to_string();
 
         db.merge_update_status(
