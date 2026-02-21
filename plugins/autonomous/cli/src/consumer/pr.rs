@@ -45,7 +45,7 @@ pub async fn process_pending(db: &Database) -> Result<()> {
         // 1단계: Multi-LLM 리뷰
         let started = Utc::now().to_rfc3339();
 
-        let result = session::run_claude(&wt_path, "/multi-review", Some("json")).await;
+        let result = session::run_claude(&wt_path, "/develop-workflow:multi-review", Some("json")).await;
 
         match result {
             Ok(res) => {
@@ -60,7 +60,7 @@ pub async fn process_pending(db: &Database) -> Result<()> {
                     queue_item_id: item.id.clone(),
                     worker_id: worker_id.clone(),
                     command: format!(
-                        "claude -p \"/multi-review\" (PR #{})",
+                        "claude -p \"/develop-workflow:multi-review\" (PR #{})",
                         item.github_number
                     ),
                     stdout: res.stdout.clone(),

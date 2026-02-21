@@ -40,7 +40,7 @@ pub async fn process_pending(db: &Database) -> Result<()> {
         };
 
         // 머지 실행
-        let prompt = format!("/merge-pr {}", item.pr_number);
+        let prompt = format!("/git-utils:merge-pr {}", item.pr_number);
         let started = Utc::now().to_rfc3339();
 
         let result = session::run_claude(&wt_path, &prompt, None).await;
@@ -57,7 +57,7 @@ pub async fn process_pending(db: &Database) -> Result<()> {
                     queue_type: "merge".to_string(),
                     queue_item_id: item.id.clone(),
                     worker_id: worker_id.clone(),
-                    command: format!("claude -p \"/merge-pr {}\"", item.pr_number),
+                    command: format!("claude -p \"/git-utils:merge-pr {}\"", item.pr_number),
                     stdout: res.stdout.clone(),
                     stderr: res.stderr.clone(),
                     exit_code: res.exit_code,

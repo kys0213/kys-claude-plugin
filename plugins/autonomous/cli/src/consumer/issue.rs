@@ -132,7 +132,7 @@ async fn process_ready_issue(
     db.issue_update_status(item_id, "processing", &StatusFields::default())?;
 
     let prompt = format!(
-        "/develop implement based on analysis:\n\n{report}\n\nThis is for issue #{issue_num} in {repo_name}."
+        "/develop-workflow:develop-auto implement based on analysis:\n\n{report}\n\nThis is for issue #{issue_num} in {repo_name}."
     );
 
     let started = Utc::now().to_rfc3339();
@@ -151,7 +151,7 @@ async fn process_ready_issue(
                 queue_type: "issue".to_string(),
                 queue_item_id: item_id.to_string(),
                 worker_id: worker_id.to_string(),
-                command: format!("claude -p \"/develop implement issue #{issue_num}\""),
+                command: format!("claude -p \"/develop-workflow:develop-auto implement issue #{issue_num}\""),
                 stdout: res.stdout.clone(),
                 stderr: res.stderr.clone(),
                 exit_code: res.exit_code,
