@@ -1090,3 +1090,236 @@ fn issue_update_status_atomic_fields() {
     assert_eq!(worker_id.as_deref(), Some("w1"));
     assert_eq!(report.as_deref(), Some("report"));
 }
+
+#[test]
+fn pr_update_status_atomic_fields() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    let item = NewPrItem {
+        repo_id: repo_id.clone(),
+        github_number: 1,
+        title: "Atomic PR".into(),
+        body: None,
+        author: "dev1".into(),
+        head_branch: "feat".into(),
+        base_branch: "main".into(),
+    };
+    let id = db.pr_insert(&item).unwrap();
+
+    // worker_id와 review_comment를 동시에 설정
+    db.pr_update_status(
+        &id,
+        "review_done",
+        &StatusFields {
+            worker_id: Some("w1".into()),
+            review_comment: Some("LGTM".into()),
+            ..Default::default()
+        },
+    ).unwrap();
+
+    let (worker_id, comment): (Option<String>, Option<String>) = db.conn().query_row(
+        "SELECT worker_id, review_comment FROM pr_queue WHERE id = ?1",
+        rusqlite::params![id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap();
+
+    assert_eq!(worker_id.as_deref(), Some("w1"));
+    assert_eq!(comment.as_deref(), Some("LGTM"));
+}
+
+#[test]
+fn merge_update_status_atomic_fields() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    let item = NewMergeItem {
+        repo_id: repo_id.clone(),
+        pr_number: 1,
+        title: "Atomic merge".into(),
+        head_branch: "feat".into(),
+        base_branch: "main".into(),
+    };
+    let id = db.merge_insert(&item).unwrap();
+
+    // worker_id와 error_message를 동시에 설정
+    db.merge_update_status(
+        &id,
+        "conflict",
+        &StatusFields {
+            worker_id: Some("w1".into()),
+            error_message: Some("conflict in file.rs".into()),
+            ..Default::default()
+        },
+    ).unwrap();
+
+    let (worker_id, error): (Option<String>, Option<String>) = db.conn().query_row(
+        "SELECT worker_id, error_message FROM merge_queue WHERE id = ?1",
+        rusqlite::params![id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap();
+
+    assert_eq!(worker_id.as_deref(), Some("w1"));
+    assert_eq!(error.as_deref(), Some("conflict in file.rs"));
+}
+
+#[test]
+fn pr_mark_failed_increments_retry_count() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    let item = NewPrItem {
+        repo_id: repo_id.clone(),
+        github_number: 1,
+        title: "PR retry".into(),
+        body: None,
+        author: "dev1".into(),
+        head_branch: "feat".into(),
+        base_branch: "main".into(),
+    };
+    let id = db.pr_insert(&item).unwrap();
+
+    db.pr_mark_failed(&id, "error 1").unwrap();
+
+    let retry_count: i64 = db.conn().query_row(
+        "SELECT retry_count FROM pr_queue WHERE id = ?1",
+        rusqlite::params![id],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(retry_count, 1);
+
+    db.queue_retry(&id).unwrap();
+    db.pr_mark_failed(&id, "error 2").unwrap();
+
+    let retry_count: i64 = db.conn().query_row(
+        "SELECT retry_count FROM pr_queue WHERE id = ?1",
+        rusqlite::params![id],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(retry_count, 2);
+}
+
+#[test]
+fn merge_mark_failed_increments_retry_count() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    let item = NewMergeItem {
+        repo_id: repo_id.clone(),
+        pr_number: 1,
+        title: "Merge retry".into(),
+        head_branch: "feat".into(),
+        base_branch: "main".into(),
+    };
+    let id = db.merge_insert(&item).unwrap();
+
+    db.merge_mark_failed(&id, "error 1").unwrap();
+
+    let retry_count: i64 = db.conn().query_row(
+        "SELECT retry_count FROM merge_queue WHERE id = ?1",
+        rusqlite::params![id],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(retry_count, 1);
+
+    db.queue_retry(&id).unwrap();
+    db.merge_mark_failed(&id, "error 2").unwrap();
+
+    let retry_count: i64 = db.conn().query_row(
+        "SELECT retry_count FROM merge_queue WHERE id = ?1",
+        rusqlite::params![id],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(retry_count, 2);
+}
+
+// ═══════════════════════════════════════════════
+// 12. 마이그레이션: 기존 중복 데이터 정리
+// ═══════════════════════════════════════════════
+
+#[test]
+fn migration_cleans_up_existing_duplicates() {
+    // 수동으로 UNIQUE 없는 테이블 생성 후 중복 삽입 → initialize()로 마이그레이션 검증
+    let db = Database::open(Path::new(":memory:")).unwrap();
+
+    // UNIQUE 없이 테이블만 생성
+    db.conn().execute_batch("
+        PRAGMA foreign_keys=ON;
+        CREATE TABLE IF NOT EXISTS repositories (
+            id TEXT PRIMARY KEY, url TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS scan_cursors (
+            repo_id TEXT NOT NULL REFERENCES repositories(id), target TEXT NOT NULL,
+            last_seen TEXT NOT NULL, last_scan TEXT NOT NULL, PRIMARY KEY (repo_id, target)
+        );
+        CREATE TABLE IF NOT EXISTS issue_queue (
+            id TEXT PRIMARY KEY, repo_id TEXT NOT NULL REFERENCES repositories(id),
+            github_number INTEGER NOT NULL, title TEXT NOT NULL, body TEXT, labels TEXT,
+            author TEXT NOT NULL, analysis_report TEXT, status TEXT NOT NULL DEFAULT 'pending',
+            worker_id TEXT, branch_name TEXT, pr_number INTEGER, error_message TEXT,
+            retry_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS pr_queue (
+            id TEXT PRIMARY KEY, repo_id TEXT NOT NULL REFERENCES repositories(id),
+            github_number INTEGER NOT NULL, title TEXT NOT NULL, body TEXT,
+            author TEXT NOT NULL, head_branch TEXT NOT NULL, base_branch TEXT NOT NULL,
+            review_comment TEXT, status TEXT NOT NULL DEFAULT 'pending', worker_id TEXT,
+            error_message TEXT, retry_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS merge_queue (
+            id TEXT PRIMARY KEY, repo_id TEXT NOT NULL REFERENCES repositories(id),
+            pr_number INTEGER NOT NULL, title TEXT NOT NULL, head_branch TEXT NOT NULL,
+            base_branch TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+            conflict_files TEXT, worker_id TEXT, error_message TEXT,
+            retry_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS consumer_logs (
+            id TEXT PRIMARY KEY, repo_id TEXT NOT NULL REFERENCES repositories(id),
+            queue_type TEXT NOT NULL, queue_item_id TEXT NOT NULL, worker_id TEXT NOT NULL,
+            command TEXT NOT NULL, stdout TEXT, stderr TEXT, exit_code INTEGER,
+            started_at TEXT NOT NULL, finished_at TEXT, duration_ms INTEGER
+        );
+    ").unwrap();
+
+    // 레포 추가
+    db.conn().execute(
+        "INSERT INTO repositories (id, url, name, enabled, created_at, updated_at) VALUES ('r1', 'https://github.com/a/b', 'a/b', 1, '2024-01-01', '2024-01-01')",
+        [],
+    ).unwrap();
+
+    // 중복 이슈 삽입 (UNIQUE 없으므로 가능)
+    db.conn().execute(
+        "INSERT INTO issue_queue (id, repo_id, github_number, title, author, status, created_at, updated_at) VALUES ('i1', 'r1', 42, 'First', 'alice', 'pending', '2024-01-01', '2024-01-01')",
+        [],
+    ).unwrap();
+    db.conn().execute(
+        "INSERT INTO issue_queue (id, repo_id, github_number, title, author, status, created_at, updated_at) VALUES ('i2', 'r1', 42, 'Duplicate', 'bob', 'pending', '2024-01-02', '2024-01-02')",
+        [],
+    ).unwrap();
+
+    // 중복 확인
+    let count: i64 = db.conn().query_row(
+        "SELECT COUNT(*) FROM issue_queue WHERE repo_id = 'r1' AND github_number = 42", [],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(count, 2);
+
+    // initialize() 호출 → 마이그레이션 실행
+    db.initialize().unwrap();
+
+    // 중복이 제거되고 하나만 남아야 함
+    let count: i64 = db.conn().query_row(
+        "SELECT COUNT(*) FROM issue_queue WHERE repo_id = 'r1' AND github_number = 42", [],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(count, 1);
+
+    // 가장 오래된 항목(First)이 유지되어야 함
+    let title: String = db.conn().query_row(
+        "SELECT title FROM issue_queue WHERE repo_id = 'r1' AND github_number = 42", [],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(title, "First");
+}
