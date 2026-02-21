@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [project-dir]
@@ -81,7 +79,7 @@ missing=()
 
 if [[ -f "$PROJECT_DIR/.env.local" ]]; then
   for var in "${REQUIRED_VARS[@]}"; do
-    if grep -q "^${var}=" "$PROJECT_DIR/.env.local"; then
+    if grep -qE "^${var}=.+" "$PROJECT_DIR/.env.local"; then
       found=$((found + 1))
     else
       missing+=("$var")
@@ -98,7 +96,15 @@ else
   check "REQUIRED_VARS" "FAIL" "$found/$total missing: ${missing[*]:-}"
 fi
 
-# 6. docker-compose.override.yml (optional)
+# 6. Node.js installed (required for check-auth.sh)
+if command -v node &>/dev/null; then
+  node_ver="$(node --version 2>/dev/null)"
+  check "NODE_INSTALLED" "OK" "node $node_ver"
+else
+  check "NODE_INSTALLED" "WARN" "not found (required for check-auth.sh)"
+fi
+
+# 7. docker-compose.override.yml (optional)
 if [[ -f "$PROJECT_DIR/docker-compose.override.yml" ]]; then
   check "OVERRIDE_YML" "OK" "found"
 else

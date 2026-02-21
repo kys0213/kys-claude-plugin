@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [project-dir]
@@ -57,7 +55,14 @@ if [[ ! -f "$AUTH_FILE" ]]; then
   exit 2
 fi
 
-# 3. Parse with node (same pattern as run.sh sync_codex_auth)
+# 3. Verify node is available
+if ! command -v node &>/dev/null; then
+  echo "ERROR=NODE_NOT_FOUND node is required for JWT parsing" >&2
+  exit 2
+fi
+
+# 4. Parse with node (same pattern as run.sh sync_codex_auth)
+node_exit=0
 node -e '
 const fs = require("fs");
 const path = process.argv[1];
@@ -131,4 +136,5 @@ for (const name of names) {
 }
 
 process.exit(hasExpired ? 1 : 0);
-' "$AUTH_FILE"
+' "$AUTH_FILE" || node_exit=$?
+exit $node_exit
