@@ -84,13 +84,24 @@ fn run_migrations(conn: &Connection, from: u32, to: u32) -> Result<()> {
 /// Execute a single migration step.
 ///
 /// Add new migration steps here as the schema evolves.
-fn migrate_step(_conn: &Connection, from: u32, to: u32) -> Result<()> {
+fn migrate_step(conn: &Connection, from: u32, to: u32) -> Result<()> {
     match (from, to) {
-        // Example future migrations:
-        // (3, 4) => {
-        //     conn.execute_batch("ALTER TABLE sessions ADD COLUMN duration_ms INTEGER;")?;
-        //     Ok(())
-        // }
+        (3, 4) => {
+            conn.execute_batch(
+                "ALTER TABLE sessions ADD COLUMN first_prompt_snippet TEXT;"
+            )?;
+            // Backfill from existing prompts: take first prompt text (up to 500 chars)
+            conn.execute_batch(
+                "UPDATE sessions SET first_prompt_snippet = (
+                    SELECT SUBSTR(p.text, 1, 500)
+                    FROM prompts p
+                    WHERE p.session_id = sessions.id
+                    ORDER BY p.timestamp ASC
+                    LIMIT 1
+                ) WHERE first_prompt_snippet IS NULL;"
+            )?;
+            Ok(())
+        }
         _ => {
             anyhow::bail!(
                 "no migration path from v{} to v{}. Run with --full to rebuild.",

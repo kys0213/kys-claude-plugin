@@ -67,6 +67,10 @@ struct QueryArgs {
     /// List all available perspectives
     #[arg(long)]
     list_perspectives: bool,
+    /// Filter perspectives to sessions matching this SQL condition on the sessions table.
+    /// Example: "first_prompt_snippet LIKE '[autodev]%'"
+    #[arg(long)]
+    session_filter: Option<String>,
 }
 
 #[derive(clap::Args)]
@@ -219,6 +223,7 @@ fn run_query(args: QueryArgs) -> Result<()> {
         args.perspective.as_deref(),
         args.sql_file.as_deref(),
         params,
+        args.session_filter.as_deref(),
     )
 }
 

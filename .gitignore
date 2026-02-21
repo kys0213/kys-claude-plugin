@@ -31,4 +31,4 @@ tools/bumpversion/bumpversion
 
 # Rust build artifacts
 plugins/suggest-workflow/cli/target/
-plugins/autonomous/cli/target/
+plugins/autodev/cli/target/
