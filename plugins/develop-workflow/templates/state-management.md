@@ -53,7 +53,7 @@ Phase 간 전환을 물리적으로 제어하는 조건입니다.
 | Gate | 설정 시점 | 용도 |
 |------|----------|------|
 | `review_clean_pass` | Phase 2 리뷰에서 Blocking 이슈 0개 | Phase 3 IMPLEMENT 진입 허용 |
-| `architect_verified` | Phase 3 Architect 검증 통과 | Phase 4 MERGE 진입 허용 |
+| `architect_verified` | Phase 3 Architect 검증 통과 | Phase 4 PR 진입 허용 |
 | `re_review_clean` | Phase 4 코드 리뷰 clean pass | PR 생성/push 허용 |
 
 ### Gate 검증 매트릭스
@@ -61,8 +61,8 @@ Phase 간 전환을 물리적으로 제어하는 조건입니다.
 | Phase | Matcher | 필수 Gate | 차단 대상 |
 |-------|---------|-----------|----------|
 | IMPLEMENT | Write\|Edit | `review_clean_pass` | 파일 수정 |
-| MERGE | Write\|Edit | `review_clean_pass` + `architect_verified` | 파일 수정 |
-| MERGE | Bash (git push/gh pr/git commit) | `re_review_clean` | 종료 명령 |
+| PR | Write\|Edit | `review_clean_pass` + `architect_verified` | 파일 수정 |
+| PR | Bash (git push/gh pr/git commit) | `re_review_clean` | 종료 명령 |
 
 ### Checkpoint 상태
 
@@ -88,7 +88,7 @@ Phase 2 진입 → Edit state.json (phase: REVIEW, checkpoints 초기화)
 Phase 2 통과 → Edit state.json (gates.review_clean_pass: true)
 Phase 3 진입 → Edit state.json (phase: IMPLEMENT, strategy 기록)
 Phase 3 통과 → Edit state.json (gates.architect_verified: true)
-Phase 4 진입 → Edit state.json (phase: MERGE)
+Phase 4 진입 → Edit state.json (phase: PR)
 Phase 4 통과 → Edit state.json (gates.re_review_clean: true)
 완료          → Edit state.json (phase: DONE)
 ```
@@ -111,7 +111,7 @@ CP 시작     → Edit state.json (cp-N: in_progress, iteration: 1)
     │
     ├── phase: DONE → "이전 완료. 새로 시작합니다." → state.json 삭제 → 새 워크플로우
     │
-    └── phase: DESIGN | REVIEW | IMPLEMENT | MERGE
+    └── phase: DESIGN | REVIEW | IMPLEMENT | PR
         │
         ▼
         사용자에게 보고:
@@ -130,7 +130,7 @@ CP 시작     → Edit state.json (cp-N: in_progress, iteration: 1)
 | DESIGN | Phase 1부터 재시작 (설계는 컨텍스트 필요하므로) |
 | REVIEW | Phase 2부터 재시작 (리뷰 재실행) |
 | IMPLEMENT | passed 건너뜀, in_progress CP의 현재 iteration부터 |
-| MERGE | Phase 4부터 재시작 |
+| PR | Phase 4부터 재시작 |
 
 > **IMPLEMENT가 핵심**: DESIGN/REVIEW/MERGE는 상대적으로 짧으므로 재시작해도 됨.
 > IMPLEMENT는 오래 걸리므로 Checkpoint 단위 재개가 중요함.

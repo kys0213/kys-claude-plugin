@@ -15,6 +15,7 @@ pub trait RepoRepository {
     fn repo_find_enabled(&self) -> Result<Vec<EnabledRepo>>;
     fn repo_update_config(&self, name: &str, config: &RepoConfig) -> Result<()>;
     fn repo_get_config(&self, name: &str) -> Result<String>;
+    fn repo_get_config_struct(&self, name: &str) -> Result<RepoConfig>;
     fn repo_count(&self) -> Result<i64>;
     fn repo_status_summary(&self) -> Result<Vec<RepoStatusRow>>;
 }
@@ -232,6 +233,36 @@ impl RepoRepository for Database {
                 row.get::<_, i64>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?,
                 row.get::<_, String>(6)?, row.get::<_, String>(7)?,
             ))
+        })?;
+        Ok(config)
+    }
+
+    fn repo_get_config_struct(&self, name: &str) -> Result<RepoConfig> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT c.scan_interval_secs, c.scan_targets, c.issue_concurrency, c.pr_concurrency, \
+             c.merge_concurrency, c.model, c.issue_workflow, c.pr_workflow, c.filter_labels, \
+             c.ignore_authors, c.workspace_strategy, c.gh_host \
+             FROM repo_configs c JOIN repositories r ON r.id = c.repo_id WHERE r.name = ?1",
+        )?;
+        let config = stmt.query_row(rusqlite::params![name], |row| {
+            let scan_targets_str: String = row.get(1)?;
+            let filter_labels_str: Option<String> = row.get(8)?;
+            let ignore_authors_str: String = row.get(9)?;
+            Ok(RepoConfig {
+                scan_interval_secs: row.get::<_, i64>(0)? as u64,
+                scan_targets: serde_json::from_str(&scan_targets_str).unwrap_or_default(),
+                issue_concurrency: row.get::<_, i64>(2)? as u32,
+                pr_concurrency: row.get::<_, i64>(3)? as u32,
+                merge_concurrency: row.get::<_, i64>(4)? as u32,
+                model: row.get(5)?,
+                issue_workflow: row.get(6)?,
+                pr_workflow: row.get(7)?,
+                filter_labels: filter_labels_str.and_then(|s| serde_json::from_str(&s).ok()),
+                ignore_authors: serde_json::from_str(&ignore_authors_str).unwrap_or_default(),
+                workspace_strategy: row.get(10)?,
+                gh_host: row.get(11)?,
+            })
         })?;
         Ok(config)
     }

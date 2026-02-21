@@ -55,6 +55,10 @@ Phase 1: DESIGN ─→ Phase 2: REVIEW ─→ Phase 3: IMPLEMENT ─→ Phase 4:
     │   ├── Yes → 삭제 후 새 워크플로우 시작
     │   └── No  → 새 워크플로우 시작
     │
+    ├── .develop-workflow.yaml 읽기
+    │   ├── commands 섹션 있음 → 설정값 사용 (누락 키는 기본값)
+    │   └── 파일 없음 → 전체 기본값 사용
+    │
     ▼
 Phase 1부터 실행
 ```
@@ -194,7 +198,7 @@ Consumer가 제공한 분석 리포트에서 요구사항을 추출합니다. **
 
 ### Step 1.2: Multi-LLM 아키텍처 설계
 
-요구사항을 기반으로 3개 LLM에 설계 요청을 **병렬** 전달합니다.
+`commands.design` (기본: `/multi-llm-design`)을 사용하여 3개 LLM에 설계 요청을 **병렬** 전달합니다.
 
 ```
 Task(subagent_type="architect-claude", prompt=DESIGN_PROMPT, run_in_background=true)
@@ -246,7 +250,7 @@ checkpoints:
 
 ## Phase 2: REVIEW
 
-`/multi-review` 커맨드로 설계 문서를 검증합니다.
+`commands.review` (기본: `/multi-review`)로 설계 문서를 검증합니다.
 
 **진입 시 상태 기록**:
 ```json
@@ -330,10 +334,10 @@ Task(subagent_type="reviewer-gemini", prompt=REVIEW_PROMPT, run_in_background=tr
 
 ### Step 3.1: 브랜치 생성
 
-git-utils `/git-branch` 활용:
+`commands.branch` (기본: `/git-branch`) 활용:
 
 ```bash
-/git-branch feat/<feature-name>
+{commands.branch} feat/<feature-name>
 ```
 
 ### Step 3.2: 태스크 분석 및 전략 선택
@@ -430,10 +434,10 @@ Claude Code 공식 Agent Teams 기능을 활용합니다.
 
 ### Step 4.1: Multi-LLM 코드 리뷰 + 자동 수정
 
-구현 결과물에 대해 `/multi-review`로 코드 리뷰 실행:
+구현 결과물에 대해 `commands.code_review` (기본: `/multi-review`)로 코드 리뷰 실행:
 
 ```
-/multi-review "구현된 코드를 엔지니어 관점으로 리뷰해줘"
+{commands.code_review} "구현된 코드를 엔지니어 관점으로 리뷰해줘"
 ```
 
 ```
@@ -459,10 +463,10 @@ Claude Code 공식 Agent Teams 기능을 활용합니다.
 
 ### Step 4.2: Commit & PR 생성
 
-git-utils 활용:
+`commands.commit_and_pr` (기본: `/commit-and-pr`) 활용:
 
 ```bash
-/commit-and-pr
+{commands.commit_and_pr}
 ```
 
 > **Gate 필수**: `re_review_clean`이 `true`여야 커밋/PR 생성이 가능합니다.
@@ -502,10 +506,63 @@ This is for issue #42 in my-project.
 
 ## 설정
 
-`/develop`와 동일한 `.develop-workflow.yaml` 설정을 공유합니다.
+`.develop-workflow.yaml` (프로젝트 루트)로 워크플로우를 커스터마이징합니다.
+
+### 커맨드 커스터마이징
+
+각 Phase에서 사용하는 커맨드를 레포별로 오버라이드할 수 있습니다.
+`commands` 섹션을 생략하면 기본값이 적용됩니다.
 
 ```yaml
 # .develop-workflow.yaml (프로젝트 루트)
+commands:
+  # Phase 1: DESIGN — 설계 커맨드
+  design: /multi-llm-design           # default
+
+  # Phase 2: REVIEW — 설계 리뷰 커맨드
+  review: /multi-review                # default
+
+  # Phase 3: IMPLEMENT — git 브랜치 관련
+  branch: /git-branch                  # default
+  branch_status: /branch-status        # default
+
+  # Phase 4: PR — 코드 리뷰 및 PR 생성
+  code_review: /multi-review           # default
+  commit_and_pr: /commit-and-pr        # default
+```
+
+**레포별 오버라이드 예시:**
+
+```yaml
+# 모노레포에서 커스텀 도구를 사용하는 경우
+commands:
+  design: /custom-design               # 커스텀 설계 에이전트
+  commit_and_pr: /turbo-pr             # turborepo용 PR 커맨드
+  code_review: /review-with-codeowners # CODEOWNERS 기반 리뷰
+```
+
+### 커맨드 로딩 순서
+
+워크플로우 시작 시 (Step 0) 다음 순서로 커맨드를 결정합니다:
+
+```
+1. .develop-workflow.yaml의 commands 섹션 읽기
+2. 누락된 키는 기본값으로 채우기
+3. 워크플로우 전체에서 해당 값을 사용
+```
+
+| 키 | 기본값 | 사용 Phase |
+|----|--------|-----------|
+| `commands.design` | `/multi-llm-design` | Phase 1 |
+| `commands.review` | `/multi-review` | Phase 2 |
+| `commands.branch` | `/git-branch` | Phase 3 |
+| `commands.branch_status` | `/branch-status` | Phase 3 |
+| `commands.code_review` | `/multi-review` | Phase 4 |
+| `commands.commit_and_pr` | `/commit-and-pr` | Phase 4 |
+
+### 워크플로우 옵션
+
+```yaml
 develop:
   design:
     multi_llm: true
@@ -517,15 +574,23 @@ develop:
     strategy: auto
     max_retries: 3
     validate_each: true
-  merge:
+  pr:
     code_review: true
-    auto_ci_check: true
 ```
 
-## git-utils 의존성
+## Consumer 연동
 
-| Phase | git-utils 커맨드 | 용도 |
-|-------|-----------------|------|
-| Phase 3 | `/git-branch` | feature 브랜치 생성 |
-| Phase 3 | `/branch-status` | 브랜치 상태 확인 |
-| Phase 4 | `/commit-and-pr` | 커밋 + PR 생성 |
+Consumer(`RepoConfig`)의 `issue_workflow`와 `pr_workflow` 필드로 **어떤 워크플로우를 사용할지** 결정합니다.
+`.develop-workflow.yaml`의 `commands` 섹션은 **워크플로우 내부에서 어떤 커맨드를 사용할지** 결정합니다.
+
+```
+Consumer (RepoConfig)                Workflow (.develop-workflow.yaml)
+┌────────────────────────┐          ┌──────────────────────────────┐
+│ issue_workflow           │          │ commands:                     │
+│   = "/develop-auto"      │ ──────→ │   design: /multi-llm-design   │
+│                          │          │   review: /multi-review       │
+│ pr_workflow              │          │   code_review: /multi-review  │
+│   = "/multi-review"      │          │   commit_and_pr: /commit-pr   │
+└────────────────────────┘          └──────────────────────────────┘
+  "어떤 워크플로우 쓸지"               "워크플로우 안에서 어떤 커맨드 쓸지"
+```

@@ -42,10 +42,16 @@ pub async fn process_pending(db: &Database) -> Result<()> {
                 }
             };
 
+        // 레포 설정 로드
+        let config = db
+            .repo_get_config_struct(&item.repo_name)
+            .unwrap_or_default();
+        let pr_workflow = &config.pr_workflow;
+
         // 1단계: Multi-LLM 리뷰
         let started = Utc::now().to_rfc3339();
 
-        let result = session::run_claude(&wt_path, "/develop-workflow:multi-review", Some("json")).await;
+        let result = session::run_claude(&wt_path, pr_workflow, Some("json")).await;
 
         match result {
             Ok(res) => {
@@ -60,8 +66,8 @@ pub async fn process_pending(db: &Database) -> Result<()> {
                     queue_item_id: item.id.clone(),
                     worker_id: worker_id.clone(),
                     command: format!(
-                        "claude -p \"/develop-workflow:multi-review\" (PR #{})",
-                        item.github_number
+                        "claude -p \"{}\" (PR #{})",
+                        pr_workflow, item.github_number
                     ),
                     stdout: res.stdout.clone(),
                     stderr: res.stderr.clone(),

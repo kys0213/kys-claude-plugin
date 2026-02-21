@@ -2,6 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use uuid::Uuid;
 
+use crate::config::models::RepoConfig;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::Database;
@@ -91,6 +92,11 @@ pub async fn process_pending(db: &Database) -> Result<()> {
                     )?;
                     tracing::info!("issue #{} analysis complete", item.github_number);
 
+                    // 레포 설정 로드
+                    let config = db
+                        .repo_get_config_struct(&item.repo_name)
+                        .unwrap_or_default();
+
                     // 2단계: 구현
                     process_ready_issue(
                         db,
@@ -101,6 +107,7 @@ pub async fn process_pending(db: &Database) -> Result<()> {
                         item.github_number,
                         &report,
                         &wt_path,
+                        &config,
                     )
                     .await?;
                 } else {
@@ -128,11 +135,13 @@ async fn process_ready_issue(
     issue_num: i64,
     report: &str,
     wt_path: &std::path::Path,
+    config: &RepoConfig,
 ) -> Result<()> {
     db.issue_update_status(item_id, "processing", &StatusFields::default())?;
 
+    let workflow = &config.issue_workflow;
     let prompt = format!(
-        "/develop-workflow:develop-auto implement based on analysis:\n\n{report}\n\nThis is for issue #{issue_num} in {repo_name}."
+        "{workflow} implement based on analysis:\n\n{report}\n\nThis is for issue #{issue_num} in {repo_name}."
     );
 
     let started = Utc::now().to_rfc3339();
@@ -151,7 +160,7 @@ async fn process_ready_issue(
                 queue_type: "issue".to_string(),
                 queue_item_id: item_id.to_string(),
                 worker_id: worker_id.to_string(),
-                command: format!("claude -p \"/develop-workflow:develop-auto implement issue #{issue_num}\""),
+                command: format!("claude -p \"{workflow} implement issue #{issue_num}\""),
                 stdout: res.stdout.clone(),
                 stderr: res.stderr.clone(),
                 exit_code: res.exit_code,
