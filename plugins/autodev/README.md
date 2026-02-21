@@ -79,14 +79,16 @@ scan 발견 → autodev:wip → 리뷰(/multi-review)
   실패 시 → 라벨 제거 → 다음 tick 재시도
 ```
 
-### Knowledge Extraction (done 전이 시)
+### Knowledge Extraction
 
 ```
-done → knowledge-extractor agent
-  1. daemon.log 파싱 (phase 전이, 에러, 소요 시간)
-  2. suggest-workflow 세션 분석 ([autodev] 마커 필터)
-  3. 교차 분석 → 인사이트 도출
-  4. KnowledgeSuggestion → PR or 이슈 코멘트
+Per-task (done 전이 시):
+  해당 세션 1건 분석 → 즉시 피드백 (이슈 코멘트)
+
+Daily (매일 06:00):
+  전일 daemon.YYYY-MM-DD.log 전체 + suggest-workflow 교차 분석
+  → 일일 리포트 (GitHub 이슈) + 크로스 태스크 패턴 발견
+  → KnowledgeSuggestion → 규칙 제안 PR
 ```
 
 ---
@@ -125,7 +127,9 @@ repos:
 
 daemon:
   tick_interval_secs: 10
-  log_file: ~/.autodev/daemon.log
+  log_dir: ~/.autodev/logs           # 일자별 롤링 (daemon.YYYY-MM-DD.log)
+  log_retention_days: 30
+  daily_report_hour: 6               # 매일 06:00에 일일 리포트
 ```
 
 ---
