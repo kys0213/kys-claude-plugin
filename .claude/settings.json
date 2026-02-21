@@ -31,6 +31,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ./.claude/hooks/cargo-check.sh",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }
