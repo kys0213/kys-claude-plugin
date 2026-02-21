@@ -317,40 +317,127 @@ merging (worker_id 할당)
 
 ---
 
-### Knowledge Extraction Pipeline
+### Knowledge Extraction (Agent-Driven)
 
-이슈 또는 PR이 완료(done)될 때, 축적된 전체 맥락을 분석하여
-시스템 자체를 개선하는 제안을 생성한다.
+이슈 또는 PR이 완료(done)될 때, 에이전트가 CLI를 통해
+완료된 작업 데이터를 능동적으로 탐색하며 인사이트를 도출한다.
+
+#### 설계 원칙: Data-Only CLI + LLM 해석
+
+```
+CLI (Rust)  = 사실만 반환   "무엇이 일어났는가"
+Agent (LLM) = 의미를 해석   "그래서 무슨 의미인가"
+```
+
+CLI는 SQLite에서 구조화된 데이터를 꺼내주는 역할만 한다.
+"이 패턴이 무엇을 의미하는지", "어떤 개선이 필요한지"는
+전적으로 에이전트가 판단한다.
+
+```
+❌ Rule-based (엣지케이스 누적)
+   if error.contains("timeout")  → suggest "increase timeout"
+   if file_edit_count > 3        → suggest "refactor"
+   ... (끝없이 규칙 추가)
+
+✅ Data-only + LLM 해석
+   CLI: SELECT error, COUNT(*) GROUP BY error  → 통계만 반환
+   Agent: "timeout이 5건 중 3건, 모두 external API 호출 시점
+          → API 클라이언트에 retry/backoff 설정 필요"
+```
+
+#### Insight CLI
+
+```bash
+# 완료 태스크 데이터를 SQLite에 인덱싱
+autonomous insight index
+
+# perspective 기반 쿼리 (사실만 반환)
+autonomous insight query --perspective <name> [--param key=value]
+
+# 에이전트가 작성한 커스텀 쿼리 (SELECT only)
+autonomous insight query --sql-file /tmp/custom.sql
+```
+
+#### Perspectives (데이터 조회 관점)
+
+| Perspective | 반환 데이터 | 용도 |
+|-------------|-----------|------|
+| `task-timeline` | 상태 전이 이벤트 시간순 | 병목 구간 파악 |
+| `error-frequency` | 에러 메시지별 빈도 | 반복 실패 패턴 |
+| `hitl-history` | HITL 질문/답변 쌍 | 맥락 부족 패턴 |
+| `file-hotspots` | 파일별 수정 빈도 | 변경 집중 영역 |
+| `duration-stats` | 단계별 소요 시간 | 성능 병목 |
+| `cross-task` | 유사 태스크 비교 | 반복 패턴 발견 |
+| `retry-history` | 재시도/실패 이력 | 안정성 문제 |
+
+각 perspective는 파라미터화된 SQL 쿼리일 뿐, 분석 로직을 포함하지 않는다:
+
+```rust
+// perspectives.rs — 데이터 조회만, 해석 로직 없음
+PerspectiveInfo {
+    name: "error-frequency",
+    params: vec![
+        ParamDef { name: "repo", param_type: ParamType::Text, .. },
+        ParamDef { name: "since", param_type: ParamType::Text, .. },
+        ParamDef { name: "top", param_type: ParamType::Integer, default: "10", .. },
+    ],
+    sql: "SELECT error_message, COUNT(*) AS count, \
+          GROUP_CONCAT(DISTINCT queue_type) AS queue_types \
+          FROM consumer_logs \
+          WHERE repo_id = :repo AND exit_code != 0 \
+            AND started_at >= :since \
+          GROUP BY error_message \
+          ORDER BY count DESC \
+          LIMIT :top",
+}
+```
+
+#### 에이전트 탐색 흐름
 
 ```
 done 전이 시
   │
   ▼
-┌──────────────────────────────────┐
-│ 맥락 수집                         │
-│                                  │
-│ • issue body + 전체 댓글 이력      │
-│ • analysis_report                │
-│ • HITL Q&A (질문 → 사람 답변)      │
-│ • PR diff + review comments      │
-│ • consumer_logs (실행 이력)        │
-└──────────────┬───────────────────┘
-               │
-               ▼
-run_claude(knowledge_extraction, json)
-               │
-               ▼
+knowledge-extractor agent 시작
+  │
+  │  ── 1차 탐색 (전체 윤곽) ──
+  │
+  │  $CLI insight query --perspective task-timeline --param item_id=xxx
+  │  → "analyzing 2분 → waiting_human 4시간 → processing 8분"
+  │
+  │  $CLI insight query --perspective error-frequency --param repo=org/repo
+  │  → [{error: "timeout", count: 3}, {error: "parse error", count: 1}]
+  │
+  │  ── 2차 탐색 (drill-down) ──
+  │
+  │  (1차에서 timeout 3건 발견 → 관심 영역)
+  │  $CLI insight query --perspective cross-task --param error=timeout
+  │  → "issue-38, issue-42, issue-45 모두 external API 모듈에서 발생"
+  │
+  │  $CLI insight query --perspective file-hotspots --param repo=org/repo
+  │  → [{file: "src/api/client.rs", edits: 12}, ...]
+  │
+  │  ── 3차 탐색 (커스텀 쿼리) ──
+  │
+  │  (에이전트가 직접 SQL 작성)
+  │  $CLI insight query --sql-file /tmp/deep-dive.sql
+  │  → "HITL 질문의 70%가 API 스펙 관련"
+  │
+  │  ── 인사이트 종합 ──
+  │
+  │  에이전트가 탐색 결과를 종합하여 판단:
+  │  "API client 모듈에 timeout retry 규칙이 없고,
+  │   HITL 질문도 대부분 API 스펙 관련
+  │   → .claude/rules/api-client.md 에 가이드라인 추가 제안"
+  │
+  ▼
 ┌───────────────────────────────────────┐
 │ KnowledgeSuggestion {                 │
 │   suggestions: [{                     │
-│     type: "rule" | "claude_md"        │
-│           | "hook" | "skill"          │
-│           | "subagent",               │
+│     type: "rule",                     │
 │     target_file: ".claude/rules/...", │
 │     content: "...",                   │
-│     reason: "이번 이슈에서 context    │
-│             없는 에러로 디버깅에       │
-│             30분 소요"                │
+│     reason: "..."                     │
 │   }]                                  │
 │ }                                     │
 └──────────────┬────────────────────────┘
@@ -358,6 +445,34 @@ run_claude(knowledge_extraction, json)
                ▼
           PR 생성 or
           이슈 코멘트로 제안
+```
+
+#### 크로스 태스크 학습
+
+단일 태스크가 아닌 축적된 전체 이력에서 패턴을 발견한다:
+
+```
+                    ┌─────────────────────────┐
+                    │ insight SQLite DB        │
+                    │                          │
+issue-38 done ─────→│ task_events             │
+issue-42 done ─────→│ consumer_logs           │
+pr-15 done    ─────→│ hitl_exchanges          │
+issue-45 done ─────→│ file_changes            │
+pr-18 done    ─────→│ review_comments         │
+                    │                          │
+                    └────────────┬─────────────┘
+                                 │
+                    에이전트가 perspectives로 조회
+                                 │
+                    ┌────────────┴─────────────┐
+                    │ 발견 가능한 패턴 예시:      │
+                    │                          │
+                    │ • 같은 모듈 반복 수정       │
+                    │ • 동일 유형 HITL 질문 반복  │
+                    │ • 특정 에러 반복 발생       │
+                    │ • 리뷰 지적사항 패턴        │
+                    └──────────────────────────┘
 ```
 
 ---
@@ -402,8 +517,9 @@ run_claude(knowledge_extraction, json)
 │  │      └─ conflict ──→ 자동 해결 시도             │   │
 │  │                                               │   │
 │  │  done 전이 시:                                 │   │
-│  │    ──→ Knowledge Extraction                   │   │
-│  │    ──→ rules/hooks/skills 제안                 │   │
+│  │    ──→ insight index (SQLite 축적)             │   │
+│  │    ──→ knowledge-extractor agent              │   │
+│  │       perspectives 탐색 → 인사이트 도출         │   │
 │  └───────────────────────────────────────────────┘   │
 │                      │                               │
 │                 sleep(tick)                           │
