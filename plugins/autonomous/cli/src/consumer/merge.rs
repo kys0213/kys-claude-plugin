@@ -2,6 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use uuid::Uuid;
 
+use crate::active::ActiveItems;
 use crate::config::Env;
 use crate::queue::models::*;
 use crate::queue::repository::*;
@@ -10,7 +11,7 @@ use crate::session;
 use crate::workspace;
 
 /// pending 머지 처리
-pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
+pub async fn process_pending(db: &Database, env: &dyn Env, active: &mut ActiveItems) -> Result<()> {
     let cfg = crate::config::loader::load_merged(env, None);
     let items = db.merge_find_pending(cfg.consumer.merge_concurrency)?;
 
@@ -18,6 +19,7 @@ pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
         // Pre-flight: GitHub에서 PR이 아직 머지 가능한 상태인지 확인
         if !super::github::is_pr_mergeable(&item.repo_name, item.pr_number, cfg.consumer.gh_host.as_deref()).await {
             db.merge_update_status(&item.id, "done", &StatusFields::default())?;
+            active.remove("merge", &item.repo_id, item.pr_number);
             tracing::info!("PR #{} is closed or already merged, skipping", item.pr_number);
             continue;
         }
@@ -77,6 +79,7 @@ pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
 
                 if res.exit_code == 0 {
                     db.merge_update_status(&item.id, "done", &StatusFields::default())?;
+                    active.remove("merge", &item.repo_id, item.pr_number);
                     tracing::info!("PR #{} merged successfully", item.pr_number);
 
                     // worktree 정리
@@ -99,6 +102,7 @@ pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
                                 "done",
                                 &StatusFields::default(),
                             )?;
+                            active.remove("merge", &item.repo_id, item.pr_number);
                             tracing::info!(
                                 "PR #{} conflicts resolved and merged",
                                 item.pr_number

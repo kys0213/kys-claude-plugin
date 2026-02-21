@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::Deserialize;
 
+use crate::active::ActiveItems;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::Database;
@@ -34,6 +35,7 @@ pub async fn scan(
     repo_name: &str,
     ignore_authors: &[String],
     gh_host: Option<&str>,
+    active: &mut ActiveItems,
 ) -> Result<()> {
     let since = db.cursor_get_last_seen(repo_id, "pulls")?;
 
@@ -80,10 +82,20 @@ pub async fn scan(
             continue;
         }
 
-        // 이미 큐에 있는지 확인
+        // 인메모리 중복 체크 (fast path)
+        if active.contains("pr", repo_id, pr.number) {
+            if latest_updated.as_ref().map_or(true, |l| pr.updated_at > *l) {
+                latest_updated = Some(pr.updated_at.clone());
+            }
+            continue;
+        }
+
+        // DB 중복 체크 (fallback)
         let exists = db.pr_exists(repo_id, pr.number)?;
 
-        if !exists {
+        if exists {
+            active.insert("pr", repo_id, pr.number);
+        } else {
             let item = NewPrItem {
                 repo_id: repo_id.to_string(),
                 github_number: pr.number,
@@ -95,6 +107,7 @@ pub async fn scan(
             };
 
             db.pr_insert(&item)?;
+            active.insert("pr", repo_id, pr.number);
             tracing::info!("queued PR #{}: {}", pr.number, pr.title);
         }
 

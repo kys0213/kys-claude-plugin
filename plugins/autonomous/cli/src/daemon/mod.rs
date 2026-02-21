@@ -5,6 +5,7 @@ use std::path::Path;
 use anyhow::{bail, Result};
 use tracing::info;
 
+use crate::active::ActiveItems;
 use crate::config::{self, Env};
 use crate::queue::Database;
 use crate::queue::repository::QueueAdmin;
@@ -47,15 +48,18 @@ pub async fn start(home: &Path, env: &dyn Env) -> Result<()> {
 
     println!("autodev daemon started (pid: {})", std::process::id());
 
+    // 인메모리 중복 방지: 큐에 존재하는 항목 추적
+    let mut active = ActiveItems::new();
+
     // 메인 루프: scanner + consumer (inline - rusqlite is not Sync)
     tokio::select! {
         _ = async {
             loop {
-                if let Err(e) = scanner::scan_all(&db, env).await {
+                if let Err(e) = scanner::scan_all(&db, env, &mut active).await {
                     tracing::error!("scan error: {e}");
                 }
 
-                if let Err(e) = consumer::process_all(&db, env).await {
+                if let Err(e) = consumer::process_all(&db, env, &mut active).await {
                     tracing::error!("consumer error: {e}");
                 }
 

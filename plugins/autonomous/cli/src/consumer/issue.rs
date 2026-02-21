@@ -2,6 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use uuid::Uuid;
 
+use crate::active::ActiveItems;
 use crate::config;
 use crate::config::models::WorkflowConfig;
 use crate::config::Env;
@@ -12,7 +13,7 @@ use crate::session;
 use crate::workspace;
 
 /// pending 이슈 처리
-pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
+pub async fn process_pending(db: &Database, env: &dyn Env, active: &mut ActiveItems) -> Result<()> {
     let cfg = config::loader::load_merged(env, None);
     let items = db.issue_find_pending(cfg.consumer.issue_concurrency)?;
 
@@ -20,6 +21,7 @@ pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
         // Pre-flight: GitHub에서 이슈가 아직 open인지 확인
         if !super::github::is_issue_open(&item.repo_name, item.github_number, cfg.consumer.gh_host.as_deref()).await {
             db.issue_update_status(&item.id, "done", &StatusFields::default())?;
+            active.remove("issue", &item.repo_id, item.github_number);
             tracing::info!("issue #{} is closed on GitHub, skipping", item.github_number);
             continue;
         }
@@ -107,6 +109,7 @@ pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
                     // 2단계: 구현
                     process_ready_issue(
                         db,
+                        active,
                         &item.id,
                         &item.repo_name,
                         &item.repo_id,
@@ -135,6 +138,7 @@ pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
 
 async fn process_ready_issue(
     db: &Database,
+    active: &mut ActiveItems,
     item_id: &str,
     repo_name: &str,
     repo_id: &str,
@@ -178,6 +182,7 @@ async fn process_ready_issue(
 
             if res.exit_code == 0 {
                 db.issue_update_status(item_id, "done", &StatusFields::default())?;
+                active.remove("issue", repo_id, issue_num);
                 tracing::info!("issue #{issue_num} implementation complete");
             } else {
                 db.issue_mark_failed(

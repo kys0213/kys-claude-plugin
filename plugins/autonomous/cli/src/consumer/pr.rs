@@ -2,6 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use uuid::Uuid;
 
+use crate::active::ActiveItems;
 use crate::config;
 use crate::config::Env;
 use crate::queue::models::*;
@@ -11,7 +12,7 @@ use crate::session;
 use crate::workspace;
 
 /// pending PR 처리
-pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
+pub async fn process_pending(db: &Database, env: &dyn Env, active: &mut ActiveItems) -> Result<()> {
     let cfg = config::loader::load_merged(env, None);
     let items = db.pr_find_pending(cfg.consumer.pr_concurrency)?;
 
@@ -19,6 +20,7 @@ pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
         // Pre-flight: GitHub에서 PR이 리뷰 대상인지 확인 (open + not approved)
         if !super::github::is_pr_reviewable(&item.repo_name, item.github_number, cfg.consumer.gh_host.as_deref()).await {
             db.pr_update_status(&item.id, "done", &StatusFields::default())?;
+            active.remove("pr", &item.repo_id, item.github_number);
             tracing::info!("PR #{} is closed or already approved, skipping", item.github_number);
             continue;
         }
@@ -95,6 +97,7 @@ pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
                             ..Default::default()
                         },
                     )?;
+                    active.remove("pr", &item.repo_id, item.github_number);
                     tracing::info!("PR #{} review complete", item.github_number);
                 } else {
                     db.pr_mark_failed(

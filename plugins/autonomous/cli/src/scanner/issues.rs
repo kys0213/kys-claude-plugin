@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::Deserialize;
 
+use crate::active::ActiveItems;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::Database;
@@ -34,6 +35,7 @@ pub async fn scan(
     ignore_authors: &[String],
     filter_labels: &Option<Vec<String>>,
     gh_host: Option<&str>,
+    active: &mut ActiveItems,
 ) -> Result<()> {
     // 마지막 스캔 시점 이후의 이슈만
     let since = db.cursor_get_last_seen(repo_id, "issues")?;
@@ -92,10 +94,21 @@ pub async fn scan(
             }
         }
 
-        // 이미 큐에 있는지 확인
+        // 인메모리 중복 체크 (fast path)
+        if active.contains("issue", repo_id, issue.number) {
+            // 최신 updated_at는 계속 추적
+            if latest_updated.as_ref().map_or(true, |l| issue.updated_at > *l) {
+                latest_updated = Some(issue.updated_at.clone());
+            }
+            continue;
+        }
+
+        // DB 중복 체크 (fallback — 이전 데몬 실행분)
         let exists = db.issue_exists(repo_id, issue.number)?;
 
-        if !exists {
+        if exists {
+            active.insert("issue", repo_id, issue.number);
+        } else {
             let labels_json = serde_json::to_string(
                 &issue.labels.iter().map(|l| &l.name).collect::<Vec<_>>(),
             )?;
@@ -110,6 +123,7 @@ pub async fn scan(
             };
 
             db.issue_insert(&item)?;
+            active.insert("issue", repo_id, issue.number);
             tracing::info!("queued issue #{}: {}", issue.number, issue.title);
         }
 

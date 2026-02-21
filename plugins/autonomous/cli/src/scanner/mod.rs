@@ -3,13 +3,14 @@ pub mod pulls;
 
 use anyhow::Result;
 
+use crate::active::ActiveItems;
 use crate::config;
 use crate::config::Env;
 use crate::queue::repository::*;
 use crate::queue::Database;
 
 /// 등록된 모든 레포를 스캔
-pub async fn scan_all(db: &Database, env: &dyn Env) -> Result<()> {
+pub async fn scan_all(db: &Database, env: &dyn Env, active: &mut ActiveItems) -> Result<()> {
     let repos = db.repo_find_enabled()?;
 
     for repo in repos {
@@ -37,6 +38,7 @@ pub async fn scan_all(db: &Database, env: &dyn Env) -> Result<()> {
                         &cfg.consumer.ignore_authors,
                         &cfg.consumer.filter_labels,
                         gh_host,
+                        active,
                     ).await {
                         tracing::error!("issue scan error for {}: {e}", repo.name);
                     }
@@ -46,6 +48,7 @@ pub async fn scan_all(db: &Database, env: &dyn Env) -> Result<()> {
                         db, &repo.id, &repo.name,
                         &cfg.consumer.ignore_authors,
                         gh_host,
+                        active,
                     ).await {
                         tracing::error!("PR scan error for {}: {e}", repo.name);
                     }
