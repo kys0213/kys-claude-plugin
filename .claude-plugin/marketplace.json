@@ -20,7 +20,7 @@
       ],
       "name": "develop-workflow",
       "source": "./plugins/develop-workflow",
-      "version": "0.5.0"
+      "version": "0.6.0"
     },
     {
       "category": "integration",
