@@ -3,6 +3,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::config;
+use crate::config::Env;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::Database;
@@ -10,7 +11,7 @@ use crate::session;
 use crate::workspace;
 
 /// pending PR 처리
-pub async fn process_pending(db: &Database) -> Result<()> {
+pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
     let items = db.pr_find_pending(5)?;
 
     for item in items {
@@ -27,13 +28,13 @@ pub async fn process_pending(db: &Database) -> Result<()> {
 
         // 워크스페이스 준비
         let task_id = format!("pr-{}", item.github_number);
-        if let Err(e) = workspace::ensure_cloned(&item.repo_url, &item.repo_name).await {
+        if let Err(e) = workspace::ensure_cloned(env, &item.repo_url, &item.repo_name).await {
             db.pr_mark_failed(&item.id, &format!("clone failed: {e}"))?;
             continue;
         }
 
         let wt_path =
-            match workspace::create_worktree(&item.repo_name, &task_id, Some(&item.head_branch))
+            match workspace::create_worktree(env, &item.repo_name, &task_id, Some(&item.head_branch))
                 .await
             {
                 Ok(p) => p,
@@ -44,7 +45,7 @@ pub async fn process_pending(db: &Database) -> Result<()> {
             };
 
         // YAML 설정 로드 (글로벌 + 레포별 머지)
-        let config = config::loader::load_merged(Some(&wt_path));
+        let config = config::loader::load_merged(env, Some(&wt_path));
         let pr_workflow = &config.workflow.pr;
 
         // 1단계: Multi-LLM 리뷰

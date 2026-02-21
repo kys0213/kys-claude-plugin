@@ -3,13 +3,14 @@ use std::path::Path;
 use anyhow::Result;
 
 use super::models::WorkflowConfig;
+use super::Env;
 
 const CONFIG_FILENAME: &str = ".develop-workflow.yaml";
 
 /// 글로벌(~/) + 레포별 YAML을 머지하여 최종 설정 반환
 /// Raw YAML Value 단계에서 딥머지 → 최종 역직렬화
-pub fn load_merged(repo_path: Option<&Path>) -> WorkflowConfig {
-    let global = load_raw_yaml_global();
+pub fn load_merged(env: &dyn Env, repo_path: Option<&Path>) -> WorkflowConfig {
+    let global = load_raw_yaml_global(env);
     let repo = repo_path.and_then(|p| load_raw_yaml_from_dir(p));
 
     let merged = match (global, repo) {
@@ -24,8 +25,8 @@ pub fn load_merged(repo_path: Option<&Path>) -> WorkflowConfig {
 }
 
 /// 글로벌 YAML을 raw JSON Value로 로드
-fn load_raw_yaml_global() -> Option<serde_json::Value> {
-    let home = std::env::var("HOME").ok()?;
+fn load_raw_yaml_global(env: &dyn Env) -> Option<serde_json::Value> {
+    let home = env.var("HOME").ok()?;
     let path = Path::new(&home).join(CONFIG_FILENAME);
     load_raw_yaml(&path)
 }
@@ -61,14 +62,14 @@ fn deep_merge(base: serde_json::Value, over: serde_json::Value) -> serde_json::V
 }
 
 /// 글로벌 설정 파일 경로
-pub fn global_config_path() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+pub fn global_config_path(env: &dyn Env) -> std::path::PathBuf {
+    let home = env.var("HOME").unwrap_or_else(|_| ".".into());
     Path::new(&home).join(CONFIG_FILENAME)
 }
 
 /// 글로벌 설정 파일 초기화 (setup 시 사용)
-pub fn init_global(config: &WorkflowConfig) -> Result<()> {
-    let path = global_config_path();
+pub fn init_global(env: &dyn Env, config: &WorkflowConfig) -> Result<()> {
+    let path = global_config_path(env);
     let yaml = serde_yaml::to_string(config)?;
     std::fs::write(&path, yaml)?;
     Ok(())

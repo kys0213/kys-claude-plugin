@@ -1,15 +1,16 @@
 use anyhow::Result;
 
 use crate::config;
+use crate::config::Env;
 use crate::queue::repository::*;
 use crate::queue::Database;
 
 /// 상태 요약
-pub fn status(db: &Database) -> Result<String> {
+pub fn status(db: &Database, env: &dyn Env) -> Result<String> {
     let mut output = String::new();
 
     // 데몬 상태
-    let home = config::autodev_home();
+    let home = config::autodev_home(env);
     let running = crate::daemon::pid::is_running(&home);
     output.push_str(&format!(
         "autodev daemon: {}\n\n",
@@ -74,9 +75,9 @@ pub fn repo_list(db: &Database) -> Result<String> {
 }
 
 /// 레포 설정 표시 (YAML 기반)
-pub fn repo_config(name: &str) -> Result<()> {
+pub fn repo_config(env: &dyn Env, name: &str) -> Result<()> {
     // 글로벌 설정
-    let global_path = config::loader::global_config_path();
+    let global_path = config::loader::global_config_path(env);
     println!("Global config: {}", global_path.display());
 
     if global_path.exists() {
@@ -86,7 +87,7 @@ pub fn repo_config(name: &str) -> Result<()> {
     }
 
     // 워크스페이스에서 레포별 설정 탐색
-    let ws = config::workspaces_path().join(name);
+    let ws = config::workspaces_path(env).join(name);
     let repo_config_path = ws.join(".develop-workflow.yaml");
     println!("\nRepo config: {}", repo_config_path.display());
 
@@ -98,9 +99,9 @@ pub fn repo_config(name: &str) -> Result<()> {
 
     // 최종 머지 결과 표시
     let merged = if ws.exists() {
-        config::loader::load_merged(Some(&ws))
+        config::loader::load_merged(env, Some(&ws))
     } else {
-        config::loader::load_merged(None)
+        config::loader::load_merged(env, None)
     };
 
     let yaml = serde_yaml::to_string(&merged)?;

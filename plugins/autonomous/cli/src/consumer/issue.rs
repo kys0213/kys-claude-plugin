@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::config;
 use crate::config::models::WorkflowConfig;
+use crate::config::Env;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::Database;
@@ -11,7 +12,7 @@ use crate::session;
 use crate::workspace;
 
 /// pending 이슈 처리
-pub async fn process_pending(db: &Database) -> Result<()> {
+pub async fn process_pending(db: &Database, env: &dyn Env) -> Result<()> {
     // concurrency 설정에 따라 처리할 이슈 수 결정
     let items = db.issue_find_pending(5)?;
 
@@ -30,7 +31,7 @@ pub async fn process_pending(db: &Database) -> Result<()> {
 
         // 워크스페이스 준비
         let task_id = format!("issue-{}", item.github_number);
-        match workspace::ensure_cloned(&item.repo_url, &item.repo_name).await {
+        match workspace::ensure_cloned(env, &item.repo_url, &item.repo_name).await {
             Ok(_) => {}
             Err(e) => {
                 db.issue_mark_failed(&item.id, &format!("clone failed: {e}"))?;
@@ -38,7 +39,7 @@ pub async fn process_pending(db: &Database) -> Result<()> {
             }
         }
 
-        let wt_path = match workspace::create_worktree(&item.repo_name, &task_id, None).await {
+        let wt_path = match workspace::create_worktree(env, &item.repo_name, &task_id, None).await {
             Ok(p) => p,
             Err(e) => {
                 db.issue_mark_failed(&item.id, &format!("worktree failed: {e}"))?;
@@ -94,7 +95,7 @@ pub async fn process_pending(db: &Database) -> Result<()> {
                     tracing::info!("issue #{} analysis complete", item.github_number);
 
                     // YAML 설정 로드 (글로벌 + 레포별 머지)
-                    let config = config::loader::load_merged(Some(&wt_path));
+                    let config = config::loader::load_merged(env, Some(&wt_path));
 
                     // 2단계: 구현
                     process_ready_issue(

@@ -1,8 +1,36 @@
 use autodev::config::loader;
 use autodev::config::models::WorkflowConfig;
-use serial_test::serial;
+use autodev::config::Env;
+use std::collections::HashMap;
 use std::fs;
 use tempfile::TempDir;
+
+/// 테스트용 환경 변수 모킹 — #[serial] 없이 병렬 실행 가능
+struct TestEnv {
+    vars: HashMap<String, String>,
+}
+
+impl TestEnv {
+    fn new() -> Self {
+        Self {
+            vars: HashMap::new(),
+        }
+    }
+
+    fn with_home(mut self, home: &str) -> Self {
+        self.vars.insert("HOME".to_string(), home.to_string());
+        self
+    }
+}
+
+impl Env for TestEnv {
+    fn var(&self, key: &str) -> Result<String, std::env::VarError> {
+        self.vars
+            .get(key)
+            .cloned()
+            .ok_or(std::env::VarError::NotPresent)
+    }
+}
 
 // ═══════════════════════════════════════════════
 // 1. 기본값 검증
@@ -22,22 +50,20 @@ fn default_config_has_expected_values() {
 }
 
 #[test]
-#[serial]
 fn load_merged_no_files_returns_defaults() {
     let tmp = TempDir::new().unwrap();
-    std::env::set_var("HOME", tmp.path());
+    let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
     // 존재하지 않는 경로 → 양쪽 모두 None → default
-    let config = loader::load_merged(Some(tmp.path()));
+    let config = loader::load_merged(&env, Some(tmp.path()));
     assert_eq!(config.consumer.scan_interval_secs, 300);
     assert_eq!(config.commands.design, "/multi-llm-design");
 }
 
 #[test]
-#[serial]
 fn load_merged_none_path_returns_defaults() {
     let tmp = TempDir::new().unwrap();
-    std::env::set_var("HOME", tmp.path());
-    let config = loader::load_merged(None);
+    let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
+    let config = loader::load_merged(&env, None);
     assert_eq!(config.consumer.scan_interval_secs, 300);
 }
 
@@ -46,7 +72,6 @@ fn load_merged_none_path_returns_defaults() {
 // ═══════════════════════════════════════════════
 
 #[test]
-#[serial]
 fn load_merged_global_only() {
     let tmp = TempDir::new().unwrap();
 
@@ -58,9 +83,9 @@ commands:
   design: /custom-design
 "#;
     fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
-    std::env::set_var("HOME", tmp.path());
+    let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
-    let config = loader::load_merged(None);
+    let config = loader::load_merged(&env, None);
     assert_eq!(config.consumer.scan_interval_secs, 60);
     assert_eq!(config.consumer.model, "opus");
     assert_eq!(config.commands.design, "/custom-design");
@@ -74,14 +99,13 @@ commands:
 // ═══════════════════════════════════════════════
 
 #[test]
-#[serial]
 fn load_merged_repo_only() {
     let tmp = TempDir::new().unwrap();
     let repo_dir = tmp.path().join("repo");
     fs::create_dir_all(&repo_dir).unwrap();
 
     // HOME에는 글로벌 YAML 없음
-    std::env::set_var("HOME", tmp.path());
+    let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     let yaml = r#"
 consumer:
@@ -92,7 +116,7 @@ consumer:
 "#;
     fs::write(repo_dir.join(".develop-workflow.yaml"), yaml).unwrap();
 
-    let config = loader::load_merged(Some(&repo_dir));
+    let config = loader::load_merged(&env, Some(&repo_dir));
     assert_eq!(config.consumer.scan_interval_secs, 120);
     assert_eq!(config.consumer.ignore_authors, vec!["bot1", "bot2"]);
     // 나머지는 default
@@ -104,7 +128,6 @@ consumer:
 // ═══════════════════════════════════════════════
 
 #[test]
-#[serial]
 fn load_merged_repo_overrides_global() {
     let tmp = TempDir::new().unwrap();
     let repo_dir = tmp.path().join("repo");
@@ -121,7 +144,7 @@ commands:
   review: /global-review
 "#;
     fs::write(tmp.path().join(".develop-workflow.yaml"), global_yaml).unwrap();
-    std::env::set_var("HOME", tmp.path());
+    let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     // 레포 오버라이드 — model과 design만 덮어씀
     let repo_yaml = r#"
@@ -132,7 +155,7 @@ commands:
 "#;
     fs::write(repo_dir.join(".develop-workflow.yaml"), repo_yaml).unwrap();
 
-    let config = loader::load_merged(Some(&repo_dir));
+    let config = loader::load_merged(&env, Some(&repo_dir));
 
     // 오버라이드된 값
     assert_eq!(config.consumer.model, "haiku");
@@ -152,13 +175,12 @@ commands:
 // ═══════════════════════════════════════════════
 
 #[test]
-#[serial]
 fn init_global_writes_yaml_file() {
     let tmp = TempDir::new().unwrap();
-    std::env::set_var("HOME", tmp.path());
+    let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     let config = WorkflowConfig::default();
-    loader::init_global(&config).unwrap();
+    loader::init_global(&env, &config).unwrap();
 
     let path = tmp.path().join(".develop-workflow.yaml");
     assert!(path.exists());
@@ -173,48 +195,45 @@ fn init_global_writes_yaml_file() {
 // ═══════════════════════════════════════════════
 
 #[test]
-#[serial]
 fn load_merged_ignores_malformed_yaml() {
     let tmp = TempDir::new().unwrap();
     let repo_dir = tmp.path().join("repo");
     fs::create_dir_all(&repo_dir).unwrap();
 
-    std::env::set_var("HOME", tmp.path());
+    let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     // 잘못된 YAML
     fs::write(repo_dir.join(".develop-workflow.yaml"), "{{invalid yaml!!!").unwrap();
 
     // 파싱 실패 시 기본값 반환 (패닉하지 않음)
-    let config = loader::load_merged(Some(&repo_dir));
+    let config = loader::load_merged(&env, Some(&repo_dir));
     assert_eq!(config.consumer.scan_interval_secs, 300);
 }
 
 #[test]
-#[serial]
 fn load_merged_empty_yaml_returns_defaults() {
     let tmp = TempDir::new().unwrap();
     let repo_dir = tmp.path().join("repo");
     fs::create_dir_all(&repo_dir).unwrap();
 
-    std::env::set_var("HOME", tmp.path());
+    let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     // 빈 파일
     fs::write(repo_dir.join(".develop-workflow.yaml"), "").unwrap();
 
-    let config = loader::load_merged(Some(&repo_dir));
+    let config = loader::load_merged(&env, Some(&repo_dir));
     assert_eq!(config.consumer.scan_interval_secs, 300);
 }
 
 #[test]
-#[serial]
 fn load_merged_partial_yaml_fills_defaults() {
     let tmp = TempDir::new().unwrap();
 
     let yaml = "consumer:\n  model: gpt-4\n";
     fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
-    std::env::set_var("HOME", tmp.path());
+    let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
-    let config = loader::load_merged(None);
+    let config = loader::load_merged(&env, None);
     assert_eq!(config.consumer.model, "gpt-4");
     // 나머지 전부 default
     assert_eq!(config.consumer.scan_interval_secs, 300);

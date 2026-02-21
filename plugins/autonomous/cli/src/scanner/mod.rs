@@ -4,17 +4,19 @@ pub mod pulls;
 use anyhow::Result;
 
 use crate::config;
+use crate::config::Env;
 use crate::queue::repository::*;
 use crate::queue::Database;
 
 /// 등록된 모든 레포를 스캔
-pub async fn scan_all(db: &Database) -> Result<()> {
+pub async fn scan_all(db: &Database, env: &dyn Env) -> Result<()> {
     let repos = db.repo_find_enabled()?;
 
     for repo in repos {
         // 워크스페이스 경로에서 레포별 YAML 설정 로드
-        let ws_path = config::workspaces_path().join(&repo.name);
+        let ws_path = config::workspaces_path(env).join(&repo.name);
         let cfg = config::loader::load_merged(
+            env,
             if ws_path.exists() { Some(ws_path.as_path()) } else { None }
         );
 

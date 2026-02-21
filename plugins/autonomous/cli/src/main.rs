@@ -100,7 +100,8 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let home = config::autodev_home();
+    let env = config::RealEnv;
+    let home = config::autodev_home(&env);
     std::fs::create_dir_all(&home)?;
 
     let db_path = home.join("autodev.db");
@@ -108,14 +109,14 @@ async fn main() -> Result<()> {
     db.initialize()?;
 
     match cli.command {
-        Commands::Start => daemon::start(&home).await?,
+        Commands::Start => daemon::start(&home, &env).await?,
         Commands::Stop => daemon::stop(&home)?,
         Commands::Restart => {
             daemon::stop(&home).ok();
-            daemon::start(&home).await?;
+            daemon::start(&home, &env).await?;
         }
         Commands::Status => {
-            let status = client::status(&db)?;
+            let status = client::status(&db, &env)?;
             println!("{status}");
         }
         Commands::Dashboard => tui::run(&db).await?,
@@ -128,7 +129,7 @@ async fn main() -> Result<()> {
                 println!("{list}");
             }
             RepoAction::Config { name } => {
-                client::repo_config(&name)?;
+                client::repo_config(&env, &name)?;
             }
             RepoAction::Remove { name } => {
                 client::repo_remove(&db, &name)?;

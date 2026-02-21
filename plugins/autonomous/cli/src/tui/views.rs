@@ -68,7 +68,7 @@ pub fn render(f: &mut Frame, db: &Database, state: &AppState) {
 }
 
 fn render_header(f: &mut Frame, area: Rect, db: &Database) {
-    let home = crate::config::autodev_home();
+    let home = crate::config::autodev_home(&crate::config::RealEnv);
     let running = crate::daemon::pid::is_running(&home);
     let status = if running {
         Span::styled("● running", Style::default().fg(Color::Green))

@@ -5,13 +5,14 @@ use std::path::Path;
 use anyhow::{bail, Result};
 use tracing::info;
 
+use crate::config::Env;
 use crate::queue::Database;
 use crate::queue::repository::QueueAdmin;
 use crate::scanner;
 use crate::consumer;
 
 /// 데몬을 포그라운드로 시작
-pub async fn start(home: &Path) -> Result<()> {
+pub async fn start(home: &Path, env: &dyn Env) -> Result<()> {
     if pid::is_running(home) {
         bail!("daemon is already running (pid: {})", pid::read_pid(home).unwrap_or(0));
     }
@@ -46,11 +47,11 @@ pub async fn start(home: &Path) -> Result<()> {
     tokio::select! {
         _ = async {
             loop {
-                if let Err(e) = scanner::scan_all(&db).await {
+                if let Err(e) = scanner::scan_all(&db, env).await {
                     tracing::error!("scan error: {e}");
                 }
 
-                if let Err(e) = consumer::process_all(&db).await {
+                if let Err(e) = consumer::process_all(&db, env).await {
                     tracing::error!("consumer error: {e}");
                 }
 
