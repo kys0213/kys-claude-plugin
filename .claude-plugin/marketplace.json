@@ -80,6 +80,20 @@
       "name": "suggest-workflow",
       "source": "./plugins/suggest-workflow",
       "version": "2.1.0"
+    },
+    {
+      "category": "devops",
+      "description": "OpenClaw Docker 환경 관리 - run.sh CLI + Skill 기반 게이트웨이 제어, 인증 관리, 로그 조회",
+      "keywords": [
+        "openclaw",
+        "docker",
+        "gateway",
+        "devops",
+        "container"
+      ],
+      "name": "openclaw-docker",
+      "source": "./plugins/openclaw-docker",
+      "version": "0.2.0"
     }
   ]
 }
