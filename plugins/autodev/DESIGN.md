@@ -309,7 +309,7 @@ autodev logs <repo>        # 실행 로그 조회
 
 ```bash
 # ~/.bashrc 또는 ~/.zshrc에 추가
-export AUTONOMOUS_HOME="$HOME/.autodev"
+export AUTODEV_HOME="$HOME/.autodev"
 export PATH="$HOME/.local/bin:$PATH"
 
 # 단축 명령어

@@ -68,7 +68,7 @@ struct QueryArgs {
     #[arg(long)]
     list_perspectives: bool,
     /// Filter perspectives to sessions matching this SQL condition on the sessions table.
-    /// Example: "first_prompt_snippet LIKE '[autonomous]%'"
+    /// Example: "first_prompt_snippet LIKE '[autodev]%'"
     #[arg(long)]
     session_filter: Option<String>,
 }

@@ -154,7 +154,7 @@ autodev repo add <url> --config '{"gh_host": "github.mycompany.com", ...}'
 
 ```bash
 # ~/.bashrc 또는 ~/.zshrc에 추가
-export AUTONOMOUS_HOME="$HOME/.autodev"
+export AUTODEV_HOME="$HOME/.autodev"
 export PATH="$HOME/.local/bin:$PATH"
 
 alias auto="autodev"
