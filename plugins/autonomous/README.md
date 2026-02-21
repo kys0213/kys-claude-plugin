@@ -345,52 +345,88 @@ CLI는 SQLite에서 구조화된 데이터를 꺼내주는 역할만 한다.
           → API 클라이언트에 retry/backoff 설정 필요"
 ```
 
-#### Insight CLI
+#### 데이터 소스: 2-DB 아키텍처
 
-```bash
-# 완료 태스크 데이터를 SQLite에 인덱싱
-autonomous insight index
+autonomous의 인사이트는 **두 개의 독립적인 데이터 소스**에서 나온다.
+별도 CLI를 만들지 않고, 기존 suggest-workflow에 **세션 필터링 기능**을 추가하여 재사용한다.
 
-# perspective 기반 쿼리 (사실만 반환)
-autonomous insight query --perspective <name> [--param key=value]
-
-# 에이전트가 작성한 커스텀 쿼리 (SELECT only)
-autonomous insight query --sql-file /tmp/custom.sql
+```
+┌──────────────────────────┐    ┌──────────────────────────────────┐
+│ A. autonomous.db         │    │ B. suggest-workflow index.db     │
+│    (~/.autonomous/)      │    │    (~/.claude/suggest-workflow-   │
+│                          │    │     index/{project}/)            │
+│ 태스크 메타데이터:          │    │                                  │
+│ • issue_queue            │    │ 세션 실행 이력:                     │
+│ • pr_queue               │    │ • sessions (+ first_prompt_      │
+│ • merge_queue            │    │   snippet)                       │
+│ • consumer_logs          │    │ • prompts                        │
+│ • scan_cursors           │    │ • tool_uses (classified)         │
+│                          │    │ • file_edits                     │
+│ "무엇을 처리했는가"         │    │                                  │
+│ (큐 상태, 에러, 소요 시간)  │    │ "어떻게 실행했는가"                │
+│                          │    │ (도구 사용, 파일 수정, 프롬프트)     │
+└──────────────────────────┘    └──────────────────────────────────┘
 ```
 
-#### Perspectives (데이터 조회 관점)
+#### 세션 식별: `[autonomous]` 마커 컨벤션
+
+autonomous consumer가 `claude -p` 실행 시, 첫 프롬프트에 마커를 삽입한다:
+
+```
+claude -p "[autonomous] fix: resolve login timeout issue in auth module"
+```
+
+suggest-workflow는 인덱싱 시 `first_prompt_snippet` (첫 500자)을 저장한다.
+이후 `--session-filter` 또는 `filtered-sessions` perspective로 autonomous 세션만 조회 가능:
+
+```bash
+# autonomous 세션 목록 조회
+suggest-workflow query \
+  --perspective filtered-sessions \
+  --param prompt_pattern="[autonomous]"
+
+# autonomous 세션의 도구 사용 패턴
+suggest-workflow query \
+  --perspective tool-frequency \
+  --session-filter "first_prompt_snippet LIKE '[autonomous]%'"
+
+# autonomous 세션의 파일 수정 이상치
+suggest-workflow query \
+  --perspective repetition \
+  --session-filter "first_prompt_snippet LIKE '[autonomous]%'"
+
+# 에이전트가 작성한 커스텀 쿼리
+suggest-workflow query --sql-file /tmp/deep-dive.sql
+```
+
+#### Perspectives (세션 필터 지원 현황)
+
+suggest-workflow의 기존 perspective 중 `--session-filter` 지원:
+
+| Perspective | Session Filter | 설명 |
+|-------------|:-:|------|
+| `filtered-sessions` | - | 첫 프롬프트 패턴으로 세션 검색 (신규) |
+| `tool-frequency` | `{SF}` | 도구 사용 빈도 |
+| `repetition` | `{SF}` | 이상치 탐지 (z-score²) |
+| `prompts` | `{SF}` | 프롬프트 키워드 검색 |
+| `sessions` | `{SF}` | 세션 목록 및 요약 |
+| `transitions` | - | 도구 전이 확률 (derived) |
+| `trends` | - | 주간 트렌드 (derived) |
+| `hotfiles` | - | 파일 핫스팟 (derived) |
+| `sequences` | - | 도구 시퀀스 (derived) |
+
+> derived table perspective는 전체 데이터에서 사전 계산되므로 세션 필터 미지원.
+> 필터가 필요한 경우 `--sql-file`로 core table에서 직접 쿼리.
+
+autonomous 전용 perspective (autonomous.db 대상, 추후 추가):
 
 | Perspective | 반환 데이터 | 용도 |
 |-------------|-----------|------|
 | `task-timeline` | 상태 전이 이벤트 시간순 | 병목 구간 파악 |
 | `error-frequency` | 에러 메시지별 빈도 | 반복 실패 패턴 |
 | `hitl-history` | HITL 질문/답변 쌍 | 맥락 부족 패턴 |
-| `file-hotspots` | 파일별 수정 빈도 | 변경 집중 영역 |
 | `duration-stats` | 단계별 소요 시간 | 성능 병목 |
-| `cross-task` | 유사 태스크 비교 | 반복 패턴 발견 |
 | `retry-history` | 재시도/실패 이력 | 안정성 문제 |
-
-각 perspective는 파라미터화된 SQL 쿼리일 뿐, 분석 로직을 포함하지 않는다:
-
-```rust
-// perspectives.rs — 데이터 조회만, 해석 로직 없음
-PerspectiveInfo {
-    name: "error-frequency",
-    params: vec![
-        ParamDef { name: "repo", param_type: ParamType::Text, .. },
-        ParamDef { name: "since", param_type: ParamType::Text, .. },
-        ParamDef { name: "top", param_type: ParamType::Integer, default: "10", .. },
-    ],
-    sql: "SELECT error_message, COUNT(*) AS count, \
-          GROUP_CONCAT(DISTINCT queue_type) AS queue_types \
-          FROM consumer_logs \
-          WHERE repo_id = :repo AND exit_code != 0 \
-            AND started_at >= :since \
-          GROUP BY error_message \
-          ORDER BY count DESC \
-          LIMIT :top",
-}
-```
 
 #### 에이전트 탐색 흐름
 
@@ -400,35 +436,40 @@ done 전이 시
   ▼
 knowledge-extractor agent 시작
   │
-  │  ── 1차 탐색 (전체 윤곽) ──
+  │  ══ 1차: autonomous.db (태스크 메타) ══
   │
-  │  $CLI insight query --perspective task-timeline --param item_id=xxx
-  │  → "analyzing 2분 → waiting_human 4시간 → processing 8분"
+  │  autonomous queue 조회 → 상태 전이, 소요 시간
+  │  autonomous logs 조회  → 에러 메시지, exit code
   │
-  │  $CLI insight query --perspective error-frequency --param repo=org/repo
-  │  → [{error: "timeout", count: 3}, {error: "parse error", count: 1}]
+  │  ══ 2차: suggest-workflow (세션 실행 이력) ══
   │
-  │  ── 2차 탐색 (drill-down) ──
+  │  suggest-workflow query \
+  │    --perspective filtered-sessions \
+  │    --param prompt_pattern="[autonomous]"
+  │  → autonomous 세션 목록
   │
-  │  (1차에서 timeout 3건 발견 → 관심 영역)
-  │  $CLI insight query --perspective cross-task --param error=timeout
-  │  → "issue-38, issue-42, issue-45 모두 external API 모듈에서 발생"
+  │  suggest-workflow query \
+  │    --perspective tool-frequency \
+  │    --session-filter "first_prompt_snippet LIKE '[autonomous]%'"
+  │  → [{tool: "Edit", frequency: 45}, {tool: "Bash:test", frequency: 38}, ...]
   │
-  │  $CLI insight query --perspective file-hotspots --param repo=org/repo
-  │  → [{file: "src/api/client.rs", edits: 12}, ...]
+  │  ══ 3차: drill-down (관심 영역 심화) ══
   │
-  │  ── 3차 탐색 (커스텀 쿼리) ──
+  │  suggest-workflow query \
+  │    --perspective repetition \
+  │    --session-filter "first_prompt_snippet LIKE '[autonomous]%'"
+  │  → 이상치 세션 발견: "session-abc에서 Bash:test 28회 반복"
   │
-  │  (에이전트가 직접 SQL 작성)
-  │  $CLI insight query --sql-file /tmp/deep-dive.sql
-  │  → "HITL 질문의 70%가 API 스펙 관련"
+  │  suggest-workflow query --sql-file /tmp/deep-dive.sql
+  │  → 에이전트가 직접 SQL 작성하여 cross-table 분석
   │
-  │  ── 인사이트 종합 ──
+  │  ══ 4차: 인사이트 종합 ══
   │
   │  에이전트가 탐색 결과를 종합하여 판단:
-  │  "API client 모듈에 timeout retry 규칙이 없고,
-  │   HITL 질문도 대부분 API 스펙 관련
-  │   → .claude/rules/api-client.md 에 가이드라인 추가 제안"
+  │  "autonomous 세션에서 Bash:test가 평균 대비 3배 호출.
+  │   테스트 실패 → 수정 → 재실행 루프가 반복됨.
+  │   src/api/client.rs 수정 시 항상 발생.
+  │   → .claude/rules/api-testing.md 에 테스트 전략 가이드 추가 제안"
   │
   ▼
 ┌───────────────────────────────────────┐
@@ -449,30 +490,36 @@ knowledge-extractor agent 시작
 
 #### 크로스 태스크 학습
 
-단일 태스크가 아닌 축적된 전체 이력에서 패턴을 발견한다:
+단일 태스크가 아닌 축적된 전체 이력에서 패턴을 발견한다.
+두 DB를 교차 조회하여 "무엇을 처리했는가" + "어떻게 실행했는가"를 결합:
 
 ```
-                    ┌─────────────────────────┐
-                    │ insight SQLite DB        │
-                    │                          │
-issue-38 done ─────→│ task_events             │
-issue-42 done ─────→│ consumer_logs           │
-pr-15 done    ─────→│ hitl_exchanges          │
-issue-45 done ─────→│ file_changes            │
-pr-18 done    ─────→│ review_comments         │
-                    │                          │
-                    └────────────┬─────────────┘
-                                 │
-                    에이전트가 perspectives로 조회
-                                 │
-                    ┌────────────┴─────────────┐
-                    │ 발견 가능한 패턴 예시:      │
-                    │                          │
-                    │ • 같은 모듈 반복 수정       │
-                    │ • 동일 유형 HITL 질문 반복  │
-                    │ • 특정 에러 반복 발생       │
-                    │ • 리뷰 지적사항 패턴        │
-                    └──────────────────────────┘
+                                 ┌────────────────────────────────┐
+                                 │      suggest-workflow          │
+                                 │      index.db (per-project)    │
+   autonomous.db                 │                                │
+   (태스크 메타)                   │  sessions                     │
+                                 │  ├ first_prompt_snippet        │
+   issue_queue ──┐               │  │ "[autonomous] fix:..."      │
+   pr_queue    ──┤               │  ├ tool_uses (classified)      │
+   merge_queue ──┤               │  ├ prompts                     │
+   consumer_   ──┘               │  └ file_edits                  │
+     logs                        │                                │
+       │                         └───────────────┬────────────────┘
+       │                                         │
+       │              knowledge-extractor        │
+       │              agent 교차 조회              │
+       └────────────────┬────────────────────────┘
+                        │
+           ┌────────────┴─────────────┐
+           │ 발견 가능한 패턴 예시:      │
+           │                          │
+           │ • 같은 모듈 반복 수정       │  ← file_edits + session_filter
+           │ • 동일 유형 HITL 질문 반복  │  ← consumer_logs + prompts
+           │ • 특정 에러 반복 발생       │  ← consumer_logs (exit_code)
+           │ • 리뷰 지적사항 패턴        │  ← tool_uses (Bash:test 반복)
+           │ • 테스트 실패 루프          │  ← repetition perspective
+           └──────────────────────────┘
 ```
 
 ---
@@ -480,50 +527,67 @@ pr-18 done    ─────→│ review_comments         │
 ## End-to-End
 
 ```
-┌──────────────────────────────────────────────────────┐
-│                    EVENT LOOP                         │
-│                                                      │
-│  ┌────────────────────────────────────────────────┐  │
-│  │ SCAN: gh api polling (per-repo interval)       │  │
-│  │       filter_labels로 대상 이슈/PR 식별          │  │
-│  │       cursor 기반 증분 탐색                      │  │
-│  └───────────────────┬────────────────────────────┘  │
-│                      │ 신규 아이템                     │
-│                      ▼                               │
-│  ┌────────┐  ┌────────┐  ┌─────────┐                │
-│  │ Issue  │  │  PR    │  │ Merge   │                │
-│  │ Queue  │  │ Queue  │  │ Queue   │                │
-│  └───┬────┘  └───┬────┘  └────┬────┘                │
-│      │           │            │                      │
-│  ┌───┴───────────┴────────────┴──────────────────┐   │
-│  │ PROCESS:                                      │   │
-│  │                                               │   │
-│  │  Issues:                                      │   │
-│  │    pending ──→ 분석(JSON)                      │   │
-│  │      ├─ high confidence ──→ 바로 구현           │   │
-│  │      └─ low confidence  ──→ 이슈 댓글 + 대기    │   │
-│  │                                               │   │
-│  │  waiting_human:                               │   │
-│  │    댓글 확인 → 답변 있으면 context 보강 후 구현   │   │
-│  │                                               │   │
-│  │  PRs:                                         │   │
-│  │    pending ──→ 리뷰(JSON)                      │   │
-│  │      ├─ approve ──→ merge queue INSERT         │   │
-│  │      └─ request_changes ──→ inline 댓글        │   │
-│  │                                               │   │
-│  │  Merges:                                      │   │
-│  │    pending ──→ merge 실행                      │   │
-│  │      ├─ 성공 ──→ done                          │   │
-│  │      └─ conflict ──→ 자동 해결 시도             │   │
-│  │                                               │   │
-│  │  done 전이 시:                                 │   │
-│  │    ──→ insight index (SQLite 축적)             │   │
-│  │    ──→ knowledge-extractor agent              │   │
-│  │       perspectives 탐색 → 인사이트 도출         │   │
-│  └───────────────────────────────────────────────┘   │
-│                      │                               │
-│                 sleep(tick)                           │
-└──────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                         EVENT LOOP                                │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │ SCAN: gh api polling (per-repo interval)                    │ │
+│  │       filter_labels로 대상 이슈/PR 식별                       │ │
+│  │       cursor 기반 증분 탐색                                   │ │
+│  └──────────────────────┬──────────────────────────────────────┘ │
+│                          │ 신규 아이템                              │
+│                          ▼                                        │
+│  ┌──────────┐  ┌──────────┐  ┌───────────┐                      │
+│  │ Issue Q  │  │  PR Q    │  │ Merge Q   │  autonomous.db       │
+│  │ (pending)│  │ (pending)│  │ (pending) │                      │
+│  └────┬─────┘  └────┬─────┘  └─────┬─────┘                      │
+│       │              │              │                             │
+│  ┌────┴──────────────┴──────────────┴────────────────────────┐   │
+│  │ PROCESS:                                                  │   │
+│  │                                                           │   │
+│  │  Issues:                                                  │   │
+│  │    pending ──→ 분석(JSON)                                  │   │
+│  │      ├─ high confidence ──→ 바로 구현                       │   │
+│  │      │   claude -p "[autonomous] fix: ..."                │   │
+│  │      │                  ▲ 마커 삽입                         │   │
+│  │      └─ low confidence  ──→ 이슈 댓글 + 대기                │   │
+│  │                                                           │   │
+│  │  waiting_human:                                           │   │
+│  │    댓글 확인 → 답변 있으면 context 보강 후 구현               │   │
+│  │                                                           │   │
+│  │  PRs:                                                     │   │
+│  │    pending ──→ 리뷰(JSON)                                  │   │
+│  │      ├─ approve ──→ merge queue INSERT                     │   │
+│  │      └─ request_changes ──→ inline 댓글                    │   │
+│  │                                                           │   │
+│  │  Merges:                                                  │   │
+│  │    pending ──→ merge 실행                                  │   │
+│  │      ├─ 성공 ──→ done                                      │   │
+│  │      └─ conflict ──→ 자동 해결 시도                         │   │
+│  └────────────────────────────┬──────────────────────────────┘   │
+│                                │                                  │
+│                           done 전이                               │
+│                                │                                  │
+│  ┌─────────────────────────────┴─────────────────────────────┐   │
+│  │ KNOWLEDGE EXTRACTION:                                     │   │
+│  │                                                           │   │
+│  │  ┌─────────────────────────────────────────────────────┐  │   │
+│  │  │ Claude Code 세션 (JSONL)                             │  │   │
+│  │  │ "[autonomous] fix: ..." → suggest-workflow 인덱싱     │  │   │
+│  │  │ → first_prompt_snippet에 마커 저장                    │  │   │
+│  │  └────────────────────────────┬────────────────────────┘  │   │
+│  │                               │                           │   │
+│  │  knowledge-extractor agent:   │                           │   │
+│  │    1. autonomous.db 조회      │ suggest-workflow query    │   │
+│  │       (태스크 메타, 에러)      │ --session-filter          │   │
+│  │    2. suggest-workflow 조회 ──┘ "[autonomous]%"           │   │
+│  │       (도구 패턴, 파일 수정)                               │   │
+│  │    3. 교차 분석 → 인사이트 도출                             │   │
+│  │    4. KnowledgeSuggestion → PR or 이슈 코멘트             │   │
+│  └───────────────────────────────────────────────────────────┘   │
+│                                │                                  │
+│                           sleep(tick)                             │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
