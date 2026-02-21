@@ -66,12 +66,27 @@ scan 발견 → autodev:wip → 분석(claude -p)
   실패 시 → 라벨 제거 → 다음 tick 재시도
 ```
 
-### PR: 리뷰
+### PR: 리뷰 → 개선 → 재리뷰 → 머지
 
 ```
 scan 발견 → autodev:wip → 리뷰(/multi-review)
-  ├─ approve         → gh pr review --approve → autodev:done
-  └─ request_changes → 인라인 댓글 → autodev:done
+  ├─ approve → 머지(/merge-pr) → autodev:done
+  └─ request_changes → 인라인 댓글
+       → 자동 개선(claude -p /develop implement feedback)
+       → 재리뷰(/multi-review)
+       → approve 될 때까지 반복
+       → 머지 → autodev:done
+  실패 시 → 라벨 제거 → 다음 tick 재시도
+```
+
+### Knowledge Extraction (done 전이 시)
+
+```
+done → knowledge-extractor agent
+  1. daemon.log 파싱 (phase 전이, 에러, 소요 시간)
+  2. suggest-workflow 세션 분석 ([autodev] 마커 필터)
+  3. 교차 분석 → 인사이트 도출
+  4. KnowledgeSuggestion → PR or 이슈 코멘트
 ```
 
 ---

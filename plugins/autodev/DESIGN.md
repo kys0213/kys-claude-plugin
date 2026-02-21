@@ -81,6 +81,10 @@ Phase:
   Ready         → 분석 완료, 구현 대기
   Implementing  → 구현 프롬프트 실행중
   Reviewing     → PR 리뷰 실행중
+  ReviewDone    → 리뷰 완료, 개선 대기
+  Improving     → 리뷰 피드백 반영 구현중
+  Improved      → 개선 완료, 재리뷰 대기
+  MergeReady    → approve 완료, 머지 대기
   Merging       → 머지 실행중
 ```
 
@@ -355,7 +359,10 @@ process() — Issue
             (다음 tick에 재발견 → 재시도)
 ```
 
-### PR Flow
+### PR Flow - 리뷰 → 개선 → 재리뷰 사이클
+
+리뷰 결과를 JSON으로 받아 verdict에 따라 결정적으로 분기한다.
+`request_changes` 시 자동으로 피드백을 반영하고, 재리뷰 후 approve되면 머지로 진행한다.
 
 ```
 process() — PR
@@ -374,31 +381,51 @@ process() — PR
   │  }
   │    │
   │    ├─ approve
-  │    │    gh pr review --approve
-  │    │    wip → autodev:done
-  │    │    active.remove(id)
+  │    │    gh pr review --approve -b "{summary}"
+  │    │    phase → MergeReady
   │    │
   │    └─ request_changes
-  │         POST /pulls/{N}/reviews (inline 댓글)
-  │         wip → autodev:done
-  │         active.remove(id)
-  │         (개선 후 다시 리뷰 요청하면 skip/done 라벨 제거)
-```
-
-### Merge Flow
-
-```
-process() — Merge (PR이 approved 상태일 때)
+  │         POST /pulls/{N}/reviews
+  │           event: REQUEST_CHANGES
+  │           body: "{summary}"
+  │           comments: [{path, line, body}]
+  │         phase → ReviewDone
   │
-  ├─ Pending
+  ├─ ReviewDone
+  │    run_claude(
+  │      "/develop implement review feedback:"
+  │      + review_comment
+  │    )
+  │    phase → Improving
+  │
+  ├─ Improving (완료 대기)
+  │    │
+  │    ├─ success → phase → Improved
+  │    └─ failure → wip 제거, active.remove(id) → 재시도
+  │
+  ├─ Improved
+  │    재리뷰: run_claude(/multi-review, json)
+  │    phase → Reviewing (반복)
+  │    │
+  │    (Reviewing에서 approve 나올 때까지 사이클 반복)
+  │
+  ├─ MergeReady
   │    run_claude(/merge-pr {N})
   │    phase → Merging
   │
   └─ Merging (완료 대기)
        │
-       ├─ success → wip → autodev:done, active.remove(id)
-       ├─ conflict → 자동 해결 시도 → 성공/실패
-       └─ failure → wip 제거, active.remove(id) → 재시도
+       ├─ success
+       │    wip → autodev:done
+       │    active.remove(id)
+       │
+       ├─ conflict
+       │    run_claude(conflict resolution)
+       │    ├─ 해결 → wip → autodev:done
+       │    └─ 실패 → wip 제거, active.remove(id) → 재시도
+       │
+       └─ failure
+            wip 제거, active.remove(id) → 재시도
 ```
 
 ---
@@ -590,7 +617,185 @@ daemon:
 
 ---
 
-## 13. JSON Schemas
+## 13. Knowledge Extraction (Agent-Driven)
+
+이슈 또는 PR이 완료(done)될 때, 에이전트가 완료된 작업 데이터를 능동적으로 탐색하며 인사이트를 도출한다.
+
+### 설계 원칙: Data-Only + LLM 해석
+
+```
+daemon.log + suggest-workflow = 사실만 반환   "무엇이 일어났는가"
+Agent (LLM)                   = 의미를 해석   "그래서 무슨 의미인가"
+```
+
+```
+❌ Rule-based (엣지케이스 누적)
+   if error.contains("timeout")  → suggest "increase timeout"
+   ... (끝없이 규칙 추가)
+
+✅ Data-only + LLM 해석
+   Log: "timeout 3건, 모두 external API 호출 시점"
+   Agent: "→ API 클라이언트에 retry/backoff 설정 필요"
+```
+
+### 데이터 소스
+
+autodev의 인사이트는 **두 개의 독립적인 데이터 소스**에서 나온다.
+
+```
+┌──────────────────────────┐    ┌──────────────────────────────────┐
+│ A. daemon.log            │    │ B. suggest-workflow index.db     │
+│    (~/.autodev/)         │    │    (~/.claude/suggest-workflow-   │
+│                          │    │     index/{project}/)            │
+│ 태스크 실행 이력:          │    │                                  │
+│ • phase 전이 이벤트       │    │ 세션 실행 이력:                     │
+│ • 라벨 변경 이력          │    │ • sessions (+ first_prompt_      │
+│ • 에러 메시지             │    │   snippet)                       │
+│ • 소요 시간              │    │ • prompts                        │
+│                          │    │ • tool_uses (classified)         │
+│ "무엇을 처리했는가"        │    │ • file_edits                     │
+│ (상태 전이, 에러, 시간)    │    │                                  │
+│                          │    │ "어떻게 실행했는가"                │
+│                          │    │ (도구 사용, 파일 수정, 프롬프트)     │
+└──────────────────────────┘    └──────────────────────────────────┘
+```
+
+### 세션 식별: `[autodev]` 마커 컨벤션
+
+autodev processor가 `claude -p` 실행 시, 첫 프롬프트에 마커를 삽입한다:
+
+```
+claude -p "[autodev] fix: resolve login timeout issue in auth module"
+```
+
+suggest-workflow는 인덱싱 시 `first_prompt_snippet` (첫 500자)을 저장한다.
+이후 `--session-filter`로 autodev 세션만 조회 가능:
+
+```bash
+# autodev 세션 목록 조회
+suggest-workflow query \
+  --perspective filtered-sessions \
+  --param prompt_pattern="[autodev]"
+
+# autodev 세션의 도구 사용 패턴
+suggest-workflow query \
+  --perspective tool-frequency \
+  --session-filter "first_prompt_snippet LIKE '[autodev]%'"
+
+# autodev 세션의 파일 수정 이상치
+suggest-workflow query \
+  --perspective repetition \
+  --session-filter "first_prompt_snippet LIKE '[autodev]%'"
+```
+
+### 에이전트 탐색 흐름
+
+```
+done 전이 시
+  │
+  ▼
+knowledge-extractor agent 시작
+  │
+  │  ══ 1차: daemon.log (태스크 메타) ══
+  │
+  │  로그 파싱 → phase 전이, 소요 시간, 에러
+  │
+  │  ══ 2차: suggest-workflow (세션 실행 이력) ══
+  │
+  │  suggest-workflow query \
+  │    --perspective filtered-sessions \
+  │    --param prompt_pattern="[autodev]"
+  │  → autodev 세션 목록
+  │
+  │  suggest-workflow query \
+  │    --perspective tool-frequency \
+  │    --session-filter "first_prompt_snippet LIKE '[autodev]%'"
+  │  → [{tool: "Edit", frequency: 45}, {tool: "Bash:test", frequency: 38}, ...]
+  │
+  │  ══ 3차: drill-down (관심 영역 심화) ══
+  │
+  │  suggest-workflow query \
+  │    --perspective repetition \
+  │    --session-filter "first_prompt_snippet LIKE '[autodev]%'"
+  │  → 이상치 세션 발견: "session-abc에서 Bash:test 28회 반복"
+  │
+  │  ══ 4차: 인사이트 종합 ══
+  │
+  │  에이전트가 탐색 결과를 종합하여 판단:
+  │  "autodev 세션에서 Bash:test가 평균 대비 3배 호출.
+  │   테스트 실패 → 수정 → 재실행 루프가 반복됨.
+  │   src/api/client.rs 수정 시 항상 발생.
+  │   → .claude/rules/api-testing.md 에 테스트 전략 가이드 추가 제안"
+  │
+  ▼
+┌───────────────────────────────────────┐
+│ KnowledgeSuggestion {                 │
+│   suggestions: [{                     │
+│     type: "rule",                     │
+│     target_file: ".claude/rules/...", │
+│     content: "...",                   │
+│     reason: "..."                     │
+│   }]                                  │
+│ }                                     │
+└──────────────┬────────────────────────┘
+               │
+               ▼
+          PR 생성 or
+          이슈 코멘트로 제안
+```
+
+### 크로스 태스크 학습
+
+단일 태스크가 아닌 축적된 전체 이력에서 패턴을 발견한다.
+daemon.log + suggest-workflow를 교차 조회하여 "무엇을 처리했는가" + "어떻게 실행했는가"를 결합:
+
+```
+                                 ┌────────────────────────────────┐
+                                 │      suggest-workflow          │
+                                 │      index.db (per-project)    │
+   daemon.log                    │                                │
+   (태스크 메타)                   │  sessions                     │
+                                 │  ├ first_prompt_snippet        │
+   phase 전이 ──┐                │  │ "[autodev] fix:..."         │
+   에러 메시지 ──┤                │  ├ tool_uses (classified)      │
+   소요 시간   ──┘                │  ├ prompts                     │
+       │                         │  └ file_edits                  │
+       │                         │                                │
+       │                         └───────────────┬────────────────┘
+       │                                         │
+       │              knowledge-extractor        │
+       │              agent 교차 조회              │
+       └────────────────┬────────────────────────┘
+                        │
+           ┌────────────┴─────────────┐
+           │ 발견 가능한 패턴 예시:      │
+           │                          │
+           │ • 같은 모듈 반복 수정       │  ← file_edits + session_filter
+           │ • 특정 에러 반복 발생       │  ← daemon.log (에러 패턴)
+           │ • 리뷰 지적사항 패턴        │  ← tool_uses (Bash:test 반복)
+           │ • 테스트 실패 루프          │  ← repetition perspective
+           │ • 리뷰→개선 반복 횟수       │  ← daemon.log (phase 사이클)
+           └──────────────────────────┘
+```
+
+---
+
+## 14. JSON Schemas
+
+### KnowledgeSuggestion (Post-completion)
+
+```json
+{
+  "suggestions": [
+    {
+      "type": "rule | claude_md | hook | skill | subagent",
+      "target_file": ".claude/rules/error-handling.md",
+      "content": "에러 핸들링시 반드시 anyhow context 사용",
+      "reason": "이번 이슈에서 context 없는 에러로 디버깅에 30분 소요"
+    }
+  ]
+}
+```
 
 ### AnalysisResult (Issue)
 
@@ -625,7 +830,7 @@ daemon:
 
 ---
 
-## 14. 사이드이펙트 & 의존성
+## 15. 사이드이펙트 & 의존성
 
 ### 기존 코드 영향
 - **marketplace.json**: 플러그인 1개 추가 (신규)
@@ -644,7 +849,7 @@ daemon:
 
 ---
 
-## 15. 구현 우선순위
+## 16. 구현 우선순위
 
 ### Phase 1: 코어 (MVP)
 1. Cargo 프로젝트 초기화 + CLI 프레임워크
@@ -676,46 +881,71 @@ daemon:
 ## End-to-End
 
 ```
-┌───────────────────────────────────────────────────────────┐
-│                      DAEMON LOOP                           │
-│                                                            │
-│  ┌──────────────────────────────────────────────────────┐ │
-│  │ 1. RECOVERY                                          │ │
-│  │    autodev:wip + active에 없음 → wip 라벨 제거        │ │
-│  └──────────────────────────────────────────────────────┘ │
-│                          │                                 │
-│  ┌──────────────────────────────────────────────────────┐ │
-│  │ 2. SCAN                                              │ │
-│  │    gh api: open + autodev 라벨 없는 이슈/PR 조회      │ │
-│  │    → autodev:wip 라벨 추가                            │ │
-│  │    → active.insert(id, Pending)                      │ │
-│  └──────────────────────────────────────────────────────┘ │
-│                          │                                 │
-│  ┌──────────────────────────────────────────────────────┐ │
-│  │ 3. PROCESS                                           │ │
-│  │                                                      │ │
-│  │  Issues:                                             │ │
-│  │    Pending → Analyzing → verdict 분기                 │ │
-│  │      implement  → Ready → Implementing → PR 생성     │ │
-│  │      clarify    → 댓글 + autodev:skip                │ │
-│  │      wontfix    → 댓글 + autodev:skip                │ │
-│  │    success → autodev:done                            │ │
-│  │    failure → 라벨 제거 (재시도)                        │ │
-│  │                                                      │ │
-│  │  PRs:                                                │ │
-│  │    Pending → Reviewing → verdict 분기                 │ │
-│  │      approve         → autodev:done                  │ │
-│  │      request_changes → 댓글 + autodev:done           │ │
-│  │                                                      │ │
-│  │  Merges:                                             │ │
-│  │    Pending → Merging → done/conflict/failure         │ │
-│  └──────────────────────────────────────────────────────┘ │
-│                          │                                 │
-│                    sleep(tick)                              │
-│                          │                                 │
-│                          └──→ loop                         │
-└───────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                          DAEMON LOOP                              │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │ 1. RECOVERY                                                 │ │
+│  │    autodev:wip + active에 없음 → wip 라벨 제거               │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                            │                                      │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │ 2. SCAN                                                     │ │
+│  │    gh api: open + autodev 라벨 없는 이슈/PR 조회             │ │
+│  │    → autodev:wip 라벨 추가                                   │ │
+│  │    → active.insert(id, Pending)                             │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                            │                                      │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │ 3. PROCESS                                                  │ │
+│  │                                                             │ │
+│  │  Issues:                                                    │ │
+│  │    Pending → Analyzing → verdict 분기                        │ │
+│  │      implement → Ready → Implementing → PR 생성              │ │
+│  │      clarify/wontfix → 댓글 + autodev:skip                  │ │
+│  │    success → autodev:done → [Knowledge Extraction]          │ │
+│  │    failure → 라벨 제거 (재시도)                                │ │
+│  │                                                             │ │
+│  │  PRs:                                                       │ │
+│  │    Pending → Reviewing → verdict 분기                        │ │
+│  │      approve → MergeReady → Merging → done                  │ │
+│  │      request_changes → ReviewDone → Improving → Improved    │ │
+│  │        → 재리뷰 (Reviewing 반복)                              │ │
+│  │    success → autodev:done → [Knowledge Extraction]          │ │
+│  │    failure → 라벨 제거 (재시도)                                │ │
+│  │                                                             │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                            │                                      │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │ 4. KNOWLEDGE EXTRACTION (done 전이 시)                       │ │
+│  │                                                             │ │
+│  │  claude -p "[autodev] fix: ..."                             │ │
+│  │    → suggest-workflow 인덱싱 (first_prompt_snippet 마커)      │ │
+│  │                                                             │ │
+│  │  knowledge-extractor agent:                                 │ │
+│  │    1. daemon.log 파싱 (phase 전이, 에러, 소요 시간)           │ │
+│  │    2. suggest-workflow query --session-filter "[autodev]%"   │ │
+│  │       (도구 패턴, 파일 수정, 이상치)                           │ │
+│  │    3. 교차 분석 → 인사이트 도출                                │ │
+│  │    4. KnowledgeSuggestion → PR or 이슈 코멘트                │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                            │                                      │
+│                      sleep(tick)                                   │
+│                            │                                      │
+│                            └──→ loop                              │
+└──────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Status Transitions
+
+| Type | Phase Flow | 라벨 전이 |
+|------|-----------|----------|
+| Issue | `Pending → Analyzing → Ready → Implementing → done` | `(없음) → wip → done` |
+| Issue | `Pending → Analyzing → skip` (clarify/wontfix) | `(없음) → wip → skip` |
+| PR | `Pending → Reviewing → MergeReady → Merging → done` | `(없음) → wip → done` |
+| PR | `Pending → Reviewing → ReviewDone → Improving → Improved → Reviewing (반복)` | `wip` 유지 |
 
 ---
 
@@ -728,4 +958,5 @@ daemon:
 | **recovery()** | 크래시 후 orphan wip 정리 |
 | **scan()** | 라벨 없는 이슈/PR 발견 → wip 라벨 + active 등록 |
 | **process()** | Phase별 작업 실행 → done/skip/재시도 |
+| **Knowledge Extraction** | done 전이 시 daemon.log + suggest-workflow 교차 분석 → 인사이트 |
 | **daemon.log** | append-only 실행 로그 |
