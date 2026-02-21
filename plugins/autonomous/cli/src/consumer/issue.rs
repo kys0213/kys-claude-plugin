@@ -2,7 +2,8 @@ use anyhow::Result;
 use chrono::Utc;
 use uuid::Uuid;
 
-use crate::config::models::RepoConfig;
+use crate::config;
+use crate::config::models::WorkflowConfig;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::Database;
@@ -92,10 +93,8 @@ pub async fn process_pending(db: &Database) -> Result<()> {
                     )?;
                     tracing::info!("issue #{} analysis complete", item.github_number);
 
-                    // 레포 설정 로드
-                    let config = db
-                        .repo_get_config_struct(&item.repo_name)
-                        .unwrap_or_default();
+                    // YAML 설정 로드 (글로벌 + 레포별 머지)
+                    let config = config::loader::load_merged(Some(&wt_path));
 
                     // 2단계: 구현
                     process_ready_issue(
@@ -135,11 +134,11 @@ async fn process_ready_issue(
     issue_num: i64,
     report: &str,
     wt_path: &std::path::Path,
-    config: &RepoConfig,
+    config: &WorkflowConfig,
 ) -> Result<()> {
     db.issue_update_status(item_id, "processing", &StatusFields::default())?;
 
-    let workflow = &config.issue_workflow;
+    let workflow = &config.workflow.issue;
     let prompt = format!(
         "{workflow} implement based on analysis:\n\n{report}\n\nThis is for issue #{issue_num} in {repo_name}."
     );

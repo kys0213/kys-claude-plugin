@@ -2,6 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use uuid::Uuid;
 
+use crate::config;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::Database;
@@ -42,11 +43,9 @@ pub async fn process_pending(db: &Database) -> Result<()> {
                 }
             };
 
-        // 레포 설정 로드
-        let config = db
-            .repo_get_config_struct(&item.repo_name)
-            .unwrap_or_default();
-        let pr_workflow = &config.pr_workflow;
+        // YAML 설정 로드 (글로벌 + 레포별 머지)
+        let config = config::loader::load_merged(Some(&wt_path));
+        let pr_workflow = &config.workflow.pr;
 
         // 1단계: Multi-LLM 리뷰
         let started = Utc::now().to_rfc3339();

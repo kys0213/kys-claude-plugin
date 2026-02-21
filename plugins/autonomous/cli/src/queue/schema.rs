@@ -13,22 +13,6 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
             updated_at  TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS repo_configs (
-            repo_id             TEXT PRIMARY KEY REFERENCES repositories(id),
-            scan_interval_secs  INTEGER NOT NULL DEFAULT 300,
-            scan_targets        TEXT NOT NULL DEFAULT '[\"issues\",\"pulls\"]',
-            issue_concurrency   INTEGER NOT NULL DEFAULT 1,
-            pr_concurrency      INTEGER NOT NULL DEFAULT 1,
-            merge_concurrency   INTEGER NOT NULL DEFAULT 1,
-            model               TEXT NOT NULL DEFAULT 'sonnet',
-            issue_workflow      TEXT NOT NULL DEFAULT '/develop-workflow:develop-auto',
-            pr_workflow         TEXT NOT NULL DEFAULT '/develop-workflow:multi-review',
-            filter_labels       TEXT DEFAULT NULL,
-            ignore_authors      TEXT DEFAULT '[\"dependabot\",\"renovate\"]',
-            workspace_strategy  TEXT NOT NULL DEFAULT 'worktree',
-            gh_host             TEXT DEFAULT NULL
-        );
-
         CREATE TABLE IF NOT EXISTS scan_cursors (
             repo_id     TEXT NOT NULL REFERENCES repositories(id),
             target      TEXT NOT NULL,

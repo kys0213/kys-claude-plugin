@@ -1,3 +1,4 @@
+pub mod loader;
 pub mod models;
 
 use std::path::PathBuf;
