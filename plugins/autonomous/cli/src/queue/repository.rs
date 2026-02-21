@@ -188,7 +188,7 @@ impl IssueQueueRepository for Database {
              title = excluded.title, body = excluded.body, labels = excluded.labels, \
              author = excluded.author, status = 'pending', error_message = NULL, \
              worker_id = NULL, retry_count = 0, updated_at = excluded.updated_at \
-             WHERE status IN ('done', 'failed')",
+             WHERE status = 'done'",
             rusqlite::params![id, item.repo_id, item.github_number, item.title, item.body, item.labels, item.author, now],
         )?;
         Ok(id)
@@ -197,7 +197,7 @@ impl IssueQueueRepository for Database {
     fn issue_exists(&self, repo_id: &str, github_number: i64) -> Result<bool> {
         let exists: bool = self.conn().query_row(
             "SELECT COUNT(*) > 0 FROM issue_queue WHERE repo_id = ?1 AND github_number = ?2 \
-             AND status NOT IN ('done', 'failed')",
+             AND status != 'done'",
             rusqlite::params![repo_id, github_number],
             |row| row.get(0),
         )?;
@@ -291,7 +291,7 @@ impl PrQueueRepository for Database {
              head_branch = excluded.head_branch, base_branch = excluded.base_branch, \
              status = 'pending', error_message = NULL, worker_id = NULL, \
              retry_count = 0, updated_at = excluded.updated_at \
-             WHERE status IN ('done', 'failed')",
+             WHERE status = 'done'",
             rusqlite::params![id, item.repo_id, item.github_number, item.title, item.body, item.author, item.head_branch, item.base_branch, now],
         )?;
         Ok(id)
@@ -300,7 +300,7 @@ impl PrQueueRepository for Database {
     fn pr_exists(&self, repo_id: &str, github_number: i64) -> Result<bool> {
         let exists: bool = self.conn().query_row(
             "SELECT COUNT(*) > 0 FROM pr_queue WHERE repo_id = ?1 AND github_number = ?2 \
-             AND status NOT IN ('done', 'failed')",
+             AND status != 'done'",
             rusqlite::params![repo_id, github_number],
             |row| row.get(0),
         )?;
@@ -395,7 +395,7 @@ impl MergeQueueRepository for Database {
              base_branch = excluded.base_branch, status = 'pending', \
              error_message = NULL, worker_id = NULL, retry_count = 0, \
              updated_at = excluded.updated_at \
-             WHERE status IN ('done', 'failed')",
+             WHERE status = 'done'",
             rusqlite::params![id, item.repo_id, item.pr_number, item.title, item.head_branch, item.base_branch, now],
         )?;
         Ok(id)
@@ -404,7 +404,7 @@ impl MergeQueueRepository for Database {
     fn merge_exists(&self, repo_id: &str, pr_number: i64) -> Result<bool> {
         let exists: bool = self.conn().query_row(
             "SELECT COUNT(*) > 0 FROM merge_queue WHERE repo_id = ?1 AND pr_number = ?2 \
-             AND status NOT IN ('done', 'failed')",
+             AND status != 'done'",
             rusqlite::params![repo_id, pr_number],
             |row| row.get(0),
         )?;
