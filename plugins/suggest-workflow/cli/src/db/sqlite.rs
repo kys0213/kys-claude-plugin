@@ -335,6 +335,9 @@ fn validate_session_filter(filter: &str) -> Result<()> {
     if filter.contains(';') {
         anyhow::bail!("session filter must not contain semicolons");
     }
+    if filter.contains("{SF:") {
+        anyhow::bail!("session filter must not contain {{SF:}} placeholders");
+    }
     let upper = filter.trim().to_uppercase();
     for keyword in &["DROP ", "CREATE ", "ALTER ", "INSERT ", "DELETE ", "UPDATE "] {
         if upper.contains(keyword) {

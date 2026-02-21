@@ -196,6 +196,21 @@ fn e5_session_filter_rejects_dangerous_sql() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("must not contain DDL"));
+
+    // {SF:} placeholder injection (would cause infinite loop)
+    cli_with_home(&tmp)
+        .args([
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--perspective",
+            "tool-frequency",
+            "--session-filter",
+            "first_prompt_snippet LIKE '{SF:id}'",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("must not contain {SF:}"));
 }
 
 // --- E6: --session-filter without {SF} markers is silently ignored ---
