@@ -124,3 +124,56 @@ pub fn parse_analysis(stdout: &str) -> Option<AnalysisResult> {
     // 직접 파싱 시도 (claude가 raw JSON을 반환한 경우)
     serde_json::from_str::<AnalysisResult>(stdout).ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_review_approve_from_envelope() {
+        let stdout = r#"{"result": "{\"verdict\":\"approve\",\"summary\":\"LGTM\"}"}"#;
+        let result = parse_review(stdout).expect("should parse");
+        assert_eq!(result.verdict, ReviewVerdict::Approve);
+        assert_eq!(result.summary, "LGTM");
+        assert!(result.comments.is_empty());
+    }
+
+    #[test]
+    fn parse_review_request_changes_from_envelope() {
+        let stdout = r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Fix error handling\",\"comments\":[{\"path\":\"src/main.rs\",\"line\":42,\"body\":\"Missing null check\"}]}"}"#;
+        let result = parse_review(stdout).expect("should parse");
+        assert_eq!(result.verdict, ReviewVerdict::RequestChanges);
+        assert_eq!(result.summary, "Fix error handling");
+        assert_eq!(result.comments.len(), 1);
+        assert_eq!(result.comments[0].path, "src/main.rs");
+        assert_eq!(result.comments[0].line, Some(42));
+    }
+
+    #[test]
+    fn parse_review_raw_json_without_envelope() {
+        let stdout = r#"{"verdict":"approve","summary":"All good"}"#;
+        let result = parse_review(stdout).expect("should parse");
+        assert_eq!(result.verdict, ReviewVerdict::Approve);
+        assert_eq!(result.summary, "All good");
+    }
+
+    #[test]
+    fn parse_review_malformed_returns_none() {
+        // plain text — not JSON
+        assert!(parse_review("LGTM - no issues found").is_none());
+    }
+
+    #[test]
+    fn parse_review_envelope_with_non_review_result_returns_none() {
+        // envelope의 result가 ReviewResult JSON이 아닌 일반 텍스트
+        let stdout = r#"{"result": "LGTM"}"#;
+        assert!(parse_review(stdout).is_none());
+    }
+
+    #[test]
+    fn parse_review_missing_verdict_returns_none() {
+        // verdict 필드 누락
+        let stdout = r#"{"summary":"All good"}"#;
+        assert!(parse_review(stdout).is_none());
+    }
+}

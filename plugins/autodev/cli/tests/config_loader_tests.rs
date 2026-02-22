@@ -47,6 +47,12 @@ fn default_config_has_expected_values() {
     assert_eq!(config.workflow.pr, "/develop-workflow:multi-review");
     assert_eq!(config.commands.design, "/multi-llm-design");
     assert_eq!(config.commands.commit_and_pr, "/commit-and-pr");
+    // DaemonConfig defaults
+    assert_eq!(config.daemon.tick_interval_secs, 10);
+    assert_eq!(config.daemon.reconcile_window_hours, 24);
+    assert_eq!(config.daemon.daily_report_hour, 6);
+    // ConsumerConfig: auto_merge default
+    assert!(!config.consumer.auto_merge);
 }
 
 #[test]
@@ -220,4 +226,67 @@ fn load_merged_partial_yaml_fills_defaults() {
     assert_eq!(config.workflow.issue, "/develop-workflow:develop-auto");
     assert_eq!(config.commands.design, "/multi-llm-design");
     assert!(config.develop.review.multi_llm);
+}
+
+// ═══════════════════════════════════════════════
+// 6. DaemonConfig — YAML 파싱 + backward compat
+// ═══════════════════════════════════════════════
+
+#[test]
+fn daemon_config_parsed_from_yaml() {
+    let tmp = TempDir::new().unwrap();
+
+    let yaml = r#"
+daemon:
+  tick_interval_secs: 30
+  reconcile_window_hours: 48
+  daily_report_hour: 9
+"#;
+    fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
+    let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
+
+    let config = loader::load_merged(&env, None);
+    assert_eq!(config.daemon.tick_interval_secs, 30);
+    assert_eq!(config.daemon.reconcile_window_hours, 48);
+    assert_eq!(config.daemon.daily_report_hour, 9);
+}
+
+#[test]
+fn daemon_config_backward_compat_without_section() {
+    let tmp = TempDir::new().unwrap();
+
+    // daemon 섹션 없는 기존 YAML — backward compat 보장
+    let yaml = r#"
+consumer:
+  scan_interval_secs: 60
+  model: opus
+"#;
+    fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
+    let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
+
+    let config = loader::load_merged(&env, None);
+    // consumer 값은 오버라이드
+    assert_eq!(config.consumer.scan_interval_secs, 60);
+    // daemon은 전부 default
+    assert_eq!(config.daemon.tick_interval_secs, 10);
+    assert_eq!(config.daemon.reconcile_window_hours, 24);
+    assert_eq!(config.daemon.daily_report_hour, 6);
+}
+
+#[test]
+fn daemon_config_partial_override() {
+    let tmp = TempDir::new().unwrap();
+
+    // daemon 섹션에 일부만 지정 — 나머지는 default
+    let yaml = r#"
+daemon:
+  daily_report_hour: 12
+"#;
+    fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
+    let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
+
+    let config = loader::load_merged(&env, None);
+    assert_eq!(config.daemon.tick_interval_secs, 10); // default
+    assert_eq!(config.daemon.reconcile_window_hours, 24); // default
+    assert_eq!(config.daemon.daily_report_hour, 12); // overridden
 }

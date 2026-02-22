@@ -3,6 +3,7 @@ use std::path::Path;
 use autodev::components::merger::{MergeOutcome, Merger};
 use autodev::components::reviewer::Reviewer;
 use autodev::infrastructure::claude::mock::MockClaude;
+use autodev::infrastructure::claude::output::ReviewVerdict;
 
 // ═══════════════════════════════════════════════
 // Reviewer 테스트
@@ -28,6 +29,61 @@ async fn reviewer_success_parses_output() {
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].1, "/multi-review");
     assert_eq!(calls[0].2.as_deref(), Some("json"));
+}
+
+#[tokio::test]
+async fn reviewer_verdict_approve() {
+    let claude = MockClaude::new();
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"approve\",\"summary\":\"LGTM\"}"}"#,
+        0,
+    );
+
+    let reviewer = Reviewer::new(&claude);
+    let output = reviewer
+        .review_pr(Path::new("/tmp/test"), "/multi-review")
+        .await
+        .unwrap();
+
+    assert_eq!(output.exit_code, 0);
+    assert_eq!(output.verdict, Some(ReviewVerdict::Approve));
+    assert_eq!(output.review, "LGTM");
+}
+
+#[tokio::test]
+async fn reviewer_verdict_request_changes() {
+    let claude = MockClaude::new();
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Fix bugs\"}"}"#,
+        0,
+    );
+
+    let reviewer = Reviewer::new(&claude);
+    let output = reviewer
+        .review_pr(Path::new("/tmp/test"), "/multi-review")
+        .await
+        .unwrap();
+
+    assert_eq!(output.exit_code, 0);
+    assert_eq!(output.verdict, Some(ReviewVerdict::RequestChanges));
+    assert_eq!(output.review, "Fix bugs");
+}
+
+#[tokio::test]
+async fn reviewer_verdict_none_on_non_review_json() {
+    let claude = MockClaude::new();
+    // Non-ReviewResult JSON → verdict=None, fallback to parse_output
+    claude.enqueue_response(r#"{"result": "LGTM - no issues found"}"#, 0);
+
+    let reviewer = Reviewer::new(&claude);
+    let output = reviewer
+        .review_pr(Path::new("/tmp/test"), "/multi-review")
+        .await
+        .unwrap();
+
+    assert_eq!(output.exit_code, 0);
+    assert_eq!(output.verdict, None);
+    assert_eq!(output.review, "LGTM - no issues found");
 }
 
 #[tokio::test]

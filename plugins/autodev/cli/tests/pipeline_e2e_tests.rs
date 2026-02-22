@@ -9,7 +9,7 @@ use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
 use autodev::queue::repository::*;
 use autodev::queue::task_queues::{
-    issue_phase, labels, make_work_id, IssueItem, MergeItem, PrItem, TaskQueues,
+    issue_phase, labels, make_work_id, merge_phase, IssueItem, MergeItem, PrItem, TaskQueues,
 };
 use autodev::queue::Database;
 
@@ -1359,4 +1359,143 @@ async fn process_all_handles_all_queues() {
         8,
         "should call claude 8 times total (6 pipeline + 2 knowledge extraction)"
     );
+}
+
+// ═══════════════════════════════════════════════════
+// 21. scan_merges: autodev:done PR을 merge queue에 적재
+// ═══════════════════════════════════════════════════
+
+#[tokio::test]
+async fn scan_merges_detects_done_prs() {
+    let gh = MockGh::new();
+
+    // issues endpoint 응답: autodev:done 라벨이 붙은 PR (#50)
+    let issues_json = serde_json::json!([{
+        "number": 50,
+        "title": "Feature PR",
+        "pull_request": {"url": "https://api.github.com/repos/org/repo/pulls/50"},
+        "labels": [{"name": "autodev:done"}]
+    }]);
+    gh.set_paginate(
+        "org/repo",
+        "issues",
+        serde_json::to_vec(&issues_json).unwrap(),
+    );
+
+    // PR 상세 정보 응답
+    let pr_detail = serde_json::json!({
+        "number": 50,
+        "title": "Feature PR",
+        "head": {"ref": "feat/new-feature"},
+        "base": {"ref": "main"}
+    });
+    gh.set_paginate(
+        "org/repo",
+        "pulls/50",
+        serde_json::to_vec(&pr_detail).unwrap(),
+    );
+
+    let mut queues = TaskQueues::new();
+    autodev::scanner::pulls::scan_merges(
+        &gh,
+        "repo-1",
+        "org/repo",
+        "https://github.com/org/repo",
+        None,
+        &mut queues,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(queues.merges.len(merge_phase::PENDING), 1);
+    assert_label_removed(&gh, "org/repo", 50, labels::DONE);
+    assert_label_added(&gh, "org/repo", 50, labels::WIP);
+}
+
+// ═══════════════════════════════════════════════════
+// 22. scan_merges: 이미 merge queue에 있으면 skip
+// ═══════════════════════════════════════════════════
+
+#[tokio::test]
+async fn scan_merges_dedup_skips_existing() {
+    let gh = MockGh::new();
+
+    let issues_json = serde_json::json!([{
+        "number": 60,
+        "title": "Already queued",
+        "pull_request": {"url": "https://api.github.com/repos/org/repo/pulls/60"},
+        "labels": [{"name": "autodev:done"}]
+    }]);
+    gh.set_paginate(
+        "org/repo",
+        "issues",
+        serde_json::to_vec(&issues_json).unwrap(),
+    );
+
+    let mut queues = TaskQueues::new();
+    // 미리 merge queue에 동일 PR 적재
+    queues.merges.push(
+        merge_phase::PENDING,
+        MergeItem {
+            work_id: make_work_id("merge", "org/repo", 60),
+            repo_id: "repo-1".to_string(),
+            repo_name: "org/repo".to_string(),
+            repo_url: "https://github.com/org/repo".to_string(),
+            pr_number: 60,
+            title: "Already queued".to_string(),
+            head_branch: "feat/x".to_string(),
+            base_branch: "main".to_string(),
+        },
+    );
+
+    autodev::scanner::pulls::scan_merges(
+        &gh,
+        "repo-1",
+        "org/repo",
+        "https://github.com/org/repo",
+        None,
+        &mut queues,
+    )
+    .await
+    .unwrap();
+
+    // 중복 추가 없음
+    assert_eq!(queues.merges.len(merge_phase::PENDING), 1);
+    // label 변경도 없음
+    assert!(gh.removed_labels.lock().unwrap().is_empty());
+}
+
+// ═══════════════════════════════════════════════════
+// 23. scan_merges: issue(PR 아님)는 무시
+// ═══════════════════════════════════════════════════
+
+#[tokio::test]
+async fn scan_merges_skips_non_pr_issues() {
+    let gh = MockGh::new();
+
+    // pull_request 필드 없는 일반 이슈
+    let issues_json = serde_json::json!([{
+        "number": 70,
+        "title": "Plain issue",
+        "labels": [{"name": "autodev:done"}]
+    }]);
+    gh.set_paginate(
+        "org/repo",
+        "issues",
+        serde_json::to_vec(&issues_json).unwrap(),
+    );
+
+    let mut queues = TaskQueues::new();
+    autodev::scanner::pulls::scan_merges(
+        &gh,
+        "repo-1",
+        "org/repo",
+        "https://github.com/org/repo",
+        None,
+        &mut queues,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(queues.merges.len(merge_phase::PENDING), 0);
 }
