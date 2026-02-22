@@ -14,7 +14,11 @@ pub fn status(db: &Database, env: &dyn Env) -> Result<String> {
     let running = crate::daemon::pid::is_running(&home);
     output.push_str(&format!(
         "autodev daemon: {}\n\n",
-        if running { "● running" } else { "○ stopped" }
+        if running {
+            "● running"
+        } else {
+            "○ stopped"
+        }
     ));
 
     // 레포 목록
@@ -125,21 +129,30 @@ pub fn queue_list(db: &Database, repo: &str) -> Result<String> {
     output.push_str("Issue Queue:\n");
     let issues = db.issue_list(repo, 20)?;
     for item in &issues {
-        output.push_str(&format!("  #{} [{}] {}\n", item.github_number, item.status, item.title));
+        output.push_str(&format!(
+            "  #{} [{}] {}\n",
+            item.github_number, item.status, item.title
+        ));
     }
 
     // PR queue
     output.push_str("\nPR Queue:\n");
     let prs = db.pr_list(repo, 20)?;
     for item in &prs {
-        output.push_str(&format!("  #{} [{}] {}\n", item.github_number, item.status, item.title));
+        output.push_str(&format!(
+            "  #{} [{}] {}\n",
+            item.github_number, item.status, item.title
+        ));
     }
 
     // Merge queue
     output.push_str("\nMerge Queue:\n");
     let merges = db.merge_list(repo, 20)?;
     for item in &merges {
-        output.push_str(&format!("  PR #{} [{}] {}\n", item.github_number, item.status, item.title));
+        output.push_str(&format!(
+            "  PR #{} [{}] {}\n",
+            item.github_number, item.status, item.title
+        ));
     }
 
     Ok(output)
@@ -174,7 +187,10 @@ pub fn logs(db: &Database, repo: Option<&str>, limit: usize) -> Result<String> {
             Some(_) => "✗",
             None => "…",
         };
-        let dur = entry.duration_ms.map(|d| format!(" ({d}ms)")).unwrap_or_default();
+        let dur = entry
+            .duration_ms
+            .map(|d| format!(" ({d}ms)"))
+            .unwrap_or_default();
         output.push_str(&format!(
             "  {} [{}] {} {}{}\n",
             entry.started_at, entry.queue_type, status, entry.command, dur

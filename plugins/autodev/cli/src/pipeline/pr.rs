@@ -88,9 +88,7 @@ pub async fn process_pending(
             Ok(output) => {
                 let finished = Utc::now().to_rfc3339();
                 let duration = chrono::Utc::now()
-                    .signed_duration_since(
-                        chrono::DateTime::parse_from_rfc3339(&started).unwrap(),
-                    )
+                    .signed_duration_since(chrono::DateTime::parse_from_rfc3339(&started).unwrap())
                     .num_milliseconds();
 
                 db.log_insert(&NewConsumerLog {
@@ -98,10 +96,7 @@ pub async fn process_pending(
                     queue_type: "pr".to_string(),
                     queue_item_id: item.id.clone(),
                     worker_id: worker_id.clone(),
-                    command: format!(
-                        "claude -p \"{}\" (PR #{})",
-                        pr_workflow, item.github_number
-                    ),
+                    command: format!("claude -p \"{}\" (PR #{})", pr_workflow, item.github_number),
                     stdout: output.stdout.clone(),
                     stderr: output.stderr.clone(),
                     exit_code: output.exit_code,

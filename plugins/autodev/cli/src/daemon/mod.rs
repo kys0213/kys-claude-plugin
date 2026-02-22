@@ -106,8 +106,7 @@ pub async fn start(
 
 /// 데몬 중지 (PID → SIGTERM)
 pub fn stop(home: &Path) -> Result<()> {
-    let pid =
-        pid::read_pid(home).ok_or_else(|| anyhow::anyhow!("daemon is not running"))?;
+    let pid = pid::read_pid(home).ok_or_else(|| anyhow::anyhow!("daemon is not running"))?;
 
     std::process::Command::new("kill")
         .arg(pid.to_string())

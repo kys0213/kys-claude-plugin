@@ -19,12 +19,10 @@ impl Env for RealEnv {
 
 /// ~/.autodev 경로 반환
 pub fn autodev_home(env: &dyn Env) -> PathBuf {
-    let home = env
-        .var("AUTODEV_HOME")
-        .unwrap_or_else(|_| {
-            let home = env.var("HOME").expect("HOME not set");
-            format!("{home}/.autodev")
-        });
+    let home = env.var("AUTODEV_HOME").unwrap_or_else(|_| {
+        let home = env.var("HOME").expect("HOME not set");
+        format!("{home}/.autodev")
+    });
     PathBuf::from(home)
 }
 

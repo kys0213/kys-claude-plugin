@@ -41,12 +41,21 @@ async fn scan_issues_queues_new_items() {
 
     let ignore = vec!["dependabot".to_string()];
     let mut active = autodev::active::ActiveItems::new();
-    autodev::scanner::issues::scan(&db, &gh, &repo_id, "org/repo", &ignore, &None, None, &mut active)
-        .await
-        .unwrap();
+    autodev::scanner::issues::scan(
+        &db,
+        &gh,
+        &repo_id,
+        "org/repo",
+        &ignore,
+        &None,
+        None,
+        &mut active,
+    )
+    .await
+    .unwrap();
 
-    assert!(db.issue_exists(&repo_id, 42).unwrap());  // alice
-    assert!(db.issue_exists(&repo_id, 43).unwrap());  // bob
+    assert!(db.issue_exists(&repo_id, 42).unwrap()); // alice
+    assert!(db.issue_exists(&repo_id, 43).unwrap()); // bob
     assert!(!db.issue_exists(&repo_id, 44).unwrap()); // PR-linked → skipped
     assert!(!db.issue_exists(&repo_id, 45).unwrap()); // dependabot → skipped
 }
@@ -58,9 +67,18 @@ async fn scan_issues_skips_pr_linked() {
     let gh = mock_gh_with_fixture("org/repo", "issues", "issues.json");
 
     let mut active = autodev::active::ActiveItems::new();
-    autodev::scanner::issues::scan(&db, &gh, &repo_id, "org/repo", &[], &None, None, &mut active)
-        .await
-        .unwrap();
+    autodev::scanner::issues::scan(
+        &db,
+        &gh,
+        &repo_id,
+        "org/repo",
+        &[],
+        &None,
+        None,
+        &mut active,
+    )
+    .await
+    .unwrap();
 
     assert!(!db.issue_exists(&repo_id, 44).unwrap());
 }
@@ -73,11 +91,20 @@ async fn scan_issues_filters_by_label() {
 
     let labels = Some(vec!["bug".to_string()]);
     let mut active = autodev::active::ActiveItems::new();
-    autodev::scanner::issues::scan(&db, &gh, &repo_id, "org/repo", &[], &labels, None, &mut active)
-        .await
-        .unwrap();
+    autodev::scanner::issues::scan(
+        &db,
+        &gh,
+        &repo_id,
+        "org/repo",
+        &[],
+        &labels,
+        None,
+        &mut active,
+    )
+    .await
+    .unwrap();
 
-    assert!(db.issue_exists(&repo_id, 50).unwrap());  // has "bug"
+    assert!(db.issue_exists(&repo_id, 50).unwrap()); // has "bug"
     assert!(!db.issue_exists(&repo_id, 51).unwrap()); // only "enhancement"
 }
 
@@ -90,14 +117,32 @@ async fn scan_issues_no_duplicates() {
     let ignore = vec!["dependabot".to_string()];
     let mut active = autodev::active::ActiveItems::new();
 
-    autodev::scanner::issues::scan(&db, &gh, &repo_id, "org/repo", &ignore, &None, None, &mut active)
-        .await
-        .unwrap();
+    autodev::scanner::issues::scan(
+        &db,
+        &gh,
+        &repo_id,
+        "org/repo",
+        &ignore,
+        &None,
+        None,
+        &mut active,
+    )
+    .await
+    .unwrap();
     let count_first = db.issue_find_pending(100).unwrap().len();
 
-    autodev::scanner::issues::scan(&db, &gh, &repo_id, "org/repo", &ignore, &None, None, &mut active)
-        .await
-        .unwrap();
+    autodev::scanner::issues::scan(
+        &db,
+        &gh,
+        &repo_id,
+        "org/repo",
+        &ignore,
+        &None,
+        None,
+        &mut active,
+    )
+    .await
+    .unwrap();
     let count_second = db.issue_find_pending(100).unwrap().len();
 
     assert_eq!(count_first, count_second);
@@ -109,13 +154,25 @@ async fn scan_issues_updates_cursor() {
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
     let gh = mock_gh_with_fixture("org/repo", "issues", "issues.json");
 
-    assert!(db.cursor_get_last_seen(&repo_id, "issues").unwrap().is_none());
+    assert!(db
+        .cursor_get_last_seen(&repo_id, "issues")
+        .unwrap()
+        .is_none());
 
     let ignore = vec!["dependabot".to_string()];
     let mut active = autodev::active::ActiveItems::new();
-    autodev::scanner::issues::scan(&db, &gh, &repo_id, "org/repo", &ignore, &None, None, &mut active)
-        .await
-        .unwrap();
+    autodev::scanner::issues::scan(
+        &db,
+        &gh,
+        &repo_id,
+        "org/repo",
+        &ignore,
+        &None,
+        None,
+        &mut active,
+    )
+    .await
+    .unwrap();
 
     let cursor = db.cursor_get_last_seen(&repo_id, "issues").unwrap();
     assert!(cursor.is_some());
@@ -129,9 +186,18 @@ async fn scan_issues_empty_response() {
     gh.set_paginate("org/repo", "issues", b"[]".to_vec());
 
     let mut active = autodev::active::ActiveItems::new();
-    autodev::scanner::issues::scan(&db, &gh, &repo_id, "org/repo", &[], &None, None, &mut active)
-        .await
-        .unwrap();
+    autodev::scanner::issues::scan(
+        &db,
+        &gh,
+        &repo_id,
+        "org/repo",
+        &[],
+        &None,
+        None,
+        &mut active,
+    )
+    .await
+    .unwrap();
 
     assert!(db.issue_find_pending(100).unwrap().is_empty());
 }
@@ -152,7 +218,7 @@ async fn scan_prs_queues_new_items() {
         .await
         .unwrap();
 
-    assert!(db.pr_exists(&repo_id, 100).unwrap());  // alice
+    assert!(db.pr_exists(&repo_id, 100).unwrap()); // alice
     assert!(!db.pr_exists(&repo_id, 101).unwrap()); // renovate
 }
 
@@ -207,7 +273,14 @@ async fn scan_issues_gh_failure_returns_error() {
     let mut active = autodev::active::ActiveItems::new();
 
     let result = autodev::scanner::issues::scan(
-        &db, &gh, &repo_id, "org/repo", &[], &None, None, &mut active,
+        &db,
+        &gh,
+        &repo_id,
+        "org/repo",
+        &[],
+        &None,
+        None,
+        &mut active,
     )
     .await;
     assert!(result.is_err());

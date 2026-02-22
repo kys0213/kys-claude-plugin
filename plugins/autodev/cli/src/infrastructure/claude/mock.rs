@@ -14,12 +14,18 @@ pub struct MockClaude {
     pub calls: Mutex<Vec<(String, String, Option<String>)>>,
 }
 
-impl MockClaude {
-    pub fn new() -> Self {
+impl Default for MockClaude {
+    fn default() -> Self {
         Self {
             responses: Mutex::new(Vec::new()),
             calls: Mutex::new(Vec::new()),
         }
+    }
+}
+
+impl MockClaude {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// 다음 run_session 호출 시 반환할 응답 추가

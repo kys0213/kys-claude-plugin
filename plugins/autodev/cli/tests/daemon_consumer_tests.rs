@@ -116,7 +116,12 @@ async fn issue_pipeline_success_transitions_to_ready() {
     let mut active = autodev::active::ActiveItems::new();
 
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &claude, &mut active,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &claude,
+        &mut active,
     )
     .await
     .expect("process_pending should succeed");
@@ -156,7 +161,12 @@ async fn issue_pipeline_claude_failure_marks_failed() {
     let mut active = autodev::active::ActiveItems::new();
 
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &claude, &mut active,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &claude,
+        &mut active,
     )
     .await
     .expect("should handle failure gracefully");
@@ -192,11 +202,9 @@ async fn pr_pipeline_success_transitions_to_review_done() {
     let notifier = Notifier::new(&gh);
     let mut active = autodev::active::ActiveItems::new();
 
-    autodev::pipeline::pr::process_pending(
-        &db, &env, &workspace, &notifier, &claude, &mut active,
-    )
-    .await
-    .expect("process_pending should succeed");
+    autodev::pipeline::pr::process_pending(&db, &env, &workspace, &notifier, &claude, &mut active)
+        .await
+        .expect("process_pending should succeed");
 
     let pending = db.pr_find_pending(100).unwrap();
     assert!(pending.is_empty());
@@ -229,11 +237,9 @@ async fn pr_pipeline_claude_failure_marks_failed() {
     let notifier = Notifier::new(&gh);
     let mut active = autodev::active::ActiveItems::new();
 
-    autodev::pipeline::pr::process_pending(
-        &db, &env, &workspace, &notifier, &claude, &mut active,
-    )
-    .await
-    .expect("should handle failure");
+    autodev::pipeline::pr::process_pending(&db, &env, &workspace, &notifier, &claude, &mut active)
+        .await
+        .expect("should handle failure");
 
     let list = db.pr_list("org/repo", 100).unwrap();
     assert_eq!(list.len(), 1);
@@ -270,7 +276,12 @@ async fn issue_pipeline_processes_up_to_limit() {
     let mut active = autodev::active::ActiveItems::new();
 
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &claude, &mut active,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &claude,
+        &mut active,
     )
     .await
     .expect("should process batch");
@@ -308,11 +319,9 @@ async fn process_all_handles_issues_and_prs() {
     let notifier = Notifier::new(&gh);
     let mut active = autodev::active::ActiveItems::new();
 
-    autodev::pipeline::process_all(
-        &db, &env, &workspace, &notifier, &claude, &mut active,
-    )
-    .await
-    .expect("process_all should succeed");
+    autodev::pipeline::process_all(&db, &env, &workspace, &notifier, &claude, &mut active)
+        .await
+        .expect("process_all should succeed");
 
     assert!(db.issue_find_pending(100).unwrap().is_empty());
     assert!(db.pr_find_pending(100).unwrap().is_empty());

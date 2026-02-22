@@ -23,12 +23,7 @@ impl<'a> Notifier<'a> {
     }
 
     /// PR이 리뷰 대상인지 확인 (open + APPROVED 리뷰 없음)
-    pub async fn is_pr_reviewable(
-        &self,
-        repo_name: &str,
-        number: i64,
-        host: Option<&str>,
-    ) -> bool {
+    pub async fn is_pr_reviewable(&self, repo_name: &str, number: i64, host: Option<&str>) -> bool {
         match self
             .gh
             .api_get_field(repo_name, &format!("pulls/{number}"), ".state", host)
@@ -42,12 +37,7 @@ impl<'a> Notifier<'a> {
         let jq = r#"[.[] | select(.state == "APPROVED")] | length"#;
         match self
             .gh
-            .api_get_field(
-                repo_name,
-                &format!("pulls/{number}/reviews"),
-                jq,
-                host,
-            )
+            .api_get_field(repo_name, &format!("pulls/{number}/reviews"), jq, host)
             .await
         {
             Some(count) => count.parse::<i64>().unwrap_or(0) == 0,
@@ -56,12 +46,7 @@ impl<'a> Notifier<'a> {
     }
 
     /// PR이 머지 가능한 상태인지 확인 (open + not merged)
-    pub async fn is_pr_mergeable(
-        &self,
-        repo_name: &str,
-        number: i64,
-        host: Option<&str>,
-    ) -> bool {
+    pub async fn is_pr_mergeable(&self, repo_name: &str, number: i64, host: Option<&str>) -> bool {
         match self
             .gh
             .api_get_field(repo_name, &format!("pulls/{number}"), ".state", host)

@@ -23,7 +23,7 @@ pub enum Panel {
 #[derive(Debug, Clone)]
 pub struct ActiveItem {
     pub id: String,
-    pub queue_type: String,   // "issue" | "pr" | "merge"
+    pub queue_type: String, // "issue" | "pr" | "merge"
     pub repo_name: String,
     pub number: i64,
     pub title: String,
@@ -231,7 +231,10 @@ pub fn query_label_counts(db: &Database) -> LabelCounts {
 }
 
 /// Get selected active item ID (for retry/skip actions)
-pub fn selected_active_item<'a>(items: &'a [ActiveItem], state: &AppState) -> Option<&'a ActiveItem> {
+pub fn selected_active_item<'a>(
+    items: &'a [ActiveItem],
+    state: &AppState,
+) -> Option<&'a ActiveItem> {
     if state.active_panel == Panel::ActiveItems && state.selected_index < items.len() {
         Some(&items[state.selected_index])
     } else {
@@ -246,7 +249,7 @@ pub fn render(f: &mut Frame, db: &Database, state: &AppState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // header
-            Constraint::Min(0),   // body
+            Constraint::Min(0),    // body
             Constraint::Length(1), // footer
         ])
         .split(f.area());
@@ -317,8 +320,11 @@ fn render_body(f: &mut Frame, area: Rect, db: &Database, state: &AppState) {
             width: area.width.saturating_sub(4).min(msg.len() as u16 + 4),
             height: 1,
         };
-        let status = Paragraph::new(msg.as_str())
-            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+        let status = Paragraph::new(msg.as_str()).style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
         f.render_widget(status, msg_area);
     }
 }

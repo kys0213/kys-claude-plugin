@@ -23,7 +23,11 @@ impl Claude for RealClaude {
             args.push(fmt.to_string());
         }
 
-        tracing::info!("running: claude -p \"{}\" in {:?}", truncate(prompt, 80), cwd);
+        tracing::info!(
+            "running: claude -p \"{}\" in {:?}",
+            truncate(prompt, 80),
+            cwd
+        );
 
         let result = tokio::process::Command::new("claude")
             .args(&args)

@@ -193,10 +193,7 @@ fn logs_empty() {
 #[test]
 fn unknown_command_fails() {
     let home = TempDir::new().unwrap();
-    autodev(&home)
-        .arg("nonexistent")
-        .assert()
-        .failure();
+    autodev(&home).arg("nonexistent").assert().failure();
 }
 
 #[test]
@@ -221,13 +218,9 @@ fn status_shows_repo_after_add() {
         .assert()
         .success();
 
-    autodev(&home)
-        .arg("status")
-        .assert()
-        .success()
-        .stdout(
-            predicate::str::contains("org/myrepo")
-                .and(predicate::str::contains("issues:0"))
-                .and(predicate::str::contains("prs:0")),
-        );
+    autodev(&home).arg("status").assert().success().stdout(
+        predicate::str::contains("org/myrepo")
+            .and(predicate::str::contains("issues:0"))
+            .and(predicate::str::contains("prs:0")),
+    );
 }

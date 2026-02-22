@@ -38,10 +38,7 @@ fn repo_add_and_count() {
 fn repo_add_duplicate_url_fails() {
     let db = open_memory_db();
     add_test_repo(&db);
-    let result = db.repo_add(
-        "https://github.com/org/test-repo",
-        "org/test-repo",
-    );
+    let result = db.repo_add("https://github.com/org/test-repo", "org/test-repo");
     assert!(result.is_err());
 }
 
@@ -1030,11 +1027,14 @@ fn issue_mark_failed_increments_retry_count() {
     // 첫 번째 실패 → retry_count = 1
     db.issue_mark_failed(&id, "error 1").unwrap();
 
-    let retry_count: i64 = db.conn().query_row(
-        "SELECT retry_count FROM issue_queue WHERE id = ?1",
-        rusqlite::params![id],
-        |row| row.get(0),
-    ).unwrap();
+    let retry_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT retry_count FROM issue_queue WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(retry_count, 1);
 
     // retry → pending, retry_count는 유지
@@ -1043,11 +1043,14 @@ fn issue_mark_failed_increments_retry_count() {
     // 두 번째 실패 → retry_count = 2
     db.issue_mark_failed(&id, "error 2").unwrap();
 
-    let retry_count: i64 = db.conn().query_row(
-        "SELECT retry_count FROM issue_queue WHERE id = ?1",
-        rusqlite::params![id],
-        |row| row.get(0),
-    ).unwrap();
+    let retry_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT retry_count FROM issue_queue WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(retry_count, 2);
 }
 
@@ -1079,13 +1082,17 @@ fn issue_update_status_atomic_fields() {
             analysis_report: Some("report".into()),
             ..Default::default()
         },
-    ).unwrap();
+    )
+    .unwrap();
 
-    let (worker_id, report): (Option<String>, Option<String>) = db.conn().query_row(
-        "SELECT worker_id, analysis_report FROM issue_queue WHERE id = ?1",
-        rusqlite::params![id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    ).unwrap();
+    let (worker_id, report): (Option<String>, Option<String>) = db
+        .conn()
+        .query_row(
+            "SELECT worker_id, analysis_report FROM issue_queue WHERE id = ?1",
+            rusqlite::params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
 
     assert_eq!(worker_id.as_deref(), Some("w1"));
     assert_eq!(report.as_deref(), Some("report"));
@@ -1116,13 +1123,17 @@ fn pr_update_status_atomic_fields() {
             review_comment: Some("LGTM".into()),
             ..Default::default()
         },
-    ).unwrap();
+    )
+    .unwrap();
 
-    let (worker_id, comment): (Option<String>, Option<String>) = db.conn().query_row(
-        "SELECT worker_id, review_comment FROM pr_queue WHERE id = ?1",
-        rusqlite::params![id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    ).unwrap();
+    let (worker_id, comment): (Option<String>, Option<String>) = db
+        .conn()
+        .query_row(
+            "SELECT worker_id, review_comment FROM pr_queue WHERE id = ?1",
+            rusqlite::params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
 
     assert_eq!(worker_id.as_deref(), Some("w1"));
     assert_eq!(comment.as_deref(), Some("LGTM"));
@@ -1151,13 +1162,17 @@ fn merge_update_status_atomic_fields() {
             error_message: Some("conflict in file.rs".into()),
             ..Default::default()
         },
-    ).unwrap();
+    )
+    .unwrap();
 
-    let (worker_id, error): (Option<String>, Option<String>) = db.conn().query_row(
-        "SELECT worker_id, error_message FROM merge_queue WHERE id = ?1",
-        rusqlite::params![id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    ).unwrap();
+    let (worker_id, error): (Option<String>, Option<String>) = db
+        .conn()
+        .query_row(
+            "SELECT worker_id, error_message FROM merge_queue WHERE id = ?1",
+            rusqlite::params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
 
     assert_eq!(worker_id.as_deref(), Some("w1"));
     assert_eq!(error.as_deref(), Some("conflict in file.rs"));
@@ -1181,21 +1196,27 @@ fn pr_mark_failed_increments_retry_count() {
 
     db.pr_mark_failed(&id, "error 1").unwrap();
 
-    let retry_count: i64 = db.conn().query_row(
-        "SELECT retry_count FROM pr_queue WHERE id = ?1",
-        rusqlite::params![id],
-        |row| row.get(0),
-    ).unwrap();
+    let retry_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT retry_count FROM pr_queue WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(retry_count, 1);
 
     db.queue_retry(&id).unwrap();
     db.pr_mark_failed(&id, "error 2").unwrap();
 
-    let retry_count: i64 = db.conn().query_row(
-        "SELECT retry_count FROM pr_queue WHERE id = ?1",
-        rusqlite::params![id],
-        |row| row.get(0),
-    ).unwrap();
+    let retry_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT retry_count FROM pr_queue WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(retry_count, 2);
 }
 
@@ -1215,21 +1236,27 @@ fn merge_mark_failed_increments_retry_count() {
 
     db.merge_mark_failed(&id, "error 1").unwrap();
 
-    let retry_count: i64 = db.conn().query_row(
-        "SELECT retry_count FROM merge_queue WHERE id = ?1",
-        rusqlite::params![id],
-        |row| row.get(0),
-    ).unwrap();
+    let retry_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT retry_count FROM merge_queue WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(retry_count, 1);
 
     db.queue_retry(&id).unwrap();
     db.merge_mark_failed(&id, "error 2").unwrap();
 
-    let retry_count: i64 = db.conn().query_row(
-        "SELECT retry_count FROM merge_queue WHERE id = ?1",
-        rusqlite::params![id],
-        |row| row.get(0),
-    ).unwrap();
+    let retry_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT retry_count FROM merge_queue WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(retry_count, 2);
 }
 
@@ -1300,26 +1327,38 @@ fn migration_cleans_up_existing_duplicates() {
     ).unwrap();
 
     // 중복 확인
-    let count: i64 = db.conn().query_row(
-        "SELECT COUNT(*) FROM issue_queue WHERE repo_id = 'r1' AND github_number = 42", [],
-        |row| row.get(0),
-    ).unwrap();
+    let count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM issue_queue WHERE repo_id = 'r1' AND github_number = 42",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(count, 2);
 
     // initialize() 호출 → 마이그레이션 실행
     db.initialize().unwrap();
 
     // 중복이 제거되고 하나만 남아야 함
-    let count: i64 = db.conn().query_row(
-        "SELECT COUNT(*) FROM issue_queue WHERE repo_id = 'r1' AND github_number = 42", [],
-        |row| row.get(0),
-    ).unwrap();
+    let count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM issue_queue WHERE repo_id = 'r1' AND github_number = 42",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(count, 1);
 
     // 가장 오래된 항목(First)이 유지되어야 함
-    let title: String = db.conn().query_row(
-        "SELECT title FROM issue_queue WHERE repo_id = 'r1' AND github_number = 42", [],
-        |row| row.get(0),
-    ).unwrap();
+    let title: String = db
+        .conn()
+        .query_row(
+            "SELECT title FROM issue_queue WHERE repo_id = 'r1' AND github_number = 42",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(title, "First");
 }

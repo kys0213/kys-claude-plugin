@@ -1,8 +1,8 @@
-use autodev::queue::Database;
+use autodev::queue::models::*;
 use autodev::queue::repository::{
     IssueQueueRepository, MergeQueueRepository, PrQueueRepository, QueueAdmin, RepoRepository,
 };
-use autodev::queue::models::*;
+use autodev::queue::Database;
 use tempfile::TempDir;
 
 fn setup_db() -> (TempDir, Database) {

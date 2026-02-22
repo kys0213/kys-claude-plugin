@@ -52,7 +52,7 @@ impl LogTailer {
         match File::open(&log_path) {
             Ok(file) => {
                 let reader = BufReader::new(&file);
-                let all_lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+                let all_lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
                 let total = all_lines.len();
                 let start = total.saturating_sub(max_lines);
                 let lines: Vec<LogLine> = all_lines[start..]
@@ -174,10 +174,7 @@ mod tests {
             parse_log_line("2026-02-22T14:32:00 DEBUG processing queue").level,
             LogLevel::Debug
         );
-        assert_eq!(
-            parse_log_line("some random line").level,
-            LogLevel::Unknown
-        );
+        assert_eq!(parse_log_line("some random line").level, LogLevel::Unknown);
     }
 
     #[test]

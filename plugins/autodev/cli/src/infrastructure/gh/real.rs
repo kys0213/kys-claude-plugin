@@ -100,7 +100,11 @@ impl Gh for RealGh {
             args.push(h.to_string());
         }
 
-        match tokio::process::Command::new("gh").args(&args).output().await {
+        match tokio::process::Command::new("gh")
+            .args(&args)
+            .output()
+            .await
+        {
             Ok(output) => {
                 if !output.status.success() {
                     tracing::warn!("gh issue comment failed for {repo_name}#{number}");
@@ -134,12 +138,14 @@ impl Gh for RealGh {
             args.push(h.to_string());
         }
 
-        match tokio::process::Command::new("gh").args(&args).output().await {
+        match tokio::process::Command::new("gh")
+            .args(&args)
+            .output()
+            .await
+        {
             Ok(output) => {
                 if !output.status.success() {
-                    tracing::warn!(
-                        "gh label remove failed for {repo_name}#{number} label={label}"
-                    );
+                    tracing::warn!("gh label remove failed for {repo_name}#{number} label={label}");
                 }
                 output.status.success()
             }

@@ -11,7 +11,7 @@ const CONFIG_FILENAME: &str = ".develop-workflow.yaml";
 /// Raw YAML Value 단계에서 딥머지 → 최종 역직렬화
 pub fn load_merged(env: &dyn Env, repo_path: Option<&Path>) -> WorkflowConfig {
     let global = load_raw_yaml_global(env);
-    let repo = repo_path.and_then(|p| load_raw_yaml_from_dir(p));
+    let repo = repo_path.and_then(load_raw_yaml_from_dir);
 
     let merged = match (global, repo) {
         (Some(g), Some(r)) => deep_merge(g, r),
