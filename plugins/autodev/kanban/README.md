@@ -11,9 +11,7 @@ kanban/
 
 ## todo/
 
-| 항목 | 파일 |
-|------|------|
-| CI/CD 및 배포 | [todo/ci-release.md](./todo/ci-release.md) |
+_(모두 완료)_
 
 ## in-progress/
 
@@ -26,6 +24,7 @@ _(없음)_
 | 코어 (MVP) | [done/core-mvp.md](./done/core-mvp.md) |
 | PR/머지 파이프라인 | [done/pr-merge-pipeline.md](./done/pr-merge-pipeline.md) |
 | TUI 대시보드 | [done/tui-dashboard.md](./done/tui-dashboard.md) |
+| CI/CD 및 배포 | [done/ci-release.md](./done/ci-release.md) |
 
 ## 테스트 현황
 
