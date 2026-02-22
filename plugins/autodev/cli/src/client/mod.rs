@@ -37,19 +37,25 @@ pub fn status(db: &Database, env: &dyn Env) -> Result<String> {
     Ok(output)
 }
 
+/// URL에서 org/repo 이름 추출
+fn extract_repo_name(url: &str) -> Result<String> {
+    let trimmed = url.trim_end_matches('/').trim_end_matches(".git");
+    let parts: Vec<&str> = trimmed.split('/').collect();
+    if parts.len() < 2 {
+        anyhow::bail!("invalid repository URL: {url} (expected https://github.com/org/repo)");
+    }
+    let org = parts[parts.len() - 2];
+    let repo = parts[parts.len() - 1];
+    if org.is_empty() || repo.is_empty() {
+        anyhow::bail!("invalid repository URL: {url} (org or repo name is empty)");
+    }
+    Ok(format!("{org}/{repo}"))
+}
+
 /// 레포 등록
 pub fn repo_add(db: &Database, url: &str) -> Result<()> {
     // URL에서 이름 추출 (예: https://github.com/org/repo -> org/repo)
-    let name = url
-        .trim_end_matches('/')
-        .trim_end_matches(".git")
-        .rsplit('/')
-        .take(2)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join("/");
+    let name = extract_repo_name(url)?;
 
     db.repo_add(url, &name)?;
 

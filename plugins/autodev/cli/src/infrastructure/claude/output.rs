@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::Deserialize;
 
 /// claude -p --output-format json 결과 파싱
@@ -19,11 +21,29 @@ pub fn parse_output(stdout: &str) -> String {
     }
 }
 
+/// 이슈 분석 verdict 타입
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Verdict {
+    Implement,
+    NeedsClarification,
+    Wontfix,
+}
+
+impl fmt::Display for Verdict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Verdict::Implement => write!(f, "implement"),
+            Verdict::NeedsClarification => write!(f, "needs_clarification"),
+            Verdict::Wontfix => write!(f, "wontfix"),
+        }
+    }
+}
+
 /// 이슈 분석 결과 구조체
 #[derive(Debug, Clone, Deserialize)]
 pub struct AnalysisResult {
-    /// "implement" | "needs_clarification" | "wontfix"
-    pub verdict: String,
+    pub verdict: Verdict,
     /// 0.0 ~ 1.0
     pub confidence: f64,
     pub summary: String,

@@ -44,20 +44,22 @@ impl RepoRepository for Database {
 
     fn repo_remove(&self, name: &str) -> Result<()> {
         let conn = self.conn();
+        let tx = conn.unchecked_transaction()?;
         let repo_id_query = "(SELECT id FROM repositories WHERE name = ?1)";
 
-        conn.execute(
+        tx.execute(
             &format!("DELETE FROM scan_cursors WHERE repo_id = {repo_id_query}"),
             rusqlite::params![name],
         )?;
-        conn.execute(
+        tx.execute(
             &format!("DELETE FROM consumer_logs WHERE repo_id = {repo_id_query}"),
             rusqlite::params![name],
         )?;
-        conn.execute(
+        tx.execute(
             "DELETE FROM repositories WHERE name = ?1",
             rusqlite::params![name],
         )?;
+        tx.commit()?;
         Ok(())
     }
 

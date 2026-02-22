@@ -134,7 +134,7 @@ pub async fn process_pending(
                 let analysis = output::parse_analysis(&res.stdout);
 
                 match analysis {
-                    Some(ref a) if a.verdict == "wontfix" => {
+                    Some(ref a) if a.verdict == output::Verdict::Wontfix => {
                         let comment = verdict::format_wontfix_comment(a);
                         notifier.post_issue_comment(&item.repo_name, item.github_number, &comment, gh_host).await;
                         gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
@@ -143,7 +143,7 @@ pub async fn process_pending(
                         let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
                     }
                     Some(ref a)
-                        if a.verdict == "needs_clarification"
+                        if a.verdict == output::Verdict::NeedsClarification
                             || a.confidence < cfg.consumer.confidence_threshold =>
                     {
                         let comment = verdict::format_clarification_comment(a);

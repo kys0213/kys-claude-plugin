@@ -14,6 +14,16 @@ use crate::queue::repository::*;
 use crate::queue::task_queues::{labels, pr_phase, TaskQueues};
 use crate::queue::Database;
 
+/// PR 리뷰 결과를 GitHub 댓글로 포맷
+fn format_review_comment(review: &str, pr_number: i64) -> String {
+    format!(
+        "<!-- autodev:review -->\n\
+         ## Autodev Code Review (PR #{})\n\n\
+         {review}",
+        pr_number
+    )
+}
+
 /// Pending PR을 pop하여 리뷰
 pub async fn process_pending(
     db: &Database,
@@ -94,10 +104,16 @@ pub async fn process_pending(
                 });
 
                 if output.exit_code == 0 {
+                    let pr_num = item.github_number;
+
+                    // 리뷰 결과를 GitHub PR 댓글로 게시
+                    let comment = format_review_comment(&output.review, pr_num);
+                    notifier.post_issue_comment(&item.repo_name, pr_num, &comment, gh_host).await;
+
                     // 리뷰 결과 저장 → ReviewDone에 push (피드백 루프 진입)
                     item.review_comment = Some(output.review);
                     queues.prs.push(pr_phase::REVIEW_DONE, item);
-                    tracing::info!("PR #{} review complete → ReviewDone", output.exit_code);
+                    tracing::info!("PR #{} review complete → ReviewDone", pr_num);
                 } else {
                     gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
                     tracing::error!("review exited with {} for PR #{}", output.exit_code, item.github_number);

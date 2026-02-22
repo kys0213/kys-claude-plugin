@@ -6,6 +6,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::queue::repository::RepoRepository;
 use crate::queue::Database;
 
 // ─── Panel enum ───
@@ -148,10 +149,7 @@ fn render_header(f: &mut Frame, area: Rect, db: &Database) {
         Span::styled("○ stopped", Style::default().fg(Color::Red))
     };
 
-    let repo_count: i64 = db
-        .conn()
-        .query_row("SELECT COUNT(*) FROM repositories", [], |row| row.get(0))
-        .unwrap_or(0);
+    let repo_count = db.repo_status_summary().map(|v| v.len()).unwrap_or(0);
 
     let header = Paragraph::new(Line::from(vec![
         Span::styled(
@@ -210,13 +208,9 @@ fn render_body(f: &mut Frame, area: Rect, db: &Database, state: &AppState) {
 }
 
 fn render_repos_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppState) {
-    let conn = db.conn();
-    let repos: Vec<(String, bool)> = conn
-        .prepare("SELECT name, enabled FROM repositories ORDER BY name")
-        .and_then(|mut stmt| {
-            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-                .and_then(|rows| rows.collect())
-        })
+    let repos: Vec<(String, bool)> = db
+        .repo_status_summary()
+        .map(|rows| rows.into_iter().map(|r| (r.name, r.enabled)).collect())
         .unwrap_or_default();
 
     let items: Vec<ListItem> = repos
@@ -283,12 +277,7 @@ fn render_active_items_panel(f: &mut Frame, area: Rect, db: &Database, state: &A
                 _ => "?",
             };
 
-            let title_max = 30;
-            let title = if item.title.len() > title_max {
-                format!("{}…", &item.title[..title_max])
-            } else {
-                item.title.clone()
-            };
+            let title = truncate_str(&item.title, 30);
 
             ListItem::new(Line::from(vec![
                 Span::raw(format!("{prefix} ")),
@@ -326,6 +315,10 @@ fn render_active_items_panel(f: &mut Frame, area: Rect, db: &Database, state: &A
 
 fn render_labels_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppState) {
     let counts = query_label_counts(db);
+    let max_count = [counts.wip, counts.done, counts.skip, counts.failed]
+        .into_iter()
+        .max()
+        .unwrap_or(0);
 
     let items = vec![
         ListItem::new(Line::from(vec![
@@ -336,7 +329,7 @@ fn render_labels_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppStat
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
-            Span::raw(bar(counts.wip, 15)),
+            Span::raw(bar_scaled(counts.wip, max_count, 15)),
         ])),
         ListItem::new(Line::from(vec![
             Span::raw("  "),
@@ -346,7 +339,7 @@ fn render_labels_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppStat
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
-            Span::styled(bar(counts.done, 15), Style::default().fg(Color::Green)),
+            Span::styled(bar_scaled(counts.done, max_count, 15), Style::default().fg(Color::Green)),
         ])),
         ListItem::new(Line::from(vec![
             Span::raw("  "),
@@ -356,7 +349,7 @@ fn render_labels_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppStat
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
-            Span::styled(bar(counts.skip, 15), Style::default().fg(Color::Yellow)),
+            Span::styled(bar_scaled(counts.skip, max_count, 15), Style::default().fg(Color::Yellow)),
         ])),
         ListItem::new(Line::from(vec![
             Span::raw("  "),
@@ -366,7 +359,7 @@ fn render_labels_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppStat
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
-            Span::styled(bar(counts.failed, 15), Style::default().fg(Color::Red)),
+            Span::styled(bar_scaled(counts.failed, max_count, 15), Style::default().fg(Color::Red)),
         ])),
     ];
 
@@ -417,11 +410,7 @@ fn render_logs_panel(f: &mut Frame, area: Rect, state: &AppState) {
             };
 
             // Truncate long lines for display
-            let display = if line.raw.len() > 120 {
-                format!("{}…", &line.raw[..120])
-            } else {
-                line.raw.clone()
-            };
+            let display = truncate_str(&line.raw, 120);
 
             ListItem::new(format!("  {display}")).style(style)
         })
@@ -455,10 +444,24 @@ fn render_footer(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_widget(footer, area);
 }
 
-/// Generate a mini bar chart string
-fn bar(count: i64, max_width: usize) -> String {
-    let len = (count as usize).min(max_width);
+fn bar_scaled(count: i64, max_count: i64, max_width: usize) -> String {
+    let len = if max_count > 0 {
+        ((count as f64 / max_count as f64) * max_width as f64).ceil() as usize
+    } else {
+        0
+    };
+    let len = len.min(max_width);
     let filled = "█".repeat(len);
     let empty = "░".repeat(max_width.saturating_sub(len));
     format!("{filled}{empty}")
+}
+
+fn truncate_str(s: &str, max_chars: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count > max_chars {
+        let truncated: String = s.chars().take(max_chars).collect();
+        format!("{truncated}…")
+    } else {
+        s.to_string()
+    }
 }

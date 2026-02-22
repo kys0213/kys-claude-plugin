@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 /// .develop-workflow.yaml의 전체 스키마
 /// 글로벌(~/) + 레포별 오버라이드를 딥머지하여 최종 설정 생성
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct WorkflowConfig {
     pub consumer: ConsumerConfig,
     pub workflow: WorkflowRouting,

@@ -83,6 +83,6 @@
 
 ## 최종 상태
 
-- **172 tests passing** (zero failures)
+- **170 tests passing** (zero failures)
 - **Zero compiler warnings** (dead_code 전역 억제 제거)
 - SOLID 점수: SRP 9/10, OCP 9/10, LSP 10/10, ISP 9/10, DIP 10/10
