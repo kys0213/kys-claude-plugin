@@ -1,6 +1,24 @@
 # Autodev Progress Tracker
 
-구현 진행 상황을 Phase별로 추적합니다.
+디렉토리 기반 칸반보드로 진행 상황을 추적합니다.
+
+```
+progress/
+├── todo/          ← 미착수
+├── in-progress/   ← 진행 중
+└── done/          ← 완료
+```
+
+## todo/
+
+| Phase | 파일 |
+|-------|------|
+| Phase 3: TUI 대시보드 | [todo/phase3-tui.md](./todo/phase3-tui.md) |
+| Phase 4: 배포 | [todo/phase4-release.md](./todo/phase4-release.md) |
+
+## in-progress/
+
+_(없음)_
 
 ## done/
 
@@ -8,13 +26,6 @@
 |-------|------|
 | Phase 1: 코어 (MVP) | [done/phase1-core.md](./done/phase1-core.md) |
 | Phase 2: 확장 | [done/phase2-extension.md](./done/phase2-extension.md) |
-
-## 남은 작업
-
-| Phase | 파일 |
-|-------|------|
-| Phase 3: TUI 대시보드 | [phase3-tui.md](./phase3-tui.md) |
-| Phase 4: 배포 | [phase4-release.md](./phase4-release.md) |
 
 ## 테스트 현황
 
