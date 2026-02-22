@@ -94,7 +94,7 @@ pub fn repo_config(env: &dyn Env, name: &str) -> Result<()> {
     }
 
     // 워크스페이스에서 레포별 설정 탐색
-    let ws = config::workspaces_path(env).join(name);
+    let ws = config::workspaces_path(env).join(config::sanitize_repo_name(name));
     let repo_config_path = ws.join(".develop-workflow.yaml");
     println!("\nRepo config: {}", repo_config_path.display());
 

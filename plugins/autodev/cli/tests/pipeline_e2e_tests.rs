@@ -175,6 +175,8 @@ async fn issue_full_cycle_pending_to_done() {
     claude.enqueue_response(&make_analysis_json("implement", 0.9), 0);
     // Phase 2: implementation -> success
     claude.enqueue_response(r#"{"result": "Implementation complete"}"#, 0);
+    // Phase 2.5: knowledge extraction (best effort, after implementation done)
+    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
@@ -214,10 +216,10 @@ async fn issue_full_cycle_pending_to_done() {
     assert_label_added(&gh, "org/repo", 10, labels::DONE);
     assert_label_removed(&gh, "org/repo", 10, labels::WIP);
 
-    // Claude called exactly 2 times (analysis + implementation)
-    assert_eq!(claude.call_count(), 2);
+    // Claude called 3 times (analysis + implementation + knowledge extraction)
+    assert_eq!(claude.call_count(), 3);
 
-    // 2 consumer logs recorded
+    // 2 consumer logs recorded (knowledge extraction doesn't create a consumer log)
     let logs = db.log_recent(None, 100).unwrap();
     assert_eq!(
         logs.len(),
@@ -1168,13 +1170,17 @@ async fn process_all_handles_all_queues() {
     claude.enqueue_response(&make_analysis_json("implement", 0.9), 0);
     // 2. Issue implementation -> done (issue::process_ready)
     claude.enqueue_response(r#"{"result": "Implementation done"}"#, 0);
-    // 3. PR review -> ReviewDone (pr::process_pending)
+    // 3. Issue knowledge extraction (best effort, after issue done)
+    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
+    // 4. PR review -> ReviewDone (pr::process_pending)
     claude.enqueue_response(r#"{"result": "LGTM"}"#, 0);
-    // 4. PR feedback implementation -> Improved (pr::process_review_done)
+    // 5. PR feedback implementation -> Improved (pr::process_review_done)
     claude.enqueue_response(r#"{"result": "Feedback applied"}"#, 0);
-    // 5. PR re-review -> done/approved (pr::process_improved)
+    // 6. PR re-review -> done/approved (pr::process_improved)
     claude.enqueue_response(r#"{"result": "Approved"}"#, 0);
-    // 6. Merge -> success (merge::process_pending)
+    // 7. PR knowledge extraction (best effort, after PR done)
+    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
+    // 8. Merge -> success (merge::process_pending)
     claude.enqueue_response("Merged successfully", 0);
 
     let workspace = Workspace::new(&git, &env);
@@ -1221,5 +1227,5 @@ async fn process_all_handles_all_queues() {
     );
     assert_label_added(&gh, "org/repo", 92, labels::DONE);
 
-    assert_eq!(claude.call_count(), 6, "should call claude 6 times total");
+    assert_eq!(claude.call_count(), 8, "should call claude 8 times total (6 pipeline + 2 knowledge extraction)");
 }

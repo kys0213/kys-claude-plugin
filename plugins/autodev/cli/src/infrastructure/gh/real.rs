@@ -195,4 +195,45 @@ impl Gh for RealGh {
             }
         }
     }
+
+    async fn create_issue(
+        &self,
+        repo_name: &str,
+        title: &str,
+        body: &str,
+        host: Option<&str>,
+    ) -> bool {
+        let mut args = vec![
+            "api".to_string(),
+            format!("repos/{repo_name}/issues"),
+            "--method".to_string(),
+            "POST".to_string(),
+            "-f".to_string(),
+            format!("title={title}"),
+            "-f".to_string(),
+            format!("body={body}"),
+        ];
+
+        if let Some(h) = host {
+            args.push("--hostname".to_string());
+            args.push(h.to_string());
+        }
+
+        match tokio::process::Command::new("gh")
+            .args(&args)
+            .output()
+            .await
+        {
+            Ok(output) => {
+                if !output.status.success() {
+                    tracing::warn!("gh create issue failed for {repo_name}");
+                }
+                output.status.success()
+            }
+            Err(e) => {
+                tracing::warn!("gh create issue error: {e}");
+                false
+            }
+        }
+    }
 }

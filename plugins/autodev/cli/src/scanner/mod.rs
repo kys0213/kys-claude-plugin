@@ -20,7 +20,7 @@ pub async fn scan_all(
     let repos = db.repo_find_enabled()?;
 
     for repo in repos {
-        let ws_path = config::workspaces_path(env).join(&repo.name);
+        let ws_path = config::workspaces_path(env).join(config::sanitize_repo_name(&repo.name));
         let cfg = config::loader::load_merged(
             env,
             if ws_path.exists() {

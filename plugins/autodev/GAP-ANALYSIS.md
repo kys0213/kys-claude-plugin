@@ -1,6 +1,6 @@
 # DESIGN.md vs 구현 Gap 분석 리포트
 
-> **Date**: 2026-02-22 (Updated)
+> **Date**: 2026-02-22 (Final)
 > **Scope**: `plugins/autodev/DESIGN.md` ↔ `plugins/autodev/cli/src/` 전체
 > **목적**: 설계 문서와 실제 구현의 차이를 식별하고, 수정 방향을 제시
 
@@ -8,16 +8,16 @@
 
 ## Executive Summary
 
-리팩토링 2차 완료. 설계(DESIGN.md)와 구현의 gap 대부분이 해소됨.
+리팩토링 3차 완료. **설계(DESIGN.md)와 구현의 모든 gap이 해소됨.**
 
 | 심각도 | 원래 건수 | 해소 | 잔여 |
 |--------|-----------|------|------|
 | **Fundamental** | 2건 | **2건 ✅** | 0건 |
-| **Major** | 4건 | **3건 ✅** | 1건 (Knowledge Extraction) |
+| **Major** | 4건 | **4건 ✅** | 0건 |
 | **Minor** | 4건 | **4건 ✅** | 0건 |
 | **Critical (코드)** | 4건 | **4건 ✅** | 0건 |
 | **High (코드)** | 7건 | **7건 ✅** | 0건 |
-| **Medium (코드)** | 8건 | **5건 ✅** | 3건 |
+| **Medium (코드)** | 8건 | **8건 ✅** | 0건 |
 | **Low (코드)** | 6건 | **6건 ✅** | 0건 |
 
 ---
@@ -61,28 +61,26 @@
 | L-05 | Low | merge conflict resolver 프롬프트 불충분 | 단계별 지침 포함하도록 개선 |
 | L-06 | Low | LogTailer 대용량 파일 OOM | bounded ring buffer로 대체 |
 
+### 3차 리팩토링 (잔여 gap 해소)
+
+| ID | 심각도 | 내용 | 해소 방법 |
+|----|--------|------|-----------|
+| M-04 | Major | Knowledge Extraction (per-task + daily) | `knowledge/` 모듈 신규 구현 (models, extractor, daily) |
+| M-04 | Medium | PR scanner `since` 파라미터 미사용 | `pulls.rs`에 `since` 파라미터 추가 |
+| M-05 | Medium | repo_base_path vs client 경로 불일치 | `sanitize_repo_name()` 공유 헬퍼로 일원화 |
+| M-07 | Medium | StatusFields COALESCE 초기화 불가 | 이전 리팩토링에서 이미 해소 (StatusFields 제거됨) |
+
 ---
 
 ## 잔여 Gap
 
-### Major (1건)
-
-| ID | 내용 | 비고 |
-|----|------|------|
-| **M-04** | Knowledge Extraction (per-task + daily) | 신규 기능 — 별도 Phase에서 구현 |
-
-### Medium (3건)
-
-| ID | 내용 | 비고 |
-|----|------|------|
-| M-04 | PR scanner `since` 파라미터 미사용 | scan 효율성 — 기능 영향 없음 |
-| M-05 | repo_base_path vs client 경로 불일치 | workspace 경로 관리 일원화 필요 |
-| M-07 | StatusFields COALESCE 초기화 불가 | 큐 제거 후 status 필드 의미 변경됨 |
+**없음** — 모든 gap이 해소됨.
 
 ---
 
 ## 최종 상태
 
-- **170 tests passing** (zero failures)
+- **182 tests passing** (zero failures)
 - **Zero compiler warnings** (dead_code 전역 억제 제거)
 - SOLID 점수: SRP 9/10, OCP 9/10, LSP 10/10, ISP 9/10, DIP 10/10
+- Knowledge Extraction: per-task (done 전이 시) + daily report (스케줄링) 구현 완료

@@ -251,6 +251,14 @@ pub async fn process_ready(
                 });
 
                 if res.exit_code == 0 {
+                    // Knowledge extraction (best effort — 실패해도 done 전이는 유지)
+                    if cfg.consumer.knowledge_extraction {
+                        let _ = crate::knowledge::extractor::extract_task_knowledge(
+                            claude, gh, &item.repo_name, item.github_number,
+                            "issue", &wt_path, gh_host,
+                        ).await;
+                    }
+
                     gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
                     gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host).await;
                     tracing::info!("issue #{} → done", item.github_number);

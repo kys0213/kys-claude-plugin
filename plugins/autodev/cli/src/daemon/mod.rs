@@ -4,6 +4,7 @@ pub mod recovery;
 use std::path::Path;
 
 use anyhow::{bail, Result};
+use chrono::Timelike;
 use tracing::info;
 
 use crate::components::notifier::Notifier;
@@ -50,6 +51,9 @@ pub async fn start(
     let notifier = Notifier::new(gh);
 
     let gh_host = cfg.consumer.gh_host.clone();
+    let daily_report_hour = cfg.consumer.daily_report_hour;
+    let knowledge_extraction = cfg.consumer.knowledge_extraction;
+    let mut last_daily_report_date = String::new();
 
     // 0. Startup Reconcile (bounded recovery)
     match startup_reconcile(&db, gh, &mut queues, gh_host.as_deref()).await {
@@ -82,6 +86,45 @@ pub async fn start(
                 // 3. Pipeline
                 if let Err(e) = pipeline::process_all(&db, env, &workspace, &notifier, gh, claude, &mut queues).await {
                     tracing::error!("pipeline error: {e}");
+                }
+
+                // 4. Daily Report (scheduled at daily_report_hour)
+                if knowledge_extraction {
+                    let now = chrono::Local::now();
+                    let today = now.format("%Y-%m-%d").to_string();
+                    if now.hour() >= daily_report_hour && last_daily_report_date != today {
+                        let yesterday = (now - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+                        let log_path = home.join(format!("daemon.{yesterday}.log"));
+
+                        if log_path.exists() {
+                            let stats = crate::knowledge::daily::parse_daemon_log(&log_path);
+                            if stats.task_count > 0 {
+                                let patterns = crate::knowledge::daily::detect_patterns(&stats);
+                                let mut report = crate::knowledge::daily::build_daily_report(&yesterday, &stats, patterns);
+
+                                // 첫 번째 활성 레포의 worktree에서 Claude 실행
+                                if let Ok(repos) = db.repo_find_enabled() {
+                                    if let Some(repo) = repos.first() {
+                                        if let Ok(base) = workspace.ensure_cloned(&repo.url, &repo.name).await {
+                                            if let Some(ks) = crate::knowledge::daily::generate_daily_suggestions(
+                                                claude, &report, &base,
+                                            ).await {
+                                                report.suggestions = ks.suggestions;
+                                            }
+
+                                            crate::knowledge::daily::post_daily_report(
+                                                gh, &repo.name, &report, gh_host.as_deref(),
+                                            ).await;
+                                        }
+                                    }
+                                }
+
+                                info!("daily report generated for {yesterday}");
+                            }
+                        }
+
+                        last_daily_report_date = today;
+                    }
                 }
 
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;

@@ -6,6 +6,7 @@ mod components;
 mod config;
 mod daemon;
 mod infrastructure;
+mod knowledge;
 mod pipeline;
 mod queue;
 mod scanner;

@@ -58,4 +58,14 @@ pub trait Gh: Send + Sync {
         label: &str,
         host: Option<&str>,
     ) -> bool;
+
+    /// `gh api repos/{repo}/issues --method POST`
+    /// 이슈 생성 (knowledge extraction daily report 등에 사용)
+    async fn create_issue(
+        &self,
+        repo_name: &str,
+        title: &str,
+        body: &str,
+        host: Option<&str>,
+    ) -> bool;
 }

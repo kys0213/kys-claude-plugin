@@ -2,6 +2,7 @@ pub mod components;
 pub mod config;
 pub mod daemon;
 pub mod infrastructure;
+pub mod knowledge;
 pub mod pipeline;
 pub mod queue;
 pub mod scanner;

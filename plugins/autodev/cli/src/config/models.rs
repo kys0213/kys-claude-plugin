@@ -27,6 +27,8 @@ pub struct ConsumerConfig {
     pub ignore_authors: Vec<String>,
     pub gh_host: Option<String>,
     pub confidence_threshold: f64,
+    pub daily_report_hour: u32,
+    pub knowledge_extraction: bool,
 }
 
 impl Default for ConsumerConfig {
@@ -44,6 +46,8 @@ impl Default for ConsumerConfig {
             ignore_authors: vec!["dependabot".into(), "renovate".into()],
             gh_host: None,
             confidence_threshold: 0.7,
+            daily_report_hour: 6,
+            knowledge_extraction: true,
         }
     }
 }

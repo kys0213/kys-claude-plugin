@@ -55,12 +55,18 @@ pub async fn scan(
 ) -> Result<()> {
     let since = db.cursor_get_last_seen(repo_id, "pulls")?;
 
-    let params: Vec<(&str, &str)> = vec![
+    let mut params: Vec<(&str, &str)> = vec![
         ("state", "open"),
         ("sort", "updated"),
         ("direction", "desc"),
         ("per_page", "30"),
     ];
+
+    let since_owned;
+    if let Some(ref s) = since {
+        since_owned = s.clone();
+        params.push(("since", &since_owned));
+    }
 
     let stdout = gh
         .api_paginate(repo_name, "pulls", &params, gh_host)

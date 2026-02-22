@@ -275,8 +275,14 @@ pub async fn process_improved(
                 });
 
                 if output.exit_code == 0 {
-                    // TODO: verdict 파싱하여 approve/request_changes 분기
-                    // 현재는 리뷰 성공 시 approve로 간주
+                    // Knowledge extraction (best effort)
+                    if cfg.consumer.knowledge_extraction {
+                        let _ = crate::knowledge::extractor::extract_task_knowledge(
+                            claude, gh, &item.repo_name, item.github_number,
+                            "pr", &wt_path, gh_host,
+                        ).await;
+                    }
+
                     gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
                     gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host).await;
                     tracing::info!("PR #{} re-review → done (approved)", item.github_number);
