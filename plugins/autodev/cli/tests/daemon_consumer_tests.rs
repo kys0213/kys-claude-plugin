@@ -7,8 +7,11 @@ use autodev::config::Env;
 use autodev::infrastructure::claude::MockClaude;
 use autodev::infrastructure::gh::MockGh;
 use autodev::infrastructure::git::MockGit;
-use autodev::queue::models::*;
 use autodev::queue::repository::*;
+use autodev::queue::task_queues::{
+    issue_phase, labels, make_work_id, pr_phase, IssueItem, MergeItem, PrItem,
+    TaskQueues,
+};
 use autodev::queue::Database;
 
 // ─── TestEnv ───
@@ -49,29 +52,47 @@ fn add_repo(db: &Database, url: &str, name: &str) -> String {
     db.repo_add(url, name).expect("add repo")
 }
 
-fn insert_pending_issue(db: &Database, repo_id: &str, number: i64, title: &str) -> String {
-    let item = NewIssueItem {
+fn make_issue_item(repo_id: &str, number: i64, title: &str) -> IssueItem {
+    IssueItem {
+        work_id: make_work_id("issue", "org/repo", number),
         repo_id: repo_id.to_string(),
+        repo_name: "org/repo".to_string(),
+        repo_url: "https://github.com/org/repo".to_string(),
         github_number: number,
         title: title.to_string(),
         body: Some("Test issue body".to_string()),
-        labels: r#"["bug"]"#.to_string(),
+        labels: vec!["bug".to_string()],
         author: "alice".to_string(),
-    };
-    db.issue_insert(&item).unwrap()
+        analysis_report: None,
+    }
 }
 
-fn insert_pending_pr(db: &Database, repo_id: &str, number: i64, title: &str) -> String {
-    let item = NewPrItem {
+fn make_pr_item(repo_id: &str, number: i64, title: &str) -> PrItem {
+    PrItem {
+        work_id: make_work_id("pr", "org/repo", number),
         repo_id: repo_id.to_string(),
+        repo_name: "org/repo".to_string(),
+        repo_url: "https://github.com/org/repo".to_string(),
         github_number: number,
         title: title.to_string(),
-        body: Some("Test PR body".to_string()),
-        author: "alice".to_string(),
         head_branch: "feat/test".to_string(),
         base_branch: "main".to_string(),
-    };
-    db.pr_insert(&item).unwrap()
+        review_comment: None,
+    }
+}
+
+#[allow(dead_code)]
+fn make_merge_item(repo_id: &str, pr_number: i64, title: &str) -> MergeItem {
+    MergeItem {
+        work_id: make_work_id("merge", "org/repo", pr_number),
+        repo_id: repo_id.to_string(),
+        repo_name: "org/repo".to_string(),
+        repo_url: "https://github.com/org/repo".to_string(),
+        pr_number,
+        title: title.to_string(),
+        head_branch: "feat/test".to_string(),
+        base_branch: "main".to_string(),
+    }
 }
 
 /// MockGh에 "이슈/PR이 open" 응답 설정
@@ -90,7 +111,6 @@ async fn issue_pipeline_success_transitions_to_ready() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_issue(&db, &repo_id, 42, "Bug: test issue");
 
     let gh = MockGh::new();
     set_gh_open(&gh, "org/repo", 42, "issues");
@@ -113,25 +133,36 @@ async fn issue_pipeline_success_transitions_to_ready() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
+
+    // Push issue to PENDING queue before processing
+    queues
+        .issues
+        .push(issue_phase::PENDING, make_issue_item(&repo_id, 42, "Bug: test issue"));
 
     autodev::pipeline::issue::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .expect("process_pending should succeed");
 
-    // pending → ready (analysis 성공)
-    let pending = db.issue_find_pending(100).unwrap();
-    assert!(pending.is_empty(), "no issues should remain pending");
-
-    let ready = db.issue_find_ready(100).unwrap();
-    assert_eq!(ready.len(), 1, "issue should be in ready state");
+    // pending → ready (analysis 성공): item moved from PENDING to READY
+    assert_eq!(
+        queues.issues.len(issue_phase::PENDING),
+        0,
+        "no issues should remain pending"
+    );
+    assert_eq!(
+        queues.issues.len(issue_phase::READY),
+        1,
+        "issue should be in ready state"
+    );
 
     let logs = db.log_recent(None, 100).unwrap();
     assert!(!logs.is_empty(), "consumer should have written logs");
@@ -147,7 +178,6 @@ async fn issue_pipeline_claude_failure_marks_failed() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_issue(&db, &repo_id, 99, "Will fail");
 
     let gh = MockGh::new();
     set_gh_open(&gh, "org/repo", 99, "issues");
@@ -158,25 +188,39 @@ async fn issue_pipeline_claude_failure_marks_failed() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
+
+    // Push issue to PENDING queue
+    queues
+        .issues
+        .push(issue_phase::PENDING, make_issue_item(&repo_id, 99, "Will fail"));
 
     autodev::pipeline::issue::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .expect("should handle failure gracefully");
 
-    let pending = db.issue_find_pending(100).unwrap();
-    assert!(pending.is_empty());
+    // Failed: removed from all queues + wip label removed
+    assert_eq!(queues.issues.len(issue_phase::PENDING), 0);
+    assert_eq!(queues.issues.len(issue_phase::READY), 0);
+    assert_eq!(queues.total(), 0, "item should be removed from all queues");
 
-    let list = db.issue_list("org/repo", 100).unwrap();
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].status, "failed");
+    let removed = gh.removed_labels.lock().unwrap();
+    assert!(
+        removed
+            .iter()
+            .any(|(repo, num, label)| repo == "org/repo"
+                && *num == 99
+                && label == labels::WIP),
+        "wip label should be removed on failure"
+    );
 }
 
 // ═══════════════════════════════════════════════
@@ -189,10 +233,16 @@ async fn pr_pipeline_success_transitions_to_review_done() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_pr(&db, &repo_id, 100, "feat: add settings");
 
     let gh = MockGh::new();
     set_gh_open(&gh, "org/repo", 100, "pulls");
+    // Set reviews endpoint to return 0 approved reviews (PR is reviewable)
+    gh.set_field(
+        "org/repo",
+        "pulls/100/reviews",
+        r#"[.[] | select(.state == "APPROVED")] | length"#,
+        "0",
+    );
 
     let git = MockGit::new();
     let claude = MockClaude::new();
@@ -200,18 +250,32 @@ async fn pr_pipeline_success_transitions_to_review_done() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
 
-    autodev::pipeline::pr::process_pending(&db, &env, &workspace, &notifier, &claude, &mut active)
-        .await
-        .expect("process_pending should succeed");
+    // Push PR to PENDING queue
+    queues
+        .prs
+        .push(pr_phase::PENDING, make_pr_item(&repo_id, 100, "feat: add settings"));
 
-    let pending = db.pr_find_pending(100).unwrap();
-    assert!(pending.is_empty());
+    autodev::pipeline::pr::process_pending(
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
+    )
+    .await
+    .expect("process_pending should succeed");
 
-    let list = db.pr_list("org/repo", 100).unwrap();
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].status, "review_done");
+    // Success: item moved from PENDING to REVIEW_DONE
+    assert_eq!(queues.prs.len(pr_phase::PENDING), 0);
+    assert_eq!(
+        queues.prs.len(pr_phase::REVIEW_DONE),
+        1,
+        "PR should be in review_done state"
+    );
 }
 
 // ═══════════════════════════════════════════════
@@ -224,10 +288,16 @@ async fn pr_pipeline_claude_failure_marks_failed() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_pr(&db, &repo_id, 200, "will fail");
 
     let gh = MockGh::new();
     set_gh_open(&gh, "org/repo", 200, "pulls");
+    // Set reviews endpoint to return 0 approved reviews (PR is reviewable)
+    gh.set_field(
+        "org/repo",
+        "pulls/200/reviews",
+        r#"[.[] | select(.state == "APPROVED")] | length"#,
+        "0",
+    );
 
     let git = MockGit::new();
     let claude = MockClaude::new();
@@ -235,15 +305,39 @@ async fn pr_pipeline_claude_failure_marks_failed() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
 
-    autodev::pipeline::pr::process_pending(&db, &env, &workspace, &notifier, &claude, &mut active)
-        .await
-        .expect("should handle failure");
+    // Push PR to PENDING queue
+    queues
+        .prs
+        .push(pr_phase::PENDING, make_pr_item(&repo_id, 200, "will fail"));
 
-    let list = db.pr_list("org/repo", 100).unwrap();
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].status, "failed");
+    autodev::pipeline::pr::process_pending(
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
+    )
+    .await
+    .expect("should handle failure");
+
+    // Failed: removed from all queues + wip label removed
+    assert_eq!(queues.prs.len(pr_phase::PENDING), 0);
+    assert_eq!(queues.prs.len(pr_phase::REVIEW_DONE), 0);
+    assert_eq!(queues.total(), 0, "item should be removed from all queues");
+
+    let removed = gh.removed_labels.lock().unwrap();
+    assert!(
+        removed
+            .iter()
+            .any(|(repo, num, label)| repo == "org/repo"
+                && *num == 200
+                && label == labels::WIP),
+        "wip label should be removed on failure"
+    );
 }
 
 // ═══════════════════════════════════════════════
@@ -257,37 +351,44 @@ async fn issue_pipeline_processes_up_to_limit() {
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
-    for i in 1..=10 {
-        insert_pending_issue(&db, &repo_id, i, &format!("Issue #{i}"));
-    }
-
     let gh = MockGh::new();
-    for i in 1..=10 {
-        set_gh_open(&gh, "org/repo", i, "issues");
-    }
-
     let git = MockGit::new();
     let claude = MockClaude::new();
+
+    let mut queues = TaskQueues::new();
+
+    for i in 1..=10 {
+        set_gh_open(&gh, "org/repo", i, "issues");
+        queues.issues.push(
+            issue_phase::PENDING,
+            make_issue_item(&repo_id, i, &format!("Issue #{i}")),
+        );
+    }
+
     // only 1 response (default concurrency=1)
-    claude.enqueue_response(r#"{"result": "{\"verdict\":\"implement\",\"confidence\":0.9,\"summary\":\"ok\",\"questions\":[],\"reason\":null,\"report\":\"report\"}"}"#, 0);
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"implement\",\"confidence\":0.9,\"summary\":\"ok\",\"questions\":[],\"reason\":null,\"report\":\"report\"}"}"#,
+        0,
+    );
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
 
     autodev::pipeline::issue::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .expect("should process batch");
 
-    let remaining = db.issue_find_pending(100).unwrap();
-    assert_eq!(remaining.len(), 9); // default concurrency=1 → 1 processed, 9 remain
+    // default concurrency=1 → 1 processed (moved to READY), 9 remain in PENDING
+    assert_eq!(queues.issues.len(issue_phase::PENDING), 9);
+    assert_eq!(queues.issues.len(issue_phase::READY), 1);
 }
 
 // ═══════════════════════════════════════════════
@@ -301,28 +402,61 @@ async fn process_all_handles_issues_and_prs() {
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
-    insert_pending_issue(&db, &repo_id, 1, "Issue");
-    insert_pending_pr(&db, &repo_id, 10, "PR");
-
     let gh = MockGh::new();
     set_gh_open(&gh, "org/repo", 1, "issues");
     set_gh_open(&gh, "org/repo", 10, "pulls");
+    // Set reviews endpoint so PR is reviewable
+    gh.set_field(
+        "org/repo",
+        "pulls/10/reviews",
+        r#"[.[] | select(.state == "APPROVED")] | length"#,
+        "0",
+    );
 
     let git = MockGit::new();
     let claude = MockClaude::new();
     // Issue analysis response
-    claude.enqueue_response(r#"{"result": "{\"verdict\":\"implement\",\"confidence\":0.9,\"summary\":\"ok\",\"questions\":[],\"reason\":null,\"report\":\"report\"}"}"#, 0);
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"implement\",\"confidence\":0.9,\"summary\":\"ok\",\"questions\":[],\"reason\":null,\"report\":\"report\"}"}"#,
+        0,
+    );
     // PR review response
     claude.enqueue_response(r#"{"result": "LGTM"}"#, 0);
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
 
-    autodev::pipeline::process_all(&db, &env, &workspace, &notifier, &claude, &mut active)
-        .await
-        .expect("process_all should succeed");
+    // Push issue and PR to their respective PENDING queues
+    queues
+        .issues
+        .push(issue_phase::PENDING, make_issue_item(&repo_id, 1, "Issue"));
+    queues
+        .prs
+        .push(pr_phase::PENDING, make_pr_item(&repo_id, 10, "PR"));
 
-    assert!(db.issue_find_pending(100).unwrap().is_empty());
-    assert!(db.pr_find_pending(100).unwrap().is_empty());
+    autodev::pipeline::process_all(
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
+    )
+    .await
+    .expect("process_all should succeed");
+
+    // Issue should have moved from PENDING through processing
+    assert_eq!(
+        queues.issues.len(issue_phase::PENDING),
+        0,
+        "no issues should remain pending"
+    );
+    // PR should have moved from PENDING through processing
+    assert_eq!(
+        queues.prs.len(pr_phase::PENDING),
+        0,
+        "no PRs should remain pending"
+    );
 }

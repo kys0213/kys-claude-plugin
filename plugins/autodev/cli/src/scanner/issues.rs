@@ -1,10 +1,10 @@
 use anyhow::Result;
 use serde::Deserialize;
 
-use crate::active::ActiveItems;
 use crate::infrastructure::gh::Gh;
-use crate::queue::models::*;
 use crate::queue::repository::*;
+use crate::queue::task_queues::{labels, issue_phase, make_work_id, IssueItem};
+use crate::queue::task_queues::TaskQueues;
 use crate::queue::Database;
 
 #[derive(Debug, Deserialize)]
@@ -28,17 +28,25 @@ struct GitHubUser {
     login: String,
 }
 
-/// GitHub Issues를 스캔하여 큐에 추가
+/// autodev: 라벨이 있는지 확인 (done/skip/wip)
+fn has_autodev_label(issue_labels: &[GitHubLabel]) -> bool {
+    issue_labels
+        .iter()
+        .any(|l| l.name.starts_with("autodev:"))
+}
+
+/// GitHub Issues를 스캔하여 TaskQueues에 추가 + autodev:wip 라벨 설정
 #[allow(clippy::too_many_arguments)]
 pub async fn scan(
     db: &Database,
     gh: &dyn Gh,
     repo_id: &str,
     repo_name: &str,
+    repo_url: &str,
     ignore_authors: &[String],
     filter_labels: &Option<Vec<String>>,
     gh_host: Option<&str>,
-    active: &mut ActiveItems,
+    queues: &mut TaskQueues,
 ) -> Result<()> {
     let since = db.cursor_get_last_seen(repo_id, "issues")?;
 
@@ -63,11 +71,23 @@ pub async fn scan(
     let mut latest_updated = since;
 
     for issue in &issues {
+        // PR은 issues API에 포함되므로 제외
         if issue.pull_request.is_some() {
             continue;
         }
 
         if ignore_authors.contains(&issue.user.login) {
+            continue;
+        }
+
+        // autodev: 라벨이 이미 있으면 skip (done/skip/wip 모두)
+        if has_autodev_label(&issue.labels) {
+            if latest_updated
+                .as_ref()
+                .is_none_or(|l| issue.updated_at > *l)
+            {
+                latest_updated = Some(issue.updated_at.clone());
+            }
             continue;
         }
 
@@ -78,7 +98,10 @@ pub async fn scan(
             }
         }
 
-        if active.contains("issue", repo_id, issue.number) {
+        let work_id = make_work_id("issue", repo_name, issue.number);
+
+        // 이미 큐에 있으면 skip (O(1) dedup)
+        if queues.contains(&work_id) {
             if latest_updated
                 .as_ref()
                 .is_none_or(|l| issue.updated_at > *l)
@@ -88,27 +111,26 @@ pub async fn scan(
             continue;
         }
 
-        let exists = db.issue_exists(repo_id, issue.number)?;
+        let label_names: Vec<String> = issue.labels.iter().map(|l| l.name.clone()).collect();
 
-        if exists {
-            active.insert("issue", repo_id, issue.number);
-        } else {
-            let labels_json =
-                serde_json::to_string(&issue.labels.iter().map(|l| &l.name).collect::<Vec<_>>())?;
+        let item = IssueItem {
+            work_id,
+            repo_id: repo_id.to_string(),
+            repo_name: repo_name.to_string(),
+            repo_url: repo_url.to_string(),
+            github_number: issue.number,
+            title: issue.title.clone(),
+            body: issue.body.clone(),
+            labels: label_names,
+            author: issue.user.login.clone(),
+            analysis_report: None,
+        };
 
-            let item = NewIssueItem {
-                repo_id: repo_id.to_string(),
-                github_number: issue.number,
-                title: issue.title.clone(),
-                body: issue.body.clone(),
-                labels: labels_json,
-                author: issue.user.login.clone(),
-            };
-
-            db.issue_insert(&item)?;
-            active.insert("issue", repo_id, issue.number);
-            tracing::info!("queued issue #{}: {}", issue.number, issue.title);
-        }
+        // autodev:wip 라벨 추가 + 큐에 push
+        gh.label_add(repo_name, issue.number, labels::WIP, gh_host)
+            .await;
+        queues.issues.push(issue_phase::PENDING, item);
+        tracing::info!("queued issue #{}: {}", issue.number, issue.title);
 
         if latest_updated
             .as_ref()

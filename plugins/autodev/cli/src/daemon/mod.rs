@@ -6,7 +6,6 @@ use std::path::Path;
 use anyhow::{bail, Result};
 use tracing::info;
 
-use crate::active::ActiveItems;
 use crate::components::notifier::Notifier;
 use crate::components::workspace::Workspace;
 use crate::config::{self, Env};
@@ -14,7 +13,8 @@ use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::pipeline;
-use crate::queue::repository::{QueueAdmin, RepoRepository};
+use crate::queue::repository::{RepoRepository, ScanCursorRepository};
+use crate::queue::task_queues::TaskQueues;
 use crate::queue::Database;
 use crate::scanner;
 
@@ -38,33 +38,25 @@ pub async fn start(
     pid::write_pid(home)?;
 
     let cfg = config::loader::load_merged(env, None);
-    let stuck_threshold = cfg.consumer.stuck_threshold_secs as i64;
 
     let db_path = home.join("autodev.db");
     let db = Database::open(&db_path)?;
     db.initialize()?;
 
-    // stuck 상태 복구
-    match db.queue_reset_stuck(stuck_threshold) {
-        Ok(n) if n > 0 => info!("recovered {n} stuck items → pending"),
-        Err(e) => tracing::error!("stuck recovery failed: {e}"),
-        _ => {}
-    }
-
-    // failed 항목 자동 재시도
-    match db.queue_auto_retry_failed(3) {
-        Ok(n) if n > 0 => info!("auto-retrying {n} failed items"),
-        Err(e) => tracing::error!("auto-retry failed: {e}"),
-        _ => {}
-    }
-
     println!("autodev daemon started (pid: {})", std::process::id());
 
-    let mut active = ActiveItems::new();
+    let mut queues = TaskQueues::new();
     let workspace = Workspace::new(git, env);
     let notifier = Notifier::new(gh);
 
     let gh_host = cfg.consumer.gh_host.clone();
+
+    // 0. Startup Reconcile (bounded recovery)
+    match startup_reconcile(&db, gh, &mut queues, gh_host.as_deref()).await {
+        Ok(n) if n > 0 => info!("startup reconcile: recovered {n} items"),
+        Err(e) => tracing::error!("startup reconcile failed: {e}"),
+        _ => {}
+    }
 
     // 메인 루프: recovery → scanner → pipeline
     tokio::select! {
@@ -73,7 +65,7 @@ pub async fn start(
                 // 1. Recovery: orphan autodev:wip 라벨 정리
                 match db.repo_find_enabled() {
                     Ok(repos) => {
-                        match recovery::recover_orphan_wip(&repos, gh, &active, gh_host.as_deref()).await {
+                        match recovery::recover_orphan_wip(&repos, gh, &queues, gh_host.as_deref()).await {
                             Ok(n) if n > 0 => info!("recovered {n} orphan wip items"),
                             Err(e) => tracing::error!("recovery error: {e}"),
                             _ => {}
@@ -83,12 +75,12 @@ pub async fn start(
                 }
 
                 // 2. Scan
-                if let Err(e) = scanner::scan_all(&db, env, gh, &mut active).await {
+                if let Err(e) = scanner::scan_all(&db, env, gh, &mut queues).await {
                     tracing::error!("scan error: {e}");
                 }
 
                 // 3. Pipeline
-                if let Err(e) = pipeline::process_all(&db, env, &workspace, &notifier, claude, &mut active).await {
+                if let Err(e) = pipeline::process_all(&db, env, &workspace, &notifier, gh, claude, &mut queues).await {
                     tracing::error!("pipeline error: {e}");
                 }
 
@@ -102,6 +94,149 @@ pub async fn start(
 
     pid::remove_pid(home);
     Ok(())
+}
+
+/// Bounded reconciliation: 재시작 시 메모리 큐를 GitHub 라벨 기반으로 복구
+///
+/// cursor - reconcile_window_hours 범위의 open 이슈/PR을 조회하여,
+/// autodev 라벨이 없는 항목을 큐에 적재한다.
+async fn startup_reconcile(
+    db: &Database,
+    gh: &dyn Gh,
+    queues: &mut TaskQueues,
+    gh_host: Option<&str>,
+) -> Result<u64> {
+    use crate::queue::task_queues::{labels, issue_phase, pr_phase, make_work_id, IssueItem, PrItem};
+
+    let repos = db.repo_find_enabled()?;
+    let mut recovered = 0u64;
+
+    for repo in &repos {
+        // issues 복구
+        let since = db.cursor_get_last_seen(&repo.id, "issues")?;
+        let mut params: Vec<(&str, &str)> = vec![
+            ("state", "open"),
+            ("sort", "updated"),
+            ("per_page", "100"),
+        ];
+        let since_val: String;
+        if let Some(ref s) = since {
+            since_val = s.clone();
+            params.push(("since", &since_val));
+        }
+
+        if let Ok(data) = gh.api_paginate(&repo.name, "issues", &params, gh_host).await {
+            let items: Vec<serde_json::Value> = serde_json::from_slice(&data).unwrap_or_default();
+            for item in items {
+                // PR 제외
+                if item.get("pull_request").is_some() {
+                    continue;
+                }
+                let number = match item["number"].as_i64() {
+                    Some(n) if n > 0 => n,
+                    _ => continue,
+                };
+
+                let item_labels: Vec<&str> = item["labels"]
+                    .as_array()
+                    .map(|arr| arr.iter().filter_map(|l| l["name"].as_str()).collect())
+                    .unwrap_or_default();
+
+                let has_done = item_labels.iter().any(|l| *l == labels::DONE);
+                let has_skip = item_labels.iter().any(|l| *l == labels::SKIP);
+                let has_wip = item_labels.iter().any(|l| *l == labels::WIP);
+
+                if has_done || has_skip {
+                    continue;
+                }
+
+                let work_id = make_work_id("issue", &repo.name, number);
+                if queues.contains(&work_id) {
+                    continue;
+                }
+
+                // orphan wip → 라벨 제거 후 큐 적재
+                if has_wip {
+                    gh.label_remove(&repo.name, number, labels::WIP, gh_host).await;
+                }
+
+                // 큐에 적재 + wip 라벨 추가
+                let issue_item = IssueItem {
+                    work_id,
+                    repo_id: repo.id.clone(),
+                    repo_name: repo.name.clone(),
+                    repo_url: repo.url.clone(),
+                    github_number: number,
+                    title: item["title"].as_str().unwrap_or("").to_string(),
+                    body: item["body"].as_str().map(|s| s.to_string()),
+                    labels: item_labels.iter().map(|s| s.to_string()).collect(),
+                    author: item["user"]["login"].as_str().unwrap_or("").to_string(),
+                    analysis_report: None,
+                };
+
+                gh.label_add(&repo.name, number, labels::WIP, gh_host).await;
+                queues.issues.push(issue_phase::PENDING, issue_item);
+                recovered += 1;
+            }
+        }
+
+        // pulls 복구
+        let params: Vec<(&str, &str)> = vec![
+            ("state", "open"),
+            ("sort", "updated"),
+            ("per_page", "100"),
+        ];
+
+        if let Ok(data) = gh.api_paginate(&repo.name, "pulls", &params, gh_host).await {
+            let items: Vec<serde_json::Value> = serde_json::from_slice(&data).unwrap_or_default();
+            for item in items {
+                let number = match item["number"].as_i64() {
+                    Some(n) if n > 0 => n,
+                    _ => continue,
+                };
+
+                let item_labels: Vec<&str> = item["labels"]
+                    .as_array()
+                    .map(|arr| arr.iter().filter_map(|l| l["name"].as_str()).collect())
+                    .unwrap_or_default();
+
+                let has_done = item_labels.iter().any(|l| *l == labels::DONE);
+                let has_skip = item_labels.iter().any(|l| *l == labels::SKIP);
+                let has_wip = item_labels.iter().any(|l| *l == labels::WIP);
+
+                if has_done || has_skip {
+                    continue;
+                }
+
+                let work_id = make_work_id("pr", &repo.name, number);
+                if queues.contains(&work_id) {
+                    continue;
+                }
+
+                if has_wip {
+                    gh.label_remove(&repo.name, number, labels::WIP, gh_host).await;
+                }
+
+                let pr_item = PrItem {
+                    work_id,
+                    repo_id: repo.id.clone(),
+                    repo_name: repo.name.clone(),
+                    repo_url: repo.url.clone(),
+                    github_number: number,
+                    title: item["title"].as_str().unwrap_or("").to_string(),
+                    head_branch: item["head"]["ref"].as_str().unwrap_or("").to_string(),
+                    base_branch: item["base"]["ref"].as_str().unwrap_or("").to_string(),
+                    review_comment: None,
+                };
+
+                gh.label_add(&repo.name, number, labels::WIP, gh_host).await;
+                queues.prs.push(pr_phase::PENDING, pr_item);
+                recovered += 1;
+            }
+        }
+    }
+
+    Ok(recovered)
 }
 
 /// 데몬 중지 (PID → SIGTERM)
