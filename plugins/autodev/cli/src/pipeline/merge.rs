@@ -3,6 +3,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::active::ActiveItems;
+use crate::components::merger::{MergeOutcome, Merger};
 use crate::components::notifier::Notifier;
 use crate::components::workspace::Workspace;
 use crate::config::Env;
@@ -22,6 +23,7 @@ pub async fn process_pending(
 ) -> Result<()> {
     let cfg = crate::config::loader::load_merged(env, None);
     let items = db.merge_find_pending(cfg.consumer.merge_concurrency)?;
+    let merger = Merger::new(claude);
 
     for item in items {
         // Pre-flight: GitHub에서 PR이 아직 머지 가능한 상태인지 확인
@@ -74,90 +76,74 @@ pub async fn process_pending(
             }
         };
 
-        // 머지 실행
-        let prompt = format!("/git-utils:merge-pr {}", item.pr_number);
+        // 머지 실행 (Merger 컴포넌트 위임)
         let started = Utc::now().to_rfc3339();
+        let merge_output = merger.merge_pr(&wt_path, item.pr_number).await;
 
-        let result = claude.run_session(&wt_path, &prompt, None).await;
+        let finished = Utc::now().to_rfc3339();
+        let duration = chrono::Utc::now()
+            .signed_duration_since(chrono::DateTime::parse_from_rfc3339(&started).unwrap())
+            .num_milliseconds();
 
-        match result {
-            Ok(res) => {
-                let finished = Utc::now().to_rfc3339();
-                let duration = chrono::Utc::now()
-                    .signed_duration_since(
-                        chrono::DateTime::parse_from_rfc3339(&started).unwrap(),
-                    )
-                    .num_milliseconds();
+        db.log_insert(&NewConsumerLog {
+            repo_id: item.repo_id.clone(),
+            queue_type: "merge".to_string(),
+            queue_item_id: item.id.clone(),
+            worker_id: worker_id.clone(),
+            command: format!("claude -p \"/git-utils:merge-pr {}\"", item.pr_number),
+            stdout: merge_output.stdout.clone(),
+            stderr: merge_output.stderr.clone(),
+            exit_code: match &merge_output.outcome {
+                MergeOutcome::Success => 0,
+                MergeOutcome::Conflict | MergeOutcome::Failed { .. } => 1,
+                MergeOutcome::Error(_) => -1,
+            },
+            started_at: started,
+            finished_at: finished,
+            duration_ms: duration,
+        })?;
 
-                db.log_insert(&NewConsumerLog {
-                    repo_id: item.repo_id.clone(),
-                    queue_type: "merge".to_string(),
-                    queue_item_id: item.id.clone(),
-                    worker_id: worker_id.clone(),
-                    command: format!(
-                        "claude -p \"/git-utils:merge-pr {}\"",
-                        item.pr_number
-                    ),
-                    stdout: res.stdout.clone(),
-                    stderr: res.stderr.clone(),
-                    exit_code: res.exit_code,
-                    started_at: started,
-                    finished_at: finished,
-                    duration_ms: duration,
-                })?;
+        match merge_output.outcome {
+            MergeOutcome::Success => {
+                db.merge_update_status(&item.id, "done", &StatusFields::default())?;
+                active.remove("merge", &item.repo_id, item.pr_number);
+                tracing::info!("PR #{} merged successfully", item.pr_number);
 
-                if res.exit_code == 0 {
-                    db.merge_update_status(&item.id, "done", &StatusFields::default())?;
-                    active.remove("merge", &item.repo_id, item.pr_number);
-                    tracing::info!("PR #{} merged successfully", item.pr_number);
+                let _ = workspace
+                    .remove_worktree(&item.repo_name, &task_id)
+                    .await;
+            }
+            MergeOutcome::Conflict => {
+                db.merge_update_status(&item.id, "conflict", &StatusFields::default())?;
 
-                    let _ = workspace
-                        .remove_worktree(&item.repo_name, &task_id)
-                        .await;
-                } else if res.stdout.contains("conflict") || res.stderr.contains("conflict") {
-                    // 충돌 발생 - 해결 시도
-                    db.merge_update_status(
-                        &item.id,
-                        "conflict",
-                        &StatusFields::default(),
-                    )?;
+                let resolve_output =
+                    merger.resolve_conflicts(&wt_path, item.pr_number).await;
 
-                    let resolve_result = claude
-                        .run_session(
-                            &wt_path,
-                            &format!("Resolve merge conflicts for PR #{}", item.pr_number),
-                            None,
-                        )
-                        .await;
-
-                    match resolve_result {
-                        Ok(rr) if rr.exit_code == 0 => {
-                            db.merge_update_status(
-                                &item.id,
-                                "done",
-                                &StatusFields::default(),
-                            )?;
-                            active.remove("merge", &item.repo_id, item.pr_number);
-                            tracing::info!(
-                                "PR #{} conflicts resolved and merged",
-                                item.pr_number
-                            );
-                        }
-                        _ => {
-                            db.merge_mark_failed(
-                                &item.id,
-                                "conflict resolution failed",
-                            )?;
-                        }
+                match resolve_output.outcome {
+                    MergeOutcome::Success => {
+                        db.merge_update_status(
+                            &item.id,
+                            "done",
+                            &StatusFields::default(),
+                        )?;
+                        active.remove("merge", &item.repo_id, item.pr_number);
+                        tracing::info!(
+                            "PR #{} conflicts resolved and merged",
+                            item.pr_number
+                        );
                     }
-                } else {
-                    db.merge_mark_failed(
-                        &item.id,
-                        &format!("merge exited with {}", res.exit_code),
-                    )?;
+                    _ => {
+                        db.merge_mark_failed(&item.id, "conflict resolution failed")?;
+                    }
                 }
             }
-            Err(e) => {
+            MergeOutcome::Failed { exit_code } => {
+                db.merge_mark_failed(
+                    &item.id,
+                    &format!("merge exited with {}", exit_code),
+                )?;
+            }
+            MergeOutcome::Error(e) => {
                 db.merge_mark_failed(&item.id, &format!("merge error: {e}"))?;
             }
         }

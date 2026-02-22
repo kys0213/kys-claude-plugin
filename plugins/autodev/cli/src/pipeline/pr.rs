@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::active::ActiveItems;
 use crate::components::notifier::Notifier;
+use crate::components::reviewer::Reviewer;
 use crate::components::workspace::Workspace;
 use crate::config;
 use crate::config::Env;
@@ -11,7 +12,6 @@ use crate::infrastructure::claude::Claude;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::Database;
-use crate::infrastructure::claude::output;
 
 /// pending PR 처리
 pub async fn process_pending(
@@ -24,6 +24,7 @@ pub async fn process_pending(
 ) -> Result<()> {
     let cfg = config::loader::load_merged(env, None);
     let items = db.pr_find_pending(cfg.consumer.pr_concurrency)?;
+    let reviewer = Reviewer::new(claude);
 
     for item in items {
         // Pre-flight: GitHub에서 PR이 리뷰 대상인지 확인
@@ -77,16 +78,14 @@ pub async fn process_pending(
         };
 
         // YAML 설정 로드 (글로벌 + 레포별 머지)
-        let config = config::loader::load_merged(env, Some(&wt_path));
-        let pr_workflow = &config.workflow.pr;
+        let repo_cfg = config::loader::load_merged(env, Some(&wt_path));
+        let pr_workflow = &repo_cfg.workflow.pr;
 
-        // Multi-LLM 리뷰
+        // 리뷰 실행 (Reviewer 컴포넌트 위임)
         let started = Utc::now().to_rfc3339();
 
-        let result = claude.run_session(&wt_path, pr_workflow, Some("json")).await;
-
-        match result {
-            Ok(res) => {
+        match reviewer.review_pr(&wt_path, pr_workflow).await {
+            Ok(output) => {
                 let finished = Utc::now().to_rfc3339();
                 let duration = chrono::Utc::now()
                     .signed_duration_since(
@@ -103,21 +102,20 @@ pub async fn process_pending(
                         "claude -p \"{}\" (PR #{})",
                         pr_workflow, item.github_number
                     ),
-                    stdout: res.stdout.clone(),
-                    stderr: res.stderr.clone(),
-                    exit_code: res.exit_code,
+                    stdout: output.stdout.clone(),
+                    stderr: output.stderr.clone(),
+                    exit_code: output.exit_code,
                     started_at: started,
                     finished_at: finished,
                     duration_ms: duration,
                 })?;
 
-                if res.exit_code == 0 {
-                    let review = output::parse_output(&res.stdout);
+                if output.exit_code == 0 {
                     db.pr_update_status(
                         &item.id,
                         "review_done",
                         &StatusFields {
-                            review_comment: Some(review),
+                            review_comment: Some(output.review),
                             ..Default::default()
                         },
                     )?;
@@ -126,7 +124,7 @@ pub async fn process_pending(
                 } else {
                     db.pr_mark_failed(
                         &item.id,
-                        &format!("review exited with {}", res.exit_code),
+                        &format!("review exited with {}", output.exit_code),
                     )?;
                 }
             }
