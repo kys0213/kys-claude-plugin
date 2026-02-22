@@ -39,7 +39,7 @@
           {
             "type": "command",
             "command": "bash ./.claude/hooks/cargo-check.sh",
-            "timeout": 30
+            "timeout": 60
           }
         ]
       }

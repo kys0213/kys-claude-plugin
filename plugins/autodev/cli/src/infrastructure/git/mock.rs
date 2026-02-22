@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use super::Git;
 
 /// 테스트용 Git 구현체 — 파일시스템만 조작, 실제 git 호출 없음
+#[allow(dead_code)]
 pub struct MockGit {
     /// clone 호출 시 실패시킬지 여부
     pub clone_should_fail: Mutex<bool>,
@@ -29,6 +30,7 @@ impl Default for MockGit {
     }
 }
 
+#[allow(dead_code)]
 impl MockGit {
     pub fn new() -> Self {
         Self::default()
@@ -89,6 +91,32 @@ impl Git for MockGit {
         if worktree.exists() {
             std::fs::remove_dir_all(worktree)?;
         }
+        Ok(())
+    }
+
+    async fn checkout_new_branch(&self, repo_dir: &Path, branch: &str) -> Result<()> {
+        self.calls.lock().unwrap().push((
+            "checkout_new_branch".into(),
+            format!("{} branch={branch}", repo_dir.display()),
+        ));
+        Ok(())
+    }
+
+    async fn add_commit_push(
+        &self,
+        repo_dir: &Path,
+        files: &[&str],
+        message: &str,
+        branch: &str,
+    ) -> Result<()> {
+        self.calls.lock().unwrap().push((
+            "add_commit_push".into(),
+            format!(
+                "{} files={:?} msg={message} branch={branch}",
+                repo_dir.display(),
+                files
+            ),
+        ));
         Ok(())
     }
 }

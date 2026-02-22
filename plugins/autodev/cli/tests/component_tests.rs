@@ -2,7 +2,7 @@ use std::path::Path;
 
 use autodev::components::merger::{MergeOutcome, Merger};
 use autodev::components::reviewer::Reviewer;
-use autodev::infrastructure::claude::MockClaude;
+use autodev::infrastructure::claude::mock::MockClaude;
 
 // ═══════════════════════════════════════════════
 // Reviewer 테스트
@@ -92,9 +92,10 @@ async fn merger_success() {
     assert!(matches!(output.outcome, MergeOutcome::Success));
     assert_eq!(output.stdout, "Merged successfully");
 
-    // 프롬프트에 PR 번호가 포함되었는지 확인
+    // 프롬프트에 [autodev] 마커와 PR 번호가 포함되었는지 확인
     let calls = claude.calls.lock().unwrap();
-    assert_eq!(calls[0].1, "/git-utils:merge-pr 42");
+    assert!(calls[0].1.contains("[autodev] merge: PR #42"));
+    assert!(calls[0].1.contains("/git-utils:merge-pr 42"));
     assert_eq!(calls[0].2, None); // output_format 없음
 }
 
@@ -165,7 +166,7 @@ async fn merger_resolve_success() {
     assert!(matches!(output.outcome, MergeOutcome::Success));
 
     let calls = claude.calls.lock().unwrap();
-    assert_eq!(calls[0].1, "Resolve merge conflicts for PR #42");
+    assert!(calls[0].1.contains("Resolve") && calls[0].1.contains("PR #42"));
 }
 
 #[tokio::test]

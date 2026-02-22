@@ -453,6 +453,10 @@ daemon:
 
 > 24h 이상 데몬이 죽어있었다면 운영 이슈로, 별도 알림/모니터링이 필요하다.
 
+**구현 요구사항**: `startup_reconcile()` 내에서 issues/pulls 스캔 시
+`DaemonConfig.reconcile_window_hours`를 읽어 `safe_since = cursor - reconcile_window_hours`를
+계산해야 한다. cursor를 그대로 사용하면 크래시 윈도우 내 이벤트를 놓칠 수 있다.
+
 ### 타이밍 예시 (scan_interval_secs: 300)
 
 ```
@@ -778,6 +782,36 @@ SessionResult {
   └─ exit_code != 0 → failure 처리 + 로그 기록
 ```
 
+### `[autodev]` 프롬프트 마커
+
+모든 `claude -p` 호출의 프롬프트 앞에 `[autodev]` 마커를 삽입한다.
+suggest-workflow가 autodev 세션을 식별하는 데 사용된다.
+
+```
+형식: [autodev] {action}: {context}
+
+예시:
+  [autodev] analyze: issue #42 - fix login timeout
+  [autodev] implement: issue #42
+  [autodev] review: PR #15
+  [autodev] improve: PR #15
+  [autodev] merge: PR #12
+  [autodev] resolve: PR #12
+  [autodev] knowledge: daily 2026-02-20
+```
+
+**삽입 위치** (모든 Claude 호출 지점):
+
+| 파일 | 호출 유형 | 마커 |
+|------|----------|------|
+| `pipeline/issue.rs` | Issue 분석 | `[autodev] analyze: issue #N - {title}` |
+| `pipeline/issue.rs` | Issue 구현 | `[autodev] implement: issue #N` |
+| `pipeline/pr.rs` | PR 리뷰 | `[autodev] review: PR #N` |
+| `pipeline/pr.rs` | PR 피드백 반영 | `[autodev] improve: PR #N` |
+| `components/merger.rs` | Merge | `[autodev] merge: PR #N` |
+| `components/merger.rs` | Conflict 해결 | `[autodev] resolve: PR #N` |
+| `knowledge/extractor.rs` | Knowledge 추출 | `[autodev] knowledge: {mode} {context}` |
+
 ---
 
 ## 9. CLI 서브커맨드
@@ -927,12 +961,34 @@ repos:
     merge_require_ci: true         # CI checks 통과 필수
 
 daemon:
-  tick_interval_secs: 10
-  reconcile_window_hours: 24     # 재시작 시 복구 윈도우 (기본 24h)
-  log_dir: ~/.autodev/logs
-  log_retention_days: 30
-  daily_report_hour: 6           # 매일 06:00에 일일 리포트 생성
+  tick_interval_secs: 10           # 메인 루프 주기 (초)
+  reconcile_window_hours: 24       # 재시작 시 복구 윈도우 (기본 24h)
+  log_dir: ~/.autodev/logs         # 일자별 롤링 로그 디렉토리
+  log_retention_days: 30           # 로그 보존 기간 (일)
+  daily_report_hour: 6             # 매일 06:00에 일일 리포트 생성
 ```
+
+### DaemonConfig 구조체 매핑
+
+daemon 섹션의 설정은 `DaemonConfig` 구조체로 매핑된다.
+daemon tick loop에서만 사용하는 설정은 `ConsumerConfig`가 아닌 `DaemonConfig`에 위치한다.
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DaemonConfig {
+    pub tick_interval_secs: u64,        // default: 10
+    pub reconcile_window_hours: u32,    // default: 24
+    pub log_dir: PathBuf,               // default: ~/.autodev/logs
+    pub log_retention_days: u32,        // default: 30
+    pub daily_report_hour: u32,         // default: 6
+}
+```
+
+> **`daily_report_hour`의 위치**: daemon tick loop에서만 참조하므로
+> `ConsumerConfig`가 아닌 `DaemonConfig`에 위치한다.
+> `startup_reconcile()`에서 `reconcile_window_hours`를 참조하여
+> bounded window를 적용한다.
 
 ---
 
@@ -1110,10 +1166,55 @@ knowledge-extractor agent (daily mode)
 │ }                                     │
 └──────────────┬────────────────────────┘
                │
-               ▼
-          GitHub 이슈로 일일 리포트 게시
-          + KnowledgeSuggestion → PR 생성
+               ├─► GitHub 이슈로 일일 리포트 게시
+               │
+               └─► KnowledgeSuggestion → PR 생성 (아래 참조)
 ```
+
+### Knowledge Suggestion → PR 생성
+
+DailyReport의 suggestions를 직접 파일로 써서 PR을 생성한다.
+Claude 세션 불필요 — `Suggestion.target_file`과 `content`를 그대로 사용.
+
+```
+KnowledgeSuggestion.suggestions 순회
+  │
+  for each suggestion:
+  │
+  ├─ 1. branch 생성
+  │    autodev/knowledge/{date}-{index}
+  │    (예: autodev/knowledge/2026-02-20-0)
+  │
+  ├─ 2. 파일 쓰기
+  │    target_file에 content 기록
+  │    (Rule → .claude/rules/*.md)
+  │    (ClaudeMd → CLAUDE.md append)
+  │
+  ├─ 3. commit + push
+  │    "[autodev] knowledge: {reason}"
+  │
+  ├─ 4. PR 생성 (gh pr create)
+  │    title: "[autodev] rule: {reason}"
+  │    body: suggestion.reason + 근거
+  │    labels: autodev:skip
+  │
+  └─ 5. autodev:skip 라벨 부착
+       → 스캐너가 자동 skip (기존 필터링 재사용)
+       → 사람이 리뷰 후 수동 merge
+```
+
+> **`autodev:skip` 라벨**: Knowledge PR은 사람이 리뷰해야 하므로
+> `autodev:skip`을 붙여 스캐너가 자동 처리하지 않도록 한다.
+> 기존 `has_autodev_label()` 필터가 `autodev:` prefix를 체크하므로
+> 신규 라벨 추가 없이 기존 메커니즘을 재사용한다.
+
+**필요한 trait 확장**:
+
+| Trait | 메서드 | 용도 |
+|-------|--------|------|
+| `Gh` | `create_pull(repo, head, base, title, body)` | PR 생성 |
+| `Git` | `checkout_new_branch(path, branch)` | branch 생성 |
+| `Git` | `add_commit_push(path, files, message, branch)` | commit + push |
 
 ### 트리거 비교
 

@@ -4,11 +4,13 @@ use std::path::Path;
 use autodev::components::notifier::Notifier;
 use autodev::components::workspace::Workspace;
 use autodev::config::Env;
-use autodev::infrastructure::claude::MockClaude;
-use autodev::infrastructure::gh::MockGh;
-use autodev::infrastructure::git::MockGit;
-use autodev::queue::models::*;
+use autodev::infrastructure::claude::mock::MockClaude;
+use autodev::infrastructure::gh::mock::MockGh;
+use autodev::infrastructure::git::mock::MockGit;
 use autodev::queue::repository::*;
+use autodev::queue::task_queues::{
+    issue_phase, labels, make_work_id, IssueItem, MergeItem, PrItem, TaskQueues,
+};
 use autodev::queue::Database;
 
 // ─── TestEnv ───
@@ -49,40 +51,46 @@ fn add_repo(db: &Database, url: &str, name: &str) -> String {
     db.repo_add(url, name).expect("add repo")
 }
 
-fn insert_pending_issue(db: &Database, repo_id: &str, number: i64, title: &str) -> String {
-    let item = NewIssueItem {
+fn make_issue_item(repo_id: &str, number: i64, title: &str) -> IssueItem {
+    IssueItem {
+        work_id: make_work_id("issue", "org/repo", number),
         repo_id: repo_id.to_string(),
+        repo_name: "org/repo".to_string(),
+        repo_url: "https://github.com/org/repo".to_string(),
         github_number: number,
         title: title.to_string(),
         body: Some("Test issue body".to_string()),
-        labels: r#"["bug"]"#.to_string(),
+        labels: vec!["bug".to_string()],
         author: "alice".to_string(),
-    };
-    db.issue_insert(&item).unwrap()
+        analysis_report: None,
+    }
 }
 
-fn insert_pending_pr(db: &Database, repo_id: &str, number: i64, title: &str) -> String {
-    let item = NewPrItem {
+fn make_pr_item(repo_id: &str, number: i64, title: &str) -> PrItem {
+    PrItem {
+        work_id: make_work_id("pr", "org/repo", number),
         repo_id: repo_id.to_string(),
+        repo_name: "org/repo".to_string(),
+        repo_url: "https://github.com/org/repo".to_string(),
         github_number: number,
         title: title.to_string(),
-        body: Some("Test PR body".to_string()),
-        author: "alice".to_string(),
         head_branch: "feat/test".to_string(),
         base_branch: "main".to_string(),
-    };
-    db.pr_insert(&item).unwrap()
+        review_comment: None,
+    }
 }
 
-fn insert_pending_merge(db: &Database, repo_id: &str, pr_number: i64, title: &str) -> String {
-    let item = NewMergeItem {
+fn make_merge_item(repo_id: &str, pr_number: i64, title: &str) -> MergeItem {
+    MergeItem {
+        work_id: make_work_id("merge", "org/repo", pr_number),
         repo_id: repo_id.to_string(),
+        repo_name: "org/repo".to_string(),
+        repo_url: "https://github.com/org/repo".to_string(),
         pr_number,
         title: title.to_string(),
         head_branch: "feat/test".to_string(),
         base_branch: "main".to_string(),
-    };
-    db.merge_insert(&item).unwrap()
+    }
 }
 
 fn set_gh_issue_open(gh: &MockGh, repo_name: &str, number: i64) {
@@ -106,8 +114,48 @@ fn make_analysis_json(verdict: &str, confidence: f64) -> String {
     serde_json::json!({ "result": inner }).to_string()
 }
 
+fn fixture_response(name: &str) -> Vec<u8> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/responses")
+        .join(name);
+    std::fs::read(path).expect("read fixture file")
+}
+
+/// Assert that the added_labels on MockGh contain the given (repo_name, number, label) tuple.
+fn assert_label_added(gh: &MockGh, repo_name: &str, number: i64, label: &str) {
+    let added = gh.added_labels.lock().unwrap();
+    assert!(
+        added
+            .iter()
+            .any(|(r, n, l)| r == repo_name && *n == number && l == label),
+        "expected added label ({repo_name}, {number}, {label}) but found: {added:?}"
+    );
+}
+
+/// Assert that the removed_labels on MockGh contain the given (repo_name, number, label) tuple.
+fn assert_label_removed(gh: &MockGh, repo_name: &str, number: i64, label: &str) {
+    let removed = gh.removed_labels.lock().unwrap();
+    assert!(
+        removed
+            .iter()
+            .any(|(r, n, l)| r == repo_name && *n == number && l == label),
+        "expected removed label ({repo_name}, {number}, {label}) but found: {removed:?}"
+    );
+}
+
+/// Assert that the added_labels on MockGh do NOT contain the given (repo_name, number, label).
+fn assert_label_not_added(gh: &MockGh, repo_name: &str, number: i64, label: &str) {
+    let added = gh.added_labels.lock().unwrap();
+    assert!(
+        !added
+            .iter()
+            .any(|(r, n, l)| r == repo_name && *n == number && l == label),
+        "expected label ({repo_name}, {number}, {label}) NOT to be added but it was"
+    );
+}
+
 // ═══════════════════════════════════════════════════
-// 1. Issue 전체 사이클: pending → analyzing → ready → processing → done
+// 1. Issue full cycle: pending → analyzing → ready → implementing → done
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -116,7 +164,6 @@ async fn issue_full_cycle_pending_to_done() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_issue(&db, &repo_id, 10, "Full cycle issue");
 
     let gh = MockGh::new();
     set_gh_issue_open(&gh, "org/repo", 10);
@@ -124,50 +171,62 @@ async fn issue_full_cycle_pending_to_done() {
     let git = MockGit::new();
     let claude = MockClaude::new();
 
-    // Phase 1: analysis → implement + high confidence → ready
+    // Phase 1: analysis with high confidence -> ready
     claude.enqueue_response(&make_analysis_json("implement", 0.9), 0);
-    // Phase 2: implementation → success
+    // Phase 2: implementation -> success
     claude.enqueue_response(r#"{"result": "Implementation complete"}"#, 0);
+    // Phase 2.5: knowledge extraction (best effort, after implementation done)
+    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
 
-    // Phase 1: process_pending (pending → analyzing → ready)
+    // Push issue to Pending queue
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 10, "Full cycle issue"),
+    );
+
+    // Phase 1: process_pending (Pending -> Ready)
     autodev::pipeline::issue::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .expect("phase 1 should succeed");
 
-    let ready = db.issue_find_ready(100).unwrap();
     assert_eq!(
-        ready.len(),
+        queues.issues.len(issue_phase::READY),
         1,
-        "issue should be in ready state after phase 1"
+        "issue should be in Ready queue after phase 1"
     );
 
-    // Phase 2: process_ready (ready → processing → done)
-    autodev::pipeline::issue::process_ready(&db, &env, &workspace, &claude, &mut active)
+    // Phase 2: process_ready (Ready -> done, removed from queue)
+    autodev::pipeline::issue::process_ready(&db, &env, &workspace, &gh, &claude, &mut queues)
         .await
         .expect("phase 2 should succeed");
 
-    let list = db.issue_list("org/repo", 100).unwrap();
-    assert_eq!(list.len(), 1);
+    // Item removed from queue (done)
     assert_eq!(
-        list[0].status, "done",
-        "issue should be done after full cycle"
+        queues.issues.total(),
+        0,
+        "issue should be removed from queue after done"
     );
 
-    // Claude는 정확히 2번 호출 (분석 1회 + 구현 1회)
-    assert_eq!(claude.call_count(), 2);
+    // Labels: done added, wip removed
+    assert_label_added(&gh, "org/repo", 10, labels::DONE);
+    assert_label_removed(&gh, "org/repo", 10, labels::WIP);
 
-    // 로그 2건 기록
+    // Claude called 3 times (analysis + implementation + knowledge extraction)
+    assert_eq!(claude.call_count(), 3);
+
+    // 2 consumer logs recorded (knowledge extraction doesn't create a consumer log)
     let logs = db.log_recent(None, 100).unwrap();
     assert_eq!(
         logs.len(),
@@ -177,7 +236,10 @@ async fn issue_full_cycle_pending_to_done() {
 }
 
 // ═══════════════════════════════════════════════════
-// 2. Issue failed → retry → 재진입 사이클
+// 2. Issue failed -> re-discovery -> success cycle
+//    In the new architecture, there is no DB retry.
+//    When an issue fails, wip is removed. On next scan,
+//    it would be re-discovered and re-queued.
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -186,7 +248,6 @@ async fn issue_failed_retry_reentry_cycle() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    let issue_id = insert_pending_issue(&db, &repo_id, 20, "Retry cycle issue");
 
     let gh = MockGh::new();
     set_gh_issue_open(&gh, "org/repo", 20);
@@ -194,61 +255,64 @@ async fn issue_failed_retry_reentry_cycle() {
     let git = MockGit::new();
     let claude = MockClaude::new();
 
-    // 1차 시도: Claude 실패
+    // 1st attempt: Claude fails (exit_code 1)
     claude.enqueue_response("analysis error", 1);
-    // 2차 시도 (retry 후): Claude 성공
+    // 2nd attempt (after re-queue): Claude succeeds
     claude.enqueue_response(&make_analysis_json("implement", 0.85), 0);
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
 
-    // 1차 시도 → failed
+    // Push issue to Pending
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 20, "Retry cycle issue"),
+    );
+
+    // 1st attempt -> fails, item removed from queue, wip removed
     autodev::pipeline::issue::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .unwrap();
 
-    let list = db.issue_list("org/repo", 100).unwrap();
     assert_eq!(
-        list[0].status, "failed",
-        "should be failed after 1st attempt"
+        queues.issues.total(),
+        0,
+        "issue should be gone from queue after failure"
+    );
+    assert_label_removed(&gh, "org/repo", 20, labels::WIP);
+
+    // Simulate re-discovery: push same issue again (as scanner would)
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 20, "Retry cycle issue"),
     );
 
-    // retry → pending으로 복구
-    let retried = db.queue_retry(&issue_id).unwrap();
-    assert!(retried, "queue_retry should return true for failed item");
-
-    let pending = db.issue_find_pending(100).unwrap();
-    assert_eq!(
-        pending.len(),
-        1,
-        "issue should be back to pending after retry"
-    );
-
-    // 2차 시도 → ready
+    // 2nd attempt -> succeeds -> Ready
     autodev::pipeline::issue::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .unwrap();
 
-    let ready = db.issue_find_ready(100).unwrap();
     assert_eq!(
-        ready.len(),
+        queues.issues.len(issue_phase::READY),
         1,
-        "issue should be in ready state after successful retry"
+        "issue should be in Ready queue after successful retry"
     );
 
     assert_eq!(
@@ -259,7 +323,7 @@ async fn issue_failed_retry_reentry_cycle() {
 }
 
 // ═══════════════════════════════════════════════════
-// 3. PR pre-flight: closed PR → skip to done
+// 3. PR pre-flight: closed PR -> skip to done
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -268,7 +332,6 @@ async fn pr_closed_on_github_skips_to_done() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_pr(&db, &repo_id, 30, "Already closed PR");
 
     let gh = MockGh::new();
     // PR is closed
@@ -279,14 +342,35 @@ async fn pr_closed_on_github_skips_to_done() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
 
-    autodev::pipeline::pr::process_pending(&db, &env, &workspace, &notifier, &claude, &mut active)
-        .await
-        .unwrap();
+    queues
+        .prs
+        .push("Pending", make_pr_item(&repo_id, 30, "Already closed PR"));
 
-    let list = db.pr_list("org/repo", 100).unwrap();
-    assert_eq!(list[0].status, "done", "closed PR should skip to done");
+    autodev::pipeline::pr::process_pending(
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
+    )
+    .await
+    .unwrap();
+
+    // Item removed from queue
+    assert_eq!(
+        queues.prs.total(),
+        0,
+        "closed PR should be removed from queue"
+    );
+
+    // Labels: done added, wip removed
+    assert_label_added(&gh, "org/repo", 30, labels::DONE);
+    assert_label_removed(&gh, "org/repo", 30, labels::WIP);
+
     assert_eq!(
         claude.call_count(),
         0,
@@ -295,7 +379,7 @@ async fn pr_closed_on_github_skips_to_done() {
 }
 
 // ═══════════════════════════════════════════════════
-// 4. PR pre-flight: already approved → skip to done
+// 4. PR pre-flight: already approved -> skip to done
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -304,7 +388,6 @@ async fn pr_already_approved_skips_to_done() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_pr(&db, &repo_id, 31, "Already approved PR");
 
     let gh = MockGh::new();
     // PR is open but already approved
@@ -321,14 +404,35 @@ async fn pr_already_approved_skips_to_done() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
 
-    autodev::pipeline::pr::process_pending(&db, &env, &workspace, &notifier, &claude, &mut active)
-        .await
-        .unwrap();
+    queues
+        .prs
+        .push("Pending", make_pr_item(&repo_id, 31, "Already approved PR"));
 
-    let list = db.pr_list("org/repo", 100).unwrap();
-    assert_eq!(list[0].status, "done", "approved PR should skip to done");
+    autodev::pipeline::pr::process_pending(
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
+    )
+    .await
+    .unwrap();
+
+    // Item removed from queue
+    assert_eq!(
+        queues.prs.total(),
+        0,
+        "approved PR should be removed from queue"
+    );
+
+    // Labels: done added, wip removed
+    assert_label_added(&gh, "org/repo", 31, labels::DONE);
+    assert_label_removed(&gh, "org/repo", 31, labels::WIP);
+
     assert_eq!(
         claude.call_count(),
         0,
@@ -337,7 +441,7 @@ async fn pr_already_approved_skips_to_done() {
 }
 
 // ═══════════════════════════════════════════════════
-// 5. Merge 성공 사이클: pending → merging → done
+// 5. Merge success cycle: pending -> merging -> done
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -346,38 +450,51 @@ async fn merge_success_cycle() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_merge(&db, &repo_id, 40, "Merge PR #40");
 
     let gh = MockGh::new();
     set_gh_pr_open(&gh, "org/repo", 40);
 
     let git = MockGit::new();
     let claude = MockClaude::new();
-    // merge 성공 (exit_code 0)
+    // merge success (exit_code 0)
     claude.enqueue_response("Merged successfully", 0);
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
+
+    queues
+        .merges
+        .push("Pending", make_merge_item(&repo_id, 40, "Merge PR #40"));
 
     autodev::pipeline::merge::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .unwrap();
 
-    let list = db.merge_list("org/repo", 100).unwrap();
-    assert_eq!(list[0].status, "done", "merge should complete successfully");
+    // Item removed from queue
+    assert_eq!(
+        queues.merges.total(),
+        0,
+        "merge should be removed from queue after done"
+    );
+
+    // Labels: done added, wip removed
+    assert_label_added(&gh, "org/repo", 40, labels::DONE);
+    assert_label_removed(&gh, "org/repo", 40, labels::WIP);
+
     assert_eq!(claude.call_count(), 1);
 }
 
 // ═══════════════════════════════════════════════════
-// 6. Merge conflict → resolve 성공 사이클
+// 6. Merge conflict -> resolve success
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -386,38 +503,49 @@ async fn merge_conflict_then_resolve_success() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_merge(&db, &repo_id, 41, "Merge PR #41 with conflict");
 
     let gh = MockGh::new();
     set_gh_pr_open(&gh, "org/repo", 41);
 
     let git = MockGit::new();
     let claude = MockClaude::new();
-    // 1st call: merge attempt → conflict (exit_code 1 + "conflict" in output)
+    // 1st call: merge attempt -> conflict (exit_code 1 + "conflict" in output)
     claude.enqueue_response("CONFLICT (content): merge conflict in src/main.rs", 1);
-    // 2nd call: resolve_conflicts → success
+    // 2nd call: resolve_conflicts -> success
     claude.enqueue_response("Conflicts resolved and committed", 0);
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
+
+    queues.merges.push(
+        "Pending",
+        make_merge_item(&repo_id, 41, "Merge PR #41 with conflict"),
+    );
 
     autodev::pipeline::merge::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .unwrap();
 
-    let list = db.merge_list("org/repo", 100).unwrap();
+    // Item removed from queue (done after conflict resolution)
     assert_eq!(
-        list[0].status, "done",
-        "merge should complete after conflict resolution"
+        queues.merges.total(),
+        0,
+        "merge should be removed from queue after conflict resolution"
     );
+
+    // Labels: done added, wip removed
+    assert_label_added(&gh, "org/repo", 41, labels::DONE);
+    assert_label_removed(&gh, "org/repo", 41, labels::WIP);
+
     assert_eq!(
         claude.call_count(),
         2,
@@ -426,7 +554,7 @@ async fn merge_conflict_then_resolve_success() {
 }
 
 // ═══════════════════════════════════════════════════
-// 7. Merge conflict → resolve 실패 사이클
+// 7. Merge conflict -> resolve failure
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -435,43 +563,54 @@ async fn merge_conflict_then_resolve_failure() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_merge(&db, &repo_id, 42, "Merge PR #42 unresolvable conflict");
 
     let gh = MockGh::new();
     set_gh_pr_open(&gh, "org/repo", 42);
 
     let git = MockGit::new();
     let claude = MockClaude::new();
-    // 1st call: merge → conflict
+    // 1st call: merge -> conflict
     claude.enqueue_response("CONFLICT (content): merge conflict in complex.rs", 1);
-    // 2nd call: resolve → failure (exit_code 1, no "conflict" keyword → Failed)
+    // 2nd call: resolve -> failure (exit_code 1, no "conflict" keyword -> Failed)
     claude.enqueue_response("Failed to resolve", 1);
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
+
+    queues.merges.push(
+        "Pending",
+        make_merge_item(&repo_id, 42, "Merge PR #42 unresolvable conflict"),
+    );
 
     autodev::pipeline::merge::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .unwrap();
 
-    let list = db.merge_list("org/repo", 100).unwrap();
+    // Item removed from queue (failed)
     assert_eq!(
-        list[0].status, "failed",
-        "should fail when conflict resolution fails"
+        queues.merges.total(),
+        0,
+        "merge should be removed from queue after resolve failure"
     );
+
+    // wip removed but NO done label (it failed)
+    assert_label_removed(&gh, "org/repo", 42, labels::WIP);
+    assert_label_not_added(&gh, "org/repo", 42, labels::DONE);
+
     assert_eq!(claude.call_count(), 2);
 }
 
 // ═══════════════════════════════════════════════════
-// 8. Merge pre-flight: already merged → skip
+// 8. Merge pre-flight: already merged -> skip to done
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -480,7 +619,6 @@ async fn merge_already_merged_skips_to_done() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_merge(&db, &repo_id, 43, "Already merged PR");
 
     let gh = MockGh::new();
     // PR is already closed/merged
@@ -491,31 +629,43 @@ async fn merge_already_merged_skips_to_done() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
+
+    queues.merges.push(
+        "Pending",
+        make_merge_item(&repo_id, 43, "Already merged PR"),
+    );
 
     autodev::pipeline::merge::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .unwrap();
 
-    let list = db.merge_list("org/repo", 100).unwrap();
+    // Item removed from queue
     assert_eq!(
-        list[0].status, "done",
-        "already merged PR should skip to done"
+        queues.merges.total(),
+        0,
+        "already merged PR should be removed from queue"
     );
+
+    // Labels: done added, wip removed
+    assert_label_added(&gh, "org/repo", 43, labels::DONE);
+    assert_label_removed(&gh, "org/repo", 43, labels::WIP);
+
     assert_eq!(claude.call_count(), 0, "claude should not be called");
 }
 
 // ═══════════════════════════════════════════════════
-// 9. Confidence 경계값: 정확히 0.7 (threshold) → ready
-//    코드: a.confidence < cfg.consumer.confidence_threshold
-//    0.7 < 0.7 은 false → 'implement' 매치 → ready
+// 9. Confidence at threshold (0.7) -> ready
+//    Code: a.confidence < cfg.consumer.confidence_threshold
+//    0.7 < 0.7 is false -> 'implement' match -> ready
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -524,7 +674,6 @@ async fn confidence_at_threshold_goes_to_ready() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_issue(&db, &repo_id, 50, "Boundary confidence issue");
 
     let gh = MockGh::new();
     set_gh_issue_open(&gh, "org/repo", 50);
@@ -536,24 +685,33 @@ async fn confidence_at_threshold_goes_to_ready() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
+
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 50, "Boundary confidence issue"),
+    );
 
     autodev::pipeline::issue::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .unwrap();
 
-    // 0.7 NOT < 0.7 → ready (not waiting_human)
-    let ready = db.issue_find_ready(100).unwrap();
-    assert_eq!(ready.len(), 1, "confidence == threshold should go to ready");
+    // 0.7 NOT < 0.7 -> ready (not waiting_human)
+    assert_eq!(
+        queues.issues.len(issue_phase::READY),
+        1,
+        "confidence == threshold should go to ready"
+    );
 
-    // 댓글 없어야 함 (waiting_human이면 댓글이 게시됨)
+    // No clarification comment should be posted
     let comments = gh.posted_comments.lock().unwrap();
     assert_eq!(
         comments.len(),
@@ -563,7 +721,7 @@ async fn confidence_at_threshold_goes_to_ready() {
 }
 
 // ═══════════════════════════════════════════════════
-// 10. Confidence 경계값: 0.69 (threshold 미만) → waiting_human
+// 10. Confidence just below threshold (0.69) -> waiting (skip label + comment)
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -572,7 +730,6 @@ async fn confidence_just_below_threshold_goes_to_waiting() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_issue(&db, &repo_id, 51, "Below threshold issue");
 
     let gh = MockGh::new();
     set_gh_issue_open(&gh, "org/repo", 51);
@@ -584,33 +741,43 @@ async fn confidence_just_below_threshold_goes_to_waiting() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
+
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 51, "Below threshold issue"),
+    );
 
     autodev::pipeline::issue::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .unwrap();
 
-    // 0.69 < 0.7 → waiting_human
-    let list = db.issue_list("org/repo", 100).unwrap();
+    // 0.69 < 0.7 -> waiting_human: item removed from queue, skip label added, comment posted
     assert_eq!(
-        list[0].status, "waiting_human",
-        "confidence below threshold should wait"
+        queues.issues.total(),
+        0,
+        "issue should be removed from queue when confidence below threshold"
     );
 
-    // clarification 댓글 게시
+    // skip label added, wip removed
+    assert_label_added(&gh, "org/repo", 51, labels::SKIP);
+    assert_label_removed(&gh, "org/repo", 51, labels::WIP);
+
+    // clarification comment posted
     let comments = gh.posted_comments.lock().unwrap();
     assert_eq!(comments.len(), 1, "should post clarification comment");
 }
 
 // ═══════════════════════════════════════════════════
-// 11. Analysis JSON에 confidence 필드 누락 → parse 실패 → fallback ready
+// 11. Analysis JSON missing confidence field -> fallback
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -619,14 +786,13 @@ async fn analysis_missing_confidence_field_falls_back_to_ready() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_issue(&db, &repo_id, 52, "Missing confidence field");
 
     let gh = MockGh::new();
     set_gh_issue_open(&gh, "org/repo", 52);
 
     let git = MockGit::new();
     let claude = MockClaude::new();
-    // JSON without confidence field → parse_analysis may return None → fallback ready
+    // JSON without confidence field -> parse_analysis may return None -> fallback ready
     let bad_json = serde_json::json!({
         "result": r#"{"verdict":"implement","summary":"test","questions":[],"report":"report"}"#
     });
@@ -634,32 +800,40 @@ async fn analysis_missing_confidence_field_falls_back_to_ready() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
+
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 52, "Missing confidence field"),
+    );
 
     autodev::pipeline::issue::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .unwrap();
 
-    // confidence 누락 시 기본값 0.0이면 → waiting_human
-    // 또는 parse_analysis returns None → fallback ready
-    // 어느 쪽이든 pipeline은 중단되지 않음
-    let list = db.issue_list("org/repo", 100).unwrap();
+    // When confidence is missing, parse_analysis may either:
+    //   - return Some with confidence=0.0 -> skip label (waiting_human)
+    //   - return None -> fallback ready
+    // Either way, pipeline should not crash
+    let in_ready = queues.issues.len(issue_phase::READY);
+    let total = queues.issues.total();
+
     assert!(
-        list[0].status == "ready" || list[0].status == "waiting_human",
-        "missing confidence should either fallback to ready or go to waiting_human, got: {}",
-        list[0].status
+        in_ready == 1 || total == 0,
+        "missing confidence should either fallback to ready (ready=1) or go to skip (total=0), got ready={in_ready}, total={total}"
     );
 }
 
 // ═══════════════════════════════════════════════════
-// 12. Analysis JSON이 완전히 깨진 형태 (빈 문자열) → fallback ready
+// 12. Completely malformed JSON -> fallback ready
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -668,42 +842,46 @@ async fn analysis_completely_malformed_json_falls_back_to_ready() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_issue(&db, &repo_id, 53, "Malformed JSON issue");
 
     let gh = MockGh::new();
     set_gh_issue_open(&gh, "org/repo", 53);
 
     let git = MockGit::new();
     let claude = MockClaude::new();
-    // 완전히 잘못된 출력 (JSON 아님)
+    // Completely malformed output (not JSON)
     claude.enqueue_response("I cannot parse this {{{garbage", 0);
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
+
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 53, "Malformed JSON issue"),
+    );
 
     autodev::pipeline::issue::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .unwrap();
 
-    // parse_analysis returns None → fallback ready
-    let ready = db.issue_find_ready(100).unwrap();
+    // parse_analysis returns None -> fallback ready
     assert_eq!(
-        ready.len(),
+        queues.issues.len(issue_phase::READY),
         1,
         "completely malformed output should fallback to ready"
     );
 }
 
 // ═══════════════════════════════════════════════════
-// 13. Workspace clone 실패 → issue failed
+// 13. Workspace clone failure -> issue failed
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -712,7 +890,6 @@ async fn workspace_clone_failure_marks_issue_failed() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_issue(&db, &repo_id, 60, "Clone will fail");
 
     let gh = MockGh::new();
     set_gh_issue_open(&gh, "org/repo", 60);
@@ -724,24 +901,35 @@ async fn workspace_clone_failure_marks_issue_failed() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
+
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 60, "Clone will fail"),
+    );
 
     autodev::pipeline::issue::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .unwrap();
 
-    let list = db.issue_list("org/repo", 100).unwrap();
+    // Item removed from queue (failed)
     assert_eq!(
-        list[0].status, "failed",
-        "clone failure should mark issue as failed"
+        queues.issues.total(),
+        0,
+        "clone failure should remove issue from queue"
     );
+
+    // wip removed
+    assert_label_removed(&gh, "org/repo", 60, labels::WIP);
+
     assert_eq!(
         claude.call_count(),
         0,
@@ -750,7 +938,7 @@ async fn workspace_clone_failure_marks_issue_failed() {
 }
 
 // ═══════════════════════════════════════════════════
-// 14. Workspace worktree 실패 → issue failed
+// 14. Workspace worktree failure -> issue failed
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -759,7 +947,6 @@ async fn workspace_worktree_failure_marks_issue_failed() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_issue(&db, &repo_id, 61, "Worktree will fail");
 
     let gh = MockGh::new();
     set_gh_issue_open(&gh, "org/repo", 61);
@@ -771,24 +958,35 @@ async fn workspace_worktree_failure_marks_issue_failed() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
+
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 61, "Worktree will fail"),
+    );
 
     autodev::pipeline::issue::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .unwrap();
 
-    let list = db.issue_list("org/repo", 100).unwrap();
+    // Item removed from queue (failed)
     assert_eq!(
-        list[0].status, "failed",
-        "worktree failure should mark issue as failed"
+        queues.issues.total(),
+        0,
+        "worktree failure should remove issue from queue"
     );
+
+    // wip removed
+    assert_label_removed(&gh, "org/repo", 61, labels::WIP);
+
     assert_eq!(
         claude.call_count(),
         0,
@@ -797,7 +995,7 @@ async fn workspace_worktree_failure_marks_issue_failed() {
 }
 
 // ═══════════════════════════════════════════════════
-// 15. Workspace clone 실패 → PR failed
+// 15. Workspace clone failure -> PR failed
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -806,7 +1004,6 @@ async fn workspace_clone_failure_marks_pr_failed() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_pr(&db, &repo_id, 70, "Clone will fail for PR");
 
     let gh = MockGh::new();
     set_gh_pr_open(&gh, "org/repo", 70);
@@ -818,22 +1015,40 @@ async fn workspace_clone_failure_marks_pr_failed() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
 
-    autodev::pipeline::pr::process_pending(&db, &env, &workspace, &notifier, &claude, &mut active)
-        .await
-        .unwrap();
-
-    let list = db.pr_list("org/repo", 100).unwrap();
-    assert_eq!(
-        list[0].status, "failed",
-        "clone failure should mark PR as failed"
+    queues.prs.push(
+        "Pending",
+        make_pr_item(&repo_id, 70, "Clone will fail for PR"),
     );
+
+    autodev::pipeline::pr::process_pending(
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
+    )
+    .await
+    .unwrap();
+
+    // Item removed from queue (failed)
+    assert_eq!(
+        queues.prs.total(),
+        0,
+        "clone failure should remove PR from queue"
+    );
+
+    // wip removed
+    assert_label_removed(&gh, "org/repo", 70, labels::WIP);
+
     assert_eq!(claude.call_count(), 0);
 }
 
 // ═══════════════════════════════════════════════════
-// 16. Workspace clone 실패 → merge failed
+// 16. Workspace clone failure -> merge failed
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -842,7 +1057,6 @@ async fn workspace_clone_failure_marks_merge_failed() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_merge(&db, &repo_id, 80, "Clone will fail for merge");
 
     let gh = MockGh::new();
     set_gh_pr_open(&gh, "org/repo", 80);
@@ -854,37 +1068,41 @@ async fn workspace_clone_failure_marks_merge_failed() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
+
+    queues.merges.push(
+        "Pending",
+        make_merge_item(&repo_id, 80, "Clone will fail for merge"),
+    );
 
     autodev::pipeline::merge::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .unwrap();
 
-    let list = db.merge_list("org/repo", 100).unwrap();
+    // Item removed from queue (failed)
     assert_eq!(
-        list[0].status, "failed",
-        "clone failure should mark merge as failed"
+        queues.merges.total(),
+        0,
+        "clone failure should remove merge from queue"
     );
+
+    // wip removed
+    assert_label_removed(&gh, "org/repo", 80, labels::WIP);
+
     assert_eq!(claude.call_count(), 0);
 }
 
 // ═══════════════════════════════════════════════════
-// 17. Scanner: autodev 라벨 필터링 — "autodev" 라벨 include filter
+// 17. Scanner: autodev label filtering - "autodev" label include filter
 // ═══════════════════════════════════════════════════
-
-fn fixture_response(name: &str) -> Vec<u8> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/responses")
-        .join(name);
-    std::fs::read(path).expect("read fixture file")
-}
 
 #[tokio::test]
 async fn scanner_filters_by_autodev_label() {
@@ -898,52 +1116,53 @@ async fn scanner_filters_by_autodev_label() {
         fixture_response("issues_with_autodev_labels.json"),
     );
 
-    // "autodev" 라벨이 있는 이슈만 스캔
-    let labels = Some(vec!["autodev".to_string()]);
-    let mut active = autodev::active::ActiveItems::new();
+    // Scan with "autodev" label filter
+    let filter_labels = Some(vec!["autodev".to_string()]);
+    let mut queues = TaskQueues::new();
 
     autodev::scanner::issues::scan(
         &db,
         &gh,
         &repo_id,
         "org/repo",
+        "https://github.com/org/repo",
         &[],
-        &labels,
+        &filter_labels,
         None,
-        &mut active,
+        &mut queues,
     )
     .await
     .unwrap();
 
-    // #60: labels=["bug","autodev"] → 포함
+    // #60: labels=["bug","autodev"] -> "autodev" matches filter, no "autodev:" prefix -> queued
     assert!(
-        db.issue_exists(&repo_id, 60).unwrap(),
+        queues.contains("issue:org/repo:60"),
         "issue #60 with 'autodev' label should be queued"
     );
-    // #61: labels=["bug","autodev:wip"] → "autodev" 정확히 일치하지 않으므로 제외
+    // #61: labels=["bug","autodev:wip"] -> has "autodev:" prefix -> skipped by has_autodev_label
     assert!(
-        !db.issue_exists(&repo_id, 61).unwrap(),
+        !queues.contains("issue:org/repo:61"),
         "issue #61 with 'autodev:wip' should NOT match 'autodev'"
     );
-    // #62: labels=["enhancement","autodev:done"] → 제외
+    // #62: labels=["enhancement","autodev:done"] -> skipped
     assert!(
-        !db.issue_exists(&repo_id, 62).unwrap(),
+        !queues.contains("issue:org/repo:62"),
         "issue #62 with 'autodev:done' should NOT match 'autodev'"
     );
-    // #63: labels=["wontfix","autodev:skip"] → 제외
+    // #63: labels=["wontfix","autodev:skip"] -> skipped
     assert!(
-        !db.issue_exists(&repo_id, 63).unwrap(),
+        !queues.contains("issue:org/repo:63"),
         "issue #63 with 'autodev:skip' should NOT match 'autodev'"
     );
-    // #64: labels=["enhancement"] → 제외
+    // #64: labels=["enhancement"] -> no autodev label -> filter doesn't match
     assert!(
-        !db.issue_exists(&repo_id, 64).unwrap(),
+        !queues.contains("issue:org/repo:64"),
         "issue #64 without autodev label should NOT be queued"
     );
 }
 
 // ═══════════════════════════════════════════════════
-// 18. Scanner: autodev:wip 라벨 필터로 wip 이슈만 스캔
+// 18. Scanner: autodev:wip label filter - only wip issues
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -958,39 +1177,41 @@ async fn scanner_filters_autodev_wip_label_only() {
         fixture_response("issues_with_autodev_labels.json"),
     );
 
-    // "autodev:wip" 라벨만 스캔
-    let labels = Some(vec!["autodev:wip".to_string()]);
-    let mut active = autodev::active::ActiveItems::new();
+    // Scan with "autodev:wip" label filter
+    let filter_labels = Some(vec!["autodev:wip".to_string()]);
+    let mut queues = TaskQueues::new();
 
     autodev::scanner::issues::scan(
         &db,
         &gh,
         &repo_id,
         "org/repo",
+        "https://github.com/org/repo",
         &[],
-        &labels,
+        &filter_labels,
         None,
-        &mut active,
+        &mut queues,
     )
     .await
     .unwrap();
 
-    // #61만 포함 (autodev:wip 라벨)
+    // Only #61 should match (autodev:wip label)
+    // But #61 has "autodev:wip" which starts with "autodev:" -> has_autodev_label returns true -> skipped
     assert!(
-        !db.issue_exists(&repo_id, 60).unwrap(),
+        !queues.contains("issue:org/repo:60"),
         "issue #60 should not match autodev:wip"
     );
     assert!(
-        db.issue_exists(&repo_id, 61).unwrap(),
-        "issue #61 with autodev:wip should be queued"
+        !queues.contains("issue:org/repo:61"),
+        "issue #61 with autodev:wip should be skipped by has_autodev_label check"
     );
-    assert!(!db.issue_exists(&repo_id, 62).unwrap());
-    assert!(!db.issue_exists(&repo_id, 63).unwrap());
-    assert!(!db.issue_exists(&repo_id, 64).unwrap());
+    assert!(!queues.contains("issue:org/repo:62"));
+    assert!(!queues.contains("issue:org/repo:63"));
+    assert!(!queues.contains("issue:org/repo:64"));
 }
 
 // ═══════════════════════════════════════════════════
-// 19. Merge 실패 (충돌 아닌 실패) → failed
+// 19. Merge non-conflict failure -> failed
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -999,36 +1220,47 @@ async fn merge_non_conflict_failure_marks_failed() {
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_merge(&db, &repo_id, 44, "Merge will fail non-conflict");
 
     let gh = MockGh::new();
     set_gh_pr_open(&gh, "org/repo", 44);
 
     let git = MockGit::new();
     let claude = MockClaude::new();
-    // merge fails with exit_code 1 but no "conflict" keyword → MergeOutcome::Failed
+    // merge fails with exit_code 1 but no "conflict" keyword -> MergeOutcome::Failed
     claude.enqueue_response("Permission denied: cannot push to protected branch", 1);
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
+
+    queues.merges.push(
+        "Pending",
+        make_merge_item(&repo_id, 44, "Merge will fail non-conflict"),
+    );
 
     autodev::pipeline::merge::process_pending(
         &db,
         &env,
         &workspace,
         &notifier,
+        &gh,
         &claude,
-        &mut active,
+        &mut queues,
     )
     .await
     .unwrap();
 
-    let list = db.merge_list("org/repo", 100).unwrap();
+    // Item removed from queue (failed)
     assert_eq!(
-        list[0].status, "failed",
-        "non-conflict failure should mark as failed"
+        queues.merges.total(),
+        0,
+        "non-conflict failure should remove merge from queue"
     );
+
+    // wip removed, no done label
+    assert_label_removed(&gh, "org/repo", 44, labels::WIP);
+    assert_label_not_added(&gh, "org/repo", 44, labels::DONE);
+
     // resolve_conflicts should NOT be called
     assert_eq!(
         claude.call_count(),
@@ -1038,7 +1270,7 @@ async fn merge_non_conflict_failure_marks_failed() {
 }
 
 // ═══════════════════════════════════════════════════
-// 20. process_all 전체 통합: issue + PR + merge 동시 처리
+// 20. process_all: issue + PR + merge all processed
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
@@ -1048,10 +1280,6 @@ async fn process_all_handles_all_queues() {
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
-    insert_pending_issue(&db, &repo_id, 90, "Issue for process_all");
-    insert_pending_pr(&db, &repo_id, 91, "PR for process_all");
-    insert_pending_merge(&db, &repo_id, 92, "Merge for process_all");
-
     let gh = MockGh::new();
     set_gh_issue_open(&gh, "org/repo", 90);
     set_gh_pr_open(&gh, "org/repo", 91);
@@ -1059,36 +1287,70 @@ async fn process_all_handles_all_queues() {
 
     let git = MockGit::new();
     let claude = MockClaude::new();
-    // Issue analysis → ready
+    // 1. Issue analysis -> ready (issue::process_pending)
     claude.enqueue_response(&make_analysis_json("implement", 0.9), 0);
-    // Issue ready doesn't get processed in same cycle if just became ready
-    // (process_all calls process_pending then process_ready, but process_ready
-    //  will find the item that just moved to ready)
+    // 2. Issue implementation -> done (issue::process_ready)
     claude.enqueue_response(r#"{"result": "Implementation done"}"#, 0);
-    // PR review
+    // 3. Issue knowledge extraction (best effort, after issue done)
+    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
+    // 4. PR review -> ReviewDone (pr::process_pending)
     claude.enqueue_response(r#"{"result": "LGTM"}"#, 0);
-    // Merge
+    // 5. PR feedback implementation -> Improved (pr::process_review_done)
+    claude.enqueue_response(r#"{"result": "Feedback applied"}"#, 0);
+    // 6. PR re-review -> done/approved (pr::process_improved)
+    claude.enqueue_response(r#"{"result": "Approved"}"#, 0);
+    // 7. PR knowledge extraction (best effort, after PR done)
+    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
+    // 8. Merge -> success (merge::process_pending)
     claude.enqueue_response("Merged successfully", 0);
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
+    let mut queues = TaskQueues::new();
 
-    autodev::pipeline::process_all(&db, &env, &workspace, &notifier, &claude, &mut active)
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 90, "Issue for process_all"),
+    );
+    queues
+        .prs
+        .push("Pending", make_pr_item(&repo_id, 91, "PR for process_all"));
+    queues.merges.push(
+        "Pending",
+        make_merge_item(&repo_id, 92, "Merge for process_all"),
+    );
+
+    autodev::pipeline::process_all(&db, &env, &workspace, &notifier, &gh, &claude, &mut queues)
         .await
         .expect("process_all should succeed");
 
-    // Issue: pending → ready → done (2 phases in same process_all)
-    let issue_list = db.issue_list("org/repo", 100).unwrap();
-    assert_eq!(issue_list[0].status, "done", "issue should be done");
+    // Issue: pending -> ready -> done (both phases in same process_all)
+    assert_eq!(
+        queues.issues.total(),
+        0,
+        "issue should be done and removed from queue"
+    );
+    assert_label_added(&gh, "org/repo", 90, labels::DONE);
 
-    // PR: pending → review_done
-    let pr_list = db.pr_list("org/repo", 100).unwrap();
-    assert_eq!(pr_list[0].status, "review_done", "pr should be review_done");
+    // PR: pending -> ReviewDone -> Improved -> done (full cycle in same process_all)
+    assert_eq!(
+        queues.prs.total(),
+        0,
+        "pr should be done and removed from queue"
+    );
+    assert_label_added(&gh, "org/repo", 91, labels::DONE);
 
-    // Merge: pending → done
-    let merge_list = db.merge_list("org/repo", 100).unwrap();
-    assert_eq!(merge_list[0].status, "done", "merge should be done");
+    // Merge: pending -> done (removed from queue)
+    assert_eq!(
+        queues.merges.total(),
+        0,
+        "merge should be done and removed from queue"
+    );
+    assert_label_added(&gh, "org/repo", 92, labels::DONE);
 
-    assert_eq!(claude.call_count(), 4, "should call claude 4 times total");
+    assert_eq!(
+        claude.call_count(),
+        8,
+        "should call claude 8 times total (6 pipeline + 2 knowledge extraction)"
+    );
 }

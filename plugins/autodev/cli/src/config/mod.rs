@@ -30,3 +30,9 @@ pub fn autodev_home(env: &dyn Env) -> PathBuf {
 pub fn workspaces_path(env: &dyn Env) -> PathBuf {
     autodev_home(env).join("workspaces")
 }
+
+/// 레포 이름을 파일시스템 안전한 디렉토리명으로 변환
+/// 예: "org/repo" → "org-repo"
+pub fn sanitize_repo_name(name: &str) -> String {
+    name.replace('/', "-")
+}

@@ -18,10 +18,21 @@ pub fn read_pid(home: &Path) -> Option<u32> {
 
 pub fn is_running(home: &Path) -> bool {
     if let Some(pid) = read_pid(home) {
-        // /proc/<pid> 존재 여부로 프로세스 생존 확인
-        Path::new(&format!("/proc/{pid}")).exists()
+        process_exists(pid)
     } else {
         false
+    }
+}
+
+/// Cross-platform process existence check
+fn process_exists(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        Path::new(&format!("/proc/{pid}")).exists()
     }
 }
 

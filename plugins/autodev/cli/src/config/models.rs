@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 /// .develop-workflow.yaml의 전체 스키마
 /// 글로벌(~/) + 레포별 오버라이드를 딥머지하여 최종 설정 생성
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct WorkflowConfig {
     pub consumer: ConsumerConfig,
     pub workflow: WorkflowRouting,
@@ -27,6 +27,8 @@ pub struct ConsumerConfig {
     pub ignore_authors: Vec<String>,
     pub gh_host: Option<String>,
     pub confidence_threshold: f64,
+    pub daily_report_hour: u32,
+    pub knowledge_extraction: bool,
 }
 
 impl Default for ConsumerConfig {
@@ -44,6 +46,8 @@ impl Default for ConsumerConfig {
             ignore_authors: vec!["dependabot".into(), "renovate".into()],
             gh_host: None,
             confidence_threshold: 0.7,
+            daily_report_hour: 6,
+            knowledge_extraction: true,
         }
     }
 }

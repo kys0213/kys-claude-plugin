@@ -6,6 +6,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::queue::repository::RepoRepository;
 use crate::queue::Database;
 
 // ─── Panel enum ───
@@ -22,6 +23,7 @@ pub enum Panel {
 
 #[derive(Debug, Clone)]
 pub struct ActiveItem {
+    #[allow(dead_code)]
     pub id: String,
     pub queue_type: String, // "issue" | "pr" | "merge"
     pub repo_name: String,
@@ -66,8 +68,8 @@ pub enum LogLevel {
     Unknown,
 }
 
-impl AppState {
-    pub fn new() -> Self {
+impl Default for AppState {
+    fn default() -> Self {
         Self {
             active_panel: Panel::ActiveItems,
             selected_index: 0,
@@ -75,6 +77,12 @@ impl AppState {
             log_lines: Vec::new(),
             status_message: None,
         }
+    }
+}
+
+impl AppState {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn next_panel(&mut self) {
@@ -110,136 +118,15 @@ impl AppState {
 
 // ─── Data queries ───
 
-pub fn query_active_items(db: &Database) -> Vec<ActiveItem> {
-    let conn = db.conn();
-    let mut items = Vec::new();
-
-    // Issues (non-terminal statuses)
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT iq.id, r.name, iq.github_number, iq.title, iq.status \
-         FROM issue_queue iq JOIN repositories r ON iq.repo_id = r.id \
-         WHERE iq.status NOT IN ('done', 'failed') \
-         ORDER BY iq.updated_at DESC",
-    ) {
-        if let Ok(rows) = stmt.query_map([], |row| {
-            Ok(ActiveItem {
-                id: row.get(0)?,
-                queue_type: "issue".to_string(),
-                repo_name: row.get(1)?,
-                number: row.get(2)?,
-                title: row.get(3)?,
-                status: row.get(4)?,
-            })
-        }) {
-            for row in rows.flatten() {
-                items.push(row);
-            }
-        }
-    }
-
-    // PRs
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT pq.id, r.name, pq.github_number, pq.title, pq.status \
-         FROM pr_queue pq JOIN repositories r ON pq.repo_id = r.id \
-         WHERE pq.status NOT IN ('done', 'failed') \
-         ORDER BY pq.updated_at DESC",
-    ) {
-        if let Ok(rows) = stmt.query_map([], |row| {
-            Ok(ActiveItem {
-                id: row.get(0)?,
-                queue_type: "pr".to_string(),
-                repo_name: row.get(1)?,
-                number: row.get(2)?,
-                title: row.get(3)?,
-                status: row.get(4)?,
-            })
-        }) {
-            for row in rows.flatten() {
-                items.push(row);
-            }
-        }
-    }
-
-    // Merges
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT mq.id, r.name, mq.pr_number, mq.title, mq.status \
-         FROM merge_queue mq JOIN repositories r ON mq.repo_id = r.id \
-         WHERE mq.status NOT IN ('done', 'failed') \
-         ORDER BY mq.updated_at DESC",
-    ) {
-        if let Ok(rows) = stmt.query_map([], |row| {
-            Ok(ActiveItem {
-                id: row.get(0)?,
-                queue_type: "merge".to_string(),
-                repo_name: row.get(1)?,
-                number: row.get(2)?,
-                title: row.get(3)?,
-                status: row.get(4)?,
-            })
-        }) {
-            for row in rows.flatten() {
-                items.push(row);
-            }
-        }
-    }
-
-    items
+pub fn query_active_items(_db: &Database) -> Vec<ActiveItem> {
+    // Active items are now tracked in daemon memory (TaskQueues).
+    // TUI will show them when daemon status file is implemented.
+    Vec::new()
 }
 
-pub fn query_label_counts(db: &Database) -> LabelCounts {
-    let conn = db.conn();
-    let mut counts = LabelCounts::default();
-
-    // WIP = analyzing + processing + ready + reviewing + review_done + merging + conflict + pending
-    let wip_statuses = "('pending','analyzing','processing','ready','reviewing','review_done','merging','conflict')";
-
-    for table in &["issue_queue", "pr_queue", "merge_queue"] {
-        let wip: i64 = conn
-            .query_row(
-                &format!("SELECT COUNT(*) FROM {table} WHERE status IN {wip_statuses}"),
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        counts.wip += wip;
-
-        let done: i64 = conn
-            .query_row(
-                &format!("SELECT COUNT(*) FROM {table} WHERE status = 'done'"),
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        counts.done += done;
-
-        let failed: i64 = conn
-            .query_row(
-                &format!("SELECT COUNT(*) FROM {table} WHERE status = 'failed'"),
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        counts.failed += failed;
-    }
-
-    // skip count from items marked with skip status (if present)
-    // autodev:skip is a GitHub label, not a DB status; we approximate via 'failed' items
-    // that were manually skipped. For now, skip = 0 as it's label-based.
-    counts.skip = 0;
-
-    counts
-}
-
-/// Get selected active item ID (for retry/skip actions)
-pub fn selected_active_item<'a>(
-    items: &'a [ActiveItem],
-    state: &AppState,
-) -> Option<&'a ActiveItem> {
-    if state.active_panel == Panel::ActiveItems && state.selected_index < items.len() {
-        Some(&items[state.selected_index])
-    } else {
-        None
-    }
+pub fn query_label_counts(_db: &Database) -> LabelCounts {
+    // Label counts are managed on GitHub, not in local DB.
+    LabelCounts::default()
 }
 
 // ─── Rendering ───
@@ -268,10 +155,7 @@ fn render_header(f: &mut Frame, area: Rect, db: &Database) {
         Span::styled("○ stopped", Style::default().fg(Color::Red))
     };
 
-    let repo_count: i64 = db
-        .conn()
-        .query_row("SELECT COUNT(*) FROM repositories", [], |row| row.get(0))
-        .unwrap_or(0);
+    let repo_count = db.repo_status_summary().map(|v| v.len()).unwrap_or(0);
 
     let header = Paragraph::new(Line::from(vec![
         Span::styled(
@@ -330,13 +214,9 @@ fn render_body(f: &mut Frame, area: Rect, db: &Database, state: &AppState) {
 }
 
 fn render_repos_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppState) {
-    let conn = db.conn();
-    let repos: Vec<(String, bool)> = conn
-        .prepare("SELECT name, enabled FROM repositories ORDER BY name")
-        .and_then(|mut stmt| {
-            stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-                .and_then(|rows| rows.collect())
-        })
+    let repos: Vec<(String, bool)> = db
+        .repo_status_summary()
+        .map(|rows| rows.into_iter().map(|r| (r.name, r.enabled)).collect())
         .unwrap_or_default();
 
     let items: Vec<ListItem> = repos
@@ -403,12 +283,7 @@ fn render_active_items_panel(f: &mut Frame, area: Rect, db: &Database, state: &A
                 _ => "?",
             };
 
-            let title_max = 30;
-            let title = if item.title.len() > title_max {
-                format!("{}…", &item.title[..title_max])
-            } else {
-                item.title.clone()
-            };
+            let title = truncate_str(&item.title, 30);
 
             ListItem::new(Line::from(vec![
                 Span::raw(format!("{prefix} ")),
@@ -446,6 +321,10 @@ fn render_active_items_panel(f: &mut Frame, area: Rect, db: &Database, state: &A
 
 fn render_labels_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppState) {
     let counts = query_label_counts(db);
+    let max_count = [counts.wip, counts.done, counts.skip, counts.failed]
+        .into_iter()
+        .max()
+        .unwrap_or(0);
 
     let items = vec![
         ListItem::new(Line::from(vec![
@@ -456,7 +335,7 @@ fn render_labels_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppStat
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
-            Span::raw(bar(counts.wip, 15)),
+            Span::raw(bar_scaled(counts.wip, max_count, 15)),
         ])),
         ListItem::new(Line::from(vec![
             Span::raw("  "),
@@ -466,7 +345,10 @@ fn render_labels_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppStat
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
-            Span::styled(bar(counts.done, 15), Style::default().fg(Color::Green)),
+            Span::styled(
+                bar_scaled(counts.done, max_count, 15),
+                Style::default().fg(Color::Green),
+            ),
         ])),
         ListItem::new(Line::from(vec![
             Span::raw("  "),
@@ -476,7 +358,10 @@ fn render_labels_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppStat
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
-            Span::styled(bar(counts.skip, 15), Style::default().fg(Color::Yellow)),
+            Span::styled(
+                bar_scaled(counts.skip, max_count, 15),
+                Style::default().fg(Color::Yellow),
+            ),
         ])),
         ListItem::new(Line::from(vec![
             Span::raw("  "),
@@ -486,7 +371,10 @@ fn render_labels_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppStat
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
-            Span::styled(bar(counts.failed, 15), Style::default().fg(Color::Red)),
+            Span::styled(
+                bar_scaled(counts.failed, max_count, 15),
+                Style::default().fg(Color::Red),
+            ),
         ])),
     ];
 
@@ -537,11 +425,7 @@ fn render_logs_panel(f: &mut Frame, area: Rect, state: &AppState) {
             };
 
             // Truncate long lines for display
-            let display = if line.raw.len() > 120 {
-                format!("{}…", &line.raw[..120])
-            } else {
-                line.raw.clone()
-            };
+            let display = truncate_str(&line.raw, 120);
 
             ListItem::new(format!("  {display}")).style(style)
         })
@@ -575,10 +459,24 @@ fn render_footer(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_widget(footer, area);
 }
 
-/// Generate a mini bar chart string
-fn bar(count: i64, max_width: usize) -> String {
-    let len = (count as usize).min(max_width);
+fn bar_scaled(count: i64, max_count: i64, max_width: usize) -> String {
+    let len = if max_count > 0 {
+        ((count as f64 / max_count as f64) * max_width as f64).ceil() as usize
+    } else {
+        0
+    };
+    let len = len.min(max_width);
     let filled = "█".repeat(len);
     let empty = "░".repeat(max_width.saturating_sub(len));
     format!("{filled}{empty}")
+}
+
+fn truncate_str(s: &str, max_chars: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count > max_chars {
+        let truncated: String = s.chars().take(max_chars).collect();
+        format!("{truncated}…")
+    } else {
+        s.to_string()
+    }
 }

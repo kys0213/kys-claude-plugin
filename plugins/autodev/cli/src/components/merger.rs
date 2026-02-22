@@ -40,7 +40,10 @@ impl<'a> Merger<'a> {
     /// `/git-utils:merge-pr {pr_number}` 커맨드로 머지를 시도하고
     /// 결과를 `MergeOutcome`으로 분류하여 반환한다.
     pub async fn merge_pr(&self, wt_path: &Path, pr_number: i64) -> MergeOutput {
-        let prompt = format!("/git-utils:merge-pr {}", pr_number);
+        let prompt = format!(
+            "[autodev] merge: PR #{}\n\n/git-utils:merge-pr {}",
+            pr_number, pr_number
+        );
 
         match self.claude.run_session(wt_path, &prompt, None).await {
             Ok(res) => {
@@ -73,7 +76,16 @@ impl<'a> Merger<'a> {
     /// 충돌 발생 후 Claude에게 해결을 요청한다.
     /// 성공 시 `MergeOutcome::Success`, 실패 시 `MergeOutcome::Failed` 반환.
     pub async fn resolve_conflicts(&self, wt_path: &Path, pr_number: i64) -> MergeOutput {
-        let prompt = format!("Resolve merge conflicts for PR #{}", pr_number);
+        let prompt = format!(
+            "[autodev] resolve: PR #{pr_number}\n\n\
+             Resolve all merge conflicts for PR #{pr_number}. \
+             Steps: 1) Run `git status` to find conflicting files. \
+             2) For each file with conflict markers (<<<<<<< / ======= / >>>>>>>), \
+             resolve by choosing the correct version or combining both changes. \
+             3) `git add` each resolved file. \
+             4) Run the project's tests to verify the resolution is correct. \
+             5) `git commit` the merge resolution."
+        );
 
         match self.claude.run_session(wt_path, &prompt, None).await {
             Ok(res) => {

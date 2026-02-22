@@ -30,29 +30,32 @@ pub fn status(db: &Database, env: &dyn Env) -> Result<String> {
     } else {
         for row in &rows {
             let icon = if row.enabled { "●" } else { "○" };
-            output.push_str(&format!(
-                "  {icon} {}  issues:{} prs:{} merges:{}\n",
-                row.name, row.issue_pending, row.pr_pending, row.merge_pending
-            ));
+            output.push_str(&format!("  {icon} {}\n", row.name));
         }
     }
 
     Ok(output)
 }
 
+/// URL에서 org/repo 이름 추출
+fn extract_repo_name(url: &str) -> Result<String> {
+    let trimmed = url.trim_end_matches('/').trim_end_matches(".git");
+    let parts: Vec<&str> = trimmed.split('/').collect();
+    if parts.len() < 2 {
+        anyhow::bail!("invalid repository URL: {url} (expected https://github.com/org/repo)");
+    }
+    let org = parts[parts.len() - 2];
+    let repo = parts[parts.len() - 1];
+    if org.is_empty() || repo.is_empty() {
+        anyhow::bail!("invalid repository URL: {url} (org or repo name is empty)");
+    }
+    Ok(format!("{org}/{repo}"))
+}
+
 /// 레포 등록
 pub fn repo_add(db: &Database, url: &str) -> Result<()> {
     // URL에서 이름 추출 (예: https://github.com/org/repo -> org/repo)
-    let name = url
-        .trim_end_matches('/')
-        .trim_end_matches(".git")
-        .rsplit('/')
-        .take(2)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join("/");
+    let name = extract_repo_name(url)?;
 
     db.repo_add(url, &name)?;
 
@@ -91,7 +94,7 @@ pub fn repo_config(env: &dyn Env, name: &str) -> Result<()> {
     }
 
     // 워크스페이스에서 레포별 설정 탐색
-    let ws = config::workspaces_path(env).join(name);
+    let ws = config::workspaces_path(env).join(config::sanitize_repo_name(name));
     let repo_config_path = ws.join(".develop-workflow.yaml");
     println!("\nRepo config: {}", repo_config_path.display());
 
@@ -118,61 +121,6 @@ pub fn repo_config(env: &dyn Env, name: &str) -> Result<()> {
 pub fn repo_remove(db: &Database, name: &str) -> Result<()> {
     db.repo_remove(name)?;
     println!("removed: {name}");
-    Ok(())
-}
-
-/// 큐 목록
-pub fn queue_list(db: &Database, repo: &str) -> Result<String> {
-    let mut output = String::new();
-
-    // Issue queue
-    output.push_str("Issue Queue:\n");
-    let issues = db.issue_list(repo, 20)?;
-    for item in &issues {
-        output.push_str(&format!(
-            "  #{} [{}] {}\n",
-            item.github_number, item.status, item.title
-        ));
-    }
-
-    // PR queue
-    output.push_str("\nPR Queue:\n");
-    let prs = db.pr_list(repo, 20)?;
-    for item in &prs {
-        output.push_str(&format!(
-            "  #{} [{}] {}\n",
-            item.github_number, item.status, item.title
-        ));
-    }
-
-    // Merge queue
-    output.push_str("\nMerge Queue:\n");
-    let merges = db.merge_list(repo, 20)?;
-    for item in &merges {
-        output.push_str(&format!(
-            "  PR #{} [{}] {}\n",
-            item.github_number, item.status, item.title
-        ));
-    }
-
-    Ok(output)
-}
-
-/// 큐 항목 재시도
-pub fn queue_retry(db: &Database, id: &str) -> Result<()> {
-    let found = db.queue_retry(id)?;
-    if found {
-        println!("retrying: {id}");
-    } else {
-        println!("not found or not in failed status: {id}");
-    }
-    Ok(())
-}
-
-/// 큐 비우기
-pub fn queue_clear(db: &Database, repo: &str) -> Result<()> {
-    db.queue_clear(repo)?;
-    println!("cleared completed/failed items for {repo}");
     Ok(())
 }
 

@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -52,13 +53,15 @@ impl LogTailer {
         match File::open(&log_path) {
             Ok(file) => {
                 let reader = BufReader::new(&file);
-                let all_lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
-                let total = all_lines.len();
-                let start = total.saturating_sub(max_lines);
-                let lines: Vec<LogLine> = all_lines[start..]
-                    .iter()
-                    .map(|l| parse_log_line(l))
-                    .collect();
+                // Ring buffer: keep only last max_lines to bound memory usage
+                let mut ring = VecDeque::with_capacity(max_lines);
+                for line in reader.lines().map_while(Result::ok) {
+                    if ring.len() == max_lines {
+                        ring.pop_front();
+                    }
+                    ring.push_back(line);
+                }
+                let lines: Vec<LogLine> = ring.iter().map(|l| parse_log_line(l)).collect();
 
                 // Set offset to end of file for future incremental reads
                 if let Ok(metadata) = file.metadata() {

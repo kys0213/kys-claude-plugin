@@ -7,7 +7,6 @@ use std::path::Path;
 use anyhow::Result;
 use async_trait::async_trait;
 
-pub use mock::MockClaude;
 pub use real::RealClaude;
 
 /// claude -p 세션 결과

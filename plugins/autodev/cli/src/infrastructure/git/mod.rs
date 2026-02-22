@@ -6,7 +6,6 @@ use std::path::Path;
 use anyhow::Result;
 use async_trait::async_trait;
 
-pub use mock::MockGit;
 pub use real::RealGit;
 
 /// Git CLI 추상화
@@ -24,4 +23,16 @@ pub trait Git: Send + Sync {
 
     /// `git worktree remove --force {worktree}`
     async fn worktree_remove(&self, base_dir: &Path, worktree: &Path) -> Result<()>;
+
+    /// `git checkout -b {branch}` in repo_dir
+    async fn checkout_new_branch(&self, repo_dir: &Path, branch: &str) -> Result<()>;
+
+    /// `git add {files} && git commit -m {message} && git push origin {branch}`
+    async fn add_commit_push(
+        &self,
+        repo_dir: &Path,
+        files: &[&str],
+        message: &str,
+        branch: &str,
+    ) -> Result<()>;
 }

@@ -1,7 +1,9 @@
-use autodev::active::ActiveItems;
 use autodev::daemon::recovery;
-use autodev::infrastructure::gh::MockGh;
+use autodev::infrastructure::gh::mock::MockGh;
 use autodev::queue::models::EnabledRepo;
+use autodev::queue::task_queues::{
+    issue_phase, make_work_id, merge_phase, pr_phase, IssueItem, MergeItem, PrItem, TaskQueues,
+};
 
 fn repo(id: &str, name: &str) -> EnabledRepo {
     EnabledRepo {
@@ -30,6 +32,48 @@ fn wip_pr_json(number: i64) -> serde_json::Value {
     })
 }
 
+fn make_issue_item(repo_name: &str, number: i64) -> IssueItem {
+    IssueItem {
+        work_id: make_work_id("issue", repo_name, number),
+        repo_id: "r1".to_string(),
+        repo_name: repo_name.to_string(),
+        repo_url: format!("https://github.com/{repo_name}"),
+        github_number: number,
+        title: "test".to_string(),
+        body: None,
+        labels: vec![],
+        author: "user".to_string(),
+        analysis_report: None,
+    }
+}
+
+fn make_pr_item(repo_name: &str, number: i64) -> PrItem {
+    PrItem {
+        work_id: make_work_id("pr", repo_name, number),
+        repo_id: "r1".to_string(),
+        repo_name: repo_name.to_string(),
+        repo_url: format!("https://github.com/{repo_name}"),
+        github_number: number,
+        title: "test".to_string(),
+        head_branch: "feat".to_string(),
+        base_branch: "main".to_string(),
+        review_comment: None,
+    }
+}
+
+fn make_merge_item(repo_name: &str, number: i64) -> MergeItem {
+    MergeItem {
+        work_id: make_work_id("merge", repo_name, number),
+        repo_id: "r1".to_string(),
+        repo_name: repo_name.to_string(),
+        repo_url: format!("https://github.com/{repo_name}"),
+        pr_number: number,
+        title: "test".to_string(),
+        head_branch: "feat".to_string(),
+        base_branch: "main".to_string(),
+    }
+}
+
 // ═══════════════════════════════════════════════
 // 1. 레포 없음 → 0건 복구
 // ═══════════════════════════════════════════════
@@ -37,9 +81,9 @@ fn wip_pr_json(number: i64) -> serde_json::Value {
 #[tokio::test]
 async fn recovery_no_repos_returns_zero() {
     let gh = MockGh::new();
-    let active = ActiveItems::new();
+    let queues = TaskQueues::new();
 
-    let result = recovery::recover_orphan_wip(&[], &gh, &active, None::<&str>).await;
+    let result = recovery::recover_orphan_wip(&[], &gh, &queues, None::<&str>).await;
 
     assert_eq!(result.unwrap(), 0);
 }
@@ -52,10 +96,10 @@ async fn recovery_no_repos_returns_zero() {
 async fn recovery_no_wip_items_returns_zero() {
     let gh = MockGh::new();
     gh.set_paginate("org/repo", "issues", b"[]".to_vec());
-    let active = ActiveItems::new();
+    let queues = TaskQueues::new();
     let repos = vec![repo("r1", "org/repo")];
 
-    let result = recovery::recover_orphan_wip(&repos, &gh, &active, None::<&str>).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, None::<&str>).await;
 
     assert_eq!(result.unwrap(), 0);
     assert!(gh.removed_labels.lock().unwrap().is_empty());
@@ -71,11 +115,13 @@ async fn recovery_skips_active_issues() {
     let gh = MockGh::new();
     gh.set_paginate("org/repo", "issues", items);
 
-    let mut active = ActiveItems::new();
-    active.insert("issue", "r1", 42);
+    let mut queues = TaskQueues::new();
+    queues
+        .issues
+        .push(issue_phase::PENDING, make_issue_item("org/repo", 42));
 
     let repos = vec![repo("r1", "org/repo")];
-    let result = recovery::recover_orphan_wip(&repos, &gh, &active, None::<&str>).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, None::<&str>).await;
 
     assert_eq!(result.unwrap(), 0);
     assert!(gh.removed_labels.lock().unwrap().is_empty());
@@ -87,30 +133,44 @@ async fn recovery_skips_active_prs() {
     let gh = MockGh::new();
     gh.set_paginate("org/repo", "issues", items);
 
-    let mut active = ActiveItems::new();
-    active.insert("pr", "r1", 10);
+    let mut queues = TaskQueues::new();
+    queues
+        .prs
+        .push(pr_phase::PENDING, make_pr_item("org/repo", 10));
 
     let repos = vec![repo("r1", "org/repo")];
-    let result = recovery::recover_orphan_wip(&repos, &gh, &active, None::<&str>).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, None::<&str>).await;
 
     assert_eq!(result.unwrap(), 0);
     assert!(gh.removed_labels.lock().unwrap().is_empty());
 }
 
+// Recovery function generates work_id = "pr:org/repo:10" for a PR.
+// A merge item has work_id = "merge:org/repo:10", which does NOT match.
+// Therefore queues.contains("pr:org/repo:10") returns false, and the
+// PR is treated as orphaned — wip label gets removed (recovered = 1).
 #[tokio::test]
 async fn recovery_skips_pr_active_as_merge() {
     let items = serde_json::to_vec(&vec![wip_pr_json(10)]).unwrap();
     let gh = MockGh::new();
     gh.set_paginate("org/repo", "issues", items);
 
-    let mut active = ActiveItems::new();
-    active.insert("merge", "r1", 10);
+    let mut queues = TaskQueues::new();
+    queues
+        .merges
+        .push(merge_phase::PENDING, make_merge_item("org/repo", 10));
 
     let repos = vec![repo("r1", "org/repo")];
-    let result = recovery::recover_orphan_wip(&repos, &gh, &active, None::<&str>).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, None::<&str>).await;
 
-    assert_eq!(result.unwrap(), 0);
-    assert!(gh.removed_labels.lock().unwrap().is_empty());
+    // "merge:org/repo:10" != "pr:org/repo:10" → orphan → label removed
+    assert_eq!(result.unwrap(), 1);
+    let labels = gh.removed_labels.lock().unwrap();
+    assert_eq!(labels.len(), 1);
+    assert_eq!(
+        labels[0],
+        ("org/repo".to_string(), 10, "autodev:wip".to_string())
+    );
 }
 
 // ═══════════════════════════════════════════════
@@ -123,10 +183,10 @@ async fn recovery_removes_orphan_issue_label() {
     let gh = MockGh::new();
     gh.set_paginate("org/repo", "issues", items);
 
-    let active = ActiveItems::new();
+    let queues = TaskQueues::new();
     let repos = vec![repo("r1", "org/repo")];
 
-    let result = recovery::recover_orphan_wip(&repos, &gh, &active, None::<&str>).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, None::<&str>).await;
 
     assert_eq!(result.unwrap(), 1);
     let labels = gh.removed_labels.lock().unwrap();
@@ -143,10 +203,10 @@ async fn recovery_removes_orphan_pr_label() {
     let gh = MockGh::new();
     gh.set_paginate("org/repo", "issues", items);
 
-    let active = ActiveItems::new();
+    let queues = TaskQueues::new();
     let repos = vec![repo("r1", "org/repo")];
 
-    let result = recovery::recover_orphan_wip(&repos, &gh, &active, None::<&str>).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, None::<&str>).await;
 
     assert_eq!(result.unwrap(), 1);
     let labels = gh.removed_labels.lock().unwrap();
@@ -163,21 +223,25 @@ async fn recovery_removes_orphan_pr_label() {
 #[tokio::test]
 async fn recovery_mixed_active_and_orphan() {
     let items = serde_json::to_vec(&vec![
-        wip_issue_json(1), // active → skip
+        wip_issue_json(1), // active (issue queue) → skip
         wip_issue_json(2), // orphan → recover
-        wip_pr_json(3),    // active (merge) → skip
+        wip_pr_json(3),    // active (pr queue) → skip
         wip_pr_json(4),    // orphan → recover
     ])
     .unwrap();
     let gh = MockGh::new();
     gh.set_paginate("org/repo", "issues", items);
 
-    let mut active = ActiveItems::new();
-    active.insert("issue", "r1", 1);
-    active.insert("merge", "r1", 3);
+    let mut queues = TaskQueues::new();
+    queues
+        .issues
+        .push(issue_phase::PENDING, make_issue_item("org/repo", 1));
+    queues
+        .prs
+        .push(pr_phase::PENDING, make_pr_item("org/repo", 3));
 
     let repos = vec![repo("r1", "org/repo")];
-    let result = recovery::recover_orphan_wip(&repos, &gh, &active, None::<&str>).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, None::<&str>).await;
 
     assert_eq!(result.unwrap(), 2);
     let labels = gh.removed_labels.lock().unwrap();
@@ -197,10 +261,10 @@ async fn recovery_api_failure_continues() {
     // repo2: empty response
     gh.set_paginate("org/repo2", "issues", b"[]".to_vec());
 
-    let active = ActiveItems::new();
+    let queues = TaskQueues::new();
     let repos = vec![repo("r1", "org/repo1"), repo("r2", "org/repo2")];
 
-    let result = recovery::recover_orphan_wip(&repos, &gh, &active, None::<&str>).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, None::<&str>).await;
 
     // repo1 fails silently, repo2 succeeds with 0
     assert_eq!(result.unwrap(), 0);
@@ -224,10 +288,10 @@ async fn recovery_multiple_repos() {
         serde_json::to_vec(&vec![wip_pr_json(20)]).unwrap(),
     );
 
-    let active = ActiveItems::new();
+    let queues = TaskQueues::new();
     let repos = vec![repo("r1", "org/repo1"), repo("r2", "org/repo2")];
 
-    let result = recovery::recover_orphan_wip(&repos, &gh, &active, None::<&str>).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, None::<&str>).await;
 
     assert_eq!(result.unwrap(), 2);
     let labels = gh.removed_labels.lock().unwrap();

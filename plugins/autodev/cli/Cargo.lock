@@ -136,6 +136,7 @@ dependencies = [
  "chrono",
  "clap",
  "crossterm",
+ "libc",
  "predicates",
  "ratatui",
  "rusqlite",

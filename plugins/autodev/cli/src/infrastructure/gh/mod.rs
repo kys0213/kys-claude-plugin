@@ -4,7 +4,6 @@ pub mod real;
 use anyhow::Result;
 use async_trait::async_trait;
 
-pub use mock::MockGh;
 pub use real::RealGh;
 
 /// GitHub CLI (`gh`) 추상화
@@ -49,4 +48,37 @@ pub trait Gh: Send + Sync {
         label: &str,
         host: Option<&str>,
     ) -> bool;
+
+    /// `gh api repos/{repo}/issues/{number}/labels --method POST`
+    /// 라벨 추가 (best effort)
+    async fn label_add(
+        &self,
+        repo_name: &str,
+        number: i64,
+        label: &str,
+        host: Option<&str>,
+    ) -> bool;
+
+    /// `gh api repos/{repo}/issues --method POST`
+    /// 이슈 생성 (knowledge extraction daily report 등에 사용)
+    async fn create_issue(
+        &self,
+        repo_name: &str,
+        title: &str,
+        body: &str,
+        host: Option<&str>,
+    ) -> bool;
+
+    /// `gh api repos/{repo}/pulls --method POST`
+    /// PR 생성 (knowledge suggestion PR 등에 사용)
+    /// 성공 시 PR 번호를 반환, 실패 시 None
+    async fn create_pr(
+        &self,
+        repo_name: &str,
+        head: &str,
+        base: &str,
+        title: &str,
+        body: &str,
+        host: Option<&str>,
+    ) -> Option<i64>;
 }

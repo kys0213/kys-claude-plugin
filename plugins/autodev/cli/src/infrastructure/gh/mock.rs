@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use super::Gh;
 
 /// 테스트용 Gh 구현체 — 미리 설정된 응답을 반환
+#[allow(dead_code)]
 pub struct MockGh {
     /// key: "{repo_name}/{path}" → value: field value
     fields: Mutex<HashMap<String, String>>,
@@ -16,6 +17,13 @@ pub struct MockGh {
     pub posted_comments: Mutex<Vec<(String, i64, String)>>,
     /// 제거된 라벨 기록: (repo_name, number, label)
     pub removed_labels: Mutex<Vec<(String, i64, String)>>,
+    /// 추가된 라벨 기록: (repo_name, number, label)
+    pub added_labels: Mutex<Vec<(String, i64, String)>>,
+    /// 생성된 이슈 기록: (repo_name, title, body)
+    pub created_issues: Mutex<Vec<(String, String, String)>>,
+    /// 생성된 PR 기록: (repo_name, head, base, title, body)
+    #[allow(clippy::type_complexity)]
+    pub created_prs: Mutex<Vec<(String, String, String, String, String)>>,
 }
 
 impl Default for MockGh {
@@ -25,10 +33,14 @@ impl Default for MockGh {
             paginate_responses: Mutex::new(HashMap::new()),
             posted_comments: Mutex::new(Vec::new()),
             removed_labels: Mutex::new(Vec::new()),
+            added_labels: Mutex::new(Vec::new()),
+            created_issues: Mutex::new(Vec::new()),
+            created_prs: Mutex::new(Vec::new()),
         }
     }
 }
 
+#[allow(dead_code)]
 impl MockGh {
     pub fn new() -> Self {
         Self::default()
@@ -107,5 +119,54 @@ impl Gh for MockGh {
             label.to_string(),
         ));
         true
+    }
+
+    async fn label_add(
+        &self,
+        repo_name: &str,
+        number: i64,
+        label: &str,
+        _host: Option<&str>,
+    ) -> bool {
+        self.added_labels
+            .lock()
+            .unwrap()
+            .push((repo_name.to_string(), number, label.to_string()));
+        true
+    }
+
+    async fn create_issue(
+        &self,
+        repo_name: &str,
+        title: &str,
+        body: &str,
+        _host: Option<&str>,
+    ) -> bool {
+        self.created_issues.lock().unwrap().push((
+            repo_name.to_string(),
+            title.to_string(),
+            body.to_string(),
+        ));
+        true
+    }
+
+    async fn create_pr(
+        &self,
+        repo_name: &str,
+        head: &str,
+        base: &str,
+        title: &str,
+        body: &str,
+        _host: Option<&str>,
+    ) -> Option<i64> {
+        let idx = self.created_prs.lock().unwrap().len() as i64 + 100;
+        self.created_prs.lock().unwrap().push((
+            repo_name.to_string(),
+            head.to_string(),
+            base.to_string(),
+            title.to_string(),
+            body.to_string(),
+        ));
+        Some(idx)
     }
 }

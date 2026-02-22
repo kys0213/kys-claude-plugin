@@ -3,11 +3,11 @@ pub mod pulls;
 
 use anyhow::Result;
 
-use crate::active::ActiveItems;
 use crate::config;
 use crate::config::Env;
 use crate::infrastructure::gh::Gh;
 use crate::queue::repository::*;
+use crate::queue::task_queues::TaskQueues;
 use crate::queue::Database;
 
 /// 등록된 모든 레포를 스캔
@@ -15,12 +15,12 @@ pub async fn scan_all(
     db: &Database,
     env: &dyn Env,
     gh: &dyn Gh,
-    active: &mut ActiveItems,
+    queues: &mut TaskQueues,
 ) -> Result<()> {
     let repos = db.repo_find_enabled()?;
 
     for repo in repos {
-        let ws_path = config::workspaces_path(env).join(&repo.name);
+        let ws_path = config::workspaces_path(env).join(config::sanitize_repo_name(&repo.name));
         let cfg = config::loader::load_merged(
             env,
             if ws_path.exists() {
@@ -48,10 +48,11 @@ pub async fn scan_all(
                         gh,
                         &repo.id,
                         &repo.name,
+                        &repo.url,
                         &cfg.consumer.ignore_authors,
                         &cfg.consumer.filter_labels,
                         gh_host,
-                        active,
+                        queues,
                     )
                     .await
                     {
@@ -64,9 +65,10 @@ pub async fn scan_all(
                         gh,
                         &repo.id,
                         &repo.name,
+                        &repo.url,
                         &cfg.consumer.ignore_authors,
                         gh_host,
-                        active,
+                        queues,
                     )
                     .await
                     {
