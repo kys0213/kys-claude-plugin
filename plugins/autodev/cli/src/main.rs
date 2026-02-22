@@ -3,7 +3,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-mod active;
 mod client;
 mod components;
 mod config;
@@ -42,11 +41,6 @@ enum Commands {
         #[command(subcommand)]
         action: RepoAction,
     },
-    /// 큐 관리
-    Queue {
-        #[command(subcommand)]
-        action: QueueAction,
-    },
     /// 실행 로그 조회
     Logs {
         /// 레포 이름 (org/repo)
@@ -75,25 +69,6 @@ enum RepoAction {
     Remove {
         /// 레포 이름 (org/repo)
         name: String,
-    },
-}
-
-#[derive(Subcommand)]
-enum QueueAction {
-    /// 큐 상태 확인
-    List {
-        /// 레포 이름 (org/repo)
-        repo: String,
-    },
-    /// 실패 항목 재시도
-    Retry {
-        /// 큐 아이템 ID
-        id: String,
-    },
-    /// 큐 비우기
-    Clear {
-        /// 레포 이름 (org/repo)
-        repo: String,
     },
 }
 
@@ -145,18 +120,6 @@ async fn main() -> Result<()> {
             }
             RepoAction::Remove { name } => {
                 client::repo_remove(&db, &name)?;
-            }
-        },
-        Commands::Queue { action } => match action {
-            QueueAction::List { repo } => {
-                let list = client::queue_list(&db, &repo)?;
-                println!("{list}");
-            }
-            QueueAction::Retry { id } => {
-                client::queue_retry(&db, &id)?;
-            }
-            QueueAction::Clear { repo } => {
-                client::queue_clear(&db, &repo)?;
             }
         },
         Commands::Logs { repo, limit } => {

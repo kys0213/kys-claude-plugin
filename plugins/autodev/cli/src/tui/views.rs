@@ -110,124 +110,15 @@ impl AppState {
 
 // ─── Data queries ───
 
-pub fn query_active_items(db: &Database) -> Vec<ActiveItem> {
-    let conn = db.conn();
-    let mut items = Vec::new();
-
-    // Issues (non-terminal statuses)
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT iq.id, r.name, iq.github_number, iq.title, iq.status \
-         FROM issue_queue iq JOIN repositories r ON iq.repo_id = r.id \
-         WHERE iq.status NOT IN ('done', 'failed') \
-         ORDER BY iq.updated_at DESC",
-    ) {
-        if let Ok(rows) = stmt.query_map([], |row| {
-            Ok(ActiveItem {
-                id: row.get(0)?,
-                queue_type: "issue".to_string(),
-                repo_name: row.get(1)?,
-                number: row.get(2)?,
-                title: row.get(3)?,
-                status: row.get(4)?,
-            })
-        }) {
-            for row in rows.flatten() {
-                items.push(row);
-            }
-        }
-    }
-
-    // PRs
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT pq.id, r.name, pq.github_number, pq.title, pq.status \
-         FROM pr_queue pq JOIN repositories r ON pq.repo_id = r.id \
-         WHERE pq.status NOT IN ('done', 'failed') \
-         ORDER BY pq.updated_at DESC",
-    ) {
-        if let Ok(rows) = stmt.query_map([], |row| {
-            Ok(ActiveItem {
-                id: row.get(0)?,
-                queue_type: "pr".to_string(),
-                repo_name: row.get(1)?,
-                number: row.get(2)?,
-                title: row.get(3)?,
-                status: row.get(4)?,
-            })
-        }) {
-            for row in rows.flatten() {
-                items.push(row);
-            }
-        }
-    }
-
-    // Merges
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT mq.id, r.name, mq.pr_number, mq.title, mq.status \
-         FROM merge_queue mq JOIN repositories r ON mq.repo_id = r.id \
-         WHERE mq.status NOT IN ('done', 'failed') \
-         ORDER BY mq.updated_at DESC",
-    ) {
-        if let Ok(rows) = stmt.query_map([], |row| {
-            Ok(ActiveItem {
-                id: row.get(0)?,
-                queue_type: "merge".to_string(),
-                repo_name: row.get(1)?,
-                number: row.get(2)?,
-                title: row.get(3)?,
-                status: row.get(4)?,
-            })
-        }) {
-            for row in rows.flatten() {
-                items.push(row);
-            }
-        }
-    }
-
-    items
+pub fn query_active_items(_db: &Database) -> Vec<ActiveItem> {
+    // Active items are now tracked in daemon memory (TaskQueues).
+    // TUI will show them when daemon status file is implemented.
+    Vec::new()
 }
 
-pub fn query_label_counts(db: &Database) -> LabelCounts {
-    let conn = db.conn();
-    let mut counts = LabelCounts::default();
-
-    // WIP = analyzing + processing + ready + reviewing + review_done + merging + conflict + pending
-    let wip_statuses = "('pending','analyzing','processing','ready','reviewing','review_done','merging','conflict')";
-
-    for table in &["issue_queue", "pr_queue", "merge_queue"] {
-        let wip: i64 = conn
-            .query_row(
-                &format!("SELECT COUNT(*) FROM {table} WHERE status IN {wip_statuses}"),
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        counts.wip += wip;
-
-        let done: i64 = conn
-            .query_row(
-                &format!("SELECT COUNT(*) FROM {table} WHERE status = 'done'"),
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        counts.done += done;
-
-        let failed: i64 = conn
-            .query_row(
-                &format!("SELECT COUNT(*) FROM {table} WHERE status = 'failed'"),
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        counts.failed += failed;
-    }
-
-    // skip count from items marked with skip status (if present)
-    // autodev:skip is a GitHub label, not a DB status; we approximate via 'failed' items
-    // that were manually skipped. For now, skip = 0 as it's label-based.
-    counts.skip = 0;
-
-    counts
+pub fn query_label_counts(_db: &Database) -> LabelCounts {
+    // Label counts are managed on GitHub, not in local DB.
+    LabelCounts::default()
 }
 
 /// Get selected active item ID (for retry/skip actions)

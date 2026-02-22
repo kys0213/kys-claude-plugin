@@ -30,10 +30,7 @@ pub fn status(db: &Database, env: &dyn Env) -> Result<String> {
     } else {
         for row in &rows {
             let icon = if row.enabled { "●" } else { "○" };
-            output.push_str(&format!(
-                "  {icon} {}  issues:{} prs:{} merges:{}\n",
-                row.name, row.issue_pending, row.pr_pending, row.merge_pending
-            ));
+            output.push_str(&format!("  {icon} {}\n", row.name));
         }
     }
 
@@ -118,61 +115,6 @@ pub fn repo_config(env: &dyn Env, name: &str) -> Result<()> {
 pub fn repo_remove(db: &Database, name: &str) -> Result<()> {
     db.repo_remove(name)?;
     println!("removed: {name}");
-    Ok(())
-}
-
-/// 큐 목록
-pub fn queue_list(db: &Database, repo: &str) -> Result<String> {
-    let mut output = String::new();
-
-    // Issue queue
-    output.push_str("Issue Queue:\n");
-    let issues = db.issue_list(repo, 20)?;
-    for item in &issues {
-        output.push_str(&format!(
-            "  #{} [{}] {}\n",
-            item.github_number, item.status, item.title
-        ));
-    }
-
-    // PR queue
-    output.push_str("\nPR Queue:\n");
-    let prs = db.pr_list(repo, 20)?;
-    for item in &prs {
-        output.push_str(&format!(
-            "  #{} [{}] {}\n",
-            item.github_number, item.status, item.title
-        ));
-    }
-
-    // Merge queue
-    output.push_str("\nMerge Queue:\n");
-    let merges = db.merge_list(repo, 20)?;
-    for item in &merges {
-        output.push_str(&format!(
-            "  PR #{} [{}] {}\n",
-            item.github_number, item.status, item.title
-        ));
-    }
-
-    Ok(output)
-}
-
-/// 큐 항목 재시도
-pub fn queue_retry(db: &Database, id: &str) -> Result<()> {
-    let found = db.queue_retry(id)?;
-    if found {
-        println!("retrying: {id}");
-    } else {
-        println!("not found or not in failed status: {id}");
-    }
-    Ok(())
-}
-
-/// 큐 비우기
-pub fn queue_clear(db: &Database, repo: &str) -> Result<()> {
-    db.queue_clear(repo)?;
-    println!("cleared completed/failed items for {repo}");
     Ok(())
 }
 

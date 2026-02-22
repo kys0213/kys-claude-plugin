@@ -138,42 +138,7 @@ fn repo_remove_then_list_empty() {
 }
 
 // ═══════════════════════════════════════════════
-// 3. queue
-// ═══════════════════════════════════════════════
-
-#[test]
-fn queue_list_empty() {
-    let home = TempDir::new().unwrap();
-
-    autodev(&home)
-        .args(["repo", "add", "https://github.com/org/myrepo"])
-        .assert()
-        .success();
-
-    autodev(&home)
-        .args(["queue", "list", "org/myrepo"])
-        .assert()
-        .success()
-        .stdout(
-            predicate::str::contains("Issue Queue:")
-                .and(predicate::str::contains("PR Queue:"))
-                .and(predicate::str::contains("Merge Queue:")),
-        );
-}
-
-#[test]
-fn queue_retry_nonexistent() {
-    let home = TempDir::new().unwrap();
-
-    autodev(&home)
-        .args(["queue", "retry", "nonexistent-id"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("not found"));
-}
-
-// ═══════════════════════════════════════════════
-// 4. logs
+// 3. logs
 // ═══════════════════════════════════════════════
 
 #[test]
@@ -188,7 +153,7 @@ fn logs_empty() {
 }
 
 // ═══════════════════════════════════════════════
-// 5. 잘못된 명령어
+// 4. 잘못된 명령어
 // ═══════════════════════════════════════════════
 
 #[test]
@@ -207,7 +172,7 @@ fn no_args_shows_help() {
 }
 
 // ═══════════════════════════════════════════════
-// 6. status after repo add (integration)
+// 5. status after repo add (integration)
 // ═══════════════════════════════════════════════
 
 #[test]
@@ -219,9 +184,9 @@ fn status_shows_repo_after_add() {
         .assert()
         .success();
 
-    autodev(&home).arg("status").assert().success().stdout(
-        predicate::str::contains("org/myrepo")
-            .and(predicate::str::contains("issues:0"))
-            .and(predicate::str::contains("prs:0")),
-    );
+    autodev(&home)
+        .arg("status")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("org/myrepo"));
 }
