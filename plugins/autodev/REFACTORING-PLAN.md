@@ -15,9 +15,11 @@
 | **Phase 3** | Scanner → StateQueue 전환 | 수정 3 |
 | **Phase 4** | Pipeline → StateQueue 전환 + 라벨 관리 | 수정 4 |
 | **Phase 5** | Daemon 루프 + startup_reconcile | 수정 2 |
-| **Phase 6** | SQLite 큐 테이블 제거 + client 수정 | 수정 3 |
+| **Phase 6** | SQLite 큐 테이블 제거 | 수정 2 |
 | **Phase 7** | PR 피드백 루프 구현 | 수정 2 |
 | **Phase 8** | 테스트 작성 | 신규 2 + 수정 1 |
+
+> **Scope 제외**: `client/mod.rs`, `main.rs` (CLI 서브커맨드) — 기존 동작 유지, 별도 작업으로 분리
 
 ---
 
@@ -339,7 +341,7 @@ pub async fn recover_orphan_wip(
 
 ---
 
-## Phase 6: SQLite 큐 테이블 제거 + client 수정
+## Phase 6: SQLite 큐 테이블 제거
 
 ### 수정: `queue/schema.rs`
 
@@ -359,10 +361,12 @@ pub async fn recover_orphan_wip(
 - `ScanCursorRepository` (cursors 관리)
 - `ConsumerLogRepository` (logs 관리)
 
-### 수정: `client/mod.rs`
+### 제외: `client/mod.rs`, `main.rs`
 
-`queue list/retry/clear` → TaskQueues 기반으로 변경.
-데몬이 실행 중일 때만 의미 있음 (메모리 큐이므로).
+CLI 서브커맨드(`queue list/retry/clear`, `status`, `repo` 등)는 이번 리팩토링에서 **변경하지 않는다**.
+기존 SQLite 큐 테이블은 schema에서 제거되지만, client가 참조하는 코드는 컴파일 에러가 나지 않도록 stub 처리하거나 별도 후속 작업으로 분리한다.
+
+> **이유**: CLI는 데몬과 별도 프로세스로 실행되므로 인메모리 큐에 직접 접근 불가. IPC 설계가 필요하며 이는 별도 scope.
 
 ---
 
@@ -483,7 +487,9 @@ async fn test_issue_flow_implement() {
 | `components/reviewer.rs` | 변경 불필요 |
 | `components/merger.rs` | 변경 불필요 |
 | `config/` | 변경 불필요 (reconcile_window_hours 추가만) |
-| `tui/` | Phase 8 이후 별도 작업 |
+| `tui/` | 별도 작업 |
+| **`client/mod.rs`** | **제외 — 별도 scope (IPC 설계 필요)** |
+| **`main.rs`** | **제외 — CLI 서브커맨드 변경 없음** |
 
 ---
 
@@ -492,10 +498,10 @@ async fn test_issue_flow_implement() {
 | 영역 | 영향 | 대응 |
 |------|------|------|
 | 데몬 재시작 | 큐 데이터 휘발 | startup_reconcile()로 복구 |
-| client CLI (`queue list/retry`) | DB 직접 조회 불가 | 데몬 프로세스에 IPC 또는 제한된 기능 |
 | consumer_logs | 유지 (SQLite) | 변경 없음 |
-| retry_count | DB 필드 제거 | 인메모리 retry 카운터 or scan에서 자연 재시도 |
+| retry_count | DB 필드 제거 | scan에서 자연 재시도 (라벨 없으면 재발견) |
 | stuck recovery | DB 기반 불가 | 불필요 (메모리 큐는 프로세스 종료 시 자동 정리) |
+| **client CLI** | **이번 scope 제외** | **별도 후속 작업 (IPC 설계)** |
 
 ---
 
