@@ -1,9 +1,9 @@
-# Autodev Progress Tracker
+# Autodev Kanban
 
 디렉토리 기반 칸반보드로 진행 상황을 추적합니다.
 
 ```
-progress/
+kanban/
 ├── todo/          ← 미착수
 ├── in-progress/   ← 진행 중
 └── done/          ← 완료
