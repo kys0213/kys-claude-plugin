@@ -54,62 +54,54 @@ fn insert_pending_issue(db: &Database, repo_id: &str, number: i64, title: &str) 
         repo_id: repo_id.to_string(),
         github_number: number,
         title: title.to_string(),
-        body: Some("Test issue body".to_string()),
+        body: Some("Test body".to_string()),
         labels: r#"["bug"]"#.to_string(),
         author: "alice".to_string(),
     };
     db.issue_insert(&item).unwrap()
 }
 
-fn insert_pending_pr(db: &Database, repo_id: &str, number: i64, title: &str) -> String {
-    let item = NewPrItem {
-        repo_id: repo_id.to_string(),
-        github_number: number,
-        title: title.to_string(),
-        body: Some("Test PR body".to_string()),
-        author: "alice".to_string(),
-        head_branch: "feat/test".to_string(),
-        base_branch: "main".to_string(),
+fn set_gh_open(gh: &MockGh, repo_name: &str, number: i64) {
+    gh.set_field(repo_name, &format!("issues/{number}"), ".state", "open");
+}
+
+fn make_analysis_json(verdict: &str, confidence: f64, questions: &[&str], reason: Option<&str>) -> String {
+    let questions_json: Vec<String> = questions.iter().map(|q| format!("\"{q}\"")).collect();
+    let reason_json = match reason {
+        Some(r) => format!("\"{}\"", r),
+        None => "null".to_string(),
     };
-    db.pr_insert(&item).unwrap()
-}
-
-/// MockGh에 "이슈/PR이 open" 응답 설정
-fn set_gh_open(gh: &MockGh, repo_name: &str, number: i64, kind: &str) {
-    let path = format!("{kind}/{number}");
-    gh.set_field(repo_name, &path, ".state", "open");
+    let report_text = "## Analysis Report";
+    let inner = format!(
+        r#"{{"verdict":"{verdict}","confidence":{confidence},"summary":"Test summary","questions":[{questions}],"reason":{reason},"report":"{report_text}"}}"#,
+        questions = questions_json.join(","),
+        reason = reason_json,
+    );
+    // Wrap in Claude JSON envelope
+    serde_json::json!({ "result": inner }).to_string()
 }
 
 // ═══════════════════════════════════════════════
-// 1. Issue pipeline — success (analysis → ready)
+// verdict: wontfix → done + 댓글 게시
 // ═══════════════════════════════════════════════
 
 #[tokio::test]
-async fn issue_pipeline_success_transitions_to_ready() {
+async fn issue_verdict_wontfix_posts_comment_and_marks_done() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_issue(&db, &repo_id, 42, "Bug: test issue");
+    insert_pending_issue(&db, &repo_id, 1, "Won't fix issue");
 
     let gh = MockGh::new();
-    set_gh_open(&gh, "org/repo", 42, "issues");
+    set_gh_open(&gh, "org/repo", 1);
 
     let git = MockGit::new();
     let claude = MockClaude::new();
-
-    // analysis 결과 JSON
-    let analysis_json = serde_json::json!({
-        "result": serde_json::json!({
-            "verdict": "implement",
-            "confidence": 0.9,
-            "summary": "Clear bug to fix",
-            "questions": [],
-            "reason": null,
-            "report": "## Analysis\nBug in login page."
-        }).to_string()
-    });
-    claude.enqueue_response(&analysis_json.to_string(), 0);
+    claude.enqueue_response(
+        &make_analysis_json("wontfix", 0.95, &[], Some("Duplicate of #42")),
+        0,
+    );
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
@@ -119,151 +111,46 @@ async fn issue_pipeline_success_transitions_to_ready() {
         &db, &env, &workspace, &notifier, &claude, &mut active,
     )
     .await
-    .expect("process_pending should succeed");
+    .unwrap();
 
-    // pending → ready (analysis 성공)
-    let pending = db.issue_find_pending(100).unwrap();
-    assert!(pending.is_empty(), "no issues should remain pending");
-
-    let ready = db.issue_find_ready(100).unwrap();
-    assert_eq!(ready.len(), 1, "issue should be in ready state");
-
-    let logs = db.log_recent(None, 100).unwrap();
-    assert!(!logs.is_empty(), "consumer should have written logs");
-}
-
-// ═══════════════════════════════════════════════
-// 2. Issue pipeline — claude failure
-// ═══════════════════════════════════════════════
-
-#[tokio::test]
-async fn issue_pipeline_claude_failure_marks_failed() {
-    let tmpdir = tempfile::TempDir::new().unwrap();
-    let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_issue(&db, &repo_id, 99, "Will fail");
-
-    let gh = MockGh::new();
-    set_gh_open(&gh, "org/repo", 99, "issues");
-
-    let git = MockGit::new();
-    let claude = MockClaude::new();
-    claude.enqueue_response("error output", 1); // exit code 1
-
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
-
-    autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &claude, &mut active,
-    )
-    .await
-    .expect("should handle failure gracefully");
-
-    let pending = db.issue_find_pending(100).unwrap();
-    assert!(pending.is_empty());
-
+    // status → done
     let list = db.issue_list("org/repo", 100).unwrap();
     assert_eq!(list.len(), 1);
-    assert_eq!(list[0].status, "failed");
+    assert_eq!(list[0].status, "done");
+
+    // 댓글이 게시되었는지 확인
+    let comments = gh.posted_comments.lock().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert!(comments[0].2.contains("Won't fix"));
+    assert!(comments[0].2.contains("Duplicate of #42"));
 }
 
 // ═══════════════════════════════════════════════
-// 3. PR pipeline — success
+// verdict: needs_clarification → waiting_human + 댓글 게시
 // ═══════════════════════════════════════════════
 
 #[tokio::test]
-async fn pr_pipeline_success_transitions_to_review_done() {
+async fn issue_verdict_needs_clarification_posts_questions_and_waits() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_pr(&db, &repo_id, 100, "feat: add settings");
+    insert_pending_issue(&db, &repo_id, 2, "Ambiguous issue");
 
     let gh = MockGh::new();
-    set_gh_open(&gh, "org/repo", 100, "pulls");
+    set_gh_open(&gh, "org/repo", 2);
 
     let git = MockGit::new();
     let claude = MockClaude::new();
-    claude.enqueue_response(r#"{"result": "LGTM"}"#, 0);
-
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
-
-    autodev::pipeline::pr::process_pending(
-        &db, &env, &workspace, &notifier, &claude, &mut active,
-    )
-    .await
-    .expect("process_pending should succeed");
-
-    let pending = db.pr_find_pending(100).unwrap();
-    assert!(pending.is_empty());
-
-    let list = db.pr_list("org/repo", 100).unwrap();
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].status, "review_done");
-}
-
-// ═══════════════════════════════════════════════
-// 4. PR pipeline — failure
-// ═══════════════════════════════════════════════
-
-#[tokio::test]
-async fn pr_pipeline_claude_failure_marks_failed() {
-    let tmpdir = tempfile::TempDir::new().unwrap();
-    let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    insert_pending_pr(&db, &repo_id, 200, "will fail");
-
-    let gh = MockGh::new();
-    set_gh_open(&gh, "org/repo", 200, "pulls");
-
-    let git = MockGit::new();
-    let claude = MockClaude::new();
-    claude.enqueue_response("review error", 1);
-
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut active = autodev::active::ActiveItems::new();
-
-    autodev::pipeline::pr::process_pending(
-        &db, &env, &workspace, &notifier, &claude, &mut active,
-    )
-    .await
-    .expect("should handle failure");
-
-    let list = db.pr_list("org/repo", 100).unwrap();
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].status, "failed");
-}
-
-// ═══════════════════════════════════════════════
-// 5. Pipeline batch limit
-// ═══════════════════════════════════════════════
-
-#[tokio::test]
-async fn issue_pipeline_processes_up_to_limit() {
-    let tmpdir = tempfile::TempDir::new().unwrap();
-    let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-
-    for i in 1..=10 {
-        insert_pending_issue(&db, &repo_id, i, &format!("Issue #{i}"));
-    }
-
-    let gh = MockGh::new();
-    for i in 1..=10 {
-        set_gh_open(&gh, "org/repo", i, "issues");
-    }
-
-    let git = MockGit::new();
-    let claude = MockClaude::new();
-    // only 1 response (default concurrency=1)
-    claude.enqueue_response(r#"{"result": "{\"verdict\":\"implement\",\"confidence\":0.9,\"summary\":\"ok\",\"questions\":[],\"reason\":null,\"report\":\"report\"}"}"#, 0);
+    claude.enqueue_response(
+        &make_analysis_json(
+            "needs_clarification",
+            0.8,
+            &["What is the expected behavior?", "Which version?"],
+            None,
+        ),
+        0,
+    );
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
@@ -273,47 +160,166 @@ async fn issue_pipeline_processes_up_to_limit() {
         &db, &env, &workspace, &notifier, &claude, &mut active,
     )
     .await
-    .expect("should process batch");
+    .unwrap();
 
-    let remaining = db.issue_find_pending(100).unwrap();
-    assert_eq!(remaining.len(), 9); // default concurrency=1 → 1 processed, 9 remain
+    // status → waiting_human
+    let list = db.issue_list("org/repo", 100).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].status, "waiting_human");
+
+    // 질문이 포함된 댓글 게시 확인
+    let comments = gh.posted_comments.lock().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert!(comments[0].2.contains("What is the expected behavior?"));
+    assert!(comments[0].2.contains("Which version?"));
 }
 
 // ═══════════════════════════════════════════════
-// 6. process_all
+// verdict: implement + 저신뢰도 → waiting_human (confidence_threshold 기준)
 // ═══════════════════════════════════════════════
 
 #[tokio::test]
-async fn process_all_handles_issues_and_prs() {
+async fn issue_verdict_implement_low_confidence_goes_to_waiting() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-
-    insert_pending_issue(&db, &repo_id, 1, "Issue");
-    insert_pending_pr(&db, &repo_id, 10, "PR");
+    insert_pending_issue(&db, &repo_id, 3, "Low confidence issue");
 
     let gh = MockGh::new();
-    set_gh_open(&gh, "org/repo", 1, "issues");
-    set_gh_open(&gh, "org/repo", 10, "pulls");
+    set_gh_open(&gh, "org/repo", 3);
 
     let git = MockGit::new();
     let claude = MockClaude::new();
-    // Issue analysis response
-    claude.enqueue_response(r#"{"result": "{\"verdict\":\"implement\",\"confidence\":0.9,\"summary\":\"ok\",\"questions\":[],\"reason\":null,\"report\":\"report\"}"}"#, 0);
-    // PR review response
-    claude.enqueue_response(r#"{"result": "LGTM"}"#, 0);
+    // implement verdict이지만 confidence가 threshold(기본 0.7) 미만
+    claude.enqueue_response(&make_analysis_json("implement", 0.3, &[], None), 0);
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
     let mut active = autodev::active::ActiveItems::new();
 
-    autodev::pipeline::process_all(
+    autodev::pipeline::issue::process_pending(
         &db, &env, &workspace, &notifier, &claude, &mut active,
     )
     .await
-    .expect("process_all should succeed");
+    .unwrap();
 
-    assert!(db.issue_find_pending(100).unwrap().is_empty());
-    assert!(db.pr_find_pending(100).unwrap().is_empty());
+    // 저신뢰도 → waiting_human (needs_clarification과 같은 분기)
+    let list = db.issue_list("org/repo", 100).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].status, "waiting_human");
+
+    // clarification 댓글 게시
+    let comments = gh.posted_comments.lock().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert!(comments[0].2.contains("clarification"));
+}
+
+// ═══════════════════════════════════════════════
+// verdict: implement + 고신뢰도 → ready
+// ═══════════════════════════════════════════════
+
+#[tokio::test]
+async fn issue_verdict_implement_high_confidence_goes_to_ready() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+    insert_pending_issue(&db, &repo_id, 4, "Clear bug");
+
+    let gh = MockGh::new();
+    set_gh_open(&gh, "org/repo", 4);
+
+    let git = MockGit::new();
+    let claude = MockClaude::new();
+    claude.enqueue_response(&make_analysis_json("implement", 0.95, &[], None), 0);
+
+    let workspace = Workspace::new(&git, &env);
+    let notifier = Notifier::new(&gh);
+    let mut active = autodev::active::ActiveItems::new();
+
+    autodev::pipeline::issue::process_pending(
+        &db, &env, &workspace, &notifier, &claude, &mut active,
+    )
+    .await
+    .unwrap();
+
+    // 고신뢰도 → ready
+    let ready = db.issue_find_ready(100).unwrap();
+    assert_eq!(ready.len(), 1);
+
+    // 댓글 없음 (바로 구현으로)
+    let comments = gh.posted_comments.lock().unwrap();
+    assert_eq!(comments.len(), 0);
+}
+
+// ═══════════════════════════════════════════════
+// GitHub에서 closed된 이슈 → skip (done)
+// ═══════════════════════════════════════════════
+
+#[tokio::test]
+async fn issue_closed_on_github_skips_to_done() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+    insert_pending_issue(&db, &repo_id, 5, "Already closed");
+
+    let gh = MockGh::new();
+    gh.set_field("org/repo", "issues/5", ".state", "closed");
+
+    let git = MockGit::new();
+    let claude = MockClaude::new();
+    // Claude should NOT be called
+
+    let workspace = Workspace::new(&git, &env);
+    let notifier = Notifier::new(&gh);
+    let mut active = autodev::active::ActiveItems::new();
+
+    autodev::pipeline::issue::process_pending(
+        &db, &env, &workspace, &notifier, &claude, &mut active,
+    )
+    .await
+    .unwrap();
+
+    let list = db.issue_list("org/repo", 100).unwrap();
+    assert_eq!(list[0].status, "done");
+
+    // Claude 호출 0회
+    assert_eq!(claude.call_count(), 0);
+}
+
+// ═══════════════════════════════════════════════
+// 파싱 실패 → fallback to ready
+// ═══════════════════════════════════════════════
+
+#[tokio::test]
+async fn issue_unparseable_analysis_falls_back_to_ready() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+    insert_pending_issue(&db, &repo_id, 6, "Parse fail issue");
+
+    let gh = MockGh::new();
+    set_gh_open(&gh, "org/repo", 6);
+
+    let git = MockGit::new();
+    let claude = MockClaude::new();
+    // 유효하지 않은 JSON → parse_analysis returns None
+    claude.enqueue_response("This is not valid JSON at all", 0);
+
+    let workspace = Workspace::new(&git, &env);
+    let notifier = Notifier::new(&gh);
+    let mut active = autodev::active::ActiveItems::new();
+
+    autodev::pipeline::issue::process_pending(
+        &db, &env, &workspace, &notifier, &claude, &mut active,
+    )
+    .await
+    .unwrap();
+
+    // fallback → ready
+    let ready = db.issue_find_ready(100).unwrap();
+    assert_eq!(ready.len(), 1);
 }

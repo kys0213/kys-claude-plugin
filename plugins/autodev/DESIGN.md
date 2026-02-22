@@ -219,37 +219,97 @@ plugins/autodev/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── main.rs              # CLI 진입점 (clap subcommands)
-│       ├── daemon/
-│       │   ├── mod.rs           # 데몬 시작/중지 (단일 인스턴스 보장)
-│       │   └── pid.rs           # PID 파일 관리 (~/.autodev/daemon.pid)
-│       ├── scanner/
-│       │   └── mod.rs           # GitHub 라벨 기반 스캐너
-│       ├── processor/
-│       │   ├── mod.rs           # Phase별 작업 실행
-│       │   ├── issue.rs         # Issue 처리 (분석 → 구현)
-│       │   ├── pr.rs            # PR 처리 (리뷰 → 개선)
-│       │   └── merge.rs         # Merge 처리
-│       ├── queue/
-│       │   ├── mod.rs           # TaskQueues (StateQueue + dedup index)
-│       │   ├── schema.rs        # SQLite 스키마 (repositories, scan_cursors, consumer_logs)
-│       │   └── repository.rs    # 레포/커서/로그 DB 쿼리
-│       ├── github/
-│       │   └── mod.rs           # GitHub API + 라벨 관리
-│       ├── workspace/
-│       │   └── mod.rs           # 워크스페이스 매니저 (git worktree)
-│       ├── session/
-│       │   ├── mod.rs           # claude -p 세션 실행
-│       │   └── output.rs        # 세션 출력 파싱
-│       ├── tui/
+│       │
+│       ├── infrastructure/      # 외부 시스템 추상화 (trait + 환경별 구현체)
+│       │   ├── gh/
+│       │   │   ├── mod.rs       # pub trait Gh { label_add, label_remove, list_issues, ... }
+│       │   │   ├── real.rs      # RealGh — Command::new("gh") 실행
+│       │   │   └── mock.rs      # MockGh — HashMap 기반 (테스트용)
+│       │   ├── git/
+│       │   │   ├── mod.rs       # pub trait Git { clone, worktree_add, checkout, diff, ... }
+│       │   │   ├── real.rs      # RealGit — Command::new("git") 실행
+│       │   │   └── mock.rs      # MockGit — tempdir 기반 (테스트용)
+│       │   └── claude/
+│       │       ├── mod.rs       # pub trait Claude { run_session, ... }
+│       │       ├── real.rs      # RealClaude — Command::new("claude") -p 실행
+│       │       └── mock.rs      # MockClaude — 고정 JSON 응답 (테스트용)
+│       │
+│       ├── components/          # 비즈니스 로직 단위 (trait 주입받아 동작)
+│       │   ├── workspace.rs     # Workspace { git: &dyn Git } — worktree 생명주기
+│       │   ├── analyzer.rs      # Analyzer { claude: &dyn Claude } — 이슈 분석
+│       │   ├── reviewer.rs      # Reviewer { claude: &dyn Claude } — PR 리뷰
+│       │   ├── merger.rs        # Merger { claude: &dyn Claude } — 머지 + 충돌 해결
+│       │   ├── notifier.rs      # Notifier { gh: &dyn Gh } — GitHub 댓글/라벨 관리
+│       │   └── verdict.rs       # 순수 함수 — verdict 판정 로직 (외부 의존성 없음)
+│       │
+│       ├── pipeline/            # 흐름 오케스트레이션 (components 조합)
+│       │   ├── mod.rs           # process_all() — 큐에서 pop → 타입별 분기
+│       │   ├── issue.rs         # 2-phase: analyze → implement
+│       │   ├── pr.rs            # review → improve → re-review 사이클
+│       │   └── merge.rs         # merge → conflict resolution
+│       │
+│       ├── scanner/             # GitHub 이벤트 감지
+│       │   ├── mod.rs           # scan_all() — 레포 순회 + cursor 관리
+│       │   ├── issues.rs        # IssueScanner { gh: &dyn Gh }
+│       │   └── pulls.rs         # PrScanner { gh: &dyn Gh }
+│       │
+│       ├── daemon/              # 데몬 생명주기 (루프만 담당)
+│       │   ├── mod.rs           # 메인 루프: recovery → scan → consume → sleep
+│       │   ├── pid.rs           # PID 파일 관리 (~/.autodev/daemon.pid)
+│       │   └── recovery.rs      # orphan wip 라벨 정리
+│       │
+│       ├── queue/               # 상태 관리 + 영속화
+│       │   ├── models.rs        # WorkId, IssueItem, PrItem, MergeItem 등
+│       │   ├── schema.rs        # SQLite DDL (repositories, scan_cursors, consumer_logs)
+│       │   ├── state_queue.rs   # In-Memory StateQueue<T> + dedup index
+│       │   ├── repo_store.rs    # RepositoryStore — 레포 CRUD
+│       │   ├── cursor_store.rs  # CursorStore — scan cursor 관리
+│       │   └── log_store.rs     # LogStore — consumer_logs 기록/조회
+│       │
+│       ├── tui/                 # TUI 대시보드
 │       │   ├── mod.rs           # TUI 앱 루프
 │       │   ├── views.rs         # 화면 레이아웃
 │       │   └── events.rs        # 키보드/마우스 이벤트 처리
-│       └── config/
-│           ├── mod.rs           # 설정 로드/저장
-│           └── models.rs        # 설정 모델
+│       │
+│       ├── config/              # 설정
+│       │   ├── mod.rs           # 설정 로드/저장
+│       │   └── models.rs        # 설정 모델
+│       │
+│       └── session/
+│           └── output.rs        # 세션 출력 파싱 (JSON → typed struct)
 │
 └── README.md
 ```
+
+### 레이어 의존성 규칙
+
+```
+main.rs
+  │
+  ▼
+daemon/          ← 루프만 담당, 직접 외부 호출 안 함
+  │
+  ├─→ scanner/   ← infrastructure/gh 주입받음
+  ├─→ pipeline/  ← components 조합
+  │     │
+  │     ▼
+  │   components/ ← infrastructure trait 주입받아 동작
+  │     │
+  │     ▼
+  │   infrastructure/  ← 외부 시스템 추상화 (gh, git, claude)
+  │     ├── gh/        mod.rs = trait, real.rs = 프로덕션, mock.rs = 테스트
+  │     ├── git/       mod.rs = trait, real.rs = 프로덕션, mock.rs = 테스트
+  │     └── claude/    mod.rs = trait, real.rs = 프로덕션, mock.rs = 테스트
+  │
+  ├─→ queue/     ← 순수 데이터 + SQLite (infrastructure와 독립)
+  └─→ config/    ← 설정 로드만
+```
+
+- **infrastructure → 외부**: 실제 CLI/API 호출 (gh, git, claude)
+- **components → infrastructure**: trait을 통해 주입 (테스트 시 mock 교체)
+- **pipeline → components**: 비즈니스 흐름 조합
+- **daemon → pipeline + scanner**: 루프에서 호출
+- **queue, config**: 독립 모듈, 어디서든 접근 가능
 
 ---
 
@@ -1170,28 +1230,30 @@ per-task이 놓치는 것:               daily가 발견:
 
 ### Phase 1: 코어 (MVP)
 1. Cargo 프로젝트 초기화 + CLI 프레임워크
-2. GitHub API 모듈 (라벨 조회/추가/제거)
-3. ActiveItems (HashMap)
-4. Scanner (라벨 기반 필터링)
-5. Workspace manager (git worktree)
-6. Session runner (claude -p 실행)
-7. Issue processor (분석 → 구현)
+2. infrastructure/ trait 정의 + mock 구현 (gh, git, claude)
+3. queue/ 모듈 (models, schema, state_queue, stores)
+4. components/ (workspace, analyzer, notifier, verdict)
+5. scanner/ (issues, pulls — gh trait 주입)
+6. pipeline/issue.rs (분석 → 구현 흐름)
+7. daemon/ 메인 루프 + pid
+8. infrastructure/ real 구현체 연결 (RealGh, RealGit, RealClaude)
 
 ### Phase 2: 확장
-8. PR processor + Merge processor
-9. Recovery (orphan wip 정리)
-10. 슬래시 커맨드 (auto-setup, auto, auto-config)
-11. 에이전트 파일
+9. pipeline/pr.rs + pipeline/merge.rs
+10. daemon/recovery.rs (orphan wip 정리)
+11. components/ (reviewer, merger)
+12. 슬래시 커맨드 (auto-setup, auto, auto-config)
+13. 에이전트 파일
 
 ### Phase 3: TUI 대시보드
-12. ratatui 기본 레이아웃 (active items, labels, logs)
-13. daemon.log tail 표시
-14. 키바인딩
+14. ratatui 기본 레이아웃 (active items, labels, logs)
+15. daemon.log tail 표시
+16. 키바인딩
 
 ### Phase 4: 배포
-15. CI/CD 통합 (rust-binary.yml)
-16. marketplace.json 등록
-17. README 문서화
+17. CI/CD 통합 (rust-binary.yml)
+18. marketplace.json 등록
+19. README 문서화
 
 ---
 

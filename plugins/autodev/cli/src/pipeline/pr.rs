@@ -3,25 +3,45 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::active::ActiveItems;
+use crate::components::notifier::Notifier;
+use crate::components::reviewer::Reviewer;
+use crate::components::workspace::Workspace;
 use crate::config;
 use crate::config::Env;
+use crate::infrastructure::claude::Claude;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::Database;
-use crate::session;
-use crate::workspace;
 
 /// pending PR 처리
-pub async fn process_pending(db: &Database, env: &dyn Env, active: &mut ActiveItems) -> Result<()> {
+pub async fn process_pending(
+    db: &Database,
+    env: &dyn Env,
+    workspace: &Workspace<'_>,
+    notifier: &Notifier<'_>,
+    claude: &dyn Claude,
+    active: &mut ActiveItems,
+) -> Result<()> {
     let cfg = config::loader::load_merged(env, None);
     let items = db.pr_find_pending(cfg.consumer.pr_concurrency)?;
+    let reviewer = Reviewer::new(claude);
 
     for item in items {
-        // Pre-flight: GitHub에서 PR이 리뷰 대상인지 확인 (open + not approved)
-        if !super::github::is_pr_reviewable(&item.repo_name, item.github_number, cfg.consumer.gh_host.as_deref()).await {
+        // Pre-flight: GitHub에서 PR이 리뷰 대상인지 확인
+        if !notifier
+            .is_pr_reviewable(
+                &item.repo_name,
+                item.github_number,
+                cfg.consumer.gh_host.as_deref(),
+            )
+            .await
+        {
             db.pr_update_status(&item.id, "done", &StatusFields::default())?;
             active.remove("pr", &item.repo_id, item.github_number);
-            tracing::info!("PR #{} is closed or already approved, skipping", item.github_number);
+            tracing::info!(
+                "PR #{} is closed or already approved, skipping",
+                item.github_number
+            );
             continue;
         }
 
@@ -38,36 +58,39 @@ pub async fn process_pending(db: &Database, env: &dyn Env, active: &mut ActiveIt
 
         // 워크스페이스 준비
         let task_id = format!("pr-{}", item.github_number);
-        if let Err(e) = workspace::ensure_cloned(env, &item.repo_url, &item.repo_name).await {
+        if let Err(e) = workspace
+            .ensure_cloned(&item.repo_url, &item.repo_name)
+            .await
+        {
             db.pr_mark_failed(&item.id, &format!("clone failed: {e}"))?;
             continue;
         }
 
-        let wt_path =
-            match workspace::create_worktree(env, &item.repo_name, &task_id, Some(&item.head_branch))
-                .await
-            {
-                Ok(p) => p,
-                Err(e) => {
-                    db.pr_mark_failed(&item.id, &format!("worktree failed: {e}"))?;
-                    continue;
-                }
-            };
+        let wt_path = match workspace
+            .create_worktree(&item.repo_name, &task_id, Some(&item.head_branch))
+            .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                db.pr_mark_failed(&item.id, &format!("worktree failed: {e}"))?;
+                continue;
+            }
+        };
 
         // YAML 설정 로드 (글로벌 + 레포별 머지)
-        let config = config::loader::load_merged(env, Some(&wt_path));
-        let pr_workflow = &config.workflow.pr;
+        let repo_cfg = config::loader::load_merged(env, Some(&wt_path));
+        let pr_workflow = &repo_cfg.workflow.pr;
 
-        // 1단계: Multi-LLM 리뷰
+        // 리뷰 실행 (Reviewer 컴포넌트 위임)
         let started = Utc::now().to_rfc3339();
 
-        let result = session::run_claude(&wt_path, pr_workflow, Some("json")).await;
-
-        match result {
-            Ok(res) => {
+        match reviewer.review_pr(&wt_path, pr_workflow).await {
+            Ok(output) => {
                 let finished = Utc::now().to_rfc3339();
                 let duration = chrono::Utc::now()
-                    .signed_duration_since(chrono::DateTime::parse_from_rfc3339(&started).unwrap())
+                    .signed_duration_since(
+                        chrono::DateTime::parse_from_rfc3339(&started).unwrap(),
+                    )
                     .num_milliseconds();
 
                 db.log_insert(&NewConsumerLog {
@@ -79,21 +102,20 @@ pub async fn process_pending(db: &Database, env: &dyn Env, active: &mut ActiveIt
                         "claude -p \"{}\" (PR #{})",
                         pr_workflow, item.github_number
                     ),
-                    stdout: res.stdout.clone(),
-                    stderr: res.stderr.clone(),
-                    exit_code: res.exit_code,
+                    stdout: output.stdout.clone(),
+                    stderr: output.stderr.clone(),
+                    exit_code: output.exit_code,
                     started_at: started,
                     finished_at: finished,
                     duration_ms: duration,
                 })?;
 
-                if res.exit_code == 0 {
-                    let review = session::output::parse_output(&res.stdout);
+                if output.exit_code == 0 {
                     db.pr_update_status(
                         &item.id,
                         "review_done",
                         &StatusFields {
-                            review_comment: Some(review),
+                            review_comment: Some(output.review),
                             ..Default::default()
                         },
                     )?;
@@ -102,7 +124,7 @@ pub async fn process_pending(db: &Database, env: &dyn Env, active: &mut ActiveIt
                 } else {
                     db.pr_mark_failed(
                         &item.id,
-                        &format!("review exited with {}", res.exit_code),
+                        &format!("review exited with {}", output.exit_code),
                     )?;
                 }
             }

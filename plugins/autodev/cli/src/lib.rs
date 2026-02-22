@@ -1,7 +1,8 @@
 pub mod active;
+pub mod components;
 pub mod config;
-pub mod consumer;
+pub mod daemon;
+pub mod infrastructure;
+pub mod pipeline;
 pub mod queue;
 pub mod scanner;
-pub mod session;
-pub mod workspace;
