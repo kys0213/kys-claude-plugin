@@ -109,28 +109,18 @@ pub async fn process_pending(
                 active.remove("merge", &item.repo_id, item.pr_number);
                 tracing::info!("PR #{} merged successfully", item.pr_number);
 
-                let _ = workspace
-                    .remove_worktree(&item.repo_name, &task_id)
-                    .await;
+                let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
             }
             MergeOutcome::Conflict => {
                 db.merge_update_status(&item.id, "conflict", &StatusFields::default())?;
 
-                let resolve_output =
-                    merger.resolve_conflicts(&wt_path, item.pr_number).await;
+                let resolve_output = merger.resolve_conflicts(&wt_path, item.pr_number).await;
 
                 match resolve_output.outcome {
                     MergeOutcome::Success => {
-                        db.merge_update_status(
-                            &item.id,
-                            "done",
-                            &StatusFields::default(),
-                        )?;
+                        db.merge_update_status(&item.id, "done", &StatusFields::default())?;
                         active.remove("merge", &item.repo_id, item.pr_number);
-                        tracing::info!(
-                            "PR #{} conflicts resolved and merged",
-                            item.pr_number
-                        );
+                        tracing::info!("PR #{} conflicts resolved and merged", item.pr_number);
                     }
                     _ => {
                         db.merge_mark_failed(&item.id, "conflict resolution failed")?;
@@ -138,10 +128,7 @@ pub async fn process_pending(
                 }
             }
             MergeOutcome::Failed { exit_code } => {
-                db.merge_mark_failed(
-                    &item.id,
-                    &format!("merge exited with {}", exit_code),
-                )?;
+                db.merge_mark_failed(&item.id, &format!("merge exited with {}", exit_code))?;
             }
             MergeOutcome::Error(e) => {
                 db.merge_mark_failed(&item.id, &format!("merge error: {e}"))?;

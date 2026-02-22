@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-suggest-workflow:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: macos-latest
     name: Build suggest-workflow (darwin-aarch64)
@@ -47,3 +47,51 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload ${{ steps.release.outputs.tag }} suggest-workflow-darwin-aarch64.tar.gz --clobber
+
+  build-autodev:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: autodev-linux-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: autodev-darwin-aarch64
+    runs-on: ${{ matrix.os }}
+    name: Build autodev (${{ matrix.artifact }})
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          fetch-depth: 0
+
+      - name: Get latest release tag
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName')
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Latest release: $TAG"
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Build release binary
+        working-directory: plugins/autodev/cli
+        run: cargo build --release
+
+      - name: Package binary
+        run: |
+          cd plugins/autodev/cli/target/release
+          tar czf ${{ github.workspace }}/${{ matrix.artifact }}.tar.gz autodev
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ steps.release.outputs.tag }} ${{ matrix.artifact }}.tar.gz --clobber

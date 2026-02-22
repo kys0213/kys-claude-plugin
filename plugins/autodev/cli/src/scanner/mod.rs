@@ -30,7 +30,8 @@ pub async fn scan_all(
             },
         );
 
-        let should_scan = db.cursor_should_scan(&repo.id, cfg.consumer.scan_interval_secs as i64)?;
+        let should_scan =
+            db.cursor_should_scan(&repo.id, cfg.consumer.scan_interval_secs as i64)?;
         if !should_scan {
             continue;
         }

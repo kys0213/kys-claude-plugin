@@ -131,7 +131,10 @@ async fn recovery_removes_orphan_issue_label() {
     assert_eq!(result.unwrap(), 1);
     let labels = gh.removed_labels.lock().unwrap();
     assert_eq!(labels.len(), 1);
-    assert_eq!(labels[0], ("org/repo".to_string(), 42, "autodev:wip".to_string()));
+    assert_eq!(
+        labels[0],
+        ("org/repo".to_string(), 42, "autodev:wip".to_string())
+    );
 }
 
 #[tokio::test]
@@ -147,7 +150,10 @@ async fn recovery_removes_orphan_pr_label() {
 
     assert_eq!(result.unwrap(), 1);
     let labels = gh.removed_labels.lock().unwrap();
-    assert_eq!(labels[0], ("org/repo".to_string(), 15, "autodev:wip".to_string()));
+    assert_eq!(
+        labels[0],
+        ("org/repo".to_string(), 15, "autodev:wip".to_string())
+    );
 }
 
 // ═══════════════════════════════════════════════
@@ -157,11 +163,12 @@ async fn recovery_removes_orphan_pr_label() {
 #[tokio::test]
 async fn recovery_mixed_active_and_orphan() {
     let items = serde_json::to_vec(&vec![
-        wip_issue_json(1),  // active → skip
-        wip_issue_json(2),  // orphan → recover
-        wip_pr_json(3),     // active (merge) → skip
-        wip_pr_json(4),     // orphan → recover
-    ]).unwrap();
+        wip_issue_json(1), // active → skip
+        wip_issue_json(2), // orphan → recover
+        wip_pr_json(3),    // active (merge) → skip
+        wip_pr_json(4),    // orphan → recover
+    ])
+    .unwrap();
     let gh = MockGh::new();
     gh.set_paginate("org/repo", "issues", items);
 
@@ -175,8 +182,8 @@ async fn recovery_mixed_active_and_orphan() {
     assert_eq!(result.unwrap(), 2);
     let labels = gh.removed_labels.lock().unwrap();
     assert_eq!(labels.len(), 2);
-    assert_eq!(labels[0].1, 2);  // issue #2
-    assert_eq!(labels[1].1, 4);  // pr #4
+    assert_eq!(labels[0].1, 2); // issue #2
+    assert_eq!(labels[1].1, 4); // pr #4
 }
 
 // ═══════════════════════════════════════════════
@@ -191,10 +198,7 @@ async fn recovery_api_failure_continues() {
     gh.set_paginate("org/repo2", "issues", b"[]".to_vec());
 
     let active = ActiveItems::new();
-    let repos = vec![
-        repo("r1", "org/repo1"),
-        repo("r2", "org/repo2"),
-    ];
+    let repos = vec![repo("r1", "org/repo1"), repo("r2", "org/repo2")];
 
     let result = recovery::recover_orphan_wip(&repos, &gh, &active, None::<&str>).await;
 
@@ -228,6 +232,12 @@ async fn recovery_multiple_repos() {
     assert_eq!(result.unwrap(), 2);
     let labels = gh.removed_labels.lock().unwrap();
     assert_eq!(labels.len(), 2);
-    assert_eq!(labels[0], ("org/repo1".to_string(), 10, "autodev:wip".to_string()));
-    assert_eq!(labels[1], ("org/repo2".to_string(), 20, "autodev:wip".to_string()));
+    assert_eq!(
+        labels[0],
+        ("org/repo1".to_string(), 10, "autodev:wip".to_string())
+    );
+    assert_eq!(
+        labels[1],
+        ("org/repo2".to_string(), 20, "autodev:wip".to_string())
+    );
 }

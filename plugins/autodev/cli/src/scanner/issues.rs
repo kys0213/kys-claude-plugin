@@ -29,6 +29,7 @@ struct GitHubUser {
 }
 
 /// GitHub Issues를 스캔하여 큐에 추가
+#[allow(clippy::too_many_arguments)]
 pub async fn scan(
     db: &Database,
     gh: &dyn Gh,
@@ -80,7 +81,7 @@ pub async fn scan(
         if active.contains("issue", repo_id, issue.number) {
             if latest_updated
                 .as_ref()
-                .map_or(true, |l| issue.updated_at > *l)
+                .is_none_or(|l| issue.updated_at > *l)
             {
                 latest_updated = Some(issue.updated_at.clone());
             }
@@ -92,9 +93,8 @@ pub async fn scan(
         if exists {
             active.insert("issue", repo_id, issue.number);
         } else {
-            let labels_json = serde_json::to_string(
-                &issue.labels.iter().map(|l| &l.name).collect::<Vec<_>>(),
-            )?;
+            let labels_json =
+                serde_json::to_string(&issue.labels.iter().map(|l| &l.name).collect::<Vec<_>>())?;
 
             let item = NewIssueItem {
                 repo_id: repo_id.to_string(),
@@ -112,7 +112,7 @@ pub async fn scan(
 
         if latest_updated
             .as_ref()
-            .map_or(true, |l| issue.updated_at > *l)
+            .is_none_or(|l| issue.updated_at > *l)
         {
             latest_updated = Some(issue.updated_at.clone());
         }

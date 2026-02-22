@@ -112,16 +112,17 @@ impl RepoRepository for Database {
         )?;
 
         // 레포 삭제
-        conn.execute("DELETE FROM repositories WHERE name = ?1", rusqlite::params![name])?;
+        conn.execute(
+            "DELETE FROM repositories WHERE name = ?1",
+            rusqlite::params![name],
+        )?;
 
         Ok(())
     }
 
     fn repo_list(&self) -> Result<Vec<RepoInfo>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare(
-            "SELECT name, url, enabled FROM repositories ORDER BY name",
-        )?;
+        let mut stmt = conn.prepare("SELECT name, url, enabled FROM repositories ORDER BY name")?;
 
         let rows = stmt.query_map([], |row| {
             Ok(RepoInfo {
@@ -135,9 +136,7 @@ impl RepoRepository for Database {
 
     fn repo_find_enabled(&self) -> Result<Vec<EnabledRepo>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare(
-            "SELECT id, url, name FROM repositories WHERE enabled = 1",
-        )?;
+        let mut stmt = conn.prepare("SELECT id, url, name FROM repositories WHERE enabled = 1")?;
 
         let rows = stmt.query_map([], |row| {
             Ok(EnabledRepo {
@@ -150,9 +149,9 @@ impl RepoRepository for Database {
     }
 
     fn repo_count(&self) -> Result<i64> {
-        let count = self.conn().query_row(
-            "SELECT COUNT(*) FROM repositories", [], |row| row.get(0),
-        )?;
+        let count = self
+            .conn()
+            .query_row("SELECT COUNT(*) FROM repositories", [], |row| row.get(0))?;
         Ok(count)
     }
 
@@ -259,7 +258,8 @@ impl IssueQueueRepository for Database {
              updated_at = ?6 \
              WHERE id = ?1",
             rusqlite::params![
-                id, status,
+                id,
+                status,
                 fields.worker_id.as_ref(),
                 fields.analysis_report.as_ref(),
                 fields.error_message.as_ref(),
@@ -283,7 +283,8 @@ impl IssueQueueRepository for Database {
     fn issue_count_active(&self) -> Result<i64> {
         let count = self.conn().query_row(
             "SELECT COUNT(*) FROM issue_queue WHERE status NOT IN ('done', 'failed')",
-            [], |row| row.get(0),
+            [],
+            |row| row.get(0),
         )?;
         Ok(count)
     }
@@ -296,7 +297,11 @@ impl IssueQueueRepository for Database {
              ORDER BY iq.created_at DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(rusqlite::params![repo_name, limit], |row| {
-            Ok(QueueListItem { github_number: row.get(0)?, title: row.get(1)?, status: row.get(2)? })
+            Ok(QueueListItem {
+                github_number: row.get(0)?,
+                title: row.get(1)?,
+                status: row.get(2)?,
+            })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
@@ -363,7 +368,8 @@ impl PrQueueRepository for Database {
              updated_at = ?6 \
              WHERE id = ?1",
             rusqlite::params![
-                id, status,
+                id,
+                status,
                 fields.worker_id.as_ref(),
                 fields.review_comment.as_ref(),
                 fields.error_message.as_ref(),
@@ -387,7 +393,8 @@ impl PrQueueRepository for Database {
     fn pr_count_active(&self) -> Result<i64> {
         let count = self.conn().query_row(
             "SELECT COUNT(*) FROM pr_queue WHERE status NOT IN ('done', 'failed')",
-            [], |row| row.get(0),
+            [],
+            |row| row.get(0),
         )?;
         Ok(count)
     }
@@ -400,7 +407,11 @@ impl PrQueueRepository for Database {
              ORDER BY pq.created_at DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(rusqlite::params![repo_name, limit], |row| {
-            Ok(QueueListItem { github_number: row.get(0)?, title: row.get(1)?, status: row.get(2)? })
+            Ok(QueueListItem {
+                github_number: row.get(0)?,
+                title: row.get(1)?,
+                status: row.get(2)?,
+            })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
@@ -465,7 +476,8 @@ impl MergeQueueRepository for Database {
              updated_at = ?5 \
              WHERE id = ?1",
             rusqlite::params![
-                id, status,
+                id,
+                status,
                 fields.worker_id.as_ref(),
                 fields.error_message.as_ref(),
                 now
@@ -488,7 +500,8 @@ impl MergeQueueRepository for Database {
     fn merge_count_active(&self) -> Result<i64> {
         let count = self.conn().query_row(
             "SELECT COUNT(*) FROM merge_queue WHERE status NOT IN ('done', 'failed')",
-            [], |row| row.get(0),
+            [],
+            |row| row.get(0),
         )?;
         Ok(count)
     }
@@ -501,7 +514,11 @@ impl MergeQueueRepository for Database {
              ORDER BY mq.created_at DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(rusqlite::params![repo_name, limit], |row| {
-            Ok(QueueListItem { github_number: row.get(0)?, title: row.get(1)?, status: row.get(2)? })
+            Ok(QueueListItem {
+                github_number: row.get(0)?,
+                title: row.get(1)?,
+                status: row.get(2)?,
+            })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
@@ -527,7 +544,8 @@ impl ScanCursorRepository for Database {
     }
 
     fn cursor_should_scan(&self, repo_id: &str, interval_secs: i64) -> Result<bool> {
-        let last_scan: Option<String> = self.conn()
+        let last_scan: Option<String> = self
+            .conn()
             .query_row(
                 "SELECT MAX(last_scan) FROM scan_cursors WHERE repo_id = ?1",
                 rusqlite::params![repo_id],
@@ -564,27 +582,27 @@ impl ConsumerLogRepository for Database {
     fn log_recent(&self, repo_name: Option<&str>, limit: usize) -> Result<Vec<LogEntry>> {
         let conn = self.conn();
 
-        let (query, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(name) = repo_name {
-            (
-                format!(
+        let (query, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+            if let Some(name) = repo_name {
+                (
                     "SELECT cl.started_at, cl.queue_type, cl.command, cl.exit_code, cl.duration_ms \
                      FROM consumer_logs cl JOIN repositories r ON cl.repo_id = r.id \
                      WHERE r.name = ?1 ORDER BY cl.started_at DESC LIMIT ?2"
-                ),
-                vec![Box::new(name.to_string()), Box::new(limit as i64)],
-            )
-        } else {
-            (
-                format!(
+                        .to_string(),
+                    vec![Box::new(name.to_string()), Box::new(limit as i64)],
+                )
+            } else {
+                (
                     "SELECT cl.started_at, cl.queue_type, cl.command, cl.exit_code, cl.duration_ms \
                      FROM consumer_logs cl ORDER BY cl.started_at DESC LIMIT ?1"
-                ),
-                vec![Box::new(limit as i64)],
-            )
-        };
+                        .to_string(),
+                    vec![Box::new(limit as i64)],
+                )
+            };
 
         let mut stmt = conn.prepare(&query)?;
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
         let rows = stmt.query_map(params_refs.as_slice(), |row| {
             Ok(LogEntry {
                 started_at: row.get(0)?,
@@ -634,7 +652,10 @@ impl QueueAdmin for Database {
         let mut total = 0u64;
 
         let stuck_states = [
-            ("issue_queue", &["analyzing", "processing", "ready"] as &[&str]),
+            (
+                "issue_queue",
+                &["analyzing", "processing", "ready"] as &[&str],
+            ),
             ("pr_queue", &["reviewing"]),
             ("merge_queue", &["merging", "conflict"]),
         ];

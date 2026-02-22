@@ -20,12 +20,7 @@ pub trait Git: Send + Sync {
     async fn pull_ff_only(&self, repo_dir: &Path) -> Result<bool>;
 
     /// `git worktree add {dest} [branch]` from base_dir
-    async fn worktree_add(
-        &self,
-        base_dir: &Path,
-        dest: &Path,
-        branch: Option<&str>,
-    ) -> Result<()>;
+    async fn worktree_add(&self, base_dir: &Path, dest: &Path, branch: Option<&str>) -> Result<()>;
 
     /// `git worktree remove --force {worktree}`
     async fn worktree_remove(&self, base_dir: &Path, worktree: &Path) -> Result<()>;

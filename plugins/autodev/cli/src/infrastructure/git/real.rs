@@ -32,12 +32,7 @@ impl Git for RealGit {
         Ok(status.success())
     }
 
-    async fn worktree_add(
-        &self,
-        base_dir: &Path,
-        dest: &Path,
-        branch: Option<&str>,
-    ) -> Result<()> {
+    async fn worktree_add(&self, base_dir: &Path, dest: &Path, branch: Option<&str>) -> Result<()> {
         let mut args = vec![
             "worktree".to_string(),
             "add".to_string(),
@@ -55,22 +50,14 @@ impl Git for RealGit {
             .await?;
 
         if !status.success() {
-            anyhow::bail!(
-                "git worktree add failed for {}",
-                dest.display()
-            );
+            anyhow::bail!("git worktree add failed for {}", dest.display());
         }
         Ok(())
     }
 
     async fn worktree_remove(&self, base_dir: &Path, worktree: &Path) -> Result<()> {
         tokio::process::Command::new("git")
-            .args([
-                "worktree",
-                "remove",
-                "--force",
-                worktree.to_str().unwrap(),
-            ])
+            .args(["worktree", "remove", "--force", worktree.to_str().unwrap()])
             .current_dir(base_dir)
             .status()
             .await?;

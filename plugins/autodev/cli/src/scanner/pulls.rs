@@ -67,10 +67,7 @@ pub async fn scan(
         }
 
         if active.contains("pr", repo_id, pr.number) {
-            if latest_updated
-                .as_ref()
-                .map_or(true, |l| pr.updated_at > *l)
-            {
+            if latest_updated.as_ref().is_none_or(|l| pr.updated_at > *l) {
                 latest_updated = Some(pr.updated_at.clone());
             }
             continue;
@@ -96,10 +93,7 @@ pub async fn scan(
             tracing::info!("queued PR #{}: {}", pr.number, pr.title);
         }
 
-        if latest_updated
-            .as_ref()
-            .map_or(true, |l| pr.updated_at > *l)
-        {
+        if latest_updated.as_ref().is_none_or(|l| pr.updated_at > *l) {
             latest_updated = Some(pr.updated_at.clone());
         }
     }

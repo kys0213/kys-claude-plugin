@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports)]
+
 pub mod active;
 pub mod components;
 pub mod config;

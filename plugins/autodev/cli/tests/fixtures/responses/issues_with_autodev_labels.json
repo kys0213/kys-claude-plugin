@@ -1,0 +1,47 @@
+[
+  {
+    "number": 60,
+    "title": "New feature request",
+    "body": "Please add this feature",
+    "labels": [{"name": "bug"}, {"name": "autodev"}],
+    "user": {"login": "alice"},
+    "updated_at": "2025-01-15T10:00:00Z",
+    "pull_request": null
+  },
+  {
+    "number": 61,
+    "title": "Already in progress",
+    "body": "Autodev is working on this",
+    "labels": [{"name": "bug"}, {"name": "autodev:wip"}],
+    "user": {"login": "bob"},
+    "updated_at": "2025-01-15T11:00:00Z",
+    "pull_request": null
+  },
+  {
+    "number": 62,
+    "title": "Completed by autodev",
+    "body": "Already done",
+    "labels": [{"name": "enhancement"}, {"name": "autodev:done"}],
+    "user": {"login": "charlie"},
+    "updated_at": "2025-01-15T12:00:00Z",
+    "pull_request": null
+  },
+  {
+    "number": 63,
+    "title": "Skipped issue",
+    "body": "Should not process",
+    "labels": [{"name": "wontfix"}, {"name": "autodev:skip"}],
+    "user": {"login": "dave"},
+    "updated_at": "2025-01-15T13:00:00Z",
+    "pull_request": null
+  },
+  {
+    "number": 64,
+    "title": "No autodev label",
+    "body": "Normal issue without autodev",
+    "labels": [{"name": "enhancement"}],
+    "user": {"login": "eve"},
+    "updated_at": "2025-01-15T14:00:00Z",
+    "pull_request": null
+  }
+]

@@ -18,14 +18,20 @@ pub struct MockGh {
     pub removed_labels: Mutex<Vec<(String, i64, String)>>,
 }
 
-impl MockGh {
-    pub fn new() -> Self {
+impl Default for MockGh {
+    fn default() -> Self {
         Self {
             fields: Mutex::new(HashMap::new()),
             paginate_responses: Mutex::new(HashMap::new()),
             posted_comments: Mutex::new(Vec::new()),
             removed_labels: Mutex::new(Vec::new()),
         }
+    }
+}
+
+impl MockGh {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// api_get_field 응답 설정

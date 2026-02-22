@@ -131,7 +131,10 @@ async fn merger_failure_without_conflict() {
     let merger = Merger::new(&claude);
     let output = merger.merge_pr(Path::new("/tmp/test"), 10).await;
 
-    assert!(matches!(output.outcome, MergeOutcome::Failed { exit_code: 1 }));
+    assert!(matches!(
+        output.outcome,
+        MergeOutcome::Failed { exit_code: 1 }
+    ));
     assert_eq!(output.stdout, "permission denied");
 }
 
@@ -173,7 +176,10 @@ async fn merger_resolve_failure() {
     let merger = Merger::new(&claude);
     let output = merger.resolve_conflicts(Path::new("/tmp/test"), 42).await;
 
-    assert!(matches!(output.outcome, MergeOutcome::Failed { exit_code: 1 }));
+    assert!(matches!(
+        output.outcome,
+        MergeOutcome::Failed { exit_code: 1 }
+    ));
 }
 
 // ═══════════════════════════════════════════════
@@ -213,5 +219,8 @@ async fn merger_conflict_then_resolve_failure() {
     assert!(matches!(merge_output.outcome, MergeOutcome::Conflict));
 
     let resolve_output = merger.resolve_conflicts(Path::new("/tmp/test"), 5).await;
-    assert!(matches!(resolve_output.outcome, MergeOutcome::Failed { .. }));
+    assert!(matches!(
+        resolve_output.outcome,
+        MergeOutcome::Failed { .. }
+    ));
 }

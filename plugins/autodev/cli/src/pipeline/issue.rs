@@ -8,11 +8,11 @@ use crate::components::verdict;
 use crate::components::workspace::Workspace;
 use crate::config;
 use crate::config::Env;
+use crate::infrastructure::claude::output;
 use crate::infrastructure::claude::Claude;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::Database;
-use crate::infrastructure::claude::output;
 
 // ─── 분석 프롬프트 (JSON 응답 스키마 명시) ───
 
@@ -69,7 +69,10 @@ pub async fn process_pending(
         {
             db.issue_update_status(&item.id, "done", &StatusFields::default())?;
             active.remove("issue", &item.repo_id, item.github_number);
-            tracing::info!("issue #{} is closed on GitHub, skipping", item.github_number);
+            tracing::info!(
+                "issue #{} is closed on GitHub, skipping",
+                item.github_number
+            );
             continue;
         }
 
@@ -120,9 +123,7 @@ pub async fn process_pending(
             Ok(res) => {
                 let finished = Utc::now().to_rfc3339();
                 let duration = chrono::Utc::now()
-                    .signed_duration_since(
-                        chrono::DateTime::parse_from_rfc3339(&started).unwrap(),
-                    )
+                    .signed_duration_since(chrono::DateTime::parse_from_rfc3339(&started).unwrap())
                     .num_milliseconds();
 
                 db.log_insert(&NewConsumerLog {
@@ -130,10 +131,7 @@ pub async fn process_pending(
                     queue_type: "issue".to_string(),
                     queue_item_id: item.id.clone(),
                     worker_id: worker_id.clone(),
-                    command: format!(
-                        "claude -p \"Analyze issue #{}...\"",
-                        item.github_number
-                    ),
+                    command: format!("claude -p \"Analyze issue #{}...\"", item.github_number),
                     stdout: res.stdout.clone(),
                     stderr: res.stderr.clone(),
                     exit_code: res.exit_code,
@@ -147,9 +145,7 @@ pub async fn process_pending(
                         &item.id,
                         &format!("claude exited with {}", res.exit_code),
                     )?;
-                    let _ = workspace
-                        .remove_worktree(&item.repo_name, &task_id)
-                        .await;
+                    let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
                     continue;
                 }
 
@@ -177,9 +173,7 @@ pub async fn process_pending(
                         )?;
                         active.remove("issue", &item.repo_id, item.github_number);
                         tracing::info!("issue #{} → wontfix", item.github_number);
-                        let _ = workspace
-                            .remove_worktree(&item.repo_name, &task_id)
-                            .await;
+                        let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
                     }
                     Some(ref a)
                         if a.verdict == "needs_clarification"
@@ -208,9 +202,7 @@ pub async fn process_pending(
                             a.verdict,
                             a.confidence
                         );
-                        let _ = workspace
-                            .remove_worktree(&item.repo_name, &task_id)
-                            .await;
+                        let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
                     }
                     Some(ref a) => {
                         // implement + high confidence → ready
@@ -249,9 +241,7 @@ pub async fn process_pending(
             }
             Err(e) => {
                 db.issue_mark_failed(&item.id, &format!("session error: {e}"))?;
-                let _ = workspace
-                    .remove_worktree(&item.repo_name, &task_id)
-                    .await;
+                let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
             }
         }
     }
@@ -322,9 +312,7 @@ pub async fn process_ready(
             Ok(res) => {
                 let finished = Utc::now().to_rfc3339();
                 let duration = chrono::Utc::now()
-                    .signed_duration_since(
-                        chrono::DateTime::parse_from_rfc3339(&started).unwrap(),
-                    )
+                    .signed_duration_since(chrono::DateTime::parse_from_rfc3339(&started).unwrap())
                     .num_milliseconds();
 
                 db.log_insert(&NewConsumerLog {
@@ -361,9 +349,7 @@ pub async fn process_ready(
         }
 
         // 구현 완료 후 worktree 정리
-        let _ = workspace
-            .remove_worktree(&item.repo_name, &task_id)
-            .await;
+        let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
     }
 
     Ok(())

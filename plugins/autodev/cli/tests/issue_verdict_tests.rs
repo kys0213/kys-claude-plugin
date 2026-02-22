@@ -65,7 +65,12 @@ fn set_gh_open(gh: &MockGh, repo_name: &str, number: i64) {
     gh.set_field(repo_name, &format!("issues/{number}"), ".state", "open");
 }
 
-fn make_analysis_json(verdict: &str, confidence: f64, questions: &[&str], reason: Option<&str>) -> String {
+fn make_analysis_json(
+    verdict: &str,
+    confidence: f64,
+    questions: &[&str],
+    reason: Option<&str>,
+) -> String {
     let questions_json: Vec<String> = questions.iter().map(|q| format!("\"{q}\"")).collect();
     let reason_json = match reason {
         Some(r) => format!("\"{}\"", r),
@@ -108,7 +113,12 @@ async fn issue_verdict_wontfix_posts_comment_and_marks_done() {
     let mut active = autodev::active::ActiveItems::new();
 
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &claude, &mut active,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &claude,
+        &mut active,
     )
     .await
     .unwrap();
@@ -157,7 +167,12 @@ async fn issue_verdict_needs_clarification_posts_questions_and_waits() {
     let mut active = autodev::active::ActiveItems::new();
 
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &claude, &mut active,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &claude,
+        &mut active,
     )
     .await
     .unwrap();
@@ -199,7 +214,12 @@ async fn issue_verdict_implement_low_confidence_goes_to_waiting() {
     let mut active = autodev::active::ActiveItems::new();
 
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &claude, &mut active,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &claude,
+        &mut active,
     )
     .await
     .unwrap();
@@ -239,7 +259,12 @@ async fn issue_verdict_implement_high_confidence_goes_to_ready() {
     let mut active = autodev::active::ActiveItems::new();
 
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &claude, &mut active,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &claude,
+        &mut active,
     )
     .await
     .unwrap();
@@ -277,7 +302,12 @@ async fn issue_closed_on_github_skips_to_done() {
     let mut active = autodev::active::ActiveItems::new();
 
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &claude, &mut active,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &claude,
+        &mut active,
     )
     .await
     .unwrap();
@@ -314,7 +344,12 @@ async fn issue_unparseable_analysis_falls_back_to_ready() {
     let mut active = autodev::active::ActiveItems::new();
 
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &claude, &mut active,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &claude,
+        &mut active,
     )
     .await
     .unwrap();
