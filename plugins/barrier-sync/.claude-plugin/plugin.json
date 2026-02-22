@@ -1,0 +1,23 @@
+{
+  "author": {
+    "name": "kys0213"
+  },
+  "commands": [
+    "./commands/barrier-setup.md"
+  ],
+  "description": "FIFO-based barrier pattern for parallel background Task synchronization",
+  "keywords": [
+    "barrier",
+    "sync",
+    "parallel",
+    "background",
+    "task",
+    "fifo",
+    "hook"
+  ],
+  "name": "barrier-sync",
+  "skills": [
+    "./skills"
+  ],
+  "version": "0.1.0"
+}
