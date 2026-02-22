@@ -257,7 +257,11 @@ async fn create_prs_commit_message_includes_autodev_prefix() {
 
     let report = make_report(
         "2026-02-22",
-        vec![make_suggestion(".claude/rules/test.md", "content", "improve CI")],
+        vec![make_suggestion(
+            ".claude/rules/test.md",
+            "content",
+            "improve CI",
+        )],
     );
 
     create_knowledge_prs(&gh, &git, "org/repo", &report, tmpdir.path(), None).await;

@@ -124,12 +124,19 @@ async fn issue_analysis_prompt_contains_autodev_analyze_marker() {
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
     let mut queues = TaskQueues::new();
-    queues
-        .issues
-        .push(issue_phase::PENDING, make_issue_item(&repo_id, 100, "Test issue"));
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 100, "Test issue"),
+    );
 
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -210,7 +217,13 @@ async fn pr_review_prompt_contains_autodev_review_marker() {
         .push("Pending", make_pr_item(&repo_id, 200, "Test PR"));
 
     autodev::pipeline::pr::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -248,11 +261,9 @@ async fn pr_improve_prompt_contains_autodev_improve_marker() {
     item.review_comment = Some("Fix the null check on line 42".to_string());
     queues.prs.push(pr_phase::REVIEW_DONE, item);
 
-    autodev::pipeline::pr::process_review_done(
-        &db, &env, &workspace, &gh, &claude, &mut queues,
-    )
-    .await
-    .unwrap();
+    autodev::pipeline::pr::process_review_done(&db, &env, &workspace, &gh, &claude, &mut queues)
+        .await
+        .unwrap();
 
     let calls = claude.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
@@ -287,12 +298,19 @@ async fn pr_re_review_prompt_contains_autodev_review_marker() {
     let notifier = Notifier::new(&gh);
     let mut queues = TaskQueues::new();
 
-    queues
-        .prs
-        .push(pr_phase::IMPROVED, make_pr_item(&repo_id, 202, "Improved PR"));
+    queues.prs.push(
+        pr_phase::IMPROVED,
+        make_pr_item(&repo_id, 202, "Improved PR"),
+    );
 
     autodev::pipeline::pr::process_improved(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -435,7 +453,10 @@ async fn reviewer_passes_json_output_format() {
 
     let reviewer = Reviewer::new(&claude);
     let _ = reviewer
-        .review_pr(Path::new("/tmp/test"), "[autodev] review: PR #99\n\nReview this PR")
+        .review_pr(
+            Path::new("/tmp/test"),
+            "[autodev] review: PR #99\n\nReview this PR",
+        )
         .await;
 
     let calls = claude.calls.lock().unwrap();

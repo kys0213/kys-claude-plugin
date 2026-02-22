@@ -101,9 +101,10 @@ async fn issue_verdict_wontfix_posts_comment_and_marks_done() {
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     let mut queues = TaskQueues::new();
-    queues
-        .issues
-        .push(issue_phase::PENDING, make_issue_item(&repo_id, 1, "Won't fix issue"));
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 1, "Won't fix issue"),
+    );
 
     let gh = MockGh::new();
     set_gh_open(&gh, "org/repo", 1);
@@ -135,14 +136,14 @@ async fn issue_verdict_wontfix_posts_comment_and_marks_done() {
 
     // skip label added, wip removed
     let added = gh.added_labels.lock().unwrap();
-    assert!(added.iter().any(|(repo, n, label)| repo == "org/repo"
-        && *n == 1
-        && label == labels::SKIP));
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 1 && label == labels::SKIP));
 
     let removed = gh.removed_labels.lock().unwrap();
-    assert!(removed.iter().any(|(repo, n, label)| repo == "org/repo"
-        && *n == 1
-        && label == labels::WIP));
+    assert!(removed
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 1 && label == labels::WIP));
 
     // comment posted with "Won't fix" and "Duplicate of #42"
     let comments = gh.posted_comments.lock().unwrap();
@@ -163,9 +164,10 @@ async fn issue_verdict_needs_clarification_posts_questions_and_waits() {
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     let mut queues = TaskQueues::new();
-    queues
-        .issues
-        .push(issue_phase::PENDING, make_issue_item(&repo_id, 2, "Ambiguous issue"));
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 2, "Ambiguous issue"),
+    );
 
     let gh = MockGh::new();
     set_gh_open(&gh, "org/repo", 2);
@@ -202,14 +204,14 @@ async fn issue_verdict_needs_clarification_posts_questions_and_waits() {
 
     // skip label added, wip removed
     let added = gh.added_labels.lock().unwrap();
-    assert!(added.iter().any(|(repo, n, label)| repo == "org/repo"
-        && *n == 2
-        && label == labels::SKIP));
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 2 && label == labels::SKIP));
 
     let removed = gh.removed_labels.lock().unwrap();
-    assert!(removed.iter().any(|(repo, n, label)| repo == "org/repo"
-        && *n == 2
-        && label == labels::WIP));
+    assert!(removed
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 2 && label == labels::WIP));
 
     // comment posted with questions
     let comments = gh.posted_comments.lock().unwrap();
@@ -230,9 +232,10 @@ async fn issue_verdict_implement_low_confidence_goes_to_waiting() {
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     let mut queues = TaskQueues::new();
-    queues
-        .issues
-        .push(issue_phase::PENDING, make_issue_item(&repo_id, 3, "Low confidence issue"));
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 3, "Low confidence issue"),
+    );
 
     let gh = MockGh::new();
     set_gh_open(&gh, "org/repo", 3);
@@ -262,14 +265,14 @@ async fn issue_verdict_implement_low_confidence_goes_to_waiting() {
 
     // skip label added, wip removed
     let added = gh.added_labels.lock().unwrap();
-    assert!(added.iter().any(|(repo, n, label)| repo == "org/repo"
-        && *n == 3
-        && label == labels::SKIP));
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 3 && label == labels::SKIP));
 
     let removed = gh.removed_labels.lock().unwrap();
-    assert!(removed.iter().any(|(repo, n, label)| repo == "org/repo"
-        && *n == 3
-        && label == labels::WIP));
+    assert!(removed
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 3 && label == labels::WIP));
 
     // clarification comment posted
     let comments = gh.posted_comments.lock().unwrap();
@@ -289,9 +292,10 @@ async fn issue_verdict_implement_high_confidence_goes_to_ready() {
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     let mut queues = TaskQueues::new();
-    queues
-        .issues
-        .push(issue_phase::PENDING, make_issue_item(&repo_id, 4, "Clear bug"));
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 4, "Clear bug"),
+    );
 
     let gh = MockGh::new();
     set_gh_open(&gh, "org/repo", 4);
@@ -339,9 +343,10 @@ async fn issue_closed_on_github_skips_to_done() {
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     let mut queues = TaskQueues::new();
-    queues
-        .issues
-        .push(issue_phase::PENDING, make_issue_item(&repo_id, 5, "Already closed"));
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 5, "Already closed"),
+    );
 
     let gh = MockGh::new();
     gh.set_field("org/repo", "issues/5", ".state", "closed");
@@ -370,14 +375,14 @@ async fn issue_closed_on_github_skips_to_done() {
 
     // done label added, wip removed
     let added = gh.added_labels.lock().unwrap();
-    assert!(added.iter().any(|(repo, n, label)| repo == "org/repo"
-        && *n == 5
-        && label == labels::DONE));
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 5 && label == labels::DONE));
 
     let removed = gh.removed_labels.lock().unwrap();
-    assert!(removed.iter().any(|(repo, n, label)| repo == "org/repo"
-        && *n == 5
-        && label == labels::WIP));
+    assert!(removed
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 5 && label == labels::WIP));
 
     // Claude not called
     assert_eq!(claude.call_count(), 0);
@@ -395,9 +400,10 @@ async fn issue_unparseable_analysis_falls_back_to_ready() {
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     let mut queues = TaskQueues::new();
-    queues
-        .issues
-        .push(issue_phase::PENDING, make_issue_item(&repo_id, 6, "Parse fail issue"));
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 6, "Parse fail issue"),
+    );
 
     let gh = MockGh::new();
     set_gh_open(&gh, "org/repo", 6);

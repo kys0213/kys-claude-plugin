@@ -46,17 +46,16 @@ pub async fn recover_orphan_wip(
             let queue_type = if is_pr { "pr" } else { "issue" };
             let work_id = make_work_id(queue_type, &repo.name, number);
 
-            if !queues.contains(&work_id) {
-                if gh
+            if !queues.contains(&work_id)
+                && gh
                     .label_remove(&repo.name, number, labels::WIP, gh_host)
                     .await
-                {
-                    recovered += 1;
-                    tracing::info!(
-                        "recovered orphan {queue_type} #{number} in {} (removed autodev:wip)",
-                        repo.name
-                    );
-                }
+            {
+                recovered += 1;
+                tracing::info!(
+                    "recovered orphan {queue_type} #{number} in {} (removed autodev:wip)",
+                    repo.name
+                );
             }
         }
     }

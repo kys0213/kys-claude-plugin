@@ -3,8 +3,8 @@ use serde::Deserialize;
 
 use crate::infrastructure::gh::Gh;
 use crate::queue::repository::*;
-use crate::queue::task_queues::{labels, issue_phase, make_work_id, IssueItem};
 use crate::queue::task_queues::TaskQueues;
+use crate::queue::task_queues::{issue_phase, labels, make_work_id, IssueItem};
 use crate::queue::Database;
 
 #[derive(Debug, Deserialize)]
@@ -30,9 +30,7 @@ struct GitHubUser {
 
 /// autodev: 라벨이 있는지 확인 (done/skip/wip)
 fn has_autodev_label(issue_labels: &[GitHubLabel]) -> bool {
-    issue_labels
-        .iter()
-        .any(|l| l.name.starts_with("autodev:"))
+    issue_labels.iter().any(|l| l.name.starts_with("autodev:"))
 }
 
 /// GitHub Issues를 스캔하여 TaskQueues에 추가 + autodev:wip 라벨 설정

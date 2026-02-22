@@ -22,6 +22,7 @@ pub struct MockGh {
     /// 생성된 이슈 기록: (repo_name, title, body)
     pub created_issues: Mutex<Vec<(String, String, String)>>,
     /// 생성된 PR 기록: (repo_name, head, base, title, body)
+    #[allow(clippy::type_complexity)]
     pub created_prs: Mutex<Vec<(String, String, String, String, String)>>,
 }
 
@@ -127,11 +128,10 @@ impl Gh for MockGh {
         label: &str,
         _host: Option<&str>,
     ) -> bool {
-        self.added_labels.lock().unwrap().push((
-            repo_name.to_string(),
-            number,
-            label.to_string(),
-        ));
+        self.added_labels
+            .lock()
+            .unwrap()
+            .push((repo_name.to_string(), number, label.to_string()));
         true
     }
 

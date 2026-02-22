@@ -116,12 +116,16 @@ async fn merge_success_cleans_up_worktree() {
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
     let mut queues = TaskQueues::new();
-    queues
-        .merges
-        .push("Pending", make_merge_item(&repo_id, 50));
+    queues.merges.push("Pending", make_merge_item(&repo_id, 50));
 
     autodev::pipeline::merge::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -153,12 +157,16 @@ async fn merge_conflict_does_not_clean_up_worktree_c5() {
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
     let mut queues = TaskQueues::new();
-    queues
-        .merges
-        .push("Pending", make_merge_item(&repo_id, 51));
+    queues.merges.push("Pending", make_merge_item(&repo_id, 51));
 
     autodev::pipeline::merge::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -188,12 +196,16 @@ async fn merge_failed_does_not_clean_up_worktree_c5() {
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
     let mut queues = TaskQueues::new();
-    queues
-        .merges
-        .push("Pending", make_merge_item(&repo_id, 52));
+    queues.merges.push("Pending", make_merge_item(&repo_id, 52));
 
     autodev::pipeline::merge::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -299,7 +311,13 @@ async fn pr_improved_approved_does_not_clean_worktree_c3() {
         .push(pr_phase::IMPROVED, make_pr_item(&repo_id, 70));
 
     autodev::pipeline::pr::process_improved(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -333,7 +351,13 @@ async fn pr_improved_request_changes_does_not_clean_worktree_c3() {
         .push(pr_phase::IMPROVED, make_pr_item(&repo_id, 71));
 
     autodev::pipeline::pr::process_improved(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -402,7 +426,12 @@ async fn review_cycle_has_no_iteration_limit_c4() {
     for _round in 1..=3 {
         // ReviewDone → Improved
         autodev::pipeline::pr::process_review_done(
-            &db, &env, &workspace, &gh, &claude, &mut queues,
+            &db,
+            &env,
+            &workspace,
+            &gh,
+            &claude,
+            &mut queues,
         )
         .await
         .unwrap();
@@ -410,7 +439,13 @@ async fn review_cycle_has_no_iteration_limit_c4() {
         if queues.prs.len(pr_phase::IMPROVED) > 0 {
             // Improved → re-review
             autodev::pipeline::pr::process_improved(
-                &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+                &db,
+                &env,
+                &workspace,
+                &notifier,
+                &gh,
+                &claude,
+                &mut queues,
             )
             .await
             .unwrap();

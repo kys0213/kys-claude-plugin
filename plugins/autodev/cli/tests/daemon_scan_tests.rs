@@ -290,7 +290,9 @@ async fn scan_prs_queues_new_items() {
 
     // autodev:wip label should have been added for alice's PR
     let added = gh.added_labels.lock().unwrap();
-    assert!(added.iter().any(|(_, n, l)| *n == 100 && l == "autodev:wip"));
+    assert!(added
+        .iter()
+        .any(|(_, n, l)| *n == 100 && l == "autodev:wip"));
 }
 
 #[tokio::test]

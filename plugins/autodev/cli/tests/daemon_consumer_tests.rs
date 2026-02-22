@@ -9,8 +9,7 @@ use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
 use autodev::queue::repository::*;
 use autodev::queue::task_queues::{
-    issue_phase, labels, make_work_id, pr_phase, IssueItem, MergeItem, PrItem,
-    TaskQueues,
+    issue_phase, labels, make_work_id, pr_phase, IssueItem, MergeItem, PrItem, TaskQueues,
 };
 use autodev::queue::Database;
 
@@ -136,9 +135,10 @@ async fn issue_pipeline_success_transitions_to_ready() {
     let mut queues = TaskQueues::new();
 
     // Push issue to PENDING queue before processing
-    queues
-        .issues
-        .push(issue_phase::PENDING, make_issue_item(&repo_id, 42, "Bug: test issue"));
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 42, "Bug: test issue"),
+    );
 
     autodev::pipeline::issue::process_pending(
         &db,
@@ -191,9 +191,10 @@ async fn issue_pipeline_claude_failure_marks_failed() {
     let mut queues = TaskQueues::new();
 
     // Push issue to PENDING queue
-    queues
-        .issues
-        .push(issue_phase::PENDING, make_issue_item(&repo_id, 99, "Will fail"));
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 99, "Will fail"),
+    );
 
     autodev::pipeline::issue::process_pending(
         &db,
@@ -216,9 +217,7 @@ async fn issue_pipeline_claude_failure_marks_failed() {
     assert!(
         removed
             .iter()
-            .any(|(repo, num, label)| repo == "org/repo"
-                && *num == 99
-                && label == labels::WIP),
+            .any(|(repo, num, label)| repo == "org/repo" && *num == 99 && label == labels::WIP),
         "wip label should be removed on failure"
     );
 }
@@ -253,9 +252,10 @@ async fn pr_pipeline_success_transitions_to_review_done() {
     let mut queues = TaskQueues::new();
 
     // Push PR to PENDING queue
-    queues
-        .prs
-        .push(pr_phase::PENDING, make_pr_item(&repo_id, 100, "feat: add settings"));
+    queues.prs.push(
+        pr_phase::PENDING,
+        make_pr_item(&repo_id, 100, "feat: add settings"),
+    );
 
     autodev::pipeline::pr::process_pending(
         &db,
@@ -333,9 +333,7 @@ async fn pr_pipeline_claude_failure_marks_failed() {
     assert!(
         removed
             .iter()
-            .any(|(repo, num, label)| repo == "org/repo"
-                && *num == 200
-                && label == labels::WIP),
+            .any(|(repo, num, label)| repo == "org/repo" && *num == 200 && label == labels::WIP),
         "wip label should be removed on failure"
     );
 }
@@ -435,17 +433,9 @@ async fn process_all_handles_issues_and_prs() {
         .prs
         .push(pr_phase::PENDING, make_pr_item(&repo_id, 10, "PR"));
 
-    autodev::pipeline::process_all(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .expect("process_all should succeed");
+    autodev::pipeline::process_all(&db, &env, &workspace, &notifier, &gh, &claude, &mut queues)
+        .await
+        .expect("process_all should succeed");
 
     // Issue should have moved from PENDING through processing
     assert_eq!(

@@ -64,4 +64,3 @@ pub fn global_config_path(env: &dyn Env) -> std::path::PathBuf {
     let home = env.var("HOME").unwrap_or_else(|_| ".".into());
     Path::new(&home).join(CONFIG_FILENAME)
 }
-

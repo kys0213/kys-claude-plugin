@@ -93,9 +93,7 @@ impl RepoRepository for Database {
 
     fn repo_status_summary(&self) -> Result<Vec<RepoStatusRow>> {
         let conn = self.conn();
-        let mut stmt = conn.prepare(
-            "SELECT name, enabled FROM repositories ORDER BY name",
-        )?;
+        let mut stmt = conn.prepare("SELECT name, enabled FROM repositories ORDER BY name")?;
         let rows = stmt.query_map([], |row| {
             Ok(RepoStatusRow {
                 name: row.get(0)?,

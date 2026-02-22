@@ -96,7 +96,10 @@ fn pid_file_contains_numeric_string() {
     pid::write_pid(tmpdir.path()).unwrap();
 
     let content = std::fs::read_to_string(tmpdir.path().join("daemon.pid")).unwrap();
-    let parsed: u32 = content.trim().parse().expect("PID file should contain a valid u32");
+    let parsed: u32 = content
+        .trim()
+        .parse()
+        .expect("PID file should contain a valid u32");
     assert_eq!(parsed, std::process::id());
 }
 

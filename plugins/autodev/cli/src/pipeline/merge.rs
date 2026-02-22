@@ -39,25 +39,38 @@ pub async fn process_pending(
             .is_pr_mergeable(&item.repo_name, item.pr_number, gh_host)
             .await
         {
-            gh.label_remove(&item.repo_name, item.pr_number, labels::WIP, gh_host).await;
-            gh.label_add(&item.repo_name, item.pr_number, labels::DONE, gh_host).await;
-            tracing::info!("PR #{} is closed or already merged, skipping", item.pr_number);
+            gh.label_remove(&item.repo_name, item.pr_number, labels::WIP, gh_host)
+                .await;
+            gh.label_add(&item.repo_name, item.pr_number, labels::DONE, gh_host)
+                .await;
+            tracing::info!(
+                "PR #{} is closed or already merged, skipping",
+                item.pr_number
+            );
             continue;
         }
 
         let worker_id = Uuid::new_v4().to_string();
         let task_id = format!("merge-pr-{}", item.pr_number);
 
-        if let Err(e) = workspace.ensure_cloned(&item.repo_url, &item.repo_name).await {
-            gh.label_remove(&item.repo_name, item.pr_number, labels::WIP, gh_host).await;
+        if let Err(e) = workspace
+            .ensure_cloned(&item.repo_url, &item.repo_name)
+            .await
+        {
+            gh.label_remove(&item.repo_name, item.pr_number, labels::WIP, gh_host)
+                .await;
             tracing::error!("clone failed for merge PR #{}: {e}", item.pr_number);
             continue;
         }
 
-        let wt_path = match workspace.create_worktree(&item.repo_name, &task_id, None).await {
+        let wt_path = match workspace
+            .create_worktree(&item.repo_name, &task_id, None)
+            .await
+        {
             Ok(p) => p,
             Err(e) => {
-                gh.label_remove(&item.repo_name, item.pr_number, labels::WIP, gh_host).await;
+                gh.label_remove(&item.repo_name, item.pr_number, labels::WIP, gh_host)
+                    .await;
                 tracing::error!("worktree failed for merge PR #{}: {e}", item.pr_number);
                 continue;
             }
@@ -91,8 +104,10 @@ pub async fn process_pending(
 
         match merge_output.outcome {
             MergeOutcome::Success => {
-                gh.label_remove(&item.repo_name, item.pr_number, labels::WIP, gh_host).await;
-                gh.label_add(&item.repo_name, item.pr_number, labels::DONE, gh_host).await;
+                gh.label_remove(&item.repo_name, item.pr_number, labels::WIP, gh_host)
+                    .await;
+                gh.label_add(&item.repo_name, item.pr_number, labels::DONE, gh_host)
+                    .await;
                 tracing::info!("PR #{} merged successfully → done", item.pr_number);
                 let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
             }
@@ -101,22 +116,30 @@ pub async fn process_pending(
 
                 match resolve_output.outcome {
                     MergeOutcome::Success => {
-                        gh.label_remove(&item.repo_name, item.pr_number, labels::WIP, gh_host).await;
-                        gh.label_add(&item.repo_name, item.pr_number, labels::DONE, gh_host).await;
-                        tracing::info!("PR #{} conflicts resolved and merged → done", item.pr_number);
+                        gh.label_remove(&item.repo_name, item.pr_number, labels::WIP, gh_host)
+                            .await;
+                        gh.label_add(&item.repo_name, item.pr_number, labels::DONE, gh_host)
+                            .await;
+                        tracing::info!(
+                            "PR #{} conflicts resolved and merged → done",
+                            item.pr_number
+                        );
                     }
                     _ => {
-                        gh.label_remove(&item.repo_name, item.pr_number, labels::WIP, gh_host).await;
+                        gh.label_remove(&item.repo_name, item.pr_number, labels::WIP, gh_host)
+                            .await;
                         tracing::error!("conflict resolution failed for PR #{}", item.pr_number);
                     }
                 }
             }
             MergeOutcome::Failed { exit_code } => {
-                gh.label_remove(&item.repo_name, item.pr_number, labels::WIP, gh_host).await;
+                gh.label_remove(&item.repo_name, item.pr_number, labels::WIP, gh_host)
+                    .await;
                 tracing::error!("merge exited with {} for PR #{}", exit_code, item.pr_number);
             }
             MergeOutcome::Error(e) => {
-                gh.label_remove(&item.repo_name, item.pr_number, labels::WIP, gh_host).await;
+                gh.label_remove(&item.repo_name, item.pr_number, labels::WIP, gh_host)
+                    .await;
                 tracing::error!("merge error for PR #{}: {e}", item.pr_number);
             }
         }

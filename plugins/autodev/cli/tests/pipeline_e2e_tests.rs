@@ -183,13 +183,20 @@ async fn issue_full_cycle_pending_to_done() {
     let mut queues = TaskQueues::new();
 
     // Push issue to Pending queue
-    queues
-        .issues
-        .push(issue_phase::PENDING, make_issue_item(&repo_id, 10, "Full cycle issue"));
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 10, "Full cycle issue"),
+    );
 
     // Phase 1: process_pending (Pending -> Ready)
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .expect("phase 1 should succeed");
@@ -258,13 +265,20 @@ async fn issue_failed_retry_reentry_cycle() {
     let mut queues = TaskQueues::new();
 
     // Push issue to Pending
-    queues
-        .issues
-        .push(issue_phase::PENDING, make_issue_item(&repo_id, 20, "Retry cycle issue"));
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 20, "Retry cycle issue"),
+    );
 
     // 1st attempt -> fails, item removed from queue, wip removed
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -277,13 +291,20 @@ async fn issue_failed_retry_reentry_cycle() {
     assert_label_removed(&gh, "org/repo", 20, labels::WIP);
 
     // Simulate re-discovery: push same issue again (as scanner would)
-    queues
-        .issues
-        .push(issue_phase::PENDING, make_issue_item(&repo_id, 20, "Retry cycle issue"));
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 20, "Retry cycle issue"),
+    );
 
     // 2nd attempt -> succeeds -> Ready
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -328,13 +349,23 @@ async fn pr_closed_on_github_skips_to_done() {
         .push("Pending", make_pr_item(&repo_id, 30, "Already closed PR"));
 
     autodev::pipeline::pr::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
 
     // Item removed from queue
-    assert_eq!(queues.prs.total(), 0, "closed PR should be removed from queue");
+    assert_eq!(
+        queues.prs.total(),
+        0,
+        "closed PR should be removed from queue"
+    );
 
     // Labels: done added, wip removed
     assert_label_added(&gh, "org/repo", 30, labels::DONE);
@@ -380,13 +411,23 @@ async fn pr_already_approved_skips_to_done() {
         .push("Pending", make_pr_item(&repo_id, 31, "Already approved PR"));
 
     autodev::pipeline::pr::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
 
     // Item removed from queue
-    assert_eq!(queues.prs.total(), 0, "approved PR should be removed from queue");
+    assert_eq!(
+        queues.prs.total(),
+        0,
+        "approved PR should be removed from queue"
+    );
 
     // Labels: done added, wip removed
     assert_label_added(&gh, "org/repo", 31, labels::DONE);
@@ -427,7 +468,13 @@ async fn merge_success_cycle() {
         .push("Pending", make_merge_item(&repo_id, 40, "Merge PR #40"));
 
     autodev::pipeline::merge::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -477,7 +524,13 @@ async fn merge_conflict_then_resolve_success() {
     );
 
     autodev::pipeline::merge::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -531,7 +584,13 @@ async fn merge_conflict_then_resolve_failure() {
     );
 
     autodev::pipeline::merge::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -572,12 +631,19 @@ async fn merge_already_merged_skips_to_done() {
     let notifier = Notifier::new(&gh);
     let mut queues = TaskQueues::new();
 
-    queues
-        .merges
-        .push("Pending", make_merge_item(&repo_id, 43, "Already merged PR"));
+    queues.merges.push(
+        "Pending",
+        make_merge_item(&repo_id, 43, "Already merged PR"),
+    );
 
     autodev::pipeline::merge::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -627,7 +693,13 @@ async fn confidence_at_threshold_goes_to_ready() {
     );
 
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -677,7 +749,13 @@ async fn confidence_just_below_threshold_goes_to_waiting() {
     );
 
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -730,7 +808,13 @@ async fn analysis_missing_confidence_field_falls_back_to_ready() {
     );
 
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -777,7 +861,13 @@ async fn analysis_completely_malformed_json_falls_back_to_ready() {
     );
 
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -819,7 +909,13 @@ async fn workspace_clone_failure_marks_issue_failed() {
     );
 
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -870,7 +966,13 @@ async fn workspace_worktree_failure_marks_issue_failed() {
     );
 
     autodev::pipeline::issue::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -915,12 +1017,19 @@ async fn workspace_clone_failure_marks_pr_failed() {
     let notifier = Notifier::new(&gh);
     let mut queues = TaskQueues::new();
 
-    queues
-        .prs
-        .push("Pending", make_pr_item(&repo_id, 70, "Clone will fail for PR"));
+    queues.prs.push(
+        "Pending",
+        make_pr_item(&repo_id, 70, "Clone will fail for PR"),
+    );
 
     autodev::pipeline::pr::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -967,7 +1076,13 @@ async fn workspace_clone_failure_marks_merge_failed() {
     );
 
     autodev::pipeline::merge::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -1124,7 +1239,13 @@ async fn merge_non_conflict_failure_marks_failed() {
     );
 
     autodev::pipeline::merge::process_pending(
-        &db, &env, &workspace, &notifier, &gh, &claude, &mut queues,
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
     )
     .await
     .unwrap();
@@ -1227,5 +1348,9 @@ async fn process_all_handles_all_queues() {
     );
     assert_label_added(&gh, "org/repo", 92, labels::DONE);
 
-    assert_eq!(claude.call_count(), 8, "should call claude 8 times total (6 pipeline + 2 knowledge extraction)");
+    assert_eq!(
+        claude.call_count(),
+        8,
+        "should call claude 8 times total (6 pipeline + 2 knowledge extraction)"
+    );
 }

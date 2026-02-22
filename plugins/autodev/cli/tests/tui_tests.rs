@@ -15,7 +15,10 @@ fn open_memory_db() -> Database {
 fn test_active_items_returns_empty() {
     let db = open_memory_db();
     let items = views::query_active_items(&db);
-    assert!(items.is_empty(), "query_active_items should always return empty vec");
+    assert!(
+        items.is_empty(),
+        "query_active_items should always return empty vec"
+    );
 }
 
 // ─── query_label_counts ───
@@ -49,4 +52,3 @@ fn test_panel_navigation() {
     state.next_panel();
     assert_eq!(state.active_panel, views::Panel::ActiveItems);
 }
-

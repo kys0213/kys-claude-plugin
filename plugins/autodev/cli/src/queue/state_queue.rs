@@ -108,10 +108,7 @@ impl<T: HasWorkId> StateQueue<T> {
     /// 특정 상태의 모든 아이템을 참조로 반환한다.
     #[allow(dead_code)]
     pub fn iter(&self, state: &str) -> impl Iterator<Item = &T> {
-        self.queues
-            .get(state)
-            .into_iter()
-            .flat_map(|q| q.iter())
+        self.queues.get(state).into_iter().flat_map(|q| q.iter())
     }
 
     /// 전체 아이템을 (state, &item) 형태로 순회한다.

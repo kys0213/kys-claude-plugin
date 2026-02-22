@@ -71,25 +71,38 @@ pub async fn process_pending(
             .is_issue_open(&item.repo_name, item.github_number, gh_host)
             .await
         {
-            gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
-            gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host).await;
-            tracing::info!("issue #{} is closed on GitHub, skipping", item.github_number);
+            gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                .await;
+            gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host)
+                .await;
+            tracing::info!(
+                "issue #{} is closed on GitHub, skipping",
+                item.github_number
+            );
             continue;
         }
 
         let worker_id = Uuid::new_v4().to_string();
         let task_id = format!("issue-{}", item.github_number);
 
-        if let Err(e) = workspace.ensure_cloned(&item.repo_url, &item.repo_name).await {
-            gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
+        if let Err(e) = workspace
+            .ensure_cloned(&item.repo_url, &item.repo_name)
+            .await
+        {
+            gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                .await;
             tracing::error!("clone failed for issue #{}: {e}", item.github_number);
             continue;
         }
 
-        let wt_path = match workspace.create_worktree(&item.repo_name, &task_id, None).await {
+        let wt_path = match workspace
+            .create_worktree(&item.repo_name, &task_id, None)
+            .await
+        {
             Ok(p) => p,
             Err(e) => {
-                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
+                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                    .await;
                 tracing::error!("worktree failed for issue #{}: {e}", item.github_number);
                 continue;
             }
@@ -131,7 +144,8 @@ pub async fn process_pending(
                 });
 
                 if res.exit_code != 0 {
-                    gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
+                    gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                        .await;
                     let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
                     continue;
                 }
@@ -141,9 +155,18 @@ pub async fn process_pending(
                 match analysis {
                     Some(ref a) if a.verdict == output::Verdict::Wontfix => {
                         let comment = verdict::format_wontfix_comment(a);
-                        notifier.post_issue_comment(&item.repo_name, item.github_number, &comment, gh_host).await;
-                        gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
-                        gh.label_add(&item.repo_name, item.github_number, labels::SKIP, gh_host).await;
+                        notifier
+                            .post_issue_comment(
+                                &item.repo_name,
+                                item.github_number,
+                                &comment,
+                                gh_host,
+                            )
+                            .await;
+                        gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                            .await;
+                        gh.label_add(&item.repo_name, item.github_number, labels::SKIP, gh_host)
+                            .await;
                         tracing::info!("issue #{} → wontfix (skip)", item.github_number);
                         let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
                     }
@@ -152,10 +175,24 @@ pub async fn process_pending(
                             || a.confidence < cfg.consumer.confidence_threshold =>
                     {
                         let comment = verdict::format_clarification_comment(a);
-                        notifier.post_issue_comment(&item.repo_name, item.github_number, &comment, gh_host).await;
-                        gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
-                        gh.label_add(&item.repo_name, item.github_number, labels::SKIP, gh_host).await;
-                        tracing::info!("issue #{} → skip (verdict={}, confidence={:.2})", item.github_number, a.verdict, a.confidence);
+                        notifier
+                            .post_issue_comment(
+                                &item.repo_name,
+                                item.github_number,
+                                &comment,
+                                gh_host,
+                            )
+                            .await;
+                        gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                            .await;
+                        gh.label_add(&item.repo_name, item.github_number, labels::SKIP, gh_host)
+                            .await;
+                        tracing::info!(
+                            "issue #{} → skip (verdict={}, confidence={:.2})",
+                            item.github_number,
+                            a.verdict,
+                            a.confidence
+                        );
                         let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
                     }
                     Some(ref a) => {
@@ -172,7 +209,8 @@ pub async fn process_pending(
                 }
             }
             Err(e) => {
-                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
+                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                    .await;
                 let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
                 tracing::error!("session error for issue #{}: {e}", item.github_number);
             }
@@ -208,15 +246,23 @@ pub async fn process_ready(
         let worker_id = Uuid::new_v4().to_string();
         let task_id = format!("issue-{}", item.github_number);
 
-        if let Err(e) = workspace.ensure_cloned(&item.repo_url, &item.repo_name).await {
-            gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
+        if let Err(e) = workspace
+            .ensure_cloned(&item.repo_url, &item.repo_name)
+            .await
+        {
+            gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                .await;
             tracing::error!("clone failed for issue #{}: {e}", item.github_number);
             continue;
         }
-        let wt_path = match workspace.create_worktree(&item.repo_name, &task_id, None).await {
+        let wt_path = match workspace
+            .create_worktree(&item.repo_name, &task_id, None)
+            .await
+        {
             Ok(p) => p,
             Err(e) => {
-                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
+                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                    .await;
                 tracing::error!("worktree failed for issue #{}: {e}", item.github_number);
                 continue;
             }
@@ -247,7 +293,10 @@ pub async fn process_ready(
                     queue_type: "issue".to_string(),
                     queue_item_id: item.work_id.clone(),
                     worker_id: worker_id.clone(),
-                    command: format!("claude -p \"{workflow} implement issue #{}\"", item.github_number),
+                    command: format!(
+                        "claude -p \"{workflow} implement issue #{}\"",
+                        item.github_number
+                    ),
                     stdout: res.stdout.clone(),
                     stderr: res.stderr.clone(),
                     exit_code: res.exit_code,
@@ -260,22 +309,39 @@ pub async fn process_ready(
                     // Knowledge extraction (best effort — 실패해도 done 전이는 유지)
                     if cfg.consumer.knowledge_extraction {
                         let _ = crate::knowledge::extractor::extract_task_knowledge(
-                            claude, gh, &item.repo_name, item.github_number,
-                            "issue", &wt_path, gh_host,
-                        ).await;
+                            claude,
+                            gh,
+                            &item.repo_name,
+                            item.github_number,
+                            "issue",
+                            &wt_path,
+                            gh_host,
+                        )
+                        .await;
                     }
 
-                    gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
-                    gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host).await;
+                    gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                        .await;
+                    gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host)
+                        .await;
                     tracing::info!("issue #{} → done", item.github_number);
                 } else {
-                    gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
-                    tracing::error!("implementation exited with {} for issue #{}", res.exit_code, item.github_number);
+                    gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                        .await;
+                    tracing::error!(
+                        "implementation exited with {} for issue #{}",
+                        res.exit_code,
+                        item.github_number
+                    );
                 }
             }
             Err(e) => {
-                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
-                tracing::error!("implementation error for issue #{}: {e}", item.github_number);
+                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                    .await;
+                tracing::error!(
+                    "implementation error for issue #{}: {e}",
+                    item.github_number
+                );
             }
         }
 

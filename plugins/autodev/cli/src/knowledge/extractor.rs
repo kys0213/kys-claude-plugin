@@ -81,9 +81,8 @@ fn parse_knowledge_suggestion(stdout: &str) -> Option<KnowledgeSuggestion> {
 
 /// KnowledgeSuggestion을 GitHub 코멘트로 포맷
 fn format_knowledge_comment(ks: &KnowledgeSuggestion, task_type: &str, number: i64) -> String {
-    let mut comment = format!(
-        "<!-- autodev:knowledge -->\n## Autodev Knowledge ({task_type} #{number})\n\n"
-    );
+    let mut comment =
+        format!("<!-- autodev:knowledge -->\n## Autodev Knowledge ({task_type} #{number})\n\n");
 
     for (i, s) in ks.suggestions.iter().enumerate() {
         comment.push_str(&format!(

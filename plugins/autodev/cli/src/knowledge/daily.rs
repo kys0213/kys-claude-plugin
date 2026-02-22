@@ -214,9 +214,7 @@ pub async fn post_daily_report(
     let body = format_daily_report_body(report);
 
     // gh api로 이슈 생성
-    let created = gh
-        .create_issue(repo_name, &title, &body, gh_host)
-        .await;
+    let created = gh.create_issue(repo_name, &title, &body, gh_host).await;
     if !created {
         tracing::error!("failed to create daily report issue for {repo_name}");
     }
@@ -278,8 +276,10 @@ pub async fn create_knowledge_prs(
              **Target**: `{}`\n\n\
              ### Content\n\n```\n{}\n```\n\n\
              ### Reason\n\n{}",
-            suggestion.suggestion_type, suggestion.target_file,
-            suggestion.content, suggestion.reason,
+            suggestion.suggestion_type,
+            suggestion.target_file,
+            suggestion.content,
+            suggestion.reason,
         );
 
         if let Some(pr_number) = gh

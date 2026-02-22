@@ -68,8 +68,8 @@ pub enum LogLevel {
     Unknown,
 }
 
-impl AppState {
-    pub fn new() -> Self {
+impl Default for AppState {
+    fn default() -> Self {
         Self {
             active_panel: Panel::ActiveItems,
             selected_index: 0,
@@ -77,6 +77,12 @@ impl AppState {
             log_lines: Vec::new(),
             status_message: None,
         }
+    }
+}
+
+impl AppState {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn next_panel(&mut self) {
@@ -339,7 +345,10 @@ fn render_labels_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppStat
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
-            Span::styled(bar_scaled(counts.done, max_count, 15), Style::default().fg(Color::Green)),
+            Span::styled(
+                bar_scaled(counts.done, max_count, 15),
+                Style::default().fg(Color::Green),
+            ),
         ])),
         ListItem::new(Line::from(vec![
             Span::raw("  "),
@@ -349,7 +358,10 @@ fn render_labels_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppStat
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
-            Span::styled(bar_scaled(counts.skip, max_count, 15), Style::default().fg(Color::Yellow)),
+            Span::styled(
+                bar_scaled(counts.skip, max_count, 15),
+                Style::default().fg(Color::Yellow),
+            ),
         ])),
         ListItem::new(Line::from(vec![
             Span::raw("  "),
@@ -359,7 +371,10 @@ fn render_labels_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppStat
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
-            Span::styled(bar_scaled(counts.failed, max_count, 15), Style::default().fg(Color::Red)),
+            Span::styled(
+                bar_scaled(counts.failed, max_count, 15),
+                Style::default().fg(Color::Red),
+            ),
         ])),
     ];
 

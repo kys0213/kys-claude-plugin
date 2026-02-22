@@ -58,7 +58,15 @@ pub async fn start(
     let reconcile_window_hours = 24u32;
 
     // 0. Startup Reconcile (bounded recovery)
-    match startup_reconcile(&db, gh, &mut queues, gh_host.as_deref(), reconcile_window_hours).await {
+    match startup_reconcile(
+        &db,
+        gh,
+        &mut queues,
+        gh_host.as_deref(),
+        reconcile_window_hours,
+    )
+    .await
+    {
         Ok(n) if n > 0 => info!("startup reconcile: recovered {n} items"),
         Err(e) => tracing::error!("startup reconcile failed: {e}"),
         _ => {}
@@ -175,7 +183,9 @@ async fn startup_reconcile(
     gh_host: Option<&str>,
     reconcile_window_hours: u32,
 ) -> Result<u64> {
-    use crate::queue::task_queues::{labels, issue_phase, pr_phase, make_work_id, IssueItem, PrItem};
+    use crate::queue::task_queues::{
+        issue_phase, labels, make_work_id, pr_phase, IssueItem, PrItem,
+    };
 
     let repos = db.repo_find_enabled()?;
     let mut recovered = 0u64;
@@ -186,16 +196,16 @@ async fn startup_reconcile(
             db.cursor_get_last_seen(&repo.id, "issues")?,
             reconcile_window_hours,
         );
-        let mut params: Vec<(&str, &str)> = vec![
-            ("state", "open"),
-            ("sort", "updated"),
-            ("per_page", "100"),
-        ];
+        let mut params: Vec<(&str, &str)> =
+            vec![("state", "open"), ("sort", "updated"), ("per_page", "100")];
         if let Some(ref s) = safe_since {
             params.push(("since", s));
         }
 
-        if let Ok(data) = gh.api_paginate(&repo.name, "issues", &params, gh_host).await {
+        if let Ok(data) = gh
+            .api_paginate(&repo.name, "issues", &params, gh_host)
+            .await
+        {
             let items: Vec<serde_json::Value> = serde_json::from_slice(&data).unwrap_or_default();
             for item in items {
                 // PR 제외
@@ -212,9 +222,9 @@ async fn startup_reconcile(
                     .map(|arr| arr.iter().filter_map(|l| l["name"].as_str()).collect())
                     .unwrap_or_default();
 
-                let has_done = item_labels.iter().any(|l| *l == labels::DONE);
-                let has_skip = item_labels.iter().any(|l| *l == labels::SKIP);
-                let has_wip = item_labels.iter().any(|l| *l == labels::WIP);
+                let has_done = item_labels.contains(&labels::DONE);
+                let has_skip = item_labels.contains(&labels::SKIP);
+                let has_wip = item_labels.contains(&labels::WIP);
 
                 if has_done || has_skip {
                     continue;
@@ -227,7 +237,8 @@ async fn startup_reconcile(
 
                 // orphan wip → 라벨 제거 후 큐 적재
                 if has_wip {
-                    gh.label_remove(&repo.name, number, labels::WIP, gh_host).await;
+                    gh.label_remove(&repo.name, number, labels::WIP, gh_host)
+                        .await;
                 }
 
                 // 큐에 적재 + wip 라벨 추가
@@ -255,11 +266,8 @@ async fn startup_reconcile(
             db.cursor_get_last_seen(&repo.id, "pulls")?,
             reconcile_window_hours,
         );
-        let mut params: Vec<(&str, &str)> = vec![
-            ("state", "open"),
-            ("sort", "updated"),
-            ("per_page", "100"),
-        ];
+        let mut params: Vec<(&str, &str)> =
+            vec![("state", "open"), ("sort", "updated"), ("per_page", "100")];
         if let Some(ref s) = safe_since_pulls {
             params.push(("since", s));
         }
@@ -277,9 +285,9 @@ async fn startup_reconcile(
                     .map(|arr| arr.iter().filter_map(|l| l["name"].as_str()).collect())
                     .unwrap_or_default();
 
-                let has_done = item_labels.iter().any(|l| *l == labels::DONE);
-                let has_skip = item_labels.iter().any(|l| *l == labels::SKIP);
-                let has_wip = item_labels.iter().any(|l| *l == labels::WIP);
+                let has_done = item_labels.contains(&labels::DONE);
+                let has_skip = item_labels.contains(&labels::SKIP);
+                let has_wip = item_labels.contains(&labels::WIP);
 
                 if has_done || has_skip {
                     continue;
@@ -291,7 +299,8 @@ async fn startup_reconcile(
                 }
 
                 if has_wip {
-                    gh.label_remove(&repo.name, number, labels::WIP, gh_host).await;
+                    gh.label_remove(&repo.name, number, labels::WIP, gh_host)
+                        .await;
                 }
 
                 let pr_item = PrItem {
@@ -357,7 +366,8 @@ mod tests {
 
     #[test]
     fn compute_safe_since_none_cursor_uses_now() {
-        let before = chrono::Utc::now() - chrono::Duration::hours(24) - chrono::Duration::seconds(5);
+        let before =
+            chrono::Utc::now() - chrono::Duration::hours(24) - chrono::Duration::seconds(5);
         let result = compute_safe_since(None, 24).unwrap();
         let dt = chrono::DateTime::parse_from_rfc3339(&result)
             .unwrap()
@@ -413,7 +423,9 @@ mod tests {
     #[tokio::test]
     async fn startup_reconcile_recovers_open_issues() {
         let db = open_memory_db();
-        let _repo_id = db.repo_add("https://github.com/org/repo", "org/repo").unwrap();
+        let _repo_id = db
+            .repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
 
         let gh = MockGh::new();
         let issues = serde_json::json!([{
@@ -427,19 +439,25 @@ mod tests {
         gh.set_paginate("org/repo", "pulls", b"[]".to_vec());
 
         let mut queues = TaskQueues::new();
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24).await.unwrap();
+        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+            .await
+            .unwrap();
 
         assert_eq!(result, 1);
         assert!(queues.contains("issue:org/repo:10"));
 
         let added = gh.added_labels.lock().unwrap();
-        assert!(added.iter().any(|(r, n, l)| r == "org/repo" && *n == 10 && l == "autodev:wip"));
+        assert!(added
+            .iter()
+            .any(|(r, n, l)| r == "org/repo" && *n == 10 && l == "autodev:wip"));
     }
 
     #[tokio::test]
     async fn startup_reconcile_recovers_open_prs() {
         let db = open_memory_db();
-        let _repo_id = db.repo_add("https://github.com/org/repo", "org/repo").unwrap();
+        let _repo_id = db
+            .repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
 
         let gh = MockGh::new();
         gh.set_paginate("org/repo", "issues", b"[]".to_vec());
@@ -454,7 +472,9 @@ mod tests {
         gh.set_paginate("org/repo", "pulls", serde_json::to_vec(&pulls).unwrap());
 
         let mut queues = TaskQueues::new();
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24).await.unwrap();
+        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+            .await
+            .unwrap();
 
         assert_eq!(result, 1);
         assert!(queues.contains("pr:org/repo:20"));
@@ -463,7 +483,9 @@ mod tests {
     #[tokio::test]
     async fn startup_reconcile_skips_done_and_skip_labels() {
         let db = open_memory_db();
-        let _repo_id = db.repo_add("https://github.com/org/repo", "org/repo").unwrap();
+        let _repo_id = db
+            .repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
 
         let gh = MockGh::new();
         let issues = serde_json::json!([
@@ -475,7 +497,9 @@ mod tests {
         gh.set_paginate("org/repo", "pulls", b"[]".to_vec());
 
         let mut queues = TaskQueues::new();
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24).await.unwrap();
+        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+            .await
+            .unwrap();
 
         assert_eq!(result, 1, "only the normal issue should be recovered");
         assert!(!queues.contains("issue:org/repo:1"));
@@ -486,7 +510,9 @@ mod tests {
     #[tokio::test]
     async fn startup_reconcile_removes_orphan_wip_and_re_adds() {
         let db = open_memory_db();
-        let _repo_id = db.repo_add("https://github.com/org/repo", "org/repo").unwrap();
+        let _repo_id = db
+            .repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
 
         let gh = MockGh::new();
         let issues = serde_json::json!([{
@@ -499,16 +525,22 @@ mod tests {
         gh.set_paginate("org/repo", "pulls", b"[]".to_vec());
 
         let mut queues = TaskQueues::new();
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24).await.unwrap();
+        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+            .await
+            .unwrap();
 
         assert_eq!(result, 1);
 
         // Old WIP removed then new WIP added
         let removed = gh.removed_labels.lock().unwrap();
-        assert!(removed.iter().any(|(r, n, l)| r == "org/repo" && *n == 42 && l == "autodev:wip"));
+        assert!(removed
+            .iter()
+            .any(|(r, n, l)| r == "org/repo" && *n == 42 && l == "autodev:wip"));
 
         let added = gh.added_labels.lock().unwrap();
-        assert!(added.iter().any(|(r, n, l)| r == "org/repo" && *n == 42 && l == "autodev:wip"));
+        assert!(added
+            .iter()
+            .any(|(r, n, l)| r == "org/repo" && *n == 42 && l == "autodev:wip"));
     }
 
     #[tokio::test]
@@ -517,14 +549,18 @@ mod tests {
         let gh = MockGh::new();
         let mut queues = TaskQueues::new();
 
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24).await.unwrap();
+        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+            .await
+            .unwrap();
         assert_eq!(result, 0);
     }
 
     #[tokio::test]
     async fn startup_reconcile_skips_prs_in_issue_endpoint() {
         let db = open_memory_db();
-        let _repo_id = db.repo_add("https://github.com/org/repo", "org/repo").unwrap();
+        let _repo_id = db
+            .repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
 
         let gh = MockGh::new();
         let issues = serde_json::json!([{
@@ -538,7 +574,9 @@ mod tests {
         gh.set_paginate("org/repo", "pulls", b"[]".to_vec());
 
         let mut queues = TaskQueues::new();
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24).await.unwrap();
+        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+            .await
+            .unwrap();
 
         assert_eq!(result, 0, "PRs in issue endpoint should be skipped");
     }
@@ -546,7 +584,9 @@ mod tests {
     #[tokio::test]
     async fn startup_reconcile_skips_already_queued_items() {
         let db = open_memory_db();
-        let _repo_id = db.repo_add("https://github.com/org/repo", "org/repo").unwrap();
+        let _repo_id = db
+            .repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
 
         let gh = MockGh::new();
         let issues = serde_json::json!([
@@ -572,7 +612,9 @@ mod tests {
             },
         );
 
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24).await.unwrap();
+        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+            .await
+            .unwrap();
         assert_eq!(result, 0, "already queued items should be skipped");
     }
 
@@ -580,7 +622,9 @@ mod tests {
     #[tokio::test]
     async fn startup_reconcile_uses_configurable_window() {
         let db = open_memory_db();
-        let _repo_id = db.repo_add("https://github.com/org/repo", "org/repo").unwrap();
+        let _repo_id = db
+            .repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
 
         let gh = MockGh::new();
         let issues = serde_json::json!([
@@ -592,7 +636,9 @@ mod tests {
         let mut queues = TaskQueues::new();
 
         // window=48h should still work — function accepts the param
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 48).await.unwrap();
+        let result = startup_reconcile(&db, &gh, &mut queues, None, 48)
+            .await
+            .unwrap();
         assert_eq!(result, 1, "48h window should work the same as 24h");
     }
 }

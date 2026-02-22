@@ -50,17 +50,26 @@ pub async fn process_pending(
             .is_pr_reviewable(&item.repo_name, item.github_number, gh_host)
             .await
         {
-            gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
-            gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host).await;
-            tracing::info!("PR #{} is closed or already approved, skipping", item.github_number);
+            gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                .await;
+            gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host)
+                .await;
+            tracing::info!(
+                "PR #{} is closed or already approved, skipping",
+                item.github_number
+            );
             continue;
         }
 
         let worker_id = Uuid::new_v4().to_string();
         let task_id = format!("pr-{}", item.github_number);
 
-        if let Err(e) = workspace.ensure_cloned(&item.repo_url, &item.repo_name).await {
-            gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
+        if let Err(e) = workspace
+            .ensure_cloned(&item.repo_url, &item.repo_name)
+            .await
+        {
+            gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                .await;
             tracing::error!("clone failed for PR #{}: {e}", item.github_number);
             continue;
         }
@@ -71,7 +80,8 @@ pub async fn process_pending(
         {
             Ok(p) => p,
             Err(e) => {
-                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
+                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                    .await;
                 tracing::error!("worktree failed for PR #{}: {e}", item.github_number);
                 continue;
             }
@@ -111,19 +121,27 @@ pub async fn process_pending(
 
                     // 리뷰 결과를 GitHub PR 댓글로 게시
                     let comment = format_review_comment(&output.review, pr_num);
-                    notifier.post_issue_comment(&item.repo_name, pr_num, &comment, gh_host).await;
+                    notifier
+                        .post_issue_comment(&item.repo_name, pr_num, &comment, gh_host)
+                        .await;
 
                     // 리뷰 결과 저장 → ReviewDone에 push (피드백 루프 진입)
                     item.review_comment = Some(output.review);
                     queues.prs.push(pr_phase::REVIEW_DONE, item);
                     tracing::info!("PR #{} review complete → ReviewDone", pr_num);
                 } else {
-                    gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
-                    tracing::error!("review exited with {} for PR #{}", output.exit_code, item.github_number);
+                    gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                        .await;
+                    tracing::error!(
+                        "review exited with {} for PR #{}",
+                        output.exit_code,
+                        item.github_number
+                    );
                 }
             }
             Err(e) => {
-                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
+                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                    .await;
                 tracing::error!("review error for PR #{}: {e}", item.github_number);
             }
         }
@@ -148,8 +166,12 @@ pub async fn process_review_done(
         let worker_id = Uuid::new_v4().to_string();
         let task_id = format!("pr-{}", item.github_number);
 
-        if let Err(e) = workspace.ensure_cloned(&item.repo_url, &item.repo_name).await {
-            gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
+        if let Err(e) = workspace
+            .ensure_cloned(&item.repo_url, &item.repo_name)
+            .await
+        {
+            gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                .await;
             tracing::error!("clone failed for PR #{}: {e}", item.github_number);
             continue;
         }
@@ -160,7 +182,8 @@ pub async fn process_review_done(
         {
             Ok(p) => p,
             Err(e) => {
-                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
+                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                    .await;
                 tracing::error!("worktree failed for PR #{}: {e}", item.github_number);
                 continue;
             }
@@ -202,13 +225,21 @@ pub async fn process_review_done(
                     queues.prs.push(pr_phase::IMPROVED, item);
                     tracing::info!("PR feedback implemented → Improved");
                 } else {
-                    gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
-                    tracing::error!("feedback implementation failed for PR #{}", item.github_number);
+                    gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                        .await;
+                    tracing::error!(
+                        "feedback implementation failed for PR #{}",
+                        item.github_number
+                    );
                 }
             }
             Err(e) => {
-                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
-                tracing::error!("feedback implementation error for PR #{}: {e}", item.github_number);
+                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                    .await;
+                tracing::error!(
+                    "feedback implementation error for PR #{}: {e}",
+                    item.github_number
+                );
             }
         }
     }
@@ -234,8 +265,12 @@ pub async fn process_improved(
         let worker_id = Uuid::new_v4().to_string();
         let task_id = format!("pr-{}", item.github_number);
 
-        if let Err(e) = workspace.ensure_cloned(&item.repo_url, &item.repo_name).await {
-            gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
+        if let Err(e) = workspace
+            .ensure_cloned(&item.repo_url, &item.repo_name)
+            .await
+        {
+            gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                .await;
             tracing::error!("clone failed for PR #{}: {e}", item.github_number);
             continue;
         }
@@ -246,7 +281,8 @@ pub async fn process_improved(
         {
             Ok(p) => p,
             Err(e) => {
-                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
+                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                    .await;
                 tracing::error!("worktree failed for PR #{}: {e}", item.github_number);
                 continue;
             }
@@ -285,13 +321,21 @@ pub async fn process_improved(
                     // Knowledge extraction (best effort)
                     if cfg.consumer.knowledge_extraction {
                         let _ = crate::knowledge::extractor::extract_task_knowledge(
-                            claude, gh, &item.repo_name, item.github_number,
-                            "pr", &wt_path, gh_host,
-                        ).await;
+                            claude,
+                            gh,
+                            &item.repo_name,
+                            item.github_number,
+                            "pr",
+                            &wt_path,
+                            gh_host,
+                        )
+                        .await;
                     }
 
-                    gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
-                    gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host).await;
+                    gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                        .await;
+                    gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host)
+                        .await;
                     tracing::info!("PR #{} re-review → done (approved)", item.github_number);
                 } else {
                     // 재리뷰 실패 → request_changes → ReviewDone 재진입
@@ -301,7 +345,8 @@ pub async fn process_improved(
                 }
             }
             Err(e) => {
-                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host).await;
+                gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                    .await;
                 tracing::error!("re-review error for PR #{}: {e}", item.github_number);
             }
         }

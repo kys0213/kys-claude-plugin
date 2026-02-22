@@ -133,9 +133,7 @@ impl TaskQueues {
 
     /// 어떤 큐든 해당 work_id가 존재하는지 확인
     pub fn contains(&self, work_id: &str) -> bool {
-        self.issues.contains(work_id)
-            || self.prs.contains(work_id)
-            || self.merges.contains(work_id)
+        self.issues.contains(work_id) || self.prs.contains(work_id) || self.merges.contains(work_id)
     }
 
     /// 전체 아이템 수
@@ -193,15 +191,9 @@ mod tests {
 
     #[test]
     fn make_work_id_format() {
-        assert_eq!(
-            make_work_id("issue", "org/repo", 42),
-            "issue:org/repo:42"
-        );
+        assert_eq!(make_work_id("issue", "org/repo", 42), "issue:org/repo:42");
         assert_eq!(make_work_id("pr", "org/repo", 15), "pr:org/repo:15");
-        assert_eq!(
-            make_work_id("merge", "org/repo", 15),
-            "merge:org/repo:15"
-        );
+        assert_eq!(make_work_id("merge", "org/repo", 15), "merge:org/repo:15");
     }
 
     #[test]

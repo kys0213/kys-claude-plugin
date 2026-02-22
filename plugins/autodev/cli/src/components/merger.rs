@@ -40,7 +40,10 @@ impl<'a> Merger<'a> {
     /// `/git-utils:merge-pr {pr_number}` 커맨드로 머지를 시도하고
     /// 결과를 `MergeOutcome`으로 분류하여 반환한다.
     pub async fn merge_pr(&self, wt_path: &Path, pr_number: i64) -> MergeOutput {
-        let prompt = format!("[autodev] merge: PR #{}\n\n/git-utils:merge-pr {}", pr_number, pr_number);
+        let prompt = format!(
+            "[autodev] merge: PR #{}\n\n/git-utils:merge-pr {}",
+            pr_number, pr_number
+        );
 
         match self.claude.run_session(wt_path, &prompt, None).await {
             Ok(res) => {
