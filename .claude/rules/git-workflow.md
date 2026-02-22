@@ -55,19 +55,20 @@ chore(cli): update dependencies
 | `fix` | patch |
 | `refactor` | patch |
 | `major` | major |
+| `docs` | - (버전 범프 없음) |
 
-`docs`, `ci`, `chore`, `test`, `style`, `perf`, `build`, `revert` 등은 `plugins/` 또는 `common/` 변경이 **없을 때만** 사용 가능합니다.
+`ci`, `chore`, `test`, `style`, `perf`, `build`, `revert` 등은 `plugins/` 또는 `common/` 변경이 **없을 때만** 사용 가능합니다.
 
 ```
 # plugins/ 변경 포함 PR
 ✅ refactor(suggest-workflow): improve Rust logic
 ✅ fix(git-utils): resolve path issue
 ✅ feat(develop-workflow): add multi-LLM support
+✅ docs(autodev): add code review report
 
 # plugins/ 변경 포함 PR — CI 실패
 ❌ chore(suggest-workflow): update dependencies  # 버전 범프 prefix 아님
 ❌ perf(git-utils): optimize startup              # perf는 버전 범프 미지원
-❌ docs(develop-workflow): update README          # docs는 버전 범프 미지원
 ```
 
 > **주의**: CI의 `validate.yml`에서 `Check version bump prefix for code changes` 단계로 검증됩니다. PR 생성 시 변경 대상 디렉토리를 확인하고 적절한 type을 선택하세요.

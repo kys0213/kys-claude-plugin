@@ -1,10 +1,11 @@
+use assert_cmd::cargo_bin_cmd;
 use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
 /// AUTODEV_HOME을 tempdir로 설정한 CLI 명령어 실행 헬퍼
 fn autodev(home: &TempDir) -> Command {
-    let mut cmd = Command::cargo_bin("autodev").unwrap();
+    let mut cmd = cargo_bin_cmd!("autodev");
     cmd.env("AUTODEV_HOME", home.path());
     cmd
 }

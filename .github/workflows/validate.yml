@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -129,7 +131,7 @@ jobs:
 
           if [ "$HAS_CODE_CHANGES" = "true" ]; then
             # 버전업을 트리거하는 prefix인지 확인 (feat, fix, refactor, major)
-            if ! echo "$PR_TITLE" | grep -qE '^(feat|fix|refactor|major)(\(.+\))?:'; then
+            if ! echo "$PR_TITLE" | grep -qE '^(feat|fix|refactor|major|docs)(\(.+\))?:'; then
               echo ""
               echo "::error::Code changes in plugins/ or common/ require a version bump prefix"
               echo ""
@@ -140,8 +142,9 @@ jobs:
               echo "  feat:  new features (bumps minor version)"
               echo "  fix:   bug fixes (bumps patch version)"
               echo "  refactor: code refactoring (bumps patch version)"
+              echo "  docs:  documentation changes (no version bump)"
               echo ""
-              echo "Non-version prefixes (docs, style, test, ci, chore, etc.) are only"
+              echo "Non-version prefixes (style, test, ci, chore, etc.) are only"
               echo "allowed for changes that don't affect plugins/ or common/ directories."
               exit 1
             fi
