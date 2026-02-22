@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use autodev::infrastructure::gh::MockGh;
 use autodev::queue::repository::*;
