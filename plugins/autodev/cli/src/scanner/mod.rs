@@ -75,6 +75,16 @@ pub async fn scan_all(
                         tracing::error!("PR scan error for {}: {e}", repo.name);
                     }
                 }
+                "merges" => {
+                    if cfg.consumer.auto_merge {
+                        if let Err(e) =
+                            pulls::scan_merges(gh, &repo.id, &repo.name, &repo.url, gh_host, queues)
+                                .await
+                        {
+                            tracing::error!("merge scan error for {}: {e}", repo.name);
+                        }
+                    }
+                }
                 _ => {}
             }
         }

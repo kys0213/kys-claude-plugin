@@ -3,7 +3,9 @@ use serde::Deserialize;
 
 use crate::infrastructure::gh::Gh;
 use crate::queue::repository::*;
-use crate::queue::task_queues::{labels, make_work_id, pr_phase, PrItem, TaskQueues};
+use crate::queue::task_queues::{
+    labels, make_work_id, merge_phase, pr_phase, MergeItem, PrItem, TaskQueues,
+};
 use crate::queue::Database;
 
 #[derive(Debug, Deserialize)]
@@ -129,6 +131,91 @@ pub async fn scan(
 
     if let Some(last_seen) = latest_updated {
         db.cursor_upsert(repo_id, "pulls", &last_seen)?;
+    }
+
+    Ok(())
+}
+
+/// autodev:done 라벨이 붙은 open PR 중 approved 상태인 것을 merge queue에 적재
+///
+/// PR review → done 후 다음 scan cycle에서 merge 대상으로 발견된다.
+/// `auto_merge: true` 설정이 있는 레포에서만 호출되어야 한다.
+pub async fn scan_merges(
+    gh: &dyn Gh,
+    repo_id: &str,
+    repo_name: &str,
+    repo_url: &str,
+    gh_host: Option<&str>,
+    queues: &mut TaskQueues,
+) -> Result<()> {
+    // autodev:done 라벨이 붙은 open PR 조회
+    // issues endpoint를 사용하면 label 필터링이 가능 (pulls endpoint는 불가)
+    let params: Vec<(&str, &str)> = vec![
+        ("state", "open"),
+        ("labels", labels::DONE),
+        ("per_page", "30"),
+    ];
+
+    let stdout = gh
+        .api_paginate(repo_name, "issues", &params, gh_host)
+        .await?;
+
+    let items: Vec<serde_json::Value> = serde_json::from_slice(&stdout)?;
+
+    for item in &items {
+        // issues endpoint에서 PR만 필터 (pull_request 필드가 있으면 PR)
+        if item.get("pull_request").is_none() {
+            continue;
+        }
+
+        let number = match item["number"].as_i64() {
+            Some(n) if n > 0 => n,
+            _ => continue,
+        };
+
+        let merge_work_id = make_work_id("merge", repo_name, number);
+
+        // 이미 merge queue에 있으면 skip
+        if queues.contains(&merge_work_id) {
+            continue;
+        }
+
+        // PR 상세 정보 조회 (head/base branch 필요)
+        let pr_params: Vec<(&str, &str)> = vec![];
+        let pr_data = gh
+            .api_paginate(repo_name, &format!("pulls/{number}"), &pr_params, gh_host)
+            .await;
+
+        let (head_branch, base_branch, title) = match pr_data {
+            Ok(data) => {
+                let pr: serde_json::Value =
+                    serde_json::from_slice(&data).unwrap_or(serde_json::Value::Null);
+                (
+                    pr["head"]["ref"].as_str().unwrap_or("").to_string(),
+                    pr["base"]["ref"].as_str().unwrap_or("main").to_string(),
+                    pr["title"].as_str().unwrap_or("").to_string(),
+                )
+            }
+            Err(_) => continue,
+        };
+
+        let merge_item = MergeItem {
+            work_id: merge_work_id,
+            repo_id: repo_id.to_string(),
+            repo_name: repo_name.to_string(),
+            repo_url: repo_url.to_string(),
+            pr_number: number,
+            title,
+            head_branch,
+            base_branch,
+        };
+
+        // done → wip 라벨 전환 + merge queue push
+        gh.label_remove(repo_name, number, labels::DONE, gh_host)
+            .await;
+        gh.label_add(repo_name, number, labels::WIP, gh_host).await;
+        queues.merges.push(merge_phase::PENDING, merge_item);
+        tracing::info!("queued merge PR #{number}");
     }
 
     Ok(())

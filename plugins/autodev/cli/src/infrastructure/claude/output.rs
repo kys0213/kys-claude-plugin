@@ -56,6 +56,57 @@ pub struct AnalysisResult {
     pub report: String,
 }
 
+/// PR 리뷰 verdict 타입
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewVerdict {
+    Approve,
+    RequestChanges,
+}
+
+impl fmt::Display for ReviewVerdict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReviewVerdict::Approve => write!(f, "approve"),
+            ReviewVerdict::RequestChanges => write!(f, "request_changes"),
+        }
+    }
+}
+
+/// PR 리뷰 결과 구조체
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReviewResult {
+    pub verdict: ReviewVerdict,
+    pub summary: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub comments: Vec<ReviewComment>,
+}
+
+/// PR 리뷰 개별 댓글 (향후 PR review API의 line comment 게시에 사용)
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct ReviewComment {
+    pub path: String,
+    pub line: Option<u32>,
+    pub body: String,
+}
+
+/// claude -p 리뷰 결과를 ReviewResult로 파싱 시도
+/// 1차: stdout가 claude JSON envelope이면 result 필드 추출 후 파싱
+/// 2차: stdout 자체를 직접 파싱
+/// 실패 시 None 반환 (호출측에서 exit_code 기반 fallback)
+pub fn parse_review(stdout: &str) -> Option<ReviewResult> {
+    if let Ok(envelope) = serde_json::from_str::<ClaudeJsonOutput>(stdout) {
+        if let Some(inner) = envelope.result {
+            if let Ok(review) = serde_json::from_str::<ReviewResult>(&inner) {
+                return Some(review);
+            }
+        }
+    }
+    serde_json::from_str::<ReviewResult>(stdout).ok()
+}
+
 /// claude -p 분석 결과를 AnalysisResult로 파싱 시도
 /// 1차: stdout가 claude JSON envelope이면 result 필드 추출 후 파싱
 /// 2차: stdout 자체를 직접 파싱

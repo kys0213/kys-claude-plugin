@@ -1293,12 +1293,18 @@ async fn process_all_handles_all_queues() {
     claude.enqueue_response(r#"{"result": "Implementation done"}"#, 0);
     // 3. Issue knowledge extraction (best effort, after issue done)
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
-    // 4. PR review -> ReviewDone (pr::process_pending)
-    claude.enqueue_response(r#"{"result": "LGTM"}"#, 0);
+    // 4. PR review -> ReviewDone (pr::process_pending, verdict=request_changes)
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Needs changes\"}"}"#,
+        0,
+    );
     // 5. PR feedback implementation -> Improved (pr::process_review_done)
     claude.enqueue_response(r#"{"result": "Feedback applied"}"#, 0);
-    // 6. PR re-review -> done/approved (pr::process_improved)
-    claude.enqueue_response(r#"{"result": "Approved"}"#, 0);
+    // 6. PR re-review -> done/approved (pr::process_improved, verdict=approve)
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"approve\",\"summary\":\"Approved\"}"}"#,
+        0,
+    );
     // 7. PR knowledge extraction (best effort, after PR done)
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
     // 8. Merge -> success (merge::process_pending)
