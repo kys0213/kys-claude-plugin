@@ -1,157 +1,256 @@
-# Autodev Critical Issues 분석 및 수정 계획
+# barrier-sync 플러그인 설계
 
 ## 요구사항 정리
 
-REVIEW-REPORT.md의 Critical 4건을 치명도 순으로 분석·수정한다.
+### 핵심 문제
+background Task 여러 개를 병렬 실행 후, 전원 완료를 **LLM 턴 소모 없이** 감지하는 방법이 없다.
+현재 방법: output_file을 주기적으로 Read → 턴 낭비 + polling 비효율.
 
-| 우선순위 | ID | 파일 | 문제 | 데이터 영향 |
-|---------|-----|------|------|------------|
-| 1 | C-04 | `queue/repository.rs:181-195` | upsert 시 phantom UUID 반환 | 존재하지 않는 ID 참조 → 상태 전이 실패 |
-| 2 | C-01 | `queue/repository.rs:84-121` | `repo_remove` 6개 DELETE 트랜잭션 없음 | 중간 실패 시 orphan 데이터 |
-| 3 | C-03 | `queue/schema.rs:106-146` | 마이그레이션 트랜잭션 없음 | 동시 데몬 시작 시 데이터 손실/중복 인덱스 |
-| 4 | C-02 | `infrastructure/git/real.rs:15,39,60` | `.to_str().unwrap()` 3곳 panic | non-UTF-8 경로에서 데몬 크래시 |
+### 해결 방법
+FIFO 기반 barrier 패턴:
+- **Producer** (SubagentStop hook): Task 완료 시 FIFO에 write
+- **Consumer** (background Bash): FIFO에서 blocking read → CPU 0%, 턴 0
+- 전원 완료 감지 후 stdout으로 결과 반환 → 메인 에이전트가 Read
 
-> 우선순위 근거: C-04는 정상 운영 중에도 발생 가능(이슈 재스캔), C-01은 repo 삭제 시 발생, C-03은 동시 시작이라는 특수 조건 필요, C-02는 non-UTF-8 경로라는 드문 조건 필요
+### 플러그인으로 제공할 가치
+1. 비자명한 패턴을 패키징하여 재사용 가능하게 만듦
+2. hook 등록, barrier 실행, 결과 수집을 skill 문서로 LLM이 자동 참조
+3. `/barrier-setup` 커맨드로 hook 등록 자동화
 
 ---
 
 ## 사이드이펙트 조사
 
-### C-04: `issue_insert` 반환값 오류
+### 1. 기존 hooks와의 충돌
 
-- **영향 범위**: `issue_insert`, `pr_insert`, `merge_insert` 3곳에 동일 패턴
-- **현재 호출자 분석**: scanner에서 반환 ID를 사용하지 않으므로 즉시 영향 없음
-- **잠재 위험**: 향후 반환 ID를 사용하는 코드 추가 시 silent failure 발생
-- **수정 방식**: upsert 후 SELECT로 실제 ID 조회 (쿼리 1회 추가, 성능 영향 무시 가능)
-- **기존 테스트**: `issue_duplicate_insert_is_ignored()` — 반환 ID 정확성 미검증
+현재 `.claude/settings.json` 등록된 hooks:
+- PreToolUse: `Write|Edit` → default-branch-guard + develop-phase-gate
+- PreToolUse: `Bash` → default-branch-guard-commit + develop-phase-gate
+- PostToolUse: `Write|Edit` → cargo-check
 
-### C-01: `repo_remove` 트랜잭션 누락
+**SubagentStop hook은 현재 등록된 것이 없다** → 충돌 없음.
 
-- **영향 범위**: `repo_remove()` 1곳
-- **사이드이펙트**: `self.conn()`이 `&Connection` 반환 → `unchecked_transaction()` 호출 가능 (rusqlite 표준 패턴)
-- **기존 테스트**: 3건 존재하나 부분 실패 시나리오 없음
-- **위험**: 트랜잭션 안에서 `?` 사용 시 Transaction Drop이 자동 rollback → 안전
+단, 사용자가 이 플러그인을 설치할 때 `settings.local.json`에 SubagentStop hook을 수동 등록해야 한다.
+→ `/barrier-setup` 커맨드에서 `git-utils hook register` 또는 직접 JSON 편집으로 자동화 가능.
 
-### C-03: Schema migration race condition
+### 2. plugin.json의 hooks 필드
 
-- **영향 범위**: `migrate_unique_constraints()` 1곳
-- **사이드이펙트**: `BEGIN EXCLUSIVE`는 다른 writer를 블로킹 → 동시 시작 시 한쪽이 대기 후 진행
-- **WAL 모드 호환성**: EXCLUSIVE 트랜잭션은 WAL 모드에서도 정상 동작
-- **기존 테스트**: `migration_cleans_up_existing_duplicates()` 1건 — 동시성 미검증
+Claude Code 플러그인 스펙에서 `plugin.json`에 hooks 배열을 선언하면 플러그인 설치 시 자동 등록될 수 있다.
+단, 현재 프로젝트의 기존 플러그인 중 hooks를 plugin.json에 선언한 예가 없다 (모두 settings.json에서 직접 관리).
+→ 일관성을 위해 `/barrier-setup` 커맨드 방식 채택.
 
-### C-02: Path panic
+### 3. validation 도구 호환성
 
-- **영향 범위**: `real.rs`의 `clone`, `worktree_add`, `worktree_remove` 3개 메서드
-- **사이드이펙트**: `to_str()` → `ok_or_else()`로 변경 시 에러 반환. 호출자가 이미 `Result` 처리하므로 안전
-- **기존 테스트**: `real.rs`에 대한 단위 테스트 없음 (Mock만 존재)
+`tools/validate/` Go 검증기가 체크하는 항목:
+- `plugin.json`: name(kebab-case), version(semver), commands 파일 존재 여부
+- `marketplace.json`: name, source, version
+- `SKILL.md`: frontmatter(name, description), 본문 50~500줄
+- `commands/*.md`: frontmatter(description)
+- `agents/*.md`: frontmatter(description)
+- `hooks/*.md`: frontmatter(name, description), event 유효성
+- `scripts/*.sh`: sensitive data 검출
+
+→ 각 파일이 이 규칙을 따라야 CI가 통과함.
+
+### 4. `/tmp` 사용
+
+barrier가 `/tmp/claude-barriers/` 에 FIFO와 메타데이터를 생성.
+- trap EXIT로 자동 클린업 → 잔여 파일 문제 없음
+- 동시 실행 시 BARRIER_ID로 격리 → 충돌 없음
+
+### 5. 플랫폼 제약
+
+- macOS: 정상 동작 (POSIX FIFO 지원)
+- Linux: 정상 동작
+- Windows: 미지원 (named pipe 비호환) → README에 명시
 
 ---
 
-## 수정 설계
+## 설계
 
-### Step 1: C-04 — upsert 후 실제 ID 조회
+### 플러그인 구조
 
-**파일**: `plugins/autodev/cli/src/queue/repository.rs`
+```
+plugins/barrier-sync/
+├── .claude-plugin/
+│   └── plugin.json
+├── commands/
+│   └── barrier-setup.md          # /barrier-setup — hook 등록 자동화
+├── hooks/
+│   └── signal-done.sh            # SubagentStop hook (producer)
+├── scripts/
+│   └── wait-for-tasks.sh         # barrier (consumer)
+└── skills/
+    └── barrier-sync/
+        └── SKILL.md              # LLM 참조용 사용법 가이드
+```
 
-`issue_insert`, `pr_insert`, `merge_insert` 3곳 수정:
+### 각 파일 상세 설계
 
-```rust
-fn issue_insert(&self, item: &NewIssueItem) -> Result<String> {
-    let id = Uuid::new_v4().to_string();
-    let now = Utc::now().to_rfc3339();
-    self.conn().execute(
-        "INSERT INTO issue_queue (...) VALUES (...) ON CONFLICT(...) DO UPDATE SET ...",
-        rusqlite::params![id, ...],
-    )?;
+#### 1. `plugin.json`
 
-    // upsert 후 실제 ID 조회
-    let actual_id: String = self.conn().query_row(
-        "SELECT id FROM issue_queue WHERE repo_id = ?1 AND github_number = ?2",
-        rusqlite::params![item.repo_id, item.github_number],
-        |row| row.get(0),
-    )?;
-    Ok(actual_id)
+```json
+{
+  "author": { "name": "kys0213" },
+  "name": "barrier-sync",
+  "description": "FIFO-based barrier pattern for parallel background Task synchronization",
+  "version": "0.1.0",
+  "commands": ["./commands/barrier-setup.md"],
+  "skills": ["./skills"]
 }
 ```
 
-동일 패턴을 `pr_insert` (unique key: `repo_id + github_number`), `merge_insert` (unique key: `repo_id + pr_number`)에도 적용.
+#### 2. `signal-done.sh` (SubagentStop Hook — Producer)
 
-**테스트 추가**:
-- 신규 삽입 → 새 ID 반환 확인
-- 중복 삽입 (status=done) → 기존 행의 ID 반환 확인
-- 중복 삽입 (status≠done) → INSERT 무시, 기존 ID 반환 확인
+**책임**: Task 완료 이벤트를 수신하여 FIFO에 기록
 
-### Step 2: C-01 — `repo_remove` 트랜잭션 래핑
-
-**파일**: `plugins/autodev/cli/src/queue/repository.rs`
-
-```rust
-fn repo_remove(&self, name: &str) -> Result<()> {
-    let conn = self.conn();
-    let tx = conn.unchecked_transaction()?;
-    let repo_id_query = "(SELECT id FROM repositories WHERE name = ?1)";
-
-    tx.execute(&format!("DELETE FROM issue_queue WHERE repo_id = {repo_id_query}"), rusqlite::params![name])?;
-    tx.execute(&format!("DELETE FROM pr_queue WHERE repo_id = {repo_id_query}"), rusqlite::params![name])?;
-    tx.execute(&format!("DELETE FROM merge_queue WHERE repo_id = {repo_id_query}"), rusqlite::params![name])?;
-    tx.execute(&format!("DELETE FROM scan_cursors WHERE repo_id = {repo_id_query}"), rusqlite::params![name])?;
-    tx.execute(&format!("DELETE FROM consumer_logs WHERE repo_id = {repo_id_query}"), rusqlite::params![name])?;
-    tx.execute("DELETE FROM repositories WHERE name = ?1", rusqlite::params![name])?;
-
-    tx.commit()?;
-    Ok(())
+**입력**: stdin으로 SubagentStop hook JSON
+```json
+{
+  "agent_id": "ad7baaa",
+  "agent_type": "general-purpose",
+  "last_assistant_message": "검토 결과...",
+  "session_id": "...",
+  "hook_event_name": "SubagentStop"
 }
 ```
 
-### Step 3: C-03 — Schema migration EXCLUSIVE 트랜잭션
+**동작**:
+1. stdin에서 JSON 파싱 (jq)
+2. `/tmp/claude-barriers/` 하위에서 활성 barrier 검색 (meta.json의 pid가 살아있는 것)
+3. 활성 barrier가 없으면 즉시 exit 0 (barrier 미사용 세션에 영향 없음)
+4. agent_id + last_assistant_message 앞 500자를 결과 파일에 저장
+5. FIFO에 agent_id를 write (blocking이 아닌 순간 write)
 
-**파일**: `plugins/autodev/cli/src/queue/schema.rs`
+**엣지 케이스**:
+- jq 미설치: 기본 grep/sed로 fallback
+- 활성 barrier 없음: silent exit
+- FIFO write 실패: stderr에 경고, exit 0 (hook이 에이전트를 차단하면 안 됨)
 
-```rust
-fn migrate_unique_constraints(conn: &Connection) -> Result<()> {
-    conn.execute_batch("BEGIN EXCLUSIVE")?;
+#### 3. `wait-for-tasks.sh` (Barrier — Consumer)
 
-    let result = (|| -> Result<()> {
-        let tables = [("issue_queue", "github_number"), ...];
-        for (table, number_col) in &tables {
-            let idx_name = format!("idx_{table}_unique");
-            let exists: bool = conn.query_row(...)?;
-            if exists { continue; }
-            conn.execute(&format!("DELETE FROM {table} ..."), [])?;
-            conn.execute(&format!("CREATE UNIQUE INDEX ..."), [])?;
-        }
-        Ok(())
-    })();
+**책임**: 지정된 수의 완료 신호를 FIFO에서 blocking read
 
-    match result {
-        Ok(()) => { conn.execute_batch("COMMIT")?; Ok(()) }
-        Err(e) => { let _ = conn.execute_batch("ROLLBACK"); Err(e) }
-    }
-}
-```
-
-### Step 4: C-02 — Path panic → Result 반환
-
-**파일**: `plugins/autodev/cli/src/infrastructure/git/real.rs`
-
-3곳의 `.to_str().unwrap()` 변환:
-
-```rust
-// Before
-dest.to_str().unwrap()
-
-// After
-let dest_str = dest.to_str()
-    .ok_or_else(|| anyhow::anyhow!("invalid UTF-8 path: {}", dest.display()))?;
-```
-
-### Step 5: 테스트 실행 및 검증
-
+**인터페이스**:
 ```bash
-cd plugins/autodev/cli && cargo test
+BARRIER_ID="my-barrier" bash wait-for-tasks.sh <expected_count> [timeout_sec]
 ```
 
-### Step 6: 커밋 및 PR
+**동작**:
+1. BARRIER_ID 결정 (환경변수 or `barrier-$$`)
+2. `/tmp/claude-barriers/{BARRIER_ID}/` 디렉토리 생성
+3. `mkfifo pipe` → FIFO 생성
+4. `meta.json` 작성 (pid, fifo_path, expected_count)
+5. `results/` 디렉토리 생성
+6. timeout 타이머 시작 (background subshell)
+7. loop: `read < pipe` × expected_count회
+8. 전원 도착 → stdout에 결과 출력
+9. trap EXIT → 클린업 (디렉토리 전체 삭제)
 
-- 커밋: `fix(autodev): resolve critical data integrity issues (C-01~C-04)`
-- PR: `docs(autodev): add code review report`
+**stdout 형식**:
+```
+--- BARRIER COMPLETE (5/5) ---
+agents: editor(abc) continuity(def) ...
+
+=== editor-abc ===
+[last_assistant_message 앞 500자]
+
+=== continuity-def ===
+[last_assistant_message 앞 500자]
+```
+
+**타임아웃 시** (exit 1):
+```
+--- BARRIER TIMEOUT (300s) 3/5 completed ---
+agents: editor(abc) continuity(def) unifier(ghi)
+
+=== editor-abc ===
+[부분 결과]
+```
+
+#### 4. `SKILL.md`
+
+LLM이 barrier-sync를 사용해야 하는 상황에서 자동으로 참조하는 문서.
+
+**frontmatter**:
+```yaml
+name: barrier-sync
+description: Use this skill when running 2+ background Tasks in parallel and need to wait for all to complete without consuming LLM turns. Provides FIFO-based barrier synchronization.
+allowed-tools: Bash, Read, Task
+```
+
+**본문 구성**:
+1. 개요 — 언제 사용하는지
+2. 사전 조건 — `/barrier-setup` 으로 hook 등록 필요
+3. 사용 패턴 — 3단계 (barrier 시작 → Task 실행 → 결과 Read)
+4. 파라미터 레퍼런스
+5. 출력 형식 설명
+6. 주의사항 (ordering, timeout, BARRIER_ID 충돌 방지)
+7. 예시 시나리오 2-3개
+
+#### 5. `barrier-setup.md` (커맨드)
+
+**frontmatter**:
+```yaml
+description: barrier-sync 플러그인의 SubagentStop hook을 등록합니다
+allowed-tools:
+  - Bash
+  - Read
+  - Write
+  - AskUserQuestion
+```
+
+**동작**:
+1. 현재 hook 등록 상태 확인 (settings.json / settings.local.json 읽기)
+2. SubagentStop hook이 이미 등록되어 있으면 안내 후 종료
+3. 미등록이면 등록 범위 선택 (프로젝트 / 사용자)
+4. settings에 SubagentStop hook 추가
+5. jq 설치 여부 확인, 미설치 시 안내
+
+### marketplace.json 등록
+
+```json
+{
+  "category": "infrastructure",
+  "description": "FIFO 기반 barrier 패턴 — 병렬 background Task 동기화 (턴 소모 없이 전원 완료 대기)",
+  "keywords": [
+    "barrier",
+    "sync",
+    "parallel",
+    "background",
+    "task",
+    "fifo",
+    "hook"
+  ],
+  "name": "barrier-sync",
+  "source": "./plugins/barrier-sync",
+  "version": "0.1.0"
+}
+```
+
+---
+
+## 구현 순서
+
+### Phase 1: 스크립트 구현
+1. `scripts/wait-for-tasks.sh` — barrier consumer
+2. `hooks/signal-done.sh` — hook producer
+
+### Phase 2: 플러그인 메타
+3. `.claude-plugin/plugin.json`
+4. `commands/barrier-setup.md`
+5. `skills/barrier-sync/SKILL.md`
+
+### Phase 3: 레지스트리 등록
+6. `.claude-plugin/marketplace.json`에 barrier-sync 추가
+
+### Phase 4: 검증
+7. validation 통과 확인 (`make validate`)
+
+---
+
+## 변경하지 않는 것
+
+- `.claude/settings.json`: 글로벌 설정은 건드리지 않음 (사용자가 `/barrier-setup`으로 선택)
+- 기존 플러그인 코드: 의존성 없음, 독립 플러그인
+- Go validation 도구: 기존 규칙만으로 검증 가능

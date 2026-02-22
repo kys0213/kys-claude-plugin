@@ -94,6 +94,22 @@
       "name": "autodev",
       "source": "./plugins/autodev",
       "version": "0.3.0"
+    },
+    {
+      "category": "infrastructure",
+      "description": "FIFO 기반 barrier 패턴 — 병렬 background Task 동기화 (턴 소모 없이 전원 완료 대기)",
+      "keywords": [
+        "barrier",
+        "sync",
+        "parallel",
+        "background",
+        "task",
+        "fifo",
+        "hook"
+      ],
+      "name": "barrier-sync",
+      "source": "./plugins/barrier-sync",
+      "version": "0.1.0"
     }
   ]
 }
