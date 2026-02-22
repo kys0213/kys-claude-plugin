@@ -4,6 +4,8 @@ use rusqlite::Connection;
 pub fn create_tables(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "
+        BEGIN EXCLUSIVE;
+
         CREATE TABLE IF NOT EXISTS repositories (
             id          TEXT PRIMARY KEY,
             url         TEXT NOT NULL UNIQUE,
@@ -37,6 +39,8 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         );
 
         CREATE INDEX IF NOT EXISTS idx_consumer_logs_repo ON consumer_logs(repo_id, started_at);
+
+        COMMIT;
         ",
     )?;
     Ok(())

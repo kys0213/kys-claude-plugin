@@ -61,11 +61,15 @@ impl Git for RealGit {
     }
 
     async fn worktree_remove(&self, base_dir: &Path, worktree: &Path) -> Result<()> {
-        tokio::process::Command::new("git")
-            .args(["worktree", "remove", "--force", worktree.to_str().unwrap()])
+        let status = tokio::process::Command::new("git")
+            .args(["worktree", "remove", "--force", &path_to_string(worktree)])
             .current_dir(base_dir)
             .status()
             .await?;
+
+        if !status.success() {
+            tracing::warn!("git worktree remove failed for {}", worktree.display());
+        }
 
         Ok(())
     }
