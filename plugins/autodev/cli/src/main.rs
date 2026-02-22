@@ -5,15 +5,12 @@ mod active;
 mod client;
 mod components;
 mod config;
-mod consumer;
 mod daemon;
 mod infrastructure;
 mod pipeline;
 mod queue;
 mod scanner;
-mod session;
 mod tui;
-mod workspace;
 
 use infrastructure::claude::RealClaude;
 use infrastructure::gh::RealGh;

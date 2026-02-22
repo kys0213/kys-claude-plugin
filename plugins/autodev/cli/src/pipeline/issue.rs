@@ -12,7 +12,7 @@ use crate::infrastructure::claude::Claude;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::Database;
-use crate::session;
+use crate::infrastructure::claude::output;
 
 // ─── 분석 프롬프트 (JSON 응답 스키마 명시) ───
 
@@ -154,7 +154,7 @@ pub async fn process_pending(
                 }
 
                 // verdict 분기
-                let analysis = session::output::parse_analysis(&res.stdout);
+                let analysis = output::parse_analysis(&res.stdout);
 
                 match analysis {
                     Some(ref a) if a.verdict == "wontfix" => {
@@ -231,7 +231,7 @@ pub async fn process_pending(
                     }
                     None => {
                         // 파싱 실패 — fallback
-                        let report = session::output::parse_output(&res.stdout);
+                        let report = output::parse_output(&res.stdout);
                         db.issue_update_status(
                             &item.id,
                             "ready",

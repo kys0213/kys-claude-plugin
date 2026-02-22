@@ -1,4 +1,4 @@
-use crate::session::output::AnalysisResult;
+use crate::infrastructure::claude::output::AnalysisResult;
 
 /// wontfix verdict 댓글 포맷
 pub fn format_wontfix_comment(a: &AnalysisResult) -> String {

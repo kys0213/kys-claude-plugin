@@ -1,4 +1,5 @@
 pub mod mock;
+pub mod output;
 pub mod real;
 
 use std::path::Path;

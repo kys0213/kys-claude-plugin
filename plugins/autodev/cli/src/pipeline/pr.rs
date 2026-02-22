@@ -11,7 +11,7 @@ use crate::infrastructure::claude::Claude;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::Database;
-use crate::session;
+use crate::infrastructure::claude::output;
 
 /// pending PR 처리
 pub async fn process_pending(
@@ -112,7 +112,7 @@ pub async fn process_pending(
                 })?;
 
                 if res.exit_code == 0 {
-                    let review = session::output::parse_output(&res.stdout);
+                    let review = output::parse_output(&res.stdout);
                     db.pr_update_status(
                         &item.id,
                         "review_done",
