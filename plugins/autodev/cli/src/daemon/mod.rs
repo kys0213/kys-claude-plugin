@@ -1,4 +1,5 @@
 pub mod pid;
+pub mod recovery;
 
 use std::path::Path;
 
@@ -13,7 +14,7 @@ use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::pipeline;
-use crate::queue::repository::QueueAdmin;
+use crate::queue::repository::{QueueAdmin, RepoRepository};
 use crate::queue::Database;
 use crate::scanner;
 
@@ -63,14 +64,30 @@ pub async fn start(
     let workspace = Workspace::new(git, env);
     let notifier = Notifier::new(gh);
 
-    // 메인 루프: scanner + pipeline
+    let gh_host = cfg.consumer.gh_host.clone();
+
+    // 메인 루프: recovery → scanner → pipeline
     tokio::select! {
         _ = async {
             loop {
+                // 1. Recovery: orphan autodev:wip 라벨 정리
+                match db.repo_find_enabled() {
+                    Ok(repos) => {
+                        match recovery::recover_orphan_wip(&repos, gh, &active, gh_host.as_deref()).await {
+                            Ok(n) if n > 0 => info!("recovered {n} orphan wip items"),
+                            Err(e) => tracing::error!("recovery error: {e}"),
+                            _ => {}
+                        }
+                    }
+                    Err(e) => tracing::error!("recovery repo lookup failed: {e}"),
+                }
+
+                // 2. Scan
                 if let Err(e) = scanner::scan_all(&db, env, gh, &mut active).await {
                     tracing::error!("scan error: {e}");
                 }
 
+                // 3. Pipeline
                 if let Err(e) = pipeline::process_all(&db, env, &workspace, &notifier, claude, &mut active).await {
                     tracing::error!("pipeline error: {e}");
                 }

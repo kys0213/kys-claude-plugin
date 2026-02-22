@@ -14,6 +14,8 @@ pub struct MockGh {
     paginate_responses: Mutex<HashMap<String, Vec<u8>>>,
     /// 게시된 댓글 기록: (repo_name, number, body)
     pub posted_comments: Mutex<Vec<(String, i64, String)>>,
+    /// 제거된 라벨 기록: (repo_name, number, label)
+    pub removed_labels: Mutex<Vec<(String, i64, String)>>,
 }
 
 impl MockGh {
@@ -22,6 +24,7 @@ impl MockGh {
             fields: Mutex::new(HashMap::new()),
             paginate_responses: Mutex::new(HashMap::new()),
             posted_comments: Mutex::new(Vec::new()),
+            removed_labels: Mutex::new(Vec::new()),
         }
     }
 
@@ -81,6 +84,21 @@ impl Gh for MockGh {
             repo_name.to_string(),
             number,
             body.to_string(),
+        ));
+        true
+    }
+
+    async fn label_remove(
+        &self,
+        repo_name: &str,
+        number: i64,
+        label: &str,
+        _host: Option<&str>,
+    ) -> bool {
+        self.removed_labels.lock().unwrap().push((
+            repo_name.to_string(),
+            number,
+            label.to_string(),
         ));
         true
     }

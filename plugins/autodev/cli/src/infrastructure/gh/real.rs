@@ -113,4 +113,40 @@ impl Gh for RealGh {
             }
         }
     }
+
+    async fn label_remove(
+        &self,
+        repo_name: &str,
+        number: i64,
+        label: &str,
+        host: Option<&str>,
+    ) -> bool {
+        let mut args = vec![
+            "api".to_string(),
+            format!("repos/{repo_name}/issues/{number}/labels/{label}"),
+            "--method".to_string(),
+            "DELETE".to_string(),
+            "--silent".to_string(),
+        ];
+
+        if let Some(h) = host {
+            args.push("--hostname".to_string());
+            args.push(h.to_string());
+        }
+
+        match tokio::process::Command::new("gh").args(&args).output().await {
+            Ok(output) => {
+                if !output.status.success() {
+                    tracing::warn!(
+                        "gh label remove failed for {repo_name}#{number} label={label}"
+                    );
+                }
+                output.status.success()
+            }
+            Err(e) => {
+                tracing::warn!("gh label remove error: {e}");
+                false
+            }
+        }
+    }
 }

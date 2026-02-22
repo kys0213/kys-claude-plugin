@@ -39,4 +39,14 @@ pub trait Gh: Send + Sync {
         body: &str,
         host: Option<&str>,
     ) -> bool;
+
+    /// `gh api repos/{repo}/issues/{number}/labels/{label} --method DELETE`
+    /// 라벨 제거 (best effort)
+    async fn label_remove(
+        &self,
+        repo_name: &str,
+        number: i64,
+        label: &str,
+        host: Option<&str>,
+    ) -> bool;
 }
