@@ -340,8 +340,11 @@ async fn pr_improved_request_changes_does_not_clean_worktree_c3() {
     let gh = MockGh::new();
     let git = MockGit::new();
     let claude = MockClaude::new();
-    // Re-review: request_changes (exit_code 1)
-    claude.enqueue_response(r#"{"result": "Needs more work"}"#, 1);
+    // Re-review: request_changes (verdict-based)
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Needs more work\"}"}"#,
+        0,
+    );
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
@@ -402,16 +405,25 @@ async fn review_cycle_has_no_iteration_limit_c4() {
     // 3번의 review → request_changes 시뮬레이션 (max_iterations=2 초과)
     // Round 1: improve → improved
     claude.enqueue_response(r#"{"result": "Applied fix 1"}"#, 0);
-    // Round 1: re-review → request_changes
-    claude.enqueue_response(r#"{"result": "Still needs work"}"#, 1);
+    // Round 1: re-review → request_changes (verdict-based)
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Still needs work\"}"}"#,
+        0,
+    );
     // Round 2: improve → improved
     claude.enqueue_response(r#"{"result": "Applied fix 2"}"#, 0);
-    // Round 2: re-review → request_changes
-    claude.enqueue_response(r#"{"result": "Still not right"}"#, 1);
+    // Round 2: re-review → request_changes (verdict-based)
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Still not right\"}"}"#,
+        0,
+    );
     // Round 3: improve → improved (EXCEEDS max_iterations=2)
     claude.enqueue_response(r#"{"result": "Applied fix 3"}"#, 0);
-    // Round 3: re-review → approved (finally)
-    claude.enqueue_response(r#"{"result": "LGTM"}"#, 0);
+    // Round 3: re-review → approved (verdict-based)
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"approve\",\"summary\":\"LGTM\"}"}"#,
+        0,
+    );
     // Knowledge extraction
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 

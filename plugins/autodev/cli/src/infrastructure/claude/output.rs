@@ -56,6 +56,57 @@ pub struct AnalysisResult {
     pub report: String,
 }
 
+/// PR 리뷰 verdict 타입
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewVerdict {
+    Approve,
+    RequestChanges,
+}
+
+impl fmt::Display for ReviewVerdict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReviewVerdict::Approve => write!(f, "approve"),
+            ReviewVerdict::RequestChanges => write!(f, "request_changes"),
+        }
+    }
+}
+
+/// PR 리뷰 결과 구조체
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReviewResult {
+    pub verdict: ReviewVerdict,
+    pub summary: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub comments: Vec<ReviewComment>,
+}
+
+/// PR 리뷰 개별 댓글 (향후 PR review API의 line comment 게시에 사용)
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct ReviewComment {
+    pub path: String,
+    pub line: Option<u32>,
+    pub body: String,
+}
+
+/// claude -p 리뷰 결과를 ReviewResult로 파싱 시도
+/// 1차: stdout가 claude JSON envelope이면 result 필드 추출 후 파싱
+/// 2차: stdout 자체를 직접 파싱
+/// 실패 시 None 반환 (호출측에서 exit_code 기반 fallback)
+pub fn parse_review(stdout: &str) -> Option<ReviewResult> {
+    if let Ok(envelope) = serde_json::from_str::<ClaudeJsonOutput>(stdout) {
+        if let Some(inner) = envelope.result {
+            if let Ok(review) = serde_json::from_str::<ReviewResult>(&inner) {
+                return Some(review);
+            }
+        }
+    }
+    serde_json::from_str::<ReviewResult>(stdout).ok()
+}
+
 /// claude -p 분석 결과를 AnalysisResult로 파싱 시도
 /// 1차: stdout가 claude JSON envelope이면 result 필드 추출 후 파싱
 /// 2차: stdout 자체를 직접 파싱
@@ -72,4 +123,57 @@ pub fn parse_analysis(stdout: &str) -> Option<AnalysisResult> {
 
     // 직접 파싱 시도 (claude가 raw JSON을 반환한 경우)
     serde_json::from_str::<AnalysisResult>(stdout).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_review_approve_from_envelope() {
+        let stdout = r#"{"result": "{\"verdict\":\"approve\",\"summary\":\"LGTM\"}"}"#;
+        let result = parse_review(stdout).expect("should parse");
+        assert_eq!(result.verdict, ReviewVerdict::Approve);
+        assert_eq!(result.summary, "LGTM");
+        assert!(result.comments.is_empty());
+    }
+
+    #[test]
+    fn parse_review_request_changes_from_envelope() {
+        let stdout = r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Fix error handling\",\"comments\":[{\"path\":\"src/main.rs\",\"line\":42,\"body\":\"Missing null check\"}]}"}"#;
+        let result = parse_review(stdout).expect("should parse");
+        assert_eq!(result.verdict, ReviewVerdict::RequestChanges);
+        assert_eq!(result.summary, "Fix error handling");
+        assert_eq!(result.comments.len(), 1);
+        assert_eq!(result.comments[0].path, "src/main.rs");
+        assert_eq!(result.comments[0].line, Some(42));
+    }
+
+    #[test]
+    fn parse_review_raw_json_without_envelope() {
+        let stdout = r#"{"verdict":"approve","summary":"All good"}"#;
+        let result = parse_review(stdout).expect("should parse");
+        assert_eq!(result.verdict, ReviewVerdict::Approve);
+        assert_eq!(result.summary, "All good");
+    }
+
+    #[test]
+    fn parse_review_malformed_returns_none() {
+        // plain text — not JSON
+        assert!(parse_review("LGTM - no issues found").is_none());
+    }
+
+    #[test]
+    fn parse_review_envelope_with_non_review_result_returns_none() {
+        // envelope의 result가 ReviewResult JSON이 아닌 일반 텍스트
+        let stdout = r#"{"result": "LGTM"}"#;
+        assert!(parse_review(stdout).is_none());
+    }
+
+    #[test]
+    fn parse_review_missing_verdict_returns_none() {
+        // verdict 필드 누락
+        let stdout = r#"{"summary":"All good"}"#;
+        assert!(parse_review(stdout).is_none());
+    }
 }

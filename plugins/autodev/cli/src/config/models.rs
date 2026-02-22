@@ -6,9 +6,29 @@ use serde::{Deserialize, Serialize};
 #[serde(default, deny_unknown_fields)]
 pub struct WorkflowConfig {
     pub consumer: ConsumerConfig,
+    pub daemon: DaemonConfig,
     pub workflow: WorkflowRouting,
     pub commands: CommandsConfig,
     pub develop: DevelopConfig,
+}
+
+/// 데몬 루프 전용 설정
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DaemonConfig {
+    pub tick_interval_secs: u64,
+    pub reconcile_window_hours: u32,
+    pub daily_report_hour: u32,
+}
+
+impl Default for DaemonConfig {
+    fn default() -> Self {
+        Self {
+            tick_interval_secs: 10,
+            reconcile_window_hours: 24,
+            daily_report_hour: 6,
+        }
+    }
 }
 
 /// Consumer 인프라 설정
@@ -27,8 +47,8 @@ pub struct ConsumerConfig {
     pub ignore_authors: Vec<String>,
     pub gh_host: Option<String>,
     pub confidence_threshold: f64,
-    pub daily_report_hour: u32,
     pub knowledge_extraction: bool,
+    pub auto_merge: bool,
 }
 
 impl Default for ConsumerConfig {
@@ -46,8 +66,8 @@ impl Default for ConsumerConfig {
             ignore_authors: vec!["dependabot".into(), "renovate".into()],
             gh_host: None,
             confidence_threshold: 0.7,
-            daily_report_hour: 6,
             knowledge_extraction: true,
+            auto_merge: false,
         }
     }
 }

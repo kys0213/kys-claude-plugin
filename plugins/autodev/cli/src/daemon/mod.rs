@@ -51,11 +51,12 @@ pub async fn start(
     let notifier = Notifier::new(gh);
 
     let gh_host = cfg.consumer.gh_host.clone();
-    let daily_report_hour = cfg.consumer.daily_report_hour;
+    let daily_report_hour = cfg.daemon.daily_report_hour;
     let knowledge_extraction = cfg.consumer.knowledge_extraction;
     let mut last_daily_report_date = String::new();
 
-    let reconcile_window_hours = 24u32;
+    let reconcile_window_hours = cfg.daemon.reconcile_window_hours;
+    let tick_interval_secs = cfg.daemon.tick_interval_secs;
 
     // 0. Startup Reconcile (bounded recovery)
     match startup_reconcile(
@@ -145,7 +146,7 @@ pub async fn start(
                     }
                 }
 
-                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(tick_interval_secs)).await;
             }
         } => {},
         _ = tokio::signal::ctrl_c() => {

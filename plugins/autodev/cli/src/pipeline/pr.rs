@@ -7,6 +7,7 @@ use crate::components::reviewer::Reviewer;
 use crate::components::workspace::Workspace;
 use crate::config;
 use crate::config::Env;
+use crate::infrastructure::claude::output::ReviewVerdict;
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::queue::models::*;
@@ -15,12 +16,16 @@ use crate::queue::task_queues::{labels, pr_phase, TaskQueues};
 use crate::queue::Database;
 
 /// PR 리뷰 결과를 GitHub 댓글로 포맷
-fn format_review_comment(review: &str, pr_number: i64) -> String {
+fn format_review_comment(review: &str, pr_number: i64, verdict: Option<&ReviewVerdict>) -> String {
+    let verdict_label = match verdict {
+        Some(ReviewVerdict::Approve) => " — **Approved**",
+        Some(ReviewVerdict::RequestChanges) => " — **Changes Requested**",
+        None => "",
+    };
     format!(
         "<!-- autodev:review -->\n\
-         ## Autodev Code Review (PR #{})\n\n\
-         {review}",
-        pr_number
+         ## Autodev Code Review (PR #{pr_number}){verdict_label}\n\n\
+         {review}"
     )
 }
 
@@ -119,16 +124,54 @@ pub async fn process_pending(
                 if output.exit_code == 0 {
                     let pr_num = item.github_number;
 
-                    // 리뷰 결과를 GitHub PR 댓글로 게시
-                    let comment = format_review_comment(&output.review, pr_num);
-                    notifier
-                        .post_issue_comment(&item.repo_name, pr_num, &comment, gh_host)
-                        .await;
+                    match output.verdict {
+                        Some(ReviewVerdict::Approve) => {
+                            // approve → 댓글 게시 + 즉시 done
+                            let comment = format_review_comment(
+                                &output.review,
+                                pr_num,
+                                Some(&ReviewVerdict::Approve),
+                            );
+                            notifier
+                                .post_issue_comment(&item.repo_name, pr_num, &comment, gh_host)
+                                .await;
 
-                    // 리뷰 결과 저장 → ReviewDone에 push (피드백 루프 진입)
-                    item.review_comment = Some(output.review);
-                    queues.prs.push(pr_phase::REVIEW_DONE, item);
-                    tracing::info!("PR #{} review complete → ReviewDone", pr_num);
+                            // Knowledge extraction (best effort)
+                            if cfg.consumer.knowledge_extraction {
+                                let _ = crate::knowledge::extractor::extract_task_knowledge(
+                                    claude,
+                                    gh,
+                                    &item.repo_name,
+                                    item.github_number,
+                                    "pr",
+                                    &wt_path,
+                                    gh_host,
+                                )
+                                .await;
+                            }
+
+                            gh.label_remove(&item.repo_name, pr_num, labels::WIP, gh_host)
+                                .await;
+                            gh.label_add(&item.repo_name, pr_num, labels::DONE, gh_host)
+                                .await;
+                            tracing::info!("PR #{pr_num} review → done (approved)");
+                        }
+                        Some(ReviewVerdict::RequestChanges) | None => {
+                            // request_changes 또는 verdict 파싱 실패 → 피드백 루프 진입
+                            let comment = format_review_comment(
+                                &output.review,
+                                pr_num,
+                                output.verdict.as_ref(),
+                            );
+                            notifier
+                                .post_issue_comment(&item.repo_name, pr_num, &comment, gh_host)
+                                .await;
+
+                            item.review_comment = Some(output.review);
+                            queues.prs.push(pr_phase::REVIEW_DONE, item);
+                            tracing::info!("PR #{pr_num} review complete → ReviewDone");
+                        }
+                    }
                 } else {
                     gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                         .await;
@@ -317,31 +360,45 @@ pub async fn process_improved(
                     duration_ms: duration,
                 });
 
-                if output.exit_code == 0 {
-                    // Knowledge extraction (best effort)
-                    if cfg.consumer.knowledge_extraction {
-                        let _ = crate::knowledge::extractor::extract_task_knowledge(
-                            claude,
-                            gh,
-                            &item.repo_name,
-                            item.github_number,
-                            "pr",
-                            &wt_path,
-                            gh_host,
-                        )
-                        .await;
-                    }
-
+                if output.exit_code != 0 {
                     gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                         .await;
-                    gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host)
-                        .await;
-                    tracing::info!("PR #{} re-review → done (approved)", item.github_number);
-                } else {
-                    // 재리뷰 실패 → request_changes → ReviewDone 재진입
-                    item.review_comment = Some(output.review);
-                    queues.prs.push(pr_phase::REVIEW_DONE, item);
-                    tracing::info!("PR re-review → ReviewDone (request_changes)");
+                    tracing::error!(
+                        "re-review exited with {} for PR #{}",
+                        output.exit_code,
+                        item.github_number
+                    );
+                    continue;
+                }
+
+                match output.verdict {
+                    Some(ReviewVerdict::Approve) => {
+                        // Knowledge extraction (best effort)
+                        if cfg.consumer.knowledge_extraction {
+                            let _ = crate::knowledge::extractor::extract_task_knowledge(
+                                claude,
+                                gh,
+                                &item.repo_name,
+                                item.github_number,
+                                "pr",
+                                &wt_path,
+                                gh_host,
+                            )
+                            .await;
+                        }
+
+                        gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
+                            .await;
+                        gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host)
+                            .await;
+                        tracing::info!("PR #{} re-review → done (approved)", item.github_number);
+                    }
+                    Some(ReviewVerdict::RequestChanges) | None => {
+                        // request_changes 또는 verdict 파싱 실패 → ReviewDone 재진입
+                        item.review_comment = Some(output.review);
+                        queues.prs.push(pr_phase::REVIEW_DONE, item);
+                        tracing::info!("PR re-review → ReviewDone (request_changes)");
+                    }
                 }
             }
             Err(e) => {
