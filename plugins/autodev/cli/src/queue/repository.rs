@@ -20,6 +20,7 @@ pub trait IssueQueueRepository {
     fn issue_insert(&self, item: &NewIssueItem) -> Result<String>;
     fn issue_exists(&self, repo_id: &str, github_number: i64) -> Result<bool>;
     fn issue_find_pending(&self, limit: u32) -> Result<Vec<PendingIssue>>;
+    fn issue_find_ready(&self, limit: u32) -> Result<Vec<ReadyIssue>>;
     fn issue_update_status(&self, id: &str, status: &str, fields: &StatusFields) -> Result<()>;
     fn issue_mark_failed(&self, id: &str, error: &str) -> Result<()>;
     fn issue_count_active(&self) -> Result<i64>;
@@ -220,6 +221,28 @@ impl IssueQueueRepository for Database {
                 github_number: row.get(3)?,
                 title: row.get(4)?,
                 body: row.get(5)?,
+                repo_url: row.get(6)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn issue_find_ready(&self, limit: u32) -> Result<Vec<ReadyIssue>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT iq.id, iq.repo_id, r.name, iq.github_number, iq.title, iq.analysis_report, r.url \
+             FROM issue_queue iq JOIN repositories r ON iq.repo_id = r.id \
+             WHERE iq.status = 'ready' \
+             ORDER BY iq.created_at ASC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![limit], |row| {
+            Ok(ReadyIssue {
+                id: row.get(0)?,
+                repo_id: row.get(1)?,
+                repo_name: row.get(2)?,
+                github_number: row.get(3)?,
+                title: row.get(4)?,
+                analysis_report: row.get(5)?,
                 repo_url: row.get(6)?,
             })
         })?;

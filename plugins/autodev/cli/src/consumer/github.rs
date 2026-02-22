@@ -32,6 +32,37 @@ pub async fn is_pr_mergeable(repo_name: &str, number: i64, gh_host: Option<&str>
     }
 }
 
+/// 이슈에 댓글 게시 (best effort — 실패해도 계속 진행)
+pub async fn post_issue_comment(repo_name: &str, number: i64, body: &str, gh_host: Option<&str>) -> bool {
+    let mut args = vec![
+        "issue".to_string(),
+        "comment".to_string(),
+        number.to_string(),
+        "--repo".to_string(),
+        repo_name.to_string(),
+        "--body".to_string(),
+        body.to_string(),
+    ];
+
+    if let Some(host) = gh_host {
+        args.push("--hostname".to_string());
+        args.push(host.to_string());
+    }
+
+    match tokio::process::Command::new("gh").args(&args).output().await {
+        Ok(output) => {
+            if !output.status.success() {
+                tracing::warn!("gh issue comment failed for {repo_name}#{number}");
+            }
+            output.status.success()
+        }
+        Err(e) => {
+            tracing::warn!("gh issue comment error: {e}");
+            false
+        }
+    }
+}
+
 async fn gh_get_field(
     repo_name: &str,
     path: &str,
