@@ -4,7 +4,6 @@ pub mod real;
 use anyhow::Result;
 use async_trait::async_trait;
 
-pub use mock::MockGh;
 pub use real::RealGh;
 
 /// GitHub CLI (`gh`) 추상화

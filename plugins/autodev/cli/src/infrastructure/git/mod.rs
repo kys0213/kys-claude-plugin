@@ -6,7 +6,6 @@ use std::path::Path;
 use anyhow::Result;
 use async_trait::async_trait;
 
-pub use mock::MockGit;
 pub use real::RealGit;
 
 /// Git CLI 추상화

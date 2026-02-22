@@ -50,12 +50,3 @@ fn test_panel_navigation() {
     assert_eq!(state.active_panel, views::Panel::ActiveItems);
 }
 
-// ─── selected_active_item ───
-
-#[test]
-fn test_selected_active_item_returns_none_when_empty() {
-    let items: Vec<views::ActiveItem> = Vec::new();
-    let state = views::AppState::new();
-    let selected = views::selected_active_item(&items, &state);
-    assert!(selected.is_none(), "should return None when no active items exist");
-}

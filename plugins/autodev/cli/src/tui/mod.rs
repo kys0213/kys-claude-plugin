@@ -14,7 +14,6 @@ use crate::config;
 use crate::queue::Database;
 
 use events::LogTailer;
-use views::Panel;
 
 const LOG_TAIL_MAX_LINES: usize = 200;
 

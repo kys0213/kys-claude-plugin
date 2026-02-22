@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use super::{Claude, SessionResult};
 
 /// 테스트용 Claude 구현체 — 미리 설정된 응답을 반환
+#[allow(dead_code)]
 pub struct MockClaude {
     /// 순차적으로 반환할 응답 큐 (FIFO)
     responses: Mutex<Vec<SessionResult>>,
@@ -23,6 +24,7 @@ impl Default for MockClaude {
     }
 }
 
+#[allow(dead_code)]
 impl MockClaude {
     pub fn new() -> Self {
         Self::default()

@@ -1,5 +1,3 @@
-#![allow(dead_code, unused_imports)]
-
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 

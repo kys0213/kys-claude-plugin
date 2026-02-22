@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use super::Gh;
 
 /// 테스트용 Gh 구현체 — 미리 설정된 응답을 반환
+#[allow(dead_code)]
 pub struct MockGh {
     /// key: "{repo_name}/{path}" → value: field value
     fields: Mutex<HashMap<String, String>>,
@@ -32,6 +33,7 @@ impl Default for MockGh {
     }
 }
 
+#[allow(dead_code)]
 impl MockGh {
     pub fn new() -> Self {
         Self::default()

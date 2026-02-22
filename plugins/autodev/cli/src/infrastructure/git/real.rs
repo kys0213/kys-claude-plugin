@@ -5,6 +5,11 @@ use async_trait::async_trait;
 
 use super::Git;
 
+/// Path → 문자열 변환 (non-UTF-8 경로에서도 안전)
+fn path_to_string(p: &Path) -> String {
+    p.to_string_lossy().into_owned()
+}
+
 /// 실제 `git` CLI를 호출하는 구현체
 pub struct RealGit;
 
@@ -12,7 +17,7 @@ pub struct RealGit;
 impl Git for RealGit {
     async fn clone(&self, url: &str, dest: &Path) -> Result<()> {
         let status = tokio::process::Command::new("git")
-            .args(["clone", url, dest.to_str().unwrap()])
+            .args(["clone", url, &path_to_string(dest)])
             .status()
             .await?;
 
@@ -36,7 +41,7 @@ impl Git for RealGit {
         let mut args = vec![
             "worktree".to_string(),
             "add".to_string(),
-            dest.to_str().unwrap().to_string(),
+            path_to_string(dest),
         ];
 
         if let Some(b) = branch {

@@ -27,11 +27,11 @@ fn add_test_repo_with_url(db: &Database, url: &str, name: &str) -> String {
 #[test]
 fn repo_add_and_count() {
     let db = open_memory_db();
-    assert_eq!(db.repo_count().unwrap(), 0);
+    assert_eq!(db.repo_list().unwrap().len(), 0);
 
     let id = add_test_repo(&db);
     assert!(!id.is_empty());
-    assert_eq!(db.repo_count().unwrap(), 1);
+    assert_eq!(db.repo_list().unwrap().len(), 1);
 }
 
 #[test]
@@ -47,17 +47,17 @@ fn repo_add_different_urls() {
     let db = open_memory_db();
     add_test_repo_with_url(&db, "https://github.com/a/b", "a/b");
     add_test_repo_with_url(&db, "https://github.com/c/d", "c/d");
-    assert_eq!(db.repo_count().unwrap(), 2);
+    assert_eq!(db.repo_list().unwrap().len(), 2);
 }
 
 #[test]
 fn repo_remove() {
     let db = open_memory_db();
     add_test_repo(&db);
-    assert_eq!(db.repo_count().unwrap(), 1);
+    assert_eq!(db.repo_list().unwrap().len(), 1);
 
     db.repo_remove("org/test-repo").unwrap();
-    assert_eq!(db.repo_count().unwrap(), 0);
+    assert_eq!(db.repo_list().unwrap().len(), 0);
 }
 
 #[test]

@@ -10,6 +10,7 @@ use crate::queue::Database;
 struct GitHubPR {
     number: i64,
     title: String,
+    #[allow(dead_code)]
     body: Option<String>,
     user: GitHubUser,
     head: GitHubBranch,

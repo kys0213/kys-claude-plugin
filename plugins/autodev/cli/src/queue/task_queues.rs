@@ -12,7 +12,9 @@ pub struct IssueItem {
     pub github_number: i64,
     pub title: String,
     pub body: Option<String>,
+    #[allow(dead_code)]
     pub labels: Vec<String>,
+    #[allow(dead_code)]
     pub author: String,
     /// Phase 1(분석) 완료 후 Phase 2(구현)에서 사용
     pub analysis_report: Option<String>,
@@ -32,8 +34,10 @@ pub struct PrItem {
     pub repo_name: String,
     pub repo_url: String,
     pub github_number: i64,
+    #[allow(dead_code)]
     pub title: String,
     pub head_branch: String,
+    #[allow(dead_code)]
     pub base_branch: String,
     /// 리뷰 결과 (피드백 루프에서 사용)
     pub review_comment: Option<String>,
@@ -53,8 +57,11 @@ pub struct MergeItem {
     pub repo_name: String,
     pub repo_url: String,
     pub pr_number: i64,
+    #[allow(dead_code)]
     pub title: String,
+    #[allow(dead_code)]
     pub head_branch: String,
+    #[allow(dead_code)]
     pub base_branch: String,
 }
 
@@ -75,18 +82,14 @@ pub fn make_work_id(queue_type: &str, repo_name: &str, number: i64) -> String {
 
 pub mod issue_phase {
     pub const PENDING: &str = "Pending";
-    pub const ANALYZING: &str = "Analyzing";
     pub const READY: &str = "Ready";
-    pub const IMPLEMENTING: &str = "Implementing";
 }
 
 // ─── PR Phase 상수 ───
 
 pub mod pr_phase {
     pub const PENDING: &str = "Pending";
-    pub const REVIEWING: &str = "Reviewing";
     pub const REVIEW_DONE: &str = "ReviewDone";
-    pub const IMPROVING: &str = "Improving";
     pub const IMPROVED: &str = "Improved";
 }
 
@@ -94,8 +97,6 @@ pub mod pr_phase {
 
 pub mod merge_phase {
     pub const PENDING: &str = "Pending";
-    pub const MERGING: &str = "Merging";
-    pub const CONFLICT: &str = "Conflict";
 }
 
 // ─── GitHub Label 상수 ───
@@ -138,6 +139,7 @@ impl TaskQueues {
     }
 
     /// 전체 아이템 수
+    #[allow(dead_code)]
     pub fn total(&self) -> usize {
         self.issues.total() + self.prs.total() + self.merges.total()
     }

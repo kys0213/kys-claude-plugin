@@ -1,7 +1,5 @@
 use std::path::Path;
 
-use anyhow::Result;
-
 use super::models::WorkflowConfig;
 use super::Env;
 
@@ -67,10 +65,3 @@ pub fn global_config_path(env: &dyn Env) -> std::path::PathBuf {
     Path::new(&home).join(CONFIG_FILENAME)
 }
 
-/// 글로벌 설정 파일 초기화 (setup 시 사용)
-pub fn init_global(env: &dyn Env, config: &WorkflowConfig) -> Result<()> {
-    let path = global_config_path(env);
-    let yaml = serde_yaml::to_string(config)?;
-    std::fs::write(&path, yaml)?;
-    Ok(())
-}

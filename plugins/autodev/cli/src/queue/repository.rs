@@ -12,7 +12,6 @@ pub trait RepoRepository {
     fn repo_remove(&self, name: &str) -> Result<()>;
     fn repo_list(&self) -> Result<Vec<RepoInfo>>;
     fn repo_find_enabled(&self) -> Result<Vec<EnabledRepo>>;
-    fn repo_count(&self) -> Result<i64>;
     fn repo_status_summary(&self) -> Result<Vec<RepoStatusRow>>;
 }
 
@@ -88,13 +87,6 @@ impl RepoRepository for Database {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }
-
-    fn repo_count(&self) -> Result<i64> {
-        let count = self
-            .conn()
-            .query_row("SELECT COUNT(*) FROM repositories", [], |row| row.get(0))?;
-        Ok(count)
     }
 
     fn repo_status_summary(&self) -> Result<Vec<RepoStatusRow>> {

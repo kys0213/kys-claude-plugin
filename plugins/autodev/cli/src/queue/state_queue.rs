@@ -54,6 +54,7 @@ impl<T: HasWorkId> StateQueue<T> {
 
     /// 아이템을 from 상태에서 to 상태로 전이한다.
     /// 성공 시 true, 해당 아이템이 from 상태에 없으면 false.
+    #[allow(dead_code)]
     pub fn transit(&mut self, id: &str, from: &str, to: &str) -> bool {
         match self.index.get(id) {
             Some(current) if current == from => {}
@@ -75,6 +76,7 @@ impl<T: HasWorkId> StateQueue<T> {
     }
 
     /// work_id로 아이템을 완전히 제거한다 (done/skip 시).
+    #[allow(dead_code)]
     pub fn remove(&mut self, id: &str) -> Option<T> {
         let state = self.index.remove(id)?;
         self.remove_from_queue(&state, id)
@@ -86,21 +88,25 @@ impl<T: HasWorkId> StateQueue<T> {
     }
 
     /// 해당 work_id의 현재 상태를 반환한다.
+    #[allow(dead_code)]
     pub fn state_of(&self, id: &str) -> Option<&str> {
         self.index.get(id).map(|s| s.as_str())
     }
 
     /// 특정 상태의 큐 깊이를 반환한다.
+    #[allow(dead_code)]
     pub fn len(&self, state: &str) -> usize {
         self.queues.get(state).map_or(0, |q| q.len())
     }
 
     /// 전체 아이템 수를 반환한다.
+    #[allow(dead_code)]
     pub fn total(&self) -> usize {
         self.index.len()
     }
 
     /// 특정 상태의 모든 아이템을 참조로 반환한다.
+    #[allow(dead_code)]
     pub fn iter(&self, state: &str) -> impl Iterator<Item = &T> {
         self.queues
             .get(state)
@@ -109,6 +115,7 @@ impl<T: HasWorkId> StateQueue<T> {
     }
 
     /// 전체 아이템을 (state, &item) 형태로 순회한다.
+    #[allow(dead_code)]
     pub fn iter_all(&self) -> impl Iterator<Item = (&str, &T)> {
         self.queues
             .iter()
@@ -116,6 +123,7 @@ impl<T: HasWorkId> StateQueue<T> {
     }
 
     /// 내부 큐에서 work_id로 아이템을 제거 (선형 탐색)
+    #[allow(dead_code)]
     fn remove_from_queue(&mut self, state: &str, id: &str) -> Option<T> {
         let queue = self.queues.get_mut(state)?;
         let pos = queue.iter().position(|item| item.work_id() == id)?;

@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use super::Git;
 
 /// 테스트용 Git 구현체 — 파일시스템만 조작, 실제 git 호출 없음
+#[allow(dead_code)]
 pub struct MockGit {
     /// clone 호출 시 실패시킬지 여부
     pub clone_should_fail: Mutex<bool>,
@@ -29,6 +30,7 @@ impl Default for MockGit {
     }
 }
 
+#[allow(dead_code)]
 impl MockGit {
     pub fn new() -> Self {
         Self::default()

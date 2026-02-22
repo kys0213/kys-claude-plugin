@@ -1,5 +1,3 @@
-#![allow(dead_code, unused_imports)]
-
 pub mod components;
 pub mod config;
 pub mod daemon;

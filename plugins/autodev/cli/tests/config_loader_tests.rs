@@ -171,27 +171,7 @@ commands:
 }
 
 // ═══════════════════════════════════════════════
-// 5. init_global — YAML 직렬화 + 파일 쓰기
-// ═══════════════════════════════════════════════
-
-#[test]
-fn init_global_writes_yaml_file() {
-    let tmp = TempDir::new().unwrap();
-    let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
-
-    let config = WorkflowConfig::default();
-    loader::init_global(&env, &config).unwrap();
-
-    let path = tmp.path().join(".develop-workflow.yaml");
-    assert!(path.exists());
-
-    let content = fs::read_to_string(&path).unwrap();
-    assert!(content.contains("scan_interval_secs"));
-    assert!(content.contains("sonnet"));
-}
-
-// ═══════════════════════════════════════════════
-// 6. YAML 파싱 엣지 케이스
+// 5. YAML 파싱 엣지 케이스
 // ═══════════════════════════════════════════════
 
 #[test]

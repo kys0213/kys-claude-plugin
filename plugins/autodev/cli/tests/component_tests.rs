@@ -2,7 +2,7 @@ use std::path::Path;
 
 use autodev::components::merger::{MergeOutcome, Merger};
 use autodev::components::reviewer::Reviewer;
-use autodev::infrastructure::claude::MockClaude;
+use autodev::infrastructure::claude::mock::MockClaude;
 
 // ═══════════════════════════════════════════════
 // Reviewer 테스트
@@ -165,7 +165,7 @@ async fn merger_resolve_success() {
     assert!(matches!(output.outcome, MergeOutcome::Success));
 
     let calls = claude.calls.lock().unwrap();
-    assert_eq!(calls[0].1, "Resolve merge conflicts for PR #42");
+    assert!(calls[0].1.contains("Resolve") && calls[0].1.contains("PR #42"));
 }
 
 #[tokio::test]

@@ -33,6 +33,8 @@ serde_yaml = "0.9"
 # Async trait (dyn Trait + async fn)
 async-trait = "0.1"
 
+libc = "0.2"
+
 # Utils
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"

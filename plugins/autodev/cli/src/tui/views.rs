@@ -22,6 +22,7 @@ pub enum Panel {
 
 #[derive(Debug, Clone)]
 pub struct ActiveItem {
+    #[allow(dead_code)]
     pub id: String,
     pub queue_type: String, // "issue" | "pr" | "merge"
     pub repo_name: String,
@@ -119,18 +120,6 @@ pub fn query_active_items(_db: &Database) -> Vec<ActiveItem> {
 pub fn query_label_counts(_db: &Database) -> LabelCounts {
     // Label counts are managed on GitHub, not in local DB.
     LabelCounts::default()
-}
-
-/// Get selected active item ID (for retry/skip actions)
-pub fn selected_active_item<'a>(
-    items: &'a [ActiveItem],
-    state: &AppState,
-) -> Option<&'a ActiveItem> {
-    if state.active_panel == Panel::ActiveItems && state.selected_index < items.len() {
-        Some(&items[state.selected_index])
-    } else {
-        None
-    }
 }
 
 // ─── Rendering ───
