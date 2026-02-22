@@ -1,210 +1,256 @@
-# autodev 플러그인: 코드 구조를 디자인 문서에 맞게 리팩토링
+# barrier-sync 플러그인 설계
 
-## 목표
+## 요구사항 정리
 
-현재 코드 구조를 DESIGN.md에 명시된 디렉토리/모듈 구조로 변경한다.
-**블랙박스 테스트 기반**: 기존 통합 테스트(5개 파일, ~60개 테스트)가 리팩토링 전후로 모두 통과해야 한다.
+### 핵심 문제
+background Task 여러 개를 병렬 실행 후, 전원 완료를 **LLM 턴 소모 없이** 감지하는 방법이 없다.
+현재 방법: output_file을 주기적으로 Read → 턴 낭비 + polling 비효율.
 
----
+### 해결 방법
+FIFO 기반 barrier 패턴:
+- **Producer** (SubagentStop hook): Task 완료 시 FIFO에 write
+- **Consumer** (background Bash): FIFO에서 blocking read → CPU 0%, 턴 0
+- 전원 완료 감지 후 stdout으로 결과 반환 → 메인 에이전트가 Read
 
-## 현재 구조 vs 디자인 구조: 차이점
-
-| # | 현재 (Code) | 디자인 (DESIGN.md) | 변경 유형 |
-|---|-------------|-------------------|----------|
-| 1 | `consumer/` | `processor/` | 디렉토리 rename |
-| 2 | `consumer/github.rs` | `github/mod.rs` | 파일 이동 → 독립 모듈 |
-| 3 | `lib.rs`에서 `pub mod consumer` | `pub mod processor` | 모듈명 변경 |
-| 4 | `scanner/issues.rs`, `scanner/pulls.rs` | `scanner/mod.rs` (단일) | 디자인은 단일이지만, 코드의 분리가 더 좋으므로 **디자인 업데이트** |
-| 5 | `active.rs` (독립) | 디자인에 없음 | 유지 (런타임 필수) |
-| 6 | `client/mod.rs` (CLI handlers) | 디자인에 없음 | 유지 (CLI 구현 디테일) |
-| 7 | `config/loader.rs` | 디자인에 없음 | 유지 (config 구현 디테일) |
-| 8 | `queue/models.rs` | 디자인에 없음 | 유지 (데이터 모델) |
+### 플러그인으로 제공할 가치
+1. 비자명한 패턴을 패키징하여 재사용 가능하게 만듦
+2. hook 등록, barrier 실행, 결과 수집을 skill 문서로 LLM이 자동 참조
+3. `/barrier-setup` 커맨드로 hook 등록 자동화
 
 ---
 
-## 리팩토링 범위
+## 사이드이펙트 조사
 
-### 코드 변경 (3건)
+### 1. 기존 hooks와의 충돌
 
-1. **`consumer/` → `processor/` 디렉토리 rename**
-   - `consumer/mod.rs` → `processor/mod.rs`
-   - `consumer/issue.rs` → `processor/issue.rs`
-   - `consumer/pr.rs` → `processor/pr.rs`
-   - `consumer/merge.rs` → `processor/merge.rs`
+현재 `.claude/settings.json` 등록된 hooks:
+- PreToolUse: `Write|Edit` → default-branch-guard + develop-phase-gate
+- PreToolUse: `Bash` → default-branch-guard-commit + develop-phase-gate
+- PostToolUse: `Write|Edit` → cargo-check
 
-2. **`consumer/github.rs` → `github/mod.rs` 독립 모듈화**
-   - `consumer/github.rs` → `github/mod.rs`
-   - processor 내부에서 `crate::github::*`로 import 변경
+**SubagentStop hook은 현재 등록된 것이 없다** → 충돌 없음.
 
-3. **모듈 선언 업데이트**
-   - `lib.rs`: `pub mod consumer` → `pub mod processor` + `pub mod github` 추가
-   - `main.rs`: `mod consumer` → `mod processor` + `mod github` 추가
-   - 모든 내부 참조 (`consumer::` → `processor::`) 업데이트
+단, 사용자가 이 플러그인을 설치할 때 `settings.local.json`에 SubagentStop hook을 수동 등록해야 한다.
+→ `/barrier-setup` 커맨드에서 `git-utils hook register` 또는 직접 JSON 편집으로 자동화 가능.
 
-### 디자인 문서 업데이트 (2건)
+### 2. plugin.json의 hooks 필드
 
-4. **DESIGN.md 디렉토리 구조 업데이트**
-   - `scanner/issues.rs`, `scanner/pulls.rs` 반영 (현재 코드가 더 좋은 분리)
-   - `queue/models.rs` 반영
-   - `active.rs`, `client/mod.rs`, `config/loader.rs` 반영
-   - `lib.rs` 반영
+Claude Code 플러그인 스펙에서 `plugin.json`에 hooks 배열을 선언하면 플러그인 설치 시 자동 등록될 수 있다.
+단, 현재 프로젝트의 기존 플러그인 중 hooks를 plugin.json에 선언한 예가 없다 (모두 settings.json에서 직접 관리).
+→ 일관성을 위해 `/barrier-setup` 커맨드 방식 채택.
 
-5. **README.md 동기화** (DESIGN.md 변경 반영)
+### 3. validation 도구 호환성
+
+`tools/validate/` Go 검증기가 체크하는 항목:
+- `plugin.json`: name(kebab-case), version(semver), commands 파일 존재 여부
+- `marketplace.json`: name, source, version
+- `SKILL.md`: frontmatter(name, description), 본문 50~500줄
+- `commands/*.md`: frontmatter(description)
+- `agents/*.md`: frontmatter(description)
+- `hooks/*.md`: frontmatter(name, description), event 유효성
+- `scripts/*.sh`: sensitive data 검출
+
+→ 각 파일이 이 규칙을 따라야 CI가 통과함.
+
+### 4. `/tmp` 사용
+
+barrier가 `/tmp/claude-barriers/` 에 FIFO와 메타데이터를 생성.
+- trap EXIT로 자동 클린업 → 잔여 파일 문제 없음
+- 동시 실행 시 BARRIER_ID로 격리 → 충돌 없음
+
+### 5. 플랫폼 제약
+
+- macOS: 정상 동작 (POSIX FIFO 지원)
+- Linux: 정상 동작
+- Windows: 미지원 (named pipe 비호환) → README에 명시
 
 ---
 
-## 실행 계획
+## 설계
 
-### Phase 0: 블랙박스 테스트 베이스라인 확립
+### 플러그인 구조
 
-기존 테스트가 모두 통과하는지 확인한다.
+```
+plugins/barrier-sync/
+├── .claude-plugin/
+│   └── plugin.json
+├── commands/
+│   └── barrier-setup.md          # /barrier-setup — hook 등록 자동화
+├── hooks/
+│   └── signal-done.sh            # SubagentStop hook (producer)
+├── scripts/
+│   └── wait-for-tasks.sh         # barrier (consumer)
+└── skills/
+    └── barrier-sync/
+        └── SKILL.md              # LLM 참조용 사용법 가이드
+```
 
+### 각 파일 상세 설계
+
+#### 1. `plugin.json`
+
+```json
+{
+  "author": { "name": "kys0213" },
+  "name": "barrier-sync",
+  "description": "FIFO-based barrier pattern for parallel background Task synchronization",
+  "version": "0.1.0",
+  "commands": ["./commands/barrier-setup.md"],
+  "skills": ["./skills"]
+}
+```
+
+#### 2. `signal-done.sh` (SubagentStop Hook — Producer)
+
+**책임**: Task 완료 이벤트를 수신하여 FIFO에 기록
+
+**입력**: stdin으로 SubagentStop hook JSON
+```json
+{
+  "agent_id": "ad7baaa",
+  "agent_type": "general-purpose",
+  "last_assistant_message": "검토 결과...",
+  "session_id": "...",
+  "hook_event_name": "SubagentStop"
+}
+```
+
+**동작**:
+1. stdin에서 JSON 파싱 (jq)
+2. `/tmp/claude-barriers/` 하위에서 활성 barrier 검색 (meta.json의 pid가 살아있는 것)
+3. 활성 barrier가 없으면 즉시 exit 0 (barrier 미사용 세션에 영향 없음)
+4. agent_id + last_assistant_message 앞 500자를 결과 파일에 저장
+5. FIFO에 agent_id를 write (blocking이 아닌 순간 write)
+
+**엣지 케이스**:
+- jq 미설치: 기본 grep/sed로 fallback
+- 활성 barrier 없음: silent exit
+- FIFO write 실패: stderr에 경고, exit 0 (hook이 에이전트를 차단하면 안 됨)
+
+#### 3. `wait-for-tasks.sh` (Barrier — Consumer)
+
+**책임**: 지정된 수의 완료 신호를 FIFO에서 blocking read
+
+**인터페이스**:
 ```bash
-cd plugins/autodev/cli && cargo test 2>&1
+BARRIER_ID="my-barrier" bash wait-for-tasks.sh <expected_count> [timeout_sec]
 ```
 
-**통과 조건**: 모든 5개 테스트 파일의 ~60개 테스트가 pass
+**동작**:
+1. BARRIER_ID 결정 (환경변수 or `barrier-$$`)
+2. `/tmp/claude-barriers/{BARRIER_ID}/` 디렉토리 생성
+3. `mkfifo pipe` → FIFO 생성
+4. `meta.json` 작성 (pid, fifo_path, expected_count)
+5. `results/` 디렉토리 생성
+6. timeout 타이머 시작 (background subshell)
+7. loop: `read < pipe` × expected_count회
+8. 전원 도착 → stdout에 결과 출력
+9. trap EXIT → 클린업 (디렉토리 전체 삭제)
 
----
-
-### Phase 1: `consumer/` → `processor/` + `github/` 독립 모듈
-
-#### Step 1-1: 파일 이동
-
+**stdout 형식**:
 ```
-consumer/mod.rs    → processor/mod.rs
-consumer/issue.rs  → processor/issue.rs
-consumer/pr.rs     → processor/pr.rs
-consumer/merge.rs  → processor/merge.rs
-consumer/github.rs → github/mod.rs
-```
+--- BARRIER COMPLETE (5/5) ---
+agents: editor(abc) continuity(def) ...
 
-#### Step 1-2: 모듈 선언 수정
+=== editor-abc ===
+[last_assistant_message 앞 500자]
 
-**`src/lib.rs`**:
-```rust
-pub mod active;
-pub mod config;
-pub mod github;       // NEW (consumer/github.rs에서 이동)
-pub mod processor;    // RENAMED from consumer
-pub mod queue;
-pub mod scanner;
-pub mod session;
-pub mod workspace;
+=== continuity-def ===
+[last_assistant_message 앞 500자]
 ```
 
-**`src/main.rs`**:
-```rust
-mod active;
-mod client;
-mod config;
-mod daemon;
-mod github;           // NEW
-mod processor;        // RENAMED from consumer
-mod queue;
-mod scanner;
-mod session;
-mod tui;
-mod workspace;
+**타임아웃 시** (exit 1):
+```
+--- BARRIER TIMEOUT (300s) 3/5 completed ---
+agents: editor(abc) continuity(def) unifier(ghi)
+
+=== editor-abc ===
+[부분 결과]
 ```
 
-#### Step 1-3: 내부 참조 수정
+#### 4. `SKILL.md`
 
-- `processor/mod.rs` 내 `mod github` 제거 → `use crate::github`
-- `processor/issue.rs`, `pr.rs`, `merge.rs` 내 `super::github::` → `crate::github::`
-- `daemon/mod.rs` 내 `consumer::` → `processor::` 호출
-- `main.rs` 내 `consumer::` → `processor::`
+LLM이 barrier-sync를 사용해야 하는 상황에서 자동으로 참조하는 문서.
 
-#### Step 1-4: 테스트 파일 참조 수정
-
-- `tests/daemon_consumer_tests.rs`:
-  - `autodev::consumer::issue::` → `autodev::processor::issue::`
-  - `autodev::consumer::pr::` → `autodev::processor::pr::`
-  - `autodev::consumer::process_all` → `autodev::processor::process_all`
-
----
-
-### Phase 2: 블랙박스 테스트 검증
-
-```bash
-cd plugins/autodev/cli && cargo test 2>&1
+**frontmatter**:
+```yaml
+name: barrier-sync
+description: Use this skill when running 2+ background Tasks in parallel and need to wait for all to complete without consuming LLM turns. Provides FIFO-based barrier synchronization.
+allowed-tools: Bash, Read, Task
 ```
 
-**통과 조건**: Phase 0과 동일한 테스트가 모두 pass
+**본문 구성**:
+1. 개요 — 언제 사용하는지
+2. 사전 조건 — `/barrier-setup` 으로 hook 등록 필요
+3. 사용 패턴 — 3단계 (barrier 시작 → Task 실행 → 결과 Read)
+4. 파라미터 레퍼런스
+5. 출력 형식 설명
+6. 주의사항 (ordering, timeout, BARRIER_ID 충돌 방지)
+7. 예시 시나리오 2-3개
 
----
+#### 5. `barrier-setup.md` (커맨드)
 
-### Phase 3: DESIGN.md 업데이트
-
-DESIGN.md의 디렉토리 구조 섹션을 실제 코드와 일치하도록 업데이트:
-
+**frontmatter**:
+```yaml
+description: barrier-sync 플러그인의 SubagentStop hook을 등록합니다
+allowed-tools:
+  - Bash
+  - Read
+  - Write
+  - AskUserQuestion
 ```
-plugins/autodev/
-├── cli/
-│   ├── Cargo.toml
-│   └── src/
-│       ├── main.rs
-│       ├── lib.rs              # 라이브러리 export
-│       ├── active.rs           # ActiveItems (in-memory dedup)
-│       ├── client/
-│       │   └── mod.rs          # CLI 서브커맨드 핸들러
-│       ├── daemon/
-│       │   ├── mod.rs
-│       │   └── pid.rs
-│       ├── scanner/
-│       │   ├── mod.rs          # scan_all 오케스트레이터
-│       │   ├── issues.rs       # 이슈 스캐너
-│       │   └── pulls.rs        # PR 스캐너
-│       ├── processor/          # (구 consumer/)
-│       │   ├── mod.rs          # process_all 오케스트레이터
-│       │   ├── issue.rs        # Issue 처리 (분석 → 구현)
-│       │   ├── pr.rs           # PR 처리 (리뷰 → 개선)
-│       │   └── merge.rs        # Merge 처리
-│       ├── github/             # GitHub API 헬퍼
-│       │   └── mod.rs
-│       ├── queue/
-│       │   ├── mod.rs          # Database wrapper
-│       │   ├── models.rs       # 데이터 모델
-│       │   ├── schema.rs       # SQLite 스키마
-│       │   └── repository.rs   # 데이터 접근 레이어
-│       ├── session/
-│       │   ├── mod.rs
-│       │   └── output.rs
-│       ├── workspace/
-│       │   └── mod.rs
-│       ├── config/
-│       │   ├── mod.rs
-│       │   ├── models.rs
-│       │   └── loader.rs       # YAML 로딩/머지
-│       └── tui/
-│           ├── mod.rs
-│           ├── views.rs
-│           └── events.rs
+
+**동작**:
+1. 현재 hook 등록 상태 확인 (settings.json / settings.local.json 읽기)
+2. SubagentStop hook이 이미 등록되어 있으면 안내 후 종료
+3. 미등록이면 등록 범위 선택 (프로젝트 / 사용자)
+4. settings에 SubagentStop hook 추가
+5. jq 설치 여부 확인, 미설치 시 안내
+
+### marketplace.json 등록
+
+```json
+{
+  "category": "infrastructure",
+  "description": "FIFO 기반 barrier 패턴 — 병렬 background Task 동기화 (턴 소모 없이 전원 완료 대기)",
+  "keywords": [
+    "barrier",
+    "sync",
+    "parallel",
+    "background",
+    "task",
+    "fifo",
+    "hook"
+  ],
+  "name": "barrier-sync",
+  "source": "./plugins/barrier-sync",
+  "version": "0.1.0"
+}
 ```
 
 ---
 
-### Phase 4: 최종 검증
+## 구현 순서
 
-1. `cargo test` — 전체 테스트 통과 확인
-2. `cargo build --release` — 릴리스 빌드 성공 확인
-3. 커밋 및 푸시
+### Phase 1: 스크립트 구현
+1. `scripts/wait-for-tasks.sh` — barrier consumer
+2. `hooks/signal-done.sh` — hook producer
+
+### Phase 2: 플러그인 메타
+3. `.claude-plugin/plugin.json`
+4. `commands/barrier-setup.md`
+5. `skills/barrier-sync/SKILL.md`
+
+### Phase 3: 레지스트리 등록
+6. `.claude-plugin/marketplace.json`에 barrier-sync 추가
+
+### Phase 4: 검증
+7. validation 통과 확인 (`make validate`)
 
 ---
-
-## 리스크 & 사이드이펙트
-
-| 리스크 | 대응 |
-|--------|------|
-| 테스트에서 `autodev::consumer::` 경로 하드코딩 | 테스트 파일 내 import 경로 일괄 변경 |
-| daemon 모듈 내 consumer 참조 | `consumer::` → `processor::` 일괄 변경 |
-| 외부에서 lib crate 사용하는 곳 | lib.rs의 re-export로 처리 (현재 외부 사용처 없음) |
-| `consumer/github.rs`가 processor 내부에서만 사용 | 독립 모듈로 분리해도 가시성 문제 없음 (pub fn) |
 
 ## 변경하지 않는 것
 
-- `active.rs`: 디자인에 없지만 런타임 필수 → 유지
-- `client/mod.rs`: CLI 구현 디테일 → 유지
-- `config/loader.rs`: config 내부 구현 → 유지
-- `queue/models.rs`: 데이터 모델 분리 → 유지
-- `scanner/issues.rs`, `scanner/pulls.rs`: 코드 분리가 더 좋음 → 유지 (디자인 업데이트)
+- `.claude/settings.json`: 글로벌 설정은 건드리지 않음 (사용자가 `/barrier-setup`으로 선택)
+- 기존 플러그인 코드: 의존성 없음, 독립 플러그인
+- Go validation 도구: 기존 규칙만으로 검증 가능
