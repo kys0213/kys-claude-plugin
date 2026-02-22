@@ -172,11 +172,18 @@ merge scan: approved + 라벨 없는 PR 발견 (사람/autodev approve 모두)
 Per-task (done 전이 시):
   해당 세션 1건 분석 → 즉시 피드백 (이슈 코멘트)
 
-Daily (매일 06:00):
+Daily (매일 daily_report_hour):
   전일 daemon.YYYY-MM-DD.log 전체 + suggest-workflow 교차 분석
   → 일일 리포트 (GitHub 이슈) + 크로스 태스크 패턴 발견
-  → KnowledgeSuggestion → 규칙 제안 PR
+  → KnowledgeSuggestion → 규칙 제안 PR (autodev:skip 라벨)
 ```
+
+**Knowledge PR 생성**: DailyReport의 suggestions를 Git trait로 직접 파일 쓰기하여 PR 생성.
+Claude 세션 불필요 — `Suggestion.target_file`과 `content`를 그대로 사용한다.
+PR에 `autodev:skip` 라벨을 부착하여 스캐너가 자동 처리하지 않도록 한다 (사람이 리뷰 후 수동 merge).
+
+**`[autodev]` 세션 마커**: 모든 `claude -p` 호출의 프롬프트 앞에 `[autodev] {action}: {context}` 마커 삽입.
+suggest-workflow가 autodev 세션을 식별하는 데 사용된다.
 
 ---
 
@@ -267,12 +274,15 @@ repos:
     merge_require_ci: true         # CI checks 통과 필수
 
 daemon:
-  tick_interval_secs: 10           # 메인 루프 주기
-  reconcile_window_hours: 24       # 재시작 시 복구 윈도우
+  tick_interval_secs: 10           # 메인 루프 주기 (초)
+  reconcile_window_hours: 24       # 재시작 시 복구 윈도우 (시간)
   log_dir: ~/.autodev/logs         # 일자별 롤링 (daemon.YYYY-MM-DD.log)
-  log_retention_days: 30           # 로그 보존 기간
+  log_retention_days: 30           # 로그 보존 기간 (일)
   daily_report_hour: 6             # 매일 06:00에 일일 리포트
 ```
+
+> **daemon 섹션**: daemon tick loop에서만 사용하는 설정.
+> `daily_report_hour`, `reconcile_window_hours` 등은 `DaemonConfig` 구조체에 매핑된다.
 
 ### File Locations
 
