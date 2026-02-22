@@ -93,4 +93,30 @@ impl Git for MockGit {
         }
         Ok(())
     }
+
+    async fn checkout_new_branch(&self, repo_dir: &Path, branch: &str) -> Result<()> {
+        self.calls.lock().unwrap().push((
+            "checkout_new_branch".into(),
+            format!("{} branch={branch}", repo_dir.display()),
+        ));
+        Ok(())
+    }
+
+    async fn add_commit_push(
+        &self,
+        repo_dir: &Path,
+        files: &[&str],
+        message: &str,
+        branch: &str,
+    ) -> Result<()> {
+        self.calls.lock().unwrap().push((
+            "add_commit_push".into(),
+            format!(
+                "{} files={:?} msg={message} branch={branch}",
+                repo_dir.display(),
+                files
+            ),
+        ));
+        Ok(())
+    }
 }

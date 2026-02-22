@@ -78,11 +78,14 @@ pub async fn process_pending(
         };
 
         let repo_cfg = config::loader::load_merged(env, Some(&wt_path));
-        let pr_workflow = &repo_cfg.workflow.pr;
+        let pr_prompt = format!(
+            "[autodev] review: PR #{}\n\n{}",
+            item.github_number, repo_cfg.workflow.pr
+        );
 
         let started = Utc::now().to_rfc3339();
 
-        match reviewer.review_pr(&wt_path, pr_workflow).await {
+        match reviewer.review_pr(&wt_path, &pr_prompt).await {
             Ok(output) => {
                 let finished = Utc::now().to_rfc3339();
                 let duration = chrono::Utc::now()
@@ -94,7 +97,7 @@ pub async fn process_pending(
                     queue_type: "pr".to_string(),
                     queue_item_id: item.work_id.clone(),
                     worker_id: worker_id.clone(),
-                    command: format!("claude -p \"{}\" (PR #{})", pr_workflow, item.github_number),
+                    command: format!("[autodev] review: PR #{}", item.github_number),
                     stdout: output.stdout.clone(),
                     stderr: output.stderr.clone(),
                     exit_code: output.exit_code,
@@ -165,8 +168,9 @@ pub async fn process_review_done(
 
         let review = item.review_comment.as_deref().unwrap_or("");
         let prompt = format!(
-            "Implement the following review feedback for PR #{}:\n\n{review}",
-            item.github_number
+            "[autodev] improve: PR #{}\n\n\
+             Implement the following review feedback for PR #{}:\n\n{review}",
+            item.github_number, item.github_number
         );
 
         let started = Utc::now().to_rfc3339();
@@ -249,11 +253,14 @@ pub async fn process_improved(
         };
 
         let repo_cfg = config::loader::load_merged(env, Some(&wt_path));
-        let pr_workflow = &repo_cfg.workflow.pr;
+        let pr_prompt = format!(
+            "[autodev] review: PR #{}\n\n{}",
+            item.github_number, repo_cfg.workflow.pr
+        );
 
         let started = Utc::now().to_rfc3339();
 
-        match reviewer.review_pr(&wt_path, pr_workflow).await {
+        match reviewer.review_pr(&wt_path, &pr_prompt).await {
             Ok(output) => {
                 let finished = Utc::now().to_rfc3339();
                 let duration = chrono::Utc::now()
@@ -265,7 +272,7 @@ pub async fn process_improved(
                     queue_type: "pr".to_string(),
                     queue_item_id: item.work_id.clone(),
                     worker_id: worker_id.clone(),
-                    command: format!("re-review PR #{}", item.github_number),
+                    command: format!("[autodev] re-review: PR #{}", item.github_number),
                     stdout: output.stdout.clone(),
                     stderr: output.stderr.clone(),
                     exit_code: output.exit_code,

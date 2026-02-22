@@ -164,8 +164,10 @@ pub async fn generate_daily_suggestions(
         }
     };
 
+    let date = &report.date;
     let prompt = format!(
-        "Below is today's autodev daily report. Analyze the patterns and suggest improvements.\n\n\
+        "[autodev] knowledge: daily {date}\n\n\
+         Below is today's autodev daily report. Analyze the patterns and suggest improvements.\n\n\
          ```json\n{report_json}\n```\n\n\
          Respond with a JSON object:\n\
          {{\n  \"suggestions\": [\n    {{\n      \
@@ -217,6 +219,83 @@ pub async fn post_daily_report(
         .await;
     if !created {
         tracing::error!("failed to create daily report issue for {repo_name}");
+    }
+}
+
+/// DailyReport의 suggestions를 각각 PR로 생성
+///
+/// 각 suggestion에 대해:
+/// 1. branch 생성 (autodev/knowledge/{date}-{index})
+/// 2. target_file에 content 기록
+/// 3. commit + push
+/// 4. PR 생성 + autodev:skip 라벨 부착
+pub async fn create_knowledge_prs(
+    gh: &dyn Gh,
+    git: &dyn crate::infrastructure::git::Git,
+    repo_name: &str,
+    report: &DailyReport,
+    base_path: &Path,
+    gh_host: Option<&str>,
+) {
+    use crate::queue::task_queues::labels;
+
+    for (i, suggestion) in report.suggestions.iter().enumerate() {
+        let branch = format!("autodev/knowledge/{}-{}", report.date, i);
+        let target = &suggestion.target_file;
+
+        // 1. branch 생성
+        if let Err(e) = git.checkout_new_branch(base_path, &branch).await {
+            tracing::warn!("knowledge PR: failed to create branch {branch}: {e}");
+            continue;
+        }
+
+        // 2. 파일 쓰기
+        let file_path = base_path.join(target);
+        if let Some(parent) = file_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(e) = std::fs::write(&file_path, &suggestion.content) {
+            tracing::warn!("knowledge PR: failed to write {target}: {e}");
+            continue;
+        }
+
+        // 3. commit + push
+        let message = format!("[autodev] knowledge: {}", suggestion.reason);
+        if let Err(e) = git
+            .add_commit_push(base_path, &[target.as_str()], &message, &branch)
+            .await
+        {
+            tracing::warn!("knowledge PR: failed to commit+push {branch}: {e}");
+            continue;
+        }
+
+        // 4. PR 생성
+        let pr_title = format!("[autodev] rule: {}", suggestion.reason);
+        let pr_body = format!(
+            "<!-- autodev:knowledge-pr -->\n\n\
+             ## Knowledge Suggestion\n\n\
+             **Type**: {:?}\n\
+             **Target**: `{}`\n\n\
+             ### Content\n\n```\n{}\n```\n\n\
+             ### Reason\n\n{}",
+            suggestion.suggestion_type, suggestion.target_file,
+            suggestion.content, suggestion.reason,
+        );
+
+        if let Some(pr_number) = gh
+            .create_pr(repo_name, &branch, "main", &pr_title, &pr_body, gh_host)
+            .await
+        {
+            // autodev:skip 라벨 부착 — 스캐너가 자동 처리하지 않도록
+            gh.label_add(repo_name, pr_number, labels::SKIP, gh_host)
+                .await;
+            tracing::info!(
+                "knowledge PR #{pr_number} created for suggestion {i}: {}",
+                suggestion.reason
+            );
+        } else {
+            tracing::warn!("knowledge PR: failed to create PR for suggestion {i}");
+        }
     }
 }
 

@@ -21,7 +21,8 @@ pub async fn extract_task_knowledge(
     gh_host: Option<&str>,
 ) -> Result<Option<KnowledgeSuggestion>> {
     let prompt = format!(
-        "Analyze the completed {task_type} task (#{github_number}) in this workspace. \
+        "[autodev] knowledge: per-task {task_type} #{github_number}\n\n\
+         Analyze the completed {task_type} task (#{github_number}) in this workspace. \
          Review the changes made, any issues encountered, and lessons learned. \
          Respond with a JSON object matching this schema:\n\
          {{\n  \"suggestions\": [\n    {{\n      \

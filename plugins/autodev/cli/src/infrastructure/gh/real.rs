@@ -236,4 +236,56 @@ impl Gh for RealGh {
             }
         }
     }
+
+    async fn create_pr(
+        &self,
+        repo_name: &str,
+        head: &str,
+        base: &str,
+        title: &str,
+        body: &str,
+        host: Option<&str>,
+    ) -> Option<i64> {
+        let mut args = vec![
+            "api".to_string(),
+            format!("repos/{repo_name}/pulls"),
+            "--method".to_string(),
+            "POST".to_string(),
+            "-f".to_string(),
+            format!("head={head}"),
+            "-f".to_string(),
+            format!("base={base}"),
+            "-f".to_string(),
+            format!("title={title}"),
+            "-f".to_string(),
+            format!("body={body}"),
+            "--jq".to_string(),
+            ".number".to_string(),
+        ];
+
+        if let Some(h) = host {
+            args.push("--hostname".to_string());
+            args.push(h.to_string());
+        }
+
+        match tokio::process::Command::new("gh")
+            .args(&args)
+            .output()
+            .await
+        {
+            Ok(output) => {
+                if output.status.success() {
+                    let num_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    num_str.parse::<i64>().ok()
+                } else {
+                    tracing::warn!("gh create pr failed for {repo_name}");
+                    None
+                }
+            }
+            Err(e) => {
+                tracing::warn!("gh create pr error: {e}");
+                None
+            }
+        }
+    }
 }

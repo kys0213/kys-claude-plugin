@@ -21,6 +21,8 @@ pub struct MockGh {
     pub added_labels: Mutex<Vec<(String, i64, String)>>,
     /// 생성된 이슈 기록: (repo_name, title, body)
     pub created_issues: Mutex<Vec<(String, String, String)>>,
+    /// 생성된 PR 기록: (repo_name, head, base, title, body)
+    pub created_prs: Mutex<Vec<(String, String, String, String, String)>>,
 }
 
 impl Default for MockGh {
@@ -32,6 +34,7 @@ impl Default for MockGh {
             removed_labels: Mutex::new(Vec::new()),
             added_labels: Mutex::new(Vec::new()),
             created_issues: Mutex::new(Vec::new()),
+            created_prs: Mutex::new(Vec::new()),
         }
     }
 }
@@ -145,5 +148,25 @@ impl Gh for MockGh {
             body.to_string(),
         ));
         true
+    }
+
+    async fn create_pr(
+        &self,
+        repo_name: &str,
+        head: &str,
+        base: &str,
+        title: &str,
+        body: &str,
+        _host: Option<&str>,
+    ) -> Option<i64> {
+        let idx = self.created_prs.lock().unwrap().len() as i64 + 100;
+        self.created_prs.lock().unwrap().push((
+            repo_name.to_string(),
+            head.to_string(),
+            base.to_string(),
+            title.to_string(),
+            body.to_string(),
+        ));
+        Some(idx)
     }
 }

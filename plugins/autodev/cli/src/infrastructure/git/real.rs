@@ -73,4 +73,59 @@ impl Git for RealGit {
 
         Ok(())
     }
+
+    async fn checkout_new_branch(&self, repo_dir: &Path, branch: &str) -> Result<()> {
+        let status = tokio::process::Command::new("git")
+            .args(["checkout", "-b", branch])
+            .current_dir(repo_dir)
+            .status()
+            .await?;
+
+        if !status.success() {
+            anyhow::bail!("git checkout -b {branch} failed");
+        }
+        Ok(())
+    }
+
+    async fn add_commit_push(
+        &self,
+        repo_dir: &Path,
+        files: &[&str],
+        message: &str,
+        branch: &str,
+    ) -> Result<()> {
+        let mut add_args = vec!["add".to_string()];
+        for f in files {
+            add_args.push(f.to_string());
+        }
+
+        let status = tokio::process::Command::new("git")
+            .args(&add_args)
+            .current_dir(repo_dir)
+            .status()
+            .await?;
+        if !status.success() {
+            anyhow::bail!("git add failed");
+        }
+
+        let status = tokio::process::Command::new("git")
+            .args(["commit", "-m", message])
+            .current_dir(repo_dir)
+            .status()
+            .await?;
+        if !status.success() {
+            anyhow::bail!("git commit failed");
+        }
+
+        let status = tokio::process::Command::new("git")
+            .args(["push", "origin", branch])
+            .current_dir(repo_dir)
+            .status()
+            .await?;
+        if !status.success() {
+            anyhow::bail!("git push origin {branch} failed");
+        }
+
+        Ok(())
+    }
 }

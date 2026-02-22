@@ -55,8 +55,10 @@ pub async fn start(
     let knowledge_extraction = cfg.consumer.knowledge_extraction;
     let mut last_daily_report_date = String::new();
 
+    let reconcile_window_hours = 24u32;
+
     // 0. Startup Reconcile (bounded recovery)
-    match startup_reconcile(&db, gh, &mut queues, gh_host.as_deref()).await {
+    match startup_reconcile(&db, gh, &mut queues, gh_host.as_deref(), reconcile_window_hours).await {
         Ok(n) if n > 0 => info!("startup reconcile: recovered {n} items"),
         Err(e) => tracing::error!("startup reconcile failed: {e}"),
         _ => {}
@@ -115,6 +117,14 @@ pub async fn start(
                                             crate::knowledge::daily::post_daily_report(
                                                 gh, &repo.name, &report, gh_host.as_deref(),
                                             ).await;
+
+                                            // Knowledge PR 생성 (suggestions → PR + autodev:skip)
+                                            if !report.suggestions.is_empty() {
+                                                crate::knowledge::daily::create_knowledge_prs(
+                                                    gh, git, &repo.name, &report, &base,
+                                                    gh_host.as_deref(),
+                                                ).await;
+                                            }
                                         }
                                     }
                                 }
@@ -139,6 +149,21 @@ pub async fn start(
     Ok(())
 }
 
+/// cursor에서 reconcile_window_hours를 빼서 safe_since를 계산
+///
+/// cursor가 없으면 현재 시점 - window를 사용.
+/// cursor 파싱 실패 시에도 현재 시점 - window를 사용.
+fn compute_safe_since(cursor: Option<String>, window_hours: u32) -> Option<String> {
+    let window = chrono::Duration::hours(window_hours as i64);
+    let base = match cursor {
+        Some(ref s) => chrono::DateTime::parse_from_rfc3339(s)
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .unwrap_or_else(|_| chrono::Utc::now()),
+        None => chrono::Utc::now(),
+    };
+    Some((base - window).to_rfc3339())
+}
+
 /// Bounded reconciliation: 재시작 시 메모리 큐를 GitHub 라벨 기반으로 복구
 ///
 /// cursor - reconcile_window_hours 범위의 open 이슈/PR을 조회하여,
@@ -148,6 +173,7 @@ async fn startup_reconcile(
     gh: &dyn Gh,
     queues: &mut TaskQueues,
     gh_host: Option<&str>,
+    reconcile_window_hours: u32,
 ) -> Result<u64> {
     use crate::queue::task_queues::{labels, issue_phase, pr_phase, make_work_id, IssueItem, PrItem};
 
@@ -155,17 +181,18 @@ async fn startup_reconcile(
     let mut recovered = 0u64;
 
     for repo in &repos {
-        // issues 복구
-        let since = db.cursor_get_last_seen(&repo.id, "issues")?;
+        // issues 복구: cursor - reconcile_window_hours로 bounded window 적용
+        let safe_since = compute_safe_since(
+            db.cursor_get_last_seen(&repo.id, "issues")?,
+            reconcile_window_hours,
+        );
         let mut params: Vec<(&str, &str)> = vec![
             ("state", "open"),
             ("sort", "updated"),
             ("per_page", "100"),
         ];
-        let since_val: String;
-        if let Some(ref s) = since {
-            since_val = s.clone();
-            params.push(("since", &since_val));
+        if let Some(ref s) = safe_since {
+            params.push(("since", s));
         }
 
         if let Ok(data) = gh.api_paginate(&repo.name, "issues", &params, gh_host).await {
@@ -223,12 +250,19 @@ async fn startup_reconcile(
             }
         }
 
-        // pulls 복구
-        let params: Vec<(&str, &str)> = vec![
+        // pulls 복구: cursor - reconcile_window_hours로 bounded window 적용
+        let safe_since_pulls = compute_safe_since(
+            db.cursor_get_last_seen(&repo.id, "pulls")?,
+            reconcile_window_hours,
+        );
+        let mut params: Vec<(&str, &str)> = vec![
             ("state", "open"),
             ("sort", "updated"),
             ("per_page", "100"),
         ];
+        if let Some(ref s) = safe_since_pulls {
+            params.push(("since", s));
+        }
 
         if let Ok(data) = gh.api_paginate(&repo.name, "pulls", &params, gh_host).await {
             let items: Vec<serde_json::Value> = serde_json::from_slice(&data).unwrap_or_default();

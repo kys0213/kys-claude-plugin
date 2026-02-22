@@ -96,10 +96,15 @@ pub async fn process_pending(
         };
 
         let body_text = item.body.as_deref().unwrap_or("");
-        let prompt = ANALYSIS_PROMPT_TEMPLATE
-            .replace("{number}", &item.github_number.to_string())
-            .replace("{title}", &item.title)
-            .replace("{body}", body_text);
+        let prompt = format!(
+            "[autodev] analyze: issue #{} - {}\n\n{}",
+            item.github_number,
+            item.title,
+            ANALYSIS_PROMPT_TEMPLATE
+                .replace("{number}", &item.github_number.to_string())
+                .replace("{title}", &item.title)
+                .replace("{body}", body_text),
+        );
 
         let started = Utc::now().to_rfc3339();
         let result = claude.run_session(&wt_path, &prompt, Some("json")).await;
@@ -221,9 +226,10 @@ pub async fn process_ready(
         let workflow = &repo_cfg.workflow.issue;
         let report = item.analysis_report.as_deref().unwrap_or("");
         let prompt = format!(
-            "{workflow} implement based on analysis:\n\n{report}\n\n\
+            "[autodev] implement: issue #{}\n\n\
+             {workflow} implement based on analysis:\n\n{report}\n\n\
              This is for issue #{} in {}.",
-            item.github_number, item.repo_name
+            item.github_number, item.github_number, item.repo_name
         );
 
         let started = Utc::now().to_rfc3339();

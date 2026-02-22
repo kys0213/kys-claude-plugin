@@ -68,4 +68,17 @@ pub trait Gh: Send + Sync {
         body: &str,
         host: Option<&str>,
     ) -> bool;
+
+    /// `gh api repos/{repo}/pulls --method POST`
+    /// PR 생성 (knowledge suggestion PR 등에 사용)
+    /// 성공 시 PR 번호를 반환, 실패 시 None
+    async fn create_pr(
+        &self,
+        repo_name: &str,
+        head: &str,
+        base: &str,
+        title: &str,
+        body: &str,
+        host: Option<&str>,
+    ) -> Option<i64>;
 }
