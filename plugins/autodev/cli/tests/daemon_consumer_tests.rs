@@ -1,11 +1,15 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use autodev::components::notifier::Notifier;
+use autodev::components::workspace::Workspace;
 use autodev::config::Env;
+use autodev::infrastructure::claude::MockClaude;
+use autodev::infrastructure::gh::MockGh;
+use autodev::infrastructure::git::MockGit;
 use autodev::queue::models::*;
 use autodev::queue::repository::*;
 use autodev::queue::Database;
-use serial_test::serial;
 
 // ─── TestEnv ───
 
@@ -35,16 +39,6 @@ impl Env for TestEnv {
 
 // ─── Helpers ───
 
-fn fixtures_bin() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/bin")
-}
-
-fn path_with_fake_bin() -> String {
-    let fake = fixtures_bin();
-    let original = std::env::var("PATH").unwrap_or_default();
-    format!("{}:{original}", fake.display())
-}
-
 fn open_memory_db() -> Database {
     let db = Database::open(Path::new(":memory:")).expect("open in-memory db");
     db.initialize().expect("initialize schema");
@@ -53,19 +47,6 @@ fn open_memory_db() -> Database {
 
 fn add_repo(db: &Database, url: &str, name: &str) -> String {
     db.repo_add(url, name).expect("add repo")
-}
-
-fn setup_subprocess_env() {
-    std::env::set_var("PATH", path_with_fake_bin());
-    std::env::remove_var("CLAUDE_MOCK_EXIT_CODE");
-    std::env::remove_var("CLAUDE_MOCK_STDERR");
-    std::env::remove_var("GIT_MOCK_EXIT_CODE");
-}
-
-fn cleanup_env() {
-    std::env::remove_var("CLAUDE_MOCK_EXIT_CODE");
-    std::env::remove_var("CLAUDE_MOCK_STDERR");
-    std::env::remove_var("GIT_MOCK_EXIT_CODE");
 }
 
 fn insert_pending_issue(db: &Database, repo_id: &str, number: i64, title: &str) -> String {
@@ -93,52 +74,92 @@ fn insert_pending_pr(db: &Database, repo_id: &str, number: i64, title: &str) -> 
     db.pr_insert(&item).unwrap()
 }
 
+/// MockGh에 "이슈/PR이 open" 응답 설정
+fn set_gh_open(gh: &MockGh, repo_name: &str, number: i64, kind: &str) {
+    let path = format!("{kind}/{number}");
+    gh.set_field(repo_name, &path, ".state", "open");
+}
+
 // ═══════════════════════════════════════════════
-// 1. Issue consumer — success
+// 1. Issue pipeline — success (analysis → ready)
 // ═══════════════════════════════════════════════
 
 #[tokio::test]
-#[serial]
-async fn issue_consumer_success_transitions_to_done() {
+async fn issue_pipeline_success_transitions_to_ready() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
     insert_pending_issue(&db, &repo_id, 42, "Bug: test issue");
 
-    setup_subprocess_env();
+    let gh = MockGh::new();
+    set_gh_open(&gh, "org/repo", 42, "issues");
 
-    autodev::consumer::issue::process_pending(&db, &env)
-        .await
-        .expect("process_pending should succeed");
+    let git = MockGit::new();
+    let claude = MockClaude::new();
 
+    // analysis 결과 JSON
+    let analysis_json = serde_json::json!({
+        "result": serde_json::json!({
+            "verdict": "implement",
+            "confidence": 0.9,
+            "summary": "Clear bug to fix",
+            "questions": [],
+            "reason": null,
+            "report": "## Analysis\nBug in login page."
+        }).to_string()
+    });
+    claude.enqueue_response(&analysis_json.to_string(), 0);
+
+    let workspace = Workspace::new(&git, &env);
+    let notifier = Notifier::new(&gh);
+    let mut active = autodev::active::ActiveItems::new();
+
+    autodev::pipeline::issue::process_pending(
+        &db, &env, &workspace, &notifier, &claude, &mut active,
+    )
+    .await
+    .expect("process_pending should succeed");
+
+    // pending → ready (analysis 성공)
     let pending = db.issue_find_pending(100).unwrap();
     assert!(pending.is_empty(), "no issues should remain pending");
 
+    let ready = db.issue_find_ready(100).unwrap();
+    assert_eq!(ready.len(), 1, "issue should be in ready state");
+
     let logs = db.log_recent(None, 100).unwrap();
     assert!(!logs.is_empty(), "consumer should have written logs");
-    cleanup_env();
 }
 
 // ═══════════════════════════════════════════════
-// 2. Issue consumer — claude failure
+// 2. Issue pipeline — claude failure
 // ═══════════════════════════════════════════════
 
 #[tokio::test]
-#[serial]
-async fn issue_consumer_claude_failure_marks_failed() {
+async fn issue_pipeline_claude_failure_marks_failed() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
     insert_pending_issue(&db, &repo_id, 99, "Will fail");
 
-    setup_subprocess_env();
-    std::env::set_var("CLAUDE_MOCK_EXIT_CODE", "1");
+    let gh = MockGh::new();
+    set_gh_open(&gh, "org/repo", 99, "issues");
 
-    autodev::consumer::issue::process_pending(&db, &env)
-        .await
-        .expect("should handle failure gracefully");
+    let git = MockGit::new();
+    let claude = MockClaude::new();
+    claude.enqueue_response("error output", 1); // exit code 1
+
+    let workspace = Workspace::new(&git, &env);
+    let notifier = Notifier::new(&gh);
+    let mut active = autodev::active::ActiveItems::new();
+
+    autodev::pipeline::issue::process_pending(
+        &db, &env, &workspace, &notifier, &claude, &mut active,
+    )
+    .await
+    .expect("should handle failure gracefully");
 
     let pending = db.issue_find_pending(100).unwrap();
     assert!(pending.is_empty());
@@ -146,27 +167,36 @@ async fn issue_consumer_claude_failure_marks_failed() {
     let list = db.issue_list("org/repo", 100).unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].status, "failed");
-    cleanup_env();
 }
 
 // ═══════════════════════════════════════════════
-// 3. PR consumer — success
+// 3. PR pipeline — success
 // ═══════════════════════════════════════════════
 
 #[tokio::test]
-#[serial]
-async fn pr_consumer_success_transitions_to_review_done() {
+async fn pr_pipeline_success_transitions_to_review_done() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
     insert_pending_pr(&db, &repo_id, 100, "feat: add settings");
 
-    setup_subprocess_env();
+    let gh = MockGh::new();
+    set_gh_open(&gh, "org/repo", 100, "pulls");
 
-    autodev::consumer::pr::process_pending(&db, &env)
-        .await
-        .expect("process_pending should succeed");
+    let git = MockGit::new();
+    let claude = MockClaude::new();
+    claude.enqueue_response(r#"{"result": "LGTM"}"#, 0);
+
+    let workspace = Workspace::new(&git, &env);
+    let notifier = Notifier::new(&gh);
+    let mut active = autodev::active::ActiveItems::new();
+
+    autodev::pipeline::pr::process_pending(
+        &db, &env, &workspace, &notifier, &claude, &mut active,
+    )
+    .await
+    .expect("process_pending should succeed");
 
     let pending = db.pr_find_pending(100).unwrap();
     assert!(pending.is_empty());
@@ -174,42 +204,48 @@ async fn pr_consumer_success_transitions_to_review_done() {
     let list = db.pr_list("org/repo", 100).unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].status, "review_done");
-    cleanup_env();
 }
 
 // ═══════════════════════════════════════════════
-// 4. PR consumer — failure
+// 4. PR pipeline — failure
 // ═══════════════════════════════════════════════
 
 #[tokio::test]
-#[serial]
-async fn pr_consumer_claude_failure_marks_failed() {
+async fn pr_pipeline_claude_failure_marks_failed() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
     insert_pending_pr(&db, &repo_id, 200, "will fail");
 
-    setup_subprocess_env();
-    std::env::set_var("CLAUDE_MOCK_EXIT_CODE", "1");
+    let gh = MockGh::new();
+    set_gh_open(&gh, "org/repo", 200, "pulls");
 
-    autodev::consumer::pr::process_pending(&db, &env)
-        .await
-        .expect("should handle failure");
+    let git = MockGit::new();
+    let claude = MockClaude::new();
+    claude.enqueue_response("review error", 1);
+
+    let workspace = Workspace::new(&git, &env);
+    let notifier = Notifier::new(&gh);
+    let mut active = autodev::active::ActiveItems::new();
+
+    autodev::pipeline::pr::process_pending(
+        &db, &env, &workspace, &notifier, &claude, &mut active,
+    )
+    .await
+    .expect("should handle failure");
 
     let list = db.pr_list("org/repo", 100).unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].status, "failed");
-    cleanup_env();
 }
 
 // ═══════════════════════════════════════════════
-// 5. Consumer batch limit
+// 5. Pipeline batch limit
 // ═══════════════════════════════════════════════
 
 #[tokio::test]
-#[serial]
-async fn issue_consumer_processes_up_to_limit() {
+async fn issue_pipeline_processes_up_to_limit() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
@@ -219,16 +255,28 @@ async fn issue_consumer_processes_up_to_limit() {
         insert_pending_issue(&db, &repo_id, i, &format!("Issue #{i}"));
     }
 
-    setup_subprocess_env();
+    let gh = MockGh::new();
+    for i in 1..=10 {
+        set_gh_open(&gh, "org/repo", i, "issues");
+    }
 
-    // process_pending uses config issue_concurrency (default: 1)
-    autodev::consumer::issue::process_pending(&db, &env)
-        .await
-        .expect("should process batch");
+    let git = MockGit::new();
+    let claude = MockClaude::new();
+    // only 1 response (default concurrency=1)
+    claude.enqueue_response(r#"{"result": "{\"verdict\":\"implement\",\"confidence\":0.9,\"summary\":\"ok\",\"questions\":[],\"reason\":null,\"report\":\"report\"}"}"#, 0);
+
+    let workspace = Workspace::new(&git, &env);
+    let notifier = Notifier::new(&gh);
+    let mut active = autodev::active::ActiveItems::new();
+
+    autodev::pipeline::issue::process_pending(
+        &db, &env, &workspace, &notifier, &claude, &mut active,
+    )
+    .await
+    .expect("should process batch");
 
     let remaining = db.issue_find_pending(100).unwrap();
     assert_eq!(remaining.len(), 9); // default concurrency=1 → 1 processed, 9 remain
-    cleanup_env();
 }
 
 // ═══════════════════════════════════════════════
@@ -236,7 +284,6 @@ async fn issue_consumer_processes_up_to_limit() {
 // ═══════════════════════════════════════════════
 
 #[tokio::test]
-#[serial]
 async fn process_all_handles_issues_and_prs() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
@@ -246,13 +293,27 @@ async fn process_all_handles_issues_and_prs() {
     insert_pending_issue(&db, &repo_id, 1, "Issue");
     insert_pending_pr(&db, &repo_id, 10, "PR");
 
-    setup_subprocess_env();
+    let gh = MockGh::new();
+    set_gh_open(&gh, "org/repo", 1, "issues");
+    set_gh_open(&gh, "org/repo", 10, "pulls");
 
-    autodev::consumer::process_all(&db, &env)
-        .await
-        .expect("process_all should succeed");
+    let git = MockGit::new();
+    let claude = MockClaude::new();
+    // Issue analysis response
+    claude.enqueue_response(r#"{"result": "{\"verdict\":\"implement\",\"confidence\":0.9,\"summary\":\"ok\",\"questions\":[],\"reason\":null,\"report\":\"report\"}"}"#, 0);
+    // PR review response
+    claude.enqueue_response(r#"{"result": "LGTM"}"#, 0);
+
+    let workspace = Workspace::new(&git, &env);
+    let notifier = Notifier::new(&gh);
+    let mut active = autodev::active::ActiveItems::new();
+
+    autodev::pipeline::process_all(
+        &db, &env, &workspace, &notifier, &claude, &mut active,
+    )
+    .await
+    .expect("process_all should succeed");
 
     assert!(db.issue_find_pending(100).unwrap().is_empty());
     assert!(db.pr_find_pending(100).unwrap().is_empty());
-    cleanup_env();
 }

@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::Deserialize;
 
 use crate::active::ActiveItems;
+use crate::infrastructure::gh::Gh;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::Database;
@@ -31,6 +32,7 @@ struct GitHubBranch {
 /// GitHub PRs를 스캔하여 큐에 추가
 pub async fn scan(
     db: &Database,
+    gh: &dyn Gh,
     repo_id: &str,
     repo_name: &str,
     ignore_authors: &[String],
@@ -39,58 +41,41 @@ pub async fn scan(
 ) -> Result<()> {
     let since = db.cursor_get_last_seen(repo_id, "pulls")?;
 
-    let mut args = vec![
-        "api".to_string(),
-        format!("repos/{repo_name}/pulls"),
-        "--paginate".to_string(),
-        "--method".to_string(), "GET".to_string(),
-        "-f".to_string(), "state=open".to_string(),
-        "-f".to_string(), "sort=updated".to_string(),
-        "-f".to_string(), "direction=desc".to_string(),
-        "-f".to_string(), "per_page=30".to_string(),
+    let params: Vec<(&str, &str)> = vec![
+        ("state", "open"),
+        ("sort", "updated"),
+        ("direction", "desc"),
+        ("per_page", "30"),
     ];
 
-    // GitHub Enterprise: --hostname 추가
-    if let Some(host) = gh_host {
-        args.push("--hostname".to_string());
-        args.push(host.to_string());
-    }
-
-    let output = tokio::process::Command::new("gh")
-        .args(&args)
-        .output()
+    let stdout = gh
+        .api_paginate(repo_name, "pulls", &params, gh_host)
         .await?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("gh api error: {stderr}");
-    }
-
-    let prs: Vec<GitHubPR> = serde_json::from_slice(&output.stdout)?;
+    let prs: Vec<GitHubPR> = serde_json::from_slice(&stdout)?;
     let mut latest_updated = since;
 
     for pr in &prs {
-        // since 이전 PR은 건너뜀
         if let Some(ref s) = latest_updated {
             if pr.updated_at <= *s {
                 continue;
             }
         }
 
-        // 작성자 필터
         if ignore_authors.contains(&pr.user.login) {
             continue;
         }
 
-        // 인메모리 중복 체크 (fast path)
         if active.contains("pr", repo_id, pr.number) {
-            if latest_updated.as_ref().map_or(true, |l| pr.updated_at > *l) {
+            if latest_updated
+                .as_ref()
+                .map_or(true, |l| pr.updated_at > *l)
+            {
                 latest_updated = Some(pr.updated_at.clone());
             }
             continue;
         }
 
-        // DB 중복 체크 (fallback)
         let exists = db.pr_exists(repo_id, pr.number)?;
 
         if exists {
@@ -111,12 +96,14 @@ pub async fn scan(
             tracing::info!("queued PR #{}: {}", pr.number, pr.title);
         }
 
-        if latest_updated.as_ref().map_or(true, |l| pr.updated_at > *l) {
+        if latest_updated
+            .as_ref()
+            .map_or(true, |l| pr.updated_at > *l)
+        {
             latest_updated = Some(pr.updated_at.clone());
         }
     }
 
-    // 스캔 커서 업데이트
     if let Some(last_seen) = latest_updated {
         db.cursor_upsert(repo_id, "pulls", &last_seen)?;
     }

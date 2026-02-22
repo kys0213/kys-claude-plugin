@@ -3,14 +3,21 @@ use clap::{Parser, Subcommand};
 
 mod active;
 mod client;
+mod components;
 mod config;
 mod consumer;
 mod daemon;
+mod infrastructure;
+mod pipeline;
 mod queue;
 mod scanner;
 mod session;
 mod tui;
 mod workspace;
+
+use infrastructure::claude::RealClaude;
+use infrastructure::gh::RealGh;
+use infrastructure::git::RealGit;
 
 #[derive(Parser)]
 #[command(name = "autodev", version, about = "GitHub 이슈 → PR 자동화 에이전트")]
@@ -109,12 +116,17 @@ async fn main() -> Result<()> {
     let db = queue::Database::open(&db_path)?;
     db.initialize()?;
 
+    // infrastructure 구현체 생성 (프로덕션)
+    let gh = RealGh;
+    let git = RealGit;
+    let claude = RealClaude;
+
     match cli.command {
-        Commands::Start => daemon::start(&home, &env).await?,
+        Commands::Start => daemon::start(&home, &env, &gh, &git, &claude).await?,
         Commands::Stop => daemon::stop(&home)?,
         Commands::Restart => {
             daemon::stop(&home).ok();
-            daemon::start(&home, &env).await?;
+            daemon::start(&home, &env, &gh, &git, &claude).await?;
         }
         Commands::Status => {
             let status = client::status(&db, &env)?;
