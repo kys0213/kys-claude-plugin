@@ -49,4 +49,14 @@ pub trait Gh: Send + Sync {
         label: &str,
         host: Option<&str>,
     ) -> bool;
+
+    /// `gh api repos/{repo}/issues/{number}/labels --method POST`
+    /// 라벨 추가 (best effort)
+    async fn label_add(
+        &self,
+        repo_name: &str,
+        number: i64,
+        label: &str,
+        host: Option<&str>,
+    ) -> bool;
 }

@@ -16,6 +16,8 @@ pub struct MockGh {
     pub posted_comments: Mutex<Vec<(String, i64, String)>>,
     /// 제거된 라벨 기록: (repo_name, number, label)
     pub removed_labels: Mutex<Vec<(String, i64, String)>>,
+    /// 추가된 라벨 기록: (repo_name, number, label)
+    pub added_labels: Mutex<Vec<(String, i64, String)>>,
 }
 
 impl Default for MockGh {
@@ -25,6 +27,7 @@ impl Default for MockGh {
             paginate_responses: Mutex::new(HashMap::new()),
             posted_comments: Mutex::new(Vec::new()),
             removed_labels: Mutex::new(Vec::new()),
+            added_labels: Mutex::new(Vec::new()),
         }
     }
 }
@@ -102,6 +105,21 @@ impl Gh for MockGh {
         _host: Option<&str>,
     ) -> bool {
         self.removed_labels.lock().unwrap().push((
+            repo_name.to_string(),
+            number,
+            label.to_string(),
+        ));
+        true
+    }
+
+    async fn label_add(
+        &self,
+        repo_name: &str,
+        number: i64,
+        label: &str,
+        _host: Option<&str>,
+    ) -> bool {
+        self.added_labels.lock().unwrap().push((
             repo_name.to_string(),
             number,
             label.to_string(),

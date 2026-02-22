@@ -155,4 +155,44 @@ impl Gh for RealGh {
             }
         }
     }
+
+    async fn label_add(
+        &self,
+        repo_name: &str,
+        number: i64,
+        label: &str,
+        host: Option<&str>,
+    ) -> bool {
+        let mut args = vec![
+            "api".to_string(),
+            format!("repos/{repo_name}/issues/{number}/labels"),
+            "--method".to_string(),
+            "POST".to_string(),
+            "--silent".to_string(),
+            "-f".to_string(),
+            format!("labels[]={label}"),
+        ];
+
+        if let Some(h) = host {
+            args.push("--hostname".to_string());
+            args.push(h.to_string());
+        }
+
+        match tokio::process::Command::new("gh")
+            .args(&args)
+            .output()
+            .await
+        {
+            Ok(output) => {
+                if !output.status.success() {
+                    tracing::warn!("gh label add failed for {repo_name}#{number} label={label}");
+                }
+                output.status.success()
+            }
+            Err(e) => {
+                tracing::warn!("gh label add error: {e}");
+                false
+            }
+        }
+    }
 }
