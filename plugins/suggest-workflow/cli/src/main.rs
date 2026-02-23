@@ -1,22 +1,24 @@
-use clap::{Parser, Subcommand};
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-mod commands;
-mod parsers;
 mod analyzers;
+mod commands;
+mod db;
+mod parsers;
 mod tokenizer;
 mod types;
-mod db;
 
 use analyzers::{AnalysisDepth, StopwordSet, TuningConfig};
-use commands::analyze::{AnalysisScope, AnalysisFocus};
+use commands::analyze::{AnalysisFocus, AnalysisScope};
 
 #[derive(Parser)]
 #[command(name = "suggest-workflow")]
 #[command(version = "3.0.0")]
-#[command(about = "Analyze Claude session patterns — structural statistics extraction for LLM interpretation")]
+#[command(
+    about = "Analyze Claude session patterns — structural statistics extraction for LLM interpretation"
+)]
 #[command(args_conflicts_with_subcommands = true)]
 struct Cli {
     #[command(subcommand)]
@@ -271,8 +273,7 @@ fn run_legacy(cli: LegacyArgs) -> Result<()> {
         return Ok(());
     }
 
-    let depth: AnalysisDepth = cli.depth.parse()
-        .map_err(|e: String| anyhow::anyhow!(e))?;
+    let depth: AnalysisDepth = cli.depth.parse().map_err(|e: String| anyhow::anyhow!(e))?;
 
     let project_path = match cli.project {
         Some(p) => p,
@@ -283,17 +284,34 @@ fn run_legacy(cli: LegacyArgs) -> Result<()> {
     };
 
     // Parse date range filters
-    let since_ms = cli.since.as_deref().map(|s| {
-        NaiveDate::parse_from_str(s, "%Y-%m-%d")
-            .map(|d| d.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis())
-            .map_err(|e| anyhow::anyhow!("invalid --since date '{}': {} (expected YYYY-MM-DD)", s, e))
-    }).transpose()?;
+    let since_ms = cli
+        .since
+        .as_deref()
+        .map(|s| {
+            NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                .map(|d| d.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis())
+                .map_err(|e| {
+                    anyhow::anyhow!("invalid --since date '{}': {} (expected YYYY-MM-DD)", s, e)
+                })
+        })
+        .transpose()?;
 
-    let until_ms = cli.until.as_deref().map(|s| {
-        NaiveDate::parse_from_str(s, "%Y-%m-%d")
-            .map(|d| d.and_hms_opt(23, 59, 59).unwrap().and_utc().timestamp_millis())
-            .map_err(|e| anyhow::anyhow!("invalid --until date '{}': {} (expected YYYY-MM-DD)", s, e))
-    }).transpose()?;
+    let until_ms = cli
+        .until
+        .as_deref()
+        .map(|s| {
+            NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                .map(|d| {
+                    d.and_hms_opt(23, 59, 59)
+                        .unwrap()
+                        .and_utc()
+                        .timestamp_millis()
+                })
+                .map_err(|e| {
+                    anyhow::anyhow!("invalid --until date '{}': {} (expected YYYY-MM-DD)", s, e)
+                })
+        })
+        .transpose()?;
 
     let date_range = match (since_ms, until_ms) {
         (Some(s), Some(u)) => Some((s, u)),
@@ -362,10 +380,8 @@ fn run_legacy(cli: LegacyArgs) -> Result<()> {
         commands::index::run(&store, &sessions_dir)?;
     }
 
-    let scope: AnalysisScope = cli.scope.parse()
-        .map_err(|e: String| anyhow::anyhow!(e))?;
-    let focus: AnalysisFocus = cli.focus.parse()
-        .map_err(|e: String| anyhow::anyhow!(e))?;
+    let scope: AnalysisScope = cli.scope.parse().map_err(|e: String| anyhow::anyhow!(e))?;
+    let focus: AnalysisFocus = cli.focus.parse().map_err(|e: String| anyhow::anyhow!(e))?;
 
     commands::analyze::run(
         scope,

@@ -6,11 +6,8 @@ use predicates::prelude::*;
 // --- A1: First indexing creates DB and reports new sessions ---
 #[test]
 fn a1_first_index_creates_db() {
-    let (tmp, project) = setup_project(&[
-        "minimal.jsonl",
-        "multi_tool.jsonl",
-        "bash_classified.jsonl",
-    ]);
+    let (tmp, project) =
+        setup_project(&["minimal.jsonl", "multi_tool.jsonl", "bash_classified.jsonl"]);
 
     cli_with_home(&tmp)
         .args(["index", "--project", project.to_str().unwrap()])
@@ -142,11 +139,8 @@ fn a5_incremental_detects_deletion() {
 // --- A6: --full forces complete rebuild ---
 #[test]
 fn a6_full_rebuild() {
-    let (tmp, project) = setup_project(&[
-        "minimal.jsonl",
-        "multi_tool.jsonl",
-        "bash_classified.jsonl",
-    ]);
+    let (tmp, project) =
+        setup_project(&["minimal.jsonl", "multi_tool.jsonl", "bash_classified.jsonl"]);
 
     // First indexing
     cli_with_home(&tmp)

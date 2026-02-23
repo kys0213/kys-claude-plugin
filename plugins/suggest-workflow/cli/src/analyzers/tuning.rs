@@ -124,10 +124,20 @@ impl TuningConfig {
         decay_half_life: Option<f64>,
         z_threshold: Option<f64>,
     ) {
-        if let Some(v) = bm25_k1 { self.bm25_k1 = v; }
-        if let Some(v) = bm25_b { self.bm25_b = v; }
-        if let Some(v) = time_window { self.time_window_minutes = v; }
-        if let Some(v) = decay_half_life { self.decay_half_life_days = v; }
-        if let Some(v) = z_threshold { self.z_score_threshold = v; }
+        if let Some(v) = bm25_k1 {
+            self.bm25_k1 = v;
+        }
+        if let Some(v) = bm25_b {
+            self.bm25_b = v;
+        }
+        if let Some(v) = time_window {
+            self.time_window_minutes = v;
+        }
+        if let Some(v) = decay_half_life {
+            self.decay_half_life_days = v;
+        }
+        if let Some(v) = z_threshold {
+            self.z_score_threshold = v;
+        }
     }
 }

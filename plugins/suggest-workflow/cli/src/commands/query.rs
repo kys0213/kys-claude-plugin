@@ -14,8 +14,9 @@ pub fn run(
     let result = match (perspective, sql_file) {
         // --sql-file takes priority
         (_, Some(path)) => {
-            let sql = std::fs::read_to_string(path)
-                .map_err(|e| anyhow::anyhow!("failed to read SQL file '{}': {}", path.display(), e))?;
+            let sql = std::fs::read_to_string(path).map_err(|e| {
+                anyhow::anyhow!("failed to read SQL file '{}': {}", path.display(), e)
+            })?;
             let trimmed = sql.trim();
             if trimmed.is_empty() {
                 anyhow::bail!("SQL file is empty: {}", path.display());
@@ -57,9 +58,9 @@ pub fn list(repo: &dyn QueryRepository) -> Result<()> {
 pub fn parse_params(raw: &[String]) -> Result<QueryParams> {
     let mut map = HashMap::new();
     for item in raw {
-        let (key, value) = item
-            .split_once('=')
-            .ok_or_else(|| anyhow::anyhow!("invalid --param format '{}': expected key=value", item))?;
+        let (key, value) = item.split_once('=').ok_or_else(|| {
+            anyhow::anyhow!("invalid --param format '{}': expected key=value", item)
+        })?;
         map.insert(key.to_string(), value.to_string());
     }
     Ok(map)

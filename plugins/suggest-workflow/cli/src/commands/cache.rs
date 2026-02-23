@@ -1,21 +1,20 @@
+use crate::analyzers::tool_classifier::classify_tool;
+use crate::analyzers::{
+    analyze_files, analyze_prompts, analyze_repetition, analyze_tacit_knowledge, analyze_trends,
+    analyze_workflows, build_dependency_graph, build_transition_matrix, link_sessions,
+    AnalysisDepth, DepthConfig, StopwordSet, TuningConfig,
+};
+use crate::db::repository::QueryRepository;
+use crate::parsers::{
+    adapt_to_history_entries, extract_tool_sequence, list_sessions, parse_session,
+    resolve_project_path,
+};
+use crate::types::*;
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use chrono::{DateTime, Utc};
-use crate::types::*;
-use crate::db::repository::QueryRepository;
-use crate::parsers::{
-    parse_session, list_sessions, resolve_project_path,
-    adapt_to_history_entries, extract_tool_sequence,
-};
-use crate::analyzers::{
-    analyze_workflows, analyze_prompts, analyze_tacit_knowledge,
-    build_transition_matrix, analyze_repetition, analyze_trends,
-    analyze_files, link_sessions, build_dependency_graph,
-    AnalysisDepth, DepthConfig, StopwordSet, TuningConfig,
-};
-use crate::analyzers::tool_classifier::classify_tool;
 
 const CACHE_VERSION: &str = "2.0.0";
 const CACHE_DIR_NAME: &str = "suggest-workflow-cache";
@@ -34,11 +33,12 @@ pub fn run(
     tuning: &TuningConfig,
     db: Option<&dyn QueryRepository>,
 ) -> Result<()> {
-    let resolved_path = resolve_project_path(project_path)
-        .with_context(|| format!(
+    let resolved_path = resolve_project_path(project_path).with_context(|| {
+        format!(
             "Project not found: {}\nExpected encoded directory under ~/.claude/projects/",
             project_path
-        ))?;
+        )
+    })?;
 
     let encoded_name = resolved_path
         .file_name()
@@ -69,9 +69,7 @@ pub fn run(
             .unwrap_or("unknown")
             .to_string();
 
-        let file_size = fs::metadata(session_file)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let file_size = fs::metadata(session_file).map(|m| m.len()).unwrap_or(0);
 
         let entries = parse_session(session_file)?;
 
@@ -328,10 +326,10 @@ fn build_meta_from_summary(
     let first_ts = summary.prompts.first().map(|p| p.timestamp);
     let last_ts = summary.prompts.last().map(|p| p.timestamp);
 
-    let first_timestamp = first_ts
-        .and_then(|ts| DateTime::from_timestamp_millis(ts).map(|dt| dt.to_rfc3339()));
-    let last_timestamp = last_ts
-        .and_then(|ts| DateTime::from_timestamp_millis(ts).map(|dt| dt.to_rfc3339()));
+    let first_timestamp =
+        first_ts.and_then(|ts| DateTime::from_timestamp_millis(ts).map(|dt| dt.to_rfc3339()));
+    let last_timestamp =
+        last_ts.and_then(|ts| DateTime::from_timestamp_millis(ts).map(|dt| dt.to_rfc3339()));
 
     let duration_minutes = match (first_ts, last_ts) {
         (Some(first), Some(last)) if last > first => Some((last - first) / (60 * 1000)),
@@ -399,9 +397,24 @@ fn generate_analysis_snapshot(
     db: Option<&dyn QueryRepository>,
 ) -> Result<()> {
     // Complex analyses (always in-memory — no DB equivalent yet)
-    let workflow_result = analyze_workflows(sessions, threshold, top, tuning.min_seq_length, tuning.max_seq_length, tuning.time_window_minutes);
+    let workflow_result = analyze_workflows(
+        sessions,
+        threshold,
+        top,
+        tuning.min_seq_length,
+        tuning.max_seq_length,
+        tuning.time_window_minutes,
+    );
     let prompt_result = analyze_prompts(history_entries, decay, tuning.decay_half_life_days);
-    let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, tuning, stopwords);
+    let skill_result = analyze_tacit_knowledge(
+        history_entries,
+        threshold,
+        top,
+        depth_config,
+        decay,
+        tuning,
+        stopwords,
+    );
     let dep_graph_result = build_dependency_graph(sessions, top, tuning);
 
     // Statistical analyses: use DB queries when available, fall back to in-memory

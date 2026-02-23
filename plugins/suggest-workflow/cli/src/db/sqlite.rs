@@ -106,7 +106,12 @@ impl IndexRepository for SqliteStore {
                 "INSERT INTO prompts (session_id, text, timestamp, char_count) VALUES (?1, ?2, ?3, ?4)",
             )?;
             for p in &session.prompts {
-                stmt.execute(params![&session.id, &p.text, p.timestamp, p.char_count as i64])?;
+                stmt.execute(params![
+                    &session.id,
+                    &p.text,
+                    p.timestamp,
+                    p.char_count as i64
+                ])?;
             }
         }
 
@@ -150,9 +155,7 @@ impl IndexRepository for SqliteStore {
 
     fn remove_stale_sessions(&self, existing_paths: &[&Path]) -> Result<u64> {
         // Get all session file_paths from DB
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, file_path FROM sessions")?;
+        let mut stmt = self.conn.prepare("SELECT id, file_path FROM sessions")?;
 
         let db_sessions: Vec<(String, String)> = stmt
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
@@ -285,7 +288,12 @@ impl QueryRepository for SqliteStore {
         Ok(self.perspectives.clone())
     }
 
-    fn query(&self, perspective: &str, params: &QueryParams, session_filter: Option<&str>) -> Result<serde_json::Value> {
+    fn query(
+        &self,
+        perspective: &str,
+        params: &QueryParams,
+        session_filter: Option<&str>,
+    ) -> Result<serde_json::Value> {
         let info = self
             .perspectives
             .iter()
@@ -295,10 +303,7 @@ impl QueryRepository for SqliteStore {
         // Validate required parameters
         for param_def in &info.params {
             if param_def.required && !params.contains_key(&param_def.name) {
-                anyhow::bail!(
-                    "missing required param: --param {}=<value>",
-                    param_def.name
-                );
+                anyhow::bail!("missing required param: --param {}=<value>", param_def.name);
             }
         }
 
@@ -339,7 +344,9 @@ fn validate_session_filter(filter: &str) -> Result<()> {
         anyhow::bail!("session filter must not contain {{SF:}} placeholders");
     }
     let upper = filter.trim().to_uppercase();
-    for keyword in &["DROP ", "CREATE ", "ALTER ", "INSERT ", "DELETE ", "UPDATE "] {
+    for keyword in &[
+        "DROP ", "CREATE ", "ALTER ", "INSERT ", "DELETE ", "UPDATE ",
+    ] {
         if upper.contains(keyword) {
             anyhow::bail!("session filter must not contain DDL/DML keywords");
         }
@@ -426,11 +433,7 @@ fn stmt_to_json(
     stmt: &mut rusqlite::Statement,
     bind_values: &[rusqlite::types::Value],
 ) -> Result<serde_json::Value> {
-    let column_names: Vec<String> = stmt
-        .column_names()
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
 
     let params: Vec<&dyn rusqlite::types::ToSql> = bind_values
         .iter()

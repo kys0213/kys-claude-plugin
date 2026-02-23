@@ -3,18 +3,27 @@ use crate::analyzers::depth::DepthConfig;
 use crate::analyzers::stopwords::StopwordSet;
 use crate::analyzers::tacit::tokenize;
 use crate::tokenizer::KoreanTokenizer;
-use std::sync::LazyLock;
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
-static KOREAN_TOKENIZER: LazyLock<Option<KoreanTokenizer>> = LazyLock::new(|| {
-    KoreanTokenizer::new().ok()
-});
+static KOREAN_TOKENIZER: LazyLock<Option<KoreanTokenizer>> =
+    LazyLock::new(|| KoreanTokenizer::new().ok());
 
 /// Sentence/clause delimiters for Korean text
 const CLAUSE_DELIMITERS: &[&str] = &[
-    ". ", ".\n", "! ", "!\n", "? ", "?\n",
-    " 그리고 ", " 그런데 ", " 하지만 ", " 또한 ",
-    " and ", " but ", " also ",
+    ". ",
+    ".\n",
+    "! ",
+    "!\n",
+    "? ",
+    "?\n",
+    " 그리고 ",
+    " 그런데 ",
+    " 하지만 ",
+    " 또한 ",
+    " and ",
+    " but ",
+    " also ",
 ];
 
 /// Single-char delimiters that work at boundaries
@@ -190,7 +199,11 @@ mod tests {
     fn test_split_into_clauses_korean() {
         let text = "타입을 명시하고 그리고 에러 처리도 해줘";
         let clauses = split_into_clauses(text);
-        assert!(clauses.len() >= 2, "Should split on '그리고': {:?}", clauses);
+        assert!(
+            clauses.len() >= 2,
+            "Should split on '그리고': {:?}",
+            clauses
+        );
     }
 
     #[test]
@@ -232,7 +245,10 @@ mod tests {
             &ranker,
             &test_stopwords(),
         );
-        assert!(result.is_decomposed(), "Long text should produce sub-queries");
+        assert!(
+            result.is_decomposed(),
+            "Long text should produce sub-queries"
+        );
         assert!(result.all_queries().len() > 1);
     }
 

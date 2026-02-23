@@ -1,12 +1,10 @@
-use std::collections::{BTreeSet, HashSet};
-use crate::types::{SessionEntry, SessionLinkResult, SessionLink};
 use crate::parsers::extract_tool_sequence;
+use crate::types::{SessionEntry, SessionLink, SessionLinkResult};
+use std::collections::{BTreeSet, HashSet};
 
 /// Link sessions that share edited files and are temporally close.
 /// Pure structural computation: file overlap (Jaccard) + time proximity.
-pub fn link_sessions(
-    sessions: &[(String, Vec<SessionEntry>)],
-) -> SessionLinkResult {
+pub fn link_sessions(sessions: &[(String, Vec<SessionEntry>)]) -> SessionLinkResult {
     // Extract per-session: file set + timestamp range
     let mut session_data: Vec<SessionFileData> = Vec::new();
 
@@ -68,7 +66,12 @@ pub fn link_sessions(
             let overlap_ratio = intersection as f64 / union as f64;
 
             // Time gap between sessions (end of earlier → start of later)
-            let time_gap = match (a.last_timestamp, b.first_timestamp, b.last_timestamp, a.first_timestamp) {
+            let time_gap = match (
+                a.last_timestamp,
+                b.first_timestamp,
+                b.last_timestamp,
+                a.first_timestamp,
+            ) {
                 (Some(a_last), Some(b_first), _, _) if b_first >= a_last => {
                     Some((b_first - a_last) / (60 * 1000)) // minutes
                 }
@@ -78,10 +81,8 @@ pub fn link_sessions(
                 _ => None,
             };
 
-            let shared_files: Vec<String> = set_a
-                .intersection(&set_b)
-                .map(|s| (*s).clone())
-                .collect();
+            let shared_files: Vec<String> =
+                set_a.intersection(&set_b).map(|s| (*s).clone()).collect();
 
             links.push(SessionLink {
                 session_a: a.session_id.clone(),

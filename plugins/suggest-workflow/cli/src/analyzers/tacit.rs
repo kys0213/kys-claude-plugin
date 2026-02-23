@@ -1,19 +1,18 @@
-use std::sync::LazyLock;
-use std::collections::{BTreeSet, HashMap, HashSet};
-use crate::types::{HistoryEntry, TacitPattern, TacitAnalysisResult};
 use crate::analyzers::bm25::BM25Ranker;
-use crate::analyzers::suffix_miner::SuffixMiner;
 use crate::analyzers::depth::DepthConfig;
 use crate::analyzers::query_decomposer::decompose_query;
 use crate::analyzers::stopwords::StopwordSet;
+use crate::analyzers::suffix_miner::SuffixMiner;
 use crate::analyzers::tuning::TuningConfig;
 use crate::tokenizer::KoreanTokenizer;
+use crate::types::{HistoryEntry, TacitAnalysisResult, TacitPattern};
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::LazyLock;
 
 // --- Tokenizer ---
 
-static KOREAN_TOKENIZER: LazyLock<Option<KoreanTokenizer>> = LazyLock::new(|| {
-    KoreanTokenizer::new().ok()
-});
+static KOREAN_TOKENIZER: LazyLock<Option<KoreanTokenizer>> =
+    LazyLock::new(|| KoreanTokenizer::new().ok());
 
 /// Minimum character length for a prompt to be considered meaningful
 const MIN_PROMPT_LENGTH: usize = 5;
@@ -68,7 +67,11 @@ fn bigram_similarity_precomputed(
     let intersection = bigrams_a.intersection(bigrams_b).count();
     let union = bigrams_a.union(bigrams_b).count();
 
-    if union == 0 { 0.0 } else { intersection as f64 / union as f64 }
+    if union == 0 {
+        0.0
+    } else {
+        intersection as f64 / union as f64
+    }
 }
 
 // --- Clustering ---
@@ -149,10 +152,7 @@ fn calculate_consistency(timestamps: &[i64]) -> f64 {
     let mut sorted = timestamps.to_vec();
     sorted.sort();
 
-    let intervals: Vec<f64> = sorted
-        .windows(2)
-        .map(|w| (w[1] - w[0]) as f64)
-        .collect();
+    let intervals: Vec<f64> = sorted.windows(2).map(|w| (w[1] - w[0]) as f64).collect();
 
     if intervals.is_empty() {
         return 0.0;
@@ -163,7 +163,8 @@ fn calculate_consistency(timestamps: &[i64]) -> f64 {
         return 0.0;
     }
 
-    let variance = intervals.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / intervals.len() as f64;
+    let variance =
+        intervals.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / intervals.len() as f64;
     let cv = variance.sqrt() / mean;
     1.0 / (1.0 + cv)
 }
@@ -301,7 +302,11 @@ pub fn analyze_tacit_knowledge(
     let bm25_ranker = BM25Ranker::new(&all_documents, tuning.bm25_k1, tuning.bm25_b);
 
     // Step 5: Cluster normalized texts (using depth-driven similarity threshold)
-    let clusters = cluster_normalized(&cluster_entries, depth_config.similarity_threshold, tuning.max_clusters);
+    let clusters = cluster_normalized(
+        &cluster_entries,
+        depth_config.similarity_threshold,
+        tuning.max_clusters,
+    );
 
     // Step 6: Score and rank clusters with multi-query BM25
     let mut patterns = Vec::new();
@@ -355,7 +360,11 @@ pub fn analyze_tacit_knowledge(
                             weighted_sum += score * weight;
                             total_weight += weight;
                         }
-                        if total_weight > 0.0 { weighted_sum / total_weight } else { 0.0 }
+                        if total_weight > 0.0 {
+                            weighted_sum / total_weight
+                        } else {
+                            0.0
+                        }
                     }
                 }
             }

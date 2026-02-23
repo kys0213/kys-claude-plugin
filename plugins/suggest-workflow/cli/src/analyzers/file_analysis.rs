@@ -1,16 +1,11 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
-use crate::types::{
-    SessionEntry, FileAnalysisResult, FileHotspot, CoChangeGroup,
-};
-use crate::parsers::extract_tool_sequence;
 use crate::analyzers::tool_classifier::classify_tool;
+use crate::parsers::extract_tool_sequence;
+use crate::types::{CoChangeGroup, FileAnalysisResult, FileHotspot, SessionEntry};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 /// Analyze file-level patterns: hotspots, co-change groups, tool correlations.
 /// Pure counting — no heuristic rules.
-pub fn analyze_files(
-    sessions: &[(String, Vec<SessionEntry>)],
-    top_n: usize,
-) -> FileAnalysisResult {
+pub fn analyze_files(sessions: &[(String, Vec<SessionEntry>)], top_n: usize) -> FileAnalysisResult {
     // Per-file stats across all sessions
     let mut file_edit_count: HashMap<String, usize> = HashMap::new();
     let mut file_session_count: HashMap<String, HashSet<String>> = HashMap::new();
@@ -27,7 +22,10 @@ pub fn analyze_files(
             let classified = classify_tool(&tool.name, tool.input.as_ref());
 
             // Track file edits
-            if matches!(tool.name.as_str(), "Edit" | "Write" | "NotebookEdit" | "Read") {
+            if matches!(
+                tool.name.as_str(),
+                "Edit" | "Write" | "NotebookEdit" | "Read"
+            ) {
                 if let Some(input) = &tool.input {
                     let path = input
                         .get("file_path")
@@ -61,10 +59,7 @@ pub fn analyze_files(
     let mut hot_files: Vec<FileHotspot> = file_edit_count
         .iter()
         .map(|(path, &edit_count)| {
-            let session_count = file_session_count
-                .get(path)
-                .map(|s| s.len())
-                .unwrap_or(0);
+            let session_count = file_session_count.get(path).map(|s| s.len()).unwrap_or(0);
 
             let mut tools_used: Vec<(String, usize)> = file_tool_map
                 .get(path)

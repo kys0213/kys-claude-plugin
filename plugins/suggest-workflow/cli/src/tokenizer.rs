@@ -6,13 +6,13 @@
 use anyhow::Result;
 
 #[cfg(feature = "lindera-korean")]
-use lindera::tokenizer::Tokenizer;
+use lindera::dictionary::{load_embedded_dictionary, DictionaryKind};
+#[cfg(feature = "lindera-korean")]
+use lindera::mode::Mode;
 #[cfg(feature = "lindera-korean")]
 use lindera::segmenter::Segmenter;
 #[cfg(feature = "lindera-korean")]
-use lindera::dictionary::{DictionaryKind, load_embedded_dictionary};
-#[cfg(feature = "lindera-korean")]
-use lindera::mode::Mode;
+use lindera::tokenizer::Tokenizer;
 
 /// Korean tokenizer with optional lindera support
 pub struct KoreanTokenizer {
@@ -95,10 +95,9 @@ impl Default for KoreanTokenizer {
 #[cfg(not(feature = "lindera-korean"))]
 fn rule_based_tokenize(text: &str) -> Vec<String> {
     const PARTICLES: &[&str] = &[
-        "은", "는", "이", "가", "을", "를", "에", "의", "로", "으로",
-        "와", "과", "도", "만", "까지", "부터", "에서", "한테", "께",
-        "처럼", "같이", "보다", "라고", "고", "면", "서", "니까",
-        "지만", "어서", "아서", "려고", "게", "도록",
+        "은", "는", "이", "가", "을", "를", "에", "의", "로", "으로", "와", "과", "도", "만",
+        "까지", "부터", "에서", "한테", "께", "처럼", "같이", "보다", "라고", "고", "면", "서",
+        "니까", "지만", "어서", "아서", "려고", "게", "도록",
     ];
 
     let mut tokens = Vec::new();
@@ -124,9 +123,7 @@ fn rule_based_tokenize(text: &str) -> Vec<String> {
     }
 
     if tokens.is_empty() {
-        text.split_whitespace()
-            .map(|s| s.to_string())
-            .collect()
+        text.split_whitespace().map(|s| s.to_string()).collect()
     } else {
         tokens
     }

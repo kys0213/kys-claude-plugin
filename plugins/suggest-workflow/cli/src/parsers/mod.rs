@@ -1,3 +1,6 @@
 pub mod projects;
 
-pub use projects::{list_sessions, parse_session, extract_tool_sequence, resolve_project_path, adapt_to_history_entries};
+pub use projects::{
+    adapt_to_history_entries, extract_tool_sequence, list_sessions, parse_session,
+    resolve_project_path,
+};

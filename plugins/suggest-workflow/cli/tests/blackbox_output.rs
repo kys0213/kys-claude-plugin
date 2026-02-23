@@ -35,8 +35,8 @@ fn f1_query_stdout_is_valid_json_array() {
         .stdout
         .clone();
 
-    let json: serde_json::Value = serde_json::from_slice(&output)
-        .expect("stdout should be valid JSON");
+    let json: serde_json::Value =
+        serde_json::from_slice(&output).expect("stdout should be valid JSON");
     assert!(json.is_array(), "query output should be a JSON array");
 }
 
@@ -82,8 +82,9 @@ fn f1_all_perspectives_return_valid_json() {
             .stdout
             .clone();
 
-        let json: serde_json::Value = serde_json::from_slice(&output)
-            .unwrap_or_else(|e| panic!("perspective '{}' stdout not valid JSON: {}", perspective, e));
+        let json: serde_json::Value = serde_json::from_slice(&output).unwrap_or_else(|e| {
+            panic!("perspective '{}' stdout not valid JSON: {}", perspective, e)
+        });
         assert!(
             json.is_array(),
             "perspective '{}' should return JSON array, got: {:?}",
@@ -117,8 +118,8 @@ fn f1_sql_file_returns_valid_json() {
         .stdout
         .clone();
 
-    let json: serde_json::Value = serde_json::from_slice(&output)
-        .expect("--sql-file stdout should be valid JSON");
+    let json: serde_json::Value =
+        serde_json::from_slice(&output).expect("--sql-file stdout should be valid JSON");
     assert!(json.is_array(), "--sql-file output should be a JSON array");
 }
 
@@ -145,10 +146,7 @@ fn f2_index_writes_summary_to_stderr() {
     );
 
     // stdout should be empty (index doesn't output data)
-    assert!(
-        output.stdout.is_empty(),
-        "index stdout should be empty"
-    );
+    assert!(output.stdout.is_empty(), "index stdout should be empty");
 }
 
 #[test]

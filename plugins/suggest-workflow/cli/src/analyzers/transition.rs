@@ -1,13 +1,11 @@
-use std::collections::HashMap;
-use crate::types::{SessionEntry, TransitionMatrixResult, TransitionEntry};
-use crate::parsers::extract_tool_sequence;
 use crate::analyzers::tool_classifier::classify_tool;
+use crate::parsers::extract_tool_sequence;
+use crate::types::{SessionEntry, TransitionEntry, TransitionMatrixResult};
+use std::collections::HashMap;
 
 /// Build a tool transition matrix from sessions.
 /// Pure counting: no rules, no classification beyond tool name mapping.
-pub fn build_transition_matrix(
-    sessions: &[(String, Vec<SessionEntry>)],
-) -> TransitionMatrixResult {
+pub fn build_transition_matrix(sessions: &[(String, Vec<SessionEntry>)]) -> TransitionMatrixResult {
     let mut matrix: HashMap<String, HashMap<String, usize>> = HashMap::new();
     let mut total_transitions: usize = 0;
 
@@ -56,7 +54,11 @@ pub fn build_transition_matrix(
                 from: from.clone(),
                 to: to.clone(),
                 count,
-                probability: if from_total > 0.0 { count as f64 / from_total } else { 0.0 },
+                probability: if from_total > 0.0 {
+                    count as f64 / from_total
+                } else {
+                    0.0
+                },
             });
         }
     }

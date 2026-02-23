@@ -62,7 +62,10 @@ pub fn check_and_migrate(conn: &Connection) -> Result<MigrateResult> {
         [current.to_string()],
     )?;
 
-    Ok(MigrateResult::Migrated { from: stored, to: current })
+    Ok(MigrateResult::Migrated {
+        from: stored,
+        to: current,
+    })
 }
 
 #[derive(Debug, PartialEq)]
@@ -87,9 +90,7 @@ fn run_migrations(conn: &Connection, from: u32, to: u32) -> Result<()> {
 fn migrate_step(conn: &Connection, from: u32, to: u32) -> Result<()> {
     match (from, to) {
         (3, 4) => {
-            conn.execute_batch(
-                "ALTER TABLE sessions ADD COLUMN first_prompt_snippet TEXT;"
-            )?;
+            conn.execute_batch("ALTER TABLE sessions ADD COLUMN first_prompt_snippet TEXT;")?;
             // Backfill from existing prompts: take first prompt text (up to 500 chars)
             conn.execute_batch(
                 "UPDATE sessions SET first_prompt_snippet = (
@@ -98,7 +99,7 @@ fn migrate_step(conn: &Connection, from: u32, to: u32) -> Result<()> {
                     WHERE p.session_id = sessions.id
                     ORDER BY p.timestamp ASC
                     LIMIT 1
-                ) WHERE first_prompt_snippet IS NULL;"
+                ) WHERE first_prompt_snippet IS NULL;",
             )?;
             Ok(())
         }

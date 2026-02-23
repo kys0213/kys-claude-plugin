@@ -18,14 +18,18 @@ const FALLBACK_SUFFIXES: &[&str] = &["해줘", "해주세요", "하세요", "해
 
 /// Mines frequent suffixes from a collection of prompts
 pub struct SuffixMiner {
-    min_n: usize,       // min char n-gram length (default: 2)
-    max_n: usize,       // max char n-gram length (default: 10)
-    min_freq_pct: f64,  // min frequency ratio (default: 0.02)
+    min_n: usize,      // min char n-gram length (default: 2)
+    max_n: usize,      // max char n-gram length (default: 10)
+    min_freq_pct: f64, // min frequency ratio (default: 0.02)
 }
 
 impl SuffixMiner {
     pub fn new(min_n: usize, max_n: usize, min_freq_pct: f64) -> Self {
-        Self { min_n, max_n, min_freq_pct }
+        Self {
+            min_n,
+            max_n,
+            min_freq_pct,
+        }
     }
 
     /// Mine frequent suffixes from prompts.
@@ -145,7 +149,10 @@ mod tests {
         ];
         let miner = SuffixMiner::default();
         let suffixes = miner.mine(&prompts);
-        assert!(suffixes.iter().any(|s| s.text == "해줘"), "Should discover '해줘' suffix");
+        assert!(
+            suffixes.iter().any(|s| s.text == "해줘"),
+            "Should discover '해줘' suffix"
+        );
     }
 
     #[test]
@@ -172,9 +179,15 @@ mod tests {
     fn test_normalization() {
         let miner = SuffixMiner::default();
         let suffixes = vec![
-            DiscoveredSuffix { text: "해주세요".to_string() },
-            DiscoveredSuffix { text: "해줘".to_string() },
-            DiscoveredSuffix { text: "해".to_string() },
+            DiscoveredSuffix {
+                text: "해주세요".to_string(),
+            },
+            DiscoveredSuffix {
+                text: "해줘".to_string(),
+            },
+            DiscoveredSuffix {
+                text: "해".to_string(),
+            },
         ];
 
         let r1 = miner.normalize("타입을 명시해줘", &suffixes);
@@ -189,8 +202,14 @@ mod tests {
         let prompts = vec!["hello world", "foo bar"];
         let miner = SuffixMiner::default();
         let suffixes = miner.mine(&prompts);
-        assert!(suffixes.iter().any(|s| s.text == "해줘"), "Should have fallback '해줘'");
-        assert!(suffixes.iter().any(|s| s.text == "해주세요"), "Should have fallback '해주세요'");
+        assert!(
+            suffixes.iter().any(|s| s.text == "해줘"),
+            "Should have fallback '해줘'"
+        );
+        assert!(
+            suffixes.iter().any(|s| s.text == "해주세요"),
+            "Should have fallback '해주세요'"
+        );
     }
 
     #[test]

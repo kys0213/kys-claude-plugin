@@ -23,9 +23,13 @@ fn param_integer_type_error() {
 
     cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--perspective", "tool-frequency",
-            "--param", "top=abc",
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--perspective",
+            "tool-frequency",
+            "--param",
+            "top=abc",
         ])
         .assert()
         .failure()
@@ -40,9 +44,13 @@ fn param_float_type_error() {
 
     cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--perspective", "repetition",
-            "--param", "z_threshold=not_a_number",
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--perspective",
+            "repetition",
+            "--param",
+            "z_threshold=not_a_number",
         ])
         .assert()
         .failure()
@@ -57,9 +65,13 @@ fn param_date_format_error() {
 
     cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--perspective", "trends",
-            "--param", "since=2026/02/10",
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--perspective",
+            "trends",
+            "--param",
+            "since=2026/02/10",
         ])
         .assert()
         .failure()
@@ -74,9 +86,13 @@ fn param_date_invalid_string() {
 
     cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--perspective", "trends",
-            "--param", "since=yesterday",
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--perspective",
+            "trends",
+            "--param",
+            "since=yesterday",
         ])
         .assert()
         .failure()
@@ -95,9 +111,13 @@ fn param_top_zero_returns_empty() {
 
     let output = cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--perspective", "tool-frequency",
-            "--param", "top=0",
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--perspective",
+            "tool-frequency",
+            "--param",
+            "top=0",
         ])
         .assert()
         .success()
@@ -118,9 +138,13 @@ fn param_top_negative_returns_all() {
 
     let output = cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--perspective", "tool-frequency",
-            "--param", "top=-1",
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--perspective",
+            "tool-frequency",
+            "--param",
+            "top=-1",
         ])
         .assert()
         .success()
@@ -142,9 +166,13 @@ fn param_top_large_value() {
 
     let output = cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--perspective", "tool-frequency",
-            "--param", "top=999999",
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--perspective",
+            "tool-frequency",
+            "--param",
+            "top=999999",
         ])
         .assert()
         .success()
@@ -168,9 +196,13 @@ fn param_missing_equals_sign() {
 
     cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--perspective", "tool-frequency",
-            "--param", "keyonly",
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--perspective",
+            "tool-frequency",
+            "--param",
+            "keyonly",
         ])
         .assert()
         .failure()
@@ -188,9 +220,13 @@ fn param_empty_key() {
     // The query will succeed since "" key is simply ignored (not a defined param)
     cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--perspective", "tool-frequency",
-            "--param", "=value",
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--perspective",
+            "tool-frequency",
+            "--param",
+            "=value",
         ])
         .assert()
         .success();
@@ -207,12 +243,12 @@ fn query_missing_perspective_and_sql_file() {
     index_project(&tmp, &project);
 
     cli_with_home(&tmp)
-        .args([
-            "query", "--project", project.to_str().unwrap(),
-        ])
+        .args(["query", "--project", project.to_str().unwrap()])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("--perspective or --sql-file required"));
+        .stderr(predicate::str::contains(
+            "--perspective or --sql-file required",
+        ));
 }
 
 /// --perspective + --sql-file → sql-file takes priority
@@ -225,9 +261,13 @@ fn sql_file_takes_priority_over_perspective() {
 
     let output = cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--perspective", "tool-frequency",
-            "--sql-file", sql_file.to_str().unwrap(),
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--perspective",
+            "tool-frequency",
+            "--sql-file",
+            sql_file.to_str().unwrap(),
         ])
         .assert()
         .success()
@@ -239,10 +279,14 @@ fn sql_file_takes_priority_over_perspective() {
     let arr = json.as_array().unwrap();
     // valid_select.sql: SELECT classified_name, COUNT(*) as cnt ...
     // Should have "classified_name" key (not "tool" which comes from perspective)
-    assert!(arr[0].get("classified_name").is_some(),
-        "sql-file should be executed, not perspective");
-    assert!(arr[0].get("tool").is_none(),
-        "perspective output key 'tool' should not appear");
+    assert!(
+        arr[0].get("classified_name").is_some(),
+        "sql-file should be executed, not perspective"
+    );
+    assert!(
+        arr[0].get("tool").is_none(),
+        "perspective output key 'tool' should not appear"
+    );
 }
 
 // ============================================================
@@ -260,8 +304,11 @@ fn sql_delete_blocked() {
 
     cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--sql-file", sql_file.to_str().unwrap(),
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--sql-file",
+            sql_file.to_str().unwrap(),
         ])
         .assert()
         .failure()
@@ -279,8 +326,11 @@ fn sql_update_blocked() {
 
     cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--sql-file", sql_file.to_str().unwrap(),
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--sql-file",
+            sql_file.to_str().unwrap(),
         ])
         .assert()
         .failure()
@@ -298,8 +348,11 @@ fn sql_drop_blocked() {
 
     cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--sql-file", sql_file.to_str().unwrap(),
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--sql-file",
+            sql_file.to_str().unwrap(),
         ])
         .assert()
         .failure()
@@ -317,8 +370,11 @@ fn sql_create_blocked() {
 
     cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--sql-file", sql_file.to_str().unwrap(),
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--sql-file",
+            sql_file.to_str().unwrap(),
         ])
         .assert()
         .failure()
@@ -336,8 +392,11 @@ fn sql_lowercase_select_accepted() {
 
     let output = cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--sql-file", sql_file.to_str().unwrap(),
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--sql-file",
+            sql_file.to_str().unwrap(),
         ])
         .assert()
         .success()
@@ -360,8 +419,11 @@ fn sql_leading_whitespace_accepted() {
 
     cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--sql-file", sql_file.to_str().unwrap(),
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--sql-file",
+            sql_file.to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -383,8 +445,11 @@ fn sql_cte_with_clause_blocked() {
     // CTE starts with "WITH", not "SELECT", so it will be blocked
     cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--sql-file", sql_file.to_str().unwrap(),
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--sql-file",
+            sql_file.to_str().unwrap(),
         ])
         .assert()
         .failure()
@@ -402,8 +467,11 @@ fn sql_injection_does_not_corrupt_db() {
     std::fs::write(&sql_file, "DELETE FROM sessions; SELECT 1").unwrap();
     let _ = cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--sql-file", sql_file.to_str().unwrap(),
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--sql-file",
+            sql_file.to_str().unwrap(),
         ])
         .assert()
         .failure();
@@ -411,8 +479,11 @@ fn sql_injection_does_not_corrupt_db() {
     // Verify data is still intact
     let output = cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--perspective", "sessions",
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--perspective",
+            "sessions",
         ])
         .assert()
         .success()
@@ -422,7 +493,11 @@ fn sql_injection_does_not_corrupt_db() {
 
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
     let arr = json.as_array().unwrap();
-    assert_eq!(arr.len(), 1, "session data should be intact after failed injection");
+    assert_eq!(
+        arr.len(),
+        1,
+        "session data should be intact after failed injection"
+    );
 }
 
 // ============================================================
@@ -437,10 +512,15 @@ fn extra_params_ignored() {
     // Pass an unknown param — should be silently ignored
     cli_with_home(&tmp)
         .args([
-            "query", "--project", project.to_str().unwrap(),
-            "--perspective", "tool-frequency",
-            "--param", "top=5",
-            "--param", "unknown_param=xyz",
+            "query",
+            "--project",
+            project.to_str().unwrap(),
+            "--perspective",
+            "tool-frequency",
+            "--param",
+            "top=5",
+            "--param",
+            "unknown_param=xyz",
         ])
         .assert()
         .success();

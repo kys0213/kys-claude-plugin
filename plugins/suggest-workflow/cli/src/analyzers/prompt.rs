@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use chrono::{DateTime, Utc};
-use crate::types::{HistoryEntry, PromptAnalysisResult, PromptFrequency};
 use crate::analyzers::suffix_miner::SuffixMiner;
+use crate::types::{HistoryEntry, PromptAnalysisResult, PromptFrequency};
+use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 
 pub fn analyze_prompts(
     entries: &[HistoryEntry],
@@ -43,7 +43,10 @@ pub fn analyze_prompts(
             1.0
         };
 
-        let data = prompt_map.entry(key).or_insert((0, 0.0, entry.timestamp, entry.display.clone()));
+        let data =
+            prompt_map
+                .entry(key)
+                .or_insert((0, 0.0, entry.timestamp, entry.display.clone()));
         data.0 += 1;
         data.1 += decay_weight;
         data.2 = data.2.max(entry.timestamp);
@@ -81,15 +84,13 @@ pub fn analyze_prompts(
     }
 
     let start_date = if earliest != i64::MAX {
-        DateTime::from_timestamp_millis(earliest)
-            .map(|dt| dt.to_rfc3339())
+        DateTime::from_timestamp_millis(earliest).map(|dt| dt.to_rfc3339())
     } else {
         None
     };
 
     let end_date = if latest != i64::MIN {
-        DateTime::from_timestamp_millis(latest)
-            .map(|dt| dt.to_rfc3339())
+        DateTime::from_timestamp_millis(latest).map(|dt| dt.to_rfc3339())
     } else {
         None
     };
