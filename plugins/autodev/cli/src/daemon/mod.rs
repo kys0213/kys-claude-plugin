@@ -1,6 +1,7 @@
 pub mod log;
 pub mod pid;
 pub mod recovery;
+pub mod status;
 
 use std::path::Path;
 
@@ -55,6 +56,10 @@ pub async fn start(
     let daily_report_hour = cfg.daemon.daily_report_hour;
     let knowledge_extraction = cfg.consumer.knowledge_extraction;
     let mut last_daily_report_date = String::new();
+
+    let start_time = std::time::Instant::now();
+    let status_path = home.join("daemon.status.json");
+    let counters = status::StatusCounters::default();
 
     let reconcile_window_hours = cfg.daemon.reconcile_window_hours;
     let tick_interval_secs = cfg.daemon.tick_interval_secs;
@@ -159,6 +164,10 @@ pub async fn start(
                     }
                 }
 
+                // 5. Status file 갱신
+                let ds = status::build_status(&queues, &counters, start_time);
+                status::write_status(&status_path, &ds);
+
                 tokio::time::sleep(std::time::Duration::from_secs(tick_interval_secs)).await;
             }
         } => {},
@@ -167,6 +176,7 @@ pub async fn start(
         }
     }
 
+    status::remove_status(&status_path);
     pid::remove_pid(home);
     Ok(())
 }
