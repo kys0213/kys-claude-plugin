@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use assert_cmd::Command;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -40,6 +42,7 @@ pub fn setup_project(fixtures: &[&str]) -> (TempDir, PathBuf) {
 }
 
 /// Build a CLI command with HOME overridden to the temp directory.
+#[allow(deprecated)]
 pub fn cli_with_home(tmp: &TempDir) -> Command {
     let mut cmd = Command::cargo_bin("suggest-workflow").unwrap();
     cmd.env("HOME", tmp.path());
