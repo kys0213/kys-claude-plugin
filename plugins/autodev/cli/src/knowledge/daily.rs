@@ -5,8 +5,11 @@ use anyhow::Result;
 
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
+use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 
-use super::models::{DailyReport, DailySummary, KnowledgeSuggestion, Pattern, PatternType};
+use super::models::{
+    CrossAnalysis, DailyReport, DailySummary, KnowledgeSuggestion, Pattern, PatternType,
+};
 
 /// 데몬 로그 파싱 결과
 #[derive(Debug, Default)]
@@ -147,10 +150,60 @@ pub fn build_daily_report(date: &str, stats: &LogStats, patterns: Vec<Pattern>) 
         },
         patterns,
         suggestions: Vec::new(), // Claude가 채울 영역
+        cross_analysis: None,    // suggest-workflow 연동 시 채워짐
+    }
+}
+
+/// suggest-workflow에서 교차 분석 데이터를 수집하여 DailyReport에 추가
+pub async fn enrich_with_cross_analysis(
+    report: &mut DailyReport,
+    sw: &dyn SuggestWorkflow,
+) {
+    let session_filter = "first_prompt_snippet LIKE '[autodev]%'";
+
+    // 1. filtered-sessions: 전일 autodev 세션 목록
+    let sessions = match sw
+        .query_filtered_sessions("[autodev]", Some(&report.date), None)
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::debug!("suggest-workflow filtered-sessions query failed (non-fatal): {e}");
+            Vec::new()
+        }
+    };
+
+    // 2. tool-frequency: autodev 세션의 도구 사용 빈도
+    let tool_frequencies = match sw.query_tool_frequency(Some(session_filter)).await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::debug!("suggest-workflow tool-frequency query failed (non-fatal): {e}");
+            Vec::new()
+        }
+    };
+
+    // 3. repetition: 이상치 세션 탐지
+    let anomalies = match sw.query_repetition(Some(session_filter)).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::debug!("suggest-workflow repetition query failed (non-fatal): {e}");
+            Vec::new()
+        }
+    };
+
+    // 데이터가 하나라도 있으면 cross_analysis 설정
+    if !sessions.is_empty() || !tool_frequencies.is_empty() || !anomalies.is_empty() {
+        report.cross_analysis = Some(CrossAnalysis {
+            tool_frequencies,
+            anomalies,
+            sessions,
+        });
     }
 }
 
 /// Claude에게 DailyReport를 전달하여 KnowledgeSuggestion 생성
+///
+/// report에 cross_analysis가 포함되어 있으면 교차 분석 섹션도 프롬프트에 포함.
 pub async fn generate_daily_suggestions(
     claude: &dyn Claude,
     report: &DailyReport,
@@ -164,11 +217,19 @@ pub async fn generate_daily_suggestions(
         }
     };
 
+    let cross_analysis_hint = if report.cross_analysis.is_some() {
+        "\n\nThe report includes `cross_analysis` from suggest-workflow with tool usage patterns, \
+         session data, and anomalies. Cross-reference these with daemon log patterns to identify \
+         deeper insights (e.g., high tool frequency correlated with failures, repeated test loops)."
+    } else {
+        ""
+    };
+
     let date = &report.date;
     let prompt = format!(
         "[autodev] knowledge: daily {date}\n\n\
          Below is today's autodev daily report. Analyze the patterns and suggest improvements.\n\n\
-         ```json\n{report_json}\n```\n\n\
+         ```json\n{report_json}\n```{cross_analysis_hint}\n\n\
          Respond with a JSON object:\n\
          {{\n  \"suggestions\": [\n    {{\n      \
          \"type\": \"rule | claude_md | hook | skill | subagent\",\n      \
@@ -328,6 +389,36 @@ fn format_daily_report_body(report: &DailyReport) -> String {
         }
     }
 
+    if let Some(ref ca) = report.cross_analysis {
+        body.push_str("\n## Cross Analysis (suggest-workflow)\n\n");
+
+        if !ca.sessions.is_empty() {
+            body.push_str(&format!("**Sessions**: {} autodev sessions\n\n", ca.sessions.len()));
+        }
+
+        if !ca.tool_frequencies.is_empty() {
+            body.push_str("**Top Tools**:\n");
+            for tf in ca.tool_frequencies.iter().take(10) {
+                body.push_str(&format!(
+                    "- `{}`: {} uses across {} sessions\n",
+                    tf.tool, tf.frequency, tf.sessions
+                ));
+            }
+            body.push('\n');
+        }
+
+        if !ca.anomalies.is_empty() {
+            body.push_str("**Anomalies** (z-score outliers):\n");
+            for a in &ca.anomalies {
+                body.push_str(&format!(
+                    "- Session `{}`: `{}` x{} (deviation: {:.1})\n",
+                    a.session_id, a.tool, a.cnt, a.deviation_score
+                ));
+            }
+            body.push('\n');
+        }
+    }
+
     if !report.suggestions.is_empty() {
         body.push_str("\n## Suggestions\n\n");
         for s in &report.suggestions {
@@ -455,6 +546,7 @@ mod tests {
                 affected_tasks: vec!["issue:1".into()],
             }],
             suggestions: vec![],
+            cross_analysis: None,
         };
 
         let body = format_daily_report_body(&report);

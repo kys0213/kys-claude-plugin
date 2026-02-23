@@ -15,6 +15,7 @@ mod tui;
 use infrastructure::claude::RealClaude;
 use infrastructure::gh::RealGh;
 use infrastructure::git::RealGit;
+use infrastructure::suggest_workflow::RealSuggestWorkflow;
 
 #[derive(Parser)]
 #[command(name = "autodev", version, about = "GitHub 이슈 → PR 자동화 에이전트")]
@@ -126,13 +127,14 @@ async fn main() -> Result<()> {
     let gh = RealGh;
     let git = RealGit;
     let claude = RealClaude;
+    let sw = RealSuggestWorkflow;
 
     match cli.command {
-        Commands::Start => daemon::start(&home, &env, &gh, &git, &claude).await?,
+        Commands::Start => daemon::start(&home, &env, &gh, &git, &claude, &sw).await?,
         Commands::Stop => daemon::stop(&home)?,
         Commands::Restart => {
             daemon::stop(&home).ok();
-            daemon::start(&home, &env, &gh, &git, &claude).await?;
+            daemon::start(&home, &env, &gh, &git, &claude, &sw).await?;
         }
         Commands::Status => {
             let status = client::status(&db, &env)?;

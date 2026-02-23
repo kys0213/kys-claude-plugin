@@ -7,6 +7,7 @@ use autodev::config::Env;
 use autodev::infrastructure::claude::mock::MockClaude;
 use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
+use autodev::infrastructure::suggest_workflow::mock::MockSuggestWorkflow;
 use autodev::queue::repository::*;
 use autodev::queue::task_queues::{
     issue_phase, labels, make_work_id, pr_phase, IssueItem, MergeItem, PrItem, TaskQueues,
@@ -257,6 +258,7 @@ async fn pr_pipeline_success_transitions_to_review_done() {
         make_pr_item(&repo_id, 100, "feat: add settings"),
     );
 
+    let sw = MockSuggestWorkflow::new();
     autodev::pipeline::pr::process_pending(
         &db,
         &env,
@@ -264,6 +266,7 @@ async fn pr_pipeline_success_transitions_to_review_done() {
         &notifier,
         &gh,
         &claude,
+        &sw,
         &mut queues,
     )
     .await
@@ -312,6 +315,7 @@ async fn pr_pipeline_claude_failure_marks_failed() {
         .prs
         .push(pr_phase::PENDING, make_pr_item(&repo_id, 200, "will fail"));
 
+    let sw = MockSuggestWorkflow::new();
     autodev::pipeline::pr::process_pending(
         &db,
         &env,
@@ -319,6 +323,7 @@ async fn pr_pipeline_claude_failure_marks_failed() {
         &notifier,
         &gh,
         &claude,
+        &sw,
         &mut queues,
     )
     .await
@@ -433,7 +438,8 @@ async fn process_all_handles_issues_and_prs() {
         .prs
         .push(pr_phase::PENDING, make_pr_item(&repo_id, 10, "PR"));
 
-    autodev::pipeline::process_all(&db, &env, &workspace, &notifier, &gh, &claude, &mut queues)
+    let sw = MockSuggestWorkflow::new();
+    autodev::pipeline::process_all(&db, &env, &workspace, &notifier, &gh, &claude, &sw, &mut queues)
         .await
         .expect("process_all should succeed");
 

@@ -15,6 +15,7 @@ use crate::config::{self, Env};
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
+use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 use crate::pipeline;
 use crate::queue::repository::{RepoRepository, ScanCursorRepository};
 use crate::queue::task_queues::TaskQueues;
@@ -28,6 +29,7 @@ pub async fn start(
     gh: &dyn Gh,
     git: &dyn Git,
     claude: &dyn Claude,
+    sw: &dyn SuggestWorkflow,
 ) -> Result<()> {
     if pid::is_running(home) {
         bail!(
@@ -110,7 +112,7 @@ pub async fn start(
                 }
 
                 // 3. Pipeline
-                if let Err(e) = pipeline::process_all(&db, env, &workspace, &notifier, gh, claude, &mut queues).await {
+                if let Err(e) = pipeline::process_all(&db, env, &workspace, &notifier, gh, claude, sw, &mut queues).await {
                     tracing::error!("pipeline error: {e}");
                 }
 
@@ -135,6 +137,11 @@ pub async fn start(
                                 if let Ok(repos) = db.repo_find_enabled() {
                                     if let Some(repo) = repos.first() {
                                         if let Ok(base) = workspace.ensure_cloned(&repo.url, &repo.name).await {
+                                            // suggest-workflow 교차 분석 데이터 수집 (M-03)
+                                            crate::knowledge::daily::enrich_with_cross_analysis(
+                                                &mut report, sw,
+                                            ).await;
+
                                             if let Some(ks) = crate::knowledge::daily::generate_daily_suggestions(
                                                 claude, &report, &base,
                                             ).await {

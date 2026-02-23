@@ -10,6 +10,7 @@ use crate::config::Env;
 use crate::infrastructure::claude::output;
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
+use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::task_queues::{issue_phase, labels, TaskQueues};
@@ -231,6 +232,7 @@ pub async fn process_ready(
     workspace: &Workspace<'_>,
     gh: &dyn Gh,
     claude: &dyn Claude,
+    sw: &dyn SuggestWorkflow,
     queues: &mut TaskQueues,
 ) -> Result<()> {
     let cfg = config::loader::load_merged(env, None);
@@ -311,6 +313,7 @@ pub async fn process_ready(
                         let _ = crate::knowledge::extractor::extract_task_knowledge(
                             claude,
                             gh,
+                            sw,
                             &item.repo_name,
                             item.github_number,
                             "issue",

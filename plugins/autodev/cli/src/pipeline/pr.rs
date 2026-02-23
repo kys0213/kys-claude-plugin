@@ -10,6 +10,7 @@ use crate::config::Env;
 use crate::infrastructure::claude::output::ReviewVerdict;
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
+use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::task_queues::{labels, pr_phase, TaskQueues};
@@ -37,6 +38,7 @@ pub async fn process_pending(
     notifier: &Notifier<'_>,
     gh: &dyn Gh,
     claude: &dyn Claude,
+    sw: &dyn SuggestWorkflow,
     queues: &mut TaskQueues,
 ) -> Result<()> {
     let cfg = config::loader::load_merged(env, None);
@@ -141,6 +143,7 @@ pub async fn process_pending(
                                 let _ = crate::knowledge::extractor::extract_task_knowledge(
                                     claude,
                                     gh,
+                                    sw,
                                     &item.repo_name,
                                     item.github_number,
                                     "pr",
@@ -298,6 +301,7 @@ pub async fn process_improved(
     _notifier: &Notifier<'_>,
     gh: &dyn Gh,
     claude: &dyn Claude,
+    sw: &dyn SuggestWorkflow,
     queues: &mut TaskQueues,
 ) -> Result<()> {
     let cfg = config::loader::load_merged(env, None);
@@ -378,6 +382,7 @@ pub async fn process_improved(
                             let _ = crate::knowledge::extractor::extract_task_knowledge(
                                 claude,
                                 gh,
+                                sw,
                                 &item.repo_name,
                                 item.github_number,
                                 "pr",

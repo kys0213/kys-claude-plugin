@@ -4,26 +4,33 @@ use anyhow::Result;
 
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
+use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 
 use super::models::KnowledgeSuggestion;
 
 /// per-task knowledge extraction
 ///
 /// done 전이 시 호출: 완료된 작업의 세션을 Claude로 분석하여 개선 제안 추출.
+/// suggest-workflow 세션 데이터가 있으면 도구 사용 패턴도 함께 분석.
 /// 결과는 GitHub 이슈 코멘트로 게시.
 pub async fn extract_task_knowledge(
     claude: &dyn Claude,
     gh: &dyn Gh,
+    sw: &dyn SuggestWorkflow,
     repo_name: &str,
     github_number: i64,
     task_type: &str,
     wt_path: &Path,
     gh_host: Option<&str>,
 ) -> Result<Option<KnowledgeSuggestion>> {
+    // suggest-workflow에서 해당 태스크 세션의 도구 사용 패턴 조회 (best effort)
+    let sw_section = build_suggest_workflow_section(sw, task_type, github_number).await;
+
     let prompt = format!(
         "[autodev] knowledge: per-task {task_type} #{github_number}\n\n\
          Analyze the completed {task_type} task (#{github_number}) in this workspace. \
-         Review the changes made, any issues encountered, and lessons learned. \
+         Review the changes made, any issues encountered, and lessons learned.\
+         {sw_section}\n\n\
          Respond with a JSON object matching this schema:\n\
          {{\n  \"suggestions\": [\n    {{\n      \
          \"type\": \"rule | claude_md | hook | skill | subagent\",\n      \
@@ -61,6 +68,40 @@ pub async fn extract_task_knowledge(
     }
 
     Ok(suggestion)
+}
+
+/// suggest-workflow에서 해당 태스크 세션의 도구 사용 패턴을 조회하여 프롬프트 섹션 생성
+async fn build_suggest_workflow_section(
+    sw: &dyn SuggestWorkflow,
+    task_type: &str,
+    github_number: i64,
+) -> String {
+    // autodev 세션 식별: "[autodev]" 마커 + task 키워드로 필터
+    let session_filter = format!(
+        "first_prompt_snippet LIKE '[autodev]%{task_type}%#{github_number}%'"
+    );
+
+    let tool_freq = match sw.query_tool_frequency(Some(&session_filter)).await {
+        Ok(entries) if !entries.is_empty() => entries,
+        Ok(_) => return String::new(),
+        Err(e) => {
+            tracing::debug!("suggest-workflow tool-frequency query failed (non-fatal): {e}");
+            return String::new();
+        }
+    };
+
+    let tool_freq_json = match serde_json::to_string_pretty(&tool_freq) {
+        Ok(j) => j,
+        Err(_) => return String::new(),
+    };
+
+    format!(
+        "\n\n--- suggest-workflow session data ---\n\
+         The following tool usage pattern was recorded for this task's session:\n\
+         ```json\n{tool_freq_json}\n```\n\
+         Consider these patterns when making suggestions \
+         (e.g., high Bash:test frequency may indicate test loop issues)."
+    )
 }
 
 /// Claude 출력에서 KnowledgeSuggestion 파싱
