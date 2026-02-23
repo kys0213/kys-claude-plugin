@@ -15,7 +15,6 @@ kanban/
 
 | 항목 | 파일 | 우선순위 |
 |------|------|---------|
-| 로그 롤링/보존 (M-04+M-05) | [todo/log-rolling.md](./todo/log-rolling.md) | Critical |
 | TUI 데이터 표시 (M-06) | [todo/tui-data-display.md](./todo/tui-data-display.md) | High |
 | Phase 상태 세분화 (M-01) | [todo/phase-refinement.md](./todo/phase-refinement.md) | Medium |
 | suggest-workflow 통합 (M-03) | [todo/suggest-workflow-integration.md](./todo/suggest-workflow-integration.md) | Medium |
@@ -33,8 +32,9 @@ _(없음)_
 | PR/머지 파이프라인 | [done/pr-merge-pipeline.md](./done/pr-merge-pipeline.md) |
 | TUI 대시보드 | [done/tui-dashboard.md](./done/tui-dashboard.md) |
 | CI/CD 및 배포 | [done/ci-release.md](./done/ci-release.md) |
+| 로그 롤링/보존 (M-04+M-05) | [done/log-rolling.md](./done/log-rolling.md) |
 
 ## 테스트 현황
 
-- 전체 테스트: **185개** (모두 통과)
-- 마지막 검증일: 2026-02-22
+- 전체 테스트: **297개** (모두 통과)
+- 마지막 검증일: 2026-02-23
