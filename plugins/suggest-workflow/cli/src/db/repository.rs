@@ -77,6 +77,7 @@ pub type QueryParams = HashMap<String, String>;
 
 // --- Repository traits ---
 
+#[allow(dead_code)]
 pub trait IndexRepository {
     fn initialize(&self) -> Result<()>;
     fn check_session(&self, file_path: &Path, size: u64, mtime: i64) -> Result<SessionStatus>;

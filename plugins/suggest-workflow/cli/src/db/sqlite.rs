@@ -360,11 +360,7 @@ fn validate_session_filter(filter: &str) -> Result<()> {
 /// - If `filter` is Some: replace `{SF:col}` with `AND col IN (SELECT id FROM sessions WHERE <filter>)`.
 fn apply_session_filter(sql: &str, filter: Option<&str>) -> String {
     let mut result = sql.to_string();
-    loop {
-        let start = match result.find("{SF:") {
-            Some(pos) => pos,
-            None => break,
-        };
+    while let Some(start) = result.find("{SF:") {
         let end = match result[start..].find('}') {
             Some(offset) => start + offset + 1,
             None => break,

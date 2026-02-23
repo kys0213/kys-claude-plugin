@@ -23,6 +23,7 @@ const CACHE_DIR_NAME: &str = "suggest-workflow-cache";
 /// All summaries are regenerated every time to ensure consistency
 /// with the current code version (no stale cache risk).
 /// Outputs the cache directory path to stdout.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     project_path: &str,
     depth: &AnalysisDepth,
@@ -382,6 +383,7 @@ fn build_meta_from_summary(
 
 // --- Analysis snapshot (includes new statistical analyzers) ---
 
+#[allow(clippy::too_many_arguments)]
 fn generate_analysis_snapshot(
     sessions: &[(String, Vec<SessionEntry>)],
     history_entries: &[HistoryEntry],

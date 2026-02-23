@@ -59,6 +59,7 @@ impl std::str::FromStr for AnalysisFocus {
 }
 
 /// Unified analysis entry point
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     scope: AnalysisScope,
     depth: AnalysisDepth,
@@ -118,6 +119,7 @@ fn apply_date_filter(
 }
 
 /// Single-project analysis
+#[allow(clippy::too_many_arguments)]
 fn run_project_analysis(
     project_path: &str,
     depth_config: &DepthConfig,
@@ -188,6 +190,7 @@ fn run_project_analysis(
 }
 
 /// Global cross-project analysis
+#[allow(clippy::too_many_arguments)]
 fn run_global_analysis(
     depth_config: &DepthConfig,
     depth: &AnalysisDepth,
@@ -307,6 +310,7 @@ struct GlobalInfo {
 
 /// Load sessions and history entries from a project directory.
 /// Uses rayon for parallel JSONL parsing across session files.
+#[allow(clippy::type_complexity)]
 fn load_sessions_from_dir(
     project_dir: &Path,
     project_label: &str,
@@ -338,15 +342,12 @@ fn decode_project_name(encoded: &str) -> String {
     //   /home/user/my-project → -home-user-my-project
     // We cannot distinguish original hyphens from encoded slashes.
     // Use the encoded name directly as a display label (stripping leading dash).
-    if encoded.starts_with('-') {
-        encoded[1..].to_string()
-    } else {
-        encoded.to_string()
-    }
+    encoded.strip_prefix('-').unwrap_or(encoded).to_string()
 }
 
 // --- Output formatting ---
 
+#[allow(clippy::too_many_arguments)]
 fn print_text_output(
     sessions: &[(String, Vec<crate::types::SessionEntry>)],
     history_entries: &[crate::types::HistoryEntry],
@@ -588,7 +589,7 @@ fn print_text_output(
             let short_name: String = stat
                 .name
                 .split('/')
-                .last()
+                .next_back()
                 .unwrap_or(&stat.name)
                 .to_string();
             println!(
@@ -611,6 +612,7 @@ fn truncate_str(s: &str, max: usize) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn print_json_output(
     sessions: &[(String, Vec<crate::types::SessionEntry>)],
     history_entries: &[crate::types::HistoryEntry],

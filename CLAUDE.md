@@ -41,6 +41,20 @@
 - **적용**: 외부 시스템과 상호작용하는 기능 구현 (API 호출, DB 접근, CLI 실행 등)
 - **제외**: 단순 버그 수정, 설정 변경, 문서 수정 등 외부 의존성이 없는 작업
 
+## 코드 품질 게이트 (Quality Gate)
+
+lint, format, test가 실패하면 변경된 부분이 아니더라도 반드시 수정해야 합니다.
+
+```
+❌ 내가 변경한 파일이 아니니까 무시
+✅ pre-push hook 또는 CI에서 실패하면 해당 오류를 모두 수정한 뒤 push
+```
+
+- `cargo fmt --check` 실패 → `cargo fmt` 실행하여 수정
+- `cargo clippy -- -D warnings` 실패 → clippy 경고를 코드 수정 또는 `#[allow]`로 해결
+- `cargo test` 실패 → 테스트가 통과하도록 수정
+- pre-push hook은 **모든** Rust 프로젝트를 검증합니다 (변경 여부 무관)
+
 ## PR 타이틀 / 커밋 메시지 규칙
 
 `.claude/rules/git-workflow.md` 를 따릅니다.

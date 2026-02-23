@@ -124,10 +124,10 @@ fn cluster_normalized(
                     &precomputed_bigrams[i],
                     &precomputed_bigrams[*cluster_idx],
                 );
-                if sim >= similarity_threshold {
-                    if best_match.map_or(true, |(_, best_sim)| sim > best_sim) {
-                        best_match = Some((pos, sim));
-                    }
+                if sim >= similarity_threshold
+                    && best_match.is_none_or(|(_, best_sim)| sim > best_sim)
+                {
+                    best_match = Some((pos, sim));
                 }
             }
         }
