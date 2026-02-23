@@ -29,11 +29,9 @@ fn cleanup_old_logs_with_today(log_dir: &Path, retention_days: u32, today: Naive
         // daemon.YYYY-MM-DD.log 형식만 대상
         if let Some(date_str) = parse_log_date(&name_str) {
             if let Ok(file_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-                if file_date < cutoff {
-                    if std::fs::remove_file(entry.path()).is_ok() {
-                        info!("deleted old log: {name_str}");
-                        deleted += 1;
-                    }
+                if file_date < cutoff && std::fs::remove_file(entry.path()).is_ok() {
+                    info!("deleted old log: {name_str}");
+                    deleted += 1;
                 }
             }
         }
