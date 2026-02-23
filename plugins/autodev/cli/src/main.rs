@@ -73,17 +73,50 @@ enum RepoAction {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("autodev=info".parse()?),
-        )
-        .init();
-
     let cli = Cli::parse();
     let env = config::RealEnv;
     let home = config::autodev_home(&env);
     std::fs::create_dir_all(&home)?;
+
+    let is_daemon = matches!(cli.command, Commands::Start | Commands::Restart);
+
+    // _guard must live until main() returns to flush non-blocking writer
+    let _guard = if is_daemon {
+        let cfg = config::loader::load_merged(&env, None);
+        let log_dir = config::resolve_log_dir(&cfg.daemon.log_dir, &home);
+        std::fs::create_dir_all(&log_dir)?;
+
+        let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
+            .rotation(tracing_appender::rolling::Rotation::DAILY)
+            .filename_prefix("daemon")
+            .filename_suffix("log")
+            .build(&log_dir)
+            .expect("failed to create log appender");
+
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::EnvFilter::from_default_env()
+                    .add_directive("autodev=info".parse()?),
+            )
+            .with(tracing_subscriber::fmt::layer().with_writer(non_blocking))
+            .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+            .init();
+
+        Some(guard)
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::from_default_env()
+                    .add_directive("autodev=info".parse()?),
+            )
+            .init();
+        None
+    };
 
     let db_path = home.join("autodev.db");
     let db = queue::Database::open(&db_path)?;

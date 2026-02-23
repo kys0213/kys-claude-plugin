@@ -36,3 +36,13 @@ pub fn workspaces_path(env: &dyn Env) -> PathBuf {
 pub fn sanitize_repo_name(name: &str) -> String {
     name.replace('/', "-")
 }
+
+/// 로그 디렉토리 경로 해석: 절대 경로면 그대로, 상대 경로면 home 기준
+pub fn resolve_log_dir(log_dir: &str, home: &std::path::Path) -> PathBuf {
+    let path = std::path::Path::new(log_dir);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        home.join(log_dir)
+    }
+}
