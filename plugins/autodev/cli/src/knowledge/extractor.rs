@@ -13,6 +13,7 @@ use super::models::KnowledgeSuggestion;
 /// done 전이 시 호출: 완료된 작업의 세션을 Claude로 분석하여 개선 제안 추출.
 /// suggest-workflow 세션 데이터가 있으면 도구 사용 패턴도 함께 분석.
 /// 결과는 GitHub 이슈 코멘트로 게시.
+#[allow(clippy::too_many_arguments)]
 pub async fn extract_task_knowledge(
     claude: &dyn Claude,
     gh: &dyn Gh,

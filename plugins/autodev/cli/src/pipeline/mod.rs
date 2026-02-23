@@ -14,6 +14,7 @@ use crate::queue::task_queues::TaskQueues;
 use crate::queue::Database;
 
 /// 모든 큐 처리 — 각 phase를 독립적으로 실행
+#[allow(clippy::too_many_arguments)]
 pub async fn process_all(
     db: &Database,
     env: &dyn Env,

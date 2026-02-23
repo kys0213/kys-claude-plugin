@@ -31,6 +31,7 @@ fn format_review_comment(review: &str, pr_number: i64, verdict: Option<&ReviewVe
 }
 
 /// Pending PR을 pop하여 리뷰
+#[allow(clippy::too_many_arguments)]
 pub async fn process_pending(
     db: &Database,
     env: &dyn Env,
@@ -294,6 +295,7 @@ pub async fn process_review_done(
 }
 
 /// Improved PR을 pop하여 재리뷰 → approve면 done, request_changes면 ReviewDone 재진입
+#[allow(clippy::too_many_arguments)]
 pub async fn process_improved(
     db: &Database,
     env: &dyn Env,
