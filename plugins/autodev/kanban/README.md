@@ -11,7 +11,15 @@ kanban/
 
 ## todo/
 
-_(모두 완료)_
+> DESIGN-GAP-REPORT.md v2 (2026-02-23) 기반 잔존 gap
+
+| 항목 | 파일 | 우선순위 |
+|------|------|---------|
+| 로그 롤링/보존 (M-04+M-05) | [todo/log-rolling.md](./todo/log-rolling.md) | Critical |
+| TUI 데이터 표시 (M-06) | [todo/tui-data-display.md](./todo/tui-data-display.md) | High |
+| Phase 상태 세분화 (M-01) | [todo/phase-refinement.md](./todo/phase-refinement.md) | Medium |
+| suggest-workflow 통합 (M-03) | [todo/suggest-workflow-integration.md](./todo/suggest-workflow-integration.md) | Medium |
+| 문서 정합성 갱신 (L-03+L-04) | [todo/doc-consistency.md](./todo/doc-consistency.md) | Low |
 
 ## in-progress/
 
