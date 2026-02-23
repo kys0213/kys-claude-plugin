@@ -17,15 +17,11 @@
     "prepare": "husky",
     "check": "npm run lint && npm run typecheck"
   },
-  "lint-staged": {
-    "*.ts": "eslint --fix"
-  },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "eslint": "^9.39.2",
     "globals": "^17.3.0",
     "husky": "^9.1.7",
-    "lint-staged": "^16.2.7",
     "typescript-eslint": "^8.54.0"
   }
 }
