@@ -9,6 +9,7 @@ use autodev::config::Env;
 use autodev::infrastructure::claude::mock::MockClaude;
 use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
+use autodev::infrastructure::suggest_workflow::mock::MockSuggestWorkflow;
 use autodev::queue::repository::*;
 use autodev::queue::task_queues::{
     issue_phase, make_work_id, pr_phase, IssueItem, PrItem, TaskQueues,
@@ -177,7 +178,8 @@ async fn issue_implement_prompt_contains_autodev_implement_marker() {
     item.analysis_report = Some("Test analysis report".to_string());
     queues.issues.push(issue_phase::READY, item);
 
-    autodev::pipeline::issue::process_ready(&db, &env, &workspace, &gh, &claude, &mut queues)
+    let sw = MockSuggestWorkflow::new();
+    autodev::pipeline::issue::process_ready(&db, &env, &workspace, &gh, &claude, &sw, &mut queues)
         .await
         .unwrap();
 
@@ -216,6 +218,7 @@ async fn pr_review_prompt_contains_autodev_review_marker() {
         .prs
         .push("Pending", make_pr_item(&repo_id, 200, "Test PR"));
 
+    let sw = MockSuggestWorkflow::new();
     autodev::pipeline::pr::process_pending(
         &db,
         &env,
@@ -223,6 +226,7 @@ async fn pr_review_prompt_contains_autodev_review_marker() {
         &notifier,
         &gh,
         &claude,
+        &sw,
         &mut queues,
     )
     .await
@@ -303,6 +307,7 @@ async fn pr_re_review_prompt_contains_autodev_review_marker() {
         make_pr_item(&repo_id, 202, "Improved PR"),
     );
 
+    let sw = MockSuggestWorkflow::new();
     autodev::pipeline::pr::process_improved(
         &db,
         &env,
@@ -310,6 +315,7 @@ async fn pr_re_review_prompt_contains_autodev_review_marker() {
         &notifier,
         &gh,
         &claude,
+        &sw,
         &mut queues,
     )
     .await
@@ -382,9 +388,11 @@ async fn knowledge_per_task_prompt_contains_autodev_knowledge_marker() {
 
     let gh = MockGh::new();
 
+    let sw = MockSuggestWorkflow::new();
     let _ = autodev::knowledge::extractor::extract_task_knowledge(
         &claude,
         &gh,
+        &sw,
         "org/repo",
         42,
         "issue",
@@ -423,6 +431,7 @@ async fn knowledge_daily_prompt_contains_autodev_knowledge_daily_marker() {
         },
         patterns: vec![],
         suggestions: vec![],
+        cross_analysis: None,
     };
 
     let _ = autodev::knowledge::daily::generate_daily_suggestions(

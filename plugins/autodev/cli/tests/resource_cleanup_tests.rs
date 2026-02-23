@@ -7,6 +7,7 @@ use autodev::config::Env;
 use autodev::infrastructure::claude::mock::MockClaude;
 use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
+use autodev::infrastructure::suggest_workflow::mock::MockSuggestWorkflow;
 use autodev::queue::repository::*;
 use autodev::queue::task_queues::{
     issue_phase, make_work_id, pr_phase, IssueItem, MergeItem, PrItem, TaskQueues,
@@ -305,6 +306,7 @@ async fn pr_improved_approved_does_not_clean_worktree_c3() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
+    let sw = MockSuggestWorkflow::new();
     let mut queues = TaskQueues::new();
     queues
         .prs
@@ -317,6 +319,7 @@ async fn pr_improved_approved_does_not_clean_worktree_c3() {
         &notifier,
         &gh,
         &claude,
+        &sw,
         &mut queues,
     )
     .await
@@ -348,6 +351,7 @@ async fn pr_improved_request_changes_does_not_clean_worktree_c3() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
+    let sw = MockSuggestWorkflow::new();
     let mut queues = TaskQueues::new();
     queues
         .prs
@@ -360,6 +364,7 @@ async fn pr_improved_request_changes_does_not_clean_worktree_c3() {
         &notifier,
         &gh,
         &claude,
+        &sw,
         &mut queues,
     )
     .await
@@ -401,6 +406,7 @@ async fn review_cycle_has_no_iteration_limit_c4() {
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
+    let sw = MockSuggestWorkflow::new();
 
     // 3번의 review → request_changes 시뮬레이션 (max_iterations=2 초과)
     // Round 1: improve → improved
@@ -457,6 +463,7 @@ async fn review_cycle_has_no_iteration_limit_c4() {
                 &notifier,
                 &gh,
                 &claude,
+                &sw,
                 &mut queues,
             )
             .await
@@ -510,12 +517,13 @@ async fn issue_ready_cleans_up_worktree() {
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
     let workspace = Workspace::new(&git, &env);
+    let sw = MockSuggestWorkflow::new();
     let mut queues = TaskQueues::new();
     queues
         .issues
         .push(issue_phase::READY, make_issue_item(&repo_id, 90));
 
-    autodev::pipeline::issue::process_ready(&db, &env, &workspace, &gh, &claude, &mut queues)
+    autodev::pipeline::issue::process_ready(&db, &env, &workspace, &gh, &claude, &sw, &mut queues)
         .await
         .unwrap();
 

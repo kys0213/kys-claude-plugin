@@ -10,6 +10,7 @@ use crate::config::Env;
 use crate::infrastructure::claude::output::ReviewVerdict;
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
+use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::task_queues::{labels, pr_phase, TaskQueues};
@@ -30,6 +31,7 @@ fn format_review_comment(review: &str, pr_number: i64, verdict: Option<&ReviewVe
 }
 
 /// Pending PR을 pop하여 리뷰
+#[allow(clippy::too_many_arguments)]
 pub async fn process_pending(
     db: &Database,
     env: &dyn Env,
@@ -37,6 +39,7 @@ pub async fn process_pending(
     notifier: &Notifier<'_>,
     gh: &dyn Gh,
     claude: &dyn Claude,
+    sw: &dyn SuggestWorkflow,
     queues: &mut TaskQueues,
 ) -> Result<()> {
     let cfg = config::loader::load_merged(env, None);
@@ -141,6 +144,7 @@ pub async fn process_pending(
                                 let _ = crate::knowledge::extractor::extract_task_knowledge(
                                     claude,
                                     gh,
+                                    sw,
                                     &item.repo_name,
                                     item.github_number,
                                     "pr",
@@ -291,6 +295,7 @@ pub async fn process_review_done(
 }
 
 /// Improved PR을 pop하여 재리뷰 → approve면 done, request_changes면 ReviewDone 재진입
+#[allow(clippy::too_many_arguments)]
 pub async fn process_improved(
     db: &Database,
     env: &dyn Env,
@@ -298,6 +303,7 @@ pub async fn process_improved(
     _notifier: &Notifier<'_>,
     gh: &dyn Gh,
     claude: &dyn Claude,
+    sw: &dyn SuggestWorkflow,
     queues: &mut TaskQueues,
 ) -> Result<()> {
     let cfg = config::loader::load_merged(env, None);
@@ -378,6 +384,7 @@ pub async fn process_improved(
                             let _ = crate::knowledge::extractor::extract_task_knowledge(
                                 claude,
                                 gh,
+                                sw,
                                 &item.repo_name,
                                 item.github_number,
                                 "pr",

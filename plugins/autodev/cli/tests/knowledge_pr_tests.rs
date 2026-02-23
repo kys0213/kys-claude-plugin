@@ -17,6 +17,7 @@ fn make_report(date: &str, suggestions: Vec<Suggestion>) -> DailyReport {
         },
         patterns: vec![],
         suggestions,
+        cross_analysis: None,
     }
 }
 

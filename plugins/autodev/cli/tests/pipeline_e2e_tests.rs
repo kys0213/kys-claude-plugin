@@ -7,6 +7,7 @@ use autodev::config::Env;
 use autodev::infrastructure::claude::mock::MockClaude;
 use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
+use autodev::infrastructure::suggest_workflow::mock::MockSuggestWorkflow;
 use autodev::queue::repository::*;
 use autodev::queue::task_queues::{
     issue_phase, labels, make_work_id, merge_phase, IssueItem, MergeItem, PrItem, TaskQueues,
@@ -208,7 +209,8 @@ async fn issue_full_cycle_pending_to_done() {
     );
 
     // Phase 2: process_ready (Ready -> done, removed from queue)
-    autodev::pipeline::issue::process_ready(&db, &env, &workspace, &gh, &claude, &mut queues)
+    let sw = MockSuggestWorkflow::new();
+    autodev::pipeline::issue::process_ready(&db, &env, &workspace, &gh, &claude, &sw, &mut queues)
         .await
         .expect("phase 2 should succeed");
 
@@ -348,6 +350,7 @@ async fn pr_closed_on_github_skips_to_done() {
         .prs
         .push("Pending", make_pr_item(&repo_id, 30, "Already closed PR"));
 
+    let sw = MockSuggestWorkflow::new();
     autodev::pipeline::pr::process_pending(
         &db,
         &env,
@@ -355,6 +358,7 @@ async fn pr_closed_on_github_skips_to_done() {
         &notifier,
         &gh,
         &claude,
+        &sw,
         &mut queues,
     )
     .await
@@ -410,6 +414,7 @@ async fn pr_already_approved_skips_to_done() {
         .prs
         .push("Pending", make_pr_item(&repo_id, 31, "Already approved PR"));
 
+    let sw = MockSuggestWorkflow::new();
     autodev::pipeline::pr::process_pending(
         &db,
         &env,
@@ -417,6 +422,7 @@ async fn pr_already_approved_skips_to_done() {
         &notifier,
         &gh,
         &claude,
+        &sw,
         &mut queues,
     )
     .await
@@ -1022,6 +1028,7 @@ async fn workspace_clone_failure_marks_pr_failed() {
         make_pr_item(&repo_id, 70, "Clone will fail for PR"),
     );
 
+    let sw = MockSuggestWorkflow::new();
     autodev::pipeline::pr::process_pending(
         &db,
         &env,
@@ -1029,6 +1036,7 @@ async fn workspace_clone_failure_marks_pr_failed() {
         &notifier,
         &gh,
         &claude,
+        &sw,
         &mut queues,
     )
     .await
@@ -1326,9 +1334,19 @@ async fn process_all_handles_all_queues() {
         make_merge_item(&repo_id, 92, "Merge for process_all"),
     );
 
-    autodev::pipeline::process_all(&db, &env, &workspace, &notifier, &gh, &claude, &mut queues)
-        .await
-        .expect("process_all should succeed");
+    let sw = MockSuggestWorkflow::new();
+    autodev::pipeline::process_all(
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &sw,
+        &mut queues,
+    )
+    .await
+    .expect("process_all should succeed");
 
     // Issue: pending -> ready -> done (both phases in same process_all)
     assert_eq!(
