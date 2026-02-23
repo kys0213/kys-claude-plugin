@@ -14,6 +14,12 @@ use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::task_queues::{issue_phase, labels, TaskQueues};
+
+/// ANALYZING/IMPLEMENTING 상태에서 아이템을 제거하는 헬퍼.
+/// 모든 early-return 경로에서 호출하여 아이템이 중간 상태에 stuck되는 것을 방지한다.
+fn remove_from_phase(queues: &mut TaskQueues, work_id: &str) {
+    queues.issues.remove(work_id);
+}
 use crate::queue::Database;
 
 // ─── 분석 프롬프트 (JSON 응답 스키마 명시) ───
@@ -67,11 +73,17 @@ pub async fn process_pending(
             None => break,
         };
 
+        // Pending → Analyzing 상태 전이 (TUI/status 가시성)
+        let work_id = item.work_id.clone();
+        queues.issues.push(issue_phase::ANALYZING, item.clone());
+        tracing::debug!("issue #{}: Pending → Analyzing", item.github_number);
+
         // Pre-flight: GitHub에서 이슈가 아직 open인지 확인
         if !notifier
             .is_issue_open(&item.repo_name, item.github_number, gh_host)
             .await
         {
+            remove_from_phase(queues, &work_id);
             gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                 .await;
             gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host)
@@ -90,6 +102,7 @@ pub async fn process_pending(
             .ensure_cloned(&item.repo_url, &item.repo_name)
             .await
         {
+            remove_from_phase(queues, &work_id);
             gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                 .await;
             tracing::error!("clone failed for issue #{}: {e}", item.github_number);
@@ -102,6 +115,7 @@ pub async fn process_pending(
         {
             Ok(p) => p,
             Err(e) => {
+                remove_from_phase(queues, &work_id);
                 gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                     .await;
                 tracing::error!("worktree failed for issue #{}: {e}", item.github_number);
@@ -145,6 +159,7 @@ pub async fn process_pending(
                 });
 
                 if res.exit_code != 0 {
+                    remove_from_phase(queues, &work_id);
                     gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                         .await;
                     let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
@@ -155,6 +170,7 @@ pub async fn process_pending(
 
                 match analysis {
                     Some(ref a) if a.verdict == output::Verdict::Wontfix => {
+                        remove_from_phase(queues, &work_id);
                         let comment = verdict::format_wontfix_comment(a);
                         notifier
                             .post_issue_comment(
@@ -175,6 +191,7 @@ pub async fn process_pending(
                         if a.verdict == output::Verdict::NeedsClarification
                             || a.confidence < cfg.consumer.confidence_threshold =>
                     {
+                        remove_from_phase(queues, &work_id);
                         let comment = verdict::format_clarification_comment(a);
                         notifier
                             .post_issue_comment(
@@ -197,19 +214,27 @@ pub async fn process_pending(
                         let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
                     }
                     Some(ref a) => {
+                        // Analyzing → Ready 전이
+                        remove_from_phase(queues, &work_id);
                         item.analysis_report = Some(a.report.clone());
                         queues.issues.push(issue_phase::READY, item);
-                        tracing::info!("issue analysis → Ready (confidence={:.2})", a.confidence);
+                        tracing::info!(
+                            "issue analysis: Analyzing → Ready (confidence={:.2})",
+                            a.confidence
+                        );
                     }
                     None => {
+                        // Analyzing → Ready 전이 (파싱 실패 fallback)
+                        remove_from_phase(queues, &work_id);
                         let report = output::parse_output(&res.stdout);
                         item.analysis_report = Some(report);
                         queues.issues.push(issue_phase::READY, item);
-                        tracing::warn!("issue analysis output not parseable, fallback → Ready");
+                        tracing::warn!("issue analysis output not parseable, fallback: Analyzing → Ready");
                     }
                 }
             }
             Err(e) => {
+                remove_from_phase(queues, &work_id);
                 gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                     .await;
                 let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
@@ -245,6 +270,11 @@ pub async fn process_ready(
             None => break,
         };
 
+        // Ready → Implementing 상태 전이 (TUI/status 가시성)
+        let work_id = item.work_id.clone();
+        queues.issues.push(issue_phase::IMPLEMENTING, item.clone());
+        tracing::debug!("issue #{}: Ready → Implementing", item.github_number);
+
         let worker_id = Uuid::new_v4().to_string();
         let task_id = format!("issue-{}", item.github_number);
 
@@ -252,6 +282,7 @@ pub async fn process_ready(
             .ensure_cloned(&item.repo_url, &item.repo_name)
             .await
         {
+            remove_from_phase(queues, &work_id);
             gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                 .await;
             tracing::error!("clone failed for issue #{}: {e}", item.github_number);
@@ -263,6 +294,7 @@ pub async fn process_ready(
         {
             Ok(p) => p,
             Err(e) => {
+                remove_from_phase(queues, &work_id);
                 gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                     .await;
                 tracing::error!("worktree failed for issue #{}: {e}", item.github_number);
@@ -323,12 +355,15 @@ pub async fn process_ready(
                         .await;
                     }
 
+                    // Implementing → done
+                    remove_from_phase(queues, &work_id);
                     gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                         .await;
                     gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host)
                         .await;
-                    tracing::info!("issue #{} → done", item.github_number);
+                    tracing::info!("issue #{}: Implementing → done", item.github_number);
                 } else {
+                    remove_from_phase(queues, &work_id);
                     gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                         .await;
                     tracing::error!(
@@ -339,6 +374,7 @@ pub async fn process_ready(
                 }
             }
             Err(e) => {
+                remove_from_phase(queues, &work_id);
                 gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                     .await;
                 tracing::error!(

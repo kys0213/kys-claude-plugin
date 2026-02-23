@@ -259,24 +259,27 @@ plugins/autodev/
 │       │   └── recovery.rs      # orphan wip 라벨 정리
 │       │
 │       ├── queue/               # 상태 관리 + 영속화
-│       │   ├── models.rs        # WorkId, IssueItem, PrItem, MergeItem 등
+│       │   ├── mod.rs           # Database wrapper + 모듈 re-export
+│       │   ├── models.rs        # IssueItem, PrItem, MergeItem, NewConsumerLog 등
 │       │   ├── schema.rs        # SQLite DDL (repositories, scan_cursors, consumer_logs)
 │       │   ├── state_queue.rs   # In-Memory StateQueue<T> + dedup index
-│       │   ├── repo_store.rs    # RepositoryStore — 레포 CRUD
-│       │   ├── cursor_store.rs  # CursorStore — scan cursor 관리
-│       │   └── log_store.rs     # LogStore — consumer_logs 기록/조회
+│       │   ├── task_queues.rs   # TaskQueues — 3종 큐 + phase 상수 + labels
+│       │   └── repository.rs    # 레포 CRUD + scan cursor + consumer_logs (통합)
 │       │
 │       ├── tui/                 # TUI 대시보드
 │       │   ├── mod.rs           # TUI 앱 루프
-│       │   ├── views.rs         # 화면 레이아웃
+│       │   ├── views.rs         # 화면 레이아웃 + 상태 조회
 │       │   └── events.rs        # 키보드/마우스 이벤트 처리
 │       │
 │       ├── config/              # 설정
-│       │   ├── mod.rs           # 설정 로드/저장
-│       │   └── models.rs        # 설정 모델
+│       │   ├── mod.rs           # Env trait + 경로 해석
+│       │   ├── models.rs        # WorkflowConfig, ConsumerConfig, DaemonConfig 등
+│       │   └── loader.rs        # .develop-workflow.yaml 로드 + 딥머지
 │       │
-│       └── session/
-│           └── output.rs        # 세션 출력 파싱 (JSON → typed struct)
+│       └── knowledge/           # Knowledge Extraction
+│           ├── mod.rs
+│           ├── extractor.rs     # Per-task knowledge extraction
+│           └── daily.rs         # Daily report 생성 + 패턴 탐지
 │
 └── README.md
 ```
@@ -318,8 +321,12 @@ daemon/          ← 루프만 담당, 직접 외부 호출 안 함
 ```toml
 [package]
 name = "autodev"
-version = "0.1.0"
+version = "0.2.3"
 edition = "2021"
+
+[lib]
+name = "autodev"
+path = "src/lib.rs"
 
 [[bin]]
 name = "autodev"
@@ -332,9 +339,6 @@ clap = { version = "4", features = ["derive"] }
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# HTTP client (GitHub API)
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
-
 # SQLite (레포 관리 + scan 커서 + 실행 로그)
 rusqlite = { version = "0.32", features = ["bundled"] }
 
@@ -345,6 +349,12 @@ crossterm = "0.28"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
+
+# Async trait (dyn Trait + async fn)
+async-trait = "0.1"
+
+libc = "0.2"
 
 # Utils
 chrono = { version = "0.4", features = ["serde"] }
@@ -353,6 +363,12 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+serial_test = "3"
 
 [profile.release]
 opt-level = 3
@@ -944,28 +960,70 @@ tools: ["Read", "Glob", "Grep", "Edit", "Bash"]
 
 ## 12. Configuration
 
-```yaml
-# ~/.autodev/config.yaml
+설정 파일은 `.develop-workflow.yaml`을 사용한다.
+글로벌(`~/`)과 워크스페이스별 오버라이드를 딥머지하여 최종 `WorkflowConfig`를 생성한다.
 
-repos:
-  - name: org/my-repo
-    url: https://github.com/org/my-repo
-    enabled: true
-    scan_interval_secs: 300
-    scan_targets: [issues, pulls]
-    filter_labels: []              # 빈 배열 = 전체 대상
-    ignore_authors: [dependabot, renovate]
-    model: sonnet
-    confidence_threshold: 0.7
-    auto_merge: true               # approved PR 자동 머지
-    merge_require_ci: true         # CI checks 통과 필수
+```yaml
+# ~/.develop-workflow.yaml (글로벌)
+# 또는 <repo-root>/.develop-workflow.yaml (워크스페이스별 오버라이드)
+
+consumer:
+  scan_interval_secs: 300
+  scan_targets: [issues, pulls]
+  issue_concurrency: 1
+  pr_concurrency: 1
+  merge_concurrency: 1
+  model: sonnet
+  confidence_threshold: 0.7
+  auto_merge: false
+  knowledge_extraction: true
+  filter_labels: []              # null = 전체 대상
+  ignore_authors: [dependabot, renovate]
 
 daemon:
   tick_interval_secs: 10           # 메인 루프 주기 (초)
   reconcile_window_hours: 24       # 재시작 시 복구 윈도우 (기본 24h)
-  log_dir: ~/.autodev/logs         # 일자별 롤링 로그 디렉토리
+  log_dir: logs                    # 일자별 롤링 로그 디렉토리
   log_retention_days: 30           # 로그 보존 기간 (일)
   daily_report_hour: 6             # 매일 06:00에 일일 리포트 생성
+
+workflow:
+  issue: "/develop-workflow:develop-auto"
+  pr: "/develop-workflow:multi-review"
+
+commands:
+  design: "/multi-llm-design"
+  review: "/multi-review"
+  branch: "/git-branch"
+  branch_status: "/branch-status"
+  code_review: "/multi-review"
+  commit_and_pr: "/commit-and-pr"
+
+develop:
+  review:
+    multi_llm: true
+    auto_feedback: true
+    max_iterations: 2
+  implement:
+    strategy: auto
+    max_retries: 3
+    validate_each: true
+  pr:
+    code_review: true
+```
+
+레포 등록은 SQLite DB(`autodev.db`)의 `repositories` 테이블에서 관리한다 (CLI `repo add/remove` 명령).
+
+### WorkflowConfig 구조체 매핑
+
+```rust
+pub struct WorkflowConfig {
+    pub consumer: ConsumerConfig,   // scan/concurrency/model 설정
+    pub daemon: DaemonConfig,       // tick/reconcile/log 설정
+    pub workflow: WorkflowRouting,  // issue/pr 워크플로우 라우팅
+    pub commands: CommandsConfig,   // 내부 커맨드 매핑
+    pub develop: DevelopConfig,     // 워크플로우 옵션 (review/implement/pr)
+}
 ```
 
 ### DaemonConfig 구조체 매핑
@@ -979,9 +1037,9 @@ daemon tick loop에서만 사용하는 설정은 `ConsumerConfig`가 아닌 `Dae
 pub struct DaemonConfig {
     pub tick_interval_secs: u64,        // default: 10
     pub reconcile_window_hours: u32,    // default: 24
-    pub log_dir: PathBuf,               // default: ~/.autodev/logs
-    pub log_retention_days: u32,        // default: 30
     pub daily_report_hour: u32,         // default: 6
+    pub log_dir: String,                // default: "logs"
+    pub log_retention_days: u32,        // default: 30
 }
 ```
 

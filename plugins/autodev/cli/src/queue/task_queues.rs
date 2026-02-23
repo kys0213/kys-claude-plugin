@@ -82,14 +82,18 @@ pub fn make_work_id(queue_type: &str, repo_name: &str, number: i64) -> String {
 
 pub mod issue_phase {
     pub const PENDING: &str = "Pending";
+    pub const ANALYZING: &str = "Analyzing";
     pub const READY: &str = "Ready";
+    pub const IMPLEMENTING: &str = "Implementing";
 }
 
 // ─── PR Phase 상수 ───
 
 pub mod pr_phase {
     pub const PENDING: &str = "Pending";
+    pub const REVIEWING: &str = "Reviewing";
     pub const REVIEW_DONE: &str = "ReviewDone";
+    pub const IMPROVING: &str = "Improving";
     pub const IMPROVED: &str = "Improved";
 }
 
@@ -97,6 +101,8 @@ pub mod pr_phase {
 
 pub mod merge_phase {
     pub const PENDING: &str = "Pending";
+    pub const MERGING: &str = "Merging";
+    pub const CONFLICT: &str = "Conflict";
 }
 
 // ─── GitHub Label 상수 ───
@@ -307,5 +313,144 @@ mod tests {
         assert_eq!(labels::WIP, "autodev:wip");
         assert_eq!(labels::DONE, "autodev:done");
         assert_eq!(labels::SKIP, "autodev:skip");
+    }
+
+    // ═══════════════════════════════════════════════════
+    // Phase Refinement: 중간 상태 전이 패턴 테스트
+    // ═══════════════════════════════════════════════════
+
+    #[test]
+    fn issue_lifecycle_with_intermediate_phases() {
+        let mut tq = TaskQueues::new();
+
+        // scan → Pending
+        let i = issue("org/repo", 42);
+        tq.issues.push(issue_phase::PENDING, i);
+
+        // pop(Pending) → push(Analyzing, clone) — pipeline 패턴 재현
+        let mut item = tq.issues.pop(issue_phase::PENDING).unwrap();
+        let work_id = item.work_id.clone();
+        tq.issues.push(issue_phase::ANALYZING, item.clone());
+        assert_eq!(tq.issues.state_of(&work_id), Some(issue_phase::ANALYZING));
+        assert_eq!(tq.issues.len(issue_phase::ANALYZING), 1);
+
+        // 분석 완료: remove(Analyzing) → push(Ready)
+        tq.issues.remove(&work_id);
+        item.analysis_report = Some("report...".to_string());
+        tq.issues.push(issue_phase::READY, item.clone());
+        assert_eq!(tq.issues.state_of(&work_id), Some(issue_phase::READY));
+
+        // pop(Ready) → push(Implementing, clone) — 구현 시작
+        let item = tq.issues.pop(issue_phase::READY).unwrap();
+        tq.issues.push(issue_phase::IMPLEMENTING, item.clone());
+        assert_eq!(
+            tq.issues.state_of(&work_id),
+            Some(issue_phase::IMPLEMENTING)
+        );
+
+        // 구현 완료: remove(Implementing) → done
+        tq.issues.remove(&work_id);
+        assert_eq!(tq.total(), 0);
+    }
+
+    #[test]
+    fn pr_lifecycle_with_intermediate_phases() {
+        let mut tq = TaskQueues::new();
+
+        // scan → Pending
+        let p = pr("org/repo", 10);
+        tq.prs.push(pr_phase::PENDING, p);
+
+        // pop(Pending) → push(Reviewing)
+        let mut item = tq.prs.pop(pr_phase::PENDING).unwrap();
+        let work_id = item.work_id.clone();
+        tq.prs.push(pr_phase::REVIEWING, item.clone());
+        assert_eq!(tq.prs.state_of(&work_id), Some(pr_phase::REVIEWING));
+
+        // request_changes: remove(Reviewing) → push(ReviewDone)
+        tq.prs.remove(&work_id);
+        item.review_comment = Some("fix null check".to_string());
+        tq.prs.push(pr_phase::REVIEW_DONE, item.clone());
+        assert_eq!(tq.prs.state_of(&work_id), Some(pr_phase::REVIEW_DONE));
+
+        // pop(ReviewDone) → push(Improving)
+        let item = tq.prs.pop(pr_phase::REVIEW_DONE).unwrap();
+        tq.prs.push(pr_phase::IMPROVING, item.clone());
+        assert_eq!(tq.prs.state_of(&work_id), Some(pr_phase::IMPROVING));
+
+        // 개선 완료: remove(Improving) → push(Improved)
+        tq.prs.remove(&work_id);
+        tq.prs.push(pr_phase::IMPROVED, item.clone());
+        assert_eq!(tq.prs.state_of(&work_id), Some(pr_phase::IMPROVED));
+
+        // 재리뷰: pop(Improved) → push(Reviewing)
+        let item = tq.prs.pop(pr_phase::IMPROVED).unwrap();
+        tq.prs.push(pr_phase::REVIEWING, item.clone());
+        assert_eq!(tq.prs.state_of(&work_id), Some(pr_phase::REVIEWING));
+
+        // approve: remove(Reviewing) → done
+        tq.prs.remove(&work_id);
+        assert_eq!(tq.total(), 0);
+    }
+
+    #[test]
+    fn merge_lifecycle_with_conflict_phase() {
+        let mut tq = TaskQueues::new();
+
+        let m = merge("org/repo", 5);
+        tq.merges.push(merge_phase::PENDING, m);
+
+        // pop(Pending) → push(Merging)
+        let item = tq.merges.pop(merge_phase::PENDING).unwrap();
+        let work_id = item.work_id.clone();
+        tq.merges.push(merge_phase::MERGING, item.clone());
+        assert_eq!(tq.merges.state_of(&work_id), Some(merge_phase::MERGING));
+
+        // 충돌 발생: remove(Merging) → push(Conflict)
+        tq.merges.remove(&work_id);
+        tq.merges.push(merge_phase::CONFLICT, item.clone());
+        assert_eq!(tq.merges.state_of(&work_id), Some(merge_phase::CONFLICT));
+
+        // 충돌 해결: remove(Conflict) → done
+        tq.merges.remove(&work_id);
+        assert_eq!(tq.total(), 0);
+    }
+
+    #[test]
+    fn merge_lifecycle_success_path() {
+        let mut tq = TaskQueues::new();
+
+        let m = merge("org/repo", 5);
+        tq.merges.push(merge_phase::PENDING, m);
+
+        // pop(Pending) → push(Merging)
+        let item = tq.merges.pop(merge_phase::PENDING).unwrap();
+        let work_id = item.work_id.clone();
+        tq.merges.push(merge_phase::MERGING, item.clone());
+
+        // 성공: remove(Merging) → done
+        tq.merges.remove(&work_id);
+        assert_eq!(tq.total(), 0);
+    }
+
+    #[test]
+    fn phase_constants_match_design() {
+        // Issue: Pending → Analyzing → Ready → Implementing
+        assert_eq!(issue_phase::PENDING, "Pending");
+        assert_eq!(issue_phase::ANALYZING, "Analyzing");
+        assert_eq!(issue_phase::READY, "Ready");
+        assert_eq!(issue_phase::IMPLEMENTING, "Implementing");
+
+        // PR: Pending → Reviewing → ReviewDone → Improving → Improved
+        assert_eq!(pr_phase::PENDING, "Pending");
+        assert_eq!(pr_phase::REVIEWING, "Reviewing");
+        assert_eq!(pr_phase::REVIEW_DONE, "ReviewDone");
+        assert_eq!(pr_phase::IMPROVING, "Improving");
+        assert_eq!(pr_phase::IMPROVED, "Improved");
+
+        // Merge: Pending → Merging → Conflict
+        assert_eq!(merge_phase::PENDING, "Pending");
+        assert_eq!(merge_phase::MERGING, "Merging");
+        assert_eq!(merge_phase::CONFLICT, "Conflict");
     }
 }
