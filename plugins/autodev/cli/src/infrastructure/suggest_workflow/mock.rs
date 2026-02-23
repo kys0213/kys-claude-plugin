@@ -96,10 +96,7 @@ impl SuggestWorkflow for MockSuggestWorkflow {
         }
     }
 
-    async fn query_repetition(
-        &self,
-        session_filter: Option<&str>,
-    ) -> Result<Vec<RepetitionEntry>> {
+    async fn query_repetition(&self, session_filter: Option<&str>) -> Result<Vec<RepetitionEntry>> {
         self.calls.lock().unwrap().push((
             "query_repetition".into(),
             vec![session_filter.unwrap_or("").to_string()],

@@ -1335,9 +1335,18 @@ async fn process_all_handles_all_queues() {
     );
 
     let sw = MockSuggestWorkflow::new();
-    autodev::pipeline::process_all(&db, &env, &workspace, &notifier, &gh, &claude, &sw, &mut queues)
-        .await
-        .expect("process_all should succeed");
+    autodev::pipeline::process_all(
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &sw,
+        &mut queues,
+    )
+    .await
+    .expect("process_all should succeed");
 
     // Issue: pending -> ready -> done (both phases in same process_all)
     assert_eq!(

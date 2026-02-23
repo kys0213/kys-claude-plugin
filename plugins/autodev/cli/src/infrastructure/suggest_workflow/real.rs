@@ -58,10 +58,7 @@ impl SuggestWorkflow for RealSuggestWorkflow {
         Ok(entries)
     }
 
-    async fn query_repetition(
-        &self,
-        session_filter: Option<&str>,
-    ) -> Result<Vec<RepetitionEntry>> {
+    async fn query_repetition(&self, session_filter: Option<&str>) -> Result<Vec<RepetitionEntry>> {
         let mut args = vec![
             "query".to_string(),
             "--perspective".to_string(),

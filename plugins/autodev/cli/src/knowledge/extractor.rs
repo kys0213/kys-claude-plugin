@@ -77,9 +77,8 @@ async fn build_suggest_workflow_section(
     github_number: i64,
 ) -> String {
     // autodev 세션 식별: "[autodev]" 마커 + task 키워드로 필터
-    let session_filter = format!(
-        "first_prompt_snippet LIKE '[autodev]%{task_type}%#{github_number}%'"
-    );
+    let session_filter =
+        format!("first_prompt_snippet LIKE '[autodev]%{task_type}%#{github_number}%'");
 
     let tool_freq = match sw.query_tool_frequency(Some(&session_filter)).await {
         Ok(entries) if !entries.is_empty() => entries,

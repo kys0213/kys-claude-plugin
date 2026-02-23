@@ -155,10 +155,7 @@ pub fn build_daily_report(date: &str, stats: &LogStats, patterns: Vec<Pattern>) 
 }
 
 /// suggest-workflow에서 교차 분석 데이터를 수집하여 DailyReport에 추가
-pub async fn enrich_with_cross_analysis(
-    report: &mut DailyReport,
-    sw: &dyn SuggestWorkflow,
-) {
+pub async fn enrich_with_cross_analysis(report: &mut DailyReport, sw: &dyn SuggestWorkflow) {
     let session_filter = "first_prompt_snippet LIKE '[autodev]%'";
 
     // 1. filtered-sessions: 전일 autodev 세션 목록
@@ -393,7 +390,10 @@ fn format_daily_report_body(report: &DailyReport) -> String {
         body.push_str("\n## Cross Analysis (suggest-workflow)\n\n");
 
         if !ca.sessions.is_empty() {
-            body.push_str(&format!("**Sessions**: {} autodev sessions\n\n", ca.sessions.len()));
+            body.push_str(&format!(
+                "**Sessions**: {} autodev sessions\n\n",
+                ca.sessions.len()
+            ));
         }
 
         if !ca.tool_frequencies.is_empty() {

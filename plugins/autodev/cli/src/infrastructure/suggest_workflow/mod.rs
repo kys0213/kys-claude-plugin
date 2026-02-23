@@ -35,8 +35,5 @@ pub trait SuggestWorkflow: Send + Sync {
     /// repetition perspective 조회 (이상치 탐지)
     ///
     /// `session_filter`가 Some이면 `--session-filter` 옵션 추가.
-    async fn query_repetition(
-        &self,
-        session_filter: Option<&str>,
-    ) -> Result<Vec<RepetitionEntry>>;
+    async fn query_repetition(&self, session_filter: Option<&str>) -> Result<Vec<RepetitionEntry>>;
 }

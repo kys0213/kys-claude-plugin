@@ -203,7 +203,10 @@ async fn enrich_with_cross_analysis_populates_report() {
 
     autodev::knowledge::daily::enrich_with_cross_analysis(&mut report, &sw).await;
 
-    let ca = report.cross_analysis.as_ref().expect("cross_analysis should be set");
+    let ca = report
+        .cross_analysis
+        .as_ref()
+        .expect("cross_analysis should be set");
     assert_eq!(ca.sessions.len(), 1);
     assert_eq!(ca.sessions[0].id, "session-1");
     assert_eq!(ca.tool_frequencies.len(), 2);

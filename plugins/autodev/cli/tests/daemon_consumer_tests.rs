@@ -439,9 +439,18 @@ async fn process_all_handles_issues_and_prs() {
         .push(pr_phase::PENDING, make_pr_item(&repo_id, 10, "PR"));
 
     let sw = MockSuggestWorkflow::new();
-    autodev::pipeline::process_all(&db, &env, &workspace, &notifier, &gh, &claude, &sw, &mut queues)
-        .await
-        .expect("process_all should succeed");
+    autodev::pipeline::process_all(
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &sw,
+        &mut queues,
+    )
+    .await
+    .expect("process_all should succeed");
 
     // Issue should have moved from PENDING through processing
     assert_eq!(
