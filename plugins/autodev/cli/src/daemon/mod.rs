@@ -1,3 +1,4 @@
+pub mod log;
 pub mod pid;
 pub mod recovery;
 
@@ -58,6 +59,15 @@ pub async fn start(
     let reconcile_window_hours = cfg.daemon.reconcile_window_hours;
     let tick_interval_secs = cfg.daemon.tick_interval_secs;
 
+    let log_dir = config::resolve_log_dir(&cfg.daemon.log_dir, home);
+    let log_retention_days = cfg.daemon.log_retention_days;
+
+    // Startup cleanup: 보존 기간 초과 로그 삭제
+    let n = log::cleanup_old_logs(&log_dir, log_retention_days);
+    if n > 0 {
+        info!("startup log cleanup: deleted {n} old log files");
+    }
+
     // 0. Startup Reconcile (bounded recovery)
     match startup_reconcile(
         &db,
@@ -105,7 +115,10 @@ pub async fn start(
                     let today = now.format("%Y-%m-%d").to_string();
                     if now.hour() >= daily_report_hour && last_daily_report_date != today {
                         let yesterday = (now - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
-                        let log_path = home.join(format!("daemon.{yesterday}.log"));
+                        let log_path = log_dir.join(format!("daemon.{yesterday}.log"));
+
+                        // 일간 로그 cleanup
+                        log::cleanup_old_logs(&log_dir, log_retention_days);
 
                         if log_path.exists() {
                             let stats = crate::knowledge::daily::parse_daemon_log(&log_path);
