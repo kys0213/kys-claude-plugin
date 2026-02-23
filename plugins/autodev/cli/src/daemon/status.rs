@@ -248,4 +248,76 @@ mod tests {
         remove_status(&path);
         assert!(!path.exists());
     }
+
+    #[test]
+    fn status_file_reflects_queue_changes_across_ticks() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("daemon.status.json");
+        let start = std::time::Instant::now();
+
+        let mut queues = TaskQueues::new();
+        let mut counters = StatusCounters::default();
+
+        // ── Tick 1: issue 1개 적재 ──
+        queues
+            .issues
+            .push(issue_phase::PENDING, make_issue("org/repo", 1));
+
+        let s1 = build_status(&queues, &counters, start);
+        write_status(&path, &s1);
+
+        let loaded1 = read_status(&path).unwrap();
+        assert_eq!(loaded1.active_items.len(), 1);
+        assert_eq!(loaded1.active_items[0].number, 1);
+        assert_eq!(loaded1.counters.wip, 1);
+        assert_eq!(loaded1.counters.done, 0);
+
+        // ── Tick 2: PR 추가, issue phase 변경 ──
+        queues.prs.push(pr_phase::PENDING, make_pr("org/repo", 10));
+        let issue = queues.issues.pop(issue_phase::PENDING).unwrap();
+        queues.issues.push(issue_phase::READY, issue);
+
+        let s2 = build_status(&queues, &counters, start);
+        write_status(&path, &s2);
+
+        let loaded2 = read_status(&path).unwrap();
+        assert_eq!(loaded2.active_items.len(), 2);
+        assert_eq!(loaded2.counters.wip, 2);
+
+        // issue의 phase가 Ready로 변경되었는지 확인
+        let issue_item = loaded2
+            .active_items
+            .iter()
+            .find(|i| i.queue_type == "issue")
+            .unwrap();
+        assert_eq!(issue_item.phase, "Ready");
+
+        // ── Tick 3: issue 처리 완료 (pop) → done 카운터 증가 ──
+        queues.issues.pop(issue_phase::READY);
+        counters.done += 1;
+
+        let s3 = build_status(&queues, &counters, start);
+        write_status(&path, &s3);
+
+        let loaded3 = read_status(&path).unwrap();
+        assert_eq!(loaded3.active_items.len(), 1, "issue popped, only PR left");
+        assert_eq!(loaded3.active_items[0].queue_type, "pr");
+        assert_eq!(loaded3.counters.wip, 1);
+        assert_eq!(loaded3.counters.done, 1);
+
+        // ── Tick 4: PR도 처리 완료 → 큐 비어짐 ──
+        queues.prs.pop(pr_phase::PENDING);
+        counters.done += 1;
+
+        let s4 = build_status(&queues, &counters, start);
+        write_status(&path, &s4);
+
+        let loaded4 = read_status(&path).unwrap();
+        assert!(loaded4.active_items.is_empty());
+        assert_eq!(loaded4.counters.wip, 0);
+        assert_eq!(loaded4.counters.done, 2);
+
+        // uptime은 tick 1보다 크거나 같아야 함
+        assert!(loaded4.uptime_secs >= loaded1.uptime_secs);
+    }
 }
