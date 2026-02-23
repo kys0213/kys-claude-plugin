@@ -1,0 +1,104 @@
+#!/bin/bash
+# pre-push hook: CI(validate.yml)와 동일한 Rust 검증 체인 실행
+# push 되는 커밋에 Rust 파일 변경이 있을 때만 실행
+#
+# CI 검증 순서:
+#   1. cargo fmt --check
+#   2. cargo clippy -- -D warnings
+#   3. cargo check
+#   4. cargo test
+
+set -e
+
+# push 대상 remote/branch 정보
+remote="$1"
+url="$2"
+
+# 기본 비교 대상: origin/main
+BASE_REF="origin/main"
+
+# stdin에서 push될 ref 범위 읽기
+while read -r local_ref local_oid remote_ref remote_oid; do
+  # 삭제 push는 스킵
+  if [ "$local_oid" = "0000000000000000000000000000000000000000" ]; then
+    continue
+  fi
+
+  # 비교 대상 결정: remote에 이미 있으면 remote_oid 기준, 아니면 BASE_REF
+  if [ "$remote_oid" = "0000000000000000000000000000000000000000" ]; then
+    COMPARE_REF="$BASE_REF"
+  else
+    COMPARE_REF="$remote_oid"
+  fi
+
+  # 변경된 파일 목록
+  CHANGED=$(git diff --name-only "$COMPARE_REF"..."$local_oid" 2>/dev/null || git diff --name-only "$BASE_REF"..."$local_oid" 2>/dev/null || echo "")
+
+  if [ -z "$CHANGED" ]; then
+    continue
+  fi
+
+  # Rust 프로젝트별 변경 감지
+  RUST_DIRS=()
+
+  if echo "$CHANGED" | grep -q '^plugins/autodev/'; then
+    RUST_DIRS+=("plugins/autodev/cli")
+  fi
+
+  if echo "$CHANGED" | grep -q '^plugins/suggest-workflow/'; then
+    RUST_DIRS+=("plugins/suggest-workflow/cli")
+  fi
+
+  if [ ${#RUST_DIRS[@]} -eq 0 ]; then
+    continue
+  fi
+
+  # 각 Rust 프로젝트에 대해 CI 검증 체인 실행
+  for dir in "${RUST_DIRS[@]}"; do
+    if [ ! -f "$dir/Cargo.toml" ]; then
+      continue
+    fi
+
+    echo "══════════════════════════════════════════"
+    echo "  pre-push: validating $dir"
+    echo "══════════════════════════════════════════"
+
+    # 1. Format check
+    echo "→ cargo fmt --check"
+    if ! (cd "$dir" && cargo fmt --check 2>&1); then
+      echo ""
+      echo "✗ cargo fmt --check failed in $dir"
+      echo "  Run: cd $dir && cargo fmt"
+      exit 1
+    fi
+
+    # 2. Clippy lint
+    echo "→ cargo clippy -- -D warnings"
+    if ! (cd "$dir" && cargo clippy -- -D warnings 2>&1); then
+      echo ""
+      echo "✗ cargo clippy failed in $dir"
+      exit 1
+    fi
+
+    # 3. Type check
+    echo "→ cargo check"
+    if ! (cd "$dir" && cargo check 2>&1); then
+      echo ""
+      echo "✗ cargo check failed in $dir"
+      exit 1
+    fi
+
+    # 4. Tests
+    echo "→ cargo test"
+    if ! (cd "$dir" && cargo test 2>&1); then
+      echo ""
+      echo "✗ cargo test failed in $dir"
+      exit 1
+    fi
+
+    echo "✓ $dir passed all checks"
+    echo ""
+  done
+done
+
+exit 0
