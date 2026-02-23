@@ -1,6 +1,6 @@
 #!/bin/bash
 # pre-push hook: CI(validate.yml)와 동일한 Rust 검증 체인 실행
-# Cargo.toml이 존재하는 모든 Rust 프로젝트를 무조건 검증
+# 변경된 파일을 감지하여 해당 Rust 프로젝트만 검증 (CI와 동일한 방식)
 #
 # CI 검증 순서:
 #   1. cargo fmt --check
@@ -10,15 +10,48 @@
 
 set -e
 
+# 리모트 대비 변경된 파일 목록 (push 대상 커밋들의 변경 파일)
+REMOTE="$1"
+URL="$2"
+
+# stdin에서 push 정보를 읽어 변경 범위 결정
+CHANGED_FILES=""
+while read -r local_ref local_oid remote_ref remote_oid; do
+  if [ "$remote_oid" = "0000000000000000000000000000000000000000" ]; then
+    # 새 브랜치: main 대비 변경 파일
+    CHANGED_FILES=$(git diff --name-only origin/main..."$local_oid" 2>/dev/null || git diff --name-only HEAD)
+  else
+    # 기존 브랜치: 리모트 대비 변경 파일
+    CHANGED_FILES=$(git diff --name-only "$remote_oid"..."$local_oid" 2>/dev/null || git diff --name-only HEAD)
+  fi
+done
+
+if [ -z "$CHANGED_FILES" ]; then
+  echo "pre-push: no changed files detected, skipping checks"
+  exit 0
+fi
+
+# Rust 프로젝트별 변경 감지 (CI의 check_rust 단계와 동일)
+declare -A RUST_DIRS
 RUST_DIRS=(
-  "plugins/autodev/cli"
-  "plugins/suggest-workflow/cli"
+  ["plugins/autodev/"]="plugins/autodev/cli"
+  ["plugins/suggest-workflow/"]="plugins/suggest-workflow/cli"
 )
 
-for dir in "${RUST_DIRS[@]}"; do
+CHECKED=0
+
+for prefix in "${!RUST_DIRS[@]}"; do
+  dir="${RUST_DIRS[$prefix]}"
+
+  if ! echo "$CHANGED_FILES" | grep -q "^${prefix}"; then
+    continue
+  fi
+
   if [ ! -f "$dir/Cargo.toml" ]; then
     continue
   fi
+
+  CHECKED=$((CHECKED + 1))
 
   echo "══════════════════════════════════════════"
   echo "  pre-push: validating $dir"
@@ -60,5 +93,9 @@ for dir in "${RUST_DIRS[@]}"; do
   echo "✓ $dir passed all checks"
   echo ""
 done
+
+if [ "$CHECKED" -eq 0 ]; then
+  echo "pre-push: no Rust projects affected, skipping checks"
+fi
 
 exit 0

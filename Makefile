@@ -1,4 +1,4 @@
-.PHONY: help build test validate validate-ci detect clean
+.PHONY: help setup build test validate validate-ci detect clean
 
 BINARY := bin/validate
 
@@ -6,6 +6,7 @@ BINARY := bin/validate
 help:
 	@echo "사용 가능한 명령어:"
 	@echo ""
+	@echo "  make setup           Git hooks 설치 (클론 후 최초 1회)"
 	@echo "  make build           Go 바이너리 빌드"
 	@echo "  make test            Go 테스트 실행"
 	@echo "  make validate        플러그인 검증 (전체)"
@@ -21,6 +22,13 @@ help:
 	@echo "  make build && make validate"
 	@echo "  make detect"
 	@echo "  make detect-from REF=develop"
+
+# Git hooks 설치
+setup:
+	@echo "Installing git hooks..."
+	@cp scripts/hooks/* .git/hooks/
+	@chmod +x .git/hooks/*
+	@echo "✓ Git hooks installed"
 
 # Go 빌드
 build:
