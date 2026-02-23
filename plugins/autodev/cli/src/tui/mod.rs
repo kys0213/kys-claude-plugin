@@ -29,6 +29,7 @@ pub async fn run(db: &Database) -> Result<()> {
     // Initialize log tailer
     let home = config::autodev_home(&config::RealEnv);
     let log_dir = home.join("logs");
+    let status_path = home.join("daemon.status.json");
     let mut tailer = LogTailer::new(log_dir);
     state.log_lines = tailer.initial_load(LOG_TAIL_MAX_LINES);
 
@@ -44,7 +45,7 @@ pub async fn run(db: &Database) -> Result<()> {
             }
         }
 
-        terminal.draw(|f| views::render(f, db, &state))?;
+        terminal.draw(|f| views::render(f, db, &status_path, &state))?;
 
         if event::poll(std::time::Duration::from_millis(500))? {
             if let Event::Key(key) = event::read()? {

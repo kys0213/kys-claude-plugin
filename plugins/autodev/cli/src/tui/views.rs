@@ -118,20 +118,40 @@ impl AppState {
 
 // ─── Data queries ───
 
-pub fn query_active_items(_db: &Database) -> Vec<ActiveItem> {
-    // Active items are now tracked in daemon memory (TaskQueues).
-    // TUI will show them when daemon status file is implemented.
-    Vec::new()
+pub fn query_active_items(status_path: &std::path::Path) -> Vec<ActiveItem> {
+    let status = match crate::daemon::status::read_status(status_path) {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+    status
+        .active_items
+        .into_iter()
+        .map(|si| ActiveItem {
+            id: si.work_id.clone(),
+            queue_type: si.queue_type,
+            repo_name: si.repo_name,
+            number: si.number,
+            title: si.title,
+            status: si.phase,
+        })
+        .collect()
 }
 
-pub fn query_label_counts(_db: &Database) -> LabelCounts {
-    // Label counts are managed on GitHub, not in local DB.
-    LabelCounts::default()
+pub fn query_label_counts(status_path: &std::path::Path) -> LabelCounts {
+    match crate::daemon::status::read_status(status_path) {
+        Some(s) => LabelCounts {
+            wip: s.counters.wip,
+            done: s.counters.done,
+            skip: s.counters.skip,
+            failed: s.counters.failed,
+        },
+        None => LabelCounts::default(),
+    }
 }
 
 // ─── Rendering ───
 
-pub fn render(f: &mut Frame, db: &Database, state: &AppState) {
+pub fn render(f: &mut Frame, db: &Database, status_path: &std::path::Path, state: &AppState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -142,7 +162,7 @@ pub fn render(f: &mut Frame, db: &Database, state: &AppState) {
         .split(f.area());
 
     render_header(f, chunks[0], db);
-    render_body(f, chunks[1], db, state);
+    render_body(f, chunks[1], db, status_path, state);
     render_footer(f, chunks[2], state);
 }
 
@@ -171,7 +191,13 @@ fn render_header(f: &mut Frame, area: Rect, db: &Database) {
     f.render_widget(header, area);
 }
 
-fn render_body(f: &mut Frame, area: Rect, db: &Database, state: &AppState) {
+fn render_body(
+    f: &mut Frame,
+    area: Rect,
+    db: &Database,
+    status_path: &std::path::Path,
+    state: &AppState,
+) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -192,8 +218,8 @@ fn render_body(f: &mut Frame, area: Rect, db: &Database, state: &AppState) {
         ])
         .split(chunks[1]);
 
-    render_active_items_panel(f, detail_chunks[0], db, state);
-    render_labels_panel(f, detail_chunks[1], db, state);
+    render_active_items_panel(f, detail_chunks[0], status_path, state);
+    render_labels_panel(f, detail_chunks[1], status_path, state);
     render_logs_panel(f, detail_chunks[2], state);
 
     // Render status message overlay if present
@@ -251,8 +277,13 @@ fn render_repos_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppState
     f.render_widget(list, area);
 }
 
-fn render_active_items_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppState) {
-    let active_items = query_active_items(db);
+fn render_active_items_panel(
+    f: &mut Frame,
+    area: Rect,
+    status_path: &std::path::Path,
+    state: &AppState,
+) {
+    let active_items = query_active_items(status_path);
 
     let items: Vec<ListItem> = active_items
         .iter()
@@ -319,8 +350,8 @@ fn render_active_items_panel(f: &mut Frame, area: Rect, db: &Database, state: &A
     f.render_widget(list, area);
 }
 
-fn render_labels_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppState) {
-    let counts = query_label_counts(db);
+fn render_labels_panel(f: &mut Frame, area: Rect, status_path: &std::path::Path, state: &AppState) {
+    let counts = query_label_counts(status_path);
     let max_count = [counts.wip, counts.done, counts.skip, counts.failed]
         .into_iter()
         .max()
