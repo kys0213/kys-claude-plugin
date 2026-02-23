@@ -33,6 +33,8 @@ _(없음)_
 | 로그 롤링/보존 (M-04+M-05) | [done/log-rolling.md](./done/log-rolling.md) |
 | TUI 데이터 표시 (M-06) | [done/tui-data-display.md](./done/tui-data-display.md) |
 | suggest-workflow 통합 (M-03) | [done/suggest-workflow-integration.md](./done/suggest-workflow-integration.md) |
+| Gap 개선 (H-01, H-02, H-03, M-02) | [done/gap-improvement.md](./done/gap-improvement.md) |
+| SQLite → In-Memory 리팩토링 | [done/refactoring-sqlite-to-memory.md](./done/refactoring-sqlite-to-memory.md) |
 
 ## 테스트 현황
 
