@@ -16,7 +16,6 @@ kanban/
 | 항목 | 파일 | 우선순위 |
 |------|------|---------|
 | Phase 상태 세분화 (M-01) | [todo/phase-refinement.md](./todo/phase-refinement.md) | Medium |
-| suggest-workflow 통합 (M-03) | [todo/suggest-workflow-integration.md](./todo/suggest-workflow-integration.md) | Medium |
 | 문서 정합성 갱신 (L-03+L-04) | [todo/doc-consistency.md](./todo/doc-consistency.md) | Low |
 
 ## in-progress/
@@ -33,6 +32,7 @@ _(없음)_
 | CI/CD 및 배포 | [done/ci-release.md](./done/ci-release.md) |
 | 로그 롤링/보존 (M-04+M-05) | [done/log-rolling.md](./done/log-rolling.md) |
 | TUI 데이터 표시 (M-06) | [done/tui-data-display.md](./done/tui-data-display.md) |
+| suggest-workflow 통합 (M-03) | [done/suggest-workflow-integration.md](./done/suggest-workflow-integration.md) |
 
 ## 테스트 현황
 
