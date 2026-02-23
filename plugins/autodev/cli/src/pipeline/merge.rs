@@ -142,10 +142,7 @@ pub async fn process_pending(
                             .await;
                         gh.label_add(&item.repo_name, item.pr_number, labels::DONE, gh_host)
                             .await;
-                        tracing::info!(
-                            "PR #{}: Conflict → done (resolved)",
-                            item.pr_number
-                        );
+                        tracing::info!("PR #{}: Conflict → done (resolved)", item.pr_number);
                     }
                     _ => {
                         remove_from_phase(queues, &work_id);

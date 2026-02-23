@@ -229,7 +229,9 @@ pub async fn process_pending(
                         let report = output::parse_output(&res.stdout);
                         item.analysis_report = Some(report);
                         queues.issues.push(issue_phase::READY, item);
-                        tracing::warn!("issue analysis output not parseable, fallback: Analyzing → Ready");
+                        tracing::warn!(
+                            "issue analysis output not parseable, fallback: Analyzing → Ready"
+                        );
                     }
                 }
             }

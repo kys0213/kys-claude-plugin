@@ -343,7 +343,10 @@ pub async fn process_improved(
         // Improved → Reviewing 상태 전이 (재리뷰, TUI/status 가시성)
         let work_id = item.work_id.clone();
         queues.prs.push(pr_phase::REVIEWING, item.clone());
-        tracing::debug!("PR #{}: Improved → Reviewing (re-review)", item.github_number);
+        tracing::debug!(
+            "PR #{}: Improved → Reviewing (re-review)",
+            item.github_number
+        );
 
         let worker_id = Uuid::new_v4().to_string();
         let task_id = format!("pr-{}", item.github_number);
@@ -437,7 +440,10 @@ pub async fn process_improved(
                             .await;
                         gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host)
                             .await;
-                        tracing::info!("PR #{}: Reviewing → done (re-review approved)", item.github_number);
+                        tracing::info!(
+                            "PR #{}: Reviewing → done (re-review approved)",
+                            item.github_number
+                        );
                     }
                     Some(ReviewVerdict::RequestChanges) | None => {
                         // Reviewing → ReviewDone (재진입)
