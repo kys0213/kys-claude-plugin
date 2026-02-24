@@ -548,7 +548,348 @@ recovery() 추가 로직:
 
 ---
 
-## 7. 사이드이펙트 & 영향 범위
+## 8. Knowledge Extraction v2
+
+### v1과의 차이
+
+| | v1 | v2 |
+|---|---|---|
+| 트리거 시점 | done 전이 시 1회 | 세션 완료마다 (분석, 구현, 리뷰) |
+| 기존 지식 비교 | 없음 (항상 추출) | 기존 레포 지식과 diff → 의미 없으면 skip |
+| 결과물 | 이슈 코멘트만 | 코멘트 + **actionable PR** (skill/subagent 등) |
+| 일간 분석 | daemon 로그 기반 | daemon 로그 + **교차 세션 패턴** |
+
+### Per-Session Knowledge Extraction
+
+v2에서는 각 Claude 세션 완료 시점에 지식 추출을 시도한다:
+
+```
+세션 완료 시점:
+  1. 분석 세션 완료     — process_pending() 성공 후
+  2. 구현 세션 완료     — process_ready() PR 생성 후
+  3. PR 리뷰 세션 완료  — PR approve 시
+```
+
+### 기존 지식 비교 (Delta Check)
+
+각 세션 완료 시 기존 레포의 지식 베이스와 비교하여, 의미 있는 차이가 있을 때만 추출을 진행한다:
+
+```
+기존 지식 수집 대상:
+  - .claude/rules/*.md
+  - CLAUDE.md
+  - .claude/hooks.json (또는 hooks/ 디렉토리)
+  - plugins/*/commands/*.md (skill 정의)
+  - .develop-workflow.yaml (subagent 설정)
+```
+
+```rust
+// knowledge/extractor.rs — v2 per-session extraction
+
+pub async fn extract_session_knowledge(
+    claude: &dyn Claude,
+    gh: &dyn Gh,
+    sw: &dyn SuggestWorkflow,
+    repo_name: &str,
+    github_number: i64,
+    session_type: &str,       // "analysis" | "implementation" | "review"
+    wt_path: &Path,
+    gh_host: Option<&str>,
+) -> Result<Option<KnowledgeSuggestion>> {
+    // 1. 기존 지식 베이스 수집
+    let existing_knowledge = collect_existing_knowledge(wt_path)?;
+
+    // 2. suggest-workflow 세션 데이터
+    let sw_section = build_suggest_workflow_section(sw, session_type, github_number).await;
+
+    // 3. Delta-aware 프롬프트
+    let prompt = format!(
+        "[autodev] knowledge: {session_type} #{github_number}\n\n\
+         Analyze the completed {session_type} session (#{github_number}).\n\n\
+         === Existing Repository Knowledge ===\n\
+         {existing_knowledge}\n\n\
+         === Session Data ===\n\
+         {sw_section}\n\n\
+         Compare this session's learnings against the existing knowledge above.\n\
+         ONLY suggest changes if there is a meaningful gap or improvement.\n\
+         If the session's learnings are already covered by existing rules/skills, \
+         return {{\"suggestions\": []}}.\n\n\
+         For actionable suggestions (skill, subagent), include the full file content \
+         in the `content` field so it can be directly committed as a PR.\n\n\
+         Respond with JSON:\n\
+         {{\n  \"suggestions\": [\n    {{\n      \
+         \"type\": \"rule | claude_md | hook | skill | subagent\",\n      \
+         \"target_file\": \".claude/rules/...\",\n      \
+         \"content\": \"full file content or specific recommendation\",\n      \
+         \"reason\": \"why this is new knowledge not covered by existing rules\"\n    }}\n  ]\n}}"
+    );
+
+    let result = claude.run_session(wt_path, &prompt, &Default::default()).await;
+
+    let suggestion = match result {
+        Ok(res) if res.exit_code == 0 => parse_knowledge_suggestion(&res.stdout),
+        _ => None,
+    };
+
+    // 4. 빈 suggestions → skip (기존 지식과 차이 없음)
+    let suggestion = match suggestion {
+        Some(ref ks) if ks.suggestions.is_empty() => {
+            tracing::debug!(
+                "{session_type} #{github_number}: no new knowledge (delta check passed)"
+            );
+            return Ok(None);
+        }
+        Some(ks) => ks,
+        None => return Ok(None),
+    };
+
+    // 5. 코멘트 게시
+    let comment = format_knowledge_comment(&suggestion, session_type, github_number);
+    gh.issue_comment(repo_name, github_number, &comment, gh_host).await;
+
+    // 6. Actionable suggestions → PR 생성
+    let actionable: Vec<&Suggestion> = suggestion.suggestions.iter()
+        .filter(|s| matches!(s.suggestion_type, SuggestionType::Skill | SuggestionType::Subagent))
+        .collect();
+
+    if !actionable.is_empty() {
+        create_knowledge_pr(gh, git, repo_name, &actionable, github_number, wt_path, gh_host).await;
+    }
+
+    Ok(Some(suggestion))
+}
+
+/// 기존 레포 지식 베이스를 문자열로 수집
+fn collect_existing_knowledge(wt_path: &Path) -> Result<String> {
+    let mut knowledge = String::new();
+
+    // CLAUDE.md
+    let claude_md = wt_path.join("CLAUDE.md");
+    if claude_md.exists() {
+        knowledge.push_str("### CLAUDE.md\n");
+        knowledge.push_str(&std::fs::read_to_string(&claude_md)?);
+        knowledge.push_str("\n\n");
+    }
+
+    // .claude/rules/*.md
+    let rules_dir = wt_path.join(".claude/rules");
+    if rules_dir.is_dir() {
+        for entry in std::fs::read_dir(&rules_dir)? {
+            let entry = entry?;
+            if entry.path().extension().is_some_and(|e| e == "md") {
+                knowledge.push_str(&format!("### {}\n", entry.file_name().to_string_lossy()));
+                knowledge.push_str(&std::fs::read_to_string(entry.path())?);
+                knowledge.push_str("\n\n");
+            }
+        }
+    }
+
+    // skills 목록 (파일명만)
+    let plugins_dir = wt_path.join("plugins");
+    if plugins_dir.is_dir() {
+        knowledge.push_str("### Existing Skills\n");
+        // plugins/*/commands/*.md 패턴으로 skill 파일 검색
+        for plugin_entry in std::fs::read_dir(&plugins_dir)?.flatten() {
+            let cmds_dir = plugin_entry.path().join("commands");
+            if cmds_dir.is_dir() {
+                for cmd_entry in std::fs::read_dir(&cmds_dir)?.flatten() {
+                    if cmd_entry.path().extension().is_some_and(|e| e == "md") {
+                        knowledge.push_str(&format!(
+                            "- {}\n",
+                            cmd_entry.path().strip_prefix(wt_path).unwrap_or(&cmd_entry.path()).display()
+                        ));
+                    }
+                }
+            }
+        }
+        knowledge.push('\n');
+    }
+
+    Ok(knowledge)
+}
+```
+
+### Actionable PR 생성
+
+suggestion type이 `skill` 또는 `subagent`이면 코멘트 외에 실제 PR을 생성한다:
+
+```rust
+/// actionable knowledge suggestion으로 PR 생성
+async fn create_knowledge_pr(
+    gh: &dyn Gh,
+    git: &dyn Git,
+    repo_name: &str,
+    suggestions: &[&Suggestion],
+    source_number: i64,
+    wt_path: &Path,
+    gh_host: Option<&str>,
+) {
+    let branch = format!("autodev/knowledge-{source_number}");
+
+    // 1. 브랜치 생성 + 파일 작성
+    for s in suggestions {
+        let file_path = wt_path.join(&s.target_file);
+        if let Some(parent) = file_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&file_path, &s.content);
+    }
+
+    // 2. git add + commit + push
+    let files: Vec<&str> = suggestions.iter().map(|s| s.target_file.as_str()).collect();
+    let _ = git.add_and_commit(
+        wt_path, &files,
+        &format!("feat(autodev): add knowledge from #{source_number}"),
+    ).await;
+    let _ = git.push(wt_path, &branch).await;
+
+    // 3. PR 생성 (autodev:skip 라벨 → 자신이 리뷰하지 않도록)
+    let body = format!(
+        "## Knowledge Extraction\n\n\
+         Source: #{source_number}\n\n\
+         {}\n\n\
+         ---\n\
+         > 이 PR은 autodev의 지식 추출 결과로 자동 생성되었습니다.\n\
+         > 사람이 리뷰 후 머지해주세요.",
+        suggestions.iter()
+            .map(|s| format!("- **{:?}**: `{}` — {}", s.suggestion_type, s.target_file, s.reason))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+
+    if let Some(pr_num) = gh.create_pr(
+        repo_name, &branch, "main",
+        "feat(autodev): knowledge extraction", &body, gh_host,
+    ).await {
+        gh.label_add(repo_name, pr_num, labels::SKIP, gh_host).await;
+        tracing::info!("knowledge PR #{pr_num} created from #{source_number}");
+    }
+}
+```
+
+### Pipeline 내 호출 위치
+
+```rust
+// pipeline/issue.rs — process_pending() 분석 완료 후
+Some(ref a) => {
+    // 분석 코멘트 게시 + analyzed 라벨 ...
+
+    // ─── Knowledge Extraction (분석 세션) ───
+    if knowledge_extraction {
+        let _ = extractor::extract_session_knowledge(
+            claude, gh, sw, &item.repo_name, item.github_number,
+            "analysis", &wt_path, gh_host,
+        ).await;
+    }
+
+    let _ = workspace.remove_worktree(...).await;
+}
+
+// pipeline/issue.rs — process_ready() 구현 완료 후
+Some(pr_num) => {
+    // PR queue push + implementing 라벨 ...
+
+    // ─── Knowledge Extraction (구현 세션) ───
+    if knowledge_extraction {
+        let _ = extractor::extract_session_knowledge(
+            claude, gh, sw, &item.repo_name, item.github_number,
+            "implementation", &wt_path, gh_host,
+        ).await;
+    }
+}
+
+// pipeline/pr.rs — PR approve 시
+Some(ReviewVerdict::Approve) => {
+    // ─── Knowledge Extraction (리뷰 세션) ───
+    if knowledge_extraction {
+        let _ = extractor::extract_session_knowledge(
+            claude, gh, sw, &item.repo_name, item.github_number,
+            "review", &wt_path, gh_host,
+        ).await;
+    }
+
+    // source_issue done 전이 ...
+}
+```
+
+### Daily Knowledge Extraction
+
+일간 분석은 v1 구조를 유지하되, **교차 세션 패턴 감지**를 강화한다:
+
+```
+Daily Report (v2):
+  1. daemon 로그 파싱 (v1 동일)
+  2. detect_patterns() (v1 동일)
+  3. suggest-workflow 교차 분석 (v1 동일)
+  4. ─── NEW: 일간 세션 간 패턴 집계 ───
+     - 같은 날 서로 다른 세션(분석/구현/리뷰)에서 추출된 knowledge를
+       집계하여 cross-session 패턴 도출
+     - 예: 여러 세션에서 동일한 skill 부족 → 우선순위 높은 suggestion
+  5. Claude에게 집계 데이터 + per-session suggestions 전달
+  6. 일간 리포트 이슈 생성
+  7. 고우선순위 suggestions → knowledge PR 생성
+```
+
+```rust
+// knowledge/daily.rs — v2 추가 로직
+
+/// 당일 per-session extraction 결과를 consumer_logs에서 집계
+pub fn aggregate_daily_suggestions(
+    db: &Database,
+    date: &str,
+) -> Vec<Suggestion> {
+    // consumer_logs 테이블에서 해당 날짜의 knowledge extraction 로그 조회
+    // → stdout에서 KnowledgeSuggestion 파싱
+    // → 모든 suggestions를 flat하게 모아서 반환
+    // → 동일 target_file + 유사 content → 빈도 집계
+    ...
+}
+
+/// 교차 세션 패턴: 여러 세션에서 반복 등장하는 suggestion을 감지
+pub fn detect_cross_session_patterns(
+    aggregated: &[Suggestion],
+) -> Vec<Pattern> {
+    // target_file 기준 그룹핑
+    // 2회 이상 등장하는 target_file → Pattern { type: Hotfile, ... }
+    // 같은 type (skill/subagent)이 3회 이상 → Pattern { type: ReviewCycle, ... }
+    ...
+}
+```
+
+### Knowledge Extraction 전체 흐름
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Per-Session (세션 완료 시)                            │
+│                                                      │
+│  1. 기존 레포 지식 수집 (CLAUDE.md, rules, skills)    │
+│  2. suggest-workflow 세션 데이터                       │
+│  3. Claude: delta check (기존 지식과 비교)             │
+│     └─ 차이 없음 → skip (no noise)                   │
+│     └─ 차이 있음 → suggestions                       │
+│  4. 이슈 코멘트로 게시                                │
+│  5. skill/subagent → PR 생성 (autodev:skip 라벨)     │
+└──────────────────────────┬──────────────────────────┘
+                           │
+                   (consumer_logs에 기록)
+                           │
+┌──────────────────────────▼──────────────────────────┐
+│  Daily (일간 집계)                                    │
+│                                                      │
+│  1. daemon 로그 파싱 (통계)                           │
+│  2. 일간 per-session suggestions 집계                │
+│  3. 교차 세션 패턴 감지                               │
+│     - 같은 skill 부족이 3개 세션에서 반복               │
+│     - 동일 파일 반복 수정 패턴                         │
+│  4. Claude: 집계 데이터 → 우선순위 정렬               │
+│  5. 일간 리포트 이슈 생성                             │
+│  6. 고우선순위 → knowledge PR 생성                    │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
+## 9. 사이드이펙트 & 영향 범위
 
 ### 코드 변경
 
@@ -561,6 +902,8 @@ recovery() 추가 로직:
 | `pipeline/pr.rs` | approve 경로에 Issue done 전이 추가 | 낮음 |
 | `components/verdict.rs` | `format_analysis_comment()` 함수 추가 | 낮음 (new function) |
 | `infrastructure/claude/output.rs` | `extract_pr_number()` 함수 추가 | 낮음 (new function) |
+| `knowledge/extractor.rs` | `extract_session_knowledge()` + delta check + PR 생성 | **중간** |
+| `knowledge/daily.rs` | `aggregate_daily_suggestions()` + `detect_cross_session_patterns()` | **중간** |
 | `daemon/mod.rs` | `startup_reconcile()` 라벨 필터 확장 | **중간** |
 
 ### 기존 테스트 영향
@@ -570,6 +913,7 @@ recovery() 추가 로직:
 | `pipeline_e2e_tests.rs` | `process_pending()` 동작 변경 (analyzed 라벨 + exit queue) | 테스트 기대값 수정 |
 | `daemon_consumer_tests.rs` | reconcile 라벨 필터 변경 | 새 라벨 케이스 추가 |
 | `task_queues.rs` (unit) | `PrItem` 필드 추가 | 테스트 헬퍼에 `source_issue_number: None` 추가 |
+| `knowledge/extractor.rs` (unit) | `extract_task_knowledge` → `extract_session_knowledge` 시그니처 변경 | 기존 테스트 마이그레이션 |
 
 ### 하위 호환성
 
@@ -579,7 +923,7 @@ recovery() 추가 로직:
 
 ---
 
-## 8. End-to-End Flow (v2)
+## 10. End-to-End Flow (v2)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -604,15 +948,16 @@ recovery() 추가 로직:
 │  │                                                               │  │
 │  │  Issues:                                                      │  │
 │  │    Pending → Analyzing:                                       │  │
-│  │      OK → 분석 코멘트 + autodev:analyzed + exit queue         │  │
+│  │      OK → knowledge(분석) → 분석 코멘트 + analyzed + exit     │  │
 │  │      clarify/wontfix → autodev:skip                          │  │
 │  │                                                               │  │
 │  │    Ready → Implementing:                                      │  │
-│  │      OK + PR 생성 → PR queue push + autodev:implementing     │  │
+│  │      OK + PR → knowledge(구현) → PR queue + implementing     │  │
 │  │      Err → 라벨 제거 + 재시도                                 │  │
 │  │                                                               │  │
 │  │  PRs (리뷰):                                                  │  │
-│  │    Reviewing → approve → autodev:done (PR)                   │  │
+│  │    Reviewing → approve → knowledge(리뷰)                     │  │
+│  │                         → autodev:done (PR)                   │  │
 │  │                         + source_issue → done    ← NEW        │  │
 │  │    Reviewing → request_changes → ReviewDone → Improving      │  │
 │  │                                    → Improved → re-review     │  │
@@ -630,7 +975,7 @@ recovery() 추가 로직:
 
 ---
 
-## 9. Status Transitions (v2)
+## 11. Status Transitions (v2)
 
 | Type | Phase Flow | 라벨 전이 |
 |------|-----------|----------|
@@ -645,7 +990,7 @@ recovery() 추가 로직:
 
 ---
 
-## 10. 구현 우선순위
+## 12. 구현 우선순위
 
 ### Phase A: 라벨 + 모델 (기반)
 
@@ -675,9 +1020,20 @@ recovery() 추가 로직:
 15. 테스트: PR approve 시 source_issue done 전이 검증
 16. 테스트: reconcile에서 approved-analysis → Ready 적재 검증
 
+### Phase E: Knowledge Extraction v2
+
+17. `extractor.rs` — `extract_session_knowledge()` (delta check + actionable PR)
+18. `extractor.rs` — `collect_existing_knowledge()` (레포 지식 베이스 수집)
+19. `daily.rs` — `aggregate_daily_suggestions()` (일간 per-session 집계)
+20. `daily.rs` — `detect_cross_session_patterns()` (교차 세션 패턴)
+21. pipeline 3곳에 knowledge extraction 호출 추가
+22. 테스트: delta check — 기존 지식과 동일하면 skip 검증
+23. 테스트: actionable suggestion → PR 생성 검증
+24. 테스트: 일간 교차 세션 패턴 감지 검증
+
 ---
 
-## 11. 구현 체크리스트
+## 13. 구현 체크리스트
 
 - [ ] 새 라벨 상수 추가 (`ANALYZED`, `APPROVED_ANALYSIS`, `IMPLEMENTING`)
 - [ ] `PrItem.source_issue_number` 추가
@@ -688,4 +1044,8 @@ recovery() 추가 로직:
 - [ ] `process_ready()` 변경 — PR 생성 + PR queue push
 - [ ] PR approve 시 Issue done 전이 (`source_issue_number` 활용)
 - [ ] `startup_reconcile()` 라벨 필터 확장
+- [ ] `extract_session_knowledge()` — delta check + actionable PR 생성
+- [ ] `collect_existing_knowledge()` — 기존 레포 지식 수집
+- [ ] `aggregate_daily_suggestions()` — 일간 per-session 집계
+- [ ] `detect_cross_session_patterns()` — 교차 세션 패턴 감지
 - [ ] 기존 테스트 수정 + 새 테스트 추가
