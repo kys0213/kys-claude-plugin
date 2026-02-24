@@ -81,4 +81,16 @@ pub trait Gh: Send + Sync {
         body: &str,
         host: Option<&str>,
     ) -> Option<i64>;
+
+    /// `gh pr review {number}` — PR 리뷰 제출
+    /// event: `"APPROVE"` | `"REQUEST_CHANGES"` | `"COMMENT"`
+    /// GitHub PR UI에서 Approved / Changes Requested 상태를 설정한다.
+    async fn pr_review(
+        &self,
+        repo_name: &str,
+        number: i64,
+        event: &str,
+        body: &str,
+        host: Option<&str>,
+    ) -> bool;
 }

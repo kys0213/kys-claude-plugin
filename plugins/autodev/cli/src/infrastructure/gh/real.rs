@@ -237,6 +237,93 @@ impl Gh for RealGh {
         }
     }
 
+    async fn pr_review(
+        &self,
+        repo_name: &str,
+        number: i64,
+        event: &str,
+        body: &str,
+        host: Option<&str>,
+    ) -> bool {
+        let args = match event {
+            "APPROVE" => {
+                let mut a = vec![
+                    "pr".to_string(),
+                    "review".to_string(),
+                    number.to_string(),
+                    "--repo".to_string(),
+                    repo_name.to_string(),
+                    "--approve".to_string(),
+                ];
+                if !body.is_empty() {
+                    a.push("--body".to_string());
+                    a.push(body.to_string());
+                }
+                if let Some(h) = host {
+                    a.push("--hostname".to_string());
+                    a.push(h.to_string());
+                }
+                a
+            }
+            "REQUEST_CHANGES" => {
+                let mut a = vec![
+                    "pr".to_string(),
+                    "review".to_string(),
+                    number.to_string(),
+                    "--repo".to_string(),
+                    repo_name.to_string(),
+                    "--request-changes".to_string(),
+                    "--body".to_string(),
+                    if body.is_empty() {
+                        "Changes requested".to_string()
+                    } else {
+                        body.to_string()
+                    },
+                ];
+                if let Some(h) = host {
+                    a.push("--hostname".to_string());
+                    a.push(h.to_string());
+                }
+                a
+            }
+            _ => {
+                // COMMENT
+                let mut a = vec![
+                    "pr".to_string(),
+                    "review".to_string(),
+                    number.to_string(),
+                    "--repo".to_string(),
+                    repo_name.to_string(),
+                    "--comment".to_string(),
+                    "--body".to_string(),
+                    body.to_string(),
+                ];
+                if let Some(h) = host {
+                    a.push("--hostname".to_string());
+                    a.push(h.to_string());
+                }
+                a
+            }
+        };
+
+        match tokio::process::Command::new("gh")
+            .args(&args)
+            .output()
+            .await
+        {
+            Ok(output) => {
+                if !output.status.success() {
+                    tracing::warn!("gh pr review failed for {repo_name}#{number} event={event}");
+                }
+                output.status.success()
+            }
+            Err(e) => {
+                tracing::warn!("gh pr review error: {e}");
+                false
+            }
+        }
+    }
+
     async fn create_pr(
         &self,
         repo_name: &str,

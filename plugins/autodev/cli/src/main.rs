@@ -41,6 +41,16 @@ enum Commands {
         #[command(subcommand)]
         action: RepoAction,
     },
+    /// 큐 관리
+    Queue {
+        #[command(subcommand)]
+        action: QueueAction,
+    },
+    /// 설정 관리
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
     /// 실행 로그 조회
     Logs {
         /// 레포 이름 (org/repo)
@@ -49,6 +59,21 @@ enum Commands {
         #[arg(short = 'n', long, default_value = "20")]
         limit: usize,
     },
+}
+
+#[derive(Subcommand)]
+enum QueueAction {
+    /// 큐 상태 조회 (daemon.status.json 기반)
+    List {
+        /// 레포 이름으로 필터 (org/repo)
+        repo: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// 현재 설정 표시 (글로벌 + 기본값 머지 결과)
+    Show,
 }
 
 #[derive(Subcommand)]
@@ -154,6 +179,17 @@ async fn main() -> Result<()> {
             }
             RepoAction::Remove { name } => {
                 client::repo_remove(&db, &name)?;
+            }
+        },
+        Commands::Queue { action } => match action {
+            QueueAction::List { repo } => {
+                let output = client::queue_list(&env, repo.as_deref())?;
+                println!("{output}");
+            }
+        },
+        Commands::Config { action } => match action {
+            ConfigAction::Show => {
+                client::config_show(&env)?;
             }
         },
         Commands::Logs { repo, limit } => {

@@ -1377,6 +1377,135 @@ async fn process_all_handles_all_queues() {
         8,
         "should call claude 8 times total (6 pipeline + 2 knowledge extraction)"
     );
+
+    // PR Review API: request_changes (1st review) + approve (re-review) = 2 reviews
+    let reviews = gh.reviewed_prs.lock().unwrap();
+    assert_eq!(
+        reviews.len(),
+        2,
+        "should submit 2 PR reviews (request_changes + approve)"
+    );
+    assert_eq!(reviews[0].1, 91, "1st review on PR #91");
+    assert_eq!(reviews[0].2, "REQUEST_CHANGES");
+    assert_eq!(reviews[1].1, 91, "2nd review on PR #91");
+    assert_eq!(reviews[1].2, "APPROVE");
+}
+
+// ═══════════════════════════════════════════════════
+// 20b. PR review API: approve on first review submits APPROVE
+// ═══════════════════════════════════════════════════
+
+#[tokio::test]
+async fn pr_approve_submits_review_api() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let gh = MockGh::new();
+    set_gh_pr_open(&gh, "org/repo", 95);
+
+    let git = MockGit::new();
+    let claude = MockClaude::new();
+    // Review → approve (verdict=approve)
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"approve\",\"summary\":\"LGTM\"}"}"#,
+        0,
+    );
+    // Knowledge extraction
+    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
+
+    let workspace = Workspace::new(&git, &env);
+    let notifier = Notifier::new(&gh);
+    let mut queues = TaskQueues::new();
+
+    queues
+        .prs
+        .push("Pending", make_pr_item(&repo_id, 95, "Approve PR"));
+
+    let sw = MockSuggestWorkflow::new();
+    autodev::pipeline::pr::process_pending(
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &sw,
+        &mut queues,
+    )
+    .await
+    .unwrap();
+
+    // PR done
+    assert_eq!(queues.prs.total(), 0);
+    assert_label_added(&gh, "org/repo", 95, labels::DONE);
+
+    // Review API: single APPROVE call
+    let reviews = gh.reviewed_prs.lock().unwrap();
+    assert_eq!(reviews.len(), 1, "should submit 1 review");
+    assert_eq!(reviews[0].1, 95);
+    assert_eq!(reviews[0].2, "APPROVE");
+}
+
+// ═══════════════════════════════════════════════════
+// 20c. PR review API: request_changes on first review submits REQUEST_CHANGES
+// ═══════════════════════════════════════════════════
+
+#[tokio::test]
+async fn pr_request_changes_submits_review_api() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let gh = MockGh::new();
+    set_gh_pr_open(&gh, "org/repo", 96);
+
+    let git = MockGit::new();
+    let claude = MockClaude::new();
+    // Review → request_changes
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Fix bugs\"}"}"#,
+        0,
+    );
+    // Feedback implementation
+    claude.enqueue_response(r#"{"result": "Feedback applied"}"#, 0);
+    // Re-review → approve
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"approve\",\"summary\":\"OK now\"}"}"#,
+        0,
+    );
+    // Knowledge extraction
+    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
+
+    let workspace = Workspace::new(&git, &env);
+    let notifier = Notifier::new(&gh);
+    let mut queues = TaskQueues::new();
+
+    queues
+        .prs
+        .push("Pending", make_pr_item(&repo_id, 96, "Changes needed PR"));
+
+    let sw = MockSuggestWorkflow::new();
+    autodev::pipeline::process_all(
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &sw,
+        &mut queues,
+    )
+    .await
+    .unwrap();
+
+    // Review API: REQUEST_CHANGES + APPROVE
+    let reviews = gh.reviewed_prs.lock().unwrap();
+    assert_eq!(reviews.len(), 2);
+    assert_eq!(reviews[0].2, "REQUEST_CHANGES");
+    assert_eq!(reviews[1].2, "APPROVE");
 }
 
 // ═══════════════════════════════════════════════════

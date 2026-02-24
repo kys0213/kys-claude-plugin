@@ -142,7 +142,15 @@ pub async fn process_pending(
 
                     match output.verdict {
                         Some(ReviewVerdict::Approve) => {
-                            // approve → 댓글 게시 + 즉시 done
+                            // approve → GitHub Review API + 댓글 게시 + 즉시 done
+                            gh.pr_review(
+                                &item.repo_name,
+                                pr_num,
+                                "APPROVE",
+                                &output.review,
+                                gh_host,
+                            )
+                            .await;
                             let comment = format_review_comment(
                                 &output.review,
                                 pr_num,
@@ -178,6 +186,16 @@ pub async fn process_pending(
                         Some(ReviewVerdict::RequestChanges) | None => {
                             // Reviewing → ReviewDone (피드백 루프 진입)
                             remove_from_phase(queues, &work_id);
+                            if matches!(output.verdict, Some(ReviewVerdict::RequestChanges)) {
+                                gh.pr_review(
+                                    &item.repo_name,
+                                    pr_num,
+                                    "REQUEST_CHANGES",
+                                    &output.review,
+                                    gh_host,
+                                )
+                                .await;
+                            }
                             let comment = format_review_comment(
                                 &output.review,
                                 pr_num,
@@ -419,6 +437,10 @@ pub async fn process_improved(
 
                 match output.verdict {
                     Some(ReviewVerdict::Approve) => {
+                        // GitHub Review API: approve
+                        gh.pr_review(&item.repo_name, item.github_number, "APPROVE", "", gh_host)
+                            .await;
+
                         // Knowledge extraction (best effort)
                         if cfg.consumer.knowledge_extraction {
                             let _ = crate::knowledge::extractor::extract_task_knowledge(
@@ -448,6 +470,16 @@ pub async fn process_improved(
                     Some(ReviewVerdict::RequestChanges) | None => {
                         // Reviewing → ReviewDone (재진입)
                         remove_from_phase(queues, &work_id);
+                        if matches!(output.verdict, Some(ReviewVerdict::RequestChanges)) {
+                            gh.pr_review(
+                                &item.repo_name,
+                                item.github_number,
+                                "REQUEST_CHANGES",
+                                &output.review,
+                                gh_host,
+                            )
+                            .await;
+                        }
                         item.review_comment = Some(output.review);
                         queues.prs.push(pr_phase::REVIEW_DONE, item);
                         tracing::info!("PR re-review: Reviewing → ReviewDone (request_changes)");

@@ -206,9 +206,11 @@ autodev status             # 데몬 상태 + 큐 깊이 요약 + 레포별 통�
 autodev dashboard          # TUI 대시보드
 
 # 큐 관리
-autodev queue list <repo>  # 큐 상태 확인
-autodev queue retry <id>   # 실패 항목 재시도
-autodev queue clear <repo> # 큐 비우기 (done/failed 항목 삭제)
+autodev queue list         # 전체 큐 상태 조회 (daemon.status.json 기반)
+autodev queue list <repo>  # 레포별 큐 상태 필터
+
+# 설정 관리
+autodev config show        # 현재 글로벌 설정 표시
 
 # 실행 로그
 autodev logs               # 최근 실행 로그 (기본 20건)
