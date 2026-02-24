@@ -53,14 +53,44 @@ fn extract_repo_name(url: &str) -> Result<String> {
 }
 
 /// 레포 등록
-pub fn repo_add(db: &Database, url: &str) -> Result<()> {
-    // URL에서 이름 추출 (예: https://github.com/org/repo -> org/repo)
+pub fn repo_add(
+    db: &Database,
+    env: &dyn config::Env,
+    url: &str,
+    config_json: Option<&str>,
+) -> Result<()> {
     let name = extract_repo_name(url)?;
 
-    db.repo_add(url, &name)?;
+    match db.repo_add(url, &name) {
+        Ok(_) => {}
+        Err(e) => {
+            let err_str = e.to_string();
+            if err_str.contains("UNIQUE constraint failed") {
+                anyhow::bail!(
+                    "already registered: {name}. Use 'autodev repo config {name}' to view settings."
+                );
+            }
+            return Err(e);
+        }
+    }
 
-    println!("registered: {name} ({url})");
-    println!("config: edit ~/.develop-workflow.yaml (global) or <repo>/.develop-workflow.yaml (per-repo)");
+    if let Some(json_str) = config_json {
+        let value: serde_json::Value = serde_json::from_str(json_str)
+            .map_err(|e| anyhow::anyhow!("invalid config JSON: {e}"))?;
+        let ws_dir = config::workspaces_path(env).join(config::sanitize_repo_name(&name));
+        std::fs::create_dir_all(&ws_dir)?;
+        let yaml = serde_yaml::to_string(&value)?;
+        std::fs::write(ws_dir.join(".develop-workflow.yaml"), yaml)?;
+        println!("registered: {name} ({url})");
+        println!(
+            "config: written to {}",
+            ws_dir.join(".develop-workflow.yaml").display()
+        );
+    } else {
+        println!("registered: {name} ({url})");
+        println!("config: edit ~/.develop-workflow.yaml (global) or <repo>/.develop-workflow.yaml (per-repo)");
+    }
+
     Ok(())
 }
 

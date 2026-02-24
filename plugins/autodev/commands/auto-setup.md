@@ -22,11 +22,29 @@ git remote get-url origin
 
 ### Step 1.5: GitHub Enterprise 자동 감지
 
-감지된 URL에서 호스트를 추출하여 GitHub Enterprise 여부를 자동 판별합니다:
+감지된 URL에서 호스트를 추출하여 GitHub Enterprise 여부를 자동 판별합니다.
 
-- `github.com` → 일반 GitHub (추가 설정 불필요, 다음 단계로)
-- 호스트에 `github`이 포함된 다른 도메인 (예: `github.mycompany.com`) → GitHub Enterprise로 감지
-- `github`이 포함되지 않은 호스트 (예: `gitlab.com`, `bitbucket.org`) → GitHub이 아닌 호스트로 판단, `gh api` 미사용이므로 패스
+**판별 로직 (순서대로):**
+
+1. `github.com` → 일반 GitHub (추가 설정 불필요, 다음 단계로)
+2. `github.com`이 아닌 호스트 → `gh auth status`로 인증된 호스트 목록을 조회하여 매칭:
+
+```bash
+gh auth status 2>&1
+```
+
+출력에서 인증된 호스트 목록을 파싱합니다 (예: `github.com`, `git.mycompany.com` 등).
+
+- 레포 URL의 호스트가 인증된 호스트 목록에 **있으면** → GitHub Enterprise로 감지
+- 인증된 호스트 목록에 **없으면** → AskUserQuestion으로 확인:
+
+```
+감지된 호스트 '{detected_host}'가 gh CLI에 인증되어 있지 않습니다.
+
+이 호스트가 GitHub Enterprise입니까?
+- 예 → gh auth login 안내 후 중단
+- 아니오 (GitHub이 아닌 호스트) → gh_host 없이 진행
+```
 
 **Enterprise 감지 시:**
 
@@ -138,15 +156,20 @@ AskUserQuestion으로 질문:
 ### Step 9: 등록
 
 수집된 설정을 JSON으로 구성하여 CLI에 전달합니다.
-Step 1.5에서 Enterprise가 감지된 경우 `gh_host` 필드를 config JSON에 포함합니다:
+JSON은 `WorkflowConfig` 구조에 맞게 구성합니다.
+Step 1.5에서 Enterprise가 감지된 경우 `consumer.gh_host` 필드를 config JSON에 포함합니다:
 
 ```bash
-# 일반 GitHub
-autodev repo add <url> --config '<json>'
+# 일반 GitHub — 기본 설정으로 등록
+autodev repo add <url> --config '{"consumer":{"scan_interval_secs":<step5>,"issue_concurrency":<step6_issue>,"pr_concurrency":<step6_pr>,"merge_concurrency":<step6_merge>,"scan_targets":[<step4>]}}'
 
-# GitHub Enterprise (gh_host 포함)
-autodev repo add <url> --config '{"gh_host": "github.mycompany.com", ...}'
+# GitHub Enterprise — gh_host 포함
+autodev repo add <url> --config '{"consumer":{"gh_host":"<detected_host>","scan_interval_secs":<step5>,"issue_concurrency":<step6_issue>,"pr_concurrency":<step6_pr>,"merge_concurrency":<step6_merge>,"scan_targets":[<step4>]}}'
 ```
+
+등록 성공 시 CLI가 자동으로 워크스페이스 디렉토리(`~/.autodev/workspaces/<org-repo>/`)에 `.develop-workflow.yaml`을 생성합니다.
+
+`--config` 없이 등록한 경우에도 이후 `autodev repo config <name>`으로 설정을 확인하고 수동 편집할 수 있습니다.
 
 ### Step 10: 셸 환경 등록
 
