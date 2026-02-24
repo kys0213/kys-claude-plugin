@@ -82,6 +82,9 @@ enum RepoAction {
     Add {
         /// 레포 URL
         url: String,
+        /// 초기 설정 JSON (WorkflowConfig 형식)
+        #[arg(long)]
+        config: Option<String>,
     },
     /// 등록된 레포 목록
     List,
@@ -167,8 +170,8 @@ async fn main() -> Result<()> {
         }
         Commands::Dashboard => tui::run(&db).await?,
         Commands::Repo { action } => match action {
-            RepoAction::Add { url } => {
-                client::repo_add(&db, &url)?;
+            RepoAction::Add { url, config } => {
+                client::repo_add(&db, &env, &url, config.as_deref())?;
             }
             RepoAction::List => {
                 let list = client::repo_list(&db)?;

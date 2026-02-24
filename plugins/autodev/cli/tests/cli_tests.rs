@@ -72,7 +72,7 @@ fn repo_add_with_git_suffix() {
 }
 
 #[test]
-fn repo_add_duplicate_fails() {
+fn repo_add_duplicate_shows_friendly_error() {
     let home = TempDir::new().unwrap();
 
     autodev(&home)
@@ -83,7 +83,56 @@ fn repo_add_duplicate_fails() {
     autodev(&home)
         .args(["repo", "add", "https://github.com/org/myrepo"])
         .assert()
-        .failure();
+        .failure()
+        .stderr(predicate::str::contains("already registered: org/myrepo"));
+}
+
+#[test]
+fn repo_add_with_config_writes_yaml() {
+    let home = TempDir::new().unwrap();
+
+    let config_json = r#"{"consumer":{"gh_host":"ghe.example.com","scan_interval_secs":60}}"#;
+
+    autodev(&home)
+        .args([
+            "repo",
+            "add",
+            "https://github.com/org/myrepo",
+            "--config",
+            config_json,
+        ])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("registered: org/myrepo")
+                .and(predicate::str::contains("config: written to")),
+        );
+
+    // Verify YAML file was created in workspace
+    let ws_dir = home.path().join("workspaces").join("org-myrepo");
+    let yaml_path = ws_dir.join(".develop-workflow.yaml");
+    assert!(yaml_path.exists(), "config YAML should be created");
+
+    let content = std::fs::read_to_string(&yaml_path).unwrap();
+    assert!(content.contains("gh_host"));
+    assert!(content.contains("ghe.example.com"));
+}
+
+#[test]
+fn repo_add_with_invalid_config_json_fails() {
+    let home = TempDir::new().unwrap();
+
+    autodev(&home)
+        .args([
+            "repo",
+            "add",
+            "https://github.com/org/myrepo",
+            "--config",
+            "{invalid",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid config JSON"));
 }
 
 #[test]
