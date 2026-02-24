@@ -277,10 +277,8 @@ for target in &cfg.consumer.scan_targets {
             // 1. 새 이슈 scan (분석 대기)
             issues::scan(db, gh, ..., queues).await?;
 
-            // 2. 승인된 이슈 scan (구현 대기) — analysis_review가 활성화된 경우만
-            if cfg.consumer.analysis_review {
-                issues::scan_approved(gh, &repo.id, &repo.name, &repo.url, gh_host, queues).await?;
-            }
+            // 2. 승인된 이슈 scan (구현 대기)
+            issues::scan_approved(gh, &repo.id, &repo.name, &repo.url, gh_host, queues).await?;
         }
         "pulls" => { ... }  // 기존 유지
         "merges" => { ... } // 기존 유지
@@ -302,16 +300,7 @@ v2: analysis OK + implement → analyzed 라벨 + 분석 코멘트 게시 + queu
 ```rust
 // pipeline/issue.rs — process_pending() 핵심 변경
 
-// 기존 v1:
 Some(ref a) => {
-    // Analyzing → Ready 전이 (queue 내부)
-    remove_from_phase(queues, &work_id);
-    item.analysis_report = Some(a.report.clone());
-    queues.issues.push(issue_phase::READY, item);
-}
-
-// v2: analysis_review 모드
-Some(ref a) if analysis_review => {
     // 분석 리포트를 이슈 코멘트로 게시
     let comment = verdict::format_analysis_comment(a);
     notifier.post_issue_comment(&item.repo_name, item.github_number, &comment, gh_host).await;
@@ -322,13 +311,6 @@ Some(ref a) if analysis_review => {
     gh.label_add(&item.repo_name, item.github_number, labels::ANALYZED, gh_host).await;
     tracing::info!("issue #{}: Analyzing → analyzed (awaiting human review)", item.github_number);
     let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
-}
-
-// v2: analysis_review 비활성화 시 (v1 호환 동작)
-Some(ref a) if !analysis_review => {
-    remove_from_phase(queues, &work_id);
-    item.analysis_report = Some(a.report.clone());
-    queues.issues.push(issue_phase::READY, item);
 }
 ```
 
@@ -398,14 +380,10 @@ if res.exit_code == 0 {
             tracing::info!("issue #{}: Implementing → PR review pending", item.github_number);
         }
         None => {
-            // PR 번호 추출 실패 → 기존 v1 동작 (즉시 done)
+            // PR 번호 추출 실패 → 에러 처리 (라벨 제거, 다음 scan에서 재시도)
             remove_from_phase(queues, &work_id);
-            if knowledge_extraction {
-                let _ = extractor::extract_task_knowledge(...).await;
-            }
             gh.label_remove(&item.repo_name, item.github_number, labels::IMPLEMENTING, gh_host).await;
-            gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host).await;
-            tracing::info!("issue #{}: Implementing → done (no PR detected)", item.github_number);
+            tracing::error!("issue #{}: PR number extraction failed, retrying", item.github_number);
         }
     }
 }
@@ -505,18 +483,6 @@ pub struct PrItem {
 }
 ```
 
-### ConsumerConfig 확장
-
-```rust
-pub struct ConsumerConfig {
-    // ... 기존 필드 ...
-
-    /// 분석 리뷰 게이트 활성화 (default: true)
-    /// true: 분석 후 사람 승인 필요 (v2 flow)
-    /// false: 분석 → 자동 구현 (v1 호환)
-    pub analysis_review: bool,
-}
-```
 
 ---
 
@@ -582,34 +548,16 @@ recovery() 추가 로직:
 
 ---
 
-## 8. Configuration 변경
-
-```yaml
-# .develop-workflow.yaml
-
-consumer:
-  # ... 기존 필드 ...
-  analysis_review: true    # v2: 분석 리뷰 게이트 (default: true)
-```
-
-| 설정 | 값 | 동작 |
-|------|----|------|
-| `analysis_review: true` | 기본값 | v2 flow: 분석 → 사람 승인 → 구현 |
-| `analysis_review: false` | opt-out | v1 flow: 분석 → 자동 구현 |
-
----
-
-## 9. 사이드이펙트 & 영향 범위
+## 7. 사이드이펙트 & 영향 범위
 
 ### 코드 변경
 
 | 파일 | 변경 내용 | 위험도 |
 |------|----------|--------|
 | `queue/task_queues.rs` | `labels` 모듈에 상수 3개 추가, `PrItem.source_issue_number` 추가 | 낮음 (additive) |
-| `config/models.rs` | `ConsumerConfig.analysis_review` 필드 추가 | 낮음 (serde default) |
 | `scanner/issues.rs` | `scan_approved()` 함수 추가 | 낮음 (new function) |
 | `scanner/mod.rs` | `scan_all()`에 `scan_approved()` 호출 추가 | 낮음 |
-| `pipeline/issue.rs` | `process_pending()` 분기 추가, `process_ready()` PR 연동 로직 | **중간** |
+| `pipeline/issue.rs` | `process_pending()` 변경, `process_ready()` PR 연동 로직 | **중간** |
 | `pipeline/pr.rs` | approve 경로에 Issue done 전이 추가 | 낮음 |
 | `components/verdict.rs` | `format_analysis_comment()` 함수 추가 | 낮음 (new function) |
 | `infrastructure/claude/output.rs` | `extract_pr_number()` 함수 추가 | 낮음 (new function) |
@@ -619,21 +567,19 @@ consumer:
 
 | 테스트 파일 | 영향 | 대응 |
 |------------|------|------|
-| `pipeline_e2e_tests.rs` | `analysis_review=false` 시 v1 동작 유지 필요 | 기존 테스트에 config mock 추가 |
+| `pipeline_e2e_tests.rs` | `process_pending()` 동작 변경 (analyzed 라벨 + exit queue) | 테스트 기대값 수정 |
 | `daemon_consumer_tests.rs` | reconcile 라벨 필터 변경 | 새 라벨 케이스 추가 |
 | `task_queues.rs` (unit) | `PrItem` 필드 추가 | 테스트 헬퍼에 `source_issue_number: None` 추가 |
 
 ### 하위 호환성
 
-- `analysis_review` default가 `true`이므로, **기존 사용자는 자동으로 v2 flow로 전환**됨
-- v1 동작을 원하면 `analysis_review: false` 설정
 - 기존 `autodev:wip/done/skip` 라벨은 그대로 유지
 - 새 라벨(`analyzed`, `approved-analysis`, `implementing`)은 GitHub에 자동 생성됨
   (label_add API가 존재하지 않는 라벨을 자동 생성)
 
 ---
 
-## 10. End-to-End Flow (v2)
+## 8. End-to-End Flow (v2)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -658,15 +604,11 @@ consumer:
 │  │                                                               │  │
 │  │  Issues:                                                      │  │
 │  │    Pending → Analyzing:                                       │  │
-│  │      analysis_review=true:                                    │  │
-│  │        OK → 분석 코멘트 + autodev:analyzed + exit queue       │  │
-│  │      analysis_review=false:                                   │  │
-│  │        OK → Ready에 push (v1 호환)                            │  │
+│  │      OK → 분석 코멘트 + autodev:analyzed + exit queue         │  │
 │  │      clarify/wontfix → autodev:skip                          │  │
 │  │                                                               │  │
 │  │    Ready → Implementing:                                      │  │
 │  │      OK + PR 생성 → PR queue push + autodev:implementing     │  │
-│  │      OK + PR 없음 → autodev:done (v1 호환)                   │  │
 │  │      Err → 라벨 제거 + 재시도                                 │  │
 │  │                                                               │  │
 │  │  PRs (리뷰):                                                  │  │
@@ -688,14 +630,13 @@ consumer:
 
 ---
 
-## 11. Status Transitions (v2)
+## 9. Status Transitions (v2)
 
 | Type | Phase Flow | 라벨 전이 |
 |------|-----------|----------|
-| Issue (v2, review=true) | `Pending → Analyzing → (exit)` | `(없음) → wip → analyzed` |
-| Issue (human approve) | `(scan_approved) → Ready → Implementing → (exit)` | `approved-analysis → implementing` |
+| Issue (분석) | `Pending → Analyzing → (exit)` | `(없음) → wip → analyzed` |
+| Issue (승인 → 구현) | `(scan_approved) → Ready → Implementing → (exit)` | `approved-analysis → implementing` |
 | Issue (PR approved) | `(PR pipeline triggers)` | `implementing → done` |
-| Issue (v2, review=false) | `Pending → Analyzing → Ready → Implementing → done` | `(없음) → wip → implementing → done` |
 | Issue (clarify/wontfix) | `Pending → Analyzing → skip` | `(없음) → wip → skip` |
 | Issue (analysis reject) | `analyzed → (없음) → re-scan` | `analyzed → (없음) → wip → analyzed` |
 | PR (리뷰) | `Pending → Reviewing → approve → done` | `(없음) → wip → done` |
@@ -704,48 +645,47 @@ consumer:
 
 ---
 
-## 12. 구현 우선순위
+## 10. 구현 우선순위
 
 ### Phase A: 라벨 + 모델 (기반)
 
 1. `labels` 모듈에 `ANALYZED`, `APPROVED_ANALYSIS`, `IMPLEMENTING` 상수 추가
 2. `PrItem`에 `source_issue_number: Option<i64>` 필드 추가
-3. `ConsumerConfig`에 `analysis_review: bool` 필드 추가 (default: true)
-4. 기존 테스트 수정 (PrItem 생성자에 새 필드 추가)
+3. 기존 테스트 수정 (PrItem 생성자에 새 필드 추가)
 
 ### Phase B: 분석 리뷰 게이트
 
-5. `verdict.rs`에 `format_analysis_comment()` 추가
-6. `pipeline/issue.rs` `process_pending()` 변경 — `analysis_review` 분기
-7. 테스트: analysis_review=true 시 analyzed 라벨 + exit queue 검증
-8. 테스트: analysis_review=false 시 v1 호환 동작 검증
+4. `verdict.rs`에 `format_analysis_comment()` 추가
+5. `pipeline/issue.rs` `process_pending()` 변경 — 분석 완료 시 analyzed 라벨 + exit queue
+6. 테스트: 분석 성공 시 analyzed 라벨 + exit queue 검증
 
 ### Phase C: Approved Scan + 구현
 
-9. `scanner/issues.rs`에 `scan_approved()` 추가
-10. `scanner/mod.rs`에 `scan_approved()` 호출 추가
-11. `output.rs`에 `extract_pr_number()` 추가
-12. `pipeline/issue.rs` `process_ready()` 변경 — PR 생성 + PR queue push
-13. 테스트: scan_approved → Ready 큐 적재 검증
-14. 테스트: process_ready → PR 생성 + PR queue push 검증
+7. `scanner/issues.rs`에 `scan_approved()` 추가
+8. `scanner/mod.rs`에 `scan_approved()` 호출 추가
+9. `output.rs`에 `extract_pr_number()` 추가
+10. `pipeline/issue.rs` `process_ready()` 변경 — PR 생성 + PR queue push
+11. 테스트: scan_approved → Ready 큐 적재 검증
+12. 테스트: process_ready → PR 생성 + PR queue push 검증
 
 ### Phase D: Issue-PR 연동
 
-15. `pipeline/pr.rs` approve 경로에 source_issue done 전이 추가
-16. `daemon/mod.rs` reconcile 라벨 필터 확장
-17. 테스트: PR approve 시 source_issue done 전이 검증
-18. 테스트: reconcile에서 approved-analysis → Ready 적재 검증
+13. `pipeline/pr.rs` approve 경로에 source_issue done 전이 추가
+14. `daemon/mod.rs` reconcile 라벨 필터 확장
+15. 테스트: PR approve 시 source_issue done 전이 검증
+16. 테스트: reconcile에서 approved-analysis → Ready 적재 검증
 
 ---
 
-## 13. v1 → v2 전환 체크리스트
+## 11. 구현 체크리스트
 
-- [ ] 새 라벨 상수 추가 (additive, 기존 코드 영향 없음)
-- [ ] PrItem.source_issue_number 추가 (Option, 기존 코드 영향 없음)
-- [ ] analysis_review config 추가 (serde default, 기존 설정 파일 호환)
-- [ ] process_pending() 분기 (analysis_review flag로 v1/v2 전환)
-- [ ] scan_approved() 추가 (새 함수, 기존 코드 영향 없음)
-- [ ] process_ready() PR 연동 (PR 번호 추출 실패 시 v1 fallback)
-- [ ] PR approve 시 Issue done (source_issue_number가 None이면 기존 동작)
-- [ ] reconcile 확장 (새 라벨 추가 처리, 기존 라벨 동작 유지)
-- [ ] 기존 테스트 통과 확인 (analysis_review=false로 v1 동작 검증)
+- [ ] 새 라벨 상수 추가 (`ANALYZED`, `APPROVED_ANALYSIS`, `IMPLEMENTING`)
+- [ ] `PrItem.source_issue_number` 추가
+- [ ] `process_pending()` 변경 — 분석 완료 시 analyzed 라벨 + 코멘트 + exit queue
+- [ ] `format_analysis_comment()` 추가
+- [ ] `scan_approved()` 추가
+- [ ] `extract_pr_number()` 추가
+- [ ] `process_ready()` 변경 — PR 생성 + PR queue push
+- [ ] PR approve 시 Issue done 전이 (`source_issue_number` 활용)
+- [ ] `startup_reconcile()` 라벨 필터 확장
+- [ ] 기존 테스트 수정 + 새 테스트 추가
