@@ -93,6 +93,12 @@ PR:
 autodev:analyzed → (사람이 코멘트 + analyzed 라벨 제거)
                  → (없음) → 다음 scan에서 재발견 → 재분석
                     (이전 코멘트가 context로 포함되어 분석 품질 향상)
+
+재분석 무한 루프 방지 (Safety Valve):
+  scan() 시 이슈 코멘트에서 <!-- autodev:analysis --> 마커 개수 카운트
+  count >= MAX_ANALYSIS_ATTEMPTS(기본 3) →
+    autodev:skip 라벨 추가 + "max analysis attempts reached" 코멘트
+    (사람이 skip 해제 시 카운터 리셋하여 재시도 가능)
 ```
 
 ---
@@ -188,6 +194,54 @@ scan_all():
   pulls::scan_merges()      — labels=autodev:done, open → merge Pending
 ```
 
+### issues::scan() 재분석 Safety Valve
+
+이슈가 reject → 재분석을 반복하여 무한 루프에 빠지는 것을 방지한다.
+`scan()` 시 라벨이 없는 이슈를 Pending으로 적재하기 전에, 기존 분석 코멘트 수를 확인한다.
+
+```rust
+// scanner/issues.rs — scan() 내부, Pending 적재 전
+
+const MAX_ANALYSIS_ATTEMPTS: usize = 3;
+
+// 이슈 코멘트에서 autodev 분석 마커 개수 확인
+let analysis_count = count_analysis_comments(gh, repo_name, number, gh_host).await;
+
+if analysis_count >= MAX_ANALYSIS_ATTEMPTS {
+    // 최대 분석 횟수 초과 → skip 전이
+    gh.label_add(repo_name, number, labels::SKIP, gh_host).await;
+    let comment = format!(
+        "<!-- autodev:system -->\n\
+         Autodev analysis has been attempted {analysis_count} times without approval.\n\
+         Marking as `autodev:skip`.\n\n\
+         > To retry, remove the `autodev:skip` label."
+    );
+    notifier.post_issue_comment(repo_name, number, &comment, gh_host).await;
+    tracing::warn!("issue #{number}: max analysis attempts ({analysis_count}) reached → skip");
+    continue;
+}
+
+// 정상 적재
+gh.label_add(repo_name, number, labels::WIP, gh_host).await;
+queues.issues.push(issue_phase::PENDING, item);
+```
+
+```rust
+/// 이슈 코멘트에서 autodev 분석 리포트 개수를 카운트
+async fn count_analysis_comments(
+    gh: &dyn Gh,
+    repo_name: &str,
+    number: i64,
+    gh_host: Option<&str>,
+) -> usize {
+    let jq = r#"[.[] | select(.body | contains("<!-- autodev:analysis -->"))] | length"#;
+    gh.api_get_field(repo_name, &format!("issues/{number}/comments"), jq, gh_host)
+        .await
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .unwrap_or(0)
+}
+```
+
 ### issues::scan_approved() 구현
 
 ```rust
@@ -221,8 +275,12 @@ pub async fn scan_approved(
         if queues.contains(&work_id) { continue; } // dedup
 
         // 라벨 전이: approved-analysis → implementing
-        gh.label_remove(repo_name, number, labels::APPROVED_ANALYSIS, gh_host).await;
+        // 주의: implementing을 먼저 추가한 후 approved-analysis를 제거한다.
+        // 이 순서가 중요한 이유: 두 API 호출 사이에 크래시 발생 시,
+        // "라벨 없음" 상태(→ 재분석)를 방지하고 "양쪽 다 있는" 상태(→ 안전)를 보장.
+        // 양쪽 라벨이 동시에 있는 경우: scan_approved()가 dedup으로 재적재 방지.
         gh.label_add(repo_name, number, labels::IMPLEMENTING, gh_host).await;
+        gh.label_remove(repo_name, number, labels::APPROVED_ANALYSIS, gh_host).await;
 
         // 이전 분석 리포트를 이슈 코멘트에서 추출 (최신 autodev 분석 코멘트)
         let analysis_report = extract_analysis_from_comments(
@@ -347,7 +405,11 @@ v2: 구현 성공 → PR 생성 → PR queue에 push → autodev:implementing (P
 
 if res.exit_code == 0 {
     // PR 생성 결과에서 PR 번호 추출
-    let pr_number = extract_pr_number_from_output(&res.stdout);
+    let pr_number = extract_pr_number_from_output(&res.stdout)
+        // stdout 파싱 실패 시 GitHub API fallback: 동일 head branch의 기존 PR 조회
+        // → 이미 PR이 생성된 상태에서 번호만 추출 실패한 경우 중복 PR 방지
+        .or_else(|| find_existing_pr(gh, &item.repo_name,
+            &format!("autodev/issue-{}", item.github_number), gh_host).await);
 
     match pr_number {
         Some(pr_num) => {
@@ -373,6 +435,15 @@ if res.exit_code == 0 {
                     item.github_number, pr_num
                 );
             }
+
+            // Issue 코멘트: PR 생성 기록 (recovery 시 PR 번호 추적용)
+            let pr_comment = format!(
+                "<!-- autodev:pr-link:{pr_num} -->\n\
+                 Implementation PR #{pr_num} has been created and is awaiting review."
+            );
+            notifier.post_issue_comment(
+                &item.repo_name, item.github_number, &pr_comment, gh_host
+            ).await;
 
             // Issue: queue에서 제거 (PR 리뷰가 끝나면 PR pipeline이 done 전이)
             remove_from_phase(queues, &work_id);
@@ -411,6 +482,31 @@ pub fn extract_pr_number(stdout: &str) -> Option<i64> {
     }
 
     None
+}
+```
+
+### 기존 PR 조회 (중복 PR 방지 Fallback)
+
+```rust
+// infrastructure/gh 또는 pipeline/issue.rs
+
+/// head branch 이름으로 이미 생성된 PR을 조회하여 번호를 반환.
+/// extract_pr_number() 파싱 실패 시 fallback으로 사용하여 중복 PR 생성을 방지한다.
+async fn find_existing_pr(
+    gh: &dyn Gh,
+    repo_name: &str,
+    head_branch: &str,
+    gh_host: Option<&str>,
+) -> Option<i64> {
+    // gh api repos/{owner}/{repo}/pulls?head={owner}:{branch}&state=open
+    let params = [
+        ("head", head_branch),
+        ("state", "open"),
+        ("per_page", "1"),
+    ];
+    let data = gh.api_paginate(repo_name, "pulls", &params, gh_host).await.ok()?;
+    let prs: Vec<serde_json::Value> = serde_json::from_slice(&data).ok()?;
+    prs.first().and_then(|pr| pr["number"].as_i64())
 }
 ```
 
@@ -510,8 +606,9 @@ for item in items {
 
     // 사람이 분석 승인 → Ready 큐에 적재
     if has_label(&labels, labels::APPROVED_ANALYSIS) {
-        gh.label_remove(repo, number, labels::APPROVED_ANALYSIS, gh_host).await;
+        // implementing을 먼저 추가 후 approved-analysis 제거 (크래시 안전)
         gh.label_add(repo, number, labels::IMPLEMENTING, gh_host).await;
+        gh.label_remove(repo, number, labels::APPROVED_ANALYSIS, gh_host).await;
         let item = build_issue_item(..., extract_analysis_from_comments(...).await);
         queues.issues.push(issue_phase::READY, item);
         recovered += 1;
@@ -541,10 +638,15 @@ v2에서는 `autodev:wip` 외에 `autodev:implementing` 상태의 이슈도 체�
 
 ```
 recovery() 추가 로직:
-  autodev:implementing + 연결된 PR이 이미 merged/closed → implementing → done
+  autodev:implementing 이슈 감지 →
+    이슈 코멘트에서 <!-- autodev:pr-link:{N} --> 마커로 연결 PR 번호 추출 →
+    연결 PR이 merged/closed → implementing → done
+    연결 PR이 아직 open → skip (PR pipeline이 처리)
+    연결 PR 마커 없음 → implementing 라벨 제거 (다음 scan에서 재시도)
 ```
 
 이 로직은 PR approve 시점에 크래시가 발생했을 때를 커버한다.
+**전제 조건**: `process_ready()`에서 PR 생성 시 `<!-- autodev:pr-link:{N} -->` 코멘트를 남겨야 함.
 
 ---
 
@@ -715,35 +817,67 @@ suggestion type이 `skill` 또는 `subagent`이면 코멘트 외에 실제 PR을
 
 ```rust
 /// actionable knowledge suggestion으로 PR 생성
+///
+/// **중요**: 구현 worktree(task branch)에서 직접 knowledge branch를 만들면
+/// 구현 브랜치의 uncommitted 변경사항과 충돌할 수 있다.
+/// 따라서 main 기반의 **별도 worktree**를 생성하여 격리된 환경에서 PR을 만든다.
 async fn create_knowledge_pr(
     gh: &dyn Gh,
     git: &dyn Git,
+    workspace: &dyn Workspace,
     repo_name: &str,
     suggestions: &[&Suggestion],
     source_number: i64,
-    wt_path: &Path,
     gh_host: Option<&str>,
 ) {
     let branch = format!("autodev/knowledge-{source_number}");
+    let task_id = format!("knowledge-{source_number}");
 
-    // 1. 브랜치 생성 + 파일 작성
+    // 1. main 기반 별도 worktree 생성 (구현 worktree와 격리)
+    let kn_wt_path = match workspace.create_worktree(repo_name, &task_id, "main").await {
+        Ok(path) => path,
+        Err(e) => {
+            tracing::warn!("knowledge worktree creation failed: {e}");
+            return;
+        }
+    };
+
+    // 2. knowledge branch 생성 + 파일 작성
+    if let Err(e) = git.checkout_new_branch(&kn_wt_path, &branch).await {
+        tracing::warn!("knowledge branch creation failed: {e}");
+        let _ = workspace.remove_worktree(repo_name, &task_id).await;
+        return;
+    }
+
+    let mut files = Vec::new();
     for s in suggestions {
-        let file_path = wt_path.join(&s.target_file);
+        let file_path = kn_wt_path.join(&s.target_file);
         if let Some(parent) = file_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let _ = std::fs::write(&file_path, &s.content);
+        if std::fs::write(&file_path, &s.content).is_ok() {
+            files.push(s.target_file.clone());
+        }
     }
 
-    // 2. git add + commit + push
-    let files: Vec<&str> = suggestions.iter().map(|s| s.target_file.as_str()).collect();
-    let _ = git.add_and_commit(
-        wt_path, &files,
-        &format!("feat(autodev): add knowledge from #{source_number}"),
-    ).await;
-    let _ = git.push(wt_path, &branch).await;
+    if files.is_empty() {
+        let _ = workspace.remove_worktree(repo_name, &task_id).await;
+        return;
+    }
 
-    // 3. PR 생성 (autodev:skip 라벨 → 자신이 리뷰하지 않도록)
+    // 3. git add + commit + push
+    let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
+    if let Err(e) = git.add_commit_push(
+        &kn_wt_path, &file_refs,
+        &format!("feat(autodev): add knowledge from #{source_number}"),
+        &branch,
+    ).await {
+        tracing::warn!("knowledge PR commit+push failed: {e}");
+        let _ = workspace.remove_worktree(repo_name, &task_id).await;
+        return;
+    }
+
+    // 4. PR 생성 (autodev:skip 라벨 → 자신이 리뷰하지 않도록)
     let body = format!(
         "## Knowledge Extraction\n\n\
          Source: #{source_number}\n\n\
@@ -764,6 +898,9 @@ async fn create_knowledge_pr(
         gh.label_add(repo_name, pr_num, labels::SKIP, gh_host).await;
         tracing::info!("knowledge PR #{pr_num} created from #{source_number}");
     }
+
+    // 5. worktree 정리
+    let _ = workspace.remove_worktree(repo_name, &task_id).await;
 }
 ```
 
@@ -876,7 +1013,93 @@ pub fn detect_cross_task_patterns(
 
 ---
 
-## 9. 사이드이펙트 & 영향 범위
+## 9. Worktree & Branch Lifecycle (v2 보완)
+
+### 원칙
+
+- **Worktree**: 각 pipeline 단계에서 생성하고, 단계 완료 시 **반드시 제거**
+- **Branch**: remote에 push된 branch는 PR이 closed/merged 될 때까지 **유지**
+- Worktree 제거 ≠ Branch 삭제 (worktree는 작업 디렉토리일 뿐, branch는 remote에 독립적으로 존재)
+
+### Pipeline별 Lifecycle
+
+```
+Issue Pipeline (process_ready):
+  create_worktree(task_id, None)
+  → 구현 + git push → PR 생성 (branch: autodev/issue-{N})
+  → PR queue push
+  → remove_worktree()          ← worktree 정리
+  ※ branch는 remote에 유지 → PR pipeline이 이후 사용
+
+PR Pipeline (process_pending → process_review_done → process_improved):
+  ┌── process_pending ──────────────────────────────────┐
+  │  create_worktree(task_id, head_branch)              │
+  │  → Claude 리뷰 실행                                 │
+  │  → verdict 판정                                     │
+  │  → remove_worktree()        ← worktree 정리 (NEW)  │
+  │                                                      │
+  │  approve → done (worktree 이미 제거됨)               │
+  │  request_changes → ReviewDone 큐                    │
+  └──────────────────────────────────────────────────────┘
+         │
+  ┌── process_review_done ──────────────────────────────┐
+  │  create_worktree(task_id, head_branch)              │
+  │  → Claude 피드백 반영 + git push (같은 branch)      │
+  │  → remove_worktree()        ← worktree 정리 (NEW)  │
+  │  → Improved 큐                                      │
+  └──────────────────────────────────────────────────────┘
+         │
+  ┌── process_improved ─────────────────────────────────┐
+  │  create_worktree(task_id, head_branch)              │
+  │  → Claude 재리뷰 실행                                │
+  │  → remove_worktree()        ← worktree 정리 (NEW)  │
+  │                                                      │
+  │  approve → done                                      │
+  │  request_changes → ReviewDone (반복)                 │
+  └──────────────────────────────────────────────────────┘
+
+Knowledge PR:
+  create_worktree(task_id, "main")  ← 별도 격리 worktree
+  → branch 생성 + 파일 작성 + PR 생성
+  → remove_worktree()
+```
+
+### 핵심 불변식 (Invariant)
+
+1. **모든 pipeline 함수는 생성한 worktree를 자신이 제거**한다 (success/failure 모두)
+2. PR의 `head_branch`는 remote에 존재하므로, 다음 단계에서 `create_worktree(task_id, head_branch)`로 항상 재생성 가능
+3. Worktree 제거 시 branch를 삭제하지 않는다 — branch는 PR lifecycle과 함께 관리
+
+### v1 대비 변경
+
+```
+v1: pipeline/pr.rs에서 worktree 제거 호출 없음 → worktree 누적
+v2: 각 process_* 함수 끝에서 remove_worktree() 호출 → 정리
+```
+
+### 구현 변경 필요 (pipeline/pr.rs)
+
+```rust
+// process_pending(), process_review_done(), process_improved() 공통 패턴
+
+let wt_path = workspace.create_worktree(&item.repo_name, &task_id, Some(&item.head_branch)).await?;
+
+// ... 작업 수행 ...
+
+// worktree 정리 (success/failure 모두)
+let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
+```
+
+**주의사항**:
+- `process_review_done()`에서 피드백 반영 후 `git push`가 완료된 뒤에 worktree를 제거해야 한다
+- push가 실패하면 worktree를 유지할 필요 없음 (재시도 시 새 worktree 생성)
+- `process_pending()`과 `process_improved()`는 리뷰만 수행하므로 (코드 수정 없음) 즉시 정리 가능
+
+---
+
+## 10. 사이드이펙트 & 영향 범위
+
+> **Note**: 기존 Section 9~13이 10~14로 밀림
 
 ### 코드 변경
 
@@ -886,10 +1109,13 @@ pub fn detect_cross_task_patterns(
 | `scanner/issues.rs` | `scan_approved()` 함수 추가 | 낮음 (new function) |
 | `scanner/mod.rs` | `scan_all()`에 `scan_approved()` 호출 추가 | 낮음 |
 | `pipeline/issue.rs` | `process_pending()` 변경, `process_ready()` PR 연동 로직 | **중간** |
-| `pipeline/pr.rs` | approve 경로에 Issue done 전이 추가 | 낮음 |
+| `pipeline/pr.rs` | approve 경로에 Issue done 전이 추가 + **worktree 정리 로직 추가** | **중간** |
 | `components/verdict.rs` | `format_analysis_comment()` 함수 추가 | 낮음 (new function) |
 | `infrastructure/claude/output.rs` | `extract_pr_number()` 함수 추가 | 낮음 (new function) |
-| `knowledge/extractor.rs` | `extract_task_knowledge()` 확장 — delta check + PR 생성 | **중간** |
+| `scanner/issues.rs` | `count_analysis_comments()` Safety Valve 추가 | 낮음 (new function) |
+| `pipeline/issue.rs` | `find_existing_pr()` API fallback 추가 | 낮음 (new function) |
+| `daemon/recovery.rs` | `recover_orphan_implementing()` + `extract_pr_link_from_comments()` 추가 | **중간** |
+| `knowledge/extractor.rs` | `extract_task_knowledge()` 확장 — delta check + PR 생성 (격리 worktree) | **중간** |
 | `knowledge/daily.rs` | `aggregate_daily_suggestions()` + `detect_cross_task_patterns()` | **중간** |
 | `daemon/mod.rs` | `startup_reconcile()` 라벨 필터 확장 | **중간** |
 
@@ -910,7 +1136,7 @@ pub fn detect_cross_task_patterns(
 
 ---
 
-## 10. End-to-End Flow (v2)
+## 11. End-to-End Flow (v2)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -962,7 +1188,7 @@ pub fn detect_cross_task_patterns(
 
 ---
 
-## 11. Status Transitions (v2)
+## 12. Status Transitions (v2)
 
 | Type | Phase Flow | 라벨 전이 |
 |------|-----------|----------|
@@ -977,7 +1203,7 @@ pub fn detect_cross_task_patterns(
 
 ---
 
-## 12. 구현 우선순위
+## 13. 구현 우선순위
 
 ### Phase A: 라벨 + 모델 (기반)
 
@@ -1019,19 +1245,22 @@ pub fn detect_cross_task_patterns(
 
 ---
 
-## 13. 구현 체크리스트
+## 14. 구현 체크리스트
 
 - [ ] 새 라벨 상수 추가 (`ANALYZED`, `APPROVED_ANALYSIS`, `IMPLEMENTING`)
 - [ ] `PrItem.source_issue_number` 추가
 - [ ] `process_pending()` 변경 — 분석 완료 시 analyzed 라벨 + 코멘트 + exit queue
 - [ ] `format_analysis_comment()` 추가
-- [ ] `scan_approved()` 추가
-- [ ] `extract_pr_number()` 추가
-- [ ] `process_ready()` 변경 — PR 생성 + PR queue push
+- [ ] 재분석 Safety Valve — `scan()` 에서 분석 코멘트 수 확인 → 3회 초과 시 skip
+- [ ] `scan_approved()` 추가 — 라벨 전이 순서: implementing 먼저 추가 → approved-analysis 제거
+- [ ] `extract_pr_number()` 추가 + `find_existing_pr()` API fallback (중복 PR 방지)
+- [ ] `process_ready()` 변경 — PR 생성 + PR queue push + `<!-- autodev:pr-link:{N} -->` 이슈 코멘트
 - [ ] PR approve 시 Issue done 전이 (`source_issue_number` 활용)
 - [ ] `startup_reconcile()` 라벨 필터 확장
-- [ ] `extract_task_knowledge()` 확장 — delta check + actionable PR 생성
-- [ ] `collect_existing_knowledge()` — 기존 레포 지식 수집
+- [ ] `recover_orphan_implementing()` — pr-link 마커 기반 PR 상태 확인 → done 전이
+- [ ] `extract_task_knowledge()` 확장 — delta check + actionable PR 생성 (격리 worktree)
+- [ ] `collect_existing_knowledge()` — 기존 레포 지식 수집 (skills, hooks, workflow 포함)
 - [ ] `aggregate_daily_suggestions()` — 일간 per-task 집계
 - [ ] `detect_cross_task_patterns()` — 교차 task 패턴 감지
+- [ ] `pipeline/pr.rs` worktree 정리 — process_pending/review_done/improved 각 함수에 remove_worktree() 추가
 - [ ] 기존 테스트 수정 + 새 테스트 추가

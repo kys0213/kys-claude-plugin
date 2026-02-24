@@ -116,6 +116,22 @@ gh.label_remove(..., labels::IMPLEMENTING, ...).await;
 
 Phase 1에서 Issue가 implementing 상태로 남게 되므로, 크래시 시 복구 로직이 필요.
 
+**전제 조건**: Phase 1의 `process_ready()`에서 PR 생성 시 `<!-- autodev:pr-link:{N} -->` 마커가 포함된 이슈 코멘트를 남겨야 함. 이 마커를 통해 recovery에서 연결 PR 번호를 추적한다.
+
+#### 2-0. (Phase 1에 포함) `process_ready()` PR 생성 시 이슈 코멘트 추가
+
+```rust
+// pipeline/issue.rs — process_ready() PR 생성 성공 경로, PR queue push 직후
+
+let pr_comment = format!(
+    "<!-- autodev:pr-link:{pr_num} -->\n\
+     Implementation PR #{pr_num} has been created and is awaiting review."
+);
+notifier.post_issue_comment(&item.repo_name, item.github_number, &pr_comment, gh_host).await;
+```
+
+> **Phase 1 체크리스트에 추가**: 1-1에서 implementing 유지와 함께 이 코멘트 로직도 반드시 포함.
+
 #### 2-1. `daemon/recovery.rs` — `recover_orphan_implementing()` 추가
 
 ```rust
@@ -127,17 +143,24 @@ pub async fn recover_orphan_implementing(
     gh_host: Option<&str>,
 ) -> Result<u64> {
     // 1. autodev:implementing 라벨이 있는 open 이슈 조회
-    // 2. 각 이슈의 timeline/events에서 연결된 PR 번호 추출
-    //    (issue body에 "Closes #N" → PR 본문, 또는 linked PRs API)
-    //    대안: 이슈 코멘트에서 "PR #{N} created" 패턴 검색 (daemon 로그에서 기록)
-    // 3. 연결 PR의 state 확인 (merged/closed)
+    // 2. 이슈 코멘트에서 <!-- autodev:pr-link:{N} --> 마커로 PR 번호 추출
+    //    (process_ready()에서 남긴 코멘트 — Phase 1 전제 조건)
+    // 3. 연결 PR의 state 확인 (gh api repos/{owner}/{repo}/pulls/{N})
     // 4. merged/closed이면 implementing → done 전이
+    // 5. 마커가 없는 orphan implementing → implementing 라벨 제거 (재시도)
+}
+
+/// 이슈 코멘트에서 autodev PR 링크 마커를 추출
+async fn extract_pr_link_from_comments(
+    gh: &dyn Gh, repo_name: &str, number: i64, gh_host: Option<&str>,
+) -> Option<i64> {
+    let jq = r#"[.[] | select(.body | contains("<!-- autodev:pr-link:")) | .body] | last"#;
+    let body = gh.api_get_field(repo_name, &format!("issues/{number}/comments"), jq, gh_host).await?;
+    // <!-- autodev:pr-link:42 --> 에서 42 추출
+    let re = regex::Regex::new(r"<!-- autodev:pr-link:(\d+) -->").ok()?;
+    re.captures(&body).and_then(|c| c[1].parse().ok())
 }
 ```
-
-**단순화 접근**: PR의 `Closes #N` 본문보다, 이슈 코멘트에서 autodev가 남긴 로그(`PR #{N} created`)를 파싱하는 것이 더 신뢰성 있음. 하지만 현재 `process_ready()`가 이슈 코멘트를 남기지 않으므로, Phase 1에서 PR 생성 시 이슈 코멘트를 추가하는 것도 고려.
-
-**대안**: `startup_reconcile()`의 implementing 처리를 강화하는 방향. 현재는 skip인데, PR이 이미 완료되었는지 확인 후 done 전이.
 
 #### 2-2. `daemon/mod.rs` — 메인 루프에 호출 추가
 
@@ -156,9 +179,9 @@ recover_orphan_implementing(...).await;  // NEW
 
 ---
 
-### Phase 3: `extract_pr_number()` JSON fallback — Low
+### Phase 3: `extract_pr_number()` JSON fallback + 중복 PR 방지 — Low→Medium
 
-**목적**: `{"pr_number": 123}` JSON 패턴도 파싱
+**목적**: PR 번호 파싱 강화 + 파싱 전면 실패 시 API fallback으로 중복 PR 방지
 
 #### 3-1. `infrastructure/claude/output.rs` — `extract_pr_number()` 확장
 
@@ -177,12 +200,37 @@ if let Ok(v) = serde_json::from_str::<serde_json::Value>(&search_text) {
 }
 ```
 
-#### 3-2. 테스트
+#### 3-2. `pipeline/issue.rs` — `find_existing_pr()` API fallback 추가
+
+`extract_pr_number()` 파싱 실패 시 head branch 기반으로 기존 PR을 조회하여 중복 생성 방지:
+
+```rust
+/// head branch 이름으로 이미 생성된 PR을 조회 (중복 PR 방지)
+async fn find_existing_pr(
+    gh: &dyn Gh, repo_name: &str, head_branch: &str, gh_host: Option<&str>,
+) -> Option<i64> {
+    let params = [("head", head_branch), ("state", "open"), ("per_page", "1")];
+    let data = gh.api_paginate(repo_name, "pulls", &params, gh_host).await.ok()?;
+    let prs: Vec<serde_json::Value> = serde_json::from_slice(&data).ok()?;
+    prs.first().and_then(|pr| pr["number"].as_i64())
+}
+```
+
+`process_ready()`에서의 호출:
+```rust
+let pr_number = extract_pr_number_from_output(&res.stdout)
+    .or_else(|| find_existing_pr(gh, &item.repo_name,
+        &format!("autodev/issue-{}", item.github_number), gh_host).await);
+```
+
+#### 3-3. 테스트
 
 - `extract_pr_number_from_json_field`: `{"pr_number": 42}` → Some(42)
 - `extract_pr_number_from_envelope_json_field`: envelope 안 JSON → Some(42)
+- `find_existing_pr_returns_existing`: mock API → 기존 PR 번호 반환
+- `find_existing_pr_returns_none_when_no_pr`: mock API → None
 
-**검증**: `cargo test` — output 테스트 통과
+**검증**: `cargo test` — output + pipeline 테스트 통과
 
 ---
 
@@ -288,47 +336,61 @@ Phase 4 완료 후 진행.
 
 #### 5-1. `knowledge/extractor.rs` — `create_knowledge_pr()` 추가
 
-설계 Section 8의 per-task actionable PR 생성 로직:
+설계 Section 8의 per-task actionable PR 생성 로직.
+**중요**: 구현 worktree에서 직접 branch를 만들면 구현 브랜치의 변경사항과 충돌할 수 있으므로, main 기반의 **별도 worktree**를 생성하여 격리된 환경에서 PR을 만든다.
 
 ```rust
-/// Per-task actionable knowledge suggestion으로 PR 생성
-///
-/// skill/subagent type의 suggestion이 있으면 코멘트 외에 실제 PR을 생성한다.
+/// Per-task actionable knowledge suggestion으로 PR 생성 (격리된 worktree 사용)
 async fn create_knowledge_pr(
     gh: &dyn Gh,
     git: &dyn Git,
+    workspace: &dyn Workspace,
     repo_name: &str,
     suggestions: &[&Suggestion],
     source_number: i64,
-    wt_path: &Path,
     gh_host: Option<&str>,
 ) {
     let branch = format!("autodev/knowledge-{source_number}");
+    let task_id = format!("knowledge-{source_number}");
 
-    // 1. 브랜치 생성
-    if let Err(e) = git.checkout_new_branch(wt_path, &branch).await {
+    // 1. main 기반 별도 worktree 생성 (구현 worktree와 격리)
+    let kn_wt_path = match workspace.create_worktree(repo_name, &task_id, "main").await {
+        Ok(path) => path,
+        Err(e) => {
+            tracing::warn!("knowledge worktree creation failed: {e}");
+            return;
+        }
+    };
+
+    // 2. knowledge branch 생성 + 파일 쓰기
+    if let Err(e) = git.checkout_new_branch(&kn_wt_path, &branch).await {
         tracing::warn!("knowledge PR branch creation failed: {e}");
+        let _ = workspace.remove_worktree(repo_name, &task_id).await;
         return;
     }
 
-    // 2. 파일 쓰기
     let mut files = Vec::new();
     for s in suggestions {
-        let file_path = wt_path.join(&s.target_file);
+        let file_path = kn_wt_path.join(&s.target_file);
         if let Some(parent) = file_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
         if std::fs::write(&file_path, &s.content).is_ok() {
-            files.push(s.target_file.as_str());
+            files.push(s.target_file.clone());
         }
     }
 
-    if files.is_empty() { return; }
+    if files.is_empty() {
+        let _ = workspace.remove_worktree(repo_name, &task_id).await;
+        return;
+    }
 
     // 3. commit + push
+    let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
     let message = format!("feat(autodev): add knowledge from #{source_number}");
-    if let Err(e) = git.add_commit_push(wt_path, &files, &message, &branch).await {
+    if let Err(e) = git.add_commit_push(&kn_wt_path, &file_refs, &message, &branch).await {
         tracing::warn!("knowledge PR commit+push failed: {e}");
+        let _ = workspace.remove_worktree(repo_name, &task_id).await;
         return;
     }
 
@@ -340,6 +402,9 @@ async fn create_knowledge_pr(
         gh.label_add(repo_name, pr_num, labels::SKIP, gh_host).await;
         tracing::info!("knowledge PR #{pr_num} created from #{source_number}");
     }
+
+    // 5. worktree 정리
+    let _ = workspace.remove_worktree(repo_name, &task_id).await;
 }
 ```
 
@@ -355,13 +420,13 @@ if let Some(ref ks) = suggestion {
         .collect();
 
     if !actionable.is_empty() {
-        create_knowledge_pr(gh, git, repo_name, &actionable,
-            github_number, wt_path, gh_host).await;
+        create_knowledge_pr(gh, git, workspace, repo_name, &actionable,
+            github_number, gh_host).await;
     }
 }
 ```
 
-**주의**: `extract_task_knowledge()` 시그니처에 `git: &dyn Git` 파라미터 추가 필요.
+**주의**: `extract_task_knowledge()` 시그니처에 `git: &dyn Git` + `workspace: &dyn Workspace` 파라미터 추가 필요.
 → 호출부(`pipeline/pr.rs` 2곳)도 수정 필요.
 
 #### 5-3. `detect_cross_task_patterns()` daily flow 연결
@@ -423,14 +488,14 @@ Phase 4 (knowledge 수집 확장) ── 독립 (Phase 1과 병렬 가능)
 |------|------|------|
 | Phase 1: `process_ready()` 변경 시 기존 E2E 테스트 실패 | **높음** | 기대값 수정 필수, 테스트부터 변경 |
 | Phase 2: implementing 이슈의 연결 PR 번호 추출 | **중간** | `process_ready()`에서 PR 생성 시 이슈 코멘트 남기는 방안 추가 검토 |
-| Phase 5: `extract_task_knowledge()` 시그니처 변경 | **중간** | 호출부 2곳(pr.rs process_pending, process_improved) cascading 수정 |
+| Phase 5: `extract_task_knowledge()` 시그니처 변경 | **중간** | 호출부 2곳(pr.rs process_pending, process_improved) cascading 수정 — `git` + `workspace` 파라미터 추가 |
 | Phase 5: `detect_cross_task_patterns()`가 `report.suggestions` 기반 | **낮음** | daily report 생성 시점에 suggestions가 이미 채워져 있어야 함 → 순서 확인 |
 
 ---
 
 ## 구현 체크리스트 (13항목)
 
-- [ ] 1-1. `process_ready()` PR 생성 성공 시 implementing 유지 (done 제거)
+- [ ] 1-1. `process_ready()` PR 생성 성공 시 implementing 유지 (done 제거) + `<!-- autodev:pr-link:{N} -->` 이슈 코멘트 추가
 - [ ] 1-2. `process_ready()` PR 번호 추출 실패 시 done 제거
 - [ ] 1-3. 기존 E2E 테스트 기대값 수정
 - [ ] 1-4. 새 테스트: process_ready 라벨 전이 검증
