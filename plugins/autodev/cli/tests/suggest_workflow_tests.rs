@@ -101,7 +101,7 @@ async fn extract_task_knowledge_includes_sw_data_in_prompt() {
     // Claude에 전달된 프롬프트에 suggest-workflow 데이터가 포함되어야 함
     let calls = claude.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
-    let prompt = &calls[0].1;
+    let prompt = &calls[0].prompt;
     assert!(
         prompt.contains("suggest-workflow session data"),
         "prompt should contain suggest-workflow section"
@@ -143,7 +143,7 @@ async fn extract_task_knowledge_works_without_sw_data() {
 
     // suggest-workflow 데이터가 없으면 프롬프트에 포함되지 않아야 함
     let calls = claude.calls.lock().unwrap();
-    let prompt = &calls[0].1;
+    let prompt = &calls[0].prompt;
     assert!(
         !prompt.contains("suggest-workflow session data"),
         "prompt should NOT contain suggest-workflow section when no data"
@@ -276,7 +276,7 @@ async fn daily_suggestions_prompt_includes_cross_analysis_hint() {
 
     let calls = claude.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
-    let prompt = &calls[0].1;
+    let prompt = &calls[0].prompt;
     assert!(
         prompt.contains("cross_analysis"),
         "prompt should mention cross_analysis"
@@ -312,7 +312,7 @@ async fn daily_suggestions_prompt_no_cross_hint_without_analysis() {
         autodev::knowledge::daily::generate_daily_suggestions(&claude, &report, tmp.path()).await;
 
     let calls = claude.calls.lock().unwrap();
-    let prompt = &calls[0].1;
+    let prompt = &calls[0].prompt;
     assert!(
         !prompt.contains("cross_analysis"),
         "prompt should NOT mention cross_analysis when absent"

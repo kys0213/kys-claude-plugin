@@ -287,7 +287,9 @@ pub async fn process_review_done(
         );
 
         let started = Utc::now().to_rfc3339();
-        let result = claude.run_session(&wt_path, &prompt, None).await;
+        let result = claude
+            .run_session(&wt_path, &prompt, &Default::default())
+            .await;
 
         match result {
             Ok(res) => {

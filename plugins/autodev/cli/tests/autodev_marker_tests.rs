@@ -144,7 +144,7 @@ async fn issue_analysis_prompt_contains_autodev_analyze_marker() {
 
     let calls = claude.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
-    let prompt = &calls[0].1;
+    let prompt = &calls[0].prompt;
     assert!(
         prompt.starts_with("[autodev] analyze: issue #100"),
         "analysis prompt should start with [autodev] analyze marker, got: {}",
@@ -185,7 +185,7 @@ async fn issue_implement_prompt_contains_autodev_implement_marker() {
 
     let calls = claude.calls.lock().unwrap();
     assert!(calls.len() >= 1);
-    let prompt = &calls[0].1;
+    let prompt = &calls[0].prompt;
     assert!(
         prompt.starts_with("[autodev] implement: issue #101"),
         "implement prompt should start with [autodev] implement marker, got: {}",
@@ -234,7 +234,7 @@ async fn pr_review_prompt_contains_autodev_review_marker() {
 
     let calls = claude.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
-    let prompt = &calls[0].1;
+    let prompt = &calls[0].prompt;
     assert!(
         prompt.starts_with("[autodev] review: PR #200"),
         "review prompt should start with [autodev] review marker, got: {}",
@@ -271,7 +271,7 @@ async fn pr_improve_prompt_contains_autodev_improve_marker() {
 
     let calls = claude.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
-    let prompt = &calls[0].1;
+    let prompt = &calls[0].prompt;
     assert!(
         prompt.starts_with("[autodev] improve: PR #201"),
         "improve prompt should start with [autodev] improve marker, got: {}",
@@ -323,7 +323,7 @@ async fn pr_re_review_prompt_contains_autodev_review_marker() {
 
     let calls = claude.calls.lock().unwrap();
     assert!(calls.len() >= 1);
-    let prompt = &calls[0].1;
+    let prompt = &calls[0].prompt;
     assert!(
         prompt.starts_with("[autodev] review: PR #202"),
         "re-review prompt should start with [autodev] review marker, got: {}",
@@ -345,7 +345,7 @@ async fn merger_prompt_contains_autodev_merge_marker() {
 
     let calls = claude.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
-    let prompt = &calls[0].1;
+    let prompt = &calls[0].prompt;
     assert!(
         prompt.starts_with("[autodev] merge: PR #42"),
         "merge prompt should start with [autodev] merge marker, got: {prompt}"
@@ -370,7 +370,7 @@ async fn merger_resolve_prompt_contains_autodev_resolve_marker() {
 
     let calls = claude.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
-    let prompt = &calls[0].1;
+    let prompt = &calls[0].prompt;
     assert!(
         prompt.starts_with("[autodev] resolve: PR #42"),
         "resolve prompt should start with [autodev] resolve marker, got: {prompt}"
@@ -403,7 +403,7 @@ async fn knowledge_per_task_prompt_contains_autodev_knowledge_marker() {
 
     let calls = claude.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
-    let prompt = &calls[0].1;
+    let prompt = &calls[0].prompt;
     assert!(
         prompt.starts_with("[autodev] knowledge: per-task issue #42"),
         "per-task knowledge prompt should start with [autodev] knowledge marker, got: {}",
@@ -443,7 +443,7 @@ async fn knowledge_daily_prompt_contains_autodev_knowledge_daily_marker() {
 
     let calls = claude.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
-    let prompt = &calls[0].1;
+    let prompt = &calls[0].prompt;
     assert!(
         prompt.starts_with("[autodev] knowledge: daily 2026-02-22"),
         "daily knowledge prompt should start with [autodev] knowledge: daily marker, got: {}",
@@ -471,7 +471,7 @@ async fn reviewer_passes_json_output_format() {
     let calls = claude.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
     assert_eq!(
-        calls[0].2.as_deref(),
+        calls[0].output_format.as_deref(),
         Some("json"),
         "reviewer should pass json output_format"
     );

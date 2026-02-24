@@ -1,5 +1,7 @@
 use std::fmt;
+use std::sync::LazyLock;
 
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 /// claude -p --output-format json 결과 파싱
@@ -22,7 +24,7 @@ pub fn parse_output(stdout: &str) -> String {
 }
 
 /// 이슈 분석 verdict 타입
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Verdict {
     Implement,
@@ -41,7 +43,7 @@ impl fmt::Display for Verdict {
 }
 
 /// 이슈 분석 결과 구조체
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct AnalysisResult {
     pub verdict: Verdict,
     /// 0.0 ~ 1.0
@@ -57,7 +59,7 @@ pub struct AnalysisResult {
 }
 
 /// PR 리뷰 verdict 타입
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReviewVerdict {
     Approve,
@@ -74,7 +76,7 @@ impl fmt::Display for ReviewVerdict {
 }
 
 /// PR 리뷰 결과 구조체
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct ReviewResult {
     pub verdict: ReviewVerdict,
     pub summary: String,
@@ -84,13 +86,21 @@ pub struct ReviewResult {
 }
 
 /// PR 리뷰 개별 댓글 (향후 PR review API의 line comment 게시에 사용)
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[allow(dead_code)]
 pub struct ReviewComment {
     pub path: String,
     pub line: Option<u32>,
     pub body: String,
 }
+
+/// AnalysisResult JSON schema (한 번만 생성)
+pub static ANALYSIS_SCHEMA: LazyLock<String> =
+    LazyLock::new(|| serde_json::to_string(&schemars::schema_for!(AnalysisResult)).unwrap());
+
+/// ReviewResult JSON schema (한 번만 생성)
+pub static REVIEW_SCHEMA: LazyLock<String> =
+    LazyLock::new(|| serde_json::to_string(&schemars::schema_for!(ReviewResult)).unwrap());
 
 /// claude -p 리뷰 결과를 ReviewResult로 파싱 시도
 /// 1차: stdout가 claude JSON envelope이면 result 필드 추출 후 파싱
@@ -175,5 +185,28 @@ mod tests {
         // verdict 필드 누락
         let stdout = r#"{"summary":"All good"}"#;
         assert!(parse_review(stdout).is_none());
+    }
+
+    #[test]
+    fn analysis_schema_is_valid_json_with_required_fields() {
+        let schema: serde_json::Value =
+            serde_json::from_str(&ANALYSIS_SCHEMA).expect("ANALYSIS_SCHEMA should be valid JSON");
+        let props = schema["properties"]
+            .as_object()
+            .expect("should have properties");
+        assert!(props.contains_key("verdict"), "schema should have verdict");
+        assert!(props.contains_key("summary"), "schema should have summary");
+        assert!(props.contains_key("report"), "schema should have report");
+    }
+
+    #[test]
+    fn review_schema_is_valid_json_with_required_fields() {
+        let schema: serde_json::Value =
+            serde_json::from_str(&REVIEW_SCHEMA).expect("REVIEW_SCHEMA should be valid JSON");
+        let props = schema["properties"]
+            .as_object()
+            .expect("should have properties");
+        assert!(props.contains_key("verdict"), "schema should have verdict");
+        assert!(props.contains_key("summary"), "schema should have summary");
     }
 }

@@ -28,8 +28,8 @@ async fn reviewer_success_parses_output() {
     // Claude에 json 출력 형식이 전달되었는지 확인
     let calls = claude.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].1, "/multi-review");
-    assert_eq!(calls[0].2.as_deref(), Some("json"));
+    assert_eq!(calls[0].prompt, "/multi-review");
+    assert_eq!(calls[0].output_format.as_deref(), Some("json"));
 }
 
 #[tokio::test]
@@ -151,9 +151,9 @@ async fn merger_success() {
 
     // 프롬프트에 [autodev] 마커와 PR 번호가 포함되었는지 확인
     let calls = claude.calls.lock().unwrap();
-    assert!(calls[0].1.contains("[autodev] merge: PR #42"));
-    assert!(calls[0].1.contains("/git-utils:merge-pr 42"));
-    assert_eq!(calls[0].2, None); // output_format 없음
+    assert!(calls[0].prompt.contains("[autodev] merge: PR #42"));
+    assert!(calls[0].prompt.contains("/git-utils:merge-pr 42"));
+    assert_eq!(calls[0].output_format, None); // output_format 없음
 }
 
 #[tokio::test]
@@ -223,7 +223,7 @@ async fn merger_resolve_success() {
     assert!(matches!(output.outcome, MergeOutcome::Success));
 
     let calls = claude.calls.lock().unwrap();
-    assert!(calls[0].1.contains("Resolve") && calls[0].1.contains("PR #42"));
+    assert!(calls[0].prompt.contains("Resolve") && calls[0].prompt.contains("PR #42"));
 }
 
 #[tokio::test]
