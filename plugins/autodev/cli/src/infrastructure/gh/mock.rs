@@ -24,6 +24,8 @@ pub struct MockGh {
     /// 생성된 PR 기록: (repo_name, head, base, title, body)
     #[allow(clippy::type_complexity)]
     pub created_prs: Mutex<Vec<(String, String, String, String, String)>>,
+    /// PR 리뷰 기록: (repo_name, number, event, body)
+    pub reviewed_prs: Mutex<Vec<(String, i64, String, String)>>,
 }
 
 impl Default for MockGh {
@@ -36,6 +38,7 @@ impl Default for MockGh {
             added_labels: Mutex::new(Vec::new()),
             created_issues: Mutex::new(Vec::new()),
             created_prs: Mutex::new(Vec::new()),
+            reviewed_prs: Mutex::new(Vec::new()),
         }
     }
 }
@@ -145,6 +148,23 @@ impl Gh for MockGh {
         self.created_issues.lock().unwrap().push((
             repo_name.to_string(),
             title.to_string(),
+            body.to_string(),
+        ));
+        true
+    }
+
+    async fn pr_review(
+        &self,
+        repo_name: &str,
+        number: i64,
+        event: &str,
+        body: &str,
+        _host: Option<&str>,
+    ) -> bool {
+        self.reviewed_prs.lock().unwrap().push((
+            repo_name.to_string(),
+            number,
+            event.to_string(),
             body.to_string(),
         ));
         true

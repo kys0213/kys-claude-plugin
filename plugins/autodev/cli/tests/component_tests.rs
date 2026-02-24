@@ -1,9 +1,10 @@
 use std::path::Path;
 
+use autodev::components::analyzer::Analyzer;
 use autodev::components::merger::{MergeOutcome, Merger};
 use autodev::components::reviewer::Reviewer;
 use autodev::infrastructure::claude::mock::MockClaude;
-use autodev::infrastructure::claude::output::ReviewVerdict;
+use autodev::infrastructure::claude::output::{ReviewVerdict, Verdict};
 
 // ═══════════════════════════════════════════════
 // Reviewer 테스트
@@ -280,4 +281,82 @@ async fn merger_conflict_then_resolve_failure() {
         resolve_output.outcome,
         MergeOutcome::Failed { .. }
     ));
+}
+
+// ═══════════════════════════════════════════════
+// Analyzer 테스트
+// ═══════════════════════════════════════════════
+
+fn make_analysis_json_fixture(verdict: &str, confidence: f64) -> String {
+    let inner = format!(
+        r##"{{"verdict":"{verdict}","confidence":{confidence},"summary":"Test summary","questions":[],"reason":null,"report":"Analysis Report"}}"##,
+    );
+    serde_json::json!({ "result": inner }).to_string()
+}
+
+#[tokio::test]
+async fn analyzer_success_parses_implement() {
+    let claude = MockClaude::new();
+    claude.enqueue_response(&make_analysis_json_fixture("implement", 0.9), 0);
+
+    let analyzer = Analyzer::new(&claude);
+    let output = analyzer
+        .analyze(Path::new("/tmp/test"), "analyze issue")
+        .await
+        .unwrap();
+
+    assert_eq!(output.exit_code, 0);
+    let a = output.analysis.expect("should parse analysis");
+    assert_eq!(a.verdict, Verdict::Implement);
+    assert!((a.confidence - 0.9).abs() < f64::EPSILON);
+    assert_eq!(a.report, "Analysis Report");
+}
+
+#[tokio::test]
+async fn analyzer_success_parses_needs_clarification() {
+    let claude = MockClaude::new();
+    claude.enqueue_response(&make_analysis_json_fixture("needs_clarification", 0.4), 0);
+
+    let analyzer = Analyzer::new(&claude);
+    let output = analyzer
+        .analyze(Path::new("/tmp/test"), "analyze issue")
+        .await
+        .unwrap();
+
+    assert_eq!(output.exit_code, 0);
+    let a = output.analysis.expect("should parse");
+    assert_eq!(a.verdict, Verdict::NeedsClarification);
+}
+
+#[tokio::test]
+async fn analyzer_failure_returns_none_analysis() {
+    let claude = MockClaude::new();
+    claude.enqueue_response("error", 1);
+
+    let analyzer = Analyzer::new(&claude);
+    let output = analyzer
+        .analyze(Path::new("/tmp/test"), "analyze issue")
+        .await
+        .unwrap();
+
+    assert_eq!(output.exit_code, 1);
+    assert!(output.analysis.is_none());
+}
+
+#[tokio::test]
+async fn analyzer_malformed_json_returns_none_analysis() {
+    let claude = MockClaude::new();
+    claude.enqueue_response("not json at all {{{", 0);
+
+    let analyzer = Analyzer::new(&claude);
+    let output = analyzer
+        .analyze(Path::new("/tmp/test"), "analyze issue")
+        .await
+        .unwrap();
+
+    assert_eq!(output.exit_code, 0);
+    assert!(
+        output.analysis.is_none(),
+        "malformed JSON should return None"
+    );
 }

@@ -124,6 +124,76 @@ pub fn repo_remove(db: &Database, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// 큐 상태 조회 (daemon.status.json 기반, 조회 전용)
+pub fn queue_list(env: &dyn Env, repo: Option<&str>) -> Result<String> {
+    let home = config::autodev_home(env);
+    let status_path = home.join("daemon.status.json");
+
+    let status = match crate::daemon::status::read_status(&status_path) {
+        Some(s) => s,
+        None => {
+            return Ok(
+                "No queue data available (daemon not running or status file not found).\n"
+                    .to_string(),
+            );
+        }
+    };
+
+    let mut output = String::new();
+    output.push_str(&format!(
+        "Queue status (updated: {})\n\n",
+        status.updated_at
+    ));
+
+    let items: Vec<_> = if let Some(filter_repo) = repo {
+        status
+            .active_items
+            .iter()
+            .filter(|i| i.repo_name == filter_repo)
+            .collect()
+    } else {
+        status.active_items.iter().collect()
+    };
+
+    if items.is_empty() {
+        output.push_str("  (no active items)\n");
+    } else {
+        for item in &items {
+            output.push_str(&format!(
+                "  [{}] {}#{} — {} ({})\n",
+                item.queue_type.chars().next().unwrap_or('?').to_uppercase(),
+                item.repo_name,
+                item.number,
+                item.phase,
+                item.title,
+            ));
+        }
+    }
+
+    output.push_str(&format!(
+        "\nCounters: wip={} done={} skip={} failed={}\n",
+        status.counters.wip, status.counters.done, status.counters.skip, status.counters.failed,
+    ));
+
+    Ok(output)
+}
+
+/// 글로벌 설정 표시
+pub fn config_show(env: &dyn Env) -> Result<()> {
+    let global_path = config::loader::global_config_path(env);
+    println!("Config file: {}", global_path.display());
+    if global_path.exists() {
+        println!("  (exists)");
+    } else {
+        println!("  (not found — using defaults)");
+    }
+
+    let merged = config::loader::load_merged(env, None);
+    let yaml = serde_yaml::to_string(&merged)?;
+    println!("\nEffective config:\n---\n{yaml}");
+    Ok(())
+}
+
 /// 로그 조회
 pub fn logs(db: &Database, repo: Option<&str>, limit: usize) -> Result<String> {
     let entries = db.log_recent(repo, limit)?;

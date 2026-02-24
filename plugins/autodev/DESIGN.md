@@ -229,10 +229,14 @@ plugins/autodev/
 │       │   │   ├── mod.rs       # pub trait Git { clone, worktree_add, checkout, diff, ... }
 │       │   │   ├── real.rs      # RealGit — Command::new("git") 실행
 │       │   │   └── mock.rs      # MockGit — tempdir 기반 (테스트용)
-│       │   └── claude/
-│       │       ├── mod.rs       # pub trait Claude { run_session, ... }
-│       │       ├── real.rs      # RealClaude — Command::new("claude") -p 실행
-│       │       └── mock.rs      # MockClaude — 고정 JSON 응답 (테스트용)
+│       │   ├── claude/
+│       │   │   ├── mod.rs       # pub trait Claude { run_session, ... }
+│       │   │   ├── real.rs      # RealClaude — Command::new("claude") -p 실행
+│       │   │   └── mock.rs      # MockClaude — 고정 JSON 응답 (테스트용)
+│       │   └── suggest_workflow/
+│       │       ├── mod.rs       # pub trait SuggestWorkflow { query_tool_frequency, query_filtered_sessions, query_repetition }
+│       │       ├── real.rs      # RealSuggestWorkflow — suggest-workflow CLI 호출
+│       │       └── mock.rs      # MockSuggestWorkflow — 빈 결과 반환 (테스트용)
 │       │
 │       ├── components/          # 비즈니스 로직 단위 (trait 주입받아 동작)
 │       │   ├── workspace.rs     # Workspace { git: &dyn Git } — worktree 생명주기
@@ -412,7 +416,14 @@ daemon start
     │    queue[Ready]에 아이템 있으면 pop → 구현 시작
     │    (상태별 큐를 순회하며 이벤트 드리븐 처리)
     │    처리 완료 → queue.remove() + 라벨 전이
-    │    pre-flight API 호출 불필요 (scan 시점에 open 확인 완료)
+    │
+    │    **방어적 pre-flight check**:
+    │    scan과 consume 사이에 시간 차가 있어 상태가 변할 수 있으므로,
+    │    consume 시작 시 GitHub API로 현재 상태를 재확인한다:
+    │    - `notifier.is_issue_open()` — 이슈가 아직 open인지
+    │    - `notifier.is_pr_reviewable()` — PR이 open이고 미승인인지
+    │    - `notifier.is_pr_mergeable()` — PR이 open이고 머지 가능한지
+    │    close/approve 등으로 상태가 바뀌었으면 즉시 skip → done 전이
     │
     └─ 4. sleep(tick_interval)
 ```
@@ -564,23 +575,23 @@ scan()
   │   cursor 전진: db.cursor_upsert(repo.id, "issues", latest_updated_at)
   │
   └── 2b. merge scan
-      gh api repos/{repo}/pulls?state=open
+      gh api repos/{repo}/issues?labels=autodev:done&state=open
       │
       필터:
-        • approved 상태 (사람 or autodev가 approve)
-        • CI checks 통과 (설정된 경우)
+        • `autodev:done` 라벨이 붙은 open PR (issues API의 pull_request 필드로 판별)
         • queue.index에 이미 있으면 skip
-        • autodev 라벨 없는 것만
         • auto_merge 설정이 활성화된 레포만
       │
       for each item:
         id = "merge:{repo}:{number}"
+        gh label remove "autodev:done"
         gh label add "autodev:wip"
         queue.merges.push(Pending, item)
         queue.index.insert(id, Pending)
 ```
 
-> **merge scan의 소스**: autodev가 리뷰하여 approve한 PR + 사람이 approve한 PR 모두 대상.
+> **merge scan의 소스**: `autodev:done` 라벨이 붙은 open PR이 대상.
+> done → wip 라벨 전환 후 merge queue에 push하여 머지를 시도한다.
 > `auto_merge: true` 설정이 있는 레포에서만 동작한다.
 
 ### API 호출 비용 비교
@@ -869,6 +880,33 @@ autodev config edit        # 설정 편집
     ├── daemon.2026-02-20.log
     └── ...                     # retention_days 이후 자동 삭제
 ```
+
+### daemon.status.json (인메모리 상태 공유)
+
+데몬이 매 tick 종료 시 `~/.autodev/daemon.status.json`에 현재 상태를 atomic write한다.
+CLI(`autodev status`, `autodev queue list`)가 이 파일을 읽어 실시간 큐 상태를 표시한다.
+
+```rust
+pub struct DaemonStatus {
+    pub updated_at: String,       // RFC3339
+    pub uptime_secs: u64,
+    pub active_items: Vec<StatusItem>,  // 현재 큐에 있는 모든 아이템
+    pub counters: StatusCounters,       // wip/done/skip/failed 집계
+}
+
+pub struct StatusItem {
+    pub work_id: String,
+    pub queue_type: String,  // "issue" | "pr" | "merge"
+    pub repo_name: String,
+    pub number: i64,
+    pub title: String,
+    pub phase: String,       // "Pending" | "Analyzing" | "Reviewing" | ...
+}
+```
+
+- **Atomic write**: tmp 파일에 쓴 후 `rename()`으로 교체 (half-write 방지)
+- **데몬 종료 시**: `daemon.status.json` 삭제
+- **CLI 읽기**: 파일 없거나 파싱 실패 시 `None` 반환 (데몬 미실행으로 판단)
 
 ### 로그 롤링 정책
 
@@ -1314,7 +1352,18 @@ per-task이 놓치는 것:               daily가 발견:
       "affected_tasks": ["issue:42", "issue:45", "issue:48"]
     }
   ],
-  "suggestions": ["<KnowledgeSuggestion 배열>"]
+  "suggestions": ["<KnowledgeSuggestion 배열>"],
+  "cross_analysis": {
+    "tool_frequencies": [
+      { "tool": "Read", "frequency": 120, "sessions": 8 }
+    ],
+    "anomalies": [
+      { "session_id": "abc123", "tool": "Bash", "cnt": 45, "deviation_score": 3.2 }
+    ],
+    "sessions": [
+      { "id": "abc123", "prompt_count": 12, "tool_use_count": 45, "first_prompt": "[autodev] fix: ...", "started_at": "2026-02-20T14:00:00Z", "duration_minutes": 25.5 }
+    ]
+  }
 }
 ```
 

@@ -2,6 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use uuid::Uuid;
 
+use crate::components::analyzer::Analyzer;
 use crate::components::notifier::Notifier;
 use crate::components::verdict;
 use crate::components::workspace::Workspace;
@@ -66,6 +67,7 @@ pub async fn process_pending(
     let cfg = config::loader::load_merged(env, None);
     let concurrency = cfg.consumer.issue_concurrency as usize;
     let gh_host = cfg.consumer.gh_host.as_deref();
+    let analyzer = Analyzer::new(claude);
 
     for _ in 0..concurrency {
         let mut item = match queues.issues.pop(issue_phase::PENDING) {
@@ -135,7 +137,7 @@ pub async fn process_pending(
         );
 
         let started = Utc::now().to_rfc3339();
-        let result = claude.run_session(&wt_path, &prompt, Some("json")).await;
+        let result = analyzer.analyze(&wt_path, &prompt).await;
 
         match result {
             Ok(res) => {
@@ -166,9 +168,7 @@ pub async fn process_pending(
                     continue;
                 }
 
-                let analysis = output::parse_analysis(&res.stdout);
-
-                match analysis {
+                match res.analysis {
                     Some(ref a) if a.verdict == output::Verdict::Wontfix => {
                         remove_from_phase(queues, &work_id);
                         let comment = verdict::format_wontfix_comment(a);
@@ -240,7 +240,7 @@ pub async fn process_pending(
                 gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                     .await;
                 let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
-                tracing::error!("session error for issue #{}: {e}", item.github_number);
+                tracing::error!("analysis error for issue #{}: {e}", item.github_number);
             }
         }
     }
