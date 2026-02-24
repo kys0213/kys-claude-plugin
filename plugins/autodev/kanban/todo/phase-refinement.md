@@ -11,45 +11,52 @@
 
 ## 항목
 
-- [ ] **27. Issue phase 상수 확장**
+- [x] **27. Issue phase 상수 확장**
   - `queue/task_queues.rs` — `issue_phase`에 `ANALYZING`, `IMPLEMENTING` 추가
   - 설계: `Pending → Analyzing → Ready → Implementing`
 
-- [ ] **28. PR phase 상수 확장**
+- [x] **28. PR phase 상수 확장**
   - `queue/task_queues.rs` — `pr_phase`에 `REVIEWING`, `IMPROVING` 추가
   - 설계: `Pending → Reviewing → ReviewDone → Improving → Improved`
 
-- [ ] **29. Merge phase 상수 확장**
+- [x] **29. Merge phase 상수 확장**
   - `queue/task_queues.rs` — `merge_phase`에 `MERGING`, `CONFLICT` 추가
   - 설계: `Pending → Merging → Conflict`
 
-- [ ] **30. Pipeline 상태 전이 리팩토링**
-  - `pipeline/issue.rs` — pop(PENDING) → push(ANALYZING) → 분석 완료 → transit(ANALYZING→READY) → ...
-  - `pipeline/pr.rs` — 동일 패턴 적용
-  - `pipeline/merge.rs` — 동일 패턴 적용
+- [x] **30. Pipeline 상태 전이 리팩토링**
+  - `pipeline/issue.rs` — pop(PENDING) → push(ANALYZING) → 분석 완료 → remove → push(READY)
+  - `pipeline/pr.rs` — 동일 패턴 적용 (REVIEWING, IMPROVING)
+  - `pipeline/merge.rs` — 동일 패턴 적용 (MERGING, CONFLICT)
 
-## 대안: 설계 문서 갱신
+## 추가 수정
 
-구현의 인라인 처리 방식이 충분히 실용적이라 판단되면,
-DESIGN.md §2 Phase 정의를 현행 구현에 맞게 갱신하는 것도 선택지.
+- [x] **TUI 색상 매핑 버그 수정** (`tui/views.rs`)
+  - 기존: lowercase 비교 (`"pending"`) — PascalCase 상수와 불일치하여 항상 DarkGray 표시
+  - 수정: PascalCase 매칭 + 새 중간 상태(Analyzing, Reviewing 등) 색상 추가
 
-## 현재 상태
+## 완료 상태
 
 ```rust
-// Issue: 2개만 (설계는 4개)
+// Issue: 4개 (설계 1:1 매칭)
 pub mod issue_phase {
     pub const PENDING: &str = "Pending";
+    pub const ANALYZING: &str = "Analyzing";
     pub const READY: &str = "Ready";
+    pub const IMPLEMENTING: &str = "Implementing";
 }
-// PR: 3개만 (설계는 5개)
+// PR: 5개 (설계 1:1 매칭)
 pub mod pr_phase {
     pub const PENDING: &str = "Pending";
+    pub const REVIEWING: &str = "Reviewing";
     pub const REVIEW_DONE: &str = "ReviewDone";
+    pub const IMPROVING: &str = "Improving";
     pub const IMPROVED: &str = "Improved";
 }
-// Merge: 1개만 (설계는 3개)
+// Merge: 3개 (설계 1:1 매칭)
 pub mod merge_phase {
     pub const PENDING: &str = "Pending";
+    pub const MERGING: &str = "Merging";
+    pub const CONFLICT: &str = "Conflict";
 }
 ```
 
@@ -57,13 +64,14 @@ pub mod merge_phase {
 
 | 파일 | 변경 내용 |
 |------|----------|
-| `queue/task_queues.rs` | phase 상수 추가 |
-| `pipeline/issue.rs` | 상태 전이 기반 리팩토링 |
-| `pipeline/pr.rs` | 상태 전이 기반 리팩토링 |
-| `pipeline/merge.rs` | 상태 전이 기반 리팩토링 |
+| `queue/task_queues.rs` | phase 상수 6개 추가 + 테스트 5개 추가 |
+| `pipeline/issue.rs` | 상태 전이 기반 리팩토링 (Analyzing, Implementing) |
+| `pipeline/pr.rs` | 상태 전이 기반 리팩토링 (Reviewing, Improving) |
+| `pipeline/merge.rs` | 상태 전이 기반 리팩토링 (Merging, Conflict) |
+| `tui/views.rs` | 색상 매핑 PascalCase 수정 + 신규 상태 추가 |
 
 ## 완료 조건
 
-- [ ] 설계 phase와 구현 phase가 1:1 매칭 (또는 설계 문서 갱신)
-- [ ] TUI에서 현재 작업의 세부 상태 표시 가능
-- [ ] 데몬 로그에 세밀한 상태 전이 이벤트 기록
+- [x] 설계 phase와 구현 phase가 1:1 매칭
+- [x] TUI에서 현재 작업의 세부 상태 표시 가능
+- [x] 데몬 로그에 세밀한 상태 전이 이벤트 기록

@@ -290,10 +290,11 @@ fn render_active_items_panel(
         .enumerate()
         .map(|(i, item)| {
             let status_color = match item.status.as_str() {
-                "pending" => Color::White,
-                "analyzing" | "reviewing" | "merging" => Color::Cyan,
-                "ready" | "review_done" => Color::Green,
-                "processing" | "conflict" => Color::Yellow,
+                "Pending" => Color::White,
+                "Analyzing" | "Reviewing" | "Merging" => Color::Cyan,
+                "Ready" | "ReviewDone" => Color::Green,
+                "Implementing" | "Improving" | "Conflict" => Color::Yellow,
+                "Improved" => Color::Blue,
                 _ => Color::DarkGray,
             };
 

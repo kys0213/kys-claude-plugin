@@ -5,11 +5,7 @@ mod helpers;
 use helpers::{cli_with_home, setup_project};
 use std::collections::HashMap;
 
-fn index_and_query(
-    fixtures: &[&str],
-    perspective: &str,
-    params: &[&str],
-) -> serde_json::Value {
+fn index_and_query(fixtures: &[&str], perspective: &str, params: &[&str]) -> serde_json::Value {
     let (tmp, project) = setup_project(fixtures);
 
     cli_with_home(&tmp)
@@ -110,7 +106,11 @@ fn bash_classification_accuracy() {
     let json = index_and_query(&["bash_classified.jsonl"], "tool-frequency", &["top=20"]);
     let freq = to_freq_map(&json);
 
-    assert_eq!(freq.get("Bash:git"), Some(&4), "git status/diff/push + gh pr create");
+    assert_eq!(
+        freq.get("Bash:git"),
+        Some(&4),
+        "git status/diff/push + gh pr create"
+    );
     assert_eq!(freq.get("Bash:test"), Some(&1), "npm test");
     assert_eq!(freq.get("Bash:build"), Some(&1), "npm run build");
     assert_eq!(freq.get("Bash:lint"), Some(&2), "eslint + prettier");
@@ -183,11 +183,7 @@ fn sessions_prompt_count_correct() {
 /// Expected transitions from Edit: Edit→Edit(1), Edit→Bash:test(1)
 #[test]
 fn transitions_correct_for_edit() {
-    let json = index_and_query(
-        &["multi_tool.jsonl"],
-        "transitions",
-        &["tool=Edit"],
-    );
+    let json = index_and_query(&["multi_tool.jsonl"], "transitions", &["tool=Edit"]);
     let arr = json.as_array().unwrap();
 
     let transition_map: HashMap<String, i64> = arr
@@ -201,18 +197,22 @@ fn transitions_correct_for_edit() {
         .collect();
 
     assert_eq!(transition_map.get("Edit"), Some(&1), "Edit→Edit once");
-    assert_eq!(transition_map.get("Bash:test"), Some(&1), "Edit→Bash:test once");
-    assert_eq!(transition_map.len(), 2, "Edit only transitions to Edit and Bash:test");
+    assert_eq!(
+        transition_map.get("Bash:test"),
+        Some(&1),
+        "Edit→Bash:test once"
+    );
+    assert_eq!(
+        transition_map.len(),
+        2,
+        "Edit only transitions to Edit and Bash:test"
+    );
 }
 
 #[test]
 fn transitions_correct_for_bash_git() {
     // Bash:git(7)→Bash:git(8), Bash:git(8)→Read(9)
-    let json = index_and_query(
-        &["multi_tool.jsonl"],
-        "transitions",
-        &["tool=Bash:git"],
-    );
+    let json = index_and_query(&["multi_tool.jsonl"], "transitions", &["tool=Bash:git"]);
     let arr = json.as_array().unwrap();
 
     let transition_map: HashMap<String, i64> = arr
@@ -243,7 +243,11 @@ fn sequences_shows_bigrams_with_counts() {
     // Each sequence should have format "X → Y"
     for item in arr {
         let seq = item["sequence"].as_str().unwrap();
-        assert!(seq.contains(" → "), "sequence format should be 'X → Y': {}", seq);
+        assert!(
+            seq.contains(" → "),
+            "sequence format should be 'X → Y': {}",
+            seq
+        );
         assert!(item.get("count").is_some());
         assert!(item.get("probability").is_some());
     }
@@ -255,17 +259,16 @@ fn sequences_shows_bigrams_with_counts() {
 
 #[test]
 fn prompts_search_finds_matching_text() {
-    let json = index_and_query(
-        &["multi_tool.jsonl"],
-        "prompts",
-        &["search=refactor"],
-    );
+    let json = index_and_query(&["multi_tool.jsonl"], "prompts", &["search=refactor"]);
     let arr = json.as_array().unwrap();
 
     assert!(!arr.is_empty(), "should find prompt containing 'refactor'");
     for item in arr {
         let snippet = item["snippet"].as_str().unwrap().to_lowercase();
-        assert!(snippet.contains("refactor"), "snippet should contain search term");
+        assert!(
+            snippet.contains("refactor"),
+            "snippet should contain search term"
+        );
     }
 }
 
@@ -289,7 +292,11 @@ fn repetition_returns_valid_structure() {
     // With a single session, there's no variance, so anomaly detection may not trigger.
     // Use multiple fixtures to create variance across sessions.
     let json = index_and_query(
-        &["multi_tool.jsonl", "bash_classified.jsonl", "file_edits.jsonl"],
+        &[
+            "multi_tool.jsonl",
+            "bash_classified.jsonl",
+            "file_edits.jsonl",
+        ],
         "repetition",
         &["z_threshold=0.5"],
     );
@@ -301,7 +308,11 @@ fn repetition_returns_valid_structure() {
         assert!(item.get("deviation_score").is_some());
         // deviation_score = sign(z) * z², so |deviation_score| >= threshold²
         let d = item["deviation_score"].as_f64().unwrap();
-        assert!(d.abs() >= 0.25, "deviation_score {} should have |z²| >= 0.5² = 0.25", d);
+        assert!(
+            d.abs() >= 0.25,
+            "deviation_score {} should have |z²| >= 0.5² = 0.25",
+            d
+        );
     }
 }
 
@@ -331,11 +342,7 @@ fn session_links_detects_shared_files() {
 
 #[test]
 fn trends_weekly_aggregation_correct() {
-    let json = index_and_query(
-        &["multi_tool.jsonl"],
-        "trends",
-        &["since=2020-01-01"],
-    );
+    let json = index_and_query(&["multi_tool.jsonl"], "trends", &["since=2020-01-01"]);
     let arr = json.as_array().unwrap();
     assert!(!arr.is_empty(), "should have weekly buckets");
 

@@ -1,9 +1,9 @@
+use crate::types::{Content, HistoryEntry, SessionEntry, ToolUse};
+use anyhow::{Context, Result};
+use chrono::DateTime;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use anyhow::{Context, Result};
-use chrono::DateTime;
-use crate::types::{SessionEntry, ToolUse, Content, HistoryEntry};
 
 const DEFAULT_PROJECTS_PATH: &str = ".claude/projects";
 
@@ -72,8 +72,12 @@ pub fn parse_session(session_path: &Path) -> Result<Vec<SessionEntry>> {
         match serde_json::from_str::<SessionEntry>(&line) {
             Ok(entry) => entries.push(entry),
             Err(e) => {
-                eprintln!("Warning: Skipping line {} in {}: {}",
-                    line_num + 1, session_path.display(), e);
+                eprintln!(
+                    "Warning: Skipping line {} in {}: {}",
+                    line_num + 1,
+                    session_path.display(),
+                    e
+                );
             }
         }
     }
@@ -89,7 +93,9 @@ pub fn extract_tool_sequence(entries: &[SessionEntry]) -> Vec<ToolUse> {
         // Legacy format: top-level tool_use
         if entry.entry_type == "tool_use" {
             if let Some(name) = &entry.name {
-                let timestamp = entry.timestamp.as_ref()
+                let timestamp = entry
+                    .timestamp
+                    .as_ref()
                     .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
                     .map(|dt| dt.timestamp_millis());
 
@@ -109,7 +115,9 @@ pub fn extract_tool_sequence(entries: &[SessionEntry]) -> Vec<ToolUse> {
                     for item in items {
                         if item.item_type == "tool_use" {
                             if let Some(name) = &item.name {
-                                let timestamp = entry.timestamp.as_ref()
+                                let timestamp = entry
+                                    .timestamp
+                                    .as_ref()
                                     .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
                                     .map(|dt| dt.timestamp_millis());
 
@@ -168,13 +176,12 @@ pub fn adapt_to_history_entries(
                 if let Some(message) = &entry.message {
                     let display = match &message.content {
                         Content::Text(text) => text.clone(),
-                        Content::Array(items) => {
-                            items.iter()
-                                .filter(|item| item.item_type == "text")
-                                .filter_map(|item| item.text.clone())
-                                .collect::<Vec<_>>()
-                                .join("\n")
-                        }
+                        Content::Array(items) => items
+                            .iter()
+                            .filter(|item| item.item_type == "text")
+                            .filter_map(|item| item.text.clone())
+                            .collect::<Vec<_>>()
+                            .join("\n"),
                     };
 
                     // Strip system-reminder blocks first
@@ -189,7 +196,9 @@ pub fn adapt_to_history_entries(
                         continue;
                     }
 
-                    let timestamp = entry.timestamp.as_ref()
+                    let timestamp = entry
+                        .timestamp
+                        .as_ref()
                         .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
                         .map(|dt| dt.timestamp_millis())
                         .unwrap_or(0);
@@ -231,10 +240,11 @@ fn is_system_meta_message(content: &str) -> bool {
     let lower = trimmed.to_lowercase();
 
     // Basic meta filters
-    if lower.starts_with("<local-command-") ||
-       lower.starts_with("<command-name>") ||
-       lower.contains("[request interrupted by user") ||
-       trimmed.len() < 3 {
+    if lower.starts_with("<local-command-")
+        || lower.starts_with("<command-name>")
+        || lower.contains("[request interrupted by user")
+        || trimmed.len() < 3
+    {
         return true;
     }
 
@@ -244,18 +254,20 @@ fn is_system_meta_message(content: &str) -> bool {
     }
 
     // Mode activation prompts
-    if lower.contains("[autopilot activated") ||
-       lower.contains("[ralph loop") ||
-       lower.contains("[ultrawork activated") ||
-       lower.contains("[ralplan activated") ||
-       lower.contains("[ecomode activated") {
+    if lower.contains("[autopilot activated")
+        || lower.contains("[ralph loop")
+        || lower.contains("[ultrawork activated")
+        || lower.contains("[ralplan activated")
+        || lower.contains("[ecomode activated")
+    {
         return true;
     }
 
     // Predominantly markdown table content (system docs)
     let line_count = trimmed.lines().count();
     if line_count > 5 {
-        let table_lines = trimmed.lines()
+        let table_lines = trimmed
+            .lines()
             .filter(|l| l.trim().starts_with('|') && l.trim().ends_with('|'))
             .count();
         if table_lines as f64 / line_count as f64 > 0.5 {

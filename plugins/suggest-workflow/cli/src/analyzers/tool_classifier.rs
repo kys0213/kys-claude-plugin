@@ -3,7 +3,8 @@ use std::sync::LazyLock;
 
 static GIT_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^git\s|^gh\s").unwrap());
 static TEST_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(vitest|jest|mocha|pytest|cargo\s+test|go\s+test|npm\s+test|bun\s+test)\b").unwrap()
+    Regex::new(r"\b(vitest|jest|mocha|pytest|cargo\s+test|go\s+test|npm\s+test|bun\s+test)\b")
+        .unwrap()
 });
 static BUILD_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b(tsc|webpack|vite\s+build|next\s+build|npm\s+run\s+build|cargo\s+build|go\s+build|make|cmake)\b").unwrap()

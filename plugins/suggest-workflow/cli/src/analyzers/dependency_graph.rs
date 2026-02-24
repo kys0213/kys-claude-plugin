@@ -1,11 +1,10 @@
-use std::collections::{HashMap, HashSet};
-use crate::types::{
-    SessionEntry, DependencyGraphResult, DependencyNode, DependencyEdge,
-    ToolCycle, CriticalPath,
-};
-use crate::parsers::extract_tool_sequence;
 use crate::analyzers::tool_classifier::classify_tool;
 use crate::analyzers::tuning::TuningConfig;
+use crate::parsers::extract_tool_sequence;
+use crate::types::{
+    CriticalPath, DependencyEdge, DependencyGraphResult, DependencyNode, SessionEntry, ToolCycle,
+};
+use std::collections::{HashMap, HashSet};
 
 /// Build a tool dependency graph with node/edge metrics, cycle detection,
 /// and critical path analysis.
@@ -272,8 +271,7 @@ fn detect_cycles(
         let scc_set: HashSet<&str> = scc.iter().map(|s| s.as_str()).collect();
 
         // Find actual occurrences of this cycle pattern in work units
-        let (occurrence_count, avg_iterations) =
-            count_cycle_occurrences(&scc_set, work_units);
+        let (occurrence_count, avg_iterations) = count_cycle_occurrences(&scc_set, work_units);
 
         if occurrence_count > 0 {
             let mut tools: Vec<String> = scc.clone();
@@ -304,11 +302,7 @@ fn tarjan_scc<'a>(
         result: Vec<Vec<String>>,
     }
 
-    fn strongconnect<'a>(
-        v: &'a str,
-        adj: &HashMap<&'a str, Vec<&'a str>>,
-        state: &mut State<'a>,
-    ) {
+    fn strongconnect<'a>(v: &'a str, adj: &HashMap<&'a str, Vec<&'a str>>, state: &mut State<'a>) {
         state.index.insert(v, state.index_counter);
         state.lowlink.insert(v, state.index_counter);
         state.index_counter += 1;
@@ -371,10 +365,7 @@ fn tarjan_scc<'a>(
 
 /// Count how many times a cycle (SCC members) appears as a contiguous rotation
 /// in the actual work unit data. Also compute average iterations.
-fn count_cycle_occurrences(
-    scc_set: &HashSet<&str>,
-    work_units: &[Vec<String>],
-) -> (usize, f64) {
+fn count_cycle_occurrences(scc_set: &HashSet<&str>, work_units: &[Vec<String>]) -> (usize, f64) {
     let mut total_occurrences: usize = 0;
     let mut total_iterations: f64 = 0.0;
     let scc_len = scc_set.len();
@@ -388,10 +379,7 @@ fn count_cycle_occurrences(
         // looking for runs where all tools in the window belong to the SCC.
         let mut i = 0;
         while i + scc_len <= unit.len() {
-            let window: HashSet<&str> = unit[i..i + scc_len]
-                .iter()
-                .map(|s| s.as_str())
-                .collect();
+            let window: HashSet<&str> = unit[i..i + scc_len].iter().map(|s| s.as_str()).collect();
 
             if window.is_subset(scc_set) && window.len() == scc_len {
                 // Found one occurrence of the cycle pattern, count consecutive repetitions

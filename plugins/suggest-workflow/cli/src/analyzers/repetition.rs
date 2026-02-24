@@ -1,11 +1,10 @@
-use std::collections::HashMap;
-use crate::types::{
-    SessionEntry, RepetitionResult, FileEditOutlier,
-    ToolLoop, SessionRepetitionStats,
-};
-use crate::parsers::extract_tool_sequence;
 use crate::analyzers::tool_classifier::classify_tool;
 use crate::analyzers::tuning::TuningConfig;
+use crate::parsers::extract_tool_sequence;
+use crate::types::{
+    FileEditOutlier, RepetitionResult, SessionEntry, SessionRepetitionStats, ToolLoop,
+};
+use std::collections::HashMap;
 
 /// Detect repetition patterns and statistical outliers across sessions.
 /// Uses mean ± σ from the data itself — thresholds driven by TuningConfig.
@@ -44,12 +43,19 @@ pub fn analyze_repetition(
         }
 
         // Detect consecutive loops: find repeated subsequences
-        detect_loops(&classified, session_id, &mut all_loops, tuning.loop_max_seq_length, tuning.loop_min_repeats);
+        detect_loops(
+            &classified,
+            session_id,
+            &mut all_loops,
+            tuning.loop_max_seq_length,
+            tuning.loop_min_repeats,
+        );
 
         // Session-level repetition stats
         let total_tool_uses = classified.len();
         let unique_tool_uses = {
-            let set: std::collections::HashSet<&str> = classified.iter().map(|s| s.as_str()).collect();
+            let set: std::collections::HashSet<&str> =
+                classified.iter().map(|s| s.as_str()).collect();
             set.len()
         };
 
@@ -73,7 +79,7 @@ pub fn analyze_repetition(
 
     let file_edit_outliers: Vec<FileEditOutlier> = if std_dev > 0.0 {
         // Step 1: compute z-scores and p-values for all candidates
-        let mut candidates: Vec<(usize, f64, f64)> = all_file_edits  // (index, z, p)
+        let mut candidates: Vec<(usize, f64, f64)> = all_file_edits // (index, z, p)
             .iter()
             .enumerate()
             .filter_map(|(i, (_, _, count))| {
@@ -119,7 +125,13 @@ pub fn analyze_repetition(
 }
 
 /// Detect repeating subsequences in tool sequences.
-fn detect_loops(classified: &[String], session_id: &str, loops: &mut Vec<ToolLoop>, max_seq_length: usize, min_repeats: usize) {
+fn detect_loops(
+    classified: &[String],
+    session_id: &str,
+    loops: &mut Vec<ToolLoop>,
+    max_seq_length: usize,
+    min_repeats: usize,
+) {
     for seq_len in 2..=max_seq_length {
         if classified.len() < seq_len * 2 {
             continue;
@@ -174,16 +186,23 @@ fn max_consecutive_same(tools: &[String]) -> (usize, Option<String>) {
 /// Approximate standard normal CDF using Abramowitz & Stegun formula 26.2.17.
 /// Absolute error < 7.5×10⁻⁸ for all z.
 fn normal_cdf_approx(z: f64) -> f64 {
-    if z < -8.0 { return 0.0; }
-    if z > 8.0 { return 1.0; }
+    if z < -8.0 {
+        return 0.0;
+    }
+    if z > 8.0 {
+        return 1.0;
+    }
     let t = 1.0 / (1.0 + 0.2316419 * z.abs());
     let pdf = 0.398_942_280_401_432_7 * (-z * z / 2.0).exp(); // 1/√(2π) × e^(-z²/2)
-    let poly = t * (0.319_381_530
-        + t * (-0.356_563_782
-        + t * (1.781_477_937
-        + t * (-1.821_255_978
-        + t * 1.330_274_429))));
-    if z >= 0.0 { 1.0 - pdf * poly } else { pdf * poly }
+    let poly = t
+        * (0.319_381_530
+            + t * (-0.356_563_782
+                + t * (1.781_477_937 + t * (-1.821_255_978 + t * 1.330_274_429))));
+    if z >= 0.0 {
+        1.0 - pdf * poly
+    } else {
+        pdf * poly
+    }
 }
 
 /// Benjamini-Hochberg procedure for controlling False Discovery Rate.
@@ -210,7 +229,11 @@ fn benjamini_hochberg(candidates: &mut [(usize, f64, f64)], alpha: f64) -> Vec<u
     }
 
     // All items with rank ≤ max_k are significant
-    candidates.iter().take(max_k).map(|&(idx, _, _)| idx).collect()
+    candidates
+        .iter()
+        .take(max_k)
+        .map(|&(idx, _, _)| idx)
+        .collect()
 }
 
 fn mean_stddev(values: &[f64]) -> (f64, f64) {

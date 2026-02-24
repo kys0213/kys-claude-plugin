@@ -1,11 +1,9 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
-use chrono::{DateTime, Datelike, IsoWeek, Utc};
-use crate::types::{
-    SessionEntry, HistoryEntry, TrendResult, WeeklyBucket, ToolTrend,
-};
-use crate::parsers::extract_tool_sequence;
 use crate::analyzers::tool_classifier::classify_tool;
 use crate::analyzers::tuning::TuningConfig;
+use crate::parsers::extract_tool_sequence;
+use crate::types::{HistoryEntry, SessionEntry, ToolTrend, TrendResult, WeeklyBucket};
+use chrono::{DateTime, Datelike, IsoWeek, Utc};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Aggregate statistics by ISO week. Pure temporal grouping — no rules.
 pub fn analyze_trends(
@@ -80,7 +78,8 @@ pub fn analyze_trends(
     }
 
     // Build weekly buckets (union of all week keys)
-    let all_weeks: BTreeMap<String, ()> = weekly_prompts.keys()
+    let all_weeks: BTreeMap<String, ()> = weekly_prompts
+        .keys()
         .chain(weekly_sessions.keys())
         .map(|k| (k.clone(), ()))
         .collect();
@@ -168,7 +167,11 @@ fn compute_tool_trends(weeks: &[WeeklyBucket], min_r_squared: f64) -> Vec<ToolTr
         };
 
         // If the fit is too weak, zero the slope so it's not mistaken for a real trend
-        let effective_slope = if r_squared >= min_r_squared { slope } else { 0.0 };
+        let effective_slope = if r_squared >= min_r_squared {
+            slope
+        } else {
+            0.0
+        };
 
         trends.push(ToolTrend {
             tool,

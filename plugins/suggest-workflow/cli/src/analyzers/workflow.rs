@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
-use crate::types::{SessionEntry, ToolUse, ToolSequence, WorkflowAnalysisResult};
-use crate::parsers::extract_tool_sequence;
 use crate::analyzers::tool_classifier::classify_tool;
+use crate::parsers::extract_tool_sequence;
+use crate::types::{SessionEntry, ToolSequence, ToolUse, WorkflowAnalysisResult};
+use std::collections::{HashMap, HashSet};
 
 /// Convert time_window_minutes to milliseconds (called with TuningConfig value)
 fn time_window_ms(minutes: u64) -> i64 {
@@ -36,7 +36,9 @@ fn extract_sequences_from_classified(
         current_unit.push(name.clone());
 
         if i < tool_uses.len() - 1 {
-            if let (Some(curr_ts), Some(next_ts)) = (tool_uses[i].timestamp, tool_uses[i + 1].timestamp) {
+            if let (Some(curr_ts), Some(next_ts)) =
+                (tool_uses[i].timestamp, tool_uses[i + 1].timestamp)
+            {
                 let time_diff = next_ts - curr_ts;
                 if time_diff > time_window {
                     if current_unit.len() >= min_length {
@@ -76,7 +78,9 @@ fn find_common_sequences(
 
     for (seq, &session_idx) in sequences.iter().zip(session_indices.iter()) {
         let key = seq.join("\x1F");
-        let entry = sequence_map.entry(key).or_insert_with(|| (0, HashSet::new()));
+        let entry = sequence_map
+            .entry(key)
+            .or_insert_with(|| (0, HashSet::new()));
         entry.0 += 1;
         entry.1.insert(session_idx);
     }
@@ -96,7 +100,12 @@ fn find_common_sequences(
 
     // Maximal sequence mining: remove subsequences contained in longer sequences
     // A shorter sequence is redundant if a longer sequence with >= its count contains it
-    results.sort_by(|a, b| b.tools.len().cmp(&a.tools.len()).then_with(|| b.count.cmp(&a.count)));
+    results.sort_by(|a, b| {
+        b.tools
+            .len()
+            .cmp(&a.tools.len())
+            .then_with(|| b.count.cmp(&a.count))
+    });
     let mut maximal: Vec<ToolSequence> = Vec::new();
     for candidate in results {
         let is_subsequence = maximal.iter().any(|longer| {
@@ -157,7 +166,11 @@ pub fn analyze_workflows(
 
         // Extract sequences from already-classified names
         let sequences = extract_sequences_from_classified(
-            &tool_uses, &classified_names, min_length, max_length, time_window,
+            &tool_uses,
+            &classified_names,
+            min_length,
+            max_length,
+            time_window,
         );
 
         for seq in sequences {
@@ -167,7 +180,10 @@ pub fn analyze_workflows(
     }
 
     let common_sequences = find_common_sequences(
-        &all_sequences, &all_session_indices, &session_names, threshold,
+        &all_sequences,
+        &all_session_indices,
+        &session_names,
+        threshold,
     );
     let top_sequences = common_sequences.into_iter().take(top).collect();
 

@@ -41,7 +41,8 @@ impl BM25Ranker {
         let idf: HashMap<String, f64> = df
             .into_iter()
             .map(|(term, freq)| {
-                let idf_val = ((doc_count as f64 - freq as f64 + 0.5) / (freq as f64 + 0.5) + 1.0).ln();
+                let idf_val =
+                    ((doc_count as f64 - freq as f64 + 0.5) / (freq as f64 + 0.5) + 1.0).ln();
                 (term, idf_val)
             })
             .collect();
@@ -75,7 +76,8 @@ impl BM25Ranker {
         for term in query_unique {
             if let (Some(&idf), Some(&freq)) = (self.idf.get(term), doc_tf.get(term)) {
                 let numerator = freq as f64 * (self.k1 + 1.0);
-                let denominator = freq as f64 + self.k1 * (1.0 - self.b + self.b * (dl / self.avg_dl));
+                let denominator =
+                    freq as f64 + self.k1 * (1.0 - self.b + self.b * (dl / self.avg_dl));
                 score += idf * (numerator / denominator);
             }
         }
@@ -104,9 +106,7 @@ impl BM25Ranker {
 
         let mut token_idf: Vec<(String, f64)> = tokens
             .iter()
-            .filter_map(|t| {
-                self.idf.get(t).map(|&idf| (t.clone(), idf))
-            })
+            .filter_map(|t| self.idf.get(t).map(|&idf| (t.clone(), idf)))
             .collect();
 
         // Deduplicate

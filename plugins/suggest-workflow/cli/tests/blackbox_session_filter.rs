@@ -18,11 +18,8 @@ fn index_project(tmp: &tempfile::TempDir, project: &std::path::Path) {
 // --- E1: filtered-sessions perspective finds sessions by first prompt pattern ---
 #[test]
 fn e1_filtered_sessions_by_prompt_pattern() {
-    let (tmp, project) = setup_project(&[
-        "minimal.jsonl",
-        "multi_tool.jsonl",
-        "autodev_session.jsonl",
-    ]);
+    let (tmp, project) =
+        setup_project(&["minimal.jsonl", "multi_tool.jsonl", "autodev_session.jsonl"]);
     index_project(&tmp, &project);
 
     let output = cli_with_home(&tmp)
@@ -79,11 +76,8 @@ fn e2_filtered_sessions_no_match() {
 // --- E3: --session-filter on tool-frequency limits to filtered sessions ---
 #[test]
 fn e3_session_filter_on_tool_frequency() {
-    let (tmp, project) = setup_project(&[
-        "minimal.jsonl",
-        "multi_tool.jsonl",
-        "autodev_session.jsonl",
-    ]);
+    let (tmp, project) =
+        setup_project(&["minimal.jsonl", "multi_tool.jsonl", "autodev_session.jsonl"]);
     index_project(&tmp, &project);
 
     // Query tool-frequency for all sessions
@@ -133,11 +127,8 @@ fn e3_session_filter_on_tool_frequency() {
 // --- E4: --session-filter on sessions perspective ---
 #[test]
 fn e4_session_filter_on_sessions() {
-    let (tmp, project) = setup_project(&[
-        "minimal.jsonl",
-        "multi_tool.jsonl",
-        "autodev_session.jsonl",
-    ]);
+    let (tmp, project) =
+        setup_project(&["minimal.jsonl", "multi_tool.jsonl", "autodev_session.jsonl"]);
     index_project(&tmp, &project);
 
     let output = cli_with_home(&tmp)

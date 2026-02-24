@@ -16,6 +16,11 @@ use crate::queue::repository::*;
 use crate::queue::task_queues::{labels, pr_phase, TaskQueues};
 use crate::queue::Database;
 
+/// REVIEWING/IMPROVING 상태에서 아이템을 제거하는 헬퍼.
+fn remove_from_phase(queues: &mut TaskQueues, work_id: &str) {
+    queues.prs.remove(work_id);
+}
+
 /// PR 리뷰 결과를 GitHub 댓글로 포맷
 fn format_review_comment(review: &str, pr_number: i64, verdict: Option<&ReviewVerdict>) -> String {
     let verdict_label = match verdict {
@@ -53,11 +58,17 @@ pub async fn process_pending(
             None => break,
         };
 
+        // Pending → Reviewing 상태 전이 (TUI/status 가시성)
+        let work_id = item.work_id.clone();
+        queues.prs.push(pr_phase::REVIEWING, item.clone());
+        tracing::debug!("PR #{}: Pending → Reviewing", item.github_number);
+
         // Pre-flight: GitHub에서 PR이 리뷰 대상인지 확인
         if !notifier
             .is_pr_reviewable(&item.repo_name, item.github_number, gh_host)
             .await
         {
+            remove_from_phase(queues, &work_id);
             gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                 .await;
             gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host)
@@ -76,6 +87,7 @@ pub async fn process_pending(
             .ensure_cloned(&item.repo_url, &item.repo_name)
             .await
         {
+            remove_from_phase(queues, &work_id);
             gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                 .await;
             tracing::error!("clone failed for PR #{}: {e}", item.github_number);
@@ -88,6 +100,7 @@ pub async fn process_pending(
         {
             Ok(p) => p,
             Err(e) => {
+                remove_from_phase(queues, &work_id);
                 gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                     .await;
                 tracing::error!("worktree failed for PR #{}: {e}", item.github_number);
@@ -154,14 +167,17 @@ pub async fn process_pending(
                                 .await;
                             }
 
+                            // Reviewing → done
+                            remove_from_phase(queues, &work_id);
                             gh.label_remove(&item.repo_name, pr_num, labels::WIP, gh_host)
                                 .await;
                             gh.label_add(&item.repo_name, pr_num, labels::DONE, gh_host)
                                 .await;
-                            tracing::info!("PR #{pr_num} review → done (approved)");
+                            tracing::info!("PR #{pr_num}: Reviewing → done (approved)");
                         }
                         Some(ReviewVerdict::RequestChanges) | None => {
-                            // request_changes 또는 verdict 파싱 실패 → 피드백 루프 진입
+                            // Reviewing → ReviewDone (피드백 루프 진입)
+                            remove_from_phase(queues, &work_id);
                             let comment = format_review_comment(
                                 &output.review,
                                 pr_num,
@@ -173,10 +189,11 @@ pub async fn process_pending(
 
                             item.review_comment = Some(output.review);
                             queues.prs.push(pr_phase::REVIEW_DONE, item);
-                            tracing::info!("PR #{pr_num} review complete → ReviewDone");
+                            tracing::info!("PR #{pr_num}: Reviewing → ReviewDone");
                         }
                     }
                 } else {
+                    remove_from_phase(queues, &work_id);
                     gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                         .await;
                     tracing::error!(
@@ -187,6 +204,7 @@ pub async fn process_pending(
                 }
             }
             Err(e) => {
+                remove_from_phase(queues, &work_id);
                 gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                     .await;
                 tracing::error!("review error for PR #{}: {e}", item.github_number);
@@ -210,6 +228,11 @@ pub async fn process_review_done(
     let gh_host = cfg.consumer.gh_host.as_deref();
 
     while let Some(item) = queues.prs.pop(pr_phase::REVIEW_DONE) {
+        // ReviewDone → Improving 상태 전이 (TUI/status 가시성)
+        let work_id = item.work_id.clone();
+        queues.prs.push(pr_phase::IMPROVING, item.clone());
+        tracing::debug!("PR #{}: ReviewDone → Improving", item.github_number);
+
         let worker_id = Uuid::new_v4().to_string();
         let task_id = format!("pr-{}", item.github_number);
 
@@ -217,6 +240,7 @@ pub async fn process_review_done(
             .ensure_cloned(&item.repo_url, &item.repo_name)
             .await
         {
+            remove_from_phase(queues, &work_id);
             gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                 .await;
             tracing::error!("clone failed for PR #{}: {e}", item.github_number);
@@ -229,6 +253,7 @@ pub async fn process_review_done(
         {
             Ok(p) => p,
             Err(e) => {
+                remove_from_phase(queues, &work_id);
                 gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                     .await;
                 tracing::error!("worktree failed for PR #{}: {e}", item.github_number);
@@ -268,10 +293,13 @@ pub async fn process_review_done(
                 });
 
                 if res.exit_code == 0 {
-                    // 개선 완료 → Improved에 push (재리뷰 대기)
+                    // Improving → Improved (재리뷰 대기)
+                    remove_from_phase(queues, &work_id);
+                    let pr_num = item.github_number;
                     queues.prs.push(pr_phase::IMPROVED, item);
-                    tracing::info!("PR feedback implemented → Improved");
+                    tracing::info!("PR #{pr_num}: Improving → Improved");
                 } else {
+                    remove_from_phase(queues, &work_id);
                     gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                         .await;
                     tracing::error!(
@@ -281,6 +309,7 @@ pub async fn process_review_done(
                 }
             }
             Err(e) => {
+                remove_from_phase(queues, &work_id);
                 gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                     .await;
                 tracing::error!(
@@ -311,6 +340,14 @@ pub async fn process_improved(
     let reviewer = Reviewer::new(claude);
 
     while let Some(mut item) = queues.prs.pop(pr_phase::IMPROVED) {
+        // Improved → Reviewing 상태 전이 (재리뷰, TUI/status 가시성)
+        let work_id = item.work_id.clone();
+        queues.prs.push(pr_phase::REVIEWING, item.clone());
+        tracing::debug!(
+            "PR #{}: Improved → Reviewing (re-review)",
+            item.github_number
+        );
+
         let worker_id = Uuid::new_v4().to_string();
         let task_id = format!("pr-{}", item.github_number);
 
@@ -318,6 +355,7 @@ pub async fn process_improved(
             .ensure_cloned(&item.repo_url, &item.repo_name)
             .await
         {
+            remove_from_phase(queues, &work_id);
             gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                 .await;
             tracing::error!("clone failed for PR #{}: {e}", item.github_number);
@@ -330,6 +368,7 @@ pub async fn process_improved(
         {
             Ok(p) => p,
             Err(e) => {
+                remove_from_phase(queues, &work_id);
                 gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                     .await;
                 tracing::error!("worktree failed for PR #{}: {e}", item.github_number);
@@ -367,6 +406,7 @@ pub async fn process_improved(
                 });
 
                 if output.exit_code != 0 {
+                    remove_from_phase(queues, &work_id);
                     gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                         .await;
                     tracing::error!(
@@ -394,21 +434,28 @@ pub async fn process_improved(
                             .await;
                         }
 
+                        // Reviewing → done (re-review approved)
+                        remove_from_phase(queues, &work_id);
                         gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                             .await;
                         gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host)
                             .await;
-                        tracing::info!("PR #{} re-review → done (approved)", item.github_number);
+                        tracing::info!(
+                            "PR #{}: Reviewing → done (re-review approved)",
+                            item.github_number
+                        );
                     }
                     Some(ReviewVerdict::RequestChanges) | None => {
-                        // request_changes 또는 verdict 파싱 실패 → ReviewDone 재진입
+                        // Reviewing → ReviewDone (재진입)
+                        remove_from_phase(queues, &work_id);
                         item.review_comment = Some(output.review);
                         queues.prs.push(pr_phase::REVIEW_DONE, item);
-                        tracing::info!("PR re-review → ReviewDone (request_changes)");
+                        tracing::info!("PR re-review: Reviewing → ReviewDone (request_changes)");
                     }
                 }
             }
             Err(e) => {
+                remove_from_phase(queues, &work_id);
                 gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                     .await;
                 tracing::error!("re-review error for PR #{}: {e}", item.github_number);

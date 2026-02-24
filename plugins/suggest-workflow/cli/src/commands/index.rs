@@ -2,9 +2,9 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
+use crate::analyzers::tool_classifier;
 use crate::db::repository::*;
 use crate::parsers;
-use crate::analyzers::tool_classifier;
 use crate::types::{Content, SessionEntry, ToolUse};
 
 pub fn run(repo: &dyn IndexRepository, sessions_dir: &Path) -> Result<()> {
@@ -52,11 +52,7 @@ pub fn run(repo: &dyn IndexRepository, sessions_dir: &Path) -> Result<()> {
                 }
             }
             Err(e) => {
-                eprintln!(
-                    "Warning: Failed to parse {}: {}",
-                    file_path.display(),
-                    e
-                );
+                eprintln!("Warning: Failed to parse {}: {}", file_path.display(), e);
                 error_count += 1;
             }
         }

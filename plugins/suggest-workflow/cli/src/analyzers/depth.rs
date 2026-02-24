@@ -77,7 +77,10 @@ impl std::str::FromStr for AnalysisDepth {
             "narrow" => Ok(AnalysisDepth::Narrow),
             "normal" => Ok(AnalysisDepth::Normal),
             "wide" => Ok(AnalysisDepth::Wide),
-            _ => Err(format!("invalid depth '{}': expected narrow, normal, or wide", s)),
+            _ => Err(format!(
+                "invalid depth '{}': expected narrow, normal, or wide",
+                s
+            )),
         }
     }
 }

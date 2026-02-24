@@ -1,15 +1,14 @@
-use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
-use rayon::prelude::*;
-use crate::parsers::{
-    parse_session, list_sessions, resolve_project_path, adapt_to_history_entries,
-};
-use crate::parsers::projects::list_projects;
 use crate::analyzers::{
-    analyze_workflows, analyze_prompts, analyze_tacit_knowledge,
-    build_dependency_graph,
+    analyze_prompts, analyze_tacit_knowledge, analyze_workflows, build_dependency_graph,
     AnalysisDepth, DepthConfig, StopwordSet, TuningConfig,
 };
+use crate::parsers::projects::list_projects;
+use crate::parsers::{
+    adapt_to_history_entries, list_sessions, parse_session, resolve_project_path,
+};
+use anyhow::{Context, Result};
+use rayon::prelude::*;
+use std::path::{Path, PathBuf};
 
 /// Analysis scope
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -51,12 +50,16 @@ impl std::str::FromStr for AnalysisFocus {
             "all" => Ok(AnalysisFocus::All),
             "workflow" => Ok(AnalysisFocus::Workflow),
             "skill" => Ok(AnalysisFocus::Skill),
-            _ => Err(format!("invalid focus '{}': expected all, workflow, or skill", s)),
+            _ => Err(format!(
+                "invalid focus '{}': expected all, workflow, or skill",
+                s
+            )),
         }
     }
 }
 
 /// Unified analysis entry point
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     scope: AnalysisScope,
     depth: AnalysisDepth,
@@ -73,24 +76,50 @@ pub fn run(
     let depth_config = depth.resolve();
 
     match scope {
-        AnalysisScope::Project => {
-            run_project_analysis(project_path, &depth_config, &depth, focus, threshold, top, format, decay, date_range, stopwords, tuning)
-        }
-        AnalysisScope::Global => {
-            run_global_analysis(&depth_config, &depth, focus, threshold, top, format, decay, date_range, stopwords, tuning)
-        }
+        AnalysisScope::Project => run_project_analysis(
+            project_path,
+            &depth_config,
+            &depth,
+            focus,
+            threshold,
+            top,
+            format,
+            decay,
+            date_range,
+            stopwords,
+            tuning,
+        ),
+        AnalysisScope::Global => run_global_analysis(
+            &depth_config,
+            &depth,
+            focus,
+            threshold,
+            top,
+            format,
+            decay,
+            date_range,
+            stopwords,
+            tuning,
+        ),
     }
 }
 
 /// Filter history entries by date range
-fn apply_date_filter(entries: Vec<crate::types::HistoryEntry>, date_range: Option<(i64, i64)>) -> Vec<crate::types::HistoryEntry> {
+fn apply_date_filter(
+    entries: Vec<crate::types::HistoryEntry>,
+    date_range: Option<(i64, i64)>,
+) -> Vec<crate::types::HistoryEntry> {
     match date_range {
-        Some((since, until)) => entries.into_iter().filter(|e| e.timestamp >= since && e.timestamp <= until).collect(),
+        Some((since, until)) => entries
+            .into_iter()
+            .filter(|e| e.timestamp >= since && e.timestamp <= until)
+            .collect(),
         None => entries,
     }
 }
 
 /// Single-project analysis
+#[allow(clippy::too_many_arguments)]
 fn run_project_analysis(
     project_path: &str,
     depth_config: &DepthConfig,
@@ -104,11 +133,12 @@ fn run_project_analysis(
     stopwords: &StopwordSet,
     tuning: &TuningConfig,
 ) -> Result<()> {
-    let resolved_path = resolve_project_path(project_path)
-        .with_context(|| format!(
+    let resolved_path = resolve_project_path(project_path).with_context(|| {
+        format!(
             "Project not found: {}\nExpected to find encoded directory under ~/.claude/projects/",
             project_path
-        ))?;
+        )
+    })?;
 
     eprintln!("Analyzing project: {}", resolved_path.display());
     eprintln!("Depth: {} | Focus: {:?}", depth, focus);
@@ -121,22 +151,46 @@ fn run_project_analysis(
         std::process::exit(2);
     }
 
-    eprintln!("Loaded {} sessions ({} prompts after date filter)", sessions.len(), history_entries.len());
+    eprintln!(
+        "Loaded {} sessions ({} prompts after date filter)",
+        sessions.len(),
+        history_entries.len()
+    );
 
     if format == "json" {
         print_json_output(
-            &sessions, &history_entries, depth_config, depth, focus,
-            threshold, top, decay, project_path, None, stopwords, tuning,
+            &sessions,
+            &history_entries,
+            depth_config,
+            depth,
+            focus,
+            threshold,
+            top,
+            decay,
+            project_path,
+            None,
+            stopwords,
+            tuning,
         )
     } else {
         print_text_output(
-            &sessions, &history_entries, depth_config, depth, focus,
-            threshold, top, decay, None, stopwords, tuning,
+            &sessions,
+            &history_entries,
+            depth_config,
+            depth,
+            focus,
+            threshold,
+            top,
+            decay,
+            None,
+            stopwords,
+            tuning,
         )
     }
 }
 
 /// Global cross-project analysis
+#[allow(clippy::too_many_arguments)]
 fn run_global_analysis(
     depth_config: &DepthConfig,
     depth: &AnalysisDepth,
@@ -210,13 +264,32 @@ fn run_global_analysis(
 
     if format == "json" {
         print_json_output(
-            &all_sessions, &all_history, depth_config, depth, focus,
-            threshold, top, decay, "global", global_info.as_ref(), stopwords, tuning,
+            &all_sessions,
+            &all_history,
+            depth_config,
+            depth,
+            focus,
+            threshold,
+            top,
+            decay,
+            "global",
+            global_info.as_ref(),
+            stopwords,
+            tuning,
         )
     } else {
         print_text_output(
-            &all_sessions, &all_history, depth_config, depth, focus,
-            threshold, top, decay, global_info.as_ref(), stopwords, tuning,
+            &all_sessions,
+            &all_history,
+            depth_config,
+            depth,
+            focus,
+            threshold,
+            top,
+            decay,
+            global_info.as_ref(),
+            stopwords,
+            tuning,
         )
     }
 }
@@ -237,10 +310,14 @@ struct GlobalInfo {
 
 /// Load sessions and history entries from a project directory.
 /// Uses rayon for parallel JSONL parsing across session files.
+#[allow(clippy::type_complexity)]
 fn load_sessions_from_dir(
     project_dir: &Path,
     project_label: &str,
-) -> Result<(Vec<(String, Vec<crate::types::SessionEntry>)>, Vec<crate::types::HistoryEntry>)> {
+) -> Result<(
+    Vec<(String, Vec<crate::types::SessionEntry>)>,
+    Vec<crate::types::HistoryEntry>,
+)> {
     let session_files = list_sessions(project_dir)?;
 
     let sessions: Vec<(String, Vec<crate::types::SessionEntry>)> = session_files
@@ -265,15 +342,12 @@ fn decode_project_name(encoded: &str) -> String {
     //   /home/user/my-project → -home-user-my-project
     // We cannot distinguish original hyphens from encoded slashes.
     // Use the encoded name directly as a display label (stripping leading dash).
-    if encoded.starts_with('-') {
-        encoded[1..].to_string()
-    } else {
-        encoded.to_string()
-    }
+    encoded.strip_prefix('-').unwrap_or(encoded).to_string()
 }
 
 // --- Output formatting ---
 
+#[allow(clippy::too_many_arguments)]
 fn print_text_output(
     sessions: &[(String, Vec<crate::types::SessionEntry>)],
     history_entries: &[crate::types::HistoryEntry],
@@ -289,21 +363,41 @@ fn print_text_output(
 ) -> Result<()> {
     // Header
     if let Some(info) = global_info {
-        println!("\n=== Global Analysis ({} projects, {} prompts) ===", info.project_count, info.total_prompts);
+        println!(
+            "\n=== Global Analysis ({} projects, {} prompts) ===",
+            info.project_count, info.total_prompts
+        );
     } else {
         println!("\n=== Project Analysis ===");
     }
-    println!("Depth: {} | Multi-query: {:?}\n", depth, depth_config.multi_query_strategy);
+    println!(
+        "Depth: {} | Multi-query: {:?}\n",
+        depth, depth_config.multi_query_strategy
+    );
 
     // Workflow analysis
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Workflow {
-        let workflow_result = analyze_workflows(sessions, threshold, top, tuning.min_seq_length, tuning.max_seq_length, tuning.time_window_minutes);
+        let workflow_result = analyze_workflows(
+            sessions,
+            threshold,
+            top,
+            tuning.min_seq_length,
+            tuning.max_seq_length,
+            tuning.time_window_minutes,
+        );
         let prompt_result = analyze_prompts(history_entries, decay, tuning.decay_half_life_days);
 
         println!("--- Workflow Analysis ---\n");
-        println!("Total prompts: {} | Unique: {}", prompt_result.total, prompt_result.unique);
+        println!(
+            "Total prompts: {} | Unique: {}",
+            prompt_result.total, prompt_result.unique
+        );
         if let Some(start) = &prompt_result.start_date {
-            println!("Period: {} ~ {}", start, prompt_result.end_date.as_deref().unwrap_or("N/A"));
+            println!(
+                "Period: {} ~ {}",
+                start,
+                prompt_result.end_date.as_deref().unwrap_or("N/A")
+            );
         }
 
         if !prompt_result.top_prompts.is_empty() {
@@ -314,7 +408,10 @@ fn print_text_output(
             }
         }
 
-        println!("\nTotal sequences: {} | Unique: {}", workflow_result.total_sequences, workflow_result.unique_sequences);
+        println!(
+            "\nTotal sequences: {} | Unique: {}",
+            workflow_result.total_sequences, workflow_result.unique_sequences
+        );
         if !workflow_result.top_sequences.is_empty() {
             println!("\nTop Tool Sequences:");
             for (i, seq) in workflow_result.top_sequences.iter().enumerate() {
@@ -331,32 +428,52 @@ fn print_text_output(
         // Dependency graph
         let dep_graph = build_dependency_graph(sessions, top, tuning);
         println!("--- Tool Dependency Graph ---\n");
-        println!("Nodes: {} | Edges: {} | Cycles: {}\n",
-            dep_graph.nodes.len(), dep_graph.edges.len(), dep_graph.cycles.len());
+        println!(
+            "Nodes: {} | Edges: {} | Cycles: {}\n",
+            dep_graph.nodes.len(),
+            dep_graph.edges.len(),
+            dep_graph.cycles.len()
+        );
 
         if !dep_graph.nodes.is_empty() {
             println!("Top Nodes (by usage):");
-            println!("{:<20} {:<8} {:<8} {:<8} {:<8} {:<10} {:<10}",
-                "Tool", "Uses", "Fanout", "Fanin", "AvgPos", "Entry%", "Terminal%");
+            println!(
+                "{:<20} {:<8} {:<8} {:<8} {:<8} {:<10} {:<10}",
+                "Tool", "Uses", "Fanout", "Fanin", "AvgPos", "Entry%", "Terminal%"
+            );
             println!("{}", "-".repeat(72));
             for node in dep_graph.nodes.iter().take(top) {
-                println!("{:<20} {:<8} {:<8} {:<8} {:<8.2} {:<10.0} {:<10.0}",
-                    truncate_str(&node.tool, 20), node.total_uses, node.fanout, node.fanin,
-                    node.avg_position, node.entry_rate * 100.0, node.terminal_rate * 100.0);
+                println!(
+                    "{:<20} {:<8} {:<8} {:<8} {:<8.2} {:<10.0} {:<10.0}",
+                    truncate_str(&node.tool, 20),
+                    node.total_uses,
+                    node.fanout,
+                    node.fanin,
+                    node.avg_position,
+                    node.entry_rate * 100.0,
+                    node.terminal_rate * 100.0
+                );
             }
             println!();
         }
 
         if !dep_graph.edges.is_empty() {
             println!("Top Edges (by frequency):");
-            println!("{:<20} {:<20} {:<6} {:<8} {:<8} {:<10}",
-                "From", "To", "Count", "P(→)", "P(←)", "Commit%");
+            println!(
+                "{:<20} {:<20} {:<6} {:<8} {:<8} {:<10}",
+                "From", "To", "Count", "P(→)", "P(←)", "Commit%"
+            );
             println!("{}", "-".repeat(72));
             for edge in dep_graph.edges.iter().take(top) {
-                println!("{:<20} {:<20} {:<6} {:<8.2} {:<8.2} {:<10.0}",
-                    truncate_str(&edge.from, 20), truncate_str(&edge.to, 20),
-                    edge.count, edge.probability, edge.reverse_probability,
-                    edge.commit_reachable_rate * 100.0);
+                println!(
+                    "{:<20} {:<20} {:<6} {:<8.2} {:<8.2} {:<10.0}",
+                    truncate_str(&edge.from, 20),
+                    truncate_str(&edge.to, 20),
+                    edge.count,
+                    edge.probability,
+                    edge.reverse_probability,
+                    edge.commit_reachable_rate * 100.0
+                );
             }
             println!();
         }
@@ -364,9 +481,13 @@ fn print_text_output(
         if !dep_graph.cycles.is_empty() {
             println!("Detected Cycles:");
             for (i, cycle) in dep_graph.cycles.iter().take(5).enumerate() {
-                println!("  {}. [{}x, avg {:.1} iter] {}",
-                    i + 1, cycle.occurrence_count, cycle.avg_iterations,
-                    cycle.tools.join(" ↔ "));
+                println!(
+                    "  {}. [{}x, avg {:.1} iter] {}",
+                    i + 1,
+                    cycle.occurrence_count,
+                    cycle.avg_iterations,
+                    cycle.tools.join(" ↔ ")
+                );
             }
             println!();
         }
@@ -374,9 +495,13 @@ fn print_text_output(
         if !dep_graph.critical_paths.is_empty() {
             println!("Critical Paths:");
             for (i, path) in dep_graph.critical_paths.iter().take(5).enumerate() {
-                println!("  {}. [{}x, {:.0}% commit] {}",
-                    i + 1, path.frequency, path.commit_rate * 100.0,
-                    path.path.join(" → "));
+                println!(
+                    "  {}. [{}x, {:.0}% commit] {}",
+                    i + 1,
+                    path.frequency,
+                    path.commit_rate * 100.0,
+                    path.path.join(" → ")
+                );
             }
             println!();
         }
@@ -386,7 +511,15 @@ fn print_text_output(
 
     // Skill/tacit knowledge analysis
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Skill {
-        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, tuning, stopwords);
+        let skill_result = analyze_tacit_knowledge(
+            history_entries,
+            threshold,
+            top,
+            depth_config,
+            decay,
+            tuning,
+            stopwords,
+        );
 
         println!("--- Tacit Knowledge Analysis ---\n");
         println!("Detected patterns: {}\n", skill_result.patterns.len());
@@ -394,7 +527,10 @@ fn print_text_output(
         if skill_result.patterns.is_empty() {
             println!("No patterns found with threshold >= {}", threshold);
         } else {
-            println!("{:<4} {:<30} {:<12} {:<8} {:<10}", "#", "Pattern", "Type", "Count", "Confidence");
+            println!(
+                "{:<4} {:<30} {:<12} {:<8} {:<10}",
+                "#", "Pattern", "Type", "Count", "Confidence"
+            );
             println!("{}", "-".repeat(70));
 
             for (i, pattern) in skill_result.patterns.iter().enumerate() {
@@ -414,7 +550,10 @@ fn print_text_output(
 
                 println!(
                     "{:<4} {} {:<12} {:<8} {:<10.0}%",
-                    i + 1, padded, pattern.pattern_type, pattern.count,
+                    i + 1,
+                    padded,
+                    pattern.pattern_type,
+                    pattern.count,
                     pattern.confidence * 100.0
                 );
             }
@@ -422,8 +561,12 @@ fn print_text_output(
             // Examples for top patterns
             println!("\n\nExample Prompts:\n");
             for (i, pattern) in skill_result.patterns.iter().take(3).enumerate() {
-                println!("{}. {} ({}x, {:.0}% confidence)",
-                    i + 1, pattern.pattern, pattern.count, pattern.confidence * 100.0
+                println!(
+                    "{}. {} ({}x, {:.0}% confidence)",
+                    i + 1,
+                    pattern.pattern,
+                    pattern.count,
+                    pattern.confidence * 100.0
                 );
                 println!("   Type: {}", pattern.pattern_type);
                 println!("   BM25: {:.2}", pattern.bm25_score);
@@ -443,8 +586,16 @@ fn print_text_output(
         let mut sorted = info.projects.iter().collect::<Vec<_>>();
         sorted.sort_by(|a, b| b.prompt_count.cmp(&a.prompt_count));
         for stat in sorted.iter().take(20) {
-            let short_name: String = stat.name.split('/').last().unwrap_or(&stat.name).to_string();
-            println!("  {}: {} prompts, {} sessions", short_name, stat.prompt_count, stat.session_count);
+            let short_name: String = stat
+                .name
+                .split('/')
+                .next_back()
+                .unwrap_or(&stat.name)
+                .to_string();
+            println!(
+                "  {}: {} prompts, {} sessions",
+                short_name, stat.prompt_count, stat.session_count
+            );
         }
         println!();
     }
@@ -461,6 +612,7 @@ fn truncate_str(s: &str, max: usize) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn print_json_output(
     sessions: &[(String, Vec<crate::types::SessionEntry>)],
     history_entries: &[crate::types::HistoryEntry],
@@ -499,7 +651,14 @@ fn print_json_output(
     }
 
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Workflow {
-        let workflow_result = analyze_workflows(sessions, threshold, top, tuning.min_seq_length, tuning.max_seq_length, tuning.time_window_minutes);
+        let workflow_result = analyze_workflows(
+            sessions,
+            threshold,
+            top,
+            tuning.min_seq_length,
+            tuning.max_seq_length,
+            tuning.time_window_minutes,
+        );
         let prompt_result = analyze_prompts(history_entries, decay, tuning.decay_half_life_days);
         let dep_graph = build_dependency_graph(sessions, top, tuning);
         output["promptAnalysis"] = serde_json::to_value(&prompt_result)?;
@@ -508,7 +667,15 @@ fn print_json_output(
     }
 
     if focus == AnalysisFocus::All || focus == AnalysisFocus::Skill {
-        let skill_result = analyze_tacit_knowledge(history_entries, threshold, top, depth_config, decay, tuning, stopwords);
+        let skill_result = analyze_tacit_knowledge(
+            history_entries,
+            threshold,
+            top,
+            depth_config,
+            decay,
+            tuning,
+            stopwords,
+        );
         output["tacitKnowledge"] = serde_json::to_value(&skill_result)?;
     }
 
