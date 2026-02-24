@@ -165,6 +165,7 @@ pub async fn process_pending(
                                 let _ = crate::knowledge::extractor::extract_task_knowledge(
                                     claude,
                                     gh,
+                                    workspace.git(),
                                     sw,
                                     &item.repo_name,
                                     item.github_number,
@@ -464,6 +465,7 @@ pub async fn process_improved(
                             let _ = crate::knowledge::extractor::extract_task_knowledge(
                                 claude,
                                 gh,
+                                workspace.git(),
                                 sw,
                                 &item.repo_name,
                                 item.github_number,

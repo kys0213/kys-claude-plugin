@@ -4,7 +4,9 @@ use anyhow::Result;
 
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
+use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
+use crate::queue::task_queues::labels;
 
 use super::models::KnowledgeSuggestion;
 
@@ -27,8 +29,55 @@ pub fn collect_existing_knowledge(wt_path: &Path) -> String {
 
     // .claude/rules/*.md
     let rules_dir = wt_path.join(".claude/rules");
-    if rules_dir.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(&rules_dir) {
+    collect_md_dir(&rules_dir, ".claude/rules", &mut knowledge);
+
+    // .claude/hooks.json
+    let hooks_json = wt_path.join(".claude/hooks.json");
+    if hooks_json.exists() {
+        if let Ok(content) = std::fs::read_to_string(&hooks_json) {
+            knowledge.push_str("--- .claude/hooks.json ---\n");
+            knowledge.push_str(&content);
+            knowledge.push_str("\n\n");
+        }
+    }
+
+    // .claude-plugin/ (skills, plugin.json)
+    let plugin_dir = wt_path.join(".claude-plugin");
+    if plugin_dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&plugin_dir) {
+            let mut paths: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+            paths.sort_by_key(|e| e.path());
+            for entry in paths {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        let name = path.file_name().unwrap_or_default().to_string_lossy();
+                        knowledge.push_str(&format!("--- .claude-plugin/{name} ---\n"));
+                        knowledge.push_str(&content);
+                        knowledge.push_str("\n\n");
+                    }
+                }
+            }
+        }
+    }
+
+    // .develop-workflow.yaml (워크플로우 설정)
+    let workflow_yaml = wt_path.join(".develop-workflow.yaml");
+    if workflow_yaml.exists() {
+        if let Ok(content) = std::fs::read_to_string(&workflow_yaml) {
+            knowledge.push_str("--- .develop-workflow.yaml ---\n");
+            knowledge.push_str(&content);
+            knowledge.push_str("\n\n");
+        }
+    }
+
+    knowledge
+}
+
+/// 디렉토리 내 *.md 파일을 수집하여 knowledge 문자열에 추가
+fn collect_md_dir(dir: &Path, label: &str, knowledge: &mut String) {
+    if dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(dir) {
             let mut paths: Vec<_> = entries
                 .filter_map(|e| e.ok())
                 .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
@@ -39,15 +88,13 @@ pub fn collect_existing_knowledge(wt_path: &Path) -> String {
                 let path = entry.path();
                 if let Ok(content) = std::fs::read_to_string(&path) {
                     let name = path.file_name().unwrap_or_default().to_string_lossy();
-                    knowledge.push_str(&format!("--- .claude/rules/{name} ---\n"));
+                    knowledge.push_str(&format!("--- {label}/{name} ---\n"));
                     knowledge.push_str(&content);
                     knowledge.push_str("\n\n");
                 }
             }
         }
     }
-
-    knowledge
 }
 
 /// per-task knowledge extraction
@@ -59,6 +106,7 @@ pub fn collect_existing_knowledge(wt_path: &Path) -> String {
 pub async fn extract_task_knowledge(
     claude: &dyn Claude,
     gh: &dyn Gh,
+    git: &dyn Git,
     sw: &dyn SuggestWorkflow,
     repo_name: &str,
     github_number: i64,
@@ -102,7 +150,10 @@ pub async fn extract_task_knowledge(
         .await;
 
     let suggestion = match result {
-        Ok(res) if res.exit_code == 0 => parse_knowledge_suggestion(&res.stdout),
+        Ok(res) if res.exit_code == 0 => {
+            // empty suggestions → None (코멘트 게시 불필요)
+            parse_knowledge_suggestion(&res.stdout).filter(|ks| !ks.suggestions.is_empty())
+        }
         Ok(res) => {
             tracing::warn!(
                 "knowledge extraction exited with {} for {task_type} #{github_number}",
@@ -116,13 +167,24 @@ pub async fn extract_task_knowledge(
         }
     };
 
-    // 제안이 있으면 GitHub 코멘트로 게시
+    // 제안이 있으면 GitHub 코멘트로 게시 + per-task actionable PR 생성
     if let Some(ref ks) = suggestion {
-        if !ks.suggestions.is_empty() {
-            let comment = format_knowledge_comment(ks, task_type, github_number);
-            gh.issue_comment(repo_name, github_number, &comment, gh_host)
-                .await;
-        }
+        let comment = format_knowledge_comment(ks, task_type, github_number);
+        gh.issue_comment(repo_name, github_number, &comment, gh_host)
+            .await;
+
+        // per-task actionable PR: suggestion마다 PR 생성
+        create_task_knowledge_prs(
+            gh,
+            git,
+            repo_name,
+            ks,
+            task_type,
+            github_number,
+            wt_path,
+            gh_host,
+        )
+        .await;
     }
 
     Ok(suggestion)
@@ -196,6 +258,75 @@ fn format_knowledge_comment(ks: &KnowledgeSuggestion, task_type: &str, number: i
     comment
 }
 
+/// per-task suggestion마다 actionable PR 생성
+///
+/// 각 suggestion에 대해 branch → file write → commit → push → PR 생성.
+/// daily knowledge PR과 동일한 패턴이지만 branch naming이 task 단위.
+#[allow(clippy::too_many_arguments)]
+async fn create_task_knowledge_prs(
+    gh: &dyn Gh,
+    git: &dyn Git,
+    repo_name: &str,
+    ks: &KnowledgeSuggestion,
+    task_type: &str,
+    github_number: i64,
+    base_path: &Path,
+    gh_host: Option<&str>,
+) {
+    let today = chrono::Local::now().format("%Y-%m-%d");
+    for (i, suggestion) in ks.suggestions.iter().enumerate() {
+        let branch = format!("autodev/knowledge/{task_type}-{github_number}-{today}-{i}");
+        let target = &suggestion.target_file;
+
+        if let Err(e) = git.checkout_new_branch(base_path, &branch).await {
+            tracing::warn!("task knowledge PR: failed to create branch {branch}: {e}");
+            continue;
+        }
+
+        let file_path = base_path.join(target);
+        if let Some(parent) = file_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(e) = std::fs::write(&file_path, &suggestion.content) {
+            tracing::warn!("task knowledge PR: failed to write {target}: {e}");
+            continue;
+        }
+
+        let message = format!("[autodev] knowledge: {}", suggestion.reason);
+        if let Err(e) = git
+            .add_commit_push(base_path, &[target.as_str()], &message, &branch)
+            .await
+        {
+            tracing::warn!("task knowledge PR: failed to commit+push {branch}: {e}");
+            continue;
+        }
+
+        let pr_title = format!("[autodev] rule: {}", suggestion.reason);
+        let pr_body = format!(
+            "<!-- autodev:knowledge-pr -->\n\n\
+             ## Knowledge Suggestion ({task_type} #{github_number})\n\n\
+             **Type**: {:?}\n\
+             **Target**: `{}`\n\n\
+             ### Content\n\n```\n{}\n```\n\n\
+             ### Reason\n\n{}",
+            suggestion.suggestion_type,
+            suggestion.target_file,
+            suggestion.content,
+            suggestion.reason,
+        );
+
+        if let Some(pr_num) = gh
+            .create_pr(repo_name, &branch, "main", &pr_title, &pr_body, gh_host)
+            .await
+        {
+            gh.label_add(repo_name, pr_num, labels::SKIP, gh_host).await;
+            tracing::info!(
+                "task knowledge PR #{pr_num} created for {task_type} #{github_number} suggestion {i}"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,6 +383,34 @@ mod tests {
         assert!(knowledge.contains("Run clippy"));
         assert!(knowledge.contains(".claude/rules/lint.md"));
         assert!(knowledge.contains(".claude/rules/test.md"));
+    }
+
+    #[test]
+    fn collect_existing_knowledge_reads_hooks_and_plugin() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path();
+
+        // .claude/hooks.json
+        std::fs::create_dir_all(base.join(".claude")).unwrap();
+        std::fs::write(base.join(".claude/hooks.json"), r#"{"hooks":[]}"#).unwrap();
+
+        // .claude-plugin/plugin.json
+        std::fs::create_dir_all(base.join(".claude-plugin")).unwrap();
+        std::fs::write(
+            base.join(".claude-plugin/plugin.json"),
+            r#"{"name":"test"}"#,
+        )
+        .unwrap();
+
+        // .develop-workflow.yaml
+        std::fs::write(base.join(".develop-workflow.yaml"), "workflow: test").unwrap();
+
+        let knowledge = collect_existing_knowledge(base);
+        assert!(knowledge.contains(".claude/hooks.json"));
+        assert!(knowledge.contains(r#"{"hooks":[]}"#));
+        assert!(knowledge.contains(".claude-plugin/plugin.json"));
+        assert!(knowledge.contains("workflow: test"));
+        assert!(knowledge.contains(".develop-workflow.yaml"));
     }
 
     #[test]

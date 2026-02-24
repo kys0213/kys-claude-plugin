@@ -16,6 +16,11 @@ impl<'a> Workspace<'a> {
         Self { git, env }
     }
 
+    /// 내부 Git 인프라 참조 반환
+    pub fn git(&self) -> &'a dyn Git {
+        self.git
+    }
+
     /// 레포의 base clone 경로
     pub fn repo_base_path(&self, repo_name: &str) -> PathBuf {
         let sanitized = config::sanitize_repo_name(repo_name);

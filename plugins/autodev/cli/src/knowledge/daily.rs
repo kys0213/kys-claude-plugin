@@ -364,7 +364,6 @@ pub async fn create_knowledge_prs(
 ///
 /// 당일 knowledge 코멘트들에서 target_file 기준으로 그룹핑하여
 /// 2회 이상 등장하는 패턴을 감지한다.
-#[allow(dead_code)]
 pub fn detect_cross_task_patterns(suggestions: &[super::models::Suggestion]) -> Vec<Pattern> {
     let mut file_counts: std::collections::HashMap<&str, Vec<&str>> =
         std::collections::HashMap::new();

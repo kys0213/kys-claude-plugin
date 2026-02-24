@@ -27,7 +27,7 @@ pub async fn process_all(
 ) -> Result<()> {
     // Issue: Phase 1 (분석) → Phase 2 (구현)
     issue::process_pending(db, env, workspace, notifier, gh, claude, queues).await?;
-    issue::process_ready(db, env, workspace, gh, claude, sw, queues).await?;
+    issue::process_ready(db, env, workspace, notifier, gh, claude, sw, queues).await?;
 
     // PR: 리뷰 → 개선 → 재리뷰 사이클
     pr::process_pending(db, env, workspace, notifier, gh, claude, sw, queues).await?;

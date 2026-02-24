@@ -16,6 +16,23 @@ use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::task_queues::{issue_phase, labels, make_work_id, pr_phase, PrItem, TaskQueues};
 
+/// head branch 이름으로 이미 생성된 PR을 조회하여 번호를 반환.
+/// extract_pr_number() 파싱 실패 시 fallback으로 사용하여 중복 PR 생성을 방지한다.
+async fn find_existing_pr(
+    gh: &dyn Gh,
+    repo_name: &str,
+    head_branch: &str,
+    gh_host: Option<&str>,
+) -> Option<i64> {
+    let params = [("head", head_branch), ("state", "open"), ("per_page", "1")];
+    let data = gh
+        .api_paginate(repo_name, "pulls", &params, gh_host)
+        .await
+        .ok()?;
+    let prs: Vec<serde_json::Value> = serde_json::from_slice(&data).ok()?;
+    prs.first().and_then(|pr| pr["number"].as_i64())
+}
+
 /// ANALYZING/IMPLEMENTING 상태에서 아이템을 제거하는 헬퍼.
 /// 모든 early-return 경로에서 호출하여 아이템이 중간 상태에 stuck되는 것을 방지한다.
 fn remove_from_phase(queues: &mut TaskQueues, work_id: &str) {
@@ -296,10 +313,12 @@ pub async fn process_pending(
 // ═══════════════════════════════════════════════════
 
 /// Ready 상태 이슈를 pop하여 구현
+#[allow(clippy::too_many_arguments)]
 pub async fn process_ready(
     db: &Database,
     env: &dyn Env,
     workspace: &Workspace<'_>,
+    notifier: &Notifier<'_>,
     gh: &dyn Gh,
     claude: &dyn Claude,
     _sw: &dyn SuggestWorkflow,
@@ -398,7 +417,12 @@ pub async fn process_ready(
 
                 if res.exit_code == 0 {
                     // v2: PR 번호 추출 → PR queue에 push (Issue-PR 연동)
-                    let pr_number = output::extract_pr_number(&res.stdout);
+                    // stdout 파싱 + find_existing_pr() API fallback
+                    let head_branch = format!("autodev/issue-{}", item.github_number);
+                    let pr_number = match output::extract_pr_number(&res.stdout) {
+                        Some(n) => Some(n),
+                        None => find_existing_pr(gh, &item.repo_name, &head_branch, gh_host).await,
+                    };
 
                     match pr_number {
                         Some(pr_num) => {
@@ -429,29 +453,29 @@ pub async fn process_ready(
                                 );
                             }
 
-                            // Issue: Implementing → done (PR pipeline이 이어서 처리)
+                            // Issue 코멘트: PR 생성 기록 (recovery 시 PR 번호 추적용)
+                            let pr_comment = format!(
+                                "<!-- autodev:pr-link:{pr_num} -->\n\
+                                 Implementation PR #{pr_num} has been created and is awaiting review."
+                            );
+                            notifier
+                                .post_issue_comment(
+                                    &item.repo_name,
+                                    item.github_number,
+                                    &pr_comment,
+                                    gh_host,
+                                )
+                                .await;
+
+                            // Issue: queue에서 제거 (implementing 라벨 유지 — PR approve 시 done 전이)
                             remove_from_phase(queues, &work_id);
-                            gh.label_remove(
-                                &item.repo_name,
-                                item.github_number,
-                                labels::IMPLEMENTING,
-                                gh_host,
-                            )
-                            .await;
-                            gh.label_add(
-                                &item.repo_name,
-                                item.github_number,
-                                labels::DONE,
-                                gh_host,
-                            )
-                            .await;
                             tracing::info!(
-                                "issue #{}: Implementing → done (PR #{pr_num} linked)",
+                                "issue #{}: exit queue (PR #{pr_num} review pending)",
                                 item.github_number
                             );
                         }
                         None => {
-                            // PR 번호 추출 실패 → issue done + 경고
+                            // PR 번호 추출 실패 → implementing 라벨 제거 (다음 scan에서 재시도)
                             remove_from_phase(queues, &work_id);
                             gh.label_remove(
                                 &item.repo_name,
@@ -460,15 +484,8 @@ pub async fn process_ready(
                                 gh_host,
                             )
                             .await;
-                            gh.label_add(
-                                &item.repo_name,
-                                item.github_number,
-                                labels::DONE,
-                                gh_host,
-                            )
-                            .await;
                             tracing::warn!(
-                                "issue #{}: Implementing → done (no PR number extracted)",
+                                "issue #{}: PR number extraction failed, implementing removed (will retry)",
                                 item.github_number
                             );
                         }

@@ -173,6 +173,7 @@ async fn issue_implement_prompt_contains_autodev_implement_marker() {
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
     let workspace = Workspace::new(&git, &env);
+    let notifier = Notifier::new(&gh);
     let mut queues = TaskQueues::new();
 
     let mut item = make_issue_item(&repo_id, 101, "Implement issue");
@@ -180,9 +181,18 @@ async fn issue_implement_prompt_contains_autodev_implement_marker() {
     queues.issues.push(issue_phase::READY, item);
 
     let sw = MockSuggestWorkflow::new();
-    autodev::pipeline::issue::process_ready(&db, &env, &workspace, &gh, &claude, &sw, &mut queues)
-        .await
-        .unwrap();
+    autodev::pipeline::issue::process_ready(
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &sw,
+        &mut queues,
+    )
+    .await
+    .unwrap();
 
     let calls = claude.calls.lock().unwrap();
     assert!(calls.len() >= 1);
@@ -389,10 +399,12 @@ async fn knowledge_per_task_prompt_contains_autodev_knowledge_marker() {
 
     let gh = MockGh::new();
 
+    let git = MockGit::new();
     let sw = MockSuggestWorkflow::new();
     let _ = autodev::knowledge::extractor::extract_task_knowledge(
         &claude,
         &gh,
+        &git,
         &sw,
         "org/repo",
         42,

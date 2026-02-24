@@ -148,7 +148,7 @@ pub fn extract_pr_number(stdout: &str) -> Option<i64> {
         stdout.to_string()
     };
 
-    // "/pull/" 패턴 검색
+    // Pattern 1: "/pull/" URL 패턴 검색
     for segment in search_text.split("/pull/") {
         if segment == search_text {
             continue; // split이 발생하지 않은 경우
@@ -156,6 +156,15 @@ pub fn extract_pr_number(stdout: &str) -> Option<i64> {
         // "/pull/" 뒤의 숫자 추출
         let num_str: String = segment.chars().take_while(|c| c.is_ascii_digit()).collect();
         if let Ok(n) = num_str.parse::<i64>() {
+            if n > 0 {
+                return Some(n);
+            }
+        }
+    }
+
+    // Pattern 2: JSON에서 pr_number 필드
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&search_text) {
+        if let Some(n) = v["pr_number"].as_i64() {
             if n > 0 {
                 return Some(n);
             }
@@ -262,5 +271,25 @@ mod tests {
     fn extract_pr_number_first_match() {
         let stdout = "See /pull/10 and /pull/20";
         assert_eq!(extract_pr_number(stdout), Some(10));
+    }
+
+    #[test]
+    fn extract_pr_number_from_json_field() {
+        let stdout = r#"{"pr_number": 42}"#;
+        assert_eq!(extract_pr_number(stdout), Some(42));
+    }
+
+    #[test]
+    fn extract_pr_number_from_envelope_json_field() {
+        let stdout = r#"{"result": "{\"pr_number\": 99}"}"#;
+        assert_eq!(extract_pr_number(stdout), Some(99));
+    }
+
+    #[test]
+    fn extract_pr_number_url_takes_precedence_over_json() {
+        let stdout = r#"{"pr_number": 10, "url": "https://github.com/org/repo/pull/20"}"#;
+        // URL pattern is checked first, but this JSON doesn't contain /pull/ at top level
+        // pr_number should be found via JSON fallback since no /pull/ in raw text
+        assert_eq!(extract_pr_number(stdout), Some(20));
     }
 }
