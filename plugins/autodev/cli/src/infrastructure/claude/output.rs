@@ -135,6 +135,36 @@ pub fn parse_analysis(stdout: &str) -> Option<AnalysisResult> {
     serde_json::from_str::<AnalysisResult>(stdout).ok()
 }
 
+/// v2: Claude 세션 stdout에서 PR 번호를 추출
+///
+/// 패턴 1: `github.com/{owner}/{repo}/pull/{number}` URL
+/// 패턴 2: envelope 안 text에 같은 URL 패턴
+/// 실패 시 None 반환
+pub fn extract_pr_number(stdout: &str) -> Option<i64> {
+    // envelope에서 result 추출 후 검색 (escape된 문자열도 처리)
+    let search_text = if let Ok(envelope) = serde_json::from_str::<ClaudeJsonOutput>(stdout) {
+        envelope.result.unwrap_or_else(|| stdout.to_string())
+    } else {
+        stdout.to_string()
+    };
+
+    // "/pull/" 패턴 검색
+    for segment in search_text.split("/pull/") {
+        if segment == search_text {
+            continue; // split이 발생하지 않은 경우
+        }
+        // "/pull/" 뒤의 숫자 추출
+        let num_str: String = segment.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(n) = num_str.parse::<i64>() {
+            if n > 0 {
+                return Some(n);
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,5 +238,29 @@ mod tests {
             .expect("should have properties");
         assert!(props.contains_key("verdict"), "schema should have verdict");
         assert!(props.contains_key("summary"), "schema should have summary");
+    }
+
+    #[test]
+    fn extract_pr_number_from_url_in_text() {
+        let stdout = "Created PR: https://github.com/org/repo/pull/42\nDone.";
+        assert_eq!(extract_pr_number(stdout), Some(42));
+    }
+
+    #[test]
+    fn extract_pr_number_from_envelope() {
+        let stdout = r#"{"result": "PR created at https://github.com/org/repo/pull/123"}"#;
+        assert_eq!(extract_pr_number(stdout), Some(123));
+    }
+
+    #[test]
+    fn extract_pr_number_none_when_absent() {
+        assert_eq!(extract_pr_number("No PR created"), None);
+        assert_eq!(extract_pr_number(""), None);
+    }
+
+    #[test]
+    fn extract_pr_number_first_match() {
+        let stdout = "See /pull/10 and /pull/20";
+        assert_eq!(extract_pr_number(stdout), Some(10));
     }
 }

@@ -78,6 +78,7 @@ fn make_pr_item(repo_id: &str, number: i64, title: &str) -> PrItem {
         head_branch: "feat/test".to_string(),
         base_branch: "main".to_string(),
         review_comment: None,
+        source_issue_number: None,
     }
 }
 
@@ -153,7 +154,7 @@ async fn issue_pipeline_success_transitions_to_ready() {
     .await
     .expect("process_pending should succeed");
 
-    // pending → ready (analysis 성공): item moved from PENDING to READY
+    // v2: pending → analyzed 라벨 + queue 이탈 (HITL 게이트)
     assert_eq!(
         queues.issues.len(issue_phase::PENDING),
         0,
@@ -161,8 +162,36 @@ async fn issue_pipeline_success_transitions_to_ready() {
     );
     assert_eq!(
         queues.issues.len(issue_phase::READY),
-        1,
-        "issue should be in ready state"
+        0,
+        "v2: issue should NOT be in ready (exits queue for human review)"
+    );
+    assert_eq!(queues.total(), 0, "v2: issue should exit queue entirely");
+
+    // analyzed 라벨이 추가되었는지 확인
+    let added = gh.added_labels.lock().unwrap();
+    assert!(
+        added
+            .iter()
+            .any(|(r, n, l)| r == "org/repo" && *n == 42 && l == "autodev:analyzed"),
+        "should add analyzed label"
+    );
+
+    // wip 라벨이 제거되었는지 확인
+    let removed = gh.removed_labels.lock().unwrap();
+    assert!(
+        removed
+            .iter()
+            .any(|(r, n, l)| r == "org/repo" && *n == 42 && l == "autodev:wip"),
+        "should remove wip label"
+    );
+
+    // 분석 코멘트가 게시되었는지 확인
+    let comments = gh.posted_comments.lock().unwrap();
+    assert!(
+        comments.iter().any(|(r, n, body)| r == "org/repo"
+            && *n == 42
+            && body.contains("<!-- autodev:analysis -->")),
+        "should post analysis comment with marker"
     );
 
     let logs = db.log_recent(None, 100).unwrap();
@@ -389,9 +418,13 @@ async fn issue_pipeline_processes_up_to_limit() {
     .await
     .expect("should process batch");
 
-    // default concurrency=1 → 1 processed (moved to READY), 9 remain in PENDING
+    // v2: default concurrency=1 → 1 processed (exits queue with analyzed label), 9 remain in PENDING
     assert_eq!(queues.issues.len(issue_phase::PENDING), 9);
-    assert_eq!(queues.issues.len(issue_phase::READY), 1);
+    assert_eq!(
+        queues.issues.len(issue_phase::READY),
+        0,
+        "v2: exits queue, not moved to Ready"
+    );
 }
 
 // ═══════════════════════════════════════════════

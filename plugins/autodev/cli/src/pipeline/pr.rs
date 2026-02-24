@@ -175,6 +175,22 @@ pub async fn process_pending(
                                 .await;
                             }
 
+                            // v2: source issue done 전이
+                            if let Some(issue_num) = item.source_issue_number {
+                                gh.label_remove(
+                                    &item.repo_name,
+                                    issue_num,
+                                    labels::IMPLEMENTING,
+                                    gh_host,
+                                )
+                                .await;
+                                gh.label_add(&item.repo_name, issue_num, labels::DONE, gh_host)
+                                    .await;
+                                tracing::info!(
+                                    "issue #{issue_num}: done (linked PR #{pr_num} approved)"
+                                );
+                            }
+
                             // Reviewing → done
                             remove_from_phase(queues, &work_id);
                             gh.label_remove(&item.repo_name, pr_num, labels::WIP, gh_host)
@@ -456,6 +472,23 @@ pub async fn process_improved(
                                 gh_host,
                             )
                             .await;
+                        }
+
+                        // v2: source issue done 전이
+                        if let Some(issue_num) = item.source_issue_number {
+                            gh.label_remove(
+                                &item.repo_name,
+                                issue_num,
+                                labels::IMPLEMENTING,
+                                gh_host,
+                            )
+                            .await;
+                            gh.label_add(&item.repo_name, issue_num, labels::DONE, gh_host)
+                                .await;
+                            tracing::info!(
+                                "issue #{issue_num}: done (linked PR #{} re-review approved)",
+                                item.github_number
+                            );
                         }
 
                         // Reviewing → done (re-review approved)

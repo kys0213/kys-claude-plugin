@@ -78,6 +78,7 @@ fn make_pr_item(repo_id: &str, number: i64, title: &str) -> PrItem {
         head_branch: "feat/test".to_string(),
         base_branch: "main".to_string(),
         review_comment: None,
+        source_issue_number: None,
     }
 }
 
@@ -189,7 +190,7 @@ async fn issue_full_cycle_pending_to_done() {
         make_issue_item(&repo_id, 10, "Full cycle issue"),
     );
 
-    // Phase 1: process_pending (Pending -> Ready)
+    // Phase 1: process_pending (Pending -> analyzed, exits queue with comment)
     autodev::pipeline::issue::process_pending(
         &db,
         &env,
@@ -202,39 +203,23 @@ async fn issue_full_cycle_pending_to_done() {
     .await
     .expect("phase 1 should succeed");
 
-    assert_eq!(
-        queues.issues.len(issue_phase::READY),
-        1,
-        "issue should be in Ready queue after phase 1"
-    );
-
-    // Phase 2: process_ready (Ready -> done, removed from queue)
-    let sw = MockSuggestWorkflow::new();
-    autodev::pipeline::issue::process_ready(&db, &env, &workspace, &gh, &claude, &sw, &mut queues)
-        .await
-        .expect("phase 2 should succeed");
-
-    // Item removed from queue (done)
+    // v2: Item removed from queue (analyzed + exits for human review)
     assert_eq!(
         queues.issues.total(),
         0,
-        "issue should be removed from queue after done"
+        "issue should be removed from queue after analysis"
     );
 
-    // Labels: done added, wip removed
-    assert_label_added(&gh, "org/repo", 10, labels::DONE);
+    // Labels: analyzed added, wip removed
+    assert_label_added(&gh, "org/repo", 10, labels::ANALYZED);
     assert_label_removed(&gh, "org/repo", 10, labels::WIP);
 
-    // Claude called 3 times (analysis + implementation + knowledge extraction)
-    assert_eq!(claude.call_count(), 3);
+    // Claude called once (analysis only)
+    assert_eq!(claude.call_count(), 1);
 
-    // 2 consumer logs recorded (knowledge extraction doesn't create a consumer log)
+    // 1 consumer log recorded (analysis only)
     let logs = db.log_recent(None, 100).unwrap();
-    assert_eq!(
-        logs.len(),
-        2,
-        "should have 2 consumer logs (analysis + implementation)"
-    );
+    assert_eq!(logs.len(), 1, "should have 1 consumer log (analysis only)");
 }
 
 // ═══════════════════════════════════════════════════
@@ -311,11 +296,15 @@ async fn issue_failed_retry_reentry_cycle() {
     .await
     .unwrap();
 
+    // v2: analyzed + exits queue
     assert_eq!(
-        queues.issues.len(issue_phase::READY),
-        1,
-        "issue should be in Ready queue after successful retry"
+        queues.issues.total(),
+        0,
+        "issue should be removed from queue after successful analysis"
     );
+
+    assert_label_added(&gh, "org/repo", 20, labels::ANALYZED);
+    assert_label_removed(&gh, "org/repo", 20, labels::WIP);
 
     assert_eq!(
         claude.call_count(),
@@ -710,19 +699,22 @@ async fn confidence_at_threshold_goes_to_ready() {
     .await
     .unwrap();
 
-    // 0.7 NOT < 0.7 -> ready (not waiting_human)
+    // v2: 0.7 >= 0.7 -> analyzed (exits queue for human review)
     assert_eq!(
-        queues.issues.len(issue_phase::READY),
-        1,
-        "confidence == threshold should go to ready"
+        queues.issues.total(),
+        0,
+        "confidence == threshold should trigger analyzed and exit"
     );
 
-    // No clarification comment should be posted
+    assert_label_added(&gh, "org/repo", 50, labels::ANALYZED);
+    assert_label_removed(&gh, "org/repo", 50, labels::WIP);
+
+    // Analysis comment should be posted
     let comments = gh.posted_comments.lock().unwrap();
     assert_eq!(
         comments.len(),
-        0,
-        "no clarification comment for threshold confidence"
+        1,
+        "analysis comment should be posted for implement verdict"
     );
 }
 
@@ -878,11 +870,21 @@ async fn analysis_completely_malformed_json_falls_back_to_ready() {
     .await
     .unwrap();
 
-    // parse_analysis returns None -> fallback ready
+    // v2: parse_analysis returns None -> fallback analyzed (exits queue)
     assert_eq!(
-        queues.issues.len(issue_phase::READY),
+        queues.issues.total(),
+        0,
+        "completely malformed output should fallback to analyzed and exit"
+    );
+
+    assert_label_added(&gh, "org/repo", 53, labels::ANALYZED);
+    assert_label_removed(&gh, "org/repo", 53, labels::WIP);
+
+    let comments = gh.posted_comments.lock().unwrap();
+    assert_eq!(
+        comments.len(),
         1,
-        "completely malformed output should fallback to ready"
+        "fallback analysis comment should be posted"
     );
 }
 
@@ -1295,13 +1297,9 @@ async fn process_all_handles_all_queues() {
 
     let git = MockGit::new();
     let claude = MockClaude::new();
-    // 1. Issue analysis -> ready (issue::process_pending)
+    // 1. Issue analysis -> analyzed (issue::process_pending, exits queue)
     claude.enqueue_response(&make_analysis_json("implement", 0.9), 0);
-    // 2. Issue implementation -> done (issue::process_ready)
-    claude.enqueue_response(r#"{"result": "Implementation done"}"#, 0);
-    // 3. Issue knowledge extraction (best effort, after issue done)
-    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
-    // 4. PR review -> ReviewDone (pr::process_pending, verdict=request_changes)
+    // 2. PR review -> ReviewDone (pr::process_pending, verdict=request_changes)
     claude.enqueue_response(
         r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Needs changes\"}"}"#,
         0,
@@ -1348,13 +1346,13 @@ async fn process_all_handles_all_queues() {
     .await
     .expect("process_all should succeed");
 
-    // Issue: pending -> ready -> done (both phases in same process_all)
+    // v2: Issue: pending -> analyzed (exits queue for human review)
     assert_eq!(
         queues.issues.total(),
         0,
-        "issue should be done and removed from queue"
+        "issue should be analyzed and removed from queue"
     );
-    assert_label_added(&gh, "org/repo", 90, labels::DONE);
+    assert_label_added(&gh, "org/repo", 90, labels::ANALYZED);
 
     // PR: pending -> ReviewDone -> Improved -> done (full cycle in same process_all)
     assert_eq!(
@@ -1374,8 +1372,8 @@ async fn process_all_handles_all_queues() {
 
     assert_eq!(
         claude.call_count(),
-        8,
-        "should call claude 8 times total (6 pipeline + 2 knowledge extraction)"
+        6,
+        "should call claude 6 times total (1 issue analysis + 3 PR pipeline + 1 PR knowledge + 1 merge)"
     );
 
     // PR Review API: request_changes (1st review) + approve (re-review) = 2 reviews

@@ -58,6 +58,14 @@ pub async fn scan_all(
                     {
                         tracing::error!("issue scan error for {}: {e}", repo.name);
                     }
+
+                    // v2: approved-analysis 라벨이 있는 이슈를 Ready 큐에 적재
+                    if let Err(e) =
+                        issues::scan_approved(gh, &repo.id, &repo.name, &repo.url, gh_host, queues)
+                            .await
+                    {
+                        tracing::error!("approved scan error for {}: {e}", repo.name);
+                    }
                 }
                 "pulls" => {
                     if let Err(e) = pulls::scan(

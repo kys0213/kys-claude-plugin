@@ -360,6 +360,41 @@ pub async fn create_knowledge_prs(
     }
 }
 
+/// v2: per-task knowledge extraction 결과를 집계
+///
+/// 당일 knowledge 코멘트들에서 target_file 기준으로 그룹핑하여
+/// 2회 이상 등장하는 패턴을 감지한다.
+#[allow(dead_code)]
+pub fn detect_cross_task_patterns(suggestions: &[super::models::Suggestion]) -> Vec<Pattern> {
+    let mut file_counts: std::collections::HashMap<&str, Vec<&str>> =
+        std::collections::HashMap::new();
+
+    for s in suggestions {
+        file_counts
+            .entry(&s.target_file)
+            .or_default()
+            .push(&s.reason);
+    }
+
+    let mut patterns = Vec::new();
+    for (file, reasons) in &file_counts {
+        if reasons.len() >= 2 {
+            patterns.push(Pattern {
+                pattern_type: PatternType::Hotfile,
+                description: format!(
+                    "{file} suggested by {} tasks: {}",
+                    reasons.len(),
+                    reasons.join("; ")
+                ),
+                occurrences: reasons.len() as u32,
+                affected_tasks: vec![],
+            });
+        }
+    }
+
+    patterns
+}
+
 /// DailyReport를 Markdown 본문으로 포맷
 fn format_daily_report_body(report: &DailyReport) -> String {
     let s = &report.summary;
@@ -556,5 +591,59 @@ mod tests {
         assert!(body.contains("autodev:daily-report"));
         assert!(body.contains("Issues done | 3"));
         assert!(body.contains("RepeatedFailure"));
+    }
+
+    // ═══════════════════════════════════════════════
+    // v2: detect_cross_task_patterns
+    // ═══════════════════════════════════════════════
+
+    #[test]
+    fn detect_cross_task_patterns_finds_repeated_files() {
+        use super::super::models::{Suggestion, SuggestionType};
+
+        let suggestions = vec![
+            Suggestion {
+                suggestion_type: SuggestionType::Rule,
+                target_file: ".claude/rules/test.md".into(),
+                content: "Run tests first".into(),
+                reason: "Issue #1".into(),
+            },
+            Suggestion {
+                suggestion_type: SuggestionType::Rule,
+                target_file: ".claude/rules/test.md".into(),
+                content: "Always test".into(),
+                reason: "Issue #2".into(),
+            },
+            Suggestion {
+                suggestion_type: SuggestionType::ClaudeMd,
+                target_file: "CLAUDE.md".into(),
+                content: "Update docs".into(),
+                reason: "Issue #3".into(),
+            },
+        ];
+
+        let patterns = detect_cross_task_patterns(&suggestions);
+        assert_eq!(
+            patterns.len(),
+            1,
+            "only .claude/rules/test.md has 2+ occurrences"
+        );
+        assert_eq!(patterns[0].occurrences, 2);
+        assert!(patterns[0].description.contains(".claude/rules/test.md"));
+    }
+
+    #[test]
+    fn detect_cross_task_patterns_empty_when_no_repeats() {
+        use super::super::models::{Suggestion, SuggestionType};
+
+        let suggestions = vec![Suggestion {
+            suggestion_type: SuggestionType::Rule,
+            target_file: ".claude/rules/test.md".into(),
+            content: "Run tests".into(),
+            reason: "Issue #1".into(),
+        }];
+
+        let patterns = detect_cross_task_patterns(&suggestions);
+        assert!(patterns.is_empty());
     }
 }
