@@ -17,14 +17,23 @@ pub struct SessionResult {
     pub exit_code: i32,
 }
 
+/// Claude CLI 세션 옵션
+#[derive(Debug, Default)]
+pub struct SessionOptions {
+    /// --output-format 값 (e.g. "json", "stream-json")
+    pub output_format: Option<String>,
+    /// --json-schema 값 (JSON schema 문자열)
+    pub json_schema: Option<String>,
+}
+
 /// Claude CLI 추상화
 #[async_trait]
 pub trait Claude: Send + Sync {
-    /// `claude -p "{prompt}" [--output-format {fmt}]` in cwd
+    /// `claude -p "{prompt}" [--output-format {fmt}] [--json-schema {schema}]` in cwd
     async fn run_session(
         &self,
         cwd: &Path,
         prompt: &str,
-        output_format: Option<&str>,
+        opts: &SessionOptions,
     ) -> Result<SessionResult>;
 }

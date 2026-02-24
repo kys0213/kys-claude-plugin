@@ -14,13 +14,18 @@ impl Claude for RealClaude {
         &self,
         cwd: &Path,
         prompt: &str,
-        output_format: Option<&str>,
+        opts: &super::SessionOptions,
     ) -> Result<SessionResult> {
         let mut args = vec!["-p".to_string(), prompt.to_string()];
 
-        if let Some(fmt) = output_format {
+        if let Some(ref fmt) = opts.output_format {
             args.push("--output-format".to_string());
-            args.push(fmt.to_string());
+            args.push(fmt.clone());
+        }
+
+        if let Some(ref schema) = opts.json_schema {
+            args.push("--json-schema".to_string());
+            args.push(schema.clone());
         }
 
         tracing::info!(

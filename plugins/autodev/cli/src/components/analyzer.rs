@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::infrastructure::claude::output;
-use crate::infrastructure::claude::Claude;
+use crate::infrastructure::claude::{Claude, SessionOptions};
 
 /// 이슈 분석 결과
 pub struct AnalyzerOutput {
@@ -31,7 +31,14 @@ impl<'a> Analyzer<'a> {
     pub async fn analyze(&self, wt_path: &Path, prompt: &str) -> Result<AnalyzerOutput> {
         let result = self
             .claude
-            .run_session(wt_path, prompt, Some("json"))
+            .run_session(
+                wt_path,
+                prompt,
+                &SessionOptions {
+                    output_format: Some("json".into()),
+                    json_schema: Some(output::ANALYSIS_SCHEMA.clone()),
+                },
+            )
             .await?;
 
         let analysis = if result.exit_code == 0 {

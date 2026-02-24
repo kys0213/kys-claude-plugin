@@ -42,7 +42,9 @@ pub async fn extract_task_knowledge(
          If none, return {{\"suggestions\": []}}."
     );
 
-    let result = claude.run_session(wt_path, &prompt, None).await;
+    let result = claude
+        .run_session(wt_path, &prompt, &Default::default())
+        .await;
 
     let suggestion = match result {
         Ok(res) if res.exit_code == 0 => parse_knowledge_suggestion(&res.stdout),

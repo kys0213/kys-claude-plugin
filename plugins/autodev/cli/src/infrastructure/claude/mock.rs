@@ -6,13 +6,23 @@ use async_trait::async_trait;
 
 use super::{Claude, SessionResult};
 
+/// 호출 기록용 구조체
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct MockCallRecord {
+    pub cwd: String,
+    pub prompt: String,
+    pub output_format: Option<String>,
+    pub json_schema: Option<String>,
+}
+
 /// 테스트용 Claude 구현체 — 미리 설정된 응답을 반환
 #[allow(dead_code)]
 pub struct MockClaude {
     /// 순차적으로 반환할 응답 큐 (FIFO)
     responses: Mutex<Vec<SessionResult>>,
-    /// 호출 기록: (cwd, prompt, output_format)
-    pub calls: Mutex<Vec<(String, String, Option<String>)>>,
+    /// 호출 기록
+    pub calls: Mutex<Vec<MockCallRecord>>,
 }
 
 impl Default for MockClaude {
@@ -51,13 +61,14 @@ impl Claude for MockClaude {
         &self,
         cwd: &Path,
         prompt: &str,
-        output_format: Option<&str>,
+        opts: &super::SessionOptions,
     ) -> Result<SessionResult> {
-        self.calls.lock().unwrap().push((
-            cwd.display().to_string(),
-            prompt.to_string(),
-            output_format.map(String::from),
-        ));
+        self.calls.lock().unwrap().push(MockCallRecord {
+            cwd: cwd.display().to_string(),
+            prompt: prompt.to_string(),
+            output_format: opts.output_format.clone(),
+            json_schema: opts.json_schema.clone(),
+        });
 
         let mut responses = self.responses.lock().unwrap();
         if responses.is_empty() {

@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use crate::infrastructure::claude::output;
 use crate::infrastructure::claude::output::ReviewVerdict;
-use crate::infrastructure::claude::Claude;
+use crate::infrastructure::claude::{Claude, SessionOptions};
 
 /// PR 리뷰 실행 — Claude 세션을 통한 코드 리뷰
 pub struct Reviewer<'a> {
@@ -38,7 +38,14 @@ impl<'a> Reviewer<'a> {
     pub async fn review_pr(&self, wt_path: &Path, prompt: &str) -> Result<ReviewOutput> {
         let result = self
             .claude
-            .run_session(wt_path, prompt, Some("json"))
+            .run_session(
+                wt_path,
+                prompt,
+                &SessionOptions {
+                    output_format: Some("json".into()),
+                    json_schema: Some(output::REVIEW_SCHEMA.clone()),
+                },
+            )
             .await?;
 
         let (review, verdict) = if result.exit_code == 0 {

@@ -45,7 +45,11 @@ impl<'a> Merger<'a> {
             pr_number, pr_number
         );
 
-        match self.claude.run_session(wt_path, &prompt, None).await {
+        match self
+            .claude
+            .run_session(wt_path, &prompt, &Default::default())
+            .await
+        {
             Ok(res) => {
                 let outcome = if res.exit_code == 0 {
                     MergeOutcome::Success
@@ -87,7 +91,11 @@ impl<'a> Merger<'a> {
              5) `git commit` the merge resolution."
         );
 
-        match self.claude.run_session(wt_path, &prompt, None).await {
+        match self
+            .claude
+            .run_session(wt_path, &prompt, &Default::default())
+            .await
+        {
             Ok(res) => {
                 let outcome = if res.exit_code == 0 {
                     MergeOutcome::Success

@@ -235,7 +235,10 @@ pub async fn generate_daily_suggestions(
          \"reason\": \"why this matters\"\n    }}\n  ]\n}}"
     );
 
-    match claude.run_session(wt_path, &prompt, None).await {
+    match claude
+        .run_session(wt_path, &prompt, &Default::default())
+        .await
+    {
         Ok(res) if res.exit_code == 0 => {
             // envelope → inner parse
             if let Ok(envelope) = serde_json::from_str::<
