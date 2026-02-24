@@ -182,7 +182,16 @@ DESIGN-v2의 `scan_approved()`에서 `analysis_report` 필드를 활용함 → *
 
 **목적**: PR approve 시 source issue도 자동으로 done 전이
 
-#### D-1. PR approve 경로에 Issue done 전이 추가
+#### D-1. PR pipeline worktree 정리 추가
+- **파일**: `cli/src/pipeline/pr.rs`
+- **변경**: `process_pending()`, `process_review_done()`, `process_improved()` 각 함수에서 작업 완료 후 `remove_worktree()` 호출 추가
+  - 현재 `pr.rs` 전체에 `remove_worktree()` 호출이 0건 → worktree 누적 문제
+  - `issue.rs`와 동일한 패턴: 함수 끝에서 success/failure 모두 정리
+  - **주의**: `process_review_done()`은 `git push` 완료 후에 정리해야 함
+- **branch 보존**: `remove_worktree()`는 worktree 디렉토리만 제거. remote branch는 유지됨
+  → 다음 단계(`process_improved()` 등)에서 `create_worktree(task_id, head_branch)`로 재생성 가능
+
+#### D-2. PR approve 경로에 Issue done 전이 추가
 - **파일**: `cli/src/pipeline/pr.rs`
 - **변경**: `process_pending()` 및 `process_improved()` 의 approve 분기에서:
   ```rust
@@ -206,14 +215,15 @@ DESIGN-v2의 `scan_approved()`에서 `analysis_report` 필드를 활용함 → *
 - **변경**: `autodev:implementing` + 연결 PR이 이미 merged/closed → done 전이
 - **복잡도**: PR 조회가 필요하므로 Phase E 이후로 미룰 수도 있음
 
-#### D-4. 테스트 작성
+#### D-5. 테스트 작성
 - PR approve 시 `source_issue_number`가 Some이면 Issue done 전이
 - PR approve 시 `source_issue_number`가 None이면 기존 동작 유지
 - reconcile: `analyzed` 라벨 → skip
 - reconcile: `approved-analysis` → Ready 적재 + 라벨 전이
 - reconcile: `implementing` → skip
+- PR pipeline worktree 정리: 각 process_* 함수 완료 후 worktree 제거 확인
 
-**검증**: `cargo test` — PR pipeline + reconcile 테스트 통과
+**검증**: `cargo test` — PR pipeline + reconcile + worktree 정리 테스트 통과
 
 ---
 
@@ -282,13 +292,13 @@ B, C는 A 완료 후 병렬 가능하나, C의 `process_ready()` 변경이 B의 
 | A | `cargo test` + `cargo clippy` | 기존 테스트 전부 통과 |
 | B | 위 + 새 테스트 | analyzed 라벨 전이 + queue 이탈 검증 |
 | C | 위 + 새 테스트 | scan_approved + process_ready PR 생성 검증 |
-| D | 위 + 새 테스트 | Issue-PR 연동 + reconcile 확장 검증 |
+| D | 위 + 새 테스트 | Issue-PR 연동 + reconcile 확장 + PR worktree 정리 검증 |
 | E | 위 + 새 테스트 | delta check + daily 패턴 검증 |
 | 최종 | `cargo fmt --check` + `cargo clippy -- -D warnings` + `cargo test` | Quality Gate 전부 통과 |
 
 ---
 
-## 구현 순서 요약 (23 항목)
+## 구현 순서 요약 (25 항목)
 
 | # | Phase | 항목 | 파일 |
 |---|-------|------|------|
@@ -298,23 +308,25 @@ B, C는 A 완료 후 병렬 가능하나, C의 `process_ready()` 변경이 B의 
 | 4 | A | 기존 테스트 통과 확인 | — |
 | 5 | B | `format_analysis_comment()` 추가 | components/verdict.rs |
 | 6 | B | `process_pending()` 분석 완료 경로 변경 | pipeline/issue.rs |
-| 7 | B | Phase B 테스트 | pipeline/issue.rs, verdict.rs |
-| 8 | C | `extract_analysis_from_comments()` 추가 | scanner/issues.rs |
-| 9 | C | `scan_approved()` 추가 | scanner/issues.rs |
-| 10 | C | `scan_all()` 호출 추가 | scanner/mod.rs |
-| 11 | C | `extract_pr_number()` 추가 | infrastructure/claude/output.rs |
-| 12 | C | `process_ready()` PR 생성 + queue push | pipeline/issue.rs |
-| 13 | C | Phase C 테스트 | scanner/issues.rs, output.rs, pipeline/issue.rs |
-| 14 | D | PR approve → Issue done 전이 | pipeline/pr.rs |
-| 15 | D | `startup_reconcile()` 라벨 필터 확장 | daemon/mod.rs |
-| 16 | D | Recovery 확장 (implementing + merged PR) | daemon/recovery.rs |
-| 17 | D | Phase D 테스트 | pipeline/pr.rs, daemon/mod.rs |
-| 18 | E | `collect_existing_knowledge()` | knowledge/extractor.rs |
-| 19 | E | `extract_task_knowledge()` 확장 | knowledge/extractor.rs |
-| 20 | E | `create_knowledge_pr()` | knowledge/extractor.rs |
-| 21 | E | `aggregate_daily_suggestions()` | knowledge/daily.rs |
-| 22 | E | `detect_cross_task_patterns()` | knowledge/daily.rs |
-| 23 | E | Phase E 테스트 | knowledge/ |
+| 7 | B | 재분석 Safety Valve 추가 | scanner/issues.rs |
+| 8 | B | Phase B 테스트 | pipeline/issue.rs, verdict.rs, scanner/issues.rs |
+| 9 | C | `extract_analysis_from_comments()` 추가 | scanner/issues.rs |
+| 10 | C | `scan_approved()` 추가 | scanner/issues.rs |
+| 11 | C | `scan_all()` 호출 추가 | scanner/mod.rs |
+| 12 | C | `extract_pr_number()` + `find_existing_pr()` 추가 | infrastructure/claude/output.rs, pipeline/issue.rs |
+| 13 | C | `process_ready()` PR 생성 + queue push + pr-link 코멘트 | pipeline/issue.rs |
+| 14 | C | Phase C 테스트 | scanner/issues.rs, output.rs, pipeline/issue.rs |
+| 15 | D | PR pipeline worktree 정리 추가 | pipeline/pr.rs |
+| 16 | D | PR approve → Issue done 전이 | pipeline/pr.rs |
+| 17 | D | `startup_reconcile()` 라벨 필터 확장 | daemon/mod.rs |
+| 18 | D | Recovery 확장 (implementing + merged PR) | daemon/recovery.rs |
+| 19 | D | Phase D 테스트 | pipeline/pr.rs, daemon/mod.rs |
+| 20 | E | `collect_existing_knowledge()` | knowledge/extractor.rs |
+| 21 | E | `extract_task_knowledge()` 확장 | knowledge/extractor.rs |
+| 22 | E | `create_knowledge_pr()` (격리 worktree) | knowledge/extractor.rs |
+| 23 | E | `aggregate_daily_suggestions()` | knowledge/daily.rs |
+| 24 | E | `detect_cross_task_patterns()` | knowledge/daily.rs |
+| 25 | E | Phase E 테스트 | knowledge/ |
 
 ---
 

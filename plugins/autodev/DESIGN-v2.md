@@ -1013,7 +1013,93 @@ pub fn detect_cross_task_patterns(
 
 ---
 
-## 9. 사이드이펙트 & 영향 범위
+## 9. Worktree & Branch Lifecycle (v2 보완)
+
+### 원칙
+
+- **Worktree**: 각 pipeline 단계에서 생성하고, 단계 완료 시 **반드시 제거**
+- **Branch**: remote에 push된 branch는 PR이 closed/merged 될 때까지 **유지**
+- Worktree 제거 ≠ Branch 삭제 (worktree는 작업 디렉토리일 뿐, branch는 remote에 독립적으로 존재)
+
+### Pipeline별 Lifecycle
+
+```
+Issue Pipeline (process_ready):
+  create_worktree(task_id, None)
+  → 구현 + git push → PR 생성 (branch: autodev/issue-{N})
+  → PR queue push
+  → remove_worktree()          ← worktree 정리
+  ※ branch는 remote에 유지 → PR pipeline이 이후 사용
+
+PR Pipeline (process_pending → process_review_done → process_improved):
+  ┌── process_pending ──────────────────────────────────┐
+  │  create_worktree(task_id, head_branch)              │
+  │  → Claude 리뷰 실행                                 │
+  │  → verdict 판정                                     │
+  │  → remove_worktree()        ← worktree 정리 (NEW)  │
+  │                                                      │
+  │  approve → done (worktree 이미 제거됨)               │
+  │  request_changes → ReviewDone 큐                    │
+  └──────────────────────────────────────────────────────┘
+         │
+  ┌── process_review_done ──────────────────────────────┐
+  │  create_worktree(task_id, head_branch)              │
+  │  → Claude 피드백 반영 + git push (같은 branch)      │
+  │  → remove_worktree()        ← worktree 정리 (NEW)  │
+  │  → Improved 큐                                      │
+  └──────────────────────────────────────────────────────┘
+         │
+  ┌── process_improved ─────────────────────────────────┐
+  │  create_worktree(task_id, head_branch)              │
+  │  → Claude 재리뷰 실행                                │
+  │  → remove_worktree()        ← worktree 정리 (NEW)  │
+  │                                                      │
+  │  approve → done                                      │
+  │  request_changes → ReviewDone (반복)                 │
+  └──────────────────────────────────────────────────────┘
+
+Knowledge PR:
+  create_worktree(task_id, "main")  ← 별도 격리 worktree
+  → branch 생성 + 파일 작성 + PR 생성
+  → remove_worktree()
+```
+
+### 핵심 불변식 (Invariant)
+
+1. **모든 pipeline 함수는 생성한 worktree를 자신이 제거**한다 (success/failure 모두)
+2. PR의 `head_branch`는 remote에 존재하므로, 다음 단계에서 `create_worktree(task_id, head_branch)`로 항상 재생성 가능
+3. Worktree 제거 시 branch를 삭제하지 않는다 — branch는 PR lifecycle과 함께 관리
+
+### v1 대비 변경
+
+```
+v1: pipeline/pr.rs에서 worktree 제거 호출 없음 → worktree 누적
+v2: 각 process_* 함수 끝에서 remove_worktree() 호출 → 정리
+```
+
+### 구현 변경 필요 (pipeline/pr.rs)
+
+```rust
+// process_pending(), process_review_done(), process_improved() 공통 패턴
+
+let wt_path = workspace.create_worktree(&item.repo_name, &task_id, Some(&item.head_branch)).await?;
+
+// ... 작업 수행 ...
+
+// worktree 정리 (success/failure 모두)
+let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
+```
+
+**주의사항**:
+- `process_review_done()`에서 피드백 반영 후 `git push`가 완료된 뒤에 worktree를 제거해야 한다
+- push가 실패하면 worktree를 유지할 필요 없음 (재시도 시 새 worktree 생성)
+- `process_pending()`과 `process_improved()`는 리뷰만 수행하므로 (코드 수정 없음) 즉시 정리 가능
+
+---
+
+## 10. 사이드이펙트 & 영향 범위
+
+> **Note**: 기존 Section 9~13이 10~14로 밀림
 
 ### 코드 변경
 
@@ -1023,7 +1109,7 @@ pub fn detect_cross_task_patterns(
 | `scanner/issues.rs` | `scan_approved()` 함수 추가 | 낮음 (new function) |
 | `scanner/mod.rs` | `scan_all()`에 `scan_approved()` 호출 추가 | 낮음 |
 | `pipeline/issue.rs` | `process_pending()` 변경, `process_ready()` PR 연동 로직 | **중간** |
-| `pipeline/pr.rs` | approve 경로에 Issue done 전이 추가 | 낮음 |
+| `pipeline/pr.rs` | approve 경로에 Issue done 전이 추가 + **worktree 정리 로직 추가** | **중간** |
 | `components/verdict.rs` | `format_analysis_comment()` 함수 추가 | 낮음 (new function) |
 | `infrastructure/claude/output.rs` | `extract_pr_number()` 함수 추가 | 낮음 (new function) |
 | `scanner/issues.rs` | `count_analysis_comments()` Safety Valve 추가 | 낮음 (new function) |
@@ -1050,7 +1136,7 @@ pub fn detect_cross_task_patterns(
 
 ---
 
-## 10. End-to-End Flow (v2)
+## 11. End-to-End Flow (v2)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -1102,7 +1188,7 @@ pub fn detect_cross_task_patterns(
 
 ---
 
-## 11. Status Transitions (v2)
+## 12. Status Transitions (v2)
 
 | Type | Phase Flow | 라벨 전이 |
 |------|-----------|----------|
@@ -1117,7 +1203,7 @@ pub fn detect_cross_task_patterns(
 
 ---
 
-## 12. 구현 우선순위
+## 13. 구현 우선순위
 
 ### Phase A: 라벨 + 모델 (기반)
 
@@ -1159,7 +1245,7 @@ pub fn detect_cross_task_patterns(
 
 ---
 
-## 13. 구현 체크리스트
+## 14. 구현 체크리스트
 
 - [ ] 새 라벨 상수 추가 (`ANALYZED`, `APPROVED_ANALYSIS`, `IMPLEMENTING`)
 - [ ] `PrItem.source_issue_number` 추가
@@ -1176,4 +1262,5 @@ pub fn detect_cross_task_patterns(
 - [ ] `collect_existing_knowledge()` — 기존 레포 지식 수집 (skills, hooks, workflow 포함)
 - [ ] `aggregate_daily_suggestions()` — 일간 per-task 집계
 - [ ] `detect_cross_task_patterns()` — 교차 task 패턴 감지
+- [ ] `pipeline/pr.rs` worktree 정리 — process_pending/review_done/improved 각 함수에 remove_worktree() 추가
 - [ ] 기존 테스트 수정 + 새 테스트 추가
