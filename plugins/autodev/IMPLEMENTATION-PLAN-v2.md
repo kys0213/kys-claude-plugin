@@ -109,15 +109,23 @@ DESIGN-v2의 `scan_approved()`에서 `analysis_report` 필드를 활용함 → *
   - 변경: `Implement` verdict → 분석 코멘트 게시 + `wip` 라벨 제거 + `analyzed` 라벨 추가 + queue에서 제거
 - **주의**: `NeedsClarification`, `Wontfix` 경로는 기존 유지
 
-#### B-3. 테스트 작성
+#### B-3. 재분석 Safety Valve 추가
+- **파일**: `cli/src/scanner/issues.rs`
+- **변경**: `scan()` 에서 Pending 적재 전 `count_analysis_comments()` 호출
+  - 분석 코멘트 수 >= `MAX_ANALYSIS_ATTEMPTS`(기본 3) → `autodev:skip` 라벨 + 안내 코멘트
+  - 그 외 → 기존 Pending 적재 로직 유지
+- **TDD**: 분석 코멘트 3개 이상인 이슈 → skip 전이 검증, 0~2개인 이슈 → 정상 Pending 적재 검증
+
+#### B-4. 테스트 작성
 - 분석 성공 (`Implement` verdict) 시:
   - `autodev:analyzed` 라벨 추가 확인
   - `autodev:wip` 라벨 제거 확인
   - 이슈 코멘트에 분석 리포트 게시 확인
   - queue에서 완전 제거 확인 (Ready로 이동하지 않음)
 - 기존 `NeedsClarification`, `Wontfix` 테스트가 여전히 통과하는지 확인
+- 재분석 Safety Valve: 분석 코멘트 3회 이상 → skip 전이 검증
 
-**검증**: `cargo test` — process_pending 관련 테스트 통과
+**검증**: `cargo test` — process_pending + safety valve 관련 테스트 통과
 
 ---
 
@@ -134,7 +142,7 @@ DESIGN-v2의 `scan_approved()`에서 `analysis_report` 필드를 활용함 → *
 - **파일**: `cli/src/scanner/issues.rs`
 - **변경**:
   - `autodev:approved-analysis` 라벨이 있는 open 이슈 조회
-  - `approved-analysis` 라벨 제거 + `implementing` 라벨 추가
+  - `implementing` 라벨 **먼저 추가** → `approved-analysis` 라벨 제거 (크래시 시 "라벨 없음" 방지)
   - 분석 리포트를 코멘트에서 추출
   - `IssueItem` 생성 (analysis_report 포함)
   - `Ready` 큐에 push
@@ -156,7 +164,7 @@ DESIGN-v2의 `scan_approved()`에서 `analysis_report` 필드를 활용함 → *
 - **파일**: `cli/src/pipeline/issue.rs`
 - **변경** (핵심):
   - 기존: 구현 성공 → `autodev:done` (이슈 완료)
-  - 변경: 구현 성공 → PR 번호 추출 → PrItem 생성 (`source_issue_number` 설정) → PR queue push + `autodev:wip` (PR) → Issue queue에서 제거
+  - 변경: 구현 성공 → PR 번호 추출 (stdout 파싱 + `find_existing_pr()` fallback) → PrItem 생성 (`source_issue_number` 설정) → PR queue push + `autodev:wip` (PR) → **이슈 코멘트 게시** (`<!-- autodev:pr-link:{N} -->` 마커, recovery 추적용) → Issue queue에서 제거
   - PR 번호 추출 실패 시 → `implementing` 라벨 제거 + queue 제거 (다음 scan에서 재시도)
 - **주의**: 더 이상 knowledge extraction을 process_ready()에서 직접 호출하지 않음 (PR approve 시점에서 호출)
 
