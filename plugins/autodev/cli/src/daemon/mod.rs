@@ -102,6 +102,11 @@ pub async fn start(
                             Err(e) => tracing::error!("recovery error: {e}"),
                             _ => {}
                         }
+                        match recovery::recover_orphan_implementing(&repos, gh, &queues, gh_host.as_deref()).await {
+                            Ok(n) if n > 0 => info!("recovered {n} orphan implementing items"),
+                            Err(e) => tracing::error!("implementing recovery error: {e}"),
+                            _ => {}
+                        }
                     }
                     Err(e) => tracing::error!("recovery repo lookup failed: {e}"),
                 }
@@ -146,6 +151,12 @@ pub async fn start(
                                                 claude, &report, &base,
                                             ).await {
                                                 report.suggestions = ks.suggestions;
+                                            }
+
+                                            // v2: cross-task patterns 감지 (suggestions 간 반복 파일)
+                                            if !report.suggestions.is_empty() {
+                                                let cross_patterns = crate::knowledge::daily::detect_cross_task_patterns(&report.suggestions);
+                                                report.patterns.extend(cross_patterns);
                                             }
 
                                             crate::knowledge::daily::post_daily_report(

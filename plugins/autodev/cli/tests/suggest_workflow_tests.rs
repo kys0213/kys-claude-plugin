@@ -1,5 +1,6 @@
 use autodev::infrastructure::claude::mock::MockClaude;
 use autodev::infrastructure::gh::mock::MockGh;
+use autodev::infrastructure::git::mock::MockGit;
 use autodev::infrastructure::suggest_workflow::mock::MockSuggestWorkflow;
 use autodev::knowledge::models::*;
 
@@ -81,11 +82,13 @@ async fn extract_task_knowledge_includes_sw_data_in_prompt() {
         },
     ]);
 
+    let git = MockGit::new();
     let tmp = tempfile::TempDir::new().unwrap();
 
     let result = autodev::knowledge::extractor::extract_task_knowledge(
         &claude,
         &gh,
+        &git,
         &sw,
         "org/repo",
         42,
@@ -96,7 +99,8 @@ async fn extract_task_knowledge_includes_sw_data_in_prompt() {
     .await
     .unwrap();
 
-    assert!(result.is_some());
+    // empty suggestions → None (Phase 4 empty guard)
+    assert!(result.is_none());
 
     // Claude에 전달된 프롬프트에 suggest-workflow 데이터가 포함되어야 함
     let calls = claude.calls.lock().unwrap();
@@ -121,6 +125,7 @@ async fn extract_task_knowledge_works_without_sw_data() {
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
     let gh = MockGh::new();
+    let git = MockGit::new();
     let sw = MockSuggestWorkflow::new();
     // suggest-workflow 데이터 없음 (빈 응답)
 
@@ -129,6 +134,7 @@ async fn extract_task_knowledge_works_without_sw_data() {
     let result = autodev::knowledge::extractor::extract_task_knowledge(
         &claude,
         &gh,
+        &git,
         &sw,
         "org/repo",
         42,
@@ -139,7 +145,8 @@ async fn extract_task_knowledge_works_without_sw_data() {
     .await
     .unwrap();
 
-    assert!(result.is_some());
+    // empty suggestions → None (Phase 4 empty guard)
+    assert!(result.is_none());
 
     // suggest-workflow 데이터가 없으면 프롬프트에 포함되지 않아야 함
     let calls = claude.calls.lock().unwrap();

@@ -518,15 +518,25 @@ async fn issue_ready_cleans_up_worktree() {
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
     let workspace = Workspace::new(&git, &env);
+    let notifier = Notifier::new(&gh);
     let sw = MockSuggestWorkflow::new();
     let mut queues = TaskQueues::new();
     queues
         .issues
         .push(issue_phase::READY, make_issue_item(&repo_id, 90));
 
-    autodev::pipeline::issue::process_ready(&db, &env, &workspace, &gh, &claude, &sw, &mut queues)
-        .await
-        .unwrap();
+    autodev::pipeline::issue::process_ready(
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &sw,
+        &mut queues,
+    )
+    .await
+    .unwrap();
 
     // Issue pipeline은 항상 worktree 정리 수행 (올바른 동작)
     assert!(
