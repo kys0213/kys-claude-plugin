@@ -256,13 +256,54 @@ async fn startup_reconcile(
                 let has_done = item_labels.contains(&labels::DONE);
                 let has_skip = item_labels.contains(&labels::SKIP);
                 let has_wip = item_labels.contains(&labels::WIP);
+                // v2: 새 라벨 상태 확인
+                let has_analyzed = item_labels.contains(&labels::ANALYZED);
+                let has_approved = item_labels.contains(&labels::APPROVED_ANALYSIS);
+                let has_implementing = item_labels.contains(&labels::IMPLEMENTING);
 
                 if has_done || has_skip {
                     continue;
                 }
 
+                // v2: analyzed → 사람 리뷰 대기 중, skip
+                if has_analyzed {
+                    continue;
+                }
+
+                // v2: implementing → PR pipeline이 처리 중, skip
+                if has_implementing {
+                    continue;
+                }
+
                 let work_id = make_work_id("issue", &repo.name, number);
                 if queues.contains(&work_id) {
+                    continue;
+                }
+
+                // v2: approved-analysis → Ready 큐에 적재
+                if has_approved {
+                    gh.label_remove(&repo.name, number, labels::APPROVED_ANALYSIS, gh_host)
+                        .await;
+                    gh.label_remove(&repo.name, number, labels::ANALYZED, gh_host)
+                        .await;
+                    gh.label_add(&repo.name, number, labels::IMPLEMENTING, gh_host)
+                        .await;
+
+                    let issue_item = IssueItem {
+                        work_id,
+                        repo_id: repo.id.clone(),
+                        repo_name: repo.name.clone(),
+                        repo_url: repo.url.clone(),
+                        github_number: number,
+                        title: item["title"].as_str().unwrap_or("").to_string(),
+                        body: item["body"].as_str().map(|s| s.to_string()),
+                        labels: item_labels.iter().map(|s| s.to_string()).collect(),
+                        author: item["user"]["login"].as_str().unwrap_or("").to_string(),
+                        analysis_report: None,
+                    };
+
+                    queues.issues.push(issue_phase::READY, issue_item);
+                    recovered += 1;
                     continue;
                 }
 
@@ -344,6 +385,7 @@ async fn startup_reconcile(
                     head_branch: item["head"]["ref"].as_str().unwrap_or("").to_string(),
                     base_branch: item["base"]["ref"].as_str().unwrap_or("").to_string(),
                     review_comment: None,
+                    source_issue_number: None,
                 };
 
                 gh.label_add(&repo.name, number, labels::WIP, gh_host).await;
@@ -671,5 +713,96 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result, 1, "48h window should work the same as 24h");
+    }
+
+    // ═══════════════════════════════════════════════
+    // v2: reconcile 라벨 필터 확장
+    // ═══════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn startup_reconcile_skips_analyzed_label() {
+        let db = open_memory_db();
+        let _repo_id = db
+            .repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
+
+        let gh = MockGh::new();
+        let issues = serde_json::json!([
+            {"number": 1, "title": "Analyzed", "labels": [{"name": "autodev:analyzed"}], "user": {"login": "a"}}
+        ]);
+        gh.set_paginate("org/repo", "issues", serde_json::to_vec(&issues).unwrap());
+        gh.set_paginate("org/repo", "pulls", b"[]".to_vec());
+
+        let mut queues = TaskQueues::new();
+        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result, 0,
+            "analyzed issues should be skipped (awaiting human review)"
+        );
+    }
+
+    #[tokio::test]
+    async fn startup_reconcile_skips_implementing_label() {
+        let db = open_memory_db();
+        let _repo_id = db
+            .repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
+
+        let gh = MockGh::new();
+        let issues = serde_json::json!([
+            {"number": 2, "title": "Implementing", "labels": [{"name": "autodev:implementing"}], "user": {"login": "a"}}
+        ]);
+        gh.set_paginate("org/repo", "issues", serde_json::to_vec(&issues).unwrap());
+        gh.set_paginate("org/repo", "pulls", b"[]".to_vec());
+
+        let mut queues = TaskQueues::new();
+        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result, 0,
+            "implementing issues should be skipped (PR pipeline handles)"
+        );
+    }
+
+    #[tokio::test]
+    async fn startup_reconcile_recovers_approved_analysis_to_ready() {
+        let db = open_memory_db();
+        let _repo_id = db
+            .repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
+
+        let gh = MockGh::new();
+        let issues = serde_json::json!([
+            {"number": 3, "title": "Approved", "labels": [{"name": "autodev:approved-analysis"}], "user": {"login": "a"}}
+        ]);
+        gh.set_paginate("org/repo", "issues", serde_json::to_vec(&issues).unwrap());
+        gh.set_paginate("org/repo", "pulls", b"[]".to_vec());
+
+        let mut queues = TaskQueues::new();
+        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result, 1,
+            "approved-analysis issues should be recovered to Ready"
+        );
+        assert!(queues.contains("issue:org/repo:3"));
+
+        // implementing 라벨 추가, approved-analysis 제거
+        let added = gh.added_labels.lock().unwrap();
+        assert!(added
+            .iter()
+            .any(|(r, n, l)| r == "org/repo" && *n == 3 && l == "autodev:implementing"));
+
+        let removed = gh.removed_labels.lock().unwrap();
+        assert!(removed
+            .iter()
+            .any(|(r, n, l)| r == "org/repo" && *n == 3 && l == "autodev:approved-analysis"));
     }
 }

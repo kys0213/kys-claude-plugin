@@ -319,16 +319,34 @@ async fn issue_verdict_implement_high_confidence_goes_to_ready() {
     .await
     .unwrap();
 
-    // high confidence → moved to Ready
-    assert_eq!(queues.issues.len(issue_phase::READY), 1);
+    // v2: high confidence → analyzed 라벨 + queue 이탈 (HITL 게이트)
+    assert_eq!(
+        queues.issues.len(issue_phase::READY),
+        0,
+        "v2: exits queue, not moved to Ready"
+    );
+    assert_eq!(
+        queues.issues.total(),
+        0,
+        "v2: issue should exit queue entirely"
+    );
 
-    // no comment posted (goes straight to implementation)
-    let comments = gh.posted_comments.lock().unwrap();
-    assert_eq!(comments.len(), 0);
-
-    // no skip label added
+    // analyzed 라벨 추가, wip 라벨 제거
     let added = gh.added_labels.lock().unwrap();
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 4 && label == labels::ANALYZED));
     assert!(!added.iter().any(|(_, _, label)| label == labels::SKIP));
+
+    let removed = gh.removed_labels.lock().unwrap();
+    assert!(removed
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 4 && label == labels::WIP));
+
+    // 분석 코멘트가 게시됨
+    let comments = gh.posted_comments.lock().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert!(comments[0].2.contains("<!-- autodev:analysis -->"));
 }
 
 // ═══════════════════════════════════════════════
@@ -428,6 +446,26 @@ async fn issue_unparseable_analysis_falls_back_to_ready() {
     .await
     .unwrap();
 
-    // fallback → Ready queue has 1 item
-    assert_eq!(queues.issues.len(issue_phase::READY), 1);
+    // v2: fallback → analyzed 라벨 + queue 이탈
+    assert_eq!(
+        queues.issues.len(issue_phase::READY),
+        0,
+        "v2: exits queue, not moved to Ready"
+    );
+    assert_eq!(
+        queues.issues.total(),
+        0,
+        "v2: issue should exit queue entirely"
+    );
+
+    // analyzed 라벨 추가
+    let added = gh.added_labels.lock().unwrap();
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 6 && label == labels::ANALYZED));
+
+    // 분석 코멘트가 게시됨 (fallback)
+    let comments = gh.posted_comments.lock().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert!(comments[0].2.contains("<!-- autodev:analysis -->"));
 }

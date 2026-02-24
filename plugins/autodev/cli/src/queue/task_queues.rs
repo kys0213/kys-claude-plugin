@@ -41,6 +41,8 @@ pub struct PrItem {
     pub base_branch: String,
     /// 리뷰 결과 (피드백 루프에서 사용)
     pub review_comment: Option<String>,
+    /// v2: 이 PR이 어떤 이슈로부터 생성되었는지 (issue pipeline에서 설정)
+    pub source_issue_number: Option<i64>,
 }
 
 impl HasWorkId for PrItem {
@@ -111,6 +113,11 @@ pub mod labels {
     pub const WIP: &str = "autodev:wip";
     pub const DONE: &str = "autodev:done";
     pub const SKIP: &str = "autodev:skip";
+
+    // v2: 분석 리뷰 게이트 + Issue-PR 연동
+    pub const ANALYZED: &str = "autodev:analyzed";
+    pub const APPROVED_ANALYSIS: &str = "autodev:approved-analysis";
+    pub const IMPLEMENTING: &str = "autodev:implementing";
 }
 
 // ─── TaskQueues: 전체 작업 큐 ───
@@ -179,6 +186,7 @@ mod tests {
             head_branch: "feature".to_string(),
             base_branch: "main".to_string(),
             review_comment: None,
+            source_issue_number: None,
         }
     }
 
@@ -313,6 +321,11 @@ mod tests {
         assert_eq!(labels::WIP, "autodev:wip");
         assert_eq!(labels::DONE, "autodev:done");
         assert_eq!(labels::SKIP, "autodev:skip");
+
+        // v2 라벨
+        assert_eq!(labels::ANALYZED, "autodev:analyzed");
+        assert_eq!(labels::APPROVED_ANALYSIS, "autodev:approved-analysis");
+        assert_eq!(labels::IMPLEMENTING, "autodev:implementing");
     }
 
     // ═══════════════════════════════════════════════════

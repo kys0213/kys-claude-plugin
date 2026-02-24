@@ -152,6 +152,7 @@ mod tests {
             head_branch: "feat".to_string(),
             base_branch: "main".to_string(),
             review_comment: None,
+            source_issue_number: None,
         }
     }
 
