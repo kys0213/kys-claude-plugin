@@ -554,25 +554,25 @@ recovery() 추가 로직:
 
 | | v1 | v2 |
 |---|---|---|
-| 트리거 시점 | done 전이 시 1회 | 세션 완료마다 (분석, 구현, 리뷰) |
+| 트리거 시점 | done 전이 시 1회 | done 전이 시 1회 (동일) |
 | 기존 지식 비교 | 없음 (항상 추출) | 기존 레포 지식과 diff → 의미 없으면 skip |
 | 결과물 | 이슈 코멘트만 | 코멘트 + **actionable PR** (skill/subagent 등) |
-| 일간 분석 | daemon 로그 기반 | daemon 로그 + **교차 세션 패턴** |
+| 일간 분석 | daemon 로그 기반 | daemon 로그 + **교차 task 패턴** |
 
-### Per-Session Knowledge Extraction
+### Per-Task Knowledge Extraction
 
-v2에서는 각 Claude 세션 완료 시점에 지식 추출을 시도한다:
+v1과 동일하게 **done 전이 시점**에 1회 실행한다.
+v2에서 달라지는 것은 delta check와 actionable PR 생성이다:
 
 ```
-세션 완료 시점:
-  1. 분석 세션 완료     — process_pending() 성공 후
-  2. 구현 세션 완료     — process_ready() PR 생성 후
-  3. PR 리뷰 세션 완료  — PR approve 시
+done 전이 시점:
+  Issue: PR approved → implementing → done 전이 직전
+  PR:    리뷰 approve → wip → done 전이 직전 (standalone PR)
 ```
 
 ### 기존 지식 비교 (Delta Check)
 
-각 세션 완료 시 기존 레포의 지식 베이스와 비교하여, 의미 있는 차이가 있을 때만 추출을 진행한다:
+done 전이 시 기존 레포의 지식 베이스와 비교하여, 의미 있는 차이가 있을 때만 추출을 진행한다:
 
 ```
 기존 지식 수집 대상:
@@ -584,35 +584,35 @@ v2에서는 각 Claude 세션 완료 시점에 지식 추출을 시도한다:
 ```
 
 ```rust
-// knowledge/extractor.rs — v2 per-session extraction
+// knowledge/extractor.rs — v2: v1의 extract_task_knowledge()를 확장
 
-pub async fn extract_session_knowledge(
+pub async fn extract_task_knowledge(
     claude: &dyn Claude,
     gh: &dyn Gh,
     sw: &dyn SuggestWorkflow,
     repo_name: &str,
     github_number: i64,
-    session_type: &str,       // "analysis" | "implementation" | "review"
+    task_type: &str,       // "issue" | "pr"
     wt_path: &Path,
     gh_host: Option<&str>,
 ) -> Result<Option<KnowledgeSuggestion>> {
-    // 1. 기존 지식 베이스 수집
+    // 1. 기존 지식 베이스 수집 (v2 추가)
     let existing_knowledge = collect_existing_knowledge(wt_path)?;
 
-    // 2. suggest-workflow 세션 데이터
-    let sw_section = build_suggest_workflow_section(sw, session_type, github_number).await;
+    // 2. suggest-workflow 세션 데이터 (v1 유지)
+    let sw_section = build_suggest_workflow_section(sw, task_type, github_number).await;
 
-    // 3. Delta-aware 프롬프트
+    // 3. Delta-aware 프롬프트 (v2: 기존 지식과 비교 지시 추가)
     let prompt = format!(
-        "[autodev] knowledge: {session_type} #{github_number}\n\n\
-         Analyze the completed {session_type} session (#{github_number}).\n\n\
+        "[autodev] knowledge: {task_type} #{github_number}\n\n\
+         Analyze the completed {task_type} task (#{github_number}).\n\n\
          === Existing Repository Knowledge ===\n\
          {existing_knowledge}\n\n\
          === Session Data ===\n\
          {sw_section}\n\n\
-         Compare this session's learnings against the existing knowledge above.\n\
+         Compare this task's learnings against the existing knowledge above.\n\
          ONLY suggest changes if there is a meaningful gap or improvement.\n\
-         If the session's learnings are already covered by existing rules/skills, \
+         If the task's learnings are already covered by existing rules/skills, \
          return {{\"suggestions\": []}}.\n\n\
          For actionable suggestions (skill, subagent), include the full file content \
          in the `content` field so it can be directly committed as a PR.\n\n\
@@ -635,7 +635,7 @@ pub async fn extract_session_knowledge(
     let suggestion = match suggestion {
         Some(ref ks) if ks.suggestions.is_empty() => {
             tracing::debug!(
-                "{session_type} #{github_number}: no new knowledge (delta check passed)"
+                "{task_type} #{github_number}: no new knowledge (delta check passed)"
             );
             return Ok(None);
         }
@@ -643,11 +643,11 @@ pub async fn extract_session_knowledge(
         None => return Ok(None),
     };
 
-    // 5. 코멘트 게시
-    let comment = format_knowledge_comment(&suggestion, session_type, github_number);
+    // 5. 코멘트 게시 (v1 유지)
+    let comment = format_knowledge_comment(&suggestion, task_type, github_number);
     gh.issue_comment(repo_name, github_number, &comment, gh_host).await;
 
-    // 6. Actionable suggestions → PR 생성
+    // 6. Actionable suggestions → PR 생성 (v2 추가)
     let actionable: Vec<&Suggestion> = suggestion.suggestions.iter()
         .filter(|s| matches!(s.suggestion_type, SuggestionType::Skill | SuggestionType::Subagent))
         .collect();
@@ -769,63 +769,50 @@ async fn create_knowledge_pr(
 
 ### Pipeline 내 호출 위치
 
+done 전이 직전에 1회만 호출한다. v1과 동일한 위치:
+
 ```rust
-// pipeline/issue.rs — process_pending() 분석 완료 후
-Some(ref a) => {
-    // 분석 코멘트 게시 + analyzed 라벨 ...
-
-    // ─── Knowledge Extraction (분석 세션) ───
-    if knowledge_extraction {
-        let _ = extractor::extract_session_knowledge(
-            claude, gh, sw, &item.repo_name, item.github_number,
-            "analysis", &wt_path, gh_host,
-        ).await;
-    }
-
-    let _ = workspace.remove_worktree(...).await;
-}
-
-// pipeline/issue.rs — process_ready() 구현 완료 후
-Some(pr_num) => {
-    // PR queue push + implementing 라벨 ...
-
-    // ─── Knowledge Extraction (구현 세션) ───
-    if knowledge_extraction {
-        let _ = extractor::extract_session_knowledge(
-            claude, gh, sw, &item.repo_name, item.github_number,
-            "implementation", &wt_path, gh_host,
-        ).await;
-    }
-}
-
-// pipeline/pr.rs — PR approve 시
+// pipeline/pr.rs — PR approve 시 (done 전이 직전)
 Some(ReviewVerdict::Approve) => {
-    // ─── Knowledge Extraction (리뷰 세션) ───
+    // ─── Knowledge Extraction (done 전이 직전) ───
     if knowledge_extraction {
-        let _ = extractor::extract_session_knowledge(
+        let _ = extractor::extract_task_knowledge(
             claude, gh, sw, &item.repo_name, item.github_number,
-            "review", &wt_path, gh_host,
+            "pr", &wt_path, gh_host,
         ).await;
     }
 
-    // source_issue done 전이 ...
+    // Reviewing → done (PR)
+    remove_from_phase(queues, &work_id);
+    gh.label_remove(&item.repo_name, pr_num, labels::WIP, gh_host).await;
+    gh.label_add(&item.repo_name, pr_num, labels::DONE, gh_host).await;
+
+    // Issue-PR 연동: source_issue도 done 전이
+    if let Some(issue_num) = item.source_issue_number {
+        gh.label_remove(&item.repo_name, issue_num, labels::IMPLEMENTING, gh_host).await;
+        gh.label_add(&item.repo_name, issue_num, labels::DONE, gh_host).await;
+    }
 }
 ```
 
+Issue에서 생성된 PR의 경우, PR approve 시점에 knowledge extraction이 실행된다.
+이 시점에는 분석 → 구현 → 리뷰의 전체 맥락이 worktree에 남아 있으므로,
+단일 extraction으로 전체 task lifecycle의 지식을 추출할 수 있다.
+
 ### Daily Knowledge Extraction
 
-일간 분석은 v1 구조를 유지하되, **교차 세션 패턴 감지**를 강화한다:
+일간 분석은 v1 구조를 유지하되, **교차 task 패턴 감지**를 강화한다:
 
 ```
 Daily Report (v2):
   1. daemon 로그 파싱 (v1 동일)
   2. detect_patterns() (v1 동일)
   3. suggest-workflow 교차 분석 (v1 동일)
-  4. ─── NEW: 일간 세션 간 패턴 집계 ───
-     - 같은 날 서로 다른 세션(분석/구현/리뷰)에서 추출된 knowledge를
-       집계하여 cross-session 패턴 도출
-     - 예: 여러 세션에서 동일한 skill 부족 → 우선순위 높은 suggestion
-  5. Claude에게 집계 데이터 + per-session suggestions 전달
+  4. ─── NEW: 일간 task 간 패턴 집계 ───
+     - 같은 날 서로 다른 task(이슈/PR)의 done에서 추출된 knowledge를
+       집계하여 cross-task 패턴 도출
+     - 예: 여러 task에서 동일한 skill 부족 → 우선순위 높은 suggestion
+  5. Claude에게 집계 데이터 + per-task suggestions 전달
   6. 일간 리포트 이슈 생성
   7. 고우선순위 suggestions → knowledge PR 생성
 ```
@@ -833,7 +820,7 @@ Daily Report (v2):
 ```rust
 // knowledge/daily.rs — v2 추가 로직
 
-/// 당일 per-session extraction 결과를 consumer_logs에서 집계
+/// 당일 per-task extraction 결과를 consumer_logs에서 집계
 pub fn aggregate_daily_suggestions(
     db: &Database,
     date: &str,
@@ -845,8 +832,8 @@ pub fn aggregate_daily_suggestions(
     ...
 }
 
-/// 교차 세션 패턴: 여러 세션에서 반복 등장하는 suggestion을 감지
-pub fn detect_cross_session_patterns(
+/// 교차 task 패턴: 여러 task에서 반복 등장하는 suggestion을 감지
+pub fn detect_cross_task_patterns(
     aggregated: &[Suggestion],
 ) -> Vec<Pattern> {
     // target_file 기준 그룹핑
@@ -860,7 +847,7 @@ pub fn detect_cross_session_patterns(
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  Per-Session (세션 완료 시)                            │
+│  Per-Task (done 전이 시)                              │
 │                                                      │
 │  1. 기존 레포 지식 수집 (CLAUDE.md, rules, skills)    │
 │  2. suggest-workflow 세션 데이터                       │
@@ -877,9 +864,9 @@ pub fn detect_cross_session_patterns(
 │  Daily (일간 집계)                                    │
 │                                                      │
 │  1. daemon 로그 파싱 (통계)                           │
-│  2. 일간 per-session suggestions 집계                │
-│  3. 교차 세션 패턴 감지                               │
-│     - 같은 skill 부족이 3개 세션에서 반복               │
+│  2. 일간 per-task suggestions 집계                   │
+│  3. 교차 task 패턴 감지                               │
+│     - 같은 skill 부족이 3개 task에서 반복              │
 │     - 동일 파일 반복 수정 패턴                         │
 │  4. Claude: 집계 데이터 → 우선순위 정렬               │
 │  5. 일간 리포트 이슈 생성                             │
@@ -902,8 +889,8 @@ pub fn detect_cross_session_patterns(
 | `pipeline/pr.rs` | approve 경로에 Issue done 전이 추가 | 낮음 |
 | `components/verdict.rs` | `format_analysis_comment()` 함수 추가 | 낮음 (new function) |
 | `infrastructure/claude/output.rs` | `extract_pr_number()` 함수 추가 | 낮음 (new function) |
-| `knowledge/extractor.rs` | `extract_session_knowledge()` + delta check + PR 생성 | **중간** |
-| `knowledge/daily.rs` | `aggregate_daily_suggestions()` + `detect_cross_session_patterns()` | **중간** |
+| `knowledge/extractor.rs` | `extract_task_knowledge()` 확장 — delta check + PR 생성 | **중간** |
+| `knowledge/daily.rs` | `aggregate_daily_suggestions()` + `detect_cross_task_patterns()` | **중간** |
 | `daemon/mod.rs` | `startup_reconcile()` 라벨 필터 확장 | **중간** |
 
 ### 기존 테스트 영향
@@ -913,7 +900,7 @@ pub fn detect_cross_session_patterns(
 | `pipeline_e2e_tests.rs` | `process_pending()` 동작 변경 (analyzed 라벨 + exit queue) | 테스트 기대값 수정 |
 | `daemon_consumer_tests.rs` | reconcile 라벨 필터 변경 | 새 라벨 케이스 추가 |
 | `task_queues.rs` (unit) | `PrItem` 필드 추가 | 테스트 헬퍼에 `source_issue_number: None` 추가 |
-| `knowledge/extractor.rs` (unit) | `extract_task_knowledge` → `extract_session_knowledge` 시그니처 변경 | 기존 테스트 마이그레이션 |
+| `knowledge/extractor.rs` (unit) | `extract_task_knowledge` 시그니처 확장 (기존 지식 수집 파라미터) | 기존 테스트 마이그레이션 |
 
 ### 하위 호환성
 
@@ -948,15 +935,15 @@ pub fn detect_cross_session_patterns(
 │  │                                                               │  │
 │  │  Issues:                                                      │  │
 │  │    Pending → Analyzing:                                       │  │
-│  │      OK → knowledge(분석) → 분석 코멘트 + analyzed + exit     │  │
+│  │      OK → 분석 코멘트 + autodev:analyzed + exit queue         │  │
 │  │      clarify/wontfix → autodev:skip                          │  │
 │  │                                                               │  │
 │  │    Ready → Implementing:                                      │  │
-│  │      OK + PR → knowledge(구현) → PR queue + implementing     │  │
+│  │      OK + PR 생성 → PR queue push + autodev:implementing     │  │
 │  │      Err → 라벨 제거 + 재시도                                 │  │
 │  │                                                               │  │
 │  │  PRs (리뷰):                                                  │  │
-│  │    Reviewing → approve → knowledge(리뷰)                     │  │
+│  │    Reviewing → approve → knowledge(done) ← delta check       │  │
 │  │                         → autodev:done (PR)                   │  │
 │  │                         + source_issue → done    ← NEW        │  │
 │  │    Reviewing → request_changes → ReviewDone → Improving      │  │
@@ -1022,14 +1009,13 @@ pub fn detect_cross_session_patterns(
 
 ### Phase E: Knowledge Extraction v2
 
-17. `extractor.rs` — `extract_session_knowledge()` (delta check + actionable PR)
+17. `extractor.rs` — `extract_task_knowledge()` 확장 (delta check + actionable PR)
 18. `extractor.rs` — `collect_existing_knowledge()` (레포 지식 베이스 수집)
-19. `daily.rs` — `aggregate_daily_suggestions()` (일간 per-session 집계)
-20. `daily.rs` — `detect_cross_session_patterns()` (교차 세션 패턴)
-21. pipeline 3곳에 knowledge extraction 호출 추가
-22. 테스트: delta check — 기존 지식과 동일하면 skip 검증
-23. 테스트: actionable suggestion → PR 생성 검증
-24. 테스트: 일간 교차 세션 패턴 감지 검증
+19. `daily.rs` — `aggregate_daily_suggestions()` (일간 per-task 집계)
+20. `daily.rs` — `detect_cross_task_patterns()` (교차 task 패턴)
+21. 테스트: delta check — 기존 지식과 동일하면 skip 검증
+22. 테스트: actionable suggestion → PR 생성 검증
+23. 테스트: 일간 교차 task 패턴 감지 검증
 
 ---
 
@@ -1044,8 +1030,8 @@ pub fn detect_cross_session_patterns(
 - [ ] `process_ready()` 변경 — PR 생성 + PR queue push
 - [ ] PR approve 시 Issue done 전이 (`source_issue_number` 활용)
 - [ ] `startup_reconcile()` 라벨 필터 확장
-- [ ] `extract_session_knowledge()` — delta check + actionable PR 생성
+- [ ] `extract_task_knowledge()` 확장 — delta check + actionable PR 생성
 - [ ] `collect_existing_knowledge()` — 기존 레포 지식 수집
-- [ ] `aggregate_daily_suggestions()` — 일간 per-session 집계
-- [ ] `detect_cross_session_patterns()` — 교차 세션 패턴 감지
+- [ ] `aggregate_daily_suggestions()` — 일간 per-task 집계
+- [ ] `detect_cross_task_patterns()` — 교차 task 패턴 감지
 - [ ] 기존 테스트 수정 + 새 테스트 추가
