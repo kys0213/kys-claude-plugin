@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
@@ -158,11 +160,23 @@ async fn main() -> Result<()> {
     let sw = RealSuggestWorkflow;
 
     match cli.command {
-        Commands::Start => daemon::start(&home, &env, &gh, &git, &claude, &sw).await?,
+        Commands::Start => {
+            let env: Arc<dyn config::Env> = Arc::new(env);
+            let gh: Arc<dyn infrastructure::gh::Gh> = Arc::new(gh);
+            let git: Arc<dyn infrastructure::git::Git> = Arc::new(git);
+            let claude: Arc<dyn infrastructure::claude::Claude> = Arc::new(claude);
+            let sw: Arc<dyn infrastructure::suggest_workflow::SuggestWorkflow> = Arc::new(sw);
+            daemon::start(&home, env, gh, git, claude, sw).await?;
+        }
         Commands::Stop => daemon::stop(&home)?,
         Commands::Restart => {
             daemon::stop(&home).ok();
-            daemon::start(&home, &env, &gh, &git, &claude, &sw).await?;
+            let env: Arc<dyn config::Env> = Arc::new(env);
+            let gh: Arc<dyn infrastructure::gh::Gh> = Arc::new(gh);
+            let git: Arc<dyn infrastructure::git::Git> = Arc::new(git);
+            let claude: Arc<dyn infrastructure::claude::Claude> = Arc::new(claude);
+            let sw: Arc<dyn infrastructure::suggest_workflow::SuggestWorkflow> = Arc::new(sw);
+            daemon::start(&home, env, gh, git, claude, sw).await?;
         }
         Commands::Status => {
             let status = client::status(&db, &env)?;
