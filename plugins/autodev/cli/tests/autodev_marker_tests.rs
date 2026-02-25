@@ -401,15 +401,18 @@ async fn knowledge_per_task_prompt_contains_autodev_knowledge_marker() {
 
     let git = MockGit::new();
     let sw = MockSuggestWorkflow::new();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmp);
+    let workspace = Workspace::new(&git, &env);
     let _ = autodev::knowledge::extractor::extract_task_knowledge(
         &claude,
         &gh,
-        &git,
+        &workspace,
         &sw,
         "org/repo",
         42,
         "issue",
-        Path::new("/tmp/test"),
+        tmp.path(),
         None,
     )
     .await;

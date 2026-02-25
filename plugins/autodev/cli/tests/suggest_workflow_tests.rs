@@ -1,8 +1,34 @@
+use autodev::components::workspace::Workspace;
+use autodev::config::Env;
 use autodev::infrastructure::claude::mock::MockClaude;
 use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
 use autodev::infrastructure::suggest_workflow::mock::MockSuggestWorkflow;
 use autodev::knowledge::models::*;
+
+struct TestEnv {
+    vars: std::collections::HashMap<String, String>,
+}
+
+impl TestEnv {
+    fn new(tmp: &tempfile::TempDir) -> Self {
+        let mut vars = std::collections::HashMap::new();
+        vars.insert(
+            "AUTODEV_HOME".to_string(),
+            tmp.path().to_str().unwrap().to_string(),
+        );
+        Self { vars }
+    }
+}
+
+impl Env for TestEnv {
+    fn var(&self, key: &str) -> Result<String, std::env::VarError> {
+        self.vars
+            .get(key)
+            .cloned()
+            .ok_or(std::env::VarError::NotPresent)
+    }
+}
 
 // ═══════════════════════════════════════════════════
 // 1. MockSuggestWorkflow 기본 동작 테스트
@@ -84,11 +110,13 @@ async fn extract_task_knowledge_includes_sw_data_in_prompt() {
 
     let git = MockGit::new();
     let tmp = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmp);
+    let workspace = Workspace::new(&git, &env);
 
     let result = autodev::knowledge::extractor::extract_task_knowledge(
         &claude,
         &gh,
-        &git,
+        &workspace,
         &sw,
         "org/repo",
         42,
@@ -130,11 +158,13 @@ async fn extract_task_knowledge_works_without_sw_data() {
     // suggest-workflow 데이터 없음 (빈 응답)
 
     let tmp = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmp);
+    let workspace = Workspace::new(&git, &env);
 
     let result = autodev::knowledge::extractor::extract_task_knowledge(
         &claude,
         &gh,
-        &git,
+        &workspace,
         &sw,
         "org/repo",
         42,

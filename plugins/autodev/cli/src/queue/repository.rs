@@ -24,6 +24,8 @@ pub trait ScanCursorRepository {
 pub trait ConsumerLogRepository {
     fn log_insert(&self, log: &NewConsumerLog) -> Result<()>;
     fn log_recent(&self, repo_name: Option<&str>, limit: usize) -> Result<Vec<LogEntry>>;
+    /// 특정 날짜의 knowledge extraction stdout를 모두 반환
+    fn log_knowledge_stdout_by_date(&self, date: &str) -> Result<Vec<String>>;
 }
 
 // ─── SQLite implementations ───
@@ -192,6 +194,18 @@ impl ConsumerLogRepository for Database {
                 duration_ms: row.get(4)?,
             })
         })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn log_knowledge_stdout_by_date(&self, date: &str) -> Result<Vec<String>> {
+        let conn = self.conn();
+        let like_pattern = format!("{date}%");
+        let mut stmt = conn.prepare(
+            "SELECT stdout FROM consumer_logs \
+             WHERE queue_type = 'knowledge' AND started_at LIKE ?1 \
+             ORDER BY started_at",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![like_pattern], |row| row.get(0))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 }

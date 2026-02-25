@@ -147,11 +147,17 @@ pub async fn start(
                                                 &mut report, sw,
                                             ).await;
 
+                                            // v2: per-task knowledge 결과를 consumer_logs에서 집계
+                                            let per_task = crate::knowledge::daily::aggregate_daily_suggestions(&db, &yesterday);
+
                                             if let Some(ks) = crate::knowledge::daily::generate_daily_suggestions(
                                                 claude, &report, &base,
                                             ).await {
                                                 report.suggestions = ks.suggestions;
                                             }
+
+                                            // per-task 결과를 daily suggestions에 merge
+                                            report.suggestions.extend(per_task);
 
                                             // v2: cross-task patterns 감지 (suggestions 간 반복 파일)
                                             if !report.suggestions.is_empty() {
