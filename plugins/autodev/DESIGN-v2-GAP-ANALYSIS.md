@@ -9,66 +9,136 @@
 
 | 구분 | 갭 수 | 심각도 |
 |------|-------|--------|
-| 크래시 안전성 위반 | 1 | **높음** |
-| 의도적 미구현 (사람 판단) | 1 | 정보 |
+| 설계 변경 (Label-Positive 전환) | 1 | **높음** → 설계로 해소 |
+| 의도적 미구현 (사람 판단) | 1 | 정보 (Gap 1로 자연 해소) |
 | 설계 문서 갱신 필요 (구현이 더 나음) | 1 | 낮음 |
 | 설계-구현 불일치 | 2 | 중간 |
 | **전체** | **5** | |
 
 ---
 
-## Gap 1: `scan_approved()` 라벨 전이 순서 — 크래시 안전성 위반
+## Gap 1: `scan()` Label-Negative 방식 — 크래시 안전성 구조적 결함
 
-**심각도**: 높음
+**심각도**: 높음 → **설계 변경으로 해소**
 
-### 설계 (DESIGN-v2 Section 4)
+### 문제
 
-```rust
-// 주의: implementing을 먼저 추가한 후 approved-analysis를 제거한다.
-// 이 순서가 중요한 이유: 두 API 호출 사이에 크래시 발생 시,
-// "라벨 없음" 상태(→ 재분석)를 방지하고 "양쪽 다 있는" 상태(→ 안전)를 보장.
-gh.label_add(repo_name, number, labels::IMPLEMENTING, gh_host).await;
-gh.label_remove(repo_name, number, labels::APPROVED_ANALYSIS, gh_host).await;
-```
-
-### 구현 (`scanner/issues.rs:192-198`)
+현재 `scan()`은 **Label-Negative** 방식: `autodev:*` 라벨이 없는 이슈를 분석 대상으로 잡음.
 
 ```rust
-// 현재 구현: 제거 먼저 → 추가 나중 (크래시 위험)
-gh.label_remove(repo_name, issue.number, labels::APPROVED_ANALYSIS, gh_host).await;
-gh.label_remove(repo_name, issue.number, labels::ANALYZED, gh_host).await;
-gh.label_add(repo_name, issue.number, labels::IMPLEMENTING, gh_host).await;
+// scanner/issues.rs:81-90
+if has_autodev_label(&issue.labels) {
+    continue; // skip
+}
+// → autodev 라벨이 없으면 분석 대상
 ```
 
-### 동일 문제: `startup_reconcile()` (`daemon/mod.rs:302-306`)
-
-```rust
-// reconcile에서도 동일한 역순
-gh.label_remove(&repo.name, number, labels::APPROVED_ANALYSIS, gh_host).await;
-gh.label_remove(&repo.name, number, labels::ANALYZED, gh_host).await;
-gh.label_add(&repo.name, number, labels::IMPLEMENTING, gh_host).await;
-```
-
-### 위험 시나리오
+이 방식에서는 라벨 전이 중 크래시가 발생하면:
 
 ```
 1. approved-analysis 제거 완료
-2. ── 크래시 발생 ──
-3. analyzed도 제거된 상태, implementing 미추가
-4. 이슈에 autodev 라벨 없음
-5. 다음 scan()에서 새 이슈로 인식 → 재분석 (사람의 승인이 무효화됨)
+2. analyzed 제거 완료
+3. ── 크래시 ──
+4. implementing 미추가
+5. 이슈에 autodev 라벨 없음 → scan()이 새 이슈로 인식 → 재분석
 ```
 
-### 수정 방향
+설계(DESIGN-v2)에서는 "추가 먼저, 제거 나중" 순서로 완화하려 했지만, 이는 **증상 완화**일 뿐 근본 해결이 아님.
+
+### 근본 원인
+
+Label-Negative 방식 자체가 문제:
+- "라벨이 없는 상태"가 "새 이슈"와 "크래시로 라벨 유실된 이슈"를 구분할 수 없음
+- 라벨 전이 순서를 아무리 조심해도, 어떤 경로에서든 모든 라벨이 사라지면 재분석 위험 존재
+
+### 수정 방향: Label-Positive 전환 (트리거 라벨 도입)
+
+`scan()`을 **Label-Positive** 방식으로 전환: 명시적 트리거 라벨이 있는 이슈만 분석 대상으로 잡음.
+
+```
+[Before] Label-Negative
+scan(): autodev:* 라벨 없음 → 분석 대상
+→ 크래시로 라벨 유실 시 재분석 위험
+
+[After] Label-Positive
+scan(): autodev:analyze 라벨 있음 → 분석 대상
+→ 크래시로 라벨 유실 시 아무 일도 안 일어남 (안전)
+```
+
+#### 새 라벨: `autodev:analyze`
 
 ```rust
-// 올바른 순서: 추가 먼저, 제거 나중
-gh.label_add(repo_name, issue.number, labels::IMPLEMENTING, gh_host).await;
-gh.label_remove(repo_name, issue.number, labels::APPROVED_ANALYSIS, gh_host).await;
-gh.label_remove(repo_name, issue.number, labels::ANALYZED, gh_host).await;
+pub mod labels {
+    pub const ANALYZE: &str = "autodev:analyze";   // 트리거 (사람이 붙임)
+    pub const WIP: &str = "autodev:wip";
+    pub const ANALYZED: &str = "autodev:analyzed";
+    pub const APPROVED_ANALYSIS: &str = "autodev:approved-analysis";
+    pub const IMPLEMENTING: &str = "autodev:implementing";
+    pub const DONE: &str = "autodev:done";
+    pub const SKIP: &str = "autodev:skip";
+}
 ```
 
-크래시 발생 시: `implementing` + `approved-analysis` 양쪽 라벨이 존재 → `scan_approved()`의 dedup이 중복 적재 방지 → 안전.
+#### 변경되는 라벨 전이
+
+```
+[사람]                    [autodev]
+autodev:analyze 붙임  →  scan()이 감지
+                          → analyze 제거 + wip 추가
+                          → 분석 시작
+                          → wip 제거 + analyzed 추가
+                          → 분석 코멘트 게시
+[사람]
+approved-analysis 붙임 →  scan_approved()가 감지
+                          → implementing 추가 (기존 라벨 제거)
+                          → PR 생성
+```
+
+#### 변경되는 scan() 필터
+
+```rust
+// Before: Label-Negative
+fn scan() {
+    let issues = gh.list_issues(repo, state: "open").await;
+    for issue in issues {
+        if has_autodev_label(&issue.labels) { continue; } // 라벨 없으면 대상
+    }
+}
+
+// After: Label-Positive
+fn scan() {
+    let issues = gh.list_issues(repo, state: "open", labels: "autodev:analyze").await;
+    for issue in issues {
+        // autodev:analyze가 있는 것만 가져옴 → 트리거 명시적
+    }
+}
+```
+
+#### 크래시 안전성 비교
+
+| 시나리오 | Label-Negative | Label-Positive |
+|----------|---------------|----------------|
+| 정상 동작 | ✅ | ✅ |
+| 라벨 전이 중 크래시 (라벨 전부 유실) | ❌ 재분석 | ✅ 무시 (안전) |
+| 라벨 전이 중 크래시 (일부만 유실) | 순서에 따라 다름 | ✅ 무시 (안전) |
+| 새 이슈 자동 분석 | ✅ 자동 | ❌ 사람이 라벨 필요 |
+
+#### 부수 효과
+
+1. **Gap 2 (Safety Valve) 자연 해소**: 재분석 자체가 불가능하므로 무한루프 방지 로직 불필요
+2. **`filter_labels` 설정 단순화**: 트리거 라벨이 `filter_labels` 역할을 대체
+3. **startup_reconcile()의 라벨 순서 문제도 해소**: 라벨이 없으면 아무 일도 안 생김
+
+#### 영향받는 코드
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `scanner/issues.rs` `scan()` | GitHub API 호출에 `labels: "autodev:analyze"` 필터 추가 |
+| `scanner/issues.rs` `scan()` | `has_autodev_label()` 체크 제거 (API 레벨에서 필터됨) |
+| `scanner/issues.rs` `scan()` | `analyze` 라벨 제거 + `wip` 라벨 추가 로직 |
+| `queue/task_queues.rs` | `labels::ANALYZE` 상수 추가 |
+| `daemon/mod.rs` `startup_reconcile()` | 라벨 전이 순서 고려 불필요 (선택적 정리) |
+| DESIGN-v2.md | Section 4 scan() 설명 갱신 |
 
 ---
 
@@ -247,8 +317,8 @@ for (st, count) in &type_counts {
 
 | 순위 | Gap | 이유 |
 |------|-----|------|
-| 1 | Gap 1: 라벨 전이 순서 | 크래시 시 사람의 승인이 유실됨. 코드 3줄 순서만 변경하면 수정 가능 |
+| 1 | Gap 1: Label-Positive 전환 | 크래시 안전성을 구조적으로 해소. scan() 필터 + 트리거 라벨 도입 |
 | 2 | Gap 4: Daily worktree 격리 | branch 오염 가능성. per-task과 동일 패턴 적용 |
 | 3 | Gap 5: ReviewCycle 패턴 | 사용되지 않는 enum variant. 구현 추가 또는 variant 제거 |
 | 문서 | Gap 3: Knowledge PR 타입 필터 | 구현이 설계보다 나음. DESIGN-v2 문서만 갱신 |
-| 문서 | Gap 2: Safety Valve | 사람이 판단하기로 결정. DESIGN-v2 문서만 갱신 |
+| 해소 | Gap 2: Safety Valve | Gap 1의 Label-Positive 전환으로 재분석 자체가 불가능 → 자연 해소 |
