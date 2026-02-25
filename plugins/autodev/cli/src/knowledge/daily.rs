@@ -7,8 +7,11 @@ use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 
+use crate::queue::repository::ConsumerLogRepository;
+use crate::queue::Database;
+
 use super::models::{
-    CrossAnalysis, DailyReport, DailySummary, KnowledgeSuggestion, Pattern, PatternType,
+    CrossAnalysis, DailyReport, DailySummary, KnowledgeSuggestion, Pattern, PatternType, Suggestion,
 };
 
 /// 데몬 로그 파싱 결과
@@ -360,6 +363,29 @@ pub async fn create_knowledge_prs(
     }
 }
 
+/// v2: consumer_logs에서 당일 knowledge extraction 결과를 집계
+///
+/// queue_type = 'knowledge'인 로그의 stdout를 KnowledgeSuggestion으로 파싱하여
+/// 모든 suggestions를 flat하게 모아서 반환한다.
+pub fn aggregate_daily_suggestions(db: &Database, date: &str) -> Vec<Suggestion> {
+    let stdouts = match db.log_knowledge_stdout_by_date(date) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("failed to query knowledge logs for {date}: {e}");
+            return Vec::new();
+        }
+    };
+
+    let mut all_suggestions = Vec::new();
+    for stdout in &stdouts {
+        if let Ok(ks) = serde_json::from_str::<KnowledgeSuggestion>(stdout) {
+            all_suggestions.extend(ks.suggestions);
+        }
+    }
+
+    all_suggestions
+}
+
 /// v2: per-task knowledge extraction 결과를 집계
 ///
 /// 당일 knowledge 코멘트들에서 target_file 기준으로 그룹핑하여
@@ -644,5 +670,102 @@ mod tests {
 
         let patterns = detect_cross_task_patterns(&suggestions);
         assert!(patterns.is_empty());
+    }
+
+    // ═══════════════════════════════════════════════
+    // v2: aggregate_daily_suggestions
+    // ═══════════════════════════════════════════════
+
+    fn open_memory_db() -> Database {
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        db.initialize().unwrap();
+        db
+    }
+
+    fn add_repo(db: &Database) -> String {
+        use crate::queue::repository::RepoRepository;
+        db.repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap()
+    }
+
+    #[test]
+    fn aggregate_daily_suggestions_collects_from_consumer_logs() {
+        use crate::queue::repository::ConsumerLogRepository;
+
+        let db = open_memory_db();
+        let repo_id = add_repo(&db);
+
+        let ks1 = r#"{"suggestions":[{"type":"rule","target_file":".claude/rules/a.md","content":"A","reason":"R1"}]}"#;
+        let ks2 = r#"{"suggestions":[{"type":"hook","target_file":".claude/hooks.json","content":"B","reason":"R2"}]}"#;
+
+        db.log_insert(&crate::queue::models::NewConsumerLog {
+            repo_id: repo_id.clone(),
+            queue_type: "knowledge".to_string(),
+            queue_item_id: "w1".to_string(),
+            worker_id: "u1".to_string(),
+            command: "[autodev] knowledge: pr #1".to_string(),
+            stdout: ks1.to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+            started_at: "2026-02-22T10:00:00Z".to_string(),
+            finished_at: "2026-02-22T10:00:01Z".to_string(),
+            duration_ms: 0,
+        })
+        .unwrap();
+
+        db.log_insert(&crate::queue::models::NewConsumerLog {
+            repo_id,
+            queue_type: "knowledge".to_string(),
+            queue_item_id: "w2".to_string(),
+            worker_id: "u2".to_string(),
+            command: "[autodev] knowledge: pr #2".to_string(),
+            stdout: ks2.to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+            started_at: "2026-02-22T11:00:00Z".to_string(),
+            finished_at: "2026-02-22T11:00:01Z".to_string(),
+            duration_ms: 0,
+        })
+        .unwrap();
+
+        let result = aggregate_daily_suggestions(&db, "2026-02-22");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].target_file, ".claude/rules/a.md");
+        assert_eq!(result[1].target_file, ".claude/hooks.json");
+    }
+
+    #[test]
+    fn aggregate_daily_suggestions_empty_when_no_knowledge_logs() {
+        let db = open_memory_db();
+        let result = aggregate_daily_suggestions(&db, "2026-02-22");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn aggregate_daily_suggestions_ignores_non_knowledge_logs() {
+        use crate::queue::repository::ConsumerLogRepository;
+
+        let db = open_memory_db();
+        let repo_id = add_repo(&db);
+
+        db.log_insert(&crate::queue::models::NewConsumerLog {
+            repo_id,
+            queue_type: "pr".to_string(),
+            queue_item_id: "w1".to_string(),
+            worker_id: "u1".to_string(),
+            command: "[autodev] review: PR #1".to_string(),
+            stdout:
+                r#"{"suggestions":[{"type":"rule","target_file":"x","content":"y","reason":"z"}]}"#
+                    .to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+            started_at: "2026-02-22T10:00:00Z".to_string(),
+            finished_at: "2026-02-22T10:00:01Z".to_string(),
+            duration_ms: 0,
+        })
+        .unwrap();
+
+        let result = aggregate_daily_suggestions(&db, "2026-02-22");
+        assert!(result.is_empty(), "should not include non-knowledge logs");
     }
 }

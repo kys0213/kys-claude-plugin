@@ -60,6 +60,7 @@ pub async fn process_pending(
 
         // Pending → Reviewing 상태 전이 (TUI/status 가시성)
         let work_id = item.work_id.clone();
+        let repo_name_for_wt = item.repo_name.clone();
         queues.prs.push(pr_phase::REVIEWING, item.clone());
         tracing::debug!("PR #{}: Pending → Reviewing", item.github_number);
 
@@ -160,20 +161,41 @@ pub async fn process_pending(
                                 .post_issue_comment(&item.repo_name, pr_num, &comment, gh_host)
                                 .await;
 
-                            // Knowledge extraction (best effort)
+                            // Knowledge extraction (best effort) + consumer_logs 기록
                             if cfg.consumer.knowledge_extraction {
-                                let _ = crate::knowledge::extractor::extract_task_knowledge(
-                                    claude,
-                                    gh,
-                                    workspace.git(),
-                                    sw,
-                                    &item.repo_name,
-                                    item.github_number,
-                                    "pr",
-                                    &wt_path,
-                                    gh_host,
-                                )
-                                .await;
+                                let knowledge_result =
+                                    crate::knowledge::extractor::extract_task_knowledge(
+                                        claude,
+                                        gh,
+                                        workspace,
+                                        sw,
+                                        &item.repo_name,
+                                        item.github_number,
+                                        "pr",
+                                        &wt_path,
+                                        gh_host,
+                                    )
+                                    .await;
+                                if let Ok(Some(ref ks)) = knowledge_result {
+                                    if let Ok(json) = serde_json::to_string(ks) {
+                                        let _ = db.log_insert(&NewConsumerLog {
+                                            repo_id: item.repo_id.clone(),
+                                            queue_type: "knowledge".to_string(),
+                                            queue_item_id: item.work_id.clone(),
+                                            worker_id: worker_id.clone(),
+                                            command: format!(
+                                                "[autodev] knowledge: pr #{}",
+                                                item.github_number
+                                            ),
+                                            stdout: json,
+                                            stderr: String::new(),
+                                            exit_code: 0,
+                                            started_at: Utc::now().to_rfc3339(),
+                                            finished_at: Utc::now().to_rfc3339(),
+                                            duration_ms: 0,
+                                        });
+                                    }
+                                }
                             }
 
                             // v2: source issue done 전이
@@ -245,6 +267,9 @@ pub async fn process_pending(
                 tracing::error!("review error for PR #{}: {e}", item.github_number);
             }
         }
+
+        // v2: worktree 정리 (success/failure 모두)
+        let _ = workspace.remove_worktree(&repo_name_for_wt, &task_id).await;
     }
 
     Ok(())
@@ -265,6 +290,7 @@ pub async fn process_review_done(
     while let Some(item) = queues.prs.pop(pr_phase::REVIEW_DONE) {
         // ReviewDone → Improving 상태 전이 (TUI/status 가시성)
         let work_id = item.work_id.clone();
+        let repo_name_for_wt = item.repo_name.clone();
         queues.prs.push(pr_phase::IMPROVING, item.clone());
         tracing::debug!("PR #{}: ReviewDone → Improving", item.github_number);
 
@@ -355,6 +381,9 @@ pub async fn process_review_done(
                 );
             }
         }
+
+        // v2: worktree 정리 (success/failure 모두)
+        let _ = workspace.remove_worktree(&repo_name_for_wt, &task_id).await;
     }
 
     Ok(())
@@ -379,6 +408,7 @@ pub async fn process_improved(
     while let Some(mut item) = queues.prs.pop(pr_phase::IMPROVED) {
         // Improved → Reviewing 상태 전이 (재리뷰, TUI/status 가시성)
         let work_id = item.work_id.clone();
+        let repo_name_for_wt = item.repo_name.clone();
         queues.prs.push(pr_phase::REVIEWING, item.clone());
         tracing::debug!(
             "PR #{}: Improved → Reviewing (re-review)",
@@ -451,6 +481,7 @@ pub async fn process_improved(
                         output.exit_code,
                         item.github_number
                     );
+                    let _ = workspace.remove_worktree(&repo_name_for_wt, &task_id).await;
                     continue;
                 }
 
@@ -460,20 +491,41 @@ pub async fn process_improved(
                         gh.pr_review(&item.repo_name, item.github_number, "APPROVE", "", gh_host)
                             .await;
 
-                        // Knowledge extraction (best effort)
+                        // Knowledge extraction (best effort) + consumer_logs 기록
                         if cfg.consumer.knowledge_extraction {
-                            let _ = crate::knowledge::extractor::extract_task_knowledge(
-                                claude,
-                                gh,
-                                workspace.git(),
-                                sw,
-                                &item.repo_name,
-                                item.github_number,
-                                "pr",
-                                &wt_path,
-                                gh_host,
-                            )
-                            .await;
+                            let knowledge_result =
+                                crate::knowledge::extractor::extract_task_knowledge(
+                                    claude,
+                                    gh,
+                                    workspace,
+                                    sw,
+                                    &item.repo_name,
+                                    item.github_number,
+                                    "pr",
+                                    &wt_path,
+                                    gh_host,
+                                )
+                                .await;
+                            if let Ok(Some(ref ks)) = knowledge_result {
+                                if let Ok(json) = serde_json::to_string(ks) {
+                                    let _ = db.log_insert(&NewConsumerLog {
+                                        repo_id: item.repo_id.clone(),
+                                        queue_type: "knowledge".to_string(),
+                                        queue_item_id: item.work_id.clone(),
+                                        worker_id: worker_id.clone(),
+                                        command: format!(
+                                            "[autodev] knowledge: pr #{}",
+                                            item.github_number
+                                        ),
+                                        stdout: json,
+                                        stderr: String::new(),
+                                        exit_code: 0,
+                                        started_at: Utc::now().to_rfc3339(),
+                                        finished_at: Utc::now().to_rfc3339(),
+                                        duration_ms: 0,
+                                    });
+                                }
+                            }
                         }
 
                         // v2: source issue done 전이
@@ -530,6 +582,9 @@ pub async fn process_improved(
                 tracing::error!("re-review error for PR #{}: {e}", item.github_number);
             }
         }
+
+        // v2: worktree 정리 (success/failure 모두)
+        let _ = workspace.remove_worktree(&repo_name_for_wt, &task_id).await;
     }
 
     Ok(())

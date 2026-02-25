@@ -2,9 +2,9 @@ use std::path::Path;
 
 use anyhow::Result;
 
+use crate::components::workspace::Workspace;
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
-use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 use crate::queue::task_queues::labels;
 
@@ -61,6 +61,40 @@ pub fn collect_existing_knowledge(wt_path: &Path) -> String {
         }
     }
 
+    // plugins/*/commands/*.md (skill 정의)
+    let plugins_dir = wt_path.join("plugins");
+    if plugins_dir.is_dir() {
+        if let Ok(plugin_entries) = std::fs::read_dir(&plugins_dir) {
+            let mut skill_lines = Vec::new();
+            for plugin_entry in plugin_entries.flatten() {
+                let cmds_dir = plugin_entry.path().join("commands");
+                if cmds_dir.is_dir() {
+                    if let Ok(cmd_entries) = std::fs::read_dir(&cmds_dir) {
+                        for cmd in cmd_entries.flatten() {
+                            if cmd.path().extension().is_some_and(|e| e == "md") {
+                                let rel = cmd
+                                    .path()
+                                    .strip_prefix(wt_path)
+                                    .unwrap_or(&cmd.path())
+                                    .display()
+                                    .to_string();
+                                skill_lines.push(rel);
+                            }
+                        }
+                    }
+                }
+            }
+            if !skill_lines.is_empty() {
+                skill_lines.sort();
+                knowledge.push_str("--- Existing Skills ---\n");
+                for line in &skill_lines {
+                    knowledge.push_str(&format!("- {line}\n"));
+                }
+                knowledge.push('\n');
+            }
+        }
+    }
+
     // .develop-workflow.yaml (워크플로우 설정)
     let workflow_yaml = wt_path.join(".develop-workflow.yaml");
     if workflow_yaml.exists() {
@@ -106,7 +140,7 @@ fn collect_md_dir(dir: &Path, label: &str, knowledge: &mut String) {
 pub async fn extract_task_knowledge(
     claude: &dyn Claude,
     gh: &dyn Gh,
-    git: &dyn Git,
+    workspace: &Workspace<'_>,
     sw: &dyn SuggestWorkflow,
     repo_name: &str,
     github_number: i64,
@@ -173,15 +207,14 @@ pub async fn extract_task_knowledge(
         gh.issue_comment(repo_name, github_number, &comment, gh_host)
             .await;
 
-        // per-task actionable PR: suggestion마다 PR 생성
+        // per-task actionable PR: suggestion마다 PR 생성 (격리된 worktree 사용)
         create_task_knowledge_prs(
             gh,
-            git,
+            workspace,
             repo_name,
             ks,
             task_type,
             github_number,
-            wt_path,
             gh_host,
         )
         .await;
@@ -258,46 +291,68 @@ fn format_knowledge_comment(ks: &KnowledgeSuggestion, task_type: &str, number: i
     comment
 }
 
-/// per-task suggestion마다 actionable PR 생성
+/// per-task suggestion마다 actionable PR 생성 (격리된 worktree 사용)
 ///
-/// 각 suggestion에 대해 branch → file write → commit → push → PR 생성.
-/// daily knowledge PR과 동일한 패턴이지만 branch naming이 task 단위.
+/// 각 suggestion에 대해 main 기반 별도 worktree → branch → file write → commit → push → PR 생성.
+/// 구현 worktree와 격리하여 uncommitted 변경 충돌을 방지한다.
 #[allow(clippy::too_many_arguments)]
 async fn create_task_knowledge_prs(
     gh: &dyn Gh,
-    git: &dyn Git,
+    workspace: &Workspace<'_>,
     repo_name: &str,
     ks: &KnowledgeSuggestion,
     task_type: &str,
     github_number: i64,
-    base_path: &Path,
     gh_host: Option<&str>,
 ) {
+    let git = workspace.git();
     let today = chrono::Local::now().format("%Y-%m-%d");
     for (i, suggestion) in ks.suggestions.iter().enumerate() {
         let branch = format!("autodev/knowledge/{task_type}-{github_number}-{today}-{i}");
+        let knowledge_task_id = format!("knowledge-{task_type}-{github_number}-{i}");
         let target = &suggestion.target_file;
 
-        if let Err(e) = git.checkout_new_branch(base_path, &branch).await {
+        // main 기반 별도 worktree 생성 (구현 worktree와 격리)
+        let kn_wt_path = match workspace
+            .create_worktree(repo_name, &knowledge_task_id, None)
+            .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("task knowledge PR: worktree creation failed: {e}");
+                continue;
+            }
+        };
+
+        if let Err(e) = git.checkout_new_branch(&kn_wt_path, &branch).await {
             tracing::warn!("task knowledge PR: failed to create branch {branch}: {e}");
+            let _ = workspace
+                .remove_worktree(repo_name, &knowledge_task_id)
+                .await;
             continue;
         }
 
-        let file_path = base_path.join(target);
+        let file_path = kn_wt_path.join(target);
         if let Some(parent) = file_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
         if let Err(e) = std::fs::write(&file_path, &suggestion.content) {
             tracing::warn!("task knowledge PR: failed to write {target}: {e}");
+            let _ = workspace
+                .remove_worktree(repo_name, &knowledge_task_id)
+                .await;
             continue;
         }
 
         let message = format!("[autodev] knowledge: {}", suggestion.reason);
         if let Err(e) = git
-            .add_commit_push(base_path, &[target.as_str()], &message, &branch)
+            .add_commit_push(&kn_wt_path, &[target.as_str()], &message, &branch)
             .await
         {
             tracing::warn!("task knowledge PR: failed to commit+push {branch}: {e}");
+            let _ = workspace
+                .remove_worktree(repo_name, &knowledge_task_id)
+                .await;
             continue;
         }
 
@@ -324,6 +379,11 @@ async fn create_task_knowledge_prs(
                 "task knowledge PR #{pr_num} created for {task_type} #{github_number} suggestion {i}"
             );
         }
+
+        // worktree 정리
+        let _ = workspace
+            .remove_worktree(repo_name, &knowledge_task_id)
+            .await;
     }
 }
 
@@ -411,6 +471,35 @@ mod tests {
         assert!(knowledge.contains(".claude-plugin/plugin.json"));
         assert!(knowledge.contains("workflow: test"));
         assert!(knowledge.contains(".develop-workflow.yaml"));
+    }
+
+    #[test]
+    fn collect_existing_knowledge_reads_plugin_skills() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path();
+
+        // plugins/my-plugin/commands/foo.md
+        std::fs::create_dir_all(base.join("plugins/my-plugin/commands")).unwrap();
+        std::fs::write(
+            base.join("plugins/my-plugin/commands/foo.md"),
+            "# Foo skill",
+        )
+        .unwrap();
+        std::fs::write(
+            base.join("plugins/my-plugin/commands/bar.md"),
+            "# Bar skill",
+        )
+        .unwrap();
+
+        // plugins/other/commands/baz.md
+        std::fs::create_dir_all(base.join("plugins/other/commands")).unwrap();
+        std::fs::write(base.join("plugins/other/commands/baz.md"), "# Baz skill").unwrap();
+
+        let knowledge = collect_existing_knowledge(base);
+        assert!(knowledge.contains("Existing Skills"));
+        assert!(knowledge.contains("plugins/my-plugin/commands/foo.md"));
+        assert!(knowledge.contains("plugins/my-plugin/commands/bar.md"));
+        assert!(knowledge.contains("plugins/other/commands/baz.md"));
     }
 
     #[test]

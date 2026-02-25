@@ -223,9 +223,9 @@ async fn merge_failed_does_not_clean_up_worktree_c5() {
 // C-2: PR process_review_done worktree 정리 누락
 // ═══════════════════════════════════════════════
 
-/// C-2: PR review_done 성공 경로 — Improved로 전이 시 worktree 미정리
+/// C-2 FIX: PR review_done 성공 경로 — Improved로 전이 시 worktree 정리
 #[tokio::test]
-async fn pr_review_done_success_does_not_clean_worktree_c2() {
+async fn pr_review_done_success_cleans_worktree_c2() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
@@ -247,16 +247,16 @@ async fn pr_review_done_success_does_not_clean_worktree_c2() {
         .await
         .unwrap();
 
-    // C-2 BUG: process_review_done에서 worktree 정리 미호출
+    // C-2 FIX: process_review_done에서 worktree 정리 호출
     assert!(
-        !has_worktree_remove(&git),
-        "C-2: process_review_done does NOT clean up worktree on success"
+        has_worktree_remove(&git),
+        "C-2: process_review_done should clean up worktree on success"
     );
 }
 
-/// C-2: PR review_done 실패 경로 — worktree 미정리
+/// C-2 FIX: PR review_done 실패 경로 — worktree 정리
 #[tokio::test]
-async fn pr_review_done_failure_does_not_clean_worktree_c2() {
+async fn pr_review_done_failure_cleans_worktree_c2() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
@@ -278,10 +278,10 @@ async fn pr_review_done_failure_does_not_clean_worktree_c2() {
         .await
         .unwrap();
 
-    // C-2 BUG: 실패 시에도 worktree 미정리
+    // C-2 FIX: 실패 시에도 worktree 정리
     assert!(
-        !has_worktree_remove(&git),
-        "C-2: process_review_done does NOT clean up worktree on failure"
+        has_worktree_remove(&git),
+        "C-2: process_review_done should clean up worktree on failure"
     );
 }
 
@@ -326,10 +326,10 @@ async fn pr_improved_approved_does_not_clean_worktree_c3() {
     .await
     .unwrap();
 
-    // C-3 BUG: process_improved에서 worktree 정리 미호출
+    // C-3 FIX: process_improved에서 worktree 정리 호출
     assert!(
-        !has_worktree_remove(&git),
-        "C-3: process_improved does NOT clean up worktree on approval"
+        has_worktree_remove(&git),
+        "C-3: process_improved should clean up worktree on approval"
     );
 }
 
@@ -371,10 +371,10 @@ async fn pr_improved_request_changes_does_not_clean_worktree_c3() {
     .await
     .unwrap();
 
-    // C-3 BUG: 재리뷰 실패 → ReviewDone 재진입 시에도 worktree 미정리
+    // C-3 FIX: 재리뷰 실패 → ReviewDone 재진입 시에도 worktree 정리
     assert!(
-        !has_worktree_remove(&git),
-        "C-3: process_improved does NOT clean up worktree on request_changes"
+        has_worktree_remove(&git),
+        "C-3: process_improved should clean up worktree on request_changes"
     );
 
     // 대신 ReviewDone 큐에 재진입 확인
