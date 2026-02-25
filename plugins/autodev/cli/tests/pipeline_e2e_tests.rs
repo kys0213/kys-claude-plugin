@@ -116,13 +116,6 @@ fn make_analysis_json(verdict: &str, confidence: f64) -> String {
     serde_json::json!({ "result": inner }).to_string()
 }
 
-fn fixture_response(name: &str) -> Vec<u8> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/responses")
-        .join(name);
-    std::fs::read(path).expect("read fixture file")
-}
-
 /// Assert that the added_labels on MockGh contain the given (repo_name, number, label) tuple.
 fn assert_label_added(gh: &MockGh, repo_name: &str, number: i64, label: &str) {
     let added = gh.added_labels.lock().unwrap();

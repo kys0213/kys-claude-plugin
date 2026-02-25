@@ -273,12 +273,18 @@ async fn startup_reconcile(
                 let has_done = item_labels.contains(&labels::DONE);
                 let has_skip = item_labels.contains(&labels::SKIP);
                 let has_wip = item_labels.contains(&labels::WIP);
+                let has_analyze = item_labels.contains(&labels::ANALYZE);
                 // v2: 새 라벨 상태 확인
                 let has_analyzed = item_labels.contains(&labels::ANALYZED);
                 let has_approved = item_labels.contains(&labels::APPROVED_ANALYSIS);
                 let has_implementing = item_labels.contains(&labels::IMPLEMENTING);
 
                 if has_done || has_skip {
+                    continue;
+                }
+
+                // 트리거 라벨 → scan()이 다음 주기에 처리
+                if has_analyze {
                     continue;
                 }
 
@@ -324,29 +330,28 @@ async fn startup_reconcile(
                     continue;
                 }
 
-                // orphan wip → 라벨 제거 후 큐 적재
+                // orphan wip → 분석 중 크래시. wip 유지 + Pending 적재하여 분석 재개
                 if has_wip {
-                    gh.label_remove(&repo.name, number, labels::WIP, gh_host)
-                        .await;
+                    let issue_item = IssueItem {
+                        work_id,
+                        repo_id: repo.id.clone(),
+                        repo_name: repo.name.clone(),
+                        repo_url: repo.url.clone(),
+                        github_number: number,
+                        title: item["title"].as_str().unwrap_or("").to_string(),
+                        body: item["body"].as_str().map(|s| s.to_string()),
+                        labels: item_labels.iter().map(|s| s.to_string()).collect(),
+                        author: item["user"]["login"].as_str().unwrap_or("").to_string(),
+                        analysis_report: None,
+                    };
+
+                    queues.issues.push(issue_phase::PENDING, issue_item);
+                    recovered += 1;
+                    continue;
                 }
 
-                // 큐에 적재 + wip 라벨 추가
-                let issue_item = IssueItem {
-                    work_id,
-                    repo_id: repo.id.clone(),
-                    repo_name: repo.name.clone(),
-                    repo_url: repo.url.clone(),
-                    github_number: number,
-                    title: item["title"].as_str().unwrap_or("").to_string(),
-                    body: item["body"].as_str().map(|s| s.to_string()),
-                    labels: item_labels.iter().map(|s| s.to_string()).collect(),
-                    author: item["user"]["login"].as_str().unwrap_or("").to_string(),
-                    analysis_report: None,
-                };
-
-                gh.label_add(&repo.name, number, labels::WIP, gh_host).await;
-                queues.issues.push(issue_phase::PENDING, issue_item);
-                recovered += 1;
+                // Label-Positive: autodev 라벨 없음 → 무시
+                // (사람이 autodev:analyze 라벨을 추가해야 scan() 대상이 됨)
             }
         }
 
@@ -510,8 +515,9 @@ mod tests {
     // startup_reconcile 테스트
     // ═══════════════════════════════════════════════
 
+    /// Label-Positive: 라벨 없는 이슈는 무시됨 (사람이 analyze 라벨 추가 필요)
     #[tokio::test]
-    async fn startup_reconcile_recovers_open_issues() {
+    async fn startup_reconcile_skips_unlabeled_issues() {
         let db = open_memory_db();
         let _repo_id = db
             .repo_add("https://github.com/org/repo", "org/repo")
@@ -533,13 +539,11 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result, 1);
-        assert!(queues.contains("issue:org/repo:10"));
-
-        let added = gh.added_labels.lock().unwrap();
-        assert!(added
-            .iter()
-            .any(|(r, n, l)| r == "org/repo" && *n == 10 && l == "autodev:wip"));
+        assert_eq!(
+            result, 0,
+            "unlabeled issues should be ignored (Label-Positive)"
+        );
+        assert!(!queues.contains("issue:org/repo:10"));
     }
 
     #[tokio::test]
@@ -591,14 +595,16 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result, 1, "only the normal issue should be recovered");
+        // Label-Positive: done/skip → skip, unlabeled #3 → also ignored
+        assert_eq!(result, 0, "all issues should be skipped");
         assert!(!queues.contains("issue:org/repo:1"));
         assert!(!queues.contains("issue:org/repo:2"));
-        assert!(queues.contains("issue:org/repo:3"));
+        assert!(!queues.contains("issue:org/repo:3"));
     }
 
+    /// Label-Positive: orphan wip → wip 유지 + Pending 적재 (분석 재개)
     #[tokio::test]
-    async fn startup_reconcile_removes_orphan_wip_and_re_adds() {
+    async fn startup_reconcile_recovers_orphan_wip() {
         let db = open_memory_db();
         let _repo_id = db
             .repo_add("https://github.com/org/repo", "org/repo")
@@ -620,15 +626,16 @@ mod tests {
             .unwrap();
 
         assert_eq!(result, 1);
+        assert!(queues.contains("issue:org/repo:42"));
 
-        // Old WIP removed then new WIP added
+        // wip 라벨은 유지 (제거도 추가도 안 함)
         let removed = gh.removed_labels.lock().unwrap();
-        assert!(removed
+        assert!(!removed
             .iter()
             .any(|(r, n, l)| r == "org/repo" && *n == 42 && l == "autodev:wip"));
 
         let added = gh.added_labels.lock().unwrap();
-        assert!(added
+        assert!(!added
             .iter()
             .any(|(r, n, l)| r == "org/repo" && *n == 42 && l == "autodev:wip"));
     }
@@ -708,7 +715,7 @@ mod tests {
         assert_eq!(result, 0, "already queued items should be skipped");
     }
 
-    /// C-6: reconcile_window_hours가 하드코딩(24) 되어있음을 검증
+    /// C-6: reconcile_window_hours 파라미터가 정상 동작하는지 검증
     #[tokio::test]
     async fn startup_reconcile_uses_configurable_window() {
         let db = open_memory_db();
@@ -717,8 +724,9 @@ mod tests {
             .unwrap();
 
         let gh = MockGh::new();
+        // Label-Positive: autodev:wip 라벨이 있어야 reconcile 대상
         let issues = serde_json::json!([
-            {"number": 1, "title": "Issue", "labels": [], "user": {"login": "a"}}
+            {"number": 1, "title": "Issue", "labels": [{"name": "autodev:wip"}], "user": {"login": "a"}}
         ]);
         gh.set_paginate("org/repo", "issues", serde_json::to_vec(&issues).unwrap());
         gh.set_paginate("org/repo", "pulls", b"[]".to_vec());
