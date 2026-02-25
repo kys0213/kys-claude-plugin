@@ -506,10 +506,10 @@ Phase 4 (knowledge 수집 확장) ── 독립 (Phase 1과 병렬 가능)
 - [x] 2-3. recovery 테스트 추가
 - [x] 3-1. `extract_pr_number()` JSON pr_number fallback 추가
 - [x] 3-2. extract_pr_number 테스트 추가
-- [x] 4-1. `collect_existing_knowledge()` 수집 범위 확장 — hooks.json, workflow yaml 완료. **plugins/*/commands/*.md 미완료 (Gap A)**
+- [x] 4-1. `collect_existing_knowledge()` 수집 범위 확장 — hooks.json, workflow yaml, plugins/*/commands/*.md 완료
 - [x] 4-2. `extract_task_knowledge()` empty suggestions → Ok(None)
-- [ ] 4-3. knowledge 수집 테스트 추가 — plugins skills 수집 테스트 필요 (Gap A 해결 후)
-- [x] 5-1. `create_knowledge_pr()` per-task actionable PR — **worktree 격리 미적용 (Gap C)**
+- [x] 4-3. knowledge 수집 테스트 추가
+- [x] 5-1. `create_knowledge_pr()` per-task actionable PR — worktree 격리 적용 완료
 - [x] 5-2. `extract_task_knowledge()` 시그니처 확장 + 호출부 수정
 - [x] 5-3. `detect_cross_task_patterns()` daily flow 연결
-- [ ] 5-4. actionable PR + daily 연동 테스트 — `aggregate_daily_suggestions()` 미구현 (Gap B)
+- [x] 5-4. actionable PR + daily 연동 테스트
