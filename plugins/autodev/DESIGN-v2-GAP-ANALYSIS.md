@@ -11,7 +11,8 @@
 |------|-------|--------|
 | 크래시 안전성 위반 | 1 | **높음** |
 | 의도적 미구현 (사람 판단) | 1 | 정보 |
-| 설계-구현 불일치 | 3 | 중간 |
+| 설계 문서 갱신 필요 (구현이 더 나음) | 1 | 낮음 |
+| 설계-구현 불일치 | 2 | 중간 |
 | **전체** | **5** | |
 
 ---
@@ -101,9 +102,9 @@ DESIGN-v2 문서에서 해당 섹션을 제거하거나 "사람 판단으로 대
 
 ---
 
-## Gap 3: Knowledge PR — suggestion type 필터 누락
+## Gap 3: Knowledge PR — 설계 문서의 타입 필터가 불필요
 
-**심각도**: 중간
+**심각도**: 낮음 (구현이 설계보다 나음 → 설계 문서 갱신 필요)
 
 ### 설계 (DESIGN-v2 Section 8)
 
@@ -112,10 +113,6 @@ DESIGN-v2 문서에서 해당 섹션을 제거하거나 "사람 판단으로 대
 let actionable: Vec<&Suggestion> = suggestion.suggestions.iter()
     .filter(|s| matches!(s.suggestion_type, SuggestionType::Skill | SuggestionType::Subagent))
     .collect();
-
-if !actionable.is_empty() {
-    create_knowledge_pr(gh, git, repo_name, &actionable, ...).await;
-}
 ```
 
 ### 구현 (`knowledge/extractor.rs:210-221`)
@@ -125,24 +122,23 @@ if !actionable.is_empty() {
 create_task_knowledge_prs(gh, workspace, repo_name, ks, task_type, github_number, gh_host).await;
 ```
 
-### 영향
+### 판단: 구현이 올바름
 
-`Rule`, `ClaudeMd`, `Hook` 등 단순 텍스트 추천도 PR로 생성됨. 설계 의도는 **파일을 직접 커밋할 수 있는** Skill/Subagent만 PR로 만들고, 나머지는 코멘트로만 게시하는 것.
+5개 타입 모두 실제 파일 변경이 필요한 actionable 항목이다:
+
+| Type | 대상 파일 | 파일 변경 |
+|------|----------|----------|
+| `Rule` | `.claude/rules/*.md` | ✅ 파일 생성 |
+| `ClaudeMd` | `CLAUDE.md` | ✅ 파일 수정 |
+| `Hook` | `.claude/hooks.json` | ✅ 파일 수정 |
+| `Skill` | `plugins/*/commands/*.md` | ✅ 파일 생성 |
+| `Subagent` | `.develop-workflow.yaml` | ✅ 파일 수정 |
+
+코멘트만 남기면 사람이 직접 파일을 만들어야 하므로, PR로 올리는 현재 구현이 더 실용적이다.
 
 ### 수정 방향
 
-`create_task_knowledge_prs()` 호출 전에 Skill/Subagent 타입만 필터링:
-
-```rust
-let actionable: Vec<_> = ks.suggestions.iter()
-    .filter(|s| matches!(s.suggestion_type, SuggestionType::Skill | SuggestionType::Subagent))
-    .collect();
-if !actionable.is_empty() {
-    create_task_knowledge_prs(gh, workspace, repo_name, &actionable, ...).await;
-}
-```
-
-또는, 모든 타입에서 PR을 생성하는 현재 방식이 더 유용하다면 DESIGN-v2 문서를 수정.
+DESIGN-v2 Section 8의 Skill/Subagent 필터를 제거하고, 모든 suggestion type에 대해 PR을 생성하도록 설계 문서를 갱신.
 
 ---
 
@@ -252,7 +248,7 @@ for (st, count) in &type_counts {
 | 순위 | Gap | 이유 |
 |------|-----|------|
 | 1 | Gap 1: 라벨 전이 순서 | 크래시 시 사람의 승인이 유실됨. 코드 3줄 순서만 변경하면 수정 가능 |
-| 2 | Gap 3: Knowledge PR 타입 필터 | 불필요한 PR noise 발생. 필터 추가 또는 설계 문서 수정 |
-| 3 | Gap 4: Daily worktree 격리 | branch 오염 가능성. per-task과 동일 패턴 적용 |
-| 4 | Gap 5: ReviewCycle 패턴 | 사용되지 않는 enum variant. 구현 추가 또는 variant 제거 |
-| 정보 | Gap 2: Safety Valve | 사람이 판단하기로 결정. 설계 문서만 갱신 |
+| 2 | Gap 4: Daily worktree 격리 | branch 오염 가능성. per-task과 동일 패턴 적용 |
+| 3 | Gap 5: ReviewCycle 패턴 | 사용되지 않는 enum variant. 구현 추가 또는 variant 제거 |
+| 문서 | Gap 3: Knowledge PR 타입 필터 | 구현이 설계보다 나음. DESIGN-v2 문서만 갱신 |
+| 문서 | Gap 2: Safety Valve | 사람이 판단하기로 결정. DESIGN-v2 문서만 갱신 |
