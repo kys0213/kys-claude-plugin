@@ -21,6 +21,8 @@ pub struct DaemonConfig {
     pub daily_report_hour: u32,
     pub log_dir: String,
     pub log_retention_days: u32,
+    /// 전체 동시 실행 가능한 파이프라인 태스크 상한 (Claude 세션 수)
+    pub max_concurrent_tasks: u32,
 }
 
 impl Default for DaemonConfig {
@@ -31,6 +33,7 @@ impl Default for DaemonConfig {
             daily_report_hour: 6,
             log_dir: "logs".into(),
             log_retention_days: 30,
+            max_concurrent_tasks: 3,
         }
     }
 }
