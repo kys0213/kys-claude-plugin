@@ -1114,20 +1114,37 @@ async fn workspace_clone_failure_marks_merge_failed() {
 // 17. Scanner: autodev label filtering - "autodev" label include filter
 // ═══════════════════════════════════════════════════
 
+/// Label-Positive: filter_labels는 트리거 라벨과 별개의 추가 필터.
+/// autodev:analyze + "bug" 라벨이 모두 있는 이슈만 큐에 적재.
 #[tokio::test]
-async fn scanner_filters_by_autodev_label() {
+async fn scanner_filter_labels_with_label_positive() {
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     let gh = MockGh::new();
-    gh.set_paginate(
-        "org/repo",
-        "issues",
-        fixture_response("issues_with_autodev_labels.json"),
-    );
+    // API가 autodev:analyze 라벨 이슈만 반환 (Label-Positive)
+    let issues = serde_json::json!([
+        {
+            "number": 80,
+            "title": "Bug with trigger",
+            "body": "has bug + analyze",
+            "labels": [{"name": "bug"}, {"name": "autodev:analyze"}],
+            "user": {"login": "alice"},
+            "pull_request": null
+        },
+        {
+            "number": 81,
+            "title": "Feature with trigger",
+            "body": "has enhancement + analyze",
+            "labels": [{"name": "enhancement"}, {"name": "autodev:analyze"}],
+            "user": {"login": "bob"},
+            "pull_request": null
+        }
+    ]);
+    gh.set_paginate("org/repo", "issues", serde_json::to_vec(&issues).unwrap());
 
-    // Scan with "autodev" label filter
-    let filter_labels = Some(vec!["autodev".to_string()]);
+    // filter_labels="bug" → #80만 통과
+    let filter_labels = Some(vec!["bug".to_string()]);
     let mut queues = TaskQueues::new();
 
     autodev::scanner::issues::scan(
@@ -1144,51 +1161,35 @@ async fn scanner_filters_by_autodev_label() {
     .await
     .unwrap();
 
-    // #60: labels=["bug","autodev"] -> "autodev" matches filter, no "autodev:" prefix -> queued
     assert!(
-        queues.contains("issue:org/repo:60"),
-        "issue #60 with 'autodev' label should be queued"
+        queues.contains("issue:org/repo:80"),
+        "issue #80 with 'bug' label should pass filter"
     );
-    // #61: labels=["bug","autodev:wip"] -> has "autodev:" prefix -> skipped by has_autodev_label
     assert!(
-        !queues.contains("issue:org/repo:61"),
-        "issue #61 with 'autodev:wip' should NOT match 'autodev'"
-    );
-    // #62: labels=["enhancement","autodev:done"] -> skipped
-    assert!(
-        !queues.contains("issue:org/repo:62"),
-        "issue #62 with 'autodev:done' should NOT match 'autodev'"
-    );
-    // #63: labels=["wontfix","autodev:skip"] -> skipped
-    assert!(
-        !queues.contains("issue:org/repo:63"),
-        "issue #63 with 'autodev:skip' should NOT match 'autodev'"
-    );
-    // #64: labels=["enhancement"] -> no autodev label -> filter doesn't match
-    assert!(
-        !queues.contains("issue:org/repo:64"),
-        "issue #64 without autodev label should NOT be queued"
+        !queues.contains("issue:org/repo:81"),
+        "issue #81 with 'enhancement' should NOT pass 'bug' filter"
     );
 }
 
-// ═══════════════════════════════════════════════════
-// 18. Scanner: autodev:wip label filter - only wip issues
-// ═══════════════════════════════════════════════════
-
+/// Label-Positive: filter_labels가 None이면 autodev:analyze 이슈 모두 큐에 적재.
 #[tokio::test]
-async fn scanner_filters_autodev_wip_label_only() {
+async fn scanner_no_filter_labels_queues_all_triggered() {
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     let gh = MockGh::new();
-    gh.set_paginate(
-        "org/repo",
-        "issues",
-        fixture_response("issues_with_autodev_labels.json"),
-    );
+    let issues = serde_json::json!([
+        {
+            "number": 90,
+            "title": "Triggered issue",
+            "body": "analyze me",
+            "labels": [{"name": "autodev:analyze"}],
+            "user": {"login": "alice"},
+            "pull_request": null
+        }
+    ]);
+    gh.set_paginate("org/repo", "issues", serde_json::to_vec(&issues).unwrap());
 
-    // Scan with "autodev:wip" label filter
-    let filter_labels = Some(vec!["autodev:wip".to_string()]);
     let mut queues = TaskQueues::new();
 
     autodev::scanner::issues::scan(
@@ -1198,26 +1199,22 @@ async fn scanner_filters_autodev_wip_label_only() {
         "org/repo",
         "https://github.com/org/repo",
         &[],
-        &filter_labels,
+        &None,
         None,
         &mut queues,
     )
     .await
     .unwrap();
 
-    // Only #61 should match (autodev:wip label)
-    // But #61 has "autodev:wip" which starts with "autodev:" -> has_autodev_label returns true -> skipped
-    assert!(
-        !queues.contains("issue:org/repo:60"),
-        "issue #60 should not match autodev:wip"
-    );
-    assert!(
-        !queues.contains("issue:org/repo:61"),
-        "issue #61 with autodev:wip should be skipped by has_autodev_label check"
-    );
-    assert!(!queues.contains("issue:org/repo:62"));
-    assert!(!queues.contains("issue:org/repo:63"));
-    assert!(!queues.contains("issue:org/repo:64"));
+    assert!(queues.contains("issue:org/repo:90"));
+
+    // analyze→wip 전이 검증
+    let removed = gh.removed_labels.lock().unwrap();
+    assert!(removed
+        .iter()
+        .any(|(_, n, l)| *n == 90 && l == "autodev:analyze"));
+    let added = gh.added_labels.lock().unwrap();
+    assert!(added.iter().any(|(_, n, l)| *n == 90 && l == "autodev:wip"));
 }
 
 // ═══════════════════════════════════════════════════

@@ -110,6 +110,7 @@ pub mod merge_phase {
 // ─── GitHub Label 상수 ───
 
 pub mod labels {
+    pub const ANALYZE: &str = "autodev:analyze"; // 트리거 (사람이 추가)
     pub const WIP: &str = "autodev:wip";
     pub const DONE: &str = "autodev:done";
     pub const SKIP: &str = "autodev:skip";

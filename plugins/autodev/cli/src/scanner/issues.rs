@@ -14,7 +14,6 @@ struct GitHubIssue {
     body: Option<String>,
     labels: Vec<GitHubLabel>,
     user: GitHubUser,
-    updated_at: String,
     pull_request: Option<serde_json::Value>,
 }
 
@@ -28,12 +27,8 @@ struct GitHubUser {
     login: String,
 }
 
-/// autodev: 라벨이 있는지 확인 (done/skip/wip)
-fn has_autodev_label(issue_labels: &[GitHubLabel]) -> bool {
-    issue_labels.iter().any(|l| l.name.starts_with("autodev:"))
-}
-
-/// GitHub Issues를 스캔하여 TaskQueues에 추가 + autodev:wip 라벨 설정
+/// Label-Positive: `autodev:analyze` 트리거 라벨이 있는 이슈만 스캔하여
+/// TaskQueues에 추가 + `analyze→wip` 라벨 전이
 #[allow(clippy::too_many_arguments)]
 pub async fn scan(
     db: &Database,
@@ -46,27 +41,18 @@ pub async fn scan(
     gh_host: Option<&str>,
     queues: &mut TaskQueues,
 ) -> Result<()> {
-    let since = db.cursor_get_last_seen(repo_id, "issues")?;
-
-    let mut params: Vec<(&str, &str)> = vec![
+    // Label-Positive: autodev:analyze 라벨이 있는 이슈만 조회
+    let params: Vec<(&str, &str)> = vec![
         ("state", "open"),
-        ("sort", "updated"),
-        ("direction", "desc"),
+        ("labels", labels::ANALYZE),
         ("per_page", "30"),
     ];
-
-    let since_owned;
-    if let Some(ref s) = since {
-        since_owned = s.clone();
-        params.push(("since", &since_owned));
-    }
 
     let stdout = gh
         .api_paginate(repo_name, "issues", &params, gh_host)
         .await?;
 
     let issues: Vec<GitHubIssue> = serde_json::from_slice(&stdout)?;
-    let mut latest_updated = since;
 
     for issue in &issues {
         // PR은 issues API에 포함되므로 제외
@@ -78,17 +64,7 @@ pub async fn scan(
             continue;
         }
 
-        // autodev: 라벨이 이미 있으면 skip (done/skip/wip 모두)
-        if has_autodev_label(&issue.labels) {
-            if latest_updated
-                .as_ref()
-                .is_none_or(|l| issue.updated_at > *l)
-            {
-                latest_updated = Some(issue.updated_at.clone());
-            }
-            continue;
-        }
-
+        // filter_labels 추가 필터 (트리거 라벨과 별개의 안전장치)
         if let Some(labels) = filter_labels {
             let issue_labels: Vec<&str> = issue.labels.iter().map(|l| l.name.as_str()).collect();
             if !labels.iter().any(|l| issue_labels.contains(&l.as_str())) {
@@ -100,12 +76,6 @@ pub async fn scan(
 
         // 이미 큐에 있으면 skip (O(1) dedup)
         if queues.contains(&work_id) {
-            if latest_updated
-                .as_ref()
-                .is_none_or(|l| issue.updated_at > *l)
-            {
-                latest_updated = Some(issue.updated_at.clone());
-            }
             continue;
         }
 
@@ -124,23 +94,18 @@ pub async fn scan(
             analysis_report: None,
         };
 
-        // autodev:wip 라벨 추가 + 큐에 push
+        // 라벨 전이: analyze 제거 → wip 추가 (트리거 소비)
+        gh.label_remove(repo_name, issue.number, labels::ANALYZE, gh_host)
+            .await;
         gh.label_add(repo_name, issue.number, labels::WIP, gh_host)
             .await;
         queues.issues.push(issue_phase::PENDING, item);
-        tracing::info!("queued issue #{}: {}", issue.number, issue.title);
-
-        if latest_updated
-            .as_ref()
-            .is_none_or(|l| issue.updated_at > *l)
-        {
-            latest_updated = Some(issue.updated_at.clone());
-        }
+        tracing::info!("issue #{}: autodev:analyze → wip (Pending)", issue.number);
     }
 
-    if let Some(last_seen) = latest_updated {
-        db.cursor_upsert(repo_id, "issues", &last_seen)?;
-    }
+    // cursor 업데이트 (scan interval 제어용)
+    let now = chrono::Utc::now().to_rfc3339();
+    db.cursor_upsert(repo_id, "issues", &now)?;
 
     Ok(())
 }

@@ -38,7 +38,8 @@ fn mock_gh_with_fixture(repo_name: &str, endpoint: &str, fixture: &str) -> MockG
 async fn scan_issues_queues_new_items() {
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    let gh = mock_gh_with_fixture("org/repo", "issues", "issues.json");
+    // Label-Positive: fixture에 autodev:analyze 라벨이 있는 이슈만 반환
+    let gh = mock_gh_with_fixture("org/repo", "issues", "issues_with_analyze_label.json");
 
     let ignore = vec!["dependabot".to_string()];
     let mut queues = TaskQueues::new();
@@ -61,7 +62,15 @@ async fn scan_issues_queues_new_items() {
     assert!(!queues.contains("issue:org/repo:44")); // PR-linked → skipped
     assert!(!queues.contains("issue:org/repo:45")); // dependabot → skipped
 
-    // autodev:wip labels should have been added for queued items
+    // analyze 라벨 제거 + wip 라벨 추가 검증
+    let removed = gh.removed_labels.lock().unwrap();
+    assert!(removed
+        .iter()
+        .any(|(_, n, l)| *n == 42 && l == "autodev:analyze"));
+    assert!(removed
+        .iter()
+        .any(|(_, n, l)| *n == 43 && l == "autodev:analyze"));
+
     let added = gh.added_labels.lock().unwrap();
     assert!(added.iter().any(|(_, n, l)| *n == 42 && l == "autodev:wip"));
     assert!(added.iter().any(|(_, n, l)| *n == 43 && l == "autodev:wip"));
@@ -117,11 +126,28 @@ async fn scan_issues_filters_by_label() {
     assert!(!queues.contains("issue:org/repo:51")); // only "enhancement"
 }
 
+/// Label-Positive: scan()은 API 레벨에서 autodev:analyze 라벨 필터를 적용하므로,
+/// 다른 autodev:* 라벨이 있는 이슈는 API 응답에 포함되지 않는다.
+/// 이 테스트는 autodev:analyze 라벨이 있는 이슈만 큐에 적재되고
+/// analyze→wip 전이가 정상 동작함을 검증한다.
 #[tokio::test]
-async fn scan_issues_skips_autodev_labeled() {
+async fn scan_issues_only_picks_up_analyze_label() {
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-    let gh = mock_gh_with_fixture("org/repo", "issues", "issues_with_autodev_labels.json");
+
+    // API가 autodev:analyze 라벨 이슈만 반환하는 시나리오
+    let gh = MockGh::new();
+    let issues = serde_json::json!([
+        {
+            "number": 70,
+            "title": "Triggered for analysis",
+            "body": "analyze me",
+            "labels": [{"name": "bug"}, {"name": "autodev:analyze"}],
+            "user": {"login": "alice"},
+            "pull_request": null
+        }
+    ]);
+    gh.set_paginate("org/repo", "issues", serde_json::to_vec(&issues).unwrap());
 
     let mut queues = TaskQueues::new();
     autodev::scanner::issues::scan(
@@ -138,28 +164,16 @@ async fn scan_issues_skips_autodev_labeled() {
     .await
     .unwrap();
 
-    // #60 has "autodev" (not "autodev:*") — should be skipped because has_autodev_label
-    //   checks for "autodev:" prefix; "autodev" alone does not match "autodev:"
-    //   so #60 should actually be queued (no "autodev:" prefix label)
-    // #61 has "autodev:wip" → skipped
-    // #62 has "autodev:done" → skipped
-    // #63 has "autodev:skip" → skipped
-    // #64 has no autodev label → queued
+    assert!(queues.contains("issue:org/repo:70"));
 
-    // "autodev" label on #60 does NOT start with "autodev:" so it passes the filter
-    assert!(queues.contains("issue:org/repo:60"));
-    assert!(!queues.contains("issue:org/repo:61")); // autodev:wip
-    assert!(!queues.contains("issue:org/repo:62")); // autodev:done
-    assert!(!queues.contains("issue:org/repo:63")); // autodev:skip
-    assert!(queues.contains("issue:org/repo:64")); // no autodev label
+    // analyze 제거 + wip 추가
+    let removed = gh.removed_labels.lock().unwrap();
+    assert!(removed
+        .iter()
+        .any(|(_, n, l)| *n == 70 && l == "autodev:analyze"));
 
-    // autodev:wip labels should have been added only for queued items
     let added = gh.added_labels.lock().unwrap();
-    assert!(added.iter().any(|(_, n, l)| *n == 60 && l == "autodev:wip"));
-    assert!(added.iter().any(|(_, n, l)| *n == 64 && l == "autodev:wip"));
-    assert!(!added.iter().any(|(_, n, _)| *n == 61));
-    assert!(!added.iter().any(|(_, n, _)| *n == 62));
-    assert!(!added.iter().any(|(_, n, _)| *n == 63));
+    assert!(added.iter().any(|(_, n, l)| *n == 70 && l == "autodev:wip"));
 }
 
 #[tokio::test]
