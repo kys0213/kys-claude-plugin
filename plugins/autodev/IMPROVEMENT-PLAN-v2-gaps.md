@@ -493,21 +493,23 @@ Phase 4 (knowledge 수집 확장) ── 독립 (Phase 1과 병렬 가능)
 
 ---
 
-## 구현 체크리스트 (13항목)
+## 구현 체크리스트 (16항목)
 
-- [ ] 1-1. `process_ready()` PR 생성 성공 시 implementing 유지 (done 제거) + `<!-- autodev:pr-link:{N} -->` 이슈 코멘트 추가
-- [ ] 1-2. `process_ready()` PR 번호 추출 실패 시 done 제거
-- [ ] 1-3. 기존 E2E 테스트 기대값 수정
-- [ ] 1-4. 새 테스트: process_ready 라벨 전이 검증
-- [ ] 2-1. `recover_orphan_implementing()` 추가
-- [ ] 2-2. daemon 메인 루프에 호출 추가
-- [ ] 2-3. recovery 테스트 추가
-- [ ] 3-1. `extract_pr_number()` JSON pr_number fallback 추가
-- [ ] 3-2. extract_pr_number 테스트 추가
-- [ ] 4-1. `collect_existing_knowledge()` 수집 범위 확장
-- [ ] 4-2. `extract_task_knowledge()` empty suggestions → Ok(None)
-- [ ] 4-3. knowledge 수집 테스트 추가
-- [ ] 5-1. `create_knowledge_pr()` per-task actionable PR
-- [ ] 5-2. `extract_task_knowledge()` 시그니처 확장 + 호출부 수정
-- [ ] 5-3. `detect_cross_task_patterns()` daily flow 연결
-- [ ] 5-4. actionable PR + daily 연동 테스트
+> 최종 검증: design-v2-gap-analysis-final.md (2026-02-25)
+
+- [x] 1-1. `process_ready()` PR 생성 성공 시 implementing 유지 (done 제거) + `<!-- autodev:pr-link:{N} -->` 이슈 코멘트 추가
+- [x] 1-2. `process_ready()` PR 번호 추출 실패 시 done 제거
+- [x] 1-3. 기존 E2E 테스트 기대값 수정
+- [x] 1-4. 새 테스트: process_ready 라벨 전이 검증
+- [x] 2-1. `recover_orphan_implementing()` 추가
+- [x] 2-2. daemon 메인 루프에 호출 추가
+- [x] 2-3. recovery 테스트 추가
+- [x] 3-1. `extract_pr_number()` JSON pr_number fallback 추가
+- [x] 3-2. extract_pr_number 테스트 추가
+- [x] 4-1. `collect_existing_knowledge()` 수집 범위 확장 — hooks.json, workflow yaml 완료. **plugins/*/commands/*.md 미완료 (Gap A)**
+- [x] 4-2. `extract_task_knowledge()` empty suggestions → Ok(None)
+- [ ] 4-3. knowledge 수집 테스트 추가 — plugins skills 수집 테스트 필요 (Gap A 해결 후)
+- [x] 5-1. `create_knowledge_pr()` per-task actionable PR — **worktree 격리 미적용 (Gap C)**
+- [x] 5-2. `extract_task_knowledge()` 시그니처 확장 + 호출부 수정
+- [x] 5-3. `detect_cross_task_patterns()` daily flow 연결
+- [ ] 5-4. actionable PR + daily 연동 테스트 — `aggregate_daily_suggestions()` 미구현 (Gap B)
