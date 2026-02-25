@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Knowledge suggestion 타입
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SuggestionType {
     Rule,

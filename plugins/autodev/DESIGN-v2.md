@@ -36,7 +36,8 @@ v1: Pending → Analyzing → Ready → Implementing → done
 
 | 라벨 | 의미 | 전이 조건 |
 |------|------|----------|
-| `autodev:wip` | 분석 진행중 | scanner가 새 이슈 발견 |
+| `autodev:analyze` | **트리거** — 분석 요청 | 사람이 라벨 추가 |
+| `autodev:wip` | 분석 진행중 | scanner가 트리거 라벨 감지 |
 | `autodev:analyzed` | 분석 완료, **사람 리뷰 대기** | 분석 성공 시 |
 | `autodev:approved-analysis` | 사람이 분석 승인, **구현 대기** | 사람이 라벨 변경 |
 | `autodev:implementing` | PR 생성됨, **PR 리뷰 진행중** | 구현 + PR 생성 성공 시 |
@@ -54,35 +55,47 @@ v1: Pending → Analyzing → Ready → Implementing → done
 ### 전체 라벨 상태 전이
 
 ```
-Issue:
-(없음) ─scan─→ autodev:wip ─analysis─→ autodev:analyzed
-                    │                       │
-                    ├──skip──→ autodev:skip  │ ← 사람 리뷰 대기
-                    │                       │
-                    │              ┌────────────────────────┐
-                    │              │  사람이 라벨 변경        │
-                    │              │  analyzed 제거           │
-                    │              │  approved-analysis 추가  │
-                    │              └────────┬───────────────┘
-                    │                       │
-                    │                       ▼
-                    │            autodev:approved-analysis
-                    │                       │
-                    │              ┌────────────────────┐
-                    │              │  daemon이 감지       │
-                    │              │  scan_approved()     │
-                    │              └────────┬───────────┘
-                    │                       │
-                    │                       ▼
-                    │            autodev:implementing ←─ PR 생성됨
-                    │                       │
-                    │              ┌────────────────────┐
-                    │              │  PR approve 시      │
-                    │              │  PR pipeline이 전이  │
-                    │              └────────┬───────────┘
-                    │                       │
-                    │                       ▼
-                    └───failure──→ (없음)   autodev:done
+Issue (Label-Positive 모델):
+                    ┌────────────────────────┐
+                    │  사람이 트리거 라벨 추가  │
+                    │  autodev:analyze        │
+                    └────────┬───────────────┘
+                             │
+                    ┌────────▼───────────────┐
+                    │  scan()이 감지           │
+                    │  analyze 제거 + wip 추가 │
+                    └────────┬───────────────┘
+                             │
+              autodev:wip ───┤
+                    │        │
+                    ├──skip──→ autodev:skip
+                    │
+                    ▼ (분석 완료)
+              autodev:analyzed ← 사람 리뷰 대기
+                    │
+                    │  ┌────────────────────────┐
+                    │  │  사람이 라벨 변경        │
+                    │  │  analyzed 제거           │
+                    │  │  approved-analysis 추가  │
+                    │  └────────┬───────────────┘
+                    │           │
+                    │           ▼
+                    │ autodev:approved-analysis
+                    │           │
+                    │  ┌────────┴───────────┐
+                    │  │  scan_approved()    │
+                    │  └────────┬───────────┘
+                    │           │
+                    │           ▼
+                    │ autodev:implementing ←─ PR 생성됨
+                    │           │
+                    │  ┌────────┴───────────┐
+                    │  │  PR approve 시      │
+                    │  │  PR pipeline이 전이  │
+                    │  └────────┬───────────┘
+                    │           │
+                    │           ▼
+                    └──failure  autodev:done
 
 PR:
 (없음) ─scan─→ autodev:wip ─approve─→ autodev:done
@@ -91,14 +104,13 @@ PR:
 
 사람이 분석을 reject하는 경우:
 autodev:analyzed → (사람이 코멘트 + analyzed 라벨 제거)
-                 → (없음) → 다음 scan에서 재발견 → 재분석
+                 → 사람이 다시 autodev:analyze 라벨 추가 시 재분석
                     (이전 코멘트가 context로 포함되어 분석 품질 향상)
+                 → 사람이 라벨을 추가하지 않으면 아무 일도 안 일어남 (안전)
 
-재분석 무한 루프 방지 (Safety Valve):
-  scan() 시 이슈 코멘트에서 <!-- autodev:analysis --> 마커 개수 카운트
-  count >= MAX_ANALYSIS_ATTEMPTS(기본 3) →
-    autodev:skip 라벨 추가 + "max analysis attempts reached" 코멘트
-    (사람이 skip 해제 시 카운터 리셋하여 재시도 가능)
+크래시 안전성:
+  Label-Positive 모델이므로 크래시로 라벨이 유실되어도 재분석 위험 없음.
+  사람이 autodev:analyze를 명시적으로 추가해야만 scan() 대상이 됨.
 ```
 
 ---
@@ -109,10 +121,11 @@ autodev:analyzed → (사람이 코멘트 + analyzed 라벨 제거)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Phase 1: Analysis (자동)                                           │
+│  Phase 1: Analysis (트리거 라벨 기반)                                 │
 │                                                                     │
-│  Scanner: 새 이슈 (no autodev label)                                │
-│  → autodev:wip + queue[Pending]                                    │
+│  사람: 이슈에 autodev:analyze 라벨 추가                               │
+│  Scanner: autodev:analyze 라벨 감지                                  │
+│  → analyze 제거 + autodev:wip 추가 + queue[Pending]                 │
 │  → Analyze → 분석 리포트를 이슈 코멘트로 게시                         │
 │  → autodev:wip → autodev:analyzed                                  │
 │  → queue에서 제거 (사람 리뷰 대기)                                    │
@@ -124,7 +137,7 @@ autodev:analyzed → (사람이 코멘트 + analyzed 라벨 제거)
               │  사람이 분석 리포트를 검토:                      │
               │    ✅ 승인 → autodev:approved-analysis 라벨 추가 │
               │    ❌ 거부 → analyzed 라벨 제거 + 피드백 코멘트  │
-              │              (다음 scan에서 재분석)              │
+              │              (재분석 시 autodev:analyze 재추가)  │
               └───────────────────────┬──────────────────────┘
                                       │
 ┌─────────────────────────────────────▼───────────────────────────────┐
@@ -155,7 +168,8 @@ autodev:analyzed → (사람이 코멘트 + analyzed 라벨 제거)
 
 ```
 Issue Phase (v2):
-  Pending       → scan에서 등록됨 (분석 대기)
+  (trigger)     → 사람이 autodev:analyze 라벨 추가
+  Pending       → scan에서 트리거 감지 (analyze→wip 전이, 분석 대기)
   Analyzing     → 분석 프롬프트 실행중
   (exit queue)  → autodev:analyzed 라벨 (사람 리뷰 대기)
   Ready         → approved scan에서 등록됨 (구현 대기)
@@ -184,63 +198,55 @@ scan_all():
   pulls::scan_merges() — labels=autodev:done, open → merge Pending
 ```
 
-### 새 scan 구조 (v2)
+### 새 scan 구조 (v2) — Label-Positive
 
 ```
 scan_all():
-  issues::scan()            — since=cursor, no autodev label → Pending (분석 대기)
+  issues::scan()            — labels=autodev:analyze → Pending (분석 대기)  ← CHANGED
   issues::scan_approved()   — labels=autodev:approved-analysis → Ready (구현 대기)  ← NEW
   pulls::scan()             — since=cursor, no autodev label → Pending (리뷰 대기)
   pulls::scan_merges()      — labels=autodev:done, open → merge Pending
 ```
 
-### issues::scan() 재분석 Safety Valve
+### issues::scan() — Label-Positive 모델
 
-이슈가 reject → 재분석을 반복하여 무한 루프에 빠지는 것을 방지한다.
-`scan()` 시 라벨이 없는 이슈를 Pending으로 적재하기 전에, 기존 분석 코멘트 수를 확인한다.
-
-```rust
-// scanner/issues.rs — scan() 내부, Pending 적재 전
-
-const MAX_ANALYSIS_ATTEMPTS: usize = 3;
-
-// 이슈 코멘트에서 autodev 분석 마커 개수 확인
-let analysis_count = count_analysis_comments(gh, repo_name, number, gh_host).await;
-
-if analysis_count >= MAX_ANALYSIS_ATTEMPTS {
-    // 최대 분석 횟수 초과 → skip 전이
-    gh.label_add(repo_name, number, labels::SKIP, gh_host).await;
-    let comment = format!(
-        "<!-- autodev:system -->\n\
-         Autodev analysis has been attempted {analysis_count} times without approval.\n\
-         Marking as `autodev:skip`.\n\n\
-         > To retry, remove the `autodev:skip` label."
-    );
-    notifier.post_issue_comment(repo_name, number, &comment, gh_host).await;
-    tracing::warn!("issue #{number}: max analysis attempts ({analysis_count}) reached → skip");
-    continue;
-}
-
-// 정상 적재
-gh.label_add(repo_name, number, labels::WIP, gh_host).await;
-queues.issues.push(issue_phase::PENDING, item);
-```
+v1에서는 `autodev:*` 라벨이 없는 이슈를 자동 감지했으나 (Label-Negative),
+v2에서는 사람이 `autodev:analyze` 라벨을 명시적으로 추가한 이슈만 감지한다 (Label-Positive).
 
 ```rust
-/// 이슈 코멘트에서 autodev 분석 리포트 개수를 카운트
-async fn count_analysis_comments(
-    gh: &dyn Gh,
-    repo_name: &str,
-    number: i64,
-    gh_host: Option<&str>,
-) -> usize {
-    let jq = r#"[.[] | select(.body | contains("<!-- autodev:analysis -->"))] | length"#;
-    gh.api_get_field(repo_name, &format!("issues/{number}/comments"), jq, gh_host)
-        .await
-        .and_then(|s| s.trim().parse::<usize>().ok())
-        .unwrap_or(0)
+// scanner/issues.rs — scan()
+
+// Label-Positive: autodev:analyze 라벨이 있는 이슈만 조회
+let params = [
+    ("state", "open"),
+    ("labels", "autodev:analyze"),
+    ("per_page", "30"),
+];
+let data = gh.api_paginate(repo_name, "issues", &params, gh_host).await?;
+let issues: Vec<serde_json::Value> = serde_json::from_slice(&data)?;
+
+for issue in &issues {
+    if issue.get("pull_request").is_some() { continue; } // PR 제외
+
+    let number = match issue["number"].as_i64() {
+        Some(n) if n > 0 => n,
+        _ => continue,
+    };
+
+    let work_id = make_work_id("issue", repo_name, number);
+    if queues.contains(&work_id) { continue; } // dedup
+
+    // 라벨 전이: analyze → wip (트리거 소비)
+    gh.label_remove(repo_name, number, labels::ANALYZE, gh_host).await;
+    gh.label_add(repo_name, number, labels::WIP, gh_host).await;
+
+    queues.issues.push(issue_phase::PENDING, item);
+    tracing::info!("issue #{number}: autodev:analyze → wip (Pending)");
 }
 ```
+
+**Safety Valve 불필요**: Label-Positive 모델에서는 사람이 `autodev:analyze`를 다시 추가하지 않으면
+재분석이 일어나지 않으므로 무한루프 방지 로직이 필요 없다.
 
 ### issues::scan_approved() 구현
 
@@ -548,6 +554,7 @@ Some(ReviewVerdict::Approve) => {
 // queue/task_queues.rs
 
 pub mod labels {
+    pub const ANALYZE: &str = "autodev:analyze";  // 트리거 (사람이 추가)
     pub const WIP: &str = "autodev:wip";
     pub const DONE: &str = "autodev:done";
     pub const SKIP: &str = "autodev:skip";
@@ -590,12 +597,20 @@ v1에서는 `done/skip` 라벨만 skip했으나, v2에서는 더 많은 라벨�
 
 ```rust
 // daemon/mod.rs — startup_reconcile()
+//
+// Label-Positive 모델: autodev 라벨이 없는 이슈는 무시 (안전).
+// reconcile 대상은 autodev:* 라벨이 있는 이슈만.
 
 for item in items {
     let labels = get_labels(&item);
 
     // 영속 완료/제외 → skip
     if has_label(&labels, labels::DONE) || has_label(&labels, labels::SKIP) {
+        continue;
+    }
+
+    // 트리거 라벨만 있는 경우 → scan()이 다음 주기에 처리 (reconcile 불필요)
+    if has_label(&labels, labels::ANALYZE) {
         continue;
     }
 
@@ -606,7 +621,6 @@ for item in items {
 
     // 사람이 분석 승인 → Ready 큐에 적재
     if has_label(&labels, labels::APPROVED_ANALYSIS) {
-        // implementing을 먼저 추가 후 approved-analysis 제거 (크래시 안전)
         gh.label_add(repo, number, labels::IMPLEMENTING, gh_host).await;
         gh.label_remove(repo, number, labels::APPROVED_ANALYSIS, gh_host).await;
         let item = build_issue_item(..., extract_analysis_from_comments(...).await);
@@ -620,15 +634,14 @@ for item in items {
         continue;
     }
 
-    // orphan wip → 정리 후 적재
+    // orphan wip → 분석 중 크래시. wip 유지 + Pending 적재하여 분석 재개
     if has_label(&labels, labels::WIP) {
-        gh.label_remove(repo, number, labels::WIP, gh_host).await;
+        queues.issues.push(issue_phase::PENDING, item);
+        recovered += 1;
+        continue;
     }
 
-    // no autodev label 또는 정리된 wip → Pending 적재
-    gh.label_add(repo, number, labels::WIP, gh_host).await;
-    queues.issues.push(issue_phase::PENDING, item);
-    recovered += 1;
+    // autodev 라벨 없음 → Label-Positive이므로 무시 (사람이 analyze 라벨 추가 필요)
 }
 ```
 
@@ -1106,13 +1119,14 @@ let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
 | 파일 | 변경 내용 | 위험도 |
 |------|----------|--------|
 | `queue/task_queues.rs` | `labels` 모듈에 상수 3개 추가, `PrItem.source_issue_number` 추가 | 낮음 (additive) |
+| `scanner/issues.rs` | `scan()` Label-Positive 전환 (autodev:analyze 필터) | **중간** |
 | `scanner/issues.rs` | `scan_approved()` 함수 추가 | 낮음 (new function) |
 | `scanner/mod.rs` | `scan_all()`에 `scan_approved()` 호출 추가 | 낮음 |
 | `pipeline/issue.rs` | `process_pending()` 변경, `process_ready()` PR 연동 로직 | **중간** |
 | `pipeline/pr.rs` | approve 경로에 Issue done 전이 추가 + **worktree 정리 로직 추가** | **중간** |
 | `components/verdict.rs` | `format_analysis_comment()` 함수 추가 | 낮음 (new function) |
 | `infrastructure/claude/output.rs` | `extract_pr_number()` 함수 추가 | 낮음 (new function) |
-| `scanner/issues.rs` | `count_analysis_comments()` Safety Valve 추가 | 낮음 (new function) |
+| ~~`scanner/issues.rs`~~ | ~~`count_analysis_comments()` Safety Valve~~ | ~~제거 (Label-Positive로 불필요)~~ |
 | `pipeline/issue.rs` | `find_existing_pr()` API fallback 추가 | 낮음 (new function) |
 | `daemon/recovery.rs` | `recover_orphan_implementing()` + `extract_pr_link_from_comments()` 추가 | **중간** |
 | `knowledge/extractor.rs` | `extract_task_knowledge()` 확장 — delta check + PR 생성 (격리 worktree) | **중간** |
@@ -1150,7 +1164,7 @@ let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
 │                            │                                        │
 │  ┌───────────────────────────────────────────────────────────────┐  │
 │  │ 2. SCAN                                                       │  │
-│  │    2a. issues::scan()         — 새 이슈 → Pending (분석)       │  │
+│  │    2a. issues::scan()         — analyze 라벨 → Pending (분석)  │  │
 │  │    2b. issues::scan_approved()— approved → Ready (구현)  ←NEW │  │
 │  │    2c. pulls::scan()          — 새 PR → Pending (리뷰)        │  │
 │  │    2d. pulls::scan_merges()   — approved PR → merge Pending   │  │
@@ -1192,11 +1206,11 @@ let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
 
 | Type | Phase Flow | 라벨 전이 |
 |------|-----------|----------|
-| Issue (분석) | `Pending → Analyzing → (exit)` | `(없음) → wip → analyzed` |
+| Issue (분석) | `(trigger) → Pending → Analyzing → (exit)` | `analyze → wip → analyzed` |
 | Issue (승인 → 구현) | `(scan_approved) → Ready → Implementing → (exit)` | `approved-analysis → implementing` |
 | Issue (PR approved) | `(PR pipeline triggers)` | `implementing → done` |
-| Issue (clarify/wontfix) | `Pending → Analyzing → skip` | `(없음) → wip → skip` |
-| Issue (analysis reject) | `analyzed → (없음) → re-scan` | `analyzed → (없음) → wip → analyzed` |
+| Issue (clarify/wontfix) | `Pending → Analyzing → skip` | `wip → skip` |
+| Issue (analysis reject) | `analyzed → (사람이 다시 트리거)` | `analyzed → (없음) → analyze → wip → analyzed` |
 | PR (리뷰) | `Pending → Reviewing → approve → done` | `(없음) → wip → done` |
 | PR (리뷰 + 피드백) | `Pending → Reviewing → ReviewDone → Improving → Improved → Reviewing (반복)` | `wip` 유지 |
 | Merge | `Pending → Merging → done` | `(없음) → wip → done` |
@@ -1207,15 +1221,17 @@ let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
 
 ### Phase A: 라벨 + 모델 (기반)
 
-1. `labels` 모듈에 `ANALYZED`, `APPROVED_ANALYSIS`, `IMPLEMENTING` 상수 추가
+1. `labels` 모듈에 `ANALYZE`, `ANALYZED`, `APPROVED_ANALYSIS`, `IMPLEMENTING` 상수 추가
 2. `PrItem`에 `source_issue_number: Option<i64>` 필드 추가
 3. 기존 테스트 수정 (PrItem 생성자에 새 필드 추가)
 
-### Phase B: 분석 리뷰 게이트
+### Phase B: Label-Positive Scan + 분석 리뷰 게이트
 
-4. `verdict.rs`에 `format_analysis_comment()` 추가
-5. `pipeline/issue.rs` `process_pending()` 변경 — 분석 완료 시 analyzed 라벨 + exit queue
-6. 테스트: 분석 성공 시 analyzed 라벨 + exit queue 검증
+4. `scanner/issues.rs` `scan()` Label-Positive 전환 — `labels=autodev:analyze` 필터 + `analyze→wip` 전이
+5. `verdict.rs`에 `format_analysis_comment()` 추가
+6. `pipeline/issue.rs` `process_pending()` 변경 — 분석 완료 시 analyzed 라벨 + exit queue
+7. 테스트: scan()이 analyze 라벨 감지 + Label-Positive 필터 검증
+8. 테스트: 분석 성공 시 analyzed 라벨 + exit queue 검증
 
 ### Phase C: Approved Scan + 구현
 
@@ -1247,16 +1263,16 @@ let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
 
 ## 14. 구현 체크리스트
 
-- [ ] 새 라벨 상수 추가 (`ANALYZED`, `APPROVED_ANALYSIS`, `IMPLEMENTING`)
+- [ ] 새 라벨 상수 추가 (`ANALYZE`, `ANALYZED`, `APPROVED_ANALYSIS`, `IMPLEMENTING`)
 - [ ] `PrItem.source_issue_number` 추가
+- [ ] `scan()` Label-Positive 전환 — `labels=autodev:analyze` 필터 + `analyze→wip` 라벨 전이
 - [ ] `process_pending()` 변경 — 분석 완료 시 analyzed 라벨 + 코멘트 + exit queue
 - [ ] `format_analysis_comment()` 추가
-- [ ] 재분석 Safety Valve — `scan()` 에서 분석 코멘트 수 확인 → 3회 초과 시 skip
 - [ ] `scan_approved()` 추가 — 라벨 전이 순서: implementing 먼저 추가 → approved-analysis 제거
 - [ ] `extract_pr_number()` 추가 + `find_existing_pr()` API fallback (중복 PR 방지)
 - [ ] `process_ready()` 변경 — PR 생성 + PR queue push + `<!-- autodev:pr-link:{N} -->` 이슈 코멘트
 - [ ] PR approve 시 Issue done 전이 (`source_issue_number` 활용)
-- [ ] `startup_reconcile()` 라벨 필터 확장
+- [ ] `startup_reconcile()` 라벨 필터 확장 (Label-Positive: autodev 라벨 없으면 무시)
 - [ ] `recover_orphan_implementing()` — pr-link 마커 기반 PR 상태 확인 → done 전이
 - [ ] `extract_task_knowledge()` 확장 — delta check + actionable PR 생성 (격리 worktree)
 - [ ] `collect_existing_knowledge()` — 기존 레포 지식 수집 (skills, hooks, workflow 포함)

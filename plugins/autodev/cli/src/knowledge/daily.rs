@@ -293,45 +293,68 @@ pub async fn post_daily_report(
 /// 4. PR 생성 + autodev:skip 라벨 부착
 pub async fn create_knowledge_prs(
     gh: &dyn Gh,
-    git: &dyn crate::infrastructure::git::Git,
+    workspace: &crate::components::workspace::Workspace<'_>,
     repo_name: &str,
     report: &DailyReport,
-    base_path: &Path,
     gh_host: Option<&str>,
 ) {
     use crate::queue::task_queues::labels;
 
+    let git = workspace.git();
+
     for (i, suggestion) in report.suggestions.iter().enumerate() {
         let branch = format!("autodev/knowledge/{}-{}", report.date, i);
+        let knowledge_task_id = format!("knowledge-daily-{}-{i}", report.date);
         let target = &suggestion.target_file;
 
-        // 1. branch 생성
-        if let Err(e) = git.checkout_new_branch(base_path, &branch).await {
+        // 1. 별도 worktree 생성 (base_path 오염 방지)
+        let kn_wt_path = match workspace
+            .create_worktree(repo_name, &knowledge_task_id, None)
+            .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("knowledge PR: worktree creation failed: {e}");
+                continue;
+            }
+        };
+
+        // 2. branch 생성
+        if let Err(e) = git.checkout_new_branch(&kn_wt_path, &branch).await {
             tracing::warn!("knowledge PR: failed to create branch {branch}: {e}");
+            let _ = workspace
+                .remove_worktree(repo_name, &knowledge_task_id)
+                .await;
             continue;
         }
 
-        // 2. 파일 쓰기
-        let file_path = base_path.join(target);
+        // 3. 파일 쓰기
+        let file_path = kn_wt_path.join(target);
         if let Some(parent) = file_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
         if let Err(e) = std::fs::write(&file_path, &suggestion.content) {
             tracing::warn!("knowledge PR: failed to write {target}: {e}");
+            let _ = workspace
+                .remove_worktree(repo_name, &knowledge_task_id)
+                .await;
             continue;
         }
 
-        // 3. commit + push
+        // 4. commit + push
         let message = format!("[autodev] knowledge: {}", suggestion.reason);
         if let Err(e) = git
-            .add_commit_push(base_path, &[target.as_str()], &message, &branch)
+            .add_commit_push(&kn_wt_path, &[target.as_str()], &message, &branch)
             .await
         {
             tracing::warn!("knowledge PR: failed to commit+push {branch}: {e}");
+            let _ = workspace
+                .remove_worktree(repo_name, &knowledge_task_id)
+                .await;
             continue;
         }
 
-        // 4. PR 생성
+        // 5. PR 생성
         let pr_title = format!("[autodev] rule: {}", suggestion.reason);
         let pr_body = format!(
             "<!-- autodev:knowledge-pr -->\n\n\
@@ -360,6 +383,11 @@ pub async fn create_knowledge_prs(
         } else {
             tracing::warn!("knowledge PR: failed to create PR for suggestion {i}");
         }
+
+        // 6. worktree 정리
+        let _ = workspace
+            .remove_worktree(repo_name, &knowledge_task_id)
+            .await;
     }
 }
 
@@ -393,21 +421,46 @@ pub fn aggregate_daily_suggestions(db: &Database, date: &str) -> Vec<Suggestion>
 pub fn detect_cross_task_patterns(suggestions: &[super::models::Suggestion]) -> Vec<Pattern> {
     let mut file_counts: std::collections::HashMap<&str, Vec<&str>> =
         std::collections::HashMap::new();
+    let mut type_counts: std::collections::HashMap<&super::models::SuggestionType, Vec<&str>> =
+        std::collections::HashMap::new();
 
     for s in suggestions {
         file_counts
             .entry(&s.target_file)
             .or_default()
             .push(&s.reason);
+        type_counts
+            .entry(&s.suggestion_type)
+            .or_default()
+            .push(&s.reason);
     }
 
     let mut patterns = Vec::new();
+
+    // Hotfile: 동일 파일이 2회 이상 제안됨
     for (file, reasons) in &file_counts {
         if reasons.len() >= 2 {
             patterns.push(Pattern {
                 pattern_type: PatternType::Hotfile,
                 description: format!(
                     "{file} suggested by {} tasks: {}",
+                    reasons.len(),
+                    reasons.join("; ")
+                ),
+                occurrences: reasons.len() as u32,
+                affected_tasks: vec![],
+            });
+        }
+    }
+
+    // ReviewCycle: 동일 suggestion_type이 3회 이상 반복됨
+    for (st, reasons) in &type_counts {
+        if reasons.len() >= 3 {
+            patterns.push(Pattern {
+                pattern_type: PatternType::ReviewCycle,
+                description: format!(
+                    "{:?} suggested {} times across tasks: {}",
+                    st,
                     reasons.len(),
                     reasons.join("; ")
                 ),
@@ -670,6 +723,57 @@ mod tests {
 
         let patterns = detect_cross_task_patterns(&suggestions);
         assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn detect_cross_task_patterns_finds_review_cycle() {
+        use super::super::models::{PatternType, Suggestion, SuggestionType};
+
+        let suggestions = vec![
+            Suggestion {
+                suggestion_type: SuggestionType::Skill,
+                target_file: "plugins/a/commands/x.md".into(),
+                content: "skill A".into(),
+                reason: "Issue #1".into(),
+            },
+            Suggestion {
+                suggestion_type: SuggestionType::Skill,
+                target_file: "plugins/b/commands/y.md".into(),
+                content: "skill B".into(),
+                reason: "Issue #2".into(),
+            },
+            Suggestion {
+                suggestion_type: SuggestionType::Skill,
+                target_file: "plugins/c/commands/z.md".into(),
+                content: "skill C".into(),
+                reason: "Issue #3".into(),
+            },
+            Suggestion {
+                suggestion_type: SuggestionType::Rule,
+                target_file: ".claude/rules/test.md".into(),
+                content: "rule".into(),
+                reason: "Issue #4".into(),
+            },
+        ];
+
+        let patterns = detect_cross_task_patterns(&suggestions);
+
+        // Hotfile: 모두 다른 파일이므로 없음
+        assert!(
+            !patterns
+                .iter()
+                .any(|p| p.pattern_type == PatternType::Hotfile),
+            "no hotfile pattern expected"
+        );
+
+        // ReviewCycle: Skill 3회 반복
+        let review_cycles: Vec<_> = patterns
+            .iter()
+            .filter(|p| p.pattern_type == PatternType::ReviewCycle)
+            .collect();
+        assert_eq!(review_cycles.len(), 1);
+        assert_eq!(review_cycles[0].occurrences, 3);
+        assert!(review_cycles[0].description.contains("Skill"));
     }
 
     // ═══════════════════════════════════════════════

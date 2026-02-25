@@ -1,0 +1,34 @@
+[
+  {
+    "number": 42,
+    "title": "Bug: login page crashes",
+    "body": "Steps to reproduce...",
+    "labels": [{"name": "bug"}, {"name": "autodev:analyze"}],
+    "user": {"login": "alice"},
+    "pull_request": null
+  },
+  {
+    "number": 43,
+    "title": "Feature: dark mode",
+    "body": "Please add dark mode",
+    "labels": [{"name": "enhancement"}, {"name": "autodev:analyze"}],
+    "user": {"login": "bob"},
+    "pull_request": null
+  },
+  {
+    "number": 44,
+    "title": "PR-linked issue (should be skipped)",
+    "body": null,
+    "labels": [{"name": "autodev:analyze"}],
+    "user": {"login": "charlie"},
+    "pull_request": {"url": "https://api.github.com/repos/org/repo/pulls/44"}
+  },
+  {
+    "number": 45,
+    "title": "Bot update",
+    "body": "Automated dependency update",
+    "labels": [{"name": "dependencies"}, {"name": "autodev:analyze"}],
+    "user": {"login": "dependabot"},
+    "pull_request": null
+  }
+]
