@@ -11,14 +11,7 @@ kanban/
 
 ## todo/
 
-> 설계-구현 정합성 분석 (2026-02-24) 기반
-
-| 항목 | 파일 | 우선순위 |
-|------|------|---------|
-| PR Review API 구현 (H-1) | [todo/pr-review-api.md](./todo/pr-review-api.md) | High |
-| DESIGN.md 설계-구현 정합성 갱신 (M-1, M-2, L-1~L-3) | [todo/design-doc-sync.md](./todo/design-doc-sync.md) | Medium |
-| CLI queue 서브커맨드 + IPC 설계 (M-3) | [todo/cli-queue-ipc.md](./todo/cli-queue-ipc.md) | Medium |
-| 소규모 정리 (L-4, L-5, L-6) | [todo/minor-cleanup.md](./todo/minor-cleanup.md) | Low |
+_(없음)_
 
 ## in-progress/
 
@@ -28,6 +21,15 @@ _(없음)_
 
 | 항목 | 파일 |
 |------|------|
+| PR Review API 구현 (H-1) | [done/pr-review-api.md](./done/pr-review-api.md) |
+| `aggregate_daily_suggestions()` 구현 (Gap B) | [done/aggregate-daily-suggestions.md](./done/aggregate-daily-suggestions.md) |
+| `plugins/*/commands/*.md` knowledge 수집 (Gap A) | [done/knowledge-plugins-collection.md](./done/knowledge-plugins-collection.md) |
+| Knowledge PR worktree 격리 (Gap C) | [done/knowledge-pr-worktree-isolation.md](./done/knowledge-pr-worktree-isolation.md) |
+| DESIGN.md 설계-구현 정합성 갱신 (M-1, M-2, L-1~L-3) | [done/design-doc-sync.md](./done/design-doc-sync.md) |
+| CLI queue 서브커맨드 (M-3) | [done/cli-queue-ipc.md](./done/cli-queue-ipc.md) |
+| 소규모 정리 (L-4, L-5, L-6) | [done/minor-cleanup.md](./done/minor-cleanup.md) |
+| DESIGN-v2 최종 갭 분석 | [done/design-v2-gap-analysis-final.md](./done/design-v2-gap-analysis-final.md) |
+| DESIGN-v2 구현 검토 리포트 | [done/design-v2-review.md](./done/design-v2-review.md) |
 | 설계-구현 정합성 분석 | [done/design-implementation-analysis.md](./done/design-implementation-analysis.md) |
 | Phase 상태 세분화 (M-01) | [done/phase-refinement.md](./done/phase-refinement.md) |
 | 문서 정합성 갱신 (L-03+L-04) | [done/doc-consistency.md](./done/doc-consistency.md) |
@@ -41,7 +43,16 @@ _(없음)_
 | Gap 개선 (H-01, H-02, H-03, M-02) | [done/gap-improvement.md](./done/gap-improvement.md) |
 | SQLite → In-Memory 리팩토링 | [done/refactoring-sqlite-to-memory.md](./done/refactoring-sqlite-to-memory.md) |
 
+## 구현 계획 현황
+
+| 계획 | 상태 |
+|------|------|
+| REFACTORING-PLAN.md | ✅ 완료 (2026-02-23) |
+| plans/autodev-gap-improvement.md | ✅ 완료 (2026-02-23) |
+| IMPLEMENTATION-PLAN-v2.md Phase A~E | ✅ 완료 |
+| IMPROVEMENT-PLAN-v2-gaps.md Phase 1~5 | ✅ 완료 |
+
 ## 테스트 현황
 
-- 전체 테스트: **311개** (모두 통과)
-- 마지막 검증일: 2026-02-23
+- 전체 테스트: **390개** (모두 통과)
+- 마지막 검증일: 2026-02-25
