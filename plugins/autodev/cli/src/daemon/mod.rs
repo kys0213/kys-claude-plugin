@@ -3,13 +3,15 @@ pub mod pid;
 pub mod recovery;
 pub mod status;
 
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{bail, Result};
 use chrono::Timelike;
+use tokio::task::JoinSet;
 use tracing::info;
 
-use crate::components::notifier::Notifier;
 use crate::components::workspace::Workspace;
 use crate::config::{self, Env};
 use crate::infrastructure::claude::Claude;
@@ -18,18 +20,197 @@ use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 use crate::pipeline;
 use crate::queue::repository::{RepoRepository, ScanCursorRepository};
-use crate::queue::task_queues::TaskQueues;
+use crate::queue::task_queues::{issue_phase, merge_phase, pr_phase, TaskQueues};
 use crate::queue::Database;
 use crate::scanner;
 
-/// 데몬을 포그라운드로 시작
+// ─── In-Flight Concurrency Tracker ───
+
+/// Spawned task 동시 실행 제한기.
+/// per-repo 카운트 + 전역 상한으로 Claude 세션 수를 제한한다.
+struct InFlightTracker {
+    per_repo: HashMap<String, usize>,
+    total: usize,
+    max_total: usize,
+}
+
+impl InFlightTracker {
+    fn new(max_total: u32) -> Self {
+        Self {
+            per_repo: HashMap::new(),
+            total: 0,
+            max_total: max_total as usize,
+        }
+    }
+
+    fn can_spawn(&self) -> bool {
+        self.total < self.max_total
+    }
+
+    fn track(&mut self, repo_name: &str) {
+        *self.per_repo.entry(repo_name.to_string()).or_default() += 1;
+        self.total += 1;
+    }
+
+    fn release(&mut self, repo_name: &str) {
+        if let Some(count) = self.per_repo.get_mut(repo_name) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.per_repo.remove(repo_name);
+            }
+        }
+        self.total = self.total.saturating_sub(1);
+    }
+}
+
+// ─── Task Spawner ───
+
+/// 큐에서 Ready 아이템을 pop → working phase 전이 → spawned task로 실행.
+/// InFlightTracker가 상한에 도달하면 즉시 반환한다.
+#[allow(clippy::too_many_arguments)]
+fn spawn_ready_tasks(
+    queues: &mut TaskQueues,
+    tracker: &mut InFlightTracker,
+    join_set: &mut JoinSet<pipeline::TaskOutput>,
+    env: &Arc<dyn Env>,
+    gh: &Arc<dyn Gh>,
+    git: &Arc<dyn Git>,
+    claude: &Arc<dyn Claude>,
+    sw: &Arc<dyn SuggestWorkflow>,
+) {
+    // Issue: Pending → Analyzing
+    while tracker.can_spawn() {
+        let item = match queues.issues.pop(issue_phase::PENDING) {
+            Some(item) => item,
+            None => break,
+        };
+        tracker.track(&item.repo_name);
+        queues.issues.push(issue_phase::ANALYZING, item.clone());
+        tracing::debug!("issue #{}: spawned analyze_one", item.github_number);
+
+        let (e, g, gi, c) = (
+            Arc::clone(env),
+            Arc::clone(gh),
+            Arc::clone(git),
+            Arc::clone(claude),
+        );
+        join_set
+            .spawn(async move { pipeline::issue::analyze_one(item, &*e, &*g, &*gi, &*c).await });
+    }
+
+    // Issue: Ready → Implementing
+    while tracker.can_spawn() {
+        let item = match queues.issues.pop(issue_phase::READY) {
+            Some(item) => item,
+            None => break,
+        };
+        tracker.track(&item.repo_name);
+        queues.issues.push(issue_phase::IMPLEMENTING, item.clone());
+        tracing::debug!("issue #{}: spawned implement_one", item.github_number);
+
+        let (e, g, gi, c) = (
+            Arc::clone(env),
+            Arc::clone(gh),
+            Arc::clone(git),
+            Arc::clone(claude),
+        );
+        join_set
+            .spawn(async move { pipeline::issue::implement_one(item, &*e, &*g, &*gi, &*c).await });
+    }
+
+    // PR: Pending → Reviewing
+    while tracker.can_spawn() {
+        let item = match queues.prs.pop(pr_phase::PENDING) {
+            Some(item) => item,
+            None => break,
+        };
+        tracker.track(&item.repo_name);
+        queues.prs.push(pr_phase::REVIEWING, item.clone());
+        tracing::debug!("PR #{}: spawned review_one", item.github_number);
+
+        let (e, g, gi, c, s) = (
+            Arc::clone(env),
+            Arc::clone(gh),
+            Arc::clone(git),
+            Arc::clone(claude),
+            Arc::clone(sw),
+        );
+        join_set
+            .spawn(async move { pipeline::pr::review_one(item, &*e, &*g, &*gi, &*c, &*s).await });
+    }
+
+    // PR: ReviewDone → Improving
+    while tracker.can_spawn() {
+        let item = match queues.prs.pop(pr_phase::REVIEW_DONE) {
+            Some(item) => item,
+            None => break,
+        };
+        tracker.track(&item.repo_name);
+        queues.prs.push(pr_phase::IMPROVING, item.clone());
+        tracing::debug!("PR #{}: spawned improve_one", item.github_number);
+
+        let (e, g, gi, c) = (
+            Arc::clone(env),
+            Arc::clone(gh),
+            Arc::clone(git),
+            Arc::clone(claude),
+        );
+        join_set.spawn(async move { pipeline::pr::improve_one(item, &*e, &*g, &*gi, &*c).await });
+    }
+
+    // PR: Improved → Reviewing (re-review)
+    while tracker.can_spawn() {
+        let item = match queues.prs.pop(pr_phase::IMPROVED) {
+            Some(item) => item,
+            None => break,
+        };
+        tracker.track(&item.repo_name);
+        queues.prs.push(pr_phase::REVIEWING, item.clone());
+        tracing::debug!("PR #{}: spawned re_review_one", item.github_number);
+
+        let (e, g, gi, c, s) = (
+            Arc::clone(env),
+            Arc::clone(gh),
+            Arc::clone(git),
+            Arc::clone(claude),
+            Arc::clone(sw),
+        );
+        join_set.spawn(
+            async move { pipeline::pr::re_review_one(item, &*e, &*g, &*gi, &*c, &*s).await },
+        );
+    }
+
+    // Merge: Pending → Merging
+    while tracker.can_spawn() {
+        let item = match queues.merges.pop(merge_phase::PENDING) {
+            Some(item) => item,
+            None => break,
+        };
+        tracker.track(&item.repo_name);
+        queues.merges.push(merge_phase::MERGING, item.clone());
+        tracing::debug!("merge PR #{}: spawned merge_one", item.pr_number);
+
+        let (e, g, gi, c) = (
+            Arc::clone(env),
+            Arc::clone(gh),
+            Arc::clone(git),
+            Arc::clone(claude),
+        );
+        join_set.spawn(async move { pipeline::merge::merge_one(item, &*e, &*g, &*gi, &*c).await });
+    }
+}
+
+// ─── Daemon Entry Point ───
+
+/// 데몬을 포그라운드로 시작 (non-blocking event loop)
+#[allow(clippy::too_many_arguments)]
 pub async fn start(
     home: &Path,
-    env: &dyn Env,
-    gh: &dyn Gh,
-    git: &dyn Git,
-    claude: &dyn Claude,
-    sw: &dyn SuggestWorkflow,
+    env: Arc<dyn Env>,
+    gh: Arc<dyn Gh>,
+    git: Arc<dyn Git>,
+    claude: Arc<dyn Claude>,
+    sw: Arc<dyn SuggestWorkflow>,
 ) -> Result<()> {
     if pid::is_running(home) {
         bail!(
@@ -42,7 +223,7 @@ pub async fn start(
 
     pid::write_pid(home)?;
 
-    let cfg = config::loader::load_merged(env, None);
+    let cfg = config::loader::load_merged(&*env, None);
 
     let db_path = home.join("autodev.db");
     let db = Database::open(&db_path)?;
@@ -51,8 +232,8 @@ pub async fn start(
     println!("autodev daemon started (pid: {})", std::process::id());
 
     let mut queues = TaskQueues::new();
-    let workspace = Workspace::new(git, env);
-    let notifier = Notifier::new(gh);
+    let mut join_set: JoinSet<pipeline::TaskOutput> = JoinSet::new();
+    let mut tracker = InFlightTracker::new(cfg.daemon.max_concurrent_tasks);
 
     let gh_host = cfg.consumer.gh_host.clone();
     let daily_report_hour = cfg.daemon.daily_report_hour;
@@ -78,7 +259,7 @@ pub async fn start(
     // 0. Startup Reconcile (bounded recovery)
     match startup_reconcile(
         &db,
-        gh,
+        &*gh,
         &mut queues,
         gh_host.as_deref(),
         reconcile_window_hours,
@@ -90,19 +271,58 @@ pub async fn start(
         _ => {}
     }
 
-    // 메인 루프: recovery → scanner → pipeline
-    tokio::select! {
-        _ = async {
-            loop {
+    info!(
+        "event loop starting (max_concurrent_tasks={})",
+        cfg.daemon.max_concurrent_tasks
+    );
+
+    // 메인 이벤트 루프: task completion / tick / status / shutdown
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(tick_interval_secs));
+    let mut status_tick = tokio::time::interval(std::time::Duration::from_secs(5));
+
+    loop {
+        tokio::select! {
+            // ── Task completion ──
+            Some(result) = join_set.join_next() => {
+                match result {
+                    Ok(output) => {
+                        tracker.release(&output.repo_name);
+                        info!(
+                            "task completed: {} (in-flight: {})",
+                            output.work_id, tracker.total
+                        );
+                        pipeline::handle_task_output(&mut queues, &db, output);
+                    }
+                    Err(e) => {
+                        // Task panicked — item stays in working phase.
+                        // Startup recovery will clean up on next restart.
+                        tracing::error!("spawned task panicked: {e}");
+                        tracker.total = tracker.total.saturating_sub(1);
+                    }
+                }
+
+                // Task 완료 후 즉시 새 task spawn 시도 (tick 대기 불필요)
+                spawn_ready_tasks(
+                    &mut queues, &mut tracker, &mut join_set,
+                    &env, &gh, &git, &claude, &sw,
+                );
+            }
+
+            // ── Tick: housekeeping + spawn ──
+            _ = tick.tick() => {
                 // 1. Recovery: orphan autodev:wip 라벨 정리
                 match db.repo_find_enabled() {
                     Ok(repos) => {
-                        match recovery::recover_orphan_wip(&repos, gh, &queues, gh_host.as_deref()).await {
+                        match recovery::recover_orphan_wip(
+                            &repos, &*gh, &queues, gh_host.as_deref(),
+                        ).await {
                             Ok(n) if n > 0 => info!("recovered {n} orphan wip items"),
                             Err(e) => tracing::error!("recovery error: {e}"),
                             _ => {}
                         }
-                        match recovery::recover_orphan_implementing(&repos, gh, &queues, gh_host.as_deref()).await {
+                        match recovery::recover_orphan_implementing(
+                            &repos, &*gh, &queues, gh_host.as_deref(),
+                        ).await {
                             Ok(n) if n > 0 => info!("recovered {n} orphan implementing items"),
                             Err(e) => tracing::error!("implementing recovery error: {e}"),
                             _ => {}
@@ -112,14 +332,15 @@ pub async fn start(
                 }
 
                 // 2. Scan
-                if let Err(e) = scanner::scan_all(&db, env, gh, &mut queues).await {
+                if let Err(e) = scanner::scan_all(&db, &*env, &*gh, &mut queues).await {
                     tracing::error!("scan error: {e}");
                 }
 
-                // 3. Pipeline
-                if let Err(e) = pipeline::process_all(&db, env, &workspace, &notifier, gh, claude, sw, &mut queues).await {
-                    tracing::error!("pipeline error: {e}");
-                }
+                // 3. Spawn ready tasks
+                spawn_ready_tasks(
+                    &mut queues, &mut tracker, &mut join_set,
+                    &env, &gh, &git, &claude, &sw,
+                );
 
                 // 4. Daily Report (scheduled at daily_report_hour)
                 if knowledge_extraction {
@@ -129,7 +350,6 @@ pub async fn start(
                         let yesterday = (now - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
                         let log_path = log_dir.join(format!("daemon.{yesterday}.log"));
 
-                        // 일간 로그 cleanup
                         log::cleanup_old_logs(&log_dir, log_retention_days);
 
                         if log_path.exists() {
@@ -138,41 +358,36 @@ pub async fn start(
                                 let patterns = crate::knowledge::daily::detect_patterns(&stats);
                                 let mut report = crate::knowledge::daily::build_daily_report(&yesterday, &stats, patterns);
 
-                                // 첫 번째 활성 레포의 worktree에서 Claude 실행
+                                let workspace = Workspace::new(&*git, &*env);
                                 if let Ok(repos) = db.repo_find_enabled() {
                                     if let Some(repo) = repos.first() {
                                         if let Ok(base) = workspace.ensure_cloned(&repo.url, &repo.name).await {
-                                            // suggest-workflow 교차 분석 데이터 수집 (M-03)
                                             crate::knowledge::daily::enrich_with_cross_analysis(
-                                                &mut report, sw,
+                                                &mut report, &*sw,
                                             ).await;
 
-                                            // v2: per-task knowledge 결과를 consumer_logs에서 집계
                                             let per_task = crate::knowledge::daily::aggregate_daily_suggestions(&db, &yesterday);
 
                                             if let Some(ks) = crate::knowledge::daily::generate_daily_suggestions(
-                                                claude, &report, &base,
+                                                &*claude, &report, &base,
                                             ).await {
                                                 report.suggestions = ks.suggestions;
                                             }
 
-                                            // per-task 결과를 daily suggestions에 merge
                                             report.suggestions.extend(per_task);
 
-                                            // v2: cross-task patterns 감지 (suggestions 간 반복 파일)
                                             if !report.suggestions.is_empty() {
                                                 let cross_patterns = crate::knowledge::daily::detect_cross_task_patterns(&report.suggestions);
                                                 report.patterns.extend(cross_patterns);
                                             }
 
                                             crate::knowledge::daily::post_daily_report(
-                                                gh, &repo.name, &report, gh_host.as_deref(),
+                                                &*gh, &repo.name, &report, gh_host.as_deref(),
                                             ).await;
 
-                                            // Knowledge PR 생성 (suggestions → PR + autodev:skip)
                                             if !report.suggestions.is_empty() {
                                                 crate::knowledge::daily::create_knowledge_prs(
-                                                    gh, &workspace, &repo.name, &report,
+                                                    &*gh, &workspace, &repo.name, &report,
                                                     gh_host.as_deref(),
                                                 ).await;
                                             }
@@ -187,16 +402,30 @@ pub async fn start(
                         last_daily_report_date = today;
                     }
                 }
+            }
 
-                // 5. Status file 갱신
+            // ── Status heartbeat ──
+            _ = status_tick.tick() => {
                 let ds = status::build_status(&queues, &counters, start_time);
                 status::write_status(&status_path, &ds);
-
-                tokio::time::sleep(std::time::Duration::from_secs(tick_interval_secs)).await;
             }
-        } => {},
-        _ = tokio::signal::ctrl_c() => {
-            info!("received SIGINT, shutting down...");
+
+            // ── Graceful shutdown ──
+            _ = tokio::signal::ctrl_c() => {
+                info!("received SIGINT, shutting down...");
+                break;
+            }
+        }
+    }
+
+    // Wait for in-flight tasks to complete
+    if !join_set.is_empty() {
+        info!("waiting for {} in-flight tasks...", join_set.len());
+        while let Some(result) = join_set.join_next().await {
+            if let Ok(output) = result {
+                tracker.release(&output.repo_name);
+                pipeline::handle_task_output(&mut queues, &db, output);
+            }
         }
     }
 
@@ -444,6 +673,34 @@ mod tests {
         let db = Database::open(std::path::Path::new(":memory:")).expect("open in-memory db");
         db.initialize().expect("initialize schema");
         db
+    }
+
+    // ═══════════════════════════════════════════════
+    // InFlightTracker 테스트
+    // ═══════════════════════════════════════════════
+
+    #[test]
+    fn tracker_respects_max_total() {
+        let mut t = InFlightTracker::new(2);
+        assert!(t.can_spawn());
+        t.track("org/repo-a");
+        assert!(t.can_spawn());
+        t.track("org/repo-b");
+        assert!(!t.can_spawn());
+        t.release("org/repo-a");
+        assert!(t.can_spawn());
+    }
+
+    #[test]
+    fn tracker_per_repo_cleanup() {
+        let mut t = InFlightTracker::new(10);
+        t.track("org/repo");
+        t.track("org/repo");
+        assert_eq!(t.per_repo["org/repo"], 2);
+        t.release("org/repo");
+        assert_eq!(t.per_repo["org/repo"], 1);
+        t.release("org/repo");
+        assert!(!t.per_repo.contains_key("org/repo"));
     }
 
     // ═══════════════════════════════════════════════

@@ -31,6 +31,7 @@ pub struct TaskOutput {
 }
 
 /// 큐 조작 명령 — main loop에서만 실행된다 (큐는 main task 소유).
+#[allow(dead_code)]
 pub enum QueueOp {
     /// 현재 working phase에서 아이템 제거 (done/skip/error)
     Remove,
