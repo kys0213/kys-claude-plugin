@@ -172,7 +172,7 @@ pub async fn start(
                                             // Knowledge PR 생성 (suggestions → PR + autodev:skip)
                                             if !report.suggestions.is_empty() {
                                                 crate::knowledge::daily::create_knowledge_prs(
-                                                    gh, git, &repo.name, &report, &base,
+                                                    gh, &workspace, &repo.name, &report,
                                                     gh_host.as_deref(),
                                                 ).await;
                                             }

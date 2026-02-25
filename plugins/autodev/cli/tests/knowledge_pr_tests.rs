@@ -1,7 +1,37 @@
+use std::collections::HashMap;
+
+use autodev::components::workspace::Workspace;
+use autodev::config::Env;
 use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
 use autodev::knowledge::daily::create_knowledge_prs;
 use autodev::knowledge::models::*;
+
+// ─── TestEnv ───
+
+struct TestEnv {
+    vars: HashMap<String, String>,
+}
+
+impl TestEnv {
+    fn new(tmpdir: &tempfile::TempDir) -> Self {
+        let mut vars = HashMap::new();
+        vars.insert(
+            "AUTODEV_HOME".to_string(),
+            tmpdir.path().to_str().unwrap().to_string(),
+        );
+        Self { vars }
+    }
+}
+
+impl Env for TestEnv {
+    fn var(&self, key: &str) -> Result<String, std::env::VarError> {
+        self.vars
+            .get(key)
+            .cloned()
+            .ok_or(std::env::VarError::NotPresent)
+    }
+}
 
 // ─── Helpers ───
 
@@ -30,6 +60,15 @@ fn make_suggestion(target: &str, content: &str, reason: &str) -> Suggestion {
     }
 }
 
+/// worktree path 계산: $AUTODEV_HOME/workspaces/{sanitized_repo}/{task_id}
+fn worktree_path(tmpdir: &tempfile::TempDir, task_id: &str) -> std::path::PathBuf {
+    tmpdir
+        .path()
+        .join("workspaces")
+        .join("org-repo")
+        .join(task_id)
+}
+
 // ═══════════════════════════════════════════════
 // create_knowledge_prs 기본 동작
 // ═══════════════════════════════════════════════
@@ -39,6 +78,12 @@ async fn create_prs_creates_branch_commit_pr_and_skip_label() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let gh = MockGh::new();
     let git = MockGit::new();
+    let env = TestEnv::new(&tmpdir);
+    let workspace = Workspace::new(&git, &env);
+
+    // ensure_cloned 시뮬레이션: base(main) 디렉토리 생성
+    let base = tmpdir.path().join("workspaces/org-repo/main");
+    std::fs::create_dir_all(&base).unwrap();
 
     let report = make_report(
         "2026-02-22",
@@ -49,10 +94,16 @@ async fn create_prs_creates_branch_commit_pr_and_skip_label() {
         )],
     );
 
-    create_knowledge_prs(&gh, &git, "org/repo", &report, tmpdir.path(), None).await;
+    create_knowledge_prs(&gh, &workspace, "org/repo", &report, None).await;
+
+    // git: worktree 생성 확인
+    let git_calls = git.calls.lock().unwrap();
+    assert!(
+        git_calls.iter().any(|(m, _)| m == "worktree_add"),
+        "should create worktree"
+    );
 
     // git: branch 생성 확인
-    let git_calls = git.calls.lock().unwrap();
     let branch_call = git_calls
         .iter()
         .find(|(m, _)| m == "checkout_new_branch")
@@ -66,6 +117,12 @@ async fn create_prs_creates_branch_commit_pr_and_skip_label() {
     assert!(
         git_calls.iter().any(|(m, _)| m == "add_commit_push"),
         "should commit and push"
+    );
+
+    // git: worktree 정리 확인
+    assert!(
+        git_calls.iter().any(|(m, _)| m == "worktree_remove"),
+        "should remove worktree after PR"
     );
 
     // gh: PR 생성 확인
@@ -86,14 +143,19 @@ async fn create_prs_creates_branch_commit_pr_and_skip_label() {
 }
 
 // ═══════════════════════════════════════════════
-// 파일 쓰기 검증
+// 파일 쓰기 검증 (worktree 격리 경로)
 // ═══════════════════════════════════════════════
 
 #[tokio::test]
-async fn create_prs_writes_file_content_to_target_path() {
+async fn create_prs_writes_file_content_to_worktree_path() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let gh = MockGh::new();
     let git = MockGit::new();
+    let env = TestEnv::new(&tmpdir);
+    let workspace = Workspace::new(&git, &env);
+
+    let base = tmpdir.path().join("workspaces/org-repo/main");
+    std::fs::create_dir_all(&base).unwrap();
 
     let report = make_report(
         "2026-02-22",
@@ -104,32 +166,60 @@ async fn create_prs_writes_file_content_to_target_path() {
         )],
     );
 
-    create_knowledge_prs(&gh, &git, "org/repo", &report, tmpdir.path(), None).await;
+    create_knowledge_prs(&gh, &workspace, "org/repo", &report, None).await;
 
-    let file_path = tmpdir.path().join(".claude/rules/test.md");
-    let content = std::fs::read_to_string(&file_path).unwrap();
-    assert_eq!(content, "Always run tests before committing");
+    // git 호출에서 worktree 경로 사용을 확인 (worktree는 PR 후 정리됨)
+    let git_calls = git.calls.lock().unwrap();
+    let wt_path = worktree_path(&tmpdir, "knowledge-daily-2026-02-22-0");
+    let wt_str = wt_path.to_str().unwrap();
+
+    // checkout_new_branch가 worktree 경로에서 실행됨
+    let branch_call = git_calls
+        .iter()
+        .find(|(m, _)| m == "checkout_new_branch")
+        .unwrap();
+    assert!(
+        branch_call.1.contains(wt_str),
+        "branch should be created in worktree, not base_path"
+    );
+
+    // add_commit_push가 worktree 경로에서 실행됨
+    let commit_call = git_calls
+        .iter()
+        .find(|(m, _)| m == "add_commit_push")
+        .unwrap();
+    assert!(
+        commit_call.1.contains(wt_str),
+        "commit should happen in worktree, not base_path"
+    );
+    assert!(
+        commit_call.1.contains(".claude/rules/test.md"),
+        "committed file should be the target"
+    );
+
+    // base_path에는 파일이 없어야 함 (격리 확인)
+    assert!(!base.join(".claude/rules/test.md").exists());
 }
 
 // ═══════════════════════════════════════════════
-// C-1: fs::write 덮어쓰기 동작 검증
+// worktree 격리: base_path 오염 없음 검증
 // ═══════════════════════════════════════════════
 
 #[tokio::test]
-async fn create_prs_overwrites_existing_file_c1() {
+async fn create_prs_does_not_pollute_base_path() {
     let tmpdir = tempfile::TempDir::new().unwrap();
-
-    // 기존 파일 생성
-    let file_dir = tmpdir.path().join(".claude/rules");
-    std::fs::create_dir_all(&file_dir).unwrap();
-    std::fs::write(
-        file_dir.join("existing.md"),
-        "Original content that should be preserved",
-    )
-    .unwrap();
-
     let gh = MockGh::new();
     let git = MockGit::new();
+    let env = TestEnv::new(&tmpdir);
+    let workspace = Workspace::new(&git, &env);
+
+    let base = tmpdir.path().join("workspaces/org-repo/main");
+    std::fs::create_dir_all(&base).unwrap();
+
+    // base_path에 기존 파일 생성
+    let file_dir = base.join(".claude/rules");
+    std::fs::create_dir_all(&file_dir).unwrap();
+    std::fs::write(file_dir.join("existing.md"), "Original content").unwrap();
 
     let report = make_report(
         "2026-02-22",
@@ -140,13 +230,13 @@ async fn create_prs_overwrites_existing_file_c1() {
         )],
     );
 
-    create_knowledge_prs(&gh, &git, "org/repo", &report, tmpdir.path(), None).await;
+    create_knowledge_prs(&gh, &workspace, "org/repo", &report, None).await;
 
-    // C-1 BUG: fs::write는 append가 아니라 overwrite
-    let content = std::fs::read_to_string(tmpdir.path().join(".claude/rules/existing.md")).unwrap();
+    // base_path의 기존 파일은 변경되지 않아야 함 (격리 확인)
+    let content = std::fs::read_to_string(base.join(".claude/rules/existing.md")).unwrap();
     assert_eq!(
-        content, "Replacement content",
-        "C-1: fs::write overwrites existing file instead of appending"
+        content, "Original content",
+        "base_path file should be untouched (worktree isolation)"
     );
 }
 
@@ -159,9 +249,11 @@ async fn create_prs_empty_suggestions_does_nothing() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let gh = MockGh::new();
     let git = MockGit::new();
+    let env = TestEnv::new(&tmpdir);
+    let workspace = Workspace::new(&git, &env);
 
     let report = make_report("2026-02-22", vec![]);
-    create_knowledge_prs(&gh, &git, "org/repo", &report, tmpdir.path(), None).await;
+    create_knowledge_prs(&gh, &workspace, "org/repo", &report, None).await;
 
     let git_calls = git.calls.lock().unwrap();
     assert!(git_calls.is_empty(), "no git calls for empty suggestions");
@@ -179,6 +271,11 @@ async fn create_prs_multiple_suggestions_creates_multiple_prs() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let gh = MockGh::new();
     let git = MockGit::new();
+    let env = TestEnv::new(&tmpdir);
+    let workspace = Workspace::new(&git, &env);
+
+    let base = tmpdir.path().join("workspaces/org-repo/main");
+    std::fs::create_dir_all(&base).unwrap();
 
     let report = make_report(
         "2026-02-22",
@@ -189,7 +286,7 @@ async fn create_prs_multiple_suggestions_creates_multiple_prs() {
         ],
     );
 
-    create_knowledge_prs(&gh, &git, "org/repo", &report, tmpdir.path(), None).await;
+    create_knowledge_prs(&gh, &workspace, "org/repo", &report, None).await;
 
     // 3개 PR 생성 확인
     let prs = gh.created_prs.lock().unwrap();
@@ -214,6 +311,18 @@ async fn create_prs_multiple_suggestions_creates_multiple_prs() {
         .filter(|(_, _, l)| l == "autodev:skip")
         .count();
     assert_eq!(skip_count, 3);
+
+    // 각 suggestion에 대해 worktree 생성+제거 확인
+    let wt_add_count = git_calls
+        .iter()
+        .filter(|(m, _)| m == "worktree_add")
+        .count();
+    let wt_remove_count = git_calls
+        .iter()
+        .filter(|(m, _)| m == "worktree_remove")
+        .count();
+    assert_eq!(wt_add_count, 3, "should create 3 worktrees");
+    assert_eq!(wt_remove_count, 3, "should remove 3 worktrees");
 }
 
 // ═══════════════════════════════════════════════
@@ -225,6 +334,11 @@ async fn create_prs_body_contains_suggestion_details() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let gh = MockGh::new();
     let git = MockGit::new();
+    let env = TestEnv::new(&tmpdir);
+    let workspace = Workspace::new(&git, &env);
+
+    let base = tmpdir.path().join("workspaces/org-repo/main");
+    std::fs::create_dir_all(&base).unwrap();
 
     let report = make_report(
         "2026-02-22",
@@ -236,7 +350,7 @@ async fn create_prs_body_contains_suggestion_details() {
         }],
     );
 
-    create_knowledge_prs(&gh, &git, "org/repo", &report, tmpdir.path(), None).await;
+    create_knowledge_prs(&gh, &workspace, "org/repo", &report, None).await;
 
     let prs = gh.created_prs.lock().unwrap();
     let body = &prs[0].4;
@@ -255,6 +369,11 @@ async fn create_prs_commit_message_includes_autodev_prefix() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let gh = MockGh::new();
     let git = MockGit::new();
+    let env = TestEnv::new(&tmpdir);
+    let workspace = Workspace::new(&git, &env);
+
+    let base = tmpdir.path().join("workspaces/org-repo/main");
+    std::fs::create_dir_all(&base).unwrap();
 
     let report = make_report(
         "2026-02-22",
@@ -265,7 +384,7 @@ async fn create_prs_commit_message_includes_autodev_prefix() {
         )],
     );
 
-    create_knowledge_prs(&gh, &git, "org/repo", &report, tmpdir.path(), None).await;
+    create_knowledge_prs(&gh, &workspace, "org/repo", &report, None).await;
 
     let git_calls = git.calls.lock().unwrap();
     let commit_call = git_calls
