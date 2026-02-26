@@ -469,3 +469,143 @@ async fn issue_unparseable_analysis_falls_back_to_ready() {
     assert_eq!(comments.len(), 1);
     assert!(comments[0].2.contains("<!-- autodev:analysis -->"));
 }
+
+// ═══════════════════════════════════════════════
+// Re-analysis includes prior comments as context (DESIGN-v2)
+// ═══════════════════════════════════════════════
+
+#[tokio::test]
+async fn reanalysis_includes_prior_comments_in_prompt() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let mut queues = TaskQueues::new();
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 7, "Re-analyze issue"),
+    );
+
+    let gh = MockGh::new();
+    set_gh_open(&gh, "org/repo", 7);
+
+    // 이전 분석 코멘트 + 사람 피드백 코멘트 설정
+    let prior_comments = serde_json::json!([
+        {
+            "user": { "login": "autodev[bot]" },
+            "body": "<!-- autodev:analysis -->\n## Autodev Analysis Report\n\nPrevious analysis here.",
+            "created_at": "2026-02-25T10:00:00Z"
+        },
+        {
+            "user": { "login": "human-reviewer" },
+            "body": "The analysis missed the edge case for empty input.",
+            "created_at": "2026-02-25T11:00:00Z"
+        }
+    ]);
+    gh.set_paginate(
+        "org/repo",
+        "issues/7/comments",
+        serde_json::to_vec(&prior_comments).unwrap(),
+    );
+
+    let git = MockGit::new();
+    let claude = MockClaude::new();
+    claude.enqueue_response(&make_analysis_json("implement", 0.95, &[], None), 0);
+
+    let workspace = Workspace::new(&git, &env);
+    let notifier = Notifier::new(&gh);
+
+    autodev::pipeline::issue::process_pending(
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
+    )
+    .await
+    .unwrap();
+
+    // Claude에 전달된 프롬프트에 이전 context가 포함됨
+    let calls = claude.calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    let prompt = &calls[0].prompt;
+    assert!(
+        prompt.contains("Prior Discussion Context"),
+        "prompt should include prior context section"
+    );
+    assert!(
+        prompt.contains("Previous analysis here."),
+        "prompt should include previous analysis"
+    );
+    assert!(
+        prompt.contains("edge case for empty input"),
+        "prompt should include human feedback"
+    );
+    assert!(
+        prompt.contains("@autodev[bot]"),
+        "prompt should include comment author"
+    );
+    assert!(
+        prompt.contains("@human-reviewer"),
+        "prompt should include feedback author"
+    );
+}
+
+// ═══════════════════════════════════════════════
+// First analysis (no prior comments) → no context appended
+// ═══════════════════════════════════════════════
+
+#[tokio::test]
+async fn first_analysis_has_no_prior_context() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let mut queues = TaskQueues::new();
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 8, "First time issue"),
+    );
+
+    let gh = MockGh::new();
+    set_gh_open(&gh, "org/repo", 8);
+
+    // 코멘트 없음 (첫 분석)
+    gh.set_paginate(
+        "org/repo",
+        "issues/8/comments",
+        serde_json::to_vec(&serde_json::json!([])).unwrap(),
+    );
+
+    let git = MockGit::new();
+    let claude = MockClaude::new();
+    claude.enqueue_response(&make_analysis_json("implement", 0.95, &[], None), 0);
+
+    let workspace = Workspace::new(&git, &env);
+    let notifier = Notifier::new(&gh);
+
+    autodev::pipeline::issue::process_pending(
+        &db,
+        &env,
+        &workspace,
+        &notifier,
+        &gh,
+        &claude,
+        &mut queues,
+    )
+    .await
+    .unwrap();
+
+    // 첫 분석: prior context가 포함되지 않음
+    let calls = claude.calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    let prompt = &calls[0].prompt;
+    assert!(
+        !prompt.contains("Prior Discussion Context"),
+        "first analysis should not include prior context"
+    );
+}
