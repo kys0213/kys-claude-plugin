@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::config;
 use crate::config::Env;
-use crate::queue::repository::*;
+use crate::domain::repository::*;
 use crate::queue::Database;
 
 /// 상태 요약

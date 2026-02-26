@@ -14,13 +14,13 @@ use tracing::info;
 
 use crate::components::workspace::Workspace;
 use crate::config::{self, Env};
+use crate::domain::models::ResolvedRepo;
+use crate::domain::repository::RepoRepository;
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 use crate::pipeline;
-use crate::queue::models::ResolvedRepo;
-use crate::queue::repository::RepoRepository;
 use crate::queue::task_queues::{issue_phase, merge_phase, pr_phase, TaskQueues};
 use crate::queue::Database;
 use crate::scanner;
@@ -448,9 +448,8 @@ async fn startup_reconcile(
     gh: &dyn Gh,
     queues: &mut TaskQueues,
 ) -> Result<u64> {
-    use crate::queue::task_queues::{
-        issue_phase, labels, make_work_id, pr_phase, IssueItem, PrItem,
-    };
+    use crate::domain::labels;
+    use crate::queue::task_queues::{issue_phase, make_work_id, pr_phase, IssueItem, PrItem};
 
     let mut recovered = 0u64;
 
@@ -587,8 +586,8 @@ pub fn stop(home: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::models::{RepoIssue, RepoPull};
     use crate::infrastructure::gh::mock::MockGh;
-    use crate::queue::models::{RepoIssue, RepoPull};
     use crate::queue::task_queues::{issue_phase, make_work_id, IssueItem, TaskQueues};
 
     /// 테스트용 ResolvedRepo 빌더

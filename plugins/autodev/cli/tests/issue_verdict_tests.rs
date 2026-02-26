@@ -4,11 +4,12 @@ use std::path::Path;
 use autodev::components::notifier::Notifier;
 use autodev::components::workspace::Workspace;
 use autodev::config::Env;
+use autodev::domain::labels;
+use autodev::domain::repository::RepoRepository;
 use autodev::infrastructure::claude::mock::MockClaude;
 use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
-use autodev::queue::repository::RepoRepository;
-use autodev::queue::task_queues::{issue_phase, labels, make_work_id, IssueItem, TaskQueues};
+use autodev::queue::task_queues::{issue_phase, make_work_id, IssueItem, TaskQueues};
 use autodev::queue::Database;
 
 // ─── TestEnv ───

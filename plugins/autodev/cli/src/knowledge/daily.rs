@@ -7,7 +7,7 @@ use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 
-use crate::queue::repository::ConsumerLogRepository;
+use crate::domain::repository::ConsumerLogRepository;
 use crate::queue::Database;
 
 use super::models::{
@@ -298,7 +298,7 @@ pub async fn create_knowledge_prs(
     report: &DailyReport,
     gh_host: Option<&str>,
 ) {
-    use crate::queue::task_queues::labels;
+    use crate::domain::labels;
 
     let git = workspace.git();
 
@@ -796,14 +796,14 @@ mod tests {
     }
 
     fn add_repo(db: &Database) -> String {
-        use crate::queue::repository::RepoRepository;
+        use crate::domain::repository::RepoRepository;
         db.repo_add("https://github.com/org/repo", "org/repo")
             .unwrap()
     }
 
     #[test]
     fn aggregate_daily_suggestions_collects_from_consumer_logs() {
-        use crate::queue::repository::ConsumerLogRepository;
+        use crate::domain::repository::ConsumerLogRepository;
 
         let db = open_memory_db();
         let repo_id = add_repo(&db);
@@ -811,7 +811,7 @@ mod tests {
         let ks1 = r#"{"suggestions":[{"type":"rule","target_file":".claude/rules/a.md","content":"A","reason":"R1"}]}"#;
         let ks2 = r#"{"suggestions":[{"type":"hook","target_file":".claude/hooks.json","content":"B","reason":"R2"}]}"#;
 
-        db.log_insert(&crate::queue::models::NewConsumerLog {
+        db.log_insert(&crate::domain::models::NewConsumerLog {
             repo_id: repo_id.clone(),
             queue_type: "knowledge".to_string(),
             queue_item_id: "w1".to_string(),
@@ -826,7 +826,7 @@ mod tests {
         })
         .unwrap();
 
-        db.log_insert(&crate::queue::models::NewConsumerLog {
+        db.log_insert(&crate::domain::models::NewConsumerLog {
             repo_id,
             queue_type: "knowledge".to_string(),
             queue_item_id: "w2".to_string(),
@@ -856,12 +856,12 @@ mod tests {
 
     #[test]
     fn aggregate_daily_suggestions_ignores_non_knowledge_logs() {
-        use crate::queue::repository::ConsumerLogRepository;
+        use crate::domain::repository::ConsumerLogRepository;
 
         let db = open_memory_db();
         let repo_id = add_repo(&db);
 
-        db.log_insert(&crate::queue::models::NewConsumerLog {
+        db.log_insert(&crate::domain::models::NewConsumerLog {
             repo_id,
             queue_type: "pr".to_string(),
             queue_item_id: "w1".to_string(),

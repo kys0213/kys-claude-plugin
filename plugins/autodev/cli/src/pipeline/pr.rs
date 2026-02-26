@@ -7,15 +7,16 @@ use crate::components::reviewer::Reviewer;
 use crate::components::workspace::Workspace;
 use crate::config;
 use crate::config::Env;
+use crate::domain::labels;
+use crate::domain::models::*;
+use crate::domain::repository::*;
 use crate::infrastructure::claude::output::ReviewVerdict;
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 use crate::pipeline::{QueueOp, TaskOutput, AGENT_SYSTEM_PROMPT};
-use crate::queue::models::*;
-use crate::queue::repository::*;
-use crate::queue::task_queues::{labels, pr_phase, PrItem, TaskQueues};
+use crate::queue::task_queues::{pr_phase, PrItem, TaskQueues};
 use crate::queue::Database;
 
 /// REVIEWING/IMPROVING 상태에서 아이템을 제거하는 헬퍼.

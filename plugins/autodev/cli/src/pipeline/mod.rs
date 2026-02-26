@@ -7,11 +7,11 @@ use anyhow::Result;
 use crate::components::notifier::Notifier;
 use crate::components::workspace::Workspace;
 use crate::config::Env;
+use crate::domain::models::NewConsumerLog;
+use crate::domain::repository::ConsumerLogRepository;
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
-use crate::queue::models::NewConsumerLog;
-use crate::queue::repository::ConsumerLogRepository;
 use crate::queue::task_queues::{IssueItem, MergeItem, PrItem, TaskQueues};
 use crate::queue::Database;
 

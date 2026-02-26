@@ -1,10 +1,10 @@
 use anyhow::Result;
 use serde::Deserialize;
 
+use crate::domain::labels;
+use crate::domain::repository::*;
 use crate::infrastructure::gh::Gh;
-use crate::queue::repository::*;
-use crate::queue::task_queues::TaskQueues;
-use crate::queue::task_queues::{issue_phase, labels, make_work_id, IssueItem};
+use crate::queue::task_queues::{issue_phase, make_work_id, IssueItem, TaskQueues};
 use crate::queue::Database;
 
 #[derive(Debug, Deserialize)]

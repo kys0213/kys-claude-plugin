@@ -7,6 +7,7 @@ mod client;
 mod components;
 mod config;
 mod daemon;
+mod domain;
 mod infrastructure;
 mod knowledge;
 mod pipeline;

@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::queue::repository::RepoRepository;
+use crate::domain::repository::RepoRepository;
 use crate::queue::Database;
 
 // ─── Panel enum ───

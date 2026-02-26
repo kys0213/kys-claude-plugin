@@ -1,5 +1,5 @@
-use autodev::queue::models::*;
-use autodev::queue::repository::*;
+use autodev::domain::models::*;
+use autodev::domain::repository::*;
 use autodev::queue::Database;
 use std::path::Path;
 

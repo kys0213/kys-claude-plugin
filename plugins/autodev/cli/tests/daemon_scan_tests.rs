@@ -1,7 +1,7 @@
 use std::path::Path;
 
+use autodev::domain::repository::*;
 use autodev::infrastructure::gh::mock::MockGh;
-use autodev::queue::repository::*;
 use autodev::queue::task_queues::{issue_phase, pr_phase, TaskQueues};
 use autodev::queue::Database;
 
