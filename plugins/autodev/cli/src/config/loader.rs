@@ -19,7 +19,13 @@ pub fn load_merged(env: &dyn Env, repo_path: Option<&Path>) -> WorkflowConfig {
     };
 
     // 머지된 YAML Value → WorkflowConfig (serde(default)가 미지정 필드 채움)
-    serde_json::from_value(merged).unwrap_or_default()
+    match serde_json::from_value::<WorkflowConfig>(merged) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            tracing::warn!("config deserialization failed, falling back to defaults: {e}");
+            WorkflowConfig::default()
+        }
+    }
 }
 
 /// 글로벌 YAML을 raw JSON Value로 로드

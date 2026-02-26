@@ -87,7 +87,9 @@ ENV
 fi
 ```
 
-### Step 2: 의존성 검증
+### Step 2: 의존성 검증 및 리뷰 플러그인 감지
+
+#### 2-1. 필수 플러그인 검증
 
 다음 플러그인이 `kys-claude-plugin` 마켓플레이스에서 User Scope로 설치되어 있는지 확인하세요:
 
@@ -95,13 +97,40 @@ fi
 |------|---------|-------------|
 | 필수 | `develop-workflow` | `kys-claude-plugin` |
 | 필수 | `git-utils` | `kys-claude-plugin` |
-| 권장 | `external-llm` | `kys-claude-plugin` |
 
 미설치 시 안내:
 - 필수 → 경고 + `/plugin install <name>@kys-claude-plugin`
-- 권장 → multi-LLM 분석이 Claude 단일 모델로 fallback됨을 안내
 
 설치 확인이 완료되지 않으면 다음 단계로 진행하지 마세요.
+
+#### 2-2. 리뷰 플러그인 자동 감지
+
+설치된 리뷰 관련 플러그인을 자동으로 스캔합니다.
+플러그인 캐시 디렉토리를 탐색하여 사용 가능한 리뷰 커맨드를 수집하세요:
+
+```bash
+# 설치된 플러그인 캐시에서 리뷰 관련 커맨드 탐색
+ls ~/.claude/plugins/cache/*/commands/*.md 2>/dev/null
+```
+
+**감지 대상 플러그인 및 커맨드:**
+
+| 플러그인 | 커맨드 | 기능 |
+|---------|--------|------|
+| `develop-workflow` | `/develop-workflow:multi-review` | multi-LLM PR 리뷰 |
+| `develop-workflow` | `/develop-workflow:develop-auto` | multi-LLM 이슈 분석 |
+| `external-llm` | `/external-llm:invoke-codex` | OpenAI Codex 호출 |
+| `external-llm` | `/external-llm:invoke-gemini` | Google Gemini 호출 |
+
+**감지 결과를 변수로 보관** (Step 7에서 사용):
+- `detected_plugins`: 감지된 플러그인 이름 목록
+- `has_external_llm`: `external-llm` 플러그인 설치 여부 (bool)
+- `has_multi_review`: `develop-workflow`의 `multi-review` 커맨드 존재 여부 (bool)
+
+**감지 결과에 따른 안내:**
+- `external-llm` 미설치 + `develop-workflow` 설치됨 → "`external-llm` 없이도 `/multi-review`는 Claude 단일 모델로 동작합니다. multi-LLM (Codex+Gemini) 분석이 필요하면 `external-llm` 설치를 권장합니다."
+- `external-llm` 설치됨 → "multi-LLM 리뷰가 가능합니다 (Claude + Codex + Gemini)."
+- 둘 다 미설치 → "리뷰 플러그인이 감지되지 않았습니다. `/plugin install develop-workflow@kys-claude-plugin`으로 설치하세요."
 
 ### Step 3: CLI 설치 및 버전 확인
 
@@ -142,9 +171,43 @@ AskUserQuestion으로 질문:
 
 ### Step 7: 워크플로우 선택
 
+Step 2-2에서 감지된 플러그인 목록을 기반으로 사용 가능한 워크플로우 선택지를 동적으로 구성합니다.
+
+**선택지 구성 로직:**
+
+**Case 1: `external-llm` + `develop-workflow` 모두 감지됨**
+
 AskUserQuestion으로 질문:
-- Issue 분석: multi-LLM (Claude+Codex+Gemini) / 단일 모델
-- PR 리뷰: /multi-review / 단일 모델
+- Issue 분석 워크플로우:
+  - `/develop-workflow:develop-auto` — multi-LLM (Claude+Codex+Gemini) (권장)
+  - `/develop-workflow:develop-auto` — Claude 단일 모델
+- PR 리뷰 워크플로우:
+  - `/develop-workflow:multi-review` — multi-LLM (Claude+Codex+Gemini) (권장)
+  - `/develop-workflow:multi-review` — Claude 단일 모델
+
+**Case 2: `develop-workflow`만 감지됨 (`external-llm` 없음)**
+
+AskUserQuestion으로 질문:
+- Issue 분석 워크플로우:
+  - `/develop-workflow:develop-auto` — Claude 단일 모델 (권장)
+- PR 리뷰 워크플로우:
+  - `/develop-workflow:multi-review` — Claude 단일 모델 (권장)
+
+> `external-llm` 미설치로 multi-LLM 옵션은 표시하지 않습니다.
+> 사용자에게 "multi-LLM을 사용하려면 `/plugin install external-llm@kys-claude-plugin` 후 재설정하세요"를 안내합니다.
+
+**Case 3: 리뷰 플러그인 미감지**
+
+> 필수 플러그인이 설치되지 않았습니다. Step 2에서 차단되어야 합니다.
+
+**선택 결과 매핑:**
+
+| 선택 | config 반영 |
+|------|------------|
+| multi-LLM 이슈 분석 | `workflow.issue: "/develop-workflow:develop-auto"`, `develop.review.multi_llm: true` |
+| 단일 모델 이슈 분석 | `workflow.issue: "/develop-workflow:develop-auto"`, `develop.review.multi_llm: false` |
+| multi-LLM PR 리뷰 | `workflow.pr: "/develop-workflow:multi-review"`, `commands.code_review: "/multi-review"` |
+| 단일 모델 PR 리뷰 | `workflow.pr: "/develop-workflow:multi-review"`, `commands.code_review: "/multi-review"`, `develop.review.multi_llm: false` |
 
 ### Step 8: 필터 설정
 
@@ -157,14 +220,14 @@ AskUserQuestion으로 질문:
 
 수집된 설정을 JSON으로 구성하여 CLI에 전달합니다.
 JSON은 `WorkflowConfig` 구조에 맞게 구성합니다.
-Step 1.5에서 Enterprise가 감지된 경우 `consumer.gh_host` 필드를 config JSON에 포함합니다:
+Step 1.5에서 Enterprise가 감지된 경우 `consumer.gh_host` 필드를, Step 7의 워크플로우 선택 결과를 `workflow`/`develop` 필드에 포함합니다:
 
 ```bash
 # 일반 GitHub — 기본 설정으로 등록
-autodev repo add <url> --config '{"consumer":{"scan_interval_secs":<step5>,"issue_concurrency":<step6_issue>,"pr_concurrency":<step6_pr>,"merge_concurrency":<step6_merge>,"scan_targets":[<step4>]}}'
+autodev repo add <url> --config '{"consumer":{"scan_interval_secs":<step5>,"issue_concurrency":<step6_issue>,"pr_concurrency":<step6_pr>,"merge_concurrency":<step6_merge>,"scan_targets":[<step4>]},"workflow":{"issue":"<step7_issue>","pr":"<step7_pr>"},"develop":{"review":{"multi_llm":<step7_multi_llm>}}}'
 
 # GitHub Enterprise — gh_host 포함
-autodev repo add <url> --config '{"consumer":{"gh_host":"<detected_host>","scan_interval_secs":<step5>,"issue_concurrency":<step6_issue>,"pr_concurrency":<step6_pr>,"merge_concurrency":<step6_merge>,"scan_targets":[<step4>]}}'
+autodev repo add <url> --config '{"consumer":{"gh_host":"<detected_host>","scan_interval_secs":<step5>,"issue_concurrency":<step6_issue>,"pr_concurrency":<step6_pr>,"merge_concurrency":<step6_merge>,"scan_targets":[<step4>]},"workflow":{"issue":"<step7_issue>","pr":"<step7_pr>"},"develop":{"review":{"multi_llm":<step7_multi_llm>}}}'
 ```
 
 등록 성공 시 CLI가 자동으로 워크스페이스 디렉토리(`~/.autodev/workspaces/<org-repo>/`)에 `.develop-workflow.yaml`을 생성합니다.

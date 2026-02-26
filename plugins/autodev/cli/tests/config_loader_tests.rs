@@ -287,3 +287,62 @@ daemon:
     assert_eq!(config.daemon.tick_interval_secs, 10); // default
     assert_eq!(config.daemon.daily_report_hour, 12); // overridden
 }
+
+// ═══════════════════════════════════════════════
+// 7. 타입 오류 시 default fallback (#131)
+// ═══════════════════════════════════════════════
+
+#[test]
+fn load_merged_type_error_falls_back_to_defaults() {
+    let tmp = TempDir::new().unwrap();
+
+    // scan_interval_secs는 u64인데 문자열을 넣으면 역직렬화 실패
+    let yaml = r#"
+consumer:
+  scan_interval_secs: "oops"
+"#;
+    fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
+    let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
+
+    // 타입 오류 시에도 패닉 없이 default 반환
+    let config = loader::load_merged(&env, None);
+    assert_eq!(config.consumer.scan_interval_secs, 300);
+    assert_eq!(config.consumer.model, "sonnet");
+}
+
+#[test]
+fn load_merged_wrong_type_in_nested_field_falls_back() {
+    let tmp = TempDir::new().unwrap();
+
+    // multi_llm은 bool인데 문자열을 넣음
+    let yaml = r#"
+develop:
+  review:
+    multi_llm: "not_a_bool"
+"#;
+    fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
+    let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
+
+    let config = loader::load_merged(&env, None);
+    // default fallback 확인
+    assert!(config.develop.review.multi_llm);
+    assert_eq!(config.consumer.scan_interval_secs, 300);
+}
+
+#[test]
+fn load_merged_unknown_field_falls_back_to_defaults() {
+    let tmp = TempDir::new().unwrap();
+
+    // deny_unknown_fields로 인해 알 수 없는 필드가 있으면 역직렬화 실패
+    let yaml = r#"
+consumer:
+  scan_interval_secs: 60
+totally_unknown_field: 42
+"#;
+    fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
+    let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
+
+    let config = loader::load_merged(&env, None);
+    // deny_unknown_fields → 역직렬화 실패 → default fallback
+    assert_eq!(config.consumer.scan_interval_secs, 300);
+}
