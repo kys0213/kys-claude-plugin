@@ -1,27 +1,16 @@
-use autodev::config::Env;
 use autodev::daemon::recovery;
 use autodev::infrastructure::gh::mock::MockGh;
-use autodev::queue::models::EnabledRepo;
+use autodev::queue::models::ResolvedRepo;
 use autodev::queue::task_queues::{
     issue_phase, make_work_id, merge_phase, pr_phase, IssueItem, MergeItem, PrItem, TaskQueues,
 };
 
-struct MockEnv;
-
-impl Env for MockEnv {
-    fn var(&self, key: &str) -> Result<String, std::env::VarError> {
-        match key {
-            "AUTODEV_HOME" => Ok("/tmp/autodev-test".to_string()),
-            _ => Err(std::env::VarError::NotPresent),
-        }
-    }
-}
-
-fn repo(id: &str, name: &str) -> EnabledRepo {
-    EnabledRepo {
+fn repo(id: &str, name: &str) -> ResolvedRepo {
+    ResolvedRepo {
         id: id.to_string(),
         url: format!("https://github.com/{name}"),
         name: name.to_string(),
+        gh_host: None,
     }
 }
 
@@ -97,7 +86,7 @@ async fn recovery_no_repos_returns_zero() {
     let gh = MockGh::new();
     let queues = TaskQueues::new();
 
-    let result = recovery::recover_orphan_wip(&[], &gh, &queues, &MockEnv).await;
+    let result = recovery::recover_orphan_wip(&[], &gh, &queues).await;
 
     assert_eq!(result.unwrap(), 0);
 }
@@ -113,7 +102,7 @@ async fn recovery_no_wip_items_returns_zero() {
     let queues = TaskQueues::new();
     let repos = vec![repo("r1", "org/repo")];
 
-    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, &MockEnv).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
     assert_eq!(result.unwrap(), 0);
     assert!(gh.removed_labels.lock().unwrap().is_empty());
@@ -135,7 +124,7 @@ async fn recovery_skips_active_issues() {
         .push(issue_phase::PENDING, make_issue_item("org/repo", 42));
 
     let repos = vec![repo("r1", "org/repo")];
-    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, &MockEnv).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
     assert_eq!(result.unwrap(), 0);
     assert!(gh.removed_labels.lock().unwrap().is_empty());
@@ -153,7 +142,7 @@ async fn recovery_skips_active_prs() {
         .push(pr_phase::PENDING, make_pr_item("org/repo", 10));
 
     let repos = vec![repo("r1", "org/repo")];
-    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, &MockEnv).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
     assert_eq!(result.unwrap(), 0);
     assert!(gh.removed_labels.lock().unwrap().is_empty());
@@ -175,7 +164,7 @@ async fn recovery_skips_pr_active_as_merge() {
         .push(merge_phase::PENDING, make_merge_item("org/repo", 10));
 
     let repos = vec![repo("r1", "org/repo")];
-    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, &MockEnv).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
     // "merge:org/repo:10" != "pr:org/repo:10" → orphan → label removed
     assert_eq!(result.unwrap(), 1);
@@ -200,7 +189,7 @@ async fn recovery_removes_orphan_issue_label() {
     let queues = TaskQueues::new();
     let repos = vec![repo("r1", "org/repo")];
 
-    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, &MockEnv).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
     assert_eq!(result.unwrap(), 1);
     let labels = gh.removed_labels.lock().unwrap();
@@ -220,7 +209,7 @@ async fn recovery_removes_orphan_pr_label() {
     let queues = TaskQueues::new();
     let repos = vec![repo("r1", "org/repo")];
 
-    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, &MockEnv).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
     assert_eq!(result.unwrap(), 1);
     let labels = gh.removed_labels.lock().unwrap();
@@ -255,7 +244,7 @@ async fn recovery_mixed_active_and_orphan() {
         .push(pr_phase::PENDING, make_pr_item("org/repo", 3));
 
     let repos = vec![repo("r1", "org/repo")];
-    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, &MockEnv).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
     assert_eq!(result.unwrap(), 2);
     let labels = gh.removed_labels.lock().unwrap();
@@ -278,7 +267,7 @@ async fn recovery_api_failure_continues() {
     let queues = TaskQueues::new();
     let repos = vec![repo("r1", "org/repo1"), repo("r2", "org/repo2")];
 
-    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, &MockEnv).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
     // repo1 fails silently, repo2 succeeds with 0
     assert_eq!(result.unwrap(), 0);
@@ -305,7 +294,7 @@ async fn recovery_multiple_repos() {
     let queues = TaskQueues::new();
     let repos = vec![repo("r1", "org/repo1"), repo("r2", "org/repo2")];
 
-    let result = recovery::recover_orphan_wip(&repos, &gh, &queues, &MockEnv).await;
+    let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
     assert_eq!(result.unwrap(), 2);
     let labels = gh.removed_labels.lock().unwrap();

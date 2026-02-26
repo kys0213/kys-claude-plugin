@@ -304,15 +304,16 @@ pub async fn start(
                 // 1. Recovery: orphan autodev:wip 라벨 정리
                 match db.repo_find_enabled() {
                     Ok(repos) => {
+                        let resolved = recovery::resolve_repos(&repos, &*env);
                         match recovery::recover_orphan_wip(
-                            &repos, &*gh, &queues, &*env,
+                            &resolved, &*gh, &queues,
                         ).await {
                             Ok(n) if n > 0 => info!("recovered {n} orphan wip items"),
                             Err(e) => tracing::error!("recovery error: {e}"),
                             _ => {}
                         }
                         match recovery::recover_orphan_implementing(
-                            &repos, &*gh, &queues, &*env,
+                            &resolved, &*gh, &queues,
                         ).await {
                             Ok(n) if n > 0 => info!("recovered {n} orphan implementing items"),
                             Err(e) => tracing::error!("implementing recovery error: {e}"),
@@ -372,15 +373,19 @@ pub async fn start(
                                                 report.patterns.extend(cross_patterns);
                                             }
 
-                                            let repo_gh_host = recovery::resolve_gh_host(&*env, &repo.name);
+                                            let resolved_repo = recovery::resolve_repos(
+                                                std::slice::from_ref(repo), &*env,
+                                            );
+                                            let repo_gh_host = resolved_repo.first()
+                                                .and_then(|r| r.gh_host.as_deref());
                                             crate::knowledge::daily::post_daily_report(
-                                                &*gh, &repo.name, &report, repo_gh_host.as_deref(),
+                                                &*gh, &repo.name, &report, repo_gh_host,
                                             ).await;
 
                                             if !report.suggestions.is_empty() {
                                                 crate::knowledge::daily::create_knowledge_prs(
                                                     &*gh, &workspace, &repo.name, &report,
-                                                    repo_gh_host.as_deref(),
+                                                    repo_gh_host,
                                                 ).await;
                                             }
                                         }
@@ -481,9 +486,10 @@ async fn startup_reconcile(
     let repos = db.repo_find_enabled()?;
     let mut recovered = 0u64;
 
-    for repo in &repos {
-        let repo_gh_host = recovery::resolve_gh_host(env, &repo.name);
-        let gh_host = repo_gh_host.as_deref();
+    let resolved = recovery::resolve_repos(&repos, env);
+
+    for (i, repo) in repos.iter().enumerate() {
+        let gh_host = resolved[i].gh_host();
         // issues 복구: cursor - reconcile_window_hours로 bounded window 적용
         let safe_since = compute_safe_since(
             db.cursor_get_last_seen(&repo.id, "issues")?,

@@ -22,6 +22,24 @@ pub struct EnabledRepo {
     pub name: String,
 }
 
+/// EnabledRepo + per-repo config가 해석된 value object.
+///
+/// daemon tick마다 한번 생성하여 recovery/reconcile/knowledge에 전달한다.
+/// gh_host 등 per-repo 설정을 내부에 보유하므로 호출측이 config를 반복 로드할 필요가 없다.
+#[allow(dead_code)]
+pub struct ResolvedRepo {
+    pub id: String,
+    pub url: String,
+    pub name: String,
+    pub gh_host: Option<String>,
+}
+
+impl ResolvedRepo {
+    pub fn gh_host(&self) -> Option<&str> {
+        self.gh_host.as_deref()
+    }
+}
+
 pub struct RepoInfo {
     pub name: String,
     pub url: String,

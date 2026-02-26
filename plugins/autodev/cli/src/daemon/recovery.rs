@@ -7,7 +7,7 @@ use anyhow::Result;
 use crate::config;
 use crate::config::Env;
 use crate::infrastructure::gh::Gh;
-use crate::queue::models::EnabledRepo;
+use crate::queue::models::{EnabledRepo, ResolvedRepo};
 use crate::queue::task_queues::{labels, make_work_id, TaskQueues};
 
 /// gh_host 캐시 엔트리: 설정 파일의 mtime과 해석된 값을 보관
@@ -23,11 +23,11 @@ fn config_mtime(path: &std::path::Path) -> Option<SystemTime> {
     std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
-/// Per-repo config에서 gh_host를 로드하는 헬퍼.
+/// Per-repo config에서 gh_host를 해석하는 내부 헬퍼.
 ///
 /// 설정 파일의 mtime이 변경되지 않았으면 캐시된 값을 반환하여
 /// 매 tick마다 불필요한 디스크 I/O를 회피한다.
-pub(crate) fn resolve_gh_host(env: &dyn Env, repo_name: &str) -> Option<String> {
+fn resolve_gh_host(env: &dyn Env, repo_name: &str) -> Option<String> {
     let ws_path = config::workspaces_path(env).join(config::sanitize_repo_name(repo_name));
     let config_path = ws_path.join(".develop-workflow.yaml");
     let current_mtime = config_mtime(&config_path);
@@ -71,21 +71,35 @@ pub(crate) fn resolve_gh_host(env: &dyn Env, repo_name: &str) -> Option<String> 
     value
 }
 
+/// EnabledRepo 목록을 ResolvedRepo 목록으로 변환하는 팩토리.
+///
+/// 각 레포의 per-repo config에서 gh_host를 해석하여 value object에 내장한다.
+/// mtime 기반 캐시를 내부적으로 사용하므로 tick마다 호출해도 디스크 I/O가 최소화된다.
+pub(crate) fn resolve_repos(repos: &[EnabledRepo], env: &dyn Env) -> Vec<ResolvedRepo> {
+    repos
+        .iter()
+        .map(|r| ResolvedRepo {
+            id: r.id.clone(),
+            url: r.url.clone(),
+            name: r.name.clone(),
+            gh_host: resolve_gh_host(env, &r.name),
+        })
+        .collect()
+}
+
 /// Orphan `autodev:wip` 라벨 정리
 ///
 /// 크래시로 인해 `autodev:wip` 라벨이 남아있지만 메모리 큐에 없는 항목을 찾아
 /// 라벨을 제거한다. 다음 scan에서 자연스럽게 재발견되어 재처리된다.
 pub async fn recover_orphan_wip(
-    repos: &[EnabledRepo],
+    repos: &[ResolvedRepo],
     gh: &dyn Gh,
     queues: &TaskQueues,
-    env: &dyn Env,
 ) -> Result<u64> {
     let mut recovered = 0u64;
 
     for repo in repos {
-        let repo_gh_host = resolve_gh_host(env, &repo.name);
-        let gh_host = repo_gh_host.as_deref();
+        let gh_host = repo.gh_host();
 
         let endpoint = "issues";
         let params = &[
@@ -140,16 +154,14 @@ pub async fn recover_orphan_wip(
 /// 연결 PR 마커(`<!-- autodev:pr-link:{N} -->`)가 없는 경우 implementing 라벨을 제거하여
 /// 다음 scan에서 재시도하도록 한다.
 pub async fn recover_orphan_implementing(
-    repos: &[EnabledRepo],
+    repos: &[ResolvedRepo],
     gh: &dyn Gh,
     queues: &TaskQueues,
-    env: &dyn Env,
 ) -> Result<u64> {
     let mut recovered = 0u64;
 
     for repo in repos {
-        let repo_gh_host = resolve_gh_host(env, &repo.name);
-        let gh_host = repo_gh_host.as_deref();
+        let gh_host = repo.gh_host();
 
         let params = &[
             ("labels", labels::IMPLEMENTING),
