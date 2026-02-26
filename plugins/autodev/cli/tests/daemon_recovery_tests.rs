@@ -1,36 +1,43 @@
 use autodev::daemon::recovery;
 use autodev::infrastructure::gh::mock::MockGh;
-use autodev::queue::models::ResolvedRepo;
+use autodev::queue::models::{RepoIssue, RepoPull, ResolvedRepo};
 use autodev::queue::task_queues::{
     issue_phase, make_work_id, merge_phase, pr_phase, IssueItem, MergeItem, PrItem, TaskQueues,
 };
 
-fn repo(id: &str, name: &str) -> ResolvedRepo {
+fn repo(id: &str, name: &str, issues: Vec<RepoIssue>, pulls: Vec<RepoPull>) -> ResolvedRepo {
     ResolvedRepo {
         id: id.to_string(),
         url: format!("https://github.com/{name}"),
         name: name.to_string(),
         gh_host: None,
+        issues,
+        pulls,
     }
 }
 
-/// autodev:wip 라벨이 있는 이슈 JSON 생성
-fn wip_issue_json(number: i64) -> serde_json::Value {
-    serde_json::json!({
-        "number": number,
-        "state": "open",
-        "labels": [{"name": "autodev:wip"}]
-    })
+/// autodev:wip 라벨이 있는 이슈 생성
+fn wip_issue(number: i64) -> RepoIssue {
+    RepoIssue {
+        number,
+        title: format!("Issue #{number}"),
+        body: None,
+        author: "user".to_string(),
+        labels: vec!["autodev:wip".to_string()],
+    }
 }
 
-/// autodev:wip 라벨이 있는 PR JSON 생성
-fn wip_pr_json(number: i64) -> serde_json::Value {
-    serde_json::json!({
-        "number": number,
-        "state": "open",
-        "labels": [{"name": "autodev:wip"}],
-        "pull_request": {"url": "https://api.github.com/repos/org/repo/pulls/1"}
-    })
+/// autodev:wip 라벨이 있는 PR 생성
+fn wip_pull(number: i64) -> RepoPull {
+    RepoPull {
+        number,
+        title: format!("PR #{number}"),
+        body: None,
+        author: "user".to_string(),
+        labels: vec!["autodev:wip".to_string()],
+        head_branch: "feat".to_string(),
+        base_branch: "main".to_string(),
+    }
 }
 
 fn make_issue_item(repo_name: &str, number: i64) -> IssueItem {
@@ -98,9 +105,8 @@ async fn recovery_no_repos_returns_zero() {
 #[tokio::test]
 async fn recovery_no_wip_items_returns_zero() {
     let gh = MockGh::new();
-    gh.set_paginate("org/repo", "issues", b"[]".to_vec());
     let queues = TaskQueues::new();
-    let repos = vec![repo("r1", "org/repo")];
+    let repos = vec![repo("r1", "org/repo", vec![], vec![])];
 
     let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
@@ -114,16 +120,14 @@ async fn recovery_no_wip_items_returns_zero() {
 
 #[tokio::test]
 async fn recovery_skips_active_issues() {
-    let items = serde_json::to_vec(&vec![wip_issue_json(42)]).unwrap();
     let gh = MockGh::new();
-    gh.set_paginate("org/repo", "issues", items);
 
     let mut queues = TaskQueues::new();
     queues
         .issues
         .push(issue_phase::PENDING, make_issue_item("org/repo", 42));
 
-    let repos = vec![repo("r1", "org/repo")];
+    let repos = vec![repo("r1", "org/repo", vec![wip_issue(42)], vec![])];
     let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
     assert_eq!(result.unwrap(), 0);
@@ -132,16 +136,14 @@ async fn recovery_skips_active_issues() {
 
 #[tokio::test]
 async fn recovery_skips_active_prs() {
-    let items = serde_json::to_vec(&vec![wip_pr_json(10)]).unwrap();
     let gh = MockGh::new();
-    gh.set_paginate("org/repo", "issues", items);
 
     let mut queues = TaskQueues::new();
     queues
         .prs
         .push(pr_phase::PENDING, make_pr_item("org/repo", 10));
 
-    let repos = vec![repo("r1", "org/repo")];
+    let repos = vec![repo("r1", "org/repo", vec![], vec![wip_pull(10)])];
     let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
     assert_eq!(result.unwrap(), 0);
@@ -154,16 +156,14 @@ async fn recovery_skips_active_prs() {
 // PR is treated as orphaned — wip label gets removed (recovered = 1).
 #[tokio::test]
 async fn recovery_skips_pr_active_as_merge() {
-    let items = serde_json::to_vec(&vec![wip_pr_json(10)]).unwrap();
     let gh = MockGh::new();
-    gh.set_paginate("org/repo", "issues", items);
 
     let mut queues = TaskQueues::new();
     queues
         .merges
         .push(merge_phase::PENDING, make_merge_item("org/repo", 10));
 
-    let repos = vec![repo("r1", "org/repo")];
+    let repos = vec![repo("r1", "org/repo", vec![], vec![wip_pull(10)])];
     let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
     // "merge:org/repo:10" != "pr:org/repo:10" → orphan → label removed
@@ -182,12 +182,9 @@ async fn recovery_skips_pr_active_as_merge() {
 
 #[tokio::test]
 async fn recovery_removes_orphan_issue_label() {
-    let items = serde_json::to_vec(&vec![wip_issue_json(42)]).unwrap();
     let gh = MockGh::new();
-    gh.set_paginate("org/repo", "issues", items);
-
     let queues = TaskQueues::new();
-    let repos = vec![repo("r1", "org/repo")];
+    let repos = vec![repo("r1", "org/repo", vec![wip_issue(42)], vec![])];
 
     let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
@@ -202,12 +199,9 @@ async fn recovery_removes_orphan_issue_label() {
 
 #[tokio::test]
 async fn recovery_removes_orphan_pr_label() {
-    let items = serde_json::to_vec(&vec![wip_pr_json(15)]).unwrap();
     let gh = MockGh::new();
-    gh.set_paginate("org/repo", "issues", items);
-
     let queues = TaskQueues::new();
-    let repos = vec![repo("r1", "org/repo")];
+    let repos = vec![repo("r1", "org/repo", vec![], vec![wip_pull(15)])];
 
     let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
@@ -225,15 +219,7 @@ async fn recovery_removes_orphan_pr_label() {
 
 #[tokio::test]
 async fn recovery_mixed_active_and_orphan() {
-    let items = serde_json::to_vec(&vec![
-        wip_issue_json(1), // active (issue queue) → skip
-        wip_issue_json(2), // orphan → recover
-        wip_pr_json(3),    // active (pr queue) → skip
-        wip_pr_json(4),    // orphan → recover
-    ])
-    .unwrap();
     let gh = MockGh::new();
-    gh.set_paginate("org/repo", "issues", items);
 
     let mut queues = TaskQueues::new();
     queues
@@ -243,7 +229,12 @@ async fn recovery_mixed_active_and_orphan() {
         .prs
         .push(pr_phase::PENDING, make_pr_item("org/repo", 3));
 
-    let repos = vec![repo("r1", "org/repo")];
+    let repos = vec![repo(
+        "r1",
+        "org/repo",
+        vec![wip_issue(1), wip_issue(2)], // #1 active, #2 orphan
+        vec![wip_pull(3), wip_pull(4)],   // #3 active, #4 orphan
+    )];
     let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
     assert_eq!(result.unwrap(), 2);
@@ -254,22 +245,20 @@ async fn recovery_mixed_active_and_orphan() {
 }
 
 // ═══════════════════════════════════════════════
-// 6. API 실패 → 에러 로그만, 계속 진행
+// 6. 빈 issues/pulls → 0건 복구 (API 실패 시나리오는 resolve_repos에서 처리)
 // ═══════════════════════════════════════════════
 
 #[tokio::test]
-async fn recovery_api_failure_continues() {
+async fn recovery_empty_issues_and_pulls() {
     let gh = MockGh::new();
-    // repo1: no mock → api_paginate fails
-    // repo2: empty response
-    gh.set_paginate("org/repo2", "issues", b"[]".to_vec());
-
     let queues = TaskQueues::new();
-    let repos = vec![repo("r1", "org/repo1"), repo("r2", "org/repo2")];
+    let repos = vec![
+        repo("r1", "org/repo1", vec![], vec![]),
+        repo("r2", "org/repo2", vec![], vec![]),
+    ];
 
     let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 
-    // repo1 fails silently, repo2 succeeds with 0
     assert_eq!(result.unwrap(), 0);
 }
 
@@ -280,19 +269,11 @@ async fn recovery_api_failure_continues() {
 #[tokio::test]
 async fn recovery_multiple_repos() {
     let gh = MockGh::new();
-    gh.set_paginate(
-        "org/repo1",
-        "issues",
-        serde_json::to_vec(&vec![wip_issue_json(10)]).unwrap(),
-    );
-    gh.set_paginate(
-        "org/repo2",
-        "issues",
-        serde_json::to_vec(&vec![wip_pr_json(20)]).unwrap(),
-    );
-
     let queues = TaskQueues::new();
-    let repos = vec![repo("r1", "org/repo1"), repo("r2", "org/repo2")];
+    let repos = vec![
+        repo("r1", "org/repo1", vec![wip_issue(10)], vec![]),
+        repo("r2", "org/repo2", vec![], vec![wip_pull(20)]),
+    ];
 
     let result = recovery::recover_orphan_wip(&repos, &gh, &queues).await;
 

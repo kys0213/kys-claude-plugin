@@ -7,7 +7,7 @@ use anyhow::Result;
 use crate::config;
 use crate::config::Env;
 use crate::infrastructure::gh::Gh;
-use crate::queue::models::{EnabledRepo, ResolvedRepo};
+use crate::queue::models::{EnabledRepo, RepoIssue, RepoPull, ResolvedRepo};
 use crate::queue::task_queues::{labels, make_work_id, TaskQueues};
 
 /// gh_host 캐시 엔트리: 설정 파일의 mtime과 해석된 값을 보관
@@ -73,18 +73,70 @@ fn resolve_gh_host(env: &dyn Env, repo_name: &str) -> Option<String> {
 
 /// EnabledRepo 목록을 ResolvedRepo 목록으로 변환하는 팩토리.
 ///
-/// 각 레포의 per-repo config에서 gh_host를 해석하여 value object에 내장한다.
+/// 각 레포의 per-repo config에서 gh_host를 해석하고,
+/// GitHub API를 통해 open issues/pulls를 pre-fetch하여 value object에 내장한다.
 /// mtime 기반 캐시를 내부적으로 사용하므로 tick마다 호출해도 디스크 I/O가 최소화된다.
-pub(crate) fn resolve_repos(repos: &[EnabledRepo], env: &dyn Env) -> Vec<ResolvedRepo> {
-    repos
-        .iter()
-        .map(|r| ResolvedRepo {
+pub(crate) async fn resolve_repos(
+    repos: &[EnabledRepo],
+    env: &dyn Env,
+    gh: &dyn Gh,
+) -> Vec<ResolvedRepo> {
+    let mut resolved = Vec::with_capacity(repos.len());
+
+    for r in repos {
+        let gh_host = resolve_gh_host(env, &r.name);
+
+        // Open issues pre-fetch (GitHub issues API에는 PR도 포함 — RepoIssue::from_json이 필터링)
+        let issues = match gh
+            .api_paginate(
+                &r.name,
+                "issues",
+                &[("state", "open"), ("per_page", "100")],
+                gh_host.as_deref(),
+            )
+            .await
+        {
+            Ok(data) => {
+                let raw: Vec<serde_json::Value> = serde_json::from_slice(&data).unwrap_or_default();
+                raw.iter().filter_map(RepoIssue::from_json).collect()
+            }
+            Err(e) => {
+                tracing::warn!("failed to fetch issues for {}: {e}", r.name);
+                Vec::new()
+            }
+        };
+
+        // Open pulls pre-fetch (full PR data: head/base branch 포함)
+        let pulls = match gh
+            .api_paginate(
+                &r.name,
+                "pulls",
+                &[("state", "open"), ("per_page", "100")],
+                gh_host.as_deref(),
+            )
+            .await
+        {
+            Ok(data) => {
+                let raw: Vec<serde_json::Value> = serde_json::from_slice(&data).unwrap_or_default();
+                raw.iter().filter_map(RepoPull::from_json).collect()
+            }
+            Err(e) => {
+                tracing::warn!("failed to fetch pulls for {}: {e}", r.name);
+                Vec::new()
+            }
+        };
+
+        resolved.push(ResolvedRepo {
             id: r.id.clone(),
             url: r.url.clone(),
             name: r.name.clone(),
-            gh_host: resolve_gh_host(env, &r.name),
-        })
-        .collect()
+            gh_host,
+            issues,
+            pulls,
+        });
+    }
+
+    resolved
 }
 
 /// Orphan `autodev:wip` 라벨 정리
@@ -101,43 +153,35 @@ pub async fn recover_orphan_wip(
     for repo in repos {
         let gh_host = repo.gh_host();
 
-        let endpoint = "issues";
-        let params = &[
-            ("labels", labels::WIP),
-            ("state", "open"),
-            ("per_page", "100"),
-        ];
-
-        let data = match gh.api_paginate(&repo.name, endpoint, params, gh_host).await {
-            Ok(d) => d,
-            Err(e) => {
-                tracing::warn!("recovery scan failed for {}: {e}", repo.name);
-                continue;
-            }
-        };
-
-        let items: Vec<serde_json::Value> = serde_json::from_slice(&data).unwrap_or_default();
-
-        for item in items {
-            let number = match item["number"].as_i64() {
-                Some(n) if n > 0 => n,
-                _ => continue,
-            };
-
-            // GitHub issues API includes PRs — pull_request 필드 유무로 구분
-            let is_pr = item.get("pull_request").is_some();
-
-            let queue_type = if is_pr { "pr" } else { "issue" };
-            let work_id = make_work_id(queue_type, &repo.name, number);
-
+        // Issues with wip label
+        for issue in repo.issues.iter().filter(|i| i.is_wip()) {
+            let work_id = make_work_id("issue", &repo.name, issue.number);
             if !queues.contains(&work_id)
                 && gh
-                    .label_remove(&repo.name, number, labels::WIP, gh_host)
+                    .label_remove(&repo.name, issue.number, labels::WIP, gh_host)
                     .await
             {
                 recovered += 1;
                 tracing::info!(
-                    "recovered orphan {queue_type} #{number} in {} (removed autodev:wip)",
+                    "recovered orphan issue #{} in {} (removed autodev:wip)",
+                    issue.number,
+                    repo.name
+                );
+            }
+        }
+
+        // PRs with wip label
+        for pull in repo.pulls.iter().filter(|p| p.is_wip()) {
+            let work_id = make_work_id("pr", &repo.name, pull.number);
+            if !queues.contains(&work_id)
+                && gh
+                    .label_remove(&repo.name, pull.number, labels::WIP, gh_host)
+                    .await
+            {
+                recovered += 1;
+                tracing::info!(
+                    "recovered orphan pr #{} in {} (removed autodev:wip)",
+                    pull.number,
                     repo.name
                 );
             }
@@ -163,51 +207,32 @@ pub async fn recover_orphan_implementing(
     for repo in repos {
         let gh_host = repo.gh_host();
 
-        let params = &[
-            ("labels", labels::IMPLEMENTING),
-            ("state", "open"),
-            ("per_page", "100"),
-        ];
-
-        let data = match gh.api_paginate(&repo.name, "issues", params, gh_host).await {
-            Ok(d) => d,
-            Err(e) => {
-                tracing::warn!("implementing recovery scan failed for {}: {e}", repo.name);
-                continue;
-            }
-        };
-
-        let items: Vec<serde_json::Value> = serde_json::from_slice(&data).unwrap_or_default();
-
-        for item in items {
-            if item.get("pull_request").is_some() {
-                continue; // PR 제외
-            }
-
-            let number = match item["number"].as_i64() {
-                Some(n) if n > 0 => n,
-                _ => continue,
-            };
-
-            let work_id = make_work_id("issue", &repo.name, number);
+        for issue in repo.issues.iter().filter(|i| i.is_implementing()) {
+            let work_id = make_work_id("issue", &repo.name, issue.number);
             if queues.contains(&work_id) {
-                continue; // 큐에 있으면 skip
+                continue;
             }
 
             // 이슈 코멘트에서 pr-link 마커 추출
-            match extract_pr_link_from_comments(gh, &repo.name, number, gh_host).await {
+            match extract_pr_link_from_comments(gh, &repo.name, issue.number, gh_host).await {
                 Some(pr_num) => {
                     // 연결 PR 상태 확인
                     let pr_state = get_pr_state(gh, &repo.name, pr_num, gh_host).await;
                     match pr_state.as_deref() {
                         Some("closed") | Some("merged") => {
-                            gh.label_remove(&repo.name, number, labels::IMPLEMENTING, gh_host)
-                                .await;
-                            gh.label_add(&repo.name, number, labels::DONE, gh_host)
+                            gh.label_remove(
+                                &repo.name,
+                                issue.number,
+                                labels::IMPLEMENTING,
+                                gh_host,
+                            )
+                            .await;
+                            gh.label_add(&repo.name, issue.number, labels::DONE, gh_host)
                                 .await;
                             recovered += 1;
                             tracing::info!(
-                                "recovered implementing issue #{number} in {} (PR #{pr_num} {})",
+                                "recovered implementing issue #{} in {} (PR #{pr_num} {})",
+                                issue.number,
                                 repo.name,
                                 pr_state.as_deref().unwrap_or("unknown")
                             );
@@ -219,11 +244,12 @@ pub async fn recover_orphan_implementing(
                 }
                 None => {
                     // pr-link 마커 없음 → implementing 제거 (다음 scan에서 재시도)
-                    gh.label_remove(&repo.name, number, labels::IMPLEMENTING, gh_host)
+                    gh.label_remove(&repo.name, issue.number, labels::IMPLEMENTING, gh_host)
                         .await;
                     recovered += 1;
                     tracing::info!(
-                        "recovered orphan implementing issue #{number} in {} (no pr-link marker)",
+                        "recovered orphan implementing issue #{} in {} (no pr-link marker)",
+                        issue.number,
                         repo.name
                     );
                 }
