@@ -361,7 +361,24 @@ pub async fn process_review_done(
                     // Improving → Improved (재리뷰 대기)
                     remove_from_phase(queues, &work_id);
                     let pr_num = item.github_number;
+                    // iteration 라벨 동기화 (이전 제거 → 새 부착)
+                    if item.review_iteration > 0 {
+                        gh.label_remove(
+                            &item.repo_name,
+                            pr_num,
+                            &labels::iteration_label(item.review_iteration),
+                            gh_host,
+                        )
+                        .await;
+                    }
                     item.review_iteration += 1;
+                    gh.label_add(
+                        &item.repo_name,
+                        pr_num,
+                        &labels::iteration_label(item.review_iteration),
+                        gh_host,
+                    )
+                    .await;
                     queues.prs.push(pr_phase::IMPROVED, item);
                     tracing::info!("PR #{pr_num}: Improving → Improved");
                 } else {
@@ -552,6 +569,16 @@ pub async fn process_improved(
                         remove_from_phase(queues, &work_id);
                         gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                             .await;
+                        // iteration 라벨 정리
+                        if item.review_iteration > 0 {
+                            gh.label_remove(
+                                &item.repo_name,
+                                item.github_number,
+                                &labels::iteration_label(item.review_iteration),
+                                gh_host,
+                            )
+                            .await;
+                        }
                         gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host)
                             .await;
                         tracing::info!(
@@ -599,6 +626,14 @@ pub async fn process_improved(
                                 &item.repo_name,
                                 item.github_number,
                                 labels::SKIP,
+                                gh_host,
+                            )
+                            .await;
+                            // iteration 라벨 정리
+                            gh.label_remove(
+                                &item.repo_name,
+                                item.github_number,
+                                &labels::iteration_label(item.review_iteration),
                                 gh_host,
                             )
                             .await;
@@ -843,23 +878,11 @@ pub async fn review_one(
 
                         // 외부 PR (source_issue_number 없음): 리뷰 댓글만, 자동수정 안함
                         if item.source_issue_number.is_none() {
-                            gh.label_remove(
-                                &item.repo_name,
-                                github_number,
-                                labels::WIP,
-                                gh_host,
-                            )
-                            .await;
-                            gh.label_add(
-                                &item.repo_name,
-                                github_number,
-                                labels::DONE,
-                                gh_host,
-                            )
-                            .await;
-                            tracing::info!(
-                                "PR #{github_number}: external PR, review-only → done"
-                            );
+                            gh.label_remove(&item.repo_name, github_number, labels::WIP, gh_host)
+                                .await;
+                            gh.label_add(&item.repo_name, github_number, labels::DONE, gh_host)
+                                .await;
+                            tracing::info!("PR #{github_number}: external PR, review-only → done");
                             ops.push(QueueOp::Remove);
                         } else {
                             item.review_comment = Some(output.review);
@@ -988,7 +1011,24 @@ pub async fn improve_one(
             });
 
             if res.exit_code == 0 {
+                // iteration 라벨 동기화 (이전 제거 → 새 부착)
+                if item.review_iteration > 0 {
+                    gh.label_remove(
+                        &repo_name,
+                        github_number,
+                        &labels::iteration_label(item.review_iteration),
+                        gh_host,
+                    )
+                    .await;
+                }
                 item.review_iteration += 1;
+                gh.label_add(
+                    &repo_name,
+                    github_number,
+                    &labels::iteration_label(item.review_iteration),
+                    gh_host,
+                )
+                .await;
                 ops.push(QueueOp::Remove);
                 ops.push(QueueOp::PushPr {
                     phase: pr_phase::IMPROVED,
@@ -1175,6 +1215,16 @@ pub async fn re_review_one(
 
                     gh.label_remove(&repo_name, github_number, labels::WIP, gh_host)
                         .await;
+                    // iteration 라벨 정리
+                    if item.review_iteration > 0 {
+                        gh.label_remove(
+                            &repo_name,
+                            github_number,
+                            &labels::iteration_label(item.review_iteration),
+                            gh_host,
+                        )
+                        .await;
+                    }
                     gh.label_add(&repo_name, github_number, labels::DONE, gh_host)
                         .await;
                     tracing::info!("PR #{github_number}: Reviewing → done (re-review approved)");
@@ -1202,17 +1252,20 @@ pub async fn re_review_one(
                              Marking as `autodev:skip`. Manual intervention required."
                         );
                         notifier
-                            .post_issue_comment(
-                                &item.repo_name,
-                                github_number,
-                                &comment,
-                                gh_host,
-                            )
+                            .post_issue_comment(&item.repo_name, github_number, &comment, gh_host)
                             .await;
                         gh.label_remove(&repo_name, github_number, labels::WIP, gh_host)
                             .await;
                         gh.label_add(&repo_name, github_number, labels::SKIP, gh_host)
                             .await;
+                        // iteration 라벨 정리
+                        gh.label_remove(
+                            &repo_name,
+                            github_number,
+                            &labels::iteration_label(item.review_iteration),
+                            gh_host,
+                        )
+                        .await;
                         tracing::info!(
                             "PR #{github_number}: iteration limit ({max_iterations}) reached → skip"
                         );

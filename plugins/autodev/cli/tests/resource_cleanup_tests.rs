@@ -10,7 +10,7 @@ use autodev::infrastructure::git::mock::MockGit;
 use autodev::infrastructure::suggest_workflow::mock::MockSuggestWorkflow;
 use autodev::queue::repository::*;
 use autodev::queue::task_queues::{
-    issue_phase, make_work_id, pr_phase, IssueItem, MergeItem, PrItem, TaskQueues,
+    issue_phase, labels, make_work_id, pr_phase, IssueItem, MergeItem, PrItem, TaskQueues,
 };
 use autodev::queue::Database;
 
@@ -478,13 +478,19 @@ async fn review_cycle_stops_at_max_iterations_c4() {
     // skip 라벨이 추가되었는지 확인
     let added = gh.added_labels.lock().unwrap();
     assert!(
-        added.iter().any(|(r, n, l)| r == "org/repo" && *n == 80 && l == labels::SKIP),
+        added
+            .iter()
+            .any(|(r, n, l)| r == "org/repo" && *n == 80 && l == labels::SKIP),
         "C-4: autodev:skip label should be added when max_iterations reached"
     );
     drop(added);
 
     // 큐가 비어있는지 확인
-    assert_eq!(queues.prs.total(), 0, "C-4: all PR items should be removed from queue");
+    assert_eq!(
+        queues.prs.total(),
+        0,
+        "C-4: all PR items should be removed from queue"
+    );
 }
 
 // ═══════════════════════════════════════════════

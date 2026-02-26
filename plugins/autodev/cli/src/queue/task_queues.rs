@@ -121,6 +121,22 @@ pub mod labels {
     pub const ANALYZED: &str = "autodev:analyzed";
     pub const APPROVED_ANALYSIS: &str = "autodev:approved-analysis";
     pub const IMPLEMENTING: &str = "autodev:implementing";
+
+    // v2: 리뷰 반복 횟수 라벨 (예: "autodev:iteration/1")
+    pub const ITERATION_PREFIX: &str = "autodev:iteration/";
+
+    /// "autodev:iteration/{n}" 라벨 생성
+    pub fn iteration_label(n: u32) -> String {
+        format!("{ITERATION_PREFIX}{n}")
+    }
+
+    /// 라벨 목록에서 "autodev:iteration/{n}" 파싱. 없으면 0 반환.
+    pub fn parse_iteration(label_names: &[&str]) -> u32 {
+        label_names
+            .iter()
+            .find_map(|l| l.strip_prefix(ITERATION_PREFIX)?.parse::<u32>().ok())
+            .unwrap_or(0)
+    }
 }
 
 // ─── TaskQueues: 전체 작업 큐 ───
@@ -330,6 +346,27 @@ mod tests {
         assert_eq!(labels::ANALYZED, "autodev:analyzed");
         assert_eq!(labels::APPROVED_ANALYSIS, "autodev:approved-analysis");
         assert_eq!(labels::IMPLEMENTING, "autodev:implementing");
+    }
+
+    #[test]
+    fn iteration_label_format() {
+        assert_eq!(labels::iteration_label(1), "autodev:iteration/1");
+        assert_eq!(labels::iteration_label(2), "autodev:iteration/2");
+        assert_eq!(labels::iteration_label(0), "autodev:iteration/0");
+    }
+
+    #[test]
+    fn parse_iteration_from_labels() {
+        assert_eq!(
+            labels::parse_iteration(&["autodev:wip", "autodev:iteration/2"]),
+            2
+        );
+        assert_eq!(labels::parse_iteration(&["autodev:wip"]), 0);
+        assert_eq!(labels::parse_iteration(&[]), 0);
+        assert_eq!(
+            labels::parse_iteration(&["autodev:iteration/3", "autodev:iteration/1"]),
+            3, // 첫 번째 매칭 반환
+        );
     }
 
     // ═══════════════════════════════════════════════════
