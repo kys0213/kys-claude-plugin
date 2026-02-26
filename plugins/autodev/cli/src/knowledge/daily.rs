@@ -328,8 +328,17 @@ pub async fn create_knowledge_prs(
             continue;
         }
 
-        // 3. 파일 쓰기
-        let file_path = kn_wt_path.join(target);
+        // 3. 파일 쓰기 (path traversal 방지)
+        let file_path = match crate::config::safe_join(&kn_wt_path, target) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("knowledge PR: unsafe target_file '{target}': {e}");
+                let _ = workspace
+                    .remove_worktree(repo_name, &knowledge_task_id)
+                    .await;
+                continue;
+            }
+        };
         if let Some(parent) = file_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }

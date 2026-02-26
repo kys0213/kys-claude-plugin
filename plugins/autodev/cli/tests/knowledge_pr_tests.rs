@@ -396,3 +396,94 @@ async fn create_prs_commit_message_includes_autodev_prefix() {
         "commit message should include [autodev] knowledge: prefix"
     );
 }
+
+// ═══════════════════════════════════════════════
+// path traversal 방어: 위험 경로 → PR 미생성 + worktree 정리
+// ═══════════════════════════════════════════════
+
+#[tokio::test]
+async fn create_prs_rejects_parent_traversal() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let gh = MockGh::new();
+    let git = MockGit::new();
+    let env = TestEnv::new(&tmpdir);
+    let workspace = Workspace::new(&git, &env);
+
+    let base = tmpdir.path().join("workspaces/org-repo/main");
+    std::fs::create_dir_all(&base).unwrap();
+
+    let report = make_report(
+        "2026-02-22",
+        vec![make_suggestion(
+            "../../../etc/passwd",
+            "malicious content",
+            "traversal attack",
+        )],
+    );
+
+    create_knowledge_prs(&gh, &workspace, "org/repo", &report, None).await;
+
+    // PR이 생성되지 않아야 함
+    let prs = gh.created_prs.lock().unwrap();
+    assert!(prs.is_empty(), "traversal path should not create PR");
+
+    // worktree는 정리되어야 함
+    let git_calls = git.calls.lock().unwrap();
+    assert!(
+        git_calls.iter().any(|(m, _)| m == "worktree_remove"),
+        "worktree should be cleaned up after path rejection"
+    );
+}
+
+#[tokio::test]
+async fn create_prs_rejects_absolute_path() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let gh = MockGh::new();
+    let git = MockGit::new();
+    let env = TestEnv::new(&tmpdir);
+    let workspace = Workspace::new(&git, &env);
+
+    let base = tmpdir.path().join("workspaces/org-repo/main");
+    std::fs::create_dir_all(&base).unwrap();
+
+    let report = make_report(
+        "2026-02-22",
+        vec![make_suggestion(
+            "/tmp/pwned.txt",
+            "malicious content",
+            "absolute path attack",
+        )],
+    );
+
+    create_knowledge_prs(&gh, &workspace, "org/repo", &report, None).await;
+
+    let prs = gh.created_prs.lock().unwrap();
+    assert!(prs.is_empty(), "absolute path should not create PR");
+}
+
+#[tokio::test]
+async fn create_prs_mixed_safe_and_unsafe_skips_only_unsafe() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let gh = MockGh::new();
+    let git = MockGit::new();
+    let env = TestEnv::new(&tmpdir);
+    let workspace = Workspace::new(&git, &env);
+
+    let base = tmpdir.path().join("workspaces/org-repo/main");
+    std::fs::create_dir_all(&base).unwrap();
+
+    let report = make_report(
+        "2026-02-22",
+        vec![
+            make_suggestion(".claude/rules/safe.md", "safe content", "valid"),
+            make_suggestion("../../escape.txt", "bad", "traversal"),
+            make_suggestion("CLAUDE.md", "also safe", "valid too"),
+        ],
+    );
+
+    create_knowledge_prs(&gh, &workspace, "org/repo", &report, None).await;
+
+    // 안전한 2개만 PR 생성
+    let prs = gh.created_prs.lock().unwrap();
+    assert_eq!(prs.len(), 2, "only safe suggestions should create PRs");
+}
