@@ -17,7 +17,6 @@ pub struct WorkflowConfig {
 #[serde(default)]
 pub struct DaemonConfig {
     pub tick_interval_secs: u64,
-    pub reconcile_window_hours: u32,
     pub daily_report_hour: u32,
     pub log_dir: String,
     pub log_retention_days: u32,
@@ -29,7 +28,6 @@ impl Default for DaemonConfig {
     fn default() -> Self {
         Self {
             tick_interval_secs: 10,
-            reconcile_window_hours: 24,
             daily_report_hour: 6,
             log_dir: "logs".into(),
             log_retention_days: 30,

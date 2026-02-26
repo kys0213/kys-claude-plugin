@@ -535,7 +535,9 @@ async fn startup_reconcile(
         }
 
         // ── PRs 복구 ──
-        for pull in &repo.pulls {
+        // Label-Positive: autodev:wip 라벨이 있는 PR만 복구 대상.
+        // 라벨 없는 PR은 scanner가 다음 주기에 처리하므로 skip.
+        for pull in repo.pulls.iter().filter(|p| p.is_wip()) {
             if pull.is_terminal() {
                 continue;
             }
@@ -545,11 +547,7 @@ async fn startup_reconcile(
                 continue;
             }
 
-            if pull.is_wip() {
-                gh.label_remove(&repo.name, pull.number, labels::WIP, gh_host)
-                    .await;
-            }
-
+            // wip 유지 + Pending 적재 (issue wip 복구와 동일 패턴)
             let pr_item = PrItem {
                 work_id,
                 repo_id: repo.id.clone(),
@@ -564,8 +562,6 @@ async fn startup_reconcile(
                 review_iteration: pull.review_iteration(),
             };
 
-            gh.label_add(&repo.name, pull.number, labels::WIP, gh_host)
-                .await;
             queues.prs.push(pr_phase::PENDING, pr_item);
             recovered += 1;
         }
@@ -673,8 +669,9 @@ mod tests {
         assert!(!queues.contains("issue:org/repo:10"));
     }
 
+    /// Label-Positive: 라벨 없는 PR은 무시됨 (scanner가 다음 주기에 처리)
     #[tokio::test]
-    async fn startup_reconcile_recovers_open_prs() {
+    async fn startup_reconcile_skips_unlabeled_prs() {
         let gh = MockGh::new();
         let resolved = vec![resolved_repo(
             vec![],
@@ -690,8 +687,38 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(
+            result, 0,
+            "unlabeled PRs should be ignored (Label-Positive)"
+        );
+        assert!(!queues.contains("pr:org/repo:20"));
+    }
+
+    /// Label-Positive: wip PR은 복구 대상 (크래시 복구)
+    #[tokio::test]
+    async fn startup_reconcile_recovers_wip_prs() {
+        let gh = MockGh::new();
+        let resolved = vec![resolved_repo(
+            vec![],
+            vec![pull_from_json(serde_json::json!({
+                "number": 20, "title": "WIP PR",
+                "labels": [{"name": "autodev:wip"}],
+                "head": {"ref": "feat/test"}, "base": {"ref": "main"},
+                "user": {"login": "bob"}
+            }))],
+        )];
+
+        let mut queues = TaskQueues::new();
+        let result = startup_reconcile(&resolved, &gh, &mut queues)
+            .await
+            .unwrap();
+
         assert_eq!(result, 1);
         assert!(queues.contains("pr:org/repo:20"));
+
+        // wip 라벨 유지 (제거도 추가도 안 함)
+        assert!(gh.removed_labels.lock().unwrap().is_empty());
+        assert!(gh.added_labels.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
