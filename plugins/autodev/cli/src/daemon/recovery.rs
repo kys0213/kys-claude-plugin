@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::SystemTime;
+
 use anyhow::Result;
 
 use crate::config;
@@ -6,12 +10,41 @@ use crate::infrastructure::gh::Gh;
 use crate::queue::models::EnabledRepo;
 use crate::queue::task_queues::{labels, make_work_id, TaskQueues};
 
+/// gh_host 캐시 엔트리: 설정 파일의 mtime과 해석된 값을 보관
+struct GhHostEntry {
+    mtime: Option<SystemTime>,
+    value: Option<String>,
+}
+
+static GH_HOST_CACHE: Mutex<Option<HashMap<String, GhHostEntry>>> = Mutex::new(None);
+
+/// 설정 파일의 mtime을 조회 (파일 없으면 None)
+fn config_mtime(path: &std::path::Path) -> Option<SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
 /// Per-repo config에서 gh_host를 로드하는 헬퍼.
 ///
-/// scanner에서 사용하는 패턴과 동일하게 workspace 경로 기반으로
-/// per-repo config를 로드하여 gh_host를 반환한다.
+/// 설정 파일의 mtime이 변경되지 않았으면 캐시된 값을 반환하여
+/// 매 tick마다 불필요한 디스크 I/O를 회피한다.
 pub(crate) fn resolve_gh_host(env: &dyn Env, repo_name: &str) -> Option<String> {
     let ws_path = config::workspaces_path(env).join(config::sanitize_repo_name(repo_name));
+    let config_path = ws_path.join(".develop-workflow.yaml");
+    let current_mtime = config_mtime(&config_path);
+
+    // 캐시 조회: mtime 일치하면 재사용
+    {
+        let guard = GH_HOST_CACHE.lock().unwrap();
+        if let Some(ref cache) = *guard {
+            if let Some(entry) = cache.get(repo_name) {
+                if entry.mtime == current_mtime {
+                    return entry.value.clone();
+                }
+            }
+        }
+    }
+
+    // 캐시 미스 또는 mtime 변경 → 디스크에서 로드
     let cfg = config::loader::load_merged(
         env,
         if ws_path.exists() {
@@ -20,7 +53,22 @@ pub(crate) fn resolve_gh_host(env: &dyn Env, repo_name: &str) -> Option<String> 
             None
         },
     );
-    cfg.consumer.gh_host
+    let value = cfg.consumer.gh_host;
+
+    // 캐시 갱신
+    {
+        let mut guard = GH_HOST_CACHE.lock().unwrap();
+        let cache = guard.get_or_insert_with(HashMap::new);
+        cache.insert(
+            repo_name.to_string(),
+            GhHostEntry {
+                mtime: current_mtime,
+                value: value.clone(),
+            },
+        );
+    }
+
+    value
 }
 
 /// Orphan `autodev:wip` 라벨 정리
