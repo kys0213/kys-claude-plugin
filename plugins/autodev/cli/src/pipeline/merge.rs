@@ -126,7 +126,6 @@ pub async fn process_pending(
                 gh.label_add(&item.repo_name, item.pr_number, labels::DONE, gh_host)
                     .await;
                 tracing::info!("PR #{}: Merging → done", item.pr_number);
-                let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
             }
             MergeOutcome::Conflict => {
                 // Merging → Conflict 상태 전이
@@ -167,6 +166,9 @@ pub async fn process_pending(
                 tracing::error!("merge error for PR #{}: {e}", item.pr_number);
             }
         }
+
+        // 모든 경로에서 worktree 정리 보장
+        let _ = workspace.remove_worktree(&item.repo_name, &task_id).await;
     }
 
     Ok(())

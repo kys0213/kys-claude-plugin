@@ -71,6 +71,18 @@ pub async fn process_pending(
             .is_pr_reviewable(&item.repo_name, item.github_number, gh_host)
             .await
         {
+            // source issue done 전이 (preflight skip 경로)
+            if let Some(issue_num) = item.source_issue_number {
+                gh.label_remove(&item.repo_name, issue_num, labels::IMPLEMENTING, gh_host)
+                    .await;
+                gh.label_add(&item.repo_name, issue_num, labels::DONE, gh_host)
+                    .await;
+                tracing::info!(
+                    "issue #{issue_num}: done (linked PR #{} preflight-skipped)",
+                    item.github_number
+                );
+            }
+
             remove_from_phase(queues, &work_id);
             gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                 .await;
@@ -700,6 +712,17 @@ pub async fn review_one(
         .is_pr_reviewable(&item.repo_name, github_number, gh_host)
         .await
     {
+        // source issue done 전이 (preflight skip 경로)
+        if let Some(issue_num) = item.source_issue_number {
+            gh.label_remove(&item.repo_name, issue_num, labels::IMPLEMENTING, gh_host)
+                .await;
+            gh.label_add(&item.repo_name, issue_num, labels::DONE, gh_host)
+                .await;
+            tracing::info!(
+                "issue #{issue_num}: done (linked PR #{github_number} preflight-skipped)"
+            );
+        }
+
         gh.label_remove(&item.repo_name, github_number, labels::WIP, gh_host)
             .await;
         gh.label_add(&item.repo_name, github_number, labels::DONE, gh_host)

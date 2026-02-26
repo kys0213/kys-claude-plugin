@@ -49,7 +49,6 @@ fn default_config_has_expected_values() {
     assert_eq!(config.commands.commit_and_pr, "/commit-and-pr");
     // DaemonConfig defaults
     assert_eq!(config.daemon.tick_interval_secs, 10);
-    assert_eq!(config.daemon.reconcile_window_hours, 24);
     assert_eq!(config.daemon.daily_report_hour, 6);
     assert_eq!(config.daemon.log_dir, "logs");
     assert_eq!(config.daemon.log_retention_days, 30);
@@ -241,7 +240,6 @@ fn daemon_config_parsed_from_yaml() {
     let yaml = r#"
 daemon:
   tick_interval_secs: 30
-  reconcile_window_hours: 48
   daily_report_hour: 9
 "#;
     fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
@@ -249,7 +247,6 @@ daemon:
 
     let config = loader::load_merged(&env, None);
     assert_eq!(config.daemon.tick_interval_secs, 30);
-    assert_eq!(config.daemon.reconcile_window_hours, 48);
     assert_eq!(config.daemon.daily_report_hour, 9);
 }
 
@@ -271,7 +268,6 @@ consumer:
     assert_eq!(config.consumer.scan_interval_secs, 60);
     // daemon은 전부 default
     assert_eq!(config.daemon.tick_interval_secs, 10);
-    assert_eq!(config.daemon.reconcile_window_hours, 24);
     assert_eq!(config.daemon.daily_report_hour, 6);
 }
 
@@ -289,6 +285,5 @@ daemon:
 
     let config = loader::load_merged(&env, None);
     assert_eq!(config.daemon.tick_interval_secs, 10); // default
-    assert_eq!(config.daemon.reconcile_window_hours, 24); // default
     assert_eq!(config.daemon.daily_report_hour, 12); // overridden
 }
