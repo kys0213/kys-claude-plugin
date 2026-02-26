@@ -17,7 +17,7 @@ async fn reviewer_success_parses_output() {
 
     let reviewer = Reviewer::new(&claude);
     let output = reviewer
-        .review_pr(Path::new("/tmp/test"), "/multi-review")
+        .review_pr(Path::new("/tmp/test"), "/multi-review", None)
         .await
         .unwrap();
 
@@ -42,7 +42,7 @@ async fn reviewer_verdict_approve() {
 
     let reviewer = Reviewer::new(&claude);
     let output = reviewer
-        .review_pr(Path::new("/tmp/test"), "/multi-review")
+        .review_pr(Path::new("/tmp/test"), "/multi-review", None)
         .await
         .unwrap();
 
@@ -61,7 +61,7 @@ async fn reviewer_verdict_request_changes() {
 
     let reviewer = Reviewer::new(&claude);
     let output = reviewer
-        .review_pr(Path::new("/tmp/test"), "/multi-review")
+        .review_pr(Path::new("/tmp/test"), "/multi-review", None)
         .await
         .unwrap();
 
@@ -78,7 +78,7 @@ async fn reviewer_verdict_none_on_non_review_json() {
 
     let reviewer = Reviewer::new(&claude);
     let output = reviewer
-        .review_pr(Path::new("/tmp/test"), "/multi-review")
+        .review_pr(Path::new("/tmp/test"), "/multi-review", None)
         .await
         .unwrap();
 
@@ -94,7 +94,7 @@ async fn reviewer_success_raw_output() {
 
     let reviewer = Reviewer::new(&claude);
     let output = reviewer
-        .review_pr(Path::new("/tmp/test"), "review this PR")
+        .review_pr(Path::new("/tmp/test"), "review this PR", None)
         .await
         .unwrap();
 
@@ -110,7 +110,7 @@ async fn reviewer_failure_returns_empty_review() {
 
     let reviewer = Reviewer::new(&claude);
     let output = reviewer
-        .review_pr(Path::new("/tmp/test"), "/multi-review")
+        .review_pr(Path::new("/tmp/test"), "/multi-review", None)
         .await
         .unwrap();
 
@@ -126,7 +126,7 @@ async fn reviewer_no_response_returns_failure() {
 
     let reviewer = Reviewer::new(&claude);
     let output = reviewer
-        .review_pr(Path::new("/tmp/test"), "/multi-review")
+        .review_pr(Path::new("/tmp/test"), "/multi-review", None)
         .await
         .unwrap();
 
@@ -301,7 +301,7 @@ async fn analyzer_success_parses_implement() {
 
     let analyzer = Analyzer::new(&claude);
     let output = analyzer
-        .analyze(Path::new("/tmp/test"), "analyze issue")
+        .analyze(Path::new("/tmp/test"), "analyze issue", None)
         .await
         .unwrap();
 
@@ -319,7 +319,7 @@ async fn analyzer_success_parses_needs_clarification() {
 
     let analyzer = Analyzer::new(&claude);
     let output = analyzer
-        .analyze(Path::new("/tmp/test"), "analyze issue")
+        .analyze(Path::new("/tmp/test"), "analyze issue", None)
         .await
         .unwrap();
 
@@ -335,7 +335,7 @@ async fn analyzer_failure_returns_none_analysis() {
 
     let analyzer = Analyzer::new(&claude);
     let output = analyzer
-        .analyze(Path::new("/tmp/test"), "analyze issue")
+        .analyze(Path::new("/tmp/test"), "analyze issue", None)
         .await
         .unwrap();
 
@@ -350,7 +350,7 @@ async fn analyzer_malformed_json_returns_none_analysis() {
 
     let analyzer = Analyzer::new(&claude);
     let output = analyzer
-        .analyze(Path::new("/tmp/test"), "analyze issue")
+        .analyze(Path::new("/tmp/test"), "analyze issue", None)
         .await
         .unwrap();
 

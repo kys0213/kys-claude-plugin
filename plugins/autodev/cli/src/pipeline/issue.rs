@@ -13,7 +13,7 @@ use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
-use crate::pipeline::{QueueOp, TaskOutput};
+use crate::pipeline::{QueueOp, TaskOutput, AGENT_SYSTEM_PROMPT};
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::task_queues::{
@@ -158,7 +158,9 @@ pub async fn process_pending(
         );
 
         let started = Utc::now().to_rfc3339();
-        let result = analyzer.analyze(&wt_path, &prompt).await;
+        let result = analyzer
+            .analyze(&wt_path, &prompt, Some(AGENT_SYSTEM_PROMPT))
+            .await;
 
         match result {
             Ok(res) => {
@@ -382,17 +384,22 @@ pub async fn process_ready(
 
         let repo_cfg = config::loader::load_merged(env, Some(&wt_path));
         let workflow = &repo_cfg.workflow.issue;
-        let report = item.analysis_report.as_deref().unwrap_or("");
         let prompt = format!(
-            "[autodev] implement: issue #{}\n\n\
-             {workflow} implement based on analysis:\n\n{report}\n\n\
-             This is for issue #{} in {}.",
-            item.github_number, item.github_number, item.repo_name
+            "[autodev] implement: issue #{} in {}",
+            item.github_number, item.repo_name
         );
+        let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{workflow}");
 
         let started = Utc::now().to_rfc3339();
         let result = claude
-            .run_session(&wt_path, &prompt, &Default::default())
+            .run_session(
+                &wt_path,
+                &prompt,
+                &crate::infrastructure::claude::SessionOptions {
+                    append_system_prompt: Some(system_prompt),
+                    ..Default::default()
+                },
+            )
             .await;
 
         match result {
@@ -447,6 +454,7 @@ pub async fn process_ready(
                                     base_branch: String::new(),
                                     review_comment: None,
                                     source_issue_number: Some(item.github_number),
+                                    review_iteration: 0,
                                 };
                                 gh.label_add(&item.repo_name, pr_num, labels::WIP, gh_host)
                                     .await;
@@ -630,7 +638,9 @@ pub async fn analyze_one(
     );
 
     let started = Utc::now().to_rfc3339();
-    let result = analyzer.analyze(&wt_path, &prompt).await;
+    let result = analyzer
+        .analyze(&wt_path, &prompt, Some(AGENT_SYSTEM_PROMPT))
+        .await;
 
     match result {
         Ok(res) => {
@@ -836,17 +846,22 @@ pub async fn implement_one(
 
     let repo_cfg = config::loader::load_merged(env, Some(&wt_path));
     let workflow = &repo_cfg.workflow.issue;
-    let report = item.analysis_report.as_deref().unwrap_or("");
     let prompt = format!(
-        "[autodev] implement: issue #{}\n\n\
-         {workflow} implement based on analysis:\n\n{report}\n\n\
-         This is for issue #{} in {}.",
-        item.github_number, item.github_number, item.repo_name
+        "[autodev] implement: issue #{} in {}",
+        item.github_number, item.repo_name
     );
+    let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{workflow}");
 
     let started = Utc::now().to_rfc3339();
     let result = claude
-        .run_session(&wt_path, &prompt, &Default::default())
+        .run_session(
+            &wt_path,
+            &prompt,
+            &crate::infrastructure::claude::SessionOptions {
+                append_system_prompt: Some(system_prompt),
+                ..Default::default()
+            },
+        )
         .await;
 
     match result {
@@ -897,6 +912,7 @@ pub async fn implement_one(
                             base_branch: String::new(),
                             review_comment: None,
                             source_issue_number: Some(item.github_number),
+                            review_iteration: 0,
                         };
 
                         let pr_comment = format!(

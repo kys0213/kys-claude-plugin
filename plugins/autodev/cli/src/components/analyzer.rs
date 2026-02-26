@@ -28,7 +28,12 @@ impl<'a> Analyzer<'a> {
     ///
     /// `prompt`로 Claude 세션을 실행하고 JSON 출력을 파싱하여
     /// 구조화된 `AnalyzerOutput`을 반환한다.
-    pub async fn analyze(&self, wt_path: &Path, prompt: &str) -> Result<AnalyzerOutput> {
+    pub async fn analyze(
+        &self,
+        wt_path: &Path,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<AnalyzerOutput> {
         let result = self
             .claude
             .run_session(
@@ -37,6 +42,7 @@ impl<'a> Analyzer<'a> {
                 &SessionOptions {
                     output_format: Some("json".into()),
                     json_schema: Some(output::ANALYSIS_SCHEMA.clone()),
+                    append_system_prompt: system_prompt.map(String::from),
                 },
             )
             .await?;

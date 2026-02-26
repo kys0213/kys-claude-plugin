@@ -28,6 +28,11 @@ impl Claude for RealClaude {
             args.push(schema.clone());
         }
 
+        if let Some(ref sp) = opts.append_system_prompt {
+            args.push("--append-system-prompt".to_string());
+            args.push(sp.clone());
+        }
+
         tracing::info!(
             "running: claude -p \"{}\" in {:?}",
             truncate(prompt, 80),

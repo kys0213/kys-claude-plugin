@@ -12,7 +12,7 @@ use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
-use crate::pipeline::{QueueOp, TaskOutput};
+use crate::pipeline::{QueueOp, TaskOutput, AGENT_SYSTEM_PROMPT};
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::task_queues::{labels, pr_phase, PrItem, TaskQueues};
@@ -112,14 +112,15 @@ pub async fn process_pending(
         };
 
         let repo_cfg = config::loader::load_merged(env, Some(&wt_path));
-        let pr_prompt = format!(
-            "[autodev] review: PR #{}\n\n{}",
-            item.github_number, repo_cfg.workflow.pr
-        );
+        let pr_prompt = format!("[autodev] review: PR #{}", item.github_number);
+        let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{}", repo_cfg.workflow.pr);
 
         let started = Utc::now().to_rfc3339();
 
-        match reviewer.review_pr(&wt_path, &pr_prompt).await {
+        match reviewer
+            .review_pr(&wt_path, &pr_prompt, Some(&system_prompt))
+            .await
+        {
             Ok(output) => {
                 let finished = Utc::now().to_rfc3339();
                 let duration = chrono::Utc::now()
@@ -289,7 +290,7 @@ pub async fn process_review_done(
     let cfg = config::loader::load_merged(env, None);
     let gh_host = cfg.consumer.gh_host.as_deref();
 
-    while let Some(item) = queues.prs.pop(pr_phase::REVIEW_DONE) {
+    while let Some(mut item) = queues.prs.pop(pr_phase::REVIEW_DONE) {
         // ReviewDone → Improving 상태 전이 (TUI/status 가시성)
         let work_id = item.work_id.clone();
         let repo_name_for_wt = item.repo_name.clone();
@@ -324,16 +325,18 @@ pub async fn process_review_done(
             }
         };
 
-        let review = item.review_comment.as_deref().unwrap_or("");
-        let prompt = format!(
-            "[autodev] improve: PR #{}\n\n\
-             Implement the following review feedback for PR #{}:\n\n{review}",
-            item.github_number, item.github_number
-        );
+        let prompt = format!("[autodev] improve: PR #{}", item.github_number);
 
         let started = Utc::now().to_rfc3339();
         let result = claude
-            .run_session(&wt_path, &prompt, &Default::default())
+            .run_session(
+                &wt_path,
+                &prompt,
+                &crate::infrastructure::claude::SessionOptions {
+                    append_system_prompt: Some(AGENT_SYSTEM_PROMPT.to_string()),
+                    ..Default::default()
+                },
+            )
             .await;
 
         match result {
@@ -361,6 +364,24 @@ pub async fn process_review_done(
                     // Improving → Improved (재리뷰 대기)
                     remove_from_phase(queues, &work_id);
                     let pr_num = item.github_number;
+                    // iteration 라벨 동기화 (이전 제거 → 새 부착)
+                    if item.review_iteration > 0 {
+                        gh.label_remove(
+                            &item.repo_name,
+                            pr_num,
+                            &labels::iteration_label(item.review_iteration),
+                            gh_host,
+                        )
+                        .await;
+                    }
+                    item.review_iteration += 1;
+                    gh.label_add(
+                        &item.repo_name,
+                        pr_num,
+                        &labels::iteration_label(item.review_iteration),
+                        gh_host,
+                    )
+                    .await;
                     queues.prs.push(pr_phase::IMPROVED, item);
                     tracing::info!("PR #{pr_num}: Improving → Improved");
                 } else {
@@ -397,7 +418,7 @@ pub async fn process_improved(
     db: &Database,
     env: &dyn Env,
     workspace: &Workspace<'_>,
-    _notifier: &Notifier<'_>,
+    notifier: &Notifier<'_>,
     gh: &dyn Gh,
     claude: &dyn Claude,
     sw: &dyn SuggestWorkflow,
@@ -446,14 +467,15 @@ pub async fn process_improved(
         };
 
         let repo_cfg = config::loader::load_merged(env, Some(&wt_path));
-        let pr_prompt = format!(
-            "[autodev] review: PR #{}\n\n{}",
-            item.github_number, repo_cfg.workflow.pr
-        );
+        let pr_prompt = format!("[autodev] review: PR #{}", item.github_number);
+        let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{}", repo_cfg.workflow.pr);
 
         let started = Utc::now().to_rfc3339();
 
-        match reviewer.review_pr(&wt_path, &pr_prompt).await {
+        match reviewer
+            .review_pr(&wt_path, &pr_prompt, Some(&system_prompt))
+            .await
+        {
             Ok(output) => {
                 let finished = Utc::now().to_rfc3339();
                 let duration = chrono::Utc::now()
@@ -551,6 +573,16 @@ pub async fn process_improved(
                         remove_from_phase(queues, &work_id);
                         gh.label_remove(&item.repo_name, item.github_number, labels::WIP, gh_host)
                             .await;
+                        // iteration 라벨 정리
+                        if item.review_iteration > 0 {
+                            gh.label_remove(
+                                &item.repo_name,
+                                item.github_number,
+                                &labels::iteration_label(item.review_iteration),
+                                gh_host,
+                            )
+                            .await;
+                        }
                         gh.label_add(&item.repo_name, item.github_number, labels::DONE, gh_host)
                             .await;
                         tracing::info!(
@@ -559,7 +591,6 @@ pub async fn process_improved(
                         );
                     }
                     Some(ReviewVerdict::RequestChanges) | None => {
-                        // Reviewing → ReviewDone (재진입)
                         remove_from_phase(queues, &work_id);
                         if matches!(output.verdict, Some(ReviewVerdict::RequestChanges)) {
                             gh.pr_review(
@@ -571,9 +602,56 @@ pub async fn process_improved(
                             )
                             .await;
                         }
-                        item.review_comment = Some(output.review);
-                        queues.prs.push(pr_phase::REVIEW_DONE, item);
-                        tracing::info!("PR re-review: Reviewing → ReviewDone (request_changes)");
+
+                        let max_iterations = cfg.develop.review.max_iterations;
+                        if item.review_iteration >= max_iterations {
+                            let comment = format!(
+                                "<!-- autodev:skip -->\n\
+                                 ## Autodev: Review iteration limit reached\n\n\
+                                 Reached maximum review iterations ({max_iterations}). \
+                                 Marking as `autodev:skip`. Manual intervention required."
+                            );
+                            notifier
+                                .post_issue_comment(
+                                    &item.repo_name,
+                                    item.github_number,
+                                    &comment,
+                                    gh_host,
+                                )
+                                .await;
+                            gh.label_remove(
+                                &item.repo_name,
+                                item.github_number,
+                                labels::WIP,
+                                gh_host,
+                            )
+                            .await;
+                            gh.label_add(
+                                &item.repo_name,
+                                item.github_number,
+                                labels::SKIP,
+                                gh_host,
+                            )
+                            .await;
+                            // iteration 라벨 정리
+                            gh.label_remove(
+                                &item.repo_name,
+                                item.github_number,
+                                &labels::iteration_label(item.review_iteration),
+                                gh_host,
+                            )
+                            .await;
+                            tracing::info!(
+                                "PR #{}: iteration limit ({max_iterations}) reached → skip",
+                                item.github_number
+                            );
+                        } else {
+                            item.review_comment = Some(output.review);
+                            queues.prs.push(pr_phase::REVIEW_DONE, item);
+                            tracing::info!(
+                                "PR re-review: Reviewing → ReviewDone (request_changes)"
+                            );
+                        }
                     }
                 }
             }
@@ -675,14 +753,15 @@ pub async fn review_one(
     };
 
     let repo_cfg = config::loader::load_merged(env, Some(&wt_path));
-    let pr_prompt = format!(
-        "[autodev] review: PR #{github_number}\n\n{}",
-        repo_cfg.workflow.pr
-    );
+    let pr_prompt = format!("[autodev] review: PR #{github_number}");
+    let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{}", repo_cfg.workflow.pr);
 
     let started = Utc::now().to_rfc3339();
 
-    match reviewer.review_pr(&wt_path, &pr_prompt).await {
+    match reviewer
+        .review_pr(&wt_path, &pr_prompt, Some(&system_prompt))
+        .await
+    {
         Ok(output) => {
             let finished = Utc::now().to_rfc3339();
             let duration = chrono::Utc::now()
@@ -802,13 +881,23 @@ pub async fn review_one(
                             .post_issue_comment(&item.repo_name, github_number, &comment, gh_host)
                             .await;
 
-                        item.review_comment = Some(output.review);
-                        ops.push(QueueOp::Remove);
-                        ops.push(QueueOp::PushPr {
-                            phase: pr_phase::REVIEW_DONE,
-                            item,
-                        });
-                        tracing::info!("PR #{github_number}: Reviewing → ReviewDone");
+                        // 외부 PR (source_issue_number 없음): 리뷰 댓글만, 자동수정 안함
+                        if item.source_issue_number.is_none() {
+                            gh.label_remove(&item.repo_name, github_number, labels::WIP, gh_host)
+                                .await;
+                            gh.label_add(&item.repo_name, github_number, labels::DONE, gh_host)
+                                .await;
+                            tracing::info!("PR #{github_number}: external PR, review-only → done");
+                            ops.push(QueueOp::Remove);
+                        } else {
+                            item.review_comment = Some(output.review);
+                            ops.push(QueueOp::Remove);
+                            ops.push(QueueOp::PushPr {
+                                phase: pr_phase::REVIEW_DONE,
+                                item,
+                            });
+                            tracing::info!("PR #{github_number}: Reviewing → ReviewDone");
+                        }
                     }
                 }
             } else {
@@ -840,7 +929,7 @@ pub async fn review_one(
 
 /// PR 피드백 반영 구현 — spawned task에서 실행.
 pub async fn improve_one(
-    item: PrItem,
+    mut item: PrItem,
     env: &dyn Env,
     gh: &dyn Gh,
     git: &dyn Git,
@@ -894,15 +983,18 @@ pub async fn improve_one(
         }
     };
 
-    let review = item.review_comment.as_deref().unwrap_or("");
-    let prompt = format!(
-        "[autodev] improve: PR #{github_number}\n\n\
-         Implement the following review feedback for PR #{github_number}:\n\n{review}"
-    );
+    let prompt = format!("[autodev] improve: PR #{github_number}");
 
     let started = Utc::now().to_rfc3339();
     let result = claude
-        .run_session(&wt_path, &prompt, &Default::default())
+        .run_session(
+            &wt_path,
+            &prompt,
+            &crate::infrastructure::claude::SessionOptions {
+                append_system_prompt: Some(AGENT_SYSTEM_PROMPT.to_string()),
+                ..Default::default()
+            },
+        )
         .await;
 
     match result {
@@ -927,6 +1019,24 @@ pub async fn improve_one(
             });
 
             if res.exit_code == 0 {
+                // iteration 라벨 동기화 (이전 제거 → 새 부착)
+                if item.review_iteration > 0 {
+                    gh.label_remove(
+                        &repo_name,
+                        github_number,
+                        &labels::iteration_label(item.review_iteration),
+                        gh_host,
+                    )
+                    .await;
+                }
+                item.review_iteration += 1;
+                gh.label_add(
+                    &repo_name,
+                    github_number,
+                    &labels::iteration_label(item.review_iteration),
+                    gh_host,
+                )
+                .await;
                 ops.push(QueueOp::Remove);
                 ops.push(QueueOp::PushPr {
                     phase: pr_phase::IMPROVED,
@@ -967,6 +1077,7 @@ pub async fn re_review_one(
     sw: &dyn SuggestWorkflow,
 ) -> TaskOutput {
     let workspace = Workspace::new(git, env);
+    let notifier = Notifier::new(gh);
     let cfg = config::loader::load_merged(env, None);
     let gh_host = cfg.consumer.gh_host.as_deref();
     let reviewer = Reviewer::new(claude);
@@ -1016,14 +1127,15 @@ pub async fn re_review_one(
     };
 
     let repo_cfg = config::loader::load_merged(env, Some(&wt_path));
-    let pr_prompt = format!(
-        "[autodev] review: PR #{github_number}\n\n{}",
-        repo_cfg.workflow.pr
-    );
+    let pr_prompt = format!("[autodev] review: PR #{github_number}");
+    let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{}", repo_cfg.workflow.pr);
 
     let started = Utc::now().to_rfc3339();
 
-    match reviewer.review_pr(&wt_path, &pr_prompt).await {
+    match reviewer
+        .review_pr(&wt_path, &pr_prompt, Some(&system_prompt))
+        .await
+    {
         Ok(output) => {
             let finished = Utc::now().to_rfc3339();
             let duration = chrono::Utc::now()
@@ -1112,6 +1224,16 @@ pub async fn re_review_one(
 
                     gh.label_remove(&repo_name, github_number, labels::WIP, gh_host)
                         .await;
+                    // iteration 라벨 정리
+                    if item.review_iteration > 0 {
+                        gh.label_remove(
+                            &repo_name,
+                            github_number,
+                            &labels::iteration_label(item.review_iteration),
+                            gh_host,
+                        )
+                        .await;
+                    }
                     gh.label_add(&repo_name, github_number, labels::DONE, gh_host)
                         .await;
                     tracing::info!("PR #{github_number}: Reviewing → done (re-review approved)");
@@ -1128,13 +1250,46 @@ pub async fn re_review_one(
                         )
                         .await;
                     }
-                    item.review_comment = Some(output.review);
-                    ops.push(QueueOp::Remove);
-                    ops.push(QueueOp::PushPr {
-                        phase: pr_phase::REVIEW_DONE,
-                        item,
-                    });
-                    tracing::info!("PR #{github_number}: re-review → ReviewDone (request_changes)");
+
+                    let max_iterations = cfg.develop.review.max_iterations;
+                    if item.review_iteration >= max_iterations {
+                        // 상한 초과: skip 처리
+                        let comment = format!(
+                            "<!-- autodev:skip -->\n\
+                             ## Autodev: Review iteration limit reached\n\n\
+                             Reached maximum review iterations ({max_iterations}). \
+                             Marking as `autodev:skip`. Manual intervention required."
+                        );
+                        notifier
+                            .post_issue_comment(&item.repo_name, github_number, &comment, gh_host)
+                            .await;
+                        gh.label_remove(&repo_name, github_number, labels::WIP, gh_host)
+                            .await;
+                        gh.label_add(&repo_name, github_number, labels::SKIP, gh_host)
+                            .await;
+                        // iteration 라벨 정리
+                        gh.label_remove(
+                            &repo_name,
+                            github_number,
+                            &labels::iteration_label(item.review_iteration),
+                            gh_host,
+                        )
+                        .await;
+                        tracing::info!(
+                            "PR #{github_number}: iteration limit ({max_iterations}) reached → skip"
+                        );
+                        ops.push(QueueOp::Remove);
+                    } else {
+                        item.review_comment = Some(output.review);
+                        ops.push(QueueOp::Remove);
+                        ops.push(QueueOp::PushPr {
+                            phase: pr_phase::REVIEW_DONE,
+                            item,
+                        });
+                        tracing::info!(
+                            "PR #{github_number}: re-review → ReviewDone (request_changes)"
+                        );
+                    }
                 }
             }
         }

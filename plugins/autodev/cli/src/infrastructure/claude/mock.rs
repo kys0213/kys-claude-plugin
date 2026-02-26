@@ -14,6 +14,7 @@ pub struct MockCallRecord {
     pub prompt: String,
     pub output_format: Option<String>,
     pub json_schema: Option<String>,
+    pub append_system_prompt: Option<String>,
 }
 
 /// 테스트용 Claude 구현체 — 미리 설정된 응답을 반환
@@ -68,6 +69,7 @@ impl Claude for MockClaude {
             prompt: prompt.to_string(),
             output_format: opts.output_format.clone(),
             json_schema: opts.json_schema.clone(),
+            append_system_prompt: opts.append_system_prompt.clone(),
         });
 
         let mut responses = self.responses.lock().unwrap();

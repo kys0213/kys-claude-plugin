@@ -24,6 +24,8 @@ pub struct SessionOptions {
     pub output_format: Option<String>,
     /// --json-schema 값 (JSON schema 문자열)
     pub json_schema: Option<String>,
+    /// --append-system-prompt 값 (행동 지침을 system prompt로 주입)
+    pub append_system_prompt: Option<String>,
 }
 
 /// Claude CLI 추상화
