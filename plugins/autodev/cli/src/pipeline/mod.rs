@@ -136,6 +136,7 @@ mod tests {
             base_branch: "main".to_string(),
             review_comment: None,
             source_issue_number: None,
+            review_iteration: 0,
         }
     }
 

@@ -637,6 +637,7 @@ async fn startup_reconcile(
                     base_branch: item["base"]["ref"].as_str().unwrap_or("").to_string(),
                     review_comment: None,
                     source_issue_number: None,
+                    review_iteration: 0,
                 };
 
                 gh.label_add(&repo.name, number, labels::WIP, gh_host).await;

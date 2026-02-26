@@ -43,6 +43,8 @@ pub struct PrItem {
     pub review_comment: Option<String>,
     /// v2: 이 PR이 어떤 이슈로부터 생성되었는지 (issue pipeline에서 설정)
     pub source_issue_number: Option<i64>,
+    /// 리뷰→수정 반복 횟수 (improve_one에서 +1, re_review_one에서 max_iterations 체크)
+    pub review_iteration: u32,
 }
 
 impl HasWorkId for PrItem {
@@ -188,6 +190,7 @@ mod tests {
             base_branch: "main".to_string(),
             review_comment: None,
             source_issue_number: None,
+            review_iteration: 0,
         }
     }
 

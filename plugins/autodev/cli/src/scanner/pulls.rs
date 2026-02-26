@@ -117,6 +117,7 @@ pub async fn scan(
             base_branch: pr.base.ref_name.clone(),
             review_comment: None,
             source_issue_number: None,
+            review_iteration: 0,
         };
 
         // autodev:wip 라벨 추가 + 큐에 push

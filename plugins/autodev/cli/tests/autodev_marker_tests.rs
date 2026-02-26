@@ -81,6 +81,7 @@ fn make_pr_item(repo_id: &str, number: i64, title: &str) -> PrItem {
         base_branch: "main".to_string(),
         review_comment: None,
         source_issue_number: None,
+        review_iteration: 0,
     }
 }
 

@@ -447,6 +447,7 @@ pub async fn process_ready(
                                     base_branch: String::new(),
                                     review_comment: None,
                                     source_issue_number: Some(item.github_number),
+                                    review_iteration: 0,
                                 };
                                 gh.label_add(&item.repo_name, pr_num, labels::WIP, gh_host)
                                     .await;
@@ -897,6 +898,7 @@ pub async fn implement_one(
                             base_branch: String::new(),
                             review_comment: None,
                             source_issue_number: Some(item.github_number),
+                            review_iteration: 0,
                         };
 
                         let pr_comment = format!(

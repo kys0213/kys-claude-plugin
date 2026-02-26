@@ -63,6 +63,7 @@ fn make_pr_item(repo_id: &str, number: i64) -> PrItem {
         base_branch: "main".to_string(),
         review_comment: None,
         source_issue_number: None,
+        review_iteration: 0,
     }
 }
 
@@ -386,16 +387,16 @@ async fn pr_improved_request_changes_does_not_clean_worktree_c3() {
 }
 
 // ═══════════════════════════════════════════════
-// C-4: max_iterations 미적용 검증
+// C-4: max_iterations 적용 검증
 // ═══════════════════════════════════════════════
 
-/// C-4: 리뷰 사이클이 max_iterations 없이 무한 반복 가능함을 검증
+/// C-4: 리뷰 사이클이 max_iterations에서 멈추는 것을 검증
 ///
-/// ReviewConfig::max_iterations는 2로 설정되어 있지만
-/// process_improved에서 iteration count를 추적하지 않아
-/// 무한 루프가 발생할 수 있다.
+/// ReviewConfig::max_iterations=2일 때,
+/// 2회 improve 후 re-review에서 request_changes가 나오면
+/// autodev:skip 라벨을 붙이고 루프를 종료한다.
 #[tokio::test]
-async fn review_cycle_has_no_iteration_limit_c4() {
+async fn review_cycle_stops_at_max_iterations_c4() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
@@ -409,39 +410,29 @@ async fn review_cycle_has_no_iteration_limit_c4() {
     let notifier = Notifier::new(&gh);
     let sw = MockSuggestWorkflow::new();
 
-    // 3번의 review → request_changes 시뮬레이션 (max_iterations=2 초과)
-    // Round 1: improve → improved
+    // Round 1: improve → improved (iteration 0→1)
     claude.enqueue_response(r#"{"result": "Applied fix 1"}"#, 0);
-    // Round 1: re-review → request_changes (verdict-based)
+    // Round 1: re-review → request_changes
     claude.enqueue_response(
         r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Still needs work\"}"}"#,
         0,
     );
-    // Round 2: improve → improved
+    // Round 2: improve → improved (iteration 1→2)
     claude.enqueue_response(r#"{"result": "Applied fix 2"}"#, 0);
-    // Round 2: re-review → request_changes (verdict-based)
+    // Round 2: re-review → request_changes (iteration=2 >= max_iterations=2 → skip)
     claude.enqueue_response(
         r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Still not right\"}"}"#,
         0,
     );
-    // Round 3: improve → improved (EXCEEDS max_iterations=2)
-    claude.enqueue_response(r#"{"result": "Applied fix 3"}"#, 0);
-    // Round 3: re-review → approved (verdict-based)
-    claude.enqueue_response(
-        r#"{"result": "{\"verdict\":\"approve\",\"summary\":\"LGTM\"}"}"#,
-        0,
-    );
-    // Knowledge extraction
-    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
     let mut queues = TaskQueues::new();
 
-    // Start with PR in ReviewDone (first iteration)
+    // Start with PR in ReviewDone (iteration=0)
     let mut item = make_pr_item(&repo_id, 80);
     item.review_comment = Some("Fix these issues".to_string());
     queues.prs.push(pr_phase::REVIEW_DONE, item);
 
-    // Run 3 full cycles
+    // Run up to 3 cycles — should stop at 2
     for _round in 1..=3 {
         // ReviewDone → Improved
         autodev::pipeline::pr::process_review_done(
@@ -470,19 +461,30 @@ async fn review_cycle_has_no_iteration_limit_c4() {
             .await
             .unwrap();
 
-            // If pushed back to ReviewDone, the cycle continues
+            // If not pushed back to ReviewDone, the cycle stopped
             if queues.prs.len(pr_phase::REVIEW_DONE) == 0 {
                 break;
             }
         }
     }
 
-    // C-4: 모든 7개 Claude 호출이 완료됨 = 3회 반복 가능 (max_iterations=2 초과)
+    // C-4: 4개 Claude 호출 = 2회 반복만 실행 (max_iterations=2에서 멈춤)
     assert_eq!(
         claude.call_count(),
-        7,
-        "C-4: review cycle ran 3 iterations (exceeds max_iterations=2) — no limit enforced"
+        4,
+        "C-4: review cycle stopped at max_iterations=2"
     );
+
+    // skip 라벨이 추가되었는지 확인
+    let added = gh.added_labels.lock().unwrap();
+    assert!(
+        added.iter().any(|(r, n, l)| r == "org/repo" && *n == 80 && l == labels::SKIP),
+        "C-4: autodev:skip label should be added when max_iterations reached"
+    );
+    drop(added);
+
+    // 큐가 비어있는지 확인
+    assert_eq!(queues.prs.total(), 0, "C-4: all PR items should be removed from queue");
 }
 
 // ═══════════════════════════════════════════════
