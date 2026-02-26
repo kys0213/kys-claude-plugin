@@ -37,6 +37,88 @@ pub fn sanitize_repo_name(name: &str) -> String {
     name.replace('/', "-")
 }
 
+/// 신뢰할 수 없는 경로를 `base` 안에서만 유효한 경로로 결합.
+/// 절대경로, `..` 컴포넌트, base 디렉토리 탈출 시 `Err`를 반환한다.
+pub fn safe_join(base: &std::path::Path, untrusted: &str) -> Result<PathBuf, String> {
+    use std::path::Component;
+
+    let path = std::path::Path::new(untrusted);
+
+    // 절대경로 거부
+    if path.is_absolute() {
+        return Err(format!("absolute path not allowed: {untrusted}"));
+    }
+
+    // `..` 컴포넌트 거부
+    for comp in path.components() {
+        if matches!(comp, Component::ParentDir) {
+            return Err(format!(
+                "parent directory traversal not allowed: {untrusted}"
+            ));
+        }
+    }
+
+    let joined = base.join(path);
+
+    // 최종 경로가 base 안에 있는지 확인
+    if !joined.starts_with(base) {
+        return Err(format!("path escapes base directory: {untrusted}"));
+    }
+
+    Ok(joined)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn safe_join_allows_normal_relative_path() {
+        let base = Path::new("/worktree");
+        let result = safe_join(base, ".claude/rules/test.md").unwrap();
+        assert_eq!(result, base.join(".claude/rules/test.md"));
+    }
+
+    #[test]
+    fn safe_join_allows_simple_filename() {
+        let base = Path::new("/worktree");
+        let result = safe_join(base, "CLAUDE.md").unwrap();
+        assert_eq!(result, base.join("CLAUDE.md"));
+    }
+
+    #[test]
+    fn safe_join_rejects_absolute_path() {
+        let base = Path::new("/worktree");
+        assert!(safe_join(base, "/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn safe_join_rejects_parent_traversal() {
+        let base = Path::new("/worktree");
+        assert!(safe_join(base, "../../../etc/passwd").is_err());
+    }
+
+    #[test]
+    fn safe_join_rejects_mixed_traversal() {
+        let base = Path::new("/worktree");
+        assert!(safe_join(base, "valid/path/../../../escape").is_err());
+    }
+
+    #[test]
+    fn safe_join_rejects_single_parent() {
+        let base = Path::new("/worktree");
+        assert!(safe_join(base, "..").is_err());
+    }
+
+    #[test]
+    fn safe_join_allows_nested_directory() {
+        let base = Path::new("/worktree");
+        let result = safe_join(base, ".claude/hooks.json").unwrap();
+        assert_eq!(result, base.join(".claude/hooks.json"));
+    }
+}
+
 /// 로그 디렉토리 경로 해석: 절대 경로면 그대로, 상대 경로면 home 기준
 pub fn resolve_log_dir(log_dir: &str, home: &std::path::Path) -> PathBuf {
     let path = std::path::Path::new(log_dir);
