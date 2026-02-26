@@ -139,9 +139,9 @@ async fn merge_success_cleans_up_worktree() {
     );
 }
 
-/// C-5: merge conflict 경로에서 worktree 정리 미누락 검증
+/// C-5 FIX: merge conflict 경로에서도 worktree 정리 보장
 #[tokio::test]
-async fn merge_conflict_does_not_clean_up_worktree_c5() {
+async fn merge_conflict_cleans_up_worktree_c5() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
@@ -174,16 +174,16 @@ async fn merge_conflict_does_not_clean_up_worktree_c5() {
     .await
     .unwrap();
 
-    // C-5 BUG: Conflict/Failed 경로에서 worktree_remove 미호출
+    // C-5 FIX: Conflict 경로에서도 worktree 정리 보장
     assert!(
-        !has_worktree_remove(&git),
-        "C-5: merge conflict path does NOT clean up worktree (resource leak)"
+        has_worktree_remove(&git),
+        "C-5: merge conflict path should clean up worktree"
     );
 }
 
-/// C-5: merge non-conflict failure 경로에서 worktree 정리 누락 검증
+/// C-5 FIX: merge non-conflict failure 경로에서도 worktree 정리 보장
 #[tokio::test]
-async fn merge_failed_does_not_clean_up_worktree_c5() {
+async fn merge_failed_cleans_up_worktree_c5() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
@@ -213,10 +213,10 @@ async fn merge_failed_does_not_clean_up_worktree_c5() {
     .await
     .unwrap();
 
-    // C-5 BUG: Failed 경로에서 worktree_remove 미호출
+    // C-5 FIX: Failed 경로에서도 worktree 정리 보장
     assert!(
-        !has_worktree_remove(&git),
-        "C-5: merge failed path does NOT clean up worktree (resource leak)"
+        has_worktree_remove(&git),
+        "C-5: merge failed path should clean up worktree"
     );
 }
 

@@ -1,8 +1,27 @@
 use anyhow::Result;
 
+use crate::config;
+use crate::config::Env;
 use crate::infrastructure::gh::Gh;
 use crate::queue::models::EnabledRepo;
 use crate::queue::task_queues::{labels, make_work_id, TaskQueues};
+
+/// Per-repo config에서 gh_host를 로드하는 헬퍼.
+///
+/// scanner에서 사용하는 패턴과 동일하게 workspace 경로 기반으로
+/// per-repo config를 로드하여 gh_host를 반환한다.
+pub(crate) fn resolve_gh_host(env: &dyn Env, repo_name: &str) -> Option<String> {
+    let ws_path = config::workspaces_path(env).join(config::sanitize_repo_name(repo_name));
+    let cfg = config::loader::load_merged(
+        env,
+        if ws_path.exists() {
+            Some(ws_path.as_path())
+        } else {
+            None
+        },
+    );
+    cfg.consumer.gh_host
+}
 
 /// Orphan `autodev:wip` 라벨 정리
 ///
@@ -12,11 +31,14 @@ pub async fn recover_orphan_wip(
     repos: &[EnabledRepo],
     gh: &dyn Gh,
     queues: &TaskQueues,
-    gh_host: Option<&str>,
+    env: &dyn Env,
 ) -> Result<u64> {
     let mut recovered = 0u64;
 
     for repo in repos {
+        let repo_gh_host = resolve_gh_host(env, &repo.name);
+        let gh_host = repo_gh_host.as_deref();
+
         let endpoint = "issues";
         let params = &[
             ("labels", labels::WIP),
@@ -73,11 +95,14 @@ pub async fn recover_orphan_implementing(
     repos: &[EnabledRepo],
     gh: &dyn Gh,
     queues: &TaskQueues,
-    gh_host: Option<&str>,
+    env: &dyn Env,
 ) -> Result<u64> {
     let mut recovered = 0u64;
 
     for repo in repos {
+        let repo_gh_host = resolve_gh_host(env, &repo.name);
+        let gh_host = repo_gh_host.as_deref();
+
         let params = &[
             ("labels", labels::IMPLEMENTING),
             ("state", "open"),

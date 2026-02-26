@@ -235,7 +235,6 @@ pub async fn start(
     let mut join_set: JoinSet<pipeline::TaskOutput> = JoinSet::new();
     let mut tracker = InFlightTracker::new(cfg.daemon.max_concurrent_tasks);
 
-    let gh_host = cfg.consumer.gh_host.clone();
     let daily_report_hour = cfg.daemon.daily_report_hour;
     let knowledge_extraction = cfg.consumer.knowledge_extraction;
     let mut last_daily_report_date = String::new();
@@ -257,15 +256,7 @@ pub async fn start(
     }
 
     // 0. Startup Reconcile (bounded recovery)
-    match startup_reconcile(
-        &db,
-        &*gh,
-        &mut queues,
-        gh_host.as_deref(),
-        reconcile_window_hours,
-    )
-    .await
-    {
+    match startup_reconcile(&db, &*env, &*gh, &mut queues, reconcile_window_hours).await {
         Ok(n) if n > 0 => info!("startup reconcile: recovered {n} items"),
         Err(e) => tracing::error!("startup reconcile failed: {e}"),
         _ => {}
@@ -314,14 +305,14 @@ pub async fn start(
                 match db.repo_find_enabled() {
                     Ok(repos) => {
                         match recovery::recover_orphan_wip(
-                            &repos, &*gh, &queues, gh_host.as_deref(),
+                            &repos, &*gh, &queues, &*env,
                         ).await {
                             Ok(n) if n > 0 => info!("recovered {n} orphan wip items"),
                             Err(e) => tracing::error!("recovery error: {e}"),
                             _ => {}
                         }
                         match recovery::recover_orphan_implementing(
-                            &repos, &*gh, &queues, gh_host.as_deref(),
+                            &repos, &*gh, &queues, &*env,
                         ).await {
                             Ok(n) if n > 0 => info!("recovered {n} orphan implementing items"),
                             Err(e) => tracing::error!("implementing recovery error: {e}"),
@@ -381,14 +372,15 @@ pub async fn start(
                                                 report.patterns.extend(cross_patterns);
                                             }
 
+                                            let repo_gh_host = recovery::resolve_gh_host(&*env, &repo.name);
                                             crate::knowledge::daily::post_daily_report(
-                                                &*gh, &repo.name, &report, gh_host.as_deref(),
+                                                &*gh, &repo.name, &report, repo_gh_host.as_deref(),
                                             ).await;
 
                                             if !report.suggestions.is_empty() {
                                                 crate::knowledge::daily::create_knowledge_prs(
                                                     &*gh, &workspace, &repo.name, &report,
-                                                    gh_host.as_deref(),
+                                                    repo_gh_host.as_deref(),
                                                 ).await;
                                             }
                                         }
@@ -449,15 +441,37 @@ fn compute_safe_since(cursor: Option<String>, window_hours: u32) -> Option<Strin
     Some((base - window).to_rfc3339())
 }
 
+/// PR body에서 `Closes #N`, `Fixes #N`, `Resolves #N` 패턴을 파싱하여
+/// source issue number를 추출한다. 대소문자 무시.
+fn extract_source_issue_from_body(body: Option<&str>) -> Option<i64> {
+    let body = body?;
+    let lower = body.to_lowercase();
+    for prefix in &["closes #", "fixes #", "resolves #"] {
+        if let Some(pos) = lower.find(prefix) {
+            let start = pos + prefix.len();
+            let num_str: String = lower[start..]
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
+            if let Ok(n) = num_str.parse::<i64>() {
+                if n > 0 {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Bounded reconciliation: 재시작 시 메모리 큐를 GitHub 라벨 기반으로 복구
 ///
 /// cursor - reconcile_window_hours 범위의 open 이슈/PR을 조회하여,
 /// autodev 라벨이 없는 항목을 큐에 적재한다.
 async fn startup_reconcile(
     db: &Database,
+    env: &dyn Env,
     gh: &dyn Gh,
     queues: &mut TaskQueues,
-    gh_host: Option<&str>,
     reconcile_window_hours: u32,
 ) -> Result<u64> {
     use crate::queue::task_queues::{
@@ -468,6 +482,8 @@ async fn startup_reconcile(
     let mut recovered = 0u64;
 
     for repo in &repos {
+        let repo_gh_host = recovery::resolve_gh_host(env, &repo.name);
+        let gh_host = repo_gh_host.as_deref();
         // issues 복구: cursor - reconcile_window_hours로 bounded window 적용
         let safe_since = compute_safe_since(
             db.cursor_get_last_seen(&repo.id, "issues")?,
@@ -626,6 +642,9 @@ async fn startup_reconcile(
                         .await;
                 }
 
+                let pr_body = item["body"].as_str();
+                let source_issue_number = extract_source_issue_from_body(pr_body);
+
                 let pr_item = PrItem {
                     work_id,
                     repo_id: repo.id.clone(),
@@ -636,7 +655,7 @@ async fn startup_reconcile(
                     head_branch: item["head"]["ref"].as_str().unwrap_or("").to_string(),
                     base_branch: item["base"]["ref"].as_str().unwrap_or("").to_string(),
                     review_comment: None,
-                    source_issue_number: None,
+                    source_issue_number,
                     review_iteration: labels::parse_iteration(&item_labels),
                 };
 
@@ -669,6 +688,17 @@ mod tests {
     use super::*;
     use crate::infrastructure::gh::mock::MockGh;
     use crate::queue::task_queues::{issue_phase, make_work_id, IssueItem, TaskQueues};
+
+    struct MockEnv;
+
+    impl Env for MockEnv {
+        fn var(&self, key: &str) -> Result<String, std::env::VarError> {
+            match key {
+                "AUTODEV_HOME" => Ok("/tmp/autodev-test".to_string()),
+                _ => Err(std::env::VarError::NotPresent),
+            }
+        }
+    }
 
     fn open_memory_db() -> Database {
         let db = Database::open(std::path::Path::new(":memory:")).expect("open in-memory db");
@@ -793,7 +823,7 @@ mod tests {
         gh.set_paginate("org/repo", "pulls", b"[]".to_vec());
 
         let mut queues = TaskQueues::new();
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+        let result = startup_reconcile(&db, &MockEnv, &gh, &mut queues, 24)
             .await
             .unwrap();
 
@@ -824,7 +854,7 @@ mod tests {
         gh.set_paginate("org/repo", "pulls", serde_json::to_vec(&pulls).unwrap());
 
         let mut queues = TaskQueues::new();
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+        let result = startup_reconcile(&db, &MockEnv, &gh, &mut queues, 24)
             .await
             .unwrap();
 
@@ -849,7 +879,7 @@ mod tests {
         gh.set_paginate("org/repo", "pulls", b"[]".to_vec());
 
         let mut queues = TaskQueues::new();
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+        let result = startup_reconcile(&db, &MockEnv, &gh, &mut queues, 24)
             .await
             .unwrap();
 
@@ -879,7 +909,7 @@ mod tests {
         gh.set_paginate("org/repo", "pulls", b"[]".to_vec());
 
         let mut queues = TaskQueues::new();
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+        let result = startup_reconcile(&db, &MockEnv, &gh, &mut queues, 24)
             .await
             .unwrap();
 
@@ -904,7 +934,7 @@ mod tests {
         let gh = MockGh::new();
         let mut queues = TaskQueues::new();
 
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+        let result = startup_reconcile(&db, &MockEnv, &gh, &mut queues, 24)
             .await
             .unwrap();
         assert_eq!(result, 0);
@@ -929,7 +959,7 @@ mod tests {
         gh.set_paginate("org/repo", "pulls", b"[]".to_vec());
 
         let mut queues = TaskQueues::new();
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+        let result = startup_reconcile(&db, &MockEnv, &gh, &mut queues, 24)
             .await
             .unwrap();
 
@@ -967,7 +997,7 @@ mod tests {
             },
         );
 
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+        let result = startup_reconcile(&db, &MockEnv, &gh, &mut queues, 24)
             .await
             .unwrap();
         assert_eq!(result, 0, "already queued items should be skipped");
@@ -992,7 +1022,7 @@ mod tests {
         let mut queues = TaskQueues::new();
 
         // window=48h should still work — function accepts the param
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 48)
+        let result = startup_reconcile(&db, &MockEnv, &gh, &mut queues, 48)
             .await
             .unwrap();
         assert_eq!(result, 1, "48h window should work the same as 24h");
@@ -1017,7 +1047,7 @@ mod tests {
         gh.set_paginate("org/repo", "pulls", b"[]".to_vec());
 
         let mut queues = TaskQueues::new();
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+        let result = startup_reconcile(&db, &MockEnv, &gh, &mut queues, 24)
             .await
             .unwrap();
 
@@ -1042,7 +1072,7 @@ mod tests {
         gh.set_paginate("org/repo", "pulls", b"[]".to_vec());
 
         let mut queues = TaskQueues::new();
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+        let result = startup_reconcile(&db, &MockEnv, &gh, &mut queues, 24)
             .await
             .unwrap();
 
@@ -1067,7 +1097,7 @@ mod tests {
         gh.set_paginate("org/repo", "pulls", b"[]".to_vec());
 
         let mut queues = TaskQueues::new();
-        let result = startup_reconcile(&db, &gh, &mut queues, None, 24)
+        let result = startup_reconcile(&db, &MockEnv, &gh, &mut queues, 24)
             .await
             .unwrap();
 
