@@ -117,8 +117,7 @@ pub async fn scan(
 ///
 /// 1. `autodev:approved-analysis` 라벨 제거
 /// 2. `autodev:implementing` 라벨 추가
-/// 3. 이슈 코멘트에서 분석 리포트 추출
-/// 4. `IssueItem` 생성 → Ready 큐 push
+/// 3. `IssueItem` 생성 → Ready 큐 push
 #[allow(clippy::too_many_arguments)]
 pub async fn scan_approved(
     gh: &dyn Gh,
@@ -162,9 +161,8 @@ pub async fn scan_approved(
         gh.label_add(repo_name, issue.number, labels::IMPLEMENTING, gh_host)
             .await;
 
-        // 이슈 코멘트에서 분석 리포트 추출
-        let analysis_report =
-            extract_analysis_from_comments(gh, repo_name, issue.number, gh_host).await;
+        // 분석 리포트는 에이전트가 gh CLI로 직접 코멘트를 확인
+        let analysis_report = None;
 
         let label_names: Vec<String> = issue.labels.iter().map(|l| l.name.clone()).collect();
 
@@ -190,33 +188,4 @@ pub async fn scan_approved(
     }
 
     Ok(())
-}
-
-/// 이슈 코멘트에서 `<!-- autodev:analysis -->` 마커가 포함된 최신 코멘트의 body를 추출
-async fn extract_analysis_from_comments(
-    gh: &dyn Gh,
-    repo_name: &str,
-    issue_number: i64,
-    gh_host: Option<&str>,
-) -> Option<String> {
-    let params: Vec<(&str, &str)> = vec![("per_page", "100")];
-    let endpoint = format!("issues/{issue_number}/comments");
-
-    let data = gh
-        .api_paginate(repo_name, &endpoint, &params, gh_host)
-        .await
-        .ok()?;
-
-    let comments: Vec<serde_json::Value> = serde_json::from_slice(&data).ok()?;
-
-    // 최신 코멘트부터 역순으로 탐색
-    for comment in comments.iter().rev() {
-        if let Some(body) = comment["body"].as_str() {
-            if body.contains("<!-- autodev:analysis -->") {
-                return Some(body.to_string());
-            }
-        }
-    }
-
-    None
 }

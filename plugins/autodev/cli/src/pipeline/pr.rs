@@ -12,7 +12,7 @@ use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
-use crate::pipeline::{QueueOp, TaskOutput};
+use crate::pipeline::{QueueOp, TaskOutput, AGENT_SYSTEM_PROMPT};
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::task_queues::{labels, pr_phase, PrItem, TaskQueues};
@@ -112,14 +112,15 @@ pub async fn process_pending(
         };
 
         let repo_cfg = config::loader::load_merged(env, Some(&wt_path));
-        let pr_prompt = format!(
-            "[autodev] review: PR #{}\n\n{}",
-            item.github_number, repo_cfg.workflow.pr
-        );
+        let pr_prompt = format!("[autodev] review: PR #{}", item.github_number);
+        let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{}", repo_cfg.workflow.pr);
 
         let started = Utc::now().to_rfc3339();
 
-        match reviewer.review_pr(&wt_path, &pr_prompt).await {
+        match reviewer
+            .review_pr(&wt_path, &pr_prompt, Some(&system_prompt))
+            .await
+        {
             Ok(output) => {
                 let finished = Utc::now().to_rfc3339();
                 let duration = chrono::Utc::now()
@@ -324,16 +325,18 @@ pub async fn process_review_done(
             }
         };
 
-        let review = item.review_comment.as_deref().unwrap_or("");
-        let prompt = format!(
-            "[autodev] improve: PR #{}\n\n\
-             Implement the following review feedback for PR #{}:\n\n{review}",
-            item.github_number, item.github_number
-        );
+        let prompt = format!("[autodev] improve: PR #{}", item.github_number);
 
         let started = Utc::now().to_rfc3339();
         let result = claude
-            .run_session(&wt_path, &prompt, &Default::default())
+            .run_session(
+                &wt_path,
+                &prompt,
+                &crate::infrastructure::claude::SessionOptions {
+                    append_system_prompt: Some(AGENT_SYSTEM_PROMPT.to_string()),
+                    ..Default::default()
+                },
+            )
             .await;
 
         match result {
@@ -464,14 +467,15 @@ pub async fn process_improved(
         };
 
         let repo_cfg = config::loader::load_merged(env, Some(&wt_path));
-        let pr_prompt = format!(
-            "[autodev] review: PR #{}\n\n{}",
-            item.github_number, repo_cfg.workflow.pr
-        );
+        let pr_prompt = format!("[autodev] review: PR #{}", item.github_number);
+        let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{}", repo_cfg.workflow.pr);
 
         let started = Utc::now().to_rfc3339();
 
-        match reviewer.review_pr(&wt_path, &pr_prompt).await {
+        match reviewer
+            .review_pr(&wt_path, &pr_prompt, Some(&system_prompt))
+            .await
+        {
             Ok(output) => {
                 let finished = Utc::now().to_rfc3339();
                 let duration = chrono::Utc::now()
@@ -749,14 +753,15 @@ pub async fn review_one(
     };
 
     let repo_cfg = config::loader::load_merged(env, Some(&wt_path));
-    let pr_prompt = format!(
-        "[autodev] review: PR #{github_number}\n\n{}",
-        repo_cfg.workflow.pr
-    );
+    let pr_prompt = format!("[autodev] review: PR #{github_number}");
+    let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{}", repo_cfg.workflow.pr);
 
     let started = Utc::now().to_rfc3339();
 
-    match reviewer.review_pr(&wt_path, &pr_prompt).await {
+    match reviewer
+        .review_pr(&wt_path, &pr_prompt, Some(&system_prompt))
+        .await
+    {
         Ok(output) => {
             let finished = Utc::now().to_rfc3339();
             let duration = chrono::Utc::now()
@@ -978,15 +983,18 @@ pub async fn improve_one(
         }
     };
 
-    let review = item.review_comment.as_deref().unwrap_or("");
-    let prompt = format!(
-        "[autodev] improve: PR #{github_number}\n\n\
-         Implement the following review feedback for PR #{github_number}:\n\n{review}"
-    );
+    let prompt = format!("[autodev] improve: PR #{github_number}");
 
     let started = Utc::now().to_rfc3339();
     let result = claude
-        .run_session(&wt_path, &prompt, &Default::default())
+        .run_session(
+            &wt_path,
+            &prompt,
+            &crate::infrastructure::claude::SessionOptions {
+                append_system_prompt: Some(AGENT_SYSTEM_PROMPT.to_string()),
+                ..Default::default()
+            },
+        )
         .await;
 
     match result {
@@ -1119,14 +1127,15 @@ pub async fn re_review_one(
     };
 
     let repo_cfg = config::loader::load_merged(env, Some(&wt_path));
-    let pr_prompt = format!(
-        "[autodev] review: PR #{github_number}\n\n{}",
-        repo_cfg.workflow.pr
-    );
+    let pr_prompt = format!("[autodev] review: PR #{github_number}");
+    let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{}", repo_cfg.workflow.pr);
 
     let started = Utc::now().to_rfc3339();
 
-    match reviewer.review_pr(&wt_path, &pr_prompt).await {
+    match reviewer
+        .review_pr(&wt_path, &pr_prompt, Some(&system_prompt))
+        .await
+    {
         Ok(output) => {
             let finished = Utc::now().to_rfc3339();
             let duration = chrono::Utc::now()

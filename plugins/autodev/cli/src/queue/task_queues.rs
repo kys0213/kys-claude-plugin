@@ -16,7 +16,7 @@ pub struct IssueItem {
     pub labels: Vec<String>,
     #[allow(dead_code)]
     pub author: String,
-    /// Phase 1(분석) 완료 후 Phase 2(구현)에서 사용
+    #[allow(dead_code)]
     pub analysis_report: Option<String>,
 }
 

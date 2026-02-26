@@ -35,7 +35,12 @@ impl<'a> Reviewer<'a> {
     /// verdict 파싱 우선순위:
     /// 1. ReviewResult JSON → verdict + summary
     /// 2. fallback → parse_output (기존 텍스트) + verdict=None
-    pub async fn review_pr(&self, wt_path: &Path, prompt: &str) -> Result<ReviewOutput> {
+    pub async fn review_pr(
+        &self,
+        wt_path: &Path,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<ReviewOutput> {
         let result = self
             .claude
             .run_session(
@@ -44,6 +49,7 @@ impl<'a> Reviewer<'a> {
                 &SessionOptions {
                     output_format: Some("json".into()),
                     json_schema: Some(output::REVIEW_SCHEMA.clone()),
+                    append_system_prompt: system_prompt.map(String::from),
                 },
             )
             .await?;

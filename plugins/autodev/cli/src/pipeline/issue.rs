@@ -13,57 +13,12 @@ use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
-use crate::pipeline::{QueueOp, TaskOutput};
+use crate::pipeline::{QueueOp, TaskOutput, AGENT_SYSTEM_PROMPT};
 use crate::queue::models::*;
 use crate::queue::repository::*;
 use crate::queue::task_queues::{
     issue_phase, labels, make_work_id, pr_phase, IssueItem, PrItem, TaskQueues,
 };
-
-/// 이슈 코멘트에서 이전 분석 결과와 피드백을 추출하여 프롬프트 context로 포맷.
-/// 첫 분석(이전 분석 코멘트 없음)이면 None을 반환한다.
-async fn fetch_prior_context(
-    gh: &dyn Gh,
-    repo_name: &str,
-    issue_number: i64,
-    gh_host: Option<&str>,
-) -> Option<String> {
-    let params: Vec<(&str, &str)> = vec![("per_page", "100")];
-    let endpoint = format!("issues/{issue_number}/comments");
-
-    let data = gh
-        .api_paginate(repo_name, &endpoint, &params, gh_host)
-        .await
-        .ok()?;
-
-    let comments: Vec<serde_json::Value> = serde_json::from_slice(&data).ok()?;
-
-    // 이전 분석 코멘트가 없으면 첫 분석 → context 불필요
-    let has_prior_analysis = comments.iter().any(|c| {
-        c["body"]
-            .as_str()
-            .is_some_and(|b| b.contains("<!-- autodev:analysis -->"))
-    });
-
-    if !has_prior_analysis {
-        return None;
-    }
-
-    let mut context = String::from(
-        "\n\n---\n## Prior Discussion Context\n\n\
-         The following are previous analysis results and human feedback. \
-         Use this context to improve your analysis:\n\n",
-    );
-
-    for comment in &comments {
-        let author = comment["user"]["login"].as_str().unwrap_or("unknown");
-        let body = comment["body"].as_str().unwrap_or("");
-        let created = comment["created_at"].as_str().unwrap_or("");
-        context.push_str(&format!("### @{author} ({created})\n{body}\n\n"));
-    }
-
-    Some(context)
-}
 
 /// head branch 이름으로 이미 생성된 PR을 조회하여 번호를 반환.
 /// extract_pr_number() 파싱 실패 시 fallback으로 사용하여 중복 PR 생성을 방지한다.
@@ -192,9 +147,7 @@ pub async fn process_pending(
         };
 
         let body_text = item.body.as_deref().unwrap_or("");
-        let prior_context =
-            fetch_prior_context(gh, &item.repo_name, item.github_number, gh_host).await;
-        let mut prompt = format!(
+        let prompt = format!(
             "[autodev] analyze: issue #{} - {}\n\n{}",
             item.github_number,
             item.title,
@@ -203,12 +156,11 @@ pub async fn process_pending(
                 .replace("{title}", &item.title)
                 .replace("{body}", body_text),
         );
-        if let Some(ctx) = prior_context {
-            prompt.push_str(&ctx);
-        }
 
         let started = Utc::now().to_rfc3339();
-        let result = analyzer.analyze(&wt_path, &prompt).await;
+        let result = analyzer
+            .analyze(&wt_path, &prompt, Some(AGENT_SYSTEM_PROMPT))
+            .await;
 
         match result {
             Ok(res) => {
@@ -432,17 +384,22 @@ pub async fn process_ready(
 
         let repo_cfg = config::loader::load_merged(env, Some(&wt_path));
         let workflow = &repo_cfg.workflow.issue;
-        let report = item.analysis_report.as_deref().unwrap_or("");
         let prompt = format!(
-            "[autodev] implement: issue #{}\n\n\
-             {workflow} implement based on analysis:\n\n{report}\n\n\
-             This is for issue #{} in {}.",
-            item.github_number, item.github_number, item.repo_name
+            "[autodev] implement: issue #{} in {}",
+            item.github_number, item.repo_name
         );
+        let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{workflow}");
 
         let started = Utc::now().to_rfc3339();
         let result = claude
-            .run_session(&wt_path, &prompt, &Default::default())
+            .run_session(
+                &wt_path,
+                &prompt,
+                &crate::infrastructure::claude::SessionOptions {
+                    append_system_prompt: Some(system_prompt),
+                    ..Default::default()
+                },
+            )
             .await;
 
         match result {
@@ -681,7 +638,9 @@ pub async fn analyze_one(
     );
 
     let started = Utc::now().to_rfc3339();
-    let result = analyzer.analyze(&wt_path, &prompt).await;
+    let result = analyzer
+        .analyze(&wt_path, &prompt, Some(AGENT_SYSTEM_PROMPT))
+        .await;
 
     match result {
         Ok(res) => {
@@ -887,17 +846,22 @@ pub async fn implement_one(
 
     let repo_cfg = config::loader::load_merged(env, Some(&wt_path));
     let workflow = &repo_cfg.workflow.issue;
-    let report = item.analysis_report.as_deref().unwrap_or("");
     let prompt = format!(
-        "[autodev] implement: issue #{}\n\n\
-         {workflow} implement based on analysis:\n\n{report}\n\n\
-         This is for issue #{} in {}.",
-        item.github_number, item.github_number, item.repo_name
+        "[autodev] implement: issue #{} in {}",
+        item.github_number, item.repo_name
     );
+    let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{workflow}");
 
     let started = Utc::now().to_rfc3339();
     let result = claude
-        .run_session(&wt_path, &prompt, &Default::default())
+        .run_session(
+            &wt_path,
+            &prompt,
+            &crate::infrastructure::claude::SessionOptions {
+                append_system_prompt: Some(system_prompt),
+                ..Default::default()
+            },
+        )
         .await;
 
     match result {

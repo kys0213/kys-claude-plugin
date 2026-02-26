@@ -482,6 +482,7 @@ async fn reviewer_passes_json_output_format() {
         .review_pr(
             Path::new("/tmp/test"),
             "[autodev] review: PR #99\n\nReview this PR",
+            None,
         )
         .await;
 
