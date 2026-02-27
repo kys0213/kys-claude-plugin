@@ -88,7 +88,6 @@ pub async fn process_pending(
 ) -> Result<()> {
     let cfg = config::loader::load_merged(env, None);
     let concurrency = cfg.consumer.issue_concurrency as usize;
-    let gh_host = cfg.consumer.gh_host.as_deref();
     let analyzer = Analyzer::new(claude);
 
     for _ in 0..concurrency {
@@ -96,6 +95,7 @@ pub async fn process_pending(
             Some(item) => item,
             None => break,
         };
+        let gh_host = item.gh_host.as_deref();
 
         // Pending → Analyzing 상태 전이 (TUI/status 가시성)
         let work_id = item.work_id.clone();
@@ -333,13 +333,13 @@ pub async fn process_ready(
 ) -> Result<()> {
     let cfg = config::loader::load_merged(env, None);
     let concurrency = cfg.consumer.issue_concurrency as usize;
-    let gh_host = cfg.consumer.gh_host.as_deref();
 
     for _ in 0..concurrency {
         let item = match queues.issues.pop(issue_phase::READY) {
             Some(item) => item,
             None => break,
         };
+        let gh_host = item.gh_host.as_deref();
 
         // Ready → Implementing 상태 전이 (TUI/status 가시성)
         let work_id = item.work_id.clone();
@@ -456,6 +456,7 @@ pub async fn process_ready(
                                     review_comment: None,
                                     source_issue_number: Some(item.github_number),
                                     review_iteration: 0,
+                                    gh_host: item.gh_host.clone(),
                                 };
                                 gh.label_add(&item.repo_name, pr_num, labels::WIP, gh_host)
                                     .await;
@@ -559,7 +560,7 @@ pub async fn analyze_one(
     let workspace = Workspace::new(git, env);
     let notifier = Notifier::new(gh);
     let cfg = config::loader::load_merged(env, None);
-    let gh_host = cfg.consumer.gh_host.as_deref();
+    let gh_host = item.gh_host.as_deref();
     let analyzer = Analyzer::new(claude);
 
     let work_id = item.work_id.clone();
@@ -789,8 +790,7 @@ pub async fn implement_one(
 ) -> TaskOutput {
     let workspace = Workspace::new(git, env);
     let notifier = Notifier::new(gh);
-    let cfg = config::loader::load_merged(env, None);
-    let gh_host = cfg.consumer.gh_host.as_deref();
+    let gh_host = item.gh_host.as_deref();
 
     let work_id = item.work_id.clone();
     let repo_name = item.repo_name.clone();
@@ -914,6 +914,7 @@ pub async fn implement_one(
                             review_comment: None,
                             source_issue_number: Some(item.github_number),
                             review_iteration: 0,
+                            gh_host: item.gh_host.clone(),
                         };
 
                         let pr_comment = format!(

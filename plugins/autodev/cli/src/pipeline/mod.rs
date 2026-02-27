@@ -137,6 +137,7 @@ mod tests {
             labels: vec![],
             author: "user".to_string(),
             analysis_report: None,
+            gh_host: None,
         }
     }
 
@@ -153,6 +154,7 @@ mod tests {
             review_comment: None,
             source_issue_number: None,
             review_iteration: 0,
+            gh_host: None,
         }
     }
 

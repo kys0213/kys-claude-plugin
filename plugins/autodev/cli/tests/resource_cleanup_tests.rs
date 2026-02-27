@@ -65,6 +65,7 @@ fn make_pr_item(repo_id: &str, number: i64) -> PrItem {
         review_comment: None,
         source_issue_number: None,
         review_iteration: 0,
+        gh_host: None,
     }
 }
 
@@ -78,6 +79,7 @@ fn make_merge_item(repo_id: &str, pr_number: i64) -> MergeItem {
         title: "Merge PR".to_string(),
         head_branch: "feat/test".to_string(),
         base_branch: "main".to_string(),
+        gh_host: None,
     }
 }
 
@@ -510,6 +512,7 @@ fn make_issue_item(repo_id: &str, number: i64) -> IssueItem {
         labels: vec![],
         author: "alice".to_string(),
         analysis_report: Some("report".to_string()),
+        gh_host: None,
     }
 }
 

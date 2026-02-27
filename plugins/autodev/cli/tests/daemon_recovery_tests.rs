@@ -52,6 +52,7 @@ fn make_issue_item(repo_name: &str, number: i64) -> IssueItem {
         labels: vec![],
         author: "user".to_string(),
         analysis_report: None,
+        gh_host: None,
     }
 }
 
@@ -68,6 +69,7 @@ fn make_pr_item(repo_name: &str, number: i64) -> PrItem {
         review_comment: None,
         source_issue_number: None,
         review_iteration: 0,
+        gh_host: None,
     }
 }
 
@@ -81,6 +83,7 @@ fn make_merge_item(repo_name: &str, number: i64) -> MergeItem {
         title: "test".to_string(),
         head_branch: "feat".to_string(),
         base_branch: "main".to_string(),
+        gh_host: None,
     }
 }
 

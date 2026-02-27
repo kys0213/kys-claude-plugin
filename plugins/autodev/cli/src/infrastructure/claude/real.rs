@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Instant;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -34,10 +35,13 @@ impl Claude for RealClaude {
         }
 
         tracing::info!(
-            "running: claude -p \"{}\" in {:?}",
+            "[claude] >>> claude -p \"{}\" in {:?} (args={})",
             truncate(prompt, 80),
-            cwd
+            cwd,
+            args.len()
         );
+
+        let start = Instant::now();
 
         let result = tokio::process::Command::new("claude")
             .args(&args)
@@ -46,12 +50,25 @@ impl Claude for RealClaude {
             .output()
             .await?;
 
+        let elapsed = start.elapsed();
         let stdout = String::from_utf8_lossy(&result.stdout).to_string();
         let stderr = String::from_utf8_lossy(&result.stderr).to_string();
         let exit_code = result.status.code().unwrap_or(-1);
 
-        if exit_code != 0 {
-            tracing::warn!("claude session exited with code {exit_code}: {stderr}");
+        if exit_code == 0 {
+            tracing::info!(
+                "[claude] <<< OK (exit=0, {}ms, stdout={} bytes, stderr={} bytes)",
+                elapsed.as_millis(),
+                stdout.len(),
+                stderr.len()
+            );
+        } else {
+            tracing::error!(
+                "[claude] <<< FAILED (exit={exit_code}, {}ms, stdout={} bytes): {}",
+                elapsed.as_millis(),
+                stdout.len(),
+                truncate(&stderr, 200)
+            );
         }
 
         Ok(SessionResult {
