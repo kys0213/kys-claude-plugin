@@ -40,6 +40,10 @@ fn resolve_gh_host(env: &dyn Env, repo_name: &str) -> Option<String> {
         if let Some(ref cache) = *guard {
             if let Some(entry) = cache.get(repo_name) {
                 if entry.mtime == current_mtime {
+                    tracing::debug!(
+                        "[config] resolve_gh_host({repo_name}): cache hit → {:?}",
+                        entry.value
+                    );
                     return entry.value.clone();
                 }
             }
@@ -56,6 +60,7 @@ fn resolve_gh_host(env: &dyn Env, repo_name: &str) -> Option<String> {
         },
     );
     let value = cfg.consumer.gh_host;
+    tracing::debug!("[config] resolve_gh_host({repo_name}): loaded → {value:?}");
 
     // 캐시 갱신
     {
