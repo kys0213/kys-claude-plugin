@@ -33,7 +33,6 @@ pub async fn process_pending(
 ) -> Result<()> {
     let cfg = crate::config::loader::load_merged(env, None);
     let concurrency = cfg.consumer.merge_concurrency as usize;
-    let gh_host = cfg.consumer.gh_host.as_deref();
     let merger = Merger::new(claude);
 
     for _ in 0..concurrency {
@@ -41,6 +40,7 @@ pub async fn process_pending(
             Some(item) => item,
             None => break,
         };
+        let gh_host = item.gh_host.as_deref();
 
         // Pending → Merging 상태 전이 (TUI/status 가시성)
         let work_id = item.work_id.clone();
@@ -191,8 +191,7 @@ pub async fn merge_one(
 ) -> TaskOutput {
     let workspace = Workspace::new(git, env);
     let notifier = Notifier::new(gh);
-    let cfg = crate::config::loader::load_merged(env, None);
-    let gh_host = cfg.consumer.gh_host.as_deref();
+    let gh_host = item.gh_host.as_deref();
     let merger = Merger::new(claude);
 
     let work_id = item.work_id.clone();

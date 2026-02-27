@@ -212,6 +212,7 @@ impl GitRepository {
                 labels: label_names,
                 author: issue.user.login.clone(),
                 analysis_report: None,
+                gh_host: self.gh_host.clone(),
             };
 
             gh.label_remove(
@@ -300,6 +301,7 @@ impl GitRepository {
                 labels: label_names,
                 author: issue.user.login.clone(),
                 analysis_report: None,
+                gh_host: self.gh_host.clone(),
             };
 
             self.issue_queue.push(issue_phase::READY, item);
@@ -384,6 +386,7 @@ impl GitRepository {
                 review_comment: None,
                 source_issue_number: None,
                 review_iteration: 0,
+                gh_host: self.gh_host.clone(),
             };
 
             gh.label_add(&self.name, pr.number, labels::WIP, self.gh_host.as_deref())
@@ -467,6 +470,7 @@ impl GitRepository {
                 title,
                 head_branch,
                 base_branch,
+                gh_host: self.gh_host.clone(),
             };
 
             gh.label_remove(&self.name, number, labels::DONE, self.gh_host.as_deref())
@@ -627,6 +631,7 @@ impl GitRepository {
                     labels: issue.labels.clone(),
                     author: issue.author.clone(),
                     analysis_report: None,
+                    gh_host: self.gh_host.clone(),
                 };
 
                 self.issue_queue.push(issue_phase::READY, item);
@@ -646,6 +651,7 @@ impl GitRepository {
                     labels: issue.labels.clone(),
                     author: issue.author.clone(),
                     analysis_report: None,
+                    gh_host: self.gh_host.clone(),
                 };
 
                 self.issue_queue.push(issue_phase::PENDING, item);
@@ -677,6 +683,7 @@ impl GitRepository {
                 review_comment: None,
                 source_issue_number: pull.source_issue_number(),
                 review_iteration: pull.review_iteration(),
+                gh_host: self.gh_host.clone(),
             };
 
             self.pr_queue.push(pr_phase::PENDING, item);
@@ -844,6 +851,7 @@ mod tests {
             labels: vec![],
             author: "user".to_string(),
             analysis_report: None,
+            gh_host: None,
         }
     }
 
@@ -860,6 +868,7 @@ mod tests {
             review_comment: None,
             source_issue_number: None,
             review_iteration: 0,
+            gh_host: None,
         }
     }
 

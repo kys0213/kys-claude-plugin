@@ -18,6 +18,8 @@ pub struct IssueItem {
     pub author: String,
     #[allow(dead_code)]
     pub analysis_report: Option<String>,
+    /// GHE hostname (e.g. "git.example.com"). None이면 github.com.
+    pub gh_host: Option<String>,
 }
 
 impl HasWorkId for IssueItem {
@@ -45,6 +47,8 @@ pub struct PrItem {
     pub source_issue_number: Option<i64>,
     /// 리뷰→수정 반복 횟수 (improve_one에서 +1, re_review_one에서 max_iterations 체크)
     pub review_iteration: u32,
+    /// GHE hostname (e.g. "git.example.com"). None이면 github.com.
+    pub gh_host: Option<String>,
 }
 
 impl HasWorkId for PrItem {
@@ -67,6 +71,8 @@ pub struct MergeItem {
     pub head_branch: String,
     #[allow(dead_code)]
     pub base_branch: String,
+    /// GHE hostname (e.g. "git.example.com"). None이면 github.com.
+    pub gh_host: Option<String>,
 }
 
 impl HasWorkId for MergeItem {
@@ -163,6 +169,7 @@ mod tests {
             labels: vec![],
             author: "user".to_string(),
             analysis_report: None,
+            gh_host: None,
         }
     }
 
@@ -179,6 +186,7 @@ mod tests {
             review_comment: None,
             source_issue_number: None,
             review_iteration: 0,
+            gh_host: None,
         }
     }
 
@@ -192,6 +200,7 @@ mod tests {
             title: format!("Merge PR #{number}"),
             head_branch: "feature".to_string(),
             base_branch: "main".to_string(),
+            gh_host: None,
         }
     }
 

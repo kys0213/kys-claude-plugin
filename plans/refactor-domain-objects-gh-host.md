@@ -1,8 +1,8 @@
 # 도메인 객체 리팩토링: gh_host를 큐 아이템에 바인딩
 
 > **Date**: 2026-02-27
-> **Scope**: IssueItem, PrItem, MergeItem에 `gh_host` 필드 추가 + 파이프라인 gh_host 소스 변경
-> **Status**: 설계 검토 중
+> **Scope**: IssueItem, PrItem, MergeItem에 `gh_host` 필드 추가 + 파이프라인 gh_host 소스 변경 + infrastructure 로깅 강화
+> **Status**: 구현 중
 
 ---
 
@@ -238,3 +238,67 @@ Step 10: cargo fmt + clippy + test 전체 통과 확인
 현재 스코프는 **gh_host 유실 버그**의 구조적 해결에 집중.
 도메인 객체를 큐 아이템으로 통합하는 것은 PLAN.md의 Phase 4 범위이며,
 해당 리팩토링은 큐 아이템 자체의 재설계를 수반하므로 별도 작업으로 분리.
+
+### "daemon/recovery.rs는 왜 변경하지 않는가?"
+
+`recovery.rs`는 `ResolvedRepo`를 직접 받아 `repo.gh_host()`를 사용한다.
+큐 아이템을 생성하지 않으므로 이번 리팩토링에 영향 없음.
+
+---
+
+## 7. 로깅 강화 (infrastructure 레이어)
+
+### 7-1. gh 호출 로깅 (`infrastructure/gh/real.rs`)
+
+현재 상태: 실패 시 `warn!`만 출력. 호출 시작, 전체 args, duration, 응답 크기 없음.
+
+**변경:**
+- 호출 시작: `debug!` — 전체 args (hostname 포함 여부 확인 가능)
+- 호출 성공: `debug!` — duration, stdout 크기
+- 호출 실패: `warn!` — duration, exit code, stderr 내용
+- `api_paginate` 실패: 기존 `bail!`에 stderr만 포함 → duration도 추가
+
+```rust
+// 예시 (모든 메서드에 적용)
+let start = std::time::Instant::now();
+tracing::debug!("[gh:{method}] >>> gh {}", args.join(" "));
+let output = tokio::process::Command::new("gh").args(&args).output().await?;
+let elapsed = start.elapsed();
+if output.status.success() {
+    tracing::debug!("[gh:{method}] <<< OK ({}ms, {} bytes)", elapsed.as_millis(), output.stdout.len());
+} else {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    tracing::warn!("[gh:{method}] <<< FAILED (exit={}, {}ms): {stderr}", output.status.code().unwrap_or(-1), elapsed.as_millis());
+}
+```
+
+**로그 레벨:**
+| 상황 | 레벨 | 이유 |
+|------|------|------|
+| gh 호출 시작/성공 | `DEBUG` | tick당 수십 건 — INFO는 과도 |
+| gh 호출 실패 | `WARN` | 조치 필요 (기존과 동일) |
+
+### 7-2. Claude 호출 로깅 (`infrastructure/claude/real.rs`)
+
+현재 상태: 시작 `info!`(프롬프트 80자), exit≠0 `warn!`(stderr). 완료 로그, duration 없음.
+
+**변경:**
+- 호출 완료: `info!` — exit code, duration, stdout/stderr 크기
+- 비정상 종료: `warn!` → `error!`
+
+```rust
+let start = std::time::Instant::now();
+tracing::info!("[claude] >>> claude -p \"{}\" in {:?} (args={})", truncate(prompt, 80), cwd, args.len());
+let result = tokio::process::Command::new("claude")...;
+let elapsed = start.elapsed();
+if exit_code == 0 {
+    tracing::info!("[claude] <<< OK ({}ms, stdout={} bytes, stderr={} bytes)", elapsed.as_millis(), stdout.len(), stderr.len());
+} else {
+    tracing::error!("[claude] <<< FAILED (exit={exit_code}, {}ms, stdout={} bytes): {}", elapsed.as_millis(), stdout.len(), truncate(&stderr, 200));
+}
+```
+
+### 7-3. 재시도(retry) 로직 — 이번 스코프 제외
+
+재시도 로직은 별도 이슈로 분리. 현재 `real.rs`에는 재시도 로직이 없으므로
+attempt/backoff 관련 로깅은 추후 재시도 구현 시 함께 추가.

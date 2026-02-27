@@ -66,6 +66,7 @@ fn make_issue_item(repo_id: &str, number: i64, title: &str) -> IssueItem {
         labels: vec!["bug".to_string()],
         author: "alice".to_string(),
         analysis_report: None,
+        gh_host: None,
     }
 }
 
@@ -82,6 +83,7 @@ fn make_pr_item(repo_id: &str, number: i64, title: &str) -> PrItem {
         review_comment: None,
         source_issue_number: None,
         review_iteration: 0,
+        gh_host: None,
     }
 }
 

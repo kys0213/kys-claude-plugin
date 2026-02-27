@@ -65,6 +65,7 @@ fn make_issue_item(repo_id: &str, number: i64, title: &str) -> IssueItem {
         labels: vec!["bug".to_string()],
         author: "alice".to_string(),
         analysis_report: None,
+        gh_host: None,
     }
 }
 
@@ -81,6 +82,7 @@ fn make_pr_item(repo_id: &str, number: i64, title: &str) -> PrItem {
         review_comment: None,
         source_issue_number: None,
         review_iteration: 0,
+        gh_host: None,
     }
 }
 
@@ -94,6 +96,7 @@ fn make_merge_item(repo_id: &str, pr_number: i64, title: &str) -> MergeItem {
         title: title.to_string(),
         head_branch: "feat/test".to_string(),
         base_branch: "main".to_string(),
+        gh_host: None,
     }
 }
 
@@ -1582,6 +1585,7 @@ async fn scan_merges_dedup_skips_existing() {
             title: "Already queued".to_string(),
             head_branch: "feat/x".to_string(),
             base_branch: "main".to_string(),
+            gh_host: None,
         },
     );
 

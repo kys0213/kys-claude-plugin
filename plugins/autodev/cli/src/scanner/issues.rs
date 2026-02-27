@@ -92,6 +92,7 @@ pub async fn scan(
             labels: label_names,
             author: issue.user.login.clone(),
             analysis_report: None,
+            gh_host: gh_host.map(String::from),
         };
 
         // 라벨 전이: analyze 제거 → wip 추가 (트리거 소비)
@@ -177,6 +178,7 @@ pub async fn scan_approved(
             labels: label_names,
             author: issue.user.login.clone(),
             analysis_report,
+            gh_host: gh_host.map(String::from),
         };
 
         queues.issues.push(issue_phase::READY, item);

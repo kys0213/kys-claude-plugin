@@ -119,6 +119,7 @@ pub async fn scan(
             review_comment: None,
             source_issue_number: None,
             review_iteration: 0,
+            gh_host: gh_host.map(String::from),
         };
 
         // autodev:wip 라벨 추가 + 큐에 push
@@ -211,6 +212,7 @@ pub async fn scan_merges(
             title,
             head_branch,
             base_branch,
+            gh_host: gh_host.map(String::from),
         };
 
         // done → wip 라벨 전환 + merge queue push

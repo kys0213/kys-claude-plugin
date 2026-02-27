@@ -52,7 +52,6 @@ pub async fn process_pending(
 ) -> Result<()> {
     let cfg = config::loader::load_merged(env, None);
     let concurrency = cfg.consumer.pr_concurrency as usize;
-    let gh_host = cfg.consumer.gh_host.as_deref();
     let reviewer = Reviewer::new(claude);
 
     for _ in 0..concurrency {
@@ -60,6 +59,7 @@ pub async fn process_pending(
             Some(item) => item,
             None => break,
         };
+        let gh_host = item.gh_host.as_deref();
 
         // Pending → Reviewing 상태 전이 (TUI/status 가시성)
         let work_id = item.work_id.clone();
@@ -294,16 +294,15 @@ pub async fn process_pending(
 /// ReviewDone PR을 pop하여 피드백 반영 구현
 pub async fn process_review_done(
     db: &Database,
-    env: &dyn Env,
+    _env: &dyn Env,
     workspace: &Workspace<'_>,
     gh: &dyn Gh,
     claude: &dyn Claude,
     queues: &mut TaskQueues,
 ) -> Result<()> {
-    let cfg = config::loader::load_merged(env, None);
-    let gh_host = cfg.consumer.gh_host.as_deref();
-
     while let Some(mut item) = queues.prs.pop(pr_phase::REVIEW_DONE) {
+        let gh_host = item.gh_host.as_deref();
+
         // ReviewDone → Improving 상태 전이 (TUI/status 가시성)
         let work_id = item.work_id.clone();
         let repo_name_for_wt = item.repo_name.clone();
@@ -438,10 +437,11 @@ pub async fn process_improved(
     queues: &mut TaskQueues,
 ) -> Result<()> {
     let cfg = config::loader::load_merged(env, None);
-    let gh_host = cfg.consumer.gh_host.as_deref();
     let reviewer = Reviewer::new(claude);
 
     while let Some(mut item) = queues.prs.pop(pr_phase::IMPROVED) {
+        let gh_host = item.gh_host.as_deref();
+
         // Improved → Reviewing 상태 전이 (재리뷰, TUI/status 가시성)
         let work_id = item.work_id.clone();
         let repo_name_for_wt = item.repo_name.clone();
@@ -699,7 +699,7 @@ pub async fn review_one(
     let workspace = Workspace::new(git, env);
     let notifier = Notifier::new(gh);
     let cfg = config::loader::load_merged(env, None);
-    let gh_host = cfg.consumer.gh_host.as_deref();
+    let gh_host = item.gh_host.as_deref();
     let reviewer = Reviewer::new(claude);
 
     let work_id = item.work_id.clone();
@@ -960,8 +960,7 @@ pub async fn improve_one(
     claude: &dyn Claude,
 ) -> TaskOutput {
     let workspace = Workspace::new(git, env);
-    let cfg = config::loader::load_merged(env, None);
-    let gh_host = cfg.consumer.gh_host.as_deref();
+    let gh_host = item.gh_host.as_deref();
 
     let work_id = item.work_id.clone();
     let repo_name = item.repo_name.clone();
@@ -1103,7 +1102,7 @@ pub async fn re_review_one(
     let workspace = Workspace::new(git, env);
     let notifier = Notifier::new(gh);
     let cfg = config::loader::load_merged(env, None);
-    let gh_host = cfg.consumer.gh_host.as_deref();
+    let gh_host = item.gh_host.as_deref();
     let reviewer = Reviewer::new(claude);
 
     let work_id = item.work_id.clone();

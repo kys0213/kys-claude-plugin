@@ -1,5 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use std::time::Instant;
 
 use super::Gh;
 
@@ -27,15 +28,33 @@ impl Gh for RealGh {
             args.push(h.to_string());
         }
 
+        tracing::debug!("[gh:api_get_field] >>> gh {}", args.join(" "));
+        let start = Instant::now();
+
         let output = tokio::process::Command::new("gh")
             .args(&args)
             .output()
             .await
             .ok()?;
 
+        let elapsed = start.elapsed();
+
         if output.status.success() {
-            Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            tracing::debug!(
+                "[gh:api_get_field] <<< OK ({}ms, {} bytes)",
+                elapsed.as_millis(),
+                stdout.len()
+            );
+            Some(stdout)
         } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            tracing::warn!(
+                "[gh:api_get_field] <<< FAILED (exit={}, {}ms): {}",
+                output.status.code().unwrap_or(-1),
+                elapsed.as_millis(),
+                stderr.trim()
+            );
             None
         }
     }
@@ -65,16 +84,32 @@ impl Gh for RealGh {
             args.push(h.to_string());
         }
 
+        tracing::debug!("[gh:api_paginate] >>> gh {}", args.join(" "));
+        let start = Instant::now();
+
         let output = tokio::process::Command::new("gh")
             .args(&args)
             .output()
             .await?;
 
+        let elapsed = start.elapsed();
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("gh api error: {stderr}");
+            tracing::warn!(
+                "[gh:api_paginate] <<< FAILED (exit={}, {}ms): {}",
+                output.status.code().unwrap_or(-1),
+                elapsed.as_millis(),
+                stderr.trim()
+            );
+            anyhow::bail!("gh api error ({}ms): {stderr}", elapsed.as_millis());
         }
 
+        tracing::debug!(
+            "[gh:api_paginate] <<< OK ({}ms, {} bytes)",
+            elapsed.as_millis(),
+            output.stdout.len()
+        );
         Ok(output.stdout)
     }
 
@@ -100,19 +135,39 @@ impl Gh for RealGh {
             args.push(h.to_string());
         }
 
+        tracing::debug!(
+            "[gh:issue_comment] >>> gh issue comment {} --repo {} (body={} bytes)",
+            number,
+            repo_name,
+            body.len()
+        );
+        let start = Instant::now();
+
         match tokio::process::Command::new("gh")
             .args(&args)
             .output()
             .await
         {
             Ok(output) => {
-                if !output.status.success() {
-                    tracing::warn!("gh issue comment failed for {repo_name}#{number}");
+                let elapsed = start.elapsed();
+                if output.status.success() {
+                    tracing::debug!("[gh:issue_comment] <<< OK ({}ms)", elapsed.as_millis());
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!(
+                        "[gh:issue_comment] <<< FAILED (exit={}, {}ms): {}",
+                        output.status.code().unwrap_or(-1),
+                        elapsed.as_millis(),
+                        stderr.trim()
+                    );
                 }
                 output.status.success()
             }
             Err(e) => {
-                tracing::warn!("gh issue comment error: {e}");
+                tracing::warn!(
+                    "[gh:issue_comment] <<< ERROR ({}ms): {e}",
+                    start.elapsed().as_millis()
+                );
                 false
             }
         }
@@ -138,19 +193,32 @@ impl Gh for RealGh {
             args.push(h.to_string());
         }
 
+        tracing::debug!("[gh:label_remove] >>> {repo_name}#{number} -{label}");
+        let start = Instant::now();
+
         match tokio::process::Command::new("gh")
             .args(&args)
             .output()
             .await
         {
             Ok(output) => {
+                let elapsed = start.elapsed();
                 if !output.status.success() {
-                    tracing::warn!("gh label remove failed for {repo_name}#{number} label={label}");
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!(
+                        "[gh:label_remove] <<< FAILED (exit={}, {}ms): {}",
+                        output.status.code().unwrap_or(-1),
+                        elapsed.as_millis(),
+                        stderr.trim()
+                    );
                 }
                 output.status.success()
             }
             Err(e) => {
-                tracing::warn!("gh label remove error: {e}");
+                tracing::warn!(
+                    "[gh:label_remove] <<< ERROR ({}ms): {e}",
+                    start.elapsed().as_millis()
+                );
                 false
             }
         }
@@ -178,19 +246,32 @@ impl Gh for RealGh {
             args.push(h.to_string());
         }
 
+        tracing::debug!("[gh:label_add] >>> {repo_name}#{number} +{label}");
+        let start = Instant::now();
+
         match tokio::process::Command::new("gh")
             .args(&args)
             .output()
             .await
         {
             Ok(output) => {
+                let elapsed = start.elapsed();
                 if !output.status.success() {
-                    tracing::warn!("gh label add failed for {repo_name}#{number} label={label}");
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!(
+                        "[gh:label_add] <<< FAILED (exit={}, {}ms): {}",
+                        output.status.code().unwrap_or(-1),
+                        elapsed.as_millis(),
+                        stderr.trim()
+                    );
                 }
                 output.status.success()
             }
             Err(e) => {
-                tracing::warn!("gh label add error: {e}");
+                tracing::warn!(
+                    "[gh:label_add] <<< ERROR ({}ms): {e}",
+                    start.elapsed().as_millis()
+                );
                 false
             }
         }
@@ -219,19 +300,32 @@ impl Gh for RealGh {
             args.push(h.to_string());
         }
 
+        tracing::debug!("[gh:create_issue] >>> {repo_name} title={title}");
+        let start = Instant::now();
+
         match tokio::process::Command::new("gh")
             .args(&args)
             .output()
             .await
         {
             Ok(output) => {
+                let elapsed = start.elapsed();
                 if !output.status.success() {
-                    tracing::warn!("gh create issue failed for {repo_name}");
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!(
+                        "[gh:create_issue] <<< FAILED (exit={}, {}ms): {}",
+                        output.status.code().unwrap_or(-1),
+                        elapsed.as_millis(),
+                        stderr.trim()
+                    );
                 }
                 output.status.success()
             }
             Err(e) => {
-                tracing::warn!("gh create issue error: {e}");
+                tracing::warn!(
+                    "[gh:create_issue] <<< ERROR ({}ms): {e}",
+                    start.elapsed().as_millis()
+                );
                 false
             }
         }
@@ -306,19 +400,32 @@ impl Gh for RealGh {
             }
         };
 
+        tracing::debug!("[gh:pr_review] >>> {repo_name}#{number} event={event}");
+        let start = Instant::now();
+
         match tokio::process::Command::new("gh")
             .args(&args)
             .output()
             .await
         {
             Ok(output) => {
+                let elapsed = start.elapsed();
                 if !output.status.success() {
-                    tracing::warn!("gh pr review failed for {repo_name}#{number} event={event}");
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!(
+                        "[gh:pr_review] <<< FAILED (exit={}, {}ms): {}",
+                        output.status.code().unwrap_or(-1),
+                        elapsed.as_millis(),
+                        stderr.trim()
+                    );
                 }
                 output.status.success()
             }
             Err(e) => {
-                tracing::warn!("gh pr review error: {e}");
+                tracing::warn!(
+                    "[gh:pr_review] <<< ERROR ({}ms): {e}",
+                    start.elapsed().as_millis()
+                );
                 false
             }
         }
@@ -355,22 +462,40 @@ impl Gh for RealGh {
             args.push(h.to_string());
         }
 
+        tracing::debug!("[gh:create_pr] >>> {repo_name} {head} -> {base}");
+        let start = Instant::now();
+
         match tokio::process::Command::new("gh")
             .args(&args)
             .output()
             .await
         {
             Ok(output) => {
+                let elapsed = start.elapsed();
                 if output.status.success() {
                     let num_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    tracing::debug!(
+                        "[gh:create_pr] <<< OK ({}ms, pr={})",
+                        elapsed.as_millis(),
+                        num_str
+                    );
                     num_str.parse::<i64>().ok()
                 } else {
-                    tracing::warn!("gh create pr failed for {repo_name}");
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!(
+                        "[gh:create_pr] <<< FAILED (exit={}, {}ms): {}",
+                        output.status.code().unwrap_or(-1),
+                        elapsed.as_millis(),
+                        stderr.trim()
+                    );
                     None
                 }
             }
             Err(e) => {
-                tracing::warn!("gh create pr error: {e}");
+                tracing::warn!(
+                    "[gh:create_pr] <<< ERROR ({}ms): {e}",
+                    start.elapsed().as_millis()
+                );
                 None
             }
         }

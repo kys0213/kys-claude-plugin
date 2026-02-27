@@ -62,6 +62,7 @@ fn make_issue_item(repo_id: &str, number: i64, title: &str) -> IssueItem {
         labels: vec!["bug".to_string()],
         author: "alice".to_string(),
         analysis_report: None,
+        gh_host: None,
     }
 }
 
