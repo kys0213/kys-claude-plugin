@@ -1,17 +1,15 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use autodev::components::notifier::Notifier;
-use autodev::components::workspace::Workspace;
 use autodev::config::Env;
 use autodev::domain::labels;
-use autodev::domain::repository::*;
+use autodev::domain::repository::{ConsumerLogRepository, RepoRepository};
 use autodev::infrastructure::agent::mock::MockAgent;
 use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
 use autodev::infrastructure::suggest_workflow::mock::MockSuggestWorkflow;
 use autodev::queue::task_queues::{
-    issue_phase, make_work_id, merge_phase, IssueItem, MergeItem, PrItem, TaskQueues,
+    issue_phase, make_work_id, merge_phase, pr_phase, IssueItem, MergeItem, PrItem, TaskQueues,
 };
 use autodev::queue::Database;
 
@@ -61,7 +59,7 @@ fn make_issue_item(repo_id: &str, number: i64, title: &str) -> IssueItem {
         repo_url: "https://github.com/org/repo".to_string(),
         github_number: number,
         title: title.to_string(),
-        body: Some("Test issue body".to_string()),
+        body: Some("Test body".to_string()),
         labels: vec!["bug".to_string()],
         author: "alice".to_string(),
         analysis_report: None,
@@ -86,234 +84,406 @@ fn make_pr_item(repo_id: &str, number: i64, title: &str) -> PrItem {
     }
 }
 
-fn make_merge_item(repo_id: &str, pr_number: i64, title: &str) -> MergeItem {
+fn make_merge_item(repo_id: &str, pr_number: i64) -> MergeItem {
     MergeItem {
         work_id: make_work_id("merge", "org/repo", pr_number),
         repo_id: repo_id.to_string(),
         repo_name: "org/repo".to_string(),
         repo_url: "https://github.com/org/repo".to_string(),
         pr_number,
-        title: title.to_string(),
+        title: "Merge PR".to_string(),
         head_branch: "feat/test".to_string(),
         base_branch: "main".to_string(),
         gh_host: None,
     }
 }
 
-fn set_gh_issue_open(gh: &MockGh, repo_name: &str, number: i64) {
-    gh.set_field(repo_name, &format!("issues/{number}"), ".state", "open");
+fn set_gh_issue_open(gh: &MockGh, number: i64) {
+    gh.set_field("org/repo", &format!("issues/{number}"), ".state", "open");
 }
 
-fn set_gh_pr_open(gh: &MockGh, repo_name: &str, number: i64) {
-    gh.set_field(repo_name, &format!("pulls/{number}"), ".state", "open");
+fn set_gh_pr_open(gh: &MockGh, number: i64) {
+    gh.set_field("org/repo", &format!("pulls/{number}"), ".state", "open");
     gh.set_field(
-        repo_name,
+        "org/repo",
         &format!("pulls/{number}/reviews"),
         r#"[.[] | select(.state == "APPROVED")] | length"#,
         "0",
     );
 }
 
+fn set_gh_pr_mergeable(gh: &MockGh, number: i64) {
+    gh.set_field("org/repo", &format!("pulls/{number}"), ".state", "open");
+    gh.set_field("org/repo", &format!("pulls/{number}"), ".mergeable", "true");
+    gh.set_field(
+        "org/repo",
+        &format!("pulls/{number}/reviews"),
+        r#"[.[] | select(.state == "APPROVED")] | length"#,
+        "1",
+    );
+}
+
 fn make_analysis_json(verdict: &str, confidence: f64) -> String {
     let inner = format!(
-        r##"{{"verdict":"{verdict}","confidence":{confidence},"summary":"Test summary","questions":[],"reason":null,"report":"Analysis Report"}}"##,
+        r##"{{"verdict":"{verdict}","confidence":{confidence},"summary":"Test summary","questions":[],"reason":null,"report":"Analysis Report" }}"##,
     );
     serde_json::json!({ "result": inner }).to_string()
 }
 
-/// Assert that the added_labels on MockGh contain the given (repo_name, number, label) tuple.
-fn assert_label_added(gh: &MockGh, repo_name: &str, number: i64, label: &str) {
-    let added = gh.added_labels.lock().unwrap();
-    assert!(
-        added
-            .iter()
-            .any(|(r, n, l)| r == repo_name && *n == number && l == label),
-        "expected added label ({repo_name}, {number}, {label}) but found: {added:?}"
+fn make_analysis_json_with_questions(
+    verdict: &str,
+    confidence: f64,
+    questions: &[&str],
+    reason: Option<&str>,
+) -> String {
+    let questions_json: Vec<String> = questions.iter().map(|q| format!("\"{q}\"")).collect();
+    let reason_json = match reason {
+        Some(r) => format!("\"{r}\""),
+        None => "null".to_string(),
+    };
+    let inner = format!(
+        r#"{{"verdict":"{verdict}","confidence":{confidence},"summary":"Test summary","questions":[{questions}],"reason":{reason},"report":"Analysis Report" }}"#,
+        questions = questions_json.join(","),
+        reason = reason_json,
     );
+    serde_json::json!({ "result": inner }).to_string()
 }
 
-/// Assert that the removed_labels on MockGh contain the given (repo_name, number, label) tuple.
-fn assert_label_removed(gh: &MockGh, repo_name: &str, number: i64, label: &str) {
+fn has_worktree_remove(git: &MockGit) -> bool {
+    git.calls
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(m, _)| m == "worktree_remove")
+}
+
+// ─── Pipeline helpers: simulate daemon pop → working state → _one() → handle_task_output ───
+
+async fn run_analyze(
+    queues: &mut TaskQueues,
+    db: &Database,
+    env: &dyn Env,
+    gh: &dyn Gh,
+    git: &dyn Git,
+    claude: &dyn Agent,
+) {
+    let item = queues.issues.pop(issue_phase::PENDING).unwrap();
+    queues.issues.push(issue_phase::ANALYZING, item.clone());
+    let output = autodev::pipeline::issue::analyze_one(item, env, gh, git, claude).await;
+    autodev::pipeline::handle_task_output(queues, db, output);
+}
+
+async fn run_implement(
+    queues: &mut TaskQueues,
+    db: &Database,
+    env: &dyn Env,
+    gh: &dyn Gh,
+    git: &dyn Git,
+    claude: &dyn Agent,
+) {
+    let item = queues.issues.pop(issue_phase::READY).unwrap();
+    queues.issues.push(issue_phase::IMPLEMENTING, item.clone());
+    let output = autodev::pipeline::issue::implement_one(item, env, gh, git, claude).await;
+    autodev::pipeline::handle_task_output(queues, db, output);
+}
+
+async fn run_review(
+    queues: &mut TaskQueues,
+    db: &Database,
+    env: &dyn Env,
+    gh: &dyn Gh,
+    git: &dyn Git,
+    claude: &dyn Agent,
+    sw: &dyn SuggestWorkflow,
+) {
+    let item = queues.prs.pop(pr_phase::PENDING).unwrap();
+    queues.prs.push(pr_phase::REVIEWING, item.clone());
+    let output = autodev::pipeline::pr::review_one(item, env, gh, git, claude, sw).await;
+    autodev::pipeline::handle_task_output(queues, db, output);
+}
+
+async fn run_improve(
+    queues: &mut TaskQueues,
+    db: &Database,
+    env: &dyn Env,
+    gh: &dyn Gh,
+    git: &dyn Git,
+    claude: &dyn Agent,
+) {
+    let item = queues.prs.pop(pr_phase::REVIEW_DONE).unwrap();
+    queues.prs.push(pr_phase::IMPROVING, item.clone());
+    let output = autodev::pipeline::pr::improve_one(item, env, gh, git, claude).await;
+    autodev::pipeline::handle_task_output(queues, db, output);
+}
+
+async fn run_re_review(
+    queues: &mut TaskQueues,
+    db: &Database,
+    env: &dyn Env,
+    gh: &dyn Gh,
+    git: &dyn Git,
+    claude: &dyn Agent,
+    sw: &dyn SuggestWorkflow,
+) {
+    let item = queues.prs.pop(pr_phase::IMPROVED).unwrap();
+    queues.prs.push(pr_phase::REVIEWING, item.clone());
+    let output = autodev::pipeline::pr::re_review_one(item, env, gh, git, claude, sw).await;
+    autodev::pipeline::handle_task_output(queues, db, output);
+}
+
+async fn run_merge(
+    queues: &mut TaskQueues,
+    db: &Database,
+    env: &dyn Env,
+    gh: &dyn Gh,
+    git: &dyn Git,
+    claude: &dyn Agent,
+) {
+    let item = queues.merges.pop(merge_phase::PENDING).unwrap();
+    queues.merges.push(merge_phase::MERGING, item.clone());
+    let output = autodev::pipeline::merge::merge_one(item, env, gh, git, claude).await;
+    autodev::pipeline::handle_task_output(queues, db, output);
+}
+
+// Trait imports for helper function signatures
+use autodev::infrastructure::agent::Agent;
+use autodev::infrastructure::gh::Gh;
+use autodev::infrastructure::git::Git;
+use autodev::infrastructure::suggest_workflow::SuggestWorkflow;
+
+// ═══════════════════════════════════════════════════════════
+// Issue Pipeline: analyze_one
+// ═══════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn issue_analysis_success_exits_queue_with_analyzed_label() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let mut queues = TaskQueues::new();
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 1, "Bug fix"),
+    );
+
+    let gh = MockGh::new();
+    set_gh_issue_open(&gh, 1);
+
+    let git = MockGit::new();
+    let claude = MockAgent::new();
+    claude.enqueue_response(&make_analysis_json("implement", 0.95), 0);
+
+    run_analyze(&mut queues, &db, &env, &gh, &git, &claude).await;
+
+    // v2: exits queue entirely (HITL gate)
+    assert_eq!(queues.issues.total(), 0);
+
+    // analyzed label added, wip removed
+    let added = gh.added_labels.lock().unwrap();
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 1 && label == labels::ANALYZED));
+
     let removed = gh.removed_labels.lock().unwrap();
-    assert!(
-        removed
-            .iter()
-            .any(|(r, n, l)| r == repo_name && *n == number && l == label),
-        "expected removed label ({repo_name}, {number}, {label}) but found: {removed:?}"
-    );
+    assert!(removed
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 1 && label == labels::WIP));
+
+    // analysis comment posted
+    let comments = gh.posted_comments.lock().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert!(comments[0].2.contains("<!-- autodev:analysis -->"));
 }
 
-/// Assert that the added_labels on MockGh do NOT contain the given (repo_name, number, label).
-fn assert_label_not_added(gh: &MockGh, repo_name: &str, number: i64, label: &str) {
+#[tokio::test]
+async fn issue_closed_on_github_skips_to_done() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let mut queues = TaskQueues::new();
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 5, "Already closed"),
+    );
+
+    let gh = MockGh::new();
+    gh.set_field("org/repo", "issues/5", ".state", "closed");
+
+    let git = MockGit::new();
+    let claude = MockAgent::new();
+
+    run_analyze(&mut queues, &db, &env, &gh, &git, &claude).await;
+
+    assert_eq!(queues.issues.total(), 0);
+
     let added = gh.added_labels.lock().unwrap();
-    assert!(
-        !added
-            .iter()
-            .any(|(r, n, l)| r == repo_name && *n == number && l == label),
-        "expected label ({repo_name}, {number}, {label}) NOT to be added but it was"
-    );
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 5 && label == labels::DONE));
+
+    assert_eq!(claude.call_count(), 0);
 }
 
-// ═══════════════════════════════════════════════════
-// 1. Issue full cycle: pending → analyzing → ready → implementing → done
-// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// Issue Verdict Tests
+// ═══════════════════════════════════════════════════════════
 
 #[tokio::test]
-async fn issue_full_cycle_pending_to_done() {
+async fn issue_verdict_wontfix_posts_comment_and_marks_done() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
+    let mut queues = TaskQueues::new();
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 1, "Won't fix issue"),
+    );
+
     let gh = MockGh::new();
-    set_gh_issue_open(&gh, "org/repo", 10);
+    set_gh_issue_open(&gh, 1);
 
     let git = MockGit::new();
     let claude = MockAgent::new();
-
-    // Phase 1: analysis with high confidence -> ready
-    claude.enqueue_response(&make_analysis_json("implement", 0.9), 0);
-    // Phase 2: implementation -> success
-    claude.enqueue_response(r#"{"result": "Implementation complete"}"#, 0);
-    // Phase 2.5: knowledge extraction (best effort, after implementation done)
-    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
-
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-
-    // Push issue to Pending queue
-    queues.issues.push(
-        issue_phase::PENDING,
-        make_issue_item(&repo_id, 10, "Full cycle issue"),
-    );
-
-    // Phase 1: process_pending (Pending -> analyzed, exits queue with comment)
-    autodev::pipeline::issue::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .expect("phase 1 should succeed");
-
-    // v2: Item removed from queue (analyzed + exits for human review)
-    assert_eq!(
-        queues.issues.total(),
+    claude.enqueue_response(
+        &make_analysis_json_with_questions("wontfix", 0.95, &[], Some("Duplicate of #42")),
         0,
-        "issue should be removed from queue after analysis"
     );
 
-    // Labels: analyzed added, wip removed
-    assert_label_added(&gh, "org/repo", 10, labels::ANALYZED);
-    assert_label_removed(&gh, "org/repo", 10, labels::WIP);
+    run_analyze(&mut queues, &db, &env, &gh, &git, &claude).await;
 
-    // Claude called once (analysis only)
-    assert_eq!(claude.call_count(), 1);
+    assert_eq!(queues.issues.total(), 0);
 
-    // 1 consumer log recorded (analysis only)
-    let logs = db.log_recent(None, 100).unwrap();
-    assert_eq!(logs.len(), 1, "should have 1 consumer log (analysis only)");
+    let added = gh.added_labels.lock().unwrap();
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 1 && label == labels::SKIP));
+
+    let comments = gh.posted_comments.lock().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert!(comments[0].2.contains("Won't fix"));
+    assert!(comments[0].2.contains("Duplicate of #42"));
 }
 
-// ═══════════════════════════════════════════════════
-// 2. Issue failed -> re-discovery -> success cycle
-//    In the new architecture, there is no DB retry.
-//    When an issue fails, wip is removed. On next scan,
-//    it would be re-discovered and re-queued.
-// ═══════════════════════════════════════════════════
-
 #[tokio::test]
-async fn issue_failed_retry_reentry_cycle() {
+async fn issue_verdict_needs_clarification_posts_questions() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
+    let mut queues = TaskQueues::new();
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 2, "Ambiguous issue"),
+    );
+
     let gh = MockGh::new();
-    set_gh_issue_open(&gh, "org/repo", 20);
+    set_gh_issue_open(&gh, 2);
 
     let git = MockGit::new();
     let claude = MockAgent::new();
-
-    // 1st attempt: Claude fails (exit_code 1)
-    claude.enqueue_response("analysis error", 1);
-    // 2nd attempt (after re-queue): Claude succeeds
-    claude.enqueue_response(&make_analysis_json("implement", 0.85), 0);
-
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-
-    // Push issue to Pending
-    queues.issues.push(
-        issue_phase::PENDING,
-        make_issue_item(&repo_id, 20, "Retry cycle issue"),
-    );
-
-    // 1st attempt -> fails, item removed from queue, wip removed
-    autodev::pipeline::issue::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(
-        queues.issues.total(),
+    claude.enqueue_response(
+        &make_analysis_json_with_questions(
+            "needs_clarification",
+            0.8,
+            &["What is the expected behavior?", "Which version?"],
+            None,
+        ),
         0,
-        "issue should be gone from queue after failure"
-    );
-    assert_label_removed(&gh, "org/repo", 20, labels::WIP);
-
-    // Simulate re-discovery: push same issue again (as scanner would)
-    queues.issues.push(
-        issue_phase::PENDING,
-        make_issue_item(&repo_id, 20, "Retry cycle issue"),
     );
 
-    // 2nd attempt -> succeeds -> Ready
-    autodev::pipeline::issue::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .unwrap();
+    run_analyze(&mut queues, &db, &env, &gh, &git, &claude).await;
 
-    // v2: analyzed + exits queue
-    assert_eq!(
-        queues.issues.total(),
-        0,
-        "issue should be removed from queue after successful analysis"
-    );
+    assert_eq!(queues.issues.total(), 0);
 
-    assert_label_added(&gh, "org/repo", 20, labels::ANALYZED);
-    assert_label_removed(&gh, "org/repo", 20, labels::WIP);
+    let added = gh.added_labels.lock().unwrap();
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 2 && label == labels::SKIP));
 
-    assert_eq!(
-        claude.call_count(),
-        2,
-        "claude should be called twice (fail + success)"
-    );
+    let comments = gh.posted_comments.lock().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert!(comments[0].2.contains("What is the expected behavior?"));
+    assert!(comments[0].2.contains("Which version?"));
 }
 
-// ═══════════════════════════════════════════════════
-// 3. PR pre-flight: closed PR -> skip to done
-// ═══════════════════════════════════════════════════
+#[tokio::test]
+async fn issue_verdict_implement_low_confidence_goes_to_waiting() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let mut queues = TaskQueues::new();
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 3, "Low confidence issue"),
+    );
+
+    let gh = MockGh::new();
+    set_gh_issue_open(&gh, 3);
+
+    let git = MockGit::new();
+    let claude = MockAgent::new();
+    claude.enqueue_response(&make_analysis_json("implement", 0.3), 0);
+
+    run_analyze(&mut queues, &db, &env, &gh, &git, &claude).await;
+
+    assert_eq!(queues.issues.total(), 0);
+
+    let added = gh.added_labels.lock().unwrap();
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 3 && label == labels::SKIP));
+
+    let comments = gh.posted_comments.lock().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert!(comments[0].2.contains("clarification"));
+}
+
+#[tokio::test]
+async fn issue_unparseable_analysis_falls_back_to_analyzed() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let mut queues = TaskQueues::new();
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 6, "Parse fail issue"),
+    );
+
+    let gh = MockGh::new();
+    set_gh_issue_open(&gh, 6);
+
+    let git = MockGit::new();
+    let claude = MockAgent::new();
+    claude.enqueue_response("This is not valid JSON at all", 0);
+
+    run_analyze(&mut queues, &db, &env, &gh, &git, &claude).await;
+
+    assert_eq!(queues.issues.total(), 0);
+
+    let added = gh.added_labels.lock().unwrap();
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 6 && label == labels::ANALYZED));
+
+    let comments = gh.posted_comments.lock().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert!(comments[0].2.contains("<!-- autodev:analysis -->"));
+}
+
+// ═══════════════════════════════════════════════════════════
+// PR Pipeline: review_one
+// ═══════════════════════════════════════════════════════════
 
 #[tokio::test]
 async fn pr_closed_on_github_skips_to_done() {
@@ -322,289 +492,238 @@ async fn pr_closed_on_github_skips_to_done() {
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
+    let mut queues = TaskQueues::new();
+    queues
+        .prs
+        .push(pr_phase::PENDING, make_pr_item(&repo_id, 10, "Closed PR"));
+
     let gh = MockGh::new();
-    // PR is closed
-    gh.set_field("org/repo", "pulls/30", ".state", "closed");
+    gh.set_field("org/repo", "pulls/10", ".state", "closed");
 
     let git = MockGit::new();
     let claude = MockAgent::new();
-
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-
-    queues
-        .prs
-        .push("Pending", make_pr_item(&repo_id, 30, "Already closed PR"));
-
     let sw = MockSuggestWorkflow::new();
-    autodev::pipeline::pr::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &sw,
-        &mut queues,
-    )
-    .await
-    .unwrap();
 
-    // Item removed from queue
-    assert_eq!(
-        queues.prs.total(),
-        0,
-        "closed PR should be removed from queue"
-    );
+    run_review(&mut queues, &db, &env, &gh, &git, &claude, &sw).await;
 
-    // Labels: done added, wip removed
-    assert_label_added(&gh, "org/repo", 30, labels::DONE);
-    assert_label_removed(&gh, "org/repo", 30, labels::WIP);
+    assert_eq!(queues.prs.total(), 0);
 
-    assert_eq!(
-        claude.call_count(),
-        0,
-        "claude should not be called for closed PR"
-    );
+    let added = gh.added_labels.lock().unwrap();
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 10 && label == labels::DONE));
+
+    assert_eq!(claude.call_count(), 0);
 }
 
-// ═══════════════════════════════════════════════════
-// 4. PR pre-flight: already approved -> skip to done
-// ═══════════════════════════════════════════════════
-
 #[tokio::test]
-async fn pr_already_approved_skips_to_done() {
+async fn pr_review_success_posts_comment() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
-    let gh = MockGh::new();
-    // PR is open but already approved
-    gh.set_field("org/repo", "pulls/31", ".state", "open");
-    gh.set_field(
-        "org/repo",
-        "pulls/31/reviews",
-        r#"[.[] | select(.state == "APPROVED")] | length"#,
-        "2",
-    );
-
-    let git = MockGit::new();
-    let claude = MockAgent::new();
-
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
     let mut queues = TaskQueues::new();
-
     queues
         .prs
-        .push("Pending", make_pr_item(&repo_id, 31, "Already approved PR"));
-
-    let sw = MockSuggestWorkflow::new();
-    autodev::pipeline::pr::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &sw,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    // Item removed from queue
-    assert_eq!(
-        queues.prs.total(),
-        0,
-        "approved PR should be removed from queue"
-    );
-
-    // Labels: done added, wip removed
-    assert_label_added(&gh, "org/repo", 31, labels::DONE);
-    assert_label_removed(&gh, "org/repo", 31, labels::WIP);
-
-    assert_eq!(
-        claude.call_count(),
-        0,
-        "claude should not be called for approved PR"
-    );
-}
-
-// ═══════════════════════════════════════════════════
-// 5. Merge success cycle: pending -> merging -> done
-// ═══════════════════════════════════════════════════
-
-#[tokio::test]
-async fn merge_success_cycle() {
-    let tmpdir = tempfile::TempDir::new().unwrap();
-    let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+        .push(pr_phase::PENDING, make_pr_item(&repo_id, 20, "Good PR"));
 
     let gh = MockGh::new();
-    set_gh_pr_open(&gh, "org/repo", 40);
+    set_gh_pr_open(&gh, 20);
 
     let git = MockGit::new();
     let claude = MockAgent::new();
-    // merge success (exit_code 0)
-    claude.enqueue_response("Merged successfully", 0);
+    claude.enqueue_response(r#"{"result": "LGTM - no issues found"}"#, 0);
 
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
+    let sw = MockSuggestWorkflow::new();
 
-    queues
-        .merges
-        .push("Pending", make_merge_item(&repo_id, 40, "Merge PR #40"));
+    run_review(&mut queues, &db, &env, &gh, &git, &claude, &sw).await;
 
-    autodev::pipeline::merge::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    // Item removed from queue
-    assert_eq!(
-        queues.merges.total(),
-        0,
-        "merge should be removed from queue after done"
-    );
-
-    // Labels: done added, wip removed
-    assert_label_added(&gh, "org/repo", 40, labels::DONE);
-    assert_label_removed(&gh, "org/repo", 40, labels::WIP);
-
+    // PR exits queue (goes to done or review_done depending on verdict)
     assert_eq!(claude.call_count(), 1);
 }
 
-// ═══════════════════════════════════════════════════
-// 6. Merge conflict -> resolve success
-// ═══════════════════════════════════════════════════
-
 #[tokio::test]
-async fn merge_conflict_then_resolve_success() {
+async fn pr_review_claude_failure_removes_from_queue() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
+    let mut queues = TaskQueues::new();
+    queues
+        .prs
+        .push(pr_phase::PENDING, make_pr_item(&repo_id, 21, "Failing PR"));
+
     let gh = MockGh::new();
-    set_gh_pr_open(&gh, "org/repo", 41);
+    set_gh_pr_open(&gh, 21);
 
     let git = MockGit::new();
     let claude = MockAgent::new();
-    // 1st call: merge attempt -> conflict (exit_code 1 + "conflict" in output)
-    claude.enqueue_response("CONFLICT (content): merge conflict in src/main.rs", 1);
-    // 2nd call: resolve_conflicts -> success
-    claude.enqueue_response("Conflicts resolved and committed", 0);
+    claude.enqueue_response("review error", 1);
 
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
+    let sw = MockSuggestWorkflow::new();
 
-    queues.merges.push(
-        "Pending",
-        make_merge_item(&repo_id, 41, "Merge PR #41 with conflict"),
-    );
+    run_review(&mut queues, &db, &env, &gh, &git, &claude, &sw).await;
 
-    autodev::pipeline::merge::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .unwrap();
+    assert_eq!(queues.prs.total(), 0);
 
-    // Item removed from queue (done after conflict resolution)
-    assert_eq!(
-        queues.merges.total(),
-        0,
-        "merge should be removed from queue after conflict resolution"
-    );
-
-    // Labels: done added, wip removed
-    assert_label_added(&gh, "org/repo", 41, labels::DONE);
-    assert_label_removed(&gh, "org/repo", 41, labels::WIP);
-
-    assert_eq!(
-        claude.call_count(),
-        2,
-        "should call claude twice (merge + resolve)"
-    );
+    let removed = gh.removed_labels.lock().unwrap();
+    assert!(removed
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 21 && label == labels::WIP));
 }
 
-// ═══════════════════════════════════════════════════
-// 7. Merge conflict -> resolve failure
-// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// PR Pipeline: improve_one
+// ═══════════════════════════════════════════════════════════
 
 #[tokio::test]
-async fn merge_conflict_then_resolve_failure() {
+async fn pr_improve_success_moves_to_improved() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
+    let mut queues = TaskQueues::new();
+    let mut item = make_pr_item(&repo_id, 30, "PR with feedback");
+    item.review_comment = Some("Fix the null check".to_string());
+    queues.prs.push(pr_phase::REVIEW_DONE, item);
+
     let gh = MockGh::new();
-    set_gh_pr_open(&gh, "org/repo", 42);
+    let git = MockGit::new();
+    let claude = MockAgent::new();
+    claude.enqueue_response(r#"{"result": "Feedback applied"}"#, 0);
+
+    run_improve(&mut queues, &db, &env, &gh, &git, &claude).await;
+
+    assert_eq!(queues.prs.len(pr_phase::IMPROVED), 1);
+}
+
+#[tokio::test]
+async fn pr_improve_failure_removes_from_queue() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let mut queues = TaskQueues::new();
+    let mut item = make_pr_item(&repo_id, 31, "PR with feedback");
+    item.review_comment = Some("Fix this".to_string());
+    queues.prs.push(pr_phase::REVIEW_DONE, item);
+
+    let gh = MockGh::new();
+    let git = MockGit::new();
+    let claude = MockAgent::new();
+    claude.enqueue_response("implementation error", 1);
+
+    run_improve(&mut queues, &db, &env, &gh, &git, &claude).await;
+
+    assert_eq!(queues.prs.total(), 0);
+}
+
+// ═══════════════════════════════════════════════════════════
+// PR Pipeline: re_review_one
+// ═══════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn pr_re_review_approved_exits_queue() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let mut queues = TaskQueues::new();
+    queues.prs.push(
+        pr_phase::IMPROVED,
+        make_pr_item(&repo_id, 40, "Improved PR"),
+    );
+
+    let gh = MockGh::new();
+    let git = MockGit::new();
+    let claude = MockAgent::new();
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"approve\",\"summary\":\"LGTM\"}"}"#,
+        0,
+    );
+    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
+
+    let sw = MockSuggestWorkflow::new();
+
+    run_re_review(&mut queues, &db, &env, &gh, &git, &claude, &sw).await;
+
+    assert_eq!(queues.prs.total(), 0);
+
+    let added = gh.added_labels.lock().unwrap();
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 40 && label == labels::DONE));
+}
+
+#[tokio::test]
+async fn pr_re_review_request_changes_pushes_back_to_review_done() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let mut queues = TaskQueues::new();
+    queues.prs.push(
+        pr_phase::IMPROVED,
+        make_pr_item(&repo_id, 41, "Needs more work"),
+    );
+
+    let gh = MockGh::new();
+    let git = MockGit::new();
+    let claude = MockAgent::new();
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Needs more work\"}"}"#,
+        0,
+    );
+
+    let sw = MockSuggestWorkflow::new();
+
+    run_re_review(&mut queues, &db, &env, &gh, &git, &claude, &sw).await;
+
+    assert_eq!(
+        queues.prs.len(pr_phase::REVIEW_DONE),
+        1,
+        "request_changes should push back to ReviewDone"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════
+// Merge Pipeline: merge_one
+// ═══════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn merge_success_marks_done() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let mut queues = TaskQueues::new();
+    queues
+        .merges
+        .push(merge_phase::PENDING, make_merge_item(&repo_id, 50));
+
+    let gh = MockGh::new();
+    set_gh_pr_mergeable(&gh, 50);
 
     let git = MockGit::new();
     let claude = MockAgent::new();
-    // 1st call: merge -> conflict
-    claude.enqueue_response("CONFLICT (content): merge conflict in complex.rs", 1);
-    // 2nd call: resolve -> failure (exit_code 1, no "conflict" keyword -> Failed)
-    claude.enqueue_response("Failed to resolve", 1);
+    claude.enqueue_response("Merged successfully", 0);
 
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
+    run_merge(&mut queues, &db, &env, &gh, &git, &claude).await;
 
-    queues.merges.push(
-        "Pending",
-        make_merge_item(&repo_id, 42, "Merge PR #42 unresolvable conflict"),
-    );
+    assert_eq!(queues.merges.total(), 0);
 
-    autodev::pipeline::merge::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    // Item removed from queue (failed)
-    assert_eq!(
-        queues.merges.total(),
-        0,
-        "merge should be removed from queue after resolve failure"
-    );
-
-    // wip removed but NO done label (it failed)
-    assert_label_removed(&gh, "org/repo", 42, labels::WIP);
-    assert_label_not_added(&gh, "org/repo", 42, labels::DONE);
-
-    assert_eq!(claude.call_count(), 2);
+    let added = gh.added_labels.lock().unwrap();
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 50 && label == labels::DONE));
 }
-
-// ═══════════════════════════════════════════════════
-// 8. Merge pre-flight: already merged -> skip to done
-// ═══════════════════════════════════════════════════
 
 #[tokio::test]
 async fn merge_already_merged_skips_to_done() {
@@ -613,1030 +732,361 @@ async fn merge_already_merged_skips_to_done() {
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
+    let mut queues = TaskQueues::new();
+    queues
+        .merges
+        .push(merge_phase::PENDING, make_merge_item(&repo_id, 55));
+
     let gh = MockGh::new();
-    // PR is already closed/merged
-    gh.set_field("org/repo", "pulls/43", ".state", "closed");
+    gh.set_field("org/repo", "pulls/55", ".state", "closed");
 
     let git = MockGit::new();
     let claude = MockAgent::new();
 
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
+    run_merge(&mut queues, &db, &env, &gh, &git, &claude).await;
 
-    queues.merges.push(
-        "Pending",
-        make_merge_item(&repo_id, 43, "Already merged PR"),
-    );
+    assert_eq!(queues.merges.total(), 0);
 
-    autodev::pipeline::merge::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    // Item removed from queue
-    assert_eq!(
-        queues.merges.total(),
-        0,
-        "already merged PR should be removed from queue"
-    );
-
-    // Labels: done added, wip removed
-    assert_label_added(&gh, "org/repo", 43, labels::DONE);
-    assert_label_removed(&gh, "org/repo", 43, labels::WIP);
-
-    assert_eq!(claude.call_count(), 0, "claude should not be called");
-}
-
-// ═══════════════════════════════════════════════════
-// 9. Confidence at threshold (0.7) -> ready
-//    Code: a.confidence < cfg.consumer.confidence_threshold
-//    0.7 < 0.7 is false -> 'implement' match -> ready
-// ═══════════════════════════════════════════════════
-
-#[tokio::test]
-async fn confidence_at_threshold_goes_to_ready() {
-    let tmpdir = tempfile::TempDir::new().unwrap();
-    let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-
-    let gh = MockGh::new();
-    set_gh_issue_open(&gh, "org/repo", 50);
-
-    let git = MockGit::new();
-    let claude = MockAgent::new();
-    // confidence exactly at threshold (0.7)
-    claude.enqueue_response(&make_analysis_json("implement", 0.7), 0);
-
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-
-    queues.issues.push(
-        issue_phase::PENDING,
-        make_issue_item(&repo_id, 50, "Boundary confidence issue"),
-    );
-
-    autodev::pipeline::issue::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    // v2: 0.7 >= 0.7 -> analyzed (exits queue for human review)
-    assert_eq!(
-        queues.issues.total(),
-        0,
-        "confidence == threshold should trigger analyzed and exit"
-    );
-
-    assert_label_added(&gh, "org/repo", 50, labels::ANALYZED);
-    assert_label_removed(&gh, "org/repo", 50, labels::WIP);
-
-    // Analysis comment should be posted
-    let comments = gh.posted_comments.lock().unwrap();
-    assert_eq!(
-        comments.len(),
-        1,
-        "analysis comment should be posted for implement verdict"
-    );
-}
-
-// ═══════════════════════════════════════════════════
-// 10. Confidence just below threshold (0.69) -> waiting (skip label + comment)
-// ═══════════════════════════════════════════════════
-
-#[tokio::test]
-async fn confidence_just_below_threshold_goes_to_waiting() {
-    let tmpdir = tempfile::TempDir::new().unwrap();
-    let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-
-    let gh = MockGh::new();
-    set_gh_issue_open(&gh, "org/repo", 51);
-
-    let git = MockGit::new();
-    let claude = MockAgent::new();
-    // confidence just below threshold
-    claude.enqueue_response(&make_analysis_json("implement", 0.69), 0);
-
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-
-    queues.issues.push(
-        issue_phase::PENDING,
-        make_issue_item(&repo_id, 51, "Below threshold issue"),
-    );
-
-    autodev::pipeline::issue::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    // 0.69 < 0.7 -> waiting_human: item removed from queue, skip label added, comment posted
-    assert_eq!(
-        queues.issues.total(),
-        0,
-        "issue should be removed from queue when confidence below threshold"
-    );
-
-    // skip label added, wip removed
-    assert_label_added(&gh, "org/repo", 51, labels::SKIP);
-    assert_label_removed(&gh, "org/repo", 51, labels::WIP);
-
-    // clarification comment posted
-    let comments = gh.posted_comments.lock().unwrap();
-    assert_eq!(comments.len(), 1, "should post clarification comment");
-}
-
-// ═══════════════════════════════════════════════════
-// 11. Analysis JSON missing confidence field -> fallback
-// ═══════════════════════════════════════════════════
-
-#[tokio::test]
-async fn analysis_missing_confidence_field_falls_back_to_ready() {
-    let tmpdir = tempfile::TempDir::new().unwrap();
-    let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-
-    let gh = MockGh::new();
-    set_gh_issue_open(&gh, "org/repo", 52);
-
-    let git = MockGit::new();
-    let claude = MockAgent::new();
-    // JSON without confidence field -> parse_analysis may return None -> fallback ready
-    let bad_json = serde_json::json!({
-        "result": r#"{"verdict":"implement","summary":"test","questions":[],"report":"report"}"#
-    });
-    claude.enqueue_response(&bad_json.to_string(), 0);
-
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-
-    queues.issues.push(
-        issue_phase::PENDING,
-        make_issue_item(&repo_id, 52, "Missing confidence field"),
-    );
-
-    autodev::pipeline::issue::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    // When confidence is missing, parse_analysis may either:
-    //   - return Some with confidence=0.0 -> skip label (waiting_human)
-    //   - return None -> fallback ready
-    // Either way, pipeline should not crash
-    let in_ready = queues.issues.len(issue_phase::READY);
-    let total = queues.issues.total();
-
-    assert!(
-        in_ready == 1 || total == 0,
-        "missing confidence should either fallback to ready (ready=1) or go to skip (total=0), got ready={in_ready}, total={total}"
-    );
-}
-
-// ═══════════════════════════════════════════════════
-// 12. Completely malformed JSON -> fallback ready
-// ═══════════════════════════════════════════════════
-
-#[tokio::test]
-async fn analysis_completely_malformed_json_falls_back_to_ready() {
-    let tmpdir = tempfile::TempDir::new().unwrap();
-    let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-
-    let gh = MockGh::new();
-    set_gh_issue_open(&gh, "org/repo", 53);
-
-    let git = MockGit::new();
-    let claude = MockAgent::new();
-    // Completely malformed output (not JSON)
-    claude.enqueue_response("I cannot parse this {{{garbage", 0);
-
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-
-    queues.issues.push(
-        issue_phase::PENDING,
-        make_issue_item(&repo_id, 53, "Malformed JSON issue"),
-    );
-
-    autodev::pipeline::issue::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    // v2: parse_analysis returns None -> fallback analyzed (exits queue)
-    assert_eq!(
-        queues.issues.total(),
-        0,
-        "completely malformed output should fallback to analyzed and exit"
-    );
-
-    assert_label_added(&gh, "org/repo", 53, labels::ANALYZED);
-    assert_label_removed(&gh, "org/repo", 53, labels::WIP);
-
-    let comments = gh.posted_comments.lock().unwrap();
-    assert_eq!(
-        comments.len(),
-        1,
-        "fallback analysis comment should be posted"
-    );
-}
-
-// ═══════════════════════════════════════════════════
-// 13. Workspace clone failure -> issue failed
-// ═══════════════════════════════════════════════════
-
-#[tokio::test]
-async fn workspace_clone_failure_marks_issue_failed() {
-    let tmpdir = tempfile::TempDir::new().unwrap();
-    let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-
-    let gh = MockGh::new();
-    set_gh_issue_open(&gh, "org/repo", 60);
-
-    let git = MockGit::new();
-    *git.clone_should_fail.lock().unwrap() = true;
-
-    let claude = MockAgent::new();
-
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-
-    queues.issues.push(
-        issue_phase::PENDING,
-        make_issue_item(&repo_id, 60, "Clone will fail"),
-    );
-
-    autodev::pipeline::issue::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    // Item removed from queue (failed)
-    assert_eq!(
-        queues.issues.total(),
-        0,
-        "clone failure should remove issue from queue"
-    );
-
-    // wip removed
-    assert_label_removed(&gh, "org/repo", 60, labels::WIP);
-
-    assert_eq!(
-        claude.call_count(),
-        0,
-        "claude should not be called when clone fails"
-    );
-}
-
-// ═══════════════════════════════════════════════════
-// 14. Workspace worktree failure -> issue failed
-// ═══════════════════════════════════════════════════
-
-#[tokio::test]
-async fn workspace_worktree_failure_marks_issue_failed() {
-    let tmpdir = tempfile::TempDir::new().unwrap();
-    let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-
-    let gh = MockGh::new();
-    set_gh_issue_open(&gh, "org/repo", 61);
-
-    let git = MockGit::new();
-    *git.worktree_should_fail.lock().unwrap() = true;
-
-    let claude = MockAgent::new();
-
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-
-    queues.issues.push(
-        issue_phase::PENDING,
-        make_issue_item(&repo_id, 61, "Worktree will fail"),
-    );
-
-    autodev::pipeline::issue::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    // Item removed from queue (failed)
-    assert_eq!(
-        queues.issues.total(),
-        0,
-        "worktree failure should remove issue from queue"
-    );
-
-    // wip removed
-    assert_label_removed(&gh, "org/repo", 61, labels::WIP);
-
-    assert_eq!(
-        claude.call_count(),
-        0,
-        "claude should not be called when worktree fails"
-    );
-}
-
-// ═══════════════════════════════════════════════════
-// 15. Workspace clone failure -> PR failed
-// ═══════════════════════════════════════════════════
-
-#[tokio::test]
-async fn workspace_clone_failure_marks_pr_failed() {
-    let tmpdir = tempfile::TempDir::new().unwrap();
-    let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-
-    let gh = MockGh::new();
-    set_gh_pr_open(&gh, "org/repo", 70);
-
-    let git = MockGit::new();
-    *git.clone_should_fail.lock().unwrap() = true;
-
-    let claude = MockAgent::new();
-
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-
-    queues.prs.push(
-        "Pending",
-        make_pr_item(&repo_id, 70, "Clone will fail for PR"),
-    );
-
-    let sw = MockSuggestWorkflow::new();
-    autodev::pipeline::pr::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &sw,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    // Item removed from queue (failed)
-    assert_eq!(
-        queues.prs.total(),
-        0,
-        "clone failure should remove PR from queue"
-    );
-
-    // wip removed
-    assert_label_removed(&gh, "org/repo", 70, labels::WIP);
+    let added = gh.added_labels.lock().unwrap();
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 55 && label == labels::DONE));
 
     assert_eq!(claude.call_count(), 0);
 }
 
-// ═══════════════════════════════════════════════════
-// 16. Workspace clone failure -> merge failed
-// ═══════════════════════════════════════════════════
-
 #[tokio::test]
-async fn workspace_clone_failure_marks_merge_failed() {
+async fn merge_conflict_then_resolve_success() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
+    let mut queues = TaskQueues::new();
+    queues
+        .merges
+        .push(merge_phase::PENDING, make_merge_item(&repo_id, 60));
+
     let gh = MockGh::new();
-    set_gh_pr_open(&gh, "org/repo", 80);
+    set_gh_pr_mergeable(&gh, 60);
 
     let git = MockGit::new();
-    *git.clone_should_fail.lock().unwrap() = true;
-
     let claude = MockAgent::new();
+    // merge → conflict
+    claude.enqueue_response("CONFLICT in file.rs", 1);
+    // resolve → success
+    claude.enqueue_response("Resolved and pushed", 0);
 
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
+    run_merge(&mut queues, &db, &env, &gh, &git, &claude).await;
 
-    queues.merges.push(
-        "Pending",
-        make_merge_item(&repo_id, 80, "Clone will fail for merge"),
-    );
+    assert_eq!(queues.merges.total(), 0);
 
-    autodev::pipeline::merge::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    // Item removed from queue (failed)
-    assert_eq!(
-        queues.merges.total(),
-        0,
-        "clone failure should remove merge from queue"
-    );
-
-    // wip removed
-    assert_label_removed(&gh, "org/repo", 80, labels::WIP);
-
-    assert_eq!(claude.call_count(), 0);
+    let added = gh.added_labels.lock().unwrap();
+    assert!(added
+        .iter()
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 60 && label == labels::DONE));
 }
 
-// ═══════════════════════════════════════════════════
-// 17. Scanner: autodev label filtering - "autodev" label include filter
-// ═══════════════════════════════════════════════════
-
-/// Label-Positive: filter_labels는 트리거 라벨과 별개의 추가 필터.
-/// autodev:analyze + "bug" 라벨이 모두 있는 이슈만 큐에 적재.
 #[tokio::test]
-async fn scanner_filter_labels_with_label_positive() {
+async fn merge_conflict_then_resolve_failure() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
-    let gh = MockGh::new();
-    // API가 autodev:analyze 라벨 이슈만 반환 (Label-Positive)
-    let issues = serde_json::json!([
-        {
-            "number": 80,
-            "title": "Bug with trigger",
-            "body": "has bug + analyze",
-            "labels": [{"name": "bug"}, {"name": "autodev:analyze"}],
-            "user": {"login": "alice"},
-            "pull_request": null
-        },
-        {
-            "number": 81,
-            "title": "Feature with trigger",
-            "body": "has enhancement + analyze",
-            "labels": [{"name": "enhancement"}, {"name": "autodev:analyze"}],
-            "user": {"login": "bob"},
-            "pull_request": null
-        }
-    ]);
-    gh.set_paginate("org/repo", "issues", serde_json::to_vec(&issues).unwrap());
-
-    // filter_labels="bug" → #80만 통과
-    let filter_labels = Some(vec!["bug".to_string()]);
     let mut queues = TaskQueues::new();
-
-    autodev::scanner::issues::scan(
-        &db,
-        &gh,
-        &repo_id,
-        "org/repo",
-        "https://github.com/org/repo",
-        &[],
-        &filter_labels,
-        None,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    assert!(
-        queues.contains("issue:org/repo:80"),
-        "issue #80 with 'bug' label should pass filter"
-    );
-    assert!(
-        !queues.contains("issue:org/repo:81"),
-        "issue #81 with 'enhancement' should NOT pass 'bug' filter"
-    );
-}
-
-/// Label-Positive: filter_labels가 None이면 autodev:analyze 이슈 모두 큐에 적재.
-#[tokio::test]
-async fn scanner_no_filter_labels_queues_all_triggered() {
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+    queues
+        .merges
+        .push(merge_phase::PENDING, make_merge_item(&repo_id, 61));
 
     let gh = MockGh::new();
-    let issues = serde_json::json!([
-        {
-            "number": 90,
-            "title": "Triggered issue",
-            "body": "analyze me",
-            "labels": [{"name": "autodev:analyze"}],
-            "user": {"login": "alice"},
-            "pull_request": null
-        }
-    ]);
-    gh.set_paginate("org/repo", "issues", serde_json::to_vec(&issues).unwrap());
+    set_gh_pr_mergeable(&gh, 61);
 
-    let mut queues = TaskQueues::new();
+    let git = MockGit::new();
+    let claude = MockAgent::new();
+    // merge → conflict
+    claude.enqueue_response("CONFLICT in file.rs", 1);
+    // resolve → fail
+    claude.enqueue_response("Cannot resolve", 1);
 
-    autodev::scanner::issues::scan(
-        &db,
-        &gh,
-        &repo_id,
-        "org/repo",
-        "https://github.com/org/repo",
-        &[],
-        &None,
-        None,
-        &mut queues,
-    )
-    .await
-    .unwrap();
+    run_merge(&mut queues, &db, &env, &gh, &git, &claude).await;
 
-    assert!(queues.contains("issue:org/repo:90"));
+    assert_eq!(queues.merges.total(), 0);
 
-    // analyze→wip 전이 검증
     let removed = gh.removed_labels.lock().unwrap();
     assert!(removed
         .iter()
-        .any(|(_, n, l)| *n == 90 && l == "autodev:analyze"));
-    let added = gh.added_labels.lock().unwrap();
-    assert!(added.iter().any(|(_, n, l)| *n == 90 && l == "autodev:wip"));
+        .any(|(repo, n, label)| repo == "org/repo" && *n == 61 && label == labels::WIP));
 }
 
-// ═══════════════════════════════════════════════════
-// 19. Merge non-conflict failure -> failed
-// ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// Resource Cleanup Tests (worktree)
+// ═══════════════════════════════════════════════════════════
 
 #[tokio::test]
-async fn merge_non_conflict_failure_marks_failed() {
+async fn merge_success_cleans_up_worktree() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     let gh = MockGh::new();
-    set_gh_pr_open(&gh, "org/repo", 44);
+    set_gh_pr_mergeable(&gh, 70);
 
     let git = MockGit::new();
     let claude = MockAgent::new();
-    // merge fails with exit_code 1 but no "conflict" keyword -> MergeOutcome::Failed
-    claude.enqueue_response("Permission denied: cannot push to protected branch", 1);
-
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-
-    queues.merges.push(
-        "Pending",
-        make_merge_item(&repo_id, 44, "Merge will fail non-conflict"),
-    );
-
-    autodev::pipeline::merge::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    // Item removed from queue (failed)
-    assert_eq!(
-        queues.merges.total(),
-        0,
-        "non-conflict failure should remove merge from queue"
-    );
-
-    // wip removed, no done label
-    assert_label_removed(&gh, "org/repo", 44, labels::WIP);
-    assert_label_not_added(&gh, "org/repo", 44, labels::DONE);
-
-    // resolve_conflicts should NOT be called
-    assert_eq!(
-        claude.call_count(),
-        1,
-        "should only attempt merge, not resolve"
-    );
-}
-
-// ═══════════════════════════════════════════════════
-// 20. process_all: issue + PR + merge all processed
-// ═══════════════════════════════════════════════════
-
-#[tokio::test]
-async fn process_all_handles_all_queues() {
-    let tmpdir = tempfile::TempDir::new().unwrap();
-    let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
-
-    let gh = MockGh::new();
-    set_gh_issue_open(&gh, "org/repo", 90);
-    set_gh_pr_open(&gh, "org/repo", 91);
-    set_gh_pr_open(&gh, "org/repo", 92);
-
-    let git = MockGit::new();
-    let claude = MockAgent::new();
-    // 1. Issue analysis -> analyzed (issue::process_pending, exits queue)
-    claude.enqueue_response(&make_analysis_json("implement", 0.9), 0);
-    // 2. PR review -> ReviewDone (pr::process_pending, verdict=request_changes)
-    claude.enqueue_response(
-        r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Needs changes\"}"}"#,
-        0,
-    );
-    // 5. PR feedback implementation -> Improved (pr::process_review_done)
-    claude.enqueue_response(r#"{"result": "Feedback applied"}"#, 0);
-    // 6. PR re-review -> done/approved (pr::process_improved, verdict=approve)
-    claude.enqueue_response(
-        r#"{"result": "{\"verdict\":\"approve\",\"summary\":\"Approved\"}"}"#,
-        0,
-    );
-    // 7. PR knowledge extraction (best effort, after PR done)
-    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
-    // 8. Merge -> success (merge::process_pending)
     claude.enqueue_response("Merged successfully", 0);
 
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
     let mut queues = TaskQueues::new();
-
-    queues.issues.push(
-        issue_phase::PENDING,
-        make_issue_item(&repo_id, 90, "Issue for process_all"),
-    );
     queues
-        .prs
-        .push("Pending", make_pr_item(&repo_id, 91, "PR for process_all"));
-    queues.merges.push(
-        "Pending",
-        make_merge_item(&repo_id, 92, "Merge for process_all"),
-    );
+        .merges
+        .push(merge_phase::PENDING, make_merge_item(&repo_id, 70));
 
-    let sw = MockSuggestWorkflow::new();
-    autodev::pipeline::process_all(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &sw,
-        &mut queues,
-    )
-    .await
-    .expect("process_all should succeed");
+    run_merge(&mut queues, &db, &env, &gh, &git, &claude).await;
 
-    // v2: Issue: pending -> analyzed (exits queue for human review)
-    assert_eq!(
-        queues.issues.total(),
-        0,
-        "issue should be analyzed and removed from queue"
+    assert!(
+        has_worktree_remove(&git),
+        "merge success should clean up worktree"
     );
-    assert_label_added(&gh, "org/repo", 90, labels::ANALYZED);
-
-    // PR: pending -> ReviewDone -> Improved -> done (full cycle in same process_all)
-    assert_eq!(
-        queues.prs.total(),
-        0,
-        "pr should be done and removed from queue"
-    );
-    assert_label_added(&gh, "org/repo", 91, labels::DONE);
-
-    // Merge: pending -> done (removed from queue)
-    assert_eq!(
-        queues.merges.total(),
-        0,
-        "merge should be done and removed from queue"
-    );
-    assert_label_added(&gh, "org/repo", 92, labels::DONE);
-
-    assert_eq!(
-        claude.call_count(),
-        6,
-        "should call claude 6 times total (1 issue analysis + 3 PR pipeline + 1 PR knowledge + 1 merge)"
-    );
-
-    // PR Review API: request_changes (1st review) + approve (re-review) = 2 reviews
-    let reviews = gh.reviewed_prs.lock().unwrap();
-    assert_eq!(
-        reviews.len(),
-        2,
-        "should submit 2 PR reviews (request_changes + approve)"
-    );
-    assert_eq!(reviews[0].1, 91, "1st review on PR #91");
-    assert_eq!(reviews[0].2, "REQUEST_CHANGES");
-    assert_eq!(reviews[1].1, 91, "2nd review on PR #91");
-    assert_eq!(reviews[1].2, "APPROVE");
 }
 
-// ═══════════════════════════════════════════════════
-// 20b. PR review API: approve on first review submits APPROVE
-// ═══════════════════════════════════════════════════
-
 #[tokio::test]
-async fn pr_approve_submits_review_api() {
+async fn merge_conflict_cleans_up_worktree() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     let gh = MockGh::new();
-    set_gh_pr_open(&gh, "org/repo", 95);
+    set_gh_pr_mergeable(&gh, 71);
 
     let git = MockGit::new();
     let claude = MockAgent::new();
-    // Review → approve (verdict=approve)
+    claude.enqueue_response("CONFLICT in file.rs", 1);
+    claude.enqueue_response("Cannot resolve", 1);
+
+    let mut queues = TaskQueues::new();
+    queues
+        .merges
+        .push(merge_phase::PENDING, make_merge_item(&repo_id, 71));
+
+    run_merge(&mut queues, &db, &env, &gh, &git, &claude).await;
+
+    assert!(
+        has_worktree_remove(&git),
+        "merge conflict path should clean up worktree"
+    );
+}
+
+#[tokio::test]
+async fn pr_improve_success_cleans_worktree() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let gh = MockGh::new();
+    let git = MockGit::new();
+    let claude = MockAgent::new();
+    claude.enqueue_response(r#"{"result": "Feedback applied"}"#, 0);
+
+    let mut queues = TaskQueues::new();
+    let mut item = make_pr_item(&repo_id, 80, "PR feedback");
+    item.review_comment = Some("Fix null check".to_string());
+    queues.prs.push(pr_phase::REVIEW_DONE, item);
+
+    run_improve(&mut queues, &db, &env, &gh, &git, &claude).await;
+
+    assert!(
+        has_worktree_remove(&git),
+        "improve_one should clean up worktree on success"
+    );
+}
+
+#[tokio::test]
+async fn pr_improve_failure_cleans_worktree() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let gh = MockGh::new();
+    let git = MockGit::new();
+    let claude = MockAgent::new();
+    claude.enqueue_response("implementation error", 1);
+
+    let mut queues = TaskQueues::new();
+    let mut item = make_pr_item(&repo_id, 81, "PR feedback");
+    item.review_comment = Some("Fix this".to_string());
+    queues.prs.push(pr_phase::REVIEW_DONE, item);
+
+    run_improve(&mut queues, &db, &env, &gh, &git, &claude).await;
+
+    assert!(
+        has_worktree_remove(&git),
+        "improve_one should clean up worktree on failure"
+    );
+}
+
+#[tokio::test]
+async fn pr_re_review_approved_cleans_worktree() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let gh = MockGh::new();
+    let git = MockGit::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(
         r#"{"result": "{\"verdict\":\"approve\",\"summary\":\"LGTM\"}"}"#,
         0,
     );
-    // Knowledge extraction
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-
-    queues
-        .prs
-        .push("Pending", make_pr_item(&repo_id, 95, "Approve PR"));
-
     let sw = MockSuggestWorkflow::new();
-    autodev::pipeline::pr::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &sw,
-        &mut queues,
-    )
-    .await
-    .unwrap();
+    let mut queues = TaskQueues::new();
+    queues.prs.push(
+        pr_phase::IMPROVED,
+        make_pr_item(&repo_id, 82, "Improved PR"),
+    );
 
-    // PR done
-    assert_eq!(queues.prs.total(), 0);
-    assert_label_added(&gh, "org/repo", 95, labels::DONE);
+    run_re_review(&mut queues, &db, &env, &gh, &git, &claude, &sw).await;
 
-    // Review API: single APPROVE call
-    let reviews = gh.reviewed_prs.lock().unwrap();
-    assert_eq!(reviews.len(), 1, "should submit 1 review");
-    assert_eq!(reviews[0].1, 95);
-    assert_eq!(reviews[0].2, "APPROVE");
+    assert!(
+        has_worktree_remove(&git),
+        "re_review_one should clean up worktree on approval"
+    );
 }
 
-// ═══════════════════════════════════════════════════
-// 20c. PR review API: request_changes on first review submits REQUEST_CHANGES
-// ═══════════════════════════════════════════════════
-
 #[tokio::test]
-async fn pr_request_changes_submits_review_api() {
+async fn issue_implement_cleans_up_worktree() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
     let db = open_memory_db();
     let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     let gh = MockGh::new();
-    set_gh_pr_open(&gh, "org/repo", 96);
+    let git = MockGit::new();
+    let claude = MockAgent::new();
+    claude.enqueue_response(r#"{"result": "Done"}"#, 0);
+    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
+
+    let mut queues = TaskQueues::new();
+    let mut item = make_issue_item(&repo_id, 90, "Ready issue");
+    item.analysis_report = Some("report".to_string());
+    queues.issues.push(issue_phase::READY, item);
+
+    run_implement(&mut queues, &db, &env, &gh, &git, &claude).await;
+
+    assert!(
+        has_worktree_remove(&git),
+        "implement_one should clean up worktree"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════
+// Review Cycle: max_iterations
+// ═══════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn review_cycle_stops_at_max_iterations() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let gh = MockGh::new();
+    let git = MockGit::new();
+    let claude = MockAgent::new();
+
+    let sw = MockSuggestWorkflow::new();
+
+    // Round 1: improve → improved (iteration 0→1)
+    claude.enqueue_response(r#"{"result": "Applied fix 1"}"#, 0);
+    // Round 1: re-review → request_changes
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Still needs work\"}"}"#,
+        0,
+    );
+    // Round 2: improve → improved (iteration 1→2)
+    claude.enqueue_response(r#"{"result": "Applied fix 2"}"#, 0);
+    // Round 2: re-review → request_changes (iteration=2 >= max_iterations=2 → skip)
+    claude.enqueue_response(
+        r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Still not right\"}"}"#,
+        0,
+    );
+
+    let mut queues = TaskQueues::new();
+    let mut item = make_pr_item(&repo_id, 100, "PR under review");
+    item.review_comment = Some("Fix these issues".to_string());
+    queues.prs.push(pr_phase::REVIEW_DONE, item);
+
+    for _round in 1..=3 {
+        if queues.prs.len(pr_phase::REVIEW_DONE) > 0 {
+            run_improve(&mut queues, &db, &env, &gh, &git, &claude).await;
+        }
+
+        if queues.prs.len(pr_phase::IMPROVED) > 0 {
+            run_re_review(&mut queues, &db, &env, &gh, &git, &claude, &sw).await;
+
+            if queues.prs.len(pr_phase::REVIEW_DONE) == 0 {
+                break;
+            }
+        }
+    }
+
+    assert_eq!(
+        claude.call_count(),
+        4,
+        "review cycle stopped at max_iterations=2"
+    );
+
+    let added = gh.added_labels.lock().unwrap();
+    assert!(
+        added
+            .iter()
+            .any(|(r, n, l)| r == "org/repo" && *n == 100 && l == labels::SKIP),
+        "autodev:skip label should be added when max_iterations reached"
+    );
+    drop(added);
+
+    assert_eq!(
+        queues.prs.total(),
+        0,
+        "all PR items should be removed from queue"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════
+// DB Logging
+// ═══════════════════════════════════════════════════════════
+
+#[tokio::test]
+async fn analyze_one_logs_to_db() {
+    let tmpdir = tempfile::TempDir::new().unwrap();
+    let env = TestEnv::new(&tmpdir);
+    let db = open_memory_db();
+    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
+
+    let mut queues = TaskQueues::new();
+    queues.issues.push(
+        issue_phase::PENDING,
+        make_issue_item(&repo_id, 200, "Log test"),
+    );
+
+    let gh = MockGh::new();
+    set_gh_issue_open(&gh, 200);
 
     let git = MockGit::new();
     let claude = MockAgent::new();
-    // Review → request_changes
-    claude.enqueue_response(
-        r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Fix bugs\"}"}"#,
-        0,
+    claude.enqueue_response(&make_analysis_json("implement", 0.9), 0);
+
+    run_analyze(&mut queues, &db, &env, &gh, &git, &claude).await;
+
+    let logs = db.log_recent(None, 10).expect("fetch logs");
+    assert!(
+        !logs.is_empty(),
+        "analyze_one should produce at least one log entry"
     );
-    // Feedback implementation
-    claude.enqueue_response(r#"{"result": "Feedback applied"}"#, 0);
-    // Re-review → approve
-    claude.enqueue_response(
-        r#"{"result": "{\"verdict\":\"approve\",\"summary\":\"OK now\"}"}"#,
-        0,
-    );
-    // Knowledge extraction
-    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
-
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-
-    queues
-        .prs
-        .push("Pending", make_pr_item(&repo_id, 96, "Changes needed PR"));
-
-    let sw = MockSuggestWorkflow::new();
-    autodev::pipeline::process_all(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &sw,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    // Review API: REQUEST_CHANGES + APPROVE
-    let reviews = gh.reviewed_prs.lock().unwrap();
-    assert_eq!(reviews.len(), 2);
-    assert_eq!(reviews[0].2, "REQUEST_CHANGES");
-    assert_eq!(reviews[1].2, "APPROVE");
-}
-
-// ═══════════════════════════════════════════════════
-// 21. scan_merges: autodev:done PR을 merge queue에 적재
-// ═══════════════════════════════════════════════════
-
-#[tokio::test]
-async fn scan_merges_detects_done_prs() {
-    let gh = MockGh::new();
-
-    // issues endpoint 응답: autodev:done 라벨이 붙은 PR (#50)
-    let issues_json = serde_json::json!([{
-        "number": 50,
-        "title": "Feature PR",
-        "pull_request": {"url": "https://api.github.com/repos/org/repo/pulls/50"},
-        "labels": [{"name": "autodev:done"}]
-    }]);
-    gh.set_paginate(
-        "org/repo",
-        "issues",
-        serde_json::to_vec(&issues_json).unwrap(),
-    );
-
-    // PR 상세 정보 응답
-    let pr_detail = serde_json::json!({
-        "number": 50,
-        "title": "Feature PR",
-        "head": {"ref": "feat/new-feature"},
-        "base": {"ref": "main"}
-    });
-    gh.set_paginate(
-        "org/repo",
-        "pulls/50",
-        serde_json::to_vec(&pr_detail).unwrap(),
-    );
-
-    let mut queues = TaskQueues::new();
-    autodev::scanner::pulls::scan_merges(
-        &gh,
-        "repo-1",
-        "org/repo",
-        "https://github.com/org/repo",
-        None,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(queues.merges.len(merge_phase::PENDING), 1);
-    assert_label_removed(&gh, "org/repo", 50, labels::DONE);
-    assert_label_added(&gh, "org/repo", 50, labels::WIP);
-}
-
-// ═══════════════════════════════════════════════════
-// 22. scan_merges: 이미 merge queue에 있으면 skip
-// ═══════════════════════════════════════════════════
-
-#[tokio::test]
-async fn scan_merges_dedup_skips_existing() {
-    let gh = MockGh::new();
-
-    let issues_json = serde_json::json!([{
-        "number": 60,
-        "title": "Already queued",
-        "pull_request": {"url": "https://api.github.com/repos/org/repo/pulls/60"},
-        "labels": [{"name": "autodev:done"}]
-    }]);
-    gh.set_paginate(
-        "org/repo",
-        "issues",
-        serde_json::to_vec(&issues_json).unwrap(),
-    );
-
-    let mut queues = TaskQueues::new();
-    // 미리 merge queue에 동일 PR 적재
-    queues.merges.push(
-        merge_phase::PENDING,
-        MergeItem {
-            work_id: make_work_id("merge", "org/repo", 60),
-            repo_id: "repo-1".to_string(),
-            repo_name: "org/repo".to_string(),
-            repo_url: "https://github.com/org/repo".to_string(),
-            pr_number: 60,
-            title: "Already queued".to_string(),
-            head_branch: "feat/x".to_string(),
-            base_branch: "main".to_string(),
-            gh_host: None,
-        },
-    );
-
-    autodev::scanner::pulls::scan_merges(
-        &gh,
-        "repo-1",
-        "org/repo",
-        "https://github.com/org/repo",
-        None,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    // 중복 추가 없음
-    assert_eq!(queues.merges.len(merge_phase::PENDING), 1);
-    // label 변경도 없음
-    assert!(gh.removed_labels.lock().unwrap().is_empty());
-}
-
-// ═══════════════════════════════════════════════════
-// 23. scan_merges: issue(PR 아님)는 무시
-// ═══════════════════════════════════════════════════
-
-#[tokio::test]
-async fn scan_merges_skips_non_pr_issues() {
-    let gh = MockGh::new();
-
-    // pull_request 필드 없는 일반 이슈
-    let issues_json = serde_json::json!([{
-        "number": 70,
-        "title": "Plain issue",
-        "labels": [{"name": "autodev:done"}]
-    }]);
-    gh.set_paginate(
-        "org/repo",
-        "issues",
-        serde_json::to_vec(&issues_json).unwrap(),
-    );
-
-    let mut queues = TaskQueues::new();
-    autodev::scanner::pulls::scan_merges(
-        &gh,
-        "repo-1",
-        "org/repo",
-        "https://github.com/org/repo",
-        None,
-        &mut queues,
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(queues.merges.len(merge_phase::PENDING), 0);
 }

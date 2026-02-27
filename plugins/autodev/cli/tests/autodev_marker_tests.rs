@@ -2,19 +2,13 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use autodev::components::merger::Merger;
-use autodev::components::notifier::Notifier;
 use autodev::components::reviewer::Reviewer;
-use autodev::components::workspace::Workspace;
 use autodev::config::Env;
-use autodev::domain::repository::*;
 use autodev::infrastructure::agent::mock::MockAgent;
 use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
 use autodev::infrastructure::suggest_workflow::mock::MockSuggestWorkflow;
-use autodev::queue::task_queues::{
-    issue_phase, make_work_id, pr_phase, IssueItem, PrItem, TaskQueues,
-};
-use autodev::queue::Database;
+use autodev::queue::task_queues::{make_work_id, IssueItem, PrItem};
 
 // ─── TestEnv ───
 
@@ -44,20 +38,10 @@ impl Env for TestEnv {
 
 // ─── Helpers ───
 
-fn open_memory_db() -> Database {
-    let db = Database::open(Path::new(":memory:")).expect("open in-memory db");
-    db.initialize().expect("initialize schema");
-    db
-}
-
-fn add_repo(db: &Database, url: &str, name: &str) -> String {
-    db.repo_add(url, name).expect("add repo")
-}
-
-fn make_issue_item(repo_id: &str, number: i64, title: &str) -> IssueItem {
+fn make_issue_item(number: i64, title: &str) -> IssueItem {
     IssueItem {
         work_id: make_work_id("issue", "org/repo", number),
-        repo_id: repo_id.to_string(),
+        repo_id: "r1".to_string(),
         repo_name: "org/repo".to_string(),
         repo_url: "https://github.com/org/repo".to_string(),
         github_number: number,
@@ -70,10 +54,10 @@ fn make_issue_item(repo_id: &str, number: i64, title: &str) -> IssueItem {
     }
 }
 
-fn make_pr_item(repo_id: &str, number: i64, title: &str) -> PrItem {
+fn make_pr_item(number: i64, title: &str) -> PrItem {
     PrItem {
         work_id: make_work_id("pr", "org/repo", number),
-        repo_id: repo_id.to_string(),
+        repo_id: "r1".to_string(),
         repo_name: "org/repo".to_string(),
         repo_url: "https://github.com/org/repo".to_string(),
         github_number: number,
@@ -116,8 +100,6 @@ fn make_analysis_json(verdict: &str, confidence: f64) -> String {
 async fn issue_analysis_prompt_contains_autodev_analyze_marker() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     let gh = MockGh::new();
     set_gh_issue_open(&gh, "org/repo", 100);
@@ -126,25 +108,9 @@ async fn issue_analysis_prompt_contains_autodev_analyze_marker() {
     let claude = MockAgent::new();
     claude.enqueue_response(&make_analysis_json("implement", 0.9), 0);
 
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-    queues.issues.push(
-        issue_phase::PENDING,
-        make_issue_item(&repo_id, 100, "Test issue"),
-    );
+    let item = make_issue_item(100, "Test issue");
 
-    autodev::pipeline::issue::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &mut queues,
-    )
-    .await
-    .unwrap();
+    let _output = autodev::pipeline::issue::analyze_one(item, &env, &gh, &git, &claude).await;
 
     let calls = claude.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
@@ -164,8 +130,6 @@ async fn issue_analysis_prompt_contains_autodev_analyze_marker() {
 async fn issue_implement_prompt_contains_autodev_implement_marker() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     let gh = MockGh::new();
     let git = MockGit::new();
@@ -175,30 +139,13 @@ async fn issue_implement_prompt_contains_autodev_implement_marker() {
     // Knowledge extraction response
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-
-    let mut item = make_issue_item(&repo_id, 101, "Implement issue");
+    let mut item = make_issue_item(101, "Implement issue");
     item.analysis_report = Some("Test analysis report".to_string());
-    queues.issues.push(issue_phase::READY, item);
 
-    let sw = MockSuggestWorkflow::new();
-    autodev::pipeline::issue::process_ready(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &sw,
-        &mut queues,
-    )
-    .await
-    .unwrap();
+    let _output = autodev::pipeline::issue::implement_one(item, &env, &gh, &git, &claude).await;
 
     let calls = claude.calls.lock().unwrap();
-    assert!(calls.len() >= 1);
+    assert!(!calls.is_empty());
     let prompt = &calls[0].prompt;
     assert!(
         prompt.starts_with("[autodev] implement: issue #101"),
@@ -215,8 +162,6 @@ async fn issue_implement_prompt_contains_autodev_implement_marker() {
 async fn pr_review_prompt_contains_autodev_review_marker() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     let gh = MockGh::new();
     set_gh_pr_open(&gh, "org/repo", 200);
@@ -225,26 +170,10 @@ async fn pr_review_prompt_contains_autodev_review_marker() {
     let claude = MockAgent::new();
     claude.enqueue_response(r#"{"result": "LGTM - no issues"}"#, 0);
 
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-    queues
-        .prs
-        .push("Pending", make_pr_item(&repo_id, 200, "Test PR"));
+    let item = make_pr_item(200, "Test PR");
 
     let sw = MockSuggestWorkflow::new();
-    autodev::pipeline::pr::process_pending(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &sw,
-        &mut queues,
-    )
-    .await
-    .unwrap();
+    let _output = autodev::pipeline::pr::review_one(item, &env, &gh, &git, &claude, &sw).await;
 
     let calls = claude.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
@@ -264,24 +193,16 @@ async fn pr_review_prompt_contains_autodev_review_marker() {
 async fn pr_improve_prompt_contains_autodev_improve_marker() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     let gh = MockGh::new();
     let git = MockGit::new();
     let claude = MockAgent::new();
     claude.enqueue_response(r#"{"result": "Feedback applied"}"#, 0);
 
-    let workspace = Workspace::new(&git, &env);
-    let mut queues = TaskQueues::new();
-
-    let mut item = make_pr_item(&repo_id, 201, "PR with review feedback");
+    let mut item = make_pr_item(201, "PR with review feedback");
     item.review_comment = Some("Fix the null check on line 42".to_string());
-    queues.prs.push(pr_phase::REVIEW_DONE, item);
 
-    autodev::pipeline::pr::process_review_done(&db, &env, &workspace, &gh, &claude, &mut queues)
-        .await
-        .unwrap();
+    let _output = autodev::pipeline::pr::improve_one(item, &env, &gh, &git, &claude).await;
 
     let calls = claude.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
@@ -301,8 +222,6 @@ async fn pr_improve_prompt_contains_autodev_improve_marker() {
 async fn pr_re_review_prompt_contains_autodev_review_marker() {
     let tmpdir = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmpdir);
-    let db = open_memory_db();
-    let repo_id = add_repo(&db, "https://github.com/org/repo", "org/repo");
 
     let gh = MockGh::new();
     let git = MockGit::new();
@@ -312,31 +231,13 @@ async fn pr_re_review_prompt_contains_autodev_review_marker() {
     // Knowledge extraction
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
-    let workspace = Workspace::new(&git, &env);
-    let notifier = Notifier::new(&gh);
-    let mut queues = TaskQueues::new();
-
-    queues.prs.push(
-        pr_phase::IMPROVED,
-        make_pr_item(&repo_id, 202, "Improved PR"),
-    );
+    let item = make_pr_item(202, "Improved PR");
 
     let sw = MockSuggestWorkflow::new();
-    autodev::pipeline::pr::process_improved(
-        &db,
-        &env,
-        &workspace,
-        &notifier,
-        &gh,
-        &claude,
-        &sw,
-        &mut queues,
-    )
-    .await
-    .unwrap();
+    let _output = autodev::pipeline::pr::re_review_one(item, &env, &gh, &git, &claude, &sw).await;
 
     let calls = claude.calls.lock().unwrap();
-    assert!(calls.len() >= 1);
+    assert!(!calls.is_empty());
     let prompt = &calls[0].prompt;
     assert!(
         prompt.starts_with("[autodev] review: PR #202"),
@@ -406,7 +307,7 @@ async fn knowledge_per_task_prompt_contains_autodev_knowledge_marker() {
     let sw = MockSuggestWorkflow::new();
     let tmp = tempfile::TempDir::new().unwrap();
     let env = TestEnv::new(&tmp);
-    let workspace = Workspace::new(&git, &env);
+    let workspace = autodev::components::workspace::Workspace::new(&git, &env);
     let _ = autodev::knowledge::extractor::extract_task_knowledge(
         &claude,
         &gh,
