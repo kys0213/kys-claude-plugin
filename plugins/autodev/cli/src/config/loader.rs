@@ -8,19 +8,44 @@ const CONFIG_FILENAME: &str = ".develop-workflow.yaml";
 /// 글로벌(~/) + 레포별 YAML을 머지하여 최종 설정 반환
 /// Raw YAML Value 단계에서 딥머지 → 최종 역직렬화
 pub fn load_merged(env: &dyn Env, repo_path: Option<&Path>) -> WorkflowConfig {
+    let global_path = global_config_path(env);
     let global = load_raw_yaml_global(env);
-    let repo = repo_path.and_then(load_raw_yaml_from_dir);
+    tracing::debug!(
+        "[config] global: {} ({})",
+        global_path.display(),
+        if global.is_some() {
+            "found"
+        } else {
+            "not found"
+        }
+    );
+
+    let repo = repo_path.and_then(|p| {
+        let r = load_raw_yaml_from_dir(p);
+        tracing::debug!(
+            "[config] repo: {} ({})",
+            p.join(CONFIG_FILENAME).display(),
+            if r.is_some() { "found" } else { "not found" }
+        );
+        r
+    });
 
     let merged = match (global, repo) {
         (Some(g), Some(r)) => deep_merge(g, r),
         (Some(g), None) => g,
         (None, Some(r)) => r,
-        (None, None) => return WorkflowConfig::default(),
+        (None, None) => {
+            tracing::debug!("[config] no config files found, using defaults");
+            return WorkflowConfig::default();
+        }
     };
 
     // 머지된 YAML Value → WorkflowConfig (serde(default)가 미지정 필드 채움)
     match serde_json::from_value::<WorkflowConfig>(merged) {
-        Ok(cfg) => cfg,
+        Ok(cfg) => {
+            tracing::debug!("[config] gh_host: {:?}", cfg.consumer.gh_host);
+            cfg
+        }
         Err(e) => {
             tracing::warn!("config deserialization failed, falling back to defaults: {e}");
             WorkflowConfig::default()
