@@ -9,10 +9,12 @@ permissions:
   contents: write
 
 jobs:
-  build-suggest-workflow:
+  detect:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    runs-on: macos-latest
-    name: Build suggest-workflow (darwin-aarch64)
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      has_builds: ${{ steps.matrix.outputs.has_builds }}
 
     steps:
       - name: Checkout repository
@@ -21,46 +23,67 @@ jobs:
           ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 0
 
-      - name: Get latest suggest-workflow release tag
-        id: release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Detect Rust plugins to build
+        id: matrix
         run: |
-          TAG=$(gh release list --json tagName -q '[.[] | select(.tagName | startswith("suggest-workflow/"))][0].tagName')
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "Latest suggest-workflow release: $TAG"
+          python3 << 'PYEOF'
+          import tomllib, json, subprocess, os
 
-      - name: Setup Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+          # 범프 커밋에 달린 태그에서 플러그인 이름 추출
+          raw = subprocess.check_output(["git", "tag", "--points-at", "HEAD"]).decode().strip()
+          tags = [t for t in raw.split("\n") if t and "/v" in t]
 
-      - name: Build release binary
-        working-directory: plugins/suggest-workflow/cli
-        run: cargo build --release --features lindera-korean
+          includes = []
+          for tag in tags:
+              plugin = tag.rsplit("/v", 1)[0]
+              cargo_path = f"plugins/{plugin}/cli/Cargo.toml"
 
-      - name: Package binary
-        run: |
-          cd plugins/suggest-workflow/cli/target/release
-          tar czf ${{ github.workspace }}/suggest-workflow-darwin-aarch64.tar.gz suggest-workflow
+              if not os.path.isfile(cargo_path):
+                  print(f"Skip {plugin}: no {cargo_path}")
+                  continue
 
-      - name: Upload to release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload ${{ steps.release.outputs.tag }} suggest-workflow-darwin-aarch64.tar.gz --clobber
+              with open(cargo_path, "rb") as f:
+                  data = tomllib.load(f)
 
-  build-autodev:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+              ci = data.get("package", {}).get("metadata", {}).get("ci", {})
+              targets = ci.get("targets", [])
+              if not targets:
+                  print(f"Skip {plugin}: no ci.targets in Cargo.toml")
+                  continue
+
+              features = ",".join(ci.get("features", []))
+              binary = data.get("bin", [{}])[0].get("name", plugin) if data.get("bin") else data.get("package", {}).get("name", plugin)
+
+              for target in targets:
+                  suffix = target["artifact-suffix"]
+                  includes.append({
+                      "plugin": plugin,
+                      "tag": tag,
+                      "os": target["os"],
+                      "features": features,
+                      "binary": binary,
+                      "artifact": f"{plugin}-{suffix}",
+                  })
+
+          matrix = json.dumps({"include": includes})
+          has_builds = "true" if includes else "false"
+
+          print(f"Matrix: {matrix}")
+          print(f"Has builds: {has_builds}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"matrix={matrix}\n")
+              f.write(f"has_builds={has_builds}\n")
+          PYEOF
+
+  build:
+    needs: detect
+    if: ${{ needs.detect.outputs.has_builds == 'true' }}
     strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: autodev-linux-x86_64
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact: autodev-darwin-aarch64
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
-    name: Build autodev (${{ matrix.artifact }})
+    name: Build ${{ matrix.artifact }}
 
     steps:
       - name: Checkout repository
@@ -69,29 +92,25 @@ jobs:
           ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 0
 
-      - name: Get latest autodev release tag
-        id: release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG=$(gh release list --json tagName -q '[.[] | select(.tagName | startswith("autodev/"))][0].tagName')
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "Latest autodev release: $TAG"
-
       - name: Setup Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: Build release binary
-        working-directory: plugins/autodev/cli
-        run: cargo build --release
+        working-directory: plugins/${{ matrix.plugin }}/cli
+        run: |
+          if [ -n "${{ matrix.features }}" ]; then
+            cargo build --release --features "${{ matrix.features }}"
+          else
+            cargo build --release
+          fi
 
       - name: Package binary
         run: |
-          cd plugins/autodev/cli/target/release
-          tar czf ${{ github.workspace }}/${{ matrix.artifact }}.tar.gz autodev
+          cd plugins/${{ matrix.plugin }}/cli/target/release
+          tar czf ${{ github.workspace }}/${{ matrix.artifact }}.tar.gz ${{ matrix.binary }}
 
       - name: Upload to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ steps.release.outputs.tag }} ${{ matrix.artifact }}.tar.gz --clobber
+          gh release upload ${{ matrix.tag }} ${{ matrix.artifact }}.tar.gz --clobber
