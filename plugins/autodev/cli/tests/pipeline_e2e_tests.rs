@@ -6,7 +6,7 @@ use autodev::components::workspace::Workspace;
 use autodev::config::Env;
 use autodev::domain::labels;
 use autodev::domain::repository::*;
-use autodev::infrastructure::claude::mock::MockClaude;
+use autodev::infrastructure::agent::mock::MockAgent;
 use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
 use autodev::infrastructure::suggest_workflow::mock::MockSuggestWorkflow;
@@ -169,7 +169,7 @@ async fn issue_full_cycle_pending_to_done() {
     set_gh_issue_open(&gh, "org/repo", 10);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
 
     // Phase 1: analysis with high confidence -> ready
     claude.enqueue_response(&make_analysis_json("implement", 0.9), 0);
@@ -238,7 +238,7 @@ async fn issue_failed_retry_reentry_cycle() {
     set_gh_issue_open(&gh, "org/repo", 20);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
 
     // 1st attempt: Claude fails (exit_code 1)
     claude.enqueue_response("analysis error", 1);
@@ -327,7 +327,7 @@ async fn pr_closed_on_github_skips_to_done() {
     gh.set_field("org/repo", "pulls/30", ".state", "closed");
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
@@ -391,7 +391,7 @@ async fn pr_already_approved_skips_to_done() {
     );
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
@@ -448,7 +448,7 @@ async fn merge_success_cycle() {
     set_gh_pr_open(&gh, "org/repo", 40);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // merge success (exit_code 0)
     claude.enqueue_response("Merged successfully", 0);
 
@@ -501,7 +501,7 @@ async fn merge_conflict_then_resolve_success() {
     set_gh_pr_open(&gh, "org/repo", 41);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // 1st call: merge attempt -> conflict (exit_code 1 + "conflict" in output)
     claude.enqueue_response("CONFLICT (content): merge conflict in src/main.rs", 1);
     // 2nd call: resolve_conflicts -> success
@@ -561,7 +561,7 @@ async fn merge_conflict_then_resolve_failure() {
     set_gh_pr_open(&gh, "org/repo", 42);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // 1st call: merge -> conflict
     claude.enqueue_response("CONFLICT (content): merge conflict in complex.rs", 1);
     // 2nd call: resolve -> failure (exit_code 1, no "conflict" keyword -> Failed)
@@ -618,7 +618,7 @@ async fn merge_already_merged_skips_to_done() {
     gh.set_field("org/repo", "pulls/43", ".state", "closed");
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
@@ -672,7 +672,7 @@ async fn confidence_at_threshold_goes_to_ready() {
     set_gh_issue_open(&gh, "org/repo", 50);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // confidence exactly at threshold (0.7)
     claude.enqueue_response(&make_analysis_json("implement", 0.7), 0);
 
@@ -731,7 +731,7 @@ async fn confidence_just_below_threshold_goes_to_waiting() {
     set_gh_issue_open(&gh, "org/repo", 51);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // confidence just below threshold
     claude.enqueue_response(&make_analysis_json("implement", 0.69), 0);
 
@@ -787,7 +787,7 @@ async fn analysis_missing_confidence_field_falls_back_to_ready() {
     set_gh_issue_open(&gh, "org/repo", 52);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // JSON without confidence field -> parse_analysis may return None -> fallback ready
     let bad_json = serde_json::json!({
         "result": r#"{"verdict":"implement","summary":"test","questions":[],"report":"report"}"#
@@ -843,7 +843,7 @@ async fn analysis_completely_malformed_json_falls_back_to_ready() {
     set_gh_issue_open(&gh, "org/repo", 53);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // Completely malformed output (not JSON)
     claude.enqueue_response("I cannot parse this {{{garbage", 0);
 
@@ -903,7 +903,7 @@ async fn workspace_clone_failure_marks_issue_failed() {
     let git = MockGit::new();
     *git.clone_should_fail.lock().unwrap() = true;
 
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
@@ -960,7 +960,7 @@ async fn workspace_worktree_failure_marks_issue_failed() {
     let git = MockGit::new();
     *git.worktree_should_fail.lock().unwrap() = true;
 
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
@@ -1017,7 +1017,7 @@ async fn workspace_clone_failure_marks_pr_failed() {
     let git = MockGit::new();
     *git.clone_should_fail.lock().unwrap() = true;
 
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
@@ -1072,7 +1072,7 @@ async fn workspace_clone_failure_marks_merge_failed() {
     let git = MockGit::new();
     *git.clone_should_fail.lock().unwrap() = true;
 
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
@@ -1230,7 +1230,7 @@ async fn merge_non_conflict_failure_marks_failed() {
     set_gh_pr_open(&gh, "org/repo", 44);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // merge fails with exit_code 1 but no "conflict" keyword -> MergeOutcome::Failed
     claude.enqueue_response("Permission denied: cannot push to protected branch", 1);
 
@@ -1291,7 +1291,7 @@ async fn process_all_handles_all_queues() {
     set_gh_pr_open(&gh, "org/repo", 92);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // 1. Issue analysis -> analyzed (issue::process_pending, exits queue)
     claude.enqueue_response(&make_analysis_json("implement", 0.9), 0);
     // 2. PR review -> ReviewDone (pr::process_pending, verdict=request_changes)
@@ -1399,7 +1399,7 @@ async fn pr_approve_submits_review_api() {
     set_gh_pr_open(&gh, "org/repo", 95);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // Review → approve (verdict=approve)
     claude.enqueue_response(
         r#"{"result": "{\"verdict\":\"approve\",\"summary\":\"LGTM\"}"}"#,
@@ -1456,7 +1456,7 @@ async fn pr_request_changes_submits_review_api() {
     set_gh_pr_open(&gh, "org/repo", 96);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // Review → request_changes
     claude.enqueue_response(
         r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Fix bugs\"}"}"#,

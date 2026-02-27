@@ -9,7 +9,7 @@ use crate::config::Env;
 use crate::domain::labels;
 use crate::domain::models::*;
 use crate::domain::repository::*;
-use crate::infrastructure::claude::Claude;
+use crate::infrastructure::agent::Agent;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::pipeline::{QueueOp, TaskOutput};
@@ -28,7 +28,7 @@ pub async fn process_pending(
     workspace: &Workspace<'_>,
     notifier: &Notifier<'_>,
     gh: &dyn Gh,
-    claude: &dyn Claude,
+    claude: &dyn Agent,
     queues: &mut TaskQueues,
 ) -> Result<()> {
     let cfg = crate::config::loader::load_merged(env, None);
@@ -187,7 +187,7 @@ pub async fn merge_one(
     env: &dyn Env,
     gh: &dyn Gh,
     git: &dyn Git,
-    claude: &dyn Claude,
+    claude: &dyn Agent,
 ) -> TaskOutput {
     let workspace = Workspace::new(git, env);
     let notifier = Notifier::new(gh);

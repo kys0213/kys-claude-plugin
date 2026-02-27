@@ -11,8 +11,8 @@ use crate::config::Env;
 use crate::domain::labels;
 use crate::domain::models::*;
 use crate::domain::repository::*;
-use crate::infrastructure::claude::output;
-use crate::infrastructure::claude::Claude;
+use crate::infrastructure::agent::output;
+use crate::infrastructure::agent::Agent;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
@@ -83,7 +83,7 @@ pub async fn process_pending(
     workspace: &Workspace<'_>,
     notifier: &Notifier<'_>,
     gh: &dyn Gh,
-    claude: &dyn Claude,
+    claude: &dyn Agent,
     queues: &mut TaskQueues,
 ) -> Result<()> {
     let cfg = config::loader::load_merged(env, None);
@@ -327,7 +327,7 @@ pub async fn process_ready(
     workspace: &Workspace<'_>,
     notifier: &Notifier<'_>,
     gh: &dyn Gh,
-    claude: &dyn Claude,
+    claude: &dyn Agent,
     _sw: &dyn SuggestWorkflow,
     queues: &mut TaskQueues,
 ) -> Result<()> {
@@ -396,7 +396,7 @@ pub async fn process_ready(
             .run_session(
                 &wt_path,
                 &prompt,
-                &crate::infrastructure::claude::SessionOptions {
+                &crate::infrastructure::agent::SessionOptions {
                     append_system_prompt: Some(system_prompt),
                     ..Default::default()
                 },
@@ -555,7 +555,7 @@ pub async fn analyze_one(
     env: &dyn Env,
     gh: &dyn Gh,
     git: &dyn Git,
-    claude: &dyn Claude,
+    claude: &dyn Agent,
 ) -> TaskOutput {
     let workspace = Workspace::new(git, env);
     let notifier = Notifier::new(gh);
@@ -786,7 +786,7 @@ pub async fn implement_one(
     env: &dyn Env,
     gh: &dyn Gh,
     git: &dyn Git,
-    claude: &dyn Claude,
+    claude: &dyn Agent,
 ) -> TaskOutput {
     let workspace = Workspace::new(git, env);
     let notifier = Notifier::new(gh);
@@ -858,7 +858,7 @@ pub async fn implement_one(
         .run_session(
             &wt_path,
             &prompt,
-            &crate::infrastructure::claude::SessionOptions {
+            &crate::infrastructure::agent::SessionOptions {
                 append_system_prompt: Some(system_prompt),
                 ..Default::default()
             },

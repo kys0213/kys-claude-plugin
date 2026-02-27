@@ -7,7 +7,7 @@ use autodev::components::reviewer::Reviewer;
 use autodev::components::workspace::Workspace;
 use autodev::config::Env;
 use autodev::domain::repository::*;
-use autodev::infrastructure::claude::mock::MockClaude;
+use autodev::infrastructure::agent::mock::MockAgent;
 use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
 use autodev::infrastructure::suggest_workflow::mock::MockSuggestWorkflow;
@@ -123,7 +123,7 @@ async fn issue_analysis_prompt_contains_autodev_analyze_marker() {
     set_gh_issue_open(&gh, "org/repo", 100);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(&make_analysis_json("implement", 0.9), 0);
 
     let workspace = Workspace::new(&git, &env);
@@ -169,7 +169,7 @@ async fn issue_implement_prompt_contains_autodev_implement_marker() {
 
     let gh = MockGh::new();
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // Phase 2 implementation response
     claude.enqueue_response(r#"{"result": "Done"}"#, 0);
     // Knowledge extraction response
@@ -222,7 +222,7 @@ async fn pr_review_prompt_contains_autodev_review_marker() {
     set_gh_pr_open(&gh, "org/repo", 200);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(r#"{"result": "LGTM - no issues"}"#, 0);
 
     let workspace = Workspace::new(&git, &env);
@@ -269,7 +269,7 @@ async fn pr_improve_prompt_contains_autodev_improve_marker() {
 
     let gh = MockGh::new();
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(r#"{"result": "Feedback applied"}"#, 0);
 
     let workspace = Workspace::new(&git, &env);
@@ -306,7 +306,7 @@ async fn pr_re_review_prompt_contains_autodev_review_marker() {
 
     let gh = MockGh::new();
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // Re-review: approved
     claude.enqueue_response(r#"{"result": "Approved"}"#, 0);
     // Knowledge extraction
@@ -351,7 +351,7 @@ async fn pr_re_review_prompt_contains_autodev_review_marker() {
 
 #[tokio::test]
 async fn merger_prompt_contains_autodev_merge_marker() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response("Merged successfully", 0);
 
     let merger = Merger::new(&claude);
@@ -376,7 +376,7 @@ async fn merger_prompt_contains_autodev_merge_marker() {
 
 #[tokio::test]
 async fn merger_resolve_prompt_contains_autodev_resolve_marker() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response("Conflicts resolved", 0);
 
     let merger = Merger::new(&claude);
@@ -397,7 +397,7 @@ async fn merger_resolve_prompt_contains_autodev_resolve_marker() {
 
 #[tokio::test]
 async fn knowledge_per_task_prompt_contains_autodev_knowledge_marker() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
     let gh = MockGh::new();
@@ -436,7 +436,7 @@ async fn knowledge_per_task_prompt_contains_autodev_knowledge_marker() {
 
 #[tokio::test]
 async fn knowledge_daily_prompt_contains_autodev_knowledge_daily_marker() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
     let report = autodev::knowledge::models::DailyReport {
@@ -476,7 +476,7 @@ async fn knowledge_daily_prompt_contains_autodev_knowledge_daily_marker() {
 
 #[tokio::test]
 async fn reviewer_passes_json_output_format() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(r#"{"result": "LGTM"}"#, 0);
 
     let reviewer = Reviewer::new(&claude);

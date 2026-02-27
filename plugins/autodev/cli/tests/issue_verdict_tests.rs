@@ -6,7 +6,7 @@ use autodev::components::workspace::Workspace;
 use autodev::config::Env;
 use autodev::domain::labels;
 use autodev::domain::repository::RepoRepository;
-use autodev::infrastructure::claude::mock::MockClaude;
+use autodev::infrastructure::agent::mock::MockAgent;
 use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
 use autodev::queue::task_queues::{issue_phase, make_work_id, IssueItem, TaskQueues};
@@ -112,7 +112,7 @@ async fn issue_verdict_wontfix_posts_comment_and_marks_done() {
     set_gh_open(&gh, "org/repo", 1);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(
         &make_analysis_json("wontfix", 0.95, &[], Some("Duplicate of #42")),
         0,
@@ -175,7 +175,7 @@ async fn issue_verdict_needs_clarification_posts_questions_and_waits() {
     set_gh_open(&gh, "org/repo", 2);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(
         &make_analysis_json(
             "needs_clarification",
@@ -243,7 +243,7 @@ async fn issue_verdict_implement_low_confidence_goes_to_waiting() {
     set_gh_open(&gh, "org/repo", 3);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // implement verdict but confidence below threshold (default 0.7)
     claude.enqueue_response(&make_analysis_json("implement", 0.3, &[], None), 0);
 
@@ -303,7 +303,7 @@ async fn issue_verdict_implement_high_confidence_goes_to_ready() {
     set_gh_open(&gh, "org/repo", 4);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(&make_analysis_json("implement", 0.95, &[], None), 0);
 
     let workspace = Workspace::new(&git, &env);
@@ -372,7 +372,7 @@ async fn issue_closed_on_github_skips_to_done() {
     gh.set_field("org/repo", "issues/5", ".state", "closed");
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // Claude should NOT be called
 
     let workspace = Workspace::new(&git, &env);
@@ -429,7 +429,7 @@ async fn issue_unparseable_analysis_falls_back_to_ready() {
     set_gh_open(&gh, "org/repo", 6);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // Invalid JSON → parse_analysis returns None
     claude.enqueue_response("This is not valid JSON at all", 0);
 

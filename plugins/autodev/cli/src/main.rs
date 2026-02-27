@@ -15,7 +15,7 @@ mod queue;
 mod scanner;
 mod tui;
 
-use infrastructure::claude::RealClaude;
+use infrastructure::agent::ClaudeAgent;
 use infrastructure::gh::RealGh;
 use infrastructure::git::RealGit;
 use infrastructure::suggest_workflow::RealSuggestWorkflow;
@@ -157,7 +157,7 @@ async fn main() -> Result<()> {
     // infrastructure 구현체 생성 (프로덕션)
     let gh = RealGh;
     let git = RealGit;
-    let claude = RealClaude;
+    let claude = ClaudeAgent;
     let sw = RealSuggestWorkflow;
 
     match cli.command {
@@ -165,7 +165,7 @@ async fn main() -> Result<()> {
             let env: Arc<dyn config::Env> = Arc::new(env);
             let gh: Arc<dyn infrastructure::gh::Gh> = Arc::new(gh);
             let git: Arc<dyn infrastructure::git::Git> = Arc::new(git);
-            let claude: Arc<dyn infrastructure::claude::Claude> = Arc::new(claude);
+            let claude: Arc<dyn infrastructure::agent::Agent> = Arc::new(claude);
             let sw: Arc<dyn infrastructure::suggest_workflow::SuggestWorkflow> = Arc::new(sw);
             daemon::start(&home, env, gh, git, claude, sw).await?;
         }
@@ -175,7 +175,7 @@ async fn main() -> Result<()> {
             let env: Arc<dyn config::Env> = Arc::new(env);
             let gh: Arc<dyn infrastructure::gh::Gh> = Arc::new(gh);
             let git: Arc<dyn infrastructure::git::Git> = Arc::new(git);
-            let claude: Arc<dyn infrastructure::claude::Claude> = Arc::new(claude);
+            let claude: Arc<dyn infrastructure::agent::Agent> = Arc::new(claude);
             let sw: Arc<dyn infrastructure::suggest_workflow::SuggestWorkflow> = Arc::new(sw);
             daemon::start(&home, env, gh, git, claude, sw).await?;
         }

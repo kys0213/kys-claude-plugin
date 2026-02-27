@@ -6,7 +6,7 @@ use autodev::components::workspace::Workspace;
 use autodev::config::Env;
 use autodev::domain::labels;
 use autodev::domain::repository::*;
-use autodev::infrastructure::claude::mock::MockClaude;
+use autodev::infrastructure::agent::mock::MockAgent;
 use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
 use autodev::infrastructure::suggest_workflow::mock::MockSuggestWorkflow;
@@ -122,7 +122,7 @@ async fn issue_pipeline_success_transitions_to_ready() {
     set_gh_open(&gh, "org/repo", 42, "issues");
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
 
     // analysis 결과 JSON
     let analysis_json = serde_json::json!({
@@ -218,7 +218,7 @@ async fn issue_pipeline_claude_failure_marks_failed() {
     set_gh_open(&gh, "org/repo", 99, "issues");
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response("error output", 1); // exit code 1
 
     let workspace = Workspace::new(&git, &env);
@@ -279,7 +279,7 @@ async fn pr_pipeline_success_transitions_to_review_done() {
     );
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(r#"{"result": "LGTM"}"#, 0);
 
     let workspace = Workspace::new(&git, &env);
@@ -337,7 +337,7 @@ async fn pr_pipeline_claude_failure_marks_failed() {
     );
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response("review error", 1);
 
     let workspace = Workspace::new(&git, &env);
@@ -390,7 +390,7 @@ async fn issue_pipeline_processes_up_to_limit() {
 
     let gh = MockGh::new();
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
 
     let mut queues = TaskQueues::new();
 
@@ -455,7 +455,7 @@ async fn process_all_handles_issues_and_prs() {
     );
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // Issue analysis response
     claude.enqueue_response(
         r#"{"result": "{\"verdict\":\"implement\",\"confidence\":0.9,\"summary\":\"ok\",\"questions\":[],\"reason\":null,\"report\":\"report\"}"}"#,

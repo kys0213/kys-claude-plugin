@@ -3,8 +3,8 @@ use std::path::Path;
 use autodev::components::analyzer::Analyzer;
 use autodev::components::merger::{MergeOutcome, Merger};
 use autodev::components::reviewer::Reviewer;
-use autodev::infrastructure::claude::mock::MockClaude;
-use autodev::infrastructure::claude::output::{ReviewVerdict, Verdict};
+use autodev::infrastructure::agent::mock::MockAgent;
+use autodev::infrastructure::agent::output::{ReviewVerdict, Verdict};
 
 // ═══════════════════════════════════════════════
 // Reviewer 테스트
@@ -12,7 +12,7 @@ use autodev::infrastructure::claude::output::{ReviewVerdict, Verdict};
 
 #[tokio::test]
 async fn reviewer_success_parses_output() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(r#"{"result": "LGTM - no issues found"}"#, 0);
 
     let reviewer = Reviewer::new(&claude);
@@ -34,7 +34,7 @@ async fn reviewer_success_parses_output() {
 
 #[tokio::test]
 async fn reviewer_verdict_approve() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(
         r#"{"result": "{\"verdict\":\"approve\",\"summary\":\"LGTM\"}"}"#,
         0,
@@ -53,7 +53,7 @@ async fn reviewer_verdict_approve() {
 
 #[tokio::test]
 async fn reviewer_verdict_request_changes() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(
         r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Fix bugs\"}"}"#,
         0,
@@ -72,7 +72,7 @@ async fn reviewer_verdict_request_changes() {
 
 #[tokio::test]
 async fn reviewer_verdict_none_on_non_review_json() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // Non-ReviewResult JSON → verdict=None, fallback to parse_output
     claude.enqueue_response(r#"{"result": "LGTM - no issues found"}"#, 0);
 
@@ -89,7 +89,7 @@ async fn reviewer_verdict_none_on_non_review_json() {
 
 #[tokio::test]
 async fn reviewer_success_raw_output() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response("Plain text review output", 0);
 
     let reviewer = Reviewer::new(&claude);
@@ -105,7 +105,7 @@ async fn reviewer_success_raw_output() {
 
 #[tokio::test]
 async fn reviewer_failure_returns_empty_review() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response("error output", 1);
 
     let reviewer = Reviewer::new(&claude);
@@ -121,8 +121,8 @@ async fn reviewer_failure_returns_empty_review() {
 
 #[tokio::test]
 async fn reviewer_no_response_returns_failure() {
-    let claude = MockClaude::new();
-    // No response enqueued → MockClaude returns exit_code=1
+    let claude = MockAgent::new();
+    // No response enqueued → MockAgent returns exit_code=1
 
     let reviewer = Reviewer::new(&claude);
     let output = reviewer
@@ -140,7 +140,7 @@ async fn reviewer_no_response_returns_failure() {
 
 #[tokio::test]
 async fn merger_success() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response("Merged successfully", 0);
 
     let merger = Merger::new(&claude);
@@ -158,7 +158,7 @@ async fn merger_success() {
 
 #[tokio::test]
 async fn merger_conflict_detected_in_stdout() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response("CONFLICT (content): Merge conflict in src/main.rs", 1);
 
     let merger = Merger::new(&claude);
@@ -169,8 +169,8 @@ async fn merger_conflict_detected_in_stdout() {
 
 #[tokio::test]
 async fn merger_conflict_detected_in_stderr() {
-    let claude = MockClaude::new();
-    // MockClaude는 stderr를 빈 문자열로 설정하므로, stdout에서 확인
+    let claude = MockAgent::new();
+    // MockAgent는 stderr를 빈 문자열로 설정하므로, stdout에서 확인
     // stderr에 conflict가 있는 경우를 테스트하려면 별도 처리 필요
     // 여기서는 stdout에 conflict가 포함된 경우를 테스트
     claude.enqueue_response("merge conflict detected", 1);
@@ -183,7 +183,7 @@ async fn merger_conflict_detected_in_stderr() {
 
 #[tokio::test]
 async fn merger_failure_without_conflict() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response("permission denied", 1);
 
     let merger = Merger::new(&claude);
@@ -198,13 +198,13 @@ async fn merger_failure_without_conflict() {
 
 #[tokio::test]
 async fn merger_error_no_response() {
-    let claude = MockClaude::new();
-    // No response → MockClaude returns exit_code=1 with empty stdout
+    let claude = MockAgent::new();
+    // No response → MockAgent returns exit_code=1 with empty stdout
 
     let merger = Merger::new(&claude);
     let output = merger.merge_pr(Path::new("/tmp/test"), 10).await;
 
-    // MockClaude returns Ok with exit_code=1 (not Err), so this is Failed
+    // MockAgent returns Ok with exit_code=1 (not Err), so this is Failed
     assert!(matches!(output.outcome, MergeOutcome::Failed { .. }));
 }
 
@@ -214,7 +214,7 @@ async fn merger_error_no_response() {
 
 #[tokio::test]
 async fn merger_resolve_success() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response("Conflicts resolved", 0);
 
     let merger = Merger::new(&claude);
@@ -228,7 +228,7 @@ async fn merger_resolve_success() {
 
 #[tokio::test]
 async fn merger_resolve_failure() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response("Cannot resolve", 1);
 
     let merger = Merger::new(&claude);
@@ -246,7 +246,7 @@ async fn merger_resolve_failure() {
 
 #[tokio::test]
 async fn merger_conflict_then_resolve_success() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // 1차: merge → conflict
     claude.enqueue_response("CONFLICT in file.rs", 1);
     // 2차: resolve → success
@@ -265,7 +265,7 @@ async fn merger_conflict_then_resolve_success() {
 
 #[tokio::test]
 async fn merger_conflict_then_resolve_failure() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // 1차: merge → conflict
     claude.enqueue_response("conflict in main.rs", 1);
     // 2차: resolve → fail
@@ -296,7 +296,7 @@ fn make_analysis_json_fixture(verdict: &str, confidence: f64) -> String {
 
 #[tokio::test]
 async fn analyzer_success_parses_implement() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(&make_analysis_json_fixture("implement", 0.9), 0);
 
     let analyzer = Analyzer::new(&claude);
@@ -314,7 +314,7 @@ async fn analyzer_success_parses_implement() {
 
 #[tokio::test]
 async fn analyzer_success_parses_needs_clarification() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(&make_analysis_json_fixture("needs_clarification", 0.4), 0);
 
     let analyzer = Analyzer::new(&claude);
@@ -330,7 +330,7 @@ async fn analyzer_success_parses_needs_clarification() {
 
 #[tokio::test]
 async fn analyzer_failure_returns_none_analysis() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response("error", 1);
 
     let analyzer = Analyzer::new(&claude);
@@ -345,7 +345,7 @@ async fn analyzer_failure_returns_none_analysis() {
 
 #[tokio::test]
 async fn analyzer_malformed_json_returns_none_analysis() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response("not json at all {{{", 0);
 
     let analyzer = Analyzer::new(&claude);

@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use crate::components::workspace::Workspace;
 use crate::domain::labels;
-use crate::infrastructure::claude::Claude;
+use crate::infrastructure::agent::Agent;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 
@@ -138,7 +138,7 @@ fn collect_md_dir(dir: &Path, label: &str, knowledge: &mut String) {
 /// 결과는 GitHub 이슈 코멘트로 게시.
 #[allow(clippy::too_many_arguments)]
 pub async fn extract_task_knowledge(
-    claude: &dyn Claude,
+    claude: &dyn Agent,
     gh: &dyn Gh,
     workspace: &Workspace<'_>,
     sw: &dyn SuggestWorkflow,
@@ -260,7 +260,7 @@ async fn build_suggest_workflow_section(
 fn parse_knowledge_suggestion(stdout: &str) -> Option<KnowledgeSuggestion> {
     // claude --output-format json envelope
     if let Ok(envelope) =
-        serde_json::from_str::<crate::infrastructure::claude::output::ClaudeJsonOutput>(stdout)
+        serde_json::from_str::<crate::infrastructure::agent::output::ClaudeJsonOutput>(stdout)
     {
         if let Some(inner) = envelope.result {
             if let Ok(ks) = serde_json::from_str::<KnowledgeSuggestion>(&inner) {

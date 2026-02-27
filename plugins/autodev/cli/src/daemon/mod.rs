@@ -18,7 +18,7 @@ use crate::config::{self, Env};
 use crate::domain::git_repository::GitRepository;
 use crate::domain::git_repository_factory::GitRepositoryFactory;
 use crate::domain::repository::{ConsumerLogRepository, RepoRepository, ScanCursorRepository};
-use crate::infrastructure::claude::Claude;
+use crate::infrastructure::agent::Agent;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
@@ -114,7 +114,7 @@ fn spawn_ready_tasks(
     env: &Arc<dyn Env>,
     gh: &Arc<dyn Gh>,
     git: &Arc<dyn Git>,
-    claude: &Arc<dyn Claude>,
+    claude: &Arc<dyn Agent>,
     sw: &Arc<dyn SuggestWorkflow>,
 ) {
     for repo in repos.values_mut() {
@@ -256,7 +256,7 @@ pub async fn start(
     env: Arc<dyn Env>,
     gh: Arc<dyn Gh>,
     git: Arc<dyn Git>,
-    claude: Arc<dyn Claude>,
+    claude: Arc<dyn Agent>,
     sw: Arc<dyn SuggestWorkflow>,
 ) -> Result<()> {
     if pid::is_running(home) {

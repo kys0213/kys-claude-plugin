@@ -10,8 +10,8 @@ use crate::config::Env;
 use crate::domain::labels;
 use crate::domain::models::*;
 use crate::domain::repository::*;
-use crate::infrastructure::claude::output::ReviewVerdict;
-use crate::infrastructure::claude::Claude;
+use crate::infrastructure::agent::output::ReviewVerdict;
+use crate::infrastructure::agent::Agent;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
@@ -46,7 +46,7 @@ pub async fn process_pending(
     workspace: &Workspace<'_>,
     notifier: &Notifier<'_>,
     gh: &dyn Gh,
-    claude: &dyn Claude,
+    claude: &dyn Agent,
     sw: &dyn SuggestWorkflow,
     queues: &mut TaskQueues,
 ) -> Result<()> {
@@ -297,7 +297,7 @@ pub async fn process_review_done(
     _env: &dyn Env,
     workspace: &Workspace<'_>,
     gh: &dyn Gh,
-    claude: &dyn Claude,
+    claude: &dyn Agent,
     queues: &mut TaskQueues,
 ) -> Result<()> {
     while let Some(mut item) = queues.prs.pop(pr_phase::REVIEW_DONE) {
@@ -344,7 +344,7 @@ pub async fn process_review_done(
             .run_session(
                 &wt_path,
                 &prompt,
-                &crate::infrastructure::claude::SessionOptions {
+                &crate::infrastructure::agent::SessionOptions {
                     append_system_prompt: Some(AGENT_SYSTEM_PROMPT.to_string()),
                     ..Default::default()
                 },
@@ -432,7 +432,7 @@ pub async fn process_improved(
     workspace: &Workspace<'_>,
     notifier: &Notifier<'_>,
     gh: &dyn Gh,
-    claude: &dyn Claude,
+    claude: &dyn Agent,
     sw: &dyn SuggestWorkflow,
     queues: &mut TaskQueues,
 ) -> Result<()> {
@@ -693,7 +693,7 @@ pub async fn review_one(
     env: &dyn Env,
     gh: &dyn Gh,
     git: &dyn Git,
-    claude: &dyn Claude,
+    claude: &dyn Agent,
     sw: &dyn SuggestWorkflow,
 ) -> TaskOutput {
     let workspace = Workspace::new(git, env);
@@ -957,7 +957,7 @@ pub async fn improve_one(
     env: &dyn Env,
     gh: &dyn Gh,
     git: &dyn Git,
-    claude: &dyn Claude,
+    claude: &dyn Agent,
 ) -> TaskOutput {
     let workspace = Workspace::new(git, env);
     let gh_host = item.gh_host.as_deref();
@@ -1013,7 +1013,7 @@ pub async fn improve_one(
         .run_session(
             &wt_path,
             &prompt,
-            &crate::infrastructure::claude::SessionOptions {
+            &crate::infrastructure::agent::SessionOptions {
                 append_system_prompt: Some(AGENT_SYSTEM_PROMPT.to_string()),
                 ..Default::default()
             },
@@ -1096,7 +1096,7 @@ pub async fn re_review_one(
     env: &dyn Env,
     gh: &dyn Gh,
     git: &dyn Git,
-    claude: &dyn Claude,
+    claude: &dyn Agent,
     sw: &dyn SuggestWorkflow,
 ) -> TaskOutput {
     let workspace = Workspace::new(git, env);

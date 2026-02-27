@@ -2,13 +2,13 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::infrastructure::claude::output;
-use crate::infrastructure::claude::output::ReviewVerdict;
-use crate::infrastructure::claude::{Claude, SessionOptions};
+use crate::infrastructure::agent::output;
+use crate::infrastructure::agent::output::ReviewVerdict;
+use crate::infrastructure::agent::{Agent, SessionOptions};
 
 /// PR 리뷰 실행 — Claude 세션을 통한 코드 리뷰
 pub struct Reviewer<'a> {
-    claude: &'a dyn Claude,
+    claude: &'a dyn Agent,
 }
 
 /// 리뷰 실행 결과
@@ -23,7 +23,7 @@ pub struct ReviewOutput {
 }
 
 impl<'a> Reviewer<'a> {
-    pub fn new(claude: &'a dyn Claude) -> Self {
+    pub fn new(claude: &'a dyn Agent) -> Self {
         Self { claude }
     }
 

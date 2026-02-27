@@ -9,7 +9,7 @@ use crate::components::workspace::Workspace;
 use crate::config::Env;
 use crate::domain::models::NewConsumerLog;
 use crate::domain::repository::ConsumerLogRepository;
-use crate::infrastructure::claude::Claude;
+use crate::infrastructure::agent::Agent;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 use crate::queue::task_queues::{IssueItem, MergeItem, PrItem, TaskQueues};
@@ -107,7 +107,7 @@ pub async fn process_all(
     workspace: &Workspace<'_>,
     notifier: &Notifier<'_>,
     gh: &dyn Gh,
-    claude: &dyn Claude,
+    claude: &dyn Agent,
     sw: &dyn SuggestWorkflow,
     queues: &mut TaskQueues,
 ) -> Result<()> {

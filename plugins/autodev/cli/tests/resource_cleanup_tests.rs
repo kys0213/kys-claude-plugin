@@ -6,7 +6,7 @@ use autodev::components::workspace::Workspace;
 use autodev::config::Env;
 use autodev::domain::labels;
 use autodev::domain::repository::*;
-use autodev::infrastructure::claude::mock::MockClaude;
+use autodev::infrastructure::agent::mock::MockAgent;
 use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
 use autodev::infrastructure::suggest_workflow::mock::MockSuggestWorkflow;
@@ -116,7 +116,7 @@ async fn merge_success_cleans_up_worktree() {
     set_gh_pr_open(&gh, 50);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response("Merged successfully", 0);
 
     let workspace = Workspace::new(&git, &env);
@@ -154,7 +154,7 @@ async fn merge_conflict_cleans_up_worktree_c5() {
     set_gh_pr_open(&gh, 51);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // merge → conflict
     claude.enqueue_response("CONFLICT in file.rs", 1);
     // resolve → fail
@@ -196,7 +196,7 @@ async fn merge_failed_cleans_up_worktree_c5() {
     set_gh_pr_open(&gh, 52);
 
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response("permission denied", 1);
 
     let workspace = Workspace::new(&git, &env);
@@ -237,7 +237,7 @@ async fn pr_review_done_success_cleans_worktree_c2() {
 
     let gh = MockGh::new();
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(r#"{"result": "Feedback applied"}"#, 0);
 
     let workspace = Workspace::new(&git, &env);
@@ -268,7 +268,7 @@ async fn pr_review_done_failure_cleans_worktree_c2() {
 
     let gh = MockGh::new();
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response("implementation error", 1);
 
     let workspace = Workspace::new(&git, &env);
@@ -303,7 +303,7 @@ async fn pr_improved_approved_does_not_clean_worktree_c3() {
 
     let gh = MockGh::new();
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // Re-review: approved (exit_code 0)
     claude.enqueue_response(r#"{"result": "LGTM"}"#, 0);
     // Knowledge extraction
@@ -347,7 +347,7 @@ async fn pr_improved_request_changes_does_not_clean_worktree_c3() {
 
     let gh = MockGh::new();
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     // Re-review: request_changes (verdict-based)
     claude.enqueue_response(
         r#"{"result": "{\"verdict\":\"request_changes\",\"summary\":\"Needs more work\"}"}"#,
@@ -407,7 +407,7 @@ async fn review_cycle_stops_at_max_iterations_c4() {
 
     let gh = MockGh::new();
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
 
     let workspace = Workspace::new(&git, &env);
     let notifier = Notifier::new(&gh);
@@ -525,7 +525,7 @@ async fn issue_ready_cleans_up_worktree() {
 
     let gh = MockGh::new();
     let git = MockGit::new();
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(r#"{"result": "Done"}"#, 0);
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
