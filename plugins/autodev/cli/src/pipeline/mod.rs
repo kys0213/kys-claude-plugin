@@ -1,6 +1,9 @@
 pub mod issue;
 pub mod merge;
 pub mod pr;
+pub mod task;
+pub mod task_runner;
+pub mod tasks;
 
 use anyhow::Result;
 
