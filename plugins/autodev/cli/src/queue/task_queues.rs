@@ -129,6 +129,7 @@ impl Default for TaskQueues {
 }
 
 impl TaskQueues {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
     }
