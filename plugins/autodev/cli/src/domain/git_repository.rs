@@ -475,6 +475,212 @@ impl GitRepository {
 
         Ok(())
     }
+
+    // ─── Recovery ───
+
+    /// Orphan `autodev:wip` 라벨 정리.
+    ///
+    /// pre-fetched issues/pulls 중 wip 라벨이 있지만 큐에 없는 항목의
+    /// wip 라벨을 제거한다. 다음 scan에서 재발견되어 재처리된다.
+    pub async fn recover_orphan_wip(&self, gh: &dyn Gh) -> u64 {
+        let mut recovered = 0u64;
+        let gh_host = self.gh_host.as_deref();
+
+        for issue in self.issues.iter().filter(|i| i.is_wip()) {
+            let work_id = make_work_id("issue", &self.name, issue.number);
+            if !self.contains(&work_id)
+                && gh
+                    .label_remove(&self.name, issue.number, labels::WIP, gh_host)
+                    .await
+            {
+                recovered += 1;
+                tracing::info!(
+                    "recovered orphan issue #{} in {} (removed autodev:wip)",
+                    issue.number,
+                    self.name
+                );
+            }
+        }
+
+        for pull in self.pulls.iter().filter(|p| p.is_wip()) {
+            let work_id = make_work_id("pr", &self.name, pull.number);
+            if !self.contains(&work_id)
+                && gh
+                    .label_remove(&self.name, pull.number, labels::WIP, gh_host)
+                    .await
+            {
+                recovered += 1;
+                tracing::info!(
+                    "recovered orphan pr #{} in {} (removed autodev:wip)",
+                    pull.number,
+                    self.name
+                );
+            }
+        }
+
+        recovered
+    }
+
+    /// Orphan `autodev:implementing` 이슈 복구.
+    ///
+    /// implementing 라벨이 있지만 큐에 없는 이슈를 찾아:
+    /// - pr-link 마커 있고 PR closed/merged → done 전이
+    /// - pr-link 마커 없음 → implementing 제거 (다음 scan에서 재시도)
+    pub async fn recover_orphan_implementing(&self, gh: &dyn Gh) -> u64 {
+        let mut recovered = 0u64;
+        let gh_host = self.gh_host.as_deref();
+
+        for issue in self.issues.iter().filter(|i| i.is_implementing()) {
+            let work_id = make_work_id("issue", &self.name, issue.number);
+            if self.contains(&work_id) {
+                continue;
+            }
+
+            match extract_pr_link_from_comments(gh, &self.name, issue.number, gh_host).await {
+                Some(pr_num) => {
+                    let pr_state = get_pr_state(gh, &self.name, pr_num, gh_host).await;
+                    match pr_state.as_deref() {
+                        Some("closed") | Some("merged") => {
+                            gh.label_remove(
+                                &self.name,
+                                issue.number,
+                                labels::IMPLEMENTING,
+                                gh_host,
+                            )
+                            .await;
+                            gh.label_add(&self.name, issue.number, labels::DONE, gh_host)
+                                .await;
+                            recovered += 1;
+                            tracing::info!(
+                                "recovered implementing issue #{} in {} (PR #{pr_num} {})",
+                                issue.number,
+                                self.name,
+                                pr_state.as_deref().unwrap_or("unknown")
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+                None => {
+                    gh.label_remove(&self.name, issue.number, labels::IMPLEMENTING, gh_host)
+                        .await;
+                    recovered += 1;
+                    tracing::info!(
+                        "recovered orphan implementing issue #{} in {} (no pr-link marker)",
+                        issue.number,
+                        self.name
+                    );
+                }
+            }
+        }
+
+        recovered
+    }
+
+    /// 재시작 시 pre-fetched 상태 기반 큐 복구.
+    ///
+    /// issues/pulls의 라벨 상태에 따라 적절한 큐에 적재한다.
+    pub async fn startup_reconcile(&mut self, gh: &dyn Gh) -> u64 {
+        let mut recovered = 0u64;
+        let gh_host = self.gh_host.as_deref();
+
+        // ── Issues 복구 ──
+        for issue in &self.issues {
+            if issue.is_terminal() {
+                continue;
+            }
+            if issue.is_analyze() {
+                continue;
+            }
+            if issue.is_analyzed() {
+                continue;
+            }
+            if issue.is_implementing() {
+                continue;
+            }
+
+            let work_id = make_work_id("issue", &self.name, issue.number);
+            if self.contains(&work_id) {
+                continue;
+            }
+
+            if issue.is_approved() {
+                gh.label_remove(&self.name, issue.number, labels::APPROVED_ANALYSIS, gh_host)
+                    .await;
+                gh.label_remove(&self.name, issue.number, labels::ANALYZED, gh_host)
+                    .await;
+                gh.label_add(&self.name, issue.number, labels::IMPLEMENTING, gh_host)
+                    .await;
+
+                let item = IssueItem {
+                    work_id,
+                    repo_id: self.id.clone(),
+                    repo_name: self.name.clone(),
+                    repo_url: self.url.clone(),
+                    github_number: issue.number,
+                    title: issue.title.clone(),
+                    body: issue.body.clone(),
+                    labels: issue.labels.clone(),
+                    author: issue.author.clone(),
+                    analysis_report: None,
+                };
+
+                self.issue_queue.push(issue_phase::READY, item);
+                recovered += 1;
+                continue;
+            }
+
+            if issue.is_wip() {
+                let item = IssueItem {
+                    work_id,
+                    repo_id: self.id.clone(),
+                    repo_name: self.name.clone(),
+                    repo_url: self.url.clone(),
+                    github_number: issue.number,
+                    title: issue.title.clone(),
+                    body: issue.body.clone(),
+                    labels: issue.labels.clone(),
+                    author: issue.author.clone(),
+                    analysis_report: None,
+                };
+
+                self.issue_queue.push(issue_phase::PENDING, item);
+                recovered += 1;
+                continue;
+            }
+        }
+
+        // ── PRs 복구 ──
+        for pull in self.pulls.iter().filter(|p| p.is_wip()) {
+            if pull.is_terminal() {
+                continue;
+            }
+
+            let work_id = make_work_id("pr", &self.name, pull.number);
+            if self.contains(&work_id) {
+                continue;
+            }
+
+            let item = PrItem {
+                work_id,
+                repo_id: self.id.clone(),
+                repo_name: self.name.clone(),
+                repo_url: self.url.clone(),
+                github_number: pull.number,
+                title: pull.title.clone(),
+                head_branch: pull.head_branch.clone(),
+                base_branch: pull.base_branch.clone(),
+                review_comment: None,
+                source_issue_number: pull.source_issue_number(),
+                review_iteration: pull.review_iteration(),
+            };
+
+            self.pr_queue.push(pr_phase::PENDING, item);
+            recovered += 1;
+        }
+
+        recovered
+    }
 }
 
 // ─── GitHub API Helpers ───
@@ -527,6 +733,42 @@ pub(crate) async fn fetch_pulls(
             Vec::new()
         }
     }
+}
+
+// ─── Recovery Helpers ───
+
+/// 이슈 코멘트에서 `<!-- autodev:pr-link:{N} -->` 마커를 추출하여 PR 번호 반환
+async fn extract_pr_link_from_comments(
+    gh: &dyn Gh,
+    repo_name: &str,
+    number: i64,
+    gh_host: Option<&str>,
+) -> Option<i64> {
+    let jq = r#"[.[] | select(.body | contains("<!-- autodev:pr-link:")) | .body] | last"#;
+    let body = gh
+        .api_get_field(repo_name, &format!("issues/{number}/comments"), jq, gh_host)
+        .await?;
+    let start = body.find("<!-- autodev:pr-link:")? + "<!-- autodev:pr-link:".len();
+    let end = body[start..].find(" -->").map(|i| start + i)?;
+    body[start..end].trim().parse().ok()
+}
+
+/// PR의 state를 조회 ("open", "closed", "merged" 등)
+async fn get_pr_state(
+    gh: &dyn Gh,
+    repo_name: &str,
+    pr_number: i64,
+    gh_host: Option<&str>,
+) -> Option<String> {
+    let merged = gh
+        .api_get_field(repo_name, &format!("pulls/{pr_number}"), ".merged", gh_host)
+        .await;
+    if merged.as_deref() == Some("true") {
+        return Some("merged".to_string());
+    }
+
+    gh.api_get_field(repo_name, &format!("pulls/{pr_number}"), ".state", gh_host)
+        .await
 }
 
 #[cfg(test)]
@@ -1074,5 +1316,311 @@ mod tests {
         repo.scan_merges(&gh).await.unwrap();
 
         assert_eq!(repo.merge_queue.len(merge_phase::PENDING), 0);
+    }
+
+    // ═══════════════════════════════════════════════════
+    // Recovery Tests
+    // ═══════════════════════════════════════════════════
+
+    fn make_repo_with_state(issues: Vec<RepoIssue>, pulls: Vec<RepoPull>) -> GitRepository {
+        let mut repo = make_repo();
+        repo.set_github_state(issues, pulls);
+        repo
+    }
+
+    fn issue_from_json(v: serde_json::Value) -> RepoIssue {
+        RepoIssue::from_json(&v).expect("valid issue JSON")
+    }
+
+    fn pull_from_json(v: serde_json::Value) -> RepoPull {
+        RepoPull::from_json(&v).expect("valid pull JSON")
+    }
+
+    #[tokio::test]
+    async fn recover_orphan_wip_removes_label_from_unqueued_issues() {
+        let gh = MockGh::new();
+        let repo = make_repo_with_state(
+            vec![issue_from_json(serde_json::json!({
+                "number": 1, "title": "Orphan WIP",
+                "labels": [{"name": "autodev:wip"}],
+                "user": {"login": "alice"}
+            }))],
+            vec![],
+        );
+
+        let recovered = repo.recover_orphan_wip(&gh).await;
+
+        assert_eq!(recovered, 1);
+        let removed = gh.removed_labels.lock().unwrap();
+        assert_eq!(removed.len(), 1);
+        assert_eq!(
+            removed[0],
+            ("org/repo".to_string(), 1, "autodev:wip".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn recover_orphan_wip_keeps_queued_items() {
+        let gh = MockGh::new();
+        let mut repo = make_repo_with_state(
+            vec![issue_from_json(serde_json::json!({
+                "number": 1, "title": "Queued WIP",
+                "labels": [{"name": "autodev:wip"}],
+                "user": {"login": "alice"}
+            }))],
+            vec![],
+        );
+
+        // Pre-populate queue
+        repo.issue_queue
+            .push(issue_phase::PENDING, issue_item("org/repo", 1));
+
+        let recovered = repo.recover_orphan_wip(&gh).await;
+
+        assert_eq!(recovered, 0);
+        assert!(gh.removed_labels.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn recover_orphan_wip_handles_prs() {
+        let gh = MockGh::new();
+        let repo = make_repo_with_state(
+            vec![],
+            vec![pull_from_json(serde_json::json!({
+                "number": 10, "title": "Orphan PR",
+                "labels": [{"name": "autodev:wip"}],
+                "head": {"ref": "fix"}, "base": {"ref": "main"},
+                "user": {"login": "bob"}
+            }))],
+        );
+
+        let recovered = repo.recover_orphan_wip(&gh).await;
+
+        assert_eq!(recovered, 1);
+        let removed = gh.removed_labels.lock().unwrap();
+        assert_eq!(
+            removed[0],
+            ("org/repo".to_string(), 10, "autodev:wip".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn recover_orphan_implementing_no_pr_link_removes_label() {
+        let gh = MockGh::new();
+        let repo = make_repo_with_state(
+            vec![issue_from_json(serde_json::json!({
+                "number": 5, "title": "Implementing",
+                "labels": [{"name": "autodev:implementing"}],
+                "user": {"login": "alice"}
+            }))],
+            vec![],
+        );
+        // No pr-link comment set → extract_pr_link_from_comments returns None
+
+        let recovered = repo.recover_orphan_implementing(&gh).await;
+
+        assert_eq!(recovered, 1);
+        let removed = gh.removed_labels.lock().unwrap();
+        assert!(removed.iter().any(|r| r.2 == "autodev:implementing"));
+    }
+
+    #[tokio::test]
+    async fn recover_orphan_implementing_with_merged_pr_transitions_to_done() {
+        let gh = MockGh::new();
+        let repo = make_repo_with_state(
+            vec![issue_from_json(serde_json::json!({
+                "number": 5, "title": "Implementing",
+                "labels": [{"name": "autodev:implementing"}],
+                "user": {"login": "alice"}
+            }))],
+            vec![],
+        );
+
+        // Set up pr-link comment
+        gh.set_field(
+            "org/repo",
+            "issues/5/comments",
+            r#"[.[] | select(.body | contains("<!-- autodev:pr-link:")) | .body] | last"#,
+            "some text <!-- autodev:pr-link:42 --> more text",
+        );
+        // PR is merged
+        gh.set_field("org/repo", "pulls/42", ".merged", "true");
+
+        let recovered = repo.recover_orphan_implementing(&gh).await;
+
+        assert_eq!(recovered, 1);
+        let removed = gh.removed_labels.lock().unwrap();
+        assert!(removed.iter().any(|r| r.2 == "autodev:implementing"));
+        let added = gh.added_labels.lock().unwrap();
+        assert!(added.iter().any(|r| r.2 == "autodev:done"));
+    }
+
+    // ═══════════════════════════════════════════════════
+    // startup_reconcile Tests
+    // ═══════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn reconcile_skips_unlabeled_issues() {
+        let gh = MockGh::new();
+        let mut repo = make_repo_with_state(
+            vec![issue_from_json(serde_json::json!({
+                "number": 10, "title": "No label",
+                "labels": [], "user": {"login": "alice"}
+            }))],
+            vec![],
+        );
+
+        let result = repo.startup_reconcile(&gh).await;
+        assert_eq!(result, 0);
+        assert!(!repo.contains("issue:org/repo:10"));
+    }
+
+    #[tokio::test]
+    async fn reconcile_skips_terminal_issues() {
+        let gh = MockGh::new();
+        let mut repo = make_repo_with_state(
+            vec![
+                issue_from_json(serde_json::json!({
+                    "number": 1, "title": "Done",
+                    "labels": [{"name": "autodev:done"}], "user": {"login": "a"}
+                })),
+                issue_from_json(serde_json::json!({
+                    "number": 2, "title": "Skip",
+                    "labels": [{"name": "autodev:skip"}], "user": {"login": "a"}
+                })),
+            ],
+            vec![],
+        );
+
+        let result = repo.startup_reconcile(&gh).await;
+        assert_eq!(result, 0);
+    }
+
+    #[tokio::test]
+    async fn reconcile_recovers_wip_issue_to_pending() {
+        let gh = MockGh::new();
+        let mut repo = make_repo_with_state(
+            vec![issue_from_json(serde_json::json!({
+                "number": 42, "title": "Orphan WIP",
+                "labels": [{"name": "autodev:wip"}], "user": {"login": "alice"}
+            }))],
+            vec![],
+        );
+
+        let result = repo.startup_reconcile(&gh).await;
+
+        assert_eq!(result, 1);
+        assert!(repo.contains("issue:org/repo:42"));
+        assert_eq!(repo.issue_queue.len(issue_phase::PENDING), 1);
+
+        // wip label not touched (kept as-is)
+        assert!(gh.removed_labels.lock().unwrap().is_empty());
+        assert!(gh.added_labels.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn reconcile_recovers_approved_to_ready() {
+        let gh = MockGh::new();
+        let mut repo = make_repo_with_state(
+            vec![issue_from_json(serde_json::json!({
+                "number": 3, "title": "Approved",
+                "labels": [{"name": "autodev:approved-analysis"}],
+                "user": {"login": "a"}
+            }))],
+            vec![],
+        );
+
+        let result = repo.startup_reconcile(&gh).await;
+
+        assert_eq!(result, 1);
+        assert!(repo.contains("issue:org/repo:3"));
+        assert_eq!(repo.issue_queue.len(issue_phase::READY), 1);
+
+        let added = gh.added_labels.lock().unwrap();
+        assert!(added
+            .iter()
+            .any(|(_, n, l)| *n == 3 && l == "autodev:implementing"));
+
+        let removed = gh.removed_labels.lock().unwrap();
+        assert!(removed
+            .iter()
+            .any(|(_, n, l)| *n == 3 && l == "autodev:approved-analysis"));
+    }
+
+    #[tokio::test]
+    async fn reconcile_recovers_wip_pr_to_pending() {
+        let gh = MockGh::new();
+        let mut repo = make_repo_with_state(
+            vec![],
+            vec![pull_from_json(serde_json::json!({
+                "number": 20, "title": "WIP PR",
+                "labels": [{"name": "autodev:wip"}],
+                "head": {"ref": "feat/test"}, "base": {"ref": "main"},
+                "user": {"login": "bob"}
+            }))],
+        );
+
+        let result = repo.startup_reconcile(&gh).await;
+
+        assert_eq!(result, 1);
+        assert!(repo.contains("pr:org/repo:20"));
+        assert_eq!(repo.pr_queue.len(pr_phase::PENDING), 1);
+    }
+
+    #[tokio::test]
+    async fn reconcile_skips_unlabeled_prs() {
+        let gh = MockGh::new();
+        let mut repo = make_repo_with_state(
+            vec![],
+            vec![pull_from_json(serde_json::json!({
+                "number": 20, "title": "No label PR",
+                "labels": [],
+                "head": {"ref": "feat/test"}, "base": {"ref": "main"},
+                "user": {"login": "bob"}
+            }))],
+        );
+
+        let result = repo.startup_reconcile(&gh).await;
+        assert_eq!(result, 0);
+        assert!(!repo.contains("pr:org/repo:20"));
+    }
+
+    #[tokio::test]
+    async fn reconcile_skips_already_queued() {
+        let gh = MockGh::new();
+        let mut repo = make_repo_with_state(
+            vec![issue_from_json(serde_json::json!({
+                "number": 10, "title": "Already queued",
+                "labels": [{"name": "autodev:wip"}], "user": {"login": "a"}
+            }))],
+            vec![],
+        );
+
+        repo.issue_queue
+            .push(issue_phase::PENDING, issue_item("org/repo", 10));
+
+        let result = repo.startup_reconcile(&gh).await;
+        assert_eq!(result, 0);
+    }
+
+    #[tokio::test]
+    async fn reconcile_skips_analyzed_and_implementing() {
+        let gh = MockGh::new();
+        let mut repo = make_repo_with_state(
+            vec![
+                issue_from_json(serde_json::json!({
+                    "number": 1, "title": "Analyzed",
+                    "labels": [{"name": "autodev:analyzed"}], "user": {"login": "a"}
+                })),
+                issue_from_json(serde_json::json!({
+                    "number": 2, "title": "Implementing",
+                    "labels": [{"name": "autodev:implementing"}], "user": {"login": "a"}
+                })),
+            ],
+            vec![],
+        );
+
+        let result = repo.startup_reconcile(&gh).await;
+        assert_eq!(result, 0);
     }
 }
