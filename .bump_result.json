@@ -3,16 +3,9 @@
   "results": [
     {
       "plugin": "autodev",
-      "old_version": "0.7.7",
-      "new_version": "0.7.8",
+      "old_version": "0.7.8",
+      "new_version": "0.7.9",
       "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/autodev/.claude-plugin/plugin.json",
-      "marketplace_updated": true
-    },
-    {
-      "plugin": "suggest-workflow",
-      "old_version": "2.1.0",
-      "new_version": "2.1.1",
-      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/suggest-workflow/.claude-plugin/plugin.json",
       "marketplace_updated": true
     }
   ]
