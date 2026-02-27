@@ -66,6 +66,7 @@ jobs:
           echo "pr_title=$PR_TITLE" >> $GITHUB_OUTPUT
 
       - name: Bump versions
+        id: bump_versions
         if: steps.bump_info.outputs.bump_type != 'none'
         run: |
           BUMP_TYPE="${{ steps.bump_info.outputs.bump_type }}"
@@ -74,14 +75,13 @@ jobs:
           echo "Bumping version: $BUMP_TYPE"
           echo "PR Title: $PR_TITLE"
 
-          # 변경된 플러그인만 버전 범프 (Go 도구 사용)
+          # 변경된 플러그인만 버전 범프 (Go 도구 사용, JSON 출력)
           # main 브랜치의 이전 커밋과 비교하여 변경된 플러그인 감지
-          ./bumpversion --base=HEAD~1 --type="$BUMP_TYPE" --verbose
+          BUMP_RESULT=$(./bumpversion --base=HEAD~1 --type="$BUMP_TYPE" --json)
+          echo "Bump result: $BUMP_RESULT"
 
-          # marketplace.json에서 가장 높은 버전을 새 버전으로 사용
-          NEW_VERSION=$(jq -r '[.plugins[].version] | max' .claude-plugin/marketplace.json)
-          echo "New version: $NEW_VERSION"
-          echo "$NEW_VERSION" > .new_version
+          # 범프된 플러그인 목록 저장 (플러그인별 태그 생성용)
+          echo "$BUMP_RESULT" > .bump_result.json
 
       - name: Verify version consistency
         if: steps.bump_info.outputs.bump_type != 'none'
@@ -96,27 +96,34 @@ jobs:
       - name: Commit and push version bump
         if: steps.bump_info.outputs.bump_type != 'none'
         run: |
-          NEW_VERSION=$(cat .new_version)
+          # 범프된 플러그인 요약 생성
+          SUMMARY=$(jq -r '.results[] | "\(.plugin) \(.old_version) → \(.new_version)"' .bump_result.json | paste -sd ', ' -)
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add -A
-          git commit -m "chore: bump version to $NEW_VERSION [skip ci]" || echo "No changes to commit"
+          git commit -m "chore: bump versions ($SUMMARY) [skip ci]" || echo "No changes to commit"
           git push
 
-      - name: Create release tag
+      - name: Create release tags
         if: steps.bump_info.outputs.bump_type != 'none'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          NEW_VERSION=$(cat .new_version)
+          # 범프된 플러그인별로 개별 태그 및 릴리즈 생성
+          jq -c '.results[]' .bump_result.json | while read -r item; do
+            PLUGIN=$(echo "$item" | jq -r '.plugin')
+            VERSION=$(echo "$item" | jq -r '.new_version')
+            TAG="${PLUGIN}/v${VERSION}"
 
-          git tag "v$NEW_VERSION"
-          git push origin "v$NEW_VERSION"
+            echo "Creating tag: $TAG"
+            git tag "$TAG"
+            git push origin "$TAG"
 
-          gh release create "v$NEW_VERSION" \
-            --title "Release v$NEW_VERSION" \
-            --generate-notes
+            gh release create "$TAG" \
+              --title "${PLUGIN} v${VERSION}" \
+              --generate-notes
 
-          echo "✓ Created release v$NEW_VERSION"
+            echo "✓ Created release ${PLUGIN} v${VERSION}"
+          done
