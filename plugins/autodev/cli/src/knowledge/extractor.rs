@@ -3,10 +3,10 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::components::workspace::Workspace;
+use crate::domain::labels;
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
-use crate::queue::task_queues::labels;
 
 use super::models::KnowledgeSuggestion;
 

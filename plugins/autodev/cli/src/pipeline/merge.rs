@@ -6,13 +6,14 @@ use crate::components::merger::{MergeOutcome, Merger};
 use crate::components::notifier::Notifier;
 use crate::components::workspace::Workspace;
 use crate::config::Env;
+use crate::domain::labels;
+use crate::domain::models::*;
+use crate::domain::repository::*;
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::pipeline::{QueueOp, TaskOutput};
-use crate::queue::models::*;
-use crate::queue::repository::*;
-use crate::queue::task_queues::{labels, merge_phase, MergeItem, TaskQueues};
+use crate::queue::task_queues::{merge_phase, MergeItem, TaskQueues};
 use crate::queue::Database;
 
 /// MERGING/CONFLICT 상태에서 아이템을 제거하는 헬퍼.

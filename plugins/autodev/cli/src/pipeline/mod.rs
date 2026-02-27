@@ -7,11 +7,11 @@ use anyhow::Result;
 use crate::components::notifier::Notifier;
 use crate::components::workspace::Workspace;
 use crate::config::Env;
+use crate::domain::models::NewConsumerLog;
+use crate::domain::repository::ConsumerLogRepository;
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
-use crate::queue::models::NewConsumerLog;
-use crate::queue::repository::ConsumerLogRepository;
 use crate::queue::task_queues::{IssueItem, MergeItem, PrItem, TaskQueues};
 use crate::queue::Database;
 
@@ -67,6 +67,7 @@ pub enum QueueOp {
 /// TaskOutput의 큐 조작을 실행하고 로그를 DB에 기록한다.
 ///
 /// Main loop에서 spawned task 완료 시 호출.
+#[allow(dead_code)]
 pub fn handle_task_output(queues: &mut TaskQueues, db: &Database, output: TaskOutput) {
     let work_id = output.work_id;
 

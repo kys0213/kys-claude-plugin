@@ -1,10 +1,11 @@
 use anyhow::Result;
 use serde::Deserialize;
 
+use crate::domain::labels;
+use crate::domain::repository::*;
 use crate::infrastructure::gh::Gh;
-use crate::queue::repository::*;
 use crate::queue::task_queues::{
-    labels, make_work_id, merge_phase, pr_phase, MergeItem, PrItem, TaskQueues,
+    make_work_id, merge_phase, pr_phase, MergeItem, PrItem, TaskQueues,
 };
 use crate::queue::Database;
 

@@ -8,16 +8,17 @@ use crate::components::verdict;
 use crate::components::workspace::Workspace;
 use crate::config;
 use crate::config::Env;
+use crate::domain::labels;
+use crate::domain::models::*;
+use crate::domain::repository::*;
 use crate::infrastructure::claude::output;
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 use crate::pipeline::{QueueOp, TaskOutput, AGENT_SYSTEM_PROMPT};
-use crate::queue::models::*;
-use crate::queue::repository::*;
 use crate::queue::task_queues::{
-    issue_phase, labels, make_work_id, pr_phase, IssueItem, PrItem, TaskQueues,
+    issue_phase, make_work_id, pr_phase, IssueItem, PrItem, TaskQueues,
 };
 
 /// head branch 이름으로 이미 생성된 PR을 조회하여 번호를 반환.

@@ -1,6 +1,6 @@
 use autodev::daemon::recovery;
+use autodev::domain::models::{RepoIssue, RepoPull, ResolvedRepo};
 use autodev::infrastructure::gh::mock::MockGh;
-use autodev::queue::models::{RepoIssue, RepoPull, ResolvedRepo};
 use autodev::queue::task_queues::{
     issue_phase, make_work_id, merge_phase, pr_phase, IssueItem, MergeItem, PrItem, TaskQueues,
 };

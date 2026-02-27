@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::domain::git_repository::GitRepository;
 use crate::queue::task_queues::TaskQueues;
 
 // ─── Status file models ───
@@ -35,6 +37,7 @@ pub struct StatusCounters {
 // ─── Build / Write / Read ───
 
 /// TaskQueues의 인메모리 상태를 DaemonStatus로 변환
+#[allow(dead_code)]
 pub fn build_status(
     queues: &TaskQueues,
     counters: &StatusCounters,
@@ -73,6 +76,64 @@ pub fn build_status(
             title: merge.title.clone(),
             phase: phase.to_string(),
         });
+    }
+
+    let wip = items.len() as i64;
+
+    DaemonStatus {
+        updated_at: chrono::Local::now().to_rfc3339(),
+        uptime_secs: start_time.elapsed().as_secs(),
+        active_items: items,
+        counters: StatusCounters {
+            wip,
+            done: counters.done,
+            skip: counters.skip,
+            failed: counters.failed,
+        },
+    }
+}
+
+/// HashMap<String, GitRepository>의 per-repo 큐를 DaemonStatus로 변환
+pub fn build_status_from_repos(
+    repos: &HashMap<String, GitRepository>,
+    counters: &StatusCounters,
+    start_time: std::time::Instant,
+) -> DaemonStatus {
+    let mut items = Vec::new();
+
+    for repo in repos.values() {
+        for (phase, issue) in repo.issue_queue.iter_all() {
+            items.push(StatusItem {
+                work_id: issue.work_id.clone(),
+                queue_type: "issue".to_string(),
+                repo_name: issue.repo_name.clone(),
+                number: issue.github_number,
+                title: issue.title.clone(),
+                phase: phase.to_string(),
+            });
+        }
+
+        for (phase, pr) in repo.pr_queue.iter_all() {
+            items.push(StatusItem {
+                work_id: pr.work_id.clone(),
+                queue_type: "pr".to_string(),
+                repo_name: pr.repo_name.clone(),
+                number: pr.github_number,
+                title: pr.title.clone(),
+                phase: phase.to_string(),
+            });
+        }
+
+        for (phase, merge) in repo.merge_queue.iter_all() {
+            items.push(StatusItem {
+                work_id: merge.work_id.clone(),
+                queue_type: "merge".to_string(),
+                repo_name: merge.repo_name.clone(),
+                number: merge.pr_number,
+                title: merge.title.clone(),
+                phase: phase.to_string(),
+            });
+        }
     }
 
     let wip = items.len() as i64;

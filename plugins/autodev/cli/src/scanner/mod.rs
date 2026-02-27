@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub mod issues;
 pub mod pulls;
 
@@ -5,8 +7,8 @@ use anyhow::Result;
 
 use crate::config;
 use crate::config::Env;
+use crate::domain::repository::*;
 use crate::infrastructure::gh::Gh;
-use crate::queue::repository::*;
 use crate::queue::task_queues::TaskQueues;
 use crate::queue::Database;
 

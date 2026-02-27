@@ -6,9 +6,10 @@ use anyhow::Result;
 
 use crate::config;
 use crate::config::Env;
+use crate::domain::labels;
+use crate::domain::models::{EnabledRepo, RepoIssue, RepoPull, ResolvedRepo};
 use crate::infrastructure::gh::Gh;
-use crate::queue::models::{EnabledRepo, RepoIssue, RepoPull, ResolvedRepo};
-use crate::queue::task_queues::{labels, make_work_id, TaskQueues};
+use crate::queue::task_queues::{make_work_id, TaskQueues};
 
 /// gh_host 캐시 엔트리: 설정 파일의 mtime과 해석된 값을 보관
 struct GhHostEntry {
