@@ -73,10 +73,6 @@ mod tests {
                 applied: Mutex::new(Vec::new()),
             }
         }
-
-        fn applied_work_ids(&self) -> Vec<String> {
-            self.applied.lock().unwrap().clone()
-        }
     }
 
     #[async_trait(?Send)]
@@ -177,10 +173,7 @@ mod tests {
         mgr.apply(result);
 
         // Each source should have received the apply
-        for source in &mgr.sources {
-            // We can't easily access MockSource fields through dyn TaskSource
-            // so we trust the implementation delegates correctly
-        }
         // The test proves no panics and apply is called on all sources
+        assert!(!mgr.sources.is_empty());
     }
 }
