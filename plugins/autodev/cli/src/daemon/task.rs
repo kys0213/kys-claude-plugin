@@ -18,6 +18,7 @@ use crate::queue::task_queues::{IssueItem, MergeItem, PrItem};
 
 /// Agent(Claude)에게 전달할 요청.
 /// `before_invoke`가 성공하면 이 DTO를 반환한다.
+#[derive(Debug)]
 pub struct AgentRequest {
     /// 작업 디렉토리 (worktree 경로)
     pub working_dir: PathBuf,
@@ -119,6 +120,7 @@ impl fmt::Display for TaskStatus {
 }
 
 /// 건너뛰기 사유
+#[derive(Debug)]
 pub enum SkipReason {
     /// Preflight 검사 실패 (이슈가 닫힘, PR이 머지됨 등)
     PreflightFailed(String),
