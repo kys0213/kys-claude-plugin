@@ -29,12 +29,6 @@ pub trait WorkspaceOps: Send + Sync {
 
     /// worktree 제거.
     async fn remove_worktree(&self, repo_name: &str, task_id: &str) -> Result<()>;
-
-    /// 레포의 base clone 경로 반환 (read-only 용도).
-    fn repo_base_path(&self, repo_name: &str) -> PathBuf;
-
-    /// 작업별 worktree 경로 반환 (read-only 용도).
-    fn worktree_path(&self, repo_name: &str, task_id: &str) -> PathBuf;
 }
 
 // ─── Workspace struct ───
@@ -137,14 +131,6 @@ impl WorkspaceOps for Workspace<'_> {
     async fn remove_worktree(&self, repo_name: &str, task_id: &str) -> Result<()> {
         Workspace::remove_worktree(self, repo_name, task_id).await
     }
-
-    fn repo_base_path(&self, repo_name: &str) -> PathBuf {
-        Workspace::repo_base_path(self, repo_name)
-    }
-
-    fn worktree_path(&self, repo_name: &str, task_id: &str) -> PathBuf {
-        Workspace::worktree_path(self, repo_name, task_id)
-    }
 }
 
 // ─── OwnedWorkspace ───
@@ -189,13 +175,5 @@ impl WorkspaceOps for OwnedWorkspace {
         self.as_workspace()
             .remove_worktree(repo_name, task_id)
             .await
-    }
-
-    fn repo_base_path(&self, repo_name: &str) -> PathBuf {
-        self.as_workspace().repo_base_path(repo_name)
-    }
-
-    fn worktree_path(&self, repo_name: &str, task_id: &str) -> PathBuf {
-        self.as_workspace().worktree_path(repo_name, task_id)
     }
 }

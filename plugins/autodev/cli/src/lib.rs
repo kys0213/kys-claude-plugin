@@ -7,7 +7,6 @@ pub mod domain;
 pub mod infrastructure;
 pub mod knowledge;
 pub mod queue;
-pub mod scanner;
 pub mod sources;
 pub mod tasks;
 pub mod tui;

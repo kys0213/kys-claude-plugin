@@ -237,7 +237,7 @@ impl Task for ImplementTask {
                 ops.push(QueueOp::Remove);
                 ops.push(QueueOp::PushPr {
                     phase: pr_phase::PENDING,
-                    item: pr_item,
+                    item: Box::new(pr_item),
                 });
                 tracing::info!(
                     "issue #{}: PR #{pr_num} created, pushed to PR queue",
@@ -330,14 +330,6 @@ mod tests {
                 .unwrap()
                 .push((repo_name.to_string(), task_id.to_string()));
             Ok(())
-        }
-
-        fn repo_base_path(&self, _repo_name: &str) -> PathBuf {
-            PathBuf::from("/mock/workspaces/main")
-        }
-
-        fn worktree_path(&self, _repo_name: &str, task_id: &str) -> PathBuf {
-            PathBuf::from(format!("/mock/workspaces/{task_id}"))
         }
     }
 

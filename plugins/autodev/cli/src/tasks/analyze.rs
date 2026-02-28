@@ -476,14 +476,6 @@ mod tests {
                 .push((repo_name.to_string(), task_id.to_string()));
             Ok(())
         }
-
-        fn repo_base_path(&self, _repo_name: &str) -> PathBuf {
-            PathBuf::from("/mock/workspaces/main")
-        }
-
-        fn worktree_path(&self, _repo_name: &str, task_id: &str) -> PathBuf {
-            PathBuf::from(format!("/mock/workspaces/{task_id}"))
-        }
     }
 
     // ─── Mock ConfigLoader ───
@@ -622,12 +614,6 @@ mod tests {
             async fn remove_worktree(&self, _: &str, _: &str) -> anyhow::Result<()> {
                 Ok(())
             }
-            fn repo_base_path(&self, _: &str) -> PathBuf {
-                PathBuf::new()
-            }
-            fn worktree_path(&self, _: &str, _: &str) -> PathBuf {
-                PathBuf::new()
-            }
         }
 
         let gh = Arc::new(MockGh::new());
@@ -642,10 +628,8 @@ mod tests {
 
         let result = task.before_invoke().await;
         assert!(result.is_err());
-        match result.unwrap_err() {
-            SkipReason::PreflightFailed(msg) => assert!(msg.contains("clone failed")),
-            _ => panic!("expected PreflightFailed"),
-        }
+        let SkipReason::PreflightFailed(msg) = result.unwrap_err();
+        assert!(msg.contains("clone failed"));
     }
 
     // ═══════════════════════════════════════════════

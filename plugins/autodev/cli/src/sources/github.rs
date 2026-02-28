@@ -321,14 +321,8 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                     repo.pr_queue.remove(&result.work_id);
                     repo.merge_queue.remove(&result.work_id);
                 }
-                QueueOp::PushIssue { phase, item } => {
-                    repo.issue_queue.push(phase, item.clone());
-                }
                 QueueOp::PushPr { phase, item } => {
-                    repo.pr_queue.push(phase, item.clone());
-                }
-                QueueOp::PushMerge { phase, item } => {
-                    repo.merge_queue.push(phase, item.clone());
+                    repo.pr_queue.push(phase, *item.clone());
                 }
             }
         }
@@ -380,12 +374,6 @@ mod tests {
         }
         async fn remove_worktree(&self, _: &str, _: &str) -> anyhow::Result<()> {
             Ok(())
-        }
-        fn repo_base_path(&self, _: &str) -> PathBuf {
-            PathBuf::from("/mock/main")
-        }
-        fn worktree_path(&self, _: &str, task_id: &str) -> PathBuf {
-            PathBuf::from(format!("/mock/{task_id}"))
         }
     }
 
@@ -717,7 +705,7 @@ mod tests {
                 QueueOp::Remove,
                 QueueOp::PushPr {
                     phase: pr_phase::PENDING,
-                    item: make_test_pr("org/repo", 10),
+                    item: Box::new(make_test_pr("org/repo", 10)),
                 },
             ],
             logs: vec![],

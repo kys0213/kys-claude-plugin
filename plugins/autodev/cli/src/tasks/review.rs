@@ -319,7 +319,7 @@ impl Task for ReviewTask {
                 if cfg.consumer.knowledge_extraction {
                     ops.push(QueueOp::PushPr {
                         phase: pr_phase::EXTRACTING,
-                        item: self.item.clone(),
+                        item: Box::new(self.item.clone()),
                     });
                 }
             }
@@ -418,7 +418,7 @@ impl Task for ReviewTask {
                         ops.push(QueueOp::Remove);
                         ops.push(QueueOp::PushPr {
                             phase: pr_phase::REVIEW_DONE,
-                            item: next_item,
+                            item: Box::new(next_item),
                         });
                     }
                 }
@@ -464,12 +464,6 @@ mod tests {
         }
         async fn remove_worktree(&self, _: &str, _: &str) -> anyhow::Result<()> {
             Ok(())
-        }
-        fn repo_base_path(&self, _: &str) -> PathBuf {
-            PathBuf::from("/mock/main")
-        }
-        fn worktree_path(&self, _: &str, task_id: &str) -> PathBuf {
-            PathBuf::from(format!("/mock/{task_id}"))
         }
     }
 

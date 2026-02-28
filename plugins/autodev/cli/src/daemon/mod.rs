@@ -2,7 +2,6 @@ pub mod agent;
 pub mod agent_impl;
 pub mod log;
 pub mod pid;
-pub mod recovery;
 pub mod status;
 pub mod task;
 pub mod task_runner;
