@@ -12,11 +12,8 @@ pub struct IssueItem {
     pub github_number: i64,
     pub title: String,
     pub body: Option<String>,
-    #[allow(dead_code)]
     pub labels: Vec<String>,
-    #[allow(dead_code)]
     pub author: String,
-    #[allow(dead_code)]
     pub analysis_report: Option<String>,
     /// GHE hostname (e.g. "git.example.com"). None이면 github.com.
     pub gh_host: Option<String>,
@@ -36,10 +33,8 @@ pub struct PrItem {
     pub repo_name: String,
     pub repo_url: String,
     pub github_number: i64,
-    #[allow(dead_code)]
     pub title: String,
     pub head_branch: String,
-    #[allow(dead_code)]
     pub base_branch: String,
     /// 리뷰 결과 (피드백 루프에서 사용)
     pub review_comment: Option<String>,
@@ -65,11 +60,8 @@ pub struct MergeItem {
     pub repo_name: String,
     pub repo_url: String,
     pub pr_number: i64,
-    #[allow(dead_code)]
     pub title: String,
-    #[allow(dead_code)]
     pub head_branch: String,
-    #[allow(dead_code)]
     pub base_branch: String,
     /// GHE hostname (e.g. "git.example.com"). None이면 github.com.
     pub gh_host: Option<String>,
@@ -105,6 +97,7 @@ pub mod pr_phase {
     pub const REVIEW_DONE: &str = "ReviewDone";
     pub const IMPROVING: &str = "Improving";
     pub const IMPROVED: &str = "Improved";
+    pub const EXTRACTING: &str = "Extracting";
 }
 
 // ─── Merge Phase 상수 ───
@@ -135,7 +128,6 @@ impl Default for TaskQueues {
 }
 
 impl TaskQueues {
-    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -146,7 +138,6 @@ impl TaskQueues {
     }
 
     /// 전체 아이템 수
-    #[allow(dead_code)]
     pub fn total(&self) -> usize {
         self.issues.total() + self.prs.total() + self.merges.total()
     }

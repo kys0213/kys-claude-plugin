@@ -224,7 +224,7 @@ pub async fn extract_task_knowledge(
 }
 
 /// suggest-workflow에서 해당 태스크 세션의 도구 사용 패턴을 조회하여 프롬프트 섹션 생성
-async fn build_suggest_workflow_section(
+pub async fn build_suggest_workflow_section(
     sw: &dyn SuggestWorkflow,
     task_type: &str,
     github_number: i64,
@@ -257,7 +257,7 @@ async fn build_suggest_workflow_section(
 }
 
 /// Claude 출력에서 KnowledgeSuggestion 파싱
-fn parse_knowledge_suggestion(stdout: &str) -> Option<KnowledgeSuggestion> {
+pub fn parse_knowledge_suggestion(stdout: &str) -> Option<KnowledgeSuggestion> {
     // claude --output-format json envelope
     if let Ok(envelope) =
         serde_json::from_str::<crate::infrastructure::claude::output::ClaudeJsonOutput>(stdout)
@@ -273,7 +273,7 @@ fn parse_knowledge_suggestion(stdout: &str) -> Option<KnowledgeSuggestion> {
 }
 
 /// KnowledgeSuggestion을 GitHub 코멘트로 포맷
-fn format_knowledge_comment(ks: &KnowledgeSuggestion, task_type: &str, number: i64) -> String {
+pub fn format_knowledge_comment(ks: &KnowledgeSuggestion, task_type: &str, number: i64) -> String {
     let mut comment =
         format!("<!-- autodev:knowledge -->\n## Autodev Knowledge ({task_type} #{number})\n\n");
 
@@ -296,7 +296,7 @@ fn format_knowledge_comment(ks: &KnowledgeSuggestion, task_type: &str, number: i
 /// 각 suggestion에 대해 main 기반 별도 worktree → branch → file write → commit → push → PR 생성.
 /// 구현 worktree와 격리하여 uncommitted 변경 충돌을 방지한다.
 #[allow(clippy::too_many_arguments)]
-async fn create_task_knowledge_prs(
+pub async fn create_task_knowledge_prs(
     gh: &dyn Gh,
     workspace: &Workspace<'_>,
     repo_name: &str,
