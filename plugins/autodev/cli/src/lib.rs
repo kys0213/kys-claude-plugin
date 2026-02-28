@@ -1,4 +1,5 @@
 // ci: trigger version bump pipeline
+pub mod client;
 pub mod components;
 pub mod config;
 pub mod daemon;
