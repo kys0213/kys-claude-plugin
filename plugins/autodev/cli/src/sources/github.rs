@@ -17,8 +17,11 @@ use crate::domain::git_repository::GitRepository;
 use crate::domain::git_repository_factory::GitRepositoryFactory;
 use crate::domain::repository::{RepoRepository, ScanCursorRepository};
 use crate::infrastructure::gh::Gh;
+use crate::infrastructure::git::Git;
+use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 use crate::queue::task_queues::{issue_phase, merge_phase, pr_phase};
 use crate::tasks::analyze::AnalyzeTask;
+use crate::tasks::extract::ExtractTask;
 use crate::tasks::implement::ImplementTask;
 use crate::tasks::improve::ImproveTask;
 use crate::tasks::merge::MergeTask;
@@ -32,6 +35,8 @@ pub struct GitHubTaskSource<DB: RepoRepository + ScanCursorRepository> {
     gh: Arc<dyn Gh>,
     config: Arc<dyn ConfigLoader>,
     env: Arc<dyn Env>,
+    git: Arc<dyn Git>,
+    sw: Arc<dyn SuggestWorkflow>,
     db: DB,
     repos: HashMap<String, GitRepository>,
 }
@@ -42,6 +47,8 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
         gh: Arc<dyn Gh>,
         config: Arc<dyn ConfigLoader>,
         env: Arc<dyn Env>,
+        git: Arc<dyn Git>,
+        sw: Arc<dyn SuggestWorkflow>,
         db: DB,
     ) -> Self {
         Self {
@@ -49,6 +56,8 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
             gh,
             config,
             env,
+            git,
+            sw,
             db,
             repos: HashMap::new(),
         }
@@ -258,6 +267,23 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                 )));
             }
 
+            // PR: Extracting → knowledge extraction (best-effort)
+            while let Some(item) = repo.pr_queue.pop(pr_phase::EXTRACTING) {
+                tracing::debug!(
+                    "PR #{}: creating ExtractTask (knowledge)",
+                    item.github_number
+                );
+                tasks.push(Box::new(ExtractTask::new(
+                    Arc::clone(&self.workspace),
+                    Arc::clone(&self.gh),
+                    Arc::clone(&self.config),
+                    Arc::clone(&self.sw),
+                    Arc::clone(&self.git),
+                    Arc::clone(&self.env),
+                    item,
+                )));
+            }
+
             // Merge: Pending → Merging
             while let Some(item) = repo.merge_queue.pop(merge_phase::PENDING) {
                 repo.merge_queue.push(merge_phase::MERGING, item.clone());
@@ -329,6 +355,9 @@ mod tests {
     use crate::config::models::WorkflowConfig;
     use crate::domain::models::EnabledRepo;
     use crate::infrastructure::gh::mock::MockGh;
+    use crate::infrastructure::git::Git;
+    use crate::infrastructure::suggest_workflow::SuggestWorkflow;
+    use crate::knowledge::models::{RepetitionEntry, SessionEntry, ToolFrequencyEntry};
     use crate::queue::task_queues::{make_work_id, IssueItem, MergeItem, PrItem};
     use std::path::{Path, PathBuf};
 
@@ -374,6 +403,59 @@ mod tests {
                 "AUTODEV_HOME" => Ok("/tmp/autodev-test".to_string()),
                 _ => Err(std::env::VarError::NotPresent),
             }
+        }
+    }
+
+    struct MockGit;
+
+    #[async_trait]
+    impl Git for MockGit {
+        async fn clone(&self, _: &str, _: &Path) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn pull_ff_only(&self, _: &Path) -> anyhow::Result<bool> {
+            Ok(true)
+        }
+        async fn worktree_add(&self, _: &Path, _: &Path, _: Option<&str>) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn worktree_remove(&self, _: &Path, _: &Path) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn checkout_new_branch(&self, _: &Path, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn add_commit_push(
+            &self,
+            _: &Path,
+            _: &[&str],
+            _: &str,
+            _: &str,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct MockSuggestWorkflow;
+
+    #[async_trait]
+    impl SuggestWorkflow for MockSuggestWorkflow {
+        async fn query_tool_frequency(
+            &self,
+            _: Option<&str>,
+        ) -> anyhow::Result<Vec<ToolFrequencyEntry>> {
+            Ok(vec![])
+        }
+        async fn query_filtered_sessions(
+            &self,
+            _: &str,
+            _: Option<&str>,
+            _: Option<u32>,
+        ) -> anyhow::Result<Vec<SessionEntry>> {
+            Ok(vec![])
+        }
+        async fn query_repetition(&self, _: Option<&str>) -> anyhow::Result<Vec<RepetitionEntry>> {
+            Ok(vec![])
         }
     }
 
@@ -424,6 +506,8 @@ mod tests {
             gh,
             Arc::new(MockConfigLoader),
             Arc::new(MockEnv),
+            Arc::new(MockGit),
+            Arc::new(MockSuggestWorkflow),
             MockDb::empty(),
         )
     }

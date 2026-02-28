@@ -97,6 +97,7 @@ pub mod pr_phase {
     pub const REVIEW_DONE: &str = "ReviewDone";
     pub const IMPROVING: &str = "Improving";
     pub const IMPROVED: &str = "Improved";
+    pub const EXTRACTING: &str = "Extracting";
 }
 
 // ─── Merge Phase 상수 ───

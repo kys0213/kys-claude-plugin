@@ -146,6 +146,8 @@ pub async fn start(
         Arc::clone(&gh),
         config_loader,
         Arc::clone(&env),
+        Arc::clone(&git),
+        Arc::clone(&sw),
         source_db,
     );
 

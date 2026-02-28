@@ -314,6 +314,14 @@ impl Task for ReviewTask {
                     .await;
 
                 ops.push(QueueOp::Remove);
+
+                // Knowledge extraction (best-effort, config gated)
+                if cfg.consumer.knowledge_extraction {
+                    ops.push(QueueOp::PushPr {
+                        phase: pr_phase::EXTRACTING,
+                        item: self.item.clone(),
+                    });
+                }
             }
             Some(ReviewVerdict::RequestChanges) | None => {
                 // GitHub Review API: REQUEST_CHANGES
