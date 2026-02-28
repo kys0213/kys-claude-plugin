@@ -1,9 +1,43 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
+use async_trait::async_trait;
 
 use crate::config::{self, Env};
 use crate::infrastructure::git::Git;
+
+// ─── WorkspaceOps trait ───
+
+/// Workspace 조작 추상화 — Task에서 이 trait에만 의존한다.
+///
+/// 실제 구현체는 `Workspace` struct이며, 테스트에서는 MockWorkspace를 주입한다.
+#[allow(dead_code)]
+#[async_trait]
+pub trait WorkspaceOps: Send + Sync {
+    /// 레포가 아직 클론되지 않았으면 클론, 있으면 pull.
+    /// 반환값: base clone 경로.
+    async fn ensure_cloned(&self, repo_url: &str, repo_name: &str) -> Result<PathBuf>;
+
+    /// 작업용 worktree 생성.
+    /// 반환값: worktree 경로.
+    async fn create_worktree(
+        &self,
+        repo_name: &str,
+        task_id: &str,
+        branch: Option<&str>,
+    ) -> Result<PathBuf>;
+
+    /// worktree 제거.
+    async fn remove_worktree(&self, repo_name: &str, task_id: &str) -> Result<()>;
+
+    /// 레포의 base clone 경로 반환 (read-only 용도).
+    fn repo_base_path(&self, repo_name: &str) -> PathBuf;
+
+    /// 작업별 worktree 경로 반환 (read-only 용도).
+    fn worktree_path(&self, repo_name: &str, task_id: &str) -> PathBuf;
+}
+
+// ─── Workspace struct ───
 
 /// Workspace 관리 — Git trait 주입받아 worktree 생명주기 관리
 pub struct Workspace<'a> {
@@ -81,5 +115,35 @@ impl<'a> Workspace<'a> {
         }
 
         Ok(())
+    }
+}
+
+/// WorkspaceOps trait 구현 — inherent 메서드에 위임
+#[allow(dead_code)]
+#[async_trait]
+impl WorkspaceOps for Workspace<'_> {
+    async fn ensure_cloned(&self, repo_url: &str, repo_name: &str) -> Result<PathBuf> {
+        Workspace::ensure_cloned(self, repo_url, repo_name).await
+    }
+
+    async fn create_worktree(
+        &self,
+        repo_name: &str,
+        task_id: &str,
+        branch: Option<&str>,
+    ) -> Result<PathBuf> {
+        Workspace::create_worktree(self, repo_name, task_id, branch).await
+    }
+
+    async fn remove_worktree(&self, repo_name: &str, task_id: &str) -> Result<()> {
+        Workspace::remove_worktree(self, repo_name, task_id).await
+    }
+
+    fn repo_base_path(&self, repo_name: &str) -> PathBuf {
+        Workspace::repo_base_path(self, repo_name)
+    }
+
+    fn worktree_path(&self, repo_name: &str, task_id: &str) -> PathBuf {
+        Workspace::worktree_path(self, repo_name, task_id)
     }
 }

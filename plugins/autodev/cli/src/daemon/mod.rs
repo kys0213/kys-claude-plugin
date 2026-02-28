@@ -1,8 +1,20 @@
+#[allow(dead_code)]
+pub mod agent;
 pub mod log;
 pub mod pid;
 #[allow(dead_code)]
 pub mod recovery;
 pub mod status;
+#[allow(dead_code)]
+pub mod task;
+#[allow(dead_code)]
+pub mod task_context;
+#[allow(dead_code)]
+pub mod task_manager;
+#[allow(dead_code)]
+pub mod task_runner;
+#[allow(dead_code)]
+pub mod task_source;
 
 use std::collections::HashMap;
 use std::path::Path;

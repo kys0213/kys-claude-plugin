@@ -1,7 +1,40 @@
 pub mod loader;
 pub mod models;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use self::models::WorkflowConfig;
+
+// ─── ConfigLoader trait ───
+
+/// 설정 로드 추상화 — Task에서 이 trait에만 의존한다.
+///
+/// 실제 구현체는 `RealConfigLoader`이며, 테스트에서는 MockConfigLoader를 주입한다.
+#[allow(dead_code)]
+pub trait ConfigLoader: Send + Sync {
+    /// 글로벌 + 레포별 설정을 머지하여 최종 설정 반환.
+    /// `workspace_path`가 Some이면 해당 디렉토리의 레포별 설정을 오버라이드한다.
+    fn load(&self, workspace_path: Option<&Path>) -> WorkflowConfig;
+}
+
+/// 실제 설정 로더 — `loader::load_merged`에 위임
+#[allow(dead_code)]
+pub struct RealConfigLoader {
+    env: Box<dyn Env>,
+}
+
+#[allow(dead_code)]
+impl RealConfigLoader {
+    pub fn new(env: Box<dyn Env>) -> Self {
+        Self { env }
+    }
+}
+
+impl ConfigLoader for RealConfigLoader {
+    fn load(&self, workspace_path: Option<&Path>) -> WorkflowConfig {
+        loader::load_merged(&*self.env, workspace_path)
+    }
+}
 
 /// 환경 변수 접근을 추상화하는 트레이트 (테스트 격리를 위해 사용)
 pub trait Env: Send + Sync {
