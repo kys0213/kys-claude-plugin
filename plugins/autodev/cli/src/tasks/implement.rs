@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use uuid::Uuid;
 
-use super::AGENT_SYSTEM_PROMPT;
+use super::{resolve_workflow, AGENT_SYSTEM_PROMPT};
 use crate::components::workspace::WorkspaceOps;
 use crate::config::ConfigLoader;
 use crate::daemon::task::{
@@ -117,9 +117,9 @@ impl Task for ImplementTask {
             })?;
         self.wt_path = Some(wt_path.clone());
 
-        // 레포별 config에서 workflow 로드
+        // 레포별 config에서 workflow 로드 (builtin: 접두어는 내장 프롬프트로 해석)
         let repo_cfg = self.config.load(Some(&wt_path));
-        let workflow = repo_cfg.workflow.issue.clone();
+        let workflow = resolve_workflow(&repo_cfg.workflow.issue);
         let prompt = format!(
             "[autodev] implement: issue #{} in {}",
             self.item.github_number, self.item.repo_name

@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use uuid::Uuid;
 
-use super::AGENT_SYSTEM_PROMPT;
+use super::{resolve_workflow, AGENT_SYSTEM_PROMPT};
 use crate::components::workspace::WorkspaceOps;
 use crate::config::ConfigLoader;
 use crate::daemon::task::{
@@ -171,10 +171,11 @@ impl Task for ReviewTask {
             })?;
         self.wt_path = Some(wt_path.clone());
 
-        // 레포별 config
+        // 레포별 config (builtin: 접두어는 내장 프롬프트로 해석)
         let repo_cfg = self.config.load(Some(&wt_path));
+        let workflow = resolve_workflow(&repo_cfg.workflow.pr);
         let pr_prompt = format!("[autodev] review: PR #{}", self.item.github_number);
-        let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{}", repo_cfg.workflow.pr);
+        let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{workflow}");
 
         self.started_at = Some(Utc::now().to_rfc3339());
 

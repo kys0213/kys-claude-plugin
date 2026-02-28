@@ -89,19 +89,21 @@ fi
 
 ### Step 2: 의존성 검증 및 리뷰 플러그인 감지
 
-#### 2-1. 필수 플러그인 검증
+#### 2-1. 플러그인 검증
 
 다음 플러그인이 `kys-claude-plugin` 마켓플레이스에서 User Scope로 설치되어 있는지 확인하세요:
 
 | 구분 | 플러그인 | 마켓플레이스 |
 |------|---------|-------------|
-| 필수 | `develop-workflow` | `kys-claude-plugin` |
 | 필수 | `git-utils` | `kys-claude-plugin` |
+| 권장 | `develop-workflow` | `kys-claude-plugin` |
 
 미설치 시 안내:
-- 필수 → 경고 + `/plugin install <name>@kys-claude-plugin`
+- **필수** (`git-utils`) → 경고 + `/plugin install git-utils@kys-claude-plugin` — 설치 확인이 완료되지 않으면 다음 단계로 진행하지 마세요.
+- **권장** (`develop-workflow`) → "`develop-workflow` 없이도 autodev의 내장 워크플로우로 동작합니다. 설계→리뷰→구현 파이프라인과 Multi-LLM 리뷰를 사용하려면 설치를 권장합니다: `/plugin install develop-workflow@kys-claude-plugin`"
 
-설치 확인이 완료되지 않으면 다음 단계로 진행하지 마세요.
+**감지 결과를 변수로 보관** (Step 7에서 사용):
+- `has_develop_workflow`: `develop-workflow` 플러그인 설치 여부 (bool)
 
 #### 2-2. 리뷰 플러그인 자동 감지
 
@@ -128,9 +130,9 @@ ls ~/.claude/plugins/cache/*/commands/*.md 2>/dev/null
 - `has_multi_review`: `develop-workflow`의 `multi-review` 커맨드 존재 여부 (bool)
 
 **감지 결과에 따른 안내:**
-- `external-llm` 미설치 + `develop-workflow` 설치됨 → "`external-llm` 없이도 `/multi-review`는 Claude 단일 모델로 동작합니다. multi-LLM (Codex+Gemini) 분석이 필요하면 `external-llm` 설치를 권장합니다."
-- `external-llm` 설치됨 → "multi-LLM 리뷰가 가능합니다 (Claude + Codex + Gemini)."
-- 둘 다 미설치 → "리뷰 플러그인이 감지되지 않았습니다. `/plugin install develop-workflow@kys-claude-plugin`으로 설치하세요."
+- `develop-workflow` 미설치 + `external-llm` 미설치 → "외부 워크플로우 플러그인 없이 autodev 내장 워크플로우로 동작합니다. 설계→리뷰→구현 파이프라인이 필요하면 `develop-workflow` 설치를 권장합니다."
+- `develop-workflow` 설치됨 + `external-llm` 미설치 → "`external-llm` 없이도 `/multi-review`는 Claude 단일 모델로 동작합니다. multi-LLM (Codex+Gemini) 분석이 필요하면 `external-llm` 설치를 권장합니다."
+- `develop-workflow` 설치됨 + `external-llm` 설치됨 → "multi-LLM 리뷰가 가능합니다 (Claude + Codex + Gemini)."
 
 ### Step 3: CLI 설치 및 버전 확인
 
@@ -171,7 +173,7 @@ AskUserQuestion으로 질문:
 
 ### Step 7: 워크플로우 선택
 
-Step 2-2에서 감지된 플러그인 목록을 기반으로 사용 가능한 워크플로우 선택지를 동적으로 구성합니다.
+Step 2-1과 2-2에서 감지된 플러그인 목록을 기반으로 사용 가능한 워크플로우 선택지를 동적으로 구성합니다.
 
 **선택지 구성 로직:**
 
@@ -196,9 +198,17 @@ AskUserQuestion으로 질문:
 > `external-llm` 미설치로 multi-LLM 옵션은 표시하지 않습니다.
 > 사용자에게 "multi-LLM을 사용하려면 `/plugin install external-llm@kys-claude-plugin` 후 재설정하세요"를 안내합니다.
 
-**Case 3: 리뷰 플러그인 미감지**
+**Case 3: `develop-workflow` 미설치**
 
-> 필수 플러그인이 설치되지 않았습니다. Step 2에서 차단되어야 합니다.
+AskUserQuestion으로 질문:
+- Issue 워크플로우:
+  - 내장 분석+구현 — autodev 기본 에이전트가 이슈 분석 후 직접 구현 (권장)
+  - 분석만 수행 — 이슈를 분석하고 리포트만 작성 (구현은 수동)
+- PR 리뷰 워크플로우:
+  - 내장 리뷰 — autodev 기본 에이전트가 코드 리뷰 수행 (권장)
+
+> `develop-workflow` 미설치로 설계→리뷰→구현 파이프라인과 Multi-LLM 합의 기능은 사용할 수 없습니다.
+> 사용자에게 "파이프라인 기반 워크플로우가 필요하면 `/plugin install develop-workflow@kys-claude-plugin` 후 `/auto-config`로 재설정하세요"를 안내합니다.
 
 **선택 결과 매핑:**
 
@@ -208,6 +218,9 @@ AskUserQuestion으로 질문:
 | 단일 모델 이슈 분석 | `workflow.issue: "/develop-workflow:develop-auto"`, `develop.review.multi_llm: false` |
 | multi-LLM PR 리뷰 | `workflow.pr: "/develop-workflow:multi-review"`, `commands.code_review: "/multi-review"` |
 | 단일 모델 PR 리뷰 | `workflow.pr: "/develop-workflow:multi-review"`, `commands.code_review: "/multi-review"`, `develop.review.multi_llm: false` |
+| 내장 분석+구현 | `workflow.issue: "builtin:analyze-and-implement"` |
+| 분석만 수행 | `workflow.issue: "builtin:analyze-only"` |
+| 내장 리뷰 | `workflow.pr: "builtin:review"` |
 
 ### Step 8: 필터 설정
 
