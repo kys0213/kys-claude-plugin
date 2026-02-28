@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -11,7 +12,6 @@ use crate::infrastructure::git::Git;
 /// Workspace 조작 추상화 — Task에서 이 trait에만 의존한다.
 ///
 /// 실제 구현체는 `Workspace` struct이며, 테스트에서는 MockWorkspace를 주입한다.
-#[allow(dead_code)]
 #[async_trait]
 pub trait WorkspaceOps: Send + Sync {
     /// 레포가 아직 클론되지 않았으면 클론, 있으면 pull.
@@ -119,7 +119,6 @@ impl<'a> Workspace<'a> {
 }
 
 /// WorkspaceOps trait 구현 — inherent 메서드에 위임
-#[allow(dead_code)]
 #[async_trait]
 impl WorkspaceOps for Workspace<'_> {
     async fn ensure_cloned(&self, repo_url: &str, repo_name: &str) -> Result<PathBuf> {
@@ -145,5 +144,58 @@ impl WorkspaceOps for Workspace<'_> {
 
     fn worktree_path(&self, repo_name: &str, task_id: &str) -> PathBuf {
         Workspace::worktree_path(self, repo_name, task_id)
+    }
+}
+
+// ─── OwnedWorkspace ───
+
+/// Arc 소유 기반 Workspace — `'static` 요구되는 컨텍스트에서 사용.
+///
+/// `Workspace<'a>`는 참조를 빌려 사용하므로 `Arc<dyn WorkspaceOps>`에 넣을 수 없다.
+/// `OwnedWorkspace`는 `Arc<dyn Git>`, `Arc<dyn Env>`를 소유하여 `'static`을 만족한다.
+pub struct OwnedWorkspace {
+    git: Arc<dyn Git>,
+    env: Arc<dyn Env>,
+}
+
+impl OwnedWorkspace {
+    pub fn new(git: Arc<dyn Git>, env: Arc<dyn Env>) -> Self {
+        Self { git, env }
+    }
+
+    fn as_workspace(&self) -> Workspace<'_> {
+        Workspace::new(&*self.git, &*self.env)
+    }
+}
+
+#[async_trait]
+impl WorkspaceOps for OwnedWorkspace {
+    async fn ensure_cloned(&self, repo_url: &str, repo_name: &str) -> Result<PathBuf> {
+        self.as_workspace().ensure_cloned(repo_url, repo_name).await
+    }
+
+    async fn create_worktree(
+        &self,
+        repo_name: &str,
+        task_id: &str,
+        branch: Option<&str>,
+    ) -> Result<PathBuf> {
+        self.as_workspace()
+            .create_worktree(repo_name, task_id, branch)
+            .await
+    }
+
+    async fn remove_worktree(&self, repo_name: &str, task_id: &str) -> Result<()> {
+        self.as_workspace()
+            .remove_worktree(repo_name, task_id)
+            .await
+    }
+
+    fn repo_base_path(&self, repo_name: &str) -> PathBuf {
+        self.as_workspace().repo_base_path(repo_name)
+    }
+
+    fn worktree_path(&self, repo_name: &str, task_id: &str) -> PathBuf {
+        self.as_workspace().worktree_path(repo_name, task_id)
     }
 }

@@ -23,7 +23,7 @@ impl DefaultTaskManager {
     }
 }
 
-#[async_trait]
+#[async_trait(?Send)]
 impl TaskManager for DefaultTaskManager {
     async fn tick(&mut self) {
         for source in &mut self.sources {
@@ -34,6 +34,14 @@ impl TaskManager for DefaultTaskManager {
 
     fn drain_ready(&mut self) -> Vec<Box<dyn Task>> {
         std::mem::take(&mut self.ready_tasks)
+    }
+
+    fn pop_ready(&mut self) -> Option<Box<dyn Task>> {
+        if self.ready_tasks.is_empty() {
+            None
+        } else {
+            Some(self.ready_tasks.remove(0))
+        }
     }
 
     fn apply(&mut self, result: TaskResult) {
@@ -71,7 +79,7 @@ mod tests {
         }
     }
 
-    #[async_trait]
+    #[async_trait(?Send)]
     impl TaskSource for MockSource {
         async fn poll(&mut self) -> Vec<Box<dyn Task>> {
             std::mem::take(&mut *self.tasks_to_return.lock().unwrap())

@@ -104,7 +104,6 @@ impl GitRepository {
     pub fn name(&self) -> &str {
         &self.name
     }
-    #[allow(dead_code)]
     pub fn url(&self) -> &str {
         &self.url
     }
@@ -114,12 +113,10 @@ impl GitRepository {
 
     // ─── GitHub State ───
 
-    #[allow(dead_code)]
     pub fn issues(&self) -> &[RepoIssue] {
         &self.issues
     }
 
-    #[allow(dead_code)]
     pub fn pulls(&self) -> &[RepoPull] {
         &self.pulls
     }
@@ -147,7 +144,6 @@ impl GitRepository {
     }
 
     /// 전체 큐 아이템 수
-    #[allow(dead_code)]
     pub fn total_items(&self) -> usize {
         self.issue_queue.total() + self.pr_queue.total() + self.merge_queue.total()
     }

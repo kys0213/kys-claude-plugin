@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use uuid::Uuid;
 
+use super::AGENT_SYSTEM_PROMPT;
 use crate::components::workspace::WorkspaceOps;
 use crate::config::ConfigLoader;
 use crate::daemon::task::{
@@ -22,7 +23,6 @@ use crate::domain::models::NewConsumerLog;
 use crate::infrastructure::claude::output::{self, ReviewVerdict};
 use crate::infrastructure::claude::SessionOptions;
 use crate::infrastructure::gh::Gh;
-use crate::pipeline::AGENT_SYSTEM_PROMPT;
 use crate::queue::task_queues::{pr_phase, PrItem};
 
 /// PR 리뷰 결과를 GitHub 댓글로 포맷

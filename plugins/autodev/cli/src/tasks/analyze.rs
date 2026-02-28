@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use uuid::Uuid;
 
+use super::AGENT_SYSTEM_PROMPT;
 use crate::components::verdict;
 use crate::components::workspace::WorkspaceOps;
 use crate::config::ConfigLoader;
@@ -22,7 +23,6 @@ use crate::domain::models::NewConsumerLog;
 use crate::infrastructure::claude::output::{self, AnalysisResult};
 use crate::infrastructure::claude::SessionOptions;
 use crate::infrastructure::gh::Gh;
-use crate::pipeline::AGENT_SYSTEM_PROMPT;
 use crate::queue::task_queues::IssueItem;
 
 // ─── 분석 프롬프트 (JSON 응답 스키마 명시) ───

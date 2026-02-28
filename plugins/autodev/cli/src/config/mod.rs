@@ -10,7 +10,6 @@ use self::models::WorkflowConfig;
 /// 설정 로드 추상화 — Task에서 이 trait에만 의존한다.
 ///
 /// 실제 구현체는 `RealConfigLoader`이며, 테스트에서는 MockConfigLoader를 주입한다.
-#[allow(dead_code)]
 pub trait ConfigLoader: Send + Sync {
     /// 글로벌 + 레포별 설정을 머지하여 최종 설정 반환.
     /// `workspace_path`가 Some이면 해당 디렉토리의 레포별 설정을 오버라이드한다.
@@ -18,12 +17,10 @@ pub trait ConfigLoader: Send + Sync {
 }
 
 /// 실제 설정 로더 — `loader::load_merged`에 위임
-#[allow(dead_code)]
 pub struct RealConfigLoader {
     env: Box<dyn Env>,
 }
 
-#[allow(dead_code)]
 impl RealConfigLoader {
     pub fn new(env: Box<dyn Env>) -> Self {
         Self { env }

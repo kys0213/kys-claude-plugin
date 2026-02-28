@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use uuid::Uuid;
 
+use super::AGENT_SYSTEM_PROMPT;
 use crate::components::workspace::WorkspaceOps;
 use crate::config::ConfigLoader;
 use crate::daemon::task::{
@@ -20,7 +21,6 @@ use crate::domain::labels;
 use crate::domain::models::NewConsumerLog;
 use crate::infrastructure::claude::SessionOptions;
 use crate::infrastructure::gh::Gh;
-use crate::pipeline::AGENT_SYSTEM_PROMPT;
 use crate::queue::task_queues::{pr_phase, PrItem};
 
 /// PR 피드백 반영 Task.
@@ -30,6 +30,7 @@ use crate::queue::task_queues::{pr_phase, PrItem};
 pub struct ImproveTask {
     workspace: Arc<dyn WorkspaceOps>,
     gh: Arc<dyn Gh>,
+    #[allow(dead_code)]
     config: Arc<dyn ConfigLoader>,
     item: PrItem,
     worker_id: String,

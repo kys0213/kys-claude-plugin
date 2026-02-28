@@ -15,8 +15,8 @@ use super::task::{Task, TaskResult};
 /// 생명주기:
 /// 1. `TaskManager.tick()` → `poll()` 호출 → 새 Task 수집
 /// 2. Task 실행 완료 → `apply()` 호출 → 큐 상태 반영
-#[async_trait]
-pub trait TaskSource: Send + Sync {
+#[async_trait(?Send)]
+pub trait TaskSource: Send {
     /// 새로운 Task를 수집한다.
     /// repo sync, recovery, scan을 수행하고 실행 가능한 Task를 반환한다.
     async fn poll(&mut self) -> Vec<Box<dyn Task>>;

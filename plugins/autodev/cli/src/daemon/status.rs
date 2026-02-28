@@ -37,7 +37,6 @@ pub struct StatusCounters {
 // ─── Build / Write / Read ───
 
 /// TaskQueues의 인메모리 상태를 DaemonStatus로 변환
-#[allow(dead_code)]
 pub fn build_status(
     queues: &TaskQueues,
     counters: &StatusCounters,

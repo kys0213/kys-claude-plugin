@@ -12,9 +12,10 @@ use super::task::{Task, TaskResult};
 /// Daemon과 TaskSource 사이의 중재자 역할:
 /// - `tick()`: 주기적으로 TaskSource를 poll하여 Task 수집
 /// - `drain_ready()`: 실행 가능한 Task를 Daemon에 전달
+/// - `pop_ready()`: 실행 가능한 Task를 하나씩 꺼낸다 (인플라이트 제한 대응)
 /// - `apply()`: 완료된 Task 결과를 TaskSource에 반영
-#[async_trait]
-pub trait TaskManager: Send + Sync {
+#[async_trait(?Send)]
+pub trait TaskManager: Send {
     /// 주기적 하우스키핑.
     /// 모든 TaskSource를 poll하여 새 Task를 수집한다.
     async fn tick(&mut self);
@@ -22,6 +23,10 @@ pub trait TaskManager: Send + Sync {
     /// 실행 가능한 Task를 모두 꺼내 반환한다.
     /// 호출 후 내부 ready 목록은 비워진다.
     fn drain_ready(&mut self) -> Vec<Box<dyn Task>>;
+
+    /// 실행 가능한 Task를 하나 꺼낸다.
+    /// 인플라이트 제한에 맞춰 하나씩 꺼내 spawn할 때 사용한다.
+    fn pop_ready(&mut self) -> Option<Box<dyn Task>>;
 
     /// 완료된 Task 결과를 모든 TaskSource에 반영한다.
     fn apply(&mut self, result: TaskResult);
