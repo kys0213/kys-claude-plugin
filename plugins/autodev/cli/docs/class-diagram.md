@@ -60,49 +60,71 @@ Task 구현체는 단순 위임(delegation)에 불과하다.
 
 ## TO-BE: 목표 구조
 
-`_one()` 내부 로직을 **before / after** 로 분리하여,
-Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 한다.
+`_one()` 내부 로직을 **before / resolve** 로 분리한다.
+- Task는 **판단만** 한다 (순수 함수로 데이터 반환)
+- TaskRunner가 **실행**을 담당한다 (Agent 호출, side effect 실행)
+- cleanup hook은 **선택적** — 필요한 task만 구현 (worktree 정리 등)
 
 ```
-                     ┌──────────────────────────────────────────┐
-                     │              «trait» Task                 │
-                     ├──────────────────────────────────────────┤
-                     │ + before_invoke() → Result<Invocation,   │
-                     │                           SkipReason>    │
-                     │ + after_invoke(output) → TaskResult      │
-                     │ + cleanup()                               │
-                     └────────────────────┬─────────────────────┘
+                     ┌──────────────────────────────────────────────┐
+                     │                «trait» Task                   │
+                     ├──────────────────────────────────────────────┤
+                     │ + before_invoke() → Result<Invocation,       │  필수: pre-flight + 요청 구성
+                     │                           SkipReason>        │
+                     │ + resolve(output) → TaskResult               │  필수: 결과 해석 (순수 함수)
+                     │ + cleanup()  { }              // default nop │  선택: 필요시만 override
+                     └────────────────────┬─────────────────────────┘
                                           │
           ┌───────────────┬───────────────┼──────────────┬──────────────┬──────────────┐
           │               │               │              │              │              │
   ┌───────┴──────┐ ┌──────┴──────┐ ┌──────┴─────┐ ┌─────┴──────┐ ┌────┴───────┐ ┌────┴──────┐
   │ AnalyzeTask  │ │ImplementTask│ │ ReviewTask  │ │ImproveTask │ │ReReviewTask│ │ MergeTask │
-  └───────┬──────┘ └──────┬──────┘ └──────┬─────┘ └─────┬──────┘ └────┬───────┘ └────┬──────┘
-          │               │               │              │              │              │
-          ▼               ▼               ▼              ▼              ▼              ▼
+  │              │ │             │ │             │ │            │ │            │ │           │
+  │ cleanup: ✓   │ │ cleanup: ✓  │ │ cleanup: ✓  │ │ cleanup: ✓ │ │ cleanup: ✓  │ │ cleanup: ✓│
+  │ (worktree)   │ │ (worktree)  │ │ (worktree)  │ │ (worktree) │ │ (worktree)  │ │ (worktree)│
+  └──────────────┘ └─────────────┘ └─────────────┘ └────────────┘ └────────────┘ └───────────┘
 
   ┌─────────────────────────────────────────────────────────────────────────────────────────┐
   │                              TaskRunner (orchestrator)                                  │
   │                                                                                         │
-  │  pub async fn execute(task: &mut dyn Task, agent: &dyn Agent) -> TaskOutput {           │
-  │      // 1. Pre-flight + request 구성                                                    │
-  │      let invocation = match task.before_invoke() {                                      │
+  │  pub async fn execute(task, agent, gh) -> TaskOutput {                                  │
+  │                                                                                         │
+  │      // 1. Pre-flight + request 구성 (Task 판단)                                        │
+  │      let invocation = match task.before_invoke().await {                                │
   │          Ok(inv) => inv,                                                                │
-  │          Err(skip) => return skip.into_task_output(),   // Agent 호출 없이 종료          │
+  │          Err(skip) => {                                                                 │
+  │              self.run_side_effects(&skip.side_effects, gh).await;                       │
+  │              return skip.into_task_output();                                            │
+  │          }                                                                              │
   │      };                                                                                 │
   │                                                                                         │
-  │      // 2. Agent 호출 (유일한 외부 호출 지점)                                              │
+  │      // 2. Agent 호출 (TaskRunner 책임)                                                  │
   │      let agent_output = agent.run_session(                                              │
   │          &invocation.cwd, &invocation.prompt, &invocation.opts                          │
   │      ).await;                                                                           │
   │                                                                                         │
-  │      // 3. 후처리 + queue ops/labels/comments 결정                                       │
-  │      let result = task.after_invoke(agent_output);                                      │
+  │      // 3. 결과 해석 (Task 판단 — 순수 함수)                                              │
+  │      let result = task.resolve(agent_output);                                           │
   │                                                                                         │
-  │      // 4. Cleanup (항상 실행)                                                            │
-  │      task.cleanup();                                                                    │
+  │      // 4. Side effects 실행 (TaskRunner 책임)                                           │
+  │      self.run_side_effects(&result.side_effects, gh).await;                             │
+  │                                                                                         │
+  │      // 5. Cleanup hook (선택적)                                                         │
+  │      task.cleanup().await;                                                              │
   │                                                                                         │
   │      result.into_task_output()                                                          │
+  │  }                                                                                      │
+  │                                                                                         │
+  │  async fn run_side_effects(&self, effects: &[SideEffect], gh: &dyn Gh) {               │
+  │      for effect in effects {                                                            │
+  │          match effect {                                                                 │
+  │              LabelRemove { .. }     => gh.label_remove(..).await,                       │
+  │              LabelAdd { .. }        => gh.label_add(..).await,                          │
+  │              PostComment { .. }     => gh.issue_comment(..).await,                      │
+  │              PrReview { .. }        => gh.pr_review(..).await,                          │
+  │              ExtractKnowledge { .. } => /* best-effort */,                              │
+  │          }                                                                              │
+  │      }                                                                                  │
   │  }                                                                                      │
   └─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -112,60 +134,74 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
 ## 핵심 타입 정의
 
 ```
-  ┌─────────────────────────────────────┐
-  │            Invocation               │
-  ├─────────────────────────────────────┤  before_invoke() 성공 시 반환
-  │ + cwd: PathBuf                      │  Agent에게 전달할 요청을 기술
-  │ + prompt: String                    │
-  │ + opts: SessionOptions              │
-  └─────────────────────────────────────┘
+  ┌──────────────────────────────────────┐
+  │            Invocation                │
+  ├──────────────────────────────────────┤  before_invoke() 성공 시 반환
+  │ + cwd: PathBuf                       │  Agent에게 전달할 요청을 기술
+  │ + prompt: String                     │
+  │ + opts: SessionOptions               │
+  └──────────────────────────────────────┘
 
-  ┌─────────────────────────────────────┐
-  │            SkipReason               │
-  ├─────────────────────────────────────┤  before_invoke() 실패 시 반환
-  │ + work_id: String                   │  Agent 호출 없이 바로 종료
-  │ + repo_name: String                 │
-  │ + reason: SkipKind                  │
-  │ + queue_ops: Vec<QueueOp>           │
-  │ + logs: Vec<NewConsumerLog>         │
-  │ + into_task_output() → TaskOutput   │
-  └─────────────────────────────────────┘
+  ┌──────────────────────────────────────┐
+  │            SkipReason                │
+  ├──────────────────────────────────────┤  before_invoke() 실패 시 반환
+  │ + work_id: String                    │  Agent 호출 없이 바로 종료
+  │ + repo_name: String                  │
+  │ + reason: SkipKind                   │
+  │ + queue_ops: Vec<QueueOp>            │  SkipReason도 side_effects를 갖는다
+  │ + side_effects: Vec<SideEffect>      │  (예: IssueClosed → WIP제거 + DONE추가)
+  │ + logs: Vec<NewConsumerLog>          │
+  │ + into_task_output() → TaskOutput    │
+  └──────────────────────────────────────┘
 
-  ┌─────────────────────────────────────┐
-  │     «enum» SkipKind                 │
-  ├─────────────────────────────────────┤
-  │   IssueClosed                       │
-  │   PrNotReviewable                   │
-  │   PrNotMergeable                    │
-  │   CloneFailed(String)               │
-  │   WorktreeCreationFailed(String)    │
-  └─────────────────────────────────────┘
+  ┌──────────────────────────────────────┐
+  │     «enum» SkipKind                  │
+  ├──────────────────────────────────────┤
+  │   IssueClosed                        │
+  │   PrNotReviewable                    │
+  │   PrNotMergeable                     │
+  │   CloneFailed(String)                │
+  │   WorktreeCreationFailed(String)     │
+  └──────────────────────────────────────┘
 
-  ┌─────────────────────────────────────┐
-  │            TaskResult               │
-  ├─────────────────────────────────────┤  after_invoke() 반환값
-  │ + work_id: String                   │  Agent 결과 해석 후 queue ops 결정
-  │ + repo_name: String                 │
-  │ + queue_ops: Vec<QueueOp>           │
-  │ + logs: Vec<NewConsumerLog>         │
-  │ + side_effects: Vec<SideEffect>     │
-  │ + into_task_output() → TaskOutput   │
-  └─────────────────────────────────────┘
+  ┌──────────────────────────────────────┐
+  │            TaskResult                │
+  ├──────────────────────────────────────┤  resolve() 반환값 — 순수 데이터
+  │ + work_id: String                    │  Agent 결과를 해석한 판단 결과
+  │ + repo_name: String                  │
+  │ + queue_ops: Vec<QueueOp>            │  큐 조작 (main loop에서 실행)
+  │ + side_effects: Vec<SideEffect>      │  외부 호출 (TaskRunner가 실행)
+  │ + logs: Vec<NewConsumerLog>          │  DB 로그
+  │ + into_task_output() → TaskOutput    │
+  └──────────────────────────────────────┘
 
-  ┌─────────────────────────────────────┐
-  │     «enum» SideEffect               │
-  ├─────────────────────────────────────┤  후처리에서 발생하는 외부 호출 기술
-  │   LabelRemove { repo, num, label }  │  (실행은 TaskRunner가 담당)
-  │   LabelAdd { repo, num, label }     │
-  │   PostComment { repo, num, body }   │
-  │   PrReview { repo, num, event, .. } │
-  │   ExtractKnowledge { ... }          │
-  └─────────────────────────────────────┘
+  ┌──────────────────────────────────────┐
+  │     «enum» SideEffect                │
+  ├──────────────────────────────────────┤  Task가 "무엇을 해야 하는지" 기술
+  │   LabelRemove { repo, num, label }   │  TaskRunner가 실행을 담당
+  │   LabelAdd { repo, num, label }      │
+  │   PostComment { repo, num, body }    │
+  │   PrReview { repo, num, event, body }│
+  │   ExtractKnowledge { repo, num, .. } │
+  └──────────────────────────────────────┘
+```
+
+### 역할 분리 원칙
+
+```
+  Task (판단)                         TaskRunner (실행)
+  ─────────────────────               ─────────────────────────
+  "issue가 closed니까                 "Task가 말한 대로
+   WIP 라벨 빼고                       gh.label_remove() 호출하고
+   DONE 라벨 붙여야 해"                gh.label_add() 호출한다"
+       ↓                                  ↓
+  SideEffect 데이터 반환              SideEffect 데이터 받아서 실행
+  (순수 함수, mock 불필요)            (Gh trait 의존)
 ```
 
 ---
 
-## Concrete Task 내부 구조 (before / after 분리)
+## Concrete Task 내부 구조 (before / resolve 분리)
 
 ### AnalyzeTask
 
@@ -177,7 +213,7 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
   │ - workspace: Workspace                                      │
   │ - notifier: Notifier                                        │
   │ - config: ConsumerConfig                                    │
-  │ - wt_path: Option<PathBuf>          // cleanup용            │
+  │ - wt_path: Option<PathBuf>                                  │
   ├─────────────────────────────────────────────────────────────┤
   │ before_invoke():                                            │
   │   ├─ notifier.is_issue_open()  → Err(IssueClosed)          │
@@ -185,17 +221,34 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
   │   ├─ workspace.create_worktree() → Err(WorktreeFailed)     │
   │   └─ Ok(Invocation { cwd, prompt, opts: json_schema })     │
   │                                                             │
-  │ after_invoke(agent_output):                                 │
-  │   ├─ exit_code != 0 → Remove + WIP 제거                    │
+  │ resolve(agent_output) → TaskResult:         ← 순수 함수     │
+  │   ├─ exit_code != 0                                         │
+  │   │   queue_ops: [Remove]                                   │
+  │   │   side_effects: [LabelRemove(WIP)]                      │
   │   ├─ parse analysis JSON                                    │
-  │   │   ├─ Wontfix → Remove + SKIP + 사유 코멘트             │
-  │   │   ├─ NeedsClarification | low confidence → SKIP         │
-  │   │   ├─ Implement → ANALYZED + 분석 리포트 코멘트          │
-  │   │   └─ parse 실패 → fallback ANALYZED                    │
-  │   └─ Err → Remove + WIP 제거                               │
+  │   │   ├─ Wontfix                                            │
+  │   │   │   queue_ops: [Remove]                               │
+  │   │   │   side_effects: [LabelRemove(WIP), LabelAdd(SKIP), │
+  │   │   │                  PostComment(사유)]                  │
+  │   │   ├─ NeedsClarification | confidence < threshold        │
+  │   │   │   queue_ops: [Remove]                               │
+  │   │   │   side_effects: [LabelRemove(WIP), LabelAdd(SKIP), │
+  │   │   │                  PostComment(질문)]                  │
+  │   │   ├─ Implement                                          │
+  │   │   │   queue_ops: [Remove]                               │
+  │   │   │   side_effects: [LabelRemove(WIP),                  │
+  │   │   │                  LabelAdd(ANALYZED),                 │
+  │   │   │                  PostComment(리포트)]                │
+  │   │   └─ parse 실패                                         │
+  │   │       queue_ops: [Remove]                               │
+  │   │       side_effects: [LabelRemove(WIP),                  │
+  │   │                      LabelAdd(ANALYZED),                 │
+  │   │                      PostComment(fallback)]              │
+  │   └─ Err                                                    │
+  │       queue_ops: [Remove]                                   │
+  │       side_effects: [LabelRemove(WIP)]                      │
   │                                                             │
-  │ cleanup():                                                  │
-  │   └─ workspace.remove_worktree()                            │
+  │ cleanup():  workspace.remove_worktree()                     │
   └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -207,7 +260,6 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
   ├─────────────────────────────────────────────────────────────┤
   │ - item: IssueItem                                           │
   │ - workspace: Workspace                                      │
-  │ - gh: Arc<dyn Gh>                   // PR fallback 조회용   │
   │ - wt_path: Option<PathBuf>                                  │
   ├─────────────────────────────────────────────────────────────┤
   │ before_invoke():                                            │
@@ -215,17 +267,27 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
   │   ├─ workspace.create_worktree() → Err(WorktreeFailed)     │
   │   └─ Ok(Invocation { cwd, prompt, opts: default })         │
   │                                                             │
-  │ after_invoke(agent_output):                                 │
-  │   ├─ exit_code != 0 → Remove + IMPLEMENTING 제거           │
-  │   ├─ extract_pr_number(stdout)                              │
-  │   │   ├─ Some(pr) → Remove + PushPr(PENDING)               │
-  │   │   ├─ None → find_existing_pr(gh) fallback              │
-  │   │   │   ├─ Some(pr) → Remove + PushPr(PENDING)           │
-  │   │   │   └─ None → Remove + IMPLEMENTING 제거             │
-  │   └─ Err → Remove + IMPLEMENTING 제거                      │
+  │ resolve(agent_output) → TaskResult:         ← 순수 함수     │
+  │   ├─ exit_code != 0                                         │
+  │   │   queue_ops: [Remove]                                   │
+  │   │   side_effects: [LabelRemove(IMPLEMENTING)]             │
+  │   ├─ exit_code == 0                                         │
+  │   │   ├─ extract_pr_number(stdout) → Some(pr)               │
+  │   │   │   queue_ops: [Remove, PushPr(PENDING, pr_item)]     │
+  │   │   │   side_effects: [LabelAdd(WIP, pr)]                 │
+  │   │   └─ extract 실패                                       │
+  │   │       queue_ops: [Remove]                               │
+  │   │       side_effects: [LabelRemove(IMPLEMENTING)]         │
+  │   └─ Err                                                    │
+  │       queue_ops: [Remove]                                   │
+  │       side_effects: [LabelRemove(IMPLEMENTING)]             │
   │                                                             │
-  │ cleanup():                                                  │
-  │   └─ workspace.remove_worktree()                            │
+  │ cleanup():  workspace.remove_worktree()                     │
+  │                                                             │
+  │ NOTE: find_existing_pr() fallback는 before_invoke에서       │
+  │       head_branch를 미리 기록해두고, resolve에서             │
+  │       stdout 파싱 실패 시 FindPr side_effect로 위임.        │
+  │       또는 resolve를 async로 두고 직접 gh 조회.              │
   └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -239,7 +301,6 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
   │ - workspace: Workspace                                      │
   │ - notifier: Notifier                                        │
   │ - config: ConsumerConfig                                    │
-  │ - sw: Arc<dyn SuggestWorkflow>                              │
   │ - wt_path: Option<PathBuf>                                  │
   ├─────────────────────────────────────────────────────────────┤
   │ before_invoke():                                            │
@@ -248,25 +309,34 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
   │   ├─ workspace.create_worktree() → Err(WorktreeFailed)     │
   │   └─ Ok(Invocation { cwd, prompt, opts: json_schema })     │
   │                                                             │
-  │ after_invoke(agent_output):                                 │
-  │   ├─ exit_code != 0 → Remove + WIP 제거                    │
-  │   ├─ parse review verdict                                   │
-  │   │   ├─ Approve                                            │
-  │   │   │   ├─ PrReview(APPROVE)                              │
-  │   │   │   ├─ knowledge extraction (if enabled)              │
-  │   │   │   ├─ linked issue → issue DONE                      │
-  │   │   │   └─ PR DONE                                        │
-  │   │   ├─ RequestChanges + linked issue                      │
-  │   │   │   ├─ PrReview(REQUEST_CHANGES)                      │
-  │   │   │   └─ PushPr(REVIEW_DONE) + review_comment 보존     │
-  │   │   ├─ RequestChanges + external PR                       │
-  │   │   │   ├─ PostComment (코멘트만)                          │
-  │   │   │   └─ PR DONE                                        │
-  │   │   └─ None → RequestChanges와 동일 처리                  │
-  │   └─ Err → Remove + WIP 제거                               │
+  │ resolve(agent_output) → TaskResult:         ← 순수 함수     │
+  │   ├─ exit_code != 0                                         │
+  │   │   queue_ops: [Remove]                                   │
+  │   │   side_effects: [LabelRemove(WIP)]                      │
+  │   ├─ Approve                                                │
+  │   │   queue_ops: [Remove]                                   │
+  │   │   side_effects:                                         │
+  │   │     [PrReview(APPROVE),                                 │
+  │   │      PostComment(리뷰 요약),                             │
+  │   │      LabelRemove(WIP), LabelAdd(DONE, pr),             │
+  │   │      LabelRemove(IMPLEMENTING, issue),   ← if linked   │
+  │   │      LabelAdd(DONE, issue),              ← if linked   │
+  │   │      ExtractKnowledge(..)]               ← if enabled  │
+  │   ├─ RequestChanges + linked issue                          │
+  │   │   queue_ops: [Remove, PushPr(REVIEW_DONE, updated)]    │
+  │   │   side_effects:                                         │
+  │   │     [PrReview(REQUEST_CHANGES),                         │
+  │   │      PostComment(리뷰 피드백)]                           │
+  │   ├─ RequestChanges + external PR                           │
+  │   │   queue_ops: [Remove]                                   │
+  │   │   side_effects:                                         │
+  │   │     [PostComment(리뷰 피드백),                           │
+  │   │      LabelRemove(WIP), LabelAdd(DONE)]                 │
+  │   └─ Err                                                    │
+  │       queue_ops: [Remove]                                   │
+  │       side_effects: [LabelRemove(WIP)]                      │
   │                                                             │
-  │ cleanup():                                                  │
-  │   └─ workspace.remove_worktree()                            │
+  │ cleanup():  workspace.remove_worktree()                     │
   └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -285,16 +355,20 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
   │   ├─ workspace.create_worktree() → Err(WorktreeFailed)     │
   │   └─ Ok(Invocation { cwd, prompt, opts: default })         │
   │                                                             │
-  │ after_invoke(agent_output):                                 │
-  │   ├─ exit_code != 0 → Remove + WIP 제거                    │
+  │ resolve(agent_output) → TaskResult:         ← 순수 함수     │
+  │   ├─ exit_code != 0                                         │
+  │   │   queue_ops: [Remove]                                   │
+  │   │   side_effects: [LabelRemove(WIP)]                      │
   │   ├─ exit_code == 0                                         │
-  │   │   ├─ iteration > 0 → 이전 iteration 라벨 제거          │
-  │   │   ├─ iteration++ → 새 iteration 라벨 추가              │
-  │   │   └─ PushPr(IMPROVED)                                   │
-  │   └─ Err → Remove + WIP 제거                               │
+  │   │   queue_ops: [Remove, PushPr(IMPROVED, updated)]        │
+  │   │   side_effects:                                         │
+  │   │     [LabelRemove(iteration/N),     ← if iteration > 0  │
+  │   │      LabelAdd(iteration/N+1)]                           │
+  │   └─ Err                                                    │
+  │       queue_ops: [Remove]                                   │
+  │       side_effects: [LabelRemove(WIP)]                      │
   │                                                             │
-  │ cleanup():                                                  │
-  │   └─ workspace.remove_worktree()                            │
+  │ cleanup():  workspace.remove_worktree()                     │
   └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -306,9 +380,7 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
   ├─────────────────────────────────────────────────────────────┤
   │ - item: PrItem                                              │
   │ - workspace: Workspace                                      │
-  │ - notifier: Notifier                                        │
   │ - config: DevelopConfig                                     │
-  │ - sw: Arc<dyn SuggestWorkflow>                              │
   │ - wt_path: Option<PathBuf>                                  │
   ├─────────────────────────────────────────────────────────────┤
   │ before_invoke():                                            │
@@ -316,26 +388,35 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
   │   ├─ workspace.create_worktree() → Err(WorktreeFailed)     │
   │   └─ Ok(Invocation { cwd, prompt, opts: json_schema })     │
   │                                                             │
-  │ after_invoke(agent_output):                                 │
-  │   ├─ exit_code != 0 → Remove + WIP 제거                    │
-  │   ├─ parse review verdict                                   │
-  │   │   ├─ Approve                                            │
-  │   │   │   ├─ PrReview(APPROVE)                              │
-  │   │   │   ├─ knowledge extraction (if enabled)              │
-  │   │   │   ├─ linked issue → issue DONE                      │
-  │   │   │   ├─ iteration 라벨 제거                             │
-  │   │   │   └─ PR DONE                                        │
-  │   │   ├─ RequestChanges + iteration < max                   │
-  │   │   │   ├─ PrReview(REQUEST_CHANGES)                      │
-  │   │   │   └─ PushPr(REVIEW_DONE) + review_comment 보존     │
-  │   │   ├─ RequestChanges + iteration >= max ← CRITICAL       │
-  │   │   │   ├─ SKIP + iteration 라벨 제거                     │
-  │   │   │   └─ PostComment("iteration limit reached")         │
-  │   │   └─ None → RequestChanges와 동일 처리                  │
-  │   └─ Err → Remove + WIP 제거                               │
+  │ resolve(agent_output) → TaskResult:         ← 순수 함수     │
+  │   ├─ exit_code != 0                                         │
+  │   │   queue_ops: [Remove]                                   │
+  │   │   side_effects: [LabelRemove(WIP)]                      │
+  │   ├─ Approve                                                │
+  │   │   queue_ops: [Remove]                                   │
+  │   │   side_effects:                                         │
+  │   │     [PrReview(APPROVE),                                 │
+  │   │      LabelRemove(WIP), LabelAdd(DONE, pr),             │
+  │   │      LabelRemove(iteration/N),                          │
+  │   │      LabelRemove(IMPLEMENTING, issue),   ← if linked   │
+  │   │      LabelAdd(DONE, issue),              ← if linked   │
+  │   │      ExtractKnowledge(..)]               ← if enabled  │
+  │   ├─ RequestChanges + iteration < max                       │
+  │   │   queue_ops: [Remove, PushPr(REVIEW_DONE, updated)]    │
+  │   │   side_effects:                                         │
+  │   │     [PrReview(REQUEST_CHANGES),                         │
+  │   │      PostComment(리뷰 피드백)]                           │
+  │   ├─ RequestChanges + iteration >= max     ← CRITICAL       │
+  │   │   queue_ops: [Remove]                                   │
+  │   │   side_effects:                                         │
+  │   │     [LabelRemove(WIP), LabelAdd(SKIP),                 │
+  │   │      LabelRemove(iteration/N),                          │
+  │   │      PostComment("iteration limit reached")]            │
+  │   └─ Err                                                    │
+  │       queue_ops: [Remove]                                   │
+  │       side_effects: [LabelRemove(WIP)]                      │
   │                                                             │
-  │ cleanup():                                                  │
-  │   └─ workspace.remove_worktree()                            │
+  │ cleanup():  workspace.remove_worktree()                     │
   └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -348,7 +429,6 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
   │ - item: MergeItem                                           │
   │ - workspace: Workspace                                      │
   │ - notifier: Notifier                                        │
-  │ - merger: Merger                    // merge 전용 컴포넌트  │
   │ - wt_path: Option<PathBuf>                                  │
   ├─────────────────────────────────────────────────────────────┤
   │ before_invoke():                                            │
@@ -357,18 +437,22 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
   │   ├─ workspace.create_worktree() → Err(WorktreeFailed)     │
   │   └─ Ok(Invocation { cwd, prompt: merge_pr, opts })        │
   │                                                             │
-  │ after_invoke(agent_output):                                 │
-  │   ├─ parse MergeOutcome                                     │
-  │   │   ├─ Success → PR DONE                                  │
-  │   │   ├─ Conflict → resolve_conflicts()                     │
-  │   │   │   ├─ resolve 성공 → PR DONE                         │
-  │   │   │   └─ resolve 실패 → Remove + WIP 제거              │
-  │   │   ├─ Failed → Remove + WIP 제거                         │
-  │   │   └─ Error → Remove + WIP 제거                          │
-  │   └─ (MergeTask는 Agent 호출 대신 Merger 사용)              │
+  │ resolve(agent_output) → TaskResult:         ← 순수 함수     │
+  │   ├─ Success                                                │
+  │   │   queue_ops: [Remove]                                   │
+  │   │   side_effects: [LabelRemove(WIP), LabelAdd(DONE)]     │
+  │   ├─ Conflict                                               │
+  │   │   (conflict resolution은 별도 Agent 호출이 필요하므로    │
+  │   │    ResolveConflict side_effect로 위임하거나              │
+  │   │    MergeTask를 2-phase로 설계)                           │
+  │   ├─ Failed                                                 │
+  │   │   queue_ops: [Remove]                                   │
+  │   │   side_effects: [LabelRemove(WIP)]                      │
+  │   └─ Error                                                  │
+  │       queue_ops: [Remove]                                   │
+  │       side_effects: [LabelRemove(WIP)]                      │
   │                                                             │
-  │ cleanup():                                                  │
-  │   └─ workspace.remove_worktree()                            │
+  │ cleanup():  workspace.remove_worktree()                     │
   └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -381,7 +465,7 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
   │                          DAEMON (Orchestrator)                         │
   │                                                                         │
   │  loop {                                                                 │
-  │    scan → pop from queues → TaskRunner.execute(task, agent)             │
+  │    scan → pop from queues → TaskRunner.execute(task, agent, gh)         │
   │    handle_task_output(queues, db, output)                               │
   │  }                                                                      │
   └───────────────────────────────────┬─────────────────────────────────────┘
@@ -392,19 +476,41 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
         │    TaskRunner     │               │    TaskQueues     │
         ├───────────────────┤               ├───────────────────┤
         │ execute(task,     │               │ issues: StateQueue│
-        │         agent)    │               │ prs: StateQueue   │
+        │   agent, gh)      │               │ prs: StateQueue   │
         │  → TaskOutput     │               │ merges: StateQueue│
-        └────────┬──────────┘               └───────────────────┘
-                 │ calls
-      ┌──────────┼──────────────┐
-      ▼          ▼              ▼
-  before_     Agent          after_
-  invoke()  .run_session()   invoke()
-      │                        │
-      │          │              │
-      ▼          │              ▼
-  Invocation ────┘          TaskResult
-  or SkipReason             { queue_ops, side_effects, logs }
+        │                   │               └───────────────────┘
+        │ run_side_effects()│
+        │  (Gh 의존)        │
+        └────────┬──────────┘
+                 │
+    ┌────────────┼─────────────────────────┐
+    ▼            ▼                         ▼
+  Task         Agent                    TaskRunner
+  .before()    .run_session()           .run_side_effects()
+    │                                      │
+    ▼            │                         ▼
+  Invocation ────┘                      for effect in side_effects {
+  or SkipReason ──→ run_side_effects()      gh.label_remove()
+                                            gh.label_add()
+    Task                                    gh.issue_comment()
+    .resolve(output)                        gh.pr_review()
+    │                                   }
+    ▼
+  TaskResult { queue_ops, side_effects } ──→ run_side_effects()
+```
+
+### 의존성 방향 정리
+
+```
+  Task (순수 판단)              TaskRunner (실행)
+  ─────────────────────         ─────────────────────────
+  의존: item, config            의존: Agent, Gh
+  before: + Workspace, Notifier
+  resolve: 의존 없음 (순수)
+  cleanup: + Workspace
+
+  ※ resolve()는 외부 의존성 없는 순수 함수
+  ※ side_effects 실행은 TaskRunner가 Gh에 위임
 ```
 
 ### Infrastructure Traits (변경 없음)
@@ -463,45 +569,9 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
 
 ---
 
-## SideEffect 실행 전략
-
-현재 `_one()` 함수는 label/comment/review를 즉시 실행한다.
-리팩토링 후에는 **두 가지 전략**이 가능하다:
-
-### Option A: after_invoke 내부에서 즉시 실행 (현재와 동일)
-
-```
-  after_invoke(output):
-    gh.label_remove(...)     // 즉시 실행
-    gh.label_add(...)        // 즉시 실행
-    gh.post_issue_comment()  // 즉시 실행
-    → TaskResult { queue_ops }
-```
-
-- 장점: 기존 코드 변경 최소화
-- 단점: after_invoke에 Gh 의존성 필요, side effect 테스트 시 MockGh 필수
-
-### Option B: SideEffect를 데이터로 반환하고 TaskRunner가 실행
-
-```
-  after_invoke(output):
-    → TaskResult {
-        queue_ops: [Remove, PushPr(PENDING)],
-        side_effects: [LabelRemove(..), LabelAdd(..), PostComment(..)],
-      }
-
-  TaskRunner:
-    for effect in result.side_effects {
-        effect.execute(&gh).await;
-    }
-```
-
-- 장점: after_invoke가 **순수 함수**, 테스트에서 assert_eq로 검증 가능
-- 단점: SideEffect enum 정의 필요, 추가 추상화 레이어
-
----
-
 ## 테스트 포인트 매핑
+
+resolve()가 순수 함수이므로, 테스트 레이어가 명확히 분리된다.
 
 ```
   ┌─────────────────────────────────────────────────────────────────────┐
@@ -510,25 +580,27 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
   │  ┌─── before_invoke() 단위 테스트 ────────────────────────────┐    │
   │  │                                                              │    │
   │  │  Mock: Notifier (pre-flight), Workspace (clone/worktree)    │    │
-  │  │  검증: Invocation 내용 or SkipReason 종류                   │    │
+  │  │  검증: Invocation 내용 or SkipReason { kind, side_effects } │    │
   │  │  Agent: 불필요                                               │    │
   │  │                                                              │    │
   │  └──────────────────────────────────────────────────────────────┘    │
   │                                                                     │
-  │  ┌─── after_invoke() 단위 테스트 ─────────────────────────────┐    │
+  │  ┌─── resolve() 단위 테스트 ──────────────────────────────────┐    │
   │  │                                                              │    │
-  │  │  Input: 미리 구성한 SessionResult (exit_code, stdout)       │    │
-  │  │  Mock: Gh (Option A) or 없음 (Option B)                     │    │
-  │  │  검증: queue_ops 내용, side_effects 내용, logs              │    │
-  │  │  Agent: 불필요                                               │    │
+  │  │  Input: 미리 구성한 SessionResult (exit_code, stdout JSON)  │    │
+  │  │  Mock: 없음 (순수 함수)                                      │    │
+  │  │  검증: assert_eq!(result.queue_ops, expected_ops)           │    │
+  │  │        assert_eq!(result.side_effects, expected_effects)    │    │
+  │  │  Agent: 불필요, Gh: 불필요                                   │    │
   │  │                                                              │    │
   │  └──────────────────────────────────────────────────────────────┘    │
   │                                                                     │
   │  ┌─── TaskRunner 통합 테스트 ──────────────────────────────────┐   │
   │  │                                                              │    │
-  │  │  Mock: Agent (응답 주입), Task (before/after stub)          │    │
-  │  │  검증: before→agent→after→cleanup 순서 보장                 │    │
+  │  │  Mock: Agent (응답 주입), Gh (side effect 실행 검증)        │    │
+  │  │  검증: before→agent→resolve→side_effects→cleanup 순서 보장  │    │
   │  │        SkipReason 시 Agent 호출 안 됨                       │    │
+  │  │        SkipReason의 side_effects도 실행됨                   │    │
   │  │                                                              │    │
   │  └──────────────────────────────────────────────────────────────┘    │
   │                                                                     │
@@ -540,3 +612,44 @@ Agent 호출 없이도 전처리·후처리를 독립 테스트할 수 있게 �
   │  └──────────────────────────────────────────────────────────────┘    │
   └─────────────────────────────────────────────────────────────────────┘
 ```
+
+### 테스트 난이도 비교 (AS-IS vs TO-BE)
+
+```
+  AS-IS: _one() 전체 호출
+  ──────────────────────────────────────────────────────
+  테스트 하나에 필요한 mock:  Agent + Gh + Git + Env
+  verdict 분기 검증하려면:    Agent mock 응답 조작 필수
+  label 검증하려면:           MockGh의 호출 기록 확인
+
+  TO-BE: resolve() 단독 호출
+  ──────────────────────────────────────────────────────
+  테스트 하나에 필요한 mock:  없음 (순수 함수)
+  verdict 분기 검증:          SessionResult 직접 구성
+  label 검증:                 assert_eq!(side_effects, [...])
+```
+
+---
+
+## 미결 설계 포인트
+
+### 1. ImplementTask의 find_existing_pr fallback
+
+현재 `implement_one()`은 stdout에서 PR 번호 추출 실패 시
+`gh.api_paginate()`로 fallback 조회한다.
+
+resolve()를 순수 함수로 유지하려면:
+- **방안 A**: `FindPr { head_branch }` SideEffect 추가 → TaskRunner가 조회 후 queue_ops 결정
+- **방안 B**: resolve()를 async로 두고 Gh를 주입 (순수성 포기)
+- **방안 C**: before_invoke에서 head_branch 기록, resolve에서 stdout 파싱만 하고
+             실패 시 `NeedsPrLookup` 상태 반환 → TaskRunner가 2차 처리
+
+### 2. MergeTask의 conflict resolution
+
+현재 `merge_one()`은 conflict 발생 시 `merger.resolve_conflicts()`를
+추가 Agent 호출로 시도한다.
+
+resolve()가 단일 Agent 응답만 받으므로:
+- **방안 A**: Conflict → `ResolveConflict` SideEffect → TaskRunner가 2차 Agent 호출
+- **방안 B**: MergeTask를 2-phase task로 설계 (merge → conflict resolution)
+- **방안 C**: Merger가 내부적으로 2회 호출하고 최종 결과만 반환
