@@ -1,5 +1,7 @@
 #[allow(dead_code)]
 pub mod agent;
+#[allow(dead_code)]
+pub mod agent_impl;
 pub mod log;
 pub mod pid;
 #[allow(dead_code)]
@@ -12,7 +14,11 @@ pub mod task_context;
 #[allow(dead_code)]
 pub mod task_manager;
 #[allow(dead_code)]
+pub mod task_manager_impl;
+#[allow(dead_code)]
 pub mod task_runner;
+#[allow(dead_code)]
+pub mod task_runner_impl;
 #[allow(dead_code)]
 pub mod task_source;
 
