@@ -277,12 +277,6 @@ mod tests {
         async fn remove_worktree(&self, _: &str, _: &str) -> anyhow::Result<()> {
             Ok(())
         }
-        fn repo_base_path(&self, _: &str) -> PathBuf {
-            PathBuf::from("/mock/main")
-        }
-        fn worktree_path(&self, _: &str, task_id: &str) -> PathBuf {
-            PathBuf::from(format!("/mock/{task_id}"))
-        }
     }
 
     struct MockConfigLoader;

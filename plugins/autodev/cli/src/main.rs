@@ -3,29 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-#[allow(dead_code)]
-mod client;
-#[allow(dead_code)]
-mod components;
-#[allow(dead_code)]
-mod config;
-#[allow(dead_code)]
-mod daemon;
-#[allow(dead_code)]
-mod domain;
-#[allow(dead_code)]
-mod infrastructure;
-#[allow(dead_code)]
-mod knowledge;
-#[allow(dead_code)]
-mod queue;
-mod scanner;
-#[allow(dead_code)]
-mod sources;
-#[allow(dead_code)]
-mod tasks;
-#[allow(dead_code)]
-mod tui;
+use autodev::{client, config, daemon, infrastructure, queue, tui};
 
 use infrastructure::claude::RealClaude;
 use infrastructure::gh::RealGh;

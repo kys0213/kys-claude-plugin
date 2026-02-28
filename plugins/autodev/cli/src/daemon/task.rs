@@ -12,7 +12,7 @@ use async_trait::async_trait;
 
 use crate::domain::models::NewConsumerLog;
 use crate::infrastructure::claude::SessionOptions;
-use crate::queue::task_queues::{IssueItem, MergeItem, PrItem};
+use crate::queue::task_queues::PrItem;
 
 // ─── Agent 요청/응답 DTO ───
 
@@ -55,17 +55,10 @@ impl AgentResponse {
 pub enum QueueOp {
     /// 현재 working phase에서 아이템 제거 (done/skip/error)
     Remove,
-    /// Issue를 특정 phase에 push
-    PushIssue {
-        phase: &'static str,
-        item: IssueItem,
-    },
     /// PR을 특정 phase에 push
-    PushPr { phase: &'static str, item: PrItem },
-    /// Merge를 특정 phase에 push
-    PushMerge {
+    PushPr {
         phase: &'static str,
-        item: MergeItem,
+        item: Box<PrItem>,
     },
 }
 
@@ -124,15 +117,12 @@ impl fmt::Display for TaskStatus {
 pub enum SkipReason {
     /// Preflight 검사 실패 (이슈가 닫힘, PR이 머지됨 등)
     PreflightFailed(String),
-    /// 이미 처리된 아이템
-    AlreadyProcessed,
 }
 
 impl fmt::Display for SkipReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SkipReason::PreflightFailed(msg) => write!(f, "preflight: {msg}"),
-            SkipReason::AlreadyProcessed => write!(f, "already processed"),
         }
     }
 }

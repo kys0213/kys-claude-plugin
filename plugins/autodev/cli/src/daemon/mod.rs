@@ -2,13 +2,8 @@ pub mod agent;
 pub mod agent_impl;
 pub mod log;
 pub mod pid;
-#[allow(dead_code)]
-pub mod recovery;
 pub mod status;
 pub mod task;
-pub mod task_context;
-pub mod task_manager;
-pub mod task_manager_impl;
 pub mod task_runner;
 pub mod task_runner_impl;
 pub mod task_source;

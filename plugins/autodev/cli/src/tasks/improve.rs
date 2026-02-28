@@ -171,7 +171,7 @@ impl Task for ImproveTask {
             ops.push(QueueOp::Remove);
             ops.push(QueueOp::PushPr {
                 phase: pr_phase::IMPROVED,
-                item: next_item,
+                item: Box::new(next_item),
             });
         } else {
             self.gh
@@ -228,12 +228,6 @@ mod tests {
         }
         async fn remove_worktree(&self, _: &str, _: &str) -> anyhow::Result<()> {
             Ok(())
-        }
-        fn repo_base_path(&self, _: &str) -> PathBuf {
-            PathBuf::from("/mock/main")
-        }
-        fn worktree_path(&self, _: &str, task_id: &str) -> PathBuf {
-            PathBuf::from(format!("/mock/{task_id}"))
         }
     }
 
