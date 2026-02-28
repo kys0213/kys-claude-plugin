@@ -5,7 +5,6 @@ pub mod daemon;
 pub mod domain;
 pub mod infrastructure;
 pub mod knowledge;
-pub mod pipeline;
 pub mod queue;
 pub mod scanner;
 pub mod sources;

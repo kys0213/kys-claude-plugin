@@ -18,8 +18,6 @@ mod infrastructure;
 #[allow(dead_code)]
 mod knowledge;
 #[allow(dead_code)]
-mod pipeline;
-#[allow(dead_code)]
 mod queue;
 mod scanner;
 #[allow(dead_code)]
