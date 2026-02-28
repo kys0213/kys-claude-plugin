@@ -7,6 +7,7 @@
     "./commands/outline.md",
     "./commands/design.md",
     "./commands/develop.md",
+    "./commands/develop-auto.md",
     "./commands/implement.md",
     "./commands/multi-review.md",
     "./commands/review-to-issues.md"
