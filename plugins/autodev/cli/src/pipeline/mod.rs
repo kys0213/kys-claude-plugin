@@ -1,17 +1,12 @@
 pub mod issue;
 pub mod merge;
 pub mod pr;
+pub mod task;
+pub mod task_runner;
+pub mod tasks;
 
-use anyhow::Result;
-
-use crate::components::notifier::Notifier;
-use crate::components::workspace::Workspace;
-use crate::config::Env;
 use crate::domain::models::NewConsumerLog;
 use crate::domain::repository::ConsumerLogRepository;
-use crate::infrastructure::claude::Claude;
-use crate::infrastructure::gh::Gh;
-use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 use crate::queue::task_queues::{IssueItem, MergeItem, PrItem, TaskQueues};
 use crate::queue::Database;
 
@@ -93,31 +88,6 @@ pub fn handle_task_output(queues: &mut TaskQueues, db: &Database, output: TaskOu
     for log in &output.logs {
         let _ = db.log_insert(log);
     }
-}
-
-// ─── Legacy batch processing ───
-
-/// 이벤트 루프 도입 전의 동기 처리 방식.
-/// 현재는 daemon event loop가 각 phase를 개별 spawned task로 처리한다.
-#[allow(dead_code)]
-#[allow(clippy::too_many_arguments)]
-pub async fn process_all(
-    db: &Database,
-    env: &dyn Env,
-    workspace: &Workspace<'_>,
-    notifier: &Notifier<'_>,
-    gh: &dyn Gh,
-    claude: &dyn Claude,
-    sw: &dyn SuggestWorkflow,
-    queues: &mut TaskQueues,
-) -> Result<()> {
-    issue::process_pending(db, env, workspace, notifier, gh, claude, queues).await?;
-    issue::process_ready(db, env, workspace, notifier, gh, claude, sw, queues).await?;
-    pr::process_pending(db, env, workspace, notifier, gh, claude, sw, queues).await?;
-    pr::process_review_done(db, env, workspace, gh, claude, queues).await?;
-    pr::process_improved(db, env, workspace, notifier, gh, claude, sw, queues).await?;
-    merge::process_pending(db, env, workspace, notifier, gh, claude, queues).await?;
-    Ok(())
 }
 
 #[cfg(test)]

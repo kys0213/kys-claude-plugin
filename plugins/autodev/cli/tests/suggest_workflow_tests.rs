@@ -1,6 +1,6 @@
 use autodev::components::workspace::Workspace;
 use autodev::config::Env;
-use autodev::infrastructure::claude::mock::MockClaude;
+use autodev::infrastructure::agent::mock::MockAgent;
 use autodev::infrastructure::gh::mock::MockGh;
 use autodev::infrastructure::git::mock::MockGit;
 use autodev::infrastructure::suggest_workflow::mock::MockSuggestWorkflow;
@@ -88,7 +88,7 @@ async fn mock_suggest_workflow_records_calls() {
 
 #[tokio::test]
 async fn extract_task_knowledge_includes_sw_data_in_prompt() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
     let gh = MockGh::new();
@@ -149,7 +149,7 @@ async fn extract_task_knowledge_includes_sw_data_in_prompt() {
 
 #[tokio::test]
 async fn extract_task_knowledge_works_without_sw_data() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
     let gh = MockGh::new();
@@ -281,7 +281,7 @@ async fn enrich_with_cross_analysis_empty_when_no_data() {
 
 #[tokio::test]
 async fn daily_suggestions_prompt_includes_cross_analysis_hint() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
     let report = DailyReport {
@@ -326,7 +326,7 @@ async fn daily_suggestions_prompt_includes_cross_analysis_hint() {
 
 #[tokio::test]
 async fn daily_suggestions_prompt_no_cross_hint_without_analysis() {
-    let claude = MockClaude::new();
+    let claude = MockAgent::new();
     claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
 
     let report = DailyReport {

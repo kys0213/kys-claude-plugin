@@ -4,13 +4,13 @@ use std::time::Instant;
 use anyhow::Result;
 use async_trait::async_trait;
 
-use super::{Claude, SessionResult};
+use super::{Agent, SessionResult};
 
-/// 실제 `claude` CLI를 호출하는 구현체
-pub struct RealClaude;
+/// 실제 `claude` CLI를 호출하는 Agent 구현체
+pub struct ClaudeAgent;
 
 #[async_trait]
-impl Claude for RealClaude {
+impl Agent for ClaudeAgent {
     async fn run_session(
         &self,
         cwd: &Path,
@@ -35,7 +35,7 @@ impl Claude for RealClaude {
         }
 
         tracing::info!(
-            "[claude] >>> claude -p \"{}\" in {:?} (args={})",
+            "[agent] >>> claude -p \"{}\" in {:?} (args={})",
             truncate(prompt, 80),
             cwd,
             args.len()
@@ -57,14 +57,14 @@ impl Claude for RealClaude {
 
         if exit_code == 0 {
             tracing::info!(
-                "[claude] <<< OK (exit=0, {}ms, stdout={} bytes, stderr={} bytes)",
+                "[agent] <<< OK (exit=0, {}ms, stdout={} bytes, stderr={} bytes)",
                 elapsed.as_millis(),
                 stdout.len(),
                 stderr.len()
             );
         } else {
             tracing::error!(
-                "[claude] <<< FAILED (exit={exit_code}, {}ms, stdout={} bytes): {}",
+                "[agent] <<< FAILED (exit={exit_code}, {}ms, stdout={} bytes): {}",
                 elapsed.as_millis(),
                 stdout.len(),
                 truncate(&stderr, 200)

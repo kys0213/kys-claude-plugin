@@ -2,8 +2,8 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::infrastructure::claude::output;
-use crate::infrastructure::claude::{Claude, SessionOptions};
+use crate::infrastructure::agent::output;
+use crate::infrastructure::agent::{Agent, SessionOptions};
 
 /// 이슈 분석 결과
 pub struct AnalyzerOutput {
@@ -16,11 +16,11 @@ pub struct AnalyzerOutput {
 
 /// 이슈 분석 — Claude 세션을 통한 이슈 분석
 pub struct Analyzer<'a> {
-    claude: &'a dyn Claude,
+    claude: &'a dyn Agent,
 }
 
 impl<'a> Analyzer<'a> {
-    pub fn new(claude: &'a dyn Claude) -> Self {
+    pub fn new(claude: &'a dyn Agent) -> Self {
         Self { claude }
     }
 

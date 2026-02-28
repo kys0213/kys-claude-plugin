@@ -18,11 +18,18 @@ use crate::config::{self, Env};
 use crate::domain::git_repository::GitRepository;
 use crate::domain::git_repository_factory::GitRepositoryFactory;
 use crate::domain::repository::{ConsumerLogRepository, RepoRepository, ScanCursorRepository};
-use crate::infrastructure::claude::Claude;
+use crate::infrastructure::agent::Agent;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 use crate::pipeline;
+use crate::pipeline::task_runner::TaskRunner;
+use crate::pipeline::tasks::analyze::AnalyzeTask;
+use crate::pipeline::tasks::implement::ImplementTask;
+use crate::pipeline::tasks::improve::ImproveTask;
+use crate::pipeline::tasks::merge::MergeTask;
+use crate::pipeline::tasks::re_review::ReReviewTask;
+use crate::pipeline::tasks::review::ReviewTask;
 use crate::pipeline::QueueOp;
 use crate::queue::task_queues::{issue_phase, merge_phase, pr_phase};
 use crate::queue::Database;
@@ -104,7 +111,7 @@ fn apply_queue_ops(repos: &mut HashMap<String, GitRepository>, output: &pipeline
 
 // ─── Task Spawner ───
 
-/// 모든 repo의 큐에서 Ready 아이템을 pop → working phase 전이 → spawned task로 실행.
+/// 모든 repo의 큐에서 Ready 아이템을 pop → working phase 전이 → TaskRunner로 실행.
 /// InFlightTracker가 상한에 도달하면 즉시 반환한다.
 #[allow(clippy::too_many_arguments)]
 fn spawn_ready_tasks(
@@ -114,7 +121,7 @@ fn spawn_ready_tasks(
     env: &Arc<dyn Env>,
     gh: &Arc<dyn Gh>,
     git: &Arc<dyn Git>,
-    claude: &Arc<dyn Claude>,
+    agent: &Arc<dyn Agent>,
     sw: &Arc<dyn SuggestWorkflow>,
 ) {
     for repo in repos.values_mut() {
@@ -126,16 +133,17 @@ fn spawn_ready_tasks(
             };
             tracker.track(&item.repo_name);
             repo.issue_queue.push(issue_phase::ANALYZING, item.clone());
-            tracing::debug!("issue #{}: spawned analyze_one", item.github_number);
+            tracing::debug!("issue #{}: spawned AnalyzeTask", item.github_number);
 
-            let (e, g, gi, c) = (
-                Arc::clone(env),
-                Arc::clone(gh),
-                Arc::clone(git),
-                Arc::clone(claude),
-            );
-            join_set.spawn(
-                async move { pipeline::issue::analyze_one(item, &*e, &*g, &*gi, &*c).await },
+            TaskRunner::spawn(
+                join_set,
+                AnalyzeTask::new(
+                    item,
+                    Arc::clone(env),
+                    Arc::clone(gh),
+                    Arc::clone(git),
+                    Arc::clone(agent),
+                ),
             );
         }
 
@@ -148,17 +156,18 @@ fn spawn_ready_tasks(
             tracker.track(&item.repo_name);
             repo.issue_queue
                 .push(issue_phase::IMPLEMENTING, item.clone());
-            tracing::debug!("issue #{}: spawned implement_one", item.github_number);
+            tracing::debug!("issue #{}: spawned ImplementTask", item.github_number);
 
-            let (e, g, gi, c) = (
-                Arc::clone(env),
-                Arc::clone(gh),
-                Arc::clone(git),
-                Arc::clone(claude),
+            TaskRunner::spawn(
+                join_set,
+                ImplementTask::new(
+                    item,
+                    Arc::clone(env),
+                    Arc::clone(gh),
+                    Arc::clone(git),
+                    Arc::clone(agent),
+                ),
             );
-            join_set.spawn(async move {
-                pipeline::issue::implement_one(item, &*e, &*g, &*gi, &*c).await
-            });
         }
 
         // PR: Pending → Reviewing
@@ -169,18 +178,19 @@ fn spawn_ready_tasks(
             };
             tracker.track(&item.repo_name);
             repo.pr_queue.push(pr_phase::REVIEWING, item.clone());
-            tracing::debug!("PR #{}: spawned review_one", item.github_number);
+            tracing::debug!("PR #{}: spawned ReviewTask", item.github_number);
 
-            let (e, g, gi, c, s) = (
-                Arc::clone(env),
-                Arc::clone(gh),
-                Arc::clone(git),
-                Arc::clone(claude),
-                Arc::clone(sw),
+            TaskRunner::spawn(
+                join_set,
+                ReviewTask::new(
+                    item,
+                    Arc::clone(env),
+                    Arc::clone(gh),
+                    Arc::clone(git),
+                    Arc::clone(agent),
+                    Arc::clone(sw),
+                ),
             );
-            join_set.spawn(async move {
-                pipeline::pr::review_one(item, &*e, &*g, &*gi, &*c, &*s).await
-            });
         }
 
         // PR: ReviewDone → Improving
@@ -191,16 +201,18 @@ fn spawn_ready_tasks(
             };
             tracker.track(&item.repo_name);
             repo.pr_queue.push(pr_phase::IMPROVING, item.clone());
-            tracing::debug!("PR #{}: spawned improve_one", item.github_number);
+            tracing::debug!("PR #{}: spawned ImproveTask", item.github_number);
 
-            let (e, g, gi, c) = (
-                Arc::clone(env),
-                Arc::clone(gh),
-                Arc::clone(git),
-                Arc::clone(claude),
+            TaskRunner::spawn(
+                join_set,
+                ImproveTask::new(
+                    item,
+                    Arc::clone(env),
+                    Arc::clone(gh),
+                    Arc::clone(git),
+                    Arc::clone(agent),
+                ),
             );
-            join_set
-                .spawn(async move { pipeline::pr::improve_one(item, &*e, &*g, &*gi, &*c).await });
         }
 
         // PR: Improved → Reviewing (re-review)
@@ -211,18 +223,19 @@ fn spawn_ready_tasks(
             };
             tracker.track(&item.repo_name);
             repo.pr_queue.push(pr_phase::REVIEWING, item.clone());
-            tracing::debug!("PR #{}: spawned re_review_one", item.github_number);
+            tracing::debug!("PR #{}: spawned ReReviewTask", item.github_number);
 
-            let (e, g, gi, c, s) = (
-                Arc::clone(env),
-                Arc::clone(gh),
-                Arc::clone(git),
-                Arc::clone(claude),
-                Arc::clone(sw),
+            TaskRunner::spawn(
+                join_set,
+                ReReviewTask::new(
+                    item,
+                    Arc::clone(env),
+                    Arc::clone(gh),
+                    Arc::clone(git),
+                    Arc::clone(agent),
+                    Arc::clone(sw),
+                ),
             );
-            join_set.spawn(async move {
-                pipeline::pr::re_review_one(item, &*e, &*g, &*gi, &*c, &*s).await
-            });
         }
 
         // Merge: Pending → Merging
@@ -233,16 +246,18 @@ fn spawn_ready_tasks(
             };
             tracker.track(&item.repo_name);
             repo.merge_queue.push(merge_phase::MERGING, item.clone());
-            tracing::debug!("merge PR #{}: spawned merge_one", item.pr_number);
+            tracing::debug!("merge PR #{}: spawned MergeTask", item.pr_number);
 
-            let (e, g, gi, c) = (
-                Arc::clone(env),
-                Arc::clone(gh),
-                Arc::clone(git),
-                Arc::clone(claude),
+            TaskRunner::spawn(
+                join_set,
+                MergeTask::new(
+                    item,
+                    Arc::clone(env),
+                    Arc::clone(gh),
+                    Arc::clone(git),
+                    Arc::clone(agent),
+                ),
             );
-            join_set
-                .spawn(async move { pipeline::merge::merge_one(item, &*e, &*g, &*gi, &*c).await });
         }
     }
 }
@@ -256,7 +271,7 @@ pub async fn start(
     env: Arc<dyn Env>,
     gh: Arc<dyn Gh>,
     git: Arc<dyn Git>,
-    claude: Arc<dyn Claude>,
+    claude: Arc<dyn Agent>,
     sw: Arc<dyn SuggestWorkflow>,
 ) -> Result<()> {
     if pid::is_running(home) {

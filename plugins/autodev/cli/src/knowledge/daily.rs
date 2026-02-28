@@ -3,7 +3,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::infrastructure::claude::Claude;
+use crate::infrastructure::agent::Agent;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 
@@ -205,7 +205,7 @@ pub async fn enrich_with_cross_analysis(report: &mut DailyReport, sw: &dyn Sugge
 ///
 /// report에 cross_analysis가 포함되어 있으면 교차 분석 섹션도 프롬프트에 포함.
 pub async fn generate_daily_suggestions(
-    claude: &dyn Claude,
+    claude: &dyn Agent,
     report: &DailyReport,
     wt_path: &Path,
 ) -> Option<KnowledgeSuggestion> {
@@ -245,7 +245,7 @@ pub async fn generate_daily_suggestions(
         Ok(res) if res.exit_code == 0 => {
             // envelope → inner parse
             if let Ok(envelope) = serde_json::from_str::<
-                crate::infrastructure::claude::output::ClaudeJsonOutput,
+                crate::infrastructure::agent::output::ClaudeJsonOutput,
             >(&res.stdout)
             {
                 if let Some(inner) = envelope.result {

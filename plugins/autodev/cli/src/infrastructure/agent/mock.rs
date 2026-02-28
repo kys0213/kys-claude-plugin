@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use anyhow::Result;
 use async_trait::async_trait;
 
-use super::{Claude, SessionResult};
+use super::{Agent, SessionResult};
 
 /// 호출 기록용 구조체
 #[derive(Debug)]
@@ -17,16 +17,16 @@ pub struct MockCallRecord {
     pub append_system_prompt: Option<String>,
 }
 
-/// 테스트용 Claude 구현체 — 미리 설정된 응답을 반환
+/// 테스트용 Agent 구현체 — 미리 설정된 응답을 반환
 #[allow(dead_code)]
-pub struct MockClaude {
+pub struct MockAgent {
     /// 순차적으로 반환할 응답 큐 (FIFO)
     responses: Mutex<Vec<SessionResult>>,
     /// 호출 기록
     pub calls: Mutex<Vec<MockCallRecord>>,
 }
 
-impl Default for MockClaude {
+impl Default for MockAgent {
     fn default() -> Self {
         Self {
             responses: Mutex::new(Vec::new()),
@@ -36,7 +36,7 @@ impl Default for MockClaude {
 }
 
 #[allow(dead_code)]
-impl MockClaude {
+impl MockAgent {
     pub fn new() -> Self {
         Self::default()
     }
@@ -57,7 +57,7 @@ impl MockClaude {
 }
 
 #[async_trait]
-impl Claude for MockClaude {
+impl Agent for MockAgent {
     async fn run_session(
         &self,
         cwd: &Path,

@@ -112,6 +112,7 @@ pub mod pr_phase {
 pub mod merge_phase {
     pub const PENDING: &str = "Pending";
     pub const MERGING: &str = "Merging";
+    #[allow(dead_code)]
     pub const CONFLICT: &str = "Conflict";
 }
 

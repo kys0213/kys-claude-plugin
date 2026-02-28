@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::infrastructure::claude::Claude;
+use crate::infrastructure::agent::Agent;
 
 /// 머지 실행 결과의 분류
 pub enum MergeOutcome {
@@ -27,11 +27,11 @@ fn contains_conflict(s: &str) -> bool {
 
 /// PR 머지 + 충돌 해결 — Claude 세션을 통한 머지 자동화
 pub struct Merger<'a> {
-    claude: &'a dyn Claude,
+    claude: &'a dyn Agent,
 }
 
 impl<'a> Merger<'a> {
-    pub fn new(claude: &'a dyn Claude) -> Self {
+    pub fn new(claude: &'a dyn Agent) -> Self {
         Self { claude }
     }
 
