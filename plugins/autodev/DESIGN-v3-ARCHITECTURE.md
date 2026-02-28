@@ -139,8 +139,8 @@
 
 ```rust
 pub struct Daemon {
-    manager: TaskManager,
-    runner: TaskRunner,
+    manager: Box<dyn TaskManager>,
+    runner: Arc<dyn TaskRunner>,
     inflight: InFlightTracker,
 }
 ```
@@ -154,20 +154,25 @@ Daemon은 **제어 흐름만** 담당한다:
 
 ### TaskManager (작업 수집 + 결과 반영)
 
+trait으로 정의하여 Daemon이 Mock을 주입받을 수 있게 한다.
+
 ```rust
-pub struct TaskManager {
+pub struct DefaultTaskManager {
     sources: Vec<Box<dyn TaskSource>>,
 }
 ```
 
-- `poll_all()`: 모든 source에서 실행 가능한 Task를 수집
+- `tick()`: 모든 source에서 `poll()`하여 실행 가능한 Task를 내부에 수집
+- `drain_ready()`: 수집된 Task들을 꺼내서 반환
 - `apply(TaskResult)`: Task 실행 결과를 source의 큐에 반영
 - `schedule_daily_report()`: 일간 리포트 생성 시점 판단 + Task 생성
 
 ### TaskRunner (실행 엔진)
 
+trait으로 정의하여 Daemon이 Mock을 주입받을 수 있게 한다.
+
 ```rust
-pub struct TaskRunner {
+pub struct DefaultTaskRunner {
     agent: Arc<dyn Agent>,
 }
 ```
@@ -178,6 +183,33 @@ pub struct TaskRunner {
 ---
 
 ## 4. Trait 정의
+
+### TaskManager
+
+```rust
+#[async_trait]
+pub trait TaskManager: Send + Sync {
+    /// source들에서 실행 가능한 Task를 폴링하여 내부에 수집.
+    async fn tick(&mut self);
+
+    /// 수집된 Task들을 꺼내서 반환.
+    fn drain_ready(&mut self) -> Vec<Box<dyn Task>>;
+
+    /// Task 실행 결과를 source의 큐에 반영.
+    fn apply(&mut self, result: TaskResult);
+}
+```
+
+### TaskRunner
+
+```rust
+#[async_trait]
+pub trait TaskRunner: Send + Sync {
+    /// Task의 생명주기를 실행하고 결과를 반환.
+    /// before_invoke → agent.invoke → after_invoke
+    async fn run(&self, task: Box<dyn Task>) -> TaskResult;
+}
+```
 
 ### TaskSource
 
@@ -504,7 +536,7 @@ fn apply(&mut self, result: &TaskResult) {
 ### 실행 흐름
 
 ```rust
-impl TaskRunner {
+impl DefaultTaskRunner {
     pub async fn run(&self, mut task: Box<dyn Task>) -> TaskResult {
         // 1. before_invoke
         let request = match task.before_invoke().await {
@@ -828,10 +860,16 @@ MockDb + MockGh → GitHubTaskSource 테스트(fail) → GitHubTaskSource 구현
 
 ### Phase 4: Daemon 전환
 
-18. `daemon/mod.rs` — 새 Daemon struct로 event loop 재작성
+Daemon도 TaskManager/TaskRunner를 인터페이스로 의존하므로
+MockTaskManager + MockTaskRunner를 주입하여 오케스트레이션 동작을 단위 테스트한다.
+
+```
+MockTaskManager + MockTaskRunner → Daemon 테스트(fail) → Daemon 구현(pass)
+```
+
+18. Daemon — 테스트 → 구현
 19. `main.rs` — 새 Daemon 조립 (DI)
 20. 기존 `pipeline/`, `scanner/` 모듈 제거
-21. Daemon event loop는 `select!` + `JoinSet` 제어 흐름이므로 단위 테스트 대상이 아님
 
 ---
 
@@ -847,28 +885,29 @@ SOLID 준수로 각 컴포넌트가 trait 경계에서 완전히 분리되므로
 4. **TDD 순서** — 인터페이스 정의 → 테스트 작성(fail) → 구현(pass)
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  각 컴포넌트의 테스트 경계                                      │
-│                                                              │
-│  ┌─────────┐    ┌─────────┐    ┌─────────┐                  │
-│  │  Task   │    │ Runner  │    │ Source   │                  │
-│  │─────────│    │─────────│    │─────────│                  │
-│  │ Mock:   │    │ Mock:   │    │ Mock:   │                  │
-│  │  Gh     │    │  Agent  │    │  Gh     │                  │
-│  │  WsOps  │    │  Task   │    │  Db     │                  │
-│  │  Config │    │         │    │         │                  │
-│  │─────────│    │─────────│    │─────────│                  │
-│  │ 검증:   │    │ 검증:   │    │ 검증:   │                  │
-│  │  before │    │  skip시 │    │  poll이 │                  │
-│  │   →Req  │    │  agent  │    │  올바른 │                  │
-│  │  after  │    │  미호출 │    │  Task를 │                  │
-│  │   →Res  │    │  정상시 │    │  생성   │                  │
-│  │         │    │  lifecycle│   │  apply가│                  │
-│  │         │    │  호출순서│    │  큐반영 │                  │
-│  └─────────┘    └─────────┘    └─────────┘                  │
-│                                                              │
-│  컴포넌트 간 연결은 trait 계약이 보장 → 통합 테스트 불필요       │
-└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│  각 컴포넌트의 테스트 경계                                              │
+│                                                                      │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌──────────┐               │
+│  │  Task   │  │ Runner  │  │ Source   │  │  Daemon  │               │
+│  │─────────│  │─────────│  │─────────│  │──────────│               │
+│  │ Mock:   │  │ Mock:   │  │ Mock:   │  │ Mock:    │               │
+│  │  Gh     │  │  Agent  │  │  Gh     │  │  Manager │               │
+│  │  WsOps  │  │  Task   │  │  Db     │  │  Runner  │               │
+│  │  Config │  │         │  │         │  │          │               │
+│  │─────────│  │─────────│  │─────────│  │──────────│               │
+│  │ 검증:   │  │ 검증:   │  │ 검증:   │  │ 검증:    │               │
+│  │  before │  │  skip시 │  │  poll이 │  │  tick시  │               │
+│  │   →Req  │  │  agent  │  │  올바른 │  │  drain   │               │
+│  │  after  │  │  미호출 │  │  Task를 │  │  +spawn  │               │
+│  │   →Res  │  │  정상시 │  │  생성   │  │  완료시  │               │
+│  │         │  │ lifecycle│  │  apply가│  │  apply   │               │
+│  │         │  │  호출순서│  │  큐반영 │  │  inflight│               │
+│  └─────────┘  └─────────┘  └─────────┘  │  제어    │               │
+│                                          └──────────┘               │
+│                                                                      │
+│  컴포넌트 간 연결은 trait 계약이 보장 → 통합 테스트 불필요               │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Task 단위 테스트 (before_invoke / after_invoke 각각 격리)
@@ -1104,6 +1143,95 @@ async fn apply_delegates_to_correct_source() {
 
     // Then: source.apply() 1회 호출
     assert_eq!(source.apply_count(), 1);
+}
+```
+
+### Daemon 단위 테스트
+
+Daemon은 MockTaskManager + MockTaskRunner를 주입받아 오케스트레이션 로직을 검증한다.
+
+```rust
+#[tokio::test]
+async fn daemon_spawns_tasks_from_manager_to_runner() {
+    // Given: manager가 task 2개를 반환
+    let manager = MockTaskManager::new()
+        .on_drain(vec![mock_task("a"), mock_task("b")]);
+    let runner = MockTaskRunner::new()
+        .returning(TaskResult::completed("a"))
+        .returning(TaskResult::completed("b"));
+    let mut daemon = Daemon::new(
+        Box::new(manager.clone()),
+        Arc::new(runner.clone()),
+        InFlightTracker::new(10),
+    );
+
+    // When: 1 tick 실행
+    daemon.run_one_tick().await;
+
+    // Then: runner에 2개 task 전달됨
+    assert_eq!(runner.run_count(), 2);
+}
+
+#[tokio::test]
+async fn daemon_applies_completed_result_to_manager() {
+    // Given: runner가 결과를 반환
+    let manager = MockTaskManager::new()
+        .on_drain(vec![mock_task("a")]);
+    let runner = MockTaskRunner::new()
+        .returning(TaskResult::completed("a"));
+    let mut daemon = Daemon::new(
+        Box::new(manager.clone()),
+        Arc::new(runner),
+        InFlightTracker::new(10),
+    );
+
+    // When: tick → task 완료
+    daemon.run_one_tick().await;
+
+    // Then: manager.apply() 호출됨
+    assert_eq!(manager.apply_count(), 1);
+}
+
+#[tokio::test]
+async fn daemon_respects_inflight_limit() {
+    // Given: inflight 최대 1개, task 3개
+    let manager = MockTaskManager::new()
+        .on_drain(vec![mock_task("a"), mock_task("b"), mock_task("c")]);
+    let runner = MockTaskRunner::new()
+        .returning_delayed(TaskResult::completed("a"), Duration::from_millis(50));
+    let mut daemon = Daemon::new(
+        Box::new(manager),
+        Arc::new(runner.clone()),
+        InFlightTracker::new(1),  // 최대 1개
+    );
+
+    // When: 1 tick
+    daemon.run_one_tick().await;
+
+    // Then: 동시에 1개만 spawn됨 (나머지는 다음 tick에서)
+    assert_eq!(runner.concurrent_max(), 1);
+}
+
+#[tokio::test]
+async fn daemon_spawns_immediately_after_task_completion() {
+    // Given: inflight 최대 1개, task 2개
+    let manager = MockTaskManager::new()
+        .on_drain(vec![mock_task("a"), mock_task("b")]);
+    let runner = MockTaskRunner::new()
+        .returning(TaskResult::completed("a"))
+        .returning(TaskResult::completed("b"));
+    let mut daemon = Daemon::new(
+        Box::new(manager.clone()),
+        Arc::new(runner.clone()),
+        InFlightTracker::new(1),
+    );
+
+    // When: 루프 실행 (task "a" 완료 → 즉시 "b" spawn)
+    daemon.run_until_idle().await;
+
+    // Then: 2개 모두 실행됨 + apply 2회
+    assert_eq!(runner.run_count(), 2);
+    assert_eq!(manager.apply_count(), 2);
 }
 ```
 
