@@ -765,98 +765,345 @@ cli/src/
 
 ---
 
-## 14. 마이그레이션 전략
+## 14. 마이그레이션 전략 (TDD)
+
+각 Phase에서 **인터페이스 정의 → 테스트 작성 (fail) → 구현 (pass)** 순서를 따른다.
+SOLID 원칙으로 컴포넌트 간 의존이 trait 경계에서 끊기므로,
+**각 컴포넌트의 단위 테스트만으로 정확성을 검증**할 수 있다.
+컴포넌트 간 상호작용은 trait 계약이 보장하므로 통합 테스트는 작성하지 않는다.
+
+```
+❌ 구현 → 나중에 테스트
+❌ 컴포넌트 A + B를 조합한 통합 테스트
+✅ trait 정의 → Mock 구현 → 테스트 작성 (fail) → 구현 (pass)
+✅ 각 컴포넌트를 Mock 의존성으로 격리하여 단위 테스트
+```
 
 ### Phase 1: Trait 정의 + DTO
 
-1. `daemon/task_source.rs` — TaskSource trait
-2. `daemon/task.rs` — Task trait + SkipReason + TaskResult
-3. `daemon/agent.rs` — Agent trait + AgentRequest + AgentResponse
+1. `daemon/task.rs` — Task trait + SkipReason + TaskResult + AgentRequest + AgentResponse
+2. `daemon/task_source.rs` — TaskSource trait
+3. `daemon/agent.rs` — Agent trait
 4. `infrastructure/workspace/` — WorkspaceOps trait 추출
 5. `config/` — ConfigLoader trait 추출
 6. 기존 코드 변경 없음 (additive only)
+7. 테스트 없음 (trait 정의만, 로직 없음)
 
 ### Phase 2: Task 구현체
 
-7. `tasks/analyze.rs` — pipeline/issue.rs의 analyze_one에서 추출
-8. `tasks/implement.rs` — pipeline/issue.rs의 implement_one에서 추출
-9. `tasks/review.rs` — pipeline/pr.rs의 review_one에서 추출
-10. `tasks/improve.rs` — pipeline/pr.rs의 improve_one에서 추출
-11. `tasks/merge.rs` — pipeline/merge.rs의 merge_one에서 추출
-12. 각 Task의 before_invoke/after_invoke 테스트
+각 Task마다 **테스트 먼저 → 구현** 순서로 진행한다.
+Mock 의존성(MockGh, MockWorkspace, MockConfig)은 Phase 2 시작 시 한 번 작성한다.
+
+```
+Mock 작성 → AnalyzeTask 테스트(fail) → AnalyzeTask 구현(pass)
+         → ImplementTask 테스트(fail) → ImplementTask 구현(pass)
+         → ReviewTask 테스트(fail) → ReviewTask 구현(pass)
+         → ImproveTask 테스트(fail) → ImproveTask 구현(pass)
+         → MergeTask 테스트(fail) → MergeTask 구현(pass)
+```
+
+8. Mock 의존성 모듈 작성 (`tests/mocks/`)
+9. AnalyzeTask — 테스트 → 구현
+10. ImplementTask — 테스트 → 구현
+11. ReviewTask — 테스트 → 구현
+12. ImproveTask — 테스트 → 구현
+13. MergeTask — 테스트 → 구현
 
 ### Phase 3: Source + Runner + Manager
 
-13. `daemon/agent.rs` — ClaudeAgent 구현
-14. `daemon/task_runner.rs` — TaskRunner (before → agent → after)
-15. `sources/github.rs` — GitHubTaskSource (recovery + scan + Task 생성)
-16. `daemon/task_manager.rs` — TaskManager (poll_all + apply + daily_report)
-17. 각 컴포넌트 단위 테스트
+각 컴포넌트 역시 **테스트 먼저 → 구현**.
+Task는 Phase 2에서 완성된 실제 구현이 아닌 MockTask로 테스트한다.
+
+```
+MockTask 작성 → TaskRunner 테스트(fail) → TaskRunner 구현(pass)
+MockAgent 작성 → ClaudeAgent 테스트(fail) → ClaudeAgent 구현(pass)
+MockTaskSource 작성 → TaskManager 테스트(fail) → TaskManager 구현(pass)
+MockDb + MockGh → GitHubTaskSource 테스트(fail) → GitHubTaskSource 구현(pass)
+```
+
+14. TaskRunner — 테스트 → 구현
+15. ClaudeAgent — 테스트 → 구현
+16. TaskManager — 테스트 → 구현
+17. GitHubTaskSource — 테스트 → 구현
 
 ### Phase 4: Daemon 전환
 
 18. `daemon/mod.rs` — 새 Daemon struct로 event loop 재작성
 19. `main.rs` — 새 Daemon 조립 (DI)
 20. 기존 `pipeline/`, `scanner/` 모듈 제거
-21. 통합 테스트
+21. Daemon event loop는 `select!` + `JoinSet` 제어 흐름이므로 단위 테스트 대상이 아님
 
 ---
 
 ## 15. 테스트 전략
 
-### Task 단위 테스트
+### 원칙
+
+SOLID 준수로 각 컴포넌트가 trait 경계에서 완전히 분리되므로:
+
+1. **단위 테스트만 작성한다** — Mock 의존성을 주입하여 각 컴포넌트를 격리 검증
+2. **통합 테스트는 작성하지 않는다** — 컴포넌트 간 계약은 trait이 보장
+3. **블랙박스 테스트** — 내부 구현이 아닌 입출력(AgentRequest/TaskResult)을 검증
+4. **TDD 순서** — 인터페이스 정의 → 테스트 작성(fail) → 구현(pass)
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  각 컴포넌트의 테스트 경계                                      │
+│                                                              │
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐                  │
+│  │  Task   │    │ Runner  │    │ Source   │                  │
+│  │─────────│    │─────────│    │─────────│                  │
+│  │ Mock:   │    │ Mock:   │    │ Mock:   │                  │
+│  │  Gh     │    │  Agent  │    │  Gh     │                  │
+│  │  WsOps  │    │  Task   │    │  Db     │                  │
+│  │  Config │    │         │    │         │                  │
+│  │─────────│    │─────────│    │─────────│                  │
+│  │ 검증:   │    │ 검증:   │    │ 검증:   │                  │
+│  │  before │    │  skip시 │    │  poll이 │                  │
+│  │   →Req  │    │  agent  │    │  올바른 │                  │
+│  │  after  │    │  미호출 │    │  Task를 │                  │
+│  │   →Res  │    │  정상시 │    │  생성   │                  │
+│  │         │    │  lifecycle│   │  apply가│                  │
+│  │         │    │  호출순서│    │  큐반영 │                  │
+│  └─────────┘    └─────────┘    └─────────┘                  │
+│                                                              │
+│  컴포넌트 간 연결은 trait 계약이 보장 → 통합 테스트 불필요       │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Task 단위 테스트 (before_invoke / after_invoke 각각 격리)
 
 ```rust
-// Mock Agent + Mock WorkspaceOps + Mock Gh
+// ── before_invoke 테스트 ──
+
 #[tokio::test]
-async fn analyze_task_skips_closed_issue() {
+async fn analyze_before_skips_closed_issue() {
+    // Given: 이미 닫힌 이슈
     let gh = MockGh::new().with_issue_closed(42);
-    let ctx = TaskContext { gh: Arc::new(gh), ... };
+    let ctx = TaskContext::test(gh, MockWorkspace::new(), MockConfig::new());
     let mut task = AnalyzeTask::new(ctx, issue_item(42));
 
+    // When
     let result = task.before_invoke().await;
+
+    // Then: preflight 실패로 skip
     assert!(matches!(result, Err(SkipReason::PreflightFailed(_))));
 }
 
 #[tokio::test]
-async fn analyze_task_returns_implement_request() {
+async fn analyze_before_creates_worktree_and_returns_request() {
+    // Given: open 이슈
     let gh = MockGh::new().with_issue_open(42);
     let ws = MockWorkspace::new();
-    let ctx = TaskContext { gh: Arc::new(gh), workspace: Arc::new(ws), ... };
+    let ctx = TaskContext::test(gh, ws.clone(), MockConfig::new());
     let mut task = AnalyzeTask::new(ctx, issue_item(42));
 
+    // When
     let request = task.before_invoke().await.unwrap();
+
+    // Then: worktree 생성됨 + 분석 프롬프트 + JSON schema
+    assert_eq!(ws.created_worktrees(), 1);
     assert!(request.prompt.contains("Analyze"));
     assert!(request.session_opts.json_schema.is_some());
 }
-```
 
-### TaskRunner 테스트
+// ── after_invoke 테스트 ──
 
-```rust
 #[tokio::test]
-async fn runner_skips_task_on_preflight_failure() {
-    let agent = MockAgent::new();
-    let runner = TaskRunner::new(Arc::new(agent));
-    let task = FailingPreflightTask::new();
+async fn analyze_after_implement_verdict_posts_comment_and_exits_queue() {
+    // Given: 분석 결과가 implement verdict
+    let gh = MockGh::new();
+    let ctx = TaskContext::test(gh.clone(), MockWorkspace::new(), MockConfig::new());
+    let mut task = AnalyzeTask::new(ctx, issue_item(42));
+    let response = AgentResponse::ok(r#"{"verdict":"implement","report":"..."}"#);
 
-    let result = runner.run(Box::new(task)).await;
-    assert!(matches!(result.status, TaskStatus::Skipped(_)));
-    assert_eq!(agent.invoke_count(), 0);  // agent 호출 안 됨
+    // When
+    let result = task.after_invoke(response).await;
+
+    // Then: 분석 코멘트 게시 + analyzed 라벨 + 큐에서 제거
+    assert_eq!(gh.comments_posted(), 1);
+    assert!(gh.label_added("autodev:analyzed"));
+    assert!(gh.label_removed("autodev:wip"));
+    assert!(matches!(result.queue_ops[0], QueueOp::Remove));
+}
+
+#[tokio::test]
+async fn analyze_after_clarify_verdict_marks_skip() {
+    // Given: 분석 결과가 clarify verdict
+    let ctx = TaskContext::test(MockGh::new(), MockWorkspace::new(), MockConfig::new());
+    let mut task = AnalyzeTask::new(ctx, issue_item(42));
+    let response = AgentResponse::ok(r#"{"verdict":"clarify","report":"..."}"#);
+
+    // When
+    let result = task.after_invoke(response).await;
+
+    // Then: skip 라벨 + 큐에서 제거
+    assert!(matches!(result.queue_ops[0], QueueOp::Remove));
 }
 ```
 
-### GitHubTaskSource 테스트
+### implement, review 등도 동일 패턴
+
+```rust
+// ImplementTask: before_invoke는 worktree + feature branch 생성 검증
+// ImplementTask: after_invoke는 PR 생성 + PushPr 큐 연산 검증
+
+#[tokio::test]
+async fn implement_after_creates_pr_and_pushes_to_pr_queue() {
+    let gh = MockGh::new().with_pr_created(99);
+    let ctx = TaskContext::test(gh.clone(), MockWorkspace::new(), MockConfig::new());
+    let mut task = ImplementTask::new(ctx, issue_item_ready(42));
+    let response = AgentResponse::ok("https://github.com/org/repo/pull/99");
+
+    let result = task.after_invoke(response).await;
+
+    assert!(gh.label_added("autodev:wip"));   // PR에 wip 라벨
+    assert!(matches!(result.queue_ops[0], QueueOp::Remove));  // issue 큐 제거
+    assert!(matches!(result.queue_ops[1], QueueOp::PushPr { .. }));  // PR 큐 push
+}
+
+// ReviewTask: after_invoke approve → done 라벨 + source_issue done 검증
+#[tokio::test]
+async fn review_after_approve_transitions_issue_to_done() {
+    let gh = MockGh::new();
+    let ctx = TaskContext::test(gh.clone(), MockWorkspace::new(), MockConfig::new());
+    let item = pr_item(99).with_source_issue(42);
+    let mut task = ReviewTask::new(ctx, item);
+    let response = AgentResponse::ok(r#"{"verdict":"approve","review":"LGTM"}"#);
+
+    let result = task.after_invoke(response).await;
+
+    // PR done
+    assert!(gh.label_added_for(99, "autodev:done"));
+    // source issue도 done
+    assert!(gh.label_added_for(42, "autodev:done"));
+    assert!(gh.label_removed_for(42, "autodev:implementing"));
+}
+```
+
+### TaskRunner 단위 테스트
 
 ```rust
 #[tokio::test]
-async fn poll_creates_analyze_task_for_pending_issue() {
-    let gh = MockGh::new().with_labeled_issue(42, "autodev:analyze");
-    let mut source = GitHubTaskSource::new(ctx, db);
+async fn runner_skips_without_calling_agent() {
+    // Given: before_invoke가 실패하는 Task
+    let agent = MockAgent::new();
+    let runner = TaskRunner::new(Arc::new(agent.clone()));
+    let task = MockTask::failing_preflight("issue:org/repo:42");
 
+    // When
+    let result = runner.run(Box::new(task)).await;
+
+    // Then: agent 호출 안 됨 + Skipped 상태
+    assert_eq!(agent.invoke_count(), 0);
+    assert!(matches!(result.status, TaskStatus::Skipped(_)));
+}
+
+#[tokio::test]
+async fn runner_calls_agent_and_after_invoke() {
+    // Given: 정상 Task + Agent
+    let agent = MockAgent::new().returning(AgentResponse::ok("output"));
+    let runner = TaskRunner::new(Arc::new(agent.clone()));
+    let task = MockTask::succeeding("issue:org/repo:42");
+
+    // When
+    let result = runner.run(Box::new(task)).await;
+
+    // Then: agent 1회 호출 + Completed 상태
+    assert_eq!(agent.invoke_count(), 1);
+    assert!(matches!(result.status, TaskStatus::Completed));
+}
+```
+
+### GitHubTaskSource 단위 테스트
+
+```rust
+#[tokio::test]
+async fn poll_creates_analyze_task_for_labeled_issue() {
+    // Given: autodev:analyze 라벨이 있는 이슈
+    let gh = MockGh::new().with_labeled_issues(vec![
+        (42, vec!["autodev:analyze"]),
+    ]);
+    let db = MockDb::new();
+    let mut source = GitHubTaskSource::new(ctx(gh), db);
+
+    // When
     let tasks = source.poll().await;
+
+    // Then: AnalyzeTask 1개 생성
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].work_id(), "issue:org/repo:42");
+}
+
+#[tokio::test]
+async fn poll_skips_already_queued_item() {
+    // Given: 이미 큐에 있는 이슈
+    let gh = MockGh::new().with_labeled_issues(vec![
+        (42, vec!["autodev:analyze"]),
+    ]);
+    let mut source = GitHubTaskSource::new(ctx(gh), MockDb::new());
+
+    // When: 첫 poll → 두 번째 poll
+    let first = source.poll().await;
+    let second = source.poll().await;
+
+    // Then: 두 번째는 비어있음 (dedup)
+    assert_eq!(first.len(), 1);
+    assert_eq!(second.len(), 0);
+}
+
+#[tokio::test]
+async fn apply_removes_item_from_queue() {
+    // Given: 큐에 아이템이 있는 상태
+    let mut source = source_with_queued_issue(42);
+    let result = TaskResult {
+        work_id: "issue:org/repo:42".into(),
+        repo_name: "org/repo".into(),
+        queue_ops: vec![QueueOp::Remove],
+        ..Default::default()
+    };
+
+    // When
+    source.apply(&result);
+
+    // Then: 큐에서 제거됨
+    assert!(!source.contains("issue:org/repo:42"));
+}
+```
+
+### TaskManager 단위 테스트
+
+```rust
+#[tokio::test]
+async fn poll_all_collects_from_all_sources() {
+    // Given: 두 source에서 각각 task를 반환
+    let source1 = MockTaskSource::returning(vec![mock_task("a")]);
+    let source2 = MockTaskSource::returning(vec![mock_task("b")]);
+    let mut manager = TaskManager::new(vec![
+        Box::new(source1),
+        Box::new(source2),
+    ]);
+
+    // When
+    manager.tick().await;
+    let tasks = manager.drain_ready();
+
+    // Then: 2개 task 수집
+    assert_eq!(tasks.len(), 2);
+}
+
+#[tokio::test]
+async fn apply_delegates_to_correct_source() {
+    // Given
+    let source = MockTaskSource::new();
+    let mut manager = TaskManager::new(vec![Box::new(source.clone())]);
+    let result = TaskResult { work_id: "issue:org/repo:42".into(), .. };
+
+    // When
+    manager.apply(result);
+
+    // Then: source.apply() 1회 호출
+    assert_eq!(source.apply_count(), 1);
 }
 ```
 
