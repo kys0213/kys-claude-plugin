@@ -33,7 +33,7 @@ v1: Pending → Analyzing → Ready → Implementing → done
 | Analyzing → Ready | 내부 자동 전이 | queue 이탈 → 사람 리뷰 → scanner 재진입 |
 | Ready → done | 구현 성공 시 즉시 done | PR 생성 후 queue 이탈 → PR approve 시 done |
 | Issue-PR 연결 | 없음 | `PrItem.source_issue_number` |
-| PR scan | cursor 기반 (모든 PR 자동 수집) | Label-Positive (`autodev:review` 라벨만) |
+| PR scan | cursor 기반 (모든 PR 자동 수집) | Label-Positive (`autodev:wip` 라벨만) |
 | Merge 파이프라인 | 없음 | 없음 (scope 외) |
 
 ---
@@ -54,12 +54,25 @@ v1: Pending → Analyzing → Ready → Implementing → done
 
 ### PR 라벨
 
-| 라벨 | 의미 | 전이 주체 |
-|------|------|----------|
-| `autodev:review` | **트리거** — 리뷰 대기/진행중 | daemon (ImplementTask) |
-| `autodev:changes-requested` | 피드백 반영중 | daemon (ReviewTask) |
-| `autodev:done` | approve 완료 | daemon (ReviewTask) |
-| `autodev:skip` | 제외 | HITL |
+| 라벨 | 의미 | 전이 주체 | 비고 |
+|------|------|----------|------|
+| `autodev:wip` | **트리거** — 리뷰 대기/진행중 | daemon (ImplementTask) | Issue 공유 |
+| `autodev:changes-requested` | 피드백 반영중 | daemon (ReviewTask) | PR 전용 |
+| `autodev:done` | approve 완료 | daemon (ReviewTask) | Issue 공유 |
+| `autodev:skip` | 제외 | HITL | Issue 공유 |
+
+### 공유 라벨 정책
+
+Issue와 PR은 GitHub에서 독립된 엔티티이므로, 동일한 라벨명을 사용해도 충돌하지 않는다.
+라벨의 의미는 대상(Issue/PR)에 따라 다르게 해석된다:
+
+| 라벨 | Issue 의미 | PR 의미 |
+|------|-----------|---------|
+| `autodev:wip` | 분석 진행중 | 리뷰 대기/진행중 |
+| `autodev:done` | 완료 | approve 완료 |
+| `autodev:skip` | 제외 | 제외 |
+
+PR 전용 라벨은 `autodev:changes-requested` 1개만 존재한다.
 
 ### Label-Positive 모델
 
@@ -73,8 +86,8 @@ Label-Positive: 특정 라벨이 있는 항목만 scan 대상
 ```
 
 Issue는 사람이 `autodev:analyze`를 추가해야 시작.
-PR은 `ImplementTask`가 PR 생성 시 `autodev:review`를 자동 추가하여 시작.
-외부에서 생성된 PR은 사람이 수동으로 `autodev:review`를 추가해야 리뷰 대상이 됨.
+PR은 `ImplementTask`가 PR 생성 시 `autodev:wip`를 자동 추가하여 시작.
+외부에서 생성된 PR은 사람이 수동으로 `autodev:wip`를 추가해야 리뷰 대상이 됨.
 
 ---
 
@@ -147,10 +160,10 @@ PR은 `ImplementTask`가 PR 생성 시 `autodev:review`를 자동 추가하여 �
 ```
                ┌─────────────────────────┐
         daemon │  ImplementTask가 PR 생성 │
-               │  + autodev:review 추가   │
+               │  + autodev:wip 추가   │
                └────────────┬────────────┘
                             │
-                    autodev:review ◄────────────────┐
+                    autodev:wip ◄────────────────┐
                             │                       │
                    ┌────────▼────────┐              │
             daemon │  ReviewTask      │              │
@@ -174,7 +187,7 @@ PR은 `ImplementTask`가 PR 생성 시 `autodev:review`를 자동 추가하여 �
                      │        (라벨 제거)           │
                      │                              │
                      └──────────────────────────────┘
-                      autodev:review
+                      autodev:wip
                       (iteration +1)
 ```
 
@@ -185,7 +198,7 @@ PR은 `ImplementTask`가 PR 생성 시 `autodev:review`를 자동 추가하여 �
 | (없음) → `analyze` | Issue | **HITL** |
 | `analyzed` → `approved-analysis` | Issue | **HITL** |
 | `analyzed` → (제거) | Issue | **HITL** |
-| (수동) → `review` | PR (외부 PR) | **HITL** |
+| (수동) → `wip` | PR (외부 PR) | **HITL** |
 | (수동) → `skip` | Both | **HITL** |
 | **그 외 모든 전이** | Both | **daemon** |
 
@@ -221,7 +234,7 @@ PR은 `ImplementTask`가 PR 생성 시 `autodev:review`를 자동 추가하여 �
 │  → approved-analysis 제거, autodev:implementing 추가                  │
 │  → queue[Ready]에 push                                               │
 │  → ImplementTask → PR 생성 (body에 Closes #N 포함)                   │
-│  → PR에 autodev:review 라벨 + PR queue[Pending]에 직접 push          │
+│  → PR에 autodev:wip 라벨 + PR queue[Pending]에 직접 push          │
 │  → queue에서 issue 제거 (PR 리뷰 대기)                                │
 └─────────────────────────────────┬───────────────────────────────────┘
                                   │
@@ -231,7 +244,7 @@ PR은 `ImplementTask`가 PR 생성 시 `autodev:review`를 자동 추가하여 �
 │  PR queue[Pending] → ReviewTask → verdict 분기                       │
 │    approve → autodev:done (PR) + source_issue → done                │
 │    request_changes → autodev:changes-requested                       │
-│      → ImproveTask → 피드백 반영 → autodev:review (re-review)        │
+│      → ImproveTask → 피드백 반영 → autodev:wip (re-review)        │
 │                                                                      │
 │  PR approve 시:                                                      │
 │    source_issue_number가 있으면 →                                     │
@@ -247,12 +260,12 @@ PR은 `ImplementTask`가 PR 생성 시 `autodev:review`를 자동 추가하여 �
 scan_all():
   issues::scan()            — labels=autodev:analyze → Pending (분석 대기)
   issues::scan_approved()   — labels=autodev:approved-analysis → Ready (구현 대기)
-  pulls::scan()             — labels=autodev:review → Pending (리뷰 대기)
+  pulls::scan()             — labels=autodev:wip → Pending (리뷰 대기)
 ```
 
 - `issues::scan()`: `autodev:analyze` 라벨이 있는 open 이슈만 감지
 - `issues::scan_approved()`: 사람이 승인한 이슈를 감지하여 구현 큐에 적재
-- `pulls::scan()`: `autodev:review` 라벨이 있는 open PR만 감지
+- `pulls::scan()`: `autodev:wip` 라벨이 있는 open PR만 감지
 - Safety Valve 불필요: Label-Positive 모델에서는 무한루프 방지 로직이 필요 없음
 
 ---
@@ -275,14 +288,14 @@ scan_all():
 ### PR Phase
 
 ```
-  (trigger)     → ImplementTask가 PR 생성 + autodev:review 라벨 추가
-  Pending       → scan에서 review 라벨 감지 (또는 ImplementTask가 직접 push)
+  (trigger)     → ImplementTask가 PR 생성 + autodev:wip 라벨 추가
+  Pending       → scan에서 wip 라벨 감지 (또는 ImplementTask가 직접 push)
   Reviewing     → ReviewTask 실행중
   (exit: approve)       → autodev:done + queue 제거
   (exit: request_changes) → autodev:changes-requested
   ReviewDone    → 리뷰 verdict 파싱 완료 (피드백 반영 대기)
   Improving     → ImproveTask 실행중
-  Improved      → 피드백 반영 완료 → autodev:review + Pending으로 재진입
+  Improved      → 피드백 반영 완료 → autodev:wip + Pending으로 재진입
 ```
 
 ---
@@ -360,7 +373,7 @@ PR Tasks:
 | `autodev:approved-analysis` | Ready 큐 적재 |
 | `autodev:implementing` | skip (PR pipeline이 처리) |
 | `autodev:wip` (orphan Issue) | Pending 적재 (분석 재개) |
-| `autodev:review` (PR) | Pending 적재 (리뷰 재개) |
+| `autodev:wip` (PR) | Pending 적재 (리뷰 재개) |
 | `autodev:changes-requested` (PR) | ReviewDone 적재 (피드백 반영 재개) |
 | autodev 라벨 없음 | 무시 (Label-Positive) |
 
@@ -386,7 +399,7 @@ autodev:implementing 이슈 감지 →
 │  │ 1. RECOVERY                                                   │  │
 │  │    Issue: autodev:wip + queue에 없음 → wip 라벨 제거           │  │
 │  │    Issue: autodev:implementing + PR merged → done              │  │
-│  │    PR: autodev:review + queue에 없음 → Pending 적재            │  │
+│  │    PR: autodev:wip + queue에 없음 → Pending 적재            │  │
 │  │    PR: autodev:changes-requested + queue에 없음 → ReviewDone  │  │
 │  └───────────────────────────────────────────────────────────────┘  │
 │                            │                                        │
@@ -394,7 +407,7 @@ autodev:implementing 이슈 감지 →
 │  │ 2. SCAN                                                       │  │
 │  │    2a. issues::scan()         — analyze 라벨 → Pending (분석)  │  │
 │  │    2b. issues::scan_approved()— approved → Ready (구현)        │  │
-│  │    2c. pulls::scan()          — review 라벨 → Pending (리뷰)   │  │
+│  │    2c. pulls::scan()          — wip 라벨 → Pending (리뷰)      │  │
 │  └───────────────────────────────────────────────────────────────┘  │
 │                            │                                        │
 │  ┌───────────────────────────────────────────────────────────────┐  │
@@ -406,7 +419,7 @@ autodev:implementing 이슈 감지 →
 │  │      clarify/wontfix → autodev:skip                          │  │
 │  │                                                               │  │
 │  │    Ready → Implementing:                                      │  │
-│  │      OK + PR 생성 → PR에 autodev:review + PR queue push      │  │
+│  │      OK + PR 생성 → PR에 autodev:wip + PR queue push      │  │
 │  │      Err → 라벨 제거 + 재시도                                 │  │
 │  │                                                               │  │
 │  │  PRs:                                                         │  │
@@ -415,7 +428,7 @@ autodev:implementing 이슈 감지 →
 │  │      request_changes → autodev:changes-requested              │  │
 │  │                                                               │  │
 │  │    ReviewDone → Improving:                                    │  │
-│  │      OK → autodev:review + Pending (re-review)               │  │
+│  │      OK → autodev:wip + Pending (re-review)               │  │
 │  │      Err → 라벨 제거                                          │  │
 │  │                                                               │  │
 │  └───────────────────────────────────────────────────────────────┘  │
@@ -435,9 +448,9 @@ autodev:implementing 이슈 감지 →
 | Issue (PR approved) | `(PR pipeline triggers)` | `implementing → done` |
 | Issue (clarify/wontfix) | `Pending → Analyzing → skip` | `wip → skip` |
 | Issue (analysis reject) | `analyzed → (사람이 다시 트리거)` | `analyzed → (없음) → analyze → ...` |
-| PR (리뷰) | `Pending → Reviewing → (approve)` | `review → done` |
-| PR (리뷰 + 피드백) | `Pending → Reviewing → ReviewDone → Improving → Improved → Pending` | `review → changes-requested → review` |
-| PR (max iteration) | `Pending → Reviewing → (skip)` | `review → skip` |
+| PR (리뷰) | `Pending → Reviewing → (approve)` | `wip → done` |
+| PR (리뷰 + 피드백) | `Pending → Reviewing → ReviewDone → Improving → Improved → Pending` | `wip → changes-requested → wip` |
+| PR (max iteration) | `Pending → Reviewing → (skip)` | `wip → skip` |
 
 ---
 
@@ -447,4 +460,4 @@ autodev:implementing 이슈 감지 →
 
 - **PR Merge**: `autodev:done` 이후의 머지는 사람의 판단 또는 별도 자동화가 처리
 - **Branch 정리**: merged PR의 branch 삭제는 GitHub settings 또는 별도 자동화
-- **외부 PR 자동 리뷰**: 외부 PR에 `autodev:review` 라벨을 자동 추가하는 정책은 별도 결정
+- **외부 PR 자동 리뷰**: 외부 PR에 `autodev:wip` 라벨을 자동 추가하는 정책은 별도 결정
