@@ -19,6 +19,8 @@ pub struct DaemonConfig {
     pub tick_interval_secs: u64,
     pub daily_report_hour: u32,
     pub log_dir: String,
+    /// 로그 레벨 (trace, debug, info, warn, error). RUST_LOG 환경변수가 우선.
+    pub log_level: String,
     pub log_retention_days: u32,
     /// 전체 동시 실행 가능한 파이프라인 태스크 상한 (Claude 세션 수)
     pub max_concurrent_tasks: u32,
@@ -30,6 +32,7 @@ impl Default for DaemonConfig {
             tick_interval_secs: 10,
             daily_report_hour: 6,
             log_dir: "logs".into(),
+            log_level: "info".into(),
             log_retention_days: 30,
             max_concurrent_tasks: 3,
         }
@@ -167,5 +170,39 @@ pub struct PrConfig {
 impl Default for PrConfig {
     fn default() -> Self {
         Self { code_review: true }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn daemon_config_default_log_level_is_info() {
+        let cfg = DaemonConfig::default();
+        assert_eq!(cfg.log_level, "info");
+    }
+
+    #[test]
+    fn daemon_config_log_level_from_yaml() {
+        let yaml = r#"
+daemon:
+  log_level: "debug"
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.daemon.log_level, "debug");
+        // 나머지 필드는 기본값 유지
+        assert_eq!(cfg.daemon.log_dir, "logs");
+    }
+
+    #[test]
+    fn daemon_config_log_level_defaults_when_omitted() {
+        let yaml = r#"
+daemon:
+  log_dir: "/var/log/autodev"
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.daemon.log_level, "info");
+        assert_eq!(cfg.daemon.log_dir, "/var/log/autodev");
     }
 }
