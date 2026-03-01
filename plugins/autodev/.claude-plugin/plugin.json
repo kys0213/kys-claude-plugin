@@ -11,7 +11,8 @@
     "./commands/auto.md",
     "./commands/auto-setup.md",
     "./commands/auto-config.md",
-    "./commands/auto-dashboard.md"
+    "./commands/auto-dashboard.md",
+    "./commands/auto-update.md"
   ],
   "description": "이벤트 기반 자율 개발 오케스트레이터 - Issue 분석, PR 리뷰, 자동 머지",
   "name": "autodev",
