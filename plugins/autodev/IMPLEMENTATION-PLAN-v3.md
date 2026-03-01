@@ -149,16 +149,13 @@ pub trait ConfigLoader: Send + Sync {
 }
 ```
 
-### 1-8. `daemon/task_context.rs` — TaskContext
+### ~~1-8. `daemon/task_context.rs` — TaskContext~~ (폐기)
 
-```rust
-#[derive(Clone)]
-pub struct TaskContext {
-    pub workspace: Arc<dyn WorkspaceOps>,
-    pub gh: Arc<dyn Gh>,
-    pub config: Arc<dyn ConfigLoader>,
-}
-```
+> TaskContext는 성급한 추상화로 판단하여 폐기.
+> TaskSource가 OCP로 확장 가능하므로, 각 소스가 생성하는 Task는 서로 다른
+> 의존성을 가진다. 각 Source가 자기 Task에 필요한 의존성을 개별 `Arc<dyn Trait>`로
+> 직접 주입하는 패턴이 적절.
+> 기존 `daemon/task_context.rs`는 dead code로 삭제 대상.
 
 ### 수정 파일
 - `daemon/mod.rs`: 새 모듈 선언 추가 (`pub mod task; pub mod agent;` 등)
@@ -205,7 +202,9 @@ struct MockConfigLoader { ... } // 고정 config 반환
 
 ```rust
 pub struct AnalyzeTask {
-    ctx: TaskContext,
+    workspace: Arc<dyn WorkspaceOps>,
+    gh: Arc<dyn Gh>,
+    config: Arc<dyn ConfigLoader>,
     item: IssueItem,
     // before_invoke에서 생성되는 상태
     wt_path: Option<PathBuf>,
@@ -245,7 +244,9 @@ analyze_after_nonzero_exit_removes
 
 ```rust
 pub struct ImplementTask {
-    ctx: TaskContext,
+    workspace: Arc<dyn WorkspaceOps>,
+    gh: Arc<dyn Gh>,
+    config: Arc<dyn ConfigLoader>,
     item: IssueItem,
     wt_path: Option<PathBuf>,
     task_id: String,
@@ -283,7 +284,9 @@ implement_after_uses_find_existing_pr_fallback
 
 ```rust
 pub struct ReviewTask {
-    ctx: TaskContext,
+    workspace: Arc<dyn WorkspaceOps>,
+    gh: Arc<dyn Gh>,
+    config: Arc<dyn ConfigLoader>,
     item: PrItem,
     wt_path: Option<PathBuf>,
     task_id: String,
@@ -325,7 +328,9 @@ review_after_nonzero_exit_removes
 
 ```rust
 pub struct ImproveTask {
-    ctx: TaskContext,
+    workspace: Arc<dyn WorkspaceOps>,
+    gh: Arc<dyn Gh>,
+    config: Arc<dyn ConfigLoader>,
     item: PrItem,
     wt_path: Option<PathBuf>,
     task_id: String,
@@ -356,7 +361,9 @@ improve_after_nonzero_exit_removes
 
 ```rust
 pub struct MergeTask {
-    ctx: TaskContext,
+    workspace: Arc<dyn WorkspaceOps>,
+    gh: Arc<dyn Gh>,
+    config: Arc<dyn ConfigLoader>,
     item: MergeItem,
     wt_path: Option<PathBuf>,
     task_id: String,
@@ -509,7 +516,9 @@ apply_delegates_to_sources
 
 ```rust
 pub struct GitHubTaskSource {
-    ctx: TaskContext,
+    workspace: Arc<dyn WorkspaceOps>,
+    gh: Arc<dyn Gh>,
+    config: Arc<dyn ConfigLoader>,
     repos: HashMap<String, GitRepository>,
     db: Arc<Database>,
 }
@@ -619,12 +628,13 @@ daemon_spawns_immediately_after_completion
 
 ```rust
 // 기존: daemon::start(home, env, gh, git, claude, sw)
-// 변경:
+// 변경: 각 컴포넌트에 필요한 의존성을 개별 Arc로 주입 (TaskContext 없음)
 let workspace = Arc::new(RealWorkspace::new(git.clone(), env.clone()));
 let config_loader = Arc::new(RealConfigLoader::new(env.clone()));
-let task_ctx = TaskContext { workspace, gh: gh.clone(), config: config_loader };
 let agent = Arc::new(ClaudeAgent::new(claude.clone()));
-let source = Box::new(GitHubTaskSource::new(task_ctx.clone(), db.clone()));
+let source = Box::new(GitHubTaskSource::new(
+    workspace.clone(), gh.clone(), config_loader.clone(), env.clone(), git.clone(), sw.clone(), db.clone(),
+));
 let manager = Box::new(DefaultTaskManager::new(vec![source]));
 let runner = Arc::new(DefaultTaskRunner::new(agent));
 let mut daemon = Daemon::new(manager, runner, max_concurrent_tasks, db);
@@ -658,7 +668,7 @@ daemon.run().await?;
 
 | 현재 | 위치 | Phase 4 이후 |
 |------|------|-------------|
-| `#[allow(clippy::too_many_arguments)]` | pipeline/issue.rs, pr.rs, merge.rs, daemon/mod.rs | **제거** (TaskContext로 통합) |
+| `#[allow(clippy::too_many_arguments)]` | pipeline/issue.rs, pr.rs, merge.rs, daemon/mod.rs | **제거** (개별 Arc 주입 + Task struct 필드로 전환) |
 | `#[allow(dead_code)]` | pipeline/mod.rs (process_all, handle_task_output) | **제거** (코드 자체 제거) |
 | `#[allow(dead_code)]` | daemon/recovery.rs | 확인 후 제거 |
 
@@ -699,7 +709,7 @@ Phase 4 (Daemon 전환 + Legacy 제거) ← Phase 1, 2, 3 필요
 # Phase 1
 refactor(autodev): define Task, Agent, TaskSource, TaskRunner traits
 refactor(autodev): extract WorkspaceOps trait from Workspace struct
-refactor(autodev): add ConfigLoader trait and TaskContext
+refactor(autodev): add ConfigLoader trait
 
 # Phase 2
 refactor(autodev): implement AnalyzeTask with TDD

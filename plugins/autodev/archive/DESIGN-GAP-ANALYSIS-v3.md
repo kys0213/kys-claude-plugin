@@ -218,16 +218,20 @@ Daemon 단위 테스트 불가의 원인 중 하나.
 
 ---
 
-### NEW-GAP-7: Merger 컴포넌트가 고아 상태 (dead code)
+### NEW-GAP-7: Dead code 잔존 (merger.rs, task_context.rs)
 
 | 항목 | 내용 |
 |------|------|
 | **카테고리** | Dead code |
-| **디자인** | DESIGN-v2 §12: "PR Merge: scope 외" |
-| **구현** | `components/merger.rs`: `MergeOutcome`, `MergeOutput`, `Merger` struct가 존재하지만 호출하는 코드 없음 |
-| **파일** | `cli/src/components/merger.rs` (122줄) |
+| **디자인** | DESIGN-v2 §12: "PR Merge: scope 외", TaskContext: NEW-GAP-3 참조 |
+| **구현** | 아래 표 참조 |
 
-**영향**: Dead code. merge pipeline 제거 시 함께 제거되어야 했으나 잔존. `cargo clippy` dead_code 경고 대상.
+| 파일 | 내용 | 사유 |
+|------|------|------|
+| `cli/src/components/merger.rs` (122줄) | `MergeOutcome`, `MergeOutput`, `Merger` struct | merge pipeline 제거 시 함께 삭제되어야 했으나 잔존 |
+| `cli/src/daemon/task_context.rs` (24줄) | `TaskContext { workspace, gh, config }` | NEW-GAP-3 결정에 따라 폐기. 정의만 존재하고 어디서도 사용하지 않는 dead code |
+
+**영향**: `cargo clippy` dead_code 경고 대상. 두 파일 모두 삭제.
 
 ---
 
