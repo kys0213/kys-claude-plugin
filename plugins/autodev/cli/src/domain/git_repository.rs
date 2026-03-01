@@ -32,30 +32,6 @@ struct ScanUser {
     login: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct ScanPull {
-    number: i64,
-    title: String,
-    #[allow(dead_code)]
-    body: Option<String>,
-    user: ScanUser,
-    head: ScanBranch,
-    base: ScanBranch,
-    updated_at: String,
-    #[serde(default)]
-    labels: Vec<ScanLabel>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ScanBranch {
-    #[serde(rename = "ref")]
-    ref_name: String,
-}
-
-fn has_autodev_label(scan_labels: &[ScanLabel]) -> bool {
-    scan_labels.iter().any(|l| l.name.starts_with("autodev:"))
-}
-
 // ─── GitRepository Aggregate ───
 
 /// Git repository aggregate.
@@ -311,92 +287,85 @@ impl GitRepository {
         Ok(())
     }
 
-    /// 새로 업데이트된 PR을 스캔하여 pr_queue(Pending)에 추가.
+    /// `autodev:wip` 라벨이 있는 open PR을 스캔하여 pr_queue(Pending)에 추가.
     ///
-    /// cursor 기반 증분 스캔으로 이전 스캔 이후 업데이트된 PR만 처리한다.
-    /// autodev: 라벨이 이미 있는 PR은 건너뛴다.
-    pub async fn scan_pulls(
-        &mut self,
-        gh: &dyn Gh,
-        db: &dyn ScanCursorRepository,
-        ignore_authors: &[String],
-    ) -> Result<()> {
-        let since = db.cursor_get_last_seen(&self.id, "pulls")?;
-
-        let mut params: Vec<(&str, &str)> = vec![
+    /// Label-Positive 모델: `autodev:wip` 라벨이 있는 PR만 scan 대상.
+    /// 외부 PR은 사람이 수동으로 `autodev:wip`를 추가해야 리뷰 대상이 됨.
+    pub async fn scan_pulls(&mut self, gh: &dyn Gh, ignore_authors: &[String]) -> Result<()> {
+        let params: Vec<(&str, &str)> = vec![
             ("state", "open"),
-            ("sort", "updated"),
-            ("direction", "desc"),
+            ("labels", labels::WIP),
             ("per_page", "30"),
         ];
 
-        let since_owned;
-        if let Some(ref s) = since {
-            since_owned = s.clone();
-            params.push(("since", &since_owned));
-        }
-
         let stdout = gh
-            .api_paginate(&self.name, "pulls", &params, self.gh_host.as_deref())
+            .api_paginate(&self.name, "issues", &params, self.gh_host.as_deref())
             .await?;
 
-        let prs: Vec<ScanPull> = serde_json::from_slice(&stdout)?;
-        let mut latest_updated = since;
+        let items: Vec<serde_json::Value> = serde_json::from_slice(&stdout)?;
 
-        for pr in &prs {
-            if let Some(ref s) = latest_updated {
-                if pr.updated_at <= *s {
-                    continue;
-                }
-            }
-
-            if ignore_authors.contains(&pr.user.login) {
+        for item in &items {
+            // issues API는 PR도 포함 — pull_request 필드가 있어야 PR
+            if item.get("pull_request").is_none() {
                 continue;
             }
 
-            if has_autodev_label(&pr.labels) {
-                if latest_updated.as_ref().is_none_or(|l| pr.updated_at > *l) {
-                    latest_updated = Some(pr.updated_at.clone());
-                }
+            let number = match item["number"].as_i64() {
+                Some(n) if n > 0 => n,
+                _ => continue,
+            };
+
+            let author = item["user"]["login"].as_str().unwrap_or("");
+            if ignore_authors.iter().any(|a| a == author) {
                 continue;
             }
 
-            let work_id = make_work_id("pr", &self.name, pr.number);
+            let work_id = make_work_id("pr", &self.name, number);
 
             if self.contains(&work_id) {
-                if latest_updated.as_ref().is_none_or(|l| pr.updated_at > *l) {
-                    latest_updated = Some(pr.updated_at.clone());
-                }
                 continue;
             }
 
-            let item = PrItem {
+            // PR 상세 정보 (head/base branch) 조회
+            let pr_data = gh
+                .api_paginate(
+                    &self.name,
+                    &format!("pulls/{number}"),
+                    &[],
+                    self.gh_host.as_deref(),
+                )
+                .await;
+
+            let (head_branch, base_branch, title) = match pr_data {
+                Ok(data) => {
+                    let pr: serde_json::Value =
+                        serde_json::from_slice(&data).unwrap_or(serde_json::Value::Null);
+                    (
+                        pr["head"]["ref"].as_str().unwrap_or("").to_string(),
+                        pr["base"]["ref"].as_str().unwrap_or("main").to_string(),
+                        pr["title"].as_str().unwrap_or("").to_string(),
+                    )
+                }
+                Err(_) => continue,
+            };
+
+            let pr_item = PrItem {
                 work_id,
                 repo_id: self.id.clone(),
                 repo_name: self.name.clone(),
                 repo_url: self.url.clone(),
-                github_number: pr.number,
-                title: pr.title.clone(),
-                head_branch: pr.head.ref_name.clone(),
-                base_branch: pr.base.ref_name.clone(),
+                github_number: number,
+                title,
+                head_branch,
+                base_branch,
                 review_comment: None,
                 source_issue_number: None,
                 review_iteration: 0,
                 gh_host: self.gh_host.clone(),
             };
 
-            gh.label_add(&self.name, pr.number, labels::WIP, self.gh_host.as_deref())
-                .await;
-            self.pr_queue.push(pr_phase::PENDING, item);
-            tracing::info!("queued PR #{}: {}", pr.number, pr.title);
-
-            if latest_updated.as_ref().is_none_or(|l| pr.updated_at > *l) {
-                latest_updated = Some(pr.updated_at.clone());
-            }
-        }
-
-        if let Some(last_seen) = latest_updated {
-            db.cursor_upsert(&self.id, "pulls", &last_seen)?;
+            self.pr_queue.push(pr_phase::PENDING, pr_item);
+            tracing::info!("queued PR #{number} (wip label detected)");
         }
 
         Ok(())
@@ -1145,106 +1114,120 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scan_pulls_adds_new_prs_to_queue() {
+    async fn scan_pulls_queues_wip_labeled_prs() {
         let gh = MockGh::new();
-        let db = MockCursorRepo::new();
 
-        let pulls_json = serde_json::json!([
+        // issues endpoint (labels=autodev:wip) returns PR with pull_request field
+        let issues_json = serde_json::json!([
             {
                 "number": 10,
                 "title": "fix bug",
-                "body": "Closes #1",
                 "user": {"login": "alice"},
-                "head": {"ref": "fix-bug"},
-                "base": {"ref": "main"},
-                "updated_at": "2025-01-01T00:00:00Z",
-                "labels": []
+                "labels": [{"name": "autodev:wip"}],
+                "pull_request": {}
             }
         ]);
         gh.set_paginate(
             "org/repo",
-            "pulls",
-            serde_json::to_vec(&pulls_json).unwrap(),
+            "issues",
+            serde_json::to_vec(&issues_json).unwrap(),
+        );
+
+        // PR detail endpoint
+        let pr_detail = serde_json::json!({
+            "head": {"ref": "fix-bug"},
+            "base": {"ref": "main"},
+            "title": "fix bug"
+        });
+        gh.set_paginate(
+            "org/repo",
+            "pulls/10",
+            serde_json::to_vec(&pr_detail).unwrap(),
         );
 
         let mut repo = make_repo();
-        repo.scan_pulls(&gh, &db, &[]).await.unwrap();
+        repo.scan_pulls(&gh, &[]).await.unwrap();
 
         assert_eq!(repo.pr_queue.len(pr_phase::PENDING), 1);
         let item = repo.pr_queue.pop(pr_phase::PENDING).unwrap();
         assert_eq!(item.github_number, 10);
         assert_eq!(item.head_branch, "fix-bug");
 
-        // wip label added
+        // No wip label added (already has it — Label-Positive)
         let added = gh.added_labels.lock().unwrap();
-        assert_eq!(added.len(), 1);
-        assert_eq!(
-            added[0],
-            ("org/repo".to_string(), 10, "autodev:wip".to_string())
-        );
+        assert!(added.is_empty());
     }
 
     #[tokio::test]
-    async fn scan_pulls_skips_autodev_labeled_prs() {
+    async fn scan_pulls_skips_already_queued_prs() {
         let gh = MockGh::new();
-        let db = MockCursorRepo::new();
 
-        let pulls_json = serde_json::json!([
+        let issues_json = serde_json::json!([
             {
                 "number": 10,
-                "title": "already reviewed",
-                "body": null,
+                "title": "already queued",
                 "user": {"login": "alice"},
-                "head": {"ref": "fix-bug"},
-                "base": {"ref": "main"},
-                "updated_at": "2025-01-01T00:00:00Z",
-                "labels": [{"name": "autodev:done"}]
+                "labels": [{"name": "autodev:wip"}],
+                "pull_request": {}
             }
         ]);
         gh.set_paginate(
             "org/repo",
-            "pulls",
-            serde_json::to_vec(&pulls_json).unwrap(),
+            "issues",
+            serde_json::to_vec(&issues_json).unwrap(),
         );
 
         let mut repo = make_repo();
-        repo.scan_pulls(&gh, &db, &[]).await.unwrap();
+        // Pre-fill queue to simulate already-queued state
+        repo.pr_queue.push(
+            pr_phase::REVIEWING,
+            PrItem {
+                work_id: make_work_id("pr", "org/repo", 10),
+                repo_id: "repo-id-1".to_string(),
+                repo_name: "org/repo".to_string(),
+                repo_url: "https://github.com/org/repo".to_string(),
+                github_number: 10,
+                title: "already queued".to_string(),
+                head_branch: "fix-bug".to_string(),
+                base_branch: "main".to_string(),
+                review_comment: None,
+                source_issue_number: None,
+                review_iteration: 0,
+                gh_host: None,
+            },
+        );
 
+        repo.scan_pulls(&gh, &[]).await.unwrap();
+
+        // Should not add a second copy
         assert_eq!(repo.pr_queue.len(pr_phase::PENDING), 0);
     }
 
     #[tokio::test]
-    async fn scan_pulls_updates_cursor() {
+    async fn scan_pulls_skips_ignored_authors() {
         let gh = MockGh::new();
-        let db = MockCursorRepo::new();
 
-        let pulls_json = serde_json::json!([
+        let issues_json = serde_json::json!([
             {
                 "number": 10,
-                "title": "fix bug",
-                "body": null,
-                "user": {"login": "alice"},
-                "head": {"ref": "fix-bug"},
-                "base": {"ref": "main"},
-                "updated_at": "2025-06-01T12:00:00Z",
-                "labels": []
+                "title": "renovate update",
+                "user": {"login": "renovate"},
+                "labels": [{"name": "autodev:wip"}],
+                "pull_request": {}
             }
         ]);
         gh.set_paginate(
             "org/repo",
-            "pulls",
-            serde_json::to_vec(&pulls_json).unwrap(),
+            "issues",
+            serde_json::to_vec(&issues_json).unwrap(),
         );
 
         let mut repo = make_repo();
-        repo.scan_pulls(&gh, &db, &[]).await.unwrap();
-
-        // Cursor should be updated to the PR's updated_at
-        let cursor = db
-            .cursor_get_last_seen("repo-id-1", "pulls")
-            .unwrap()
+        repo.scan_pulls(&gh, &["renovate".to_string()])
+            .await
             .unwrap();
-        assert_eq!(cursor, "2025-06-01T12:00:00Z");
+
+        assert_eq!(repo.pr_queue.len(pr_phase::PENDING), 0);
     }
 
     #[tokio::test]

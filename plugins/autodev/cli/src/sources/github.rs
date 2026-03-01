@@ -179,7 +179,7 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                     }
                     "pulls" => {
                         if let Err(e) = repo
-                            .scan_pulls(&*self.gh, &self.db, &repo_cfg.consumer.ignore_authors)
+                            .scan_pulls(&*self.gh, &repo_cfg.consumer.ignore_authors)
                             .await
                         {
                             tracing::error!("PR scan error for {repo_name}: {e}");
