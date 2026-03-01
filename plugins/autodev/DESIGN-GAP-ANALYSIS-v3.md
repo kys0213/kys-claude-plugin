@@ -44,36 +44,90 @@ v2.1의 **Critical gap은 모두 해소**됨. 남은 gap은 v3 아키텍처 리�
 
 ## Medium Gaps
 
-### NEW-GAP-1: Daemon이 함수(`start()`)이지 struct가 아님
+### NEW-GAP-1: Daemon이 함수(`start()`)이지 struct가 아님 + 의존성 조립 미분리
 
 | 항목 | 내용 |
 |------|------|
 | **카테고리** | v3 Architecture (Phase 4) |
 | **디자인** | DESIGN-v3 §2, §9: `pub struct Daemon { manager, runner, inflight }` + `impl Daemon { async fn run() }` |
-| **구현** | `daemon/mod.rs:100`: `pub async fn start(home, env, gh, git, claude, sw) -> Result<()>` 함수 |
+| **구현** | `daemon/mod.rs:100`: `pub async fn start(home, env, gh, git, claude, sw) -> Result<()>` 함수 — 의존성 조립과 이벤트 루프 실행이 혼재 |
 | **파일** | `cli/src/daemon/mod.rs:100-335` |
 
 **영향**: Daemon 자체의 단위 테스트가 불가능. MockTaskManager + MockTaskRunner를 주입하여 오케스트레이션 로직(인플라이트 제한, task 완료 후 즉시 spawn 등)을 검증할 수 없음.
 
-**DESIGN-v3 목표**:
+**수정 방향**: `bootstrap` → `Daemon::new` → `Daemon::run` 3단계 분리
+
 ```rust
-// 테스트 가능한 Daemon struct
-pub struct Daemon {
-    manager: Box<dyn TaskManager>,
-    runner: Arc<dyn TaskRunner>,
-    inflight: InFlightTracker,
+// 1. 조립 결과를 담는 구조체
+struct DaemonDeps {
+    manager:  Box<dyn TaskManager>,
+    runner:   Arc<dyn TaskRunner>,
+    reporter: Box<dyn DailyReporter>,
+    log_db:   Database,
+    config:   DaemonConfig,
 }
 
+// 2. 의존성 조립만 담당 (외부 리소스 생성: DB, config, workspace 등)
+async fn bootstrap(
+    home:   &Path,
+    env:    Arc<dyn Env>,
+    gh:     Arc<dyn Gh>,
+    git:    Arc<dyn Git>,
+    claude: Arc<dyn Claude>,
+    sw:     Arc<dyn SuggestWorkflow>,
+) -> Result<DaemonDeps> {
+    let db = Database::open(home.join("daemon.db"))?;
+    let log_db = Database::open(home.join("daemon-log.db"))?;
+    let config = config::loader::load_merged(&env)?;
+    let workspace = OwnedWorkspace::new(git.clone(), env.clone());
+    let agent = ClaudeAgent::new(claude);
+    let runner = DefaultTaskRunner::new(Arc::new(agent));
+    let source = GitHubTaskSource::new(workspace, gh, config.clone(), env, git, sw, db);
+    let manager = DefaultTaskManager::new(vec![Box::new(source)]);
+    let reporter = DefaultDailyReporter::new(/* ... */);
+    Ok(DaemonDeps { manager: Box::new(manager), runner, reporter, log_db, config })
+}
+
+// 3. 테스트 가능한 Daemon struct
+pub struct Daemon {
+    manager:  Box<dyn TaskManager>,
+    runner:   Arc<dyn TaskRunner>,
+    reporter: Box<dyn DailyReporter>,
+    log_db:   Database,
+    config:   DaemonConfig,
+}
+
+// 4. start()는 bootstrap → run 연결만
+pub async fn start(home, env, gh, git, claude, sw) -> Result<()> {
+    let deps = bootstrap(home, &env, &gh, &git, &claude, &sw).await?;
+    let mut daemon = Daemon::new(deps.manager, deps.runner, deps.log_db, deps.reporter, deps.config);
+    daemon.run().await
+}
+```
+
+**테스트 시**: `bootstrap` 없이 mock만으로 `Daemon::new(mock, mock, ...)` 직접 생성 가능.
+
+```rust
 #[tokio::test]
 async fn daemon_respects_inflight_limit() {
     let manager = MockTaskManager::new()...;
     let runner = MockTaskRunner::new()...;
-    let mut daemon = Daemon::new(manager, runner, InFlightTracker::new(1));
-    // ...
+    let reporter = MockDailyReporter::new()...;
+    let log_db = Database::open_in_memory()?;
+    let mut daemon = Daemon::new(Box::new(manager), runner, log_db, Box::new(reporter), config);
+    // bootstrap 불필요 — 순수 오케스트레이션 로직만 검증
 }
 ```
 
 **현재**: 통합 테스트만 가능 (실제 DB, 실제 프로세스 필요).
+
+**책임 분리 요약**:
+| 계층 | 책임 | 테스트 |
+|------|------|--------|
+| `bootstrap()` | 외부 리소스 생성 + 의존성 조립 | 통합 테스트 |
+| `Daemon::new()` | 조립된 의존성 수신 | — |
+| `Daemon::run()` | 오케스트레이션 (poll, dispatch, inflight) | mock으로 단위 테스트 |
+| `start()` | 진입점 — bootstrap → run 연결 | E2E |
 
 ---
 
@@ -229,6 +283,7 @@ Daemon 단위 테스트 불가의 원인 중 하나.
 | Legacy `pipeline/` 제거 | ✅ | 모듈 완전 삭제 |
 | Legacy `scanner/` 제거 | ✅ | 모듈 완전 삭제 |
 | Merge pipeline 제거 | ✅ | `MergeItem`, `merge_queue`, `scan_merges` 삭제 |
+| **bootstrap 분리** | ❌ | 의존성 조립이 start()에 인라인 (NEW-GAP-1) |
 | **Daemon struct** | ❌ | 함수로 구현 (NEW-GAP-1) |
 | **TaskManager 연동** | ❌ | 미사용 (NEW-GAP-2) |
 | ~~TaskContext 사용~~ | — | 성급한 추상화로 판단, Gap에서 제외 |
@@ -250,9 +305,12 @@ Daemon 단위 테스트 불가의 원인 중 하나.
 ### Priority 2: v3 Phase 4 완료
 
 ```
-4. NEW-GAP-2: Daemon에서 TaskManager 사용 (source.poll → manager.tick)
-5. NEW-GAP-1: Daemon struct 전환 (함수 → struct + DI)
-6. NEW-GAP-4: Daily report 로직 분리 (DailyReportSource 또는 TaskManager 내부)
+4. NEW-GAP-1: bootstrap + Daemon struct 전환
+   a. bootstrap() 함수 추출 — 의존성 조립 분리
+   b. Daemon struct 정의 — 조립된 의존성 수신
+   c. start()를 bootstrap → Daemon::new → run 연결로 축소
+5. NEW-GAP-2: Daemon에서 TaskManager 사용 (source.poll → manager.tick)
+6. NEW-GAP-4: Daily report 로직 분리 (DailyReporter trait + DefaultDailyReporter)
 ```
 
 ### Priority 3: 정리
