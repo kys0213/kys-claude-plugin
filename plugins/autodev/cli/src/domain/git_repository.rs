@@ -625,7 +625,7 @@ impl GitRepository {
             }
         }
 
-        // ── PRs 복구 ──
+        // ── PRs 복구: wip → Pending (리뷰 재개) ──
         for pull in self.pulls.iter().filter(|p| p.is_wip()) {
             if pull.is_terminal() {
                 continue;
@@ -652,6 +652,36 @@ impl GitRepository {
             };
 
             self.pr_queue.push(pr_phase::PENDING, item);
+            recovered += 1;
+        }
+
+        // ── PRs 복구: changes-requested → ReviewDone (피드백 반영 재개) ──
+        for pull in self.pulls.iter().filter(|p| p.is_changes_requested()) {
+            if pull.is_terminal() {
+                continue;
+            }
+
+            let work_id = make_work_id("pr", &self.name, pull.number);
+            if self.contains(&work_id) {
+                continue;
+            }
+
+            let item = PrItem {
+                work_id,
+                repo_id: self.id.clone(),
+                repo_name: self.name.clone(),
+                repo_url: self.url.clone(),
+                github_number: pull.number,
+                title: pull.title.clone(),
+                head_branch: pull.head_branch.clone(),
+                base_branch: pull.base_branch.clone(),
+                review_comment: None,
+                source_issue_number: pull.source_issue_number(),
+                review_iteration: pull.review_iteration(),
+                gh_host: self.gh_host.clone(),
+            };
+
+            self.pr_queue.push(pr_phase::REVIEW_DONE, item);
             recovered += 1;
         }
 

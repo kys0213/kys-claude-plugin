@@ -146,6 +146,24 @@ impl Task for ImproveTask {
         let mut ops = Vec::new();
 
         if response.exit_code == 0 {
+            // changes-requested → wip 라벨 전이
+            self.gh
+                .label_remove(
+                    &self.item.repo_name,
+                    self.item.github_number,
+                    labels::CHANGES_REQUESTED,
+                    gh_host,
+                )
+                .await;
+            self.gh
+                .label_add(
+                    &self.item.repo_name,
+                    self.item.github_number,
+                    labels::WIP,
+                    gh_host,
+                )
+                .await;
+
             // Iteration 라벨 동기화
             if self.item.review_iteration > 0 {
                 self.gh
@@ -178,7 +196,7 @@ impl Task for ImproveTask {
                 .label_remove(
                     &self.item.repo_name,
                     self.item.github_number,
-                    labels::WIP,
+                    labels::CHANGES_REQUESTED,
                     gh_host,
                 )
                 .await;
@@ -294,11 +312,17 @@ mod tests {
             |op| matches!(op, QueueOp::PushPr { phase, item } if *phase == pr_phase::IMPROVED && item.review_iteration == 1)
         ));
 
-        // Iteration label added
+        // changes-requested → wip 전이
         let added = gh.added_labels.lock().unwrap();
+        assert!(added.iter().any(|(_, n, l)| *n == 10 && l == labels::WIP));
+        // Iteration label added
         assert!(added
             .iter()
             .any(|(_, _, l)| l == &labels::iteration_label(1)));
+        let removed = gh.removed_labels.lock().unwrap();
+        assert!(removed
+            .iter()
+            .any(|(_, n, l)| *n == 10 && l == labels::CHANGES_REQUESTED));
     }
 
     #[tokio::test]
@@ -362,6 +386,8 @@ mod tests {
             .any(|op| matches!(op, QueueOp::PushPr { .. })));
 
         let removed = gh.removed_labels.lock().unwrap();
-        assert!(removed.iter().any(|(_, n, l)| *n == 10 && l == labels::WIP));
+        assert!(removed
+            .iter()
+            .any(|(_, n, l)| *n == 10 && l == labels::CHANGES_REQUESTED));
     }
 }

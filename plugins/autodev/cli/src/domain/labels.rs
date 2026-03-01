@@ -10,6 +10,9 @@ pub const ANALYZED: &str = "autodev:analyzed";
 pub const APPROVED_ANALYSIS: &str = "autodev:approved-analysis";
 pub const IMPLEMENTING: &str = "autodev:implementing";
 
+// v2.1: PR 전용 라벨
+pub const CHANGES_REQUESTED: &str = "autodev:changes-requested";
+
 // v2: 리뷰 반복 횟수 라벨 (예: "autodev:iteration/1")
 pub const ITERATION_PREFIX: &str = "autodev:iteration/";
 

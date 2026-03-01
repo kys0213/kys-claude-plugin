@@ -348,24 +348,26 @@ impl Task for ReviewTask {
                     )
                     .await;
 
+                // wip → changes-requested 라벨 전이
+                self.gh
+                    .label_remove(
+                        &self.item.repo_name,
+                        self.item.github_number,
+                        labels::WIP,
+                        gh_host,
+                    )
+                    .await;
+                self.gh
+                    .label_add(
+                        &self.item.repo_name,
+                        self.item.github_number,
+                        labels::CHANGES_REQUESTED,
+                        gh_host,
+                    )
+                    .await;
+
                 // 외부 PR (source_issue 없음): 리뷰 댓글만, 자동수정 안함
                 if self.item.source_issue_number.is_none() {
-                    self.gh
-                        .label_remove(
-                            &self.item.repo_name,
-                            self.item.github_number,
-                            labels::WIP,
-                            gh_host,
-                        )
-                        .await;
-                    self.gh
-                        .label_add(
-                            &self.item.repo_name,
-                            self.item.github_number,
-                            labels::DONE,
-                            gh_host,
-                        )
-                        .await;
                     ops.push(QueueOp::Remove);
                 } else {
                     // Max iterations 확인 (re-review일 때만)
@@ -661,7 +663,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn after_external_pr_request_changes_marks_done() {
+    async fn after_external_pr_request_changes_marks_changes_requested() {
         let gh = Arc::new(MockGh::new());
         gh.set_field("org/repo", "pulls/10", ".state", "open");
 
@@ -671,14 +673,19 @@ mod tests {
 
         let result = task.after_invoke(make_request_changes_response()).await;
 
-        // Should NOT push to review_done
+        // Should NOT push to review_done (external PR: no auto-fix)
         assert!(!result
             .queue_ops
             .iter()
             .any(|op| matches!(op, QueueOp::PushPr { .. })));
 
+        // wip → changes-requested 전이
         let added = gh.added_labels.lock().unwrap();
-        assert!(added.iter().any(|(_, n, l)| *n == 10 && l == labels::DONE));
+        assert!(added
+            .iter()
+            .any(|(_, n, l)| *n == 10 && l == labels::CHANGES_REQUESTED));
+        let removed = gh.removed_labels.lock().unwrap();
+        assert!(removed.iter().any(|(_, n, l)| *n == 10 && l == labels::WIP));
     }
 
     #[tokio::test]
