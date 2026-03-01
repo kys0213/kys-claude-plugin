@@ -52,8 +52,6 @@ fn default_config_has_expected_values() {
     assert_eq!(config.daemon.daily_report_hour, 6);
     assert_eq!(config.daemon.log_dir, "logs");
     assert_eq!(config.daemon.log_retention_days, 30);
-    // ConsumerConfig: auto_merge default
-    assert!(!config.consumer.auto_merge);
 }
 
 #[test]

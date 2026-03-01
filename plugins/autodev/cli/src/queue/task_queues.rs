@@ -52,27 +52,6 @@ impl HasWorkId for PrItem {
     }
 }
 
-/// Merge 작업 아이템 (인메모리)
-#[derive(Debug, Clone)]
-pub struct MergeItem {
-    pub work_id: String,
-    pub repo_id: String,
-    pub repo_name: String,
-    pub repo_url: String,
-    pub pr_number: i64,
-    pub title: String,
-    pub head_branch: String,
-    pub base_branch: String,
-    /// GHE hostname (e.g. "git.example.com"). None이면 github.com.
-    pub gh_host: Option<String>,
-}
-
-impl HasWorkId for MergeItem {
-    fn work_id(&self) -> &str {
-        &self.work_id
-    }
-}
-
 // ─── Work ID 생성 헬퍼 ───
 
 /// work_id 형식: "{type}:{repo_name}:{number}"
@@ -100,14 +79,6 @@ pub mod pr_phase {
     pub const EXTRACTING: &str = "Extracting";
 }
 
-// ─── Merge Phase 상수 ───
-
-pub mod merge_phase {
-    pub const PENDING: &str = "Pending";
-    pub const MERGING: &str = "Merging";
-    pub const CONFLICT: &str = "Conflict";
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,7 +88,6 @@ mod tests {
     fn make_work_id_format() {
         assert_eq!(make_work_id("issue", "org/repo", 42), "issue:org/repo:42");
         assert_eq!(make_work_id("pr", "org/repo", 15), "pr:org/repo:15");
-        assert_eq!(make_work_id("merge", "org/repo", 15), "merge:org/repo:15");
     }
 
     #[test]
@@ -161,16 +131,12 @@ mod tests {
         assert_eq!(issue_phase::READY, "Ready");
         assert_eq!(issue_phase::IMPLEMENTING, "Implementing");
 
-        // PR: Pending → Reviewing → ReviewDone → Improving → Improved
+        // PR: Pending → Reviewing → ReviewDone → Improving → Improved → Extracting
         assert_eq!(pr_phase::PENDING, "Pending");
         assert_eq!(pr_phase::REVIEWING, "Reviewing");
         assert_eq!(pr_phase::REVIEW_DONE, "ReviewDone");
         assert_eq!(pr_phase::IMPROVING, "Improving");
         assert_eq!(pr_phase::IMPROVED, "Improved");
-
-        // Merge: Pending → Merging → Conflict
-        assert_eq!(merge_phase::PENDING, "Pending");
-        assert_eq!(merge_phase::MERGING, "Merging");
-        assert_eq!(merge_phase::CONFLICT, "Conflict");
+        assert_eq!(pr_phase::EXTRACTING, "Extracting");
     }
 }

@@ -19,12 +19,11 @@ use crate::domain::repository::{RepoRepository, ScanCursorRepository};
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
-use crate::queue::task_queues::{issue_phase, merge_phase, pr_phase};
+use crate::queue::task_queues::{issue_phase, pr_phase};
 use crate::tasks::analyze::AnalyzeTask;
 use crate::tasks::extract::ExtractTask;
 use crate::tasks::implement::ImplementTask;
 use crate::tasks::improve::ImproveTask;
-use crate::tasks::merge::MergeTask;
 use crate::tasks::review::ReviewTask;
 
 /// GitHub 이슈/PR 스캔 기반 TaskSource.
@@ -179,16 +178,16 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                     }
                     "pulls" => {
                         if let Err(e) = repo
-                            .scan_pulls(&*self.gh, &self.db, &repo_cfg.consumer.ignore_authors)
+                            .scan_pulls(&*self.gh, &repo_cfg.consumer.ignore_authors)
                             .await
                         {
                             tracing::error!("PR scan error for {repo_name}: {e}");
                         }
-                    }
-                    "merges" => {
-                        if repo_cfg.consumer.auto_merge {
-                            if let Err(e) = repo.scan_merges(&*self.gh).await {
-                                tracing::error!("merge scan error for {repo_name}: {e}");
+
+                        // done + merged + NOT extracted → knowledge extraction
+                        if repo_cfg.consumer.knowledge_extraction {
+                            if let Err(e) = repo.scan_done_merged(&*self.gh).await {
+                                tracing::error!("done_merged scan error for {repo_name}: {e}");
                             }
                         }
                     }
@@ -283,18 +282,6 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                     item,
                 )));
             }
-
-            // Merge: Pending → Merging
-            while let Some(item) = repo.merge_queue.pop(merge_phase::PENDING) {
-                repo.merge_queue.push(merge_phase::MERGING, item.clone());
-                tracing::debug!("merge PR #{}: creating MergeTask", item.pr_number);
-                tasks.push(Box::new(MergeTask::new(
-                    Arc::clone(&self.workspace),
-                    Arc::clone(&self.gh),
-                    Arc::clone(&self.config),
-                    item,
-                )));
-            }
         }
 
         tasks
@@ -319,7 +306,6 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                 QueueOp::Remove => {
                     repo.issue_queue.remove(&result.work_id);
                     repo.pr_queue.remove(&result.work_id);
-                    repo.merge_queue.remove(&result.work_id);
                 }
                 QueueOp::PushPr { phase, item } => {
                     repo.pr_queue.push(phase, *item.clone());
@@ -352,7 +338,7 @@ mod tests {
     use crate::infrastructure::git::Git;
     use crate::infrastructure::suggest_workflow::SuggestWorkflow;
     use crate::knowledge::models::{RepetitionEntry, SessionEntry, ToolFrequencyEntry};
-    use crate::queue::task_queues::{make_work_id, IssueItem, MergeItem, PrItem};
+    use crate::queue::task_queues::{make_work_id, IssueItem, PrItem};
     use std::path::{Path, PathBuf};
 
     // ─── Mock dependencies ───
@@ -533,20 +519,6 @@ mod tests {
         }
     }
 
-    fn make_test_merge(repo_name: &str, number: i64) -> MergeItem {
-        MergeItem {
-            work_id: make_work_id("merge", repo_name, number),
-            repo_id: "r1".to_string(),
-            repo_name: repo_name.to_string(),
-            repo_url: format!("https://github.com/{repo_name}"),
-            pr_number: number,
-            title: format!("PR #{number}"),
-            head_branch: "feat".to_string(),
-            base_branch: "main".to_string(),
-            gh_host: None,
-        }
-    }
-
     // ─── drain_queue_items tests ───
 
     #[test]
@@ -632,26 +604,6 @@ mod tests {
         let tasks = source.drain_queue_items();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].work_id(), "pr:org/repo:10");
-    }
-
-    #[test]
-    fn drain_creates_merge_task_from_pending_merge() {
-        let gh = Arc::new(MockGh::new());
-        let mut source = make_source(gh);
-
-        let mut repo = GitRepository::new(
-            "r1".to_string(),
-            "org/repo".to_string(),
-            "https://github.com/org/repo".to_string(),
-            None,
-        );
-        repo.merge_queue
-            .push(merge_phase::PENDING, make_test_merge("org/repo", 20));
-        source.repos.insert("org/repo".to_string(), repo);
-
-        let tasks = source.drain_queue_items();
-        assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].work_id(), "merge:org/repo:20");
     }
 
     // ─── apply_queue_ops tests ───
@@ -759,8 +711,8 @@ mod tests {
             None,
         );
         repo2
-            .merge_queue
-            .push(merge_phase::PENDING, make_test_merge("org/repo2", 20));
+            .pr_queue
+            .push(pr_phase::REVIEW_DONE, make_test_pr("org/repo2", 20));
 
         source.repos.insert("org/repo1".to_string(), repo1);
         source.repos.insert("org/repo2".to_string(), repo2);

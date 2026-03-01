@@ -138,6 +138,9 @@ impl RepoPull {
     pub fn is_terminal(&self) -> bool {
         self.is_done() || self.has_label(labels::SKIP)
     }
+    pub fn is_changes_requested(&self) -> bool {
+        self.has_label(labels::CHANGES_REQUESTED)
+    }
 
     /// PR body에서 `Closes #N`, `Fixes #N`, `Resolves #N` 패턴을 파싱하여
     /// source issue number를 추출한다.

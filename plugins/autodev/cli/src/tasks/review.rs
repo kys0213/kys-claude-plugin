@@ -314,14 +314,7 @@ impl Task for ReviewTask {
                     .await;
 
                 ops.push(QueueOp::Remove);
-
-                // Knowledge extraction (best-effort, config gated)
-                if cfg.consumer.knowledge_extraction {
-                    ops.push(QueueOp::PushPr {
-                        phase: pr_phase::EXTRACTING,
-                        item: Box::new(self.item.clone()),
-                    });
-                }
+                // Knowledge extraction은 scan_done_merged()가 merge 후 트리거
             }
             Some(ReviewVerdict::RequestChanges) | None => {
                 // GitHub Review API: REQUEST_CHANGES
@@ -348,24 +341,26 @@ impl Task for ReviewTask {
                     )
                     .await;
 
+                // wip → changes-requested 라벨 전이
+                self.gh
+                    .label_remove(
+                        &self.item.repo_name,
+                        self.item.github_number,
+                        labels::WIP,
+                        gh_host,
+                    )
+                    .await;
+                self.gh
+                    .label_add(
+                        &self.item.repo_name,
+                        self.item.github_number,
+                        labels::CHANGES_REQUESTED,
+                        gh_host,
+                    )
+                    .await;
+
                 // 외부 PR (source_issue 없음): 리뷰 댓글만, 자동수정 안함
                 if self.item.source_issue_number.is_none() {
-                    self.gh
-                        .label_remove(
-                            &self.item.repo_name,
-                            self.item.github_number,
-                            labels::WIP,
-                            gh_host,
-                        )
-                        .await;
-                    self.gh
-                        .label_add(
-                            &self.item.repo_name,
-                            self.item.github_number,
-                            labels::DONE,
-                            gh_host,
-                        )
-                        .await;
                     ops.push(QueueOp::Remove);
                 } else {
                     // Max iterations 확인 (re-review일 때만)
@@ -584,57 +579,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn after_approve_pushes_to_extracting_when_enabled() {
+    async fn after_approve_does_not_push_extracting() {
+        // Knowledge extraction is now triggered by scan_done_merged, not ReviewTask
         let gh = Arc::new(MockGh::new());
         gh.set_field("org/repo", "pulls/10", ".state", "open");
 
-        // Default config has knowledge_extraction = true
         let mut task = make_task(gh.clone(), Some(42));
         let _ = task.before_invoke().await;
 
         let result = task.after_invoke(make_approve_response()).await;
 
         assert!(matches!(result.status, TaskStatus::Completed));
-        assert!(result.queue_ops.iter().any(
-            |op| matches!(op, QueueOp::PushPr { phase, item } if *phase == pr_phase::EXTRACTING && item.github_number == 10)
-        ));
-    }
-
-    struct NoExtractionConfigLoader;
-    impl ConfigLoader for NoExtractionConfigLoader {
-        fn load(&self, _: Option<&Path>) -> WorkflowConfig {
-            let mut cfg = WorkflowConfig::default();
-            cfg.consumer.knowledge_extraction = false;
-            cfg
-        }
-    }
-
-    #[tokio::test]
-    async fn after_approve_skips_extracting_when_disabled() {
-        let gh = Arc::new(MockGh::new());
-        gh.set_field("org/repo", "pulls/10", ".state", "open");
-
-        let mut task = ReviewTask::new(
-            Arc::new(MockWorkspace),
-            gh.clone(),
-            Arc::new(NoExtractionConfigLoader),
-            make_test_pr(Some(42)),
-        );
-        let _ = task.before_invoke().await;
-
-        let result = task.after_invoke(make_approve_response()).await;
-
-        assert!(matches!(result.status, TaskStatus::Completed));
-        // Remove should still be present
+        // Only Remove, no PushPr
         assert!(result
             .queue_ops
             .iter()
             .any(|op| matches!(op, QueueOp::Remove)));
-        // But no PushPr to EXTRACTING
-        assert!(!result.queue_ops.iter().any(
-            |op| matches!(op, QueueOp::PushPr { phase, .. } if *phase == pr_phase::EXTRACTING)
-        ));
-        // PR still marked done
+        assert!(!result
+            .queue_ops
+            .iter()
+            .any(|op| matches!(op, QueueOp::PushPr { .. })));
+        // PR marked done
         let added = gh.added_labels.lock().unwrap();
         assert!(added.iter().any(|(_, n, l)| *n == 10 && l == labels::DONE));
     }
@@ -661,7 +626,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn after_external_pr_request_changes_marks_done() {
+    async fn after_external_pr_request_changes_marks_changes_requested() {
         let gh = Arc::new(MockGh::new());
         gh.set_field("org/repo", "pulls/10", ".state", "open");
 
@@ -671,14 +636,19 @@ mod tests {
 
         let result = task.after_invoke(make_request_changes_response()).await;
 
-        // Should NOT push to review_done
+        // Should NOT push to review_done (external PR: no auto-fix)
         assert!(!result
             .queue_ops
             .iter()
             .any(|op| matches!(op, QueueOp::PushPr { .. })));
 
+        // wip → changes-requested 전이
         let added = gh.added_labels.lock().unwrap();
-        assert!(added.iter().any(|(_, n, l)| *n == 10 && l == labels::DONE));
+        assert!(added
+            .iter()
+            .any(|(_, n, l)| *n == 10 && l == labels::CHANGES_REQUESTED));
+        let removed = gh.removed_labels.lock().unwrap();
+        assert!(removed.iter().any(|(_, n, l)| *n == 10 && l == labels::WIP));
     }
 
     #[tokio::test]

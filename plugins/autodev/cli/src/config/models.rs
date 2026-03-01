@@ -44,7 +44,6 @@ pub struct ConsumerConfig {
     pub scan_targets: Vec<String>,
     pub issue_concurrency: u32,
     pub pr_concurrency: u32,
-    pub merge_concurrency: u32,
     pub model: String,
     pub workspace_strategy: String,
     pub filter_labels: Option<Vec<String>>,
@@ -52,7 +51,6 @@ pub struct ConsumerConfig {
     pub gh_host: Option<String>,
     pub confidence_threshold: f64,
     pub knowledge_extraction: bool,
-    pub auto_merge: bool,
 }
 
 impl Default for ConsumerConfig {
@@ -62,7 +60,6 @@ impl Default for ConsumerConfig {
             scan_targets: vec!["issues".into(), "pulls".into()],
             issue_concurrency: 1,
             pr_concurrency: 1,
-            merge_concurrency: 1,
             model: "sonnet".into(),
             workspace_strategy: "worktree".into(),
             filter_labels: None,
@@ -70,7 +67,6 @@ impl Default for ConsumerConfig {
             gh_host: None,
             confidence_threshold: 0.7,
             knowledge_extraction: true,
-            auto_merge: false,
         }
     }
 }

@@ -2,7 +2,6 @@ pub mod analyze;
 pub mod extract;
 pub mod implement;
 pub mod improve;
-pub mod merge;
 pub mod review;
 
 /// 모든 Task에서 `--append-system-prompt`로 주입되는 공통 지침.
