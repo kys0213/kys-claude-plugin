@@ -5,11 +5,18 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct WorkflowConfig {
-    pub consumer: ConsumerConfig,
+    pub sources: SourcesConfig,
     pub daemon: DaemonConfig,
     pub workflow: WorkflowRouting,
     pub commands: CommandsConfig,
     pub develop: DevelopConfig,
+}
+
+/// 태스크 소스 설정 — 소스 종류별 하위 키
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct SourcesConfig {
+    pub github: GitHubSourceConfig,
 }
 
 /// 데몬 루프 전용 설정
@@ -39,10 +46,10 @@ impl Default for DaemonConfig {
     }
 }
 
-/// Consumer 인프라 설정
+/// GitHub 소스 설정
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct ConsumerConfig {
+pub struct GitHubSourceConfig {
     pub scan_interval_secs: u64,
     pub scan_targets: Vec<String>,
     pub issue_concurrency: u32,
@@ -56,7 +63,7 @@ pub struct ConsumerConfig {
     pub knowledge_extraction: bool,
 }
 
-impl Default for ConsumerConfig {
+impl Default for GitHubSourceConfig {
     fn default() -> Self {
         Self {
             scan_interval_secs: 300,

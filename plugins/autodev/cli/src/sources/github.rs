@@ -144,7 +144,7 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
 
             let should_scan = self
                 .db
-                .cursor_should_scan(repo.id(), repo_cfg.consumer.scan_interval_secs as i64)
+                .cursor_should_scan(repo.id(), repo_cfg.sources.github.scan_interval_secs as i64)
                 .unwrap_or(false);
             if !should_scan {
                 continue;
@@ -157,15 +157,15 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                 None => continue,
             };
 
-            for target in &repo_cfg.consumer.scan_targets {
+            for target in &repo_cfg.sources.github.scan_targets {
                 match target.as_str() {
                     "issues" => {
                         if let Err(e) = repo
                             .scan_issues(
                                 &*self.gh,
                                 &self.db,
-                                &repo_cfg.consumer.ignore_authors,
-                                &repo_cfg.consumer.filter_labels,
+                                &repo_cfg.sources.github.ignore_authors,
+                                &repo_cfg.sources.github.filter_labels,
                             )
                             .await
                         {
@@ -178,14 +178,14 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                     }
                     "pulls" => {
                         if let Err(e) = repo
-                            .scan_pulls(&*self.gh, &repo_cfg.consumer.ignore_authors)
+                            .scan_pulls(&*self.gh, &repo_cfg.sources.github.ignore_authors)
                             .await
                         {
                             tracing::error!("PR scan error for {repo_name}: {e}");
                         }
 
                         // done + merged + NOT extracted → knowledge extraction
-                        if repo_cfg.consumer.knowledge_extraction {
+                        if repo_cfg.sources.github.knowledge_extraction {
                             if let Err(e) = repo.scan_done_merged(&*self.gh).await {
                                 tracing::error!("done_merged scan error for {repo_name}: {e}");
                             }

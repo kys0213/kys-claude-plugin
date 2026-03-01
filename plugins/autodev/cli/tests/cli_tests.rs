@@ -91,7 +91,8 @@ fn repo_add_duplicate_shows_friendly_error() {
 fn repo_add_with_config_writes_yaml() {
     let home = TempDir::new().unwrap();
 
-    let config_json = r#"{"consumer":{"gh_host":"ghe.example.com","scan_interval_secs":60}}"#;
+    let config_json =
+        r#"{"sources":{"github":{"gh_host":"ghe.example.com","scan_interval_secs":60}}}"#;
 
     autodev(&home)
         .args([

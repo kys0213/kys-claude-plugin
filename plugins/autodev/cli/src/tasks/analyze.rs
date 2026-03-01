@@ -399,7 +399,7 @@ impl Task for AnalyzeTask {
         let analysis = output::parse_analysis(&response.stdout);
         let ops = match analysis {
             Some(ref a) => {
-                self.handle_analysis(a, cfg.consumer.confidence_threshold)
+                self.handle_analysis(a, cfg.sources.github.confidence_threshold)
                     .await
             }
             None => self.handle_fallback(&response.stdout).await,
