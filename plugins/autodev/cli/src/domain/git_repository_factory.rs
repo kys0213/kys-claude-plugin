@@ -59,7 +59,7 @@ fn resolve_gh_host(env: &dyn Env, repo_name: &str) -> Option<String> {
             None
         },
     );
-    let value = cfg.consumer.gh_host;
+    let value = cfg.sources.github.gh_host;
     tracing::debug!("[config] resolve_gh_host({repo_name}): loaded → {value:?}");
 
     // 캐시 갱신

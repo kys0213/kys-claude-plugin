@@ -28,7 +28,7 @@ autodev repo config <name>
 
 AskUserQuestion으로 변경할 항목을 선택:
 - 스캔 주기
-- Consumer 처리량 (Issue/PR/Merge)
+- 소스별 동시 처리량 (Issue/PR/Merge)
 - 워크플로우 선택
 - 필터 설정
 - 활성화/비활성화

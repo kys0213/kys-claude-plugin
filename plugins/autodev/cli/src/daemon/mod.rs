@@ -169,7 +169,7 @@ pub async fn start(
     let mut pending_tasks: Vec<Box<dyn task::Task>> = Vec::new();
 
     let daily_report_hour = cfg.daemon.daily_report_hour;
-    let knowledge_extraction = cfg.consumer.knowledge_extraction;
+    let knowledge_extraction = cfg.sources.github.knowledge_extraction;
     let mut last_daily_report_date = String::new();
 
     let start_time = std::time::Instant::now();

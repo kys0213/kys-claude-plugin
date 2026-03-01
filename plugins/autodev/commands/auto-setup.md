@@ -162,12 +162,12 @@ AskUserQuestion으로 질문:
 - 15분 (저부하)
 - 직접 입력
 
-### Step 6: Consumer 처리량
+### Step 6: 소스별 동시 처리량
 
 AskUserQuestion으로 질문:
-- Issue Consumer 동시 처리 수 (1~3)
-- PR Consumer 동시 처리 수 (1~3)
-- Merge Consumer 동시 처리 수 (1~2)
+- Issue 동시 처리 수 (1~3)
+- PR 동시 처리 수 (1~3)
+- Merge 동시 처리 수 (1~2)
 
 ### Step 7: 워크플로우 선택
 
@@ -220,14 +220,14 @@ AskUserQuestion으로 질문:
 
 수집된 설정을 JSON으로 구성하여 CLI에 전달합니다.
 JSON은 `WorkflowConfig` 구조에 맞게 구성합니다.
-Step 1.5에서 Enterprise가 감지된 경우 `consumer.gh_host` 필드를, Step 7의 워크플로우 선택 결과를 `workflow`/`develop` 필드에 포함합니다:
+Step 1.5에서 Enterprise가 감지된 경우 `sources.github.gh_host` 필드를, Step 7의 워크플로우 선택 결과를 `workflow`/`develop` 필드에 포함합니다:
 
 ```bash
 # 일반 GitHub — 기본 설정으로 등록
-autodev repo add <url> --config '{"consumer":{"scan_interval_secs":<step5>,"issue_concurrency":<step6_issue>,"pr_concurrency":<step6_pr>,"merge_concurrency":<step6_merge>,"scan_targets":[<step4>]},"workflow":{"issue":"<step7_issue>","pr":"<step7_pr>"},"develop":{"review":{"multi_llm":<step7_multi_llm>}}}'
+autodev repo add <url> --config '{"sources":{"github":{"scan_interval_secs":<step5>,"issue_concurrency":<step6_issue>,"pr_concurrency":<step6_pr>,"merge_concurrency":<step6_merge>,"scan_targets":[<step4>]}},"workflow":{"issue":"<step7_issue>","pr":"<step7_pr>"},"develop":{"review":{"multi_llm":<step7_multi_llm>}}}'
 
 # GitHub Enterprise — gh_host 포함
-autodev repo add <url> --config '{"consumer":{"gh_host":"<detected_host>","scan_interval_secs":<step5>,"issue_concurrency":<step6_issue>,"pr_concurrency":<step6_pr>,"merge_concurrency":<step6_merge>,"scan_targets":[<step4>]},"workflow":{"issue":"<step7_issue>","pr":"<step7_pr>"},"develop":{"review":{"multi_llm":<step7_multi_llm>}}}'
+autodev repo add <url> --config '{"sources":{"github":{"gh_host":"<detected_host>","scan_interval_secs":<step5>,"issue_concurrency":<step6_issue>,"pr_concurrency":<step6_pr>,"merge_concurrency":<step6_merge>,"scan_targets":[<step4>]}},"workflow":{"issue":"<step7_issue>","pr":"<step7_pr>"},"develop":{"review":{"multi_llm":<step7_multi_llm>}}}'
 ```
 
 등록 성공 시 CLI가 자동으로 워크스페이스 디렉토리(`~/.autodev/workspaces/<org-repo>/`)에 `.develop-workflow.yaml`을 생성합니다.

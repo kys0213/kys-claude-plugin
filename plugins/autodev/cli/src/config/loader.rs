@@ -43,7 +43,7 @@ pub fn load_merged(env: &dyn Env, repo_path: Option<&Path>) -> WorkflowConfig {
     // 머지된 YAML Value → WorkflowConfig (serde(default)가 미지정 필드 채움)
     match serde_json::from_value::<WorkflowConfig>(merged) {
         Ok(cfg) => {
-            tracing::debug!("[config] gh_host: {:?}", cfg.consumer.gh_host);
+            tracing::debug!("[config] gh_host: {:?}", cfg.sources.github.gh_host);
             cfg
         }
         Err(e) => {

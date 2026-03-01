@@ -101,10 +101,10 @@ async fn main() -> Result<()> {
     std::fs::create_dir_all(&home)?;
 
     let is_daemon = matches!(cli.command, Commands::Start | Commands::Restart);
+    let cfg = config::loader::load_merged(&env, None);
 
     // _guard must live until main() returns to flush non-blocking writer
     let _guard = if is_daemon {
-        let cfg = config::loader::load_merged(&env, None);
         let log_dir = config::resolve_log_dir(&cfg.daemon.log_dir, &home);
         std::fs::create_dir_all(&log_dir)?;
 
@@ -120,23 +120,29 @@ async fn main() -> Result<()> {
         use tracing_subscriber::layer::SubscriberExt;
         use tracing_subscriber::util::SubscriberInitExt;
 
+        // 우선순위: RUST_LOG 환경변수 > YAML log_level > 기본값 "info"
+        let filter = if std::env::var("RUST_LOG").is_ok() {
+            tracing_subscriber::EnvFilter::from_default_env()
+        } else {
+            tracing_subscriber::EnvFilter::new(format!("autodev={}", cfg.daemon.log_level))
+        };
+
         tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::EnvFilter::from_default_env()
-                    .add_directive("autodev=info".parse()?),
-            )
+            .with(filter)
             .with(tracing_subscriber::fmt::layer().with_writer(non_blocking))
             .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
             .init();
 
         Some(guard)
     } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::from_default_env()
-                    .add_directive("autodev=info".parse()?),
-            )
-            .init();
+        // 우선순위: RUST_LOG 환경변수 > YAML log_level > 기본값 "info"
+        let filter = if std::env::var("RUST_LOG").is_ok() {
+            tracing_subscriber::EnvFilter::from_default_env()
+        } else {
+            tracing_subscriber::EnvFilter::new(format!("autodev={}", cfg.daemon.log_level))
+        };
+
+        tracing_subscriber::fmt().with_env_filter(filter).init();
         None
     };
 
