@@ -84,8 +84,6 @@
 │  → ImplementTask │
 │  → ReviewTask    │
 │  → ImproveTask   │
-│  → ReReviewTask  │
-│  → MergeTask     │
 └────────┬─────────┘
          │ creates
          ▼
@@ -107,13 +105,13 @@
   └──────────┬───────────┘
              △ impl
              │
-  ┌──────────┼──────────────────────────────────┐
-  │          │          │          │             │
-  ▼          ▼          ▼          ▼             ▼
-┌──────┐ ┌────────┐ ┌────────┐ ┌─────────┐ ┌────────┐
-│Analy │ │Implmnt │ │Review  │ │Improve  │ │Merge   │
-│zeTask│ │Task    │ │Task    │ │Task     │ │Task    │
-└──────┘ └────────┘ └────────┘ └─────────┘ └────────┘
+  ┌──────────┼──────────────────────┐
+  │          │          │          │
+  ▼          ▼          ▼          ▼
+┌──────┐ ┌────────┐ ┌────────┐ ┌─────────┐
+│Analy │ │Implmnt │ │Review  │ │Improve  │
+│zeTask│ │Task    │ │Task    │ │Task     │
+└──────┘ └────────┘ └────────┘ └─────────┘
 ```
 
 ---
@@ -425,20 +423,6 @@ pub struct ImproveTask {
 | `before_invoke` | worktree 생성 + PR branch checkout → 피드백 반영 프롬프트 구성 (review_comment 포함) |
 | `after_invoke` | commit + push → review_iteration 증가 → QueueOp::PushPr(Improved) → worktree 정리 |
 
-### MergeTask
-
-```rust
-pub struct MergeTask {
-    ctx: TaskContext,
-    item: MergeItem,
-}
-```
-
-| 메서드 | 동작 |
-|--------|------|
-| `before_invoke` | preflight: PR이 아직 merge 가능한지 확인 → merge 요청 구성 |
-| `after_invoke` | merge 결과 처리 → 성공: QueueOp::Remove → 충돌: 재시도 |
-
 ---
 
 ## 7. GitHubTaskSource 상세
@@ -473,12 +457,10 @@ async fn poll(&mut self) -> Vec<Box<dyn Task>> {
     //    - issues::scan()          → issue_queue(Pending)
     //    - issues::scan_approved() → issue_queue(Ready)
     //    - pulls::scan()           → pr_queue(Pending)
-    //    - pulls::scan_merges()    → merge_queue(Pending)
     for repo in self.repos.values_mut() {
         repo.scan_issues().await;
         repo.scan_approved_issues().await;
         repo.scan_pulls().await;
-        repo.scan_merges().await;
     }
 
     // 4. 큐에서 실행 가능한 Task 생성
@@ -500,10 +482,6 @@ async fn poll(&mut self) -> Vec<Box<dyn Task>> {
         if let Some(item) = repo.pr_queue.pop("ReviewDone") {
             tasks.push(Box::new(ImproveTask::new(self.ctx.clone(), item)));
         }
-        // merge Pending → MergeTask
-        if let Some(item) = repo.merge_queue.pop("Pending") {
-            tasks.push(Box::new(MergeTask::new(self.ctx.clone(), item)));
-        }
     }
     tasks
 }
@@ -519,7 +497,6 @@ fn apply(&mut self, result: &TaskResult) {
             QueueOp::Remove => repo.remove(&result.work_id),
             QueueOp::PushIssue { phase, item } => repo.issue_queue.push(phase, item),
             QueueOp::PushPr { phase, item } => repo.pr_queue.push(phase, item),
-            QueueOp::PushMerge { phase, item } => repo.merge_queue.push(phase, item),
         }
     }
     // 로그 기록
@@ -718,16 +695,16 @@ pub struct TaskContext {
 v2에서 정의한 큐 아이템은 그대로 사용한다:
 
 ```
-┌───────────┐  ┌───────────┐  ┌───────────┐
-│ IssueItem │  │  PrItem   │  │ MergeItem │
-│───────────│  │───────────│  │───────────│
-│ work_id   │  │ work_id   │  │ work_id   │
-│ repo_id   │  │ repo_id   │  │ repo_id   │
-│ repo_name │  │ repo_name │  │ repo_name │
-│ number    │  │ number    │  │ pr_number │
-│ body      │  │ head_br   │  │ head_br   │
-│ labels    │  │ base_br   │  │ base_br   │
-│ analysis_ │  │ review_   │  └───────────┘
+┌───────────┐  ┌───────────┐
+│ IssueItem │  │  PrItem   │
+│───────────│  │───────────│
+│ work_id   │  │ work_id   │
+│ repo_id   │  │ repo_id   │
+│ repo_name │  │ repo_name │
+│ number    │  │ number    │
+│ body      │  │ head_br   │
+│ labels    │  │ base_br   │
+│ analysis_ │  │ review_   │
 │  report   │  │  comment  │
 └───────────┘  │ review_   │
                │  iteration│
@@ -756,8 +733,7 @@ cli/src/
 │   ├── analyze.rs          // AnalyzeTask
 │   ├── implement.rs        // ImplementTask
 │   ├── review.rs           // ReviewTask
-│   ├── improve.rs          // ImproveTask
-│   └── merge.rs            // MergeTask
+│   └── improve.rs          // ImproveTask
 ├── sources/                // TaskSource 구현체
 │   ├── mod.rs
 │   └── github.rs           // GitHubTaskSource
@@ -777,7 +753,8 @@ cli/src/
 │   ├── analyzer.rs
 │   ├── reviewer.rs
 │   ├── notifier.rs
-│   └── verdict.rs
+│   ├── verdict.rs
+│   └── workspace.rs
 ├── config/                 // ConfigLoader trait 추가
 ├── knowledge/              // 변경 없음
 ├── scanner/                // → sources/github.rs로 이동
@@ -791,7 +768,7 @@ cli/src/
 | `daemon/mod.rs` (746줄) | `daemon/mod.rs` + `task_manager.rs` + `task_runner.rs` | 3분할 |
 | `pipeline/issue.rs` | `tasks/analyze.rs` + `tasks/implement.rs` | Task trait 구현 |
 | `pipeline/pr.rs` | `tasks/review.rs` + `tasks/improve.rs` | Task trait 구현 |
-| `pipeline/merge.rs` | `tasks/merge.rs` | Task trait 구현 |
+| `pipeline/merge.rs` | (삭제) | Merge 파이프라인 제거 |
 | `scanner/` | `sources/github.rs` | GitHubTaskSource 내부 |
 | `domain/git_repository.rs` (1639줄) | 큐 + 도메인만 유지 (scanning 제거) | 책임 축소 |
 
@@ -831,7 +808,6 @@ Mock 작성 → AnalyzeTask 테스트(fail) → AnalyzeTask 구현(pass)
          → ImplementTask 테스트(fail) → ImplementTask 구현(pass)
          → ReviewTask 테스트(fail) → ReviewTask 구현(pass)
          → ImproveTask 테스트(fail) → ImproveTask 구현(pass)
-         → MergeTask 테스트(fail) → MergeTask 구현(pass)
 ```
 
 8. Mock 의존성 모듈 작성 (`tests/mocks/`)
@@ -839,7 +815,6 @@ Mock 작성 → AnalyzeTask 테스트(fail) → AnalyzeTask 구현(pass)
 10. ImplementTask — 테스트 → 구현
 11. ReviewTask — 테스트 → 구현
 12. ImproveTask — 테스트 → 구현
-13. MergeTask — 테스트 → 구현
 
 ### Phase 3: Source + Runner + Manager
 
