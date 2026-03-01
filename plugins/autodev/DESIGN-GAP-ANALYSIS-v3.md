@@ -35,7 +35,7 @@
 | Severity | 개수 | 주요 테마 |
 |----------|------|----------|
 | **Critical** | 0 | — |
-| **Medium** | 4 | v3 아키텍처 마이그레이션 미완료 (Daemon struct, TaskManager, TaskContext) |
+| **Medium** | 3 | v3 아키텍처 마이그레이션 미완료 (Daemon struct, TaskManager, Daily report) |
 | **Low** | 5 | 라벨 정리 누락, dead code, `#[allow]` |
 
 v2.1의 **Critical gap은 모두 해소**됨. 남은 gap은 v3 아키텍처 리팩토링 범위.
@@ -99,31 +99,12 @@ async fn daemon_respects_inflight_limit() {
 
 ---
 
-### NEW-GAP-3: TaskContext 정의됨 but 미사용
+### ~~NEW-GAP-3~~: TaskContext — 성급한 추상화로 판단, Gap에서 제외
 
-| 항목 | 내용 |
-|------|------|
-| **카테고리** | v3 Architecture (Phase 2) |
-| **디자인** | DESIGN-v3 §11: `TaskContext { workspace, gh, config }`를 Task 생성자에 주입 |
-| **구현** | `daemon/task_context.rs`에 정의되었으나, Task들이 개별 의존성을 받음 |
-| **파일** | `daemon/task_context.rs` (정의), `sources/github.rs:209-214` (개별 Arc::clone 전달) |
-
-**현재 패턴** (sources/github.rs):
-```rust
-AnalyzeTask::new(
-    Arc::clone(&self.workspace),  // 개별 전달
-    Arc::clone(&self.gh),
-    Arc::clone(&self.config),
-    item,
-)
-```
-
-**디자인 패턴**:
-```rust
-AnalyzeTask::new(ctx.clone(), item)  // TaskContext 한 번에 전달
-```
-
-**영향**: 의존성 추가 시 모든 Task 생성자 + 모든 테스트를 수정해야 함. TaskContext를 사용하면 변경 지점이 1곳으로 줄어듦.
+> **제외 사유**: TaskContext(`{ workspace, gh, config }`)는 GitHub 전용 의존성.
+> 소스가 다양해지면(Slack, Jira 등) 각 소스마다 필요한 의존성이 다르므로,
+> 하나의 TaskContext로 묶으면 소스 추가 시 TaskContext 자체가 비대해져 OCP/ISP 위반.
+> 각 Source가 자기 Task에 필요한 의존성을 직접 주입하는 현재 방식이 적절.
 
 ---
 
@@ -206,7 +187,7 @@ Daemon 단위 테스트 불가의 원인 중 하나.
 
 | 위치 | 어노테이션 | 상태 |
 |------|-----------|------|
-| `knowledge/extractor.rs:139` | `#[allow(clippy::too_many_arguments)]` | **해결 필요** — TaskContext 패턴 미적용 |
+| `knowledge/extractor.rs:139` | `#[allow(clippy::too_many_arguments)]` | **해결 필요** — builder 패턴 또는 config struct로 인자 축소 |
 | `knowledge/extractor.rs:298` | `#[allow(clippy::too_many_arguments)]` | **해결 필요** — 동일 |
 | `tasks/extract.rs:43` | `#[allow(dead_code)]` config | **해결 필요** — config 미사용 |
 | `tasks/improve.rs:33` | `#[allow(dead_code)]` config | **해결 필요** — config 미사용 |
@@ -250,7 +231,7 @@ Daemon 단위 테스트 불가의 원인 중 하나.
 | Merge pipeline 제거 | ✅ | `MergeItem`, `merge_queue`, `scan_merges` 삭제 |
 | **Daemon struct** | ❌ | 함수로 구현 (NEW-GAP-1) |
 | **TaskManager 연동** | ❌ | 미사용 (NEW-GAP-2) |
-| **TaskContext 사용** | ❌ | 미사용 (NEW-GAP-3) |
+| ~~TaskContext 사용~~ | — | 성급한 추상화로 판단, Gap에서 제외 |
 | **Daily report 분리** | ❌ | 인라인 (NEW-GAP-4) |
 | `#[allow(too_many_arguments)]` 0건 | ❌ | 2건 잔존 (NEW-GAP-8) |
 
@@ -269,10 +250,9 @@ Daemon 단위 테스트 불가의 원인 중 하나.
 ### Priority 2: v3 Phase 4 완료
 
 ```
-4. NEW-GAP-3: TaskContext를 Task 생성자에 실제 사용
-5. NEW-GAP-2: Daemon에서 TaskManager 사용 (source.poll → manager.tick)
-6. NEW-GAP-1: Daemon struct 전환 (함수 → struct + DI)
-7. NEW-GAP-4: Daily report 로직 분리 (DailyReportSource 또는 TaskManager 내부)
+4. NEW-GAP-2: Daemon에서 TaskManager 사용 (source.poll → manager.tick)
+5. NEW-GAP-1: Daemon struct 전환 (함수 → struct + DI)
+6. NEW-GAP-4: Daily report 로직 분리 (DailyReportSource 또는 TaskManager 내부)
 ```
 
 ### Priority 3: 정리
