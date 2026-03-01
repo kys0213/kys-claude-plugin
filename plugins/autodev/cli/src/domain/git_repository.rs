@@ -6,9 +6,7 @@ use crate::domain::models::{RepoIssue, RepoPull};
 use crate::domain::repository::ScanCursorRepository;
 use crate::infrastructure::gh::Gh;
 use crate::queue::state_queue::StateQueue;
-use crate::queue::task_queues::{
-    issue_phase, make_work_id, merge_phase, pr_phase, IssueItem, MergeItem, PrItem,
-};
+use crate::queue::task_queues::{issue_phase, make_work_id, pr_phase, IssueItem, PrItem};
 
 // ─── Private serde types for scanning ───
 
@@ -40,7 +38,7 @@ struct ScanUser {
 /// - 식별 정보 (DB 원본)
 /// - 설정 (per-repo config)
 /// - GitHub 상태 스냅샷 (issues, pulls)
-/// - 작업 큐 (issue, pr, merge)
+/// - 작업 큐 (issue, pr)
 pub struct GitRepository {
     id: String,
     name: String,
@@ -54,7 +52,6 @@ pub struct GitRepository {
     // Per-repo work queues
     pub issue_queue: StateQueue<IssueItem>,
     pub pr_queue: StateQueue<PrItem>,
-    pub merge_queue: StateQueue<MergeItem>,
 }
 
 impl GitRepository {
@@ -68,7 +65,6 @@ impl GitRepository {
             pulls: Vec::new(),
             issue_queue: StateQueue::new(),
             pr_queue: StateQueue::new(),
-            merge_queue: StateQueue::new(),
         }
     }
 
@@ -114,14 +110,12 @@ impl GitRepository {
 
     /// 어떤 큐든 해당 work_id가 존재하는지 확인
     pub fn contains(&self, work_id: &str) -> bool {
-        self.issue_queue.contains(work_id)
-            || self.pr_queue.contains(work_id)
-            || self.merge_queue.contains(work_id)
+        self.issue_queue.contains(work_id) || self.pr_queue.contains(work_id)
     }
 
     /// 전체 큐 아이템 수
     pub fn total_items(&self) -> usize {
-        self.issue_queue.total() + self.pr_queue.total() + self.merge_queue.total()
+        self.issue_queue.total() + self.pr_queue.total()
     }
 
     // ─── Scanning ───
@@ -371,84 +365,6 @@ impl GitRepository {
         Ok(())
     }
 
-    /// `autodev:done` 라벨이 붙은 PR을 스캔하여 merge_queue(Pending)에 추가.
-    ///
-    /// 라벨 전이: done 제거 → wip 추가
-    pub async fn scan_merges(&mut self, gh: &dyn Gh) -> Result<()> {
-        let params: Vec<(&str, &str)> = vec![
-            ("state", "open"),
-            ("labels", labels::DONE),
-            ("per_page", "30"),
-        ];
-
-        let stdout = gh
-            .api_paginate(&self.name, "issues", &params, self.gh_host.as_deref())
-            .await?;
-
-        let items: Vec<serde_json::Value> = serde_json::from_slice(&stdout)?;
-
-        for item in &items {
-            if item.get("pull_request").is_none() {
-                continue;
-            }
-
-            let number = match item["number"].as_i64() {
-                Some(n) if n > 0 => n,
-                _ => continue,
-            };
-
-            let merge_work_id = make_work_id("merge", &self.name, number);
-
-            if self.contains(&merge_work_id) {
-                continue;
-            }
-
-            let pr_params: Vec<(&str, &str)> = vec![];
-            let pr_data = gh
-                .api_paginate(
-                    &self.name,
-                    &format!("pulls/{number}"),
-                    &pr_params,
-                    self.gh_host.as_deref(),
-                )
-                .await;
-
-            let (head_branch, base_branch, title) = match pr_data {
-                Ok(data) => {
-                    let pr: serde_json::Value =
-                        serde_json::from_slice(&data).unwrap_or(serde_json::Value::Null);
-                    (
-                        pr["head"]["ref"].as_str().unwrap_or("").to_string(),
-                        pr["base"]["ref"].as_str().unwrap_or("main").to_string(),
-                        pr["title"].as_str().unwrap_or("").to_string(),
-                    )
-                }
-                Err(_) => continue,
-            };
-
-            let merge_item = MergeItem {
-                work_id: merge_work_id,
-                repo_id: self.id.clone(),
-                repo_name: self.name.clone(),
-                repo_url: self.url.clone(),
-                pr_number: number,
-                title,
-                head_branch,
-                base_branch,
-                gh_host: self.gh_host.clone(),
-            };
-
-            gh.label_remove(&self.name, number, labels::DONE, self.gh_host.as_deref())
-                .await;
-            gh.label_add(&self.name, number, labels::WIP, self.gh_host.as_deref())
-                .await;
-            self.merge_queue.push(merge_phase::PENDING, merge_item);
-            tracing::info!("queued merge PR #{number}");
-        }
-
-        Ok(())
-    }
-
     /// `autodev:done` + merged + NOT `autodev:extracted` PR을 스캔하여
     /// pr_queue(Extracting)에 추가 (지식 추출 대상).
     ///
@@ -549,9 +465,11 @@ impl GitRepository {
 
     /// Orphan `autodev:wip` 라벨 정리.
     ///
-    /// pre-fetched issues/pulls 중 wip 라벨이 있지만 큐에 없는 항목의
-    /// wip 라벨을 제거한다. 다음 scan에서 재발견되어 재처리된다.
-    pub async fn recover_orphan_wip(&self, gh: &dyn Gh) -> u64 {
+    /// pre-fetched issues/pulls 중 wip 라벨이 있지만 큐에 없는 항목을 복구.
+    ///
+    /// - Issue: wip 라벨 제거 → 다음 scan에서 재발견
+    /// - PR: Pending 큐에 재적재 (Label-Positive 모델에서는 라벨 제거 시 재발견 불가)
+    pub async fn recover_orphan_wip(&mut self, gh: &dyn Gh) -> u64 {
         let mut recovered = 0u64;
         let gh_host = self.gh_host.as_deref();
 
@@ -571,20 +489,39 @@ impl GitRepository {
             }
         }
 
-        for pull in self.pulls.iter().filter(|p| p.is_wip()) {
-            let work_id = make_work_id("pr", &self.name, pull.number);
-            if !self.contains(&work_id)
-                && gh
-                    .label_remove(&self.name, pull.number, labels::WIP, gh_host)
-                    .await
-            {
-                recovered += 1;
-                tracing::info!(
-                    "recovered orphan pr #{} in {} (removed autodev:wip)",
-                    pull.number,
-                    self.name
-                );
-            }
+        // PR: Label-Positive — wip 라벨 유지, Pending 큐에 재적재
+        let orphan_pulls: Vec<_> = self
+            .pulls
+            .iter()
+            .filter(|p| p.is_wip())
+            .filter(|p| {
+                let work_id = make_work_id("pr", &self.name, p.number);
+                !self.issue_queue.contains(&work_id) && !self.pr_queue.contains(&work_id)
+            })
+            .map(|p| PrItem {
+                work_id: make_work_id("pr", &self.name, p.number),
+                repo_id: self.id.clone(),
+                repo_name: self.name.clone(),
+                repo_url: self.url.clone(),
+                github_number: p.number,
+                title: p.title.clone(),
+                head_branch: p.head_branch.clone(),
+                base_branch: p.base_branch.clone(),
+                review_comment: None,
+                source_issue_number: p.source_issue_number(),
+                review_iteration: p.review_iteration(),
+                gh_host: self.gh_host.clone(),
+            })
+            .collect();
+
+        for item in orphan_pulls {
+            tracing::info!(
+                "recovered orphan pr #{} in {} (re-queued to Pending)",
+                item.github_number,
+                self.name
+            );
+            self.pr_queue.push(pr_phase::PENDING, item);
+            recovered += 1;
         }
 
         recovered
@@ -880,7 +817,7 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::infrastructure::gh::mock::MockGh;
-    use crate::queue::task_queues::{issue_phase, make_work_id, merge_phase, pr_phase};
+    use crate::queue::task_queues::{issue_phase, make_work_id, pr_phase};
 
     // ─── Mock ScanCursorRepository ───
 
@@ -1356,86 +1293,6 @@ mod tests {
         assert_eq!(repo.pr_queue.len(pr_phase::PENDING), 0);
     }
 
-    #[tokio::test]
-    async fn scan_merges_adds_done_prs_to_merge_queue() {
-        let gh = MockGh::new();
-
-        // issues endpoint returns done PR
-        let issues_json = serde_json::json!([
-            {
-                "number": 20,
-                "title": "done PR",
-                "labels": [{"name": "autodev:done"}],
-                "pull_request": {}
-            }
-        ]);
-        gh.set_paginate(
-            "org/repo",
-            "issues",
-            serde_json::to_vec(&issues_json).unwrap(),
-        );
-
-        // PR detail
-        let pr_detail = serde_json::json!({
-            "number": 20,
-            "title": "done PR",
-            "head": {"ref": "feature-branch"},
-            "base": {"ref": "main"}
-        });
-        gh.set_paginate(
-            "org/repo",
-            "pulls/20",
-            serde_json::to_vec(&pr_detail).unwrap(),
-        );
-
-        let mut repo = make_repo();
-        repo.scan_merges(&gh).await.unwrap();
-
-        assert_eq!(repo.merge_queue.len(merge_phase::PENDING), 1);
-        let item = repo.merge_queue.pop(merge_phase::PENDING).unwrap();
-        assert_eq!(item.pr_number, 20);
-        assert_eq!(item.head_branch, "feature-branch");
-
-        // Label transitions: done removed, wip added
-        let removed = gh.removed_labels.lock().unwrap();
-        assert_eq!(removed.len(), 1);
-        assert_eq!(
-            removed[0],
-            ("org/repo".to_string(), 20, "autodev:done".to_string())
-        );
-
-        let added = gh.added_labels.lock().unwrap();
-        assert_eq!(added.len(), 1);
-        assert_eq!(
-            added[0],
-            ("org/repo".to_string(), 20, "autodev:wip".to_string())
-        );
-    }
-
-    #[tokio::test]
-    async fn scan_merges_skips_non_pr_issues() {
-        let gh = MockGh::new();
-
-        // issues endpoint returns a regular issue (no pull_request field)
-        let issues_json = serde_json::json!([
-            {
-                "number": 30,
-                "title": "regular issue",
-                "labels": [{"name": "autodev:done"}]
-            }
-        ]);
-        gh.set_paginate(
-            "org/repo",
-            "issues",
-            serde_json::to_vec(&issues_json).unwrap(),
-        );
-
-        let mut repo = make_repo();
-        repo.scan_merges(&gh).await.unwrap();
-
-        assert_eq!(repo.merge_queue.len(merge_phase::PENDING), 0);
-    }
-
     // ═══════════════════════════════════════════════════
     // Recovery Tests
     // ═══════════════════════════════════════════════════
@@ -1457,7 +1314,7 @@ mod tests {
     #[tokio::test]
     async fn recover_orphan_wip_removes_label_from_unqueued_issues() {
         let gh = MockGh::new();
-        let repo = make_repo_with_state(
+        let mut repo = make_repo_with_state(
             vec![issue_from_json(serde_json::json!({
                 "number": 1, "title": "Orphan WIP",
                 "labels": [{"name": "autodev:wip"}],
@@ -1500,9 +1357,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recover_orphan_wip_handles_prs() {
+    async fn recover_orphan_wip_requeues_prs_to_pending() {
         let gh = MockGh::new();
-        let repo = make_repo_with_state(
+        let mut repo = make_repo_with_state(
             vec![],
             vec![pull_from_json(serde_json::json!({
                 "number": 10, "title": "Orphan PR",
@@ -1515,11 +1372,11 @@ mod tests {
         let recovered = repo.recover_orphan_wip(&gh).await;
 
         assert_eq!(recovered, 1);
-        let removed = gh.removed_labels.lock().unwrap();
-        assert_eq!(
-            removed[0],
-            ("org/repo".to_string(), 10, "autodev:wip".to_string())
-        );
+        // PR은 라벨 제거 대신 Pending 큐에 재적재 (Label-Positive)
+        assert!(repo.contains("pr:org/repo:10"));
+        assert_eq!(repo.pr_queue.len(pr_phase::PENDING), 1);
+        // wip 라벨은 유지
+        assert!(gh.removed_labels.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

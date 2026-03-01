@@ -65,17 +65,6 @@ pub fn build_status_from_repos(
                 phase: phase.to_string(),
             });
         }
-
-        for (phase, merge) in repo.merge_queue.iter_all() {
-            items.push(StatusItem {
-                work_id: merge.work_id.clone(),
-                queue_type: "merge".to_string(),
-                repo_name: merge.repo_name.clone(),
-                number: merge.pr_number,
-                title: merge.title.clone(),
-                phase: phase.to_string(),
-            });
-        }
     }
 
     let wip = items.len() as i64;
