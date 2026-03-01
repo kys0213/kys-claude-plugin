@@ -184,6 +184,13 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                         {
                             tracing::error!("PR scan error for {repo_name}: {e}");
                         }
+
+                        // done + merged + NOT extracted → knowledge extraction
+                        if repo_cfg.consumer.knowledge_extraction {
+                            if let Err(e) = repo.scan_done_merged(&*self.gh).await {
+                                tracing::error!("done_merged scan error for {repo_name}: {e}");
+                            }
+                        }
                     }
                     "merges" => {
                         if repo_cfg.consumer.auto_merge {

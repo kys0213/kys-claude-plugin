@@ -314,14 +314,7 @@ impl Task for ReviewTask {
                     .await;
 
                 ops.push(QueueOp::Remove);
-
-                // Knowledge extraction (best-effort, config gated)
-                if cfg.consumer.knowledge_extraction {
-                    ops.push(QueueOp::PushPr {
-                        phase: pr_phase::EXTRACTING,
-                        item: Box::new(self.item.clone()),
-                    });
-                }
+                // Knowledge extraction은 scan_done_merged()가 merge 후 트리거
             }
             Some(ReviewVerdict::RequestChanges) | None => {
                 // GitHub Review API: REQUEST_CHANGES
@@ -586,57 +579,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn after_approve_pushes_to_extracting_when_enabled() {
+    async fn after_approve_does_not_push_extracting() {
+        // Knowledge extraction is now triggered by scan_done_merged, not ReviewTask
         let gh = Arc::new(MockGh::new());
         gh.set_field("org/repo", "pulls/10", ".state", "open");
 
-        // Default config has knowledge_extraction = true
         let mut task = make_task(gh.clone(), Some(42));
         let _ = task.before_invoke().await;
 
         let result = task.after_invoke(make_approve_response()).await;
 
         assert!(matches!(result.status, TaskStatus::Completed));
-        assert!(result.queue_ops.iter().any(
-            |op| matches!(op, QueueOp::PushPr { phase, item } if *phase == pr_phase::EXTRACTING && item.github_number == 10)
-        ));
-    }
-
-    struct NoExtractionConfigLoader;
-    impl ConfigLoader for NoExtractionConfigLoader {
-        fn load(&self, _: Option<&Path>) -> WorkflowConfig {
-            let mut cfg = WorkflowConfig::default();
-            cfg.consumer.knowledge_extraction = false;
-            cfg
-        }
-    }
-
-    #[tokio::test]
-    async fn after_approve_skips_extracting_when_disabled() {
-        let gh = Arc::new(MockGh::new());
-        gh.set_field("org/repo", "pulls/10", ".state", "open");
-
-        let mut task = ReviewTask::new(
-            Arc::new(MockWorkspace),
-            gh.clone(),
-            Arc::new(NoExtractionConfigLoader),
-            make_test_pr(Some(42)),
-        );
-        let _ = task.before_invoke().await;
-
-        let result = task.after_invoke(make_approve_response()).await;
-
-        assert!(matches!(result.status, TaskStatus::Completed));
-        // Remove should still be present
+        // Only Remove, no PushPr
         assert!(result
             .queue_ops
             .iter()
             .any(|op| matches!(op, QueueOp::Remove)));
-        // But no PushPr to EXTRACTING
-        assert!(!result.queue_ops.iter().any(
-            |op| matches!(op, QueueOp::PushPr { phase, .. } if *phase == pr_phase::EXTRACTING)
-        ));
-        // PR still marked done
+        assert!(!result
+            .queue_ops
+            .iter()
+            .any(|op| matches!(op, QueueOp::PushPr { .. })));
+        // PR marked done
         let added = gh.added_labels.lock().unwrap();
         assert!(added.iter().any(|(_, n, l)| *n == 10 && l == labels::DONE));
     }

@@ -449,6 +449,102 @@ impl GitRepository {
         Ok(())
     }
 
+    /// `autodev:done` + merged + NOT `autodev:extracted` PR을 스캔하여
+    /// pr_queue(Extracting)에 추가 (지식 추출 대상).
+    ///
+    /// Label-Positive: done 라벨 + closed(merged) 상태 + extracted 라벨 없음
+    pub async fn scan_done_merged(&mut self, gh: &dyn Gh) -> Result<()> {
+        let params: Vec<(&str, &str)> = vec![
+            ("state", "closed"),
+            ("labels", labels::DONE),
+            ("per_page", "30"),
+        ];
+
+        let stdout = gh
+            .api_paginate(&self.name, "issues", &params, self.gh_host.as_deref())
+            .await?;
+
+        let items: Vec<serde_json::Value> = serde_json::from_slice(&stdout)?;
+
+        for item in &items {
+            // issues API — PR만 대상
+            if item.get("pull_request").is_none() {
+                continue;
+            }
+
+            let number = match item["number"].as_i64() {
+                Some(n) if n > 0 => n,
+                _ => continue,
+            };
+
+            // extracted 라벨이 있으면 이미 처리됨
+            let item_labels: Vec<&str> = item["labels"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|l| l["name"].as_str())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if item_labels.contains(&labels::EXTRACTED) {
+                continue;
+            }
+
+            let work_id = make_work_id("pr", &self.name, number);
+            if self.contains(&work_id) {
+                continue;
+            }
+
+            // PR 상세 정보 조회 (merged 여부 확인)
+            let pr_data = gh
+                .api_paginate(
+                    &self.name,
+                    &format!("pulls/{number}"),
+                    &[],
+                    self.gh_host.as_deref(),
+                )
+                .await;
+
+            let (merged, head_branch, base_branch, title) = match pr_data {
+                Ok(data) => {
+                    let pr: serde_json::Value =
+                        serde_json::from_slice(&data).unwrap_or(serde_json::Value::Null);
+                    (
+                        pr["merged"].as_bool().unwrap_or(false),
+                        pr["head"]["ref"].as_str().unwrap_or("").to_string(),
+                        pr["base"]["ref"].as_str().unwrap_or("main").to_string(),
+                        pr["title"].as_str().unwrap_or("").to_string(),
+                    )
+                }
+                Err(_) => continue,
+            };
+
+            if !merged {
+                continue;
+            }
+
+            let pr_item = PrItem {
+                work_id,
+                repo_id: self.id.clone(),
+                repo_name: self.name.clone(),
+                repo_url: self.url.clone(),
+                github_number: number,
+                title,
+                head_branch,
+                base_branch,
+                review_comment: None,
+                source_issue_number: None,
+                review_iteration: 0,
+                gh_host: self.gh_host.clone(),
+            };
+
+            self.pr_queue.push(pr_phase::EXTRACTING, pr_item);
+            tracing::info!("queued knowledge extraction for merged PR #{number}");
+        }
+
+        Ok(())
+    }
+
     // ─── Recovery ───
 
     /// Orphan `autodev:wip` 라벨 정리.

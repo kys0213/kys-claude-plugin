@@ -21,6 +21,7 @@ use crate::config::{ConfigLoader, Env};
 use crate::daemon::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
+use crate::domain::labels;
 use crate::domain::models::NewConsumerLog;
 use crate::infrastructure::claude::SessionOptions;
 use crate::infrastructure::gh::Gh;
@@ -226,6 +227,16 @@ impl Task for ExtractTask {
                 response.exit_code
             );
         }
+
+        // extracted 라벨 추가 (중복 추출 방지)
+        self.gh
+            .label_add(
+                &self.item.repo_name,
+                self.item.github_number,
+                labels::EXTRACTED,
+                gh_host,
+            )
+            .await;
 
         self.cleanup_worktree().await;
 
