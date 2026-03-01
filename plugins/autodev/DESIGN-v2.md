@@ -271,13 +271,13 @@ scan_all():
   issues::scan()            — labels=autodev:analyze → Pending (분석 대기)
   issues::scan_approved()   — labels=autodev:approved-analysis → Ready (구현 대기)
   pulls::scan()             — labels=autodev:wip, state=open → Pending (리뷰 대기)
-  pulls::scan_done_merged() — labels=autodev:done, state=merged → Extracting (지식 추출)
+  pulls::scan_done_merged() — labels=autodev:done, NOT autodev:extracted, state=merged → Extracting
 ```
 
 - `issues::scan()`: `autodev:analyze` 라벨이 있는 open 이슈만 감지
 - `issues::scan_approved()`: 사람이 승인한 이슈를 감지하여 구현 큐에 적재
 - `pulls::scan()`: `autodev:wip` 라벨이 있는 open PR만 감지
-- `pulls::scan_done_merged()`: `autodev:done` 라벨이 있는 merged PR 감지, consumer_logs에 기록이 없으면 Extracting 적재
+- `pulls::scan_done_merged()`: `autodev:done` 라벨 + merged 상태 + `autodev:extracted` 라벨이 없는 PR 감지
 - Safety Valve 불필요: Label-Positive 모델에서는 무한루프 방지 로직이 필요 없음
 
 ---
@@ -310,8 +310,8 @@ scan_all():
   Improved      → 피드백 반영 완료 → autodev:wip + Pending으로 재진입
 
   --- merge 후 ---
-  Extracting    → scan_done_merged에서 감지 (done + merged, DB 미기록)
-  (exit)        → ExtractTask 완료 → queue 제거
+  Extracting    → scan_done_merged에서 감지 (done + merged + NOT extracted)
+  (exit)        → ExtractTask 완료 → autodev:extracted 추가 + queue 제거
 ```
 
 ---
@@ -350,7 +350,7 @@ PR Tasks:
 
 ### Per-Task (PR merge 후)
 
-트리거 조건: `autodev:done` 라벨 + PR merged 상태 + consumer_logs에 미기록
+트리거 조건: `autodev:done` 라벨 + PR merged 상태 + `autodev:extracted` 라벨 없음
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -365,13 +365,16 @@ PR Tasks:
 │     └─ 차이 있음 → suggestions                       │
 │  4. 이슈 코멘트로 게시                                │
 │  5. skill/subagent → PR 생성 (autodev:skip 라벨)     │
-│  6. consumer_logs에 기록 (중복 방지)                  │
+│  6. autodev:extracted 라벨 추가 (중복 방지)           │
 └─────────────────────────────────────────────────────┘
 ```
 
 > **왜 merge 후인가?**
 > approve됐지만 merge되지 않은 PR에서 지식을 추출하면 낭비될 수 있다.
 > merge된 코드만이 실제로 레포에 반영된 확정 지식이다.
+>
+> **중복 방지**: `autodev:extracted` 라벨로 이미 처리된 PR을 scan에서 제외.
+> Label-Positive 모델과 일관되며 GitHub UI에서도 추출 상태를 확인할 수 있다.
 
 ### Daily (일간 집계)
 
@@ -435,7 +438,7 @@ autodev:implementing 이슈 감지 →
 │  │    2a. issues::scan()           — analyze 라벨 → Pending      │  │
 │  │    2b. issues::scan_approved()  — approved → Ready            │  │
 │  │    2c. pulls::scan()            — wip 라벨 → Pending (리뷰)   │  │
-│  │    2d. pulls::scan_done_merged()— done+merged → Extracting   │  │
+│  │    2d. pulls::scan_done_merged()— done+merged-extracted      │  │
 │  └───────────────────────────────────────────────────────────────┘  │
 │                            │                                        │
 │  ┌───────────────────────────────────────────────────────────────┐  │
@@ -460,7 +463,7 @@ autodev:implementing 이슈 감지 →
 │  │      Err → 라벨 제거                                          │  │
 │  │                                                               │  │
 │  │    Extracting:                                                │  │
-│  │      ExtractTask → 지식 추출 + consumer_logs 기록 → 제거     │  │
+│  │      ExtractTask → 지식 추출 + autodev:extracted → 제거      │  │
 │  │                                                               │  │
 │  └───────────────────────────────────────────────────────────────┘  │
 │                            │                                        │
@@ -482,7 +485,7 @@ autodev:implementing 이슈 감지 →
 | PR (리뷰) | `Pending → Reviewing → (approve)` | `wip → done` |
 | PR (리뷰 + 피드백) | `Pending → Reviewing → ReviewDone → Improving → Improved → Pending` | `wip → changes-requested → wip` |
 | PR (max iteration) | `Pending → Reviewing → (skip)` | `wip → skip` |
-| PR (지식 추출) | `(scan_done_merged) → Extracting → (exit)` | `done (merged) → done` |
+| PR (지식 추출) | `(scan_done_merged) → Extracting → (exit)` | `done (merged) → done + extracted` |
 
 ---
 
