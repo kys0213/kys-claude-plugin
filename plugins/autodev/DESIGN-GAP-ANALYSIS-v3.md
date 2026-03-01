@@ -36,7 +36,7 @@
 |----------|------|----------|
 | **Critical** | 0 | — |
 | **Medium** | 4 | v3 아키텍처 마이그레이션 미완료 (Daemon struct, TaskManager, TaskContext) |
-| **Low** | 6 | 라벨 정리 누락, dead code, `#[allow]`, trait bound 불일치 |
+| **Low** | 5 | 라벨 정리 누락, dead code, `#[allow]` |
 
 v2.1의 **Critical gap은 모두 해소**됨. 남은 gap은 v3 아키텍처 리팩토링 범위.
 
@@ -215,30 +215,7 @@ Daemon 단위 테스트 불가의 원인 중 하나.
 
 ---
 
-### NEW-GAP-9: TaskSource trait `?Send` bound 불일치
-
-| 항목 | 내용 |
-|------|------|
-| **카테고리** | v3 Architecture (Phase 1) |
-| **디자인** | DESIGN-v3 §4: `pub trait TaskSource: Send + Sync` |
-| **구현** | `daemon/task_source.rs:18`: `#[async_trait(?Send)] pub trait TaskSource: Send` |
-| **파일** | `cli/src/daemon/task_source.rs:18-19` |
-
-**불일치**:
-```
-디자인: #[async_trait] pub trait TaskSource: Send + Sync
-구현:   #[async_trait(?Send)] pub trait TaskSource: Send
-```
-
-- `?Send`: async 메서드의 Future가 non-Send → 단일 스레드에서만 안전
-- `TaskRunner`와 `Agent`는 `Send + Sync` → 일관성 부족
-- `TaskManager`도 `?Send` → TaskSource와 일관되지만 디자인과 불일치
-
-**영향**: 다중 스레드 환경에서 TaskSource를 spawn하여 병렬 poll 불가.
-
----
-
-### NEW-GAP-10: Improved → Reviewing 직접 전이
+### NEW-GAP-9: Improved → Reviewing 직접 전이
 
 | 항목 | 내용 |
 |------|------|
@@ -302,6 +279,5 @@ Daemon 단위 테스트 불가의 원인 중 하나.
 
 ```
 8. NEW-GAP-8: #[allow] 어노테이션 해소
-9. NEW-GAP-9: TaskSource trait Send+Sync bound 일관성
-10. NEW-GAP-10: Improved → Pending 경유 (선택적)
+9. NEW-GAP-9: Improved → Pending 경유 (선택적)
 ```
