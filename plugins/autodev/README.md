@@ -317,4 +317,4 @@ daemon:
 
 ---
 
-상세 설계는 [DESIGN.md](./DESIGN.md) 참조.
+상세 설계는 [DESIGN-v2.md](./DESIGN-v2.md) 참조.

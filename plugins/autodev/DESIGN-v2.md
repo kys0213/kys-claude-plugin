@@ -2,7 +2,7 @@
 
 > **Date**: 2026-03-01
 > **Revision**: v2.1 — Merge 파이프라인 제거, PR 라벨 세분화, PR scan Label-Positive 전환
-> **Base**: DESIGN.md (v1) — 3-Tier 상태 관리, 메인 루프, workspace 등 기존 아키텍처 유지
+> **Base**: [DESIGN-v1.md](./archive/DESIGN-v1.md) — 3-Tier 상태 관리, 메인 루프, workspace 등 기존 아키텍처 유지
 
 ---
 
