@@ -1,12 +1,12 @@
 # Autonomous Plugin
 
-기존 플러그인 생태계(`git-utils`, `external-llm`, `review`)를 이벤트 드리븐 루프로 자동 실행하는 오케스트레이션 레이어.
+기존 플러그인 생태계(`git-utils`, `external-llm`, `develop-workflow`)를 이벤트 드리븐 루프로 자동 실행하는 오케스트레이션 레이어.
 
 ```
 autodev (오케스트레이터)
-  ├── git-utils     → /merge-pr, /commit-and-pr
-  ├── external-llm  → /invoke-codex, /invoke-gemini, /code-review
-  └── review        → /multi-review
+  ├── git-utils          → /merge-pr, /commit-and-pr
+  ├── external-llm       → /invoke-codex, /invoke-gemini, /code-review
+  └── develop-workflow   → /multi-review
 ```
 
 ---

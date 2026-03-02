@@ -29,7 +29,10 @@ serde = { version = "1.0.228", features = ["derive"] }
 		t.Fatalf("bumpCargoToml failed: %v", err)
 	}
 
-	updated, _ := os.ReadFile(path)
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read updated file: %v", err)
+	}
 	result := string(updated)
 
 	// [package] version should be updated
@@ -71,7 +74,10 @@ serde = "1"
 		t.Fatalf("bumpCargoToml failed: %v", err)
 	}
 
-	updated, _ := os.ReadFile(path)
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read updated file: %v", err)
+	}
 	result := string(updated)
 
 	// [package] version should be updated
@@ -150,7 +156,10 @@ version = "5.0.0"
 		t.Fatalf("bumpCargoToml failed: %v", err)
 	}
 
-	updated, _ := os.ReadFile(path)
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read updated file: %v", err)
+	}
 	result := string(updated)
 
 	// [package] version should be updated
@@ -185,7 +194,10 @@ serde = "1"
 		t.Fatalf("bumpCargoToml failed on prerelease version: %v", err)
 	}
 
-	updated, _ := os.ReadFile(path)
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read updated file: %v", err)
+	}
 	result := string(updated)
 
 	if !strings.Contains(result, `version = "1.0.0"`) {
@@ -196,7 +208,7 @@ serde = "1"
 	}
 }
 
-func TestValidateCargoToml_PrereleaseValid(t *testing.T) {
+func TestParseCargoPackageSection_PrereleaseValid(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Cargo.toml")
 
@@ -209,9 +221,73 @@ edition = "2021"
 		t.Fatal(err)
 	}
 
-	b := NewBumper(dir, false)
-	if err := b.validateCargoToml(path); err != nil {
-		t.Fatalf("validateCargoToml should accept prerelease version, got: %v", err)
+	info, err := parseCargoPackageSection(path)
+	if err != nil {
+		t.Fatalf("parseCargoPackageSection should accept prerelease version, got: %v", err)
+	}
+	if !strings.Contains(info.section, "1.0.0-rc.1") {
+		t.Error("section should contain the prerelease version")
+	}
+}
+
+func TestExtractCargoPackageVersion(t *testing.T) {
+	dir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		content string
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "simple version",
+			content: `[package]
+name = "myapp"
+version = "1.2.3"
+`,
+			want: "1.2.3",
+		},
+		{
+			name: "prerelease version",
+			content: `[package]
+name = "myapp"
+version = "1.0.0-beta.1"
+
+[dependencies]
+serde = { version = "1.0.0" }
+`,
+			want: "1.0.0-beta.1",
+		},
+		{
+			name: "no package section",
+			content: `[workspace]
+members = ["crates/*"]
+`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(dir, tt.name+".toml")
+			if err := os.WriteFile(path, []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := ExtractCargoPackageVersion(path)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -252,7 +328,10 @@ lto = true
 		t.Fatalf("bumpCargoToml failed: %v", err)
 	}
 
-	updated, _ := os.ReadFile(path)
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read updated file: %v", err)
+	}
 	result := string(updated)
 
 	// Only version should change

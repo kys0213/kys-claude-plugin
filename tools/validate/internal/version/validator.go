@@ -248,11 +248,47 @@ func validateVersionConsistency(marketplacePath string, repoRoot string) []Resul
 	return results
 }
 
+// Pre-compiled regexes for Cargo.toml [package] section parsing (same strategy as bumpversion tool)
+var (
+	cargoPackageRe      = regexp.MustCompile(`(?m)^\[package\]\s*$`)
+	cargoSectionRe      = regexp.MustCompile(`(?m)^\[`)
+	cargoVersionExtract = regexp.MustCompile(`(?m)^version\s*=\s*"(\d+\.\d+\.\d+(?:-[\w.]+)?)"\s*$`)
+)
+
+// extractCargoPackageVersion reads a Cargo.toml and returns the version from the [package] section
+// using index-based section boundary parsing (consistent with bumpversion tool).
+func extractCargoPackageVersion(path string) (string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+
+	text := string(content)
+
+	pkgLoc := cargoPackageRe.FindStringIndex(text)
+	if pkgLoc == nil {
+		return "", fmt.Errorf("no [package] section found")
+	}
+
+	// Find section end (next [...] header or EOF)
+	pkgEnd := len(text)
+	remaining := text[pkgLoc[1]:]
+	if nextSection := cargoSectionRe.FindStringIndex(remaining); nextSection != nil {
+		pkgEnd = pkgLoc[1] + nextSection[0]
+	}
+
+	section := text[pkgLoc[1]:pkgEnd]
+	match := cargoVersionExtract.FindStringSubmatch(section)
+	if match == nil {
+		return "", fmt.Errorf("no version field found in [package] section")
+	}
+
+	return match[1], nil
+}
+
 // validateCargoVersionConsistency checks that plugin.json version matches cli/Cargo.toml version
 func validateCargoVersionConsistency(repoRoot string, pluginFiles []string) []Result {
 	var results []Result
-
-	cargoVersionRe := regexp.MustCompile(`(?m)^\[package\]\s*\n(?:[^\[]*\n)*?version\s*=\s*"(\d+\.\d+\.\d+(?:-[\w.]+)?)"`)
 
 	for _, file := range pluginFiles {
 		fullPath := filepath.Join(repoRoot, file)
@@ -278,32 +314,19 @@ func validateCargoVersionConsistency(repoRoot string, pluginFiles []string) []Re
 			continue
 		}
 
-		// Read Cargo.toml version
-		cargoContent, err := os.ReadFile(cargoPath)
+		// Extract Cargo.toml [package] version using index-based parsing
+		cargoVersion, err := extractCargoPackageVersion(cargoPath)
 		if err != nil {
 			results = append(results, Result{
 				File:   cargoPath,
 				Type:   "cargo-version-consistency",
 				Plugin: pluginName,
 				Valid:  false,
-				Error:  "Cannot read Cargo.toml: " + err.Error(),
+				Error:  fmt.Sprintf("Cannot parse Cargo.toml: %s", err.Error()),
 			})
 			continue
 		}
 
-		match := cargoVersionRe.FindSubmatch(cargoContent)
-		if match == nil {
-			results = append(results, Result{
-				File:   cargoPath,
-				Type:   "cargo-version-consistency",
-				Plugin: pluginName,
-				Valid:  false,
-				Error:  "No version found in [package] section of Cargo.toml",
-			})
-			continue
-		}
-
-		cargoVersion := string(match[1])
 		if pluginVersion != cargoVersion {
 			results = append(results, Result{
 				File:   cargoPath,

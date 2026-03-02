@@ -21,6 +21,15 @@ const (
 	BumpPatch BumpType = "patch"
 )
 
+// Pre-compiled regexes for Cargo.toml parsing
+var (
+	cargoPackageRe       = regexp.MustCompile(`(?m)^\[package\]\s*$`)
+	cargoSectionRe       = regexp.MustCompile(`(?m)^\[`)
+	cargoVersionRe       = regexp.MustCompile(`(?m)^(version\s*=\s*")\d+\.\d+\.\d+(-[\w.]+)?(")\s*$`)
+	cargoVersionMatchRe  = regexp.MustCompile(`(?m)^version\s*=\s*"\d+\.\d+\.\d+(-[\w.]+)?"\s*$`)
+	cargoVersionExtract  = regexp.MustCompile(`(?m)^version\s*=\s*"(\d+\.\d+\.\d+(?:-[\w.]+)?)"\s*$`)
+)
+
 // BumpResult represents the result of a version bump operation
 type BumpResult struct {
 	Plugin      string `json:"plugin"`
@@ -126,9 +135,8 @@ func (b *Bumper) bumpPlugin(pkg changes.Package, bumpType BumpType, marketplace 
 		hasCargoToml := false
 		if _, err := os.Stat(cargoTomlPath); err == nil {
 			hasCargoToml = true
-			// Dry-validate: read and parse to ensure it will succeed before writing anything
-			if err := b.validateCargoToml(cargoTomlPath); err != nil {
-				return result, fmt.Errorf("failed to validate Cargo.toml (no files modified): %w", err)
+			if _, err := parseCargoPackageSection(cargoTomlPath); err != nil {
+				return result, fmt.Errorf("Cargo.toml validation failed (no files modified): %w", err)
 			}
 		}
 
@@ -149,7 +157,7 @@ func (b *Bumper) bumpPlugin(pkg changes.Package, bumpType BumpType, marketplace 
 		// Update Cargo.toml (already validated above)
 		if hasCargoToml {
 			if err := b.bumpCargoToml(cargoTomlPath, newVersion); err != nil {
-				return result, fmt.Errorf("failed to update Cargo.toml: %w", err)
+				return result, fmt.Errorf("Cargo.toml update failed: %w", err)
 			}
 			result.CargoToml = true
 		}
@@ -158,84 +166,77 @@ func (b *Bumper) bumpPlugin(pkg changes.Package, bumpType BumpType, marketplace 
 	return result, nil
 }
 
+// cargoPackageInfo holds the parsed [package] section of a Cargo.toml file.
+type cargoPackageInfo struct {
+	fullText   string // entire file content
+	sectionStart int  // byte offset where [package] header ends
+	sectionEnd   int  // byte offset where the next section starts (or EOF)
+	section      string // content between [package] and next section
+}
 
-// validateCargoToml checks that a Cargo.toml can be safely bumped (has [package] section with exactly one version field).
-// Call this before any file writes to avoid partial updates.
-func (b *Bumper) validateCargoToml(path string) error {
+// parseCargoPackageSection reads a Cargo.toml file and extracts the [package] section boundaries.
+// It validates that exactly one version field exists in the section.
+func parseCargoPackageSection(path string) (*cargoPackageInfo, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	text := string(content)
 
-	pkgRe := regexp.MustCompile(`(?m)^\[package\]\s*$`)
-	sectionRe := regexp.MustCompile(`(?m)^\[`)
-	versionRe := regexp.MustCompile(`(?m)^version\s*=\s*"\d+\.\d+\.\d+(-[\w.]+)?"\s*$`)
-
-	pkgLoc := pkgRe.FindStringIndex(text)
+	pkgLoc := cargoPackageRe.FindStringIndex(text)
 	if pkgLoc == nil {
-		return fmt.Errorf("no [package] section found in %s", path)
+		return nil, fmt.Errorf("no [package] section found in %s", path)
 	}
 
 	pkgEnd := len(text)
 	remaining := text[pkgLoc[1]:]
-	if nextSection := sectionRe.FindStringIndex(remaining); nextSection != nil {
+	if nextSection := cargoSectionRe.FindStringIndex(remaining); nextSection != nil {
 		pkgEnd = pkgLoc[1] + nextSection[0]
 	}
 
-	pkgSection := text[pkgLoc[1]:pkgEnd]
-	matches := versionRe.FindAllStringIndex(pkgSection, -1)
+	section := text[pkgLoc[1]:pkgEnd]
+
+	matches := cargoVersionMatchRe.FindAllStringIndex(section, -1)
 	if len(matches) == 0 {
-		return fmt.Errorf("no version field found in [package] section of %s", path)
+		return nil, fmt.Errorf("no version field found in [package] section of %s", path)
 	}
 	if len(matches) > 1 {
-		return fmt.Errorf("multiple version fields found in [package] section of %s", path)
+		return nil, fmt.Errorf("multiple version fields found in [package] section of %s", path)
 	}
 
-	return nil
+	return &cargoPackageInfo{
+		fullText:     text,
+		sectionStart: pkgLoc[1],
+		sectionEnd:   pkgEnd,
+		section:      section,
+	}, nil
+}
+
+// ExtractCargoPackageVersion reads a Cargo.toml and returns the version from the [package] section.
+func ExtractCargoPackageVersion(path string) (string, error) {
+	info, err := parseCargoPackageSection(path)
+	if err != nil {
+		return "", err
+	}
+
+	match := cargoVersionExtract.FindStringSubmatch(info.section)
+	if match == nil {
+		return "", fmt.Errorf("no version field found in [package] section of %s", path)
+	}
+	return match[1], nil
 }
 
 // bumpCargoToml updates the version field in the [package] section of a Cargo.toml file.
 // It only replaces the version within the [package] section to avoid corrupting dependency versions.
 func (b *Bumper) bumpCargoToml(path, newVersion string) error {
-	content, err := os.ReadFile(path)
+	info, err := parseCargoPackageSection(path)
 	if err != nil {
 		return err
 	}
 
-	text := string(content)
-
-	// Find the [package] section boundaries
-	pkgRe := regexp.MustCompile(`(?m)^\[package\]\s*$`)
-	sectionRe := regexp.MustCompile(`(?m)^\[`)
-	versionRe := regexp.MustCompile(`(?m)^(version\s*=\s*")\d+\.\d+\.\d+(-[\w.]+)?(")\s*$`)
-
-	pkgLoc := pkgRe.FindStringIndex(text)
-	if pkgLoc == nil {
-		return fmt.Errorf("no [package] section found in %s", path)
-	}
-
-	// Find the end of [package] section (next section header or EOF)
-	pkgEnd := len(text)
-	remaining := text[pkgLoc[1]:]
-	if nextSection := sectionRe.FindStringIndex(remaining); nextSection != nil {
-		pkgEnd = pkgLoc[1] + nextSection[0]
-	}
-
-	pkgSection := text[pkgLoc[1]:pkgEnd]
-
-	// Replace version only within [package] section
-	matches := versionRe.FindAllStringIndex(pkgSection, -1)
-	if len(matches) == 0 {
-		return fmt.Errorf("no version field found in [package] section of %s", path)
-	}
-	if len(matches) > 1 {
-		return fmt.Errorf("multiple version fields found in [package] section of %s", path)
-	}
-
-	updatedSection := versionRe.ReplaceAllString(pkgSection, "${1}"+newVersion+"${3}")
-	updated := text[:pkgLoc[1]] + updatedSection + text[pkgEnd:]
+	updatedSection := cargoVersionRe.ReplaceAllString(info.section, "${1}"+newVersion+"${3}")
+	updated := info.fullText[:info.sectionStart] + updatedSection + info.fullText[info.sectionEnd:]
 
 	return os.WriteFile(path, []byte(updated), 0644)
 }
