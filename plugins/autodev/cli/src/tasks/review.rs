@@ -389,6 +389,14 @@ impl Task for ReviewTask {
                             )
                             .await;
                         self.gh
+                            .label_remove(
+                                &self.item.repo_name,
+                                self.item.github_number,
+                                labels::CHANGES_REQUESTED,
+                                gh_host,
+                            )
+                            .await;
+                        self.gh
                             .label_add(
                                 &self.item.repo_name,
                                 self.item.github_number,
@@ -679,6 +687,12 @@ mod tests {
 
         let added = gh.added_labels.lock().unwrap();
         assert!(added.iter().any(|(_, n, l)| *n == 10 && l == labels::SKIP));
+
+        // changes-requested should be removed when skip is applied
+        let removed = gh.removed_labels.lock().unwrap();
+        assert!(removed
+            .iter()
+            .any(|(_, n, l)| *n == 10 && l == labels::CHANGES_REQUESTED));
     }
 
     #[tokio::test]
