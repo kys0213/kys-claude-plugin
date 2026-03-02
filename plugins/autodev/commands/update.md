@@ -76,6 +76,47 @@ sources:
    - `consumer:` → `sources:\n  github:` 로 키 변경
    - 하위 필드의 들여쓰기를 2칸 추가
 
+##### Migration 2: v1 deprecated 키 제거 (v0.9.x → v1.0.0)
+
+YAML 파일에서 `commands`, `develop`, `workflow` 최상위 키가 있으면 v2 `workflows` 구조로 변환해야 합니다.
+
+**변경 전:**
+```yaml
+workflow:
+  issue: builtin
+  pr: builtin
+develop:
+  review:
+    max_iterations: 3
+```
+
+**변경 후:**
+```yaml
+workflows:
+  analyze:
+    agent: autodev:issue-analyzer
+  implement:
+    agent: autodev:issue-analyzer
+  review:
+    agent: autodev:pr-reviewer
+    max_iterations: 3
+```
+
+**점검 방법:**
+
+각 YAML 파일을 Read 도구로 읽고, `commands:`, `develop:`, `workflow:` 최상위 키가 존재하는지 확인합니다.
+
+> v1.0.0부터 deprecated 키는 파싱 시 무시됩니다 (`deny_unknown_fields` 제거). 기능에는 영향이 없지만, 설정 파일을 깔끔하게 유지하기 위해 마이그레이션을 권장합니다.
+
+**발견 시:**
+
+1. 사용자에게 변경 내용을 명확히 보여줍니다
+2. AskUserQuestion으로 자동 변환 여부를 확인합니다
+3. 승인 시 Edit 도구로 YAML 파일을 직접 수정합니다:
+   - `workflow:` / `develop:` / `commands:` 섹션 제거
+   - `workflows:` 섹션 추가 (기존 `workflow.issue` → `workflows.implement`, `workflow.pr` → `workflows.review` 매핑)
+   - `develop.review.max_iterations` → `workflows.review.max_iterations`로 이동
+
 ### Step 3: 플러그인 의존성 점검
 
 필수 플러그인이 설치되어 있는지 확인합니다:

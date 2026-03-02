@@ -120,8 +120,8 @@ impl Task for ImplementTask {
         // 레포별 config에서 workflow 로드
         let repo_cfg = self.config.load(Some(&wt_path));
         let resolved = super::workflow_resolver::resolve_workflow_prompt(
-            &repo_cfg.workflow.issue,
-            super::workflow_resolver::TaskType::Issue,
+            &repo_cfg.workflows.implement,
+            super::workflow_resolver::TaskType::Implement,
         );
         let prompt = format!(
             "[autodev] implement: issue #{} in {}",
@@ -151,7 +151,13 @@ impl Task for ImplementTask {
         let finished = Utc::now().to_rfc3339();
 
         let repo_cfg = self.config.load(self.wt_path.as_deref());
-        let workflow = &repo_cfg.workflow.issue;
+        let workflow = repo_cfg
+            .workflows
+            .implement
+            .agent
+            .as_deref()
+            .or(repo_cfg.workflows.implement.command.as_deref())
+            .unwrap_or("builtin");
 
         let log = NewConsumerLog {
             repo_id: self.item.repo_id.clone(),

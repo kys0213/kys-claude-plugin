@@ -323,6 +323,14 @@ impl Task for AnalyzeTask {
             })?;
         self.wt_path = Some(wt_path.clone());
 
+        // 레포별 config에서 workflow 로드
+        let repo_cfg = self.config.load(Some(&wt_path));
+        let resolved = super::workflow_resolver::resolve_workflow_prompt(
+            &repo_cfg.workflows.analyze,
+            super::workflow_resolver::TaskType::Analyze,
+        );
+        let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{resolved}");
+
         // 프롬프트 구성
         let body_text = self.item.body.as_deref().unwrap_or("");
         let prompt = format!(
@@ -343,7 +351,7 @@ impl Task for AnalyzeTask {
             session_opts: SessionOptions {
                 output_format: Some("json".into()),
                 json_schema: Some(output::ANALYSIS_SCHEMA.clone()),
-                append_system_prompt: Some(AGENT_SYSTEM_PROMPT.to_string()),
+                append_system_prompt: Some(system_prompt),
             },
         })
     }

@@ -175,8 +175,8 @@ impl Task for ReviewTask {
         let repo_cfg = self.config.load(Some(&wt_path));
         let pr_prompt = format!("[autodev] review: PR #{}", self.item.github_number);
         let resolved = super::workflow_resolver::resolve_workflow_prompt(
-            &repo_cfg.workflow.pr,
-            super::workflow_resolver::TaskType::Pr,
+            &repo_cfg.workflows.review.as_stage(),
+            super::workflow_resolver::TaskType::Review,
         );
         let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{resolved}");
 
@@ -368,7 +368,7 @@ impl Task for ReviewTask {
                     ops.push(QueueOp::Remove);
                 } else {
                     // Max iterations 확인 (re-review일 때만)
-                    let max_iterations = cfg.develop.review.max_iterations;
+                    let max_iterations = cfg.workflows.review.max_iterations;
                     if self.item.review_iteration >= max_iterations {
                         let limit_comment = format!(
                             "<!-- autodev:skip -->\n\
