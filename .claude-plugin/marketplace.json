@@ -93,7 +93,7 @@
       ],
       "name": "autodev",
       "source": "./plugins/autodev",
-      "version": "0.9.3"
+      "version": "0.9.4"
     },
     {
       "category": "infrastructure",
