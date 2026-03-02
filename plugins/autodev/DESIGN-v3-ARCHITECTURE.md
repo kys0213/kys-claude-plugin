@@ -56,7 +56,7 @@
 │  async poll_all()       │        └──────────────┬──────────────┘
 │    -> Vec<Box<dyn Task>>│                       │ uses
 │  apply(TaskResult)      │                       ▼
-│  schedule_daily_report()│             ┌─────────────────────┐
+│                         │             ┌─────────────────────┐
 └────────────┬────────────┘             │  «trait» Agent      │
              │ owns                     │─────────────────────│
              ▼                          │  async invoke(      │
@@ -131,7 +131,7 @@
 | scanning (이슈/PR 감지) | `GitRepository` | **GitHubTaskSource.poll()** | source가 작업 생성 |
 | task spawning | `daemon/mod.rs` | **TaskRunner** | Runner가 task 실행 |
 | task 결과 처리 (queue ops) | `daemon/mod.rs` | **TaskManager.apply()** | Manager가 결과 반영 |
-| daily report | `daemon/mod.rs` | **TaskManager** | 주기적 작업 스케줄링 |
+| daily report | `daemon/mod.rs` | **Daemon (DailyReporter)** | 독립 컴포넌트로 SRP 분리 |
 
 ### Daemon (얇은 오케스트레이터)
 
@@ -163,7 +163,9 @@ pub struct DefaultTaskManager {
 - `tick()`: 모든 source에서 `poll()`하여 실행 가능한 Task를 내부에 수집
 - `drain_ready()`: 수집된 Task들을 꺼내서 반환
 - `apply(TaskResult)`: Task 실행 결과를 source의 큐에 반영
-- `schedule_daily_report()`: 일간 리포트 생성 시점 판단 + Task 생성
+
+> **Note**: 일간 리포트는 `DailyReporter` trait으로 분리되어 Daemon이 직접 소유한다 (SRP).
+> TaskManager는 TaskSource 집계에만 집중한다.
 
 ### TaskRunner (실행 엔진)
 
@@ -271,8 +273,8 @@ pub trait Agent: Send + Sync {
   │──────────────│    │───────────────│    │────────────│
   │ working_dir  │    │ exit_code     │    │ work_id    │
   │ prompt       │    │ stdout        │    │ repo_name  │
-  │ system_prompt│    │ stderr        │    │ logs       │
-  │ session_opts │    │ duration      │    │ queue_ops  │
+  │ session_opts │    │ stderr        │    │ logs       │
+  │              │    │ duration      │    │ queue_ops  │
   └──────────────┘    └───────────────┘    │ status     │
                                            └────────────┘
 ```
@@ -293,12 +295,13 @@ pub struct AgentRequest {
     pub working_dir: PathBuf,
     /// 메인 프롬프트
     pub prompt: String,
-    /// 시스템 프롬프트 (선택)
-    pub system_prompt: Option<String>,
-    /// Claude 세션 옵션 (output_format, json_schema 등)
+    /// Claude 세션 옵션 (output_format, json_schema, append_system_prompt 등)
     pub session_opts: SessionOptions,
 }
 ```
+
+> **Note**: `system_prompt`은 `SessionOptions.append_system_prompt`에 통합.
+> Claude CLI의 실제 옵션 체계와 일치하며, 별도 필드로 분리할 이유가 없다.
 
 ### AgentResponse
 
@@ -768,10 +771,9 @@ cli/src/
 │   ├── reviewer.rs
 │   ├── notifier.rs
 │   ├── verdict.rs
-│   └── workspace.rs
+│   └── workspace.rs        // WorkspaceOps trait + OwnedWorkspace
 ├── config/                 // ConfigLoader trait 추가
-├── knowledge/              // 변경 없음
-├── scanner/                // → sources/github.rs로 이동
+├── knowledge/              // 변경 없음 (per-task + daily)
 └── tui/                    // 변경 없음
 ```
 
@@ -782,8 +784,8 @@ cli/src/
 | `daemon/mod.rs` (746줄) | `daemon/mod.rs` + `task_manager.rs` + `task_runner.rs` | 3분할 |
 | `pipeline/issue.rs` | `tasks/analyze.rs` + `tasks/implement.rs` | Task trait 구현 |
 | `pipeline/pr.rs` | `tasks/review.rs` + `tasks/improve.rs` | Task trait 구현 |
-| `pipeline/merge.rs` | (삭제) | Merge 파이프라인 제거 |
-| `scanner/` | `sources/github.rs` | GitHubTaskSource 내부 |
+| `pipeline/merge.rs` | (삭제) | Merge 파이프라인 제거 (DESIGN-v2 scope 외) |
+| `scanner/` | `sources/github.rs` | GitHubTaskSource 내부 (완료) |
 | `domain/git_repository.rs` (1639줄) | 큐 + 도메인만 유지 (scanning 제거) | 책임 축소 |
 
 ---
