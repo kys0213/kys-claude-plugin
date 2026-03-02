@@ -2,10 +2,10 @@
   "dry_run": false,
   "results": [
     {
-      "plugin": "autodev",
-      "old_version": "0.9.4",
-      "new_version": "0.9.5",
-      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/autodev/.claude-plugin/plugin.json",
+      "plugin": "git-utils",
+      "old_version": "2.3.3",
+      "new_version": "2.3.4",
+      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/git-utils/.claude-plugin/plugin.json",
       "marketplace_updated": true
     }
   ]
