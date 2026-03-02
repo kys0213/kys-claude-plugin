@@ -42,6 +42,28 @@ git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/orig
 cat ~/.git-workflow-env 2>/dev/null
 ```
 
+## Step 1.5: git-utils CLI 설치 확인
+
+git-utils CLI가 설치되어 있는지 확인합니다:
+
+```bash
+command -v git-utils 2>/dev/null && git-utils --version
+```
+
+설치되어 있지 않은 경우, 플러그인 디렉토리에서 빌드/설치를 실행합니다:
+
+```bash
+cd {git-utils 플러그인 디렉토리} && bun run install-cli
+```
+
+설치 후 다시 확인:
+
+```bash
+command -v git-utils 2>/dev/null
+```
+
+실패 시 → Bun 설치 여부, PATH 설정 안내 후 중단.
+
 ## Step 2: 기능 선택
 
 AskUserQuestion (multiSelect: true)으로 설정할 기능을 선택받습니다:

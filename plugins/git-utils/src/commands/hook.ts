@@ -82,7 +82,9 @@ export function createHookCommand(deps: HookCommandDeps): HookCommandInterface {
 
       const arr = settings.hooks![input.hookType];
       const existingIndex = arr.findIndex(
-        (h) => h.hooks?.some((hook) => hook.command === input.command),
+        (h) =>
+          h.matcher === input.matcher ||
+          h.hooks?.some((hook) => hook.command === input.command),
       );
 
       let action: 'created' | 'updated';
