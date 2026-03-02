@@ -43,6 +43,53 @@ ls ~/.autodev/workspaces/*/. develop-workflow.yaml 2>/dev/null
 
 아래 규칙을 **순서대로** 점검합니다. 해당 사항이 없으면 건너뜁니다.
 
+##### Migration 2: `commands`/`develop`/`workflow` → `workflows` (v0.9.x → v1.0.0)
+
+YAML 파일에서 deprecated v1 키(`commands`, `develop`, `workflow`)가 있으면 v2 `workflows` 구조로 변환해야 합니다.
+
+**변경 전 (v1):**
+```yaml
+workflow:
+  issue: builtin
+  pr: /develop-workflow:multi-review
+commands:
+  design: /multi-llm-design
+  review: /multi-review
+develop:
+  review:
+    multi_llm: true
+    max_iterations: 3
+```
+
+**변경 후 (v2):**
+```yaml
+workflows:
+  analyze:
+    agent: autodev:issue-analyzer
+  implement:
+    agent: autodev:issue-analyzer
+  review:
+    command: /develop-workflow:multi-review
+    max_iterations: 3
+```
+
+**점검 방법:**
+
+각 YAML 파일을 Read 도구로 읽고, `commands:`, `develop:`, `workflow:` 최상위 키가 존재하는지 확인합니다.
+
+**발견 시:**
+
+1. 사용자에게 deprecated 키 목록과 변환 내용을 명확히 보여줍니다
+2. AskUserQuestion으로 자동 변환 여부를 확인합니다
+3. 승인 시 Edit 도구로 YAML 파일을 수정합니다:
+   - `workflow.issue` → `workflows.analyze.agent` 또는 `workflows.analyze.command` (builtin 여부에 따라)
+   - `workflow.pr` → `workflows.review.agent` 또는 `workflows.review.command`
+   - `develop.review.max_iterations` → `workflows.review.max_iterations`
+   - `commands`, `develop`, `workflow` 섹션 삭제
+4. deprecated 키가 있어도 파싱은 성공합니다 (`deny_unknown_fields` 제거됨). 단, 해당 키의 값은 무시되므로 마이그레이션을 권장합니다.
+
+> **참고:** v2에서 `deny_unknown_fields`가 제거되어 deprecated 키가 있어도 파싱 실패하지 않습니다. 하지만 해당 설정값은 무시되므로 의도한 동작을 위해 마이그레이션이 필요합니다.
+
 ##### Migration 1: `consumer:` → `sources.github:` (v0.8.1 → v0.9.0)
 
 YAML 파일에서 최상위 `consumer:` 키가 있으면 `sources.github:`로 변환해야 합니다.

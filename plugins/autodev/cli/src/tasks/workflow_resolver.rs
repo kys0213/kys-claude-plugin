@@ -1,39 +1,57 @@
-//! WorkflowResolver — config 값을 system prompt 텍스트로 변환.
+//! WorkflowResolver — WorkflowStage를 system prompt 텍스트로 변환.
 //!
-//! `"builtin"` prefix → autodev 내장 에이전트 위임 지시문
-//! 그 외 → 커스텀 슬래시 커맨드 (패스스루)
+//! `agent` 지정 → builtin 에이전트 위임 지시문
+//! `command` 지정 → 커스텀 슬래시 커맨드 (패스스루)
+//! 둘 다 미지정 → task_type별 기본 agent 사용
+
+use crate::config::models::WorkflowStage;
 
 /// 워크플로우 대상 구분.
 pub enum TaskType {
-    Issue,
-    Pr,
+    Analyze,
+    Implement,
+    Review,
 }
 
-const BUILTIN_PREFIX: &str = "builtin";
+/// task_type별 기본 builtin agent 이름.
+fn default_agent(task_type: &TaskType) -> &'static str {
+    match task_type {
+        TaskType::Analyze => "autodev:issue-analyzer",
+        TaskType::Implement => "autodev:issue-analyzer",
+        TaskType::Review => "autodev:pr-reviewer",
+    }
+}
 
-/// config에 저장된 워크플로우 값을 system prompt 텍스트로 변환한다.
+/// WorkflowStage를 system prompt 텍스트로 변환한다.
 ///
-/// - `"builtin"` 또는 `"builtin:*"` → 내장 에이전트 위임 지시문
-/// - 그 외 → 커스텀 슬래시 커맨드 그대로 반환
-pub fn resolve_workflow_prompt(config_value: &str, task_type: TaskType) -> String {
-    if config_value.starts_with(BUILTIN_PREFIX) {
-        match task_type {
-            TaskType::Issue => "\
-You MUST delegate this task to the `autodev:issue-analyzer` agent \
-using the Agent tool with subagent_type=\"autodev:issue-analyzer\". \
-Pass all issue context (number, repo, comments) to the agent. \
-Do not attempt to perform the analysis yourself."
-                .to_string(),
-            TaskType::Pr => "\
-You MUST delegate this task to the `autodev:pr-reviewer` agent \
-using the Agent tool with subagent_type=\"autodev:pr-reviewer\". \
-Pass all PR context (number, repo, diff, comments) to the agent. \
-Do not attempt to perform the review yourself."
-                .to_string(),
-        }
-    } else {
-        // 커스텀 슬래시 커맨드 — 그대로 반환
-        config_value.to_string()
+/// 우선순위:
+/// 1. `command`가 Some → 커스텀 슬래시 커맨드 그대로 반환
+/// 2. `agent`가 Some → 해당 agent 위임 지시문 생성
+/// 3. 둘 다 None → task_type별 기본 agent 위임 지시문 생성
+pub fn resolve_workflow_prompt(stage: &WorkflowStage, task_type: TaskType) -> String {
+    // 커스텀 슬래시 커맨드 우선
+    if let Some(ref cmd) = stage.command {
+        return cmd.clone();
+    }
+
+    let agent_name = stage
+        .agent
+        .as_deref()
+        .unwrap_or_else(|| default_agent(&task_type));
+
+    match task_type {
+        TaskType::Analyze | TaskType::Implement => format!(
+            "You MUST delegate this task to the `{agent_name}` agent \
+             using the Agent tool with subagent_type=\"{agent_name}\". \
+             Pass all issue context (number, repo, comments) to the agent. \
+             Do not attempt to perform the analysis yourself."
+        ),
+        TaskType::Review => format!(
+            "You MUST delegate this task to the `{agent_name}` agent \
+             using the Agent tool with subagent_type=\"{agent_name}\". \
+             Pass all PR context (number, repo, diff, comments) to the agent. \
+             Do not attempt to perform the review yourself."
+        ),
     }
 }
 
@@ -42,30 +60,71 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_builtin_issue() {
-        let result = resolve_workflow_prompt("builtin", TaskType::Issue);
+    fn resolve_builtin_analyze() {
+        let stage = WorkflowStage {
+            agent: Some("autodev:issue-analyzer".into()),
+            command: None,
+        };
+        let result = resolve_workflow_prompt(&stage, TaskType::Analyze);
         assert!(result.contains("autodev:issue-analyzer"));
         assert!(result.contains("Agent tool"));
     }
 
     #[test]
-    fn resolve_builtin_pr() {
-        let result = resolve_workflow_prompt("builtin", TaskType::Pr);
+    fn resolve_builtin_implement() {
+        let stage = WorkflowStage {
+            agent: Some("autodev:issue-analyzer".into()),
+            command: None,
+        };
+        let result = resolve_workflow_prompt(&stage, TaskType::Implement);
+        assert!(result.contains("autodev:issue-analyzer"));
+        assert!(result.contains("issue context"));
+    }
+
+    #[test]
+    fn resolve_builtin_review() {
+        let stage = WorkflowStage {
+            agent: Some("autodev:pr-reviewer".into()),
+            command: None,
+        };
+        let result = resolve_workflow_prompt(&stage, TaskType::Review);
         assert!(result.contains("autodev:pr-reviewer"));
-        assert!(result.contains("Agent tool"));
+        assert!(result.contains("PR context"));
     }
 
     #[test]
     fn resolve_custom_command() {
-        let custom = "/develop-workflow:multi-review";
-        let result = resolve_workflow_prompt(custom, TaskType::Pr);
-        assert_eq!(result, custom);
+        let stage = WorkflowStage {
+            agent: None,
+            command: Some("/develop-workflow:multi-review".into()),
+        };
+        let result = resolve_workflow_prompt(&stage, TaskType::Review);
+        assert_eq!(result, "/develop-workflow:multi-review");
     }
 
     #[test]
-    fn resolve_builtin_prefix() {
-        // "builtin:v2" 등 prefix 확장성
-        let result = resolve_workflow_prompt("builtin:v2", TaskType::Issue);
+    fn resolve_command_takes_precedence_over_agent() {
+        let stage = WorkflowStage {
+            agent: Some("autodev:pr-reviewer".into()),
+            command: Some("/custom-review".into()),
+        };
+        let result = resolve_workflow_prompt(&stage, TaskType::Review);
+        assert_eq!(result, "/custom-review");
+    }
+
+    #[test]
+    fn resolve_none_falls_back_to_default_agent() {
+        let stage = WorkflowStage {
+            agent: None,
+            command: None,
+        };
+        let result = resolve_workflow_prompt(&stage, TaskType::Review);
+        assert!(result.contains("autodev:pr-reviewer"));
+
+        let result = resolve_workflow_prompt(&stage, TaskType::Analyze);
+        assert!(result.contains("autodev:issue-analyzer"));
+
+        let result = resolve_workflow_prompt(&stage, TaskType::Implement);
         assert!(result.contains("autodev:issue-analyzer"));
     }
 }

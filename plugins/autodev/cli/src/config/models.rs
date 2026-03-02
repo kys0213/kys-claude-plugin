@@ -1,15 +1,20 @@
 use serde::{Deserialize, Serialize};
 
-/// .develop-workflow.yaml의 전체 스키마
+/// .develop-workflow.yaml의 전체 스키마 (v2)
 /// 글로벌(~/) + 레포별 오버라이드를 딥머지하여 최종 설정 생성
+///
+/// v2에서 `commands`, `develop`, `workflow` 섹션을 제거하고
+/// `workflows` 섹션으로 파이프라인 3단계(analyze, implement, review)를
+/// 1급 개념으로 표현한다.
+///
+/// `deny_unknown_fields` 제거: v1 YAML에 deprecated 키가 있어도
+/// 파싱 실패 없이 무시하고 유효한 키만 역직렬화한다.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct WorkflowConfig {
     pub sources: SourcesConfig,
     pub daemon: DaemonConfig,
-    pub workflow: WorkflowRouting,
-    pub commands: CommandsConfig,
-    pub develop: DevelopConfig,
+    pub workflows: Workflows,
 }
 
 /// 태스크 소스 설정 — 소스 종류별 하위 키
@@ -81,107 +86,84 @@ impl Default for GitHubSourceConfig {
     }
 }
 
-/// 워크플로우 라우팅 — Consumer가 어떤 워크플로우를 실행할지
+// ═══════════════════════════════════════════════
+// workflows — 파이프라인 단계별 실행 방식 (v2)
+// ═══════════════════════════════════════════════
+
+/// 파이프라인 단계별 워크플로우 설정.
+///
+/// ```text
+/// analyze → implement → review
+/// ```
+///
+/// 각 단계는 `agent`(builtin) 또는 `command`(커스텀 슬래시 커맨드) 중
+/// 하나로 실행 방식을 지정한다. 둘 다 미지정 시 task_type별 기본 agent 사용.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct WorkflowRouting {
-    pub issue: String,
-    pub pr: String,
+pub struct Workflows {
+    pub analyze: WorkflowStage,
+    pub implement: WorkflowStage,
+    pub review: ReviewStage,
 }
 
-impl Default for WorkflowRouting {
+impl Default for Workflows {
     fn default() -> Self {
         Self {
-            issue: "builtin".into(),
-            pr: "builtin".into(),
+            analyze: WorkflowStage {
+                agent: Some("autodev:issue-analyzer".into()),
+                command: None,
+            },
+            implement: WorkflowStage {
+                agent: Some("autodev:issue-analyzer".into()),
+                command: None,
+            },
+            review: ReviewStage {
+                agent: Some("autodev:pr-reviewer".into()),
+                command: None,
+                max_iterations: 2,
+            },
         }
     }
 }
 
-// NOTE: CommandsConfig is deprecated but retained for backward compatibility
-// with existing .develop-workflow.yaml files that contain a `commands:` section.
-// The `deny_unknown_fields` on WorkflowConfig requires this struct to exist
-// so that YAML parsing does not fail.
-
-/// 워크플로우 내부 커맨드 매핑
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct CommandsConfig {
-    pub design: String,
-    pub review: String,
-    pub branch: String,
-    pub branch_status: String,
-    pub code_review: String,
-    pub commit_and_pr: String,
-}
-
-impl Default for CommandsConfig {
-    fn default() -> Self {
-        Self {
-            design: "/multi-llm-design".into(),
-            review: "/multi-review".into(),
-            branch: "/git-branch".into(),
-            branch_status: "/branch-status".into(),
-            code_review: "/multi-review".into(),
-            commit_and_pr: "/commit-and-pr".into(),
-        }
-    }
-}
-
-/// 워크플로우 옵션
+/// 워크플로우 단계 공통 설정.
+///
+/// `agent`와 `command`는 상호 배타적이다.
+/// - `agent`: autodev builtin agent에 위임 (예: `autodev:issue-analyzer`)
+/// - `command`: 커스텀 슬래시 커맨드 실행 (예: `/develop-workflow:multi-review`)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
-pub struct DevelopConfig {
-    pub review: ReviewConfig,
-    pub implement: ImplementConfig,
-    pub pr: PrConfig,
+pub struct WorkflowStage {
+    pub agent: Option<String>,
+    pub command: Option<String>,
 }
 
+/// 리뷰 단계 설정 — WorkflowStage + max_iterations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct ReviewConfig {
-    pub multi_llm: bool,
-    pub auto_feedback: bool,
+pub struct ReviewStage {
+    pub agent: Option<String>,
+    pub command: Option<String>,
     pub max_iterations: u32,
 }
 
-impl Default for ReviewConfig {
+impl Default for ReviewStage {
     fn default() -> Self {
         Self {
-            multi_llm: true,
-            auto_feedback: true,
+            agent: Some("autodev:pr-reviewer".into()),
+            command: None,
             max_iterations: 2,
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ImplementConfig {
-    pub strategy: String,
-    pub max_retries: u32,
-    pub validate_each: bool,
-}
-
-impl Default for ImplementConfig {
-    fn default() -> Self {
-        Self {
-            strategy: "auto".into(),
-            max_retries: 3,
-            validate_each: true,
+impl ReviewStage {
+    /// 워크플로우 라우팅에 필요한 agent/command 부분만 추출.
+    pub fn as_stage(&self) -> WorkflowStage {
+        WorkflowStage {
+            agent: self.agent.clone(),
+            command: self.command.clone(),
         }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct PrConfig {
-    pub code_review: bool,
-}
-
-impl Default for PrConfig {
-    fn default() -> Self {
-        Self { code_review: true }
     }
 }
 
@@ -216,5 +198,104 @@ daemon:
         let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(cfg.daemon.log_level, "info");
         assert_eq!(cfg.daemon.log_dir, "/var/log/autodev");
+    }
+
+    #[test]
+    fn workflows_default_agents() {
+        let cfg = Workflows::default();
+        assert_eq!(cfg.analyze.agent.as_deref(), Some("autodev:issue-analyzer"));
+        assert_eq!(
+            cfg.implement.agent.as_deref(),
+            Some("autodev:issue-analyzer")
+        );
+        assert_eq!(cfg.review.agent.as_deref(), Some("autodev:pr-reviewer"));
+        assert_eq!(cfg.review.max_iterations, 2);
+    }
+
+    #[test]
+    fn workflows_from_yaml_partial_override() {
+        let yaml = r#"
+workflows:
+  review:
+    max_iterations: 5
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        // review.max_iterations overridden
+        assert_eq!(cfg.workflows.review.max_iterations, 5);
+        // review.agent retains default
+        assert_eq!(
+            cfg.workflows.review.agent.as_deref(),
+            Some("autodev:pr-reviewer")
+        );
+        // analyze/implement retain defaults from Workflows::default()
+        assert_eq!(
+            cfg.workflows.analyze.agent.as_deref(),
+            Some("autodev:issue-analyzer")
+        );
+    }
+
+    #[test]
+    fn workflows_custom_command_overrides_agent() {
+        let yaml = r#"
+workflows:
+  analyze:
+    command: /develop-workflow:multi-analyze
+    agent: null
+  review:
+    command: /develop-workflow:multi-review
+    agent: null
+    max_iterations: 3
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            cfg.workflows.analyze.command.as_deref(),
+            Some("/develop-workflow:multi-analyze")
+        );
+        assert!(cfg.workflows.analyze.agent.is_none());
+        assert_eq!(
+            cfg.workflows.review.command.as_deref(),
+            Some("/develop-workflow:multi-review")
+        );
+        assert!(cfg.workflows.review.agent.is_none());
+        assert_eq!(cfg.workflows.review.max_iterations, 3);
+    }
+
+    #[test]
+    fn deprecated_v1_keys_are_silently_ignored() {
+        // v1 YAML with commands, develop, workflow keys
+        // With deny_unknown_fields removed, these should be ignored
+        let yaml = r#"
+sources:
+  github:
+    model: opus
+commands:
+  design: /old-design
+develop:
+  review:
+    multi_llm: true
+workflow:
+  issue: builtin
+  pr: builtin
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        // Valid keys are parsed
+        assert_eq!(cfg.sources.github.model, "opus");
+        // workflows uses defaults (v1 keys ignored)
+        assert_eq!(
+            cfg.workflows.analyze.agent.as_deref(),
+            Some("autodev:issue-analyzer")
+        );
+        assert_eq!(
+            cfg.workflows.review.agent.as_deref(),
+            Some("autodev:pr-reviewer")
+        );
+    }
+
+    #[test]
+    fn review_stage_as_stage() {
+        let review = ReviewStage::default();
+        let stage = review.as_stage();
+        assert_eq!(stage.agent.as_deref(), Some("autodev:pr-reviewer"));
+        assert!(stage.command.is_none());
     }
 }

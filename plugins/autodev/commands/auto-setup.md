@@ -100,7 +100,7 @@ fi
 
 미설치 시 안내:
 - 필수 → 경고 + `/plugin install <name>@kys-claude-plugin`
-- 선택 → "커스텀 워크플로우를 사용하려면 설치하세요" 안내
+- 선택 → "커스텀 워크플로우를 사용하려면 설치하세요. builtin 에이전트가 기본 제공됩니다." 안내
 
 `git-utils` 설치 확인이 완료되지 않으면 다음 단계로 진행하지 마세요.
 
@@ -201,10 +201,10 @@ AskUserQuestion으로 질문:
 
 | 선택 | config 반영 |
 |------|------------|
-| builtin 이슈 분석 | `workflow.issue: "builtin"` |
-| builtin PR 리뷰 | `workflow.pr: "builtin"` |
-| 커스텀 이슈 분석 | `workflow.issue: "<감지된 커맨드>"`, `develop.review.multi_llm: true/false` |
-| 커스텀 PR 리뷰 | `workflow.pr: "<감지된 커맨드>"`, `develop.review.multi_llm: true/false` |
+| builtin 이슈 분석 | `workflows.analyze.agent: "autodev:issue-analyzer"` |
+| builtin PR 리뷰 | `workflows.review.agent: "autodev:pr-reviewer"` |
+| 커스텀 이슈 분석 | `workflows.analyze.command: "<감지된 커맨드>"` (agent: null) |
+| 커스텀 PR 리뷰 | `workflows.review.command: "<감지된 커맨드>"` (agent: null) |
 
 ### Step 8: 필터 설정
 
@@ -216,15 +216,15 @@ AskUserQuestion으로 질문:
 ### Step 9: 등록
 
 수집된 설정을 JSON으로 구성하여 CLI에 전달합니다.
-JSON은 `WorkflowConfig` 구조에 맞게 구성합니다.
-Step 1.5에서 Enterprise가 감지된 경우 `sources.github.gh_host` 필드를, Step 7의 워크플로우 선택 결과를 `workflow`/`develop` 필드에 포함합니다:
+JSON은 `WorkflowConfig` v2 구조에 맞게 구성합니다.
+Step 1.5에서 Enterprise가 감지된 경우 `sources.github.gh_host` 필드를, Step 7의 워크플로우 선택 결과를 `workflows` 필드에 포함합니다:
 
 ```bash
 # 일반 GitHub — 기본 설정으로 등록
-autodev repo add <url> --config '{"sources":{"github":{"scan_interval_secs":<step5>,"issue_concurrency":<step6_issue>,"pr_concurrency":<step6_pr>,"merge_concurrency":<step6_merge>,"scan_targets":[<step4>]}},"workflow":{"issue":"<step7_issue>","pr":"<step7_pr>"},"develop":{"review":{"multi_llm":<step7_multi_llm>}}}'
+autodev repo add <url> --config '{"sources":{"github":{"scan_interval_secs":<step5>,"issue_concurrency":<step6_issue>,"pr_concurrency":<step6_pr>,"scan_targets":[<step4>]}},"workflows":{"analyze":{"agent":"<step7_analyze_agent>","command":<step7_analyze_cmd>},"review":{"agent":"<step7_review_agent>","command":<step7_review_cmd>}}}'
 
 # GitHub Enterprise — gh_host 포함
-autodev repo add <url> --config '{"sources":{"github":{"gh_host":"<detected_host>","scan_interval_secs":<step5>,"issue_concurrency":<step6_issue>,"pr_concurrency":<step6_pr>,"merge_concurrency":<step6_merge>,"scan_targets":[<step4>]}},"workflow":{"issue":"<step7_issue>","pr":"<step7_pr>"},"develop":{"review":{"multi_llm":<step7_multi_llm>}}}'
+autodev repo add <url> --config '{"sources":{"github":{"gh_host":"<detected_host>","scan_interval_secs":<step5>,"issue_concurrency":<step6_issue>,"pr_concurrency":<step6_pr>,"scan_targets":[<step4>]}},"workflows":{"analyze":{"agent":"<step7_analyze_agent>","command":<step7_analyze_cmd>},"review":{"agent":"<step7_review_agent>","command":<step7_review_cmd>}}}'
 ```
 
 등록 성공 시 CLI가 자동으로 워크스페이스 디렉토리(`~/.autodev/workspaces/<org-repo>/`)에 `.develop-workflow.yaml`을 생성합니다.
