@@ -246,7 +246,6 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                 tasks.push(Box::new(ImproveTask::new(
                     Arc::clone(&self.workspace),
                     Arc::clone(&self.gh),
-                    Arc::clone(&self.config),
                     item,
                 )));
             }
@@ -275,7 +274,6 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                 tasks.push(Box::new(ExtractTask::new(
                     Arc::clone(&self.workspace),
                     Arc::clone(&self.gh),
-                    Arc::clone(&self.config),
                     Arc::clone(&self.sw),
                     Arc::clone(&self.git),
                     Arc::clone(&self.env),

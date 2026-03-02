@@ -1,10 +1,7 @@
 use std::path::Path;
 
-use anyhow::Result;
-
 use crate::components::workspace::Workspace;
 use crate::domain::labels;
-use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 
@@ -131,98 +128,6 @@ fn collect_md_dir(dir: &Path, label: &str, knowledge: &mut String) {
     }
 }
 
-/// per-task knowledge extraction
-///
-/// done 전이 시 호출: 완료된 작업의 세션을 Claude로 분석하여 개선 제안 추출.
-/// suggest-workflow 세션 데이터가 있으면 도구 사용 패턴도 함께 분석.
-/// 결과는 GitHub 이슈 코멘트로 게시.
-#[allow(clippy::too_many_arguments)]
-pub async fn extract_task_knowledge(
-    claude: &dyn Claude,
-    gh: &dyn Gh,
-    workspace: &Workspace<'_>,
-    sw: &dyn SuggestWorkflow,
-    repo_name: &str,
-    github_number: i64,
-    task_type: &str,
-    wt_path: &Path,
-    gh_host: Option<&str>,
-) -> Result<Option<KnowledgeSuggestion>> {
-    // suggest-workflow에서 해당 태스크 세션의 도구 사용 패턴 조회 (best effort)
-    let sw_section = build_suggest_workflow_section(sw, task_type, github_number).await;
-
-    // v2: delta-aware — 기존 지식과 비교하여 중복 제거
-    let existing = collect_existing_knowledge(wt_path);
-    let delta_section = if existing.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "\n\n--- Existing Knowledge Base ---\n\
-             The following knowledge already exists in this repository. \
-             Do NOT suggest anything that is already covered below. \
-             Only suggest genuinely NEW improvements.\n\n{existing}"
-        )
-    };
-
-    let prompt = format!(
-        "[autodev] knowledge: per-task {task_type} #{github_number}\n\n\
-         Analyze the completed {task_type} task (#{github_number}) in this workspace. \
-         Review the changes made, any issues encountered, and lessons learned.\
-         {sw_section}{delta_section}\n\n\
-         Respond with a JSON object matching this schema:\n\
-         {{\n  \"suggestions\": [\n    {{\n      \
-         \"type\": \"rule | claude_md | hook | skill | subagent\",\n      \
-         \"target_file\": \".claude/rules/...\",\n      \
-         \"content\": \"specific recommendation\",\n      \
-         \"reason\": \"why this matters\"\n    }}\n  ]\n}}\n\n\
-         Only include suggestions if there are genuine improvements to propose. \
-         If none, return {{\"suggestions\": []}}."
-    );
-
-    let result = claude
-        .run_session(wt_path, &prompt, &Default::default())
-        .await;
-
-    let suggestion = match result {
-        Ok(res) if res.exit_code == 0 => {
-            // empty suggestions → None (코멘트 게시 불필요)
-            parse_knowledge_suggestion(&res.stdout).filter(|ks| !ks.suggestions.is_empty())
-        }
-        Ok(res) => {
-            tracing::warn!(
-                "knowledge extraction exited with {} for {task_type} #{github_number}",
-                res.exit_code
-            );
-            None
-        }
-        Err(e) => {
-            tracing::warn!("knowledge extraction failed for {task_type} #{github_number}: {e}");
-            None
-        }
-    };
-
-    // 제안이 있으면 GitHub 코멘트로 게시 + per-task actionable PR 생성
-    if let Some(ref ks) = suggestion {
-        let comment = format_knowledge_comment(ks, task_type, github_number);
-        gh.issue_comment(repo_name, github_number, &comment, gh_host)
-            .await;
-
-        // per-task actionable PR: suggestion마다 PR 생성 (격리된 worktree 사용)
-        create_task_knowledge_prs(
-            gh,
-            workspace,
-            repo_name,
-            ks,
-            task_type,
-            github_number,
-            gh_host,
-        )
-        .await;
-    }
-
-    Ok(suggestion)
-}
-
 /// suggest-workflow에서 해당 태스크 세션의 도구 사용 패턴을 조회하여 프롬프트 섹션 생성
 pub async fn build_suggest_workflow_section(
     sw: &dyn SuggestWorkflow,
@@ -291,22 +196,30 @@ pub fn format_knowledge_comment(ks: &KnowledgeSuggestion, task_type: &str, numbe
     comment
 }
 
+/// per-task knowledge PR 생성 시 필요한 컨텍스트.
+pub struct KnowledgePrContext<'a> {
+    pub repo_name: &'a str,
+    pub task_type: &'a str,
+    pub github_number: i64,
+    pub gh_host: Option<&'a str>,
+}
+
 /// per-task suggestion마다 actionable PR 생성 (격리된 worktree 사용)
 ///
 /// 각 suggestion에 대해 main 기반 별도 worktree → branch → file write → commit → push → PR 생성.
 /// 구현 worktree와 격리하여 uncommitted 변경 충돌을 방지한다.
-#[allow(clippy::too_many_arguments)]
 pub async fn create_task_knowledge_prs(
     gh: &dyn Gh,
     workspace: &Workspace<'_>,
-    repo_name: &str,
+    ctx: &KnowledgePrContext<'_>,
     ks: &KnowledgeSuggestion,
-    task_type: &str,
-    github_number: i64,
-    gh_host: Option<&str>,
 ) {
     let git = workspace.git();
     let today = chrono::Local::now().format("%Y-%m-%d");
+    let task_type = ctx.task_type;
+    let github_number = ctx.github_number;
+    let repo_name = ctx.repo_name;
+    let gh_host = ctx.gh_host;
     for (i, suggestion) in ks.suggestions.iter().enumerate() {
         let branch = format!("autodev/knowledge/{task_type}-{github_number}-{today}-{i}");
         let knowledge_task_id = format!("knowledge-{task_type}-{github_number}-{i}");

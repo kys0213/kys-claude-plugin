@@ -1,34 +1,6 @@
-use autodev::components::workspace::Workspace;
-use autodev::config::Env;
 use autodev::infrastructure::claude::mock::MockClaude;
-use autodev::infrastructure::gh::mock::MockGh;
-use autodev::infrastructure::git::mock::MockGit;
 use autodev::infrastructure::suggest_workflow::mock::MockSuggestWorkflow;
 use autodev::knowledge::models::*;
-
-struct TestEnv {
-    vars: std::collections::HashMap<String, String>,
-}
-
-impl TestEnv {
-    fn new(tmp: &tempfile::TempDir) -> Self {
-        let mut vars = std::collections::HashMap::new();
-        vars.insert(
-            "AUTODEV_HOME".to_string(),
-            tmp.path().to_str().unwrap().to_string(),
-        );
-        Self { vars }
-    }
-}
-
-impl Env for TestEnv {
-    fn var(&self, key: &str) -> Result<String, std::env::VarError> {
-        self.vars
-            .get(key)
-            .cloned()
-            .ok_or(std::env::VarError::NotPresent)
-    }
-}
 
 // ═══════════════════════════════════════════════════
 // 1. MockSuggestWorkflow 기본 동작 테스트
@@ -87,11 +59,7 @@ async fn mock_suggest_workflow_records_calls() {
 // ═══════════════════════════════════════════════════
 
 #[tokio::test]
-async fn extract_task_knowledge_includes_sw_data_in_prompt() {
-    let claude = MockClaude::new();
-    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
-
-    let gh = MockGh::new();
+async fn build_suggest_workflow_section_includes_sw_data() {
     let sw = MockSuggestWorkflow::new();
 
     // suggest-workflow가 tool-frequency 데이터 반환
@@ -108,39 +76,16 @@ async fn extract_task_knowledge_includes_sw_data_in_prompt() {
         },
     ]);
 
-    let git = MockGit::new();
-    let tmp = tempfile::TempDir::new().unwrap();
-    let env = TestEnv::new(&tmp);
-    let workspace = Workspace::new(&git, &env);
+    let section =
+        autodev::knowledge::extractor::build_suggest_workflow_section(&sw, "issue", 42).await;
 
-    let result = autodev::knowledge::extractor::extract_task_knowledge(
-        &claude,
-        &gh,
-        &workspace,
-        &sw,
-        "org/repo",
-        42,
-        "issue",
-        tmp.path(),
-        None,
-    )
-    .await
-    .unwrap();
-
-    // empty suggestions → None (Phase 4 empty guard)
-    assert!(result.is_none());
-
-    // Claude에 전달된 프롬프트에 suggest-workflow 데이터가 포함되어야 함
-    let calls = claude.calls.lock().unwrap();
-    assert_eq!(calls.len(), 1);
-    let prompt = &calls[0].prompt;
     assert!(
-        prompt.contains("suggest-workflow session data"),
-        "prompt should contain suggest-workflow section"
+        section.contains("suggest-workflow session data"),
+        "section should contain suggest-workflow header"
     );
     assert!(
-        prompt.contains("Bash:test"),
-        "prompt should contain tool name"
+        section.contains("Bash:test"),
+        "section should contain tool name"
     );
 
     // suggest-workflow가 호출되었는지 확인
@@ -148,42 +93,16 @@ async fn extract_task_knowledge_includes_sw_data_in_prompt() {
 }
 
 #[tokio::test]
-async fn extract_task_knowledge_works_without_sw_data() {
-    let claude = MockClaude::new();
-    claude.enqueue_response(r#"{"suggestions":[]}"#, 0);
-
-    let gh = MockGh::new();
-    let git = MockGit::new();
+async fn build_suggest_workflow_section_empty_without_sw_data() {
     let sw = MockSuggestWorkflow::new();
     // suggest-workflow 데이터 없음 (빈 응답)
 
-    let tmp = tempfile::TempDir::new().unwrap();
-    let env = TestEnv::new(&tmp);
-    let workspace = Workspace::new(&git, &env);
+    let section =
+        autodev::knowledge::extractor::build_suggest_workflow_section(&sw, "issue", 42).await;
 
-    let result = autodev::knowledge::extractor::extract_task_knowledge(
-        &claude,
-        &gh,
-        &workspace,
-        &sw,
-        "org/repo",
-        42,
-        "issue",
-        tmp.path(),
-        None,
-    )
-    .await
-    .unwrap();
-
-    // empty suggestions → None (Phase 4 empty guard)
-    assert!(result.is_none());
-
-    // suggest-workflow 데이터가 없으면 프롬프트에 포함되지 않아야 함
-    let calls = claude.calls.lock().unwrap();
-    let prompt = &calls[0].prompt;
     assert!(
-        !prompt.contains("suggest-workflow session data"),
-        "prompt should NOT contain suggest-workflow section when no data"
+        section.is_empty(),
+        "section should be empty when no SW data"
     );
 }
 

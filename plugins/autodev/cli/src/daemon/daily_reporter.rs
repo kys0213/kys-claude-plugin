@@ -36,6 +36,14 @@ pub trait DailyReporter: Send {
 
 // ─── Default Implementation ───
 
+/// DailyReporter 생성에 필요한 설정 값.
+pub struct DailyReporterConfig {
+    pub log_dir: PathBuf,
+    pub log_retention_days: u32,
+    pub daily_report_hour: u32,
+    pub knowledge_extraction: bool,
+}
+
 /// DailyReporter의 기본 구현체.
 ///
 /// 의존성:
@@ -51,15 +59,11 @@ pub struct DefaultDailyReporter {
     env: Arc<dyn crate::config::Env>,
     sw: Arc<dyn SuggestWorkflow>,
     db: Database,
-    log_dir: PathBuf,
-    log_retention_days: u32,
-    daily_report_hour: u32,
-    knowledge_extraction: bool,
+    config: DailyReporterConfig,
     last_daily_report_date: String,
 }
 
 impl DefaultDailyReporter {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         gh: Arc<dyn Gh>,
         claude: Arc<dyn Claude>,
@@ -67,10 +71,7 @@ impl DefaultDailyReporter {
         env: Arc<dyn crate::config::Env>,
         sw: Arc<dyn SuggestWorkflow>,
         db: Database,
-        log_dir: PathBuf,
-        log_retention_days: u32,
-        daily_report_hour: u32,
-        knowledge_extraction: bool,
+        config: DailyReporterConfig,
     ) -> Self {
         Self {
             gh,
@@ -79,10 +80,7 @@ impl DefaultDailyReporter {
             env,
             sw,
             db,
-            log_dir,
-            log_retention_days,
-            daily_report_hour,
-            knowledge_extraction,
+            config,
             last_daily_report_date: String::new(),
         }
     }
@@ -91,22 +89,22 @@ impl DefaultDailyReporter {
 #[async_trait(?Send)]
 impl DailyReporter for DefaultDailyReporter {
     async fn maybe_run(&mut self) {
-        if !self.knowledge_extraction {
+        if !self.config.knowledge_extraction {
             return;
         }
 
         let now = chrono::Local::now();
         let today = now.format("%Y-%m-%d").to_string();
-        if now.hour() < self.daily_report_hour || self.last_daily_report_date == today {
+        if now.hour() < self.config.daily_report_hour || self.last_daily_report_date == today {
             return;
         }
 
         let yesterday = (now - chrono::Duration::days(1))
             .format("%Y-%m-%d")
             .to_string();
-        let log_path = self.log_dir.join(format!("daemon.{yesterday}.log"));
+        let log_path = self.config.log_dir.join(format!("daemon.{yesterday}.log"));
 
-        log::cleanup_old_logs(&self.log_dir, self.log_retention_days);
+        log::cleanup_old_logs(&self.config.log_dir, self.config.log_retention_days);
 
         if log_path.exists() {
             let stats = crate::knowledge::daily::parse_daemon_log(&log_path);

@@ -306,10 +306,12 @@ pub async fn start(
         Arc::clone(&env),
         Arc::clone(&sw),
         report_db,
-        log_dir.clone(),
-        cfg.daemon.log_retention_days,
-        cfg.daemon.daily_report_hour,
-        cfg.sources.github.knowledge_extraction,
+        daily_reporter::DailyReporterConfig {
+            log_dir: log_dir.clone(),
+            log_retention_days: cfg.daemon.log_retention_days,
+            daily_report_hour: cfg.daemon.daily_report_hour,
+            knowledge_extraction: cfg.sources.github.knowledge_extraction,
+        },
     ));
 
     // ── Startup log cleanup ──

@@ -13,7 +13,6 @@ use uuid::Uuid;
 
 use super::AGENT_SYSTEM_PROMPT;
 use crate::components::workspace::WorkspaceOps;
-use crate::config::ConfigLoader;
 use crate::daemon::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
@@ -30,8 +29,6 @@ use crate::queue::task_queues::{pr_phase, PrItem};
 pub struct ImproveTask {
     workspace: Arc<dyn WorkspaceOps>,
     gh: Arc<dyn Gh>,
-    #[allow(dead_code)]
-    config: Arc<dyn ConfigLoader>,
     item: PrItem,
     worker_id: String,
     task_id: String,
@@ -40,17 +37,11 @@ pub struct ImproveTask {
 }
 
 impl ImproveTask {
-    pub fn new(
-        workspace: Arc<dyn WorkspaceOps>,
-        gh: Arc<dyn Gh>,
-        config: Arc<dyn ConfigLoader>,
-        item: PrItem,
-    ) -> Self {
+    pub fn new(workspace: Arc<dyn WorkspaceOps>, gh: Arc<dyn Gh>, item: PrItem) -> Self {
         let task_id = format!("pr-{}", item.github_number);
         Self {
             workspace,
             gh,
-            config,
             item,
             worker_id: Uuid::new_v4().to_string(),
             task_id,
@@ -222,10 +213,8 @@ impl Task for ImproveTask {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
     use std::time::Duration;
 
-    use crate::config::models::WorkflowConfig;
     use crate::infrastructure::gh::mock::MockGh;
     use crate::queue::task_queues::make_work_id;
 
@@ -249,13 +238,6 @@ mod tests {
         }
     }
 
-    struct MockConfigLoader;
-    impl ConfigLoader for MockConfigLoader {
-        fn load(&self, _: Option<&Path>) -> WorkflowConfig {
-            WorkflowConfig::default()
-        }
-    }
-
     fn make_test_pr() -> PrItem {
         PrItem {
             work_id: make_work_id("pr", "org/repo", 10),
@@ -274,12 +256,7 @@ mod tests {
     }
 
     fn make_task(gh: Arc<MockGh>) -> ImproveTask {
-        ImproveTask::new(
-            Arc::new(MockWorkspace),
-            gh,
-            Arc::new(MockConfigLoader),
-            make_test_pr(),
-        )
+        ImproveTask::new(Arc::new(MockWorkspace), gh, make_test_pr())
     }
 
     #[tokio::test]
@@ -330,12 +307,7 @@ mod tests {
         let gh = Arc::new(MockGh::new());
         let mut pr = make_test_pr();
         pr.review_iteration = 2;
-        let mut task = ImproveTask::new(
-            Arc::new(MockWorkspace),
-            gh.clone(),
-            Arc::new(MockConfigLoader),
-            pr,
-        );
+        let mut task = ImproveTask::new(Arc::new(MockWorkspace), gh.clone(), pr);
         let _ = task.before_invoke().await;
 
         let response = AgentResponse {
