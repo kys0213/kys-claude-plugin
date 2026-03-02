@@ -223,7 +223,7 @@ workflows:
 ```yaml
 workflows:
   analyze:
-    command: /develop-workflow:multi-analyze   # 커스텀 분석 사용
+    command: /external-llm:analyze              # 커스텀 분석 사용
   review:
     command: /develop-workflow:multi-review    # 커스텀 리뷰 사용
 ```

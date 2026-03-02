@@ -56,7 +56,7 @@ func Validate(repoRoot string) (*Results, error) {
 			results.Failed = append(results.Failed, result)
 		}
 
-		// 3. Version consistency check
+		// 3. Version consistency check (plugin.json vs marketplace.json)
 		consistencyResults := validateVersionConsistency(marketplaceFile, repoRoot)
 		for _, r := range consistencyResults {
 			if r.Valid {
@@ -64,6 +64,16 @@ func Validate(repoRoot string) (*Results, error) {
 			} else {
 				results.Failed = append(results.Failed, r)
 			}
+		}
+	}
+
+	// 4. Cargo.toml version consistency check (plugin.json vs Cargo.toml)
+	cargoResults := validateCargoVersionConsistency(repoRoot, pluginFiles)
+	for _, r := range cargoResults {
+		if r.Valid {
+			results.Passed = append(results.Passed, r)
+		} else {
+			results.Failed = append(results.Failed, r)
 		}
 	}
 
@@ -232,6 +242,106 @@ func validateVersionConsistency(marketplacePath string, repoRoot string) []Resul
 					Valid:  true,
 				})
 			}
+		}
+	}
+
+	return results
+}
+
+// Pre-compiled regexes for Cargo.toml [package] section parsing (same strategy as bumpversion tool)
+var (
+	cargoPackageRe      = regexp.MustCompile(`(?m)^\[package\]\s*$`)
+	cargoSectionRe      = regexp.MustCompile(`(?m)^\[`)
+	cargoVersionExtract = regexp.MustCompile(`(?m)^version\s*=\s*"(\d+\.\d+\.\d+(?:-[\w.]+)?)"\s*$`)
+)
+
+// extractCargoPackageVersion reads a Cargo.toml and returns the version from the [package] section
+// using index-based section boundary parsing (consistent with bumpversion tool).
+func extractCargoPackageVersion(path string) (string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+
+	text := string(content)
+
+	pkgLoc := cargoPackageRe.FindStringIndex(text)
+	if pkgLoc == nil {
+		return "", fmt.Errorf("no [package] section found")
+	}
+
+	// Find section end (next [...] header or EOF)
+	pkgEnd := len(text)
+	remaining := text[pkgLoc[1]:]
+	if nextSection := cargoSectionRe.FindStringIndex(remaining); nextSection != nil {
+		pkgEnd = pkgLoc[1] + nextSection[0]
+	}
+
+	section := text[pkgLoc[1]:pkgEnd]
+	match := cargoVersionExtract.FindStringSubmatch(section)
+	if match == nil {
+		return "", fmt.Errorf("no version field found in [package] section")
+	}
+
+	return match[1], nil
+}
+
+// validateCargoVersionConsistency checks that plugin.json version matches cli/Cargo.toml version
+func validateCargoVersionConsistency(repoRoot string, pluginFiles []string) []Result {
+	var results []Result
+
+	for _, file := range pluginFiles {
+		fullPath := filepath.Join(repoRoot, file)
+		pluginDir := filepath.Dir(filepath.Dir(fullPath)) // up from .claude-plugin/plugin.json
+
+		cargoPath := filepath.Join(pluginDir, "cli", "Cargo.toml")
+		if _, err := os.Stat(cargoPath); err != nil {
+			continue // no Cargo.toml, skip
+		}
+
+		// Read plugin.json version
+		pluginContent, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+		var pluginData map[string]interface{}
+		if err := json.Unmarshal(pluginContent, &pluginData); err != nil {
+			continue
+		}
+		pluginVersion, _ := pluginData["version"].(string)
+		pluginName, _ := pluginData["name"].(string)
+		if pluginVersion == "" {
+			continue
+		}
+
+		// Extract Cargo.toml [package] version using index-based parsing
+		cargoVersion, err := extractCargoPackageVersion(cargoPath)
+		if err != nil {
+			results = append(results, Result{
+				File:   cargoPath,
+				Type:   "cargo-version-consistency",
+				Plugin: pluginName,
+				Valid:  false,
+				Error:  fmt.Sprintf("Cannot parse Cargo.toml: %s", err.Error()),
+			})
+			continue
+		}
+
+		if pluginVersion != cargoVersion {
+			results = append(results, Result{
+				File:   cargoPath,
+				Type:   "cargo-version-consistency",
+				Plugin: pluginName,
+				Valid:  false,
+				Error:  fmt.Sprintf("Version mismatch: plugin.json has '%s', Cargo.toml has '%s'", pluginVersion, cargoVersion),
+			})
+		} else {
+			results = append(results, Result{
+				File:   cargoPath,
+				Type:   "cargo-version-consistency",
+				Plugin: pluginName,
+				Valid:  true,
+			})
 		}
 	}
 

@@ -122,7 +122,7 @@ workflows:
 필수 플러그인이 설치되어 있는지 확인합니다:
 
 ```bash
-ls ~/.claude/plugins/cache/*/commands/*.md 2>/dev/null
+ls ~/.claude/plugins/cache/*/*/*/commands/*.md 2>/dev/null
 ```
 
 | 구분 | 플러그인 | 확인 대상 |

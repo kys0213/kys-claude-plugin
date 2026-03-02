@@ -21,6 +21,15 @@ const (
 	BumpPatch BumpType = "patch"
 )
 
+// Pre-compiled regexes for Cargo.toml parsing
+var (
+	cargoPackageRe       = regexp.MustCompile(`(?m)^\[package\]\s*$`)
+	cargoSectionRe       = regexp.MustCompile(`(?m)^\[`)
+	cargoVersionRe       = regexp.MustCompile(`(?m)^(version\s*=\s*")\d+\.\d+\.\d+(-[\w.]+)?(")\s*$`)
+	cargoVersionMatchRe  = regexp.MustCompile(`(?m)^version\s*=\s*"\d+\.\d+\.\d+(-[\w.]+)?"\s*$`)
+	cargoVersionExtract  = regexp.MustCompile(`(?m)^version\s*=\s*"(\d+\.\d+\.\d+(?:-[\w.]+)?)"\s*$`)
+)
+
 // BumpResult represents the result of a version bump operation
 type BumpResult struct {
 	Plugin      string `json:"plugin"`
@@ -28,6 +37,7 @@ type BumpResult struct {
 	NewVersion  string `json:"new_version"`
 	PluginJSON  string `json:"plugin_json"`
 	Marketplace bool   `json:"marketplace_updated"`
+	CargoToml   bool   `json:"cargo_toml_updated"`
 }
 
 // Bumper handles version bumping operations
@@ -120,7 +130,17 @@ func (b *Bumper) bumpPlugin(pkg changes.Package, bumpType BumpType, marketplace 
 	result.NewVersion = newVersion
 
 	if !b.DryRun {
-		// Update plugin.json if it exists
+		// Validate Cargo.toml first (before any writes) to avoid partial updates
+		cargoTomlPath := filepath.Join(b.RepoRoot, pkg.Path, "cli", "Cargo.toml")
+		hasCargoToml := false
+		if _, err := os.Stat(cargoTomlPath); err == nil {
+			hasCargoToml = true
+			if _, err := parseCargoPackageSection(cargoTomlPath); err != nil {
+				return result, fmt.Errorf("Cargo.toml validation failed (no files modified): %w", err)
+			}
+		}
+
+		// All validations passed — now perform writes
 		if pluginJSONExists {
 			pluginData["version"] = newVersion
 			if err := b.saveJSON(pluginJSONPath, pluginData); err != nil {
@@ -128,16 +148,98 @@ func (b *Bumper) bumpPlugin(pkg changes.Package, bumpType BumpType, marketplace 
 			}
 		}
 
-		// Update marketplace.json
+		// Update marketplace.json (in-memory, saved later in BumpPlugins)
 		if err := b.updateMarketplacePlugin(marketplace, pkg.Name, newVersion); err != nil {
 			return result, fmt.Errorf("failed to update marketplace: %w", err)
 		}
 		result.Marketplace = true
+
+		// Update Cargo.toml (already validated above)
+		if hasCargoToml {
+			if err := b.bumpCargoToml(cargoTomlPath, newVersion); err != nil {
+				return result, fmt.Errorf("Cargo.toml update failed: %w", err)
+			}
+			result.CargoToml = true
+		}
 	}
 
 	return result, nil
 }
 
+// cargoPackageInfo holds the parsed [package] section of a Cargo.toml file.
+type cargoPackageInfo struct {
+	fullText   string // entire file content
+	sectionStart int  // byte offset where [package] header ends
+	sectionEnd   int  // byte offset where the next section starts (or EOF)
+	section      string // content between [package] and next section
+}
+
+// parseCargoPackageSection reads a Cargo.toml file and extracts the [package] section boundaries.
+// It validates that exactly one version field exists in the section.
+func parseCargoPackageSection(path string) (*cargoPackageInfo, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	text := string(content)
+
+	pkgLoc := cargoPackageRe.FindStringIndex(text)
+	if pkgLoc == nil {
+		return nil, fmt.Errorf("no [package] section found in %s", path)
+	}
+
+	pkgEnd := len(text)
+	remaining := text[pkgLoc[1]:]
+	if nextSection := cargoSectionRe.FindStringIndex(remaining); nextSection != nil {
+		pkgEnd = pkgLoc[1] + nextSection[0]
+	}
+
+	section := text[pkgLoc[1]:pkgEnd]
+
+	matches := cargoVersionMatchRe.FindAllStringIndex(section, -1)
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no version field found in [package] section of %s", path)
+	}
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("multiple version fields found in [package] section of %s", path)
+	}
+
+	return &cargoPackageInfo{
+		fullText:     text,
+		sectionStart: pkgLoc[1],
+		sectionEnd:   pkgEnd,
+		section:      section,
+	}, nil
+}
+
+// ExtractCargoPackageVersion reads a Cargo.toml and returns the version from the [package] section.
+func ExtractCargoPackageVersion(path string) (string, error) {
+	info, err := parseCargoPackageSection(path)
+	if err != nil {
+		return "", err
+	}
+
+	match := cargoVersionExtract.FindStringSubmatch(info.section)
+	if match == nil {
+		return "", fmt.Errorf("no version field found in [package] section of %s", path)
+	}
+	return match[1], nil
+}
+
+// bumpCargoToml updates the version field in the [package] section of a Cargo.toml file.
+// It only replaces the version within the [package] section to avoid corrupting dependency versions.
+func (b *Bumper) bumpCargoToml(path, newVersion string) error {
+	info, err := parseCargoPackageSection(path)
+	if err != nil {
+		return err
+	}
+
+	updatedSection := cargoVersionRe.ReplaceAllString(info.section, "${1}"+newVersion+"${3}")
+	updated := info.fullText[:info.sectionStart] + updatedSection + info.fullText[info.sectionEnd:]
+
+	return os.WriteFile(path, []byte(updated), 0644)
+}
 
 // getMarketplacePluginVersion gets the version of a plugin from marketplace.json
 func (b *Bumper) getMarketplacePluginVersion(marketplace map[string]interface{}, pluginName string) string {
