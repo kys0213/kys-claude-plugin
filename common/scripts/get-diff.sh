@@ -3,7 +3,7 @@
 # scope별 diff를 임시 파일에 저장하고 경로만 반환하는 유틸 스크립트
 # 사용법: ./get-diff.sh [scope] [target]
 #   scope: uncommitted (기본), staged, pr, branch
-#   target: branch scope일 때 base 브랜치명
+#   target: pr scope일 때 PR 번호, branch scope일 때 base 브랜치명
 
 set -e
 set -u
@@ -36,9 +36,16 @@ case "$SCOPE" in
                 echo "--- /dev/null" >> "$OUTPUT_FILE"
                 echo "+++ b/$ufile" >> "$OUTPUT_FILE"
                 if [ -f "$PROJECT_ROOT/$ufile" ]; then
-                    LINES=$(wc -l < "$PROJECT_ROOT/$ufile" 2>/dev/null || echo "0")
-                    echo "@@ -0,0 +1,$LINES @@" >> "$OUTPUT_FILE"
-                    sed 's/^/+/' "$PROJECT_ROOT/$ufile" >> "$OUTPUT_FILE"
+                    # Check if file is text (not binary)
+                    # empty files are treated as text; grep -qI detects binary reliably (POSIX)
+                    if [ ! -s "$PROJECT_ROOT/$ufile" ] || LC_ALL=C grep -qI '' "$PROJECT_ROOT/$ufile" 2>/dev/null; then
+                        LINES=$(wc -l < "$PROJECT_ROOT/$ufile" 2>/dev/null || echo "0")
+                        echo "@@ -0,0 +1,$LINES @@" >> "$OUTPUT_FILE"
+                        sed 's/^/+/' "$PROJECT_ROOT/$ufile" >> "$OUTPUT_FILE"
+                    else
+                        echo "@@ Binary file @@" >> "$OUTPUT_FILE"
+                        echo "+++ Binary file" >> "$OUTPUT_FILE"
+                    fi
                 fi
             done <<< "$UNTRACKED"
         fi
@@ -48,8 +55,21 @@ case "$SCOPE" in
         (cd "$PROJECT_ROOT" && git diff --cached 2>/dev/null || true) > "$OUTPUT_FILE"
         ;;
     pr)
-        echo "PR diff 수집 중..." >&2
-        (cd "$PROJECT_ROOT" && gh pr diff 2>/dev/null || true) > "$OUTPUT_FILE"
+        if [ -n "$TARGET" ]; then
+            echo "PR #$TARGET diff 수집 중..." >&2
+            if ! (cd "$PROJECT_ROOT" && gh pr diff "$TARGET") > "$OUTPUT_FILE" 2>/dev/null; then
+                rm -f "$OUTPUT_FILE"
+                echo "Error: PR #$TARGET 을(를) 찾을 수 없습니다. PR 번호를 확인해주세요." >&2
+                exit 1
+            fi
+        else
+            echo "현재 브랜치 PR diff 수집 중..." >&2
+            if ! (cd "$PROJECT_ROOT" && gh pr diff) > "$OUTPUT_FILE" 2>/dev/null; then
+                rm -f "$OUTPUT_FILE"
+                echo "Error: 현재 브랜치에 연결된 PR이 없습니다." >&2
+                exit 1
+            fi
+        fi
         ;;
     branch)
         BASE="${TARGET:-main}"

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ./.claude/hooks/default-branch-guard-hook.sh",
+            "command": "git-utils guard write --project-dir=${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch' --default-branch=main",
             "timeout": 5
           },
           {
@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ./.claude/hooks/default-branch-guard-commit-hook.sh",
+            "command": "git-utils guard commit --project-dir=${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch' --default-branch=main",
             "timeout": 5
           },
           {

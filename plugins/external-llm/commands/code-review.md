@@ -1,6 +1,6 @@
 ---
 description: Claude, Codex, Gemini 3개 LLM으로 코드 변경사항을 리뷰합니다
-argument-hint: "[scope] [관점]"
+argument-hint: "[--uncommitted|--staged|--pr [번호]|--branch <name>] [관점]"
 allowed-tools: ["Task"]
 ---
 
@@ -14,17 +14,24 @@ Claude, OpenAI Codex, Google Gemini 3개 LLM을 사용하여 코드 변경사항
 # 기본 (uncommitted 변경사항)
 /code-review
 
-# scope 지정
+# scope 지정 (-- 접두사)
+/code-review --uncommitted
+/code-review --staged
+/code-review --pr              # 현재 브랜치의 PR
+/code-review --pr 123          # 특정 PR 번호
+/code-review --branch main     # main 대비 현재 브랜치 diff
+
+# scope 지정 (기존 방식도 지원)
 /code-review staged
 /code-review pr
 /code-review "branch main"
 
 # 관점 지정
 /code-review "security 관점으로 리뷰해줘"
-/code-review "staged performance 관점"
+/code-review "--staged performance 관점"
 
 # 복합
-/code-review "pr 보안과 성능 관점에서 리뷰해줘"
+/code-review "--pr 123 보안과 성능 관점에서 리뷰해줘"
 ```
 
 ## 핵심 워크플로우
@@ -44,13 +51,15 @@ Claude, OpenAI Codex, Google Gemini 3개 LLM을 사용하여 코드 변경사항
 
 사용자 요청에서 추출:
 - **scope**: uncommitted (기본), staged, pr, branch
-- **target**: branch scope일 때 base 브랜치명
+- **target**: pr scope일 때 PR 번호, branch scope일 때 base 브랜치명
 - **관점**: security, performance, architecture 등 (기본: 일반 코드 리뷰)
 
-파싱 규칙:
-- "staged" → scope=staged
-- "pr" → scope=pr
-- "branch main" / "branch develop" → scope=branch, target=main/develop
+파싱 규칙 (`--` 접두사 우선, 기존 방식도 호환):
+- `--uncommitted` 또는 "uncommitted" → scope=uncommitted
+- `--staged` 또는 "staged" → scope=staged
+- `--pr` 또는 "pr" → scope=pr
+- `--pr 123` → scope=pr, target=123
+- `--branch main` 또는 "branch main" → scope=branch, target=main
 - 그 외 → scope=uncommitted
 - "security" / "보안" → 관점=security
 - "performance" / "성능" → 관점=performance
@@ -69,9 +78,10 @@ Task(subagent_type="diff-collector", prompt="scope: [scope], target: [target]", 
 **에러 시**: 변경사항이 없으면 에이전트가 에러 메시지를 반환합니다. 사용자에게 안내 후 종료:
 ```
 변경사항이 없습니다. 다른 scope를 지정해보세요:
-- /code-review staged
-- /code-review pr
-- /code-review "branch main"
+- /code-review --staged
+- /code-review --pr
+- /code-review --pr 123
+- /code-review --branch main
 ```
 
 ### Step 3: 3개 리뷰 에이전트 병렬 실행
@@ -135,7 +145,7 @@ call-codex-review.sh를 사용하여 코드 리뷰를 수행해주세요.
 
 ## 요약
 
-- **Scope**: [scope]
+- **Scope**: [scope] (target이 있으면 함께 표시, 예: `pr #123`, `branch main`)
 - **Claude 점수**: XX/100
 - **Codex 점수**: XX/100
 - **Gemini 점수**: XX/100

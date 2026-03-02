@@ -32,3 +32,6 @@ tools/bumpversion/bumpversion
 # Rust build artifacts
 plugins/suggest-workflow/cli/target/
 plugins/autodev/cli/target/
+
+# Plugin build outputs
+plugins/git-utils/dist/

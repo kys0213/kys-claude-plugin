@@ -3,7 +3,7 @@
 # codex review 네이티브 CLI를 사용하여 코드 리뷰를 수행하는 래퍼 스크립트
 # 사용법: ./call-codex-review.sh [scope] [target] [prompt]
 #   scope: uncommitted (기본), staged, pr, branch
-#   target: branch scope일 때 base 브랜치명 (없으면 빈 문자열)
+#   target: pr scope일 때 PR 번호, branch scope일 때 base 브랜치명 (없으면 빈 문자열)
 #   prompt: 추가 리뷰 지시사항 (선택)
 
 set -e
@@ -44,7 +44,11 @@ case "$SCOPE" in
         ;;
     pr)
         # PR의 base 브랜치 가져오기
-        PR_BASE=$(cd "$PROJECT_ROOT" && gh pr view --json baseRefName -q '.baseRefName' 2>/dev/null || echo "main")
+        if [ -n "$TARGET" ]; then
+            PR_BASE=$(cd "$PROJECT_ROOT" && gh pr view "$TARGET" --json baseRefName -q '.baseRefName' 2>/dev/null || echo "main")
+        else
+            PR_BASE=$(cd "$PROJECT_ROOT" && gh pr view --json baseRefName -q '.baseRefName' 2>/dev/null || echo "main")
+        fi
         CODEX_FLAGS="--base $PR_BASE"
         ;;
     branch)
