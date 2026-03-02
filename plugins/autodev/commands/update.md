@@ -86,9 +86,9 @@ ls ~/.claude/plugins/cache/*/commands/*.md 2>/dev/null
 
 | 구분 | 플러그인 | 확인 대상 |
 |------|---------|----------|
-| 필수 | `develop-workflow` | `multi-review.md`, `develop-auto.md` 존재 여부 |
 | 필수 | `git-utils` | `commit-and-pr.md` 존재 여부 |
-| 권장 | `external-llm` | `invoke-codex.md`, `invoke-gemini.md` 존재 여부 |
+| 선택 | `develop-workflow` | `multi-review.md`, `develop-auto.md` 존재 여부 |
+| 선택 | `external-llm` | `invoke-codex.md`, `invoke-gemini.md` 존재 여부 |
 
 미설치 플러그인이 있으면 설치 명령어를 안내합니다.
 

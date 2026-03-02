@@ -119,12 +119,15 @@ impl Task for ImplementTask {
 
         // 레포별 config에서 workflow 로드
         let repo_cfg = self.config.load(Some(&wt_path));
-        let workflow = repo_cfg.workflow.issue.clone();
+        let resolved = super::workflow_resolver::resolve_workflow_prompt(
+            &repo_cfg.workflow.issue,
+            super::workflow_resolver::TaskType::Issue,
+        );
         let prompt = format!(
             "[autodev] implement: issue #{} in {}",
             self.item.github_number, self.item.repo_name
         );
-        let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{workflow}");
+        let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{resolved}");
 
         self.started_at = Some(Utc::now().to_rfc3339());
 
