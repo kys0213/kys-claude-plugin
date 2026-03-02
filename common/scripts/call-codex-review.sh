@@ -3,7 +3,7 @@
 # codex review 네이티브 CLI를 사용하여 코드 리뷰를 수행하는 래퍼 스크립트
 # 사용법: ./call-codex-review.sh [scope] [target] [prompt]
 #   scope: uncommitted (기본), staged, pr, branch
-#   target: branch scope일 때 base 브랜치명 (없으면 빈 문자열)
+#   target: pr scope일 때 PR 번호, branch scope일 때 base 브랜치명 (없으면 빈 문자열)
 #   prompt: 추가 리뷰 지시사항 (선택)
 
 set -e
