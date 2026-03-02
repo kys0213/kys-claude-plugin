@@ -1,4 +1,4 @@
-# Config Schema v2: `.develop-workflow.yaml`
+# Config Schema v2: `.autodev.yaml`
 
 > **Date**: 2026-03-02
 > **Status**: Draft
@@ -48,8 +48,8 @@ workflows:    # autodev 파이프라인 단계별 실행 방식
 `.claude/` 설정과 동일한 패턴으로, 글로벌 기본값 위에 레포별 오버라이드를 deep merge한다:
 
 ```
-~/.develop-workflow.yaml              ← 글로벌 기본값
-  └── <repo>/.develop-workflow.yaml   ← 레포별 오버라이드 (deep merge)
+~/.autodev.yaml              ← 글로벌 기본값
+  └── <repo>/.autodev.yaml   ← 레포별 오버라이드 (deep merge)
 ```
 
 레포 설정에서 명시한 필드만 글로벌 값을 덮어쓴다. 명시하지 않은 필드는 글로벌 → default 순으로 적용된다.
@@ -184,7 +184,7 @@ workflows:
 
 ## 6. 레포별 오버라이드 예시
 
-### 글로벌 설정 (`~/.develop-workflow.yaml`)
+### 글로벌 설정 (`~/.autodev.yaml`)
 
 ```yaml
 daemon:
@@ -206,7 +206,7 @@ workflows:
     max_iterations: 2
 ```
 
-### Frontend 레포 오버라이드 (`frontend-app/.develop-workflow.yaml`)
+### Frontend 레포 오버라이드 (`frontend-app/.autodev.yaml`)
 
 ```yaml
 sources:
@@ -218,7 +218,7 @@ workflows:
     max_iterations: 3     # UI 리뷰는 반복 횟수를 늘림
 ```
 
-### OSS 레포 오버라이드 (`oss-lib/.develop-workflow.yaml`)
+### OSS 레포 오버라이드 (`oss-lib/.autodev.yaml`)
 
 ```yaml
 workflows:

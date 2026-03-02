@@ -102,7 +102,7 @@ workflows:
   review:
     max_iterations: 5
 "#;
-    fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
+    fs::write(tmp.path().join(".autodev.yaml"), yaml).unwrap();
     let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     let config = loader::load_merged(&env, None);
@@ -138,7 +138,7 @@ sources:
       - bot1
       - bot2
 "#;
-    fs::write(repo_dir.join(".develop-workflow.yaml"), yaml).unwrap();
+    fs::write(repo_dir.join(".autodev.yaml"), yaml).unwrap();
 
     let config = loader::load_merged(&env, Some(&repo_dir));
     assert_eq!(config.sources.github.scan_interval_secs, 120);
@@ -168,7 +168,7 @@ workflows:
   review:
     max_iterations: 5
 "#;
-    fs::write(tmp.path().join(".develop-workflow.yaml"), global_yaml).unwrap();
+    fs::write(tmp.path().join(".autodev.yaml"), global_yaml).unwrap();
     let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     // 레포 오버라이드 — model과 max_iterations만 덮어씀
@@ -180,7 +180,7 @@ workflows:
   review:
     max_iterations: 3
 "#;
-    fs::write(repo_dir.join(".develop-workflow.yaml"), repo_yaml).unwrap();
+    fs::write(repo_dir.join(".autodev.yaml"), repo_yaml).unwrap();
 
     let config = loader::load_merged(&env, Some(&repo_dir));
 
@@ -209,7 +209,7 @@ fn load_merged_ignores_malformed_yaml() {
     let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     // 잘못된 YAML
-    fs::write(repo_dir.join(".develop-workflow.yaml"), "{{invalid yaml!!!").unwrap();
+    fs::write(repo_dir.join(".autodev.yaml"), "{{invalid yaml!!!").unwrap();
 
     // 파싱 실패 시 기본값 반환 (패닉하지 않음)
     let config = loader::load_merged(&env, Some(&repo_dir));
@@ -225,7 +225,7 @@ fn load_merged_empty_yaml_returns_defaults() {
     let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     // 빈 파일
-    fs::write(repo_dir.join(".develop-workflow.yaml"), "").unwrap();
+    fs::write(repo_dir.join(".autodev.yaml"), "").unwrap();
 
     let config = loader::load_merged(&env, Some(&repo_dir));
     assert_eq!(config.sources.github.scan_interval_secs, 300);
@@ -236,7 +236,7 @@ fn load_merged_partial_yaml_fills_defaults() {
     let tmp = TempDir::new().unwrap();
 
     let yaml = "sources:\n  github:\n    model: gpt-4\n";
-    fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
+    fs::write(tmp.path().join(".autodev.yaml"), yaml).unwrap();
     let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     let config = loader::load_merged(&env, None);
@@ -263,7 +263,7 @@ daemon:
   tick_interval_secs: 30
   daily_report_hour: 9
 "#;
-    fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
+    fs::write(tmp.path().join(".autodev.yaml"), yaml).unwrap();
     let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     let config = loader::load_merged(&env, None);
@@ -282,7 +282,7 @@ sources:
     scan_interval_secs: 60
     model: opus
 "#;
-    fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
+    fs::write(tmp.path().join(".autodev.yaml"), yaml).unwrap();
     let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     let config = loader::load_merged(&env, None);
@@ -302,7 +302,7 @@ fn daemon_config_partial_override() {
 daemon:
   daily_report_hour: 12
 "#;
-    fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
+    fs::write(tmp.path().join(".autodev.yaml"), yaml).unwrap();
     let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     let config = loader::load_merged(&env, None);
@@ -324,7 +324,7 @@ sources:
   github:
     scan_interval_secs: "oops"
 "#;
-    fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
+    fs::write(tmp.path().join(".autodev.yaml"), yaml).unwrap();
     let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     // 타입 오류 시에도 패닉 없이 default 반환
@@ -343,7 +343,7 @@ workflows:
   review:
     max_iterations: "not_a_number"
 "#;
-    fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
+    fs::write(tmp.path().join(".autodev.yaml"), yaml).unwrap();
     let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     let config = loader::load_merged(&env, None);
@@ -375,7 +375,7 @@ workflow:
   issue: builtin
   pr: builtin
 "#;
-    fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
+    fs::write(tmp.path().join(".autodev.yaml"), yaml).unwrap();
     let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     let config = loader::load_merged(&env, None);
@@ -399,7 +399,7 @@ sources:
     scan_interval_secs: 60
 totally_unknown_field: 42
 "#;
-    fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
+    fs::write(tmp.path().join(".autodev.yaml"), yaml).unwrap();
     let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     let config = loader::load_merged(&env, None);
@@ -425,7 +425,7 @@ workflows:
     agent: null
     max_iterations: 3
 "#;
-    fs::write(tmp.path().join(".develop-workflow.yaml"), yaml).unwrap();
+    fs::write(tmp.path().join(".autodev.yaml"), yaml).unwrap();
     let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     let config = loader::load_merged(&env, None);
@@ -460,7 +460,7 @@ workflows:
   review:
     max_iterations: 5
 "#;
-    fs::write(tmp.path().join(".develop-workflow.yaml"), global_yaml).unwrap();
+    fs::write(tmp.path().join(".autodev.yaml"), global_yaml).unwrap();
     let env = TestEnv::new().with_home(tmp.path().to_str().unwrap());
 
     // 레포: review만 오버라이드
@@ -469,7 +469,7 @@ workflows:
   review:
     max_iterations: 3
 "#;
-    fs::write(repo_dir.join(".develop-workflow.yaml"), repo_yaml).unwrap();
+    fs::write(repo_dir.join(".autodev.yaml"), repo_yaml).unwrap();
 
     let config = loader::load_merged(&env, Some(&repo_dir));
 

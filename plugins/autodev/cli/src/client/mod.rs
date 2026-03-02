@@ -80,15 +80,15 @@ pub fn repo_add(
         let ws_dir = config::workspaces_path(env).join(config::sanitize_repo_name(&name));
         std::fs::create_dir_all(&ws_dir)?;
         let yaml = serde_yaml::to_string(&value)?;
-        std::fs::write(ws_dir.join(".develop-workflow.yaml"), yaml)?;
+        std::fs::write(ws_dir.join(config::CONFIG_FILENAME), yaml)?;
         println!("registered: {name} ({url})");
         println!(
             "config: written to {}",
-            ws_dir.join(".develop-workflow.yaml").display()
+            ws_dir.join(config::CONFIG_FILENAME).display()
         );
     } else {
         println!("registered: {name} ({url})");
-        println!("config: edit ~/.develop-workflow.yaml (global) or <repo>/.develop-workflow.yaml (per-repo)");
+        println!("config: edit ~/.autodev.yaml (global) or <repo>/.autodev.yaml (per-repo)");
     }
 
     Ok(())
@@ -125,7 +125,7 @@ pub fn repo_config(env: &dyn Env, name: &str) -> Result<()> {
 
     // 워크스페이스에서 레포별 설정 탐색
     let ws = config::workspaces_path(env).join(config::sanitize_repo_name(name));
-    let repo_config_path = ws.join(".develop-workflow.yaml");
+    let repo_config_path = ws.join(config::CONFIG_FILENAME);
     println!("\nRepo config: {}", repo_config_path.display());
 
     if repo_config_path.exists() {

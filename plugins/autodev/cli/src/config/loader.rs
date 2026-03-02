@@ -3,7 +3,7 @@ use std::path::Path;
 use super::models::WorkflowConfig;
 use super::Env;
 
-const CONFIG_FILENAME: &str = ".develop-workflow.yaml";
+pub const CONFIG_FILENAME: &str = ".autodev.yaml";
 
 /// 글로벌(~/) + 레포별 YAML을 머지하여 최종 설정 반환
 /// Raw YAML Value 단계에서 딥머지 → 최종 역직렬화

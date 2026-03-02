@@ -111,7 +111,7 @@ fn repo_add_with_config_writes_yaml() {
 
     // Verify YAML file was created in workspace
     let ws_dir = home.path().join("workspaces").join("org-myrepo");
-    let yaml_path = ws_dir.join(".develop-workflow.yaml");
+    let yaml_path = ws_dir.join(".autodev.yaml");
     assert!(yaml_path.exists(), "config YAML should be created");
 
     let content = std::fs::read_to_string(&yaml_path).unwrap();
