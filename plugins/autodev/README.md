@@ -75,12 +75,12 @@ GitHub Labels (SSOT, 영속)         SQLite (영속 관리)
 └──────────────────────┘
             │
      In-Memory StateQueue (휘발)
-     ┌──────────────────────────────────┐
-     │ issues[Pending]  → [Analyzing]   │
-     │ prs[Reviewing]   → [Improving]   │
-     │ merges[Merging]  → [Conflict]    │
-     │ index: HashMap<WorkId, State>    │
-     └──────────────────────────────────┘
+     ┌──────────────────────────────────────────────┐
+     │ issues[Pending → Analyzing → Ready → Impl]   │
+     │ prs[Pending → Reviewing → ReviewDone → Impr]  │
+     │ prs[Extracting]  (merge 후 지식 추출)          │
+     │ index: HashMap<WorkId, State>                 │
+     └──────────────────────────────────────────────┘
 ```
 
 - **GitHub 라벨 = SSOT** — 작업 완료 상태의 유일한 영속 마커
@@ -92,25 +92,32 @@ GitHub Labels (SSOT, 영속)         SQLite (영속 관리)
 ```
 plugins/autodev/cli/src/
 ├── main.rs              # CLI 진입점 (clap subcommands)
-├── daemon/              # 데몬 루프 + PID + recovery
-├── scanner/             # GitHub 이벤트 감지 (cursor 기반 incremental)
-├── pipeline/            # 흐름 오케스트레이션 (issue, pr, merge)
-├── components/          # 비즈니스 로직 (workspace, analyzer, reviewer, merger, notifier)
+├── daemon/              # Daemon + TaskManager + TaskRunner + Agent + PID
+├── tasks/               # Task 구현체 (analyze, implement, review, improve, extract)
+├── sources/             # TaskSource 구현체 (github — recovery, scan, queue drain)
+├── components/          # 비즈니스 로직 (workspace, analyzer, reviewer, notifier)
 ├── infrastructure/      # 외부 시스템 추상화 (gh, git, claude — trait + mock + real)
-├── queue/               # SQLite 스키마 + repository 패턴
+├── domain/              # 도메인 모델 (GitRepository, labels, models)
+├── queue/               # SQLite 스키마 + StateQueue + repository 패턴
+├── knowledge/           # Knowledge extraction (per-task + daily report)
 ├── tui/                 # ratatui 기반 TUI 대시보드
-└── config/              # YAML 설정 로드/merge
+└── config/              # YAML 설정 로드/merge + ConfigLoader trait
 ```
 
 ### 라벨 상태 전이
 
 ```
-(없음) ──scan──→ autodev:wip ──success──→ autodev:done
-                     │
-                     ├──skip────→ autodev:skip
-                     ├──failure──→ (없음)  ← 재시도
-                     └──crash────→ recovery() → (없음)  ← 재시도
+Issue:
+  (HITL) autodev:analyze → (daemon) wip → analyzed → (HITL) approved-analysis
+  → (daemon) implementing → done (PR approve 시)
+
+PR:
+  autodev:wip → (ReviewTask) done 또는 changes-requested
+  → (ImproveTask) wip (iteration+1) → 재리뷰 반복
+  → (merge 후) extracted
 ```
+
+> 상세 전이 다이어그램은 [DESIGN-v2.md](./DESIGN-v2.md) §3 참조.
 
 ---
 
@@ -132,38 +139,44 @@ loop (매 tick):
 
 ## Flows
 
-### Issue: 분석 → 구현 → PR
+### Issue: 분석 → HITL → 구현 → PR
 
 ```
-scan 발견 → wip + queue[Pending]
-  → 분석(claude -p) → queue[Analyzing]
-  ├─ implement  → queue[Ready] → 구현(claude -p) → PR 생성 → autodev:done
-  ├─ clarify    → 댓글 + autodev:skip + queue.remove()
-  └─ wontfix    → 댓글 + autodev:skip + queue.remove()
-  실패 시 → 라벨 제거 + queue.remove() → 다음 scan에서 재발견
+Phase 1 (분석):
+  사람이 autodev:analyze 추가 → scan 감지 → wip + queue[Pending]
+  → AnalyzeTask (claude -p) → queue[Analyzing]
+  ├─ implement → 분석 코멘트 + autodev:analyzed + queue 이탈 (사람 리뷰 대기)
+  ├─ clarify   → 댓글 + autodev:skip
+  └─ wontfix   → 댓글 + autodev:skip
+
+Phase 2 (HITL → 구현):
+  사람이 approved-analysis 추가 → scan 감지 → implementing + queue[Ready]
+  → ImplementTask → PR 생성 (Closes #N) → PR에 autodev:wip 추가
+  → issue queue 이탈 (PR 리뷰 대기)
+
+Phase 3 (PR approve → Issue done):
+  PR approve 시 source_issue_number가 있으면 → Issue: implementing → done
 ```
 
 ### PR: 리뷰 → 개선 → 재리뷰
 
 ```
-scan 발견 → wip + queue[Pending]
-  → 리뷰(/multi-review) → queue[Reviewing]
-  ├─ approve → autodev:done + queue.remove()
-  └─ request_changes → 인라인 댓글
-       → queue[Improving] → 자동 개선(claude -p)
-       → queue[Improved] → 재리뷰
-       → approve 될 때까지 반복 → autodev:done
-  실패 시 → 라벨 제거 + queue.remove() → 재시도
+scan 감지 (autodev:wip) → queue[Pending]
+  → ReviewTask → queue[Reviewing]
+  ├─ approve → autodev:done + source_issue → done + knowledge extraction
+  └─ request_changes → autodev:changes-requested
+       → ImproveTask → 피드백 반영 → autodev:wip (iteration+1)
+       → queue[Pending] → 재리뷰
+       → max iteration 초과 시 → autodev:skip
 ```
 
-### Merge: 별도 큐
+### Knowledge Extraction: merge 후 지식 추출
 
 ```
-merge scan: approved + 라벨 없는 PR 발견 (사람/autodev approve 모두)
-  → wip + queue[Pending] → 머지(/merge-pr) → queue[Merging]
-  ├─ success  → autodev:done + queue.remove()
-  ├─ conflict → queue[Conflict] → 자동 해결 시도 → 재머지
-  └─ failure  → 라벨 제거 + queue.remove() → 재시도
+scan_done_merged: autodev:done + merged + NOT extracted → queue[Extracting]
+  → ExtractTask → 기존 지식 수집 + suggest-workflow 데이터
+  → Claude 분석 → 이슈 코멘트 + knowledge PR 생성 (autodev:skip 라벨)
+  → autodev:extracted 추가 + queue 제거
 ```
 
 ### Knowledge Extraction
@@ -317,4 +330,4 @@ daemon:
 
 ---
 
-상세 설계는 [DESIGN-v2.md](./DESIGN-v2.md) 참조.
+상세 설계는 [DESIGN-v2.md](./DESIGN-v2.md) (워크플로우) 및 [DESIGN-v3-ARCHITECTURE.md](./DESIGN-v3-ARCHITECTURE.md) (아키텍처) 참조.

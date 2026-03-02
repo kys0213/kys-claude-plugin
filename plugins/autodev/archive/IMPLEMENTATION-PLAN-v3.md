@@ -149,13 +149,13 @@ pub trait ConfigLoader: Send + Sync {
 }
 ```
 
-### ~~1-8. `daemon/task_context.rs` — TaskContext~~ (폐기)
+### ~~1-8. `daemon/task_context.rs` — TaskContext~~ (폐기 → ✅ 삭제 완료)
 
 > TaskContext는 성급한 추상화로 판단하여 폐기.
 > TaskSource가 OCP로 확장 가능하므로, 각 소스가 생성하는 Task는 서로 다른
 > 의존성을 가진다. 각 Source가 자기 Task에 필요한 의존성을 개별 `Arc<dyn Trait>`로
 > 직접 주입하는 패턴이 적절.
-> 기존 `daemon/task_context.rs`는 dead code로 삭제 대상.
+> ~~기존 `daemon/task_context.rs`는 dead code로 삭제 대상.~~ → 삭제 완료.
 
 ### 수정 파일
 - `daemon/mod.rs`: 새 모듈 선언 추가 (`pub mod task; pub mod agent;` 등)
@@ -355,50 +355,20 @@ improve_after_success_pushes_to_improved
 improve_after_nonzero_exit_removes
 ```
 
-### 2-5. `tasks/merge.rs` — MergeTask
+### ~~2-5. `tasks/merge.rs` — MergeTask~~ (scope 외 → 제거)
 
-**현재 코드**: `pipeline/merge.rs` → `merge_one()` (160줄)
-
-```rust
-pub struct MergeTask {
-    workspace: Arc<dyn WorkspaceOps>,
-    gh: Arc<dyn Gh>,
-    config: Arc<dyn ConfigLoader>,
-    item: MergeItem,
-    wt_path: Option<PathBuf>,
-    task_id: String,
-}
-```
-
-**before_invoke**:
-1. preflight: PR mergeable 확인
-2. worktree 생성
-3. merge 프롬프트 구성
-
-**after_invoke**:
-1. `MergeOutcome` 파싱
-2. Success → `done` 라벨 + `QueueOp::Remove`
-3. Conflict → resolve 시도 (Agent 재호출 필요 — 별도 설계 고려)
-4. Failed/Error → `QueueOp::Remove`
-5. worktree 정리
-
-**테스트**:
-
-```
-merge_before_skips_non_mergeable
-merge_before_creates_worktree
-merge_after_success_marks_done
-merge_after_conflict_attempts_resolve
-merge_after_failure_removes
-```
+> DESIGN-v2.md §12 "Scope 외"에서 Merge 파이프라인을 명시적으로 제외.
+> `autodev:done` 이후의 머지는 사람의 판단 또는 별도 자동화가 처리한다.
+> MergeTask는 구현하지 않으며, 이 항목은 IMPL-PLAN에서 제거한다.
 
 ### 수정 파일
 - `lib.rs`: `pub mod tasks;` 추가
 
 ### 완료 기준
-- 5개 Task 구현체 × 각 before/after 테스트 → 모든 테스트 통과
+- 4개 Task 구현체 (Analyze, Implement, Review, Improve) × 각 before/after 테스트 → 모든 테스트 통과
 - `cargo test` 통과
 - 기존 `pipeline/` 코드는 아직 변경하지 않음
+- ~~MergeTask~~: DESIGN-v2 scope 외로 제거
 
 ---
 
@@ -716,7 +686,6 @@ refactor(autodev): implement AnalyzeTask with TDD
 refactor(autodev): implement ImplementTask with TDD
 refactor(autodev): implement ReviewTask with TDD
 refactor(autodev): implement ImproveTask with TDD
-refactor(autodev): implement MergeTask with TDD
 
 # Phase 3
 refactor(autodev): implement DefaultTaskRunner and ClaudeAgent
@@ -735,8 +704,8 @@ refactor(autodev): remove legacy pipeline and scanner modules
 
 | 리스크 | 확률 | 영향 | 대응 |
 |--------|------|------|------|
-| MergeTask의 conflict resolve가 단일 Agent 호출로 불충분 | 중간 | 중간 | after_invoke에서 conflict 시 별도 AgentRequest를 생성하여 Runner에 재요청하는 패턴 고려. 또는 MergeTask 내부에서 Claude를 직접 호출 (Task trait 확장 없이 pragmatic 접근) |
-| daily report가 현재 daemon 루프에 인라인 (60줄) | 낮음 | 낮음 | Phase 4에서 `TaskManager.tick()` 내부의 스케줄링으로 이동. 또는 별도 `DailyReportSource` (TaskSource 구현체) |
+| ~~MergeTask의 conflict resolve가 단일 Agent 호출로 불충분~~ | ~~중간~~ | ~~중간~~ | DESIGN-v2 scope 외로 제거 |
+| daily report가 현재 daemon 루프에 인라인 (60줄) | 낮음 | 낮음 | ✅ 해결: `DailyReporter` trait으로 분리, Daemon이 직접 소유 (SRP) |
 | git_repository.rs의 scan 로직 이동 시 회귀 | 중간 | 중간 | Phase 3에서 기존 scan 로직을 함수 단위로 추출 후 `GitHubTaskSource`에서 호출. 기존 테스트 유지 |
 | `QueueOp` 이동 시 기존 코드 컴파일 실패 | 높음 | 낮음 | Phase 4까지 기존 `pipeline::QueueOp`을 유지하고, `daemon::task`에서 re-export. Phase 4 마지막에 정리 |
 
@@ -748,7 +717,7 @@ refactor(autodev): remove legacy pipeline and scanner modules
 |------|--------|-------|
 | `daemon/mod.rs` | 746줄 | ~120줄 (Daemon struct + event loop) |
 | `pipeline/` 총 LOC | ~2500줄 | 0줄 (모듈 제거) |
-| `tasks/` 총 LOC | 0줄 | ~600줄 (5개 Task × ~120줄) |
+| `tasks/` 총 LOC | 0줄 | ~600줄 (4개 Task + ExtractTask) |
 | `sources/github.rs` | 0줄 | ~300줄 |
 | `daemon/task_runner.rs` | 0줄 | ~40줄 |
 | `daemon/task_manager.rs` | 0줄 | ~60줄 |
