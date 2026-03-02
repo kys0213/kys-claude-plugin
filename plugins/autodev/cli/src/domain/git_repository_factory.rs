@@ -29,7 +29,7 @@ fn config_mtime(path: &std::path::Path) -> Option<SystemTime> {
 ///
 /// 설정 파일의 mtime이 변경되지 않았으면 캐시된 값을 반환하여
 /// 매 tick마다 불필요한 디스크 I/O를 회피한다.
-fn resolve_gh_host(env: &dyn Env, repo_name: &str) -> Option<String> {
+pub(crate) fn resolve_gh_host(env: &dyn Env, repo_name: &str) -> Option<String> {
     let ws_path = config::workspaces_path(env).join(config::sanitize_repo_name(repo_name));
     let config_path = ws_path.join(".develop-workflow.yaml");
     let current_mtime = config_mtime(&config_path);

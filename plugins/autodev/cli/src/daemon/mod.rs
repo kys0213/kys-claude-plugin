@@ -1,27 +1,28 @@
 pub mod agent;
 pub mod agent_impl;
+pub mod daily_reporter;
 pub mod log;
 pub mod pid;
 pub mod status;
 pub mod task;
+pub mod task_manager;
+pub mod task_manager_impl;
 pub mod task_runner;
 pub mod task_runner_impl;
 pub mod task_source;
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{bail, Result};
-use chrono::Timelike;
 use tokio::task::JoinSet;
 use tracing::info;
 
-use crate::components::workspace::{OwnedWorkspace, Workspace};
+use crate::components::workspace::OwnedWorkspace;
 use crate::config::{self, Env};
-use crate::domain::git_repository::GitRepository;
 use crate::domain::git_repository_factory::GitRepositoryFactory;
-use crate::domain::repository::{ConsumerLogRepository, RepoRepository};
+use crate::domain::repository::ConsumerLogRepository;
 use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
@@ -30,10 +31,11 @@ use crate::queue::Database;
 use crate::sources::github::GitHubTaskSource;
 
 use self::agent_impl::ClaudeAgent;
+use self::daily_reporter::DailyReporter;
 use self::task::TaskResult;
+use self::task_manager::TaskManager;
 use self::task_runner::TaskRunner;
 use self::task_runner_impl::DefaultTaskRunner;
-use self::task_source::TaskSource;
 
 // ─── In-Flight Concurrency Tracker ───
 
@@ -94,6 +96,129 @@ fn try_spawn(
     }
 }
 
+// ─── Daemon ───
+
+/// 데몬 이벤트 루프를 관리하는 구조체.
+///
+/// trait 기반 의존성 주입으로 테스트 가능:
+/// - `TaskManager`: Task 수집 + 분배
+/// - `TaskRunner`: Task 생명주기 실행
+/// - `DailyReporter`: 일간 보고서 생성
+pub struct Daemon {
+    manager: Box<dyn TaskManager>,
+    runner: Arc<dyn TaskRunner>,
+    reporter: Box<dyn DailyReporter>,
+    tracker: InFlightTracker,
+    log_db: Database,
+    status_path: PathBuf,
+    counters: status::StatusCounters,
+    tick_interval_secs: u64,
+}
+
+impl Daemon {
+    pub fn new(
+        manager: Box<dyn TaskManager>,
+        runner: Arc<dyn TaskRunner>,
+        reporter: Box<dyn DailyReporter>,
+        max_concurrent_tasks: u32,
+        log_db: Database,
+        status_path: PathBuf,
+        tick_interval_secs: u64,
+    ) -> Self {
+        Self {
+            manager,
+            runner,
+            reporter,
+            tracker: InFlightTracker::new(max_concurrent_tasks),
+            log_db,
+            status_path,
+            counters: status::StatusCounters::default(),
+            tick_interval_secs,
+        }
+    }
+
+    /// 메인 이벤트 루프 실행.
+    ///
+    /// task completion / tick / status heartbeat / shutdown 4개 arm으로 구성.
+    /// SIGINT 수신 시 in-flight tasks를 대기한 뒤 종료한다.
+    pub async fn run(&mut self) {
+        let start_time = std::time::Instant::now();
+        let mut join_set: JoinSet<TaskResult> = JoinSet::new();
+        let mut pending_tasks: Vec<Box<dyn task::Task>> = Vec::new();
+
+        let mut tick =
+            tokio::time::interval(std::time::Duration::from_secs(self.tick_interval_secs));
+        let mut status_tick = tokio::time::interval(std::time::Duration::from_secs(5));
+
+        loop {
+            tokio::select! {
+                // ── Task completion ──
+                Some(result) = join_set.join_next() => {
+                    match result {
+                        Ok(task_result) => {
+                            self.tracker.release(&task_result.repo_name);
+                            info!(
+                                "task completed: {} - {} (in-flight: {})",
+                                task_result.work_id, task_result.status, self.tracker.total
+                            );
+                            self.manager.apply(&task_result);
+                            for log_entry in &task_result.logs {
+                                let _ = self.log_db.log_insert(log_entry);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("spawned task panicked: {e}");
+                            self.tracker.total = self.tracker.total.saturating_sub(1);
+                        }
+                    }
+
+                    try_spawn(&mut pending_tasks, &mut self.tracker, &mut join_set, &self.runner);
+                }
+
+                // ── Tick: housekeeping + spawn + daily report ──
+                _ = tick.tick() => {
+                    self.manager.tick().await;
+                    pending_tasks.extend(self.manager.drain_ready());
+
+                    try_spawn(&mut pending_tasks, &mut self.tracker, &mut join_set, &self.runner);
+
+                    self.reporter.maybe_run().await;
+                }
+
+                // ── Status heartbeat ──
+                _ = status_tick.tick() => {
+                    let ds = status::build_status(
+                        self.manager.active_items(), &self.counters, start_time,
+                    );
+                    status::write_status(&self.status_path, &ds);
+                }
+
+                // ── Graceful shutdown ──
+                _ = tokio::signal::ctrl_c() => {
+                    info!("received SIGINT, shutting down...");
+                    break;
+                }
+            }
+        }
+
+        // Wait for in-flight tasks to complete
+        if !join_set.is_empty() {
+            info!("waiting for {} in-flight tasks...", join_set.len());
+            while let Some(result) = join_set.join_next().await {
+                if let Ok(task_result) = result {
+                    self.tracker.release(&task_result.repo_name);
+                    self.manager.apply(&task_result);
+                    for log_entry in &task_result.logs {
+                        let _ = self.log_db.log_insert(log_entry);
+                    }
+                }
+            }
+        }
+
+        status::remove_status(&self.status_path);
+    }
+}
+
 // ─── Daemon Entry Point ───
 
 /// 데몬을 포그라운드로 시작 (non-blocking event loop)
@@ -122,8 +247,10 @@ pub async fn start(
     // Source DB: owned by GitHubTaskSource (repo sync, cursor operations)
     let source_db = Database::open(&db_path)?;
     source_db.initialize()?;
-    // Logging DB: separate connection for DB logging + daily reports
+    // Logging DB: separate connection for task result logging
     let log_db = Database::open(&db_path)?;
+    // Report DB: separate connection for daily reporter (repo_find_enabled + knowledge logs)
+    let report_db = Database::open(&db_path)?;
 
     println!("autodev daemon started (pid: {})", std::process::id());
 
@@ -137,7 +264,7 @@ pub async fn start(
         Arc::clone(&env),
     ))));
     let mut source = GitHubTaskSource::new(
-        workspace.clone(),
+        workspace,
         Arc::clone(&gh),
         config_loader,
         Arc::clone(&env),
@@ -164,25 +291,31 @@ pub async fn start(
         Err(e) => tracing::error!("startup reconcile failed: {e}"),
     }
 
-    let mut tracker = InFlightTracker::new(cfg.daemon.max_concurrent_tasks);
-    let mut join_set: JoinSet<TaskResult> = JoinSet::new();
-    let mut pending_tasks: Vec<Box<dyn task::Task>> = Vec::new();
+    // ── TaskManager: DefaultTaskManager wrapping source ──
+    let manager: Box<dyn TaskManager> =
+        Box::new(task_manager_impl::DefaultTaskManager::new(vec![Box::new(
+            source,
+        )]));
 
-    let daily_report_hour = cfg.daemon.daily_report_hour;
-    let knowledge_extraction = cfg.sources.github.knowledge_extraction;
-    let mut last_daily_report_date = String::new();
-
-    let start_time = std::time::Instant::now();
-    let status_path = home.join("daemon.status.json");
-    let counters = status::StatusCounters::default();
-
-    let tick_interval_secs = cfg.daemon.tick_interval_secs;
-
+    // ── DailyReporter ──
     let log_dir = config::resolve_log_dir(&cfg.daemon.log_dir, home);
-    let log_retention_days = cfg.daemon.log_retention_days;
+    let reporter: Box<dyn DailyReporter> = Box::new(daily_reporter::DefaultDailyReporter::new(
+        Arc::clone(&gh),
+        Arc::clone(&claude),
+        Arc::clone(&git),
+        Arc::clone(&env),
+        Arc::clone(&sw),
+        report_db,
+        daily_reporter::DailyReporterConfig {
+            log_dir: log_dir.clone(),
+            log_retention_days: cfg.daemon.log_retention_days,
+            daily_report_hour: cfg.daemon.daily_report_hour,
+            knowledge_extraction: cfg.sources.github.knowledge_extraction,
+        },
+    ));
 
-    // Startup cleanup: 보존 기간 초과 로그 삭제
-    let n = log::cleanup_old_logs(&log_dir, log_retention_days);
+    // ── Startup log cleanup ──
+    let n = log::cleanup_old_logs(&log_dir, cfg.daemon.log_retention_days);
     if n > 0 {
         info!("startup log cleanup: deleted {n} old log files");
     }
@@ -192,144 +325,20 @@ pub async fn start(
         cfg.daemon.max_concurrent_tasks
     );
 
-    // 메인 이벤트 루프: task completion / tick / status / shutdown
-    let mut tick = tokio::time::interval(std::time::Duration::from_secs(tick_interval_secs));
-    let mut status_tick = tokio::time::interval(std::time::Duration::from_secs(5));
+    // ── Daemon ──
+    let status_path = home.join("daemon.status.json");
+    let mut daemon = Daemon::new(
+        manager,
+        runner,
+        reporter,
+        cfg.daemon.max_concurrent_tasks,
+        log_db,
+        status_path,
+        cfg.daemon.tick_interval_secs,
+    );
 
-    loop {
-        tokio::select! {
-            // ── Task completion ──
-            Some(result) = join_set.join_next() => {
-                match result {
-                    Ok(task_result) => {
-                        tracker.release(&task_result.repo_name);
-                        info!(
-                            "task completed: {} - {} (in-flight: {})",
-                            task_result.work_id, task_result.status, tracker.total
-                        );
-                        // Apply queue ops to the per-repo queues
-                        source.apply(&task_result);
-                        // DB logging
-                        for log_entry in &task_result.logs {
-                            let _ = log_db.log_insert(log_entry);
-                        }
-                    }
-                    Err(e) => {
-                        // Task panicked — item stays in working phase.
-                        // Startup recovery will clean up on next restart.
-                        tracing::error!("spawned task panicked: {e}");
-                        tracker.total = tracker.total.saturating_sub(1);
-                    }
-                }
+    daemon.run().await;
 
-                // Task 완료 후 즉시 새 task spawn 시도 (tick 대기 불필요)
-                try_spawn(&mut pending_tasks, &mut tracker, &mut join_set, &runner);
-            }
-
-            // ── Tick: housekeeping + spawn ──
-            _ = tick.tick() => {
-                // poll: repo sync → recovery → scan → drain queues → Task 생성
-                let new_tasks = source.poll().await;
-                pending_tasks.extend(new_tasks);
-
-                // Spawn ready tasks
-                try_spawn(&mut pending_tasks, &mut tracker, &mut join_set, &runner);
-
-                // Daily Report (scheduled at daily_report_hour)
-                if knowledge_extraction {
-                    let now = chrono::Local::now();
-                    let today = now.format("%Y-%m-%d").to_string();
-                    if now.hour() >= daily_report_hour && last_daily_report_date != today {
-                        let yesterday = (now - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
-                        let log_path = log_dir.join(format!("daemon.{yesterday}.log"));
-
-                        log::cleanup_old_logs(&log_dir, log_retention_days);
-
-                        if log_path.exists() {
-                            let stats = crate::knowledge::daily::parse_daemon_log(&log_path);
-                            if stats.task_count > 0 {
-                                let patterns = crate::knowledge::daily::detect_patterns(&stats);
-                                let mut report = crate::knowledge::daily::build_daily_report(&yesterday, &stats, patterns);
-
-                                let ws = Workspace::new(&*git, &*env);
-                                if let Ok(enabled) = RepoRepository::repo_find_enabled(&log_db) {
-                                    if let Some(er) = enabled.first() {
-                                        if let Ok(base) = ws.ensure_cloned(&er.url, &er.name).await {
-                                            crate::knowledge::daily::enrich_with_cross_analysis(
-                                                &mut report, &*sw,
-                                            ).await;
-
-                                            let per_task = crate::knowledge::daily::aggregate_daily_suggestions(&log_db, &yesterday);
-
-                                            if let Some(ks) = crate::knowledge::daily::generate_daily_suggestions(
-                                                &*claude, &report, &base,
-                                            ).await {
-                                                report.suggestions = ks.suggestions;
-                                            }
-
-                                            report.suggestions.extend(per_task);
-
-                                            if !report.suggestions.is_empty() {
-                                                let cross_patterns = crate::knowledge::daily::detect_cross_task_patterns(&report.suggestions);
-                                                report.patterns.extend(cross_patterns);
-                                            }
-
-                                            // Use repo's gh_host directly
-                                            let repo_gh_host = source.repos()
-                                                .get(&er.name)
-                                                .and_then(|r: &GitRepository| r.gh_host());
-                                            crate::knowledge::daily::post_daily_report(
-                                                &*gh, &er.name, &report, repo_gh_host,
-                                            ).await;
-
-                                            if !report.suggestions.is_empty() {
-                                                crate::knowledge::daily::create_knowledge_prs(
-                                                    &*gh, &ws, &er.name, &report,
-                                                    repo_gh_host,
-                                                ).await;
-                                            }
-                                        }
-                                    }
-                                }
-
-                                info!("daily report generated for {yesterday}");
-                            }
-                        }
-
-                        last_daily_report_date = today;
-                    }
-                }
-            }
-
-            // ── Status heartbeat ──
-            _ = status_tick.tick() => {
-                let ds = status::build_status_from_repos(source.repos(), &counters, start_time);
-                status::write_status(&status_path, &ds);
-            }
-
-            // ── Graceful shutdown ──
-            _ = tokio::signal::ctrl_c() => {
-                info!("received SIGINT, shutting down...");
-                break;
-            }
-        }
-    }
-
-    // Wait for in-flight tasks to complete
-    if !join_set.is_empty() {
-        info!("waiting for {} in-flight tasks...", join_set.len());
-        while let Some(result) = join_set.join_next().await {
-            if let Ok(task_result) = result {
-                tracker.release(&task_result.repo_name);
-                source.apply(&task_result);
-                for log_entry in &task_result.logs {
-                    let _ = log_db.log_insert(log_entry);
-                }
-            }
-        }
-    }
-
-    status::remove_status(&status_path);
     pid::remove_pid(home);
     Ok(())
 }

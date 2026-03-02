@@ -75,8 +75,8 @@
 ┌──────────────────┐  ┌──────────────────┐
 │GitHubTaskSource  │  │(future sources)  │
 │──────────────────│  │  SlackTaskSource │
-│ ctx: TaskContext  │  │  JiraTaskSource  │
-│──────────────────│  └──────────────────┘
+│ workspace, gh,   │  │  JiraTaskSource  │
+│ config, db, ...  │  └──────────────────┘
 │ async poll()     │
 │  // 1. recovery  │
 │  // 2. scan      │
@@ -356,21 +356,20 @@ pub enum SkipReason {
 
 ### 공통 구조
 
-모든 Task는 `TaskContext`와 큐 아이템을 생성자 주입받는다.
+각 Task는 자신에게 필요한 의존성만 개별 `Arc<dyn Trait>`로 생성자 주입받는다.
 
-```rust
-pub struct TaskContext {
-    pub workspace: Arc<dyn WorkspaceOps>,
-    pub gh: Arc<dyn Gh>,
-    pub config: Arc<dyn ConfigLoader>,
-}
-```
+> ~~TaskContext~~ (폐기): TaskSource가 OCP로 확장 가능하므로, 각 소스가 생성하는
+> Task는 서로 다른 의존성과 관심사를 가진다. 하나의 TaskContext로 묶으면
+> 소스 추가 시 god object가 되어 OCP/ISP 위반. 각 Source가 자기 Task에
+> 필요한 의존성을 직접 주입하는 패턴이 적절하다.
 
 ### AnalyzeTask
 
 ```rust
 pub struct AnalyzeTask {
-    ctx: TaskContext,
+    workspace: Arc<dyn WorkspaceOps>,
+    gh: Arc<dyn Gh>,
+    config: Arc<dyn ConfigLoader>,
     item: IssueItem,
 }
 ```
@@ -384,7 +383,9 @@ pub struct AnalyzeTask {
 
 ```rust
 pub struct ImplementTask {
-    ctx: TaskContext,
+    workspace: Arc<dyn WorkspaceOps>,
+    gh: Arc<dyn Gh>,
+    config: Arc<dyn ConfigLoader>,
     item: IssueItem,
 }
 ```
@@ -398,7 +399,9 @@ pub struct ImplementTask {
 
 ```rust
 pub struct ReviewTask {
-    ctx: TaskContext,
+    workspace: Arc<dyn WorkspaceOps>,
+    gh: Arc<dyn Gh>,
+    config: Arc<dyn ConfigLoader>,
     item: PrItem,
 }
 ```
@@ -412,7 +415,9 @@ pub struct ReviewTask {
 
 ```rust
 pub struct ImproveTask {
-    ctx: TaskContext,
+    workspace: Arc<dyn WorkspaceOps>,
+    gh: Arc<dyn Gh>,
+    config: Arc<dyn ConfigLoader>,
     item: PrItem,
     sw: Arc<dyn SuggestWorkflow>,  // 선택적 의존
 }
@@ -431,7 +436,9 @@ pub struct ImproveTask {
 
 ```rust
 pub struct GitHubTaskSource {
-    ctx: TaskContext,
+    workspace: Arc<dyn WorkspaceOps>,
+    gh: Arc<dyn Gh>,
+    config: Arc<dyn ConfigLoader>,
     repos: HashMap<String, GitRepository>,
     db: Arc<Database>,
     scan_interval: Duration,
@@ -464,23 +471,32 @@ async fn poll(&mut self) -> Vec<Box<dyn Task>> {
     }
 
     // 4. 큐에서 실행 가능한 Task 생성
+    //    각 Task에 필요한 의존성을 개별 Arc::clone으로 주입
     let mut tasks: Vec<Box<dyn Task>> = Vec::new();
     for repo in self.repos.values_mut() {
         // issue Pending → AnalyzeTask
         if let Some(item) = repo.issue_queue.pop("Pending") {
-            tasks.push(Box::new(AnalyzeTask::new(self.ctx.clone(), item)));
+            tasks.push(Box::new(AnalyzeTask::new(
+                self.workspace.clone(), self.gh.clone(), self.config.clone(), item,
+            )));
         }
         // issue Ready → ImplementTask
         if let Some(item) = repo.issue_queue.pop("Ready") {
-            tasks.push(Box::new(ImplementTask::new(self.ctx.clone(), item)));
+            tasks.push(Box::new(ImplementTask::new(
+                self.workspace.clone(), self.gh.clone(), self.config.clone(), item,
+            )));
         }
         // pr Pending → ReviewTask
         if let Some(item) = repo.pr_queue.pop("Pending") {
-            tasks.push(Box::new(ReviewTask::new(self.ctx.clone(), item)));
+            tasks.push(Box::new(ReviewTask::new(
+                self.workspace.clone(), self.gh.clone(), self.config.clone(), item,
+            )));
         }
         // pr ReviewDone → ImproveTask
         if let Some(item) = repo.pr_queue.pop("ReviewDone") {
-            tasks.push(Box::new(ImproveTask::new(self.ctx.clone(), item)));
+            tasks.push(Box::new(ImproveTask::new(
+                self.workspace.clone(), self.gh.clone(), self.config.clone(), item,
+            )));
         }
     }
     tasks
@@ -671,22 +687,20 @@ pub trait ConfigLoader: Send + Sync {
 
 ---
 
-## 11. TaskContext
+## 11. ~~TaskContext~~ (폐기)
 
-Task와 TaskSource가 공유하는 의존성 묶음:
-
-```rust
-#[derive(Clone)]
-pub struct TaskContext {
-    pub workspace: Arc<dyn WorkspaceOps>,
-    pub gh: Arc<dyn Gh>,
-    pub config: Arc<dyn ConfigLoader>,
-}
-```
-
-- 각 Task는 생성 시 TaskContext를 주입받는다
-- TaskContext의 모든 필드는 `Arc<dyn Trait>`이므로 clone 비용이 낮다
-- GitHubTaskSource도 동일한 TaskContext를 사용한다
+> **폐기 사유**: TaskSource가 OCP로 확장 가능하므로, 각 소스가 생성하는 Task는
+> 서로 다른 의존성과 관심사를 가진다 (GitHub → gh/git/workspace, Slack → slack client,
+> Jira → jira client). 하나의 TaskContext로 묶으면:
+>
+> 1. 소스 추가 시 TaskContext가 비대해져 **god object** 화
+> 2. 사용하지 않는 필드가 `Option`으로 채워져 **ISP 위반**
+> 3. TaskSource OCP 달성의 의미가 퇴색
+>
+> **대안**: 각 TaskSource가 자기 Task에 필요한 의존성을 개별 `Arc<dyn Trait>`로
+> 직접 주입. Task 생성자가 자신의 관심사만 받으므로 ISP 준수.
+>
+> `daemon/task_context.rs`는 dead code로 삭제 대상.
 
 ---
 
@@ -894,8 +908,9 @@ SOLID 준수로 각 컴포넌트가 trait 경계에서 완전히 분리되므로
 async fn analyze_before_skips_closed_issue() {
     // Given: 이미 닫힌 이슈
     let gh = MockGh::new().with_issue_closed(42);
-    let ctx = TaskContext::test(gh, MockWorkspace::new(), MockConfig::new());
-    let mut task = AnalyzeTask::new(ctx, issue_item(42));
+    let ws = Arc::new(MockWorkspace::new());
+    let config = Arc::new(MockConfig::new());
+    let mut task = AnalyzeTask::new(ws.clone(), gh.clone(), config.clone(), issue_item(42));
 
     // When
     let result = task.before_invoke().await;
@@ -907,10 +922,10 @@ async fn analyze_before_skips_closed_issue() {
 #[tokio::test]
 async fn analyze_before_creates_worktree_and_returns_request() {
     // Given: open 이슈
-    let gh = MockGh::new().with_issue_open(42);
-    let ws = MockWorkspace::new();
-    let ctx = TaskContext::test(gh, ws.clone(), MockConfig::new());
-    let mut task = AnalyzeTask::new(ctx, issue_item(42));
+    let gh = Arc::new(MockGh::new().with_issue_open(42));
+    let ws = Arc::new(MockWorkspace::new());
+    let config = Arc::new(MockConfig::new());
+    let mut task = AnalyzeTask::new(ws.clone(), gh.clone(), config.clone(), issue_item(42));
 
     // When
     let request = task.before_invoke().await.unwrap();
@@ -926,9 +941,10 @@ async fn analyze_before_creates_worktree_and_returns_request() {
 #[tokio::test]
 async fn analyze_after_implement_verdict_posts_comment_and_exits_queue() {
     // Given: 분석 결과가 implement verdict
-    let gh = MockGh::new();
-    let ctx = TaskContext::test(gh.clone(), MockWorkspace::new(), MockConfig::new());
-    let mut task = AnalyzeTask::new(ctx, issue_item(42));
+    let gh = Arc::new(MockGh::new());
+    let ws = Arc::new(MockWorkspace::new());
+    let config = Arc::new(MockConfig::new());
+    let mut task = AnalyzeTask::new(ws.clone(), gh.clone(), config.clone(), issue_item(42));
     let response = AgentResponse::ok(r#"{"verdict":"implement","report":"..."}"#);
 
     // When
@@ -944,8 +960,10 @@ async fn analyze_after_implement_verdict_posts_comment_and_exits_queue() {
 #[tokio::test]
 async fn analyze_after_clarify_verdict_marks_skip() {
     // Given: 분석 결과가 clarify verdict
-    let ctx = TaskContext::test(MockGh::new(), MockWorkspace::new(), MockConfig::new());
-    let mut task = AnalyzeTask::new(ctx, issue_item(42));
+    let gh = Arc::new(MockGh::new());
+    let ws = Arc::new(MockWorkspace::new());
+    let config = Arc::new(MockConfig::new());
+    let mut task = AnalyzeTask::new(ws.clone(), gh.clone(), config.clone(), issue_item(42));
     let response = AgentResponse::ok(r#"{"verdict":"clarify","report":"..."}"#);
 
     // When
@@ -964,9 +982,10 @@ async fn analyze_after_clarify_verdict_marks_skip() {
 
 #[tokio::test]
 async fn implement_after_creates_pr_and_pushes_to_pr_queue() {
-    let gh = MockGh::new().with_pr_created(99);
-    let ctx = TaskContext::test(gh.clone(), MockWorkspace::new(), MockConfig::new());
-    let mut task = ImplementTask::new(ctx, issue_item_ready(42));
+    let gh = Arc::new(MockGh::new().with_pr_created(99));
+    let ws = Arc::new(MockWorkspace::new());
+    let config = Arc::new(MockConfig::new());
+    let mut task = ImplementTask::new(ws.clone(), gh.clone(), config.clone(), issue_item_ready(42));
     let response = AgentResponse::ok("https://github.com/org/repo/pull/99");
 
     let result = task.after_invoke(response).await;
@@ -979,10 +998,11 @@ async fn implement_after_creates_pr_and_pushes_to_pr_queue() {
 // ReviewTask: after_invoke approve → done 라벨 + source_issue done 검증
 #[tokio::test]
 async fn review_after_approve_transitions_issue_to_done() {
-    let gh = MockGh::new();
-    let ctx = TaskContext::test(gh.clone(), MockWorkspace::new(), MockConfig::new());
+    let gh = Arc::new(MockGh::new());
+    let ws = Arc::new(MockWorkspace::new());
+    let config = Arc::new(MockConfig::new());
     let item = pr_item(99).with_source_issue(42);
-    let mut task = ReviewTask::new(ctx, item);
+    let mut task = ReviewTask::new(ws.clone(), gh.clone(), config.clone(), item);
     let response = AgentResponse::ok(r#"{"verdict":"approve","review":"LGTM"}"#);
 
     let result = task.after_invoke(response).await;
@@ -1039,7 +1059,7 @@ async fn poll_creates_analyze_task_for_labeled_issue() {
         (42, vec!["autodev:analyze"]),
     ]);
     let db = MockDb::new();
-    let mut source = GitHubTaskSource::new(ctx(gh), db);
+    let mut source = GitHubTaskSource::new(Arc::new(MockWorkspace::new()), gh, Arc::new(MockConfig::new()), db);
 
     // When
     let tasks = source.poll().await;
@@ -1055,7 +1075,7 @@ async fn poll_skips_already_queued_item() {
     let gh = MockGh::new().with_labeled_issues(vec![
         (42, vec!["autodev:analyze"]),
     ]);
-    let mut source = GitHubTaskSource::new(ctx(gh), MockDb::new());
+    let mut source = GitHubTaskSource::new(Arc::new(MockWorkspace::new()), gh, Arc::new(MockConfig::new()), MockDb::new());
 
     // When: 첫 poll → 두 번째 poll
     let first = source.poll().await;

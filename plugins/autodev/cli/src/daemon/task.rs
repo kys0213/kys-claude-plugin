@@ -117,12 +117,15 @@ impl fmt::Display for TaskStatus {
 pub enum SkipReason {
     /// Preflight 검사 실패 (이슈가 닫힘, PR이 머지됨 등)
     PreflightFailed(String),
+    /// 이미 처리된 아이템 (dedup)
+    AlreadyProcessed,
 }
 
 impl fmt::Display for SkipReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SkipReason::PreflightFailed(msg) => write!(f, "preflight: {msg}"),
+            SkipReason::AlreadyProcessed => write!(f, "already processed"),
         }
     }
 }

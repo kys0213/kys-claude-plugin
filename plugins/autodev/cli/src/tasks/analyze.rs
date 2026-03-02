@@ -628,8 +628,10 @@ mod tests {
 
         let result = task.before_invoke().await;
         assert!(result.is_err());
-        let SkipReason::PreflightFailed(msg) = result.unwrap_err();
-        assert!(msg.contains("clone failed"));
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, SkipReason::PreflightFailed(ref msg) if msg.contains("clone failed"))
+        );
     }
 
     // ═══════════════════════════════════════════════

@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use super::AGENT_SYSTEM_PROMPT;
 use crate::components::workspace::{Workspace, WorkspaceOps};
-use crate::config::{ConfigLoader, Env};
+use crate::config::Env;
 use crate::daemon::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
@@ -29,7 +29,7 @@ use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
 use crate::knowledge::extractor::{
     build_suggest_workflow_section, collect_existing_knowledge, create_task_knowledge_prs,
-    format_knowledge_comment, parse_knowledge_suggestion,
+    format_knowledge_comment, parse_knowledge_suggestion, KnowledgePrContext,
 };
 use crate::queue::task_queues::PrItem;
 
@@ -40,8 +40,6 @@ use crate::queue::task_queues::PrItem;
 pub struct ExtractTask {
     workspace: Arc<dyn WorkspaceOps>,
     gh: Arc<dyn Gh>,
-    #[allow(dead_code)]
-    config: Arc<dyn ConfigLoader>,
     sw: Arc<dyn SuggestWorkflow>,
     git: Arc<dyn Git>,
     env: Arc<dyn Env>,
@@ -56,7 +54,6 @@ impl ExtractTask {
     pub fn new(
         workspace: Arc<dyn WorkspaceOps>,
         gh: Arc<dyn Gh>,
-        config: Arc<dyn ConfigLoader>,
         sw: Arc<dyn SuggestWorkflow>,
         git: Arc<dyn Git>,
         env: Arc<dyn Env>,
@@ -66,7 +63,6 @@ impl ExtractTask {
         Self {
             workspace,
             gh,
-            config,
             sw,
             git,
             env,
@@ -210,16 +206,13 @@ impl Task for ExtractTask {
 
                 // per-suggestion actionable PR 생성
                 let ws = Workspace::new(&*self.git, &*self.env);
-                create_task_knowledge_prs(
-                    &*self.gh,
-                    &ws,
-                    &self.item.repo_name,
-                    ks,
+                let ctx = KnowledgePrContext {
+                    repo_name: &self.item.repo_name,
                     task_type,
-                    number,
+                    github_number: number,
                     gh_host,
-                )
-                .await;
+                };
+                create_task_knowledge_prs(&*self.gh, &ws, &ctx, ks).await;
             }
         } else {
             tracing::warn!(
@@ -256,7 +249,6 @@ mod tests {
     use std::path::Path;
     use std::time::Duration;
 
-    use crate::config::models::WorkflowConfig;
     use crate::infrastructure::gh::mock::MockGh;
     use crate::infrastructure::suggest_workflow::SuggestWorkflow;
     use crate::knowledge::models::ToolFrequencyEntry;
@@ -281,15 +273,6 @@ mod tests {
         }
         async fn remove_worktree(&self, _: &str, _: &str) -> anyhow::Result<()> {
             Ok(())
-        }
-    }
-
-    // ─── Mock ConfigLoader ───
-
-    struct MockConfigLoader;
-    impl ConfigLoader for MockConfigLoader {
-        fn load(&self, _: Option<&Path>) -> WorkflowConfig {
-            WorkflowConfig::default()
         }
     }
 
@@ -400,7 +383,6 @@ mod tests {
         ExtractTask::new(
             Arc::new(MockWorkspace),
             gh,
-            Arc::new(MockConfigLoader),
             sw,
             Arc::new(MockGit),
             Arc::new(MockEnv),

@@ -44,10 +44,18 @@ impl TaskManager for DefaultTaskManager {
         }
     }
 
-    fn apply(&mut self, result: TaskResult) {
+    fn apply(&mut self, result: &TaskResult) {
         for source in &mut self.sources {
-            source.apply(&result);
+            source.apply(result);
         }
+    }
+
+    fn active_items(&self) -> Vec<crate::daemon::status::StatusItem> {
+        let mut items = Vec::new();
+        for source in &self.sources {
+            items.extend(source.active_items());
+        }
+        items
     }
 }
 
@@ -83,6 +91,10 @@ mod tests {
 
         fn apply(&mut self, result: &TaskResult) {
             self.applied.lock().unwrap().push(result.work_id.clone());
+        }
+
+        fn active_items(&self) -> Vec<crate::daemon::status::StatusItem> {
+            Vec::new()
         }
     }
 
@@ -170,7 +182,7 @@ mod tests {
             status: TaskStatus::Completed,
         };
 
-        mgr.apply(result);
+        mgr.apply(&result);
 
         // Each source should have received the apply
         // The test proves no panics and apply is called on all sources
