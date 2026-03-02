@@ -4,5 +4,5 @@
   },
   "description": "외부 LLM(OpenAI Codex, Google Gemini) 호출 인프라",
   "name": "external-llm",
-  "version": "0.5.0"
+  "version": "0.6.0"
 }

@@ -2,10 +2,10 @@
   "dry_run": false,
   "results": [
     {
-      "plugin": "git-utils",
-      "old_version": "2.3.3",
-      "new_version": "2.3.4",
-      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/git-utils/.claude-plugin/plugin.json",
+      "plugin": "external-llm",
+      "old_version": "0.5.0",
+      "new_version": "0.6.0",
+      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/external-llm/.claude-plugin/plugin.json",
       "marketplace_updated": true
     }
   ]
