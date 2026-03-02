@@ -327,6 +327,33 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> TaskSource for GitHubTask
     fn apply(&mut self, result: &TaskResult) {
         self.apply_queue_ops(result);
     }
+
+    fn active_items(&self) -> Vec<crate::daemon::status::StatusItem> {
+        let mut items = Vec::new();
+        for repo in self.repos.values() {
+            for (phase, issue) in repo.issue_queue.iter_all() {
+                items.push(crate::daemon::status::StatusItem {
+                    work_id: issue.work_id.clone(),
+                    queue_type: "issue".to_string(),
+                    repo_name: issue.repo_name.clone(),
+                    number: issue.github_number,
+                    title: issue.title.clone(),
+                    phase: phase.to_string(),
+                });
+            }
+            for (phase, pr) in repo.pr_queue.iter_all() {
+                items.push(crate::daemon::status::StatusItem {
+                    work_id: pr.work_id.clone(),
+                    queue_type: "pr".to_string(),
+                    repo_name: pr.repo_name.clone(),
+                    number: pr.github_number,
+                    title: pr.title.clone(),
+                    phase: phase.to_string(),
+                });
+            }
+        }
+        items
+    }
 }
 
 #[cfg(test)]

@@ -1,9 +1,6 @@
-use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-
-use crate::domain::git_repository::GitRepository;
 
 // ─── Status file models ───
 
@@ -35,44 +32,18 @@ pub struct StatusCounters {
 
 // ─── Build / Write / Read ───
 
-/// HashMap<String, GitRepository>の per-repo 큐를 DaemonStatus로 변환
-pub fn build_status_from_repos(
-    repos: &HashMap<String, GitRepository>,
+/// 활성 아이템 목록과 카운터로 DaemonStatus를 생성한다.
+pub fn build_status(
+    active_items: Vec<StatusItem>,
     counters: &StatusCounters,
     start_time: std::time::Instant,
 ) -> DaemonStatus {
-    let mut items = Vec::new();
-
-    for repo in repos.values() {
-        for (phase, issue) in repo.issue_queue.iter_all() {
-            items.push(StatusItem {
-                work_id: issue.work_id.clone(),
-                queue_type: "issue".to_string(),
-                repo_name: issue.repo_name.clone(),
-                number: issue.github_number,
-                title: issue.title.clone(),
-                phase: phase.to_string(),
-            });
-        }
-
-        for (phase, pr) in repo.pr_queue.iter_all() {
-            items.push(StatusItem {
-                work_id: pr.work_id.clone(),
-                queue_type: "pr".to_string(),
-                repo_name: pr.repo_name.clone(),
-                number: pr.github_number,
-                title: pr.title.clone(),
-                phase: phase.to_string(),
-            });
-        }
-    }
-
-    let wip = items.len() as i64;
+    let wip = active_items.len() as i64;
 
     DaemonStatus {
         updated_at: chrono::Local::now().to_rfc3339(),
         uptime_secs: start_time.elapsed().as_secs(),
-        active_items: items,
+        active_items,
         counters: StatusCounters {
             wip,
             done: counters.done,

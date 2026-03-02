@@ -5,6 +5,7 @@
 
 use async_trait::async_trait;
 
+use super::status::StatusItem;
 use super::task::{Task, TaskResult};
 
 /// Task 수집 및 분배 관리자.
@@ -14,6 +15,7 @@ use super::task::{Task, TaskResult};
 /// - `drain_ready()`: 실행 가능한 Task를 Daemon에 전달
 /// - `pop_ready()`: 실행 가능한 Task를 하나씩 꺼낸다 (인플라이트 제한 대응)
 /// - `apply()`: 완료된 Task 결과를 TaskSource에 반영
+/// - `active_items()`: status heartbeat용 활성 아이템 목록 반환
 #[async_trait(?Send)]
 pub trait TaskManager: Send {
     /// 주기적 하우스키핑.
@@ -29,5 +31,8 @@ pub trait TaskManager: Send {
     fn pop_ready(&mut self) -> Option<Box<dyn Task>>;
 
     /// 완료된 Task 결과를 모든 TaskSource에 반영한다.
-    fn apply(&mut self, result: TaskResult);
+    fn apply(&mut self, result: &TaskResult);
+
+    /// 현재 활성 아이템 목록을 반환한다 (status heartbeat용).
+    fn active_items(&self) -> Vec<StatusItem>;
 }

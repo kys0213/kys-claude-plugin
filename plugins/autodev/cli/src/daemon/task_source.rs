@@ -5,6 +5,7 @@
 
 use async_trait::async_trait;
 
+use super::status::StatusItem;
 use super::task::{Task, TaskResult};
 
 /// Task를 생성하는 외부 소스.
@@ -24,4 +25,7 @@ pub trait TaskSource: Send {
     /// 완료된 Task의 결과를 소스에 반영한다.
     /// 큐 상태 전이(Remove, Push 등)를 적용한다.
     fn apply(&mut self, result: &TaskResult);
+
+    /// 현재 활성 아이템 목록을 반환한다 (status heartbeat용).
+    fn active_items(&self) -> Vec<StatusItem>;
 }
