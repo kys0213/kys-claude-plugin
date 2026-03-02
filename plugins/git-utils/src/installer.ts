@@ -19,7 +19,7 @@
 // ============================================================
 
 import { resolve, join } from 'node:path';
-import { copyFile, chmod, readFile, appendFile, access, unlink } from 'node:fs/promises';
+import { chmod, readFile, appendFile, access, rename } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
 import { exec } from './core/shell';
 import type { Result } from './types';
@@ -209,9 +209,8 @@ export function createRealDeps(): InstallerDeps {
     },
 
     async installBinary(src: string, dest: string): Promise<void> {
-      await copyFile(src, dest);
-      await chmod(dest, 0o755);
-      try { await unlink(src); } catch { /* cleanup failure is non-fatal */ }
+      await chmod(src, 0o755);
+      await rename(src, dest);
     },
 
     isInPath(dir: string): boolean {
