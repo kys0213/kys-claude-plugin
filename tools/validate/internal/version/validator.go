@@ -56,7 +56,7 @@ func Validate(repoRoot string) (*Results, error) {
 			results.Failed = append(results.Failed, result)
 		}
 
-		// 3. Version consistency check
+		// 3. Version consistency check (plugin.json vs marketplace.json)
 		consistencyResults := validateVersionConsistency(marketplaceFile, repoRoot)
 		for _, r := range consistencyResults {
 			if r.Valid {
@@ -64,6 +64,16 @@ func Validate(repoRoot string) (*Results, error) {
 			} else {
 				results.Failed = append(results.Failed, r)
 			}
+		}
+	}
+
+	// 4. Cargo.toml version consistency check (plugin.json vs Cargo.toml)
+	cargoResults := validateCargoVersionConsistency(repoRoot, pluginFiles)
+	for _, r := range cargoResults {
+		if r.Valid {
+			results.Passed = append(results.Passed, r)
+		} else {
+			results.Failed = append(results.Failed, r)
 		}
 	}
 
@@ -232,6 +242,83 @@ func validateVersionConsistency(marketplacePath string, repoRoot string) []Resul
 					Valid:  true,
 				})
 			}
+		}
+	}
+
+	return results
+}
+
+// validateCargoVersionConsistency checks that plugin.json version matches cli/Cargo.toml version
+func validateCargoVersionConsistency(repoRoot string, pluginFiles []string) []Result {
+	var results []Result
+
+	cargoVersionRe := regexp.MustCompile(`(?m)^\[package\]\s*\n(?:[^\[]*\n)*?version\s*=\s*"(\d+\.\d+\.\d+)"`)
+
+	for _, file := range pluginFiles {
+		fullPath := filepath.Join(repoRoot, file)
+		pluginDir := filepath.Dir(filepath.Dir(fullPath)) // up from .claude-plugin/plugin.json
+
+		cargoPath := filepath.Join(pluginDir, "cli", "Cargo.toml")
+		if _, err := os.Stat(cargoPath); err != nil {
+			continue // no Cargo.toml, skip
+		}
+
+		// Read plugin.json version
+		pluginContent, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+		var pluginData map[string]interface{}
+		if err := json.Unmarshal(pluginContent, &pluginData); err != nil {
+			continue
+		}
+		pluginVersion, _ := pluginData["version"].(string)
+		pluginName, _ := pluginData["name"].(string)
+		if pluginVersion == "" {
+			continue
+		}
+
+		// Read Cargo.toml version
+		cargoContent, err := os.ReadFile(cargoPath)
+		if err != nil {
+			results = append(results, Result{
+				File:   cargoPath,
+				Type:   "cargo-version-consistency",
+				Plugin: pluginName,
+				Valid:  false,
+				Error:  "Cannot read Cargo.toml: " + err.Error(),
+			})
+			continue
+		}
+
+		match := cargoVersionRe.FindSubmatch(cargoContent)
+		if match == nil {
+			results = append(results, Result{
+				File:   cargoPath,
+				Type:   "cargo-version-consistency",
+				Plugin: pluginName,
+				Valid:  false,
+				Error:  "No version found in [package] section of Cargo.toml",
+			})
+			continue
+		}
+
+		cargoVersion := string(match[1])
+		if pluginVersion != cargoVersion {
+			results = append(results, Result{
+				File:   cargoPath,
+				Type:   "cargo-version-consistency",
+				Plugin: pluginName,
+				Valid:  false,
+				Error:  fmt.Sprintf("Version mismatch: plugin.json has '%s', Cargo.toml has '%s'", pluginVersion, cargoVersion),
+			})
+		} else {
+			results = append(results, Result{
+				File:   cargoPath,
+				Type:   "cargo-version-consistency",
+				Plugin: pluginName,
+				Valid:  true,
+			})
 		}
 	}
 

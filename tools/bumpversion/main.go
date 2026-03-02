@@ -182,6 +182,9 @@ func main() {
 				if r.Marketplace {
 					gray.Println("    marketplace.json: updated")
 				}
+				if r.CargoToml {
+					gray.Println("    Cargo.toml: updated")
+				}
 			}
 		}
 		fmt.Println()

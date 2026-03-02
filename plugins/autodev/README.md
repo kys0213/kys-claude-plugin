@@ -1,12 +1,12 @@
 # Autonomous Plugin
 
-기존 플러그인 생태계(`develop-workflow`, `git-utils`, `external-llm`)를 이벤트 드리븐 루프로 자동 실행하는 오케스트레이션 레이어.
+기존 플러그인 생태계(`git-utils`, `external-llm`, `review`)를 이벤트 드리븐 루프로 자동 실행하는 오케스트레이션 레이어.
 
 ```
 autodev (오케스트레이터)
-  ├── develop-workflow  → /develop, /multi-review
-  ├── git-utils         → /merge-pr, /commit-and-pr
-  └── external-llm      → /invoke-codex, /invoke-gemini
+  ├── git-utils     → /merge-pr, /commit-and-pr
+  ├── external-llm  → /invoke-codex, /invoke-gemini, /code-review
+  └── review        → /multi-review
 ```
 
 ---
@@ -238,7 +238,7 @@ autodev logs <repo> -n 50  # 레포별 로그, 건수 지정
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  autodev v0.1.0          ● running    │  3 repos │ [?]  │
+│  autodev v0.9.4          ● running    │  3 repos │ [?]  │
 ├──────────┬──────────────────────────────────────────────┤
 │          │  [I] org/repo#42  analyzing   Bug fix        │
 │  Repos   │  [P] org/repo#10  reviewing   Add feature    │
@@ -274,44 +274,54 @@ autodev logs <repo> -n 50  # 레포별 로그, 건수 지정
 ## Configuration
 
 ```yaml
-# ~/.autodev/config.yaml
-repos:
-  - name: org/my-repo
-    url: https://github.com/org/my-repo
-    enabled: true
-    scan_interval_secs: 300       # scan 주기 (기본 5분)
-    scan_targets: [issues, pulls]
-    filter_labels: []              # 빈 배열 = 전체 대상
-    ignore_authors: [dependabot, renovate]
-    model: sonnet                  # claude -p 모델
-    confidence_threshold: 0.7      # 분석 자동 구현 최소 신뢰도
-    auto_merge: true               # approved PR 자동 머지
-    merge_require_ci: true         # CI checks 통과 필수
+# ~/.autodev.yaml (글로벌 기본값)
+# 또는 <repo>/.autodev.yaml (레포별 오버라이드, deep merge)
 
 daemon:
   tick_interval_secs: 10           # 메인 루프 주기 (초)
-  reconcile_window_hours: 24       # 재시작 시 복구 윈도우 (시간)
-  log_dir: ~/.autodev/logs         # 일자별 롤링 (daemon.YYYY-MM-DD.log)
-  log_retention_days: 30           # 로그 보존 기간 (일)
   daily_report_hour: 6             # 매일 06:00에 일일 리포트
+  log_dir: logs                    # 로그 디렉토리 (~/.autodev/ 기준)
+  log_level: info                  # trace | debug | info | warn | error
+  log_retention_days: 30           # 로그 보관 기간 (일)
+  max_concurrent_tasks: 3          # 전체 동시 실행 파이프라인 상한
+
+sources:
+  github:
+    scan_interval_secs: 300        # 스캔 주기 (기본 5분)
+    scan_targets: [issues, pulls]
+    issue_concurrency: 1
+    pr_concurrency: 1
+    ignore_authors: [dependabot, renovate]
+    model: sonnet                  # claude -p 모델
+    confidence_threshold: 0.7      # 분석 신뢰도 임계값
+    gh_host: null                  # GitHub Enterprise host (null = github.com)
+
+workflows:
+  analyze:
+    agent: autodev:issue-analyzer
+  implement:
+    agent: autodev:issue-analyzer
+  review:
+    agent: autodev:pr-reviewer
+    max_iterations: 2
 ```
 
-> **daemon 섹션**: daemon tick loop에서만 사용하는 설정.
-> `daily_report_hour`, `reconcile_window_hours` 등은 `DaemonConfig` 구조체에 매핑된다.
+> 상세 스키마는 [CONFIG-SCHEMA-v2.md](./CONFIG-SCHEMA-v2.md) 참조.
 
 ### File Locations
 
 ```
+~/.autodev.yaml              # 글로벌 설정
 ~/.autodev/
-├── config.yaml          # 글로벌 설정
-├── autodev.db           # SQLite (repositories, scan_cursors, consumer_logs)
-├── daemon.pid           # PID 파일 (단일 인스턴스 보장)
-├── workspaces/          # 레포별 워크스페이스
-│   └── {org}/{repo}/
-│       ├── main/        # base clone (장기 유지)
-│       └── issue-42/    # worktree (태스크별 격리)
+├── autodev.db               # SQLite (repositories, scan_cursors, consumer_logs)
+├── daemon.pid               # PID 파일 (단일 인스턴스 보장)
+├── workspaces/              # 레포별 워크스페이스
+│   └── {org-repo}/
+│       ├── .autodev.yaml    # 레포별 설정 (오버라이드)
+│       ├── main/            # base clone (장기 유지)
+│       └── issue-42/        # worktree (태스크별 격리)
 └── logs/
-    ├── daemon.2026-02-22.log   # 일자별 롤링
+    ├── daemon.2026-03-03.log  # 일자별 롤링
     └── ...
 ```
 

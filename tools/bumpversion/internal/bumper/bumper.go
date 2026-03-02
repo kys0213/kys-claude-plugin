@@ -28,6 +28,7 @@ type BumpResult struct {
 	NewVersion  string `json:"new_version"`
 	PluginJSON  string `json:"plugin_json"`
 	Marketplace bool   `json:"marketplace_updated"`
+	CargoToml   bool   `json:"cargo_toml_updated"`
 }
 
 // Bumper handles version bumping operations
@@ -133,11 +134,64 @@ func (b *Bumper) bumpPlugin(pkg changes.Package, bumpType BumpType, marketplace 
 			return result, fmt.Errorf("failed to update marketplace: %w", err)
 		}
 		result.Marketplace = true
+
+		// Update Cargo.toml if it exists (Rust CLI plugins)
+		cargoTomlPath := filepath.Join(b.RepoRoot, pkg.Path, "cli", "Cargo.toml")
+		if _, err := os.Stat(cargoTomlPath); err == nil {
+			if err := b.bumpCargoToml(cargoTomlPath, newVersion); err != nil {
+				return result, fmt.Errorf("failed to update Cargo.toml: %w", err)
+			}
+			result.CargoToml = true
+		}
 	}
 
 	return result, nil
 }
 
+
+// bumpCargoToml updates the version field in the [package] section of a Cargo.toml file.
+// It only replaces the version within the [package] section to avoid corrupting dependency versions.
+func (b *Bumper) bumpCargoToml(path, newVersion string) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	text := string(content)
+
+	// Find the [package] section boundaries
+	pkgRe := regexp.MustCompile(`(?m)^\[package\]\s*$`)
+	sectionRe := regexp.MustCompile(`(?m)^\[`)
+	versionRe := regexp.MustCompile(`(?m)^(version\s*=\s*")\d+\.\d+\.\d+(")\s*$`)
+
+	pkgLoc := pkgRe.FindStringIndex(text)
+	if pkgLoc == nil {
+		return fmt.Errorf("no [package] section found in %s", path)
+	}
+
+	// Find the end of [package] section (next section header or EOF)
+	pkgEnd := len(text)
+	remaining := text[pkgLoc[1]:]
+	if nextSection := sectionRe.FindStringIndex(remaining); nextSection != nil {
+		pkgEnd = pkgLoc[1] + nextSection[0]
+	}
+
+	pkgSection := text[pkgLoc[1]:pkgEnd]
+
+	// Replace version only within [package] section
+	matches := versionRe.FindAllStringIndex(pkgSection, -1)
+	if len(matches) == 0 {
+		return fmt.Errorf("no version field found in [package] section of %s", path)
+	}
+	if len(matches) > 1 {
+		return fmt.Errorf("multiple version fields found in [package] section of %s", path)
+	}
+
+	updatedSection := versionRe.ReplaceAllString(pkgSection, "${1}"+newVersion+"${2}")
+	updated := text[:pkgLoc[1]] + updatedSection + text[pkgEnd:]
+
+	return os.WriteFile(path, []byte(updated), 0644)
+}
 
 // getMarketplacePluginVersion gets the version of a plugin from marketplace.json
 func (b *Bumper) getMarketplacePluginVersion(marketplace map[string]interface{}, pluginName string) string {

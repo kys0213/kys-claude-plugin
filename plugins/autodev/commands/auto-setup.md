@@ -111,7 +111,7 @@ fi
 
 ```bash
 # 설치된 플러그인 캐시에서 리뷰 관련 커맨드 탐색
-ls ~/.claude/plugins/cache/*/commands/*.md 2>/dev/null
+ls ~/.claude/plugins/cache/*/*/*/commands/*.md 2>/dev/null
 ```
 
 **감지 대상 플러그인 및 커맨드:**
