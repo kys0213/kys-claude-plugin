@@ -7,7 +7,8 @@ allowed-tools: ["Task", "Glob"]
 # 분석 커맨드 (/analyze)
 
 Claude, OpenAI Codex, Google Gemini 3개 LLM을 사용하여 파일을 종합적으로 분석합니다.
-리뷰와 달리 **패턴, 의존성, 아키텍처 추적**에 초점을 맞춥니다.
+**`/review`와의 차이**: review는 "이 코드가 얼마나 좋은가" (품질 평가 + 점수),
+analyze는 "이 코드가 어떻게 구성되어 있는가" (구조 파악 + 패턴 발견)에 초점을 맞춥니다.
 
 ## 사용법
 

@@ -22,32 +22,39 @@ TARGET="${2:-}"
 # 출력 디렉토리 생성
 mkdir -p "$OUTPUT_DIR"
 
-# scope별 diff 생성
+# scope별 diff를 직접 파일에 쓰기 (대용량 diff 시 메모리 안전)
 case "$SCOPE" in
     uncommitted)
         echo "uncommitted 변경사항 수집 중..." >&2
-        DIFF_CONTENT=$(cd "$PROJECT_ROOT" && git diff HEAD 2>/dev/null || true)
-        # untracked 파일 요약 추가
+        (cd "$PROJECT_ROOT" && git diff HEAD 2>/dev/null || true) > "$OUTPUT_FILE"
+        # untracked 파일: git add -N 으로 intent-to-add 등록 후 diff에 포함
         UNTRACKED=$(cd "$PROJECT_ROOT" && git ls-files --others --exclude-standard 2>/dev/null || true)
         if [ -n "$UNTRACKED" ]; then
-            DIFF_CONTENT+="
-
-# Untracked files:
-$UNTRACKED"
+            echo "" >> "$OUTPUT_FILE"
+            echo "# Untracked files (새 파일):" >> "$OUTPUT_FILE"
+            while IFS= read -r ufile; do
+                echo "--- /dev/null" >> "$OUTPUT_FILE"
+                echo "+++ b/$ufile" >> "$OUTPUT_FILE"
+                if [ -f "$PROJECT_ROOT/$ufile" ]; then
+                    LINES=$(wc -l < "$PROJECT_ROOT/$ufile" 2>/dev/null || echo "0")
+                    echo "@@ -0,0 +1,$LINES @@" >> "$OUTPUT_FILE"
+                    sed 's/^/+/' "$PROJECT_ROOT/$ufile" >> "$OUTPUT_FILE"
+                fi
+            done <<< "$UNTRACKED"
         fi
         ;;
     staged)
         echo "staged 변경사항 수집 중..." >&2
-        DIFF_CONTENT=$(cd "$PROJECT_ROOT" && git diff --cached 2>/dev/null || true)
+        (cd "$PROJECT_ROOT" && git diff --cached 2>/dev/null || true) > "$OUTPUT_FILE"
         ;;
     pr)
         echo "PR diff 수집 중..." >&2
-        DIFF_CONTENT=$(cd "$PROJECT_ROOT" && gh pr diff 2>/dev/null || true)
+        (cd "$PROJECT_ROOT" && gh pr diff 2>/dev/null || true) > "$OUTPUT_FILE"
         ;;
     branch)
         BASE="${TARGET:-main}"
         echo "branch diff 수집 중 (base: $BASE)..." >&2
-        DIFF_CONTENT=$(cd "$PROJECT_ROOT" && git diff "$BASE"...HEAD 2>/dev/null || true)
+        (cd "$PROJECT_ROOT" && git diff "$BASE"...HEAD 2>/dev/null || true) > "$OUTPUT_FILE"
         ;;
     *)
         echo "Error: 알 수 없는 scope '$SCOPE'" >&2
@@ -57,13 +64,12 @@ $UNTRACKED"
 esac
 
 # diff가 비어있으면 에러
-if [ -z "$DIFF_CONTENT" ]; then
+if [ ! -s "$OUTPUT_FILE" ]; then
+    rm -f "$OUTPUT_FILE"
     echo "Error: '$SCOPE' scope에 변경사항이 없습니다." >&2
     exit 1
 fi
 
-# 파일에 저장
-echo "$DIFF_CONTENT" > "$OUTPUT_FILE"
 echo "diff 저장 완료: $(wc -l < "$OUTPUT_FILE") lines" >&2
 
 # 경로만 stdout으로 반환

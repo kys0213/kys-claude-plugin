@@ -34,7 +34,12 @@ fi
 # scope별 codex review 플래그 결정
 CODEX_FLAGS=""
 case "$SCOPE" in
-    uncommitted|staged)
+    uncommitted)
+        CODEX_FLAGS="--uncommitted"
+        ;;
+    staged)
+        # codex review에 --staged 플래그가 없으므로 --uncommitted으로 대체.
+        # staged만 정확히 보려면 get-diff.sh staged → diff 파일 기반 리뷰를 권장.
         CODEX_FLAGS="--uncommitted"
         ;;
     pr)
