@@ -48,8 +48,13 @@ case "$SCOPE" in
         (cd "$PROJECT_ROOT" && git diff --cached 2>/dev/null || true) > "$OUTPUT_FILE"
         ;;
     pr)
-        echo "PR diff 수집 중..." >&2
-        (cd "$PROJECT_ROOT" && gh pr diff 2>/dev/null || true) > "$OUTPUT_FILE"
+        if [ -n "$TARGET" ]; then
+            echo "PR #$TARGET diff 수집 중..." >&2
+            (cd "$PROJECT_ROOT" && gh pr diff "$TARGET" 2>/dev/null || true) > "$OUTPUT_FILE"
+        else
+            echo "현재 브랜치 PR diff 수집 중..." >&2
+            (cd "$PROJECT_ROOT" && gh pr diff 2>/dev/null || true) > "$OUTPUT_FILE"
+        fi
         ;;
     branch)
         BASE="${TARGET:-main}"

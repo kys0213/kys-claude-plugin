@@ -44,7 +44,11 @@ case "$SCOPE" in
         ;;
     pr)
         # PR의 base 브랜치 가져오기
-        PR_BASE=$(cd "$PROJECT_ROOT" && gh pr view --json baseRefName -q '.baseRefName' 2>/dev/null || echo "main")
+        if [ -n "$TARGET" ]; then
+            PR_BASE=$(cd "$PROJECT_ROOT" && gh pr view "$TARGET" --json baseRefName -q '.baseRefName' 2>/dev/null || echo "main")
+        else
+            PR_BASE=$(cd "$PROJECT_ROOT" && gh pr view --json baseRefName -q '.baseRefName' 2>/dev/null || echo "main")
+        fi
         CODEX_FLAGS="--base $PR_BASE"
         ;;
     branch)
