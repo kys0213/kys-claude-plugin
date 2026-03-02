@@ -75,16 +75,42 @@ describe('hook command', () => {
       expect(settings.hooks.Stop[0].matcher).toBe('Write|Edit');
     });
 
-    test('다른 command가 있으면 → 새 hook 추가 (action: "created")', async () => {
+    test('동일 matcher + 다른 command → 기존 entry 교체 (action: "updated")', async () => {
       fs.files.set(SETTINGS_PATH, JSON.stringify({
         hooks: { Stop: [{ matcher: '*', hooks: [{ type: 'command', command: 'bash old.sh' }] }] },
       }));
       const result = await hook.register({
         hookType: 'Stop', matcher: '*', command: 'bash new.sh', projectDir: PROJECT_DIR,
       });
+      expect(result.ok && result.data.action).toBe('updated');
+      const settings = JSON.parse(fs.files.get(SETTINGS_PATH)!);
+      expect(settings.hooks.Stop).toHaveLength(1);
+      expect(settings.hooks.Stop[0].hooks[0].command).toBe('bash new.sh');
+    });
+
+    test('다른 matcher + 다른 command → 새 entry 추가 (action: "created")', async () => {
+      fs.files.set(SETTINGS_PATH, JSON.stringify({
+        hooks: { Stop: [{ matcher: '*', hooks: [{ type: 'command', command: 'bash old.sh' }] }] },
+      }));
+      const result = await hook.register({
+        hookType: 'Stop', matcher: 'Write|Edit', command: 'bash new.sh', projectDir: PROJECT_DIR,
+      });
       expect(result.ok && result.data.action).toBe('created');
       const settings = JSON.parse(fs.files.get(SETTINGS_PATH)!);
       expect(settings.hooks.Stop).toHaveLength(2);
+    });
+
+    test('동일 matcher + 다른 command → 교체된 command 값 검증', async () => {
+      fs.files.set(SETTINGS_PATH, JSON.stringify({
+        hooks: { Stop: [{ matcher: 'Write|Edit', hooks: [{ type: 'command', command: 'bash old-broken.sh' }] }] },
+      }));
+      const result = await hook.register({
+        hookType: 'Stop', matcher: 'Write|Edit', command: 'git-utils guard write --project-dir=/new', projectDir: PROJECT_DIR,
+      });
+      expect(result.ok && result.data.action).toBe('updated');
+      const settings = JSON.parse(fs.files.get(SETTINGS_PATH)!);
+      expect(settings.hooks.Stop).toHaveLength(1);
+      expect(settings.hooks.Stop[0].hooks[0].command).toBe('git-utils guard write --project-dir=/new');
     });
 
     test('timeout 지정 → hookEntry에 timeout 포함', async () => {

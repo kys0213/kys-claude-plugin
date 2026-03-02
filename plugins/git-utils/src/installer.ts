@@ -18,6 +18,10 @@
 //   ~/.local/bin/git-utils    (XDG Base Directory 표준)
 // ============================================================
 
+import { resolve, join } from 'node:path';
+import { copyFile, chmod, readFile, appendFile, access } from 'node:fs/promises';
+import { mkdirSync } from 'node:fs';
+import { exec } from './core/shell';
 import type { Result } from './types';
 
 // -- Constants --
@@ -167,4 +171,107 @@ export function createInstaller(deps: InstallerDeps): Installer {
       };
     },
   };
+}
+
+// -- Real dependencies (system calls) --
+
+const PLUGIN_ROOT = resolve(import.meta.dir, '..');
+
+export function createRealDeps(): InstallerDeps {
+  return {
+    async getPluginVersion(): Promise<string> {
+      const pkgPath = join(PLUGIN_ROOT, 'package.json');
+      const content = await readFile(pkgPath, 'utf-8');
+      const pkg = JSON.parse(content) as { version: string };
+      return pkg.version;
+    },
+
+    async getInstalledVersion(): Promise<string | null> {
+      try {
+        await access(BINARY_PATH);
+      } catch {
+        return null;
+      }
+      const result = await exec([BINARY_PATH, '--version']);
+      if (result.exitCode !== 0) return null;
+      const match = result.stdout.match(/\d+\.\d+\.\d+[\w.-]*/);
+      return match ? match[0] : null;
+    },
+
+    async buildBinary(outfile: string): Promise<void> {
+      const result = await exec(
+        ['bun', 'build', '--compile', 'src/cli.ts', '--outfile', outfile],
+        { cwd: PLUGIN_ROOT },
+      );
+      if (result.exitCode !== 0) {
+        throw new Error(result.stderr || result.stdout);
+      }
+    },
+
+    async installBinary(src: string, dest: string): Promise<void> {
+      await copyFile(src, dest);
+      await chmod(dest, 0o755);
+      // Clean up tmp file
+      try {
+        const { unlink } = await import('node:fs/promises');
+        await unlink(src);
+      } catch {
+        // Ignore cleanup failure
+      }
+    },
+
+    isInPath(dir: string): boolean {
+      const pathEnv = process.env.PATH ?? '';
+      return pathEnv.split(':').includes(dir);
+    },
+
+    async addToPath(dir: string): Promise<{ shell: string; rcFile: string }> {
+      const home = process.env.HOME!;
+      const shell = process.env.SHELL?.includes('zsh') ? 'zsh' : 'bash';
+      const rcFile = shell === 'zsh' ? join(home, '.zshrc') : join(home, '.bashrc');
+      const exportLine = `\nexport PATH="${dir}:$PATH"  # added by git-utils installer\n`;
+      await appendFile(rcFile, exportLine);
+      return { shell, rcFile };
+    },
+  };
+}
+
+// -- Entrypoint --
+
+async function main(): Promise<void> {
+  mkdirSync(INSTALL_DIR, { recursive: true });
+
+  const installer = createInstaller(createRealDeps());
+  const result = await installer.run();
+
+  if (!result.ok) {
+    console.error(`Install failed: ${result.error}`);
+    process.exit(1);
+  }
+
+  const { action, version, previousVersion, binaryPath, pathConfigured } = result.data;
+
+  switch (action) {
+    case 'installed':
+      console.log(`git-utils v${version} installed → ${binaryPath}`);
+      break;
+    case 'updated':
+      console.log(`git-utils updated: v${previousVersion} → v${version} (${binaryPath})`);
+      break;
+    case 'skipped':
+      console.log(`git-utils v${version} is already up to date`);
+      break;
+  }
+
+  if (!pathConfigured) {
+    console.warn(`\nNote: ${INSTALL_DIR} is not in your PATH.`);
+    console.warn(`Add this to your shell config:\n  export PATH="${INSTALL_DIR}:$PATH"`);
+  }
+}
+
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
 }
