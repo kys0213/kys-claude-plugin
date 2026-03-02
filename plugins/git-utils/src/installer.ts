@@ -19,7 +19,7 @@
 // ============================================================
 
 import { resolve, join } from 'node:path';
-import { copyFile, chmod, readFile, appendFile, access } from 'node:fs/promises';
+import { copyFile, chmod, readFile, appendFile, access, unlink } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
 import { exec } from './core/shell';
 import type { Result } from './types';
@@ -211,13 +211,7 @@ export function createRealDeps(): InstallerDeps {
     async installBinary(src: string, dest: string): Promise<void> {
       await copyFile(src, dest);
       await chmod(dest, 0o755);
-      // Clean up tmp file
-      try {
-        const { unlink } = await import('node:fs/promises');
-        await unlink(src);
-      } catch {
-        // Ignore cleanup failure
-      }
+      try { await unlink(src); } catch { /* cleanup failure is non-fatal */ }
     },
 
     isInPath(dir: string): boolean {
@@ -229,6 +223,9 @@ export function createRealDeps(): InstallerDeps {
       const home = process.env.HOME!;
       const shell = process.env.SHELL?.includes('zsh') ? 'zsh' : 'bash';
       const rcFile = shell === 'zsh' ? join(home, '.zshrc') : join(home, '.bashrc');
+      // Avoid duplicate entries on re-runs
+      const existing = await readFile(rcFile, 'utf-8').catch(() => '');
+      if (existing.includes(dir)) return { shell, rcFile };
       const exportLine = `\nexport PATH="${dir}:$PATH"  # added by git-utils installer\n`;
       await appendFile(rcFile, exportLine);
       return { shell, rcFile };
