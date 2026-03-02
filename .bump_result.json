@@ -2,11 +2,20 @@
   "dry_run": false,
   "results": [
     {
-      "plugin": "external-llm",
-      "old_version": "0.5.0",
-      "new_version": "0.6.0",
-      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/external-llm/.claude-plugin/plugin.json",
-      "marketplace_updated": true
+      "plugin": "autodev",
+      "old_version": "0.9.5",
+      "new_version": "0.9.6",
+      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/autodev/.claude-plugin/plugin.json",
+      "marketplace_updated": true,
+      "cargo_toml_updated": true
+    },
+    {
+      "plugin": "suggest-workflow",
+      "old_version": "2.1.1",
+      "new_version": "2.1.2",
+      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/suggest-workflow/.claude-plugin/plugin.json",
+      "marketplace_updated": true,
+      "cargo_toml_updated": true
     }
   ]
 }
