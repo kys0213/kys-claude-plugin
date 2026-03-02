@@ -1,6 +1,8 @@
 pub mod loader;
 pub mod models;
 
+pub use loader::CONFIG_FILENAME;
+
 use std::path::{Path, PathBuf};
 
 use self::models::WorkflowConfig;

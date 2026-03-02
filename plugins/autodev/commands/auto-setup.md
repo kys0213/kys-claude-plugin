@@ -227,7 +227,7 @@ autodev repo add <url> --config '{"sources":{"github":{"scan_interval_secs":<ste
 autodev repo add <url> --config '{"sources":{"github":{"gh_host":"<detected_host>","scan_interval_secs":<step5>,"issue_concurrency":<step6_issue>,"pr_concurrency":<step6_pr>,"scan_targets":[<step4>]}},"workflows":{"analyze":{"agent":"<step7_analyze_agent>","command":<step7_analyze_cmd>},"review":{"agent":"<step7_review_agent>","command":<step7_review_cmd>}}}'
 ```
 
-등록 성공 시 CLI가 자동으로 워크스페이스 디렉토리(`~/.autodev/workspaces/<org-repo>/`)에 `.develop-workflow.yaml`을 생성합니다.
+등록 성공 시 CLI가 자동으로 워크스페이스 디렉토리(`~/.autodev/workspaces/<org-repo>/`)에 `.autodev.yaml`을 생성합니다.
 
 `--config` 없이 등록한 경우에도 이후 `autodev repo config <name>`으로 설정을 확인하고 수동 편집할 수 있습니다.
 

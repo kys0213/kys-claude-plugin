@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// .develop-workflow.yaml의 전체 스키마 (v2)
+/// .autodev.yaml의 전체 스키마 (v2)
 /// 글로벌(~/) + 레포별 오버라이드를 딥머지하여 최종 설정 생성
 ///
 /// v2에서 `commands`, `develop`, `workflow` 섹션을 제거하고

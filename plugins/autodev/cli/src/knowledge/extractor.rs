@@ -92,11 +92,11 @@ pub fn collect_existing_knowledge(wt_path: &Path) -> String {
         }
     }
 
-    // .develop-workflow.yaml (워크플로우 설정)
-    let workflow_yaml = wt_path.join(".develop-workflow.yaml");
+    // .autodev.yaml (워크플로우 설정)
+    let workflow_yaml = wt_path.join(".autodev.yaml");
     if workflow_yaml.exists() {
         if let Ok(content) = std::fs::read_to_string(&workflow_yaml) {
-            knowledge.push_str("--- .develop-workflow.yaml ---\n");
+            knowledge.push_str("--- .autodev.yaml ---\n");
             knowledge.push_str(&content);
             knowledge.push_str("\n\n");
         }
@@ -384,15 +384,15 @@ mod tests {
         )
         .unwrap();
 
-        // .develop-workflow.yaml
-        std::fs::write(base.join(".develop-workflow.yaml"), "workflow: test").unwrap();
+        // .autodev.yaml
+        std::fs::write(base.join(".autodev.yaml"), "workflow: test").unwrap();
 
         let knowledge = collect_existing_knowledge(base);
         assert!(knowledge.contains(".claude/hooks.json"));
         assert!(knowledge.contains(r#"{"hooks":[]}"#));
         assert!(knowledge.contains(".claude-plugin/plugin.json"));
         assert!(knowledge.contains("workflow: test"));
-        assert!(knowledge.contains(".develop-workflow.yaml"));
+        assert!(knowledge.contains(".autodev.yaml"));
     }
 
     #[test]

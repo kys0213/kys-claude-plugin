@@ -24,7 +24,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh
 
 #### 2-1. 글로벌 설정 점검
 
-`~/.develop-workflow.yaml`이 있으면 읽어서 deprecated 키를 점검합니다.
+`~/.autodev.yaml`이 있으면 읽어서 deprecated 키를 점검합니다.
 
 #### 2-2. 등록된 레포별 설정 점검
 
@@ -36,7 +36,7 @@ autodev repo list
 
 ```bash
 # 각 레포의 워크스페이스 경로
-ls ~/.autodev/workspaces/*/. develop-workflow.yaml 2>/dev/null
+ls ~/.autodev/workspaces/*/.autodev.yaml 2>/dev/null
 ```
 
 #### 2-3. 마이그레이션 규칙 적용
