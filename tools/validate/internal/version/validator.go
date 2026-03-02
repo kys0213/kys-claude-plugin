@@ -252,7 +252,7 @@ func validateVersionConsistency(marketplacePath string, repoRoot string) []Resul
 func validateCargoVersionConsistency(repoRoot string, pluginFiles []string) []Result {
 	var results []Result
 
-	cargoVersionRe := regexp.MustCompile(`(?m)^\[package\]\s*\n(?:[^\[]*\n)*?version\s*=\s*"(\d+\.\d+\.\d+)"`)
+	cargoVersionRe := regexp.MustCompile(`(?m)^\[package\]\s*\n(?:[^\[]*\n)*?version\s*=\s*"(\d+\.\d+\.\d+(?:-[\w.]+)?)"`)
 
 	for _, file := range pluginFiles {
 		fullPath := filepath.Join(repoRoot, file)

@@ -121,7 +121,18 @@ func (b *Bumper) bumpPlugin(pkg changes.Package, bumpType BumpType, marketplace 
 	result.NewVersion = newVersion
 
 	if !b.DryRun {
-		// Update plugin.json if it exists
+		// Validate Cargo.toml first (before any writes) to avoid partial updates
+		cargoTomlPath := filepath.Join(b.RepoRoot, pkg.Path, "cli", "Cargo.toml")
+		hasCargoToml := false
+		if _, err := os.Stat(cargoTomlPath); err == nil {
+			hasCargoToml = true
+			// Dry-validate: read and parse to ensure it will succeed before writing anything
+			if err := b.validateCargoToml(cargoTomlPath); err != nil {
+				return result, fmt.Errorf("failed to validate Cargo.toml (no files modified): %w", err)
+			}
+		}
+
+		// All validations passed — now perform writes
 		if pluginJSONExists {
 			pluginData["version"] = newVersion
 			if err := b.saveJSON(pluginJSONPath, pluginData); err != nil {
@@ -129,15 +140,14 @@ func (b *Bumper) bumpPlugin(pkg changes.Package, bumpType BumpType, marketplace 
 			}
 		}
 
-		// Update marketplace.json
+		// Update marketplace.json (in-memory, saved later in BumpPlugins)
 		if err := b.updateMarketplacePlugin(marketplace, pkg.Name, newVersion); err != nil {
 			return result, fmt.Errorf("failed to update marketplace: %w", err)
 		}
 		result.Marketplace = true
 
-		// Update Cargo.toml if it exists (Rust CLI plugins)
-		cargoTomlPath := filepath.Join(b.RepoRoot, pkg.Path, "cli", "Cargo.toml")
-		if _, err := os.Stat(cargoTomlPath); err == nil {
+		// Update Cargo.toml (already validated above)
+		if hasCargoToml {
 			if err := b.bumpCargoToml(cargoTomlPath, newVersion); err != nil {
 				return result, fmt.Errorf("failed to update Cargo.toml: %w", err)
 			}
@@ -148,6 +158,43 @@ func (b *Bumper) bumpPlugin(pkg changes.Package, bumpType BumpType, marketplace 
 	return result, nil
 }
 
+
+// validateCargoToml checks that a Cargo.toml can be safely bumped (has [package] section with exactly one version field).
+// Call this before any file writes to avoid partial updates.
+func (b *Bumper) validateCargoToml(path string) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	text := string(content)
+
+	pkgRe := regexp.MustCompile(`(?m)^\[package\]\s*$`)
+	sectionRe := regexp.MustCompile(`(?m)^\[`)
+	versionRe := regexp.MustCompile(`(?m)^version\s*=\s*"\d+\.\d+\.\d+(-[\w.]+)?"\s*$`)
+
+	pkgLoc := pkgRe.FindStringIndex(text)
+	if pkgLoc == nil {
+		return fmt.Errorf("no [package] section found in %s", path)
+	}
+
+	pkgEnd := len(text)
+	remaining := text[pkgLoc[1]:]
+	if nextSection := sectionRe.FindStringIndex(remaining); nextSection != nil {
+		pkgEnd = pkgLoc[1] + nextSection[0]
+	}
+
+	pkgSection := text[pkgLoc[1]:pkgEnd]
+	matches := versionRe.FindAllStringIndex(pkgSection, -1)
+	if len(matches) == 0 {
+		return fmt.Errorf("no version field found in [package] section of %s", path)
+	}
+	if len(matches) > 1 {
+		return fmt.Errorf("multiple version fields found in [package] section of %s", path)
+	}
+
+	return nil
+}
 
 // bumpCargoToml updates the version field in the [package] section of a Cargo.toml file.
 // It only replaces the version within the [package] section to avoid corrupting dependency versions.
@@ -162,7 +209,7 @@ func (b *Bumper) bumpCargoToml(path, newVersion string) error {
 	// Find the [package] section boundaries
 	pkgRe := regexp.MustCompile(`(?m)^\[package\]\s*$`)
 	sectionRe := regexp.MustCompile(`(?m)^\[`)
-	versionRe := regexp.MustCompile(`(?m)^(version\s*=\s*")\d+\.\d+\.\d+(")\s*$`)
+	versionRe := regexp.MustCompile(`(?m)^(version\s*=\s*")\d+\.\d+\.\d+(-[\w.]+)?(")\s*$`)
 
 	pkgLoc := pkgRe.FindStringIndex(text)
 	if pkgLoc == nil {
@@ -187,7 +234,7 @@ func (b *Bumper) bumpCargoToml(path, newVersion string) error {
 		return fmt.Errorf("multiple version fields found in [package] section of %s", path)
 	}
 
-	updatedSection := versionRe.ReplaceAllString(pkgSection, "${1}"+newVersion+"${2}")
+	updatedSection := versionRe.ReplaceAllString(pkgSection, "${1}"+newVersion+"${3}")
 	updated := text[:pkgLoc[1]] + updatedSection + text[pkgEnd:]
 
 	return os.WriteFile(path, []byte(updated), 0644)

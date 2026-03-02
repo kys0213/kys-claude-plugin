@@ -164,6 +164,57 @@ version = "5.0.0"
 	}
 }
 
+func TestBumpCargoToml_PrereleaseVersion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Cargo.toml")
+
+	content := `[package]
+name = "myapp"
+version = "1.0.0-beta.1"
+edition = "2021"
+
+[dependencies]
+serde = "1"
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	b := NewBumper(dir, false)
+	if err := b.bumpCargoToml(path, "1.0.0"); err != nil {
+		t.Fatalf("bumpCargoToml failed on prerelease version: %v", err)
+	}
+
+	updated, _ := os.ReadFile(path)
+	result := string(updated)
+
+	if !strings.Contains(result, `version = "1.0.0"`) {
+		t.Error("expected prerelease version to be replaced with 1.0.0")
+	}
+	if strings.Contains(result, "beta") {
+		t.Error("prerelease suffix should be removed after bump")
+	}
+}
+
+func TestValidateCargoToml_PrereleaseValid(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Cargo.toml")
+
+	content := `[package]
+name = "myapp"
+version = "1.0.0-rc.1"
+edition = "2021"
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	b := NewBumper(dir, false)
+	if err := b.validateCargoToml(path); err != nil {
+		t.Fatalf("validateCargoToml should accept prerelease version, got: %v", err)
+	}
+}
+
 func TestBumpCargoToml_PreservesFileStructure(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Cargo.toml")
