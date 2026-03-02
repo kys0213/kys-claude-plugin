@@ -3,6 +3,7 @@ pub mod extract;
 pub mod implement;
 pub mod improve;
 pub mod review;
+pub mod workflow_resolver;
 
 /// 모든 Task에서 `--append-system-prompt`로 주입되는 공통 지침.
 /// 에이전트가 GitHub 코멘트/피드백/첨부를 직접 확인하도록 유도한다.

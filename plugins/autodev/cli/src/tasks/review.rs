@@ -174,7 +174,11 @@ impl Task for ReviewTask {
         // 레포별 config
         let repo_cfg = self.config.load(Some(&wt_path));
         let pr_prompt = format!("[autodev] review: PR #{}", self.item.github_number);
-        let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{}", repo_cfg.workflow.pr);
+        let resolved = super::workflow_resolver::resolve_workflow_prompt(
+            &repo_cfg.workflow.pr,
+            super::workflow_resolver::TaskType::Pr,
+        );
+        let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{resolved}");
 
         self.started_at = Some(Utc::now().to_rfc3339());
 

@@ -43,8 +43,8 @@ fn default_config_has_expected_values() {
     assert_eq!(config.sources.github.scan_targets, vec!["issues", "pulls"]);
     assert_eq!(config.sources.github.issue_concurrency, 1);
     assert_eq!(config.sources.github.model, "sonnet");
-    assert_eq!(config.workflow.issue, "/develop-workflow:develop-auto");
-    assert_eq!(config.workflow.pr, "/develop-workflow:multi-review");
+    assert_eq!(config.workflow.issue, "builtin");
+    assert_eq!(config.workflow.pr, "builtin");
     assert_eq!(config.commands.design, "/multi-llm-design");
     assert_eq!(config.commands.commit_and_pr, "/commit-and-pr");
     // DaemonConfig defaults
@@ -226,7 +226,7 @@ fn load_merged_partial_yaml_fills_defaults() {
     assert_eq!(config.sources.github.model, "gpt-4");
     // 나머지 전부 default
     assert_eq!(config.sources.github.scan_interval_secs, 300);
-    assert_eq!(config.workflow.issue, "/develop-workflow:develop-auto");
+    assert_eq!(config.workflow.issue, "builtin");
     assert_eq!(config.commands.design, "/multi-llm-design");
     assert!(config.develop.review.multi_llm);
 }

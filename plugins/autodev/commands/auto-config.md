@@ -29,7 +29,7 @@ autodev repo config <name>
 AskUserQuestion으로 변경할 항목을 선택:
 - 스캔 주기
 - 소스별 동시 처리량 (Issue/PR/Merge)
-- 워크플로우 선택
+- 워크플로우 선택 (`builtin` 또는 커스텀 슬래시 커맨드)
 - 필터 설정
 - 활성화/비활성화
 - **레포 삭제**

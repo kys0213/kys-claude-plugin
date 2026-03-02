@@ -92,11 +92,16 @@ pub struct WorkflowRouting {
 impl Default for WorkflowRouting {
     fn default() -> Self {
         Self {
-            issue: "/develop-workflow:develop-auto".into(),
-            pr: "/develop-workflow:multi-review".into(),
+            issue: "builtin".into(),
+            pr: "builtin".into(),
         }
     }
 }
+
+// NOTE: CommandsConfig is deprecated but retained for backward compatibility
+// with existing .develop-workflow.yaml files that contain a `commands:` section.
+// The `deny_unknown_fields` on WorkflowConfig requires this struct to exist
+// so that YAML parsing does not fail.
 
 /// 워크플로우 내부 커맨드 매핑
 #[derive(Debug, Clone, Serialize, Deserialize)]

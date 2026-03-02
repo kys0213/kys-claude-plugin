@@ -7,7 +7,6 @@ tools: ["Read", "Glob", "Grep", "Bash", "Task"]
 # PR Reviewer
 
 PR의 코드 변경사항을 Multi-LLM으로 병렬 리뷰합니다.
-기존 `/multi-review` 커맨드를 활용하여 Sonnet + Codex + Gemini 병렬 리뷰를 수행합니다.
 
 ## 리뷰 프로세스
 
@@ -19,7 +18,11 @@ git diff <base_branch>...<head_branch>
 
 ### 2. Multi-LLM 리뷰 실행
 
-`/multi-review` 커맨드를 호출하여 3개 LLM의 리뷰를 수행합니다.
+3개 LLM을 병렬로 호출하여 다각도 리뷰:
+
+- **Claude** (자신): 코드 변경사항 심층 리뷰
+- **Codex**: `common/scripts/call-codex.sh`로 병렬 리뷰
+- **Gemini**: `common/scripts/call-gemini.sh`로 병렬 리뷰
 
 ### 3. 리뷰 결과 종합
 
