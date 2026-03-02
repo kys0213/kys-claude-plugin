@@ -36,9 +36,16 @@ case "$SCOPE" in
                 echo "--- /dev/null" >> "$OUTPUT_FILE"
                 echo "+++ b/$ufile" >> "$OUTPUT_FILE"
                 if [ -f "$PROJECT_ROOT/$ufile" ]; then
-                    LINES=$(wc -l < "$PROJECT_ROOT/$ufile" 2>/dev/null || echo "0")
-                    echo "@@ -0,0 +1,$LINES @@" >> "$OUTPUT_FILE"
-                    sed 's/^/+/' "$PROJECT_ROOT/$ufile" >> "$OUTPUT_FILE"
+                    # Check if file is text (not binary)
+                    # empty files are treated as text; grep -qI detects binary reliably (POSIX)
+                    if [ ! -s "$PROJECT_ROOT/$ufile" ] || LC_ALL=C grep -qI '' "$PROJECT_ROOT/$ufile" 2>/dev/null; then
+                        LINES=$(wc -l < "$PROJECT_ROOT/$ufile" 2>/dev/null || echo "0")
+                        echo "@@ -0,0 +1,$LINES @@" >> "$OUTPUT_FILE"
+                        sed 's/^/+/' "$PROJECT_ROOT/$ufile" >> "$OUTPUT_FILE"
+                    else
+                        echo "@@ Binary file @@" >> "$OUTPUT_FILE"
+                        echo "+++ Binary file" >> "$OUTPUT_FILE"
+                    fi
                 fi
             done <<< "$UNTRACKED"
         fi
