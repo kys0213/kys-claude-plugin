@@ -2,7 +2,7 @@
 
 > **Date**: 2026-02-22
 > **Scope**: DESIGN-GAP-REPORT.md에서 식별된 H-01, H-02, H-03, M-02 해소
-> **Status**: 전체 구현 완료 (2026-02-23 검증). kanban → [done/gap-improvement.md](../plugins/autodev/kanban/done/gap-improvement.md)
+> **Status**: 전체 구현 완료 (2026-02-23 검증)
 
 ---
 
