@@ -121,13 +121,13 @@ impl Gh for RealGh {
         host: Option<&str>,
     ) -> bool {
         let mut args = vec![
-            "issue".to_string(),
-            "comment".to_string(),
-            number.to_string(),
-            "--repo".to_string(),
-            repo_name.to_string(),
-            "--body".to_string(),
-            body.to_string(),
+            "api".to_string(),
+            format!("repos/{repo_name}/issues/{number}/comments"),
+            "--method".to_string(),
+            "POST".to_string(),
+            "--silent".to_string(),
+            "-f".to_string(),
+            format!("body={body}"),
         ];
 
         if let Some(h) = host {
@@ -136,9 +136,7 @@ impl Gh for RealGh {
         }
 
         tracing::debug!(
-            "[gh:issue_comment] >>> gh issue comment {} --repo {} (body={} bytes)",
-            number,
-            repo_name,
+            "[gh:issue_comment] >>> gh api repos/{repo_name}/issues/{number}/comments (body={} bytes)",
             body.len()
         );
         let start = Instant::now();
@@ -339,66 +337,30 @@ impl Gh for RealGh {
         body: &str,
         host: Option<&str>,
     ) -> bool {
-        let args = match event {
-            "APPROVE" => {
-                let mut a = vec![
-                    "pr".to_string(),
-                    "review".to_string(),
-                    number.to_string(),
-                    "--repo".to_string(),
-                    repo_name.to_string(),
-                    "--approve".to_string(),
-                ];
-                if !body.is_empty() {
-                    a.push("--body".to_string());
-                    a.push(body.to_string());
-                }
-                if let Some(h) = host {
-                    a.push("--hostname".to_string());
-                    a.push(h.to_string());
-                }
-                a
-            }
-            "REQUEST_CHANGES" => {
-                let mut a = vec![
-                    "pr".to_string(),
-                    "review".to_string(),
-                    number.to_string(),
-                    "--repo".to_string(),
-                    repo_name.to_string(),
-                    "--request-changes".to_string(),
-                    "--body".to_string(),
-                    if body.is_empty() {
-                        "Changes requested".to_string()
-                    } else {
-                        body.to_string()
-                    },
-                ];
-                if let Some(h) = host {
-                    a.push("--hostname".to_string());
-                    a.push(h.to_string());
-                }
-                a
-            }
-            _ => {
-                // COMMENT
-                let mut a = vec![
-                    "pr".to_string(),
-                    "review".to_string(),
-                    number.to_string(),
-                    "--repo".to_string(),
-                    repo_name.to_string(),
-                    "--comment".to_string(),
-                    "--body".to_string(),
-                    body.to_string(),
-                ];
-                if let Some(h) = host {
-                    a.push("--hostname".to_string());
-                    a.push(h.to_string());
-                }
-                a
-            }
+        let review_body = match event {
+            "REQUEST_CHANGES" if body.is_empty() => "Changes requested",
+            _ => body,
         };
+
+        let mut args = vec![
+            "api".to_string(),
+            format!("repos/{repo_name}/pulls/{number}/reviews"),
+            "--method".to_string(),
+            "POST".to_string(),
+            "--silent".to_string(),
+            "-f".to_string(),
+            format!("event={event}"),
+        ];
+
+        if !review_body.is_empty() {
+            args.push("-f".to_string());
+            args.push(format!("body={review_body}"));
+        }
+
+        if let Some(h) = host {
+            args.push("--hostname".to_string());
+            args.push(h.to_string());
+        }
 
         tracing::debug!("[gh:pr_review] >>> {repo_name}#{number} event={event}");
         let start = Instant::now();
