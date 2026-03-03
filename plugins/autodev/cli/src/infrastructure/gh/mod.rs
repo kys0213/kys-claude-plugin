@@ -29,7 +29,7 @@ pub trait Gh: Send + Sync {
         host: Option<&str>,
     ) -> Result<Vec<u8>>;
 
-    /// `gh issue comment {number} --repo {repo} --body {body}`
+    /// `gh api repos/{repo}/issues/{number}/comments --method POST -f body={body}`
     /// 실패해도 계속 진행 (best effort)
     async fn issue_comment(
         &self,
@@ -82,7 +82,7 @@ pub trait Gh: Send + Sync {
         host: Option<&str>,
     ) -> Option<i64>;
 
-    /// `gh pr review {number}` — PR 리뷰 제출
+    /// `gh api repos/{repo}/pulls/{number}/reviews --method POST -f event={event}`
     /// event: `"APPROVE"` | `"REQUEST_CHANGES"` | `"COMMENT"`
     /// GitHub PR UI에서 Approved / Changes Requested 상태를 설정한다.
     async fn pr_review(
