@@ -109,16 +109,40 @@ impl Task for ExtractTask {
         } else {
             Some(self.item.head_branch.as_str())
         };
-        let wt_path = self
+
+        // 이전 시도에서 남은 worktree 정리 후 재생성
+        let _ = self
+            .workspace
+            .remove_worktree(&self.item.repo_name, &self.task_id)
+            .await;
+
+        let wt_path = match self
             .workspace
             .create_worktree(&self.item.repo_name, &self.task_id, branch)
             .await
-            .map_err(|e| {
-                SkipReason::PreflightFailed(format!(
+        {
+            Ok(path) => path,
+            Err(e) => {
+                // worktree 생성 실패 시 extract-failed 라벨을 추가하여 무한 재스캔 방지.
+                // extracted와 구분하여 수동 라벨 제거로 재시도 가능.
+                tracing::warn!(
+                    "worktree creation failed for PR #{}, marking as extract-failed to prevent retry loop: {e}",
+                    self.item.github_number
+                );
+                self.gh
+                    .label_add(
+                        &self.item.repo_name,
+                        self.item.github_number,
+                        labels::EXTRACT_FAILED,
+                        self.item.gh_host.as_deref(),
+                    )
+                    .await;
+                return Err(SkipReason::PreflightFailed(format!(
                     "worktree failed for PR #{}: {e}",
                     self.item.github_number
-                ))
-            })?;
+                )));
+            }
+        };
         self.wt_path = Some(wt_path.clone());
 
         let task_type = "pr";
@@ -529,5 +553,55 @@ mod tests {
         assert!(result.logs[0]
             .command
             .contains("knowledge: per-task pr #10"));
+    }
+
+    // ─── Worktree Failure Mock ───
+
+    struct FailingWorkspace;
+
+    #[async_trait]
+    impl WorkspaceOps for FailingWorkspace {
+        async fn ensure_cloned(&self, _: &str, _: &str) -> anyhow::Result<PathBuf> {
+            Ok(PathBuf::from("/mock/main"))
+        }
+        async fn create_worktree(
+            &self,
+            _: &str,
+            _: &str,
+            _: Option<&str>,
+        ) -> anyhow::Result<PathBuf> {
+            anyhow::bail!("git worktree add failed: path already exists")
+        }
+        async fn remove_worktree(&self, _: &str, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn before_invoke_worktree_failure_adds_extract_failed_label() {
+        let gh = Arc::new(MockGh::new());
+        let sw: Arc<dyn SuggestWorkflow> = Arc::new(MockSuggestWorkflow::empty());
+
+        let mut task = ExtractTask::new(
+            Arc::new(FailingWorkspace),
+            gh.clone(),
+            sw,
+            Arc::new(MockGit),
+            Arc::new(MockEnv),
+            make_test_pr(),
+        );
+
+        let result = task.before_invoke().await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SkipReason::PreflightFailed(_)
+        ));
+
+        // extract-failed 라벨이 추가되어 무한 재스캔 방지 (수동 제거로 재시도 가능)
+        let labels = gh.added_labels.lock().unwrap();
+        assert!(labels.iter().any(|(repo, n, label)| repo == "org/repo"
+            && *n == 10
+            && label == labels::EXTRACT_FAILED));
     }
 }

@@ -173,10 +173,11 @@ scan 감지 (autodev:wip) → queue[Pending]
 ### Knowledge Extraction: merge 후 지식 추출
 
 ```
-scan_done_merged: autodev:done + merged + NOT extracted → queue[Extracting]
+scan_done_merged: autodev:done + merged + NOT extracted/extract-failed → queue[Extracting]
   → ExtractTask → 기존 지식 수집 + suggest-workflow 데이터
   → Claude 분석 → 이슈 코멘트 + knowledge PR 생성 (autodev:skip 라벨)
-  → autodev:extracted 추가 + queue 제거
+  → 성공: autodev:extracted 추가 + queue 제거
+  → worktree 실패: autodev:extract-failed 추가 (라벨 제거로 재시도 가능)
 ```
 
 ### Knowledge Extraction

@@ -393,7 +393,7 @@ impl GitRepository {
                 _ => continue,
             };
 
-            // extracted 라벨이 있으면 이미 처리됨
+            // extracted 또는 extract-failed 라벨이 있으면 스킵
             let item_labels: Vec<&str> = item["labels"]
                 .as_array()
                 .map(|arr| {
@@ -402,7 +402,9 @@ impl GitRepository {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            if item_labels.contains(&labels::EXTRACTED) {
+            if item_labels.contains(&labels::EXTRACTED)
+                || item_labels.contains(&labels::EXTRACT_FAILED)
+            {
                 continue;
             }
 
