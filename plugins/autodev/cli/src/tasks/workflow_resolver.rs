@@ -96,10 +96,10 @@ mod tests {
     fn resolve_custom_command() {
         let stage = WorkflowStage {
             agent: None,
-            command: Some("/develop-workflow:multi-review".into()),
+            command: Some("/review:multi-review".into()),
         };
         let result = resolve_workflow_prompt(&stage, TaskType::Review);
-        assert_eq!(result, "/develop-workflow:multi-review");
+        assert_eq!(result, "/review:multi-review");
     }
 
     #[test]

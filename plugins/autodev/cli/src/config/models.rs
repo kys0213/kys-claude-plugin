@@ -136,7 +136,7 @@ impl Default for Workflows {
 ///
 /// `agent`와 `command`는 상호 배타적이다.
 /// - `agent`: autodev builtin agent에 위임 (예: `autodev:issue-analyzer`)
-/// - `command`: 커스텀 슬래시 커맨드 실행 (예: `/develop-workflow:multi-review`)
+/// - `command`: 커스텀 슬래시 커맨드 실행 (예: `/review:multi-review`)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct WorkflowStage {
@@ -245,22 +245,22 @@ workflows:
         let yaml = r#"
 workflows:
   analyze:
-    command: /develop-workflow:multi-analyze
+    command: /review:multi-analyze
     agent: null
   review:
-    command: /develop-workflow:multi-review
+    command: /review:multi-review
     agent: null
     max_iterations: 3
 "#;
         let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(
             cfg.workflows.analyze.command.as_deref(),
-            Some("/develop-workflow:multi-analyze")
+            Some("/review:multi-analyze")
         );
         assert!(cfg.workflows.analyze.agent.is_none());
         assert_eq!(
             cfg.workflows.review.command.as_deref(),
-            Some("/develop-workflow:multi-review")
+            Some("/review:multi-review")
         );
         assert!(cfg.workflows.review.agent.is_none());
         assert_eq!(cfg.workflows.review.max_iterations, 3);
