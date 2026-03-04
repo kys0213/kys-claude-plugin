@@ -97,6 +97,8 @@ impl AnalyzeTask {
         &self,
         analysis: &AnalysisResult,
         confidence_threshold: f64,
+        auto_approve: bool,
+        auto_approve_threshold: f64,
     ) -> Vec<QueueOp> {
         let gh_host = self.gh_host();
 
@@ -193,11 +195,30 @@ impl AnalyzeTask {
                 gh_host,
             )
             .await;
-        tracing::info!(
-            "issue #{}: Analyzing → analyzed (awaiting human review, confidence={:.2})",
-            self.item.github_number,
-            analysis.confidence
-        );
+
+        // auto-approve: confidence가 임계값 이상이면 approved-analysis 라벨도 추가
+        if auto_approve && analysis.confidence >= auto_approve_threshold {
+            self.gh
+                .label_add(
+                    &self.item.repo_name,
+                    self.item.github_number,
+                    labels::APPROVED_ANALYSIS,
+                    gh_host,
+                )
+                .await;
+            tracing::info!(
+                "issue #{}: auto-approved (confidence={:.2} >= threshold={:.2})",
+                self.item.github_number,
+                analysis.confidence,
+                auto_approve_threshold,
+            );
+        } else {
+            tracing::info!(
+                "issue #{}: Analyzing → analyzed (awaiting human review, confidence={:.2})",
+                self.item.github_number,
+                analysis.confidence
+            );
+        }
         vec![QueueOp::Remove]
     }
 
@@ -407,8 +428,13 @@ impl Task for AnalyzeTask {
         let analysis = output::parse_analysis(&response.stdout);
         let ops = match analysis {
             Some(ref a) => {
-                self.handle_analysis(a, cfg.sources.github.confidence_threshold)
-                    .await
+                self.handle_analysis(
+                    a,
+                    cfg.sources.github.confidence_threshold,
+                    cfg.sources.github.auto_approve,
+                    cfg.sources.github.auto_approve_threshold,
+                )
+                .await
             }
             None => self.handle_fallback(&response.stdout).await,
         };
@@ -787,6 +813,86 @@ mod tests {
 
         let removed = gh.removed_labels.lock().unwrap();
         assert!(removed.iter().any(|(_, _, l)| l == labels::WIP));
+    }
+
+    // ─── auto-approve tests ───
+
+    struct AutoApproveConfigLoader {
+        auto_approve: bool,
+        threshold: f64,
+    }
+
+    impl ConfigLoader for AutoApproveConfigLoader {
+        fn load(&self, _workspace_path: Option<&Path>) -> WorkflowConfig {
+            let mut cfg = WorkflowConfig::default();
+            cfg.sources.github.auto_approve = self.auto_approve;
+            cfg.sources.github.auto_approve_threshold = self.threshold;
+            cfg
+        }
+    }
+
+    #[tokio::test]
+    async fn after_auto_approve_adds_approved_label() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "issues/42", ".state", "open");
+
+        let ws = Arc::new(MockWorkspace::new());
+        let cfg = Arc::new(AutoApproveConfigLoader {
+            auto_approve: true,
+            threshold: 0.8,
+        });
+        let mut task = AnalyzeTask::new(ws, gh.clone(), cfg, make_test_issue());
+        let _ = task.before_invoke().await;
+
+        // confidence 0.9 >= threshold 0.8 → auto-approve
+        let result = task.after_invoke(make_implement_response()).await;
+
+        assert!(matches!(result.status, TaskStatus::Completed));
+        let added = gh.added_labels.lock().unwrap();
+        assert!(added.iter().any(|(_, _, l)| l == labels::ANALYZED));
+        assert!(added.iter().any(|(_, _, l)| l == labels::APPROVED_ANALYSIS));
+    }
+
+    #[tokio::test]
+    async fn after_auto_approve_skipped_when_disabled() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "issues/42", ".state", "open");
+
+        let ws = Arc::new(MockWorkspace::new());
+        let cfg = Arc::new(AutoApproveConfigLoader {
+            auto_approve: false,
+            threshold: 0.8,
+        });
+        let mut task = AnalyzeTask::new(ws, gh.clone(), cfg, make_test_issue());
+        let _ = task.before_invoke().await;
+
+        let result = task.after_invoke(make_implement_response()).await;
+
+        assert!(matches!(result.status, TaskStatus::Completed));
+        let added = gh.added_labels.lock().unwrap();
+        assert!(added.iter().any(|(_, _, l)| l == labels::ANALYZED));
+        assert!(!added.iter().any(|(_, _, l)| l == labels::APPROVED_ANALYSIS));
+    }
+
+    #[tokio::test]
+    async fn after_auto_approve_skipped_when_below_threshold() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "issues/42", ".state", "open");
+
+        let ws = Arc::new(MockWorkspace::new());
+        let cfg = Arc::new(AutoApproveConfigLoader {
+            auto_approve: true,
+            threshold: 0.95, // higher than confidence 0.9
+        });
+        let mut task = AnalyzeTask::new(ws, gh.clone(), cfg, make_test_issue());
+        let _ = task.before_invoke().await;
+
+        let result = task.after_invoke(make_implement_response()).await;
+
+        assert!(matches!(result.status, TaskStatus::Completed));
+        let added = gh.added_labels.lock().unwrap();
+        assert!(added.iter().any(|(_, _, l)| l == labels::ANALYZED));
+        assert!(!added.iter().any(|(_, _, l)| l == labels::APPROVED_ANALYSIS));
     }
 
     #[tokio::test]

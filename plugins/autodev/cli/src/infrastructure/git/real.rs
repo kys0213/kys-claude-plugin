@@ -37,6 +37,52 @@ impl Git for RealGit {
         Ok(status.success())
     }
 
+    async fn sync_default_branch(&self, repo_dir: &Path) -> Result<bool> {
+        // 1. fetch origin
+        let status = tokio::process::Command::new("git")
+            .args(["fetch", "origin"])
+            .current_dir(repo_dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await?;
+        if !status.success() {
+            return Ok(false);
+        }
+
+        // 2. detect default branch via symbolic-ref
+        let output = tokio::process::Command::new("git")
+            .args(["symbolic-ref", "refs/remotes/origin/HEAD", "--short"])
+            .current_dir(repo_dir)
+            .output()
+            .await?;
+        let default_ref = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let branch = default_ref.strip_prefix("origin/").unwrap_or("main");
+
+        // 3. checkout default branch (force to discard any local changes)
+        let status = tokio::process::Command::new("git")
+            .args(["checkout", branch])
+            .current_dir(repo_dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await?;
+        if !status.success() {
+            return Ok(false);
+        }
+
+        // 4. reset to origin/<branch>
+        let status = tokio::process::Command::new("git")
+            .args(["reset", "--hard", &format!("origin/{branch}")])
+            .current_dir(repo_dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await?;
+
+        Ok(status.success())
+    }
+
     async fn worktree_add(&self, base_dir: &Path, dest: &Path, branch: Option<&str>) -> Result<()> {
         let mut args = vec![
             "worktree".to_string(),

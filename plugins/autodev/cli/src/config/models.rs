@@ -66,6 +66,10 @@ pub struct GitHubSourceConfig {
     pub gh_host: Option<String>,
     pub confidence_threshold: f64,
     pub knowledge_extraction: bool,
+    /// 분석 완료 후 자동 구현 전환 활성화 (기본: false)
+    pub auto_approve: bool,
+    /// 자동 전환을 위한 최소 confidence 임계값 (기본: 0.8)
+    pub auto_approve_threshold: f64,
 }
 
 impl Default for GitHubSourceConfig {
@@ -82,6 +86,8 @@ impl Default for GitHubSourceConfig {
             gh_host: None,
             confidence_threshold: 0.7,
             knowledge_extraction: true,
+            auto_approve: false,
+            auto_approve_threshold: 0.8,
         }
     }
 }

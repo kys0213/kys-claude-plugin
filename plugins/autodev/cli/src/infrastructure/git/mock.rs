@@ -63,6 +63,15 @@ impl Git for MockGit {
         Ok(*self.pull_result.lock().unwrap())
     }
 
+    async fn sync_default_branch(&self, repo_dir: &Path) -> Result<bool> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(("sync_default_branch".into(), repo_dir.display().to_string()));
+
+        Ok(*self.pull_result.lock().unwrap())
+    }
+
     async fn worktree_add(&self, base_dir: &Path, dest: &Path, branch: Option<&str>) -> Result<()> {
         self.calls.lock().unwrap().push((
             "worktree_add".into(),

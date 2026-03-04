@@ -72,8 +72,10 @@ impl<'a> Workspace<'a> {
         if !base.exists() {
             std::fs::create_dir_all(base.parent().unwrap())?;
             self.git.clone(repo_url, &base).await?;
-        } else if !self.git.pull_ff_only(&base).await? {
-            tracing::warn!("git pull failed for {repo_name}, continuing with existing state");
+        } else if !self.git.sync_default_branch(&base).await? {
+            tracing::warn!(
+                "sync_default_branch failed for {repo_name}, continuing with existing state"
+            );
         }
 
         Ok(base)

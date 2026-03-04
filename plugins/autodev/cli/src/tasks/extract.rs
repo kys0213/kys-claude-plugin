@@ -352,6 +352,9 @@ mod tests {
         async fn pull_ff_only(&self, _: &Path) -> anyhow::Result<bool> {
             Ok(true)
         }
+        async fn sync_default_branch(&self, _: &Path) -> anyhow::Result<bool> {
+            Ok(true)
+        }
         async fn worktree_add(&self, _: &Path, _: &Path, _: Option<&str>) -> anyhow::Result<()> {
             Ok(())
         }
