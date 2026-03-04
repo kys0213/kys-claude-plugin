@@ -61,10 +61,11 @@ fn repo_remove() {
 }
 
 #[test]
-fn repo_remove_nonexistent_is_ok() {
+fn repo_remove_nonexistent_returns_error() {
     let db = open_memory_db();
-    // Should not error even if repo doesn't exist
-    db.repo_remove("nonexistent/repo").unwrap();
+    // Should error when repo doesn't exist
+    let result = db.repo_remove("nonexistent/repo");
+    assert!(result.is_err());
 }
 
 #[test]

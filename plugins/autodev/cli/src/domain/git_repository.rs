@@ -364,13 +364,9 @@ impl GitRepository {
                 Err(_) => continue,
             };
 
-            let label_names: Vec<String> = item["labels"]
+            let label_names: Vec<&str> = item["labels"]
                 .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|l| l["name"].as_str().map(String::from))
-                        .collect()
-                })
+                .map(|arr| arr.iter().filter_map(|l| l["name"].as_str()).collect())
                 .unwrap_or_default();
 
             let pr_item = PrItem {
@@ -384,9 +380,7 @@ impl GitRepository {
                 base_branch,
                 review_comment: None,
                 source_issue_number: None,
-                review_iteration: labels::parse_iteration(
-                    &label_names.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-                ),
+                review_iteration: labels::parse_iteration(&label_names),
                 gh_host: self.gh_host.clone(),
             };
 
