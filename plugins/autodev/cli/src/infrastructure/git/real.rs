@@ -27,10 +27,54 @@ impl Git for RealGit {
         Ok(())
     }
 
-    async fn pull_ff_only(&self, repo_dir: &Path) -> Result<bool> {
+    async fn sync_default_branch(&self, repo_dir: &Path) -> Result<bool> {
+        // 1. fetch origin
         let status = tokio::process::Command::new("git")
-            .args(["pull", "--ff-only"])
+            .args(["fetch", "origin"])
             .current_dir(repo_dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await?;
+        if !status.success() {
+            return Ok(false);
+        }
+
+        // 2. detect default branch via symbolic-ref
+        let output = tokio::process::Command::new("git")
+            .args(["symbolic-ref", "refs/remotes/origin/HEAD", "--short"])
+            .current_dir(repo_dir)
+            .output()
+            .await?;
+        let default_ref = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let branch = if output.status.success() && !default_ref.is_empty() {
+            default_ref.strip_prefix("origin/").unwrap_or(&default_ref)
+        } else {
+            tracing::warn!(
+                "could not detect default branch for {}, falling back to 'main'",
+                repo_dir.display()
+            );
+            "main"
+        };
+
+        // 3. checkout default branch (force to discard any local changes)
+        let status = tokio::process::Command::new("git")
+            .args(["checkout", branch])
+            .current_dir(repo_dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await?;
+        if !status.success() {
+            return Ok(false);
+        }
+
+        // 4. reset to origin/<branch>
+        let status = tokio::process::Command::new("git")
+            .args(["reset", "--hard", &format!("origin/{branch}")])
+            .current_dir(repo_dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status()
             .await?;
 

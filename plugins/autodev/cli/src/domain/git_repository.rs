@@ -286,11 +286,32 @@ impl GitRepository {
     /// Label-Positive 모델: `autodev:wip` 라벨이 있는 PR만 scan 대상.
     /// 외부 PR은 사람이 수동으로 `autodev:wip`를 추가해야 리뷰 대상이 됨.
     pub async fn scan_pulls(&mut self, gh: &dyn Gh, ignore_authors: &[String]) -> Result<()> {
-        let params: Vec<(&str, &str)> = vec![
-            ("state", "open"),
-            ("labels", labels::WIP),
-            ("per_page", "30"),
-        ];
+        // Scan wip-labeled PRs → Pending (review)
+        self.scan_pulls_by_label(gh, ignore_authors, labels::WIP, pr_phase::PENDING)
+            .await?;
+
+        // Scan changes-requested PRs → ReviewDone (improve)
+        self.scan_pulls_by_label(
+            gh,
+            ignore_authors,
+            labels::CHANGES_REQUESTED,
+            pr_phase::REVIEW_DONE,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// 특정 라벨의 PR을 스캔하여 지정된 phase의 큐에 추가.
+    async fn scan_pulls_by_label(
+        &mut self,
+        gh: &dyn Gh,
+        ignore_authors: &[String],
+        label: &str,
+        target_phase: &str,
+    ) -> Result<()> {
+        let params: Vec<(&str, &str)> =
+            vec![("state", "open"), ("labels", label), ("per_page", "30")];
 
         let stdout = gh
             .api_paginate(&self.name, "issues", &params, self.gh_host.as_deref())
@@ -343,6 +364,11 @@ impl GitRepository {
                 Err(_) => continue,
             };
 
+            let label_names: Vec<&str> = item["labels"]
+                .as_array()
+                .map(|arr| arr.iter().filter_map(|l| l["name"].as_str()).collect())
+                .unwrap_or_default();
+
             let pr_item = PrItem {
                 work_id,
                 repo_id: self.id.clone(),
@@ -354,12 +380,12 @@ impl GitRepository {
                 base_branch,
                 review_comment: None,
                 source_issue_number: None,
-                review_iteration: 0,
+                review_iteration: labels::parse_iteration(&label_names),
                 gh_host: self.gh_host.clone(),
             };
 
-            self.pr_queue.push(pr_phase::PENDING, pr_item);
-            tracing::info!("queued PR #{number} (wip label detected)");
+            self.pr_queue.push(target_phase, pr_item);
+            tracing::info!("queued PR #{number} ({label} → {target_phase})");
         }
 
         Ok(())
@@ -565,6 +591,20 @@ impl GitRepository {
                                 self.name,
                                 pr_state.as_deref().unwrap_or("unknown")
                             );
+                        }
+                        Some("open") => {
+                            // PR is still open but not in queue — ensure wip label
+                            // so scan_pulls or recover_orphan_wip can pick it up.
+                            let pr_work_id = make_work_id("pr", &self.name, pr_num);
+                            if !self.contains(&pr_work_id) {
+                                gh.label_add(&self.name, pr_num, labels::WIP, gh_host).await;
+                                recovered += 1;
+                                tracing::info!(
+                                    "recovered implementing issue #{} in {} (PR #{pr_num} open, added wip label)",
+                                    issue.number,
+                                    self.name,
+                                );
+                            }
                         }
                         _ => {}
                     }
@@ -1430,6 +1470,36 @@ mod tests {
         assert!(removed.iter().any(|r| r.2 == "autodev:implementing"));
         let added = gh.added_labels.lock().unwrap();
         assert!(added.iter().any(|r| r.2 == "autodev:done"));
+    }
+
+    #[tokio::test]
+    async fn recover_orphan_implementing_with_open_pr_adds_wip_label() {
+        let gh = MockGh::new();
+        let repo = make_repo_with_state(
+            vec![issue_from_json(serde_json::json!({
+                "number": 5, "title": "Implementing",
+                "labels": [{"name": "autodev:implementing"}],
+                "user": {"login": "alice"}
+            }))],
+            vec![],
+        );
+
+        // Set up pr-link comment
+        gh.set_field(
+            "org/repo",
+            "issues/5/comments",
+            r#"[.[] | select(.body | contains("<!-- autodev:pr-link:")) | .body] | last"#,
+            "some text <!-- autodev:pr-link:42 --> more text",
+        );
+        // PR is open (not merged)
+        gh.set_field("org/repo", "pulls/42", ".merged", "false");
+        gh.set_field("org/repo", "pulls/42", ".state", "open");
+
+        let recovered = repo.recover_orphan_implementing(&gh).await;
+
+        assert_eq!(recovered, 1);
+        let added = gh.added_labels.lock().unwrap();
+        assert!(added.iter().any(|r| r.1 == 42 && r.2 == "autodev:wip"));
     }
 
     // ═══════════════════════════════════════════════════

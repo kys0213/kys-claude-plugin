@@ -13,7 +13,7 @@ pub struct MockGit {
     pub clone_should_fail: Mutex<bool>,
     /// worktree_add 호출 시 실패시킬지 여부
     pub worktree_should_fail: Mutex<bool>,
-    /// pull 호출 시 성공/실패
+    /// sync_default_branch 호출 시 성공/실패
     pub pull_result: Mutex<bool>,
     /// 호출 기록: (method, args_summary)
     pub calls: Mutex<Vec<(String, String)>>,
@@ -54,11 +54,11 @@ impl Git for MockGit {
         Ok(())
     }
 
-    async fn pull_ff_only(&self, repo_dir: &Path) -> Result<bool> {
+    async fn sync_default_branch(&self, repo_dir: &Path) -> Result<bool> {
         self.calls
             .lock()
             .unwrap()
-            .push(("pull".into(), repo_dir.display().to_string()));
+            .push(("sync_default_branch".into(), repo_dir.display().to_string()));
 
         Ok(*self.pull_result.lock().unwrap())
     }

@@ -25,20 +25,33 @@ impl RepoRepository for Database {
 
     fn repo_remove(&self, name: &str) -> Result<()> {
         let conn = self.conn();
-        let tx = conn.unchecked_transaction()?;
-        let repo_id_query = "(SELECT id FROM repositories WHERE name = ?1)";
 
+        // Lookup repo_id explicitly first to avoid subquery issues with FK enforcement
+        let repo_id: Option<String> = conn
+            .query_row(
+                "SELECT id FROM repositories WHERE name = ?1",
+                rusqlite::params![name],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let repo_id = match repo_id {
+            Some(id) => id,
+            None => anyhow::bail!("repository not found: {name}"),
+        };
+
+        let tx = conn.unchecked_transaction()?;
         tx.execute(
-            &format!("DELETE FROM scan_cursors WHERE repo_id = {repo_id_query}"),
-            rusqlite::params![name],
+            "DELETE FROM scan_cursors WHERE repo_id = ?1",
+            rusqlite::params![repo_id],
         )?;
         tx.execute(
-            &format!("DELETE FROM consumer_logs WHERE repo_id = {repo_id_query}"),
-            rusqlite::params![name],
+            "DELETE FROM consumer_logs WHERE repo_id = ?1",
+            rusqlite::params![repo_id],
         )?;
         tx.execute(
-            "DELETE FROM repositories WHERE name = ?1",
-            rusqlite::params![name],
+            "DELETE FROM repositories WHERE id = ?1",
+            rusqlite::params![repo_id],
         )?;
         tx.commit()?;
         Ok(())
