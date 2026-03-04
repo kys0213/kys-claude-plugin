@@ -201,16 +201,25 @@ impl Gh for RealGh {
         {
             Ok(output) => {
                 let elapsed = start.elapsed();
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    tracing::warn!(
-                        "[gh:label_remove] <<< FAILED (exit={}, {}ms): {}",
-                        output.status.code().unwrap_or(-1),
-                        elapsed.as_millis(),
-                        stderr.trim()
-                    );
+                if output.status.success() {
+                    return true;
                 }
-                output.status.success()
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stderr_lower = stderr.to_lowercase();
+                if stderr_lower.contains("404") || stderr_lower.contains("does not exist") {
+                    tracing::warn!(
+                        "[gh:label_remove] <<< label already removed, skipping ({}ms): {repo_name}#{number} -{label}",
+                        elapsed.as_millis()
+                    );
+                    return true;
+                }
+                tracing::warn!(
+                    "[gh:label_remove] <<< FAILED (exit={}, {}ms): {}",
+                    output.status.code().unwrap_or(-1),
+                    elapsed.as_millis(),
+                    stderr.trim()
+                );
+                false
             }
             Err(e) => {
                 tracing::warn!(
