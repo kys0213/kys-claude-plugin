@@ -27,16 +27,6 @@ impl Git for RealGit {
         Ok(())
     }
 
-    async fn pull_ff_only(&self, repo_dir: &Path) -> Result<bool> {
-        let status = tokio::process::Command::new("git")
-            .args(["pull", "--ff-only"])
-            .current_dir(repo_dir)
-            .status()
-            .await?;
-
-        Ok(status.success())
-    }
-
     async fn sync_default_branch(&self, repo_dir: &Path) -> Result<bool> {
         // 1. fetch origin
         let status = tokio::process::Command::new("git")
@@ -57,7 +47,15 @@ impl Git for RealGit {
             .output()
             .await?;
         let default_ref = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let branch = default_ref.strip_prefix("origin/").unwrap_or("main");
+        let branch = if output.status.success() && !default_ref.is_empty() {
+            default_ref.strip_prefix("origin/").unwrap_or(&default_ref)
+        } else {
+            tracing::warn!(
+                "could not detect default branch for {}, falling back to 'main'",
+                repo_dir.display()
+            );
+            "main"
+        };
 
         // 3. checkout default branch (force to discard any local changes)
         let status = tokio::process::Command::new("git")

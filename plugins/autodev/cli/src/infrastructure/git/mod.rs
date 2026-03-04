@@ -14,10 +14,6 @@ pub trait Git: Send + Sync {
     /// `git clone {url} {dest}`
     async fn clone(&self, url: &str, dest: &Path) -> Result<()>;
 
-    /// `git pull --ff-only` in repo_dir
-    /// 성공 시 true, 실패 시 false (에러가 아닌 실패)
-    async fn pull_ff_only(&self, repo_dir: &Path) -> Result<bool>;
-
     /// 기본 브랜치를 origin과 동기화.
     ///
     /// `git fetch origin` → default branch 감지 → `git checkout` → `git reset --hard origin/<branch>`

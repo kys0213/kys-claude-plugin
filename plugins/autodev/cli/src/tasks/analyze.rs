@@ -425,6 +425,7 @@ impl Task for AnalyzeTask {
         }
 
         // stdout 파싱
+        let auto_approve_threshold = cfg.sources.github.auto_approve_threshold.clamp(0.0, 1.0);
         let analysis = output::parse_analysis(&response.stdout);
         let ops = match analysis {
             Some(ref a) => {
@@ -432,7 +433,7 @@ impl Task for AnalyzeTask {
                     a,
                     cfg.sources.github.confidence_threshold,
                     cfg.sources.github.auto_approve,
-                    cfg.sources.github.auto_approve_threshold,
+                    auto_approve_threshold,
                 )
                 .await
             }
