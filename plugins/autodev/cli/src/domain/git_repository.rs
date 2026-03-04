@@ -598,15 +598,30 @@ impl GitRepository {
                             let pr_work_id = make_work_id("pr", &self.name, pr_num);
                             if !self.contains(&pr_work_id) {
                                 gh.label_add(&self.name, pr_num, labels::WIP, gh_host).await;
-                                recovered += 1;
-                                tracing::info!(
-                                    "recovered implementing issue #{} in {} (PR #{pr_num} open, added wip label)",
-                                    issue.number,
-                                    self.name,
-                                );
                             }
+                            // Always remove implementing from the issue to prevent
+                            // infinite recovery loops on subsequent polls.
+                            gh.label_remove(
+                                &self.name,
+                                issue.number,
+                                labels::IMPLEMENTING,
+                                gh_host,
+                            )
+                            .await;
+                            recovered += 1;
+                            tracing::info!(
+                                "recovered implementing issue #{} in {} (PR #{pr_num} open, removed implementing)",
+                                issue.number,
+                                self.name,
+                            );
                         }
-                        _ => {}
+                        _ => {
+                            tracing::warn!(
+                                "issue #{}: pr-link references PR #{pr_num} in unhandled state {:?}, skipping",
+                                issue.number,
+                                pr_state,
+                            );
+                        }
                     }
                 }
                 None => {
@@ -1473,7 +1488,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recover_orphan_implementing_with_open_pr_adds_wip_label() {
+    async fn recover_orphan_implementing_with_open_pr_adds_wip_and_removes_implementing() {
         let gh = MockGh::new();
         let repo = make_repo_with_state(
             vec![issue_from_json(serde_json::json!({
@@ -1498,8 +1513,14 @@ mod tests {
         let recovered = repo.recover_orphan_implementing(&gh).await;
 
         assert_eq!(recovered, 1);
+        // wip label added to PR
         let added = gh.added_labels.lock().unwrap();
         assert!(added.iter().any(|r| r.1 == 42 && r.2 == "autodev:wip"));
+        // implementing label removed from issue (prevents infinite recovery loop)
+        let removed = gh.removed_labels.lock().unwrap();
+        assert!(removed
+            .iter()
+            .any(|r| r.1 == 5 && r.2 == "autodev:implementing"));
     }
 
     // ═══════════════════════════════════════════════════
