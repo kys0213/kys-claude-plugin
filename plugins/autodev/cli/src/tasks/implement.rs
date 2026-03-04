@@ -252,8 +252,10 @@ impl Task for ImplementTask {
                     "issue #{}: PR #{pr_num} created, pushed to PR queue",
                     self.item.github_number
                 );
+                self.cleanup_worktree().await;
             }
             None => {
+                // PR extraction failed but agent succeeded — preserve worktree for manual recovery
                 self.gh
                     .label_remove(
                         &self.item.repo_name,
@@ -262,15 +264,38 @@ impl Task for ImplementTask {
                         gh_host,
                     )
                     .await;
+                self.gh
+                    .label_add(
+                        &self.item.repo_name,
+                        self.item.github_number,
+                        labels::IMPL_FAILED,
+                        gh_host,
+                    )
+                    .await;
+
+                let fail_comment = format!(
+                    "<!-- autodev:impl-failed -->\n\
+                     ⚠️ Implementation completed but PR creation/detection failed.\n\n\
+                     **Branch**: `{head_branch}`\n\
+                     Worktree has been preserved. You can manually create a PR:\n\
+                     ```\ngh pr create --head {head_branch}\n```"
+                );
+                self.gh
+                    .issue_comment(
+                        &self.item.repo_name,
+                        self.item.github_number,
+                        &fail_comment,
+                        gh_host,
+                    )
+                    .await;
+
                 tracing::warn!(
-                    "issue #{}: PR number extraction failed, implementing removed",
+                    "issue #{}: PR extraction failed, worktree preserved for manual recovery",
                     self.item.github_number
                 );
                 ops.push(QueueOp::Remove);
             }
         }
-
-        self.cleanup_worktree().await;
 
         TaskResult {
             work_id: self.item.work_id.clone(),
@@ -446,9 +471,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn after_pr_extract_fail_removes_implementing() {
+    async fn after_pr_extract_fail_preserves_worktree_and_adds_failed_label() {
         let gh = Arc::new(MockGh::new());
-        let mut task = make_task(gh.clone());
+        let ws = Arc::new(MockWorkspace::new());
+        let cfg = Arc::new(MockConfigLoader);
+        let mut task = ImplementTask::new(ws.clone(), gh.clone(), cfg, make_test_issue());
         let _ = task.before_invoke().await;
 
         let response = AgentResponse {
@@ -471,10 +498,27 @@ mod tests {
             .iter()
             .any(|op| matches!(op, QueueOp::PushPr { .. })));
 
+        // implementing label removed
         let removed = gh.removed_labels.lock().unwrap();
         assert!(removed
             .iter()
             .any(|(_, n, l)| *n == 42 && l == labels::IMPLEMENTING));
+
+        // impl-failed label added
+        let added = gh.added_labels.lock().unwrap();
+        assert!(added
+            .iter()
+            .any(|(_, n, l)| *n == 42 && l == labels::IMPL_FAILED));
+
+        // Recovery comment posted
+        let comments = gh.posted_comments.lock().unwrap();
+        assert!(comments
+            .iter()
+            .any(|(_, n, body)| *n == 42 && body.contains("autodev:impl-failed")));
+
+        // Worktree NOT cleaned up (preserved for manual recovery)
+        let removed_wts = ws.removed.lock().unwrap();
+        assert!(removed_wts.is_empty());
     }
 
     #[tokio::test]
