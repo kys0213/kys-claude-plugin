@@ -203,11 +203,19 @@ impl Gh for RealGh {
                 let elapsed = start.elapsed();
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
+                    let stderr_trimmed = stderr.trim();
+                    // 404 = label already removed → treat as success
+                    if stderr_trimmed.contains("HTTP 404") || stderr_trimmed.contains("Not Found") {
+                        tracing::debug!(
+                            "[gh:label_remove] label already removed ({}ms): {stderr_trimmed}",
+                            elapsed.as_millis()
+                        );
+                        return true;
+                    }
                     tracing::warn!(
-                        "[gh:label_remove] <<< FAILED (exit={}, {}ms): {}",
+                        "[gh:label_remove] <<< FAILED (exit={}, {}ms): {stderr_trimmed}",
                         output.status.code().unwrap_or(-1),
                         elapsed.as_millis(),
-                        stderr.trim()
                     );
                 }
                 output.status.success()

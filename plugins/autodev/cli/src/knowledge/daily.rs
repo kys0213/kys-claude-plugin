@@ -60,10 +60,15 @@ pub fn parse_daemon_log(log_path: &Path) -> LogStats {
             stats.task_count += 1;
         }
 
-        // duration 추출: "(1234ms)"
-        if let Some(start) = line.rfind('(') {
-            if let Some(end) = line.rfind("ms)") {
-                if let Ok(ms) = line[start + 1..end].parse::<u64>() {
+        // duration 추출: "1234ms)" 패턴에서 숫자 부분을 역방향 탐색
+        if let Some(ms_end) = line.rfind("ms)") {
+            let num_start = line[..ms_end]
+                .bytes()
+                .rposition(|b| !b.is_ascii_digit())
+                .map(|p| p + 1)
+                .unwrap_or(0);
+            if num_start < ms_end {
+                if let Ok(ms) = line[num_start..ms_end].parse::<u64>() {
                     stats.total_duration_ms += ms;
                 }
             }
@@ -601,6 +606,29 @@ mod tests {
     fn parse_daemon_log_missing_file() {
         let stats = parse_daemon_log(Path::new("/nonexistent/log.log"));
         assert_eq!(stats.task_count, 0);
+    }
+
+    #[test]
+    fn parse_daemon_log_ansi_codes_and_trailing_parens() {
+        let tmp = TempDir::new().unwrap();
+        let log_path = tmp.path().join("daemon.log");
+        {
+            let mut f = std::fs::File::create(&log_path).unwrap();
+            // ANSI escape codes + trailing "(HTTP 401)" after "ms)" — caused begin>end panic
+            writeln!(
+                f,
+                "\x1b[2m2026-03-03T03:05:05Z\x1b[0m \x1b[33m WARN\x1b[0m \
+                 [gh:api_paginate] <<< FAILED (exit=1, 34643ms): gh: (HTTP 401)"
+            )
+            .unwrap();
+            // Normal line with duration
+            writeln!(f, "2026-03-03T10:00:00 INFO issue #42 → Done (5000ms)").unwrap();
+        }
+
+        let stats = parse_daemon_log(&log_path);
+        // Should not panic, and should extract both durations
+        assert_eq!(stats.total_duration_ms, 34643 + 5000);
+        assert_eq!(stats.issues_done, 1);
     }
 
     #[test]
