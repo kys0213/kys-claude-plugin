@@ -4,6 +4,14 @@ use std::time::Instant;
 
 use super::Gh;
 
+/// gh CLI stderr의 "(HTTP NNN)" 패턴에서 HTTP 상태코드를 추출
+fn parse_gh_http_status(stderr: &str) -> Option<u16> {
+    let marker = "(HTTP ";
+    let start = stderr.find(marker)? + marker.len();
+    let end = start + stderr[start..].find(')')?;
+    stderr[start..end].parse().ok()
+}
+
 /// 실제 `gh` CLI를 호출하는 구현체
 pub struct RealGh;
 
@@ -205,7 +213,8 @@ impl Gh for RealGh {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     let stderr_trimmed = stderr.trim();
                     // 404 = label already removed → treat as success
-                    if stderr_trimmed.contains("HTTP 404") || stderr_trimmed.contains("Not Found") {
+                    // Parse HTTP status code from gh CLI stderr "(HTTP NNN)" pattern
+                    if parse_gh_http_status(stderr_trimmed) == Some(404) {
                         tracing::debug!(
                             "[gh:label_remove] label already removed ({}ms): {stderr_trimmed}",
                             elapsed.as_millis()
@@ -469,5 +478,27 @@ impl Gh for RealGh {
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_gh_http_status_extracts_404() {
+        let stderr = "gh: Label does not exist (HTTP 404)";
+        assert_eq!(parse_gh_http_status(stderr), Some(404));
+    }
+
+    #[test]
+    fn parse_gh_http_status_extracts_401() {
+        let stderr = "gh: Must authenticate to access this API. (HTTP 401)";
+        assert_eq!(parse_gh_http_status(stderr), Some(401));
+    }
+
+    #[test]
+    fn parse_gh_http_status_none_for_no_pattern() {
+        assert_eq!(parse_gh_http_status("some random error"), None);
     }
 }
