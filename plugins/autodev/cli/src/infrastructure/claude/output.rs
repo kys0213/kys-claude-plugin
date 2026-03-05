@@ -337,7 +337,7 @@ mod tests {
         );
         let result = parse_analysis(&envelope).expect("should parse markdown-wrapped JSON");
         assert_eq!(result.verdict, Verdict::Implement);
-        assert!((result.confidence - 0.97).abs() < f64::EPSILON);
+        assert!((result.confidence - 0.97).abs() < 1e-9);
     }
 
     #[test]
