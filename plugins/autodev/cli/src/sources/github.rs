@@ -137,10 +137,14 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                 },
             );
 
-            let repo = match self.repos.get(repo_name) {
+            let repo = match self.repos.get_mut(repo_name) {
                 Some(r) => r,
                 None => continue,
             };
+
+            // Always cache concurrency limits (even when scan is skipped)
+            repo.issue_concurrency = repo_cfg.sources.github.issue_concurrency as usize;
+            repo.pr_concurrency = repo_cfg.sources.github.pr_concurrency as usize;
 
             let should_scan = self
                 .db
@@ -151,11 +155,6 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
             }
 
             tracing::info!("scanning {}...", repo_name);
-
-            let repo = match self.repos.get_mut(repo_name) {
-                Some(r) => r,
-                None => continue,
-            };
 
             for target in &repo_cfg.sources.github.scan_targets {
                 match target.as_str() {
@@ -198,13 +197,26 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
     }
 
     /// 모든 repo의 큐에서 ready 아이템을 pop → working phase 전이 → Task 생성.
+    ///
+    /// per-repo `issue_concurrency` / `pr_concurrency` 제한을 적용하여,
+    /// in-flight 태스크 수를 초과하지 않도록 bounded drain을 수행한다.
     fn drain_queue_items(&mut self) -> Vec<Box<dyn Task>> {
         let mut tasks: Vec<Box<dyn Task>> = Vec::new();
 
         for repo in self.repos.values_mut() {
+            // ─── Issue concurrency: Analyzing + Implementing 합산 제한 ───
+            let issue_in_flight = repo.issue_queue.len(issue_phase::ANALYZING)
+                + repo.issue_queue.len(issue_phase::IMPLEMENTING);
+            let mut issue_slots = repo.issue_concurrency.saturating_sub(issue_in_flight);
+
             // Issue: Pending → Analyzing
-            while let Some(item) = repo.issue_queue.pop(issue_phase::PENDING) {
-                repo.issue_queue.push(issue_phase::ANALYZING, item.clone());
+            let drained = repo.issue_queue.drain_to(
+                issue_phase::PENDING,
+                issue_phase::ANALYZING,
+                issue_slots,
+            );
+            issue_slots -= drained.len();
+            for item in drained {
                 tracing::debug!("issue #{}: creating AnalyzeTask", item.github_number);
                 tasks.push(Box::new(AnalyzeTask::new(
                     Arc::clone(&self.workspace),
@@ -214,10 +226,12 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                 )));
             }
 
-            // Issue: Ready → Implementing
-            while let Some(item) = repo.issue_queue.pop(issue_phase::READY) {
-                repo.issue_queue
-                    .push(issue_phase::IMPLEMENTING, item.clone());
+            // Issue: Ready → Implementing (shares issue_concurrency budget)
+            for item in repo.issue_queue.drain_to(
+                issue_phase::READY,
+                issue_phase::IMPLEMENTING,
+                issue_slots,
+            ) {
                 tracing::debug!("issue #{}: creating ImplementTask", item.github_number);
                 tasks.push(Box::new(ImplementTask::new(
                     Arc::clone(&self.workspace),
@@ -227,9 +241,18 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                 )));
             }
 
+            // ─── PR concurrency: Reviewing + Improving + Extracting 합산 제한 ───
+            let pr_in_flight = repo.pr_queue.len(pr_phase::REVIEWING)
+                + repo.pr_queue.len(pr_phase::IMPROVING)
+                + repo.pr_queue.len(pr_phase::EXTRACTING);
+            let mut pr_slots = repo.pr_concurrency.saturating_sub(pr_in_flight);
+
             // PR: Pending → Reviewing
-            while let Some(item) = repo.pr_queue.pop(pr_phase::PENDING) {
-                repo.pr_queue.push(pr_phase::REVIEWING, item.clone());
+            let drained = repo
+                .pr_queue
+                .drain_to(pr_phase::PENDING, pr_phase::REVIEWING, pr_slots);
+            pr_slots -= drained.len();
+            for item in drained {
                 tracing::debug!("PR #{}: creating ReviewTask", item.github_number);
                 tasks.push(Box::new(ReviewTask::new(
                     Arc::clone(&self.workspace),
@@ -240,8 +263,11 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
             }
 
             // PR: ReviewDone → Improving
-            while let Some(item) = repo.pr_queue.pop(pr_phase::REVIEW_DONE) {
-                repo.pr_queue.push(pr_phase::IMPROVING, item.clone());
+            let drained =
+                repo.pr_queue
+                    .drain_to(pr_phase::REVIEW_DONE, pr_phase::IMPROVING, pr_slots);
+            pr_slots -= drained.len();
+            for item in drained {
                 tracing::debug!("PR #{}: creating ImproveTask", item.github_number);
                 tasks.push(Box::new(ImproveTask::new(
                     Arc::clone(&self.workspace),
@@ -251,8 +277,11 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
             }
 
             // PR: Improved → Reviewing (re-review)
-            while let Some(item) = repo.pr_queue.pop(pr_phase::IMPROVED) {
-                repo.pr_queue.push(pr_phase::REVIEWING, item.clone());
+            let drained = repo
+                .pr_queue
+                .drain_to(pr_phase::IMPROVED, pr_phase::REVIEWING, pr_slots);
+            pr_slots -= drained.len();
+            for item in drained {
                 tracing::debug!(
                     "PR #{}: creating ReviewTask (re-review)",
                     item.github_number
@@ -265,8 +294,11 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                 )));
             }
 
-            // PR: Extracting → knowledge extraction (best-effort)
-            while let Some(item) = repo.pr_queue.pop(pr_phase::EXTRACTING) {
+            // PR: Extracting → knowledge extraction (fire-and-forget, item leaves queue)
+            for _ in 0..pr_slots {
+                let Some(item) = repo.pr_queue.pop(pr_phase::EXTRACTING) else {
+                    break;
+                };
                 tracing::debug!(
                     "PR #{}: creating ExtractTask (knowledge)",
                     item.github_number
@@ -744,6 +776,135 @@ mod tests {
 
         let tasks = source.drain_queue_items();
         assert_eq!(tasks.len(), 3);
+    }
+
+    // ─── concurrency limit tests ───
+
+    #[test]
+    fn drain_respects_issue_concurrency_limit() {
+        let gh = Arc::new(MockGh::new());
+        let mut source = make_source(gh);
+
+        let mut repo = GitRepository::new(
+            "r1".to_string(),
+            "org/repo".to_string(),
+            "https://github.com/org/repo".to_string(),
+            None,
+        );
+        repo.issue_concurrency = 2;
+
+        // 5 pending issues, but concurrency = 2
+        for i in 1..=5 {
+            repo.issue_queue
+                .push(issue_phase::PENDING, make_test_issue("org/repo", i));
+        }
+        source.repos.insert("org/repo".to_string(), repo);
+
+        let tasks = source.drain_queue_items();
+        assert_eq!(tasks.len(), 2);
+
+        // 3 items should remain in Pending
+        assert_eq!(
+            source.repos["org/repo"]
+                .issue_queue
+                .len(issue_phase::PENDING),
+            3
+        );
+        assert_eq!(
+            source.repos["org/repo"]
+                .issue_queue
+                .len(issue_phase::ANALYZING),
+            2
+        );
+    }
+
+    #[test]
+    fn drain_issue_concurrency_counts_in_flight() {
+        let gh = Arc::new(MockGh::new());
+        let mut source = make_source(gh);
+
+        let mut repo = GitRepository::new(
+            "r1".to_string(),
+            "org/repo".to_string(),
+            "https://github.com/org/repo".to_string(),
+            None,
+        );
+        repo.issue_concurrency = 2;
+
+        // 1 already analyzing
+        repo.issue_queue
+            .push(issue_phase::ANALYZING, make_test_issue("org/repo", 1));
+        // 3 pending
+        for i in 2..=4 {
+            repo.issue_queue
+                .push(issue_phase::PENDING, make_test_issue("org/repo", i));
+        }
+        source.repos.insert("org/repo".to_string(), repo);
+
+        let tasks = source.drain_queue_items();
+        // Only 1 slot available (2 - 1 in-flight)
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(
+            source.repos["org/repo"]
+                .issue_queue
+                .len(issue_phase::ANALYZING),
+            2
+        );
+        assert_eq!(
+            source.repos["org/repo"]
+                .issue_queue
+                .len(issue_phase::PENDING),
+            2
+        );
+    }
+
+    #[test]
+    fn drain_issue_concurrency_includes_implementing() {
+        let gh = Arc::new(MockGh::new());
+        let mut source = make_source(gh);
+
+        let mut repo = GitRepository::new(
+            "r1".to_string(),
+            "org/repo".to_string(),
+            "https://github.com/org/repo".to_string(),
+            None,
+        );
+        repo.issue_concurrency = 1;
+
+        // 1 already implementing → no slots
+        repo.issue_queue
+            .push(issue_phase::IMPLEMENTING, make_test_issue("org/repo", 1));
+        repo.issue_queue
+            .push(issue_phase::PENDING, make_test_issue("org/repo", 2));
+        source.repos.insert("org/repo".to_string(), repo);
+
+        let tasks = source.drain_queue_items();
+        assert_eq!(tasks.len(), 0);
+    }
+
+    #[test]
+    fn drain_respects_pr_concurrency_limit() {
+        let gh = Arc::new(MockGh::new());
+        let mut source = make_source(gh);
+
+        let mut repo = GitRepository::new(
+            "r1".to_string(),
+            "org/repo".to_string(),
+            "https://github.com/org/repo".to_string(),
+            None,
+        );
+        repo.pr_concurrency = 1;
+
+        // 3 pending PRs, but concurrency = 1
+        for i in 1..=3 {
+            repo.pr_queue
+                .push(pr_phase::PENDING, make_test_pr("org/repo", i));
+        }
+        source.repos.insert("org/repo".to_string(), repo);
+
+        let tasks = source.drain_queue_items();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(source.repos["org/repo"].pr_queue.len(pr_phase::PENDING), 2);
     }
 
     #[test]

@@ -52,6 +52,10 @@ pub struct GitRepository {
     // Per-repo work queues
     pub issue_queue: StateQueue<IssueItem>,
     pub pr_queue: StateQueue<PrItem>,
+
+    // Per-repo concurrency limits (set during scan)
+    pub issue_concurrency: usize,
+    pub pr_concurrency: usize,
 }
 
 impl GitRepository {
@@ -65,6 +69,8 @@ impl GitRepository {
             pulls: Vec::new(),
             issue_queue: StateQueue::new(),
             pr_queue: StateQueue::new(),
+            issue_concurrency: 1,
+            pr_concurrency: 1,
         }
     }
 
