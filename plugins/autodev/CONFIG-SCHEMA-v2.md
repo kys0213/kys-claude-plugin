@@ -3,7 +3,7 @@
 > **Date**: 2026-03-02
 > **Status**: Draft
 > **Closes**: #162
-> **Base**: [DESIGN-v2.md](./DESIGN-v2.md) — Issue-PR Workflow (Analysis Review + Label-Positive)
+> **Base**: [DESIGN-v3.md](./DESIGN-v3.md) — Issue-PR Workflow (Analysis Review + Label-Positive)
 
 ---
 
