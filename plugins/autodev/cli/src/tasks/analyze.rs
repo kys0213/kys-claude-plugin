@@ -897,6 +897,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn after_markdown_envelope_parses_successfully() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "issues/42", ".state", "open");
+
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+
+        // Claude가 마크다운으로 래핑한 JSON을 반환하는 실제 케이스 (#196)
+        let inner = "Analysis complete. Here's the result:\n\n```json\n{\"verdict\":\"implement\",\"confidence\":0.9,\"summary\":\"Clear bug\",\"questions\":[],\"reason\":null,\"report\":\"Fix the login handler\"}\n```";
+        let envelope = format!(
+            r#"{{"type":"result","subtype":"success","is_error":false,"duration_ms":108056,"result":{}}}"#,
+            serde_json::to_string(inner).unwrap()
+        );
+        let response = AgentResponse {
+            exit_code: 0,
+            stdout: envelope,
+            stderr: String::new(),
+            duration: Duration::from_secs(5),
+        };
+
+        let result = task.after_invoke(response).await;
+
+        assert!(matches!(result.status, TaskStatus::Completed));
+        // 파싱 성공 → analyzed 라벨 (fallback이 아닌 정상 경로)
+        let added = gh.added_labels.lock().unwrap();
+        assert!(added.iter().any(|(_, _, l)| l == labels::ANALYZED));
+
+        let comments = gh.posted_comments.lock().unwrap();
+        // 정상 파싱이면 verdict::format_analysis_comment 사용 (autodev:analysis 포함)
+        assert!(comments[0].2.contains("autodev:analysis"));
+    }
+
+    #[tokio::test]
     async fn after_cleans_up_worktree() {
         let gh = Arc::new(MockGh::new());
         gh.set_field("org/repo", "issues/42", ".state", "open");
