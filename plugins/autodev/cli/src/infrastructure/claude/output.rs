@@ -31,7 +31,7 @@ fn extract_json_from_text(text: &str) -> Option<&str> {
         let content_start = start + marker.len();
         // ```jsonl, ```json5 등 다른 마커와 구분
         if let Some(&next_byte) = text.as_bytes().get(content_start) {
-            if next_byte != b'\n' && next_byte != b'\r' && next_byte != b' ' {
+            if next_byte.is_ascii_alphanumeric() {
                 return None;
             }
         }
