@@ -210,10 +210,13 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
             let mut issue_slots = repo.issue_concurrency.saturating_sub(issue_in_flight);
 
             // Issue: Pending → Analyzing
-            for item in
-                repo.issue_queue
-                    .drain_to(issue_phase::PENDING, issue_phase::ANALYZING, issue_slots)
-            {
+            let drained = repo.issue_queue.drain_to(
+                issue_phase::PENDING,
+                issue_phase::ANALYZING,
+                issue_slots,
+            );
+            issue_slots -= drained.len();
+            for item in drained {
                 tracing::debug!("issue #{}: creating AnalyzeTask", item.github_number);
                 tasks.push(Box::new(AnalyzeTask::new(
                     Arc::clone(&self.workspace),
@@ -221,7 +224,6 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                     Arc::clone(&self.config),
                     item,
                 )));
-                issue_slots -= 1;
             }
 
             // Issue: Ready → Implementing (shares issue_concurrency budget)
@@ -246,10 +248,11 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
             let mut pr_slots = repo.pr_concurrency.saturating_sub(pr_in_flight);
 
             // PR: Pending → Reviewing
-            for item in repo
+            let drained = repo
                 .pr_queue
-                .drain_to(pr_phase::PENDING, pr_phase::REVIEWING, pr_slots)
-            {
+                .drain_to(pr_phase::PENDING, pr_phase::REVIEWING, pr_slots);
+            pr_slots -= drained.len();
+            for item in drained {
                 tracing::debug!("PR #{}: creating ReviewTask", item.github_number);
                 tasks.push(Box::new(ReviewTask::new(
                     Arc::clone(&self.workspace),
@@ -257,28 +260,28 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                     Arc::clone(&self.config),
                     item,
                 )));
-                pr_slots -= 1;
             }
 
             // PR: ReviewDone → Improving
-            for item in repo
-                .pr_queue
-                .drain_to(pr_phase::REVIEW_DONE, pr_phase::IMPROVING, pr_slots)
-            {
+            let drained =
+                repo.pr_queue
+                    .drain_to(pr_phase::REVIEW_DONE, pr_phase::IMPROVING, pr_slots);
+            pr_slots -= drained.len();
+            for item in drained {
                 tracing::debug!("PR #{}: creating ImproveTask", item.github_number);
                 tasks.push(Box::new(ImproveTask::new(
                     Arc::clone(&self.workspace),
                     Arc::clone(&self.gh),
                     item,
                 )));
-                pr_slots -= 1;
             }
 
             // PR: Improved → Reviewing (re-review)
-            for item in repo
+            let drained = repo
                 .pr_queue
-                .drain_to(pr_phase::IMPROVED, pr_phase::REVIEWING, pr_slots)
-            {
+                .drain_to(pr_phase::IMPROVED, pr_phase::REVIEWING, pr_slots);
+            pr_slots -= drained.len();
+            for item in drained {
                 tracing::debug!(
                     "PR #{}: creating ReviewTask (re-review)",
                     item.github_number
@@ -289,7 +292,6 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                     Arc::clone(&self.config),
                     item,
                 )));
-                pr_slots -= 1;
             }
 
             // PR: Extracting → knowledge extraction (fire-and-forget, item leaves queue)
