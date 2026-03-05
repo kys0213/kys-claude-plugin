@@ -95,6 +95,20 @@ impl<T: HasWorkId> StateQueue<T> {
         self.queues.get(state).map_or(0, |q| q.len())
     }
 
+    /// from 상태에서 최대 limit개를 pop → to 상태로 push하고 반환한다.
+    pub fn drain_to(&mut self, from: &str, to: &str, limit: usize) -> Vec<T>
+    where
+        T: Clone,
+    {
+        let mut result = Vec::new();
+        for _ in 0..limit {
+            let Some(item) = self.pop(from) else { break };
+            self.push(to, item.clone());
+            result.push(item);
+        }
+        result
+    }
+
     /// 전체 아이템 수를 반환한다.
     pub fn total(&self) -> usize {
         self.index.len()
