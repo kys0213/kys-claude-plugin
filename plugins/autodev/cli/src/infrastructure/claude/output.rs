@@ -29,6 +29,12 @@ fn extract_json_from_text(text: &str) -> Option<&str> {
     let marker = "```json";
     if let Some(start) = text.find(marker) {
         let content_start = start + marker.len();
+        // ```jsonl, ```json5 등 다른 마커와 구분
+        if let Some(&next_byte) = text.as_bytes().get(content_start) {
+            if next_byte.is_ascii_alphanumeric() {
+                return None;
+            }
+        }
         if let Some(end) = text[content_start..].find("```") {
             let extracted = text[content_start..content_start + end].trim();
             if !extracted.is_empty() {
@@ -124,7 +130,7 @@ pub static REVIEW_SCHEMA: LazyLock<String> =
 /// 2차: envelope result 내 마크다운 ```json 블록 추출
 /// 3차: stdout 자체를 직접 파싱
 /// 4차: stdout 내 마크다운 ```json 블록 추출
-fn try_parse_with_fallbacks<T: serde::de::DeserializeOwned>(stdout: &str) -> Option<T> {
+pub(crate) fn try_parse_with_fallbacks<T: serde::de::DeserializeOwned>(stdout: &str) -> Option<T> {
     let trimmed = stdout.trim();
 
     if let Ok(envelope) = serde_json::from_str::<ClaudeJsonOutput>(trimmed) {
@@ -324,6 +330,16 @@ mod tests {
     #[test]
     fn extract_json_returns_none_for_empty_code_block() {
         assert!(extract_json_from_text("```json\n```").is_none());
+    }
+
+    #[test]
+    fn extract_json_ignores_jsonl_marker() {
+        assert!(extract_json_from_text("```jsonl\n{\"a\":1}\n```").is_none());
+    }
+
+    #[test]
+    fn extract_json_ignores_json5_marker() {
+        assert!(extract_json_from_text("```json5\n{\"a\":1}\n```").is_none());
     }
 
     // ─── parse_analysis markdown fallback tests ───

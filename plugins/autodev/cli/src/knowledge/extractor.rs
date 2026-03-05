@@ -163,18 +163,7 @@ pub async fn build_suggest_workflow_section(
 
 /// Claude 출력에서 KnowledgeSuggestion 파싱
 pub fn parse_knowledge_suggestion(stdout: &str) -> Option<KnowledgeSuggestion> {
-    // claude --output-format json envelope
-    if let Ok(envelope) =
-        serde_json::from_str::<crate::infrastructure::claude::output::ClaudeJsonOutput>(stdout)
-    {
-        if let Some(inner) = envelope.result {
-            if let Ok(ks) = serde_json::from_str::<KnowledgeSuggestion>(&inner) {
-                return Some(ks);
-            }
-        }
-    }
-    // 직접 파싱
-    serde_json::from_str::<KnowledgeSuggestion>(stdout).ok()
+    crate::infrastructure::claude::output::try_parse_with_fallbacks(stdout)
 }
 
 /// KnowledgeSuggestion을 GitHub 코멘트로 포맷
