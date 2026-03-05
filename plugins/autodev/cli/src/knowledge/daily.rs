@@ -248,18 +248,7 @@ pub async fn generate_daily_suggestions(
         .await
     {
         Ok(res) if res.exit_code == 0 => {
-            // envelope → inner parse
-            if let Ok(envelope) = serde_json::from_str::<
-                crate::infrastructure::claude::output::ClaudeJsonOutput,
-            >(&res.stdout)
-            {
-                if let Some(inner) = envelope.result {
-                    if let Ok(ks) = serde_json::from_str::<KnowledgeSuggestion>(&inner) {
-                        return Some(ks);
-                    }
-                }
-            }
-            serde_json::from_str::<KnowledgeSuggestion>(&res.stdout).ok()
+            crate::infrastructure::claude::output::try_parse_with_fallbacks(&res.stdout)
         }
         Ok(res) => {
             tracing::warn!("daily suggestion generation exited with {}", res.exit_code);
