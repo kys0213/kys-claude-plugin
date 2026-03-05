@@ -13,14 +13,30 @@ pub struct ClaudeJsonOutput {
 
 /// JSON 출력 파싱 시도, 실패하면 원본 텍스트 반환
 pub fn parse_output(stdout: &str) -> String {
-    if let Ok(parsed) = serde_json::from_str::<ClaudeJsonOutput>(stdout) {
+    let trimmed = stdout.trim();
+    if let Ok(parsed) = serde_json::from_str::<ClaudeJsonOutput>(trimmed) {
         parsed
             .result
             .or(parsed.error)
-            .unwrap_or_else(|| stdout.to_string())
+            .unwrap_or_else(|| trimmed.to_string())
     } else {
-        stdout.to_string()
+        trimmed.to_string()
     }
+}
+
+/// 텍스트에서 JSON 블록을 추출 (마크다운 ```json 코드블록)
+fn extract_json_from_text(text: &str) -> Option<&str> {
+    let marker = "```json";
+    if let Some(start) = text.find(marker) {
+        let content_start = start + marker.len();
+        if let Some(end) = text[content_start..].find("```") {
+            let extracted = text[content_start..content_start + end].trim();
+            if !extracted.is_empty() {
+                return Some(extracted);
+            }
+        }
+    }
+    None
 }
 
 /// 이슈 분석 verdict 타입
@@ -102,37 +118,49 @@ pub static ANALYSIS_SCHEMA: LazyLock<String> =
 pub static REVIEW_SCHEMA: LazyLock<String> =
     LazyLock::new(|| serde_json::to_string(&schemars::schema_for!(ReviewResult)).unwrap());
 
-/// claude -p 리뷰 결과를 ReviewResult로 파싱 시도
-/// 1차: stdout가 claude JSON envelope이면 result 필드 추출 후 파싱
-/// 2차: stdout 자체를 직접 파싱
-/// 실패 시 None 반환 (호출측에서 exit_code 기반 fallback)
-pub fn parse_review(stdout: &str) -> Option<ReviewResult> {
-    if let Ok(envelope) = serde_json::from_str::<ClaudeJsonOutput>(stdout) {
+/// Claude stdout를 구조체로 파싱 (4단계 fallback)
+///
+/// 1차: JSON envelope → result 필드 직접 파싱
+/// 2차: envelope result 내 마크다운 ```json 블록 추출
+/// 3차: stdout 자체를 직접 파싱
+/// 4차: stdout 내 마크다운 ```json 블록 추출
+fn try_parse_with_fallbacks<T: serde::de::DeserializeOwned>(stdout: &str) -> Option<T> {
+    let trimmed = stdout.trim();
+
+    if let Ok(envelope) = serde_json::from_str::<ClaudeJsonOutput>(trimmed) {
         if let Some(inner) = envelope.result {
-            if let Ok(review) = serde_json::from_str::<ReviewResult>(&inner) {
-                return Some(review);
+            if let Ok(parsed) = serde_json::from_str::<T>(&inner) {
+                return Some(parsed);
+            }
+            if let Some(json_str) = extract_json_from_text(&inner) {
+                if let Ok(parsed) = serde_json::from_str::<T>(json_str) {
+                    return Some(parsed);
+                }
             }
         }
     }
-    serde_json::from_str::<ReviewResult>(stdout).ok()
+
+    if let Ok(parsed) = serde_json::from_str::<T>(trimmed) {
+        return Some(parsed);
+    }
+
+    if let Some(json_str) = extract_json_from_text(trimmed) {
+        return serde_json::from_str::<T>(json_str).ok();
+    }
+
+    None
+}
+
+/// claude -p 리뷰 결과를 ReviewResult로 파싱 시도
+/// 실패 시 None 반환 (호출측에서 exit_code 기반 fallback)
+pub fn parse_review(stdout: &str) -> Option<ReviewResult> {
+    try_parse_with_fallbacks(stdout)
 }
 
 /// claude -p 분석 결과를 AnalysisResult로 파싱 시도
-/// 1차: stdout가 claude JSON envelope이면 result 필드 추출 후 파싱
-/// 2차: stdout 자체를 직접 파싱
 /// 실패 시 None 반환 (호출측에서 fallback 처리)
 pub fn parse_analysis(stdout: &str) -> Option<AnalysisResult> {
-    // claude --output-format json 결과: { "result": "<escaped json string>" }
-    if let Ok(envelope) = serde_json::from_str::<ClaudeJsonOutput>(stdout) {
-        if let Some(inner) = envelope.result {
-            if let Ok(analysis) = serde_json::from_str::<AnalysisResult>(&inner) {
-                return Some(analysis);
-            }
-        }
-    }
-
-    // 직접 파싱 시도 (claude가 raw JSON을 반환한 경우)
-    serde_json::from_str::<AnalysisResult>(stdout).ok()
+    try_parse_with_fallbacks(stdout)
 }
 
 /// v2: Claude 세션 stdout에서 PR 번호를 추출
@@ -277,6 +305,72 @@ mod tests {
     fn extract_pr_number_from_json_field() {
         let stdout = r#"{"pr_number": 42}"#;
         assert_eq!(extract_pr_number(stdout), Some(42));
+    }
+
+    // ─── extract_json_from_text tests ───
+
+    #[test]
+    fn extract_json_from_markdown_code_block() {
+        let text = "Analysis complete.\n\n```json\n{\"verdict\":\"implement\"}\n```";
+        let extracted = extract_json_from_text(text).unwrap();
+        assert_eq!(extracted, "{\"verdict\":\"implement\"}");
+    }
+
+    #[test]
+    fn extract_json_returns_none_for_plain_text() {
+        assert!(extract_json_from_text("no json here").is_none());
+    }
+
+    #[test]
+    fn extract_json_returns_none_for_empty_code_block() {
+        assert!(extract_json_from_text("```json\n```").is_none());
+    }
+
+    // ─── parse_analysis markdown fallback tests ───
+
+    #[test]
+    fn parse_analysis_from_markdown_in_envelope() {
+        let inner = "Analysis complete. Here's the result:\n\n```json\n{\"verdict\":\"implement\",\"confidence\":0.97,\"summary\":\"Clear bug\",\"questions\":[],\"reason\":null,\"report\":\"Fix it\"}\n```";
+        let envelope = format!(
+            r#"{{"type":"result","subtype":"success","is_error":false,"duration_ms":108056,"result":{}}}"#,
+            serde_json::to_string(inner).unwrap()
+        );
+        let result = parse_analysis(&envelope).expect("should parse markdown-wrapped JSON");
+        assert_eq!(result.verdict, Verdict::Implement);
+        assert!((result.confidence - 0.97).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_analysis_from_markdown_without_envelope() {
+        let text = "Here is the analysis:\n\n```json\n{\"verdict\":\"wontfix\",\"confidence\":0.8,\"summary\":\"Duplicate\",\"questions\":[],\"reason\":\"Already fixed\",\"report\":\"\"}\n```";
+        let result = parse_analysis(text).expect("should parse");
+        assert_eq!(result.verdict, Verdict::Wontfix);
+    }
+
+    #[test]
+    fn parse_analysis_trims_whitespace() {
+        let analysis = r#"{"verdict":"implement","confidence":0.9,"summary":"ok","questions":[],"reason":null,"report":"r"}"#;
+        let stdout = format!("  \n{}\n  ", analysis);
+        let result = parse_analysis(&stdout).expect("should parse trimmed");
+        assert_eq!(result.verdict, Verdict::Implement);
+    }
+
+    // ─── parse_review markdown fallback tests ───
+
+    #[test]
+    fn parse_review_from_markdown_in_envelope() {
+        let inner = "Review done.\n\n```json\n{\"verdict\":\"approve\",\"summary\":\"LGTM\",\"comments\":[]}\n```";
+        let envelope = format!(r#"{{"result":{}}}"#, serde_json::to_string(inner).unwrap());
+        let result = parse_review(&envelope).expect("should parse markdown-wrapped review");
+        assert_eq!(result.verdict, ReviewVerdict::Approve);
+    }
+
+    // ─── parse_output trim test ───
+
+    #[test]
+    fn parse_output_trims_whitespace() {
+        let stdout = "  \n{\"result\": \"hello world\"}\n  ";
+        assert_eq!(parse_output(stdout), "hello world");
     }
 
     #[test]
