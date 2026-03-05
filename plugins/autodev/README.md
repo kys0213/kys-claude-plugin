@@ -116,7 +116,7 @@ PR:
   → (merge 후) extracted
 ```
 
-> 상세 전이 다이어그램은 [DESIGN-v2.md](./DESIGN-v2.md) §3 참조.
+> 상세 전이 다이어그램은 [DESIGN-v3.md](./DESIGN-v3.md) §3 참조.
 
 ---
 
@@ -340,4 +340,4 @@ workflows:
 
 ---
 
-상세 설계는 [DESIGN-v2.md](./DESIGN-v2.md) (워크플로우) 및 [DESIGN-v3-ARCHITECTURE.md](./DESIGN-v3-ARCHITECTURE.md) (아키텍처) 참조.
+상세 설계는 [DESIGN-v3.md](./DESIGN-v3.md) (워크플로우) 및 [DESIGN-v3-ARCHITECTURE.md](./DESIGN-v3-ARCHITECTURE.md) (아키텍처) 참조.
