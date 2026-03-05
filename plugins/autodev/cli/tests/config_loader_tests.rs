@@ -418,10 +418,10 @@ fn workflows_custom_command_parsed() {
     let yaml = r#"
 workflows:
   analyze:
-    command: /develop-workflow:multi-analyze
+    command: /review:multi-analyze
     agent: null
   review:
-    command: /develop-workflow:multi-review
+    command: /review:multi-review
     agent: null
     max_iterations: 3
 "#;
@@ -431,12 +431,12 @@ workflows:
     let config = loader::load_merged(&env, None);
     assert_eq!(
         config.workflows.analyze.command.as_deref(),
-        Some("/develop-workflow:multi-analyze")
+        Some("/review:multi-analyze")
     );
     assert!(config.workflows.analyze.agent.is_none());
     assert_eq!(
         config.workflows.review.command.as_deref(),
-        Some("/develop-workflow:multi-review")
+        Some("/review:multi-review")
     );
     assert_eq!(config.workflows.review.max_iterations, 3);
     // implement은 default 유지

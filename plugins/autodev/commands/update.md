@@ -128,7 +128,6 @@ ls ~/.claude/plugins/cache/*/*/*/commands/*.md 2>/dev/null
 | 구분 | 플러그인 | 확인 대상 |
 |------|---------|----------|
 | 필수 | `git-utils` | `commit-and-pr.md` 존재 여부 |
-| 선택 | `develop-workflow` | `multi-review.md`, `develop-auto.md` 존재 여부 |
 | 선택 | `external-llm` | `invoke-codex.md`, `invoke-gemini.md` 존재 여부 |
 
 미설치 플러그인이 있으면 설치 명령어를 안내합니다.
@@ -145,7 +144,6 @@ ls ~/.claude/plugins/cache/*/*/*/commands/*.md 2>/dev/null
 | CLI 바이너리 버전       | OK   | v0.9.0                       |
 | 글로벌 설정 마이그레이션 | OK   | consumer → sources.github 완료 |
 | 레포별 설정 마이그레이션 | OK   | org/repo 변환 완료            |
-| develop-workflow 플러그인| OK   | 설치됨                       |
 | git-utils 플러그인      | OK   | 설치됨                       |
 | external-llm 플러그인   | WARN | 미설치 (multi-LLM 사용 불가)  |
 ```
