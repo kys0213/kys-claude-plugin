@@ -22,11 +22,25 @@ fn default_agent(task_type: &TaskType) -> &'static str {
     }
 }
 
-/// 이슈 분석/구현 위임 프롬프트 템플릿. `{agent_name}` 플레이스홀더 사용.
-const ISSUE_PROMPT: &str = "You MUST delegate this task to the `{agent_name}` agent \
+/// 분석 위임 프롬프트 템플릿. `{agent_name}` 플레이스홀더 사용.
+const ANALYZE_PROMPT: &str = "You MUST delegate this task to the `{agent_name}` agent \
     using the Agent tool with subagent_type=\"{agent_name}\". \
     Pass all issue context (number, repo, comments) to the agent. \
     Do not attempt to perform the analysis yourself.";
+
+/// 구현 위임 프롬프트 템플릿. `{agent_name}` 플레이스홀더 사용.
+const IMPLEMENT_PROMPT: &str = "You MUST delegate this task to the `{agent_name}` agent \
+    using the Agent tool with subagent_type=\"{agent_name}\". \
+    Pass all issue context (number, repo, comments) to the agent. \
+    Do not attempt to perform the implementation yourself.\n\n\
+    After the agent completes the implementation, you MUST review the changes \
+    for code quality before creating the PR:\n\
+    1. Run `git diff` to see all changes\n\
+    2. Review for code reuse (search for existing utilities that could replace new code)\n\
+    3. Review for code quality (redundant state, copy-paste, stringly-typed code)\n\
+    4. Review for efficiency (unnecessary work, missed concurrency, unbounded data)\n\
+    5. Fix any issues found directly — do not just report them\n\
+    6. Then proceed with commit and PR creation";
 
 /// PR 리뷰 위임 프롬프트 템플릿. `{agent_name}` 플레이스홀더 사용.
 const REVIEW_PROMPT: &str = "You MUST delegate this task to the `{agent_name}` agent \
@@ -52,7 +66,8 @@ pub fn resolve_workflow_prompt(stage: &WorkflowStage, task_type: TaskType) -> St
         .unwrap_or_else(|| default_agent(&task_type));
 
     let template = match task_type {
-        TaskType::Analyze | TaskType::Implement => ISSUE_PROMPT,
+        TaskType::Analyze => ANALYZE_PROMPT,
+        TaskType::Implement => IMPLEMENT_PROMPT,
         TaskType::Review => REVIEW_PROMPT,
     };
 
@@ -83,6 +98,8 @@ mod tests {
         let result = resolve_workflow_prompt(&stage, TaskType::Implement);
         assert!(result.contains("autodev:issue-analyzer"));
         assert!(result.contains("issue context"));
+        assert!(result.contains("review the changes"));
+        assert!(result.contains("code quality"));
     }
 
     #[test]
