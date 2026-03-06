@@ -72,10 +72,24 @@ pub fn format_analysis_comment(a: &AnalysisResult) -> String {
     comment
 }
 
+/// 파싱 실패 시 raw report를 분석 코멘트로 포맷
+///
+/// `format_analysis_comment`와 동일한 마커/헤더/푸터를 사용하여 일관성을 유지한다.
+pub fn format_raw_analysis_comment(report: &str) -> String {
+    format!(
+        "<!-- autodev:analysis -->\n\
+         ## Autodev Analysis Report\n\n\
+         {report}\n\n\
+         ---\n\
+         > 이 분석을 승인하려면 `autodev:approved-analysis` 라벨을 추가하세요.\n\
+         > 수정이 필요하면 코멘트로 피드백을 남기고 `autodev:analyzed` 라벨을 제거하세요."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::infrastructure::claude::output::{AnalysisResult, RelatedIssue, Verdict};
+    use crate::infrastructure::claude::output::{AnalysisResult, RelatedIssue, Relation, Verdict};
 
     #[test]
     fn format_analysis_comment_contains_marker_and_fields() {
@@ -141,13 +155,13 @@ mod tests {
             related_issues: vec![
                 RelatedIssue {
                     number: 10,
-                    relation: "related".to_string(),
+                    relation: Relation::Related,
                     confidence: 0.7,
                     summary: "Similar auth issue".to_string(),
                 },
                 RelatedIssue {
                     number: 15,
-                    relation: "duplicate".to_string(),
+                    relation: Relation::Duplicate,
                     confidence: 0.9,
                     summary: "Same bug reported".to_string(),
                 },

@@ -250,14 +250,7 @@ impl AnalyzeTask {
     async fn handle_fallback(&self, stdout: &str) -> Vec<QueueOp> {
         let gh_host = self.gh_host();
         let report = output::parse_output(stdout);
-        let comment = format!(
-            "<!-- autodev:analysis -->\n\
-             ## Autodev Analysis Report\n\n\
-             {report}\n\n\
-             ---\n\
-             > 이 분석을 승인하려면 `autodev:approved-analysis` 라벨을 추가하세요.\n\
-             > 수정이 필요하면 코멘트로 피드백을 남기고 `autodev:analyzed` 라벨을 제거하세요."
-        );
+        let comment = verdict::format_raw_analysis_comment(&report);
         self.gh
             .issue_comment(
                 &self.item.repo_name,

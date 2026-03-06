@@ -64,12 +64,32 @@ impl fmt::Display for Verdict {
     }
 }
 
+/// 관련 이슈 관계 타입
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Relation {
+    Duplicate,
+    Related,
+    Blocks,
+    BlockedBy,
+}
+
+impl fmt::Display for Relation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Relation::Duplicate => write!(f, "duplicate"),
+            Relation::Related => write!(f, "related"),
+            Relation::Blocks => write!(f, "blocks"),
+            Relation::BlockedBy => write!(f, "blocked_by"),
+        }
+    }
+}
+
 /// 관련 이슈 정보
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct RelatedIssue {
     pub number: i64,
-    /// "duplicate" | "related" | "blocks" | "blocked_by"
-    pub relation: String,
+    pub relation: Relation,
     /// 0.0 ~ 1.0
     pub confidence: f64,
     pub summary: String,
