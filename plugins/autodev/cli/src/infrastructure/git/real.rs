@@ -85,30 +85,26 @@ impl Git for RealGit {
         let dest_str = path_to_string(dest);
 
         if let Some(b) = branch {
-            // Try creating a new branch first; if it already exists, fall back to checkout.
-            // This avoids a separate rev-parse check (TOCTOU) and saves a subprocess in the
-            // common case (new branch).
-            let create = tokio::process::Command::new("git")
-                .args(["worktree", "add", "-b", b, &dest_str])
+            // Try checking out an existing branch first (handles local and remote tracking
+            // branches). If the branch doesn't exist yet, fall back to creating it with -b.
+            // This order is important: ReviewTask/ImproveTask pass existing PR branches that
+            // may only exist on the remote, while ImplementTask creates new branches.
+            let checkout = tokio::process::Command::new("git")
+                .args(["worktree", "add", &dest_str, b])
                 .current_dir(base_dir)
                 .output()
                 .await?;
 
-            if !create.status.success() {
-                let stderr = String::from_utf8_lossy(&create.stderr);
-                if !stderr.contains("already exists") {
-                    anyhow::bail!("git worktree add -b failed: {}", stderr.trim());
-                }
-
-                // Branch already exists → checkout into worktree
-                let checkout = tokio::process::Command::new("git")
-                    .args(["worktree", "add", &dest_str, b])
+            if !checkout.status.success() {
+                // Branch doesn't exist → create new branch from HEAD
+                let create = tokio::process::Command::new("git")
+                    .args(["worktree", "add", "-b", b, &dest_str])
                     .current_dir(base_dir)
                     .output()
                     .await?;
 
-                if !checkout.status.success() {
-                    let err = String::from_utf8_lossy(&checkout.stderr);
+                if !create.status.success() {
+                    let err = String::from_utf8_lossy(&create.stderr);
                     anyhow::bail!("git worktree add failed: {}", err.trim());
                 }
             }
