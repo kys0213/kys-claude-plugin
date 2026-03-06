@@ -82,43 +82,42 @@ impl Git for RealGit {
     }
 
     async fn worktree_add(&self, base_dir: &Path, dest: &Path, branch: Option<&str>) -> Result<()> {
-        let mut args = vec!["worktree".to_string(), "add".to_string()];
+        let dest_str = path_to_string(dest);
 
         if let Some(b) = branch {
-            // Check if branch already exists locally or in remote
-            let exists = tokio::process::Command::new("git")
-                .args(["rev-parse", "--verify", b])
+            // Try creating a new branch first; if it already exists, fall back to checkout.
+            // This avoids a separate rev-parse check (TOCTOU) and saves a subprocess in the
+            // common case (new branch).
+            let create = tokio::process::Command::new("git")
+                .args(["worktree", "add", "-b", b, &dest_str])
                 .current_dir(base_dir)
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
                 .status()
-                .await
-                .map(|s| s.success())
-                .unwrap_or(false);
+                .await?;
 
-            if exists {
-                // Existing branch → checkout into worktree
-                args.push(path_to_string(dest));
-                args.push(b.to_string());
-            } else {
-                // New branch → create with -b
-                args.push("-b".to_string());
-                args.push(b.to_string());
-                args.push(path_to_string(dest));
+            if !create.success() {
+                // Branch already exists → checkout into worktree
+                let checkout = tokio::process::Command::new("git")
+                    .args(["worktree", "add", &dest_str, b])
+                    .current_dir(base_dir)
+                    .status()
+                    .await?;
+
+                if !checkout.success() {
+                    anyhow::bail!("git worktree add failed for {}", dest.display());
+                }
             }
         } else {
-            args.push(path_to_string(dest));
+            let status = tokio::process::Command::new("git")
+                .args(["worktree", "add", &dest_str])
+                .current_dir(base_dir)
+                .status()
+                .await?;
+
+            if !status.success() {
+                anyhow::bail!("git worktree add failed for {}", dest.display());
+            }
         }
 
-        let status = tokio::process::Command::new("git")
-            .args(&args)
-            .current_dir(base_dir)
-            .status()
-            .await?;
-
-        if !status.success() {
-            anyhow::bail!("git worktree add failed for {}", dest.display());
-        }
         Ok(())
     }
 

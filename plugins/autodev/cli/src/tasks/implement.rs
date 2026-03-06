@@ -75,6 +75,10 @@ impl ImplementTask {
         }
     }
 
+    fn head_branch(&self) -> String {
+        format!("autodev/issue-{}", self.item.github_number)
+    }
+
     async fn cleanup_worktree(&self) {
         let _ = self
             .workspace
@@ -105,7 +109,7 @@ impl Task for ImplementTask {
                 ))
             })?;
 
-        let branch_name = format!("autodev/issue-{}", self.item.github_number);
+        let branch_name = self.head_branch();
         let wt_path = self
             .workspace
             .create_worktree(&self.item.repo_name, &self.task_id, Some(&branch_name))
@@ -201,7 +205,7 @@ impl Task for ImplementTask {
         }
 
         // PR 번호 추출 (stdout 파싱 + API fallback)
-        let head_branch = format!("autodev/issue-{}", self.item.github_number);
+        let head_branch = self.head_branch();
         let pr_number = match output::extract_pr_number(&response.stdout) {
             Some(n) => Some(n),
             None => find_existing_pr(&*self.gh, &self.item.repo_name, &head_branch, gh_host).await,
