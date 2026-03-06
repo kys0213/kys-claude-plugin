@@ -33,24 +33,48 @@ Issue #{number}: {title}
 
 {body}
 
-Respond with this exact JSON schema:
+## Step 1: Survey existing issues
+
+Run `gh issue list --state open --json number,title,labels,body --limit 30` to get the current issue inventory.
+Compare each existing issue with the current issue to identify duplicates, related issues, or blocking dependencies.
+
+## Step 2: Analyze the issue
+
+Based on the codebase and the existing issue inventory, analyze this issue for:
+- Feasibility and clarity of requirements
+- Affected files and implementation direction
+- Risks and checkpoints
+- Duplicates or related issues found in Step 1
+
+## Step 3: Respond in JSON
+
 {{
   "verdict": "implement" | "needs_clarification" | "wontfix",
   "confidence": 0.0-1.0,
   "summary": "1-2 sentence summary of the issue",
   "questions": ["question1", ...],
   "reason": "reason if wontfix, null otherwise",
-  "report": "full markdown analysis report with: affected files, implementation direction, checkpoints, risks"
+  "report": "full markdown analysis report with: affected files, implementation direction, checkpoints, risks",
+  "related_issues": [
+    {{
+      "number": 123,
+      "relation": "duplicate" | "related" | "blocks" | "blocked_by",
+      "confidence": 0.0-1.0,
+      "summary": "brief explanation of the relationship"
+    }}
+  ]
 }}
 
 Rules:
 - verdict "implement": the issue is clear enough to implement
 - verdict "needs_clarification": the issue is ambiguous or missing critical details
 - verdict "wontfix": the issue should not be implemented (duplicate, out of scope, invalid)
+  - If a duplicate is found with high confidence (>= 0.8), use "wontfix" and reference the original issue in reason
 - confidence: how confident you are in the verdict (0.0 = no confidence, 1.0 = fully confident)
 - questions: list of clarifying questions (required when verdict is "needs_clarification")
 - reason: explanation (required when verdict is "wontfix")
-- report: detailed analysis regardless of verdict"#;
+- report: detailed analysis regardless of verdict
+- related_issues: list of related existing issues found in Step 1 (empty array if none found)"#;
 
 /// 이슈 분석 Task.
 ///
@@ -226,14 +250,7 @@ impl AnalyzeTask {
     async fn handle_fallback(&self, stdout: &str) -> Vec<QueueOp> {
         let gh_host = self.gh_host();
         let report = output::parse_output(stdout);
-        let comment = format!(
-            "<!-- autodev:analysis -->\n\
-             ## Autodev Analysis Report\n\n\
-             {report}\n\n\
-             ---\n\
-             > 이 분석을 승인하려면 `autodev:approved-analysis` 라벨을 추가하세요.\n\
-             > 수정이 필요하면 코멘트로 피드백을 남기고 `autodev:analyzed` 라벨을 제거하세요."
-        );
+        let comment = verdict::format_raw_analysis_comment(&report);
         self.gh
             .issue_comment(
                 &self.item.repo_name,
