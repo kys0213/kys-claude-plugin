@@ -52,6 +52,18 @@ enum Commands {
         #[arg(short = 'n', long, default_value = "20")]
         limit: usize,
     },
+    /// 토큰 사용량 리포트
+    Usage {
+        /// 레포 이름 필터 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+        /// 시작일 (YYYY-MM-DD)
+        #[arg(long)]
+        since: Option<String>,
+        /// 이슈 번호로 필터
+        #[arg(long)]
+        issue: Option<i64>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -209,6 +221,10 @@ async fn main() -> Result<()> {
         Commands::Logs { repo, limit } => {
             let logs = client::logs(&db, repo.as_deref(), limit)?;
             println!("{logs}");
+        }
+        Commands::Usage { repo, since, issue } => {
+            let report = client::usage(&db, repo.as_deref(), since.as_deref(), issue)?;
+            println!("{report}");
         }
     }
 

@@ -224,6 +224,91 @@ pub fn config_show(env: &dyn Env) -> Result<()> {
     Ok(())
 }
 
+/// 사용량 리포트
+pub fn usage(
+    db: &Database,
+    repo: Option<&str>,
+    since: Option<&str>,
+    issue: Option<i64>,
+) -> Result<String> {
+    use crate::domain::repository::TokenUsageRepository;
+
+    let mut output = String::new();
+
+    if let (Some(repo_name), Some(issue_num)) = (repo, issue) {
+        // Issue-specific report
+        let entries = db.usage_by_issue(repo_name, issue_num)?;
+        if entries.is_empty() {
+            output.push_str(&format!("No usage data for {repo_name}#{issue_num}.\n"));
+        } else {
+            output.push_str(&format!("Usage for {repo_name}#{issue_num}:\n\n"));
+            for e in &entries {
+                let dur = format_duration(e.duration_ms);
+                output.push_str(&format!(
+                    "  [{:>8}] sessions={} duration={} tokens(in={} out={})\n",
+                    e.queue_type, e.sessions, dur, e.input_tokens, e.output_tokens
+                ));
+            }
+        }
+        return Ok(output);
+    }
+
+    let summary = db.usage_summary(repo, since)?;
+
+    output.push_str("Usage Summary\n");
+    output.push_str(&format!("  Total sessions:  {}\n", summary.total_sessions));
+    output.push_str(&format!(
+        "  Total duration:  {}\n",
+        format_duration(summary.total_duration_ms)
+    ));
+    if summary.total_input_tokens > 0 || summary.total_output_tokens > 0 {
+        output.push_str(&format!(
+            "  Input tokens:    {}\n  Output tokens:   {}\n",
+            summary.total_input_tokens, summary.total_output_tokens
+        ));
+        output.push_str(&format!(
+            "  Cache write:     {}\n  Cache read:      {}\n",
+            summary.total_cache_write_tokens, summary.total_cache_read_tokens
+        ));
+    }
+
+    if !summary.by_queue_type.is_empty() {
+        output.push_str("\nBy queue type:\n");
+        for qt in &summary.by_queue_type {
+            let dur = format_duration(qt.duration_ms);
+            output.push_str(&format!(
+                "  {:>12}: sessions={:<4} duration={:<12} tokens(in={} out={})\n",
+                qt.queue_type, qt.sessions, dur, qt.input_tokens, qt.output_tokens
+            ));
+        }
+    }
+
+    if !summary.by_repo.is_empty() {
+        output.push_str("\nBy repository:\n");
+        for r in &summary.by_repo {
+            let dur = format_duration(r.duration_ms);
+            output.push_str(&format!(
+                "  {}: sessions={} duration={} tokens(in={} out={})\n",
+                r.repo_name, r.sessions, dur, r.input_tokens, r.output_tokens
+            ));
+        }
+    }
+
+    Ok(output)
+}
+
+fn format_duration(ms: i64) -> String {
+    if ms < 1000 {
+        format!("{ms}ms")
+    } else if ms < 60_000 {
+        format!("{:.1}s", ms as f64 / 1000.0)
+    } else if ms < 3_600_000 {
+        format!("{:.1}m", ms as f64 / 60_000.0)
+    } else {
+        format!("{:.1}h", ms as f64 / 3_600_000.0)
+    }
+}
+
 /// 로그 조회
 pub fn logs(db: &Database, repo: Option<&str>, limit: usize) -> Result<String> {
     let entries = db.log_recent(repo, limit)?;

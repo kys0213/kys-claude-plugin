@@ -24,3 +24,9 @@ pub trait ConsumerLogRepository {
     /// 특정 날짜의 knowledge extraction stdout를 모두 반환
     fn log_knowledge_stdout_by_date(&self, date: &str) -> Result<Vec<String>>;
 }
+
+pub trait TokenUsageRepository {
+    fn usage_insert(&self, usage: &NewTokenUsage) -> Result<()>;
+    fn usage_summary(&self, repo: Option<&str>, since: Option<&str>) -> Result<UsageSummary>;
+    fn usage_by_issue(&self, repo: &str, issue: i64) -> Result<Vec<UsageByIssue>>;
+}

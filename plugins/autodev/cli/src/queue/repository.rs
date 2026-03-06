@@ -42,6 +42,10 @@ impl RepoRepository for Database {
 
         let tx = conn.unchecked_transaction()?;
         tx.execute(
+            "DELETE FROM token_usage WHERE repo_id = ?1",
+            rusqlite::params![repo_id],
+        )?;
+        tx.execute(
             "DELETE FROM scan_cursors WHERE repo_id = ?1",
             rusqlite::params![repo_id],
         )?;
@@ -198,6 +202,158 @@ impl ConsumerLogRepository for Database {
              ORDER BY started_at",
         )?;
         let rows = stmt.query_map(rusqlite::params![like_pattern], |row| row.get(0))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+}
+
+impl TokenUsageRepository for Database {
+    fn usage_insert(&self, usage: &NewTokenUsage) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.conn().execute(
+            "INSERT INTO token_usage (log_id, repo_id, queue_type, queue_item_id, \
+             input_tokens, output_tokens, cache_write_tokens, cache_read_tokens, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            rusqlite::params![
+                usage.log_id,
+                usage.repo_id,
+                usage.queue_type,
+                usage.queue_item_id,
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cache_write_tokens,
+                usage.cache_read_tokens,
+                now
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn usage_summary(&self, repo: Option<&str>, since: Option<&str>) -> Result<UsageSummary> {
+        let conn = self.conn();
+
+        // Build WHERE clauses
+        let mut conditions = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        let mut idx = 1;
+
+        if let Some(name) = repo {
+            conditions.push(format!("r.name = ?{idx}"));
+            params.push(Box::new(name.to_string()));
+            idx += 1;
+        }
+        if let Some(date) = since {
+            conditions.push(format!("cl.started_at >= ?{idx}"));
+            params.push(Box::new(date.to_string()));
+        }
+
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
+        };
+
+        // Total summary from consumer_logs (sessions + duration)
+        let totals_query = format!(
+            "SELECT COUNT(*), COALESCE(SUM(cl.duration_ms), 0) \
+             FROM consumer_logs cl JOIN repositories r ON cl.repo_id = r.id {where_clause}"
+        );
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let (total_sessions, total_duration_ms): (i64, i64) =
+            conn.query_row(&totals_query, params_refs.as_slice(), |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?;
+
+        // Token totals from token_usage table
+        let token_totals_query = format!(
+            "SELECT COALESCE(SUM(tu.input_tokens), 0), COALESCE(SUM(tu.output_tokens), 0), \
+             COALESCE(SUM(tu.cache_write_tokens), 0), COALESCE(SUM(tu.cache_read_tokens), 0) \
+             FROM token_usage tu JOIN repositories r ON tu.repo_id = r.id \
+             JOIN consumer_logs cl ON tu.log_id = cl.id {where_clause}"
+        );
+        let (total_input, total_output, total_cache_write, total_cache_read): (i64, i64, i64, i64) =
+            conn.query_row(&token_totals_query, params_refs.as_slice(), |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?;
+
+        // By queue_type
+        let qt_query = format!(
+            "SELECT cl.queue_type, COUNT(*), COALESCE(SUM(cl.duration_ms), 0), \
+             COALESCE(SUM(tu.input_tokens), 0), COALESCE(SUM(tu.output_tokens), 0) \
+             FROM consumer_logs cl \
+             JOIN repositories r ON cl.repo_id = r.id \
+             LEFT JOIN token_usage tu ON tu.log_id = cl.id \
+             {where_clause} GROUP BY cl.queue_type ORDER BY cl.queue_type"
+        );
+        let mut stmt = conn.prepare(&qt_query)?;
+        let qt_rows = stmt.query_map(params_refs.as_slice(), |row| {
+            Ok(UsageByQueueType {
+                queue_type: row.get(0)?,
+                sessions: row.get(1)?,
+                duration_ms: row.get(2)?,
+                input_tokens: row.get(3)?,
+                output_tokens: row.get(4)?,
+            })
+        })?;
+        let by_queue_type: Vec<UsageByQueueType> = qt_rows.collect::<Result<Vec<_>, _>>()?;
+
+        // By repo
+        let repo_query = format!(
+            "SELECT r.name, COUNT(*), COALESCE(SUM(cl.duration_ms), 0), \
+             COALESCE(SUM(tu.input_tokens), 0), COALESCE(SUM(tu.output_tokens), 0) \
+             FROM consumer_logs cl \
+             JOIN repositories r ON cl.repo_id = r.id \
+             LEFT JOIN token_usage tu ON tu.log_id = cl.id \
+             {where_clause} GROUP BY r.name ORDER BY r.name"
+        );
+        let mut stmt = conn.prepare(&repo_query)?;
+        let repo_rows = stmt.query_map(params_refs.as_slice(), |row| {
+            Ok(UsageByRepo {
+                repo_name: row.get(0)?,
+                sessions: row.get(1)?,
+                duration_ms: row.get(2)?,
+                input_tokens: row.get(3)?,
+                output_tokens: row.get(4)?,
+            })
+        })?;
+        let by_repo: Vec<UsageByRepo> = repo_rows.collect::<Result<Vec<_>, _>>()?;
+
+        Ok(UsageSummary {
+            total_sessions,
+            total_duration_ms,
+            total_input_tokens: total_input,
+            total_output_tokens: total_output,
+            total_cache_write_tokens: total_cache_write,
+            total_cache_read_tokens: total_cache_read,
+            by_queue_type,
+            by_repo,
+        })
+    }
+
+    fn usage_by_issue(&self, repo: &str, issue: i64) -> Result<Vec<UsageByIssue>> {
+        let conn = self.conn();
+        let issue_str = issue.to_string();
+        let mut stmt = conn.prepare(
+            "SELECT cl.queue_item_id, cl.queue_type, COUNT(*), \
+             COALESCE(SUM(cl.duration_ms), 0), \
+             COALESCE(SUM(tu.input_tokens), 0), COALESCE(SUM(tu.output_tokens), 0) \
+             FROM consumer_logs cl \
+             JOIN repositories r ON cl.repo_id = r.id \
+             LEFT JOIN token_usage tu ON tu.log_id = cl.id \
+             WHERE r.name = ?1 AND cl.queue_item_id = ?2 \
+             GROUP BY cl.queue_item_id, cl.queue_type \
+             ORDER BY cl.queue_type",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![repo, issue_str], |row| {
+            Ok(UsageByIssue {
+                queue_item_id: row.get(0)?,
+                queue_type: row.get(1)?,
+                sessions: row.get(2)?,
+                duration_ms: row.get(3)?,
+                input_tokens: row.get(4)?,
+                output_tokens: row.get(5)?,
+            })
+        })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 }
