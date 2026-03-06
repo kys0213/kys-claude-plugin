@@ -22,6 +22,18 @@ fn default_agent(task_type: &TaskType) -> &'static str {
     }
 }
 
+/// 이슈 분석/구현 위임 프롬프트 템플릿. `{agent_name}` 플레이스홀더 사용.
+const ISSUE_PROMPT: &str = "You MUST delegate this task to the `{agent_name}` agent \
+    using the Agent tool with subagent_type=\"{agent_name}\". \
+    Pass all issue context (number, repo, comments) to the agent. \
+    Do not attempt to perform the analysis yourself.";
+
+/// PR 리뷰 위임 프롬프트 템플릿. `{agent_name}` 플레이스홀더 사용.
+const REVIEW_PROMPT: &str = "You MUST delegate this task to the `{agent_name}` agent \
+    using the Agent tool with subagent_type=\"{agent_name}\". \
+    Pass all PR context (number, repo, diff, comments) to the agent. \
+    Do not attempt to perform the review yourself.";
+
 /// WorkflowStage를 system prompt 텍스트로 변환한다.
 ///
 /// 우선순위:
@@ -39,20 +51,12 @@ pub fn resolve_workflow_prompt(stage: &WorkflowStage, task_type: TaskType) -> St
         .as_deref()
         .unwrap_or_else(|| default_agent(&task_type));
 
-    match task_type {
-        TaskType::Analyze | TaskType::Implement => format!(
-            "You MUST delegate this task to the `{agent_name}` agent \
-             using the Agent tool with subagent_type=\"{agent_name}\". \
-             Pass all issue context (number, repo, comments) to the agent. \
-             Do not attempt to perform the analysis yourself."
-        ),
-        TaskType::Review => format!(
-            "You MUST delegate this task to the `{agent_name}` agent \
-             using the Agent tool with subagent_type=\"{agent_name}\". \
-             Pass all PR context (number, repo, diff, comments) to the agent. \
-             Do not attempt to perform the review yourself."
-        ),
-    }
+    let template = match task_type {
+        TaskType::Analyze | TaskType::Implement => ISSUE_PROMPT,
+        TaskType::Review => REVIEW_PROMPT,
+    };
+
+    template.replace("{agent_name}", agent_name)
 }
 
 #[cfg(test)]
