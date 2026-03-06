@@ -64,6 +64,17 @@ impl fmt::Display for Verdict {
     }
 }
 
+/// 관련 이슈 정보
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct RelatedIssue {
+    pub number: i64,
+    /// "duplicate" | "related" | "blocks" | "blocked_by"
+    pub relation: String,
+    /// 0.0 ~ 1.0
+    pub confidence: f64,
+    pub summary: String,
+}
+
 /// 이슈 분석 결과 구조체
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct AnalysisResult {
@@ -78,6 +89,9 @@ pub struct AnalysisResult {
     pub reason: Option<String>,
     /// 전체 분석 리포트 (구현 단계에서 사용)
     pub report: String,
+    /// 기존 이슈와의 관련성 분석 결과
+    #[serde(default)]
+    pub related_issues: Vec<RelatedIssue>,
 }
 
 /// PR 리뷰 verdict 타입
