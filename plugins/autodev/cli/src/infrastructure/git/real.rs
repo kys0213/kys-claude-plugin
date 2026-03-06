@@ -91,10 +91,15 @@ impl Git for RealGit {
             let create = tokio::process::Command::new("git")
                 .args(["worktree", "add", "-b", b, &dest_str])
                 .current_dir(base_dir)
-                .status()
+                .output()
                 .await?;
 
-            if !create.success() {
+            if !create.status.success() {
+                let stderr = String::from_utf8_lossy(&create.stderr);
+                if !stderr.contains("already exists") {
+                    anyhow::bail!("git worktree add -b failed: {}", stderr.trim());
+                }
+
                 // Branch already exists → checkout into worktree
                 let checkout = tokio::process::Command::new("git")
                     .args(["worktree", "add", &dest_str, b])
