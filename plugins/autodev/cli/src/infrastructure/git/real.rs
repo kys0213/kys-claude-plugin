@@ -104,22 +104,24 @@ impl Git for RealGit {
                 let checkout = tokio::process::Command::new("git")
                     .args(["worktree", "add", &dest_str, b])
                     .current_dir(base_dir)
-                    .status()
+                    .output()
                     .await?;
 
-                if !checkout.success() {
-                    anyhow::bail!("git worktree add failed for {}", dest.display());
+                if !checkout.status.success() {
+                    let err = String::from_utf8_lossy(&checkout.stderr);
+                    anyhow::bail!("git worktree add failed: {}", err.trim());
                 }
             }
         } else {
-            let status = tokio::process::Command::new("git")
+            let out = tokio::process::Command::new("git")
                 .args(["worktree", "add", &dest_str])
                 .current_dir(base_dir)
-                .status()
+                .output()
                 .await?;
 
-            if !status.success() {
-                anyhow::bail!("git worktree add failed for {}", dest.display());
+            if !out.status.success() {
+                let err = String::from_utf8_lossy(&out.stderr);
+                anyhow::bail!("git worktree add failed: {}", err.trim());
             }
         }
 
