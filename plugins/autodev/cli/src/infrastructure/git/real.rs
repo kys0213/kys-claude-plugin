@@ -82,14 +82,32 @@ impl Git for RealGit {
     }
 
     async fn worktree_add(&self, base_dir: &Path, dest: &Path, branch: Option<&str>) -> Result<()> {
-        let mut args = vec![
-            "worktree".to_string(),
-            "add".to_string(),
-            path_to_string(dest),
-        ];
+        let mut args = vec!["worktree".to_string(), "add".to_string()];
 
         if let Some(b) = branch {
-            args.push(b.to_string());
+            // Check if branch already exists locally or in remote
+            let exists = tokio::process::Command::new("git")
+                .args(["rev-parse", "--verify", b])
+                .current_dir(base_dir)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await
+                .map(|s| s.success())
+                .unwrap_or(false);
+
+            if exists {
+                // Existing branch → checkout into worktree
+                args.push(path_to_string(dest));
+                args.push(b.to_string());
+            } else {
+                // New branch → create with -b
+                args.push("-b".to_string());
+                args.push(b.to_string());
+                args.push(path_to_string(dest));
+            }
+        } else {
+            args.push(path_to_string(dest));
         }
 
         let status = tokio::process::Command::new("git")

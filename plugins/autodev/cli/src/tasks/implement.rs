@@ -105,9 +105,10 @@ impl Task for ImplementTask {
                 ))
             })?;
 
+        let branch_name = format!("autodev/issue-{}", self.item.github_number);
         let wt_path = self
             .workspace
-            .create_worktree(&self.item.repo_name, &self.task_id, None)
+            .create_worktree(&self.item.repo_name, &self.task_id, Some(&branch_name))
             .await
             .map_err(|e| {
                 SkipReason::PreflightFailed(format!(
@@ -321,7 +322,7 @@ mod tests {
 
     struct MockWorkspace {
         cloned: Mutex<Vec<(String, String)>>,
-        worktrees: Mutex<Vec<(String, String)>>,
+        worktrees: Mutex<Vec<(String, String, Option<String>)>>,
         removed: Mutex<Vec<(String, String)>>,
     }
 
@@ -349,12 +350,13 @@ mod tests {
             &self,
             repo_name: &str,
             task_id: &str,
-            _branch: Option<&str>,
+            branch: Option<&str>,
         ) -> anyhow::Result<PathBuf> {
-            self.worktrees
-                .lock()
-                .unwrap()
-                .push((repo_name.to_string(), task_id.to_string()));
+            self.worktrees.lock().unwrap().push((
+                repo_name.to_string(),
+                task_id.to_string(),
+                branch.map(|b| b.to_string()),
+            ));
             Ok(PathBuf::from(format!("/mock/workspaces/{task_id}")))
         }
 
@@ -426,6 +428,7 @@ mod tests {
         let wts = ws.worktrees.lock().unwrap();
         assert_eq!(wts.len(), 1);
         assert_eq!(wts[0].1, "issue-42");
+        assert_eq!(wts[0].2, Some("autodev/issue-42".to_string()));
     }
 
     // ═══════════════════════════════════════════════
