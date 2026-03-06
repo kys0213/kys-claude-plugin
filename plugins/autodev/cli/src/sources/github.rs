@@ -241,10 +241,11 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                 )));
             }
 
-            // ─── PR concurrency: Reviewing + Improving + Extracting 합산 제한 ───
-            let pr_in_flight = repo.pr_queue.len(pr_phase::REVIEWING)
-                + repo.pr_queue.len(pr_phase::IMPROVING)
-                + repo.pr_queue.len(pr_phase::EXTRACTING);
+            // ─── PR concurrency: Reviewing + Improving 합산 제한 ───
+            // Extracting is excluded: items in Extracting are queued (waiting to be popped),
+            // not actively in-flight. Including them would self-block the pop loop below.
+            let pr_in_flight =
+                repo.pr_queue.len(pr_phase::REVIEWING) + repo.pr_queue.len(pr_phase::IMPROVING);
             let mut pr_slots = repo.pr_concurrency.saturating_sub(pr_in_flight);
 
             // PR: Pending → Reviewing
