@@ -233,6 +233,11 @@ pub fn usage(
 ) -> Result<String> {
     use crate::domain::repository::TokenUsageRepository;
 
+    if let Some(s) = since {
+        chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+            .map_err(|_| anyhow::anyhow!("invalid --since format: expected YYYY-MM-DD"))?;
+    }
+
     let mut output = String::new();
 
     if let (Some(repo_name), Some(issue_num)) = (repo, issue) {

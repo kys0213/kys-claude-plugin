@@ -231,6 +231,15 @@ impl TokenUsageRepository for Database {
     fn usage_summary(&self, repo: Option<&str>, since: Option<&str>) -> Result<UsageSummary> {
         let conn = self.conn();
 
+        if let Some(name) = repo {
+            if !name
+                .chars()
+                .all(|c| c.is_alphanumeric() || matches!(c, '/' | '-' | '_' | '.'))
+            {
+                anyhow::bail!("invalid repo name: {name}");
+            }
+        }
+
         // Build WHERE clauses
         let mut conditions = Vec::new();
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
