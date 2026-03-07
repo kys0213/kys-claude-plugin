@@ -8,8 +8,8 @@ pub fn format_wontfix_comment(a: &AnalysisResult) -> String {
         .unwrap_or("No additional details provided.");
     format!(
         "<!-- autodev:wontfix -->\n\
-         ## Autodev Analysis\n\n\
-         **Verdict**: Won't fix\n\n\
+         ## 🤖 Autodev Analysis\n\n\
+         **Verdict**: `wontfix`\n\n\
          **Summary**: {}\n\n\
          **Reason**: {reason}",
         a.summary
@@ -20,7 +20,7 @@ pub fn format_wontfix_comment(a: &AnalysisResult) -> String {
 pub fn format_clarification_comment(a: &AnalysisResult) -> String {
     let mut comment = format!(
         "<!-- autodev:waiting -->\n\
-         ## Autodev Analysis\n\n\
+         ## 🤖 Autodev Analysis\n\n\
          **Summary**: {}\n\n\
          This issue needs clarification before implementation can proceed.\n\n",
         a.summary
@@ -28,8 +28,8 @@ pub fn format_clarification_comment(a: &AnalysisResult) -> String {
 
     if !a.questions.is_empty() {
         comment.push_str("**Questions**:\n");
-        for (i, q) in a.questions.iter().enumerate() {
-            comment.push_str(&format!("{}. {q}\n", i + 1));
+        for q in &a.questions {
+            comment.push_str(&format!("- [ ] {q}\n"));
         }
     }
 
@@ -42,9 +42,11 @@ pub fn format_clarification_comment(a: &AnalysisResult) -> String {
 pub fn format_analysis_comment(a: &AnalysisResult) -> String {
     let mut comment = format!(
         "<!-- autodev:analysis -->\n\
-         ## Autodev Analysis Report\n\n\
-         **Verdict**: {} (confidence: {:.0}%)\n\n\
-         {}",
+         ## 🤖 Autodev Analysis Report\n\n\
+         **Verdict**: `{}` | **Confidence**: {:.0}%\n\n\
+         <details>\n<summary>Analysis Report</summary>\n\n\
+         {}\n\
+         </details>",
         a.verdict,
         a.confidence * 100.0,
         a.report
@@ -78,7 +80,7 @@ pub fn format_analysis_comment(a: &AnalysisResult) -> String {
 pub fn format_raw_analysis_comment(report: &str) -> String {
     format!(
         "<!-- autodev:analysis -->\n\
-         ## Autodev Analysis Report\n\n\
+         ## 🤖 Autodev Analysis Report\n\n\
          {report}\n\n\
          ---\n\
          > 이 분석을 승인하려면 `autodev:approved-analysis` 라벨을 추가하세요.\n\
@@ -139,8 +141,8 @@ mod tests {
         };
         let comment = format_clarification_comment(&a);
         assert!(comment.contains("autodev:waiting"));
-        assert!(comment.contains("1. Which API?"));
-        assert!(comment.contains("2. Target version?"));
+        assert!(comment.contains("- [ ] Which API?"));
+        assert!(comment.contains("- [ ] Target version?"));
     }
 
     #[test]

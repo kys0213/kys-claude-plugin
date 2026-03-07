@@ -221,7 +221,50 @@ impl Daemon {
 
 // ─── Daemon Entry Point ───
 
-/// 데몬을 포그라운드로 시작 (non-blocking event loop)
+/// 현재 프로세스를 백그라운드 데몬으로 전환한다 (포그라운드/백그라운드 모두 지원).
+///
+/// Unix fork() + setsid() 패턴을 사용:
+/// - 부모 프로세스: 자식 PID 출력 후 즉시 종료
+/// - 자식 프로세스: 새 세션 생성 후 이벤트 루프 실행
+///
+/// stdout/stderr는 log_dir/daemon.out 파일로 리다이렉트된다.
+#[cfg(unix)]
+pub fn daemonize(log_dir: &Path) -> Result<()> {
+    use std::fs::OpenOptions;
+    use std::os::unix::io::AsRawFd;
+
+    let pid = unsafe { libc::fork() };
+    if pid < 0 {
+        bail!("fork failed");
+    }
+    if pid > 0 {
+        // 부모: 자식 PID 출력 후 종료
+        println!("autodev daemon started in background (pid: {pid})");
+        std::process::exit(0);
+    }
+
+    // 자식: 새 세션 생성
+    if unsafe { libc::setsid() } < 0 {
+        bail!("setsid failed");
+    }
+
+    // stdout/stderr → 로그 파일
+    let log_file = log_dir.join("daemon.out");
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file)?;
+
+    unsafe {
+        libc::dup2(file.as_raw_fd(), libc::STDOUT_FILENO);
+        libc::dup2(file.as_raw_fd(), libc::STDERR_FILENO);
+        libc::close(libc::STDIN_FILENO);
+    }
+
+    Ok(())
+}
+
+/// 데몬을 포그라운드 또는 백그라운드로 시작 (non-blocking event loop)
 pub async fn start(
     home: &Path,
     env: Arc<dyn Env>,

@@ -19,12 +19,20 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// 데몬 시작 (백그라운드)
-    Start,
+    /// 데몬 시작
+    Start {
+        /// 백그라운드 데몬으로 실행
+        #[arg(short = 'd', long)]
+        daemon: bool,
+    },
     /// 데몬 중지
     Stop,
     /// 데몬 재시작
-    Restart,
+    Restart {
+        /// 백그라운드 데몬으로 실행
+        #[arg(short = 'd', long)]
+        daemon: bool,
+    },
     /// 상태 요약 출력
     Status,
     /// TUI 대시보드
@@ -100,7 +108,10 @@ async fn main() -> Result<()> {
     let home = config::autodev_home(&env);
     std::fs::create_dir_all(&home)?;
 
-    let is_daemon = matches!(cli.command, Commands::Start | Commands::Restart);
+    let is_daemon = matches!(
+        cli.command,
+        Commands::Start { .. } | Commands::Restart { .. }
+    );
     let cfg = config::loader::load_merged(&env, None);
 
     // _guard must live until main() returns to flush non-blocking writer
@@ -157,7 +168,14 @@ async fn main() -> Result<()> {
     let sw = RealSuggestWorkflow;
 
     match cli.command {
-        Commands::Start => {
+        Commands::Start {
+            daemon: daemonize_flag,
+        } => {
+            if daemonize_flag {
+                let log_dir = config::resolve_log_dir(&cfg.daemon.log_dir, &home);
+                std::fs::create_dir_all(&log_dir)?;
+                daemon::daemonize(&log_dir)?;
+            }
             let env: Arc<dyn config::Env> = Arc::new(env);
             let gh: Arc<dyn infrastructure::gh::Gh> = Arc::new(gh);
             let git: Arc<dyn infrastructure::git::Git> = Arc::new(git);
@@ -166,8 +184,15 @@ async fn main() -> Result<()> {
             daemon::start(&home, env, gh, git, claude, sw).await?;
         }
         Commands::Stop => daemon::stop(&home)?,
-        Commands::Restart => {
+        Commands::Restart {
+            daemon: daemonize_flag,
+        } => {
             daemon::stop(&home).ok();
+            if daemonize_flag {
+                let log_dir = config::resolve_log_dir(&cfg.daemon.log_dir, &home);
+                std::fs::create_dir_all(&log_dir)?;
+                daemon::daemonize(&log_dir)?;
+            }
             let env: Arc<dyn config::Env> = Arc::new(env);
             let gh: Arc<dyn infrastructure::gh::Gh> = Arc::new(gh);
             let git: Arc<dyn infrastructure::git::Git> = Arc::new(git);

@@ -54,7 +54,7 @@ Based on the codebase and the existing issue inventory, analyze this issue for:
   "summary": "1-2 sentence summary of the issue",
   "questions": ["question1", ...],
   "reason": "reason if wontfix, null otherwise",
-  "report": "full markdown analysis report with: affected files, implementation direction, checkpoints, risks",
+  "report": "<markdown with sections: Summary (1-2 sentences), Affected Files (table: File/ChangeType/Description), Implementation Direction (numbered steps), Risks (table: Risk/Severity/Mitigation), Checkpoints (task list)>",
   "related_issues": [
     {{
       "number": 123,
