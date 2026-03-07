@@ -235,7 +235,7 @@ pub fn daemonize(log_dir: &Path) -> Result<()> {
 
     let pid = unsafe { libc::fork() };
     if pid < 0 {
-        bail!("fork failed");
+        bail!("fork failed: {}", std::io::Error::last_os_error());
     }
     if pid > 0 {
         // 부모: 자식 PID 출력 후 종료
@@ -245,7 +245,7 @@ pub fn daemonize(log_dir: &Path) -> Result<()> {
 
     // 자식: 새 세션 생성
     if unsafe { libc::setsid() } < 0 {
-        bail!("setsid failed");
+        bail!("setsid failed: {}", std::io::Error::last_os_error());
     }
 
     // stdout/stderr → 로그 파일
@@ -256,10 +256,25 @@ pub fn daemonize(log_dir: &Path) -> Result<()> {
         .open(&log_file)?;
 
     unsafe {
-        libc::dup2(file.as_raw_fd(), libc::STDOUT_FILENO);
-        libc::dup2(file.as_raw_fd(), libc::STDERR_FILENO);
-        libc::close(libc::STDIN_FILENO);
+        if libc::dup2(file.as_raw_fd(), libc::STDOUT_FILENO) < 0 {
+            bail!("dup2 stdout failed: {}", std::io::Error::last_os_error());
+        }
+        if libc::dup2(file.as_raw_fd(), libc::STDERR_FILENO) < 0 {
+            bail!("dup2 stderr failed: {}", std::io::Error::last_os_error());
+        }
     }
+
+    // stdin → /dev/null (close 대신)
+    let devnull = std::fs::File::open("/dev/null")
+        .map_err(|e| anyhow::anyhow!("open /dev/null failed: {e}"))?;
+    unsafe {
+        if libc::dup2(devnull.as_raw_fd(), libc::STDIN_FILENO) < 0 {
+            bail!("dup2 stdin failed: {}", std::io::Error::last_os_error());
+        }
+    }
+
+    std::mem::forget(file);
+    std::mem::forget(devnull);
 
     Ok(())
 }
