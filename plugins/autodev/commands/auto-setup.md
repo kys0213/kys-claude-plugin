@@ -235,12 +235,12 @@ autodev repo add <url> --config '{"sources":{"github":{"gh_host":"<detected_host
 
 | 라벨 | 색상 | 설명 |
 |------|------|------|
-| `autodev:analyze` | `0E8A16` (green) | Trigger autodev analysis |
+| `autodev:analyze` | `0366D6` (blue) | Trigger autodev analysis |
 | `autodev:wip` | `FBCA04` (yellow) | Work in progress |
 | `autodev:done` | `0E8A16` (green) | Completed |
 | `autodev:skip` | `E4E669` (light yellow) | Skipped |
 | `autodev:analyzed` | `1D76DB` (blue) | Analysis complete, awaiting review |
-| `autodev:approved-analysis` | `0E8A16` (green) | Analysis approved, awaiting implementation |
+| `autodev:approved-analysis` | `28A745` (light green) | Analysis approved, awaiting implementation |
 | `autodev:implementing` | `FBCA04` (yellow) | Implementation in progress |
 | `autodev:changes-requested` | `E99695` (red) | Changes requested on PR |
 | `autodev:extracted` | `D4C5F9` (purple) | Knowledge extracted |
@@ -251,20 +251,14 @@ autodev repo add <url> --config '{"sources":{"github":{"gh_host":"<detected_host
 
 ```bash
 REPO="<owner>/<repo>"  # Step 1에서 감지된 레포
-HOSTNAME_FLAG=""
-
-# GitHub Enterprise인 경우 --hostname 플래그 추가
-if [ -n "${gh_host}" ]; then
-  HOSTNAME_FLAG="--hostname ${gh_host}"
-fi
 
 declare -A LABEL_COLORS=(
-  ["autodev:analyze"]="0E8A16"
+  ["autodev:analyze"]="0366D6"
   ["autodev:wip"]="FBCA04"
   ["autodev:done"]="0E8A16"
   ["autodev:skip"]="E4E669"
   ["autodev:analyzed"]="1D76DB"
-  ["autodev:approved-analysis"]="0E8A16"
+  ["autodev:approved-analysis"]="28A745"
   ["autodev:implementing"]="FBCA04"
   ["autodev:changes-requested"]="E99695"
   ["autodev:extracted"]="D4C5F9"
@@ -286,28 +280,28 @@ declare -A LABEL_DESCS=(
   ["autodev:impl-failed"]="Implementation failed"
 )
 
-success=0
+created=0
 skipped=0
 
 for label in "${!LABEL_COLORS[@]}"; do
   color="${LABEL_COLORS[$label]}"
   desc="${LABEL_DESCS[$label]}"
-  if gh label create "$label" \
-      --color "$color" \
-      --description "$desc" \
-      --repo "$REPO" \
-      $HOSTNAME_FLAG \
-      --force 2>/dev/null; then
-    echo "  ✓ $label"
-    ((success++))
+  if [ -n "${gh_host}" ]; then
+    output=$(gh label create "$label" --color "$color" --description "$desc" --repo "$REPO" --hostname "${gh_host}" --force 2>&1)
   else
-    echo "  - $label (skipped)"
+    output=$(gh label create "$label" --color "$color" --description "$desc" --repo "$REPO" --force 2>&1)
+  fi
+  if [ $? -eq 0 ]; then
+    echo "  ✓ $label"
+    ((created++))
+  else
+    echo "  ⚠ $label: $output"
     ((skipped++))
   fi
 done
 
 echo ""
-echo "라벨 등록 완료: ${success}개 등록, ${skipped}개 스킵"
+echo "라벨 등록 완료: ${created}개 등록, ${skipped}개 스킵"
 ```
 
 `--force` 플래그를 사용하므로 이미 존재하는 라벨은 색상/설명이 업데이트됩니다.
