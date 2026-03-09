@@ -165,7 +165,6 @@ AskUserQuestion으로 질문:
 AskUserQuestion으로 질문:
 - Issue 동시 처리 수 (1~3)
 - PR 동시 처리 수 (1~3)
-- Merge 동시 처리 수 (1~2)
 
 ### Step 7: 워크플로우 선택
 
