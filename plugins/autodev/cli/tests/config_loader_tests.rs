@@ -49,18 +49,9 @@ fn default_config_has_expected_values() {
     assert_eq!(config.daemon.log_dir, "logs");
     assert_eq!(config.daemon.log_retention_days, 30);
     // Workflows defaults (v2)
-    assert_eq!(
-        config.workflows.analyze.agent.as_deref(),
-        Some("autodev:issue-analyzer")
-    );
-    assert_eq!(
-        config.workflows.implement.agent.as_deref(),
-        Some("autodev:issue-analyzer")
-    );
-    assert_eq!(
-        config.workflows.review.agent.as_deref(),
-        Some("autodev:pr-reviewer")
-    );
+    assert!(config.workflows.analyze.command.is_none());
+    assert!(config.workflows.implement.command.is_none());
+    assert!(config.workflows.review.command.is_none());
     assert_eq!(config.workflows.review.max_iterations, 2);
 }
 
@@ -71,10 +62,7 @@ fn load_merged_no_files_returns_defaults() {
     // 존재하지 않는 경로 → 양쪽 모두 None → default
     let config = loader::load_merged(&env, Some(tmp.path()));
     assert_eq!(config.sources.github.scan_interval_secs, 300);
-    assert_eq!(
-        config.workflows.analyze.agent.as_deref(),
-        Some("autodev:issue-analyzer")
-    );
+    assert!(config.workflows.analyze.command.is_none());
 }
 
 #[test]
@@ -111,10 +99,7 @@ workflows:
     assert_eq!(config.workflows.review.max_iterations, 5);
     // 미지정 필드는 default 유지
     assert_eq!(config.sources.github.issue_concurrency, 1);
-    assert_eq!(
-        config.workflows.analyze.agent.as_deref(),
-        Some("autodev:issue-analyzer")
-    );
+    assert!(config.workflows.analyze.command.is_none());
 }
 
 // ═══════════════════════════════════════════════
@@ -243,10 +228,7 @@ fn load_merged_partial_yaml_fills_defaults() {
     assert_eq!(config.sources.github.model, "gpt-4");
     // 나머지 전부 default
     assert_eq!(config.sources.github.scan_interval_secs, 300);
-    assert_eq!(
-        config.workflows.analyze.agent.as_deref(),
-        Some("autodev:issue-analyzer")
-    );
+    assert!(config.workflows.analyze.command.is_none());
     assert_eq!(config.workflows.review.max_iterations, 2);
 }
 
@@ -382,10 +364,7 @@ workflow:
     // 유효한 키는 정상 파싱됨 (v1 키가 있어도 fallback 아님)
     assert_eq!(config.sources.github.scan_interval_secs, 60);
     // workflows는 default
-    assert_eq!(
-        config.workflows.analyze.agent.as_deref(),
-        Some("autodev:issue-analyzer")
-    );
+    assert!(config.workflows.analyze.command.is_none());
 }
 
 #[test]
@@ -433,17 +412,13 @@ workflows:
         config.workflows.analyze.command.as_deref(),
         Some("/review:multi-analyze")
     );
-    assert!(config.workflows.analyze.agent.is_none());
     assert_eq!(
         config.workflows.review.command.as_deref(),
         Some("/review:multi-review")
     );
     assert_eq!(config.workflows.review.max_iterations, 3);
     // implement은 default 유지
-    assert_eq!(
-        config.workflows.implement.agent.as_deref(),
-        Some("autodev:issue-analyzer")
-    );
+    assert!(config.workflows.implement.command.is_none());
 }
 
 #[test]
@@ -452,11 +427,11 @@ fn workflows_deep_merge_preserves_global_stage() {
     let repo_dir = tmp.path().join("repo");
     fs::create_dir_all(&repo_dir).unwrap();
 
-    // 글로벌: analyze에 커스텀 에이전트
+    // 글로벌: analyze에 커스텀 커맨드
     let global_yaml = r#"
 workflows:
   analyze:
-    agent: custom:analyzer
+    command: /custom-analyze
   review:
     max_iterations: 5
 "#;
@@ -475,8 +450,8 @@ workflows:
 
     // 글로벌에서 유지
     assert_eq!(
-        config.workflows.analyze.agent.as_deref(),
-        Some("custom:analyzer")
+        config.workflows.analyze.command.as_deref(),
+        Some("/custom-analyze")
     );
     // 레포에서 오버라이드
     assert_eq!(config.workflows.review.max_iterations, 3);

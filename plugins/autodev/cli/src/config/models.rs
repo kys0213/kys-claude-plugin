@@ -102,9 +102,9 @@ impl Default for GitHubSourceConfig {
 /// analyze → implement → review
 /// ```
 ///
-/// 각 단계는 `agent`(builtin) 또는 `command`(커스텀 슬래시 커맨드) 중
-/// 하나로 실행 방식을 지정한다. 둘 다 미지정 시 task_type별 기본 agent 사용.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// 각 단계는 `command`로 커스텀 슬래시 커맨드를 지정할 수 있다.
+/// 미지정 시 task_type별 기본 출력 스펙이 system prompt로 사용된다.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Workflows {
     pub analyze: WorkflowStage,
@@ -112,35 +112,13 @@ pub struct Workflows {
     pub review: ReviewStage,
 }
 
-impl Default for Workflows {
-    fn default() -> Self {
-        Self {
-            analyze: WorkflowStage {
-                agent: Some("autodev:issue-analyzer".into()),
-                command: None,
-            },
-            implement: WorkflowStage {
-                agent: Some("autodev:issue-analyzer".into()),
-                command: None,
-            },
-            review: ReviewStage {
-                agent: Some("autodev:pr-reviewer".into()),
-                command: None,
-                max_iterations: 2,
-            },
-        }
-    }
-}
-
 /// 워크플로우 단계 공통 설정.
 ///
-/// `agent`와 `command`는 상호 배타적이다.
-/// - `agent`: autodev builtin agent에 위임 (예: `autodev:issue-analyzer`)
-/// - `command`: 커스텀 슬래시 커맨드 실행 (예: `/review:multi-review`)
+/// `command`가 지정되면 해당 슬래시 커맨드를 system prompt로 사용한다.
+/// 미지정 시 task_type별 기본 출력 스펙이 적용된다.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct WorkflowStage {
-    pub agent: Option<String>,
     pub command: Option<String>,
 }
 
@@ -148,7 +126,6 @@ pub struct WorkflowStage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ReviewStage {
-    pub agent: Option<String>,
     pub command: Option<String>,
     pub max_iterations: u32,
 }
@@ -156,7 +133,6 @@ pub struct ReviewStage {
 impl Default for ReviewStage {
     fn default() -> Self {
         Self {
-            agent: Some("autodev:pr-reviewer".into()),
             command: None,
             max_iterations: 2,
         }
@@ -164,10 +140,9 @@ impl Default for ReviewStage {
 }
 
 impl ReviewStage {
-    /// 워크플로우 라우팅에 필요한 agent/command 부분만 추출.
+    /// 워크플로우 라우팅에 필요한 command 부분만 추출.
     pub fn as_stage(&self) -> WorkflowStage {
         WorkflowStage {
-            agent: self.agent.clone(),
             command: self.command.clone(),
         }
     }
@@ -207,14 +182,11 @@ daemon:
     }
 
     #[test]
-    fn workflows_default_agents() {
+    fn workflows_default() {
         let cfg = Workflows::default();
-        assert_eq!(cfg.analyze.agent.as_deref(), Some("autodev:issue-analyzer"));
-        assert_eq!(
-            cfg.implement.agent.as_deref(),
-            Some("autodev:issue-analyzer")
-        );
-        assert_eq!(cfg.review.agent.as_deref(), Some("autodev:pr-reviewer"));
+        assert!(cfg.analyze.command.is_none());
+        assert!(cfg.implement.command.is_none());
+        assert!(cfg.review.command.is_none());
         assert_eq!(cfg.review.max_iterations, 2);
     }
 
@@ -226,30 +198,18 @@ workflows:
     max_iterations: 5
 "#;
         let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
-        // review.max_iterations overridden
         assert_eq!(cfg.workflows.review.max_iterations, 5);
-        // review.agent retains default
-        assert_eq!(
-            cfg.workflows.review.agent.as_deref(),
-            Some("autodev:pr-reviewer")
-        );
-        // analyze/implement retain defaults from Workflows::default()
-        assert_eq!(
-            cfg.workflows.analyze.agent.as_deref(),
-            Some("autodev:issue-analyzer")
-        );
+        assert!(cfg.workflows.review.command.is_none());
     }
 
     #[test]
-    fn workflows_custom_command_overrides_agent() {
+    fn workflows_custom_command() {
         let yaml = r#"
 workflows:
   analyze:
     command: /review:multi-analyze
-    agent: null
   review:
     command: /review:multi-review
-    agent: null
     max_iterations: 3
 "#;
         let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
@@ -257,19 +217,15 @@ workflows:
             cfg.workflows.analyze.command.as_deref(),
             Some("/review:multi-analyze")
         );
-        assert!(cfg.workflows.analyze.agent.is_none());
         assert_eq!(
             cfg.workflows.review.command.as_deref(),
             Some("/review:multi-review")
         );
-        assert!(cfg.workflows.review.agent.is_none());
         assert_eq!(cfg.workflows.review.max_iterations, 3);
     }
 
     #[test]
     fn deprecated_v1_keys_are_silently_ignored() {
-        // v1 YAML with commands, develop, workflow keys
-        // With deny_unknown_fields removed, these should be ignored
         let yaml = r#"
 sources:
   github:
@@ -284,24 +240,39 @@ workflow:
   pr: builtin
 "#;
         let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
-        // Valid keys are parsed
         assert_eq!(cfg.sources.github.model, "opus");
         // workflows uses defaults (v1 keys ignored)
-        assert_eq!(
-            cfg.workflows.analyze.agent.as_deref(),
-            Some("autodev:issue-analyzer")
-        );
-        assert_eq!(
-            cfg.workflows.review.agent.as_deref(),
-            Some("autodev:pr-reviewer")
-        );
+        assert!(cfg.workflows.analyze.command.is_none());
+        assert!(cfg.workflows.review.command.is_none());
     }
 
     #[test]
     fn review_stage_as_stage() {
-        let review = ReviewStage::default();
+        let review = ReviewStage {
+            command: Some("/custom-review".into()),
+            max_iterations: 3,
+        };
         let stage = review.as_stage();
-        assert_eq!(stage.agent.as_deref(), Some("autodev:pr-reviewer"));
-        assert!(stage.command.is_none());
+        assert_eq!(stage.command.as_deref(), Some("/custom-review"));
+    }
+
+    #[test]
+    fn deprecated_agent_field_is_silently_ignored() {
+        // 기존 YAML에 agent 필드가 있어도 파싱 실패 없이 무시
+        let yaml = r#"
+workflows:
+  analyze:
+    agent: autodev:issue-analyzer
+    command: /custom-analyze
+  review:
+    agent: autodev:pr-reviewer
+    max_iterations: 3
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            cfg.workflows.analyze.command.as_deref(),
+            Some("/custom-analyze")
+        );
+        assert_eq!(cfg.workflows.review.max_iterations, 3);
     }
 }
