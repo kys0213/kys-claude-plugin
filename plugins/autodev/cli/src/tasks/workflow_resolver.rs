@@ -23,10 +23,16 @@ fn default_agent(task_type: &TaskType) -> &'static str {
 }
 
 /// 분석 위임 프롬프트 템플릿. `{agent_name}` 플레이스홀더 사용.
-const ANALYZE_PROMPT: &str = "You MUST delegate this task to the `{agent_name}` agent \
+///
+/// agent에 분석을 위임하되, 최종 JSON 보고서는 Claude가 직접 생성한다.
+/// `--output-format json` + `--json-schema`와 함께 사용되므로
+/// Claude가 agent 결과를 수신한 뒤 JSON schema에 맞춰 응답해야 한다.
+const ANALYZE_PROMPT: &str = "Delegate the analysis work to the `{agent_name}` agent \
     using the Agent tool with subagent_type=\"{agent_name}\". \
     Pass all issue context (number, repo, comments) to the agent. \
-    Do not attempt to perform the analysis yourself.";
+    After the agent completes, use its findings to produce YOUR response \
+    as a JSON object matching the required schema. \
+    Do not pass through the agent's raw output — you must synthesize it into the JSON format.";
 
 /// 구현 위임 프롬프트 템플릿. `{agent_name}` 플레이스홀더 사용.
 const IMPLEMENT_PROMPT: &str = "You MUST delegate this task to the `{agent_name}` agent \

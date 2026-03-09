@@ -16,7 +16,6 @@ use crate::daemon::task_source::TaskSource;
 use crate::domain::git_repository::GitRepository;
 use crate::domain::git_repository_factory::GitRepositoryFactory;
 use crate::domain::repository::{RepoRepository, ScanCursorRepository};
-use crate::infrastructure::claude::Claude;
 use crate::infrastructure::gh::Gh;
 use crate::infrastructure::git::Git;
 use crate::infrastructure::suggest_workflow::SuggestWorkflow;
@@ -33,7 +32,6 @@ use crate::tasks::review::ReviewTask;
 pub struct GitHubTaskSource<DB: RepoRepository + ScanCursorRepository> {
     workspace: Arc<dyn WorkspaceOps>,
     gh: Arc<dyn Gh>,
-    claude: Arc<dyn Claude>,
     config: Arc<dyn ConfigLoader>,
     env: Arc<dyn Env>,
     git: Arc<dyn Git>,
@@ -43,11 +41,9 @@ pub struct GitHubTaskSource<DB: RepoRepository + ScanCursorRepository> {
 }
 
 impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         workspace: Arc<dyn WorkspaceOps>,
         gh: Arc<dyn Gh>,
-        claude: Arc<dyn Claude>,
         config: Arc<dyn ConfigLoader>,
         env: Arc<dyn Env>,
         git: Arc<dyn Git>,
@@ -57,7 +53,6 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
         Self {
             workspace,
             gh,
-            claude,
             config,
             env,
             git,
@@ -226,7 +221,6 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                 tasks.push(Box::new(AnalyzeTask::new(
                     Arc::clone(&self.workspace),
                     Arc::clone(&self.gh),
-                    Arc::clone(&self.claude),
                     Arc::clone(&self.config),
                     item,
                 )));
@@ -539,11 +533,9 @@ mod tests {
     }
 
     fn make_source(gh: Arc<MockGh>) -> GitHubTaskSource<MockDb> {
-        use crate::infrastructure::claude::mock::MockClaude;
         GitHubTaskSource::new(
             Arc::new(MockWorkspace),
             gh,
-            Arc::new(MockClaude::new()),
             Arc::new(MockConfigLoader),
             Arc::new(MockEnv),
             Arc::new(MockGit),
