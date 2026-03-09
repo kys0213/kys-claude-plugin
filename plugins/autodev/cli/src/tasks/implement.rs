@@ -159,9 +159,8 @@ impl Task for ImplementTask {
         let workflow = repo_cfg
             .workflows
             .implement
-            .agent
+            .command
             .as_deref()
-            .or(repo_cfg.workflows.implement.command.as_deref())
             .unwrap_or("builtin");
 
         let log = NewConsumerLog {

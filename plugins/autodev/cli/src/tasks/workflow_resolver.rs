@@ -1,8 +1,8 @@
 //! WorkflowResolver — WorkflowStage를 system prompt 텍스트로 변환.
 //!
-//! `agent` 지정 → builtin 에이전트 위임 지시문
-//! `command` 지정 → 커스텀 슬래시 커맨드 (패스스루)
-//! 둘 다 미지정 → task_type별 기본 agent 사용
+//! task_type별 출력 스펙을 정의하고, 커스텀 슬래시 커맨드가 있으면 그대로 반환한다.
+//! user prompt가 동적으로 분석/리뷰/구현 지시를 전달하고,
+//! system prompt는 최종 출력 형식(JSON 스펙)과 절차를 정의한다.
 
 use crate::config::models::WorkflowStage;
 
@@ -13,27 +13,20 @@ pub enum TaskType {
     Review,
 }
 
-/// task_type별 기본 builtin agent 이름.
-fn default_agent(task_type: &TaskType) -> &'static str {
-    match task_type {
-        TaskType::Analyze => "autodev:issue-analyzer",
-        TaskType::Implement => "autodev:issue-analyzer",
-        TaskType::Review => "autodev:pr-reviewer",
-    }
-}
+/// 분석 결과 출력 스펙.
+///
+/// `--output-format json` + `--json-schema`와 함께 사용된다.
+/// user prompt의 분석 요청을 수행한 뒤, 결과를 JSON schema에 맞춰 응답해야 한다.
+const ANALYZE_PROMPT: &str = "You are an issue analyzer. \
+    Perform the requested analysis and respond with a JSON object matching the required schema. \
+    Your response must contain: verdict, confidence, summary, questions, reason, report, and related_issues.";
 
-/// 분석 위임 프롬프트 템플릿. `{agent_name}` 플레이스홀더 사용.
-const ANALYZE_PROMPT: &str = "You MUST delegate this task to the `{agent_name}` agent \
-    using the Agent tool with subagent_type=\"{agent_name}\". \
-    Pass all issue context (number, repo, comments) to the agent. \
-    Do not attempt to perform the analysis yourself.";
-
-/// 구현 위임 프롬프트 템플릿. `{agent_name}` 플레이스홀더 사용.
-const IMPLEMENT_PROMPT: &str = "You MUST delegate this task to the `{agent_name}` agent \
-    using the Agent tool with subagent_type=\"{agent_name}\". \
-    Pass all issue context (number, repo, comments) to the agent. \
-    Do not attempt to perform the implementation yourself.\n\n\
-    After the agent completes the implementation, you MUST review the changes \
+/// 구현 절차 스펙.
+///
+/// 구현 완료 후 품질 리뷰를 거쳐 커밋/PR을 생성하는 절차를 정의한다.
+const IMPLEMENT_PROMPT: &str = "You are an issue implementer. \
+    Perform the requested implementation based on the issue context.\n\n\
+    After completing the implementation, you MUST review the changes \
     for code quality before creating the PR:\n\
     1. Run `git diff` to see all changes\n\
     2. Review for code reuse (search for existing utilities that could replace new code)\n\
@@ -42,36 +35,30 @@ const IMPLEMENT_PROMPT: &str = "You MUST delegate this task to the `{agent_name}
     5. Fix any issues found directly — do not just report them\n\
     6. Then proceed with commit and PR creation";
 
-/// PR 리뷰 위임 프롬프트 템플릿. `{agent_name}` 플레이스홀더 사용.
-const REVIEW_PROMPT: &str = "You MUST delegate this task to the `{agent_name}` agent \
-    using the Agent tool with subagent_type=\"{agent_name}\". \
-    Pass all PR context (number, repo, diff, comments) to the agent. \
-    Do not attempt to perform the review yourself.";
+/// PR 리뷰 결과 출력 스펙.
+///
+/// `--output-format json` + `--json-schema`와 함께 사용된다.
+/// user prompt의 리뷰 요청을 수행한 뒤, 결과를 JSON schema에 맞춰 응답해야 한다.
+const REVIEW_PROMPT: &str = "You are a PR reviewer. \
+    Perform the requested code review and respond with a JSON object matching the required schema. \
+    Your response must contain: verdict, summary, and report.";
 
 /// WorkflowStage를 system prompt 텍스트로 변환한다.
 ///
 /// 우선순위:
 /// 1. `command`가 Some → 커스텀 슬래시 커맨드 그대로 반환
-/// 2. `agent`가 Some → 해당 agent 위임 지시문 생성
-/// 3. 둘 다 None → task_type별 기본 agent 위임 지시문 생성
+/// 2. 그 외 → task_type별 출력 스펙 반환
 pub fn resolve_workflow_prompt(stage: &WorkflowStage, task_type: TaskType) -> String {
     // 커스텀 슬래시 커맨드 우선
     if let Some(ref cmd) = stage.command {
         return cmd.clone();
     }
 
-    let agent_name = stage
-        .agent
-        .as_deref()
-        .unwrap_or_else(|| default_agent(&task_type));
-
-    let template = match task_type {
-        TaskType::Analyze => ANALYZE_PROMPT,
-        TaskType::Implement => IMPLEMENT_PROMPT,
-        TaskType::Review => REVIEW_PROMPT,
-    };
-
-    template.replace("{agent_name}", agent_name)
+    match task_type {
+        TaskType::Analyze => ANALYZE_PROMPT.to_string(),
+        TaskType::Implement => IMPLEMENT_PROMPT.to_string(),
+        TaskType::Review => REVIEW_PROMPT.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -79,44 +66,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_builtin_analyze() {
-        let stage = WorkflowStage {
-            agent: Some("autodev:issue-analyzer".into()),
-            command: None,
-        };
+    fn resolve_analyze_returns_output_spec() {
+        let stage = WorkflowStage::default();
         let result = resolve_workflow_prompt(&stage, TaskType::Analyze);
-        assert!(result.contains("autodev:issue-analyzer"));
-        assert!(result.contains("Agent tool"));
+        assert!(result.contains("issue analyzer"));
+        assert!(result.contains("JSON object"));
+        assert!(result.contains("verdict"));
     }
 
     #[test]
-    fn resolve_builtin_implement() {
-        let stage = WorkflowStage {
-            agent: Some("autodev:issue-analyzer".into()),
-            command: None,
-        };
+    fn resolve_implement_returns_procedure() {
+        let stage = WorkflowStage::default();
         let result = resolve_workflow_prompt(&stage, TaskType::Implement);
-        assert!(result.contains("autodev:issue-analyzer"));
-        assert!(result.contains("issue context"));
+        assert!(result.contains("issue implementer"));
         assert!(result.contains("review the changes"));
         assert!(result.contains("code quality"));
     }
 
     #[test]
-    fn resolve_builtin_review() {
-        let stage = WorkflowStage {
-            agent: Some("autodev:pr-reviewer".into()),
-            command: None,
-        };
+    fn resolve_review_returns_output_spec() {
+        let stage = WorkflowStage::default();
         let result = resolve_workflow_prompt(&stage, TaskType::Review);
-        assert!(result.contains("autodev:pr-reviewer"));
-        assert!(result.contains("PR context"));
+        assert!(result.contains("PR reviewer"));
+        assert!(result.contains("JSON object"));
+        assert!(result.contains("verdict"));
     }
 
     #[test]
     fn resolve_custom_command() {
         let stage = WorkflowStage {
-            agent: None,
             command: Some("/review:multi-review".into()),
         };
         let result = resolve_workflow_prompt(&stage, TaskType::Review);
@@ -124,28 +102,11 @@ mod tests {
     }
 
     #[test]
-    fn resolve_command_takes_precedence_over_agent() {
+    fn resolve_with_command() {
         let stage = WorkflowStage {
-            agent: Some("autodev:pr-reviewer".into()),
             command: Some("/custom-review".into()),
         };
         let result = resolve_workflow_prompt(&stage, TaskType::Review);
         assert_eq!(result, "/custom-review");
-    }
-
-    #[test]
-    fn resolve_none_falls_back_to_default_agent() {
-        let stage = WorkflowStage {
-            agent: None,
-            command: None,
-        };
-        let result = resolve_workflow_prompt(&stage, TaskType::Review);
-        assert!(result.contains("autodev:pr-reviewer"));
-
-        let result = resolve_workflow_prompt(&stage, TaskType::Analyze);
-        assert!(result.contains("autodev:issue-analyzer"));
-
-        let result = resolve_workflow_prompt(&stage, TaskType::Implement);
-        assert!(result.contains("autodev:issue-analyzer"));
     }
 }
