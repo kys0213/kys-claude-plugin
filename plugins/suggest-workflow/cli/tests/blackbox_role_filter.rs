@@ -7,10 +7,7 @@ mod helpers;
 
 use helpers::{cli_with_home, setup_project};
 
-fn index_and_query_prompts(
-    fixtures: &[&str],
-    extra_params: &[&str],
-) -> serde_json::Value {
+fn index_and_query_prompts(fixtures: &[&str], extra_params: &[&str]) -> serde_json::Value {
     let (tmp, project) = setup_project(fixtures);
 
     cli_with_home(&tmp)
@@ -55,13 +52,18 @@ fn prompts_default_returns_human_only() {
     // <local-command-run> → system
     assert_eq!(rows.len(), 2, "expected 2 human prompts, got: {:?}", rows);
 
-    let snippets: Vec<&str> = rows.iter().map(|r| r["snippet"].as_str().unwrap()).collect();
+    let snippets: Vec<&str> = rows
+        .iter()
+        .map(|r| r["snippet"].as_str().unwrap())
+        .collect();
     assert!(
         snippets.iter().any(|s| s.contains("Fix the login bug")),
         "should contain 'Fix the login bug'"
     );
     assert!(
-        snippets.iter().any(|s| s.contains("Now deploy to production")),
+        snippets
+            .iter()
+            .any(|s| s.contains("Now deploy to production")),
         "should contain 'Now deploy to production'"
     );
 
@@ -85,14 +87,8 @@ fn prompts_role_all_returns_human_and_system() {
     );
 
     let roles: Vec<&str> = rows.iter().map(|r| r["role"].as_str().unwrap()).collect();
-    assert!(
-        roles.contains(&"human"),
-        "should include human prompts"
-    );
-    assert!(
-        roles.contains(&"system"),
-        "should include system prompts"
-    );
+    assert!(roles.contains(&"human"), "should include human prompts");
+    assert!(roles.contains(&"system"), "should include system prompts");
     assert!(
         !roles.contains(&"meta"),
         "meta prompts should never be stored"
@@ -104,10 +100,7 @@ fn prompts_role_system_excludes_human() {
     let result = index_and_query_prompts(&["system_noise.jsonl"], &["role=system"]);
     let rows = result.as_array().unwrap();
 
-    assert!(
-        !rows.is_empty(),
-        "should have at least one system prompt"
-    );
+    assert!(!rows.is_empty(), "should have at least one system prompt");
 
     for row in rows {
         assert_eq!(
@@ -118,7 +111,10 @@ fn prompts_role_system_excludes_human() {
     }
 
     // Verify no human content leaked
-    let snippets: Vec<&str> = rows.iter().map(|r| r["snippet"].as_str().unwrap()).collect();
+    let snippets: Vec<&str> = rows
+        .iter()
+        .map(|r| r["snippet"].as_str().unwrap())
+        .collect();
     assert!(
         !snippets.iter().any(|s| s.contains("Fix the login bug")),
         "should not contain human prompts"

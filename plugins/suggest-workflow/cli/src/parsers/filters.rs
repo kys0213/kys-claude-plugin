@@ -20,6 +20,12 @@ impl PromptRole {
     }
 }
 
+/// Minimum character count for text remaining after system-reminder stripping
+/// to be considered genuine human input. Below this threshold, leftovers like
+/// "ok" or "y" are treated as system noise when the original contained
+/// `<system-reminder>` tags.
+const MIN_HUMAN_CHARS_AFTER_STRIP: usize = 5;
+
 /// Classify a prompt's role after `strip_system_reminders` has been applied.
 ///
 /// - `stripped_text`: the text *after* system-reminder blocks have been removed.
@@ -33,7 +39,7 @@ pub fn classify_prompt_role(stripped_text: &str, had_system_reminders: bool) -> 
         return PromptRole::System;
     }
     // Original text was entirely system-reminder tags with negligible leftovers
-    if had_system_reminders && trimmed.len() < 5 {
+    if had_system_reminders && trimmed.chars().count() < MIN_HUMAN_CHARS_AFTER_STRIP {
         return PromptRole::System;
     }
     PromptRole::Human
@@ -67,7 +73,7 @@ pub fn is_system_meta_message(content: &str) -> bool {
     if lower.starts_with("<local-command-")
         || lower.starts_with("<command-name>")
         || lower.contains("[request interrupted by user")
-        || trimmed.len() < 3
+        || trimmed.chars().count() < 3
     {
         return true;
     }

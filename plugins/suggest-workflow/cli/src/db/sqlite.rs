@@ -111,7 +111,7 @@ impl IndexRepository for SqliteStore {
                     &p.text,
                     p.timestamp,
                     p.char_count as i64,
-                    &p.role
+                    p.role.as_str()
                 ])?;
             }
         }

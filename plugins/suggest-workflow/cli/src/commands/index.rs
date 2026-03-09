@@ -106,7 +106,7 @@ fn extract_session_data(file_path: &Path, size: u64, mtime: i64) -> Result<Sessi
 
     let first_prompt_snippet = prompts
         .iter()
-        .find(|p| p.role == "human")
+        .find(|p| p.role == PromptRole::Human)
         .or_else(|| prompts.first())
         .map(|p| p.text.chars().take(500).collect::<String>());
 
@@ -166,7 +166,7 @@ fn extract_prompts(entries: &[SessionEntry]) -> Vec<PromptData> {
                 char_count: text.chars().count(),
                 text,
                 timestamp,
-                role: role.as_str().to_string(),
+                role,
             })
         })
         .collect()
