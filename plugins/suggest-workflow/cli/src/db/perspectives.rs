@@ -115,7 +115,7 @@ pub fn register_perspectives() -> Vec<PerspectiveInfo> {
                 ORDER BY ABS(deviation_score) DESC"
                 .into(),
         },
-        // prompts: Search prompts by keyword
+        // prompts: Search prompts by keyword with role filtering
         // Supports --session-filter via {SF:p.session_id}
         PerspectiveInfo {
             name: "prompts".into(),
@@ -135,12 +135,20 @@ pub fn register_perspectives() -> Vec<PerspectiveInfo> {
                     default: Some("20".into()),
                     description: "상위 N개".into(),
                 },
+                ParamDef {
+                    name: "role".into(),
+                    param_type: ParamType::Text,
+                    required: false,
+                    default: Some("human".into()),
+                    description: "역할 필터 (human, system, all)".into(),
+                },
             ],
             sql: "\
-                SELECT p.session_id, p.timestamp, p.char_count, \
+                SELECT p.session_id, p.timestamp, p.char_count, p.role, \
                        SUBSTR(p.text, 1, 200) AS snippet \
                 FROM prompts p \
-                WHERE p.text LIKE '%' || :search || '%' {SF:p.session_id} \
+                WHERE (:role = 'all' OR p.role = :role) \
+                  AND p.text LIKE '%' || :search || '%' {SF:p.session_id} \
                 ORDER BY p.timestamp DESC \
                 LIMIT :top"
                 .into(),

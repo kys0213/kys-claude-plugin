@@ -1,4 +1,4 @@
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 pub const DDL: &str = "
 -- 메타 정보
@@ -27,10 +27,12 @@ CREATE TABLE IF NOT EXISTS prompts (
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     text       TEXT NOT NULL,
     timestamp  INTEGER NOT NULL,
-    char_count INTEGER NOT NULL
+    char_count INTEGER NOT NULL,
+    role       TEXT NOT NULL DEFAULT 'human'
 );
 CREATE INDEX IF NOT EXISTS idx_prompts_session ON prompts(session_id);
 CREATE INDEX IF NOT EXISTS idx_prompts_ts ON prompts(timestamp);
+CREATE INDEX IF NOT EXISTS idx_prompts_role ON prompts(role);
 
 -- 도구 사용
 CREATE TABLE IF NOT EXISTS tool_uses (

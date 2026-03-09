@@ -103,6 +103,36 @@ fn migrate_step(conn: &Connection, from: u32, to: u32) -> Result<()> {
             )?;
             Ok(())
         }
+        (4, 5) => {
+            conn.execute_batch(
+                "ALTER TABLE prompts ADD COLUMN role TEXT NOT NULL DEFAULT 'human';",
+            )?;
+            conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_prompts_role ON prompts(role);")?;
+            // Heuristic backfill: best-effort approximation of classify_prompt_role().
+            // This SQL subset does NOT cover all patterns in is_system_meta_message()
+            // (e.g., YAML frontmatter, markdown table density, skill expansions).
+            // Also, old data stores raw text with <system-reminder> tags intact,
+            // whereas the new pipeline strips them before storage.
+            // Run `index --full` after migration for exact classification.
+            conn.execute_batch(
+                "UPDATE prompts SET role = 'system' WHERE
+                    text LIKE '%<system-reminder>%'
+                    OR text LIKE '%<local-command-%'
+                    OR text LIKE '%<command-name>%'
+                    OR text LIKE '%[request interrupted by user%'
+                    OR text LIKE '%[autopilot activated%'
+                    OR text LIKE '%[ralph loop%'
+                    OR text LIKE '%[ultrawork activated%'
+                    OR text LIKE '%[ralplan activated%'
+                    OR text LIKE '%[ecomode activated%'
+                    OR text LIKE '<task-notification>%'
+                    OR text LIKE '<teammate-message%'
+                    OR text LIKE '<command-message>%'
+                    OR text LIKE 'Stop hook feedback:%'
+                    OR char_count < 3;",
+            )?;
+            Ok(())
+        }
         _ => {
             anyhow::bail!(
                 "no migration path from v{} to v{}. Run with --full to rebuild.",
