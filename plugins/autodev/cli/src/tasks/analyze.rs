@@ -456,9 +456,16 @@ impl Task for AnalyzeTask {
                 "issue #{}: Phase 1 parse failed, running Phase 2 JSON conversion",
                 self.item.github_number
             );
-            // Phase 2 프롬프트에는 최대 8000자까지만 포함 (토큰 절약)
-            let truncated = if report.len() > 8000 {
-                &report[..8000]
+            // Phase 2 프롬프트에는 최대 8000자까지만 포함
+            // (Claude CLI 토큰 예산 절약 — 8000 chars ≈ 2000-3000 tokens)
+            const PHASE2_MAX_REPORT_CHARS: usize = 8000;
+            let truncated = if report.chars().count() > PHASE2_MAX_REPORT_CHARS {
+                // UTF-8 char boundary 안전 truncation
+                let end = report
+                    .char_indices()
+                    .nth(PHASE2_MAX_REPORT_CHARS)
+                    .map_or(report.len(), |(i, _)| i);
+                &report[..end]
             } else {
                 &report
             };
