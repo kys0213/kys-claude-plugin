@@ -231,80 +231,10 @@ autodev repo add <url> --config '{"sources":{"github":{"gh_host":"<detected_host
 
 `autodev repo add` 성공 후, GitHub 레포에 autodev가 사용하는 라벨을 자동으로 등록합니다.
 
-**라벨 목록 및 색상/설명:**
+`label-setup` 스킬을 참조하여 라벨을 생성합니다:
+- `REPO`: Step 1에서 감지된 `<owner>/<repo>`
+- `gh_host`: Step 1.5에서 감지된 GitHub Enterprise 호스트 (일반 GitHub이면 빈 값)
 
-| 라벨 | 색상 | 설명 |
-|------|------|------|
-| `autodev:analyze` | `0366D6` (blue) | Trigger autodev analysis |
-| `autodev:wip` | `FBCA04` (yellow) | Work in progress |
-| `autodev:done` | `0E8A16` (green) | Completed |
-| `autodev:skip` | `E4E669` (light yellow) | Skipped |
-| `autodev:analyzed` | `1D76DB` (blue) | Analysis complete, awaiting review |
-| `autodev:approved-analysis` | `28A745` (light green) | Analysis approved, awaiting implementation |
-| `autodev:implementing` | `FBCA04` (yellow) | Implementation in progress |
-| `autodev:changes-requested` | `E99695` (red) | Changes requested on PR |
-| `autodev:extracted` | `D4C5F9` (purple) | Knowledge extracted |
-| `autodev:extract-failed` | `B60205` (dark red) | Extraction failed |
-| `autodev:impl-failed` | `B60205` (dark red) | Implementation failed |
-
-**실행 스크립트:**
-
-```bash
-REPO="<owner>/<repo>"  # Step 1에서 감지된 레포
-
-declare -A LABEL_COLORS=(
-  ["autodev:analyze"]="0366D6"
-  ["autodev:wip"]="FBCA04"
-  ["autodev:done"]="0E8A16"
-  ["autodev:skip"]="E4E669"
-  ["autodev:analyzed"]="1D76DB"
-  ["autodev:approved-analysis"]="28A745"
-  ["autodev:implementing"]="FBCA04"
-  ["autodev:changes-requested"]="E99695"
-  ["autodev:extracted"]="D4C5F9"
-  ["autodev:extract-failed"]="B60205"
-  ["autodev:impl-failed"]="B60205"
-)
-
-declare -A LABEL_DESCS=(
-  ["autodev:analyze"]="Trigger autodev analysis"
-  ["autodev:wip"]="Work in progress"
-  ["autodev:done"]="Completed"
-  ["autodev:skip"]="Skipped"
-  ["autodev:analyzed"]="Analysis complete, awaiting review"
-  ["autodev:approved-analysis"]="Analysis approved, awaiting implementation"
-  ["autodev:implementing"]="Implementation in progress"
-  ["autodev:changes-requested"]="Changes requested on PR"
-  ["autodev:extracted"]="Knowledge extracted"
-  ["autodev:extract-failed"]="Extraction failed"
-  ["autodev:impl-failed"]="Implementation failed"
-)
-
-created=0
-skipped=0
-
-for label in "${!LABEL_COLORS[@]}"; do
-  color="${LABEL_COLORS[$label]}"
-  desc="${LABEL_DESCS[$label]}"
-  if [ -n "${gh_host}" ]; then
-    output=$(gh label create "$label" --color "$color" --description "$desc" --repo "$REPO" --hostname "${gh_host}" --force 2>&1)
-  else
-    output=$(gh label create "$label" --color "$color" --description "$desc" --repo "$REPO" --force 2>&1)
-  fi
-  if [ $? -eq 0 ]; then
-    echo "  ✓ $label"
-    ((created++))
-  else
-    echo "  ⚠ $label: $output"
-    ((skipped++))
-  fi
-done
-
-echo ""
-echo "라벨 등록 완료: ${created}개 등록, ${skipped}개 스킵"
-```
-
-`--force` 플래그를 사용하므로 이미 존재하는 라벨은 색상/설명이 업데이트됩니다.
 등록 실패 시에도 전체 설정 흐름은 계속 진행합니다.
 
 ### Step 10: 셸 환경 등록
