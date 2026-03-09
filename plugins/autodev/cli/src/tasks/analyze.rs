@@ -21,7 +21,7 @@ use crate::daemon::task::{
 use crate::domain::labels;
 use crate::domain::models::NewConsumerLog;
 use crate::infrastructure::claude::output::{self, AnalysisResult};
-use crate::infrastructure::claude::SessionOptions;
+use crate::infrastructure::claude::{Claude, SessionOptions};
 use crate::infrastructure::gh::Gh;
 use crate::queue::task_queues::IssueItem;
 
@@ -84,6 +84,7 @@ Rules:
 pub struct AnalyzeTask {
     workspace: Arc<dyn WorkspaceOps>,
     gh: Arc<dyn Gh>,
+    claude: Arc<dyn Claude>,
     config: Arc<dyn ConfigLoader>,
     item: IssueItem,
     worker_id: String,
@@ -96,6 +97,7 @@ impl AnalyzeTask {
     pub fn new(
         workspace: Arc<dyn WorkspaceOps>,
         gh: Arc<dyn Gh>,
+        claude: Arc<dyn Claude>,
         config: Arc<dyn ConfigLoader>,
         item: IssueItem,
     ) -> Self {
@@ -103,6 +105,7 @@ impl AnalyzeTask {
         Self {
             workspace,
             gh,
+            claude,
             config,
             item,
             worker_id: Uuid::new_v4().to_string(),
@@ -247,10 +250,9 @@ impl AnalyzeTask {
     }
 
     /// 파싱 실패 시 fallback: 분석 결과를 raw text로 코멘트
-    async fn handle_fallback(&self, stdout: &str) -> Vec<QueueOp> {
+    async fn handle_fallback(&self, report: &str) -> Vec<QueueOp> {
         let gh_host = self.gh_host();
-        let report = output::parse_output(stdout);
-        let comment = verdict::format_raw_analysis_comment(&report);
+        let comment = verdict::format_raw_analysis_comment(report);
         self.gh
             .issue_comment(
                 &self.item.repo_name,
@@ -441,9 +443,72 @@ impl Task for AnalyzeTask {
             };
         }
 
-        // stdout 파싱
+        // Phase 1: agent 응답을 직접 파싱 시도
         let auto_approve_threshold = cfg.sources.github.auto_approve_threshold.clamp(0.0, 1.0);
-        let analysis = output::parse_analysis(&response.stdout);
+        let mut analysis = output::parse_analysis(&response.stdout);
+
+        // raw_report: Phase 2 프롬프트와 fallback 코멘트에서 공유
+        let raw_report = if analysis.is_none() && !response.stdout.trim().is_empty() {
+            let report = output::parse_output(&response.stdout);
+
+            // Phase 2: 별도 Claude 세션으로 JSON 변환
+            tracing::info!(
+                "issue #{}: Phase 1 parse failed, running Phase 2 JSON conversion",
+                self.item.github_number
+            );
+            // Phase 2 프롬프트에는 최대 8000자까지만 포함 (토큰 절약)
+            let truncated = if report.len() > 8000 {
+                &report[..8000]
+            } else {
+                &report
+            };
+            let phase2_prompt = format!(
+                "Convert the following analysis report into JSON format.\n\n\
+                 Report:\n{truncated}\n\n\
+                 Respond ONLY with a JSON object matching the schema. Do not include any other text."
+            );
+            let phase2_opts = SessionOptions {
+                output_format: Some("json".into()),
+                json_schema: Some(output::ANALYSIS_SCHEMA.clone()),
+                append_system_prompt: None,
+            };
+            let wt_path = self
+                .wt_path
+                .as_deref()
+                .unwrap_or_else(|| std::path::Path::new("/tmp"));
+            match self
+                .claude
+                .run_session(wt_path, &phase2_prompt, &phase2_opts)
+                .await
+            {
+                Ok(session) if session.exit_code == 0 => {
+                    analysis = output::parse_analysis(&session.stdout);
+                    if analysis.is_some() {
+                        tracing::info!(
+                            "issue #{}: Phase 2 JSON conversion succeeded",
+                            self.item.github_number
+                        );
+                    }
+                }
+                Ok(session) => {
+                    tracing::warn!(
+                        "issue #{}: Phase 2 session failed (exit_code={})",
+                        self.item.github_number,
+                        session.exit_code
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "issue #{}: Phase 2 session error: {e}",
+                        self.item.github_number
+                    );
+                }
+            }
+            Some(report)
+        } else {
+            None
+        };
+
         let ops = match analysis {
             Some(ref a) => {
                 self.handle_analysis(
@@ -454,7 +519,10 @@ impl Task for AnalyzeTask {
                 )
                 .await
             }
-            None => self.handle_fallback(&response.stdout).await,
+            None => {
+                let report = raw_report.unwrap_or_else(|| output::parse_output(&response.stdout));
+                self.handle_fallback(&report).await
+            }
         };
 
         self.cleanup_worktree().await;
@@ -558,10 +626,14 @@ mod tests {
         }
     }
 
+    fn mock_claude() -> Arc<crate::infrastructure::claude::mock::MockClaude> {
+        Arc::new(crate::infrastructure::claude::mock::MockClaude::new())
+    }
+
     fn make_task(gh: Arc<MockGh>) -> AnalyzeTask {
         let ws = Arc::new(MockWorkspace::new());
         let cfg = Arc::new(MockConfigLoader);
-        AnalyzeTask::new(ws, gh, cfg, make_test_issue())
+        AnalyzeTask::new(ws, gh, mock_claude(), cfg, make_test_issue())
     }
 
     fn make_implement_response() -> AgentResponse {
@@ -630,7 +702,7 @@ mod tests {
 
         let ws = Arc::new(MockWorkspace::new());
         let cfg = Arc::new(MockConfigLoader);
-        let mut task = AnalyzeTask::new(ws.clone(), gh, cfg, make_test_issue());
+        let mut task = AnalyzeTask::new(ws.clone(), gh, mock_claude(), cfg, make_test_issue());
 
         let request = task.before_invoke().await.expect("should succeed");
 
@@ -674,6 +746,7 @@ mod tests {
         let mut task = AnalyzeTask::new(
             Arc::new(FailCloneWorkspace),
             gh,
+            mock_claude(),
             Arc::new(MockConfigLoader),
             make_test_issue(),
         );
@@ -806,6 +879,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn after_phase2_converts_unparseable_to_json() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "issues/42", ".state", "open");
+
+        let ws = Arc::new(MockWorkspace::new());
+        let mock_claude = mock_claude();
+        // Phase 2 response: MockClaude returns proper JSON
+        let phase2_json = r#"{"result": "{\"verdict\":\"implement\",\"confidence\":0.85,\"summary\":\"Clear bug report\",\"questions\":[],\"reason\":null,\"report\":\"Fix the login handler\"}"}"#;
+        mock_claude.enqueue_response(phase2_json, 0);
+        let cfg = Arc::new(MockConfigLoader);
+        let mut task =
+            AnalyzeTask::new(ws, gh.clone(), mock_claude.clone(), cfg, make_test_issue());
+        let _ = task.before_invoke().await;
+
+        // Phase 1: unparseable markdown output from agent
+        let response = AgentResponse {
+            exit_code: 0,
+            stdout: "Here is my analysis:\n\nThe login bug is caused by...".to_string(),
+            stderr: String::new(),
+            duration: Duration::from_secs(10),
+        };
+
+        let result = task.after_invoke(response).await;
+
+        assert!(matches!(result.status, TaskStatus::Completed));
+        // Phase 2 should have been called
+        assert_eq!(mock_claude.call_count(), 1);
+        // Verify Phase 2 prompt contains the raw report and conversion instruction
+        let calls = mock_claude.calls.lock().unwrap();
+        assert!(calls[0]
+            .prompt
+            .contains("Convert the following analysis report into JSON"));
+        assert!(calls[0].prompt.contains("The login bug is caused by"));
+        assert!(calls[0].append_system_prompt.is_none());
+        // Phase 2 succeeded → normal analysis path (analyzed label, not fallback)
+        let added = gh.added_labels.lock().unwrap();
+        assert!(added.iter().any(|(_, _, l)| l == labels::ANALYZED));
+        let comments = gh.posted_comments.lock().unwrap();
+        assert!(comments[0].2.contains("autodev:analysis"));
+    }
+
+    #[tokio::test]
+    async fn after_phase2_failure_falls_back() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "issues/42", ".state", "open");
+
+        let ws = Arc::new(MockWorkspace::new());
+        let mock_claude = mock_claude();
+        // Phase 2 also fails (no response configured → exit_code=1)
+        let cfg = Arc::new(MockConfigLoader);
+        let mut task =
+            AnalyzeTask::new(ws, gh.clone(), mock_claude.clone(), cfg, make_test_issue());
+        let _ = task.before_invoke().await;
+
+        let response = AgentResponse {
+            exit_code: 0,
+            stdout: "Unparseable agent output".to_string(),
+            stderr: String::new(),
+            duration: Duration::from_secs(10),
+        };
+
+        let result = task.after_invoke(response).await;
+
+        assert!(matches!(result.status, TaskStatus::Completed));
+        // Phase 2 was attempted
+        assert_eq!(mock_claude.call_count(), 1);
+        // Fell back to raw comment (fallback path also uses analyzed label)
+        let added = gh.added_labels.lock().unwrap();
+        assert!(added.iter().any(|(_, _, l)| l == labels::ANALYZED));
+    }
+
+    #[tokio::test]
     async fn after_nonzero_exit_fails_and_removes() {
         let gh = Arc::new(MockGh::new());
         gh.set_field("org/repo", "issues/42", ".state", "open");
@@ -859,7 +1004,7 @@ mod tests {
             auto_approve: true,
             threshold: 0.8,
         });
-        let mut task = AnalyzeTask::new(ws, gh.clone(), cfg, make_test_issue());
+        let mut task = AnalyzeTask::new(ws, gh.clone(), mock_claude(), cfg, make_test_issue());
         let _ = task.before_invoke().await;
 
         // confidence 0.9 >= threshold 0.8 → auto-approve
@@ -881,7 +1026,7 @@ mod tests {
             auto_approve: false,
             threshold: 0.8,
         });
-        let mut task = AnalyzeTask::new(ws, gh.clone(), cfg, make_test_issue());
+        let mut task = AnalyzeTask::new(ws, gh.clone(), mock_claude(), cfg, make_test_issue());
         let _ = task.before_invoke().await;
 
         let result = task.after_invoke(make_implement_response()).await;
@@ -902,7 +1047,7 @@ mod tests {
             auto_approve: true,
             threshold: 0.95, // higher than confidence 0.9
         });
-        let mut task = AnalyzeTask::new(ws, gh.clone(), cfg, make_test_issue());
+        let mut task = AnalyzeTask::new(ws, gh.clone(), mock_claude(), cfg, make_test_issue());
         let _ = task.before_invoke().await;
 
         let result = task.after_invoke(make_implement_response()).await;
@@ -953,7 +1098,7 @@ mod tests {
 
         let ws = Arc::new(MockWorkspace::new());
         let cfg = Arc::new(MockConfigLoader);
-        let mut task = AnalyzeTask::new(ws.clone(), gh, cfg, make_test_issue());
+        let mut task = AnalyzeTask::new(ws.clone(), gh, mock_claude(), cfg, make_test_issue());
         let _ = task.before_invoke().await;
 
         let _ = task.after_invoke(make_implement_response()).await;

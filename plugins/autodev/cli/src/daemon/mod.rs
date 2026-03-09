@@ -324,6 +324,7 @@ pub async fn start(
     let mut source = GitHubTaskSource::new(
         workspace,
         Arc::clone(&gh),
+        Arc::clone(&claude),
         config_loader,
         Arc::clone(&env),
         Arc::clone(&git),
