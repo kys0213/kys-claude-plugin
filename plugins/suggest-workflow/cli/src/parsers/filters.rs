@@ -96,17 +96,16 @@ pub fn is_system_meta_message(content: &str) -> bool {
         }
     }
 
-    // Hook feedback from Stop/PreToolUse/PostToolUse hooks
+    // Hook feedback prefixes (case-insensitive, first 30 chars for safe slicing)
     let byte_end = trimmed
         .char_indices()
         .map(|(i, _)| i)
         .take(31)
         .last()
-        .unwrap_or(trimmed.len())
-        .min(trimmed.len());
-    let lower_start = &trimmed[..byte_end].to_lowercase();
-    if lower_start.starts_with("stop hook feedback:")
-        || lower_start.starts_with("base directory for this skill:")
+        .unwrap_or(trimmed.len());
+    let prefix_lower = trimmed[..byte_end].to_lowercase();
+    if prefix_lower.starts_with("stop hook feedback:")
+        || prefix_lower.starts_with("base directory for this skill:")
     {
         return true;
     }
@@ -122,15 +121,17 @@ pub fn is_system_meta_message(content: &str) -> bool {
     }
 
     // Predominantly markdown table content (system docs)
-    let line_count = trimmed.lines().count();
-    if line_count > 5 {
-        let table_lines = trimmed
-            .lines()
-            .filter(|l| l.trim().starts_with('|') && l.trim().ends_with('|'))
-            .count();
-        if table_lines as f64 / line_count as f64 > 0.5 {
-            return true;
+    let mut line_count = 0;
+    let mut table_lines = 0;
+    for line in trimmed.lines() {
+        line_count += 1;
+        let l = line.trim();
+        if l.starts_with('|') && l.ends_with('|') {
+            table_lines += 1;
         }
+    }
+    if line_count > 5 && table_lines as f64 / line_count as f64 > 0.5 {
+        return true;
     }
 
     false
