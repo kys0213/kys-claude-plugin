@@ -65,15 +65,48 @@ pub fn strip_system_reminders(content: &str) -> String {
 }
 
 /// Detect messages that are system/meta noise rather than genuine user prompts.
+///
+/// Uses structural heuristics rather than enumerating specific tag names,
+/// so new XML-based system messages (e.g., `<session-restore>`) are caught
+/// automatically.
 pub fn is_system_meta_message(content: &str) -> bool {
     let trimmed = content.trim();
-    let lower = trimmed.to_lowercase();
 
-    // Basic meta filters
-    if lower.starts_with("<local-command-")
-        || lower.starts_with("<command-name>")
-        || lower.contains("[request interrupted by user")
-        || trimmed.chars().count() < 3
+    // Very short messages are not meaningful prompts
+    if trimmed.chars().count() < 3 {
+        return true;
+    }
+
+    // XML-like tags: all system-injected messages use <tag> format.
+    // Real user prompts never start with '<'.
+    if trimmed.starts_with('<') {
+        return true;
+    }
+
+    // Bracket-wrapped system messages where the entire content is enclosed:
+    // [Request interrupted by user], [autopilot activated], [ralph loop ...].
+    // Excludes user prefixes like "[autodev] fix: ..." where text follows "] ".
+    if trimmed.starts_with('[') {
+        if let Some(close) = trimmed.find(']') {
+            // Entire message is bracket-wrapped, or only whitespace follows
+            let after_bracket = trimmed[close + 1..].trim();
+            if after_bracket.is_empty() {
+                return true;
+            }
+        }
+    }
+
+    // Hook feedback from Stop/PreToolUse/PostToolUse hooks
+    let byte_end = trimmed
+        .char_indices()
+        .map(|(i, _)| i)
+        .take(31)
+        .last()
+        .unwrap_or(trimmed.len())
+        .min(trimmed.len());
+    let lower_start = &trimmed[..byte_end].to_lowercase();
+    if lower_start.starts_with("stop hook feedback:")
+        || lower_start.starts_with("base directory for this skill:")
     {
         return true;
     }
@@ -83,13 +116,8 @@ pub fn is_system_meta_message(content: &str) -> bool {
         return true;
     }
 
-    // Mode activation prompts
-    if lower.contains("[autopilot activated")
-        || lower.contains("[ralph loop")
-        || lower.contains("[ultrawork activated")
-        || lower.contains("[ralplan activated")
-        || lower.contains("[ecomode activated")
-    {
+    // YAML frontmatter (command definitions)
+    if trimmed.starts_with("---\n") && trimmed.contains("\n---\n") {
         return true;
     }
 
@@ -103,11 +131,6 @@ pub fn is_system_meta_message(content: &str) -> bool {
         if table_lines as f64 / line_count as f64 > 0.5 {
             return true;
         }
-    }
-
-    // YAML frontmatter (command definitions)
-    if trimmed.starts_with("---\n") && trimmed.contains("\n---\n") {
-        return true;
     }
 
     false
@@ -190,20 +213,47 @@ mod tests {
         assert!(is_system_meta_message(
             "<local-command-run>test</local-command-run>"
         ));
+        assert!(is_system_meta_message(
+            "<command-message>git-utils:commit-and-pr</command-message>"
+        ));
+    }
+
+    #[test]
+    fn test_is_system_meta_task_notification() {
+        assert!(is_system_meta_message(
+            "<task-notification><task-id>abc123</task-id></task-notification>"
+        ));
+    }
+
+    #[test]
+    fn test_is_system_meta_teammate_message() {
+        assert!(is_system_meta_message(
+            "<teammate-message teammate_id=\"agent-report\" color=\"green\">done</teammate-message>"
+        ));
+    }
+
+    #[test]
+    fn test_is_system_meta_hook_feedback() {
+        assert!(is_system_meta_message(
+            "Stop hook feedback: [bash ./.claude/hooks/auto-commit-hook.sh]: something"
+        ));
     }
 
     #[test]
     fn test_is_system_meta_interrupted() {
         assert!(is_system_meta_message(
-            "something [request interrupted by user] end"
+            "[Request interrupted by user for tool use]"
         ));
+        assert!(is_system_meta_message("[Request interrupted by user]"));
     }
 
     #[test]
     fn test_is_system_meta_mode_activation() {
-        assert!(is_system_meta_message("[autopilot activated] starting"));
+        // In real data, mode activations arrive inside <system-reminder> tags.
+        // After strip_system_reminders(), only the bracket-wrapped core remains.
+        assert!(is_system_meta_message("[autopilot activated]"));
         assert!(is_system_meta_message("[ralph loop iteration 3]"));
-        assert!(is_system_meta_message("[ultrawork activated] go"));
+        assert!(is_system_meta_message("[ultrawork activated]"));
     }
 
     #[test]

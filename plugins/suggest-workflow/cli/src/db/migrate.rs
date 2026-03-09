@@ -125,6 +125,10 @@ fn migrate_step(conn: &Connection, from: u32, to: u32) -> Result<()> {
                     OR text LIKE '%[ultrawork activated%'
                     OR text LIKE '%[ralplan activated%'
                     OR text LIKE '%[ecomode activated%'
+                    OR text LIKE '<task-notification>%'
+                    OR text LIKE '<teammate-message%'
+                    OR text LIKE '<command-message>%'
+                    OR text LIKE 'Stop hook feedback:%'
                     OR char_count < 3;",
             )?;
             Ok(())
