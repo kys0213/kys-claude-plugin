@@ -103,6 +103,27 @@ fn migrate_step(conn: &Connection, from: u32, to: u32) -> Result<()> {
             )?;
             Ok(())
         }
+        (4, 5) => {
+            conn.execute_batch(
+                "ALTER TABLE prompts ADD COLUMN role TEXT NOT NULL DEFAULT 'human';",
+            )?;
+            conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_prompts_role ON prompts(role);")?;
+            // Heuristic backfill: reclassify known system/meta patterns
+            conn.execute_batch(
+                "UPDATE prompts SET role = 'system' WHERE
+                    text LIKE '%<system-reminder>%'
+                    OR text LIKE '%<local-command-%'
+                    OR text LIKE '%<command-name>%'
+                    OR text LIKE '%[request interrupted by user%'
+                    OR text LIKE '%[autopilot activated%'
+                    OR text LIKE '%[ralph loop%'
+                    OR text LIKE '%[ultrawork activated%'
+                    OR text LIKE '%[ralplan activated%'
+                    OR text LIKE '%[ecomode activated%'
+                    OR char_count < 3;",
+            )?;
+            Ok(())
+        }
         _ => {
             anyhow::bail!(
                 "no migration path from v{} to v{}. Run with --full to rebuild.",

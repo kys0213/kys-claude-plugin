@@ -5,6 +5,7 @@ use std::time::UNIX_EPOCH;
 use crate::analyzers::tool_classifier;
 use crate::db::repository::*;
 use crate::parsers;
+use crate::parsers::filters::{classify_prompt_role, strip_system_reminders, PromptRole};
 use crate::types::{Content, SessionEntry, ToolUse};
 
 pub fn run(repo: &dyn IndexRepository, sessions_dir: &Path) -> Result<()> {
@@ -104,7 +105,9 @@ fn extract_session_data(file_path: &Path, size: u64, mtime: i64) -> Result<Sessi
         .or_else(|| tool_uses.last().and_then(|t| t.timestamp));
 
     let first_prompt_snippet = prompts
-        .first()
+        .iter()
+        .find(|p| p.role == "human")
+        .or_else(|| prompts.first())
         .map(|p| p.text.chars().take(500).collect::<String>());
 
     Ok(SessionData {
@@ -129,7 +132,7 @@ fn extract_prompts(entries: &[SessionEntry]) -> Vec<PromptData> {
         .filter(|e| e.entry_type == "user")
         .filter_map(|e| {
             let message = e.message.as_ref()?;
-            let text = match &message.content {
+            let raw_text = match &message.content {
                 Content::Text(t) => t.clone(),
                 Content::Array(items) => items
                     .iter()
@@ -139,7 +142,16 @@ fn extract_prompts(entries: &[SessionEntry]) -> Vec<PromptData> {
                     .join("\n"),
             };
 
-            if text.trim().is_empty() {
+            if raw_text.trim().is_empty() {
+                return None;
+            }
+
+            let had_system_reminders = raw_text.contains("<system-reminder>");
+            let text = strip_system_reminders(&raw_text);
+            let role = classify_prompt_role(&text, had_system_reminders);
+
+            // Skip Meta (empty after stripping)
+            if role == PromptRole::Meta {
                 return None;
             }
 
@@ -154,6 +166,7 @@ fn extract_prompts(entries: &[SessionEntry]) -> Vec<PromptData> {
                 char_count: text.chars().count(),
                 text,
                 timestamp,
+                role: role.as_str().to_string(),
             })
         })
         .collect()

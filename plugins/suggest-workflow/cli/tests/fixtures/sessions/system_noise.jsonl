@@ -1,0 +1,8 @@
+{"type":"user","message":{"content":"Fix the login bug"},"timestamp":"2026-02-10T10:00:00+00:00"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"I'll look into the login bug."}]},"timestamp":"2026-02-10T10:00:01+00:00"}
+{"type":"user","message":{"content":"<system-reminder>hook success: Success</system-reminder>"},"timestamp":"2026-02-10T10:00:02+00:00"}
+{"type":"user","message":{"content":"<system-reminder>SessionStart hook additional context: some context</system-reminder>"},"timestamp":"2026-02-10T10:00:03+00:00"}
+{"type":"user","message":{"content":"<local-command-run>test</local-command-run>"},"timestamp":"2026-02-10T10:00:04+00:00"}
+{"type":"user","message":{"content":"Now deploy to production"},"timestamp":"2026-02-10T10:00:05+00:00"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Deploying now."}]},"timestamp":"2026-02-10T10:00:06+00:00"}
+{"type":"user","message":{"content":"ok <system-reminder>PostToolUse hook additional context: done</system-reminder>"},"timestamp":"2026-02-10T10:00:07+00:00"}

@@ -103,14 +103,15 @@ impl IndexRepository for SqliteStore {
         // Insert prompts
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO prompts (session_id, text, timestamp, char_count) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO prompts (session_id, text, timestamp, char_count, role) VALUES (?1, ?2, ?3, ?4, ?5)",
             )?;
             for p in &session.prompts {
                 stmt.execute(params![
                     &session.id,
                     &p.text,
                     p.timestamp,
-                    p.char_count as i64
+                    p.char_count as i64,
+                    &p.role
                 ])?;
             }
         }

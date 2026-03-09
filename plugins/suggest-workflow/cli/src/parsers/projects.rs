@@ -1,3 +1,4 @@
+use super::filters::{is_system_meta_message, strip_system_reminders};
 use crate::types::{Content, HistoryEntry, SessionEntry, ToolUse};
 use anyhow::{Context, Result};
 use chrono::DateTime;
@@ -214,71 +215,4 @@ pub fn adapt_to_history_entries(
     }
 
     history_entries
-}
-
-/// Strip <system-reminder>...</system-reminder> blocks from user messages
-fn strip_system_reminders(content: &str) -> String {
-    let mut result = String::with_capacity(content.len());
-    let mut rest = content;
-
-    while let Some(start) = rest.find("<system-reminder>") {
-        result.push_str(&rest[..start]);
-        if let Some(end) = rest[start..].find("</system-reminder>") {
-            rest = &rest[start + end + "</system-reminder>".len()..];
-        } else {
-            // Unclosed tag - skip everything after it
-            rest = "";
-            break;
-        }
-    }
-    result.push_str(rest);
-    result.trim().to_string()
-}
-
-fn is_system_meta_message(content: &str) -> bool {
-    let trimmed = content.trim();
-    let lower = trimmed.to_lowercase();
-
-    // Basic meta filters
-    if lower.starts_with("<local-command-")
-        || lower.starts_with("<command-name>")
-        || lower.contains("[request interrupted by user")
-        || trimmed.len() < 3
-    {
-        return true;
-    }
-
-    // Skill/command expansion: starts with "# " and very long
-    if trimmed.starts_with("# ") && trimmed.len() > 500 {
-        return true;
-    }
-
-    // Mode activation prompts
-    if lower.contains("[autopilot activated")
-        || lower.contains("[ralph loop")
-        || lower.contains("[ultrawork activated")
-        || lower.contains("[ralplan activated")
-        || lower.contains("[ecomode activated")
-    {
-        return true;
-    }
-
-    // Predominantly markdown table content (system docs)
-    let line_count = trimmed.lines().count();
-    if line_count > 5 {
-        let table_lines = trimmed
-            .lines()
-            .filter(|l| l.trim().starts_with('|') && l.trim().ends_with('|'))
-            .count();
-        if table_lines as f64 / line_count as f64 > 0.5 {
-            return true;
-        }
-    }
-
-    // YAML frontmatter (command definitions)
-    if trimmed.starts_with("---\n") && trimmed.contains("\n---\n") {
-        return true;
-    }
-
-    false
 }

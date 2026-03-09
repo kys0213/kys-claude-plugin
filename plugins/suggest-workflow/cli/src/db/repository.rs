@@ -23,6 +23,7 @@ pub struct PromptData {
     pub text: String,
     pub timestamp: i64,
     pub char_count: usize,
+    pub role: String,
 }
 
 pub struct ToolUseData {
