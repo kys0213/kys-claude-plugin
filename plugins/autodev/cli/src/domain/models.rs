@@ -209,3 +209,52 @@ pub struct LogEntry {
     pub exit_code: Option<i32>,
     pub duration_ms: Option<i64>,
 }
+
+// ─── Token Usage models ───
+
+pub struct NewTokenUsage {
+    pub log_id: String,
+    pub repo_id: String,
+    pub queue_type: String,
+    pub queue_item_id: String,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub cache_read_tokens: i64,
+}
+
+pub struct UsageSummary {
+    pub total_sessions: i64,
+    pub total_duration_ms: i64,
+    pub total_input_tokens: i64,
+    pub total_output_tokens: i64,
+    pub total_cache_write_tokens: i64,
+    pub total_cache_read_tokens: i64,
+    pub by_queue_type: Vec<UsageByQueueType>,
+    pub by_repo: Vec<UsageByRepo>,
+}
+
+pub struct UsageByQueueType {
+    pub queue_type: String,
+    pub sessions: i64,
+    pub duration_ms: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+}
+
+pub struct UsageByRepo {
+    pub repo_name: String,
+    pub sessions: i64,
+    pub duration_ms: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+}
+
+pub struct UsageByIssue {
+    pub queue_item_id: String,
+    pub queue_type: String,
+    pub sessions: i64,
+    pub duration_ms: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+}
