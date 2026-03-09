@@ -149,3 +149,16 @@ fn existing_fixtures_classify_as_human() {
         );
     }
 }
+
+#[test]
+fn prompts_invalid_role_returns_empty() {
+    // An invalid role value should return no matching rows
+    let result = index_and_query_prompts(&["system_noise.jsonl"], &["role=invalid"]);
+    let rows = result.as_array().unwrap();
+
+    assert!(
+        rows.is_empty(),
+        "invalid role filter should return empty results, got {}",
+        rows.len()
+    );
+}

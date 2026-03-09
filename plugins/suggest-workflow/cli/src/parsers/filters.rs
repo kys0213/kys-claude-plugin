@@ -24,6 +24,11 @@ impl PromptRole {
 /// to be considered genuine human input. Below this threshold, leftovers like
 /// "ok" or "y" are treated as system noise when the original contained
 /// `<system-reminder>` tags.
+///
+/// Empirical analysis of real sessions shows:
+/// - System remnants (auto-confirmations): "응"(1), "좋아"(2) — all ≤ 3 chars
+/// - Shortest genuine human prompts: "진행하자", "머지해줘" — all ≥ 4 chars
+/// - Threshold of 5 provides a safety margin above the 3-char boundary.
 const MIN_HUMAN_CHARS_AFTER_STRIP: usize = 5;
 
 /// Classify a prompt's role after `strip_system_reminders` has been applied.
@@ -96,12 +101,11 @@ pub fn is_system_meta_message(content: &str) -> bool {
         }
     }
 
-    // Hook feedback prefixes (case-insensitive, first 30 chars for safe slicing)
+    // Hook feedback prefixes (case-insensitive, first 30 chars for safe UTF-8 slicing)
     let byte_end = trimmed
         .char_indices()
+        .nth(30)
         .map(|(i, _)| i)
-        .take(31)
-        .last()
         .unwrap_or(trimmed.len());
     let prefix_lower = trimmed[..byte_end].to_lowercase();
     if prefix_lower.starts_with("stop hook feedback:")
@@ -274,5 +278,51 @@ mod tests {
         assert_eq!(PromptRole::Human.as_str(), "human");
         assert_eq!(PromptRole::System.as_str(), "system");
         assert_eq!(PromptRole::Meta.as_str(), "meta");
+    }
+
+    #[test]
+    fn test_classify_boundary_char_counts() {
+        // Empirical boundary: system remnants ≤ 3 chars, human ≥ 4 chars
+        // Threshold is 5 with safety margin
+
+        // 1-char auto-confirmation → system (when had_system_reminders)
+        assert_eq!(classify_prompt_role("응", true), PromptRole::System);
+        // 2-char → system
+        assert_eq!(classify_prompt_role("좋아", true), PromptRole::System);
+        // 4-char → system (still below threshold 5)
+        assert_eq!(classify_prompt_role("done", true), PromptRole::System);
+        // 5-char → human (at threshold)
+        assert_eq!(classify_prompt_role("진행하자!", true), PromptRole::Human);
+        // Same texts without system-reminders → always human
+        assert_eq!(classify_prompt_role("응응응", false), PromptRole::Human);
+        assert_eq!(classify_prompt_role("done", false), PromptRole::Human);
+    }
+
+    #[test]
+    fn test_is_system_meta_bracket_prefix_not_system() {
+        // User-prefixed bracket messages should NOT be classified as system
+        assert!(!is_system_meta_message(
+            "[autodev] fix: resolve login timeout"
+        ));
+        assert!(!is_system_meta_message("[bug] something is broken here"));
+    }
+
+    #[test]
+    fn test_is_system_meta_korean_hook_feedback() {
+        // Korean text starting with hook-like prefix should not panic
+        assert!(!is_system_meta_message(
+            "@plugins/workflow-guide/ 에서 install 시점에 rules 를 어떻게 셋팅 중이야?"
+        ));
+    }
+
+    #[test]
+    fn test_is_system_meta_markdown_table_density() {
+        // >50% table lines with >5 lines → system
+        let table_heavy = "| A | B |\n| - | - |\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |\ntext\n";
+        assert!(is_system_meta_message(table_heavy));
+
+        // ≤50% table lines → not system
+        let text_heavy = "line 1\nline 2\nline 3\nline 4\n| A | B |\n| 1 | 2 |\n";
+        assert!(!is_system_meta_message(text_heavy));
     }
 }
