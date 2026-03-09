@@ -1,6 +1,7 @@
 use assert_cmd::cargo_bin_cmd;
 use assert_cmd::Command;
 use predicates::prelude::*;
+use serial_test::serial;
 use tempfile::TempDir;
 
 /// AUTODEV_HOME을 tempdir로 설정한 CLI 명령어 실행 헬퍼
@@ -239,4 +240,107 @@ fn status_shows_repo_after_add() {
         .assert()
         .success()
         .stdout(predicate::str::contains("org/myrepo"));
+}
+
+// ═══════════════════════════════════════════════
+// 6. daemon mode (--daemon / -d flag)
+// ═══════════════════════════════════════════════
+
+#[test]
+fn stop_fails_when_no_daemon_running() {
+    let home = TempDir::new().unwrap();
+    autodev(&home)
+        .arg("stop")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not running"));
+}
+
+#[test]
+fn start_help_shows_daemon_flag() {
+    let home = TempDir::new().unwrap();
+    autodev(&home)
+        .args(["start", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--daemon").and(predicate::str::contains("-d")));
+}
+
+#[test]
+fn restart_help_shows_daemon_flag() {
+    let home = TempDir::new().unwrap();
+    autodev(&home)
+        .args(["restart", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--daemon").and(predicate::str::contains("-d")));
+}
+
+#[test]
+#[serial]
+fn start_daemon_forks_and_parent_exits_successfully() {
+    let home = TempDir::new().unwrap();
+
+    // daemonize() forks: parent prints PID message and exits with 0.
+    // The child may fail later (no GITHUB_TOKEN etc.), but the fork itself succeeds.
+    autodev(&home)
+        .args(["start", "--daemon"])
+        .timeout(std::time::Duration::from_secs(5))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("daemon started in background"));
+
+    // Give the forked child time to write PID (if it gets that far)
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    // Clean up any child process that may have started
+    let _ = autodev(&home).arg("stop").ok();
+}
+
+#[test]
+#[serial]
+fn start_daemon_short_flag_forks_successfully() {
+    let home = TempDir::new().unwrap();
+
+    autodev(&home)
+        .args(["start", "-d"])
+        .timeout(std::time::Duration::from_secs(5))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("daemon started in background"));
+
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let _ = autodev(&home).arg("stop").ok();
+}
+
+#[test]
+#[serial]
+fn restart_daemon_flag_forks_successfully() {
+    let home = TempDir::new().unwrap();
+
+    autodev(&home)
+        .args(["restart", "--daemon"])
+        .timeout(std::time::Duration::from_secs(5))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("daemon started in background"));
+
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let _ = autodev(&home).arg("stop").ok();
+}
+
+#[test]
+#[serial]
+fn restart_daemon_short_flag_forks_successfully() {
+    let home = TempDir::new().unwrap();
+
+    autodev(&home)
+        .args(["restart", "-d"])
+        .timeout(std::time::Duration::from_secs(5))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("daemon started in background"));
+
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let _ = autodev(&home).arg("stop").ok();
 }

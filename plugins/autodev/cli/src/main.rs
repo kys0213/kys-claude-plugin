@@ -184,9 +184,16 @@ async fn main() -> Result<()> {
             daemon: daemonize_flag,
         } => {
             if daemonize_flag {
-                let log_dir = config::resolve_log_dir(&cfg.daemon.log_dir, &home);
-                std::fs::create_dir_all(&log_dir)?;
-                daemon::daemonize(&log_dir)?;
+                #[cfg(unix)]
+                {
+                    let log_dir = config::resolve_log_dir(&cfg.daemon.log_dir, &home);
+                    std::fs::create_dir_all(&log_dir)?;
+                    daemon::daemonize(&log_dir)?;
+                }
+                #[cfg(not(unix))]
+                {
+                    anyhow::bail!("--daemon flag is only supported on Unix systems");
+                }
             }
             let env: Arc<dyn config::Env> = Arc::new(env);
             let gh: Arc<dyn infrastructure::gh::Gh> = Arc::new(gh);
@@ -201,9 +208,16 @@ async fn main() -> Result<()> {
         } => {
             daemon::stop(&home).ok();
             if daemonize_flag {
-                let log_dir = config::resolve_log_dir(&cfg.daemon.log_dir, &home);
-                std::fs::create_dir_all(&log_dir)?;
-                daemon::daemonize(&log_dir)?;
+                #[cfg(unix)]
+                {
+                    let log_dir = config::resolve_log_dir(&cfg.daemon.log_dir, &home);
+                    std::fs::create_dir_all(&log_dir)?;
+                    daemon::daemonize(&log_dir)?;
+                }
+                #[cfg(not(unix))]
+                {
+                    anyhow::bail!("--daemon flag is only supported on Unix systems");
+                }
             }
             let env: Arc<dyn config::Env> = Arc::new(env);
             let gh: Arc<dyn infrastructure::gh::Gh> = Arc::new(gh);
