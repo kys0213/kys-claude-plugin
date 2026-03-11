@@ -24,8 +24,13 @@ Gap 분석에서 발견된 6건을 심각도 순으로 수정한다.
 
 ### Gap #1: Label add-first 순서 변경
 
-- `git_repository.rs`의 `scan_approved_issues_adds_to_ready_queue` 테스트가 현재 remove-first 순서를 검증함
-- **대응**: 테스트도 함께 add-first 순서로 수정
+- `git_repository.rs`의 `scan_approved_issues_adds_to_ready_queue` 테스트 — assertion이 `any()` 매처로 순서 무관 검증이므로 **테스트 변경 불필요**
+- **추가 발견**: `recover_orphan_implementing` (git_repository.rs:584-592)에서도 remove-first 패턴 사용 중
+  - `label_remove(IMPLEMENTING)` → `label_add(DONE)` — add-first로 수정 필요
+  - 같은 함수의 PR open 분기 (line 610-616)와 None 분기 (line 634)는 단방향 제거(`label_remove`만)이므로 변경 불필요
+- **추가 확인**: `recover_orphan_wip` — label 전이 없음 (wip 제거만 수행하거나 큐에 재삽입). 변경 불필요
+- **추가 확인**: `startup_reconcile` — label 전이 없음 (기존 label 기반으로 큐에 push만 수행). 변경 불필요
+- **대응**: Step 1 수정 목록에 `recover_orphan_implementing` 추가
 
 ### Gap #2: ExtractTask extract-failed
 
@@ -71,8 +76,15 @@ Gap 분석에서 발견된 6건을 심각도 순으로 수정한다.
 | `tasks/review.rs` after_invoke max_iterations | wip+changes→skip | 복합 | add(skip)→remove(wip)→remove(changes) |
 | `tasks/improve.rs` after_invoke (success) | changes-requested→wip | remove→add | add→remove |
 | `domain/git_repository.rs` scan_approved_issues | approved→implementing | remove→add | add→remove |
+| `domain/git_repository.rs` recover_orphan_implementing (closed/merged) | implementing→done | remove→add | add→remove |
 
-**테스트 수정**: `git_repository.rs`의 `scan_approved_issues_adds_to_ready_queue` 테스트에서 label 순서 검증은 assertion이 순서 무관(각각 별도 확인)이므로 **테스트 변경 불필요**.
+**테스트 수정**: `git_repository.rs`의 `scan_approved_issues_adds_to_ready_queue` 테스트에서 label 순서 검증은 assertion이 순서 무관(`any()` 매처)이므로 **테스트 변경 불필요**.
+
+**변경 불필요 확인**:
+- `recover_orphan_implementing` PR open 분기 (line 610-616): 단방향 제거(`label_remove(IMPLEMENTING)`)만 수행
+- `recover_orphan_implementing` None 분기 (line 634): 단방향 제거(`label_remove(IMPLEMENTING)`)만 수행
+- `recover_orphan_wip`: label 전이 없음 (wip 제거 또는 큐 재삽입만)
+- `startup_reconcile`: label 변경 없음 (기존 label 기반 큐 push만)
 
 ### Step 2: ExtractTask extract-failed 분기 (Gap #2)
 
@@ -182,8 +194,8 @@ workflows:
 ## 구현 순서
 
 ```
-Step 1: Label add-first (5개 파일, ~30개 전이 지점)
-  └─ 기존 테스트 통과 확인
+Step 1: Label add-first (5개 파일, ~15개 전이 지점 + recovery 1개)
+  └─ 기존 테스트 통과 확인 (테스트는 순서 무관 검증이므로 변경 불필요)
 
 Step 2: ExtractTask extract-failed (1개 파일)
   └─ 테스트 1건 추가
