@@ -700,6 +700,73 @@ mod tests {
             .any(|(_, n, l)| *n == 10 && l == labels::CHANGES_REQUESTED));
     }
 
+    // ═══════════════════════════════════════════════
+    // DESIGN-v3: label add-first 순서 검증
+    // ═══════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn before_closed_pr_adds_done_before_removing_wip() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "pulls/10", ".state", "closed");
+
+        let mut task = make_task(gh.clone(), Some(42));
+        let _ = task.before_invoke().await;
+
+        // PR: done before wip removal
+        gh.assert_add_before_remove(10, labels::DONE, labels::WIP);
+        // Source issue: done before implementing removal
+        gh.assert_add_before_remove(42, labels::DONE, labels::IMPLEMENTING);
+    }
+
+    #[tokio::test]
+    async fn after_approve_adds_done_before_removing_wip() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "pulls/10", ".state", "open");
+
+        let mut task = make_task(gh.clone(), Some(42));
+        let _ = task.before_invoke().await;
+        let _ = task.after_invoke(make_approve_response()).await;
+
+        // PR: done before wip removal
+        gh.assert_add_before_remove(10, labels::DONE, labels::WIP);
+        // Source issue: done before implementing removal
+        gh.assert_add_before_remove(42, labels::DONE, labels::IMPLEMENTING);
+    }
+
+    #[tokio::test]
+    async fn after_request_changes_adds_changes_requested_before_removing_wip() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "pulls/10", ".state", "open");
+
+        // external PR — triggers changes-requested label transition
+        let mut task = make_task(gh.clone(), None);
+        let _ = task.before_invoke().await;
+        let _ = task.after_invoke(make_request_changes_response()).await;
+
+        gh.assert_add_before_remove(10, labels::CHANGES_REQUESTED, labels::WIP);
+    }
+
+    #[tokio::test]
+    async fn after_max_iterations_adds_skip_before_removing_changes_requested() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "pulls/10", ".state", "open");
+
+        let mut pr = make_test_pr(Some(42));
+        pr.review_iteration = 3; // exceeds default max (2)
+        let mut task = ReviewTask::new(
+            Arc::new(MockWorkspace),
+            gh.clone(),
+            Arc::new(MockConfigLoader),
+            pr,
+        );
+        let _ = task.before_invoke().await;
+        let _ = task.after_invoke(make_request_changes_response()).await;
+
+        // max_iterations 경로에서는 wip→changes-requested 전이 후
+        // skip 추가 → changes-requested 제거 순서로 진행.
+        gh.assert_add_before_remove(10, labels::SKIP, labels::CHANGES_REQUESTED);
+    }
+
     #[tokio::test]
     async fn after_nonzero_exit_removes() {
         let gh = Arc::new(MockGh::new());

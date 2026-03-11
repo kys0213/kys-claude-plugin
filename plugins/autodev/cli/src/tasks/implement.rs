@@ -1069,6 +1069,40 @@ mod tests {
     }
 
     // ═══════════════════════════════════════════════
+    // DESIGN-v3: label add-first 순서 검증
+    // ═══════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn before_closed_issue_adds_done_before_removing_implementing() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "issues/42", ".state", "closed");
+
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+
+        gh.assert_add_before_remove(42, labels::DONE, labels::IMPLEMENTING);
+    }
+
+    #[tokio::test]
+    async fn after_no_pr_adds_impl_failed_before_removing_implementing() {
+        let gh = Arc::new(MockGh::new());
+        let ws = Arc::new(MockWorkspace::new());
+        let cfg = Arc::new(MockConfigLoader);
+        let mut task = ImplementTask::new(ws, gh.clone(), cfg, make_test_issue());
+        let _ = task.before_invoke().await;
+
+        let response = AgentResponse {
+            exit_code: 0,
+            stdout: "Done but no PR URL".to_string(),
+            stderr: String::new(),
+            duration: Duration::from_secs(30),
+        };
+        let _ = task.after_invoke(response).await;
+
+        gh.assert_add_before_remove(42, labels::IMPL_FAILED, labels::IMPLEMENTING);
+    }
+
+    // ═══════════════════════════════════════════════
     // existing tests (continued)
     // ═══════════════════════════════════════════════
 

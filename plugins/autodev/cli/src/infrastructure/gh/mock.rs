@@ -19,6 +19,10 @@ pub struct MockGh {
     pub removed_labels: Mutex<Vec<(String, i64, String)>>,
     /// 추가된 라벨 기록: (repo_name, number, label)
     pub added_labels: Mutex<Vec<(String, i64, String)>>,
+    /// 라벨 연산 순서 기록: ("add"|"remove", repo_name, number, label)
+    /// add-first 순서 검증에 사용 — added_labels/removed_labels는 각각 별개 Vec이라
+    /// cross-operation 순서 검증이 불가능하므로 이 필드로 보완.
+    pub label_ops: Mutex<Vec<(String, String, i64, String)>>,
     /// 생성된 이슈 기록: (repo_name, title, body)
     pub created_issues: Mutex<Vec<(String, String, String)>>,
     /// 생성된 PR 기록: (repo_name, head, base, title, body)
@@ -39,6 +43,7 @@ impl Default for MockGh {
             posted_comments: Mutex::new(Vec::new()),
             removed_labels: Mutex::new(Vec::new()),
             added_labels: Mutex::new(Vec::new()),
+            label_ops: Mutex::new(Vec::new()),
             created_issues: Mutex::new(Vec::new()),
             created_prs: Mutex::new(Vec::new()),
             reviewed_prs: Mutex::new(Vec::new()),
@@ -57,6 +62,26 @@ impl MockGh {
     pub fn set_field(&self, repo_name: &str, path: &str, jq: &str, value: &str) {
         let key = format!("{repo_name}/{path}:{jq}");
         self.fields.lock().unwrap().insert(key, value.to_string());
+    }
+
+    /// 특정 issue/PR에 대해 add가 remove보다 먼저 호출되었는지 검증.
+    /// (add_label, remove_label) 쌍에 대해 label_ops에서 add의 인덱스가 remove보다 작은지 확인.
+    pub fn assert_add_before_remove(&self, number: i64, add_label: &str, remove_label: &str) {
+        let ops = self.label_ops.lock().unwrap();
+        let add_pos = ops
+            .iter()
+            .position(|(op, _, n, l)| op == "add" && *n == number && l == add_label);
+        let remove_pos = ops
+            .iter()
+            .position(|(op, _, n, l)| op == "remove" && *n == number && l == remove_label);
+        match (add_pos, remove_pos) {
+            (Some(a), Some(r)) => assert!(
+                a < r,
+                "add-first violated: add({add_label}) at index {a}, remove({remove_label}) at index {r} for #{number}"
+            ),
+            (None, _) => panic!("label_add({add_label}) not found for #{number}"),
+            (_, None) => panic!("label_remove({remove_label}) not found for #{number}"),
+        }
     }
 
     /// api_paginate 응답 설정
@@ -133,6 +158,12 @@ impl Gh for MockGh {
             number,
             label.to_string(),
         ));
+        self.label_ops.lock().unwrap().push((
+            "remove".to_string(),
+            repo_name.to_string(),
+            number,
+            label.to_string(),
+        ));
         true
     }
 
@@ -147,6 +178,12 @@ impl Gh for MockGh {
             .lock()
             .unwrap()
             .push((repo_name.to_string(), number, label.to_string()));
+        self.label_ops.lock().unwrap().push((
+            "add".to_string(),
+            repo_name.to_string(),
+            number,
+            label.to_string(),
+        ));
         true
     }
 

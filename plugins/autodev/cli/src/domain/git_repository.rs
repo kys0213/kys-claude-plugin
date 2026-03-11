@@ -1230,7 +1230,7 @@ mod tests {
         let item = repo.issue_queue.pop(issue_phase::READY).unwrap();
         assert_eq!(item.github_number, 5);
 
-        // Label transitions: approved-analysis removed, analyzed removed, implementing added
+        // Label transitions: implementing added first, then old labels removed
         let removed = gh.removed_labels.lock().unwrap();
         assert_eq!(removed.len(), 2);
         assert!(removed.iter().any(|r| r.2 == "autodev:approved-analysis"));
@@ -1239,6 +1239,10 @@ mod tests {
         let added = gh.added_labels.lock().unwrap();
         assert_eq!(added.len(), 1);
         assert_eq!(added[0].2, "autodev:implementing");
+
+        // DESIGN-v3: add-first 순서 검증
+        gh.assert_add_before_remove(5, labels::IMPLEMENTING, labels::APPROVED_ANALYSIS);
+        gh.assert_add_before_remove(5, labels::IMPLEMENTING, labels::ANALYZED);
     }
 
     #[tokio::test]
@@ -1493,6 +1497,9 @@ mod tests {
         assert!(removed.iter().any(|r| r.2 == "autodev:implementing"));
         let added = gh.added_labels.lock().unwrap();
         assert!(added.iter().any(|r| r.2 == "autodev:done"));
+
+        // DESIGN-v3: add-first 순서 검증
+        gh.assert_add_before_remove(5, labels::DONE, labels::IMPLEMENTING);
     }
 
     #[tokio::test]

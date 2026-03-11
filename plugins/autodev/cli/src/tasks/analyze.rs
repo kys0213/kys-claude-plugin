@@ -946,6 +946,78 @@ mod tests {
         assert!(comments[0].2.contains("autodev:analysis"));
     }
 
+    // ═══════════════════════════════════════════════
+    // DESIGN-v3: label add-first 순서 검증
+    // 설계 원칙: 라벨 전이 시 새 라벨을 먼저 추가(add)한 뒤 이전 라벨을 제거(remove).
+    // 이렇게 해야 중간에 크래시가 발생해도 라벨 없는 상태가 되지 않는다.
+    // ═══════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn before_closed_issue_adds_done_before_removing_wip() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "issues/42", ".state", "closed");
+
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+
+        gh.assert_add_before_remove(42, labels::DONE, labels::WIP);
+    }
+
+    #[tokio::test]
+    async fn after_implement_verdict_adds_analyzed_before_removing_wip() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "issues/42", ".state", "open");
+
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+        let _ = task.after_invoke(make_implement_response()).await;
+
+        gh.assert_add_before_remove(42, labels::ANALYZED, labels::WIP);
+    }
+
+    #[tokio::test]
+    async fn after_wontfix_verdict_adds_skip_before_removing_wip() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "issues/42", ".state", "open");
+
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+        let _ = task.after_invoke(make_wontfix_response()).await;
+
+        gh.assert_add_before_remove(42, labels::SKIP, labels::WIP);
+    }
+
+    #[tokio::test]
+    async fn after_clarify_verdict_adds_skip_before_removing_wip() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "issues/42", ".state", "open");
+
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+        let _ = task.after_invoke(make_clarify_response()).await;
+
+        gh.assert_add_before_remove(42, labels::SKIP, labels::WIP);
+    }
+
+    #[tokio::test]
+    async fn after_fallback_adds_analyzed_before_removing_wip() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "issues/42", ".state", "open");
+
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+
+        let response = AgentResponse {
+            exit_code: 0,
+            stdout: "Not valid JSON".to_string(),
+            stderr: String::new(),
+            duration: Duration::from_secs(3),
+        };
+        let _ = task.after_invoke(response).await;
+
+        gh.assert_add_before_remove(42, labels::ANALYZED, labels::WIP);
+    }
+
     #[tokio::test]
     async fn after_cleans_up_worktree() {
         let gh = Arc::new(MockGh::new());

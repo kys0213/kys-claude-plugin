@@ -336,6 +336,27 @@ mod tests {
             .any(|(_, _, l)| l == &labels::iteration_label(3)));
     }
 
+    // ═══════════════════════════════════════════════
+    // DESIGN-v3: label add-first 순서 검증
+    // ═══════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn after_success_adds_wip_before_removing_changes_requested() {
+        let gh = Arc::new(MockGh::new());
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+
+        let response = AgentResponse {
+            exit_code: 0,
+            stdout: "Changes applied".to_string(),
+            stderr: String::new(),
+            duration: Duration::from_secs(20),
+        };
+        let _ = task.after_invoke(response).await;
+
+        gh.assert_add_before_remove(10, labels::WIP, labels::CHANGES_REQUESTED);
+    }
+
     #[tokio::test]
     async fn after_nonzero_exit_removes() {
         let gh = Arc::new(MockGh::new());
