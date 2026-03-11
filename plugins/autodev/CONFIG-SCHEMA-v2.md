@@ -138,24 +138,23 @@ analyze → implement → review
 ```yaml
 workflows:
   analyze:
-    agent: autodev:issue-analyzer       # builtin agent
+    command: null                        # 커스텀 슬래시 커맨드 (선택, 미지정 시 builtin)
   implement:
-    agent: autodev:issue-analyzer       # builtin agent (implementer 미존재, analyzer 재사용)
+    command: null                        # 커스텀 슬래시 커맨드 (선택, 미지정 시 builtin)
   review:
-    agent: autodev:pr-reviewer          # builtin agent
+    command: null                        # 커스텀 슬래시 커맨드 (선택, 미지정 시 builtin)
     max_iterations: 2                   # 리뷰-피드백 반영 최대 횟수
 ```
 
+> **Note**: v2 초기 스키마에 있던 `agent` 필드는 제거되었다. YAML에 `agent` 키가 남아 있어도 파싱 시 무시된다 (`deny_unknown_fields` 미적용).
+
 ### 커스터마이즈
 
-각 단계는 `agent` 또는 `command` 중 하나로 실행 방식을 지정한다:
+각 단계는 `command` 필드로 커스텀 슬래시 커맨드를 지정할 수 있다. 미지정 시 task_type별 기본 출력 스펙이 system prompt로 사용된다.
 
 | 필드 | 의미 | 예시 |
 |------|------|------|
-| `agent` | autodev builtin agent에 위임 | `autodev:issue-analyzer` |
 | `command` | 커스텀 slash command 실행 | `/develop-workflow:multi-review` |
-
-`agent`와 `command`는 **상호 배타적**이다. 둘 다 설정하면 validation error.
 
 ```yaml
 # 예: 특정 레포에서 리뷰만 커스텀 slash command로 실행
@@ -177,7 +176,7 @@ workflows:
   implement:  # 기존
   review:     # 기존
   extract:                                # 신규 단계
-    agent: autodev:knowledge-extractor
+    command: /custom-extract
 ```
 
 ---
@@ -197,12 +196,7 @@ sources:
     ignore_authors: [dependabot, renovate]
 
 workflows:
-  analyze:
-    agent: autodev:issue-analyzer
-  implement:
-    agent: autodev:issue-analyzer
   review:
-    agent: autodev:pr-reviewer
     max_iterations: 2
 ```
 

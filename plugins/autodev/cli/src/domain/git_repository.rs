@@ -238,6 +238,14 @@ impl GitRepository {
                 continue;
             }
 
+            // add-first: add IMPLEMENTING before removing old labels
+            gh.label_add(
+                &self.name,
+                issue.number,
+                labels::IMPLEMENTING,
+                self.gh_host.as_deref(),
+            )
+            .await;
             gh.label_remove(
                 &self.name,
                 issue.number,
@@ -249,13 +257,6 @@ impl GitRepository {
                 &self.name,
                 issue.number,
                 labels::ANALYZED,
-                self.gh_host.as_deref(),
-            )
-            .await;
-            gh.label_add(
-                &self.name,
-                issue.number,
-                labels::IMPLEMENTING,
                 self.gh_host.as_deref(),
             )
             .await;
@@ -581,6 +582,9 @@ impl GitRepository {
                     let pr_state = get_pr_state(gh, &self.name, pr_num, gh_host).await;
                     match pr_state.as_deref() {
                         Some("closed") | Some("merged") => {
+                            // add-first: add DONE before removing IMPLEMENTING
+                            gh.label_add(&self.name, issue.number, labels::DONE, gh_host)
+                                .await;
                             gh.label_remove(
                                 &self.name,
                                 issue.number,
@@ -588,8 +592,6 @@ impl GitRepository {
                                 gh_host,
                             )
                             .await;
-                            gh.label_add(&self.name, issue.number, labels::DONE, gh_host)
-                                .await;
                             recovered += 1;
                             tracing::info!(
                                 "recovered implementing issue #{} in {} (PR #{pr_num} {})",

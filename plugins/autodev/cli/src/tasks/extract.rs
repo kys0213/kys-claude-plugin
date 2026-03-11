@@ -245,12 +245,17 @@ impl Task for ExtractTask {
             );
         }
 
-        // extracted 라벨 추가 (중복 추출 방지)
+        // 중복 추출 방지 라벨: 성공 시 extracted, 실패 시 extract-failed
+        let final_label = if response.exit_code == 0 {
+            labels::EXTRACTED
+        } else {
+            labels::EXTRACT_FAILED
+        };
         self.gh
             .label_add(
                 &self.item.repo_name,
                 self.item.github_number,
-                labels::EXTRACTED,
+                final_label,
                 gh_host,
             )
             .await;
@@ -500,6 +505,34 @@ mod tests {
         // No comment posted
         let comments = gh.posted_comments.lock().unwrap();
         assert!(comments.is_empty());
+    }
+
+    #[tokio::test]
+    async fn after_invoke_agent_failure_adds_extract_failed_label() {
+        let gh = Arc::new(MockGh::new());
+        let sw: Arc<dyn SuggestWorkflow> = Arc::new(MockSuggestWorkflow::empty());
+
+        let mut task = make_task(gh.clone(), sw);
+        let _ = task.before_invoke().await;
+
+        let response = AgentResponse {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: "timeout".to_string(),
+            duration: Duration::from_secs(60),
+        };
+
+        let result = task.after_invoke(response).await;
+
+        assert!(matches!(result.status, TaskStatus::Completed));
+        // extract-failed 라벨이 추가되어야 함 (extracted가 아님)
+        let labels = gh.added_labels.lock().unwrap();
+        assert!(labels
+            .iter()
+            .any(|(_, n, l)| *n == 10 && l == labels::EXTRACT_FAILED));
+        assert!(!labels
+            .iter()
+            .any(|(_, n, l)| *n == 10 && l == labels::EXTRACTED));
     }
 
     #[tokio::test]

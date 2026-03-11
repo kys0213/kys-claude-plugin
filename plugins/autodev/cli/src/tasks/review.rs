@@ -106,8 +106,11 @@ impl Task for ReviewTask {
             .await;
         if let Some(ref s) = state {
             if s != "open" {
-                // source issue done 전이
+                // source issue done 전이 (add-first)
                 if let Some(issue_num) = self.item.source_issue_number {
+                    self.gh
+                        .label_add(&self.item.repo_name, issue_num, labels::DONE, gh_host)
+                        .await;
                     self.gh
                         .label_remove(
                             &self.item.repo_name,
@@ -116,23 +119,20 @@ impl Task for ReviewTask {
                             gh_host,
                         )
                         .await;
-                    self.gh
-                        .label_add(&self.item.repo_name, issue_num, labels::DONE, gh_host)
-                        .await;
                 }
-                self.gh
-                    .label_remove(
-                        &self.item.repo_name,
-                        self.item.github_number,
-                        labels::WIP,
-                        gh_host,
-                    )
-                    .await;
                 self.gh
                     .label_add(
                         &self.item.repo_name,
                         self.item.github_number,
                         labels::DONE,
+                        gh_host,
+                    )
+                    .await;
+                self.gh
+                    .label_remove(
+                        &self.item.repo_name,
+                        self.item.github_number,
+                        labels::WIP,
                         gh_host,
                     )
                     .await;
@@ -273,8 +273,11 @@ impl Task for ReviewTask {
                     )
                     .await;
 
-                // Source issue → done
+                // Source issue → done (add-first)
                 if let Some(issue_num) = self.item.source_issue_number {
+                    self.gh
+                        .label_add(&self.item.repo_name, issue_num, labels::DONE, gh_host)
+                        .await;
                     self.gh
                         .label_remove(
                             &self.item.repo_name,
@@ -283,12 +286,17 @@ impl Task for ReviewTask {
                             gh_host,
                         )
                         .await;
-                    self.gh
-                        .label_add(&self.item.repo_name, issue_num, labels::DONE, gh_host)
-                        .await;
                 }
 
-                // PR → done
+                // PR → done (add-first)
+                self.gh
+                    .label_add(
+                        &self.item.repo_name,
+                        self.item.github_number,
+                        labels::DONE,
+                        gh_host,
+                    )
+                    .await;
                 self.gh
                     .label_remove(
                         &self.item.repo_name,
@@ -308,14 +316,6 @@ impl Task for ReviewTask {
                         )
                         .await;
                 }
-                self.gh
-                    .label_add(
-                        &self.item.repo_name,
-                        self.item.github_number,
-                        labels::DONE,
-                        gh_host,
-                    )
-                    .await;
 
                 ops.push(QueueOp::Remove);
                 // Knowledge extraction은 scan_done_merged()가 merge 후 트리거
@@ -345,20 +345,20 @@ impl Task for ReviewTask {
                     )
                     .await;
 
-                // wip → changes-requested 라벨 전이
-                self.gh
-                    .label_remove(
-                        &self.item.repo_name,
-                        self.item.github_number,
-                        labels::WIP,
-                        gh_host,
-                    )
-                    .await;
+                // wip → changes-requested 라벨 전이 (add-first)
                 self.gh
                     .label_add(
                         &self.item.repo_name,
                         self.item.github_number,
                         labels::CHANGES_REQUESTED,
+                        gh_host,
+                    )
+                    .await;
+                self.gh
+                    .label_remove(
+                        &self.item.repo_name,
+                        self.item.github_number,
+                        labels::WIP,
                         gh_host,
                     )
                     .await;
@@ -384,6 +384,15 @@ impl Task for ReviewTask {
                                 gh_host,
                             )
                             .await;
+                        // add-first: add SKIP before removing old labels
+                        self.gh
+                            .label_add(
+                                &self.item.repo_name,
+                                self.item.github_number,
+                                labels::SKIP,
+                                gh_host,
+                            )
+                            .await;
                         self.gh
                             .label_remove(
                                 &self.item.repo_name,
@@ -397,14 +406,6 @@ impl Task for ReviewTask {
                                 &self.item.repo_name,
                                 self.item.github_number,
                                 labels::CHANGES_REQUESTED,
-                                gh_host,
-                            )
-                            .await;
-                        self.gh
-                            .label_add(
-                                &self.item.repo_name,
-                                self.item.github_number,
-                                labels::SKIP,
                                 gh_host,
                             )
                             .await;
@@ -669,7 +670,7 @@ mod tests {
         gh.set_field("org/repo", "pulls/10", ".state", "open");
 
         let mut pr = make_test_pr(Some(42));
-        pr.review_iteration = 3; // default max is 3
+        pr.review_iteration = 3; // exceeds default max (2)
         let mut task = ReviewTask::new(
             Arc::new(MockWorkspace),
             gh.clone(),

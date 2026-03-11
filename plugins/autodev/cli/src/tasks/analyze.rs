@@ -137,18 +137,18 @@ impl AnalyzeTask {
                 )
                 .await;
             self.gh
-                .label_remove(
-                    &self.item.repo_name,
-                    self.item.github_number,
-                    labels::WIP,
-                    gh_host,
-                )
-                .await;
-            self.gh
                 .label_add(
                     &self.item.repo_name,
                     self.item.github_number,
                     labels::SKIP,
+                    gh_host,
+                )
+                .await;
+            self.gh
+                .label_remove(
+                    &self.item.repo_name,
+                    self.item.github_number,
+                    labels::WIP,
                     gh_host,
                 )
                 .await;
@@ -169,18 +169,18 @@ impl AnalyzeTask {
                 )
                 .await;
             self.gh
-                .label_remove(
-                    &self.item.repo_name,
-                    self.item.github_number,
-                    labels::WIP,
-                    gh_host,
-                )
-                .await;
-            self.gh
                 .label_add(
                     &self.item.repo_name,
                     self.item.github_number,
                     labels::SKIP,
+                    gh_host,
+                )
+                .await;
+            self.gh
+                .label_remove(
+                    &self.item.repo_name,
+                    self.item.github_number,
+                    labels::WIP,
                     gh_host,
                 )
                 .await;
@@ -204,18 +204,18 @@ impl AnalyzeTask {
             )
             .await;
         self.gh
-            .label_remove(
-                &self.item.repo_name,
-                self.item.github_number,
-                labels::WIP,
-                gh_host,
-            )
-            .await;
-        self.gh
             .label_add(
                 &self.item.repo_name,
                 self.item.github_number,
                 labels::ANALYZED,
+                gh_host,
+            )
+            .await;
+        self.gh
+            .label_remove(
+                &self.item.repo_name,
+                self.item.github_number,
+                labels::WIP,
                 gh_host,
             )
             .await;
@@ -260,18 +260,18 @@ impl AnalyzeTask {
             )
             .await;
         self.gh
-            .label_remove(
-                &self.item.repo_name,
-                self.item.github_number,
-                labels::WIP,
-                gh_host,
-            )
-            .await;
-        self.gh
             .label_add(
                 &self.item.repo_name,
                 self.item.github_number,
                 labels::ANALYZED,
+                gh_host,
+            )
+            .await;
+        self.gh
+            .label_remove(
+                &self.item.repo_name,
+                self.item.github_number,
+                labels::WIP,
                 gh_host,
             )
             .await;
@@ -316,18 +316,18 @@ impl Task for AnalyzeTask {
         if let Some(ref s) = state {
             if s != "open" {
                 self.gh
-                    .label_remove(
-                        &self.item.repo_name,
-                        self.item.github_number,
-                        labels::WIP,
-                        gh_host,
-                    )
-                    .await;
-                self.gh
                     .label_add(
                         &self.item.repo_name,
                         self.item.github_number,
                         labels::DONE,
+                        gh_host,
+                    )
+                    .await;
+                self.gh
+                    .label_remove(
+                        &self.item.repo_name,
+                        self.item.github_number,
+                        labels::WIP,
                         gh_host,
                     )
                     .await;

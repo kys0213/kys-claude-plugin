@@ -248,7 +248,19 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                 repo.pr_queue.len(pr_phase::REVIEWING) + repo.pr_queue.len(pr_phase::IMPROVING);
             let mut pr_slots = repo.pr_concurrency.saturating_sub(pr_in_flight);
 
-            // PR: Pending → Reviewing
+            // PR: Improved → Pending (설계 준수: re-review는 Pending에서 다시 시작)
+            // 무제한 이동 — concurrency 슬롯을 소비하지 않음 (큐 이동만)
+            let promoted =
+                repo.pr_queue
+                    .drain_to(pr_phase::IMPROVED, pr_phase::PENDING, usize::MAX);
+            for item in &promoted {
+                tracing::debug!(
+                    "PR #{}: Improved → Pending (re-review queued)",
+                    item.github_number
+                );
+            }
+
+            // PR: Pending → Reviewing (Improved에서 방금 이동한 아이템도 포함)
             let drained = repo
                 .pr_queue
                 .drain_to(pr_phase::PENDING, pr_phase::REVIEWING, pr_slots);
@@ -273,24 +285,6 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                 tasks.push(Box::new(ImproveTask::new(
                     Arc::clone(&self.workspace),
                     Arc::clone(&self.gh),
-                    item,
-                )));
-            }
-
-            // PR: Improved → Reviewing (re-review)
-            let drained = repo
-                .pr_queue
-                .drain_to(pr_phase::IMPROVED, pr_phase::REVIEWING, pr_slots);
-            pr_slots -= drained.len();
-            for item in drained {
-                tracing::debug!(
-                    "PR #{}: creating ReviewTask (re-review)",
-                    item.github_number
-                );
-                tasks.push(Box::new(ReviewTask::new(
-                    Arc::clone(&self.workspace),
-                    Arc::clone(&self.gh),
-                    Arc::clone(&self.config),
                     item,
                 )));
             }

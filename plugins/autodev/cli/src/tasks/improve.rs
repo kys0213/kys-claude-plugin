@@ -137,20 +137,20 @@ impl Task for ImproveTask {
         let mut ops = Vec::new();
 
         if response.exit_code == 0 {
-            // changes-requested → wip 라벨 전이
-            self.gh
-                .label_remove(
-                    &self.item.repo_name,
-                    self.item.github_number,
-                    labels::CHANGES_REQUESTED,
-                    gh_host,
-                )
-                .await;
+            // changes-requested → wip 라벨 전이 (add-first)
             self.gh
                 .label_add(
                     &self.item.repo_name,
                     self.item.github_number,
                     labels::WIP,
+                    gh_host,
+                )
+                .await;
+            self.gh
+                .label_remove(
+                    &self.item.repo_name,
+                    self.item.github_number,
+                    labels::CHANGES_REQUESTED,
                     gh_host,
                 )
                 .await;

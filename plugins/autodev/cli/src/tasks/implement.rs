@@ -124,6 +124,44 @@ impl Task for ImplementTask {
     }
 
     async fn before_invoke(&mut self) -> Result<AgentRequest, SkipReason> {
+        let gh_host = self.item.gh_host.as_deref();
+
+        // Preflight: issue가 아직 open인지 확인 (AnalyzeTask 패턴 동일)
+        let state = self
+            .gh
+            .api_get_field(
+                &self.item.repo_name,
+                &format!("issues/{}", self.item.github_number),
+                ".state",
+                gh_host,
+            )
+            .await;
+        if let Some(ref s) = state {
+            if s != "open" {
+                // add-first: DONE 먼저, IMPLEMENTING 제거
+                self.gh
+                    .label_add(
+                        &self.item.repo_name,
+                        self.item.github_number,
+                        labels::DONE,
+                        gh_host,
+                    )
+                    .await;
+                self.gh
+                    .label_remove(
+                        &self.item.repo_name,
+                        self.item.github_number,
+                        labels::IMPLEMENTING,
+                        gh_host,
+                    )
+                    .await;
+                return Err(SkipReason::PreflightFailed(format!(
+                    "issue #{} is closed",
+                    self.item.github_number
+                )));
+            }
+        }
+
         // Workspace 준비
         self.workspace
             .ensure_cloned(&self.item.repo_url, &self.item.repo_name)
@@ -313,18 +351,18 @@ impl Task for ImplementTask {
             None => {
                 // PR extraction failed but agent succeeded — preserve worktree for manual recovery
                 self.gh
-                    .label_remove(
-                        &self.item.repo_name,
-                        self.item.github_number,
-                        labels::IMPLEMENTING,
-                        gh_host,
-                    )
-                    .await;
-                self.gh
                     .label_add(
                         &self.item.repo_name,
                         self.item.github_number,
                         labels::IMPL_FAILED,
+                        gh_host,
+                    )
+                    .await;
+                self.gh
+                    .label_remove(
+                        &self.item.repo_name,
+                        self.item.github_number,
+                        labels::IMPLEMENTING,
                         gh_host,
                     )
                     .await;
@@ -470,6 +508,29 @@ mod tests {
     // ═══════════════════════════════════════════════
     // before_invoke tests
     // ═══════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn before_skips_closed_issue() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "issues/42", ".state", "closed");
+
+        let mut task = make_task(gh.clone());
+        let result = task.before_invoke().await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SkipReason::PreflightFailed(ref msg) if msg.contains("is closed")
+        ));
+        // add-first: DONE added
+        let added = gh.added_labels.lock().unwrap();
+        assert!(added.iter().any(|(_, n, l)| *n == 42 && l == labels::DONE));
+        // IMPLEMENTING removed
+        let removed = gh.removed_labels.lock().unwrap();
+        assert!(removed
+            .iter()
+            .any(|(_, n, l)| *n == 42 && l == labels::IMPLEMENTING));
+    }
 
     #[tokio::test]
     async fn before_creates_worktree_and_returns_request() {
