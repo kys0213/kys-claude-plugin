@@ -458,6 +458,15 @@ mod tests {
         ImplementTask::new(ws, gh, cfg, make_test_issue())
     }
 
+    fn make_task_with_issue(
+        gh: Arc<MockGh>,
+        ws: Arc<MockWorkspace>,
+        item: IssueItem,
+    ) -> ImplementTask {
+        let cfg = Arc::new(MockConfigLoader);
+        ImplementTask::new(ws, gh, cfg, item)
+    }
+
     // ═══════════════════════════════════════════════
     // before_invoke tests
     // ═══════════════════════════════════════════════
@@ -885,6 +894,116 @@ mod tests {
                 .iter()
                 .any(|op| matches!(op, QueueOp::PushPr { item, .. } if item.github_number == 88)),
             "should push correct-branch PR to queue"
+        );
+    }
+
+    // ═══════════════════════════════════════════════
+    // Regression test: issue #218 exact reproduction
+    // ═══════════════════════════════════════════════
+
+    /// issue #218 재현 테스트.
+    ///
+    /// 시나리오 (실제 발생한 버그):
+    ///   1. issue #131 "feat(testing): setup 시 .claude/rules에 테스트 관련 rules 설치 지원" 등록
+    ///   2. implementing 단계 진입, agent가 exit_code=0으로 완료하지만 실제 PR을 생성하지 않음
+    ///   3. extract_pr_number() → None (stdout에 PR URL 없음)
+    ///   4. find_existing_pr() fallback → 관련 없는 PR #75 (feature/scaffold-boilerplate) 반환
+    ///   5. PR #75를 issue에 잘못 링크 → 라벨 제거 → 파이프라인 이탈
+    ///
+    /// 기대 동작:
+    ///   - find_existing_pr()가 head branch 불일치 PR을 거부
+    ///   - IMPL_FAILED 라벨 추가 + 에러 코멘트 작성
+    ///   - 잘못된 PR이 큐에 push되지 않음
+    #[tokio::test]
+    async fn regression_issue_218_wrong_pr_link_and_pipeline_escape() {
+        let gh = Arc::new(MockGh::new());
+        let ws = Arc::new(MockWorkspace::new());
+
+        // issue #131 시뮬레이션
+        let issue_131 = IssueItem {
+            work_id: make_work_id("issue", "tosspayments/node-claude-code-plugin", 131),
+            repo_id: "r1".to_string(),
+            repo_name: "tosspayments/node-claude-code-plugin".to_string(),
+            repo_url: "https://github.com/tosspayments/node-claude-code-plugin".to_string(),
+            github_number: 131,
+            title: "feat(testing): setup 시 .claude/rules에 테스트 관련 rules 설치 지원"
+                .to_string(),
+            body: Some("테스트 rules 설치 지원".to_string()),
+            labels: vec!["autodev:implementing".to_string()],
+            author: "user".to_string(),
+            analysis_report: None,
+            gh_host: None,
+        };
+
+        // GitHub API가 관련 없는 PR #75를 반환하는 상황 재현
+        gh.set_paginate(
+            "tosspayments/node-claude-code-plugin",
+            "pulls",
+            serde_json::to_vec(&serde_json::json!([{
+                "number": 75,
+                "title": "feat(stack-installer): add boilerplate scaffolding",
+                "head": {"ref": "feature/scaffold-boilerplate"}
+            }]))
+            .unwrap(),
+        );
+
+        let mut task = make_task_with_issue(gh.clone(), ws.clone(), issue_131);
+        let _ = task.before_invoke().await;
+
+        // Agent가 exit_code=0이지만 실제 PR을 생성하지 않은 상황
+        let response = AgentResponse {
+            exit_code: 0,
+            stdout: "Implementation complete. All changes have been committed.".to_string(),
+            stderr: String::new(),
+            duration: Duration::from_secs(120),
+        };
+        let result = task.after_invoke(response).await;
+
+        // 검증 1: 잘못된 PR #75가 큐에 push되지 않아야 함
+        assert!(
+            !result
+                .queue_ops
+                .iter()
+                .any(|op| matches!(op, QueueOp::PushPr { .. })),
+            "must NOT link unrelated PR #75 to issue #131"
+        );
+
+        // 검증 2: autodev:pr-link:75 코멘트가 작성되지 않아야 함
+        let comments = gh.posted_comments.lock().unwrap();
+        assert!(
+            !comments
+                .iter()
+                .any(|(_, _, body)| body.contains("autodev:pr-link:75")),
+            "must NOT post pr-link comment for unrelated PR #75"
+        );
+
+        // 검증 3: IMPL_FAILED 라벨이 추가되어야 함 (파이프라인 이탈 방지)
+        let added = gh.added_labels.lock().unwrap();
+        assert!(
+            added
+                .iter()
+                .any(|(_, n, l)| *n == 131 && l == labels::IMPL_FAILED),
+            "must add impl-failed label to prevent pipeline escape"
+        );
+
+        // 검증 4: impl-failed 코멘트가 작성되어야 함
+        assert!(
+            comments
+                .iter()
+                .any(|(_, n, body)| *n == 131 && body.contains("<!-- autodev:impl-failed -->")),
+            "must post impl-failed comment for recovery"
+        );
+
+        // 검증 5: find_existing_pr가 owner:branch 형식으로 호출되었는지
+        let calls = gh.paginate_calls.lock().unwrap();
+        let head_param = calls[0]
+            .2
+            .iter()
+            .find(|(k, _)| k == "head")
+            .expect("head param should exist");
+        assert_eq!(
+            head_param.1, "tosspayments:autodev/issue-131",
+            "must use owner:branch format in GitHub API head parameter"
         );
     }
 
