@@ -26,6 +26,9 @@ pub struct MockGh {
     pub created_prs: Mutex<Vec<(String, String, String, String, String)>>,
     /// PR 리뷰 기록: (repo_name, number, event, body)
     pub reviewed_prs: Mutex<Vec<(String, i64, String, String)>>,
+    /// api_paginate 호출 기록: (repo_name, endpoint, params)
+    #[allow(clippy::type_complexity)]
+    pub paginate_calls: Mutex<Vec<(String, String, Vec<(String, String)>)>>,
 }
 
 impl Default for MockGh {
@@ -39,6 +42,7 @@ impl Default for MockGh {
             created_issues: Mutex::new(Vec::new()),
             created_prs: Mutex::new(Vec::new()),
             reviewed_prs: Mutex::new(Vec::new()),
+            paginate_calls: Mutex::new(Vec::new()),
         }
     }
 }
@@ -82,9 +86,17 @@ impl Gh for MockGh {
         &self,
         repo_name: &str,
         endpoint: &str,
-        _params: &[(&str, &str)],
+        params: &[(&str, &str)],
         _host: Option<&str>,
     ) -> Result<Vec<u8>> {
+        self.paginate_calls.lock().unwrap().push((
+            repo_name.to_string(),
+            endpoint.to_string(),
+            params
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        ));
         let key = format!("{repo_name}/{endpoint}");
         self.paginate_responses
             .lock()

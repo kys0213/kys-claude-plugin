@@ -25,19 +25,45 @@ use crate::infrastructure::gh::Gh;
 use crate::queue::task_queues::{make_work_id, pr_phase, IssueItem, PrItem};
 
 /// head branch 이름으로 이미 생성된 PR을 조회하여 번호를 반환.
+///
+/// GitHub API의 `head` 파라미터는 `owner:branch` 형식을 요구한다.
+/// 반환된 PR의 head branch가 예상과 일치하는지 추가 검증한다.
 async fn find_existing_pr(
     gh: &dyn Gh,
     repo_name: &str,
     head_branch: &str,
     gh_host: Option<&str>,
 ) -> Option<i64> {
-    let params = [("head", head_branch), ("state", "open"), ("per_page", "1")];
+    // GitHub API requires "owner:branch" format for the head parameter
+    let owner = repo_name.split('/').next()?;
+    let head_filter = format!("{owner}:{head_branch}");
+    let params = [
+        ("head", head_filter.as_str()),
+        ("state", "open"),
+        ("per_page", "1"),
+    ];
     let data = gh
         .api_paginate(repo_name, "pulls", &params, gh_host)
         .await
         .ok()?;
     let prs: Vec<serde_json::Value> = serde_json::from_slice(&data).ok()?;
-    prs.first().and_then(|pr| pr["number"].as_i64())
+    let pr = prs.first()?;
+
+    // Validate: returned PR's head branch must match expected branch
+    let actual_head = pr
+        .get("head")
+        .and_then(|h| h.get("ref"))
+        .and_then(|r| r.as_str());
+    if actual_head != Some(head_branch) {
+        tracing::warn!(
+            "find_existing_pr: expected head={head_branch}, got {:?}, ignoring PR #{}",
+            actual_head,
+            pr["number"]
+        );
+        return None;
+    }
+
+    pr["number"].as_i64()
 }
 
 /// 이슈 구현 Task.
@@ -190,6 +216,32 @@ impl Task for ImplementTask {
                     gh_host,
                 )
                 .await;
+            self.gh
+                .label_add(
+                    &self.item.repo_name,
+                    self.item.github_number,
+                    labels::IMPL_FAILED,
+                    gh_host,
+                )
+                .await;
+
+            let head_branch = self.head_branch();
+            let fail_comment = format!(
+                "<!-- autodev:impl-failed -->\n\
+                 ⚠️ Implementation agent failed (exit_code={}).\n\n\
+                 **Branch**: `{head_branch}`\n\
+                 Check the agent logs for details.",
+                response.exit_code
+            );
+            self.gh
+                .issue_comment(
+                    &self.item.repo_name,
+                    self.item.github_number,
+                    &fail_comment,
+                    gh_host,
+                )
+                .await;
+
             self.cleanup_worktree().await;
             return TaskResult {
                 work_id: self.item.work_id.clone(),
@@ -548,10 +600,23 @@ mod tests {
             .iter()
             .any(|op| matches!(op, QueueOp::Remove)));
 
+        // implementing label removed
         let removed = gh.removed_labels.lock().unwrap();
         assert!(removed
             .iter()
             .any(|(_, n, l)| *n == 42 && l == labels::IMPLEMENTING));
+
+        // impl-failed label added
+        let added = gh.added_labels.lock().unwrap();
+        assert!(added
+            .iter()
+            .any(|(_, n, l)| *n == 42 && l == labels::IMPL_FAILED));
+
+        // failure comment posted
+        let comments = gh.posted_comments.lock().unwrap();
+        assert!(comments
+            .iter()
+            .any(|(_, n, body)| *n == 42 && body.contains("<!-- autodev:impl-failed -->")));
     }
 
     #[tokio::test]
@@ -561,7 +626,11 @@ mod tests {
         gh.set_paginate(
             "org/repo",
             "pulls",
-            serde_json::to_vec(&serde_json::json!([{"number": 55}])).unwrap(),
+            serde_json::to_vec(&serde_json::json!([{
+                "number": 55,
+                "head": {"ref": "autodev/issue-42"}
+            }]))
+            .unwrap(),
         );
 
         let mut task = make_task(gh.clone());
@@ -582,6 +651,246 @@ mod tests {
             .iter()
             .any(|op| matches!(op, QueueOp::PushPr { item, .. } if item.github_number == 55)));
     }
+
+    // ═══════════════════════════════════════════════
+    // find_existing_pr unit tests
+    // ═══════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn find_existing_pr_uses_owner_prefix_in_head_param() {
+        let gh = MockGh::new();
+        gh.set_paginate(
+            "org/repo",
+            "pulls",
+            serde_json::to_vec(&serde_json::json!([{
+                "number": 10,
+                "head": {"ref": "autodev/issue-5"}
+            }]))
+            .unwrap(),
+        );
+
+        let result = find_existing_pr(&gh, "org/repo", "autodev/issue-5", None).await;
+        assert_eq!(result, Some(10));
+
+        // Verify params contain "owner:branch" format
+        let calls = gh.paginate_calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        let head_param = calls[0]
+            .2
+            .iter()
+            .find(|(k, _)| k == "head")
+            .expect("head param should exist");
+        assert_eq!(head_param.1, "org:autodev/issue-5");
+    }
+
+    #[tokio::test]
+    async fn find_existing_pr_validates_head_branch() {
+        let gh = MockGh::new();
+        gh.set_paginate(
+            "org/repo",
+            "pulls",
+            serde_json::to_vec(&serde_json::json!([{
+                "number": 20,
+                "head": {"ref": "autodev/issue-7"}
+            }]))
+            .unwrap(),
+        );
+
+        let result = find_existing_pr(&gh, "org/repo", "autodev/issue-7", None).await;
+        assert_eq!(result, Some(20));
+    }
+
+    #[tokio::test]
+    async fn find_existing_pr_rejects_mismatched_branch() {
+        let gh = MockGh::new();
+        // API returns PR with a different head branch
+        gh.set_paginate(
+            "org/repo",
+            "pulls",
+            serde_json::to_vec(&serde_json::json!([{
+                "number": 75,
+                "head": {"ref": "feature/scaffold-boilerplate"}
+            }]))
+            .unwrap(),
+        );
+
+        let result = find_existing_pr(&gh, "org/repo", "autodev/issue-131", None).await;
+        assert_eq!(result, None, "should reject PR with mismatched head branch");
+    }
+
+    #[tokio::test]
+    async fn find_existing_pr_returns_none_on_empty_response() {
+        let gh = MockGh::new();
+        gh.set_paginate(
+            "org/repo",
+            "pulls",
+            serde_json::to_vec(&serde_json::json!([])).unwrap(),
+        );
+
+        let result = find_existing_pr(&gh, "org/repo", "autodev/issue-99", None).await;
+        assert_eq!(result, None);
+    }
+
+    // ═══════════════════════════════════════════════
+    // after_invoke: agent failure (exit_code != 0) tests
+    // ═══════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn after_nonzero_exit_adds_impl_failed_label() {
+        let gh = Arc::new(MockGh::new());
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+
+        let response = AgentResponse {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: "error".to_string(),
+            duration: Duration::from_secs(10),
+        };
+        let result = task.after_invoke(response).await;
+
+        assert!(matches!(result.status, TaskStatus::Failed(_)));
+
+        let added = gh.added_labels.lock().unwrap();
+        assert!(
+            added
+                .iter()
+                .any(|(_, n, l)| *n == 42 && l == labels::IMPL_FAILED),
+            "should add impl-failed label on agent failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn after_nonzero_exit_posts_failure_comment() {
+        let gh = Arc::new(MockGh::new());
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+
+        let response = AgentResponse {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: "crash".to_string(),
+            duration: Duration::from_secs(10),
+        };
+        let _ = task.after_invoke(response).await;
+
+        let comments = gh.posted_comments.lock().unwrap();
+        assert!(
+            comments
+                .iter()
+                .any(|(_, n, body)| *n == 42 && body.contains("<!-- autodev:impl-failed -->")),
+            "should post impl-failed comment marker"
+        );
+    }
+
+    #[tokio::test]
+    async fn after_nonzero_exit_comment_includes_exit_code() {
+        let gh = Arc::new(MockGh::new());
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+
+        let response = AgentResponse {
+            exit_code: 137,
+            stdout: String::new(),
+            stderr: "killed".to_string(),
+            duration: Duration::from_secs(10),
+        };
+        let _ = task.after_invoke(response).await;
+
+        let comments = gh.posted_comments.lock().unwrap();
+        assert!(
+            comments
+                .iter()
+                .any(|(_, n, body)| *n == 42 && body.contains("exit_code=137")),
+            "comment should include the exit code"
+        );
+    }
+
+    // ═══════════════════════════════════════════════
+    // after_invoke: fallback PR rejection/acceptance tests
+    // ═══════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn after_fallback_rejects_wrong_branch_pr() {
+        let gh = Arc::new(MockGh::new());
+        // API returns a PR with a different branch (reproducing issue #218)
+        gh.set_paginate(
+            "org/repo",
+            "pulls",
+            serde_json::to_vec(&serde_json::json!([{
+                "number": 75,
+                "head": {"ref": "feature/scaffold-boilerplate"}
+            }]))
+            .unwrap(),
+        );
+
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+
+        let response = AgentResponse {
+            exit_code: 0,
+            stdout: "Implementation complete.".to_string(),
+            stderr: String::new(),
+            duration: Duration::from_secs(30),
+        };
+        let result = task.after_invoke(response).await;
+
+        // Should NOT push PR #75 to queue
+        assert!(
+            !result
+                .queue_ops
+                .iter()
+                .any(|op| matches!(op, QueueOp::PushPr { .. })),
+            "should not push mismatched PR to queue"
+        );
+
+        // Should add impl-failed label
+        let added = gh.added_labels.lock().unwrap();
+        assert!(
+            added
+                .iter()
+                .any(|(_, n, l)| *n == 42 && l == labels::IMPL_FAILED),
+            "should add impl-failed label when fallback PR is rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn after_fallback_accepts_correct_branch_pr() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_paginate(
+            "org/repo",
+            "pulls",
+            serde_json::to_vec(&serde_json::json!([{
+                "number": 88,
+                "head": {"ref": "autodev/issue-42"}
+            }]))
+            .unwrap(),
+        );
+
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+
+        let response = AgentResponse {
+            exit_code: 0,
+            stdout: "Implementation complete.".to_string(),
+            stderr: String::new(),
+            duration: Duration::from_secs(30),
+        };
+        let result = task.after_invoke(response).await;
+
+        // Should push PR #88 to queue
+        assert!(
+            result
+                .queue_ops
+                .iter()
+                .any(|op| matches!(op, QueueOp::PushPr { item, .. } if item.github_number == 88)),
+            "should push correct-branch PR to queue"
+        );
+    }
+
+    // ═══════════════════════════════════════════════
+    // existing tests (continued)
+    // ═══════════════════════════════════════════════
 
     #[tokio::test]
     async fn after_cleans_up_worktree() {
