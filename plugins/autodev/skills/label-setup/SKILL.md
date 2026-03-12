@@ -24,6 +24,7 @@ GitHub 레포에 autodev 워크플로우에서 사용하는 라벨을 생성/업
 | `autodev:extracted` | `D4C5F9` (purple) | Knowledge extracted |
 | `autodev:extract-failed` | `B60205` (dark red) | Extraction failed |
 | `autodev:impl-failed` | `B60205` (dark red) | Implementation failed |
+| `autodev:review-failed` | `B60205` (dark red) | Review failed |
 
 ## 입력 변수
 
@@ -47,6 +48,7 @@ declare -A LABEL_COLORS=(
   ["autodev:extracted"]="D4C5F9"
   ["autodev:extract-failed"]="B60205"
   ["autodev:impl-failed"]="B60205"
+  ["autodev:review-failed"]="B60205"
 )
 
 declare -A LABEL_DESCS=(
@@ -61,6 +63,7 @@ declare -A LABEL_DESCS=(
   ["autodev:extracted"]="Knowledge extracted"
   ["autodev:extract-failed"]="Extraction failed"
   ["autodev:impl-failed"]="Implementation failed"
+  ["autodev:review-failed"]="Review failed"
 )
 
 created=0
