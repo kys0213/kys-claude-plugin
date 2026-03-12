@@ -238,6 +238,14 @@ impl GitRepository {
                 continue;
             }
 
+            // add-first: add IMPLEMENTING before removing old labels
+            gh.label_add(
+                &self.name,
+                issue.number,
+                labels::IMPLEMENTING,
+                self.gh_host.as_deref(),
+            )
+            .await;
             gh.label_remove(
                 &self.name,
                 issue.number,
@@ -249,13 +257,6 @@ impl GitRepository {
                 &self.name,
                 issue.number,
                 labels::ANALYZED,
-                self.gh_host.as_deref(),
-            )
-            .await;
-            gh.label_add(
-                &self.name,
-                issue.number,
-                labels::IMPLEMENTING,
                 self.gh_host.as_deref(),
             )
             .await;
@@ -581,6 +582,9 @@ impl GitRepository {
                     let pr_state = get_pr_state(gh, &self.name, pr_num, gh_host).await;
                     match pr_state.as_deref() {
                         Some("closed") | Some("merged") => {
+                            // add-first: add DONE before removing IMPLEMENTING
+                            gh.label_add(&self.name, issue.number, labels::DONE, gh_host)
+                                .await;
                             gh.label_remove(
                                 &self.name,
                                 issue.number,
@@ -588,8 +592,6 @@ impl GitRepository {
                                 gh_host,
                             )
                             .await;
-                            gh.label_add(&self.name, issue.number, labels::DONE, gh_host)
-                                .await;
                             recovered += 1;
                             tracing::info!(
                                 "recovered implementing issue #{} in {} (PR #{pr_num} {})",
@@ -1228,7 +1230,7 @@ mod tests {
         let item = repo.issue_queue.pop(issue_phase::READY).unwrap();
         assert_eq!(item.github_number, 5);
 
-        // Label transitions: approved-analysis removed, analyzed removed, implementing added
+        // Label transitions: implementing added first, then old labels removed
         let removed = gh.removed_labels.lock().unwrap();
         assert_eq!(removed.len(), 2);
         assert!(removed.iter().any(|r| r.2 == "autodev:approved-analysis"));
@@ -1237,6 +1239,10 @@ mod tests {
         let added = gh.added_labels.lock().unwrap();
         assert_eq!(added.len(), 1);
         assert_eq!(added[0].2, "autodev:implementing");
+
+        // DESIGN-v3: add-first 순서 검증
+        gh.assert_add_before_remove(5, labels::IMPLEMENTING, labels::APPROVED_ANALYSIS);
+        gh.assert_add_before_remove(5, labels::IMPLEMENTING, labels::ANALYZED);
     }
 
     #[tokio::test]
@@ -1491,6 +1497,9 @@ mod tests {
         assert!(removed.iter().any(|r| r.2 == "autodev:implementing"));
         let added = gh.added_labels.lock().unwrap();
         assert!(added.iter().any(|r| r.2 == "autodev:done"));
+
+        // DESIGN-v3: add-first 순서 검증
+        gh.assert_add_before_remove(5, labels::DONE, labels::IMPLEMENTING);
     }
 
     #[tokio::test]

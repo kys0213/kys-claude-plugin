@@ -248,7 +248,19 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                 repo.pr_queue.len(pr_phase::REVIEWING) + repo.pr_queue.len(pr_phase::IMPROVING);
             let mut pr_slots = repo.pr_concurrency.saturating_sub(pr_in_flight);
 
-            // PR: Pending → Reviewing
+            // PR: Improved → Pending (설계 준수: re-review는 Pending에서 다시 시작)
+            // 무제한 이동 — concurrency 슬롯을 소비하지 않음 (큐 이동만)
+            let promoted =
+                repo.pr_queue
+                    .drain_to(pr_phase::IMPROVED, pr_phase::PENDING, usize::MAX);
+            for item in &promoted {
+                tracing::debug!(
+                    "PR #{}: Improved → Pending (re-review queued)",
+                    item.github_number
+                );
+            }
+
+            // PR: Pending → Reviewing (Improved에서 방금 이동한 아이템도 포함)
             let drained = repo
                 .pr_queue
                 .drain_to(pr_phase::PENDING, pr_phase::REVIEWING, pr_slots);
@@ -273,24 +285,6 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                 tasks.push(Box::new(ImproveTask::new(
                     Arc::clone(&self.workspace),
                     Arc::clone(&self.gh),
-                    item,
-                )));
-            }
-
-            // PR: Improved → Reviewing (re-review)
-            let drained = repo
-                .pr_queue
-                .drain_to(pr_phase::IMPROVED, pr_phase::REVIEWING, pr_slots);
-            pr_slots -= drained.len();
-            for item in drained {
-                tracing::debug!(
-                    "PR #{}: creating ReviewTask (re-review)",
-                    item.github_number
-                );
-                tasks.push(Box::new(ReviewTask::new(
-                    Arc::clone(&self.workspace),
-                    Arc::clone(&self.gh),
-                    Arc::clone(&self.config),
                     item,
                 )));
             }
@@ -923,5 +917,74 @@ mod tests {
 
         let tasks = source.drain_queue_items();
         assert!(tasks.is_empty());
+    }
+
+    // ═══════════════════════════════════════════════
+    // DESIGN-v3: Improved → Pending → Reviewing 경로 검증
+    // 설계 원칙: 피드백 반영 완료(Improved)된 PR은 Pending으로 돌아간 뒤
+    //           Pending → Reviewing 경로를 통해 다시 리뷰 태스크가 생성된다.
+    //           (Improved → Reviewing 직행 금지)
+    // ═══════════════════════════════════════════════
+
+    #[test]
+    fn drain_improved_routes_through_pending_then_reviewing() {
+        let gh = Arc::new(MockGh::new());
+        let mut source = make_source(gh);
+
+        let mut repo = GitRepository::new(
+            "r1".to_string(),
+            "org/repo".to_string(),
+            "https://github.com/org/repo".to_string(),
+            None,
+        );
+        repo.pr_concurrency = 2;
+
+        // Improved 상태에 PR 1개 배치
+        repo.pr_queue
+            .push(pr_phase::IMPROVED, make_test_pr("org/repo", 1));
+        source.repos.insert("org/repo".to_string(), repo);
+
+        let tasks = source.drain_queue_items();
+
+        // ReviewTask가 생성되어야 함
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].work_id(), "pr:org/repo:1");
+
+        // Improved → Pending → Reviewing 경로 확인:
+        // Improved는 비어 있고, Pending도 비어 있고 (drain 됨), Reviewing에 도착
+        let repo = &source.repos["org/repo"];
+        assert_eq!(repo.pr_queue.len(pr_phase::IMPROVED), 0);
+        assert_eq!(repo.pr_queue.len(pr_phase::PENDING), 0);
+        assert_eq!(repo.pr_queue.len(pr_phase::REVIEWING), 1);
+    }
+
+    #[test]
+    fn drain_improved_respects_pr_concurrency() {
+        let gh = Arc::new(MockGh::new());
+        let mut source = make_source(gh);
+
+        let mut repo = GitRepository::new(
+            "r1".to_string(),
+            "org/repo".to_string(),
+            "https://github.com/org/repo".to_string(),
+            None,
+        );
+        repo.pr_concurrency = 1;
+
+        // Improved PR 2개, concurrency = 1
+        repo.pr_queue
+            .push(pr_phase::IMPROVED, make_test_pr("org/repo", 1));
+        repo.pr_queue
+            .push(pr_phase::IMPROVED, make_test_pr("org/repo", 2));
+        source.repos.insert("org/repo".to_string(), repo);
+
+        let tasks = source.drain_queue_items();
+
+        // concurrency=1이므로 1개만 Reviewing으로 진입
+        assert_eq!(tasks.len(), 1);
+        let repo = &source.repos["org/repo"];
+        assert_eq!(repo.pr_queue.len(pr_phase::REVIEWING), 1);
+        // 나머지 1개는 Pending에 대기
+        assert_eq!(repo.pr_queue.len(pr_phase::PENDING), 1);
     }
 }
