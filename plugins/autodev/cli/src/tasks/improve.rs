@@ -183,6 +183,15 @@ impl Task for ImproveTask {
                 item: Box::new(next_item),
             });
         } else {
+            // 실패 라벨 추가 (add-first) → changes-requested 제거
+            self.gh
+                .label_add(
+                    &self.item.repo_name,
+                    self.item.github_number,
+                    labels::IMPROVE_FAILED,
+                    gh_host,
+                )
+                .await;
             self.gh
                 .label_remove(
                     &self.item.repo_name,
@@ -191,6 +200,23 @@ impl Task for ImproveTask {
                     gh_host,
                 )
                 .await;
+
+            let fail_comment = format!(
+                "<!-- autodev:improve-failed -->\n\
+                 ⚠️ Improve agent failed (exit_code={}).\n\n\
+                 **Branch**: `{}`\n\
+                 Check the agent logs for details.",
+                response.exit_code, self.item.head_branch
+            );
+            self.gh
+                .issue_comment(
+                    &self.item.repo_name,
+                    self.item.github_number,
+                    &fail_comment,
+                    gh_host,
+                )
+                .await;
+
             ops.push(QueueOp::Remove);
         }
 
@@ -358,7 +384,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn after_nonzero_exit_removes() {
+    async fn after_nonzero_exit_removes_and_adds_improve_failed() {
         let gh = Arc::new(MockGh::new());
         let mut task = make_task(gh.clone());
         let _ = task.before_invoke().await;
@@ -378,9 +404,39 @@ mod tests {
             .iter()
             .any(|op| matches!(op, QueueOp::PushPr { .. })));
 
+        // IMPROVE_FAILED 라벨 추가
+        let added = gh.added_labels.lock().unwrap();
+        assert!(added
+            .iter()
+            .any(|(_, n, l)| *n == 10 && l == labels::IMPROVE_FAILED));
+
+        // CHANGES_REQUESTED 라벨 제거
         let removed = gh.removed_labels.lock().unwrap();
         assert!(removed
             .iter()
             .any(|(_, n, l)| *n == 10 && l == labels::CHANGES_REQUESTED));
+
+        // 실패 코멘트 작성
+        let comments = gh.posted_comments.lock().unwrap();
+        assert!(comments
+            .iter()
+            .any(|(_, n, body)| *n == 10 && body.contains("Improve agent failed")));
+    }
+
+    #[tokio::test]
+    async fn after_nonzero_exit_adds_improve_failed_before_removing_changes_requested() {
+        let gh = Arc::new(MockGh::new());
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+
+        let response = AgentResponse {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: "error".to_string(),
+            duration: Duration::from_secs(5),
+        };
+        let _ = task.after_invoke(response).await;
+
+        gh.assert_add_before_remove(10, labels::IMPROVE_FAILED, labels::CHANGES_REQUESTED);
     }
 }
