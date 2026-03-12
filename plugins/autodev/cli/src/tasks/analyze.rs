@@ -423,6 +423,15 @@ impl Task for AnalyzeTask {
 
         // Agent 호출 실패 (exit_code != 0)
         if response.exit_code != 0 {
+            // add-first: 새 라벨 추가 → 이전 라벨 제거 (크래시 안전)
+            self.gh
+                .label_add(
+                    &self.item.repo_name,
+                    self.item.github_number,
+                    labels::ANALYZE_FAILED,
+                    gh_host,
+                )
+                .await;
             self.gh
                 .label_remove(
                     &self.item.repo_name,
@@ -431,6 +440,22 @@ impl Task for AnalyzeTask {
                     gh_host,
                 )
                 .await;
+
+            let fail_comment = format!(
+                "<!-- autodev:analyze-failed -->\n\
+                 ⚠️ Analysis agent failed (exit_code={}).\n\n\
+                 Check the agent logs for details.",
+                response.exit_code
+            );
+            self.gh
+                .issue_comment(
+                    &self.item.repo_name,
+                    self.item.github_number,
+                    &fail_comment,
+                    gh_host,
+                )
+                .await;
+
             self.cleanup_worktree().await;
             return TaskResult {
                 work_id: self.item.work_id.clone(),
@@ -831,6 +856,89 @@ mod tests {
 
         let removed = gh.removed_labels.lock().unwrap();
         assert!(removed.iter().any(|(_, _, l)| l == labels::WIP));
+
+        let added = gh.added_labels.lock().unwrap();
+        assert!(added.iter().any(|(_, _, l)| l == labels::ANALYZE_FAILED));
+
+        let comments = gh.posted_comments.lock().unwrap();
+        assert!(comments
+            .iter()
+            .any(|(_, _, body)| body.contains("<!-- autodev:analyze-failed -->")));
+    }
+
+    // ═══════════════════════════════════════════════
+    // after_invoke: agent failure (exit_code != 0) detailed tests
+    // ═══════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn after_nonzero_exit_adds_analyze_failed_label() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "issues/42", ".state", "open");
+
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+
+        let response = AgentResponse {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: "error".to_string(),
+            duration: Duration::from_secs(10),
+        };
+        let result = task.after_invoke(response).await;
+
+        assert!(matches!(result.status, TaskStatus::Failed(_)));
+
+        let added = gh.added_labels.lock().unwrap();
+        assert!(
+            added
+                .iter()
+                .any(|(_, n, l)| *n == 42 && l == labels::ANALYZE_FAILED),
+            "should add analyze-failed label on agent failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn after_nonzero_exit_posts_failure_comment() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "issues/42", ".state", "open");
+
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+
+        let response = AgentResponse {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: "crash".to_string(),
+            duration: Duration::from_secs(10),
+        };
+        let _ = task.after_invoke(response).await;
+
+        let comments = gh.posted_comments.lock().unwrap();
+        assert!(
+            comments
+                .iter()
+                .any(|(_, n, body)| *n == 42 && body.contains("<!-- autodev:analyze-failed -->")),
+            "should post failure comment with autodev:analyze-failed marker"
+        );
+    }
+
+    #[tokio::test]
+    async fn after_nonzero_exit_uses_add_first_ordering() {
+        let gh = Arc::new(MockGh::new());
+        gh.set_field("org/repo", "issues/42", ".state", "open");
+
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+
+        let response = AgentResponse {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: "error".to_string(),
+            duration: Duration::from_secs(10),
+        };
+        let _ = task.after_invoke(response).await;
+
+        gh.assert_add_before_remove(42, labels::ANALYZE_FAILED, labels::WIP);
     }
 
     // ─── auto-approve tests ───
