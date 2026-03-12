@@ -523,7 +523,7 @@ autodev:changes-requested (orphan PR) 감지 →
 │  │    Ready → Implementing:                                      │  │
 │  │      OK + PR 생성 → PR에 autodev:wip + PR queue push         │  │
 │  │      OK + PR 감지 실패 → autodev:impl-failed (worktree 보존) │  │
-│  │      Err → 라벨 제거 + 재시도                                  │  │
+│  │      Err → autodev:impl-failed (라벨 추가 + 실패 코멘트)       │  │
 │  │                                                               │  │
 │  │  PRs:                                                         │  │
 │  │    Pending → Reviewing:                                       │  │
