@@ -147,7 +147,79 @@ Supervisor는 다음 기준을 종합적으로 판단한다:
 | **개선 완료** | diff가 리뷰 피드백을 정확히 반영 | 피드백과 무관한 변경이 포함됨 |
 | **구현 실패** | 컴파일 에러, lint 실패 등 재시도 가능 오류 | 설계 수준 문제, 요구사항 불명확 |
 
-### 2.6 Supervisor 판단 기준의 인터페이스화
+### 2.6 Supervisor 호출 조건 (Activation Strategy)
+
+매 tick마다 LLM을 호출하는 것은 비효율적이다.
+대부분의 tick에서는 완료된 task가 0~1개이고, 그 경우 기존 v3 방식(passthrough)으로 처리해도 충분하다.
+Supervisor LLM은 **판단이 필요한 상황에서만** 호출한다.
+
+```
+버퍼 상태 확인 (결정적 로직, LLM 불필요)
+  │
+  ├─ 활성화 조건 미충족 → Passthrough (v3 방식으로 즉시 적용)
+  │
+  └─ 활성화 조건 충족 → LLM Supervisor 호출
+```
+
+#### 활성화 조건 (OR — 하나라도 해당하면 호출)
+
+| 조건 | 설명 | 설정 |
+|------|------|------|
+| **임계값 초과** | 레포당 버퍼에 N개 이상의 전이가 쌓임 | `activation_threshold: 3` |
+| **실패 포함** | 버퍼에 Failed 상태의 결과가 1건 이상 | (항상 적용) |
+| **critical path 변경** | 변경된 파일이 critical_paths 패턴에 매칭 | `critical_paths: [...]` |
+| **충돌 가능성** | 같은 파일을 수정하는 전이가 2개 이상 | (항상 적용) |
+
+이 조건 확인은 **결정적 로직**(패턴 매칭, 개수 비교)으로 처리하므로 LLM 호출이 필요 없다.
+
+```rust
+fn needs_supervisor(
+    transitions: &[PendingTransition],
+    config: &SupervisorConfig,
+) -> bool {
+    // 1. 임계값 초과
+    if transitions.len() >= config.activation_threshold {
+        return true;
+    }
+    // 2. 실패 포함
+    if transitions.iter().any(|t| t.status == TaskStatus::Failed) {
+        return true;
+    }
+    // 3. critical path 변경
+    if transitions.iter().any(|t| {
+        t.affected_files.iter().any(|f| config.matches_critical_path(f))
+    }) {
+        return true;
+    }
+    // 4. 파일 충돌 (같은 파일을 수정하는 전이가 2개 이상)
+    let all_files: Vec<_> = transitions.iter()
+        .flat_map(|t| &t.affected_files)
+        .collect();
+    if has_duplicates(&all_files) {
+        return true;
+    }
+    false
+}
+```
+
+#### 흐름 요약
+
+```
+tick 도달
+  │
+  ├─ 버퍼 비어있음 → skip (LLM 호출 없음)
+  │
+  ├─ needs_supervisor() == false
+  │   → Passthrough: 모든 전이를 즉시 적용 (v3 동작, LLM 호출 없음)
+  │
+  └─ needs_supervisor() == true
+      → LLM Supervisor 호출 → 판단에 따라 적용/hold/retry
+```
+
+이로써 **대부분의 tick에서 LLM 호출 없이 v3과 동일하게 동작**하고,
+판단이 필요한 순간에만 Supervisor가 개입한다.
+
+### 2.7 Supervisor 판단 기준의 인터페이스화
 
 Supervisor가 참조하는 판단 기준은 **설정으로 커스터마이즈 가능**해야 한다.
 LLM 프롬프트에 주입되는 정책이므로, 레포별로 다른 기준을 적용할 수 있다.
@@ -157,8 +229,9 @@ LLM 프롬프트에 주입되는 정책이므로, 레포별로 다른 기준을 
 supervisor:
   enabled: true
   model: haiku                    # 경량 모델 (분류 작업)
+  activation_threshold: 3         # 레포당 N개 이상 누적 시 Supervisor 호출
   policy: default                 # 판단 정책 (default / strict / permissive)
-  critical_paths:                 # Hold 강제 경로 패턴
+  critical_paths:                 # Hold 강제 + Supervisor 활성화 트리거
     - "src/auth/**"
     - "src/payment/**"
     - "migrations/**"
@@ -222,45 +295,51 @@ impl Daemon {
                 Some(result) = join_set.join_next() => {
                     self.inflight.release(&result.repo_name);
                     self.transition_buffer.push(result);
-                    // v3: self.manager.apply(result);  ← 제거
-                    // v4: 버퍼에 쌓고, tick에서 Supervisor가 판단
                 }
 
-                // Tick → Supervisor 실행 후 승인된 전이만 적용
+                // Tick → 조건부 Supervisor 실행
                 _ = tick.tick() => {
                     // 1. 기존 poll
                     self.manager.tick().await;
 
-                    // 2. Supervisor 판단 (NEW)
-                    let verdicts = self.supervisor.review(
-                        &self.transition_buffer,
-                        &self.manager,
-                    ).await;
-
-                    // 3. 승인된 전이만 적용
-                    for (result, decision) in verdicts.approved() {
-                        self.manager.apply(result);
+                    // 2. 버퍼 처리: 조건부 Supervisor (NEW)
+                    if !self.transition_buffer.is_empty() {
+                        self.process_transitions().await;
                     }
 
-                    // 4. Hold 항목은 HITL 알림
-                    for (result, decision) in verdicts.held() {
-                        self.notifier.notify_hitl(&decision).await;
-                    }
-
-                    // 5. Retry 항목은 큐에 재삽입
-                    for (result, decision) in verdicts.retries() {
-                        self.manager.requeue(result, &decision.hint);
-                    }
-
-                    // 6. 버퍼 정리
-                    self.transition_buffer.clear();
-
-                    // 7. 주기적 작업 (DailyReporter 패턴)
+                    // 3. 주기적 작업 (DailyReporter 패턴)
                     self.reporter.maybe_run().await;           // 기존
                     self.spec_gap.maybe_run(&repos).await;     // NEW
 
-                    // 8. 새 task spawn
+                    // 4. 새 task spawn
                     self.try_spawn(&mut join_set).await;
+                }
+            }
+        }
+    }
+
+    async fn process_transitions(&mut self) {
+        for (repo_name, transitions) in self.transition_buffer.drain_by_repo() {
+            if needs_supervisor(&transitions, &self.supervisor_config) {
+                // 조건 충족 → LLM Supervisor 호출
+                let verdicts = self.supervisor.review(
+                    &transitions,
+                    &self.manager.queue_snapshot(&repo_name),
+                    &self.supervisor_config,
+                ).await;
+
+                for (result, decision) in verdicts.iter() {
+                    match &decision.action {
+                        Proceed => self.manager.apply(result),
+                        Hold { .. } => self.notifier.notify_hitl(&decision).await,
+                        Retry { .. } => self.manager.requeue(result, &decision.hint),
+                        Defer { .. } => self.transition_buffer.push_back(result),
+                    }
+                }
+            } else {
+                // 조건 미충족 → Passthrough (v3 동작, LLM 호출 없음)
+                for (result, _) in transitions {
+                    self.manager.apply(result);
                 }
             }
         }
@@ -268,7 +347,7 @@ impl Daemon {
 }
 ```
 
-### 2.10 상태 전이 변경 요약
+### 2.11 상태 전이 변경 요약
 
 | 전이 지점 | v3 | v4 |
 |-----------|-----|-----|
@@ -638,17 +717,20 @@ cli/src/
 supervisor:
   enabled: false                    # Supervisor 활성화 (기본: false, opt-in)
   model: haiku                      # LLM 모델 (경량 분류 작업)
+  activation_threshold: 3           # 레포당 N개 이상 누적 시 LLM 호출 (기본: 3)
   timeout_secs: 30                  # Supervisor 호출 타임아웃
   policy: default                   # 판단 정책
-  critical_paths:                   # Hold 강제 경로 패턴
+  critical_paths:                   # Hold 강제 + Supervisor 활성화 트리거
     - "src/auth/**"
     - "migrations/**"
   auto_retry_patterns:              # 자동 재시도 에러 패턴
     - "cargo build failed"
     - "compilation error"
   max_retries: 2                    # task별 최대 재시도 횟수
-  fallback: passthrough             # 실패 시 폴백 (passthrough = v3 동작)
+  fallback: passthrough             # LLM 실패 시 폴백 (passthrough = v3 동작)
 ```
+
+> **활성화 조건 (OR)**: `activation_threshold` 초과, Failed 상태 포함, critical_paths 매칭, 파일 충돌 감지 중 하나라도 해당하면 LLM 호출. 조건 미충족 시 passthrough (LLM 호출 없음).
 
 ### 5.2 spec_gap 섹션 추가
 
