@@ -1,7 +1,7 @@
 ---
 description: 3개 LLM(Claude, Codex, Gemini)으로 스펙/코드를 4가지 관점에서 리뷰합니다 (Agent Teams)
 argument-hint: "[파일 패턴] [추가 컨텍스트]"
-allowed-tools: ["Task", "Glob", "Bash", "Read"]
+allowed-tools: ["Task", "Glob"]
 ---
 
 # 스펙 리뷰 커맨드 (/spec-review)
@@ -22,26 +22,9 @@ allowed-tools: ["Task", "Glob", "Bash", "Read"]
 ## 사용법
 
 ```bash
-# 파일 패턴 지정
 /spec-review "src/**/*.rs"
-/spec-review "plugins/external-llm/**/*.md"
-
-# 추가 컨텍스트
 /spec-review "src/**/*.rs" "인증 모듈 리팩토링 관련"
-
-# 자연어
 /spec-review "새로 추가한 Rust 모듈 스펙 리뷰해줘"
-```
-
-## 핵심 워크플로우
-
-```
-1. Glob으로 파일 경로 수집 (내용 안 읽음!)
-2. Agent Teams 활성 여부 확인
-3-A. Agent Teams → 4 teammates 생성 (각 관점 1명)
-3-B. Agent Teams 미활성 → Task 4개 병렬 (fallback)
-4. 각 teammate/subagent가 내부에서 3-LLM 호출
-5. 결과 취합 → 종합 리포트
 ```
 
 ## 작업 프로세스
@@ -50,7 +33,7 @@ allowed-tools: ["Task", "Glob", "Bash", "Read"]
 
 사용자 요청에서 추출:
 - **대상 파일**: glob 패턴 또는 키워드
-- **컨텍스트**: 추가 요청사항 (어떤 기능/변경에 대한 리뷰인지)
+- **컨텍스트**: 추가 요청사항
 
 **파일 패턴 매핑**:
 - "src" / "코드" → `src/**/*.{ts,tsx,js,rs,py}`
@@ -63,28 +46,14 @@ allowed-tools: ["Task", "Glob", "Bash", "Read"]
 
 **CRITICAL**: 파일 내용을 읽지 않습니다! 경로만 수집합니다.
 
-```
-Glob: src/**/*.rs
-→ ["src/main.rs", "src/lib.rs", ...]
-```
-
 파일이 없으면 즉시 에러:
 ```
 Error: '[패턴]'에 맞는 파일을 찾을 수 없습니다.
 ```
 
-### Step 3: 프로젝트 컨벤션 파일 경로 수집
+### Step 3: Agent Teams 또는 Subagent 분기
 
-컨벤션 분석을 위해 프로젝트 규칙 파일 경로도 수집합니다:
-
-```
-Glob: .claude/rules/*.md → 규칙 파일 경로 목록
-CLAUDE.md → 프로젝트 원칙 경로
-```
-
-### Step 4: Agent Teams 또는 Subagent 분기
-
-#### 4-A: Agent Teams 사용 (권장)
+#### 3-A: Agent Teams 사용 (권장)
 
 Agent Teams가 활성화된 경우 에이전트 팀을 생성합니다:
 
@@ -99,56 +68,88 @@ Agent Teams가 활성화된 경우 에이전트 팀을 생성합니다:
 대상 파일:
 - [파일 경로 목록]
 
-컨벤션 파일:
-- CLAUDE.md
-- [.claude/rules/*.md 파일 목록]
-
 ## 팀 구성
 
 ### Teammate 1: 사이드이펙트 분석가
-[아래 관점별 프롬프트 참조]
+[아래 관점별 분석 기준 참조]
 
 ### Teammate 2: 단순성/유지보수성 분석가
-[아래 관점별 프롬프트 참조]
+[아래 관점별 분석 기준 참조]
 
 ### Teammate 3: 컨벤션 부합성 분석가
-[아래 관점별 프롬프트 참조]
+[아래 관점별 분석 기준 참조]
 
 ### Teammate 4: 테스트 계획 분석가
-[아래 관점별 프롬프트 참조]
-
-## 각 팀원 공통 지침
-
-1. 대상 파일을 Read로 읽으세요
-2. 자신의 관점으로 직접 분석하세요 (Claude 분석)
-3. call-codex.sh로 Codex 분석을 수행하세요
-4. call-gemini.sh로 Gemini 분석을 수행하세요
-5. 3개 LLM 결과를 비교하여 컨센서스 리포트를 작성하세요
-6. 리더에게 최종 리포트를 보고하세요
+[아래 관점별 분석 기준 참조]
 ```
 
-#### 4-B: Subagent Fallback
+#### 3-B: Subagent Fallback
 
-Agent Teams가 비활성이면 Task 4개를 병렬 실행합니다:
+Agent Teams가 비활성이면 Task 4개를 `run_in_background=true`로 병렬 실행합니다.
+각 Task에 관점별 분석 기준 + 공통 지침을 프롬프트로 전달합니다.
 
-```
-Task(prompt="[관점별 프롬프트]", run_in_background=true)  # x4
-```
-
-### Step 5: 결과 취합 및 종합 리포트
+### Step 4: 결과 취합 및 종합 리포트
 
 4개 관점의 결과를 취합하여 종합 리포트를 작성합니다.
 
 ---
 
-## 관점별 Teammate 프롬프트
+## 팀원 공통 지침
+
+모든 teammate/subagent는 다음 절차를 따릅니다:
+
+### 분석 절차
+
+1. 대상 파일을 Read로 읽기
+2. 자신의 관점으로 직접 Claude 분석 수행
+3. Codex에 동일한 분석 요청:
+   `bash ${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-codex.sh "[프롬프트]"`
+   → 결과 파일 Read
+4. Gemini에 동일한 분석 요청:
+   `bash ${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-gemini.sh "[프롬프트]"`
+   → 결과 파일 Read
+5. 3-LLM 컨센서스 도출
+
+### 관점별 추가 절차
+
+- **컨벤션 분석가**: CLAUDE.md와 .claude/rules/*.md도 Read로 읽어 프로젝트 규칙 파악
+- **테스트 계획 분석가**: 관련 테스트 파일 탐색 (Glob: `**/tests/**`, `**/*test*`, `**/*spec*`)
+
+### 출력 형식
+
+```markdown
+### [관점명] 분석 결과
+
+#### Claude 분석
+[직접 분석 결과]
+
+#### Codex 분석
+[Codex 결과 요약]
+
+#### Gemini 분석
+[Gemini 결과 요약]
+
+#### 컨센서스 (3-LLM)
+- **합의 사항** (3/3 또는 2/3 동의)
+  1. [구체적 발견 + 심각도/우선순위]
+- **개별 지적** (1/3)
+  1. [LLM명: 지적 내용]
+```
+
+### 컨센서스 분석 기준
+
+- **3/3 합의**: 높은 신뢰도 → 반드시 반영
+- **2/3 동의**: 중간 신뢰도 → 사용자에게 제시
+- **1/3 지적**: 참고 사항 → 정보 제공
+
+---
+
+## 관점별 분석 기준
 
 ### Teammate 1: 사이드이펙트 분석가
 
 ```
 당신은 사이드이펙트 분석 전문가입니다. 코드/스펙 변경이 기존 시스템에 미치는 영향을 분석합니다.
-
-## 담당 관점: 사이드이펙트 분석
 
 ## 분석 기준
 
@@ -172,51 +173,12 @@ Task(prompt="[관점별 프롬프트]", run_in_background=true)  # x4
    - Critical: 기존 기능이 깨질 수 있음
    - Warning: 동작이 미묘하게 변할 수 있음
    - Info: 알아두면 좋은 영향
-
-## 분석 절차
-
-1. 대상 파일을 Read로 읽기
-2. 직접 Claude 분석 수행
-3. Codex에 동일한 분석 요청:
-   bash ${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-codex.sh "[프롬프트]"
-   결과 파일 Read
-4. Gemini에 동일한 분석 요청:
-   bash ${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-gemini.sh "[프롬프트]"
-   결과 파일 Read
-5. 3-LLM 컨센서스 도출
-
-## 대상 파일
-[파일 경로 목록]
-
-## 사용자 요청
-[원래 사용자 요청]
-
-## 출력 형식
-
-### 사이드이펙트 분석 결과
-
-#### Claude 분석
-[직접 분석 결과]
-
-#### Codex 분석
-[Codex 결과 요약]
-
-#### Gemini 분석
-[Gemini 결과 요약]
-
-#### 컨센서스 (3-LLM)
-- **합의된 사이드이펙트** (3/3 또는 2/3 동의)
-  1. [구체적 영향 + 심각도]
-- **개별 지적** (1/3)
-  1. [LLM명: 지적 내용]
 ```
 
 ### Teammate 2: 단순성 & 유지보수성 분석가
 
 ```
 당신은 코드 단순성과 유지보수성 전문가입니다. 불필요한 복잡도를 찾아내고 유지보수하기 좋은 구조를 제안합니다.
-
-## 담당 관점: 단순성 & 유지보수성
 
 ## 분석 기준
 
@@ -242,51 +204,12 @@ Task(prompt="[관점별 프롬프트]", run_in_background=true)  # x4
    - SRP: 하나의 모듈이 여러 책임을 갖고 있지 않은지
    - OCP: 새로운 타입 추가 시 기존 코드 수정이 필요한지
    - DIP: 구체 구현에 직접 의존하고 있지 않은지
-
-## 분석 절차
-
-1. 대상 파일을 Read로 읽기
-2. 직접 Claude 분석 수행
-3. Codex에 동일한 분석 요청:
-   bash ${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-codex.sh "[프롬프트]"
-   결과 파일 Read
-4. Gemini에 동일한 분석 요청:
-   bash ${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-gemini.sh "[프롬프트]"
-   결과 파일 Read
-5. 3-LLM 컨센서스 도출
-
-## 대상 파일
-[파일 경로 목록]
-
-## 사용자 요청
-[원래 사용자 요청]
-
-## 출력 형식
-
-### 단순성 & 유지보수성 분석 결과
-
-#### Claude 분석
-[직접 분석 결과]
-
-#### Codex 분석
-[Codex 결과 요약]
-
-#### Gemini 분석
-[Gemini 결과 요약]
-
-#### 컨센서스 (3-LLM)
-- **합의된 개선점** (3/3 또는 2/3 동의)
-  1. [구체적 문제 + 개선안]
-- **개별 지적** (1/3)
-  1. [LLM명: 지적 내용]
 ```
 
 ### Teammate 3: 컨벤션 부합성 분석가
 
 ```
 당신은 프로젝트 컨벤션 전문가입니다. 코드가 기존 프로젝트의 규칙과 패턴에 부합하는지 분석합니다.
-
-## 담당 관점: 컨벤션 부합성
 
 ## 분석 기준
 
@@ -310,46 +233,6 @@ Task(prompt="[관점별 프롬프트]", run_in_background=true)  # x4
    - 기존 유사 코드와의 패턴 일치
    - 기존 테스트 작성 스타일과의 일치
    - 기존 에러 메시지 스타일과의 일치
-
-## 분석 절차
-
-1. 대상 파일과 컨벤션 파일을 Read로 읽기
-2. 직접 Claude 분석 수행
-3. Codex에 동일한 분석 요청 (컨벤션 파일 내용 포함):
-   bash ${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-codex.sh "[프롬프트]"
-   결과 파일 Read
-4. Gemini에 동일한 분석 요청:
-   bash ${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-gemini.sh "[프롬프트]"
-   결과 파일 Read
-5. 3-LLM 컨센서스 도출
-
-## 대상 파일
-[파일 경로 목록]
-
-## 컨벤션 파일
-[컨벤션 파일 경로 목록]
-
-## 사용자 요청
-[원래 사용자 요청]
-
-## 출력 형식
-
-### 컨벤션 부합성 분석 결과
-
-#### Claude 분석
-[직접 분석 결과]
-
-#### Codex 분석
-[Codex 결과 요약]
-
-#### Gemini 분석
-[Gemini 결과 요약]
-
-#### 컨센서스 (3-LLM)
-- **합의된 위반 사항** (3/3 또는 2/3 동의)
-  1. [위반 내용 + 준수해야 할 규칙 참조]
-- **개별 지적** (1/3)
-  1. [LLM명: 지적 내용]
 ```
 
 ### Teammate 4: 테스트 계획 분석가
@@ -357,77 +240,23 @@ Task(prompt="[관점별 프롬프트]", run_in_background=true)  # x4
 ```
 당신은 QA/테스트 전문가입니다. 테스트 계획의 존재 여부를 확인하고, 없다면 스펙에 맞는 테스트 계획을 제안합니다.
 
-## 담당 관점: 테스트 계획
-
 ## 분석 기준
 
 1. **기존 테스트 존재 여부**
-   - 단위 테스트 (unit test) 존재 확인
-   - 통합 테스트 (integration test) 존재 확인
-   - E2E 테스트 존재 확인
+   - 단위/통합/E2E 테스트 존재 확인
    - 테스트 커버리지 수준 추정
 
 2. **테스트 품질 평가** (기존 테스트가 있는 경우)
-   - 경계값 테스트 (edge cases)
-   - 에러 경로 테스트 (error paths)
-   - 정상 경로 테스트 (happy paths)
-   - 테스트 격리성 (independence)
-   - Mock/Stub 적절성
+   - 경계값/에러 경로/정상 경로 커버리지
+   - 테스트 격리성, Mock/Stub 적절성
 
 3. **테스트 계획 제안** (기존 테스트가 부족한 경우)
    - TDD 원칙에 따른 테스트 우선순위
    - 블랙박스 테스트 시나리오
    - 인메모리 구현체 활용 전략
-   - 핵심 시나리오 목록
 
 4. **QA 관점 체크리스트**
-   - 회귀 테스트 필요 여부
-   - 성능 테스트 필요 여부
-   - 보안 테스트 필요 여부
-   - 호환성 테스트 필요 여부
-
-## 분석 절차
-
-1. 대상 파일을 Read로 읽기
-2. 관련 테스트 파일 탐색 (Glob: **/tests/**, **/*test***, **/*spec**)
-3. 직접 Claude 분석 수행
-4. Codex에 동일한 분석 요청:
-   bash ${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-codex.sh "[프롬프트]"
-   결과 파일 Read
-5. Gemini에 동일한 분석 요청:
-   bash ${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-gemini.sh "[프롬프트]"
-   결과 파일 Read
-6. 3-LLM 컨센서스 도출
-
-## 대상 파일
-[파일 경로 목록]
-
-## 사용자 요청
-[원래 사용자 요청]
-
-## 출력 형식
-
-### 테스트 계획 분석 결과
-
-#### 기존 테스트 현황
-- 단위 테스트: [있음/없음] ([파일 목록])
-- 통합 테스트: [있음/없음]
-- E2E 테스트: [있음/없음]
-
-#### Claude 분석
-[직접 분석 결과]
-
-#### Codex 분석
-[Codex 결과 요약]
-
-#### Gemini 분석
-[Gemini 결과 요약]
-
-#### 컨센서스 (3-LLM)
-- **합의된 테스트 계획** (3/3 또는 2/3 동의)
-  1. [테스트 시나리오 + 우선순위]
-- **개별 제안** (1/3)
-  1. [LLM명: 제안 내용]
+   - 회귀/성능/보안/호환성 테스트 필요 여부
 ```
 
 ---
@@ -440,72 +269,25 @@ Task(prompt="[관점별 프롬프트]", run_in_background=true)  # x4
 # 스펙 리뷰 종합 결과
 
 ## 요약
-
 - **대상**: [파일 패턴 / 파일 수]
-- **리뷰 관점**: 사이드이펙트 | 단순성 | 컨벤션 | 테스트 계획
 
 ## 1. 사이드이펙트 분석
-
-### 3-LLM 컨센서스
-[Teammate 1의 컨센서스 결과]
-
-### Critical 사이드이펙트 (3/3 합의)
-1. [구체적 영향]
-
-### Warning (2/3 동의)
-1. [구체적 영향]
+[Teammate 1 컨센서스 결과]
 
 ## 2. 단순성 & 유지보수성
-
-### 3-LLM 컨센서스
-[Teammate 2의 컨센서스 결과]
-
-### 주요 개선점
-1. [복잡도/유지보수 이슈 + 개선안]
+[Teammate 2 컨센서스 결과]
 
 ## 3. 컨벤션 부합성
-
-### 3-LLM 컨센서스
-[Teammate 3의 컨센서스 결과]
-
-### 위반 사항
-1. [위반 내용 + 참조 규칙]
+[Teammate 3 컨센서스 결과]
 
 ## 4. 테스트 계획
-
-### 3-LLM 컨센서스
-[Teammate 4의 컨센서스 결과]
-
-### 제안된 테스트 계획
-1. [테스트 시나리오 + 우선순위]
+[Teammate 4 컨센서스 결과]
 
 ## 종합 권장사항
-
 ### Critical (다수 관점 + 다수 LLM 합의)
-1. [반드시 반영해야 할 사항]
-
 ### Important (2개 이상 관점 또는 2/3 LLM 동의)
-1. [검토 권장 사항]
-
 ### 참고사항
-1. [알아두면 좋은 사항]
 ```
-
-## 컨센서스 분석 기준
-
-- **3/3 합의**: 높은 신뢰도 → 반드시 반영
-- **2/3 동의**: 중간 신뢰도 → 사용자에게 제시
-- **1/3 지적**: 참고 사항 → 정보 제공
-
-## Fallback: Subagent 모드
-
-Agent Teams가 비활성인 경우, 4개의 Task를 `run_in_background=true`로 병렬 실행합니다.
-각 Task에 관점별 프롬프트를 전달하며, 프롬프트에 다음을 포함합니다:
-
-1. 대상 파일 경로 (Read로 읽을 것)
-2. 관점별 분석 기준
-3. call-codex.sh, call-gemini.sh 호출 지침
-4. 3-LLM 컨센서스 출력 형식
 
 ## 주의사항
 
