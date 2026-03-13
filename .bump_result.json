@@ -2,12 +2,12 @@
   "dry_run": false,
   "results": [
     {
-      "plugin": "autodev",
-      "old_version": "0.10.2",
-      "new_version": "0.10.3",
-      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/autodev/.claude-plugin/plugin.json",
+      "plugin": "external-llm",
+      "old_version": "0.7.0",
+      "new_version": "0.8.0",
+      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/external-llm/.claude-plugin/plugin.json",
       "marketplace_updated": true,
-      "cargo_toml_updated": true
+      "cargo_toml_updated": false
     }
   ]
 }
