@@ -15,8 +15,11 @@ pub const CHANGES_REQUESTED: &str = "autodev:changes-requested";
 pub const EXTRACTED: &str = "autodev:extracted";
 pub const EXTRACT_FAILED: &str = "autodev:extract-failed";
 
-// v2.2: 구현 실패 라벨
+// v2.2: 실패 라벨
 pub const IMPL_FAILED: &str = "autodev:impl-failed";
+pub const ANALYZE_FAILED: &str = "autodev:analyze-failed";
+pub const REVIEW_FAILED: &str = "autodev:review-failed";
+pub const IMPROVE_FAILED: &str = "autodev:improve-failed";
 
 // v2: 리뷰 반복 횟수 라벨 (예: "autodev:iteration/1")
 pub const ITERATION_PREFIX: &str = "autodev:iteration/";

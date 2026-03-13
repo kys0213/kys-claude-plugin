@@ -523,16 +523,17 @@ autodev:changes-requested (orphan PR) 감지 →
 │  │    Ready → Implementing:                                      │  │
 │  │      OK + PR 생성 → PR에 autodev:wip + PR queue push         │  │
 │  │      OK + PR 감지 실패 → autodev:impl-failed (worktree 보존) │  │
-│  │      Err → 라벨 제거 + 재시도                                  │  │
+│  │      Err → autodev:impl-failed (라벨 추가 + 실패 코멘트)      │  │
 │  │                                                               │  │
 │  │  PRs:                                                         │  │
 │  │    Pending → Reviewing:                                       │  │
 │  │      approve → autodev:done (PR) + source_issue → done       │  │
 │  │      request_changes → autodev:changes-requested              │  │
+│  │      Err → autodev:review-failed (라벨 추가 + 실패 코멘트)   │  │
 │  │                                                               │  │
 │  │    ReviewDone → Improving:                                    │  │
 │  │      OK → autodev:wip + Pending (re-review)                  │  │
-│  │      Err → 라벨 제거                                          │  │
+│  │      Err → autodev:improve-failed (라벨 추가 + 실패 코멘트)  │  │
 │  │                                                               │  │
 │  │    Extracting:                                                │  │
 │  │      ExtractTask → 지식 추출 + autodev:extracted → 제거      │  │

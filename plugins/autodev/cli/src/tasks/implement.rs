@@ -246,19 +246,20 @@ impl Task for ImplementTask {
 
         // Agent 호출 실패
         if response.exit_code != 0 {
-            self.gh
-                .label_remove(
-                    &self.item.repo_name,
-                    self.item.github_number,
-                    labels::IMPLEMENTING,
-                    gh_host,
-                )
-                .await;
+            // add-first: IMPL_FAILED 추가 후 IMPLEMENTING 제거
             self.gh
                 .label_add(
                     &self.item.repo_name,
                     self.item.github_number,
                     labels::IMPL_FAILED,
+                    gh_host,
+                )
+                .await;
+            self.gh
+                .label_remove(
+                    &self.item.repo_name,
+                    self.item.github_number,
+                    labels::IMPLEMENTING,
                     gh_host,
                 )
                 .await;
@@ -1096,6 +1097,23 @@ mod tests {
             stdout: "Done but no PR URL".to_string(),
             stderr: String::new(),
             duration: Duration::from_secs(30),
+        };
+        let _ = task.after_invoke(response).await;
+
+        gh.assert_add_before_remove(42, labels::IMPL_FAILED, labels::IMPLEMENTING);
+    }
+
+    #[tokio::test]
+    async fn after_nonzero_exit_uses_add_first_ordering() {
+        let gh = Arc::new(MockGh::new());
+        let mut task = make_task(gh.clone());
+        let _ = task.before_invoke().await;
+
+        let response = AgentResponse {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: "agent crashed".to_string(),
+            duration: Duration::from_secs(5),
         };
         let _ = task.after_invoke(response).await;
 
