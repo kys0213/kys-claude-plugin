@@ -1,3 +1,4 @@
+pub mod claw;
 pub mod cron;
 pub mod decisions;
 pub mod hitl;

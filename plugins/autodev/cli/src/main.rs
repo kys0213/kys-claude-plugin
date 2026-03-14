@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use autodev::core::config;
@@ -92,6 +92,29 @@ enum Commands {
     Decisions {
         #[command(subcommand)]
         action: DecisionsAction,
+    },
+    /// Claw 워크스페이스 관리
+    Claw {
+        #[command(subcommand)]
+        action: ClawAction,
+    },
+    /// Claw 에이전트 세션 시작 (claude --cwd ~/.autodev/claw-workspace)
+    Agent,
+}
+
+#[derive(Subcommand)]
+enum ClawAction {
+    /// Claw 워크스페이스 초기화
+    Init {
+        /// 레포별 오버라이드 생성 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// 적용된 규칙 파일 목록
+    Rules {
+        /// 레포별 오버라이드 포함 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
     },
 }
 
@@ -660,6 +683,36 @@ async fn main() -> Result<()> {
                 client::cron::cron_trigger(&db, &env, &name, repo.as_deref())?;
             }
         },
+        Commands::Claw { action } => match action {
+            ClawAction::Init { repo } => {
+                if let Some(repo_name) = repo {
+                    client::claw::claw_init(&home)?;
+                    client::claw::claw_init_repo(&home, &repo_name)?;
+                } else {
+                    client::claw::claw_init(&home)?;
+                }
+            }
+            ClawAction::Rules { repo } => {
+                let rules = client::claw::claw_rules(&home, repo.as_deref())?;
+                for rule in &rules {
+                    println!("  {rule}");
+                }
+            }
+        },
+        Commands::Agent => {
+            let ws = client::claw::claw_workspace_path(&home);
+            if !ws.exists() {
+                anyhow::bail!("Claw workspace not initialized. Run 'autodev claw init' first.");
+            }
+            let status = std::process::Command::new("claude")
+                .arg("--cwd")
+                .arg(&ws)
+                .status()
+                .context("failed to launch claude. Is it installed?")?;
+            if !status.success() {
+                std::process::exit(status.code().unwrap_or(1));
+            }
+        }
     }
 
     Ok(())
