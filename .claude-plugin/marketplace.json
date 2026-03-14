@@ -96,6 +96,19 @@
       "version": "0.10.3"
     },
     {
+      "category": "productivity",
+      "description": "Claude Code status line — 컬러, 프로그레스바, 클릭 가능 링크가 포함된 HUD",
+      "keywords": [
+        "statusline",
+        "hud",
+        "ui",
+        "tui"
+      ],
+      "name": "hud",
+      "source": "./plugins/hud",
+      "version": "0.1.0"
+    },
+    {
       "category": "infrastructure",
       "description": "FIFO 기반 barrier 패턴 — 병렬 background Task 동기화 (턴 소모 없이 전원 완료 대기)",
       "keywords": [

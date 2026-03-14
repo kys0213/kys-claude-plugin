@@ -1,0 +1,17 @@
+{
+  "author": {
+    "name": "kys0213"
+  },
+  "commands": [
+    "./commands/setup.md"
+  ],
+  "description": "Claude Code status line with colors, progress bar, and clickable links",
+  "keywords": [
+    "statusline",
+    "hud",
+    "ui",
+    "tui"
+  ],
+  "name": "hud",
+  "version": "0.1.0"
+}
