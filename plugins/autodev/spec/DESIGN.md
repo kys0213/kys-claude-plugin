@@ -437,7 +437,8 @@ Daemon은 **판단하지 않는다**. 수집, 저장, ready 실행만 수행.
 
 ```sql
 -- 스펙
-specs (id, repo_id, title, body, status, source_path, created_at, updated_at)
+specs (id, repo_id, title, body, status, source_path,
+       test_commands, acceptance_criteria, created_at, updated_at)
 spec_issues (spec_id, issue_number, created_at)
 
 -- HITL

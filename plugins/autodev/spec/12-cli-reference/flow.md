@@ -121,7 +121,8 @@ autodev spec status <id> --json
 autodev spec update <id> --file <f>
 autodev spec pause <id>
 autodev spec resume <id>
-autodev spec evaluate <id>          # Claw 즉시 판단 트리거
+autodev spec prioritize <id1> <id2> ...   # 스펙 우선순위 지정
+autodev spec evaluate <id>                # claw-evaluate cron 즉시 트리거
 autodev spec decisions --json [-n 20]
 ```
 
@@ -146,16 +147,16 @@ autodev queue skip <work-id>              # skip 처리 (Claw가 호출)
 ### Cron
 
 ```bash
-autodev cron list                          # 등록된 cron job 목록
-autodev cron add --name <n> --interval <s> --command "..."
-                                           # interval 기반 job 추가
-autodev cron add --name <n> --schedule "<cron>" --command "..."
-                                           # cron expression 기반 job 추가
-autodev cron update <name> --interval <s>  # 주기 변경
-autodev cron pause <name>                  # 일시정지
-autodev cron resume <name>                 # 재개
-autodev cron remove <name>                 # 제거
-autodev cron trigger <name>                # 즉시 실행
+autodev cron list --json                   # 등록된 cron job 목록
+autodev cron add --name <n> --repo <r> --interval <s> --script <path>
+                                           # interval 기반, 스크립트 파일
+autodev cron add --name <n> --repo <r> --schedule "<cron>" --script <path>
+                                           # cron expression 기반
+autodev cron update <name> [--repo <r>] --interval <s>
+autodev cron pause <name> [--repo <r>]     # 일시정지
+autodev cron resume <name> [--repo <r>]    # 재개
+autodev cron remove <name> [--repo <r>]    # 제거 (custom만)
+autodev cron trigger <name> [--repo <r>]   # 즉시 실행
 ```
 
 ### 로그 / 사용량
