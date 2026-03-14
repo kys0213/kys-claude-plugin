@@ -10,14 +10,14 @@ use async_trait::async_trait;
 use chrono::Timelike;
 use tracing::info;
 
-use crate::components::workspace::Workspace;
-use crate::domain::git_repository_factory::resolve_gh_host;
-use crate::domain::repository::RepoRepository;
-use crate::infrastructure::claude::Claude;
-use crate::infrastructure::gh::Gh;
-use crate::infrastructure::git::Git;
-use crate::infrastructure::suggest_workflow::SuggestWorkflow;
-use crate::queue::Database;
+use crate::core::repository::RepoRepository;
+use crate::infra::claude::Claude;
+use crate::infra::db::Database;
+use crate::infra::gh::Gh;
+use crate::infra::git::Git;
+use crate::infra::suggest_workflow::SuggestWorkflow;
+use crate::tasks::helpers::git_ops_factory::resolve_gh_host;
+use crate::tasks::helpers::workspace::Workspace;
 
 use super::log;
 
@@ -56,7 +56,7 @@ pub struct DefaultDailyReporter {
     gh: Arc<dyn Gh>,
     claude: Arc<dyn Claude>,
     git: Arc<dyn Git>,
-    env: Arc<dyn crate::config::Env>,
+    env: Arc<dyn crate::core::config::Env>,
     sw: Arc<dyn SuggestWorkflow>,
     db: Database,
     config: DailyReporterConfig,
@@ -68,7 +68,7 @@ impl DefaultDailyReporter {
         gh: Arc<dyn Gh>,
         claude: Arc<dyn Claude>,
         git: Arc<dyn Git>,
-        env: Arc<dyn crate::config::Env>,
+        env: Arc<dyn crate::core::config::Env>,
         sw: Arc<dyn SuggestWorkflow>,
         db: Database,
         config: DailyReporterConfig,
@@ -107,32 +107,35 @@ impl DailyReporter for DefaultDailyReporter {
         log::cleanup_old_logs(&self.config.log_dir, self.config.log_retention_days);
 
         if log_path.exists() {
-            let stats = crate::knowledge::daily::parse_daemon_log(&log_path);
+            let stats = crate::tasks::knowledge::daily::parse_daemon_log(&log_path);
             if stats.task_count > 0 {
-                let patterns = crate::knowledge::daily::detect_patterns(&stats);
-                let mut report =
-                    crate::knowledge::daily::build_daily_report(&yesterday, &stats, patterns);
+                let patterns = crate::tasks::knowledge::daily::detect_patterns(&stats);
+                let mut report = crate::tasks::knowledge::daily::build_daily_report(
+                    &yesterday, &stats, patterns,
+                );
 
                 let ws = Workspace::new(&*self.git, &*self.env);
                 if let Ok(enabled) = RepoRepository::repo_find_enabled(&self.db) {
                     if let Some(er) = enabled.first() {
                         if let Ok(base) = ws.ensure_cloned(&er.url, &er.name).await {
-                            crate::knowledge::daily::enrich_with_cross_analysis(
+                            crate::tasks::knowledge::daily::enrich_with_cross_analysis(
                                 &mut report,
                                 &*self.sw,
                             )
                             .await;
 
-                            let per_task = crate::knowledge::daily::aggregate_daily_suggestions(
-                                &self.db, &yesterday,
-                            );
+                            let per_task =
+                                crate::tasks::knowledge::daily::aggregate_daily_suggestions(
+                                    &self.db, &yesterday,
+                                );
 
-                            if let Some(ks) = crate::knowledge::daily::generate_daily_suggestions(
-                                &*self.claude,
-                                &report,
-                                &base,
-                            )
-                            .await
+                            if let Some(ks) =
+                                crate::tasks::knowledge::daily::generate_daily_suggestions(
+                                    &*self.claude,
+                                    &report,
+                                    &base,
+                                )
+                                .await
                             {
                                 report.suggestions = ks.suggestions;
                             }
@@ -141,14 +144,14 @@ impl DailyReporter for DefaultDailyReporter {
 
                             if !report.suggestions.is_empty() {
                                 let cross_patterns =
-                                    crate::knowledge::daily::detect_cross_task_patterns(
+                                    crate::tasks::knowledge::daily::detect_cross_task_patterns(
                                         &report.suggestions,
                                     );
                                 report.patterns.extend(cross_patterns);
                             }
 
                             let repo_gh_host = resolve_gh_host(&*self.env, &er.name);
-                            crate::knowledge::daily::post_daily_report(
+                            crate::tasks::knowledge::daily::post_daily_report(
                                 &*self.gh,
                                 &er.name,
                                 &report,
@@ -157,7 +160,7 @@ impl DailyReporter for DefaultDailyReporter {
                             .await;
 
                             if !report.suggestions.is_empty() {
-                                crate::knowledge::daily::create_knowledge_prs(
+                                crate::tasks::knowledge::daily::create_knowledge_prs(
                                     &*self.gh,
                                     &ws,
                                     &er.name,

@@ -1,6 +1,6 @@
-use autodev::infrastructure::claude::mock::MockClaude;
-use autodev::infrastructure::suggest_workflow::mock::MockSuggestWorkflow;
-use autodev::knowledge::models::*;
+use autodev::infra::claude::mock::MockClaude;
+use autodev::infra::suggest_workflow::mock::MockSuggestWorkflow;
+use autodev::tasks::knowledge::models::*;
 
 // ═══════════════════════════════════════════════════
 // 1. MockSuggestWorkflow 기본 동작 테스트
@@ -77,7 +77,8 @@ async fn build_suggest_workflow_section_includes_sw_data() {
     ]);
 
     let section =
-        autodev::knowledge::extractor::build_suggest_workflow_section(&sw, "issue", 42).await;
+        autodev::tasks::knowledge::extractor::build_suggest_workflow_section(&sw, "issue", 42)
+            .await;
 
     assert!(
         section.contains("suggest-workflow session data"),
@@ -98,7 +99,8 @@ async fn build_suggest_workflow_section_empty_without_sw_data() {
     // suggest-workflow 데이터 없음 (빈 응답)
 
     let section =
-        autodev::knowledge::extractor::build_suggest_workflow_section(&sw, "issue", 42).await;
+        autodev::tasks::knowledge::extractor::build_suggest_workflow_section(&sw, "issue", 42)
+            .await;
 
     assert!(
         section.is_empty(),
@@ -157,7 +159,7 @@ async fn enrich_with_cross_analysis_populates_report() {
         cross_analysis: None,
     };
 
-    autodev::knowledge::daily::enrich_with_cross_analysis(&mut report, &sw).await;
+    autodev::tasks::knowledge::daily::enrich_with_cross_analysis(&mut report, &sw).await;
 
     let ca = report
         .cross_analysis
@@ -190,7 +192,7 @@ async fn enrich_with_cross_analysis_empty_when_no_data() {
         cross_analysis: None,
     };
 
-    autodev::knowledge::daily::enrich_with_cross_analysis(&mut report, &sw).await;
+    autodev::tasks::knowledge::daily::enrich_with_cross_analysis(&mut report, &sw).await;
 
     assert!(
         report.cross_analysis.is_none(),
@@ -228,7 +230,8 @@ async fn daily_suggestions_prompt_includes_cross_analysis_hint() {
     let tmp = tempfile::TempDir::new().unwrap();
 
     let _ =
-        autodev::knowledge::daily::generate_daily_suggestions(&claude, &report, tmp.path()).await;
+        autodev::tasks::knowledge::daily::generate_daily_suggestions(&claude, &report, tmp.path())
+            .await;
 
     let calls = claude.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
@@ -265,7 +268,8 @@ async fn daily_suggestions_prompt_no_cross_hint_without_analysis() {
     let tmp = tempfile::TempDir::new().unwrap();
 
     let _ =
-        autodev::knowledge::daily::generate_daily_suggestions(&claude, &report, tmp.path()).await;
+        autodev::tasks::knowledge::daily::generate_daily_suggestions(&claude, &report, tmp.path())
+            .await;
 
     let calls = claude.calls.lock().unwrap();
     let prompt = &calls[0].prompt;
@@ -354,8 +358,6 @@ fn cross_analysis_omitted_when_none() {
 // Helper
 // ═══════════════════════════════════════════════════
 
-fn sw_trait(
-    sw: &MockSuggestWorkflow,
-) -> &dyn autodev::infrastructure::suggest_workflow::SuggestWorkflow {
-    sw as &dyn autodev::infrastructure::suggest_workflow::SuggestWorkflow
+fn sw_trait(sw: &MockSuggestWorkflow) -> &dyn autodev::infra::suggest_workflow::SuggestWorkflow {
+    sw as &dyn autodev::infra::suggest_workflow::SuggestWorkflow
 }

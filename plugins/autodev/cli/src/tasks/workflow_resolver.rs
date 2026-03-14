@@ -4,7 +4,7 @@
 //! user prompt가 동적으로 분석/리뷰/구현 지시를 전달하고,
 //! system prompt는 최종 출력 형식(JSON 스펙)과 절차를 정의한다.
 
-use crate::config::models::WorkflowStage;
+use crate::core::config::models::WorkflowStage;
 
 /// 워크플로우 대상 구분.
 pub enum TaskType {

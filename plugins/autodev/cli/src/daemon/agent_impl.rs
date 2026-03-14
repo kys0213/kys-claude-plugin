@@ -8,8 +8,8 @@ use std::time::Instant;
 use async_trait::async_trait;
 
 use super::agent::Agent;
-use super::task::{AgentRequest, AgentResponse};
-use crate::infrastructure::claude::Claude;
+use crate::core::task::{AgentRequest, AgentResponse};
+use crate::infra::claude::Claude;
 
 /// Claude CLI를 래핑하는 Agent 구현체.
 pub struct ClaudeAgent {
@@ -50,11 +50,11 @@ impl Agent for ClaudeAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::infrastructure::claude::mock::MockClaude;
+    use crate::infra::claude::mock::MockClaude;
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use crate::infrastructure::claude::SessionOptions;
+    use crate::infra::claude::SessionOptions;
 
     #[tokio::test]
     async fn maps_session_result_to_response() {

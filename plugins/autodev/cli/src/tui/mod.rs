@@ -1,3 +1,4 @@
+pub mod board;
 pub mod events;
 pub mod views;
 
@@ -10,8 +11,8 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 
-use crate::config;
-use crate::queue::Database;
+use crate::core::config;
+use crate::infra::db::Database;
 
 use events::LogTailer;
 

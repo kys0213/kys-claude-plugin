@@ -6,8 +6,8 @@ use ratatui::{
     Frame,
 };
 
-use crate::domain::repository::RepoRepository;
-use crate::queue::Database;
+use crate::core::repository::RepoRepository;
+use crate::infra::db::Database;
 
 // ─── Panel enum ───
 
@@ -167,7 +167,7 @@ pub fn render(f: &mut Frame, db: &Database, status_path: &std::path::Path, state
 }
 
 fn render_header(f: &mut Frame, area: Rect, db: &Database) {
-    let home = crate::config::autodev_home(&crate::config::RealEnv);
+    let home = crate::core::config::autodev_home(&crate::core::config::RealEnv);
     let running = crate::daemon::pid::is_running(&home);
     let status = if running {
         Span::styled("● running", Style::default().fg(Color::Green))

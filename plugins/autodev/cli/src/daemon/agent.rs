@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 
-use super::task::{AgentRequest, AgentResponse};
+use crate::core::task::{AgentRequest, AgentResponse};
 
 /// Agent — Claude CLI 호출 추상화.
 ///

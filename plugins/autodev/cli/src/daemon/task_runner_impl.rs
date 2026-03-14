@@ -7,8 +7,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::agent::Agent;
-use super::task::{Task, TaskResult};
 use super::task_runner::TaskRunner;
+use crate::core::task::{Task, TaskResult};
 
 /// Task 생명주기 실행기.
 ///
@@ -48,8 +48,8 @@ impl TaskRunner for DefaultTaskRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::task::{AgentRequest, AgentResponse, QueueOp, SkipReason, TaskStatus};
-    use crate::infrastructure::claude::SessionOptions;
+    use crate::core::task::{AgentRequest, AgentResponse, QueueOp, SkipReason, TaskStatus};
+    use crate::infra::claude::SessionOptions;
     use std::path::PathBuf;
     use std::sync::Mutex;
     use std::time::Duration;

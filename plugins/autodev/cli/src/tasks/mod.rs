@@ -1,7 +1,9 @@
 pub mod analyze;
 pub mod extract;
+pub mod helpers;
 pub mod implement;
 pub mod improve;
+pub mod knowledge;
 pub mod review;
 pub mod workflow_resolver;
 

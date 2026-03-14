@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use autodev::components::analyzer::Analyzer;
-use autodev::components::reviewer::Reviewer;
-use autodev::infrastructure::claude::mock::MockClaude;
-use autodev::infrastructure::claude::output::{ReviewVerdict, Verdict};
+use autodev::infra::claude::mock::MockClaude;
+use autodev::infra::claude::output::{ReviewVerdict, Verdict};
+use autodev::tasks::helpers::analyzer::Analyzer;
+use autodev::tasks::helpers::reviewer::Reviewer;
 
 // ═══════════════════════════════════════════════
 // Reviewer 테스트

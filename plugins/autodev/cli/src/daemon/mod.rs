@@ -1,15 +1,16 @@
 pub mod agent;
 pub mod agent_impl;
+pub mod collectors;
+pub mod cron;
 pub mod daily_reporter;
 pub mod log;
+pub mod notifiers;
 pub mod pid;
 pub mod status;
-pub mod task;
 pub mod task_manager;
 pub mod task_manager_impl;
 pub mod task_runner;
 pub mod task_runner_impl;
-pub mod task_source;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -19,23 +20,24 @@ use anyhow::{bail, Result};
 use tokio::task::JoinSet;
 use tracing::info;
 
-use crate::components::workspace::OwnedWorkspace;
-use crate::config::{self, Env};
-use crate::domain::git_repository_factory::GitRepositoryFactory;
-use crate::domain::repository::ConsumerLogRepository;
-use crate::infrastructure::claude::Claude;
-use crate::infrastructure::gh::Gh;
-use crate::infrastructure::git::Git;
-use crate::infrastructure::suggest_workflow::SuggestWorkflow;
-use crate::queue::Database;
-use crate::sources::github::GitHubTaskSource;
+use crate::core::config::{self, Env};
+use crate::core::repository::ConsumerLogRepository;
+use crate::daemon::collectors::github::GitHubTaskSource;
+use crate::infra::claude::Claude;
+use crate::infra::db::Database;
+use crate::infra::gh::Gh;
+use crate::infra::git::Git;
+use crate::infra::suggest_workflow::SuggestWorkflow;
+use crate::tasks::helpers::git_ops_factory::GitRepositoryFactory;
+use crate::tasks::helpers::workspace::OwnedWorkspace;
 
 use self::agent_impl::ClaudeAgent;
+use self::cron::engine::CronEngine;
 use self::daily_reporter::DailyReporter;
-use self::task::TaskResult;
 use self::task_manager::TaskManager;
 use self::task_runner::TaskRunner;
 use self::task_runner_impl::DefaultTaskRunner;
+use crate::core::task::TaskResult;
 
 // ─── In-Flight Concurrency Tracker ───
 
@@ -80,7 +82,7 @@ impl InFlightTracker {
 
 /// pending_tasks 버퍼에서 InFlightTracker 상한까지 Task를 꺼내 spawn한다.
 fn try_spawn(
-    pending: &mut Vec<Box<dyn task::Task>>,
+    pending: &mut Vec<Box<dyn crate::core::task::Task>>,
     tracker: &mut InFlightTracker,
     join_set: &mut JoinSet<TaskResult>,
     runner: &Arc<dyn TaskRunner>,
@@ -113,6 +115,7 @@ pub struct Daemon {
     status_path: PathBuf,
     counters: status::StatusCounters,
     tick_interval_secs: u64,
+    cron_engine: Option<CronEngine>,
 }
 
 impl Daemon {
@@ -134,7 +137,13 @@ impl Daemon {
             status_path,
             counters: status::StatusCounters::default(),
             tick_interval_secs,
+            cron_engine: None,
         }
+    }
+
+    pub fn with_cron_engine(mut self, engine: CronEngine) -> Self {
+        self.cron_engine = Some(engine);
+        self
     }
 
     /// 메인 이벤트 루프 실행.
@@ -144,7 +153,7 @@ impl Daemon {
     pub async fn run(&mut self) {
         let start_time = std::time::Instant::now();
         let mut join_set: JoinSet<TaskResult> = JoinSet::new();
-        let mut pending_tasks: Vec<Box<dyn task::Task>> = Vec::new();
+        let mut pending_tasks: Vec<Box<dyn crate::core::task::Task>> = Vec::new();
 
         let mut tick =
             tokio::time::interval(std::time::Duration::from_secs(self.tick_interval_secs));
@@ -175,7 +184,7 @@ impl Daemon {
                     try_spawn(&mut pending_tasks, &mut self.tracker, &mut join_set, &self.runner);
                 }
 
-                // ── Tick: housekeeping + spawn + daily report ──
+                // ── Tick: housekeeping + spawn + daily report + cron ──
                 _ = tick.tick() => {
                     self.manager.tick().await;
                     pending_tasks.extend(self.manager.drain_ready());
@@ -183,6 +192,14 @@ impl Daemon {
                     try_spawn(&mut pending_tasks, &mut self.tracker, &mut join_set, &self.runner);
 
                     self.reporter.maybe_run().await;
+
+                    // Execute due cron jobs
+                    if let Some(ref cron) = self.cron_engine {
+                        let results = cron.tick().await;
+                        for r in &results {
+                            info!("cron '{}' completed: exit_code={}", r.job_name, r.exit_code);
+                        }
+                    }
                 }
 
                 // ── Status heartbeat ──
@@ -302,7 +319,7 @@ pub async fn start(
     let cfg = config::loader::load_merged(&*env, None);
 
     let db_path = home.join("autodev.db");
-    // Source DB: owned by GitHubTaskSource (repo sync, cursor operations)
+    // Source DB: owned by GitHubTaskSource / Collector (repo sync, cursor operations)
     let source_db = Database::open(&db_path)?;
     source_db.initialize()?;
     // Logging DB: separate connection for task result logging
@@ -316,7 +333,7 @@ pub async fn start(
     let agent = Arc::new(ClaudeAgent::new(Arc::clone(&claude)));
     let runner: Arc<dyn TaskRunner> = Arc::new(DefaultTaskRunner::new(agent));
 
-    // ── TaskSource: GitHubTaskSource ──
+    // ── Collector: GitHubTaskSource ──
     let workspace = Arc::new(OwnedWorkspace::new(Arc::clone(&git), Arc::clone(&env)));
     let config_loader = Arc::new(config::RealConfigLoader::new(Box::new(EnvClone(
         Arc::clone(&env),
@@ -383,6 +400,10 @@ pub async fn start(
         cfg.daemon.max_concurrent_tasks
     );
 
+    // ── CronEngine ──
+    let cron_db = Database::open(&db_path)?;
+    let cron_engine = CronEngine::new(cron_db, home.to_path_buf());
+
     // ── Daemon ──
     let status_path = home.join("daemon.status.json");
     let mut daemon = Daemon::new(
@@ -393,7 +414,8 @@ pub async fn start(
         log_db,
         status_path,
         cfg.daemon.tick_interval_secs,
-    );
+    )
+    .with_cron_engine(cron_engine);
 
     daemon.run().await;
 

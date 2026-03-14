@@ -1,0 +1,95 @@
+use anyhow::Result;
+
+use super::models::*;
+
+// ─── Repository traits ───
+
+pub trait RepoRepository {
+    fn repo_add(&self, url: &str, name: &str) -> Result<String>;
+    fn repo_remove(&self, name: &str) -> Result<()>;
+    fn repo_list(&self) -> Result<Vec<RepoInfo>>;
+    fn repo_find_enabled(&self) -> Result<Vec<EnabledRepo>>;
+    fn repo_status_summary(&self) -> Result<Vec<RepoStatusRow>>;
+}
+
+pub trait ScanCursorRepository {
+    fn cursor_get_last_seen(&self, repo_id: &str, target: &str) -> Result<Option<String>>;
+    fn cursor_upsert(&self, repo_id: &str, target: &str, last_seen: &str) -> Result<()>;
+    fn cursor_should_scan(&self, repo_id: &str, interval_secs: i64) -> Result<bool>;
+}
+
+pub trait ConsumerLogRepository {
+    fn log_insert(&self, log: &NewConsumerLog) -> Result<()>;
+    fn log_recent(&self, repo_name: Option<&str>, limit: usize) -> Result<Vec<LogEntry>>;
+    /// 특정 날짜의 knowledge extraction stdout를 모두 반환
+    fn log_knowledge_stdout_by_date(&self, date: &str) -> Result<Vec<String>>;
+}
+
+pub trait TokenUsageRepository {
+    fn usage_insert(&self, usage: &NewTokenUsage) -> Result<()>;
+    fn usage_summary(&self, repo: Option<&str>, since: Option<&str>) -> Result<UsageSummary>;
+    fn usage_by_issue(&self, repo: &str, issue: i64) -> Result<Vec<UsageByIssue>>;
+}
+
+pub trait SpecRepository {
+    fn spec_add(&self, spec: &NewSpec) -> Result<String>;
+    fn spec_list(&self, repo: Option<&str>) -> Result<Vec<Spec>>;
+    fn spec_show(&self, id: &str) -> Result<Option<Spec>>;
+    fn spec_update(
+        &self,
+        id: &str,
+        body: &str,
+        test_commands: Option<&str>,
+        acceptance_criteria: Option<&str>,
+    ) -> Result<()>;
+    fn spec_set_status(&self, id: &str, status: SpecStatus) -> Result<()>;
+    fn spec_issues(&self, spec_id: &str) -> Result<Vec<SpecIssue>>;
+    fn spec_issue_counts(&self) -> Result<std::collections::HashMap<String, usize>>;
+    fn spec_link_issue(&self, spec_id: &str, issue_number: i64) -> Result<()>;
+    fn spec_unlink_issue(&self, spec_id: &str, issue_number: i64) -> Result<()>;
+}
+
+pub trait HitlRepository {
+    fn hitl_create(&self, event: &NewHitlEvent) -> Result<String>;
+    fn hitl_list(&self, repo: Option<&str>) -> Result<Vec<HitlEvent>>;
+    fn hitl_show(&self, id: &str) -> Result<Option<HitlEvent>>;
+    fn hitl_respond(&self, response: &NewHitlResponse) -> Result<()>;
+    fn hitl_set_status(&self, id: &str, status: HitlStatus) -> Result<()>;
+    fn hitl_pending_count(&self, repo: Option<&str>) -> Result<i64>;
+    fn hitl_responses(&self, event_id: &str) -> Result<Vec<HitlResponse>>;
+}
+
+pub trait QueueRepository {
+    /// 큐 아이템의 현재 phase를 조회한다
+    fn queue_get_phase(&self, work_id: &str) -> Result<Option<String>>;
+    /// 큐 아이템을 다음 phase로 전이한다 (pending → ready → running → done)
+    fn queue_advance(&self, work_id: &str) -> Result<()>;
+    /// 큐 아이템을 skip 처리한다
+    fn queue_skip(&self, work_id: &str, reason: Option<&str>) -> Result<()>;
+    /// 큐 아이템 목록을 조회한다 (repo별 필터 가능)
+    fn queue_list_items(&self, repo: Option<&str>) -> Result<Vec<QueueItem>>;
+}
+
+pub trait ClawDecisionRepository {
+    fn decision_add(&self, decision: &NewClawDecision) -> Result<String>;
+    fn decision_list(&self, repo: Option<&str>, limit: usize) -> Result<Vec<ClawDecision>>;
+    fn decision_show(&self, id: &str) -> Result<Option<ClawDecision>>;
+    fn decision_list_by_spec(&self, spec_id: &str, limit: usize) -> Result<Vec<ClawDecision>>;
+    fn decision_count(&self, repo: Option<&str>) -> Result<i64>;
+}
+
+pub trait CronRepository {
+    fn cron_add(&self, job: &NewCronJob) -> Result<String>;
+    fn cron_list(&self, repo: Option<&str>) -> Result<Vec<CronJob>>;
+    fn cron_show(&self, name: &str, repo: Option<&str>) -> Result<Option<CronJob>>;
+    fn cron_update_interval(
+        &self,
+        name: &str,
+        repo: Option<&str>,
+        interval_secs: u64,
+    ) -> Result<()>;
+    fn cron_set_status(&self, name: &str, repo: Option<&str>, status: CronStatus) -> Result<()>;
+    fn cron_remove(&self, name: &str, repo: Option<&str>) -> Result<()>;
+    fn cron_update_last_run(&self, id: &str) -> Result<()>;
+    fn cron_find_due(&self) -> Result<Vec<CronJob>>;
+}

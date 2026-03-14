@@ -12,18 +12,18 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use super::AGENT_SYSTEM_PROMPT;
-use crate::components::verdict;
-use crate::components::workspace::WorkspaceOps;
-use crate::config::ConfigLoader;
-use crate::daemon::task::{
+use crate::core::config::ConfigLoader;
+use crate::core::labels;
+use crate::core::models::NewConsumerLog;
+use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
-use crate::domain::labels;
-use crate::domain::models::NewConsumerLog;
-use crate::infrastructure::claude::output::{self, AnalysisResult};
-use crate::infrastructure::claude::SessionOptions;
-use crate::infrastructure::gh::Gh;
-use crate::queue::task_queues::IssueItem;
+use crate::core::task_queues::IssueItem;
+use crate::infra::claude::output::{self, AnalysisResult};
+use crate::infra::claude::SessionOptions;
+use crate::infra::gh::Gh;
+use crate::tasks::helpers::verdict;
+use crate::tasks::helpers::workspace::WorkspaceOps;
 
 // ─── 분석 프롬프트 (JSON 응답 스키마 명시) ───
 
@@ -501,9 +501,9 @@ mod tests {
     use std::sync::Mutex;
     use std::time::Duration;
 
-    use crate::config::models::WorkflowConfig;
-    use crate::infrastructure::gh::mock::MockGh;
-    use crate::queue::task_queues::make_work_id;
+    use crate::core::config::models::WorkflowConfig;
+    use crate::core::task_queues::make_work_id;
+    use crate::infra::gh::mock::MockGh;
 
     // ─── Mock WorkspaceOps ───
 

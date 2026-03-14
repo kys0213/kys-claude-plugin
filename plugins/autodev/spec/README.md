@@ -1,7 +1,7 @@
 # SPEC v4: Claw Layer
 
 > **Date**: 2026-03-14
-> **구조**: 각 항목은 `flow.md`(사용자 플로우)와 `design.md`(컴포넌트 설계)로 구성
+> **구조**: 각 항목은 `flow.md`(사용자 플로우)로 구성, 전체 설계는 `DESIGN.md` 참조
 
 ## 개요
 
@@ -27,21 +27,21 @@ autodev v4는 **두 가지 모드**로 동작한다:
 
 ## 스펙 목록
 
-| # | 항목 | 설명 | flow | design |
-|---|------|------|------|--------|
-| 1 | [레포 등록](./01-repo-registration/) | autodev로 관리할 레포 등록 | ✅ | ⬜ |
-| 2 | [이슈 등록](./02-issue-registration/) | Issue 모드 (v3 호환 + Claw 확장) | ✅ | ⬜ |
-| 3 | [스펙 등록](./03-spec-registration/) | Spec 모드, 필수 섹션 검증, /add-spec | ✅ | ⬜ |
-| 4 | [다중 스펙 우선순위](./04-spec-priority/) | 스펙 간 우선순위/충돌 판단 | ✅ | ⬜ |
-| 5 | [HITL 알림](./05-hitl-notification/) | 알림 채널 OCP (Notifier trait) | ✅ | ⬜ |
-| 6 | [칸반 보드](./06-kanban-board/) | TUI 칸반, BoardRenderer trait | ✅ | ⬜ |
-| 7 | [피드백 루프](./07-feedback-loop/) | /update-spec 대화형 수정 | ✅ | ⬜ |
-| 8 | [스펙 완료 판정](./08-spec-completion/) | 완료 조건 + HITL 최종 확인 | ✅ | ⬜ |
-| 9 | [실패 복구](./09-failure-recovery/) | 유형별 대응 + 에스컬레이션 | ✅ | ⬜ |
-| 10 | [Claw 워크스페이스](./10-claw-workspace/) | 자연어 기반 Claw 행동 설정 | ✅ | ⬜ |
-| 11 | [컨벤션 부트스트랩](./11-convention-bootstrap/) | 기술 스택 기반 규칙 제안 + 자율 개선 | ✅ | ⬜ |
-| 12 | [인터페이스 레퍼런스](./12-cli-reference/) | Plugin commands (SSOT) + autodev CLI | ✅ | ⬜ |
-| 13 | [Cron 관리](./13-cron/) | 스크립트 기반 cron, 환경변수 주입, 유효성 검증 | ✅ | ⬜ |
+| # | 항목 | 설명 | flow |
+|---|------|------|------|
+| 1 | [레포 등록](./01-repo-registration/) | autodev로 관리할 레포 등록 | ✅ |
+| 2 | [이슈 등록](./02-issue-registration/) | Issue 모드 (v3 호환 + Claw 확장) | ✅ |
+| 3 | [스펙 등록](./03-spec-registration/) | Spec 모드, 필수 섹션 검증, /add-spec | ✅ |
+| 4 | [다중 스펙 우선순위](./04-spec-priority/) | 스펙 간 우선순위/충돌 판단 | ✅ |
+| 5 | [HITL 알림](./05-hitl-notification/) | 알림 채널 OCP (Notifier trait) | ✅ |
+| 6 | [칸반 보드](./06-kanban-board/) | TUI 칸반, BoardRenderer trait | ✅ |
+| 7 | [피드백 루프](./07-feedback-loop/) | /update-spec 대화형 수정 | ✅ |
+| 8 | [스펙 완료 판정](./08-spec-completion/) | 완료 조건 + HITL 최종 확인 | ✅ |
+| 9 | [실패 복구](./09-failure-recovery/) | 유형별 대응 + 에스컬레이션 | ✅ |
+| 10 | [Claw 워크스페이스](./10-claw-workspace/) | 자연어 기반 Claw 행동 설정 | ✅ |
+| 11 | [컨벤션 부트스트랩](./11-convention-bootstrap/) | 기술 스택 기반 규칙 제안 + 자율 개선 | ✅ |
+| 12 | [인터페이스 레퍼런스](./12-cli-reference/) | Plugin commands (SSOT) + autodev CLI | ✅ |
+| 13 | [Cron 관리](./13-cron/) | 스크립트 기반 cron, 환경변수 주입, 유효성 검증 | ✅ |
 
 ## 메인 에이전트 모델
 
@@ -142,8 +142,8 @@ Flow 1: 레포 등록
 
 ## 다음 단계
 
-이 플로우 문서가 확정되면:
+플로우 문서 + DESIGN.md 확정 완료. 구현 진행:
 
-1. 각 플로우에서 필요한 **컴포넌트**를 도출
-2. 컴포넌트 간 **인터페이스** 정의
-3. DESIGN-v4.md를 플로우 기반으로 재구성
+1. v4 패키지 구조 생성 (`core/`, `infra/`, `daemon/`, `cli/`, `tui/`, `tasks/`)
+2. v3 코드를 v4 구조로 이동
+3. DESIGN.md Phase 순서로 신규 컴포넌트 구현

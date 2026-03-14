@@ -1,0 +1,901 @@
+use std::io::{BufRead, BufReader};
+use std::path::Path;
+
+use anyhow::Result;
+
+use crate::infra::claude::Claude;
+use crate::infra::gh::Gh;
+use crate::infra::suggest_workflow::SuggestWorkflow;
+
+use crate::core::repository::ConsumerLogRepository;
+use crate::infra::db::Database;
+
+use super::models::{
+    CrossAnalysis, DailyReport, DailySummary, KnowledgeSuggestion, Pattern, PatternType, Suggestion,
+};
+
+/// 데몬 로그 파싱 결과
+#[derive(Debug, Default)]
+pub struct LogStats {
+    pub issues_done: u32,
+    pub prs_done: u32,
+    pub failed: u32,
+    pub skipped: u32,
+    pub total_duration_ms: u64,
+    pub task_count: u32,
+    pub error_lines: Vec<String>,
+    pub task_ids: Vec<String>,
+}
+
+/// 데몬 로그 파일을 파싱하여 일간 통계 추출
+pub fn parse_daemon_log(log_path: &Path) -> LogStats {
+    let mut stats = LogStats::default();
+
+    let file = match std::fs::File::open(log_path) {
+        Ok(f) => f,
+        Err(_) => return stats,
+    };
+
+    let reader = BufReader::new(file);
+    for line in reader.lines().map_while(Result::ok) {
+        // "→ done" or "→ Done" — issue/PR 완료
+        if line.contains("→ Done") || line.contains("→ done") {
+            if line.contains("issue") || line.contains("Issue") {
+                stats.issues_done += 1;
+            } else if line.contains("PR") || line.contains("pr") {
+                stats.prs_done += 1;
+            }
+            stats.task_count += 1;
+        }
+
+        // "→ Failed" — 실패
+        if line.contains("→ Failed") || line.contains("→ failed") {
+            stats.failed += 1;
+            stats.task_count += 1;
+        }
+
+        // "→ skip" — 스킵
+        if line.contains("→ skip") || line.contains("→ Skip") {
+            stats.skipped += 1;
+            stats.task_count += 1;
+        }
+
+        // duration 추출: "1234ms)" 패턴에서 숫자 부분을 역방향 탐색
+        if let Some(ms_end) = line.rfind("ms)") {
+            let num_start = line[..ms_end]
+                .bytes()
+                .rposition(|b| !b.is_ascii_digit())
+                .map(|p| p + 1)
+                .unwrap_or(0);
+            if num_start < ms_end {
+                if let Ok(ms) = line[num_start..ms_end].parse::<u64>() {
+                    stats.total_duration_ms += ms;
+                }
+            }
+        }
+
+        // ERROR 라인 수집
+        if line.contains(" ERROR ") || line.contains("[ERROR]") {
+            stats.error_lines.push(line.clone());
+        }
+
+        // 태스크 ID 수집: "queued issue #42" or "queued PR #10"
+        if line.contains("queued ") {
+            if let Some(hash_pos) = line.find('#') {
+                let num_str: String = line[hash_pos + 1..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect();
+                if !num_str.is_empty() {
+                    let prefix = if line.contains("issue") {
+                        "issue"
+                    } else {
+                        "pr"
+                    };
+                    stats.task_ids.push(format!("{prefix}:{num_str}"));
+                }
+            }
+        }
+    }
+
+    stats
+}
+
+/// 로그 통계에서 반복 패턴 감지
+pub fn detect_patterns(stats: &LogStats) -> Vec<Pattern> {
+    let mut patterns = Vec::new();
+
+    // repeated_failure: 실패가 3건 이상이면 패턴으로 보고
+    if stats.failed >= 3 {
+        patterns.push(Pattern {
+            pattern_type: PatternType::RepeatedFailure,
+            description: format!("{} tasks failed in a single day", stats.failed),
+            occurrences: stats.failed,
+            affected_tasks: stats.task_ids.clone(),
+        });
+    }
+
+    // error 빈도 기반 hotfile 추출 (같은 파일명이 error에 3회 이상 등장)
+    let mut file_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    for err_line in &stats.error_lines {
+        // 파일명 패턴 추출: "src/..." or "*.rs" etc.
+        for word in err_line.split_whitespace() {
+            if (word.contains('/') && word.contains('.')) || word.ends_with(".rs") {
+                *file_counts.entry(word.to_string()).or_default() += 1;
+            }
+        }
+    }
+    for (file, count) in &file_counts {
+        if *count >= 3 {
+            patterns.push(Pattern {
+                pattern_type: PatternType::Hotfile,
+                description: format!("{file} appeared in {count} error lines"),
+                occurrences: *count,
+                affected_tasks: vec![],
+            });
+        }
+    }
+
+    patterns
+}
+
+/// DailyReport 생성
+pub fn build_daily_report(date: &str, stats: &LogStats, patterns: Vec<Pattern>) -> DailyReport {
+    let avg_duration_ms = if stats.task_count > 0 {
+        stats.total_duration_ms / stats.task_count as u64
+    } else {
+        0
+    };
+
+    DailyReport {
+        date: date.to_string(),
+        summary: DailySummary {
+            issues_done: stats.issues_done,
+            prs_done: stats.prs_done,
+            failed: stats.failed,
+            skipped: stats.skipped,
+            avg_duration_ms,
+        },
+        patterns,
+        suggestions: Vec::new(), // Claude가 채울 영역
+        cross_analysis: None,    // suggest-workflow 연동 시 채워짐
+    }
+}
+
+/// suggest-workflow에서 교차 분석 데이터를 수집하여 DailyReport에 추가
+pub async fn enrich_with_cross_analysis(report: &mut DailyReport, sw: &dyn SuggestWorkflow) {
+    let session_filter = "first_prompt_snippet LIKE '[autodev]%'";
+
+    // 1. filtered-sessions: 전일 autodev 세션 목록
+    let sessions = match sw
+        .query_filtered_sessions("[autodev]", Some(&report.date), None)
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::debug!("suggest-workflow filtered-sessions query failed (non-fatal): {e}");
+            Vec::new()
+        }
+    };
+
+    // 2. tool-frequency: autodev 세션의 도구 사용 빈도
+    let tool_frequencies = match sw.query_tool_frequency(Some(session_filter)).await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::debug!("suggest-workflow tool-frequency query failed (non-fatal): {e}");
+            Vec::new()
+        }
+    };
+
+    // 3. repetition: 이상치 세션 탐지
+    let anomalies = match sw.query_repetition(Some(session_filter)).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::debug!("suggest-workflow repetition query failed (non-fatal): {e}");
+            Vec::new()
+        }
+    };
+
+    // 데이터가 하나라도 있으면 cross_analysis 설정
+    if !sessions.is_empty() || !tool_frequencies.is_empty() || !anomalies.is_empty() {
+        report.cross_analysis = Some(CrossAnalysis {
+            tool_frequencies,
+            anomalies,
+            sessions,
+        });
+    }
+}
+
+/// Claude에게 DailyReport를 전달하여 KnowledgeSuggestion 생성
+///
+/// report에 cross_analysis가 포함되어 있으면 교차 분석 섹션도 프롬프트에 포함.
+pub async fn generate_daily_suggestions(
+    claude: &dyn Claude,
+    report: &DailyReport,
+    wt_path: &Path,
+) -> Option<KnowledgeSuggestion> {
+    let report_json = match serde_json::to_string_pretty(report) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::error!("failed to serialize daily report: {e}");
+            return None;
+        }
+    };
+
+    let cross_analysis_hint = if report.cross_analysis.is_some() {
+        "\n\nThe report includes `cross_analysis` from suggest-workflow with tool usage patterns, \
+         session data, and anomalies. Cross-reference these with daemon log patterns to identify \
+         deeper insights (e.g., high tool frequency correlated with failures, repeated test loops)."
+    } else {
+        ""
+    };
+
+    let date = &report.date;
+    let prompt = format!(
+        "[autodev] knowledge: daily {date}\n\n\
+         Below is today's autodev daily report. Analyze the patterns and suggest improvements.\n\n\
+         ```json\n{report_json}\n```{cross_analysis_hint}\n\n\
+         Respond with a JSON object:\n\
+         {{\n  \"suggestions\": [\n    {{\n      \
+         \"type\": \"rule | claude_md | hook | skill | subagent\",\n      \
+         \"target_file\": \"path to file\",\n      \
+         \"content\": \"specific recommendation\",\n      \
+         \"reason\": \"why this matters\"\n    }}\n  ]\n}}"
+    );
+
+    match claude
+        .run_session(wt_path, &prompt, &Default::default())
+        .await
+    {
+        Ok(res) if res.exit_code == 0 => {
+            crate::infra::claude::output::try_parse_with_fallbacks(&res.stdout)
+        }
+        Ok(res) => {
+            tracing::warn!("daily suggestion generation exited with {}", res.exit_code);
+            None
+        }
+        Err(e) => {
+            tracing::warn!("daily suggestion generation failed: {e}");
+            None
+        }
+    }
+}
+
+/// 일간 리포트를 GitHub 이슈로 게시
+pub async fn post_daily_report(
+    gh: &dyn Gh,
+    repo_name: &str,
+    report: &DailyReport,
+    gh_host: Option<&str>,
+) {
+    let title = format!("[autodev] Daily Report {}", report.date);
+    let body = format_daily_report_body(report);
+
+    // gh api로 이슈 생성
+    let created = gh.create_issue(repo_name, &title, &body, gh_host).await;
+    if !created {
+        tracing::error!("failed to create daily report issue for {repo_name}");
+    }
+}
+
+/// DailyReport의 suggestions를 각각 PR로 생성
+///
+/// 각 suggestion에 대해:
+/// 1. branch 생성 (autodev/knowledge/{date}-{index})
+/// 2. target_file에 content 기록
+/// 3. commit + push
+/// 4. PR 생성 + autodev:skip 라벨 부착
+pub async fn create_knowledge_prs(
+    gh: &dyn Gh,
+    workspace: &crate::tasks::helpers::workspace::Workspace<'_>,
+    repo_name: &str,
+    report: &DailyReport,
+    gh_host: Option<&str>,
+) {
+    use crate::core::labels;
+
+    let git = workspace.git();
+
+    for (i, suggestion) in report.suggestions.iter().enumerate() {
+        let branch = format!("autodev/knowledge/{}-{}", report.date, i);
+        let knowledge_task_id = format!("knowledge-daily-{}-{i}", report.date);
+        let target = &suggestion.target_file;
+
+        // 1. 별도 worktree 생성 (base_path 오염 방지)
+        let kn_wt_path = match workspace
+            .create_worktree(repo_name, &knowledge_task_id, None)
+            .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("knowledge PR: worktree creation failed: {e}");
+                continue;
+            }
+        };
+
+        // 2. branch 생성
+        if let Err(e) = git.checkout_new_branch(&kn_wt_path, &branch).await {
+            tracing::warn!("knowledge PR: failed to create branch {branch}: {e}");
+            let _ = workspace
+                .remove_worktree(repo_name, &knowledge_task_id)
+                .await;
+            continue;
+        }
+
+        // 3. 파일 쓰기 (path traversal 방지)
+        let file_path = match crate::core::config::safe_join(&kn_wt_path, target) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("knowledge PR: unsafe target_file '{target}': {e}");
+                let _ = workspace
+                    .remove_worktree(repo_name, &knowledge_task_id)
+                    .await;
+                continue;
+            }
+        };
+        if let Some(parent) = file_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(e) = std::fs::write(&file_path, &suggestion.content) {
+            tracing::warn!("knowledge PR: failed to write {target}: {e}");
+            let _ = workspace
+                .remove_worktree(repo_name, &knowledge_task_id)
+                .await;
+            continue;
+        }
+
+        // 4. commit + push
+        let message = format!("[autodev] knowledge: {}", suggestion.reason);
+        if let Err(e) = git
+            .add_commit_push(&kn_wt_path, &[target.as_str()], &message, &branch)
+            .await
+        {
+            tracing::warn!("knowledge PR: failed to commit+push {branch}: {e}");
+            let _ = workspace
+                .remove_worktree(repo_name, &knowledge_task_id)
+                .await;
+            continue;
+        }
+
+        // 5. PR 생성
+        let pr_title = format!("[autodev] rule: {}", suggestion.reason);
+        let pr_body = format!(
+            "<!-- autodev:knowledge-pr -->\n\n\
+             ## Knowledge Suggestion\n\n\
+             **Type**: {:?}\n\
+             **Target**: `{}`\n\n\
+             ### Content\n\n```\n{}\n```\n\n\
+             ### Reason\n\n{}",
+            suggestion.suggestion_type,
+            suggestion.target_file,
+            suggestion.content,
+            suggestion.reason,
+        );
+
+        if let Some(pr_number) = gh
+            .create_pr(repo_name, &branch, "main", &pr_title, &pr_body, gh_host)
+            .await
+        {
+            // autodev:skip 라벨 부착 — 스캐너가 자동 처리하지 않도록
+            gh.label_add(repo_name, pr_number, labels::SKIP, gh_host)
+                .await;
+            tracing::info!(
+                "knowledge PR #{pr_number} created for suggestion {i}: {}",
+                suggestion.reason
+            );
+        } else {
+            tracing::warn!("knowledge PR: failed to create PR for suggestion {i}");
+        }
+
+        // 6. worktree 정리
+        let _ = workspace
+            .remove_worktree(repo_name, &knowledge_task_id)
+            .await;
+    }
+}
+
+/// v2: consumer_logs에서 당일 knowledge extraction 결과를 집계
+///
+/// queue_type = 'knowledge'인 로그의 stdout를 KnowledgeSuggestion으로 파싱하여
+/// 모든 suggestions를 flat하게 모아서 반환한다.
+pub fn aggregate_daily_suggestions(db: &Database, date: &str) -> Vec<Suggestion> {
+    let stdouts = match db.log_knowledge_stdout_by_date(date) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("failed to query knowledge logs for {date}: {e}");
+            return Vec::new();
+        }
+    };
+
+    let mut all_suggestions = Vec::new();
+    for stdout in &stdouts {
+        if let Ok(ks) = serde_json::from_str::<KnowledgeSuggestion>(stdout) {
+            all_suggestions.extend(ks.suggestions);
+        }
+    }
+
+    all_suggestions
+}
+
+/// v2: per-task knowledge extraction 결과를 집계
+///
+/// 당일 knowledge 코멘트들에서 target_file 기준으로 그룹핑하여
+/// 2회 이상 등장하는 패턴을 감지한다.
+pub fn detect_cross_task_patterns(suggestions: &[super::models::Suggestion]) -> Vec<Pattern> {
+    let mut file_counts: std::collections::HashMap<&str, Vec<&str>> =
+        std::collections::HashMap::new();
+    let mut type_counts: std::collections::HashMap<&super::models::SuggestionType, Vec<&str>> =
+        std::collections::HashMap::new();
+
+    for s in suggestions {
+        file_counts
+            .entry(&s.target_file)
+            .or_default()
+            .push(&s.reason);
+        type_counts
+            .entry(&s.suggestion_type)
+            .or_default()
+            .push(&s.reason);
+    }
+
+    let mut patterns = Vec::new();
+
+    // Hotfile: 동일 파일이 2회 이상 제안됨
+    for (file, reasons) in &file_counts {
+        if reasons.len() >= 2 {
+            patterns.push(Pattern {
+                pattern_type: PatternType::Hotfile,
+                description: format!(
+                    "{file} suggested by {} tasks: {}",
+                    reasons.len(),
+                    reasons.join("; ")
+                ),
+                occurrences: reasons.len() as u32,
+                affected_tasks: vec![],
+            });
+        }
+    }
+
+    // ReviewCycle: 동일 suggestion_type이 3회 이상 반복됨
+    for (st, reasons) in &type_counts {
+        if reasons.len() >= 3 {
+            patterns.push(Pattern {
+                pattern_type: PatternType::ReviewCycle,
+                description: format!(
+                    "{:?} suggested {} times across tasks: {}",
+                    st,
+                    reasons.len(),
+                    reasons.join("; ")
+                ),
+                occurrences: reasons.len() as u32,
+                affected_tasks: vec![],
+            });
+        }
+    }
+
+    patterns
+}
+
+/// DailyReport를 Markdown 본문으로 포맷
+fn format_daily_report_body(report: &DailyReport) -> String {
+    let s = &report.summary;
+    let mut body = format!(
+        "<!-- autodev:daily-report -->\n\
+         ## Summary\n\n\
+         | Metric | Count |\n\
+         |--------|-------|\n\
+         | Issues done | {} |\n\
+         | PRs done | {} |\n\
+         | Failed | {} |\n\
+         | Skipped | {} |\n\
+         | Avg duration | {}ms |\n",
+        s.issues_done, s.prs_done, s.failed, s.skipped, s.avg_duration_ms
+    );
+
+    if !report.patterns.is_empty() {
+        body.push_str("\n## Patterns\n\n");
+        for p in &report.patterns {
+            body.push_str(&format!(
+                "- **{:?}** (x{}): {}\n",
+                p.pattern_type, p.occurrences, p.description
+            ));
+            if !p.affected_tasks.is_empty() {
+                body.push_str(&format!("  - Affected: {}\n", p.affected_tasks.join(", ")));
+            }
+        }
+    }
+
+    if let Some(ref ca) = report.cross_analysis {
+        body.push_str("\n## Cross Analysis (suggest-workflow)\n\n");
+
+        if !ca.sessions.is_empty() {
+            body.push_str(&format!(
+                "**Sessions**: {} autodev sessions\n\n",
+                ca.sessions.len()
+            ));
+        }
+
+        if !ca.tool_frequencies.is_empty() {
+            body.push_str("**Top Tools**:\n");
+            for tf in ca.tool_frequencies.iter().take(10) {
+                body.push_str(&format!(
+                    "- `{}`: {} uses across {} sessions\n",
+                    tf.tool, tf.frequency, tf.sessions
+                ));
+            }
+            body.push('\n');
+        }
+
+        if !ca.anomalies.is_empty() {
+            body.push_str("**Anomalies** (z-score outliers):\n");
+            for a in &ca.anomalies {
+                body.push_str(&format!(
+                    "- Session `{}`: `{}` x{} (deviation: {:.1})\n",
+                    a.session_id, a.tool, a.cnt, a.deviation_score
+                ));
+            }
+            body.push('\n');
+        }
+    }
+
+    if !report.suggestions.is_empty() {
+        body.push_str("\n## Suggestions\n\n");
+        for s in &report.suggestions {
+            body.push_str(&format!(
+                "- **{:?}** → `{}`: {}\n  > {}\n",
+                s.suggestion_type, s.target_file, s.content, s.reason
+            ));
+        }
+    }
+
+    body
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    #[test]
+    fn parse_daemon_log_counts_done_and_failed() {
+        let tmp = TempDir::new().unwrap();
+        let log_path = tmp.path().join("daemon.2026-02-22.log");
+        {
+            let mut f = std::fs::File::create(&log_path).unwrap();
+            writeln!(f, "2026-02-22T10:00:00 INFO issue #42 → Done (5000ms)").unwrap();
+            writeln!(f, "2026-02-22T10:01:00 INFO PR #10 → Done (3000ms)").unwrap();
+            writeln!(f, "2026-02-22T10:02:00 ERROR issue #43 → Failed").unwrap();
+            writeln!(f, "2026-02-22T10:03:00 INFO issue #44 → skip").unwrap();
+            writeln!(f, "2026-02-22T09:00:00 INFO queued issue #42").unwrap();
+            writeln!(f, "2026-02-22T09:01:00 INFO queued PR #10").unwrap();
+        }
+
+        let stats = parse_daemon_log(&log_path);
+        assert_eq!(stats.issues_done, 1);
+        assert_eq!(stats.prs_done, 1);
+        assert_eq!(stats.failed, 1);
+        assert_eq!(stats.skipped, 1);
+        assert_eq!(stats.total_duration_ms, 8000);
+        assert_eq!(stats.task_count, 4);
+        assert_eq!(stats.task_ids.len(), 2);
+    }
+
+    #[test]
+    fn parse_daemon_log_empty_file() {
+        let tmp = TempDir::new().unwrap();
+        let log_path = tmp.path().join("daemon.log");
+        std::fs::File::create(&log_path).unwrap();
+
+        let stats = parse_daemon_log(&log_path);
+        assert_eq!(stats.task_count, 0);
+    }
+
+    #[test]
+    fn parse_daemon_log_missing_file() {
+        let stats = parse_daemon_log(Path::new("/nonexistent/log.log"));
+        assert_eq!(stats.task_count, 0);
+    }
+
+    #[test]
+    fn parse_daemon_log_ansi_codes_and_trailing_parens() {
+        let tmp = TempDir::new().unwrap();
+        let log_path = tmp.path().join("daemon.log");
+        {
+            let mut f = std::fs::File::create(&log_path).unwrap();
+            // ANSI escape codes + trailing "(HTTP 401)" after "ms)" — caused begin>end panic
+            writeln!(
+                f,
+                "\x1b[2m2026-03-03T03:05:05Z\x1b[0m \x1b[33m WARN\x1b[0m \
+                 [gh:api_paginate] <<< FAILED (exit=1, 34643ms): gh: (HTTP 401)"
+            )
+            .unwrap();
+            // Normal line with duration
+            writeln!(f, "2026-03-03T10:00:00 INFO issue #42 → Done (5000ms)").unwrap();
+        }
+
+        let stats = parse_daemon_log(&log_path);
+        // Should not panic, and should extract both durations
+        assert_eq!(stats.total_duration_ms, 34643 + 5000);
+        assert_eq!(stats.issues_done, 1);
+    }
+
+    #[test]
+    fn detect_patterns_repeated_failure() {
+        let stats = LogStats {
+            failed: 3,
+            task_ids: vec!["issue:1".into(), "issue:2".into(), "issue:3".into()],
+            ..Default::default()
+        };
+
+        let patterns = detect_patterns(&stats);
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].pattern_type, PatternType::RepeatedFailure);
+        assert_eq!(patterns[0].occurrences, 3);
+    }
+
+    #[test]
+    fn detect_patterns_no_patterns_when_few_failures() {
+        let stats = LogStats {
+            failed: 1,
+            ..Default::default()
+        };
+
+        let patterns = detect_patterns(&stats);
+        assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn build_daily_report_computes_avg_duration() {
+        let stats = LogStats {
+            issues_done: 5,
+            prs_done: 2,
+            failed: 1,
+            skipped: 0,
+            total_duration_ms: 8000,
+            task_count: 8,
+            ..Default::default()
+        };
+
+        let report = build_daily_report("2026-02-22", &stats, vec![]);
+        assert_eq!(report.summary.avg_duration_ms, 1000);
+        assert_eq!(report.summary.issues_done, 5);
+        assert_eq!(report.date, "2026-02-22");
+    }
+
+    #[test]
+    fn build_daily_report_zero_tasks() {
+        let stats = LogStats::default();
+        let report = build_daily_report("2026-02-22", &stats, vec![]);
+        assert_eq!(report.summary.avg_duration_ms, 0);
+    }
+
+    #[test]
+    fn format_daily_report_body_renders_markdown() {
+        let report = DailyReport {
+            date: "2026-02-22".into(),
+            summary: DailySummary {
+                issues_done: 3,
+                prs_done: 1,
+                failed: 0,
+                skipped: 1,
+                avg_duration_ms: 5000,
+            },
+            patterns: vec![Pattern {
+                pattern_type: PatternType::RepeatedFailure,
+                description: "3 tasks failed".into(),
+                occurrences: 3,
+                affected_tasks: vec!["issue:1".into()],
+            }],
+            suggestions: vec![],
+            cross_analysis: None,
+        };
+
+        let body = format_daily_report_body(&report);
+        assert!(body.contains("autodev:daily-report"));
+        assert!(body.contains("Issues done | 3"));
+        assert!(body.contains("RepeatedFailure"));
+    }
+
+    // ═══════════════════════════════════════════════
+    // v2: detect_cross_task_patterns
+    // ═══════════════════════════════════════════════
+
+    #[test]
+    fn detect_cross_task_patterns_finds_repeated_files() {
+        use super::super::models::{Suggestion, SuggestionType};
+
+        let suggestions = vec![
+            Suggestion {
+                suggestion_type: SuggestionType::Rule,
+                target_file: ".claude/rules/test.md".into(),
+                content: "Run tests first".into(),
+                reason: "Issue #1".into(),
+            },
+            Suggestion {
+                suggestion_type: SuggestionType::Rule,
+                target_file: ".claude/rules/test.md".into(),
+                content: "Always test".into(),
+                reason: "Issue #2".into(),
+            },
+            Suggestion {
+                suggestion_type: SuggestionType::ClaudeMd,
+                target_file: "CLAUDE.md".into(),
+                content: "Update docs".into(),
+                reason: "Issue #3".into(),
+            },
+        ];
+
+        let patterns = detect_cross_task_patterns(&suggestions);
+        assert_eq!(
+            patterns.len(),
+            1,
+            "only .claude/rules/test.md has 2+ occurrences"
+        );
+        assert_eq!(patterns[0].occurrences, 2);
+        assert!(patterns[0].description.contains(".claude/rules/test.md"));
+    }
+
+    #[test]
+    fn detect_cross_task_patterns_empty_when_no_repeats() {
+        use super::super::models::{Suggestion, SuggestionType};
+
+        let suggestions = vec![Suggestion {
+            suggestion_type: SuggestionType::Rule,
+            target_file: ".claude/rules/test.md".into(),
+            content: "Run tests".into(),
+            reason: "Issue #1".into(),
+        }];
+
+        let patterns = detect_cross_task_patterns(&suggestions);
+        assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn detect_cross_task_patterns_finds_review_cycle() {
+        use super::super::models::{PatternType, Suggestion, SuggestionType};
+
+        let suggestions = vec![
+            Suggestion {
+                suggestion_type: SuggestionType::Skill,
+                target_file: "plugins/a/commands/x.md".into(),
+                content: "skill A".into(),
+                reason: "Issue #1".into(),
+            },
+            Suggestion {
+                suggestion_type: SuggestionType::Skill,
+                target_file: "plugins/b/commands/y.md".into(),
+                content: "skill B".into(),
+                reason: "Issue #2".into(),
+            },
+            Suggestion {
+                suggestion_type: SuggestionType::Skill,
+                target_file: "plugins/c/commands/z.md".into(),
+                content: "skill C".into(),
+                reason: "Issue #3".into(),
+            },
+            Suggestion {
+                suggestion_type: SuggestionType::Rule,
+                target_file: ".claude/rules/test.md".into(),
+                content: "rule".into(),
+                reason: "Issue #4".into(),
+            },
+        ];
+
+        let patterns = detect_cross_task_patterns(&suggestions);
+
+        // Hotfile: 모두 다른 파일이므로 없음
+        assert!(
+            !patterns
+                .iter()
+                .any(|p| p.pattern_type == PatternType::Hotfile),
+            "no hotfile pattern expected"
+        );
+
+        // ReviewCycle: Skill 3회 반복
+        let review_cycles: Vec<_> = patterns
+            .iter()
+            .filter(|p| p.pattern_type == PatternType::ReviewCycle)
+            .collect();
+        assert_eq!(review_cycles.len(), 1);
+        assert_eq!(review_cycles[0].occurrences, 3);
+        assert!(review_cycles[0].description.contains("Skill"));
+    }
+
+    // ═══════════════════════════════════════════════
+    // v2: aggregate_daily_suggestions
+    // ═══════════════════════════════════════════════
+
+    fn open_memory_db() -> Database {
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        db.initialize().unwrap();
+        db
+    }
+
+    fn add_repo(db: &Database) -> String {
+        use crate::core::repository::RepoRepository;
+        db.repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap()
+    }
+
+    #[test]
+    fn aggregate_daily_suggestions_collects_from_consumer_logs() {
+        use crate::core::repository::ConsumerLogRepository;
+
+        let db = open_memory_db();
+        let repo_id = add_repo(&db);
+
+        let ks1 = r#"{"suggestions":[{"type":"rule","target_file":".claude/rules/a.md","content":"A","reason":"R1"}]}"#;
+        let ks2 = r#"{"suggestions":[{"type":"hook","target_file":".claude/hooks.json","content":"B","reason":"R2"}]}"#;
+
+        db.log_insert(&crate::core::models::NewConsumerLog {
+            repo_id: repo_id.clone(),
+            queue_type: "knowledge".to_string(),
+            queue_item_id: "w1".to_string(),
+            worker_id: "u1".to_string(),
+            command: "[autodev] knowledge: pr #1".to_string(),
+            stdout: ks1.to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+            started_at: "2026-02-22T10:00:00Z".to_string(),
+            finished_at: "2026-02-22T10:00:01Z".to_string(),
+            duration_ms: 0,
+        })
+        .unwrap();
+
+        db.log_insert(&crate::core::models::NewConsumerLog {
+            repo_id,
+            queue_type: "knowledge".to_string(),
+            queue_item_id: "w2".to_string(),
+            worker_id: "u2".to_string(),
+            command: "[autodev] knowledge: pr #2".to_string(),
+            stdout: ks2.to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+            started_at: "2026-02-22T11:00:00Z".to_string(),
+            finished_at: "2026-02-22T11:00:01Z".to_string(),
+            duration_ms: 0,
+        })
+        .unwrap();
+
+        let result = aggregate_daily_suggestions(&db, "2026-02-22");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].target_file, ".claude/rules/a.md");
+        assert_eq!(result[1].target_file, ".claude/hooks.json");
+    }
+
+    #[test]
+    fn aggregate_daily_suggestions_empty_when_no_knowledge_logs() {
+        let db = open_memory_db();
+        let result = aggregate_daily_suggestions(&db, "2026-02-22");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn aggregate_daily_suggestions_ignores_non_knowledge_logs() {
+        use crate::core::repository::ConsumerLogRepository;
+
+        let db = open_memory_db();
+        let repo_id = add_repo(&db);
+
+        db.log_insert(&crate::core::models::NewConsumerLog {
+            repo_id,
+            queue_type: "pr".to_string(),
+            queue_item_id: "w1".to_string(),
+            worker_id: "u1".to_string(),
+            command: "[autodev] review: PR #1".to_string(),
+            stdout:
+                r#"{"suggestions":[{"type":"rule","target_file":"x","content":"y","reason":"z"}]}"#
+                    .to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+            started_at: "2026-02-22T10:00:00Z".to_string(),
+            finished_at: "2026-02-22T10:00:01Z".to_string(),
+            duration_ms: 0,
+        })
+        .unwrap();
+
+        let result = aggregate_daily_suggestions(&db, "2026-02-22");
+        assert!(result.is_empty(), "should not include non-knowledge logs");
+    }
+}

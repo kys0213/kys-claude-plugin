@@ -1,14 +1,15 @@
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
-use autodev::{client, config, daemon, infrastructure, queue, tui};
+use autodev::core::config;
+use autodev::{cli as client, daemon, infra, tui};
 
-use infrastructure::claude::RealClaude;
-use infrastructure::gh::RealGh;
-use infrastructure::git::RealGit;
-use infrastructure::suggest_workflow::RealSuggestWorkflow;
+use infra::claude::RealClaude;
+use infra::gh::RealGh;
+use infra::git::RealGit;
+use infra::suggest_workflow::RealSuggestWorkflow;
 
 #[derive(Parser)]
 #[command(name = "autodev", version, about = "GitHub 이슈 → PR 자동화 에이전트")]
@@ -72,6 +73,80 @@ enum Commands {
         #[arg(long)]
         issue: Option<i64>,
     },
+    /// 스펙 관리
+    Spec {
+        #[command(subcommand)]
+        action: SpecAction,
+    },
+    /// HITL (Human-in-the-Loop) 이벤트 관리
+    Hitl {
+        #[command(subcommand)]
+        action: HitlAction,
+    },
+    /// 크론 잡 관리
+    Cron {
+        #[command(subcommand)]
+        action: CronAction,
+    },
+    /// Claw 결정 이력 조회
+    Decisions {
+        #[command(subcommand)]
+        action: DecisionsAction,
+    },
+    /// Claw 워크스페이스 관리
+    Claw {
+        #[command(subcommand)]
+        action: ClawAction,
+    },
+    /// 칸반 보드 출력
+    Board {
+        /// 레포 이름으로 필터 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
+    /// Claw 에이전트 세션 시작 (claude --cwd ~/.autodev/claw-workspace)
+    Agent,
+    /// Convention bootstrap — detect tech stack and generate .claude/rules/
+    Convention {
+        #[command(subcommand)]
+        action: ConventionAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConventionAction {
+    /// Detect and display technology stack from a repository
+    Detect {
+        /// Path to the repository
+        repo_path: String,
+    },
+    /// Generate .claude/rules/ convention files (dry-run by default)
+    Bootstrap {
+        /// Path to the repository
+        repo_path: String,
+        /// Actually write files (default: dry-run)
+        #[arg(long)]
+        apply: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ClawAction {
+    /// Claw 워크스페이스 초기화
+    Init {
+        /// 레포별 오버라이드 생성 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// 적용된 규칙 파일 목록
+    Rules {
+        /// 레포별 오버라이드 포함 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -79,7 +154,151 @@ enum QueueAction {
     /// 큐 상태 조회 (daemon.status.json 기반)
     List {
         /// 레포 이름으로 필터 (org/repo)
+        #[arg(long)]
         repo: Option<String>,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
+    /// 큐 아이템을 다음 phase로 전이
+    Advance {
+        /// 작업 ID
+        work_id: String,
+    },
+    /// 큐 아이템을 skip 처리
+    Skip {
+        /// 작업 ID
+        work_id: String,
+        /// skip 사유
+        #[arg(long)]
+        reason: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum HitlAction {
+    /// HITL 이벤트 목록 조회
+    List {
+        /// 레포 이름으로 필터 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
+    /// HITL 이벤트 상세 조회
+    Show {
+        /// 이벤트 ID
+        id: String,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
+    /// HITL 이벤트에 응답
+    Respond {
+        /// 이벤트 ID
+        id: String,
+        /// 선택 번호
+        #[arg(long)]
+        choice: Option<i32>,
+        /// 메시지
+        #[arg(long)]
+        message: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum CronAction {
+    /// 크론 잡 목록
+    List {
+        /// JSON 형식으로 출력
+        #[arg(long)]
+        json: bool,
+    },
+    /// 크론 잡 추가
+    Add {
+        /// 잡 이름
+        #[arg(long)]
+        name: String,
+        /// 스크립트 경로
+        #[arg(long)]
+        script: String,
+        /// 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+        /// 실행 간격 (초)
+        #[arg(long)]
+        interval: Option<u64>,
+        /// 크론 표현식
+        #[arg(long)]
+        schedule: Option<String>,
+    },
+    /// 크론 잡 간격 업데이트
+    Update {
+        /// 잡 이름
+        name: String,
+        /// 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+        /// 새 실행 간격 (초)
+        #[arg(long)]
+        interval: u64,
+    },
+    /// 크론 잡 일시 정지
+    Pause {
+        /// 잡 이름
+        name: String,
+        /// 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// 크론 잡 재개
+    Resume {
+        /// 잡 이름
+        name: String,
+        /// 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// 크론 잡 제거
+    Remove {
+        /// 잡 이름
+        name: String,
+        /// 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// 크론 잡 즉시 실행
+    Trigger {
+        /// 잡 이름
+        name: String,
+        /// 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum DecisionsAction {
+    /// Claw 결정 이력 목록
+    List {
+        /// 레포 이름으로 필터 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+        /// 최근 N개 항목
+        #[arg(short = 'n', long, default_value = "20")]
+        limit: usize,
+    },
+    /// Claw 결정 상세 조회
+    Show {
+        /// 결정 ID
+        id: String,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -118,6 +337,88 @@ enum RepoAction {
         /// 업데이트할 설정 JSON (WorkflowConfig 형식)
         #[arg(long)]
         config: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum SpecAction {
+    /// 스펙 추가
+    Add {
+        /// 스펙 제목
+        #[arg(long)]
+        title: String,
+        /// 스펙 본문
+        #[arg(long)]
+        body: String,
+        /// 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: String,
+        /// 소스 파일 경로
+        #[arg(long)]
+        file: Option<String>,
+        /// 테스트 커맨드 (JSON 배열)
+        #[arg(long)]
+        test_commands: Option<String>,
+        /// 수락 기준 (마크다운)
+        #[arg(long)]
+        acceptance_criteria: Option<String>,
+    },
+    /// 스펙 목록
+    List {
+        /// 레포 이름 필터 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
+    /// 스펙 상세 조회
+    Show {
+        /// 스펙 ID
+        id: String,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
+    /// 스펙 업데이트
+    Update {
+        /// 스펙 ID
+        id: String,
+        /// 스펙 본문
+        #[arg(long)]
+        body: Option<String>,
+        /// 테스트 커맨드 (JSON 배열)
+        #[arg(long)]
+        test_commands: Option<String>,
+        /// 수락 기준 (마크다운)
+        #[arg(long)]
+        acceptance_criteria: Option<String>,
+    },
+    /// 스펙 일시 중단
+    Pause {
+        /// 스펙 ID
+        id: String,
+    },
+    /// 스펙 재개
+    Resume {
+        /// 스펙 ID
+        id: String,
+    },
+    /// 이슈 연결
+    Link {
+        /// 스펙 ID
+        spec_id: String,
+        /// 이슈 번호
+        #[arg(long)]
+        issue: i64,
+    },
+    /// 이슈 연결 해제
+    Unlink {
+        /// 스펙 ID
+        spec_id: String,
+        /// 이슈 번호
+        #[arg(long)]
+        issue: i64,
     },
 }
 
@@ -178,7 +479,7 @@ async fn main() -> Result<()> {
     };
 
     let db_path = home.join("autodev.db");
-    let db = queue::Database::open(&db_path)?;
+    let db = infra::db::Database::open(&db_path)?;
     db.initialize()?;
 
     // infrastructure 구현체 생성 (프로덕션)
@@ -204,10 +505,10 @@ async fn main() -> Result<()> {
                 }
             }
             let env: Arc<dyn config::Env> = Arc::new(env);
-            let gh: Arc<dyn infrastructure::gh::Gh> = Arc::new(gh);
-            let git: Arc<dyn infrastructure::git::Git> = Arc::new(git);
-            let claude: Arc<dyn infrastructure::claude::Claude> = Arc::new(claude);
-            let sw: Arc<dyn infrastructure::suggest_workflow::SuggestWorkflow> = Arc::new(sw);
+            let gh: Arc<dyn infra::gh::Gh> = Arc::new(gh);
+            let git: Arc<dyn infra::git::Git> = Arc::new(git);
+            let claude: Arc<dyn infra::claude::Claude> = Arc::new(claude);
+            let sw: Arc<dyn infra::suggest_workflow::SuggestWorkflow> = Arc::new(sw);
             daemon::start(&home, env, gh, git, claude, sw).await?;
         }
         Commands::Stop => daemon::stop(&home)?,
@@ -228,10 +529,10 @@ async fn main() -> Result<()> {
                 }
             }
             let env: Arc<dyn config::Env> = Arc::new(env);
-            let gh: Arc<dyn infrastructure::gh::Gh> = Arc::new(gh);
-            let git: Arc<dyn infrastructure::git::Git> = Arc::new(git);
-            let claude: Arc<dyn infrastructure::claude::Claude> = Arc::new(claude);
-            let sw: Arc<dyn infrastructure::suggest_workflow::SuggestWorkflow> = Arc::new(sw);
+            let gh: Arc<dyn infra::gh::Gh> = Arc::new(gh);
+            let git: Arc<dyn infra::git::Git> = Arc::new(git);
+            let claude: Arc<dyn infra::claude::Claude> = Arc::new(claude);
+            let sw: Arc<dyn infra::suggest_workflow::SuggestWorkflow> = Arc::new(sw);
             daemon::start(&home, env, gh, git, claude, sw).await?;
         }
         Commands::Status => {
@@ -258,8 +559,21 @@ async fn main() -> Result<()> {
             }
         },
         Commands::Queue { action } => match action {
-            QueueAction::List { repo } => {
-                let output = client::queue_list(&env, repo.as_deref())?;
+            QueueAction::List { repo, json } => {
+                if json {
+                    let output = client::queue::queue_list_db(&db, repo.as_deref(), true)?;
+                    println!("{output}");
+                } else {
+                    let output = client::queue_list(&env, repo.as_deref())?;
+                    println!("{output}");
+                }
+            }
+            QueueAction::Advance { work_id } => {
+                let output = client::queue::queue_advance(&db, &work_id)?;
+                println!("{output}");
+            }
+            QueueAction::Skip { work_id, reason } => {
+                let output = client::queue::queue_skip(&db, &work_id, reason.as_deref())?;
                 println!("{output}");
             }
         },
@@ -276,6 +590,197 @@ async fn main() -> Result<()> {
             let report = client::usage(&db, repo.as_deref(), since.as_deref(), issue)?;
             println!("{report}");
         }
+        Commands::Spec { action } => match action {
+            SpecAction::Add {
+                title,
+                body,
+                repo,
+                file,
+                test_commands,
+                acceptance_criteria,
+            } => {
+                let id = client::spec::spec_add(
+                    &db,
+                    &title,
+                    &body,
+                    &repo,
+                    file.as_deref(),
+                    test_commands.as_deref(),
+                    acceptance_criteria.as_deref(),
+                )?;
+                println!("created: {id}");
+            }
+            SpecAction::List { repo, json } => {
+                let output = client::spec::spec_list(&db, repo.as_deref(), json)?;
+                println!("{output}");
+            }
+            SpecAction::Show { id, json } => {
+                let output = client::spec::spec_show(&db, &id, json)?;
+                println!("{output}");
+            }
+            SpecAction::Update {
+                id,
+                body,
+                test_commands,
+                acceptance_criteria,
+            } => {
+                client::spec::spec_update(
+                    &db,
+                    &id,
+                    body.as_deref(),
+                    test_commands.as_deref(),
+                    acceptance_criteria.as_deref(),
+                )?;
+            }
+            SpecAction::Pause { id } => {
+                client::spec::spec_pause(&db, &id)?;
+            }
+            SpecAction::Resume { id } => {
+                client::spec::spec_resume(&db, &id)?;
+            }
+            SpecAction::Link { spec_id, issue } => {
+                client::spec::spec_link(&db, &spec_id, issue)?;
+            }
+            SpecAction::Unlink { spec_id, issue } => {
+                client::spec::spec_unlink(&db, &spec_id, issue)?;
+            }
+        },
+        Commands::Hitl { action } => match action {
+            HitlAction::List { repo, json } => {
+                let output = client::hitl::list(&db, repo.as_deref(), json)?;
+                println!("{output}");
+            }
+            HitlAction::Show { id, json } => {
+                let output = client::hitl::show(&db, &id, json)?;
+                println!("{output}");
+            }
+            HitlAction::Respond {
+                id,
+                choice,
+                message,
+            } => {
+                let output = client::hitl::respond(&db, &id, choice, message.as_deref())?;
+                println!("{output}");
+            }
+        },
+        Commands::Decisions { action } => match action {
+            DecisionsAction::List { repo, json, limit } => {
+                let output = client::decisions::list(&db, repo.as_deref(), limit, json)?;
+                println!("{output}");
+            }
+            DecisionsAction::Show { id, json } => {
+                let output = client::decisions::show(&db, &id, json)?;
+                println!("{output}");
+            }
+        },
+        Commands::Cron { action } => match action {
+            CronAction::List { json } => {
+                let output = client::cron::cron_list(&db, json)?;
+                println!("{output}");
+            }
+            CronAction::Add {
+                name,
+                script,
+                repo,
+                interval,
+                schedule,
+            } => {
+                client::cron::cron_add(
+                    &db,
+                    &name,
+                    &script,
+                    repo.as_deref(),
+                    interval,
+                    schedule.as_deref(),
+                )?;
+            }
+            CronAction::Update {
+                name,
+                repo,
+                interval,
+            } => {
+                client::cron::cron_update(&db, &name, repo.as_deref(), interval)?;
+            }
+            CronAction::Pause { name, repo } => {
+                client::cron::cron_pause(&db, &name, repo.as_deref())?;
+            }
+            CronAction::Resume { name, repo } => {
+                client::cron::cron_resume(&db, &name, repo.as_deref())?;
+            }
+            CronAction::Remove { name, repo } => {
+                client::cron::cron_remove(&db, &name, repo.as_deref())?;
+            }
+            CronAction::Trigger { name, repo } => {
+                client::cron::cron_trigger(&db, &env, &name, repo.as_deref())?;
+            }
+        },
+        Commands::Claw { action } => match action {
+            ClawAction::Init { repo } => {
+                if let Some(repo_name) = repo {
+                    client::claw::claw_init(&home)?;
+                    client::claw::claw_init_repo(&home, &repo_name)?;
+                } else {
+                    client::claw::claw_init(&home)?;
+                }
+            }
+            ClawAction::Rules { repo } => {
+                let rules = client::claw::claw_rules(&home, repo.as_deref())?;
+                for rule in &rules {
+                    println!("  {rule}");
+                }
+            }
+        },
+        Commands::Board { repo, json } => {
+            use autodev::core::board::BoardRenderer;
+            use autodev::tui::board::{BoardStateBuilder, TextBoardRenderer};
+
+            let state = BoardStateBuilder::build(&db, repo.as_deref())?;
+            if json {
+                let json_str = serde_json::to_string_pretty(&state)?;
+                println!("{json_str}");
+            } else {
+                let renderer = TextBoardRenderer;
+                let output = renderer.render(&state);
+                print!("{output}");
+            }
+        }
+        Commands::Agent => {
+            let ws = client::claw::claw_workspace_path(&home);
+            if !ws.exists() {
+                anyhow::bail!("Claw workspace not initialized. Run 'autodev claw init' first.");
+            }
+            let status = std::process::Command::new("claude")
+                .arg("--cwd")
+                .arg(&ws)
+                .status()
+                .context("failed to launch claude. Is it installed?")?;
+            if !status.success() {
+                std::process::exit(status.code().unwrap_or(1));
+            }
+        }
+        Commands::Convention { action } => match action {
+            ConventionAction::Detect { repo_path } => {
+                let path = std::path::Path::new(&repo_path);
+                if !path.is_dir() {
+                    anyhow::bail!("not a directory: {repo_path}");
+                }
+                let stack = client::convention::detect_tech_stack(path);
+                print!("{}", client::convention::format_tech_stack(&stack));
+            }
+            ConventionAction::Bootstrap { repo_path, apply } => {
+                let path = std::path::Path::new(&repo_path);
+                if !path.is_dir() {
+                    anyhow::bail!("not a directory: {repo_path}");
+                }
+                let stack = client::convention::detect_tech_stack(path);
+                print!("{}", client::convention::format_tech_stack(&stack));
+                let result = client::convention::bootstrap(path, &stack, apply)?;
+                print!(
+                    "{}",
+                    client::convention::format_bootstrap_result(&result, !apply)
+                );
+            }
+        },
     }
 
     Ok(())

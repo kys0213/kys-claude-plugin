@@ -1,5 +1,5 @@
-use autodev::components::notifier::Notifier;
-use autodev::infrastructure::gh::mock::MockGh;
+use autodev::infra::gh::mock::MockGh;
+use autodev::tasks::helpers::notifier::Notifier;
 
 // ═══════════════════════════════════════════════
 // is_issue_open

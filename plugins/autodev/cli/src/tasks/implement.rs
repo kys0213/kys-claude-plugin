@@ -12,17 +12,17 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use super::AGENT_SYSTEM_PROMPT;
-use crate::components::workspace::WorkspaceOps;
-use crate::config::ConfigLoader;
-use crate::daemon::task::{
+use crate::core::config::ConfigLoader;
+use crate::core::labels;
+use crate::core::models::NewConsumerLog;
+use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
-use crate::domain::labels;
-use crate::domain::models::NewConsumerLog;
-use crate::infrastructure::claude::output;
-use crate::infrastructure::claude::SessionOptions;
-use crate::infrastructure::gh::Gh;
-use crate::queue::task_queues::{make_work_id, pr_phase, IssueItem, PrItem};
+use crate::core::task_queues::{make_work_id, pr_phase, IssueItem, PrItem};
+use crate::infra::claude::output;
+use crate::infra::claude::SessionOptions;
+use crate::infra::gh::Gh;
+use crate::tasks::helpers::workspace::WorkspaceOps;
 
 /// head branch 이름으로 이미 생성된 PR을 조회하여 번호를 반환.
 ///
@@ -409,8 +409,8 @@ mod tests {
     use std::sync::Mutex;
     use std::time::Duration;
 
-    use crate::config::models::WorkflowConfig;
-    use crate::infrastructure::gh::mock::MockGh;
+    use crate::core::config::models::WorkflowConfig;
+    use crate::infra::gh::mock::MockGh;
 
     // ─── Mock WorkspaceOps ───
 
