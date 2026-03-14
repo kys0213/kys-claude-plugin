@@ -74,7 +74,7 @@ fn load_raw_yaml(path: &Path) -> Option<serde_json::Value> {
 }
 
 /// JSON Value 딥머지: over에 명시적으로 존재하는 값만 base를 덮어씀
-fn deep_merge(base: serde_json::Value, over: serde_json::Value) -> serde_json::Value {
+pub(crate) fn deep_merge(base: serde_json::Value, over: serde_json::Value) -> serde_json::Value {
     use serde_json::Value;
 
     match (base, over) {
