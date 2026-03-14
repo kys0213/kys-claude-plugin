@@ -724,6 +724,107 @@ impl HitlRepository for Database {
     }
 }
 
+impl QueueRepository for Database {
+    fn queue_get_phase(&self, work_id: &str) -> Result<Option<String>> {
+        let result = self.conn().query_row(
+            "SELECT phase FROM queue_items WHERE work_id = ?1",
+            rusqlite::params![work_id],
+            |row| row.get(0),
+        );
+        match result {
+            Ok(phase) => Ok(Some(phase)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn queue_advance(&self, work_id: &str) -> Result<()> {
+        let current_phase = self
+            .queue_get_phase(work_id)?
+            .ok_or_else(|| anyhow::anyhow!("queue item not found: {work_id}"))?;
+
+        let next_phase = match current_phase.as_str() {
+            "pending" => "ready",
+            "ready" => "running",
+            "running" => "done",
+            "done" | "skipped" => {
+                anyhow::bail!("cannot advance terminal state: {current_phase}")
+            }
+            other => anyhow::bail!("unknown phase: {other}"),
+        };
+
+        let now = Utc::now().to_rfc3339();
+        self.conn().execute(
+            "UPDATE queue_items SET phase = ?1, updated_at = ?2 WHERE work_id = ?3",
+            rusqlite::params![next_phase, now, work_id],
+        )?;
+
+        Ok(())
+    }
+
+    fn queue_skip(&self, work_id: &str, reason: Option<&str>) -> Result<()> {
+        let current_phase = self
+            .queue_get_phase(work_id)?
+            .ok_or_else(|| anyhow::anyhow!("queue item not found: {work_id}"))?;
+
+        match current_phase.as_str() {
+            "done" | "skipped" => {
+                anyhow::bail!("cannot skip terminal state: {current_phase}")
+            }
+            _ => {}
+        }
+
+        let now = Utc::now().to_rfc3339();
+        self.conn().execute(
+            "UPDATE queue_items SET phase = 'skipped', skip_reason = ?1, updated_at = ?2 WHERE work_id = ?3",
+            rusqlite::params![reason, now, work_id],
+        )?;
+
+        Ok(())
+    }
+
+    fn queue_list_items(&self, repo: Option<&str>) -> Result<Vec<QueueItem>> {
+        let conn = self.conn();
+
+        let (query, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+            if let Some(name) = repo {
+                (
+                    "SELECT q.work_id, q.repo_id, q.queue_type, q.phase, q.title, \
+                     q.skip_reason, q.created_at, q.updated_at \
+                     FROM queue_items q JOIN repositories r ON q.repo_id = r.id \
+                     WHERE r.name = ?1 ORDER BY q.created_at DESC"
+                        .to_string(),
+                    vec![Box::new(name.to_string())],
+                )
+            } else {
+                (
+                    "SELECT work_id, repo_id, queue_type, phase, title, \
+                     skip_reason, created_at, updated_at \
+                     FROM queue_items ORDER BY created_at DESC"
+                        .to_string(),
+                    vec![],
+                )
+            };
+
+        let mut stmt = conn.prepare(&query)?;
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let rows = stmt.query_map(params_refs.as_slice(), |row| {
+            Ok(QueueItem {
+                work_id: row.get(0)?,
+                repo_id: row.get(1)?,
+                queue_type: row.get(2)?,
+                phase: row.get(3)?,
+                title: row.get(4)?,
+                skip_reason: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+}
+
 impl CronRepository for Database {
     fn cron_add(&self, job: &NewCronJob) -> Result<String> {
         let conn = self.conn();

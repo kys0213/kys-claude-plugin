@@ -58,6 +58,17 @@ pub trait HitlRepository {
     fn hitl_responses(&self, event_id: &str) -> Result<Vec<HitlResponse>>;
 }
 
+pub trait QueueRepository {
+    /// 큐 아이템의 현재 phase를 조회한다
+    fn queue_get_phase(&self, work_id: &str) -> Result<Option<String>>;
+    /// 큐 아이템을 다음 phase로 전이한다 (pending → ready → running → done)
+    fn queue_advance(&self, work_id: &str) -> Result<()>;
+    /// 큐 아이템을 skip 처리한다
+    fn queue_skip(&self, work_id: &str, reason: Option<&str>) -> Result<()>;
+    /// 큐 아이템 목록을 조회한다 (repo별 필터 가능)
+    fn queue_list_items(&self, repo: Option<&str>) -> Result<Vec<QueueItem>>;
+}
+
 pub trait CronRepository {
     fn cron_add(&self, job: &NewCronJob) -> Result<String>;
     fn cron_list(&self, repo: Option<&str>) -> Result<Vec<CronJob>>;

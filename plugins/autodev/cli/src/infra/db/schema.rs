@@ -115,6 +115,18 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_cron_jobs_name_global
             ON cron_jobs(name) WHERE repo_id IS NULL;
 
+        CREATE TABLE IF NOT EXISTS queue_items (
+            work_id     TEXT PRIMARY KEY,
+            repo_id     TEXT NOT NULL REFERENCES repositories(id),
+            queue_type  TEXT NOT NULL,
+            phase       TEXT NOT NULL DEFAULT 'pending',
+            title       TEXT,
+            skip_reason TEXT,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_queue_items_repo_phase ON queue_items(repo_id, phase);
+
         COMMIT;
         ",
     )?;

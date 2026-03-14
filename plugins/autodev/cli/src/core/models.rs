@@ -263,6 +263,20 @@ pub struct UsageByIssue {
     pub output_tokens: i64,
 }
 
+// ─── Queue models ───
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueItem {
+    pub work_id: String,
+    pub repo_id: String,
+    pub queue_type: String,
+    pub phase: String,
+    pub title: Option<String>,
+    pub skip_reason: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 // ─── Spec models ───
 
 /// Spec status lifecycle

@@ -95,7 +95,24 @@ enum QueueAction {
     /// 큐 상태 조회 (daemon.status.json 기반)
     List {
         /// 레포 이름으로 필터 (org/repo)
+        #[arg(long)]
         repo: Option<String>,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
+    /// 큐 아이템을 다음 phase로 전이
+    Advance {
+        /// 작업 ID
+        work_id: String,
+    },
+    /// 큐 아이템을 skip 처리
+    Skip {
+        /// 작업 ID
+        work_id: String,
+        /// skip 사유
+        #[arg(long)]
+        reason: Option<String>,
     },
 }
 
@@ -459,8 +476,21 @@ async fn main() -> Result<()> {
             }
         },
         Commands::Queue { action } => match action {
-            QueueAction::List { repo } => {
-                let output = client::queue_list(&env, repo.as_deref())?;
+            QueueAction::List { repo, json } => {
+                if json {
+                    let output = client::queue::queue_list_db(&db, repo.as_deref(), true)?;
+                    println!("{output}");
+                } else {
+                    let output = client::queue_list(&env, repo.as_deref())?;
+                    println!("{output}");
+                }
+            }
+            QueueAction::Advance { work_id } => {
+                let output = client::queue::queue_advance(&db, &work_id)?;
+                println!("{output}");
+            }
+            QueueAction::Skip { work_id, reason } => {
+                let output = client::queue::queue_skip(&db, &work_id, reason.as_deref())?;
                 println!("{output}");
             }
         },

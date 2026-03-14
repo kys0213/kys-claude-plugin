@@ -1,5 +1,6 @@
 pub mod cron;
 pub mod hitl;
+pub mod queue;
 pub mod spec;
 
 use std::path::{Path, PathBuf};
