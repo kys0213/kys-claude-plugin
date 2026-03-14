@@ -28,8 +28,8 @@ fn write_workspace_config(ws_dir: &Path, value: &serde_json::Value) -> Result<Pa
 }
 
 /// 최종 effective config 출력
-fn print_effective_config(env: &dyn Env, ws_dir: &Path, name: &str) -> Result<()> {
-    let effective = config::loader::load_merged(env, Some(ws_dir));
+fn print_effective_config(env: &dyn Env, ws_dir: Option<&Path>, name: &str) -> Result<()> {
+    let effective = config::loader::load_merged(env, ws_dir);
     let yaml = serde_yaml::to_string(&effective)?;
     println!("\nEffective config for {name}:\n---\n{yaml}");
     Ok(())
@@ -159,13 +159,7 @@ pub fn repo_config(env: &dyn Env, name: &str) -> Result<()> {
     }
 
     // 최종 머지 결과 표시
-    if ws.exists() {
-        print_effective_config(env, &ws, name)?;
-    } else {
-        let effective = config::loader::load_merged(env, None);
-        let yaml = serde_yaml::to_string(&effective)?;
-        println!("\nEffective config for {name}:\n---\n{yaml}");
-    }
+    print_effective_config(env, if ws.exists() { Some(&ws) } else { None }, name)?;
 
     Ok(())
 }
@@ -199,7 +193,7 @@ pub fn repo_update(
     let existing = if config_path.exists() {
         let content = std::fs::read_to_string(&config_path)?;
         serde_yaml::from_str::<serde_json::Value>(&content)
-            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()))
+            .map_err(|e| anyhow::anyhow!("failed to parse existing config {}: {e}", config_path.display()))?
     } else {
         serde_json::Value::Object(serde_json::Map::new())
     };
@@ -213,7 +207,7 @@ pub fn repo_update(
     println!("config: written to {}", config_path.display());
 
     // 최종 effective config 표시
-    print_effective_config(env, &ws_dir, name)?;
+    print_effective_config(env, Some(&ws_dir), name)?;
 
     Ok(())
 }
