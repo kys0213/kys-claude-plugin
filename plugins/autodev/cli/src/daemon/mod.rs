@@ -4,6 +4,7 @@ pub mod collectors;
 pub mod cron;
 pub mod daily_reporter;
 pub mod log;
+pub mod notifiers;
 pub mod pid;
 pub mod status;
 pub mod task_manager;

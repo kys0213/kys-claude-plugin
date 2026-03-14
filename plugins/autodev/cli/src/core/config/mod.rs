@@ -100,6 +100,16 @@ pub fn safe_join(base: &std::path::Path, untrusted: &str) -> Result<PathBuf, Str
     Ok(joined)
 }
 
+/// 로그 디렉토리 경로 해석: 절대 경로면 그대로, 상대 경로면 home 기준
+pub fn resolve_log_dir(log_dir: &str, home: &std::path::Path) -> PathBuf {
+    let path = std::path::Path::new(log_dir);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        home.join(log_dir)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,15 +158,5 @@ mod tests {
         let base = Path::new("/worktree");
         let result = safe_join(base, ".claude/hooks.json").unwrap();
         assert_eq!(result, base.join(".claude/hooks.json"));
-    }
-}
-
-/// 로그 디렉토리 경로 해석: 절대 경로면 그대로, 상대 경로면 home 기준
-pub fn resolve_log_dir(log_dir: &str, home: &std::path::Path) -> PathBuf {
-    let path = std::path::Path::new(log_dir);
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        home.join(log_dir)
     }
 }
