@@ -34,17 +34,13 @@ export function createGuardService(git: GitService): GuardService {
       });
 
       // write guard: 프로젝트 외부 파일이면 패스
-      if (input.target === 'write' && input.toolFilePath) {
-        if (!isInsideProjectDir(input.toolFilePath, input.projectDir)) {
-          return pass('file is outside project directory');
-        }
+      if (input.target === 'write' && input.toolFilePath && !isInsideProjectDir(input.toolFilePath, input.projectDir)) {
+        return pass('file is outside project directory');
       }
 
       // commit guard: git commit 패턴이 아니면 패스
-      if (input.target === 'commit') {
-        if (!input.toolCommand || !GIT_COMMIT_PATTERN.test(input.toolCommand)) {
-          return pass('not a git commit command');
-        }
+      if (input.target === 'commit' && (!input.toolCommand || !GIT_COMMIT_PATTERN.test(input.toolCommand))) {
+        return pass('not a git commit command');
       }
 
       // Guard 1: git repo 확인
