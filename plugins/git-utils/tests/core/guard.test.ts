@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { createGuardService } from '../../src/core/guard';
+import { createGuardService, isInsideProjectDir, isInsideAnyGitRepo } from '../../src/core/guard';
 import type { GitService } from '../../src/core/git';
 import type { GuardInput } from '../../src/types';
 
@@ -191,6 +191,110 @@ describe('GuardService.check', () => {
       const guard = createGuardService(mockGit());
       const result = await guard.check(baseInput);
       expect(result.reason).toContain('./create-branch.sh');
+    });
+  });
+
+  describe('프로젝트 외부 파일 경로 (write guard)', () => {
+    test('프로젝트 외부 + git repo 밖 파일 → allowed: true (패스)', async () => {
+      const guard = createGuardService(mockGit());
+      // /home/user/.claude/ 는 git repo가 아니므로 허용
+      const result = await guard.check({
+        ...baseInput,
+        projectDir: '/home/user/my-project',
+        toolFilePath: '/home/user/.claude/settings.json',
+      });
+      expect(result.allowed).toBe(true);
+      expect(result.reason).toBe('file is outside any git repository');
+    });
+
+    test('프로젝트 외부 + 다른 git repo 안 파일 → allowed: false (차단)', async () => {
+      const guard = createGuardService(mockGit());
+      // 현재 프로젝트 자체가 git repo이므로 프로젝트 내 다른 경로를 "다른 git repo"로 시뮬레이션
+      // 실제 .git이 존재하는 경로를 사용
+      const thisProjectDir = process.cwd();
+      const result = await guard.check({
+        ...baseInput,
+        projectDir: '/some/other/project',
+        toolFilePath: `${thisProjectDir}/package.json`,
+      });
+      expect(result.allowed).toBe(false);
+    });
+
+    test('프로젝트 내부 파일 + 기본 브랜치 → allowed: false (차단)', async () => {
+      const guard = createGuardService(mockGit());
+      const result = await guard.check({
+        ...baseInput,
+        projectDir: '/home/user/my-project',
+        toolFilePath: '/home/user/my-project/src/index.ts',
+      });
+      expect(result.allowed).toBe(false);
+    });
+
+    test('프로젝트 내부 파일 + feature 브랜치 → allowed: true (패스)', async () => {
+      const guard = createGuardService(mockGit({
+        getCurrentBranch: async () => 'feat/something',
+      }));
+      const result = await guard.check({
+        ...baseInput,
+        projectDir: '/home/user/my-project',
+        toolFilePath: '/home/user/my-project/src/index.ts',
+      });
+      expect(result.allowed).toBe(true);
+    });
+
+    test('toolFilePath가 없으면 기존 guard 로직 수행', async () => {
+      const guard = createGuardService(mockGit());
+      const result = await guard.check(baseInput);
+      expect(result.allowed).toBe(false);
+    });
+
+    test('commit target은 toolFilePath를 무시하고 기존 로직 수행', async () => {
+      const guard = createGuardService(mockGit());
+      const result = await guard.check({
+        ...baseInput,
+        target: 'commit',
+        toolFilePath: '/external/path/file.txt',
+        toolCommand: 'git commit -m "test"',
+      });
+      expect(result.allowed).toBe(false);
+    });
+  });
+
+  describe('isInsideProjectDir', () => {
+    test('프로젝트 내부 파일 → true', () => {
+      expect(isInsideProjectDir('/home/user/project/src/file.ts', '/home/user/project')).toBe(true);
+    });
+
+    test('프로젝트 루트 자체 → true', () => {
+      expect(isInsideProjectDir('/home/user/project', '/home/user/project')).toBe(true);
+    });
+
+    test('프로젝트 외부 파일 → false', () => {
+      expect(isInsideProjectDir('/home/user/.claude/settings.json', '/home/user/project')).toBe(false);
+    });
+
+    test('접두사가 유사하지만 다른 디렉토리 → false', () => {
+      expect(isInsideProjectDir('/home/user/project-extra/file.ts', '/home/user/project')).toBe(false);
+    });
+
+    test('홈 디렉토리 파일 vs 프로젝트 → false', () => {
+      expect(isInsideProjectDir('/Users/user/.claude/settings.json', '/Users/user/Documents/my-project')).toBe(false);
+    });
+  });
+
+  describe('isInsideAnyGitRepo', () => {
+    test('현재 프로젝트 내 파일 → true (git repo 안)', () => {
+      const filePath = `${process.cwd()}/package.json`;
+      expect(isInsideAnyGitRepo(filePath)).toBe(true);
+    });
+
+    test('존재하지 않는 깊은 경로도 부모에 .git이 있으면 → true', () => {
+      const filePath = `${process.cwd()}/some/deep/nonexistent/file.ts`;
+      expect(isInsideAnyGitRepo(filePath)).toBe(true);
+    });
+
+    test('/tmp 루트 파일 → false (git repo 밖)', () => {
+      expect(isInsideAnyGitRepo('/tmp/random-file.txt')).toBe(false);
     });
   });
 });

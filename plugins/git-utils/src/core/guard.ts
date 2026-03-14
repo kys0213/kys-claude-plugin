@@ -4,6 +4,8 @@
 // 두 hook 스크립트(~30줄 중복)를 단일 서비스로 통합합니다.
 // ============================================================
 
+import { resolve, dirname, relative, isAbsolute } from 'node:path';
+import { existsSync } from 'node:fs';
 import type { GuardInput, GuardOutput } from '../types';
 import type { GitService } from './git';
 
@@ -13,6 +15,40 @@ export interface GuardService {
 
 const GIT_COMMIT_PATTERN = /\bgit\b.*\bcommit\b/;
 
+/**
+ * 파일 경로가 프로젝트 디렉토리 내부에 있는지 확인합니다.
+ * path.relative()를 사용하여 상대 경로 기반으로 판정합니다.
+ */
+export function isInsideProjectDir(filePath: string, projectDir: string): boolean {
+  const rel = relative(resolve(projectDir), resolve(filePath));
+  // relative path가 '..'로 시작하지 않고 절대 경로가 아니면 내부
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+/**
+ * 파일 경로가 어떤 git 저장소 안에 있는지 확인합니다.
+ * 존재하는 최상위 디렉토리부터 .git 디렉토리 존재 여부를 검사합니다.
+ */
+export function isInsideAnyGitRepo(filePath: string): boolean {
+  // 존재하는 최상위 디렉토리부터 검색하여 불필요한 existsSync 호출 감소
+  let dir = resolve(dirname(filePath));
+  const root = resolve('/');
+  while (dir !== root && !existsSync(dir)) {
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  while (dir !== root) {
+    if (existsSync(`${dir}/.git`)) {
+      return true;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return false;
+}
+
 export function createGuardService(git: GitService): GuardService {
   return {
     async check(input: GuardInput): Promise<GuardOutput> {
@@ -21,11 +57,18 @@ export function createGuardService(git: GitService): GuardService {
         reason,
       });
 
-      // commit guard: git commit 패턴이 아니면 패스
-      if (input.target === 'commit') {
-        if (!input.toolCommand || !GIT_COMMIT_PATTERN.test(input.toolCommand)) {
-          return pass('not a git commit command');
+      // write guard: 프로젝트 외부 파일 판정
+      if (input.target === 'write' && input.toolFilePath && !isInsideProjectDir(input.toolFilePath, input.projectDir)) {
+        // 다른 git repo 안에 있으면 차단 유지 (기존 guard 로직 계속 진행)
+        // git repo 밖이면 허용 (설정 파일 등)
+        if (!isInsideAnyGitRepo(input.toolFilePath)) {
+          return pass('file is outside any git repository');
         }
+      }
+
+      // commit guard: git commit 패턴이 아니면 패스
+      if (input.target === 'commit' && (!input.toolCommand || !GIT_COMMIT_PATTERN.test(input.toolCommand))) {
+        return pass('not a git commit command');
       }
 
       // Guard 1: git repo 확인

@@ -175,14 +175,17 @@ async function main(): Promise<void> {
 
       // Read stdin for hook JSON (Claude hook provides tool input)
       let toolCommand: string | undefined;
-      if (target === 'commit') {
-        try {
-          const stdin = await readFile('/dev/stdin', 'utf-8');
-          const hookInput = JSON.parse(stdin);
+      let toolFilePath: string | undefined;
+      try {
+        const stdin = await readFile('/dev/stdin', 'utf-8');
+        const hookInput = JSON.parse(stdin);
+        if (target === 'commit') {
           toolCommand = hookInput?.tool_input?.command;
-        } catch {
-          // stdin not available or not JSON
+        } else if (target === 'write') {
+          toolFilePath = hookInput?.tool_input?.file_path;
         }
+      } catch {
+        // stdin not available or not JSON
       }
 
       const result = await guard.check({
@@ -191,6 +194,7 @@ async function main(): Promise<void> {
         createBranchScript: (parsed.flags['create-branch-script'] as string) || 'git-utils branch',
         defaultBranch: parsed.flags['default-branch'] as string | undefined,
         toolCommand,
+        toolFilePath,
       });
 
       if (!result.allowed) {
