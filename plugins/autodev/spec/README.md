@@ -41,6 +41,7 @@ autodev v4는 **두 가지 모드**로 동작한다:
 | 10 | [Claw 워크스페이스](./10-claw-workspace/) | 자연어 기반 Claw 행동 설정 | ✅ | ⬜ |
 | 11 | [컨벤션 부트스트랩](./11-convention-bootstrap/) | 기술 스택 기반 규칙 제안 + 자율 개선 | ✅ | ⬜ |
 | 12 | [인터페이스 레퍼런스](./12-cli-reference/) | Plugin commands (SSOT) + autodev CLI | ✅ | ⬜ |
+| 13 | [Cron 관리](./13-cron/) | 스크립트 기반 cron, 환경변수 주입, 유효성 검증 | ✅ | ⬜ |
 
 ## 메인 에이전트 모델
 

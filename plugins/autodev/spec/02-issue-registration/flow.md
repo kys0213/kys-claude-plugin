@@ -22,7 +22,8 @@
 
 ### Claw 비활성 시 (claw.enabled: false)
 
-v3와 100% 동일. daemon이 기계적으로 슬롯 기반 drain 수행.
+daemon이 수집만 수행. 큐에 아이템이 쌓이지만 advance되지 않아 Task가 실행되지 않는다.
+Claw가 활성화되어야 자율 루프가 동작한다.
 
 ### Claw 활성 시 (claw.enabled: true)
 

@@ -203,18 +203,20 @@ HITL 코멘트에 **응답 마커**를 포함한다:
 
 Claw는 다음 틱에서 해당 마커의 답글을 스캔하여 응답으로 인식.
 
-#### TUI에서 CLI 안내
+#### Dashboard에서 HITL 확인 → CLI로 응답
 
-TUI에서 상세 피드백이 필요한 HITL 항목을 선택하면 CLI 명령어를 안내:
+Dashboard(읽기 전용)에서 HITL 항목을 확인한 후, 별도 터미널에서 CLI 또는 Claw 세션으로 응답한다.
 
 ```
-🔔 [HIGH] PR #42 리뷰 3회 반복
+Dashboard에서 확인:
+  🔔 [HIGH] PR #42 리뷰 3회 반복 (hitl-01)
 
-   [1: 재시도] [2: skip] [3: 스펙 수정] [m: 메시지 입력]
-   > 사용자가 m을 누름
+별도 터미널에서 응답:
+  autodev hitl respond hitl-01 --choice 1
 
-   상세 피드백을 입력하려면:
-   autodev hitl respond hitl-01 --message "..."
+또는 Claw 세션에서:
+  > /hitl
+  > 1번 재시도해줘
 ```
 
 ---

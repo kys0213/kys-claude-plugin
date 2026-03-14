@@ -73,6 +73,19 @@ autodev daemon (백그라운드)       ← 수집 + Task 실행
 | `/claw rules [repo]` | 현재 적용 규칙 확인 | Claw 세션 |
 | `/claw edit <rule>` | 규칙 편집 | Claw 세션 |
 
+### Cron 관리
+
+| Command | 설명 | 실행 위치 |
+|---------|------|----------|
+| `/cron list` | cron job 목록 (global + per-repo) | Claw 세션 |
+| `/cron pause <name> [--repo]` | cron 일시정지 | Claw 세션 |
+| `/cron resume <name> [--repo]` | cron 재개 | Claw 세션 |
+| `/cron trigger <name> [--repo]` | cron 즉시 실행 | Claw 세션 |
+| `/cron add ...` | cron 추가 | Claw 세션 |
+
+- per-repo job은 `--repo` 필수 (claude -p 실행 시 작업 경로 지정)
+- 내부적으로 `autodev cron` CLI 호출
+
 ---
 
 ## Layer 2: autodev CLI (인프라 도구)
@@ -126,6 +139,23 @@ autodev hitl respond <id> --message "..."
 ```bash
 autodev queue list --json [--repo <name>]
 autodev queue show <work-id> --json
+autodev queue advance <work-id>           # 다음 phase로 전이 (Claw가 호출)
+autodev queue skip <work-id>              # skip 처리 (Claw가 호출)
+```
+
+### Cron
+
+```bash
+autodev cron list                          # 등록된 cron job 목록
+autodev cron add --name <n> --interval <s> --command "..."
+                                           # interval 기반 job 추가
+autodev cron add --name <n> --schedule "<cron>" --command "..."
+                                           # cron expression 기반 job 추가
+autodev cron update <name> --interval <s>  # 주기 변경
+autodev cron pause <name>                  # 일시정지
+autodev cron resume <name>                 # 재개
+autodev cron remove <name>                 # 제거
+autodev cron trigger <name>                # 즉시 실행
 ```
 
 ### 로그 / 사용량
@@ -165,6 +195,7 @@ Claw 세션 (autodev agent):
   /spec             스펙 관리
   /decisions        판단 이력
   /claw rules       규칙 확인/편집
+  /cron             cron job 관리
 
 별도 터미널:
   autodev dashboard  TUI 모니터링 (읽기 전용)

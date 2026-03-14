@@ -176,6 +176,9 @@ $ autodev agent
   /decisions [repo]    최근 Claw 판단 이력
   /claw rules [repo]   현재 적용 규칙 확인
   /claw edit <rule>    규칙 편집
+  /cron list           cron job 목록 (global + per-repo)
+  /cron pause <name>   cron 일시정지
+  /cron trigger <name> cron 즉시 실행
   /help                전체 명령어 목록
 
   (레포 Claude 세션 전용)

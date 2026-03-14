@@ -22,7 +22,7 @@
   → 3회 연속 실패 시 → HITL 알림
 
 Claw 판단 실패 (Claude Code 세션 오류 또는 의도 불명확):
-  → daemon의 기계적 drain으로 fallback (v3 동작)
+  → 해당 틱의 판단 건너뜀 (큐 상태 유지, 다음 틱에서 재시도)
   → 세션 로그 보존 (디버깅용)
   → 연속 N회 실패 시 → HITL 알림
   → 원인: claw-workspace 규칙 충돌, 네트워크 오류, 토큰 초과 등
