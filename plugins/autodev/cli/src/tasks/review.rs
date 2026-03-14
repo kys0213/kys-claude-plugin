@@ -13,17 +13,17 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use super::AGENT_SYSTEM_PROMPT;
-use crate::components::workspace::WorkspaceOps;
-use crate::config::ConfigLoader;
-use crate::daemon::task::{
+use crate::tasks::helpers::workspace::WorkspaceOps;
+use crate::core::config::ConfigLoader;
+use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
-use crate::domain::labels;
-use crate::domain::models::NewConsumerLog;
-use crate::infrastructure::claude::output::{self, ReviewVerdict};
-use crate::infrastructure::claude::SessionOptions;
-use crate::infrastructure::gh::Gh;
-use crate::queue::task_queues::{pr_phase, PrItem};
+use crate::core::labels;
+use crate::core::models::NewConsumerLog;
+use crate::infra::claude::output::{self, ReviewVerdict};
+use crate::infra::claude::SessionOptions;
+use crate::infra::gh::Gh;
+use crate::core::task_queues::{pr_phase, PrItem};
 
 /// PR 리뷰 결과를 GitHub 댓글로 포맷
 fn format_review_comment(review: &str, pr_number: i64, verdict: Option<&ReviewVerdict>) -> String {
@@ -477,9 +477,9 @@ mod tests {
     use std::path::Path;
     use std::time::Duration;
 
-    use crate::config::models::WorkflowConfig;
-    use crate::infrastructure::gh::mock::MockGh;
-    use crate::queue::task_queues::make_work_id;
+    use crate::core::config::models::WorkflowConfig;
+    use crate::infra::gh::mock::MockGh;
+    use crate::core::task_queues::make_work_id;
 
     struct MockWorkspace;
 

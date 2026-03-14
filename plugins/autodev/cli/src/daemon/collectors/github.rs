@@ -9,17 +9,17 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::components::workspace::WorkspaceOps;
-use crate::config::{self, ConfigLoader, Env};
-use crate::daemon::task::{QueueOp, Task, TaskResult};
-use crate::daemon::task_source::TaskSource;
-use crate::domain::git_repository::GitRepository;
-use crate::domain::git_repository_factory::GitRepositoryFactory;
-use crate::domain::repository::{RepoRepository, ScanCursorRepository};
-use crate::infrastructure::gh::Gh;
-use crate::infrastructure::git::Git;
-use crate::infrastructure::suggest_workflow::SuggestWorkflow;
-use crate::queue::task_queues::{issue_phase, pr_phase};
+use crate::tasks::helpers::workspace::WorkspaceOps;
+use crate::core::config::{self, ConfigLoader, Env};
+use crate::core::task::{QueueOp, Task, TaskResult};
+use crate::core::collector::TaskSource;
+use crate::tasks::helpers::git_ops::GitRepository;
+use crate::tasks::helpers::git_ops_factory::GitRepositoryFactory;
+use crate::core::repository::{RepoRepository, ScanCursorRepository};
+use crate::infra::gh::Gh;
+use crate::infra::git::Git;
+use crate::infra::suggest_workflow::SuggestWorkflow;
+use crate::core::task_queues::{issue_phase, pr_phase};
 use crate::tasks::analyze::AnalyzeTask;
 use crate::tasks::extract::ExtractTask;
 use crate::tasks::implement::ImplementTask;
@@ -384,13 +384,13 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> TaskSource for GitHubTask
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::models::WorkflowConfig;
-    use crate::domain::models::EnabledRepo;
-    use crate::infrastructure::gh::mock::MockGh;
-    use crate::infrastructure::git::Git;
-    use crate::infrastructure::suggest_workflow::SuggestWorkflow;
-    use crate::knowledge::models::{RepetitionEntry, SessionEntry, ToolFrequencyEntry};
-    use crate::queue::task_queues::{make_work_id, IssueItem, PrItem};
+    use crate::core::config::models::WorkflowConfig;
+    use crate::core::models::EnabledRepo;
+    use crate::infra::gh::mock::MockGh;
+    use crate::infra::git::Git;
+    use crate::infra::suggest_workflow::SuggestWorkflow;
+    use crate::tasks::knowledge::models::{RepetitionEntry, SessionEntry, ToolFrequencyEntry};
+    use crate::core::task_queues::{make_work_id, IssueItem, PrItem};
     use std::path::{Path, PathBuf};
 
     // ─── Mock dependencies ───
@@ -503,13 +503,13 @@ mod tests {
         fn repo_remove(&self, _: &str) -> anyhow::Result<()> {
             Ok(())
         }
-        fn repo_list(&self) -> anyhow::Result<Vec<crate::domain::models::RepoInfo>> {
+        fn repo_list(&self) -> anyhow::Result<Vec<crate::core::models::RepoInfo>> {
             Ok(vec![])
         }
         fn repo_find_enabled(&self) -> anyhow::Result<Vec<EnabledRepo>> {
             Ok(self.repos.clone())
         }
-        fn repo_status_summary(&self) -> anyhow::Result<Vec<crate::domain::models::RepoStatusRow>> {
+        fn repo_status_summary(&self) -> anyhow::Result<Vec<crate::core::models::RepoStatusRow>> {
             Ok(vec![])
         }
     }
@@ -680,7 +680,7 @@ mod tests {
             repo_name: "org/repo".to_string(),
             queue_ops: vec![QueueOp::Remove],
             logs: vec![],
-            status: crate::daemon::task::TaskStatus::Completed,
+            status: crate::core::task::TaskStatus::Completed,
         };
 
         source.apply(&result);
@@ -713,7 +713,7 @@ mod tests {
                 },
             ],
             logs: vec![],
-            status: crate::daemon::task::TaskStatus::Completed,
+            status: crate::core::task::TaskStatus::Completed,
         };
 
         source.apply(&result);
@@ -731,7 +731,7 @@ mod tests {
             repo_name: "unknown/repo".to_string(),
             queue_ops: vec![QueueOp::Remove],
             logs: vec![],
-            status: crate::daemon::task::TaskStatus::Completed,
+            status: crate::core::task::TaskStatus::Completed,
         };
 
         // Should not panic

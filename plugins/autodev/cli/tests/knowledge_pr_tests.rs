@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use autodev::components::workspace::Workspace;
-use autodev::config::Env;
-use autodev::infrastructure::gh::mock::MockGh;
-use autodev::infrastructure::git::mock::MockGit;
-use autodev::knowledge::daily::create_knowledge_prs;
-use autodev::knowledge::models::*;
+use autodev::tasks::helpers::workspace::Workspace;
+use autodev::core::config::Env;
+use autodev::infra::gh::mock::MockGh;
+use autodev::infra::git::mock::MockGit;
+use autodev::tasks::knowledge::daily::create_knowledge_prs;
+use autodev::tasks::knowledge::models::*;
 
 // ─── TestEnv ───
 

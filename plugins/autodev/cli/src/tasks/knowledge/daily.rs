@@ -3,12 +3,12 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::infrastructure::claude::Claude;
-use crate::infrastructure::gh::Gh;
-use crate::infrastructure::suggest_workflow::SuggestWorkflow;
+use crate::infra::claude::Claude;
+use crate::infra::gh::Gh;
+use crate::infra::suggest_workflow::SuggestWorkflow;
 
-use crate::domain::repository::ConsumerLogRepository;
-use crate::queue::Database;
+use crate::core::repository::ConsumerLogRepository;
+use crate::infra::db::Database;
 
 use super::models::{
     CrossAnalysis, DailyReport, DailySummary, KnowledgeSuggestion, Pattern, PatternType, Suggestion,
@@ -248,7 +248,7 @@ pub async fn generate_daily_suggestions(
         .await
     {
         Ok(res) if res.exit_code == 0 => {
-            crate::infrastructure::claude::output::try_parse_with_fallbacks(&res.stdout)
+            crate::infra::claude::output::try_parse_with_fallbacks(&res.stdout)
         }
         Ok(res) => {
             tracing::warn!("daily suggestion generation exited with {}", res.exit_code);
@@ -287,12 +287,12 @@ pub async fn post_daily_report(
 /// 4. PR 생성 + autodev:skip 라벨 부착
 pub async fn create_knowledge_prs(
     gh: &dyn Gh,
-    workspace: &crate::components::workspace::Workspace<'_>,
+    workspace: &crate::tasks::helpers::workspace::Workspace<'_>,
     repo_name: &str,
     report: &DailyReport,
     gh_host: Option<&str>,
 ) {
-    use crate::domain::labels;
+    use crate::core::labels;
 
     let git = workspace.git();
 
@@ -323,7 +323,7 @@ pub async fn create_knowledge_prs(
         }
 
         // 3. 파일 쓰기 (path traversal 방지)
-        let file_path = match crate::config::safe_join(&kn_wt_path, target) {
+        let file_path = match crate::core::config::safe_join(&kn_wt_path, target) {
             Ok(p) => p,
             Err(e) => {
                 tracing::warn!("knowledge PR: unsafe target_file '{target}': {e}");
@@ -813,14 +813,14 @@ mod tests {
     }
 
     fn add_repo(db: &Database) -> String {
-        use crate::domain::repository::RepoRepository;
+        use crate::core::repository::RepoRepository;
         db.repo_add("https://github.com/org/repo", "org/repo")
             .unwrap()
     }
 
     #[test]
     fn aggregate_daily_suggestions_collects_from_consumer_logs() {
-        use crate::domain::repository::ConsumerLogRepository;
+        use crate::core::repository::ConsumerLogRepository;
 
         let db = open_memory_db();
         let repo_id = add_repo(&db);
@@ -828,7 +828,7 @@ mod tests {
         let ks1 = r#"{"suggestions":[{"type":"rule","target_file":".claude/rules/a.md","content":"A","reason":"R1"}]}"#;
         let ks2 = r#"{"suggestions":[{"type":"hook","target_file":".claude/hooks.json","content":"B","reason":"R2"}]}"#;
 
-        db.log_insert(&crate::domain::models::NewConsumerLog {
+        db.log_insert(&crate::core::models::NewConsumerLog {
             repo_id: repo_id.clone(),
             queue_type: "knowledge".to_string(),
             queue_item_id: "w1".to_string(),
@@ -843,7 +843,7 @@ mod tests {
         })
         .unwrap();
 
-        db.log_insert(&crate::domain::models::NewConsumerLog {
+        db.log_insert(&crate::core::models::NewConsumerLog {
             repo_id,
             queue_type: "knowledge".to_string(),
             queue_item_id: "w2".to_string(),
@@ -873,12 +873,12 @@ mod tests {
 
     #[test]
     fn aggregate_daily_suggestions_ignores_non_knowledge_logs() {
-        use crate::domain::repository::ConsumerLogRepository;
+        use crate::core::repository::ConsumerLogRepository;
 
         let db = open_memory_db();
         let repo_id = add_repo(&db);
 
-        db.log_insert(&crate::domain::models::NewConsumerLog {
+        db.log_insert(&crate::core::models::NewConsumerLog {
             repo_id,
             queue_type: "pr".to_string(),
             queue_item_id: "w1".to_string(),

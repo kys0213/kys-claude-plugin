@@ -4,9 +4,9 @@
 
 use async_trait::async_trait;
 
-use super::task::{Task, TaskResult};
+use crate::core::task::{Task, TaskResult};
 use super::task_manager::TaskManager;
-use super::task_source::TaskSource;
+use crate::core::collector::TaskSource;
 
 /// TaskSource에서 Task를 수집하고 분배하는 기본 구현체.
 pub struct DefaultTaskManager {
@@ -62,8 +62,8 @@ impl TaskManager for DefaultTaskManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::task::{AgentRequest, AgentResponse, QueueOp, SkipReason, TaskStatus};
-    use crate::infrastructure::claude::SessionOptions;
+    use crate::core::task::{AgentRequest, AgentResponse, QueueOp, SkipReason, TaskStatus};
+    use crate::infra::claude::SessionOptions;
     use std::path::PathBuf;
     use std::sync::Mutex;
 

@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use crate::components::workspace::Workspace;
-use crate::domain::labels;
-use crate::infrastructure::gh::Gh;
-use crate::infrastructure::suggest_workflow::SuggestWorkflow;
+use crate::tasks::helpers::workspace::Workspace;
+use crate::core::labels;
+use crate::infra::gh::Gh;
+use crate::infra::suggest_workflow::SuggestWorkflow;
 
 use super::models::KnowledgeSuggestion;
 
@@ -163,7 +163,7 @@ pub async fn build_suggest_workflow_section(
 
 /// Claude 출력에서 KnowledgeSuggestion 파싱
 pub fn parse_knowledge_suggestion(stdout: &str) -> Option<KnowledgeSuggestion> {
-    crate::infrastructure::claude::output::try_parse_with_fallbacks(stdout)
+    crate::infra::claude::output::try_parse_with_fallbacks(stdout)
 }
 
 /// KnowledgeSuggestion을 GitHub 코멘트로 포맷
@@ -234,7 +234,7 @@ pub async fn create_task_knowledge_prs(
             continue;
         }
 
-        let file_path = match crate::config::safe_join(&kn_wt_path, target) {
+        let file_path = match crate::core::config::safe_join(&kn_wt_path, target) {
             Ok(p) => p,
             Err(e) => {
                 tracing::warn!("task knowledge PR: unsafe target_file '{target}': {e}");

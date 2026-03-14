@@ -1,15 +1,14 @@
 pub mod agent;
 pub mod agent_impl;
+pub mod collectors;
 pub mod daily_reporter;
 pub mod log;
 pub mod pid;
 pub mod status;
-pub mod task;
 pub mod task_manager;
 pub mod task_manager_impl;
 pub mod task_runner;
 pub mod task_runner_impl;
-pub mod task_source;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -19,20 +18,20 @@ use anyhow::{bail, Result};
 use tokio::task::JoinSet;
 use tracing::info;
 
-use crate::components::workspace::OwnedWorkspace;
-use crate::config::{self, Env};
-use crate::domain::git_repository_factory::GitRepositoryFactory;
-use crate::domain::repository::ConsumerLogRepository;
-use crate::infrastructure::claude::Claude;
-use crate::infrastructure::gh::Gh;
-use crate::infrastructure::git::Git;
-use crate::infrastructure::suggest_workflow::SuggestWorkflow;
-use crate::queue::Database;
-use crate::sources::github::GitHubTaskSource;
+use crate::tasks::helpers::workspace::OwnedWorkspace;
+use crate::core::config::{self, Env};
+use crate::tasks::helpers::git_ops_factory::GitRepositoryFactory;
+use crate::core::repository::ConsumerLogRepository;
+use crate::infra::claude::Claude;
+use crate::infra::gh::Gh;
+use crate::infra::git::Git;
+use crate::infra::suggest_workflow::SuggestWorkflow;
+use crate::infra::db::Database;
+use crate::daemon::collectors::github::GitHubTaskSource;
 
 use self::agent_impl::ClaudeAgent;
 use self::daily_reporter::DailyReporter;
-use self::task::TaskResult;
+use crate::core::task::TaskResult;
 use self::task_manager::TaskManager;
 use self::task_runner::TaskRunner;
 use self::task_runner_impl::DefaultTaskRunner;
@@ -80,7 +79,7 @@ impl InFlightTracker {
 
 /// pending_tasks 버퍼에서 InFlightTracker 상한까지 Task를 꺼내 spawn한다.
 fn try_spawn(
-    pending: &mut Vec<Box<dyn task::Task>>,
+    pending: &mut Vec<Box<dyn crate::core::task::Task>>,
     tracker: &mut InFlightTracker,
     join_set: &mut JoinSet<TaskResult>,
     runner: &Arc<dyn TaskRunner>,
@@ -144,7 +143,7 @@ impl Daemon {
     pub async fn run(&mut self) {
         let start_time = std::time::Instant::now();
         let mut join_set: JoinSet<TaskResult> = JoinSet::new();
-        let mut pending_tasks: Vec<Box<dyn task::Task>> = Vec::new();
+        let mut pending_tasks: Vec<Box<dyn crate::core::task::Task>> = Vec::new();
 
         let mut tick =
             tokio::time::interval(std::time::Duration::from_secs(self.tick_interval_secs));

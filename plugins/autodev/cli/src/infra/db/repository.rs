@@ -2,8 +2,8 @@ use anyhow::Result;
 use chrono::Utc;
 use uuid::Uuid;
 
-use crate::domain::models::*;
-use crate::domain::repository::*;
+use crate::core::models::*;
+use crate::core::repository::*;
 
 use super::Database;
 

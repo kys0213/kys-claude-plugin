@@ -4,13 +4,13 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 
-use crate::config;
-use crate::config::Env;
-use crate::domain::models::EnabledRepo;
-use crate::domain::repository::RepoRepository;
-use crate::infrastructure::gh::Gh;
+use crate::core::config;
+use crate::core::config::Env;
+use crate::core::models::EnabledRepo;
+use crate::core::repository::RepoRepository;
+use crate::infra::gh::Gh;
 
-use super::git_repository::{fetch_issues, fetch_pulls, GitRepository};
+use super::git_ops::{fetch_issues, fetch_pulls, GitRepository};
 
 // ─── gh_host Cache ───
 
@@ -125,7 +125,7 @@ impl GitRepositoryFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::infrastructure::gh::mock::MockGh;
+    use crate::infra::gh::mock::MockGh;
 
     fn mock_env() -> impl Env {
         struct TestEnv(tempfile::TempDir);

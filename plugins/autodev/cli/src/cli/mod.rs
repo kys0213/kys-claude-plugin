@@ -2,10 +2,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::config;
-use crate::config::Env;
-use crate::domain::repository::*;
-use crate::queue::Database;
+use crate::core::config;
+use crate::core::config::Env;
+use crate::core::repository::*;
+use crate::infra::db::Database;
 
 /// JSON 문자열을 serde_json::Value로 파싱
 fn parse_config_json(json_str: &str) -> Result<serde_json::Value> {
@@ -300,7 +300,7 @@ pub fn usage(
     since: Option<&str>,
     issue: Option<i64>,
 ) -> Result<String> {
-    use crate::domain::repository::TokenUsageRepository;
+    use crate::core::repository::TokenUsageRepository;
 
     if let Some(s) = since {
         chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
@@ -414,8 +414,8 @@ pub fn logs(db: &Database, repo: Option<&str>, limit: usize) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Env;
-    use crate::domain::repository::RepoRepository;
+    use crate::core::config::Env;
+    use crate::core::repository::RepoRepository;
     use std::env::VarError;
 
     struct TestEnv {
@@ -431,9 +431,9 @@ mod tests {
         }
     }
 
-    fn setup_test_db(dir: &std::path::Path) -> crate::queue::Database {
+    fn setup_test_db(dir: &std::path::Path) -> crate::infra::db::Database {
         let db_path = dir.join("test.db");
-        let db = crate::queue::Database::open(&db_path).unwrap();
+        let db = crate::infra::db::Database::open(&db_path).unwrap();
         db.initialize().unwrap();
         db
     }

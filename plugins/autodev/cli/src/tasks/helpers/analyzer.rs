@@ -2,8 +2,8 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::infrastructure::claude::output;
-use crate::infrastructure::claude::{Claude, SessionOptions};
+use crate::infra::claude::output;
+use crate::infra::claude::{Claude, SessionOptions};
 
 /// 이슈 분석 결과
 pub struct AnalyzerOutput {

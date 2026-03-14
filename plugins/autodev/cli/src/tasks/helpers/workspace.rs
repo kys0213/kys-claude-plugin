@@ -4,8 +4,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::config::{self, Env};
-use crate::infrastructure::git::Git;
+use crate::core::config::{self, Env};
+use crate::infra::git::Git;
 
 // ─── WorkspaceOps trait ───
 

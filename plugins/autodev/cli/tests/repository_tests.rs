@@ -1,6 +1,6 @@
-use autodev::domain::models::*;
-use autodev::domain::repository::*;
-use autodev::queue::Database;
+use autodev::core::models::*;
+use autodev::core::repository::*;
+use autodev::infra::db::Database;
 use std::path::Path;
 
 // ─── Helpers ───

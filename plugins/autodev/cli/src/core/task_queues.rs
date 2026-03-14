@@ -82,7 +82,7 @@ pub mod pr_phase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::labels;
+    use crate::core::labels;
 
     #[test]
     fn make_work_id_format() {

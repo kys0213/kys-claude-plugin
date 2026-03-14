@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::knowledge::models::{RepetitionEntry, SessionEntry, ToolFrequencyEntry};
+use crate::tasks::knowledge::models::{RepetitionEntry, SessionEntry, ToolFrequencyEntry};
 
 use super::SuggestWorkflow;
 

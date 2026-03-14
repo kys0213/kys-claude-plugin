@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 
 use super::status::StatusItem;
-use super::task::{Task, TaskResult};
+use crate::core::task::{Task, TaskResult};
 
 /// Task 수집 및 분배 관리자.
 ///

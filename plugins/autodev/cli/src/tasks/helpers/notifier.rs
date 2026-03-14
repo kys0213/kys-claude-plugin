@@ -1,4 +1,4 @@
-use crate::infrastructure::gh::Gh;
+use crate::infra::gh::Gh;
 
 /// GitHub 상태 확인 + 댓글 관리 — Gh trait 주입받아 동작
 pub struct Notifier<'a> {

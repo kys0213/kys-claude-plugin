@@ -16,22 +16,22 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use super::AGENT_SYSTEM_PROMPT;
-use crate::components::workspace::{Workspace, WorkspaceOps};
-use crate::config::Env;
-use crate::daemon::task::{
+use crate::tasks::helpers::workspace::{Workspace, WorkspaceOps};
+use crate::core::config::Env;
+use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
-use crate::domain::labels;
-use crate::domain::models::NewConsumerLog;
-use crate::infrastructure::claude::SessionOptions;
-use crate::infrastructure::gh::Gh;
-use crate::infrastructure::git::Git;
-use crate::infrastructure::suggest_workflow::SuggestWorkflow;
-use crate::knowledge::extractor::{
+use crate::core::labels;
+use crate::core::models::NewConsumerLog;
+use crate::infra::claude::SessionOptions;
+use crate::infra::gh::Gh;
+use crate::infra::git::Git;
+use crate::infra::suggest_workflow::SuggestWorkflow;
+use crate::tasks::knowledge::extractor::{
     build_suggest_workflow_section, collect_existing_knowledge, create_task_knowledge_prs,
     format_knowledge_comment, parse_knowledge_suggestion, KnowledgePrContext,
 };
-use crate::queue::task_queues::PrItem;
+use crate::core::task_queues::PrItem;
 
 /// Knowledge Extraction Task.
 ///
@@ -278,10 +278,10 @@ mod tests {
     use std::path::Path;
     use std::time::Duration;
 
-    use crate::infrastructure::gh::mock::MockGh;
-    use crate::infrastructure::suggest_workflow::SuggestWorkflow;
-    use crate::knowledge::models::ToolFrequencyEntry;
-    use crate::queue::task_queues::make_work_id;
+    use crate::infra::gh::mock::MockGh;
+    use crate::infra::suggest_workflow::SuggestWorkflow;
+    use crate::tasks::knowledge::models::ToolFrequencyEntry;
+    use crate::core::task_queues::make_work_id;
 
     // ─── Mock Workspace ───
 
@@ -334,13 +334,13 @@ mod tests {
             _: &str,
             _: Option<&str>,
             _: Option<u32>,
-        ) -> anyhow::Result<Vec<crate::knowledge::models::SessionEntry>> {
+        ) -> anyhow::Result<Vec<crate::tasks::knowledge::models::SessionEntry>> {
             Ok(vec![])
         }
         async fn query_repetition(
             &self,
             _: Option<&str>,
-        ) -> anyhow::Result<Vec<crate::knowledge::models::RepetitionEntry>> {
+        ) -> anyhow::Result<Vec<crate::tasks::knowledge::models::RepetitionEntry>> {
             Ok(vec![])
         }
     }

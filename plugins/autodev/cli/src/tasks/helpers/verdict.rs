@@ -1,4 +1,4 @@
-use crate::infrastructure::claude::output::AnalysisResult;
+use crate::infra::claude::output::AnalysisResult;
 
 /// wontfix verdict 댓글 포맷
 pub fn format_wontfix_comment(a: &AnalysisResult) -> String {
@@ -91,7 +91,7 @@ pub fn format_raw_analysis_comment(report: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::infrastructure::claude::output::{AnalysisResult, RelatedIssue, Relation, Verdict};
+    use crate::infra::claude::output::{AnalysisResult, RelatedIssue, Relation, Verdict};
 
     #[test]
     fn format_analysis_comment_contains_marker_and_fields() {

@@ -1,12 +1,12 @@
 use anyhow::Result;
 use serde::Deserialize;
 
-use crate::domain::labels;
-use crate::domain::models::{RepoIssue, RepoPull};
-use crate::domain::repository::ScanCursorRepository;
-use crate::infrastructure::gh::Gh;
-use crate::queue::state_queue::StateQueue;
-use crate::queue::task_queues::{issue_phase, make_work_id, pr_phase, IssueItem, PrItem};
+use crate::core::labels;
+use crate::core::models::{RepoIssue, RepoPull};
+use crate::core::repository::ScanCursorRepository;
+use crate::infra::gh::Gh;
+use crate::core::state_queue::StateQueue;
+use crate::core::task_queues::{issue_phase, make_work_id, pr_phase, IssueItem, PrItem};
 
 // ─── Private serde types for scanning ───
 
@@ -881,8 +881,8 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    use crate::infrastructure::gh::mock::MockGh;
-    use crate::queue::task_queues::{issue_phase, make_work_id, pr_phase};
+    use crate::infra::gh::mock::MockGh;
+    use crate::core::task_queues::{issue_phase, make_work_id, pr_phase};
 
     // ─── Mock ScanCursorRepository ───
 

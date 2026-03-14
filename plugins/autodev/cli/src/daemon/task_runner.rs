@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 
-use super::task::{Task, TaskResult};
+use crate::core::task::{Task, TaskResult};
 
 /// Task 실행기.
 ///

@@ -3,12 +3,13 @@ use std::sync::Arc;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use autodev::{client, config, daemon, infrastructure, queue, tui};
+use autodev::core::config;
+use autodev::{cli as client, daemon, infra, tui};
 
-use infrastructure::claude::RealClaude;
-use infrastructure::gh::RealGh;
-use infrastructure::git::RealGit;
-use infrastructure::suggest_workflow::RealSuggestWorkflow;
+use infra::claude::RealClaude;
+use infra::gh::RealGh;
+use infra::git::RealGit;
+use infra::suggest_workflow::RealSuggestWorkflow;
 
 #[derive(Parser)]
 #[command(name = "autodev", version, about = "GitHub 이슈 → PR 자동화 에이전트")]
@@ -178,7 +179,7 @@ async fn main() -> Result<()> {
     };
 
     let db_path = home.join("autodev.db");
-    let db = queue::Database::open(&db_path)?;
+    let db = infra::db::Database::open(&db_path)?;
     db.initialize()?;
 
     // infrastructure 구현체 생성 (프로덕션)
@@ -204,10 +205,10 @@ async fn main() -> Result<()> {
                 }
             }
             let env: Arc<dyn config::Env> = Arc::new(env);
-            let gh: Arc<dyn infrastructure::gh::Gh> = Arc::new(gh);
-            let git: Arc<dyn infrastructure::git::Git> = Arc::new(git);
-            let claude: Arc<dyn infrastructure::claude::Claude> = Arc::new(claude);
-            let sw: Arc<dyn infrastructure::suggest_workflow::SuggestWorkflow> = Arc::new(sw);
+            let gh: Arc<dyn infra::gh::Gh> = Arc::new(gh);
+            let git: Arc<dyn infra::git::Git> = Arc::new(git);
+            let claude: Arc<dyn infra::claude::Claude> = Arc::new(claude);
+            let sw: Arc<dyn infra::suggest_workflow::SuggestWorkflow> = Arc::new(sw);
             daemon::start(&home, env, gh, git, claude, sw).await?;
         }
         Commands::Stop => daemon::stop(&home)?,
@@ -228,10 +229,10 @@ async fn main() -> Result<()> {
                 }
             }
             let env: Arc<dyn config::Env> = Arc::new(env);
-            let gh: Arc<dyn infrastructure::gh::Gh> = Arc::new(gh);
-            let git: Arc<dyn infrastructure::git::Git> = Arc::new(git);
-            let claude: Arc<dyn infrastructure::claude::Claude> = Arc::new(claude);
-            let sw: Arc<dyn infrastructure::suggest_workflow::SuggestWorkflow> = Arc::new(sw);
+            let gh: Arc<dyn infra::gh::Gh> = Arc::new(gh);
+            let git: Arc<dyn infra::git::Git> = Arc::new(git);
+            let claude: Arc<dyn infra::claude::Claude> = Arc::new(claude);
+            let sw: Arc<dyn infra::suggest_workflow::SuggestWorkflow> = Arc::new(sw);
             daemon::start(&home, env, gh, git, claude, sw).await?;
         }
         Commands::Status => {

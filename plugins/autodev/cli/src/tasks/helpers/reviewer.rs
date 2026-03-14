@@ -2,9 +2,9 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::infrastructure::claude::output;
-use crate::infrastructure::claude::output::ReviewVerdict;
-use crate::infrastructure::claude::{Claude, SessionOptions};
+use crate::infra::claude::output;
+use crate::infra::claude::output::ReviewVerdict;
+use crate::infra::claude::{Claude, SessionOptions};
 
 /// PR 리뷰 실행 — Claude 세션을 통한 코드 리뷰
 pub struct Reviewer<'a> {

@@ -1,6 +1,6 @@
-use autodev::config::loader;
-use autodev::config::models::WorkflowConfig;
-use autodev::config::Env;
+use autodev::core::config::loader;
+use autodev::core::config::models::WorkflowConfig;
+use autodev::core::config::Env;
 use std::collections::HashMap;
 use std::fs;
 use tempfile::TempDir;

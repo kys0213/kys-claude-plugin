@@ -10,9 +10,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::domain::models::NewConsumerLog;
-use crate::infrastructure::claude::SessionOptions;
-use crate::queue::task_queues::PrItem;
+use crate::core::models::NewConsumerLog;
+use crate::infra::claude::SessionOptions;
+use crate::core::task_queues::PrItem;
 
 // ─── Agent 요청/응답 DTO ───
 
