@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod agent_impl;
 pub mod collectors;
+pub mod cron;
 pub mod daily_reporter;
 pub mod log;
 pub mod pid;
@@ -30,6 +31,7 @@ use crate::tasks::helpers::git_ops_factory::GitRepositoryFactory;
 use crate::tasks::helpers::workspace::OwnedWorkspace;
 
 use self::agent_impl::ClaudeAgent;
+use self::cron::engine::CronEngine;
 use self::daily_reporter::DailyReporter;
 use self::task_manager::TaskManager;
 use self::task_runner::TaskRunner;
@@ -112,6 +114,7 @@ pub struct Daemon {
     status_path: PathBuf,
     counters: status::StatusCounters,
     tick_interval_secs: u64,
+    cron_engine: Option<CronEngine>,
 }
 
 impl Daemon {
@@ -133,7 +136,13 @@ impl Daemon {
             status_path,
             counters: status::StatusCounters::default(),
             tick_interval_secs,
+            cron_engine: None,
         }
+    }
+
+    pub fn with_cron_engine(mut self, engine: CronEngine) -> Self {
+        self.cron_engine = Some(engine);
+        self
     }
 
     /// 메인 이벤트 루프 실행.
@@ -174,7 +183,7 @@ impl Daemon {
                     try_spawn(&mut pending_tasks, &mut self.tracker, &mut join_set, &self.runner);
                 }
 
-                // ── Tick: housekeeping + spawn + daily report ──
+                // ── Tick: housekeeping + spawn + daily report + cron ──
                 _ = tick.tick() => {
                     self.manager.tick().await;
                     pending_tasks.extend(self.manager.drain_ready());
@@ -182,6 +191,14 @@ impl Daemon {
                     try_spawn(&mut pending_tasks, &mut self.tracker, &mut join_set, &self.runner);
 
                     self.reporter.maybe_run().await;
+
+                    // Execute due cron jobs
+                    if let Some(ref cron) = self.cron_engine {
+                        let results = cron.tick().await;
+                        for r in &results {
+                            info!("cron '{}' completed: exit_code={}", r.job_name, r.exit_code);
+                        }
+                    }
                 }
 
                 // ── Status heartbeat ──
@@ -382,6 +399,10 @@ pub async fn start(
         cfg.daemon.max_concurrent_tasks
     );
 
+    // ── CronEngine ──
+    let cron_db = Database::open(&db_path)?;
+    let cron_engine = CronEngine::new(cron_db, home.to_path_buf());
+
     // ── Daemon ──
     let status_path = home.join("daemon.status.json");
     let mut daemon = Daemon::new(
@@ -392,7 +413,8 @@ pub async fn start(
         log_db,
         status_path,
         cfg.daemon.tick_interval_secs,
-    );
+    )
+    .with_cron_engine(cron_engine);
 
     daemon.run().await;
 
