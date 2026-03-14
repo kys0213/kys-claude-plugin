@@ -370,13 +370,15 @@ impl fmt::Display for HitlSeverity {
     }
 }
 
-impl HitlSeverity {
-    pub fn from_str_lowercase(s: &str) -> Option<Self> {
+impl std::str::FromStr for HitlSeverity {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "high" => Some(Self::High),
-            "medium" => Some(Self::Medium),
-            "low" => Some(Self::Low),
-            _ => None,
+            "high" => Ok(Self::High),
+            "medium" => Ok(Self::Medium),
+            "low" => Ok(Self::Low),
+            _ => Err(format!("invalid hitl severity: {s}")),
         }
     }
 }
@@ -398,13 +400,15 @@ impl fmt::Display for HitlStatus {
     }
 }
 
-impl HitlStatus {
-    pub fn from_str_lowercase(s: &str) -> Option<Self> {
+impl std::str::FromStr for HitlStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "pending" => Some(Self::Pending),
-            "responded" => Some(Self::Responded),
-            "expired" => Some(Self::Expired),
-            _ => None,
+            "pending" => Ok(Self::Pending),
+            "responded" => Ok(Self::Responded),
+            "expired" => Ok(Self::Expired),
+            _ => Err(format!("invalid hitl status: {s}")),
         }
     }
 }
@@ -478,13 +482,6 @@ impl std::str::FromStr for CronStatus {
             _ => Err(anyhow::anyhow!("invalid cron status: {s}")),
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CronScope {
-    Global,
-    PerRepo { repo_id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

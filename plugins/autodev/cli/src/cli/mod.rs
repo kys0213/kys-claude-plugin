@@ -15,6 +15,16 @@ use crate::core::config::Env;
 use crate::core::repository::*;
 use crate::infra::db::Database;
 
+/// Shared helper: resolve a repo name to its database ID.
+pub fn resolve_repo_id(db: &Database, repo_name: &str) -> Result<String> {
+    let enabled = db.repo_find_enabled()?;
+    enabled
+        .iter()
+        .find(|r| r.name == repo_name)
+        .map(|r| r.id.clone())
+        .ok_or_else(|| anyhow::anyhow!("repository not found: {repo_name}"))
+}
+
 /// JSON 문자열을 serde_json::Value로 파싱
 fn parse_config_json(json_str: &str) -> Result<serde_json::Value> {
     serde_json::from_str(json_str).map_err(|e| anyhow::anyhow!("invalid config JSON: {e}"))

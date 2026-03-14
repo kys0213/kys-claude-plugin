@@ -1,6 +1,8 @@
 use async_trait::async_trait;
+use serde::Serialize;
 
 /// 알림 이벤트 (HitlEvent의 알림용 뷰)
+#[derive(Serialize)]
 pub struct NotificationEvent {
     pub repo_name: String,
     pub severity: String,

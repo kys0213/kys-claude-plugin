@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::Result;
 
 use crate::core::board::*;
@@ -35,6 +37,16 @@ impl BoardStateBuilder {
                 continue;
             }
 
+            // Pre-compute: set of done work_ids for this repo
+            let done_work_ids: HashSet<&str> = repo_items
+                .iter()
+                .filter(|qi| qi.phase == "done")
+                .map(|qi| qi.work_id.as_str())
+                .collect();
+
+            // Hoist hitl_pending_count outside the spec loop (once per repo)
+            let hitl_count = db.hitl_pending_count(Some(&repo.name))? as u32;
+
             // Build spec entries
             let mut spec_entries = Vec::new();
             for spec in &repo_specs {
@@ -43,14 +55,10 @@ impl BoardStateBuilder {
                 let done_count = linked_issues
                     .iter()
                     .filter(|si| {
-                        all_items.iter().any(|qi| {
-                            qi.work_id == format!("{}#{}", repo.name, si.issue_number)
-                                && qi.phase == "done"
-                        })
+                        let work_id = format!("{}#{}", repo.name, si.issue_number);
+                        done_work_ids.contains(work_id.as_str())
                     })
                     .count();
-
-                let hitl_count = db.hitl_pending_count(Some(&repo.name))? as u32;
 
                 spec_entries.push(SpecBoardEntry {
                     id: spec.id.clone(),

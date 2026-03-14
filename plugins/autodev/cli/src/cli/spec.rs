@@ -1,5 +1,6 @@
 use anyhow::Result;
 
+use crate::cli::resolve_repo_id;
 use crate::core::models::*;
 use crate::core::repository::*;
 use crate::infra::db::Database;
@@ -14,20 +15,7 @@ pub fn spec_add(
     test_commands: Option<&str>,
     acceptance_criteria: Option<&str>,
 ) -> Result<String> {
-    // Find repo_id by name
-    let repos = db.repo_list()?;
-    let repo = repos
-        .iter()
-        .find(|r| r.name == repo_name)
-        .ok_or_else(|| anyhow::anyhow!("repository not found: {repo_name}"))?;
-
-    // Get repo_id from enabled repos (which has the id field)
-    let enabled = db.repo_find_enabled()?;
-    let repo_id = enabled
-        .iter()
-        .find(|r| r.name == repo.name)
-        .map(|r| r.id.clone())
-        .ok_or_else(|| anyhow::anyhow!("repository not enabled: {repo_name}"))?;
+    let repo_id = resolve_repo_id(db, repo_name)?;
 
     let new_spec = NewSpec {
         repo_id,

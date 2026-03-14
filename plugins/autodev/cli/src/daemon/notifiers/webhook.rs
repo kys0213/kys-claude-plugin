@@ -1,14 +1,24 @@
 use anyhow::{bail, Result};
 use async_trait::async_trait;
+use serde::Serialize;
 
 use crate::core::notifier::{NotificationEvent, Notifier};
 
 /// Webhook URL에 JSON payload를 POST하는 Notifier.
 ///
 /// 외부 HTTP 라이브러리 의존성을 피하기 위해
-/// `curl` CLI를 `std::process::Command`로 호출한다.
+/// `curl` CLI를 `tokio::process::Command`로 호출한다.
 pub struct WebhookNotifier {
     url: String,
+}
+
+/// Wraps a `NotificationEvent` with the fixed `"event": "hitl_required"` field
+/// so that `serde_json::to_string` produces the complete payload.
+#[derive(Serialize)]
+struct WebhookPayload<'a> {
+    event: &'static str,
+    #[serde(flatten)]
+    inner: &'a NotificationEvent,
 }
 
 impl WebhookNotifier {
@@ -17,39 +27,12 @@ impl WebhookNotifier {
     }
 
     /// NotificationEvent를 JSON 문자열로 직렬화한다.
-    fn build_payload(event: &NotificationEvent) -> String {
-        let options_json: Vec<String> = event
-            .options
-            .iter()
-            .map(|o| format!("\"{}\"", o.replace('"', "\\\"")))
-            .collect();
-
-        let work_id = match &event.work_id {
-            Some(id) => format!("\"{}\"", id.replace('"', "\\\"")),
-            None => "null".to_string(),
+    fn build_payload(event: &NotificationEvent) -> Result<String> {
+        let payload = WebhookPayload {
+            event: "hitl_required",
+            inner: event,
         };
-
-        let spec_id = match &event.spec_id {
-            Some(id) => format!("\"{}\"", id.replace('"', "\\\"")),
-            None => "null".to_string(),
-        };
-
-        let url = match &event.url {
-            Some(u) => format!("\"{}\"", u.replace('"', "\\\"")),
-            None => "null".to_string(),
-        };
-
-        format!(
-            r#"{{"event":"hitl_required","repo_name":"{}","severity":"{}","situation":"{}","context":"{}","options":[{}],"work_id":{},"spec_id":{},"url":{}}}"#,
-            event.repo_name.replace('"', "\\\""),
-            event.severity.replace('"', "\\\""),
-            event.situation.replace('"', "\\\""),
-            event.context.replace('"', "\\\""),
-            options_json.join(","),
-            work_id,
-            spec_id,
-            url,
-        )
+        serde_json::to_string(&payload).map_err(Into::into)
     }
 }
 
@@ -60,9 +43,9 @@ impl Notifier for WebhookNotifier {
     }
 
     async fn notify(&self, event: &NotificationEvent) -> Result<()> {
-        let payload = Self::build_payload(event);
+        let payload = Self::build_payload(event)?;
 
-        let output = std::process::Command::new("curl")
+        let output = tokio::process::Command::new("curl")
             .args([
                 "-s",
                 "-o",
@@ -77,7 +60,8 @@ impl Notifier for WebhookNotifier {
                 &payload,
                 &self.url,
             ])
-            .output()?;
+            .output()
+            .await?;
 
         if !output.status.success() {
             bail!(
@@ -117,7 +101,7 @@ mod tests {
     #[test]
     fn build_payload_contains_all_fields() {
         let event = make_event();
-        let payload = WebhookNotifier::build_payload(&event);
+        let payload = WebhookNotifier::build_payload(&event).unwrap();
 
         assert!(payload.contains("\"event\":\"hitl_required\""));
         assert!(payload.contains("\"repo_name\":\"org/repo\""));
@@ -137,7 +121,7 @@ mod tests {
         event.spec_id = None;
         event.url = None;
 
-        let payload = WebhookNotifier::build_payload(&event);
+        let payload = WebhookNotifier::build_payload(&event).unwrap();
 
         assert!(payload.contains("\"work_id\":null"));
         assert!(payload.contains("\"spec_id\":null"));
@@ -147,7 +131,7 @@ mod tests {
     #[test]
     fn build_payload_is_valid_json() {
         let event = make_event();
-        let payload = WebhookNotifier::build_payload(&event);
+        let payload = WebhookNotifier::build_payload(&event).unwrap();
         let parsed: serde_json::Result<serde_json::Value> = serde_json::from_str(&payload);
         assert!(parsed.is_ok(), "payload is not valid JSON: {payload}");
     }
@@ -156,7 +140,7 @@ mod tests {
     fn build_payload_escapes_quotes() {
         let mut event = make_event();
         event.situation = "found \"error\" in log".to_string();
-        let payload = WebhookNotifier::build_payload(&event);
+        let payload = WebhookNotifier::build_payload(&event).unwrap();
         let parsed: serde_json::Result<serde_json::Value> = serde_json::from_str(&payload);
         assert!(
             parsed.is_ok(),

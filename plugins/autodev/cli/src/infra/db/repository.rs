@@ -250,21 +250,7 @@ impl SpecRepository for Database {
         let mut stmt = conn.prepare(&query)?;
         let params_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|p| p.as_ref()).collect();
-        let rows = stmt.query_map(params_refs.as_slice(), |row| {
-            let status_str: String = row.get(4)?;
-            Ok(Spec {
-                id: row.get(0)?,
-                repo_id: row.get(1)?,
-                title: row.get(2)?,
-                body: row.get(3)?,
-                status: status_str.parse().unwrap_or(SpecStatus::Active),
-                source_path: row.get(5)?,
-                test_commands: row.get(6)?,
-                acceptance_criteria: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
-            })
-        })?;
+        let rows = stmt.query_map(params_refs.as_slice(), map_spec_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
@@ -275,27 +261,9 @@ impl SpecRepository for Database {
              test_commands, acceptance_criteria, created_at, updated_at \
              FROM specs WHERE id = ?1",
             rusqlite::params![id],
-            |row| {
-                let status_str: String = row.get(4)?;
-                Ok(Spec {
-                    id: row.get(0)?,
-                    repo_id: row.get(1)?,
-                    title: row.get(2)?,
-                    body: row.get(3)?,
-                    status: status_str.parse().unwrap_or(SpecStatus::Active),
-                    source_path: row.get(5)?,
-                    test_commands: row.get(6)?,
-                    acceptance_criteria: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
-                })
-            },
+            map_spec_row,
         );
-        match result {
-            Ok(spec) => Ok(Some(spec)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        optional_query_row(result)
     }
 
     fn spec_update(
@@ -589,23 +557,7 @@ impl HitlRepository for Database {
         let mut stmt = conn.prepare(&query)?;
         let params_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|p| p.as_ref()).collect();
-        let rows = stmt.query_map(params_refs.as_slice(), |row| {
-            let severity_str: String = row.get(4)?;
-            let status_str: String = row.get(8)?;
-            Ok(HitlEvent {
-                id: row.get(0)?,
-                repo_id: row.get(1)?,
-                spec_id: row.get(2)?,
-                work_id: row.get(3)?,
-                severity: HitlSeverity::from_str_lowercase(&severity_str)
-                    .unwrap_or(HitlSeverity::Medium),
-                situation: row.get(5)?,
-                context: row.get(6)?,
-                options: row.get(7)?,
-                status: HitlStatus::from_str_lowercase(&status_str).unwrap_or(HitlStatus::Pending),
-                created_at: row.get(9)?,
-            })
-        })?;
+        let rows = stmt.query_map(params_refs.as_slice(), map_hitl_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
@@ -615,31 +567,9 @@ impl HitlRepository for Database {
             "SELECT id, repo_id, spec_id, work_id, severity, situation, context, options, status, created_at \
              FROM hitl_events WHERE id = ?1",
             rusqlite::params![id],
-            |row| {
-                let severity_str: String = row.get(4)?;
-                let status_str: String = row.get(8)?;
-                Ok(HitlEvent {
-                    id: row.get(0)?,
-                    repo_id: row.get(1)?,
-                    spec_id: row.get(2)?,
-                    work_id: row.get(3)?,
-                    severity: HitlSeverity::from_str_lowercase(&severity_str)
-                        .unwrap_or(HitlSeverity::Medium),
-                    situation: row.get(5)?,
-                    context: row.get(6)?,
-                    options: row.get(7)?,
-                    status: HitlStatus::from_str_lowercase(&status_str)
-                        .unwrap_or(HitlStatus::Pending),
-                    created_at: row.get(9)?,
-                })
-            },
+            map_hitl_row,
         );
-
-        match result {
-            Ok(event) => Ok(Some(event)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        optional_query_row(result)
     }
 
     fn hitl_respond(&self, response: &NewHitlResponse) -> Result<()> {
@@ -731,54 +661,59 @@ impl QueueRepository for Database {
             rusqlite::params![work_id],
             |row| row.get(0),
         );
-        match result {
-            Ok(phase) => Ok(Some(phase)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        optional_query_row(result)
     }
 
     fn queue_advance(&self, work_id: &str) -> Result<()> {
-        let current_phase = self
-            .queue_get_phase(work_id)?
-            .ok_or_else(|| anyhow::anyhow!("queue item not found: {work_id}"))?;
-
-        let next_phase = match current_phase.as_str() {
-            "pending" => "ready",
-            "ready" => "running",
-            "running" => "done",
-            "done" | "skipped" => {
-                anyhow::bail!("cannot advance terminal state: {current_phase}")
-            }
-            other => anyhow::bail!("unknown phase: {other}"),
-        };
-
         let now = Utc::now().to_rfc3339();
-        self.conn().execute(
-            "UPDATE queue_items SET phase = ?1, updated_at = ?2 WHERE work_id = ?3",
-            rusqlite::params![next_phase, now, work_id],
-        )?;
+        // Atomic CAS-style transitions: UPDATE with WHERE on expected phase.
+        // Try each valid transition; exactly one should match.
+        let transitions: &[(&str, &str)] = &[
+            ("pending", "ready"),
+            ("ready", "running"),
+            ("running", "done"),
+        ];
 
-        Ok(())
+        let conn = self.conn();
+        for &(from, to) in transitions {
+            let affected = conn.execute(
+                "UPDATE queue_items SET phase = ?1, updated_at = ?2 WHERE work_id = ?3 AND phase = ?4",
+                rusqlite::params![to, now, work_id, from],
+            )?;
+            if affected > 0 {
+                return Ok(());
+            }
+        }
+
+        // None of the transitions matched — determine why.
+        let current = self.queue_get_phase(work_id)?;
+        match current.as_deref() {
+            None => anyhow::bail!("queue item not found: {work_id}"),
+            Some("done") | Some("skipped") => {
+                anyhow::bail!("cannot advance terminal state: {}", current.unwrap())
+            }
+            Some(other) => anyhow::bail!("unknown phase: {other}"),
+        }
     }
 
     fn queue_skip(&self, work_id: &str, reason: Option<&str>) -> Result<()> {
-        let current_phase = self
-            .queue_get_phase(work_id)?
-            .ok_or_else(|| anyhow::anyhow!("queue item not found: {work_id}"))?;
-
-        match current_phase.as_str() {
-            "done" | "skipped" => {
-                anyhow::bail!("cannot skip terminal state: {current_phase}")
-            }
-            _ => {}
-        }
-
         let now = Utc::now().to_rfc3339();
-        self.conn().execute(
-            "UPDATE queue_items SET phase = 'skipped', skip_reason = ?1, updated_at = ?2 WHERE work_id = ?3",
+        // Atomic: only skip if not already in a terminal state.
+        let affected = self.conn().execute(
+            "UPDATE queue_items SET phase = 'skipped', skip_reason = ?1, updated_at = ?2 \
+             WHERE work_id = ?3 AND phase NOT IN ('done', 'skipped')",
             rusqlite::params![reason, now, work_id],
         )?;
+
+        if affected == 0 {
+            let current = self.queue_get_phase(work_id)?;
+            match current.as_deref() {
+                None => anyhow::bail!("queue item not found: {work_id}"),
+                Some(phase) => {
+                    anyhow::bail!("cannot skip terminal state: {phase}")
+                }
+            }
+        }
 
         Ok(())
     }
@@ -809,18 +744,7 @@ impl QueueRepository for Database {
         let mut stmt = conn.prepare(&query)?;
         let params_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|p| p.as_ref()).collect();
-        let rows = stmt.query_map(params_refs.as_slice(), |row| {
-            Ok(QueueItem {
-                work_id: row.get(0)?,
-                repo_id: row.get(1)?,
-                queue_type: row.get(2)?,
-                phase: row.get(3)?,
-                title: row.get(4)?,
-                skip_reason: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
-            })
-        })?;
+        let rows = stmt.query_map(params_refs.as_slice(), map_queue_item_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 }
@@ -875,18 +799,7 @@ impl ClawDecisionRepository for Database {
         let mut stmt = conn.prepare(&query)?;
         let params_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|p| p.as_ref()).collect();
-        let rows = stmt.query_map(params_refs.as_slice(), |row| {
-            Ok(ClawDecision {
-                id: row.get(0)?,
-                repo_id: row.get(1)?,
-                spec_id: row.get(2)?,
-                decision_type: row.get(3)?,
-                target_work_id: row.get(4)?,
-                reasoning: row.get(5)?,
-                context_json: row.get(6)?,
-                created_at: row.get(7)?,
-            })
-        })?;
+        let rows = stmt.query_map(params_refs.as_slice(), map_decision_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
@@ -897,24 +810,9 @@ impl ClawDecisionRepository for Database {
              reasoning, context_json, created_at \
              FROM claw_decisions WHERE id = ?1",
             rusqlite::params![id],
-            |row| {
-                Ok(ClawDecision {
-                    id: row.get(0)?,
-                    repo_id: row.get(1)?,
-                    spec_id: row.get(2)?,
-                    decision_type: row.get(3)?,
-                    target_work_id: row.get(4)?,
-                    reasoning: row.get(5)?,
-                    context_json: row.get(6)?,
-                    created_at: row.get(7)?,
-                })
-            },
+            map_decision_row,
         );
-        match result {
-            Ok(d) => Ok(Some(d)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
+        optional_query_row(result)
     }
 
     fn decision_list_by_spec(&self, spec_id: &str, limit: usize) -> Result<Vec<ClawDecision>> {
@@ -925,16 +823,7 @@ impl ClawDecisionRepository for Database {
              FROM claw_decisions WHERE spec_id = ?1 ORDER BY created_at DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(rusqlite::params![spec_id, limit as i64], |row| {
-            Ok(ClawDecision {
-                id: row.get(0)?,
-                repo_id: row.get(1)?,
-                spec_id: row.get(2)?,
-                decision_type: row.get(3)?,
-                target_work_id: row.get(4)?,
-                reasoning: row.get(5)?,
-                context_json: row.get(6)?,
-                created_at: row.get(7)?,
-            })
+            map_decision_row(row)
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
@@ -1044,10 +933,9 @@ impl CronRepository for Database {
             params.iter().map(|p| p.as_ref()).collect();
         let result = conn.query_row(query, params_refs.as_slice(), |row| Ok(map_cron_row(row)));
 
-        match result {
-            Ok(job) => Ok(Some(job?)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
+        match optional_query_row(result)? {
+            Some(job) => Ok(Some(job?)),
+            None => Ok(None),
         }
     }
 
@@ -1192,6 +1080,77 @@ impl CronRepository for Database {
 
         Ok(due_jobs)
     }
+}
+
+// ─── Row-mapping helpers ───
+
+/// Converts a `query_row` result into `Ok(Some(x))` / `Ok(None)` / `Err(e)`,
+/// collapsing `QueryReturnedNoRows` into `None`.
+fn optional_query_row<T>(result: std::result::Result<T, rusqlite::Error>) -> Result<Option<T>> {
+    match result {
+        Ok(val) => Ok(Some(val)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn map_hitl_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HitlEvent> {
+    let severity_str: String = row.get(4)?;
+    let status_str: String = row.get(8)?;
+    Ok(HitlEvent {
+        id: row.get(0)?,
+        repo_id: row.get(1)?,
+        spec_id: row.get(2)?,
+        work_id: row.get(3)?,
+        severity: severity_str.parse().unwrap_or(HitlSeverity::Medium),
+        situation: row.get(5)?,
+        context: row.get(6)?,
+        options: row.get(7)?,
+        status: status_str.parse().unwrap_or(HitlStatus::Pending),
+        created_at: row.get(9)?,
+    })
+}
+
+fn map_decision_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClawDecision> {
+    Ok(ClawDecision {
+        id: row.get(0)?,
+        repo_id: row.get(1)?,
+        spec_id: row.get(2)?,
+        decision_type: row.get(3)?,
+        target_work_id: row.get(4)?,
+        reasoning: row.get(5)?,
+        context_json: row.get(6)?,
+        created_at: row.get(7)?,
+    })
+}
+
+fn map_spec_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Spec> {
+    let status_str: String = row.get(4)?;
+    Ok(Spec {
+        id: row.get(0)?,
+        repo_id: row.get(1)?,
+        title: row.get(2)?,
+        body: row.get(3)?,
+        status: status_str.parse().unwrap_or(SpecStatus::Active),
+        source_path: row.get(5)?,
+        test_commands: row.get(6)?,
+        acceptance_criteria: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
+    })
+}
+
+fn map_queue_item_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueItem> {
+    Ok(QueueItem {
+        work_id: row.get(0)?,
+        repo_id: row.get(1)?,
+        queue_type: row.get(2)?,
+        phase: row.get(3)?,
+        title: row.get(4)?,
+        skip_reason: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
+    })
 }
 
 fn map_cron_row(row: &rusqlite::Row<'_>) -> Result<CronJob> {

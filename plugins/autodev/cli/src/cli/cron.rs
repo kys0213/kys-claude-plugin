@@ -1,5 +1,6 @@
 use anyhow::Result;
 
+use crate::cli::resolve_repo_id;
 use crate::core::config;
 use crate::core::config::Env;
 use crate::core::models::*;
@@ -183,24 +184,6 @@ pub fn cron_trigger(db: &Database, env: &dyn Env, name: &str, repo: Option<&str>
 }
 
 // ─── Helpers ───
-
-fn resolve_repo_id(db: &Database, repo_name: &str) -> Result<String> {
-    let repos = db.repo_list()?;
-    repos
-        .iter()
-        .find(|r| r.name == repo_name)
-        .map(|_| {
-            // Get the actual ID by querying enabled repos
-            let enabled = db.repo_find_enabled().unwrap_or_default();
-            enabled
-                .iter()
-                .find(|e| e.name == repo_name)
-                .map(|e| e.id.clone())
-                .unwrap_or_default()
-        })
-        .filter(|id| !id.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("repository not found: {repo_name}"))
-}
 
 fn find_repo_info(db: &Database, repo_name: &str) -> Result<Option<EnabledRepo>> {
     let repos = db.repo_find_enabled()?;
