@@ -55,6 +55,26 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_token_usage_repo ON token_usage(repo_id, created_at);
 
+        CREATE TABLE IF NOT EXISTS specs (
+            id                  TEXT PRIMARY KEY,
+            repo_id             TEXT NOT NULL REFERENCES repositories(id),
+            title               TEXT NOT NULL,
+            body                TEXT NOT NULL,
+            status              TEXT NOT NULL DEFAULT 'active',
+            source_path         TEXT,
+            test_commands       TEXT,
+            acceptance_criteria TEXT,
+            created_at          TEXT NOT NULL,
+            updated_at          TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS spec_issues (
+            spec_id        TEXT NOT NULL REFERENCES specs(id),
+            issue_number   INTEGER NOT NULL,
+            created_at     TEXT NOT NULL,
+            PRIMARY KEY (spec_id, issue_number)
+        );
+
         COMMIT;
         ",
     )?;

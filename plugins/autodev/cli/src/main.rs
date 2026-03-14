@@ -73,6 +73,11 @@ enum Commands {
         #[arg(long)]
         issue: Option<i64>,
     },
+    /// 스펙 관리
+    Spec {
+        #[command(subcommand)]
+        action: SpecAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -119,6 +124,88 @@ enum RepoAction {
         /// 업데이트할 설정 JSON (WorkflowConfig 형식)
         #[arg(long)]
         config: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum SpecAction {
+    /// 스펙 추가
+    Add {
+        /// 스펙 제목
+        #[arg(long)]
+        title: String,
+        /// 스펙 본문
+        #[arg(long)]
+        body: String,
+        /// 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: String,
+        /// 소스 파일 경로
+        #[arg(long)]
+        file: Option<String>,
+        /// 테스트 커맨드 (JSON 배열)
+        #[arg(long)]
+        test_commands: Option<String>,
+        /// 수락 기준 (마크다운)
+        #[arg(long)]
+        acceptance_criteria: Option<String>,
+    },
+    /// 스펙 목록
+    List {
+        /// 레포 이름 필터 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
+    /// 스펙 상세 조회
+    Show {
+        /// 스펙 ID
+        id: String,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
+    /// 스펙 업데이트
+    Update {
+        /// 스펙 ID
+        id: String,
+        /// 스펙 본문
+        #[arg(long)]
+        body: Option<String>,
+        /// 테스트 커맨드 (JSON 배열)
+        #[arg(long)]
+        test_commands: Option<String>,
+        /// 수락 기준 (마크다운)
+        #[arg(long)]
+        acceptance_criteria: Option<String>,
+    },
+    /// 스펙 일시 중단
+    Pause {
+        /// 스펙 ID
+        id: String,
+    },
+    /// 스펙 재개
+    Resume {
+        /// 스펙 ID
+        id: String,
+    },
+    /// 이슈 연결
+    Link {
+        /// 스펙 ID
+        spec_id: String,
+        /// 이슈 번호
+        #[arg(long)]
+        issue: i64,
+    },
+    /// 이슈 연결 해제
+    Unlink {
+        /// 스펙 ID
+        spec_id: String,
+        /// 이슈 번호
+        #[arg(long)]
+        issue: i64,
     },
 }
 
@@ -277,6 +364,61 @@ async fn main() -> Result<()> {
             let report = client::usage(&db, repo.as_deref(), since.as_deref(), issue)?;
             println!("{report}");
         }
+        Commands::Spec { action } => match action {
+            SpecAction::Add {
+                title,
+                body,
+                repo,
+                file,
+                test_commands,
+                acceptance_criteria,
+            } => {
+                let id = client::spec::spec_add(
+                    &db,
+                    &title,
+                    &body,
+                    &repo,
+                    file.as_deref(),
+                    test_commands.as_deref(),
+                    acceptance_criteria.as_deref(),
+                )?;
+                println!("created: {id}");
+            }
+            SpecAction::List { repo, json } => {
+                let output = client::spec::spec_list(&db, repo.as_deref(), json)?;
+                println!("{output}");
+            }
+            SpecAction::Show { id, json } => {
+                let output = client::spec::spec_show(&db, &id, json)?;
+                println!("{output}");
+            }
+            SpecAction::Update {
+                id,
+                body,
+                test_commands,
+                acceptance_criteria,
+            } => {
+                client::spec::spec_update(
+                    &db,
+                    &id,
+                    body.as_deref(),
+                    test_commands.as_deref(),
+                    acceptance_criteria.as_deref(),
+                )?;
+            }
+            SpecAction::Pause { id } => {
+                client::spec::spec_pause(&db, &id)?;
+            }
+            SpecAction::Resume { id } => {
+                client::spec::spec_resume(&db, &id)?;
+            }
+            SpecAction::Link { spec_id, issue } => {
+                client::spec::spec_link(&db, &spec_id, issue)?;
+            }
+            SpecAction::Unlink { spec_id, issue } => {
+                client::spec::spec_unlink(&db, &spec_id, issue)?;
+            }
+        },
     }
 
     Ok(())

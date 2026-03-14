@@ -30,3 +30,20 @@ pub trait TokenUsageRepository {
     fn usage_summary(&self, repo: Option<&str>, since: Option<&str>) -> Result<UsageSummary>;
     fn usage_by_issue(&self, repo: &str, issue: i64) -> Result<Vec<UsageByIssue>>;
 }
+
+pub trait SpecRepository {
+    fn spec_add(&self, spec: &NewSpec) -> Result<String>;
+    fn spec_list(&self, repo: Option<&str>) -> Result<Vec<Spec>>;
+    fn spec_show(&self, id: &str) -> Result<Option<Spec>>;
+    fn spec_update(
+        &self,
+        id: &str,
+        body: &str,
+        test_commands: Option<&str>,
+        acceptance_criteria: Option<&str>,
+    ) -> Result<()>;
+    fn spec_set_status(&self, id: &str, status: SpecStatus) -> Result<()>;
+    fn spec_issues(&self, spec_id: &str) -> Result<Vec<SpecIssue>>;
+    fn spec_link_issue(&self, spec_id: &str, issue_number: i64) -> Result<()>;
+    fn spec_unlink_issue(&self, spec_id: &str, issue_number: i64) -> Result<()>;
+}

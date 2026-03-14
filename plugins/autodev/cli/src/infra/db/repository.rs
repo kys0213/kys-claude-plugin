@@ -206,6 +206,177 @@ impl ConsumerLogRepository for Database {
     }
 }
 
+impl SpecRepository for Database {
+    fn spec_add(&self, spec: &NewSpec) -> Result<String> {
+        let conn = self.conn();
+        let now = Utc::now().to_rfc3339();
+        let id = Uuid::new_v4().to_string();
+
+        conn.execute(
+            "INSERT INTO specs (id, repo_id, title, body, status, source_path, test_commands, acceptance_criteria, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?6, ?7, ?8, ?8)",
+            rusqlite::params![
+                id, spec.repo_id, spec.title, spec.body,
+                spec.source_path, spec.test_commands, spec.acceptance_criteria, now
+            ],
+        )?;
+
+        Ok(id)
+    }
+
+    fn spec_list(&self, repo: Option<&str>) -> Result<Vec<Spec>> {
+        let conn = self.conn();
+
+        let (query, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+            if let Some(name) = repo {
+                (
+                    "SELECT s.id, s.repo_id, s.title, s.body, s.status, s.source_path, \
+                 s.test_commands, s.acceptance_criteria, s.created_at, s.updated_at \
+                 FROM specs s JOIN repositories r ON s.repo_id = r.id \
+                 WHERE r.name = ?1 ORDER BY s.created_at DESC"
+                        .to_string(),
+                    vec![Box::new(name.to_string())],
+                )
+            } else {
+                (
+                    "SELECT id, repo_id, title, body, status, source_path, \
+                 test_commands, acceptance_criteria, created_at, updated_at \
+                 FROM specs ORDER BY created_at DESC"
+                        .to_string(),
+                    vec![],
+                )
+            };
+
+        let mut stmt = conn.prepare(&query)?;
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let rows = stmt.query_map(params_refs.as_slice(), |row| {
+            let status_str: String = row.get(4)?;
+            Ok(Spec {
+                id: row.get(0)?,
+                repo_id: row.get(1)?,
+                title: row.get(2)?,
+                body: row.get(3)?,
+                status: status_str.parse().unwrap_or(SpecStatus::Active),
+                source_path: row.get(5)?,
+                test_commands: row.get(6)?,
+                acceptance_criteria: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn spec_show(&self, id: &str) -> Result<Option<Spec>> {
+        let conn = self.conn();
+        let result = conn.query_row(
+            "SELECT id, repo_id, title, body, status, source_path, \
+             test_commands, acceptance_criteria, created_at, updated_at \
+             FROM specs WHERE id = ?1",
+            rusqlite::params![id],
+            |row| {
+                let status_str: String = row.get(4)?;
+                Ok(Spec {
+                    id: row.get(0)?,
+                    repo_id: row.get(1)?,
+                    title: row.get(2)?,
+                    body: row.get(3)?,
+                    status: status_str.parse().unwrap_or(SpecStatus::Active),
+                    source_path: row.get(5)?,
+                    test_commands: row.get(6)?,
+                    acceptance_criteria: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
+                })
+            },
+        );
+        match result {
+            Ok(spec) => Ok(Some(spec)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn spec_update(
+        &self,
+        id: &str,
+        body: &str,
+        test_commands: Option<&str>,
+        acceptance_criteria: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn();
+        let now = Utc::now().to_rfc3339();
+
+        let affected = conn.execute(
+            "UPDATE specs SET body = ?1, test_commands = ?2, acceptance_criteria = ?3, updated_at = ?4 \
+             WHERE id = ?5",
+            rusqlite::params![body, test_commands, acceptance_criteria, now, id],
+        )?;
+
+        if affected == 0 {
+            anyhow::bail!("spec not found: {id}");
+        }
+        Ok(())
+    }
+
+    fn spec_set_status(&self, id: &str, status: SpecStatus) -> Result<()> {
+        let conn = self.conn();
+        let now = Utc::now().to_rfc3339();
+
+        let affected = conn.execute(
+            "UPDATE specs SET status = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![status.as_str(), now, id],
+        )?;
+
+        if affected == 0 {
+            anyhow::bail!("spec not found: {id}");
+        }
+        Ok(())
+    }
+
+    fn spec_issues(&self, spec_id: &str) -> Result<Vec<SpecIssue>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT spec_id, issue_number, created_at FROM spec_issues \
+             WHERE spec_id = ?1 ORDER BY issue_number",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![spec_id], |row| {
+            Ok(SpecIssue {
+                spec_id: row.get(0)?,
+                issue_number: row.get(1)?,
+                created_at: row.get(2)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn spec_link_issue(&self, spec_id: &str, issue_number: i64) -> Result<()> {
+        let conn = self.conn();
+        let now = Utc::now().to_rfc3339();
+
+        conn.execute(
+            "INSERT INTO spec_issues (spec_id, issue_number, created_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params![spec_id, issue_number, now],
+        )?;
+        Ok(())
+    }
+
+    fn spec_unlink_issue(&self, spec_id: &str, issue_number: i64) -> Result<()> {
+        let conn = self.conn();
+
+        let affected = conn.execute(
+            "DELETE FROM spec_issues WHERE spec_id = ?1 AND issue_number = ?2",
+            rusqlite::params![spec_id, issue_number],
+        )?;
+
+        if affected == 0 {
+            anyhow::bail!("issue link not found: spec={spec_id}, issue=#{issue_number}");
+        }
+        Ok(())
+    }
+}
+
 impl TokenUsageRepository for Database {
     fn usage_insert(&self, usage: &NewTokenUsage) -> Result<()> {
         let now = Utc::now().to_rfc3339();

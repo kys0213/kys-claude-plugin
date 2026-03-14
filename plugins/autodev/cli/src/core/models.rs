@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use super::labels;
 
 // ─── Input models (INSERT) ───
@@ -257,4 +259,78 @@ pub struct UsageByIssue {
     pub duration_ms: i64,
     pub input_tokens: i64,
     pub output_tokens: i64,
+}
+
+// ─── Spec models ───
+
+/// Spec status lifecycle
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SpecStatus {
+    Active,
+    Paused,
+    Completed,
+    Archived,
+}
+
+impl SpecStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SpecStatus::Active => "active",
+            SpecStatus::Paused => "paused",
+            SpecStatus::Completed => "completed",
+            SpecStatus::Archived => "archived",
+        }
+    }
+}
+
+impl std::str::FromStr for SpecStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "active" => Ok(SpecStatus::Active),
+            "paused" => Ok(SpecStatus::Paused),
+            "completed" => Ok(SpecStatus::Completed),
+            "archived" => Ok(SpecStatus::Archived),
+            _ => Err(format!("invalid spec status: {s}")),
+        }
+    }
+}
+
+impl std::fmt::Display for SpecStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Spec {
+    pub id: String,
+    pub repo_id: String,
+    pub title: String,
+    pub body: String,
+    pub status: SpecStatus,
+    pub source_path: Option<String>,
+    pub test_commands: Option<String>,
+    pub acceptance_criteria: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpecIssue {
+    pub spec_id: String,
+    pub issue_number: i64,
+    pub created_at: String,
+}
+
+/// For inserting new specs
+pub struct NewSpec {
+    pub repo_id: String,
+    pub title: String,
+    pub body: String,
+    pub source_path: Option<String>,
+    pub test_commands: Option<String>,
+    pub acceptance_criteria: Option<String>,
 }
