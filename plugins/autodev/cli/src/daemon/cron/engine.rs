@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use tracing::{info, warn};
 
+use crate::core::models::RepoInfo;
 use crate::core::repository::{CronRepository, RepoRepository};
 use crate::infra::db::Database;
 
@@ -40,23 +41,24 @@ impl CronEngine {
 
         info!("cron: found {} due job(s)", due_jobs.len());
 
-        // Pre-fetch repo info for repo lookups
-        let repos = self.db.repo_list().unwrap_or_default();
+        // Pre-fetch enabled repos (has id field for correct matching)
+        let enabled_repos = self.db.repo_find_enabled().unwrap_or_default();
 
         let mut results = Vec::new();
 
         for job in &due_jobs {
             let repo_info = job.repo_id.as_ref().and_then(|rid| {
-                repos.iter().find(|r| {
-                    // Match by checking repo list - repo_id in cron_jobs is the DB id
-                    // We need to find the matching repo
-                    // Since RepoInfo doesn't have id, we look it up differently
-                    // Actually we need to use the repo_id from job to find repo info
-                    r.name == *rid || r.url.contains(rid)
-                })
+                enabled_repos
+                    .iter()
+                    .find(|r| r.id == *rid)
+                    .map(|r| RepoInfo {
+                        name: r.name.clone(),
+                        url: r.url.clone(),
+                        enabled: true,
+                    })
             });
 
-            let env_vars = ScriptRunner::build_env_vars(&self.home, job, repo_info);
+            let env_vars = ScriptRunner::build_env_vars(&self.home, job, repo_info.as_ref());
             let result = ScriptRunner::run(&job.script_path, env_vars).await;
 
             // Update last_run_at regardless of success/failure

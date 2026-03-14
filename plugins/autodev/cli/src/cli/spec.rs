@@ -42,9 +42,9 @@ pub fn spec_list(db: &Database, repo: Option<&str>, json: bool) -> Result<String
     if specs.is_empty() {
         output.push_str("No specs found.\n");
     } else {
+        let issue_counts = db.spec_issue_counts()?;
         for s in &specs {
-            let issues = db.spec_issues(&s.id)?;
-            let issue_count = issues.len();
+            let issue_count = issue_counts.get(&s.id).copied().unwrap_or(0);
             output.push_str(&format!(
                 "  [{}] {} — {} (issues: {})\n",
                 s.status, s.id, s.title, issue_count

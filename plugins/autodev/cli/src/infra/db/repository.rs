@@ -319,6 +319,23 @@ impl SpecRepository for Database {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    fn spec_issue_counts(&self) -> Result<std::collections::HashMap<String, usize>> {
+        let conn = self.conn();
+        let mut stmt =
+            conn.prepare("SELECT spec_id, COUNT(*) FROM spec_issues GROUP BY spec_id")?;
+        let rows = stmt.query_map([], |row| {
+            let spec_id: String = row.get(0)?;
+            let count: usize = row.get(1)?;
+            Ok((spec_id, count))
+        })?;
+        let mut map = std::collections::HashMap::new();
+        for row in rows {
+            let (spec_id, count) = row?;
+            map.insert(spec_id, count);
+        }
+        Ok(map)
+    }
+
     fn spec_link_issue(&self, spec_id: &str, issue_number: i64) -> Result<()> {
         let conn = self.conn();
         let now = Utc::now().to_rfc3339();
@@ -603,10 +620,13 @@ impl HitlRepository for Database {
 
     fn hitl_set_status(&self, id: &str, status: HitlStatus) -> Result<()> {
         let conn = self.conn();
-        conn.execute(
+        let affected = conn.execute(
             "UPDATE hitl_events SET status = ?1 WHERE id = ?2",
             rusqlite::params![status.to_string(), id],
         )?;
+        if affected == 0 {
+            anyhow::bail!("hitl event not found: {id}");
+        }
         Ok(())
     }
 
@@ -822,9 +842,7 @@ impl ClawDecisionRepository for Database {
              reasoning, context_json, created_at \
              FROM claw_decisions WHERE spec_id = ?1 ORDER BY created_at DESC LIMIT ?2",
         )?;
-        let rows = stmt.query_map(rusqlite::params![spec_id, limit as i64], |row| {
-            map_decision_row(row)
-        })?;
+        let rows = stmt.query_map(rusqlite::params![spec_id, limit as i64], map_decision_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
