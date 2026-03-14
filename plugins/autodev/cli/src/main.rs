@@ -88,6 +88,11 @@ enum Commands {
         #[command(subcommand)]
         action: CronAction,
     },
+    /// Claw 결정 이력 조회
+    Decisions {
+        #[command(subcommand)]
+        action: DecisionsAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -216,6 +221,30 @@ enum CronAction {
         /// 레포 이름 (org/repo)
         #[arg(long)]
         repo: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum DecisionsAction {
+    /// Claw 결정 이력 목록
+    List {
+        /// 레포 이름으로 필터 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+        /// 최근 N개 항목
+        #[arg(short = 'n', long, default_value = "20")]
+        limit: usize,
+    },
+    /// Claw 결정 상세 조회
+    Show {
+        /// 결정 ID
+        id: String,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -577,6 +606,16 @@ async fn main() -> Result<()> {
                 message,
             } => {
                 let output = client::hitl::respond(&db, &id, choice, message.as_deref())?;
+                println!("{output}");
+            }
+        },
+        Commands::Decisions { action } => match action {
+            DecisionsAction::List { repo, json, limit } => {
+                let output = client::decisions::list(&db, repo.as_deref(), limit, json)?;
+                println!("{output}");
+            }
+            DecisionsAction::Show { id, json } => {
+                let output = client::decisions::show(&db, &id, json)?;
                 println!("{output}");
             }
         },

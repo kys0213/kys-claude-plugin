@@ -69,6 +69,14 @@ pub trait QueueRepository {
     fn queue_list_items(&self, repo: Option<&str>) -> Result<Vec<QueueItem>>;
 }
 
+pub trait ClawDecisionRepository {
+    fn decision_add(&self, decision: &NewClawDecision) -> Result<String>;
+    fn decision_list(&self, repo: Option<&str>, limit: usize) -> Result<Vec<ClawDecision>>;
+    fn decision_show(&self, id: &str) -> Result<Option<ClawDecision>>;
+    fn decision_list_by_spec(&self, spec_id: &str, limit: usize) -> Result<Vec<ClawDecision>>;
+    fn decision_count(&self, repo: Option<&str>) -> Result<i64>;
+}
+
 pub trait CronRepository {
     fn cron_add(&self, job: &NewCronJob) -> Result<String>;
     fn cron_list(&self, repo: Option<&str>) -> Result<Vec<CronJob>>;

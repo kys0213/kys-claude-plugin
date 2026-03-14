@@ -1,4 +1,5 @@
 pub mod cron;
+pub mod decisions;
 pub mod hitl;
 pub mod queue;
 pub mod spec;

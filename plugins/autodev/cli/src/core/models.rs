@@ -514,3 +514,26 @@ pub struct NewCronJob {
     pub script_path: String,
     pub builtin: bool,
 }
+
+// ─── Claw Decision models ───
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClawDecision {
+    pub id: String,
+    pub repo_id: String,
+    pub spec_id: Option<String>,
+    pub decision_type: String,
+    pub target_work_id: Option<String>,
+    pub reasoning: String,
+    pub context_json: Option<String>,
+    pub created_at: String,
+}
+
+pub struct NewClawDecision {
+    pub repo_id: String,
+    pub spec_id: Option<String>,
+    pub decision_type: String,
+    pub target_work_id: Option<String>,
+    pub reasoning: String,
+    pub context_json: Option<String>,
+}

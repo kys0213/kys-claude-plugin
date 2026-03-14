@@ -127,6 +127,19 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_queue_items_repo_phase ON queue_items(repo_id, phase);
 
+        CREATE TABLE IF NOT EXISTS claw_decisions (
+            id              TEXT PRIMARY KEY,
+            repo_id         TEXT NOT NULL REFERENCES repositories(id),
+            spec_id         TEXT,
+            decision_type   TEXT NOT NULL,
+            target_work_id  TEXT,
+            reasoning       TEXT NOT NULL,
+            context_json    TEXT,
+            created_at      TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_claw_decisions_repo ON claw_decisions(repo_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_claw_decisions_spec ON claw_decisions(spec_id, created_at);
+
         COMMIT;
         ",
     )?;

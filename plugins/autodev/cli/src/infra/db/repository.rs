@@ -825,6 +825,142 @@ impl QueueRepository for Database {
     }
 }
 
+impl ClawDecisionRepository for Database {
+    fn decision_add(&self, decision: &NewClawDecision) -> Result<String> {
+        let conn = self.conn();
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+
+        conn.execute(
+            "INSERT INTO claw_decisions (id, repo_id, spec_id, decision_type, target_work_id, reasoning, context_json, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                id,
+                decision.repo_id,
+                decision.spec_id,
+                decision.decision_type,
+                decision.target_work_id,
+                decision.reasoning,
+                decision.context_json,
+                now
+            ],
+        )?;
+
+        Ok(id)
+    }
+
+    fn decision_list(&self, repo: Option<&str>, limit: usize) -> Result<Vec<ClawDecision>> {
+        let conn = self.conn();
+
+        let (query, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+            if let Some(name) = repo {
+                (
+                    "SELECT d.id, d.repo_id, d.spec_id, d.decision_type, d.target_work_id, \
+                     d.reasoning, d.context_json, d.created_at \
+                     FROM claw_decisions d JOIN repositories r ON d.repo_id = r.id \
+                     WHERE r.name = ?1 ORDER BY d.created_at DESC LIMIT ?2"
+                        .to_string(),
+                    vec![Box::new(name.to_string()), Box::new(limit as i64)],
+                )
+            } else {
+                (
+                    "SELECT id, repo_id, spec_id, decision_type, target_work_id, \
+                     reasoning, context_json, created_at \
+                     FROM claw_decisions ORDER BY created_at DESC LIMIT ?1"
+                        .to_string(),
+                    vec![Box::new(limit as i64)],
+                )
+            };
+
+        let mut stmt = conn.prepare(&query)?;
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let rows = stmt.query_map(params_refs.as_slice(), |row| {
+            Ok(ClawDecision {
+                id: row.get(0)?,
+                repo_id: row.get(1)?,
+                spec_id: row.get(2)?,
+                decision_type: row.get(3)?,
+                target_work_id: row.get(4)?,
+                reasoning: row.get(5)?,
+                context_json: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn decision_show(&self, id: &str) -> Result<Option<ClawDecision>> {
+        let conn = self.conn();
+        let result = conn.query_row(
+            "SELECT id, repo_id, spec_id, decision_type, target_work_id, \
+             reasoning, context_json, created_at \
+             FROM claw_decisions WHERE id = ?1",
+            rusqlite::params![id],
+            |row| {
+                Ok(ClawDecision {
+                    id: row.get(0)?,
+                    repo_id: row.get(1)?,
+                    spec_id: row.get(2)?,
+                    decision_type: row.get(3)?,
+                    target_work_id: row.get(4)?,
+                    reasoning: row.get(5)?,
+                    context_json: row.get(6)?,
+                    created_at: row.get(7)?,
+                })
+            },
+        );
+        match result {
+            Ok(d) => Ok(Some(d)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn decision_list_by_spec(&self, spec_id: &str, limit: usize) -> Result<Vec<ClawDecision>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, repo_id, spec_id, decision_type, target_work_id, \
+             reasoning, context_json, created_at \
+             FROM claw_decisions WHERE spec_id = ?1 ORDER BY created_at DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![spec_id, limit as i64], |row| {
+            Ok(ClawDecision {
+                id: row.get(0)?,
+                repo_id: row.get(1)?,
+                spec_id: row.get(2)?,
+                decision_type: row.get(3)?,
+                target_work_id: row.get(4)?,
+                reasoning: row.get(5)?,
+                context_json: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn decision_count(&self, repo: Option<&str>) -> Result<i64> {
+        let conn = self.conn();
+
+        let (query, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+            if let Some(name) = repo {
+                (
+                    "SELECT COUNT(*) FROM claw_decisions d JOIN repositories r ON d.repo_id = r.id \
+                     WHERE r.name = ?1"
+                        .to_string(),
+                    vec![Box::new(name.to_string())],
+                )
+            } else {
+                ("SELECT COUNT(*) FROM claw_decisions".to_string(), vec![])
+            };
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let count: i64 = conn.query_row(&query, params_refs.as_slice(), |row| row.get(0))?;
+        Ok(count)
+    }
+}
+
 impl CronRepository for Database {
     fn cron_add(&self, job: &NewCronJob) -> Result<String> {
         let conn = self.conn();
