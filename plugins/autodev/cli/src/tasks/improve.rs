@@ -12,15 +12,15 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use super::AGENT_SYSTEM_PROMPT;
-use crate::tasks::helpers::workspace::WorkspaceOps;
+use crate::core::labels;
+use crate::core::models::NewConsumerLog;
 use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
-use crate::core::labels;
-use crate::core::models::NewConsumerLog;
+use crate::core::task_queues::{pr_phase, PrItem};
 use crate::infra::claude::SessionOptions;
 use crate::infra::gh::Gh;
-use crate::core::task_queues::{pr_phase, PrItem};
+use crate::tasks::helpers::workspace::WorkspaceOps;
 
 /// PR 피드백 반영 Task.
 ///
@@ -241,8 +241,8 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    use crate::infra::gh::mock::MockGh;
     use crate::core::task_queues::make_work_id;
+    use crate::infra::gh::mock::MockGh;
 
     struct MockWorkspace;
 

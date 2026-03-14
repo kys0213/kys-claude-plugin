@@ -13,17 +13,17 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use super::AGENT_SYSTEM_PROMPT;
-use crate::tasks::helpers::workspace::WorkspaceOps;
 use crate::core::config::ConfigLoader;
+use crate::core::labels;
+use crate::core::models::NewConsumerLog;
 use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
-use crate::core::labels;
-use crate::core::models::NewConsumerLog;
+use crate::core::task_queues::{pr_phase, PrItem};
 use crate::infra::claude::output::{self, ReviewVerdict};
 use crate::infra::claude::SessionOptions;
 use crate::infra::gh::Gh;
-use crate::core::task_queues::{pr_phase, PrItem};
+use crate::tasks::helpers::workspace::WorkspaceOps;
 
 /// PR 리뷰 결과를 GitHub 댓글로 포맷
 fn format_review_comment(review: &str, pr_number: i64, verdict: Option<&ReviewVerdict>) -> String {
@@ -478,8 +478,8 @@ mod tests {
     use std::time::Duration;
 
     use crate::core::config::models::WorkflowConfig;
-    use crate::infra::gh::mock::MockGh;
     use crate::core::task_queues::make_work_id;
+    use crate::infra::gh::mock::MockGh;
 
     struct MockWorkspace;
 

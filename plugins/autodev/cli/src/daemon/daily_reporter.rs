@@ -10,14 +10,14 @@ use async_trait::async_trait;
 use chrono::Timelike;
 use tracing::info;
 
-use crate::tasks::helpers::workspace::Workspace;
-use crate::tasks::helpers::git_ops_factory::resolve_gh_host;
 use crate::core::repository::RepoRepository;
 use crate::infra::claude::Claude;
+use crate::infra::db::Database;
 use crate::infra::gh::Gh;
 use crate::infra::git::Git;
 use crate::infra::suggest_workflow::SuggestWorkflow;
-use crate::infra::db::Database;
+use crate::tasks::helpers::git_ops_factory::resolve_gh_host;
+use crate::tasks::helpers::workspace::Workspace;
 
 use super::log;
 
@@ -110,8 +110,9 @@ impl DailyReporter for DefaultDailyReporter {
             let stats = crate::tasks::knowledge::daily::parse_daemon_log(&log_path);
             if stats.task_count > 0 {
                 let patterns = crate::tasks::knowledge::daily::detect_patterns(&stats);
-                let mut report =
-                    crate::tasks::knowledge::daily::build_daily_report(&yesterday, &stats, patterns);
+                let mut report = crate::tasks::knowledge::daily::build_daily_report(
+                    &yesterday, &stats, patterns,
+                );
 
                 let ws = Workspace::new(&*self.git, &*self.env);
                 if let Ok(enabled) = RepoRepository::repo_find_enabled(&self.db) {
@@ -123,16 +124,18 @@ impl DailyReporter for DefaultDailyReporter {
                             )
                             .await;
 
-                            let per_task = crate::tasks::knowledge::daily::aggregate_daily_suggestions(
-                                &self.db, &yesterday,
-                            );
+                            let per_task =
+                                crate::tasks::knowledge::daily::aggregate_daily_suggestions(
+                                    &self.db, &yesterday,
+                                );
 
-                            if let Some(ks) = crate::tasks::knowledge::daily::generate_daily_suggestions(
-                                &*self.claude,
-                                &report,
-                                &base,
-                            )
-                            .await
+                            if let Some(ks) =
+                                crate::tasks::knowledge::daily::generate_daily_suggestions(
+                                    &*self.claude,
+                                    &report,
+                                    &base,
+                                )
+                                .await
                             {
                                 report.suggestions = ks.suggestions;
                             }

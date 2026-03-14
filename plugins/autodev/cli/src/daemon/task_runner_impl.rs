@@ -7,8 +7,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::agent::Agent;
-use crate::core::task::{Task, TaskResult};
 use super::task_runner::TaskRunner;
+use crate::core::task::{Task, TaskResult};
 
 /// Task 생명주기 실행기.
 ///

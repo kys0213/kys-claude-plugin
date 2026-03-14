@@ -4,9 +4,9 @@ use serde::Deserialize;
 use crate::core::labels;
 use crate::core::models::{RepoIssue, RepoPull};
 use crate::core::repository::ScanCursorRepository;
-use crate::infra::gh::Gh;
 use crate::core::state_queue::StateQueue;
 use crate::core::task_queues::{issue_phase, make_work_id, pr_phase, IssueItem, PrItem};
+use crate::infra::gh::Gh;
 
 // ─── Private serde types for scanning ───
 
@@ -881,8 +881,8 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    use crate::infra::gh::mock::MockGh;
     use crate::core::task_queues::{issue_phase, make_work_id, pr_phase};
+    use crate::infra::gh::mock::MockGh;
 
     // ─── Mock ScanCursorRepository ───
 

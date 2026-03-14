@@ -4,9 +4,9 @@
 
 use async_trait::async_trait;
 
-use crate::core::task::{Task, TaskResult};
 use super::task_manager::TaskManager;
 use crate::core::collector::TaskSource;
+use crate::core::task::{Task, TaskResult};
 
 /// TaskSource에서 Task를 수집하고 분배하는 기본 구현체.
 pub struct DefaultTaskManager {

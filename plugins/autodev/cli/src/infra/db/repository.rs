@@ -537,3 +537,189 @@ impl TokenUsageRepository for Database {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 }
+
+impl HitlRepository for Database {
+    fn hitl_create(&self, event: &NewHitlEvent) -> Result<String> {
+        let conn = self.conn();
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        let options_json = serde_json::to_string(&event.options)?;
+
+        conn.execute(
+            "INSERT INTO hitl_events (id, repo_id, spec_id, work_id, severity, situation, context, options, status, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9)",
+            rusqlite::params![
+                id,
+                event.repo_id,
+                event.spec_id,
+                event.work_id,
+                event.severity.to_string(),
+                event.situation,
+                event.context,
+                options_json,
+                now
+            ],
+        )?;
+
+        Ok(id)
+    }
+
+    fn hitl_list(&self, repo: Option<&str>) -> Result<Vec<HitlEvent>> {
+        let conn = self.conn();
+
+        let (query, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(name) =
+            repo
+        {
+            (
+                "SELECT e.id, e.repo_id, e.spec_id, e.work_id, e.severity, e.situation, e.context, e.options, e.status, e.created_at \
+                 FROM hitl_events e JOIN repositories r ON e.repo_id = r.id \
+                 WHERE r.name = ?1 ORDER BY e.created_at DESC"
+                    .to_string(),
+                vec![Box::new(name.to_string())],
+            )
+        } else {
+            (
+                "SELECT id, repo_id, spec_id, work_id, severity, situation, context, options, status, created_at \
+                 FROM hitl_events ORDER BY created_at DESC"
+                    .to_string(),
+                vec![],
+            )
+        };
+
+        let mut stmt = conn.prepare(&query)?;
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let rows = stmt.query_map(params_refs.as_slice(), |row| {
+            let severity_str: String = row.get(4)?;
+            let status_str: String = row.get(8)?;
+            Ok(HitlEvent {
+                id: row.get(0)?,
+                repo_id: row.get(1)?,
+                spec_id: row.get(2)?,
+                work_id: row.get(3)?,
+                severity: HitlSeverity::from_str_lowercase(&severity_str)
+                    .unwrap_or(HitlSeverity::Medium),
+                situation: row.get(5)?,
+                context: row.get(6)?,
+                options: row.get(7)?,
+                status: HitlStatus::from_str_lowercase(&status_str).unwrap_or(HitlStatus::Pending),
+                created_at: row.get(9)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn hitl_show(&self, id: &str) -> Result<Option<HitlEvent>> {
+        let conn = self.conn();
+        let result = conn.query_row(
+            "SELECT id, repo_id, spec_id, work_id, severity, situation, context, options, status, created_at \
+             FROM hitl_events WHERE id = ?1",
+            rusqlite::params![id],
+            |row| {
+                let severity_str: String = row.get(4)?;
+                let status_str: String = row.get(8)?;
+                Ok(HitlEvent {
+                    id: row.get(0)?,
+                    repo_id: row.get(1)?,
+                    spec_id: row.get(2)?,
+                    work_id: row.get(3)?,
+                    severity: HitlSeverity::from_str_lowercase(&severity_str)
+                        .unwrap_or(HitlSeverity::Medium),
+                    situation: row.get(5)?,
+                    context: row.get(6)?,
+                    options: row.get(7)?,
+                    status: HitlStatus::from_str_lowercase(&status_str)
+                        .unwrap_or(HitlStatus::Pending),
+                    created_at: row.get(9)?,
+                })
+            },
+        );
+
+        match result {
+            Ok(event) => Ok(Some(event)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn hitl_respond(&self, response: &NewHitlResponse) -> Result<()> {
+        let conn = self.conn();
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+
+        let tx = conn.unchecked_transaction()?;
+
+        tx.execute(
+            "INSERT INTO hitl_responses (id, event_id, choice, message, source, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                id,
+                response.event_id,
+                response.choice,
+                response.message,
+                response.source,
+                now
+            ],
+        )?;
+
+        tx.execute(
+            "UPDATE hitl_events SET status = 'responded' WHERE id = ?1",
+            rusqlite::params![response.event_id],
+        )?;
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn hitl_set_status(&self, id: &str, status: HitlStatus) -> Result<()> {
+        let conn = self.conn();
+        conn.execute(
+            "UPDATE hitl_events SET status = ?1 WHERE id = ?2",
+            rusqlite::params![status.to_string(), id],
+        )?;
+        Ok(())
+    }
+
+    fn hitl_pending_count(&self, repo: Option<&str>) -> Result<i64> {
+        let conn = self.conn();
+
+        let (query, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+            if let Some(name) = repo {
+                (
+                    "SELECT COUNT(*) FROM hitl_events e JOIN repositories r ON e.repo_id = r.id \
+                 WHERE r.name = ?1 AND e.status = 'pending'"
+                        .to_string(),
+                    vec![Box::new(name.to_string())],
+                )
+            } else {
+                (
+                    "SELECT COUNT(*) FROM hitl_events WHERE status = 'pending'".to_string(),
+                    vec![],
+                )
+            };
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let count: i64 = conn.query_row(&query, params_refs.as_slice(), |row| row.get(0))?;
+        Ok(count)
+    }
+
+    fn hitl_responses(&self, event_id: &str) -> Result<Vec<HitlResponse>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, event_id, choice, message, source, created_at \
+             FROM hitl_responses WHERE event_id = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![event_id], |row| {
+            Ok(HitlResponse {
+                id: row.get(0)?,
+                event_id: row.get(1)?,
+                choice: row.get(2)?,
+                message: row.get(3)?,
+                source: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+}

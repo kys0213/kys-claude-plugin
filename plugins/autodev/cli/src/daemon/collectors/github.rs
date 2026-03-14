@@ -9,19 +9,19 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::tasks::helpers::workspace::WorkspaceOps;
-use crate::core::config::{self, ConfigLoader, Env};
-use crate::core::task::{QueueOp, Task, TaskResult};
 use crate::core::collector::TaskSource;
-use crate::tasks::helpers::git_ops::GitRepository;
-use crate::tasks::helpers::git_ops_factory::GitRepositoryFactory;
+use crate::core::config::{self, ConfigLoader, Env};
 use crate::core::repository::{RepoRepository, ScanCursorRepository};
+use crate::core::task::{QueueOp, Task, TaskResult};
+use crate::core::task_queues::{issue_phase, pr_phase};
 use crate::infra::gh::Gh;
 use crate::infra::git::Git;
 use crate::infra::suggest_workflow::SuggestWorkflow;
-use crate::core::task_queues::{issue_phase, pr_phase};
 use crate::tasks::analyze::AnalyzeTask;
 use crate::tasks::extract::ExtractTask;
+use crate::tasks::helpers::git_ops::GitRepository;
+use crate::tasks::helpers::git_ops_factory::GitRepositoryFactory;
+use crate::tasks::helpers::workspace::WorkspaceOps;
 use crate::tasks::implement::ImplementTask;
 use crate::tasks::improve::ImproveTask;
 use crate::tasks::review::ReviewTask;
@@ -386,11 +386,11 @@ mod tests {
     use super::*;
     use crate::core::config::models::WorkflowConfig;
     use crate::core::models::EnabledRepo;
+    use crate::core::task_queues::{make_work_id, IssueItem, PrItem};
     use crate::infra::gh::mock::MockGh;
     use crate::infra::git::Git;
     use crate::infra::suggest_workflow::SuggestWorkflow;
     use crate::tasks::knowledge::models::{RepetitionEntry, SessionEntry, ToolFrequencyEntry};
-    use crate::core::task_queues::{make_work_id, IssueItem, PrItem};
     use std::path::{Path, PathBuf};
 
     // ─── Mock dependencies ───

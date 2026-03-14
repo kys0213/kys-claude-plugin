@@ -47,3 +47,13 @@ pub trait SpecRepository {
     fn spec_link_issue(&self, spec_id: &str, issue_number: i64) -> Result<()>;
     fn spec_unlink_issue(&self, spec_id: &str, issue_number: i64) -> Result<()>;
 }
+
+pub trait HitlRepository {
+    fn hitl_create(&self, event: &NewHitlEvent) -> Result<String>;
+    fn hitl_list(&self, repo: Option<&str>) -> Result<Vec<HitlEvent>>;
+    fn hitl_show(&self, id: &str) -> Result<Option<HitlEvent>>;
+    fn hitl_respond(&self, response: &NewHitlResponse) -> Result<()>;
+    fn hitl_set_status(&self, id: &str, status: HitlStatus) -> Result<()>;
+    fn hitl_pending_count(&self, repo: Option<&str>) -> Result<i64>;
+    fn hitl_responses(&self, event_id: &str) -> Result<Vec<HitlResponse>>;
+}

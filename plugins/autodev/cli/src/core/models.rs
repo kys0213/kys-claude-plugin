@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use super::labels;
@@ -333,4 +335,103 @@ pub struct NewSpec {
     pub source_path: Option<String>,
     pub test_commands: Option<String>,
     pub acceptance_criteria: Option<String>,
+}
+
+// ─── HITL (Human-in-the-Loop) models ───
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum HitlSeverity {
+    High,
+    Medium,
+    Low,
+}
+
+impl fmt::Display for HitlSeverity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HitlSeverity::High => write!(f, "high"),
+            HitlSeverity::Medium => write!(f, "medium"),
+            HitlSeverity::Low => write!(f, "low"),
+        }
+    }
+}
+
+impl HitlSeverity {
+    pub fn from_str_lowercase(s: &str) -> Option<Self> {
+        match s {
+            "high" => Some(Self::High),
+            "medium" => Some(Self::Medium),
+            "low" => Some(Self::Low),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum HitlStatus {
+    Pending,
+    Responded,
+    Expired,
+}
+
+impl fmt::Display for HitlStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HitlStatus::Pending => write!(f, "pending"),
+            HitlStatus::Responded => write!(f, "responded"),
+            HitlStatus::Expired => write!(f, "expired"),
+        }
+    }
+}
+
+impl HitlStatus {
+    pub fn from_str_lowercase(s: &str) -> Option<Self> {
+        match s {
+            "pending" => Some(Self::Pending),
+            "responded" => Some(Self::Responded),
+            "expired" => Some(Self::Expired),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HitlEvent {
+    pub id: String,
+    pub repo_id: String,
+    pub spec_id: Option<String>,
+    pub work_id: Option<String>,
+    pub severity: HitlSeverity,
+    pub situation: String,
+    pub context: String,
+    pub options: String,
+    pub status: HitlStatus,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HitlResponse {
+    pub id: String,
+    pub event_id: String,
+    pub choice: Option<i32>,
+    pub message: Option<String>,
+    pub source: String,
+    pub created_at: String,
+}
+
+pub struct NewHitlEvent {
+    pub repo_id: String,
+    pub spec_id: Option<String>,
+    pub work_id: Option<String>,
+    pub severity: HitlSeverity,
+    pub situation: String,
+    pub context: String,
+    pub options: Vec<String>,
+}
+
+pub struct NewHitlResponse {
+    pub event_id: String,
+    pub choice: Option<i32>,
+    pub message: Option<String>,
+    pub source: String,
 }

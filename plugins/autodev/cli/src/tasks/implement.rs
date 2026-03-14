@@ -12,17 +12,17 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use super::AGENT_SYSTEM_PROMPT;
-use crate::tasks::helpers::workspace::WorkspaceOps;
 use crate::core::config::ConfigLoader;
+use crate::core::labels;
+use crate::core::models::NewConsumerLog;
 use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
-use crate::core::labels;
-use crate::core::models::NewConsumerLog;
+use crate::core::task_queues::{make_work_id, pr_phase, IssueItem, PrItem};
 use crate::infra::claude::output;
 use crate::infra::claude::SessionOptions;
 use crate::infra::gh::Gh;
-use crate::core::task_queues::{make_work_id, pr_phase, IssueItem, PrItem};
+use crate::tasks::helpers::workspace::WorkspaceOps;
 
 /// head branch 이름으로 이미 생성된 PR을 조회하여 번호를 반환.
 ///

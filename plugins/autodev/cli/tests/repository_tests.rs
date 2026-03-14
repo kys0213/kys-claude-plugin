@@ -287,3 +287,217 @@ fn log_recent_empty() {
     let logs = db.log_recent(None, 10).unwrap();
     assert!(logs.is_empty());
 }
+
+// ═══════════════════════════════════════════════
+// 4. HITL (Human-in-the-Loop)
+// ═══════════════════════════════════════════════
+
+fn create_test_hitl_event(db: &Database, repo_id: &str) -> String {
+    use autodev::core::models::{HitlSeverity, NewHitlEvent};
+    use autodev::core::repository::HitlRepository;
+
+    let event = NewHitlEvent {
+        repo_id: repo_id.to_string(),
+        spec_id: Some("spec-1".to_string()),
+        work_id: Some("pr:org/repo:42".to_string()),
+        severity: HitlSeverity::High,
+        situation: "Test conflict detected".to_string(),
+        context: "File A conflicts with File B".to_string(),
+        options: vec![
+            "Keep A".to_string(),
+            "Keep B".to_string(),
+            "Merge both".to_string(),
+        ],
+    };
+    db.hitl_create(&event).unwrap()
+}
+
+#[test]
+fn hitl_create_and_show() {
+    use autodev::core::repository::HitlRepository;
+
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    let event_id = create_test_hitl_event(&db, &repo_id);
+
+    assert!(!event_id.is_empty());
+
+    let event = db.hitl_show(&event_id).unwrap().unwrap();
+    assert_eq!(event.id, event_id);
+    assert_eq!(event.repo_id, repo_id);
+    assert_eq!(event.spec_id, Some("spec-1".to_string()));
+    assert_eq!(event.work_id, Some("pr:org/repo:42".to_string()));
+    assert_eq!(event.severity.to_string(), "high");
+    assert_eq!(event.status.to_string(), "pending");
+    assert_eq!(event.situation, "Test conflict detected");
+    assert_eq!(event.context, "File A conflicts with File B");
+
+    // Verify options are stored as JSON
+    let options: Vec<String> = serde_json::from_str(&event.options).unwrap();
+    assert_eq!(options.len(), 3);
+    assert_eq!(options[0], "Keep A");
+}
+
+#[test]
+fn hitl_show_nonexistent_returns_none() {
+    use autodev::core::repository::HitlRepository;
+
+    let db = open_memory_db();
+    let result = db.hitl_show("nonexistent-id").unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn hitl_list_all() {
+    use autodev::core::repository::HitlRepository;
+
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    create_test_hitl_event(&db, &repo_id);
+    create_test_hitl_event(&db, &repo_id);
+
+    let events = db.hitl_list(None).unwrap();
+    assert_eq!(events.len(), 2);
+}
+
+#[test]
+fn hitl_list_by_repo() {
+    use autodev::core::repository::HitlRepository;
+
+    let db = open_memory_db();
+    let repo_id1 = add_test_repo_with_url(&db, "https://github.com/a/one", "a/one");
+    let repo_id2 = add_test_repo_with_url(&db, "https://github.com/b/two", "b/two");
+
+    create_test_hitl_event(&db, &repo_id1);
+    create_test_hitl_event(&db, &repo_id2);
+
+    let all = db.hitl_list(None).unwrap();
+    assert_eq!(all.len(), 2);
+
+    let repo1_events = db.hitl_list(Some("a/one")).unwrap();
+    assert_eq!(repo1_events.len(), 1);
+
+    let repo2_events = db.hitl_list(Some("b/two")).unwrap();
+    assert_eq!(repo2_events.len(), 1);
+}
+
+#[test]
+fn hitl_list_empty() {
+    use autodev::core::repository::HitlRepository;
+
+    let db = open_memory_db();
+    let events = db.hitl_list(None).unwrap();
+    assert!(events.is_empty());
+}
+
+#[test]
+fn hitl_respond_updates_status() {
+    use autodev::core::models::NewHitlResponse;
+    use autodev::core::repository::HitlRepository;
+
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    let event_id = create_test_hitl_event(&db, &repo_id);
+
+    let response = NewHitlResponse {
+        event_id: event_id.clone(),
+        choice: Some(1),
+        message: Some("Going with option A".to_string()),
+        source: "cli".to_string(),
+    };
+    db.hitl_respond(&response).unwrap();
+
+    // Event status should be updated to responded
+    let event = db.hitl_show(&event_id).unwrap().unwrap();
+    assert_eq!(event.status.to_string(), "responded");
+
+    // Response should be retrievable
+    let responses = db.hitl_responses(&event_id).unwrap();
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].choice, Some(1));
+    assert_eq!(
+        responses[0].message,
+        Some("Going with option A".to_string())
+    );
+    assert_eq!(responses[0].source, "cli");
+}
+
+#[test]
+fn hitl_set_status() {
+    use autodev::core::models::HitlStatus;
+    use autodev::core::repository::HitlRepository;
+
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    let event_id = create_test_hitl_event(&db, &repo_id);
+
+    db.hitl_set_status(&event_id, HitlStatus::Expired).unwrap();
+
+    let event = db.hitl_show(&event_id).unwrap().unwrap();
+    assert_eq!(event.status.to_string(), "expired");
+}
+
+#[test]
+fn hitl_pending_count() {
+    use autodev::core::models::{HitlStatus, NewHitlResponse};
+    use autodev::core::repository::HitlRepository;
+
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    assert_eq!(db.hitl_pending_count(None).unwrap(), 0);
+
+    let id1 = create_test_hitl_event(&db, &repo_id);
+    create_test_hitl_event(&db, &repo_id);
+
+    assert_eq!(db.hitl_pending_count(None).unwrap(), 2);
+    assert_eq!(db.hitl_pending_count(Some("org/test-repo")).unwrap(), 2);
+
+    // Respond to one
+    db.hitl_respond(&NewHitlResponse {
+        event_id: id1.clone(),
+        choice: Some(1),
+        message: None,
+        source: "cli".to_string(),
+    })
+    .unwrap();
+
+    assert_eq!(db.hitl_pending_count(None).unwrap(), 1);
+
+    // Expire the other
+    let events = db.hitl_list(None).unwrap();
+    let pending_event = events.iter().find(|e| e.id != id1).unwrap();
+    db.hitl_set_status(&pending_event.id, HitlStatus::Expired)
+        .unwrap();
+
+    assert_eq!(db.hitl_pending_count(None).unwrap(), 0);
+}
+
+#[test]
+fn hitl_responses_empty() {
+    use autodev::core::repository::HitlRepository;
+
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    let event_id = create_test_hitl_event(&db, &repo_id);
+
+    let responses = db.hitl_responses(&event_id).unwrap();
+    assert!(responses.is_empty());
+}
+
+#[test]
+fn hitl_pending_count_filters_by_repo() {
+    use autodev::core::repository::HitlRepository;
+
+    let db = open_memory_db();
+    let repo_id1 = add_test_repo_with_url(&db, "https://github.com/a/one", "a/one");
+    let repo_id2 = add_test_repo_with_url(&db, "https://github.com/b/two", "b/two");
+
+    create_test_hitl_event(&db, &repo_id1);
+    create_test_hitl_event(&db, &repo_id2);
+    create_test_hitl_event(&db, &repo_id2);
+
+    assert_eq!(db.hitl_pending_count(None).unwrap(), 3);
+    assert_eq!(db.hitl_pending_count(Some("a/one")).unwrap(), 1);
+    assert_eq!(db.hitl_pending_count(Some("b/two")).unwrap(), 2);
+}

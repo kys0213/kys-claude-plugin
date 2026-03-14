@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use crate::tasks::helpers::workspace::Workspace;
 use crate::core::labels;
 use crate::infra::gh::Gh;
 use crate::infra::suggest_workflow::SuggestWorkflow;
+use crate::tasks::helpers::workspace::Workspace;
 
 use super::models::KnowledgeSuggestion;
 

@@ -75,6 +75,29 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
             PRIMARY KEY (spec_id, issue_number)
         );
 
+        CREATE TABLE IF NOT EXISTS hitl_events (
+            id          TEXT PRIMARY KEY,
+            repo_id     TEXT NOT NULL REFERENCES repositories(id),
+            spec_id     TEXT,
+            work_id     TEXT,
+            severity    TEXT NOT NULL,
+            situation   TEXT NOT NULL,
+            context     TEXT NOT NULL DEFAULT '',
+            options     TEXT NOT NULL DEFAULT '[]',
+            status      TEXT NOT NULL DEFAULT 'pending',
+            created_at  TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_hitl_events_repo ON hitl_events(repo_id, status);
+
+        CREATE TABLE IF NOT EXISTS hitl_responses (
+            id          TEXT PRIMARY KEY,
+            event_id    TEXT NOT NULL REFERENCES hitl_events(id),
+            choice      INTEGER,
+            message     TEXT,
+            source      TEXT NOT NULL,
+            created_at  TEXT NOT NULL
+        );
+
         COMMIT;
         ",
     )?;

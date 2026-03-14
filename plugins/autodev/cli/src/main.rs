@@ -78,6 +78,11 @@ enum Commands {
         #[command(subcommand)]
         action: SpecAction,
     },
+    /// HITL (Human-in-the-Loop) 이벤트 관리
+    Hitl {
+        #[command(subcommand)]
+        action: HitlAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -86,6 +91,38 @@ enum QueueAction {
     List {
         /// 레포 이름으로 필터 (org/repo)
         repo: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum HitlAction {
+    /// HITL 이벤트 목록 조회
+    List {
+        /// 레포 이름으로 필터 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
+    /// HITL 이벤트 상세 조회
+    Show {
+        /// 이벤트 ID
+        id: String,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
+    /// HITL 이벤트에 응답
+    Respond {
+        /// 이벤트 ID
+        id: String,
+        /// 선택 번호
+        #[arg(long)]
+        choice: Option<i32>,
+        /// 메시지
+        #[arg(long)]
+        message: Option<String>,
     },
 }
 
@@ -417,6 +454,24 @@ async fn main() -> Result<()> {
             }
             SpecAction::Unlink { spec_id, issue } => {
                 client::spec::spec_unlink(&db, &spec_id, issue)?;
+            }
+        },
+        Commands::Hitl { action } => match action {
+            HitlAction::List { repo, json } => {
+                let output = client::hitl::list(&db, repo.as_deref(), json)?;
+                println!("{output}");
+            }
+            HitlAction::Show { id, json } => {
+                let output = client::hitl::show(&db, &id, json)?;
+                println!("{output}");
+            }
+            HitlAction::Respond {
+                id,
+                choice,
+                message,
+            } => {
+                let output = client::hitl::respond(&db, &id, choice, message.as_deref())?;
+                println!("{output}");
             }
         },
     }

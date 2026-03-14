@@ -16,22 +16,22 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use super::AGENT_SYSTEM_PROMPT;
-use crate::tasks::helpers::workspace::{Workspace, WorkspaceOps};
 use crate::core::config::Env;
+use crate::core::labels;
+use crate::core::models::NewConsumerLog;
 use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
-use crate::core::labels;
-use crate::core::models::NewConsumerLog;
+use crate::core::task_queues::PrItem;
 use crate::infra::claude::SessionOptions;
 use crate::infra::gh::Gh;
 use crate::infra::git::Git;
 use crate::infra::suggest_workflow::SuggestWorkflow;
+use crate::tasks::helpers::workspace::{Workspace, WorkspaceOps};
 use crate::tasks::knowledge::extractor::{
     build_suggest_workflow_section, collect_existing_knowledge, create_task_knowledge_prs,
     format_knowledge_comment, parse_knowledge_suggestion, KnowledgePrContext,
 };
-use crate::core::task_queues::PrItem;
 
 /// Knowledge Extraction Task.
 ///
@@ -278,10 +278,10 @@ mod tests {
     use std::path::Path;
     use std::time::Duration;
 
+    use crate::core::task_queues::make_work_id;
     use crate::infra::gh::mock::MockGh;
     use crate::infra::suggest_workflow::SuggestWorkflow;
     use crate::tasks::knowledge::models::ToolFrequencyEntry;
-    use crate::core::task_queues::make_work_id;
 
     // ─── Mock Workspace ───
 

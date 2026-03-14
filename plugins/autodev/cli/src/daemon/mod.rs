@@ -18,23 +18,23 @@ use anyhow::{bail, Result};
 use tokio::task::JoinSet;
 use tracing::info;
 
-use crate::tasks::helpers::workspace::OwnedWorkspace;
 use crate::core::config::{self, Env};
-use crate::tasks::helpers::git_ops_factory::GitRepositoryFactory;
 use crate::core::repository::ConsumerLogRepository;
+use crate::daemon::collectors::github::GitHubTaskSource;
 use crate::infra::claude::Claude;
+use crate::infra::db::Database;
 use crate::infra::gh::Gh;
 use crate::infra::git::Git;
 use crate::infra::suggest_workflow::SuggestWorkflow;
-use crate::infra::db::Database;
-use crate::daemon::collectors::github::GitHubTaskSource;
+use crate::tasks::helpers::git_ops_factory::GitRepositoryFactory;
+use crate::tasks::helpers::workspace::OwnedWorkspace;
 
 use self::agent_impl::ClaudeAgent;
 use self::daily_reporter::DailyReporter;
-use crate::core::task::TaskResult;
 use self::task_manager::TaskManager;
 use self::task_runner::TaskRunner;
 use self::task_runner_impl::DefaultTaskRunner;
+use crate::core::task::TaskResult;
 
 // ─── In-Flight Concurrency Tracker ───
 

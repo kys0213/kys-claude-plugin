@@ -1,3 +1,4 @@
+pub mod hitl;
 pub mod spec;
 
 use std::path::{Path, PathBuf};
