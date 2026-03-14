@@ -2,10 +2,10 @@
   "dry_run": false,
   "results": [
     {
-      "plugin": "external-llm",
-      "old_version": "0.7.0",
-      "new_version": "0.8.0",
-      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/external-llm/.claude-plugin/plugin.json",
+      "plugin": "hud",
+      "old_version": "0.1.0",
+      "new_version": "0.2.0",
+      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/hud/.claude-plugin/plugin.json",
       "marketplace_updated": true,
       "cargo_toml_updated": false
     }
