@@ -147,6 +147,63 @@ pub fn repo_config(env: &dyn Env, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// 레포 설정 업데이트 (딥머지)
+pub fn repo_update(
+    db: &Database,
+    env: &dyn config::Env,
+    name: &str,
+    config_json: &str,
+) -> Result<()> {
+    // 1. 레포 존재 여부 확인
+    let repos = db.repo_list()?;
+    if !repos.iter().any(|r| r.name == name) {
+        anyhow::bail!("repository not found: {name}. Use 'autodev repo add' first.");
+    }
+
+    // 2. JSON 파싱
+    let new_value: serde_json::Value = serde_json::from_str(config_json)
+        .map_err(|e| anyhow::anyhow!("invalid config JSON: {e}"))?;
+
+    // 빈 JSON 객체 체크
+    if new_value.as_object().is_some_and(|m| m.is_empty()) {
+        println!("warning: empty config '{{}}' — no changes applied for {name}.");
+        return Ok(());
+    }
+
+    // 3. 기존 워크스페이스 YAML 로드
+    let ws_dir = config::workspaces_path(env).join(config::sanitize_repo_name(name));
+    std::fs::create_dir_all(&ws_dir)?;
+    let config_path = ws_dir.join(config::CONFIG_FILENAME);
+
+    let existing = if config_path.exists() {
+        let content = std::fs::read_to_string(&config_path)?;
+        serde_yaml::from_str::<serde_json::Value>(&content)
+            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()))
+    } else {
+        serde_json::Value::Object(serde_json::Map::new())
+    };
+
+    // 4. 딥머지 (existing + new)
+    let merged = config::loader::deep_merge(existing, new_value);
+
+    // 5. YAML로 저장
+    let yaml = serde_yaml::to_string(&merged)?;
+    std::fs::write(&config_path, &yaml)?;
+
+    println!("updated: {name}");
+    println!(
+        "config: written to {}",
+        config_path.display()
+    );
+
+    // 최종 effective config 표시
+    let effective = config::loader::load_merged(env, Some(&ws_dir));
+    let effective_yaml = serde_yaml::to_string(&effective)?;
+    println!("\nEffective config for {name}:\n---\n{effective_yaml}");
+
+    Ok(())
+}
+
 /// 레포 제거
 pub fn repo_remove(db: &Database, name: &str) -> Result<()> {
     db.repo_remove(name)?;
@@ -340,4 +397,160 @@ pub fn logs(db: &Database, repo: Option<&str>, limit: usize) -> Result<String> {
     }
 
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Env;
+    use crate::domain::repository::RepoRepository;
+    use std::env::VarError;
+
+    struct TestEnv {
+        home: String,
+    }
+
+    impl Env for TestEnv {
+        fn var(&self, key: &str) -> Result<String, VarError> {
+            match key {
+                "HOME" | "AUTODEV_HOME" => Ok(self.home.clone()),
+                _ => Err(VarError::NotPresent),
+            }
+        }
+    }
+
+    fn setup_test_db(dir: &std::path::Path) -> crate::queue::Database {
+        let db_path = dir.join("test.db");
+        let db = crate::queue::Database::open(&db_path).unwrap();
+        db.initialize().unwrap();
+        db
+    }
+
+    #[test]
+    fn repo_update_existing_repo_deep_merges() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = setup_test_db(tmp.path());
+        let env = TestEnv {
+            home: tmp.path().to_string_lossy().to_string(),
+        };
+
+        // Register a repo
+        db.repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
+
+        // Write initial config
+        let ws_dir = config::workspaces_path(&env).join(config::sanitize_repo_name("org/repo"));
+        std::fs::create_dir_all(&ws_dir).unwrap();
+        std::fs::write(
+            ws_dir.join(config::CONFIG_FILENAME),
+            "daemon:\n  poll_interval: 30\nsources:\n  github:\n    gh_host: github.com\n",
+        )
+        .unwrap();
+
+        // Update with new config
+        repo_update(
+            &db,
+            &env,
+            "org/repo",
+            r#"{"daemon":{"log_level":"debug"}}"#,
+        )
+        .unwrap();
+
+        // Read back and verify deep merge
+        let content =
+            std::fs::read_to_string(ws_dir.join(config::CONFIG_FILENAME)).unwrap();
+        let value: serde_json::Value = serde_yaml::from_str(&content).unwrap();
+
+        // Original field preserved
+        assert_eq!(value["daemon"]["poll_interval"], 30);
+        // New field added
+        assert_eq!(value["daemon"]["log_level"], "debug");
+        // Other section preserved
+        assert_eq!(value["sources"]["github"]["gh_host"], "github.com");
+    }
+
+    #[test]
+    fn repo_update_nonexistent_repo_returns_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = setup_test_db(tmp.path());
+        let env = TestEnv {
+            home: tmp.path().to_string_lossy().to_string(),
+        };
+
+        let result = repo_update(&db, &env, "org/nonexistent", r#"{"key":"value"}"#);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("repository not found"),
+            "expected 'repository not found', got: {err}"
+        );
+    }
+
+    #[test]
+    fn repo_update_invalid_json_returns_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = setup_test_db(tmp.path());
+        let env = TestEnv {
+            home: tmp.path().to_string_lossy().to_string(),
+        };
+
+        db.repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
+
+        let result = repo_update(&db, &env, "org/repo", "not-valid-json");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("invalid config JSON"),
+            "expected 'invalid config JSON', got: {err}"
+        );
+    }
+
+    #[test]
+    fn repo_update_empty_json_is_noop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = setup_test_db(tmp.path());
+        let env = TestEnv {
+            home: tmp.path().to_string_lossy().to_string(),
+        };
+
+        db.repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
+
+        // Write initial config
+        let ws_dir = config::workspaces_path(&env).join(config::sanitize_repo_name("org/repo"));
+        std::fs::create_dir_all(&ws_dir).unwrap();
+        let original = "daemon:\n  poll_interval: 30\n";
+        std::fs::write(ws_dir.join(config::CONFIG_FILENAME), original).unwrap();
+
+        // Update with empty JSON
+        repo_update(&db, &env, "org/repo", "{}").unwrap();
+
+        // Config file should be unchanged (no write happened)
+        let content =
+            std::fs::read_to_string(ws_dir.join(config::CONFIG_FILENAME)).unwrap();
+        assert_eq!(content, original, "config should not be modified for empty JSON");
+    }
+
+    #[test]
+    fn repo_update_no_existing_yaml_creates_new() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = setup_test_db(tmp.path());
+        let env = TestEnv {
+            home: tmp.path().to_string_lossy().to_string(),
+        };
+
+        db.repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
+
+        // No existing YAML — should create new file
+        repo_update(&db, &env, "org/repo", r#"{"daemon":{"log_level":"warn"}}"#)
+            .unwrap();
+
+        let ws_dir = config::workspaces_path(&env).join(config::sanitize_repo_name("org/repo"));
+        let content =
+            std::fs::read_to_string(ws_dir.join(config::CONFIG_FILENAME)).unwrap();
+        let value: serde_json::Value = serde_yaml::from_str(&content).unwrap();
+        assert_eq!(value["daemon"]["log_level"], "warn");
+    }
 }

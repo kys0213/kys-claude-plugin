@@ -111,6 +111,14 @@ enum RepoAction {
         /// 레포 이름 (org/repo)
         name: String,
     },
+    /// 레포 설정 업데이트 (기존 설정에 딥머지)
+    Update {
+        /// 레포 이름 (org/repo)
+        name: String,
+        /// 업데이트할 설정 JSON (WorkflowConfig 형식)
+        #[arg(long)]
+        config: String,
+    },
 }
 
 #[tokio::main]
@@ -244,6 +252,9 @@ async fn main() -> Result<()> {
             }
             RepoAction::Remove { name } => {
                 client::repo_remove(&db, &name)?;
+            }
+            RepoAction::Update { name, config } => {
+                client::repo_update(&db, &env, &name, &config)?;
             }
         },
         Commands::Queue { action } => match action {
