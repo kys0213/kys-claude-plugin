@@ -501,3 +501,250 @@ fn hitl_pending_count_filters_by_repo() {
     assert_eq!(db.hitl_pending_count(Some("a/one")).unwrap(), 1);
     assert_eq!(db.hitl_pending_count(Some("b/two")).unwrap(), 2);
 }
+
+// ═══════════════════════════════════════════════
+// 5. Cron jobs
+// ═══════════════════════════════════════════════
+
+fn add_cron_job(db: &Database, name: &str, interval_secs: u64) -> String {
+    let job = NewCronJob {
+        name: name.to_string(),
+        repo_id: None,
+        schedule: CronSchedule::Interval {
+            secs: interval_secs,
+        },
+        script_path: "/usr/bin/echo".to_string(),
+        builtin: false,
+    };
+    db.cron_add(&job).unwrap()
+}
+
+fn add_cron_job_for_repo(db: &Database, name: &str, repo_id: &str) -> String {
+    let job = NewCronJob {
+        name: name.to_string(),
+        repo_id: Some(repo_id.to_string()),
+        schedule: CronSchedule::Interval { secs: 60 },
+        script_path: "/usr/bin/echo".to_string(),
+        builtin: false,
+    };
+    db.cron_add(&job).unwrap()
+}
+
+#[test]
+fn cron_add_and_list() {
+    let db = open_memory_db();
+    assert!(db.cron_list(None).unwrap().is_empty());
+
+    let id = add_cron_job(&db, "test-job", 300);
+    assert!(!id.is_empty());
+
+    let jobs = db.cron_list(None).unwrap();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0].name, "test-job");
+    assert_eq!(jobs[0].status, CronStatus::Active);
+    assert!(!jobs[0].builtin);
+    assert!(jobs[0].repo_id.is_none());
+}
+
+#[test]
+fn cron_add_with_expression_schedule() {
+    let db = open_memory_db();
+    let job = NewCronJob {
+        name: "nightly".to_string(),
+        repo_id: None,
+        schedule: CronSchedule::Expression {
+            cron: "0 2 * * *".to_string(),
+        },
+        script_path: "/usr/bin/echo".to_string(),
+        builtin: false,
+    };
+    db.cron_add(&job).unwrap();
+
+    let jobs = db.cron_list(None).unwrap();
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(
+        jobs[0].schedule,
+        CronSchedule::Expression {
+            cron: "0 2 * * *".to_string()
+        }
+    );
+}
+
+#[test]
+fn cron_add_duplicate_name_fails() {
+    let db = open_memory_db();
+    add_cron_job(&db, "dup-job", 60);
+    let result = db.cron_add(&NewCronJob {
+        name: "dup-job".to_string(),
+        repo_id: None,
+        schedule: CronSchedule::Interval { secs: 120 },
+        script_path: "/usr/bin/true".to_string(),
+        builtin: false,
+    });
+    assert!(result.is_err());
+}
+
+#[test]
+fn cron_add_same_name_different_repo() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    // Global job
+    add_cron_job(&db, "sync", 60);
+    // Per-repo job with same name
+    add_cron_job_for_repo(&db, "sync", &repo_id);
+
+    let all = db.cron_list(None).unwrap();
+    assert_eq!(all.len(), 2);
+}
+
+#[test]
+fn cron_show_found() {
+    let db = open_memory_db();
+    add_cron_job(&db, "my-job", 300);
+
+    let job = db.cron_show("my-job", None).unwrap();
+    assert!(job.is_some());
+    assert_eq!(job.unwrap().name, "my-job");
+}
+
+#[test]
+fn cron_show_not_found() {
+    let db = open_memory_db();
+    let job = db.cron_show("nonexistent", None).unwrap();
+    assert!(job.is_none());
+}
+
+#[test]
+fn cron_update_interval() {
+    let db = open_memory_db();
+    add_cron_job(&db, "updatable", 60);
+
+    db.cron_update_interval("updatable", None, 120).unwrap();
+
+    let job = db.cron_show("updatable", None).unwrap().unwrap();
+    assert_eq!(job.schedule, CronSchedule::Interval { secs: 120 });
+}
+
+#[test]
+fn cron_update_interval_not_found() {
+    let db = open_memory_db();
+    let result = db.cron_update_interval("missing", None, 60);
+    assert!(result.is_err());
+}
+
+#[test]
+fn cron_pause_and_resume() {
+    let db = open_memory_db();
+    add_cron_job(&db, "toggleable", 60);
+
+    db.cron_set_status("toggleable", None, CronStatus::Paused)
+        .unwrap();
+    let job = db.cron_show("toggleable", None).unwrap().unwrap();
+    assert_eq!(job.status, CronStatus::Paused);
+
+    db.cron_set_status("toggleable", None, CronStatus::Active)
+        .unwrap();
+    let job = db.cron_show("toggleable", None).unwrap().unwrap();
+    assert_eq!(job.status, CronStatus::Active);
+}
+
+#[test]
+fn cron_remove() {
+    let db = open_memory_db();
+    add_cron_job(&db, "removable", 60);
+    assert_eq!(db.cron_list(None).unwrap().len(), 1);
+
+    db.cron_remove("removable", None).unwrap();
+    assert!(db.cron_list(None).unwrap().is_empty());
+}
+
+#[test]
+fn cron_remove_builtin_fails() {
+    let db = open_memory_db();
+    let job = NewCronJob {
+        name: "builtin-job".to_string(),
+        repo_id: None,
+        schedule: CronSchedule::Interval { secs: 60 },
+        script_path: "/usr/bin/echo".to_string(),
+        builtin: true,
+    };
+    db.cron_add(&job).unwrap();
+
+    let result = db.cron_remove("builtin-job", None);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("cannot remove built-in"),
+        "expected 'cannot remove built-in', got: {err}"
+    );
+}
+
+#[test]
+fn cron_remove_not_found() {
+    let db = open_memory_db();
+    let result = db.cron_remove("ghost", None);
+    assert!(result.is_err());
+}
+
+#[test]
+fn cron_update_last_run() {
+    let db = open_memory_db();
+    let id = add_cron_job(&db, "runnable", 60);
+
+    let job = db.cron_show("runnable", None).unwrap().unwrap();
+    assert!(job.last_run_at.is_none());
+
+    db.cron_update_last_run(&id).unwrap();
+
+    let job = db.cron_show("runnable", None).unwrap().unwrap();
+    assert!(job.last_run_at.is_some());
+}
+
+#[test]
+fn cron_find_due_no_last_run() {
+    let db = open_memory_db();
+    add_cron_job(&db, "never-ran", 60);
+
+    let due = db.cron_find_due().unwrap();
+    assert_eq!(due.len(), 1);
+    assert_eq!(due[0].name, "never-ran");
+}
+
+#[test]
+fn cron_find_due_excludes_paused() {
+    let db = open_memory_db();
+    add_cron_job(&db, "paused-job", 60);
+    db.cron_set_status("paused-job", None, CronStatus::Paused)
+        .unwrap();
+
+    let due = db.cron_find_due().unwrap();
+    assert!(due.is_empty());
+}
+
+#[test]
+fn cron_find_due_recently_run() {
+    let db = open_memory_db();
+    let id = add_cron_job(&db, "recent-job", 9999999);
+    db.cron_update_last_run(&id).unwrap();
+
+    // With a very large interval, job should NOT be due
+    let due = db.cron_find_due().unwrap();
+    assert!(due.is_empty());
+}
+
+#[test]
+fn cron_list_per_repo() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    add_cron_job(&db, "global-job", 60);
+    add_cron_job_for_repo(&db, "repo-job", &repo_id);
+
+    let repo_jobs = db.cron_list(Some("org/test-repo")).unwrap();
+    assert_eq!(repo_jobs.len(), 1);
+    assert_eq!(repo_jobs[0].name, "repo-job");
+
+    let all_jobs = db.cron_list(None).unwrap();
+    assert_eq!(all_jobs.len(), 2);
+}

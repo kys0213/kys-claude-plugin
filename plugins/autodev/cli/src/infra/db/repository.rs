@@ -723,3 +723,280 @@ impl HitlRepository for Database {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 }
+
+impl CronRepository for Database {
+    fn cron_add(&self, job: &NewCronJob) -> Result<String> {
+        let conn = self.conn();
+        let now = Utc::now().to_rfc3339();
+        let id = Uuid::new_v4().to_string();
+
+        let (schedule_type, schedule_value) = match &job.schedule {
+            CronSchedule::Interval { secs } => ("interval".to_string(), secs.to_string()),
+            CronSchedule::Expression { cron } => ("expression".to_string(), cron.clone()),
+        };
+
+        conn.execute(
+            "INSERT INTO cron_jobs (id, name, repo_id, schedule_type, schedule_value, script_path, status, builtin, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7, ?8)",
+            rusqlite::params![
+                id,
+                job.name,
+                job.repo_id,
+                schedule_type,
+                schedule_value,
+                job.script_path,
+                job.builtin as i32,
+                now
+            ],
+        )?;
+
+        Ok(id)
+    }
+
+    fn cron_list(&self, repo: Option<&str>) -> Result<Vec<CronJob>> {
+        let conn = self.conn();
+
+        let (query, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(r) = repo
+        {
+            (
+                "SELECT id, name, repo_id, schedule_type, schedule_value, script_path, status, builtin, last_run_at, created_at \
+                 FROM cron_jobs WHERE repo_id = (SELECT id FROM repositories WHERE name = ?1) \
+                 ORDER BY name"
+                    .to_string(),
+                vec![Box::new(r.to_string())],
+            )
+        } else {
+            (
+                "SELECT id, name, repo_id, schedule_type, schedule_value, script_path, status, builtin, last_run_at, created_at \
+                 FROM cron_jobs ORDER BY name"
+                    .to_string(),
+                vec![],
+            )
+        };
+
+        let mut stmt = conn.prepare(&query)?;
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let rows = stmt.query_map(params_refs.as_slice(), |row| Ok(map_cron_row(row)))?;
+
+        let mut jobs = Vec::new();
+        for row in rows {
+            jobs.push(row??);
+        }
+        Ok(jobs)
+    }
+
+    fn cron_show(&self, name: &str, repo: Option<&str>) -> Result<Option<CronJob>> {
+        let conn = self.conn();
+
+        let (query, params): (&str, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(r) = repo {
+            (
+                "SELECT id, name, repo_id, schedule_type, schedule_value, script_path, status, builtin, last_run_at, created_at \
+                 FROM cron_jobs WHERE name = ?1 AND repo_id = (SELECT id FROM repositories WHERE name = ?2)",
+                vec![Box::new(name.to_string()), Box::new(r.to_string())],
+            )
+        } else {
+            (
+                "SELECT id, name, repo_id, schedule_type, schedule_value, script_path, status, builtin, last_run_at, created_at \
+                 FROM cron_jobs WHERE name = ?1 AND repo_id IS NULL",
+                vec![Box::new(name.to_string())],
+            )
+        };
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let result = conn.query_row(query, params_refs.as_slice(), |row| Ok(map_cron_row(row)));
+
+        match result {
+            Ok(job) => Ok(Some(job?)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn cron_update_interval(
+        &self,
+        name: &str,
+        repo: Option<&str>,
+        interval_secs: u64,
+    ) -> Result<()> {
+        let conn = self.conn();
+        let rows_affected = if let Some(r) = repo {
+            conn.execute(
+                "UPDATE cron_jobs SET schedule_type = 'interval', schedule_value = ?1 \
+                 WHERE name = ?2 AND repo_id = (SELECT id FROM repositories WHERE name = ?3)",
+                rusqlite::params![interval_secs.to_string(), name, r],
+            )?
+        } else {
+            conn.execute(
+                "UPDATE cron_jobs SET schedule_type = 'interval', schedule_value = ?1 \
+                 WHERE name = ?2 AND repo_id IS NULL",
+                rusqlite::params![interval_secs.to_string(), name],
+            )?
+        };
+        if rows_affected == 0 {
+            anyhow::bail!("cron job not found: {name}");
+        }
+        Ok(())
+    }
+
+    fn cron_set_status(&self, name: &str, repo: Option<&str>, status: CronStatus) -> Result<()> {
+        let conn = self.conn();
+        let status_str = status.to_string();
+        let rows_affected = if let Some(r) = repo {
+            conn.execute(
+                "UPDATE cron_jobs SET status = ?1 \
+                 WHERE name = ?2 AND repo_id = (SELECT id FROM repositories WHERE name = ?3)",
+                rusqlite::params![status_str, name, r],
+            )?
+        } else {
+            conn.execute(
+                "UPDATE cron_jobs SET status = ?1 WHERE name = ?2 AND repo_id IS NULL",
+                rusqlite::params![status_str, name],
+            )?
+        };
+        if rows_affected == 0 {
+            anyhow::bail!("cron job not found: {name}");
+        }
+        Ok(())
+    }
+
+    fn cron_remove(&self, name: &str, repo: Option<&str>) -> Result<()> {
+        let conn = self.conn();
+
+        // Check if builtin
+        let (query, params): (&str, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(r) = repo {
+            (
+                "SELECT builtin FROM cron_jobs WHERE name = ?1 AND repo_id = (SELECT id FROM repositories WHERE name = ?2)",
+                vec![Box::new(name.to_string()), Box::new(r.to_string())],
+            )
+        } else {
+            (
+                "SELECT builtin FROM cron_jobs WHERE name = ?1 AND repo_id IS NULL",
+                vec![Box::new(name.to_string())],
+            )
+        };
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let builtin: i32 = conn
+            .query_row(query, params_refs.as_slice(), |row| row.get(0))
+            .map_err(|_| anyhow::anyhow!("cron job not found: {name}"))?;
+
+        if builtin != 0 {
+            anyhow::bail!("cannot remove built-in cron job: {name}");
+        }
+
+        let rows_affected = if let Some(r) = repo {
+            conn.execute(
+                "DELETE FROM cron_jobs WHERE name = ?1 AND repo_id = (SELECT id FROM repositories WHERE name = ?2)",
+                rusqlite::params![name, r],
+            )?
+        } else {
+            conn.execute(
+                "DELETE FROM cron_jobs WHERE name = ?1 AND repo_id IS NULL",
+                rusqlite::params![name],
+            )?
+        };
+        if rows_affected == 0 {
+            anyhow::bail!("cron job not found: {name}");
+        }
+        Ok(())
+    }
+
+    fn cron_update_last_run(&self, id: &str) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let rows_affected = self.conn().execute(
+            "UPDATE cron_jobs SET last_run_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, id],
+        )?;
+        if rows_affected == 0 {
+            anyhow::bail!("cron job not found: {id}");
+        }
+        Ok(())
+    }
+
+    fn cron_find_due(&self) -> Result<Vec<CronJob>> {
+        let conn = self.conn();
+        let now = Utc::now();
+
+        let mut stmt = conn.prepare(
+            "SELECT id, name, repo_id, schedule_type, schedule_value, script_path, status, builtin, last_run_at, created_at \
+             FROM cron_jobs WHERE status = 'active'",
+        )?;
+
+        let rows = stmt.query_map([], |row| Ok(map_cron_row(row)))?;
+
+        let mut due_jobs = Vec::new();
+        for row in rows {
+            let job = row??;
+            match &job.schedule {
+                CronSchedule::Interval { secs } => {
+                    let is_due = if let Some(ref last) = job.last_run_at {
+                        if let Ok(last_time) = chrono::DateTime::parse_from_rfc3339(last) {
+                            let elapsed = now.signed_duration_since(last_time);
+                            elapsed.num_seconds() >= *secs as i64
+                        } else {
+                            true
+                        }
+                    } else {
+                        true
+                    };
+                    if is_due {
+                        due_jobs.push(job);
+                    }
+                }
+                CronSchedule::Expression { .. } => {
+                    // For now, return all active expression jobs
+                    due_jobs.push(job);
+                }
+            }
+        }
+
+        Ok(due_jobs)
+    }
+}
+
+fn map_cron_row(row: &rusqlite::Row<'_>) -> Result<CronJob> {
+    let schedule_type: String = row.get(3)?;
+    let schedule_value: String = row.get(4)?;
+    let status_str: String = row.get(6)?;
+    let builtin_int: i32 = row.get(7)?;
+
+    let schedule = match schedule_type.as_str() {
+        "interval" => CronSchedule::Interval {
+            secs: schedule_value.parse().map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    4,
+                    rusqlite::types::Type::Text,
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("invalid interval: {e}"),
+                    )),
+                )
+            })?,
+        },
+        "expression" => CronSchedule::Expression {
+            cron: schedule_value,
+        },
+        other => {
+            return Err(anyhow::anyhow!("unknown schedule type: {other}"));
+        }
+    };
+
+    let status: CronStatus = status_str
+        .parse()
+        .map_err(|e: anyhow::Error| anyhow::anyhow!("invalid status: {e}"))?;
+
+    Ok(CronJob {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        repo_id: row.get(2)?,
+        schedule,
+        script_path: row.get(5)?,
+        status,
+        builtin: builtin_int != 0,
+        last_run_at: row.get(8)?,
+        created_at: row.get(9)?,
+    })
+}

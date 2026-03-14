@@ -83,6 +83,11 @@ enum Commands {
         #[command(subcommand)]
         action: HitlAction,
     },
+    /// 크론 잡 관리
+    Cron {
+        #[command(subcommand)]
+        action: CronAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -123,6 +128,77 @@ enum HitlAction {
         /// 메시지
         #[arg(long)]
         message: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum CronAction {
+    /// 크론 잡 목록
+    List {
+        /// JSON 형식으로 출력
+        #[arg(long)]
+        json: bool,
+    },
+    /// 크론 잡 추가
+    Add {
+        /// 잡 이름
+        #[arg(long)]
+        name: String,
+        /// 스크립트 경로
+        #[arg(long)]
+        script: String,
+        /// 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+        /// 실행 간격 (초)
+        #[arg(long)]
+        interval: Option<u64>,
+        /// 크론 표현식
+        #[arg(long)]
+        schedule: Option<String>,
+    },
+    /// 크론 잡 간격 업데이트
+    Update {
+        /// 잡 이름
+        name: String,
+        /// 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+        /// 새 실행 간격 (초)
+        #[arg(long)]
+        interval: u64,
+    },
+    /// 크론 잡 일시 정지
+    Pause {
+        /// 잡 이름
+        name: String,
+        /// 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// 크론 잡 재개
+    Resume {
+        /// 잡 이름
+        name: String,
+        /// 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// 크론 잡 제거
+    Remove {
+        /// 잡 이름
+        name: String,
+        /// 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// 크론 잡 즉시 실행
+    Trigger {
+        /// 잡 이름
+        name: String,
+        /// 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
     },
 }
 
@@ -472,6 +548,47 @@ async fn main() -> Result<()> {
             } => {
                 let output = client::hitl::respond(&db, &id, choice, message.as_deref())?;
                 println!("{output}");
+            }
+        },
+        Commands::Cron { action } => match action {
+            CronAction::List { json } => {
+                let output = client::cron::cron_list(&db, json)?;
+                println!("{output}");
+            }
+            CronAction::Add {
+                name,
+                script,
+                repo,
+                interval,
+                schedule,
+            } => {
+                client::cron::cron_add(
+                    &db,
+                    &name,
+                    &script,
+                    repo.as_deref(),
+                    interval,
+                    schedule.as_deref(),
+                )?;
+            }
+            CronAction::Update {
+                name,
+                repo,
+                interval,
+            } => {
+                client::cron::cron_update(&db, &name, repo.as_deref(), interval)?;
+            }
+            CronAction::Pause { name, repo } => {
+                client::cron::cron_pause(&db, &name, repo.as_deref())?;
+            }
+            CronAction::Resume { name, repo } => {
+                client::cron::cron_resume(&db, &name, repo.as_deref())?;
+            }
+            CronAction::Remove { name, repo } => {
+                client::cron::cron_remove(&db, &name, repo.as_deref())?;
+            }
+            CronAction::Trigger { name, repo } => {
+                client::cron::cron_trigger(&db, &env, &name, repo.as_deref())?;
             }
         },
     }

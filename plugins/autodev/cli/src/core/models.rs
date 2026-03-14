@@ -435,3 +435,68 @@ pub struct NewHitlResponse {
     pub message: Option<String>,
     pub source: String,
 }
+
+// ─── Cron models ───
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CronStatus {
+    Active,
+    Paused,
+}
+
+impl std::fmt::Display for CronStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CronStatus::Active => write!(f, "active"),
+            CronStatus::Paused => write!(f, "paused"),
+        }
+    }
+}
+
+impl std::str::FromStr for CronStatus {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "active" => Ok(CronStatus::Active),
+            "paused" => Ok(CronStatus::Paused),
+            _ => Err(anyhow::anyhow!("invalid cron status: {s}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CronScope {
+    Global,
+    PerRepo { repo_id: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CronJob {
+    pub id: String,
+    pub name: String,
+    pub repo_id: Option<String>,
+    pub schedule: CronSchedule,
+    pub script_path: String,
+    pub status: CronStatus,
+    pub builtin: bool,
+    pub last_run_at: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value")]
+pub enum CronSchedule {
+    Interval { secs: u64 },
+    Expression { cron: String },
+}
+
+pub struct NewCronJob {
+    pub name: String,
+    pub repo_id: Option<String>,
+    pub schedule: CronSchedule,
+    pub script_path: String,
+    pub builtin: bool,
+}

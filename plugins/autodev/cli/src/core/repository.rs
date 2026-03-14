@@ -57,3 +57,19 @@ pub trait HitlRepository {
     fn hitl_pending_count(&self, repo: Option<&str>) -> Result<i64>;
     fn hitl_responses(&self, event_id: &str) -> Result<Vec<HitlResponse>>;
 }
+
+pub trait CronRepository {
+    fn cron_add(&self, job: &NewCronJob) -> Result<String>;
+    fn cron_list(&self, repo: Option<&str>) -> Result<Vec<CronJob>>;
+    fn cron_show(&self, name: &str, repo: Option<&str>) -> Result<Option<CronJob>>;
+    fn cron_update_interval(
+        &self,
+        name: &str,
+        repo: Option<&str>,
+        interval_secs: u64,
+    ) -> Result<()>;
+    fn cron_set_status(&self, name: &str, repo: Option<&str>, status: CronStatus) -> Result<()>;
+    fn cron_remove(&self, name: &str, repo: Option<&str>) -> Result<()>;
+    fn cron_update_last_run(&self, id: &str) -> Result<()>;
+    fn cron_find_due(&self) -> Result<Vec<CronJob>>;
+}

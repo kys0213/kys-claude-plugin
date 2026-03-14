@@ -98,6 +98,23 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
             created_at  TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS cron_jobs (
+            id              TEXT PRIMARY KEY,
+            name            TEXT NOT NULL,
+            repo_id         TEXT REFERENCES repositories(id),
+            schedule_type   TEXT NOT NULL,
+            schedule_value  TEXT NOT NULL,
+            script_path     TEXT NOT NULL,
+            status          TEXT NOT NULL DEFAULT 'active',
+            builtin         INTEGER NOT NULL DEFAULT 0,
+            last_run_at     TEXT,
+            created_at      TEXT NOT NULL,
+            UNIQUE(name, repo_id)
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_cron_jobs_name_global
+            ON cron_jobs(name) WHERE repo_id IS NULL;
+
         COMMIT;
         ",
     )?;

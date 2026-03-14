@@ -1,3 +1,4 @@
+pub mod cron;
 pub mod hitl;
 pub mod spec;
 
