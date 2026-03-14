@@ -1,9 +1,39 @@
+use std::path::{Path, PathBuf};
+
 use anyhow::Result;
 
 use crate::config;
 use crate::config::Env;
 use crate::domain::repository::*;
 use crate::queue::Database;
+
+/// JSON 문자열을 serde_json::Value로 파싱
+fn parse_config_json(json_str: &str) -> Result<serde_json::Value> {
+    serde_json::from_str(json_str).map_err(|e| anyhow::anyhow!("invalid config JSON: {e}"))
+}
+
+/// 레포의 워크스페이스 디렉토리 경로 반환 (생성 포함)
+fn ensure_workspace_dir(env: &dyn Env, name: &str) -> Result<PathBuf> {
+    let ws_dir = config::workspaces_path(env).join(config::sanitize_repo_name(name));
+    std::fs::create_dir_all(&ws_dir)?;
+    Ok(ws_dir)
+}
+
+/// serde_json::Value를 YAML로 워크스페이스 설정 파일에 저장
+fn write_workspace_config(ws_dir: &Path, value: &serde_json::Value) -> Result<PathBuf> {
+    let config_path = ws_dir.join(config::CONFIG_FILENAME);
+    let yaml = serde_yaml::to_string(value)?;
+    std::fs::write(&config_path, yaml)?;
+    Ok(config_path)
+}
+
+/// 최종 effective config 출력
+fn print_effective_config(env: &dyn Env, ws_dir: &Path, name: &str) -> Result<()> {
+    let effective = config::loader::load_merged(env, Some(ws_dir));
+    let yaml = serde_yaml::to_string(&effective)?;
+    println!("\nEffective config for {name}:\n---\n{yaml}");
+    Ok(())
+}
 
 /// 상태 요약
 pub fn status(db: &Database, env: &dyn Env) -> Result<String> {
@@ -75,17 +105,11 @@ pub fn repo_add(
     }
 
     if let Some(json_str) = config_json {
-        let value: serde_json::Value = serde_json::from_str(json_str)
-            .map_err(|e| anyhow::anyhow!("invalid config JSON: {e}"))?;
-        let ws_dir = config::workspaces_path(env).join(config::sanitize_repo_name(&name));
-        std::fs::create_dir_all(&ws_dir)?;
-        let yaml = serde_yaml::to_string(&value)?;
-        std::fs::write(ws_dir.join(config::CONFIG_FILENAME), yaml)?;
+        let value = parse_config_json(json_str)?;
+        let ws_dir = ensure_workspace_dir(env, &name)?;
+        let config_path = write_workspace_config(&ws_dir, &value)?;
         println!("registered: {name} ({url})");
-        println!(
-            "config: written to {}",
-            ws_dir.join(config::CONFIG_FILENAME).display()
-        );
+        println!("config: written to {}", config_path.display());
     } else {
         println!("registered: {name} ({url})");
         println!("config: edit ~/.autodev.yaml (global) or <repo>/.autodev.yaml (per-repo)");
@@ -135,14 +159,13 @@ pub fn repo_config(env: &dyn Env, name: &str) -> Result<()> {
     }
 
     // 최종 머지 결과 표시
-    let merged = if ws.exists() {
-        config::loader::load_merged(env, Some(&ws))
+    if ws.exists() {
+        print_effective_config(env, &ws, name)?;
     } else {
-        config::loader::load_merged(env, None)
-    };
-
-    let yaml = serde_yaml::to_string(&merged)?;
-    println!("\nEffective config for {name}:\n---\n{yaml}");
+        let effective = config::loader::load_merged(env, None);
+        let yaml = serde_yaml::to_string(&effective)?;
+        println!("\nEffective config for {name}:\n---\n{yaml}");
+    }
 
     Ok(())
 }
@@ -161,8 +184,7 @@ pub fn repo_update(
     }
 
     // 2. JSON 파싱
-    let new_value: serde_json::Value = serde_json::from_str(config_json)
-        .map_err(|e| anyhow::anyhow!("invalid config JSON: {e}"))?;
+    let new_value = parse_config_json(config_json)?;
 
     // 빈 JSON 객체 체크
     if new_value.as_object().is_some_and(|m| m.is_empty()) {
@@ -170,9 +192,8 @@ pub fn repo_update(
         return Ok(());
     }
 
-    // 3. 기존 워크스페이스 YAML 로드
-    let ws_dir = config::workspaces_path(env).join(config::sanitize_repo_name(name));
-    std::fs::create_dir_all(&ws_dir)?;
+    // 3. 기존 워크스페이스 YAML 로드 + 딥머지
+    let ws_dir = ensure_workspace_dir(env, name)?;
     let config_path = ws_dir.join(config::CONFIG_FILENAME);
 
     let existing = if config_path.exists() {
@@ -183,23 +204,16 @@ pub fn repo_update(
         serde_json::Value::Object(serde_json::Map::new())
     };
 
-    // 4. 딥머지 (existing + new)
     let merged = config::loader::deep_merge(existing, new_value);
 
-    // 5. YAML로 저장
-    let yaml = serde_yaml::to_string(&merged)?;
-    std::fs::write(&config_path, &yaml)?;
+    // 4. YAML로 저장
+    let config_path = write_workspace_config(&ws_dir, &merged)?;
 
     println!("updated: {name}");
-    println!(
-        "config: written to {}",
-        config_path.display()
-    );
+    println!("config: written to {}", config_path.display());
 
     // 최종 effective config 표시
-    let effective = config::loader::load_merged(env, Some(&ws_dir));
-    let effective_yaml = serde_yaml::to_string(&effective)?;
-    println!("\nEffective config for {name}:\n---\n{effective_yaml}");
+    print_effective_config(env, &ws_dir, name)?;
 
     Ok(())
 }
