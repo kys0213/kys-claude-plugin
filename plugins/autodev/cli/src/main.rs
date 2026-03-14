@@ -98,6 +98,15 @@ enum Commands {
         #[command(subcommand)]
         action: ClawAction,
     },
+    /// 칸반 보드 출력
+    Board {
+        /// 레포 이름으로 필터 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
     /// Claw 에이전트 세션 시작 (claude --cwd ~/.autodev/claw-workspace)
     Agent,
     /// Convention bootstrap — detect tech stack and generate .claude/rules/
@@ -721,6 +730,20 @@ async fn main() -> Result<()> {
                 }
             }
         },
+        Commands::Board { repo, json } => {
+            use autodev::core::board::BoardRenderer;
+            use autodev::tui::board::{BoardStateBuilder, TextBoardRenderer};
+
+            let state = BoardStateBuilder::build(&db, repo.as_deref())?;
+            if json {
+                let json_str = serde_json::to_string_pretty(&state)?;
+                println!("{json_str}");
+            } else {
+                let renderer = TextBoardRenderer;
+                let output = renderer.render(&state);
+                print!("{output}");
+            }
+        }
         Commands::Agent => {
             let ws = client::claw::claw_workspace_path(&home);
             if !ws.exists() {

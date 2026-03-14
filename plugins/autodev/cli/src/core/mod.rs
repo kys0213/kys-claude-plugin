@@ -1,3 +1,4 @@
+pub mod board;
 pub mod collector;
 pub mod config;
 pub mod labels;
