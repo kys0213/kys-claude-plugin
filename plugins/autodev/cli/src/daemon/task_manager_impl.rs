@@ -1,21 +1,21 @@
 //! DefaultTaskManager — TaskManager trait의 기본 구현체.
 //!
-//! TaskSource를 poll하여 Task를 수집하고, Daemon에게 분배한다.
+//! Collector를 poll하여 Task를 수집하고, Daemon에게 분배한다.
 
 use async_trait::async_trait;
 
 use super::task_manager::TaskManager;
-use crate::core::collector::TaskSource;
+use crate::core::collector::Collector;
 use crate::core::task::{Task, TaskResult};
 
-/// TaskSource에서 Task를 수집하고 분배하는 기본 구현체.
+/// Collector에서 Task를 수집하고 분배하는 기본 구현체.
 pub struct DefaultTaskManager {
-    sources: Vec<Box<dyn TaskSource>>,
+    sources: Vec<Box<dyn Collector>>,
     ready_tasks: Vec<Box<dyn Task>>,
 }
 
 impl DefaultTaskManager {
-    pub fn new(sources: Vec<Box<dyn TaskSource>>) -> Self {
+    pub fn new(sources: Vec<Box<dyn Collector>>) -> Self {
         Self {
             sources,
             ready_tasks: Vec::new(),
@@ -67,7 +67,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Mutex;
 
-    // ─── Mock TaskSource ───
+    // ─── Mock Collector ───
 
     struct MockSource {
         tasks_to_return: Mutex<Vec<Box<dyn Task>>>,
@@ -84,7 +84,7 @@ mod tests {
     }
 
     #[async_trait(?Send)]
-    impl TaskSource for MockSource {
+    impl Collector for MockSource {
         async fn poll(&mut self) -> Vec<Box<dyn Task>> {
             std::mem::take(&mut *self.tasks_to_return.lock().unwrap())
         }

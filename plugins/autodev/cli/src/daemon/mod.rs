@@ -301,7 +301,7 @@ pub async fn start(
     let cfg = config::loader::load_merged(&*env, None);
 
     let db_path = home.join("autodev.db");
-    // Source DB: owned by GitHubTaskSource (repo sync, cursor operations)
+    // Source DB: owned by GitHubTaskSource / Collector (repo sync, cursor operations)
     let source_db = Database::open(&db_path)?;
     source_db.initialize()?;
     // Logging DB: separate connection for task result logging
@@ -315,7 +315,7 @@ pub async fn start(
     let agent = Arc::new(ClaudeAgent::new(Arc::clone(&claude)));
     let runner: Arc<dyn TaskRunner> = Arc::new(DefaultTaskRunner::new(agent));
 
-    // ── TaskSource: GitHubTaskSource ──
+    // ── Collector: GitHubTaskSource ──
     let workspace = Arc::new(OwnedWorkspace::new(Arc::clone(&git), Arc::clone(&env)));
     let config_loader = Arc::new(config::RealConfigLoader::new(Box::new(EnvClone(
         Arc::clone(&env),

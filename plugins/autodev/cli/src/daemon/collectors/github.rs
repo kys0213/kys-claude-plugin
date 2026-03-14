@@ -1,4 +1,4 @@
-//! GitHubTaskSource — GitHub 이슈/PR 스캔 기반 TaskSource 구현체.
+//! GitHubTaskSource — GitHub 이슈/PR 스캔 기반 Collector 구현체.
 //!
 //! daemon의 per-repo 큐, 스캔, 복구 로직을 캡슐화한다.
 //! `poll()`: repo sync → recovery → scan → queue drain → Task 생성
@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::core::collector::TaskSource;
+use crate::core::collector::Collector;
 use crate::core::config::{self, ConfigLoader, Env};
 use crate::core::repository::{RepoRepository, ScanCursorRepository};
 use crate::core::task::{QueueOp, Task, TaskResult};
@@ -26,7 +26,7 @@ use crate::tasks::implement::ImplementTask;
 use crate::tasks::improve::ImproveTask;
 use crate::tasks::review::ReviewTask;
 
-/// GitHub 이슈/PR 스캔 기반 TaskSource.
+/// GitHub 이슈/PR 스캔 기반 Collector.
 ///
 /// per-repo 큐를 소유하고, 스캔 → Task 생성 → 큐 적용 생명주기를 관리한다.
 pub struct GitHubTaskSource<DB: RepoRepository + ScanCursorRepository> {
@@ -341,7 +341,7 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
 }
 
 #[async_trait(?Send)]
-impl<DB: RepoRepository + ScanCursorRepository + Send> TaskSource for GitHubTaskSource<DB> {
+impl<DB: RepoRepository + ScanCursorRepository + Send> Collector for GitHubTaskSource<DB> {
     async fn poll(&mut self) -> Vec<Box<dyn Task>> {
         self.sync_repos().await;
         self.run_recovery().await;

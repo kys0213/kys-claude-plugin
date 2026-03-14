@@ -1,7 +1,7 @@
-//! TaskSource trait 정의.
+//! Collector trait 정의.
 //!
 //! GitHub 이슈/PR 스캔 등 외부 소스에서 Task를 생성하는 인터페이스.
-//! TaskManager가 TaskSource를 poll하여 실행 가능한 Task를 수집한다.
+//! TaskManager가 Collector를 poll하여 실행 가능한 Task를 수집한다.
 
 use async_trait::async_trait;
 
@@ -17,15 +17,13 @@ use crate::daemon::status::StatusItem;
 /// 1. `TaskManager.tick()` → `poll()` 호출 → 새 Task 수집
 /// 2. Task 실행 완료 → `apply()` 호출 → 큐 상태 반영
 #[async_trait(?Send)]
-pub trait TaskSource: Send {
-    /// 새로운 Task를 수집한다.
-    /// repo sync, recovery, scan을 수행하고 실행 가능한 Task를 반환한다.
+pub trait Collector: Send {
+    /// Scan external sources and return new Tasks ready for execution.
     async fn poll(&mut self) -> Vec<Box<dyn Task>>;
 
-    /// 완료된 Task의 결과를 소스에 반영한다.
-    /// 큐 상태 전이(Remove, Push 등)를 적용한다.
+    /// Apply completed task results back to internal state.
     fn apply(&mut self, result: &TaskResult);
 
-    /// 현재 활성 아이템 목록을 반환한다 (status heartbeat용).
+    /// Return currently active items for status reporting.
     fn active_items(&self) -> Vec<StatusItem>;
 }
