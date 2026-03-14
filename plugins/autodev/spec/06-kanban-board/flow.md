@@ -181,4 +181,4 @@ autodev spec status auth-v2
 autodev agent
 ```
 
-전체 CLI 명령어는 [Flow 12: CLI 레퍼런스](./12-cli-reference.md) 참조.
+전체 CLI 명령어는 [Flow 12: CLI 레퍼런스](../12-cli-reference/flow.md) 참조.

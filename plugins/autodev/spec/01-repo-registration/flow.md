@@ -55,8 +55,8 @@ autodev repo add <github-url> [--config '<JSON>']
 ```
 
 관련 플로우:
-- [Flow 10: Claw 워크스페이스](./10-claw-workspace.md)
-- [Flow 11: 컨벤션 부트스트랩](./11-convention-bootstrap.md)
+- [Flow 10: Claw 워크스페이스](../10-claw-workspace/flow.md)
+- [Flow 11: 컨벤션 부트스트랩](../11-convention-bootstrap/flow.md)
 
 ---
 

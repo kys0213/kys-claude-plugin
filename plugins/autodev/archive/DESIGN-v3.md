@@ -2,7 +2,7 @@
 
 > **Date**: 2026-03-05
 > **Revision**: v3.0 — Auto-approve, impl-failed, changes-requested 정규 스캔, sync_default_branch, add-first 라벨 전이
-> **Base**: [DESIGN-v2.md](./archive/DESIGN-v2.md) — Analysis Review + Label-Positive 모델
+> **Base**: [DESIGN-v2.md](./DESIGN-v2.md) — Analysis Review + Label-Positive 모델
 
 ---
 
