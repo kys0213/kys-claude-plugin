@@ -100,6 +100,28 @@ enum Commands {
     },
     /// Claw 에이전트 세션 시작 (claude --cwd ~/.autodev/claw-workspace)
     Agent,
+    /// Convention bootstrap — detect tech stack and generate .claude/rules/
+    Convention {
+        #[command(subcommand)]
+        action: ConventionAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConventionAction {
+    /// Detect and display technology stack from a repository
+    Detect {
+        /// Path to the repository
+        repo_path: String,
+    },
+    /// Generate .claude/rules/ convention files (dry-run by default)
+    Bootstrap {
+        /// Path to the repository
+        repo_path: String,
+        /// Actually write files (default: dry-run)
+        #[arg(long)]
+        apply: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -713,6 +735,29 @@ async fn main() -> Result<()> {
                 std::process::exit(status.code().unwrap_or(1));
             }
         }
+        Commands::Convention { action } => match action {
+            ConventionAction::Detect { repo_path } => {
+                let path = std::path::Path::new(&repo_path);
+                if !path.is_dir() {
+                    anyhow::bail!("not a directory: {repo_path}");
+                }
+                let stack = client::convention::detect_tech_stack(path);
+                print!("{}", client::convention::format_tech_stack(&stack));
+            }
+            ConventionAction::Bootstrap { repo_path, apply } => {
+                let path = std::path::Path::new(&repo_path);
+                if !path.is_dir() {
+                    anyhow::bail!("not a directory: {repo_path}");
+                }
+                let stack = client::convention::detect_tech_stack(path);
+                print!("{}", client::convention::format_tech_stack(&stack));
+                let result = client::convention::bootstrap(path, &stack, apply)?;
+                print!(
+                    "{}",
+                    client::convention::format_bootstrap_result(&result, !apply)
+                );
+            }
+        },
     }
 
     Ok(())

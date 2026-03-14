@@ -1,4 +1,5 @@
 pub mod claw;
+pub mod convention;
 pub mod cron;
 pub mod decisions;
 pub mod hitl;
