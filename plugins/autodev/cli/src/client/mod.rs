@@ -192,8 +192,12 @@ pub fn repo_update(
 
     let existing = if config_path.exists() {
         let content = std::fs::read_to_string(&config_path)?;
-        serde_yaml::from_str::<serde_json::Value>(&content)
-            .map_err(|e| anyhow::anyhow!("failed to parse existing config {}: {e}", config_path.display()))?
+        serde_yaml::from_str::<serde_json::Value>(&content).map_err(|e| {
+            anyhow::anyhow!(
+                "failed to parse existing config {}: {e}",
+                config_path.display()
+            )
+        })?
     } else {
         serde_json::Value::Object(serde_json::Map::new())
     };
@@ -456,17 +460,10 @@ mod tests {
         .unwrap();
 
         // Update with new config
-        repo_update(
-            &db,
-            &env,
-            "org/repo",
-            r#"{"daemon":{"log_level":"debug"}}"#,
-        )
-        .unwrap();
+        repo_update(&db, &env, "org/repo", r#"{"daemon":{"log_level":"debug"}}"#).unwrap();
 
         // Read back and verify deep merge
-        let content =
-            std::fs::read_to_string(ws_dir.join(config::CONFIG_FILENAME)).unwrap();
+        let content = std::fs::read_to_string(ws_dir.join(config::CONFIG_FILENAME)).unwrap();
         let value: serde_json::Value = serde_yaml::from_str(&content).unwrap();
 
         // Original field preserved
@@ -535,9 +532,11 @@ mod tests {
         repo_update(&db, &env, "org/repo", "{}").unwrap();
 
         // Config file should be unchanged (no write happened)
-        let content =
-            std::fs::read_to_string(ws_dir.join(config::CONFIG_FILENAME)).unwrap();
-        assert_eq!(content, original, "config should not be modified for empty JSON");
+        let content = std::fs::read_to_string(ws_dir.join(config::CONFIG_FILENAME)).unwrap();
+        assert_eq!(
+            content, original,
+            "config should not be modified for empty JSON"
+        );
     }
 
     #[test]
@@ -552,12 +551,10 @@ mod tests {
             .unwrap();
 
         // No existing YAML — should create new file
-        repo_update(&db, &env, "org/repo", r#"{"daemon":{"log_level":"warn"}}"#)
-            .unwrap();
+        repo_update(&db, &env, "org/repo", r#"{"daemon":{"log_level":"warn"}}"#).unwrap();
 
         let ws_dir = config::workspaces_path(&env).join(config::sanitize_repo_name("org/repo"));
-        let content =
-            std::fs::read_to_string(ws_dir.join(config::CONFIG_FILENAME)).unwrap();
+        let content = std::fs::read_to_string(ws_dir.join(config::CONFIG_FILENAME)).unwrap();
         let value: serde_json::Value = serde_yaml::from_str(&content).unwrap();
         assert_eq!(value["daemon"]["log_level"], "warn");
     }
