@@ -1,7 +1,7 @@
 # IMPLEMENTATION PLAN: v3 Daemon Architecture Refactoring
 
 > **Date**: 2026-02-28
-> **Base Document**: [DESIGN-v3-ARCHITECTURE.md](../DESIGN-v3-ARCHITECTURE.md)
+> **Base Document**: [DESIGN-v3-ARCHITECTURE.md](./DESIGN-v3-ARCHITECTURE.md)
 > **Branch**: `claude/autodev-solid-design-v2-EYEe2`
 
 ---

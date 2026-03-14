@@ -116,7 +116,7 @@ PR:
   → (merge 후) extracted
 ```
 
-> 상세 전이 다이어그램은 [DESIGN-v3.md](./DESIGN-v3.md) §3 참조.
+> 상세 전이 다이어그램은 [DESIGN-v3.md](./archive/DESIGN-v3.md) §3 참조.
 
 ---
 
@@ -306,7 +306,7 @@ workflows:
     max_iterations: 2
 ```
 
-> 상세 스키마는 [CONFIG-SCHEMA-v2.md](./CONFIG-SCHEMA-v2.md) 참조.
+> 상세 스키마는 [CONFIG-SCHEMA-v2.md](./archive/CONFIG-SCHEMA-v2.md) 참조.
 
 ### File Locations
 
@@ -340,4 +340,5 @@ workflows:
 
 ---
 
-상세 설계는 [DESIGN-v3.md](./DESIGN-v3.md) (워크플로우) 및 [DESIGN-v3-ARCHITECTURE.md](./DESIGN-v3-ARCHITECTURE.md) (아키텍처) 참조.
+상세 설계는 [DESIGN-v3.md](./archive/DESIGN-v3.md) (워크플로우) 및 [DESIGN-v3-ARCHITECTURE.md](./archive/DESIGN-v3-ARCHITECTURE.md) (아키텍처) 참조.
+v4 설계는 [spec/](./spec/) 참조.
