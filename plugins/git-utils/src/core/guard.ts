@@ -4,7 +4,7 @@
 // 두 hook 스크립트(~30줄 중복)를 단일 서비스로 통합합니다.
 // ============================================================
 
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, relative, isAbsolute } from 'node:path';
 import { existsSync } from 'node:fs';
 import type { GuardInput, GuardOutput } from '../types';
 import type { GitService } from './git';
@@ -17,22 +17,27 @@ const GIT_COMMIT_PATTERN = /\bgit\b.*\bcommit\b/;
 
 /**
  * 파일 경로가 프로젝트 디렉토리 내부에 있는지 확인합니다.
- * 양쪽 경로를 resolve한 뒤 접두사 비교를 수행합니다.
+ * path.relative()를 사용하여 상대 경로 기반으로 판정합니다.
  */
 export function isInsideProjectDir(filePath: string, projectDir: string): boolean {
-  const resolvedFile = resolve(filePath);
-  const resolvedProject = resolve(projectDir);
-  // 디렉토리 구분자를 붙여 /tmp/test-extra 가 /tmp/test 내부로 판정되지 않도록 합니다.
-  return resolvedFile === resolvedProject || resolvedFile.startsWith(resolvedProject + '/');
+  const rel = relative(resolve(projectDir), resolve(filePath));
+  // relative path가 '..'로 시작하지 않고 절대 경로가 아니면 내부
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
 /**
  * 파일 경로가 어떤 git 저장소 안에 있는지 확인합니다.
- * 부모 디렉토리를 순회하며 .git 디렉토리 존재 여부를 검사합니다.
+ * 존재하는 최상위 디렉토리부터 .git 디렉토리 존재 여부를 검사합니다.
  */
 export function isInsideAnyGitRepo(filePath: string): boolean {
+  // 존재하는 최상위 디렉토리부터 검색하여 불필요한 existsSync 호출 감소
   let dir = resolve(dirname(filePath));
   const root = resolve('/');
+  while (dir !== root && !existsSync(dir)) {
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
   while (dir !== root) {
     if (existsSync(`${dir}/.git`)) {
       return true;
