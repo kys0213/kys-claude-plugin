@@ -117,6 +117,8 @@ export interface GuardInput {
   defaultBranch?: string;
   /** commit guard 전용: stdin으로 전달된 tool_input.command */
   toolCommand?: string;
+  /** write guard 전용: stdin으로 전달된 tool_input.file_path */
+  toolFilePath?: string;
 }
 
 export interface GuardOutput {
