@@ -151,7 +151,7 @@ autodev claw rules --json [--repo <name>]      # 적용 중인 규칙 목록
 autodev claw edit <rule> [--repo <name>]       # 규칙 편집
 ```
 
-### Claw 에이전트 실행
+### Claw Headless 실행
 
 ```bash
 autodev agent                                  # 대화형 Claw 세션
