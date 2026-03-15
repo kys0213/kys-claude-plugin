@@ -93,7 +93,7 @@
       ],
       "name": "autodev",
       "source": "./plugins/autodev",
-      "version": "0.13.1"
+      "version": "0.13.2"
     },
     {
       "category": "productivity",
