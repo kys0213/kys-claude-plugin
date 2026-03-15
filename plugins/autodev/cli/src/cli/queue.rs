@@ -30,8 +30,26 @@ pub fn queue_skip(db: &Database, work_id: &str, reason: Option<&str>) -> Result<
 }
 
 /// DB 기반 큐 아이템 목록 조회
-pub fn queue_list_db(db: &Database, repo: Option<&str>, json: bool) -> Result<String> {
-    let items = db.queue_list_items(repo)?;
+pub fn queue_list_db(
+    db: &Database,
+    repo: Option<&str>,
+    json: bool,
+    state: Option<&str>,
+    unextracted: bool,
+) -> Result<String> {
+    let mut items = db.queue_list_items(repo)?;
+
+    // Apply --state filter
+    if let Some(phase_filter) = state {
+        items.retain(|item| item.phase == phase_filter);
+    }
+
+    // Apply --unextracted filter: done + pr type + no skip_reason
+    if unextracted {
+        items.retain(|item| {
+            item.phase == "done" && item.queue_type == "pr" && item.skip_reason.is_none()
+        });
+    }
 
     if json {
         return Ok(serde_json::to_string_pretty(&items)?);

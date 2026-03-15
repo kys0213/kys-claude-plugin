@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
+use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 use crate::core::models::RepoInfo;
@@ -12,21 +14,35 @@ use super::runner::{CronExecResult, ScriptRunner};
 ///
 /// Called from the daemon tick loop. On each tick it:
 /// 1. Queries the DB for due cron jobs (active + interval elapsed)
-/// 2. Resolves repo info for per-repo jobs
-/// 3. Builds env vars and executes each script
-/// 4. Updates last_run_at after execution
+/// 2. Checks in-memory running map to prevent duplicate execution
+/// 3. Resolves repo info for per-repo jobs
+/// 4. Builds env vars and executes each script
+/// 5. Updates last_run_at after execution
 pub struct CronEngine {
     db: Database,
     home: PathBuf,
+    /// In-memory tracking of running jobs to prevent duplicate execution.
+    /// Key = job ID, Value = JoinHandle of the spawned task.
+    running: HashMap<String, JoinHandle<()>>,
 }
 
 impl CronEngine {
     pub fn new(db: Database, home: PathBuf) -> Self {
-        Self { db, home }
+        Self {
+            db,
+            home,
+            running: HashMap::new(),
+        }
     }
 
     /// Check for due cron jobs and execute them.
-    pub async fn tick(&self) -> Vec<CronExecResult> {
+    ///
+    /// Jobs that are still running from a previous tick are skipped.
+    /// Finished jobs are cleaned up before processing new ones.
+    pub async fn tick(&mut self) -> Vec<CronExecResult> {
+        // Clean up finished jobs
+        self.running.retain(|_id, handle| !handle.is_finished());
+
         let due_jobs = match self.db.cron_find_due() {
             Ok(jobs) => jobs,
             Err(e) => {
@@ -47,6 +63,15 @@ impl CronEngine {
         let mut results = Vec::new();
 
         for job in &due_jobs {
+            // Skip if this job is still running from a previous tick
+            if self.running.contains_key(&job.id) {
+                info!(
+                    "cron: skipping '{}' (still running from previous tick)",
+                    job.name
+                );
+                continue;
+            }
+
             let repo_info = job.repo_id.as_ref().and_then(|rid| {
                 enabled_repos
                     .iter()
@@ -71,6 +96,24 @@ impl CronEngine {
 
         results
     }
+
+    /// Spawn a long-running job and track it in the running map.
+    /// Returns true if the job was spawned, false if it was already running.
+    pub fn spawn_job(&mut self, job_id: String, job_name: String, future: JoinHandle<()>) -> bool {
+        if let Some(handle) = self.running.get(&job_id) {
+            if !handle.is_finished() {
+                info!("cron: cannot spawn '{}': already running", job_name);
+                return false;
+            }
+        }
+        self.running.insert(job_id, future);
+        true
+    }
+
+    /// Check if a specific job is currently running.
+    pub fn is_running(&self, job_id: &str) -> bool {
+        self.running.get(job_id).is_some_and(|h| !h.is_finished())
+    }
 }
 
 #[cfg(test)]
@@ -91,7 +134,7 @@ mod tests {
     #[tokio::test]
     async fn tick_returns_empty_when_no_due_jobs() {
         let (dir, db) = setup_db();
-        let engine = CronEngine::new(db, dir.path().to_path_buf());
+        let mut engine = CronEngine::new(db, dir.path().to_path_buf());
 
         let results = engine.tick().await;
         assert!(results.is_empty());
@@ -111,7 +154,7 @@ mod tests {
         })
         .unwrap();
 
-        let engine = CronEngine::new(db, dir.path().to_path_buf());
+        let mut engine = CronEngine::new(db, dir.path().to_path_buf());
 
         let results = engine.tick().await;
         assert_eq!(results.len(), 1);
@@ -136,7 +179,7 @@ mod tests {
         db.cron_set_status("paused-job", None, CronStatus::Paused)
             .unwrap();
 
-        let engine = CronEngine::new(db, dir.path().to_path_buf());
+        let mut engine = CronEngine::new(db, dir.path().to_path_buf());
 
         let results = engine.tick().await;
         assert!(results.is_empty());
@@ -158,7 +201,7 @@ mod tests {
         // Open a separate DB connection to verify the update
         let verify_db = Database::open(&dir.path().join("test.db")).unwrap();
 
-        let engine = CronEngine::new(db, dir.path().to_path_buf());
+        let mut engine = CronEngine::new(db, dir.path().to_path_buf());
         let results = engine.tick().await;
         assert_eq!(results.len(), 1);
 
@@ -180,7 +223,7 @@ mod tests {
         })
         .unwrap();
 
-        let engine = CronEngine::new(db, dir.path().to_path_buf());
+        let mut engine = CronEngine::new(db, dir.path().to_path_buf());
 
         let results = engine.tick().await;
         assert_eq!(results.len(), 1);
@@ -200,7 +243,7 @@ mod tests {
         })
         .unwrap();
 
-        let engine = CronEngine::new(db, dir.path().to_path_buf());
+        let mut engine = CronEngine::new(db, dir.path().to_path_buf());
 
         // First tick should execute
         let results = engine.tick().await;
@@ -209,5 +252,33 @@ mod tests {
         // Second tick should NOT execute (interval not elapsed)
         let results = engine.tick().await;
         assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn is_running_returns_false_when_no_job() {
+        let (dir, db) = setup_db();
+        let engine = CronEngine::new(db, dir.path().to_path_buf());
+
+        assert!(!engine.is_running("nonexistent"));
+    }
+
+    #[tokio::test]
+    async fn spawn_job_tracks_running_job() {
+        let (dir, db) = setup_db();
+        let mut engine = CronEngine::new(db, dir.path().to_path_buf());
+
+        // Spawn a job that sleeps briefly
+        let handle = tokio::spawn(async {
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        });
+
+        let spawned = engine.spawn_job("job-1".to_string(), "test-job".to_string(), handle);
+        assert!(spawned);
+        assert!(engine.is_running("job-1"));
+
+        // Trying to spawn the same job should fail
+        let handle2 = tokio::spawn(async {});
+        let spawned2 = engine.spawn_job("job-1".to_string(), "test-job".to_string(), handle2);
+        assert!(!spawned2);
     }
 }

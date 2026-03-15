@@ -8,8 +8,8 @@
 set -euo pipefail
 
 # Guard: 미추출 merged PR이 있는지 확인
-UNEXTRACTED=$(autodev queue list --json --repo "$AUTODEV_REPO_NAME" \
-  | jq '[.[] | select(.state == "done" and .extracted == false)] | length')
+UNEXTRACTED=$(autodev queue list --json --repo "$AUTODEV_REPO_NAME" --unextracted \
+  | jq 'length')
 
 if [ "$UNEXTRACTED" = "0" ]; then
   echo "skip: $AUTODEV_REPO_NAME 미추출 merged PR 없음"
