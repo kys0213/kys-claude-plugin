@@ -7,12 +7,14 @@ use crate::infra::db::Database;
 pub fn queue_advance(db: &Database, work_id: &str) -> Result<String> {
     let before = db
         .queue_get_phase(work_id)?
-        .ok_or_else(|| anyhow::anyhow!("queue item not found: {work_id}"))?;
+        .ok_or_else(|| anyhow::anyhow!("queue item not found: {work_id}"))
+        .map(|p| p.to_string())?;
 
     db.queue_advance(work_id)?;
 
     let after = db
         .queue_get_phase(work_id)?
+        .map(|p| p.to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
     Ok(format!("advanced: {work_id} ({before} → {after})"))

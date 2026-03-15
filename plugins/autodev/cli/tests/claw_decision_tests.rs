@@ -20,7 +20,7 @@ fn make_decision(repo_id: &str, decision_type: &str, reasoning: &str) -> NewClaw
     NewClawDecision {
         repo_id: repo_id.to_string(),
         spec_id: None,
-        decision_type: decision_type.to_string(),
+        decision_type: decision_type.parse().expect("valid decision type"),
         target_work_id: None,
         reasoning: reasoning.to_string(),
         context_json: None,
@@ -57,7 +57,7 @@ fn decision_show_returns_created_decision() {
     let decision = NewClawDecision {
         repo_id: repo_id.clone(),
         spec_id: Some("spec-123".to_string()),
-        decision_type: "advance".to_string(),
+        decision_type: DecisionType::Advance,
         target_work_id: Some("issue:42".to_string()),
         reasoning: "Ready to implement".to_string(),
         context_json: Some(r#"{"confidence": 0.95}"#.to_string()),
@@ -68,7 +68,7 @@ fn decision_show_returns_created_decision() {
     assert_eq!(loaded.id, id);
     assert_eq!(loaded.repo_id, repo_id);
     assert_eq!(loaded.spec_id.as_deref(), Some("spec-123"));
-    assert_eq!(loaded.decision_type, "advance");
+    assert_eq!(loaded.decision_type, DecisionType::Advance);
     assert_eq!(loaded.target_work_id.as_deref(), Some("issue:42"));
     assert_eq!(loaded.reasoning, "Ready to implement");
     assert_eq!(

@@ -265,12 +265,91 @@ pub struct UsageByIssue {
 
 // ─── Queue models ───
 
+/// Queue item phase lifecycle
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum QueuePhase {
+    Pending,
+    Ready,
+    Running,
+    Done,
+    Skipped,
+}
+
+impl QueuePhase {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            QueuePhase::Pending => "pending",
+            QueuePhase::Ready => "ready",
+            QueuePhase::Running => "running",
+            QueuePhase::Done => "done",
+            QueuePhase::Skipped => "skipped",
+        }
+    }
+}
+
+impl std::str::FromStr for QueuePhase {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(QueuePhase::Pending),
+            "ready" => Ok(QueuePhase::Ready),
+            "running" => Ok(QueuePhase::Running),
+            "done" => Ok(QueuePhase::Done),
+            "skipped" => Ok(QueuePhase::Skipped),
+            _ => Err(format!("invalid queue phase: {s}")),
+        }
+    }
+}
+
+impl fmt::Display for QueuePhase {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Queue item type
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum QueueType {
+    Issue,
+    Pr,
+}
+
+impl QueueType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            QueueType::Issue => "issue",
+            QueueType::Pr => "pr",
+        }
+    }
+}
+
+impl std::str::FromStr for QueueType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "issue" => Ok(QueueType::Issue),
+            "pr" => Ok(QueueType::Pr),
+            _ => Err(format!("invalid queue type: {s}")),
+        }
+    }
+}
+
+impl fmt::Display for QueueType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueItem {
     pub work_id: String,
     pub repo_id: String,
-    pub queue_type: String,
-    pub phase: String,
+    pub queue_type: QueueType,
+    pub phase: QueuePhase,
     pub title: Option<String>,
     pub skip_reason: Option<String>,
     pub created_at: String,
@@ -514,12 +593,53 @@ pub struct NewCronJob {
 
 // ─── Claw Decision models ───
 
+/// Claw decision type
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DecisionType {
+    Advance,
+    Skip,
+    Hitl,
+    Replan,
+}
+
+impl DecisionType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DecisionType::Advance => "advance",
+            DecisionType::Skip => "skip",
+            DecisionType::Hitl => "hitl",
+            DecisionType::Replan => "replan",
+        }
+    }
+}
+
+impl std::str::FromStr for DecisionType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "advance" => Ok(DecisionType::Advance),
+            "skip" => Ok(DecisionType::Skip),
+            "hitl" => Ok(DecisionType::Hitl),
+            "replan" => Ok(DecisionType::Replan),
+            _ => Err(format!("invalid decision type: {s}")),
+        }
+    }
+}
+
+impl fmt::Display for DecisionType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClawDecision {
     pub id: String,
     pub repo_id: String,
     pub spec_id: Option<String>,
-    pub decision_type: String,
+    pub decision_type: DecisionType,
     pub target_work_id: Option<String>,
     pub reasoning: String,
     pub context_json: Option<String>,
@@ -529,7 +649,7 @@ pub struct ClawDecision {
 pub struct NewClawDecision {
     pub repo_id: String,
     pub spec_id: Option<String>,
-    pub decision_type: String,
+    pub decision_type: DecisionType,
     pub target_work_id: Option<String>,
     pub reasoning: String,
     pub context_json: Option<String>,

@@ -675,11 +675,20 @@ impl HitlRepository for Database {
 }
 
 impl QueueRepository for Database {
-    fn queue_get_phase(&self, work_id: &str) -> Result<Option<String>> {
+    fn queue_get_phase(&self, work_id: &str) -> Result<Option<QueuePhase>> {
         let result = self.conn().query_row(
             "SELECT phase FROM queue_items WHERE work_id = ?1",
             rusqlite::params![work_id],
-            |row| row.get(0),
+            |row| {
+                let phase_str: String = row.get(0)?;
+                phase_str.parse().map_err(|e: String| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Text,
+                        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+                    )
+                })
+            },
         );
         optional_query_row(result)
     }
@@ -688,17 +697,17 @@ impl QueueRepository for Database {
         let now = Utc::now().to_rfc3339();
         // Atomic CAS-style transitions: UPDATE with WHERE on expected phase.
         // Try each valid transition; exactly one should match.
-        let transitions: &[(&str, &str)] = &[
-            ("pending", "ready"),
-            ("ready", "running"),
-            ("running", "done"),
+        let transitions: &[(QueuePhase, QueuePhase)] = &[
+            (QueuePhase::Pending, QueuePhase::Ready),
+            (QueuePhase::Ready, QueuePhase::Running),
+            (QueuePhase::Running, QueuePhase::Done),
         ];
 
         let conn = self.conn();
-        for &(from, to) in transitions {
+        for (from, to) in transitions {
             let affected = conn.execute(
                 "UPDATE queue_items SET phase = ?1, updated_at = ?2 WHERE work_id = ?3 AND phase = ?4",
-                rusqlite::params![to, now, work_id, from],
+                rusqlite::params![to.as_str(), now, work_id, from.as_str()],
             )?;
             if affected > 0 {
                 return Ok(());
@@ -707,9 +716,9 @@ impl QueueRepository for Database {
 
         // None of the transitions matched — determine why.
         let current = self.queue_get_phase(work_id)?;
-        match current.as_deref() {
+        match current {
             None => anyhow::bail!("queue item not found: {work_id}"),
-            Some("done") | Some("skipped") => {
+            Some(QueuePhase::Done) | Some(QueuePhase::Skipped) => {
                 anyhow::bail!("cannot advance terminal state: {}", current.unwrap())
             }
             Some(other) => anyhow::bail!("unknown phase: {other}"),
@@ -727,7 +736,7 @@ impl QueueRepository for Database {
 
         if affected == 0 {
             let current = self.queue_get_phase(work_id)?;
-            match current.as_deref() {
+            match current {
                 None => anyhow::bail!("queue item not found: {work_id}"),
                 Some(phase) => {
                     anyhow::bail!("cannot skip terminal state: {phase}")
@@ -782,7 +791,7 @@ impl ClawDecisionRepository for Database {
                 id,
                 decision.repo_id,
                 decision.spec_id,
-                decision.decision_type,
+                decision.decision_type.as_str(),
                 decision.target_work_id,
                 decision.reasoning,
                 decision.context_json,
@@ -1169,11 +1178,18 @@ fn map_hitl_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HitlEvent> {
 }
 
 fn map_decision_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClawDecision> {
+    let decision_type_str: String = row.get(3)?;
     Ok(ClawDecision {
         id: row.get(0)?,
         repo_id: row.get(1)?,
         spec_id: row.get(2)?,
-        decision_type: row.get(3)?,
+        decision_type: decision_type_str.parse().map_err(|e: String| {
+            rusqlite::Error::FromSqlConversionFailure(
+                3,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+            )
+        })?,
         target_work_id: row.get(4)?,
         reasoning: row.get(5)?,
         context_json: row.get(6)?,
@@ -1204,11 +1220,25 @@ fn map_spec_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Spec> {
 }
 
 fn map_queue_item_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueItem> {
+    let queue_type_str: String = row.get(2)?;
+    let phase_str: String = row.get(3)?;
     Ok(QueueItem {
         work_id: row.get(0)?,
         repo_id: row.get(1)?,
-        queue_type: row.get(2)?,
-        phase: row.get(3)?,
+        queue_type: queue_type_str.parse().map_err(|e: String| {
+            rusqlite::Error::FromSqlConversionFailure(
+                2,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+            )
+        })?,
+        phase: phase_str.parse().map_err(|e: String| {
+            rusqlite::Error::FromSqlConversionFailure(
+                3,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+            )
+        })?,
         title: row.get(4)?,
         skip_reason: row.get(5)?,
         created_at: row.get(6)?,

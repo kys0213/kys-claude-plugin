@@ -21,7 +21,7 @@ fn add_decision(db: &Database, repo_id: &str, dtype: &str, reasoning: &str) -> S
     db.decision_add(&NewClawDecision {
         repo_id: repo_id.to_string(),
         spec_id: None,
-        decision_type: dtype.to_string(),
+        decision_type: dtype.parse().expect("valid decision type"),
         target_work_id: None,
         reasoning: reasoning.to_string(),
         context_json: None,
@@ -106,7 +106,7 @@ fn cli_show_displays_decision_details() {
         .decision_add(&NewClawDecision {
             repo_id: repo_id.clone(),
             spec_id: Some("spec-42".to_string()),
-            decision_type: "hitl".to_string(),
+            decision_type: DecisionType::Hitl,
             target_work_id: Some("issue:7".to_string()),
             reasoning: "Need human review".to_string(),
             context_json: Some(r#"{"key": "val"}"#.to_string()),

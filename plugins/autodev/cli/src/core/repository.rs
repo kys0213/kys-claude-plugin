@@ -61,7 +61,7 @@ pub trait HitlRepository {
 
 pub trait QueueRepository {
     /// 큐 아이템의 현재 phase를 조회한다
-    fn queue_get_phase(&self, work_id: &str) -> Result<Option<String>>;
+    fn queue_get_phase(&self, work_id: &str) -> Result<Option<QueuePhase>>;
     /// 큐 아이템을 다음 phase로 전이한다 (pending → ready → running → done)
     fn queue_advance(&self, work_id: &str) -> Result<()>;
     /// 큐 아이템을 skip 처리한다
