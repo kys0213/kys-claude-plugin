@@ -169,10 +169,26 @@ autodev usage [--repo <name>] [--since <date>]
 ### Claw 워크스페이스
 
 ```bash
-autodev agent                     # Claw 실행 (claw-workspace Claude 세션)
 autodev claw init                 # 워크스페이스 초기화
 autodev claw rules --json         # 적용 중인 규칙 목록
 ```
+
+### Claw 에이전트
+
+```bash
+autodev agent                              # 대화형 Claw 세션
+autodev agent -p "<prompt>"                # headless (global 컨텍스트)
+autodev agent --repo <name> -p "<prompt>"  # headless (repo 컨텍스트)
+```
+
+`autodev agent`는 Claw 실행의 단일 진입점이다. 내부적으로 다음을 보장한다:
+
+- **`--cwd` 자동 결정**: Claw 워크스페이스 경로를 자동 지정
+- **환경변수 자동 주입**: `--repo` 지정 시 해당 레포의 `AUTODEV_*` 변수 설정
+- **실행 로그 기록**: 실행 결과를 DB에 자동 저장
+
+cron 스크립트에서 `claude -p --cwd` 를 직접 호출하지 않고,
+`autodev agent --repo -p` 를 호출하여 실행 인프라를 캡슐화한다.
 
 ### 대시보드
 
