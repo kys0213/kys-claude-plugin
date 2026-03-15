@@ -12,7 +12,17 @@
     "./commands/auto-setup.md",
     "./commands/auto-config.md",
     "./commands/auto-dashboard.md",
-    "./commands/update.md"
+    "./commands/update.md",
+    "./commands/add-spec.md",
+    "./commands/update-spec.md",
+    "./commands/status.md",
+    "./commands/board.md",
+    "./commands/hitl.md",
+    "./commands/spec.md",
+    "./commands/decisions.md",
+    "./commands/repo.md",
+    "./commands/claw.md",
+    "./commands/cron.md"
   ],
   "description": "이벤트 기반 자율 개발 오케스트레이터 - Issue 분석, PR 리뷰, 자동 머지",
   "name": "autodev",
