@@ -1092,9 +1092,33 @@ impl CronRepository for Database {
                         due_jobs.push(job);
                     }
                 }
-                CronSchedule::Expression { .. } => {
-                    // For now, return all active expression jobs
-                    due_jobs.push(job);
+                CronSchedule::Expression { ref cron } => {
+                    use cron::Schedule;
+                    use std::str::FromStr;
+
+                    let Ok(schedule) = Schedule::from_str(cron) else {
+                        // Skip jobs with invalid cron expressions
+                        continue;
+                    };
+
+                    let is_due = if let Some(ref last) = job.last_run_at {
+                        if let Ok(last_time) = chrono::DateTime::parse_from_rfc3339(last) {
+                            // Check if there's a scheduled time between last_run and now
+                            schedule
+                                .after(&last_time.with_timezone(&chrono::Utc))
+                                .next()
+                                .map(|next| next <= now)
+                                .unwrap_or(false)
+                        } else {
+                            true // Can't parse last_run → treat as due
+                        }
+                    } else {
+                        true // Never run → due
+                    };
+
+                    if is_due {
+                        due_jobs.push(job);
+                    }
                 }
             }
         }
