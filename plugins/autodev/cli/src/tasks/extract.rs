@@ -18,7 +18,7 @@ use uuid::Uuid;
 use super::AGENT_SYSTEM_PROMPT;
 use crate::core::config::Env;
 use crate::core::labels;
-use crate::core::models::NewConsumerLog;
+use crate::core::models::{NewConsumerLog, QueueType};
 use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
@@ -204,7 +204,7 @@ impl Task for ExtractTask {
 
         let log = NewConsumerLog {
             repo_id: self.item.repo_id.clone(),
-            queue_type: "knowledge".to_string(),
+            queue_type: QueueType::Knowledge.to_string(),
             queue_item_id: self.item.work_id.clone(),
             worker_id: self.worker_id.clone(),
             command: format!("[autodev] knowledge: per-task {task_type} #{number}"),

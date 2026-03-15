@@ -14,7 +14,7 @@ use uuid::Uuid;
 use super::AGENT_SYSTEM_PROMPT;
 use crate::core::config::ConfigLoader;
 use crate::core::labels;
-use crate::core::models::NewConsumerLog;
+use crate::core::models::{NewConsumerLog, QueueType};
 use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
@@ -406,7 +406,7 @@ impl Task for AnalyzeTask {
 
         let log = NewConsumerLog {
             repo_id: self.item.repo_id.clone(),
-            queue_type: "issue".to_string(),
+            queue_type: QueueType::Issue.to_string(),
             queue_item_id: self.item.work_id.clone(),
             worker_id: self.worker_id.clone(),
             command: format!(

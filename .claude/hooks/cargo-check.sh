@@ -4,6 +4,15 @@
 # exit 0 = 성공 (피드백 없음)
 # exit 2 = 실패 (stderr가 Claude에게 피드백됨)
 
+# Ensure rustup/cargo is in PATH
+if ! command -v cargo &>/dev/null; then
+  if [ -f "$HOME/.cargo/env" ]; then
+    . "$HOME/.cargo/env"
+  elif RUSTUP_CARGO=$(rustup which cargo 2>/dev/null); then
+    export PATH="$(dirname "$RUSTUP_CARGO"):$PATH"
+  fi
+fi
+
 INPUT=$(cat)
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
 

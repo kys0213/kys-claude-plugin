@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::Deserialize;
 
 use crate::core::labels;
-use crate::core::models::{RepoIssue, RepoPull};
+use crate::core::models::{HasLabels, RepoIssue, RepoPull};
 use crate::core::repository::ScanCursorRepository;
 use crate::core::state_queue::StateQueue;
 use crate::core::task_queues::{issue_phase, make_work_id, pr_phase, IssueItem, PrItem};

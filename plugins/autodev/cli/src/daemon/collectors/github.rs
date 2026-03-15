@@ -11,6 +11,7 @@ use async_trait::async_trait;
 
 use crate::core::collector::Collector;
 use crate::core::config::{self, ConfigLoader, Env};
+use crate::core::models::QueueType;
 use crate::core::repository::{RepoRepository, ScanCursorRepository};
 use crate::core::task::{QueueOp, Task, TaskResult};
 use crate::core::task_queues::{issue_phase, pr_phase};
@@ -359,7 +360,7 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> Collector for GitHubTaskS
             for (phase, issue) in repo.issue_queue.iter_all() {
                 items.push(crate::daemon::status::StatusItem {
                     work_id: issue.work_id.clone(),
-                    queue_type: "issue".to_string(),
+                    queue_type: QueueType::Issue,
                     repo_name: issue.repo_name.clone(),
                     number: issue.github_number,
                     title: issue.title.clone(),
@@ -369,7 +370,7 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> Collector for GitHubTaskS
             for (phase, pr) in repo.pr_queue.iter_all() {
                 items.push(crate::daemon::status::StatusItem {
                     work_id: pr.work_id.clone(),
-                    queue_type: "pr".to_string(),
+                    queue_type: QueueType::Pr,
                     repo_name: pr.repo_name.clone(),
                     number: pr.github_number,
                     title: pr.title.clone(),

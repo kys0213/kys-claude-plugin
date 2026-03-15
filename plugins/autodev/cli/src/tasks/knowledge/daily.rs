@@ -557,6 +557,8 @@ mod tests {
     use std::io::Write;
     use tempfile::TempDir;
 
+    use crate::core::models::QueueType;
+
     #[test]
     fn parse_daemon_log_counts_done_and_failed() {
         let tmp = TempDir::new().unwrap();
@@ -830,7 +832,7 @@ mod tests {
 
         db.log_insert(&crate::core::models::NewConsumerLog {
             repo_id: repo_id.clone(),
-            queue_type: "knowledge".to_string(),
+            queue_type: QueueType::Knowledge.to_string(),
             queue_item_id: "w1".to_string(),
             worker_id: "u1".to_string(),
             command: "[autodev] knowledge: pr #1".to_string(),
@@ -845,7 +847,7 @@ mod tests {
 
         db.log_insert(&crate::core::models::NewConsumerLog {
             repo_id,
-            queue_type: "knowledge".to_string(),
+            queue_type: QueueType::Knowledge.to_string(),
             queue_item_id: "w2".to_string(),
             worker_id: "u2".to_string(),
             command: "[autodev] knowledge: pr #2".to_string(),
@@ -880,7 +882,7 @@ mod tests {
 
         db.log_insert(&crate::core::models::NewConsumerLog {
             repo_id,
-            queue_type: "pr".to_string(),
+            queue_type: QueueType::Pr.to_string(),
             queue_item_id: "w1".to_string(),
             worker_id: "u1".to_string(),
             command: "[autodev] review: PR #1".to_string(),

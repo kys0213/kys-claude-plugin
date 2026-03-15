@@ -2,6 +2,8 @@
 //!
 //! Collector를 poll하여 Task를 수집하고, Daemon에게 분배한다.
 
+use std::collections::VecDeque;
+
 use async_trait::async_trait;
 
 use super::task_manager::TaskManager;
@@ -11,14 +13,14 @@ use crate::core::task::{Task, TaskResult};
 /// Collector에서 Task를 수집하고 분배하는 기본 구현체.
 pub struct DefaultTaskManager {
     sources: Vec<Box<dyn Collector>>,
-    ready_tasks: Vec<Box<dyn Task>>,
+    ready_tasks: VecDeque<Box<dyn Task>>,
 }
 
 impl DefaultTaskManager {
     pub fn new(sources: Vec<Box<dyn Collector>>) -> Self {
         Self {
             sources,
-            ready_tasks: Vec::new(),
+            ready_tasks: VecDeque::new(),
         }
     }
 }
@@ -33,15 +35,11 @@ impl TaskManager for DefaultTaskManager {
     }
 
     fn drain_ready(&mut self) -> Vec<Box<dyn Task>> {
-        std::mem::take(&mut self.ready_tasks)
+        self.ready_tasks.drain(..).collect()
     }
 
     fn pop_ready(&mut self) -> Option<Box<dyn Task>> {
-        if self.ready_tasks.is_empty() {
-            None
-        } else {
-            Some(self.ready_tasks.remove(0))
-        }
+        self.ready_tasks.pop_front()
     }
 
     fn apply(&mut self, result: &TaskResult) {

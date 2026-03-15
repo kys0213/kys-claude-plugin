@@ -113,7 +113,6 @@ pub struct Daemon {
     tracker: InFlightTracker,
     log_db: Database,
     status_path: PathBuf,
-    counters: status::StatusCounters,
     tick_interval_secs: u64,
     cron_engine: Option<CronEngine>,
 }
@@ -135,7 +134,6 @@ impl Daemon {
             tracker: InFlightTracker::new(max_concurrent_tasks),
             log_db,
             status_path,
-            counters: status::StatusCounters::default(),
             tick_interval_secs,
             cron_engine: None,
         }
@@ -205,7 +203,7 @@ impl Daemon {
                 // ── Status heartbeat ──
                 _ = status_tick.tick() => {
                     let ds = status::build_status(
-                        self.manager.active_items(), &self.counters, start_time,
+                        self.manager.active_items(), start_time,
                     );
                     status::write_status(&self.status_path, &ds);
                 }

@@ -278,7 +278,12 @@ pub fn queue_list(env: &dyn Env, repo: Option<&str>) -> Result<String> {
         for item in &items {
             output.push_str(&format!(
                 "  [{}] {}#{} — {} ({})\n",
-                item.queue_type.chars().next().unwrap_or('?').to_uppercase(),
+                item.queue_type
+                    .as_str()
+                    .chars()
+                    .next()
+                    .unwrap_or('?')
+                    .to_uppercase(),
                 item.repo_name,
                 item.number,
                 item.phase,
@@ -287,10 +292,7 @@ pub fn queue_list(env: &dyn Env, repo: Option<&str>) -> Result<String> {
         }
     }
 
-    output.push_str(&format!(
-        "\nCounters: wip={} done={} skip={} failed={}\n",
-        status.counters.wip, status.counters.done, status.counters.skip, status.counters.failed,
-    ));
+    output.push_str(&format!("\nWIP: {}\n", status.wip));
 
     Ok(output)
 }
