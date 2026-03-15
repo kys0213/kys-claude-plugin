@@ -960,6 +960,9 @@ mod tests {
         fn queue_transit(&self, _: &str, _: QueuePhase, _: QueuePhase) -> Result<bool> {
             Ok(true)
         }
+        fn queue_get_item(&self, _: &str) -> Result<Option<crate::core::models::QueueItemRow>> {
+            Ok(None)
+        }
     }
 
     // ─── Test Helpers ───

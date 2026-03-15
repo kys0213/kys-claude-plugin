@@ -344,6 +344,7 @@ pub async fn start(
         Arc::clone(&git),
         Arc::clone(&sw),
         source_db,
+        cfg.claw.clone(),
     );
 
     // ── Startup Reconcile ──

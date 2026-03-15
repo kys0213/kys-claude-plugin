@@ -180,6 +180,9 @@ enum QueueAction {
     Advance {
         /// 작업 ID
         work_id: String,
+        /// 판단 사유 (claw_decisions에 기록)
+        #[arg(long)]
+        reason: Option<String>,
     },
     /// 큐 아이템을 skip 처리
     Skip {
@@ -600,8 +603,8 @@ async fn main() -> Result<()> {
                     println!("{output}");
                 }
             }
-            QueueAction::Advance { work_id } => {
-                let output = client::queue::queue_advance(&db, &work_id)?;
+            QueueAction::Advance { work_id, reason } => {
+                let output = client::queue::queue_advance(&db, &work_id, reason.as_deref())?;
                 println!("{output}");
             }
             QueueAction::Skip { work_id, reason } => {

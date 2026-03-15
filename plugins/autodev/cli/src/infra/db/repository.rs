@@ -837,6 +837,19 @@ impl QueueRepository for Database {
         )?;
         Ok(affected > 0)
     }
+
+    fn queue_get_item(&self, work_id: &str) -> Result<Option<QueueItemRow>> {
+        let conn = self.conn();
+        let result = conn.query_row(
+            "SELECT work_id, repo_id, queue_type, phase, title, \
+             skip_reason, created_at, updated_at, \
+             task_kind, github_number, metadata_json \
+             FROM queue_items WHERE work_id = ?1",
+            rusqlite::params![work_id],
+            map_queue_item_row,
+        );
+        optional_query_row(result)
+    }
 }
 
 impl ClawDecisionRepository for Database {
