@@ -194,7 +194,7 @@ impl Daemon {
                     self.reporter.maybe_run().await;
 
                     // Execute due cron jobs
-                    if let Some(ref cron) = self.cron_engine {
+                    if let Some(ref mut cron) = self.cron_engine {
                         let results = cron.tick().await;
                         for r in &results {
                             info!("cron '{}' completed: exit_code={}", r.job_name, r.exit_code);

@@ -4,6 +4,8 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use autodev::core::config;
+use autodev::core::models::NewConsumerLog;
+use autodev::core::repository::{ConsumerLogRepository, RepoRepository};
 use autodev::{cli as client, daemon, infra, tui};
 
 use infra::claude::RealClaude;
@@ -108,7 +110,14 @@ enum Commands {
         json: bool,
     },
     /// Claw 에이전트 세션 시작 (claude --cwd ~/.autodev/claw-workspace)
-    Agent,
+    Agent {
+        /// Headless 모드 프롬프트 (지정 시 비대화형 실행)
+        #[arg(short = 'p', long)]
+        prompt: Option<String>,
+        /// 대상 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+    },
     /// Convention bootstrap — detect tech stack and generate .claude/rules/
     Convention {
         #[command(subcommand)]
@@ -159,6 +168,12 @@ enum QueueAction {
         /// JSON 출력
         #[arg(long)]
         json: bool,
+        /// phase 필터 (pending, ready, running, done, skipped)
+        #[arg(long)]
+        state: Option<String>,
+        /// 미추출 항목만 (done 상태, queue_type=pr, skip_reason 없음)
+        #[arg(long)]
+        unextracted: bool,
     },
     /// 큐 아이템을 다음 phase로 전이
     Advance {
@@ -559,9 +574,30 @@ async fn main() -> Result<()> {
             }
         },
         Commands::Queue { action } => match action {
-            QueueAction::List { repo, json } => {
+            QueueAction::List {
+                repo,
+                json,
+                state,
+                unextracted,
+            } => {
                 if json {
-                    let output = client::queue::queue_list_db(&db, repo.as_deref(), true)?;
+                    let output = client::queue::queue_list_db(
+                        &db,
+                        repo.as_deref(),
+                        true,
+                        state.as_deref(),
+                        unextracted,
+                    )?;
+                    println!("{output}");
+                } else if state.is_some() || unextracted {
+                    // Filters require DB-based query
+                    let output = client::queue::queue_list_db(
+                        &db,
+                        repo.as_deref(),
+                        false,
+                        state.as_deref(),
+                        unextracted,
+                    )?;
                     println!("{output}");
                 } else {
                     let output = client::queue_list(&env, repo.as_deref())?;
@@ -744,18 +780,100 @@ async fn main() -> Result<()> {
                 print!("{output}");
             }
         }
-        Commands::Agent => {
+        Commands::Agent { prompt, repo } => {
             let ws = client::claw::claw_workspace_path(&home);
             if !ws.exists() {
                 anyhow::bail!("Claw workspace not initialized. Run 'autodev claw init' first.");
             }
-            let status = std::process::Command::new("claude")
-                .arg("--cwd")
-                .arg(&ws)
-                .status()
-                .context("failed to launch claude. Is it installed?")?;
-            if !status.success() {
-                std::process::exit(status.code().unwrap_or(1));
+
+            // Resolve repo context if --repo is provided
+            let mut extra_env: Vec<(String, String)> = Vec::new();
+            if let Some(ref repo_name) = repo {
+                let enabled = db.repo_find_enabled()?;
+                let repo_entry = enabled
+                    .iter()
+                    .find(|r| r.name == *repo_name)
+                    .ok_or_else(|| anyhow::anyhow!("repository not found: {repo_name}"))?;
+                extra_env.push(("AUTODEV_REPO_NAME".to_string(), repo_entry.name.clone()));
+                extra_env.push(("AUTODEV_REPO_ROOT".to_string(), {
+                    let ws_dir = config::workspaces_path(&env)
+                        .join(config::sanitize_repo_name(&repo_entry.name));
+                    ws_dir.to_string_lossy().to_string()
+                }));
+                extra_env.push(("AUTODEV_REPO_ID".to_string(), repo_entry.id.clone()));
+            }
+
+            if let Some(ref prompt_text) = prompt {
+                // Headless mode: run claude non-interactively with --print
+                let started_at = chrono::Utc::now();
+                let start_instant = std::time::Instant::now();
+                let output = std::process::Command::new("claude")
+                    .arg("--print")
+                    .arg("-p")
+                    .arg(prompt_text)
+                    .arg("--cwd")
+                    .arg(&ws)
+                    .envs(extra_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+                    .output()
+                    .context("failed to launch claude. Is it installed?")?;
+
+                let duration_ms = start_instant.elapsed().as_millis() as i64;
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let exit_code = output.status.code().unwrap_or(-1);
+
+                // Print output
+                if !stdout.is_empty() {
+                    print!("{stdout}");
+                }
+                if !stderr.is_empty() {
+                    eprint!("{stderr}");
+                }
+
+                // Log to DB
+                let repo_id = repo
+                    .as_ref()
+                    .and_then(|name| {
+                        db.repo_find_enabled()
+                            .ok()?
+                            .iter()
+                            .find(|r| r.name == *name)
+                            .map(|r| r.id.clone())
+                    })
+                    .unwrap_or_else(|| "global".to_string());
+                let log = NewConsumerLog {
+                    repo_id,
+                    queue_type: "agent".to_string(),
+                    queue_item_id: "headless".to_string(),
+                    worker_id: "agent-cli".to_string(),
+                    command: format!("claude --print -p \"{}\"", prompt_text),
+                    stdout: stdout.chars().take(10000).collect(),
+                    stderr: stderr.chars().take(5000).collect(),
+                    exit_code,
+                    started_at: started_at.to_rfc3339(),
+                    finished_at: chrono::Utc::now().to_rfc3339(),
+                    duration_ms,
+                };
+                if let Err(e) = db.log_insert(&log) {
+                    eprintln!("warning: failed to log agent execution: {e}");
+                }
+
+                if !output.status.success() {
+                    std::process::exit(exit_code);
+                }
+            } else {
+                // Interactive mode (existing behavior)
+                let mut cmd = std::process::Command::new("claude");
+                cmd.arg("--cwd").arg(&ws);
+                for (k, v) in &extra_env {
+                    cmd.env(k, v);
+                }
+                let status = cmd
+                    .status()
+                    .context("failed to launch claude. Is it installed?")?;
+                if !status.success() {
+                    std::process::exit(status.code().unwrap_or(1));
+                }
             }
         }
         Commands::Convention { action } => match action {

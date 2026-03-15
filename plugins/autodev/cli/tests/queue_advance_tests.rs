@@ -250,7 +250,7 @@ fn cli_queue_list_db_json_output() {
     let repo_id = add_test_repo(&db);
     insert_queue_item(&db, &repo_id, "work-cli-3", "pending");
 
-    let output = autodev::cli::queue::queue_list_db(&db, None, true).unwrap();
+    let output = autodev::cli::queue::queue_list_db(&db, None, true, None, false).unwrap();
     let parsed: Vec<autodev::core::models::QueueItem> =
         serde_json::from_str(&output).expect("valid JSON");
     assert_eq!(parsed.len(), 1);
@@ -261,6 +261,6 @@ fn cli_queue_list_db_json_output() {
 fn cli_queue_list_db_empty() {
     let db = open_memory_db();
 
-    let output = autodev::cli::queue::queue_list_db(&db, None, false).unwrap();
+    let output = autodev::cli::queue::queue_list_db(&db, None, false, None, false).unwrap();
     assert!(output.contains("no queue items"));
 }
