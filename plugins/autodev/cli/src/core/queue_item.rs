@@ -156,6 +156,22 @@ impl QueueItem {
         }
     }
 
+    /// PR review iteration (PR이 아니면 0).
+    /// unwrap_or(0) 반복을 피하기 위한 편의 메서드.
+    pub fn review_iteration_or_zero(&self) -> u32 {
+        self.review_iteration().unwrap_or(0)
+    }
+
+    /// task_kind를 Review로 전이 (ImproveTask 완료 후 re-review 경로)
+    pub fn transition_to_review(&mut self) {
+        self.task_kind = TaskKind::Review;
+    }
+
+    /// task_kind를 Improve로 전이 (ReviewTask의 request_changes 경로)
+    pub fn transition_to_improve(&mut self) {
+        self.task_kind = TaskKind::Improve;
+    }
+
     /// Set review_comment on PR metadata
     pub fn set_review_comment(&mut self, comment: Option<String>) {
         if let ItemMetadata::Pr { review_comment, .. } = &mut self.metadata {

@@ -14,7 +14,6 @@ use uuid::Uuid;
 use super::AGENT_SYSTEM_PROMPT;
 use crate::core::labels;
 use crate::core::models::{NewConsumerLog, QueuePhase, QueueType};
-use crate::core::phase::TaskKind;
 use crate::core::queue_item::QueueItem;
 use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
@@ -153,12 +152,12 @@ impl Task for ImproveTask {
                 .await;
 
             // Iteration 라벨 동기화
-            if self.item.review_iteration().unwrap_or(0) > 0 {
+            if self.item.review_iteration_or_zero() > 0 {
                 self.gh
                     .label_remove(
                         &self.item.repo_name,
                         self.item.github_number,
-                        &labels::iteration_label(self.item.review_iteration().unwrap_or(0)),
+                        &labels::iteration_label(self.item.review_iteration_or_zero()),
                         gh_host,
                     )
                     .await;
@@ -166,7 +165,7 @@ impl Task for ImproveTask {
             let mut next_item = self.item.clone();
             let new_iteration = next_item.increment_review_iteration();
             // In unified model, Improved → directly to Pending with TaskKind::Review
-            next_item.task_kind = TaskKind::Review;
+            next_item.transition_to_review();
             self.gh
                 .label_add(
                     &self.item.repo_name,
@@ -241,6 +240,7 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    use crate::core::phase::TaskKind;
     use crate::core::queue_item::testing::*;
     use crate::infra::gh::mock::MockGh;
 

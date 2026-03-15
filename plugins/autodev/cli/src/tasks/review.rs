@@ -16,7 +16,6 @@ use super::AGENT_SYSTEM_PROMPT;
 use crate::core::config::ConfigLoader;
 use crate::core::labels;
 use crate::core::models::{NewConsumerLog, QueuePhase, QueueType};
-use crate::core::phase::TaskKind;
 use crate::core::queue_item::QueueItem;
 use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
@@ -330,12 +329,12 @@ impl Task for ReviewTask {
                     )
                     .await;
                 // iteration 라벨 정리
-                if self.item.review_iteration().unwrap_or(0) > 0 {
+                if self.item.review_iteration_or_zero() > 0 {
                     self.gh
                         .label_remove(
                             &self.item.repo_name,
                             self.item.github_number,
-                            &labels::iteration_label(self.item.review_iteration().unwrap_or(0)),
+                            &labels::iteration_label(self.item.review_iteration_or_zero()),
                             gh_host,
                         )
                         .await;
@@ -393,7 +392,7 @@ impl Task for ReviewTask {
                 } else {
                     // Max iterations 확인 (re-review일 때만)
                     let max_iterations = cfg.workflows.review.max_iterations;
-                    if self.item.review_iteration().unwrap_or(0) >= max_iterations {
+                    if self.item.review_iteration_or_zero() >= max_iterations {
                         let limit_comment = format!(
                             "<!-- autodev:skip -->\n\
                              ## Autodev: Review iteration limit reached\n\n\
@@ -433,14 +432,12 @@ impl Task for ReviewTask {
                                 gh_host,
                             )
                             .await;
-                        if self.item.review_iteration().unwrap_or(0) > 0 {
+                        if self.item.review_iteration_or_zero() > 0 {
                             self.gh
                                 .label_remove(
                                     &self.item.repo_name,
                                     self.item.github_number,
-                                    &labels::iteration_label(
-                                        self.item.review_iteration().unwrap_or(0),
-                                    ),
+                                    &labels::iteration_label(self.item.review_iteration_or_zero()),
                                     gh_host,
                                 )
                                 .await;
@@ -450,7 +447,7 @@ impl Task for ReviewTask {
                         let mut next_item = self.item.clone();
                         next_item.set_review_comment(Some(review_text));
                         // In unified model, ReviewDone → Pending with TaskKind::Improve
-                        next_item.task_kind = TaskKind::Improve;
+                        next_item.transition_to_improve();
                         ops.push(QueueOp::Remove);
                         ops.push(QueueOp::Push {
                             phase: QueuePhase::Pending,
@@ -480,6 +477,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::core::config::models::WorkflowConfig;
+    use crate::core::phase::TaskKind;
     use crate::core::queue_item::testing::*;
     use crate::infra::gh::mock::MockGh;
 
