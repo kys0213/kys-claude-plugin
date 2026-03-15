@@ -15,6 +15,7 @@ pub struct WorkflowConfig {
     pub sources: SourcesConfig,
     pub daemon: DaemonConfig,
     pub workflows: Workflows,
+    pub claw: ClawConfig,
 }
 
 /// 태스크 소스 설정 — 소스 종류별 하위 키
@@ -88,6 +89,31 @@ impl Default for GitHubSourceConfig {
             knowledge_extraction: true,
             auto_approve: false,
             auto_approve_threshold: 0.8,
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════
+// claw — Claw 레이어 설정
+// ═══════════════════════════════════════════════
+
+/// Claw 레이어 설정.
+///
+/// `enabled: true`이면 daemon은 Ready→Running drain만 수행하고,
+/// Pending→Ready 전이는 Claw(CLI)가 담당한다.
+/// `enabled: false`(기본)이면 기존 Pending→Running 직행 동작을 유지한다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClawConfig {
+    pub enabled: bool,
+    pub recovery_interval_secs: u64,
+}
+
+impl Default for ClawConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            recovery_interval_secs: 120,
         }
     }
 }
@@ -274,5 +300,35 @@ workflows:
             Some("/custom-analyze")
         );
         assert_eq!(cfg.workflows.review.max_iterations, 3);
+    }
+
+    #[test]
+    fn claw_config_defaults() {
+        let cfg = ClawConfig::default();
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.recovery_interval_secs, 120);
+    }
+
+    #[test]
+    fn claw_config_from_yaml() {
+        let yaml = r#"
+claw:
+  enabled: true
+  recovery_interval_secs: 60
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(cfg.claw.enabled);
+        assert_eq!(cfg.claw.recovery_interval_secs, 60);
+    }
+
+    #[test]
+    fn claw_config_defaults_when_omitted() {
+        let yaml = r#"
+daemon:
+  log_level: "info"
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(!cfg.claw.enabled);
+        assert_eq!(cfg.claw.recovery_interval_secs, 120);
     }
 }

@@ -76,6 +76,8 @@ pub trait QueueRepository {
     fn queue_load_active(&self, repo_id: &str) -> Result<Vec<QueueItemRow>>;
     /// CAS 방식으로 phase를 전이한다 (from → to). 성공 시 true.
     fn queue_transit(&self, work_id: &str, from: QueuePhase, to: QueuePhase) -> Result<bool>;
+    /// 단일 큐 아이템을 work_id로 조회한다
+    fn queue_get_item(&self, work_id: &str) -> Result<Option<QueueItemRow>>;
 }
 
 pub trait ClawDecisionRepository {

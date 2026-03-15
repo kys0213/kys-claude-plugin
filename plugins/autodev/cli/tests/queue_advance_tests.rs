@@ -221,7 +221,7 @@ fn cli_queue_advance_changes_phase() {
     let repo_id = add_test_repo(&db);
     insert_queue_item(&db, &repo_id, "work-cli-1", "pending");
 
-    let output = autodev::cli::queue::queue_advance(&db, "work-cli-1").unwrap();
+    let output = autodev::cli::queue::queue_advance(&db, "work-cli-1", None).unwrap();
     assert!(output.contains("pending"));
     assert!(output.contains("ready"));
 
@@ -440,4 +440,148 @@ fn cli_queue_list_shows_task_kind() {
     let output = autodev::cli::queue::queue_list_db(&db, None, false, None, false).unwrap();
     assert!(output.contains("analyze"));
     assert!(output.contains("#42"));
+}
+
+// ═══════════════════════════════════════════════
+// 9. Decision recording (H2)
+// ═══════════════════════════════════════════════
+
+#[test]
+fn advance_records_decision() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-dec-1", "pending");
+
+    autodev::cli::queue::queue_advance(&db, "work-dec-1", Some("auto-approved")).unwrap();
+
+    let decisions = db.decision_list(None, 10).unwrap();
+    assert!(!decisions.is_empty());
+    let d = &decisions[0];
+    assert_eq!(
+        d.decision_type,
+        autodev::core::models::DecisionType::Advance
+    );
+    assert_eq!(d.target_work_id.as_deref(), Some("work-dec-1"));
+    assert_eq!(d.reasoning, "auto-approved");
+}
+
+#[test]
+fn skip_records_decision() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-dec-2", "pending");
+
+    autodev::cli::queue::queue_skip(&db, "work-dec-2", Some("out of scope")).unwrap();
+
+    let decisions = db.decision_list(None, 10).unwrap();
+    assert!(!decisions.is_empty());
+    let d = &decisions[0];
+    assert_eq!(d.decision_type, autodev::core::models::DecisionType::Skip);
+    assert_eq!(d.target_work_id.as_deref(), Some("work-dec-2"));
+    assert_eq!(d.reasoning, "out of scope");
+}
+
+// ═══════════════════════════════════════════════
+// 10. queue_get_item
+// ═══════════════════════════════════════════════
+
+#[test]
+fn queue_get_item_returns_existing() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    db.queue_upsert(&make_row(
+        &repo_id,
+        "issue:org/test-repo:99",
+        QueuePhase::Pending,
+    ))
+    .unwrap();
+
+    let item = db.queue_get_item("issue:org/test-repo:99").unwrap();
+    assert!(item.is_some());
+    let item = item.unwrap();
+    assert_eq!(item.work_id, "issue:org/test-repo:99");
+    assert_eq!(item.phase, QueuePhase::Pending);
+}
+
+#[test]
+fn queue_get_item_returns_none_for_nonexistent() {
+    let db = open_memory_db();
+
+    let item = db.queue_get_item("nonexistent").unwrap();
+    assert!(item.is_none());
+}
+
+// ═══════════════════════════════════════════════
+// 11. HITL auto-trigger on review overflow (H3)
+// ═══════════════════════════════════════════════
+
+#[test]
+fn advance_creates_hitl_on_review_overflow() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    // Insert a PR item with review_iteration >= max (2)
+    let pr_metadata = serde_json::json!({
+        "Pr": {
+            "head_branch": "feat/test",
+            "base_branch": "main",
+            "review_comment": null,
+            "source_issue_number": null,
+            "review_iteration": 3
+        }
+    });
+    let now = chrono::Utc::now().to_rfc3339();
+    db.conn()
+        .execute(
+            "INSERT INTO queue_items (work_id, repo_id, queue_type, phase, title, created_at, updated_at, metadata_json) \
+             VALUES (?1, ?2, 'pr', 'pending', 'PR with high iterations', ?3, ?3, ?4)",
+            rusqlite::params!["pr:org/test-repo:50", repo_id, now, pr_metadata.to_string()],
+        )
+        .unwrap();
+
+    autodev::cli::queue::queue_advance(&db, "pr:org/test-repo:50", None).unwrap();
+
+    // Should have created a HITL event
+    let hitl_events = db.hitl_list(None).unwrap();
+    assert!(
+        !hitl_events.is_empty(),
+        "HITL event should be created for review overflow"
+    );
+    let event = &hitl_events[0];
+    assert!(event.situation.contains("review iteration"));
+    assert_eq!(event.work_id.as_deref(), Some("pr:org/test-repo:50"));
+}
+
+#[test]
+fn advance_no_hitl_when_below_threshold() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    // Insert a PR item with review_iteration below max
+    let pr_metadata = serde_json::json!({
+        "Pr": {
+            "head_branch": "feat/test",
+            "base_branch": "main",
+            "review_comment": null,
+            "source_issue_number": null,
+            "review_iteration": 1
+        }
+    });
+    let now = chrono::Utc::now().to_rfc3339();
+    db.conn()
+        .execute(
+            "INSERT INTO queue_items (work_id, repo_id, queue_type, phase, title, created_at, updated_at, metadata_json) \
+             VALUES (?1, ?2, 'pr', 'pending', 'Normal PR', ?3, ?3, ?4)",
+            rusqlite::params!["pr:org/test-repo:51", repo_id, now, pr_metadata.to_string()],
+        )
+        .unwrap();
+
+    autodev::cli::queue::queue_advance(&db, "pr:org/test-repo:51", None).unwrap();
+
+    // Should NOT have created a HITL event
+    let hitl_events = db.hitl_list(None).unwrap();
+    assert!(
+        hitl_events.is_empty(),
+        "No HITL event for low iteration count"
+    );
 }

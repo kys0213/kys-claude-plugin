@@ -10,6 +10,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::core::collector::Collector;
+use crate::core::config::models::ClawConfig;
 use crate::core::config::{self, ConfigLoader, Env};
 use crate::core::models::{QueuePhase, QueueType};
 use crate::core::phase::TaskKind;
@@ -39,9 +40,16 @@ pub struct GitHubTaskSource<DB: RepoRepository + ScanCursorRepository + QueueRep
     sw: Arc<dyn SuggestWorkflow>,
     db: DB,
     repos: HashMap<String, GitRepository>,
+    /// claw.enabled feature flag: true이면 Ready→Running drain, false이면 Pending→Running
+    claw_enabled: bool,
+    /// 인메모리 recovery throttle 타임스탬프
+    last_recovery: Option<std::time::Instant>,
+    /// recovery 실행 최소 간격 (초)
+    recovery_interval_secs: u64,
 }
 
 impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubTaskSource<DB> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         workspace: Arc<dyn WorkspaceOps>,
         gh: Arc<dyn Gh>,
@@ -50,6 +58,7 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
         git: Arc<dyn Git>,
         sw: Arc<dyn SuggestWorkflow>,
         db: DB,
+        claw: ClawConfig,
     ) -> Self {
         Self {
             workspace,
@@ -60,6 +69,9 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
             sw,
             db,
             repos: HashMap::new(),
+            claw_enabled: claw.enabled,
+            last_recovery: None,
+            recovery_interval_secs: claw.recovery_interval_secs,
         }
     }
 
@@ -201,6 +213,26 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
         }
     }
 
+    /// Claw enabled일 때 DB에서 Ready로 전이된 아이템을 in-memory 큐에 반영한다.
+    ///
+    /// Claw(CLI)가 DB에서 Pending→Ready 전이 → daemon의 in-memory queue는 여전히 Pending.
+    /// DB를 읽어 Ready 상태인 아이템을 in-memory에서도 Ready로 전이한다.
+    fn sync_queue_phases(&mut self) {
+        if !self.claw_enabled {
+            return;
+        }
+        for repo in self.repos.values_mut() {
+            if let Ok(rows) = self.db.queue_load_active(repo.id()) {
+                for row in rows {
+                    if row.phase == QueuePhase::Ready {
+                        repo.queue
+                            .transit(&row.work_id, QueuePhase::Pending, QueuePhase::Ready);
+                    }
+                }
+            }
+        }
+    }
+
     /// 모든 repo의 큐에서 ready 아이템을 pop → working phase 전이 → Task 생성.
     ///
     /// per-repo `issue_concurrency` / `pr_concurrency` 제한을 적용하여,
@@ -210,18 +242,16 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
     fn drain_and_sync<F>(
         db: &DB,
         queue: &mut crate::core::state_queue::StateQueue<crate::core::queue_item::QueueItem>,
+        from_phase: QueuePhase,
         limit: usize,
         predicate: F,
     ) -> Vec<crate::core::queue_item::QueueItem>
     where
         F: Fn(&crate::core::queue_item::QueueItem) -> bool,
     {
-        let drained =
-            queue.drain_to_filtered(QueuePhase::Pending, QueuePhase::Running, limit, predicate);
+        let drained = queue.drain_to_filtered(from_phase, QueuePhase::Running, limit, predicate);
         for item in &drained {
-            if let Err(e) =
-                db.queue_transit(&item.work_id, QueuePhase::Pending, QueuePhase::Running)
-            {
+            if let Err(e) = db.queue_transit(&item.work_id, from_phase, QueuePhase::Running) {
                 tracing::warn!("queue_transit failed for {}: {e}", item.work_id);
             }
         }
@@ -230,6 +260,12 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
 
     fn drain_queue_items(&mut self) -> Vec<Box<dyn Task>> {
         let mut tasks: Vec<Box<dyn Task>> = Vec::new();
+        // claw_enabled: Ready→Running, otherwise: Pending→Running
+        let from_phase = if self.claw_enabled {
+            QueuePhase::Ready
+        } else {
+            QueuePhase::Pending
+        };
 
         for repo in self.repos.values_mut() {
             // ─── Issue concurrency: Analyze + Implement running 합산 제한 ───
@@ -240,10 +276,11 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
                 .count();
             let mut issue_slots = repo.issue_concurrency.saturating_sub(issue_running);
 
-            // Issue: Pending(Analyze) → Running
-            let drained = Self::drain_and_sync(&self.db, &mut repo.queue, issue_slots, |i| {
-                i.is(QueueType::Issue, TaskKind::Analyze)
-            });
+            // Issue: from_phase(Analyze) → Running
+            let drained =
+                Self::drain_and_sync(&self.db, &mut repo.queue, from_phase, issue_slots, |i| {
+                    i.is(QueueType::Issue, TaskKind::Analyze)
+                });
             issue_slots -= drained.len();
             for item in drained {
                 tracing::debug!("issue #{}: creating AnalyzeTask", item.github_number);
@@ -255,10 +292,12 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
                 )));
             }
 
-            // Issue: Pending(Implement) → Running
-            for item in Self::drain_and_sync(&self.db, &mut repo.queue, issue_slots, |i| {
-                i.is(QueueType::Issue, TaskKind::Implement)
-            }) {
+            // Issue: from_phase(Implement) → Running
+            for item in
+                Self::drain_and_sync(&self.db, &mut repo.queue, from_phase, issue_slots, |i| {
+                    i.is(QueueType::Issue, TaskKind::Implement)
+                })
+            {
                 tracing::debug!("issue #{}: creating ImplementTask", item.github_number);
                 tasks.push(Box::new(ImplementTask::new(
                     Arc::clone(&self.workspace),
@@ -276,10 +315,11 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
                 .count();
             let mut pr_slots = repo.pr_concurrency.saturating_sub(pr_running);
 
-            // PR: Pending(Review) → Running
-            let drained = Self::drain_and_sync(&self.db, &mut repo.queue, pr_slots, |i| {
-                i.is(QueueType::Pr, TaskKind::Review)
-            });
+            // PR: from_phase(Review) → Running
+            let drained =
+                Self::drain_and_sync(&self.db, &mut repo.queue, from_phase, pr_slots, |i| {
+                    i.is(QueueType::Pr, TaskKind::Review)
+                });
             pr_slots -= drained.len();
             for item in drained {
                 tracing::debug!("PR #{}: creating ReviewTask", item.github_number);
@@ -291,10 +331,11 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
                 )));
             }
 
-            // PR: Pending(Improve) → Running
-            let drained = Self::drain_and_sync(&self.db, &mut repo.queue, pr_slots, |i| {
-                i.is(QueueType::Pr, TaskKind::Improve)
-            });
+            // PR: from_phase(Improve) → Running
+            let drained =
+                Self::drain_and_sync(&self.db, &mut repo.queue, from_phase, pr_slots, |i| {
+                    i.is(QueueType::Pr, TaskKind::Improve)
+                });
             pr_slots -= drained.len();
             for item in drained {
                 tracing::debug!("PR #{}: creating ImproveTask", item.github_number);
@@ -305,15 +346,14 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
                 )));
             }
 
-            // PR: Pending(Extract) → fire-and-forget
+            // PR: from_phase(Extract) → fire-and-forget
             // Extract는 PR이 이미 done 상태이므로 큐에 남겨둘 필요 없음.
             // drain_to_filtered로 꺼낸 뒤 즉시 remove하여 Running에 잔류하지 않도록 한다.
-            let extract_items = repo.queue.drain_to_filtered(
-                QueuePhase::Pending,
-                QueuePhase::Running,
-                pr_slots,
-                |i| i.is(QueueType::Pr, TaskKind::Extract),
-            );
+            let extract_items =
+                repo.queue
+                    .drain_to_filtered(from_phase, QueuePhase::Running, pr_slots, |i| {
+                        i.is(QueueType::Pr, TaskKind::Extract)
+                    });
             for item in extract_items {
                 tracing::debug!(
                     "PR #{}: creating ExtractTask (knowledge)",
@@ -376,8 +416,18 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> Collect
 {
     async fn poll(&mut self) -> Vec<Box<dyn Task>> {
         self.sync_repos().await;
-        self.run_recovery().await;
+
+        // Recovery throttle: 첫 tick에서는 항상 실행, 이후 interval 경과 시에만 실행
+        let should_recover = self.last_recovery.map_or(true, |t| {
+            t.elapsed().as_secs() >= self.recovery_interval_secs
+        });
+        if should_recover {
+            self.run_recovery().await;
+            self.last_recovery = Some(std::time::Instant::now());
+        }
+
         self.run_scans().await;
+        self.sync_queue_phases();
         self.drain_queue_items()
     }
 
@@ -510,14 +560,19 @@ mod tests {
         }
     }
 
-    /// Minimal DB mock for tests — only provides repo_find_enabled.
+    /// Minimal DB mock for tests.
+    /// `active_items`를 설정하면 `queue_load_active()`에서 반환한다.
     struct MockDb {
         repos: Vec<EnabledRepo>,
+        active_items: Vec<crate::core::models::QueueItemRow>,
     }
 
     impl MockDb {
         fn empty() -> Self {
-            Self { repos: vec![] }
+            Self {
+                repos: vec![],
+                active_items: vec![],
+            }
         }
     }
 
@@ -577,10 +632,16 @@ mod tests {
             &self,
             _: &str,
         ) -> anyhow::Result<Vec<crate::core::models::QueueItemRow>> {
-            Ok(vec![])
+            Ok(self.active_items.clone())
         }
         fn queue_transit(&self, _: &str, _: QueuePhase, _: QueuePhase) -> anyhow::Result<bool> {
             Ok(true)
+        }
+        fn queue_get_item(
+            &self,
+            _: &str,
+        ) -> anyhow::Result<Option<crate::core::models::QueueItemRow>> {
+            Ok(None)
         }
     }
 
@@ -593,6 +654,7 @@ mod tests {
             Arc::new(MockGit),
             Arc::new(MockSuggestWorkflow),
             MockDb::empty(),
+            ClawConfig::default(),
         )
     }
 
@@ -1212,6 +1274,158 @@ mod tests {
                 .filter(|i| i.is(QueueType::Pr, TaskKind::Review))
                 .count(),
             1
+        );
+    }
+
+    // ═══════════════════════════════════════════════
+    // claw_enabled: drain phase gating tests
+    // ═══════════════════════════════════════════════
+
+    fn make_claw_source(gh: Arc<MockGh>) -> GitHubTaskSource<MockDb> {
+        GitHubTaskSource::new(
+            Arc::new(MockWorkspace),
+            gh,
+            Arc::new(MockConfigLoader),
+            Arc::new(MockEnv),
+            Arc::new(MockGit),
+            Arc::new(MockSuggestWorkflow),
+            MockDb::empty(),
+            ClawConfig {
+                enabled: true,
+                ..ClawConfig::default()
+            },
+        )
+    }
+
+    #[test]
+    fn drain_from_ready_when_claw_enabled() {
+        let gh = Arc::new(MockGh::new());
+        let mut source = make_claw_source(gh);
+
+        let mut repo = GitRepository::new(
+            "r1".to_string(),
+            "org/repo".to_string(),
+            "https://github.com/org/repo".to_string(),
+            None,
+        );
+        // Item in Ready phase — should be drained when claw_enabled
+        repo.queue.push(
+            QueuePhase::Ready,
+            make_test_queue_item(QueueType::Issue, TaskKind::Analyze, "org/repo", 1),
+        );
+        source.repos.insert("org/repo".to_string(), repo);
+
+        let tasks = source.drain_queue_items();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].work_id(), "issue:org/repo:1");
+    }
+
+    #[test]
+    fn pending_items_not_drained_when_claw_enabled() {
+        let gh = Arc::new(MockGh::new());
+        let mut source = make_claw_source(gh);
+
+        let mut repo = GitRepository::new(
+            "r1".to_string(),
+            "org/repo".to_string(),
+            "https://github.com/org/repo".to_string(),
+            None,
+        );
+        // Item in Pending phase — should NOT be drained when claw_enabled
+        repo.queue.push(
+            QueuePhase::Pending,
+            make_test_queue_item(QueueType::Issue, TaskKind::Analyze, "org/repo", 1),
+        );
+        source.repos.insert("org/repo".to_string(), repo);
+
+        let tasks = source.drain_queue_items();
+        assert!(tasks.is_empty());
+        // Item should remain in Pending
+        assert_eq!(source.repos["org/repo"].queue.len(QueuePhase::Pending), 1);
+    }
+
+    #[test]
+    fn drain_from_pending_when_claw_disabled() {
+        let gh = Arc::new(MockGh::new());
+        let mut source = make_source(gh); // claw_enabled = false
+
+        let mut repo = GitRepository::new(
+            "r1".to_string(),
+            "org/repo".to_string(),
+            "https://github.com/org/repo".to_string(),
+            None,
+        );
+        repo.queue.push(
+            QueuePhase::Pending,
+            make_test_queue_item(QueueType::Issue, TaskKind::Analyze, "org/repo", 1),
+        );
+        source.repos.insert("org/repo".to_string(), repo);
+
+        let tasks = source.drain_queue_items();
+        assert_eq!(tasks.len(), 1);
+    }
+
+    #[test]
+    fn sync_queue_phases_promotes_ready() {
+        let now = chrono::Utc::now().to_rfc3339();
+        let active_row = crate::core::models::QueueItemRow {
+            work_id: "issue:org/repo:1".to_string(),
+            repo_id: "r1".to_string(),
+            queue_type: QueueType::Issue,
+            phase: QueuePhase::Ready,
+            title: Some("Test".to_string()),
+            skip_reason: None,
+            created_at: now.clone(),
+            updated_at: now,
+            task_kind: TaskKind::Analyze,
+            github_number: 1,
+            metadata_json: None,
+        };
+
+        let db = MockDb {
+            repos: vec![],
+            active_items: vec![active_row],
+        };
+
+        let mut source = GitHubTaskSource::new(
+            Arc::new(MockWorkspace),
+            Arc::new(MockGh::new()),
+            Arc::new(MockConfigLoader),
+            Arc::new(MockEnv),
+            Arc::new(MockGit),
+            Arc::new(MockSuggestWorkflow),
+            db,
+            ClawConfig {
+                enabled: true,
+                ..ClawConfig::default()
+            },
+        );
+
+        let mut repo = GitRepository::new(
+            "r1".to_string(),
+            "org/repo".to_string(),
+            "https://github.com/org/repo".to_string(),
+            None,
+        );
+        // Item starts in Pending in memory
+        repo.queue.push(
+            QueuePhase::Pending,
+            make_test_queue_item(QueueType::Issue, TaskKind::Analyze, "org/repo", 1),
+        );
+        source.repos.insert("org/repo".to_string(), repo);
+
+        // Before sync: item is Pending
+        assert_eq!(
+            source.repos["org/repo"].queue.phase_of("issue:org/repo:1"),
+            Some(QueuePhase::Pending)
+        );
+
+        source.sync_queue_phases();
+
+        // After sync: item should be Ready (promoted from DB state)
+        assert_eq!(
+            source.repos["org/repo"].queue.phase_of("issue:org/repo:1"),
+            Some(QueuePhase::Ready)
         );
     }
 }
