@@ -287,7 +287,7 @@ pub async fn post_daily_report(
 /// 4. PR 생성 + autodev:skip 라벨 부착
 pub async fn create_knowledge_prs(
     gh: &dyn Gh,
-    workspace: &crate::tasks::helpers::workspace::Workspace<'_>,
+    workspace: &crate::service::tasks::helpers::workspace::Workspace<'_>,
     repo_name: &str,
     report: &DailyReport,
     gh_host: Option<&str>,

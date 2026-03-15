@@ -747,7 +747,7 @@ impl QueueRepository for Database {
         Ok(())
     }
 
-    fn queue_list_items(&self, repo: Option<&str>) -> Result<Vec<QueueItem>> {
+    fn queue_list_items(&self, repo: Option<&str>) -> Result<Vec<QueueItemRow>> {
         let conn = self.conn();
 
         let (query, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
@@ -1219,10 +1219,10 @@ fn map_spec_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Spec> {
     })
 }
 
-fn map_queue_item_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueItem> {
+fn map_queue_item_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueItemRow> {
     let queue_type_str: String = row.get(2)?;
     let phase_str: String = row.get(3)?;
-    Ok(QueueItem {
+    Ok(QueueItemRow {
         work_id: row.get(0)?,
         repo_id: row.get(1)?,
         queue_type: queue_type_str.parse().map_err(|e: String| {

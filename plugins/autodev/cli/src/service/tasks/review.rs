@@ -15,15 +15,15 @@ use uuid::Uuid;
 use super::AGENT_SYSTEM_PROMPT;
 use crate::core::config::ConfigLoader;
 use crate::core::labels;
-use crate::core::models::{NewConsumerLog, QueueType};
+use crate::core::models::{NewConsumerLog, QueuePhase, QueueType};
+use crate::core::queue_item::QueueItem;
 use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
-use crate::core::task_queues::{pr_phase, PrItem};
 use crate::infra::claude::output::{self, ReviewVerdict};
 use crate::infra::claude::SessionOptions;
 use crate::infra::gh::Gh;
-use crate::tasks::helpers::workspace::WorkspaceOps;
+use crate::service::tasks::helpers::workspace::WorkspaceOps;
 
 /// PR 리뷰 결과를 GitHub 댓글로 포맷
 fn format_review_comment(review: &str, pr_number: i64, verdict: Option<&ReviewVerdict>) -> String {
@@ -46,7 +46,7 @@ pub struct ReviewTask {
     workspace: Arc<dyn WorkspaceOps>,
     gh: Arc<dyn Gh>,
     config: Arc<dyn ConfigLoader>,
-    item: PrItem,
+    item: QueueItem,
     worker_id: String,
     task_id: String,
     wt_path: Option<PathBuf>,
@@ -58,7 +58,7 @@ impl ReviewTask {
         workspace: Arc<dyn WorkspaceOps>,
         gh: Arc<dyn Gh>,
         config: Arc<dyn ConfigLoader>,
-        item: PrItem,
+        item: QueueItem,
     ) -> Self {
         let task_id = format!("pr-{}", item.github_number);
         Self {
@@ -107,7 +107,7 @@ impl Task for ReviewTask {
         if let Some(ref s) = state {
             if s != "open" {
                 // source issue done 전이 (add-first)
-                if let Some(issue_num) = self.item.source_issue_number {
+                if let Some(issue_num) = self.item.source_issue_number() {
                     self.gh
                         .label_add(&self.item.repo_name, issue_num, labels::DONE, gh_host)
                         .await;
@@ -154,11 +154,7 @@ impl Task for ReviewTask {
                 ))
             })?;
 
-        let branch = if self.item.head_branch.is_empty() {
-            None
-        } else {
-            Some(self.item.head_branch.as_str())
-        };
+        let branch = self.item.head_branch();
         let wt_path = self
             .workspace
             .create_worktree(&self.item.repo_name, &self.task_id, branch)
@@ -242,7 +238,8 @@ impl Task for ReviewTask {
                  ⚠️ Review agent failed (exit_code={}).\n\n\
                  **Branch**: `{}`\n\
                  Check the agent logs for details.",
-                response.exit_code, self.item.head_branch
+                response.exit_code,
+                self.item.head_branch().unwrap_or("")
             );
             self.gh
                 .issue_comment(
@@ -300,7 +297,7 @@ impl Task for ReviewTask {
                     .await;
 
                 // Source issue → done (add-first)
-                if let Some(issue_num) = self.item.source_issue_number {
+                if let Some(issue_num) = self.item.source_issue_number() {
                     self.gh
                         .label_add(&self.item.repo_name, issue_num, labels::DONE, gh_host)
                         .await;
@@ -332,12 +329,12 @@ impl Task for ReviewTask {
                     )
                     .await;
                 // iteration 라벨 정리
-                if self.item.review_iteration > 0 {
+                if self.item.review_iteration_or_zero() > 0 {
                     self.gh
                         .label_remove(
                             &self.item.repo_name,
                             self.item.github_number,
-                            &labels::iteration_label(self.item.review_iteration),
+                            &labels::iteration_label(self.item.review_iteration_or_zero()),
                             gh_host,
                         )
                         .await;
@@ -390,12 +387,12 @@ impl Task for ReviewTask {
                     .await;
 
                 // 외부 PR (source_issue 없음): 리뷰 댓글만, 자동수정 안함
-                if self.item.source_issue_number.is_none() {
+                if self.item.source_issue_number().is_none() {
                     ops.push(QueueOp::Remove);
                 } else {
                     // Max iterations 확인 (re-review일 때만)
                     let max_iterations = cfg.workflows.review.max_iterations;
-                    if self.item.review_iteration >= max_iterations {
+                    if self.item.review_iteration_or_zero() >= max_iterations {
                         let limit_comment = format!(
                             "<!-- autodev:skip -->\n\
                              ## Autodev: Review iteration limit reached\n\n\
@@ -435,12 +432,12 @@ impl Task for ReviewTask {
                                 gh_host,
                             )
                             .await;
-                        if self.item.review_iteration > 0 {
+                        if self.item.review_iteration_or_zero() > 0 {
                             self.gh
                                 .label_remove(
                                     &self.item.repo_name,
                                     self.item.github_number,
-                                    &labels::iteration_label(self.item.review_iteration),
+                                    &labels::iteration_label(self.item.review_iteration_or_zero()),
                                     gh_host,
                                 )
                                 .await;
@@ -448,10 +445,12 @@ impl Task for ReviewTask {
                         ops.push(QueueOp::Remove);
                     } else {
                         let mut next_item = self.item.clone();
-                        next_item.review_comment = Some(review_text);
+                        next_item.set_review_comment(Some(review_text));
+                        // In unified model, ReviewDone → Pending with TaskKind::Improve
+                        next_item.transition_to_improve();
                         ops.push(QueueOp::Remove);
-                        ops.push(QueueOp::PushPr {
-                            phase: pr_phase::REVIEW_DONE,
+                        ops.push(QueueOp::Push {
+                            phase: QueuePhase::Pending,
                             item: Box::new(next_item),
                         });
                     }
@@ -478,7 +477,8 @@ mod tests {
     use std::time::Duration;
 
     use crate::core::config::models::WorkflowConfig;
-    use crate::core::task_queues::make_work_id;
+    use crate::core::phase::TaskKind;
+    use crate::core::queue_item::testing::*;
     use crate::infra::gh::mock::MockGh;
 
     struct MockWorkspace;
@@ -508,21 +508,8 @@ mod tests {
         }
     }
 
-    fn make_test_pr(source_issue: Option<i64>) -> PrItem {
-        PrItem {
-            work_id: make_work_id("pr", "org/repo", 10),
-            repo_id: "r1".to_string(),
-            repo_name: "org/repo".to_string(),
-            repo_url: "https://github.com/org/repo".to_string(),
-            github_number: 10,
-            title: "Fix bug".to_string(),
-            head_branch: "autodev/issue-42".to_string(),
-            base_branch: "main".to_string(),
-            review_comment: None,
-            source_issue_number: source_issue,
-            review_iteration: 0,
-            gh_host: None,
-        }
+    fn make_test_pr(source_issue: Option<i64>) -> QueueItem {
+        test_pr_with_source(10, TaskKind::Review, source_issue, 0)
     }
 
     fn make_task(gh: Arc<MockGh>, source_issue: Option<i64>) -> ReviewTask {
@@ -629,7 +616,7 @@ mod tests {
         let result = task.after_invoke(make_approve_response()).await;
 
         assert!(matches!(result.status, TaskStatus::Completed));
-        // Only Remove, no PushPr
+        // Only Remove, no Push
         assert!(result
             .queue_ops
             .iter()
@@ -637,7 +624,7 @@ mod tests {
         assert!(!result
             .queue_ops
             .iter()
-            .any(|op| matches!(op, QueueOp::PushPr { .. })));
+            .any(|op| matches!(op, QueueOp::Push { .. })));
         // PR marked done
         let added = gh.added_labels.lock().unwrap();
         assert!(added.iter().any(|(_, n, l)| *n == 10 && l == labels::DONE));
@@ -654,9 +641,14 @@ mod tests {
         let result = task.after_invoke(make_request_changes_response()).await;
 
         assert!(matches!(result.status, TaskStatus::Completed));
-        assert!(result.queue_ops.iter().any(
-            |op| matches!(op, QueueOp::PushPr { phase, item } if *phase == pr_phase::REVIEW_DONE && item.review_comment.is_some())
-        ));
+        // ReviewDone → Pending with TaskKind::Improve (피드백 반영 경로)
+        assert!(result
+            .queue_ops
+            .iter()
+            .any(|op| matches!(op, QueueOp::Push { phase, item }
+                if *phase == QueuePhase::Pending
+                && item.task_kind == TaskKind::Improve
+                && item.review_comment().is_some())));
 
         let reviews = gh.reviewed_prs.lock().unwrap();
         assert!(reviews
@@ -679,7 +671,7 @@ mod tests {
         assert!(!result
             .queue_ops
             .iter()
-            .any(|op| matches!(op, QueueOp::PushPr { .. })));
+            .any(|op| matches!(op, QueueOp::Push { .. })));
 
         // wip → changes-requested 전이
         let added = gh.added_labels.lock().unwrap();
@@ -695,8 +687,7 @@ mod tests {
         let gh = Arc::new(MockGh::new());
         gh.set_field("org/repo", "pulls/10", ".state", "open");
 
-        let mut pr = make_test_pr(Some(42));
-        pr.review_iteration = 3; // exceeds default max (2)
+        let pr = test_pr_with_source(10, TaskKind::Review, Some(42), 3);
         let mut task = ReviewTask::new(
             Arc::new(MockWorkspace),
             gh.clone(),
@@ -714,7 +705,7 @@ mod tests {
         assert!(!result
             .queue_ops
             .iter()
-            .any(|op| matches!(op, QueueOp::PushPr { .. })));
+            .any(|op| matches!(op, QueueOp::Push { .. })));
 
         let added = gh.added_labels.lock().unwrap();
         assert!(added.iter().any(|(_, n, l)| *n == 10 && l == labels::SKIP));
@@ -777,8 +768,7 @@ mod tests {
         let gh = Arc::new(MockGh::new());
         gh.set_field("org/repo", "pulls/10", ".state", "open");
 
-        let mut pr = make_test_pr(Some(42));
-        pr.review_iteration = 3; // exceeds default max (2)
+        let pr = test_pr_with_source(10, TaskKind::Review, Some(42), 3);
         let mut task = ReviewTask::new(
             Arc::new(MockWorkspace),
             gh.clone(),

@@ -8,11 +8,6 @@
             "type": "command",
             "command": "git-utils guard write --project-dir=${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch' --default-branch=main",
             "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "node ./plugins/develop-workflow/hooks/develop-phase-gate.cjs",
-            "timeout": 5
           }
         ]
       },
@@ -22,11 +17,6 @@
           {
             "type": "command",
             "command": "git-utils guard commit --project-dir=${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch' --default-branch=main",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "node ./plugins/develop-workflow/hooks/develop-phase-gate.cjs",
             "timeout": 5
           }
         ]

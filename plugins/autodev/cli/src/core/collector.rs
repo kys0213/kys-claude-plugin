@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 
 use crate::core::task::{Task, TaskResult};
-use crate::daemon::status::StatusItem;
+use crate::service::daemon::status::StatusItem;
 
 /// Task를 생성하는 외부 소스.
 ///

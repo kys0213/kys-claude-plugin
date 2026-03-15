@@ -2,10 +2,12 @@ use anyhow::Result;
 use serde::Deserialize;
 
 use crate::core::labels;
-use crate::core::models::{HasLabels, RepoIssue, RepoPull};
+use crate::core::models::{HasLabels, QueuePhase, QueueType, RepoIssue, RepoPull};
+use crate::core::phase::TaskKind;
+use crate::core::queue_item::{PrMetadata, QueueItem, RepoRef};
 use crate::core::repository::ScanCursorRepository;
 use crate::core::state_queue::StateQueue;
-use crate::core::task_queues::{issue_phase, make_work_id, pr_phase, IssueItem, PrItem};
+use crate::core::task_queues::make_work_id;
 use crate::infra::gh::Gh;
 
 // ─── Private serde types for scanning ───
@@ -38,7 +40,7 @@ struct ScanUser {
 /// - 식별 정보 (DB 원본)
 /// - 설정 (per-repo config)
 /// - GitHub 상태 스냅샷 (issues, pulls)
-/// - 작업 큐 (issue, pr)
+/// - 작업 큐 (unified)
 pub struct GitRepository {
     id: String,
     name: String,
@@ -49,9 +51,8 @@ pub struct GitRepository {
     issues: Vec<RepoIssue>,
     pulls: Vec<RepoPull>,
 
-    // Per-repo work queues
-    pub issue_queue: StateQueue<IssueItem>,
-    pub pr_queue: StateQueue<PrItem>,
+    // Unified work queue
+    pub queue: StateQueue<QueueItem>,
 
     // Per-repo concurrency limits (set during scan)
     pub issue_concurrency: usize,
@@ -67,8 +68,7 @@ impl GitRepository {
             gh_host,
             issues: Vec::new(),
             pulls: Vec::new(),
-            issue_queue: StateQueue::new(),
-            pr_queue: StateQueue::new(),
+            queue: StateQueue::new(),
             issue_concurrency: 1,
             pr_concurrency: 1,
         }
@@ -87,6 +87,15 @@ impl GitRepository {
     }
     pub fn gh_host(&self) -> Option<&str> {
         self.gh_host.as_deref()
+    }
+
+    pub fn repo_ref(&self) -> RepoRef {
+        RepoRef {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            url: self.url.clone(),
+            gh_host: self.gh_host.clone(),
+        }
     }
 
     // ─── GitHub State ───
@@ -114,19 +123,43 @@ impl GitRepository {
 
     // ─── Queue Access ───
 
-    /// 어떤 큐든 해당 work_id가 존재하는지 확인
+    /// 큐에 해당 work_id가 존재하는지 확인
     pub fn contains(&self, work_id: &str) -> bool {
-        self.issue_queue.contains(work_id) || self.pr_queue.contains(work_id)
+        self.queue.contains(work_id)
     }
 
     /// 전체 큐 아이템 수
     pub fn total_items(&self) -> usize {
-        self.issue_queue.total() + self.pr_queue.total()
+        self.queue.total()
+    }
+
+    // ─── Queue Helpers ───
+
+    /// Issue를 QueueItem으로 변환하여 Pending 큐에 추가한다.
+    fn enqueue_issue(
+        &mut self,
+        number: i64,
+        task_kind: TaskKind,
+        title: String,
+        body: Option<String>,
+        labels: Vec<String>,
+        author: String,
+    ) {
+        let repo = self.repo_ref();
+        let item = QueueItem::new_issue(&repo, number, task_kind, title, body, labels, author);
+        self.queue.push(QueuePhase::Pending, item);
+    }
+
+    /// PR을 QueueItem으로 변환하여 Pending 큐에 추가한다.
+    fn enqueue_pr(&mut self, number: i64, task_kind: TaskKind, title: String, meta: PrMetadata) {
+        let repo = self.repo_ref();
+        let item = QueueItem::new_pr(&repo, number, task_kind, title, meta);
+        self.queue.push(QueuePhase::Pending, item);
     }
 
     // ─── Scanning ───
 
-    /// `autodev:analyze` 라벨이 있는 이슈를 스캔하여 issue_queue(Pending)에 추가.
+    /// `autodev:analyze` 라벨이 있는 이슈를 스캔하여 queue(Pending, Analyze)에 추가.
     ///
     /// 라벨 전이: analyze 제거 → wip 추가 (트리거 소비)
     pub async fn scan_issues(
@@ -165,27 +198,13 @@ impl GitRepository {
                 }
             }
 
-            let work_id = make_work_id("issue", &self.name, issue.number);
+            let work_id = make_work_id(QueueType::Issue, &self.name, issue.number);
 
             if self.contains(&work_id) {
                 continue;
             }
 
             let label_names: Vec<String> = issue.labels.iter().map(|l| l.name.clone()).collect();
-
-            let item = IssueItem {
-                work_id,
-                repo_id: self.id.clone(),
-                repo_name: self.name.clone(),
-                repo_url: self.url.clone(),
-                github_number: issue.number,
-                title: issue.title.clone(),
-                body: issue.body.clone(),
-                labels: label_names,
-                author: issue.user.login.clone(),
-                analysis_report: None,
-                gh_host: self.gh_host.clone(),
-            };
 
             gh.label_remove(
                 &self.name,
@@ -201,7 +220,14 @@ impl GitRepository {
                 self.gh_host.as_deref(),
             )
             .await;
-            self.issue_queue.push(issue_phase::PENDING, item);
+            self.enqueue_issue(
+                issue.number,
+                TaskKind::Analyze,
+                issue.title.clone(),
+                issue.body.clone(),
+                label_names,
+                issue.user.login.clone(),
+            );
             tracing::info!("issue #{}: autodev:analyze → wip (Pending)", issue.number);
         }
 
@@ -211,7 +237,7 @@ impl GitRepository {
         Ok(())
     }
 
-    /// `autodev:approved-analysis` 라벨이 있는 이슈를 스캔하여 issue_queue(Ready)에 추가.
+    /// `autodev:approved-analysis` 라벨이 있는 이슈를 스캔하여 queue(Pending, Implement)에 추가.
     ///
     /// 라벨 전이: approved-analysis 제거, analyzed 제거 → implementing 추가
     pub async fn scan_approved_issues(&mut self, gh: &dyn Gh) -> Result<()> {
@@ -232,7 +258,7 @@ impl GitRepository {
                 continue;
             }
 
-            let work_id = make_work_id("issue", &self.name, issue.number);
+            let work_id = make_work_id(QueueType::Issue, &self.name, issue.number);
 
             if self.contains(&work_id) {
                 continue;
@@ -263,21 +289,14 @@ impl GitRepository {
 
             let label_names: Vec<String> = issue.labels.iter().map(|l| l.name.clone()).collect();
 
-            let item = IssueItem {
-                work_id,
-                repo_id: self.id.clone(),
-                repo_name: self.name.clone(),
-                repo_url: self.url.clone(),
-                github_number: issue.number,
-                title: issue.title.clone(),
-                body: issue.body.clone(),
-                labels: label_names,
-                author: issue.user.login.clone(),
-                analysis_report: None,
-                gh_host: self.gh_host.clone(),
-            };
-
-            self.issue_queue.push(issue_phase::READY, item);
+            self.enqueue_issue(
+                issue.number,
+                TaskKind::Implement,
+                issue.title.clone(),
+                issue.body.clone(),
+                label_names,
+                issue.user.login.clone(),
+            );
             tracing::info!(
                 "queued approved issue #{}: {} → Ready",
                 issue.number,
@@ -288,34 +307,34 @@ impl GitRepository {
         Ok(())
     }
 
-    /// `autodev:wip` 라벨이 있는 open PR을 스캔하여 pr_queue(Pending)에 추가.
+    /// `autodev:wip` 라벨이 있는 open PR을 스캔하여 queue(Pending, Review)에 추가.
     ///
     /// Label-Positive 모델: `autodev:wip` 라벨이 있는 PR만 scan 대상.
     /// 외부 PR은 사람이 수동으로 `autodev:wip`를 추가해야 리뷰 대상이 됨.
     pub async fn scan_pulls(&mut self, gh: &dyn Gh, ignore_authors: &[String]) -> Result<()> {
         // Scan wip-labeled PRs → Pending (review)
-        self.scan_pulls_by_label(gh, ignore_authors, labels::WIP, pr_phase::PENDING)
+        self.scan_pulls_by_label(gh, ignore_authors, labels::WIP, TaskKind::Review)
             .await?;
 
-        // Scan changes-requested PRs → ReviewDone (improve)
+        // Scan changes-requested PRs → Pending (improve)
         self.scan_pulls_by_label(
             gh,
             ignore_authors,
             labels::CHANGES_REQUESTED,
-            pr_phase::REVIEW_DONE,
+            TaskKind::Improve,
         )
         .await?;
 
         Ok(())
     }
 
-    /// 특정 라벨의 PR을 스캔하여 지정된 phase의 큐에 추가.
+    /// 특정 라벨의 PR을 스캔하여 지정된 TaskKind로 큐에 추가.
     async fn scan_pulls_by_label(
         &mut self,
         gh: &dyn Gh,
         ignore_authors: &[String],
         label: &str,
-        target_phase: &str,
+        target_kind: TaskKind,
     ) -> Result<()> {
         let params: Vec<(&str, &str)> =
             vec![("state", "open"), ("labels", label), ("per_page", "30")];
@@ -342,7 +361,7 @@ impl GitRepository {
                 continue;
             }
 
-            let work_id = make_work_id("pr", &self.name, number);
+            let work_id = make_work_id(QueueType::Pr, &self.name, number);
 
             if self.contains(&work_id) {
                 continue;
@@ -376,30 +395,29 @@ impl GitRepository {
                 .map(|arr| arr.iter().filter_map(|l| l["name"].as_str()).collect())
                 .unwrap_or_default();
 
-            let pr_item = PrItem {
-                work_id,
-                repo_id: self.id.clone(),
-                repo_name: self.name.clone(),
-                repo_url: self.url.clone(),
-                github_number: number,
+            self.enqueue_pr(
+                number,
+                target_kind,
                 title,
-                head_branch,
-                base_branch,
-                review_comment: None,
-                source_issue_number: None,
-                review_iteration: labels::parse_iteration(&label_names),
-                gh_host: self.gh_host.clone(),
-            };
-
-            self.pr_queue.push(target_phase, pr_item);
-            tracing::info!("queued PR #{number} ({label} → {target_phase})");
+                PrMetadata {
+                    head_branch,
+                    base_branch,
+                    review_comment: None,
+                    source_issue_number: None,
+                    review_iteration: labels::parse_iteration(&label_names),
+                },
+            );
+            tracing::info!(
+                "queued PR #{number} ({label} → Pending/{kind})",
+                kind = target_kind.as_str()
+            );
         }
 
         Ok(())
     }
 
     /// `autodev:done` + merged + NOT `autodev:extracted` PR을 스캔하여
-    /// pr_queue(Extracting)에 추가 (지식 추출 대상).
+    /// queue(Pending, Extract)에 추가 (지식 추출 대상).
     ///
     /// Label-Positive: done 라벨 + closed(merged) 상태 + extracted 라벨 없음
     pub async fn scan_done_merged(&mut self, gh: &dyn Gh) -> Result<()> {
@@ -441,7 +459,7 @@ impl GitRepository {
                 continue;
             }
 
-            let work_id = make_work_id("pr", &self.name, number);
+            let work_id = make_work_id(QueueType::Pr, &self.name, number);
             if self.contains(&work_id) {
                 continue;
             }
@@ -474,22 +492,18 @@ impl GitRepository {
                 continue;
             }
 
-            let pr_item = PrItem {
-                work_id,
-                repo_id: self.id.clone(),
-                repo_name: self.name.clone(),
-                repo_url: self.url.clone(),
-                github_number: number,
+            self.enqueue_pr(
+                number,
+                TaskKind::Extract,
                 title,
-                head_branch,
-                base_branch,
-                review_comment: None,
-                source_issue_number: None,
-                review_iteration: 0,
-                gh_host: self.gh_host.clone(),
-            };
-
-            self.pr_queue.push(pr_phase::EXTRACTING, pr_item);
+                PrMetadata {
+                    head_branch,
+                    base_branch,
+                    review_comment: None,
+                    source_issue_number: None,
+                    review_iteration: 0,
+                },
+            );
             tracing::info!("queued knowledge extraction for merged PR #{number}");
         }
 
@@ -509,7 +523,7 @@ impl GitRepository {
         let gh_host = self.gh_host.as_deref();
 
         for issue in self.issues.iter().filter(|i| i.is_wip()) {
-            let work_id = make_work_id("issue", &self.name, issue.number);
+            let work_id = make_work_id(QueueType::Issue, &self.name, issue.number);
             if !self.contains(&work_id)
                 && gh
                     .label_remove(&self.name, issue.number, labels::WIP, gh_host)
@@ -525,28 +539,16 @@ impl GitRepository {
         }
 
         // PR: Label-Positive — wip 라벨 유지, Pending 큐에 재적재
+        let repo = self.repo_ref();
         let orphan_pulls: Vec<_> = self
             .pulls
             .iter()
             .filter(|p| p.is_wip())
             .filter(|p| {
-                let work_id = make_work_id("pr", &self.name, p.number);
-                !self.issue_queue.contains(&work_id) && !self.pr_queue.contains(&work_id)
+                let work_id = make_work_id(QueueType::Pr, &self.name, p.number);
+                !self.queue.contains(&work_id)
             })
-            .map(|p| PrItem {
-                work_id: make_work_id("pr", &self.name, p.number),
-                repo_id: self.id.clone(),
-                repo_name: self.name.clone(),
-                repo_url: self.url.clone(),
-                github_number: p.number,
-                title: p.title.clone(),
-                head_branch: p.head_branch.clone(),
-                base_branch: p.base_branch.clone(),
-                review_comment: None,
-                source_issue_number: p.source_issue_number(),
-                review_iteration: p.review_iteration(),
-                gh_host: self.gh_host.clone(),
-            })
+            .map(|p| QueueItem::from_pull(&repo, p, TaskKind::Review))
             .collect();
 
         for item in orphan_pulls {
@@ -555,7 +557,7 @@ impl GitRepository {
                 item.github_number,
                 self.name
             );
-            self.pr_queue.push(pr_phase::PENDING, item);
+            self.queue.push(QueuePhase::Pending, item);
             recovered += 1;
         }
 
@@ -572,7 +574,7 @@ impl GitRepository {
         let gh_host = self.gh_host.as_deref();
 
         for issue in self.issues.iter().filter(|i| i.is_implementing()) {
-            let work_id = make_work_id("issue", &self.name, issue.number);
+            let work_id = make_work_id(QueueType::Issue, &self.name, issue.number);
             if self.contains(&work_id) {
                 continue;
             }
@@ -603,7 +605,7 @@ impl GitRepository {
                         Some("open") => {
                             // PR is still open but not in queue — ensure wip label
                             // so scan_pulls or recover_orphan_wip can pick it up.
-                            let pr_work_id = make_work_id("pr", &self.name, pr_num);
+                            let pr_work_id = make_work_id(QueueType::Pr, &self.name, pr_num);
                             if !self.contains(&pr_work_id) {
                                 gh.label_add(&self.name, pr_num, labels::WIP, gh_host).await;
                             }
@@ -654,6 +656,7 @@ impl GitRepository {
     pub async fn startup_reconcile(&mut self, gh: &dyn Gh) -> u64 {
         let mut recovered = 0u64;
         let gh_host = self.gh_host.as_deref();
+        let repo = self.repo_ref();
 
         // ── Issues 복구 ──
         for issue in &self.issues {
@@ -670,7 +673,7 @@ impl GitRepository {
                 continue;
             }
 
-            let work_id = make_work_id("issue", &self.name, issue.number);
+            let work_id = make_work_id(QueueType::Issue, &self.name, issue.number);
             if self.contains(&work_id) {
                 continue;
             }
@@ -683,41 +686,19 @@ impl GitRepository {
                 gh.label_add(&self.name, issue.number, labels::IMPLEMENTING, gh_host)
                     .await;
 
-                let item = IssueItem {
-                    work_id,
-                    repo_id: self.id.clone(),
-                    repo_name: self.name.clone(),
-                    repo_url: self.url.clone(),
-                    github_number: issue.number,
-                    title: issue.title.clone(),
-                    body: issue.body.clone(),
-                    labels: issue.labels.clone(),
-                    author: issue.author.clone(),
-                    analysis_report: None,
-                    gh_host: self.gh_host.clone(),
-                };
-
-                self.issue_queue.push(issue_phase::READY, item);
+                self.queue.push(
+                    QueuePhase::Pending,
+                    QueueItem::from_issue(&repo, issue, TaskKind::Implement),
+                );
                 recovered += 1;
                 continue;
             }
 
             if issue.is_wip() {
-                let item = IssueItem {
-                    work_id,
-                    repo_id: self.id.clone(),
-                    repo_name: self.name.clone(),
-                    repo_url: self.url.clone(),
-                    github_number: issue.number,
-                    title: issue.title.clone(),
-                    body: issue.body.clone(),
-                    labels: issue.labels.clone(),
-                    author: issue.author.clone(),
-                    analysis_report: None,
-                    gh_host: self.gh_host.clone(),
-                };
-
-                self.issue_queue.push(issue_phase::PENDING, item);
+                self.queue.push(
+                    QueuePhase::Pending,
+                    QueueItem::from_issue(&repo, issue, TaskKind::Analyze),
+                );
                 recovered += 1;
                 continue;
             }
@@ -729,57 +710,33 @@ impl GitRepository {
                 continue;
             }
 
-            let work_id = make_work_id("pr", &self.name, pull.number);
-            if self.contains(&work_id) {
+            let work_id = make_work_id(QueueType::Pr, &self.name, pull.number);
+            if self.queue.contains(&work_id) {
                 continue;
             }
 
-            let item = PrItem {
-                work_id,
-                repo_id: self.id.clone(),
-                repo_name: self.name.clone(),
-                repo_url: self.url.clone(),
-                github_number: pull.number,
-                title: pull.title.clone(),
-                head_branch: pull.head_branch.clone(),
-                base_branch: pull.base_branch.clone(),
-                review_comment: None,
-                source_issue_number: pull.source_issue_number(),
-                review_iteration: pull.review_iteration(),
-                gh_host: self.gh_host.clone(),
-            };
-
-            self.pr_queue.push(pr_phase::PENDING, item);
+            self.queue.push(
+                QueuePhase::Pending,
+                QueueItem::from_pull(&repo, pull, TaskKind::Review),
+            );
             recovered += 1;
         }
 
-        // ── PRs 복구: changes-requested → ReviewDone (피드백 반영 재개) ──
+        // ── PRs 복구: changes-requested → Pending (피드백 반영 재개) ──
         for pull in self.pulls.iter().filter(|p| p.is_changes_requested()) {
             if pull.is_terminal() {
                 continue;
             }
 
-            let work_id = make_work_id("pr", &self.name, pull.number);
-            if self.contains(&work_id) {
+            let work_id = make_work_id(QueueType::Pr, &self.name, pull.number);
+            if self.queue.contains(&work_id) {
                 continue;
             }
 
-            let item = PrItem {
-                work_id,
-                repo_id: self.id.clone(),
-                repo_name: self.name.clone(),
-                repo_url: self.url.clone(),
-                github_number: pull.number,
-                title: pull.title.clone(),
-                head_branch: pull.head_branch.clone(),
-                base_branch: pull.base_branch.clone(),
-                review_comment: None,
-                source_issue_number: pull.source_issue_number(),
-                review_iteration: pull.review_iteration(),
-                gh_host: self.gh_host.clone(),
-            };
-
-            self.pr_queue.push(pr_phase::REVIEW_DONE, item);
+            self.queue.push(
+                QueuePhase::Pending,
+                QueueItem::from_pull(&repo, pull, TaskKind::Improve),
+            );
             recovered += 1;
         }
 
@@ -881,7 +838,9 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    use crate::core::task_queues::{issue_phase, make_work_id, pr_phase};
+    use crate::core::models::QueuePhase;
+    use crate::core::phase::TaskKind;
+    use crate::core::queue_item::testing::test_repo_named;
     use crate::infra::gh::mock::MockGh;
 
     // ─── Mock ScanCursorRepository ───
@@ -932,37 +891,34 @@ mod tests {
         )
     }
 
-    fn issue_item(repo_name: &str, number: i64) -> IssueItem {
-        IssueItem {
-            work_id: make_work_id("issue", repo_name, number),
-            repo_id: "repo-id-1".to_string(),
-            repo_name: repo_name.to_string(),
-            repo_url: format!("https://github.com/{repo_name}"),
-            github_number: number,
-            title: format!("Issue #{number}"),
-            body: None,
-            labels: vec![],
-            author: "user".to_string(),
-            analysis_report: None,
-            gh_host: None,
-        }
+    fn issue_item(repo_name: &str, number: i64) -> QueueItem {
+        let repo = test_repo_named(repo_name);
+        QueueItem::new_issue(
+            &repo,
+            number,
+            TaskKind::Analyze,
+            format!("Issue #{number}"),
+            None,
+            vec![],
+            "user".into(),
+        )
     }
 
-    fn pr_item(repo_name: &str, number: i64) -> PrItem {
-        PrItem {
-            work_id: make_work_id("pr", repo_name, number),
-            repo_id: "repo-id-1".to_string(),
-            repo_name: repo_name.to_string(),
-            repo_url: format!("https://github.com/{repo_name}"),
-            github_number: number,
-            title: format!("PR #{number}"),
-            head_branch: "feature".to_string(),
-            base_branch: "main".to_string(),
-            review_comment: None,
-            source_issue_number: None,
-            review_iteration: 0,
-            gh_host: None,
-        }
+    fn pr_item(repo_name: &str, number: i64) -> QueueItem {
+        let repo = test_repo_named(repo_name);
+        QueueItem::new_pr(
+            &repo,
+            number,
+            TaskKind::Review,
+            format!("PR #{number}"),
+            PrMetadata {
+                head_branch: "feature".into(),
+                base_branch: "main".into(),
+                review_comment: None,
+                source_issue_number: None,
+                review_iteration: 0,
+            },
+        )
     }
 
     // ═══════════════════════════════════════════════════
@@ -1011,14 +967,14 @@ mod tests {
     }
 
     #[test]
-    fn contains_checks_all_queues() {
+    fn contains_checks_queue() {
         let mut repo = make_repo();
 
         let i = issue_item("org/repo", 42);
         let p = pr_item("org/repo", 10);
 
-        repo.issue_queue.push(issue_phase::PENDING, i);
-        repo.pr_queue.push(pr_phase::PENDING, p);
+        repo.queue.push(QueuePhase::Pending, i);
+        repo.queue.push(QueuePhase::Pending, p);
 
         assert!(repo.contains("issue:org/repo:42"));
         assert!(repo.contains("pr:org/repo:10"));
@@ -1030,12 +986,11 @@ mod tests {
         let mut repo = make_repo();
         assert_eq!(repo.total_items(), 0);
 
-        repo.issue_queue
-            .push(issue_phase::PENDING, issue_item("org/repo", 1));
-        repo.issue_queue
-            .push(issue_phase::PENDING, issue_item("org/repo", 2));
-        repo.pr_queue
-            .push(pr_phase::PENDING, pr_item("org/repo", 3));
+        repo.queue
+            .push(QueuePhase::Pending, issue_item("org/repo", 1));
+        repo.queue
+            .push(QueuePhase::Pending, issue_item("org/repo", 2));
+        repo.queue.push(QueuePhase::Pending, pr_item("org/repo", 3));
 
         assert_eq!(repo.total_items(), 3);
     }
@@ -1087,8 +1042,8 @@ mod tests {
         repo.scan_issues(&gh, &db, &[], &None).await.unwrap();
 
         // PR (#2) is filtered out, only issue #1 added
-        assert_eq!(repo.issue_queue.len(issue_phase::PENDING), 1);
-        let item = repo.issue_queue.pop(issue_phase::PENDING).unwrap();
+        assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
+        let item = repo.queue.pop(QueuePhase::Pending).unwrap();
         assert_eq!(item.github_number, 1);
         assert_eq!(item.title, "bug report");
 
@@ -1133,7 +1088,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(repo.issue_queue.len(issue_phase::PENDING), 0);
+        assert_eq!(repo.queue.len(QueuePhase::Pending), 0);
     }
 
     #[tokio::test]
@@ -1158,13 +1113,13 @@ mod tests {
 
         let mut repo = make_repo();
         // Pre-populate queue with the same issue
-        repo.issue_queue
-            .push(issue_phase::PENDING, issue_item("org/repo", 1));
+        repo.queue
+            .push(QueuePhase::Pending, issue_item("org/repo", 1));
 
         repo.scan_issues(&gh, &db, &[], &None).await.unwrap();
 
         // Still only 1 item (no duplicate)
-        assert_eq!(repo.issue_queue.len(issue_phase::PENDING), 1);
+        assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
     }
 
     #[tokio::test]
@@ -1199,8 +1154,8 @@ mod tests {
         repo.scan_issues(&gh, &db, &[], &filter).await.unwrap();
 
         // Only issue #1 matches the filter
-        assert_eq!(repo.issue_queue.len(issue_phase::PENDING), 1);
-        let item = repo.issue_queue.pop(issue_phase::PENDING).unwrap();
+        assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
+        let item = repo.queue.pop(QueuePhase::Pending).unwrap();
         assert_eq!(item.github_number, 1);
     }
 
@@ -1226,9 +1181,10 @@ mod tests {
         let mut repo = make_repo();
         repo.scan_approved_issues(&gh).await.unwrap();
 
-        assert_eq!(repo.issue_queue.len(issue_phase::READY), 1);
-        let item = repo.issue_queue.pop(issue_phase::READY).unwrap();
+        assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
+        let item = repo.queue.pop(QueuePhase::Pending).unwrap();
         assert_eq!(item.github_number, 5);
+        assert_eq!(item.task_kind, TaskKind::Implement);
 
         // Label transitions: implementing added first, then old labels removed
         let removed = gh.removed_labels.lock().unwrap();
@@ -1280,10 +1236,11 @@ mod tests {
         let mut repo = make_repo();
         repo.scan_pulls(&gh, &[]).await.unwrap();
 
-        assert_eq!(repo.pr_queue.len(pr_phase::PENDING), 1);
-        let item = repo.pr_queue.pop(pr_phase::PENDING).unwrap();
+        assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
+        let item = repo.queue.pop(QueuePhase::Pending).unwrap();
         assert_eq!(item.github_number, 10);
-        assert_eq!(item.head_branch, "fix-bug");
+        assert_eq!(item.head_branch(), Some("fix-bug"));
+        assert_eq!(item.task_kind, TaskKind::Review);
 
         // No wip label added (already has it — Label-Positive)
         let added = gh.added_labels.lock().unwrap();
@@ -1311,28 +1268,27 @@ mod tests {
 
         let mut repo = make_repo();
         // Pre-fill queue to simulate already-queued state
-        repo.pr_queue.push(
-            pr_phase::REVIEWING,
-            PrItem {
-                work_id: make_work_id("pr", "org/repo", 10),
-                repo_id: "repo-id-1".to_string(),
-                repo_name: "org/repo".to_string(),
-                repo_url: "https://github.com/org/repo".to_string(),
-                github_number: 10,
-                title: "already queued".to_string(),
-                head_branch: "fix-bug".to_string(),
-                base_branch: "main".to_string(),
-                review_comment: None,
-                source_issue_number: None,
-                review_iteration: 0,
-                gh_host: None,
-            },
+        repo.queue.push(
+            QueuePhase::Running,
+            QueueItem::new_pr(
+                &test_repo_named("org/repo"),
+                10,
+                TaskKind::Review,
+                "already queued".to_string(),
+                PrMetadata {
+                    head_branch: "fix-bug".to_string(),
+                    base_branch: "main".to_string(),
+                    review_comment: None,
+                    source_issue_number: None,
+                    review_iteration: 0,
+                },
+            ),
         );
 
         repo.scan_pulls(&gh, &[]).await.unwrap();
 
         // Should not add a second copy
-        assert_eq!(repo.pr_queue.len(pr_phase::PENDING), 0);
+        assert_eq!(repo.queue.len(QueuePhase::Pending), 0);
     }
 
     #[tokio::test]
@@ -1359,7 +1315,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(repo.pr_queue.len(pr_phase::PENDING), 0);
+        assert_eq!(repo.queue.len(QueuePhase::Pending), 0);
     }
 
     // ═══════════════════════════════════════════════════
@@ -1416,8 +1372,8 @@ mod tests {
         );
 
         // Pre-populate queue
-        repo.issue_queue
-            .push(issue_phase::PENDING, issue_item("org/repo", 1));
+        repo.queue
+            .push(QueuePhase::Pending, issue_item("org/repo", 1));
 
         let recovered = repo.recover_orphan_wip(&gh).await;
 
@@ -1443,7 +1399,7 @@ mod tests {
         assert_eq!(recovered, 1);
         // PR은 라벨 제거 대신 Pending 큐에 재적재 (Label-Positive)
         assert!(repo.contains("pr:org/repo:10"));
-        assert_eq!(repo.pr_queue.len(pr_phase::PENDING), 1);
+        assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
         // wip 라벨은 유지
         assert!(gh.removed_labels.lock().unwrap().is_empty());
     }
@@ -1594,7 +1550,7 @@ mod tests {
 
         assert_eq!(result, 1);
         assert!(repo.contains("issue:org/repo:42"));
-        assert_eq!(repo.issue_queue.len(issue_phase::PENDING), 1);
+        assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
 
         // wip label not touched (kept as-is)
         assert!(gh.removed_labels.lock().unwrap().is_empty());
@@ -1617,7 +1573,7 @@ mod tests {
 
         assert_eq!(result, 1);
         assert!(repo.contains("issue:org/repo:3"));
-        assert_eq!(repo.issue_queue.len(issue_phase::READY), 1);
+        assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
 
         let added = gh.added_labels.lock().unwrap();
         assert!(added
@@ -1647,7 +1603,7 @@ mod tests {
 
         assert_eq!(result, 1);
         assert!(repo.contains("pr:org/repo:20"));
-        assert_eq!(repo.pr_queue.len(pr_phase::PENDING), 1);
+        assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
     }
 
     #[tokio::test]
@@ -1679,8 +1635,8 @@ mod tests {
             vec![],
         );
 
-        repo.issue_queue
-            .push(issue_phase::PENDING, issue_item("org/repo", 10));
+        repo.queue
+            .push(QueuePhase::Pending, issue_item("org/repo", 10));
 
         let result = repo.startup_reconcile(&gh).await;
         assert_eq!(result, 0);

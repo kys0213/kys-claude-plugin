@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use autodev::core::models::QueueType;
-use autodev::daemon::status::{write_status, DaemonStatus, StatusItem};
+use autodev::service::daemon::status::{write_status, DaemonStatus, StatusItem};
 use autodev::tui::views;
 
 // ─── query_active_items ───

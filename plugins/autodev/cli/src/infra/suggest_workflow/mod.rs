@@ -6,7 +6,7 @@ use async_trait::async_trait;
 
 pub use real::RealSuggestWorkflow;
 
-use crate::tasks::knowledge::models::{RepetitionEntry, SessionEntry, ToolFrequencyEntry};
+use crate::service::tasks::knowledge::models::{RepetitionEntry, SessionEntry, ToolFrequencyEntry};
 
 /// suggest-workflow CLI 추상화
 ///

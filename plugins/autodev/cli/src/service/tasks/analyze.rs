@@ -15,15 +15,15 @@ use super::AGENT_SYSTEM_PROMPT;
 use crate::core::config::ConfigLoader;
 use crate::core::labels;
 use crate::core::models::{NewConsumerLog, QueueType};
+use crate::core::queue_item::QueueItem;
 use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
-use crate::core::task_queues::IssueItem;
 use crate::infra::claude::output::{self, AnalysisResult};
 use crate::infra::claude::SessionOptions;
 use crate::infra::gh::Gh;
-use crate::tasks::helpers::verdict;
-use crate::tasks::helpers::workspace::WorkspaceOps;
+use crate::service::tasks::helpers::verdict;
+use crate::service::tasks::helpers::workspace::WorkspaceOps;
 
 // ─── 분석 프롬프트 (JSON 응답 스키마 명시) ───
 
@@ -85,7 +85,7 @@ pub struct AnalyzeTask {
     workspace: Arc<dyn WorkspaceOps>,
     gh: Arc<dyn Gh>,
     config: Arc<dyn ConfigLoader>,
-    item: IssueItem,
+    item: QueueItem,
     worker_id: String,
     task_id: String,
     wt_path: Option<PathBuf>,
@@ -97,7 +97,7 @@ impl AnalyzeTask {
         workspace: Arc<dyn WorkspaceOps>,
         gh: Arc<dyn Gh>,
         config: Arc<dyn ConfigLoader>,
-        item: IssueItem,
+        item: QueueItem,
     ) -> Self {
         let task_id = format!("issue-{}", item.github_number);
         Self {
@@ -370,7 +370,7 @@ impl Task for AnalyzeTask {
         let system_prompt = format!("{AGENT_SYSTEM_PROMPT}\n\n{resolved}");
 
         // 프롬프트 구성
-        let body_text = self.item.body.as_deref().unwrap_or("");
+        let body_text = self.item.body().unwrap_or("");
         let prompt = format!(
             "[autodev] analyze: issue #{} - {}\n\n{}",
             self.item.github_number,
@@ -502,7 +502,8 @@ mod tests {
     use std::time::Duration;
 
     use crate::core::config::models::WorkflowConfig;
-    use crate::core::task_queues::make_work_id;
+    use crate::core::phase::TaskKind;
+    use crate::core::queue_item::testing::test_repo;
     use crate::infra::gh::mock::MockGh;
 
     // ─── Mock WorkspaceOps ───
@@ -567,20 +568,16 @@ mod tests {
 
     // ─── Test helpers ───
 
-    fn make_test_issue() -> IssueItem {
-        IssueItem {
-            work_id: make_work_id("issue", "org/repo", 42),
-            repo_id: "r1".to_string(),
-            repo_name: "org/repo".to_string(),
-            repo_url: "https://github.com/org/repo".to_string(),
-            github_number: 42,
-            title: "Fix login bug".to_string(),
-            body: Some("Users cannot log in".to_string()),
-            labels: vec![],
-            author: "user".to_string(),
-            analysis_report: None,
-            gh_host: None,
-        }
+    fn make_test_issue() -> QueueItem {
+        QueueItem::new_issue(
+            &test_repo(),
+            42,
+            TaskKind::Analyze,
+            "Fix login bug".into(),
+            Some("Users cannot log in".into()),
+            vec![],
+            "user".into(),
+        )
     }
 
     fn make_task(gh: Arc<MockGh>) -> AnalyzeTask {

@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::core::models::NewConsumerLog;
-use crate::core::task_queues::PrItem;
+use crate::core::models::{NewConsumerLog, QueuePhase};
+use crate::core::queue_item::QueueItem;
 use crate::infra::claude::SessionOptions;
 
 // ─── Agent 요청/응답 DTO ───
@@ -55,10 +55,10 @@ impl AgentResponse {
 pub enum QueueOp {
     /// 현재 working phase에서 아이템 제거 (done/skip/error)
     Remove,
-    /// PR을 특정 phase에 push
-    PushPr {
-        phase: &'static str,
-        item: Box<PrItem>,
+    /// 아이템을 특정 phase에 push (통합 큐)
+    Push {
+        phase: QueuePhase,
+        item: Box<QueueItem>,
     },
 }
 

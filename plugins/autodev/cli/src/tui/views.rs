@@ -119,7 +119,7 @@ impl AppState {
 // ─── Data queries ───
 
 pub fn query_active_items(status_path: &std::path::Path) -> Vec<ActiveItem> {
-    let status = match crate::daemon::status::read_status(status_path) {
+    let status = match crate::service::daemon::status::read_status(status_path) {
         Some(s) => s,
         None => return Vec::new(),
     };
@@ -138,7 +138,7 @@ pub fn query_active_items(status_path: &std::path::Path) -> Vec<ActiveItem> {
 }
 
 pub fn query_label_counts(status_path: &std::path::Path) -> LabelCounts {
-    match crate::daemon::status::read_status(status_path) {
+    match crate::service::daemon::status::read_status(status_path) {
         Some(s) => LabelCounts {
             wip: s.wip,
             done: 0,
@@ -168,7 +168,7 @@ pub fn render(f: &mut Frame, db: &Database, status_path: &std::path::Path, state
 
 fn render_header(f: &mut Frame, area: Rect, db: &Database) {
     let home = crate::core::config::autodev_home(&crate::core::config::RealEnv);
-    let running = crate::daemon::pid::is_running(&home);
+    let running = crate::service::daemon::pid::is_running(&home);
     let status = if running {
         Span::styled("● running", Style::default().fg(Color::Green))
     } else {

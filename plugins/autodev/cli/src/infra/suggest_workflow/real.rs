@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 
-use crate::tasks::knowledge::models::{RepetitionEntry, SessionEntry, ToolFrequencyEntry};
+use crate::service::tasks::knowledge::models::{RepetitionEntry, SessionEntry, ToolFrequencyEntry};
 
 use super::SuggestWorkflow;
 
