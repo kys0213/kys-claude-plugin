@@ -1,5 +1,6 @@
 use anyhow::Result;
 
+use crate::core::models::{QueuePhase, QueueType};
 use crate::core::repository::QueueRepository;
 use crate::infra::db::Database;
 
@@ -43,13 +44,17 @@ pub fn queue_list_db(
 
     // Apply --state filter
     if let Some(phase_filter) = state {
-        items.retain(|item| item.phase == phase_filter);
+        if let Ok(phase) = phase_filter.parse::<QueuePhase>() {
+            items.retain(|item| item.phase == phase);
+        }
     }
 
     // Apply --unextracted filter: done + pr type + no skip_reason
     if unextracted {
         items.retain(|item| {
-            item.phase == "done" && item.queue_type == "pr" && item.skip_reason.is_none()
+            item.phase == QueuePhase::Done
+                && item.queue_type == QueueType::Pr
+                && item.skip_reason.is_none()
         });
     }
 
