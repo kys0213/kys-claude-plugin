@@ -1,4 +1,5 @@
-use autodev::core::models::QueuePhase;
+use autodev::core::models::{QueueItemRow, QueuePhase, QueueType};
+use autodev::core::phase::TaskKind;
 use autodev::core::repository::*;
 use autodev::infra::db::Database;
 use std::path::Path;
@@ -264,4 +265,179 @@ fn cli_queue_list_db_empty() {
 
     let output = autodev::cli::queue::queue_list_db(&db, None, false, None, false).unwrap();
     assert!(output.contains("no queue items"));
+}
+
+// ═══════════════════════════════════════════════
+// 6. migrate_v2 idempotent
+// ═══════════════════════════════════════════════
+
+#[test]
+fn migrate_v2_idempotent() {
+    let db = open_memory_db();
+    // initialize already calls migrate_v2, calling it again should not error
+    db.initialize().unwrap();
+}
+
+// ═══════════════════════════════════════════════
+// 7. queue_upsert / queue_remove / queue_load_active / queue_transit
+// ═══════════════════════════════════════════════
+
+fn make_row(repo_id: &str, work_id: &str, phase: QueuePhase) -> QueueItemRow {
+    let now = chrono::Utc::now().to_rfc3339();
+    QueueItemRow {
+        work_id: work_id.to_string(),
+        repo_id: repo_id.to_string(),
+        queue_type: QueueType::Issue,
+        phase,
+        title: Some("Test".to_string()),
+        skip_reason: None,
+        created_at: now.clone(),
+        updated_at: now,
+        task_kind: TaskKind::Analyze,
+        github_number: 42,
+        metadata_json: None,
+    }
+}
+
+#[test]
+fn queue_upsert_insert() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    let row = make_row(&repo_id, "issue:org/test-repo:1", QueuePhase::Pending);
+
+    db.queue_upsert(&row).unwrap();
+
+    let items = db.queue_list_items(None).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].work_id, "issue:org/test-repo:1");
+    assert_eq!(items[0].task_kind, TaskKind::Analyze);
+    assert_eq!(items[0].github_number, 42);
+}
+
+#[test]
+fn queue_upsert_update() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    let row = make_row(&repo_id, "issue:org/test-repo:1", QueuePhase::Pending);
+    db.queue_upsert(&row).unwrap();
+
+    // Update phase
+    let mut row2 = row;
+    row2.phase = QueuePhase::Running;
+    db.queue_upsert(&row2).unwrap();
+
+    let phase = db.queue_get_phase("issue:org/test-repo:1").unwrap();
+    assert_eq!(phase, Some(QueuePhase::Running));
+
+    // Should still be 1 item
+    let items = db.queue_list_items(None).unwrap();
+    assert_eq!(items.len(), 1);
+}
+
+#[test]
+fn queue_upsert_preserves_created_at() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    let row = make_row(&repo_id, "issue:org/test-repo:1", QueuePhase::Pending);
+    let original_created = row.created_at.clone();
+    db.queue_upsert(&row).unwrap();
+
+    // Upsert with different created_at
+    let mut row2 = row;
+    row2.phase = QueuePhase::Running;
+    row2.created_at = "2099-01-01T00:00:00Z".to_string();
+    db.queue_upsert(&row2).unwrap();
+
+    let items = db.queue_list_items(None).unwrap();
+    // ON CONFLICT DO UPDATE does not touch created_at
+    assert_eq!(items[0].created_at, original_created);
+}
+
+#[test]
+fn queue_load_active_excludes_terminal() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    db.queue_upsert(&make_row(&repo_id, "w-1", QueuePhase::Pending))
+        .unwrap();
+    db.queue_upsert(&make_row(&repo_id, "w-2", QueuePhase::Running))
+        .unwrap();
+    db.queue_upsert(&make_row(&repo_id, "w-3", QueuePhase::Done))
+        .unwrap();
+    db.queue_upsert(&make_row(&repo_id, "w-4", QueuePhase::Skipped))
+        .unwrap();
+
+    let active = db.queue_load_active(&repo_id).unwrap();
+    assert_eq!(active.len(), 2);
+    let ids: Vec<&str> = active.iter().map(|r| r.work_id.as_str()).collect();
+    assert!(ids.contains(&"w-1"));
+    assert!(ids.contains(&"w-2"));
+}
+
+#[test]
+fn queue_transit_cas_success() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    db.queue_upsert(&make_row(&repo_id, "w-1", QueuePhase::Pending))
+        .unwrap();
+
+    let ok = db
+        .queue_transit("w-1", QueuePhase::Pending, QueuePhase::Running)
+        .unwrap();
+    assert!(ok);
+
+    let phase = db.queue_get_phase("w-1").unwrap();
+    assert_eq!(phase, Some(QueuePhase::Running));
+}
+
+#[test]
+fn queue_transit_cas_wrong_phase() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    db.queue_upsert(&make_row(&repo_id, "w-1", QueuePhase::Running))
+        .unwrap();
+
+    let ok = db
+        .queue_transit("w-1", QueuePhase::Pending, QueuePhase::Running)
+        .unwrap();
+    assert!(!ok);
+
+    // Phase unchanged
+    let phase = db.queue_get_phase("w-1").unwrap();
+    assert_eq!(phase, Some(QueuePhase::Running));
+}
+
+#[test]
+fn queue_remove_marks_done() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    db.queue_upsert(&make_row(&repo_id, "w-1", QueuePhase::Running))
+        .unwrap();
+
+    db.queue_remove("w-1").unwrap();
+
+    let phase = db.queue_get_phase("w-1").unwrap();
+    assert_eq!(phase, Some(QueuePhase::Done));
+}
+
+// ═══════════════════════════════════════════════
+// 8. CLI output includes task_kind
+// ═══════════════════════════════════════════════
+
+#[test]
+fn cli_queue_list_shows_task_kind() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    db.queue_upsert(&make_row(
+        &repo_id,
+        "issue:org/test-repo:42",
+        QueuePhase::Pending,
+    ))
+    .unwrap();
+
+    let output = autodev::cli::queue::queue_list_db(&db, None, false, None, false).unwrap();
+    assert!(output.contains("analyze"));
+    assert!(output.contains("#42"));
 }

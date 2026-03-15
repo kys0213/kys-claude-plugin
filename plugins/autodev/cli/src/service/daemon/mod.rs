@@ -347,11 +347,20 @@ pub async fn start(
     );
 
     // ── Startup Reconcile ──
+    // Separate DB connection for startup (source_db is already moved into source)
+    let startup_db = Database::open(&db_path)?;
+    startup_db.initialize()?;
     match GitRepositoryFactory::create_all(&log_db, &*env, &*gh).await {
         Ok(mut repo_map) => {
+            // DB-first 복구: DB에서 활성 아이템을 로드
+            for repo in repo_map.values_mut() {
+                repo.load_from_db(&startup_db);
+            }
+
+            // 라벨 기반 fallback 복구
             let mut total_recovered = 0u64;
             for repo in repo_map.values_mut() {
-                let n = repo.startup_reconcile(&*gh).await;
+                let n = repo.startup_reconcile(&*gh, &startup_db).await;
                 if n > 0 {
                     total_recovered += n;
                 }

@@ -13,7 +13,7 @@ use crate::core::collector::Collector;
 use crate::core::config::{self, ConfigLoader, Env};
 use crate::core::models::{QueuePhase, QueueType};
 use crate::core::phase::TaskKind;
-use crate::core::repository::{RepoRepository, ScanCursorRepository};
+use crate::core::repository::{QueueRepository, RepoRepository, ScanCursorRepository};
 use crate::core::task::{QueueOp, Task, TaskResult};
 use crate::infra::gh::Gh;
 use crate::infra::git::Git;
@@ -30,7 +30,7 @@ use crate::service::tasks::review::ReviewTask;
 /// GitHub 이슈/PR 스캔 기반 Collector.
 ///
 /// per-repo 큐를 소유하고, 스캔 → Task 생성 → 큐 적용 생명주기를 관리한다.
-pub struct GitHubTaskSource<DB: RepoRepository + ScanCursorRepository> {
+pub struct GitHubTaskSource<DB: RepoRepository + ScanCursorRepository + QueueRepository> {
     workspace: Arc<dyn WorkspaceOps>,
     gh: Arc<dyn Gh>,
     config: Arc<dyn ConfigLoader>,
@@ -41,7 +41,7 @@ pub struct GitHubTaskSource<DB: RepoRepository + ScanCursorRepository> {
     repos: HashMap<String, GitRepository>,
 }
 
-impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
+impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubTaskSource<DB> {
     pub fn new(
         workspace: Arc<dyn WorkspaceOps>,
         gh: Arc<dyn Gh>,
@@ -111,7 +111,7 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
     async fn run_recovery(&mut self) {
         for repo in self.repos.values_mut() {
             repo.refresh(&*self.gh).await;
-            let n = repo.recover_orphan_wip(&*self.gh).await;
+            let n = repo.recover_orphan_wip(&*self.gh, &self.db).await;
             if n > 0 {
                 tracing::info!("recovered {n} orphan wip items in {}", repo.name());
             }
@@ -172,13 +172,17 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                             tracing::error!("issue scan error for {repo_name}: {e}");
                         }
 
-                        if let Err(e) = repo.scan_approved_issues(&*self.gh).await {
+                        if let Err(e) = repo.scan_approved_issues(&*self.gh, &self.db).await {
                             tracing::error!("approved scan error for {repo_name}: {e}");
                         }
                     }
                     "pulls" => {
                         if let Err(e) = repo
-                            .scan_pulls(&*self.gh, &repo_cfg.sources.github.ignore_authors)
+                            .scan_pulls(
+                                &*self.gh,
+                                &self.db,
+                                &repo_cfg.sources.github.ignore_authors,
+                            )
                             .await
                         {
                             tracing::error!("PR scan error for {repo_name}: {e}");
@@ -186,7 +190,7 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
 
                         // done + merged + NOT extracted → knowledge extraction
                         if repo_cfg.sources.github.knowledge_extraction {
-                            if let Err(e) = repo.scan_done_merged(&*self.gh).await {
+                            if let Err(e) = repo.scan_done_merged(&*self.gh, &self.db).await {
                                 tracing::error!("done_merged scan error for {repo_name}: {e}");
                             }
                         }
@@ -201,6 +205,29 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
     ///
     /// per-repo `issue_concurrency` / `pr_concurrency` 제한을 적용하여,
     /// in-flight 태스크 수를 초과하지 않도록 bounded drain을 수행한다.
+    /// drain + DB transit 공통 헬퍼.
+    /// in-memory 큐에서 drain한 뒤, DB phase도 동기화한다.
+    fn drain_and_sync<F>(
+        db: &DB,
+        queue: &mut crate::core::state_queue::StateQueue<crate::core::queue_item::QueueItem>,
+        limit: usize,
+        predicate: F,
+    ) -> Vec<crate::core::queue_item::QueueItem>
+    where
+        F: Fn(&crate::core::queue_item::QueueItem) -> bool,
+    {
+        let drained =
+            queue.drain_to_filtered(QueuePhase::Pending, QueuePhase::Running, limit, predicate);
+        for item in &drained {
+            if let Err(e) =
+                db.queue_transit(&item.work_id, QueuePhase::Pending, QueuePhase::Running)
+            {
+                tracing::warn!("queue_transit failed for {}: {e}", item.work_id);
+            }
+        }
+        drained
+    }
+
     fn drain_queue_items(&mut self) -> Vec<Box<dyn Task>> {
         let mut tasks: Vec<Box<dyn Task>> = Vec::new();
 
@@ -214,12 +241,9 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
             let mut issue_slots = repo.issue_concurrency.saturating_sub(issue_running);
 
             // Issue: Pending(Analyze) → Running
-            let drained = repo.queue.drain_to_filtered(
-                QueuePhase::Pending,
-                QueuePhase::Running,
-                issue_slots,
-                |i| i.is(QueueType::Issue, TaskKind::Analyze),
-            );
+            let drained = Self::drain_and_sync(&self.db, &mut repo.queue, issue_slots, |i| {
+                i.is(QueueType::Issue, TaskKind::Analyze)
+            });
             issue_slots -= drained.len();
             for item in drained {
                 tracing::debug!("issue #{}: creating AnalyzeTask", item.github_number);
@@ -232,12 +256,9 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
             }
 
             // Issue: Pending(Implement) → Running
-            for item in repo.queue.drain_to_filtered(
-                QueuePhase::Pending,
-                QueuePhase::Running,
-                issue_slots,
-                |i| i.is(QueueType::Issue, TaskKind::Implement),
-            ) {
+            for item in Self::drain_and_sync(&self.db, &mut repo.queue, issue_slots, |i| {
+                i.is(QueueType::Issue, TaskKind::Implement)
+            }) {
                 tracing::debug!("issue #{}: creating ImplementTask", item.github_number);
                 tasks.push(Box::new(ImplementTask::new(
                     Arc::clone(&self.workspace),
@@ -256,12 +277,9 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
             let mut pr_slots = repo.pr_concurrency.saturating_sub(pr_running);
 
             // PR: Pending(Review) → Running
-            let drained = repo.queue.drain_to_filtered(
-                QueuePhase::Pending,
-                QueuePhase::Running,
-                pr_slots,
-                |i| i.is(QueueType::Pr, TaskKind::Review),
-            );
+            let drained = Self::drain_and_sync(&self.db, &mut repo.queue, pr_slots, |i| {
+                i.is(QueueType::Pr, TaskKind::Review)
+            });
             pr_slots -= drained.len();
             for item in drained {
                 tracing::debug!("PR #{}: creating ReviewTask", item.github_number);
@@ -274,12 +292,9 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
             }
 
             // PR: Pending(Improve) → Running
-            let drained = repo.queue.drain_to_filtered(
-                QueuePhase::Pending,
-                QueuePhase::Running,
-                pr_slots,
-                |i| i.is(QueueType::Pr, TaskKind::Improve),
-            );
+            let drained = Self::drain_and_sync(&self.db, &mut repo.queue, pr_slots, |i| {
+                i.is(QueueType::Pr, TaskKind::Improve)
+            });
             pr_slots -= drained.len();
             for item in drained {
                 tracing::debug!("PR #{}: creating ImproveTask", item.github_number);
@@ -305,6 +320,9 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                     item.github_number
                 );
                 repo.queue.remove(&item.work_id);
+                if let Err(e) = self.db.queue_remove(&item.work_id) {
+                    tracing::warn!("queue_remove failed for {}: {e}", item.work_id);
+                }
                 tasks.push(Box::new(ExtractTask::new(
                     Arc::clone(&self.workspace),
                     Arc::clone(&self.gh),
@@ -337,9 +355,15 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
             match op {
                 QueueOp::Remove => {
                     repo.queue.remove(&result.work_id);
+                    if let Err(e) = self.db.queue_remove(&result.work_id) {
+                        tracing::warn!("queue_remove failed for {}: {e}", result.work_id);
+                    }
                 }
                 QueueOp::Push { phase, item } => {
                     repo.queue.push(*phase, *item.clone());
+                    if let Err(e) = self.db.queue_upsert(&item.to_row(*phase)) {
+                        tracing::error!("queue_upsert failed for {}: {e}", item.work_id);
+                    }
                 }
             }
         }
@@ -347,7 +371,9 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
 }
 
 #[async_trait(?Send)]
-impl<DB: RepoRepository + ScanCursorRepository + Send> Collector for GitHubTaskSource<DB> {
+impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> Collector
+    for GitHubTaskSource<DB>
+{
     async fn poll(&mut self) -> Vec<Box<dyn Task>> {
         self.sync_repos().await;
         self.run_recovery().await;
@@ -522,6 +548,39 @@ mod tests {
         }
         fn cursor_should_scan(&self, _: &str, _: i64) -> anyhow::Result<bool> {
             Ok(false)
+        }
+    }
+
+    impl QueueRepository for MockDb {
+        fn queue_get_phase(&self, _: &str) -> anyhow::Result<Option<QueuePhase>> {
+            Ok(None)
+        }
+        fn queue_advance(&self, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn queue_skip(&self, _: &str, _: Option<&str>) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn queue_list_items(
+            &self,
+            _: Option<&str>,
+        ) -> anyhow::Result<Vec<crate::core::models::QueueItemRow>> {
+            Ok(vec![])
+        }
+        fn queue_upsert(&self, _: &crate::core::models::QueueItemRow) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn queue_remove(&self, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn queue_load_active(
+            &self,
+            _: &str,
+        ) -> anyhow::Result<Vec<crate::core::models::QueueItemRow>> {
+            Ok(vec![])
+        }
+        fn queue_transit(&self, _: &str, _: QueuePhase, _: QueuePhase) -> anyhow::Result<bool> {
+            Ok(true)
         }
     }
 

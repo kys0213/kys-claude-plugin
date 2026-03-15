@@ -754,7 +754,8 @@ impl QueueRepository for Database {
             if let Some(name) = repo {
                 (
                     "SELECT q.work_id, q.repo_id, q.queue_type, q.phase, q.title, \
-                     q.skip_reason, q.created_at, q.updated_at \
+                     q.skip_reason, q.created_at, q.updated_at, \
+                     q.task_kind, q.github_number, q.metadata_json \
                      FROM queue_items q JOIN repositories r ON q.repo_id = r.id \
                      WHERE r.name = ?1 ORDER BY q.created_at DESC"
                         .to_string(),
@@ -763,7 +764,8 @@ impl QueueRepository for Database {
             } else {
                 (
                     "SELECT work_id, repo_id, queue_type, phase, title, \
-                     skip_reason, created_at, updated_at \
+                     skip_reason, created_at, updated_at, \
+                     task_kind, github_number, metadata_json \
                      FROM queue_items ORDER BY created_at DESC"
                         .to_string(),
                     vec![],
@@ -775,6 +777,65 @@ impl QueueRepository for Database {
             params.iter().map(|p| p.as_ref()).collect();
         let rows = stmt.query_map(params_refs.as_slice(), map_queue_item_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn queue_upsert(&self, item: &QueueItemRow) -> Result<()> {
+        let conn = self.conn();
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO queue_items (work_id, repo_id, queue_type, phase, title, skip_reason, \
+             created_at, updated_at, task_kind, github_number, metadata_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
+             ON CONFLICT(work_id) DO UPDATE SET \
+             phase = excluded.phase, title = excluded.title, skip_reason = excluded.skip_reason, \
+             updated_at = ?8, task_kind = excluded.task_kind, \
+             github_number = excluded.github_number, metadata_json = excluded.metadata_json",
+            rusqlite::params![
+                item.work_id,
+                item.repo_id,
+                item.queue_type.as_str(),
+                item.phase.as_str(),
+                item.title,
+                item.skip_reason,
+                item.created_at,
+                now,
+                item.task_kind.as_str(),
+                item.github_number,
+                item.metadata_json,
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn queue_remove(&self, work_id: &str) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.conn().execute(
+            "UPDATE queue_items SET phase = 'done', updated_at = ?1 WHERE work_id = ?2",
+            rusqlite::params![now, work_id],
+        )?;
+        Ok(())
+    }
+
+    fn queue_load_active(&self, repo_id: &str) -> Result<Vec<QueueItemRow>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT work_id, repo_id, queue_type, phase, title, \
+             skip_reason, created_at, updated_at, \
+             task_kind, github_number, metadata_json \
+             FROM queue_items WHERE repo_id = ?1 AND phase NOT IN ('done', 'skipped') \
+             ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![repo_id], map_queue_item_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn queue_transit(&self, work_id: &str, from: QueuePhase, to: QueuePhase) -> Result<bool> {
+        let now = Utc::now().to_rfc3339();
+        let affected = self.conn().execute(
+            "UPDATE queue_items SET phase = ?1, updated_at = ?2 WHERE work_id = ?3 AND phase = ?4",
+            rusqlite::params![to.as_str(), now, work_id, from.as_str()],
+        )?;
+        Ok(affected > 0)
     }
 }
 
@@ -1222,6 +1283,7 @@ fn map_spec_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Spec> {
 fn map_queue_item_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueItemRow> {
     let queue_type_str: String = row.get(2)?;
     let phase_str: String = row.get(3)?;
+    let task_kind_str: String = row.get(8)?;
     Ok(QueueItemRow {
         work_id: row.get(0)?,
         repo_id: row.get(1)?,
@@ -1243,6 +1305,15 @@ fn map_queue_item_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueItemRow>
         skip_reason: row.get(5)?,
         created_at: row.get(6)?,
         updated_at: row.get(7)?,
+        task_kind: task_kind_str.parse().map_err(|e: String| {
+            rusqlite::Error::FromSqlConversionFailure(
+                8,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+            )
+        })?,
+        github_number: row.get(9)?,
+        metadata_json: row.get(10)?,
     })
 }
 

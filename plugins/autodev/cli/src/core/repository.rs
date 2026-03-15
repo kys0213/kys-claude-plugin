@@ -68,6 +68,14 @@ pub trait QueueRepository {
     fn queue_skip(&self, work_id: &str, reason: Option<&str>) -> Result<()>;
     /// 큐 아이템 목록을 조회한다 (repo별 필터 가능)
     fn queue_list_items(&self, repo: Option<&str>) -> Result<Vec<QueueItemRow>>;
+    /// 큐 아이템을 upsert한다 (INSERT OR REPLACE, created_at 보존)
+    fn queue_upsert(&self, item: &QueueItemRow) -> Result<()>;
+    /// 큐 아이템을 done 상태로 전이한다
+    fn queue_remove(&self, work_id: &str) -> Result<()>;
+    /// 특정 repo의 활성 큐 아이템을 로드한다 (done/skipped 제외)
+    fn queue_load_active(&self, repo_id: &str) -> Result<Vec<QueueItemRow>>;
+    /// CAS 방식으로 phase를 전이한다 (from → to). 성공 시 true.
+    fn queue_transit(&self, work_id: &str, from: QueuePhase, to: QueuePhase) -> Result<bool>;
 }
 
 pub trait ClawDecisionRepository {

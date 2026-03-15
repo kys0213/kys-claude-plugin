@@ -18,7 +18,9 @@ impl Database {
     }
 
     pub fn initialize(&self) -> Result<()> {
-        schema::create_tables(&self.conn)
+        schema::create_tables(&self.conn)?;
+        schema::migrate_v2(&self.conn)?;
+        Ok(())
     }
 
     pub fn conn(&self) -> &Connection {
