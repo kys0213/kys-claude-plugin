@@ -916,6 +916,19 @@ impl ClawDecisionRepository for Database {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    fn decision_pending_for_work_id(&self, work_id: &str) -> Result<Option<ClawDecision>> {
+        let conn = self.conn();
+        let result = conn.query_row(
+            "SELECT id, repo_id, spec_id, decision_type, target_work_id, \
+             reasoning, context_json, created_at \
+             FROM claw_decisions WHERE target_work_id = ?1 \
+             ORDER BY created_at DESC LIMIT 1",
+            rusqlite::params![work_id],
+            map_decision_row,
+        );
+        optional_query_row(result)
+    }
+
     fn decision_count(&self, repo: Option<&str>) -> Result<i64> {
         let conn = self.conn();
 

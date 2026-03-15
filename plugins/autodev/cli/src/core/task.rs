@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::core::models::{NewConsumerLog, QueuePhase};
+use crate::core::models::{HitlSeverity, NewConsumerLog, QueuePhase};
 use crate::core::queue_item::QueueItem;
 use crate::infra::claude::SessionOptions;
 
@@ -59,6 +59,13 @@ pub enum QueueOp {
     Push {
         phase: QueuePhase,
         item: Box<QueueItem>,
+    },
+    /// HITL 이벤트 생성 요청
+    Hitl {
+        severity: HitlSeverity,
+        situation: String,
+        context: String,
+        options: Vec<String>,
     },
 }
 
