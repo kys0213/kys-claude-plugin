@@ -11,9 +11,11 @@ use async_trait::async_trait;
 
 use crate::core::collector::Collector;
 use crate::core::config::{self, ConfigLoader, Env};
-use crate::core::models::{QueuePhase, QueueType};
+use crate::core::models::{DecisionType, HitlSeverity, NewHitlEvent, QueuePhase, QueueType};
 use crate::core::phase::TaskKind;
-use crate::core::repository::{QueueRepository, RepoRepository, ScanCursorRepository};
+use crate::core::repository::{
+    ClawDecisionRepository, HitlRepository, QueueRepository, RepoRepository, ScanCursorRepository,
+};
 use crate::core::task::{QueueOp, Task, TaskResult};
 use crate::infra::gh::Gh;
 use crate::infra::git::Git;
@@ -30,7 +32,13 @@ use crate::service::tasks::review::ReviewTask;
 /// GitHub 이슈/PR 스캔 기반 Collector.
 ///
 /// per-repo 큐를 소유하고, 스캔 → Task 생성 → 큐 적용 생명주기를 관리한다.
-pub struct GitHubTaskSource<DB: RepoRepository + ScanCursorRepository + QueueRepository> {
+pub struct GitHubTaskSource<
+    DB: RepoRepository
+        + ScanCursorRepository
+        + QueueRepository
+        + ClawDecisionRepository
+        + HitlRepository,
+> {
     workspace: Arc<dyn WorkspaceOps>,
     gh: Arc<dyn Gh>,
     config: Arc<dyn ConfigLoader>,
@@ -41,7 +49,15 @@ pub struct GitHubTaskSource<DB: RepoRepository + ScanCursorRepository + QueueRep
     repos: HashMap<String, GitRepository>,
 }
 
-impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubTaskSource<DB> {
+impl<
+        DB: RepoRepository
+            + ScanCursorRepository
+            + QueueRepository
+            + ClawDecisionRepository
+            + HitlRepository
+            + Send,
+    > GitHubTaskSource<DB>
+{
     pub fn new(
         workspace: Arc<dyn WorkspaceOps>,
         gh: Arc<dyn Gh>,
@@ -107,9 +123,18 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
         }
     }
 
-    /// per-repo refresh + orphan recovery.
+    /// per-repo refresh + orphan recovery (주기 제어: 120초).
     async fn run_recovery(&mut self) {
         for repo in self.repos.values_mut() {
+            // recovery 주기 제어 (scan과 동일한 cursor 메커니즘 재사용)
+            let should_recover = self
+                .db
+                .cursor_should_scan(repo.id(), 120) // 2분 주기
+                .unwrap_or(false);
+            if !should_recover {
+                continue;
+            }
+
             repo.refresh(&*self.gh).await;
             let n = repo.recover_orphan_wip(&*self.gh, &self.db).await;
             if n > 0 {
@@ -119,6 +144,9 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
             if n > 0 {
                 tracing::info!("recovered {n} orphan implementing items in {}", repo.name());
             }
+
+            let now = chrono::Utc::now().to_rfc3339();
+            let _ = self.db.cursor_upsert(repo.id(), "recovery", &now);
         }
     }
 
@@ -196,6 +224,53 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
                         }
                     }
                     _ => {}
+                }
+            }
+        }
+    }
+
+    /// Pending 아이템에 대해 ClawDecision을 확인하고 적용한다.
+    ///
+    /// Decision이 없으면 auto-advance (기존 동작 유지).
+    /// Skip → 큐에서 제거, Hitl → HitlEvent 생성 + drain 대상 제외.
+    fn process_decisions(&mut self) {
+        for repo in self.repos.values_mut() {
+            let pending_ids: Vec<String> = repo
+                .queue
+                .iter(QueuePhase::Pending)
+                .map(|item| item.work_id.clone())
+                .collect();
+
+            for work_id in pending_ids {
+                let decision = match self.db.decision_pending_for_work_id(&work_id) {
+                    Ok(Some(d)) => d,
+                    _ => continue, // No decision → auto-advance (기존 동작)
+                };
+
+                match decision.decision_type {
+                    DecisionType::Advance => {} // drain에서 처리
+                    DecisionType::Skip => {
+                        repo.queue.remove(&work_id);
+                        let _ = self.db.queue_skip(&work_id, Some(&decision.reasoning));
+                        tracing::info!("decision skip: {work_id}");
+                    }
+                    DecisionType::Hitl => {
+                        let event = NewHitlEvent {
+                            repo_id: repo.id().to_string(),
+                            spec_id: decision.spec_id.clone(),
+                            work_id: Some(work_id.clone()),
+                            severity: HitlSeverity::Medium,
+                            situation: decision.reasoning.clone(),
+                            context: decision.context_json.clone().unwrap_or_default(),
+                            options: vec!["approve".into(), "skip".into()],
+                        };
+                        let _ = self.db.hitl_create(&event);
+                        // drain 대상에서 제외하기 위해 Pending에 유지
+                        tracing::info!("decision hitl: {work_id} (HITL event created)");
+                    }
+                    DecisionType::Replan => {
+                        tracing::warn!("decision replan not yet implemented: {work_id}");
+                    }
                 }
             }
         }
@@ -365,19 +440,45 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
                         tracing::error!("queue_upsert failed for {}: {e}", item.work_id);
                     }
                 }
+                QueueOp::Hitl {
+                    severity,
+                    situation,
+                    context,
+                    options,
+                } => {
+                    let event = NewHitlEvent {
+                        repo_id: repo.id().to_string(),
+                        spec_id: None,
+                        work_id: Some(result.work_id.clone()),
+                        severity: severity.clone(),
+                        situation: situation.clone(),
+                        context: context.clone(),
+                        options: options.clone(),
+                    };
+                    if let Err(e) = self.db.hitl_create(&event) {
+                        tracing::error!("hitl_create failed for {}: {e}", result.work_id);
+                    }
+                }
             }
         }
     }
 }
 
 #[async_trait(?Send)]
-impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> Collector
-    for GitHubTaskSource<DB>
+impl<
+        DB: RepoRepository
+            + ScanCursorRepository
+            + QueueRepository
+            + ClawDecisionRepository
+            + HitlRepository
+            + Send,
+    > Collector for GitHubTaskSource<DB>
 {
     async fn poll(&mut self) -> Vec<Box<dyn Task>> {
         self.sync_repos().await;
         self.run_recovery().await;
         self.run_scans().await;
+        self.process_decisions();
         self.drain_queue_items()
     }
 
@@ -581,6 +682,75 @@ mod tests {
         }
         fn queue_transit(&self, _: &str, _: QueuePhase, _: QueuePhase) -> anyhow::Result<bool> {
             Ok(true)
+        }
+    }
+
+    impl ClawDecisionRepository for MockDb {
+        fn decision_add(&self, _: &crate::core::models::NewClawDecision) -> anyhow::Result<String> {
+            Ok("d1".to_string())
+        }
+        fn decision_list(
+            &self,
+            _: Option<&str>,
+            _: usize,
+        ) -> anyhow::Result<Vec<crate::core::models::ClawDecision>> {
+            Ok(vec![])
+        }
+        fn decision_show(
+            &self,
+            _: &str,
+        ) -> anyhow::Result<Option<crate::core::models::ClawDecision>> {
+            Ok(None)
+        }
+        fn decision_list_by_spec(
+            &self,
+            _: &str,
+            _: usize,
+        ) -> anyhow::Result<Vec<crate::core::models::ClawDecision>> {
+            Ok(vec![])
+        }
+        fn decision_count(&self, _: Option<&str>) -> anyhow::Result<i64> {
+            Ok(0)
+        }
+        fn decision_pending_for_work_id(
+            &self,
+            _: &str,
+        ) -> anyhow::Result<Option<crate::core::models::ClawDecision>> {
+            Ok(None)
+        }
+    }
+
+    impl HitlRepository for MockDb {
+        fn hitl_create(&self, _: &NewHitlEvent) -> anyhow::Result<String> {
+            Ok("h1".to_string())
+        }
+        fn hitl_list(
+            &self,
+            _: Option<&str>,
+        ) -> anyhow::Result<Vec<crate::core::models::HitlEvent>> {
+            Ok(vec![])
+        }
+        fn hitl_show(&self, _: &str) -> anyhow::Result<Option<crate::core::models::HitlEvent>> {
+            Ok(None)
+        }
+        fn hitl_respond(&self, _: &crate::core::models::NewHitlResponse) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn hitl_set_status(
+            &self,
+            _: &str,
+            _: crate::core::models::HitlStatus,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn hitl_pending_count(&self, _: Option<&str>) -> anyhow::Result<i64> {
+            Ok(0)
+        }
+        fn hitl_responses(
+            &self,
+            _: &str,
+        ) -> anyhow::Result<Vec<crate::core::models::HitlResponse>> {
+            Ok(vec![])
         }
     }
 

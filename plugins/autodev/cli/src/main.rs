@@ -316,6 +316,24 @@ enum DecisionsAction {
         #[arg(long)]
         json: bool,
     },
+    /// 새 Claw 결정 생성
+    Add {
+        /// 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: String,
+        /// 결정 유형 (advance, skip, hitl, replan)
+        #[arg(long, value_name = "TYPE")]
+        decision_type: String,
+        /// 대상 work_id (e.g. "issue:org/repo:42")
+        #[arg(long)]
+        target: Option<String>,
+        /// 판단 근거
+        #[arg(long)]
+        reasoning: String,
+        /// 추가 컨텍스트 (JSON)
+        #[arg(long)]
+        context: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -702,6 +720,23 @@ async fn main() -> Result<()> {
             }
             DecisionsAction::Show { id, json } => {
                 let output = client::decisions::show(&db, &id, json)?;
+                println!("{output}");
+            }
+            DecisionsAction::Add {
+                repo,
+                decision_type,
+                target,
+                reasoning,
+                context,
+            } => {
+                let output = client::decisions::add(
+                    &db,
+                    &repo,
+                    &decision_type,
+                    target,
+                    &reasoning,
+                    context,
+                )?;
                 println!("{output}");
             }
         },

@@ -1,6 +1,7 @@
 use anyhow::Result;
 
-use crate::core::repository::ClawDecisionRepository;
+use crate::core::models::{DecisionType, NewClawDecision};
+use crate::core::repository::{ClawDecisionRepository, RepoRepository};
 use crate::infra::db::Database;
 
 /// Claw decisions 목록 조회
@@ -88,6 +89,39 @@ pub fn show(db: &Database, id: &str, json: bool) -> Result<String> {
     }
 
     Ok(output)
+}
+
+/// 새 Claw decision 생성
+pub fn add(
+    db: &Database,
+    repo_name: &str,
+    decision_type: &str,
+    target: Option<String>,
+    reasoning: &str,
+    context: Option<String>,
+) -> Result<String> {
+    let dt: DecisionType = decision_type
+        .parse()
+        .map_err(|e: String| anyhow::anyhow!(e))?;
+
+    // repo name → repo_id 변환
+    let repos = db.repo_find_enabled()?;
+    let repo = repos
+        .iter()
+        .find(|r| r.name == repo_name)
+        .ok_or_else(|| anyhow::anyhow!("repo not found: {repo_name}"))?;
+
+    let decision = NewClawDecision {
+        repo_id: repo.id.clone(),
+        spec_id: None,
+        decision_type: dt,
+        target_work_id: target,
+        reasoning: reasoning.to_string(),
+        context_json: context,
+    };
+
+    let id = db.decision_add(&decision)?;
+    Ok(format!("Decision created: {id}"))
 }
 
 fn format_relative_time(rfc3339: &str) -> String {

@@ -84,6 +84,8 @@ pub trait ClawDecisionRepository {
     fn decision_show(&self, id: &str) -> Result<Option<ClawDecision>>;
     fn decision_list_by_spec(&self, spec_id: &str, limit: usize) -> Result<Vec<ClawDecision>>;
     fn decision_count(&self, repo: Option<&str>) -> Result<i64>;
+    /// 특정 work_id에 대한 가장 최근 decision 조회
+    fn decision_pending_for_work_id(&self, work_id: &str) -> Result<Option<ClawDecision>>;
 }
 
 pub trait CronRepository {
