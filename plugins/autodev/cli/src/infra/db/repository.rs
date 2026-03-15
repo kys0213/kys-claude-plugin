@@ -1007,43 +1007,46 @@ impl CronRepository for Database {
     fn cron_remove(&self, name: &str, repo: Option<&str>) -> Result<()> {
         let conn = self.conn();
 
-        // Check if builtin
-        let (query, params): (&str, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(r) = repo {
-            (
-                "SELECT builtin FROM cron_jobs WHERE name = ?1 AND repo_id = (SELECT id FROM repositories WHERE name = ?2)",
-                vec![Box::new(name.to_string()), Box::new(r.to_string())],
-            )
-        } else {
-            (
-                "SELECT builtin FROM cron_jobs WHERE name = ?1 AND repo_id IS NULL",
-                vec![Box::new(name.to_string())],
-            )
-        };
-
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(|p| p.as_ref()).collect();
-        let builtin: i32 = conn
-            .query_row(query, params_refs.as_slice(), |row| row.get(0))
-            .map_err(|_| anyhow::anyhow!("cron job not found: {name}"))?;
-
-        if builtin != 0 {
-            anyhow::bail!("cannot remove built-in cron job: {name}");
-        }
-
+        // Atomic DELETE with builtin = 0 guard
         let rows_affected = if let Some(r) = repo {
             conn.execute(
-                "DELETE FROM cron_jobs WHERE name = ?1 AND repo_id = (SELECT id FROM repositories WHERE name = ?2)",
+                "DELETE FROM cron_jobs WHERE name = ?1 AND repo_id = (SELECT id FROM repositories WHERE name = ?2) AND builtin = 0",
                 rusqlite::params![name, r],
             )?
         } else {
             conn.execute(
-                "DELETE FROM cron_jobs WHERE name = ?1 AND repo_id IS NULL",
+                "DELETE FROM cron_jobs WHERE name = ?1 AND repo_id IS NULL AND builtin = 0",
                 rusqlite::params![name],
             )?
         };
+
         if rows_affected == 0 {
-            anyhow::bail!("cron job not found: {name}");
+            // Diagnostic: determine if the job doesn't exist or is builtin
+            let (diag_query, diag_params): (&str, Vec<Box<dyn rusqlite::types::ToSql>>) =
+                if let Some(r) = repo {
+                    (
+                        "SELECT builtin FROM cron_jobs WHERE name = ?1 AND repo_id = (SELECT id FROM repositories WHERE name = ?2)",
+                        vec![Box::new(name.to_string()), Box::new(r.to_string())],
+                    )
+                } else {
+                    (
+                        "SELECT builtin FROM cron_jobs WHERE name = ?1 AND repo_id IS NULL",
+                        vec![Box::new(name.to_string())],
+                    )
+                };
+
+            let diag_refs: Vec<&dyn rusqlite::types::ToSql> =
+                diag_params.iter().map(|p| p.as_ref()).collect();
+            match conn.query_row(diag_query, diag_refs.as_slice(), |row| row.get::<_, i32>(0)) {
+                Ok(builtin) if builtin != 0 => {
+                    anyhow::bail!("cannot remove built-in cron job: {name}");
+                }
+                _ => {
+                    anyhow::bail!("cron job not found: {name}");
+                }
+            }
         }
+
         Ok(())
     }
 
@@ -1120,11 +1123,23 @@ fn map_hitl_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HitlEvent> {
         repo_id: row.get(1)?,
         spec_id: row.get(2)?,
         work_id: row.get(3)?,
-        severity: severity_str.parse().unwrap_or(HitlSeverity::Medium),
+        severity: severity_str.parse().map_err(|e: String| {
+            rusqlite::Error::FromSqlConversionFailure(
+                4,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+            )
+        })?,
         situation: row.get(5)?,
         context: row.get(6)?,
         options: row.get(7)?,
-        status: status_str.parse().unwrap_or(HitlStatus::Pending),
+        status: status_str.parse().map_err(|e: String| {
+            rusqlite::Error::FromSqlConversionFailure(
+                8,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+            )
+        })?,
         created_at: row.get(9)?,
     })
 }
@@ -1149,7 +1164,13 @@ fn map_spec_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Spec> {
         repo_id: row.get(1)?,
         title: row.get(2)?,
         body: row.get(3)?,
-        status: status_str.parse().unwrap_or(SpecStatus::Active),
+        status: status_str.parse().map_err(|e: String| {
+            rusqlite::Error::FromSqlConversionFailure(
+                4,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+            )
+        })?,
         source_path: row.get(5)?,
         test_commands: row.get(6)?,
         acceptance_criteria: row.get(7)?,
