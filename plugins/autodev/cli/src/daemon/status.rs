@@ -2,6 +2,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::models::QueueType;
+
 // ─── Status file models ───
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9,47 +11,30 @@ pub struct DaemonStatus {
     pub updated_at: String,
     pub uptime_secs: u64,
     pub active_items: Vec<StatusItem>,
-    pub counters: StatusCounters,
+    pub wip: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusItem {
     pub work_id: String,
-    pub queue_type: String,
+    pub queue_type: QueueType,
     pub repo_name: String,
     pub number: i64,
     pub title: String,
     pub phase: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct StatusCounters {
-    pub wip: i64,
-    pub done: i64,
-    pub skip: i64,
-    pub failed: i64,
-}
-
 // ─── Build / Write / Read ───
 
-/// 활성 아이템 목록과 카운터로 DaemonStatus를 생성한다.
-pub fn build_status(
-    active_items: Vec<StatusItem>,
-    counters: &StatusCounters,
-    start_time: std::time::Instant,
-) -> DaemonStatus {
+/// 활성 아이템 목록으로 DaemonStatus를 생성한다.
+pub fn build_status(active_items: Vec<StatusItem>, start_time: std::time::Instant) -> DaemonStatus {
     let wip = active_items.len() as i64;
 
     DaemonStatus {
         updated_at: chrono::Local::now().to_rfc3339(),
         uptime_secs: start_time.elapsed().as_secs(),
         active_items,
-        counters: StatusCounters {
-            wip,
-            done: counters.done,
-            skip: counters.skip,
-            failed: counters.failed,
-        },
+        wip,
     }
 }
 
@@ -98,18 +83,13 @@ mod tests {
             uptime_secs: 3600,
             active_items: vec![StatusItem {
                 work_id: "issue:org/repo:42".to_string(),
-                queue_type: "issue".to_string(),
+                queue_type: QueueType::Issue,
                 repo_name: "org/repo".to_string(),
                 number: 42,
                 title: "Fix bug".to_string(),
                 phase: "Pending".to_string(),
             }],
-            counters: StatusCounters {
-                wip: 1,
-                done: 10,
-                skip: 2,
-                failed: 0,
-            },
+            wip: 1,
         };
 
         write_status(&path, &status);
@@ -117,8 +97,7 @@ mod tests {
 
         assert_eq!(loaded.active_items.len(), 1);
         assert_eq!(loaded.active_items[0].work_id, "issue:org/repo:42");
-        assert_eq!(loaded.counters.wip, 1);
-        assert_eq!(loaded.counters.done, 10);
+        assert_eq!(loaded.wip, 1);
     }
 
     #[test]

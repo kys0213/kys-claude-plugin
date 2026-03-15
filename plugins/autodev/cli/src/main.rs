@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use autodev::core::config;
-use autodev::core::models::NewConsumerLog;
+use autodev::core::models::{NewConsumerLog, QueueType};
 use autodev::core::repository::{ConsumerLogRepository, RepoRepository};
 use autodev::{cli as client, daemon, infra, tui};
 
@@ -437,6 +437,37 @@ enum SpecAction {
     },
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn start_daemon(
+    daemonize_flag: bool,
+    cfg: &config::models::WorkflowConfig,
+    home: &std::path::Path,
+    env: config::RealEnv,
+    gh: RealGh,
+    git: RealGit,
+    claude: RealClaude,
+    sw: RealSuggestWorkflow,
+) -> Result<()> {
+    if daemonize_flag {
+        #[cfg(unix)]
+        {
+            let log_dir = config::resolve_log_dir(&cfg.daemon.log_dir, home);
+            std::fs::create_dir_all(&log_dir)?;
+            daemon::daemonize(&log_dir)?;
+        }
+        #[cfg(not(unix))]
+        {
+            anyhow::bail!("--daemon flag is only supported on Unix systems");
+        }
+    }
+    let env: Arc<dyn config::Env> = Arc::new(env);
+    let gh: Arc<dyn infra::gh::Gh> = Arc::new(gh);
+    let git: Arc<dyn infra::git::Git> = Arc::new(git);
+    let claude: Arc<dyn infra::claude::Claude> = Arc::new(claude);
+    let sw: Arc<dyn infra::suggest_workflow::SuggestWorkflow> = Arc::new(sw);
+    daemon::start(home, env, gh, git, claude, sw).await
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -467,7 +498,6 @@ async fn main() -> Result<()> {
         use tracing_subscriber::layer::SubscriberExt;
         use tracing_subscriber::util::SubscriberInitExt;
 
-        // 우선순위: RUST_LOG 환경변수 > YAML log_level > 기본값 "info"
         let filter = if std::env::var("RUST_LOG").is_ok() {
             tracing_subscriber::EnvFilter::from_default_env()
         } else {
@@ -482,7 +512,6 @@ async fn main() -> Result<()> {
 
         Some(guard)
     } else {
-        // 우선순위: RUST_LOG 환경변수 > YAML log_level > 기본값 "info"
         let filter = if std::env::var("RUST_LOG").is_ok() {
             tracing_subscriber::EnvFilter::from_default_env()
         } else {
@@ -507,48 +536,14 @@ async fn main() -> Result<()> {
         Commands::Start {
             daemon: daemonize_flag,
         } => {
-            if daemonize_flag {
-                #[cfg(unix)]
-                {
-                    let log_dir = config::resolve_log_dir(&cfg.daemon.log_dir, &home);
-                    std::fs::create_dir_all(&log_dir)?;
-                    daemon::daemonize(&log_dir)?;
-                }
-                #[cfg(not(unix))]
-                {
-                    anyhow::bail!("--daemon flag is only supported on Unix systems");
-                }
-            }
-            let env: Arc<dyn config::Env> = Arc::new(env);
-            let gh: Arc<dyn infra::gh::Gh> = Arc::new(gh);
-            let git: Arc<dyn infra::git::Git> = Arc::new(git);
-            let claude: Arc<dyn infra::claude::Claude> = Arc::new(claude);
-            let sw: Arc<dyn infra::suggest_workflow::SuggestWorkflow> = Arc::new(sw);
-            daemon::start(&home, env, gh, git, claude, sw).await?;
+            start_daemon(daemonize_flag, &cfg, &home, env, gh, git, claude, sw).await?;
         }
         Commands::Stop => daemon::stop(&home)?,
         Commands::Restart {
             daemon: daemonize_flag,
         } => {
             daemon::stop(&home).ok();
-            if daemonize_flag {
-                #[cfg(unix)]
-                {
-                    let log_dir = config::resolve_log_dir(&cfg.daemon.log_dir, &home);
-                    std::fs::create_dir_all(&log_dir)?;
-                    daemon::daemonize(&log_dir)?;
-                }
-                #[cfg(not(unix))]
-                {
-                    anyhow::bail!("--daemon flag is only supported on Unix systems");
-                }
-            }
-            let env: Arc<dyn config::Env> = Arc::new(env);
-            let gh: Arc<dyn infra::gh::Gh> = Arc::new(gh);
-            let git: Arc<dyn infra::git::Git> = Arc::new(git);
-            let claude: Arc<dyn infra::claude::Claude> = Arc::new(claude);
-            let sw: Arc<dyn infra::suggest_workflow::SuggestWorkflow> = Arc::new(sw);
-            daemon::start(&home, env, gh, git, claude, sw).await?;
+            start_daemon(daemonize_flag, &cfg, &home, env, gh, git, claude, sw).await?;
         }
         Commands::Status => {
             let status = client::status(&db, &env)?;
@@ -830,20 +825,15 @@ async fn main() -> Result<()> {
                     eprint!("{stderr}");
                 }
 
-                // Log to DB
-                let repo_id = repo
-                    .as_ref()
-                    .and_then(|name| {
-                        db.repo_find_enabled()
-                            .ok()?
-                            .iter()
-                            .find(|r| r.name == *name)
-                            .map(|r| r.id.clone())
-                    })
+                // Log to DB — reuse repo_id from earlier lookup
+                let repo_id = extra_env
+                    .iter()
+                    .find(|(k, _)| k == "AUTODEV_REPO_ID")
+                    .map(|(_, v)| v.clone())
                     .unwrap_or_else(|| "global".to_string());
                 let log = NewConsumerLog {
                     repo_id,
-                    queue_type: "agent".to_string(),
+                    queue_type: QueueType::Agent.to_string(),
                     queue_item_id: "headless".to_string(),
                     worker_id: "agent-cli".to_string(),
                     command: format!("claude --print -p \"{}\"", prompt_text),

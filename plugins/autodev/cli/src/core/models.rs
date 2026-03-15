@@ -4,6 +4,27 @@ use serde::{Deserialize, Serialize};
 
 use super::labels;
 
+// ─── Label trait ───
+
+/// Label 기반 상태 판별을 공유하는 trait.
+/// RepoIssue, RepoPull 등 GitHub 엔티티에서 공통으로 사용한다.
+pub trait HasLabels {
+    fn labels(&self) -> &[String];
+
+    fn has_label(&self, label: &str) -> bool {
+        self.labels().iter().any(|l| l == label)
+    }
+    fn is_wip(&self) -> bool {
+        self.has_label(labels::WIP)
+    }
+    fn is_done(&self) -> bool {
+        self.has_label(labels::DONE)
+    }
+    fn is_terminal(&self) -> bool {
+        self.is_done() || self.has_label(labels::SKIP)
+    }
+}
+
 // ─── Input models (INSERT) ───
 
 pub struct NewConsumerLog {
@@ -66,19 +87,6 @@ impl RepoIssue {
         })
     }
 
-    pub fn has_label(&self, label: &str) -> bool {
-        self.labels.iter().any(|l| l == label)
-    }
-
-    pub fn is_wip(&self) -> bool {
-        self.has_label(labels::WIP)
-    }
-    pub fn is_done(&self) -> bool {
-        self.has_label(labels::DONE)
-    }
-    pub fn is_terminal(&self) -> bool {
-        self.is_done() || self.has_label(labels::SKIP)
-    }
     pub fn is_analyze(&self) -> bool {
         self.has_label(labels::ANALYZE)
     }
@@ -90,6 +98,12 @@ impl RepoIssue {
     }
     pub fn is_implementing(&self) -> bool {
         self.has_label(labels::IMPLEMENTING)
+    }
+}
+
+impl HasLabels for RepoIssue {
+    fn labels(&self) -> &[String] {
+        &self.labels
     }
 }
 
@@ -129,23 +143,18 @@ impl RepoPull {
         })
     }
 
-    pub fn has_label(&self, label: &str) -> bool {
-        self.labels.iter().any(|l| l == label)
-    }
-
-    pub fn is_wip(&self) -> bool {
-        self.has_label(labels::WIP)
-    }
-    pub fn is_done(&self) -> bool {
-        self.has_label(labels::DONE)
-    }
-    pub fn is_terminal(&self) -> bool {
-        self.is_done() || self.has_label(labels::SKIP)
-    }
     pub fn is_changes_requested(&self) -> bool {
         self.has_label(labels::CHANGES_REQUESTED)
     }
+}
 
+impl HasLabels for RepoPull {
+    fn labels(&self) -> &[String] {
+        &self.labels
+    }
+}
+
+impl RepoPull {
     /// PR body에서 `Closes #N`, `Fixes #N`, `Resolves #N` 패턴을 파싱하여
     /// source issue number를 추출한다.
     pub fn source_issue_number(&self) -> Option<i64> {
@@ -315,6 +324,8 @@ impl fmt::Display for QueuePhase {
 pub enum QueueType {
     Issue,
     Pr,
+    Knowledge,
+    Agent,
 }
 
 impl QueueType {
@@ -322,6 +333,8 @@ impl QueueType {
         match self {
             QueueType::Issue => "issue",
             QueueType::Pr => "pr",
+            QueueType::Knowledge => "knowledge",
+            QueueType::Agent => "agent",
         }
     }
 }
@@ -333,6 +346,8 @@ impl std::str::FromStr for QueueType {
         match s {
             "issue" => Ok(QueueType::Issue),
             "pr" => Ok(QueueType::Pr),
+            "knowledge" => Ok(QueueType::Knowledge),
+            "agent" => Ok(QueueType::Agent),
             _ => Err(format!("invalid queue type: {s}")),
         }
     }

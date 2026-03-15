@@ -125,6 +125,7 @@ impl GitRepositoryFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::models::HasLabels;
     use crate::infra::gh::mock::MockGh;
 
     fn mock_env() -> impl Env {

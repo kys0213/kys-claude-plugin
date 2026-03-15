@@ -25,7 +25,7 @@ pub enum Panel {
 pub struct ActiveItem {
     #[allow(dead_code)]
     pub id: String,
-    pub queue_type: String, // "issue" | "pr" | "merge"
+    pub queue_type: crate::core::models::QueueType,
     pub repo_name: String,
     pub number: i64,
     pub title: String,
@@ -140,10 +140,10 @@ pub fn query_active_items(status_path: &std::path::Path) -> Vec<ActiveItem> {
 pub fn query_label_counts(status_path: &std::path::Path) -> LabelCounts {
     match crate::daemon::status::read_status(status_path) {
         Some(s) => LabelCounts {
-            wip: s.counters.wip,
-            done: s.counters.done,
-            skip: s.counters.skip,
-            failed: s.counters.failed,
+            wip: s.wip,
+            done: 0,
+            skip: 0,
+            failed: 0,
         },
         None => LabelCounts::default(),
     }
