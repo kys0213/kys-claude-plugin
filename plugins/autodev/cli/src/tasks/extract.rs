@@ -19,10 +19,10 @@ use super::AGENT_SYSTEM_PROMPT;
 use crate::core::config::Env;
 use crate::core::labels;
 use crate::core::models::{NewConsumerLog, QueueType};
+use crate::core::queue_item::QueueItem;
 use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
-use crate::core::task_queues::PrItem;
 use crate::infra::claude::SessionOptions;
 use crate::infra::gh::Gh;
 use crate::infra::git::Git;
@@ -43,7 +43,7 @@ pub struct ExtractTask {
     sw: Arc<dyn SuggestWorkflow>,
     git: Arc<dyn Git>,
     env: Arc<dyn Env>,
-    item: PrItem,
+    item: QueueItem,
     worker_id: String,
     task_id: String,
     wt_path: Option<PathBuf>,
@@ -57,7 +57,7 @@ impl ExtractTask {
         sw: Arc<dyn SuggestWorkflow>,
         git: Arc<dyn Git>,
         env: Arc<dyn Env>,
-        item: PrItem,
+        item: QueueItem,
     ) -> Self {
         let task_id = format!("extract-pr-{}", item.github_number);
         Self {
@@ -104,11 +104,7 @@ impl Task for ExtractTask {
                 ))
             })?;
 
-        let branch = if self.item.head_branch.is_empty() {
-            None
-        } else {
-            Some(self.item.head_branch.as_str())
-        };
+        let branch = self.item.head_branch();
 
         // 이전 시도에서 남은 worktree 정리 후 재생성
         let _ = self
@@ -278,7 +274,8 @@ mod tests {
     use std::path::Path;
     use std::time::Duration;
 
-    use crate::core::task_queues::make_work_id;
+    use crate::core::phase::TaskKind;
+    use crate::core::queue_item::testing::test_pr_with_source;
     use crate::infra::gh::mock::MockGh;
     use crate::infra::suggest_workflow::SuggestWorkflow;
     use crate::tasks::knowledge::models::ToolFrequencyEntry;
@@ -391,21 +388,8 @@ mod tests {
 
     // ─── Helpers ───
 
-    fn make_test_pr() -> PrItem {
-        PrItem {
-            work_id: make_work_id("pr", "org/repo", 10),
-            repo_id: "r1".to_string(),
-            repo_name: "org/repo".to_string(),
-            repo_url: "https://github.com/org/repo".to_string(),
-            github_number: 10,
-            title: "Fix bug".to_string(),
-            head_branch: "autodev/issue-42".to_string(),
-            base_branch: "main".to_string(),
-            review_comment: None,
-            source_issue_number: Some(42),
-            review_iteration: 1,
-            gh_host: None,
-        }
+    fn make_test_pr() -> QueueItem {
+        test_pr_with_source(10, TaskKind::Extract, Some(42), 1)
     }
 
     fn make_task(gh: Arc<MockGh>, sw: Arc<dyn SuggestWorkflow>) -> ExtractTask {

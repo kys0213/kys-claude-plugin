@@ -14,11 +14,12 @@ use uuid::Uuid;
 use super::AGENT_SYSTEM_PROMPT;
 use crate::core::config::ConfigLoader;
 use crate::core::labels;
-use crate::core::models::{NewConsumerLog, QueueType};
+use crate::core::models::{NewConsumerLog, QueuePhase, QueueType};
+use crate::core::phase::TaskKind;
+use crate::core::queue_item::{ItemMetadata, QueueItem, RepoRef};
 use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
-use crate::core::task_queues::{make_work_id, pr_phase, IssueItem, PrItem};
 use crate::infra::claude::output;
 use crate::infra::claude::SessionOptions;
 use crate::infra::gh::Gh;
@@ -74,7 +75,7 @@ pub struct ImplementTask {
     workspace: Arc<dyn WorkspaceOps>,
     gh: Arc<dyn Gh>,
     config: Arc<dyn ConfigLoader>,
-    item: IssueItem,
+    item: QueueItem,
     worker_id: String,
     task_id: String,
     wt_path: Option<PathBuf>,
@@ -86,7 +87,7 @@ impl ImplementTask {
         workspace: Arc<dyn WorkspaceOps>,
         gh: Arc<dyn Gh>,
         config: Arc<dyn ConfigLoader>,
-        item: IssueItem,
+        item: QueueItem,
     ) -> Self {
         let task_id = format!("issue-{}", item.github_number);
         Self {
@@ -305,25 +306,29 @@ impl Task for ImplementTask {
 
         match pr_number {
             Some(pr_num) => {
-                let pr_work_id = make_work_id("pr", &self.item.repo_name, pr_num);
                 self.gh
                     .label_add(&self.item.repo_name, pr_num, labels::WIP, gh_host)
                     .await;
 
-                let pr_item = PrItem {
-                    work_id: pr_work_id,
-                    repo_id: self.item.repo_id.clone(),
-                    repo_name: self.item.repo_name.clone(),
-                    repo_url: self.item.repo_url.clone(),
-                    github_number: pr_num,
-                    title: format!("PR #{pr_num} (from issue #{})", self.item.github_number),
-                    head_branch: String::new(),
-                    base_branch: String::new(),
-                    review_comment: None,
-                    source_issue_number: Some(self.item.github_number),
-                    review_iteration: 0,
+                let repo = RepoRef {
+                    id: self.item.repo_id.clone(),
+                    name: self.item.repo_name.clone(),
+                    url: self.item.repo_url.clone(),
                     gh_host: self.item.gh_host.clone(),
                 };
+                let pr_item = QueueItem::new_pr(
+                    &repo,
+                    pr_num,
+                    TaskKind::Review,
+                    format!("PR #{pr_num} (from issue #{})", self.item.github_number),
+                    ItemMetadata::Pr {
+                        head_branch: String::new(),
+                        base_branch: String::new(),
+                        review_comment: None,
+                        source_issue_number: Some(self.item.github_number),
+                        review_iteration: 0,
+                    },
+                );
 
                 let pr_comment = format!(
                     "<!-- autodev:pr-link:{pr_num} -->\n\
@@ -339,8 +344,8 @@ impl Task for ImplementTask {
                     .await;
 
                 ops.push(QueueOp::Remove);
-                ops.push(QueueOp::PushPr {
-                    phase: pr_phase::PENDING,
+                ops.push(QueueOp::Push {
+                    phase: QueuePhase::Pending,
                     item: Box::new(pr_item),
                 });
                 tracing::info!(
@@ -410,6 +415,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::core::config::models::WorkflowConfig;
+    use crate::core::queue_item::testing::{test_repo, test_repo_named};
     use crate::infra::gh::mock::MockGh;
 
     // ─── Mock WorkspaceOps ───
@@ -475,20 +481,16 @@ mod tests {
 
     // ─── Test helpers ───
 
-    fn make_test_issue() -> IssueItem {
-        IssueItem {
-            work_id: make_work_id("issue", "org/repo", 42),
-            repo_id: "r1".to_string(),
-            repo_name: "org/repo".to_string(),
-            repo_url: "https://github.com/org/repo".to_string(),
-            github_number: 42,
-            title: "Fix login bug".to_string(),
-            body: Some("Users cannot log in".to_string()),
-            labels: vec![],
-            author: "user".to_string(),
-            analysis_report: None,
-            gh_host: None,
-        }
+    fn make_test_issue() -> QueueItem {
+        QueueItem::new_issue(
+            &test_repo(),
+            42,
+            TaskKind::Implement,
+            "Fix login bug".into(),
+            Some("Users cannot log in".into()),
+            vec![],
+            "user".into(),
+        )
     }
 
     fn make_task(gh: Arc<MockGh>) -> ImplementTask {
@@ -500,7 +502,7 @@ mod tests {
     fn make_task_with_issue(
         gh: Arc<MockGh>,
         ws: Arc<MockWorkspace>,
-        item: IssueItem,
+        item: QueueItem,
     ) -> ImplementTask {
         let cfg = Arc::new(MockConfigLoader);
         ImplementTask::new(ws, gh, cfg, item)
@@ -578,14 +580,14 @@ mod tests {
 
         assert!(matches!(result.status, TaskStatus::Completed));
 
-        // Should have Remove + PushPr
+        // Should have Remove + Push
         assert!(result.queue_ops.len() >= 2);
         assert!(result
             .queue_ops
             .iter()
             .any(|op| matches!(op, QueueOp::Remove)));
         assert!(result.queue_ops.iter().any(
-            |op| matches!(op, QueueOp::PushPr { phase, item } if *phase == pr_phase::PENDING && item.github_number == 99)
+            |op| matches!(op, QueueOp::Push { phase, item } if *phase == QueuePhase::Pending && item.github_number == 99)
         ));
 
         // PR에 wip 라벨 추가됨
@@ -621,11 +623,11 @@ mod tests {
             .queue_ops
             .iter()
             .any(|op| matches!(op, QueueOp::Remove)));
-        // No PushPr
+        // No Push (only Remove)
         assert!(!result
             .queue_ops
             .iter()
-            .any(|op| matches!(op, QueueOp::PushPr { .. })));
+            .any(|op| matches!(op, QueueOp::Push { .. })));
 
         // implementing label removed
         let removed = gh.removed_labels.lock().unwrap();
@@ -720,7 +722,7 @@ mod tests {
         assert!(result
             .queue_ops
             .iter()
-            .any(|op| matches!(op, QueueOp::PushPr { item, .. } if item.github_number == 55)));
+            .any(|op| matches!(op, QueueOp::Push { item, .. } if item.github_number == 55)));
     }
 
     // ═══════════════════════════════════════════════
@@ -911,7 +913,7 @@ mod tests {
             !result
                 .queue_ops
                 .iter()
-                .any(|op| matches!(op, QueueOp::PushPr { .. })),
+                .any(|op| matches!(op, QueueOp::Push { .. })),
             "should not push mismatched PR to queue"
         );
 
@@ -954,7 +956,7 @@ mod tests {
             result
                 .queue_ops
                 .iter()
-                .any(|op| matches!(op, QueueOp::PushPr { item, .. } if item.github_number == 88)),
+                .any(|op| matches!(op, QueueOp::Push { item, .. } if item.github_number == 88)),
             "should push correct-branch PR to queue"
         );
     }
@@ -982,20 +984,16 @@ mod tests {
         let ws = Arc::new(MockWorkspace::new());
 
         // issue #131 시뮬레이션
-        let issue_131 = IssueItem {
-            work_id: make_work_id("issue", "tosspayments/node-claude-code-plugin", 131),
-            repo_id: "r1".to_string(),
-            repo_name: "tosspayments/node-claude-code-plugin".to_string(),
-            repo_url: "https://github.com/tosspayments/node-claude-code-plugin".to_string(),
-            github_number: 131,
-            title: "feat(testing): setup 시 .claude/rules에 테스트 관련 rules 설치 지원"
-                .to_string(),
-            body: Some("테스트 rules 설치 지원".to_string()),
-            labels: vec!["autodev:implementing".to_string()],
-            author: "user".to_string(),
-            analysis_report: None,
-            gh_host: None,
-        };
+        let repo_131 = test_repo_named("tosspayments/node-claude-code-plugin");
+        let issue_131 = QueueItem::new_issue(
+            &repo_131,
+            131,
+            TaskKind::Implement,
+            "feat(testing): setup 시 .claude/rules에 테스트 관련 rules 설치 지원".to_string(),
+            Some("테스트 rules 설치 지원".to_string()),
+            vec!["autodev:implementing".to_string()],
+            "user".to_string(),
+        );
 
         // GitHub API가 관련 없는 PR #75를 반환하는 상황 재현
         gh.set_paginate(
@@ -1026,7 +1024,7 @@ mod tests {
             !result
                 .queue_ops
                 .iter()
-                .any(|op| matches!(op, QueueOp::PushPr { .. })),
+                .any(|op| matches!(op, QueueOp::Push { .. })),
             "must NOT link unrelated PR #75 to issue #131"
         );
 

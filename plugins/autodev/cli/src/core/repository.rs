@@ -67,7 +67,7 @@ pub trait QueueRepository {
     /// 큐 아이템을 skip 처리한다
     fn queue_skip(&self, work_id: &str, reason: Option<&str>) -> Result<()>;
     /// 큐 아이템 목록을 조회한다 (repo별 필터 가능)
-    fn queue_list_items(&self, repo: Option<&str>) -> Result<Vec<QueueItem>>;
+    fn queue_list_items(&self, repo: Option<&str>) -> Result<Vec<QueueItemRow>>;
 }
 
 pub trait ClawDecisionRepository {

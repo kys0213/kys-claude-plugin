@@ -275,7 +275,7 @@ pub struct UsageByIssue {
 // ─── Queue models ───
 
 /// Queue item phase lifecycle
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum QueuePhase {
     Pending,
@@ -359,8 +359,9 @@ impl fmt::Display for QueueType {
     }
 }
 
+/// DB-level queue item row (CLI `queue list` 등에서 사용).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QueueItem {
+pub struct QueueItemRow {
     pub work_id: String,
     pub repo_id: String,
     pub queue_type: QueueType,

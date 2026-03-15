@@ -2,7 +2,7 @@
 //!
 //! 기존 `pipeline::pr::improve_one()`의 로직을 Task trait으로 재구성한다.
 //! before_invoke: worktree(head_branch) → 피드백 반영 프롬프트
-//! after_invoke: exit_code 확인 → iteration++ → PushPr(IMPROVED)
+//! after_invoke: exit_code 확인 → iteration++ → Push(Pending) with TaskKind::Review
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,11 +13,12 @@ use uuid::Uuid;
 
 use super::AGENT_SYSTEM_PROMPT;
 use crate::core::labels;
-use crate::core::models::{NewConsumerLog, QueueType};
+use crate::core::models::{NewConsumerLog, QueuePhase, QueueType};
+use crate::core::phase::TaskKind;
+use crate::core::queue_item::QueueItem;
 use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
-use crate::core::task_queues::{pr_phase, PrItem};
 use crate::infra::claude::SessionOptions;
 use crate::infra::gh::Gh;
 use crate::tasks::helpers::workspace::WorkspaceOps;
@@ -25,11 +26,11 @@ use crate::tasks::helpers::workspace::WorkspaceOps;
 /// PR 피드백 반영 Task.
 ///
 /// `before_invoke`에서 worktree를 준비하고 피드백 반영 프롬프트를 구성한다.
-/// `after_invoke`에서 성공 시 iteration을 증가시키고 IMPROVED 상태로 push한다.
+/// `after_invoke`에서 성공 시 iteration을 증가시키고 Pending 상태로 push한다.
 pub struct ImproveTask {
     workspace: Arc<dyn WorkspaceOps>,
     gh: Arc<dyn Gh>,
-    item: PrItem,
+    item: QueueItem,
     worker_id: String,
     task_id: String,
     wt_path: Option<PathBuf>,
@@ -37,7 +38,7 @@ pub struct ImproveTask {
 }
 
 impl ImproveTask {
-    pub fn new(workspace: Arc<dyn WorkspaceOps>, gh: Arc<dyn Gh>, item: PrItem) -> Self {
+    pub fn new(workspace: Arc<dyn WorkspaceOps>, gh: Arc<dyn Gh>, item: QueueItem) -> Self {
         let task_id = format!("pr-{}", item.github_number);
         Self {
             workspace,
@@ -80,11 +81,7 @@ impl Task for ImproveTask {
                 ))
             })?;
 
-        let branch = if self.item.head_branch.is_empty() {
-            None
-        } else {
-            Some(self.item.head_branch.as_str())
-        };
+        let branch = self.item.head_branch();
         let wt_path = self
             .workspace
             .create_worktree(&self.item.repo_name, &self.task_id, branch)
@@ -156,30 +153,32 @@ impl Task for ImproveTask {
                 .await;
 
             // Iteration 라벨 동기화
-            if self.item.review_iteration > 0 {
+            if self.item.review_iteration().unwrap_or(0) > 0 {
                 self.gh
                     .label_remove(
                         &self.item.repo_name,
                         self.item.github_number,
-                        &labels::iteration_label(self.item.review_iteration),
+                        &labels::iteration_label(self.item.review_iteration().unwrap_or(0)),
                         gh_host,
                     )
                     .await;
             }
             let mut next_item = self.item.clone();
-            next_item.review_iteration += 1;
+            let new_iteration = next_item.increment_review_iteration();
+            // In unified model, Improved → directly to Pending with TaskKind::Review
+            next_item.task_kind = TaskKind::Review;
             self.gh
                 .label_add(
                     &self.item.repo_name,
                     self.item.github_number,
-                    &labels::iteration_label(next_item.review_iteration),
+                    &labels::iteration_label(new_iteration),
                     gh_host,
                 )
                 .await;
 
             ops.push(QueueOp::Remove);
-            ops.push(QueueOp::PushPr {
-                phase: pr_phase::IMPROVED,
+            ops.push(QueueOp::Push {
+                phase: QueuePhase::Pending,
                 item: Box::new(next_item),
             });
         } else {
@@ -206,7 +205,8 @@ impl Task for ImproveTask {
                  ⚠️ Improve agent failed (exit_code={}).\n\n\
                  **Branch**: `{}`\n\
                  Check the agent logs for details.",
-                response.exit_code, self.item.head_branch
+                response.exit_code,
+                self.item.head_branch().unwrap_or("")
             );
             self.gh
                 .issue_comment(
@@ -241,7 +241,7 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    use crate::core::task_queues::make_work_id;
+    use crate::core::queue_item::testing::*;
     use crate::infra::gh::mock::MockGh;
 
     struct MockWorkspace;
@@ -264,21 +264,8 @@ mod tests {
         }
     }
 
-    fn make_test_pr() -> PrItem {
-        PrItem {
-            work_id: make_work_id("pr", "org/repo", 10),
-            repo_id: "r1".to_string(),
-            repo_name: "org/repo".to_string(),
-            repo_url: "https://github.com/org/repo".to_string(),
-            github_number: 10,
-            title: "Fix bug".to_string(),
-            head_branch: "autodev/issue-42".to_string(),
-            base_branch: "main".to_string(),
-            review_comment: Some("Fix error handling".to_string()),
-            source_issue_number: Some(42),
-            review_iteration: 0,
-            gh_host: None,
-        }
+    fn make_test_pr() -> QueueItem {
+        test_pr_with_source(10, TaskKind::Improve, Some(42), 0)
     }
 
     fn make_task(gh: Arc<MockGh>) -> ImproveTask {
@@ -312,7 +299,7 @@ mod tests {
 
         assert!(matches!(result.status, TaskStatus::Completed));
         assert!(result.queue_ops.iter().any(
-            |op| matches!(op, QueueOp::PushPr { phase, item } if *phase == pr_phase::IMPROVED && item.review_iteration == 1)
+            |op| matches!(op, QueueOp::Push { phase, item } if *phase == QueuePhase::Pending && item.review_iteration() == Some(1))
         ));
 
         // changes-requested → wip 전이
@@ -331,8 +318,7 @@ mod tests {
     #[tokio::test]
     async fn after_success_increments_iteration() {
         let gh = Arc::new(MockGh::new());
-        let mut pr = make_test_pr();
-        pr.review_iteration = 2;
+        let pr = test_pr_with_source(10, TaskKind::Improve, Some(42), 2);
         let mut task = ImproveTask::new(Arc::new(MockWorkspace), gh.clone(), pr);
         let _ = task.before_invoke().await;
 
@@ -346,10 +332,9 @@ mod tests {
         let result = task.after_invoke(response).await;
 
         // Should push with iteration 3
-        assert!(result
-            .queue_ops
-            .iter()
-            .any(|op| matches!(op, QueueOp::PushPr { item, .. } if item.review_iteration == 3)));
+        assert!(result.queue_ops.iter().any(
+            |op| matches!(op, QueueOp::Push { item, .. } if item.review_iteration() == Some(3))
+        ));
 
         // Old iteration label removed, new one added
         let removed = gh.removed_labels.lock().unwrap();
@@ -406,7 +391,7 @@ mod tests {
         assert!(!result
             .queue_ops
             .iter()
-            .any(|op| matches!(op, QueueOp::PushPr { .. })));
+            .any(|op| matches!(op, QueueOp::Push { .. })));
 
         let added = gh.added_labels.lock().unwrap();
         assert!(
