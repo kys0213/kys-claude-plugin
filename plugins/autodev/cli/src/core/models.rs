@@ -3,6 +3,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::labels;
+use super::phase::TaskKind;
 
 // ─── Label trait ───
 
@@ -370,6 +371,9 @@ pub struct QueueItemRow {
     pub skip_reason: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    pub task_kind: TaskKind,
+    pub github_number: i64,
+    pub metadata_json: Option<String>,
 }
 
 // ─── Spec models ───

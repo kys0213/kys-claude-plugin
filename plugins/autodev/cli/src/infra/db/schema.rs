@@ -1,6 +1,23 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
+/// v2 마이그레이션: queue_items에 task_kind, github_number, metadata_json 컬럼 추가.
+pub fn migrate_v2(conn: &Connection) -> Result<()> {
+    let migrations = [
+        "ALTER TABLE queue_items ADD COLUMN task_kind TEXT NOT NULL DEFAULT 'analyze'",
+        "ALTER TABLE queue_items ADD COLUMN github_number INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE queue_items ADD COLUMN metadata_json TEXT",
+    ];
+    for sql in &migrations {
+        match conn.execute(sql, []) {
+            Ok(_) => {}
+            Err(e) if e.to_string().contains("duplicate column") => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(())
+}
+
 pub fn create_tables(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "

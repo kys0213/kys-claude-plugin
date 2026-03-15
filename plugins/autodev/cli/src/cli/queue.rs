@@ -75,8 +75,14 @@ pub fn queue_list_db(
             .map(|r| format!(" [reason: {r}]"))
             .unwrap_or_default();
         output.push_str(&format!(
-            "  [{}] {} — {} ({}){}\n",
-            item.queue_type, item.work_id, item.phase, title, skip
+            "  [{}] {} — {} ({}) [{}/#{}]{}\n",
+            item.queue_type,
+            item.work_id,
+            item.phase,
+            title,
+            item.task_kind,
+            item.github_number,
+            skip
         ));
     }
     Ok(output)

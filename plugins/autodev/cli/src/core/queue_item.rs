@@ -1,4 +1,6 @@
-use super::models::{QueueType, RepoIssue, RepoPull};
+use serde::{Deserialize, Serialize};
+
+use super::models::{QueueItemRow, QueuePhase, QueueType, RepoIssue, RepoPull};
 use super::phase::TaskKind;
 use super::state_queue::HasWorkId;
 use super::task_queues::make_work_id;
@@ -22,7 +24,7 @@ pub struct RepoRef {
 ///
 /// `ItemMetadata::Pr`와 1:1 대응하지만, 독립 struct로 분리하여
 /// `new_pr` 호출부에서 Issue 메타데이터를 실수로 전달할 수 없도록 한다.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrMetadata {
     pub head_branch: String,
     pub base_branch: String,
@@ -34,7 +36,7 @@ pub struct PrMetadata {
 // ─── Internal Metadata Enum ───
 
 /// QueueItem 내부 메타데이터. 외부에서 직접 생성하지 않는다.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum ItemMetadata {
     Issue {
         body: Option<String>,
@@ -253,6 +255,76 @@ impl QueueItem {
         )
     }
 
+    /// 메타데이터를 JSON 문자열로 직렬화한다.
+    pub fn metadata_json(&self) -> Option<String> {
+        serde_json::to_string(&self.metadata).ok()
+    }
+
+    /// JSON 문자열에서 ItemMetadata를 역직렬화한다.
+    pub(crate) fn metadata_from_json(json: &str) -> Option<ItemMetadata> {
+        serde_json::from_str(json).ok()
+    }
+
+    /// QueueItem을 DB 행으로 변환한다.
+    pub fn to_row(&self, phase: QueuePhase) -> QueueItemRow {
+        let now = chrono::Utc::now().to_rfc3339();
+        QueueItemRow {
+            work_id: self.work_id.clone(),
+            repo_id: self.repo_id.clone(),
+            queue_type: self.queue_type.clone(),
+            phase,
+            title: Some(self.title.clone()),
+            skip_reason: None,
+            created_at: now.clone(),
+            updated_at: now,
+            task_kind: self.task_kind,
+            github_number: self.github_number,
+            metadata_json: self.metadata_json(),
+        }
+    }
+
+    /// DB 행에서 QueueItem을 복원한다.
+    pub fn from_row(
+        row: &QueueItemRow,
+        repo_name: &str,
+        repo_url: &str,
+        gh_host: Option<&str>,
+    ) -> Option<Self> {
+        let metadata = match &row.metadata_json {
+            Some(json) => Self::metadata_from_json(json)?,
+            None => match row.queue_type {
+                QueueType::Issue => ItemMetadata::Issue {
+                    body: None,
+                    labels: vec![],
+                    author: String::new(),
+                    analysis_report: None,
+                },
+                QueueType::Pr | QueueType::Knowledge | QueueType::Agent => {
+                    ItemMetadata::Pr(PrMetadata {
+                        head_branch: String::new(),
+                        base_branch: String::new(),
+                        review_comment: None,
+                        source_issue_number: None,
+                        review_iteration: 0,
+                    })
+                }
+            },
+        };
+
+        Some(Self {
+            work_id: row.work_id.clone(),
+            repo_id: row.repo_id.clone(),
+            repo_name: repo_name.to_string(),
+            repo_url: repo_url.to_string(),
+            github_number: row.github_number,
+            queue_type: row.queue_type.clone(),
+            task_kind: row.task_kind,
+            title: row.title.clone().unwrap_or_default(),
+            metadata,
+            gh_host: gh_host.map(|s| s.to_string()),
+        })
+    }
+
     /// PR QueueItem 생성
     pub fn new_pr(
         repo: &RepoRef,
@@ -459,5 +531,67 @@ mod tests {
         );
         assert_eq!(item.head_branch(), None);
         assert_eq!(item.base_branch(), None);
+    }
+
+    #[test]
+    fn metadata_json_roundtrip_issue() {
+        let item = test_issue(42, TaskKind::Analyze);
+        let json = item.metadata_json().unwrap();
+        let meta = QueueItem::metadata_from_json(&json).unwrap();
+        match meta {
+            ItemMetadata::Issue { body, author, .. } => {
+                assert_eq!(body.as_deref(), Some("test body"));
+                assert_eq!(author, "user");
+            }
+            _ => panic!("expected Issue metadata"),
+        }
+    }
+
+    #[test]
+    fn metadata_json_roundtrip_pr() {
+        let item = test_pr_with_source(10, TaskKind::Review, Some(42), 3);
+        let json = item.metadata_json().unwrap();
+        let meta = QueueItem::metadata_from_json(&json).unwrap();
+        match meta {
+            ItemMetadata::Pr(pr) => {
+                assert_eq!(pr.head_branch, "autodev/issue-42");
+                assert_eq!(pr.base_branch, "main");
+                assert_eq!(pr.source_issue_number, Some(42));
+                assert_eq!(pr.review_iteration, 3);
+            }
+            _ => panic!("expected Pr metadata"),
+        }
+    }
+
+    #[test]
+    fn queue_item_to_row_roundtrip() {
+        let item = test_issue(42, TaskKind::Analyze);
+        let row = item.to_row(QueuePhase::Pending);
+
+        assert_eq!(row.work_id, "issue:org/repo:42");
+        assert_eq!(row.task_kind, TaskKind::Analyze);
+        assert_eq!(row.github_number, 42);
+        assert!(row.metadata_json.is_some());
+
+        let restored =
+            QueueItem::from_row(&row, "org/repo", "https://github.com/org/repo", None).unwrap();
+        assert_eq!(restored.work_id, item.work_id);
+        assert_eq!(restored.github_number, item.github_number);
+        assert_eq!(restored.task_kind, item.task_kind);
+        assert_eq!(restored.body(), item.body());
+        assert_eq!(restored.author(), item.author());
+    }
+
+    #[test]
+    fn from_row_with_null_metadata_creates_default() {
+        let mut row = test_issue(42, TaskKind::Analyze).to_row(QueuePhase::Pending);
+        row.metadata_json = None;
+
+        let restored =
+            QueueItem::from_row(&row, "org/repo", "https://github.com/org/repo", None).unwrap();
+        assert_eq!(restored.work_id, "issue:org/repo:42");
+        // Default Issue metadata has empty fields
+        assert_eq!(restored.body(), None);
+        assert_eq!(restored.author(), Some(""));
     }
 }
