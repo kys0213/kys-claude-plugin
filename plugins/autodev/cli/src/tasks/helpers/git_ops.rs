@@ -4,7 +4,7 @@ use serde::Deserialize;
 use crate::core::labels;
 use crate::core::models::{HasLabels, QueuePhase, QueueType, RepoIssue, RepoPull};
 use crate::core::phase::TaskKind;
-use crate::core::queue_item::{ItemMetadata, QueueItem, RepoRef};
+use crate::core::queue_item::{PrMetadata, QueueItem, RepoRef};
 use crate::core::repository::ScanCursorRepository;
 use crate::core::state_queue::StateQueue;
 use crate::core::task_queues::make_work_id;
@@ -151,7 +151,7 @@ impl GitRepository {
     }
 
     /// PR을 QueueItem으로 변환하여 Pending 큐에 추가한다.
-    fn enqueue_pr(&mut self, number: i64, task_kind: TaskKind, title: String, meta: ItemMetadata) {
+    fn enqueue_pr(&mut self, number: i64, task_kind: TaskKind, title: String, meta: PrMetadata) {
         let repo = self.repo_ref();
         let item = QueueItem::new_pr(&repo, number, task_kind, title, meta);
         self.queue.push(QueuePhase::Pending, item);
@@ -399,7 +399,7 @@ impl GitRepository {
                 number,
                 target_kind,
                 title,
-                ItemMetadata::Pr {
+                PrMetadata {
                     head_branch,
                     base_branch,
                     review_comment: None,
@@ -496,7 +496,7 @@ impl GitRepository {
                 number,
                 TaskKind::Extract,
                 title,
-                ItemMetadata::Pr {
+                PrMetadata {
                     head_branch,
                     base_branch,
                     review_comment: None,
@@ -911,7 +911,7 @@ mod tests {
             number,
             TaskKind::Review,
             format!("PR #{number}"),
-            ItemMetadata::Pr {
+            PrMetadata {
                 head_branch: "feature".into(),
                 base_branch: "main".into(),
                 review_comment: None,
@@ -1275,7 +1275,7 @@ mod tests {
                 10,
                 TaskKind::Review,
                 "already queued".to_string(),
-                ItemMetadata::Pr {
+                PrMetadata {
                     head_branch: "fix-bug".to_string(),
                     base_branch: "main".to_string(),
                     review_comment: None,

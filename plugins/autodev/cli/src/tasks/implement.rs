@@ -16,7 +16,7 @@ use crate::core::config::ConfigLoader;
 use crate::core::labels;
 use crate::core::models::{NewConsumerLog, QueuePhase, QueueType};
 use crate::core::phase::TaskKind;
-use crate::core::queue_item::{ItemMetadata, QueueItem, RepoRef};
+use crate::core::queue_item::{PrMetadata, QueueItem, RepoRef};
 use crate::core::task::{
     AgentRequest, AgentResponse, QueueOp, SkipReason, Task, TaskResult, TaskStatus,
 };
@@ -321,7 +321,7 @@ impl Task for ImplementTask {
                     pr_num,
                     TaskKind::Review,
                     format!("PR #{pr_num} (from issue #{})", self.item.github_number),
-                    ItemMetadata::Pr {
+                    PrMetadata {
                         head_branch: String::new(),
                         base_branch: String::new(),
                         review_comment: None,

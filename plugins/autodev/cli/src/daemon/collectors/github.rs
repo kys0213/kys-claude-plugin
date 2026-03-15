@@ -383,7 +383,7 @@ mod tests {
     use crate::core::config::models::WorkflowConfig;
     use crate::core::models::EnabledRepo;
     use crate::core::queue_item::testing::test_repo_named;
-    use crate::core::queue_item::{ItemMetadata, QueueItem};
+    use crate::core::queue_item::{PrMetadata, QueueItem};
     use crate::infra::gh::mock::MockGh;
     use crate::infra::git::Git;
     use crate::infra::suggest_workflow::SuggestWorkflow;
@@ -557,7 +557,7 @@ mod tests {
                 number,
                 task_kind,
                 format!("PR #{number}"),
-                ItemMetadata::Pr {
+                PrMetadata {
                     head_branch: "feat".into(),
                     base_branch: "main".into(),
                     review_comment: None,

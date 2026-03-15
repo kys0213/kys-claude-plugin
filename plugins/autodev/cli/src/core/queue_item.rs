@@ -16,6 +16,35 @@ pub struct RepoRef {
     pub gh_host: Option<String>,
 }
 
+// ─── Typed Metadata ───
+
+/// PR 전용 메타데이터. `QueueItem::new_pr`의 파라미터 타입.
+///
+/// `ItemMetadata::Pr`와 1:1 대응하지만, 독립 struct로 분리하여
+/// `new_pr` 호출부에서 Issue 메타데이터를 실수로 전달할 수 없도록 한다.
+#[derive(Debug, Clone)]
+pub struct PrMetadata {
+    pub head_branch: String,
+    pub base_branch: String,
+    pub review_comment: Option<String>,
+    pub source_issue_number: Option<i64>,
+    pub review_iteration: u32,
+}
+
+// ─── Internal Metadata Enum ───
+
+/// QueueItem 내부 메타데이터. 외부에서 직접 생성하지 않는다.
+#[derive(Debug, Clone)]
+pub(crate) enum ItemMetadata {
+    Issue {
+        body: Option<String>,
+        labels: Vec<String>,
+        author: String,
+        analysis_report: Option<String>,
+    },
+    Pr(PrMetadata),
+}
+
 // ─── Unified In-Memory Work Item ───
 
 /// 통합 큐 아이템.
@@ -32,27 +61,9 @@ pub struct QueueItem {
     pub queue_type: QueueType,
     pub task_kind: TaskKind,
     pub title: String,
-    pub metadata: ItemMetadata,
+    pub(crate) metadata: ItemMetadata,
     /// GHE hostname (e.g. "git.example.com"). None이면 github.com.
     pub gh_host: Option<String>,
-}
-
-/// Issue/PR 고유 메타데이터.
-#[derive(Debug, Clone)]
-pub enum ItemMetadata {
-    Issue {
-        body: Option<String>,
-        labels: Vec<String>,
-        author: String,
-        analysis_report: Option<String>,
-    },
-    Pr {
-        head_branch: String,
-        base_branch: String,
-        review_comment: Option<String>,
-        source_issue_number: Option<i64>,
-        review_iteration: u32,
-    },
 }
 
 impl HasWorkId for QueueItem {
@@ -114,7 +125,7 @@ impl QueueItem {
     /// PR head branch (PR일 때만). Issue이거나 빈 문자열이면 None.
     pub fn head_branch(&self) -> Option<&str> {
         match &self.metadata {
-            ItemMetadata::Pr { head_branch, .. } if !head_branch.is_empty() => Some(head_branch),
+            ItemMetadata::Pr(pr) if !pr.head_branch.is_empty() => Some(&pr.head_branch),
             _ => None,
         }
     }
@@ -122,7 +133,7 @@ impl QueueItem {
     /// PR base branch (PR일 때만). Issue이거나 빈 문자열이면 None.
     pub fn base_branch(&self) -> Option<&str> {
         match &self.metadata {
-            ItemMetadata::Pr { base_branch, .. } if !base_branch.is_empty() => Some(base_branch),
+            ItemMetadata::Pr(pr) if !pr.base_branch.is_empty() => Some(&pr.base_branch),
             _ => None,
         }
     }
@@ -130,7 +141,7 @@ impl QueueItem {
     /// PR review comment (PR일 때만)
     pub fn review_comment(&self) -> Option<&str> {
         match &self.metadata {
-            ItemMetadata::Pr { review_comment, .. } => review_comment.as_deref(),
+            ItemMetadata::Pr(pr) => pr.review_comment.as_deref(),
             _ => None,
         }
     }
@@ -138,10 +149,7 @@ impl QueueItem {
     /// PR source issue number (PR일 때만)
     pub fn source_issue_number(&self) -> Option<i64> {
         match &self.metadata {
-            ItemMetadata::Pr {
-                source_issue_number,
-                ..
-            } => *source_issue_number,
+            ItemMetadata::Pr(pr) => pr.source_issue_number,
             _ => None,
         }
     }
@@ -149,15 +157,12 @@ impl QueueItem {
     /// PR review iteration (PR일 때만). Issue이면 None.
     pub fn review_iteration(&self) -> Option<u32> {
         match &self.metadata {
-            ItemMetadata::Pr {
-                review_iteration, ..
-            } => Some(*review_iteration),
+            ItemMetadata::Pr(pr) => Some(pr.review_iteration),
             _ => None,
         }
     }
 
     /// PR review iteration (PR이 아니면 0).
-    /// unwrap_or(0) 반복을 피하기 위한 편의 메서드.
     pub fn review_iteration_or_zero(&self) -> u32 {
         self.review_iteration().unwrap_or(0)
     }
@@ -174,19 +179,16 @@ impl QueueItem {
 
     /// Set review_comment on PR metadata
     pub fn set_review_comment(&mut self, comment: Option<String>) {
-        if let ItemMetadata::Pr { review_comment, .. } = &mut self.metadata {
-            *review_comment = comment;
+        if let ItemMetadata::Pr(pr) = &mut self.metadata {
+            pr.review_comment = comment;
         }
     }
 
     /// Increment review_iteration on PR metadata, returning the new value
     pub fn increment_review_iteration(&mut self) -> u32 {
-        if let ItemMetadata::Pr {
-            review_iteration, ..
-        } = &mut self.metadata
-        {
-            *review_iteration += 1;
-            *review_iteration
+        if let ItemMetadata::Pr(pr) = &mut self.metadata {
+            pr.review_iteration += 1;
+            pr.review_iteration
         } else {
             0
         }
@@ -241,7 +243,7 @@ impl QueueItem {
             pull.number,
             task_kind,
             pull.title.clone(),
-            ItemMetadata::Pr {
+            PrMetadata {
                 head_branch: pull.head_branch.clone(),
                 base_branch: pull.base_branch.clone(),
                 review_comment: None,
@@ -257,9 +259,8 @@ impl QueueItem {
         github_number: i64,
         task_kind: TaskKind,
         title: String,
-        metadata: ItemMetadata,
+        pr: PrMetadata,
     ) -> Self {
-        debug_assert!(matches!(metadata, ItemMetadata::Pr { .. }));
         Self {
             work_id: make_work_id(QueueType::Pr, &repo.name, github_number),
             repo_id: repo.id.clone(),
@@ -269,7 +270,7 @@ impl QueueItem {
             queue_type: QueueType::Pr,
             task_kind,
             title,
-            metadata,
+            metadata: ItemMetadata::Pr(pr),
             gh_host: repo.gh_host.clone(),
         }
     }
@@ -322,7 +323,7 @@ pub mod testing {
             number,
             task_kind,
             format!("PR #{number}"),
-            ItemMetadata::Pr {
+            PrMetadata {
                 head_branch: "autodev/issue-42".into(),
                 base_branch: "main".into(),
                 review_comment: None,
@@ -344,7 +345,7 @@ pub mod testing {
             number,
             task_kind,
             format!("PR #{number}"),
-            ItemMetadata::Pr {
+            PrMetadata {
                 head_branch: "autodev/issue-42".into(),
                 base_branch: "main".into(),
                 review_comment: None,
@@ -386,7 +387,7 @@ mod tests {
             10,
             TaskKind::Review,
             "PR #10".into(),
-            ItemMetadata::Pr {
+            PrMetadata {
                 head_branch: "feat".into(),
                 base_branch: "main".into(),
                 review_comment: None,
@@ -424,7 +425,7 @@ mod tests {
             10,
             TaskKind::Review,
             "PR".into(),
-            ItemMetadata::Pr {
+            PrMetadata {
                 head_branch: "feat".into(),
                 base_branch: "main".into(),
                 review_comment: None,
@@ -439,5 +440,24 @@ mod tests {
         let new_iter = item.increment_review_iteration();
         assert_eq!(new_iter, 1);
         assert_eq!(item.review_iteration(), Some(1));
+    }
+
+    #[test]
+    fn empty_head_branch_returns_none() {
+        let item = QueueItem::new_pr(
+            &test_repo(),
+            10,
+            TaskKind::Review,
+            "PR".into(),
+            PrMetadata {
+                head_branch: String::new(),
+                base_branch: String::new(),
+                review_comment: None,
+                source_issue_number: None,
+                review_iteration: 0,
+            },
+        );
+        assert_eq!(item.head_branch(), None);
+        assert_eq!(item.base_branch(), None);
     }
 }
