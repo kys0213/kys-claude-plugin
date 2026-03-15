@@ -111,18 +111,18 @@ impl QueueItem {
         }
     }
 
-    /// PR head branch (PR일 때만). Issue이면 None.
+    /// PR head branch (PR일 때만). Issue이거나 빈 문자열이면 None.
     pub fn head_branch(&self) -> Option<&str> {
         match &self.metadata {
-            ItemMetadata::Pr { head_branch, .. } => Some(head_branch),
+            ItemMetadata::Pr { head_branch, .. } if !head_branch.is_empty() => Some(head_branch),
             _ => None,
         }
     }
 
-    /// PR base branch (PR일 때만). Issue이면 None.
+    /// PR base branch (PR일 때만). Issue이거나 빈 문자열이면 None.
     pub fn base_branch(&self) -> Option<&str> {
         match &self.metadata {
-            ItemMetadata::Pr { base_branch, .. } => Some(base_branch),
+            ItemMetadata::Pr { base_branch, .. } if !base_branch.is_empty() => Some(base_branch),
             _ => None,
         }
     }
