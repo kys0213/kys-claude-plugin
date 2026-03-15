@@ -290,7 +290,9 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> GitHubTaskSource<DB> {
                 )));
             }
 
-            // PR: Pending(Extract) → fire-and-forget (batch drain, immediate removal)
+            // PR: Pending(Extract) → fire-and-forget
+            // Extract는 PR이 이미 done 상태이므로 큐에 남겨둘 필요 없음.
+            // drain_to_filtered로 꺼낸 뒤 즉시 remove하여 Running에 잔류하지 않도록 한다.
             let extract_items = repo.queue.drain_to_filtered(
                 QueuePhase::Pending,
                 QueuePhase::Running,
@@ -550,7 +552,7 @@ mod tests {
                 vec![],
                 "user".into(),
             ),
-            _ => QueueItem::new_pr(
+            QueueType::Pr | QueueType::Knowledge | QueueType::Agent => QueueItem::new_pr(
                 &repo,
                 number,
                 task_kind,
