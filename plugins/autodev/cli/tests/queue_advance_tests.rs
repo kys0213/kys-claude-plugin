@@ -1,3 +1,4 @@
+use autodev::core::models::QueuePhase;
 use autodev::core::repository::*;
 use autodev::infra::db::Database;
 use std::path::Path;
@@ -37,7 +38,7 @@ fn get_phase_returns_current_phase() {
     insert_queue_item(&db, &repo_id, "work-1", "pending");
 
     let phase = db.queue_get_phase("work-1").unwrap();
-    assert_eq!(phase, Some("pending".to_string()));
+    assert_eq!(phase, Some(QueuePhase::Pending));
 }
 
 #[test]
@@ -61,7 +62,7 @@ fn advance_pending_to_ready() {
     db.queue_advance("work-1").unwrap();
 
     let phase = db.queue_get_phase("work-1").unwrap();
-    assert_eq!(phase, Some("ready".to_string()));
+    assert_eq!(phase, Some(QueuePhase::Ready));
 }
 
 #[test]
@@ -73,7 +74,7 @@ fn advance_ready_to_running() {
     db.queue_advance("work-1").unwrap();
 
     let phase = db.queue_get_phase("work-1").unwrap();
-    assert_eq!(phase, Some("running".to_string()));
+    assert_eq!(phase, Some(QueuePhase::Running));
 }
 
 #[test]
@@ -85,7 +86,7 @@ fn advance_running_to_done() {
     db.queue_advance("work-1").unwrap();
 
     let phase = db.queue_get_phase("work-1").unwrap();
-    assert_eq!(phase, Some("done".to_string()));
+    assert_eq!(phase, Some(QueuePhase::Done));
 }
 
 #[test]
@@ -132,7 +133,7 @@ fn skip_pending_with_reason() {
     db.queue_skip("work-1", Some("not needed")).unwrap();
 
     let phase = db.queue_get_phase("work-1").unwrap();
-    assert_eq!(phase, Some("skipped".to_string()));
+    assert_eq!(phase, Some(QueuePhase::Skipped));
 
     let items = db.queue_list_items(None).unwrap();
     let item = items.iter().find(|i| i.work_id == "work-1").unwrap();
@@ -148,7 +149,7 @@ fn skip_ready_without_reason() {
     db.queue_skip("work-1", None).unwrap();
 
     let phase = db.queue_get_phase("work-1").unwrap();
-    assert_eq!(phase, Some("skipped".to_string()));
+    assert_eq!(phase, Some(QueuePhase::Skipped));
 }
 
 #[test]
@@ -224,7 +225,7 @@ fn cli_queue_advance_changes_phase() {
     assert!(output.contains("ready"));
 
     let phase = db.queue_get_phase("work-cli-1").unwrap();
-    assert_eq!(phase, Some("ready".to_string()));
+    assert_eq!(phase, Some(QueuePhase::Ready));
 }
 
 #[test]
@@ -240,7 +241,7 @@ fn cli_queue_skip_stores_reason() {
 
     let items = db.queue_list_items(None).unwrap();
     let item = items.iter().find(|i| i.work_id == "work-cli-2").unwrap();
-    assert_eq!(item.phase, "skipped");
+    assert_eq!(item.phase, QueuePhase::Skipped);
     assert_eq!(item.skip_reason.as_deref(), Some("duplicate issue"));
 }
 

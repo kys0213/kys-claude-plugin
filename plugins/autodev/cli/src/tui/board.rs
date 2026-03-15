@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use anyhow::Result;
 
 use crate::core::board::*;
+use crate::core::models::QueuePhase;
 use crate::core::repository::*;
 use crate::infra::db::Database;
 
@@ -40,7 +41,7 @@ impl BoardStateBuilder {
             // Pre-compute: set of done work_ids for this repo
             let done_work_ids: HashSet<&str> = repo_items
                 .iter()
-                .filter(|qi| qi.phase == "done")
+                .filter(|qi| qi.phase == QueuePhase::Done)
                 .map(|qi| qi.work_id.as_str())
                 .collect();
 
@@ -76,11 +77,11 @@ impl BoardStateBuilder {
                     let phase = col_name.to_lowercase();
                     let items: Vec<BoardItem> = repo_items
                         .iter()
-                        .filter(|qi| qi.phase == phase)
+                        .filter(|qi| qi.phase.as_str() == phase)
                         .map(|qi| BoardItem {
                             work_id: qi.work_id.clone(),
                             title: qi.title.clone().unwrap_or_default(),
-                            queue_type: qi.queue_type.clone(),
+                            queue_type: qi.queue_type.to_string(),
                         })
                         .collect();
                     BoardColumn {

@@ -1,5 +1,6 @@
 use anyhow::Result;
 
+use crate::core::models::{QueuePhase, QueueType};
 use crate::core::repository::QueueRepository;
 use crate::infra::db::Database;
 
@@ -7,12 +8,14 @@ use crate::infra::db::Database;
 pub fn queue_advance(db: &Database, work_id: &str) -> Result<String> {
     let before = db
         .queue_get_phase(work_id)?
-        .ok_or_else(|| anyhow::anyhow!("queue item not found: {work_id}"))?;
+        .ok_or_else(|| anyhow::anyhow!("queue item not found: {work_id}"))
+        .map(|p| p.to_string())?;
 
     db.queue_advance(work_id)?;
 
     let after = db
         .queue_get_phase(work_id)?
+        .map(|p| p.to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
     Ok(format!("advanced: {work_id} ({before} → {after})"))
@@ -41,13 +44,17 @@ pub fn queue_list_db(
 
     // Apply --state filter
     if let Some(phase_filter) = state {
-        items.retain(|item| item.phase == phase_filter);
+        if let Ok(phase) = phase_filter.parse::<QueuePhase>() {
+            items.retain(|item| item.phase == phase);
+        }
     }
 
     // Apply --unextracted filter: done + pr type + no skip_reason
     if unextracted {
         items.retain(|item| {
-            item.phase == "done" && item.queue_type == "pr" && item.skip_reason.is_none()
+            item.phase == QueuePhase::Done
+                && item.queue_type == QueueType::Pr
+                && item.skip_reason.is_none()
         });
     }
 
