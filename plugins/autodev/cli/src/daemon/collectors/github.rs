@@ -959,6 +959,104 @@ mod tests {
         assert!(tasks.is_empty());
     }
 
+    // ─── unified queue behavior tests ───
+
+    #[test]
+    fn drain_issue_pr_concurrency_isolated_in_unified_queue() {
+        let gh = Arc::new(MockGh::new());
+        let mut source = make_source(gh);
+
+        let mut repo = GitRepository::new(
+            "r1".to_string(),
+            "org/repo".to_string(),
+            "https://github.com/org/repo".to_string(),
+            None,
+        );
+        repo.issue_concurrency = 1;
+        repo.pr_concurrency = 1;
+
+        // 1 issue + 1 PR in Pending — independent concurrency budgets
+        repo.queue.push(
+            QueuePhase::Pending,
+            make_test_queue_item(QueueType::Issue, TaskKind::Analyze, "org/repo", 1),
+        );
+        repo.queue.push(
+            QueuePhase::Pending,
+            make_test_queue_item(QueueType::Pr, TaskKind::Review, "org/repo", 10),
+        );
+        source.repos.insert("org/repo".to_string(), repo);
+
+        let tasks = source.drain_queue_items();
+
+        // Both should drain — issue concurrency doesn't block PR and vice versa
+        assert_eq!(tasks.len(), 2);
+    }
+
+    #[test]
+    fn drain_extract_does_not_consume_pr_concurrency() {
+        let gh = Arc::new(MockGh::new());
+        let mut source = make_source(gh);
+
+        let mut repo = GitRepository::new(
+            "r1".to_string(),
+            "org/repo".to_string(),
+            "https://github.com/org/repo".to_string(),
+            None,
+        );
+        repo.pr_concurrency = 1;
+
+        // 1 Extract already running — should NOT count against PR concurrency
+        repo.queue.push(
+            QueuePhase::Running,
+            make_test_queue_item(QueueType::Pr, TaskKind::Extract, "org/repo", 99),
+        );
+        // 1 Review pending
+        repo.queue.push(
+            QueuePhase::Pending,
+            make_test_queue_item(QueueType::Pr, TaskKind::Review, "org/repo", 10),
+        );
+        source.repos.insert("org/repo".to_string(), repo);
+
+        let tasks = source.drain_queue_items();
+
+        // Review should drain because Extract doesn't consume concurrency
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].work_id(), "pr:org/repo:10");
+    }
+
+    #[test]
+    fn drain_task_kind_determines_task_type() {
+        let gh = Arc::new(MockGh::new());
+        let mut source = make_source(gh);
+
+        let mut repo = GitRepository::new(
+            "r1".to_string(),
+            "org/repo".to_string(),
+            "https://github.com/org/repo".to_string(),
+            None,
+        );
+        repo.issue_concurrency = 2;
+
+        // Same queue_type (Issue), different task_kind
+        repo.queue.push(
+            QueuePhase::Pending,
+            make_test_queue_item(QueueType::Issue, TaskKind::Analyze, "org/repo", 1),
+        );
+        repo.queue.push(
+            QueuePhase::Pending,
+            make_test_queue_item(QueueType::Issue, TaskKind::Implement, "org/repo", 2),
+        );
+        source.repos.insert("org/repo".to_string(), repo);
+
+        let tasks = source.drain_queue_items();
+
+        // Both should drain (shared issue concurrency budget)
+        assert_eq!(tasks.len(), 2);
+        // Analyze task comes first (drain order)
+        assert_eq!(tasks[0].work_id(), "issue:org/repo:1");
+        assert_eq!(tasks[1].work_id(), "issue:org/repo:2");
+    }
+
     // ═══════════════════════════════════════════════
     // Re-review 경로 검증: ImproveTask 완료 후 Pending(Review)로 push된 PR이
     // drain에서 ReviewTask로 생성되는지 확인한다.

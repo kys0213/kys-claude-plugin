@@ -643,9 +643,14 @@ mod tests {
         let result = task.after_invoke(make_request_changes_response()).await;
 
         assert!(matches!(result.status, TaskStatus::Completed));
-        assert!(result.queue_ops.iter().any(
-            |op| matches!(op, QueueOp::Push { phase, item } if *phase == QueuePhase::Pending && item.review_comment().is_some())
-        ));
+        // ReviewDone → Pending with TaskKind::Improve (피드백 반영 경로)
+        assert!(result
+            .queue_ops
+            .iter()
+            .any(|op| matches!(op, QueueOp::Push { phase, item }
+                if *phase == QueuePhase::Pending
+                && item.task_kind == TaskKind::Improve
+                && item.review_comment().is_some())));
 
         let reviews = gh.reviewed_prs.lock().unwrap();
         assert!(reviews

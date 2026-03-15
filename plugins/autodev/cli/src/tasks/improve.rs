@@ -298,9 +298,14 @@ mod tests {
         let result = task.after_invoke(response).await;
 
         assert!(matches!(result.status, TaskStatus::Completed));
-        assert!(result.queue_ops.iter().any(
-            |op| matches!(op, QueueOp::Push { phase, item } if *phase == QueuePhase::Pending && item.review_iteration() == Some(1))
-        ));
+        // Improved → Pending with TaskKind::Review (re-review 경로)
+        assert!(result
+            .queue_ops
+            .iter()
+            .any(|op| matches!(op, QueueOp::Push { phase, item }
+                if *phase == QueuePhase::Pending
+                && item.task_kind == TaskKind::Review
+                && item.review_iteration() == Some(1))));
 
         // changes-requested → wip 전이
         let added = gh.added_labels.lock().unwrap();
