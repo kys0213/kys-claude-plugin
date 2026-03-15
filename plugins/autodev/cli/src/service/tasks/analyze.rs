@@ -22,8 +22,8 @@ use crate::core::task::{
 use crate::infra::claude::output::{self, AnalysisResult};
 use crate::infra::claude::SessionOptions;
 use crate::infra::gh::Gh;
-use crate::tasks::helpers::verdict;
-use crate::tasks::helpers::workspace::WorkspaceOps;
+use crate::service::tasks::helpers::verdict;
+use crate::service::tasks::helpers::workspace::WorkspaceOps;
 
 // ─── 분석 프롬프트 (JSON 응답 스키마 명시) ───
 

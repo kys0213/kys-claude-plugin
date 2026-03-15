@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use autodev::core::config::Env;
 use autodev::infra::gh::mock::MockGh;
 use autodev::infra::git::mock::MockGit;
-use autodev::tasks::helpers::workspace::Workspace;
-use autodev::tasks::knowledge::daily::create_knowledge_prs;
-use autodev::tasks::knowledge::models::*;
+use autodev::service::tasks::helpers::workspace::Workspace;
+use autodev::service::tasks::knowledge::daily::create_knowledge_prs;
+use autodev::service::tasks::knowledge::models::*;
 
 // ─── TestEnv ───
 

@@ -22,14 +22,14 @@ use tracing::info;
 
 use crate::core::config::{self, Env};
 use crate::core::repository::ConsumerLogRepository;
-use crate::daemon::collectors::github::GitHubTaskSource;
 use crate::infra::claude::Claude;
 use crate::infra::db::Database;
 use crate::infra::gh::Gh;
 use crate::infra::git::Git;
 use crate::infra::suggest_workflow::SuggestWorkflow;
-use crate::tasks::helpers::git_ops_factory::GitRepositoryFactory;
-use crate::tasks::helpers::workspace::OwnedWorkspace;
+use crate::service::daemon::collectors::github::GitHubTaskSource;
+use crate::service::tasks::helpers::git_ops_factory::GitRepositoryFactory;
+use crate::service::tasks::helpers::workspace::OwnedWorkspace;
 
 use self::agent_impl::ClaudeAgent;
 use self::cron::engine::CronEngine;

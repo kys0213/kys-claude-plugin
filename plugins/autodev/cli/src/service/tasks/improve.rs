@@ -20,7 +20,7 @@ use crate::core::task::{
 };
 use crate::infra::claude::SessionOptions;
 use crate::infra::gh::Gh;
-use crate::tasks::helpers::workspace::WorkspaceOps;
+use crate::service::tasks::helpers::workspace::WorkspaceOps;
 
 /// PR 피드백 반영 Task.
 ///

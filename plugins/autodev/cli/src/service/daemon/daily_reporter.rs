@@ -16,8 +16,8 @@ use crate::infra::db::Database;
 use crate::infra::gh::Gh;
 use crate::infra::git::Git;
 use crate::infra::suggest_workflow::SuggestWorkflow;
-use crate::tasks::helpers::git_ops_factory::resolve_gh_host;
-use crate::tasks::helpers::workspace::Workspace;
+use crate::service::tasks::helpers::git_ops_factory::resolve_gh_host;
+use crate::service::tasks::helpers::workspace::Workspace;
 
 use super::log;
 
@@ -107,10 +107,10 @@ impl DailyReporter for DefaultDailyReporter {
         log::cleanup_old_logs(&self.config.log_dir, self.config.log_retention_days);
 
         if log_path.exists() {
-            let stats = crate::tasks::knowledge::daily::parse_daemon_log(&log_path);
+            let stats = crate::service::tasks::knowledge::daily::parse_daemon_log(&log_path);
             if stats.task_count > 0 {
-                let patterns = crate::tasks::knowledge::daily::detect_patterns(&stats);
-                let mut report = crate::tasks::knowledge::daily::build_daily_report(
+                let patterns = crate::service::tasks::knowledge::daily::detect_patterns(&stats);
+                let mut report = crate::service::tasks::knowledge::daily::build_daily_report(
                     &yesterday, &stats, patterns,
                 );
 
@@ -118,19 +118,19 @@ impl DailyReporter for DefaultDailyReporter {
                 if let Ok(enabled) = RepoRepository::repo_find_enabled(&self.db) {
                     if let Some(er) = enabled.first() {
                         if let Ok(base) = ws.ensure_cloned(&er.url, &er.name).await {
-                            crate::tasks::knowledge::daily::enrich_with_cross_analysis(
+                            crate::service::tasks::knowledge::daily::enrich_with_cross_analysis(
                                 &mut report,
                                 &*self.sw,
                             )
                             .await;
 
                             let per_task =
-                                crate::tasks::knowledge::daily::aggregate_daily_suggestions(
+                                crate::service::tasks::knowledge::daily::aggregate_daily_suggestions(
                                     &self.db, &yesterday,
                                 );
 
                             if let Some(ks) =
-                                crate::tasks::knowledge::daily::generate_daily_suggestions(
+                                crate::service::tasks::knowledge::daily::generate_daily_suggestions(
                                     &*self.claude,
                                     &report,
                                     &base,
@@ -144,14 +144,14 @@ impl DailyReporter for DefaultDailyReporter {
 
                             if !report.suggestions.is_empty() {
                                 let cross_patterns =
-                                    crate::tasks::knowledge::daily::detect_cross_task_patterns(
+                                    crate::service::tasks::knowledge::daily::detect_cross_task_patterns(
                                         &report.suggestions,
                                     );
                                 report.patterns.extend(cross_patterns);
                             }
 
                             let repo_gh_host = resolve_gh_host(&*self.env, &er.name);
-                            crate::tasks::knowledge::daily::post_daily_report(
+                            crate::service::tasks::knowledge::daily::post_daily_report(
                                 &*self.gh,
                                 &er.name,
                                 &report,
@@ -160,7 +160,7 @@ impl DailyReporter for DefaultDailyReporter {
                             .await;
 
                             if !report.suggestions.is_empty() {
-                                crate::tasks::knowledge::daily::create_knowledge_prs(
+                                crate::service::tasks::knowledge::daily::create_knowledge_prs(
                                     &*self.gh,
                                     &ws,
                                     &er.name,

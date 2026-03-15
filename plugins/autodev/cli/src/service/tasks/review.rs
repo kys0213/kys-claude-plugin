@@ -23,7 +23,7 @@ use crate::core::task::{
 use crate::infra::claude::output::{self, ReviewVerdict};
 use crate::infra::claude::SessionOptions;
 use crate::infra::gh::Gh;
-use crate::tasks::helpers::workspace::WorkspaceOps;
+use crate::service::tasks::helpers::workspace::WorkspaceOps;
 
 /// PR 리뷰 결과를 GitHub 댓글로 포맷
 fn format_review_comment(review: &str, pr_number: i64, verdict: Option<&ReviewVerdict>) -> String {

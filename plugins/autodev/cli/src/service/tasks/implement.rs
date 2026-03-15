@@ -23,7 +23,7 @@ use crate::core::task::{
 use crate::infra::claude::output;
 use crate::infra::claude::SessionOptions;
 use crate::infra::gh::Gh;
-use crate::tasks::helpers::workspace::WorkspaceOps;
+use crate::service::tasks::helpers::workspace::WorkspaceOps;
 
 /// head branch 이름으로 이미 생성된 PR을 조회하여 번호를 반환.
 ///

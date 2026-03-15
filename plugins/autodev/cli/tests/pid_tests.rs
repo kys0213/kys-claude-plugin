@@ -1,4 +1,4 @@
-use autodev::daemon::pid;
+use autodev::service::daemon::pid;
 use tempfile::TempDir;
 
 // ═══════════════════════════════════════════════

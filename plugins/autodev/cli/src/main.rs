@@ -6,7 +6,8 @@ use clap::{Parser, Subcommand};
 use autodev::core::config;
 use autodev::core::models::{NewConsumerLog, QueueType};
 use autodev::core::repository::{ConsumerLogRepository, RepoRepository};
-use autodev::{cli as client, daemon, infra, tui};
+use autodev::service::daemon;
+use autodev::{cli as client, infra, tui};
 
 use infra::claude::RealClaude;
 use infra::gh::RealGh;

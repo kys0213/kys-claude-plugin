@@ -27,8 +27,8 @@ use crate::infra::claude::SessionOptions;
 use crate::infra::gh::Gh;
 use crate::infra::git::Git;
 use crate::infra::suggest_workflow::SuggestWorkflow;
-use crate::tasks::helpers::workspace::{Workspace, WorkspaceOps};
-use crate::tasks::knowledge::extractor::{
+use crate::service::tasks::helpers::workspace::{Workspace, WorkspaceOps};
+use crate::service::tasks::knowledge::extractor::{
     build_suggest_workflow_section, collect_existing_knowledge, create_task_knowledge_prs,
     format_knowledge_comment, parse_knowledge_suggestion, KnowledgePrContext,
 };
@@ -278,7 +278,7 @@ mod tests {
     use crate::core::queue_item::testing::test_pr_with_source;
     use crate::infra::gh::mock::MockGh;
     use crate::infra::suggest_workflow::SuggestWorkflow;
-    use crate::tasks::knowledge::models::ToolFrequencyEntry;
+    use crate::service::tasks::knowledge::models::ToolFrequencyEntry;
 
     // ─── Mock Workspace ───
 
@@ -331,13 +331,14 @@ mod tests {
             _: &str,
             _: Option<&str>,
             _: Option<u32>,
-        ) -> anyhow::Result<Vec<crate::tasks::knowledge::models::SessionEntry>> {
+        ) -> anyhow::Result<Vec<crate::service::tasks::knowledge::models::SessionEntry>> {
             Ok(vec![])
         }
         async fn query_repetition(
             &self,
             _: Option<&str>,
-        ) -> anyhow::Result<Vec<crate::tasks::knowledge::models::RepetitionEntry>> {
+        ) -> anyhow::Result<Vec<crate::service::tasks::knowledge::models::RepetitionEntry>>
+        {
             Ok(vec![])
         }
     }

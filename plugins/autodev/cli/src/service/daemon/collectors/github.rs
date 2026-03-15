@@ -18,14 +18,14 @@ use crate::core::task::{QueueOp, Task, TaskResult};
 use crate::infra::gh::Gh;
 use crate::infra::git::Git;
 use crate::infra::suggest_workflow::SuggestWorkflow;
-use crate::tasks::analyze::AnalyzeTask;
-use crate::tasks::extract::ExtractTask;
-use crate::tasks::helpers::git_ops::GitRepository;
-use crate::tasks::helpers::git_ops_factory::GitRepositoryFactory;
-use crate::tasks::helpers::workspace::WorkspaceOps;
-use crate::tasks::implement::ImplementTask;
-use crate::tasks::improve::ImproveTask;
-use crate::tasks::review::ReviewTask;
+use crate::service::tasks::analyze::AnalyzeTask;
+use crate::service::tasks::extract::ExtractTask;
+use crate::service::tasks::helpers::git_ops::GitRepository;
+use crate::service::tasks::helpers::git_ops_factory::GitRepositoryFactory;
+use crate::service::tasks::helpers::workspace::WorkspaceOps;
+use crate::service::tasks::implement::ImplementTask;
+use crate::service::tasks::improve::ImproveTask;
+use crate::service::tasks::review::ReviewTask;
 
 /// GitHub 이슈/PR 스캔 기반 Collector.
 ///
@@ -359,11 +359,11 @@ impl<DB: RepoRepository + ScanCursorRepository + Send> Collector for GitHubTaskS
         self.apply_queue_ops(result);
     }
 
-    fn active_items(&self) -> Vec<crate::daemon::status::StatusItem> {
+    fn active_items(&self) -> Vec<crate::service::daemon::status::StatusItem> {
         let mut items = Vec::new();
         for repo in self.repos.values() {
             for (phase, item) in repo.queue.iter_all() {
-                items.push(crate::daemon::status::StatusItem {
+                items.push(crate::service::daemon::status::StatusItem {
                     work_id: item.work_id.clone(),
                     queue_type: item.queue_type.clone(),
                     repo_name: item.repo_name.clone(),
@@ -387,7 +387,9 @@ mod tests {
     use crate::infra::gh::mock::MockGh;
     use crate::infra::git::Git;
     use crate::infra::suggest_workflow::SuggestWorkflow;
-    use crate::tasks::knowledge::models::{RepetitionEntry, SessionEntry, ToolFrequencyEntry};
+    use crate::service::tasks::knowledge::models::{
+        RepetitionEntry, SessionEntry, ToolFrequencyEntry,
+    };
     use std::path::{Path, PathBuf};
 
     // ─── Mock dependencies ───

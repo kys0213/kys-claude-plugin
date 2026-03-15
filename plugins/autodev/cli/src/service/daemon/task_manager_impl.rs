@@ -48,7 +48,7 @@ impl TaskManager for DefaultTaskManager {
         }
     }
 
-    fn active_items(&self) -> Vec<crate::daemon::status::StatusItem> {
+    fn active_items(&self) -> Vec<crate::service::daemon::status::StatusItem> {
         let mut items = Vec::new();
         for source in &self.sources {
             items.extend(source.active_items());
@@ -91,7 +91,7 @@ mod tests {
             self.applied.lock().unwrap().push(result.work_id.clone());
         }
 
-        fn active_items(&self) -> Vec<crate::daemon::status::StatusItem> {
+        fn active_items(&self) -> Vec<crate::service::daemon::status::StatusItem> {
             Vec::new()
         }
     }

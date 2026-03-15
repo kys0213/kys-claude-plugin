@@ -59,7 +59,7 @@ pub fn status(db: &Database, env: &dyn Env) -> Result<String> {
 
     // 데몬 상태
     let home = config::autodev_home(env);
-    let running = crate::daemon::pid::is_running(&home);
+    let running = crate::service::daemon::pid::is_running(&home);
     output.push_str(&format!(
         "autodev daemon: {}\n\n",
         if running {
@@ -246,7 +246,7 @@ pub fn queue_list(env: &dyn Env, repo: Option<&str>) -> Result<String> {
     let home = config::autodev_home(env);
     let status_path = home.join("daemon.status.json");
 
-    let status = match crate::daemon::status::read_status(&status_path) {
+    let status = match crate::service::daemon::status::read_status(&status_path) {
         Some(s) => s,
         None => {
             return Ok(
