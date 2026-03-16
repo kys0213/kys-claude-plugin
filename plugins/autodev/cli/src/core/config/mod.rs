@@ -63,6 +63,11 @@ pub fn workspaces_path(env: &dyn Env) -> PathBuf {
     autodev_home(env).join("workspaces")
 }
 
+/// Built-in cron 스크립트 디렉토리 경로
+pub fn crons_path(home: &Path) -> PathBuf {
+    home.join("crons")
+}
+
 /// 레포 이름을 파일시스템 안전한 디렉토리명으로 변환
 /// 예: "org/repo" → "org-repo"
 pub fn sanitize_repo_name(name: &str) -> String {

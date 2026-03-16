@@ -183,6 +183,156 @@ pub fn cron_trigger(db: &Database, env: &dyn Env, name: &str, repo: Option<&str>
     Ok(())
 }
 
+// ─── Built-in Cron Seeding ───
+
+/// Built-in cron 스크립트 정의
+struct BuiltinCronDef {
+    name: &'static str,
+    script_filename: &'static str,
+    script_content: &'static str,
+    schedule: CronSchedule,
+}
+
+/// 템플릿에서 포함한 스크립트 내용
+const CLAW_EVALUATE_SH: &str = include_str!("../../../templates/crons/claw-evaluate.sh");
+const GAP_DETECTION_SH: &str = include_str!("../../../templates/crons/gap-detection.sh");
+const KNOWLEDGE_EXTRACT_SH: &str = include_str!("../../../templates/crons/knowledge-extract.sh");
+const HITL_TIMEOUT_SH: &str = include_str!("../../../templates/crons/hitl-timeout.sh");
+const DAILY_REPORT_SH: &str = include_str!("../../../templates/crons/daily-report.sh");
+const LOG_CLEANUP_SH: &str = include_str!("../../../templates/crons/log-cleanup.sh");
+
+fn per_repo_cron_defs(claw_cfg: &config::models::ClawConfig) -> Vec<BuiltinCronDef> {
+    vec![
+        BuiltinCronDef {
+            name: "claw-evaluate",
+            script_filename: "claw-evaluate.sh",
+            script_content: CLAW_EVALUATE_SH,
+            schedule: CronSchedule::Interval {
+                secs: claw_cfg.schedule_interval_secs,
+            },
+        },
+        BuiltinCronDef {
+            name: "gap-detection",
+            script_filename: "gap-detection.sh",
+            script_content: GAP_DETECTION_SH,
+            schedule: CronSchedule::Interval {
+                secs: claw_cfg.gap_detection_interval_secs,
+            },
+        },
+        BuiltinCronDef {
+            name: "knowledge-extract",
+            script_filename: "knowledge-extract.sh",
+            script_content: KNOWLEDGE_EXTRACT_SH,
+            schedule: CronSchedule::Interval { secs: 3600 },
+        },
+    ]
+}
+
+fn global_cron_defs() -> Vec<BuiltinCronDef> {
+    vec![
+        BuiltinCronDef {
+            name: "hitl-timeout",
+            script_filename: "hitl-timeout.sh",
+            script_content: HITL_TIMEOUT_SH,
+            schedule: CronSchedule::Interval { secs: 300 },
+        },
+        BuiltinCronDef {
+            name: "daily-report",
+            script_filename: "daily-report.sh",
+            script_content: DAILY_REPORT_SH,
+            schedule: CronSchedule::Expression {
+                cron: "0 6 * * *".to_string(),
+            },
+        },
+        BuiltinCronDef {
+            name: "log-cleanup",
+            script_filename: "log-cleanup.sh",
+            script_content: LOG_CLEANUP_SH,
+            schedule: CronSchedule::Expression {
+                cron: "0 0 * * *".to_string(),
+            },
+        },
+    ]
+}
+
+/// 스크립트를 ~/.autodev/crons/ 에 기록하고 실행 권한을 부여한다.
+fn ensure_script(home: &std::path::Path, def: &BuiltinCronDef) -> Result<String> {
+    let crons_dir = config::crons_path(home);
+    std::fs::create_dir_all(&crons_dir)?;
+
+    let script_path = crons_dir.join(def.script_filename);
+    std::fs::write(&script_path, def.script_content)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))?;
+    }
+
+    Ok(script_path.to_string_lossy().to_string())
+}
+
+/// 멱등하게 builtin cron job 1개를 DB에 등록한다.
+/// 이미 존재하면 건너뛴다.
+fn seed_one(
+    db: &Database,
+    home: &std::path::Path,
+    def: &BuiltinCronDef,
+    repo_id: Option<&str>,
+) -> Result<bool> {
+    // UNIQUE(name, repo_id) 제약을 활용: 삽입 시 중복이면 에러 → 무시
+    let script_path = ensure_script(home, def)?;
+
+    let job = NewCronJob {
+        name: def.name.to_string(),
+        repo_id: repo_id.map(|s| s.to_string()),
+        schedule: def.schedule.clone(),
+        script_path,
+        builtin: true,
+    };
+
+    match db.cron_add(&job) {
+        Ok(_) => Ok(true),
+        Err(e) => {
+            let err_str = e.to_string();
+            if err_str.contains("UNIQUE constraint failed") {
+                Ok(false) // 이미 존재 — 정상
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
+/// repo_add() 후 호출: per-repo builtin cron 3개를 seed한다.
+pub fn seed_per_repo_crons(
+    db: &Database,
+    home: &std::path::Path,
+    repo_id: &str,
+    claw_cfg: &config::models::ClawConfig,
+) -> Result<u32> {
+    let defs = per_repo_cron_defs(claw_cfg);
+    let mut seeded = 0u32;
+    for def in &defs {
+        if seed_one(db, home, def, Some(repo_id))? {
+            seeded += 1;
+        }
+    }
+    Ok(seeded)
+}
+
+/// daemon::start() 시 호출: global builtin cron 3개를 seed한다.
+pub fn seed_global_crons(db: &Database, home: &std::path::Path) -> Result<u32> {
+    let defs = global_cron_defs();
+    let mut seeded = 0u32;
+    for def in &defs {
+        if seed_one(db, home, def, None)? {
+            seeded += 1;
+        }
+    }
+    Ok(seeded)
+}
+
 // ─── Helpers ───
 
 fn find_repo_info(db: &Database, repo_name: &str) -> Result<Option<EnabledRepo>> {

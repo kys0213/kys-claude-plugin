@@ -107,6 +107,10 @@ impl Default for GitHubSourceConfig {
 pub struct ClawConfig {
     pub enabled: bool,
     pub recovery_interval_secs: u64,
+    /// claw-evaluate cron 주기 (초). 기본 60초.
+    pub schedule_interval_secs: u64,
+    /// gap-detection cron 주기 (초). 기본 3600초 (1시간).
+    pub gap_detection_interval_secs: u64,
 }
 
 impl Default for ClawConfig {
@@ -114,6 +118,8 @@ impl Default for ClawConfig {
         Self {
             enabled: false,
             recovery_interval_secs: 120,
+            schedule_interval_secs: 60,
+            gap_detection_interval_secs: 3600,
         }
     }
 }
@@ -307,6 +313,8 @@ workflows:
         let cfg = ClawConfig::default();
         assert!(!cfg.enabled);
         assert_eq!(cfg.recovery_interval_secs, 120);
+        assert_eq!(cfg.schedule_interval_secs, 60);
+        assert_eq!(cfg.gap_detection_interval_secs, 3600);
     }
 
     #[test]
@@ -315,10 +323,14 @@ workflows:
 claw:
   enabled: true
   recovery_interval_secs: 60
+  schedule_interval_secs: 30
+  gap_detection_interval_secs: 1800
 "#;
         let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
         assert!(cfg.claw.enabled);
         assert_eq!(cfg.claw.recovery_interval_secs, 60);
+        assert_eq!(cfg.claw.schedule_interval_secs, 30);
+        assert_eq!(cfg.claw.gap_detection_interval_secs, 1800);
     }
 
     #[test]
@@ -330,5 +342,20 @@ daemon:
         let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
         assert!(!cfg.claw.enabled);
         assert_eq!(cfg.claw.recovery_interval_secs, 120);
+        assert_eq!(cfg.claw.schedule_interval_secs, 60);
+        assert_eq!(cfg.claw.gap_detection_interval_secs, 3600);
+    }
+
+    #[test]
+    fn claw_config_partial_override_preserves_defaults() {
+        let yaml = r#"
+claw:
+  enabled: true
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(cfg.claw.enabled);
+        assert_eq!(cfg.claw.recovery_interval_secs, 120);
+        assert_eq!(cfg.claw.schedule_interval_secs, 60);
+        assert_eq!(cfg.claw.gap_detection_interval_secs, 3600);
     }
 }
