@@ -2,19 +2,29 @@
 # Built-in cron: daily-report (global)
 # 주기: 매일 06시 | Guard: 24시간 내 활동이 있을 때
 #
-# 일일 리포트 — 전체 레포의 24시간 활동을 요약하여 리포트를 생성합니다.
+# 일일 리포트 — daemon 내장 DailyReporter가 직접 처리합니다.
+# 이 스크립트는 DailyReporter 트리거 역할만 수행하며 LLM(autodev agent)을 호출하지 않습니다.
+# 실제 로직: daemon 로그 파싱 → 통계 집계 → GitHub 이슈 게시
 # 중복 실행 방지는 daemon cron engine이 내부 상태로 보장합니다.
 
 set -euo pipefail
 
-# Guard: 최근 판단 이력이 존재하는지 확인
-RECENT=$(autodev spec decisions --json -n 1 | jq 'length')
+YESTERDAY=$(date -d "yesterday" +%Y-%m-%d 2>/dev/null || date -v-1d +%Y-%m-%d)
+LOG_FILE="${AUTODEV_HOME}/logs/daemon.${YESTERDAY}.log"
 
-if [ "$RECENT" = "0" ]; then
-  echo "skip: 판단 이력 없음"
+# Guard: 어제 daemon 로그가 존재하는지 확인
+if [ ! -f "$LOG_FILE" ]; then
+  echo "skip: ${YESTERDAY} 로그 파일 없음"
   exit 0
 fi
 
-echo "daily-report: 리포트 생성 시작"
+# Guard: 로그에 실제 활동(task 실행)이 있는지 확인
+if ! grep -q "task_" "$LOG_FILE" 2>/dev/null; then
+  echo "skip: ${YESTERDAY} 활동 이력 없음"
+  exit 0
+fi
 
-autodev agent -p "지난 24시간의 autodev 활동을 요약하여 일일 리포트를 생성해줘. 각 레포별 진행 상황, 완료된 이슈, 실패한 작업, HITL 현황을 포함해줘."
+echo "daily-report: ${YESTERDAY} 리포트 생성 트리거"
+
+# 결정적 처리: daemon 내장 DailyReporter에 위임
+autodev report daily --date "$YESTERDAY"
