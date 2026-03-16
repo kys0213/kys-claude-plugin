@@ -109,8 +109,8 @@ pub fn repo_add(
 ) -> Result<()> {
     let name = extract_repo_name(url)?;
 
-    match db.repo_add(url, &name) {
-        Ok(_) => {}
+    let repo_id = match db.repo_add(url, &name) {
+        Ok(id) => id,
         Err(e) => {
             let err_str = e.to_string();
             if err_str.contains("UNIQUE constraint failed") {
@@ -120,17 +120,28 @@ pub fn repo_add(
             }
             return Err(e);
         }
-    }
+    };
 
-    if let Some(json_str) = config_json {
+    // Per-repo workspace config
+    let ws_dir = if let Some(json_str) = config_json {
         let value = parse_config_json(json_str)?;
         let ws_dir = ensure_workspace_dir(env, &name)?;
         let config_path = write_workspace_config(&ws_dir, &value)?;
         println!("registered: {name} ({url})");
         println!("config: written to {}", config_path.display());
+        Some(ws_dir)
     } else {
         println!("registered: {name} ({url})");
         println!("config: edit ~/.autodev.yaml (global) or <repo>/.autodev.yaml (per-repo)");
+        None
+    };
+
+    // Built-in per-repo cron seed
+    let home = config::autodev_home(env);
+    let cfg = config::loader::load_merged(env, ws_dir.as_deref());
+    let seeded = cron::seed_per_repo_crons(db, &home, &repo_id, &cfg.claw)?;
+    if seeded > 0 {
+        println!("cron: seeded {seeded} built-in cron jobs for {name}");
     }
 
     Ok(())

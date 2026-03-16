@@ -54,6 +54,10 @@ impl RepoRepository for Database {
             rusqlite::params![repo_id],
         )?;
         tx.execute(
+            "DELETE FROM cron_jobs WHERE repo_id = ?1",
+            rusqlite::params![repo_id],
+        )?;
+        tx.execute(
             "DELETE FROM repositories WHERE id = ?1",
             rusqlite::params![repo_id],
         )?;

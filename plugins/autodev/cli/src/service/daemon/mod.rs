@@ -408,8 +408,13 @@ pub async fn start(
         cfg.daemon.max_concurrent_tasks
     );
 
-    // ── CronEngine ──
+    // ── CronEngine + global cron seed ──
     let cron_db = Database::open(&db_path)?;
+    match crate::cli::cron::seed_global_crons(&cron_db, home) {
+        Ok(n) if n > 0 => info!("seeded {n} global built-in cron jobs"),
+        Ok(_) => {}
+        Err(e) => tracing::warn!("failed to seed global cron jobs: {e}"),
+    }
     let cron_engine = CronEngine::new(cron_db, home.to_path_buf());
 
     // ── Daemon ──
