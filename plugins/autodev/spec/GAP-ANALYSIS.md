@@ -210,26 +210,6 @@
 
 ---
 
-## 구현 우선순위 제안
+## 구현 계획
 
-```
-Phase A: 자율 루프 활성화 (C1~C4)
-  1. Built-in cron 자동 등록 (repo add 시) ← C1, M4
-  2. Notifier → Daemon 연결 + notifications config ← C2, C4
-  3. hitl timeout CLI 명령 ← C3
-  4. force trigger (spec add → claw-evaluate 즉시 실행) ← H3
-
-Phase B: Spec 모드 핵심 (H1~H5)
-  5. spec prioritize / evaluate / status / decisions 서브커맨드 ← H4
-  6. claw edit 서브커맨드 ← H5
-  7. 실패 에스컬레이션 로직 ← H2
-  8. Spec 완료 판정 자동화 ← H1
-
-Phase C: Dashboard 고도화 (M1~M2)
-  9. BoardState 확장 (hitl_items, claw_status) ← M2
-  10. TUI → v4 칸반 + HITL + Claw 상태 통합 ← M1
-
-Phase D: 설정 정리 (M3~M4)
-  11. Cron 환경변수 주입 보완 ← M3
-  12. ClawConfig 확장 (schedule_interval_secs, gap_detection_interval_secs) ← M4
-```
+상세 구현 계획은 [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md) 참조.

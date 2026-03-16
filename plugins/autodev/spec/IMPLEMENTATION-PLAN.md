@@ -3,6 +3,12 @@
 > Date: 2026-03-16
 > 기반: [GAP-ANALYSIS.md](GAP-ANALYSIS.md)
 
+### 공통 제약사항
+
+- **DB migration**: 컬럼 추가 시 `infra/db/schema.rs`의 `migrate_v2` 패턴(`ALTER TABLE ... ADD COLUMN` + duplicate-column 에러 무시)을 따라 `migrate_v3()` 함수 작성
+- **Config 역직렬화 호환**: 신규 config struct는 반드시 `#[derive(Default)]` + `#[serde(default)]` 적용. 기존 `.autodev.yaml` 파싱이 깨지지 않아야 함
+- **알림 dispatch 실패**: 로그 기록 후 이벤트 루프 계속 진행. Daemon 블로킹 금지
+
 ---
 
 ## Phase A: 자율 루프 활성화
@@ -61,23 +67,23 @@
 
 1. **Notifications config 모델** (`config/models.rs`)
    ```rust
-   pub struct WorkflowConfig {
-       pub sources: SourcesConfig,
-       pub daemon: DaemonConfig,
-       pub workflows: Workflows,
-       pub claw: ClawConfig,
-       pub notifications: NotificationsConfig,  // 신규
-   }
-
+   #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+   #[serde(default)]
    pub struct NotificationsConfig {
        pub channels: Vec<ChannelConfig>,
    }
 
-   pub struct ChannelConfig {
-       pub channel_type: String,   // "github-comment", "webhook"
-       pub config: serde_yaml::Value,
+   /// tagged enum으로 채널별 config를 컴파일타임 검증
+   #[derive(Debug, Clone, Serialize, Deserialize)]
+   #[serde(tag = "type")]
+   pub enum ChannelConfig {
+       #[serde(rename = "github-comment")]
+       GitHubComment { mention: Option<String> },
+       #[serde(rename = "webhook")]
+       Webhook { url: String },
    }
    ```
+   `WorkflowConfig`에 `pub notifications: NotificationsConfig` 추가 (`#[serde(default)]`)
 
 2. **Daemon 구조체 확장**
    ```rust
@@ -113,18 +119,15 @@
 
 1. **HITL timeout 설정** (`config/models.rs`)
    ```rust
+   #[derive(Debug, Clone, Serialize, Deserialize)]
+   #[serde(default)]
    pub struct HitlConfig {
-       pub timeout_hours: u64,              // default 24
-       pub timeout_action: TimeoutAction,   // default Remind
-   }
-
-   pub enum TimeoutAction {
-       Remind,      // 재알림
-       Skip,        // autodev:skip 라벨
-       PauseSpec,   // 스펙 일시중지
+       pub timeout_hours: u64,   // default 24
    }
    ```
-   `WorkflowConfig`에 `pub hitl: HitlConfig` 추가
+   `WorkflowConfig`에 `pub hitl: HitlConfig` 추가 (`#[serde(default)]`)
+
+   > `timeout_action` (Remind/Skip/PauseSpec)은 향후 확장. 초기 구현은 단순 만료(`Expired`) 전이만 수행.
 
 2. **CLI variant** (`main.rs`)
    ```rust
@@ -139,8 +142,8 @@
 
 3. **`timeout()` 함수** (`cli/hitl.rs`):
    - `created_at`이 `timeout_hours` 이전인 `Pending` 상태 HITL 조회
-   - `timeout_action`에 따라: Remind → 재알림 / Skip → 라벨 추가 / PauseSpec → 스펙 pause
    - 상태를 `Expired`로 전이
+   - 만료 건수 출력
 
 4. **DB 메서드** (`repository.rs`):
    ```rust
@@ -151,7 +154,6 @@
 **테스트**:
 - 24시간 이전 `Pending` HITL → `timeout()` 호출 → `Expired` 상태 전이 확인
 - `Responded` 상태 HITL은 무시 확인
-- `timeout_action` 별 분기 테스트
 
 ---
 
@@ -166,10 +168,10 @@
 
 **구현 내용**:
 
-1. **`cron_trigger()` DB 메서드**: `last_run_at`을 충분히 과거로 설정하여 다음 `cron_find_due()`에서 즉시 선택되도록 함
+1. **`cron_trigger()` DB 메서드**: `last_run_at`을 `NULL`로 설정하여 다음 `cron_find_due()`에서 즉시 선택되도록 함 (기존 코드가 `None`을 "미실행 → 즉시 due"로 처리)
    ```rust
    fn cron_trigger(&self, name: &str, repo_id: Option<&str>) -> Result<()> {
-       // last_run_at = '1970-01-01T00:00:00Z' 로 설정
+       // last_run_at = NULL 로 설정 → cron_find_due()가 즉시 선택
    }
    ```
 
@@ -197,7 +199,7 @@
 **구현 내용**:
 
 1. **`spec prioritize <id1> <id2> ...`**
-   - `specs` 테이블에 `priority` 컬럼 추가 (INTEGER, default 0)
+   - `specs` 테이블에 `priority` 컬럼 추가 (INTEGER, default 0) — `migrate_v3()`에서 `ALTER TABLE` 처리
    - 인자 순서대로 priority = 1, 2, 3... 설정
    - Claw가 `spec list --json`에서 priority 기준 정렬된 결과를 참조
 
@@ -210,7 +212,7 @@
    - DB 조인: `specs` + `spec_issues` + `queue_items` + `hitl_events`
 
 4. **`spec decisions <spec-id>`**
-   - `claw_decisions` 테이블에서 `spec_id` 기준 조회
+   - 기존 `decisions list`의 spec 필터 버전 (별도 DB 메서드가 아닌 `decisions_list()`에 `spec_id` 파라미터 추가)
    - `--json`, `-n <count>` 옵션 지원
 
 **테스트**:
@@ -251,36 +253,29 @@ enum ClawAction {
 ### B-3. 실패 에스컬레이션 로직 (H2)
 
 **변경 파일**:
-- `cli/src/core/models.rs` — `QueueItem`에 `failure_count` 필드 추가 (또는 별도 테이블)
-- `cli/src/infra/db/schema.rs` — `queue_items` 테이블에 `failure_count` 컬럼
+- `cli/src/core/models.rs` — `QueueItem`에 `failure_count` 필드 추가
+- `cli/src/infra/db/schema.rs` — `queue_items` 테이블에 `failure_count` 컬럼 (`migrate_v3()`에서 `ALTER TABLE` 처리)
 - `cli/src/service/daemon/mod.rs:163-180` — task completion 이벤트 루프 확장
 - `cli/src/service/daemon/` — `escalation.rs` 신규 모듈
 
 **구현 내용**:
 
-1. **에스컬레이션 엔진** (`service/daemon/escalation.rs`)
+1. **에스컬레이션 판정 함수** (`service/daemon/escalation.rs`)
    ```rust
-   pub struct EscalationEngine {
-       dispatcher: NotificationDispatcher,  // A-2에서 구현
-   }
-
-   impl EscalationEngine {
-       pub async fn handle_failure(
-           &self, db: &Database, result: &TaskResult
-       ) -> EscalationAction {
-           let count = db.increment_failure_count(&result.work_id)?;
-           match count {
-               1..=2 => EscalationAction::Retry,
-               3     => EscalationAction::Comment,
-               4..=5 => EscalationAction::Hitl,
-               6     => EscalationAction::Skip,
-               _     => EscalationAction::UpdateSpec,
-           }
+   /// 순수 함수: 실패 횟수 → 에스컬레이션 액션 결정
+   pub fn decide_escalation(failure_count: u32) -> EscalationAction {
+       match failure_count {
+           1..=2 => EscalationAction::Retry,
+           3     => EscalationAction::Comment,
+           4..=5 => EscalationAction::Hitl,
+           6     => EscalationAction::Skip,
+           _     => EscalationAction::UpdateSpec,
        }
    }
    ```
+   별도 struct 없이 순수 함수로 구현. Daemon이 이미 소유한 dispatcher로 액션을 실행.
 
-2. **Daemon 이벤트 루프 확장**: task completion 시 `result.status`가 실패이면 `EscalationEngine::handle_failure()` 호출
+2. **Daemon 이벤트 루프 확장**: task completion 시 `result.status`가 실패이면 `db.increment_failure_count()` → `decide_escalation()` → 액션 실행
 
 3. **Level별 액션**:
    - Level 1 (Retry): `pending_tasks`에 재삽입
@@ -303,17 +298,14 @@ enum ClawAction {
 
 **구현 내용**:
 
-1. **완료 판정 체커** (`service/daemon/spec_completion.rs`)
+1. **완료 판정 함수** (`service/daemon/spec_completion.rs`)
    ```rust
-   pub struct SpecCompletionChecker;
-
-   impl SpecCompletionChecker {
-       pub fn check(db: &Database, spec_id: &str) -> CompletionStatus {
-           // 1. linked issues 전부 Done인지 확인
-           // 2. gap-detection 결과에 미해결 gap 없는지 확인
-           // 3. acceptance_criteria 검증 (test_commands 실행 결과)
-           // → 전부 만족하면 CompletionStatus::ReadyForConfirmation
-       }
+   /// 스펙 완료 조건을 검사하는 순수 함수
+   pub fn check_spec_completion(db: &Database, spec_id: &str) -> CompletionStatus {
+       // 1. linked issues 전부 Done인지 확인
+       // 2. gap-detection 결과에 미해결 gap 없는지 확인
+       // 3. acceptance_criteria 검증 (test_commands 실행 결과)
+       // → 전부 만족하면 CompletionStatus::ReadyForConfirmation
    }
    ```
 
@@ -419,16 +411,17 @@ enum ClawAction {
 
 **구현 내용**:
 
-1. **RepoInfo 확장**
+1. **RepoInfo 확장** — `default_branch`와 `local_path`는 DB 컬럼이 아닌 런타임 도출
    ```rust
    pub struct RepoInfo {
        pub name: String,
        pub url: String,
        pub enabled: bool,
-       pub default_branch: Option<String>,   // 신규
-       pub local_path: Option<String>,       // 신규
+       pub default_branch: Option<String>,   // 신규: git remote show 또는 config에서 도출
+       pub local_path: Option<String>,       // 신규: workspace 규칙에서 도출 (~/.autodev/workspaces/{name})
    }
    ```
+   > `repo_find_enabled()` 조회 시 추가 컬럼 없이 `name`으로부터 workspace 경로를 계산하고, `default_branch`는 config 또는 `git ls-remote --symref`로 해결
 
 2. **`build_env_vars()` 확장**: 누락된 환경변수 추가
    ```rust
@@ -474,20 +467,28 @@ D-1 (Env 보완) ── 독립                            │
 ## 구현 순서
 
 ```
-Step 1: A-1 (Built-in Cron + ClawConfig)      ← 자율 루프의 기반
-Step 2: A-2 (Notifier 연결 + Config)           ← 알림 파이프라인
-Step 3: A-3 (HITL Timeout)                     ← 미응답 처리
-Step 4: A-4 (Force Trigger)                    ← 즉시 평가
-Step 5: B-1 (Spec 서브커맨드)                   ← Claw 도구 확장
-Step 6: B-2 (Claw Edit)                        ← 독립, 병렬 가능
-Step 7: B-3 (에스컬레이션)                      ← A-2 완료 후
-Step 8: B-4 (완료 판정)                         ← B-1 완료 후
-Step 9: C-1 (BoardState 확장)                   ← 독립
-Step 10: C-2 (TUI 통합 대시보드)                 ← C-1 완료 후
-Step 11: D-1 (Cron 환경변수 보완)                ← 독립
+Step 1:  A-1 (Built-in Cron + ClawConfig)      ← 자율 루프의 기반
+Step 2:  A-2 ∥ A-3 (Notifier 연결 ∥ HITL Timeout)  ← 병렬 가능
+Step 3:  A-4 (Force Trigger)                    ← 즉시 평가
+Step 4:  B-1 ∥ B-2 ∥ D-1 (Spec 서브커맨드 ∥ Claw Edit ∥ Env 보완)  ← 병렬 가능
+Step 5:  B-3 (에스컬레이션)                      ← A-2 완료 후
+Step 6:  B-4 (완료 판정)                         ← B-1 완료 후
+Step 7:  C-1 (BoardState 확장)                   ← 독립
+Step 8:  C-2 (TUI 통합 대시보드)                  ← C-1 완료 후
 ```
 
 **병렬 가능 조합**:
-- Step 5 + Step 6 (B-1 + B-2)
-- Step 9 + Step 11 (C-1 + D-1)
-- Step 6은 어느 시점에서든 독립 실행 가능
+- A-2 + A-3 (서로 독립)
+- B-1 + B-2 + D-1 (서로 독립, A-1 완료 후 어느 시점에서든 시작 가능)
+- C-1은 Phase B와 병렬 가능
+
+---
+
+## Deferred (Low)
+
+다음 항목은 현재 계획에 포함하지 않으며, Phase A~D 완료 후 별도 계획:
+
+| Gap ID | 항목 | 사유 |
+|--------|------|------|
+| L1 | Convention Phase 2 (자율 개선) | Phase 1 (detect/bootstrap)이 안정화된 후 진행 |
+| L2 | `repo show` vs `repo config` 역할 정리 | UX 혼동이 실제 발생하는지 사용 데이터 수집 후 결정 |
