@@ -146,6 +146,18 @@ enum ConventionAction {
         #[arg(long)]
         apply: bool,
     },
+    /// 피드백 패턴 조회
+    Patterns {
+        /// 레포 이름 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+        /// 최소 발생 횟수 필터
+        #[arg(long, default_value = "1")]
+        min_count: i32,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1003,6 +1015,23 @@ async fn main() -> Result<()> {
                     "{}",
                     client::convention::format_bootstrap_result(&result, !apply)
                 );
+            }
+            ConventionAction::Patterns {
+                repo,
+                min_count,
+                json,
+            } => {
+                let repo_id = repo
+                    .as_deref()
+                    .map(|name| client::resolve_repo_id(&db, name));
+                let repo_id = match repo_id {
+                    Some(Ok(id)) => Some(id),
+                    Some(Err(e)) => return Err(e),
+                    None => None,
+                };
+                let output =
+                    client::convention::patterns(&db, repo_id.as_deref(), Some(min_count), json)?;
+                print!("{output}");
             }
         },
     }

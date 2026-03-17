@@ -187,6 +187,22 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_claw_decisions_repo ON claw_decisions(repo_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_claw_decisions_spec ON claw_decisions(spec_id, created_at);
 
+        CREATE TABLE IF NOT EXISTS feedback_patterns (
+            id              TEXT PRIMARY KEY,
+            repo_id         TEXT NOT NULL REFERENCES repositories(id),
+            pattern_type    TEXT NOT NULL,
+            suggestion      TEXT NOT NULL,
+            source          TEXT NOT NULL,
+            occurrence_count INTEGER NOT NULL DEFAULT 1,
+            confidence      REAL NOT NULL DEFAULT 0.5,
+            status          TEXT NOT NULL DEFAULT 'active',
+            sources_json    TEXT NOT NULL DEFAULT '{}',
+            created_at      TEXT NOT NULL,
+            last_seen_at    TEXT NOT NULL,
+            UNIQUE(repo_id, pattern_type, suggestion)
+        );
+        CREATE INDEX IF NOT EXISTS idx_feedback_patterns_repo ON feedback_patterns(repo_id, status);
+
         COMMIT;
         ",
     )?;

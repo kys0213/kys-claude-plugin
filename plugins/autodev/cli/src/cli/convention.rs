@@ -1,5 +1,10 @@
 use std::path::Path;
 
+use anyhow::Result;
+
+use crate::core::repository::FeedbackPatternRepository;
+use crate::infra::db::Database;
+
 /// Detected technology stack from a repository.
 #[derive(Debug, Default, Clone)]
 pub struct TechStack {
@@ -557,3 +562,58 @@ npx eslint .
 npx prettier --check .
 ```
 "#;
+
+// ─── Feedback Patterns CLI ───
+
+/// List feedback patterns for a repo, formatted as a table.
+pub fn patterns(
+    db: &Database,
+    repo_id: Option<&str>,
+    min_count: Option<i32>,
+    json: bool,
+) -> Result<String> {
+    let patterns = if let Some(rid) = repo_id {
+        if let Some(mc) = min_count.filter(|&c| c > 1) {
+            db.feedback_list_actionable(rid, mc)?
+        } else {
+            db.feedback_list(rid)?
+        }
+    } else {
+        // No repo_id: return empty with a message
+        return Ok("Specify --repo to list feedback patterns.\n".to_string());
+    };
+
+    if json {
+        return Ok(serde_json::to_string_pretty(&patterns)?);
+    }
+
+    if patterns.is_empty() {
+        return Ok("No feedback patterns found.\n".to_string());
+    }
+
+    let mut output = String::new();
+    output.push_str(&format!(
+        "{:<8} {:<16} {:<10} {:<8} {:<10} {}\n",
+        "COUNT", "TYPE", "STATUS", "CONF", "SOURCE", "SUGGESTION"
+    ));
+    output.push_str(&format!("{}\n", "-".repeat(80)));
+
+    for p in &patterns {
+        let suggestion_short = if p.suggestion.len() > 40 {
+            format!("{}...", &p.suggestion[..37])
+        } else {
+            p.suggestion.clone()
+        };
+        output.push_str(&format!(
+            "{:<8} {:<16} {:<10} {:<8.2} {:<10} {}\n",
+            p.occurrence_count,
+            p.pattern_type,
+            p.status.as_str(),
+            p.confidence,
+            p.source,
+            suggestion_short,
+        ));
+    }
+
+    Ok(output)
+}
