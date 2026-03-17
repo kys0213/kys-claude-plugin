@@ -5,6 +5,7 @@ pub mod decisions;
 pub mod hitl;
 pub mod queue;
 pub mod spec;
+pub mod worktree;
 
 use std::path::{Path, PathBuf};
 

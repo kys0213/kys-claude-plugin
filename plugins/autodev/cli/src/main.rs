@@ -101,6 +101,11 @@ enum Commands {
         #[command(subcommand)]
         action: ClawAction,
     },
+    /// 보존된 worktree 관리
+    Worktree {
+        #[command(subcommand)]
+        action: WorktreeAction,
+    },
     /// 칸반 보드 출력
     Board {
         /// 레포 이름으로 필터 (org/repo)
@@ -311,6 +316,21 @@ enum CronAction {
         /// 레포 이름 (org/repo)
         #[arg(long)]
         repo: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum WorktreeAction {
+    /// 보존된 worktree 목록 조회
+    List {
+        /// 레포 이름으로 필터 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// 보존된 worktree 제거
+    Remove {
+        /// worktree 경로 또는 task ID
+        id: String,
     },
 }
 
@@ -828,6 +848,16 @@ async fn main() -> Result<()> {
             }
             ClawAction::Edit { name, repo } => {
                 client::claw::claw_edit(&home, &name, repo.as_deref())?;
+            }
+        },
+        Commands::Worktree { action } => match action {
+            WorktreeAction::List { repo } => {
+                let output = client::worktree::list(&env, repo.as_deref())?;
+                println!("{output}");
+            }
+            WorktreeAction::Remove { id } => {
+                let output = client::worktree::remove(&env, &id)?;
+                println!("{output}");
             }
         },
         Commands::Board { repo, json } => {
