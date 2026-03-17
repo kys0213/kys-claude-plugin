@@ -193,6 +193,9 @@ struct BuiltinCronDef {
     schedule: CronSchedule,
 }
 
+/// Cron job name for claw-evaluate (used by daemon force-trigger).
+pub const CLAW_EVALUATE_JOB: &str = "claw-evaluate";
+
 /// 템플릿에서 포함한 스크립트 내용
 const CLAW_EVALUATE_SH: &str = include_str!("../../../templates/crons/claw-evaluate.sh");
 const GAP_DETECTION_SH: &str = include_str!("../../../templates/crons/gap-detection.sh");
@@ -204,7 +207,7 @@ const LOG_CLEANUP_SH: &str = include_str!("../../../templates/crons/log-cleanup.
 fn per_repo_cron_defs(claw_cfg: &config::models::ClawConfig) -> Vec<BuiltinCronDef> {
     vec![
         BuiltinCronDef {
-            name: "claw-evaluate",
+            name: CLAW_EVALUATE_JOB,
             script_filename: "claw-evaluate.sh",
             script_content: CLAW_EVALUATE_SH,
             schedule: CronSchedule::Interval {

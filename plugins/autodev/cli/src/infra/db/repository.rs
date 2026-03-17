@@ -1221,6 +1221,24 @@ impl CronRepository for Database {
         Ok(())
     }
 
+    fn cron_reset_last_run(&self, name: &str, repo: Option<&str>) -> Result<()> {
+        let rows_affected = if let Some(repo_id) = repo {
+            self.conn().execute(
+                "UPDATE cron_jobs SET last_run_at = NULL WHERE name = ?1 AND repo_id = ?2",
+                rusqlite::params![name, repo_id],
+            )?
+        } else {
+            self.conn().execute(
+                "UPDATE cron_jobs SET last_run_at = NULL WHERE name = ?1 AND repo_id IS NULL",
+                rusqlite::params![name],
+            )?
+        };
+        if rows_affected == 0 {
+            anyhow::bail!("cron job not found: {name}");
+        }
+        Ok(())
+    }
+
     fn cron_find_due(&self) -> Result<Vec<CronJob>> {
         let conn = self.conn();
         let now = Utc::now();
