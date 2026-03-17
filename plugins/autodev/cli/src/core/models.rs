@@ -587,6 +587,13 @@ pub struct HitlEvent {
     pub created_at: String,
 }
 
+impl HitlEvent {
+    /// Parse the JSON-encoded options field into a `Vec<String>`.
+    pub fn parsed_options(&self) -> Vec<String> {
+        serde_json::from_str(&self.options).unwrap_or_default()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HitlResponse {
     pub id: String,

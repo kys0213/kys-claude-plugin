@@ -175,13 +175,44 @@ pub fn claw_edit(home: &Path, name: &str, repo: Option<&str>) -> Result<()> {
         .arg(&file_path)
         .status()?;
 
-    if status.success() {
-        println!("Updated: {}", file_path.display());
-    } else {
+    if !status.success() {
         anyhow::bail!("Editor exited with non-zero status");
     }
 
+    // Validate edited file
+    let content = std::fs::read_to_string(&file_path)
+        .with_context(|| format!("failed to read edited file: {}", file_path.display()))?;
+
+    let warnings = validate_rule_content(&content);
+    if warnings.is_empty() {
+        println!("Updated: {}", file_path.display());
+    } else {
+        println!("Updated: {} (with warnings)", file_path.display());
+        for w in &warnings {
+            eprintln!("  warning: {w}");
+        }
+    }
+
     Ok(())
+}
+
+/// Validate rule/command/skill markdown content after editing.
+///
+/// Returns a list of warnings (empty if valid).
+fn validate_rule_content(content: &str) -> Vec<String> {
+    let mut warnings = Vec::new();
+
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        warnings.push("file is empty".to_string());
+        return warnings;
+    }
+
+    if !trimmed.lines().any(|l| l.starts_with('#')) {
+        warnings.push("no markdown heading found (expected at least one '# ...')".to_string());
+    }
+
+    warnings
 }
 
 // ─── Default content ───
@@ -338,3 +369,41 @@ const DEFAULT_PRIORITIZE_SKILL_MD: &str = r#"# 우선순위 판단 스킬
 - 정렬된 작업 목록
 - 각 작업의 우선순위 근거
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_empty_content() {
+        let warnings = validate_rule_content("");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("empty"));
+    }
+
+    #[test]
+    fn validate_whitespace_only() {
+        let warnings = validate_rule_content("   \n  \n  ");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("empty"));
+    }
+
+    #[test]
+    fn validate_no_heading() {
+        let warnings = validate_rule_content("some content without heading\nmore lines");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("heading"));
+    }
+
+    #[test]
+    fn validate_valid_content() {
+        let warnings = validate_rule_content("# My Rule\n\nSome description");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn validate_h2_heading_counts() {
+        let warnings = validate_rule_content("## Subsection\n\nContent here");
+        assert!(warnings.is_empty());
+    }
+}

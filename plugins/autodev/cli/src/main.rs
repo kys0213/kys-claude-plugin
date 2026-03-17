@@ -742,8 +742,22 @@ async fn main() -> Result<()> {
                 println!("{output}");
             }
             HitlAction::Timeout { hours, action } => {
-                let output = client::hitl::timeout(&db, hours, action)?;
-                println!("{output}");
+                let result = client::hitl::timeout(&db, hours, action)?;
+                println!("{}", result.output);
+
+                // Dispatch notifications for expired events if configured
+                if let Some(dispatcher) =
+                    autodev::service::daemon::notifiers::dispatcher::NotificationDispatcher::from_config(&cfg.daemon)
+                {
+                    for event in &result.expired_events {
+                        let notif =
+                            autodev::core::notifier::NotificationEvent::from_hitl_expired(event);
+                        let errors = dispatcher.dispatch(&notif).await;
+                        for (ch, err) in &errors {
+                            eprintln!("  notification error ({ch}): {err}");
+                        }
+                    }
+                }
             }
         },
         Commands::Decisions { action } => match action {
