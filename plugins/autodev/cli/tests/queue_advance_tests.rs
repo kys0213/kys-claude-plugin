@@ -296,6 +296,8 @@ fn make_row(repo_id: &str, work_id: &str, phase: QueuePhase) -> QueueItemRow {
         task_kind: TaskKind::Analyze,
         github_number: 42,
         metadata_json: None,
+        failure_count: 0,
+        escalation_level: 0,
     }
 }
 

@@ -798,7 +798,8 @@ impl QueueRepository for Database {
                 (
                     "SELECT q.work_id, q.repo_id, q.queue_type, q.phase, q.title, \
                      q.skip_reason, q.created_at, q.updated_at, \
-                     q.task_kind, q.github_number, q.metadata_json \
+                     q.task_kind, q.github_number, q.metadata_json, \
+                     q.failure_count, q.escalation_level \
                      FROM queue_items q JOIN repositories r ON q.repo_id = r.id \
                      WHERE r.name = ?1 ORDER BY q.created_at DESC"
                         .to_string(),
@@ -808,7 +809,8 @@ impl QueueRepository for Database {
                 (
                     "SELECT work_id, repo_id, queue_type, phase, title, \
                      skip_reason, created_at, updated_at, \
-                     task_kind, github_number, metadata_json \
+                     task_kind, github_number, metadata_json, \
+                     failure_count, escalation_level \
                      FROM queue_items ORDER BY created_at DESC"
                         .to_string(),
                     vec![],
@@ -827,8 +829,9 @@ impl QueueRepository for Database {
         let now = Utc::now().to_rfc3339();
         conn.execute(
             "INSERT INTO queue_items (work_id, repo_id, queue_type, phase, title, skip_reason, \
-             created_at, updated_at, task_kind, github_number, metadata_json) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
+             created_at, updated_at, task_kind, github_number, metadata_json, \
+             failure_count, escalation_level) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
              ON CONFLICT(work_id) DO UPDATE SET \
              phase = excluded.phase, title = excluded.title, skip_reason = excluded.skip_reason, \
              updated_at = ?8, task_kind = excluded.task_kind, \
@@ -845,6 +848,8 @@ impl QueueRepository for Database {
                 item.task_kind.as_str(),
                 item.github_number,
                 item.metadata_json,
+                item.failure_count,
+                item.escalation_level,
             ],
         )?;
         Ok(())
@@ -864,7 +869,8 @@ impl QueueRepository for Database {
         let mut stmt = conn.prepare(
             "SELECT work_id, repo_id, queue_type, phase, title, \
              skip_reason, created_at, updated_at, \
-             task_kind, github_number, metadata_json \
+             task_kind, github_number, metadata_json, \
+             failure_count, escalation_level \
              FROM queue_items WHERE repo_id = ?1 AND phase NOT IN ('done', 'skipped') \
              ORDER BY created_at ASC",
         )?;
@@ -886,12 +892,39 @@ impl QueueRepository for Database {
         let result = conn.query_row(
             "SELECT work_id, repo_id, queue_type, phase, title, \
              skip_reason, created_at, updated_at, \
-             task_kind, github_number, metadata_json \
+             task_kind, github_number, metadata_json, \
+             failure_count, escalation_level \
              FROM queue_items WHERE work_id = ?1",
             rusqlite::params![work_id],
             map_queue_item_row,
         );
         optional_query_row(result)
+    }
+
+    fn queue_increment_failure(&self, work_id: &str) -> Result<i32> {
+        let conn = self.conn();
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE queue_items SET failure_count = failure_count + 1, updated_at = ?1 \
+             WHERE work_id = ?2",
+            rusqlite::params![now, work_id],
+        )?;
+        let count: i32 = conn.query_row(
+            "SELECT failure_count FROM queue_items WHERE work_id = ?1",
+            rusqlite::params![work_id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    fn queue_get_failure_count(&self, work_id: &str) -> Result<i32> {
+        let conn = self.conn();
+        let count: i32 = conn.query_row(
+            "SELECT failure_count FROM queue_items WHERE work_id = ?1",
+            rusqlite::params![work_id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
     }
 }
 
@@ -1371,6 +1404,8 @@ fn map_queue_item_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueItemRow>
         })?,
         github_number: row.get(9)?,
         metadata_json: row.get(10)?,
+        failure_count: row.get::<_, Option<i32>>(11)?.unwrap_or(0),
+        escalation_level: row.get::<_, Option<i32>>(12)?.unwrap_or(0),
     })
 }
 

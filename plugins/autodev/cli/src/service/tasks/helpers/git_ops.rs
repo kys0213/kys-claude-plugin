@@ -963,6 +963,12 @@ mod tests {
         fn queue_get_item(&self, _: &str) -> Result<Option<crate::core::models::QueueItemRow>> {
             Ok(None)
         }
+        fn queue_increment_failure(&self, _: &str) -> Result<i32> {
+            Ok(1)
+        }
+        fn queue_get_failure_count(&self, _: &str) -> Result<i32> {
+            Ok(0)
+        }
     }
 
     // ─── Test Helpers ───

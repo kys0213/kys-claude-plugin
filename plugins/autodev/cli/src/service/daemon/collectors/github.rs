@@ -258,7 +258,10 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
         drained
     }
 
-    fn drain_queue_items(&mut self) -> Vec<Box<dyn Task>> {
+    /// Ready(또는 Pending) 상태의 큐 아이템을 Running으로 전이하며 Task를 생성한다.
+    ///
+    /// poll()에서 분리되어 별도 호출 가능. Collector trait의 drain_tasks() 구현에서 위임받는다.
+    pub fn drain_ready_tasks(&mut self) -> Vec<Box<dyn Task>> {
         let mut tasks: Vec<Box<dyn Task>> = Vec::new();
         // claw_enabled: Ready→Running, otherwise: Pending→Running
         let from_phase = if self.claw_enabled {
@@ -428,7 +431,11 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> Collect
 
         self.run_scans().await;
         self.sync_queue_phases();
-        self.drain_queue_items()
+        Vec::new()
+    }
+
+    fn drain_tasks(&mut self) -> Vec<Box<dyn Task>> {
+        self.drain_ready_tasks()
     }
 
     fn apply(&mut self, result: &TaskResult) {
@@ -643,6 +650,12 @@ mod tests {
         ) -> anyhow::Result<Option<crate::core::models::QueueItemRow>> {
             Ok(None)
         }
+        fn queue_increment_failure(&self, _: &str) -> anyhow::Result<i32> {
+            Ok(1)
+        }
+        fn queue_get_failure_count(&self, _: &str) -> anyhow::Result<i32> {
+            Ok(0)
+        }
     }
 
     fn make_source(gh: Arc<MockGh>) -> GitHubTaskSource<MockDb> {
@@ -691,7 +704,7 @@ mod tests {
         }
     }
 
-    // ─── drain_queue_items tests ───
+    // ─── drain_ready_tasks tests ───
 
     #[test]
     fn drain_creates_analyze_task_from_pending_issue() {
@@ -710,7 +723,7 @@ mod tests {
         );
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].work_id(), "issue:org/repo:1");
 
@@ -735,7 +748,7 @@ mod tests {
         );
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].work_id(), "issue:org/repo:2");
     }
@@ -757,7 +770,7 @@ mod tests {
         );
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].work_id(), "pr:org/repo:10");
     }
@@ -779,7 +792,7 @@ mod tests {
         );
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].work_id(), "pr:org/repo:10");
     }
@@ -907,7 +920,7 @@ mod tests {
         source.repos.insert("org/repo1".to_string(), repo1);
         source.repos.insert("org/repo2".to_string(), repo2);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 3);
     }
 
@@ -935,7 +948,7 @@ mod tests {
         }
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 2);
 
         // 3 items should remain in Pending
@@ -984,7 +997,7 @@ mod tests {
         }
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
         // Only 1 slot available (2 - 1 in-flight)
         assert_eq!(tasks.len(), 1);
         assert_eq!(
@@ -1029,7 +1042,7 @@ mod tests {
         );
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 0);
     }
 
@@ -1055,7 +1068,7 @@ mod tests {
         }
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 1);
         assert_eq!(
             source.repos["org/repo"]
@@ -1080,7 +1093,7 @@ mod tests {
         );
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
         assert!(tasks.is_empty());
     }
 
@@ -1111,7 +1124,7 @@ mod tests {
         );
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
 
         // Both should drain — issue concurrency doesn't block PR and vice versa
         assert_eq!(tasks.len(), 2);
@@ -1142,7 +1155,7 @@ mod tests {
         );
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
 
         // Review should drain because Extract doesn't consume concurrency
         assert_eq!(tasks.len(), 1);
@@ -1173,7 +1186,7 @@ mod tests {
         );
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
 
         // Both should drain (shared issue concurrency budget)
         assert_eq!(tasks.len(), 2);
@@ -1207,7 +1220,7 @@ mod tests {
         );
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
 
         // ReviewTask should be created
         assert_eq!(tasks.len(), 1);
@@ -1255,7 +1268,7 @@ mod tests {
         );
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
 
         // concurrency=1 so only 1 should drain to Running
         assert_eq!(tasks.len(), 1);
@@ -1315,7 +1328,7 @@ mod tests {
         );
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].work_id(), "issue:org/repo:1");
     }
@@ -1338,7 +1351,7 @@ mod tests {
         );
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
         assert!(tasks.is_empty());
         // Item should remain in Pending
         assert_eq!(source.repos["org/repo"].queue.len(QueuePhase::Pending), 1);
@@ -1361,7 +1374,7 @@ mod tests {
         );
         source.repos.insert("org/repo".to_string(), repo);
 
-        let tasks = source.drain_queue_items();
+        let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 1);
     }
 
@@ -1380,6 +1393,8 @@ mod tests {
             task_kind: TaskKind::Analyze,
             github_number: 1,
             metadata_json: None,
+            failure_count: 0,
+            escalation_level: 0,
         };
 
         let db = MockDb {

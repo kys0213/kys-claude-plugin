@@ -280,6 +280,8 @@ impl QueueItem {
             task_kind: self.task_kind,
             github_number: self.github_number,
             metadata_json: self.metadata_json(),
+            failure_count: 0,
+            escalation_level: 0,
         }
     }
 

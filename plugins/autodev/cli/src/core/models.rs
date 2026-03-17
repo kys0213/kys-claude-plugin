@@ -360,6 +360,43 @@ impl fmt::Display for QueueType {
     }
 }
 
+/// 5-Level failure escalation.
+///
+/// failure_count가 증가할 때마다 대응 수준을 높인다.
+/// 1회: 재시도, 2회: 코멘트, 3회: HITL, 4회: 스킵, 5+회: 리플랜.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EscalationLevel {
+    Retry = 1,
+    Comment = 2,
+    Hitl = 3,
+    Skip = 4,
+    Replan = 5,
+}
+
+impl From<i32> for EscalationLevel {
+    fn from(failure_count: i32) -> Self {
+        match failure_count {
+            0..=1 => EscalationLevel::Retry,
+            2 => EscalationLevel::Comment,
+            3 => EscalationLevel::Hitl,
+            4 => EscalationLevel::Skip,
+            _ => EscalationLevel::Replan,
+        }
+    }
+}
+
+impl fmt::Display for EscalationLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EscalationLevel::Retry => write!(f, "retry"),
+            EscalationLevel::Comment => write!(f, "comment"),
+            EscalationLevel::Hitl => write!(f, "hitl"),
+            EscalationLevel::Skip => write!(f, "skip"),
+            EscalationLevel::Replan => write!(f, "replan"),
+        }
+    }
+}
+
 /// DB-level queue item row (CLI `queue list` 등에서 사용).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueItemRow {
@@ -374,6 +411,8 @@ pub struct QueueItemRow {
     pub task_kind: TaskKind,
     pub github_number: i64,
     pub metadata_json: Option<String>,
+    pub failure_count: i32,
+    pub escalation_level: i32,
 }
 
 // ─── Spec models ───

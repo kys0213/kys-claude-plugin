@@ -21,6 +21,7 @@ impl Database {
         schema::create_tables(&self.conn)?;
         schema::migrate_v2(&self.conn)?;
         schema::migrate_v3(&self.conn)?;
+        schema::migrate_v4(&self.conn)?;
         Ok(())
     }
 

@@ -87,6 +87,10 @@ mod tests {
             std::mem::take(&mut *self.tasks_to_return.lock().unwrap())
         }
 
+        fn drain_tasks(&mut self) -> Vec<Box<dyn Task>> {
+            Vec::new()
+        }
+
         fn apply(&mut self, result: &TaskResult) {
             self.applied.lock().unwrap().push(result.work_id.clone());
         }

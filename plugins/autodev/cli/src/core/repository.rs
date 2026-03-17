@@ -81,6 +81,10 @@ pub trait QueueRepository {
     fn queue_transit(&self, work_id: &str, from: QueuePhase, to: QueuePhase) -> Result<bool>;
     /// 단일 큐 아이템을 work_id로 조회한다
     fn queue_get_item(&self, work_id: &str) -> Result<Option<QueueItemRow>>;
+    /// failure_count를 1 증가시키고 새 값을 반환한다
+    fn queue_increment_failure(&self, work_id: &str) -> Result<i32>;
+    /// 현재 failure_count를 조회한다
+    fn queue_get_failure_count(&self, work_id: &str) -> Result<i32>;
 }
 
 pub trait ClawDecisionRepository {
