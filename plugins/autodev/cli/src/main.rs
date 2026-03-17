@@ -171,6 +171,11 @@ enum ConventionAction {
         #[arg(long, default_value = "3")]
         threshold: i32,
     },
+    /// 승인된 컨벤션 업데이트 적용
+    ApplyApproved {
+        /// 레포 이름 (org/repo)
+        repo: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1069,6 +1074,14 @@ async fn main() -> Result<()> {
             ConventionAction::Propose { repo, threshold } => {
                 let repo_id = client::resolve_repo_id(&db, &repo)?;
                 let output = client::convention::propose_updates(&db, &repo_id, threshold)?;
+                print!("{output}");
+            }
+            ConventionAction::ApplyApproved { repo } => {
+                let repo_id = client::resolve_repo_id(&db, &repo)?;
+                let repo_path = config::workspaces_path(&env)
+                    .join(config::sanitize_repo_name(&repo))
+                    .join("main");
+                let output = client::convention::apply_approved(&db, &repo, &repo_id, &repo_path)?;
                 print!("{output}");
             }
         },

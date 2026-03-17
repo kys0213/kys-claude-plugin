@@ -2,6 +2,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
+use crate::core::models::FeedbackPatternStatus;
 use crate::core::repository::FeedbackPatternRepository;
 use crate::infra::db::Database;
 
@@ -661,7 +662,7 @@ pub fn pattern_type_to_rule_file(pattern_type: &str) -> String {
 /// then creates a HITL event for each so a human can approve, edit, or reject.
 /// Returns a summary message.
 pub fn propose_updates(db: &Database, repo_id: &str, threshold: i32) -> Result<String> {
-    use crate::core::models::{FeedbackPatternStatus, HitlSeverity, NewHitlEvent};
+    use crate::core::models::{HitlSeverity, NewHitlEvent};
     use crate::core::repository::HitlRepository;
 
     let patterns = db.feedback_list_actionable(repo_id, threshold)?;
@@ -698,6 +699,215 @@ pub fn propose_updates(db: &Database, repo_id: &str, threshold: i32) -> Result<S
     }
 
     Ok(format!("Proposed {proposed} convention update(s)\n"))
+}
+
+// ─── Convention Apply ───
+
+/// Parse the convention update context from a HITL event.
+///
+/// The context field has the format:
+/// ```text
+/// Rule file: .claude/rules/error-handling.md
+/// Occurrences: 5
+/// Suggestion: Use thiserror for all error types
+/// Sources: {"hitl": 3, "pr-review": 2}
+/// ```
+///
+/// Returns `(rule_file, suggestion)` if parsing succeeds.
+pub fn parse_convention_context(context: &str) -> Option<(String, String)> {
+    let mut rule_file = None;
+    let mut suggestion = None;
+
+    for line in context.lines() {
+        if let Some(rest) = line.strip_prefix("Rule file: ") {
+            rule_file = Some(rest.trim().to_string());
+        } else if let Some(rest) = line.strip_prefix("Suggestion: ") {
+            suggestion = Some(rest.trim().to_string());
+        }
+    }
+
+    match (rule_file, suggestion) {
+        (Some(rf), Some(sg)) => Some((rf, sg)),
+        _ => None,
+    }
+}
+
+/// Apply approved convention updates from HITL responses.
+///
+/// Scans all responded HITL events whose situation starts with "Convention update suggested:",
+/// checks the response choice, and writes or skips rule files accordingly.
+///
+/// - choice=1 ("Apply"): write the suggestion to the rule file
+/// - choice=2 ("Edit and apply"): use the response message as content
+/// - choice=3 ("Reject"): skip, mark pattern as Rejected
+///
+/// Returns a summary string.
+pub fn apply_approved(
+    db: &Database,
+    repo_name: &str,
+    repo_id: &str,
+    repo_path: &Path,
+) -> Result<String> {
+    use crate::core::models::HitlStatus;
+    use crate::core::repository::HitlRepository;
+
+    let events = db.hitl_list(Some(repo_name))?;
+
+    let mut applied = 0u32;
+    let mut rejected = 0u32;
+    let mut skipped = 0u32;
+
+    for event in &events {
+        if !matches!(event.status, HitlStatus::Responded) {
+            continue;
+        }
+
+        if !event.situation.starts_with("Convention update suggested:") {
+            continue;
+        }
+
+        let responses = db.hitl_responses(&event.id)?;
+        let response = match responses.last() {
+            Some(r) => r,
+            None => continue,
+        };
+
+        let choice = match response.choice {
+            Some(c) => c,
+            None => continue,
+        };
+
+        let parsed = parse_convention_context(&event.context);
+
+        match choice {
+            1 => {
+                // Apply: use the original suggestion
+                if let Some((rule_file, suggestion)) = parsed {
+                    write_rule_file(repo_path, &rule_file, &suggestion)?;
+                    update_linked_pattern_status(
+                        db,
+                        repo_id,
+                        &event.situation,
+                        FeedbackPatternStatus::Applied,
+                    )?;
+                    applied += 1;
+                } else {
+                    skipped += 1;
+                }
+            }
+            2 => {
+                // Edit and apply: use the response message as content
+                if let Some((rule_file, _)) = parsed {
+                    let content = response.message.as_deref().unwrap_or("").trim();
+                    if content.is_empty() {
+                        skipped += 1;
+                    } else {
+                        write_rule_file(repo_path, &rule_file, content)?;
+                        update_linked_pattern_status(
+                            db,
+                            repo_id,
+                            &event.situation,
+                            FeedbackPatternStatus::Applied,
+                        )?;
+                        applied += 1;
+                    }
+                } else {
+                    skipped += 1;
+                }
+            }
+            3 => {
+                // Reject
+                update_linked_pattern_status(
+                    db,
+                    repo_id,
+                    &event.situation,
+                    FeedbackPatternStatus::Rejected,
+                )?;
+                rejected += 1;
+            }
+            _ => {
+                skipped += 1;
+            }
+        }
+    }
+
+    Ok(format!(
+        "Convention apply complete: {applied} applied, {rejected} rejected, {skipped} skipped\n"
+    ))
+}
+
+/// Write (or append) a suggestion to a convention rule file.
+fn write_rule_file(repo_path: &Path, rule_file: &str, suggestion: &str) -> Result<()> {
+    let target = repo_path.join(rule_file);
+
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    if target.exists() {
+        // Append as a new section
+        let existing = std::fs::read_to_string(&target)?;
+        let mut content = existing;
+        if !content.ends_with('\n') {
+            content.push('\n');
+        }
+        content.push('\n');
+        content.push_str(suggestion);
+        content.push('\n');
+        std::fs::write(&target, content)?;
+    } else {
+        // Create with a heading derived from the filename
+        let stem = std::path::Path::new(rule_file)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Convention");
+        let heading = stem
+            .split('-')
+            .map(|w| {
+                let mut chars = w.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let content = format!("# {heading}\n\n{suggestion}\n");
+        std::fs::write(&target, content)?;
+    }
+
+    Ok(())
+}
+
+/// Update the linked feedback pattern status based on the HITL event situation.
+///
+/// The situation has format "Convention update suggested: <pattern_type>".
+/// We find the pattern with that type and status=Proposed, then update it.
+fn update_linked_pattern_status(
+    db: &Database,
+    repo_id: &str,
+    situation: &str,
+    status: FeedbackPatternStatus,
+) -> Result<()> {
+    let pattern_type = situation
+        .strip_prefix("Convention update suggested: ")
+        .unwrap_or("");
+
+    if pattern_type.is_empty() {
+        return Ok(());
+    }
+
+    // Find the proposed pattern matching this type
+    let patterns = db.feedback_list(repo_id)?;
+    for p in &patterns {
+        if p.pattern_type == pattern_type && p.status == FeedbackPatternStatus::Proposed {
+            db.feedback_set_status(&p.id, status.clone())?;
+            break;
+        }
+    }
+
+    Ok(())
 }
 
 // ─── Feedback Patterns CLI ───
