@@ -163,6 +163,14 @@ enum ConventionAction {
         /// 레포 이름 (org/repo)
         repo: String,
     },
+    /// 피드백 패턴 기반 컨벤션 업데이트 제안
+    Propose {
+        /// 레포 이름 (org/repo)
+        repo: String,
+        /// 최소 발생 횟수 임계값 (기본: 3)
+        #[arg(long, default_value = "3")]
+        threshold: i32,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1056,6 +1064,11 @@ async fn main() -> Result<()> {
             ConventionAction::CollectFeedback { repo } => {
                 let repo_id = client::resolve_repo_id(&db, &repo)?;
                 let output = client::convention::collect_feedback(&db, &repo, &repo_id)?;
+                print!("{output}");
+            }
+            ConventionAction::Propose { repo, threshold } => {
+                let repo_id = client::resolve_repo_id(&db, &repo)?;
+                let output = client::convention::propose_updates(&db, &repo_id, threshold)?;
                 print!("{output}");
             }
         },

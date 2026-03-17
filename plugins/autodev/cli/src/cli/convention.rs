@@ -648,6 +648,58 @@ pub fn collect_feedback_from_hitl(
     Ok(())
 }
 
+// ─── Convention Update Proposal ───
+
+/// Map pattern_type to a convention rule file path.
+pub fn pattern_type_to_rule_file(pattern_type: &str) -> String {
+    format!(".claude/rules/{pattern_type}.md")
+}
+
+/// Check actionable feedback patterns and create HITL events for convention updates.
+///
+/// Queries patterns with `occurrence_count >= threshold` and `status = Active`,
+/// then creates a HITL event for each so a human can approve, edit, or reject.
+/// Returns a summary message.
+pub fn propose_updates(db: &Database, repo_id: &str, threshold: i32) -> Result<String> {
+    use crate::core::models::{FeedbackPatternStatus, HitlSeverity, NewHitlEvent};
+    use crate::core::repository::HitlRepository;
+
+    let patterns = db.feedback_list_actionable(repo_id, threshold)?;
+
+    if patterns.is_empty() {
+        return Ok("No actionable patterns found.\n".to_string());
+    }
+
+    let mut proposed = 0;
+
+    for pattern in &patterns {
+        let rule_file = pattern_type_to_rule_file(&pattern.pattern_type);
+
+        let hitl_event = NewHitlEvent {
+            repo_id: repo_id.to_string(),
+            spec_id: None,
+            work_id: None,
+            severity: HitlSeverity::Medium,
+            situation: format!("Convention update suggested: {}", pattern.pattern_type),
+            context: format!(
+                "Rule file: {}\nOccurrences: {}\nSuggestion: {}\nSources: {}",
+                rule_file, pattern.occurrence_count, pattern.suggestion, pattern.sources_json
+            ),
+            options: vec![
+                "Apply this convention rule".to_string(),
+                "Edit and apply".to_string(),
+                "Reject".to_string(),
+            ],
+        };
+
+        db.hitl_create(&hitl_event)?;
+        db.feedback_set_status(&pattern.id, FeedbackPatternStatus::Proposed)?;
+        proposed += 1;
+    }
+
+    Ok(format!("Proposed {proposed} convention update(s)\n"))
+}
+
 // ─── Feedback Patterns CLI ───
 
 /// List feedback patterns for a repo, formatted as a table.
