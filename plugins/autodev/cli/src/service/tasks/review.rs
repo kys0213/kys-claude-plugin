@@ -233,13 +233,14 @@ impl Task for ReviewTask {
                 )
                 .await;
 
+            let head_branch = self.item.head_branch().unwrap_or("").to_string();
             let fail_comment = format!(
                 "<!-- autodev:review-failed -->\n\
                  ⚠️ Review agent failed (exit_code={}).\n\n\
-                 **Branch**: `{}`\n\
-                 Check the agent logs for details.",
+                 **Branch**: `{head_branch}`\n\
+                 Worktree has been preserved for debugging:\n\
+                 ```\ngit worktree list | grep '{head_branch}'\n```",
                 response.exit_code,
-                self.item.head_branch().unwrap_or("")
             );
             self.gh
                 .issue_comment(
@@ -250,7 +251,7 @@ impl Task for ReviewTask {
                 )
                 .await;
 
-            self.cleanup_worktree().await;
+            tracing::warn!("worktree preserved for debugging: {}", self.work_id());
             return TaskResult {
                 work_id: self.item.work_id.clone(),
                 repo_name: self.item.repo_name.clone(),

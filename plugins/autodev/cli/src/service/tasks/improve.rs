@@ -180,6 +180,8 @@ impl Task for ImproveTask {
                 phase: QueuePhase::Pending,
                 item: Box::new(next_item),
             });
+
+            self.cleanup_worktree().await;
         } else {
             // add-first: IMPROVE_FAILED 추가 후 CHANGES_REQUESTED 제거
             self.gh
@@ -199,13 +201,14 @@ impl Task for ImproveTask {
                 )
                 .await;
 
+            let head_branch = self.item.head_branch().unwrap_or("").to_string();
             let fail_comment = format!(
                 "<!-- autodev:improve-failed -->\n\
                  ⚠️ Improve agent failed (exit_code={}).\n\n\
-                 **Branch**: `{}`\n\
-                 Check the agent logs for details.",
+                 **Branch**: `{head_branch}`\n\
+                 Worktree has been preserved for debugging:\n\
+                 ```\ngit worktree list | grep '{head_branch}'\n```",
                 response.exit_code,
-                self.item.head_branch().unwrap_or("")
             );
             self.gh
                 .issue_comment(
@@ -216,10 +219,9 @@ impl Task for ImproveTask {
                 )
                 .await;
 
+            tracing::warn!("worktree preserved for debugging: {}", self.work_id());
             ops.push(QueueOp::Remove);
         }
-
-        self.cleanup_worktree().await;
 
         TaskResult {
             work_id: self.item.work_id.clone(),
