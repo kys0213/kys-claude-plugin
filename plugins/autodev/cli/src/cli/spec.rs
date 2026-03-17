@@ -268,26 +268,43 @@ fn validate_spec_sections(body: &str) -> Vec<String> {
     missing
 }
 
-/// Detect specs that share the same source_path (potential file conflicts).
-pub fn spec_conflicts(db: &Database, spec_id: &str) -> Result<String> {
+/// (source_path, conflicting specs)
+type ConflictInfo = (String, Vec<Spec>);
+
+/// Resolve a spec and find its path conflicts. Returns None if no source_path is set.
+fn resolve_conflicts(db: &Database, spec_id: &str) -> Result<(Spec, Option<ConflictInfo>)> {
     let spec = db
         .spec_show(spec_id)?
         .ok_or_else(|| anyhow::anyhow!("spec not found: {spec_id}"))?;
 
-    let source_path = match &spec.source_path {
-        Some(p) => p.clone(),
-        None => {
-            return Ok(format!(
-                "Spec {spec_id} has no source_path — cannot detect conflicts.\n"
-            ))
+    let result = match &spec.source_path {
+        Some(p) => {
+            let conflicts = find_path_conflicts(db, &spec.id, p)?;
+            if conflicts.is_empty() {
+                None
+            } else {
+                Some((p.clone(), conflicts))
+            }
         }
+        None => None,
     };
 
-    let conflicts = find_path_conflicts(db, &spec.id, &source_path)?;
+    Ok((spec, result))
+}
 
-    if conflicts.is_empty() {
-        return Ok(format!("No conflicts detected for spec {spec_id}.\n"));
+/// Detect specs that share the same source_path (potential file conflicts).
+pub fn spec_conflicts(db: &Database, spec_id: &str) -> Result<String> {
+    let (spec, resolved) = resolve_conflicts(db, spec_id)?;
+
+    if spec.source_path.is_none() {
+        return Ok(format!(
+            "Spec {spec_id} has no source_path — cannot detect conflicts.\n"
+        ));
     }
+
+    let Some((source_path, conflicts)) = resolved else {
+        return Ok(format!("No conflicts detected for spec {spec_id}.\n"));
+    };
 
     let mut output = format!(
         "⚠ {} conflict(s) detected for spec {spec_id} ({}):\n\n",
@@ -337,10 +354,103 @@ fn paths_overlap(a: &str, b: &str) -> bool {
     a_is_parent || b_is_parent
 }
 
+/// Detect conflicts and create a HITL event if conflicts are found.
+///
+/// Returns the conflict output and the created HITL event ID (if any).
+pub fn spec_conflicts_with_hitl(db: &Database, spec_id: &str) -> Result<(String, Option<String>)> {
+    let (spec, resolved) = resolve_conflicts(db, spec_id)?;
+
+    let Some((source_path, conflicts)) = resolved else {
+        return Ok((format!("No conflicts for spec {spec_id}.\n"), None));
+    };
+
+    let mut options = vec![format!("Prioritize current: {}", spec.title)];
+    for c in &conflicts {
+        options.push(format!("Prioritize: {} ({})", c.title, c.id));
+    }
+    options.push("Sequence them manually".to_string());
+
+    let hitl_event = NewHitlEvent {
+        repo_id: spec.repo_id.clone(),
+        spec_id: Some(spec.id.clone()),
+        work_id: None,
+        severity: HitlSeverity::Medium,
+        situation: format!(
+            "Spec conflict: {} spec(s) modify overlapping path '{}'",
+            conflicts.len(),
+            source_path
+        ),
+        context: format!(
+            "Spec '{}' ({}) conflicts with:\n{}",
+            spec.title,
+            spec.id,
+            format_conflict_list(&conflicts)
+        ),
+        options,
+    };
+
+    let hitl_id = db.hitl_create(&hitl_event)?;
+
+    let output = format!(
+        "⚠ {} conflict(s) for spec {spec_id} → HITL event created: {hitl_id}\n",
+        conflicts.len()
+    );
+    Ok((output, Some(hitl_id)))
+}
+
 /// Prioritize specs by setting priority order based on the given ID list.
 pub fn spec_prioritize(db: &Database, ids: &[String]) -> Result<String> {
     for (i, id) in ids.iter().enumerate() {
         db.spec_set_priority(id, (i + 1) as i32)?;
     }
     Ok(format!("Prioritized {} specs", ids.len()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths_overlap_same_path() {
+        assert!(paths_overlap("src/main.rs", "src/main.rs"));
+    }
+
+    #[test]
+    fn paths_overlap_parent_child() {
+        assert!(paths_overlap("src", "src/main.rs"));
+        assert!(paths_overlap("src/main.rs", "src"));
+    }
+
+    #[test]
+    fn paths_overlap_no_overlap() {
+        assert!(!paths_overlap("src/main.rs", "src/lib.rs"));
+        assert!(!paths_overlap("src/foo", "src/foobar"));
+    }
+
+    #[test]
+    fn paths_overlap_partial_prefix_not_overlap() {
+        // "src/fo" is not a parent of "src/foo" — no slash boundary
+        assert!(!paths_overlap("src/fo", "src/foo"));
+    }
+
+    #[test]
+    fn format_conflict_list_renders_correctly() {
+        let conflicts = vec![Spec {
+            id: "spec-1".to_string(),
+            repo_id: "repo".to_string(),
+            title: "Add feature".to_string(),
+            body: String::new(),
+            status: SpecStatus::Active,
+            source_path: Some("src/lib.rs".to_string()),
+            test_commands: None,
+            acceptance_criteria: None,
+            priority: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+        }];
+        let output = format_conflict_list(&conflicts);
+        assert!(output.contains("spec-1"));
+        assert!(output.contains("src/lib.rs"));
+        assert!(output.contains("Add feature"));
+    }
 }
