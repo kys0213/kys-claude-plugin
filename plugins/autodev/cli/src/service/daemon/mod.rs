@@ -37,7 +37,8 @@ use self::daily_reporter::DailyReporter;
 use self::task_manager::TaskManager;
 use self::task_runner::TaskRunner;
 use self::task_runner_impl::DefaultTaskRunner;
-use crate::core::task::TaskResult;
+use crate::core::notifier::NotificationEvent;
+use crate::core::task::{TaskResult, TaskStatus};
 
 // ─── In-Flight Concurrency Tracker ───
 
@@ -115,6 +116,7 @@ pub struct Daemon {
     status_path: PathBuf,
     tick_interval_secs: u64,
     cron_engine: Option<CronEngine>,
+    notifier: Option<notifiers::dispatcher::NotificationDispatcher>,
 }
 
 impl Daemon {
@@ -136,11 +138,20 @@ impl Daemon {
             status_path,
             tick_interval_secs,
             cron_engine: None,
+            notifier: None,
         }
     }
 
     pub fn with_cron_engine(mut self, engine: CronEngine) -> Self {
         self.cron_engine = Some(engine);
+        self
+    }
+
+    pub fn with_notifier(
+        mut self,
+        notifier: notifiers::dispatcher::NotificationDispatcher,
+    ) -> Self {
+        self.notifier = Some(notifier);
         self
     }
 
@@ -171,6 +182,21 @@ impl Daemon {
                             self.manager.apply(&task_result);
                             for log_entry in &task_result.logs {
                                 let _ = self.log_db.log_insert(log_entry);
+                            }
+
+                            // Notify on task failure
+                            if let TaskStatus::Failed(ref msg) = task_result.status {
+                                if let Some(ref dispatcher) = self.notifier {
+                                    let notif = NotificationEvent::from_task_failed(
+                                        &task_result.work_id,
+                                        &task_result.repo_name,
+                                        msg,
+                                    );
+                                    let errors = dispatcher.dispatch(&notif).await;
+                                    for (ch, err) in &errors {
+                                        tracing::warn!("notification error ({ch}): {err}");
+                                    }
+                                }
                             }
                         }
                         Err(e) => {
@@ -429,6 +455,12 @@ pub async fn start(
         cfg.daemon.tick_interval_secs,
     )
     .with_cron_engine(cron_engine);
+
+    if let Some(notifier) = notifiers::dispatcher::NotificationDispatcher::from_config(&cfg.daemon)
+    {
+        daemon = daemon.with_notifier(notifier);
+        info!("notification dispatcher enabled");
+    }
 
     daemon.run().await;
 

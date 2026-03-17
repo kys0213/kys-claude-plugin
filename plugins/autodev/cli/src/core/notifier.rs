@@ -30,6 +30,20 @@ impl NotificationEvent {
             url: None,
         }
     }
+
+    /// Create a notification for a failed task.
+    pub fn from_task_failed(work_id: &str, repo_name: &str, error_message: &str) -> Self {
+        Self {
+            repo_name: repo_name.to_string(),
+            severity: "high".to_string(),
+            situation: format!("Task failed: {work_id}"),
+            context: error_message.to_string(),
+            options: vec!["Retry".to_string(), "Skip".to_string()],
+            work_id: Some(work_id.to_string()),
+            spec_id: None,
+            url: None,
+        }
+    }
 }
 
 /// HITL 알림을 외부 채널로 전송하는 인터페이스 (OCP).
