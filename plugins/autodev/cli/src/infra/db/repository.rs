@@ -54,6 +54,10 @@ impl RepoRepository for Database {
             rusqlite::params![repo_id],
         )?;
         tx.execute(
+            "DELETE FROM feedback_patterns WHERE repo_id = ?1",
+            rusqlite::params![repo_id],
+        )?;
+        tx.execute(
             "DELETE FROM cron_jobs WHERE repo_id = ?1",
             rusqlite::params![repo_id],
         )?;
@@ -1027,6 +1031,105 @@ impl ClawDecisionRepository for Database {
     }
 }
 
+impl FeedbackPatternRepository for Database {
+    fn feedback_upsert(&self, pattern: &NewFeedbackPattern) -> Result<String> {
+        let conn = self.conn();
+        let now = Utc::now().to_rfc3339();
+        let id = Uuid::new_v4().to_string();
+
+        // Try insert first
+        let inserted = conn.execute(
+            "INSERT OR IGNORE INTO feedback_patterns \
+             (id, repo_id, pattern_type, suggestion, source, occurrence_count, confidence, status, sources_json, created_at, last_seen_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 1, 0.5, 'active', ?6, ?7, ?7)",
+            rusqlite::params![
+                id,
+                pattern.repo_id,
+                pattern.pattern_type,
+                pattern.suggestion,
+                pattern.source,
+                format!(r#"{{"{}": 1}}"#, pattern.source),
+                now
+            ],
+        )?;
+
+        if inserted == 0 {
+            // Row already exists — increment occurrence_count and update sources_json
+            conn.execute(
+                "UPDATE feedback_patterns \
+                 SET occurrence_count = occurrence_count + 1, \
+                     last_seen_at = ?1, \
+                     source = ?2, \
+                     sources_json = json_set(sources_json, '$.' || ?2, \
+                         COALESCE(json_extract(sources_json, '$.' || ?2), 0) + 1) \
+                 WHERE repo_id = ?3 AND pattern_type = ?4 AND suggestion = ?5",
+                rusqlite::params![
+                    now,
+                    pattern.source,
+                    pattern.repo_id,
+                    pattern.pattern_type,
+                    pattern.suggestion
+                ],
+            )?;
+
+            // Return the existing id
+            let existing_id: String = conn.query_row(
+                "SELECT id FROM feedback_patterns \
+                 WHERE repo_id = ?1 AND pattern_type = ?2 AND suggestion = ?3",
+                rusqlite::params![pattern.repo_id, pattern.pattern_type, pattern.suggestion],
+                |row| row.get(0),
+            )?;
+            return Ok(existing_id);
+        }
+
+        Ok(id)
+    }
+
+    fn feedback_list(&self, repo_id: &str) -> Result<Vec<FeedbackPattern>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, repo_id, pattern_type, suggestion, source, occurrence_count, \
+             confidence, status, sources_json, created_at, last_seen_at \
+             FROM feedback_patterns WHERE repo_id = ?1 \
+             ORDER BY occurrence_count DESC, last_seen_at DESC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![repo_id], map_feedback_pattern_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn feedback_list_actionable(
+        &self,
+        repo_id: &str,
+        min_count: i32,
+    ) -> Result<Vec<FeedbackPattern>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, repo_id, pattern_type, suggestion, source, occurrence_count, \
+             confidence, status, sources_json, created_at, last_seen_at \
+             FROM feedback_patterns \
+             WHERE repo_id = ?1 AND occurrence_count >= ?2 AND status = 'active' \
+             ORDER BY occurrence_count DESC, last_seen_at DESC",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![repo_id, min_count],
+            map_feedback_pattern_row,
+        )?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn feedback_set_status(&self, id: &str, status: FeedbackPatternStatus) -> Result<()> {
+        let conn = self.conn();
+        let rows_affected = conn.execute(
+            "UPDATE feedback_patterns SET status = ?1 WHERE id = ?2",
+            rusqlite::params![status.as_str(), id],
+        )?;
+        if rows_affected == 0 {
+            anyhow::bail!("feedback pattern not found: {id}");
+        }
+        Ok(())
+    }
+}
+
 impl CronRepository for Database {
     fn cron_add(&self, job: &NewCronJob) -> Result<String> {
         let conn = self.conn();
@@ -1424,6 +1527,29 @@ fn map_queue_item_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueItemRow>
         metadata_json: row.get(10)?,
         failure_count: row.get::<_, Option<i32>>(11)?.unwrap_or(0),
         escalation_level: row.get::<_, Option<i32>>(12)?.unwrap_or(0),
+    })
+}
+
+fn map_feedback_pattern_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FeedbackPattern> {
+    let status_str: String = row.get(7)?;
+    Ok(FeedbackPattern {
+        id: row.get(0)?,
+        repo_id: row.get(1)?,
+        pattern_type: row.get(2)?,
+        suggestion: row.get(3)?,
+        source: row.get(4)?,
+        occurrence_count: row.get(5)?,
+        confidence: row.get(6)?,
+        status: status_str.parse().map_err(|e: String| {
+            rusqlite::Error::FromSqlConversionFailure(
+                7,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+            )
+        })?,
+        sources_json: row.get(8)?,
+        created_at: row.get(9)?,
+        last_seen_at: row.get(10)?,
     })
 }
 

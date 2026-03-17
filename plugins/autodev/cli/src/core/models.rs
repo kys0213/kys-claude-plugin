@@ -679,6 +679,70 @@ pub struct NewCronJob {
     pub builtin: bool,
 }
 
+// ─── Feedback Pattern models ───
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeedbackPattern {
+    pub id: String,
+    pub repo_id: String,
+    pub pattern_type: String,
+    pub suggestion: String,
+    pub source: String,
+    pub occurrence_count: i32,
+    pub confidence: f64,
+    pub status: FeedbackPatternStatus,
+    pub sources_json: String,
+    pub created_at: String,
+    pub last_seen_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FeedbackPatternStatus {
+    Active,
+    Proposed,
+    Applied,
+    Rejected,
+}
+
+impl FeedbackPatternStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FeedbackPatternStatus::Active => "active",
+            FeedbackPatternStatus::Proposed => "proposed",
+            FeedbackPatternStatus::Applied => "applied",
+            FeedbackPatternStatus::Rejected => "rejected",
+        }
+    }
+}
+
+impl std::str::FromStr for FeedbackPatternStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "active" => Ok(FeedbackPatternStatus::Active),
+            "proposed" => Ok(FeedbackPatternStatus::Proposed),
+            "applied" => Ok(FeedbackPatternStatus::Applied),
+            "rejected" => Ok(FeedbackPatternStatus::Rejected),
+            _ => Err(format!("invalid feedback pattern status: {s}")),
+        }
+    }
+}
+
+impl fmt::Display for FeedbackPatternStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+pub struct NewFeedbackPattern {
+    pub repo_id: String,
+    pub pattern_type: String,
+    pub suggestion: String,
+    pub source: String,
+}
+
 // ─── Claw Decision models ───
 
 /// Claw decision type

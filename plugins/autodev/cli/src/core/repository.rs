@@ -95,6 +95,17 @@ pub trait ClawDecisionRepository {
     fn decision_count(&self, repo: Option<&str>) -> Result<i64>;
 }
 
+pub trait FeedbackPatternRepository {
+    fn feedback_upsert(&self, pattern: &NewFeedbackPattern) -> Result<String>;
+    fn feedback_list(&self, repo_id: &str) -> Result<Vec<FeedbackPattern>>;
+    fn feedback_list_actionable(
+        &self,
+        repo_id: &str,
+        min_count: i32,
+    ) -> Result<Vec<FeedbackPattern>>;
+    fn feedback_set_status(&self, id: &str, status: FeedbackPatternStatus) -> Result<()>;
+}
+
 pub trait CronRepository {
     fn cron_add(&self, job: &NewCronJob) -> Result<String>;
     fn cron_list(&self, repo: Option<&str>) -> Result<Vec<CronJob>>;
