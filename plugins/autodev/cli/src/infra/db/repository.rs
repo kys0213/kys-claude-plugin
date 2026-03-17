@@ -390,6 +390,18 @@ impl SpecRepository for Database {
         }
         Ok(())
     }
+
+    fn spec_list_active_with_source_path(&self) -> Result<Vec<Spec>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, repo_id, title, body, status, source_path, \
+             test_commands, acceptance_criteria, priority, created_at, updated_at \
+             FROM specs WHERE status = 'active' AND source_path IS NOT NULL \
+             ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map([], map_spec_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
 }
 
 impl TokenUsageRepository for Database {

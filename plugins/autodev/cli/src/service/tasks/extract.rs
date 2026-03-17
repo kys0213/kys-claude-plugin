@@ -256,7 +256,11 @@ impl Task for ExtractTask {
             )
             .await;
 
-        self.cleanup_worktree().await;
+        if response.exit_code == 0 {
+            self.cleanup_worktree().await;
+        } else {
+            tracing::warn!("worktree preserved for debugging: {}", self.work_id());
+        }
 
         TaskResult {
             work_id: self.item.work_id.clone(),

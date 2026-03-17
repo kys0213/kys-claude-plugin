@@ -466,6 +466,11 @@ enum SpecAction {
         /// 스펙 ID 목록 (우선순위 순서)
         ids: Vec<String>,
     },
+    /// 스펙 충돌 감지
+    Conflicts {
+        /// 스펙 ID
+        id: String,
+    },
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -712,6 +717,10 @@ async fn main() -> Result<()> {
             }
             SpecAction::Prioritize { ids } => {
                 let output = client::spec::spec_prioritize(&db, &ids)?;
+                println!("{output}");
+            }
+            SpecAction::Conflicts { id } => {
+                let output = client::spec::spec_conflicts(&db, &id)?;
                 println!("{output}");
             }
         },

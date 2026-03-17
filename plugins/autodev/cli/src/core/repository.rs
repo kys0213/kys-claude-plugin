@@ -49,6 +49,7 @@ pub trait SpecRepository {
     fn spec_unlink_issue(&self, spec_id: &str, issue_number: i64) -> Result<()>;
     fn spec_list_by_status(&self, status: SpecStatus) -> Result<Vec<Spec>>;
     fn spec_set_priority(&self, id: &str, priority: i32) -> Result<()>;
+    fn spec_list_active_with_source_path(&self) -> Result<Vec<Spec>>;
 }
 
 pub trait HitlRepository {

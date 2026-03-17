@@ -180,6 +180,36 @@ pub fn spec_check_completion(db: &Database, id: &str) -> Result<String> {
         anyhow::bail!("spec {id} has no linked issues. Link issues before completing.");
     }
 
+    // Check for conflicts before completing
+    let mut conflict_warning = String::new();
+    let active_specs = db.spec_list_active_with_source_path()?;
+    if let Some(ref source_path) = spec.source_path {
+        let conflicts: Vec<_> = active_specs
+            .iter()
+            .filter(|s| s.id != spec.id)
+            .filter(|s| {
+                s.source_path
+                    .as_ref()
+                    .is_some_and(|p| paths_overlap(p, source_path))
+            })
+            .collect();
+        if !conflicts.is_empty() {
+            conflict_warning.push_str(&format!(
+                "\n\n⚠ {} conflict(s) detected (shared source_path: {}):\n",
+                conflicts.len(),
+                source_path
+            ));
+            for c in &conflicts {
+                conflict_warning.push_str(&format!(
+                    "  - {} ({}): {}\n",
+                    c.id,
+                    c.source_path.as_deref().unwrap_or("?"),
+                    c.title
+                ));
+            }
+        }
+    }
+
     // Transition to Completing
     db.spec_set_status(id, SpecStatus::Completing)?;
 
@@ -199,8 +229,8 @@ pub fn spec_check_completion(db: &Database, id: &str) -> Result<String> {
             issue_list.join(", ")
         ),
         context: format!(
-            "Spec ID: {}\nTitle: {}\nLinked issues: {}\n\nPlease confirm completion or reject to return to Active.",
-            id, spec.title, issue_list.join(", ")
+            "Spec ID: {}\nTitle: {}\nLinked issues: {}\n\nPlease confirm completion or reject to return to Active.{}",
+            id, spec.title, issue_list.join(", "), conflict_warning
         ),
         options: vec![
             "Confirm completion".to_string(),
@@ -248,6 +278,58 @@ fn validate_spec_sections(body: &str) -> Vec<String> {
     }
 
     missing
+}
+
+/// Detect specs that share the same source_path (potential file conflicts).
+pub fn spec_conflicts(db: &Database, spec_id: &str) -> Result<String> {
+    let spec = db
+        .spec_show(spec_id)?
+        .ok_or_else(|| anyhow::anyhow!("spec not found: {spec_id}"))?;
+
+    let source_path = match &spec.source_path {
+        Some(p) => p.clone(),
+        None => {
+            return Ok(format!(
+                "Spec {spec_id} has no source_path — cannot detect conflicts.\n"
+            ))
+        }
+    };
+
+    let active_specs = db.spec_list_active_with_source_path()?;
+    let conflicts: Vec<&Spec> = active_specs
+        .iter()
+        .filter(|s| s.id != spec.id)
+        .filter(|s| {
+            s.source_path
+                .as_ref()
+                .is_some_and(|p| paths_overlap(p, &source_path))
+        })
+        .collect();
+
+    if conflicts.is_empty() {
+        return Ok(format!("No conflicts detected for spec {spec_id}.\n"));
+    }
+
+    let mut output = format!(
+        "⚠ {} conflict(s) detected for spec {spec_id} ({}):\n\n",
+        conflicts.len(),
+        source_path
+    );
+    for c in &conflicts {
+        output.push_str(&format!(
+            "  - {} ({}): {}\n",
+            c.id,
+            c.source_path.as_deref().unwrap_or("?"),
+            c.title
+        ));
+    }
+    output.push_str("\nConsider sequencing these specs or resolving file overlaps.\n");
+    Ok(output)
+}
+
+/// Check if two paths overlap (same path or parent-child relationship).
+fn paths_overlap(a: &str, b: &str) -> bool {
+    a == b || a.starts_with(&format!("{b}/")) || b.starts_with(&format!("{a}/"))
 }
 
 /// Prioritize specs by setting priority order based on the given ID list.
