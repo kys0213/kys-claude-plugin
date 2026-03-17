@@ -1,4 +1,7 @@
+use crate::core::config::models::DaemonConfig;
 use crate::core::notifier::{NotificationEvent, Notifier};
+
+use super::webhook::WebhookNotifier;
 
 /// 등록된 모든 Notifier에게 순차 전송. 개별 채널 실패 시 로그만 남기고 계속.
 pub struct NotificationDispatcher {
@@ -8,6 +11,19 @@ pub struct NotificationDispatcher {
 impl NotificationDispatcher {
     pub fn new(notifiers: Vec<Box<dyn Notifier>>) -> Self {
         Self { notifiers }
+    }
+
+    /// Build a dispatcher from daemon config. Returns `None` if no channels are configured.
+    pub fn from_config(cfg: &DaemonConfig) -> Option<Self> {
+        let mut notifiers: Vec<Box<dyn Notifier>> = Vec::new();
+        if let Some(ref url) = cfg.webhook_url {
+            notifiers.push(Box::new(WebhookNotifier::new(url.clone())));
+        }
+        if notifiers.is_empty() {
+            None
+        } else {
+            Some(Self::new(notifiers))
+        }
     }
 
     /// 모든 notifier에 이벤트를 전송하고, 실패한 채널의 (이름, 에러) 목록을 반환.

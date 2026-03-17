@@ -73,7 +73,8 @@ pub fn show(db: &Database, id: &str, json: bool) -> Result<String> {
     }
 
     // Parse and display options
-    if let Ok(options) = serde_json::from_str::<Vec<String>>(&event.options) {
+    {
+        let options = event.parsed_options();
         if !options.is_empty() {
             output.push_str("\nOptions:\n");
             for (i, opt) in options.iter().enumerate() {
@@ -133,11 +134,20 @@ pub fn respond(
     Ok(format!("Responded to HITL event {id}\n"))
 }
 
+/// Result of timeout processing, containing both display output and expired events.
+pub struct TimeoutResult {
+    pub output: String,
+    pub expired_events: Vec<HitlEvent>,
+}
+
 /// 타임아웃 초과 HITL 만료 처리
-pub fn timeout(db: &Database, hours: i64, action: TimeoutAction) -> Result<String> {
+pub fn timeout(db: &Database, hours: i64, action: TimeoutAction) -> Result<TimeoutResult> {
     let expired = db.hitl_expired_list(hours)?;
     if expired.is_empty() {
-        return Ok("No expired HITL events found".to_string());
+        return Ok(TimeoutResult {
+            output: "No expired HITL events found".to_string(),
+            expired_events: Vec::new(),
+        });
     }
 
     let mut results = Vec::new();
@@ -162,10 +172,13 @@ pub fn timeout(db: &Database, hours: i64, action: TimeoutAction) -> Result<Strin
         }
     }
 
-    Ok(format!(
-        "Processed {} expired events (action: {}):\n{}",
-        expired.len(),
-        action,
-        results.join("\n")
-    ))
+    Ok(TimeoutResult {
+        output: format!(
+            "Processed {} expired events (action: {}):\n{}",
+            expired.len(),
+            action,
+            results.join("\n")
+        ),
+        expired_events: expired,
+    })
 }

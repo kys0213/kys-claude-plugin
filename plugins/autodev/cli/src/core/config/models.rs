@@ -37,6 +37,9 @@ pub struct DaemonConfig {
     pub log_retention_days: u32,
     /// 전체 동시 실행 가능한 파이프라인 태스크 상한 (Claude 세션 수)
     pub max_concurrent_tasks: u32,
+    /// Webhook URL for notifications (e.g. Slack incoming webhook).
+    /// When set, HITL timeout events and other notifications are sent here.
+    pub webhook_url: Option<String>,
 }
 
 impl Default for DaemonConfig {
@@ -48,6 +51,7 @@ impl Default for DaemonConfig {
             log_level: "info".into(),
             log_retention_days: 30,
             max_concurrent_tasks: 3,
+            webhook_url: None,
         }
     }
 }
