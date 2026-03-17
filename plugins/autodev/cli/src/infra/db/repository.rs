@@ -235,7 +235,7 @@ impl SpecRepository for Database {
             if let Some(name) = repo {
                 (
                     "SELECT s.id, s.repo_id, s.title, s.body, s.status, s.source_path, \
-                 s.test_commands, s.acceptance_criteria, s.created_at, s.updated_at \
+                 s.test_commands, s.acceptance_criteria, s.priority, s.created_at, s.updated_at \
                  FROM specs s JOIN repositories r ON s.repo_id = r.id \
                  WHERE r.name = ?1 ORDER BY s.created_at DESC"
                         .to_string(),
@@ -244,7 +244,7 @@ impl SpecRepository for Database {
             } else {
                 (
                     "SELECT id, repo_id, title, body, status, source_path, \
-                 test_commands, acceptance_criteria, created_at, updated_at \
+                 test_commands, acceptance_criteria, priority, created_at, updated_at \
                  FROM specs ORDER BY created_at DESC"
                         .to_string(),
                     vec![],
@@ -262,7 +262,7 @@ impl SpecRepository for Database {
         let conn = self.conn();
         let result = conn.query_row(
             "SELECT id, repo_id, title, body, status, source_path, \
-             test_commands, acceptance_criteria, created_at, updated_at \
+             test_commands, acceptance_criteria, priority, created_at, updated_at \
              FROM specs WHERE id = ?1",
             rusqlite::params![id],
             map_spec_row,
@@ -361,6 +361,32 @@ impl SpecRepository for Database {
 
         if affected == 0 {
             anyhow::bail!("issue link not found: spec={spec_id}, issue=#{issue_number}");
+        }
+        Ok(())
+    }
+
+    fn spec_list_by_status(&self, status: SpecStatus) -> Result<Vec<Spec>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, repo_id, title, body, status, source_path, \
+             test_commands, acceptance_criteria, priority, created_at, updated_at \
+             FROM specs WHERE status = ?1 ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![status.as_str()], map_spec_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn spec_set_priority(&self, id: &str, priority: i32) -> Result<()> {
+        let conn = self.conn();
+        let now = Utc::now().to_rfc3339();
+
+        let affected = conn.execute(
+            "UPDATE specs SET priority = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![priority, now, id],
+        )?;
+
+        if affected == 0 {
+            anyhow::bail!("spec not found: {id}");
         }
         Ok(())
     }
@@ -674,6 +700,19 @@ impl HitlRepository for Database {
                 created_at: row.get(5)?,
             })
         })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn hitl_expired_list(&self, timeout_hours: i64) -> Result<Vec<HitlEvent>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, repo_id, spec_id, work_id, severity, situation, context, options, status, created_at \
+             FROM hitl_events \
+             WHERE status = 'pending' \
+             AND datetime(created_at) < datetime('now', '-' || ?1 || ' hours') \
+             ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![timeout_hours], map_hitl_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 }
@@ -1292,8 +1331,9 @@ fn map_spec_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Spec> {
         source_path: row.get(5)?,
         test_commands: row.get(6)?,
         acceptance_criteria: row.get(7)?,
-        created_at: row.get(8)?,
-        updated_at: row.get(9)?,
+        priority: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
     })
 }
 

@@ -47,6 +47,8 @@ pub trait SpecRepository {
     fn spec_issue_counts(&self) -> Result<std::collections::HashMap<String, usize>>;
     fn spec_link_issue(&self, spec_id: &str, issue_number: i64) -> Result<()>;
     fn spec_unlink_issue(&self, spec_id: &str, issue_number: i64) -> Result<()>;
+    fn spec_list_by_status(&self, status: SpecStatus) -> Result<Vec<Spec>>;
+    fn spec_set_priority(&self, id: &str, priority: i32) -> Result<()>;
 }
 
 pub trait HitlRepository {
@@ -57,6 +59,7 @@ pub trait HitlRepository {
     fn hitl_set_status(&self, id: &str, status: HitlStatus) -> Result<()>;
     fn hitl_pending_count(&self, repo: Option<&str>) -> Result<i64>;
     fn hitl_responses(&self, event_id: &str) -> Result<Vec<HitlResponse>>;
+    fn hitl_expired_list(&self, timeout_hours: i64) -> Result<Vec<HitlEvent>>;
 }
 
 pub trait QueueRepository {

@@ -141,6 +141,53 @@ fn collect_rule_files(dir: &Path, prefix: &str, out: &mut Vec<String>) -> Result
     Ok(())
 }
 
+/// Open a rule/command/skill file in $EDITOR for editing.
+pub fn claw_edit(home: &Path, name: &str, repo: Option<&str>) -> Result<()> {
+    let base = if let Some(repo_name) = repo {
+        let sanitized = crate::core::config::sanitize_repo_name(repo_name);
+        home.join("workspaces").join(&sanitized).join("claw")
+    } else {
+        claw_workspace_path(home)
+    };
+
+    if !base.exists() {
+        anyhow::bail!("Claw workspace not initialized. Run `autodev claw init` first.");
+    }
+
+    // Search for the file in multiple locations
+    let candidates = [
+        base.join(".claude/rules").join(format!("{name}.md")),
+        base.join("commands").join(format!("{name}.md")),
+        base.join("skills").join(name).join("SKILL.md"),
+    ];
+
+    let target = candidates.iter().find(|p| p.exists());
+
+    let file_path = match target {
+        Some(p) => p.clone(),
+        None => {
+            let paths: Vec<String> = candidates
+                .iter()
+                .map(|p| format!("  {}", p.display()))
+                .collect();
+            anyhow::bail!("Rule '{}' not found. Searched:\n{}", name, paths.join("\n"));
+        }
+    };
+
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+    let status = std::process::Command::new(&editor)
+        .arg(&file_path)
+        .status()?;
+
+    if status.success() {
+        println!("Updated: {}", file_path.display());
+    } else {
+        anyhow::bail!("Editor exited with non-zero status");
+    }
+
+    Ok(())
+}
+
 // ─── Default content ───
 
 const DEFAULT_CLAUDE_MD: &str = r#"# Claw 판단 원칙

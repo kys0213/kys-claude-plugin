@@ -1,6 +1,17 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
+/// v3 마이그레이션: specs에 priority 컬럼 추가.
+pub fn migrate_v3(conn: &Connection) -> Result<()> {
+    let sql = "ALTER TABLE specs ADD COLUMN priority INTEGER";
+    match conn.execute(sql, []) {
+        Ok(_) => {}
+        Err(e) if e.to_string().contains("duplicate column") => {}
+        Err(e) => return Err(e.into()),
+    }
+    Ok(())
+}
+
 /// v2 마이그레이션: queue_items에 task_kind, github_number, metadata_json 컬럼 추가.
 pub fn migrate_v2(conn: &Connection) -> Result<()> {
     let migrations = [
@@ -81,6 +92,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
             source_path         TEXT,
             test_commands       TEXT,
             acceptance_criteria TEXT,
+            priority            INTEGER,
             created_at          TEXT NOT NULL,
             updated_at          TEXT NOT NULL
         );

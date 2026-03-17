@@ -384,6 +384,7 @@ pub struct QueueItemRow {
 pub enum SpecStatus {
     Active,
     Paused,
+    Completing,
     Completed,
     Archived,
 }
@@ -393,6 +394,7 @@ impl SpecStatus {
         match self {
             SpecStatus::Active => "active",
             SpecStatus::Paused => "paused",
+            SpecStatus::Completing => "completing",
             SpecStatus::Completed => "completed",
             SpecStatus::Archived => "archived",
         }
@@ -406,6 +408,7 @@ impl std::str::FromStr for SpecStatus {
         match s {
             "active" => Ok(SpecStatus::Active),
             "paused" => Ok(SpecStatus::Paused),
+            "completing" => Ok(SpecStatus::Completing),
             "completed" => Ok(SpecStatus::Completed),
             "archived" => Ok(SpecStatus::Archived),
             _ => Err(format!("invalid spec status: {s}")),
@@ -429,6 +432,7 @@ pub struct Spec {
     pub source_path: Option<String>,
     pub test_commands: Option<String>,
     pub acceptance_criteria: Option<String>,
+    pub priority: Option<i32>,
     pub created_at: String,
     pub updated_at: String,
 }

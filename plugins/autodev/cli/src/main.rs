@@ -157,6 +157,14 @@ enum ClawAction {
         #[arg(long)]
         repo: Option<String>,
     },
+    /// 규칙/스킬 편집
+    Edit {
+        /// 규칙 이름 (예: scheduling, branch-naming, decompose)
+        name: String,
+        /// 레포별 오버라이드 편집 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -223,6 +231,15 @@ enum HitlAction {
         /// 메시지
         #[arg(long)]
         message: Option<String>,
+    },
+    /// 타임아웃 초과 HITL 만료 처리
+    Timeout {
+        /// 타임아웃 시간 (hours, 기본 24)
+        #[arg(long, default_value = "24")]
+        hours: i64,
+        /// 만료 액션 (expire, skip, pause-spec)
+        #[arg(long, default_value = "expire")]
+        action: String,
     },
 }
 
@@ -438,6 +455,16 @@ enum SpecAction {
         /// 이슈 번호
         #[arg(long)]
         issue: i64,
+    },
+    /// 스펙 완료 판정
+    Complete {
+        /// 스펙 ID
+        id: String,
+    },
+    /// 스펙 우선순위 지정
+    Prioritize {
+        /// 스펙 ID 목록 (우선순위 순서)
+        ids: Vec<String>,
     },
 }
 
@@ -679,6 +706,14 @@ async fn main() -> Result<()> {
             SpecAction::Unlink { spec_id, issue } => {
                 client::spec::spec_unlink(&db, &spec_id, issue)?;
             }
+            SpecAction::Complete { id } => {
+                let output = client::spec::spec_check_completion(&db, &id)?;
+                println!("{output}");
+            }
+            SpecAction::Prioritize { ids } => {
+                let output = client::spec::spec_prioritize(&db, &ids)?;
+                println!("{output}");
+            }
         },
         Commands::Hitl { action } => match action {
             HitlAction::List { repo, json } => {
@@ -695,6 +730,10 @@ async fn main() -> Result<()> {
                 message,
             } => {
                 let output = client::hitl::respond(&db, &id, choice, message.as_deref())?;
+                println!("{output}");
+            }
+            HitlAction::Timeout { hours, action } => {
+                let output = client::hitl::timeout(&db, hours, &action)?;
                 println!("{output}");
             }
         },
@@ -763,6 +802,9 @@ async fn main() -> Result<()> {
                 for rule in &rules {
                     println!("  {rule}");
                 }
+            }
+            ClawAction::Edit { name, repo } => {
+                client::claw::claw_edit(&home, &name, repo.as_deref())?;
             }
         },
         Commands::Board { repo, json } => {

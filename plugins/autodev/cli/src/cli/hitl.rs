@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::core::models::*;
-use crate::core::repository::HitlRepository;
+use crate::core::repository::{HitlRepository, SpecRepository};
 use crate::infra::db::Database;
 
 /// HITL 이벤트 목록 조회
@@ -131,4 +131,41 @@ pub fn respond(
     db.hitl_respond(&response)?;
 
     Ok(format!("Responded to HITL event {id}\n"))
+}
+
+/// 타임아웃 초과 HITL 만료 처리
+pub fn timeout(db: &Database, hours: i64, action: &str) -> Result<String> {
+    let expired = db.hitl_expired_list(hours)?;
+    if expired.is_empty() {
+        return Ok("No expired HITL events found".to_string());
+    }
+
+    let mut results = Vec::new();
+    for event in &expired {
+        db.hitl_set_status(&event.id, HitlStatus::Expired)?;
+
+        match action {
+            "pause-spec" => {
+                if let Some(ref spec_id) = event.spec_id {
+                    db.spec_set_status(spec_id, SpecStatus::Paused)?;
+                    results.push(format!(
+                        "  {} → expired (spec {} paused)",
+                        event.id, spec_id
+                    ));
+                } else {
+                    results.push(format!("  {} → expired (no spec linked)", event.id));
+                }
+            }
+            _ => {
+                results.push(format!("  {} → expired", event.id));
+            }
+        }
+    }
+
+    Ok(format!(
+        "Processed {} expired events (action: {}):\n{}",
+        expired.len(),
+        action,
+        results.join("\n")
+    ))
 }

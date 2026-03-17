@@ -27,6 +27,17 @@ pub fn spec_add(
     };
 
     let id = db.spec_add(&new_spec)?;
+
+    let missing = validate_spec_sections(body);
+    if !missing.is_empty() {
+        let mut result = format!(
+            "⚠ Missing sections: {}. Recommended: add these as ## headers.\n",
+            missing.join(", ")
+        );
+        result.push_str(&id);
+        return Ok(result);
+    }
+
     Ok(id)
 }
 
@@ -146,4 +157,103 @@ pub fn spec_unlink(db: &Database, spec_id: &str, issue_number: i64) -> Result<()
     db.spec_unlink_issue(spec_id, issue_number)?;
     println!("unlinked: spec={spec_id} issue=#{issue_number}");
     Ok(())
+}
+
+/// Check if a spec is ready for completion and transition to Completing status.
+///
+/// Verifies the spec is Active, has linked issues, then transitions to
+/// Completing and creates a HITL event for final human confirmation.
+pub fn spec_check_completion(db: &Database, id: &str) -> Result<String> {
+    let spec = db
+        .spec_show(id)?
+        .ok_or_else(|| anyhow::anyhow!("spec not found: {id}"))?;
+
+    if spec.status != SpecStatus::Active {
+        anyhow::bail!(
+            "spec {id} is not active (current status: {}). Only active specs can be completed.",
+            spec.status
+        );
+    }
+
+    let issues = db.spec_issues(id)?;
+    if issues.is_empty() {
+        anyhow::bail!("spec {id} has no linked issues. Link issues before completing.");
+    }
+
+    // Transition to Completing
+    db.spec_set_status(id, SpecStatus::Completing)?;
+
+    // Create HITL event for final confirmation
+    let issue_list: Vec<String> = issues
+        .iter()
+        .map(|i| format!("#{}", i.issue_number))
+        .collect();
+    let hitl_event = NewHitlEvent {
+        repo_id: spec.repo_id.clone(),
+        spec_id: Some(id.to_string()),
+        work_id: None,
+        severity: HitlSeverity::High,
+        situation: format!(
+            "Spec '{}' is ready for completion. Linked issues: {}",
+            spec.title,
+            issue_list.join(", ")
+        ),
+        context: format!(
+            "Spec ID: {}\nTitle: {}\nLinked issues: {}\n\nPlease confirm completion or reject to return to Active.",
+            id, spec.title, issue_list.join(", ")
+        ),
+        options: vec![
+            "Confirm completion".to_string(),
+            "Reject (return to Active)".to_string(),
+        ],
+    };
+
+    let event_id = db.hitl_create(&hitl_event)?;
+
+    Ok(format!(
+        "Spec {id} transitioned to completing. HITL event created: {event_id}\n\
+         Respond with 'autodev hitl respond {event_id} --choice 1' to confirm completion."
+    ))
+}
+
+/// Validate that a spec body contains required sections.
+///
+/// Returns a list of missing section names. Checks for section headers
+/// (## or ### prefixed) case-insensitively.
+fn validate_spec_sections(body: &str) -> Vec<String> {
+    let required: &[(&str, &[&str])] = &[
+        ("요구사항", &["requirements", "요구사항"]),
+        ("아키텍처", &["architecture", "아키텍처", "컴포넌트"]),
+        ("기술 스택", &["tech stack", "기술 스택", "기술스택"]),
+        ("테스트", &["test", "테스트"]),
+        (
+            "수용 기준",
+            &["acceptance criteria", "수용 기준", "수용기준"],
+        ),
+    ];
+
+    let lower_body = body.to_lowercase();
+    let mut missing = Vec::new();
+
+    for (name, keywords) in required {
+        let found = keywords.iter().any(|kw| {
+            let kw_lower = kw.to_lowercase();
+            // Check for markdown headers: ## or ### followed by the keyword
+            lower_body.contains(&format!("## {kw_lower}"))
+                || lower_body.contains(&format!("### {kw_lower}"))
+        });
+        if !found {
+            missing.push(name.to_string());
+        }
+    }
+
+    missing
+}
+
+/// Prioritize specs by setting priority order based on the given ID list.
+pub fn spec_prioritize(db: &Database, ids: &[String]) -> Result<String> {
+    for (i, id) in ids.iter().enumerate() {
+        db.spec_set_priority(id, (i + 1) as i32)?;
+    }
+    Ok(format!("Prioritized {} specs", ids.len()))
 }
