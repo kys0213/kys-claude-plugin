@@ -163,7 +163,7 @@ pub fn spec_unlink(db: &Database, spec_id: &str, issue_number: i64) -> Result<()
 ///
 /// Verifies the spec is Active, has linked issues, then transitions to
 /// Completing and creates a HITL event for final human confirmation.
-pub fn spec_check_completion(db: &Database, id: &str) -> Result<String> {
+pub fn spec_check_completion(db: &Database, id: &str) -> Result<(String, NewHitlEvent)> {
     let spec = db
         .spec_show(id)?
         .ok_or_else(|| anyhow::anyhow!("spec not found: {id}"))?;
@@ -228,9 +228,12 @@ pub fn spec_check_completion(db: &Database, id: &str) -> Result<String> {
 
     let event_id = db.hitl_create(&hitl_event)?;
 
-    Ok(format!(
-        "Spec {id} transitioned to completing. HITL event created: {event_id}\n\
-         Respond with 'autodev hitl respond {event_id} --choice 1' to confirm completion."
+    Ok((
+        format!(
+            "Spec {id} transitioned to completing. HITL event created: {event_id}\n\
+             Respond with 'autodev hitl respond {event_id} --choice 1' to confirm completion."
+        ),
+        hitl_event,
     ))
 }
 
