@@ -181,34 +181,22 @@ pub fn spec_check_completion(db: &Database, id: &str) -> Result<String> {
     }
 
     // Check for conflicts before completing
-    let mut conflict_warning = String::new();
-    let active_specs = db.spec_list_active_with_source_path()?;
-    if let Some(ref source_path) = spec.source_path {
-        let conflicts: Vec<_> = active_specs
-            .iter()
-            .filter(|s| s.id != spec.id)
-            .filter(|s| {
-                s.source_path
-                    .as_ref()
-                    .is_some_and(|p| paths_overlap(p, source_path))
-            })
-            .collect();
-        if !conflicts.is_empty() {
-            conflict_warning.push_str(&format!(
+    let conflict_warning = if let Some(ref source_path) = spec.source_path {
+        let conflicts = find_path_conflicts(db, &spec.id, source_path)?;
+        if conflicts.is_empty() {
+            String::new()
+        } else {
+            let mut w = format!(
                 "\n\n⚠ {} conflict(s) detected (shared source_path: {}):\n",
                 conflicts.len(),
                 source_path
-            ));
-            for c in &conflicts {
-                conflict_warning.push_str(&format!(
-                    "  - {} ({}): {}\n",
-                    c.id,
-                    c.source_path.as_deref().unwrap_or("?"),
-                    c.title
-                ));
-            }
+            );
+            w.push_str(&format_conflict_list(&conflicts));
+            w
         }
-    }
+    } else {
+        String::new()
+    };
 
     // Transition to Completing
     db.spec_set_status(id, SpecStatus::Completing)?;
@@ -295,16 +283,7 @@ pub fn spec_conflicts(db: &Database, spec_id: &str) -> Result<String> {
         }
     };
 
-    let active_specs = db.spec_list_active_with_source_path()?;
-    let conflicts: Vec<&Spec> = active_specs
-        .iter()
-        .filter(|s| s.id != spec.id)
-        .filter(|s| {
-            s.source_path
-                .as_ref()
-                .is_some_and(|p| paths_overlap(p, &source_path))
-        })
-        .collect();
+    let conflicts = find_path_conflicts(db, &spec.id, &source_path)?;
 
     if conflicts.is_empty() {
         return Ok(format!("No conflicts detected for spec {spec_id}.\n"));
@@ -315,21 +294,47 @@ pub fn spec_conflicts(db: &Database, spec_id: &str) -> Result<String> {
         conflicts.len(),
         source_path
     );
-    for c in &conflicts {
-        output.push_str(&format!(
+    output.push_str(&format_conflict_list(&conflicts));
+    output.push_str("\nConsider sequencing these specs or resolving file overlaps.\n");
+    Ok(output)
+}
+
+/// Find active specs whose source_path overlaps with the given path, excluding `exclude_id`.
+fn find_path_conflicts(db: &Database, exclude_id: &str, source_path: &str) -> Result<Vec<Spec>> {
+    let active_specs = db.spec_list_by_status(SpecStatus::Active)?;
+    Ok(active_specs
+        .into_iter()
+        .filter(|s| s.id != exclude_id)
+        .filter(|s| {
+            s.source_path
+                .as_ref()
+                .is_some_and(|p| paths_overlap(p, source_path))
+        })
+        .collect())
+}
+
+/// Format a list of conflicting specs for display.
+fn format_conflict_list(conflicts: &[Spec]) -> String {
+    let mut out = String::new();
+    for c in conflicts {
+        out.push_str(&format!(
             "  - {} ({}): {}\n",
             c.id,
             c.source_path.as_deref().unwrap_or("?"),
             c.title
         ));
     }
-    output.push_str("\nConsider sequencing these specs or resolving file overlaps.\n");
-    Ok(output)
+    out
 }
 
 /// Check if two paths overlap (same path or parent-child relationship).
 fn paths_overlap(a: &str, b: &str) -> bool {
-    a == b || a.starts_with(&format!("{b}/")) || b.starts_with(&format!("{a}/"))
+    if a == b {
+        return true;
+    }
+    let a_is_parent = b.starts_with(a) && b.as_bytes().get(a.len()) == Some(&b'/');
+    let b_is_parent = a.starts_with(b) && a.as_bytes().get(b.len()) == Some(&b'/');
+    a_is_parent || b_is_parent
 }
 
 /// Prioritize specs by setting priority order based on the given ID list.
