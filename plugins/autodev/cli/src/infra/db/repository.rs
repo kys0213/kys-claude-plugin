@@ -235,7 +235,7 @@ impl SpecRepository for Database {
             if let Some(name) = repo {
                 (
                     "SELECT s.id, s.repo_id, s.title, s.body, s.status, s.source_path, \
-                 s.test_commands, s.acceptance_criteria, s.created_at, s.updated_at \
+                 s.test_commands, s.acceptance_criteria, s.priority, s.created_at, s.updated_at \
                  FROM specs s JOIN repositories r ON s.repo_id = r.id \
                  WHERE r.name = ?1 ORDER BY s.created_at DESC"
                         .to_string(),
@@ -244,7 +244,7 @@ impl SpecRepository for Database {
             } else {
                 (
                     "SELECT id, repo_id, title, body, status, source_path, \
-                 test_commands, acceptance_criteria, created_at, updated_at \
+                 test_commands, acceptance_criteria, priority, created_at, updated_at \
                  FROM specs ORDER BY created_at DESC"
                         .to_string(),
                     vec![],
@@ -262,7 +262,7 @@ impl SpecRepository for Database {
         let conn = self.conn();
         let result = conn.query_row(
             "SELECT id, repo_id, title, body, status, source_path, \
-             test_commands, acceptance_criteria, created_at, updated_at \
+             test_commands, acceptance_criteria, priority, created_at, updated_at \
              FROM specs WHERE id = ?1",
             rusqlite::params![id],
             map_spec_row,
@@ -361,6 +361,32 @@ impl SpecRepository for Database {
 
         if affected == 0 {
             anyhow::bail!("issue link not found: spec={spec_id}, issue=#{issue_number}");
+        }
+        Ok(())
+    }
+
+    fn spec_list_by_status(&self, status: SpecStatus) -> Result<Vec<Spec>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, repo_id, title, body, status, source_path, \
+             test_commands, acceptance_criteria, priority, created_at, updated_at \
+             FROM specs WHERE status = ?1 ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![status.as_str()], map_spec_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn spec_set_priority(&self, id: &str, priority: i32) -> Result<()> {
+        let conn = self.conn();
+        let now = Utc::now().to_rfc3339();
+
+        let affected = conn.execute(
+            "UPDATE specs SET priority = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![priority, now, id],
+        )?;
+
+        if affected == 0 {
+            anyhow::bail!("spec not found: {id}");
         }
         Ok(())
     }
@@ -676,6 +702,19 @@ impl HitlRepository for Database {
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
+
+    fn hitl_expired_list(&self, timeout_hours: i64) -> Result<Vec<HitlEvent>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, repo_id, spec_id, work_id, severity, situation, context, options, status, created_at \
+             FROM hitl_events \
+             WHERE status = 'pending' \
+             AND datetime(created_at) < datetime('now', '-' || ?1 || ' hours') \
+             ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![timeout_hours], map_hitl_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
 }
 
 impl QueueRepository for Database {
@@ -759,7 +798,8 @@ impl QueueRepository for Database {
                 (
                     "SELECT q.work_id, q.repo_id, q.queue_type, q.phase, q.title, \
                      q.skip_reason, q.created_at, q.updated_at, \
-                     q.task_kind, q.github_number, q.metadata_json \
+                     q.task_kind, q.github_number, q.metadata_json, \
+                     q.failure_count, q.escalation_level \
                      FROM queue_items q JOIN repositories r ON q.repo_id = r.id \
                      WHERE r.name = ?1 ORDER BY q.created_at DESC"
                         .to_string(),
@@ -769,7 +809,8 @@ impl QueueRepository for Database {
                 (
                     "SELECT work_id, repo_id, queue_type, phase, title, \
                      skip_reason, created_at, updated_at, \
-                     task_kind, github_number, metadata_json \
+                     task_kind, github_number, metadata_json, \
+                     failure_count, escalation_level \
                      FROM queue_items ORDER BY created_at DESC"
                         .to_string(),
                     vec![],
@@ -788,8 +829,9 @@ impl QueueRepository for Database {
         let now = Utc::now().to_rfc3339();
         conn.execute(
             "INSERT INTO queue_items (work_id, repo_id, queue_type, phase, title, skip_reason, \
-             created_at, updated_at, task_kind, github_number, metadata_json) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
+             created_at, updated_at, task_kind, github_number, metadata_json, \
+             failure_count, escalation_level) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
              ON CONFLICT(work_id) DO UPDATE SET \
              phase = excluded.phase, title = excluded.title, skip_reason = excluded.skip_reason, \
              updated_at = ?8, task_kind = excluded.task_kind, \
@@ -806,6 +848,8 @@ impl QueueRepository for Database {
                 item.task_kind.as_str(),
                 item.github_number,
                 item.metadata_json,
+                item.failure_count,
+                item.escalation_level,
             ],
         )?;
         Ok(())
@@ -825,7 +869,8 @@ impl QueueRepository for Database {
         let mut stmt = conn.prepare(
             "SELECT work_id, repo_id, queue_type, phase, title, \
              skip_reason, created_at, updated_at, \
-             task_kind, github_number, metadata_json \
+             task_kind, github_number, metadata_json, \
+             failure_count, escalation_level \
              FROM queue_items WHERE repo_id = ?1 AND phase NOT IN ('done', 'skipped') \
              ORDER BY created_at ASC",
         )?;
@@ -847,12 +892,39 @@ impl QueueRepository for Database {
         let result = conn.query_row(
             "SELECT work_id, repo_id, queue_type, phase, title, \
              skip_reason, created_at, updated_at, \
-             task_kind, github_number, metadata_json \
+             task_kind, github_number, metadata_json, \
+             failure_count, escalation_level \
              FROM queue_items WHERE work_id = ?1",
             rusqlite::params![work_id],
             map_queue_item_row,
         );
         optional_query_row(result)
+    }
+
+    fn queue_increment_failure(&self, work_id: &str) -> Result<i32> {
+        let conn = self.conn();
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE queue_items SET failure_count = failure_count + 1, updated_at = ?1 \
+             WHERE work_id = ?2",
+            rusqlite::params![now, work_id],
+        )?;
+        let count: i32 = conn.query_row(
+            "SELECT failure_count FROM queue_items WHERE work_id = ?1",
+            rusqlite::params![work_id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    fn queue_get_failure_count(&self, work_id: &str) -> Result<i32> {
+        let conn = self.conn();
+        let count: i32 = conn.query_row(
+            "SELECT failure_count FROM queue_items WHERE work_id = ?1",
+            rusqlite::params![work_id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
     }
 }
 
@@ -1292,8 +1364,9 @@ fn map_spec_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Spec> {
         source_path: row.get(5)?,
         test_commands: row.get(6)?,
         acceptance_criteria: row.get(7)?,
-        created_at: row.get(8)?,
-        updated_at: row.get(9)?,
+        priority: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
     })
 }
 
@@ -1331,6 +1404,8 @@ fn map_queue_item_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueItemRow>
         })?,
         github_number: row.get(9)?,
         metadata_json: row.get(10)?,
+        failure_count: row.get::<_, Option<i32>>(11)?.unwrap_or(0),
+        escalation_level: row.get::<_, Option<i32>>(12)?.unwrap_or(0),
     })
 }
 

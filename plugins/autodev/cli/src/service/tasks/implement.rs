@@ -270,7 +270,8 @@ impl Task for ImplementTask {
                 "<!-- autodev:impl-failed -->\n\
                  ⚠️ Implementation agent failed (exit_code={}).\n\n\
                  **Branch**: `{head_branch}`\n\
-                 Check the agent logs for details.",
+                 Worktree has been preserved for debugging. You can inspect the state:\n\
+                 ```\ncd $(git worktree list | grep '{head_branch}' | awk '{{print $1}}')\n```",
                 response.exit_code
             );
             self.gh
@@ -282,7 +283,7 @@ impl Task for ImplementTask {
                 )
                 .await;
 
-            self.cleanup_worktree().await;
+            tracing::warn!("worktree preserved for debugging: {}", self.work_id());
             return TaskResult {
                 work_id: self.item.work_id.clone(),
                 repo_name: self.item.repo_name.clone(),
@@ -1099,6 +1100,41 @@ mod tests {
         let _ = task.after_invoke(response).await;
 
         gh.assert_add_before_remove(42, labels::IMPL_FAILED, labels::IMPLEMENTING);
+    }
+
+    #[tokio::test]
+    async fn after_nonzero_exit_preserves_worktree_for_debugging() {
+        let gh = Arc::new(MockGh::new());
+        let ws = Arc::new(MockWorkspace::new());
+        let cfg = Arc::new(MockConfigLoader);
+        let mut task = ImplementTask::new(ws.clone(), gh.clone(), cfg, make_test_issue());
+        let _ = task.before_invoke().await;
+
+        let response = AgentResponse {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: "agent crashed".to_string(),
+            duration: Duration::from_secs(10),
+        };
+        let result = task.after_invoke(response).await;
+
+        assert!(matches!(result.status, TaskStatus::Failed(_)));
+
+        // Worktree should NOT be cleaned up (preserved for debugging)
+        let removed_wts = ws.removed.lock().unwrap();
+        assert!(
+            removed_wts.is_empty(),
+            "worktree should be preserved on agent failure for debugging"
+        );
+
+        // Comment should mention worktree preservation
+        let comments = gh.posted_comments.lock().unwrap();
+        assert!(
+            comments
+                .iter()
+                .any(|(_, n, body)| *n == 42 && body.contains("preserved for debugging")),
+            "failure comment should mention worktree preservation"
+        );
     }
 
     #[tokio::test]

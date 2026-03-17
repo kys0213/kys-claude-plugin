@@ -21,6 +21,11 @@ pub trait Collector: Send {
     /// Scan external sources and return new Tasks ready for execution.
     async fn poll(&mut self) -> Vec<Box<dyn Task>>;
 
+    /// Drain tasks that are ready for execution.
+    ///
+    /// poll()이 수집만 담당하고, drain_tasks()가 실행 가능한 Task를 꺼낸다.
+    fn drain_tasks(&mut self) -> Vec<Box<dyn Task>>;
+
     /// Apply completed task results back to internal state.
     fn apply(&mut self, result: &TaskResult);
 

@@ -1,6 +1,33 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
+/// v4 마이그레이션: queue_items에 failure_count, escalation_level 컬럼 추가.
+pub fn migrate_v4(conn: &Connection) -> Result<()> {
+    let migrations = [
+        "ALTER TABLE queue_items ADD COLUMN failure_count INTEGER DEFAULT 0",
+        "ALTER TABLE queue_items ADD COLUMN escalation_level INTEGER DEFAULT 0",
+    ];
+    for sql in &migrations {
+        match conn.execute(sql, []) {
+            Ok(_) => {}
+            Err(e) if e.to_string().contains("duplicate column") => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(())
+}
+
+/// v3 마이그레이션: specs에 priority 컬럼 추가.
+pub fn migrate_v3(conn: &Connection) -> Result<()> {
+    let sql = "ALTER TABLE specs ADD COLUMN priority INTEGER";
+    match conn.execute(sql, []) {
+        Ok(_) => {}
+        Err(e) if e.to_string().contains("duplicate column") => {}
+        Err(e) => return Err(e.into()),
+    }
+    Ok(())
+}
+
 /// v2 마이그레이션: queue_items에 task_kind, github_number, metadata_json 컬럼 추가.
 pub fn migrate_v2(conn: &Connection) -> Result<()> {
     let migrations = [
@@ -81,6 +108,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
             source_path         TEXT,
             test_commands       TEXT,
             acceptance_criteria TEXT,
+            priority            INTEGER,
             created_at          TEXT NOT NULL,
             updated_at          TEXT NOT NULL
         );
@@ -133,14 +161,16 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
             ON cron_jobs(name) WHERE repo_id IS NULL;
 
         CREATE TABLE IF NOT EXISTS queue_items (
-            work_id     TEXT PRIMARY KEY,
-            repo_id     TEXT NOT NULL REFERENCES repositories(id),
-            queue_type  TEXT NOT NULL,
-            phase       TEXT NOT NULL DEFAULT 'pending',
-            title       TEXT,
-            skip_reason TEXT,
-            created_at  TEXT NOT NULL,
-            updated_at  TEXT NOT NULL
+            work_id           TEXT PRIMARY KEY,
+            repo_id           TEXT NOT NULL REFERENCES repositories(id),
+            queue_type        TEXT NOT NULL,
+            phase             TEXT NOT NULL DEFAULT 'pending',
+            title             TEXT,
+            skip_reason       TEXT,
+            created_at        TEXT NOT NULL,
+            updated_at        TEXT NOT NULL,
+            failure_count     INTEGER DEFAULT 0,
+            escalation_level  INTEGER DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_queue_items_repo_phase ON queue_items(repo_id, phase);
 

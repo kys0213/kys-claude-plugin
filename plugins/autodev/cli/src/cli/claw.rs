@@ -7,6 +7,12 @@ pub fn claw_workspace_path(home: &Path) -> PathBuf {
     home.join("claw-workspace")
 }
 
+/// Returns the per-repo claw override path.
+fn repo_claw_path(home: &Path, repo_name: &str) -> PathBuf {
+    let sanitized = crate::core::config::sanitize_repo_name(repo_name);
+    home.join("workspaces").join(sanitized).join("claw")
+}
+
 /// Initialize the global claw-workspace with default structure.
 ///
 /// Creates `<home>/claw-workspace/` with CLAUDE.md, rules, commands, and skills.
@@ -57,8 +63,7 @@ pub fn claw_init(home: &Path) -> Result<()> {
 ///
 /// Creates `<home>/workspaces/<org-repo>/claw/` with empty override structure.
 pub fn claw_init_repo(home: &Path, repo_name: &str) -> Result<()> {
-    let sanitized = crate::core::config::sanitize_repo_name(repo_name);
-    let repo_claw = home.join("workspaces").join(&sanitized).join("claw");
+    let repo_claw = repo_claw_path(home, repo_name);
 
     let dirs = [
         repo_claw.join(".claude/rules"),
@@ -99,18 +104,10 @@ pub fn claw_rules(home: &Path, repo: Option<&str>) -> Result<Vec<String>> {
 
     // Collect per-repo override rules if requested
     if let Some(repo_name) = repo {
-        let sanitized = crate::core::config::sanitize_repo_name(repo_name);
-        let repo_rules_dir = home
-            .join("workspaces")
-            .join(&sanitized)
-            .join("claw/.claude/rules");
+        let repo_claw = repo_claw_path(home, repo_name);
+        let repo_rules_dir = repo_claw.join(".claude/rules");
 
-        if !home
-            .join("workspaces")
-            .join(&sanitized)
-            .join("claw")
-            .exists()
-        {
+        if !repo_claw.exists() {
             anyhow::bail!(
                 "Per-repo claw override not initialized for '{repo_name}'. Run 'autodev claw init --repo {repo_name}' first."
             );
@@ -136,6 +133,52 @@ fn collect_rule_files(dir: &Path, prefix: &str, out: &mut Vec<String>) -> Result
     for entry in entries {
         let name = entry.file_name().to_string_lossy().to_string();
         out.push(format!("{prefix} {name}"));
+    }
+
+    Ok(())
+}
+
+/// Open a rule/command/skill file in $EDITOR for editing.
+pub fn claw_edit(home: &Path, name: &str, repo: Option<&str>) -> Result<()> {
+    let base = if let Some(repo_name) = repo {
+        repo_claw_path(home, repo_name)
+    } else {
+        claw_workspace_path(home)
+    };
+
+    if !base.exists() {
+        anyhow::bail!("Claw workspace not initialized. Run `autodev claw init` first.");
+    }
+
+    // Search for the file in multiple locations
+    let candidates = [
+        base.join(".claude/rules").join(format!("{name}.md")),
+        base.join("commands").join(format!("{name}.md")),
+        base.join("skills").join(name).join("SKILL.md"),
+    ];
+
+    let target = candidates.iter().find(|p| p.exists());
+
+    let file_path = match target {
+        Some(p) => p.clone(),
+        None => {
+            let paths: Vec<String> = candidates
+                .iter()
+                .map(|p| format!("  {}", p.display()))
+                .collect();
+            anyhow::bail!("Rule '{}' not found. Searched:\n{}", name, paths.join("\n"));
+        }
+    };
+
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+    let status = std::process::Command::new(&editor)
+        .arg(&file_path)
+        .status()?;
+
+    if status.success() {
+        println!("Updated: {}", file_path.display());
+    } else {
+        anyhow::bail!("Editor exited with non-zero status");
     }
 
     Ok(())
