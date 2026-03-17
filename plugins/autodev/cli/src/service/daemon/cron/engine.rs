@@ -110,6 +110,16 @@ impl CronEngine {
         true
     }
 
+    /// Mark a cron job for immediate execution on the next tick by resetting its last_run_at.
+    ///
+    /// This is used for event-driven triggers (e.g., task failure → claw-evaluate).
+    pub fn force_trigger(&self, name: &str) {
+        match self.db.cron_reset_last_run(name, None) {
+            Ok(()) => info!("cron: force-triggered '{name}' for next tick"),
+            Err(e) => warn!("cron: failed to force-trigger '{name}': {e}"),
+        }
+    }
+
     /// Check if a specific job is currently running.
     pub fn is_running(&self, job_id: &str) -> bool {
         self.running.get(job_id).is_some_and(|h| !h.is_finished())
@@ -252,6 +262,38 @@ mod tests {
         // Second tick should NOT execute (interval not elapsed)
         let results = engine.tick().await;
         assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn force_trigger_resets_last_run_and_job_runs_again() {
+        let (dir, db) = setup_db();
+
+        db.cron_add(&NewCronJob {
+            name: "force-test".to_string(),
+            repo_id: None,
+            schedule: CronSchedule::Interval { secs: 3600 }, // 1 hour
+            script_path: "echo forced".to_string(),
+            builtin: false,
+        })
+        .unwrap();
+
+        let mut engine = CronEngine::new(db, dir.path().to_path_buf());
+
+        // First tick runs the job
+        let results = engine.tick().await;
+        assert_eq!(results.len(), 1);
+
+        // Second tick should NOT run (interval not elapsed)
+        let results = engine.tick().await;
+        assert!(results.is_empty());
+
+        // Force trigger resets last_run_at
+        engine.force_trigger("force-test");
+
+        // Third tick should run again
+        let results = engine.tick().await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].stdout.trim(), "forced");
     }
 
     #[tokio::test]

@@ -198,6 +198,11 @@ impl Daemon {
                                     }
                                 }
                             }
+
+                            // Force-trigger claw-evaluate on any task completion/failure
+                            if let Some(ref cron) = self.cron_engine {
+                                cron.force_trigger(crate::cli::cron::CLAW_EVALUATE_JOB);
+                            }
                         }
                         Err(e) => {
                             tracing::error!("spawned task panicked: {e}");

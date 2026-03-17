@@ -108,5 +108,7 @@ pub trait CronRepository {
     fn cron_set_status(&self, name: &str, repo: Option<&str>, status: CronStatus) -> Result<()>;
     fn cron_remove(&self, name: &str, repo: Option<&str>) -> Result<()>;
     fn cron_update_last_run(&self, id: &str) -> Result<()>;
+    /// Reset last_run_at to NULL so the job is picked up as due on the next tick.
+    fn cron_reset_last_run(&self, name: &str, repo: Option<&str>) -> Result<()>;
     fn cron_find_due(&self) -> Result<Vec<CronJob>>;
 }
