@@ -524,6 +524,17 @@ async fn start_daemon(
     daemon::start(home, env, gh, git, claude, sw).await
 }
 
+/// Dispatch a notification event via configured channels, logging errors to stderr.
+async fn dispatch_notification(
+    dispatcher: &autodev::service::daemon::notifiers::dispatcher::NotificationDispatcher,
+    event: &autodev::core::notifier::NotificationEvent,
+) {
+    let errors = dispatcher.dispatch(event).await;
+    for (ch, err) in &errors {
+        eprintln!("  notification error ({ch}): {err}");
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -732,8 +743,17 @@ async fn main() -> Result<()> {
                 client::spec::spec_unlink(&db, &spec_id, issue)?;
             }
             SpecAction::Complete { id } => {
-                let output = client::spec::spec_check_completion(&db, &id)?;
+                let (output, hitl_event) = client::spec::spec_check_completion(&db, &id)?;
                 println!("{output}");
+
+                // Dispatch HITL creation notification if configured
+                if let Some(ref dispatcher) =
+                    autodev::service::daemon::notifiers::dispatcher::NotificationDispatcher::from_config(&cfg.daemon)
+                {
+                    let notif =
+                        autodev::core::notifier::NotificationEvent::from_hitl_created(&hitl_event);
+                    dispatch_notification(dispatcher, &notif).await;
+                }
             }
             SpecAction::Prioritize { ids } => {
                 let output = client::spec::spec_prioritize(&db, &ids)?;
@@ -766,16 +786,13 @@ async fn main() -> Result<()> {
                 println!("{}", result.output);
 
                 // Dispatch notifications for expired events if configured
-                if let Some(dispatcher) =
+                if let Some(ref dispatcher) =
                     autodev::service::daemon::notifiers::dispatcher::NotificationDispatcher::from_config(&cfg.daemon)
                 {
                     for event in &result.expired_events {
                         let notif =
                             autodev::core::notifier::NotificationEvent::from_hitl_expired(event);
-                        let errors = dispatcher.dispatch(&notif).await;
-                        for (ch, err) in &errors {
-                            eprintln!("  notification error ({ch}): {err}");
-                        }
+                        dispatch_notification(dispatcher, &notif).await;
                     }
                 }
             }

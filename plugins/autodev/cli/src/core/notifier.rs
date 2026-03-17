@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde::Serialize;
 
-use super::models::HitlEvent;
+use super::models::{HitlEvent, NewHitlEvent};
 
 /// 알림 이벤트 (HitlEvent의 알림용 뷰)
 #[derive(Serialize)]
@@ -25,6 +25,20 @@ impl NotificationEvent {
             situation: format!("[EXPIRED] {}", event.situation),
             context: event.context.clone(),
             options: event.parsed_options(),
+            work_id: event.work_id.clone(),
+            spec_id: event.spec_id.clone(),
+            url: None,
+        }
+    }
+
+    /// Create a notification for a newly created HITL event.
+    pub fn from_hitl_created(event: &NewHitlEvent) -> Self {
+        Self {
+            repo_name: event.repo_id.clone(),
+            severity: event.severity.to_string(),
+            situation: format!("[HITL] {}", event.situation),
+            context: event.context.clone(),
+            options: event.options.clone(),
             work_id: event.work_id.clone(),
             spec_id: event.spec_id.clone(),
             url: None,
