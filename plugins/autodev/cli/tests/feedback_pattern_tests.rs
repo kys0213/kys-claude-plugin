@@ -448,18 +448,21 @@ fn collect_feedback_skips_pending_events() {
 }
 
 // ═══════════════════════════════════════════════
-// 17. collect_feedback_from_event auto-collects for single event
+// 17. collect_feedback_from_hitl auto-collects for single event
 // ═══════════════════════════════════════════════
 
 #[test]
-fn collect_feedback_from_event_creates_pattern() {
+fn collect_feedback_from_hitl_creates_pattern() {
     let db = open_memory_db();
     let repo_id = add_test_repo(&db, "org/auto-collect-test");
 
-    let event_id = create_hitl_event(&db, &repo_id, "Code review needed");
-
-    autodev::cli::convention::collect_feedback_from_event(&db, &event_id, "Add more assertions")
-        .unwrap();
+    autodev::cli::convention::collect_feedback_from_hitl(
+        &db,
+        &repo_id,
+        "Code review needed",
+        "Add more assertions",
+    )
+    .unwrap();
 
     let patterns = db.feedback_list(&repo_id).unwrap();
     assert_eq!(patterns.len(), 1);
@@ -468,17 +471,16 @@ fn collect_feedback_from_event_creates_pattern() {
 }
 
 // ═══════════════════════════════════════════════
-// 18. collect_feedback_from_event skips empty messages
+// 18. collect_feedback_from_hitl skips empty messages
 // ═══════════════════════════════════════════════
 
 #[test]
-fn collect_feedback_from_event_skips_empty_message() {
+fn collect_feedback_from_hitl_skips_empty_message() {
     let db = open_memory_db();
     let repo_id = add_test_repo(&db, "org/empty-msg-test");
 
-    let event_id = create_hitl_event(&db, &repo_id, "Some situation");
-
-    autodev::cli::convention::collect_feedback_from_event(&db, &event_id, "  ").unwrap();
+    autodev::cli::convention::collect_feedback_from_hitl(&db, &repo_id, "Some situation", "  ")
+        .unwrap();
 
     let patterns = db.feedback_list(&repo_id).unwrap();
     assert!(patterns.is_empty());

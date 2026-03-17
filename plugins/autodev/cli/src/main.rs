@@ -800,8 +800,16 @@ async fn main() -> Result<()> {
 
                 // Auto-collect feedback if the response has a message
                 if let Some(ref msg) = message {
-                    if let Err(e) = client::convention::collect_feedback_from_event(&db, &id, msg) {
-                        eprintln!("warning: failed to auto-collect feedback: {e}");
+                    use autodev::core::repository::HitlRepository;
+                    if let Ok(Some(event)) = db.hitl_show(&id) {
+                        if let Err(e) = client::convention::collect_feedback_from_hitl(
+                            &db,
+                            &event.repo_id,
+                            &event.situation,
+                            msg,
+                        ) {
+                            eprintln!("warning: failed to auto-collect feedback: {e}");
+                        }
                     }
                 }
             }

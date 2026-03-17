@@ -583,15 +583,26 @@ pub fn classify_pattern_type(situation: &str) -> &'static str {
     }
 }
 
+/// Build a feedback pattern from a HITL event's situation and a user message.
+fn build_hitl_feedback(
+    repo_id: &str,
+    situation: &str,
+    message: &str,
+) -> crate::core::models::NewFeedbackPattern {
+    crate::core::models::NewFeedbackPattern {
+        repo_id: repo_id.to_string(),
+        pattern_type: classify_pattern_type(situation).to_string(),
+        suggestion: message.to_string(),
+        source: "hitl".to_string(),
+    }
+}
+
 /// Collect feedback patterns from responded HITL events for a given repo.
 ///
 /// `repo_name` is the human-readable name (e.g. "org/repo") used to query HITL events.
 /// `repo_id` is the internal UUID used for feedback pattern storage.
-/// Iterates all HITL events for the repo, filters to responded ones with messages,
-/// classifies each message, and upserts as a feedback pattern.
-/// Returns a summary string.
 pub fn collect_feedback(db: &Database, repo_name: &str, repo_id: &str) -> Result<String> {
-    use crate::core::models::{HitlStatus, NewFeedbackPattern};
+    use crate::core::models::HitlStatus;
     use crate::core::repository::HitlRepository;
 
     let events = db.hitl_list(Some(repo_name))?;
@@ -610,14 +621,7 @@ pub fn collect_feedback(db: &Database, repo_name: &str, repo_id: &str) -> Result
                 if message.trim().is_empty() {
                     continue;
                 }
-                let pattern_type = classify_pattern_type(&event.situation);
-                let pattern = NewFeedbackPattern {
-                    repo_id: repo_id.to_string(),
-                    pattern_type: pattern_type.to_string(),
-                    suggestion: message.clone(),
-                    source: "hitl".to_string(),
-                };
-                db.feedback_upsert(&pattern)?;
+                db.feedback_upsert(&build_hitl_feedback(repo_id, &event.situation, message))?;
                 collected += 1;
             }
         }
@@ -628,28 +632,19 @@ pub fn collect_feedback(db: &Database, repo_name: &str, repo_id: &str) -> Result
     ))
 }
 
-/// Collect feedback from a single HITL event's response (used for auto-collection after respond).
-pub fn collect_feedback_from_event(db: &Database, event_id: &str, message: &str) -> Result<()> {
-    use crate::core::models::NewFeedbackPattern;
-    use crate::core::repository::HitlRepository;
-
-    let event = db
-        .hitl_show(event_id)?
-        .ok_or_else(|| anyhow::anyhow!("HITL event not found: {event_id}"))?;
-
+/// Collect feedback from a single HITL response (used for auto-collection after respond).
+///
+/// Accepts repo_id and situation directly to avoid re-querying the HITL event.
+pub fn collect_feedback_from_hitl(
+    db: &Database,
+    repo_id: &str,
+    situation: &str,
+    message: &str,
+) -> Result<()> {
     if message.trim().is_empty() {
         return Ok(());
     }
-
-    let pattern_type = classify_pattern_type(&event.situation);
-    let pattern = NewFeedbackPattern {
-        repo_id: event.repo_id.clone(),
-        pattern_type: pattern_type.to_string(),
-        suggestion: message.to_string(),
-        source: "hitl".to_string(),
-    };
-    db.feedback_upsert(&pattern)?;
-
+    db.feedback_upsert(&build_hitl_feedback(repo_id, situation, message))?;
     Ok(())
 }
 
