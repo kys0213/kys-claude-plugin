@@ -565,6 +565,14 @@ async fn dispatch_notification(
     }
 }
 
+/// Force-trigger claw-evaluate cron job so the daemon picks up changes immediately.
+///
+/// Silently ignores errors (e.g. cron job not yet seeded).
+fn try_force_trigger_evaluate(db: &autodev::infra::db::Database, repo_id: &str) {
+    use autodev::core::repository::CronRepository;
+    let _ = db.cron_reset_last_run(client::cron::CLAW_EVALUATE_JOB, Some(repo_id));
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -697,8 +705,19 @@ async fn main() -> Result<()> {
                 }
             }
             QueueAction::Advance { work_id, reason } => {
-                let output = client::queue::queue_advance(&db, &work_id, reason.as_deref())?;
-                println!("{output}");
+                let result = client::queue::queue_advance(&db, &work_id, reason.as_deref())?;
+                println!("{}", result.output);
+
+                // Dispatch HITL notification if review overflow created one
+                if let Some(ref hitl_event) = result.hitl_event {
+                    if let Some(ref dispatcher) =
+                        autodev::service::daemon::notifiers::dispatcher::NotificationDispatcher::from_config(&cfg.daemon)
+                    {
+                        let notif =
+                            autodev::core::notifier::NotificationEvent::from_hitl_created(hitl_event);
+                        dispatch_notification(dispatcher, &notif).await;
+                    }
+                }
             }
             QueueAction::Skip { work_id, reason } => {
                 let output = client::queue::queue_skip(&db, &work_id, reason.as_deref())?;
@@ -727,7 +746,7 @@ async fn main() -> Result<()> {
                 test_commands,
                 acceptance_criteria,
             } => {
-                let id = client::spec::spec_add(
+                let result = client::spec::spec_add(
                     &db,
                     &title,
                     &body,
@@ -736,7 +755,10 @@ async fn main() -> Result<()> {
                     test_commands.as_deref(),
                     acceptance_criteria.as_deref(),
                 )?;
-                println!("created: {id}");
+                println!("created: {}", result.output);
+
+                // Force-trigger claw-evaluate so the new spec is evaluated immediately
+                try_force_trigger_evaluate(&db, &result.repo_id);
             }
             SpecAction::List { repo, json } => {
                 let output = client::spec::spec_list(&db, repo.as_deref(), json)?;
@@ -812,9 +834,9 @@ async fn main() -> Result<()> {
                 println!("{output}");
 
                 // Auto-collect feedback if the response has a message
-                if let Some(ref msg) = message {
-                    use autodev::core::repository::HitlRepository;
-                    if let Ok(Some(event)) = db.hitl_show(&id) {
+                use autodev::core::repository::HitlRepository;
+                if let Ok(Some(event)) = db.hitl_show(&id) {
+                    if let Some(ref msg) = message {
                         if let Err(e) = client::convention::collect_feedback_from_hitl(
                             &db,
                             &event.repo_id,
@@ -824,6 +846,9 @@ async fn main() -> Result<()> {
                             eprintln!("warning: failed to auto-collect feedback: {e}");
                         }
                     }
+
+                    // Force-trigger claw-evaluate so the response is processed immediately
+                    try_force_trigger_evaluate(&db, &event.repo_id);
                 }
             }
             HitlAction::Timeout { hours, action } => {
@@ -1073,8 +1098,21 @@ async fn main() -> Result<()> {
             }
             ConventionAction::Propose { repo, threshold } => {
                 let repo_id = client::resolve_repo_id(&db, &repo)?;
-                let output = client::convention::propose_updates(&db, &repo_id, threshold)?;
-                print!("{output}");
+                let result = client::convention::propose_updates(&db, &repo_id, threshold)?;
+                print!("{}", result.output);
+
+                // Dispatch HITL notifications for proposed convention updates
+                if !result.hitl_events.is_empty() {
+                    if let Some(ref dispatcher) =
+                        autodev::service::daemon::notifiers::dispatcher::NotificationDispatcher::from_config(&cfg.daemon)
+                    {
+                        for hitl_event in &result.hitl_events {
+                            let notif =
+                                autodev::core::notifier::NotificationEvent::from_hitl_created(hitl_event);
+                            dispatch_notification(dispatcher, &notif).await;
+                        }
+                    }
+                }
             }
             ConventionAction::ApplyApproved { repo } => {
                 let repo_id = client::resolve_repo_id(&db, &repo)?;

@@ -221,9 +221,9 @@ fn cli_queue_advance_changes_phase() {
     let repo_id = add_test_repo(&db);
     insert_queue_item(&db, &repo_id, "work-cli-1", "pending");
 
-    let output = autodev::cli::queue::queue_advance(&db, "work-cli-1", None).unwrap();
-    assert!(output.contains("pending"));
-    assert!(output.contains("ready"));
+    let result = autodev::cli::queue::queue_advance(&db, "work-cli-1", None).unwrap();
+    assert!(result.output.contains("pending"));
+    assert!(result.output.contains("ready"));
 
     let phase = db.queue_get_phase("work-cli-1").unwrap();
     assert_eq!(phase, Some(QueuePhase::Ready));

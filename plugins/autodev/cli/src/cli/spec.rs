@@ -5,6 +5,12 @@ use crate::core::models::*;
 use crate::core::repository::*;
 use crate::infra::db::Database;
 
+/// spec_add의 결과: 출력 메시지와 해결된 repo_id.
+pub struct SpecAddResult {
+    pub output: String,
+    pub repo_id: String,
+}
+
 /// Add a new spec
 pub fn spec_add(
     db: &Database,
@@ -14,11 +20,11 @@ pub fn spec_add(
     file: Option<&str>,
     test_commands: Option<&str>,
     acceptance_criteria: Option<&str>,
-) -> Result<String> {
+) -> Result<SpecAddResult> {
     let repo_id = resolve_repo_id(db, repo_name)?;
 
     let new_spec = NewSpec {
-        repo_id,
+        repo_id: repo_id.clone(),
         title: title.to_string(),
         body: body.to_string(),
         source_path: file.map(|s| s.to_string()),
@@ -29,16 +35,16 @@ pub fn spec_add(
     let id = db.spec_add(&new_spec)?;
 
     let missing = validate_spec_sections(body);
-    if !missing.is_empty() {
-        let mut result = format!(
-            "⚠ Missing sections: {}. Recommended: add these as ## headers.\n",
+    let output = if !missing.is_empty() {
+        format!(
+            "⚠ Missing sections: {}. Recommended: add these as ## headers.\n{id}",
             missing.join(", ")
-        );
-        result.push_str(&id);
-        return Ok(result);
-    }
+        )
+    } else {
+        id
+    };
 
-    Ok(id)
+    Ok(SpecAddResult { output, repo_id })
 }
 
 /// List specs

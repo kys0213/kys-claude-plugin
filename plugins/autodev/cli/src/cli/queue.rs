@@ -7,10 +7,20 @@ use crate::core::queue_item::{ItemMetadata, QueueItem};
 use crate::core::repository::{ClawDecisionRepository, HitlRepository, QueueRepository};
 use crate::infra::db::Database;
 
+/// queue_advance의 결과: 출력 메시지와 생성된 HITL 이벤트.
+pub struct QueueAdvanceResult {
+    pub output: String,
+    pub hitl_event: Option<NewHitlEvent>,
+}
+
 /// 큐 아이템을 다음 phase로 전이한다.
 /// Claw의 CLI 진입점으로서 claw_decisions에 advance 기록을 남긴다.
 /// PR의 review_iteration이 max_iterations 이상이면 HITL 이벤트를 자동 생성한다.
-pub fn queue_advance(db: &Database, work_id: &str, reason: Option<&str>) -> Result<String> {
+pub fn queue_advance(
+    db: &Database,
+    work_id: &str,
+    reason: Option<&str>,
+) -> Result<QueueAdvanceResult> {
     // advance 전에 item 조회 (decision 기록 + HITL 체크 + before phase 취득)
     let item = db
         .queue_get_item(work_id)?
@@ -28,13 +38,17 @@ pub fn queue_advance(db: &Database, work_id: &str, reason: Option<&str>) -> Resu
     record_decision(db, &item.repo_id, DecisionType::Advance, work_id, reason);
 
     // H3: PR review iteration 임계값 초과 시 HITL 자동 생성
-    if item.queue_type == QueueType::Pr {
-        if let Some(review_iteration) = extract_review_iteration(&item.metadata_json) {
-            check_review_overflow(db, &item.repo_id, work_id, review_iteration);
-        }
-    }
+    let hitl_event = if item.queue_type == QueueType::Pr {
+        extract_review_iteration(&item.metadata_json)
+            .and_then(|ri| check_review_overflow(db, &item.repo_id, work_id, ri))
+    } else {
+        None
+    };
 
-    Ok(format!("advanced: {work_id} ({before} → {after})"))
+    Ok(QueueAdvanceResult {
+        output: format!("advanced: {work_id} ({before} → {after})"),
+        hitl_event,
+    })
 }
 
 /// 큐 아이템을 skip 처리한다.
@@ -94,10 +108,17 @@ fn extract_review_iteration(metadata_json: &Option<String>) -> Option<u32> {
 /// NOTE: max_iterations는 ReviewStage::default().max_iterations와 동일한 기본값(2)을 사용한다.
 /// CLI에서는 per-repo config 로드 없이 실행되므로, 여기서는 기본값을 사용한다.
 /// Claw cron이 구현되면 config에서 로드된 값을 전달하게 된다.
-fn check_review_overflow(db: &Database, repo_id: &str, work_id: &str, review_iteration: u32) {
+///
+/// 생성된 HITL 이벤트를 반환하여 호출자가 알림을 발송할 수 있게 한다.
+fn check_review_overflow(
+    db: &Database,
+    repo_id: &str,
+    work_id: &str,
+    review_iteration: u32,
+) -> Option<NewHitlEvent> {
     let max_iterations = crate::core::config::models::ReviewStage::default().max_iterations;
     if review_iteration >= max_iterations {
-        let _ = db.hitl_create(&NewHitlEvent {
+        let event = NewHitlEvent {
             repo_id: repo_id.to_string(),
             spec_id: None,
             work_id: Some(work_id.to_string()),
@@ -111,7 +132,11 @@ fn check_review_overflow(db: &Database, repo_id: &str, work_id: &str, review_ite
                 "Skip this PR".to_string(),
                 "Merge as-is".to_string(),
             ],
-        });
+        };
+        let _ = db.hitl_create(&event);
+        Some(event)
+    } else {
+        None
     }
 }
 

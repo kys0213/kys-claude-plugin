@@ -519,8 +519,8 @@ fn propose_updates_creates_hitl_events() {
             .unwrap();
     }
 
-    let output = autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
-    assert!(output.contains("Proposed 1 convention update(s)"));
+    let result = autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
+    assert!(result.output.contains("Proposed 1 convention update(s)"));
 
     // Verify HITL event was created
     let events = db.hitl_list(Some("org/propose-test")).unwrap();
@@ -545,8 +545,8 @@ fn propose_updates_skips_below_threshold() {
     db.feedback_upsert(&make_pattern(&repo_id, "testing", "Add tests"))
         .unwrap();
 
-    let output = autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
-    assert!(output.contains("No actionable patterns found."));
+    let result = autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
+    assert!(result.output.contains("No actionable patterns found."));
 
     // No HITL events should be created
     let events = db.hitl_list(Some("org/propose-skip-test")).unwrap();
@@ -584,8 +584,8 @@ fn propose_updates_no_actionable_patterns() {
     let db = open_memory_db();
     let repo_id = add_test_repo(&db, "org/propose-empty-test");
 
-    let output = autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
-    assert!(output.contains("No actionable patterns found."));
+    let result = autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
+    assert!(result.output.contains("No actionable patterns found."));
 }
 
 // ═══════════════════════════════════════════════
@@ -603,10 +603,10 @@ fn propose_updates_idempotent() {
     }
 
     // First call should propose
-    let output1 = autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
-    assert!(output1.contains("Proposed 1 convention update(s)"));
+    let result1 = autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
+    assert!(result1.output.contains("Proposed 1 convention update(s)"));
 
     // Second call should find no actionable patterns (status is now Proposed)
-    let output2 = autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
-    assert!(output2.contains("No actionable patterns found."));
+    let result2 = autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
+    assert!(result2.output.contains("No actionable patterns found."));
 }

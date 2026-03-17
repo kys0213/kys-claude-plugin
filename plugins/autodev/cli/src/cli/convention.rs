@@ -656,22 +656,31 @@ pub fn pattern_type_to_rule_file(pattern_type: &str) -> String {
     format!(".claude/rules/{pattern_type}.md")
 }
 
+/// propose_updates의 결과: 출력 메시지와 생성된 HITL 이벤트 목록.
+pub struct ProposeResult {
+    pub output: String,
+    pub hitl_events: Vec<crate::core::models::NewHitlEvent>,
+}
+
 /// Check actionable feedback patterns and create HITL events for convention updates.
 ///
 /// Queries patterns with `occurrence_count >= threshold` and `status = Active`,
 /// then creates a HITL event for each so a human can approve, edit, or reject.
-/// Returns a summary message.
-pub fn propose_updates(db: &Database, repo_id: &str, threshold: i32) -> Result<String> {
+/// Returns a summary message and created HITL events for notification dispatch.
+pub fn propose_updates(db: &Database, repo_id: &str, threshold: i32) -> Result<ProposeResult> {
     use crate::core::models::{HitlSeverity, NewHitlEvent};
     use crate::core::repository::HitlRepository;
 
     let patterns = db.feedback_list_actionable(repo_id, threshold)?;
 
     if patterns.is_empty() {
-        return Ok("No actionable patterns found.\n".to_string());
+        return Ok(ProposeResult {
+            output: "No actionable patterns found.\n".to_string(),
+            hitl_events: Vec::new(),
+        });
     }
 
-    let mut proposed = 0;
+    let mut hitl_events = Vec::new();
 
     for pattern in &patterns {
         let rule_file = pattern_type_to_rule_file(&pattern.pattern_type);
@@ -695,10 +704,13 @@ pub fn propose_updates(db: &Database, repo_id: &str, threshold: i32) -> Result<S
 
         db.hitl_create(&hitl_event)?;
         db.feedback_set_status(&pattern.id, FeedbackPatternStatus::Proposed)?;
-        proposed += 1;
+        hitl_events.push(hitl_event);
     }
 
-    Ok(format!("Proposed {proposed} convention update(s)\n"))
+    Ok(ProposeResult {
+        output: format!("Proposed {} convention update(s)\n", hitl_events.len()),
+        hitl_events,
+    })
 }
 
 // ─── Convention Apply ───
