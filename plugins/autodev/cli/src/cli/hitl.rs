@@ -134,7 +134,7 @@ pub fn respond(
 }
 
 /// 타임아웃 초과 HITL 만료 처리
-pub fn timeout(db: &Database, hours: i64, action: &str) -> Result<String> {
+pub fn timeout(db: &Database, hours: i64, action: TimeoutAction) -> Result<String> {
     let expired = db.hitl_expired_list(hours)?;
     if expired.is_empty() {
         return Ok("No expired HITL events found".to_string());
@@ -145,7 +145,7 @@ pub fn timeout(db: &Database, hours: i64, action: &str) -> Result<String> {
         db.hitl_set_status(&event.id, HitlStatus::Expired)?;
 
         match action {
-            "pause-spec" => {
+            TimeoutAction::PauseSpec => {
                 if let Some(ref spec_id) = event.spec_id {
                     db.spec_set_status(spec_id, SpecStatus::Paused)?;
                     results.push(format!(
@@ -156,7 +156,7 @@ pub fn timeout(db: &Database, hours: i64, action: &str) -> Result<String> {
                     results.push(format!("  {} → expired (no spec linked)", event.id));
                 }
             }
-            _ => {
+            TimeoutAction::Expire => {
                 results.push(format!("  {} → expired", event.id));
             }
         }

@@ -516,6 +516,24 @@ impl std::str::FromStr for HitlStatus {
     }
 }
 
+/// HITL 타임아웃 만료 시 수행할 액션.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum TimeoutAction {
+    /// 만료만 처리
+    Expire,
+    /// 만료 후 연결된 스펙 일시 정지
+    PauseSpec,
+}
+
+impl fmt::Display for TimeoutAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TimeoutAction::Expire => write!(f, "expire"),
+            TimeoutAction::PauseSpec => write!(f, "pause-spec"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HitlEvent {
     pub id: String,

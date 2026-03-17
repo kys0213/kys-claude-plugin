@@ -237,9 +237,9 @@ enum HitlAction {
         /// 타임아웃 시간 (hours, 기본 24)
         #[arg(long, default_value = "24")]
         hours: i64,
-        /// 만료 액션 (expire, skip, pause-spec)
-        #[arg(long, default_value = "expire")]
-        action: String,
+        /// 만료 액션
+        #[arg(long, value_enum, default_value = "expire")]
+        action: autodev::core::models::TimeoutAction,
     },
 }
 
@@ -733,7 +733,7 @@ async fn main() -> Result<()> {
                 println!("{output}");
             }
             HitlAction::Timeout { hours, action } => {
-                let output = client::hitl::timeout(&db, hours, &action)?;
+                let output = client::hitl::timeout(&db, hours, action)?;
                 println!("{output}");
             }
         },
