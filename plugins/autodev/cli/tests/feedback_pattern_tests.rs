@@ -485,3 +485,128 @@ fn collect_feedback_from_hitl_skips_empty_message() {
     let patterns = db.feedback_list(&repo_id).unwrap();
     assert!(patterns.is_empty());
 }
+
+// ═══════════════════════════════════════════════
+// 19. pattern_type_to_rule_file maps correctly
+// ═══════════════════════════════════════════════
+
+#[test]
+fn pattern_type_to_rule_file_maps_correctly() {
+    use autodev::cli::convention::pattern_type_to_rule_file;
+    assert_eq!(
+        pattern_type_to_rule_file("error-handling"),
+        ".claude/rules/error-handling.md"
+    );
+    assert_eq!(
+        pattern_type_to_rule_file("testing"),
+        ".claude/rules/testing.md"
+    );
+    assert_eq!(pattern_type_to_rule_file("style"), ".claude/rules/style.md");
+}
+
+// ═══════════════════════════════════════════════
+// 20. propose_updates creates HITL events for patterns above threshold
+// ═══════════════════════════════════════════════
+
+#[test]
+fn propose_updates_creates_hitl_events() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db, "org/propose-test");
+
+    // Create a pattern with 3 occurrences
+    for _ in 0..3 {
+        db.feedback_upsert(&make_pattern(&repo_id, "error-handling", "Use anyhow"))
+            .unwrap();
+    }
+
+    let output = autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
+    assert!(output.contains("Proposed 1 convention update(s)"));
+
+    // Verify HITL event was created
+    let events = db.hitl_list(Some("org/propose-test")).unwrap();
+    assert_eq!(events.len(), 1);
+    assert!(events[0]
+        .situation
+        .contains("Convention update suggested: error-handling"));
+}
+
+// ═══════════════════════════════════════════════
+// 21. propose_updates skips patterns below threshold
+// ═══════════════════════════════════════════════
+
+#[test]
+fn propose_updates_skips_below_threshold() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db, "org/propose-skip-test");
+
+    // Create a pattern with only 2 occurrences (below threshold of 3)
+    db.feedback_upsert(&make_pattern(&repo_id, "testing", "Add tests"))
+        .unwrap();
+    db.feedback_upsert(&make_pattern(&repo_id, "testing", "Add tests"))
+        .unwrap();
+
+    let output = autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
+    assert!(output.contains("No actionable patterns found."));
+
+    // No HITL events should be created
+    let events = db.hitl_list(Some("org/propose-skip-test")).unwrap();
+    assert!(events.is_empty());
+}
+
+// ═══════════════════════════════════════════════
+// 22. propose_updates marks patterns as Proposed
+// ═══════════════════════════════════════════════
+
+#[test]
+fn propose_updates_marks_patterns_as_proposed() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db, "org/propose-status-test");
+
+    for _ in 0..3 {
+        db.feedback_upsert(&make_pattern(&repo_id, "style", "Use snake_case"))
+            .unwrap();
+    }
+
+    autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
+
+    // Pattern should now be Proposed
+    let patterns = db.feedback_list(&repo_id).unwrap();
+    assert_eq!(patterns.len(), 1);
+    assert_eq!(patterns[0].status, FeedbackPatternStatus::Proposed);
+}
+
+// ═══════════════════════════════════════════════
+// 23. propose_updates returns no actionable when none qualify
+// ═══════════════════════════════════════════════
+
+#[test]
+fn propose_updates_no_actionable_patterns() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db, "org/propose-empty-test");
+
+    let output = autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
+    assert!(output.contains("No actionable patterns found."));
+}
+
+// ═══════════════════════════════════════════════
+// 24. propose_updates is idempotent (already-proposed patterns are skipped)
+// ═══════════════════════════════════════════════
+
+#[test]
+fn propose_updates_idempotent() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db, "org/propose-idempotent-test");
+
+    for _ in 0..3 {
+        db.feedback_upsert(&make_pattern(&repo_id, "error-handling", "Use Result<T>"))
+            .unwrap();
+    }
+
+    // First call should propose
+    let output1 = autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
+    assert!(output1.contains("Proposed 1 convention update(s)"));
+
+    // Second call should find no actionable patterns (status is now Proposed)
+    let output2 = autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
+    assert!(output2.contains("No actionable patterns found."));
+}
