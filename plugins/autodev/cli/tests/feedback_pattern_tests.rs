@@ -285,3 +285,201 @@ fn feedback_upsert_different_combos_create_separate() {
     let patterns = db.feedback_list(&repo_id).unwrap();
     assert_eq!(patterns.len(), 3);
 }
+
+// ═══════════════════════════════════════════════
+// 13. classify_pattern_type returns correct types
+// ═══════════════════════════════════════════════
+
+#[test]
+fn classify_pattern_type_error_handling() {
+    use autodev::cli::convention::classify_pattern_type;
+    assert_eq!(
+        classify_pattern_type("Build error in CI pipeline"),
+        "error-handling"
+    );
+    assert_eq!(
+        classify_pattern_type("Compilation failure on main branch"),
+        "error-handling"
+    );
+}
+
+#[test]
+fn classify_pattern_type_testing() {
+    use autodev::cli::convention::classify_pattern_type;
+    assert_eq!(classify_pattern_type("Missing test coverage"), "testing");
+    assert_eq!(
+        classify_pattern_type("Integration testing needed"),
+        "testing"
+    );
+}
+
+#[test]
+fn classify_pattern_type_style() {
+    use autodev::cli::convention::classify_pattern_type;
+    assert_eq!(classify_pattern_type("Code style issue"), "style");
+    assert_eq!(classify_pattern_type("Format check failed"), "style");
+    assert_eq!(classify_pattern_type("Lint warning in module"), "style");
+}
+
+#[test]
+fn classify_pattern_type_review_process() {
+    use autodev::cli::convention::classify_pattern_type;
+    assert_eq!(
+        classify_pattern_type("Code review requested"),
+        "review-process"
+    );
+    assert_eq!(
+        classify_pattern_type("Iteration feedback"),
+        "review-process"
+    );
+}
+
+#[test]
+fn classify_pattern_type_spec_management() {
+    use autodev::cli::convention::classify_pattern_type;
+    assert_eq!(
+        classify_pattern_type("Spec conflict detected"),
+        "spec-management"
+    );
+    assert_eq!(
+        classify_pattern_type("Merge conflict in branch"),
+        "spec-management"
+    );
+}
+
+#[test]
+fn classify_pattern_type_general() {
+    use autodev::cli::convention::classify_pattern_type;
+    assert_eq!(classify_pattern_type("Something else entirely"), "general");
+    assert_eq!(classify_pattern_type(""), "general");
+}
+
+// ═══════════════════════════════════════════════
+// 14. collect_feedback processes responded HITL events with messages
+// ═══════════════════════════════════════════════
+
+fn create_hitl_event(db: &Database, repo_id: &str, situation: &str) -> String {
+    use autodev::core::models::{HitlSeverity, NewHitlEvent};
+    db.hitl_create(&NewHitlEvent {
+        repo_id: repo_id.to_string(),
+        spec_id: None,
+        work_id: None,
+        severity: HitlSeverity::Medium,
+        situation: situation.to_string(),
+        context: "test context".to_string(),
+        options: vec!["option1".to_string()],
+    })
+    .unwrap()
+}
+
+#[test]
+fn collect_feedback_processes_responded_events() {
+    use autodev::core::models::NewHitlResponse;
+
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db, "org/collect-test");
+
+    // Create HITL event and respond with a message
+    let event_id = create_hitl_event(&db, &repo_id, "Build error in CI");
+    db.hitl_respond(&NewHitlResponse {
+        event_id: event_id.clone(),
+        choice: Some(1),
+        message: Some("Use anyhow for error handling".to_string()),
+        source: "cli".to_string(),
+    })
+    .unwrap();
+
+    let output =
+        autodev::cli::convention::collect_feedback(&db, "org/collect-test", &repo_id).unwrap();
+    assert!(output.contains("Collected 1 feedback pattern(s) from 1 HITL responses"));
+
+    let patterns = db.feedback_list(&repo_id).unwrap();
+    assert_eq!(patterns.len(), 1);
+    assert_eq!(patterns[0].pattern_type, "error-handling");
+    assert_eq!(patterns[0].suggestion, "Use anyhow for error handling");
+}
+
+// ═══════════════════════════════════════════════
+// 15. collect_feedback skips HITL events without messages
+// ═══════════════════════════════════════════════
+
+#[test]
+fn collect_feedback_skips_events_without_messages() {
+    use autodev::core::models::NewHitlResponse;
+
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db, "org/no-msg-test");
+
+    let event_id = create_hitl_event(&db, &repo_id, "Test coverage low");
+    db.hitl_respond(&NewHitlResponse {
+        event_id: event_id.clone(),
+        choice: Some(1),
+        message: None,
+        source: "cli".to_string(),
+    })
+    .unwrap();
+
+    let output =
+        autodev::cli::convention::collect_feedback(&db, "org/no-msg-test", &repo_id).unwrap();
+    assert!(output.contains("Collected 0 feedback pattern(s) from 1 HITL responses"));
+
+    let patterns = db.feedback_list(&repo_id).unwrap();
+    assert!(patterns.is_empty());
+}
+
+// ═══════════════════════════════════════════════
+// 16. collect_feedback skips pending (non-responded) events
+// ═══════════════════════════════════════════════
+
+#[test]
+fn collect_feedback_skips_pending_events() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db, "org/pending-test");
+
+    // Create HITL event but do NOT respond
+    create_hitl_event(&db, &repo_id, "Style issue found");
+
+    let output =
+        autodev::cli::convention::collect_feedback(&db, "org/pending-test", &repo_id).unwrap();
+    assert!(output.contains("Collected 0 feedback pattern(s) from 0 HITL responses"));
+
+    let patterns = db.feedback_list(&repo_id).unwrap();
+    assert!(patterns.is_empty());
+}
+
+// ═══════════════════════════════════════════════
+// 17. collect_feedback_from_event auto-collects for single event
+// ═══════════════════════════════════════════════
+
+#[test]
+fn collect_feedback_from_event_creates_pattern() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db, "org/auto-collect-test");
+
+    let event_id = create_hitl_event(&db, &repo_id, "Code review needed");
+
+    autodev::cli::convention::collect_feedback_from_event(&db, &event_id, "Add more assertions")
+        .unwrap();
+
+    let patterns = db.feedback_list(&repo_id).unwrap();
+    assert_eq!(patterns.len(), 1);
+    assert_eq!(patterns[0].pattern_type, "review-process");
+    assert_eq!(patterns[0].suggestion, "Add more assertions");
+}
+
+// ═══════════════════════════════════════════════
+// 18. collect_feedback_from_event skips empty messages
+// ═══════════════════════════════════════════════
+
+#[test]
+fn collect_feedback_from_event_skips_empty_message() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db, "org/empty-msg-test");
+
+    let event_id = create_hitl_event(&db, &repo_id, "Some situation");
+
+    autodev::cli::convention::collect_feedback_from_event(&db, &event_id, "  ").unwrap();
+
+    let patterns = db.feedback_list(&repo_id).unwrap();
+    assert!(patterns.is_empty());
+}

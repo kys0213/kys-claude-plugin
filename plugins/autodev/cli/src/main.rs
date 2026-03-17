@@ -158,6 +158,11 @@ enum ConventionAction {
         #[arg(long)]
         json: bool,
     },
+    /// HITL 응답에서 피드백 패턴 수집
+    CollectFeedback {
+        /// 레포 이름 (org/repo)
+        repo: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -792,6 +797,13 @@ async fn main() -> Result<()> {
             } => {
                 let output = client::hitl::respond(&db, &id, choice, message.as_deref())?;
                 println!("{output}");
+
+                // Auto-collect feedback if the response has a message
+                if let Some(ref msg) = message {
+                    if let Err(e) = client::convention::collect_feedback_from_event(&db, &id, msg) {
+                        eprintln!("warning: failed to auto-collect feedback: {e}");
+                    }
+                }
             }
             HitlAction::Timeout { hours, action } => {
                 let result = client::hitl::timeout(&db, hours, action)?;
@@ -1031,6 +1043,11 @@ async fn main() -> Result<()> {
                 };
                 let output =
                     client::convention::patterns(&db, repo_id.as_deref(), Some(min_count), json)?;
+                print!("{output}");
+            }
+            ConventionAction::CollectFeedback { repo } => {
+                let repo_id = client::resolve_repo_id(&db, &repo)?;
+                let output = client::convention::collect_feedback(&db, &repo, &repo_id)?;
                 print!("{output}");
             }
         },

@@ -563,6 +563,96 @@ npx prettier --check .
 ```
 "#;
 
+// ─── Feedback Collection from HITL ───
+
+/// Classify the pattern type from a HITL event's situation text using keyword matching.
+pub fn classify_pattern_type(situation: &str) -> &'static str {
+    let lower = situation.to_lowercase();
+    if lower.contains("style") || lower.contains("format") || lower.contains("lint") {
+        "style"
+    } else if lower.contains("test") {
+        "testing"
+    } else if lower.contains("error") || lower.contains("fail") {
+        "error-handling"
+    } else if lower.contains("review") || lower.contains("iteration") {
+        "review-process"
+    } else if lower.contains("conflict") || lower.contains("spec") {
+        "spec-management"
+    } else {
+        "general"
+    }
+}
+
+/// Collect feedback patterns from responded HITL events for a given repo.
+///
+/// `repo_name` is the human-readable name (e.g. "org/repo") used to query HITL events.
+/// `repo_id` is the internal UUID used for feedback pattern storage.
+/// Iterates all HITL events for the repo, filters to responded ones with messages,
+/// classifies each message, and upserts as a feedback pattern.
+/// Returns a summary string.
+pub fn collect_feedback(db: &Database, repo_name: &str, repo_id: &str) -> Result<String> {
+    use crate::core::models::{HitlStatus, NewFeedbackPattern};
+    use crate::core::repository::HitlRepository;
+
+    let events = db.hitl_list(Some(repo_name))?;
+    let mut collected = 0;
+    let mut total_responded = 0;
+
+    for event in &events {
+        if !matches!(event.status, HitlStatus::Responded) {
+            continue;
+        }
+        total_responded += 1;
+
+        let responses = db.hitl_responses(&event.id)?;
+        for resp in &responses {
+            if let Some(ref message) = resp.message {
+                if message.trim().is_empty() {
+                    continue;
+                }
+                let pattern_type = classify_pattern_type(&event.situation);
+                let pattern = NewFeedbackPattern {
+                    repo_id: repo_id.to_string(),
+                    pattern_type: pattern_type.to_string(),
+                    suggestion: message.clone(),
+                    source: "hitl".to_string(),
+                };
+                db.feedback_upsert(&pattern)?;
+                collected += 1;
+            }
+        }
+    }
+
+    Ok(format!(
+        "Collected {collected} feedback pattern(s) from {total_responded} HITL responses\n"
+    ))
+}
+
+/// Collect feedback from a single HITL event's response (used for auto-collection after respond).
+pub fn collect_feedback_from_event(db: &Database, event_id: &str, message: &str) -> Result<()> {
+    use crate::core::models::NewFeedbackPattern;
+    use crate::core::repository::HitlRepository;
+
+    let event = db
+        .hitl_show(event_id)?
+        .ok_or_else(|| anyhow::anyhow!("HITL event not found: {event_id}"))?;
+
+    if message.trim().is_empty() {
+        return Ok(());
+    }
+
+    let pattern_type = classify_pattern_type(&event.situation);
+    let pattern = NewFeedbackPattern {
+        repo_id: event.repo_id.clone(),
+        pattern_type: pattern_type.to_string(),
+        suggestion: message.to_string(),
+        source: "hitl".to_string(),
+    };
+    db.feedback_upsert(&pattern)?;
+
+    Ok(())
+}
+
 // ─── Feedback Patterns CLI ───
 
 /// List feedback patterns for a repo, formatted as a table.
