@@ -25,6 +25,7 @@ pub fn claw_init(home: &Path) -> Result<()> {
         ws.join(".claude/rules"),
         ws.join("commands"),
         ws.join("skills/decompose"),
+        ws.join("skills/gap-detect"),
         ws.join("skills/prioritize"),
     ];
 
@@ -35,15 +36,21 @@ pub fn claw_init(home: &Path) -> Result<()> {
 
     // Write default files (only if they don't exist)
     let files: &[(&str, &str)] = &[
-        ("CLAUDE.md", DEFAULT_CLAUDE_MD),
-        (".claude/rules/scheduling.md", DEFAULT_SCHEDULING_MD),
-        (".claude/rules/branch-naming.md", DEFAULT_BRANCH_NAMING_MD),
-        (".claude/rules/review-policy.md", DEFAULT_REVIEW_POLICY_MD),
+        ("CLAUDE.md", TPL_CLAUDE_MD),
+        (".claude/rules/scheduling.md", TPL_SCHEDULING_MD),
+        (".claude/rules/branch-naming.md", TPL_BRANCH_NAMING_MD),
+        (".claude/rules/review-policy.md", TPL_REVIEW_POLICY_MD),
+        (
+            ".claude/rules/decompose-strategy.md",
+            TPL_DECOMPOSE_STRATEGY_MD,
+        ),
+        (".claude/rules/hitl-policy.md", TPL_HITL_POLICY_MD),
         ("commands/status.md", DEFAULT_STATUS_MD),
         ("commands/board.md", DEFAULT_BOARD_MD),
         ("commands/hitl.md", DEFAULT_HITL_MD),
-        ("skills/decompose/SKILL.md", DEFAULT_DECOMPOSE_SKILL_MD),
-        ("skills/prioritize/SKILL.md", DEFAULT_PRIORITIZE_SKILL_MD),
+        ("skills/decompose/SKILL.md", TPL_DECOMPOSE_SKILL_MD),
+        ("skills/gap-detect/SKILL.md", TPL_GAP_DETECT_SKILL_MD),
+        ("skills/prioritize/SKILL.md", TPL_PRIORITIZE_SKILL_MD),
     ];
 
     for (rel_path, content) in files {
@@ -215,72 +222,27 @@ fn validate_rule_content(content: &str) -> Vec<String> {
     warnings
 }
 
-// ─── Default content ───
+// ─── Template-based content (source of truth: templates/claw-workspace/) ───
 
-const DEFAULT_CLAUDE_MD: &str = r#"# Claw 판단 원칙
+const TPL_CLAUDE_MD: &str = include_str!("../../../templates/claw-workspace/CLAUDE.md");
+const TPL_SCHEDULING_MD: &str =
+    include_str!("../../../templates/claw-workspace/.claude/rules/scheduling.md");
+const TPL_BRANCH_NAMING_MD: &str =
+    include_str!("../../../templates/claw-workspace/.claude/rules/branch-naming.md");
+const TPL_REVIEW_POLICY_MD: &str =
+    include_str!("../../../templates/claw-workspace/.claude/rules/review-policy.md");
+const TPL_DECOMPOSE_STRATEGY_MD: &str =
+    include_str!("../../../templates/claw-workspace/.claude/rules/decompose-strategy.md");
+const TPL_HITL_POLICY_MD: &str =
+    include_str!("../../../templates/claw-workspace/.claude/rules/hitl-policy.md");
+const TPL_DECOMPOSE_SKILL_MD: &str =
+    include_str!("../../../templates/claw-workspace/skills/decompose/SKILL.md");
+const TPL_GAP_DETECT_SKILL_MD: &str =
+    include_str!("../../../templates/claw-workspace/skills/gap-detect/SKILL.md");
+const TPL_PRIORITIZE_SKILL_MD: &str =
+    include_str!("../../../templates/claw-workspace/skills/prioritize/SKILL.md");
 
-## 역할
-나는 Claw, 자율 개발 에이전트의 스케줄러다.
-큐 상태를 보고 어떤 작업을 진행할지 판단한다.
-
-## 핵심 원칙
-1. 독립적인 이슈는 병렬 진행한다
-2. 같은 파일을 수정하는 이슈는 순차 처리한다
-3. 리뷰가 3회 반복되면 HITL을 요청한다
-4. 스펙의 acceptance criteria를 항상 참조한다
-5. gap을 발견하면 즉시 이슈를 생성한다
-
-## 도구
-- `autodev queue list --json` — 큐 상태 확인
-- `autodev spec list --json` — 스펙 목록
-- `autodev hitl list --json` — HITL 대기 목록
-- `autodev decisions list --json` — 판단 이력
-"#;
-
-const DEFAULT_SCHEDULING_MD: &str = r#"# 스케줄링 정책
-
-## 우선순위 결정
-1. HITL 대기 중인 작업이 있으면 사용자에게 알린다
-2. 블로커가 없는 작업을 우선 진행한다
-3. 같은 파일을 수정하는 작업은 순차 처리한다
-4. 리소스 제한 내에서 최대 병렬성을 유지한다
-
-## 큐 상태 전이
-- `pending` → `in_progress` → `review` → `done`
-- `review`에서 3회 반복 시 → `hitl_required`
-"#;
-
-const DEFAULT_BRANCH_NAMING_MD: &str = r#"# 브랜치 네이밍
-
-## 형식
-```
-<type>/<short-description>
-```
-
-## 타입
-- `feat/` — 새 기능
-- `fix/` — 버그 수정
-- `refactor/` — 리팩토링
-- `docs/` — 문서
-
-## 예시
-- `feat/add-user-auth`
-- `fix/null-pointer-check`
-- `refactor/extract-service`
-"#;
-
-const DEFAULT_REVIEW_POLICY_MD: &str = r#"# 리뷰 정책
-
-## 자동 리뷰 기준
-1. 모든 테스트가 통과해야 한다
-2. lint/format 검사를 통과해야 한다
-3. 변경 범위가 스펙의 acceptance criteria에 부합해야 한다
-
-## HITL 에스컬레이션
-- 리뷰 반복 3회 초과 시 HITL 요청
-- 아키텍처 변경이 포함된 경우 HITL 요청
-- 보안 관련 변경이 포함된 경우 HITL 요청
-"#;
+// ─── Hardcoded content (no template file) ───
 
 const DEFAULT_STATUS_MD: &str = r#"# /status 커맨드
 
@@ -331,43 +293,6 @@ autodev hitl list --json
 autodev hitl show <id>
 autodev hitl respond <id> --choice <n>
 ```
-"#;
-
-const DEFAULT_DECOMPOSE_SKILL_MD: &str = r#"# 스펙 분해 스킬
-
-## 목적
-큰 스펙을 구현 가능한 단위로 분해한다.
-
-## 입력
-- 스펙 본문 (body)
-- acceptance criteria
-
-## 출력
-- 분해된 서브태스크 목록
-- 각 서브태스크의 예상 범위
-- 의존 관계 그래프
-
-## 프로세스
-1. 스펙의 요구사항을 파악한다
-2. 독립적으로 구현 가능한 단위로 분리한다
-3. 의존 관계를 식별한다
-4. 구현 순서를 제안한다
-"#;
-
-const DEFAULT_PRIORITIZE_SKILL_MD: &str = r#"# 우선순위 판단 스킬
-
-## 목적
-대기 중인 작업의 우선순위를 판단한다.
-
-## 기준
-1. 블로커 여부 (다른 작업을 막고 있는가)
-2. 의존성 (선행 작업이 완료되었는가)
-3. 파일 충돌 (같은 파일을 수정하는 작업이 진행 중인가)
-4. 비즈니스 우선순위 (스펙에 명시된 우선순위)
-
-## 출력
-- 정렬된 작업 목록
-- 각 작업의 우선순위 근거
 "#;
 
 #[cfg(test)]
