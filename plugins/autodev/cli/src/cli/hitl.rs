@@ -152,7 +152,10 @@ pub fn timeout(db: &Database, hours: i64, action: TimeoutAction) -> Result<Timeo
 
     let mut results = Vec::new();
     for event in &expired {
-        db.hitl_set_status(&event.id, HitlStatus::Expired)?;
+        // Remind는 알림만 재발송하므로 상태를 변경하지 않는다.
+        if action != TimeoutAction::Remind {
+            db.hitl_set_status(&event.id, HitlStatus::Expired)?;
+        }
 
         match action {
             TimeoutAction::PauseSpec => {
@@ -169,12 +172,15 @@ pub fn timeout(db: &Database, hours: i64, action: TimeoutAction) -> Result<Timeo
             TimeoutAction::Expire => {
                 results.push(format!("  {} → expired", event.id));
             }
+            TimeoutAction::Remind => {
+                results.push(format!("  {} → remind sent", event.id));
+            }
         }
     }
 
     Ok(TimeoutResult {
         output: format!(
-            "Processed {} expired events (action: {}):\n{}",
+            "Processed {} events (action: {}):\n{}",
             expired.len(),
             action,
             results.join("\n")

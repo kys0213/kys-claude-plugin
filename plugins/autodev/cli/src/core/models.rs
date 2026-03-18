@@ -562,6 +562,8 @@ pub enum TimeoutAction {
     Expire,
     /// 만료 후 연결된 스펙 일시 정지
     PauseSpec,
+    /// 알림 재발송 (만료하지 않음)
+    Remind,
 }
 
 impl fmt::Display for TimeoutAction {
@@ -569,6 +571,7 @@ impl fmt::Display for TimeoutAction {
         match self {
             TimeoutAction::Expire => write!(f, "expire"),
             TimeoutAction::PauseSpec => write!(f, "pause-spec"),
+            TimeoutAction::Remind => write!(f, "remind"),
         }
     }
 }
