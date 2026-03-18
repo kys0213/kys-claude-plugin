@@ -926,13 +926,10 @@ async fn main() -> Result<()> {
             }
             HitlAction::ScanReplies => {
                 use autodev::infra::gh::RealGh;
-                let gh: std::sync::Arc<dyn autodev::infra::gh::Gh> =
-                    std::sync::Arc::new(RealGh);
+                let gh: std::sync::Arc<dyn autodev::infra::gh::Gh> = std::sync::Arc::new(RealGh);
                 let gh_host = cfg.sources.github.gh_host.as_deref();
-                let responses = autodev::service::daemon::reply_scanner::scan_replies(
-                    &db, &gh, gh_host,
-                )
-                .await;
+                let responses =
+                    autodev::service::daemon::reply_scanner::scan_replies(&db, &gh, gh_host).await;
                 if responses.is_empty() {
                     println!("No new replies found.");
                 } else {
