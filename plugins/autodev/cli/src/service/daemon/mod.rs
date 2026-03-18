@@ -22,7 +22,7 @@ use tokio::task::JoinSet;
 use tracing::info;
 
 use crate::core::config::{self, Env};
-use crate::core::repository::ConsumerLogRepository;
+use crate::core::repository::{ConsumerLogRepository, TokenUsageRepository};
 use crate::infra::claude::Claude;
 use crate::infra::db::Database;
 use crate::infra::gh::Gh;
@@ -215,7 +215,15 @@ impl Daemon {
                             }
 
                             for log_entry in &task_result.logs {
-                                let _ = self.log_db.log_insert(log_entry);
+                                if let Ok(log_id) = self.log_db.log_insert(log_entry) {
+                                    let usage =
+                                        parse_token_usage(&log_id, log_entry);
+                                    if usage.input_tokens > 0 || usage.output_tokens > 0 {
+                                        if let Err(e) = self.log_db.usage_insert(&usage) {
+                                            tracing::warn!("failed to record token usage: {e}");
+                                        }
+                                    }
+                                }
                             }
 
                             // Notify on task failure (escalation으로 retry되더라도 기록)
@@ -357,6 +365,54 @@ pub fn daemonize(log_dir: &Path) -> Result<()> {
     std::mem::forget(devnull);
 
     Ok(())
+}
+
+/// Claude CLI stderr에서 토큰 사용량을 파싱한다.
+///
+/// Claude Code의 stderr에는 다양한 형식의 토큰 정보가 출력될 수 있다.
+/// 예: `"input_tokens": 1234`, `"output_tokens": 567`
+/// JSON 응답이 포함된 경우도 파싱한다.
+/// Claude CLI stderr에서 토큰 사용량을 파싱한다.
+fn parse_token_usage(
+    log_id: &str,
+    log: &crate::core::models::NewConsumerLog,
+) -> crate::core::models::NewTokenUsage {
+    let mut input_tokens: i64 = 0;
+    let mut output_tokens: i64 = 0;
+    let mut cache_write_tokens: i64 = 0;
+    let mut cache_read_tokens: i64 = 0;
+
+    // Parse JSON objects from stderr (Claude emits usage events as JSON lines)
+    for line in log.stderr.lines() {
+        if let Ok(obj) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+            if let Some(v) = obj.get("input_tokens").and_then(|v| v.as_i64()) {
+                input_tokens += v;
+            }
+            if let Some(v) = obj.get("output_tokens").and_then(|v| v.as_i64()) {
+                output_tokens += v;
+            }
+            if let Some(v) = obj
+                .get("cache_creation_input_tokens")
+                .and_then(|v| v.as_i64())
+            {
+                cache_write_tokens += v;
+            }
+            if let Some(v) = obj.get("cache_read_input_tokens").and_then(|v| v.as_i64()) {
+                cache_read_tokens += v;
+            }
+        }
+    }
+
+    crate::core::models::NewTokenUsage {
+        log_id: log_id.to_string(),
+        repo_id: log.repo_id.clone(),
+        queue_type: log.queue_type.clone(),
+        queue_item_id: log.queue_item_id.clone(),
+        input_tokens,
+        output_tokens,
+        cache_write_tokens,
+        cache_read_tokens,
+    }
 }
 
 /// 데몬을 포그라운드 또는 백그라운드로 시작 (non-blocking event loop)

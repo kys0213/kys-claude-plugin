@@ -151,7 +151,7 @@ impl ScanCursorRepository for Database {
 }
 
 impl ConsumerLogRepository for Database {
-    fn log_insert(&self, log: &NewConsumerLog) -> Result<()> {
+    fn log_insert(&self, log: &NewConsumerLog) -> Result<String> {
         let id = Uuid::new_v4().to_string();
         self.conn().execute(
             "INSERT INTO consumer_logs (id, repo_id, queue_type, queue_item_id, worker_id, command, stdout, stderr, exit_code, started_at, finished_at, duration_ms) \
@@ -162,7 +162,7 @@ impl ConsumerLogRepository for Database {
                 log.started_at, log.finished_at, log.duration_ms
             ],
         )?;
-        Ok(())
+        Ok(id)
     }
 
     fn log_recent(&self, repo_name: Option<&str>, limit: usize) -> Result<Vec<LogEntry>> {
