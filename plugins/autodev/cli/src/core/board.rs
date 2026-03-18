@@ -26,6 +26,10 @@ pub struct HitlSummary {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ClawStatus {
     pub running: bool,
+    /// Last claw decision timestamp (ISO 8601), if available.
+    pub last_decision_at: Option<String>,
+    /// Daemon tick interval in seconds (for "next tick" estimation).
+    pub tick_interval_secs: Option<u64>,
 }
 
 /// Per-repo board state with specs and queue columns.
