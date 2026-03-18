@@ -53,13 +53,18 @@ pub fn detect_tech_stack(repo_path: &Path) -> TechStack {
     }
 
     // Go
-    if repo_path.join("go.mod").exists() {
+    let go_mod = repo_path.join("go.mod");
+    if go_mod.exists() {
         stack.languages.push("Go".to_string());
+        if let Ok(content) = std::fs::read_to_string(&go_mod) {
+            detect_go_deps(&content, &mut stack);
+        }
     }
 
     // Python
     if repo_path.join("pyproject.toml").exists() || repo_path.join("requirements.txt").exists() {
         stack.languages.push("Python".to_string());
+        detect_python_deps(repo_path, &mut stack);
     }
 
     // Docker compose — detect databases
@@ -159,6 +164,64 @@ fn detect_node_deps(content: &str, stack: &mut TechStack) {
     }
 }
 
+fn detect_go_deps(content: &str, stack: &mut TechStack) {
+    let frameworks = [
+        ("github.com/gin-gonic/gin", "Gin"),
+        ("github.com/labstack/echo", "Echo"),
+        ("github.com/go-chi/chi", "Chi"),
+        ("github.com/gofiber/fiber", "Fiber"),
+        ("github.com/gorilla/mux", "Gorilla Mux"),
+        ("google.golang.org/grpc", "gRPC"),
+    ];
+    for (dep, name) in &frameworks {
+        if content.contains(dep) {
+            stack.frameworks.push(name.to_string());
+        }
+    }
+
+    // go test is always available
+    stack.test_tools.push("go test".to_string());
+}
+
+fn detect_python_deps(repo_path: &Path, stack: &mut TechStack) {
+    // Check pyproject.toml and requirements.txt for frameworks
+    let sources = [
+        repo_path.join("pyproject.toml"),
+        repo_path.join("requirements.txt"),
+    ];
+    for source in &sources {
+        if let Ok(content) = std::fs::read_to_string(source) {
+            let frameworks = [
+                ("fastapi", "FastAPI"),
+                ("django", "Django"),
+                ("flask", "Flask"),
+                ("starlette", "Starlette"),
+            ];
+            for (dep, name) in &frameworks {
+                if content.contains(dep) && !stack.frameworks.contains(&name.to_string()) {
+                    stack.frameworks.push(name.to_string());
+                }
+            }
+
+            let test_tools = [
+                ("pytest", "pytest"),
+                ("unittest", "unittest"),
+                ("mypy", "mypy"),
+            ];
+            for (dep, name) in &test_tools {
+                if content.contains(dep) && !stack.test_tools.contains(&name.to_string()) {
+                    stack.test_tools.push(name.to_string());
+                }
+            }
+        }
+    }
+
+    // pytest is the de facto standard
+    if !stack.test_tools.iter().any(|t| t == "pytest") {
+        stack.test_tools.push("pytest".to_string());
+    }
+}
+
 fn detect_compose_services(content: &str, stack: &mut TechStack) {
     let databases = [
         ("postgres", "PostgreSQL"),
@@ -242,6 +305,60 @@ pub fn generate_conventions(stack: &TechStack) -> Vec<ConventionFile> {
         files.push(ConventionFile {
             path: ".claude/rules/typescript-linting.md".to_string(),
             content: TS_LINTING.to_string(),
+            category: "linting".to_string(),
+        });
+    }
+
+    // Go conventions
+    if stack.languages.contains(&"Go".to_string()) {
+        files.push(ConventionFile {
+            path: ".claude/rules/go-project-structure.md".to_string(),
+            content: GO_PROJECT_STRUCTURE.to_string(),
+            category: "project-structure".to_string(),
+        });
+
+        files.push(ConventionFile {
+            path: ".claude/rules/go-error-handling.md".to_string(),
+            content: GO_ERROR_HANDLING.to_string(),
+            category: "error-handling".to_string(),
+        });
+
+        files.push(ConventionFile {
+            path: ".claude/rules/go-testing.md".to_string(),
+            content: GO_TESTING.to_string(),
+            category: "testing".to_string(),
+        });
+
+        files.push(ConventionFile {
+            path: ".claude/rules/go-linting.md".to_string(),
+            content: GO_LINTING.to_string(),
+            category: "linting".to_string(),
+        });
+    }
+
+    // Python conventions
+    if stack.languages.contains(&"Python".to_string()) {
+        files.push(ConventionFile {
+            path: ".claude/rules/python-project-structure.md".to_string(),
+            content: PY_PROJECT_STRUCTURE.to_string(),
+            category: "project-structure".to_string(),
+        });
+
+        files.push(ConventionFile {
+            path: ".claude/rules/python-type-hints.md".to_string(),
+            content: PY_TYPE_HINTS.to_string(),
+            category: "type-strategy".to_string(),
+        });
+
+        files.push(ConventionFile {
+            path: ".claude/rules/python-testing.md".to_string(),
+            content: PY_TESTING.to_string(),
+            category: "testing".to_string(),
+        });
+
+        files.push(ConventionFile {
+            path: ".claude/rules/python-linting.md".to_string(),
+            content: PY_LINTING.to_string(),
             category: "linting".to_string(),
         });
     }
@@ -562,6 +679,170 @@ const TS_LINTING: &str = r#"# TypeScript Linting
 npx eslint .
 npx prettier --check .
 ```
+"#;
+
+// ─── Go convention templates ───
+
+const GO_PROJECT_STRUCTURE: &str = r#"# Go Project Structure
+
+## Layout
+- `cmd/` — application entry points
+- `internal/` — private application code (not importable)
+- `pkg/` — public library code (importable)
+- `api/` — API definitions (proto, OpenAPI specs)
+
+## Principles
+- Keep `main.go` minimal — wire dependencies and start the server
+- Use `internal/` for domain logic to prevent external imports
+- Group by domain, not by layer (e.g., `internal/user/` not `internal/handlers/`)
+"#;
+
+const GO_ERROR_HANDLING: &str = r#"# Go Error Handling
+
+## Strategy
+- Always check returned errors — never use `_` for error values
+- Wrap errors with context using `fmt.Errorf("operation: %w", err)`
+- Use sentinel errors (`var ErrNotFound = errors.New(...)`) for expected conditions
+- Use custom error types for errors that carry structured data
+
+## Pattern
+```go
+if err != nil {
+    return fmt.Errorf("fetching user %d: %w", id, err)
+}
+```
+
+## Anti-patterns
+- Do not `log.Fatal` in library code — return errors to the caller
+- Do not use `panic` for expected error conditions
+"#;
+
+const GO_TESTING: &str = r#"# Go Testing
+
+## Organization
+- Test files: `*_test.go` in the same package
+- Table-driven tests for multiple cases
+- Use `testify/assert` or standard library `testing`
+- Integration tests: use build tag `//go:build integration`
+
+## Running
+```bash
+go test ./...
+go test -race ./...
+go test -v -run TestSpecificName ./pkg/...
+```
+
+## Conventions
+- Test function names: `TestFunctionName_Scenario`
+- Use `t.Helper()` in test helper functions
+- Use `t.Parallel()` for independent tests
+"#;
+
+const GO_LINTING: &str = r#"# Go Linting & Formatting
+
+## Tools
+- `gofmt` / `goimports` for formatting (non-negotiable)
+- `golangci-lint` for comprehensive linting
+- `go vet` for suspicious constructs
+
+## Running
+```bash
+gofmt -l .
+golangci-lint run ./...
+go vet ./...
+```
+
+## Rules
+- All code must be gofmt'd
+- No unused imports or variables
+- No shadowed variables in critical paths
+"#;
+
+// ─── Python convention templates ───
+
+const PY_PROJECT_STRUCTURE: &str = r#"# Python Project Structure
+
+## Layout
+- `src/<package>/` — source code (src-layout recommended)
+- `tests/` — test files mirroring source structure
+- `pyproject.toml` — project metadata and dependencies
+
+## Principles
+- Use `pyproject.toml` over `setup.py` for new projects
+- Virtual environments: use `venv`, `poetry`, or `uv`
+- Keep `__init__.py` files minimal — avoid heavy imports
+- Group by domain module, not by layer
+"#;
+
+const PY_TYPE_HINTS: &str = r#"# Python Type Hints
+
+## Rules
+- Add type hints to all public function signatures
+- Use `from __future__ import annotations` for modern syntax
+- Use `Optional[T]` or `T | None` (3.10+) for nullable values
+- Use `Protocol` for structural typing (duck typing with safety)
+
+## Patterns
+```python
+def get_user(user_id: int) -> User | None:
+    ...
+
+class Repository(Protocol):
+    def find(self, id: str) -> Entity | None: ...
+```
+
+## Tools
+- `mypy --strict` for type checking
+- `pyright` as an alternative type checker
+"#;
+
+const PY_TESTING: &str = r#"# Python Testing
+
+## Framework
+- pytest as the standard test framework
+- Use fixtures for setup/teardown
+- Use `conftest.py` for shared fixtures
+
+## Organization
+```
+tests/
+  conftest.py          # shared fixtures
+  test_user_service.py # mirrors src/app/user_service.py
+  integration/         # integration tests
+```
+
+## Running
+```bash
+pytest
+pytest -x --tb=short
+pytest -k "test_specific_name"
+pytest --cov=src
+```
+
+## Conventions
+- Test function names: `test_function_name_scenario`
+- Use `@pytest.mark.parametrize` for table-driven tests
+"#;
+
+const PY_LINTING: &str = r#"# Python Linting & Formatting
+
+## Tools
+- `ruff` for linting and formatting (fast, all-in-one)
+- `mypy` for type checking
+- `black` or `ruff format` for code formatting
+
+## Running
+```bash
+ruff check .
+ruff format --check .
+mypy src/
+```
+
+## Rules
+- All code must pass ruff checks
+- No unused imports or variables
+- Consistent import ordering (stdlib → third-party → local)
+- Line length: 88 characters (black default)
 "#;
 
 // ─── Feedback Collection from HITL ───
