@@ -3,6 +3,7 @@ pub mod agent_impl;
 pub mod collectors;
 pub mod cron;
 pub mod daily_reporter;
+pub mod escalation;
 pub mod log;
 pub mod notifiers;
 pub mod pid;
@@ -179,12 +180,45 @@ impl Daemon {
                                 "task completed: {} - {} (in-flight: {})",
                                 task_result.work_id, task_result.status, self.tracker.total
                             );
-                            self.manager.apply(&task_result);
+
+                            // Escalation: 실패 시 failure_count 증가 → 레벨별 대응
+                            let escalation_retry =
+                                if let TaskStatus::Failed(ref msg) = task_result.status {
+                                    match crate::cli::resolve_repo_id(
+                                        &self.log_db,
+                                        &task_result.repo_name,
+                                    ) {
+                                        Ok(repo_id) => matches!(
+                                            escalation::escalate(
+                                                &self.log_db,
+                                                &task_result.work_id,
+                                                &repo_id,
+                                                msg,
+                                            ),
+                                            escalation::EscalationOutcome::Retry
+                                        ),
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "skipping escalation for {}: {e}",
+                                                task_result.work_id
+                                            );
+                                            false
+                                        }
+                                    }
+                                } else {
+                                    false
+                                };
+
+                            // Retry일 때는 apply(Remove) 건너뛴다 — pending으로 이미 복구됨.
+                            if !escalation_retry {
+                                self.manager.apply(&task_result);
+                            }
+
                             for log_entry in &task_result.logs {
                                 let _ = self.log_db.log_insert(log_entry);
                             }
 
-                            // Notify on task failure
+                            // Notify on task failure (escalation으로 retry되더라도 기록)
                             if let TaskStatus::Failed(ref msg) = task_result.status {
                                 if let Some(ref dispatcher) = self.notifier {
                                     let notif = NotificationEvent::from_task_failed(
