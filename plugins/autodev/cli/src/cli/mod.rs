@@ -145,6 +145,41 @@ pub fn repo_add(
         println!("cron: seeded {seeded} built-in cron jobs for {name}");
     }
 
+    // Claw auto-initialization when claw.enabled
+    if cfg.claw.enabled {
+        // 1. Init global claw workspace (idempotent)
+        if let Err(e) = claw::claw_init(&home) {
+            eprintln!("warning: claw init failed: {e}");
+        }
+
+        // 2. Init per-repo claw override directory
+        if let Err(e) = claw::claw_init_repo(&home, &name) {
+            eprintln!("warning: claw init --repo failed: {e}");
+        } else {
+            println!("claw: initialized per-repo override for {name}");
+        }
+
+        // 3. Check target repo's .claude/rules/ and suggest convention bootstrap
+        let repo_root = config::workspaces_path(env)
+            .join(config::sanitize_repo_name(&name))
+            .join("main");
+        let rules_dir = repo_root.join(".claude/rules");
+        if !rules_dir.exists()
+            || rules_dir
+                .read_dir()
+                .map_or(true, |mut d| d.next().is_none())
+        {
+            let stack = convention::detect_tech_stack(&repo_root);
+            if !stack.languages.is_empty() {
+                println!(
+                    "hint: detected stack: {}. Run 'autodev convention bootstrap {} --apply' to generate .claude/rules/",
+                    stack.languages.join(", "),
+                    repo_root.display()
+                );
+            }
+        }
+    }
+
     Ok(())
 }
 
