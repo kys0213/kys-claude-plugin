@@ -552,6 +552,17 @@ pub fn spec_status(db: &Database, id: &str, json: bool) -> Result<String> {
     let decisions = db.decision_list_by_spec(id, 100)?;
     let (hitl_total, hitl_pending) = db.hitl_count_by_spec(id)?;
 
+    // Count done issues by checking queue item phases
+    let all_items = db.queue_list_items(None)?;
+    let done_count = issues
+        .iter()
+        .filter(|si| {
+            all_items.iter().any(|q| {
+                q.work_id.ends_with(&format!(":{}", si.issue_number)) && q.phase == QueuePhase::Done
+            })
+        })
+        .count();
+
     if json {
         let value = serde_json::json!({
             "id": spec.id,
@@ -560,6 +571,7 @@ pub fn spec_status(db: &Database, id: &str, json: bool) -> Result<String> {
             "priority": spec.priority,
             "issues": {
                 "total": issues.len(),
+                "done": done_count,
             },
             "hitl": {
                 "total": hitl_total,
@@ -577,7 +589,10 @@ pub fn spec_status(db: &Database, id: &str, json: bool) -> Result<String> {
         output.push_str(&format!("Priority: {p}\n"));
     }
 
-    output.push_str(&format!("\nIssues: {} linked\n", issues.len()));
+    output.push_str(&format!(
+        "\nIssues: {done_count}/{} done\n",
+        issues.len()
+    ));
     for issue in &issues {
         output.push_str(&format!("  #{}\n", issue.issue_number));
     }

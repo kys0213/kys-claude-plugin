@@ -911,13 +911,16 @@ async fn main() -> Result<()> {
                 let result = client::hitl::timeout(&db, hours, action)?;
                 println!("{}", result.output);
 
-                // Dispatch notifications for expired events if configured
+                // Dispatch notifications for processed events if configured
                 if let Some(ref dispatcher) =
                     autodev::service::daemon::notifiers::dispatcher::NotificationDispatcher::from_config(&cfg.daemon)
                 {
                     for event in &result.expired_events {
-                        let notif =
-                            autodev::core::notifier::NotificationEvent::from_hitl_expired(event);
+                        let notif = if action == autodev::core::models::TimeoutAction::Remind {
+                            autodev::core::notifier::NotificationEvent::from_hitl_reminder(event)
+                        } else {
+                            autodev::core::notifier::NotificationEvent::from_hitl_expired(event)
+                        };
                         dispatch_notification(dispatcher, &notif).await;
                     }
                 }
