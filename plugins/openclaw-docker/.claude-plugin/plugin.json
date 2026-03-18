@@ -1,0 +1,17 @@
+{
+  "author": {
+    "name": "kys0213"
+  },
+  "name": "openclaw-docker",
+  "description": "OpenClaw Docker 환경 관리 - 게이트웨이 제어, 인증 관리, 로그 조회를 CLI + Skill로 제공",
+  "version": "0.2.0",
+  "commands": [
+    "./commands/setup.md",
+    "./commands/oc-status.md",
+    "./commands/oc-restart.md",
+    "./commands/oc-diagnose.md"
+  ],
+  "skills": [
+    "./skills"
+  ]
+}
