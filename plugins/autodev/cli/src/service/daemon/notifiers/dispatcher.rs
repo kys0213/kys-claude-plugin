@@ -9,12 +9,25 @@ use super::webhook::WebhookNotifier;
 
 /// 등록된 모든 Notifier에게 순차 전송. 개별 채널 실패 시 로그만 남기고 계속.
 pub struct NotificationDispatcher {
-    notifiers: Vec<Box<dyn Notifier>>,
+    channels: Vec<ChannelEntry>,
+}
+
+struct ChannelEntry {
+    notifier: Box<dyn Notifier>,
+    severity_filter: Vec<String>,
 }
 
 impl NotificationDispatcher {
     pub fn new(notifiers: Vec<Box<dyn Notifier>>) -> Self {
-        Self { notifiers }
+        Self {
+            channels: notifiers
+                .into_iter()
+                .map(|n| ChannelEntry {
+                    notifier: n,
+                    severity_filter: Vec::new(),
+                })
+                .collect(),
+        }
     }
 
     /// Build a dispatcher from daemon config. Returns `None` if no channels are configured.
@@ -31,11 +44,14 @@ impl NotificationDispatcher {
         gh: Option<Arc<dyn Gh>>,
         gh_host: Option<String>,
     ) -> Option<Self> {
-        let mut notifiers: Vec<Box<dyn Notifier>> = Vec::new();
+        let mut channels: Vec<ChannelEntry> = Vec::new();
 
-        // Legacy: daemon.webhook_url
+        // Legacy: daemon.webhook_url (no severity filter)
         if let Some(ref url) = cfg.webhook_url {
-            notifiers.push(Box::new(WebhookNotifier::new(url.clone())));
+            channels.push(ChannelEntry {
+                notifier: Box::new(WebhookNotifier::new(url.clone())),
+                severity_filter: Vec::new(),
+            });
         }
 
         // New: notifications.channels
@@ -43,15 +59,22 @@ impl NotificationDispatcher {
             match channel.channel_type.as_str() {
                 "webhook" => {
                     if let Some(ref url) = channel.config.url {
-                        notifiers.push(Box::new(WebhookNotifier::new(url.clone())));
+                        channels.push(ChannelEntry {
+                            notifier: Box::new(WebhookNotifier::new(url.clone())),
+                            severity_filter: channel.config.severity_filter.clone(),
+                        });
                     }
                 }
                 "github_comment" => {
                     if let Some(ref gh_client) = gh {
-                        notifiers.push(Box::new(GitHubCommentNotifier::new(
-                            Arc::clone(gh_client),
-                            gh_host.clone(),
-                        )));
+                        channels.push(ChannelEntry {
+                            notifier: Box::new(GitHubCommentNotifier::new(
+                                Arc::clone(gh_client),
+                                gh_host.clone(),
+                                channel.config.mention.clone(),
+                            )),
+                            severity_filter: channel.config.severity_filter.clone(),
+                        });
                     }
                 }
                 other => {
@@ -60,20 +83,27 @@ impl NotificationDispatcher {
             }
         }
 
-        if notifiers.is_empty() {
+        if channels.is_empty() {
             None
         } else {
-            Some(Self::new(notifiers))
+            Some(Self { channels })
         }
     }
 
     /// 모든 notifier에 이벤트를 전송하고, 실패한 채널의 (이름, 에러) 목록을 반환.
+    /// severity_filter가 설정된 채널은 이벤트 severity가 필터에 포함될 때만 전송.
     pub async fn dispatch(&self, event: &NotificationEvent) -> Vec<(String, anyhow::Error)> {
         let mut errors = Vec::new();
-        for notifier in &self.notifiers {
-            if let Err(e) = notifier.notify(event).await {
-                tracing::warn!("notifier '{}' failed: {e}", notifier.channel_name());
-                errors.push((notifier.channel_name().to_string(), e));
+        for entry in &self.channels {
+            // severity_filter가 비어있으면 모든 이벤트 전송 (기본 동작)
+            if !entry.severity_filter.is_empty()
+                && !entry.severity_filter.iter().any(|f| f == &event.severity)
+            {
+                continue;
+            }
+            if let Err(e) = entry.notifier.notify(event).await {
+                tracing::warn!("notifier '{}' failed: {e}", entry.notifier.channel_name());
+                errors.push((entry.notifier.channel_name().to_string(), e));
             }
         }
         errors

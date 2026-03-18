@@ -34,6 +34,21 @@ impl NotificationEvent {
         }
     }
 
+    /// Create a reminder notification for a still-pending HITL event.
+    pub fn from_hitl_reminder(event: &HitlEvent) -> Self {
+        Self {
+            repo_name: event.repo_id.clone(),
+            severity: event.severity.to_string(),
+            situation: format!("[REMINDER] {}", event.situation),
+            context: event.context.clone(),
+            options: event.parsed_options(),
+            work_id: event.work_id.clone(),
+            spec_id: event.spec_id.clone(),
+            url: None,
+            hitl_id: Some(event.id.clone()),
+        }
+    }
+
     /// Create a notification for a newly created HITL event.
     pub fn from_hitl_created(event: &NewHitlEvent) -> Self {
         Self {

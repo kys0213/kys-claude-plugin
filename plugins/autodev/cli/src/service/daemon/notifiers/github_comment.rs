@@ -13,11 +13,16 @@ use crate::infra::gh::Gh;
 pub struct GitHubCommentNotifier {
     gh: Arc<dyn Gh>,
     gh_host: Option<String>,
+    mention: Option<String>,
 }
 
 impl GitHubCommentNotifier {
-    pub fn new(gh: Arc<dyn Gh>, gh_host: Option<String>) -> Self {
-        Self { gh, gh_host }
+    pub fn new(gh: Arc<dyn Gh>, gh_host: Option<String>, mention: Option<String>) -> Self {
+        Self {
+            gh,
+            gh_host,
+            mention,
+        }
     }
 
     /// work_id에서 (repo_name, number)를 추출한다.
@@ -35,7 +40,7 @@ impl GitHubCommentNotifier {
     /// 알림 마크다운 본문을 생성한다.
     ///
     /// HITL ID가 있으면 HTML 마커를 포함하여 reply-scanning이 가능하게 한다.
-    fn format_comment(event: &NotificationEvent) -> String {
+    fn format_comment(&self, event: &NotificationEvent) -> String {
         let mut body = String::new();
 
         // HITL reply-scanning marker (invisible in rendered markdown)
@@ -44,6 +49,9 @@ impl GitHubCommentNotifier {
         }
 
         body.push_str("## \u{1f514} autodev: 사람 확인 필요\n\n");
+        if let Some(ref mention) = self.mention {
+            body.push_str(&format!("cc {mention}\n\n"));
+        }
         body.push_str(&format!("**상황**: {}\n\n", event.situation));
         body.push_str(&format!("**분석**: {}\n\n", event.context));
 
@@ -76,7 +84,7 @@ impl Notifier for GitHubCommentNotifier {
             None => bail!("invalid work_id format: {work_id}"),
         };
 
-        let body = Self::format_comment(event);
+        let body = self.format_comment(event);
         let host = self.gh_host.as_deref();
 
         if !self.gh.issue_comment(&repo_name, number, &body, host).await {
@@ -128,7 +136,9 @@ mod tests {
     #[test]
     fn format_comment_includes_all_fields() {
         let event = make_event(Some("issue:org/repo:42"));
-        let body = GitHubCommentNotifier::format_comment(&event);
+        let gh: Arc<dyn Gh> = Arc::new(MockGh::new());
+        let notifier = GitHubCommentNotifier::new(gh, None, None);
+        let body = notifier.format_comment(&event);
 
         assert!(body.contains("사람 확인 필요"));
         assert!(body.contains("CI failure detected"));
@@ -141,7 +151,9 @@ mod tests {
     fn format_comment_empty_options() {
         let mut event = make_event(Some("issue:org/repo:42"));
         event.options = vec![];
-        let body = GitHubCommentNotifier::format_comment(&event);
+        let gh: Arc<dyn Gh> = Arc::new(MockGh::new());
+        let notifier = GitHubCommentNotifier::new(gh, None, None);
+        let body = notifier.format_comment(&event);
 
         assert!(body.contains("CI failure detected"));
         assert!(!body.contains("선택지"));
@@ -151,7 +163,7 @@ mod tests {
     async fn notify_posts_comment_to_github() {
         let mock_gh = Arc::new(MockGh::new());
         let gh: Arc<dyn Gh> = Arc::clone(&mock_gh) as Arc<dyn Gh>;
-        let notifier = GitHubCommentNotifier::new(gh, None);
+        let notifier = GitHubCommentNotifier::new(gh, None, None);
 
         let event = make_event(Some("issue:org/repo:42"));
         let result = notifier.notify(&event).await;
@@ -168,7 +180,7 @@ mod tests {
     #[tokio::test]
     async fn notify_fails_when_work_id_missing() {
         let gh: Arc<dyn Gh> = Arc::new(MockGh::new());
-        let notifier = GitHubCommentNotifier::new(gh, None);
+        let notifier = GitHubCommentNotifier::new(gh, None, None);
 
         let event = make_event(None);
         let result = notifier.notify(&event).await;
@@ -183,7 +195,7 @@ mod tests {
     #[tokio::test]
     async fn notify_fails_when_work_id_invalid() {
         let gh: Arc<dyn Gh> = Arc::new(MockGh::new());
-        let notifier = GitHubCommentNotifier::new(gh, None);
+        let notifier = GitHubCommentNotifier::new(gh, None, None);
 
         let event = make_event(Some("bad-format"));
         let result = notifier.notify(&event).await;
