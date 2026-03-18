@@ -589,10 +589,7 @@ pub fn spec_status(db: &Database, id: &str, json: bool) -> Result<String> {
         output.push_str(&format!("Priority: {p}\n"));
     }
 
-    output.push_str(&format!(
-        "\nIssues: {done_count}/{} done\n",
-        issues.len()
-    ));
+    output.push_str(&format!("\nIssues: {done_count}/{} done\n", issues.len()));
     for issue in &issues {
         output.push_str(&format!("  #{}\n", issue.issue_number));
     }
