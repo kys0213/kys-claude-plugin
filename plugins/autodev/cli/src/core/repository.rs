@@ -19,7 +19,8 @@ pub trait ScanCursorRepository {
 }
 
 pub trait ConsumerLogRepository {
-    fn log_insert(&self, log: &NewConsumerLog) -> Result<()>;
+    /// 로그를 삽입하고 생성된 log_id를 반환한다.
+    fn log_insert(&self, log: &NewConsumerLog) -> Result<String>;
     fn log_recent(&self, repo_name: Option<&str>, limit: usize) -> Result<Vec<LogEntry>>;
     /// 특정 날짜의 knowledge extraction stdout를 모두 반환
     fn log_knowledge_stdout_by_date(&self, date: &str) -> Result<Vec<String>>;
