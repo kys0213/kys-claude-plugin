@@ -836,9 +836,10 @@ async fn main() -> Result<()> {
                 let output = client::hitl::respond(&db, &id, choice, message.as_deref())?;
                 println!("{output}");
 
-                // Auto-collect feedback if the response has a message
+                // Post-response processing
                 use autodev::core::repository::HitlRepository;
                 if let Ok(Some(event)) = db.hitl_show(&id) {
+                    // Auto-collect feedback if the response has a message
                     if let Some(ref msg) = message {
                         if let Err(e) = client::convention::collect_feedback_from_hitl(
                             &db,
@@ -848,6 +849,13 @@ async fn main() -> Result<()> {
                         ) {
                             eprintln!("warning: failed to auto-collect feedback: {e}");
                         }
+                    }
+
+                    // Handle spec completion response (approve → Completed, reject → Active)
+                    if let Some(result_msg) =
+                        client::spec::handle_spec_completion_response(&db, &event, choice)
+                    {
+                        println!("{result_msg}");
                     }
 
                     // Force-trigger claw-evaluate so the response is processed immediately
