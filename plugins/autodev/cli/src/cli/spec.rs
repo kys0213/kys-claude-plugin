@@ -442,6 +442,41 @@ pub fn spec_conflicts(db: &Database, spec_id: &str) -> Result<String> {
         }
     }
 
+    // 3. Git-diff-based file overlap: compare modified files across active specs
+    {
+        let env = crate::core::config::RealEnv;
+        let ws_root = crate::core::config::workspaces_path(&env);
+        let my_files = collect_spec_files(db, &spec, &all_items, &ws_root);
+
+        if !my_files.is_empty() {
+            for other_spec in &active_specs {
+                if other_spec.id == spec.id || other_spec.repo_id != spec.repo_id {
+                    continue;
+                }
+                let other_files = collect_spec_files(db, other_spec, &all_items, &ws_root);
+                let overlap: Vec<&String> = my_files.intersection(&other_files).collect();
+                if !overlap.is_empty() {
+                    conflict_count += 1;
+                    let mut file_list = overlap.clone();
+                    file_list.sort();
+                    output.push_str(&format!(
+                        "File conflict with spec {} ({}):\n  {} overlapping file(s):\n",
+                        other_spec.id,
+                        other_spec.title,
+                        file_list.len()
+                    ));
+                    for f in file_list.iter().take(10) {
+                        output.push_str(&format!("    {f}\n"));
+                    }
+                    if overlap.len() > 10 {
+                        output.push_str(&format!("    ... and {} more\n", overlap.len() - 10));
+                    }
+                    output.push('\n');
+                }
+            }
+        }
+    }
+
     if conflict_count == 0 {
         return Ok(format!("No conflicts detected for spec {spec_id}.\n"));
     }
@@ -450,6 +485,65 @@ pub fn spec_conflicts(db: &Database, spec_id: &str) -> Result<String> {
         "⚠ {conflict_count} conflict(s) detected for spec {spec_id}:\n\n{output}\
          Consider sequencing these specs or resolving file overlaps.\n"
     ))
+}
+
+/// Collect modified files for a spec by running `git diff --name-only` on its PR branches.
+fn collect_spec_files(
+    db: &Database,
+    spec: &Spec,
+    all_items: &[QueueItemRow],
+    ws_root: &std::path::Path,
+) -> std::collections::HashSet<String> {
+    use crate::core::queue_item::QueueItem;
+
+    let mut files = std::collections::HashSet::new();
+    let issues = db.spec_issues(&spec.id).unwrap_or_default();
+
+    for issue in &issues {
+        // Find PR queue items for this issue
+        for item in all_items {
+            if !item.work_id.ends_with(&format!(":{}", issue.issue_number)) {
+                continue;
+            }
+            // Extract head_branch from PR metadata
+            if let Some(ref json) = item.metadata_json {
+                if let Some(crate::core::queue_item::ItemMetadata::Pr(pr)) =
+                    QueueItem::metadata_from_json(json)
+                {
+                    if pr.head_branch.is_empty() {
+                        continue;
+                    }
+                    let repo_name = crate::core::config::sanitize_repo_name(
+                        item.work_id.split(':').nth(1).unwrap_or(""),
+                    );
+                    let repo_dir = ws_root.join(&repo_name).join("main");
+                    if let Ok(diff_files) = git_diff_name_only(&repo_dir, &pr.head_branch) {
+                        files.extend(diff_files);
+                    }
+                }
+            }
+        }
+    }
+
+    files
+}
+
+/// Run `git diff --name-only HEAD...<branch>` and return the set of modified files.
+fn git_diff_name_only(repo_dir: &std::path::Path, branch: &str) -> Result<Vec<String>> {
+    let output = std::process::Command::new("git")
+        .args(["diff", "--name-only", &format!("HEAD...{branch}")])
+        .current_dir(repo_dir)
+        .output()?;
+
+    if !output.status.success() {
+        anyhow::bail!("git diff failed");
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| l.to_string())
+        .collect())
 }
 
 /// Find active specs whose source_path overlaps with the given path, excluding `exclude_id`.
