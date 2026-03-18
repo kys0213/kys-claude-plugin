@@ -7,6 +7,7 @@ pub mod escalation;
 pub mod log;
 pub mod notifiers;
 pub mod pid;
+pub mod reply_scanner;
 pub mod status;
 pub mod task_manager;
 pub mod task_manager_impl;

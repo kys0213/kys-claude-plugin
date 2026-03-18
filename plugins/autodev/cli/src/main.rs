@@ -279,6 +279,8 @@ enum HitlAction {
         #[arg(long, value_enum, default_value = "expire")]
         action: autodev::core::models::TimeoutAction,
     },
+    /// GitHub 코멘트 답글 스캔하여 HITL 자동 응답
+    ScanReplies,
 }
 
 #[derive(Subcommand)]
@@ -922,6 +924,20 @@ async fn main() -> Result<()> {
                             autodev::core::notifier::NotificationEvent::from_hitl_expired(event)
                         };
                         dispatch_notification(dispatcher, &notif).await;
+                    }
+                }
+            }
+            HitlAction::ScanReplies => {
+                use autodev::infra::gh::RealGh;
+                let gh: std::sync::Arc<dyn autodev::infra::gh::Gh> = std::sync::Arc::new(RealGh);
+                let gh_host = cfg.sources.github.gh_host.as_deref();
+                let responses =
+                    autodev::service::daemon::reply_scanner::scan_replies(&db, &gh, gh_host).await;
+                if responses.is_empty() {
+                    println!("No new replies found.");
+                } else {
+                    for r in &responses {
+                        println!("{r}");
                     }
                 }
             }
