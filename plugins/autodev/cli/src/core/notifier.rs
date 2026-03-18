@@ -14,6 +14,8 @@ pub struct NotificationEvent {
     pub work_id: Option<String>,
     pub spec_id: Option<String>,
     pub url: Option<String>,
+    /// HITL event ID (for reply-scanning markers in GitHub comments).
+    pub hitl_id: Option<String>,
 }
 
 impl NotificationEvent {
@@ -28,6 +30,7 @@ impl NotificationEvent {
             work_id: event.work_id.clone(),
             spec_id: event.spec_id.clone(),
             url: None,
+            hitl_id: Some(event.id.clone()),
         }
     }
 
@@ -42,6 +45,7 @@ impl NotificationEvent {
             work_id: event.work_id.clone(),
             spec_id: event.spec_id.clone(),
             url: None,
+            hitl_id: None, // ID not yet assigned at creation time
         }
     }
 
@@ -56,6 +60,7 @@ impl NotificationEvent {
             work_id: Some(work_id.to_string()),
             spec_id: None,
             url: None,
+            hitl_id: None,
         }
     }
 }

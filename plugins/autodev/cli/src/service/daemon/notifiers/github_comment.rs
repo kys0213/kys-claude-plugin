@@ -33,8 +33,16 @@ impl GitHubCommentNotifier {
     }
 
     /// 알림 마크다운 본문을 생성한다.
+    ///
+    /// HITL ID가 있으면 HTML 마커를 포함하여 reply-scanning이 가능하게 한다.
     fn format_comment(event: &NotificationEvent) -> String {
         let mut body = String::new();
+
+        // HITL reply-scanning marker (invisible in rendered markdown)
+        if let Some(ref hitl_id) = event.hitl_id {
+            body.push_str(&format!("<!-- autodev:hitl:{hitl_id} -->\n"));
+        }
+
         body.push_str("## \u{1f514} autodev: 사람 확인 필요\n\n");
         body.push_str(&format!("**상황**: {}\n\n", event.situation));
         body.push_str(&format!("**분석**: {}\n\n", event.context));
@@ -44,6 +52,7 @@ impl GitHubCommentNotifier {
             for (i, opt) in event.options.iter().enumerate() {
                 body.push_str(&format!("{}. {}\n", i + 1, opt));
             }
+            body.push_str("\n> 이 코멘트에 선택 번호(예: `1`)로 답글을 달면 자동 응답됩니다.\n");
         }
 
         body
@@ -93,6 +102,7 @@ mod tests {
             work_id: work_id.map(|s| s.to_string()),
             spec_id: None,
             url: None,
+            hitl_id: Some("hitl-test-001".to_string()),
         }
     }
 

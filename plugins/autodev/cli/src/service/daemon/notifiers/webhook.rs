@@ -99,6 +99,7 @@ mod tests {
             work_id: Some("issue:org/repo:42".to_string()),
             spec_id: Some("spec-001".to_string()),
             url: Some("https://github.com/org/repo/issues/42".to_string()),
+            hitl_id: None,
         }
     }
 
