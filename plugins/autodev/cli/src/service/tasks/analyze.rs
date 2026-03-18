@@ -456,7 +456,8 @@ impl Task for AnalyzeTask {
                 )
                 .await;
 
-            self.cleanup_worktree().await;
+            // Worktree preserved for debugging — use `autodev worktree list` to inspect.
+            tracing::warn!("worktree preserved for debugging: {}", self.work_id());
             return TaskResult {
                 work_id: self.item.work_id.clone(),
                 repo_name: self.item.repo_name.clone(),
