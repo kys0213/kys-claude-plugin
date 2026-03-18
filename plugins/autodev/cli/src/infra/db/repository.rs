@@ -738,6 +738,19 @@ impl HitlRepository for Database {
         let rows = stmt.query_map(rusqlite::params![timeout_hours], map_hitl_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
+
+    fn hitl_count_by_spec(&self, spec_id: &str) -> Result<(i64, i64)> {
+        let conn = self.conn();
+        let (total, pending) = conn.query_row(
+            "SELECT \
+               COUNT(*), \
+               SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) \
+             FROM hitl_events WHERE spec_id = ?1",
+            rusqlite::params![spec_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1).unwrap_or(0))),
+        )?;
+        Ok((total, pending))
+    }
 }
 
 impl QueueRepository for Database {

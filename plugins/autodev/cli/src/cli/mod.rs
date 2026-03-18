@@ -200,6 +200,31 @@ pub fn repo_list(db: &Database) -> Result<String> {
     Ok(output)
 }
 
+/// 레포 상세 조회
+pub fn repo_show(db: &Database, name: &str, json: bool) -> Result<String> {
+    let repos = db.repo_list()?;
+    let repo = repos
+        .iter()
+        .find(|r| r.name == name)
+        .ok_or_else(|| anyhow::anyhow!("repository not found: {name}"))?;
+
+    if json {
+        let value = serde_json::json!({
+            "name": repo.name,
+            "url": repo.url,
+            "enabled": repo.enabled,
+        });
+        return Ok(serde_json::to_string_pretty(&value)?);
+    }
+
+    let icon = if repo.enabled { "●" } else { "○" };
+    let mut output = String::new();
+    output.push_str(&format!("Name:    {}\n", repo.name));
+    output.push_str(&format!("URL:     {}\n", repo.url));
+    output.push_str(&format!("Enabled: {icon} {}\n", repo.enabled));
+    Ok(output)
+}
+
 /// 레포 설정 표시 (YAML 기반)
 pub fn repo_config(env: &dyn Env, name: &str) -> Result<()> {
     // 글로벌 설정
