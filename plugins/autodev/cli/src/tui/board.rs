@@ -96,10 +96,35 @@ impl BoardStateBuilder {
                 })
                 .collect();
 
+            // Orphan issues: queue items not linked to any spec
+            let linked_issue_numbers: std::collections::HashSet<i64> = repo_specs
+                .iter()
+                .flat_map(|s| db.spec_issues(&s.id).unwrap_or_default())
+                .map(|si| si.issue_number)
+                .collect();
+            let orphan_issues: Vec<BoardItem> = repo_items
+                .iter()
+                .filter(|qi| qi.queue_type == crate::core::models::QueueType::Issue)
+                .filter(|qi| {
+                    // Extract issue number from work_id and check if not linked
+                    !qi.work_id
+                        .rsplit(':')
+                        .next()
+                        .and_then(|n| n.parse::<i64>().ok())
+                        .is_some_and(|n| linked_issue_numbers.contains(&n))
+                })
+                .map(|qi| BoardItem {
+                    work_id: qi.work_id.clone(),
+                    title: qi.title.clone().unwrap_or_default(),
+                    queue_type: qi.queue_type.to_string(),
+                })
+                .collect();
+
             board_repos.push(RepoBoardState {
                 repo_name: repo.name.clone(),
                 specs: spec_entries,
                 columns,
+                orphan_issues,
             });
         }
 
@@ -365,6 +390,7 @@ mod tests {
                         items: vec![],
                     },
                 ],
+                orphan_issues: vec![],
             }],
             ..Default::default()
         };
@@ -406,6 +432,7 @@ mod tests {
                         items: vec![],
                     },
                 ],
+                orphan_issues: vec![],
             }],
             ..Default::default()
         };
@@ -433,6 +460,7 @@ mod tests {
                             queue_type: "issue".to_string(),
                         }],
                     }],
+                    orphan_issues: vec![],
                 },
                 RepoBoardState {
                     repo_name: "org/repo-b".to_string(),
@@ -445,6 +473,7 @@ mod tests {
                             queue_type: "pr".to_string(),
                         }],
                     }],
+                    orphan_issues: vec![],
                 },
             ],
             ..Default::default()
@@ -472,6 +501,7 @@ mod tests {
                     acceptance_criteria: None,
                 }],
                 columns: vec![],
+                orphan_issues: vec![],
             }],
             ..Default::default()
         };
