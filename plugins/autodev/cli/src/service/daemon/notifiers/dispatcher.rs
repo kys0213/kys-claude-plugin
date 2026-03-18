@@ -1,6 +1,10 @@
+use std::sync::Arc;
+
 use crate::core::config::models::DaemonConfig;
 use crate::core::notifier::{NotificationEvent, Notifier};
+use crate::infra::gh::Gh;
 
+use super::github_comment::GitHubCommentNotifier;
 use super::webhook::WebhookNotifier;
 
 /// 등록된 모든 Notifier에게 순차 전송. 개별 채널 실패 시 로그만 남기고 계속.
@@ -14,11 +18,48 @@ impl NotificationDispatcher {
     }
 
     /// Build a dispatcher from daemon config. Returns `None` if no channels are configured.
+    ///
+    /// Supports both legacy `webhook_url` and new `notifications.channels` config.
+    /// If `gh` is provided, `github_comment` channels are wired.
     pub fn from_config(cfg: &DaemonConfig) -> Option<Self> {
+        Self::from_config_with_gh(cfg, None, None)
+    }
+
+    /// Build a dispatcher with optional GitHub client for comment notifications.
+    pub fn from_config_with_gh(
+        cfg: &DaemonConfig,
+        gh: Option<Arc<dyn Gh>>,
+        gh_host: Option<String>,
+    ) -> Option<Self> {
         let mut notifiers: Vec<Box<dyn Notifier>> = Vec::new();
+
+        // Legacy: daemon.webhook_url
         if let Some(ref url) = cfg.webhook_url {
             notifiers.push(Box::new(WebhookNotifier::new(url.clone())));
         }
+
+        // New: notifications.channels
+        for channel in &cfg.notifications.channels {
+            match channel.channel_type.as_str() {
+                "webhook" => {
+                    if let Some(ref url) = channel.config.url {
+                        notifiers.push(Box::new(WebhookNotifier::new(url.clone())));
+                    }
+                }
+                "github_comment" => {
+                    if let Some(ref gh_client) = gh {
+                        notifiers.push(Box::new(GitHubCommentNotifier::new(
+                            Arc::clone(gh_client),
+                            gh_host.clone(),
+                        )));
+                    }
+                }
+                other => {
+                    tracing::warn!("unknown notification channel type: {other}");
+                }
+            }
+        }
+
         if notifiers.is_empty() {
             None
         } else {

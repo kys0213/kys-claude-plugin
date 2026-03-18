@@ -37,9 +37,10 @@ pub struct DaemonConfig {
     pub log_retention_days: u32,
     /// 전체 동시 실행 가능한 파이프라인 태스크 상한 (Claude 세션 수)
     pub max_concurrent_tasks: u32,
-    /// Webhook URL for notifications (e.g. Slack incoming webhook).
-    /// When set, HITL timeout events and other notifications are sent here.
+    /// Webhook URL for notifications (backward compat, prefer notifications.channels).
     pub webhook_url: Option<String>,
+    /// Multi-channel notification configuration.
+    pub notifications: NotificationConfig,
 }
 
 impl Default for DaemonConfig {
@@ -52,8 +53,39 @@ impl Default for DaemonConfig {
             log_retention_days: 30,
             max_concurrent_tasks: 3,
             webhook_url: None,
+            notifications: NotificationConfig::default(),
         }
     }
+}
+
+/// Multi-channel notification configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotificationConfig {
+    pub channels: Vec<NotificationChannel>,
+}
+
+/// A single notification channel configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationChannel {
+    /// Channel type: "webhook" or "github_comment"
+    #[serde(rename = "type")]
+    pub channel_type: String,
+    /// Channel-specific configuration.
+    #[serde(default)]
+    pub config: ChannelConfig,
+}
+
+/// Channel-specific configuration fields.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ChannelConfig {
+    /// Webhook URL (for webhook type).
+    pub url: Option<String>,
+    /// @mention target (for github_comment type).
+    pub mention: Option<String>,
+    /// Severity filter — only send notifications matching these levels.
+    pub severity_filter: Vec<String>,
 }
 
 /// GitHub 소스 설정
