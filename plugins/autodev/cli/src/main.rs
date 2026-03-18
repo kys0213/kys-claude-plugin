@@ -926,7 +926,7 @@ async fn main() -> Result<()> {
             use autodev::core::board::BoardRenderer;
             use autodev::tui::board::{BoardStateBuilder, TextBoardRenderer};
 
-            let state = BoardStateBuilder::build(&db, repo.as_deref())?;
+            let state = BoardStateBuilder::build(&db, repo.as_deref(), &home)?;
             if json {
                 let json_str = serde_json::to_string_pretty(&state)?;
                 println!("{json_str}");

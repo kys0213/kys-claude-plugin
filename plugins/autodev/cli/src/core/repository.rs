@@ -58,6 +58,7 @@ pub trait HitlRepository {
     fn hitl_respond(&self, response: &NewHitlResponse) -> Result<()>;
     fn hitl_set_status(&self, id: &str, status: HitlStatus) -> Result<()>;
     fn hitl_pending_count(&self, repo: Option<&str>) -> Result<i64>;
+    fn hitl_total_count(&self, repo: Option<&str>) -> Result<i64>;
     fn hitl_responses(&self, event_id: &str) -> Result<Vec<HitlResponse>>;
     fn hitl_expired_list(&self, timeout_hours: i64) -> Result<Vec<HitlEvent>>;
 }

@@ -688,6 +688,25 @@ impl HitlRepository for Database {
         Ok(count)
     }
 
+    fn hitl_total_count(&self, repo: Option<&str>) -> Result<i64> {
+        let conn = self.conn();
+        let (query, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+            if let Some(name) = repo {
+                (
+                    "SELECT COUNT(*) FROM hitl_events e JOIN repositories r ON e.repo_id = r.id \
+                     WHERE r.name = ?1"
+                        .to_string(),
+                    vec![Box::new(name.to_string())],
+                )
+            } else {
+                ("SELECT COUNT(*) FROM hitl_events".to_string(), vec![])
+            };
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let count: i64 = conn.query_row(&query, params_refs.as_slice(), |row| row.get(0))?;
+        Ok(count)
+    }
+
     fn hitl_responses(&self, event_id: &str) -> Result<Vec<HitlResponse>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
