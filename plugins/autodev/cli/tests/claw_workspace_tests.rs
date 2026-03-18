@@ -70,7 +70,7 @@ fn claw_init_claude_md_has_expected_content() -> Result<()> {
     let content = std::fs::read_to_string(home.join("claw-workspace/CLAUDE.md"))?;
     assert!(content.contains("Claw 판단 원칙"), "should contain title");
     assert!(
-        content.contains("autodev queue list --json"),
+        content.contains("autodev status --json"),
         "should contain tool reference"
     );
 
