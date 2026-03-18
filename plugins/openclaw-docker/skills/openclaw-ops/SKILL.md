@@ -137,7 +137,7 @@ $COMPOSE_CMD logs --tail 200 --no-color openclaw-gateway 2>&1 | grep -i error
 
 > `expires`는 JWT access_token의 `exp` 클레임에서 추출됩니다 (단위: ms).
 > JWT 파싱 실패 시 fallback으로 `expires` 필드를 직접 사용합니다.
-> `$CONFIG_DIR/agents/main/agent/auth-profiles.json` 경로에 위치합니다.
+> `$CONFIG_DIR/auth-profiles.json` 경로에 위치합니다.
 
 ---
 
