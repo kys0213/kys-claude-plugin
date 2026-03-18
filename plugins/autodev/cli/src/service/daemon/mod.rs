@@ -495,8 +495,11 @@ pub async fn start(
     )
     .with_cron_engine(cron_engine);
 
-    if let Some(notifier) = notifiers::dispatcher::NotificationDispatcher::from_config(&cfg.daemon)
-    {
+    if let Some(notifier) = notifiers::dispatcher::NotificationDispatcher::from_config_with_gh(
+        &cfg.daemon,
+        Some(Arc::clone(&gh)),
+        cfg.sources.github.gh_host.clone(),
+    ) {
         daemon = daemon.with_notifier(notifier);
         info!("notification dispatcher enabled");
     }
