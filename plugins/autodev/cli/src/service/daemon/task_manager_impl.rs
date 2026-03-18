@@ -29,8 +29,13 @@ impl DefaultTaskManager {
 impl TaskManager for DefaultTaskManager {
     async fn tick(&mut self) {
         for source in &mut self.sources {
-            let tasks = source.poll().await;
-            self.ready_tasks.extend(tasks);
+            // poll: 외부 소스 스캔 + 큐 동기화 (수집만, 태스크 반환 안 함)
+            let poll_tasks = source.poll().await;
+            self.ready_tasks.extend(poll_tasks);
+
+            // drain_tasks: Ready→Running 전이 + Task 객체 생성
+            let drained = source.drain_tasks();
+            self.ready_tasks.extend(drained);
         }
     }
 
