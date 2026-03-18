@@ -9,6 +9,23 @@ pub trait BoardRenderer: Send + Sync {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct BoardState {
     pub repos: Vec<RepoBoardState>,
+    /// Cross-repo HITL pending summary.
+    pub hitl_summary: HitlSummary,
+    /// Claw daemon status.
+    pub claw_status: ClawStatus,
+}
+
+/// Cross-repo HITL summary for board header.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct HitlSummary {
+    pub pending: i64,
+    pub total: i64,
+}
+
+/// Claw daemon status indicator.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ClawStatus {
+    pub running: bool,
 }
 
 /// Per-repo board state with specs and queue columns.
@@ -27,6 +44,8 @@ pub struct SpecBoardEntry {
     pub status: String,
     pub progress: String, // e.g. "3/5"
     pub hitl_count: u32,
+    /// Acceptance criteria (from spec, if defined).
+    pub acceptance_criteria: Option<String>,
 }
 
 /// A named column in the kanban board.

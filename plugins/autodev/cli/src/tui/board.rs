@@ -16,7 +16,11 @@ const COLUMN_NAMES: &[&str] = &["Pending", "Ready", "Running", "Done", "Skipped"
 
 impl BoardStateBuilder {
     /// Build board state from DB, optionally filtered by repo name.
-    pub fn build(db: &Database, repo_filter: Option<&str>) -> Result<BoardState> {
+    pub fn build(
+        db: &Database,
+        repo_filter: Option<&str>,
+        home: &std::path::Path,
+    ) -> Result<BoardState> {
         let all_repos = db.repo_find_enabled()?;
         let all_items = db.queue_list_items(repo_filter)?;
         let all_specs = db.spec_list(repo_filter)?;
@@ -67,6 +71,7 @@ impl BoardStateBuilder {
                     status: spec.status.to_string(),
                     progress: format!("{done_count}/{total}"),
                     hitl_count,
+                    acceptance_criteria: spec.acceptance_criteria.clone(),
                 });
             }
 
@@ -98,7 +103,23 @@ impl BoardStateBuilder {
             });
         }
 
-        Ok(BoardState { repos: board_repos })
+        // Cross-repo HITL summary
+        let hitl_pending = db.hitl_pending_count(None)?;
+        let hitl_total = db.hitl_total_count(None)?;
+
+        // Claw daemon status (check if status file exists)
+        let claw_running = home.join("daemon.status.json").exists();
+
+        Ok(BoardState {
+            repos: board_repos,
+            hitl_summary: HitlSummary {
+                pending: hitl_pending,
+                total: hitl_total,
+            },
+            claw_status: ClawStatus {
+                running: claw_running,
+            },
+        })
     }
 }
 
@@ -114,6 +135,21 @@ impl BoardRenderer for TextBoardRenderer {
         }
 
         let mut out = String::new();
+
+        // Header: Claw status + HITL summary
+        let claw_icon = if state.claw_status.running {
+            "●"
+        } else {
+            "○"
+        };
+        out.push_str(&format!("Claw: {claw_icon}"));
+        if state.hitl_summary.pending > 0 {
+            out.push_str(&format!(
+                "  HITL: {} pending / {} total",
+                state.hitl_summary.pending, state.hitl_summary.total
+            ));
+        }
+        out.push_str("\n\n");
 
         for (i, repo) in state.repos.iter().enumerate() {
             if i > 0 {
@@ -134,6 +170,12 @@ impl BoardRenderer for TextBoardRenderer {
                     out.push_str(&format!("  HITL: {}", spec.hitl_count));
                 }
                 out.push('\n');
+                if let Some(ref ac) = spec.acceptance_criteria {
+                    // 각 줄을 체크리스트로 표시
+                    for line in ac.lines().filter(|l| !l.trim().is_empty()) {
+                        out.push_str(&format!("    {line}\n"));
+                    }
+                }
             }
 
             // Kanban table
@@ -274,6 +316,7 @@ mod tests {
                     status: "active".to_string(),
                     progress: "3/5".to_string(),
                     hitl_count: 1,
+                    acceptance_criteria: None,
                 }],
                 columns: vec![
                     BoardColumn {
@@ -321,6 +364,7 @@ mod tests {
                     },
                 ],
             }],
+            ..Default::default()
         };
 
         let output = renderer.render(&state);
@@ -361,6 +405,7 @@ mod tests {
                     },
                 ],
             }],
+            ..Default::default()
         };
 
         let output = renderer.render(&state);
@@ -400,6 +445,7 @@ mod tests {
                     }],
                 },
             ],
+            ..Default::default()
         };
 
         let output = renderer.render(&state);
@@ -421,9 +467,11 @@ mod tests {
                     status: "active".to_string(),
                     progress: "0/3".to_string(),
                     hitl_count: 0,
+                    acceptance_criteria: None,
                 }],
                 columns: vec![],
             }],
+            ..Default::default()
         };
 
         let output = renderer.render(&state);
@@ -452,7 +500,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let db = setup_test_db(tmp.path());
 
-        let state = BoardStateBuilder::build(&db, None).unwrap();
+        let state = BoardStateBuilder::build(&db, None, tmp.path()).unwrap();
         assert!(state.repos.is_empty());
     }
 
@@ -495,7 +543,7 @@ mod tests {
             Some("PR B1"),
         );
 
-        let state = BoardStateBuilder::build(&db, None).unwrap();
+        let state = BoardStateBuilder::build(&db, None, tmp.path()).unwrap();
         assert_eq!(state.repos.len(), 2);
 
         let repo_a = state
@@ -569,7 +617,7 @@ mod tests {
             Some("Task 3"),
         );
 
-        let state = BoardStateBuilder::build(&db, None).unwrap();
+        let state = BoardStateBuilder::build(&db, None, tmp.path()).unwrap();
         assert_eq!(state.repos.len(), 1);
 
         let repo = &state.repos[0];
@@ -607,7 +655,7 @@ mod tests {
             Some("B"),
         );
 
-        let state = BoardStateBuilder::build(&db, Some("org/repo-a")).unwrap();
+        let state = BoardStateBuilder::build(&db, Some("org/repo-a"), tmp.path()).unwrap();
         assert_eq!(state.repos.len(), 1);
         assert_eq!(state.repos[0].repo_name, "org/repo-a");
     }
