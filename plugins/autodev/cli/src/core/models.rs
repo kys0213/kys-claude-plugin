@@ -564,6 +564,8 @@ pub enum TimeoutAction {
     PauseSpec,
     /// 알림 재발송 (만료하지 않음)
     Remind,
+    /// 연결된 이슈/PR을 skip 처리
+    Skip,
 }
 
 impl fmt::Display for TimeoutAction {
@@ -572,6 +574,7 @@ impl fmt::Display for TimeoutAction {
             TimeoutAction::Expire => write!(f, "expire"),
             TimeoutAction::PauseSpec => write!(f, "pause-spec"),
             TimeoutAction::Remind => write!(f, "remind"),
+            TimeoutAction::Skip => write!(f, "skip"),
         }
     }
 }

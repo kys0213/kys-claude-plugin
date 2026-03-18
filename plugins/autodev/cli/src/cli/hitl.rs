@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::core::models::*;
-use crate::core::repository::{HitlRepository, SpecRepository};
+use crate::core::repository::{HitlRepository, QueueRepository, SpecRepository};
 use crate::infra::db::Database;
 
 /// HITL 이벤트 목록 조회
@@ -174,6 +174,14 @@ pub fn timeout(db: &Database, hours: i64, action: TimeoutAction) -> Result<Timeo
             }
             TimeoutAction::Remind => {
                 results.push(format!("  {} → remind sent", event.id));
+            }
+            TimeoutAction::Skip => {
+                if let Some(ref work_id) = event.work_id {
+                    db.queue_skip(work_id, Some("HITL timeout — auto-skipped"))?;
+                    results.push(format!("  {} → skipped ({})", event.id, work_id));
+                } else {
+                    results.push(format!("  {} → expired (no work_id to skip)", event.id));
+                }
             }
         }
     }

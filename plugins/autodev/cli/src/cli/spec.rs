@@ -37,7 +37,7 @@ pub fn spec_add(
     let missing = validate_spec_sections(body);
     let output = if !missing.is_empty() {
         format!(
-            "⚠ Missing sections: {}. Recommended: add these as ## headers.\n{id}",
+            "⚠ Missing sections: {}.\n  Recommended: add these as ## headers in the spec body.\n  Tip: use /add-spec in Claude Code for guided section completion.\n{id}",
             missing.join(", ")
         )
     } else {
