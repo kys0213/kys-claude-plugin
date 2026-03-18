@@ -89,6 +89,7 @@ mod tests {
             work_id: Some("issue:org/repo:42".to_string()),
             spec_id: None,
             url: None,
+            hitl_id: None,
         }
     }
 
