@@ -38,6 +38,8 @@ pub struct RepoBoardState {
     pub repo_name: String,
     pub specs: Vec<SpecBoardEntry>,
     pub columns: Vec<BoardColumn>,
+    /// Issues not linked to any spec.
+    pub orphan_issues: Vec<BoardItem>,
 }
 
 /// Summary of a spec for board display.

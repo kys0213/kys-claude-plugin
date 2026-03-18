@@ -444,7 +444,8 @@ impl Task for AnalyzeTask {
             let fail_comment = format!(
                 "<!-- autodev:analyze-failed -->\n\
                  ⚠️ Analysis agent failed (exit_code={}).\n\n\
-                 Check the agent logs for details.",
+                 Worktree preserved for debugging:\n\
+                 ```\nautodev worktree list\n```",
                 response.exit_code
             );
             self.gh
