@@ -123,6 +123,9 @@ enum Commands {
         /// 대상 레포 이름 (org/repo)
         #[arg(long)]
         repo: Option<String>,
+        /// 에이전트 세션의 작업 디렉토리 (기본: ~/.autodev/claw-workspace)
+        #[arg(long)]
+        cwd: Option<String>,
     },
     /// Convention bootstrap — detect tech stack and generate .claude/rules/
     Convention {
@@ -936,10 +939,23 @@ async fn main() -> Result<()> {
                 print!("{output}");
             }
         }
-        Commands::Agent { prompt, repo } => {
-            let ws = client::claw::claw_workspace_path(&home);
+        Commands::Agent { prompt, repo, cwd } => {
+            let default_ws = client::claw::claw_workspace_path(&home);
+            let ws = if let Some(ref dir) = cwd {
+                std::path::PathBuf::from(dir)
+            } else {
+                default_ws.clone()
+            };
             if !ws.exists() {
-                anyhow::bail!("Claw workspace not initialized. Run 'autodev claw init' first.");
+                anyhow::bail!(
+                    "Working directory not found: {}. {}",
+                    ws.display(),
+                    if cwd.is_none() {
+                        "Run 'autodev claw init' first."
+                    } else {
+                        "Check the --cwd path."
+                    }
+                );
             }
 
             // Resolve repo context if --repo is provided

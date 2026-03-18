@@ -88,10 +88,28 @@ impl ScriptRunner {
         vars.insert("AUTODEV_JOB_NAME".to_string(), job.name.clone());
         vars.insert("AUTODEV_JOB_ID".to_string(), job.id.clone());
 
+        // Global workspace paths
+        let claw_workspace = home.join("claw-workspace");
+        vars.insert(
+            "AUTODEV_CLAW_WORKSPACE".to_string(),
+            claw_workspace.to_string_lossy().to_string(),
+        );
+
         // Per-repo variables
         if let Some(repo) = repo_info {
             vars.insert("AUTODEV_REPO_NAME".to_string(), repo.name.clone());
             vars.insert("AUTODEV_REPO_URL".to_string(), repo.url.clone());
+
+            let sanitized = crate::core::config::sanitize_repo_name(&repo.name);
+            let workspace = home.join("workspaces").join(&sanitized);
+            vars.insert(
+                "AUTODEV_WORKSPACE".to_string(),
+                workspace.to_string_lossy().to_string(),
+            );
+            vars.insert(
+                "AUTODEV_REPO_ROOT".to_string(),
+                workspace.join("main").to_string_lossy().to_string(),
+            );
         }
 
         if let Some(ref repo_id) = job.repo_id {
