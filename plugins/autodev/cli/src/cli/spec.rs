@@ -165,6 +165,9 @@ pub fn spec_unlink(db: &Database, spec_id: &str, issue_number: i64) -> Result<()
     Ok(())
 }
 
+/// 스펙 완료 HITL 이벤트 식별 마커.
+const COMPLETION_HITL_MARKER: &str = "ready for completion";
+
 /// Check if a spec is ready for completion and transition to Completing status.
 ///
 /// Verifies the spec is Active, has linked issues, then transitions to
@@ -185,6 +188,36 @@ pub fn spec_check_completion(db: &Database, id: &str) -> Result<(String, NewHitl
     if issues.is_empty() {
         anyhow::bail!("spec {id} has no linked issues. Link issues before completing.");
     }
+
+    // Verify linked issues are done (queue items in done/skipped phase)
+    let queue_items = db.queue_list_items(None)?;
+    let mut pending_issues = Vec::new();
+    for issue in &issues {
+        // work_id 형식: "issue:{repo_name}:{issue_number}"
+        let matching_item = queue_items.iter().find(|q| {
+            q.work_id.ends_with(&format!(":{}", issue.issue_number))
+                && q.work_id.starts_with("issue:")
+        });
+        match matching_item {
+            Some(item) if item.phase != QueuePhase::Done && item.skip_reason.is_none() => {
+                pending_issues.push(format!("#{} (phase: {})", issue.issue_number, item.phase));
+            }
+            None => {
+                // 큐에 없는 이슈는 아직 처리되지 않은 것으로 간주
+            }
+            _ => {} // done 또는 skipped
+        }
+    }
+
+    let issues_warning = if pending_issues.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n\n⚠ {} issue(s) not yet done: {}",
+            pending_issues.len(),
+            pending_issues.join(", ")
+        )
+    };
 
     // Check for conflicts before completing
     let conflict_warning = if let Some(ref source_path) = spec.source_path {
@@ -218,13 +251,13 @@ pub fn spec_check_completion(db: &Database, id: &str) -> Result<(String, NewHitl
         work_id: None,
         severity: HitlSeverity::High,
         situation: format!(
-            "Spec '{}' is ready for completion. Linked issues: {}",
+            "Spec '{}' is {COMPLETION_HITL_MARKER}. Linked issues: {}",
             spec.title,
             issue_list.join(", ")
         ),
         context: format!(
-            "Spec ID: {}\nTitle: {}\nLinked issues: {}\n\nPlease confirm completion or reject to return to Active.{}",
-            id, spec.title, issue_list.join(", "), conflict_warning
+            "Spec ID: {}\nTitle: {}\nLinked issues: {}\n\nPlease confirm completion or reject to return to Active.{}{}",
+            id, spec.title, issue_list.join(", "), issues_warning, conflict_warning
         ),
         options: vec![
             "Confirm completion".to_string(),
@@ -241,6 +274,47 @@ pub fn spec_check_completion(db: &Database, id: &str) -> Result<(String, NewHitl
         ),
         hitl_event,
     ))
+}
+
+/// HITL 응답으로 스펙 완료를 확정하거나 거부한다.
+///
+/// - choice 1 (Confirm completion): Completing → Completed
+/// - choice 2 (Reject): Completing → Active
+///
+/// 스펙 완료 관련 HITL 이벤트가 아니면 None을 반환한다.
+pub fn handle_spec_completion_response(
+    db: &Database,
+    event: &HitlEvent,
+    choice: Option<i32>,
+) -> Option<String> {
+    // 스펙 완료 관련 HITL인지 확인
+    let spec_id = event.spec_id.as_deref()?;
+    if !event.situation.contains(COMPLETION_HITL_MARKER) {
+        return None;
+    }
+
+    let spec = db.spec_show(spec_id).ok()??;
+    if spec.status != SpecStatus::Completing {
+        return None;
+    }
+
+    match choice {
+        Some(1) => {
+            // Confirm → Completed
+            if let Err(e) = db.spec_set_status(spec_id, SpecStatus::Completed) {
+                return Some(format!("Failed to complete spec {spec_id}: {e}"));
+            }
+            Some(format!("Spec {spec_id} marked as Completed"))
+        }
+        Some(2) => {
+            // Reject → Active
+            if let Err(e) = db.spec_set_status(spec_id, SpecStatus::Active) {
+                return Some(format!("Failed to reactivate spec {spec_id}: {e}"));
+            }
+            Some(format!("Spec {spec_id} returned to Active"))
+        }
+        _ => None,
+    }
 }
 
 /// Validate that a spec body contains required sections.
