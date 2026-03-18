@@ -170,7 +170,7 @@ PROFILE=openai-codex:default STATUS=VALID EXPIRES=2025-02-28T10:24:23Z REMAINING
 
 ### API 키 추가
 
-1. `.env.local`에 키 추가 (예: `OPENAI_API_KEY=<your-key>`)
+1. `.env.local`에 API 키 환경변수를 추가
 2. `docker-compose.override.yml`에 환경변수 매핑이 있는지 확인
 3. `openclaw.json`에서 모델 프로바이더 변경
 4. `./run.sh restart` 로 반영
@@ -182,7 +182,7 @@ PROFILE=openai-codex:default STATUS=VALID EXPIRES=2025-02-28T10:24:23Z REMAINING
 ### Telegram 추가
 
 1. BotFather에서 봇 생성 → 토큰 발급
-2. `.env.local`에 `TELEGRAM_BOT_TOKEN=<your-token>` 추가
+2. `.env.local`에 Telegram 봇 토큰 환경변수를 추가
 3. `./run.sh restart` (환경변수 반영)
 4. `./run.sh telegram` (채널 등록)
 5. 봇에게 DM → 페어링 코드 수신 → 승인
