@@ -62,6 +62,8 @@ pub trait HitlRepository {
     fn hitl_total_count(&self, repo: Option<&str>) -> Result<i64>;
     fn hitl_responses(&self, event_id: &str) -> Result<Vec<HitlResponse>>;
     fn hitl_expired_list(&self, timeout_hours: i64) -> Result<Vec<HitlEvent>>;
+    /// 특정 spec에 연결된 HITL 이벤트 수를 (total, pending) 튜플로 반환한다.
+    fn hitl_count_by_spec(&self, spec_id: &str) -> Result<(i64, i64)>;
 }
 
 pub trait QueueRepository {

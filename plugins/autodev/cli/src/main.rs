@@ -409,6 +409,14 @@ enum RepoAction {
     },
     /// 등록된 레포 목록
     List,
+    /// 레포 상세 조회
+    Show {
+        /// 레포 이름 (org/repo)
+        name: String,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
     /// 레포 설정 확인 (YAML 기반)
     Config {
         /// 레포 이름 (org/repo)
@@ -521,6 +529,19 @@ enum SpecAction {
     },
     /// 스펙 충돌 감지
     Conflicts {
+        /// 스펙 ID
+        id: String,
+    },
+    /// 스펙 진행 상태 조회 (이슈 진척, 큐 항목, HITL 이벤트 등)
+    Status {
+        /// 스펙 ID
+        id: String,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
+    /// 스펙 즉시 평가 (claw-evaluate 강제 트리거)
+    Evaluate {
         /// 스펙 ID
         id: String,
     },
@@ -666,6 +687,10 @@ async fn main() -> Result<()> {
                 let list = client::repo_list(&db)?;
                 println!("{list}");
             }
+            RepoAction::Show { name, json } => {
+                let output = client::repo_show(&db, &name, json)?;
+                println!("{output}");
+            }
             RepoAction::Config { name } => {
                 client::repo_config(&env, &name)?;
             }
@@ -749,10 +774,22 @@ async fn main() -> Result<()> {
                 test_commands,
                 acceptance_criteria,
             } => {
+                // --file이 주어지고 body가 비어있으면 파일 내용을 body로 사용한다.
+                let effective_body = if body.is_empty() {
+                    if let Some(ref path) = file {
+                        std::fs::read_to_string(path)
+                            .map_err(|e| anyhow::anyhow!("failed to read file {path}: {e}"))?
+                    } else {
+                        body
+                    }
+                } else {
+                    body
+                };
+
                 let result = client::spec::spec_add(
                     &db,
                     &title,
-                    &body,
+                    &effective_body,
                     &repo,
                     file.as_deref(),
                     test_commands.as_deref(),
@@ -816,6 +853,14 @@ async fn main() -> Result<()> {
             }
             SpecAction::Conflicts { id } => {
                 let output = client::spec::spec_conflicts(&db, &id)?;
+                println!("{output}");
+            }
+            SpecAction::Status { id, json } => {
+                let output = client::spec::spec_status(&db, &id, json)?;
+                println!("{output}");
+            }
+            SpecAction::Evaluate { id } => {
+                let output = client::spec::spec_evaluate(&db, &id)?;
                 println!("{output}");
             }
         },

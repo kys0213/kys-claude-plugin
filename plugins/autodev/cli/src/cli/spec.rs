@@ -542,6 +542,69 @@ pub fn spec_prioritize(db: &Database, ids: &[String]) -> Result<String> {
     Ok(format!("Prioritized {} specs", ids.len()))
 }
 
+/// 스펙 진행 상태 조회: 이슈 진척, HITL 이벤트, 결정 이력을 집계한다.
+pub fn spec_status(db: &Database, id: &str, json: bool) -> Result<String> {
+    let spec = db
+        .spec_show(id)?
+        .ok_or_else(|| anyhow::anyhow!("spec not found: {id}"))?;
+
+    let issues = db.spec_issues(id)?;
+    let decisions = db.decision_list_by_spec(id, 100)?;
+    let (hitl_total, hitl_pending) = db.hitl_count_by_spec(id)?;
+
+    if json {
+        let value = serde_json::json!({
+            "id": spec.id,
+            "title": spec.title,
+            "status": spec.status.to_string(),
+            "priority": spec.priority,
+            "issues": {
+                "total": issues.len(),
+            },
+            "hitl": {
+                "total": hitl_total,
+                "pending": hitl_pending,
+            },
+            "decisions": decisions.len(),
+        });
+        return Ok(serde_json::to_string_pretty(&value)?);
+    }
+
+    let mut output = String::new();
+    output.push_str(&format!("Spec: {} — {}\n", spec.id, spec.title));
+    output.push_str(&format!("Status: {}\n", spec.status));
+    if let Some(p) = spec.priority {
+        output.push_str(&format!("Priority: {p}\n"));
+    }
+
+    output.push_str(&format!("\nIssues: {} linked\n", issues.len()));
+    for issue in &issues {
+        output.push_str(&format!("  #{}\n", issue.issue_number));
+    }
+
+    output.push_str(&format!(
+        "\nHITL: {hitl_total} total ({hitl_pending} pending)\n"
+    ));
+    output.push_str(&format!("Decisions: {}\n", decisions.len()));
+
+    Ok(output)
+}
+
+/// 스펙의 repo에 대해 claw-evaluate를 즉시 트리거한다.
+pub fn spec_evaluate(db: &Database, id: &str) -> Result<String> {
+    let spec = db
+        .spec_show(id)?
+        .ok_or_else(|| anyhow::anyhow!("spec not found: {id}"))?;
+
+    // Force-trigger claw-evaluate for the spec's repo
+    let _ = db.cron_reset_last_run(crate::cli::cron::CLAW_EVALUATE_JOB, Some(&spec.repo_id));
+
+    Ok(format!(
+        "Triggered claw-evaluate for spec {id} (repo: {})\n",
+        spec.repo_id
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
