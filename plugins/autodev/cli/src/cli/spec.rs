@@ -301,28 +301,81 @@ fn resolve_conflicts(db: &Database, spec_id: &str) -> Result<(Spec, Option<Confl
     Ok((spec, result))
 }
 
-/// Detect specs that share the same source_path (potential file conflicts).
+/// Detect specs that share the same source_path or have concurrent queue items (potential conflicts).
 pub fn spec_conflicts(db: &Database, spec_id: &str) -> Result<String> {
-    let (spec, resolved) = resolve_conflicts(db, spec_id)?;
+    let spec = db
+        .spec_show(spec_id)?
+        .ok_or_else(|| anyhow::anyhow!("spec not found: {spec_id}"))?;
 
-    if spec.source_path.is_none() {
-        return Ok(format!(
-            "Spec {spec_id} has no source_path — cannot detect conflicts.\n"
-        ));
+    let mut output = String::new();
+    let mut conflict_count = 0;
+
+    // 1. Path-based conflicts (existing logic)
+    if let Some(ref source_path) = spec.source_path {
+        let path_conflicts = find_path_conflicts(db, &spec.id, source_path)?;
+        if !path_conflicts.is_empty() {
+            conflict_count += path_conflicts.len();
+            output.push_str(&format!(
+                "Path conflicts (shared source_path: {source_path}):\n"
+            ));
+            output.push_str(&format_conflict_list(&path_conflicts));
+            output.push('\n');
+        }
     }
 
-    let Some((source_path, conflicts)) = resolved else {
-        return Ok(format!("No conflicts detected for spec {spec_id}.\n"));
-    };
+    // 2. Queue-based conflicts: detect specs with concurrent running/ready items in same repo
+    let spec_issues = db.spec_issues(spec_id)?;
+    let all_items = db.queue_list_items(None)?;
+    let active_specs = db.spec_list_by_status(SpecStatus::Active)?;
 
-    let mut output = format!(
-        "⚠ {} conflict(s) detected for spec {spec_id} ({}):\n\n",
-        conflicts.len(),
-        source_path
-    );
-    output.push_str(&format_conflict_list(&conflicts));
-    output.push_str("\nConsider sequencing these specs or resolving file overlaps.\n");
-    Ok(output)
+    // Find running/ready items belonging to THIS spec's issues
+    let my_active_work_ids: std::collections::HashSet<_> = spec_issues
+        .iter()
+        .filter_map(|si| {
+            all_items.iter().find(|q| {
+                q.work_id.ends_with(&format!(":{}", si.issue_number))
+                    && (q.phase == QueuePhase::Running || q.phase == QueuePhase::Ready)
+            })
+        })
+        .map(|q| q.work_id.as_str())
+        .collect();
+
+    if !my_active_work_ids.is_empty() {
+        // Check other active specs for concurrent items in the same repo
+        for other_spec in &active_specs {
+            if other_spec.id == spec.id || other_spec.repo_id != spec.repo_id {
+                continue;
+            }
+            let other_issues = db.spec_issues(&other_spec.id)?;
+            let concurrent: Vec<_> = other_issues
+                .iter()
+                .filter_map(|si| {
+                    all_items.iter().find(|q| {
+                        q.work_id.ends_with(&format!(":{}", si.issue_number))
+                            && (q.phase == QueuePhase::Running || q.phase == QueuePhase::Ready)
+                    })
+                })
+                .collect();
+            if !concurrent.is_empty() {
+                conflict_count += 1;
+                output.push_str(&format!(
+                    "Queue conflict with spec {} ({}):\n  {} concurrent active item(s)\n\n",
+                    other_spec.id,
+                    other_spec.title,
+                    concurrent.len()
+                ));
+            }
+        }
+    }
+
+    if conflict_count == 0 {
+        return Ok(format!("No conflicts detected for spec {spec_id}.\n"));
+    }
+
+    Ok(format!(
+        "⚠ {conflict_count} conflict(s) detected for spec {spec_id}:\n\n{output}\
+         Consider sequencing these specs or resolving file overlaps.\n"
+    ))
 }
 
 /// Find active specs whose source_path overlaps with the given path, excluding `exclude_id`.
