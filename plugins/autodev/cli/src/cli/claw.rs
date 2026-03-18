@@ -48,6 +48,9 @@ pub fn claw_init(home: &Path) -> Result<()> {
         ("commands/status.md", DEFAULT_STATUS_MD),
         ("commands/board.md", DEFAULT_BOARD_MD),
         ("commands/hitl.md", DEFAULT_HITL_MD),
+        ("commands/spec.md", DEFAULT_SPEC_MD),
+        ("commands/repo.md", DEFAULT_REPO_MD),
+        ("commands/decisions.md", DEFAULT_DECISIONS_MD),
         ("skills/decompose/SKILL.md", TPL_DECOMPOSE_SKILL_MD),
         ("skills/gap-detect/SKILL.md", TPL_GAP_DETECT_SKILL_MD),
         ("skills/prioritize/SKILL.md", TPL_PRIORITIZE_SKILL_MD),
@@ -292,6 +295,56 @@ Human-in-the-Loop 이벤트를 관리합니다.
 autodev hitl list --json
 autodev hitl show <id>
 autodev hitl respond <id> --choice <n>
+```
+"#;
+
+const DEFAULT_SPEC_MD: &str = r#"# /spec 커맨드
+
+스펙을 관리합니다.
+
+## 기능
+- 스펙 목록 조회
+- 스펙 상세 / 진행 상태 조회
+- 스펙 완료 판정
+
+## 실행
+```
+autodev spec list --json
+autodev spec show <id> --json
+autodev spec status <id> --json
+autodev spec complete <id>
+```
+"#;
+
+const DEFAULT_REPO_MD: &str = r#"# /repo 커맨드
+
+등록된 레포를 관리합니다.
+
+## 기능
+- 레포 목록 조회
+- 레포 상세 조회
+- 레포 설정 확인
+
+## 실행
+```
+autodev repo list
+autodev repo show <name> --json
+autodev repo config <name>
+```
+"#;
+
+const DEFAULT_DECISIONS_MD: &str = r#"# /decisions 커맨드
+
+Claw의 판단 이력을 조회합니다.
+
+## 기능
+- 최근 판단 목록 조회
+- 판단 상세 조회
+
+## 실행
+```
+autodev decisions list --json
+autodev decisions show <id> --json
 ```
 "#;
 

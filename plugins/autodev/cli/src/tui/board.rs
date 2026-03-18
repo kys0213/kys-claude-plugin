@@ -118,6 +118,8 @@ impl BoardStateBuilder {
             },
             claw_status: ClawStatus {
                 running: claw_running,
+                last_decision_at: None,
+                tick_interval_secs: None,
             },
         })
     }

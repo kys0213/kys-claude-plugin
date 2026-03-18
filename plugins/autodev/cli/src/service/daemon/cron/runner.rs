@@ -110,6 +110,11 @@ impl ScriptRunner {
                 "AUTODEV_REPO_ROOT".to_string(),
                 workspace.join("main").to_string_lossy().to_string(),
             );
+            // Default branch — convention: "main" (git default)
+            vars.insert(
+                "AUTODEV_REPO_DEFAULT_BRANCH".to_string(),
+                "main".to_string(),
+            );
         }
 
         if let Some(ref repo_id) = job.repo_id {
