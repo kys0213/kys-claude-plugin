@@ -160,7 +160,7 @@ autodev agent --repo <name> -p "<prompt>"      # headless 실행 (repo 컨텍스
 ```
 
 **`autodev agent`가 내부적으로 보장하는 것**:
-- `--cwd`: Claw 워크스페이스 경로 자동 지정
+- **작업 디렉토리**: Claw 워크스페이스를 서브프로세스의 working directory로 자동 설정
 - **중복 실행 방지**: daemon cron engine이 job 실행 상태를 내부에서 관리
 - **환경변수 주입**: `--repo` 지정 시 해당 레포의 `AUTODEV_*` 변수 자동 설정
 - **실행 로그**: 실행 결과를 DB에 자동 기록

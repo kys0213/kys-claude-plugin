@@ -580,6 +580,18 @@ async fn start_daemon(
     daemon::start(home, env, gh, git, claude, sw).await
 }
 
+/// Build a notification dispatcher for CLI commands, wiring the Gh client for github_comment channels.
+fn build_cli_dispatcher(
+    cfg: &autodev::core::config::models::WorkflowConfig,
+) -> Option<autodev::service::daemon::notifiers::dispatcher::NotificationDispatcher> {
+    let gh: Arc<dyn autodev::infra::gh::Gh> = Arc::new(RealGh);
+    autodev::service::daemon::notifiers::dispatcher::NotificationDispatcher::from_config_with_gh(
+        &cfg.daemon,
+        Some(gh),
+        cfg.sources.github.gh_host.clone(),
+    )
+}
+
 /// Dispatch a notification event via configured channels, logging errors to stderr.
 async fn dispatch_notification(
     dispatcher: &autodev::service::daemon::notifiers::dispatcher::NotificationDispatcher,
@@ -697,7 +709,7 @@ async fn main() -> Result<()> {
                 client::repo_config(&env, &name)?;
             }
             RepoAction::Remove { name } => {
-                client::repo_remove(&db, &name)?;
+                client::repo_remove(&db, &env, &name)?;
             }
             RepoAction::Update { name, config } => {
                 client::repo_update(&db, &env, &name, &config)?;
@@ -740,11 +752,10 @@ async fn main() -> Result<()> {
 
                 // Dispatch HITL notification if review overflow created one
                 if let Some(ref hitl_event) = result.hitl_event {
-                    if let Some(ref dispatcher) =
-                        autodev::service::daemon::notifiers::dispatcher::NotificationDispatcher::from_config(&cfg.daemon)
-                    {
-                        let notif =
-                            autodev::core::notifier::NotificationEvent::from_hitl_created(hitl_event);
+                    if let Some(ref dispatcher) = build_cli_dispatcher(&cfg) {
+                        let notif = autodev::core::notifier::NotificationEvent::from_hitl_created(
+                            hitl_event,
+                        );
                         dispatch_notification(dispatcher, &notif).await;
                     }
                 }
@@ -841,9 +852,7 @@ async fn main() -> Result<()> {
                 println!("{output}");
 
                 // Dispatch HITL creation notification if configured
-                if let Some(ref dispatcher) =
-                    autodev::service::daemon::notifiers::dispatcher::NotificationDispatcher::from_config(&cfg.daemon)
-                {
+                if let Some(ref dispatcher) = build_cli_dispatcher(&cfg) {
                     let notif =
                         autodev::core::notifier::NotificationEvent::from_hitl_created(&hitl_event);
                     dispatch_notification(dispatcher, &notif).await;
@@ -914,9 +923,7 @@ async fn main() -> Result<()> {
                 println!("{}", result.output);
 
                 // Dispatch notifications for processed events if configured
-                if let Some(ref dispatcher) =
-                    autodev::service::daemon::notifiers::dispatcher::NotificationDispatcher::from_config(&cfg.daemon)
-                {
+                if let Some(ref dispatcher) = build_cli_dispatcher(&cfg) {
                     for event in &result.expired_events {
                         let notif = if action == autodev::core::models::TimeoutAction::Remind {
                             autodev::core::notifier::NotificationEvent::from_hitl_reminder(event)
@@ -1080,8 +1087,7 @@ async fn main() -> Result<()> {
                     .arg("--print")
                     .arg("-p")
                     .arg(prompt_text)
-                    .arg("--cwd")
-                    .arg(&ws)
+                    .current_dir(&ws)
                     .envs(extra_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
                     .output()
                     .context("failed to launch claude. Is it installed?")?;
@@ -1128,7 +1134,7 @@ async fn main() -> Result<()> {
             } else {
                 // Interactive mode (existing behavior)
                 let mut cmd = std::process::Command::new("claude");
-                cmd.arg("--cwd").arg(&ws);
+                cmd.current_dir(&ws);
                 for (k, v) in &extra_env {
                     cmd.env(k, v);
                 }
