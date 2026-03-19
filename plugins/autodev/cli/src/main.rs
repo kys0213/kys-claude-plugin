@@ -486,6 +486,9 @@ enum SpecAction {
         /// 스펙 본문
         #[arg(long)]
         body: Option<String>,
+        /// 스펙 본문을 파일에서 읽기
+        #[arg(long)]
+        file: Option<String>,
         /// 테스트 커맨드 (JSON 배열)
         #[arg(long)]
         test_commands: Option<String>,
@@ -702,7 +705,7 @@ async fn main() -> Result<()> {
                 println!("{list}");
             }
             RepoAction::Show { name, json } => {
-                let output = client::repo_show(&db, &name, json)?;
+                let output = client::repo_show(&db, &env, &name, json)?;
                 println!("{output}");
             }
             RepoAction::Config { name } => {
@@ -824,13 +827,21 @@ async fn main() -> Result<()> {
             SpecAction::Update {
                 id,
                 body,
+                file,
                 test_commands,
                 acceptance_criteria,
             } => {
+                let body_content = match (&body, &file) {
+                    (Some(_), Some(_)) => {
+                        anyhow::bail!("cannot specify both --body and --file");
+                    }
+                    (_, Some(path)) => Some(std::fs::read_to_string(path)?),
+                    (b, None) => b.clone(),
+                };
                 client::spec::spec_update(
                     &db,
                     &id,
-                    body.as_deref(),
+                    body_content.as_deref(),
                     test_commands.as_deref(),
                     acceptance_criteria.as_deref(),
                 )?;

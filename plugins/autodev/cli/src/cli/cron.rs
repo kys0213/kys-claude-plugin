@@ -142,21 +142,30 @@ pub fn cron_trigger(db: &Database, env: &dyn Env, name: &str, repo: Option<&str>
 
     let mut cmd = std::process::Command::new(&job.script_path);
 
-    // Always-present env vars
+    // Global env vars (aligned with daemon cron runner)
     cmd.env("AUTODEV_HOME", home.to_string_lossy().as_ref());
     cmd.env("AUTODEV_DB", db_path.to_string_lossy().as_ref());
     cmd.env(
         "AUTODEV_CLAW_WORKSPACE",
-        config::workspaces_path(env).to_string_lossy().as_ref(),
+        home.join("claw-workspace").to_string_lossy().as_ref(),
     );
+    cmd.env("AUTODEV_JOB_NAME", &job.name);
+    cmd.env("AUTODEV_JOB_ID", &job.id);
 
-    // Per-repo env vars
+    // Per-repo env vars (aligned with daemon cron runner)
     if let Some(repo_name) = repo {
         if let Some(repo_info) = find_repo_info(db, repo_name)? {
             cmd.env("AUTODEV_REPO_NAME", &repo_info.name);
-            // Derive repo root from workspace path
-            let ws = config::workspaces_path(env).join(config::sanitize_repo_name(&repo_info.name));
-            cmd.env("AUTODEV_REPO_ROOT", ws.to_string_lossy().as_ref());
+            cmd.env("AUTODEV_REPO_URL", &repo_info.url);
+            cmd.env("AUTODEV_REPO_ID", &repo_info.id);
+            let workspace =
+                config::workspaces_path(env).join(config::sanitize_repo_name(&repo_info.name));
+            cmd.env("AUTODEV_WORKSPACE", workspace.to_string_lossy().as_ref());
+            cmd.env(
+                "AUTODEV_REPO_ROOT",
+                workspace.join("main").to_string_lossy().as_ref(),
+            );
+            cmd.env("AUTODEV_REPO_DEFAULT_BRANCH", "main");
         }
     }
 
