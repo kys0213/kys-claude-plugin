@@ -70,7 +70,7 @@ Interactive (autodev agent):
 
 Headless (claw-evaluate cron에 의해 호출):
   → cron이 주기적으로 autodev agent --repo <r> -p "..." 실행
-  → autodev agent가 --cwd, 환경변수, 로깅을 자동 처리
+  → autodev agent가 작업 디렉토리, 환경변수, 로깅을 자동 처리
   → Claw가 자동으로 큐 평가 → advance/skip/hitl 판단
   → 전체 레포의 큐를 한번에 조회: autodev queue list --json
   → 레포별로 순차 판단

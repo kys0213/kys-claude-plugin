@@ -306,9 +306,18 @@ pub fn repo_update(
     Ok(())
 }
 
-/// 레포 제거
-pub fn repo_remove(db: &Database, name: &str) -> Result<()> {
+/// 레포 제거 (DB records + filesystem workspace cleanup)
+pub fn repo_remove(db: &Database, env: &dyn Env, name: &str) -> Result<()> {
     db.repo_remove(name)?;
+
+    // Clean up per-repo workspace directory (includes claw override)
+    let ws_dir = config::workspaces_path(env).join(config::sanitize_repo_name(name));
+    match std::fs::remove_dir_all(&ws_dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
+
     println!("removed: {name}");
     Ok(())
 }

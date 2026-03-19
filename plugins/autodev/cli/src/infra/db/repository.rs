@@ -41,6 +41,31 @@ impl RepoRepository for Database {
         };
 
         let tx = conn.unchecked_transaction()?;
+        // Child tables with FK to hitl_events/specs must be deleted first
+        tx.execute(
+            "DELETE FROM hitl_responses WHERE event_id IN (SELECT id FROM hitl_events WHERE repo_id = ?1)",
+            rusqlite::params![repo_id],
+        )?;
+        tx.execute(
+            "DELETE FROM spec_issues WHERE spec_id IN (SELECT id FROM specs WHERE repo_id = ?1)",
+            rusqlite::params![repo_id],
+        )?;
+        tx.execute(
+            "DELETE FROM hitl_events WHERE repo_id = ?1",
+            rusqlite::params![repo_id],
+        )?;
+        tx.execute(
+            "DELETE FROM specs WHERE repo_id = ?1",
+            rusqlite::params![repo_id],
+        )?;
+        tx.execute(
+            "DELETE FROM queue_items WHERE repo_id = ?1",
+            rusqlite::params![repo_id],
+        )?;
+        tx.execute(
+            "DELETE FROM claw_decisions WHERE repo_id = ?1",
+            rusqlite::params![repo_id],
+        )?;
         tx.execute(
             "DELETE FROM token_usage WHERE repo_id = ?1",
             rusqlite::params![repo_id],
