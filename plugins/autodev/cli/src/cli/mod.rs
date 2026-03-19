@@ -201,7 +201,7 @@ pub fn repo_list(db: &Database) -> Result<String> {
 }
 
 /// 레포 상세 조회
-pub fn repo_show(db: &Database, name: &str, json: bool) -> Result<String> {
+pub fn repo_show(db: &Database, env: &dyn Env, name: &str, json: bool) -> Result<String> {
     let repos = db.repo_list()?;
     let repo = repos
         .iter()
@@ -209,11 +209,17 @@ pub fn repo_show(db: &Database, name: &str, json: bool) -> Result<String> {
         .ok_or_else(|| anyhow::anyhow!("repository not found: {name}"))?;
 
     if json {
-        let value = serde_json::json!({
+        let ws_dir = config::workspaces_path(env).join(config::sanitize_repo_name(name));
+        let effective = config::loader::load_merged(env, Some(&ws_dir));
+        let mut value = serde_json::json!({
             "name": repo.name,
             "url": repo.url,
             "enabled": repo.enabled,
         });
+        match serde_json::to_value(&effective) {
+            Ok(cfg_value) => value["config"] = cfg_value,
+            Err(e) => eprintln!("warning: failed to serialize config: {e}"),
+        }
         return Ok(serde_json::to_string_pretty(&value)?);
     }
 

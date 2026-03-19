@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use crate::core::models::*;
-use crate::core::repository::HitlRepository;
+use crate::core::repository::{CronRepository, HitlRepository};
 use crate::infra::db::Database;
 use crate::infra::gh::Gh;
 
@@ -23,6 +23,7 @@ const HITL_MARKER_PREFIX: &str = "<!-- autodev:hitl:";
 /// 5. Save as HITL response
 pub async fn scan_replies(db: &Database, gh: &Arc<dyn Gh>, gh_host: Option<&str>) -> Vec<String> {
     let mut responses = Vec::new();
+    let mut triggered_repo_ids = std::collections::HashSet::<String>::new();
 
     let pending = match db.hitl_list(None) {
         Ok(events) => events
@@ -88,6 +89,7 @@ pub async fn scan_replies(db: &Database, gh: &Arc<dyn Gh>, gh_host: Option<&str>
                 if let Err(e) = db.hitl_respond(&response) {
                     tracing::warn!("failed to save reply for HITL {}: {e}", event.id);
                 } else {
+                    triggered_repo_ids.insert(event.repo_id.clone());
                     responses.push(format!(
                         "HITL {} responded via GitHub comment by @{author}",
                         event.id
@@ -97,6 +99,11 @@ pub async fn scan_replies(db: &Database, gh: &Arc<dyn Gh>, gh_host: Option<&str>
                 break; // Only process first reply
             }
         }
+    }
+
+    // Force-trigger claw-evaluate once per repo (deduplicated)
+    for repo_id in &triggered_repo_ids {
+        let _ = db.cron_reset_last_run(crate::cli::cron::CLAW_EVALUATE_JOB, Some(repo_id));
     }
 
     responses
