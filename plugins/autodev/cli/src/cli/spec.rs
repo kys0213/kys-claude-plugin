@@ -517,8 +517,9 @@ fn collect_spec_files(
                         item.work_id.split(':').nth(1).unwrap_or(""),
                     );
                     let repo_dir = ws_root.join(&repo_name).join("main");
-                    if let Ok(diff_files) = git_diff_name_only(&repo_dir, &pr.head_branch) {
-                        files.extend(diff_files);
+                    match git_diff_name_only(&repo_dir, &pr.head_branch) {
+                        Ok(diff_files) => files.extend(diff_files),
+                        Err(e) => tracing::warn!("git diff skipped for {}: {e}", pr.head_branch),
                     }
                 }
             }
@@ -536,7 +537,13 @@ fn git_diff_name_only(repo_dir: &std::path::Path, branch: &str) -> Result<Vec<St
         .output()?;
 
     if !output.status.success() {
-        anyhow::bail!("git diff failed");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!(
+            "git diff failed in {} for branch {}: {}",
+            repo_dir.display(),
+            branch,
+            stderr.trim()
+        );
     }
 
     Ok(String::from_utf8_lossy(&output.stdout)
