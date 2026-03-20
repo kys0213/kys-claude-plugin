@@ -546,10 +546,12 @@ fn resolve_repo_name(db: &Database, repo_id: &str) -> Result<String> {
 /// Truncate output to a maximum length, appending "..." if truncated.
 fn truncate_output(s: &str, max_len: usize) -> String {
     let trimmed = s.trim();
-    if trimmed.len() <= max_len {
+    let char_count = trimmed.chars().count();
+    if char_count <= max_len {
         trimmed.replace('\n', " | ")
     } else {
-        format!("{}...", &trimmed[..max_len].replace('\n', " | "))
+        let truncated: String = trimmed.chars().take(max_len).collect();
+        format!("{}...", truncated.replace('\n', " | "))
     }
 }
 
