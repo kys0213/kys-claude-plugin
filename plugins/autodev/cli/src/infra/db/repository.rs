@@ -352,6 +352,28 @@ impl SpecRepository for Database {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    fn spec_issues_all(&self) -> Result<std::collections::HashMap<String, Vec<SpecIssue>>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT spec_id, issue_number, created_at FROM spec_issues \
+             ORDER BY spec_id, issue_number",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(SpecIssue {
+                spec_id: row.get(0)?,
+                issue_number: row.get(1)?,
+                created_at: row.get(2)?,
+            })
+        })?;
+        let mut map: std::collections::HashMap<String, Vec<SpecIssue>> =
+            std::collections::HashMap::new();
+        for row in rows {
+            let si = row?;
+            map.entry(si.spec_id.clone()).or_default().push(si);
+        }
+        Ok(map)
+    }
+
     fn spec_issue_counts(&self) -> Result<std::collections::HashMap<String, usize>> {
         let conn = self.conn();
         let mut stmt =
