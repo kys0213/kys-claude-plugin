@@ -317,7 +317,19 @@ pub fn repo_remove(db: &Database, env: &dyn Env, name: &str) -> Result<()> {
     db.repo_remove(name)?;
 
     // Clean up per-repo workspace directory (includes claw override)
-    let ws_dir = config::workspaces_path(env).join(config::sanitize_repo_name(name));
+    let workspaces = config::workspaces_path(env);
+    let ws_dir = workspaces.join(config::sanitize_repo_name(name));
+
+    // Safety: verify the path is actually under the expected workspaces directory
+    // before performing recursive deletion.
+    if !ws_dir.starts_with(&workspaces) {
+        anyhow::bail!(
+            "refusing to delete {}: not under workspaces directory {}",
+            ws_dir.display(),
+            workspaces.display()
+        );
+    }
+
     match std::fs::remove_dir_all(&ws_dir) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}

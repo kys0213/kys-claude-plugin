@@ -110,11 +110,9 @@ impl ScriptRunner {
                 "AUTODEV_REPO_ROOT".to_string(),
                 workspace.join("main").to_string_lossy().to_string(),
             );
-            // Default branch — convention: "main" (git default)
-            vars.insert(
-                "AUTODEV_REPO_DEFAULT_BRANCH".to_string(),
-                "main".to_string(),
-            );
+            // Default branch — detect from git, fall back to "main"
+            let default_branch = crate::cli::cron::detect_default_branch(&workspace);
+            vars.insert("AUTODEV_REPO_DEFAULT_BRANCH".to_string(), default_branch);
         }
 
         if let Some(ref repo_id) = job.repo_id {

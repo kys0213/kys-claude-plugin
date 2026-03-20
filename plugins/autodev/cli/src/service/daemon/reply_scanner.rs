@@ -103,7 +103,9 @@ pub async fn scan_replies(db: &Database, gh: &Arc<dyn Gh>, gh_host: Option<&str>
 
     // Force-trigger claw-evaluate once per repo (deduplicated)
     for repo_id in &triggered_repo_ids {
-        let _ = db.cron_reset_last_run(crate::cli::cron::CLAW_EVALUATE_JOB, Some(repo_id));
+        if let Err(e) = db.cron_reset_last_run(crate::cli::cron::CLAW_EVALUATE_JOB, Some(repo_id)) {
+            tracing::warn!("failed to reset last_run for claw-evaluate (repo_id={repo_id}): {e}");
+        }
     }
 
     responses
