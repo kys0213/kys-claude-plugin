@@ -703,6 +703,41 @@ pub fn spec_status(db: &Database, id: &str, json: bool) -> Result<String> {
     Ok(output)
 }
 
+/// 스펙 관련 결정 이력 조회
+pub fn spec_decisions(db: &Database, spec_id: &str, limit: usize, json: bool) -> Result<String> {
+    // Verify spec exists
+    let _spec = db
+        .spec_show(spec_id)?
+        .ok_or_else(|| anyhow::anyhow!("spec not found: {spec_id}"))?;
+
+    let decisions = db.decision_list_by_spec(spec_id, limit)?;
+
+    if json {
+        return Ok(serde_json::to_string_pretty(&decisions)?);
+    }
+
+    let mut output = String::new();
+    if decisions.is_empty() {
+        output.push_str(&format!("No decisions found for spec {spec_id}.\n"));
+    } else {
+        output.push_str(&format!(
+            "Decisions for spec {spec_id} (showing up to {limit}):\n"
+        ));
+        for d in &decisions {
+            let target = d
+                .target_work_id
+                .as_deref()
+                .map(|w| format!(" target={w}"))
+                .unwrap_or_default();
+            output.push_str(&format!(
+                "  [{}] {} —{} {}\n",
+                d.decision_type, d.id, target, d.reasoning
+            ));
+        }
+    }
+    Ok(output)
+}
+
 /// 스펙의 repo에 대해 claw-evaluate를 즉시 트리거한다.
 pub fn spec_evaluate(db: &Database, id: &str) -> Result<String> {
     let spec = db

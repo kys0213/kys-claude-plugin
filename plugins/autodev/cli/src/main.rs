@@ -194,6 +194,9 @@ enum ClawAction {
         /// 레포별 오버라이드 포함 (org/repo)
         #[arg(long)]
         repo: Option<String>,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
     },
     /// 규칙/스킬 편집
     Edit {
@@ -309,7 +312,7 @@ enum CronAction {
         #[arg(long)]
         schedule: Option<String>,
     },
-    /// 크론 잡 간격 업데이트
+    /// 크론 잡 스케줄 업데이트
     Update {
         /// 잡 이름
         name: String,
@@ -318,7 +321,10 @@ enum CronAction {
         repo: Option<String>,
         /// 새 실행 간격 (초)
         #[arg(long)]
-        interval: u64,
+        interval: Option<u64>,
+        /// 크론 표현식
+        #[arg(long, conflicts_with = "interval")]
+        schedule: Option<String>,
     },
     /// 크론 잡 일시 정지
     Pause {
@@ -549,6 +555,17 @@ enum SpecAction {
     Evaluate {
         /// 스펙 ID
         id: String,
+    },
+    /// 스펙 관련 결정 이력 조회
+    Decisions {
+        /// 스펙 ID
+        spec_id: String,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+        /// 최근 N개 항목
+        #[arg(short = 'n', long, default_value = "20")]
+        limit: usize,
     },
 }
 
@@ -885,6 +902,14 @@ async fn main() -> Result<()> {
                 let output = client::spec::spec_evaluate(&db, &id)?;
                 println!("{output}");
             }
+            SpecAction::Decisions {
+                spec_id,
+                json,
+                limit,
+            } => {
+                let output = client::spec::spec_decisions(&db, &spec_id, limit, json)?;
+                println!("{output}");
+            }
         },
         Commands::Hitl { action } => match action {
             HitlAction::List { repo, json } => {
@@ -995,8 +1020,15 @@ async fn main() -> Result<()> {
                 name,
                 repo,
                 interval,
+                schedule,
             } => {
-                client::cron::cron_update(&db, &name, repo.as_deref(), interval)?;
+                client::cron::cron_update(
+                    &db,
+                    &name,
+                    repo.as_deref(),
+                    interval,
+                    schedule.as_deref(),
+                )?;
             }
             CronAction::Pause { name, repo } => {
                 client::cron::cron_pause(&db, &name, repo.as_deref())?;
@@ -1020,10 +1052,15 @@ async fn main() -> Result<()> {
                     client::claw::claw_init(&home)?;
                 }
             }
-            ClawAction::Rules { repo } => {
+            ClawAction::Rules { repo, json } => {
                 let rules = client::claw::claw_rules(&home, repo.as_deref())?;
-                for rule in &rules {
-                    println!("  {rule}");
+                if json {
+                    let json_str = serde_json::to_string_pretty(&rules)?;
+                    println!("{json_str}");
+                } else {
+                    for rule in &rules {
+                        println!("  {rule}");
+                    }
                 }
             }
             ClawAction::Edit { name, repo } => {

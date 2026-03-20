@@ -120,6 +120,7 @@ pub trait CronRepository {
         repo: Option<&str>,
         interval_secs: u64,
     ) -> Result<()>;
+    fn cron_update_schedule(&self, name: &str, repo: Option<&str>, cron_expr: &str) -> Result<()>;
     fn cron_set_status(&self, name: &str, repo: Option<&str>, status: CronStatus) -> Result<()>;
     fn cron_remove(&self, name: &str, repo: Option<&str>) -> Result<()>;
     fn cron_update_last_run(&self, id: &str) -> Result<()>;
