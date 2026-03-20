@@ -146,6 +146,15 @@ pub fn cron_resume(db: &Database, name: &str, repo: Option<&str>) -> Result<()> 
 
 /// Remove a cron job
 pub fn cron_remove(db: &Database, name: &str, repo: Option<&str>) -> Result<()> {
+    // Guard: prevent removal of built-in cron jobs
+    if let Some(job) = db.cron_show(name, repo)? {
+        if job.builtin {
+            anyhow::bail!(
+                "cannot remove built-in cron job '{name}'. Use 'cron pause' / 'cron resume' instead."
+            );
+        }
+    }
+
     db.cron_remove(name, repo)?;
     println!("removed cron job: {name}");
     Ok(())
