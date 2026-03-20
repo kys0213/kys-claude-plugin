@@ -199,8 +199,8 @@ impl Daemon {
                                             ) {
                                                 escalation::EscalationOutcome::Retry => true,
                                                 escalation::EscalationOutcome::Remove => false,
-                                                escalation::EscalationOutcome::RemoveWithHitl(event) => {
-                                                    escalation_hitl = Some(event);
+                                                escalation::EscalationOutcome::RemoveWithHitl(event, hitl_id) => {
+                                                    escalation_hitl = Some((event, hitl_id));
                                                     false
                                                 }
                                             }
@@ -245,8 +245,8 @@ impl Daemon {
                             }
 
                             // Notify on escalation-generated HITL event
-                            if let Some(ref hitl_event) = escalation_hitl {
-                                let notif = NotificationEvent::from_hitl_created(hitl_event);
+                            if let Some((ref hitl_event, ref hitl_id)) = escalation_hitl {
+                                let notif = NotificationEvent::from_hitl_created(hitl_event, Some(hitl_id.clone()));
                                 dispatch_notification(&self.notifier, &notif).await;
                             }
 
@@ -260,10 +260,12 @@ impl Daemon {
                                 let env = crate::core::config::RealEnv;
                                 let completable =
                                     crate::cli::spec::check_completable_specs(&self.log_db, &env);
-                                for (spec_id, hitl_event) in &completable {
+                                for (spec_id, hitl_event, hitl_id) in &completable {
                                     info!("spec auto-completion triggered for {spec_id}");
-                                    let notif =
-                                        NotificationEvent::from_hitl_created(hitl_event);
+                                    let notif = NotificationEvent::from_hitl_created(
+                                        hitl_event,
+                                        Some(hitl_id.clone()),
+                                    );
                                     dispatch_notification(&self.notifier, &notif).await;
                                 }
                             }
@@ -339,8 +341,11 @@ impl Daemon {
                                     ) {
                                         escalation::EscalationOutcome::Retry => true,
                                         escalation::EscalationOutcome::Remove => false,
-                                        escalation::EscalationOutcome::RemoveWithHitl(event) => {
-                                            escalation_hitl = Some(event);
+                                        escalation::EscalationOutcome::RemoveWithHitl(
+                                            event,
+                                            hitl_id,
+                                        ) => {
+                                            escalation_hitl = Some((event, hitl_id));
                                             false
                                         }
                                     }
@@ -383,8 +388,11 @@ impl Daemon {
                         }
 
                         // Notify on escalation-generated HITL event
-                        if let Some(ref hitl_event) = escalation_hitl {
-                            let notif = NotificationEvent::from_hitl_created(hitl_event);
+                        if let Some((ref hitl_event, ref hitl_id)) = escalation_hitl {
+                            let notif = NotificationEvent::from_hitl_created(
+                                hitl_event,
+                                Some(hitl_id.clone()),
+                            );
                             dispatch_notification(&self.notifier, &notif).await;
                         }
                     }

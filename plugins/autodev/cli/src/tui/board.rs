@@ -62,7 +62,8 @@ impl BoardStateBuilder {
                 let done_count = linked_issues
                     .iter()
                     .filter(|si| {
-                        let work_id = format!("{}#{}", repo.name, si.issue_number);
+                        // work_id format is "issue:<repo_name>:<number>"
+                        let work_id = format!("issue:{}:{}", repo.name, si.issue_number);
                         done_work_ids.contains(work_id.as_str())
                     })
                     .count();
@@ -633,10 +634,18 @@ mod tests {
         db.spec_link_issue(&spec_id, 3).unwrap();
 
         // Add queue items — #1 is done, #2 is running, #3 is pending
-        insert_queue_item(&db, "org/repo#1", &repo_id, "issue", "done", Some("Task 1"));
+        // work_id format: "issue:<repo_name>:<number>"
         insert_queue_item(
             &db,
-            "org/repo#2",
+            "issue:org/repo:1",
+            &repo_id,
+            "issue",
+            "done",
+            Some("Task 1"),
+        );
+        insert_queue_item(
+            &db,
+            "issue:org/repo:2",
             &repo_id,
             "issue",
             "running",
@@ -644,7 +653,7 @@ mod tests {
         );
         insert_queue_item(
             &db,
-            "org/repo#3",
+            "issue:org/repo:3",
             &repo_id,
             "issue",
             "pending",

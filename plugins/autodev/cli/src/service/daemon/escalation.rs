@@ -16,7 +16,8 @@ pub enum EscalationOutcome {
     /// 아이템을 제거한다. 기본 동작을 그대로 수행한다.
     Remove,
     /// HITL 이벤트를 생성하고 아이템을 제거한다. 알림 발송이 필요하다.
-    RemoveWithHitl(NewHitlEvent),
+    /// `String` is the assigned hitl_id from the database.
+    RemoveWithHitl(NewHitlEvent, String),
 }
 
 /// HITL 이벤트를 DB에 저장하고, 성공 시 RemoveWithHitl, 실패 시 Remove를 반환한다.
@@ -26,7 +27,7 @@ fn create_hitl_or_remove(
     hitl_event: NewHitlEvent,
 ) -> EscalationOutcome {
     match db.hitl_create(&hitl_event) {
-        Ok(_) => EscalationOutcome::RemoveWithHitl(hitl_event),
+        Ok(hitl_id) => EscalationOutcome::RemoveWithHitl(hitl_event, hitl_id),
         Err(e) => {
             tracing::warn!("failed to create HITL event for {work_id}: {e}");
             EscalationOutcome::Remove

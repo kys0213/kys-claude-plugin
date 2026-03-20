@@ -50,7 +50,10 @@ impl NotificationEvent {
     }
 
     /// Create a notification for a newly created HITL event.
-    pub fn from_hitl_created(event: &NewHitlEvent) -> Self {
+    ///
+    /// `hitl_id` should be the ID returned from `hitl_create()` so that
+    /// the reply-scanner can correlate GitHub comment replies back to this event.
+    pub fn from_hitl_created(event: &NewHitlEvent, hitl_id: Option<String>) -> Self {
         Self {
             repo_name: event.repo_id.clone(),
             severity: event.severity.to_string(),
@@ -60,7 +63,7 @@ impl NotificationEvent {
             work_id: event.work_id.clone(),
             spec_id: event.spec_id.clone(),
             url: None,
-            hitl_id: None, // ID not yet assigned at creation time
+            hitl_id,
         }
     }
 
