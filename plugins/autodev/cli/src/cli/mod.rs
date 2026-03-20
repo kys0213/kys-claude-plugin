@@ -4,6 +4,7 @@ pub mod cron;
 pub mod decisions;
 pub mod hitl;
 pub mod queue;
+pub mod report;
 pub mod spec;
 pub mod worktree;
 
