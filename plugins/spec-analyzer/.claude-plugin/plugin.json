@@ -1,0 +1,18 @@
+{
+  "author": {
+    "name": "kys0213"
+  },
+  "commands": [
+    "./commands/spec-analyze.md"
+  ],
+  "agents": [
+    "./agents/spec-parser.md",
+    "./agents/structure-mapper.md",
+    "./agents/compliance-checker.md",
+    "./agents/security-reviewer.md",
+    "./agents/perf-reviewer.md"
+  ],
+  "description": "스펙 문서와 구현 코드 간 갭을 체계적으로 분석하는 플러그인",
+  "name": "spec-analyzer",
+  "version": "0.1.0"
+}
