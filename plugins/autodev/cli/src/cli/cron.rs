@@ -73,9 +73,16 @@ pub fn cron_add(
 ) -> Result<()> {
     let cron_schedule = match (interval, schedule) {
         (Some(secs), None) => CronSchedule::Interval { secs },
-        (None, Some(expr)) => CronSchedule::Expression {
-            cron: expr.to_string(),
-        },
+        (None, Some(expr)) => {
+            // Validate cron expression before storing
+            use cron::Schedule;
+            use std::str::FromStr;
+            Schedule::from_str(expr)
+                .map_err(|e| anyhow::anyhow!("invalid cron expression \"{expr}\": {e}"))?;
+            CronSchedule::Expression {
+                cron: expr.to_string(),
+            }
+        }
         (Some(_), Some(_)) => {
             anyhow::bail!("specify either --interval or --schedule, not both");
         }
@@ -283,7 +290,7 @@ fn global_cron_defs() -> Vec<BuiltinCronDef> {
             script_filename: "daily-report.sh",
             script_content: DAILY_REPORT_SH,
             schedule: CronSchedule::Expression {
-                cron: "0 6 * * *".to_string(),
+                cron: "0 0 6 * * * *".to_string(),
             },
         },
         BuiltinCronDef {
@@ -291,7 +298,7 @@ fn global_cron_defs() -> Vec<BuiltinCronDef> {
             script_filename: "log-cleanup.sh",
             script_content: LOG_CLEANUP_SH,
             schedule: CronSchedule::Expression {
-                cron: "0 0 * * *".to_string(),
+                cron: "0 0 0 * * * *".to_string(),
             },
         },
     ]

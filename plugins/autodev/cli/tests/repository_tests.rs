@@ -717,7 +717,7 @@ fn cron_add_with_expression_schedule() {
         name: "nightly".to_string(),
         repo_id: None,
         schedule: CronSchedule::Expression {
-            cron: "0 2 * * *".to_string(),
+            cron: "0 0 2 * * * *".to_string(),
         },
         script_path: "/usr/bin/echo".to_string(),
         builtin: false,
@@ -729,7 +729,7 @@ fn cron_add_with_expression_schedule() {
     assert_eq!(
         jobs[0].schedule,
         CronSchedule::Expression {
-            cron: "0 2 * * *".to_string()
+            cron: "0 0 2 * * * *".to_string()
         }
     );
 }
