@@ -891,6 +891,85 @@ pub fn spec_decisions(db: &Database, spec_id: &str, limit: usize, json: bool) ->
     Ok(output)
 }
 
+/// Check all active specs and auto-trigger completion for those whose linked issues are all done.
+///
+/// Returns a list of (spec_id, NewHitlEvent) for each spec that was transitioned to Completing.
+/// Errors on individual specs are logged and skipped.
+pub fn check_completable_specs(
+    db: &Database,
+    env: &dyn crate::core::config::Env,
+) -> Vec<(String, NewHitlEvent)> {
+    let active_specs = match db.spec_list_by_status(SpecStatus::Active) {
+        Ok(specs) => specs,
+        Err(e) => {
+            tracing::warn!("check_completable_specs: failed to list active specs: {e}");
+            return Vec::new();
+        }
+    };
+
+    let queue_items = match db.queue_list_items(None) {
+        Ok(items) => items,
+        Err(e) => {
+            tracing::warn!("check_completable_specs: failed to list queue items: {e}");
+            return Vec::new();
+        }
+    };
+
+    let mut triggered = Vec::new();
+
+    for spec in &active_specs {
+        let issues = match db.spec_issues(&spec.id) {
+            Ok(issues) => issues,
+            Err(e) => {
+                tracing::warn!(
+                    "check_completable_specs: failed to load issues for spec {}: {e}",
+                    spec.id
+                );
+                continue;
+            }
+        };
+
+        // Skip specs with no linked issues
+        if issues.is_empty() {
+            continue;
+        }
+
+        // Check if ALL linked issues are done or skipped in the queue
+        let all_done = issues.iter().all(|issue| {
+            let matching_item = queue_items.iter().find(|q| {
+                q.work_id.ends_with(&format!(":{}", issue.issue_number))
+                    && q.work_id.starts_with("issue:")
+            });
+            match matching_item {
+                Some(item) => item.phase == QueuePhase::Done || item.skip_reason.is_some(),
+                None => false, // Not in queue yet = not done
+            }
+        });
+
+        if all_done {
+            tracing::info!(
+                "spec auto-completion: all issues done for spec {} ('{}')",
+                spec.id,
+                spec.title
+            );
+            match spec_check_completion(db, env, &spec.id) {
+                Ok((_output, hitl_event)) => {
+                    tracing::info!("spec auto-completion: triggered HITL for spec {}", spec.id);
+                    triggered.push((spec.id.clone(), hitl_event));
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "spec auto-completion: failed to trigger completion for spec {}: {e}",
+                        spec.id
+                    );
+                }
+            }
+        }
+    }
+
+    triggered
+}
+
 /// 스펙의 repo에 대해 claw-evaluate를 즉시 트리거한다.
 pub fn spec_evaluate(db: &Database, id: &str) -> Result<String> {
     let spec = db
