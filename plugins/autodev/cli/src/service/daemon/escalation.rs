@@ -15,6 +15,8 @@ pub enum EscalationOutcome {
     Retry,
     /// 아이템을 제거한다. 기본 동작을 그대로 수행한다.
     Remove,
+    /// HITL 이벤트를 생성하고 아이템을 제거한다. 알림 발송이 필요하다.
+    RemoveWithHitl(NewHitlEvent),
 }
 
 /// 실패한 태스크에 대해 에스컬레이션을 수행한다.
@@ -56,7 +58,7 @@ pub fn escalate(
         }
         EscalationLevel::Hitl => {
             // HITL 이벤트 생성: 사람이 개입하도록 알린다.
-            if let Err(e) = db.hitl_create(&NewHitlEvent {
+            let hitl_event = NewHitlEvent {
                 repo_id: repo_id.to_string(),
                 spec_id: None,
                 work_id: Some(work_id.to_string()),
@@ -68,15 +70,19 @@ pub fn escalate(
                     "Skip and move on".to_string(),
                     "Reassign or replan".to_string(),
                 ],
-            }) {
-                tracing::warn!("failed to create HITL event for {work_id}: {e}");
+            };
+            match db.hitl_create(&hitl_event) {
+                Ok(_) => EscalationOutcome::RemoveWithHitl(hitl_event),
+                Err(e) => {
+                    tracing::warn!("failed to create HITL event for {work_id}: {e}");
+                    EscalationOutcome::Remove
+                }
             }
-            EscalationOutcome::Remove
         }
         EscalationLevel::Skip => EscalationOutcome::Remove,
         EscalationLevel::Replan => {
             // HITL 이벤트(replan) 생성: 스펙 수준 재계획 요청
-            if let Err(e) = db.hitl_create(&NewHitlEvent {
+            let hitl_event = NewHitlEvent {
                 repo_id: repo_id.to_string(),
                 spec_id: None,
                 work_id: Some(work_id.to_string()),
@@ -91,10 +97,14 @@ pub fn escalate(
                     "Force retry with current approach".to_string(),
                     "Abandon this task".to_string(),
                 ],
-            }) {
-                tracing::warn!("failed to create HITL event for {work_id}: {e}");
+            };
+            match db.hitl_create(&hitl_event) {
+                Ok(_) => EscalationOutcome::RemoveWithHitl(hitl_event),
+                Err(e) => {
+                    tracing::warn!("failed to create HITL event for {work_id}: {e}");
+                    EscalationOutcome::Remove
+                }
             }
-            EscalationOutcome::Remove
         }
     }
 }

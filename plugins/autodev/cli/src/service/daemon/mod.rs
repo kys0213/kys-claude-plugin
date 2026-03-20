@@ -183,21 +183,28 @@ impl Daemon {
                             );
 
                             // Escalation: 실패 시 failure_count 증가 → 레벨별 대응
+                            let mut escalation_hitl = None;
                             let escalation_retry =
                                 if let TaskStatus::Failed(ref msg) = task_result.status {
                                     match crate::cli::resolve_repo_id(
                                         &self.log_db,
                                         &task_result.repo_name,
                                     ) {
-                                        Ok(repo_id) => matches!(
-                                            escalation::escalate(
+                                        Ok(repo_id) => {
+                                            match escalation::escalate(
                                                 &self.log_db,
                                                 &task_result.work_id,
                                                 &repo_id,
                                                 msg,
-                                            ),
-                                            escalation::EscalationOutcome::Retry
-                                        ),
+                                            ) {
+                                                escalation::EscalationOutcome::Retry => true,
+                                                escalation::EscalationOutcome::Remove => false,
+                                                escalation::EscalationOutcome::RemoveWithHitl(event) => {
+                                                    escalation_hitl = Some(event);
+                                                    false
+                                                }
+                                            }
+                                        }
                                         Err(e) => {
                                             tracing::warn!(
                                                 "skipping escalation for {}: {e}",
@@ -235,6 +242,17 @@ impl Daemon {
                                         &task_result.repo_name,
                                         msg,
                                     );
+                                    let errors = dispatcher.dispatch(&notif).await;
+                                    for (ch, err) in &errors {
+                                        tracing::warn!("notification error ({ch}): {err}");
+                                    }
+                                }
+                            }
+
+                            // Notify on escalation-generated HITL event
+                            if let Some(ref hitl_event) = escalation_hitl {
+                                if let Some(ref dispatcher) = self.notifier {
+                                    let notif = NotificationEvent::from_hitl_created(hitl_event);
                                     let errors = dispatcher.dispatch(&notif).await;
                                     for (ch, err) in &errors {
                                         tracing::warn!("notification error ({ch}): {err}");
