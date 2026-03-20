@@ -883,19 +883,43 @@ fn build_hitl_feedback(
 ///
 /// `repo_name` is the human-readable name (e.g. "org/repo") used to query HITL events.
 /// `repo_id` is the internal UUID used for feedback pattern storage.
+///
+/// Uses `scan_cursors` with target `"feedback-hitl"` to track the last processed
+/// event's `created_at` timestamp, ensuring each HITL response is only processed once.
 pub fn collect_feedback(db: &Database, repo_name: &str, repo_id: &str) -> Result<String> {
     use crate::core::models::HitlStatus;
-    use crate::core::repository::HitlRepository;
+    use crate::core::repository::{HitlRepository, ScanCursorRepository};
+
+    let cursor_target = "feedback-hitl";
+    let last_seen = db.cursor_get_last_seen(repo_id, cursor_target)?;
 
     let events = db.hitl_list(Some(repo_name))?;
     let mut collected = 0;
     let mut total_responded = 0;
+    let mut max_created_at: Option<String> = None;
 
     for event in &events {
         if !matches!(event.status, HitlStatus::Responded) {
             continue;
         }
+
+        // Skip events already processed in a previous run
+        if let Some(ref cursor) = last_seen {
+            if event.created_at <= *cursor {
+                continue;
+            }
+        }
+
         total_responded += 1;
+
+        // Track the latest event timestamp for cursor update
+        match max_created_at {
+            None => max_created_at = Some(event.created_at.clone()),
+            Some(ref current) if event.created_at > *current => {
+                max_created_at = Some(event.created_at.clone());
+            }
+            _ => {}
+        }
 
         let responses = db.hitl_responses(&event.id)?;
         for resp in &responses {
@@ -907,6 +931,11 @@ pub fn collect_feedback(db: &Database, repo_name: &str, repo_id: &str) -> Result
                 collected += 1;
             }
         }
+    }
+
+    // Persist cursor so next run skips these events
+    if let Some(ref ts) = max_created_at {
+        db.cursor_upsert(repo_id, cursor_target, ts)?;
     }
 
     Ok(format!(
@@ -1210,6 +1239,9 @@ pub fn parse_convention_context(context: &str) -> Option<(String, String)> {
 /// - choice=2 ("Edit and apply"): use the response message as content
 /// - choice=3 ("Reject"): skip, mark pattern as Rejected
 ///
+/// After processing each event, its status is set to `Applied` so it is not
+/// re-processed on subsequent invocations.
+///
 /// Returns a summary string.
 pub fn apply_approved(
     db: &Database,
@@ -1259,6 +1291,7 @@ pub fn apply_approved(
                         &event.situation,
                         FeedbackPatternStatus::Applied,
                     )?;
+                    db.hitl_set_status(&event.id, HitlStatus::Applied)?;
                     applied += 1;
                 } else {
                     skipped += 1;
@@ -1278,6 +1311,7 @@ pub fn apply_approved(
                             &event.situation,
                             FeedbackPatternStatus::Applied,
                         )?;
+                        db.hitl_set_status(&event.id, HitlStatus::Applied)?;
                         applied += 1;
                     }
                 } else {
@@ -1292,6 +1326,7 @@ pub fn apply_approved(
                     &event.situation,
                     FeedbackPatternStatus::Rejected,
                 )?;
+                db.hitl_set_status(&event.id, HitlStatus::Applied)?;
                 rejected += 1;
             }
             _ => {

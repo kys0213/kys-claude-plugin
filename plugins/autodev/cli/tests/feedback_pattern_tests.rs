@@ -838,3 +838,42 @@ async fn collect_feedback_from_pr_reviews_deduplicates() {
     assert_eq!(patterns.len(), 1);
     assert_eq!(patterns[0].suggestion, "Please add tests");
 }
+
+// ═══════════════════════════════════════════════
+// 31. collect_feedback does not re-process already-seen events (cursor-based dedup)
+// ═══════════════════════════════════════════════
+
+#[test]
+fn collect_feedback_skips_already_processed_events() {
+    use autodev::core::models::NewHitlResponse;
+
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db, "org/dedup-test");
+
+    // Create and respond to a HITL event
+    let event_id = create_hitl_event(&db, &repo_id, "Build error in CI");
+    db.hitl_respond(&NewHitlResponse {
+        event_id: event_id.clone(),
+        choice: Some(1),
+        message: Some("Use anyhow for error handling".to_string()),
+        source: "cli".to_string(),
+    })
+    .unwrap();
+
+    // First collection
+    let output1 =
+        autodev::cli::convention::collect_feedback(&db, "org/dedup-test", &repo_id).unwrap();
+    assert!(output1.contains("Collected 1 feedback pattern(s) from 1 HITL responses"));
+
+    let patterns = db.feedback_list(&repo_id).unwrap();
+    assert_eq!(patterns[0].occurrence_count, 1);
+
+    // Second collection should skip the already-processed event
+    let output2 =
+        autodev::cli::convention::collect_feedback(&db, "org/dedup-test", &repo_id).unwrap();
+    assert!(output2.contains("Collected 0 feedback pattern(s) from 0 HITL responses"));
+
+    // occurrence_count should NOT have been incremented
+    let patterns = db.feedback_list(&repo_id).unwrap();
+    assert_eq!(patterns[0].occurrence_count, 1);
+}

@@ -114,7 +114,7 @@ pub fn respond(
         .hitl_show(id)?
         .ok_or_else(|| anyhow::anyhow!("HITL event not found: {id}"))?;
 
-    if matches!(event.status, HitlStatus::Responded) {
+    if matches!(event.status, HitlStatus::Responded | HitlStatus::Applied) {
         anyhow::bail!("HITL event already responded: {id}");
     }
 
