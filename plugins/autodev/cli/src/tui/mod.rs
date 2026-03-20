@@ -34,6 +34,9 @@ pub async fn run(db: &Database) -> Result<()> {
     let mut tailer = LogTailer::new(log_dir);
     state.log_lines = tailer.initial_load(LOG_TAIL_MAX_LINES);
 
+    // Cache repo names for navigation
+    state.refresh_repo_names(db);
+
     loop {
         // Poll for new log lines every render cycle
         let new_lines = tailer.poll_new_lines();
@@ -50,24 +53,45 @@ pub async fn run(db: &Database) -> Result<()> {
 
         if event::poll(std::time::Duration::from_millis(500))? {
             if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') => break,
-                    KeyCode::Tab => state.next_panel(),
-                    KeyCode::Char('j') | KeyCode::Down => state.next_item(),
-                    KeyCode::Char('k') | KeyCode::Up => state.prev_item(),
-                    KeyCode::Char('r') => {
-                        handle_retry(db, &mut state);
+                // If overlay is showing, only handle dismiss keys
+                if state.detail_overlay.is_some() {
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => state.dismiss_overlay(),
+                        _ => {}
                     }
-                    KeyCode::Char('s') => {
-                        handle_skip(db, &mut state);
+                } else {
+                    match key.code {
+                        KeyCode::Char('q') => {
+                            if state.handle_quit() {
+                                break;
+                            }
+                        }
+                        KeyCode::Esc => {
+                            if state.handle_quit() {
+                                break;
+                            }
+                        }
+                        KeyCode::Tab => state.toggle_view_mode(),
+                        KeyCode::Char('j') | KeyCode::Down => state.next_item(),
+                        KeyCode::Char('k') | KeyCode::Up => state.prev_item(),
+                        KeyCode::Left => state.prev_repo(),
+                        KeyCode::Right => state.next_repo(),
+                        KeyCode::Enter => state.enter_selected(),
+                        KeyCode::Char('h') => state.show_hitl(),
+                        KeyCode::Char('s') => state.show_spec_detail(),
+                        KeyCode::Char('d') => state.show_claw_history(),
+                        KeyCode::Char('r') => {
+                            handle_retry(db, &mut state);
+                        }
+                        KeyCode::Char('R') => {
+                            // Refresh: reload log file from scratch
+                            state.log_lines = tailer.initial_load(LOG_TAIL_MAX_LINES);
+                            state.refresh_repo_names(db);
+                            state.set_status("Refreshed".to_string());
+                        }
+                        KeyCode::Char('?') => state.toggle_help(),
+                        _ => {}
                     }
-                    KeyCode::Char('R') => {
-                        // Refresh: reload log file from scratch
-                        state.log_lines = tailer.initial_load(LOG_TAIL_MAX_LINES);
-                        state.set_status("Refreshed".to_string());
-                    }
-                    KeyCode::Char('?') => state.toggle_help(),
-                    _ => {}
                 }
 
                 // Clear transient status messages on any keypress (except the one that set it)
@@ -86,8 +110,4 @@ pub async fn run(db: &Database) -> Result<()> {
 
 fn handle_retry(_db: &Database, state: &mut views::AppState) {
     state.set_status("Retry via GitHub: remove autodev:wip label".to_string());
-}
-
-fn handle_skip(_db: &Database, state: &mut views::AppState) {
-    state.set_status("Skip via GitHub: add autodev:skip label".to_string());
 }

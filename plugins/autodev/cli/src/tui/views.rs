@@ -19,6 +19,30 @@ pub enum Panel {
     Logs,
 }
 
+// ─── View mode ───
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ViewMode {
+    /// All repos overview (default)
+    AllRepos,
+    /// Per-repo detail view
+    PerRepo,
+}
+
+// ─── Detail overlay ───
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DetailOverlay {
+    /// Show detail for a specific active item
+    ItemDetail(usize),
+    /// Show HITL pending items
+    Hitl,
+    /// Show spec detail with acceptance criteria
+    SpecDetail,
+    /// Show Claw decision history
+    ClawHistory,
+}
+
 // ─── Active queue item for display ───
 
 #[derive(Debug, Clone)]
@@ -50,6 +74,13 @@ pub struct AppState {
     pub show_help: bool,
     pub log_lines: Vec<LogLine>,
     pub status_message: Option<String>,
+    pub view_mode: ViewMode,
+    /// Index of the currently focused repo (used in per-repo view and for Enter navigation)
+    pub focused_repo_index: usize,
+    /// Cached repo names for navigation
+    pub repo_names: Vec<String>,
+    /// Detail overlay (shown on top of the current view)
+    pub detail_overlay: Option<DetailOverlay>,
 }
 
 #[derive(Debug, Clone)]
@@ -76,6 +107,10 @@ impl Default for AppState {
             show_help: false,
             log_lines: Vec::new(),
             status_message: None,
+            view_mode: ViewMode::AllRepos,
+            focused_repo_index: 0,
+            repo_names: Vec::new(),
+            detail_overlay: None,
         }
     }
 }
@@ -113,6 +148,117 @@ impl AppState {
 
     pub fn clear_status(&mut self) {
         self.status_message = None;
+    }
+
+    /// Switch between AllRepos and PerRepo views.
+    /// In AllRepos: Tab switches to PerRepo for the selected repo.
+    /// In PerRepo: Tab switches back to AllRepos.
+    pub fn toggle_view_mode(&mut self) {
+        match self.view_mode {
+            ViewMode::AllRepos => {
+                // Enter per-repo view for the currently selected repo
+                if self.active_panel == Panel::Repos {
+                    self.focused_repo_index = self.selected_index;
+                }
+                self.view_mode = ViewMode::PerRepo;
+                self.selected_index = 0;
+                self.detail_overlay = None;
+            }
+            ViewMode::PerRepo => {
+                self.view_mode = ViewMode::AllRepos;
+                self.selected_index = self.focused_repo_index;
+                self.active_panel = Panel::Repos;
+                self.detail_overlay = None;
+            }
+        }
+    }
+
+    /// Enter key: in AllRepos with Repos panel, go to per-repo detail.
+    /// In ActiveItems panel, show item detail overlay.
+    pub fn enter_selected(&mut self) {
+        match self.view_mode {
+            ViewMode::AllRepos => {
+                if self.active_panel == Panel::Repos {
+                    self.focused_repo_index = self.selected_index;
+                    self.view_mode = ViewMode::PerRepo;
+                    self.selected_index = 0;
+                } else if self.active_panel == Panel::ActiveItems {
+                    self.detail_overlay = Some(DetailOverlay::ItemDetail(self.selected_index));
+                }
+            }
+            ViewMode::PerRepo => {
+                if self.active_panel == Panel::ActiveItems {
+                    self.detail_overlay = Some(DetailOverlay::ItemDetail(self.selected_index));
+                }
+            }
+        }
+    }
+
+    /// Navigate to next repo in per-repo view (Right arrow).
+    pub fn next_repo(&mut self) {
+        if self.view_mode == ViewMode::PerRepo && !self.repo_names.is_empty() {
+            self.focused_repo_index = (self.focused_repo_index + 1) % self.repo_names.len();
+            self.selected_index = 0;
+            self.detail_overlay = None;
+        }
+    }
+
+    /// Navigate to previous repo in per-repo view (Left arrow).
+    pub fn prev_repo(&mut self) {
+        if self.view_mode == ViewMode::PerRepo && !self.repo_names.is_empty() {
+            if self.focused_repo_index == 0 {
+                self.focused_repo_index = self.repo_names.len() - 1;
+            } else {
+                self.focused_repo_index -= 1;
+            }
+            self.selected_index = 0;
+            self.detail_overlay = None;
+        }
+    }
+
+    /// Show HITL overlay.
+    pub fn show_hitl(&mut self) {
+        self.detail_overlay = Some(DetailOverlay::Hitl);
+    }
+
+    /// Show spec detail overlay.
+    pub fn show_spec_detail(&mut self) {
+        self.detail_overlay = Some(DetailOverlay::SpecDetail);
+    }
+
+    /// Show Claw decision history overlay.
+    pub fn show_claw_history(&mut self) {
+        self.detail_overlay = Some(DetailOverlay::ClawHistory);
+    }
+
+    /// Dismiss any detail overlay.
+    pub fn dismiss_overlay(&mut self) {
+        self.detail_overlay = None;
+    }
+
+    /// Handle 'q' key: in per-repo view go back to all-repos, in all-repos quit (returns true).
+    pub fn handle_quit(&mut self) -> bool {
+        if self.detail_overlay.is_some() {
+            self.detail_overlay = None;
+            return false;
+        }
+        match self.view_mode {
+            ViewMode::PerRepo => {
+                self.view_mode = ViewMode::AllRepos;
+                self.selected_index = self.focused_repo_index;
+                self.active_panel = Panel::Repos;
+                false
+            }
+            ViewMode::AllRepos => true,
+        }
+    }
+
+    /// Update cached repo names from DB.
+    pub fn refresh_repo_names(&mut self, db: &Database) {
+        self.repo_names = db
+            .repo_status_summary()
+            .map(|rows| rows.into_iter().map(|r| r.name).collect())
+            .unwrap_or_default();
     }
 }
 
@@ -161,12 +307,12 @@ pub fn render(f: &mut Frame, db: &Database, status_path: &std::path::Path, state
         ])
         .split(f.area());
 
-    render_header(f, chunks[0], db);
+    render_header(f, chunks[0], db, state);
     render_body(f, chunks[1], db, status_path, state);
     render_footer(f, chunks[2], state);
 }
 
-fn render_header(f: &mut Frame, area: Rect, db: &Database) {
+fn render_header(f: &mut Frame, area: Rect, db: &Database, state: &AppState) {
     let home = crate::core::config::autodev_home(&crate::core::config::RealEnv);
     let running = crate::service::daemon::pid::is_running(&home);
     let status = if running {
@@ -177,6 +323,28 @@ fn render_header(f: &mut Frame, area: Rect, db: &Database) {
 
     let repo_count = db.repo_status_summary().map(|v| v.len()).unwrap_or(0);
 
+    let view_indicator = match state.view_mode {
+        ViewMode::AllRepos => Span::styled(
+            " [All Repos] ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        ViewMode::PerRepo => {
+            let repo_name = state
+                .repo_names
+                .get(state.focused_repo_index)
+                .map(|s| s.as_str())
+                .unwrap_or("?");
+            Span::styled(
+                format!(" [Repo: {repo_name}] "),
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            )
+        }
+    };
+
     let header = Paragraph::new(Line::from(vec![
         Span::styled(
             " autodev v0.1.0 ",
@@ -184,7 +352,9 @@ fn render_header(f: &mut Frame, area: Rect, db: &Database) {
         ),
         Span::raw("  "),
         status,
-        Span::raw(format!("  │  {repo_count} repos  │  [?] help")),
+        Span::raw(format!("  │  {repo_count} repos  │  ")),
+        view_indicator,
+        Span::raw("  │  [?] help"),
     ]))
     .block(Block::default().borders(Borders::ALL));
 
@@ -192,6 +362,40 @@ fn render_header(f: &mut Frame, area: Rect, db: &Database) {
 }
 
 fn render_body(
+    f: &mut Frame,
+    area: Rect,
+    db: &Database,
+    status_path: &std::path::Path,
+    state: &AppState,
+) {
+    match state.view_mode {
+        ViewMode::AllRepos => render_body_all_repos(f, area, db, status_path, state),
+        ViewMode::PerRepo => render_body_per_repo(f, area, db, status_path, state),
+    }
+
+    // Render detail overlay on top if present
+    if let Some(ref overlay) = state.detail_overlay {
+        render_detail_overlay(f, area, db, status_path, state, overlay);
+    }
+
+    // Render status message overlay if present
+    if let Some(ref msg) = state.status_message {
+        let msg_area = Rect {
+            x: area.x + 2,
+            y: area.y + area.height.saturating_sub(2),
+            width: area.width.saturating_sub(4).min(msg.len() as u16 + 4),
+            height: 1,
+        };
+        let status = Paragraph::new(msg.as_str()).style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
+        f.render_widget(status, msg_area);
+    }
+}
+
+fn render_body_all_repos(
     f: &mut Frame,
     area: Rect,
     db: &Database,
@@ -221,22 +425,361 @@ fn render_body(
     render_active_items_panel(f, detail_chunks[0], status_path, state);
     render_labels_panel(f, detail_chunks[1], status_path, state);
     render_logs_panel(f, detail_chunks[2], state);
+}
 
-    // Render status message overlay if present
-    if let Some(ref msg) = state.status_message {
-        let msg_area = Rect {
-            x: area.x + 2,
-            y: area.y + area.height.saturating_sub(2),
-            width: area.width.saturating_sub(4).min(msg.len() as u16 + 4),
-            height: 1,
-        };
-        let status = Paragraph::new(msg.as_str()).style(
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        );
-        f.render_widget(status, msg_area);
+fn render_body_per_repo(
+    f: &mut Frame,
+    area: Rect,
+    db: &Database,
+    status_path: &std::path::Path,
+    state: &AppState,
+) {
+    let repo_name = state
+        .repo_names
+        .get(state.focused_repo_index)
+        .cloned()
+        .unwrap_or_default();
+
+    let home = crate::core::config::autodev_home(&crate::core::config::RealEnv);
+    let board_state = crate::tui::board::BoardStateBuilder::build(db, Some(&repo_name), &home).ok();
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(40), // board / specs
+            Constraint::Percentage(30), // active items (filtered)
+            Constraint::Percentage(30), // logs
+        ])
+        .split(area);
+
+    // Top: Spec + kanban summary for this repo
+    render_repo_board_panel(f, chunks[0], &repo_name, board_state.as_ref(), state);
+
+    // Middle: Active items filtered to this repo
+    render_active_items_filtered(f, chunks[1], status_path, &repo_name, state);
+
+    // Bottom: Logs
+    render_logs_panel(f, chunks[2], state);
+}
+
+fn render_repo_board_panel(
+    f: &mut Frame,
+    area: Rect,
+    repo_name: &str,
+    board_state: Option<&crate::core::board::BoardState>,
+    state: &AppState,
+) {
+    let mut lines: Vec<Line> = Vec::new();
+
+    if let Some(bs) = board_state {
+        if let Some(repo) = bs.repos.iter().find(|r| r.repo_name == repo_name) {
+            // Specs
+            for (i, spec) in repo.specs.iter().enumerate() {
+                let selected = state.active_panel == Panel::Repos && i == state.selected_index;
+                let prefix = if selected { "▸ " } else { "  " };
+                let hitl_str = if spec.hitl_count > 0 {
+                    format!("  HITL: {}", spec.hitl_count)
+                } else {
+                    String::new()
+                };
+                let style = if selected {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        "{prefix}{} [{}] {}{hitl_str}",
+                        spec.title, spec.status, spec.progress
+                    ),
+                    style,
+                )));
+                if let Some(ref ac) = spec.acceptance_criteria {
+                    for ac_line in ac.lines().filter(|l| !l.trim().is_empty()) {
+                        lines.push(Line::from(Span::styled(
+                            format!("    {ac_line}"),
+                            Style::default().fg(Color::DarkGray),
+                        )));
+                    }
+                }
+            }
+
+            // Kanban summary
+            if !repo.columns.is_empty() {
+                lines.push(Line::from(""));
+                let col_summary: Vec<String> = repo
+                    .columns
+                    .iter()
+                    .map(|c| format!("{}: {}", c.name, c.items.len()))
+                    .collect();
+                lines.push(Line::from(Span::styled(
+                    format!("  Kanban: {}", col_summary.join(" | ")),
+                    Style::default().fg(Color::Cyan),
+                )));
+            }
+
+            // Orphan issues
+            if !repo.orphan_issues.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    format!("  Unlinked issues: {}", repo.orphan_issues.len()),
+                    Style::default().fg(Color::Yellow),
+                )));
+            }
+        } else {
+            lines.push(Line::from(Span::raw("  No data for this repo")));
+        }
+    } else {
+        lines.push(Line::from(Span::raw("  Loading...")));
     }
+
+    let nav_hint = if state.repo_names.len() > 1 {
+        format!(
+            " ({}/{}) ←/→ switch repo ",
+            state.focused_repo_index + 1,
+            state.repo_names.len()
+        )
+    } else {
+        String::new()
+    };
+
+    let block = Block::default()
+        .title(format!(" {repo_name}{nav_hint}"))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Magenta));
+
+    let paragraph = Paragraph::new(lines).block(block);
+    f.render_widget(paragraph, area);
+}
+
+fn render_active_items_filtered(
+    f: &mut Frame,
+    area: Rect,
+    status_path: &std::path::Path,
+    repo_name: &str,
+    state: &AppState,
+) {
+    let all_items = query_active_items(status_path);
+    let filtered: Vec<&ActiveItem> = all_items
+        .iter()
+        .filter(|item| item.repo_name == repo_name)
+        .collect();
+
+    let items: Vec<ListItem> = filtered
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let status_color = match item.status.as_str() {
+                "Pending" => Color::White,
+                "Analyzing" | "Reviewing" | "Merging" => Color::Cyan,
+                "Ready" | "ReviewDone" => Color::Green,
+                "Implementing" | "Improving" | "Conflict" => Color::Yellow,
+                "Improved" => Color::Blue,
+                _ => Color::DarkGray,
+            };
+
+            let selected = state.active_panel == Panel::ActiveItems && i == state.selected_index;
+            let line_style = if selected {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+
+            let prefix = if selected { "▸" } else { " " };
+            let type_icon = match item.queue_type.as_str() {
+                "issue" => "I",
+                "pr" => "P",
+                "merge" => "M",
+                _ => "?",
+            };
+
+            let title = truncate_str(&item.title, 40);
+
+            ListItem::new(Line::from(vec![
+                Span::raw(format!("{prefix} ")),
+                Span::styled(
+                    format!("[{type_icon}]"),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::raw(format!(" #{} ", item.number)),
+                Span::styled(
+                    format!("{:<12}", item.status),
+                    Style::default().fg(status_color),
+                ),
+                Span::styled(title, Style::default().fg(Color::White)),
+            ]))
+            .style(line_style)
+        })
+        .collect();
+
+    let count = filtered.len();
+    let border_style = if state.active_panel == Panel::ActiveItems {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
+
+    let list = List::new(items).block(
+        Block::default()
+            .title(format!(" Active Items ({count}) "))
+            .borders(Borders::ALL)
+            .border_style(border_style),
+    );
+
+    f.render_widget(list, area);
+}
+
+fn render_detail_overlay(
+    f: &mut Frame,
+    area: Rect,
+    db: &Database,
+    status_path: &std::path::Path,
+    state: &AppState,
+    overlay: &DetailOverlay,
+) {
+    // Center overlay in the body area
+    let overlay_area = centered_rect(70, 60, area);
+
+    let (title, lines) = match overlay {
+        DetailOverlay::ItemDetail(idx) => {
+            let items = query_active_items(status_path);
+            if let Some(item) = items.get(*idx) {
+                (
+                    format!(" {} #{} ", item.repo_name, item.number),
+                    vec![
+                        Line::from(Span::styled(
+                            item.title.clone(),
+                            Style::default().add_modifier(Modifier::BOLD),
+                        )),
+                        Line::from(""),
+                        Line::from(format!("  Type:   {}", item.queue_type.as_str())),
+                        Line::from(format!("  Status: {}", item.status)),
+                        Line::from(format!("  Repo:   {}", item.repo_name)),
+                        Line::from(""),
+                        Line::from(Span::styled(
+                            "  Press q/Esc to close",
+                            Style::default().fg(Color::DarkGray),
+                        )),
+                    ],
+                )
+            } else {
+                (" Detail ".to_string(), vec![Line::from("  Item not found")])
+            }
+        }
+        DetailOverlay::Hitl => {
+            let home = crate::core::config::autodev_home(&crate::core::config::RealEnv);
+            let board = crate::tui::board::BoardStateBuilder::build(db, None, &home).ok();
+            let pending = board.as_ref().map(|b| b.hitl_summary.pending).unwrap_or(0);
+            let total = board.as_ref().map(|b| b.hitl_summary.total).unwrap_or(0);
+            (
+                " HITL Items ".to_string(),
+                vec![
+                    Line::from(format!("  Pending: {pending}")),
+                    Line::from(format!("  Total:   {total}")),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "  Use 'autodev hitl respond' in another terminal to act.",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "  Press q/Esc to close",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                ],
+            )
+        }
+        DetailOverlay::SpecDetail => {
+            let repo_filter = if state.view_mode == ViewMode::PerRepo {
+                state
+                    .repo_names
+                    .get(state.focused_repo_index)
+                    .map(|s| s.as_str())
+            } else {
+                None
+            };
+            let home = crate::core::config::autodev_home(&crate::core::config::RealEnv);
+            let board = crate::tui::board::BoardStateBuilder::build(db, repo_filter, &home).ok();
+            let mut detail_lines = Vec::new();
+            if let Some(bs) = board.as_ref() {
+                for repo in &bs.repos {
+                    detail_lines.push(Line::from(Span::styled(
+                        format!("  {}", repo.repo_name),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )));
+                    for spec in &repo.specs {
+                        detail_lines.push(Line::from(format!(
+                            "    {} [{}] {}",
+                            spec.title, spec.status, spec.progress
+                        )));
+                        if let Some(ref ac) = spec.acceptance_criteria {
+                            for ac_line in ac.lines().filter(|l| !l.trim().is_empty()) {
+                                detail_lines.push(Line::from(Span::styled(
+                                    format!("      {ac_line}"),
+                                    Style::default().fg(Color::DarkGray),
+                                )));
+                            }
+                        }
+                    }
+                    detail_lines.push(Line::from(""));
+                }
+            }
+            if detail_lines.is_empty() {
+                detail_lines.push(Line::from("  No specs found"));
+            }
+            detail_lines.push(Line::from(Span::styled(
+                "  Press q/Esc to close",
+                Style::default().fg(Color::DarkGray),
+            )));
+            (" Spec Detail ".to_string(), detail_lines)
+        }
+        DetailOverlay::ClawHistory => (
+            " Claw Decision History ".to_string(),
+            vec![
+                Line::from("  Decision history is shown in the Activity Log."),
+                Line::from("  Filter log lines containing 'claw' or 'decision'."),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Press q/Esc to close",
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ],
+        ),
+    };
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::Black));
+
+    let paragraph = Paragraph::new(lines).block(block);
+    f.render_widget(paragraph, overlay_area);
+}
+
+/// Create a centered Rect using percentages of the parent area.
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(area);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }
 
 fn render_repos_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppState) {
@@ -481,10 +1024,26 @@ fn render_logs_panel(f: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn render_footer(f: &mut Frame, area: Rect, state: &AppState) {
-    let text = if state.show_help {
-        " Tab:panel  j/k:navigate  r:retry  s:skip  R:refresh  q:quit  ?:close help "
+    let text = if state.detail_overlay.is_some() {
+        " q/Esc:close overlay "
+    } else if state.show_help {
+        match state.view_mode {
+            ViewMode::AllRepos => {
+                " Tab:per-repo  j/k:navigate  Enter:detail  h:hitl  s:specs  d:claw  r:retry  R:refresh  q:quit  ?:close "
+            }
+            ViewMode::PerRepo => {
+                " Tab:all-repos  ←/→:switch repo  j/k:navigate  Enter:detail  h:hitl  s:specs  d:claw  q:back  ?:close "
+            }
+        }
     } else {
-        " Tab:panel  j/k:navigate  r:retry  s:skip  R:refresh  q:quit  ?:help "
+        match state.view_mode {
+            ViewMode::AllRepos => {
+                " Tab:per-repo  j/k:nav  Enter:select  h:hitl  s:specs  d:claw  q:quit  ?:help "
+            }
+            ViewMode::PerRepo => {
+                " Tab:all-repos  ←/→:repo  j/k:nav  Enter:select  h:hitl  s:specs  q:back  ?:help "
+            }
+        }
     };
 
     let footer = Paragraph::new(text).style(Style::default().fg(Color::DarkGray));
@@ -510,5 +1069,148 @@ fn truncate_str(s: &str, max_chars: usize) -> String {
         format!("{truncated}…")
     } else {
         s.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state_with_repos(names: &[&str]) -> AppState {
+        let mut state = AppState::new();
+        state.repo_names = names.iter().map(|s| s.to_string()).collect();
+        state
+    }
+
+    #[test]
+    fn toggle_view_mode_switches_between_all_and_per_repo() {
+        let mut state = state_with_repos(&["org/a", "org/b"]);
+        assert_eq!(state.view_mode, ViewMode::AllRepos);
+
+        state.active_panel = Panel::Repos;
+        state.selected_index = 1;
+        state.toggle_view_mode();
+        assert_eq!(state.view_mode, ViewMode::PerRepo);
+        assert_eq!(state.focused_repo_index, 1);
+        assert_eq!(state.selected_index, 0);
+
+        state.toggle_view_mode();
+        assert_eq!(state.view_mode, ViewMode::AllRepos);
+        assert_eq!(state.selected_index, 1);
+        assert_eq!(state.active_panel, Panel::Repos);
+    }
+
+    #[test]
+    fn enter_selected_in_repos_panel_switches_to_per_repo() {
+        let mut state = state_with_repos(&["org/a", "org/b"]);
+        state.active_panel = Panel::Repos;
+        state.selected_index = 0;
+
+        state.enter_selected();
+        assert_eq!(state.view_mode, ViewMode::PerRepo);
+        assert_eq!(state.focused_repo_index, 0);
+    }
+
+    #[test]
+    fn enter_selected_in_active_items_opens_overlay() {
+        let mut state = state_with_repos(&["org/a"]);
+        state.active_panel = Panel::ActiveItems;
+        state.selected_index = 2;
+
+        state.enter_selected();
+        assert_eq!(state.detail_overlay, Some(DetailOverlay::ItemDetail(2)));
+    }
+
+    #[test]
+    fn next_prev_repo_wraps_around() {
+        let mut state = state_with_repos(&["org/a", "org/b", "org/c"]);
+        state.view_mode = ViewMode::PerRepo;
+        state.focused_repo_index = 0;
+
+        state.next_repo();
+        assert_eq!(state.focused_repo_index, 1);
+
+        state.next_repo();
+        assert_eq!(state.focused_repo_index, 2);
+
+        state.next_repo();
+        assert_eq!(state.focused_repo_index, 0); // wrap
+
+        state.prev_repo();
+        assert_eq!(state.focused_repo_index, 2); // wrap back
+    }
+
+    #[test]
+    fn next_prev_repo_noop_in_all_repos_mode() {
+        let mut state = state_with_repos(&["org/a", "org/b"]);
+        state.view_mode = ViewMode::AllRepos;
+        state.focused_repo_index = 0;
+
+        state.next_repo();
+        assert_eq!(state.focused_repo_index, 0); // no change
+
+        state.prev_repo();
+        assert_eq!(state.focused_repo_index, 0); // no change
+    }
+
+    #[test]
+    fn handle_quit_in_per_repo_goes_back() {
+        let mut state = state_with_repos(&["org/a"]);
+        state.view_mode = ViewMode::PerRepo;
+        state.focused_repo_index = 0;
+
+        let should_exit = state.handle_quit();
+        assert!(!should_exit);
+        assert_eq!(state.view_mode, ViewMode::AllRepos);
+    }
+
+    #[test]
+    fn handle_quit_in_all_repos_exits() {
+        let mut state = state_with_repos(&["org/a"]);
+        state.view_mode = ViewMode::AllRepos;
+
+        let should_exit = state.handle_quit();
+        assert!(should_exit);
+    }
+
+    #[test]
+    fn handle_quit_dismisses_overlay_first() {
+        let mut state = state_with_repos(&["org/a"]);
+        state.view_mode = ViewMode::AllRepos;
+        state.detail_overlay = Some(DetailOverlay::Hitl);
+
+        let should_exit = state.handle_quit();
+        assert!(!should_exit);
+        assert!(state.detail_overlay.is_none());
+
+        // Now quit should exit
+        let should_exit = state.handle_quit();
+        assert!(should_exit);
+    }
+
+    #[test]
+    fn shortcut_keys_set_overlays() {
+        let mut state = AppState::new();
+
+        state.show_hitl();
+        assert_eq!(state.detail_overlay, Some(DetailOverlay::Hitl));
+
+        state.show_spec_detail();
+        assert_eq!(state.detail_overlay, Some(DetailOverlay::SpecDetail));
+
+        state.show_claw_history();
+        assert_eq!(state.detail_overlay, Some(DetailOverlay::ClawHistory));
+
+        state.dismiss_overlay();
+        assert!(state.detail_overlay.is_none());
+    }
+
+    #[test]
+    fn toggle_view_mode_clears_overlay() {
+        let mut state = state_with_repos(&["org/a"]);
+        state.detail_overlay = Some(DetailOverlay::Hitl);
+
+        state.toggle_view_mode();
+        assert!(state.detail_overlay.is_none());
     }
 }
