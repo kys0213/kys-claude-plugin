@@ -525,11 +525,13 @@ impl std::str::FromStr for HitlSeverity {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HitlStatus {
     Pending,
     Responded,
     Expired,
+    /// The HITL response has been consumed/applied (e.g., convention rule written).
+    Applied,
 }
 
 impl fmt::Display for HitlStatus {
@@ -538,6 +540,7 @@ impl fmt::Display for HitlStatus {
             HitlStatus::Pending => write!(f, "pending"),
             HitlStatus::Responded => write!(f, "responded"),
             HitlStatus::Expired => write!(f, "expired"),
+            HitlStatus::Applied => write!(f, "applied"),
         }
     }
 }
@@ -550,6 +553,7 @@ impl std::str::FromStr for HitlStatus {
             "pending" => Ok(Self::Pending),
             "responded" => Ok(Self::Responded),
             "expired" => Ok(Self::Expired),
+            "applied" => Ok(Self::Applied),
             _ => Err(format!("invalid hitl status: {s}")),
         }
     }

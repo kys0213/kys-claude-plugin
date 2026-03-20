@@ -217,7 +217,7 @@ fn apply_approved_updates_pattern_status_to_rejected() {
 }
 
 // ═══════════════════════════════════════════════
-// 7. Idempotency: already-applied patterns are skipped
+// 7. Idempotency: already-applied events are skipped on second run
 // ═══════════════════════════════════════════════
 
 #[test]
@@ -233,10 +233,11 @@ fn apply_approved_idempotent_already_applied() {
     let output1 = apply_approved(&db, "org/idempotent-test", &repo_id, tmp.path()).unwrap();
     assert!(output1.contains("1 applied"));
 
-    // Second apply - same events are still responded, so it applies again (appending)
-    // but the key behavior is that it doesn't error out
+    // Second apply - HITL event is now marked as Applied, so it is skipped
     let output2 = apply_approved(&db, "org/idempotent-test", &repo_id, tmp.path()).unwrap();
-    assert!(output2.contains("applied"));
+    assert!(output2.contains("0 applied"));
+    assert!(output2.contains("0 rejected"));
+    assert!(output2.contains("0 skipped"));
 }
 
 // ═══════════════════════════════════════════════
@@ -302,4 +303,50 @@ fn apply_approved_choice_2_empty_message_skips() {
 
     let rule_path = tmp.path().join(".claude/rules/testing.md");
     assert!(!rule_path.exists());
+}
+
+// ═══════════════════════════════════════════════
+// 11. apply_approved marks HITL event status to Applied
+// ═══════════════════════════════════════════════
+
+#[test]
+fn apply_approved_marks_hitl_event_as_applied() {
+    use autodev::core::models::HitlStatus;
+    use autodev::core::repository::HitlRepository;
+
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db, "org/hitl-status-test");
+    let tmp = TempDir::new().unwrap();
+
+    let event_id = create_convention_hitl(&db, &repo_id, "error-handling");
+    respond_hitl(&db, &event_id, 1, None);
+
+    apply_approved(&db, "org/hitl-status-test", &repo_id, tmp.path()).unwrap();
+
+    // HITL event should now have Applied status
+    let event = db.hitl_show(&event_id).unwrap().unwrap();
+    assert_eq!(event.status, HitlStatus::Applied);
+}
+
+// ═══════════════════════════════════════════════
+// 12. apply_approved marks rejected HITL event as Applied too
+// ═══════════════════════════════════════════════
+
+#[test]
+fn apply_approved_marks_rejected_hitl_event_as_applied() {
+    use autodev::core::models::HitlStatus;
+    use autodev::core::repository::HitlRepository;
+
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db, "org/hitl-reject-status-test");
+    let tmp = TempDir::new().unwrap();
+
+    let event_id = create_convention_hitl(&db, &repo_id, "style");
+    respond_hitl(&db, &event_id, 3, None);
+
+    apply_approved(&db, "org/hitl-reject-status-test", &repo_id, tmp.path()).unwrap();
+
+    // HITL event should be Applied (consumed), regardless of rejection
+    let event = db.hitl_show(&event_id).unwrap().unwrap();
+    assert_eq!(event.status, HitlStatus::Applied);
 }
