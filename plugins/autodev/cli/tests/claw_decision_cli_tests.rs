@@ -63,7 +63,8 @@ fn cli_list_json_returns_valid_json() {
     let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
     assert!(parsed.is_array());
     assert_eq!(parsed.as_array().unwrap().len(), 1);
-    assert_eq!(parsed[0]["decision_type"], "skip");
+    assert_eq!(parsed[0]["action"], "skip");
+    assert_eq!(parsed[0]["confidence"], 1.0);
 }
 
 #[test]
@@ -131,7 +132,8 @@ fn cli_show_json_returns_valid_json() {
     let output = decisions::show(&db, &id, true).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
     assert_eq!(parsed["id"], id);
-    assert_eq!(parsed["decision_type"], "replan");
+    assert_eq!(parsed["action"], "replan");
+    assert_eq!(parsed["confidence"], 1.0);
 }
 
 #[test]

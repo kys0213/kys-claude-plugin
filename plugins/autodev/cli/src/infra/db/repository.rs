@@ -1520,6 +1520,7 @@ fn map_decision_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClawDecision> {
         })?,
         target_work_id: row.get(4)?,
         reasoning: row.get(5)?,
+        confidence: 1.0,
         context_json: row.get(6)?,
         created_at: row.get(7)?,
     })

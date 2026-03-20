@@ -797,11 +797,20 @@ pub struct ClawDecision {
     pub id: String,
     pub repo_id: String,
     pub spec_id: Option<String>,
+    #[serde(rename = "action")]
     pub decision_type: DecisionType,
     pub target_work_id: Option<String>,
     pub reasoning: String,
+    /// Spec 12 requires a confidence field in JSON output.
+    /// Not stored in DB; defaults to 1.0.
+    #[serde(default = "default_confidence")]
+    pub confidence: f64,
     pub context_json: Option<String>,
     pub created_at: String,
+}
+
+fn default_confidence() -> f64 {
+    1.0
 }
 
 pub struct NewClawDecision {
