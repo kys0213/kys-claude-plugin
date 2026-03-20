@@ -3,8 +3,8 @@
   "results": [
     {
       "plugin": "autodev",
-      "old_version": "0.33.1",
-      "new_version": "0.33.2",
+      "old_version": "0.33.2",
+      "new_version": "0.34.0",
       "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/autodev/.claude-plugin/plugin.json",
       "marketplace_updated": true,
       "cargo_toml_updated": true
