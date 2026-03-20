@@ -81,6 +81,7 @@ pub struct AppState {
     pub repo_names: Vec<String>,
     /// Detail overlay (shown on top of the current view)
     pub detail_overlay: Option<DetailOverlay>,
+    pub repo_filter: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +112,7 @@ impl Default for AppState {
             focused_repo_index: 0,
             repo_names: Vec::new(),
             detail_overlay: None,
+            repo_filter: None,
         }
     }
 }
@@ -826,7 +828,15 @@ fn render_active_items_panel(
     status_path: &std::path::Path,
     state: &AppState,
 ) {
-    let active_items = query_active_items(status_path);
+    let all_items = query_active_items(status_path);
+    let active_items: Vec<&ActiveItem> = if let Some(ref filter) = state.repo_filter {
+        all_items
+            .iter()
+            .filter(|i| i.repo_name == *filter)
+            .collect()
+    } else {
+        all_items.iter().collect()
+    };
 
     let items: Vec<ListItem> = active_items
         .iter()

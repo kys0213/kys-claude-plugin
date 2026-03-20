@@ -202,8 +202,23 @@ pub fn repo_add(
 }
 
 /// 레포 목록
-pub fn repo_list(db: &Database) -> Result<String> {
+pub fn repo_list(db: &Database, json: bool) -> Result<String> {
     let repos = db.repo_list()?;
+
+    if json {
+        let value: Vec<serde_json::Value> = repos
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "name": r.name,
+                    "url": r.url,
+                    "enabled": r.enabled,
+                })
+            })
+            .collect();
+        return Ok(serde_json::to_string_pretty(&value)?);
+    }
+
     let mut output = String::new();
 
     for r in &repos {
