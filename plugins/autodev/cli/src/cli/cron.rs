@@ -165,7 +165,8 @@ pub fn cron_trigger(db: &Database, env: &dyn Env, name: &str, repo: Option<&str>
                 "AUTODEV_REPO_ROOT",
                 workspace.join("main").to_string_lossy().as_ref(),
             );
-            cmd.env("AUTODEV_REPO_DEFAULT_BRANCH", "main");
+            let default_branch = detect_default_branch(&workspace);
+            cmd.env("AUTODEV_REPO_DEFAULT_BRANCH", &default_branch);
         }
     }
 
@@ -350,4 +351,47 @@ pub fn seed_global_crons(db: &Database, home: &std::path::Path) -> Result<u32> {
 fn find_repo_info(db: &Database, repo_name: &str) -> Result<Option<EnabledRepo>> {
     let repos = db.repo_find_enabled()?;
     Ok(repos.into_iter().find(|r| r.name == repo_name))
+}
+
+/// Detect the default branch for a repo workspace via `git symbolic-ref`.
+/// Falls back to "main" with a warning if detection fails.
+pub fn detect_default_branch(workspace: &std::path::Path) -> String {
+    let repo_dir = workspace.join("main");
+    let output = std::process::Command::new("git")
+        .args(["symbolic-ref", "refs/remotes/origin/HEAD", "--short"])
+        .current_dir(&repo_dir)
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let full_ref = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            let branch = full_ref
+                .strip_prefix("origin/")
+                .unwrap_or(&full_ref)
+                .to_string();
+            if branch.is_empty() {
+                tracing::warn!(
+                    "git symbolic-ref returned empty for {}, falling back to 'main'",
+                    repo_dir.display()
+                );
+                "main".to_string()
+            } else {
+                branch
+            }
+        }
+        Ok(_) => {
+            tracing::warn!(
+                "could not detect default branch for {}, falling back to 'main'",
+                repo_dir.display()
+            );
+            "main".to_string()
+        }
+        Err(e) => {
+            tracing::warn!(
+                "failed to run git symbolic-ref for {}: {e}, falling back to 'main'",
+                repo_dir.display()
+            );
+            "main".to_string()
+        }
+    }
 }
