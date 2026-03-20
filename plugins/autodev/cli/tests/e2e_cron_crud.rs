@@ -40,6 +40,8 @@ fn e2e_cron_add_schedule() {
     let home = TempDir::new().unwrap();
     setup_repo(&home, REPO_URL);
 
+    // Use 7-field cron expression compatible with cron crate
+    // Format: sec min hour day_of_month month day_of_week year
     autodev(&home)
         .args([
             "cron",
@@ -49,7 +51,7 @@ fn e2e_cron_add_schedule() {
             "--script",
             "/bin/echo",
             "--schedule",
-            "0 * * * *",
+            "0 0 * * * * *",
         ])
         .assert()
         .success()
@@ -89,6 +91,28 @@ fn e2e_cron_add_requires_schedule_or_interval() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("--interval").or(predicate::str::contains("--schedule")));
+}
+
+#[test]
+fn e2e_cron_add_invalid_schedule_fails() {
+    let home = TempDir::new().unwrap();
+    setup_repo(&home, REPO_URL);
+
+    // An invalid cron expression should fail validation
+    autodev(&home)
+        .args([
+            "cron",
+            "add",
+            "--name",
+            "bad-schedule",
+            "--script",
+            "/bin/echo",
+            "--schedule",
+            "invalid-cron",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid cron expression"));
 }
 
 // ═══════════════════════════════════════════════
@@ -210,8 +234,15 @@ fn e2e_cron_update_to_schedule() {
         .assert()
         .success();
 
+    // Use 7-field cron expression
     autodev(&home)
-        .args(["cron", "update", "sched-upd", "--schedule", "*/5 * * * *"])
+        .args([
+            "cron",
+            "update",
+            "sched-upd",
+            "--schedule",
+            "0 */5 * * * * *",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("updated cron job: sched-upd"));
