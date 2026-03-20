@@ -1,7 +1,7 @@
 ---
 description: (내부용) 스펙 컴포넌트를 기반으로 파일 트리를 분석하고 코드 구조를 매핑하는 에이전트
 model: sonnet
-tools: ["Glob", "Grep", "Bash"]
+tools: ["Glob", "Grep"]
 ---
 
 # Structure Mapper Agent
@@ -18,12 +18,10 @@ tools: ["Glob", "Grep", "Bash"]
 
 ### 1. 파일 트리 수집
 
-코드 경로를 기준으로 파일 트리를 수집합니다:
+코드 경로를 기준으로 Glob을 사용하여 파일 목록을 수집합니다:
 
-```bash
-# depth 3으로 전체 구조 파악
-tree -L 3 --dirsfirst -I "node_modules|target|.git|dist|build" [코드경로]
-```
+- Glob: `[코드경로]/**/*` 로 전체 파일 수집
+- 제외 패턴: `node_modules`, `target`, `.git`, `dist`, `build`
 
 결과에서:
 - 디렉토리 구조와 깊이(depth)를 파악
@@ -37,8 +35,9 @@ tree -L 3 --dirsfirst -I "node_modules|target|.git|dist|build" [코드경로]
 **매핑 전략** (우선순위):
 1. **이름 일치**: 컴포넌트명과 디렉토리/파일명이 직접 일치
    - Glob: `**/*{컴포넌트명}*`
-2. **키워드 탐색**: 컴포넌트의 핵심 키워드로 파일 내 모듈 선언 검색
+2. **키워드 탐색**: 이름 일치로 찾지 못한 경우, 파일 내 모듈 선언을 검색
    - Grep: `mod {키워드}` (Rust), `export.*{키워드}` (TS/JS), `class {키워드}` (Python)
+   - 주의: Grep은 파일 경로 식별 목적으로만 사용 (내용 전체를 읽지 않음)
 3. **관례 기반**: 일반적인 프로젝트 관례에 따른 위치 추론
    - API → `api/`, `routes/`, `handlers/`
    - DB → `db/`, `repo/`, `models/`
@@ -63,10 +62,8 @@ tree -L 3 --dirsfirst -I "node_modules|target|.git|dist|build" [코드경로]
 ```json
 {
   "language": "rust | typescript | python | go | mixed",
-  "root_tree": "tree 명령 결과 (depth 3)",
   "mappings": [
     {
-      "component": "컴포넌트1",
       "directory": "src/auth/",
       "files": [
         "src/auth/login.rs",
@@ -75,18 +72,15 @@ tree -L 3 --dirsfirst -I "node_modules|target|.git|dist|build" [코드경로]
       ],
       "test_files": [
         "tests/auth_test.rs"
-      ],
-      "tree_summary": "src/auth/\n├── login.rs\n├── token.rs\n└── mod.rs"
+      ]
     }
   ],
-  "unmapped_components": ["컴포넌트X"],
   "unmapped_files": ["src/utils/helpers.rs"]
 }
 ```
 
 ## 주의사항
 
-- **파일 내용을 읽지 않음**: 구조 파악만 수행 (토큰 절약)
-- tree 명령이 없으면 `ls -R` 또는 Glob으로 대체
+- **파일 내용을 읽지 않음**: 구조 파악만 수행 (토큰 절약). Grep은 파일 경로 식별 목적으로만 사용
 - 모노레포의 경우 코드 경로를 기준으로 범위를 제한
 - 매핑 신뢰도가 낮은 경우 해당 매핑에 `"confidence": "low"` 표시

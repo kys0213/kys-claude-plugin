@@ -1,6 +1,6 @@
 ---
 description: (내부용) 스펙 요구사항과 구현 코드를 1:1 대조하여 행위 커버리지를 분석하는 에이전트
-model: opus
+model: sonnet
 tools: ["Read", "Glob", "Grep"]
 ---
 
@@ -73,13 +73,11 @@ mappings에서 각 컴포넌트에 매핑된 파일을 Read로 읽습니다.
 
 ### 갭 상세 (❌ 미구현 + ⚠️ 부분 구현)
 
-**`issue-report` 스킬의 통일 형식을 따릅니다.**
+**`issue-report` 스킬의 통일 형식(Major/Minor)을 따릅니다.**
 
-미구현/부분구현 항목을 issue-report 형식의 이슈로 변환합니다:
-- ❌ 미구현 → severity: `critical`
-- ⚠️ 부분 구현 → severity: `warning`
-
-요약 테이블 + 심각도별 상세 형식으로 출력합니다.
+미구현/부분구현 항목을 이슈로 변환합니다:
+- ❌ 미구현 → Major
+- ⚠️ 부분 구현 → 에이전트가 갭의 심각도에 따라 Major 또는 Minor로 판단
 ```
 
 ## 주의사항
