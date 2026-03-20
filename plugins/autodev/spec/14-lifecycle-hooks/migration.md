@@ -160,7 +160,7 @@ Phase 2 후:
     → cron force_trigger
     → spec completion check
 
-Phase 4 완료 후 (Daemon main loop):
+Phase 5 완료 후 (Daemon main loop):
   task 완료
     → transit(Running → Done/Failed)     ← hook이 모든 부수효과 수행
     → cron force_trigger                 ← Daemon 고유 관심사 (hook 대상 아님)
