@@ -1274,6 +1274,16 @@ async fn main() -> Result<()> {
                 let repo_id = client::resolve_repo_id(&db, &repo)?;
                 let output = client::convention::collect_feedback(&db, &repo, &repo_id)?;
                 print!("{output}");
+
+                // Also collect from PR review comments
+                let gh: std::sync::Arc<dyn autodev::infra::gh::Gh> =
+                    std::sync::Arc::new(autodev::infra::gh::RealGh);
+                let gh_host = cfg.sources.github.gh_host.as_deref();
+                let pr_output = client::convention::collect_feedback_from_pr_reviews(
+                    &db, &*gh, &repo, &repo_id, gh_host,
+                )
+                .await?;
+                print!("{pr_output}");
             }
             ConventionAction::Propose { repo, threshold } => {
                 let repo_id = client::resolve_repo_id(&db, &repo)?;

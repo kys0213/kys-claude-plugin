@@ -930,6 +930,182 @@ pub fn collect_feedback_from_hitl(
     Ok(())
 }
 
+// ─── Feedback Collection from PR Reviews ───
+
+/// A single PR review comment extracted from the GitHub API response.
+#[derive(Debug)]
+struct PrReviewComment {
+    pub body: String,
+}
+
+/// Parse PR review comments from the raw JSON returned by `gh api --paginate`.
+///
+/// The GitHub API returns an array of review objects. Each review has a `body`
+/// field (the top-level review comment). We extract non-empty body fields.
+fn parse_review_comments(raw_json: &[u8]) -> Vec<PrReviewComment> {
+    let mut comments = Vec::new();
+
+    let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(raw_json) else {
+        return comments;
+    };
+
+    // Handle both a single JSON array and concatenated arrays (from --paginate)
+    let items = match &parsed {
+        serde_json::Value::Array(arr) => arr.clone(),
+        _ => vec![parsed],
+    };
+
+    for item in &items {
+        if let Some(body) = item.get("body").and_then(|b| b.as_str()) {
+            let trimmed = body.trim();
+            if !trimmed.is_empty() {
+                comments.push(PrReviewComment {
+                    body: trimmed.to_string(),
+                });
+            }
+        }
+    }
+
+    comments
+}
+
+/// Classify a PR review comment body into a pattern type.
+///
+/// Extends `classify_pattern_type` with additional keywords commonly found
+/// in PR review comments (e.g., naming, documentation).
+pub fn classify_review_comment(body: &str) -> &'static str {
+    let lower = body.to_lowercase();
+
+    // Naming conventions
+    if lower.contains("naming")
+        || lower.contains("rename")
+        || lower.contains("variable name")
+        || lower.contains("snake_case")
+        || lower.contains("camelcase")
+    {
+        return "style";
+    }
+
+    // Documentation
+    if lower.contains("document")
+        || lower.contains("rustdoc")
+        || lower.contains("jsdoc")
+        || lower.contains("docstring")
+    {
+        return "style";
+    }
+
+    // Fall back to the existing classifier
+    classify_pattern_type(body)
+}
+
+/// Group review comments by their classified pattern type.
+/// Comments with the same pattern type are deduplicated by content.
+fn group_comments_by_theme(
+    comments: &[PrReviewComment],
+) -> std::collections::HashMap<String, Vec<String>> {
+    let mut groups: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+
+    for comment in comments {
+        let pattern_type = classify_review_comment(&comment.body).to_string();
+        let suggestions = groups.entry(pattern_type).or_default();
+
+        // Deduplicate: skip if an identical suggestion already exists
+        if !suggestions.iter().any(|s| s == &comment.body) {
+            suggestions.push(comment.body.clone());
+        }
+    }
+
+    groups
+}
+
+/// Collect feedback patterns from PR review comments for a given repo.
+///
+/// Fetches recently closed PRs, then fetches review comments for each PR.
+/// Groups comments by theme/pattern and stores detected patterns in the
+/// `feedback_patterns` table.
+///
+/// Uses cursor-based pagination via `api_paginate` and batches requests
+/// to be mindful of API rate limits (max 30 recent PRs per run).
+///
+/// `repo_name` is the GitHub slug (e.g. "org/repo").
+/// `repo_id` is the internal UUID for feedback pattern storage.
+/// `gh_host` is an optional GitHub Enterprise hostname.
+pub async fn collect_feedback_from_pr_reviews(
+    db: &Database,
+    gh: &dyn crate::infra::gh::Gh,
+    repo_name: &str,
+    repo_id: &str,
+    gh_host: Option<&str>,
+) -> Result<String> {
+    // Fetch recently closed/merged PRs (limit to 30 to respect rate limits)
+    let pulls_json = gh
+        .api_paginate(
+            repo_name,
+            "pulls",
+            &[
+                ("state", "closed"),
+                ("sort", "updated"),
+                ("direction", "desc"),
+                ("per_page", "30"),
+            ],
+            gh_host,
+        )
+        .await?;
+
+    let pulls: Vec<serde_json::Value> = match serde_json::from_slice(&pulls_json) {
+        Ok(serde_json::Value::Array(arr)) => arr,
+        _ => return Ok("No closed PRs found.\n".to_string()),
+    };
+
+    let mut total_comments = 0u32;
+    let mut total_patterns = 0u32;
+
+    for pull in &pulls {
+        let Some(pr_number) = pull.get("number").and_then(|n| n.as_i64()) else {
+            continue;
+        };
+
+        // Fetch review comments for this PR
+        let reviews_json = match gh
+            .api_paginate(
+                repo_name,
+                &format!("pulls/{pr_number}/reviews"),
+                &[("per_page", "100")],
+                gh_host,
+            )
+            .await
+        {
+            Ok(data) => data,
+            Err(_) => continue, // Skip on API error (rate limit, etc.)
+        };
+
+        let comments = parse_review_comments(&reviews_json);
+        total_comments += comments.len() as u32;
+
+        let groups = group_comments_by_theme(&comments);
+
+        for (pattern_type, suggestions) in &groups {
+            for suggestion in suggestions {
+                let pattern = crate::core::models::NewFeedbackPattern {
+                    repo_id: repo_id.to_string(),
+                    pattern_type: pattern_type.clone(),
+                    suggestion: suggestion.clone(),
+                    source: "pr-review".to_string(),
+                };
+                db.feedback_upsert(&pattern)?;
+                total_patterns += 1;
+            }
+        }
+    }
+
+    Ok(format!(
+        "Collected {total_patterns} feedback pattern(s) from {total_comments} PR review comment(s) across {} PR(s)\n",
+        pulls.len()
+    ))
+}
+
 // ─── Convention Update Proposal ───
 
 /// Map pattern_type to a convention rule file path.
