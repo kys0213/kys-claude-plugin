@@ -3,25 +3,25 @@
 ## 큐 상태 전이 흐름
 
 ```
-pending → in_progress → review → done
-                ↓          ↓
-              failed     failed
+Pending → Ready → Running → Done
+                      ↓
+                   Skipped
 ```
 
 ### 각 상태에서의 처리
 
 | 상태 | Claw 동작 |
 |------|----------|
-| pending | `autodev queue advance <work-id>` → in_progress로 전이 후 구현 시작 |
-| in_progress | 구현 완료 시 `autodev queue advance <work-id>` → review로 전이 |
-| review | 리뷰 통과 시 `autodev queue advance <work-id>` → done |
-| failed | 원인 분석 후 재시도 또는 HITL 에스컬레이션 |
-| done | 다음 큐 아이템 처리로 진행 |
+| Pending | 대기 중. `autodev queue advance <work-id>` → Ready로 전이 |
+| Ready | 실행 준비 완료. `autodev queue advance <work-id>` → Running으로 전이 후 구현 시작 |
+| Running | 구현/리뷰 진행 중. 완료 시 `autodev queue advance <work-id>` → Done |
+| Skipped | 건너뜀. 원인 분석 후 재시도 또는 HITL 에스컬레이션 |
+| Done | 다음 큐 아이템 처리로 진행 |
 
 ### 전이 전 확인 사항
 
 - advance 전에 `autodev queue show <work-id> --json`으로 현재 상태 확인
-- 이미 done/failed인 아이템은 advance 불가
+- 이미 Done/Skipped인 아이템은 advance 불가
 - skip은 `autodev queue skip <work-id> --reason "사유"` 사용
 
 ---

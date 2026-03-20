@@ -45,12 +45,14 @@ pub fn claw_init(home: &Path) -> Result<()> {
             TPL_DECOMPOSE_STRATEGY_MD,
         ),
         (".claude/rules/hitl-policy.md", TPL_HITL_POLICY_MD),
+        (".claude/rules/operations.md", TPL_OPERATIONS_MD),
         ("commands/status.md", DEFAULT_STATUS_MD),
         ("commands/board.md", DEFAULT_BOARD_MD),
         ("commands/hitl.md", DEFAULT_HITL_MD),
         ("commands/spec.md", DEFAULT_SPEC_MD),
         ("commands/repo.md", DEFAULT_REPO_MD),
         ("commands/decisions.md", DEFAULT_DECISIONS_MD),
+        ("commands/cron.md", DEFAULT_CRON_MD),
         ("skills/decompose/SKILL.md", TPL_DECOMPOSE_SKILL_MD),
         ("skills/gap-detect/SKILL.md", TPL_GAP_DETECT_SKILL_MD),
         ("skills/prioritize/SKILL.md", TPL_PRIORITIZE_SKILL_MD),
@@ -238,12 +240,16 @@ const TPL_DECOMPOSE_STRATEGY_MD: &str =
     include_str!("../../../templates/claw-workspace/.claude/rules/decompose-strategy.md");
 const TPL_HITL_POLICY_MD: &str =
     include_str!("../../../templates/claw-workspace/.claude/rules/hitl-policy.md");
+const TPL_OPERATIONS_MD: &str =
+    include_str!("../../../templates/claw-workspace/.claude/rules/operations.md");
 const TPL_DECOMPOSE_SKILL_MD: &str =
     include_str!("../../../templates/claw-workspace/skills/decompose/SKILL.md");
 const TPL_GAP_DETECT_SKILL_MD: &str =
     include_str!("../../../templates/claw-workspace/skills/gap-detect/SKILL.md");
 const TPL_PRIORITIZE_SKILL_MD: &str =
     include_str!("../../../templates/claw-workspace/skills/prioritize/SKILL.md");
+
+const DEFAULT_CRON_MD: &str = include_str!("../../../commands/cron.md");
 
 // ─── Hardcoded content (no template file) ───
 
