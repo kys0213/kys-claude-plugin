@@ -55,12 +55,31 @@ fn print_effective_config(env: &dyn Env, ws_dir: Option<&Path>, name: &str) -> R
 }
 
 /// 상태 요약
-pub fn status(db: &Database, env: &dyn Env) -> Result<String> {
+pub fn status(db: &Database, env: &dyn Env, json: bool) -> Result<String> {
+    let home = config::autodev_home(env);
+    let running = crate::service::daemon::pid::is_running(&home);
+    let rows = db.repo_status_summary()?;
+
+    if json {
+        let repos: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "name": r.name,
+                    "enabled": r.enabled,
+                })
+            })
+            .collect();
+        let value = serde_json::json!({
+            "daemon": if running { "running" } else { "stopped" },
+            "repositories": repos,
+        });
+        return Ok(serde_json::to_string_pretty(&value)?);
+    }
+
     let mut output = String::new();
 
     // 데몬 상태
-    let home = config::autodev_home(env);
-    let running = crate::service::daemon::pid::is_running(&home);
     output.push_str(&format!(
         "autodev daemon: {}\n\n",
         if running {
@@ -71,8 +90,6 @@ pub fn status(db: &Database, env: &dyn Env) -> Result<String> {
     ));
 
     // 레포 목록
-    let rows = db.repo_status_summary()?;
-
     output.push_str("Repositories:\n");
     if rows.is_empty() {
         output.push_str("  (no repositories registered)\n");

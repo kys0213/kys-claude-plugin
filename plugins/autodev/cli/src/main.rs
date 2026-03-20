@@ -38,7 +38,11 @@ enum Commands {
         daemon: bool,
     },
     /// 상태 요약 출력
-    Status,
+    Status {
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
     /// TUI 대시보드
     Dashboard,
     /// 레포 관리
@@ -237,6 +241,14 @@ enum QueueAction {
         /// skip 사유
         #[arg(long)]
         reason: Option<String>,
+    },
+    /// 큐 아이템 상세 조회
+    Show {
+        /// 작업 ID
+        work_id: String,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -691,8 +703,8 @@ async fn main() -> Result<()> {
             daemon::stop(&home).ok();
             start_daemon(daemonize_flag, &cfg, &home, env, gh, git, claude, sw).await?;
         }
-        Commands::Status => {
-            let status = client::status(&db, &env)?;
+        Commands::Status { json } => {
+            let status = client::status(&db, &env, json)?;
             println!("{status}");
         }
         Commands::Dashboard => tui::run(&db).await?,
@@ -765,6 +777,10 @@ async fn main() -> Result<()> {
             }
             QueueAction::Skip { work_id, reason } => {
                 let output = client::queue::queue_skip(&db, &work_id, reason.as_deref())?;
+                println!("{output}");
+            }
+            QueueAction::Show { work_id, json } => {
+                let output = client::queue::queue_show(&db, &work_id, json)?;
                 println!("{output}");
             }
         },
