@@ -25,4 +25,13 @@ fi
 
 echo "gap-detect: $AUTODEV_REPO_NAME (specs=$SPEC_COUNT, changes=$CHANGES)"
 
+# Phase 1: Verify acceptance criteria for each active spec
+SPEC_IDS=$(autodev spec list --json --repo "$AUTODEV_REPO_NAME" | jq -r '.[] | select(.status == "Active") | .id')
+
+for SPEC_ID in $SPEC_IDS; do
+  echo "verify: $SPEC_ID"
+  autodev spec verify "$SPEC_ID" --create-issues || true
+done
+
+# Phase 2: Generic gap detection via agent
 autodev agent --repo "$AUTODEV_REPO_NAME" -p "gap-detect 스킬을 사용하여 스펙-코드 갭을 탐지해줘"
