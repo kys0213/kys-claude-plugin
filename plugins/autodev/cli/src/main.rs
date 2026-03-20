@@ -821,6 +821,7 @@ async fn main() -> Result<()> {
                     if let Some(ref dispatcher) = build_cli_dispatcher(&cfg) {
                         let notif = autodev::core::notifier::NotificationEvent::from_hitl_created(
                             hitl_event,
+                            result.hitl_id.clone(),
                         );
                         dispatch_notification(dispatcher, &notif).await;
                     }
@@ -926,13 +927,16 @@ async fn main() -> Result<()> {
                 client::spec::spec_unlink(&db, &spec_id, issue)?;
             }
             SpecAction::Complete { id } => {
-                let (output, hitl_event) = client::spec::spec_check_completion(&db, &env, &id)?;
+                let (output, hitl_event, hitl_id) =
+                    client::spec::spec_check_completion(&db, &env, &id)?;
                 println!("{output}");
 
                 // Dispatch HITL creation notification if configured
                 if let Some(ref dispatcher) = build_cli_dispatcher(&cfg) {
-                    let notif =
-                        autodev::core::notifier::NotificationEvent::from_hitl_created(&hitl_event);
+                    let notif = autodev::core::notifier::NotificationEvent::from_hitl_created(
+                        &hitl_event,
+                        Some(hitl_id),
+                    );
                     dispatch_notification(dispatcher, &notif).await;
                 }
             }
@@ -1342,13 +1346,16 @@ async fn main() -> Result<()> {
                 print!("{}", result.output);
 
                 // Dispatch HITL notifications for proposed convention updates
-                if !result.hitl_events.is_empty() {
+                if !result.hitl_entries.is_empty() {
                     if let Some(ref dispatcher) =
                         autodev::service::daemon::notifiers::dispatcher::NotificationDispatcher::from_config(&cfg.daemon)
                     {
-                        for hitl_event in &result.hitl_events {
+                        for (hitl_event, hitl_id) in &result.hitl_entries {
                             let notif =
-                                autodev::core::notifier::NotificationEvent::from_hitl_created(hitl_event);
+                                autodev::core::notifier::NotificationEvent::from_hitl_created(
+                                    hitl_event,
+                                    Some(hitl_id.clone()),
+                                );
                             dispatch_notification(dispatcher, &notif).await;
                         }
                     }

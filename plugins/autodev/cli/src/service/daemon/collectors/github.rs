@@ -218,15 +218,18 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
     /// Claw(CLI)가 DB에서 Pending→Ready 전이 → daemon의 in-memory queue는 여전히 Pending.
     /// DB를 읽어 Ready 상태인 아이템을 in-memory에서도 Ready로 전이한다.
     fn sync_queue_phases(&mut self) {
-        if !self.claw_enabled {
-            return;
-        }
         for repo in self.repos.values_mut() {
             if let Ok(rows) = self.db.queue_load_active(repo.id()) {
                 for row in rows {
-                    if row.phase == QueuePhase::Ready {
+                    // Claw: DB Pending→Ready 전이를 in-memory에 반영
+                    if self.claw_enabled && row.phase == QueuePhase::Ready {
                         repo.queue
                             .transit(&row.work_id, QueuePhase::Pending, QueuePhase::Ready);
+                    }
+                    // Escalation retry: DB Running→Pending 복구를 in-memory에 반영
+                    if row.phase == QueuePhase::Pending {
+                        repo.queue
+                            .transit(&row.work_id, QueuePhase::Running, QueuePhase::Pending);
                     }
                 }
             }

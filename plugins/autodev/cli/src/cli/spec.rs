@@ -177,7 +177,7 @@ pub fn spec_check_completion(
     db: &Database,
     env: &dyn crate::core::config::Env,
     id: &str,
-) -> Result<(String, NewHitlEvent)> {
+) -> Result<(String, NewHitlEvent, String)> {
     let spec = db
         .spec_show(id)?
         .ok_or_else(|| anyhow::anyhow!("spec not found: {id}"))?;
@@ -309,6 +309,7 @@ pub fn spec_check_completion(
              Respond with 'autodev hitl respond {event_id} --choice 1' to confirm completion."
         ),
         hitl_event,
+        event_id,
     ))
 }
 
@@ -899,7 +900,7 @@ pub fn spec_decisions(db: &Database, spec_id: &str, limit: usize, json: bool) ->
 pub fn check_completable_specs(
     db: &Database,
     env: &dyn crate::core::config::Env,
-) -> Vec<(String, NewHitlEvent)> {
+) -> Vec<(String, NewHitlEvent, String)> {
     let active_specs = match db.spec_list_by_status(SpecStatus::Active) {
         Ok(specs) => specs,
         Err(e) => {
@@ -954,9 +955,9 @@ pub fn check_completable_specs(
                 spec.title
             );
             match spec_check_completion(db, env, &spec.id) {
-                Ok((_output, hitl_event)) => {
+                Ok((_output, hitl_event, hitl_id)) => {
                     tracing::info!("spec auto-completion: triggered HITL for spec {}", spec.id);
-                    triggered.push((spec.id.clone(), hitl_event));
+                    triggered.push((spec.id.clone(), hitl_event, hitl_id));
                 }
                 Err(e) => {
                     tracing::warn!(

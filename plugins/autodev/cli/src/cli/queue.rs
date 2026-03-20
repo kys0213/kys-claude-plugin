@@ -11,6 +11,8 @@ use crate::infra::db::Database;
 pub struct QueueAdvanceResult {
     pub output: String,
     pub hitl_event: Option<NewHitlEvent>,
+    /// The assigned hitl_id if a HITL event was created (for notification dispatch).
+    pub hitl_id: Option<String>,
 }
 
 /// 큐 아이템을 다음 phase로 전이한다.
@@ -38,16 +40,18 @@ pub fn queue_advance(
     record_decision(db, &item.repo_id, DecisionType::Advance, work_id, reason);
 
     // H3: PR review iteration 임계값 초과 시 HITL 자동 생성
-    let hitl_event = if item.queue_type == QueueType::Pr {
+    let (hitl_event, hitl_id) = if item.queue_type == QueueType::Pr {
         extract_review_iteration(&item.metadata_json)
             .and_then(|ri| check_review_overflow(db, &item.repo_id, work_id, ri))
+            .map_or((None, None), |(ev, id)| (Some(ev), id))
     } else {
-        None
+        (None, None)
     };
 
     Ok(QueueAdvanceResult {
         output: format!("advanced: {work_id} ({before} → {after})"),
         hitl_event,
+        hitl_id,
     })
 }
 
@@ -115,7 +119,7 @@ fn check_review_overflow(
     repo_id: &str,
     work_id: &str,
     review_iteration: u32,
-) -> Option<NewHitlEvent> {
+) -> Option<(NewHitlEvent, Option<String>)> {
     let max_iterations = crate::core::config::models::ReviewStage::default().max_iterations;
     if review_iteration >= max_iterations {
         let event = NewHitlEvent {
@@ -133,8 +137,8 @@ fn check_review_overflow(
                 "Merge as-is".to_string(),
             ],
         };
-        let _ = db.hitl_create(&event);
-        Some(event)
+        let hitl_id = db.hitl_create(&event).ok();
+        Some((event, hitl_id))
     } else {
         None
     }

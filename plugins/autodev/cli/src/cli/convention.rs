@@ -1145,7 +1145,8 @@ pub fn pattern_type_to_rule_file(pattern_type: &str) -> String {
 /// propose_updates의 결과: 출력 메시지와 생성된 HITL 이벤트 목록.
 pub struct ProposeResult {
     pub output: String,
-    pub hitl_events: Vec<crate::core::models::NewHitlEvent>,
+    /// Pairs of (HITL event, assigned hitl_id) for notification dispatch.
+    pub hitl_entries: Vec<(crate::core::models::NewHitlEvent, String)>,
 }
 
 /// Check actionable feedback patterns and create HITL events for convention updates.
@@ -1162,11 +1163,11 @@ pub fn propose_updates(db: &Database, repo_id: &str, threshold: i32) -> Result<P
     if patterns.is_empty() {
         return Ok(ProposeResult {
             output: "No actionable patterns found.\n".to_string(),
-            hitl_events: Vec::new(),
+            hitl_entries: Vec::new(),
         });
     }
 
-    let mut hitl_events = Vec::new();
+    let mut hitl_entries = Vec::new();
 
     for pattern in &patterns {
         let rule_file = pattern_type_to_rule_file(&pattern.pattern_type);
@@ -1188,14 +1189,14 @@ pub fn propose_updates(db: &Database, repo_id: &str, threshold: i32) -> Result<P
             ],
         };
 
-        db.hitl_create(&hitl_event)?;
+        let hitl_id = db.hitl_create(&hitl_event)?;
         db.feedback_set_status(&pattern.id, FeedbackPatternStatus::Proposed)?;
-        hitl_events.push(hitl_event);
+        hitl_entries.push((hitl_event, hitl_id));
     }
 
     Ok(ProposeResult {
-        output: format!("Proposed {} convention update(s)\n", hitl_events.len()),
-        hitl_events,
+        output: format!("Proposed {} convention update(s)\n", hitl_entries.len()),
+        hitl_entries,
     })
 }
 
