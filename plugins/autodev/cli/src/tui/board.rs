@@ -50,8 +50,12 @@ impl BoardStateBuilder {
                 .map(|qi| qi.work_id.as_str())
                 .collect();
 
-            // Hoist hitl_pending_count outside the spec loop (once per repo)
-            let hitl_count = db.hitl_pending_count(Some(&repo.name))? as u32;
+            // Fetch HITL items for this repo
+            let repo_hitl_events = db.hitl_list(Some(&repo.name)).unwrap_or_default();
+            let hitl_count = repo_hitl_events
+                .iter()
+                .filter(|e| e.status == crate::core::models::HitlStatus::Pending)
+                .count() as u32;
 
             // Build spec entries
             let mut spec_entries = Vec::new();
@@ -68,12 +72,25 @@ impl BoardStateBuilder {
                     })
                     .count();
 
+                // Collect HITL items linked to this spec
+                let hitl_items: Vec<HitlBoardItem> = repo_hitl_events
+                    .iter()
+                    .filter(|e| e.spec_id.as_deref() == Some(&spec.id))
+                    .map(|e| HitlBoardItem {
+                        severity: e.severity.to_string(),
+                        situation: e.situation.clone(),
+                        options: e.options.clone(),
+                        status: e.status.to_string(),
+                    })
+                    .collect();
+
                 spec_entries.push(SpecBoardEntry {
                     id: spec.id.clone(),
                     title: spec.title.clone(),
                     status: spec.status.to_string(),
                     progress: format!("{done_count}/{total}"),
                     hitl_count,
+                    hitl_items,
                     acceptance_criteria: spec.acceptance_criteria.clone(),
                 });
             }
@@ -138,6 +155,18 @@ impl BoardStateBuilder {
         // Claw daemon status (check if status file exists)
         let claw_running = home.join("daemon.status.json").exists();
 
+        // Recent claw decisions (Fix 5)
+        let decisions = db.decision_list(None, 10).unwrap_or_default();
+        let recent_decisions: Vec<DecisionBoardItem> = decisions
+            .into_iter()
+            .map(|d| DecisionBoardItem {
+                decision_type: d.decision_type.as_str().to_string(),
+                target_work_id: d.target_work_id,
+                reasoning: d.reasoning,
+                created_at: d.created_at,
+            })
+            .collect();
+
         Ok(BoardState {
             repos: board_repos,
             hitl_summary: HitlSummary {
@@ -149,6 +178,7 @@ impl BoardStateBuilder {
                 last_decision_at: None,
                 tick_interval_secs: None,
             },
+            recent_decisions,
         })
     }
 }
@@ -200,16 +230,59 @@ impl BoardRenderer for TextBoardRenderer {
                     out.push_str(&format!("  HITL: {}", spec.hitl_count));
                 }
                 out.push('\n');
+
+                // Fix 4: Acceptance criteria with check status
                 if let Some(ref ac) = spec.acceptance_criteria {
-                    // 각 줄을 체크리스트로 표시
                     for line in ac.lines().filter(|l| !l.trim().is_empty()) {
-                        out.push_str(&format!("    {line}\n"));
+                        let trimmed = line.trim();
+                        if trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]") {
+                            let desc = trimmed
+                                .trim_start_matches("- [x]")
+                                .trim_start_matches("- [X]")
+                                .trim();
+                            out.push_str(&format!("    [PASS] {desc}\n"));
+                        } else if trimmed.starts_with("- [ ]") {
+                            let desc = trimmed.trim_start_matches("- [ ]").trim();
+                            out.push_str(&format!("    [FAIL] {desc}\n"));
+                        } else {
+                            out.push_str(&format!("    {line}\n"));
+                        }
+                    }
+                }
+
+                // Fix 3: HITL items detail
+                if !spec.hitl_items.is_empty() {
+                    out.push_str("    HITL Items:\n");
+                    for item in &spec.hitl_items {
+                        out.push_str(&format!(
+                            "      [{severity}] {situation} ({status})\n",
+                            severity = item.severity,
+                            situation = item.situation,
+                            status = item.status,
+                        ));
+                        if !item.options.is_empty() {
+                            out.push_str(&format!("        options: {}\n", item.options));
+                        }
                     }
                 }
             }
 
             // Kanban table
             out.push_str(&render_kanban_table(&repo.columns));
+        }
+
+        // Fix 5: Recent claw decisions
+        if !state.recent_decisions.is_empty() {
+            out.push_str("\nClaw Decisions:\n");
+            for d in &state.recent_decisions {
+                let target = d.target_work_id.as_deref().unwrap_or("-");
+                out.push_str(&format!(
+                    "  [{type}] {target} — {reason} ({at})\n",
+                    type = d.decision_type,
+                    reason = d.reasoning,
+                    at = d.created_at,
+                ));
+            }
         }
 
         out
@@ -346,6 +419,7 @@ mod tests {
                     status: "active".to_string(),
                     progress: "3/5".to_string(),
                     hitl_count: 1,
+                    hitl_items: vec![],
                     acceptance_criteria: None,
                 }],
                 columns: vec![
@@ -501,6 +575,7 @@ mod tests {
                     status: "active".to_string(),
                     progress: "0/3".to_string(),
                     hitl_count: 0,
+                    hitl_items: vec![],
                     acceptance_criteria: None,
                 }],
                 columns: vec![],

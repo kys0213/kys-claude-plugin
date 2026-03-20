@@ -13,6 +13,8 @@ pub struct BoardState {
     pub hitl_summary: HitlSummary,
     /// Claw daemon status.
     pub claw_status: ClawStatus,
+    /// Recent claw decisions history.
+    pub recent_decisions: Vec<DecisionBoardItem>,
 }
 
 /// Cross-repo HITL summary for board header.
@@ -50,8 +52,28 @@ pub struct SpecBoardEntry {
     pub status: String,
     pub progress: String, // e.g. "3/5"
     pub hitl_count: u32,
+    /// Individual HITL items for overlay detail.
+    pub hitl_items: Vec<HitlBoardItem>,
     /// Acceptance criteria (from spec, if defined).
     pub acceptance_criteria: Option<String>,
+}
+
+/// A single HITL item for board display.
+#[derive(Debug, Clone, Serialize)]
+pub struct HitlBoardItem {
+    pub severity: String,
+    pub situation: String,
+    pub options: String,
+    pub status: String,
+}
+
+/// A claw decision entry for board display.
+#[derive(Debug, Clone, Serialize)]
+pub struct DecisionBoardItem {
+    pub decision_type: String,
+    pub target_work_id: Option<String>,
+    pub reasoning: String,
+    pub created_at: String,
 }
 
 /// A named column in the kanban board.

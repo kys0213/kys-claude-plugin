@@ -41,33 +41,49 @@ pub struct SpecAddResult {
     pub repo_id: String,
 }
 
+/// Parameters for `spec_add`.
+pub struct SpecAddParams<'a> {
+    pub title: &'a str,
+    pub body: &'a str,
+    pub repo_name: &'a str,
+    pub file: Option<&'a str>,
+    pub test_commands: Option<&'a str>,
+    pub acceptance_criteria: Option<&'a str>,
+    /// When false, registration is blocked if required sections are missing.
+    pub force: bool,
+}
+
 /// Add a new spec
-pub fn spec_add(
-    db: &Database,
-    title: &str,
-    body: &str,
-    repo_name: &str,
-    file: Option<&str>,
-    test_commands: Option<&str>,
-    acceptance_criteria: Option<&str>,
-) -> Result<SpecAddResult> {
-    let repo_id = resolve_repo_id(db, repo_name)?;
+///
+/// When `force` is false, registration is blocked if required sections are missing.
+/// Pass `force = true` to override and register anyway.
+pub fn spec_add(db: &Database, params: &SpecAddParams<'_>) -> Result<SpecAddResult> {
+    let repo_id = resolve_repo_id(db, params.repo_name)?;
+
+    // Validate required sections before persisting
+    let missing = validate_spec_sections(params.body);
+    if !missing.is_empty() && !params.force {
+        anyhow::bail!(
+            "Missing required sections: {}.\n  Add these as ## headers in the spec body, or pass --force to override.\n  Tip: use /add-spec in Claude Code for guided section completion.",
+            missing.join(", ")
+        );
+    }
 
     let new_spec = NewSpec {
         repo_id: repo_id.clone(),
-        title: title.to_string(),
-        body: body.to_string(),
-        source_path: file.map(|s| s.to_string()),
-        test_commands: test_commands.map(|s| s.to_string()),
-        acceptance_criteria: acceptance_criteria.map(|s| s.to_string()),
+        title: params.title.to_string(),
+        body: params.body.to_string(),
+        source_path: params.file.map(|s| s.to_string()),
+        test_commands: params.test_commands.map(|s| s.to_string()),
+        acceptance_criteria: params.acceptance_criteria.map(|s| s.to_string()),
     };
 
     let id = db.spec_add(&new_spec)?;
 
-    let missing = validate_spec_sections(body);
     let output = if !missing.is_empty() {
+        // force == true path: warn but still register
         format!(
-            "⚠ Missing sections: {}.\n  Recommended: add these as ## headers in the spec body.\n  Tip: use /add-spec in Claude Code for guided section completion.\n{id}",
+            "⚠ Missing sections (forced): {}.\n  Recommended: add these as ## headers in the spec body.\n{id}",
             missing.join(", ")
         )
     } else {

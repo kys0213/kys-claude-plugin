@@ -502,6 +502,9 @@ enum SpecAction {
         /// 수락 기준 (마크다운)
         #[arg(long)]
         acceptance_criteria: Option<String>,
+        /// 필수 섹션 누락 시에도 강제 등록
+        #[arg(long)]
+        force: bool,
     },
     /// 스펙 목록
     List {
@@ -854,6 +857,7 @@ async fn main() -> Result<()> {
                 file,
                 test_commands,
                 acceptance_criteria,
+                force,
             } => {
                 // --file이 주어지고 body가 비어있으면 파일 내용을 body로 사용한다.
                 let effective_body = if body.is_empty() {
@@ -869,12 +873,15 @@ async fn main() -> Result<()> {
 
                 let result = client::spec::spec_add(
                     &db,
-                    &title,
-                    &effective_body,
-                    &repo,
-                    file.as_deref(),
-                    test_commands.as_deref(),
-                    acceptance_criteria.as_deref(),
+                    &client::spec::SpecAddParams {
+                        title: &title,
+                        body: &effective_body,
+                        repo_name: &repo,
+                        file: file.as_deref(),
+                        test_commands: test_commands.as_deref(),
+                        acceptance_criteria: acceptance_criteria.as_deref(),
+                        force,
+                    },
                 )?;
                 println!("created: {}", result.output);
 
