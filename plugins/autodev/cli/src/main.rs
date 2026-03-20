@@ -132,6 +132,21 @@ enum Commands {
         #[command(subcommand)]
         action: ConventionAction,
     },
+    /// 리포트 생성
+    Report {
+        #[command(subcommand)]
+        action: ReportAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ReportAction {
+    /// 일일 리포트 생성 및 GitHub 이슈 게시
+    Daily {
+        /// 대상 날짜 (YYYY-MM-DD)
+        #[arg(long)]
+        date: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1157,6 +1172,12 @@ async fn main() -> Result<()> {
                 }
             }
         }
+        Commands::Report { action } => match action {
+            ReportAction::Daily { date } => {
+                let output = client::report::daily(&db, &env, &gh, &home, &date).await?;
+                println!("{output}");
+            }
+        },
         Commands::Convention { action } => match action {
             ConventionAction::Detect { repo_path } => {
                 let path = std::path::Path::new(&repo_path);
