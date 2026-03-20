@@ -233,6 +233,33 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
         }
     }
 
+    /// Claw 비활성 시 Pending 아이템을 자동으로 Ready로 전이한다.
+    ///
+    /// Claw가 없으면 Pending→Ready 판단을 대신할 주체가 없으므로,
+    /// collector가 직접 전이하여 기존 동작(즉시 실행)을 유지한다.
+    fn auto_advance_pending(&mut self) {
+        if self.claw_enabled {
+            return;
+        }
+        for repo in self.repos.values_mut() {
+            let pending_ids: Vec<String> = repo
+                .queue
+                .iter(QueuePhase::Pending)
+                .map(|item| item.work_id.clone())
+                .collect();
+            for work_id in pending_ids {
+                repo.queue
+                    .transit(&work_id, QueuePhase::Pending, QueuePhase::Ready);
+                if let Err(e) =
+                    self.db
+                        .queue_transit(&work_id, QueuePhase::Pending, QueuePhase::Ready)
+                {
+                    tracing::warn!("auto_advance queue_transit failed for {work_id}: {e}");
+                }
+            }
+        }
+    }
+
     /// 모든 repo의 큐에서 ready 아이템을 pop → working phase 전이 → Task 생성.
     ///
     /// per-repo `issue_concurrency` / `pr_concurrency` 제한을 적용하여,
@@ -258,17 +285,16 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
         drained
     }
 
-    /// Ready(또는 Pending) 상태의 큐 아이템을 Running으로 전이하며 Task를 생성한다.
+    /// Ready 상태의 큐 아이템을 Running으로 전이하며 Task를 생성한다.
+    ///
+    /// 항상 Ready→Running만 수행한다. Pending→Ready 전이는:
+    /// - claw_enabled=true: Claw가 `queue advance`로 수행
+    /// - claw_enabled=false: `auto_advance_pending()`이 poll() 시 자동 수행
     ///
     /// poll()에서 분리되어 별도 호출 가능. Collector trait의 drain_tasks() 구현에서 위임받는다.
     pub fn drain_ready_tasks(&mut self) -> Vec<Box<dyn Task>> {
         let mut tasks: Vec<Box<dyn Task>> = Vec::new();
-        // claw_enabled: Ready→Running, otherwise: Pending→Running
-        let from_phase = if self.claw_enabled {
-            QueuePhase::Ready
-        } else {
-            QueuePhase::Pending
-        };
+        let from_phase = QueuePhase::Ready;
 
         for repo in self.repos.values_mut() {
             // ─── Issue concurrency: Analyze + Implement running 합산 제한 ───
@@ -431,6 +457,7 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> Collect
 
         self.run_scans().await;
         self.sync_queue_phases();
+        self.auto_advance_pending();
         Vec::new()
     }
 
@@ -707,7 +734,7 @@ mod tests {
     // ─── drain_ready_tasks tests ───
 
     #[test]
-    fn drain_creates_analyze_task_from_pending_issue() {
+    fn drain_creates_analyze_task_from_ready_issue() {
         let gh = Arc::new(MockGh::new());
         let mut source = make_source(gh);
 
@@ -718,7 +745,7 @@ mod tests {
             None,
         );
         repo.queue.push(
-            QueuePhase::Pending,
+            QueuePhase::Ready,
             make_test_queue_item(QueueType::Issue, TaskKind::Analyze, "org/repo", 1),
         );
         source.repos.insert("org/repo".to_string(), repo);
@@ -743,7 +770,7 @@ mod tests {
             None,
         );
         repo.queue.push(
-            QueuePhase::Pending,
+            QueuePhase::Ready,
             make_test_queue_item(QueueType::Issue, TaskKind::Implement, "org/repo", 2),
         );
         source.repos.insert("org/repo".to_string(), repo);
@@ -754,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    fn drain_creates_review_task_from_pending_pr() {
+    fn drain_creates_review_task_from_ready_pr() {
         let gh = Arc::new(MockGh::new());
         let mut source = make_source(gh);
 
@@ -765,7 +792,7 @@ mod tests {
             None,
         );
         repo.queue.push(
-            QueuePhase::Pending,
+            QueuePhase::Ready,
             make_test_queue_item(QueueType::Pr, TaskKind::Review, "org/repo", 10),
         );
         source.repos.insert("org/repo".to_string(), repo);
@@ -776,7 +803,7 @@ mod tests {
     }
 
     #[test]
-    fn drain_creates_improve_task_from_review_done_pr() {
+    fn drain_creates_improve_task_from_ready_pr() {
         let gh = Arc::new(MockGh::new());
         let mut source = make_source(gh);
 
@@ -787,7 +814,7 @@ mod tests {
             None,
         );
         repo.queue.push(
-            QueuePhase::Pending,
+            QueuePhase::Ready,
             make_test_queue_item(QueueType::Pr, TaskKind::Improve, "org/repo", 10),
         );
         source.repos.insert("org/repo".to_string(), repo);
@@ -898,11 +925,11 @@ mod tests {
             None,
         );
         repo1.queue.push(
-            QueuePhase::Pending,
+            QueuePhase::Ready,
             make_test_queue_item(QueueType::Issue, TaskKind::Analyze, "org/repo1", 1),
         );
         repo1.queue.push(
-            QueuePhase::Pending,
+            QueuePhase::Ready,
             make_test_queue_item(QueueType::Pr, TaskKind::Review, "org/repo1", 10),
         );
 
@@ -913,7 +940,7 @@ mod tests {
             None,
         );
         repo2.queue.push(
-            QueuePhase::Pending,
+            QueuePhase::Ready,
             make_test_queue_item(QueueType::Pr, TaskKind::Improve, "org/repo2", 20),
         );
 
@@ -939,10 +966,10 @@ mod tests {
         );
         repo.issue_concurrency = 2;
 
-        // 5 pending issues, but concurrency = 2
+        // 5 ready issues, but concurrency = 2
         for i in 1..=5 {
             repo.queue.push(
-                QueuePhase::Pending,
+                QueuePhase::Ready,
                 make_test_queue_item(QueueType::Issue, TaskKind::Analyze, "org/repo", i),
             );
         }
@@ -951,11 +978,11 @@ mod tests {
         let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 2);
 
-        // 3 items should remain in Pending
+        // 3 items should remain in Ready
         assert_eq!(
             source.repos["org/repo"]
                 .queue
-                .iter(QueuePhase::Pending)
+                .iter(QueuePhase::Ready)
                 .filter(|i| i.is(QueueType::Issue, TaskKind::Analyze))
                 .count(),
             3
@@ -988,10 +1015,10 @@ mod tests {
             QueuePhase::Running,
             make_test_queue_item(QueueType::Issue, TaskKind::Analyze, "org/repo", 1),
         );
-        // 3 pending
+        // 3 ready
         for i in 2..=4 {
             repo.queue.push(
-                QueuePhase::Pending,
+                QueuePhase::Ready,
                 make_test_queue_item(QueueType::Issue, TaskKind::Analyze, "org/repo", i),
             );
         }
@@ -1011,7 +1038,7 @@ mod tests {
         assert_eq!(
             source.repos["org/repo"]
                 .queue
-                .iter(QueuePhase::Pending)
+                .iter(QueuePhase::Ready)
                 .filter(|i| i.is(QueueType::Issue, TaskKind::Analyze))
                 .count(),
             2
@@ -1037,7 +1064,7 @@ mod tests {
             make_test_queue_item(QueueType::Issue, TaskKind::Implement, "org/repo", 1),
         );
         repo.queue.push(
-            QueuePhase::Pending,
+            QueuePhase::Ready,
             make_test_queue_item(QueueType::Issue, TaskKind::Analyze, "org/repo", 2),
         );
         source.repos.insert("org/repo".to_string(), repo);
@@ -1059,10 +1086,10 @@ mod tests {
         );
         repo.pr_concurrency = 1;
 
-        // 3 pending PRs, but concurrency = 1
+        // 3 ready PRs, but concurrency = 1
         for i in 1..=3 {
             repo.queue.push(
-                QueuePhase::Pending,
+                QueuePhase::Ready,
                 make_test_queue_item(QueueType::Pr, TaskKind::Review, "org/repo", i),
             );
         }
@@ -1073,7 +1100,7 @@ mod tests {
         assert_eq!(
             source.repos["org/repo"]
                 .queue
-                .iter(QueuePhase::Pending)
+                .iter(QueuePhase::Ready)
                 .filter(|i| i.is(QueueType::Pr, TaskKind::Review))
                 .count(),
             2
@@ -1113,13 +1140,13 @@ mod tests {
         repo.issue_concurrency = 1;
         repo.pr_concurrency = 1;
 
-        // 1 issue + 1 PR in Pending — independent concurrency budgets
+        // 1 issue + 1 PR in Ready — independent concurrency budgets
         repo.queue.push(
-            QueuePhase::Pending,
+            QueuePhase::Ready,
             make_test_queue_item(QueueType::Issue, TaskKind::Analyze, "org/repo", 1),
         );
         repo.queue.push(
-            QueuePhase::Pending,
+            QueuePhase::Ready,
             make_test_queue_item(QueueType::Pr, TaskKind::Review, "org/repo", 10),
         );
         source.repos.insert("org/repo".to_string(), repo);
@@ -1148,9 +1175,9 @@ mod tests {
             QueuePhase::Running,
             make_test_queue_item(QueueType::Pr, TaskKind::Extract, "org/repo", 99),
         );
-        // 1 Review pending
+        // 1 Review in Ready
         repo.queue.push(
-            QueuePhase::Pending,
+            QueuePhase::Ready,
             make_test_queue_item(QueueType::Pr, TaskKind::Review, "org/repo", 10),
         );
         source.repos.insert("org/repo".to_string(), repo);
@@ -1177,11 +1204,11 @@ mod tests {
 
         // Same queue_type (Issue), different task_kind
         repo.queue.push(
-            QueuePhase::Pending,
+            QueuePhase::Ready,
             make_test_queue_item(QueueType::Issue, TaskKind::Analyze, "org/repo", 1),
         );
         repo.queue.push(
-            QueuePhase::Pending,
+            QueuePhase::Ready,
             make_test_queue_item(QueueType::Issue, TaskKind::Implement, "org/repo", 2),
         );
         source.repos.insert("org/repo".to_string(), repo);
@@ -1196,12 +1223,12 @@ mod tests {
     }
 
     // ═══════════════════════════════════════════════
-    // Re-review 경로 검증: ImproveTask 완료 후 Pending(Review)로 push된 PR이
+    // Re-review 경로 검증: ImproveTask 완료 후 Ready(Review)로 전이된 PR이
     // drain에서 ReviewTask로 생성되는지 확인한다.
     // ═══════════════════════════════════════════════
 
     #[test]
-    fn drain_improved_routes_through_pending_then_reviewing() {
+    fn drain_improved_routes_through_ready_then_running() {
         let gh = Arc::new(MockGh::new());
         let mut source = make_source(gh);
 
@@ -1213,9 +1240,9 @@ mod tests {
         );
         repo.pr_concurrency = 2;
 
-        // After ImproveTask completes, item is pushed to Pending with TaskKind::Review
+        // After ImproveTask completes and auto_advance, item is in Ready with TaskKind::Review
         repo.queue.push(
-            QueuePhase::Pending,
+            QueuePhase::Ready,
             make_test_queue_item(QueueType::Pr, TaskKind::Review, "org/repo", 1),
         );
         source.repos.insert("org/repo".to_string(), repo);
@@ -1230,7 +1257,7 @@ mod tests {
         let repo = &source.repos["org/repo"];
         assert_eq!(
             repo.queue
-                .iter(QueuePhase::Pending)
+                .iter(QueuePhase::Ready)
                 .filter(|i| i.is(QueueType::Pr, TaskKind::Review))
                 .count(),
             0
@@ -1257,13 +1284,13 @@ mod tests {
         );
         repo.pr_concurrency = 1;
 
-        // 2 PRs queued for re-review, concurrency = 1
+        // 2 PRs queued for re-review in Ready, concurrency = 1
         repo.queue.push(
-            QueuePhase::Pending,
+            QueuePhase::Ready,
             make_test_queue_item(QueueType::Pr, TaskKind::Review, "org/repo", 1),
         );
         repo.queue.push(
-            QueuePhase::Pending,
+            QueuePhase::Ready,
             make_test_queue_item(QueueType::Pr, TaskKind::Review, "org/repo", 2),
         );
         source.repos.insert("org/repo".to_string(), repo);
@@ -1280,10 +1307,10 @@ mod tests {
                 .count(),
             1
         );
-        // 1 remains in Pending
+        // 1 remains in Ready
         assert_eq!(
             repo.queue
-                .iter(QueuePhase::Pending)
+                .iter(QueuePhase::Ready)
                 .filter(|i| i.is(QueueType::Pr, TaskKind::Review))
                 .count(),
             1
@@ -1358,7 +1385,7 @@ mod tests {
     }
 
     #[test]
-    fn drain_from_pending_when_claw_disabled() {
+    fn auto_advance_promotes_pending_to_ready_when_claw_disabled() {
         let gh = Arc::new(MockGh::new());
         let mut source = make_source(gh); // claw_enabled = false
 
@@ -1374,8 +1401,49 @@ mod tests {
         );
         source.repos.insert("org/repo".to_string(), repo);
 
+        // Before auto_advance: item is Pending
+        assert_eq!(
+            source.repos["org/repo"].queue.phase_of("issue:org/repo:1"),
+            Some(QueuePhase::Pending)
+        );
+
+        // auto_advance should promote Pending → Ready
+        source.auto_advance_pending();
+
+        assert_eq!(
+            source.repos["org/repo"].queue.phase_of("issue:org/repo:1"),
+            Some(QueuePhase::Ready)
+        );
+
+        // Now drain should pick it up
         let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 1);
+    }
+
+    #[test]
+    fn auto_advance_noop_when_claw_enabled() {
+        let gh = Arc::new(MockGh::new());
+        let mut source = make_claw_source(gh); // claw_enabled = true
+
+        let mut repo = GitRepository::new(
+            "r1".to_string(),
+            "org/repo".to_string(),
+            "https://github.com/org/repo".to_string(),
+            None,
+        );
+        repo.queue.push(
+            QueuePhase::Pending,
+            make_test_queue_item(QueueType::Issue, TaskKind::Analyze, "org/repo", 1),
+        );
+        source.repos.insert("org/repo".to_string(), repo);
+
+        // auto_advance should NOT promote when claw is enabled
+        source.auto_advance_pending();
+
+        assert_eq!(
+            source.repos["org/repo"].queue.phase_of("issue:org/repo:1"),
+            Some(QueuePhase::Pending)
+        );
     }
 
     #[test]
