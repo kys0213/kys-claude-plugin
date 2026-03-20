@@ -1,9 +1,34 @@
+use std::io::Read as _;
+
 use anyhow::Result;
 
 use crate::cli::resolve_repo_id;
 use crate::core::models::*;
 use crate::core::repository::*;
 use crate::infra::db::Database;
+
+/// Allowed test runner command prefixes.
+///
+/// Commands passed to `run_spec_test_commands` must start with one of these
+/// prefixes. The list is intentionally conservative — extend it as new runners
+/// are adopted.
+const ALLOWED_TEST_COMMAND_PREFIXES: &[&str] = &[
+    "cargo test",
+    "cargo clippy",
+    "npm test",
+    "npm run test",
+    "go test",
+    "python -m pytest",
+    "make test",
+    "bash",
+    "sh",
+];
+
+/// Maximum bytes collected from a single command's stdout + stderr combined.
+const OUTPUT_SIZE_LIMIT: usize = 1024 * 1024; // 1 MB
+
+/// Timeout for a single test command (seconds).
+const TEST_COMMAND_TIMEOUT_SECS: u64 = 60;
 
 /// spec_add의 결과: 출력 메시지와 해결된 repo_id.
 pub struct SpecAddResult {
@@ -325,6 +350,10 @@ struct TestCommandResults {
 ///
 /// Returns `None` if no test_commands are defined or they are empty.
 /// Parses `test_commands` as a JSON array of command strings.
+///
+/// Each command is validated against [`ALLOWED_TEST_COMMAND_PREFIXES`].
+/// Output is capped at [`OUTPUT_SIZE_LIMIT`] bytes per command and commands
+/// are killed after [`TEST_COMMAND_TIMEOUT_SECS`] seconds.
 fn run_spec_test_commands(
     db: &Database,
     env: &dyn crate::core::config::Env,
@@ -355,41 +384,31 @@ fn run_spec_test_commands(
     let total_count = commands.len();
 
     for (i, cmd) in commands.iter().enumerate() {
-        let result = std::process::Command::new("sh")
-            .args(["-c", cmd])
+        // Validate command against allowlist
+        if !is_allowed_test_command(cmd) {
+            tracing::warn!(
+                command = cmd.as_str(),
+                "rejected test command: does not match any allowed prefix"
+            );
+            failed_count += 1;
+            summary.push_str(&format!(
+                "  [{}/{}] REJECTED: {} — command prefix not in allowlist\n",
+                i + 1,
+                total_count,
+                cmd
+            ));
+            continue;
+        }
+
+        let child = std::process::Command::new("sh")
+            .args(["-c", cmd.as_str()])
             .current_dir(&repo_dir)
-            .output();
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn();
 
-        match result {
-            Ok(output) => {
-                let success = output.status.success();
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let status_label = if success { "PASS" } else { "FAIL" };
-
-                if !success {
-                    failed_count += 1;
-                }
-
-                summary.push_str(&format!(
-                    "  [{}/{}] {}: {}\n",
-                    i + 1,
-                    total_count,
-                    status_label,
-                    cmd
-                ));
-
-                // Include truncated output for context
-                let max_output_len = 500;
-                if !stdout.is_empty() {
-                    let truncated = truncate_output(&stdout, max_output_len);
-                    summary.push_str(&format!("    stdout: {truncated}\n"));
-                }
-                if !stderr.is_empty() {
-                    let truncated = truncate_output(&stderr, max_output_len);
-                    summary.push_str(&format!("    stderr: {truncated}\n"));
-                }
-            }
+        let mut child = match child {
+            Ok(c) => c,
             Err(e) => {
                 failed_count += 1;
                 summary.push_str(&format!(
@@ -399,7 +418,89 @@ fn run_spec_test_commands(
                     cmd,
                     e
                 ));
+                continue;
             }
+        };
+
+        // Read stdout/stderr with size limit.
+        // Take pipes before waiting so we don't deadlock.
+        let stdout_bytes = child
+            .stdout
+            .take()
+            .and_then(|mut r| read_limited(&mut r, OUTPUT_SIZE_LIMIT).ok())
+            .unwrap_or_default();
+
+        let remaining = OUTPUT_SIZE_LIMIT.saturating_sub(stdout_bytes.len());
+        let stderr_bytes = child
+            .stderr
+            .take()
+            .and_then(|mut r| read_limited(&mut r, remaining).ok())
+            .unwrap_or_default();
+
+        // Wait with timeout
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(TEST_COMMAND_TIMEOUT_SECS);
+        let mut timed_out = false;
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) => {
+                    if std::time::Instant::now() >= deadline {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        timed_out = true;
+                        break std::process::ExitStatus::default();
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                Err(_) => {
+                    break std::process::ExitStatus::default();
+                }
+            }
+        };
+
+        let success = !timed_out && status.success();
+        let stdout = String::from_utf8_lossy(&stdout_bytes);
+        let stderr = String::from_utf8_lossy(&stderr_bytes);
+        let status_label = if timed_out {
+            "TIMEOUT"
+        } else if success {
+            "PASS"
+        } else {
+            "FAIL"
+        };
+
+        if !success {
+            failed_count += 1;
+        }
+
+        summary.push_str(&format!(
+            "  [{}/{}] {}: {}\n",
+            i + 1,
+            total_count,
+            status_label,
+            cmd
+        ));
+
+        // Include truncated output for context
+        let max_output_len = 500;
+        if !stdout.is_empty() {
+            let truncated = truncate_output(&stdout, max_output_len);
+            summary.push_str(&format!("    stdout: {truncated}\n"));
+        }
+        if !stderr.is_empty() {
+            let truncated_stderr = truncate_output(&stderr, max_output_len);
+            if timed_out {
+                summary.push_str(&format!(
+                    "    stderr: {truncated_stderr}\n    [timed out after {TEST_COMMAND_TIMEOUT_SECS}s]\n"
+                ));
+            } else {
+                summary.push_str(&format!("    stderr: {truncated_stderr}\n"));
+            }
+        } else if timed_out {
+            summary.push_str(&format!(
+                "    [timed out after {TEST_COMMAND_TIMEOUT_SECS}s]\n"
+            ));
         }
     }
 
@@ -1211,6 +1312,21 @@ pub fn spec_evaluate(db: &Database, id: &str) -> Result<String> {
         "Triggered claw-evaluate for spec {id} (repo: {})\n",
         spec.repo_id
     ))
+}
+
+/// Check whether a command string starts with an allowed test runner prefix.
+fn is_allowed_test_command(cmd: &str) -> bool {
+    let trimmed = cmd.trim();
+    ALLOWED_TEST_COMMAND_PREFIXES
+        .iter()
+        .any(|prefix| trimmed == *prefix || trimmed.starts_with(&format!("{prefix} ")))
+}
+
+/// Read up to `limit` bytes from a reader, discarding the rest.
+fn read_limited(reader: &mut dyn std::io::Read, limit: usize) -> std::io::Result<Vec<u8>> {
+    let mut buf = Vec::with_capacity(limit.min(8192));
+    reader.take(limit as u64).read_to_end(&mut buf)?;
+    Ok(buf)
 }
 
 #[cfg(test)]
