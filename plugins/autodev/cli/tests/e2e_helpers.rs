@@ -170,7 +170,7 @@ pub fn run_json(home: &TempDir, args: &[&str]) -> serde_json::Value {
 pub fn create_spec(home: &TempDir, repo_name: &str, title: &str, body: &str) -> String {
     let output = autodev(home)
         .args([
-            "spec", "add", "--title", title, "--body", body, "--repo", repo_name,
+            "spec", "add", "--title", title, "--body", body, "--repo", repo_name, "--force",
         ])
         .output()
         .expect("spec add");
@@ -205,6 +205,7 @@ pub fn create_spec_with_tests(
             repo_name,
             "--test-commands",
             test_commands,
+            "--force",
         ])
         .output()
         .expect("spec add");
