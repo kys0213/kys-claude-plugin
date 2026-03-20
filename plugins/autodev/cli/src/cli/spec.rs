@@ -970,6 +970,232 @@ pub fn check_completable_specs(
     triggered
 }
 
+// ─── Acceptance Criteria Verification ───
+
+/// A single parsed acceptance criterion.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AcceptanceCriterion {
+    /// The criterion text (without the checkbox prefix).
+    pub text: String,
+    /// Whether this criterion is already checked in the markdown.
+    pub checked: bool,
+}
+
+/// Result of verifying acceptance criteria for a spec.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VerifyResult {
+    pub spec_id: String,
+    pub spec_title: String,
+    pub total: usize,
+    pub met: usize,
+    pub unmet: usize,
+    pub criteria: Vec<AcceptanceCriterion>,
+}
+
+impl VerifyResult {
+    /// Return only the unmet criteria.
+    pub fn unmet_criteria(&self) -> Vec<&AcceptanceCriterion> {
+        self.criteria.iter().filter(|c| !c.checked).collect()
+    }
+}
+
+impl std::fmt::Display for VerifyResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "Spec: {} — {}\nAcceptance criteria: {}/{} met\n",
+            self.spec_id, self.spec_title, self.met, self.total
+        )?;
+        for c in &self.criteria {
+            let mark = if c.checked { "x" } else { " " };
+            writeln!(f, "  - [{mark}] {}", c.text)?;
+        }
+        Ok(())
+    }
+}
+
+/// Parse acceptance criteria from markdown checklist format.
+///
+/// Recognizes lines matching:
+/// - `- [ ] text` (unchecked)
+/// - `- [x] text` or `- [X] text` (checked)
+/// - `* [ ] text` / `* [x] text` (bullet variant)
+///
+/// Lines that don't match the checklist pattern are ignored.
+fn parse_acceptance_criteria(text: &str) -> Vec<AcceptanceCriterion> {
+    let mut criteria = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        // Match "- [ ] ...", "- [x] ...", "* [ ] ...", "* [x] ..."
+        let rest = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "));
+        let Some(rest) = rest else { continue };
+        if let Some(text) = rest.strip_prefix("[ ] ") {
+            criteria.push(AcceptanceCriterion {
+                text: text.trim().to_string(),
+                checked: false,
+            });
+        } else if let Some(text) = rest
+            .strip_prefix("[x] ")
+            .or_else(|| rest.strip_prefix("[X] "))
+        {
+            criteria.push(AcceptanceCriterion {
+                text: text.trim().to_string(),
+                checked: true,
+            });
+        }
+    }
+    criteria
+}
+
+/// Cross-reference acceptance criteria with linked issues.
+///
+/// For each unmet criterion, check if any linked issue title contains the
+/// criterion text (case-insensitive fuzzy match). If a matching issue is
+/// in the Done phase, mark the criterion as met.
+fn cross_reference_with_issues(criteria: &mut [AcceptanceCriterion], db: &Database, spec_id: &str) {
+    let issues = db.spec_issues(spec_id).unwrap_or_default();
+    if issues.is_empty() {
+        return;
+    }
+
+    let queue_items = db.queue_list_items(None).unwrap_or_default();
+
+    for criterion in criteria.iter_mut() {
+        if criterion.checked {
+            continue;
+        }
+        // Check if any linked issue that is Done matches this criterion
+        for issue in &issues {
+            let is_done = queue_items.iter().any(|q| {
+                q.work_id.ends_with(&format!(":{}", issue.issue_number))
+                    && q.work_id.starts_with("issue:")
+                    && q.phase == QueuePhase::Done
+            });
+            if is_done {
+                // Check if the issue title relates to this criterion (fuzzy match)
+                if let Some(item) = queue_items.iter().find(|q| {
+                    q.work_id.ends_with(&format!(":{}", issue.issue_number))
+                        && q.work_id.starts_with("issue:")
+                }) {
+                    if let Some(ref title) = item.title {
+                        let criterion_lower = criterion.text.to_lowercase();
+                        let title_lower = title.to_lowercase();
+                        // Simple keyword overlap: check if significant words match
+                        let criterion_words: Vec<&str> = criterion_lower
+                            .split_whitespace()
+                            .filter(|w| w.len() > 3)
+                            .collect();
+                        let matched = criterion_words
+                            .iter()
+                            .any(|word| title_lower.contains(word));
+                        if matched {
+                            criterion.checked = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Verify acceptance criteria for a spec.
+///
+/// Parses the spec's `acceptance_criteria` field as a markdown checklist,
+/// cross-references with linked issues, and returns a verification result.
+pub fn verify_acceptance_criteria(db: &Database, id: &str) -> Result<VerifyResult> {
+    let spec = db
+        .spec_show(id)?
+        .ok_or_else(|| anyhow::anyhow!("spec not found: {id}"))?;
+
+    let ac_text = spec.acceptance_criteria.as_deref().unwrap_or("");
+
+    let mut criteria = parse_acceptance_criteria(ac_text);
+
+    if criteria.is_empty() && !ac_text.is_empty() {
+        // If no checklist items found, treat each non-empty line as an unchecked criterion
+        for line in ac_text.lines() {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() && !trimmed.starts_with('#') && !trimmed.starts_with("---") {
+                criteria.push(AcceptanceCriterion {
+                    text: trimmed.to_string(),
+                    checked: false,
+                });
+            }
+        }
+    }
+
+    // Cross-reference with linked issues
+    cross_reference_with_issues(&mut criteria, db, id);
+
+    let met = criteria.iter().filter(|c| c.checked).count();
+    let unmet = criteria.len() - met;
+
+    Ok(VerifyResult {
+        spec_id: id.to_string(),
+        spec_title: spec.title.clone(),
+        total: criteria.len(),
+        met,
+        unmet,
+        criteria,
+    })
+}
+
+/// Format unmet acceptance criteria as a GitHub issue body.
+fn format_issue_body(spec: &Spec, criterion: &AcceptanceCriterion) -> String {
+    let mut body = String::new();
+    body.push_str("## Unmet Acceptance Criterion\n\n");
+    body.push_str(&format!("**Spec**: {} ({})\n\n", spec.title, spec.id));
+    body.push_str(&format!("**Criterion**: {}\n\n", criterion.text));
+    body.push_str("---\n\n");
+    body.push_str("This issue was auto-generated by `autodev spec verify`.\n");
+    body
+}
+
+/// Verify acceptance criteria and optionally create GitHub issues for unmet criteria.
+///
+/// Returns the verification result and a list of created issue descriptions (if any).
+pub fn spec_verify(
+    db: &Database,
+    id: &str,
+    json: bool,
+    create_issues: bool,
+) -> Result<(String, Vec<(String, String)>)> {
+    let result = verify_acceptance_criteria(db, id)?;
+
+    let output = if json {
+        serde_json::to_string_pretty(&result)?
+    } else {
+        result.to_string()
+    };
+
+    let mut issue_pairs = Vec::new();
+
+    if create_issues && result.unmet > 0 {
+        let spec = db
+            .spec_show(id)?
+            .ok_or_else(|| anyhow::anyhow!("spec not found: {id}"))?;
+
+        for criterion in result.unmet_criteria() {
+            let title = format!(
+                "[AC] {}: {}",
+                spec.title,
+                if criterion.text.len() > 60 {
+                    format!("{}...", &criterion.text[..57])
+                } else {
+                    criterion.text.clone()
+                }
+            );
+            let body = format_issue_body(&spec, criterion);
+            issue_pairs.push((title, body));
+        }
+    }
+
+    Ok((output, issue_pairs))
+}
+
 /// 스펙의 repo에 대해 claw-evaluate를 즉시 트리거한다.
 pub fn spec_evaluate(db: &Database, id: &str) -> Result<String> {
     let spec = db
@@ -1031,5 +1257,116 @@ mod tests {
         assert!(output.contains("spec-1"));
         assert!(output.contains("src/lib.rs"));
         assert!(output.contains("Add feature"));
+    }
+
+    #[test]
+    fn parse_acceptance_criteria_checklist() {
+        let text =
+            "- [ ] API endpoint returns 200\n- [x] Database migration applied\n- [ ] Error handling for edge cases";
+        let criteria = parse_acceptance_criteria(text);
+        assert_eq!(criteria.len(), 3);
+        assert!(!criteria[0].checked);
+        assert_eq!(criteria[0].text, "API endpoint returns 200");
+        assert!(criteria[1].checked);
+        assert_eq!(criteria[1].text, "Database migration applied");
+        assert!(!criteria[2].checked);
+    }
+
+    #[test]
+    fn parse_acceptance_criteria_star_bullet() {
+        let text = "* [ ] First criterion\n* [X] Second criterion";
+        let criteria = parse_acceptance_criteria(text);
+        assert_eq!(criteria.len(), 2);
+        assert!(!criteria[0].checked);
+        assert!(criteria[1].checked);
+    }
+
+    #[test]
+    fn parse_acceptance_criteria_ignores_non_checklist() {
+        let text = "Some random text\n## Header\n- [ ] Valid item\n- Regular list item";
+        let criteria = parse_acceptance_criteria(text);
+        assert_eq!(criteria.len(), 1);
+        assert_eq!(criteria[0].text, "Valid item");
+    }
+
+    #[test]
+    fn parse_acceptance_criteria_empty() {
+        let criteria = parse_acceptance_criteria("");
+        assert!(criteria.is_empty());
+    }
+
+    #[test]
+    fn verify_result_display() {
+        let result = VerifyResult {
+            spec_id: "spec-1".to_string(),
+            spec_title: "Test Spec".to_string(),
+            total: 3,
+            met: 1,
+            unmet: 2,
+            criteria: vec![
+                AcceptanceCriterion {
+                    text: "Done item".to_string(),
+                    checked: true,
+                },
+                AcceptanceCriterion {
+                    text: "Pending item".to_string(),
+                    checked: false,
+                },
+            ],
+        };
+        let output = result.to_string();
+        assert!(output.contains("1/3 met"));
+        assert!(output.contains("[x] Done item"));
+        assert!(output.contains("[ ] Pending item"));
+    }
+
+    #[test]
+    fn verify_result_unmet_criteria() {
+        let result = VerifyResult {
+            spec_id: "s1".to_string(),
+            spec_title: "T".to_string(),
+            total: 2,
+            met: 1,
+            unmet: 1,
+            criteria: vec![
+                AcceptanceCriterion {
+                    text: "met".to_string(),
+                    checked: true,
+                },
+                AcceptanceCriterion {
+                    text: "unmet".to_string(),
+                    checked: false,
+                },
+            ],
+        };
+        let unmet = result.unmet_criteria();
+        assert_eq!(unmet.len(), 1);
+        assert_eq!(unmet[0].text, "unmet");
+    }
+
+    #[test]
+    fn format_issue_body_contains_criterion() {
+        let spec = Spec {
+            id: "spec-1".to_string(),
+            repo_id: "repo".to_string(),
+            title: "My Spec".to_string(),
+            body: String::new(),
+            status: SpecStatus::Active,
+            source_path: None,
+            test_commands: None,
+            acceptance_criteria: None,
+            priority: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let criterion = AcceptanceCriterion {
+            text: "API returns 200".to_string(),
+            checked: false,
+        };
+        let body = format_issue_body(&spec, &criterion);
+        assert!(body.contains("My Spec"));
+        assert!(body.contains("spec-1"));
+        assert!(body.contains("API returns 200"));
+        assert!(body.contains("auto-generated"));
     }
 }
