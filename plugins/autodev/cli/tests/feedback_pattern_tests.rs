@@ -610,3 +610,231 @@ fn propose_updates_idempotent() {
     let result2 = autodev::cli::convention::propose_updates(&db, &repo_id, 3).unwrap();
     assert!(result2.output.contains("No actionable patterns found."));
 }
+
+// ═══════════════════════════════════════════════
+// 25. classify_review_comment detects naming patterns
+// ═══════════════════════════════════════════════
+
+#[test]
+fn classify_review_comment_naming() {
+    use autodev::cli::convention::classify_review_comment;
+    assert_eq!(
+        classify_review_comment("Please rename this variable"),
+        "style"
+    );
+    assert_eq!(
+        classify_review_comment("Use snake_case for fields"),
+        "style"
+    );
+    assert_eq!(classify_review_comment("Naming convention issue"), "style");
+}
+
+// ═══════════════════════════════════════════════
+// 26. classify_review_comment detects documentation patterns
+// ═══════════════════════════════════════════════
+
+#[test]
+fn classify_review_comment_documentation() {
+    use autodev::cli::convention::classify_review_comment;
+    assert_eq!(
+        classify_review_comment("Add rustdoc for this function"),
+        "style"
+    );
+    assert_eq!(classify_review_comment("Missing docstring here"), "style");
+    assert_eq!(
+        classify_review_comment("Please document this module"),
+        "style"
+    );
+}
+
+// ═══════════════════════════════════════════════
+// 27. classify_review_comment falls back to classify_pattern_type
+// ═══════════════════════════════════════════════
+
+#[test]
+fn classify_review_comment_fallback() {
+    use autodev::cli::convention::classify_review_comment;
+    // Should fall back to classify_pattern_type behavior
+    assert_eq!(classify_review_comment("Add unit test for this"), "testing");
+    assert_eq!(
+        classify_review_comment("Handle the error case"),
+        "error-handling"
+    );
+    assert_eq!(classify_review_comment("Something generic"), "general");
+}
+
+// ═══════════════════════════════════════════════
+// 28. collect_feedback_from_pr_reviews with mock Gh
+// ═══════════════════════════════════════════════
+
+#[tokio::test]
+async fn collect_feedback_from_pr_reviews_processes_comments() {
+    use autodev::infra::gh::mock::MockGh;
+
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db, "org/pr-review-test");
+
+    let mock_gh = MockGh::new();
+
+    // Set up mock: closed PRs list
+    let pulls_json = serde_json::json!([
+        {"number": 1, "state": "closed", "title": "PR 1"},
+        {"number": 2, "state": "closed", "title": "PR 2"}
+    ]);
+    mock_gh.set_paginate(
+        "org/pr-review-test",
+        "pulls",
+        serde_json::to_vec(&pulls_json).unwrap(),
+    );
+
+    // Set up mock: reviews for PR #1
+    let reviews_1 = serde_json::json!([
+        {"body": "Please add error handling here", "state": "COMMENTED"},
+        {"body": "Use snake_case for naming", "state": "CHANGES_REQUESTED"},
+        {"body": "", "state": "APPROVED"}
+    ]);
+    mock_gh.set_paginate(
+        "org/pr-review-test",
+        "pulls/1/reviews",
+        serde_json::to_vec(&reviews_1).unwrap(),
+    );
+
+    // Set up mock: reviews for PR #2
+    let reviews_2 = serde_json::json!([
+        {"body": "Add test coverage for this function", "state": "COMMENTED"}
+    ]);
+    mock_gh.set_paginate(
+        "org/pr-review-test",
+        "pulls/2/reviews",
+        serde_json::to_vec(&reviews_2).unwrap(),
+    );
+
+    let output = autodev::cli::convention::collect_feedback_from_pr_reviews(
+        &db,
+        &mock_gh,
+        "org/pr-review-test",
+        &repo_id,
+        None,
+    )
+    .await
+    .unwrap();
+
+    // Should collect 3 non-empty comments across 2 PRs
+    assert!(output.contains("3 feedback pattern(s)"));
+    assert!(output.contains("3 PR review comment(s)"));
+    assert!(output.contains("2 PR(s)"));
+
+    // Verify patterns were stored
+    let patterns = db.feedback_list(&repo_id).unwrap();
+    assert_eq!(patterns.len(), 3);
+
+    // Verify sources
+    assert!(patterns.iter().all(|p| p.source == "pr-review"));
+
+    // Verify classifications
+    let types: Vec<&str> = patterns.iter().map(|p| p.pattern_type.as_str()).collect();
+    assert!(types.contains(&"error-handling")); // "error handling"
+    assert!(types.contains(&"style")); // "snake_case" naming
+    assert!(types.contains(&"testing")); // "test coverage"
+}
+
+// ═══════════════════════════════════════════════
+// 29. collect_feedback_from_pr_reviews skips empty reviews
+// ═══════════════════════════════════════════════
+
+#[tokio::test]
+async fn collect_feedback_from_pr_reviews_skips_empty_bodies() {
+    use autodev::infra::gh::mock::MockGh;
+
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db, "org/empty-review-test");
+
+    let mock_gh = MockGh::new();
+
+    let pulls_json = serde_json::json!([
+        {"number": 1, "state": "closed", "title": "PR 1"}
+    ]);
+    mock_gh.set_paginate(
+        "org/empty-review-test",
+        "pulls",
+        serde_json::to_vec(&pulls_json).unwrap(),
+    );
+
+    // All empty or whitespace bodies
+    let reviews = serde_json::json!([
+        {"body": "", "state": "APPROVED"},
+        {"body": "   ", "state": "COMMENTED"},
+        {"body": null, "state": "COMMENTED"}
+    ]);
+    mock_gh.set_paginate(
+        "org/empty-review-test",
+        "pulls/1/reviews",
+        serde_json::to_vec(&reviews).unwrap(),
+    );
+
+    let output = autodev::cli::convention::collect_feedback_from_pr_reviews(
+        &db,
+        &mock_gh,
+        "org/empty-review-test",
+        &repo_id,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert!(output.contains("0 feedback pattern(s)"));
+
+    let patterns = db.feedback_list(&repo_id).unwrap();
+    assert!(patterns.is_empty());
+}
+
+// ═══════════════════════════════════════════════
+// 30. collect_feedback_from_pr_reviews deduplicates same comments
+// ═══════════════════════════════════════════════
+
+#[tokio::test]
+async fn collect_feedback_from_pr_reviews_deduplicates() {
+    use autodev::infra::gh::mock::MockGh;
+
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db, "org/dedup-review-test");
+
+    let mock_gh = MockGh::new();
+
+    let pulls_json = serde_json::json!([
+        {"number": 1, "state": "closed", "title": "PR 1"}
+    ]);
+    mock_gh.set_paginate(
+        "org/dedup-review-test",
+        "pulls",
+        serde_json::to_vec(&pulls_json).unwrap(),
+    );
+
+    // Two identical review comments in the same PR
+    let reviews = serde_json::json!([
+        {"body": "Please add tests", "state": "COMMENTED"},
+        {"body": "Please add tests", "state": "COMMENTED"}
+    ]);
+    mock_gh.set_paginate(
+        "org/dedup-review-test",
+        "pulls/1/reviews",
+        serde_json::to_vec(&reviews).unwrap(),
+    );
+
+    let output = autodev::cli::convention::collect_feedback_from_pr_reviews(
+        &db,
+        &mock_gh,
+        "org/dedup-review-test",
+        &repo_id,
+        None,
+    )
+    .await
+    .unwrap();
+
+    // Only 1 pattern should be stored (deduplicated within same PR)
+    assert!(output.contains("1 feedback pattern(s)"));
+
+    let patterns = db.feedback_list(&repo_id).unwrap();
+    assert_eq!(patterns.len(), 1);
+    assert_eq!(patterns[0].suggestion, "Please add tests");
+}
