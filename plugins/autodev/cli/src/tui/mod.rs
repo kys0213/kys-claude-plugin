@@ -18,7 +18,7 @@ use events::LogTailer;
 
 const LOG_TAIL_MAX_LINES: usize = 200;
 
-pub async fn run(db: &Database) -> Result<()> {
+pub async fn run(db: &Database, repo_filter: Option<&str>) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -26,6 +26,7 @@ pub async fn run(db: &Database) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut state = views::AppState::new();
+    state.repo_filter = repo_filter.map(|s| s.to_string());
 
     // Initialize log tailer
     let home = config::autodev_home(&config::RealEnv);

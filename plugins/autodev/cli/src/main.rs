@@ -44,7 +44,11 @@ enum Commands {
         json: bool,
     },
     /// TUI 대시보드
-    Dashboard,
+    Dashboard {
+        /// 레포 이름으로 필터 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+    },
     /// 레포 관리
     Repo {
         #[command(subcommand)]
@@ -443,7 +447,11 @@ enum RepoAction {
         config: Option<String>,
     },
     /// 등록된 레포 목록
-    List,
+    List {
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
     /// 레포 상세 조회
     Show {
         /// 레포 이름 (org/repo)
@@ -479,13 +487,13 @@ enum SpecAction {
         /// 스펙 제목
         #[arg(long)]
         title: String,
-        /// 스펙 본문
-        #[arg(long)]
+        /// 스펙 본문 (--file 사용 시 생략 가능)
+        #[arg(long, default_value = "")]
         body: String,
         /// 레포 이름 (org/repo)
         #[arg(long)]
         repo: String,
-        /// 소스 파일 경로
+        /// 소스 파일 경로 (body 대신 파일 내용 사용)
         #[arg(long)]
         file: Option<String>,
         /// 테스트 커맨드 (JSON 배열)
@@ -750,13 +758,13 @@ async fn main() -> Result<()> {
             let status = client::status(&db, &env, json)?;
             println!("{status}");
         }
-        Commands::Dashboard => tui::run(&db).await?,
+        Commands::Dashboard { repo } => tui::run(&db, repo.as_deref()).await?,
         Commands::Repo { action } => match action {
             RepoAction::Add { url, config } => {
                 client::repo_add(&db, &env, &url, config.as_deref())?;
             }
-            RepoAction::List => {
-                let list = client::repo_list(&db)?;
+            RepoAction::List { json } => {
+                let list = client::repo_list(&db, json)?;
                 println!("{list}");
             }
             RepoAction::Show { name, json } => {
@@ -855,7 +863,7 @@ async fn main() -> Result<()> {
                         std::fs::read_to_string(path)
                             .map_err(|e| anyhow::anyhow!("failed to read file {path}: {e}"))?
                     } else {
-                        body
+                        anyhow::bail!("--body or --file is required");
                     }
                 } else {
                     body

@@ -21,6 +21,11 @@ pub async fn daily(
     home: &std::path::Path,
     date: &str,
 ) -> Result<String> {
+    // Validate date format to prevent path traversal (e.g. "../../etc/passwd")
+    if chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_err() {
+        anyhow::bail!("invalid date format: {date} (expected YYYY-MM-DD)");
+    }
+
     let cfg = config::loader::load_merged(env, None);
     let log_dir = config::resolve_log_dir(&cfg.daemon.log_dir, home);
     let log_path = log_dir.join(format!("daemon.{date}.log"));
