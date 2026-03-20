@@ -103,10 +103,30 @@ pub fn cron_add(
     Ok(())
 }
 
-/// Update cron job interval
-pub fn cron_update(db: &Database, name: &str, repo: Option<&str>, interval: u64) -> Result<()> {
-    db.cron_update_interval(name, repo, interval)?;
-    println!("updated cron job: {name} (interval={interval}s)");
+/// Update cron job schedule (interval or cron expression)
+pub fn cron_update(
+    db: &Database,
+    name: &str,
+    repo: Option<&str>,
+    interval: Option<u64>,
+    schedule: Option<&str>,
+) -> Result<()> {
+    match (interval, schedule) {
+        (Some(secs), None) => {
+            db.cron_update_interval(name, repo, secs)?;
+            println!("updated cron job: {name} (interval={secs}s)");
+        }
+        (None, Some(expr)) => {
+            db.cron_update_schedule(name, repo, expr)?;
+            println!("updated cron job: {name} (schedule=\"{expr}\")");
+        }
+        (Some(_), Some(_)) => {
+            anyhow::bail!("specify either --interval or --schedule, not both");
+        }
+        (None, None) => {
+            anyhow::bail!("specify either --interval <secs> or --schedule \"<cron>\"");
+        }
+    }
     Ok(())
 }
 
