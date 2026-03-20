@@ -140,6 +140,42 @@ fn check_review_overflow(
     }
 }
 
+/// 단일 큐 아이템 상세 조회
+pub fn queue_show(db: &Database, work_id: &str, json: bool) -> Result<String> {
+    let item = db
+        .queue_get_item(work_id)?
+        .ok_or_else(|| anyhow::anyhow!("queue item not found: {work_id}"))?;
+
+    if json {
+        return Ok(serde_json::to_string_pretty(&item)?);
+    }
+
+    let title = item.title.as_deref().unwrap_or("-");
+    let skip = item
+        .skip_reason
+        .as_ref()
+        .map(|r| format!("\nSkip reason: {r}"))
+        .unwrap_or_default();
+    let metadata = item.metadata_json.as_deref().unwrap_or("-");
+
+    Ok(format!(
+        "Work ID:    {}\nRepo ID:    {}\nType:       {}\nPhase:      {}\nTitle:      {}\nTask kind:  {}\nGH number:  #{}\nFailures:   {}\nEscalation: {}\nCreated:    {}\nUpdated:    {}\nMetadata:   {}{}\n",
+        item.work_id,
+        item.repo_id,
+        item.queue_type,
+        item.phase,
+        title,
+        item.task_kind,
+        item.github_number,
+        item.failure_count,
+        item.escalation_level,
+        item.created_at,
+        item.updated_at,
+        metadata,
+        skip,
+    ))
+}
+
 /// DB 기반 큐 아이템 목록 조회
 pub fn queue_list_db(
     db: &Database,
