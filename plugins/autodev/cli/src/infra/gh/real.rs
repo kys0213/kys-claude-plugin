@@ -346,6 +346,70 @@ impl Gh for RealGh {
         }
     }
 
+    async fn issue_list_open(
+        &self,
+        repo_name: &str,
+        search_title: &str,
+        host: Option<&str>,
+    ) -> Vec<String> {
+        let mut args = vec![
+            "issue".to_string(),
+            "list".to_string(),
+            "--repo".to_string(),
+            repo_name.to_string(),
+            "--state".to_string(),
+            "open".to_string(),
+            "--search".to_string(),
+            format!("{search_title} in:title"),
+            "--json".to_string(),
+            "title".to_string(),
+            "--jq".to_string(),
+            ".[].title".to_string(),
+        ];
+
+        if let Some(h) = host {
+            args.push("--hostname".to_string());
+            args.push(h.to_string());
+        }
+
+        tracing::debug!(
+            "[gh:issue_list_open] >>> {repo_name} search={}",
+            search_title
+        );
+        let start = Instant::now();
+
+        match tokio::process::Command::new("gh")
+            .args(&args)
+            .output()
+            .await
+        {
+            Ok(output) => {
+                let elapsed = start.elapsed();
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    tracing::debug!("[gh:issue_list_open] <<< OK ({}ms)", elapsed.as_millis());
+                    stdout.lines().map(|l| l.to_string()).collect()
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!(
+                        "[gh:issue_list_open] <<< FAILED (exit={}, {}ms): {}",
+                        output.status.code().unwrap_or(-1),
+                        elapsed.as_millis(),
+                        stderr.trim()
+                    );
+                    Vec::new()
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[gh:issue_list_open] <<< ERROR ({}ms): {e}",
+                    start.elapsed().as_millis()
+                );
+                Vec::new()
+            }
+        }
+    }
+
     async fn pr_review(
         &self,
         repo_name: &str,

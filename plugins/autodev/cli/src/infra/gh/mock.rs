@@ -187,6 +187,21 @@ impl Gh for MockGh {
         true
     }
 
+    async fn issue_list_open(
+        &self,
+        _repo_name: &str,
+        search_title: &str,
+        _host: Option<&str>,
+    ) -> Vec<String> {
+        // Return titles of created issues that match the search
+        let issues = self.created_issues.lock().unwrap();
+        issues
+            .iter()
+            .filter(|(_, title, _)| title.contains(search_title))
+            .map(|(_, title, _)| title.clone())
+            .collect()
+    }
+
     async fn create_issue(
         &self,
         repo_name: &str,

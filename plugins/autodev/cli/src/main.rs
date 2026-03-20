@@ -5,12 +5,12 @@ use clap::{Parser, Subcommand};
 
 use autodev::core::config;
 use autodev::core::models::{NewConsumerLog, QueueType};
-use autodev::core::repository::{ConsumerLogRepository, RepoRepository, SpecRepository};
+use autodev::core::repository::{ConsumerLogRepository, RepoRepository};
 use autodev::service::daemon;
 use autodev::{cli as client, infra, tui};
 
 use infra::claude::RealClaude;
-use infra::gh::{Gh, RealGh};
+use infra::gh::RealGh;
 use infra::git::RealGit;
 use infra::suggest_workflow::RealSuggestWorkflow;
 
@@ -602,13 +602,10 @@ enum SpecAction {
         #[arg(short = 'n', long, default_value = "20")]
         limit: usize,
     },
-    /// 수용 기준 검증
+    /// 스펙 수용 기준 검증 (선택적으로 이슈 생성)
     Verify {
         /// 스펙 ID
         id: String,
-        /// JSON 출력
-        #[arg(long)]
-        json: bool,
         /// 미충족 기준에 대해 GitHub 이슈 자동 생성
         #[arg(long)]
         create_issues: bool,
@@ -964,37 +961,12 @@ async fn main() -> Result<()> {
                 let output = client::spec::spec_decisions(&db, &spec_id, limit, json)?;
                 println!("{output}");
             }
-            SpecAction::Verify {
-                id,
-                json,
-                create_issues,
-            } => {
-                let (output, issue_pairs) =
-                    client::spec::spec_verify(&db, &id, json, create_issues)?;
+            SpecAction::Verify { id, create_issues } => {
+                let gh_arc: std::sync::Arc<dyn infra::gh::Gh> = std::sync::Arc::new(RealGh);
+                let gh_host = cfg.sources.github.gh_host.as_deref();
+                let output =
+                    client::spec::spec_verify(&db, &gh_arc, &id, create_issues, gh_host).await?;
                 println!("{output}");
-
-                if !issue_pairs.is_empty() {
-                    let spec = db
-                        .spec_show(&id)?
-                        .ok_or_else(|| anyhow::anyhow!("spec not found: {id}"))?;
-                    let repo = db
-                        .repo_find_enabled()?
-                        .into_iter()
-                        .find(|r| r.id == spec.repo_id);
-                    if let Some(repo) = repo {
-                        let gh = RealGh;
-                        for (title, body) in &issue_pairs {
-                            let created = gh.create_issue(&repo.name, title, body, None).await;
-                            if created {
-                                println!("Created issue: {title}");
-                            } else {
-                                eprintln!("Failed to create issue: {title}");
-                            }
-                        }
-                    } else {
-                        eprintln!("Could not find repo for spec {id}; skipping issue creation.");
-                    }
-                }
             }
         },
         Commands::Hitl { action } => match action {
