@@ -8,8 +8,18 @@
 set -euo pipefail
 
 # Guard: 미추출 merged PR이 있는지 확인
-UNEXTRACTED=$(autodev queue list --json --repo "$AUTODEV_REPO_NAME" --unextracted \
-  | jq 'length')
+UNEXTRACTED=$(autodev queue list --json --repo "$AUTODEV_REPO_NAME" --unextracted 2>/dev/null \
+  | jq 'length' 2>/dev/null) || UNEXTRACTED=""
+
+if [ -z "$UNEXTRACTED" ]; then
+  # Fallback: autodev queue 실패 시 최근 24시간 내 merged PR 존재 여부 확인
+  RECENT_MERGED=$(git -C "$AUTODEV_REPO_ROOT" log --merges --since="24 hours ago" --oneline 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$RECENT_MERGED" = "0" ]; then
+    echo "skip: $AUTODEV_REPO_NAME 최근 24시간 merged PR 없음 (fallback)"
+    exit 0
+  fi
+  UNEXTRACTED="$RECENT_MERGED"
+fi
 
 if [ "$UNEXTRACTED" = "0" ]; then
   echo "skip: $AUTODEV_REPO_NAME 미추출 merged PR 없음"

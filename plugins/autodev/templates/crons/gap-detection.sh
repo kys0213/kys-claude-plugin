@@ -16,7 +16,8 @@ if [ "$SPEC_COUNT" = "0" ]; then
 fi
 
 # Guard: 최근 git 변경이 있는지 확인 (마지막 1시간)
-CHANGES=$(git -C "$AUTODEV_REPO_ROOT" log --since="1 hour ago" --oneline 2>/dev/null | wc -l | tr -d ' ')
+git -C "$AUTODEV_REPO_ROOT" fetch --quiet 2>/dev/null || true
+CHANGES=$(git -C "$AUTODEV_REPO_ROOT" log --all --since="1 hour ago" --oneline 2>/dev/null | wc -l | tr -d ' ')
 
 if [ "$CHANGES" = "0" ]; then
   echo "skip: $AUTODEV_REPO_NAME 최근 1시간 git 변경 없음"
