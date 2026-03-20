@@ -311,15 +311,86 @@ impl Daemon {
             }
         }
 
-        // Wait for in-flight tasks to complete
+        // Wait for in-flight tasks to complete (with escalation + notification)
         if !join_set.is_empty() {
             info!("waiting for {} in-flight tasks...", join_set.len());
             while let Some(result) = join_set.join_next().await {
-                if let Ok(task_result) = result {
-                    self.tracker.release(&task_result.repo_name);
-                    self.manager.apply(&task_result);
-                    for log_entry in &task_result.logs {
-                        let _ = self.log_db.log_insert(log_entry);
+                match result {
+                    Ok(task_result) => {
+                        self.tracker.release(&task_result.repo_name);
+                        info!(
+                            "shutdown drain: task completed: {} - {}",
+                            task_result.work_id, task_result.status
+                        );
+
+                        // Escalation: same logic as the main loop
+                        let mut escalation_hitl = None;
+                        let escalation_retry = if let TaskStatus::Failed(ref msg) =
+                            task_result.status
+                        {
+                            match crate::cli::resolve_repo_id(&self.log_db, &task_result.repo_name)
+                            {
+                                Ok(repo_id) => {
+                                    match escalation::escalate(
+                                        &self.log_db,
+                                        &task_result.work_id,
+                                        &repo_id,
+                                        msg,
+                                    ) {
+                                        escalation::EscalationOutcome::Retry => true,
+                                        escalation::EscalationOutcome::Remove => false,
+                                        escalation::EscalationOutcome::RemoveWithHitl(event) => {
+                                            escalation_hitl = Some(event);
+                                            false
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "skipping escalation for {}: {e}",
+                                        task_result.work_id
+                                    );
+                                    false
+                                }
+                            }
+                        } else {
+                            false
+                        };
+
+                        if !escalation_retry {
+                            self.manager.apply(&task_result);
+                        }
+
+                        for log_entry in &task_result.logs {
+                            if let Ok(log_id) = self.log_db.log_insert(log_entry) {
+                                let usage = parse_token_usage(&log_id, log_entry);
+                                if usage.input_tokens > 0 || usage.output_tokens > 0 {
+                                    if let Err(e) = self.log_db.usage_insert(&usage) {
+                                        tracing::warn!("failed to record token usage: {e}");
+                                    }
+                                }
+                            }
+                        }
+
+                        // Notify on task failure
+                        if let TaskStatus::Failed(ref msg) = task_result.status {
+                            let notif = NotificationEvent::from_task_failed(
+                                &task_result.work_id,
+                                &task_result.repo_name,
+                                msg,
+                            );
+                            dispatch_notification(&self.notifier, &notif).await;
+                        }
+
+                        // Notify on escalation-generated HITL event
+                        if let Some(ref hitl_event) = escalation_hitl {
+                            let notif = NotificationEvent::from_hitl_created(hitl_event);
+                            dispatch_notification(&self.notifier, &notif).await;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("shutdown drain: spawned task panicked: {e}");
+                        self.tracker.total = self.tracker.total.saturating_sub(1);
                     }
                 }
             }

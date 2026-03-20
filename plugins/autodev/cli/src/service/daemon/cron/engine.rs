@@ -305,6 +305,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tick_executes_expression_schedule() {
+        let (dir, db) = setup_db();
+
+        // Use a cron expression that matches every minute ("0 * * * * * *" = every second in cron crate)
+        // The `cron` crate uses 7-field expressions: sec min hour day month weekday year
+        db.cron_add(&NewCronJob {
+            name: "cron-expr-test".to_string(),
+            repo_id: None,
+            schedule: CronSchedule::Expression {
+                cron: "* * * * * * *".to_string(),
+            },
+            script_path: "echo expression_output".to_string(),
+            builtin: false,
+        })
+        .unwrap();
+
+        let mut engine = CronEngine::new(db, dir.path().to_path_buf());
+
+        // First tick should execute (never run before → due)
+        let results = engine.tick().await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].exit_code, 0);
+        assert_eq!(results[0].stdout.trim(), "expression_output");
+    }
+
+    #[tokio::test]
+    async fn tick_skips_expression_with_invalid_cron_syntax() {
+        let (dir, db) = setup_db();
+
+        db.cron_add(&NewCronJob {
+            name: "bad-expr".to_string(),
+            repo_id: None,
+            schedule: CronSchedule::Expression {
+                cron: "not-a-cron-expression".to_string(),
+            },
+            script_path: "echo should_not_run".to_string(),
+            builtin: false,
+        })
+        .unwrap();
+
+        let mut engine = CronEngine::new(db, dir.path().to_path_buf());
+
+        // Should skip due to invalid cron expression
+        let results = engine.tick().await;
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
     async fn spawn_job_tracks_running_job() {
         let (dir, db) = setup_db();
         let mut engine = CronEngine::new(db, dir.path().to_path_buf());
