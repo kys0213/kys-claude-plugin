@@ -254,6 +254,19 @@ impl Daemon {
                             if let Some(ref cron) = self.cron_engine {
                                 cron.force_trigger(crate::cli::cron::CLAW_EVALUATE_JOB);
                             }
+
+                            // Auto-check spec completion on successful task completion
+                            if let TaskStatus::Completed = task_result.status {
+                                let env = crate::core::config::RealEnv;
+                                let completable =
+                                    crate::cli::spec::check_completable_specs(&self.log_db, &env);
+                                for (spec_id, hitl_event) in &completable {
+                                    info!("spec auto-completion triggered for {spec_id}");
+                                    let notif =
+                                        NotificationEvent::from_hitl_created(hitl_event);
+                                    dispatch_notification(&self.notifier, &notif).await;
+                                }
+                            }
                         }
                         Err(e) => {
                             tracing::error!("spawned task panicked: {e}");
