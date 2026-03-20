@@ -45,6 +45,8 @@ pub trait SpecRepository {
     ) -> Result<()>;
     fn spec_set_status(&self, id: &str, status: SpecStatus) -> Result<()>;
     fn spec_issues(&self, spec_id: &str) -> Result<Vec<SpecIssue>>;
+    /// Fetch all spec-issue mappings in a single query, grouped by spec_id.
+    fn spec_issues_all(&self) -> Result<std::collections::HashMap<String, Vec<SpecIssue>>>;
     fn spec_issue_counts(&self) -> Result<std::collections::HashMap<String, usize>>;
     fn spec_link_issue(&self, spec_id: &str, issue_number: i64) -> Result<()>;
     fn spec_unlink_issue(&self, spec_id: &str, issue_number: i64) -> Result<()>;

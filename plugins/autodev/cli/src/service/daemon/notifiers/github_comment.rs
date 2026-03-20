@@ -21,7 +21,26 @@ impl GitHubCommentNotifier {
         Self {
             gh,
             gh_host,
-            mention,
+            mention: mention
+                .map(|m| Self::sanitize_mention(&m))
+                .filter(|m| !m.is_empty()),
+        }
+    }
+
+    /// Sanitize a GitHub mention handle to prevent markdown injection.
+    ///
+    /// Only allows characters valid in GitHub usernames: alphanumeric, hyphens,
+    /// and underscores. Strips all other characters (newlines, spaces, etc.).
+    fn sanitize_mention(raw: &str) -> String {
+        let stripped = raw.strip_prefix('@').unwrap_or(raw);
+        let sanitized: String = stripped
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        if sanitized.is_empty() {
+            String::new()
+        } else {
+            format!("@{sanitized}")
         }
     }
 
@@ -50,7 +69,7 @@ impl GitHubCommentNotifier {
 
         body.push_str("## \u{1f514} autodev: 사람 확인 필요\n\n");
         if let Some(ref mention) = self.mention {
-            body.push_str(&format!("cc {mention}\n\n"));
+            body.push_str(&format!("cc {mention}\n\n")); // mention is pre-sanitized in new()
         }
         body.push_str(&format!("**상황**: {}\n\n", event.situation));
         body.push_str(&format!("**분석**: {}\n\n", event.context));
@@ -175,6 +194,46 @@ mod tests {
         assert_eq!(comments[0].0, "org/repo");
         assert_eq!(comments[0].1, 42);
         assert!(comments[0].2.contains("CI failure detected"));
+    }
+
+    #[test]
+    fn sanitize_mention_valid_handle() {
+        assert_eq!(
+            GitHubCommentNotifier::sanitize_mention("alice-bob_123"),
+            "@alice-bob_123"
+        );
+    }
+
+    #[test]
+    fn sanitize_mention_strips_at_prefix() {
+        assert_eq!(GitHubCommentNotifier::sanitize_mention("@alice"), "@alice");
+    }
+
+    #[test]
+    fn sanitize_mention_strips_injection() {
+        // Newline injection attempt
+        assert_eq!(
+            GitHubCommentNotifier::sanitize_mention("@user\n\nMALICIOUS"),
+            "@userMALICIOUS"
+        );
+    }
+
+    #[test]
+    fn sanitize_mention_empty_after_strip() {
+        assert_eq!(GitHubCommentNotifier::sanitize_mention("@!!!"), "");
+    }
+
+    #[test]
+    fn mention_injection_rejected_in_constructor() {
+        let gh: Arc<dyn Gh> = Arc::new(MockGh::new());
+        let notifier =
+            GitHubCommentNotifier::new(gh, None, Some("@user\n\n## INJECTED HEADER".to_string()));
+        let event = make_event(Some("issue:org/repo:42"));
+        let body = notifier.format_comment(&event);
+        // The injected header must not appear
+        assert!(!body.contains("## INJECTED HEADER"));
+        // The sanitized mention should be present (only alphanumeric chars kept)
+        assert!(body.contains("cc @userINJECTEDHEADER"));
     }
 
     #[tokio::test]

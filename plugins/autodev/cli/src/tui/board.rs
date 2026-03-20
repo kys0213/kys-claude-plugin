@@ -24,6 +24,7 @@ impl BoardStateBuilder {
         let all_repos = db.repo_find_enabled()?;
         let all_items = db.queue_list_items(repo_filter)?;
         let all_specs = db.spec_list(repo_filter)?;
+        let all_spec_issues = db.spec_issues_all()?;
 
         let mut board_repos = Vec::new();
 
@@ -55,7 +56,8 @@ impl BoardStateBuilder {
             // Build spec entries
             let mut spec_entries = Vec::new();
             for spec in &repo_specs {
-                let linked_issues = db.spec_issues(&spec.id)?;
+                let empty_vec = Vec::new();
+                let linked_issues = all_spec_issues.get(&spec.id).unwrap_or(&empty_vec);
                 let total = linked_issues.len();
                 let done_count = linked_issues
                     .iter()
@@ -99,7 +101,7 @@ impl BoardStateBuilder {
             // Orphan issues: queue items not linked to any spec
             let linked_issue_numbers: std::collections::HashSet<i64> = repo_specs
                 .iter()
-                .flat_map(|s| db.spec_issues(&s.id).unwrap_or_default())
+                .flat_map(|s| all_spec_issues.get(&s.id).cloned().unwrap_or_default())
                 .map(|si| si.issue_number)
                 .collect();
             let orphan_issues: Vec<BoardItem> = repo_items
