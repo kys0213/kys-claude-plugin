@@ -1,4 +1,5 @@
 use std::io::Read as _;
+use std::sync::Arc;
 
 use anyhow::Result;
 
@@ -6,6 +7,10 @@ use crate::cli::resolve_repo_id;
 use crate::core::models::*;
 use crate::core::repository::*;
 use crate::infra::db::Database;
+use crate::infra::gh::Gh;
+
+/// Maximum number of issues created per `spec verify` invocation.
+const MAX_ISSUES_PER_VERIFY: usize = 5;
 
 /// Allowed test runner command prefixes.
 ///
@@ -891,6 +896,162 @@ pub fn spec_conflicts_with_hitl(db: &Database, spec_id: &str) -> Result<(String,
     Ok((output, Some(hitl_id)))
 }
 
+/// Truncate a string to at most `max_chars` characters, appending "..." if truncated.
+/// Safe for multibyte characters (Korean, emoji, etc.).
+fn truncate_chars(s: &str, max_chars: usize) -> String {
+    let truncated: String = s.chars().take(max_chars).collect();
+    if truncated.len() < s.len() {
+        format!("{truncated}...")
+    } else {
+        truncated
+    }
+}
+
+/// Parse acceptance criteria text into individual criterion lines.
+/// Each non-empty line (optionally prefixed with `- ` or `* `) is one criterion.
+fn parse_criteria(acceptance_criteria: &str) -> Vec<String> {
+    acceptance_criteria
+        .lines()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            line.strip_prefix("- ")
+                .or_else(|| line.strip_prefix("* "))
+                .unwrap_or(line)
+                .to_string()
+        })
+        .collect()
+}
+
+/// Verify a spec's acceptance criteria and optionally create GitHub issues for unmet criteria.
+///
+/// Returns a human-readable report of the verification result.
+pub async fn spec_verify(
+    db: &Database,
+    gh: &Arc<dyn Gh>,
+    id: &str,
+    create_issues: bool,
+    gh_host: Option<&str>,
+) -> Result<String> {
+    let spec = db
+        .spec_show(id)?
+        .ok_or_else(|| anyhow::anyhow!("spec not found: {id}"))?;
+
+    let acceptance_criteria = spec
+        .acceptance_criteria
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("spec {id} has no acceptance_criteria defined"))?;
+
+    let criteria = parse_criteria(acceptance_criteria);
+    if criteria.is_empty() {
+        return Ok(format!("spec {id}: no acceptance criteria to verify.\n"));
+    }
+
+    // Resolve repo name from repo_id
+    let enabled = db.repo_find_enabled()?;
+    let repo = enabled
+        .iter()
+        .find(|r| r.id == spec.repo_id)
+        .ok_or_else(|| anyhow::anyhow!("repo not found for id: {}", spec.repo_id))?;
+    let repo_name = &repo.name;
+
+    let linked_issues = db.spec_issues(id)?;
+    let all_items = db.queue_list_items(None)?;
+
+    // Check which criteria are "met" by having a linked done issue
+    let done_count = linked_issues
+        .iter()
+        .filter(|si| {
+            all_items.iter().any(|q| {
+                q.work_id.ends_with(&format!(":{}", si.issue_number)) && q.phase == QueuePhase::Done
+            })
+        })
+        .count();
+
+    // Build report of unmet criteria (criteria without corresponding done issues)
+    // For simplicity, consider criteria unmet if total done issues < total criteria
+    let unmet_criteria: Vec<&String> = if done_count >= criteria.len() {
+        Vec::new()
+    } else {
+        criteria.iter().skip(done_count).collect()
+    };
+
+    let mut output = String::new();
+    output.push_str(&format!("Spec: {} — {}\n", spec.id, spec.title));
+    output.push_str(&format!(
+        "Criteria: {} total, {} met, {} unmet\n\n",
+        criteria.len(),
+        criteria.len() - unmet_criteria.len(),
+        unmet_criteria.len()
+    ));
+
+    if unmet_criteria.is_empty() {
+        output.push_str("All acceptance criteria are met.\n");
+        return Ok(output);
+    }
+
+    for (i, criterion) in unmet_criteria.iter().enumerate() {
+        let status = if i < MAX_ISSUES_PER_VERIFY || !create_issues {
+            "UNMET"
+        } else {
+            "UNMET (skipped)"
+        };
+        output.push_str(&format!("  [{status}] {criterion}\n"));
+    }
+
+    if !create_issues {
+        return Ok(output);
+    }
+
+    // Create issues for unmet criteria (with dedup and rate limiting)
+    let mut created_count = 0;
+    let mut skipped_dedup = 0;
+
+    for criterion in unmet_criteria.iter().take(MAX_ISSUES_PER_VERIFY) {
+        let title = format!(
+            "[spec:{}] {}",
+            truncate_chars(&spec.title, 20),
+            truncate_chars(criterion, 57)
+        );
+
+        // Dedup: check if an open issue with the same title already exists
+        let existing = gh.issue_list_open(repo_name, &title, gh_host).await;
+        if existing.iter().any(|t| t == &title) {
+            skipped_dedup += 1;
+            output.push_str(&format!("  [DEDUP] issue already exists: {title}\n"));
+            continue;
+        }
+
+        let body = format!(
+            "Auto-created by `spec verify --create-issues`\n\n\
+             **Spec:** {} ({})\n\
+             **Criterion:** {}\n",
+            spec.title, spec.id, criterion
+        );
+
+        if gh.create_issue(repo_name, &title, &body, gh_host).await {
+            created_count += 1;
+            output.push_str(&format!("  [CREATED] {title}\n"));
+        } else {
+            output.push_str(&format!("  [FAILED] could not create issue: {title}\n"));
+        }
+    }
+
+    let remaining = unmet_criteria.len().saturating_sub(MAX_ISSUES_PER_VERIFY);
+    if remaining > 0 {
+        output.push_str(&format!(
+            "\n⚠ {remaining} additional unmet criteria exceeded the limit of {MAX_ISSUES_PER_VERIFY} issues per invocation. \
+             Re-run after resolving existing issues.\n"
+        ));
+    }
+
+    output.push_str(&format!(
+        "\nSummary: {created_count} created, {skipped_dedup} deduplicated, {remaining} skipped (limit)\n"
+    ));
+
+    Ok(output)
+}
+
 /// Prioritize specs by setting priority order based on the given ID list.
 pub fn spec_prioritize(db: &Database, ids: &[String]) -> Result<String> {
     for (i, id) in ids.iter().enumerate() {
@@ -1247,58 +1408,6 @@ pub fn verify_acceptance_criteria(db: &Database, id: &str) -> Result<VerifyResul
 }
 
 /// Format unmet acceptance criteria as a GitHub issue body.
-fn format_issue_body(spec: &Spec, criterion: &AcceptanceCriterion) -> String {
-    let mut body = String::new();
-    body.push_str("## Unmet Acceptance Criterion\n\n");
-    body.push_str(&format!("**Spec**: {} ({})\n\n", spec.title, spec.id));
-    body.push_str(&format!("**Criterion**: {}\n\n", criterion.text));
-    body.push_str("---\n\n");
-    body.push_str("This issue was auto-generated by `autodev spec verify`.\n");
-    body
-}
-
-/// Verify acceptance criteria and optionally create GitHub issues for unmet criteria.
-///
-/// Returns the verification result and a list of created issue descriptions (if any).
-pub fn spec_verify(
-    db: &Database,
-    id: &str,
-    json: bool,
-    create_issues: bool,
-) -> Result<(String, Vec<(String, String)>)> {
-    let result = verify_acceptance_criteria(db, id)?;
-
-    let output = if json {
-        serde_json::to_string_pretty(&result)?
-    } else {
-        result.to_string()
-    };
-
-    let mut issue_pairs = Vec::new();
-
-    if create_issues && result.unmet > 0 {
-        let spec = db
-            .spec_show(id)?
-            .ok_or_else(|| anyhow::anyhow!("spec not found: {id}"))?;
-
-        for criterion in result.unmet_criteria() {
-            let title = format!(
-                "[AC] {}: {}",
-                spec.title,
-                if criterion.text.len() > 60 {
-                    format!("{}...", &criterion.text[..57])
-                } else {
-                    criterion.text.clone()
-                }
-            );
-            let body = format_issue_body(&spec, criterion);
-            issue_pairs.push((title, body));
-        }
-    }
-
-    Ok((output, issue_pairs))
-}
-
 /// 스펙의 repo에 대해 claw-evaluate를 즉시 트리거한다.
 pub fn spec_evaluate(db: &Database, id: &str) -> Result<String> {
     let spec = db
@@ -1463,28 +1572,41 @@ mod tests {
     }
 
     #[test]
-    fn format_issue_body_contains_criterion() {
-        let spec = Spec {
-            id: "spec-1".to_string(),
-            repo_id: "repo".to_string(),
-            title: "My Spec".to_string(),
-            body: String::new(),
-            status: SpecStatus::Active,
-            source_path: None,
-            test_commands: None,
-            acceptance_criteria: None,
-            priority: None,
-            created_at: String::new(),
-            updated_at: String::new(),
-        };
-        let criterion = AcceptanceCriterion {
-            text: "API returns 200".to_string(),
-            checked: false,
-        };
-        let body = format_issue_body(&spec, &criterion);
-        assert!(body.contains("My Spec"));
-        assert!(body.contains("spec-1"));
-        assert!(body.contains("API returns 200"));
-        assert!(body.contains("auto-generated"));
+    fn truncate_chars_ascii() {
+        assert_eq!(truncate_chars("hello world", 5), "hello...");
+        assert_eq!(truncate_chars("hello", 5), "hello");
+        assert_eq!(truncate_chars("hi", 5), "hi");
+    }
+
+    #[test]
+    fn truncate_chars_multibyte_korean() {
+        let korean = "한글 테스트 문자열입니다";
+        let result = truncate_chars(korean, 5);
+        assert_eq!(result, "한글 테스...");
+        // Must not panic
+    }
+
+    #[test]
+    fn truncate_chars_emoji() {
+        let emoji = "🎉🎊🎈🎁🎀🎆🎇";
+        let result = truncate_chars(emoji, 3);
+        assert_eq!(result, "🎉🎊🎈...");
+    }
+
+    #[test]
+    fn parse_criteria_basic() {
+        let ac = "- criterion one\n- criterion two\n* criterion three\ncriterion four\n\n";
+        let criteria = parse_criteria(ac);
+        assert_eq!(criteria.len(), 4);
+        assert_eq!(criteria[0], "criterion one");
+        assert_eq!(criteria[1], "criterion two");
+        assert_eq!(criteria[2], "criterion three");
+        assert_eq!(criteria[3], "criterion four");
+    }
+
+    #[test]
+    fn parse_criteria_empty() {
+        assert!(parse_criteria("").is_empty());
+        assert!(parse_criteria("   \n  \n").is_empty());
     }
 }

@@ -82,6 +82,15 @@ pub trait Gh: Send + Sync {
         host: Option<&str>,
     ) -> Option<i64>;
 
+    /// Search for open issues by title substring.
+    /// Returns a list of issue titles that match the query.
+    async fn issue_list_open(
+        &self,
+        repo_name: &str,
+        search_title: &str,
+        host: Option<&str>,
+    ) -> Vec<String>;
+
     /// `gh api repos/{repo}/pulls/{number}/reviews --method POST -f event={event}`
     /// event: `"APPROVE"` | `"REQUEST_CHANGES"` | `"COMMENT"`
     /// GitHub PR UI에서 Approved / Changes Requested 상태를 설정한다.
