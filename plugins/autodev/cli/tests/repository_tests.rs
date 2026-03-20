@@ -61,6 +61,170 @@ fn repo_remove() {
 }
 
 #[test]
+fn repo_remove_cascade_deletes_all_dependent_tables() {
+    use autodev::core::phase::TaskKind;
+
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+
+    // ── Insert rows into every dependent table ──
+
+    // specs + spec_issues
+    let spec_id = db
+        .spec_add(&NewSpec {
+            repo_id: repo_id.clone(),
+            title: "Test spec".into(),
+            body: "body".into(),
+            source_path: None,
+            test_commands: None,
+            acceptance_criteria: None,
+        })
+        .unwrap();
+    db.spec_link_issue(&spec_id, 42).unwrap();
+
+    // hitl_events + hitl_responses
+    let event_id = db
+        .hitl_create(&NewHitlEvent {
+            repo_id: repo_id.clone(),
+            spec_id: Some(spec_id.clone()),
+            work_id: Some("pr:org/repo:1".into()),
+            severity: HitlSeverity::High,
+            situation: "conflict".into(),
+            context: "ctx".into(),
+            options: vec!["a".into(), "b".into()],
+        })
+        .unwrap();
+    db.hitl_respond(&NewHitlResponse {
+        event_id: event_id.clone(),
+        choice: Some(0),
+        message: None,
+        source: "cli".into(),
+    })
+    .unwrap();
+
+    // queue_items
+    db.queue_upsert(&QueueItemRow {
+        work_id: "issue:org/test-repo:99".into(),
+        repo_id: repo_id.clone(),
+        queue_type: QueueType::Issue,
+        phase: QueuePhase::Pending,
+        title: Some("test item".into()),
+        skip_reason: None,
+        created_at: "2024-01-01T00:00:00Z".into(),
+        updated_at: "2024-01-01T00:00:00Z".into(),
+        task_kind: TaskKind::Analyze,
+        github_number: 99,
+        metadata_json: None,
+        failure_count: 0,
+        escalation_level: 0,
+    })
+    .unwrap();
+
+    // claw_decisions
+    db.decision_add(&NewClawDecision {
+        repo_id: repo_id.clone(),
+        spec_id: Some(spec_id.clone()),
+        decision_type: DecisionType::Advance,
+        target_work_id: Some("issue:org/test-repo:99".into()),
+        reasoning: "looks good".into(),
+        context_json: None,
+    })
+    .unwrap();
+
+    // consumer_logs + token_usage
+    let log_id = db
+        .log_insert(&NewConsumerLog {
+            repo_id: repo_id.clone(),
+            queue_type: "issue".into(),
+            queue_item_id: "item-1".into(),
+            worker_id: "w1".into(),
+            command: "cmd".into(),
+            stdout: "out".into(),
+            stderr: "".into(),
+            exit_code: 0,
+            started_at: "2024-01-01T00:00:00Z".into(),
+            finished_at: "2024-01-01T00:00:01Z".into(),
+            duration_ms: 1000,
+        })
+        .unwrap();
+    db.usage_insert(&NewTokenUsage {
+        log_id,
+        repo_id: repo_id.clone(),
+        queue_type: "issue".into(),
+        queue_item_id: "item-1".into(),
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_write_tokens: 0,
+        cache_read_tokens: 0,
+    })
+    .unwrap();
+
+    // scan_cursors
+    db.cursor_upsert(&repo_id, "issues", "2024-01-01T00:00:00Z")
+        .unwrap();
+
+    // feedback_patterns
+    db.feedback_upsert(&NewFeedbackPattern {
+        repo_id: repo_id.clone(),
+        pattern_type: "naming".into(),
+        suggestion: "use snake_case".into(),
+        source: "review".into(),
+    })
+    .unwrap();
+
+    // cron_jobs (per-repo)
+    db.cron_add(&NewCronJob {
+        name: "repo-scan".into(),
+        repo_id: Some(repo_id.clone()),
+        schedule: CronSchedule::Interval { secs: 300 },
+        script_path: "/usr/bin/echo".into(),
+        builtin: false,
+    })
+    .unwrap();
+
+    // ── Verify rows exist before removal ──
+    assert_eq!(db.spec_list(Some("org/test-repo")).unwrap().len(), 1);
+    assert_eq!(db.hitl_list(Some("org/test-repo")).unwrap().len(), 1);
+    assert_eq!(db.queue_list_items(Some("org/test-repo")).unwrap().len(), 1);
+    assert_eq!(
+        db.decision_list(Some("org/test-repo"), 10).unwrap().len(),
+        1
+    );
+
+    // ── Remove repo ──
+    db.repo_remove("org/test-repo").unwrap();
+
+    // ── Verify ALL dependent rows are gone ──
+    assert_eq!(db.repo_list().unwrap().len(), 0);
+
+    // Query raw tables to confirm no orphan rows remain
+    let conn = db.conn();
+
+    let count = |table: &str| -> i64 {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+            row.get(0)
+        })
+        .unwrap()
+    };
+
+    assert_eq!(count("specs"), 0, "orphan rows in specs");
+    assert_eq!(count("spec_issues"), 0, "orphan rows in spec_issues");
+    assert_eq!(count("hitl_events"), 0, "orphan rows in hitl_events");
+    assert_eq!(count("hitl_responses"), 0, "orphan rows in hitl_responses");
+    assert_eq!(count("queue_items"), 0, "orphan rows in queue_items");
+    assert_eq!(count("claw_decisions"), 0, "orphan rows in claw_decisions");
+    assert_eq!(count("token_usage"), 0, "orphan rows in token_usage");
+    assert_eq!(count("scan_cursors"), 0, "orphan rows in scan_cursors");
+    assert_eq!(count("consumer_logs"), 0, "orphan rows in consumer_logs");
+    assert_eq!(
+        count("feedback_patterns"),
+        0,
+        "orphan rows in feedback_patterns"
+    );
+    assert_eq!(count("cron_jobs"), 0, "orphan rows in cron_jobs");
+}
+
+#[test]
 fn repo_remove_nonexistent_returns_error() {
     let db = open_memory_db();
     // Should error when repo doesn't exist
