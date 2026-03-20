@@ -231,6 +231,65 @@ allowed-tools: "Task"
 	}
 }
 
+func TestValidatePluginMarketplaceSync(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Setup: plugins/my-plugin/.claude-plugin/plugin.json
+	pluginDir := filepath.Join(tmpDir, "plugins", "my-plugin", ".claude-plugin")
+	os.MkdirAll(pluginDir, 0755)
+	os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(`{"name": "my-plugin", "version": "1.0.0"}`), 0644)
+
+	// Setup: plugins/orphan-plugin/.claude-plugin/plugin.json (not in marketplace)
+	orphanDir := filepath.Join(tmpDir, "plugins", "orphan-plugin", ".claude-plugin")
+	os.MkdirAll(orphanDir, 0755)
+	os.WriteFile(filepath.Join(orphanDir, "plugin.json"), []byte(`{"name": "orphan-plugin", "version": "0.1.0"}`), 0644)
+
+	// Setup: .claude-plugin/marketplace.json (only has my-plugin)
+	marketDir := filepath.Join(tmpDir, ".claude-plugin")
+	os.MkdirAll(marketDir, 0755)
+	marketplaceFile := filepath.Join(marketDir, "marketplace.json")
+	os.WriteFile(marketplaceFile, []byte(`{
+		"name": "test-repo",
+		"owner": {"name": "test"},
+		"plugins": [
+			{"name": "my-plugin", "source": "./plugins/my-plugin", "version": "1.0.0"}
+		]
+	}`), 0644)
+
+	pluginFiles := []string{
+		"plugins/my-plugin/.claude-plugin/plugin.json",
+		"plugins/orphan-plugin/.claude-plugin/plugin.json",
+	}
+
+	results := validatePluginMarketplaceSync(tmpDir, pluginFiles, marketplaceFile)
+
+	if len(results) != 2 {
+		t.Fatalf("Expected 2 results, got %d", len(results))
+	}
+
+	// Find results by plugin
+	var myPluginResult, orphanResult Result
+	for _, r := range results {
+		if strings.Contains(r.File, "my-plugin") {
+			myPluginResult = r
+		}
+		if strings.Contains(r.File, "orphan-plugin") {
+			orphanResult = r
+		}
+	}
+
+	if !myPluginResult.Valid {
+		t.Errorf("my-plugin should pass: %v", myPluginResult.Errors)
+	}
+
+	if orphanResult.Valid {
+		t.Errorf("orphan-plugin should fail (not in marketplace)")
+	}
+	if len(orphanResult.Errors) != 1 || !strings.Contains(orphanResult.Errors[0], "not registered in marketplace.json") {
+		t.Errorf("Expected marketplace sync error, got: %v", orphanResult.Errors)
+	}
+}
+
 func TestValidateSkillMD(t *testing.T) {
 	tmpDir := t.TempDir()
 

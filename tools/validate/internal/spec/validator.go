@@ -65,6 +65,16 @@ func Validate(repoRoot string) (*Results, error) {
 		} else {
 			results.Failed = append(results.Failed, result)
 		}
+
+		// 2-1. Cross-validate: every plugin.json in plugins/ must have a marketplace entry
+		crossResults := validatePluginMarketplaceSync(repoRoot, pluginFiles, marketplaceFile)
+		for _, r := range crossResults {
+			if r.Valid {
+				results.Passed = append(results.Passed, r)
+			} else {
+				results.Failed = append(results.Failed, r)
+			}
+		}
 	}
 
 	// 3. SKILL.md validation
@@ -254,6 +264,72 @@ func validateMarketplaceJSON(filePath string) Result {
 
 	result.Valid = len(result.Errors) == 0
 	return result
+}
+
+// validatePluginMarketplaceSync checks that every plugin.json under plugins/ has a corresponding entry in marketplace.json
+func validatePluginMarketplaceSync(repoRoot string, pluginFiles []string, marketplaceFile string) []Result {
+	var results []Result
+
+	// Read marketplace.json and collect registered plugin names
+	content, err := os.ReadFile(marketplaceFile)
+	if err != nil {
+		return results
+	}
+
+	var marketplace map[string]interface{}
+	if err := json.Unmarshal(content, &marketplace); err != nil {
+		return results
+	}
+
+	registeredNames := make(map[string]bool)
+	if plugins, ok := marketplace["plugins"].([]interface{}); ok {
+		for _, p := range plugins {
+			if plugin, ok := p.(map[string]interface{}); ok {
+				if name, ok := plugin["name"].(string); ok {
+					registeredNames[name] = true
+				}
+			}
+		}
+	}
+
+	// Check each plugin.json under plugins/ directory
+	for _, file := range pluginFiles {
+		// Only check plugins/ directory (skip .claude-plugin/plugin.json etc)
+		if !strings.Contains(file, "plugins/") {
+			continue
+		}
+
+		fullPath := repoRoot + "/" + file
+		pluginContent, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+
+		var pluginData map[string]interface{}
+		if err := json.Unmarshal(pluginContent, &pluginData); err != nil {
+			continue
+		}
+
+		pluginName, ok := pluginData["name"].(string)
+		if !ok || pluginName == "" {
+			continue
+		}
+
+		result := Result{
+			File: fullPath,
+			Type: "marketplace-sync",
+		}
+
+		if registeredNames[pluginName] {
+			result.Valid = true
+		} else {
+			result.Errors = append(result.Errors, fmt.Sprintf("Plugin '%s' has plugin.json but is not registered in marketplace.json", pluginName))
+		}
+
+		results = append(results, result)
+	}
+
+	return results
 }
 
 func validateSkillMD(filePath string, results *Results) Result {
