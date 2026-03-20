@@ -193,7 +193,69 @@ impl AnalyzeTask {
             return vec![QueueOp::Remove];
         }
 
-        // implement verdict → analyzed 라벨 (HITL 게이트)
+        // auto-approve: confidence가 임계값 이상이면 자동으로 구현 단계로 진행
+        if auto_approve && analysis.confidence >= auto_approve_threshold {
+            let comment = verdict::format_auto_approved_comment(analysis);
+            self.gh
+                .issue_comment(
+                    &self.item.repo_name,
+                    self.item.github_number,
+                    &comment,
+                    gh_host,
+                )
+                .await;
+
+            // add-first: implementing 라벨 추가 후 WIP 제거
+            self.gh
+                .label_add(
+                    &self.item.repo_name,
+                    self.item.github_number,
+                    labels::IMPLEMENTING,
+                    gh_host,
+                )
+                .await;
+            self.gh
+                .label_remove(
+                    &self.item.repo_name,
+                    self.item.github_number,
+                    labels::WIP,
+                    gh_host,
+                )
+                .await;
+
+            tracing::info!(
+                "issue #{}: auto-approved (confidence={:.2} >= threshold={:.2}), advancing to implement",
+                self.item.github_number,
+                analysis.confidence,
+                auto_approve_threshold,
+            );
+
+            // 직접 implement 큐에 추가하여 label-scan 대기 없이 즉시 진행
+            let repo_ref = crate::core::queue_item::RepoRef {
+                id: self.item.repo_id.clone(),
+                name: self.item.repo_name.clone(),
+                url: self.item.repo_url.clone(),
+                gh_host: self.item.gh_host.clone(),
+            };
+            let implement_item = QueueItem::new_issue(
+                &repo_ref,
+                self.item.github_number,
+                crate::core::phase::TaskKind::Implement,
+                self.item.title.clone(),
+                self.item.body().map(|s| s.to_string()),
+                self.item.labels().unwrap_or_default().to_vec(),
+                self.item.author().unwrap_or_default().to_string(),
+            );
+            return vec![
+                QueueOp::Remove,
+                QueueOp::Push {
+                    phase: crate::core::models::QueuePhase::Pending,
+                    item: Box::new(implement_item),
+                },
+            ];
+        }
+
+        // auto-approve 미충족 → analyzed 라벨 (HITL 게이트, 사람 리뷰 대기)
         let comment = verdict::format_analysis_comment(analysis);
         self.gh
             .issue_comment(
@@ -220,29 +282,11 @@ impl AnalyzeTask {
             )
             .await;
 
-        // auto-approve: confidence가 임계값 이상이면 approved-analysis 라벨도 추가
-        if auto_approve && analysis.confidence >= auto_approve_threshold {
-            self.gh
-                .label_add(
-                    &self.item.repo_name,
-                    self.item.github_number,
-                    labels::APPROVED_ANALYSIS,
-                    gh_host,
-                )
-                .await;
-            tracing::info!(
-                "issue #{}: auto-approved (confidence={:.2} >= threshold={:.2})",
-                self.item.github_number,
-                analysis.confidence,
-                auto_approve_threshold,
-            );
-        } else {
-            tracing::info!(
-                "issue #{}: Analyzing → analyzed (awaiting human review, confidence={:.2})",
-                self.item.github_number,
-                analysis.confidence
-            );
-        }
+        tracing::info!(
+            "issue #{}: Analyzing → analyzed (awaiting human review, confidence={:.2})",
+            self.item.github_number,
+            analysis.confidence
+        );
         vec![QueueOp::Remove]
     }
 
@@ -504,6 +548,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::core::config::models::WorkflowConfig;
+    use crate::core::models::QueuePhase;
     use crate::core::phase::TaskKind;
     use crate::core::queue_item::testing::test_repo;
     use crate::infra::gh::mock::MockGh;
@@ -928,7 +973,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn after_auto_approve_adds_approved_label() {
+    async fn after_auto_approve_adds_implementing_and_pushes_to_implement() {
         let gh = Arc::new(MockGh::new());
         gh.set_field("org/repo", "issues/42", ".state", "open");
 
@@ -944,9 +989,25 @@ mod tests {
         let result = task.after_invoke(make_implement_response()).await;
 
         assert!(matches!(result.status, TaskStatus::Completed));
+
+        // implementing 라벨 추가, analyzed/approved-analysis 라벨 아님
         let added = gh.added_labels.lock().unwrap();
-        assert!(added.iter().any(|(_, _, l)| l == labels::ANALYZED));
-        assert!(added.iter().any(|(_, _, l)| l == labels::APPROVED_ANALYSIS));
+        assert!(added.iter().any(|(_, _, l)| l == labels::IMPLEMENTING));
+        assert!(!added.iter().any(|(_, _, l)| l == labels::ANALYZED));
+        assert!(!added.iter().any(|(_, _, l)| l == labels::APPROVED_ANALYSIS));
+
+        // WIP 라벨 제거
+        let removed = gh.removed_labels.lock().unwrap();
+        assert!(removed.iter().any(|(_, _, l)| l == labels::WIP));
+
+        // auto-approved 코멘트 포함
+        let comments = gh.posted_comments.lock().unwrap();
+        assert!(comments[0].2.contains("Auto-approved"));
+
+        // implement 큐에 Push 됨
+        assert!(result.queue_ops.iter().any(
+            |op| matches!(op, QueueOp::Push { phase, item } if *phase == QueuePhase::Pending && item.task_kind == TaskKind::Implement)
+        ));
     }
 
     #[tokio::test]
@@ -967,7 +1028,12 @@ mod tests {
         assert!(matches!(result.status, TaskStatus::Completed));
         let added = gh.added_labels.lock().unwrap();
         assert!(added.iter().any(|(_, _, l)| l == labels::ANALYZED));
-        assert!(!added.iter().any(|(_, _, l)| l == labels::APPROVED_ANALYSIS));
+        assert!(!added.iter().any(|(_, _, l)| l == labels::IMPLEMENTING));
+        // No Push to implement queue
+        assert!(!result
+            .queue_ops
+            .iter()
+            .any(|op| matches!(op, QueueOp::Push { .. })));
     }
 
     #[tokio::test]
@@ -988,7 +1054,12 @@ mod tests {
         assert!(matches!(result.status, TaskStatus::Completed));
         let added = gh.added_labels.lock().unwrap();
         assert!(added.iter().any(|(_, _, l)| l == labels::ANALYZED));
-        assert!(!added.iter().any(|(_, _, l)| l == labels::APPROVED_ANALYSIS));
+        assert!(!added.iter().any(|(_, _, l)| l == labels::IMPLEMENTING));
+        // No Push to implement queue
+        assert!(!result
+            .queue_ops
+            .iter()
+            .any(|op| matches!(op, QueueOp::Push { .. })));
     }
 
     #[tokio::test]

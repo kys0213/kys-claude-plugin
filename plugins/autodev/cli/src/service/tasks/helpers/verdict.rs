@@ -74,6 +74,40 @@ pub fn format_analysis_comment(a: &AnalysisResult) -> String {
     comment
 }
 
+/// auto-approve 된 분석 리포트를 이슈 코멘트로 포맷
+///
+/// `format_analysis_comment`와 동일한 마커/헤더를 사용하되,
+/// 사람 승인 대신 자동 승인 안내를 표시한다.
+pub fn format_auto_approved_comment(a: &AnalysisResult) -> String {
+    let mut comment = format!(
+        "<!-- autodev:analysis -->\n\
+         ## 🤖 Autodev Analysis Report\n\n\
+         **Verdict**: `{}` | **Confidence**: {:.0}%\n\n\
+         ✅ **Auto-approved** — confidence meets threshold. Proceeding to implementation.\n\n\
+         <details>\n<summary>Analysis Report</summary>\n\n\
+         {}\n\
+         </details>",
+        a.verdict,
+        a.confidence * 100.0,
+        a.report
+    );
+
+    if !a.related_issues.is_empty() {
+        comment.push_str("\n\n### Related Issues\n\n| # | Relation | Confidence | Summary |\n|---|----------|------------|---------|");
+        for ri in &a.related_issues {
+            comment.push_str(&format!(
+                "\n| #{} | {} | {:.0}% | {} |",
+                ri.number,
+                ri.relation,
+                ri.confidence * 100.0,
+                ri.summary
+            ));
+        }
+    }
+
+    comment
+}
+
 /// 파싱 실패 시 raw report를 분석 코멘트로 포맷
 ///
 /// `format_analysis_comment`와 동일한 마커/헤더/푸터를 사용하여 일관성을 유지한다.
@@ -192,5 +226,25 @@ mod tests {
         };
         let comment = format_analysis_comment(&a);
         assert!(!comment.contains("Related Issues"));
+    }
+
+    #[test]
+    fn format_auto_approved_comment_contains_marker_and_auto_approved() {
+        let a = AnalysisResult {
+            verdict: Verdict::Implement,
+            confidence: 0.92,
+            summary: "Clear issue".to_string(),
+            questions: vec![],
+            reason: None,
+            report: "Affected files: src/main.rs".to_string(),
+            related_issues: vec![],
+        };
+        let comment = format_auto_approved_comment(&a);
+        assert!(comment.contains("<!-- autodev:analysis -->"));
+        assert!(comment.contains("Auto-approved"));
+        assert!(comment.contains("92%"));
+        assert!(comment.contains("src/main.rs"));
+        // Should NOT contain manual approval instructions
+        assert!(!comment.contains("autodev:approved-analysis"));
     }
 }
