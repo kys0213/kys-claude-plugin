@@ -172,7 +172,11 @@ const COMPLETION_HITL_MARKER: &str = "ready for completion";
 ///
 /// Verifies the spec is Active, has linked issues, then transitions to
 /// Completing and creates a HITL event for final human confirmation.
-pub fn spec_check_completion(db: &Database, id: &str) -> Result<(String, NewHitlEvent)> {
+pub fn spec_check_completion(
+    db: &Database,
+    env: &dyn crate::core::config::Env,
+    id: &str,
+) -> Result<(String, NewHitlEvent)> {
     let spec = db
         .spec_show(id)?
         .ok_or_else(|| anyhow::anyhow!("spec not found: {id}"))?;
@@ -237,8 +241,38 @@ pub fn spec_check_completion(db: &Database, id: &str) -> Result<(String, NewHitl
         String::new()
     };
 
+    // Execute test_commands if present
+    let test_results = run_spec_test_commands(db, env, &spec)?;
+
     // Transition to Completing
     db.spec_set_status(id, SpecStatus::Completing)?;
+
+    // Severity: HIGH always (completion is a critical decision).
+    // If tests failed, this is noted in the situation/context fields.
+    let severity = HitlSeverity::High;
+
+    // Build test results section for context
+    let test_section = match &test_results {
+        Some(results) => {
+            let status = if results.all_passed {
+                "ALL PASSED"
+            } else {
+                "SOME FAILED"
+            };
+            format!("\n\nTest commands: {status}\n{}", results.summary)
+        }
+        None => String::new(),
+    };
+
+    // Build situation with test status
+    let test_situation = match &test_results {
+        Some(results) if results.all_passed => " All test commands passed.".to_string(),
+        Some(results) => format!(
+            " {} of {} test command(s) failed.",
+            results.failed_count, results.total_count
+        ),
+        None => String::new(),
+    };
 
     // Create HITL event for final confirmation
     let issue_list: Vec<String> = issues
@@ -249,15 +283,16 @@ pub fn spec_check_completion(db: &Database, id: &str) -> Result<(String, NewHitl
         repo_id: spec.repo_id.clone(),
         spec_id: Some(id.to_string()),
         work_id: None,
-        severity: HitlSeverity::High,
+        severity,
         situation: format!(
-            "Spec '{}' is {COMPLETION_HITL_MARKER}. Linked issues: {}",
+            "Spec '{}' is {COMPLETION_HITL_MARKER}. Linked issues: {}.{}",
             spec.title,
-            issue_list.join(", ")
+            issue_list.join(", "),
+            test_situation,
         ),
         context: format!(
-            "Spec ID: {}\nTitle: {}\nLinked issues: {}\n\nPlease confirm completion or reject to return to Active.{}{}",
-            id, spec.title, issue_list.join(", "), issues_warning, conflict_warning
+            "Spec ID: {}\nTitle: {}\nLinked issues: {}\n\nPlease confirm completion or reject to return to Active.{}{}{}",
+            id, spec.title, issue_list.join(", "), issues_warning, conflict_warning, test_section
         ),
         options: vec![
             "Confirm completion".to_string(),
@@ -274,6 +309,124 @@ pub fn spec_check_completion(db: &Database, id: &str) -> Result<(String, NewHitl
         ),
         hitl_event,
     ))
+}
+
+/// Results from running spec test commands.
+struct TestCommandResults {
+    all_passed: bool,
+    failed_count: usize,
+    total_count: usize,
+    summary: String,
+}
+
+/// Execute test_commands defined on a spec in the spec's repo workspace directory.
+///
+/// Returns `None` if no test_commands are defined or they are empty.
+/// Parses `test_commands` as a JSON array of command strings.
+fn run_spec_test_commands(
+    db: &Database,
+    env: &dyn crate::core::config::Env,
+    spec: &Spec,
+) -> Result<Option<TestCommandResults>> {
+    let tc_json = match &spec.test_commands {
+        Some(tc) if !tc.trim().is_empty() => tc,
+        _ => return Ok(None),
+    };
+
+    // Parse JSON array of command strings
+    let commands: Vec<String> = serde_json::from_str(tc_json)
+        .map_err(|e| anyhow::anyhow!("failed to parse test_commands JSON: {e}"))?;
+
+    if commands.is_empty() {
+        return Ok(None);
+    }
+
+    // Resolve workspace directory for the spec's repo
+    let repo_name = resolve_repo_name(db, &spec.repo_id)?;
+    let ws_root = crate::core::config::workspaces_path(env);
+    let repo_dir = ws_root
+        .join(crate::core::config::sanitize_repo_name(&repo_name))
+        .join("main");
+
+    let mut summary = String::new();
+    let mut failed_count = 0;
+    let total_count = commands.len();
+
+    for (i, cmd) in commands.iter().enumerate() {
+        let result = std::process::Command::new("sh")
+            .args(["-c", cmd])
+            .current_dir(&repo_dir)
+            .output();
+
+        match result {
+            Ok(output) => {
+                let success = output.status.success();
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let status_label = if success { "PASS" } else { "FAIL" };
+
+                if !success {
+                    failed_count += 1;
+                }
+
+                summary.push_str(&format!(
+                    "  [{}/{}] {}: {}\n",
+                    i + 1,
+                    total_count,
+                    status_label,
+                    cmd
+                ));
+
+                // Include truncated output for context
+                let max_output_len = 500;
+                if !stdout.is_empty() {
+                    let truncated = truncate_output(&stdout, max_output_len);
+                    summary.push_str(&format!("    stdout: {truncated}\n"));
+                }
+                if !stderr.is_empty() {
+                    let truncated = truncate_output(&stderr, max_output_len);
+                    summary.push_str(&format!("    stderr: {truncated}\n"));
+                }
+            }
+            Err(e) => {
+                failed_count += 1;
+                summary.push_str(&format!(
+                    "  [{}/{}] ERROR: {} — {}\n",
+                    i + 1,
+                    total_count,
+                    cmd,
+                    e
+                ));
+            }
+        }
+    }
+
+    Ok(Some(TestCommandResults {
+        all_passed: failed_count == 0,
+        failed_count,
+        total_count,
+        summary,
+    }))
+}
+
+/// Resolve the repo name from a repo_id by looking up enabled repos.
+fn resolve_repo_name(db: &Database, repo_id: &str) -> Result<String> {
+    let repos = db.repo_find_enabled()?;
+    repos
+        .iter()
+        .find(|r| r.id == repo_id)
+        .map(|r| r.name.clone())
+        .ok_or_else(|| anyhow::anyhow!("repository not found for id: {repo_id}"))
+}
+
+/// Truncate output to a maximum length, appending "..." if truncated.
+fn truncate_output(s: &str, max_len: usize) -> String {
+    let trimmed = s.trim();
+    if trimmed.len() <= max_len {
+        trimmed.replace('\n', " | ")
+    } else {
+        format!("{}...", &trimmed[..max_len].replace('\n', " | "))
+    }
 }
 
 /// HITL 응답으로 스펙 완료를 확정하거나 거부한다.
