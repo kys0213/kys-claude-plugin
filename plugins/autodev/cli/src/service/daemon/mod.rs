@@ -236,28 +236,18 @@ impl Daemon {
 
                             // Notify on task failure (escalation으로 retry되더라도 기록)
                             if let TaskStatus::Failed(ref msg) = task_result.status {
-                                if let Some(ref dispatcher) = self.notifier {
-                                    let notif = NotificationEvent::from_task_failed(
-                                        &task_result.work_id,
-                                        &task_result.repo_name,
-                                        msg,
-                                    );
-                                    let errors = dispatcher.dispatch(&notif).await;
-                                    for (ch, err) in &errors {
-                                        tracing::warn!("notification error ({ch}): {err}");
-                                    }
-                                }
+                                let notif = NotificationEvent::from_task_failed(
+                                    &task_result.work_id,
+                                    &task_result.repo_name,
+                                    msg,
+                                );
+                                dispatch_notification(&self.notifier, &notif).await;
                             }
 
                             // Notify on escalation-generated HITL event
                             if let Some(ref hitl_event) = escalation_hitl {
-                                if let Some(ref dispatcher) = self.notifier {
-                                    let notif = NotificationEvent::from_hitl_created(hitl_event);
-                                    let errors = dispatcher.dispatch(&notif).await;
-                                    for (ch, err) in &errors {
-                                        tracing::warn!("notification error ({ch}): {err}");
-                                    }
-                                }
+                                let notif = NotificationEvent::from_hitl_created(hitl_event);
+                                dispatch_notification(&self.notifier, &notif).await;
                             }
 
                             // Force-trigger claw-evaluate on any task completion/failure
@@ -384,6 +374,19 @@ pub fn daemonize(log_dir: &Path) -> Result<()> {
     std::mem::forget(devnull);
 
     Ok(())
+}
+
+/// Dispatcher가 있으면 알림을 발송하고, 에러를 로깅한다.
+async fn dispatch_notification(
+    notifier: &Option<notifiers::dispatcher::NotificationDispatcher>,
+    event: &NotificationEvent,
+) {
+    if let Some(ref dispatcher) = notifier {
+        let errors = dispatcher.dispatch(event).await;
+        for (ch, err) in &errors {
+            tracing::warn!("notification error ({ch}): {err}");
+        }
+    }
 }
 
 /// Claude CLI stderr에서 토큰 사용량을 파싱한다.

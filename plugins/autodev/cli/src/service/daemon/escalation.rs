@@ -19,6 +19,21 @@ pub enum EscalationOutcome {
     RemoveWithHitl(NewHitlEvent),
 }
 
+/// HITL 이벤트를 DB에 저장하고, 성공 시 RemoveWithHitl, 실패 시 Remove를 반환한다.
+fn create_hitl_or_remove(
+    db: &Database,
+    work_id: &str,
+    hitl_event: NewHitlEvent,
+) -> EscalationOutcome {
+    match db.hitl_create(&hitl_event) {
+        Ok(_) => EscalationOutcome::RemoveWithHitl(hitl_event),
+        Err(e) => {
+            tracing::warn!("failed to create HITL event for {work_id}: {e}");
+            EscalationOutcome::Remove
+        }
+    }
+}
+
 /// 실패한 태스크에 대해 에스컬레이션을 수행한다.
 ///
 /// 1. failure_count를 1 증가시킨다.
@@ -57,7 +72,6 @@ pub fn escalate(
             EscalationOutcome::Retry
         }
         EscalationLevel::Hitl => {
-            // HITL 이벤트 생성: 사람이 개입하도록 알린다.
             let hitl_event = NewHitlEvent {
                 repo_id: repo_id.to_string(),
                 spec_id: None,
@@ -71,17 +85,10 @@ pub fn escalate(
                     "Reassign or replan".to_string(),
                 ],
             };
-            match db.hitl_create(&hitl_event) {
-                Ok(_) => EscalationOutcome::RemoveWithHitl(hitl_event),
-                Err(e) => {
-                    tracing::warn!("failed to create HITL event for {work_id}: {e}");
-                    EscalationOutcome::Remove
-                }
-            }
+            create_hitl_or_remove(db, work_id, hitl_event)
         }
         EscalationLevel::Skip => EscalationOutcome::Remove,
         EscalationLevel::Replan => {
-            // HITL 이벤트(replan) 생성: 스펙 수준 재계획 요청
             let hitl_event = NewHitlEvent {
                 repo_id: repo_id.to_string(),
                 spec_id: None,
@@ -98,13 +105,7 @@ pub fn escalate(
                     "Abandon this task".to_string(),
                 ],
             };
-            match db.hitl_create(&hitl_event) {
-                Ok(_) => EscalationOutcome::RemoveWithHitl(hitl_event),
-                Err(e) => {
-                    tracing::warn!("failed to create HITL event for {work_id}: {e}");
-                    EscalationOutcome::Remove
-                }
-            }
+            create_hitl_or_remove(db, work_id, hitl_event)
         }
     }
 }
