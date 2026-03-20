@@ -137,6 +137,22 @@
       "name": "openclaw-docker",
       "source": "./plugins/openclaw-docker",
       "version": "0.2.0"
+    },
+    {
+      "category": "productivity",
+      "description": "스펙 문서와 구현 코드 간 갭을 체계적으로 분석 — 행위 커버리지, 보안, 성능 관점 리포트",
+      "keywords": [
+        "spec",
+        "analysis",
+        "coverage",
+        "gap",
+        "compliance",
+        "security",
+        "performance"
+      ],
+      "name": "spec-analyzer",
+      "source": "./plugins/spec-analyzer",
+      "version": "0.1.0"
     }
   ]
 }
