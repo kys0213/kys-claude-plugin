@@ -859,7 +859,7 @@ async fn main() -> Result<()> {
                 client::spec::spec_unlink(&db, &spec_id, issue)?;
             }
             SpecAction::Complete { id } => {
-                let (output, hitl_event) = client::spec::spec_check_completion(&db, &id)?;
+                let (output, hitl_event) = client::spec::spec_check_completion(&db, &env, &id)?;
                 println!("{output}");
 
                 // Dispatch HITL creation notification if configured
