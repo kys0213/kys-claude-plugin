@@ -170,8 +170,9 @@ const COMPLETION_HITL_MARKER: &str = "ready for completion";
 
 /// Check if a spec is ready for completion and transition to Completing status.
 ///
-/// Verifies the spec is Active, has linked issues, then transitions to
-/// Completing and creates a HITL event for final human confirmation.
+/// Verifies the spec is Active, has linked issues, runs test commands (if any),
+/// then transitions to Completing and creates a HITL event for final human
+/// confirmation.
 pub fn spec_check_completion(
     db: &Database,
     env: &dyn crate::core::config::Env,
