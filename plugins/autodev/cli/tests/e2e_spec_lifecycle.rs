@@ -26,7 +26,7 @@ fn e2e_spec_add_returns_uuid() {
 fn e2e_spec_add_warns_missing_sections() {
     let home = TempDir::new().unwrap();
     setup_repo(&home, REPO_URL);
-    // Body with no required sections → warning
+    // Body with no required sections → blocked unless --force
     autodev(&home)
         .args([
             "spec",
@@ -39,8 +39,8 @@ fn e2e_spec_add_warns_missing_sections() {
             REPO_NAME,
         ])
         .assert()
-        .success()
-        .stdout(predicate::str::contains("Missing sections"));
+        .failure()
+        .stderr(predicate::str::contains("Missing required sections"));
 }
 
 #[test]
