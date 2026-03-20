@@ -45,6 +45,10 @@ pub fn claw_init(home: &Path) -> Result<()> {
             TPL_DECOMPOSE_STRATEGY_MD,
         ),
         (".claude/rules/hitl-policy.md", TPL_HITL_POLICY_MD),
+        (
+            ".claude/rules/auto-approve-policy.md",
+            TPL_AUTO_APPROVE_POLICY_MD,
+        ),
         (".claude/rules/operations.md", TPL_OPERATIONS_MD),
         ("commands/status.md", DEFAULT_STATUS_MD),
         ("commands/board.md", DEFAULT_BOARD_MD),
@@ -240,6 +244,8 @@ const TPL_DECOMPOSE_STRATEGY_MD: &str =
     include_str!("../../../templates/claw-workspace/.claude/rules/decompose-strategy.md");
 const TPL_HITL_POLICY_MD: &str =
     include_str!("../../../templates/claw-workspace/.claude/rules/hitl-policy.md");
+const TPL_AUTO_APPROVE_POLICY_MD: &str =
+    include_str!("../../../templates/claw-workspace/.claude/rules/auto-approve-policy.md");
 const TPL_OPERATIONS_MD: &str =
     include_str!("../../../templates/claw-workspace/.claude/rules/operations.md");
 const TPL_DECOMPOSE_SKILL_MD: &str =
