@@ -29,6 +29,7 @@ Daemon이 주기적으로 실행해야 하는 작업을 스크립트 기반 cron
 ```
 코어.on_done()            → force_claw_evaluate()
 코어.on_failed()          → force_claw_evaluate()
+코어.on_spec_registered() → force_claw_evaluate()   // Draft 진입 → 즉시 분석
 코어.on_spec_active()     → force_claw_evaluate()
 코어.on_hitl_responded()  → force_claw_evaluate()
 ```

@@ -321,6 +321,18 @@ impl DataSource for GitHubDataSource {
             _     => Ok(EscalationAction::Replan { event: replan_hitl(item) }),
         }
     }
+
+    async fn on_done(&self, item: &QueueItem, _ctx: &HookContext) -> Result<()> {
+        self.gh.comment(item.external_id(), "✅ 완료되었습니다.").await
+    }
+
+    async fn on_skip(&self, item: &QueueItem, reason: &str, _ctx: &HookContext) -> Result<()> {
+        self.gh.comment(item.external_id(), &format!("⏭️ 건너뜁니다: {reason}")).await
+    }
+
+    async fn after_hitl_created(&self, event: &HitlEvent, _ctx: &HookContext) -> Result<()> {
+        self.gh.comment_hitl(event).await
+    }
 }
 ```
 
@@ -808,7 +820,7 @@ Step 2: 요약 표시
 
   ● daemon running (uptime 2h 15m)
 
-  Repos:
+  Workspaces:
     org/repo-a — queue: 1R 2P | specs: auth-v2 ████████░░ 60%
     org/repo-b — queue: 5D   | specs: payment ██░░░░░░░░ 25%
 

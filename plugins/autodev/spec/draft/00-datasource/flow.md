@@ -20,6 +20,11 @@ DataSource = 수집, 라벨 동기화, 코멘트, 알림, escalation (외부 시
 #[async_trait]
 pub trait DataSource: Send + Sync {
     fn name(&self) -> &str;
+    fn collection_types(&self) -> Vec<&str>;
+
+    // ── 리소스 조회 ──
+    async fn resolve(&self, work_id: &str) -> Result<ResourceDetail>;
+    fn external_url(&self, item: &QueueItem) -> Option<String>;
 
     // ── 수집 ──
     async fn collect(&mut self, workspace: &WorkspaceConfig) -> Result<Vec<QueueItem>>;

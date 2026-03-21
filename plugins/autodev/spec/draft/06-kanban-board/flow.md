@@ -14,7 +14,7 @@
 
 ### TUI Dashboard
 
-#### AllRepos 뷰 (기본)
+#### AllWorkspaces 뷰 (기본)
 
 ```
 ┌─ Repos ──────┐┌─ Active Items ─────┐┌─ Runtime ─────────────┐
@@ -29,7 +29,7 @@
 └──────────────┘└────────────────────┘└───────────────────────┘
 ```
 
-#### PerRepo 뷰 (Tab 전환)
+#### PerWorkspace 뷰 (Tab 전환)
 
 ```
 ┌─ Board ──────────────────────────────┐┌─ Active ──────────┐
@@ -68,7 +68,7 @@
 |----|------|
 | j/k, ↑/↓ | 아이템 이동 |
 | ←/→ | workspace 전환 |
-| Tab | AllRepos ↔ PerRepo |
+| Tab | AllWorkspaces ↔ PerWorkspace |
 | Enter | 상세 / 전이 타임라인 |
 | h | HITL 오버레이 |
 | s | Spec 상세 |
