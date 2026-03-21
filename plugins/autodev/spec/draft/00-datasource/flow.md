@@ -58,6 +58,21 @@ pub struct HookContext<'a> {
 
 DataSource hook에 최소한의 정보만 전달. DataSource가 코어 내부 구조에 의존하지 않도록.
 
+### ResourceDetail
+
+```rust
+pub struct ResourceDetail {
+    pub title: String,
+    pub body: String,
+    pub author: String,
+    pub labels: Vec<String>,
+    pub url: Option<String>,
+    pub extra: serde_json::Value,  // DataSource별 추가 정보
+}
+```
+
+코어는 `resolve()`를 통해 DataSource의 내부 구조를 몰라도 필요한 정보를 가져온다.
+
 ### EscalationAction
 
 DataSource가 실패 정책을 결정하고, 코어가 실행한다.
@@ -77,6 +92,21 @@ pub enum EscalationAction {
 ```rust
 impl DataSource for GitHubDataSource {
     fn name(&self) -> &str { "github" }
+    fn collection_types(&self) -> Vec<&str> { vec!["issue", "pr"] }
+
+    async fn resolve(&self, work_id: &str) -> Result<ResourceDetail> {
+        let (_, type_, number) = parse_work_id(work_id);
+        let item = self.gh.get_issue_or_pr(number).await?;
+        Ok(ResourceDetail {
+            title: item.title, body: item.body, author: item.author,
+            labels: item.labels, url: Some(self.issue_url(number)),
+            extra: json!({ "state": item.state }),
+        })
+    }
+
+    fn external_url(&self, item: &QueueItem) -> Option<String> {
+        Some(format!("https://github.com/{}/{}/issues/{}", self.owner, self.repo, item.external_id()))
+    }
 
     async fn collect(&mut self, workspace: &WorkspaceConfig) -> Result<Vec<QueueItem>> {
         // autodev:analyze 라벨이 붙은 이슈/PR 감지 → QueueItem 반환
