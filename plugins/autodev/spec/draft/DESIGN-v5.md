@@ -631,7 +631,7 @@ Archived ──resume──→ Active (복구)
 
 | 상태 | 가능한 전이 | CLI | 코어 이벤트 |
 |------|------------|-----|-----------|
-| Draft | → Active | `spec add` | on_spec_active |
+| Draft | → Active, → Archived | Claw 분석 완료 + HITL 승인 | on_spec_active |
 | Active | → Paused, → Completing, → Archived | `spec pause`, (자동), `spec remove` | - |
 | Paused | → Active, → Archived | `spec resume`, `spec remove` | on_spec_active |
 | Completing | → Active, → Completed | (테스트 실패), (HITL 승인) | on_spec_completing |

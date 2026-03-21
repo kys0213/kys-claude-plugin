@@ -26,9 +26,9 @@ Any ──→ Archived (soft delete)
 Archived ──resume──→ Active (복구)
 ```
 
-| 상태 | 가능한 전이 | CLI |
-|------|------------|-----|
-| Draft | → Active | `spec add` (등록 시 바로 Active) |
+| 상태 | 가능한 전이 | 트리거 |
+|------|------------|--------|
+| Draft | → Active | Claw 분석 완료 + 사용자 승인 (HITL) |
 | Active | → Paused, → Completing(자동), → Archived | `spec pause`, `spec remove` |
 | Paused | → Active, → Archived | `spec resume`, `spec remove` |
 | Completing | → Active(테스트 실패), → Completed(HITL 승인) | 자동 |
@@ -43,17 +43,21 @@ Archived ──resume──→ Active (복구)
    CLI: 누락 시 경고 (--force로 진행 가능)
    Plugin: 누락 시 대화형 보완 (workspace 컨텍스트 기반 자동 제안)
 
-2. DB에 저장 (status: Active)
+2. DB에 저장 (status: Draft)
 
-3. 코어 on_spec_active 이벤트:
-   → ForceClawEvaluate: claw-evaluate cron 즉시 트리거
+3. Claw 분석:
+   → decompose skill로 스펙 분해 → 이슈 초안 생성
+   → 실행 계획(분해 결과, 예상 이슈 목록) 사용자에게 제시
 
-4. Claw evaluate:
-   → decompose skill로 스펙 분해 → 이슈 자동 생성
-   → 각 이슈에 autodev:analyze 라벨
+4. 사용자 승인 (HITL):
+   → 승인 → status: Active, on_spec_active 이벤트 발행
+   → 수정 요청 → Draft에 머무름, Claw 재분석
+   → 거부 → Archived
+
+5. Active 전이 후:
+   → 이슈 자동 생성 (autodev:analyze 라벨)
    → convention 기반 이슈 템플릿 적용
-
-5. 생성된 이슈들이 큐에 진입 → Flow 2 파이프라인
+   → 생성된 이슈들이 큐에 진입 → Flow 2 파이프라인
 ```
 
 ### /spec 통합 커맨드
