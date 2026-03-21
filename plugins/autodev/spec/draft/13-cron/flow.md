@@ -14,7 +14,7 @@ Daemon이 주기적으로 실행해야 하는 작업을 스크립트 기반 cron
 | daily-report | 매일 06시 | 활동 있을 때 | 일간 리포트 |
 | log-cleanup | 매일 00시 | 보관 초과 로그 있을 때 | 오래된 로그/worktree 삭제 |
 
-#### Per-repo (LLM, AgentRuntime 사용)
+#### Per-workspace (LLM, AgentRuntime 사용)
 
 | Job | 주기 | 동작 |
 |-----|------|------|
@@ -40,14 +40,14 @@ Daemon이 주기적으로 실행해야 하는 작업을 스크립트 기반 cron
 # ~/.autodev/crons/claw-evaluate.sh
 
 # Guard
-PENDING=$(autodev queue list --repo "$AUTODEV_REPO_NAME" --json | jq 'length')
+PENDING=$(autodev queue list --workspace "$AUTODEV_WORKSPACE_NAME" --json | jq 'length')
 if [ "$PENDING" = "0" ]; then
   echo "skip: 큐 비어있음"
   exit 0
 fi
 
 # 실행 (AgentRuntime 설정에 따라 적절한 LLM 사용)
-autodev agent --repo "$AUTODEV_REPO_NAME" -p "큐를 평가하고 다음 작업을 결정해줘"
+autodev agent --workspace "$AUTODEV_WORKSPACE_NAME" -p "큐를 평가하고 다음 작업을 결정해줘"
 ```
 
 ### 환경변수 주입
@@ -56,9 +56,9 @@ Daemon이 cron 실행 시 자동 주입:
 
 | 변수 | 예시 |
 |------|------|
-| `AUTODEV_REPO_NAME` | `org/repo-a` |
-| `AUTODEV_REPO_ROOT` | `/Users/me/repos/repo-a` |
-| `AUTODEV_REPO_URL` | `https://github.com/org/repo-a` |
+| `AUTODEV_WORKSPACE_NAME` | `org/repo-a` |
+| `AUTODEV_WORKSPACE_ROOT` | `/Users/me/repos/repo-a` |
+| `AUTODEV_WORKSPACE_URL` | `https://github.com/org/repo-a` |
 | `AUTODEV_HOME` | `~/.autodev` |
 | `AUTODEV_DB` | `~/.autodev/autodev.db` |
 | `AUTODEV_CLAW_WORKSPACE` | `~/.autodev/claw-workspace` |
@@ -75,7 +75,7 @@ Daemon이 cron 실행 시 자동 주입:
 
 | | Built-in | Custom |
 |---|---|---|
-| 생성 | 레포 등록 시 자동 | /cron add |
+| 생성 | workspace 등록 시 자동 | /cron add |
 | 제거 | 불가 (pause/resume) | 자유 |
 | Guard | 내장 | 사용자 자유 |
 

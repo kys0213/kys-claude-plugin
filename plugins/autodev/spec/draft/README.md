@@ -12,7 +12,7 @@
 |---|------|------|
 | 00 | [DataSource](./00-datasource/flow.md) | 외부 시스템 OCP (GitHub, Slack, Jira) |
 | 00 | [AgentRuntime](./00-agent-runtime/flow.md) | LLM 실행 OCP (Claude, Gemini, Codex) |
-| 01 | [레포 등록](./01-repo-registration/flow.md) | 레포 등록/변경/제거 + DataSource 바인딩 |
+| 01 | [Workspace 등록](./01-repo-registration/flow.md) | Workspace 등록/변경/제거 + DataSource 바인딩 |
 | 02 | [이슈 등록](./02-issue-registration/flow.md) | 이슈 모드 + 의존성 분석 + 스펙 링크 |
 | 03 | [스펙 등록](./03-spec-registration/flow.md) | 스펙 모드 + lifecycle (6상태) |
 | 04 | [스펙 우선순위](./04-spec-priority/flow.md) | 다중 스펙 + DependencyGuard |

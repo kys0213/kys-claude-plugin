@@ -41,7 +41,7 @@ Archived ──resume──→ Active (복구)
 1. 스펙 본문 파싱 → 필수 섹션 검증
    필수 섹션: 개요, 요구사항, 아키텍처, 테스트 환경, 수용 기준
    CLI: 누락 시 경고 (--force로 진행 가능)
-   Plugin: 누락 시 대화형 보완 (레포 컨텍스트 기반 자동 제안)
+   Plugin: 누락 시 대화형 보완 (workspace 컨텍스트 기반 자동 제안)
 
 2. DB에 저장 (status: Active)
 

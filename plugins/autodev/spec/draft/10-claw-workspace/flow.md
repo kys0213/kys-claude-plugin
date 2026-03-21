@@ -23,7 +23,7 @@
     └── prioritize/                   # 우선순위 판단
 ```
 
-Per-repo 오버라이드: `~/.autodev/workspaces/org-repo/claw/` (같은 파일명 = 오버라이드)
+Per-workspace 오버라이드: `~/.autodev/workspaces/org-repo/claw/` (같은 파일명 = 오버라이드)
 
 ### /claw 세션 진입 경험
 
@@ -42,7 +42,7 @@ Step 2: 요약 표시
 
   ● daemon running (uptime 2h 15m)
 
-  Repos:
+  Workspaces:
     org/repo-a — queue: 1R 2P | specs: auth-v2 ████████░░ 60%
 
   ⚠ HITL 대기: 1건

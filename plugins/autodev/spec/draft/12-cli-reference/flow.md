@@ -47,7 +47,7 @@ plugins/autodev/
 |----|-----|
 | /auto, /auto-setup, /auto-config, /auto-dashboard, /update | /auto (서브커맨드) |
 | /add-spec, /update-spec, /spec | /spec (서브커맨드) |
-| /status, /board, /decisions, /hitl, /repo, /claw, /cron | /claw (자연어) |
+| /status, /board, /decisions, /hitl, /workspace, /claw, /cron | /claw (자연어) |
 
 ### autodev CLI 전체 참조
 
@@ -56,8 +56,8 @@ autodev
 ├── start / stop / restart
 ├── status [--format text|json|rich]
 ├── dashboard
-├── repo
-│   ├── add / list / show / update / remove / config
+├── workspace
+│   ├── add / list / show / update / remove
 ├── spec
 │   ├── add / list / show / update
 │   ├── pause / resume / complete / remove
@@ -76,7 +76,7 @@ autodev
 │   ├── init / rules / edit
 ├── decisions
 │   ├── list / show
-├── agent [--repo <name>] [-p <prompt>]
+├── agent [--workspace <name>] [-p <prompt>]
 ├── convention
 ├── worktree list / clean
 ├── board [--format text|json|rich]

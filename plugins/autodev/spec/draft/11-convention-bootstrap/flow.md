@@ -2,7 +2,7 @@
 
 ### 시나리오
 
-레포 등록 시 `.claude/rules/`가 비어있다면, 기술 스택을 기반으로 컨벤션을 자동 생성한다.
+Workspace 등록 시 `.claude/rules/`가 비어있다면, 기술 스택을 기반으로 컨벤션을 자동 생성한다.
 
 ### Phase 1: Bootstrap
 
@@ -28,7 +28,7 @@
   - 사용자 직접 지시
 
 Claw가 패턴 감지 → 규칙 변경 제안 → HITL 승인 → 자동 업데이트
-  - 레포 규칙: PR로 반영
+  - workspace 규칙: PR로 반영
   - Claw workspace 규칙: 즉시 반영
 ```
 
@@ -36,10 +36,10 @@ Claw가 패턴 감지 → 규칙 변경 제안 → HITL 승인 → 자동 업데
 
 ```rust
 impl DataSource for GitHubDataSource {
-    async fn before_task(&self, kind, item, ctx) -> Result<()> {
+    async fn before_task(&self, kind: TaskKind, item: &QueueItem, ctx: &HookContext) -> Result<()> {
         if kind == TaskKind::Implement {
             // convention의 git-workflow 규칙에서 브랜치명 결정
-            let branch = ctx.repo.convention.branch_name(item);
+            let branch = ctx.workspace.convention.branch_name(item);
             // 예: feat/42-jwt-middleware
         }
         Ok(())
@@ -61,5 +61,5 @@ convention/issue-template:
 ### 관련 플로우
 
 - [Flow 0: DataSource](../00-datasource/flow.md) — before_task hook
-- [Flow 1: 레포 등록](../01-repo-registration/flow.md) — 등록 시 트리거
+- [Flow 1: Workspace 등록](../01-repo-registration/flow.md) — 등록 시 트리거
 - [Flow 3: 스펙 등록](../03-spec-registration/flow.md) — decompose 시 템플릿
