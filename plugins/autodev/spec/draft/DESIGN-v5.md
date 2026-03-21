@@ -725,6 +725,7 @@ DataSource.after_task(Implement, Failed):
 ```
 코어.on_done()            → force_claw_evaluate()
 코어.on_failed()          → force_claw_evaluate()
+코어.on_spec_registered() → force_claw_evaluate()   // Draft 진입 → 즉시 분석
 코어.on_spec_active()     → force_claw_evaluate()
 코어.on_hitl_responded()  → force_claw_evaluate()
 ```
@@ -907,7 +908,7 @@ transition_events (
 |---|------|----------|
 | 430 | claw-evaluate decisions 미기록 | DecisionRecorder (코어, 모든 전이 시 자동) |
 | 416 | agent 세션 시작 시 상태 요약 | /claw 진입 Step 2 |
-| 414 | 스펙 분해 → 이슈 자동 생성 | on_spec_active → ForceClawEvaluate |
+| 414 | 스펙 분석(Draft) → 승인 후 이슈 생성 | on_spec_registered → ForceClawEvaluate → HITL 승인 → on_spec_active |
 | 413 | 이슈 의존성 + spec_issues 링크 | on_enter_pending (DependencyAnalyzer + SpecLinker) |
 | 405 | worktree 브랜치 네이밍 | DataSource.before_task() + convention |
 | 395 | 이슈 템플릿 시스템 | Claw decompose + convention |

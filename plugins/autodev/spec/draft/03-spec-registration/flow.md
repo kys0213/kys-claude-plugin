@@ -44,8 +44,9 @@ Archived ──resume──→ Active (복구)
    Plugin: 누락 시 대화형 보완 (workspace 컨텍스트 기반 자동 제안)
 
 2. DB에 저장 (status: Draft)
+   → 코어 on_spec_registered 이벤트 → ForceClawEvaluate 즉시 트리거
 
-3. Claw 분석:
+3. Claw 분석 (즉시):
    → decompose skill로 스펙 분해 → 이슈 초안 생성
    → 실행 계획(분해 결과, 예상 이슈 목록) 사용자에게 제시
 
