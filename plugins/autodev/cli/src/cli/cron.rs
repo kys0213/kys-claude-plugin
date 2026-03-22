@@ -194,8 +194,10 @@ pub fn cron_trigger(db: &Database, env: &dyn Env, name: &str, repo: Option<&str>
             cmd.env("AUTODEV_REPO_NAME", &repo_info.name);
             cmd.env("AUTODEV_REPO_URL", &repo_info.url);
             cmd.env("AUTODEV_REPO_ID", &repo_info.id);
-            let workspace =
-                config::workspaces_path(env).join(config::sanitize_repo_name(&repo_info.name));
+            let sanitized = config::sanitize_repo_name(&repo_info.name);
+            // WORKSPACE: short workspace name for cron scripts (v5 spec)
+            cmd.env("WORKSPACE", &sanitized);
+            let workspace = config::workspaces_path(env).join(&sanitized);
             cmd.env("AUTODEV_WORKSPACE", workspace.to_string_lossy().as_ref());
             cmd.env(
                 "AUTODEV_REPO_ROOT",

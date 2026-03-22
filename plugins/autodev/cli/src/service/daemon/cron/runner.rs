@@ -101,6 +101,8 @@ impl ScriptRunner {
             vars.insert("AUTODEV_REPO_URL".to_string(), repo.url.clone());
 
             let sanitized = crate::core::config::sanitize_repo_name(&repo.name);
+            // WORKSPACE: short workspace name for cron scripts (v5 spec)
+            vars.insert("WORKSPACE".to_string(), sanitized.clone());
             let workspace = home.join("workspaces").join(&sanitized);
             vars.insert(
                 "AUTODEV_WORKSPACE".to_string(),
@@ -194,6 +196,27 @@ mod tests {
         assert_eq!(vars.get("AUTODEV_REPO_ID").unwrap(), "repo-456");
     }
 
+    #[test]
+    fn build_env_vars_includes_workspace_name_when_repo_provided() {
+        let home = PathBuf::from("/home/autodev");
+        let mut job = sample_job();
+        job.repo_id = Some("repo-456".to_string());
+        let repo = sample_repo_info();
+        let vars = ScriptRunner::build_env_vars(&home, &job, Some(&repo));
+
+        // WORKSPACE should be the sanitized repo name (v5 spec)
+        assert_eq!(vars.get("WORKSPACE").unwrap(), "my-repo");
+    }
+
+    #[test]
+    fn build_env_vars_excludes_workspace_when_no_repo() {
+        let home = PathBuf::from("/home/autodev");
+        let job = sample_job();
+        let vars = ScriptRunner::build_env_vars(&home, &job, None);
+
+        assert!(!vars.contains_key("WORKSPACE"));
+    }
+
     // ═══════════════════════════════════════════════
     // run tests
     // ═══════════════════════════════════════════════
@@ -248,5 +271,16 @@ mod tests {
 
         assert_eq!(result.exit_code, 0);
         assert_eq!(result.stdout.trim(), "/my/home");
+    }
+
+    #[tokio::test]
+    async fn run_injects_workspace_env_var_into_script() {
+        let mut env_vars = HashMap::new();
+        env_vars.insert("WORKSPACE".to_string(), "my-project".to_string());
+
+        let result = ScriptRunner::run("echo $WORKSPACE", env_vars).await;
+
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.stdout.trim(), "my-project");
     }
 }
