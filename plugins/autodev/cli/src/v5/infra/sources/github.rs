@@ -213,7 +213,7 @@ mod tests {
         use crate::infra::gh::mock::MockGh;
         let gh: Arc<dyn Gh> = Arc::new(MockGh::new());
         let mut ds = GitHubDataSource::new(gh, "https://github.com/org/repo");
-        let config: WorkspaceConfig = serde_yaml::from_str("name: test\nsources: {}").unwrap();
+        let config: WorkspaceConfig = serde_yml::from_str("name: test\nsources: {}").unwrap();
         let items = ds.collect(&config).await.unwrap();
         assert!(items.is_empty());
     }

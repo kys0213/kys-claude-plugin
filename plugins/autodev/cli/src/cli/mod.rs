@@ -43,7 +43,7 @@ fn ensure_workspace_dir(env: &dyn Env, name: &str) -> Result<PathBuf> {
 /// serde_json::Value를 YAML로 워크스페이스 설정 파일에 저장
 fn write_workspace_config(ws_dir: &Path, value: &serde_json::Value) -> Result<PathBuf> {
     let config_path = ws_dir.join(config::CONFIG_FILENAME);
-    let yaml = serde_yaml::to_string(value)?;
+    let yaml = serde_yml::to_string(value)?;
     std::fs::write(&config_path, yaml)?;
     Ok(config_path)
 }
@@ -51,7 +51,7 @@ fn write_workspace_config(ws_dir: &Path, value: &serde_json::Value) -> Result<Pa
 /// 최종 effective config 출력
 fn print_effective_config(env: &dyn Env, ws_dir: Option<&Path>, name: &str) -> Result<()> {
     let effective = config::loader::load_merged(env, ws_dir);
-    let yaml = serde_yaml::to_string(&effective)?;
+    let yaml = serde_yml::to_string(&effective)?;
     println!("\nEffective config for {name}:\n---\n{yaml}");
     Ok(())
 }
@@ -322,7 +322,7 @@ pub fn repo_update(
 
     let existing = if config_path.exists() {
         let content = std::fs::read_to_string(&config_path)?;
-        serde_yaml::from_str::<serde_json::Value>(&content).map_err(|e| {
+        serde_yml::from_str::<serde_json::Value>(&content).map_err(|e| {
             anyhow::anyhow!(
                 "failed to parse existing config {}: {e}",
                 config_path.display()
@@ -441,7 +441,7 @@ pub fn config_show(env: &dyn Env) -> Result<()> {
     }
 
     let merged = config::loader::load_merged(env, None);
-    let yaml = serde_yaml::to_string(&merged)?;
+    let yaml = serde_yml::to_string(&merged)?;
     println!("\nEffective config:\n---\n{yaml}");
     Ok(())
 }
@@ -617,7 +617,7 @@ mod tests {
 
         // Read back and verify deep merge
         let content = std::fs::read_to_string(ws_dir.join(config::CONFIG_FILENAME)).unwrap();
-        let value: serde_json::Value = serde_yaml::from_str(&content).unwrap();
+        let value: serde_json::Value = serde_yml::from_str(&content).unwrap();
 
         // Original field preserved
         assert_eq!(value["daemon"]["poll_interval"], 30);
@@ -708,7 +708,7 @@ mod tests {
 
         let ws_dir = config::workspaces_path(&env).join(config::sanitize_repo_name("org/repo"));
         let content = std::fs::read_to_string(ws_dir.join(config::CONFIG_FILENAME)).unwrap();
-        let value: serde_json::Value = serde_yaml::from_str(&content).unwrap();
+        let value: serde_json::Value = serde_yml::from_str(&content).unwrap();
         assert_eq!(value["daemon"]["log_level"], "warn");
     }
 }

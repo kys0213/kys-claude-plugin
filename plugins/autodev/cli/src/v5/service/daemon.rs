@@ -548,7 +548,7 @@ sources:
       2: retry_with_comment
       3: hitl
 "#;
-        serde_yaml::from_str(yaml).unwrap()
+        serde_yml::from_str(yaml).unwrap()
     }
 
     fn setup_daemon(tmp: &TempDir, source: MockDataSource, exit_codes: Vec<i32>) -> V5Daemon {

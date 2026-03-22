@@ -67,7 +67,7 @@ sources:
       4: skip
 "#
     );
-    serde_yaml::from_str(&yaml).unwrap()
+    serde_yml::from_str(&yaml).unwrap()
 }
 
 fn setup_daemon(

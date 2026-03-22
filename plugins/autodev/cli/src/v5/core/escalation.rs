@@ -188,7 +188,7 @@ mod tests {
 2: retry_with_comment
 3: hitl
 "#;
-        let policy: EscalationPolicy = serde_yaml::from_str(yaml).unwrap();
+        let policy: EscalationPolicy = serde_yml::from_str(yaml).unwrap();
         assert_eq!(policy.resolve(1), EscalationAction::Retry);
         assert_eq!(policy.resolve(2), EscalationAction::RetryWithComment);
         assert_eq!(policy.resolve(3), EscalationAction::Hitl);

@@ -189,7 +189,7 @@ runtime:
 
     #[test]
     fn parse_full_workspace_yaml() {
-        let config: WorkspaceConfig = serde_yaml::from_str(WORKSPACE_YAML).unwrap();
+        let config: WorkspaceConfig = serde_yml::from_str(WORKSPACE_YAML).unwrap();
         assert_eq!(config.name, "auth-project");
         assert!(!config.v5.enabled);
 
@@ -201,7 +201,7 @@ runtime:
 
     #[test]
     fn parse_states() {
-        let config: WorkspaceConfig = serde_yaml::from_str(WORKSPACE_YAML).unwrap();
+        let config: WorkspaceConfig = serde_yml::from_str(WORKSPACE_YAML).unwrap();
         let github = config.sources.get("github").unwrap();
 
         let analyze = github.states.get("analyze").unwrap();
@@ -218,7 +218,7 @@ runtime:
 
     #[test]
     fn parse_handler_types() {
-        let config: WorkspaceConfig = serde_yaml::from_str(WORKSPACE_YAML).unwrap();
+        let config: WorkspaceConfig = serde_yml::from_str(WORKSPACE_YAML).unwrap();
         let github = config.sources.get("github").unwrap();
         let implement = github.states.get("implement").unwrap();
 
@@ -245,7 +245,7 @@ runtime:
 
     #[test]
     fn parse_escalation() {
-        let config: WorkspaceConfig = serde_yaml::from_str(WORKSPACE_YAML).unwrap();
+        let config: WorkspaceConfig = serde_yml::from_str(WORKSPACE_YAML).unwrap();
         let github = config.sources.get("github").unwrap();
 
         use super::super::escalation::EscalationAction;
@@ -265,7 +265,7 @@ sources:
   github:
     url: https://github.com/org/repo
 "#;
-        let config: WorkspaceConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: WorkspaceConfig = serde_yml::from_str(yaml).unwrap();
         let github = config.sources.get("github").unwrap();
         assert_eq!(github.scan_interval_secs, 300);
         assert_eq!(github.concurrency, 1);
@@ -283,13 +283,13 @@ v5:
   enabled: true
 sources: {}
 "#;
-        let config: WorkspaceConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: WorkspaceConfig = serde_yml::from_str(yaml).unwrap();
         assert!(config.v5.enabled);
     }
 
     #[test]
     fn workspace_ref_from_config() {
-        let config: WorkspaceConfig = serde_yaml::from_str(WORKSPACE_YAML).unwrap();
+        let config: WorkspaceConfig = serde_yml::from_str(WORKSPACE_YAML).unwrap();
         let ws_ref = WorkspaceRef::from_config("ws-1", &config, "github").unwrap();
         assert_eq!(ws_ref.id, "ws-1");
         assert_eq!(ws_ref.name, "auth-project");
@@ -299,7 +299,7 @@ sources: {}
 
     #[test]
     fn workspace_ref_nonexistent_source() {
-        let config: WorkspaceConfig = serde_yaml::from_str(WORKSPACE_YAML).unwrap();
+        let config: WorkspaceConfig = serde_yml::from_str(WORKSPACE_YAML).unwrap();
         assert!(WorkspaceRef::from_config("ws-1", &config, "gitlab").is_none());
     }
 }
