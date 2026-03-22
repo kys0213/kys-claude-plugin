@@ -301,7 +301,6 @@ fn record_hitl_decision(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::models::*;
     use crate::core::repository::*;
 
     fn setup_test_db() -> (tempfile::TempDir, Database) {

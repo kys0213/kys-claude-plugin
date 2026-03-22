@@ -315,7 +315,7 @@ mod tests {
     use super::*;
     use crate::core::models::SpecStatus;
     use crate::core::phase::TaskKind;
-    use crate::core::queue_item::testing::{test_issue, test_repo};
+    use crate::core::queue_item::testing::test_repo;
     use crate::core::queue_item::QueueItem;
 
     #[test]
