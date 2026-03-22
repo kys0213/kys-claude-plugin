@@ -1,7 +1,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
-/// v5 마이그레이션: transition_events 테이블 추가 (append-only phase transition log).
+/// v5 migration: transition_events + history tables.
 pub fn migrate_v5(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "
@@ -18,6 +18,19 @@ pub fn migrate_v5(conn: &Connection) -> Result<()> {
             ON transition_events(work_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_transition_events_created
             ON transition_events(created_at);
+
+        CREATE TABLE IF NOT EXISTS history (
+            id              TEXT PRIMARY KEY,
+            source_id       TEXT NOT NULL,
+            workspace_id    TEXT NOT NULL,
+            task_kind       TEXT NOT NULL,
+            status          TEXT NOT NULL,
+            error_message   TEXT,
+            duration_ms     INTEGER,
+            created_at      TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_history_source ON history(source_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_history_workspace ON history(workspace_id, created_at);
         ",
     )?;
     Ok(())

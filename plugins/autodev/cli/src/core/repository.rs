@@ -121,6 +121,20 @@ pub trait TransitionEventRepository {
     fn transition_list_recent(&self, limit: usize) -> Result<Vec<TransitionEvent>>;
 }
 
+pub trait HistoryRepository {
+    /// Append a new history entry (append-only).
+    fn history_insert(&self, entry: &NewHistoryEntry) -> Result<String>;
+    /// Count failures for a given source_id (work_id).
+    fn history_count_failures(&self, source_id: &str) -> Result<i64>;
+    /// List history entries for a given source_id, ordered by created_at desc.
+    fn history_list_by_source(&self, source_id: &str, limit: usize) -> Result<Vec<HistoryEntry>>;
+    /// List history entries for a given workspace_id (repo_id), ordered by created_at desc.
+    fn history_list_by_workspace(
+        &self,
+        workspace_id: &str,
+        limit: usize,
+    ) -> Result<Vec<HistoryEntry>>;
+}
 pub trait CronRepository {
     fn cron_add(&self, job: &NewCronJob) -> Result<String>;
     fn cron_list(&self, repo: Option<&str>) -> Result<Vec<CronJob>>;

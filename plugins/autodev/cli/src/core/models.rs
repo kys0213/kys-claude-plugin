@@ -1058,3 +1058,66 @@ pub struct NewClawDecision {
     pub reasoning: String,
     pub context_json: Option<String>,
 }
+
+// ─── History models ───
+
+/// Task execution history status.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HistoryStatus {
+    Completed,
+    Failed,
+    Skipped,
+}
+
+impl HistoryStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            HistoryStatus::Completed => "completed",
+            HistoryStatus::Failed => "failed",
+            HistoryStatus::Skipped => "skipped",
+        }
+    }
+}
+
+impl std::str::FromStr for HistoryStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "completed" => Ok(HistoryStatus::Completed),
+            "failed" => Ok(HistoryStatus::Failed),
+            "skipped" => Ok(HistoryStatus::Skipped),
+            _ => Err(format!("invalid history status: {s}")),
+        }
+    }
+}
+
+impl fmt::Display for HistoryStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Append-only task execution history entry (DB query result).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub id: String,
+    pub source_id: String,
+    pub workspace_id: String,
+    pub task_kind: String,
+    pub status: HistoryStatus,
+    pub error_message: Option<String>,
+    pub duration_ms: Option<i64>,
+    pub created_at: String,
+}
+
+/// Input model for inserting a new history entry.
+pub struct NewHistoryEntry {
+    pub source_id: String,
+    pub workspace_id: String,
+    pub task_kind: String,
+    pub status: HistoryStatus,
+    pub error_message: Option<String>,
+    pub duration_ms: Option<i64>,
+}
