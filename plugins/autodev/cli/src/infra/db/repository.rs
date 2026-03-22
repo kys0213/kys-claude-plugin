@@ -822,11 +822,12 @@ impl QueueRepository for Database {
     fn queue_advance(&self, work_id: &str) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         // Atomic CAS-style transitions: UPDATE with WHERE on expected phase.
-        // Try each valid transition; exactly one should match.
+        // Try each valid forward transition; exactly one should match.
         let transitions: &[(QueuePhase, QueuePhase)] = &[
             (QueuePhase::Pending, QueuePhase::Ready),
             (QueuePhase::Ready, QueuePhase::Running),
-            (QueuePhase::Running, QueuePhase::Done),
+            (QueuePhase::Running, QueuePhase::Completed),
+            (QueuePhase::Completed, QueuePhase::Done),
         ];
 
         let conn = self.conn();
@@ -844,10 +845,15 @@ impl QueueRepository for Database {
         let current = self.queue_get_phase(work_id)?;
         match current {
             None => anyhow::bail!("queue item not found: {work_id}"),
-            Some(QueuePhase::Done) | Some(QueuePhase::Skipped) => {
-                anyhow::bail!("cannot advance terminal state: {}", current.unwrap())
+            Some(QueuePhase::Hitl) => {
+                anyhow::bail!("cannot advance hitl state: use queue done/hitl commands")
             }
-            Some(other) => anyhow::bail!("unknown phase: {other}"),
+            Some(phase) => {
+                if phase.is_terminal() {
+                    anyhow::bail!("cannot advance terminal state: {phase}")
+                }
+                anyhow::bail!("unexpected phase: {phase}")
+            }
         }
     }
 

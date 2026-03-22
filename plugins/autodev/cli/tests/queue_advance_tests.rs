@@ -79,10 +79,22 @@ fn advance_ready_to_running() {
 }
 
 #[test]
-fn advance_running_to_done() {
+fn advance_running_to_completed() {
     let db = open_memory_db();
     let repo_id = add_test_repo(&db);
     insert_queue_item(&db, &repo_id, "work-1", "running");
+
+    db.queue_advance("work-1").unwrap();
+
+    let phase = db.queue_get_phase("work-1").unwrap();
+    assert_eq!(phase, Some(QueuePhase::Completed));
+}
+
+#[test]
+fn advance_completed_to_done() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-1", "completed");
 
     db.queue_advance("work-1").unwrap();
 

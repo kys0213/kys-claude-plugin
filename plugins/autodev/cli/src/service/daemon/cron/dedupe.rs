@@ -109,8 +109,12 @@ pub fn filter_unique<DB: QueueRepository>(db: &DB, gaps: Vec<Gap>) -> Vec<Gap> {
 /// Whether the phase represents an "open" (in-progress) item.
 fn is_open_phase(phase: QueuePhase) -> bool {
     match phase {
-        QueuePhase::Pending | QueuePhase::Ready | QueuePhase::Running => true,
-        QueuePhase::Done | QueuePhase::Skipped => false,
+        QueuePhase::Pending
+        | QueuePhase::Ready
+        | QueuePhase::Running
+        | QueuePhase::Completed
+        | QueuePhase::Hitl => true,
+        QueuePhase::Done | QueuePhase::Skipped | QueuePhase::Failed => false,
     }
 }
 

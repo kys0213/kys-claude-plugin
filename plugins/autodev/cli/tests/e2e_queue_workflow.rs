@@ -191,7 +191,7 @@ fn e2e_queue_advance_ready_to_running() {
 }
 
 #[test]
-fn e2e_queue_advance_running_to_done() {
+fn e2e_queue_advance_running_to_completed() {
     let home = TempDir::new().unwrap();
     let repo_id = setup_repo(&home, REPO_URL);
     seed_queue_item(
@@ -208,7 +208,28 @@ fn e2e_queue_advance_running_to_done() {
         .args(["queue", "advance", "issue:org/queue-repo:42"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("running").and(predicate::str::contains("done")));
+        .stdout(predicate::str::contains("running").and(predicate::str::contains("completed")));
+}
+
+#[test]
+fn e2e_queue_advance_completed_to_done() {
+    let home = TempDir::new().unwrap();
+    let repo_id = setup_repo(&home, REPO_URL);
+    seed_queue_item(
+        &home,
+        &repo_id,
+        "issue:org/queue-repo:43",
+        "issue",
+        "completed",
+        None,
+        43,
+    );
+
+    autodev(&home)
+        .args(["queue", "advance", "issue:org/queue-repo:43"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("completed").and(predicate::str::contains("done")));
 }
 
 #[test]
@@ -235,7 +256,12 @@ fn e2e_queue_advance_full_lifecycle() {
         .args(["queue", "advance", "issue:org/queue-repo:50"])
         .assert()
         .success();
-    // running → done
+    // running → completed
+    autodev(&home)
+        .args(["queue", "advance", "issue:org/queue-repo:50"])
+        .assert()
+        .success();
+    // completed → done
     autodev(&home)
         .args(["queue", "advance", "issue:org/queue-repo:50"])
         .assert()
