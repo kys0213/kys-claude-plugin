@@ -7,11 +7,11 @@
 ## 컨베이어 벨트 흐름
 
 ```
-autodev:analyze 감지 → [analyze handlers] → Claw: Done? → autodev:implement 부착
-                                                              │
-autodev:implement 감지 → [implement handlers] → Claw: Done? → autodev:review 부착
-                                                              │
-autodev:review 감지 → [review handlers] → Claw: Done? → autodev:done 부착
+autodev:analyze 감지 → [analyze handlers] → evaluate: Done? → autodev:implement 부착
+                                                                  │
+autodev:implement 감지 → [implement handlers] → evaluate: Done? → autodev:review 부착
+                                                                  │
+autodev:review 감지 → [review handlers] → evaluate: Done? → autodev:done 부착
 ```
 
 각 구간은 독립적인 QueueItem. 되돌아가지 않고, 항상 새 아이템으로 다음 구간에 진입.
@@ -28,13 +28,11 @@ DataSource.collect(): trigger 조건 매칭 (예: autodev:analyze 라벨)
     │
     │  handlers 순차 실행:
     │    prompt → AgentRuntime.invoke()
-    │    command → slash command 호출
-    │    script → sh -c 실행 (exit code 판정)
     │
     ├── 전부 성공
     │     │
     │     ▼
-    │   Claw evaluate: "완료? 추가 검토?"
+    │   코어 evaluate: "완료? 추가 검토?"
     │     ├── Done → on_done 액션 (다음 state trigger 활성화)
     │     └── HITL → HITL 이벤트 생성 → 사람 대기
     │
@@ -61,8 +59,7 @@ sources:
       implement:
         trigger: { label: "autodev:implement" }
         handlers:
-          - command: "/implement"
-          - script: hooks/lint.sh
+          - prompt: "이슈를 구현해줘"
         on_done: { label: "autodev:review" }
 
       review:
@@ -100,6 +97,6 @@ DataSource.collect()가 changes-requested 감지
 
 ### 관련 문서
 
-- [DataSource](../concerns/datasource.md) — 상태 기반 워크플로우 정의
+- [DataSource](../concerns/datasource.md) — 상태 기반 워크플로우 정의 (v5: GitHub만)
 - [실패 복구와 HITL](./04-failure-and-hitl.md) — escalation 정책
 - [Cron 엔진](../concerns/cron-engine.md) — 품질 루프로 새 아이템 생성

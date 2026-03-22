@@ -31,8 +31,7 @@ sources:
       implement:
         trigger: { label: "autodev:implement" }
         handlers:
-          - command: "/implement"
-          - script: hooks/lint.sh
+          - prompt: "이슈를 구현해줘"
         on_done: { label: "autodev:review" }
 
       review:

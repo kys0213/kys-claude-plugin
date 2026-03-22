@@ -35,16 +35,7 @@ sources:
       5: replan
 ```
 
-DataSource마다 다른 정책 가능:
-
-```yaml
-# Slack: 바로 사람에게
-sources:
-  slack:
-    escalation:
-      1: retry
-      2: hitl              # 2회 실패부터 즉시 HITL
-```
+DataSource마다 다른 정책이 가능한 구조. v5는 GitHub 정책만 구현.
 
 ---
 
@@ -55,7 +46,7 @@ sources:
 | 경로 | 트리거 |
 |------|--------|
 | Escalation | handler 실패 → escalation 정책이 HITL/Replan 결정 |
-| Claw 분류 | handler 성공 → Claw가 "사람이 봐야 한다" 판단 |
+| 코어 evaluate | handler 성공 → evaluate가 "사람이 봐야 한다" 판단 |
 | 스펙 완료 | 모든 linked issues Done → 최종 확인 요청 |
 | 충돌 | DependencyGuard가 스펙 충돌 감지 |
 
@@ -95,5 +86,5 @@ SIGINT → on_shutdown:
 ### 관련 문서
 
 - [DataSource](../concerns/datasource.md) — escalation 정책 정의
-- [Claw](../concerns/claw-workspace.md) — Done vs HITL 분류
+- [Claw](../concerns/claw-workspace.md) — 대화형 에이전트 (HITL 응답 경로 포함)
 - [이슈 파이프라인](./03-issue-pipeline.md) — 실패가 발생하는 실행 흐름

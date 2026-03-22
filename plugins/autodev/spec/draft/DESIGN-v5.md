@@ -36,9 +36,9 @@ Claw가 아는 것      = 결과가 충분한지, 사람이 봐야 하는지
 
 ```
 GitHub = 라벨로 상태 전이     (autodev:analyze → autodev:implement → autodev:review)
-Jira   = 티켓 status로 전이   (To Analyze → Implementing → In Review)
-Slack  = 리액션으로 전이       (🤖 → ✅)
 ```
+
+> **향후 확장**: Jira(티켓 status), Slack(리액션) 등도 DataSource impl 추가만으로 지원 가능. v5는 GitHub에 집중.
 
 코어는 DataSource의 내부 상태를 모른다. collect() 조건을 만족하면 큐에 넣고, Done이면 on_done 액션을 실행할 뿐.
 
@@ -52,19 +52,21 @@ QueuePhase: Pending → Ready → Running → Done | Skipped
 
 무엇을 실행할지, 어떤 라벨을 붙일지, 다음 단계가 뭔지 — 전부 DataSource와 설정의 영역.
 
-### 4. Claw는 출구에서 분류만 한다
+### 4. 코어가 출구에서 분류한다
 
-Claw는 입구가 아니라 **출구의 분류기**. 품질 판단이 아니라 **완료 가능 여부만 판별**.
+코어의 evaluate 함수가 **출구의 분류기**. 품질 판단이 아니라 **완료 가능 여부만 판별**.
 
 ```
 투입 = 자동 (DataSource.collect() → Pending → Ready → Running)
 처리 = 자동 (handler 배열 순차 실행)
-분류 = Claw ("완료 처리해도 되나, 사람이 봐야 하나?" → Done or HITL)
+분류 = 코어 evaluate ("완료 처리해도 되나, 사람이 봐야 하나?" → Done or HITL)
 ```
 
-스펙 적합성, 코드 품질, gap 검출은 Claw가 아닌 **Cron 품질 루프**가 담당한다. Claw는 토큰을 최소로 쓰고 분류에만 집중.
+스펙 적합성, 코드 품질, gap 검출은 **Cron 품질 루프**가 담당한다. evaluate는 토큰을 최소로 쓰고 분류에만 집중.
 
-> **Note**: Claw는 Daemon 내부의 분류기 역할 외에, v4처럼 `/claw` 세션을 통해 어디서든 에이전트로 실행 가능한 구조가 필요하다. 사용자가 자연어로 큐 상태를 조회하고, HITL에 응답하고, cron을 관리하는 대화형 인터페이스. 상세 설계는 별도 문서에서 다룬다.
+### Claw는 대화형 에이전트
+
+Claw = `/claw` 세션. 사용자가 자연어로 큐 상태를 조회하고, HITL에 응답하고, cron을 관리하는 대화형 인터페이스. 상세 설계는 [Claw 워크스페이스](./concerns/claw-workspace.md)에서 다룬다.
 
 ### 5. Cron은 품질 루프
 
@@ -134,8 +136,7 @@ sources:
       implement:
         trigger: { label: "autodev:implement" }
         handlers:
-          - command: "/implement"
-          - script: hooks/lint.sh
+          - prompt: "이슈를 구현해줘"
         on_done: { label: "autodev:review" }
 
       review:
@@ -147,13 +148,18 @@ sources:
 
 각 state는 하나의 컨베이어 벨트 구간. Done이 되면 on_done 액션이 다음 state의 trigger를 활성화.
 
-### Handler 타입
+### Handler
 
-| 타입 | 형식 | 실행 |
-|------|------|------|
-| prompt | 자연어 문자열 | AgentRuntime.invoke() |
-| command | `/slash-command` | Claude slash command |
-| script | `script: path` | sh -c, exit code로 성공/실패 |
+handler는 **prompt 단일 타입**. 자연어 문자열을 AgentRuntime.invoke()로 실행한다.
+
+prompt는 **순수 작업 지시만** 담당. 린트, 포맷, 컨벤션 준수는 handler가 아닌 인프라 레이어가 보장:
+
+```
+hooks (.claude/hooks/)  = 품질 게이트 (lint, format, test — 단계 진입 시 자동 실행)
+rules (.claude/rules/)  = 컨벤션 (코딩 스타일, 아키텍처 원칙 — AgentRuntime이 참조)
+```
+
+handler prompt가 "린트 돌려줘"를 말할 필요 없다. 컨베이어 벨트의 각 구간에 진입하면 hooks와 rules가 알아서 적용된다.
 
 ### 큐 아이템 흐름
 
@@ -164,9 +170,9 @@ DataSource.collect(trigger 매칭)
   Pending → Ready → Running
     │
     │  handlers 순차 실행
-    │  (prompt → AgentRuntime, command → slash, script → sh)
+    │  (prompt → AgentRuntime.invoke())
     │
-    ├── 전부 성공 → Claw: "완료? 추가 검토?"
+    ├── 전부 성공 → 코어 evaluate: "완료? 추가 검토?"
     │                    │
     │              ┌─────┴─────┐
     │              ▼           ▼
@@ -201,7 +207,7 @@ Pipeline (1회성)          Cron (반복)
 ## OCP 확장점
 
 ```
-새 외부 시스템     = DataSource impl 추가      → 코어 변경 0
+새 외부 시스템     = DataSource impl 추가      → 코어 변경 0  (v5: GitHub만, 나머지는 v6+)
 새 LLM            = AgentRuntime impl 추가    → 코어 변경 0
 새 파이프라인 단계  = DataSource config 수정    → 코어 변경 0
 새 품질 검사       = Cron 등록                 → 코어 변경 0
@@ -217,5 +223,6 @@ Pipeline (1회성)          Cron (반복)
 | 코어 | 상태 전이, 의존성, 스펙 링크, decision 기록 | 0 |
 | DataSource | 워크플로우 정의, 외부 시스템 동기화 | 0 |
 | AgentRuntime | LLM 실행 추상화 | handler별 |
-| Claw | 완료/추가검토 분류 (Done or HITL) | 분류 시 |
+| 코어 evaluate | 완료/추가검토 분류 (Done or HITL) | 분류 시 |
+| Claw | `/claw` 대화형 에이전트 (자연어 → CLI) | 세션 시 |
 | Cron | 주기 작업, 품질 루프 | job별 |
