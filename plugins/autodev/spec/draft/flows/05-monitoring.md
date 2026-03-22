@@ -28,7 +28,7 @@
 ├──────────────┤├────────────────────┤├───────────────────────┤
 │ Logs         ││ DataSource         ││ Hooks (1h)            │
 │ 14:30 adv #42││ github ● connected ││ on_phase_enter 24 ok  │
-│ 14:25 dec .. ││   scan: 30s ago    ││ before_task     8 ok  │
+│ 14:25 dec .. ││   scan: 30s ago    ││ on_done_script  8 ok  │
 │ 14:20 skip   ││   compensation: 0  ││ ⚠ LabelSyncer: 1     │
 └──────────────┘└────────────────────┘└───────────────────────┘
 ```
@@ -157,8 +157,7 @@ Dependencies:
 
 ┌─ Hooks (1h) ──────────────────────┐
 │ on_phase_enter   24 ok  1 ⚠       │
-│ before_task       8 ok            │
-│ after_task        8 ok            │
+│ on_done_script    8 ok            │
 │ ⚠ LabelSyncer: rate limit (1 pending) │
 └───────────────────────────────────┘
 ```
