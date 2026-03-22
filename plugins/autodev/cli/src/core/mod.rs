@@ -10,3 +10,4 @@ pub mod repository;
 pub mod state_queue;
 pub mod task;
 pub mod task_queues;
+pub mod worktree_policy;

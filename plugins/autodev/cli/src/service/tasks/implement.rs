@@ -105,13 +105,6 @@ impl ImplementTask {
     fn head_branch(&self) -> String {
         format!("autodev/issue-{}", self.item.github_number)
     }
-
-    async fn cleanup_worktree(&self) {
-        let _ = self
-            .workspace
-            .remove_worktree(&self.item.repo_name, &self.task_id)
-            .await;
-    }
 }
 
 #[async_trait]
@@ -283,16 +276,21 @@ impl Task for ImplementTask {
                 )
                 .await;
 
-            tracing::warn!("worktree preserved for debugging: {}", self.work_id());
+            let status =
+                TaskStatus::Failed(format!("implementation exit_code={}", response.exit_code));
+            crate::service::tasks::helpers::workspace::maybe_cleanup_worktree(
+                &*self.workspace,
+                &self.item.repo_name,
+                &self.task_id,
+                &status,
+            )
+            .await;
             return TaskResult {
                 work_id: self.item.work_id.clone(),
                 repo_name: self.item.repo_name.clone(),
                 queue_ops: vec![QueueOp::Remove],
                 logs: vec![log],
-                status: TaskStatus::Failed(format!(
-                    "implementation exit_code={}",
-                    response.exit_code
-                )),
+                status,
             };
         }
 
@@ -353,7 +351,13 @@ impl Task for ImplementTask {
                     "issue #{}: PR #{pr_num} created, pushed to PR queue",
                     self.item.github_number
                 );
-                self.cleanup_worktree().await;
+                crate::service::tasks::helpers::workspace::maybe_cleanup_worktree(
+                    &*self.workspace,
+                    &self.item.repo_name,
+                    &self.task_id,
+                    &TaskStatus::Completed,
+                )
+                .await;
             }
             None => {
                 // PR extraction failed but agent succeeded — preserve worktree for manual recovery

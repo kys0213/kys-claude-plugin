@@ -325,13 +325,6 @@ impl AnalyzeTask {
         );
         vec![QueueOp::Remove]
     }
-
-    async fn cleanup_worktree(&self) {
-        let _ = self
-            .workspace
-            .remove_worktree(&self.item.repo_name, &self.task_id)
-            .await;
-    }
 }
 
 #[async_trait]
@@ -501,14 +494,20 @@ impl Task for AnalyzeTask {
                 )
                 .await;
 
-            // Worktree preserved for debugging — use `autodev worktree list` to inspect.
-            tracing::warn!("worktree preserved for debugging: {}", self.work_id());
+            let status = TaskStatus::Failed(format!("analysis exit_code={}", response.exit_code));
+            crate::service::tasks::helpers::workspace::maybe_cleanup_worktree(
+                &*self.workspace,
+                &self.item.repo_name,
+                &self.task_id,
+                &status,
+            )
+            .await;
             return TaskResult {
                 work_id: self.item.work_id.clone(),
                 repo_name: self.item.repo_name.clone(),
                 queue_ops: vec![QueueOp::Remove],
                 logs: vec![log],
-                status: TaskStatus::Failed(format!("analysis exit_code={}", response.exit_code)),
+                status,
             };
         }
 
@@ -528,14 +527,21 @@ impl Task for AnalyzeTask {
             None => self.handle_fallback(&response.stdout).await,
         };
 
-        self.cleanup_worktree().await;
+        let status = TaskStatus::Completed;
+        crate::service::tasks::helpers::workspace::maybe_cleanup_worktree(
+            &*self.workspace,
+            &self.item.repo_name,
+            &self.task_id,
+            &status,
+        )
+        .await;
 
         TaskResult {
             work_id: self.item.work_id.clone(),
             repo_name: self.item.repo_name.clone(),
             queue_ops: ops,
             logs: vec![log],
-            status: TaskStatus::Completed,
+            status,
         }
     }
 }
