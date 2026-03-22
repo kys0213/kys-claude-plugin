@@ -91,16 +91,21 @@ fn remove_pid_no_error_when_file_missing() {
 // ═══════════════════════════════════════════════
 
 #[test]
-fn pid_file_contains_numeric_string() {
+fn pid_file_contains_pid_and_start_time() {
     let tmpdir = TempDir::new().unwrap();
     pid::write_pid(tmpdir.path()).unwrap();
 
     let content = std::fs::read_to_string(tmpdir.path().join("daemon.pid")).unwrap();
-    let parsed: u32 = content
-        .trim()
+    let trimmed = content.trim();
+    // New format: "<pid>:<start_time>"
+    let (pid_str, start_str) = trimmed
+        .split_once(':')
+        .expect("PID file should contain pid:start_time format");
+    let parsed_pid: u32 = pid_str.parse().expect("PID part should be a valid u32");
+    let _parsed_start: u64 = start_str
         .parse()
-        .expect("PID file should contain a valid u32");
-    assert_eq!(parsed, std::process::id());
+        .expect("start_time part should be a valid u64");
+    assert_eq!(parsed_pid, std::process::id());
 }
 
 #[test]

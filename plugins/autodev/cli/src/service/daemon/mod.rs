@@ -615,17 +615,9 @@ impl Env for EnvClone {
     }
 }
 
-/// 데몬 중지 (PID → SIGTERM)
+/// 데몬 중지 (PID → SIGTERM + poll for exit)
 pub fn stop(home: &Path) -> Result<()> {
-    let pid = pid::read_pid(home).ok_or_else(|| anyhow::anyhow!("daemon is not running"))?;
-
-    std::process::Command::new("kill")
-        .arg(pid.to_string())
-        .status()?;
-
-    pid::remove_pid(home);
-    println!("autodev daemon stopped (pid: {pid})");
-    Ok(())
+    pid::stop(home)
 }
 
 #[cfg(test)]
