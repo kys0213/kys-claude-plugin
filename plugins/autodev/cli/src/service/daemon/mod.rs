@@ -602,9 +602,11 @@ pub async fn start(
 
     println!("autodev daemon started (pid: {})", std::process::id());
 
-    // ── TaskRunner: ClaudeAgent → DefaultTaskRunner ──
+    // ── TaskRunner: ClaudeAgent → DefaultTaskRunner + ShellLifecycleRunner ──
     let agent = Arc::new(ClaudeAgent::new(Arc::clone(&claude)));
-    let runner: Arc<dyn TaskRunner> = Arc::new(DefaultTaskRunner::new(agent));
+    let lifecycle_runner = Arc::new(crate::infra::lifecycle::ShellLifecycleRunner::new());
+    let runner: Arc<dyn TaskRunner> =
+        Arc::new(DefaultTaskRunner::new(agent).with_lifecycle_runner(lifecycle_runner));
 
     // ── Collector: GitHubTaskSource ──
     let workspace = Arc::new(OwnedWorkspace::new(Arc::clone(&git), Arc::clone(&env)));

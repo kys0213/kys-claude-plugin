@@ -4,6 +4,7 @@ pub mod config;
 pub mod datasource;
 pub mod handler;
 pub mod labels;
+pub mod lifecycle;
 pub mod models;
 pub mod notifier;
 pub mod phase;

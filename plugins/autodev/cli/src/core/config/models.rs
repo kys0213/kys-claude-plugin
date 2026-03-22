@@ -305,14 +305,61 @@ pub struct Workflows {
     pub review: ReviewStage,
 }
 
+// ═══════════════════════════════════════════════
+// lifecycle — yaml state lifecycle actions
+// ═══════════════════════════════════════════════
+
+/// yaml state의 on_enter/on_done/on_fail에서 사용하는 액션.
+///
+/// handler, on_enter, on_done, on_fail 전부 같은 두 가지 타입:
+/// - `script`: bash 실행 (결정적, WORK_ID + WORKTREE 주입)
+/// - `prompt`: AgentRuntime.invoke() (LLM, worktree 안에서)
+///
+/// YAML 형식: `- script: "..."` 또는 `- prompt: "..."`
+/// serde(untagged)를 사용하여 `{ script: "..." }` map을 자연스럽게 파싱.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum LifecycleAction {
+    /// bash 스크립트 실행 (WORK_ID + WORKTREE 환경변수 주입)
+    Script { script: String },
+    /// LLM prompt 실행 (worktree 안에서)
+    Prompt { prompt: String },
+}
+
+impl LifecycleAction {
+    /// script 값을 반환 (Script variant일 때만).
+    pub fn as_script(&self) -> Option<&str> {
+        match self {
+            LifecycleAction::Script { script } => Some(script),
+            LifecycleAction::Prompt { .. } => None,
+        }
+    }
+
+    /// prompt 값을 반환 (Prompt variant일 때만).
+    pub fn as_prompt(&self) -> Option<&str> {
+        match self {
+            LifecycleAction::Prompt { prompt } => Some(prompt),
+            LifecycleAction::Script { .. } => None,
+        }
+    }
+}
+
 /// 워크플로우 단계 공통 설정.
 ///
 /// `command`가 지정되면 해당 슬래시 커맨드를 system prompt로 사용한다.
 /// 미지정 시 task_type별 기본 출력 스펙이 적용된다.
+///
+/// lifecycle scripts:
+/// - `on_enter`: Running 진입 후, handler 실행 전
+/// - `on_done`: 성공적 완료 시 (evaluate가 Done 판정 후)
+/// - `on_fail`: 실패 시 (escalation level에 따라 조건부)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct WorkflowStage {
     pub command: Option<String>,
+    pub on_enter: Vec<LifecycleAction>,
+    pub on_done: Vec<LifecycleAction>,
+    pub on_fail: Vec<LifecycleAction>,
 }
 
 /// 리뷰 단계 설정 — WorkflowStage + max_iterations.
@@ -337,6 +384,9 @@ impl ReviewStage {
     pub fn as_stage(&self) -> WorkflowStage {
         WorkflowStage {
             command: self.command.clone(),
+            on_enter: Vec::new(),
+            on_done: Vec::new(),
+            on_fail: Vec::new(),
         }
     }
 }
@@ -713,5 +763,88 @@ daemon:
 "#;
         let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
         assert!(!cfg.v5.enabled);
+    }
+
+    // ═══════════════════════════════════════════════
+    // lifecycle — on_enter / on_done / on_fail 파싱
+    // ═══════════════════════════════════════════════
+
+    #[test]
+    fn workflow_stage_lifecycle_defaults_empty() {
+        let stage = WorkflowStage::default();
+        assert!(stage.on_enter.is_empty());
+        assert!(stage.on_done.is_empty());
+        assert!(stage.on_fail.is_empty());
+    }
+
+    #[test]
+    fn workflow_stage_lifecycle_from_yaml() {
+        let yaml = r#"
+workflows:
+  implement:
+    on_enter:
+      - script: "echo entering"
+    on_done:
+      - script: "echo done"
+      - prompt: "summarize changes"
+    on_fail:
+      - script: "echo failed"
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.workflows.implement.on_enter.len(), 1);
+        assert_eq!(cfg.workflows.implement.on_done.len(), 2);
+        assert_eq!(cfg.workflows.implement.on_fail.len(), 1);
+
+        match &cfg.workflows.implement.on_enter[0] {
+            LifecycleAction::Script { script: s } => assert_eq!(s, "echo entering"),
+            LifecycleAction::Prompt { prompt: _ } => panic!("expected Script"),
+        }
+        match &cfg.workflows.implement.on_done[1] {
+            LifecycleAction::Prompt { prompt: p } => assert_eq!(p, "summarize changes"),
+            LifecycleAction::Script { script: _ } => panic!("expected Prompt"),
+        }
+    }
+
+    #[test]
+    fn workflow_stage_lifecycle_omitted_defaults_empty() {
+        let yaml = r#"
+workflows:
+  implement:
+    command: /custom-implement
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            cfg.workflows.implement.command.as_deref(),
+            Some("/custom-implement")
+        );
+        assert!(cfg.workflows.implement.on_enter.is_empty());
+        assert!(cfg.workflows.implement.on_done.is_empty());
+        assert!(cfg.workflows.implement.on_fail.is_empty());
+    }
+
+    #[test]
+    fn lifecycle_action_script_serde_roundtrip() {
+        let action = LifecycleAction::Script {
+            script: "echo hello".into(),
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        let parsed: LifecycleAction = serde_json::from_str(&json).unwrap();
+        match parsed {
+            LifecycleAction::Script { script: s } => assert_eq!(s, "echo hello"),
+            LifecycleAction::Prompt { prompt: _ } => panic!("expected Script"),
+        }
+    }
+
+    #[test]
+    fn lifecycle_action_prompt_serde_roundtrip() {
+        let action = LifecycleAction::Prompt {
+            prompt: "do something".into(),
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        let parsed: LifecycleAction = serde_json::from_str(&json).unwrap();
+        match parsed {
+            LifecycleAction::Prompt { prompt: p } => assert_eq!(p, "do something"),
+            LifecycleAction::Script { script: _ } => panic!("expected Prompt"),
+        }
     }
 }
