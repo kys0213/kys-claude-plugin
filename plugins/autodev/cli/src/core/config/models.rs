@@ -908,7 +908,7 @@ sources:
         trigger:
           label: "custom:implement"
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(
             cfg.sources.github.trigger_label("analyze"),
             Some("custom:analyze")
@@ -937,7 +937,7 @@ sources:
       analyze:
         trigger: {}
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         // trigger exists but label is None
         assert_eq!(cfg.sources.github.trigger_label("analyze"), None);
     }
