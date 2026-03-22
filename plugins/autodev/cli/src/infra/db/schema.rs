@@ -238,6 +238,19 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_feedback_patterns_repo ON feedback_patterns(repo_id, status);
 
+        CREATE TABLE IF NOT EXISTS history (
+            id              TEXT PRIMARY KEY,
+            source_id       TEXT NOT NULL,
+            workspace_id    TEXT NOT NULL,
+            task_kind       TEXT NOT NULL,
+            status          TEXT NOT NULL,
+            error_message   TEXT,
+            duration_ms     INTEGER,
+            created_at      TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_history_source ON history(source_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_history_workspace ON history(workspace_id, created_at);
+
         COMMIT;
         ",
     )?;
