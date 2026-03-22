@@ -275,15 +275,40 @@ pub struct UsageByIssue {
 
 // ─── Queue models ───
 
-/// Queue item phase lifecycle
+/// Queue item phase lifecycle (v5 8-phase state machine).
+///
+/// ```text
+/// Pending → Ready → Running → Completed → Done
+///                        │          │
+///                        ▼          ▼
+///                     Failed      Hitl
+///                                   │
+///                                   ▼
+///                               Skipped (or → Done via HITL response)
+/// ```
+///
+/// Terminal states: Done, Skipped, Failed.
+/// Any non-terminal state can be skipped.
+/// Failed can be retried (→ Pending) via escalation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum QueuePhase {
+    /// DataSource.collect()가 감지, 큐 대기
     Pending,
+    /// 실행 준비 완료 (자동 전이)
     Ready,
+    /// worktree 생성 + handler 실행 중
     Running,
+    /// handler 전부 성공, evaluate 대기
+    Completed,
+    /// evaluate 완료 판정 + on_done script 성공
     Done,
+    /// evaluate가 사람 판단 필요로 분류
+    Hitl,
+    /// escalation skip 또는 preflight 실패
     Skipped,
+    /// on_done script 실패, 인프라 오류 등
+    Failed,
 }
 
 impl QueuePhase {
@@ -292,9 +317,62 @@ impl QueuePhase {
             QueuePhase::Pending => "pending",
             QueuePhase::Ready => "ready",
             QueuePhase::Running => "running",
+            QueuePhase::Completed => "completed",
             QueuePhase::Done => "done",
+            QueuePhase::Hitl => "hitl",
             QueuePhase::Skipped => "skipped",
+            QueuePhase::Failed => "failed",
         }
+    }
+
+    /// Returns true if this phase is a terminal state (no further automatic transitions).
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            QueuePhase::Done | QueuePhase::Skipped | QueuePhase::Failed
+        )
+    }
+
+    /// Returns true if the transition from `self` to `to` is a valid forward transition.
+    ///
+    /// Valid transitions per v5 spec:
+    /// - Pending → Ready (auto)
+    /// - Ready → Running (auto, concurrency limited)
+    /// - Running → Completed (all handlers succeeded)
+    /// - Running → Failed (handler failure, infra error)
+    /// - Completed → Done (evaluate passed + on_done succeeded)
+    /// - Completed → Hitl (evaluate needs human judgment)
+    /// - Completed → Failed (on_done script failure)
+    /// - Hitl → Done (human responded "done")
+    /// - Hitl → Skipped (human responded "skip")
+    /// - Hitl → Pending (human responded "retry" — new item)
+    /// - Failed → Pending (escalation retry)
+    ///
+    /// Additionally, any non-terminal state can transition to Skipped.
+    pub fn can_transition_to(&self, to: QueuePhase) -> bool {
+        matches!(
+            (self, to),
+            // Happy path
+            (QueuePhase::Pending, QueuePhase::Ready)
+            | (QueuePhase::Ready, QueuePhase::Running)
+            | (QueuePhase::Running, QueuePhase::Completed)
+            | (QueuePhase::Completed, QueuePhase::Done)
+            // Failure paths
+            | (QueuePhase::Running, QueuePhase::Failed)
+            | (QueuePhase::Completed, QueuePhase::Failed)
+            // HITL paths
+            | (QueuePhase::Completed, QueuePhase::Hitl)
+            | (QueuePhase::Hitl, QueuePhase::Done)
+            | (QueuePhase::Hitl, QueuePhase::Skipped)
+            | (QueuePhase::Hitl, QueuePhase::Pending)
+            // Retry from failure
+            | (QueuePhase::Failed, QueuePhase::Pending)
+            // Skip from any non-terminal (Hitl→Skipped already listed above)
+            | (QueuePhase::Pending, QueuePhase::Skipped)
+            | (QueuePhase::Ready, QueuePhase::Skipped)
+            | (QueuePhase::Running, QueuePhase::Skipped)
+            | (QueuePhase::Completed, QueuePhase::Skipped)
+        )
     }
 }
 
@@ -306,8 +384,11 @@ impl std::str::FromStr for QueuePhase {
             "pending" => Ok(QueuePhase::Pending),
             "ready" => Ok(QueuePhase::Ready),
             "running" => Ok(QueuePhase::Running),
+            "completed" => Ok(QueuePhase::Completed),
             "done" => Ok(QueuePhase::Done),
+            "hitl" => Ok(QueuePhase::Hitl),
             "skipped" => Ok(QueuePhase::Skipped),
+            "failed" => Ok(QueuePhase::Failed),
             _ => Err(format!("invalid queue phase: {s}")),
         }
     }
