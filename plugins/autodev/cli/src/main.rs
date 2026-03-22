@@ -109,11 +109,6 @@ enum Commands {
         #[command(subcommand)]
         action: ClawAction,
     },
-    /// 보존된 worktree 관리
-    Worktree {
-        #[command(subcommand)]
-        action: WorktreeAction,
-    },
     /// v5 큐 아이템 컨텍스트 조회 (on_done/on_fail script용)
     Context {
         /// 작업 ID
@@ -124,6 +119,11 @@ enum Commands {
         /// 특정 필드 추출 (e.g. "issue.number")
         #[arg(long)]
         field: Option<String>,
+    },
+    /// 보존된 worktree 관리
+    Worktree {
+        #[command(subcommand)]
+        action: WorktreeAction,
     },
     /// 칸반 보드 출력
     Board {
