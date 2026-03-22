@@ -94,6 +94,36 @@ describe('GuardService.check', () => {
       const result = await guard.check(baseInput);
       expect(result.allowed).toBe(false);
     });
+
+    test('develop 브랜치는 default branch가 main이어도 보호됨 → allowed: false', async () => {
+      const guard = createGuardService(mockGit({
+        getCurrentBranch: async () => 'develop',
+        detectDefaultBranch: async () => 'main',
+      }));
+      const result = await guard.check(baseInput);
+      expect(result.allowed).toBe(false);
+      expect(result.currentBranch).toBe('develop');
+      expect(result.defaultBranch).toBe('main');
+    });
+
+    test('protectedBranches로 추가 지정한 브랜치도 보호됨 → allowed: false', async () => {
+      const guard = createGuardService(mockGit({
+        getCurrentBranch: async () => 'staging',
+        detectDefaultBranch: async () => 'main',
+      }));
+      const result = await guard.check({ ...baseInput, protectedBranches: ['staging', 'release'] });
+      expect(result.allowed).toBe(false);
+      expect(result.currentBranch).toBe('staging');
+    });
+
+    test('protectedBranches에 없는 브랜치는 허용됨 → allowed: true', async () => {
+      const guard = createGuardService(mockGit({
+        getCurrentBranch: async () => 'feat/something',
+        detectDefaultBranch: async () => 'main',
+      }));
+      const result = await guard.check({ ...baseInput, protectedBranches: ['staging'] });
+      expect(result.allowed).toBe(true);
+    });
   });
 
   describe('default branch 감지 fallback', () => {
@@ -131,7 +161,7 @@ describe('GuardService.check', () => {
       expect(result.allowed).toBe(false);
     });
 
-    test('기본 브랜치에서 차단 시 reason에 브랜치 생성 안내 포함', async () => {
+    test('보호 브랜치에서 차단 시 reason에 브랜치 생성 안내 포함', async () => {
       const guard = createGuardService(mockGit());
       const result = await guard.check(baseInput);
       expect(result.reason).toContain('파일을 수정하려 합니다');
@@ -180,10 +210,11 @@ describe('GuardService.check', () => {
   });
 
   describe('차단 메시지 포맷', () => {
-    test('차단 시 reason에 현재 브랜치 이름 포함', async () => {
+    test('차단 시 reason에 보호 브랜치 이름 포함', async () => {
       const guard = createGuardService(mockGit());
       const result = await guard.check(baseInput);
       expect(result.reason).toContain('main');
+      expect(result.reason).toContain('보호 브랜치');
       expect(result.currentBranch).toBe('main');
     });
 

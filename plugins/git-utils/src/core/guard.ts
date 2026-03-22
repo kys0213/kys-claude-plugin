@@ -86,6 +86,14 @@ export function createGuardService(git: GitService): GuardService {
         }
       }
 
+      // 보호 브랜치 목록 구성: default branch + 추가 보호 브랜치 + 기본 보호 대상(develop)
+      const protectedSet = new Set<string>([defaultBranch, 'develop']);
+      if (input.protectedBranches) {
+        for (const b of input.protectedBranches) {
+          protectedSet.add(b);
+        }
+      }
+
       // Guard 2: 특수 상태 (rebase/merge) → 패스
       const state = await git.getSpecialState();
       if (state.rebase || state.merge) {
@@ -100,19 +108,19 @@ export function createGuardService(git: GitService): GuardService {
       // 현재 브랜치 확인
       const currentBranch = await git.getCurrentBranch();
 
-      // 기본 브랜치가 아니면 패스
-      if (currentBranch !== defaultBranch) {
+      // 보호 브랜치가 아니면 패스
+      if (!protectedSet.has(currentBranch)) {
         return { allowed: true, currentBranch, defaultBranch };
       }
 
-      // 기본 브랜치에서 작업 → 차단
+      // 보호 브랜치에서 작업 → 차단
       const action = input.target === 'commit' ? '커밋할 수 없습니다' : '파일을 수정하려 합니다';
       return {
         allowed: false,
         currentBranch,
         defaultBranch,
         reason: [
-          `[Branch Guard] 기본 브랜치(${defaultBranch})에서 ${action}.`,
+          `[Branch Guard] 보호 브랜치(${currentBranch})에서 ${action}.`,
           `먼저 새 브랜치를 생성해주세요:`,
           `  ${input.createBranchScript} <branch-name>`,
         ].join('\n'),

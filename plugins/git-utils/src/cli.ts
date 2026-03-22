@@ -188,11 +188,18 @@ async function main(): Promise<void> {
         // stdin not available or not JSON
       }
 
+      // Parse protected branches (comma-separated)
+      const protectedBranchesRaw = parsed.flags['protected-branches'] as string | undefined;
+      const protectedBranches = protectedBranchesRaw
+        ? protectedBranchesRaw.split(',').map(b => b.trim()).filter(Boolean)
+        : undefined;
+
       const result = await guard.check({
         target,
         projectDir: (parsed.flags['project-dir'] as string) || process.cwd(),
         createBranchScript: (parsed.flags['create-branch-script'] as string) || 'git-utils branch',
         defaultBranch: parsed.flags['default-branch'] as string | undefined,
+        protectedBranches,
         toolCommand,
         toolFilePath,
       });

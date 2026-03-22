@@ -41,11 +41,16 @@ GIT_DIR=$(git rev-parse --git-dir 2>/dev/null) || exit 0
 CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || true)
 [ -z "$CURRENT_BRANCH" ] && exit 0
 
-# 기본 브랜치가 아니면 패스
-[ "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ] && exit 0
+# 보호 브랜치 목록 구성 (default branch + develop)
+PROTECTED_BRANCHES="$DEFAULT_BRANCH develop"
+IS_PROTECTED=false
+for BRANCH in $PROTECTED_BRANCHES; do
+  [ "$CURRENT_BRANCH" = "$BRANCH" ] && IS_PROTECTED=true && break
+done
+[ "$IS_PROTECTED" = false ] && exit 0
 
-# 기본 브랜치에서 파일 수정 시도 → 블로킹
-echo "[Branch Guard] 기본 브랜치($DEFAULT_BRANCH)에서 파일을 수정하려 합니다." >&2
+# 보호 브랜치에서 파일 수정 시도 → 블로킹
+echo "[Branch Guard] 보호 브랜치($CURRENT_BRANCH)에서 파일을 수정하려 합니다." >&2
 echo "기본 브랜치에 직접 작업하는 것은 권장하지 않습니다." >&2
 echo "" >&2
 echo "먼저 새 브랜치를 생성해주세요:" >&2
