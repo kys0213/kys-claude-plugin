@@ -41,6 +41,12 @@ pub struct DaemonConfig {
     pub webhook_url: Option<String>,
     /// Multi-channel notification configuration.
     pub notifications: NotificationConfig,
+    /// Claude CLI 프로세스 타임아웃 (초). 기본 1800초 (30분).
+    /// 이 시간 초과 시 프로세스를 강제 종료한다.
+    pub task_timeout_secs: u64,
+    /// Shutdown drain 타임아웃 (초). 기본 30초.
+    /// SIGINT 후 in-flight 태스크 완료 대기 상한.
+    pub shutdown_drain_timeout_secs: u64,
 }
 
 impl Default for DaemonConfig {
@@ -54,6 +60,8 @@ impl Default for DaemonConfig {
             max_concurrent_tasks: 3,
             webhook_url: None,
             notifications: NotificationConfig::default(),
+            task_timeout_secs: 1800,
+            shutdown_drain_timeout_secs: 30,
         }
     }
 }
@@ -224,6 +232,36 @@ mod tests {
     fn daemon_config_default_log_level_is_info() {
         let cfg = DaemonConfig::default();
         assert_eq!(cfg.log_level, "info");
+    }
+
+    #[test]
+    fn daemon_config_default_timeout_values() {
+        let cfg = DaemonConfig::default();
+        assert_eq!(cfg.task_timeout_secs, 1800);
+        assert_eq!(cfg.shutdown_drain_timeout_secs, 30);
+    }
+
+    #[test]
+    fn daemon_config_timeout_from_yaml() {
+        let yaml = r#"
+daemon:
+  task_timeout_secs: 3600
+  shutdown_drain_timeout_secs: 60
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.daemon.task_timeout_secs, 3600);
+        assert_eq!(cfg.daemon.shutdown_drain_timeout_secs, 60);
+    }
+
+    #[test]
+    fn daemon_config_timeout_defaults_when_omitted() {
+        let yaml = r#"
+daemon:
+  log_level: "info"
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.daemon.task_timeout_secs, 1800);
+        assert_eq!(cfg.daemon.shutdown_drain_timeout_secs, 30);
     }
 
     #[test]
