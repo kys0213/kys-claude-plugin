@@ -642,6 +642,15 @@ enum SpecAction {
         #[arg(long)]
         create_issues: bool,
     },
+    /// 분해 대기 스펙 조회 (이슈 미생성 Active 스펙)
+    ListUndecomposed {
+        /// 레포 이름 필터 (org/repo)
+        #[arg(long)]
+        repo: Option<String>,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1018,6 +1027,10 @@ async fn main() -> Result<()> {
                 let gh_host = cfg.sources.github.gh_host.as_deref();
                 let output =
                     client::spec::spec_verify(&db, &gh_arc, &id, create_issues, gh_host).await?;
+                println!("{output}");
+            }
+            SpecAction::ListUndecomposed { repo, json } => {
+                let output = client::spec::spec_list_undecomposed(&db, repo.as_deref(), json)?;
                 println!("{output}");
             }
         },

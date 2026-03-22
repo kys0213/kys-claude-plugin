@@ -117,6 +117,52 @@ pub fn spec_list(db: &Database, repo: Option<&str>, json: bool) -> Result<String
     Ok(output)
 }
 
+/// List active specs that have no linked issues (need decomposition).
+///
+/// A spec is "undecomposed" when:
+/// - status == Active
+/// - no entries in spec_issues table for that spec_id
+///
+/// Optionally filtered by repo name.
+pub fn spec_list_undecomposed(db: &Database, repo: Option<&str>, json: bool) -> Result<String> {
+    let active_specs = db.spec_list_by_status(SpecStatus::Active)?;
+    let issue_counts = db.spec_issue_counts()?;
+
+    let undecomposed: Vec<&Spec> = active_specs
+        .iter()
+        .filter(|s| {
+            let has_issues = issue_counts.get(&s.id).copied().unwrap_or(0) > 0;
+            if has_issues {
+                return false;
+            }
+            if let Some(repo_name) = repo {
+                // Filter by repo: resolve repo_id from name
+                match crate::cli::resolve_repo_id(db, repo_name) {
+                    Ok(rid) => s.repo_id == rid,
+                    Err(_) => false,
+                }
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    if json {
+        let owned: Vec<_> = undecomposed.into_iter().cloned().collect();
+        return Ok(serde_json::to_string_pretty(&owned)?);
+    }
+
+    let mut output = String::new();
+    if undecomposed.is_empty() {
+        output.push_str("No undecomposed specs found.\n");
+    } else {
+        for s in &undecomposed {
+            output.push_str(&format!("  [{}] {} — {}\n", s.status, s.id, s.title));
+        }
+    }
+    Ok(output)
+}
+
 /// Show a single spec
 pub fn spec_show(db: &Database, id: &str, json: bool) -> Result<String> {
     let spec = db
