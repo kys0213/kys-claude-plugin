@@ -12,9 +12,12 @@ use async_trait::async_trait;
 use crate::core::collector::Collector;
 use crate::core::config::models::ClawConfig;
 use crate::core::config::{self, ConfigLoader, Env};
+use crate::core::dependency;
 use crate::core::models::{QueuePhase, QueueType};
 use crate::core::phase::TaskKind;
-use crate::core::repository::{QueueRepository, RepoRepository, ScanCursorRepository};
+use crate::core::repository::{
+    QueueRepository, RepoRepository, ScanCursorRepository, SpecRepository,
+};
 use crate::core::task::{QueueOp, Task, TaskResult};
 use crate::infra::gh::Gh;
 use crate::infra::git::Git;
@@ -31,7 +34,9 @@ use crate::service::tasks::review::ReviewTask;
 /// GitHub 이슈/PR 스캔 기반 Collector.
 ///
 /// per-repo 큐를 소유하고, 스캔 → Task 생성 → 큐 적용 생명주기를 관리한다.
-pub struct GitHubTaskSource<DB: RepoRepository + ScanCursorRepository + QueueRepository> {
+pub struct GitHubTaskSource<
+    DB: RepoRepository + ScanCursorRepository + QueueRepository + SpecRepository,
+> {
     workspace: Arc<dyn WorkspaceOps>,
     gh: Arc<dyn Gh>,
     config: Arc<dyn ConfigLoader>,
@@ -48,7 +53,9 @@ pub struct GitHubTaskSource<DB: RepoRepository + ScanCursorRepository + QueueRep
     recovery_interval_secs: u64,
 }
 
-impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubTaskSource<DB> {
+impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + SpecRepository + Send>
+    GitHubTaskSource<DB>
+{
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         workspace: Arc<dyn WorkspaceOps>,
@@ -209,6 +216,104 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
                         }
                     }
                     _ => {}
+                }
+            }
+        }
+    }
+
+    /// Claw enabled일 때 새로 enqueue된 이슈의 의존성을 분석하고 spec_issues를 자동 링크한다.
+    ///
+    /// 각 repo의 Pending 큐에 있는 Issue 아이템에 대해:
+    /// 1. 이슈 body에서 변경 대상 파일/모듈 경로를 추론
+    /// 2. 기존 큐 아이템과의 경로 충돌을 감지
+    /// 3. 관련 스펙을 자동 매칭하여 spec_issues에 링크
+    /// 4. 충돌 시 로그로 순차 처리 필요성을 기록
+    fn analyze_and_link_dependencies(&self) {
+        if !self.claw_enabled {
+            return;
+        }
+
+        for repo in self.repos.values() {
+            // Load active specs for this repo
+            let specs = match self.db.spec_list(None) {
+                Ok(s) => s
+                    .into_iter()
+                    .filter(|s| s.repo_id == repo.id())
+                    .collect::<Vec<_>>(),
+                Err(e) => {
+                    tracing::error!("spec_list failed for dependency analysis: {e}");
+                    continue;
+                }
+            };
+
+            if specs.is_empty() {
+                continue;
+            }
+
+            // Load existing spec-issue links to avoid duplicates
+            let already_linked = match self.db.spec_issues_all() {
+                Ok(m) => m
+                    .into_iter()
+                    .map(|(k, v)| (k, v.into_iter().map(|si| si.issue_number).collect()))
+                    .collect::<std::collections::HashMap<String, Vec<i64>>>(),
+                Err(e) => {
+                    tracing::error!("spec_issues_all failed: {e}");
+                    std::collections::HashMap::new()
+                }
+            };
+
+            // Analyze each pending issue
+            let pending_issues: Vec<_> = repo
+                .queue
+                .iter(QueuePhase::Pending)
+                .filter(|item| item.queue_type == QueueType::Issue)
+                .collect();
+
+            for item in pending_issues {
+                let analysis = dependency::analyze_issue_dependencies(
+                    &repo.queue,
+                    &specs,
+                    item,
+                    &already_linked,
+                );
+
+                // Auto-link matching specs
+                for spec_id in &analysis.matching_spec_ids {
+                    match self.db.spec_link_issue(spec_id, analysis.issue_number) {
+                        Ok(()) => {
+                            tracing::info!(
+                                "auto-linked issue #{} to spec {spec_id}",
+                                analysis.issue_number
+                            );
+                        }
+                        Err(e) => {
+                            // UNIQUE constraint violation means already linked (race condition safe)
+                            if !e.to_string().contains("UNIQUE constraint") {
+                                tracing::warn!(
+                                    "spec_link_issue failed for spec={spec_id} issue=#{}: {e}",
+                                    analysis.issue_number
+                                );
+                            }
+                        }
+                    }
+                }
+
+                // Log dependency conflicts for sequential processing
+                if analysis.requires_sequential {
+                    tracing::info!(
+                        "issue #{} has path conflicts with {} item(s): {:?} — sequential processing recommended",
+                        analysis.issue_number,
+                        analysis.conflicting_work_ids.len(),
+                        analysis.conflicting_work_ids
+                    );
+                }
+
+                if !analysis.inferred_paths.is_empty() {
+                    tracing::debug!(
+                        "issue #{}: inferred paths {:?}",
+                        analysis.issue_number,
+                        analysis.inferred_paths
+                    );
                 }
             }
         }
@@ -444,7 +549,7 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
 }
 
 #[async_trait(?Send)]
-impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> Collector
+impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + SpecRepository + Send> Collector
     for GitHubTaskSource<DB>
 {
     async fn poll(&mut self) -> Vec<Box<dyn Task>> {
@@ -460,6 +565,7 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> Collect
         }
 
         self.run_scans().await;
+        self.analyze_and_link_dependencies();
         self.sync_queue_phases();
         self.auto_advance_pending();
         Vec::new()
@@ -693,6 +799,61 @@ mod tests {
         }
         fn queue_get_failure_count(&self, _: &str) -> anyhow::Result<i32> {
             Ok(0)
+        }
+    }
+
+    impl SpecRepository for MockDb {
+        fn spec_add(&self, _: &crate::core::models::NewSpec) -> anyhow::Result<String> {
+            Ok("spec-1".to_string())
+        }
+        fn spec_list(&self, _: Option<&str>) -> anyhow::Result<Vec<crate::core::models::Spec>> {
+            Ok(vec![])
+        }
+        fn spec_show(&self, _: &str) -> anyhow::Result<Option<crate::core::models::Spec>> {
+            Ok(None)
+        }
+        fn spec_update(
+            &self,
+            _: &str,
+            _: &str,
+            _: Option<&str>,
+            _: Option<&str>,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn spec_set_status(
+            &self,
+            _: &str,
+            _: crate::core::models::SpecStatus,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn spec_issues(&self, _: &str) -> anyhow::Result<Vec<crate::core::models::SpecIssue>> {
+            Ok(vec![])
+        }
+        fn spec_issues_all(
+            &self,
+        ) -> anyhow::Result<std::collections::HashMap<String, Vec<crate::core::models::SpecIssue>>>
+        {
+            Ok(std::collections::HashMap::new())
+        }
+        fn spec_issue_counts(&self) -> anyhow::Result<std::collections::HashMap<String, usize>> {
+            Ok(std::collections::HashMap::new())
+        }
+        fn spec_link_issue(&self, _: &str, _: i64) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn spec_unlink_issue(&self, _: &str, _: i64) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn spec_list_by_status(
+            &self,
+            _: crate::core::models::SpecStatus,
+        ) -> anyhow::Result<Vec<crate::core::models::Spec>> {
+            Ok(vec![])
+        }
+        fn spec_set_priority(&self, _: &str, _: i32) -> anyhow::Result<()> {
+            Ok(())
         }
     }
 
