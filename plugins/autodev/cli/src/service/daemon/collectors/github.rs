@@ -927,10 +927,10 @@ mod tests {
 
         let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].work_id(), "issue:org/repo:1");
+        assert_eq!(tasks[0].work_id(), "github:org/repo#1:analyze");
 
         // Item should be moved to Running
-        assert!(source.repos["org/repo"].contains("issue:org/repo:1"));
+        assert!(source.repos["org/repo"].contains("github:org/repo#1:analyze"));
     }
 
     #[test]
@@ -952,7 +952,7 @@ mod tests {
 
         let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].work_id(), "issue:org/repo:2");
+        assert_eq!(tasks[0].work_id(), "github:org/repo#2:implement");
     }
 
     #[test]
@@ -974,7 +974,7 @@ mod tests {
 
         let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].work_id(), "pr:org/repo:10");
+        assert_eq!(tasks[0].work_id(), "github:org/repo#10:review");
     }
 
     #[test]
@@ -996,7 +996,7 @@ mod tests {
 
         let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].work_id(), "pr:org/repo:10");
+        assert_eq!(tasks[0].work_id(), "github:org/repo#10:improve");
     }
 
     // ─── apply_queue_ops tests ───
@@ -1019,7 +1019,7 @@ mod tests {
         source.repos.insert("org/repo".to_string(), repo);
 
         let result = TaskResult {
-            work_id: "issue:org/repo:1".to_string(),
+            work_id: "github:org/repo#1:analyze".to_string(),
             repo_name: "org/repo".to_string(),
             queue_ops: vec![QueueOp::Remove],
             logs: vec![],
@@ -1027,7 +1027,7 @@ mod tests {
         };
 
         source.apply(&result);
-        assert!(!source.repos["org/repo"].contains("issue:org/repo:1"));
+        assert!(!source.repos["org/repo"].contains("github:org/repo#1:analyze"));
     }
 
     #[test]
@@ -1048,7 +1048,7 @@ mod tests {
         source.repos.insert("org/repo".to_string(), repo);
 
         let result = TaskResult {
-            work_id: "issue:org/repo:1".to_string(),
+            work_id: "github:org/repo#1:analyze".to_string(),
             repo_name: "org/repo".to_string(),
             queue_ops: vec![
                 QueueOp::Remove,
@@ -1067,8 +1067,8 @@ mod tests {
         };
 
         source.apply(&result);
-        assert!(!source.repos["org/repo"].contains("issue:org/repo:1"));
-        assert!(source.repos["org/repo"].contains("pr:org/repo:10"));
+        assert!(!source.repos["org/repo"].contains("github:org/repo#1:analyze"));
+        assert!(source.repos["org/repo"].contains("github:org/repo#10:review"));
     }
 
     #[test]
@@ -1077,7 +1077,7 @@ mod tests {
         let mut source = make_source(gh);
 
         let result = TaskResult {
-            work_id: "issue:unknown/repo:1".to_string(),
+            work_id: "github:unknown/repo#1:analyze".to_string(),
             repo_name: "unknown/repo".to_string(),
             queue_ops: vec![QueueOp::Remove],
             logs: vec![],
@@ -1361,7 +1361,7 @@ mod tests {
 
         // Review should drain because Extract doesn't consume concurrency
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].work_id(), "pr:org/repo:10");
+        assert_eq!(tasks[0].work_id(), "github:org/repo#10:review");
     }
 
     #[test]
@@ -1393,8 +1393,8 @@ mod tests {
         // Both should drain (shared issue concurrency budget)
         assert_eq!(tasks.len(), 2);
         // Analyze task comes first (drain order)
-        assert_eq!(tasks[0].work_id(), "issue:org/repo:1");
-        assert_eq!(tasks[1].work_id(), "issue:org/repo:2");
+        assert_eq!(tasks[0].work_id(), "github:org/repo#1:analyze");
+        assert_eq!(tasks[1].work_id(), "github:org/repo#2:implement");
     }
 
     // ═══════════════════════════════════════════════
@@ -1426,7 +1426,7 @@ mod tests {
 
         // ReviewTask should be created
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].work_id(), "pr:org/repo:1");
+        assert_eq!(tasks[0].work_id(), "github:org/repo#1:review");
 
         // Item should be in Running
         let repo = &source.repos["org/repo"];
@@ -1532,7 +1532,7 @@ mod tests {
 
         let tasks = source.drain_ready_tasks();
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].work_id(), "issue:org/repo:1");
+        assert_eq!(tasks[0].work_id(), "github:org/repo#1:analyze");
     }
 
     #[test]
@@ -1578,7 +1578,9 @@ mod tests {
 
         // Before auto_advance: item is Pending
         assert_eq!(
-            source.repos["org/repo"].queue.phase_of("issue:org/repo:1"),
+            source.repos["org/repo"]
+                .queue
+                .phase_of("github:org/repo#1:analyze"),
             Some(QueuePhase::Pending)
         );
 
@@ -1586,7 +1588,9 @@ mod tests {
         source.auto_advance_pending();
 
         assert_eq!(
-            source.repos["org/repo"].queue.phase_of("issue:org/repo:1"),
+            source.repos["org/repo"]
+                .queue
+                .phase_of("github:org/repo#1:analyze"),
             Some(QueuePhase::Ready)
         );
 
@@ -1616,7 +1620,9 @@ mod tests {
         source.auto_advance_pending();
 
         assert_eq!(
-            source.repos["org/repo"].queue.phase_of("issue:org/repo:1"),
+            source.repos["org/repo"]
+                .queue
+                .phase_of("github:org/repo#1:analyze"),
             Some(QueuePhase::Pending)
         );
     }
@@ -1625,7 +1631,8 @@ mod tests {
     fn sync_queue_phases_promotes_ready() {
         let now = chrono::Utc::now().to_rfc3339();
         let active_row = crate::core::models::QueueItemRow {
-            work_id: "issue:org/repo:1".to_string(),
+            work_id: "github:org/repo#1:analyze".to_string(),
+            source_id: String::new(),
             repo_id: "r1".to_string(),
             queue_type: QueueType::Issue,
             phase: QueuePhase::Ready,
@@ -1674,7 +1681,9 @@ mod tests {
 
         // Before sync: item is Pending
         assert_eq!(
-            source.repos["org/repo"].queue.phase_of("issue:org/repo:1"),
+            source.repos["org/repo"]
+                .queue
+                .phase_of("github:org/repo#1:analyze"),
             Some(QueuePhase::Pending)
         );
 
@@ -1682,7 +1691,9 @@ mod tests {
 
         // After sync: item should be Ready (promoted from DB state)
         assert_eq!(
-            source.repos["org/repo"].queue.phase_of("issue:org/repo:1"),
+            source.repos["org/repo"]
+                .queue
+                .phase_of("github:org/repo#1:analyze"),
             Some(QueuePhase::Ready)
         );
     }

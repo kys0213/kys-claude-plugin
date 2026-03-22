@@ -69,6 +69,7 @@ mod tests {
     fn add_item(db: &Database, repo_id: &str, num: i64, qt: QueueType, phase: QueuePhase) {
         db.queue_upsert(&QueueItemRow {
             work_id: format!("work-{num}"),
+            source_id: String::new(),
             repo_id: repo_id.to_string(),
             queue_type: qt,
             phase,

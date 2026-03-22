@@ -286,6 +286,7 @@ fn make_row(repo_id: &str, work_id: &str, phase: QueuePhase) -> QueueItemRow {
     let now = chrono::Utc::now().to_rfc3339();
     QueueItemRow {
         work_id: work_id.to_string(),
+        source_id: String::new(),
         repo_id: repo_id.to_string(),
         queue_type: QueueType::Issue,
         phase,
@@ -305,13 +306,17 @@ fn make_row(repo_id: &str, work_id: &str, phase: QueuePhase) -> QueueItemRow {
 fn queue_upsert_insert() {
     let db = open_memory_db();
     let repo_id = add_test_repo(&db);
-    let row = make_row(&repo_id, "issue:org/test-repo:1", QueuePhase::Pending);
+    let row = make_row(
+        &repo_id,
+        "github:org/test-repo#1:analyze",
+        QueuePhase::Pending,
+    );
 
     db.queue_upsert(&row).unwrap();
 
     let items = db.queue_list_items(None).unwrap();
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0].work_id, "issue:org/test-repo:1");
+    assert_eq!(items[0].work_id, "github:org/test-repo#1:analyze");
     assert_eq!(items[0].task_kind, TaskKind::Analyze);
     assert_eq!(items[0].github_number, 42);
 }
@@ -321,7 +326,11 @@ fn queue_upsert_update() {
     let db = open_memory_db();
     let repo_id = add_test_repo(&db);
 
-    let row = make_row(&repo_id, "issue:org/test-repo:1", QueuePhase::Pending);
+    let row = make_row(
+        &repo_id,
+        "github:org/test-repo#1:analyze",
+        QueuePhase::Pending,
+    );
     db.queue_upsert(&row).unwrap();
 
     // Update phase
@@ -329,7 +338,9 @@ fn queue_upsert_update() {
     row2.phase = QueuePhase::Running;
     db.queue_upsert(&row2).unwrap();
 
-    let phase = db.queue_get_phase("issue:org/test-repo:1").unwrap();
+    let phase = db
+        .queue_get_phase("github:org/test-repo#1:analyze")
+        .unwrap();
     assert_eq!(phase, Some(QueuePhase::Running));
 
     // Should still be 1 item
@@ -342,7 +353,11 @@ fn queue_upsert_preserves_created_at() {
     let db = open_memory_db();
     let repo_id = add_test_repo(&db);
 
-    let row = make_row(&repo_id, "issue:org/test-repo:1", QueuePhase::Pending);
+    let row = make_row(
+        &repo_id,
+        "github:org/test-repo#1:analyze",
+        QueuePhase::Pending,
+    );
     let original_created = row.created_at.clone();
     db.queue_upsert(&row).unwrap();
 
@@ -434,7 +449,7 @@ fn cli_queue_list_shows_task_kind() {
     let repo_id = add_test_repo(&db);
     db.queue_upsert(&make_row(
         &repo_id,
-        "issue:org/test-repo:42",
+        "github:org/test-repo#42:analyze",
         QueuePhase::Pending,
     ))
     .unwrap();
@@ -493,15 +508,17 @@ fn queue_get_item_returns_existing() {
     let repo_id = add_test_repo(&db);
     db.queue_upsert(&make_row(
         &repo_id,
-        "issue:org/test-repo:99",
+        "github:org/test-repo#99:analyze",
         QueuePhase::Pending,
     ))
     .unwrap();
 
-    let item = db.queue_get_item("issue:org/test-repo:99").unwrap();
+    let item = db
+        .queue_get_item("github:org/test-repo#99:analyze")
+        .unwrap();
     assert!(item.is_some());
     let item = item.unwrap();
-    assert_eq!(item.work_id, "issue:org/test-repo:99");
+    assert_eq!(item.work_id, "github:org/test-repo#99:analyze");
     assert_eq!(item.phase, QueuePhase::Pending);
 }
 
@@ -647,11 +664,11 @@ fn advance_creates_hitl_on_review_overflow() {
         .execute(
             "INSERT INTO queue_items (work_id, repo_id, queue_type, phase, title, created_at, updated_at, metadata_json) \
              VALUES (?1, ?2, 'pr', 'pending', 'PR with high iterations', ?3, ?3, ?4)",
-            rusqlite::params!["pr:org/test-repo:50", repo_id, now, pr_metadata.to_string()],
+            rusqlite::params!["github:org/test-repo#50:review", repo_id, now, pr_metadata.to_string()],
         )
         .unwrap();
 
-    autodev::cli::queue::queue_advance(&db, "pr:org/test-repo:50", None).unwrap();
+    autodev::cli::queue::queue_advance(&db, "github:org/test-repo#50:review", None).unwrap();
 
     // Should have created a HITL event
     let hitl_events = db.hitl_list(None).unwrap();
@@ -661,7 +678,10 @@ fn advance_creates_hitl_on_review_overflow() {
     );
     let event = &hitl_events[0];
     assert!(event.situation.contains("review iteration"));
-    assert_eq!(event.work_id.as_deref(), Some("pr:org/test-repo:50"));
+    assert_eq!(
+        event.work_id.as_deref(),
+        Some("github:org/test-repo#50:review")
+    );
 }
 
 // ═══════════════════════════════════════════════
@@ -855,11 +875,11 @@ fn advance_no_hitl_when_below_threshold() {
         .execute(
             "INSERT INTO queue_items (work_id, repo_id, queue_type, phase, title, created_at, updated_at, metadata_json) \
              VALUES (?1, ?2, 'pr', 'pending', 'Normal PR', ?3, ?3, ?4)",
-            rusqlite::params!["pr:org/test-repo:51", repo_id, now, pr_metadata.to_string()],
+            rusqlite::params!["github:org/test-repo#51:review", repo_id, now, pr_metadata.to_string()],
         )
         .unwrap();
 
-    autodev::cli::queue::queue_advance(&db, "pr:org/test-repo:51", None).unwrap();
+    autodev::cli::queue::queue_advance(&db, "github:org/test-repo#51:review", None).unwrap();
 
     // Should NOT have created a HITL event
     let hitl_events = db.hitl_list(None).unwrap();

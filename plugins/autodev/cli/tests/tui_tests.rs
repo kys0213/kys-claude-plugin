@@ -22,7 +22,7 @@ fn test_active_items_reads_from_status_file() {
         uptime_secs: 100,
         active_items: vec![
             StatusItem {
-                work_id: "issue:org/repo:1".to_string(),
+                work_id: "github:org/repo#1:analyze".to_string(),
                 queue_type: QueueType::Issue,
                 repo_name: "org/repo".to_string(),
                 number: 1,
@@ -30,7 +30,7 @@ fn test_active_items_reads_from_status_file() {
                 phase: "Pending".to_string(),
             },
             StatusItem {
-                work_id: "pr:org/repo:10".to_string(),
+                work_id: "github:org/repo#10:review".to_string(),
                 queue_type: QueueType::Pr,
                 repo_name: "org/repo".to_string(),
                 number: 10,

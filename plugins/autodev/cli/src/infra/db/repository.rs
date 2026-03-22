@@ -896,7 +896,7 @@ impl QueueRepository for Database {
                     "SELECT q.work_id, q.repo_id, q.queue_type, q.phase, q.title, \
                      q.skip_reason, q.created_at, q.updated_at, \
                      q.task_kind, q.github_number, q.metadata_json, \
-                     q.failure_count, q.escalation_level \
+                     q.failure_count, q.escalation_level, q.source_id \
                      FROM queue_items q JOIN repositories r ON q.repo_id = r.id \
                      WHERE r.name = ?1 ORDER BY q.created_at DESC"
                         .to_string(),
@@ -907,7 +907,7 @@ impl QueueRepository for Database {
                     "SELECT work_id, repo_id, queue_type, phase, title, \
                      skip_reason, created_at, updated_at, \
                      task_kind, github_number, metadata_json, \
-                     failure_count, escalation_level \
+                     failure_count, escalation_level, source_id \
                      FROM queue_items ORDER BY created_at DESC"
                         .to_string(),
                     vec![],
@@ -927,12 +927,13 @@ impl QueueRepository for Database {
         conn.execute(
             "INSERT INTO queue_items (work_id, repo_id, queue_type, phase, title, skip_reason, \
              created_at, updated_at, task_kind, github_number, metadata_json, \
-             failure_count, escalation_level) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
+             failure_count, escalation_level, source_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
              ON CONFLICT(work_id) DO UPDATE SET \
              phase = excluded.phase, title = excluded.title, skip_reason = excluded.skip_reason, \
              updated_at = ?8, task_kind = excluded.task_kind, \
-             github_number = excluded.github_number, metadata_json = excluded.metadata_json",
+             github_number = excluded.github_number, metadata_json = excluded.metadata_json, \
+             source_id = excluded.source_id",
             rusqlite::params![
                 item.work_id,
                 item.repo_id,
@@ -947,6 +948,7 @@ impl QueueRepository for Database {
                 item.metadata_json,
                 item.failure_count,
                 item.escalation_level,
+                item.source_id,
             ],
         )?;
         Ok(())
@@ -967,7 +969,7 @@ impl QueueRepository for Database {
             "SELECT work_id, repo_id, queue_type, phase, title, \
              skip_reason, created_at, updated_at, \
              task_kind, github_number, metadata_json, \
-             failure_count, escalation_level \
+             failure_count, escalation_level, source_id \
              FROM queue_items WHERE repo_id = ?1 AND phase NOT IN ('done', 'skipped', 'failed') \
              ORDER BY created_at ASC",
         )?;
@@ -990,7 +992,7 @@ impl QueueRepository for Database {
             "SELECT work_id, repo_id, queue_type, phase, title, \
              skip_reason, created_at, updated_at, \
              task_kind, github_number, metadata_json, \
-             failure_count, escalation_level \
+             failure_count, escalation_level, source_id \
              FROM queue_items WHERE work_id = ?1",
             rusqlite::params![work_id],
             map_queue_item_row,
@@ -1748,6 +1750,7 @@ fn map_queue_item_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueItemRow>
     let task_kind_str: String = row.get(8)?;
     Ok(QueueItemRow {
         work_id: row.get(0)?,
+        source_id: row.get::<_, Option<String>>(13)?.unwrap_or_default(),
         repo_id: row.get(1)?,
         queue_type: queue_type_str.parse().map_err(|e: String| {
             rusqlite::Error::FromSqlConversionFailure(

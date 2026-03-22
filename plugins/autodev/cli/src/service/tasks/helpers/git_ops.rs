@@ -2,12 +2,12 @@ use anyhow::Result;
 use serde::Deserialize;
 
 use crate::core::labels;
-use crate::core::models::{HasLabels, QueuePhase, QueueType, RepoIssue, RepoPull};
+use crate::core::models::{HasLabels, QueuePhase, RepoIssue, RepoPull};
 use crate::core::phase::TaskKind;
 use crate::core::queue_item::{PrMetadata, QueueItem, RepoRef};
 use crate::core::repository::{QueueRepository, ScanCursorRepository};
 use crate::core::state_queue::StateQueue;
-use crate::core::task_queues::make_work_id;
+use crate::core::task_queues::make_source_id;
 use crate::infra::gh::Gh;
 
 // ─── Private serde types for scanning ───
@@ -131,6 +131,11 @@ impl GitRepository {
         self.queue.contains(work_id)
     }
 
+    /// source_id 기반 dedup: 같은 외부 엔티티의 어떤 상태라도 큐에 있으면 true.
+    pub fn contains_source(&self, source_id: &str) -> bool {
+        self.queue.contains_by_prefix(source_id)
+    }
+
     /// 전체 큐 아이템 수
     pub fn total_items(&self) -> usize {
         self.queue.total()
@@ -237,9 +242,9 @@ impl GitRepository {
                 }
             }
 
-            let work_id = make_work_id(QueueType::Issue, &self.name, issue.number);
+            let source_id = make_source_id(&self.name, issue.number);
 
-            if self.contains(&work_id) {
+            if self.contains_source(&source_id) {
                 continue;
             }
 
@@ -306,9 +311,9 @@ impl GitRepository {
                 continue;
             }
 
-            let work_id = make_work_id(QueueType::Issue, &self.name, issue.number);
+            let source_id = make_source_id(&self.name, issue.number);
 
-            if self.contains(&work_id) {
+            if self.contains_source(&source_id) {
                 continue;
             }
 
@@ -417,9 +422,9 @@ impl GitRepository {
                 continue;
             }
 
-            let work_id = make_work_id(QueueType::Pr, &self.name, number);
+            let source_id = make_source_id(&self.name, number);
 
-            if self.contains(&work_id) {
+            if self.contains_source(&source_id) {
                 continue;
             }
 
@@ -516,8 +521,8 @@ impl GitRepository {
                 continue;
             }
 
-            let work_id = make_work_id(QueueType::Pr, &self.name, number);
-            if self.contains(&work_id) {
+            let source_id = make_source_id(&self.name, number);
+            if self.contains_source(&source_id) {
                 continue;
             }
 
@@ -581,8 +586,8 @@ impl GitRepository {
         let gh_host = self.gh_host.as_deref();
 
         for issue in self.issues.iter().filter(|i| i.is_wip()) {
-            let work_id = make_work_id(QueueType::Issue, &self.name, issue.number);
-            if !self.contains(&work_id)
+            let source_id = make_source_id(&self.name, issue.number);
+            if !self.contains_source(&source_id)
                 && gh
                     .label_remove(&self.name, issue.number, labels::WIP, gh_host)
                     .await
@@ -603,8 +608,8 @@ impl GitRepository {
             .iter()
             .filter(|p| p.is_wip())
             .filter(|p| {
-                let work_id = make_work_id(QueueType::Pr, &self.name, p.number);
-                !self.queue.contains(&work_id)
+                let source_id = make_source_id(&self.name, p.number);
+                !self.queue.contains_by_prefix(&source_id)
             })
             .map(|p| QueueItem::from_pull(&repo, p, TaskKind::Review))
             .collect();
@@ -636,8 +641,8 @@ impl GitRepository {
         let gh_host = self.gh_host.as_deref();
 
         for issue in self.issues.iter().filter(|i| i.is_implementing()) {
-            let work_id = make_work_id(QueueType::Issue, &self.name, issue.number);
-            if self.contains(&work_id) {
+            let source_id = make_source_id(&self.name, issue.number);
+            if self.contains_source(&source_id) {
                 continue;
             }
 
@@ -667,8 +672,8 @@ impl GitRepository {
                         Some("open") => {
                             // PR is still open but not in queue — ensure wip label
                             // so scan_pulls or recover_orphan_wip can pick it up.
-                            let pr_work_id = make_work_id(QueueType::Pr, &self.name, pr_num);
-                            if !self.contains(&pr_work_id) {
+                            let pr_source_id = make_source_id(&self.name, pr_num);
+                            if !self.contains_source(&pr_source_id) {
                                 gh.label_add(&self.name, pr_num, labels::WIP, gh_host).await;
                             }
                             // Always remove implementing from the issue to prevent
@@ -735,8 +740,8 @@ impl GitRepository {
                 continue;
             }
 
-            let work_id = make_work_id(QueueType::Issue, &self.name, issue.number);
-            if self.contains(&work_id) {
+            let source_id = make_source_id(&self.name, issue.number);
+            if self.contains_source(&source_id) {
                 continue;
             }
 
@@ -772,8 +777,8 @@ impl GitRepository {
                 continue;
             }
 
-            let work_id = make_work_id(QueueType::Pr, &self.name, pull.number);
-            if self.queue.contains(&work_id) {
+            let source_id = make_source_id(&self.name, pull.number);
+            if self.queue.contains_by_prefix(&source_id) {
                 continue;
             }
 
@@ -790,8 +795,8 @@ impl GitRepository {
                 continue;
             }
 
-            let work_id = make_work_id(QueueType::Pr, &self.name, pull.number);
-            if self.queue.contains(&work_id) {
+            let source_id = make_source_id(&self.name, pull.number);
+            if self.queue.contains_by_prefix(&source_id) {
                 continue;
             }
 
@@ -1077,9 +1082,9 @@ mod tests {
         repo.queue.push(QueuePhase::Pending, i);
         repo.queue.push(QueuePhase::Pending, p);
 
-        assert!(repo.contains("issue:org/repo:42"));
-        assert!(repo.contains("pr:org/repo:10"));
-        assert!(!repo.contains("issue:org/repo:99"));
+        assert!(repo.contains("github:org/repo#42:analyze"));
+        assert!(repo.contains("github:org/repo#10:review"));
+        assert!(!repo.contains("github:org/repo#99:analyze"));
     }
 
     #[test]
@@ -1595,7 +1600,7 @@ mod tests {
 
         assert_eq!(recovered, 1);
         // PR은 라벨 제거 대신 Pending 큐에 재적재 (Label-Positive)
-        assert!(repo.contains("pr:org/repo:10"));
+        assert!(repo.contains("github:org/repo#10:review"));
         assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
         // wip 라벨은 유지
         assert!(gh.removed_labels.lock().unwrap().is_empty());
@@ -1708,7 +1713,7 @@ mod tests {
 
         let result = repo.startup_reconcile(&gh, &MockCursorRepo::new()).await;
         assert_eq!(result, 0);
-        assert!(!repo.contains("issue:org/repo:10"));
+        assert!(!repo.contains("github:org/repo#10:analyze"));
     }
 
     #[tokio::test]
@@ -1746,7 +1751,7 @@ mod tests {
         let result = repo.startup_reconcile(&gh, &MockCursorRepo::new()).await;
 
         assert_eq!(result, 1);
-        assert!(repo.contains("issue:org/repo:42"));
+        assert!(repo.contains("github:org/repo#42:analyze"));
         assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
 
         // wip label not touched (kept as-is)
@@ -1769,7 +1774,7 @@ mod tests {
         let result = repo.startup_reconcile(&gh, &MockCursorRepo::new()).await;
 
         assert_eq!(result, 1);
-        assert!(repo.contains("issue:org/repo:3"));
+        assert!(repo.contains("github:org/repo#3:implement"));
         assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
 
         let added = gh.added_labels.lock().unwrap();
@@ -1799,7 +1804,7 @@ mod tests {
         let result = repo.startup_reconcile(&gh, &MockCursorRepo::new()).await;
 
         assert_eq!(result, 1);
-        assert!(repo.contains("pr:org/repo:20"));
+        assert!(repo.contains("github:org/repo#20:review"));
         assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
     }
 
@@ -1818,7 +1823,7 @@ mod tests {
 
         let result = repo.startup_reconcile(&gh, &MockCursorRepo::new()).await;
         assert_eq!(result, 0);
-        assert!(!repo.contains("pr:org/repo:20"));
+        assert!(!repo.contains("github:org/repo#20:review"));
     }
 
     #[tokio::test]

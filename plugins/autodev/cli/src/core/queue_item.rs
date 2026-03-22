@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::models::{QueueItemRow, QueuePhase, QueueType, RepoIssue, RepoPull};
 use super::phase::TaskKind;
 use super::state_queue::HasWorkId;
-use super::task_queues::make_work_id;
+use super::task_queues::{make_source_id, make_work_id};
 
 // ─── Repo Context ───
 
@@ -53,9 +53,14 @@ pub(crate) enum ItemMetadata {
 ///
 /// 기존 IssueItem/PrItem을 단일 구조체로 통합한다.
 /// `queue_type`으로 Issue/PR 구분, `task_kind`로 작업 종류 결정.
+///
+/// v5: `source_id`로 같은 외부 엔티티에서 파생된 아이템을 연결한다.
 #[derive(Debug, Clone)]
 pub struct QueueItem {
     pub work_id: String,
+    /// 같은 외부 엔티티에서 파생된 아이템을 연결하는 식별자.
+    /// 형식: "github:{repo_name}#{number}"
+    pub source_id: String,
     pub repo_id: String,
     pub repo_name: String,
     pub repo_url: String,
@@ -207,7 +212,8 @@ impl QueueItem {
         author: String,
     ) -> Self {
         Self {
-            work_id: make_work_id(QueueType::Issue, &repo.name, github_number),
+            work_id: make_work_id(QueueType::Issue, &repo.name, github_number, task_kind),
+            source_id: make_source_id(&repo.name, github_number),
             repo_id: repo.id.clone(),
             repo_name: repo.name.clone(),
             repo_url: repo.url.clone(),
@@ -270,6 +276,7 @@ impl QueueItem {
         let now = chrono::Utc::now().to_rfc3339();
         QueueItemRow {
             work_id: self.work_id.clone(),
+            source_id: self.source_id.clone(),
             repo_id: self.repo_id.clone(),
             queue_type: self.queue_type.clone(),
             phase,
@@ -315,6 +322,7 @@ impl QueueItem {
 
         Some(Self {
             work_id: row.work_id.clone(),
+            source_id: row.source_id.clone(),
             repo_id: row.repo_id.clone(),
             repo_name: repo_name.to_string(),
             repo_url: repo_url.to_string(),
@@ -336,7 +344,8 @@ impl QueueItem {
         pr: PrMetadata,
     ) -> Self {
         Self {
-            work_id: make_work_id(QueueType::Pr, &repo.name, github_number),
+            work_id: make_work_id(QueueType::Pr, &repo.name, github_number, task_kind),
+            source_id: make_source_id(&repo.name, github_number),
             repo_id: repo.id.clone(),
             repo_name: repo.name.clone(),
             repo_url: repo.url.clone(),
@@ -446,7 +455,8 @@ mod tests {
             vec!["bug".into()],
             "alice".into(),
         );
-        assert_eq!(item.work_id, "issue:org/repo:42");
+        assert_eq!(item.work_id, "github:org/repo#42:analyze");
+        assert_eq!(item.source_id, "github:org/repo#42");
         assert_eq!(item.queue_type, QueueType::Issue);
         assert_eq!(item.task_kind, TaskKind::Analyze);
         assert_eq!(item.body(), Some("body"));
@@ -469,7 +479,8 @@ mod tests {
                 review_iteration: 0,
             },
         );
-        assert_eq!(item.work_id, "pr:org/repo:10");
+        assert_eq!(item.work_id, "github:org/repo#10:review");
+        assert_eq!(item.source_id, "github:org/repo#10");
         assert_eq!(item.queue_type, QueueType::Pr);
         assert_eq!(item.task_kind, TaskKind::Review);
         assert_eq!(item.head_branch(), Some("feat"));
@@ -489,7 +500,7 @@ mod tests {
             vec![],
             "user".into(),
         );
-        assert_eq!(HasWorkId::work_id(&item), "issue:org/repo:1");
+        assert_eq!(HasWorkId::work_id(&item), "github:org/repo#1:analyze");
     }
 
     #[test]
@@ -570,7 +581,8 @@ mod tests {
         let item = test_issue(42, TaskKind::Analyze);
         let row = item.to_row(QueuePhase::Pending);
 
-        assert_eq!(row.work_id, "issue:org/repo:42");
+        assert_eq!(row.work_id, "github:org/repo#42:analyze");
+        assert_eq!(row.source_id, "github:org/repo#42");
         assert_eq!(row.task_kind, TaskKind::Analyze);
         assert_eq!(row.github_number, 42);
         assert!(row.metadata_json.is_some());
@@ -578,6 +590,7 @@ mod tests {
         let restored =
             QueueItem::from_row(&row, "org/repo", "https://github.com/org/repo", None).unwrap();
         assert_eq!(restored.work_id, item.work_id);
+        assert_eq!(restored.source_id, item.source_id);
         assert_eq!(restored.github_number, item.github_number);
         assert_eq!(restored.task_kind, item.task_kind);
         assert_eq!(restored.body(), item.body());
@@ -591,9 +604,21 @@ mod tests {
 
         let restored =
             QueueItem::from_row(&row, "org/repo", "https://github.com/org/repo", None).unwrap();
-        assert_eq!(restored.work_id, "issue:org/repo:42");
+        assert_eq!(restored.work_id, "github:org/repo#42:analyze");
+        assert_eq!(restored.source_id, "github:org/repo#42");
         // Default Issue metadata has empty fields
         assert_eq!(restored.body(), None);
         assert_eq!(restored.author(), Some(""));
+    }
+
+    #[test]
+    fn source_id_links_related_items() {
+        let analyze = test_issue(42, TaskKind::Analyze);
+        let implement = test_issue(42, TaskKind::Implement);
+
+        // Same source_id, different work_id
+        assert_eq!(analyze.source_id, implement.source_id);
+        assert_ne!(analyze.work_id, implement.work_id);
+        assert_eq!(analyze.source_id, "github:org/repo#42");
     }
 }

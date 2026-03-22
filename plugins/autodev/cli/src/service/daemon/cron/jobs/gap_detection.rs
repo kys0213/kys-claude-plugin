@@ -122,6 +122,7 @@ mod tests {
     fn add_queue_item(db: &Database, repo_id: &str, github_number: i64, phase: QueuePhase) {
         let item = QueueItemRow {
             work_id: format!("work-{github_number}"),
+            source_id: String::new(),
             repo_id: repo_id.to_string(),
             queue_type: QueueType::Issue,
             phase,

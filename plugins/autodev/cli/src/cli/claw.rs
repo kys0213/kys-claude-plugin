@@ -623,6 +623,7 @@ mod tests {
 
         db.queue_upsert(&QueueItemRow {
             work_id: "issue-99".to_string(),
+            source_id: String::new(),
             repo_id,
             queue_type: QueueType::Issue,
             phase: QueuePhase::Running,
@@ -654,6 +655,7 @@ mod tests {
         let items = vec![
             QueueItemRow {
                 work_id: "a".to_string(),
+                source_id: String::new(),
                 repo_id: "r".to_string(),
                 queue_type: QueueType::Issue,
                 phase: QueuePhase::Pending,
@@ -669,6 +671,7 @@ mod tests {
             },
             QueueItemRow {
                 work_id: "b".to_string(),
+                source_id: String::new(),
                 repo_id: "r".to_string(),
                 queue_type: QueueType::Issue,
                 phase: QueuePhase::Running,

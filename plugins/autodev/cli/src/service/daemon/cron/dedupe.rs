@@ -208,6 +208,7 @@ mod tests {
     fn make_item(work_id: &str, repo_id: &str, title: &str, phase: QueuePhase) -> QueueItemRow {
         QueueItemRow {
             work_id: work_id.to_string(),
+            source_id: String::new(),
             repo_id: repo_id.to_string(),
             queue_type: QueueType::Issue,
             phase,
