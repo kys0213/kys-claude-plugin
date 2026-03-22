@@ -333,10 +333,9 @@ workflows:
 
 | Command | Description |
 |---------|-------------|
-| `/auto` | 데몬 시작/중지/상태 확인 |
-| `/auto-setup` | 레포 등록 위자드 |
-| `/auto-config` | 설정 변경 |
-| `/auto-dashboard` | TUI 대시보드 열기 |
+| `/auto [subcommand]` | 데몬 제어 — start, stop, status, setup, config, dashboard, update |
+| `/spec [subcommand]` | 스펙 관리 — add, update, list, status, pause, resume, remove |
+| `/claw [query]` | 대화형 세션 — 상태 조회, 큐 관리, 판단 이력, HITL, 규칙 편집 |
 
 ---
 

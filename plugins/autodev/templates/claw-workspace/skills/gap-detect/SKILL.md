@@ -47,7 +47,7 @@ Acceptance Criteria에 대응하는 테스트가 존재하는지 확인합니다
 
 - **구조/기능 갭**: 새 이슈 생성 (autodev:analyze 라벨)
 - **테스트 갭**: 테스트 추가 이슈 생성
-- **심각한 갭** (아키텍처 불일치): HITL 요청 + /update-spec 권고
+- **심각한 갭** (아키텍처 불일치): HITL 요청 + /spec update 권고
 
 ## 트리거
 

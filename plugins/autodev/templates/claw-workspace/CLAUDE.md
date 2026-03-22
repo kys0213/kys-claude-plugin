@@ -41,26 +41,21 @@
    등록된 레포:
      <레포별 스펙 상태 + HITL 현황>
 
-   명령어:
-     /status              전체 상태 요약
-     /board [repo]        칸반 보드
-     /hitl                HITL 대기 목록 + 대화형 응답
-     /spec list           스펙 목록
-     /spec status <id>    스펙 진행도 상세
-     /repo list           레포 목록
-     /repo show <name>    레포 상세
-     /decisions [repo]    최근 Claw 판단 이력
-     /claw rules [repo]   현재 적용 규칙 확인
-     /claw edit <rule>    규칙 편집
-     /cron list           cron job 목록
-     /cron pause <name>   cron 일시정지
-     /cron trigger <name> cron 즉시 실행
+   명령어 (v5 3-command 구조):
+     /auto [subcommand]   데몬 제어 (start/stop/setup/config/dashboard/update)
+     /spec [subcommand]   스펙 관리 (add/update/list/status/pause/resume)
+     /claw [query]        대화형 세션 (상태, 보드, HITL, 판단 이력, 규칙 등)
 
-     (레포 Claude 세션 전용)
-     /add-spec [file]     스펙 등록 (대화형)
-     /update-spec <id>    스펙 수정 (대화형)
+   /claw 세션에서 자연어로 다음을 수행할 수 있습니다:
+     "상태 알려줘"         → 전체 상태 요약
+     "보드 보여줘"         → 칸반 보드
+     "HITL 대기 목록"      → HITL 확인 + 대화형 응답
+     "판단 이력"           → Claw 판단 이력
+     "레포 목록"           → 등록된 레포
+     "cron 목록"           → cron job 현황
+     "규칙 확인"           → /claw rules
 
-   또는 자연어로 대화하세요.
+   또는 자연어로 자유롭게 대화하세요.
    ```
 
 4. HITL 대기 항목이 있으면 우선 처리를 제안합니다.
