@@ -259,16 +259,20 @@ impl GitRepository {
                 self.gh_host.as_deref(),
             )
             .await;
+            let task_kind = crate::core::issue_title::task_kind_from_title(&issue.title);
             self.enqueue_issue(
                 db,
                 issue.number,
-                TaskKind::Analyze,
+                task_kind,
                 issue.title.clone(),
                 issue.body.clone(),
                 label_names,
                 issue.user.login.clone(),
             );
-            tracing::info!("issue #{}: {effective_label} → wip (Pending)", issue.number);
+            tracing::info!(
+                "issue #{}: {effective_label} → wip (Pending, task_kind={task_kind})",
+                issue.number
+            );
         }
 
         let now = chrono::Utc::now().to_rfc3339();
