@@ -26,19 +26,39 @@ sources:
         trigger: { label: "autodev:analyze" }
         handlers:
           - prompt: "이슈를 분석하고 구현 가능 여부를 판단해줘"
-        on_done: { label: "autodev:implement" }
+        on_done:
+          - script: |
+              CTX=$(autodev context $WORK_ID --json)
+              ISSUE=$(echo $CTX | jq -r '.issue.number')
+              REPO=$(echo $CTX | jq -r '.source.url')
+              gh issue edit $ISSUE --remove-label "autodev:analyze" -R $REPO
+              gh issue edit $ISSUE --add-label "autodev:implement" -R $REPO
 
       implement:
         trigger: { label: "autodev:implement" }
         handlers:
           - prompt: "이슈를 구현해줘"
-        on_done: { label: "autodev:review" }
+        on_done:
+          - script: |
+              CTX=$(autodev context $WORK_ID --json)
+              ISSUE=$(echo $CTX | jq -r '.issue.number')
+              REPO=$(echo $CTX | jq -r '.source.url')
+              TITLE=$(echo $CTX | jq -r '.issue.title')
+              gh pr create --title "$TITLE" --body "Closes #$ISSUE" -R $REPO
+              gh issue edit $ISSUE --remove-label "autodev:implement" -R $REPO
+              gh issue edit $ISSUE --add-label "autodev:review" -R $REPO
 
       review:
         trigger: { label: "autodev:review" }
         handlers:
           - prompt: "PR을 리뷰하고 품질을 평가해줘"
-        on_done: { label: "autodev:done" }
+        on_done:
+          - script: |
+              CTX=$(autodev context $WORK_ID --json)
+              ISSUE=$(echo $CTX | jq -r '.issue.number')
+              REPO=$(echo $CTX | jq -r '.source.url')
+              gh issue edit $ISSUE --remove-label "autodev:review" -R $REPO
+              gh issue edit $ISSUE --add-label "autodev:done" -R $REPO
 
     escalation:
       1: retry
@@ -53,6 +73,10 @@ runtime:
     model: sonnet
 ```
 
+### workspace = 1 repo
+
+workspace는 하나의 외부 레포와 1:1로 대응한다. GitHub 기준으로는 1 workspace = 1 GitHub repo. 다른 DataSource 타입도 해당 시스템에서 "레포"에 해당하는 단위와 1:1 매핑.
+
 ### 기대 동작
 
 ```
@@ -60,7 +84,7 @@ runtime:
 2. workspace 디렉토리 생성 (~/.autodev/workspaces/auth-project/)
 3. DataSource 인스턴스 생성 + Daemon에 등록
 4. AgentRuntime 바인딩 (RuntimeRegistry 구성)
-5. per-workspace cron seed (claw-evaluate, gap-detection, knowledge-extract)
+5. per-workspace cron seed (evaluate, gap-detection, knowledge-extract)
 6. Claw 워크스페이스 초기화 확인
 ```
 

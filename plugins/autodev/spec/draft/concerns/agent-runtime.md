@@ -34,6 +34,12 @@ pub struct RuntimeResponse {
 }
 ```
 
+handler의 prompt 타입 액션이 실행될 때 AgentRuntime.invoke()를 경유한다. `working_dir`에는 worktree 경로가 설정된다.
+
+### Token usage 기록
+
+RuntimeResponse의 `token_usage`는 Daemon이 `token_usage` 테이블에 자동 저장한다 (work_id, workspace, runtime, model, input/output tokens, duration). `autodev status`와 TUI Dashboard의 Runtime 패널에서 집계하여 표시한다.
+
 ---
 
 ## 의존성 방향
@@ -57,7 +63,7 @@ core → infra 방향 의존 없음.
 ```
 1. RuntimeRequest.model        ← 호출 시 명시 (최우선)
 2. handler의 runtime/model     ← DataSource state config
-3. .autodev.yaml의 runtime 기본값
+3. workspace yaml의 runtime 기본값
 4. 런타임 내장 기본 모델
 ```
 
@@ -92,7 +98,7 @@ impl RuntimeRegistry {
 }
 ```
 
-어떤 런타임을 사용할지는 DataSource state config의 handler에서 지정한다.
+어떤 런타임을 사용할지는 workspace yaml의 handler에서 지정한다.
 
 ---
 
@@ -111,7 +117,7 @@ runtime:
 
 ## Handler에서의 사용
 
-DataSource state의 handler가 prompt 타입이면 AgentRuntime.invoke()를 경유:
+workspace yaml의 handler가 prompt 타입이면 AgentRuntime.invoke()를 경유:
 
 ```yaml
 states:
@@ -123,3 +129,10 @@ states:
       - prompt: "PR을 리뷰해줘"
         runtime: gemini          # 이 handler는 Gemini 사용
 ```
+
+---
+
+### 관련 문서
+
+- [DESIGN-v5](../DESIGN-v5.md) — 전체 아키텍처
+- [DataSource](./datasource.md) — handler에서 AgentRuntime 사용

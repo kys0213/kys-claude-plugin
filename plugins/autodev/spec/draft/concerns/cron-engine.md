@@ -9,7 +9,7 @@
 
 ```
 1. 인프라 유지 — hitl-timeout, log-cleanup, daily-report (결정적)
-2. 품질 루프 — gap-detection, QA, knowledge-extract (새 아이템 생성 가능)
+2. 품질 루프 — evaluate, gap-detection, knowledge-extract (LLM 사용)
 ```
 
 ---
@@ -57,7 +57,7 @@ gap 발견 → DataSource에서 open 아이템 조회 (Pending/Ready/Running)
 
 | Job | 주기 | 동작 |
 |-----|------|------|
-| evaluate | 60초 | 완료 아이템 분류 (Done or HITL) |
+| evaluate | 60초 | 완료 아이템 분류 (Done or HITL) — `autodev agent -p` |
 | gap-detection | 1시간 | 스펙-코드 대조, gap 발견 시 이슈 생성 |
 | knowledge-extract | 1시간 | merged PR 지식 추출 |
 
@@ -75,35 +75,45 @@ gap 발견 → DataSource에서 open 아이템 조회 (Pending/Ready/Running)
 코어 이벤트에서 evaluate를 즉시 트리거:
 
 ```
-task 완료/실패 → force_trigger("evaluate")
+handler 전부 성공 → Completed 전이 → force_trigger("evaluate")
   → last_run_at = NULL → 다음 tick에서 즉시 실행
 ```
+
+이로 인해 Completed 전이 → evaluate 실행까지의 대기 시간은 tick_interval(10초) 수준.
+
+> handler 실패 시에는 force_trigger 없이 즉시 escalation 정책이 적용된다 (evaluate 불필요).
 
 ---
 
 ## 스크립트 구조
 
+Cron job의 스크립트도 `autodev context`를 활용하여 필요한 정보를 조회한다.
+
 ```bash
 #!/bin/bash
-# Guard
-PENDING=$(autodev queue list --workspace "$AUTODEV_WORKSPACE_NAME" --json | jq 'length')
-if [ "$PENDING" = "0" ]; then exit 0; fi
+# Guard: Completed 상태 아이템 있을 때만
+COMPLETED=$(autodev queue list --workspace "$WORKSPACE" --phase completed --json | jq 'length')
+if [ "$COMPLETED" = "0" ]; then exit 0; fi
 
-# 실행
-autodev agent --workspace "$AUTODEV_WORKSPACE_NAME" -p "큐를 평가해줘"
+# 실행: evaluate
+# LLM이 context를 조회하고 autodev queue done/hitl CLI를 직접 호출
+autodev agent --workspace "$WORKSPACE" -p \
+  "Completed 아이템의 완료 여부를 판단하고, autodev queue done 또는 autodev queue hitl 을 실행해줘"
 ```
 
 ---
 
-## 환경변수 주입
+## Daemon 주입 환경변수 (Cron 전용)
+
+Cron 스크립트에는 workspace 정보가 필요하므로 추가 변수를 주입한다.
 
 | 변수 | 예시 |
 |------|------|
-| `AUTODEV_WORKSPACE_NAME` | `auth-project` |
-| `AUTODEV_WORKSPACE_ROOT` | `/Users/me/repos/repo-a` |
+| `WORKSPACE` | `auth-project` |
 | `AUTODEV_HOME` | `~/.autodev` |
 | `AUTODEV_DB` | `~/.autodev/autodev.db` |
-| `AUTODEV_CLAW_WORKSPACE` | `~/.autodev/claw-workspace` |
+
+> **참고**: handler/on_done/on_fail script에는 `WORK_ID` + `WORKTREE`만 주입된다. Cron은 아이템 단위가 아니라 workspace 단위로 실행되므로 다른 환경변수 세트를 사용한다.
 
 ---
 
@@ -114,3 +124,11 @@ autodev agent --workspace "$AUTODEV_WORKSPACE_NAME" -p "큐를 평가해줘"
 | 생성 | workspace 등록 시 자동 | `autodev cron add` |
 | 제거 | 불가 (pause/resume) | 자유 |
 | Guard | 내장 | 사용자 정의 |
+
+---
+
+### 관련 문서
+
+- [DESIGN-v5](../DESIGN-v5.md) — evaluate 아키텍처
+- [DataSource](./datasource.md) — autodev context 스키마
+- [Claw](./claw-workspace.md) — evaluate와 Claw의 관계
