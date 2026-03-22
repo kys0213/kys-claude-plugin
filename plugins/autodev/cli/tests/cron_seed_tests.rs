@@ -14,7 +14,7 @@ fn open_memory_db(home: &Path) -> Database {
 }
 
 fn add_repo(db: &Database) -> String {
-    db.repo_add("https://github.com/org/test-repo", "org/test-repo")
+    db.workspace_add("https://github.com/org/test-repo", "org/test-repo")
         .expect("add repo")
 }
 
@@ -177,7 +177,7 @@ fn repo_remove_deletes_associated_cron_jobs() {
     seed_per_repo_crons(&db, tmp.path(), &repo_id, &cfg).unwrap();
     assert_eq!(db.cron_list(Some("org/test-repo")).unwrap().len(), 3);
 
-    db.repo_remove("org/test-repo").unwrap();
+    db.workspace_remove("org/test-repo").unwrap();
 
     // All cron jobs for this repo should be gone
     let all_jobs = db.cron_list(None).unwrap();

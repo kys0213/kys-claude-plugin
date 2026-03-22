@@ -14,7 +14,7 @@ fn open_memory_db() -> Database {
 }
 
 fn add_test_repo(db: &Database, name: &str) -> String {
-    db.repo_add(&format!("https://github.com/{name}"), name)
+    db.workspace_add(&format!("https://github.com/{name}"), name)
         .expect("add repo")
 }
 

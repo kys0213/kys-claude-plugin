@@ -47,7 +47,7 @@ mod tests {
     }
 
     fn add_repo(db: &Database) -> String {
-        db.repo_add("https://github.com/test/repo", "test-repo")
+        db.workspace_add("https://github.com/test/repo", "test-repo")
             .unwrap()
     }
 

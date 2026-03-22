@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 
 use autodev::core::config;
 use autodev::core::models::{NewConsumerLog, QueueType};
-use autodev::core::repository::{ConsumerLogRepository, RepoRepository};
+use autodev::core::repository::{ConsumerLogRepository, WorkspaceRepository};
 use autodev::service::daemon;
 use autodev::{cli as client, infra, tui};
 
@@ -807,21 +807,21 @@ async fn main() -> Result<()> {
         Commands::Dashboard { repo } => tui::run(&db, repo.as_deref()).await?,
         Commands::Repo { action } => match action {
             RepoAction::Add { url, config } => {
-                client::repo_add(&db, &env, &url, config.as_deref())?;
+                client::workspace_add(&db, &env, &url, config.as_deref())?;
             }
             RepoAction::List { json } => {
-                let list = client::repo_list(&db, json)?;
+                let list = client::workspace_list(&db, json)?;
                 println!("{list}");
             }
             RepoAction::Show { name, json } => {
-                let output = client::repo_show(&db, &env, &name, json)?;
+                let output = client::workspace_show(&db, &env, &name, json)?;
                 println!("{output}");
             }
             RepoAction::Config { name } => {
                 client::repo_config(&env, &name)?;
             }
             RepoAction::Remove { name } => {
-                client::repo_remove(&db, &env, &name)?;
+                client::workspace_remove(&db, &env, &name)?;
             }
             RepoAction::Update { name, config } => {
                 client::repo_update(&db, &env, &name, &config)?;
@@ -1285,13 +1285,13 @@ async fn main() -> Result<()> {
             // Resolve repo context if --repo is provided
             let mut extra_env: Vec<(String, String)> = Vec::new();
             if let Some(ref repo_name) = repo {
-                let enabled = db.repo_find_enabled()?;
+                let enabled = db.workspace_find_enabled()?;
                 let repo_entry = enabled
                     .iter()
                     .find(|r| r.name == *repo_name)
                     .ok_or_else(|| anyhow::anyhow!("repository not found: {repo_name}"))?;
                 let workspace = config::workspaces_path(&env)
-                    .join(config::sanitize_repo_name(&repo_entry.name));
+                    .join(config::sanitize_workspace_name(&repo_entry.name));
                 extra_env.push(("AUTODEV_REPO_NAME".to_string(), repo_entry.name.clone()));
                 extra_env.push(("AUTODEV_REPO_ROOT".to_string(), {
                     workspace.to_string_lossy().to_string()
@@ -1426,7 +1426,7 @@ async fn main() -> Result<()> {
             } => {
                 let repo_id = repo
                     .as_deref()
-                    .map(|name| client::resolve_repo_id(&db, name));
+                    .map(|name| client::resolve_workspace_id(&db, name));
                 let repo_id = match repo_id {
                     Some(Ok(id)) => Some(id),
                     Some(Err(e)) => return Err(e),
@@ -1437,7 +1437,7 @@ async fn main() -> Result<()> {
                 print!("{output}");
             }
             ConventionAction::CollectFeedback { repo } => {
-                let repo_id = client::resolve_repo_id(&db, &repo)?;
+                let repo_id = client::resolve_workspace_id(&db, &repo)?;
                 let output = client::convention::collect_feedback(&db, &repo, &repo_id)?;
                 print!("{output}");
 
@@ -1452,7 +1452,7 @@ async fn main() -> Result<()> {
                 print!("{pr_output}");
             }
             ConventionAction::Propose { repo, threshold } => {
-                let repo_id = client::resolve_repo_id(&db, &repo)?;
+                let repo_id = client::resolve_workspace_id(&db, &repo)?;
                 let result = client::convention::propose_updates(&db, &repo_id, threshold)?;
                 print!("{}", result.output);
 
@@ -1473,9 +1473,9 @@ async fn main() -> Result<()> {
                 }
             }
             ConventionAction::ApplyApproved { repo } => {
-                let repo_id = client::resolve_repo_id(&db, &repo)?;
+                let repo_id = client::resolve_workspace_id(&db, &repo)?;
                 let repo_path = config::workspaces_path(&env)
-                    .join(config::sanitize_repo_name(&repo))
+                    .join(config::sanitize_workspace_name(&repo))
                     .join("main");
                 let output = client::convention::apply_approved(&db, &repo, &repo_id, &repo_path)?;
                 print!("{output}");

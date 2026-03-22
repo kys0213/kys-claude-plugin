@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
-use crate::core::models::{DecisionType, NewClawDecision, RepoInfo};
-use crate::core::repository::{ClawDecisionRepository, CronRepository, RepoRepository};
+use crate::core::models::{DecisionType, NewClawDecision, WorkspaceInfo};
+use crate::core::repository::{ClawDecisionRepository, CronRepository, WorkspaceRepository};
 use crate::infra::db::Database;
 
 use super::runner::{CronExecResult, ScriptRunner};
@@ -58,7 +58,7 @@ impl CronEngine {
         info!("cron: found {} due job(s)", due_jobs.len());
 
         // Pre-fetch enabled repos (has id field for correct matching)
-        let enabled_repos = self.db.repo_find_enabled().unwrap_or_default();
+        let enabled_repos = self.db.workspace_find_enabled().unwrap_or_default();
 
         let mut results = Vec::new();
 
@@ -76,7 +76,7 @@ impl CronEngine {
                 enabled_repos
                     .iter()
                     .find(|r| r.id == *rid)
-                    .map(|r| RepoInfo {
+                    .map(|r| WorkspaceInfo {
                         name: r.name.clone(),
                         url: r.url.clone(),
                         enabled: true,
@@ -195,7 +195,7 @@ impl CronEngine {
 mod tests {
     use super::*;
     use crate::core::models::{CronSchedule, CronStatus, NewCronJob};
-    use crate::core::repository::{ClawDecisionRepository, CronRepository, RepoRepository};
+    use crate::core::repository::{ClawDecisionRepository, CronRepository, WorkspaceRepository};
     use tempfile::TempDir;
 
     fn setup_db() -> (TempDir, Database) {
@@ -425,7 +425,7 @@ mod tests {
         let db = Database::open(&db_path).unwrap();
         db.initialize().unwrap();
         let repo_id = db
-            .repo_add("https://github.com/org/repo", "org/repo")
+            .workspace_add("https://github.com/org/repo", "org/repo")
             .unwrap();
         (dir, db_path, repo_id)
     }

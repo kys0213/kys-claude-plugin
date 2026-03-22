@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
-use crate::core::models::{CronJob, RepoInfo};
+use crate::core::models::{CronJob, WorkspaceInfo};
 
 /// Result of executing a cron script.
 #[derive(Debug)]
@@ -72,7 +72,7 @@ impl ScriptRunner {
     pub fn build_env_vars(
         home: &Path,
         job: &CronJob,
-        repo_info: Option<&RepoInfo>,
+        repo_info: Option<&WorkspaceInfo>,
     ) -> HashMap<String, String> {
         let mut vars = HashMap::new();
 
@@ -100,7 +100,7 @@ impl ScriptRunner {
             vars.insert("AUTODEV_REPO_NAME".to_string(), repo.name.clone());
             vars.insert("AUTODEV_REPO_URL".to_string(), repo.url.clone());
 
-            let sanitized = crate::core::config::sanitize_repo_name(&repo.name);
+            let sanitized = crate::core::config::sanitize_workspace_name(&repo.name);
             // WORKSPACE: short workspace name for cron scripts (v5 spec)
             vars.insert("WORKSPACE".to_string(), sanitized.clone());
             let workspace = home.join("workspaces").join(&sanitized);
@@ -128,7 +128,7 @@ impl ScriptRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::models::{CronJob, CronSchedule, CronStatus, RepoInfo};
+    use crate::core::models::{CronJob, CronSchedule, CronStatus, WorkspaceInfo};
     use std::path::PathBuf;
 
     fn sample_job() -> CronJob {
@@ -145,8 +145,8 @@ mod tests {
         }
     }
 
-    fn sample_repo_info() -> RepoInfo {
-        RepoInfo {
+    fn sample_repo_info() -> WorkspaceInfo {
+        WorkspaceInfo {
             name: "my-repo".to_string(),
             url: "https://github.com/org/my-repo".to_string(),
             enabled: true,

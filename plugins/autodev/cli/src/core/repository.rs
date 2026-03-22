@@ -4,12 +4,12 @@ use super::models::*;
 
 // ─── Repository traits ───
 
-pub trait RepoRepository {
-    fn repo_add(&self, url: &str, name: &str) -> Result<String>;
-    fn repo_remove(&self, name: &str) -> Result<()>;
-    fn repo_list(&self) -> Result<Vec<RepoInfo>>;
-    fn repo_find_enabled(&self) -> Result<Vec<EnabledRepo>>;
-    fn repo_status_summary(&self) -> Result<Vec<RepoStatusRow>>;
+pub trait WorkspaceRepository {
+    fn workspace_add(&self, url: &str, name: &str) -> Result<String>;
+    fn workspace_remove(&self, name: &str) -> Result<()>;
+    fn workspace_list(&self) -> Result<Vec<WorkspaceInfo>>;
+    fn workspace_find_enabled(&self) -> Result<Vec<EnabledWorkspace>>;
+    fn workspace_status_summary(&self) -> Result<Vec<WorkspaceStatusRow>>;
 }
 
 pub trait ScanCursorRepository {

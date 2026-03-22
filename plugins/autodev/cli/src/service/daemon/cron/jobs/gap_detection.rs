@@ -102,7 +102,7 @@ mod tests {
         let db = Database::open(&dir.path().join("test.db")).unwrap();
         db.initialize().unwrap();
         let repo_id = db
-            .repo_add("https://github.com/org/repo", "org/repo")
+            .workspace_add("https://github.com/org/repo", "org/repo")
             .unwrap();
         (dir, db, repo_id)
     }
@@ -218,7 +218,7 @@ mod tests {
     fn ignores_specs_from_other_repos() {
         let (_dir, db, repo_id) = setup();
         let other_repo_id = db
-            .repo_add("https://github.com/org/other", "org/other")
+            .workspace_add("https://github.com/org/other", "org/other")
             .unwrap();
 
         add_spec(&db, &repo_id, "My Spec");

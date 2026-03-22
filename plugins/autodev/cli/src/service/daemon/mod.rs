@@ -239,7 +239,7 @@ impl Daemon {
         // Escalation: 실패 시 failure_count 증가 → 레벨별 대응
         let mut escalation_hitl = None;
         let escalation_retry = if let TaskStatus::Failed(ref msg) = task_result.status {
-            match crate::cli::resolve_repo_id(&self.log_db, &task_result.repo_name) {
+            match crate::cli::resolve_workspace_id(&self.log_db, &task_result.repo_name) {
                 Ok(repo_id) => {
                     match escalation::escalate_with_config(
                         &self.log_db,
