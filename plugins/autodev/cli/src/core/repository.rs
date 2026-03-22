@@ -112,6 +112,15 @@ pub trait FeedbackPatternRepository {
     fn feedback_set_status(&self, id: &str, status: FeedbackPatternStatus) -> Result<()>;
 }
 
+pub trait TransitionEventRepository {
+    /// Append a transition event to the log.
+    fn transition_insert(&self, event: &NewTransitionEvent) -> Result<String>;
+    /// List transition events for a given work_id (chronological order).
+    fn transition_list_by_work_id(&self, work_id: &str) -> Result<Vec<TransitionEvent>>;
+    /// List recent transition events across all items.
+    fn transition_list_recent(&self, limit: usize) -> Result<Vec<TransitionEvent>>;
+}
+
 pub trait CronRepository {
     fn cron_add(&self, job: &NewCronJob) -> Result<String>;
     fn cron_list(&self, repo: Option<&str>) -> Result<Vec<CronJob>>;
