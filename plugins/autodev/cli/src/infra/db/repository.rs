@@ -83,6 +83,10 @@ impl RepoRepository for Database {
             rusqlite::params![repo_id],
         )?;
         tx.execute(
+            "DELETE FROM history WHERE workspace_id = ?1",
+            rusqlite::params![repo_id],
+        )?;
+        tx.execute(
             "DELETE FROM cron_jobs WHERE repo_id = ?1",
             rusqlite::params![repo_id],
         )?;
@@ -1773,4 +1777,267 @@ fn map_cron_row(row: &rusqlite::Row<'_>) -> Result<CronJob> {
         last_run_at: row.get(8)?,
         created_at: row.get(9)?,
     })
+}
+
+impl HistoryRepository for Database {
+    fn history_insert(&self, entry: &NewHistoryEntry) -> Result<String> {
+        let conn = self.conn();
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+
+        conn.execute(
+            "INSERT INTO history \
+             (id, source_id, workspace_id, task_kind, status, error_message, duration_ms, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                id,
+                entry.source_id,
+                entry.workspace_id,
+                entry.task_kind,
+                entry.status.as_str(),
+                entry.error_message,
+                entry.duration_ms,
+                now,
+            ],
+        )?;
+        Ok(id)
+    }
+
+    fn history_count_failures(&self, source_id: &str) -> Result<i64> {
+        let conn = self.conn();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM history WHERE source_id = ?1 AND status = 'failed'",
+            rusqlite::params![source_id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    fn history_list_by_source(&self, source_id: &str, limit: usize) -> Result<Vec<HistoryEntry>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, source_id, workspace_id, task_kind, status, \
+             error_message, duration_ms, created_at \
+             FROM history WHERE source_id = ?1 ORDER BY created_at DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![source_id, limit as i64], map_history_row)?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
+    }
+
+    fn history_list_by_workspace(
+        &self,
+        workspace_id: &str,
+        limit: usize,
+    ) -> Result<Vec<HistoryEntry>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, source_id, workspace_id, task_kind, status, \
+             error_message, duration_ms, created_at \
+             FROM history WHERE workspace_id = ?1 ORDER BY created_at DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![workspace_id, limit as i64],
+            map_history_row,
+        )?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
+    }
+}
+
+fn map_history_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryEntry> {
+    let status_str: String = row.get(4)?;
+    Ok(HistoryEntry {
+        id: row.get(0)?,
+        source_id: row.get(1)?,
+        workspace_id: row.get(2)?,
+        task_kind: row.get(3)?,
+        status: status_str.parse().map_err(|e: String| {
+            rusqlite::Error::FromSqlConversionFailure(
+                4,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+            )
+        })?,
+        error_message: row.get(5)?,
+        duration_ms: row.get(6)?,
+        created_at: row.get(7)?,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_db() -> Database {
+        let db = Database::open(std::path::Path::new(":memory:")).unwrap();
+        db.initialize().unwrap();
+        db
+    }
+
+    #[test]
+    fn history_insert_and_list_by_source() {
+        let db = setup_db();
+
+        let entry = NewHistoryEntry {
+            source_id: "issue:org/repo:42".into(),
+            workspace_id: "ws-1".into(),
+            task_kind: "issue".into(),
+            status: HistoryStatus::Completed,
+            error_message: None,
+            duration_ms: Some(1500),
+        };
+        let id = db.history_insert(&entry).unwrap();
+        assert!(!id.is_empty());
+
+        let entries = db.history_list_by_source("issue:org/repo:42", 10).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].source_id, "issue:org/repo:42");
+        assert_eq!(entries[0].status, HistoryStatus::Completed);
+        assert_eq!(entries[0].duration_ms, Some(1500));
+        assert!(entries[0].error_message.is_none());
+    }
+
+    #[test]
+    fn history_count_failures() {
+        let db = setup_db();
+
+        for status in &[
+            HistoryStatus::Failed,
+            HistoryStatus::Completed,
+            HistoryStatus::Failed,
+        ] {
+            db.history_insert(&NewHistoryEntry {
+                source_id: "issue:org/repo:10".into(),
+                workspace_id: "ws-1".into(),
+                task_kind: "issue".into(),
+                status: status.clone(),
+                error_message: if *status == HistoryStatus::Failed {
+                    Some("error".into())
+                } else {
+                    None
+                },
+                duration_ms: None,
+            })
+            .unwrap();
+        }
+
+        let count = db.history_count_failures("issue:org/repo:10").unwrap();
+        assert_eq!(count, 2);
+
+        let count = db.history_count_failures("issue:org/repo:99").unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn history_list_by_workspace() {
+        let db = setup_db();
+
+        db.history_insert(&NewHistoryEntry {
+            source_id: "issue:org/repo:1".into(),
+            workspace_id: "ws-a".into(),
+            task_kind: "issue".into(),
+            status: HistoryStatus::Completed,
+            error_message: None,
+            duration_ms: None,
+        })
+        .unwrap();
+        db.history_insert(&NewHistoryEntry {
+            source_id: "issue:org/repo:2".into(),
+            workspace_id: "ws-b".into(),
+            task_kind: "pr".into(),
+            status: HistoryStatus::Failed,
+            error_message: Some("timeout".into()),
+            duration_ms: Some(30000),
+        })
+        .unwrap();
+
+        let ws_a = db.history_list_by_workspace("ws-a", 10).unwrap();
+        assert_eq!(ws_a.len(), 1);
+        assert_eq!(ws_a[0].source_id, "issue:org/repo:1");
+
+        let ws_b = db.history_list_by_workspace("ws-b", 10).unwrap();
+        assert_eq!(ws_b.len(), 1);
+        assert_eq!(ws_b[0].status, HistoryStatus::Failed);
+        assert_eq!(ws_b[0].error_message.as_deref(), Some("timeout"));
+    }
+
+    #[test]
+    fn history_persists_across_connections() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("test.db");
+
+        {
+            let db = Database::open(&db_path).unwrap();
+            db.initialize().unwrap();
+            db.history_insert(&NewHistoryEntry {
+                source_id: "issue:org/repo:5".into(),
+                workspace_id: "ws-1".into(),
+                task_kind: "issue".into(),
+                status: HistoryStatus::Failed,
+                error_message: Some("crash".into()),
+                duration_ms: Some(500),
+            })
+            .unwrap();
+        }
+
+        {
+            let db = Database::open(&db_path).unwrap();
+            db.initialize().unwrap();
+            let count = db.history_count_failures("issue:org/repo:5").unwrap();
+            assert_eq!(count, 1, "failure_count should persist across connections");
+
+            let entries = db.history_list_by_source("issue:org/repo:5", 10).unwrap();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].error_message.as_deref(), Some("crash"));
+        }
+    }
+
+    #[test]
+    fn history_skipped_not_counted_as_failure() {
+        let db = setup_db();
+
+        db.history_insert(&NewHistoryEntry {
+            source_id: "pr:org/repo:7".into(),
+            workspace_id: "ws-1".into(),
+            task_kind: "pr".into(),
+            status: HistoryStatus::Skipped,
+            error_message: Some("preflight: issue closed".into()),
+            duration_ms: None,
+        })
+        .unwrap();
+
+        let entries = db.history_list_by_source("pr:org/repo:7", 10).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].status, HistoryStatus::Skipped);
+
+        let count = db.history_count_failures("pr:org/repo:7").unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn history_list_respects_limit() {
+        let db = setup_db();
+
+        for i in 0..5 {
+            db.history_insert(&NewHistoryEntry {
+                source_id: "issue:org/repo:1".into(),
+                workspace_id: "ws-1".into(),
+                task_kind: "issue".into(),
+                status: HistoryStatus::Completed,
+                error_message: None,
+                duration_ms: Some(i * 100),
+            })
+            .unwrap();
+        }
+
+        let entries = db.history_list_by_source("issue:org/repo:1", 3).unwrap();
+        assert_eq!(entries.len(), 3);
+    }
 }

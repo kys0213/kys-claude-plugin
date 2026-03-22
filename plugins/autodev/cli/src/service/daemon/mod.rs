@@ -23,9 +23,9 @@ use tokio::task::JoinSet;
 use tracing::info;
 
 use crate::core::config::{self, Env};
-use crate::core::models::{NewTransitionEvent, TransitionEventType};
+use crate::core::models::{HistoryStatus, NewHistoryEntry, NewTransitionEvent, TransitionEventType};
 use crate::core::repository::{
-    ConsumerLogRepository, TokenUsageRepository, TransitionEventRepository,
+    ConsumerLogRepository, HistoryRepository, TokenUsageRepository, TransitionEventRepository,
 };
 use crate::infra::claude::Claude;
 use crate::infra::db::Database;
@@ -280,6 +280,9 @@ impl Daemon {
                 }
             }
         }
+
+        // Record history entry (append-only, survives daemon restart)
+        record_history(&self.log_db, task_result);
 
         // Notify on task failure (escalation으로 retry되더라도 기록)
         if let TaskStatus::Failed(ref msg) = task_result.status {
@@ -626,6 +629,49 @@ fn record_transition(
     }
 }
 
+/// TaskResult를 history 테이블에 기록한다 (append-only).
+///
+/// daemon 재시작 후에도 이전 실행 기록이 유지된다.
+fn record_history(db: &Database, result: &TaskResult) {
+    let (status, error_message) = match &result.status {
+        TaskStatus::Completed => (HistoryStatus::Completed, None),
+        TaskStatus::Failed(msg) => (HistoryStatus::Failed, Some(msg.clone())),
+        TaskStatus::Skipped(reason) => (HistoryStatus::Skipped, Some(reason.to_string())),
+    };
+
+    let duration_ms = result.logs.first().and_then(|log| {
+        if log.duration_ms > 0 {
+            Some(log.duration_ms)
+        } else {
+            None
+        }
+    });
+
+    let workspace_id = result
+        .logs
+        .first()
+        .map(|log| log.repo_id.clone())
+        .unwrap_or_default();
+
+    let task_kind = result
+        .logs
+        .first()
+        .map(|log| log.queue_type.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let entry = NewHistoryEntry {
+        source_id: result.work_id.clone(),
+        workspace_id,
+        task_kind,
+        status,
+        error_message,
+        duration_ms,
+    };
+
+    if let Err(e) = db.history_insert(&entry) {
+        tracing::warn!("failed to record history for {}: {e}", result.work_id);
+    }
+}
 /// Claude CLI stderr에서 토큰 사용량을 파싱한다.
 ///
 /// Claude Code의 stderr에는 다양한 형식의 토큰 정보가 출력될 수 있다.
