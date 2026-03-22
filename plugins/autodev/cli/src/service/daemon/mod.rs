@@ -23,7 +23,9 @@ use tokio::task::JoinSet;
 use tracing::info;
 
 use crate::core::config::{self, Env};
-use crate::core::models::{HistoryStatus, NewHistoryEntry, NewTransitionEvent, TransitionEventType};
+use crate::core::models::{
+    HistoryStatus, NewHistoryEntry, NewTransitionEvent, TransitionEventType,
+};
 use crate::core::repository::{
     ConsumerLogRepository, HistoryRepository, TokenUsageRepository, TransitionEventRepository,
 };
