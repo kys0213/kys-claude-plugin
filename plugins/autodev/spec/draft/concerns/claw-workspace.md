@@ -20,7 +20,7 @@ evaluate cron (force_trigger로 즉시 실행 가능):
     │  LLM이 autodev context로 컨텍스트 조회 후 CLI 도구로 결정:
     │
     ├── autodev queue done $WORK_ID
-    │     → on_done script 실행
+    │     → Daemon이 on_done script 실행 (CLI 명령이 상태 전이를 트리거하고, Daemon이 script를 실행)
     │       ├── script 성공 → Done (worktree 정리)
     │       └── script 실패 → Failed (worktree 보존, 로그 기록)
     │

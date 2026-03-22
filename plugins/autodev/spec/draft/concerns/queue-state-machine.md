@@ -48,7 +48,7 @@
                     │     script → bash              │
                     └──────┬────────────┬───────────┘
                            │            │
-                    전부 성공        handler 실패
+                    전부 성공        handler/on_enter 실패
                            │            │
                            ▼            ▼
           ┌─────────────────┐    ┌─────────────────────────────┐
@@ -70,15 +70,10 @@
                    │              │     → HITL 이벤트 생성 ───────┐│
                    │              │     → worktree 보존          ││
                    │              │                               ││
-                   │              │  4: skip                      ││
-                   │              │     → on_fail script 실행     ││
-                   │              │     → Skipped ────────────────┼┼──┐
-                   │              │     → worktree 정리          ││  │
-                   │              │                               ││  │
-                   │              │  5: replan                    ││  │
-                   │              │     → on_fail script 실행     ││  │
-                   │              │     → HITL(replan) ───────────┤│  │
-                   │              │     → worktree 보존          ││  │
+                   │              │  terminal: skip 또는 replan   ││
+                   │              │     (hitl timeout 시 적용)     ││
+                   │              │     skip   → Skipped ─────────┼┼──┐
+                   │              │     replan → HITL(replan) ────┤│  │
                    │              └───────────────────────────────┘│  │
                    │                                               │  │
                    │  evaluate cron                                │  │
@@ -122,11 +117,11 @@
 | Failed | 보존 (디버깅용) |
 | Skipped | 정리 |
 | Retry | 보존 (이전 작업 위에서 재시도) |
-| Graceful shutdown 롤백 (Running→Pending) | **정리** |
+| Graceful shutdown 롤백 (Running→Pending) | **보존** (재시작 후 재사용) |
 | hitl-timeout (HITL 만료) | **정리** |
 | log-cleanup cron | 보존된 worktree 중 TTL 초과분 정리 |
 
-**정리 원칙**: worktree는 **Done이 되어야만** 정리한다. 단, shutdown 롤백과 HITL 만료 시에도 정리하여 좀비 worktree를 방지한다. 나머지 보존분은 `log-cleanup` cron이 TTL(기본 7일) 기준으로 주기 정리한다.
+**정리 원칙**: worktree는 **Done 또는 Skipped**가 되어야만 정리한다. HITL 만료 시에도 정리하여 좀비 worktree를 방지한다. Shutdown 롤백 시에는 재시작 후 재사용을 위해 보존한다. 나머지 보존분(Failed 등)은 `log-cleanup` cron이 TTL(기본 7일) 기준으로 주기 정리한다.
 
 ---
 
@@ -137,12 +132,12 @@
 | retry | 안 함 | 조용한 재시도 |
 | retry_with_comment | 실행 | 외부 알림 + 재시도 |
 | hitl | 실행 | 외부 알림 + 사람 대기 |
-| skip | 실행 | 외부 알림 + 종료 |
-| replan | 실행 | 외부 알림 + 스펙 수정 제안 |
 
 `retry`만 on_fail을 실행하지 않는다. "조용한 재시도"로 외부 시스템에 노이즈를 주지 않는다.
 
-failure_count는 append-only history에서 계산한다: `history | filter(state, failed) | count`.
+> `skip`과 `replan`은 hitl의 응답 경로 또는 hitl timeout 시 `terminal` 설정에 의해 적용된다. 독립적인 escalation level이 아니다. 상세는 [DataSource](./datasource.md)의 Escalation 정책 참조.
+
+failure_count는 append-only history에서 계산한다: `history | filter(state, failed) | count`. on_enter 실패도 handler 실패와 동일하게 failure_count에 포함된다.
 
 ---
 
@@ -154,7 +149,7 @@ failure_count는 append-only history에서 계산한다: `history | filter(state
 
 2. **"충분한가?"만 판단** — "이 handler의 결과물이 다음 단계로 넘어가기에 충분한가?"만 본다. 품질 판단(좋은 코드인가?)은 Cron 품질 루프가 담당한다.
 
-3. **state별 구체 기준은 claw-workspace rules에 위임** — `classify-policy.md`에 state별 Done 조건을 정의한다. 코어는 rules를 모르고, `autodev agent`가 rules를 참조하여 판단한다.
+3. **state별 구체 기준은 claw-workspace rules에 위임** — `~/.autodev/claw-workspace/.claude/rules/classify-policy.md`에 state별 Done 조건을 정의한다 (Claw 워크스페이스의 rules 파일, [Claw 워크스페이스](./claw-workspace.md) 참조). 코어는 rules를 모르고, `autodev agent`가 rules를 참조하여 판단한다.
 
 ### 실패 원칙
 

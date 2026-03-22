@@ -68,13 +68,15 @@ Archived ──resume──→ Active (복구)
 gap-detection cron (1시간):
   → 스펙 vs 현재 코드 비교
   → gap 발견 → 새 이슈 생성 → 파이프라인 재진입
-  → gap 없음 → Completing 상태로 전이
+  → gap 없음 + 모든 linked issues Done → Completing 상태로 전이
 
 on_spec_completing:
   → TestRunner: spec.test_commands 실행
     → 실패 → 새 이슈 생성 → Active로 복귀
     → 성공 → HITL: 최종 확인 (approve / request-changes)
 ```
+
+> **Completing 전이 조건**: gap-detection이 gap을 발견하지 못하고, 해당 스펙에 linked된 모든 이슈가 Done 상태일 때 자동으로 Completing 상태로 전이한다.
 
 ---
 
@@ -91,6 +93,8 @@ on_spec_completing:
 ```
 
 판단 기준: 스펙의 대상 모듈/파일 경로, acceptance criteria의 겹침 여부.
+
+> **DependencyGuard**: 스펙 간 의존 관계를 추적하는 메커니즘. 의존 스펙의 이슈가 선행 스펙 완료 전에 실행되지 않도록 큐 스케줄링에서 제어한다. 충돌이 감지되면 (같은 파일/모듈에 영향) HITL 이벤트를 생성하여 사용자에게 판단을 요청한다. 내부적으로는 `autodev queue dependency add/remove` CLI로 관리한다.
 
 ---
 

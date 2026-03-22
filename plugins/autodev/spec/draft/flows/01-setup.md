@@ -14,12 +14,12 @@ autodev workspace add --config workspace.yaml
 
 ```yaml
 name: "auth-project"
+concurrency: 2                    # workspace 레벨: 동시 Running 아이템 수
 
 sources:
   github:
     url: https://github.com/org/repo
     scan_interval_secs: 300
-    concurrency: 1
 
     states:
       analyze:
@@ -64,8 +64,7 @@ sources:
       1: retry
       2: retry_with_comment
       3: hitl
-      4: skip
-      5: replan
+      terminal: skip          # hitl timeout 시 적용 (skip 또는 replan)
 
 runtime:
   default: claude

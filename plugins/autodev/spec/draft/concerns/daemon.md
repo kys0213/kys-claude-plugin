@@ -24,15 +24,17 @@
 두 레벨로 동시 실행을 제어한다:
 
 ```yaml
-# workspace.yaml — 이 workspace에서 동시 Running 아이템 수
-concurrency: 2
+# workspace.yaml — workspace 루트 레벨에 정의
+concurrency: 2                    # 이 workspace에서 동시 Running 아이템 수
 
-# daemon 글로벌 설정 — 전체 workspace 합산 상한
+# daemon 글로벌 설정 (별도 config) — 전체 workspace 합산 상한
 max_concurrent: 4
 ```
 
-- **workspace.concurrency**: "이 프로젝트에 동시에 몇 개까지 돌릴까"
+- **workspace.concurrency**: workspace yaml 루트에 정의. "이 프로젝트에 동시에 몇 개까지 돌릴까". 모든 source의 아이템 합산 기준.
 - **daemon.max_concurrent**: "머신 리소스 한계" (evaluate cron의 LLM 호출도 slot을 소비)
+
+> **주의**: `concurrency`는 workspace 루트에 위치한다 (`sources.github` 하위가 아님). 하나의 workspace에 여러 source가 있을 수 있으므로, per-source가 아닌 per-workspace 기준으로 제어한다.
 
 Daemon은 `Ready → Running` 전이 시 두 제한을 모두 확인한다.
 
@@ -60,8 +62,15 @@ loop {
         // worktree 생성 (인프라)
         worktree = create_or_reuse_worktree(item)
 
-        // on_enter
-        run_actions(state.on_enter, WORK_ID=item.id, WORKTREE=worktree)
+        // on_enter (실패 시 handler를 실행하지 않고 escalation 적용)
+        result = run_actions(state.on_enter, WORK_ID=item.id, WORKTREE=worktree)
+        if result.failed:
+            failure_count = count_failures(item.source_id, item.state)
+            escalation = lookup_escalation(failure_count)
+            if escalation != retry:
+                run_actions(state.on_fail, WORK_ID=item.id, WORKTREE=worktree)
+            apply_escalation(item, escalation)
+            continue
 
         // handlers 순차 실행
         for action in state.handlers:
@@ -126,9 +135,12 @@ Daemon이 prompt/script 실행 시 주입하는 환경변수는 **2개만**:
 ```
 SIGINT → on_shutdown:
   1. Running 아이템 완료 대기 (timeout: 30초)
-     → timeout 초과: Pending으로 롤백, worktree 정리
+     → timeout 초과: Pending으로 롤백, worktree 보존
+       (재시작 후 해당 아이템이 다시 Ready → Running 전이 시 기존 worktree를 재사용)
   2. Cron engine 정지
 ```
+
+> **worktree 보존 원칙**: shutdown 롤백 시 worktree를 정리하지 않는다. retry와 동일하게, 재시작 후 이전 작업 위에서 이어서 진행할 수 있도록 worktree를 보존한다. 좀비 worktree는 `log-cleanup` cron이 TTL 기반으로 정리한다.
 
 ---
 
