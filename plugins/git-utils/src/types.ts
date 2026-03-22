@@ -115,6 +115,8 @@ export interface GuardInput {
   projectDir: string;
   createBranchScript: string;
   defaultBranch?: string;
+  /** 추가 보호 브랜치 목록 (default branch 외에 보호할 브랜치) */
+  protectedBranches?: string[];
   /** commit guard 전용: stdin으로 전달된 tool_input.command */
   toolCommand?: string;
   /** write guard 전용: stdin으로 전달된 tool_input.file_path */
