@@ -227,7 +227,7 @@ impl Daemon {
     /// escalation, manager.apply, 로그/토큰 기록, 알림 발송,
     /// cron force-trigger, spec auto-completion 등 모든 후처리를 포함한다.
     /// 메인 이벤트 루프와 graceful shutdown 양쪽에서 호출된다.
-    async fn handle_task_result(&mut self, task_result: &TaskResult) {
+    async fn handle_task_completion(&mut self, task_result: &TaskResult) {
         // Escalation: 실패 시 failure_count 증가 → 레벨별 대응
         let mut escalation_hitl = None;
         let escalation_retry = if let TaskStatus::Failed(ref msg) = task_result.status {
@@ -330,7 +330,7 @@ impl Daemon {
                                 "task completed: {} - {} (in-flight: {})",
                                 task_result.work_id, task_result.status, self.tracker.total
                             );
-                            self.handle_task_result(&task_result).await;
+                            self.handle_task_completion(&task_result).await;
                         }
                         Err(e) => {
                             tracing::error!("spawned task panicked: {e}");
@@ -411,7 +411,7 @@ impl Daemon {
                                         "shutdown drain: task completed: {} - {}",
                                         task_result.work_id, task_result.status
                                     );
-                                    self.handle_task_result(&task_result).await;
+                                    self.handle_task_completion(&task_result).await;
                                 }
                                 Some(Err(e)) => {
                                     tracing::error!("shutdown drain: spawned task panicked: {e}");
