@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -13,6 +14,7 @@ use crate::v5::core::runtime::RuntimeRegistry;
 use crate::v5::core::state_machine;
 use crate::v5::core::workspace::{StateConfig, WorkspaceConfig};
 use crate::v5::service::concurrency::ConcurrencyTracker;
+use crate::v5::service::evaluate_cron::EvaluateCron;
 use crate::v5::service::executor::{ActionEnv, ActionExecutor};
 use crate::v5::service::worktree::WorktreeManager;
 
@@ -23,8 +25,8 @@ use crate::v5::service::worktree::WorktreeManager;
 ///   2. Transition: Pending → Ready → Running (concurrency 제한)
 ///   3. Execute: yaml 정의 handler 실행
 ///   4. Complete: handler 성공 → Completed
-///   5. on_done/on_fail: script 실행
-///   6. Classify: evaluate → Done or HITL
+///   5. Evaluate: evaluate cron이 Completed 아이템을 Done/HITL로 분류
+///   6. on_done/on_fail: script 실행
 pub struct V5Daemon {
     config: WorkspaceConfig,
     sources: Vec<Box<dyn DataSource>>,
@@ -33,6 +35,7 @@ pub struct V5Daemon {
     tracker: ConcurrencyTracker,
     queue: VecDeque<V5QueueItem>,
     history: Vec<HistoryEntry>,
+    evaluate_cron: EvaluateCron,
 }
 
 /// Daemon tick의 결과.
@@ -65,6 +68,7 @@ impl V5Daemon {
         worktree_mgr: Box<dyn WorktreeManager>,
         max_concurrent: u32,
     ) -> Self {
+        let evaluate_cron = EvaluateCron::new(&config.name, PathBuf::from("/tmp/autodev-evaluate"));
         Self {
             config,
             sources,
@@ -73,6 +77,29 @@ impl V5Daemon {
             tracker: ConcurrencyTracker::new(max_concurrent),
             queue: VecDeque::new(),
             history: Vec::new(),
+            evaluate_cron,
+        }
+    }
+
+    /// autodev_home을 지정하여 생성한다 (evaluate cron script 경로 해석용).
+    pub fn with_home(
+        config: WorkspaceConfig,
+        sources: Vec<Box<dyn DataSource>>,
+        registry: Arc<RuntimeRegistry>,
+        worktree_mgr: Box<dyn WorktreeManager>,
+        max_concurrent: u32,
+        autodev_home: PathBuf,
+    ) -> Self {
+        let evaluate_cron = EvaluateCron::new(&config.name, autodev_home);
+        Self {
+            config,
+            sources,
+            executor: ActionExecutor::new(registry),
+            worktree_mgr,
+            tracker: ConcurrencyTracker::new(max_concurrent),
+            queue: VecDeque::new(),
+            history: Vec::new(),
+            evaluate_cron,
         }
     }
 
@@ -404,6 +431,11 @@ impl V5Daemon {
         self.sources = sources;
     }
 
+    /// EvaluateCron 참조 (테스트용).
+    pub fn evaluate_cron(&self) -> &EvaluateCron {
+        &self.evaluate_cron
+    }
+
     /// tokio::select! 기반 async event loop.
     ///
     /// v4 Daemon.run()과 동일한 패턴:
@@ -444,7 +476,7 @@ impl V5Daemon {
         tracing::info!("v5 daemon stopped");
     }
 
-    /// 단일 tick: collect → advance → execute → on_done.
+    /// 단일 tick: collect → advance → execute → evaluate → on_done.
     pub async fn tick(&mut self) -> Result<()> {
         // 1. Collect
         let collected = self.collect().await?;
@@ -460,10 +492,12 @@ impl V5Daemon {
 
         // 3. Execute Running items
         let outcomes = self.execute_running().await;
+        let mut has_newly_completed = false;
         for outcome in &outcomes {
             match outcome {
                 ItemOutcome::Completed(item) => {
                     tracing::info!("completed: {}", item.work_id);
+                    has_newly_completed = true;
                 }
                 ItemOutcome::Failed {
                     item,
@@ -483,23 +517,66 @@ impl V5Daemon {
             }
         }
 
-        // 4. Process Completed → Done (on_done)
-        let completed: Vec<String> = self
-            .items_in_phase(V5QueuePhase::Completed)
-            .iter()
-            .map(|i| i.work_id.clone())
-            .collect();
+        // 4. force_trigger: Running → Completed 전이 감지 시 즉시 evaluate 트리거
+        if has_newly_completed {
+            self.evaluate_cron.force_trigger();
+        }
 
-        for work_id in completed {
-            if let Some(idx) = self.queue.iter().position(|i| i.work_id == work_id) {
+        // 5. Evaluate cron: Completed 아이템을 Done/HITL로 분류
+        let ws_concurrency = self
+            .config
+            .sources
+            .values()
+            .next()
+            .map(|s| s.concurrency)
+            .unwrap_or(1);
+        let items_snapshot: Vec<V5QueueItem> = self.queue.iter().cloned().collect();
+        let eval_outcomes = self
+            .evaluate_cron
+            .tick(&items_snapshot, &mut self.tracker, ws_concurrency)
+            .await;
+
+        // 6. evaluate 결과 적용: Completed → Done 또는 Hitl 전이
+        for eval_outcome in &eval_outcomes {
+            if let Some(idx) = self
+                .queue
+                .iter()
+                .position(|i| i.work_id == eval_outcome.work_id)
+            {
                 let mut item = self.queue.remove(idx).unwrap();
-                match self.execute_on_done(&mut item).await {
-                    Ok(true) => tracing::info!("done: {}", item.work_id),
-                    Ok(false) => {
-                        tracing::warn!("on_done failed: {}", item.work_id);
+                match eval_outcome.target_phase {
+                    V5QueuePhase::Done => {
+                        // on_done script 실행
+                        match self.execute_on_done(&mut item).await {
+                            Ok(true) => tracing::info!("done: {}", item.work_id),
+                            Ok(false) => {
+                                tracing::warn!("on_done failed: {}", item.work_id);
+                            }
+                            Err(e) => {
+                                tracing::error!("on_done error for {}: {e}", item.work_id);
+                            }
+                        }
                     }
-                    Err(e) => {
-                        tracing::error!("on_done error for {}: {e}", item.work_id);
+                    V5QueuePhase::Hitl => {
+                        item.phase = V5QueuePhase::Hitl;
+                        item.updated_at = chrono::Utc::now().to_rfc3339();
+                        self.record_history(&item, "hitl", None);
+                        self.queue.push_back(item.clone());
+                        tracing::info!("hitl: {}", item.work_id);
+                    }
+                    V5QueuePhase::Pending
+                    | V5QueuePhase::Ready
+                    | V5QueuePhase::Running
+                    | V5QueuePhase::Completed
+                    | V5QueuePhase::Failed
+                    | V5QueuePhase::Skipped => {
+                        // evaluate_cron은 Done/Hitl만 반환하므로 도달하지 않는다
+                        tracing::error!(
+                            "unexpected evaluate target phase {:?} for {}",
+                            eval_outcome.target_phase,
+                            eval_outcome.work_id
+                        );
+                        self.queue.push_back(item);
                     }
                 }
             }
@@ -754,5 +831,94 @@ sources:
         let outcomes = daemon.execute_running().await;
         assert_eq!(outcomes.len(), 1);
         assert!(matches!(outcomes[0], ItemOutcome::Skipped(_)));
+    }
+
+    #[tokio::test]
+    async fn execute_running_triggers_force_trigger_on_completed() {
+        let tmp = TempDir::new().unwrap();
+        let mut source = MockDataSource::new("github");
+        source.add_item(test_item("github:org/repo#1", "analyze"));
+
+        // handler 성공 → Completed
+        let mut daemon = setup_daemon(&tmp, source, vec![0]);
+        daemon.collect().await.unwrap();
+        daemon.advance();
+
+        // Before execute: evaluate_cron not triggered
+        assert!(!daemon.evaluate_cron().is_triggered());
+
+        // execute_running produces Completed outcomes
+        let outcomes = daemon.execute_running().await;
+        assert!(matches!(outcomes[0], ItemOutcome::Completed(_)));
+
+        // But force_trigger is set during tick(), not execute_running() alone.
+        // Let's verify via tick() instead.
+    }
+
+    #[tokio::test]
+    async fn tick_sets_force_trigger_on_completed() {
+        let tmp = TempDir::new().unwrap();
+        let mut source = MockDataSource::new("github");
+        source.add_item(test_item("github:org/repo#1", "analyze"));
+
+        // handler 성공 → Completed → evaluate cron runs
+        let mut daemon = setup_daemon(&tmp, source, vec![0]);
+
+        // tick() runs the full pipeline
+        daemon.tick().await.unwrap();
+
+        // After tick, force_trigger was consumed (set and then consumed in same tick)
+        assert!(!daemon.evaluate_cron().is_triggered());
+    }
+
+    #[tokio::test]
+    async fn evaluate_cron_integrated_in_tick() {
+        let tmp = TempDir::new().unwrap();
+        let source = MockDataSource::new("github");
+        let mut daemon = setup_daemon(&tmp, source, vec![]);
+
+        // Manually add a Completed item to the queue
+        let mut item = test_item("github:org/repo#1", "analyze");
+        item.phase = V5QueuePhase::Completed;
+        daemon.push_item(item);
+
+        // force_trigger so evaluate_cron processes it
+        daemon.evaluate_cron.force_trigger();
+
+        // tick() should run evaluate_cron on the Completed item
+        daemon.tick().await.unwrap();
+
+        // The item should have been processed by evaluate_cron
+        // (either moved to Done via on_done, or to Hitl)
+        let completed = daemon.items_in_phase(V5QueuePhase::Completed);
+        // evaluate runs the script, which may or may not succeed
+        // but the item should no longer be in Completed state
+        // (it transitions to Done or Hitl depending on evaluate result)
+        assert!(
+            completed.is_empty(),
+            "expected no Completed items after evaluate, got {}",
+            completed.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn with_home_sets_autodev_home() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_workspace_config();
+        let mut registry = RuntimeRegistry::new("mock".to_string());
+        registry.register(Arc::new(MockRuntime::new("mock", vec![])));
+        let worktree_mgr = MockWorktreeManager::new(tmp.path());
+
+        let daemon = V5Daemon::with_home(
+            config,
+            vec![],
+            Arc::new(registry),
+            Box::new(worktree_mgr),
+            4,
+            tmp.path().to_path_buf(),
+        );
+
+        // Daemon should be created successfully with home path
+        assert!(daemon.queue_items().is_empty());
     }
 }

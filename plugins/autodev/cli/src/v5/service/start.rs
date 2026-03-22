@@ -39,12 +39,13 @@ pub async fn start_v5(home: &Path, claude: Arc<dyn Claude>, config: WorkspaceCon
         .unwrap_or(1)
         .max(1);
 
-    let mut daemon = V5Daemon::new(
+    let mut daemon = V5Daemon::with_home(
         config,
         vec![Box::new(source)],
         Arc::new(registry),
         Box::new(worktree_mgr),
         max_concurrent,
+        home.to_path_buf(),
     );
 
     daemon.run(10).await;
