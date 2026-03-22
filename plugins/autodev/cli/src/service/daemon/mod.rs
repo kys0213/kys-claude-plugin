@@ -157,6 +157,84 @@ impl Daemon {
         self
     }
 
+    /// 완료된 태스크의 post-processing을 수행한다.
+    ///
+    /// escalation, manager.apply, 로그/토큰 기록, 알림 발송,
+    /// cron force-trigger, spec auto-completion 등 모든 후처리를 포함한다.
+    /// 메인 이벤트 루프와 graceful shutdown 양쪽에서 호출된다.
+    async fn handle_task_result(&mut self, task_result: &TaskResult) {
+        // Escalation: 실패 시 failure_count 증가 → 레벨별 대응
+        let mut escalation_hitl = None;
+        let escalation_retry = if let TaskStatus::Failed(ref msg) = task_result.status {
+            match crate::cli::resolve_repo_id(&self.log_db, &task_result.repo_name) {
+                Ok(repo_id) => {
+                    match escalation::escalate(&self.log_db, &task_result.work_id, &repo_id, msg) {
+                        escalation::EscalationOutcome::Retry => true,
+                        escalation::EscalationOutcome::Remove => false,
+                        escalation::EscalationOutcome::RemoveWithHitl(event, hitl_id) => {
+                            escalation_hitl = Some((event, hitl_id));
+                            false
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("skipping escalation for {}: {e}", task_result.work_id);
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
+        // Retry일 때는 apply(Remove) 건너뛴다 — pending으로 이미 복구됨.
+        if !escalation_retry {
+            self.manager.apply(task_result);
+        }
+
+        for log_entry in &task_result.logs {
+            if let Ok(log_id) = self.log_db.log_insert(log_entry) {
+                let usage = parse_token_usage(&log_id, log_entry);
+                if usage.input_tokens > 0 || usage.output_tokens > 0 {
+                    if let Err(e) = self.log_db.usage_insert(&usage) {
+                        tracing::warn!("failed to record token usage: {e}");
+                    }
+                }
+            }
+        }
+
+        // Notify on task failure (escalation으로 retry되더라도 기록)
+        if let TaskStatus::Failed(ref msg) = task_result.status {
+            let notif = NotificationEvent::from_task_failed(
+                &task_result.work_id,
+                &task_result.repo_name,
+                msg,
+            );
+            dispatch_notification(&self.notifier, &notif).await;
+        }
+
+        // Notify on escalation-generated HITL event
+        if let Some((ref hitl_event, ref hitl_id)) = escalation_hitl {
+            let notif = NotificationEvent::from_hitl_created(hitl_event, Some(hitl_id.clone()));
+            dispatch_notification(&self.notifier, &notif).await;
+        }
+
+        // Force-trigger claw-evaluate on any task completion/failure
+        if let Some(ref cron) = self.cron_engine {
+            cron.force_trigger(crate::cli::cron::CLAW_EVALUATE_JOB);
+        }
+
+        // Auto-check spec completion on successful task completion
+        if let TaskStatus::Completed = task_result.status {
+            let env = crate::core::config::RealEnv;
+            let completable = crate::cli::spec::check_completable_specs(&self.log_db, &env);
+            for (spec_id, hitl_event, hitl_id) in &completable {
+                info!("spec auto-completion triggered for {spec_id}");
+                let notif = NotificationEvent::from_hitl_created(hitl_event, Some(hitl_id.clone()));
+                dispatch_notification(&self.notifier, &notif).await;
+            }
+        }
+    }
+
     /// 메인 이벤트 루프 실행.
     ///
     /// task completion / tick / status heartbeat / shutdown 4개 arm으로 구성.
@@ -181,94 +259,7 @@ impl Daemon {
                                 "task completed: {} - {} (in-flight: {})",
                                 task_result.work_id, task_result.status, self.tracker.total
                             );
-
-                            // Escalation: 실패 시 failure_count 증가 → 레벨별 대응
-                            let mut escalation_hitl = None;
-                            let escalation_retry =
-                                if let TaskStatus::Failed(ref msg) = task_result.status {
-                                    match crate::cli::resolve_repo_id(
-                                        &self.log_db,
-                                        &task_result.repo_name,
-                                    ) {
-                                        Ok(repo_id) => {
-                                            match escalation::escalate(
-                                                &self.log_db,
-                                                &task_result.work_id,
-                                                &repo_id,
-                                                msg,
-                                            ) {
-                                                escalation::EscalationOutcome::Retry => true,
-                                                escalation::EscalationOutcome::Remove => false,
-                                                escalation::EscalationOutcome::RemoveWithHitl(event, hitl_id) => {
-                                                    escalation_hitl = Some((event, hitl_id));
-                                                    false
-                                                }
-                                            }
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                "skipping escalation for {}: {e}",
-                                                task_result.work_id
-                                            );
-                                            false
-                                        }
-                                    }
-                                } else {
-                                    false
-                                };
-
-                            // Retry일 때는 apply(Remove) 건너뛴다 — pending으로 이미 복구됨.
-                            if !escalation_retry {
-                                self.manager.apply(&task_result);
-                            }
-
-                            for log_entry in &task_result.logs {
-                                if let Ok(log_id) = self.log_db.log_insert(log_entry) {
-                                    let usage =
-                                        parse_token_usage(&log_id, log_entry);
-                                    if usage.input_tokens > 0 || usage.output_tokens > 0 {
-                                        if let Err(e) = self.log_db.usage_insert(&usage) {
-                                            tracing::warn!("failed to record token usage: {e}");
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Notify on task failure (escalation으로 retry되더라도 기록)
-                            if let TaskStatus::Failed(ref msg) = task_result.status {
-                                let notif = NotificationEvent::from_task_failed(
-                                    &task_result.work_id,
-                                    &task_result.repo_name,
-                                    msg,
-                                );
-                                dispatch_notification(&self.notifier, &notif).await;
-                            }
-
-                            // Notify on escalation-generated HITL event
-                            if let Some((ref hitl_event, ref hitl_id)) = escalation_hitl {
-                                let notif = NotificationEvent::from_hitl_created(hitl_event, Some(hitl_id.clone()));
-                                dispatch_notification(&self.notifier, &notif).await;
-                            }
-
-                            // Force-trigger claw-evaluate on any task completion/failure
-                            if let Some(ref cron) = self.cron_engine {
-                                cron.force_trigger(crate::cli::cron::CLAW_EVALUATE_JOB);
-                            }
-
-                            // Auto-check spec completion on successful task completion
-                            if let TaskStatus::Completed = task_result.status {
-                                let env = crate::core::config::RealEnv;
-                                let completable =
-                                    crate::cli::spec::check_completable_specs(&self.log_db, &env);
-                                for (spec_id, hitl_event, hitl_id) in &completable {
-                                    info!("spec auto-completion triggered for {spec_id}");
-                                    let notif = NotificationEvent::from_hitl_created(
-                                        hitl_event,
-                                        Some(hitl_id.clone()),
-                                    );
-                                    dispatch_notification(&self.notifier, &notif).await;
-                                }
-                            }
+                            self.handle_task_result(&task_result).await;
                         }
                         Err(e) => {
                             tracing::error!("spawned task panicked: {e}");
@@ -313,7 +304,7 @@ impl Daemon {
             }
         }
 
-        // Wait for in-flight tasks to complete (with escalation + notification)
+        // Wait for in-flight tasks to complete (with full post-processing)
         if !join_set.is_empty() {
             info!("waiting for {} in-flight tasks...", join_set.len());
             while let Some(result) = join_set.join_next().await {
@@ -324,77 +315,7 @@ impl Daemon {
                             "shutdown drain: task completed: {} - {}",
                             task_result.work_id, task_result.status
                         );
-
-                        // Escalation: same logic as the main loop
-                        let mut escalation_hitl = None;
-                        let escalation_retry = if let TaskStatus::Failed(ref msg) =
-                            task_result.status
-                        {
-                            match crate::cli::resolve_repo_id(&self.log_db, &task_result.repo_name)
-                            {
-                                Ok(repo_id) => {
-                                    match escalation::escalate(
-                                        &self.log_db,
-                                        &task_result.work_id,
-                                        &repo_id,
-                                        msg,
-                                    ) {
-                                        escalation::EscalationOutcome::Retry => true,
-                                        escalation::EscalationOutcome::Remove => false,
-                                        escalation::EscalationOutcome::RemoveWithHitl(
-                                            event,
-                                            hitl_id,
-                                        ) => {
-                                            escalation_hitl = Some((event, hitl_id));
-                                            false
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "skipping escalation for {}: {e}",
-                                        task_result.work_id
-                                    );
-                                    false
-                                }
-                            }
-                        } else {
-                            false
-                        };
-
-                        if !escalation_retry {
-                            self.manager.apply(&task_result);
-                        }
-
-                        for log_entry in &task_result.logs {
-                            if let Ok(log_id) = self.log_db.log_insert(log_entry) {
-                                let usage = parse_token_usage(&log_id, log_entry);
-                                if usage.input_tokens > 0 || usage.output_tokens > 0 {
-                                    if let Err(e) = self.log_db.usage_insert(&usage) {
-                                        tracing::warn!("failed to record token usage: {e}");
-                                    }
-                                }
-                            }
-                        }
-
-                        // Notify on task failure
-                        if let TaskStatus::Failed(ref msg) = task_result.status {
-                            let notif = NotificationEvent::from_task_failed(
-                                &task_result.work_id,
-                                &task_result.repo_name,
-                                msg,
-                            );
-                            dispatch_notification(&self.notifier, &notif).await;
-                        }
-
-                        // Notify on escalation-generated HITL event
-                        if let Some((ref hitl_event, ref hitl_id)) = escalation_hitl {
-                            let notif = NotificationEvent::from_hitl_created(
-                                hitl_event,
-                                Some(hitl_id.clone()),
-                            );
-                            dispatch_notification(&self.notifier, &notif).await;
-                        }
+                        self.handle_task_result(&task_result).await;
                     }
                     Err(e) => {
                         tracing::error!("shutdown drain: spawned task panicked: {e}");
