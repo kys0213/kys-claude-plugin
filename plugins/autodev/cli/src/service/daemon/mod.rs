@@ -120,6 +120,7 @@ pub struct Daemon {
     cron_engine: Option<CronEngine>,
     notifier: Option<notifiers::dispatcher::NotificationDispatcher>,
     shutdown_drain_timeout_secs: u64,
+    escalation_config: config::models::EscalationConfig,
 }
 
 impl Daemon {
@@ -133,6 +134,7 @@ impl Daemon {
         status_path: PathBuf,
         tick_interval_secs: u64,
         shutdown_drain_timeout_secs: u64,
+        escalation_config: config::models::EscalationConfig,
     ) -> Self {
         Self {
             manager,
@@ -145,6 +147,7 @@ impl Daemon {
             cron_engine: None,
             notifier: None,
             shutdown_drain_timeout_secs,
+            escalation_config,
         }
     }
 
@@ -172,7 +175,13 @@ impl Daemon {
         let escalation_retry = if let TaskStatus::Failed(ref msg) = task_result.status {
             match crate::cli::resolve_repo_id(&self.log_db, &task_result.repo_name) {
                 Ok(repo_id) => {
-                    match escalation::escalate(&self.log_db, &task_result.work_id, &repo_id, msg) {
+                    match escalation::escalate_with_config(
+                        &self.log_db,
+                        &task_result.work_id,
+                        &repo_id,
+                        msg,
+                        &self.escalation_config,
+                    ) {
                         escalation::EscalationOutcome::Retry => true,
                         escalation::EscalationOutcome::Remove => false,
                         escalation::EscalationOutcome::RemoveWithHitl(event, hitl_id) => {
@@ -625,6 +634,7 @@ pub async fn start(
         status_path,
         cfg.daemon.tick_interval_secs,
         cfg.daemon.shutdown_drain_timeout_secs,
+        cfg.escalation.clone(),
     )
     .with_cron_engine(cron_engine);
 
