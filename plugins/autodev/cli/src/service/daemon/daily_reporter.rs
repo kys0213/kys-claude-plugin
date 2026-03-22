@@ -115,7 +115,7 @@ impl DailyReporter for DefaultDailyReporter {
                 );
 
                 let ws = Workspace::new(&*self.git, &*self.env);
-                if let Ok(enabled) = WorkspaceRepository::repo_find_enabled(&self.db) {
+                if let Ok(enabled) = self.db.workspace_find_enabled() {
                     if let Some(er) = enabled.first() {
                         if let Ok(base) = ws.ensure_cloned(&er.url, &er.name).await {
                             crate::service::tasks::knowledge::daily::enrich_with_cross_analysis(
