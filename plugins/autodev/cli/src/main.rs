@@ -767,7 +767,7 @@ async fn main() -> Result<()> {
     // infrastructure 구현체 생성 (프로덕션)
     let gh = RealGh;
     let git = RealGit;
-    let claude = RealClaude;
+    let claude = RealClaude::with_timeout(cfg.daemon.task_timeout_secs);
     let sw = RealSuggestWorkflow;
 
     match cli.command {

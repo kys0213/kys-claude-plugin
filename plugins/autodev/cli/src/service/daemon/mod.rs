@@ -119,9 +119,11 @@ pub struct Daemon {
     tick_interval_secs: u64,
     cron_engine: Option<CronEngine>,
     notifier: Option<notifiers::dispatcher::NotificationDispatcher>,
+    shutdown_drain_timeout_secs: u64,
 }
 
 impl Daemon {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         manager: Box<dyn TaskManager>,
         runner: Arc<dyn TaskRunner>,
@@ -130,6 +132,7 @@ impl Daemon {
         log_db: Database,
         status_path: PathBuf,
         tick_interval_secs: u64,
+        shutdown_drain_timeout_secs: u64,
     ) -> Self {
         Self {
             manager,
@@ -141,6 +144,7 @@ impl Daemon {
             tick_interval_secs,
             cron_engine: None,
             notifier: None,
+            shutdown_drain_timeout_secs,
         }
     }
 
@@ -309,24 +313,56 @@ impl Daemon {
             }
         }
 
-        // Wait for in-flight tasks to complete (with full post-processing)
+        // Wait for in-flight tasks to complete (with timeout + second SIGINT support)
         if !join_set.is_empty() {
-            info!("waiting for {} in-flight tasks...", join_set.len());
-            while let Some(result) = join_set.join_next().await {
-                match result {
-                    Ok(task_result) => {
-                        self.tracker.release(&task_result.repo_name);
-                        info!(
-                            "shutdown drain: task completed: {} - {}",
-                            task_result.work_id, task_result.status
-                        );
-                        self.handle_task_result(&task_result).await;
-                    }
-                    Err(e) => {
-                        tracing::error!("shutdown drain: spawned task panicked: {e}");
-                        self.tracker.total = self.tracker.total.saturating_sub(1);
+            let remaining = join_set.len();
+            let drain_timeout = std::time::Duration::from_secs(self.shutdown_drain_timeout_secs);
+            info!(
+                "waiting for {} in-flight tasks (drain timeout={}s)...",
+                remaining, self.shutdown_drain_timeout_secs
+            );
+
+            let drain_result = tokio::time::timeout(drain_timeout, async {
+                loop {
+                    tokio::select! {
+                        result = join_set.join_next() => {
+                            match result {
+                                Some(Ok(task_result)) => {
+                                    self.tracker.release(&task_result.repo_name);
+                                    info!(
+                                        "shutdown drain: task completed: {} - {}",
+                                        task_result.work_id, task_result.status
+                                    );
+                                    self.handle_task_result(&task_result).await;
+                                }
+                                Some(Err(e)) => {
+                                    tracing::error!("shutdown drain: spawned task panicked: {e}");
+                                    self.tracker.total = self.tracker.total.saturating_sub(1);
+                                }
+                                None => break, // all tasks completed
+                            }
+                        }
+                        // 두 번째 SIGINT: 즉시 종료
+                        _ = tokio::signal::ctrl_c() => {
+                            tracing::warn!(
+                                "received second SIGINT, force-aborting {} remaining tasks",
+                                join_set.len()
+                            );
+                            join_set.abort_all();
+                            break;
+                        }
                     }
                 }
+            })
+            .await;
+
+            if drain_result.is_err() {
+                tracing::warn!(
+                    "shutdown drain timed out after {}s, aborting {} remaining tasks",
+                    self.shutdown_drain_timeout_secs,
+                    join_set.len()
+                );
+                join_set.abort_all();
             }
         }
 
@@ -588,6 +624,7 @@ pub async fn start(
         log_db,
         status_path,
         cfg.daemon.tick_interval_secs,
+        cfg.daemon.shutdown_drain_timeout_secs,
     )
     .with_cron_engine(cron_engine);
 
