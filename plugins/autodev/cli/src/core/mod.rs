@@ -4,6 +4,7 @@ pub mod collector;
 pub mod completer;
 pub mod config;
 pub mod datasource;
+pub mod dependency;
 pub mod handler;
 pub mod labels;
 pub mod lifecycle;
