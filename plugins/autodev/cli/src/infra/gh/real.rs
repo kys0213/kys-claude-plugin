@@ -410,6 +410,98 @@ impl Gh for RealGh {
         }
     }
 
+    async fn issue_close(&self, repo_name: &str, number: i64, host: Option<&str>) -> bool {
+        let mut args = vec![
+            "api".to_string(),
+            format!("repos/{repo_name}/issues/{number}"),
+            "--method".to_string(),
+            "PATCH".to_string(),
+            "--silent".to_string(),
+            "-f".to_string(),
+            "state=closed".to_string(),
+        ];
+
+        if let Some(h) = host {
+            args.push("--hostname".to_string());
+            args.push(h.to_string());
+        }
+
+        tracing::debug!("[gh:issue_close] >>> {repo_name}#{number}");
+        let start = Instant::now();
+
+        match tokio::process::Command::new("gh")
+            .args(&args)
+            .output()
+            .await
+        {
+            Ok(output) => {
+                let elapsed = start.elapsed();
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!(
+                        "[gh:issue_close] <<< FAILED (exit={}, {}ms): {}",
+                        output.status.code().unwrap_or(-1),
+                        elapsed.as_millis(),
+                        stderr.trim()
+                    );
+                }
+                output.status.success()
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[gh:issue_close] <<< ERROR ({}ms): {e}",
+                    start.elapsed().as_millis()
+                );
+                false
+            }
+        }
+    }
+
+    async fn pr_merge(&self, repo_name: &str, number: i64, host: Option<&str>) -> bool {
+        let mut args = vec![
+            "api".to_string(),
+            format!("repos/{repo_name}/pulls/{number}/merge"),
+            "--method".to_string(),
+            "PUT".to_string(),
+            "--silent".to_string(),
+        ];
+
+        if let Some(h) = host {
+            args.push("--hostname".to_string());
+            args.push(h.to_string());
+        }
+
+        tracing::debug!("[gh:pr_merge] >>> {repo_name}#{number}");
+        let start = Instant::now();
+
+        match tokio::process::Command::new("gh")
+            .args(&args)
+            .output()
+            .await
+        {
+            Ok(output) => {
+                let elapsed = start.elapsed();
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::warn!(
+                        "[gh:pr_merge] <<< FAILED (exit={}, {}ms): {}",
+                        output.status.code().unwrap_or(-1),
+                        elapsed.as_millis(),
+                        stderr.trim()
+                    );
+                }
+                output.status.success()
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[gh:pr_merge] <<< ERROR ({}ms): {e}",
+                    start.elapsed().as_millis()
+                );
+                false
+            }
+        }
+    }
+
     async fn pr_review(
         &self,
         repo_name: &str,
