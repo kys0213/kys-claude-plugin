@@ -365,7 +365,7 @@ daemon:
   task_timeout_secs: 3600
   shutdown_drain_timeout_secs: 60
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(cfg.daemon.task_timeout_secs, 3600);
         assert_eq!(cfg.daemon.shutdown_drain_timeout_secs, 60);
     }
@@ -376,7 +376,7 @@ daemon:
 daemon:
   log_level: "info"
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(cfg.daemon.task_timeout_secs, 1800);
         assert_eq!(cfg.daemon.shutdown_drain_timeout_secs, 30);
     }
@@ -387,7 +387,7 @@ daemon:
 daemon:
   log_level: "debug"
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(cfg.daemon.log_level, "debug");
         // 나머지 필드는 기본값 유지
         assert_eq!(cfg.daemon.log_dir, "logs");
@@ -399,7 +399,7 @@ daemon:
 daemon:
   log_dir: "/var/log/autodev"
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(cfg.daemon.log_level, "info");
         assert_eq!(cfg.daemon.log_dir, "/var/log/autodev");
     }
@@ -420,7 +420,7 @@ workflows:
   review:
     max_iterations: 5
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(cfg.workflows.review.max_iterations, 5);
         assert!(cfg.workflows.review.command.is_none());
     }
@@ -435,7 +435,7 @@ workflows:
     command: /review:multi-review
     max_iterations: 3
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(
             cfg.workflows.analyze.command.as_deref(),
             Some("/review:multi-analyze")
@@ -456,7 +456,7 @@ sources:
     issue_concurrency: 2
     pr_concurrency: 1
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(cfg.sources.github.concurrency, 3);
         assert_eq!(cfg.sources.github.issue_concurrency, 2);
         assert_eq!(cfg.sources.github.pr_concurrency, 1);
@@ -469,7 +469,7 @@ sources:
   github:
     model: opus
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(cfg.sources.github.concurrency, 0);
     }
 
@@ -488,7 +488,7 @@ workflow:
   issue: builtin
   pr: builtin
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(cfg.sources.github.model, "opus");
         // workflows uses defaults (v1 keys ignored)
         assert!(cfg.workflows.analyze.command.is_none());
@@ -517,7 +517,7 @@ workflows:
     agent: autodev:pr-reviewer
     max_iterations: 3
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(
             cfg.workflows.analyze.command.as_deref(),
             Some("/custom-analyze")
@@ -543,7 +543,7 @@ claw:
   schedule_interval_secs: 30
   gap_detection_interval_secs: 1800
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert!(cfg.claw.enabled);
         assert_eq!(cfg.claw.recovery_interval_secs, 60);
         assert_eq!(cfg.claw.schedule_interval_secs, 30);
@@ -556,7 +556,7 @@ claw:
 daemon:
   log_level: "info"
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert!(!cfg.claw.enabled);
         assert_eq!(cfg.claw.recovery_interval_secs, 120);
         assert_eq!(cfg.claw.schedule_interval_secs, 60);
@@ -569,7 +569,7 @@ daemon:
 claw:
   enabled: true
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert!(cfg.claw.enabled);
         assert_eq!(cfg.claw.recovery_interval_secs, 120);
         assert_eq!(cfg.claw.schedule_interval_secs, 60);
@@ -598,7 +598,7 @@ claw:
 daemon:
   log_level: "info"
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(cfg.escalation.levels.len(), 5);
         assert_eq!(cfg.escalation.action_for(1), EscalationAction::Retry);
         assert!(cfg.escalation.on_fail.is_empty());
@@ -618,7 +618,7 @@ escalation:
     - "gh issue comment $ISSUE --body 'task failed'"
     - "echo 'notification sent'"
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(cfg.escalation.levels.len(), 5);
         assert_eq!(cfg.escalation.action_for(1), EscalationAction::Retry);
         assert_eq!(
@@ -640,7 +640,7 @@ escalation:
     2: retry
     3: skip
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(cfg.escalation.levels.len(), 3);
         assert_eq!(cfg.escalation.action_for(1), EscalationAction::Retry);
         assert_eq!(cfg.escalation.action_for(2), EscalationAction::Retry);
@@ -656,7 +656,7 @@ escalation:
   on_fail:
     - "echo fail"
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         // levels should use defaults
         assert_eq!(cfg.escalation.levels.len(), 5);
         assert_eq!(cfg.escalation.on_fail.len(), 1);
@@ -701,7 +701,7 @@ escalation:
 v5:
   enabled: true
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert!(cfg.v5.enabled);
     }
 
@@ -711,7 +711,7 @@ v5:
 daemon:
   log_level: "info"
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert!(!cfg.v5.enabled);
     }
 }

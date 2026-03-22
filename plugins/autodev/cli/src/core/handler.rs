@@ -412,14 +412,14 @@ mod tests {
     #[test]
     fn parse_action_prompt_from_yaml() {
         let yaml = r#"prompt: "Analyze this issue""#;
-        let action: Action = serde_yaml::from_str(yaml).unwrap();
+        let action: Action = serde_yml::from_str(yaml).unwrap();
         assert_eq!(action, Action::prompt("Analyze this issue"));
     }
 
     #[test]
     fn parse_action_script_from_yaml() {
         let yaml = r#"script: "echo hello""#;
-        let action: Action = serde_yaml::from_str(yaml).unwrap();
+        let action: Action = serde_yml::from_str(yaml).unwrap();
         assert_eq!(action, Action::script("echo hello"));
     }
 
@@ -436,7 +436,7 @@ on_done:
 on_fail:
   - script: "echo failed"
 "#;
-        let state: StateConfig = serde_yaml::from_str(yaml).unwrap();
+        let state: StateConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(state.trigger.label.as_deref(), Some("autodev:analyze"));
         assert_eq!(state.handlers.len(), 1);
         assert!(state.handlers[0].is_prompt());
@@ -473,7 +473,7 @@ escalation:
   4: skip
   5: replan
 "#;
-        let config: SourceConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: SourceConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(config.url.as_deref(), Some("https://github.com/org/repo"));
         assert_eq!(config.scan_interval_secs, Some(300));
         assert_eq!(config.concurrency, Some(1));
@@ -499,7 +499,7 @@ github:
       handlers:
         - prompt: "Analyze"
 "#;
-        let sources: WorkspaceSources = serde_yaml::from_str(yaml).unwrap();
+        let sources: WorkspaceSources = serde_yml::from_str(yaml).unwrap();
         assert!(sources.github.is_some());
         let github = sources.github.unwrap();
         assert!(github.state("analyze").is_some());
@@ -517,7 +517,7 @@ handlers:
 on_done:
   - script: "echo done"
 "#;
-        let state: StateConfig = serde_yaml::from_str(yaml).unwrap();
+        let state: StateConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(state.on_enter.len(), 1);
         assert!(state.on_enter[0].is_script());
     }
@@ -530,7 +530,7 @@ script: |
   ISSUE=$(echo $CTX | jq -r '.issue.number')
   gh issue edit $ISSUE --add-label "autodev:implement"
 "#;
-        let action: Action = serde_yaml::from_str(yaml).unwrap();
+        let action: Action = serde_yml::from_str(yaml).unwrap();
         match &action {
             Action::Script { script } => {
                 assert!(script.contains("autodev context"));

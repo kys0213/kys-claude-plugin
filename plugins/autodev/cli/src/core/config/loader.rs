@@ -70,7 +70,7 @@ fn load_raw_yaml_from_dir(dir: &Path) -> Option<serde_json::Value> {
 /// 미지정 필드는 Value에 존재하지 않아 머지 시 base를 보존
 fn load_raw_yaml(path: &Path) -> Option<serde_json::Value> {
     let content = std::fs::read_to_string(path).ok()?;
-    serde_yaml::from_str(&content).ok()
+    serde_yml::from_str(&content).ok()
 }
 
 /// JSON Value 딥머지: over에 명시적으로 존재하는 값만 base를 덮어씀
