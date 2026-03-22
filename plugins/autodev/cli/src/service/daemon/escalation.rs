@@ -143,9 +143,10 @@ pub fn escalate_with_config(
                 situation: format!("Task failed {new_count} times — human intervention required"),
                 context: failure_msg.to_string(),
                 options: vec![
+                    "Done — approve and complete this task".to_string(),
                     "Retry this task".to_string(),
                     "Skip and move on".to_string(),
-                    "Reassign or replan".to_string(),
+                    "Replan — update spec and try differently".to_string(),
                 ],
             };
             create_hitl_or_remove(db, work_id, hitl_event)
@@ -163,9 +164,9 @@ pub fn escalate_with_config(
                      Last error: {failure_msg}"
                 ),
                 options: vec![
-                    "Replan: update spec and decompose differently".to_string(),
-                    "Force retry with current approach".to_string(),
-                    "Abandon this task".to_string(),
+                    "Replan — update spec and decompose differently".to_string(),
+                    "Retry with current approach".to_string(),
+                    "Skip — abandon this task".to_string(),
                 ],
             };
             create_hitl_or_remove(db, work_id, hitl_event)

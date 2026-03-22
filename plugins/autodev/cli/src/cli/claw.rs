@@ -360,6 +360,148 @@ autodev decisions show <id> --json
 ```
 "#;
 
+/// Claw 세션 진입 시 시스템 상태 요약을 생성한다.
+///
+/// 스펙의 진입 경험:
+///   1. 상태 수집 (daemon, queue, hitl, failed)
+///   2. 요약 표시
+///   3. 자연어 대화 시작
+pub fn claw_session_summary(
+    db: &crate::infra::db::Database,
+    env: &dyn crate::core::config::Env,
+) -> Result<String> {
+    use crate::core::config;
+    use crate::core::repository::*;
+
+    let home = config::autodev_home(env);
+    let running = crate::service::daemon::pid::is_running(&home);
+
+    let mut output = String::new();
+
+    // Daemon status
+    if running {
+        output.push_str("daemon: running\n");
+    } else {
+        output.push_str("daemon: stopped\n");
+    }
+    output.push('\n');
+
+    // Repo summary
+    let repos = db.repo_status_summary()?;
+    if !repos.is_empty() {
+        output.push_str("Workspaces:\n");
+        for repo in &repos {
+            let icon = if repo.enabled { "●" } else { "○" };
+            // Count active queue items for this repo
+            let items = db.queue_list_items(Some(&repo.name))?;
+            let active: Vec<_> = items
+                .iter()
+                .filter(|i| {
+                    i.phase != crate::core::models::QueuePhase::Done
+                        && i.phase != crate::core::models::QueuePhase::Skipped
+                })
+                .collect();
+            if active.is_empty() {
+                output.push_str(&format!("  {icon} {} — queue: idle\n", repo.name));
+            } else {
+                let phase_counts = count_phases(&active);
+                output.push_str(&format!(
+                    "  {icon} {} — queue: {}\n",
+                    repo.name, phase_counts
+                ));
+            }
+        }
+        output.push('\n');
+    }
+
+    // HITL pending
+    let hitl_pending = db.hitl_pending_count(None)?;
+    if hitl_pending > 0 {
+        output.push_str(&format!("HITL pending: {} event(s)\n", hitl_pending));
+        let events = db.hitl_list(None)?;
+        for event in events
+            .iter()
+            .filter(|e| e.status == crate::core::models::HitlStatus::Pending)
+            .take(5)
+        {
+            let situation = if event.situation.len() > 60 {
+                format!("{}...", &event.situation[..57])
+            } else {
+                event.situation.clone()
+            };
+            output.push_str(&format!("  {} — {}\n", &event.id[..8], situation));
+        }
+        output.push('\n');
+    }
+
+    // Failed items (queue items with failure_count > 0 that are still active)
+    let all_items = db.queue_list_items(None)?;
+    let failed: Vec<_> = all_items
+        .iter()
+        .filter(|i| {
+            i.failure_count > 0
+                && i.phase != crate::core::models::QueuePhase::Done
+                && i.phase != crate::core::models::QueuePhase::Skipped
+        })
+        .collect();
+    if !failed.is_empty() {
+        output.push_str(&format!("Failed: {} item(s)\n", failed.len()));
+        for item in failed.iter().take(5) {
+            let title = item.title.as_deref().unwrap_or("-");
+            output.push_str(&format!(
+                "  {} — {} (failures: {})\n",
+                item.work_id, title, item.failure_count
+            ));
+        }
+        output.push('\n');
+    }
+
+    if hitl_pending == 0 && failed.is_empty() {
+        output.push_str("No pending HITL events or failed items.\n\n");
+    }
+
+    output.push_str("What would you like to do?\n");
+
+    Ok(output)
+}
+
+/// 활성 아이템의 phase 카운트를 문자열로 포맷한다.
+fn count_phases(items: &[&crate::core::models::QueueItemRow]) -> String {
+    use crate::core::models::QueuePhase;
+
+    let mut pending = 0;
+    let mut ready = 0;
+    let mut running = 0;
+
+    for item in items {
+        match item.phase {
+            QueuePhase::Pending => pending += 1,
+            QueuePhase::Ready => ready += 1,
+            QueuePhase::Running => running += 1,
+            QueuePhase::Done | QueuePhase::Completed => {}
+            QueuePhase::Skipped => {}
+            QueuePhase::Hitl => {}
+            QueuePhase::Failed => {}
+        }
+    }
+
+    let mut parts = Vec::new();
+    if pending > 0 {
+        parts.push(format!("{pending}P"));
+    }
+    if ready > 0 {
+        parts.push(format!("{ready}R"));
+    }
+    if running > 0 {
+        parts.push(format!("{running}Run"));
+    }
+    if parts.is_empty() {
+        "idle".to_string()
+    } else {
+        parts.join(" ")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,5 +537,160 @@ mod tests {
     fn validate_h2_heading_counts() {
         let warnings = validate_rule_content("## Subsection\n\nContent here");
         assert!(warnings.is_empty());
+    }
+
+    // ─── claw_session_summary tests ───
+
+    struct TestEnv {
+        home: String,
+    }
+
+    impl crate::core::config::Env for TestEnv {
+        fn var(&self, key: &str) -> std::result::Result<String, std::env::VarError> {
+            match key {
+                "HOME" | "AUTODEV_HOME" => Ok(self.home.clone()),
+                _ => Err(std::env::VarError::NotPresent),
+            }
+        }
+    }
+
+    fn setup_test_db(dir: &std::path::Path) -> crate::infra::db::Database {
+        let db_path = dir.join("test.db");
+        let db = crate::infra::db::Database::open(&db_path).unwrap();
+        db.initialize().unwrap();
+        db
+    }
+
+    #[test]
+    fn session_summary_empty_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = setup_test_db(tmp.path());
+        let env = TestEnv {
+            home: tmp.path().to_string_lossy().to_string(),
+        };
+
+        let summary = claw_session_summary(&db, &env).unwrap();
+        assert!(summary.contains("daemon: stopped"));
+        assert!(summary.contains("No pending HITL"));
+        assert!(summary.contains("What would you like to do?"));
+    }
+
+    #[test]
+    fn session_summary_with_hitl_pending() {
+        use crate::core::models::*;
+        use crate::core::repository::*;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let db = setup_test_db(tmp.path());
+        let env = TestEnv {
+            home: tmp.path().to_string_lossy().to_string(),
+        };
+
+        let repo_id = db
+            .repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
+        db.hitl_create(&NewHitlEvent {
+            repo_id,
+            spec_id: None,
+            work_id: None,
+            severity: HitlSeverity::Medium,
+            situation: "Test HITL event".to_string(),
+            context: String::new(),
+            options: vec!["Approve".to_string()],
+        })
+        .unwrap();
+
+        let summary = claw_session_summary(&db, &env).unwrap();
+        assert!(summary.contains("HITL pending: 1 event(s)"));
+        assert!(summary.contains("Test HITL"));
+    }
+
+    #[test]
+    fn session_summary_with_failed_items() {
+        use crate::core::models::*;
+        use crate::core::phase::TaskKind;
+        use crate::core::repository::*;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let db = setup_test_db(tmp.path());
+        let env = TestEnv {
+            home: tmp.path().to_string_lossy().to_string(),
+        };
+
+        let repo_id = db
+            .repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
+
+        db.queue_upsert(&QueueItemRow {
+            work_id: "issue-99".to_string(),
+            repo_id,
+            queue_type: QueueType::Issue,
+            phase: QueuePhase::Running,
+            title: Some("Failing task".to_string()),
+            skip_reason: None,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            task_kind: TaskKind::Implement,
+            github_number: 99,
+            metadata_json: None,
+            failure_count: 3,
+            escalation_level: 3,
+        })
+        .unwrap();
+
+        let summary = claw_session_summary(&db, &env).unwrap();
+        assert!(summary.contains("Failed: 1 item(s)"));
+        assert!(summary.contains("issue-99"));
+        assert!(summary.contains("failures: 3"));
+    }
+
+    // ─── count_phases tests ───
+
+    #[test]
+    fn count_phases_mixed() {
+        use crate::core::models::*;
+        use crate::core::phase::TaskKind;
+
+        let items = vec![
+            QueueItemRow {
+                work_id: "a".to_string(),
+                repo_id: "r".to_string(),
+                queue_type: QueueType::Issue,
+                phase: QueuePhase::Pending,
+                title: None,
+                skip_reason: None,
+                created_at: String::new(),
+                updated_at: String::new(),
+                task_kind: TaskKind::Implement,
+                github_number: 1,
+                metadata_json: None,
+                failure_count: 0,
+                escalation_level: 0,
+            },
+            QueueItemRow {
+                work_id: "b".to_string(),
+                repo_id: "r".to_string(),
+                queue_type: QueueType::Issue,
+                phase: QueuePhase::Running,
+                title: None,
+                skip_reason: None,
+                created_at: String::new(),
+                updated_at: String::new(),
+                task_kind: TaskKind::Implement,
+                github_number: 2,
+                metadata_json: None,
+                failure_count: 0,
+                escalation_level: 0,
+            },
+        ];
+        let refs: Vec<&QueueItemRow> = items.iter().collect();
+        let result = count_phases(&refs);
+        assert_eq!(result, "1P 1Run");
+    }
+
+    #[test]
+    fn count_phases_empty() {
+        let items: Vec<&crate::core::models::QueueItemRow> = vec![];
+        assert_eq!(count_phases(&items), "idle");
     }
 }

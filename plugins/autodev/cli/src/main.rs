@@ -1064,8 +1064,8 @@ async fn main() -> Result<()> {
                 choice,
                 message,
             } => {
-                let output = client::hitl::respond(&db, &id, choice, message.as_deref())?;
-                println!("{output}");
+                let result = client::hitl::respond(&db, &id, choice, message.as_deref())?;
+                println!("{}", result.output);
 
                 // Post-response processing
                 use autodev::core::repository::HitlRepository;
