@@ -657,6 +657,63 @@ impl std::str::FromStr for HitlStatus {
     }
 }
 
+/// HITL respond 시 선택한 액션.
+///
+/// 스펙의 응답 경로:
+///   "done"   → on_done script 실행 → Done
+///   "retry"  → 새 아이템 생성 → Pending
+///   "skip"   → Skipped (worktree 정리)
+///   "replan" → Claw에게 스펙 수정 제안 위임
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HitlRespondAction {
+    Done,
+    Retry,
+    Skip,
+    Replan,
+}
+
+impl HitlRespondAction {
+    /// HITL 이벤트 옵션 문자열에서 액션을 추출한다.
+    ///
+    /// 옵션 텍스트에 키워드가 포함되면 매칭:
+    ///   "done" / "complete" / "approve" → Done
+    ///   "retry" / "재시도" → Retry
+    ///   "skip" / "abandon" / "move on" → Skip
+    ///   "replan" / "revise" / "update spec" → Replan
+    pub fn from_option_text(text: &str) -> Option<Self> {
+        let lower = text.to_lowercase();
+        if lower.contains("done")
+            || lower.contains("complete")
+            || lower.contains("approve")
+            || lower.contains("merge")
+        {
+            Some(Self::Done)
+        } else if lower.contains("retry") || lower.contains("force retry") {
+            Some(Self::Retry)
+        } else if lower.contains("skip") || lower.contains("abandon") || lower.contains("move on") {
+            Some(Self::Skip)
+        } else if lower.contains("replan")
+            || lower.contains("revise")
+            || lower.contains("update spec")
+        {
+            Some(Self::Replan)
+        } else {
+            None
+        }
+    }
+}
+
+impl fmt::Display for HitlRespondAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HitlRespondAction::Done => write!(f, "done"),
+            HitlRespondAction::Retry => write!(f, "retry"),
+            HitlRespondAction::Skip => write!(f, "skip"),
+            HitlRespondAction::Replan => write!(f, "replan"),
+        }
+    }
+}
+
 /// HITL 타임아웃 만료 시 수행할 액션.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum TimeoutAction {
