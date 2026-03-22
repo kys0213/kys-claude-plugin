@@ -12,6 +12,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use super::AGENT_SYSTEM_PROMPT;
+use crate::core::branch_naming;
 use crate::core::config::ConfigLoader;
 use crate::core::labels;
 use crate::core::models::{NewConsumerLog, QueuePhase, QueueType};
@@ -89,7 +90,10 @@ impl ImplementTask {
         config: Arc<dyn ConfigLoader>,
         item: QueueItem,
     ) -> Self {
-        let task_id = format!("issue-{}", item.github_number);
+        let issue_labels = item.labels().unwrap_or(&[]).to_vec();
+        let branch =
+            branch_naming::generate_branch_name(item.github_number, &item.title, &issue_labels);
+        let task_id = branch_naming::sanitize_for_directory(&branch);
         Self {
             workspace,
             gh,
@@ -103,7 +107,12 @@ impl ImplementTask {
     }
 
     fn head_branch(&self) -> String {
-        format!("autodev/issue-{}", self.item.github_number)
+        let issue_labels = self.item.labels().unwrap_or(&[]).to_vec();
+        branch_naming::generate_branch_name(
+            self.item.github_number,
+            &self.item.title,
+            &issue_labels,
+        )
     }
 }
 
@@ -560,8 +569,9 @@ mod tests {
 
         let wts = ws.worktrees.lock().unwrap();
         assert_eq!(wts.len(), 1);
-        assert_eq!(wts[0].1, "issue-42");
-        assert_eq!(wts[0].2, Some("autodev/issue-42".to_string()));
+        // Convention-based: "Fix login bug" with no labels → feat/42-fix-login-bug
+        assert_eq!(wts[0].1, "feat-42-fix-login-bug");
+        assert_eq!(wts[0].2, Some("feat/42-fix-login-bug".to_string()));
     }
 
     // ═══════════════════════════════════════════════
@@ -701,12 +711,13 @@ mod tests {
     async fn after_uses_find_existing_pr_fallback() {
         let gh = Arc::new(MockGh::new());
         // Set up mock paginate response for find_existing_pr
+        // Convention branch: "Fix login bug" with no labels → feat/42-fix-login-bug
         gh.set_paginate(
             "org/repo",
             "pulls",
             serde_json::to_vec(&serde_json::json!([{
                 "number": 55,
-                "head": {"ref": "autodev/issue-42"}
+                "head": {"ref": "feat/42-fix-login-bug"}
             }]))
             .unwrap(),
         );
@@ -935,12 +946,13 @@ mod tests {
     #[tokio::test]
     async fn after_fallback_accepts_correct_branch_pr() {
         let gh = Arc::new(MockGh::new());
+        // Convention branch: "Fix login bug" with no labels → feat/42-fix-login-bug
         gh.set_paginate(
             "org/repo",
             "pulls",
             serde_json::to_vec(&serde_json::json!([{
                 "number": 88,
-                "head": {"ref": "autodev/issue-42"}
+                "head": {"ref": "feat/42-fix-login-bug"}
             }]))
             .unwrap(),
         );
@@ -1066,9 +1078,11 @@ mod tests {
             .iter()
             .find(|(k, _)| k == "head")
             .expect("head param should exist");
-        assert_eq!(
-            head_param.1, "tosspayments:autodev/issue-131",
-            "must use owner:branch format in GitHub API head parameter"
+        // Convention-based branch naming: type inferred from title prefix "feat(testing):"
+        assert!(
+            head_param.1.starts_with("tosspayments:feat/131-"),
+            "must use owner:branch format in GitHub API head parameter, got: {}",
+            head_param.1
         );
     }
 
@@ -1180,6 +1194,7 @@ mod tests {
 
         let removed = ws.removed.lock().unwrap();
         assert_eq!(removed.len(), 1);
-        assert_eq!(removed[0].1, "issue-42");
+        // Convention-based: "Fix login bug" with no labels → feat-42-fix-login-bug
+        assert_eq!(removed[0].1, "feat-42-fix-login-bug");
     }
 }
