@@ -662,6 +662,88 @@ impl Env for EnvClone {
     }
 }
 
+/// v5 daemon 시작.
+///
+/// v4와 동일한 PID 파일을 공유하여 동시 실행을 방지한다.
+/// v5 daemon은 workspace.yaml 기반 상태 머신 루프를 실행한다.
+pub async fn start_v5(
+    home: &Path,
+    env: Arc<dyn Env>,
+    gh: Arc<dyn Gh>,
+    git: Arc<dyn Git>,
+    claude: Arc<dyn Claude>,
+    sw: Arc<dyn SuggestWorkflow>,
+) -> Result<()> {
+    if pid::is_running(home) {
+        bail!(
+            "daemon is already running (pid: {})",
+            pid::read_pid(home).unwrap_or(0)
+        );
+    }
+
+    info!("starting autodev v5 daemon...");
+
+    pid::write_pid(home)?;
+
+    let cfg = config::loader::load_merged(&*env, None);
+
+    let db_path = home.join("autodev.db");
+    let log_db = Database::open(&db_path)?;
+    log_db.initialize()?;
+
+    println!("autodev v5 daemon started (pid: {})", std::process::id());
+
+    let log_dir = config::resolve_log_dir(&cfg.daemon.log_dir, home);
+
+    // ── Startup log cleanup ──
+    let n = log::cleanup_old_logs(&log_dir, cfg.daemon.log_retention_days);
+    if n > 0 {
+        info!("startup log cleanup: deleted {n} old log files");
+    }
+
+    info!(
+        "v5 event loop starting (max_concurrent={})",
+        cfg.daemon.max_concurrent_tasks
+    );
+
+    // ── CronEngine + global cron seed ──
+    let cron_db = Database::open(&db_path)?;
+    match crate::cli::cron::seed_global_crons(&cron_db, home) {
+        Ok(n) if n > 0 => info!("seeded {n} global built-in cron jobs"),
+        Ok(_) => {}
+        Err(e) => tracing::warn!("failed to seed global cron jobs: {e}"),
+    }
+    let mut cron_engine = CronEngine::new(cron_db, home.to_path_buf());
+
+    // ── v5 main loop ──
+    let tick_secs = cfg.daemon.tick_interval_secs;
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(tick_secs));
+
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {
+                // Execute due cron jobs
+                let results = cron_engine.tick().await;
+                for r in &results {
+                    info!("cron '{}' completed: exit_code={}", r.job_name, r.exit_code);
+                }
+            }
+            _ = tokio::signal::ctrl_c() => {
+                info!("received SIGINT, shutting down v5 daemon...");
+                break;
+            }
+        }
+    }
+
+    pid::remove_pid(home);
+
+    // Suppress unused variable warnings — these dependencies will be wired
+    // as the v5 daemon loop is fleshed out.
+    let _ = (gh, git, claude, sw, log_db);
+
+    Ok(())
+}
+
 /// 데몬 중지 (PID → SIGTERM + poll for exit)
 pub fn stop(home: &Path) -> Result<()> {
     pid::stop(home)
