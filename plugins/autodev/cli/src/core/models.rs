@@ -851,6 +851,79 @@ pub struct NewFeedbackPattern {
     pub source: String,
 }
 
+// ─── Transition Event models ───
+
+/// Type of transition event recorded in the append-only log.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransitionEventType {
+    PhaseEnter,
+    Handler,
+    Evaluate,
+    OnDone,
+    OnFail,
+    OnEnter,
+    ShutdownRollback,
+}
+
+impl TransitionEventType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TransitionEventType::PhaseEnter => "phase_enter",
+            TransitionEventType::Handler => "handler",
+            TransitionEventType::Evaluate => "evaluate",
+            TransitionEventType::OnDone => "on_done",
+            TransitionEventType::OnFail => "on_fail",
+            TransitionEventType::OnEnter => "on_enter",
+            TransitionEventType::ShutdownRollback => "shutdown_rollback",
+        }
+    }
+}
+
+impl std::str::FromStr for TransitionEventType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "phase_enter" => Ok(TransitionEventType::PhaseEnter),
+            "handler" => Ok(TransitionEventType::Handler),
+            "evaluate" => Ok(TransitionEventType::Evaluate),
+            "on_done" => Ok(TransitionEventType::OnDone),
+            "on_fail" => Ok(TransitionEventType::OnFail),
+            "on_enter" => Ok(TransitionEventType::OnEnter),
+            "shutdown_rollback" => Ok(TransitionEventType::ShutdownRollback),
+            _ => Err(format!("invalid transition event type: {s}")),
+        }
+    }
+}
+
+impl fmt::Display for TransitionEventType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Append-only transition event for tracking phase lifecycle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransitionEvent {
+    pub id: String,
+    pub work_id: String,
+    pub source_id: String,
+    pub event_type: TransitionEventType,
+    pub phase: Option<String>,
+    pub detail: Option<String>,
+    pub created_at: String,
+}
+
+/// Input model for inserting a new transition event.
+pub struct NewTransitionEvent {
+    pub work_id: String,
+    pub source_id: String,
+    pub event_type: TransitionEventType,
+    pub phase: Option<String>,
+    pub detail: Option<String>,
+}
+
 // ─── Claw Decision models ───
 
 /// Claw decision type

@@ -1,6 +1,28 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
+/// v5 마이그레이션: transition_events 테이블 추가 (append-only phase transition log).
+pub fn migrate_v5(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS transition_events (
+            id          TEXT PRIMARY KEY,
+            work_id     TEXT NOT NULL,
+            source_id   TEXT NOT NULL,
+            event_type  TEXT NOT NULL,
+            phase       TEXT,
+            detail      TEXT,
+            created_at  TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_transition_events_work_id
+            ON transition_events(work_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_transition_events_created
+            ON transition_events(created_at);
+        ",
+    )?;
+    Ok(())
+}
+
 /// v4 마이그레이션: queue_items에 failure_count, escalation_level 컬럼 추가.
 pub fn migrate_v4(conn: &Connection) -> Result<()> {
     let migrations = [

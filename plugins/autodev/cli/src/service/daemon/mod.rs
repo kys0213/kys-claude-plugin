@@ -23,7 +23,10 @@ use tokio::task::JoinSet;
 use tracing::info;
 
 use crate::core::config::{self, Env};
-use crate::core::repository::{ConsumerLogRepository, TokenUsageRepository};
+use crate::core::models::{NewTransitionEvent, TransitionEventType};
+use crate::core::repository::{
+    ConsumerLogRepository, TokenUsageRepository, TransitionEventRepository,
+};
 use crate::infra::claude::Claude;
 use crate::infra::db::Database;
 use crate::infra::gh::Gh;
@@ -41,6 +44,11 @@ use self::task_runner::TaskRunner;
 use self::task_runner_impl::DefaultTaskRunner;
 use crate::core::notifier::NotificationEvent;
 use crate::core::task::{TaskResult, TaskStatus};
+
+/// Graceful shutdown timeout default in seconds.
+/// Running tasks that don't complete within this window are rolled back to Pending.
+#[cfg(test)]
+const SHUTDOWN_TIMEOUT_SECS: u64 = 30;
 
 // ─── In-Flight Concurrency Tracker ───
 
@@ -330,6 +338,24 @@ impl Daemon {
                                 "task completed: {} - {} (in-flight: {})",
                                 task_result.work_id, task_result.status, self.tracker.total
                             );
+                            // Record phase transition event
+                            record_transition(
+                                &self.log_db,
+                                &task_result.work_id,
+                                &task_result.repo_name,
+                                match task_result.status {
+                                    TaskStatus::Completed => TransitionEventType::Handler,
+                                    TaskStatus::Failed(_) => TransitionEventType::OnFail,
+                                    TaskStatus::Skipped(_) => TransitionEventType::PhaseEnter,
+                                },
+                                Some(match task_result.status {
+                                    TaskStatus::Completed => "done",
+                                    TaskStatus::Failed(_) => "failed",
+                                    TaskStatus::Skipped(_) => "skipped",
+                                }),
+                                Some(&task_result.status.to_string()),
+                            );
+
                             self.handle_task_completion(&task_result).await;
                         }
                         Err(e) => {
@@ -400,6 +426,14 @@ impl Daemon {
                 remaining, self.shutdown_drain_timeout_secs
             );
 
+            // Collect work_ids of in-flight tasks for potential rollback
+            let in_flight_items: Vec<status::StatusItem> = self
+                .manager
+                .active_items()
+                .into_iter()
+                .filter(|item| item.phase == "Running" || item.phase == "running")
+                .collect();
+
             let drain_result = tokio::time::timeout(drain_timeout, async {
                 loop {
                     tokio::select! {
@@ -411,6 +445,25 @@ impl Daemon {
                                         "shutdown drain: task completed: {} - {}",
                                         task_result.work_id, task_result.status
                                     );
+
+                                    // Record transition event
+                                    record_transition(
+                                        &self.log_db,
+                                        &task_result.work_id,
+                                        &task_result.repo_name,
+                                        match task_result.status {
+                                            TaskStatus::Completed => TransitionEventType::Handler,
+                                            TaskStatus::Failed(_) => TransitionEventType::OnFail,
+                                            TaskStatus::Skipped(_) => TransitionEventType::PhaseEnter,
+                                        },
+                                        Some(match task_result.status {
+                                            TaskStatus::Completed => "done",
+                                            TaskStatus::Failed(_) => "failed",
+                                            TaskStatus::Skipped(_) => "skipped",
+                                        }),
+                                        Some(&task_result.status.to_string()),
+                                    );
+
                                     self.handle_task_completion(&task_result).await;
                                 }
                                 Some(Err(e)) => {
@@ -435,12 +488,43 @@ impl Daemon {
             .await;
 
             if drain_result.is_err() {
+                let timed_out_count = join_set.len();
                 tracing::warn!(
-                    "shutdown drain timed out after {}s, aborting {} remaining tasks",
+                    "shutdown drain timed out after {}s, aborting {} remaining tasks, rolling back to Pending",
                     self.shutdown_drain_timeout_secs,
-                    join_set.len()
+                    timed_out_count,
                 );
                 join_set.abort_all();
+
+                // Rollback Running → Pending for items still in-flight
+                use crate::core::models::QueuePhase;
+                use crate::core::repository::QueueRepository;
+                for item in &in_flight_items {
+                    let rollback_ok = self.log_db.queue_transit(
+                        &item.work_id,
+                        QueuePhase::Running,
+                        QueuePhase::Pending,
+                    );
+                    match rollback_ok {
+                        Ok(true) => {
+                            info!("shutdown rollback: {} Running → Pending", item.work_id);
+                            record_transition(
+                                &self.log_db,
+                                &item.work_id,
+                                &item.repo_name,
+                                TransitionEventType::ShutdownRollback,
+                                Some("pending"),
+                                Some("shutdown timeout rollback"),
+                            );
+                        }
+                        Ok(false) => {
+                            // Item already transitioned (completed in time)
+                        }
+                        Err(e) => {
+                            tracing::warn!("shutdown rollback failed for {}: {e}", item.work_id);
+                        }
+                    }
+                }
             }
         }
 
@@ -518,6 +602,27 @@ async fn dispatch_notification(
         for (ch, err) in &errors {
             tracing::warn!("notification error ({ch}): {err}");
         }
+    }
+}
+
+/// transition_events 테이블에 상태 전이 이벤트를 기록한다.
+fn record_transition(
+    db: &Database,
+    work_id: &str,
+    source_id: &str,
+    event_type: TransitionEventType,
+    phase: Option<&str>,
+    detail: Option<&str>,
+) {
+    let event = NewTransitionEvent {
+        work_id: work_id.to_string(),
+        source_id: source_id.to_string(),
+        event_type,
+        phase: phase.map(|s| s.to_string()),
+        detail: detail.map(|s| s.to_string()),
+    };
+    if let Err(e) = db.transition_insert(&event) {
+        tracing::warn!("failed to record transition event: {e}");
     }
 }
 
@@ -1009,5 +1114,137 @@ mod tests {
         assert_eq!(join_set.len(), 1);
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].repo_name(), "org/repo-a");
+    }
+
+    // ═══════════════════════════════════════════════
+    // Shutdown timeout constant
+    // ═══════════════════════════════════════════════
+
+    #[test]
+    fn shutdown_timeout_is_30_seconds() {
+        assert_eq!(SHUTDOWN_TIMEOUT_SECS, 30);
+    }
+
+    // ═══════════════════════════════════════════════
+    // TransitionEventType 테스트
+    // ═══════════════════════════════════════════════
+
+    #[test]
+    fn transition_event_type_roundtrip() {
+        let types = [
+            TransitionEventType::PhaseEnter,
+            TransitionEventType::Handler,
+            TransitionEventType::Evaluate,
+            TransitionEventType::OnDone,
+            TransitionEventType::OnFail,
+            TransitionEventType::OnEnter,
+            TransitionEventType::ShutdownRollback,
+        ];
+
+        for t in &types {
+            let s = t.as_str();
+            let parsed: TransitionEventType = s.parse().unwrap();
+            assert_eq!(*t, parsed);
+            assert_eq!(t.to_string(), s);
+        }
+    }
+
+    #[test]
+    fn transition_event_type_invalid_parse() {
+        let result = "invalid".parse::<TransitionEventType>();
+        assert!(result.is_err());
+    }
+
+    // ═══════════════════════════════════════════════
+    // transition_events DB 테스트
+    // ═══════════════════════════════════════════════
+
+    #[test]
+    fn transition_insert_and_list_by_work_id() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db = Database::open(&tmp.path().join("test.db")).unwrap();
+        db.initialize().unwrap();
+
+        let event = NewTransitionEvent {
+            work_id: "issue:org/repo:42".to_string(),
+            source_id: "org/repo".to_string(),
+            event_type: TransitionEventType::PhaseEnter,
+            phase: Some("running".to_string()),
+            detail: None,
+        };
+        let id = db.transition_insert(&event).unwrap();
+        assert!(!id.is_empty());
+
+        let event2 = NewTransitionEvent {
+            work_id: "issue:org/repo:42".to_string(),
+            source_id: "org/repo".to_string(),
+            event_type: TransitionEventType::Handler,
+            phase: Some("done".to_string()),
+            detail: Some("handler completed".to_string()),
+        };
+        db.transition_insert(&event2).unwrap();
+
+        // Different work_id
+        let event3 = NewTransitionEvent {
+            work_id: "issue:org/repo:99".to_string(),
+            source_id: "org/repo".to_string(),
+            event_type: TransitionEventType::PhaseEnter,
+            phase: Some("pending".to_string()),
+            detail: None,
+        };
+        db.transition_insert(&event3).unwrap();
+
+        let events = db.transition_list_by_work_id("issue:org/repo:42").unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event_type, TransitionEventType::PhaseEnter);
+        assert_eq!(events[0].phase.as_deref(), Some("running"));
+        assert_eq!(events[1].event_type, TransitionEventType::Handler);
+        assert_eq!(events[1].detail.as_deref(), Some("handler completed"));
+    }
+
+    #[test]
+    fn transition_list_recent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db = Database::open(&tmp.path().join("test.db")).unwrap();
+        db.initialize().unwrap();
+
+        for i in 0..5 {
+            let event = NewTransitionEvent {
+                work_id: format!("issue:org/repo:{i}"),
+                source_id: "org/repo".to_string(),
+                event_type: TransitionEventType::PhaseEnter,
+                phase: Some("pending".to_string()),
+                detail: None,
+            };
+            db.transition_insert(&event).unwrap();
+        }
+
+        let recent = db.transition_list_recent(3).unwrap();
+        assert_eq!(recent.len(), 3);
+    }
+
+    #[test]
+    fn record_transition_succeeds() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db = Database::open(&tmp.path().join("test.db")).unwrap();
+        db.initialize().unwrap();
+
+        record_transition(
+            &db,
+            "issue:org/repo:1",
+            "org/repo",
+            TransitionEventType::ShutdownRollback,
+            Some("pending"),
+            Some("shutdown timeout rollback"),
+        );
+
+        let events = db.transition_list_by_work_id("issue:org/repo:1").unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, TransitionEventType::ShutdownRollback);
+        assert_eq!(events[0].phase.as_deref(), Some("pending"));
+        assert_eq!(
+            events[0].detail.as_deref(),
+            Some("shutdown timeout rollback")
+        );
     }
 }

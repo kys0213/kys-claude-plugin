@@ -1215,6 +1215,73 @@ impl FeedbackPatternRepository for Database {
     }
 }
 
+impl TransitionEventRepository for Database {
+    fn transition_insert(&self, event: &NewTransitionEvent) -> Result<String> {
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        self.conn().execute(
+            "INSERT INTO transition_events (id, work_id, source_id, event_type, phase, detail, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                id,
+                event.work_id,
+                event.source_id,
+                event.event_type.as_str(),
+                event.phase,
+                event.detail,
+                now,
+            ],
+        )?;
+        Ok(id)
+    }
+
+    fn transition_list_by_work_id(&self, work_id: &str) -> Result<Vec<TransitionEvent>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, work_id, source_id, event_type, phase, detail, created_at \
+             FROM transition_events WHERE work_id = ?1 ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![work_id], |row| {
+            Ok(TransitionEvent {
+                id: row.get(0)?,
+                work_id: row.get(1)?,
+                source_id: row.get(2)?,
+                event_type: row
+                    .get::<_, String>(3)?
+                    .parse()
+                    .unwrap_or(TransitionEventType::PhaseEnter),
+                phase: row.get(4)?,
+                detail: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn transition_list_recent(&self, limit: usize) -> Result<Vec<TransitionEvent>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, work_id, source_id, event_type, phase, detail, created_at \
+             FROM transition_events ORDER BY created_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![limit as i64], |row| {
+            Ok(TransitionEvent {
+                id: row.get(0)?,
+                work_id: row.get(1)?,
+                source_id: row.get(2)?,
+                event_type: row
+                    .get::<_, String>(3)?
+                    .parse()
+                    .unwrap_or(TransitionEventType::PhaseEnter),
+                phase: row.get(4)?,
+                detail: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+}
+
 impl CronRepository for Database {
     fn cron_add(&self, job: &NewCronJob) -> Result<String> {
         let conn = self.conn();
