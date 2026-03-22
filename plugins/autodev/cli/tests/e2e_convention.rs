@@ -57,6 +57,80 @@ fn e2e_convention_detect_nonexistent_path_fails() {
 }
 
 #[test]
+fn e2e_convention_detect_go_repo() {
+    let home = TempDir::new().unwrap();
+    let repo_dir = TempDir::new().unwrap();
+
+    std::fs::write(
+        repo_dir.path().join("go.mod"),
+        "module example.com/test\n\ngo 1.21\n\nrequire github.com/gin-gonic/gin v1.9.0\n",
+    )
+    .unwrap();
+
+    autodev(&home)
+        .args(["convention", "detect", &repo_dir.path().to_string_lossy()])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Go")
+                .and(predicate::str::contains("Gin"))
+                .and(predicate::str::contains("go test")),
+        );
+}
+
+#[test]
+fn e2e_convention_detect_python_repo() {
+    let home = TempDir::new().unwrap();
+    let repo_dir = TempDir::new().unwrap();
+
+    std::fs::write(
+        repo_dir.path().join("requirements.txt"),
+        "fastapi==0.100.0\npytest==7.0.0\n",
+    )
+    .unwrap();
+
+    autodev(&home)
+        .args(["convention", "detect", &repo_dir.path().to_string_lossy()])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Python")
+                .and(predicate::str::contains("FastAPI"))
+                .and(predicate::str::contains("pytest")),
+        );
+}
+
+#[test]
+fn e2e_convention_detect_build_tools() {
+    let home = TempDir::new().unwrap();
+    let repo_dir = TempDir::new().unwrap();
+
+    // Create Cargo.toml so there is a language, plus Makefile and GitHub Actions
+    std::fs::write(
+        repo_dir.path().join("Cargo.toml"),
+        "[package]\nname = \"test\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(repo_dir.path().join("Makefile"), "all:\n\techo hello\n").unwrap();
+    std::fs::create_dir_all(repo_dir.path().join(".github/workflows")).unwrap();
+    std::fs::write(
+        repo_dir.path().join(".github/workflows/ci.yml"),
+        "name: CI\n",
+    )
+    .unwrap();
+
+    autodev(&home)
+        .args(["convention", "detect", &repo_dir.path().to_string_lossy()])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Build tools:")
+                .and(predicate::str::contains("Make"))
+                .and(predicate::str::contains("GitHub Actions")),
+        );
+}
+
+#[test]
 fn e2e_convention_detect_typescript_repo() {
     let home = TempDir::new().unwrap();
     let repo_dir = TempDir::new().unwrap();
@@ -191,6 +265,21 @@ fn e2e_convention_bootstrap_skips_existing_files() {
         .stdout(predicate::str::contains("skipped"));
 }
 
+#[test]
+fn e2e_convention_bootstrap_nonexistent_path() {
+    let home = TempDir::new().unwrap();
+
+    autodev(&home)
+        .args([
+            "convention",
+            "bootstrap",
+            "/tmp/nonexistent-path-autodev-12345",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not a directory"));
+}
+
 // ═══════════════════════════════════════════════
 // 3. convention patterns
 // ═══════════════════════════════════════════════
@@ -232,9 +321,29 @@ fn e2e_convention_patterns_json_empty() {
     assert_eq!(json.as_array().unwrap().len(), 0);
 }
 
+#[test]
+fn e2e_convention_patterns_nonexistent_repo() {
+    let home = TempDir::new().unwrap();
+
+    autodev(&home)
+        .args(["convention", "patterns", "--repo", "no/such-repo"])
+        .assert()
+        .failure();
+}
+
 // ═══════════════════════════════════════════════
 // 4. convention collect-feedback
 // ═══════════════════════════════════════════════
+
+#[test]
+fn e2e_convention_collect_feedback_nonexistent_repo() {
+    let home = TempDir::new().unwrap();
+
+    autodev(&home)
+        .args(["convention", "collect-feedback", "no/such-repo"])
+        .assert()
+        .failure();
+}
 
 #[test]
 fn e2e_convention_collect_feedback_no_hitl_events() {
@@ -325,6 +434,18 @@ fn e2e_convention_propose_repo_not_found() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("repository not found"));
+}
+
+#[test]
+fn e2e_convention_propose_custom_threshold() {
+    let home = TempDir::new().unwrap();
+    setup_repo(&home, REPO_URL);
+
+    autodev(&home)
+        .args(["convention", "propose", REPO_NAME, "--threshold", "10"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No actionable patterns found"));
 }
 
 // ═══════════════════════════════════════════════
