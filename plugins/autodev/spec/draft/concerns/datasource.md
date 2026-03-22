@@ -151,7 +151,6 @@ sources:
   github:
     url: https://github.com/org/repo
     scan_interval_secs: 300
-    concurrency: 1
 
     states:
       analyze:
@@ -196,8 +195,7 @@ sources:
       1: retry
       2: retry_with_comment
       3: hitl
-      4: skip
-      5: replan
+      terminal: skip          # hitl timeout 시 적용 (skip 또는 replan)
 ```
 
 ### 향후 확장 (v6+)
@@ -256,9 +254,9 @@ states:
 ```
 
 실행 주체: Daemon이 상태 전이 시점에 직접 실행.
-- `on_enter`: Running 진입 후, handler 실행 전
+- `on_enter`: Running 진입 후, handler 실행 전. **실패 시 handler를 실행하지 않고 즉시 escalation 정책을 적용**한다 (handler 실패와 동일한 경로). on_enter 실패도 history에 failed 이벤트로 기록되며 failure_count에 포함된다.
 - `on_done`: evaluate가 Done 판정 후 (script 실패 시 → Failed 상태)
-- `on_fail`: handler 실패 시, escalation level에 따라 조건부 실행 (`retry`에서는 실행 안 함)
+- `on_fail`: handler 또는 on_enter 실패 시, escalation level에 따라 조건부 실행 (`retry`에서는 실행 안 함)
 
 ---
 
@@ -266,25 +264,37 @@ states:
 
 workspace yaml에서 실패 정책을 정의하고, 코어가 실행한다.
 
+Escalation level은 **순차 실행 구간**과 **대안 선택 구간**으로 나뉜다:
+
+- Level 1~3: 순차적으로 적용 (1회 실패 → retry, 2회 → retry_with_comment, 3회 → hitl)
+- Level 4: **terminal 분기** — hitl 응답에서 사람이 선택하거나, `terminal` 설정으로 자동 적용
+
 ```yaml
 escalation:
   1: retry                # 같은 state에서 재시도 (on_fail 실행 안 함)
   2: retry_with_comment   # on_fail script 실행 + 재시도
   3: hitl                 # on_fail script 실행 + HITL 이벤트 생성
-  4: skip                 # on_fail script 실행 + Skipped
-  5: replan               # on_fail script 실행 + HITL(replan)
+  terminal: skip          # hitl에서 사람이 결정하지 않으면 (timeout) 적용되는 최종 액션
+                          # 선택지: skip (종료) 또는 replan (스펙 수정 제안)
 ```
+
+> **설계 의도**: level 4(skip)와 level 5(replan)는 순차적으로 도달할 수 없다. skip은 terminal 상태(Skipped)이므로 이후 실패가 발생하지 않는다. 따라서 skip과 replan은 level 3(hitl) 이후의 **대안적 선택지**로 재설계하였다.
+>
+> - `terminal: skip` — hitl timeout 시 해당 아이템을 건너뛰고 종료
+> - `terminal: replan` — hitl timeout 시 스펙 수정을 제안하는 HITL(replan) 이벤트 생성
+>
+> 사람이 hitl에 직접 응답하는 경우, done/retry/skip/replan 중 자유롭게 선택할 수 있다.
 
 ### on_fail 실행 조건
 
-`retry`만 on_fail script를 실행하지 않는다. 나머지(`retry_with_comment`, `hitl`, `skip`, `replan`)는 on_fail script 실행 후 해당 액션을 수행한다.
+`retry`만 on_fail script를 실행하지 않는다. 나머지(`retry_with_comment`, `hitl`)는 on_fail script 실행 후 해당 액션을 수행한다.
 
 ```
 1회 실패 → retry           → 조용히 재시도 (worktree 보존)
 2회 실패 → retry_with_comment → 외부 시스템에 실패 알림 + 재시도
 3회 실패 → hitl            → 외부 시스템에 알림 + 사람 대기
-4회 실패 → skip            → 외부 시스템에 알림 + 종료
-5회 실패 → replan          → 외부 시스템에 알림 + 스펙 수정 제안
+                              └── 사람 응답: done / retry / skip / replan
+                              └── timeout  → terminal 액션 적용 (skip 또는 replan)
 ```
 
 failure_count는 history의 append-only 이벤트에서 계산. 코어는 `history | filter(state, failed) | count` → escalation 매핑만 알면 된다.

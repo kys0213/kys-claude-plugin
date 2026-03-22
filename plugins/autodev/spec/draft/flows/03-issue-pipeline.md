@@ -35,17 +35,18 @@ DataSource.collect(): trigger 조건 매칭 (예: autodev:analyze 라벨)
     ├── 전부 성공 → Completed
     │     │
     │     ▼
-    │   evaluate cron (force_trigger로 즉시): "완료? 추가 검토?"
+    │   evaluate cron (force_trigger로 즉시 실행 + 주기 폴링 하이브리드):
+    │   "완료? 추가 검토?"
     │     ├── Done → on_done script 실행 → worktree 정리
     │     │           └── script 실패 → Failed (로그 기록, 재시도 가능)
     │     └── HITL → HITL 이벤트 생성 → 사람 대기 (worktree 보존)
     │
-    └── 실패 → escalation 정책 적용
+    └── 실패 (handler 또는 on_enter) → escalation 정책 적용
           ├── retry             → 새 아이템 생성, worktree 보존
           ├── retry_with_comment → on_fail + 새 아이템 생성
-          ├── hitl              → on_fail + HITL 생성
-          ├── skip              → on_fail + Skipped
-          └── replan            → on_fail + HITL(replan)
+          └── hitl              → on_fail + HITL 생성
+                                    └── 사람: done/retry/skip/replan
+                                    └── timeout → terminal (skip 또는 replan)
 ```
 
 ---

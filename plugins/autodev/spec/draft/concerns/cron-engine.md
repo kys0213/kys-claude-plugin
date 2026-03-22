@@ -70,16 +70,19 @@ gap 발견 → DataSource에서 open 아이템 조회 (Pending/Ready/Running)
 
 ---
 
-## Force Trigger
+## Force Trigger (하이브리드 실행 모델)
 
-코어 이벤트에서 evaluate를 즉시 트리거:
+evaluate는 **cron 주기 폴링 + force_trigger 즉시 실행**의 하이브리드 모델로 동작한다:
 
 ```
-handler 전부 성공 → Completed 전이 → force_trigger("evaluate")
-  → last_run_at = NULL → 다음 tick에서 즉시 실행
+1. 주기 폴링: evaluate cron이 60초마다 Completed 아이템을 스캔
+2. 즉시 실행: handler 성공 → Completed 전이 → force_trigger("evaluate")
+               → last_run_at = NULL → 다음 tick(10초 이내)에서 즉시 실행
 ```
 
-이로 인해 Completed 전이 → evaluate 실행까지의 대기 시간은 tick_interval(10초) 수준.
+- **force_trigger**는 동기적으로 evaluate를 실행하지 않는다. cron의 `last_run_at`을 리셋하여 다음 tick에서 우선 실행되도록 스케줄링한다.
+- evaluate LLM 호출도 concurrency slot을 소비한다 (`daemon.max_concurrent`에 `active_evaluate_count`가 포함됨).
+- 주기 폴링은 force_trigger가 누락된 경우(예: 프로세스 재시작)의 안전망 역할을 한다.
 
 > handler 실패 시에는 force_trigger 없이 즉시 escalation 정책이 적용된다 (evaluate 불필요).
 

@@ -55,7 +55,7 @@ evaluate가 Completed 아이템을 Done or HITL로 분류. LLM이 `autodev queue
 
 ### 9. Concurrency 제어
 
-workspace.concurrency + daemon.max_concurrent 2단계. evaluate LLM 호출도 slot 소비. 상세: [Daemon](./concerns/daemon.md)
+workspace.concurrency (workspace yaml 루트) + daemon.max_concurrent 2단계. evaluate LLM 호출도 slot 소비. 상세: [Daemon](./concerns/daemon.md)
 
 ### 10. Cron은 품질 루프
 
@@ -178,7 +178,7 @@ Pending → Ready → Running → Completed → Done | HITL | Failed | Skipped
 | 환경변수 | DataSource별 다수 | `WORK_ID` + `WORKTREE` 만 |
 | QueuePhase | 5개 | 8개 (+Completed, HITL, Failed) |
 | Pending → Ready | CLAW feature flag | **항상 자동** |
-| evaluate | Claw가 판단 | cron 기반, CLI 도구 호출 |
+| evaluate | Claw가 판단 | cron 기반 + force_trigger 하이브리드, CLI 도구 호출 |
 | DataSource trait | 5개 메서드 | collect + get_context 만 |
 | Concurrency | InFlightTracker | 2단계 (workspace + global) |
 
@@ -191,7 +191,7 @@ Pending → Ready → Running → Completed → Done | HITL | Failed | Skipped
 | C1. Daemon drain 제거 | DataSource 도입, Pending→Ready 자동 전이 |
 | C2. Notifier 연결 | on_done/on_fail script에서 직접 처리 |
 | C3. Force trigger | cron-engine force_trigger |
-| C4. 5단계 escalation | workspace yaml escalation 정책 |
+| C4. escalation 정책 | workspace yaml escalation (3단계 순차 + terminal 분기) |
 | H1. Spec completion | gap-detection cron + HITL 최종 확인 |
 | H2. 섹션 검증 | /spec add 대화형 검증 |
 | H3. spec prioritize | /claw 세션 자연어 |

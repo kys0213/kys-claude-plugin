@@ -63,6 +63,11 @@ autodev
 ├── claw
 │   ├── init / rules / edit
 ├── agent [--workspace <name>] [-p <prompt>]
+│         # Claw 워크스페이스의 rules를 로드한 LLM 세션을 실행.
+│         # evaluate cron이 내부적으로 호출하여 Completed 아이템을 분류.
+│         # --workspace: 대상 workspace 지정 (해당 workspace의 context 접근 가능)
+│         # -p: 프롬프트 전달 (비대화형 실행, 결과 출력 후 종료)
+│         # 인자 없이 실행 시 대화형 세션 시작 (/claw와 동일)
 ```
 
 > **v4 대비 변경**: `queue advance` 제거 (Pending→Ready 자동 전이), `context` 서브커맨드 추가, `repo` → `workspace` 리네이밍.
