@@ -827,7 +827,6 @@ impl QueueRepository for Database {
             (QueuePhase::Pending, QueuePhase::Ready),
             (QueuePhase::Ready, QueuePhase::Running),
             (QueuePhase::Running, QueuePhase::Completed),
-            (QueuePhase::Completed, QueuePhase::Done),
         ];
 
         let conn = self.conn();
@@ -846,7 +845,12 @@ impl QueueRepository for Database {
         match current {
             None => anyhow::bail!("queue item not found: {work_id}"),
             Some(QueuePhase::Hitl) => {
-                anyhow::bail!("cannot advance hitl state: use queue done/hitl commands")
+                anyhow::bail!("cannot advance hitl item: respond via 'hitl respond' first")
+            }
+            Some(QueuePhase::Completed) => {
+                anyhow::bail!(
+                    "cannot advance completed item: use 'queue done' or 'queue hitl' instead"
+                )
             }
             Some(phase) => {
                 if phase.is_terminal() {

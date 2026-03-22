@@ -712,6 +712,7 @@ pub struct HitlResponse {
     pub created_at: String,
 }
 
+#[derive(Debug)]
 pub struct NewHitlEvent {
     pub repo_id: String,
     pub spec_id: Option<String>,
