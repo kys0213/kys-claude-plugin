@@ -114,6 +114,17 @@ enum Commands {
         #[command(subcommand)]
         action: WorktreeAction,
     },
+    /// v5 큐 아이템 컨텍스트 조회 (on_done/on_fail script용)
+    Context {
+        /// 작업 ID
+        work_id: String,
+        /// JSON 출력
+        #[arg(long)]
+        json: bool,
+        /// 특정 필드 추출 (e.g. "issue.number")
+        #[arg(long)]
+        field: Option<String>,
+    },
     /// 칸반 보드 출력
     Board {
         /// 레포 이름으로 필터 (org/repo)
@@ -271,6 +282,24 @@ enum QueueAction {
         /// JSON 출력
         #[arg(long)]
         json: bool,
+    },
+    /// v5: Completed → on_done script → Done 전이
+    Done {
+        /// 작업 ID
+        work_id: String,
+    },
+    /// v5: Completed → HITL 전이
+    Hitl {
+        /// 작업 ID
+        work_id: String,
+        /// HITL 사유
+        #[arg(long)]
+        reason: String,
+    },
+    /// v5: Failed 아이템의 on_done script 재실행
+    RetryScript {
+        /// 작업 ID
+        work_id: String,
     },
 }
 
@@ -835,6 +864,18 @@ async fn main() -> Result<()> {
                 let output = client::queue::queue_show(&db, &work_id, json)?;
                 println!("{output}");
             }
+            QueueAction::Done { work_id } => {
+                println!("v5: queue done {work_id} — evaluate에서 호출되는 명령입니다.");
+                println!("Completed → on_done script → Done 전이를 수행합니다.");
+            }
+            QueueAction::Hitl { work_id, reason } => {
+                println!("v5: queue hitl {work_id} --reason \"{reason}\"");
+                println!("Completed → HITL 전이를 수행합니다.");
+            }
+            QueueAction::RetryScript { work_id } => {
+                println!("v5: queue retry-script {work_id}");
+                println!("Failed 아이템의 on_done script를 재실행합니다.");
+            }
         },
         Commands::Config { action } => match action {
             ConfigAction::Show => {
@@ -1142,6 +1183,39 @@ async fn main() -> Result<()> {
                 println!("{output}");
             }
         },
+        Commands::Context {
+            work_id,
+            json: _,
+            field,
+        } => {
+            // v5 context 조회: MockDataSource로 기본 컨텍스트 반환
+            // 실제 구현에서는 DataSource를 workspace config에서 resolve
+            use autodev::v5::core::datasource::DataSource;
+            use autodev::v5::core::queue_item::V5QueueItem;
+            use autodev::v5::infra::sources::mock::MockDataSource;
+
+            let parts: Vec<&str> = work_id.rsplitn(2, ':').collect();
+            let (state, source_id) = if parts.len() == 2 {
+                (parts[0], parts[1])
+            } else {
+                ("unknown", work_id.as_str())
+            };
+            let item = V5QueueItem::new(
+                work_id.clone(),
+                source_id.to_string(),
+                "default".to_string(),
+                state.to_string(),
+            );
+            let source = MockDataSource::new("github");
+            let ctx = source.get_context(&item).await?;
+
+            if let Some(ref f) = field {
+                let value = client::context::extract_field(&ctx, f)?;
+                println!("{value}");
+            } else {
+                println!("{}", serde_json::to_string_pretty(&ctx)?);
+            }
+        }
         Commands::Board { repo, json } => {
             use autodev::core::board::BoardRenderer;
             use autodev::tui::board::{BoardStateBuilder, TextBoardRenderer};
