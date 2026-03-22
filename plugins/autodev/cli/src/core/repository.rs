@@ -135,6 +135,7 @@ pub trait HistoryRepository {
         limit: usize,
     ) -> Result<Vec<HistoryEntry>>;
 }
+
 pub trait CronRepository {
     fn cron_add(&self, job: &NewCronJob) -> Result<String>;
     fn cron_list(&self, repo: Option<&str>) -> Result<Vec<CronJob>>;

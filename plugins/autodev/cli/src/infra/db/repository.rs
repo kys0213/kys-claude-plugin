@@ -1588,6 +1588,75 @@ impl CronRepository for Database {
     }
 }
 
+impl HistoryRepository for Database {
+    fn history_insert(&self, entry: &NewHistoryEntry) -> Result<String> {
+        let conn = self.conn();
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+
+        conn.execute(
+            "INSERT INTO history (id, source_id, workspace_id, task_kind, status, error_message, duration_ms, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                id,
+                entry.source_id,
+                entry.workspace_id,
+                entry.task_kind,
+                entry.status.as_str(),
+                entry.error_message,
+                entry.duration_ms,
+                now,
+            ],
+        )?;
+        Ok(id)
+    }
+
+    fn history_count_failures(&self, source_id: &str) -> Result<i64> {
+        let conn = self.conn();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM history WHERE source_id = ?1 AND status = 'failed'",
+            rusqlite::params![source_id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    fn history_list_by_source(&self, source_id: &str, limit: usize) -> Result<Vec<HistoryEntry>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, source_id, workspace_id, task_kind, status, error_message, duration_ms, created_at \
+             FROM history WHERE source_id = ?1 ORDER BY created_at DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![source_id, limit as i64], map_history_row)?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
+    }
+
+    fn history_list_by_workspace(
+        &self,
+        workspace_id: &str,
+        limit: usize,
+    ) -> Result<Vec<HistoryEntry>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT id, source_id, workspace_id, task_kind, status, error_message, duration_ms, created_at \
+             FROM history WHERE workspace_id = ?1 ORDER BY created_at DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![workspace_id, limit as i64],
+            map_history_row,
+        )?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
+    }
+}
+
 // ─── Row-mapping helpers ───
 
 /// Converts a `query_row` result into `Ok(Some(x))` / `Ok(None)` / `Err(e)`,
@@ -1777,78 +1846,6 @@ fn map_cron_row(row: &rusqlite::Row<'_>) -> Result<CronJob> {
         last_run_at: row.get(8)?,
         created_at: row.get(9)?,
     })
-}
-
-impl HistoryRepository for Database {
-    fn history_insert(&self, entry: &NewHistoryEntry) -> Result<String> {
-        let conn = self.conn();
-        let id = Uuid::new_v4().to_string();
-        let now = Utc::now().to_rfc3339();
-
-        conn.execute(
-            "INSERT INTO history \
-             (id, source_id, workspace_id, task_kind, status, error_message, duration_ms, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            rusqlite::params![
-                id,
-                entry.source_id,
-                entry.workspace_id,
-                entry.task_kind,
-                entry.status.as_str(),
-                entry.error_message,
-                entry.duration_ms,
-                now,
-            ],
-        )?;
-        Ok(id)
-    }
-
-    fn history_count_failures(&self, source_id: &str) -> Result<i64> {
-        let conn = self.conn();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM history WHERE source_id = ?1 AND status = 'failed'",
-            rusqlite::params![source_id],
-            |row| row.get(0),
-        )?;
-        Ok(count)
-    }
-
-    fn history_list_by_source(&self, source_id: &str, limit: usize) -> Result<Vec<HistoryEntry>> {
-        let conn = self.conn();
-        let mut stmt = conn.prepare(
-            "SELECT id, source_id, workspace_id, task_kind, status, \
-             error_message, duration_ms, created_at \
-             FROM history WHERE source_id = ?1 ORDER BY created_at DESC LIMIT ?2",
-        )?;
-        let rows = stmt.query_map(rusqlite::params![source_id, limit as i64], map_history_row)?;
-        let mut entries = Vec::new();
-        for row in rows {
-            entries.push(row?);
-        }
-        Ok(entries)
-    }
-
-    fn history_list_by_workspace(
-        &self,
-        workspace_id: &str,
-        limit: usize,
-    ) -> Result<Vec<HistoryEntry>> {
-        let conn = self.conn();
-        let mut stmt = conn.prepare(
-            "SELECT id, source_id, workspace_id, task_kind, status, \
-             error_message, duration_ms, created_at \
-             FROM history WHERE workspace_id = ?1 ORDER BY created_at DESC LIMIT ?2",
-        )?;
-        let rows = stmt.query_map(
-            rusqlite::params![workspace_id, limit as i64],
-            map_history_row,
-        )?;
-        let mut entries = Vec::new();
-        for row in rows {
-            entries.push(row?);
-        }
-        Ok(entries)
-    }
 }
 
 fn map_history_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryEntry> {
