@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
-use crate::core::models::RepoInfo;
-use crate::core::repository::{CronRepository, RepoRepository};
+use crate::core::models::{DecisionType, NewClawDecision, RepoInfo};
+use crate::core::repository::{ClawDecisionRepository, CronRepository, RepoRepository};
 use crate::infra::db::Database;
 
 use super::runner::{CronExecResult, ScriptRunner};
@@ -124,13 +124,78 @@ impl CronEngine {
     pub fn is_running(&self, job_id: &str) -> bool {
         self.running.get(job_id).is_some_and(|h| !h.is_finished())
     }
+
+    /// Record a claw-evaluate cron result as a decision in the DB.
+    ///
+    /// Parses the script stdout to determine the decision type:
+    /// - "skip: ..." → Noop (queue empty, no work)
+    /// - "evaluate: ..." with exit_code 0 → Advance (evaluation completed)
+    /// - "evaluate: ..." with non-zero exit → Skip (evaluation failed)
+    pub fn record_claw_evaluate_decision(&self, result: &CronExecResult) {
+        let repo_id = match &result.repo_id {
+            Some(id) => id.clone(),
+            None => {
+                warn!(
+                    "cron: cannot record decision for '{}': no repo_id",
+                    result.job_name
+                );
+                return;
+            }
+        };
+
+        let stdout = result.stdout.trim();
+
+        let (decision_type, reasoning) = if stdout.starts_with("skip:") {
+            let reason = stdout
+                .strip_prefix("skip:")
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            (DecisionType::Noop, format!("claw-evaluate: {reason}"))
+        } else if result.exit_code == 0 {
+            (
+                DecisionType::Advance,
+                "claw-evaluate completed (exit=0)".to_string(),
+            )
+        } else {
+            (
+                DecisionType::Skip,
+                format!("claw-evaluate failed (exit={})", result.exit_code),
+            )
+        };
+
+        let decision = NewClawDecision {
+            repo_id,
+            spec_id: None,
+            decision_type,
+            target_work_id: None,
+            reasoning,
+            context_json: Some(
+                serde_json::json!({
+                    "source": "cron",
+                    "job_name": result.job_name,
+                    "exit_code": result.exit_code,
+                    "duration_ms": result.duration_ms,
+                })
+                .to_string(),
+            ),
+        };
+
+        match self.db.decision_add(&decision) {
+            Ok(id) => info!(
+                "cron: recorded claw-evaluate decision {id} (type={})",
+                decision.decision_type
+            ),
+            Err(e) => warn!("cron: failed to record claw-evaluate decision: {e}"),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::models::{CronSchedule, CronStatus, NewCronJob};
-    use crate::core::repository::CronRepository;
+    use crate::core::repository::{ClawDecisionRepository, CronRepository, RepoRepository};
     use tempfile::TempDir;
 
     fn setup_db() -> (TempDir, Database) {
@@ -350,6 +415,109 @@ mod tests {
         // Should skip due to invalid cron expression
         let results = engine.tick().await;
         assert!(results.is_empty());
+    }
+
+    /// Setup DB with a repo and return (dir, engine_db_path, repo_id).
+    /// The engine takes ownership of one DB connection; tests open a second for verification.
+    fn setup_with_repo() -> (TempDir, std::path::PathBuf, String) {
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db = Database::open(&db_path).unwrap();
+        db.initialize().unwrap();
+        let repo_id = db
+            .repo_add("https://github.com/org/repo", "org/repo")
+            .unwrap();
+        (dir, db_path, repo_id)
+    }
+
+    fn make_cron_result(
+        job_name: &str,
+        repo_id: Option<String>,
+        exit_code: i32,
+        stdout: &str,
+    ) -> CronExecResult {
+        CronExecResult {
+            job_name: job_name.to_string(),
+            repo_id,
+            exit_code,
+            stdout: stdout.to_string(),
+            stderr: String::new(),
+            duration_ms: 100,
+        }
+    }
+
+    #[tokio::test]
+    async fn record_decision_noop_when_skip_output() {
+        let (dir, db_path, repo_id) = setup_with_repo();
+        let engine_db = Database::open(&db_path).unwrap();
+        let engine = CronEngine::new(engine_db, dir.path().to_path_buf());
+
+        let result = make_cron_result(
+            "claw-evaluate",
+            Some(repo_id),
+            0,
+            "skip: org/repo 큐 비어있고 HITL 없음\n",
+        );
+        engine.record_claw_evaluate_decision(&result);
+
+        let verify_db = Database::open(&db_path).unwrap();
+        let decisions = verify_db.decision_list(None, 10).unwrap();
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].decision_type, DecisionType::Noop);
+        assert!(decisions[0].reasoning.contains("claw-evaluate"));
+        assert!(decisions[0].context_json.is_some());
+    }
+
+    #[tokio::test]
+    async fn record_decision_advance_on_success() {
+        let (dir, db_path, repo_id) = setup_with_repo();
+        let engine_db = Database::open(&db_path).unwrap();
+        let engine = CronEngine::new(engine_db, dir.path().to_path_buf());
+
+        let result = make_cron_result(
+            "claw-evaluate",
+            Some(repo_id),
+            0,
+            "evaluate: org/repo (pending=2, hitl=0)\nsome agent output",
+        );
+        engine.record_claw_evaluate_decision(&result);
+
+        let verify_db = Database::open(&db_path).unwrap();
+        let decisions = verify_db.decision_list(None, 10).unwrap();
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].decision_type, DecisionType::Advance);
+        assert!(decisions[0].reasoning.contains("exit=0"));
+    }
+
+    #[tokio::test]
+    async fn record_decision_skip_on_failure() {
+        let (dir, db_path, repo_id) = setup_with_repo();
+        let engine_db = Database::open(&db_path).unwrap();
+        let engine = CronEngine::new(engine_db, dir.path().to_path_buf());
+
+        let result = make_cron_result("claw-evaluate", Some(repo_id), 1, "error output");
+        engine.record_claw_evaluate_decision(&result);
+
+        let verify_db = Database::open(&db_path).unwrap();
+        let decisions = verify_db.decision_list(None, 10).unwrap();
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].decision_type, DecisionType::Skip);
+        assert!(decisions[0].reasoning.contains("exit=1"));
+    }
+
+    #[tokio::test]
+    async fn record_decision_skipped_without_repo_id() {
+        let (dir, db_path, _repo_id) = setup_with_repo();
+        let engine_db = Database::open(&db_path).unwrap();
+        let engine = CronEngine::new(engine_db, dir.path().to_path_buf());
+
+        let result = make_cron_result("claw-evaluate", None, 0, "some output");
+        engine.record_claw_evaluate_decision(&result);
+
+        // No decision should be recorded (no repo_id)
+        let verify_db = Database::open(&db_path).unwrap();
+        let decisions = verify_db.decision_list(None, 10).unwrap();
+        assert!(decisions.is_empty());
     }
 
     #[tokio::test]

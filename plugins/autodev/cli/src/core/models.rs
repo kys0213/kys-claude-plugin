@@ -763,6 +763,8 @@ pub enum DecisionType {
     Skip,
     Hitl,
     Replan,
+    /// No actionable work found during evaluation tick.
+    Noop,
 }
 
 impl DecisionType {
@@ -772,6 +774,7 @@ impl DecisionType {
             DecisionType::Skip => "skip",
             DecisionType::Hitl => "hitl",
             DecisionType::Replan => "replan",
+            DecisionType::Noop => "noop",
         }
     }
 }
@@ -785,6 +788,7 @@ impl std::str::FromStr for DecisionType {
             "skip" => Ok(DecisionType::Skip),
             "hitl" => Ok(DecisionType::Hitl),
             "replan" => Ok(DecisionType::Replan),
+            "noop" => Ok(DecisionType::Noop),
             _ => Err(format!("invalid decision type: {s}")),
         }
     }
