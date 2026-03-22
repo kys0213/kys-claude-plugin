@@ -49,13 +49,6 @@ impl ImproveTask {
             started_at: None,
         }
     }
-
-    async fn cleanup_worktree(&self) {
-        let _ = self
-            .workspace
-            .remove_worktree(&self.item.repo_name, &self.task_id)
-            .await;
-    }
 }
 
 #[async_trait]
@@ -180,8 +173,6 @@ impl Task for ImproveTask {
                 phase: QueuePhase::Pending,
                 item: Box::new(next_item),
             });
-
-            self.cleanup_worktree().await;
         } else {
             // add-first: IMPROVE_FAILED 추가 후 CHANGES_REQUESTED 제거
             self.gh
@@ -219,20 +210,28 @@ impl Task for ImproveTask {
                 )
                 .await;
 
-            tracing::warn!("worktree preserved for debugging: {}", self.work_id());
             ops.push(QueueOp::Remove);
         }
+
+        let status = if response.exit_code == 0 {
+            TaskStatus::Completed
+        } else {
+            TaskStatus::Failed(format!("improve exit_code={}", response.exit_code))
+        };
+        crate::service::tasks::helpers::workspace::maybe_cleanup_worktree(
+            &*self.workspace,
+            &self.item.repo_name,
+            &self.task_id,
+            &status,
+        )
+        .await;
 
         TaskResult {
             work_id: self.item.work_id.clone(),
             repo_name: self.item.repo_name.clone(),
             queue_ops: ops,
             logs: vec![log],
-            status: if response.exit_code == 0 {
-                TaskStatus::Completed
-            } else {
-                TaskStatus::Failed(format!("improve exit_code={}", response.exit_code))
-            },
+            status,
         }
     }
 }

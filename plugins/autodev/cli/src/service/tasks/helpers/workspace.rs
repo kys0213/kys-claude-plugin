@@ -179,3 +179,33 @@ impl WorkspaceOps for OwnedWorkspace {
             .await
     }
 }
+
+// ─── Policy-based cleanup helper ───
+
+/// TaskStatus에 따라 worktree를 정리하거나 보존한다.
+///
+/// v5 스펙의 worktree 생명주기 규칙을 적용:
+/// - Completed/Skipped → 정리
+/// - Failed → 보존 (디버깅용)
+///
+/// 반환값: 정리가 수행되었으면 `true`, 보존되었으면 `false`.
+pub async fn maybe_cleanup_worktree(
+    workspace: &dyn WorkspaceOps,
+    repo_name: &str,
+    task_id: &str,
+    status: &crate::core::task::TaskStatus,
+) -> bool {
+    let action = crate::core::worktree_policy::resolve_action(status);
+    match action {
+        crate::core::worktree_policy::WorktreeAction::Cleanup => {
+            let _ = workspace.remove_worktree(repo_name, task_id).await;
+            true
+        }
+        crate::core::worktree_policy::WorktreeAction::Preserve => {
+            tracing::info!(
+                "worktree preserved per lifecycle policy: {repo_name}/{task_id} (status: {status})"
+            );
+            false
+        }
+    }
+}
