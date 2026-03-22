@@ -6,6 +6,7 @@ pub mod config;
 pub mod datasource;
 pub mod dependency;
 pub mod handler;
+pub mod history;
 pub mod issue_title;
 pub mod labels;
 pub mod lifecycle;

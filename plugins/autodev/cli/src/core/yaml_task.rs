@@ -260,7 +260,7 @@ mod tests {
             "analyze",
             PathBuf::from("/tmp/worktree"),
         );
-        assert_eq!(task.work_id(), "issue:org/repo:42");
+        assert_eq!(task.work_id(), "github:org/repo#42:analyze");
         assert_eq!(task.repo_name(), "org/repo");
     }
 
@@ -324,7 +324,7 @@ mod tests {
 
         let result = task.after_invoke(response).await;
         assert!(matches!(result.status, TaskStatus::Completed));
-        assert_eq!(result.work_id, "issue:org/repo:42");
+        assert_eq!(result.work_id, "github:org/repo#42:analyze");
         assert_eq!(result.logs.len(), 1);
         assert!(result.logs[0].command.contains("yaml:analyze"));
         assert!(result.logs[0].command.contains("on_done: 1 scripts"));
@@ -395,7 +395,7 @@ mod tests {
         let mut task =
             YamlDrivenTask::new(item, state, "review", PathBuf::from("/tmp/worktree-pr"));
 
-        assert_eq!(task.work_id(), "pr:org/repo:10");
+        assert_eq!(task.work_id(), "github:org/repo#10:review");
         assert_eq!(task.repo_name(), "org/repo");
 
         let request = task.before_invoke().await.unwrap();

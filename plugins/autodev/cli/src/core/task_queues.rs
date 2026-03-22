@@ -1,10 +1,30 @@
 use super::models::QueueType;
+use super::phase::TaskKind;
 
-// ─── Work ID 생성 헬퍼 ───
+// ─── Work ID / Source ID 생성 헬퍼 ───
 
-/// work_id 형식: "{type}:{repo_name}:{number}"
-pub fn make_work_id(queue_type: QueueType, repo_name: &str, number: i64) -> String {
-    format!("{}:{repo_name}:{number}", queue_type.as_str())
+/// v5 source_id 형식: "github:{repo_name}#{number}"
+///
+/// 같은 외부 엔티티에서 파생된 모든 아이템을 연결하는 식별자.
+pub fn make_source_id(repo_name: &str, number: i64) -> String {
+    format!("github:{repo_name}#{number}")
+}
+
+/// v5 work_id 형식: "github:{repo_name}#{number}:{state}"
+///
+/// source_id에 state(task_kind)를 결합하여 개별 작업 단계를 식별한다.
+pub fn make_work_id(
+    queue_type: QueueType,
+    repo_name: &str,
+    number: i64,
+    task_kind: TaskKind,
+) -> String {
+    let _ = queue_type; // v5에서는 source_id 기반이므로 queue_type 미사용, 호환성 유지
+    format!(
+        "{}:{}",
+        make_source_id(repo_name, number),
+        task_kind.as_str()
+    )
 }
 
 #[cfg(test)]
@@ -15,13 +35,18 @@ mod tests {
     #[test]
     fn make_work_id_format() {
         assert_eq!(
-            make_work_id(QueueType::Issue, "org/repo", 42),
-            "issue:org/repo:42"
+            make_work_id(QueueType::Issue, "org/repo", 42, TaskKind::Analyze),
+            "github:org/repo#42:analyze"
         );
         assert_eq!(
-            make_work_id(QueueType::Pr, "org/repo", 15),
-            "pr:org/repo:15"
+            make_work_id(QueueType::Pr, "org/repo", 15, TaskKind::Review),
+            "github:org/repo#15:review"
         );
+    }
+
+    #[test]
+    fn make_source_id_format() {
+        assert_eq!(make_source_id("org/repo", 42), "github:org/repo#42");
     }
 
     #[test]

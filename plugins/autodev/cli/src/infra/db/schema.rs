@@ -1,7 +1,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
-/// v5 migration: transition_events + history tables.
+/// v5 migration: transition_events + history tables + source_id lineage + item_history.
 pub fn migrate_v5(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "
@@ -33,6 +33,37 @@ pub fn migrate_v5(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_history_workspace ON history(workspace_id, created_at);
         ",
     )?;
+
+    // source_id column on queue_items
+    let alter_sql = "ALTER TABLE queue_items ADD COLUMN source_id TEXT DEFAULT ''";
+    match conn.execute(alter_sql, []) {
+        Ok(_) => {}
+        Err(e) if e.to_string().contains("duplicate column") => {}
+        Err(e) => return Err(e.into()),
+    }
+
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_queue_items_source_id ON queue_items(source_id);",
+    )?;
+
+    // append-only item_history table
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS item_history (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id   TEXT NOT NULL,
+            work_id     TEXT NOT NULL,
+            state       TEXT NOT NULL,
+            status      TEXT NOT NULL,
+            attempt     INTEGER NOT NULL DEFAULT 1,
+            summary     TEXT,
+            error       TEXT,
+            created_at  TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_item_history_source ON item_history(source_id, created_at);
+        ",
+    )?;
+
     Ok(())
 }
 

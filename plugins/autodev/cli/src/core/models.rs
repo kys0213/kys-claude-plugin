@@ -499,6 +499,8 @@ impl fmt::Display for EscalationLevel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueItemRow {
     pub work_id: String,
+    /// 같은 외부 엔티티에서 파생된 아이템을 연결하는 식별자.
+    pub source_id: String,
     pub repo_id: String,
     pub queue_type: QueueType,
     pub phase: QueuePhase,

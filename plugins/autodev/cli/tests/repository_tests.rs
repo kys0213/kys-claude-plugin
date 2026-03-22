@@ -87,7 +87,7 @@ fn repo_remove_cascade_deletes_all_dependent_tables() {
         .hitl_create(&NewHitlEvent {
             repo_id: repo_id.clone(),
             spec_id: Some(spec_id.clone()),
-            work_id: Some("pr:org/repo:1".into()),
+            work_id: Some("github:org/repo#1:review".into()),
             severity: HitlSeverity::High,
             situation: "conflict".into(),
             context: "ctx".into(),
@@ -104,7 +104,8 @@ fn repo_remove_cascade_deletes_all_dependent_tables() {
 
     // queue_items
     db.queue_upsert(&QueueItemRow {
-        work_id: "issue:org/test-repo:99".into(),
+        work_id: "github:org/test-repo#99:analyze".into(),
+        source_id: "github:org/test-repo#99".into(),
         repo_id: repo_id.clone(),
         queue_type: QueueType::Issue,
         phase: QueuePhase::Pending,
@@ -125,7 +126,7 @@ fn repo_remove_cascade_deletes_all_dependent_tables() {
         repo_id: repo_id.clone(),
         spec_id: Some(spec_id.clone()),
         decision_type: DecisionType::Advance,
-        target_work_id: Some("issue:org/test-repo:99".into()),
+        target_work_id: Some("github:org/test-repo#99:analyze".into()),
         reasoning: "looks good".into(),
         context_json: None,
     })
@@ -463,7 +464,7 @@ fn create_test_hitl_event(db: &Database, repo_id: &str) -> String {
     let event = NewHitlEvent {
         repo_id: repo_id.to_string(),
         spec_id: Some("spec-1".to_string()),
-        work_id: Some("pr:org/repo:42".to_string()),
+        work_id: Some("github:org/repo#42:review".to_string()),
         severity: HitlSeverity::High,
         situation: "Test conflict detected".to_string(),
         context: "File A conflicts with File B".to_string(),
@@ -490,7 +491,7 @@ fn hitl_create_and_show() {
     assert_eq!(event.id, event_id);
     assert_eq!(event.repo_id, repo_id);
     assert_eq!(event.spec_id, Some("spec-1".to_string()));
-    assert_eq!(event.work_id, Some("pr:org/repo:42".to_string()));
+    assert_eq!(event.work_id, Some("github:org/repo#42:review".to_string()));
     assert_eq!(event.severity.to_string(), "high");
     assert_eq!(event.status.to_string(), "pending");
     assert_eq!(event.situation, "Test conflict detected");

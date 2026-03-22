@@ -81,6 +81,13 @@ impl<T: HasWorkId> StateQueue<T> {
         self.index.contains_key(id)
     }
 
+    /// 주어진 prefix로 시작하는 work_id가 큐에 존재하는지 확인한다.
+    ///
+    /// source_id 기반 dedup에 사용: 같은 외부 엔티티의 어떤 상태라도 큐에 있으면 true.
+    pub fn contains_by_prefix(&self, prefix: &str) -> bool {
+        self.index.keys().any(|k| k.starts_with(prefix))
+    }
+
     /// 해당 work_id의 현재 상태를 반환한다.
     pub fn phase_of(&self, id: &str) -> Option<QueuePhase> {
         self.index.get(id).copied()

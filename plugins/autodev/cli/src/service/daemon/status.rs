@@ -82,7 +82,7 @@ mod tests {
             updated_at: "2026-02-23T14:00:00+09:00".to_string(),
             uptime_secs: 3600,
             active_items: vec![StatusItem {
-                work_id: "issue:org/repo:42".to_string(),
+                work_id: "github:org/repo#42:analyze".to_string(),
                 queue_type: QueueType::Issue,
                 repo_name: "org/repo".to_string(),
                 number: 42,
@@ -96,7 +96,7 @@ mod tests {
         let loaded = read_status(&path).expect("should read back");
 
         assert_eq!(loaded.active_items.len(), 1);
-        assert_eq!(loaded.active_items[0].work_id, "issue:org/repo:42");
+        assert_eq!(loaded.active_items[0].work_id, "github:org/repo#42:analyze");
         assert_eq!(loaded.wip, 1);
     }
 

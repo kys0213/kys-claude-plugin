@@ -392,10 +392,10 @@ mod tests {
         queue.push(QueuePhase::Pending, existing);
 
         let new_paths = vec!["src/core/collector.rs".to_string()];
-        let conflicts = find_conflicting_items(&queue, &new_paths, "issue:org/repo:2");
+        let conflicts = find_conflicting_items(&queue, &new_paths, "github:org/repo#2:analyze");
 
         assert_eq!(conflicts.len(), 1);
-        assert_eq!(conflicts[0], "issue:org/repo:1");
+        assert_eq!(conflicts[0], "github:org/repo#1:analyze");
     }
 
     #[test]
@@ -415,7 +415,7 @@ mod tests {
         queue.push(QueuePhase::Pending, item);
 
         let paths = vec!["src/core/collector.rs".to_string()];
-        let conflicts = find_conflicting_items(&queue, &paths, "issue:org/repo:1");
+        let conflicts = find_conflicting_items(&queue, &paths, "github:org/repo#1:analyze");
 
         assert!(conflicts.is_empty());
     }
@@ -437,7 +437,7 @@ mod tests {
         queue.push(QueuePhase::Pending, existing);
 
         let new_paths = vec!["src/service/daemon.rs".to_string()];
-        let conflicts = find_conflicting_items(&queue, &new_paths, "issue:org/repo:2");
+        let conflicts = find_conflicting_items(&queue, &new_paths, "github:org/repo#2:analyze");
 
         assert!(conflicts.is_empty());
     }
@@ -543,7 +543,10 @@ mod tests {
         assert!(analysis
             .inferred_paths
             .contains(&"src/core/collector.rs".to_string()));
-        assert_eq!(analysis.conflicting_work_ids, vec!["issue:org/repo:1"]);
+        assert_eq!(
+            analysis.conflicting_work_ids,
+            vec!["github:org/repo#1:analyze"]
+        );
         assert_eq!(analysis.matching_spec_ids, vec!["s1"]);
         assert!(analysis.requires_sequential);
     }
