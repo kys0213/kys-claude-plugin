@@ -1,28 +1,32 @@
 # Spec v5 Draft
 
 > **Date**: 2026-03-21
+> **구조**: 사용자 플로우 기반 + 관심사별 상세 스펙
 
 ## 설계 문서
 
-- **[DESIGN-v5.md](./DESIGN-v5.md)** — 전체 아키텍처 설계
+- **[DESIGN-v5.md](./DESIGN-v5.md)** — 전체 아키텍처 (DataSource + AgentRuntime)
 
-## Flow 문서
+## 사용자 플로우 (flows/)
+
+"사용자가 X를 하면 어떻게 되지?" — 시나리오 기반, 기획자/사용자 대상
 
 | # | Flow | 설명 |
 |---|------|------|
-| 00 | [DataSource](./00-datasource/flow.md) | 외부 시스템 OCP (GitHub, Slack, Jira) |
-| 00 | [AgentRuntime](./00-agent-runtime/flow.md) | LLM 실행 OCP (Claude, Gemini, Codex) |
-| 01 | [레포 등록](./01-repo-registration/flow.md) | 레포 등록/변경/제거 + DataSource 바인딩 |
-| 02 | [이슈 등록](./02-issue-registration/flow.md) | 이슈 모드 + 의존성 분석 + 스펙 링크 |
-| 03 | [스펙 등록](./03-spec-registration/flow.md) | 스펙 모드 + lifecycle (6상태) |
-| 04 | [스펙 우선순위](./04-spec-priority/flow.md) | 다중 스펙 + DependencyGuard |
-| 05 | [HITL 알림](./05-hitl-notification/flow.md) | HITL 생성/응답/라우팅 |
-| 06 | [칸반 보드](./06-kanban-board/flow.md) | TUI + CLI + Claw 시각화 |
-| 07 | [피드백 루프](./07-feedback-loop/flow.md) | PR 리뷰 / spec update / replan |
-| 08 | [스펙 완료](./08-spec-completion/flow.md) | 완료 감지 + 테스트 + gap detection |
-| 09 | [실패 복구](./09-failure-recovery/flow.md) | DataSource별 escalation + shutdown |
-| 10 | [Claw 워크스페이스](./10-claw-workspace/flow.md) | 세션 경험 + slash command 통합 |
-| 11 | [컨벤션](./11-convention-bootstrap/flow.md) | 부트스트랩 + 자율 개선 |
-| 12 | [CLI 레퍼런스](./12-cli-reference/flow.md) | 3-layer + 전체 커맨드 참조 |
-| 13 | [Cron](./13-cron/flow.md) | force trigger + 스크립트 관리 |
-| 14 | [시각화](./14-visualization/flow.md) | --format rich + TUI 패널 + 타임라인 |
+| 01 | [온보딩](./flows/01-setup.md) | 레포 등록 → 컨벤션 부트스트랩 → Claw 초기화 |
+| 02 | [스펙 생명주기](./flows/02-spec-lifecycle.md) | 스펙 등록 → 우선순위 → 이슈 분해 → 완료 판정 |
+| 03 | [이슈 파이프라인](./flows/03-issue-pipeline.md) | 이슈 감지 → 분석 → 실행 → 피드백 루프 |
+| 04 | [실패 복구와 HITL](./flows/04-failure-and-hitl.md) | 장애 대응 → escalation → 사람 개입 → 복구 |
+| 05 | [모니터링](./flows/05-monitoring.md) | 칸반 보드 + CLI 시각화 + TUI Dashboard |
+
+## 관심사별 상세 스펙 (concerns/)
+
+"이 시스템은 내부적으로 어떻게 동작하지?" — 구현자 대상
+
+| 문서 | 설명 |
+|------|------|
+| [DataSource](./concerns/datasource.md) | 외부 시스템 추상화 trait + GitHub/Slack/Jira 구현 |
+| [AgentRuntime](./concerns/agent-runtime.md) | LLM 실행 추상화 trait + Registry + 확장 시나리오 |
+| [Claw 워크스페이스](./concerns/claw-workspace.md) | 판단 레이어 규칙/스킬 구조 + /claw 세션 |
+| [Cron 엔진](./concerns/cron-engine.md) | 주기 실행 + 품질 루프 + force trigger |
+| [CLI 레퍼런스](./concerns/cli-reference.md) | 3-layer SSOT + 전체 커맨드 트리 |
