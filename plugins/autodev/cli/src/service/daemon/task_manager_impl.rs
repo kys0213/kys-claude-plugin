@@ -60,6 +60,14 @@ impl TaskManager for DefaultTaskManager {
         }
         items
     }
+
+    fn workspace_limits(&self) -> Vec<(String, usize)> {
+        let mut limits = Vec::new();
+        for source in &self.sources {
+            limits.extend(source.workspace_limits());
+        }
+        limits
+    }
 }
 
 #[cfg(test)]
@@ -101,6 +109,10 @@ mod tests {
         }
 
         fn active_items(&self) -> Vec<crate::service::daemon::status::StatusItem> {
+            Vec::new()
+        }
+
+        fn workspace_limits(&self) -> Vec<(String, usize)> {
             Vec::new()
         }
     }

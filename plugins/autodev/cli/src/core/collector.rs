@@ -31,4 +31,8 @@ pub trait Collector: Send {
 
     /// Return currently active items for status reporting.
     fn active_items(&self) -> Vec<StatusItem>;
+
+    /// 워크스페이스(레포)별 concurrency 상한을 반환한다.
+    /// key = repo_name, value = concurrency limit (0이면 제한 없음).
+    fn workspace_limits(&self) -> Vec<(String, usize)>;
 }

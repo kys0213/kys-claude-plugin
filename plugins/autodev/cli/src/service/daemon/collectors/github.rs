@@ -156,6 +156,7 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> GitHubT
             };
 
             // Always cache concurrency limits (even when scan is skipped)
+            repo.concurrency = repo_cfg.sources.github.concurrency as usize;
             repo.issue_concurrency = repo_cfg.sources.github.issue_concurrency as usize;
             repo.pr_concurrency = repo_cfg.sources.github.pr_concurrency as usize;
 
@@ -487,6 +488,13 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + Send> Collect
             }
         }
         items
+    }
+
+    fn workspace_limits(&self) -> Vec<(String, usize)> {
+        self.repos
+            .values()
+            .map(|repo| (repo.name().to_string(), repo.concurrency))
+            .collect()
     }
 }
 
