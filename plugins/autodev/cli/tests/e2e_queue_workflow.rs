@@ -436,6 +436,253 @@ fn e2e_queue_list_unextracted() {
 }
 
 // ═══════════════════════════════════════════════
+// 5b. queue done / hitl / retry-script (V5)
+// ═══════════════════════════════════════════════
+
+#[test]
+fn e2e_queue_done_transitions_completed_to_done() {
+    let home = TempDir::new().unwrap();
+    let repo_id = setup_repo(&home, REPO_URL);
+    seed_queue_item(
+        &home,
+        &repo_id,
+        "issue:org/queue-repo:100",
+        "issue",
+        "completed",
+        None,
+        100,
+    );
+
+    autodev(&home)
+        .args(["queue", "done", "issue:org/queue-repo:100"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("done"));
+
+    // Verify final state
+    autodev(&home)
+        .args(["queue", "show", "issue:org/queue-repo:100"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("done"));
+}
+
+#[test]
+fn e2e_queue_done_rejects_non_completed() {
+    let home = TempDir::new().unwrap();
+    let repo_id = setup_repo(&home, REPO_URL);
+    seed_queue_item(
+        &home,
+        &repo_id,
+        "issue:org/queue-repo:101",
+        "issue",
+        "running",
+        None,
+        101,
+    );
+
+    autodev(&home)
+        .args(["queue", "done", "issue:org/queue-repo:101"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Completed phase"));
+}
+
+#[test]
+fn e2e_queue_done_with_reason() {
+    let home = TempDir::new().unwrap();
+    let repo_id = setup_repo(&home, REPO_URL);
+    seed_queue_item(
+        &home,
+        &repo_id,
+        "issue:org/queue-repo:102",
+        "issue",
+        "completed",
+        None,
+        102,
+    );
+
+    autodev(&home)
+        .args([
+            "queue",
+            "done",
+            "issue:org/queue-repo:102",
+            "--reason",
+            "all checks passed",
+        ])
+        .assert()
+        .success();
+
+    // Decision should be recorded
+    autodev(&home)
+        .args(["decisions", "list", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("all checks passed"));
+}
+
+#[test]
+fn e2e_queue_hitl_transitions_completed_to_hitl() {
+    let home = TempDir::new().unwrap();
+    let repo_id = setup_repo(&home, REPO_URL);
+    seed_queue_item(
+        &home,
+        &repo_id,
+        "issue:org/queue-repo:110",
+        "issue",
+        "completed",
+        None,
+        110,
+    );
+
+    autodev(&home)
+        .args([
+            "queue",
+            "hitl",
+            "issue:org/queue-repo:110",
+            "--reason",
+            "needs human review",
+        ])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("hitl").and(predicate::str::contains("needs human review")),
+        );
+
+    // Verify state is hitl
+    autodev(&home)
+        .args(["queue", "show", "issue:org/queue-repo:110"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("hitl"));
+
+    // HITL event should be created
+    autodev(&home)
+        .args(["hitl", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("needs human review"));
+}
+
+#[test]
+fn e2e_queue_hitl_rejects_non_completed() {
+    let home = TempDir::new().unwrap();
+    let repo_id = setup_repo(&home, REPO_URL);
+    seed_queue_item(
+        &home,
+        &repo_id,
+        "issue:org/queue-repo:111",
+        "issue",
+        "pending",
+        None,
+        111,
+    );
+
+    autodev(&home)
+        .args([
+            "queue",
+            "hitl",
+            "issue:org/queue-repo:111",
+            "--reason",
+            "test",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Completed phase"));
+}
+
+#[test]
+fn e2e_queue_retry_script_transitions_failed_to_done() {
+    let home = TempDir::new().unwrap();
+    let repo_id = setup_repo(&home, REPO_URL);
+    seed_queue_item(
+        &home,
+        &repo_id,
+        "issue:org/queue-repo:120",
+        "issue",
+        "failed",
+        None,
+        120,
+    );
+
+    autodev(&home)
+        .args(["queue", "retry-script", "issue:org/queue-repo:120"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("retry-script"));
+
+    // Verify final state
+    autodev(&home)
+        .args(["queue", "show", "issue:org/queue-repo:120"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("done"));
+}
+
+#[test]
+fn e2e_queue_retry_script_rejects_non_failed() {
+    let home = TempDir::new().unwrap();
+    let repo_id = setup_repo(&home, REPO_URL);
+    seed_queue_item(
+        &home,
+        &repo_id,
+        "issue:org/queue-repo:121",
+        "issue",
+        "completed",
+        None,
+        121,
+    );
+
+    autodev(&home)
+        .args(["queue", "retry-script", "issue:org/queue-repo:121"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed phase"));
+}
+
+#[test]
+fn e2e_queue_full_v5_lifecycle() {
+    let home = TempDir::new().unwrap();
+    let repo_id = setup_repo(&home, REPO_URL);
+    seed_queue_item(
+        &home,
+        &repo_id,
+        "issue:org/queue-repo:130",
+        "issue",
+        "pending",
+        None,
+        130,
+    );
+
+    // pending → ready → running → completed (via advance)
+    autodev(&home)
+        .args(["queue", "advance", "issue:org/queue-repo:130"])
+        .assert()
+        .success();
+    autodev(&home)
+        .args(["queue", "advance", "issue:org/queue-repo:130"])
+        .assert()
+        .success();
+    autodev(&home)
+        .args(["queue", "advance", "issue:org/queue-repo:130"])
+        .assert()
+        .success();
+
+    // completed → done (via queue done)
+    autodev(&home)
+        .args(["queue", "done", "issue:org/queue-repo:130"])
+        .assert()
+        .success();
+
+    // Verify final state
+    autodev(&home)
+        .args(["queue", "show", "issue:org/queue-repo:130"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("done"));
+}
+
+// ═══════════════════════════════════════════════
 // 6. PR advance with review overflow → HITL
 // ═══════════════════════════════════════════════
 
@@ -553,12 +800,12 @@ fn e2e_queue_retry_script() {
         .success()
         .stdout(predicate::str::contains("retry-script"));
 
-    // Verify state is now completed
+    // Verify state is now done (retry-script transitions Failed → Done)
     autodev(&home)
         .args(["queue", "show", "issue:org/queue-repo:120"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("completed"));
+        .stdout(predicate::str::contains("done"));
 }
 
 // ═══════════════════════════════════════════════

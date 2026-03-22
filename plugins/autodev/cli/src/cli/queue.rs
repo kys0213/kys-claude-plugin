@@ -145,6 +145,131 @@ fn check_review_overflow(
     }
 }
 
+/// Completed 아이템의 on_done 처리 결과.
+#[derive(Debug)]
+pub struct QueueDoneResult {
+    pub output: String,
+    pub hitl_event: Option<NewHitlEvent>,
+    pub hitl_id: Option<String>,
+}
+
+/// Completed 아이템을 Done으로 전이한다.
+///
+/// V5 흐름: evaluate cron이 완료 판정 후 `autodev queue done <work_id>`를 호출한다.
+/// on_done script 인프라가 구현되면 여기서 script를 실행하고,
+/// 실패 시 Failed로 전이한다. 현재는 즉시 Done으로 전이한다.
+pub fn queue_done(db: &Database, work_id: &str, reason: Option<&str>) -> Result<QueueDoneResult> {
+    let item = db
+        .queue_get_item(work_id)?
+        .ok_or_else(|| anyhow::anyhow!("queue item not found: {work_id}"))?;
+
+    if item.phase != QueuePhase::Completed {
+        anyhow::bail!(
+            "queue done requires Completed phase, but {work_id} is in {} phase",
+            item.phase
+        );
+    }
+
+    // TODO: on_done script 실행 (V5 workspace.yaml 인프라 구현 시)
+    // script 성공 → Done, script 실패 → Failed
+
+    db.queue_transit(work_id, QueuePhase::Completed, QueuePhase::Done)?;
+
+    // Decision 기록
+    record_decision(
+        db,
+        &item.repo_id,
+        DecisionType::Advance,
+        work_id,
+        Some(reason.unwrap_or("evaluate: done")),
+    );
+
+    Ok(QueueDoneResult {
+        output: format!("done: {work_id} (completed → done)"),
+        hitl_event: None,
+        hitl_id: None,
+    })
+}
+
+/// Completed 아이템을 Hitl로 전이하고 HITL 이벤트를 생성한다.
+///
+/// V5 흐름: evaluate cron이 사람 판단 필요로 분류 후
+/// `autodev queue hitl <work_id> --reason "..."` 를 호출한다.
+pub fn queue_hitl(db: &Database, work_id: &str, reason: &str) -> Result<QueueDoneResult> {
+    let item = db
+        .queue_get_item(work_id)?
+        .ok_or_else(|| anyhow::anyhow!("queue item not found: {work_id}"))?;
+
+    if item.phase != QueuePhase::Completed {
+        anyhow::bail!(
+            "queue hitl requires Completed phase, but {work_id} is in {} phase",
+            item.phase
+        );
+    }
+
+    db.queue_transit(work_id, QueuePhase::Completed, QueuePhase::Hitl)?;
+
+    // HITL 이벤트 생성
+    let event = NewHitlEvent {
+        repo_id: item.repo_id.clone(),
+        spec_id: None,
+        work_id: Some(work_id.to_string()),
+        severity: HitlSeverity::Medium,
+        situation: reason.to_string(),
+        context: format!("work_id: {work_id}"),
+        options: vec![
+            "Mark as done".to_string(),
+            "Retry".to_string(),
+            "Skip".to_string(),
+        ],
+    };
+    let hitl_id = db.hitl_create(&event).ok();
+
+    // Decision 기록
+    record_decision(db, &item.repo_id, DecisionType::Hitl, work_id, Some(reason));
+
+    Ok(QueueDoneResult {
+        output: format!("hitl: {work_id} (completed → hitl, reason: {reason})"),
+        hitl_event: Some(event),
+        hitl_id,
+    })
+}
+
+/// Failed 아이템의 on_done script를 재실행한다.
+///
+/// V5 흐름: on_done script 실패로 Failed 상태가 된 아이템을
+/// 재시도한다. script 성공 시 Done, 실패 시 Failed 유지.
+/// on_done script 인프라가 구현되면 실제 script를 실행한다.
+/// 현재는 즉시 Done으로 전이한다.
+pub fn queue_retry_script(db: &Database, work_id: &str) -> Result<String> {
+    let item = db
+        .queue_get_item(work_id)?
+        .ok_or_else(|| anyhow::anyhow!("queue item not found: {work_id}"))?;
+
+    if item.phase != QueuePhase::Failed {
+        anyhow::bail!(
+            "queue retry-script requires Failed phase, but {work_id} is in {} phase",
+            item.phase
+        );
+    }
+
+    // TODO: on_done script 재실행 (V5 workspace.yaml 인프라 구현 시)
+    // script 성공 → Done, script 실패 → Failed 유지
+
+    db.queue_transit(work_id, QueuePhase::Failed, QueuePhase::Done)?;
+
+    // Decision 기록
+    record_decision(
+        db,
+        &item.repo_id,
+        DecisionType::Advance,
+        work_id,
+        Some("retry-script: on_done re-executed"),
+    );
+
+    Ok(format!("retry-script: {work_id} (failed → done)"))
+}
+
 /// 단일 큐 아이템 상세 조회
 pub fn queue_show(db: &Database, work_id: &str, json: bool) -> Result<String> {
     let item = db
@@ -301,105 +426,5 @@ pub fn queue_context(db: &Database, work_id: &str, json: bool) -> Result<String>
         title,
         item.failure_count,
         item.escalation_level,
-    ))
-}
-
-/// Completed → Done 전환 (evaluate 완료 판정 후 호출)
-pub fn queue_done(db: &Database, work_id: &str, reason: Option<&str>) -> Result<String> {
-    let item = db
-        .queue_get_item(work_id)?
-        .ok_or_else(|| anyhow::anyhow!("queue item not found: {work_id}"))?;
-
-    if item.phase != QueuePhase::Completed {
-        anyhow::bail!(
-            "cannot mark as done: item is in '{}' phase (expected 'completed')",
-            item.phase
-        );
-    }
-
-    let transitioned = db.queue_transit(work_id, QueuePhase::Completed, QueuePhase::Done)?;
-    if !transitioned {
-        anyhow::bail!("failed to transition {work_id}: concurrent modification");
-    }
-
-    // Record decision
-    record_decision(db, &item.repo_id, DecisionType::Advance, work_id, reason);
-
-    Ok(format!("done: {work_id} (completed → done)"))
-}
-
-/// queue_hitl의 결과: 출력 메시지와 생성된 HITL 이벤트.
-#[derive(Debug)]
-pub struct QueueHitlResult {
-    pub output: String,
-    pub hitl_event: Option<NewHitlEvent>,
-    pub hitl_id: Option<String>,
-}
-
-/// Completed → HITL 전환 (evaluate가 사람 판단 필요로 분류)
-pub fn queue_hitl(db: &Database, work_id: &str, reason: Option<&str>) -> Result<QueueHitlResult> {
-    let item = db
-        .queue_get_item(work_id)?
-        .ok_or_else(|| anyhow::anyhow!("queue item not found: {work_id}"))?;
-
-    if item.phase != QueuePhase::Completed {
-        anyhow::bail!(
-            "cannot move to hitl: item is in '{}' phase (expected 'completed')",
-            item.phase
-        );
-    }
-
-    let transitioned = db.queue_transit(work_id, QueuePhase::Completed, QueuePhase::Hitl)?;
-    if !transitioned {
-        anyhow::bail!("failed to transition {work_id}: concurrent modification");
-    }
-
-    // Record decision
-    record_decision(db, &item.repo_id, DecisionType::Hitl, work_id, reason);
-
-    // Create HITL event
-    let default_reason = reason.unwrap_or("evaluate determined human judgment needed");
-    let event = NewHitlEvent {
-        repo_id: item.repo_id.clone(),
-        spec_id: None,
-        work_id: Some(work_id.to_string()),
-        severity: HitlSeverity::Medium,
-        situation: format!("Queue item requires human review: {default_reason}"),
-        context: format!("work_id: {work_id}"),
-        options: vec![
-            "Mark as done".to_string(),
-            "Retry".to_string(),
-            "Skip".to_string(),
-        ],
-    };
-    let hitl_id = db.hitl_create(&event).ok();
-
-    Ok(QueueHitlResult {
-        output: format!("hitl: {work_id} (completed → hitl)"),
-        hitl_event: Some(event),
-        hitl_id,
-    })
-}
-
-/// Failed 아이템을 Completed로 되돌려 on_done 재실행 기회를 제공
-pub fn queue_retry_script(db: &Database, work_id: &str) -> Result<String> {
-    let item = db
-        .queue_get_item(work_id)?
-        .ok_or_else(|| anyhow::anyhow!("queue item not found: {work_id}"))?;
-
-    if item.phase != QueuePhase::Failed {
-        anyhow::bail!(
-            "cannot retry script: item is in '{}' phase (expected 'failed')",
-            item.phase
-        );
-    }
-
-    let transitioned = db.queue_transit(work_id, QueuePhase::Failed, QueuePhase::Completed)?;
-    if !transitioned {
-        anyhow::bail!("failed to transition {work_id}: concurrent modification");
-    }
-
-    Ok(format!(
-        "retry-script: {work_id} (failed → completed, will be re-evaluated)"
     ))
 }

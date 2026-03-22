@@ -882,11 +882,23 @@ async fn main() -> Result<()> {
                 println!("{output}");
             }
             QueueAction::Done { work_id, reason } => {
-                let output = client::queue::queue_done(&db, &work_id, reason.as_deref())?;
-                println!("{output}");
+                let result = client::queue::queue_done(&db, &work_id, reason.as_deref())?;
+                println!("{}", result.output);
+
+                // Dispatch HITL notification if created by done handler
+                if let Some(ref hitl_event) = result.hitl_event {
+                    if let Some(ref dispatcher) = build_cli_dispatcher(&cfg) {
+                        let notif = autodev::core::notifier::NotificationEvent::from_hitl_created(
+                            hitl_event,
+                            result.hitl_id.clone(),
+                        );
+                        dispatch_notification(dispatcher, &notif).await;
+                    }
+                }
             }
             QueueAction::Hitl { work_id, reason } => {
-                let result = client::queue::queue_hitl(&db, &work_id, reason.as_deref())?;
+                let reason_str = reason.as_deref().unwrap_or("manual hitl");
+                let result = client::queue::queue_hitl(&db, &work_id, reason_str)?;
                 println!("{}", result.output);
 
                 // Dispatch HITL notification if created

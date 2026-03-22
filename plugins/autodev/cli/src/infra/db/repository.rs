@@ -968,7 +968,7 @@ impl QueueRepository for Database {
              skip_reason, created_at, updated_at, \
              task_kind, github_number, metadata_json, \
              failure_count, escalation_level \
-             FROM queue_items WHERE repo_id = ?1 AND phase NOT IN ('done', 'skipped') \
+             FROM queue_items WHERE repo_id = ?1 AND phase NOT IN ('done', 'skipped', 'failed') \
              ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map(rusqlite::params![repo_id], map_queue_item_row)?;
