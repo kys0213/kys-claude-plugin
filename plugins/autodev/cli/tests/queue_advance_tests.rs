@@ -91,18 +91,6 @@ fn advance_running_to_completed() {
 }
 
 #[test]
-fn advance_completed_to_done() {
-    let db = open_memory_db();
-    let repo_id = add_test_repo(&db);
-    insert_queue_item(&db, &repo_id, "work-1", "completed");
-
-    db.queue_advance("work-1").unwrap();
-
-    let phase = db.queue_get_phase("work-1").unwrap();
-    assert_eq!(phase, Some(QueuePhase::Done));
-}
-
-#[test]
 fn advance_nonexistent_returns_error() {
     let db = open_memory_db();
 
@@ -564,6 +552,177 @@ fn advance_creates_hitl_on_review_overflow() {
     let event = &hitl_events[0];
     assert!(event.situation.contains("review iteration"));
     assert_eq!(event.work_id.as_deref(), Some("pr:org/test-repo:50"));
+}
+
+// ═══════════════════════════════════════════════
+// 12. queue_done (Completed → Done)
+// ═══════════════════════════════════════════════
+
+#[test]
+fn queue_done_completed_to_done() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-done-1", "completed");
+
+    let output = autodev::cli::queue::queue_done(&db, "work-done-1", None).unwrap();
+    assert!(output.contains("done"));
+    assert!(output.contains("completed"));
+
+    let phase = db.queue_get_phase("work-done-1").unwrap();
+    assert_eq!(phase, Some(QueuePhase::Done));
+}
+
+#[test]
+fn queue_done_with_reason_records_decision() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-done-2", "completed");
+
+    autodev::cli::queue::queue_done(&db, "work-done-2", Some("all checks passed")).unwrap();
+
+    let decisions = db.decision_list(None, 10).unwrap();
+    assert!(!decisions.is_empty());
+    assert_eq!(decisions[0].reasoning, "all checks passed");
+}
+
+#[test]
+fn queue_done_wrong_phase_fails() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-done-3", "running");
+
+    let result = autodev::cli::queue::queue_done(&db, "work-done-3", None);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("running"));
+}
+
+#[test]
+fn queue_done_not_found_fails() {
+    let db = open_memory_db();
+
+    let result = autodev::cli::queue::queue_done(&db, "nonexistent", None);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("not found"));
+}
+
+// ═══════════════════════════════════════════════
+// 13. queue_hitl (Completed → HITL)
+// ═══════════════════════════════════════════════
+
+#[test]
+fn queue_hitl_completed_to_hitl() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-hitl-1", "completed");
+
+    let result = autodev::cli::queue::queue_hitl(&db, "work-hitl-1", None).unwrap();
+    assert!(result.output.contains("hitl"));
+    assert!(result.hitl_event.is_some());
+    assert!(result.hitl_id.is_some());
+
+    let phase = db.queue_get_phase("work-hitl-1").unwrap();
+    assert_eq!(phase, Some(QueuePhase::Hitl));
+}
+
+#[test]
+fn queue_hitl_with_reason() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-hitl-2", "completed");
+
+    let result = autodev::cli::queue::queue_hitl(&db, "work-hitl-2", Some("needs review")).unwrap();
+    assert!(result.output.contains("hitl"));
+
+    // Check HITL event was created with reason
+    let hitl_events = db.hitl_list(None).unwrap();
+    assert!(!hitl_events.is_empty());
+    assert!(hitl_events[0].situation.contains("needs review"));
+}
+
+#[test]
+fn queue_hitl_wrong_phase_fails() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-hitl-3", "pending");
+
+    let result = autodev::cli::queue::queue_hitl(&db, "work-hitl-3", None);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("pending"));
+}
+
+// ═══════════════════════════════════════════════
+// 14. queue_retry_script (Failed → Completed)
+// ═══════════════════════════════════════════════
+
+#[test]
+fn queue_retry_script_failed_to_completed() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-retry-1", "failed");
+
+    let output = autodev::cli::queue::queue_retry_script(&db, "work-retry-1").unwrap();
+    assert!(output.contains("retry-script"));
+    assert!(output.contains("failed"));
+    assert!(output.contains("completed"));
+
+    let phase = db.queue_get_phase("work-retry-1").unwrap();
+    assert_eq!(phase, Some(QueuePhase::Completed));
+}
+
+#[test]
+fn queue_retry_script_wrong_phase_fails() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-retry-2", "running");
+
+    let result = autodev::cli::queue::queue_retry_script(&db, "work-retry-2");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("running"));
+}
+
+#[test]
+fn queue_retry_script_not_found_fails() {
+    let db = open_memory_db();
+
+    let result = autodev::cli::queue::queue_retry_script(&db, "nonexistent");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("not found"));
+}
+
+// ═══════════════════════════════════════════════
+// 15. queue_context
+// ═══════════════════════════════════════════════
+
+#[test]
+fn queue_context_returns_item_info() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-ctx-1", "running");
+
+    let output = autodev::cli::queue::queue_context(&db, "work-ctx-1", false).unwrap();
+    assert!(output.contains("work-ctx-1"));
+    assert!(output.contains("running"));
+}
+
+#[test]
+fn queue_context_json_output() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-ctx-2", "pending");
+
+    let output = autodev::cli::queue::queue_context(&db, "work-ctx-2", true).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&output).expect("valid JSON");
+    assert_eq!(parsed["work_id"], "work-ctx-2");
+    assert_eq!(parsed["queue"]["phase"], "pending");
+}
+
+#[test]
+fn queue_context_not_found_fails() {
+    let db = open_memory_db();
+
+    let result = autodev::cli::queue::queue_context(&db, "nonexistent", false);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("not found"));
 }
 
 #[test]

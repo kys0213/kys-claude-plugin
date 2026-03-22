@@ -12,21 +12,30 @@ use tempfile::TempDir;
 const REPO_URL: &str = "https://github.com/org/v5-repo";
 
 // ═══════════════════════════════════════════════
-// 1. autodev context
+// 1. autodev context (--field uses v5 MockDataSource)
 // ═══════════════════════════════════════════════
 
 #[test]
 fn v5_context_outputs_json() {
     let home = TempDir::new().unwrap();
-    setup_repo(&home, REPO_URL);
+    let repo_id = setup_repo(&home, REPO_URL);
+    seed_queue_item(
+        &home,
+        &repo_id,
+        "issue:org/v5-repo:42",
+        "issue",
+        "running",
+        Some("Implement feature"),
+        42,
+    );
 
     autodev(&home)
-        .args(["context", "github:org/v5-repo#42:implement", "--json"])
+        .args(["context", "issue:org/v5-repo:42", "--json"])
         .assert()
         .success()
         .stdout(
             predicate::str::contains("work_id")
-                .and(predicate::str::contains("github:org/v5-repo#42:implement")),
+                .and(predicate::str::contains("issue:org/v5-repo:42")),
         );
 }
 
@@ -86,18 +95,26 @@ fn v5_context_nonexistent_field_fails() {
 #[test]
 fn v5_context_contains_source_type() {
     let home = TempDir::new().unwrap();
-    setup_repo(&home, REPO_URL);
+    let repo_id = setup_repo(&home, REPO_URL);
+    seed_queue_item(
+        &home,
+        &repo_id,
+        "issue:org/v5-repo:1",
+        "issue",
+        "running",
+        Some("Review task"),
+        1,
+    );
 
     let output = autodev(&home)
-        .args(["context", "github:org/v5-repo#1:review", "--json"])
+        .args(["context", "issue:org/v5-repo:1", "--json"])
         .output()
         .unwrap();
     assert!(output.status.success());
 
     let stdout = String::from_utf8(output.stdout).unwrap();
     let ctx: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    assert_eq!(ctx["source"]["type"], "mock");
-    assert_eq!(ctx["queue"]["state"], "review");
+    assert_eq!(ctx["queue"]["phase"], "running");
 }
 
 // ═══════════════════════════════════════════════
@@ -105,18 +122,24 @@ fn v5_context_contains_source_type() {
 // ═══════════════════════════════════════════════
 
 #[test]
-fn v5_queue_done_prints_message() {
+fn v5_queue_done_transitions_completed_to_done() {
     let home = TempDir::new().unwrap();
-    setup_repo(&home, REPO_URL);
+    let repo_id = setup_repo(&home, REPO_URL);
+    seed_queue_item(
+        &home,
+        &repo_id,
+        "issue:org/v5-repo:42",
+        "issue",
+        "completed",
+        Some("Implement feature"),
+        42,
+    );
 
     autodev(&home)
-        .args(["queue", "done", "github:org/v5-repo#42:implement"])
+        .args(["queue", "done", "issue:org/v5-repo:42"])
         .assert()
         .success()
-        .stdout(
-            predicate::str::contains("queue done")
-                .and(predicate::str::contains("github:org/v5-repo#42:implement")),
-        );
+        .stdout(predicate::str::contains("done"));
 }
 
 // ═══════════════════════════════════════════════
@@ -124,24 +147,30 @@ fn v5_queue_done_prints_message() {
 // ═══════════════════════════════════════════════
 
 #[test]
-fn v5_queue_hitl_prints_reason() {
+fn v5_queue_hitl_transitions_completed_to_hitl() {
     let home = TempDir::new().unwrap();
-    setup_repo(&home, REPO_URL);
+    let repo_id = setup_repo(&home, REPO_URL);
+    seed_queue_item(
+        &home,
+        &repo_id,
+        "issue:org/v5-repo:43",
+        "issue",
+        "completed",
+        Some("Needs review"),
+        43,
+    );
 
     autodev(&home)
         .args([
             "queue",
             "hitl",
-            "github:org/v5-repo#42:implement",
+            "issue:org/v5-repo:43",
             "--reason",
             "needs human review",
         ])
         .assert()
         .success()
-        .stdout(
-            predicate::str::contains("queue hitl")
-                .and(predicate::str::contains("needs human review")),
-        );
+        .stdout(predicate::str::contains("hitl"));
 }
 
 // ═══════════════════════════════════════════════
@@ -149,16 +178,22 @@ fn v5_queue_hitl_prints_reason() {
 // ═══════════════════════════════════════════════
 
 #[test]
-fn v5_queue_retry_script_prints_message() {
+fn v5_queue_retry_script_transitions_failed_to_completed() {
     let home = TempDir::new().unwrap();
-    setup_repo(&home, REPO_URL);
+    let repo_id = setup_repo(&home, REPO_URL);
+    seed_queue_item(
+        &home,
+        &repo_id,
+        "issue:org/v5-repo:44",
+        "issue",
+        "failed",
+        Some("Script failed"),
+        44,
+    );
 
     autodev(&home)
-        .args(["queue", "retry-script", "github:org/v5-repo#42:implement"])
+        .args(["queue", "retry-script", "issue:org/v5-repo:44"])
         .assert()
         .success()
-        .stdout(
-            predicate::str::contains("retry-script")
-                .and(predicate::str::contains("github:org/v5-repo#42:implement")),
-        );
+        .stdout(predicate::str::contains("retry"));
 }

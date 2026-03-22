@@ -89,6 +89,7 @@ enum Commands {
         #[command(subcommand)]
         action: SpecAction,
     },
+
     /// HITL (Human-in-the-Loop) 이벤트 관리
     Hitl {
         #[command(subcommand)]
@@ -283,20 +284,23 @@ enum QueueAction {
         #[arg(long)]
         json: bool,
     },
-    /// v5: Completed → on_done script → Done 전이
+    /// Completed → Done 전환 (evaluate가 완료 판정 후 호출)
     Done {
         /// 작업 ID
         work_id: String,
+        /// 판단 사유
+        #[arg(long)]
+        reason: Option<String>,
     },
-    /// v5: Completed → HITL 전이
+    /// Completed → HITL 전환 (evaluate가 사람 판단 필요로 분류)
     Hitl {
         /// 작업 ID
         work_id: String,
         /// HITL 사유
         #[arg(long)]
-        reason: String,
+        reason: Option<String>,
     },
-    /// v5: Failed 아이템의 on_done script 재실행
+    /// Failed 아이템의 on_done 스크립트 재실행 (Failed → Completed 전환)
     RetryScript {
         /// 작업 ID
         work_id: String,
@@ -877,19 +881,31 @@ async fn main() -> Result<()> {
                 let output = client::queue::queue_show(&db, &work_id, json)?;
                 println!("{output}");
             }
-            QueueAction::Done { work_id } => {
-                println!("v5: queue done {work_id} — evaluate에서 호출되는 명령입니다.");
-                println!("Completed → on_done script → Done 전이를 수행합니다.");
+            QueueAction::Done { work_id, reason } => {
+                let output = client::queue::queue_done(&db, &work_id, reason.as_deref())?;
+                println!("{output}");
             }
             QueueAction::Hitl { work_id, reason } => {
-                println!("v5: queue hitl {work_id} --reason \"{reason}\"");
-                println!("Completed → HITL 전이를 수행합니다.");
+                let result = client::queue::queue_hitl(&db, &work_id, reason.as_deref())?;
+                println!("{}", result.output);
+
+                // Dispatch HITL notification if created
+                if let Some(ref hitl_event) = result.hitl_event {
+                    if let Some(ref dispatcher) = build_cli_dispatcher(&cfg) {
+                        let notif = autodev::core::notifier::NotificationEvent::from_hitl_created(
+                            hitl_event,
+                            result.hitl_id.clone(),
+                        );
+                        dispatch_notification(dispatcher, &notif).await;
+                    }
+                }
             }
             QueueAction::RetryScript { work_id } => {
-                println!("v5: queue retry-script {work_id}");
-                println!("Failed 아이템의 on_done script를 재실행합니다.");
+                let output = client::queue::queue_retry_script(&db, &work_id)?;
+                println!("{output}");
             }
         },
+
         Commands::Config { action } => match action {
             ConfigAction::Show => {
                 client::config_show(&env)?;
@@ -1202,35 +1218,35 @@ async fn main() -> Result<()> {
         },
         Commands::Context {
             work_id,
-            json: _,
+            json,
             field,
         } => {
-            // v5 context 조회: MockDataSource로 기본 컨텍스트 반환
-            // 실제 구현에서는 DataSource를 workspace config에서 resolve
-            use autodev::v5::core::datasource::DataSource;
-            use autodev::v5::core::queue_item::V5QueueItem;
-            use autodev::v5::infra::sources::mock::MockDataSource;
-
-            let parts: Vec<&str> = work_id.rsplitn(2, ':').collect();
-            let (state, source_id) = if parts.len() == 2 {
-                (parts[0], parts[1])
-            } else {
-                ("unknown", work_id.as_str())
-            };
-            let item = V5QueueItem::new(
-                work_id.clone(),
-                source_id.to_string(),
-                "default".to_string(),
-                state.to_string(),
-            );
-            let source = MockDataSource::new("github");
-            let ctx = source.get_context(&item).await?;
-
             if let Some(ref f) = field {
+                // --field: use v5 DataSource for structured field extraction
+                use autodev::v5::core::datasource::DataSource;
+                use autodev::v5::core::queue_item::V5QueueItem;
+                use autodev::v5::infra::sources::mock::MockDataSource;
+
+                let parts: Vec<&str> = work_id.rsplitn(2, ':').collect();
+                let (state, source_id) = if parts.len() == 2 {
+                    (parts[0], parts[1])
+                } else {
+                    ("unknown", work_id.as_str())
+                };
+                let item = V5QueueItem::new(
+                    work_id.clone(),
+                    source_id.to_string(),
+                    "default".to_string(),
+                    state.to_string(),
+                );
+                let source = MockDataSource::new("github");
+                let ctx = source.get_context(&item).await?;
                 let value = client::context::extract_field(&ctx, f)?;
                 println!("{value}");
             } else {
-                println!("{}", serde_json::to_string_pretty(&ctx)?);
+                // Default: use DB-backed context for compatibility
+                let output = client::queue::queue_context(&db, &work_id, json)?;
+                println!("{output}");
             }
         }
         Commands::Board { repo, json } => {
