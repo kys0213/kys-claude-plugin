@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
+use crate::core::config::models::LifecycleAction;
 use crate::core::models::{NewConsumerLog, QueuePhase};
 use crate::core::queue_item::QueueItem;
 use crate::infra::claude::SessionOptions;
@@ -132,6 +133,21 @@ impl fmt::Display for SkipReason {
 
 // ─── Task trait ───
 
+/// Lifecycle 설정 — Task가 yaml에서 로드한 lifecycle action을 TaskRunner에 전달.
+#[derive(Debug, Clone, Default)]
+pub struct LifecycleConfig {
+    pub on_enter: Vec<LifecycleAction>,
+    pub on_done: Vec<LifecycleAction>,
+    pub on_fail: Vec<LifecycleAction>,
+}
+
+impl LifecycleConfig {
+    /// lifecycle action이 하나라도 설정되어 있는지 확인.
+    pub fn has_any(&self) -> bool {
+        !self.on_enter.is_empty() || !self.on_done.is_empty() || !self.on_fail.is_empty()
+    }
+}
+
 /// 모든 pipeline 작업의 공통 인터페이스.
 ///
 /// 생명주기:
@@ -147,6 +163,12 @@ pub trait Task: Send + Sync {
 
     /// 이 task가 속한 레포 이름 (e.g. "org/repo")
     fn repo_name(&self) -> &str;
+
+    /// yaml state에 정의된 lifecycle 설정 반환.
+    /// 기본값은 빈 config (lifecycle 미설정).
+    fn lifecycle_config(&self) -> LifecycleConfig {
+        LifecycleConfig::default()
+    }
 
     /// Agent 호출 전 준비.
     /// Preflight 검사, worktree 생성, 프롬프트 구성을 수행한다.

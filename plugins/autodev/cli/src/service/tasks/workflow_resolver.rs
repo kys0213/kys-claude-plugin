@@ -96,6 +96,7 @@ mod tests {
     fn resolve_custom_command() {
         let stage = WorkflowStage {
             command: Some("/review:multi-review".into()),
+            ..Default::default()
         };
         let result = resolve_workflow_prompt(&stage, TaskType::Review);
         assert_eq!(result, "/review:multi-review");
@@ -105,6 +106,7 @@ mod tests {
     fn resolve_with_command() {
         let stage = WorkflowStage {
             command: Some("/custom-review".into()),
+            ..Default::default()
         };
         let result = resolve_workflow_prompt(&stage, TaskType::Review);
         assert_eq!(result, "/custom-review");
