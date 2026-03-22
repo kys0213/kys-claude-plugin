@@ -44,25 +44,68 @@ use crate::core::task::{TaskResult, TaskStatus};
 
 // ─── In-Flight Concurrency Tracker ───
 
-/// Spawned task 동시 실행 제한기.
-/// per-repo 카운트 + 전역 상한으로 Claude 세션 수를 제한한다.
+/// v5 2-level concurrency 제한기.
+///
+/// 두 단계의 동시 실행 제한을 적용한다:
+/// - **Workspace level**: 워크스페이스(레포)당 동시 실행 상한 (`workspace_limits`)
+/// - **Global level**: 전체 시스템 동시 실행 상한 (`max_global`)
+///
+/// Ready → Running 전이 시 두 제한을 모두 확인한다:
+/// ```text
+/// ws_slots = workspace.concurrency - per_workspace_running
+/// global_slots = max_global - total_running - active_evaluate_count
+/// spawnable = ws_slots > 0 && global_slots > 0
+/// ```
 struct InFlightTracker {
     per_repo: HashMap<String, usize>,
     total: usize,
-    max_total: usize,
+    max_global: usize,
+    /// 워크스페이스(레포)별 동시 실행 상한. 0이면 제한 없음.
+    workspace_limits: HashMap<String, usize>,
+    /// evaluate cron이 소비하는 active slot 수.
+    active_evaluate_count: usize,
 }
 
 impl InFlightTracker {
-    fn new(max_total: u32) -> Self {
+    fn new(max_global: u32) -> Self {
         Self {
             per_repo: HashMap::new(),
             total: 0,
-            max_total: max_total as usize,
+            max_global: max_global as usize,
+            workspace_limits: HashMap::new(),
+            active_evaluate_count: 0,
         }
     }
 
-    fn can_spawn(&self) -> bool {
-        self.total < self.max_total
+    /// 워크스페이스별 concurrency 상한을 설정한다.
+    /// 0이면 해당 워크스페이스에 workspace-level 제한 없음.
+    fn set_workspace_limit(&mut self, repo_name: &str, limit: usize) {
+        if limit > 0 {
+            self.workspace_limits.insert(repo_name.to_string(), limit);
+        } else {
+            self.workspace_limits.remove(repo_name);
+        }
+    }
+
+    /// evaluate cron active slot 수를 갱신한다.
+    fn set_active_evaluate_count(&mut self, count: usize) {
+        self.active_evaluate_count = count;
+    }
+
+    /// 글로벌 레벨에서 spawn 가능한지 확인한다.
+    fn has_global_slot(&self) -> bool {
+        self.total + self.active_evaluate_count < self.max_global
+    }
+
+    /// 특정 워크스페이스에서 spawn 가능한지 확인한다.
+    fn has_workspace_slot(&self, repo_name: &str) -> bool {
+        match self.workspace_limits.get(repo_name) {
+            Some(&limit) => {
+                let running = self.per_repo.get(repo_name).copied().unwrap_or(0);
+                running < limit
+            }
+            None => true, // 제한 없음
+        }
     }
 
     fn track(&mut self, repo_name: &str) {
@@ -83,22 +126,37 @@ impl InFlightTracker {
 
 // ─── Task Spawner ───
 
-/// pending_tasks 버퍼에서 InFlightTracker 상한까지 Task를 꺼내 spawn한다.
+/// pending_tasks 버퍼에서 2-level concurrency 상한까지 Task를 꺼내 spawn한다.
+///
+/// workspace + global 두 레벨을 모두 확인하여 slot이 있는 task만 spawn한다.
+/// workspace slot이 부족한 task는 건너뛰되 버퍼에 잔류시킨다.
 fn try_spawn(
     pending: &mut Vec<Box<dyn crate::core::task::Task>>,
     tracker: &mut InFlightTracker,
     join_set: &mut JoinSet<TaskResult>,
     runner: &Arc<dyn TaskRunner>,
 ) {
-    while tracker.can_spawn() {
-        let task = match pending.pop() {
-            Some(t) => t,
-            None => break,
-        };
+    let mut deferred: Vec<Box<dyn crate::core::task::Task>> = Vec::new();
+
+    while let Some(task) = pending.pop() {
+        if !tracker.has_global_slot() {
+            // 글로벌 상한 도달 — 남은 task를 모두 되돌린다
+            deferred.push(task);
+            break;
+        }
+        if !tracker.has_workspace_slot(task.repo_name()) {
+            // 이 workspace는 slot 부족 — 건너뛰고 다른 workspace task 시도
+            deferred.push(task);
+            continue;
+        }
         tracker.track(task.repo_name());
         let r = Arc::clone(runner);
         join_set.spawn(async move { r.run(task).await });
     }
+
+    // 글로벌 상한 도달로 pop하지 못한 나머지 + deferred를 되돌린다
+    deferred.append(pending);
+    *pending = deferred;
 }
 
 // ─── Daemon ───
@@ -287,6 +345,17 @@ impl Daemon {
                 _ = tick.tick() => {
                     self.manager.tick().await;
                     pending_tasks.extend(self.manager.drain_ready());
+
+                    // v5 2-level concurrency: sync workspace limits from config
+                    for (repo_name, limit) in self.manager.workspace_limits() {
+                        self.tracker.set_workspace_limit(&repo_name, limit);
+                    }
+
+                    // v5: track evaluate cron active slots
+                    let evaluate_count = self.cron_engine.as_ref()
+                        .map(|c| if c.is_running(crate::cli::cron::CLAW_EVALUATE_JOB) { 1 } else { 0 })
+                        .unwrap_or(0);
+                    self.tracker.set_active_evaluate_count(evaluate_count);
 
                     try_spawn(&mut pending_tasks, &mut self.tracker, &mut join_set, &self.runner);
 
@@ -678,13 +747,13 @@ mod tests {
     #[test]
     fn tracker_respects_max_total() {
         let mut t = InFlightTracker::new(2);
-        assert!(t.can_spawn());
+        assert!(t.has_global_slot());
         t.track("org/repo-a");
-        assert!(t.can_spawn());
+        assert!(t.has_global_slot());
         t.track("org/repo-b");
-        assert!(!t.can_spawn());
+        assert!(!t.has_global_slot());
         t.release("org/repo-a");
-        assert!(t.can_spawn());
+        assert!(t.has_global_slot());
     }
 
     #[test]
@@ -697,5 +766,166 @@ mod tests {
         assert_eq!(t.per_repo["org/repo"], 1);
         t.release("org/repo");
         assert!(!t.per_repo.contains_key("org/repo"));
+    }
+
+    // ═══════════════════════════════════════════════
+    // v5 2-level concurrency 테스트
+    // ═══════════════════════════════════════════════
+
+    #[test]
+    fn workspace_limit_blocks_spawn_for_that_workspace() {
+        let mut t = InFlightTracker::new(10);
+        t.set_workspace_limit("org/repo-a", 1);
+
+        assert!(t.has_workspace_slot("org/repo-a"));
+        t.track("org/repo-a");
+        // workspace limit reached
+        assert!(!t.has_workspace_slot("org/repo-a"));
+        // other workspace unaffected
+        assert!(t.has_workspace_slot("org/repo-b"));
+        // global still has room
+        assert!(t.has_global_slot());
+    }
+
+    #[test]
+    fn workspace_limit_zero_means_unlimited() {
+        let mut t = InFlightTracker::new(10);
+        t.set_workspace_limit("org/repo", 0);
+
+        // limit=0 removes the entry → no workspace-level cap
+        assert!(t.has_workspace_slot("org/repo"));
+        t.track("org/repo");
+        t.track("org/repo");
+        t.track("org/repo");
+        assert!(t.has_workspace_slot("org/repo"));
+    }
+
+    #[test]
+    fn workspace_limit_release_reopens_slot() {
+        let mut t = InFlightTracker::new(10);
+        t.set_workspace_limit("org/repo", 1);
+
+        t.track("org/repo");
+        assert!(!t.has_workspace_slot("org/repo"));
+        t.release("org/repo");
+        assert!(t.has_workspace_slot("org/repo"));
+    }
+
+    #[test]
+    fn evaluate_count_reduces_global_slots() {
+        let mut t = InFlightTracker::new(3);
+        t.track("org/repo-a");
+        // 1 running + 0 evaluate = 1 total, global max=3 → has slot
+        assert!(t.has_global_slot());
+
+        t.set_active_evaluate_count(2);
+        // 1 running + 2 evaluate = 3 total, global max=3 → no slot
+        assert!(!t.has_global_slot());
+
+        t.set_active_evaluate_count(0);
+        // 1 running + 0 evaluate = 1 total → has slot again
+        assert!(t.has_global_slot());
+    }
+
+    #[test]
+    fn two_level_both_must_pass() {
+        let mut t = InFlightTracker::new(2);
+        t.set_workspace_limit("org/repo-a", 2);
+        t.set_workspace_limit("org/repo-b", 1);
+
+        // Fill global to 1/2
+        t.track("org/repo-b");
+        // repo-b workspace full, but global has room
+        assert!(!t.has_workspace_slot("org/repo-b"));
+        assert!(t.has_global_slot());
+
+        // repo-a workspace has room, global has room
+        assert!(t.has_workspace_slot("org/repo-a"));
+        assert!(t.has_global_slot());
+
+        t.track("org/repo-a");
+        // global full (2/2)
+        assert!(!t.has_global_slot());
+        // repo-a workspace still has room (1/2) but global blocks
+        assert!(t.has_workspace_slot("org/repo-a"));
+    }
+
+    #[tokio::test]
+    async fn try_spawn_skips_workspace_full_takes_others() {
+        use crate::core::task::{AgentRequest, AgentResponse, QueueOp, SkipReason, TaskStatus};
+        use crate::infra::claude::SessionOptions;
+        use std::path::PathBuf;
+
+        struct DummyTask {
+            id: String,
+            repo: String,
+        }
+
+        #[async_trait::async_trait]
+        impl crate::core::task::Task for DummyTask {
+            fn work_id(&self) -> &str {
+                &self.id
+            }
+            fn repo_name(&self) -> &str {
+                &self.repo
+            }
+            async fn before_invoke(&mut self) -> Result<AgentRequest, SkipReason> {
+                Ok(AgentRequest {
+                    working_dir: PathBuf::from("/tmp"),
+                    prompt: "test".to_string(),
+                    session_opts: SessionOptions::default(),
+                })
+            }
+            async fn after_invoke(&mut self, _: AgentResponse) -> TaskResult {
+                TaskResult {
+                    work_id: self.id.clone(),
+                    repo_name: self.repo.clone(),
+                    queue_ops: vec![QueueOp::Remove],
+                    logs: vec![],
+                    status: TaskStatus::Completed,
+                }
+            }
+        }
+
+        struct NoopRunner;
+
+        #[async_trait::async_trait]
+        impl TaskRunner for NoopRunner {
+            async fn run(&self, _task: Box<dyn crate::core::task::Task>) -> TaskResult {
+                TaskResult {
+                    work_id: String::new(),
+                    repo_name: String::new(),
+                    queue_ops: vec![],
+                    logs: vec![],
+                    status: TaskStatus::Completed,
+                }
+            }
+        }
+
+        let runner: Arc<dyn TaskRunner> = Arc::new(NoopRunner);
+
+        let mut tracker = InFlightTracker::new(10);
+        tracker.set_workspace_limit("org/repo-a", 1);
+        // repo-a already full
+        tracker.track("org/repo-a");
+
+        let mut pending: Vec<Box<dyn crate::core::task::Task>> = vec![
+            Box::new(DummyTask {
+                id: "t1".into(),
+                repo: "org/repo-a".into(),
+            }),
+            Box::new(DummyTask {
+                id: "t2".into(),
+                repo: "org/repo-b".into(),
+            }),
+        ];
+
+        let mut join_set: JoinSet<TaskResult> = JoinSet::new();
+        try_spawn(&mut pending, &mut tracker, &mut join_set, &runner);
+
+        // repo-b task should be spawned, repo-a deferred
+        assert_eq!(join_set.len(), 1);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].repo_name(), "org/repo-a");
     }
 }

@@ -103,6 +103,10 @@ pub struct ChannelConfig {
 pub struct GitHubSourceConfig {
     pub scan_interval_secs: u64,
     pub scan_targets: Vec<String>,
+    /// 워크스페이스(레포)당 동시 Running 아이템 상한.
+    /// issue_concurrency + pr_concurrency 합산과 별개로, 워크스페이스 전체의 상한을 지정한다.
+    /// 0이면 제한 없음 (issue_concurrency + pr_concurrency 한도만 적용).
+    pub concurrency: u32,
     pub issue_concurrency: u32,
     pub pr_concurrency: u32,
     pub model: String,
@@ -123,6 +127,7 @@ impl Default for GitHubSourceConfig {
         Self {
             scan_interval_secs: 300,
             scan_targets: vec!["issues".into(), "pulls".into()],
+            concurrency: 0,
             issue_concurrency: 1,
             pr_concurrency: 1,
             model: "sonnet".into(),
@@ -424,6 +429,32 @@ workflows:
             Some("/review:multi-review")
         );
         assert_eq!(cfg.workflows.review.max_iterations, 3);
+    }
+
+    #[test]
+    fn workspace_concurrency_from_yaml() {
+        let yaml = r#"
+sources:
+  github:
+    concurrency: 3
+    issue_concurrency: 2
+    pr_concurrency: 1
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.sources.github.concurrency, 3);
+        assert_eq!(cfg.sources.github.issue_concurrency, 2);
+        assert_eq!(cfg.sources.github.pr_concurrency, 1);
+    }
+
+    #[test]
+    fn workspace_concurrency_defaults_to_zero() {
+        let yaml = r#"
+sources:
+  github:
+    model: opus
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.sources.github.concurrency, 0);
     }
 
     #[test]

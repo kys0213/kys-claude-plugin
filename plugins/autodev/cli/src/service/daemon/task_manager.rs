@@ -16,6 +16,7 @@ use crate::core::task::{Task, TaskResult};
 /// - `pop_ready()`: 실행 가능한 Task를 하나씩 꺼낸다 (인플라이트 제한 대응)
 /// - `apply()`: 완료된 Task 결과를 Collector에 반영
 /// - `active_items()`: status heartbeat용 활성 아이템 목록 반환
+/// - `workspace_limits()`: v5 workspace-level concurrency 상한 반환
 #[async_trait(?Send)]
 pub trait TaskManager: Send {
     /// 주기적 하우스키핑.
@@ -35,4 +36,8 @@ pub trait TaskManager: Send {
 
     /// 현재 활성 아이템 목록을 반환한다 (status heartbeat용).
     fn active_items(&self) -> Vec<StatusItem>;
+
+    /// 워크스페이스(레포)별 concurrency 상한을 반환한다.
+    /// key = repo_name, value = concurrency limit (0이면 제한 없음).
+    fn workspace_limits(&self) -> Vec<(String, usize)>;
 }

@@ -55,6 +55,8 @@ pub struct GitRepository {
     pub queue: StateQueue<QueueItem>,
 
     // Per-repo concurrency limits (set during scan)
+    /// 워크스페이스(레포)당 동시 Running 상한. 0이면 제한 없음.
+    pub concurrency: usize,
     pub issue_concurrency: usize,
     pub pr_concurrency: usize,
 }
@@ -69,6 +71,7 @@ impl GitRepository {
             issues: Vec::new(),
             pulls: Vec::new(),
             queue: StateQueue::new(),
+            concurrency: 0,
             issue_concurrency: 1,
             pr_concurrency: 1,
         }
