@@ -146,6 +146,29 @@ failure_count는 append-only history에서 계산한다: `history | filter(state
 
 ---
 
+## Evaluate 원칙
+
+### 판단 원칙
+
+1. **의심스러우면 HITL** (safe default) — evaluate가 확신할 수 없으면 Done이 아니라 HITL로 분류한다. 잘못된 Done보다 불필요한 HITL이 낫다.
+
+2. **"충분한가?"만 판단** — "이 handler의 결과물이 다음 단계로 넘어가기에 충분한가?"만 본다. 품질 판단(좋은 코드인가?)은 Cron 품질 루프가 담당한다.
+
+3. **state별 구체 기준은 claw-workspace rules에 위임** — `classify-policy.md`에 state별 Done 조건을 정의한다. 코어는 rules를 모르고, `autodev agent`가 rules를 참조하여 판단한다.
+
+### 실패 원칙
+
+Completed는 **안전한 대기 상태**. evaluate가 실패하든 CLI가 실패하든 Completed에서 멈추고, 다음 기회에 재시도한다.
+
+| 실패 유형 | 동작 | 상태 |
+|-----------|------|------|
+| evaluate LLM 오류/timeout | Completed 유지, 다음 cron tick에서 재시도 | Completed |
+| evaluate 반복 실패 (N회) | HITL로 에스컬레이션 | → HITL |
+| CLI 호출 실패 (`autodev queue done/hitl`) | Completed 유지 + 에러 로그, 다음 tick 재시도 | Completed |
+| on_done script 실패 | Failed 상태 (on_fail은 실행하지 않음 — handler 실패가 아니므로) | → Failed |
+
+---
+
 ### 관련 문서
 
 - [DESIGN-v5](../DESIGN-v5.md) — 설계 철학
