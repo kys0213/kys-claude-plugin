@@ -17,6 +17,7 @@ pub struct WorkflowConfig {
     pub workflows: Workflows,
     pub claw: ClawConfig,
     pub escalation: EscalationConfig,
+    pub v5: V5Config,
 }
 
 /// 태스크 소스 설정 — 소스 종류별 하위 키
@@ -262,6 +263,21 @@ impl Default for ClawConfig {
             gap_detection_interval_secs: 3600,
         }
     }
+}
+
+// ═══════════════════════════════════════════════
+// v5 — v5 daemon feature flag
+// ═══════════════════════════════════════════════
+
+/// v5 daemon 기능 플래그.
+///
+/// `enabled: true`이면 v5 daemon 루프가 시작된다.
+/// `enabled: false`(기본)이면 기존 v4 daemon이 그대로 동작한다.
+/// v4와 v5는 동일한 PID 파일을 공유하므로 동시 실행되지 않는다.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct V5Config {
+    pub enabled: bool,
 }
 
 // ═══════════════════════════════════════════════
@@ -636,5 +652,35 @@ escalation:
         assert_eq!(EscalationAction::Hitl.to_string(), "hitl");
         assert_eq!(EscalationAction::Skip.to_string(), "skip");
         assert_eq!(EscalationAction::Replan.to_string(), "replan");
+    }
+
+    // ═══════════════════════════════════════════════
+    // V5Config 테스트
+    // ═══════════════════════════════════════════════
+
+    #[test]
+    fn v5_config_defaults() {
+        let cfg = V5Config::default();
+        assert!(!cfg.enabled);
+    }
+
+    #[test]
+    fn v5_config_from_yaml() {
+        let yaml = r#"
+v5:
+  enabled: true
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(cfg.v5.enabled);
+    }
+
+    #[test]
+    fn v5_config_defaults_when_omitted() {
+        let yaml = r#"
+daemon:
+  log_level: "info"
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(!cfg.v5.enabled);
     }
 }

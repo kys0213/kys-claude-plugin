@@ -672,7 +672,11 @@ async fn start_daemon(
     let git: Arc<dyn infra::git::Git> = Arc::new(git);
     let claude: Arc<dyn infra::claude::Claude> = Arc::new(claude);
     let sw: Arc<dyn infra::suggest_workflow::SuggestWorkflow> = Arc::new(sw);
-    daemon::start(home, env, gh, git, claude, sw).await
+    if cfg.v5.enabled {
+        daemon::start_v5(home, env, gh, git, claude, sw).await
+    } else {
+        daemon::start(home, env, gh, git, claude, sw).await
+    }
 }
 
 /// Build a notification dispatcher for CLI commands, wiring the Gh client for github_comment channels.
