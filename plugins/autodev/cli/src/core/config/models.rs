@@ -121,6 +121,36 @@ pub struct GitHubSourceConfig {
     pub auto_approve: bool,
     /// 자동 전환을 위한 최소 confidence 임계값 (기본: 0.8)
     pub auto_approve_threshold: f64,
+    /// 상태별 트리거 설정 (v5).
+    ///
+    /// key: 상태 이름 (예: "analyze", "implement", "review")
+    /// value: 해당 상태를 트리거하는 조건
+    ///
+    /// 미설정 시 기존 하드코딩된 `autodev:analyze` 라벨 동작을 유지한다.
+    pub states: std::collections::HashMap<String, StateTrigger>,
+}
+
+/// 상태 트리거 설정 — workspace YAML의 `states.*.trigger` 섹션.
+///
+/// ```yaml
+/// states:
+///   analyze:
+///     trigger:
+///       label: "autodev:analyze"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct StateTrigger {
+    pub trigger: TriggerCondition,
+}
+
+/// 트리거 조건 — 현재 label 매칭만 지원.
+///
+/// 향후 `status`, `reaction` 등 다른 조건 타입을 추가할 수 있다.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct TriggerCondition {
+    pub label: Option<String>,
 }
 
 impl Default for GitHubSourceConfig {
@@ -140,7 +170,20 @@ impl Default for GitHubSourceConfig {
             knowledge_extraction: true,
             auto_approve: false,
             auto_approve_threshold: 0.8,
+            states: std::collections::HashMap::new(),
         }
+    }
+}
+
+impl GitHubSourceConfig {
+    /// 지정된 상태의 트리거 라벨을 반환한다.
+    ///
+    /// `states` 맵에 해당 상태가 있고 `trigger.label`이 설정되어 있으면 그 값을 반환.
+    /// 미설정 시 `None`을 반환하여 호출자가 기본 라벨(하드코딩)을 사용하도록 한다.
+    pub fn trigger_label(&self, state: &str) -> Option<&str> {
+        self.states
+            .get(state)
+            .and_then(|s| s.trigger.label.as_deref())
     }
 }
 
@@ -846,5 +889,56 @@ workflows:
             LifecycleAction::Prompt { prompt: p } => assert_eq!(p, "do something"),
             LifecycleAction::Script { script: _ } => panic!("expected Prompt"),
         }
+    }
+
+    // ═══════════════════════════════════════════════
+    // StateTrigger 테스트
+    // ═══════════════════════════════════════════════
+
+    #[test]
+    fn states_trigger_label_from_yaml() {
+        let yaml = r#"
+sources:
+  github:
+    states:
+      analyze:
+        trigger:
+          label: "custom:analyze"
+      implement:
+        trigger:
+          label: "custom:implement"
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            cfg.sources.github.trigger_label("analyze"),
+            Some("custom:analyze")
+        );
+        assert_eq!(
+            cfg.sources.github.trigger_label("implement"),
+            Some("custom:implement")
+        );
+        // Undefined state returns None
+        assert_eq!(cfg.sources.github.trigger_label("review"), None);
+    }
+
+    #[test]
+    fn states_default_is_empty() {
+        let cfg = GitHubSourceConfig::default();
+        assert!(cfg.states.is_empty());
+        assert_eq!(cfg.trigger_label("analyze"), None);
+    }
+
+    #[test]
+    fn states_trigger_label_none_when_label_omitted() {
+        let yaml = r#"
+sources:
+  github:
+    states:
+      analyze:
+        trigger: {}
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        // trigger exists but label is None
+        assert_eq!(cfg.sources.github.trigger_label("analyze"), None);
     }
 }
