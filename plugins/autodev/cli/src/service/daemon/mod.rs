@@ -284,6 +284,11 @@ impl Daemon {
                         let results = cron.tick().await;
                         for r in &results {
                             info!("cron '{}' completed: exit_code={}", r.job_name, r.exit_code);
+
+                            // Record claw-evaluate decisions
+                            if r.job_name == crate::cli::cron::CLAW_EVALUATE_JOB {
+                                cron.record_claw_evaluate_decision(r);
+                            }
                         }
                     }
                 }

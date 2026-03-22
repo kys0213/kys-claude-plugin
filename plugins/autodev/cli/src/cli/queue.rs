@@ -85,6 +85,7 @@ fn record_decision(
         DecisionType::Skip => "manual skip",
         DecisionType::Hitl => "manual hitl",
         DecisionType::Replan => "manual replan",
+        DecisionType::Noop => "no-op",
     };
     let _ = db.decision_add(&NewClawDecision {
         repo_id: repo_id.to_string(),
