@@ -1183,13 +1183,20 @@ async fn main() -> Result<()> {
                     .iter()
                     .find(|r| r.name == *repo_name)
                     .ok_or_else(|| anyhow::anyhow!("repository not found: {repo_name}"))?;
+                let workspace = config::workspaces_path(&env)
+                    .join(config::sanitize_repo_name(&repo_entry.name));
                 extra_env.push(("AUTODEV_REPO_NAME".to_string(), repo_entry.name.clone()));
                 extra_env.push(("AUTODEV_REPO_ROOT".to_string(), {
-                    let ws_dir = config::workspaces_path(&env)
-                        .join(config::sanitize_repo_name(&repo_entry.name));
-                    ws_dir.to_string_lossy().to_string()
+                    workspace.to_string_lossy().to_string()
                 }));
                 extra_env.push(("AUTODEV_REPO_ID".to_string(), repo_entry.id.clone()));
+                extra_env.push(("AUTODEV_REPO_URL".to_string(), repo_entry.url.clone()));
+                extra_env.push((
+                    "AUTODEV_WORKSPACE".to_string(),
+                    workspace.to_string_lossy().to_string(),
+                ));
+                let default_branch = client::cron::detect_default_branch(&workspace);
+                extra_env.push(("AUTODEV_REPO_DEFAULT_BRANCH".to_string(), default_branch));
             }
 
             if let Some(ref prompt_text) = prompt {
@@ -1245,7 +1252,25 @@ async fn main() -> Result<()> {
                     std::process::exit(exit_code);
                 }
             } else {
-                // Interactive mode (existing behavior)
+                // Interactive mode: show status summary before launching claude
+                {
+                    use autodev::core::board::BoardRenderer;
+                    use autodev::tui::board::{BoardStateBuilder, TextBoardRenderer};
+
+                    match BoardStateBuilder::build(&db, repo.as_deref(), &home) {
+                        Ok(state) => {
+                            let renderer = TextBoardRenderer;
+                            let summary = renderer.render(&state);
+                            eprintln!("── autodev status ──");
+                            eprint!("{summary}");
+                            eprintln!("────────────────────\n");
+                        }
+                        Err(e) => {
+                            eprintln!("warning: failed to load status summary: {e}");
+                        }
+                    }
+                }
+
                 let mut cmd = std::process::Command::new("claude");
                 cmd.current_dir(&ws);
                 for (k, v) in &extra_env {
