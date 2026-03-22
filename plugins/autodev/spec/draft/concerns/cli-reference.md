@@ -32,6 +32,10 @@ Layer 3: autodev CLI (SSOT)
 
 ## autodev CLI 전체 참조
 
+### Phase 1: 코어 CLI (v5 초기 구현)
+
+상태 변경, 데몬 제어, CRUD — 직접 CLI로 노출.
+
 ```
 autodev
 ├── start / stop / restart
@@ -43,7 +47,7 @@ autodev
 │   ├── add / list / show / update
 │   ├── pause / resume / complete / remove
 │   ├── link / unlink
-│   ├── status <id> / verify <id> / decisions <id>
+│   ├── status <id> / verify <id>
 ├── queue
 │   ├── list / show / skip
 │   └── dependency add / remove
@@ -54,13 +58,22 @@ autodev
 │   ├── pause / resume / remove / trigger
 ├── claw
 │   ├── init / rules / edit
-├── decisions
-│   ├── list / show
 ├── agent [--workspace <name>] [-p <prompt>]
+```
+
+### Phase 2: /claw 위임 (읽기 전용)
+
+아래 커맨드는 `/claw` 세션에서 자연어로 접근. 별도 CLI 구현은 `/claw`가 안정화된 후 필요 시 추가.
+
+```
+# /claw가 내부적으로 호출하는 조회 커맨드 (구현 우선순위 낮음)
+├── decisions list / show
+├── board [--format text|json|rich]
 ├── convention
 ├── worktree list / clean
-├── board [--format text|json|rich]
 ├── logs / usage / report
 ```
+
+> `/claw`는 `autodev status --json`, `autodev queue list --json` 등 Phase 1 CLI의 JSON 출력을 파싱하여 자연어로 표시한다. Phase 2 커맨드도 동일한 패턴으로, `/claw`가 먼저 커버하고 독립 CLI는 수요가 확인되면 추가.
 
 모든 서브커맨드는 `--json` 또는 `--format json` 출력 지원.

@@ -22,7 +22,7 @@ DataSource가 소유하는 것:
 
 ## 상태 기반 워크플로우
 
-각 DataSource는 자기 시스템의 상태 표현으로 워크플로우를 정의한다.
+각 DataSource는 자기 시스템의 상태 표현으로 워크플로우를 정의한다. v5는 GitHub에 집중한다.
 
 ### GitHub (라벨 기반)
 
@@ -44,8 +44,7 @@ sources:
       implement:
         trigger: { label: "autodev:implement" }
         handlers:
-          - command: "/implement"
-          - script: hooks/lint.sh
+          - prompt: "이슈를 구현해줘"
         on_done: { label: "autodev:review" }
 
       review:
@@ -55,52 +54,21 @@ sources:
         on_done: { label: "autodev:done" }
 ```
 
-### Jira (status 기반)
+### 향후 확장 (v6+)
 
-```yaml
-sources:
-  jira:
-    host: jira.company.com
-    project: AUTH
+DataSource trait을 구현하면 코어 변경 없이 새 외부 시스템을 추가할 수 있다.
 
-    states:
-      analyze:
-        trigger: { status: "To Analyze" }
-        handlers:
-          - prompt: "티켓을 분석하고 작업 범위를 정리해줘"
-        on_done: { status: "Implementing" }
-
-      implement:
-        trigger: { status: "Implementing" }
-        handlers:
-          - command: "/implement"
-        on_done: { status: "In Review" }
-```
-
-### Slack (리액션 기반)
-
-```yaml
-sources:
-  slack:
-    channel: "#dev-auth"
-
-    states:
-      triage:
-        trigger: { reaction: "robot_face" }
-        handlers:
-          - prompt: "이 스레드를 분석하고 이슈로 만들어줘"
-        on_done: { reaction: "white_check_mark" }
-```
+| 시스템 | 상태 표현 | trigger 예시 |
+|--------|----------|-------------|
+| Jira | 티켓 status | `{ status: "To Analyze" }` |
+| Slack | 리액션 | `{ reaction: "robot_face" }` |
+| Linear | 라벨/status | `{ label: "autodev" }` |
 
 ---
 
-## Handler 타입
+## Handler
 
-| 타입 | 형식 | 실행 방식 | 토큰 |
-|------|------|----------|------|
-| prompt | 자연어 문자열 | AgentRuntime.invoke() | 사용 |
-| command | `/slash-command` | Claude slash command 호출 | 사용 |
-| script | `script: path` | sh -c 실행, exit code로 판정 | 0 |
+handler는 **prompt 단일 타입**. 자연어 문자열을 AgentRuntime.invoke()로 실행한다. prompt는 순수 작업 지시만 담당하고, 린트/컨벤션은 hooks와 rules가 단계 진입 시 자동 보장.
 
 handler 배열은 Running 상태에서 순차 실행. 하나라도 실패 시 escalation.
 
@@ -112,7 +80,7 @@ handler 배열은 Running 상태에서 순차 실행. 하나라도 실패 시 es
 1. DataSource.collect(): trigger 조건 매칭 → QueueItem 생성
 2. Pending → Ready → Running (자동)
 3. handlers 순차 실행
-4. Claw: "완료? 추가 검토?" → Done or HITL
+4. 코어 evaluate: "완료? 추가 검토?" → Done or HITL
 5. Done → on_done 액션 실행
    → 다음 state의 trigger 활성화
    → 다음 collect() 턴에서 새 아이템으로 감지
@@ -135,7 +103,7 @@ sources:
       5: replan
 ```
 
-DataSource마다 다른 정책 가능. GitHub은 5단계, Slack은 즉시 HITL 등.
+DataSource마다 다른 정책이 가능한 구조. v5는 GitHub 정책만 구현.
 
 ---
 

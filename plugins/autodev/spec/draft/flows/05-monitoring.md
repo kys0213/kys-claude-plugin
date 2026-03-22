@@ -9,8 +9,10 @@
 | 레이어 | 진입 | 특징 |
 |--------|------|------|
 | TUI Dashboard | `autodev dashboard` | ratatui, 실시간 갱신, 키보드 네비게이션 |
-| CLI 출력 | `autodev board --format rich` | 정적 스냅샷, 진행률 바 |
-| Claw 세션 | `/claw` → "보드 보여줘" | 자연어, autodev board --json 파싱 |
+| CLI 출력 | `autodev status --format rich` | 정적 스냅샷, 코어 CLI |
+| Claw 세션 | `/claw` → "보드 보여줘" | 자연어, 읽기 전용 조회의 주 인터페이스 |
+
+> **Phase 구분**: `status`, `spec status` 등 코어 CLI는 Phase 1로 직접 구현. `board`, `decisions`, `logs` 등 읽기 전용 조회는 `/claw`가 흡수 (Phase 2, 필요 시 독립 CLI 추가).
 
 ---
 

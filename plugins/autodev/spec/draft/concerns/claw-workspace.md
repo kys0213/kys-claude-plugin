@@ -1,38 +1,31 @@
-# Claw — 분류기 + 대화형 에이전트
+# Claw — 대화형 에이전트
 
-> Claw는 두 가지 모드로 동작한다:
-> 1. **Daemon 내부 분류기** — handler 실행 결과를 보고 Done or HITL 분류
-> 2. **대화형 에이전트** — `/claw` 세션에서 자연어로 시스템 조회/조작
+> Claw = `/claw` 세션. 자연어로 시스템을 조회하고 조작하는 대화형 인터페이스.
+>
+> 분류(Done or HITL)는 **코어 evaluate 함수**가 담당한다. Claw는 분류기가 아니다.
 
 ---
 
-## 모드 1: 분류기
+## 코어 evaluate (참고)
 
-Claw의 Daemon 내부 역할은 **최소한의 판단**만 한다.
+분류 로직은 코어에 속한다. Claw와 무관.
 
 ```
 handler 실행 완료
     │
     ▼
-Claw evaluate:
+코어 evaluate:
   "완료 처리해도 되나? 사람이 봐야 하나?"
     │
     ├── Done → on_done 액션 실행 → 다음 state trigger
     └── HITL → HITL 이벤트 생성 → 사람 대기
 ```
 
-스펙 적합성, 코드 품질, gap 검출은 Claw가 아닌 **Cron 품질 루프**가 담당.
-
-### claw-evaluate cron
-
-```
-interval: 60s (+ force trigger on task complete)
-guard: 완료된 아이템 중 미분류 건이 있을 때만 실행
-```
+evaluate cron: `interval 60s + force trigger on task complete`, 완료된 아이템 중 미분류 건이 있을 때만 실행.
 
 ---
 
-## 모드 2: 대화형 에이전트 (/claw 세션)
+## 대화형 에이전트 (/claw 세션)
 
 v4와 동일하게 어디서든 실행 가능한 대화형 인터페이스.
 
@@ -99,5 +92,5 @@ Per-repo 오버라이드: `~/.autodev/workspaces/org-repo/claw/`
 v4 (15개) → v5 (3개):
   /auto   — 데몬 제어 (start/stop/setup/config/dashboard/update)
   /spec   — 스펙 CRUD (add/update/list/status/remove/pause/resume)
-  /claw   — 대화 세션 (나머지 모든 조회/조작을 자연어로)
+  /claw   — 대화 세션 (조회/조작/모니터링을 자연어로, 읽기 전용 CLI 흡수)
 ```
