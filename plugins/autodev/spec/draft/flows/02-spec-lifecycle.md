@@ -36,10 +36,27 @@ Archived ──resume──→ Active (복구)
 /spec add [file]
   → 필수 섹션 검증 (개요, 요구사항, 아키텍처, 테스트, 수용 기준)
   → DB에 저장 (status: Active)
-  → Claw가 스펙 분해 → 이슈 자동 생성
+  → 스펙 분해 → 이슈 자동 생성
   → 각 이슈에 trigger 라벨 (예: autodev:analyze) 부착
   → DataSource.collect()가 감지 → 파이프라인 진입
 ```
+
+### 스펙 분해 전략
+
+스펙 분해는 **built-in skill**로 제공되며, 커스텀 오버라이드가 가능하다.
+
+```
+기본 분해: acceptance criteria 기반
+  → 각 수용 기준을 독립 이슈로 분해
+  → 이슈 간 의존성 자동 추론 (공유 파일/모듈 기반)
+
+커스텀 분해: per-workspace 또는 per-user skill 오버라이드
+  → ~/.autodev/workspaces/<name>/skills/decompose/ 에 커스텀 skill 배치
+  → 기본 skill 대신 커스텀 skill 실행
+```
+
+분해 결과는 사용자에게 제시 → 확인/수정 후 이슈 생성 (대화형).
+잘못 분해된 경우 `/spec update`로 스펙 수정 → gap-detection이 재평가.
 
 ---
 
@@ -63,11 +80,17 @@ on_spec_completing:
 
 ## 다중 스펙 우선순위
 
+스펙 등록 시점에 Claw가 기존 Active 스펙과의 관계를 판단한다:
+
 ```
-독립 스펙: 병렬 실행 (concurrency 제한 내)
-의존 스펙: DependencyGuard가 실행 순서 강제
-충돌 스펙: 같은 파일/모듈 → HITL 요청
+/spec add [file]
+  → Claw: 기존 Active 스펙과 충돌/의존성 분석
+    → 독립: 병렬 실행 가능 (concurrency 제한 내)
+    → 의존: DependencyGuard 등록 → 선행 스펙 완료 후 실행
+    → 충돌: 같은 파일/모듈 영향 → HITL 요청 (사용자 판단)
 ```
+
+판단 기준: 스펙의 대상 모듈/파일 경로, acceptance criteria의 겹침 여부.
 
 ---
 

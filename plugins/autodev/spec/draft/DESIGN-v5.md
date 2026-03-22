@@ -52,7 +52,20 @@ QueuePhase: Pending → Ready → Running → Done | Skipped
 
 무엇을 실행할지, 어떤 라벨을 붙일지, 다음 단계가 뭔지 — 전부 DataSource와 설정의 영역.
 
-### 4. 코어가 출구에서 분류한다
+### 4. DataSource가 상태 축적기
+
+DataSource의 외부 시스템이 **상태 저장소** 역할을 겸한다.
+
+```
+GitHub issue = 상태 축적기
+  - analyze handler → 분석 결과를 issue comment로 남김
+  - implement handler → PR을 생성하고 issue에 링크
+  - review handler → PR review comment로 결과를 남김
+```
+
+handler는 별도의 output 저장소가 필요 없다. 외부 시스템(GitHub issue/PR) 자체에 산출물이 누적되고, 다음 단계 handler가 DataSource를 통해 이전 컨텍스트를 조회한다.
+
+### 5. 코어가 출구에서 분류한다
 
 코어의 evaluate 함수가 **출구의 분류기**. 품질 판단이 아니라 **완료 가능 여부만 판별**.
 
@@ -62,13 +75,32 @@ QueuePhase: Pending → Ready → Running → Done | Skipped
 분류 = 코어 evaluate ("완료 처리해도 되나, 사람이 봐야 하나?" → Done or HITL)
 ```
 
+evaluate의 판단 입력:
+- `DataSource.get_context(item)` → 해당 아이템의 리뷰, 피드백, 코멘트 등 외부 시스템 컨텍스트
+- handler 실행 결과 (exit code, stdout 요약)
+- AgentRuntime을 통해 LLM이 컨텍스트를 읽고 분류
+
 스펙 적합성, 코드 품질, gap 검출은 **Cron 품질 루프**가 담당한다. evaluate는 토큰을 최소로 쓰고 분류에만 집중.
+
+### 6. 아이템 계보 (Lineage)
+
+같은 외부 엔티티(예: GitHub issue #42)에서 파생된 아이템들은 `source_id`로 연결된다.
+
+```
+source_id = "github:org/repo#42"
+
+QueueItem(state: analyze, source_id) → Done
+QueueItem(state: implement, source_id) → Done   ← 같은 source_id
+QueueItem(state: review, source_id) → Done       ← 같은 source_id
+```
+
+SQLite에 저장된 source_id 기반으로 이전 단계의 산출물과 이력을 조회한다.
 
 ### Claw는 대화형 에이전트
 
 Claw = `/claw` 세션. 사용자가 자연어로 큐 상태를 조회하고, HITL에 응답하고, cron을 관리하는 대화형 인터페이스. 상세 설계는 [Claw 워크스페이스](./concerns/claw-workspace.md)에서 다룬다.
 
-### 5. Cron은 품질 루프
+### 7. Cron은 품질 루프
 
 파이프라인은 1회성. 품질은 Cron이 지속 감시.
 
