@@ -2,12 +2,12 @@
   "dry_run": false,
   "results": [
     {
-      "plugin": "workflow-guide",
-      "old_version": "0.3.0",
-      "new_version": "0.4.0",
-      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/workflow-guide/.claude-plugin/plugin.json",
+      "plugin": "autodev",
+      "old_version": "0.47.1",
+      "new_version": "0.48.0",
+      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/autodev/.claude-plugin/plugin.json",
       "marketplace_updated": true,
-      "cargo_toml_updated": false
+      "cargo_toml_updated": true
     }
   ]
 }
