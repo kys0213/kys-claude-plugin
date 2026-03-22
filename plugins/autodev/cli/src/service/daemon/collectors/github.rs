@@ -186,6 +186,7 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + SpecRepositor
                                 &self.db,
                                 &repo_cfg.sources.github.ignore_authors,
                                 &repo_cfg.sources.github.filter_labels,
+                                repo_cfg.sources.github.trigger_label("analyze"),
                             )
                             .await
                         {

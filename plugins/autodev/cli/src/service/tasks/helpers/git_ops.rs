@@ -195,19 +195,22 @@ impl GitRepository {
 
     // ─── Scanning ───
 
-    /// `autodev:analyze` 라벨이 있는 이슈를 스캔하여 queue(Pending, Analyze)에 추가.
+    /// 트리거 라벨이 있는 이슈를 스캔하여 queue(Pending, Analyze)에 추가.
     ///
-    /// 라벨 전이: analyze 제거 → wip 추가 (트리거 소비)
+    /// `trigger_label`이 지정되면 해당 라벨을, 미지정 시 기본값 `autodev:analyze`를 사용.
+    /// 라벨 전이: trigger 라벨 제거 → wip 추가 (트리거 소비)
     pub async fn scan_issues<DB: ScanCursorRepository + QueueRepository>(
         &mut self,
         gh: &dyn Gh,
         db: &DB,
         ignore_authors: &[String],
         filter_labels: &Option<Vec<String>>,
+        trigger_label: Option<&str>,
     ) -> Result<()> {
+        let effective_label = trigger_label.unwrap_or(labels::ANALYZE);
         let params: Vec<(&str, &str)> = vec![
             ("state", "open"),
-            ("labels", labels::ANALYZE),
+            ("labels", effective_label),
             ("per_page", "30"),
         ];
 
@@ -245,7 +248,7 @@ impl GitRepository {
             gh.label_remove(
                 &self.name,
                 issue.number,
-                labels::ANALYZE,
+                effective_label,
                 self.gh_host.as_deref(),
             )
             .await;
@@ -265,7 +268,7 @@ impl GitRepository {
                 label_names,
                 issue.user.login.clone(),
             );
-            tracing::info!("issue #{}: autodev:analyze → wip (Pending)", issue.number);
+            tracing::info!("issue #{}: {effective_label} → wip (Pending)", issue.number);
         }
 
         let now = chrono::Utc::now().to_rfc3339();
@@ -1133,7 +1136,7 @@ mod tests {
         );
 
         let mut repo = make_repo();
-        repo.scan_issues(&gh, &db, &[], &None).await.unwrap();
+        repo.scan_issues(&gh, &db, &[], &None, None).await.unwrap();
 
         // PR (#2) is filtered out, only issue #1 added
         assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
@@ -1178,7 +1181,7 @@ mod tests {
         );
 
         let mut repo = make_repo();
-        repo.scan_issues(&gh, &db, &["bot".to_string()], &None)
+        repo.scan_issues(&gh, &db, &["bot".to_string()], &None, None)
             .await
             .unwrap();
 
@@ -1210,7 +1213,7 @@ mod tests {
         repo.queue
             .push(QueuePhase::Pending, issue_item("org/repo", 1));
 
-        repo.scan_issues(&gh, &db, &[], &None).await.unwrap();
+        repo.scan_issues(&gh, &db, &[], &None, None).await.unwrap();
 
         // Still only 1 item (no duplicate)
         assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
@@ -1245,12 +1248,102 @@ mod tests {
 
         let mut repo = make_repo();
         let filter = Some(vec!["priority:high".to_string()]);
-        repo.scan_issues(&gh, &db, &[], &filter).await.unwrap();
+        repo.scan_issues(&gh, &db, &[], &filter, None)
+            .await
+            .unwrap();
 
         // Only issue #1 matches the filter
         assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
         let item = repo.queue.pop(QueuePhase::Pending).unwrap();
         assert_eq!(item.github_number, 1);
+    }
+
+    #[tokio::test]
+    async fn scan_issues_uses_custom_trigger_label() {
+        let gh = MockGh::new();
+        let db = MockCursorRepo::new();
+
+        let issues_json = serde_json::json!([
+            {
+                "number": 10,
+                "title": "custom trigger",
+                "body": "test",
+                "user": {"login": "alice"},
+                "labels": [{"name": "custom:analyze"}]
+            }
+        ]);
+        gh.set_paginate(
+            "org/repo",
+            "issues",
+            serde_json::to_vec(&issues_json).unwrap(),
+        );
+
+        let mut repo = make_repo();
+        repo.scan_issues(&gh, &db, &[], &None, Some("custom:analyze"))
+            .await
+            .unwrap();
+
+        // Issue queued with custom trigger label
+        assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
+        let item = repo.queue.pop(QueuePhase::Pending).unwrap();
+        assert_eq!(item.github_number, 10);
+
+        // Custom trigger label removed (not hardcoded autodev:analyze)
+        let removed = gh.removed_labels.lock().unwrap();
+        assert_eq!(removed.len(), 1);
+        assert_eq!(
+            removed[0],
+            ("org/repo".to_string(), 10, "custom:analyze".to_string())
+        );
+
+        // wip label still added
+        let added = gh.added_labels.lock().unwrap();
+        assert_eq!(added.len(), 1);
+        assert_eq!(
+            added[0],
+            ("org/repo".to_string(), 10, "autodev:wip".to_string())
+        );
+
+        // API called with custom label in params
+        let calls = gh.paginate_calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        let params = &calls[0].2;
+        assert!(params
+            .iter()
+            .any(|(k, v)| k == "labels" && v == "custom:analyze"));
+    }
+
+    #[tokio::test]
+    async fn scan_issues_defaults_to_analyze_label_when_none() {
+        let gh = MockGh::new();
+        let db = MockCursorRepo::new();
+
+        let issues_json = serde_json::json!([
+            {
+                "number": 20,
+                "title": "default trigger",
+                "body": null,
+                "user": {"login": "alice"},
+                "labels": [{"name": "autodev:analyze"}]
+            }
+        ]);
+        gh.set_paginate(
+            "org/repo",
+            "issues",
+            serde_json::to_vec(&issues_json).unwrap(),
+        );
+
+        let mut repo = make_repo();
+        repo.scan_issues(&gh, &db, &[], &None, None).await.unwrap();
+
+        assert_eq!(repo.queue.len(QueuePhase::Pending), 1);
+
+        // API called with default autodev:analyze label
+        let calls = gh.paginate_calls.lock().unwrap();
+        let params = &calls[0].2;
+        assert!(params
+            .iter()
+            .any(|(k, v)| k == "labels" && v == "autodev:analyze"));
     }
 
     #[tokio::test]
