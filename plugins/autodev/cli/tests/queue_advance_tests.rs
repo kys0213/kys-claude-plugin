@@ -514,6 +514,116 @@ fn queue_get_item_returns_none_for_nonexistent() {
 }
 
 // ═══════════════════════════════════════════════
+// 10b. queue_done / queue_hitl / queue_retry_script (V5)
+// ═══════════════════════════════════════════════
+
+#[test]
+fn cli_queue_done_transitions_completed_to_done() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-done-1", "completed");
+
+    let result = autodev::cli::queue::queue_done(&db, "work-done-1", None).unwrap();
+    assert!(result.output.contains("done"));
+
+    let phase = db.queue_get_phase("work-done-1").unwrap();
+    assert_eq!(phase, Some(QueuePhase::Done));
+}
+
+#[test]
+fn cli_queue_done_rejects_non_completed() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-done-2", "running");
+
+    let result = autodev::cli::queue::queue_done(&db, "work-done-2", None);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("Completed phase"));
+}
+
+#[test]
+fn cli_queue_done_records_decision() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-done-3", "completed");
+
+    autodev::cli::queue::queue_done(&db, "work-done-3", Some("tests passed")).unwrap();
+
+    let decisions = db.decision_list(None, 10).unwrap();
+    assert!(!decisions.is_empty());
+    assert_eq!(decisions[0].reasoning, "tests passed");
+}
+
+#[test]
+fn cli_queue_hitl_transitions_completed_to_hitl() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-hitl-1", "completed");
+
+    let result = autodev::cli::queue::queue_hitl(&db, "work-hitl-1", "needs human review").unwrap();
+    assert!(result.output.contains("hitl"));
+    assert!(result.hitl_event.is_some());
+    assert!(result.hitl_id.is_some());
+
+    let phase = db.queue_get_phase("work-hitl-1").unwrap();
+    assert_eq!(phase, Some(QueuePhase::Hitl));
+
+    // HITL event should exist
+    let events = db.hitl_list(None).unwrap();
+    assert!(!events.is_empty());
+    assert!(events[0].situation.contains("needs human review"));
+}
+
+#[test]
+fn cli_queue_hitl_rejects_non_completed() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-hitl-2", "pending");
+
+    let result = autodev::cli::queue::queue_hitl(&db, "work-hitl-2", "reason");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("Completed phase"));
+}
+
+#[test]
+fn cli_queue_retry_script_transitions_failed_to_done() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-retry-1", "failed");
+
+    let output = autodev::cli::queue::queue_retry_script(&db, "work-retry-1").unwrap();
+    assert!(output.contains("retry-script"));
+
+    let phase = db.queue_get_phase("work-retry-1").unwrap();
+    assert_eq!(phase, Some(QueuePhase::Done));
+}
+
+#[test]
+fn cli_queue_retry_script_rejects_non_failed() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-retry-2", "completed");
+
+    let result = autodev::cli::queue::queue_retry_script(&db, "work-retry-2");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("Failed phase"));
+}
+
+#[test]
+fn advance_completed_is_terminal() {
+    let db = open_memory_db();
+    let repo_id = add_test_repo(&db);
+    insert_queue_item(&db, &repo_id, "work-comp-1", "completed");
+
+    let result = db.queue_advance("work-comp-1");
+    assert!(result.is_err());
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("cannot advance completed"));
+}
+
+// ═══════════════════════════════════════════════
 // 11. HITL auto-trigger on review overflow (H3)
 // ═══════════════════════════════════════════════
 
@@ -564,9 +674,9 @@ fn queue_done_completed_to_done() {
     let repo_id = add_test_repo(&db);
     insert_queue_item(&db, &repo_id, "work-done-1", "completed");
 
-    let output = autodev::cli::queue::queue_done(&db, "work-done-1", None).unwrap();
-    assert!(output.contains("done"));
-    assert!(output.contains("completed"));
+    let result = autodev::cli::queue::queue_done(&db, "work-done-1", None).unwrap();
+    assert!(result.output.contains("done"));
+    assert!(result.output.contains("completed"));
 
     let phase = db.queue_get_phase("work-done-1").unwrap();
     assert_eq!(phase, Some(QueuePhase::Done));
@@ -615,7 +725,7 @@ fn queue_hitl_completed_to_hitl() {
     let repo_id = add_test_repo(&db);
     insert_queue_item(&db, &repo_id, "work-hitl-1", "completed");
 
-    let result = autodev::cli::queue::queue_hitl(&db, "work-hitl-1", None).unwrap();
+    let result = autodev::cli::queue::queue_hitl(&db, "work-hitl-1", "manual hitl").unwrap();
     assert!(result.output.contains("hitl"));
     assert!(result.hitl_event.is_some());
     assert!(result.hitl_id.is_some());
@@ -630,7 +740,7 @@ fn queue_hitl_with_reason() {
     let repo_id = add_test_repo(&db);
     insert_queue_item(&db, &repo_id, "work-hitl-2", "completed");
 
-    let result = autodev::cli::queue::queue_hitl(&db, "work-hitl-2", Some("needs review")).unwrap();
+    let result = autodev::cli::queue::queue_hitl(&db, "work-hitl-2", "needs review").unwrap();
     assert!(result.output.contains("hitl"));
 
     // Check HITL event was created with reason
@@ -645,7 +755,7 @@ fn queue_hitl_wrong_phase_fails() {
     let repo_id = add_test_repo(&db);
     insert_queue_item(&db, &repo_id, "work-hitl-3", "pending");
 
-    let result = autodev::cli::queue::queue_hitl(&db, "work-hitl-3", None);
+    let result = autodev::cli::queue::queue_hitl(&db, "work-hitl-3", "manual hitl");
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("pending"));
 }
@@ -655,7 +765,7 @@ fn queue_hitl_wrong_phase_fails() {
 // ═══════════════════════════════════════════════
 
 #[test]
-fn queue_retry_script_failed_to_completed() {
+fn queue_retry_script_failed_to_done() {
     let db = open_memory_db();
     let repo_id = add_test_repo(&db);
     insert_queue_item(&db, &repo_id, "work-retry-1", "failed");
@@ -663,10 +773,10 @@ fn queue_retry_script_failed_to_completed() {
     let output = autodev::cli::queue::queue_retry_script(&db, "work-retry-1").unwrap();
     assert!(output.contains("retry-script"));
     assert!(output.contains("failed"));
-    assert!(output.contains("completed"));
+    assert!(output.contains("done"));
 
     let phase = db.queue_get_phase("work-retry-1").unwrap();
-    assert_eq!(phase, Some(QueuePhase::Completed));
+    assert_eq!(phase, Some(QueuePhase::Done));
 }
 
 #[test]
