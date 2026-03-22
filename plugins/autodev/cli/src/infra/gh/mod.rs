@@ -91,6 +91,14 @@ pub trait Gh: Send + Sync {
         host: Option<&str>,
     ) -> Vec<String>;
 
+    /// `gh api repos/{repo}/issues/{number} --method PATCH -f state=closed`
+    /// 이슈를 닫는다 (best effort)
+    async fn issue_close(&self, repo_name: &str, number: i64, host: Option<&str>) -> bool;
+
+    /// `gh api repos/{repo}/pulls/{number}/merge --method PUT`
+    /// PR을 머지한다. 성공 시 true.
+    async fn pr_merge(&self, repo_name: &str, number: i64, host: Option<&str>) -> bool;
+
     /// `gh api repos/{repo}/pulls/{number}/reviews --method POST -f event={event}`
     /// event: `"APPROVE"` | `"REQUEST_CHANGES"` | `"COMMENT"`
     /// GitHub PR UI에서 Approved / Changes Requested 상태를 설정한다.
