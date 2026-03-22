@@ -242,17 +242,17 @@ pub fn queue_list_db(
 /// v5 spec에서 script가 아이템 정보를 조회하는 유일한 방법.
 /// `autodev context $WORK_ID --json` 형태로 사용.
 pub fn queue_context(db: &Database, work_id: &str, json: bool) -> Result<String> {
-    use crate::core::repository::RepoRepository;
+    use crate::core::repository::WorkspaceRepository;
 
     let item = db
         .queue_get_item(work_id)?
         .ok_or_else(|| anyhow::anyhow!("queue item not found: {work_id}"))?;
 
     // Resolve repo info
-    let repos = db.repo_list()?;
+    let repos = db.workspace_list()?;
     let repo = repos.iter().find(|r| {
         // repo_id is the internal ID; match by checking enabled repos
-        let enabled = db.repo_find_enabled().unwrap_or_default();
+        let enabled = db.workspace_find_enabled().unwrap_or_default();
         enabled
             .iter()
             .any(|e| e.id == item.repo_id && e.name == r.name)

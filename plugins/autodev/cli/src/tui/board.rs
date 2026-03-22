@@ -21,7 +21,7 @@ impl BoardStateBuilder {
         repo_filter: Option<&str>,
         home: &std::path::Path,
     ) -> Result<BoardState> {
-        let all_repos = db.repo_find_enabled()?;
+        let all_repos = db.workspace_find_enabled()?;
         let all_items = db.queue_list_items(repo_filter)?;
         let all_specs = db.spec_list(repo_filter)?;
         let all_spec_issues = db.spec_issues_all()?;
@@ -621,10 +621,10 @@ mod tests {
 
         // Add two repos
         let repo_a_id = db
-            .repo_add("https://github.com/org/repo-a", "org/repo-a")
+            .workspace_add("https://github.com/org/repo-a", "org/repo-a")
             .unwrap();
         let repo_b_id = db
-            .repo_add("https://github.com/org/repo-b", "org/repo-b")
+            .workspace_add("https://github.com/org/repo-b", "org/repo-b")
             .unwrap();
 
         // Add queue items
@@ -687,7 +687,7 @@ mod tests {
         let db = setup_test_db(tmp.path());
 
         let repo_id = db
-            .repo_add("https://github.com/org/repo", "org/repo")
+            .workspace_add("https://github.com/org/repo", "org/repo")
             .unwrap();
 
         // Add a spec
@@ -750,10 +750,10 @@ mod tests {
         let db = setup_test_db(tmp.path());
 
         let repo_a_id = db
-            .repo_add("https://github.com/org/repo-a", "org/repo-a")
+            .workspace_add("https://github.com/org/repo-a", "org/repo-a")
             .unwrap();
         let repo_b_id = db
-            .repo_add("https://github.com/org/repo-b", "org/repo-b")
+            .workspace_add("https://github.com/org/repo-b", "org/repo-b")
             .unwrap();
 
         insert_queue_item(

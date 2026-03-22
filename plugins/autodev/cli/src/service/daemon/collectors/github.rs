@@ -16,7 +16,7 @@ use crate::core::dependency;
 use crate::core::models::{QueuePhase, QueueType};
 use crate::core::phase::TaskKind;
 use crate::core::repository::{
-    QueueRepository, RepoRepository, ScanCursorRepository, SpecRepository,
+    QueueRepository, ScanCursorRepository, SpecRepository, WorkspaceRepository,
 };
 use crate::core::task::{QueueOp, Task, TaskResult};
 use crate::infra::gh::Gh;
@@ -35,7 +35,7 @@ use crate::service::tasks::review::ReviewTask;
 ///
 /// per-repo 큐를 소유하고, 스캔 → Task 생성 → 큐 적용 생명주기를 관리한다.
 pub struct GitHubTaskSource<
-    DB: RepoRepository + ScanCursorRepository + QueueRepository + SpecRepository,
+    DB: WorkspaceRepository + ScanCursorRepository + QueueRepository + SpecRepository,
 > {
     workspace: Arc<dyn WorkspaceOps>,
     gh: Arc<dyn Gh>,
@@ -53,7 +53,7 @@ pub struct GitHubTaskSource<
     recovery_interval_secs: u64,
 }
 
-impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + SpecRepository + Send>
+impl<DB: WorkspaceRepository + ScanCursorRepository + QueueRepository + SpecRepository + Send>
     GitHubTaskSource<DB>
 {
     #[allow(clippy::too_many_arguments)]
@@ -94,7 +94,7 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + SpecRepositor
 
     /// DB에서 enabled repos를 동기화한다 (추가/제거).
     async fn sync_repos(&mut self) {
-        let enabled = match self.db.repo_find_enabled() {
+        let enabled = match self.db.workspace_find_enabled() {
             Ok(e) => e,
             Err(e) => {
                 tracing::error!("repo_find_enabled failed: {e}");
@@ -146,8 +146,8 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + SpecRepositor
         let repo_names: Vec<String> = self.repos.keys().cloned().collect();
 
         for repo_name in &repo_names {
-            let ws_path =
-                config::workspaces_path(&*self.env).join(config::sanitize_repo_name(repo_name));
+            let ws_path = config::workspaces_path(&*self.env)
+                .join(config::sanitize_workspace_name(repo_name));
             let repo_cfg = config::loader::load_merged(
                 &*self.env,
                 if ws_path.exists() {
@@ -549,8 +549,8 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + SpecRepositor
 }
 
 #[async_trait(?Send)]
-impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + SpecRepository + Send> Collector
-    for GitHubTaskSource<DB>
+impl<DB: WorkspaceRepository + ScanCursorRepository + QueueRepository + SpecRepository + Send>
+    Collector for GitHubTaskSource<DB>
 {
     async fn poll(&mut self) -> Vec<Box<dyn Task>> {
         self.sync_repos().await;
@@ -608,7 +608,7 @@ impl<DB: RepoRepository + ScanCursorRepository + QueueRepository + SpecRepositor
 mod tests {
     use super::*;
     use crate::core::config::models::WorkflowConfig;
-    use crate::core::models::EnabledRepo;
+    use crate::core::models::EnabledWorkspace;
     use crate::core::queue_item::testing::test_repo_named;
     use crate::core::queue_item::{PrMetadata, QueueItem};
     use crate::infra::gh::mock::MockGh;
@@ -714,7 +714,7 @@ mod tests {
     /// Minimal DB mock for tests.
     /// `active_items`를 설정하면 `queue_load_active()`에서 반환한다.
     struct MockDb {
-        repos: Vec<EnabledRepo>,
+        repos: Vec<EnabledWorkspace>,
         active_items: Vec<crate::core::models::QueueItemRow>,
     }
 
@@ -727,20 +727,22 @@ mod tests {
         }
     }
 
-    impl RepoRepository for MockDb {
-        fn repo_add(&self, _: &str, _: &str) -> anyhow::Result<String> {
+    impl WorkspaceRepository for MockDb {
+        fn workspace_add(&self, _: &str, _: &str) -> anyhow::Result<String> {
             Ok("r1".to_string())
         }
-        fn repo_remove(&self, _: &str) -> anyhow::Result<()> {
+        fn workspace_remove(&self, _: &str) -> anyhow::Result<()> {
             Ok(())
         }
-        fn repo_list(&self) -> anyhow::Result<Vec<crate::core::models::RepoInfo>> {
+        fn workspace_list(&self) -> anyhow::Result<Vec<crate::core::models::WorkspaceInfo>> {
             Ok(vec![])
         }
-        fn repo_find_enabled(&self) -> anyhow::Result<Vec<EnabledRepo>> {
+        fn workspace_find_enabled(&self) -> anyhow::Result<Vec<EnabledWorkspace>> {
             Ok(self.repos.clone())
         }
-        fn repo_status_summary(&self) -> anyhow::Result<Vec<crate::core::models::RepoStatusRow>> {
+        fn workspace_status_summary(
+            &self,
+        ) -> anyhow::Result<Vec<crate::core::models::WorkspaceStatusRow>> {
             Ok(vec![])
         }
     }

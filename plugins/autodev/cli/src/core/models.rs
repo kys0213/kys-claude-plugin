@@ -45,7 +45,7 @@ pub struct NewConsumerLog {
 // ─── Query result models (projections) ───
 
 #[derive(Clone)]
-pub struct EnabledRepo {
+pub struct EnabledWorkspace {
     pub id: String,
     pub url: String,
     pub name: String,
@@ -185,12 +185,12 @@ impl RepoPull {
     }
 }
 
-/// EnabledRepo + per-repo config + pre-fetched GitHub state.
+/// EnabledWorkspace + per-repo config + pre-fetched GitHub state.
 ///
 /// daemon tick마다 한번 생성하여 recovery/reconcile/knowledge에 전달한다.
 /// gh_host 등 per-repo 설정과 open issues/pulls를 내부에 보유하므로
 /// 소비자가 config 로드나 API 호출을 반복할 필요가 없다.
-pub struct ResolvedRepo {
+pub struct ResolvedWorkspace {
     pub id: String,
     pub url: String,
     pub name: String,
@@ -199,19 +199,19 @@ pub struct ResolvedRepo {
     pub pulls: Vec<RepoPull>,
 }
 
-impl ResolvedRepo {
+impl ResolvedWorkspace {
     pub fn gh_host(&self) -> Option<&str> {
         self.gh_host.as_deref()
     }
 }
 
-pub struct RepoInfo {
+pub struct WorkspaceInfo {
     pub name: String,
     pub url: String,
     pub enabled: bool,
 }
 
-pub struct RepoStatusRow {
+pub struct WorkspaceStatusRow {
     pub name: String,
     pub enabled: bool,
 }

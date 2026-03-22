@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use chrono::Timelike;
 use tracing::info;
 
-use crate::core::repository::RepoRepository;
+use crate::core::repository::WorkspaceRepository;
 use crate::infra::claude::Claude;
 use crate::infra::db::Database;
 use crate::infra::gh::Gh;
@@ -115,7 +115,7 @@ impl DailyReporter for DefaultDailyReporter {
                 );
 
                 let ws = Workspace::new(&*self.git, &*self.env);
-                if let Ok(enabled) = RepoRepository::repo_find_enabled(&self.db) {
+                if let Ok(enabled) = self.db.workspace_find_enabled() {
                     if let Some(er) = enabled.first() {
                         if let Ok(base) = ws.ensure_cloned(&er.url, &er.name).await {
                             crate::service::tasks::knowledge::daily::enrich_with_cross_analysis(

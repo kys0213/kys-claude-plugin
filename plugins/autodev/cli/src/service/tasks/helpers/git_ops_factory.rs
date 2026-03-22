@@ -6,8 +6,8 @@ use anyhow::Result;
 
 use crate::core::config;
 use crate::core::config::Env;
-use crate::core::models::EnabledRepo;
-use crate::core::repository::RepoRepository;
+use crate::core::models::EnabledWorkspace;
+use crate::core::repository::WorkspaceRepository;
 use crate::infra::gh::Gh;
 
 use super::git_ops::{fetch_issues, fetch_pulls, GitRepository};
@@ -30,7 +30,7 @@ fn config_mtime(path: &std::path::Path) -> Option<SystemTime> {
 /// 설정 파일의 mtime이 변경되지 않았으면 캐시된 값을 반환하여
 /// 매 tick마다 불필요한 디스크 I/O를 회피한다.
 pub(crate) fn resolve_gh_host(env: &dyn Env, repo_name: &str) -> Option<String> {
-    let ws_path = config::workspaces_path(env).join(config::sanitize_repo_name(repo_name));
+    let ws_path = config::workspaces_path(env).join(config::sanitize_workspace_name(repo_name));
     let config_path = ws_path.join(config::CONFIG_FILENAME);
     let current_mtime = config_mtime(&config_path);
 
@@ -82,13 +82,13 @@ pub(crate) fn resolve_gh_host(env: &dyn Env, repo_name: &str) -> Option<String> 
 
 /// GitRepository 인스턴스를 조립하는 팩토리.
 ///
-/// DB의 EnabledRepo + per-repo config(gh_host) + GitHub API(issues/pulls)를
+/// DB의 EnabledWorkspace + per-repo config(gh_host) + GitHub API(issues/pulls)를
 /// 하나의 GitRepository aggregate로 조합한다.
 pub struct GitRepositoryFactory;
 
 impl GitRepositoryFactory {
     /// 단일 레포를 GitRepository로 조립한다.
-    pub async fn create(repo: &EnabledRepo, env: &dyn Env, gh: &dyn Gh) -> GitRepository {
+    pub async fn create(repo: &EnabledWorkspace, env: &dyn Env, gh: &dyn Gh) -> GitRepository {
         let gh_host = resolve_gh_host(env, &repo.name);
 
         let issues = fetch_issues(gh, &repo.name, gh_host.as_deref()).await;
@@ -106,11 +106,11 @@ impl GitRepositoryFactory {
 
     /// 모든 enabled repos를 일괄 생성한다.
     pub async fn create_all(
-        db: &dyn RepoRepository,
+        db: &dyn WorkspaceRepository,
         env: &dyn Env,
         gh: &dyn Gh,
     ) -> Result<HashMap<String, GitRepository>> {
-        let repos = db.repo_find_enabled()?;
+        let repos = db.workspace_find_enabled()?;
         let mut result = HashMap::with_capacity(repos.len());
 
         for repo in &repos {
@@ -187,7 +187,7 @@ mod tests {
             serde_json::to_vec(&pulls_json).unwrap(),
         );
 
-        let enabled = EnabledRepo {
+        let enabled = EnabledWorkspace {
             id: "repo-1".to_string(),
             url: "https://github.com/org/repo".to_string(),
             name: "org/repo".to_string(),
@@ -216,7 +216,7 @@ mod tests {
         let gh = MockGh::new();
         // API 응답을 설정하지 않으면 에러 반환 → 빈 벡터
 
-        let enabled = EnabledRepo {
+        let enabled = EnabledWorkspace {
             id: "repo-1".to_string(),
             url: "https://github.com/org/repo".to_string(),
             name: "org/repo".to_string(),

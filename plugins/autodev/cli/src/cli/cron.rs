@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::cli::resolve_repo_id;
+use crate::cli::resolve_workspace_id;
 use crate::core::config;
 use crate::core::config::Env;
 use crate::core::models::*;
@@ -92,7 +92,7 @@ pub fn cron_add(
     };
 
     let repo_id = if let Some(r) = repo {
-        Some(resolve_repo_id(db, r)?)
+        Some(resolve_workspace_id(db, r)?)
     } else {
         None
     };
@@ -194,7 +194,7 @@ pub fn cron_trigger(db: &Database, env: &dyn Env, name: &str, repo: Option<&str>
             cmd.env("AUTODEV_REPO_NAME", &repo_info.name);
             cmd.env("AUTODEV_REPO_URL", &repo_info.url);
             cmd.env("AUTODEV_REPO_ID", &repo_info.id);
-            let sanitized = config::sanitize_repo_name(&repo_info.name);
+            let sanitized = config::sanitize_workspace_name(&repo_info.name);
             // WORKSPACE: short workspace name for cron scripts (v5 spec)
             cmd.env("WORKSPACE", &sanitized);
             let workspace = config::workspaces_path(env).join(&sanitized);
@@ -386,8 +386,8 @@ pub fn seed_global_crons(db: &Database, home: &std::path::Path) -> Result<u32> {
 
 // ─── Helpers ───
 
-fn find_repo_info(db: &Database, repo_name: &str) -> Result<Option<EnabledRepo>> {
-    let repos = db.repo_find_enabled()?;
+fn find_repo_info(db: &Database, repo_name: &str) -> Result<Option<EnabledWorkspace>> {
+    let repos = db.workspace_find_enabled()?;
     Ok(repos.into_iter().find(|r| r.name == repo_name))
 }
 

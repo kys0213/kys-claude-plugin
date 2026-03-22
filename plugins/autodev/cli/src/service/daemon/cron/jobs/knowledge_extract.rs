@@ -61,7 +61,7 @@ mod tests {
         let db = Database::open(&dir.path().join("test.db")).unwrap();
         db.initialize().unwrap();
         let repo_id = db
-            .repo_add("https://github.com/org/repo", "org/repo")
+            .workspace_add("https://github.com/org/repo", "org/repo")
             .unwrap();
         (dir, db, repo_id)
     }
@@ -120,7 +120,7 @@ mod tests {
     fn ignores_other_repos() {
         let (_dir, db, repo_id) = setup();
         let other = db
-            .repo_add("https://github.com/org/other", "org/other")
+            .workspace_add("https://github.com/org/other", "org/other")
             .unwrap();
         add_item(&db, &repo_id, 1, QueueType::Pr, QueuePhase::Done);
         add_item(&db, &other, 2, QueueType::Pr, QueuePhase::Done);

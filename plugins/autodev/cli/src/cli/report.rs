@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::core::config;
 use crate::core::config::Env;
-use crate::core::repository::RepoRepository;
+use crate::core::repository::WorkspaceRepository;
 use crate::infra::db::Database;
 use crate::infra::gh::Gh;
 use crate::service::tasks::helpers::git_ops_factory::resolve_gh_host;
@@ -42,7 +42,7 @@ pub async fn daily(
     let patterns = daily::detect_patterns(&stats);
     let report = daily::build_daily_report(date, &stats, patterns);
 
-    let enabled = db.repo_find_enabled()?;
+    let enabled = db.workspace_find_enabled()?;
     if enabled.is_empty() {
         anyhow::bail!("no enabled repositories found");
     }

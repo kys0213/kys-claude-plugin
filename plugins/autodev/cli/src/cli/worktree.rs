@@ -23,7 +23,7 @@ pub fn list(env: &dyn Env, repo_filter: Option<&str>) -> Result<String> {
 
         // Apply repo filter (matches sanitized name)
         if let Some(filter) = repo_filter {
-            let sanitized = config::sanitize_repo_name(filter);
+            let sanitized = config::sanitize_workspace_name(filter);
             if repo_name != sanitized {
                 continue;
             }

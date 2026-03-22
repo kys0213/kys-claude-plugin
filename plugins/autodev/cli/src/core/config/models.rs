@@ -790,7 +790,7 @@ workflows:
     on_fail:
       - script: "echo failed"
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(cfg.workflows.implement.on_enter.len(), 1);
         assert_eq!(cfg.workflows.implement.on_done.len(), 2);
         assert_eq!(cfg.workflows.implement.on_fail.len(), 1);
@@ -812,7 +812,7 @@ workflows:
   implement:
     command: /custom-implement
 "#;
-        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: WorkflowConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(
             cfg.workflows.implement.command.as_deref(),
             Some("/custom-implement")

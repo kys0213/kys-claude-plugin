@@ -9,7 +9,7 @@ pub fn claw_workspace_path(home: &Path) -> PathBuf {
 
 /// Returns the per-repo claw override path.
 fn repo_claw_path(home: &Path, repo_name: &str) -> PathBuf {
-    let sanitized = crate::core::config::sanitize_repo_name(repo_name);
+    let sanitized = crate::core::config::sanitize_workspace_name(repo_name);
     home.join("workspaces").join(sanitized).join("claw")
 }
 
@@ -387,7 +387,7 @@ pub fn claw_session_summary(
     output.push('\n');
 
     // Repo summary
-    let repos = db.repo_status_summary()?;
+    let repos = db.workspace_status_summary()?;
     if !repos.is_empty() {
         output.push_str("Workspaces:\n");
         for repo in &repos {
@@ -587,7 +587,7 @@ mod tests {
         };
 
         let repo_id = db
-            .repo_add("https://github.com/org/repo", "org/repo")
+            .workspace_add("https://github.com/org/repo", "org/repo")
             .unwrap();
         db.hitl_create(&NewHitlEvent {
             repo_id,
@@ -618,7 +618,7 @@ mod tests {
         };
 
         let repo_id = db
-            .repo_add("https://github.com/org/repo", "org/repo")
+            .workspace_add("https://github.com/org/repo", "org/repo")
             .unwrap();
 
         db.queue_upsert(&QueueItemRow {

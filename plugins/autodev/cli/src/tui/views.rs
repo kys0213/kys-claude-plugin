@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::core::repository::RepoRepository;
+use crate::core::repository::WorkspaceRepository;
 use crate::infra::db::Database;
 
 // ─── Panel enum ───
@@ -258,7 +258,7 @@ impl AppState {
     /// Update cached repo names from DB.
     pub fn refresh_repo_names(&mut self, db: &Database) {
         self.repo_names = db
-            .repo_status_summary()
+            .workspace_status_summary()
             .map(|rows| rows.into_iter().map(|r| r.name).collect())
             .unwrap_or_default();
     }
@@ -323,7 +323,7 @@ fn render_header(f: &mut Frame, area: Rect, db: &Database, state: &AppState) {
         Span::styled("○ stopped", Style::default().fg(Color::Red))
     };
 
-    let repo_count = db.repo_status_summary().map(|v| v.len()).unwrap_or(0);
+    let repo_count = db.workspace_status_summary().map(|v| v.len()).unwrap_or(0);
 
     let view_indicator = match state.view_mode {
         ViewMode::AllRepos => Span::styled(
@@ -786,7 +786,7 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 
 fn render_repos_panel(f: &mut Frame, area: Rect, db: &Database, state: &AppState) {
     let repos: Vec<(String, bool)> = db
-        .repo_status_summary()
+        .workspace_status_summary()
         .map(|rows| rows.into_iter().map(|r| (r.name, r.enabled)).collect())
         .unwrap_or_default();
 

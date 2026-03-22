@@ -19,8 +19,8 @@ use crate::core::repository::*;
 use crate::infra::db::Database;
 
 /// Shared helper: resolve a repo name to its database ID.
-pub fn resolve_repo_id(db: &Database, repo_name: &str) -> Result<String> {
-    let enabled = db.repo_find_enabled()?;
+pub fn resolve_workspace_id(db: &Database, repo_name: &str) -> Result<String> {
+    let enabled = db.workspace_find_enabled()?;
     enabled
         .iter()
         .find(|r| r.name == repo_name)
@@ -35,7 +35,7 @@ fn parse_config_json(json_str: &str) -> Result<serde_json::Value> {
 
 /// 레포의 워크스페이스 디렉토리 경로 반환 (생성 포함)
 fn ensure_workspace_dir(env: &dyn Env, name: &str) -> Result<PathBuf> {
-    let ws_dir = config::workspaces_path(env).join(config::sanitize_repo_name(name));
+    let ws_dir = config::workspaces_path(env).join(config::sanitize_workspace_name(name));
     std::fs::create_dir_all(&ws_dir)?;
     Ok(ws_dir)
 }
@@ -60,7 +60,7 @@ fn print_effective_config(env: &dyn Env, ws_dir: Option<&Path>, name: &str) -> R
 pub fn status(db: &Database, env: &dyn Env, json: bool) -> Result<String> {
     let home = config::autodev_home(env);
     let running = crate::service::daemon::pid::is_running(&home);
-    let rows = db.repo_status_summary()?;
+    let rows = db.workspace_status_summary()?;
 
     if json {
         let repos: Vec<serde_json::Value> = rows
@@ -121,7 +121,7 @@ fn extract_repo_name(url: &str) -> Result<String> {
 }
 
 /// 레포 등록
-pub fn repo_add(
+pub fn workspace_add(
     db: &Database,
     env: &dyn config::Env,
     url: &str,
@@ -129,7 +129,7 @@ pub fn repo_add(
 ) -> Result<()> {
     let name = extract_repo_name(url)?;
 
-    let repo_id = match db.repo_add(url, &name) {
+    let repo_id = match db.workspace_add(url, &name) {
         Ok(id) => id,
         Err(e) => {
             let err_str = e.to_string();
@@ -180,7 +180,7 @@ pub fn repo_add(
 
         // 3. Check target repo's .claude/rules/ and suggest convention bootstrap
         let repo_root = config::workspaces_path(env)
-            .join(config::sanitize_repo_name(&name))
+            .join(config::sanitize_workspace_name(&name))
             .join("main");
         let rules_dir = repo_root.join(".claude/rules");
         if !rules_dir.exists()
@@ -203,8 +203,8 @@ pub fn repo_add(
 }
 
 /// 레포 목록
-pub fn repo_list(db: &Database, json: bool) -> Result<String> {
-    let repos = db.repo_list()?;
+pub fn workspace_list(db: &Database, json: bool) -> Result<String> {
+    let repos = db.workspace_list()?;
 
     if json {
         let value: Vec<serde_json::Value> = repos
@@ -235,15 +235,15 @@ pub fn repo_list(db: &Database, json: bool) -> Result<String> {
 }
 
 /// 레포 상세 조회
-pub fn repo_show(db: &Database, env: &dyn Env, name: &str, json: bool) -> Result<String> {
-    let repos = db.repo_list()?;
+pub fn workspace_show(db: &Database, env: &dyn Env, name: &str, json: bool) -> Result<String> {
+    let repos = db.workspace_list()?;
     let repo = repos
         .iter()
         .find(|r| r.name == name)
         .ok_or_else(|| anyhow::anyhow!("repository not found: {name}"))?;
 
     if json {
-        let ws_dir = config::workspaces_path(env).join(config::sanitize_repo_name(name));
+        let ws_dir = config::workspaces_path(env).join(config::sanitize_workspace_name(name));
         let effective = config::loader::load_merged(env, Some(&ws_dir));
         let mut value = serde_json::json!({
             "name": repo.name,
@@ -278,7 +278,7 @@ pub fn repo_config(env: &dyn Env, name: &str) -> Result<()> {
     }
 
     // 워크스페이스에서 레포별 설정 탐색
-    let ws = config::workspaces_path(env).join(config::sanitize_repo_name(name));
+    let ws = config::workspaces_path(env).join(config::sanitize_workspace_name(name));
     let repo_config_path = ws.join(config::CONFIG_FILENAME);
     println!("\nRepo config: {}", repo_config_path.display());
 
@@ -302,7 +302,7 @@ pub fn repo_update(
     config_json: &str,
 ) -> Result<()> {
     // 1. 레포 존재 여부 확인
-    let repos = db.repo_list()?;
+    let repos = db.workspace_list()?;
     if !repos.iter().any(|r| r.name == name) {
         anyhow::bail!("repository not found: {name}. Use 'autodev repo add' first.");
     }
@@ -347,12 +347,12 @@ pub fn repo_update(
 }
 
 /// 레포 제거 (DB records + filesystem workspace cleanup)
-pub fn repo_remove(db: &Database, env: &dyn Env, name: &str) -> Result<()> {
-    db.repo_remove(name)?;
+pub fn workspace_remove(db: &Database, env: &dyn Env, name: &str) -> Result<()> {
+    db.workspace_remove(name)?;
 
     // Clean up per-repo workspace directory (includes claw override)
     let workspaces = config::workspaces_path(env);
-    let ws_dir = workspaces.join(config::sanitize_repo_name(name));
+    let ws_dir = workspaces.join(config::sanitize_workspace_name(name));
 
     // Safety: verify the path is actually under the expected workspaces directory
     // before performing recursive deletion.
@@ -568,7 +568,7 @@ pub fn logs(db: &Database, repo: Option<&str>, limit: usize) -> Result<String> {
 mod tests {
     use super::*;
     use crate::core::config::Env;
-    use crate::core::repository::RepoRepository;
+    use crate::core::repository::WorkspaceRepository;
     use std::env::VarError;
 
     struct TestEnv {
@@ -600,11 +600,12 @@ mod tests {
         };
 
         // Register a repo
-        db.repo_add("https://github.com/org/repo", "org/repo")
+        db.workspace_add("https://github.com/org/repo", "org/repo")
             .unwrap();
 
         // Write initial config
-        let ws_dir = config::workspaces_path(&env).join(config::sanitize_repo_name("org/repo"));
+        let ws_dir =
+            config::workspaces_path(&env).join(config::sanitize_workspace_name("org/repo"));
         std::fs::create_dir_all(&ws_dir).unwrap();
         std::fs::write(
             ws_dir.join(config::CONFIG_FILENAME),
@@ -652,7 +653,7 @@ mod tests {
             home: tmp.path().to_string_lossy().to_string(),
         };
 
-        db.repo_add("https://github.com/org/repo", "org/repo")
+        db.workspace_add("https://github.com/org/repo", "org/repo")
             .unwrap();
 
         let result = repo_update(&db, &env, "org/repo", "not-valid-json");
@@ -672,11 +673,12 @@ mod tests {
             home: tmp.path().to_string_lossy().to_string(),
         };
 
-        db.repo_add("https://github.com/org/repo", "org/repo")
+        db.workspace_add("https://github.com/org/repo", "org/repo")
             .unwrap();
 
         // Write initial config
-        let ws_dir = config::workspaces_path(&env).join(config::sanitize_repo_name("org/repo"));
+        let ws_dir =
+            config::workspaces_path(&env).join(config::sanitize_workspace_name("org/repo"));
         std::fs::create_dir_all(&ws_dir).unwrap();
         let original = "daemon:\n  poll_interval: 30\n";
         std::fs::write(ws_dir.join(config::CONFIG_FILENAME), original).unwrap();
@@ -700,13 +702,14 @@ mod tests {
             home: tmp.path().to_string_lossy().to_string(),
         };
 
-        db.repo_add("https://github.com/org/repo", "org/repo")
+        db.workspace_add("https://github.com/org/repo", "org/repo")
             .unwrap();
 
         // No existing YAML — should create new file
         repo_update(&db, &env, "org/repo", r#"{"daemon":{"log_level":"warn"}}"#).unwrap();
 
-        let ws_dir = config::workspaces_path(&env).join(config::sanitize_repo_name("org/repo"));
+        let ws_dir =
+            config::workspaces_path(&env).join(config::sanitize_workspace_name("org/repo"));
         let content = std::fs::read_to_string(ws_dir.join(config::CONFIG_FILENAME)).unwrap();
         let value: serde_json::Value = serde_yml::from_str(&content).unwrap();
         assert_eq!(value["daemon"]["log_level"], "warn");
