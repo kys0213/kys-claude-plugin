@@ -55,17 +55,19 @@
     },
     {
       "category": "productivity",
-      "description": "레이어드 아키텍처 기반 에이전트 설계 원칙 가이드 - 깨진 유리창 효과 방지",
+      "description": "레이어드 아키텍처 기반 에이전트 설계 원칙 가이드 + convention-architect 워크플로우",
       "keywords": [
         "workflow",
         "design-principles",
         "layered-architecture",
-        "agent-design"
+        "agent-design",
+        "convention-architect",
+        "rules-scaffolding"
       ],
       "name": "workflow-guide",
       "source": "./plugins/workflow-guide",
       "strict": false,
-      "version": "0.2.1"
+      "version": "0.3.0"
     },
     {
       "category": "productivity",
