@@ -142,19 +142,19 @@
     },
     {
       "category": "productivity",
-      "description": "스펙 문서와 구현 코드 간 갭을 체계적으로 분석 — 행위 커버리지, 보안, 성능 관점 리포트",
+      "description": "스펙 설계, 검증, 갭 분석 통합 툴킷 — 대화형 설계, 스펙 품질 검증, LSP 기반 코드 갭 분석",
       "keywords": [
         "spec",
-        "analysis",
-        "coverage",
+        "design",
+        "review",
         "gap",
-        "compliance",
-        "security",
-        "performance"
+        "static-analysis",
+        "lsp",
+        "architecture"
       ],
-      "name": "spec-analyzer",
-      "source": "./plugins/spec-analyzer",
-      "version": "0.1.0"
+      "name": "spec-kit",
+      "source": "./plugins/spec-kit",
+      "version": "0.2.0"
     }
   ]
 }

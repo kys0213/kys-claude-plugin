@@ -1,0 +1,19 @@
+{
+  "author": {
+    "name": "kys0213"
+  },
+  "commands": [
+    "./commands/gap-detect.md",
+    "./commands/spec-review.md",
+    "./commands/design.md"
+  ],
+  "agents": [
+    "./agents/spec-parser.md",
+    "./agents/structure-mapper.md",
+    "./agents/gap-analyzer.md",
+    "./agents/spec-quality-checker.md"
+  ],
+  "description": "스펙 설계, 검증, 갭 분석을 위한 통합 툴킷",
+  "name": "spec-kit",
+  "version": "0.2.0"
+}
