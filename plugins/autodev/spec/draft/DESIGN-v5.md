@@ -416,6 +416,7 @@ pub trait AgentRuntime: Send + Sync {
 pub struct RuntimeRequest {
     pub working_dir: PathBuf,
     pub prompt: String,
+    pub model: Option<String>,
     pub system_prompt: Option<String>,
     pub structured_output: Option<StructuredOutput>,
     pub session_id: Option<String>,

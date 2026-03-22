@@ -102,11 +102,12 @@ runtime:
     claw_evaluate: claude    # Claw headless는 이 런타임 사용
 ```
 
-agent .md 파일의 `model` 필드는 해당 runtime 내 모델 선택:
+agent .md 파일의 `model` 필드는 `RuntimeRequest.model`로 전달된다.
+per-invocation 오버라이드도 가능하므로, 모델 결정 우선순위는 [AgentRuntime](./agent-runtime.md#모델-결정-우선순위) 참조.
 
 ```markdown
 # agents/issue-analyzer.md
 ---
-model: sonnet     # ClaudeRuntime → --model sonnet
----               # GeminiRuntime → 무시 (기본 모델)
+model: sonnet     # RuntimeRequest.model = "sonnet"
+---
 ```
