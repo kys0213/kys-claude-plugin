@@ -313,7 +313,7 @@ mod tests {
     }
 
     fn create_repo(db: &Database) -> String {
-        db.repo_add("https://github.com/org/repo", "org/repo")
+        db.workspace_add("https://github.com/org/repo", "org/repo")
             .unwrap()
     }
 

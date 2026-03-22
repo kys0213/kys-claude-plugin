@@ -815,8 +815,8 @@ mod tests {
     }
 
     fn add_repo(db: &Database) -> String {
-        use crate::core::repository::RepoRepository;
-        db.repo_add("https://github.com/org/repo", "org/repo")
+        use crate::core::repository::WorkspaceRepository;
+        db.workspace_add("https://github.com/org/repo", "org/repo")
             .unwrap()
     }
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::cli::resolve_repo_id;
+use crate::cli::resolve_workspace_id;
 use crate::core::models::*;
 use crate::core::repository::*;
 use crate::infra::db::Database;
@@ -58,7 +58,7 @@ pub struct SpecAddParams<'a> {
 /// When `force` is false, registration is blocked if required sections are missing.
 /// Pass `force = true` to override and register anyway.
 pub fn spec_add(db: &Database, params: &SpecAddParams<'_>) -> Result<SpecAddResult> {
-    let repo_id = resolve_repo_id(db, params.repo_name)?;
+    let repo_id = resolve_workspace_id(db, params.repo_name)?;
 
     // Validate required sections before persisting
     let missing = validate_spec_sections(params.body);
@@ -137,7 +137,7 @@ pub fn spec_list_undecomposed(db: &Database, repo: Option<&str>, json: bool) -> 
             }
             if let Some(repo_name) = repo {
                 // Filter by repo: resolve repo_id from name
-                match crate::cli::resolve_repo_id(db, repo_name) {
+                match crate::cli::resolve_workspace_id(db, repo_name) {
                     Ok(rid) => s.repo_id == rid,
                     Err(_) => false,
                 }
@@ -443,7 +443,7 @@ fn run_spec_test_commands(
     let repo_name = resolve_repo_name(db, &spec.repo_id)?;
     let ws_root = crate::core::config::workspaces_path(env);
     let repo_dir = ws_root
-        .join(crate::core::config::sanitize_repo_name(&repo_name))
+        .join(crate::core::config::sanitize_workspace_name(&repo_name))
         .join("main");
 
     let mut summary = String::new();
@@ -581,7 +581,7 @@ fn run_spec_test_commands(
 
 /// Resolve the repo name from a repo_id by looking up enabled repos.
 fn resolve_repo_name(db: &Database, repo_id: &str) -> Result<String> {
-    let repos = db.repo_find_enabled()?;
+    let repos = db.workspace_find_enabled()?;
     repos
         .iter()
         .find(|r| r.id == repo_id)
@@ -838,7 +838,7 @@ fn collect_spec_files(
                     if pr.head_branch.is_empty() {
                         continue;
                     }
-                    let repo_name = crate::core::config::sanitize_repo_name(
+                    let repo_name = crate::core::config::sanitize_workspace_name(
                         item.work_id.split(':').nth(1).unwrap_or(""),
                     );
                     let repo_dir = ws_root.join(&repo_name).join("main");
@@ -1012,7 +1012,7 @@ pub async fn spec_verify(
     }
 
     // Resolve repo name from repo_id
-    let enabled = db.repo_find_enabled()?;
+    let enabled = db.workspace_find_enabled()?;
     let repo = enabled
         .iter()
         .find(|r| r.id == spec.repo_id)

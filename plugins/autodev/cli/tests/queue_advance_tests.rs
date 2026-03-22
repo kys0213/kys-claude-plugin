@@ -13,7 +13,7 @@ fn open_memory_db() -> Database {
 }
 
 fn add_test_repo(db: &Database) -> String {
-    db.repo_add("https://github.com/org/test-repo", "org/test-repo")
+    db.workspace_add("https://github.com/org/test-repo", "org/test-repo")
         .expect("add repo")
 }
 
@@ -193,7 +193,7 @@ fn list_filters_by_repo() {
     let db = open_memory_db();
     let repo_id1 = add_test_repo(&db);
     let repo_id2 = db
-        .repo_add("https://github.com/org/other-repo", "org/other-repo")
+        .workspace_add("https://github.com/org/other-repo", "org/other-repo")
         .unwrap();
     insert_queue_item(&db, &repo_id1, "work-1", "pending");
     insert_queue_item(&db, &repo_id2, "work-2", "pending");

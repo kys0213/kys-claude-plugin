@@ -12,7 +12,7 @@ fn open_memory_db() -> Database {
 }
 
 fn add_test_repo(db: &Database) -> String {
-    db.repo_add("https://github.com/org/test-repo", "org/test-repo")
+    db.workspace_add("https://github.com/org/test-repo", "org/test-repo")
         .expect("add repo")
 }
 
@@ -111,8 +111,12 @@ fn spec_list_returns_all() {
 #[test]
 fn spec_list_filters_by_repo() {
     let db = open_memory_db();
-    let repo_id1 = db.repo_add("https://github.com/a/one", "a/one").unwrap();
-    let repo_id2 = db.repo_add("https://github.com/b/two", "b/two").unwrap();
+    let repo_id1 = db
+        .workspace_add("https://github.com/a/one", "a/one")
+        .unwrap();
+    let repo_id2 = db
+        .workspace_add("https://github.com/b/two", "b/two")
+        .unwrap();
 
     add_test_spec(&db, &repo_id1);
     add_test_spec(&db, &repo_id2);

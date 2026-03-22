@@ -12,12 +12,12 @@ fn open_memory_db() -> Database {
 }
 
 fn add_test_repo(db: &Database) -> String {
-    db.repo_add("https://github.com/org/test-repo", "org/test-repo")
+    db.workspace_add("https://github.com/org/test-repo", "org/test-repo")
         .expect("add repo")
 }
 
 fn add_test_repo_with_url(db: &Database, url: &str, name: &str) -> String {
-    db.repo_add(url, name).expect("add repo")
+    db.workspace_add(url, name).expect("add repo")
 }
 
 // ═══════════════════════════════════════════════
@@ -27,18 +27,18 @@ fn add_test_repo_with_url(db: &Database, url: &str, name: &str) -> String {
 #[test]
 fn repo_add_and_count() {
     let db = open_memory_db();
-    assert_eq!(db.repo_list().unwrap().len(), 0);
+    assert_eq!(db.workspace_list().unwrap().len(), 0);
 
     let id = add_test_repo(&db);
     assert!(!id.is_empty());
-    assert_eq!(db.repo_list().unwrap().len(), 1);
+    assert_eq!(db.workspace_list().unwrap().len(), 1);
 }
 
 #[test]
 fn repo_add_duplicate_url_fails() {
     let db = open_memory_db();
     add_test_repo(&db);
-    let result = db.repo_add("https://github.com/org/test-repo", "org/test-repo");
+    let result = db.workspace_add("https://github.com/org/test-repo", "org/test-repo");
     assert!(result.is_err());
 }
 
@@ -47,17 +47,17 @@ fn repo_add_different_urls() {
     let db = open_memory_db();
     add_test_repo_with_url(&db, "https://github.com/a/b", "a/b");
     add_test_repo_with_url(&db, "https://github.com/c/d", "c/d");
-    assert_eq!(db.repo_list().unwrap().len(), 2);
+    assert_eq!(db.workspace_list().unwrap().len(), 2);
 }
 
 #[test]
-fn repo_remove() {
+fn workspace_remove() {
     let db = open_memory_db();
     add_test_repo(&db);
-    assert_eq!(db.repo_list().unwrap().len(), 1);
+    assert_eq!(db.workspace_list().unwrap().len(), 1);
 
-    db.repo_remove("org/test-repo").unwrap();
-    assert_eq!(db.repo_list().unwrap().len(), 0);
+    db.workspace_remove("org/test-repo").unwrap();
+    assert_eq!(db.workspace_list().unwrap().len(), 0);
 }
 
 #[test]
@@ -192,10 +192,10 @@ fn repo_remove_cascade_deletes_all_dependent_tables() {
     );
 
     // ── Remove repo ──
-    db.repo_remove("org/test-repo").unwrap();
+    db.workspace_remove("org/test-repo").unwrap();
 
     // ── Verify ALL dependent rows are gone ──
-    assert_eq!(db.repo_list().unwrap().len(), 0);
+    assert_eq!(db.workspace_list().unwrap().len(), 0);
 
     // Query raw tables to confirm no orphan rows remain
     let conn = db.conn();
@@ -228,16 +228,16 @@ fn repo_remove_cascade_deletes_all_dependent_tables() {
 fn repo_remove_nonexistent_returns_error() {
     let db = open_memory_db();
     // Should error when repo doesn't exist
-    let result = db.repo_remove("nonexistent/repo");
+    let result = db.workspace_remove("nonexistent/repo");
     assert!(result.is_err());
 }
 
 #[test]
-fn repo_list() {
+fn workspace_list() {
     let db = open_memory_db();
     add_test_repo(&db);
 
-    let list = db.repo_list().unwrap();
+    let list = db.workspace_list().unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].name, "org/test-repo");
     assert_eq!(list[0].url, "https://github.com/org/test-repo");
@@ -247,16 +247,16 @@ fn repo_list() {
 #[test]
 fn repo_list_empty() {
     let db = open_memory_db();
-    let list = db.repo_list().unwrap();
+    let list = db.workspace_list().unwrap();
     assert!(list.is_empty());
 }
 
 #[test]
-fn repo_find_enabled() {
+fn workspace_find_enabled() {
     let db = open_memory_db();
     add_test_repo(&db);
 
-    let enabled = db.repo_find_enabled().unwrap();
+    let enabled = db.workspace_find_enabled().unwrap();
     assert_eq!(enabled.len(), 1);
     assert_eq!(enabled[0].name, "org/test-repo");
 }
@@ -266,7 +266,7 @@ fn repo_status_summary_empty() {
     let db = open_memory_db();
     add_test_repo(&db);
 
-    let summary = db.repo_status_summary().unwrap();
+    let summary = db.workspace_status_summary().unwrap();
     assert_eq!(summary.len(), 1);
     assert_eq!(summary[0].name, "org/test-repo");
     assert!(summary[0].enabled);
@@ -278,7 +278,7 @@ fn repo_status_summary_with_repos() {
     add_test_repo_with_url(&db, "https://github.com/a/one", "a/one");
     add_test_repo_with_url(&db, "https://github.com/b/two", "b/two");
 
-    let summary = db.repo_status_summary().unwrap();
+    let summary = db.workspace_status_summary().unwrap();
     assert_eq!(summary.len(), 2);
 
     let names: Vec<&str> = summary.iter().map(|r| r.name.as_str()).collect();

@@ -51,7 +51,7 @@ impl<'a> Workspace<'a> {
 
     /// 레포의 base clone 경로
     pub fn repo_base_path(&self, repo_name: &str) -> PathBuf {
-        let sanitized = config::sanitize_repo_name(repo_name);
+        let sanitized = config::sanitize_workspace_name(repo_name);
         config::workspaces_path(self.env)
             .join(&sanitized)
             .join("main")
@@ -59,7 +59,7 @@ impl<'a> Workspace<'a> {
 
     /// 작업별 worktree 경로
     pub fn worktree_path(&self, repo_name: &str, task_id: &str) -> PathBuf {
-        let sanitized = config::sanitize_repo_name(repo_name);
+        let sanitized = config::sanitize_workspace_name(repo_name);
         config::workspaces_path(self.env)
             .join(&sanitized)
             .join(task_id)

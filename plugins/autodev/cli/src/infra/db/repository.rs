@@ -9,8 +9,8 @@ use super::Database;
 
 // ─── SQLite implementations ───
 
-impl RepoRepository for Database {
-    fn repo_add(&self, url: &str, name: &str) -> Result<String> {
+impl WorkspaceRepository for Database {
+    fn workspace_add(&self, url: &str, name: &str) -> Result<String> {
         let conn = self.conn();
         let now = Utc::now().to_rfc3339();
         let id = Uuid::new_v4().to_string();
@@ -23,7 +23,7 @@ impl RepoRepository for Database {
         Ok(id)
     }
 
-    fn repo_remove(&self, name: &str) -> Result<()> {
+    fn workspace_remove(&self, name: &str) -> Result<()> {
         let conn = self.conn();
 
         // Lookup repo_id explicitly first to avoid subquery issues with FK enforcement
@@ -94,12 +94,12 @@ impl RepoRepository for Database {
         Ok(())
     }
 
-    fn repo_list(&self) -> Result<Vec<RepoInfo>> {
+    fn workspace_list(&self) -> Result<Vec<WorkspaceInfo>> {
         let conn = self.conn();
         let mut stmt = conn.prepare("SELECT name, url, enabled FROM repositories ORDER BY name")?;
 
         let rows = stmt.query_map([], |row| {
-            Ok(RepoInfo {
+            Ok(WorkspaceInfo {
                 name: row.get(0)?,
                 url: row.get(1)?,
                 enabled: row.get(2)?,
@@ -108,12 +108,12 @@ impl RepoRepository for Database {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
-    fn repo_find_enabled(&self) -> Result<Vec<EnabledRepo>> {
+    fn workspace_find_enabled(&self) -> Result<Vec<EnabledWorkspace>> {
         let conn = self.conn();
         let mut stmt = conn.prepare("SELECT id, url, name FROM repositories WHERE enabled = 1")?;
 
         let rows = stmt.query_map([], |row| {
-            Ok(EnabledRepo {
+            Ok(EnabledWorkspace {
                 id: row.get(0)?,
                 url: row.get(1)?,
                 name: row.get(2)?,
@@ -122,11 +122,11 @@ impl RepoRepository for Database {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
-    fn repo_status_summary(&self) -> Result<Vec<RepoStatusRow>> {
+    fn workspace_status_summary(&self) -> Result<Vec<WorkspaceStatusRow>> {
         let conn = self.conn();
         let mut stmt = conn.prepare("SELECT name, enabled FROM repositories ORDER BY name")?;
         let rows = stmt.query_map([], |row| {
-            Ok(RepoStatusRow {
+            Ok(WorkspaceStatusRow {
                 name: row.get(0)?,
                 enabled: row.get(1)?,
             })

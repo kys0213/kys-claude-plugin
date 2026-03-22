@@ -46,8 +46,8 @@ pub fn setup_repo(home: &TempDir, url: &str) -> String {
         .collect::<Vec<_>>()
         .join("/");
 
-    use autodev::core::repository::RepoRepository;
-    let repos = db.repo_find_enabled().expect("repo find enabled");
+    use autodev::core::repository::WorkspaceRepository;
+    let repos = db.workspace_find_enabled().expect("repo find enabled");
     repos
         .iter()
         .find(|r| r.name == name)
