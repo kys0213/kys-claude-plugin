@@ -987,14 +987,10 @@ impl QueueRepository for Database {
     fn queue_increment_failure(&self, work_id: &str) -> Result<i32> {
         let conn = self.conn();
         let now = Utc::now().to_rfc3339();
-        conn.execute(
-            "UPDATE queue_items SET failure_count = failure_count + 1, updated_at = ?1 \
-             WHERE work_id = ?2",
-            rusqlite::params![now, work_id],
-        )?;
         let count: i32 = conn.query_row(
-            "SELECT failure_count FROM queue_items WHERE work_id = ?1",
-            rusqlite::params![work_id],
+            "UPDATE queue_items SET failure_count = failure_count + 1, updated_at = ?1 \
+             WHERE work_id = ?2 RETURNING failure_count",
+            rusqlite::params![now, work_id],
             |row| row.get(0),
         )?;
         Ok(count)
@@ -1116,8 +1112,10 @@ impl FeedbackPatternRepository for Database {
         let now = Utc::now().to_rfc3339();
         let id = Uuid::new_v4().to_string();
 
+        let tx = conn.unchecked_transaction()?;
+
         // Try insert first
-        let inserted = conn.execute(
+        let inserted = tx.execute(
             "INSERT OR IGNORE INTO feedback_patterns \
              (id, repo_id, pattern_type, suggestion, source, occurrence_count, confidence, status, sources_json, created_at, last_seen_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, 1, 0.5, 'active', ?6, ?7, ?7)",
@@ -1134,7 +1132,7 @@ impl FeedbackPatternRepository for Database {
 
         if inserted == 0 {
             // Row already exists — increment occurrence_count and update sources_json
-            conn.execute(
+            tx.execute(
                 "UPDATE feedback_patterns \
                  SET occurrence_count = occurrence_count + 1, \
                      last_seen_at = ?1, \
@@ -1152,15 +1150,17 @@ impl FeedbackPatternRepository for Database {
             )?;
 
             // Return the existing id
-            let existing_id: String = conn.query_row(
+            let existing_id: String = tx.query_row(
                 "SELECT id FROM feedback_patterns \
                  WHERE repo_id = ?1 AND pattern_type = ?2 AND suggestion = ?3",
                 rusqlite::params![pattern.repo_id, pattern.pattern_type, pattern.suggestion],
                 |row| row.get(0),
             )?;
+            tx.commit()?;
             return Ok(existing_id);
         }
 
+        tx.commit()?;
         Ok(id)
     }
 
