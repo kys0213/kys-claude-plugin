@@ -363,11 +363,14 @@ impl fmt::Display for QueueType {
 /// 5-Level failure escalation.
 ///
 /// failure_count가 증가할 때마다 대응 수준을 높인다.
-/// 1회: 재시도, 2회: 코멘트, 3회: HITL, 4회: 스킵, 5+회: 리플랜.
+/// 1회: 재시도, 2회: 코멘트+재시도, 3회: HITL, 4회: 스킵, 5+회: 리플랜.
+///
+/// v5에서는 `EscalationConfig`(yaml)가 정책을 정의하며,
+/// 이 enum은 런타임 판정 결과를 표현한다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EscalationLevel {
     Retry = 1,
-    Comment = 2,
+    RetryWithComment = 2,
     Hitl = 3,
     Skip = 4,
     Replan = 5,
@@ -375,12 +378,26 @@ pub enum EscalationLevel {
 
 impl From<i32> for EscalationLevel {
     fn from(failure_count: i32) -> Self {
-        match failure_count {
-            0..=1 => EscalationLevel::Retry,
-            2 => EscalationLevel::Comment,
-            3 => EscalationLevel::Hitl,
-            4 => EscalationLevel::Skip,
-            _ => EscalationLevel::Replan,
+        use crate::core::config::models::EscalationConfig;
+        let cfg = EscalationConfig::default();
+        let count = if failure_count < 1 {
+            1
+        } else {
+            failure_count as u32
+        };
+        cfg.action_for(count).into()
+    }
+}
+
+impl From<crate::core::config::models::EscalationAction> for EscalationLevel {
+    fn from(action: crate::core::config::models::EscalationAction) -> Self {
+        use crate::core::config::models::EscalationAction;
+        match action {
+            EscalationAction::Retry => EscalationLevel::Retry,
+            EscalationAction::RetryWithComment => EscalationLevel::RetryWithComment,
+            EscalationAction::Hitl => EscalationLevel::Hitl,
+            EscalationAction::Skip => EscalationLevel::Skip,
+            EscalationAction::Replan => EscalationLevel::Replan,
         }
     }
 }
@@ -389,7 +406,7 @@ impl fmt::Display for EscalationLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             EscalationLevel::Retry => write!(f, "retry"),
-            EscalationLevel::Comment => write!(f, "comment"),
+            EscalationLevel::RetryWithComment => write!(f, "retry_with_comment"),
             EscalationLevel::Hitl => write!(f, "hitl"),
             EscalationLevel::Skip => write!(f, "skip"),
             EscalationLevel::Replan => write!(f, "replan"),

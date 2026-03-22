@@ -16,6 +16,7 @@ pub struct WorkflowConfig {
     pub daemon: DaemonConfig,
     pub workflows: Workflows,
     pub claw: ClawConfig,
+    pub escalation: EscalationConfig,
 }
 
 /// 태스크 소스 설정 — 소스 종류별 하위 키
@@ -133,6 +134,101 @@ impl Default for GitHubSourceConfig {
             knowledge_extraction: true,
             auto_approve: false,
             auto_approve_threshold: 0.8,
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════
+// escalation — 5-Level failure escalation 정책
+// ═══════════════════════════════════════════════
+
+/// 5단계 에스컬레이션 정책 설정.
+///
+/// workspace yaml에서 failure_count → action 매핑과 on_fail script를 정의한다.
+///
+/// ```yaml
+/// escalation:
+///   levels:
+///     1: retry
+///     2: retry_with_comment
+///     3: hitl
+///     4: skip
+///     5: replan
+///   on_fail:
+///     - "echo 'task failed'"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EscalationConfig {
+    /// failure_count → EscalationAction 매핑.
+    /// 키는 1~5, 값은 retry | retry_with_comment | hitl | skip | replan.
+    pub levels: std::collections::BTreeMap<u32, EscalationAction>,
+    /// 실패 시 실행할 on_fail script 목록.
+    /// retry 레벨에서는 실행하지 않고, 나머지 레벨에서 순차 실행한다.
+    pub on_fail: Vec<String>,
+}
+
+impl Default for EscalationConfig {
+    fn default() -> Self {
+        let mut levels = std::collections::BTreeMap::new();
+        levels.insert(1, EscalationAction::Retry);
+        levels.insert(2, EscalationAction::RetryWithComment);
+        levels.insert(3, EscalationAction::Hitl);
+        levels.insert(4, EscalationAction::Skip);
+        levels.insert(5, EscalationAction::Replan);
+        Self {
+            levels,
+            on_fail: Vec::new(),
+        }
+    }
+}
+
+impl EscalationConfig {
+    /// failure_count에 대응하는 EscalationAction을 반환한다.
+    /// 정의된 범위를 초과하면 가장 높은 레벨의 action을 반환한다.
+    pub fn action_for(&self, failure_count: u32) -> EscalationAction {
+        if let Some(action) = self.levels.get(&failure_count) {
+            return *action;
+        }
+        // failure_count가 정의된 최대 레벨을 초과하면 최고 레벨 action 사용
+        self.levels
+            .values()
+            .last()
+            .copied()
+            .unwrap_or(EscalationAction::Replan)
+    }
+
+    /// 해당 action에서 on_fail script를 실행해야 하는지 여부.
+    /// retry만 on_fail을 실행하지 않는다.
+    pub fn should_run_on_fail(&self, action: EscalationAction) -> bool {
+        action != EscalationAction::Retry
+    }
+}
+
+/// 에스컬레이션 액션 종류.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EscalationAction {
+    /// 조용한 재시도 (on_fail 실행 안 함, worktree 보존)
+    Retry,
+    /// on_fail 실행 + 재시도
+    RetryWithComment,
+    /// on_fail 실행 + HITL 이벤트 생성
+    Hitl,
+    /// on_fail 실행 + Skipped 상태 전이
+    Skip,
+    /// on_fail 실행 + HITL(replan) 생성
+    Replan,
+}
+
+impl std::fmt::Display for EscalationAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EscalationAction::Retry => write!(f, "retry"),
+            EscalationAction::RetryWithComment => write!(f, "retry_with_comment"),
+            EscalationAction::Hitl => write!(f, "hitl"),
+            EscalationAction::Skip => write!(f, "skip"),
+            EscalationAction::Replan => write!(f, "replan"),
         }
     }
 }
@@ -431,5 +527,114 @@ claw:
         assert_eq!(cfg.claw.recovery_interval_secs, 120);
         assert_eq!(cfg.claw.schedule_interval_secs, 60);
         assert_eq!(cfg.claw.gap_detection_interval_secs, 3600);
+    }
+
+    // ═══════════════════════════════════════════════
+    // EscalationConfig 테스트
+    // ═══════════════════════════════════════════════
+
+    #[test]
+    fn escalation_config_defaults() {
+        let cfg = EscalationConfig::default();
+        assert_eq!(cfg.levels.len(), 5);
+        assert_eq!(cfg.action_for(1), EscalationAction::Retry);
+        assert_eq!(cfg.action_for(2), EscalationAction::RetryWithComment);
+        assert_eq!(cfg.action_for(3), EscalationAction::Hitl);
+        assert_eq!(cfg.action_for(4), EscalationAction::Skip);
+        assert_eq!(cfg.action_for(5), EscalationAction::Replan);
+        assert!(cfg.on_fail.is_empty());
+    }
+
+    #[test]
+    fn escalation_config_defaults_when_omitted() {
+        let yaml = r#"
+daemon:
+  log_level: "info"
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.escalation.levels.len(), 5);
+        assert_eq!(cfg.escalation.action_for(1), EscalationAction::Retry);
+        assert!(cfg.escalation.on_fail.is_empty());
+    }
+
+    #[test]
+    fn escalation_config_from_yaml() {
+        let yaml = r#"
+escalation:
+  levels:
+    1: retry
+    2: retry_with_comment
+    3: hitl
+    4: skip
+    5: replan
+  on_fail:
+    - "gh issue comment $ISSUE --body 'task failed'"
+    - "echo 'notification sent'"
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.escalation.levels.len(), 5);
+        assert_eq!(cfg.escalation.action_for(1), EscalationAction::Retry);
+        assert_eq!(
+            cfg.escalation.action_for(2),
+            EscalationAction::RetryWithComment
+        );
+        assert_eq!(cfg.escalation.action_for(3), EscalationAction::Hitl);
+        assert_eq!(cfg.escalation.action_for(4), EscalationAction::Skip);
+        assert_eq!(cfg.escalation.action_for(5), EscalationAction::Replan);
+        assert_eq!(cfg.escalation.on_fail.len(), 2);
+    }
+
+    #[test]
+    fn escalation_config_custom_levels() {
+        let yaml = r#"
+escalation:
+  levels:
+    1: retry
+    2: retry
+    3: skip
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.escalation.levels.len(), 3);
+        assert_eq!(cfg.escalation.action_for(1), EscalationAction::Retry);
+        assert_eq!(cfg.escalation.action_for(2), EscalationAction::Retry);
+        assert_eq!(cfg.escalation.action_for(3), EscalationAction::Skip);
+        // Beyond max → last defined action
+        assert_eq!(cfg.escalation.action_for(99), EscalationAction::Skip);
+    }
+
+    #[test]
+    fn escalation_config_partial_override_preserves_defaults() {
+        let yaml = r#"
+escalation:
+  on_fail:
+    - "echo fail"
+"#;
+        let cfg: WorkflowConfig = serde_yaml::from_str(yaml).unwrap();
+        // levels should use defaults
+        assert_eq!(cfg.escalation.levels.len(), 5);
+        assert_eq!(cfg.escalation.on_fail.len(), 1);
+        assert_eq!(cfg.escalation.on_fail[0], "echo fail");
+    }
+
+    #[test]
+    fn escalation_should_run_on_fail() {
+        let cfg = EscalationConfig::default();
+        assert!(!cfg.should_run_on_fail(EscalationAction::Retry));
+        assert!(cfg.should_run_on_fail(EscalationAction::RetryWithComment));
+        assert!(cfg.should_run_on_fail(EscalationAction::Hitl));
+        assert!(cfg.should_run_on_fail(EscalationAction::Skip));
+        assert!(cfg.should_run_on_fail(EscalationAction::Replan));
+    }
+
+    #[test]
+    fn escalation_action_display() {
+        assert_eq!(EscalationAction::Retry.to_string(), "retry");
+        assert_eq!(
+            EscalationAction::RetryWithComment.to_string(),
+            "retry_with_comment"
+        );
+        assert_eq!(EscalationAction::Hitl.to_string(), "hitl");
+        assert_eq!(EscalationAction::Skip.to_string(), "skip");
+        assert_eq!(EscalationAction::Replan.to_string(), "replan");
     }
 }
