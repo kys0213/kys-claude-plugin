@@ -1,4 +1,5 @@
 pub mod board;
+pub mod branch_naming;
 pub mod collector;
 pub mod config;
 pub mod datasource;
