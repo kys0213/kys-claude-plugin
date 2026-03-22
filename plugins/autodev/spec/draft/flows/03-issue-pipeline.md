@@ -1,107 +1,95 @@
-# Flow 3: 이슈 파이프라인 — 감지 → 분석 → 실행 → 피드백
+# Flow 3: 이슈 파이프라인 — 컨베이어 벨트
 
-> 이슈가 큐에 진입하여 자동 분석·구현되고, 사용자 피드백으로 보정되는 순환 흐름.
+> 이슈가 DataSource의 상태 정의에 따라 자동으로 처리되고, Done이 다음 단계를 트리거한다.
 
 ---
 
-## 1. 이슈 등록 (Issue 모드)
-
-사람이 GitHub에 이슈를 만들고 `autodev:analyze` 라벨을 추가한다.
-
-### 파이프라인
+## 컨베이어 벨트 흐름
 
 ```
-1. DataSource.collect(): 라벨 감지 → QueueItem 생성
-2. Daemon: DB에 Pending 저장
-3. 코어 on_enter_pending:
-   a. DependencyAnalyzer: 파일 단위 의존성 분석
-   b. SpecLinker: spec_issues 자동 링크
-   c. DecisionRecorder: 수집 기록
-4. DataSource.on_phase_enter(Pending): 라벨 부착 (autodev:queued)
-5. Claw evaluate: advance 판단 → Pending → Ready
-6. Daemon drain: Ready → Running
-   → DataSource.before_task(): 시작 코멘트
-   → AgentRuntime.invoke(): Task 실행
-   → DataSource.after_task(): 결과 코멘트
-7. 완료 시 → 코어 on_done + DataSource.on_done()
-8. 실패 시 → DataSource.on_failed() → EscalationAction → 코어 처리
+autodev:analyze 감지 → [analyze handlers] → Claw: Done? → autodev:implement 부착
+                                                              │
+autodev:implement 감지 → [implement handlers] → Claw: Done? → autodev:review 부착
+                                                              │
+autodev:review 감지 → [review handlers] → Claw: Done? → autodev:done 부착
 ```
 
-### DependencyAnalyzer (코어, on_enter_pending)
+각 구간은 독립적인 QueueItem. 되돌아가지 않고, 항상 새 아이템으로 다음 구간에 진입.
 
-파일 단위 의존성 분석. DataSource 무관, 모든 소스에 공통 적용.
+---
 
-```
-1. 이슈 본문에서 파일 경로 추출
-   - 코드 블록 내 경로
-   - 명시적 경로 (src/auth/login.rs)
-   - 스펙 참조 내 파일 목록
-2. 큐의 다른 Pending/Running 아이템과 파일 경로 비교
-3. 겹침 발견 → dependency 메타데이터에 선행 work_id 기록
-```
-
-Claw가 다음 evaluate에서 의미론적 보정 (같은 모듈이지만 다른 파일 등).
-
-### SpecLinker (코어, on_enter_pending)
+## 단일 구간 상세
 
 ```
-1. 이슈 라벨에서 [XX-spec-name] 패턴 매칭
-2. 이슈 본문에서 스펙 참조 추출
-3. 매칭 시 spec_issues 테이블 링크
-4. 실패 시 로그만 (Claw가 보정)
-```
-
-### DataSource hook 예시 (GitHub)
-
-```
-on_phase_enter(Pending)  → autodev:queued 라벨
-on_phase_enter(Ready)    → autodev:ready 라벨
-on_phase_enter(Running)  → autodev:wip 라벨
-before_task(Analyze)     → "🔍 분석을 시작합니다..." 코멘트
-after_task(Analyze, Ok)  → 분석 리포트 코멘트
-on_done()                → "✅ 완료" 코멘트 + autodev:done 라벨
-on_failed(count=3)       → HITL 이벤트 생성 + GitHub 코멘트
+DataSource.collect(): trigger 조건 매칭 (예: autodev:analyze 라벨)
+    │
+    ▼
+  Pending → Ready → Running
+    │
+    │  handlers 순차 실행:
+    │    prompt → AgentRuntime.invoke()
+    │    command → slash command 호출
+    │    script → sh -c 실행 (exit code 판정)
+    │
+    ├── 전부 성공
+    │     │
+    │     ▼
+    │   Claw evaluate: "완료? 추가 검토?"
+    │     ├── Done → on_done 액션 (다음 state trigger 활성화)
+    │     └── HITL → HITL 이벤트 생성 → 사람 대기
+    │
+    └── 실패 → escalation
+          ├── Retry → Pending 재진입 (같은 구간)
+          ├── HITL → HITL 이벤트 생성
+          └── Skip → Skipped
 ```
 
 ---
 
-## 2. 피드백 루프
+## DataSource 설정 예시
 
-사용자가 구현 결과를 확인하고 수정이 필요하다고 판단한다.
+```yaml
+sources:
+  github:
+    states:
+      analyze:
+        trigger: { label: "autodev:analyze" }
+        handlers:
+          - prompt: "이슈를 분석하고 구현 가능 여부를 판단해줘"
+        on_done: { label: "autodev:implement" }
 
-### 3가지 경로
+      implement:
+        trigger: { label: "autodev:implement" }
+        handlers:
+          - command: "/implement"
+          - script: hooks/lint.sh
+        on_done: { label: "autodev:review" }
 
-#### Case 1: PR review comment
-
-```
-GitHub에서 changes-requested
-  → DataSource.collect(): 큐에 Review/Improve 아이템 추가
-  → 표준 파이프라인 (DataSource hook + AgentRuntime 실행)
-```
-
-기존 v3 흐름과 동일. DataSource hook이 자동 적용.
-
-#### Case 2: /spec update
-
-```
-/spec update <id>
-  → 현재 스펙 + 진행 상태 로드
-  → 대화형 impact analysis (어떤 이슈가 영향받는지)
-  → 사용자가 변경 승인
-  → autodev spec update CLI 실행
-  → 코어 on_spec_active 이벤트 재발행
-  → ForceClawEvaluate → Claw 재평가
+      review:
+        trigger: { label: "autodev:review" }
+        handlers:
+          - prompt: "PR을 리뷰하고 품질을 평가해줘"
+        on_done: { label: "autodev:done" }
 ```
 
-#### Case 3: Replan (HITL 응답)
+사용자가 단계를 추가/제거/교체하려면 yaml만 수정.
+
+---
+
+## 피드백 루프
+
+### PR review comment (changes-requested)
 
 ```
-on_failed Level 5 → DataSource.on_failed() → EscalationAction::Replan
-  → 코어: HITL 생성
-  → DataSource.after_hitl_created(): 알림
-  → 사용자 "replan" 응답
-  → 코어 on_hitl_responded → Claw에게 스펙 수정 제안 위임
-  → 사용자 승인 → spec update → on_spec_active
+DataSource.collect()가 changes-requested 감지
+  → 새 아이템 생성 → handlers 실행 → 수정 반영
+```
+
+### /spec update
+
+```
+스펙 변경 → on_spec_active → Cron(gap-detection) 재평가
+  → gap 발견 시 새 이슈 생성 → 파이프라인 재진입
 ```
 
 ### 핵심 원칙
@@ -112,7 +100,6 @@ on_failed Level 5 → DataSource.on_failed() → EscalationAction::Replan
 
 ### 관련 문서
 
-- [스펙 생명주기](./02-spec-lifecycle.md) — 스펙 등록, 이슈 분해
-- [실패 복구와 HITL](./04-failure-and-hitl.md) — 실패 시 escalation, replan 경로
-- [DataSource](../concerns/datasource.md) — collect, hook 상세
-- [AgentRuntime](../concerns/agent-runtime.md) — Task 실행
+- [DataSource](../concerns/datasource.md) — 상태 기반 워크플로우 정의
+- [실패 복구와 HITL](./04-failure-and-hitl.md) — escalation 정책
+- [Cron 엔진](../concerns/cron-engine.md) — 품질 루프로 새 아이템 생성

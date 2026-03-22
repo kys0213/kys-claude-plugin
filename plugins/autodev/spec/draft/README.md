@@ -28,5 +28,5 @@
 | [DataSource](./concerns/datasource.md) | 외부 시스템 추상화 trait + GitHub/Slack/Jira 구현 |
 | [AgentRuntime](./concerns/agent-runtime.md) | LLM 실행 추상화 trait + Registry + 확장 시나리오 |
 | [Claw 워크스페이스](./concerns/claw-workspace.md) | 판단 레이어 규칙/스킬 구조 + /claw 세션 |
-| [Cron 엔진](./concerns/cron-engine.md) | 주기 실행 + force trigger + 환경변수 주입 |
+| [Cron 엔진](./concerns/cron-engine.md) | 주기 실행 + 품질 루프 + force trigger |
 | [CLI 레퍼런스](./concerns/cli-reference.md) | 3-layer SSOT + 전체 커맨드 트리 |

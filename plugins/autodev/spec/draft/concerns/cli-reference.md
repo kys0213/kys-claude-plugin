@@ -11,42 +11,11 @@ Layer 1: Slash Command (3개, thin wrapper)
   /auto, /spec, /claw
 
 Layer 2: DataSource + AgentRuntime (OCP 확장점)
-  → 외부 시스템 lifecycle + LLM 실행 추상화
+  → 외부 시스템 워크플로우 + LLM 실행 추상화
 
 Layer 3: autodev CLI (SSOT)
   → DB 조작, 상태 전이, 코어 로직
   → 모든 레이어가 CLI를 호출
-```
-
----
-
-## SSOT 보장
-
-```
-/spec add       → autodev spec add (CLI)
-/claw 세션      → Bash: autodev queue list --json (CLI)
-DataSource hook → db.queue_advance (코어, CLI 내부)
-Cron script     → autodev agent (CLI)
-```
-
----
-
-## Plugin 구조
-
-```
-plugins/autodev/
-├── .claude-plugin/plugin.json     # 3 commands, 3 agents
-├── commands/
-│   ├── auto.md                    # /auto
-│   ├── spec.md                    # /spec
-│   └── claw.md                    # /claw
-├── agents/
-│   ├── issue-analyzer.md
-│   ├── pr-reviewer.md
-│   └── conflict-resolver.md
-└── skills/
-    ├── cli-reference/
-    └── label-setup/
 ```
 
 ---
@@ -68,7 +37,7 @@ autodev
 ├── start / stop / restart
 ├── status [--format text|json|rich]
 ├── dashboard
-├── repo
+├── workspace
 │   ├── add / list / show / update / remove / config
 ├── spec
 │   ├── add / list / show / update
@@ -76,8 +45,7 @@ autodev
 │   ├── link / unlink
 │   ├── status <id> / verify <id> / decisions <id>
 ├── queue
-│   ├── list / show
-│   ├── advance / skip
+│   ├── list / show / skip
 │   └── dependency add / remove
 ├── hitl
 │   ├── list / show / respond / timeout
@@ -88,7 +56,7 @@ autodev
 │   ├── init / rules / edit
 ├── decisions
 │   ├── list / show
-├── agent [--repo <name>] [-p <prompt>]
+├── agent [--workspace <name>] [-p <prompt>]
 ├── convention
 ├── worktree list / clean
 ├── board [--format text|json|rich]

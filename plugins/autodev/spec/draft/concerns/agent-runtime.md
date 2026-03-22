@@ -5,30 +5,9 @@
 
 ---
 
-## 현재 구조의 문제
-
-```
-core/task.rs:
-  AgentRequest { session_opts: SessionOptions }  ← Claude 전용
-
-infra/claude/:
-  trait Claude → RealClaude                      ← Claude 하드코딩
-
-main.rs:
-  autodev agent → claude --print -p "..."        ← Claude 하드코딩
-```
-
-core가 infra(Claude)에 의존하고 있다.
-
----
-
 ## trait 정의
 
-autodev가 **실제로 필요한 기능**에서 도출한 인터페이스:
-
 ```rust
-/// core/runtime.rs
-
 #[async_trait]
 pub trait AgentRuntime: Send + Sync {
     fn name(&self) -> &str;
@@ -45,10 +24,6 @@ pub struct RuntimeRequest {
     pub session_id: Option<String>,
 }
 
-pub struct StructuredOutput {
-    pub schema: String,
-}
-
 pub struct RuntimeResponse {
     pub exit_code: i32,
     pub stdout: String,
@@ -56,14 +31,6 @@ pub struct RuntimeResponse {
     pub duration: Duration,
     pub token_usage: Option<TokenUsage>,
     pub session_id: Option<String>,
-}
-
-pub struct RuntimeCapabilities {
-    pub can_edit_files: bool,
-    pub supports_structured_output: bool,
-    pub supports_system_prompt: bool,
-    pub supports_session_resume: bool,
-    pub max_context_tokens: usize,
 }
 ```
 
@@ -85,7 +52,18 @@ core → infra 방향 의존 없음.
 
 ---
 
-## core 옵션 → CLI 매핑 (각 런타임의 책임)
+## 모델 결정 우선순위
+
+```
+1. RuntimeRequest.model        ← 호출 시 명시 (최우선)
+2. handler의 runtime/model     ← DataSource state config
+3. .autodev.yaml의 runtime 기본값
+4. 런타임 내장 기본 모델
+```
+
+---
+
+## core 옵션 → CLI 매핑
 
 | core 옵션 | Claude | Gemini | Codex |
 |-----------|--------|--------|-------|
@@ -95,8 +73,6 @@ core → infra 방향 의존 없음.
 | `working_dir` | `current_dir()` | `current_dir()` | `--cd <dir>` |
 | `session_id` | `--resume <uuid>` | `--resume <id>` | `codex exec resume <id>` |
 
-기능 미지원 시 각 런타임이 폴백 처리 (예: system_prompt → prompt prepend).
-
 ---
 
 ## RuntimeRegistry
@@ -105,101 +81,45 @@ core → infra 방향 의존 없음.
 pub struct RuntimeRegistry {
     runtimes: HashMap<String, Arc<dyn AgentRuntime>>,
     default_name: String,
-    overrides: HashMap<TaskKind, String>,
 }
 
 impl RuntimeRegistry {
-    pub fn resolve(&self, task_kind: TaskKind) -> Arc<dyn AgentRuntime> {
-        let name = self.overrides.get(&task_kind).unwrap_or(&self.default_name);
-        self.runtimes[name].clone()
+    pub fn resolve(&self, name: &str) -> Arc<dyn AgentRuntime> {
+        self.runtimes.get(name)
+            .unwrap_or(&self.runtimes[&self.default_name])
+            .clone()
     }
 }
 ```
+
+어떤 런타임을 사용할지는 DataSource state config의 handler에서 지정한다.
 
 ---
 
 ## 설정
 
 ```yaml
-# .autodev.yaml
 runtime:
   default: claude
   claude:
     model: sonnet
-  overrides:
-    analyze: claude
-    implement: claude
-    review: gemini
-    claw_evaluate: claude
+  gemini:
+    model: pro
 ```
 
 ---
 
-## 모델 결정 우선순위
+## Handler에서의 사용
 
-per-invocation 오버라이드가 가능하므로, 모델은 다음 순서로 결정된다:
-
-```
-1. RuntimeRequest.model        ← 호출 시 명시 (최우선)
-2. agent .md의 model 필드      ← agent 정의에 고정
-3. .autodev.yaml의 runtime.{name}.model  ← 런타임 기본값
-4. 런타임 내장 기본 모델        ← 폴백 (예: Claude → sonnet)
-```
-
-예시:
-
-```rust
-// Claw가 복잡한 판단 시 opus로 오버라이드
-let request = RuntimeRequest {
-    model: Some("opus".into()),
-    prompt: "스펙을 분해하고 우선순위를 결정해줘".into(),
-    ..default
-};
-
-// 단순 분석은 model: None → config 기본값(sonnet) 사용
-let request = RuntimeRequest {
-    model: None,
-    prompt: "이슈를 분석해줘".into(),
-    ..default
-};
-```
-
----
-
-## 멀티턴 세션
-
-```
-요청 시 session_id: None   → 새 세션 시작
-응답에  session_id: Some()  → 다음 턴에서 재사용
-
-활용: Claw가 큐 평가 → advance 판단 → 같은 세션에서 후속 조치
-```
-
----
-
-## 확장 시나리오
+DataSource state의 handler가 prompt 타입이면 AgentRuntime.invoke()를 경유:
 
 ```yaml
-# Multi-LLM 리뷰
-runtime:
-  overrides:
-    review: multi
-  multi:
-    runtimes: [claude, gemini, codex]
-    strategy: consensus
-
-# 비용 최적화
-runtime:
-  overrides:
-    analyze: haiku
-    implement: sonnet
-    claw_evaluate: opus
-
-# 로컬 LLM
-runtime:
-  default: ollama
-  custom:
-    ollama:
-      command: "ollama"
-      args_template: "run codellama {prompt}"
+states:
+  analyze:
+    handlers:
+      - prompt: "이슈를 분석해줘"
+        runtime: claude          # 이 handler는 Claude 사용
+        model: haiku             # haiku 모델로
+      - prompt: "PR을 리뷰해줘"
+        runtime: gemini          # 이 handler는 Gemini 사용
 ```
