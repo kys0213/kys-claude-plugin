@@ -49,8 +49,12 @@ autodev
 │   ├── link / unlink
 │   ├── status <id> / verify <id>
 ├── queue
-│   ├── list / show / skip
+│   ├── list [--phase <phase>] / show / skip
+│   ├── done <work_id>                      ← evaluate가 호출: Completed → Done (on_done 실행)
+│   ├── hitl <work_id> [--reason <msg>]     ← evaluate가 호출: Completed → HITL
+│   ├── retry-script <work_id>              ← Failed 아이템의 on_done script 재실행
 │   └── dependency add / remove
+├── context <work_id> [--json]               ← NEW: script용 정보 조회
 ├── hitl
 │   ├── list / show / respond / timeout
 ├── cron
@@ -60,6 +64,8 @@ autodev
 │   ├── init / rules / edit
 ├── agent [--workspace <name>] [-p <prompt>]
 ```
+
+> **v4 대비 변경**: `queue advance` 제거 (Pending→Ready 자동 전이), `context` 서브커맨드 추가, `repo` → `workspace` 리네이밍.
 
 ### Phase 2: /claw 위임 (읽기 전용)
 
@@ -77,3 +83,30 @@ autodev
 > `/claw`는 `autodev status --json`, `autodev queue list --json` 등 Phase 1 CLI의 JSON 출력을 파싱하여 자연어로 표시한다. Phase 2 커맨드도 동일한 패턴으로, `/claw`가 먼저 커버하고 독립 CLI는 수요가 확인되면 추가.
 
 모든 서브커맨드는 `--json` 또는 `--format json` 출력 지원.
+
+---
+
+## `autodev context` 상세
+
+script가 아이템 정보를 조회하는 유일한 방법.
+
+```bash
+# 기본 사용 (on_done/on_fail script 내에서)
+CTX=$(autodev context $WORK_ID --json)
+ISSUE=$(echo $CTX | jq -r '.issue.number')
+REPO=$(echo $CTX | jq -r '.source.url')
+
+# 특정 필드만 조회 (jq 없이)
+autodev context $WORK_ID --field issue.number    # → 42
+autodev context $WORK_ID --field source.url      # → https://github.com/org/repo
+```
+
+context 스키마는 DataSource별로 다르다. 상세는 [DataSource](./datasource.md) 참조.
+
+---
+
+### 관련 문서
+
+- [DESIGN-v5](../DESIGN-v5.md) — 전체 아키텍처
+- [DataSource](./datasource.md) — context 스키마
+- [Claw](./claw-workspace.md) — /claw 세션

@@ -2,7 +2,7 @@
 
 > Claw = `/claw` 세션. 자연어로 시스템을 조회하고 조작하는 대화형 인터페이스.
 >
-> 분류(Done or HITL)는 **코어 evaluate 함수**가 담당한다. Claw는 분류기가 아니다.
+> 분류(Done or HITL)는 **코어 evaluate cron**이 담당한다. Claw는 분류기가 아니다.
 
 ---
 
@@ -11,23 +11,32 @@
 분류 로직은 코어에 속한다. Claw와 무관.
 
 ```
-handler 실행 완료
+handler 전부 성공 → Completed
     │
     ▼
-코어 evaluate:
-  "완료 처리해도 되나? 사람이 봐야 하나?"
+evaluate cron (force_trigger로 즉시 실행 가능):
+  autodev agent -p "Completed 아이템의 완료 여부를 판단해줘"
     │
-    ├── Done → on_done 액션 실행 → 다음 state trigger
-    └── HITL → HITL 이벤트 생성 → 사람 대기
+    │  LLM이 autodev context로 컨텍스트 조회 후 CLI 도구로 결정:
+    │
+    ├── autodev queue done $WORK_ID
+    │     → on_done script 실행
+    │       ├── script 성공 → Done (worktree 정리)
+    │       └── script 실패 → Failed (worktree 보존, 로그 기록)
+    │
+    └── autodev queue hitl $WORK_ID --reason "..."
+          → HITL 이벤트 생성 → 사람 대기 (worktree 보존)
 ```
 
-evaluate cron: `interval 60s + force trigger on task complete`, 완료된 아이템 중 미분류 건이 있을 때만 실행.
+evaluate cron: `interval 60s + force_trigger on Completed 전이`. LLM이 JSON을 파싱하는 게 아니라, 직접 `autodev queue done/hitl` CLI를 호출하여 상태를 전이한다.
+
+evaluate의 판단 입력: `autodev context $WORK_ID --json` (queue 메타데이터 + 외부 시스템 컨텍스트 + append-only history).
 
 ---
 
 ## 대화형 에이전트 (/claw 세션)
 
-v4와 동일하게 어디서든 실행 가능한 대화형 인터페이스.
+어디서든 실행 가능한 대화형 인터페이스.
 
 ### 진입 경험
 
@@ -37,17 +46,20 @@ v4와 동일하게 어디서든 실행 가능한 대화형 인터페이스.
 Step 1: 상태 수집
   autodev status --json
   autodev hitl list --json
-  autodev decisions list --json -n 3
+  autodev queue list --phase failed --json
 
 Step 2: 요약 표시
 
   ● daemon running (uptime 2h 15m)
 
-  Repos:
-    org/repo-a — queue: 1R 2P | specs: auth-v2 60%
+  Workspaces:
+    auth-project — queue: 1R 1C 2D | specs: auth-v2 60%
 
   ⚠ HITL 대기: 1건
     → #44 Session adapter — 3회 실패
+
+  ⚠ Failed: 1건
+    → #39 Auth refactor — on_done script 실패
 
   무엇을 도와드릴까요?
 
@@ -61,8 +73,9 @@ Step 3: 자연어 대화
 "지금 상황 어때?"      → autodev status --format rich
 "큐 막힌 거 있어?"     → autodev queue list --json → 분석
 "HITL 대기 목록"       → autodev hitl list --json
+"실패한 거 있어?"      → autodev queue list --phase failed --json
 "cron 일시정지"        → autodev cron pause gap-detection
-"뭐 하면 좋을까?"     → status + hitl + queue 종합 → 추천
+"뭐 하면 좋을까?"     → status + hitl + queue(failed) 종합 → 추천
 ```
 
 ---
@@ -82,7 +95,7 @@ Step 3: 자연어 대화
     └── prioritize/
 ```
 
-Per-repo 오버라이드: `~/.autodev/workspaces/org-repo/claw/`
+Per-workspace 오버라이드: `~/.autodev/workspaces/<name>/claw/`
 
 ---
 
@@ -94,3 +107,19 @@ v4 (15개) → v5 (3개):
   /spec   — 스펙 CRUD (add/update/list/status/remove/pause/resume)
   /claw   — 대화 세션 (조회/조작/모니터링을 자연어로, 읽기 전용 CLI 흡수)
 ```
+
+### 실행 컨텍스트
+
+| Command | 실행 위치 | 설명 |
+|---------|----------|------|
+| `/auto` | 어디서든 | Daemon 제어, workspace 등록 |
+| `/spec` | 레포의 Claude 세션 | 해당 레포의 스펙 CRUD |
+| `/claw` | 어디서든 | 대화형 에이전트 (전체 workspace 조회/조작) |
+
+---
+
+### 관련 문서
+
+- [DESIGN-v5](../DESIGN-v5.md) — QueuePhase 상태 머신 + evaluate 위치
+- [CLI 레퍼런스](./cli-reference.md) — CLI 전체 커맨드 트리
+- [Cron 엔진](./cron-engine.md) — evaluate cron

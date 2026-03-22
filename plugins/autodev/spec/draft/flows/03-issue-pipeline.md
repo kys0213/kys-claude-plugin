@@ -7,11 +7,11 @@
 ## 컨베이어 벨트 흐름
 
 ```
-autodev:analyze 감지 → [analyze handlers] → evaluate: Done? → autodev:implement 부착
-                                                                  │
-autodev:implement 감지 → [implement handlers] → evaluate: Done? → autodev:review 부착
-                                                                  │
-autodev:review 감지 → [review handlers] → evaluate: Done? → autodev:done 부착
+autodev:analyze 감지 → [analyze handlers] → evaluate → on_done script → autodev:implement 부착
+                                                                              │
+autodev:implement 감지 → [implement handlers] → evaluate → on_done script → autodev:review 부착
+                                                                              │
+autodev:review 감지 → [review handlers] → evaluate → on_done script → autodev:done 부착
 ```
 
 각 구간은 독립적인 QueueItem. 되돌아가지 않고, 항상 새 아이템으로 다음 구간에 진입.
@@ -24,52 +24,49 @@ autodev:review 감지 → [review handlers] → evaluate: Done? → autodev:done
 DataSource.collect(): trigger 조건 매칭 (예: autodev:analyze 라벨)
     │
     ▼
-  Pending → Ready → Running
+  Pending → Ready → Running (자동 전이, concurrency 제한)
     │
-    │  handlers 순차 실행:
-    │    prompt → AgentRuntime.invoke()
+    │  ① worktree 생성 (인프라, 또는 retry 시 기존 보존분 재사용)
+    │  ② on_enter script 실행 (정의된 경우)
+    │  ③ handlers 순차 실행:
+    │       prompt → AgentRuntime.invoke() (worktree 안에서)
+    │       script → bash (WORK_ID + WORKTREE 주입)
     │
-    ├── 전부 성공
+    ├── 전부 성공 → Completed
     │     │
     │     ▼
-    │   코어 evaluate: "완료? 추가 검토?"
-    │     ├── Done → on_done 액션 (다음 state trigger 활성화)
-    │     └── HITL → HITL 이벤트 생성 → 사람 대기
+    │   evaluate cron (force_trigger로 즉시): "완료? 추가 검토?"
+    │     ├── Done → on_done script 실행 → worktree 정리
+    │     │           └── script 실패 → Failed (로그 기록, 재시도 가능)
+    │     └── HITL → HITL 이벤트 생성 → 사람 대기 (worktree 보존)
     │
-    └── 실패 → escalation
-          ├── Retry → Pending 재진입 (같은 구간)
-          ├── HITL → HITL 이벤트 생성
-          └── Skip → Skipped
+    └── 실패 → escalation 정책 적용
+          ├── retry             → 새 아이템 생성, worktree 보존
+          ├── retry_with_comment → on_fail + 새 아이템 생성
+          ├── hitl              → on_fail + HITL 생성
+          ├── skip              → on_fail + Skipped
+          └── replan            → on_fail + HITL(replan)
 ```
 
 ---
 
-## DataSource 설정 예시
+## on_done script 예시
+
+on_done script는 `autodev context`로 필요한 정보를 조회하여 외부 시스템에 결과를 반영한다.
 
 ```yaml
-sources:
-  github:
-    states:
-      analyze:
-        trigger: { label: "autodev:analyze" }
-        handlers:
-          - prompt: "이슈를 분석하고 구현 가능 여부를 판단해줘"
-        on_done: { label: "autodev:implement" }
-
-      implement:
-        trigger: { label: "autodev:implement" }
-        handlers:
-          - prompt: "이슈를 구현해줘"
-        on_done: { label: "autodev:review" }
-
-      review:
-        trigger: { label: "autodev:review" }
-        handlers:
-          - prompt: "PR을 리뷰하고 품질을 평가해줘"
-        on_done: { label: "autodev:done" }
+on_done:
+  - script: |
+      CTX=$(autodev context $WORK_ID --json)
+      ISSUE=$(echo $CTX | jq -r '.issue.number')
+      REPO=$(echo $CTX | jq -r '.source.url')
+      TITLE=$(echo $CTX | jq -r '.issue.title')
+      gh pr create --title "$TITLE" --body "Closes #$ISSUE" -R $REPO
+      gh issue edit $ISSUE --remove-label "autodev:implement" -R $REPO
+      gh issue edit $ISSUE --add-label "autodev:review" -R $REPO
 ```
 
-사용자가 단계를 추가/제거/교체하려면 yaml만 수정.
+Daemon이 주입하는 환경변수는 `WORK_ID`와 `WORKTREE`뿐. 이슈 번호, 레포 URL 등은 `autodev context`로 직접 조회한다.
 
 ---
 
@@ -97,6 +94,6 @@ DataSource.collect()가 changes-requested 감지
 
 ### 관련 문서
 
-- [DataSource](../concerns/datasource.md) — 상태 기반 워크플로우 정의 (v5: GitHub만)
+- [DataSource](../concerns/datasource.md) — 상태 기반 워크플로우 + context 스키마
 - [실패 복구와 HITL](./04-failure-and-hitl.md) — escalation 정책
-- [Cron 엔진](../concerns/cron-engine.md) — 품질 루프로 새 아이템 생성
+- [Cron 엔진](../concerns/cron-engine.md) — evaluate cron + 품질 루프
