@@ -1,0 +1,136 @@
+---
+description: "github-autopilot 플러그인 초기 설정. 프로젝트에 rules 설치 및 설정 파일 생성"
+argument-hint: ""
+allowed-tools: ["Bash", "Read", "Write", "Glob", "AskUserQuestion"]
+---
+
+# Setup
+
+github-autopilot 플러그인의 초기 설정을 수행합니다.
+
+## 사용법
+
+```bash
+/github-autopilot:setup
+```
+
+## 작업 프로세스
+
+### Step 1: 현재 상태 확인
+
+프로젝트에 이미 설정이 있는지 확인합니다:
+- `.claude/rules/autopilot-*.md` 존재 여부
+- `github-autopilot.local.md` 존재 여부
+
+### Step 2: Rules 설치
+
+`.claude/rules/` 디렉토리에 autopilot 규칙 파일을 설치합니다.
+
+이미 존재하는 파일은 AskUserQuestion으로 덮어쓸지 확인합니다.
+
+#### autopilot-always-pull-first.md
+
+```markdown
+---
+paths:
+  - "**"
+---
+
+# Always Pull First (github-autopilot)
+
+github-autopilot의 모든 agent와 command는 작업 전 반드시 최신 변경사항을 가져와야 합니다.
+
+## 규칙
+
+작업 시작 시 아래 명령을 실행합니다:
+
+\`\`\`bash
+git fetch origin
+\`\`\`
+
+현재 브랜치가 remote tracking 브랜치가 있는 경우:
+
+\`\`\`bash
+git pull --rebase origin $(git branch --show-current)
+\`\`\`
+
+## 이유
+
+autopilot은 주기적으로 실행되므로, 이전 실행 이후 변경된 내용을 반영하지 않으면 충돌이나 중복 작업이 발생합니다.
+```
+
+#### autopilot-draft-branch.md
+
+```markdown
+---
+paths:
+  - "**"
+---
+
+# Draft Branch Convention (github-autopilot)
+
+## 브랜치 네이밍
+
+| 용도 | 패턴 | remote push |
+|------|------|-------------|
+| `draft/*` | agent 작업용 | 금지 (로컬 only) |
+| `feature/*` | PR 생성용 | 허용 |
+
+## 금지 사항
+
+- draft/* 브랜치를 `git push`하지 않는다
+- main, develop 브랜치에 직접 커밋하지 않는다
+- 기존 feature/* 브랜치를 덮어쓰지 않는다 (이미 존재하면 skip)
+
+## 승격 조건
+
+- Quality gate (fmt, lint, test) 통과 후에만 승격
+- 승격 후 draft 브랜치는 즉시 삭제
+- PR 라벨에 autopilot 접두사 포함 필수
+```
+
+### Step 3: 설정 파일 생성
+
+`github-autopilot.local.md`가 없으면 템플릿을 생성합니다:
+
+```markdown
+---
+branch_strategy: "draft-main"
+auto_promote: true
+label_prefix: "autopilot:"
+spec_paths:
+  - "spec/"
+  - "docs/spec/"
+default_intervals:
+  gap_watch: "30m"
+  build_issues: "15m"
+  merge_prs: "10m"
+  ci_watch: "20m"
+  qa_boost: "1h"
+---
+
+# github-autopilot Configuration
+
+이 파일은 github-autopilot 플러그인의 설정 파일입니다.
+위 YAML frontmatter의 값을 프로젝트에 맞게 수정하세요.
+```
+
+### Step 4: 결과 보고
+
+설치된 파일 목록을 출력합니다:
+
+```
+## Setup 완료
+
+### 설치된 Rules
+- .claude/rules/autopilot-always-pull-first.md ✅
+- .claude/rules/autopilot-draft-branch.md ✅
+
+### 설정 파일
+- github-autopilot.local.md ✅ (생성됨 / 이미 존재)
+
+### 다음 단계
+1. `github-autopilot.local.md`의 설정을 프로젝트에 맞게 수정하세요
+2. `/github-autopilot:autopilot`으로 전체 루프를 시작하거나
+3. 개별 커맨드를 실행하세요 (예: `/github-autopilot:ci-watch 20m`)
+```
