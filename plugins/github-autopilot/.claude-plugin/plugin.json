@@ -9,7 +9,8 @@
     "./commands/merge-prs.md",
     "./commands/ci-watch.md",
     "./commands/qa-boost.md",
-    "./commands/autopilot.md"
+    "./commands/autopilot.md",
+    "./commands/setup.md"
   ],
   "agents": [
     "./agents/gap-detector.md",

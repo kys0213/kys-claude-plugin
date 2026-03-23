@@ -107,3 +107,24 @@ git branch -D draft/issue-{N}
 | `{label_prefix}auto` | autopilot 생성 PR | branch-promoter |
 | `{label_prefix}ci-failure` | CI 실패 이슈 | ci-watch |
 | `{label_prefix}qa` | QA 테스트 PR | qa-boost |
+
+## Always Pull First (필수 규칙)
+
+autopilot의 모든 agent와 command는 작업 시작 전 반드시 최신 변경사항을 가져와야 한다.
+
+```bash
+git fetch origin
+# remote tracking 브랜치가 있는 경우:
+git pull --rebase origin $(git branch --show-current)
+```
+
+**이유**: autopilot은 주기적으로 실행되므로, 이전 실행 이후 다른 agent나 사람이 변경한 내용을 반영하지 않으면 충돌이나 중복 작업이 발생한다.
+
+## Draft Branch 금지 사항
+
+- `draft/*` 브랜치를 `git push`하지 않는다 (로컬 only)
+- `main`, `develop` 브랜치에 직접 커밋하지 않는다
+- 기존 `feature/*` 브랜치를 덮어쓰지 않는다 (이미 존재하면 skip)
+- Quality gate 통과 전에 승격하지 않는다
+- 승격 후 draft 브랜치는 즉시 삭제한다
+- PR 라벨에 `{label_prefix}auto`를 반드시 포함한다
