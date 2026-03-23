@@ -155,6 +155,23 @@
       "name": "spec-kit",
       "source": "./plugins/spec-kit",
       "version": "0.2.0"
+    },
+    {
+      "category": "automation",
+      "description": "CronCreate 기반 자율 개발 루프 — gap 탐지, issue 구현, PR 머지, CI 감시, QA 보강",
+      "keywords": [
+        "autopilot",
+        "automation",
+        "cron",
+        "github",
+        "issue",
+        "pr",
+        "ci",
+        "qa"
+      ],
+      "name": "github-autopilot",
+      "source": "./plugins/github-autopilot",
+      "version": "0.1.0"
     }
   ]
 }
