@@ -77,6 +77,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "$FINGERPRINT"
 gh issue create \
   --title "fix: CI failure in ${WORKFLOW_NAME} on ${BRANCH}" \
   --label "{label_prefix}ci-failure" \
+  --label "{label_prefix}ready" \
   --body "$(cat <<'EOF'
 ## CI 실패 분석
 

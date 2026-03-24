@@ -33,13 +33,12 @@ GitHub 이슈의 내용을 분석하고, 코드베이스와 매핑하여 autopil
 
 ### Phase 3: 판정
 
-다음 세 가지 중 하나로 판정합니다:
+다음 두 가지 중 하나로 판정합니다:
 
 | 판정 | 기준 |
 |------|------|
 | `ready` | 요구사항이 명확하고, 코드베이스에서 변경 지점이 특정되며, 단일 이슈로 구현 가능 |
-| `needs-clarification` | 요구사항이 모호하거나, 구현 방향이 여러 가지로 해석 가능 |
-| `too-complex` | 변경 범위가 넓어 단일 이슈로 처리하기 어려움 (분할 필요) |
+| `skip` | 요구사항이 모호하거나, 변경 범위가 넓어 단일 이슈로 처리하기 어려움 |
 
 ## 출력
 
@@ -55,23 +54,13 @@ JSON 형식으로 출력합니다:
 }
 ```
 
-### needs-clarification 판정
+### skip 판정
 
 ```json
 {
-  "verdict": "needs-clarification",
+  "verdict": "skip",
   "issue_number": 42,
-  "comment": "## Autopilot 분석 결과\n\n### 판정: ❓ Needs Clarification\n\n### 모호한 부분\n\n- [질문 사항들]\n\n### 명확해지면 구현 가능한 범위\n\n- [현재 파악 가능한 범위]"
-}
-```
-
-### too-complex 판정
-
-```json
-{
-  "verdict": "too-complex",
-  "issue_number": 42,
-  "comment": "## Autopilot 분석 결과\n\n### 판정: 🔀 Too Complex (분할 권장)\n\n### 분석\n\n- [복잡도 사유]\n\n### 분할 제안\n\n1. [하위 이슈 1 제안]\n2. [하위 이슈 2 제안]\n..."
+  "comment": "## Autopilot 분석 결과\n\n### 판정: ⏭️ Skip\n\n### 사유\n\n- [모호한 요구사항 또는 복잡도 사유]\n\n### 제안\n\n- [요구사항 명확화 방향 또는 분할 제안]"
 }
 ```
 

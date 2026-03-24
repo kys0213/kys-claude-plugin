@@ -51,7 +51,9 @@ gh issue list \
 ```
 
 조회 결과에서 `{label_prefix}` 로 시작하는 라벨이 없는 이슈를 필터링합니다.
-(`{label_prefix}ready`, `{label_prefix}wip`, `{label_prefix}needs-clarification`, `{label_prefix}too-complex` 모두 없는 이슈)
+(`{label_prefix}ready`, `{label_prefix}wip` 모두 없는 이슈)
+
+추가로, 이미 autopilot이 분석 코멘트를 남긴 이슈는 제외합니다 (코멘트에 "Autopilot 분석 결과"가 포함된 이슈).
 
 필터링된 이슈가 있으면, 각 이슈에 대해 issue-analyzer 에이전트를 호출합니다:
 
@@ -63,10 +65,9 @@ gh issue list \
 **이슈 수가 3개 이하**: 순차 호출
 **4개 이상**: 병렬 호출 (background=true)
 
-분석 결과에 따라 **반드시 라벨을 추가**합니다 (라벨 없이 코멘트만 게시하지 않는다):
+분석 결과에 따라:
 - `ready` → `gh issue edit --add-label "{label_prefix}ready"` + 분석 코멘트 게시
-- `needs-clarification` → `gh issue edit --add-label "{label_prefix}needs-clarification"` + 질문 코멘트 게시
-- `too-complex` → `gh issue edit --add-label "{label_prefix}too-complex"` + 분할 제안 코멘트 게시
+- `skip` → 분석 코멘트만 게시 (라벨 없음, 다음 cycle에서 코멘트 존재로 재분석 방지)
 
 #### 3-b: Ready 이슈 조회
 

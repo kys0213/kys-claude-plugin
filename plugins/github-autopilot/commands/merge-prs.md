@@ -38,10 +38,13 @@ git fetch origin
 설정에서 label_prefix를 확인합니다 (기본값: `autopilot:`).
 
 ```bash
+# autopilot이 생성한 PR 조회 (auto + qa 라벨)
 gh pr list --label "{label_prefix}auto" --state open --json number,title,mergeable,statusCheckRollup,reviewDecision,headRefName,baseRefName --limit 20
+
+gh pr list --label "{label_prefix}qa" --state open --json number,title,mergeable,statusCheckRollup,reviewDecision,headRefName,baseRefName --limit 20
 ```
 
-PR이 없으면 "머지 대상 PR 없음" 출력 후 종료.
+두 결과를 합치고 중복 제거합니다 (number 기준). PR이 없으면 "머지 대상 PR 없음" 출력 후 종료.
 
 ### Step 4: PR 분류
 

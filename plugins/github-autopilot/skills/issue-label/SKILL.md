@@ -1,7 +1,7 @@
 ---
 name: issue-label
 description: GitHub 이슈/PR 생성 시 라벨 지정 규칙과 fingerprint 기반 중복 방지 컨벤션. 이슈를 생성하거나 라벨을 변경하는 모든 컴포넌트가 참조
-version: 1.0.0
+version: 1.1.0
 ---
 
 # Issue Label & Dedup Convention
@@ -10,12 +10,10 @@ version: 1.0.0
 
 | 라벨 | 용도 | 부여 주체 |
 |------|------|-----------|
-| `{label_prefix}ready` | 구현 대상 이슈 | gap-issue-creator, build-issues (auto-analyze) |
+| `{label_prefix}ready` | 구현 대상 이슈 | gap-issue-creator, analyze-issue, ci-watch |
 | `{label_prefix}wip` | 구현 진행 중 | build-issues |
-| `{label_prefix}needs-clarification` | 요구사항 불명확 | build-issues (auto-analyze) |
-| `{label_prefix}too-complex` | 분할 필요 | build-issues (auto-analyze) |
+| `{label_prefix}ci-failure` | CI 실패 이슈 (ready와 함께 부여) | ci-watch |
 | `{label_prefix}auto` | autopilot 생성 PR | branch-promoter |
-| `{label_prefix}ci-failure` | CI 실패 이슈 | ci-watch |
 | `{label_prefix}qa` | QA 테스트 PR | branch-promoter (qa-boost 경유) |
 
 `label_prefix`는 `github-autopilot.local.md`에서 로딩한다 (기본값: `autopilot:`).
@@ -58,9 +56,8 @@ gh pr create \
 | 컴포넌트 | 명령어 | 필수 라벨 |
 |----------|--------|-----------|
 | gap-issue-creator | `gh issue create` | `{label_prefix}ready` |
-| ci-watch | `gh issue create` | `{label_prefix}ci-failure` |
-| analyze-issue | `gh issue edit --add-label` | `{label_prefix}ready` / `{label_prefix}needs-clarification` / `{label_prefix}too-complex` |
-| build-issues (auto-analyze) | `gh issue edit --add-label` | `{label_prefix}ready` / `{label_prefix}needs-clarification` / `{label_prefix}too-complex` |
+| ci-watch | `gh issue create` | `{label_prefix}ci-failure` + `{label_prefix}ready` |
+| analyze-issue | `gh issue edit --add-label` | `{label_prefix}ready` (ready 판정만) |
 | build-issues (구현 시작) | `gh issue edit --add-label` | `{label_prefix}wip` |
 | branch-promoter | `gh pr create` | `{label_prefix}auto` 또는 `{label_prefix}qa` |
 
@@ -116,8 +113,6 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "gap:spec/auth.md:token-re
 |------|------|
 | `{label_prefix}ready` | `0E8A16` (green) |
 | `{label_prefix}wip` | `FBCA04` (yellow) |
-| `{label_prefix}needs-clarification` | `D876E3` (purple) |
-| `{label_prefix}too-complex` | `E4E669` (lime) |
-| `{label_prefix}auto` | `1D76DB` (blue) |
 | `{label_prefix}ci-failure` | `D93F0B` (red) |
+| `{label_prefix}auto` | `1D76DB` (blue) |
 | `{label_prefix}qa` | `0075CA` (teal) |
