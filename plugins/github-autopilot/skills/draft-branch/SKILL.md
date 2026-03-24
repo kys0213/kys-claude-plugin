@@ -100,13 +100,7 @@ git branch -D draft/issue-{N}
 
 ## GitHub 라벨 체계
 
-| 라벨 | 용도 | 생성 시점 |
-|------|------|-----------|
-| `{label_prefix}ready` | 구현 대상 이슈 | gap-watch |
-| `{label_prefix}wip` | 구현 진행 중 | build-issues |
-| `{label_prefix}auto` | autopilot 생성 PR | branch-promoter |
-| `{label_prefix}ci-failure` | CI 실패 이슈 | ci-watch |
-| `{label_prefix}qa` | QA 테스트 PR | qa-boost |
+라벨 체계, 필수 규칙, fingerprint 기반 중복 방지는 **issue-label 스킬**을 참조한다.
 
 ## Always Pull First (필수 규칙)
 

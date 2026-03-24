@@ -37,6 +37,7 @@ git fetch origin
 ### Step 3: 이슈 목록 조회
 
 설정에서 label_prefix를 확인합니다 (기본값: `autopilot:`).
+라벨은 `/github-autopilot:setup`에서 사전 생성됩니다 (draft-branch 스킬 참조).
 
 #### 3-a: 라벨 없는 이슈 자동 분석
 
@@ -62,10 +63,10 @@ gh issue list \
 **이슈 수가 3개 이하**: 순차 호출
 **4개 이상**: 병렬 호출 (background=true)
 
-분석 결과에 따라:
-- `ready` → `{label_prefix}ready` 라벨 추가 + 분석 코멘트 게시
-- `needs-clarification` → `{label_prefix}needs-clarification` 라벨 추가 + 질문 코멘트 게시
-- `too-complex` → `{label_prefix}too-complex` 라벨 추가 + 분할 제안 코멘트 게시
+분석 결과에 따라 **반드시 라벨을 추가**합니다 (라벨 없이 코멘트만 게시하지 않는다):
+- `ready` → `gh issue edit --add-label "{label_prefix}ready"` + 분석 코멘트 게시
+- `needs-clarification` → `gh issue edit --add-label "{label_prefix}needs-clarification"` + 질문 코멘트 게시
+- `too-complex` → `gh issue edit --add-label "{label_prefix}too-complex"` + 분할 제안 코멘트 게시
 
 #### 3-b: Ready 이슈 조회
 

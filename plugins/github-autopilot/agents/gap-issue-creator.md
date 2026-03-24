@@ -2,6 +2,7 @@
 description: (내부용) 갭 분석 리포트를 파싱하여 GitHub issue를 생성하는 에이전트
 model: haiku
 tools: ["Bash"]
+skills: ["issue-label"]
 ---
 
 # Gap Issue Creator
@@ -16,13 +17,17 @@ tools: ["Bash"]
 
 ## 프로세스
 
-### 1. 기존 이슈 중복 확인
+### 1. Fingerprint 생성 & 중복 확인
+
+각 갭 항목에서 issue-label 스킬의 규칙에 따라 fingerprint를 생성하고, 스크립트로 중복을 확인합니다.
 
 ```bash
-gh issue list --label "{label_prefix}ready" --state open --json number,title --limit 100
-```
+# fingerprint 형식: gap:{spec_path}:{requirement_keyword}
+FINGERPRINT="gap:spec/auth.md:token-refresh"
 
-기존 이슈 제목과 비교하여 중복을 방지합니다.
+# 중복 확인 — exit 1이면 skip
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "$FINGERPRINT"
+```
 
 ### 2. 이슈 생성
 
@@ -51,6 +56,9 @@ gh issue create \
 ## 구현 가이드
 
 [갭 분석에서 제안된 구현 방향]
+
+---
+<!-- fingerprint: gap:{spec_file_path}:{requirement_keyword} -->
 EOF
 )"
 ```
@@ -62,15 +70,16 @@ EOF
 ```json
 {
   "created": [
-    {"number": 42, "title": "feat(auth): implement token refresh"},
-    {"number": 43, "title": "feat(api): add rate limiting"}
+    {"number": 42, "title": "feat(auth): implement token refresh", "fingerprint": "gap:spec/auth.md:token-refresh"}
   ],
-  "skipped_duplicates": ["implement token refresh"]
+  "skipped_duplicates": [
+    {"fingerprint": "gap:spec/api.md:rate-limiting", "existing_issue": 38}
+  ]
 }
 ```
 
 ## 주의사항
 
-- 중복 이슈를 생성하지 않는다 (제목 유사도로 판단)
+- issue-label 스킬의 라벨 필수 규칙과 fingerprint 규칙을 반드시 따른다
 - 하나의 갭 = 하나의 이슈 (원자적 단위)
 - 이슈 제목은 conventional commit 형식을 따른다
