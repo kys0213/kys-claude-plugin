@@ -2,6 +2,7 @@
 description: (내부용) GitHub issue의 요구사항을 분석하고 draft 브랜치에서 코드를 구현하는 에이전트
 model: opus
 tools: ["Read", "Glob", "Grep", "Bash", "Write", "Edit"]
+skills: ["draft-branch"]
 ---
 
 # Issue Implementer

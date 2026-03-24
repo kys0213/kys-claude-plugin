@@ -2,6 +2,7 @@
 description: (내부용) 코드 변경사항을 분석하여 누락된 테스트를 작성하는 QA 전문 에이전트
 model: sonnet
 tools: ["Read", "Glob", "Grep", "Bash", "Write", "Edit"]
+skills: ["draft-branch"]
 ---
 
 # QA Test Writer
