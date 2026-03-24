@@ -2,6 +2,7 @@
 description: (내부용) unit/e2e/성능 테스트를 전문적으로 실행하고 결과를 리포트하는 에이전트
 model: sonnet
 tools: ["Read", "Glob", "Grep", "Bash"]
+skills: ["draft-branch"]
 ---
 
 # Test Executor
