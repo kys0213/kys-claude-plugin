@@ -84,18 +84,20 @@ gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}ready"
 ```bash
 # 질문 코멘트 추가
 gh issue comment ${ISSUE_NUMBER} --body "${ANALYSIS_COMMENT}"
-```
 
-라벨은 추가하지 않습니다.
+# needs-clarification 라벨 추가
+gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}needs-clarification"
+```
 
 #### too-complex 판정
 
 ```bash
 # 분할 제안 코멘트 추가
 gh issue comment ${ISSUE_NUMBER} --body "${ANALYSIS_COMMENT}"
-```
 
-라벨은 추가하지 않습니다.
+# too-complex 라벨 추가
+gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}too-complex"
+```
 
 ### Step 7: 결과 보고
 

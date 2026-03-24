@@ -59,7 +59,8 @@ gh pr create \
 |----------|--------|-----------|
 | gap-issue-creator | `gh issue create` | `{label_prefix}ready` |
 | ci-watch | `gh issue create` | `{label_prefix}ci-failure` |
-| build-issues (auto-analyze) | `gh issue edit --add-label` | `{label_prefix}ready` / `needs-clarification` / `too-complex` |
+| analyze-issue | `gh issue edit --add-label` | `{label_prefix}ready` / `{label_prefix}needs-clarification` / `{label_prefix}too-complex` |
+| build-issues (auto-analyze) | `gh issue edit --add-label` | `{label_prefix}ready` / `{label_prefix}needs-clarification` / `{label_prefix}too-complex` |
 | build-issues (구현 시작) | `gh issue edit --add-label` | `{label_prefix}wip` |
 | branch-promoter | `gh pr create` | `{label_prefix}auto` 또는 `{label_prefix}qa` |
 

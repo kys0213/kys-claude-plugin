@@ -29,11 +29,9 @@ RESULT=$(gh issue list --state open --search "\"${FINGERPRINT}\" in:body" --json
 COUNT=$(echo "$RESULT" | jq 'length')
 
 if [[ "$COUNT" -gt 0 ]]; then
-  NUMBER=$(echo "$RESULT" | jq -r '.[0].number')
-  TITLE=$(echo "$RESULT" | jq -r '.[0].title')
-  echo "{\"duplicate\": true, \"issue_number\": ${NUMBER}, \"issue_title\": \"${TITLE}\"}"
+  echo "$RESULT" | jq '{duplicate: true, issue_number: .[0].number, issue_title: .[0].title}'
   exit 1
 else
-  echo "{\"duplicate\": false}"
+  echo '{"duplicate": false}'
   exit 0
 fi
