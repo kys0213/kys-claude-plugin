@@ -38,6 +38,37 @@ git fetch origin
 
 설정에서 label_prefix를 확인합니다 (기본값: `autopilot:`).
 
+#### 3-a: 라벨 없는 이슈 자동 분석
+
+먼저 open 상태이면서 autopilot 관련 라벨이 **하나도 없는** 이슈를 조회합니다:
+
+```bash
+gh issue list \
+  --state open \
+  --json number,title,body,labels \
+  --limit 20
+```
+
+조회 결과에서 `{label_prefix}` 로 시작하는 라벨이 없는 이슈를 필터링합니다.
+(`{label_prefix}ready`, `{label_prefix}wip`, `{label_prefix}needs-clarification`, `{label_prefix}too-complex` 모두 없는 이슈)
+
+필터링된 이슈가 있으면, 각 이슈에 대해 issue-analyzer 에이전트를 호출합니다:
+
+전달 정보:
+- issue_number
+- issue_title
+- issue_body
+
+**이슈 수가 3개 이하**: 순차 호출
+**4개 이상**: 병렬 호출 (background=true)
+
+분석 결과에 따라:
+- `ready` → `{label_prefix}ready` 라벨 추가 + 분석 코멘트 게시
+- `needs-clarification` → `{label_prefix}needs-clarification` 라벨 추가 + 질문 코멘트 게시
+- `too-complex` → `{label_prefix}too-complex` 라벨 추가 + 분할 제안 코멘트 게시
+
+#### 3-b: Ready 이슈 조회
+
 ```bash
 gh issue list \
   --label "{label_prefix}ready" \
@@ -126,7 +157,10 @@ CronCreate를 호출하여 `/github-autopilot:build-issues`를 지정된 interva
 ```
 ## Build Issues 결과
 
-### 분석
+### 자동 분석
+- 미분석 이슈: 3개 → ready: 2개, needs-clarification: 1개
+
+### 구현 대상
 - 대상 이슈: 5개
 - 배치: 3개 (batch 1: #42, #44 | batch 2: #43 | batch 3: #45)
 
