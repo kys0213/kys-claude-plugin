@@ -7,7 +7,8 @@
     "./agents/pr-merger.md",
     "./agents/ci-failure-analyzer.md",
     "./agents/qa-test-writer.md",
-    "./agents/issue-dependency-analyzer.md"
+    "./agents/issue-dependency-analyzer.md",
+    "./agents/issue-analyzer.md"
   ],
   "author": {
     "name": "kys0213"
@@ -19,7 +20,8 @@
     "./commands/ci-watch.md",
     "./commands/qa-boost.md",
     "./commands/autopilot.md",
-    "./commands/setup.md"
+    "./commands/setup.md",
+    "./commands/analyze-issue.md"
   ],
   "description": "CronCreate 기반 자율 개발 루프 - gap 탐지, issue 구현, PR 머지, CI 감시, QA 보강",
   "name": "github-autopilot",
