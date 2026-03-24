@@ -14,13 +14,14 @@ tools: ["Read", "Glob", "Grep", "Bash", "Write", "Edit"]
 - issue_number: 이슈 번호
 - issue_title: 이슈 제목
 - issue_body: 이슈 본문 (요구사항, 영향 범위, 구현 가이드)
+- issue_comments: 이슈 코멘트 (analyze-issue의 분석 결과 포함 — 영향 범위, 구현 가이드 참조)
 - draft_branch: 작업할 draft 브랜치명
 
 ## 프로세스
 
 ### Phase 1: 분석
 
-1. **이슈 요구사항 정리**: body에서 구현 항목, 수용 기준 추출
+1. **이슈 요구사항 정리**: body와 comments에서 구현 항목, 수용 기준 추출 (comments의 "Autopilot 분석 결과" 섹션에 영향 범위와 구현 가이드가 포함되어 있을 수 있음)
 2. **코드베이스 파악**:
    - 영향 범위의 파일/모듈 읽기
    - 관련 인터페이스, 타입 정의 확인

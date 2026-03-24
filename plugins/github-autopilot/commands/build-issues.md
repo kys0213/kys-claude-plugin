@@ -42,7 +42,7 @@ git fetch origin
 gh issue list \
   --label "{label_prefix}ready" \
   --state open \
-  --json number,title,body,labels \
+  --json number,title,body,labels,comments \
   --limit 20
 ```
 
@@ -81,6 +81,7 @@ gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 - issue_number
 - issue_title
 - issue_body (요구사항, 영향 범위, 구현 가이드)
+- issue_comments (분석 코멘트 포함, analyze-issue에서 생성된 구현 가이드 참조)
 - draft_branch: `draft/issue-{number}`
 
 ### Step 7: 결과 수집
