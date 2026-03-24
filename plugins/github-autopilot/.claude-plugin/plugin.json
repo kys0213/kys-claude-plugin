@@ -6,7 +6,6 @@
     "./agents/branch-promoter.md",
     "./agents/pr-merger.md",
     "./agents/ci-failure-analyzer.md",
-    "./agents/qa-test-writer.md",
     "./agents/issue-dependency-analyzer.md",
     "./agents/issue-analyzer.md",
     "./agents/qa-expert.md",

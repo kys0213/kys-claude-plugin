@@ -2,6 +2,7 @@
 description: (내부용) 커밋 해시 기반 diff를 분석하여 누락된 테스트 케이스를 탐색하고, 테스트 타입별로 분류하여 작성하는 QA 전문 에이전트
 model: sonnet
 tools: ["Read", "Glob", "Grep", "Bash", "Write", "Edit"]
+skills: ["draft-branch"]
 ---
 
 # QA Expert
