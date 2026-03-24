@@ -8,7 +8,9 @@
     "./agents/ci-failure-analyzer.md",
     "./agents/qa-test-writer.md",
     "./agents/issue-dependency-analyzer.md",
-    "./agents/issue-analyzer.md"
+    "./agents/issue-analyzer.md",
+    "./agents/qa-expert.md",
+    "./agents/test-executor.md"
   ],
   "author": {
     "name": "kys0213"
