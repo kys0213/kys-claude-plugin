@@ -2,6 +2,7 @@
 description: (내부용) draft 브랜치를 feature 브랜치로 승격하고 PR을 생성하는 에이전트
 model: haiku
 tools: ["Bash"]
+skills: ["draft-branch"]
 ---
 
 # Branch Promoter
