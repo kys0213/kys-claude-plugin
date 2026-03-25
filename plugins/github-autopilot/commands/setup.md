@@ -96,6 +96,7 @@ paths:
 ```markdown
 ---
 branch_strategy: "draft-main"
+work_branch: ""               # 에이전트 작업 base 브랜치 (비어있으면 branch_strategy에 따라 결정)
 auto_promote: true
 label_prefix: "autopilot:"
 spec_paths:
@@ -114,6 +115,14 @@ notification: ""              # skip 이슈 알림 방법 (자연어, 예: "Slac
 
 이 파일은 github-autopilot 플러그인의 설정 파일입니다.
 위 YAML frontmatter의 값을 프로젝트에 맞게 수정하세요.
+
+## work_branch
+
+에이전트가 작업할 base 브랜치를 지정합니다.
+설정하면 모든 에이전트가 이 브랜치에서 draft 브랜치를 분기하고, PR의 base도 이 브랜치가 됩니다.
+비어있으면 branch_strategy에 따라 자동 결정됩니다 (draft-main → main, draft-develop-main → develop).
+
+예시: `work_branch: "alpha"` → alpha에서 분기, PR base도 alpha
 ```
 
 ### Step 4: GitHub 라벨 생성
