@@ -37,24 +37,12 @@ git fetch origin
 
 ### Step 2.5: Pipeline Idle Check
 
-autopilot 파이프라인에 활성 작업이 있는지 확인합니다.
-
-설정에서 label_prefix를 확인합니다 (기본값: `autopilot:`).
-
 ```bash
-ISSUES=$(gh issue list --label "{label_prefix}ready" --state open --json number --jq 'length')
-WIP=$(gh issue list --label "{label_prefix}wip" --state open --json number --jq 'length')
-PRS=$(gh pr list --label "{label_prefix}auto" --state open --json number --jq 'length')
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-idle.sh "{label_prefix}"
 ```
 
-**ISSUES + WIP + PRS = 0이면**:
-
-1. `notification` 설정이 있으면 알림 발송:
-   - "autopilot 파이프라인 완료 — ci-watch cycle 중단. 재시작: `/github-autopilot:autopilot`"
-2. CronCreate를 **등록하지 않고** 종료
-3. 결과 보고: "Pipeline idle — cycle 중단"
-
-**1개라도 있으면**: Step 3부터 정상 진행.
+- **exit 0 (idle)**: `notification` 설정이 있으면 "autopilot 파이프라인 완료 — ci-watch cycle 중단" 알림 발송. CronCreate를 등록하지 않고 종료.
+- **exit 1 (active)**: Step 3부터 정상 진행.
 
 ### Step 3: CI 실패 목록 조회
 
