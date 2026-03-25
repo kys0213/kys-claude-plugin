@@ -79,7 +79,7 @@ gh issue comment ${ISSUE_NUMBER} --body "${ANALYSIS_COMMENT}"
 gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}ready"
 ```
 
-#### skip 판정 (needs-clarification / too-complex)
+#### skip 판정
 
 ```bash
 # 분석 코멘트 추가 (라벨은 부여하지 않음)

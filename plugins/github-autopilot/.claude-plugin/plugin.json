@@ -7,9 +7,7 @@
     "./agents/pr-merger.md",
     "./agents/ci-failure-analyzer.md",
     "./agents/issue-dependency-analyzer.md",
-    "./agents/issue-analyzer.md",
-    "./agents/qa-expert.md",
-    "./agents/test-executor.md"
+    "./agents/issue-analyzer.md"
   ],
   "author": {
     "name": "kys0213"

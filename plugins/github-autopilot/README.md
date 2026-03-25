@@ -122,18 +122,16 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "gap:spec/auth.md:token-re
 
 ## 에이전트
 
-| 에이전트 | model | 역할 |
-|----------|-------|------|
-| `gap-detector` | - | 스펙 파싱 → 구조 매핑 → call chain 갭 분석 |
-| `gap-issue-creator` | haiku | 갭 리포트 → GitHub 이슈 생성 |
-| `issue-analyzer` | sonnet | 이슈 분석 → ready/skip 판정 |
-| `issue-dependency-analyzer` | - | 이슈 간 의존성 → 배치 분류 |
-| `issue-implementer` | - | worktree에서 이슈 구현 |
-| `branch-promoter` | haiku | draft → feature 브랜치 승격 + PR |
-| `pr-merger` | - | PR 문제 해결 (conflict, CI 실패) |
-| `ci-failure-analyzer` | - | CI 로그 분석 → 실패 원인 리포트 |
-| `qa-expert` | sonnet | 테스트 작성 전문 에이전트 |
-| `test-executor` | - | 테스트 실행 + 결과 보고 |
+| 에이전트 | model | 호출 위치 | 역할 |
+|----------|-------|----------|------|
+| `gap-detector` | - | gap-watch | 스펙 파싱 → 구조 매핑 → call chain 갭 분석 |
+| `gap-issue-creator` | haiku | gap-watch | 갭 리포트 → GitHub 이슈 생성 (fingerprint 중복 검사 포함) |
+| `issue-analyzer` | sonnet | analyze-issue | 이슈 분석 → ready/skip 판정 (HITL) |
+| `issue-dependency-analyzer` | - | build-issues | 이슈 간 의존성 → 배치 분류 |
+| `issue-implementer` | opus | build-issues | worktree에서 이슈 구현 |
+| `branch-promoter` | haiku | build-issues | draft → feature 브랜치 승격 + PR (:auto 라벨) |
+| `pr-merger` | - | merge-prs | PR 문제 해결 (conflict, CI 실패) |
+| `ci-failure-analyzer` | - | ci-watch | CI 로그 분석 → 실패 원인 리포트 |
 
 ## 설정
 
