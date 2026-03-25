@@ -107,10 +107,7 @@ default_intervals:
   merge_prs: "10m"
   ci_watch: "20m"
   qa_boost: "1h"
-notification:
-  method: "none"            # "slack" | "github-mention" | "none"
-  slack_webhook: ""         # Slack Incoming Webhook URL
-  github_mention: ""        # GitHub @username
+notification: ""              # skip 이슈 알림 방법 (자연어, 예: "Slack DM으로 @irene에게 알려줘")
 ---
 
 # github-autopilot Configuration

@@ -36,7 +36,7 @@ git fetch origin
 
 ### Step 3: Skip 이슈 알림
 
-설정에서 `notification` 설정을 확인합니다 (`method`가 `none`이면 이 Step을 건너뜁니다).
+설정에서 `notification` 값을 확인합니다 (비어있으면 이 Step을 건너뜁니다).
 
 autopilot 분석 코멘트가 있지만 `:ready` 라벨이 없는 이슈를 조회합니다:
 
@@ -48,26 +48,20 @@ gh issue list \
 ```
 
 필터 조건:
-- `{label_prefix}` 로 시작하는 라벨이 **없음** (ready, wip 모두 없음)
+- `{label_prefix}` 로 시작하는 라벨이 **없음**
 - 코멘트에 "Autopilot 분석 결과"가 **포함됨** (이전에 skip 판정을 받은 이슈)
-- 이미 알림을 보낸 이슈는 제외 (코멘트에 "알림 전송됨"이 포함된 이슈)
+- 이미 알림을 보낸 이슈는 제외 (코멘트에 `<!-- notified -->` 가 포함된 이슈)
 
-해당 이슈가 있으면 설정된 방식으로 알림을 보냅니다:
+해당 이슈가 있으면, `notification` 설정에 적힌 자연어 지시에 따라 알림을 보냅니다. 환경에 구성된 도구(MCP, Skill 등)를 활용합니다.
 
-#### slack
+알림 내용:
+- 대상 이슈 번호와 제목
+- "이슈를 수정한 후 `/analyze-issue {번호}`를 실행해주세요"
 
-```bash
-curl -X POST "${slack_webhook}" \
-  -H "Content-Type: application/json" \
-  -d '{"text": "🔔 Autopilot skip 이슈가 대기 중입니다:\n- #${NUMBER}: ${TITLE}\n\n이슈를 수정한 후 `/analyze-issue ${NUMBER}` 를 실행해주세요."}'
-```
-
-#### github-mention
+알림 후 해당 이슈에 마커 코멘트를 남깁니다:
 
 ```bash
-gh issue comment ${ISSUE_NUMBER} --body "@${github_mention} 이 이슈는 autopilot에서 skip 판정을 받았습니다. 이슈를 수정한 후 \`/analyze-issue ${NUMBER}\`를 실행해주세요.
-
-<!-- 알림 전송됨 -->"
+gh issue comment ${ISSUE_NUMBER} --body "<!-- notified -->"
 ```
 
 ### Step 4: Ready 이슈 조회
