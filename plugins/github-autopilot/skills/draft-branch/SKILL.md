@@ -24,6 +24,10 @@ default_intervals:                   # autopilot dispatcher 기본 인터벌
   merge_prs: "10m"
   ci_watch: "20m"
   qa_boost: "1h"
+notification:                        # skip 이슈 알림 설정
+  method: "none"                     # "slack" | "github-mention" | "none"
+  slack_webhook: ""                  # Slack Incoming Webhook URL
+  github_mention: ""                 # GitHub @username (github-mention 방식)
 ---
 ```
 

@@ -107,6 +107,10 @@ default_intervals:
   merge_prs: "10m"
   ci_watch: "20m"
   qa_boost: "1h"
+notification:
+  method: "none"            # "slack" | "github-mention" | "none"
+  slack_webhook: ""         # Slack Incoming Webhook URL
+  github_mention: ""        # GitHub @username
 ---
 
 # github-autopilot Configuration
