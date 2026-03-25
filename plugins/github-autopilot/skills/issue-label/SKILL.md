@@ -10,11 +10,10 @@ version: 1.1.0
 
 | 라벨 | 용도 | 부여 주체 |
 |------|------|-----------|
-| `{label_prefix}ready` | 구현 대상 이슈 | gap-issue-creator, analyze-issue, ci-watch |
+| `{label_prefix}ready` | 구현 대상 이슈 | gap-issue-creator, qa-boost, ci-watch |
 | `{label_prefix}wip` | 구현 진행 중 | build-issues |
 | `{label_prefix}ci-failure` | CI 실패 이슈 (ready와 함께 부여) | ci-watch |
 | `{label_prefix}auto` | autopilot 생성 PR | branch-promoter |
-| `{label_prefix}qa` | QA 테스트 PR | branch-promoter (qa-boost 경유) |
 
 `label_prefix`는 `github-autopilot.local.md`에서 로딩한다 (기본값: `autopilot:`).
 
@@ -56,10 +55,10 @@ gh pr create \
 | 컴포넌트 | 명령어 | 필수 라벨 |
 |----------|--------|-----------|
 | gap-issue-creator | `gh issue create` | `{label_prefix}ready` |
+| qa-boost | `gh issue create` | `{label_prefix}ready` |
 | ci-watch | `gh issue create` | `{label_prefix}ci-failure` + `{label_prefix}ready` |
-| analyze-issue | `gh issue edit --add-label` | `{label_prefix}ready` (ready 판정만) |
 | build-issues (구현 시작) | `gh issue edit --add-label` | `{label_prefix}wip` |
-| branch-promoter | `gh pr create` | `{label_prefix}auto` 또는 `{label_prefix}qa` |
+| branch-promoter | `gh pr create` | `{label_prefix}auto` |
 
 ## Fingerprint 기반 중복 방지
 
@@ -70,6 +69,7 @@ gh pr create \
 | 컴포넌트 | fingerprint 형식 | 예시 |
 |----------|-----------------|------|
 | gap-issue-creator | `gap:{spec_path}:{requirement_keyword}` | `gap:spec/auth.md:token-refresh` |
+| qa-boost | `qa:{source_file_path}:{test_type}` | `qa:src/auth/refresh.rs:unit` |
 | ci-watch | `ci:{workflow}:{branch}:{failure_type}` | `ci:validate.yml:main:test-failure` |
 
 규칙:
@@ -115,4 +115,3 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "gap:spec/auth.md:token-re
 | `{label_prefix}wip` | `FBCA04` (yellow) |
 | `{label_prefix}ci-failure` | `D93F0B` (red) |
 | `{label_prefix}auto` | `1D76DB` (blue) |
-| `{label_prefix}qa` | `0075CA` (teal) |

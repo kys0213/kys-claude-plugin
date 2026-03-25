@@ -126,7 +126,6 @@ gh label create "{label_prefix}ready" --color "0E8A16" --description "Autopilot 
 gh label create "{label_prefix}wip" --color "FBCA04" --description "Autopilot 구현 진행 중" 2>/dev/null || true
 gh label create "{label_prefix}ci-failure" --color "D93F0B" --description "CI 실패 이슈" 2>/dev/null || true
 gh label create "{label_prefix}auto" --color "1D76DB" --description "Autopilot 자동 생성 PR" 2>/dev/null || true
-gh label create "{label_prefix}qa" --color "0075CA" --description "QA 테스트 PR" 2>/dev/null || true
 ```
 
 ### Step 5: 결과 보고
@@ -148,7 +147,6 @@ gh label create "{label_prefix}qa" --color "0075CA" --description "QA 테스트 
 - autopilot:wip ✅
 - autopilot:ci-failure ✅
 - autopilot:auto ✅
-- autopilot:qa ✅
 
 ### 다음 단계
 1. `github-autopilot.local.md`의 설정을 프로젝트에 맞게 수정하세요

@@ -52,9 +52,7 @@ draft/issue-42    ← agent 전용 작업 공간
 | 용도 | 패턴 | 예시 |
 |------|------|------|
 | 이슈 구현 | `draft/issue-{number}` | `draft/issue-42` |
-| QA 테스트 | `draft/qa-{short-hash}` | `draft/qa-a1b2c3` |
 | 승격 후 | `feature/issue-{number}` | `feature/issue-42` |
-| QA 승격 후 | `feature/qa-{short-hash}` | `feature/qa-a1b2c3` |
 
 ## 승격 (Promote) 프로세스
 

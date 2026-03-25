@@ -34,42 +34,9 @@ autopilot 라벨이 붙은 GitHub 이슈를 가져와 의존성을 분석하고,
 git fetch origin
 ```
 
-### Step 3: 이슈 목록 조회
+### Step 3: Ready 이슈 조회
 
 설정에서 label_prefix를 확인합니다 (기본값: `autopilot:`).
-라벨은 `/github-autopilot:setup`에서 사전 생성됩니다 (draft-branch 스킬 참조).
-
-#### 3-a: 라벨 없는 이슈 자동 분석
-
-먼저 open 상태이면서 autopilot 관련 라벨이 **하나도 없는** 이슈를 조회합니다:
-
-```bash
-gh issue list \
-  --state open \
-  --json number,title,body,labels \
-  --limit 20
-```
-
-조회 결과에서 `{label_prefix}` 로 시작하는 라벨이 없는 이슈를 필터링합니다.
-(`{label_prefix}ready`, `{label_prefix}wip` 모두 없는 이슈)
-
-추가로, 이미 autopilot이 분석 코멘트를 남긴 이슈는 제외합니다 (코멘트에 "Autopilot 분석 결과"가 포함된 이슈).
-
-필터링된 이슈가 있으면, 각 이슈에 대해 issue-analyzer 에이전트를 호출합니다:
-
-전달 정보:
-- issue_number
-- issue_title
-- issue_body
-
-**이슈 수가 3개 이하**: 순차 호출
-**4개 이상**: 병렬 호출 (background=true)
-
-분석 결과에 따라:
-- `ready` → `gh issue edit --add-label "{label_prefix}ready"` + 분석 코멘트 게시
-- `skip` → 분석 코멘트만 게시 (라벨 없음, 다음 cycle에서 코멘트 존재로 재분석 방지)
-
-#### 3-b: Ready 이슈 조회
 
 ```bash
 gh issue list \
@@ -158,9 +125,6 @@ CronCreate를 호출하여 `/github-autopilot:build-issues`를 지정된 interva
 
 ```
 ## Build Issues 결과
-
-### 자동 분석
-- 미분석 이슈: 3개 → ready: 2개, needs-clarification: 1개
 
 ### 구현 대상
 - 대상 이슈: 5개
