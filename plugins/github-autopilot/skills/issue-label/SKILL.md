@@ -107,7 +107,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "gap:spec/auth.md:token-re
 
 ## 라벨 생성
 
-모든 라벨은 `/github-autopilot:setup` Step 4에서 일괄 생성된다.
+모든 라벨은 setup 커맨드에서 일괄 생성된다.
 
 | 라벨 | 색상 |
 |------|------|
