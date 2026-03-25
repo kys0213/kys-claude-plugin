@@ -16,12 +16,15 @@
 
 set -euo pipefail
 
-if [[ $# -lt 1 ]]; then
+if [[ $# -lt 1 ]] || [[ -z "$1" ]]; then
   echo "Usage: check-duplicate.sh <fingerprint>" >&2
   exit 2
 fi
 
 FINGERPRINT="$1"
+
+command -v gh &>/dev/null || { echo '{"error": "gh CLI not found"}' >&2; exit 2; }
+command -v jq &>/dev/null || { echo '{"error": "jq not found"}' >&2; exit 2; }
 
 # gh issue list --search 로 body에서 fingerprint 검색
 RESULT=$(gh issue list --state open --search "\"${FINGERPRINT}\" in:body" --json number,title --limit 1 2>/dev/null || echo "[]")

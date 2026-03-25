@@ -42,6 +42,8 @@ CronCreate 기반 자율 개발 루프 — gap 탐지, 테스트 갭 발행, CI 
  │           │                                                    │
  │  Step 7: issue-implementer (worktree 병렬 구현)                  │
  │           │                                                    │
+ │  Step 8: 결과 수집                                               │
+ │           │                                                    │
  │  Step 9: branch-promoter → PR + :auto 라벨                     │
  │           │                                                    │
  │  Step 10: :wip, :ready 제거                                     │
