@@ -17,6 +17,7 @@ skills: ["draft-branch"]
 - issue_body: 이슈 본문 (요구사항, 영향 범위, 구현 가이드)
 - issue_comments: 이슈 코멘트 (analyze-issue의 분석 결과 포함 — 영향 범위, 구현 가이드 참조)
 - draft_branch: 작업할 draft 브랜치명
+- base_branch: draft 브랜치를 분기할 base 브랜치 (work_branch 또는 branch_strategy에서 결정된 값)
 
 ## 프로세스
 

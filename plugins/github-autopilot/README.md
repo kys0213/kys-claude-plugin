@@ -142,6 +142,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "gap:spec/auth.md:token-re
 ```yaml
 ---
 branch_strategy: "draft-main"
+work_branch: ""                      # 에이전트 작업 base 브랜치 (비어있으면 branch_strategy에 따라 결정)
 auto_promote: true
 label_prefix: "autopilot:"
 spec_paths:

@@ -28,13 +28,19 @@ autopilot 라벨이 붙은 GitHub 이슈를 가져와 의존성을 분석하고,
 - `/^\d+[smh]$/` 패턴 매칭 → interval 모드
 - 비어있으면 → 1회 실행 모드
 
-### Step 2: 최신 상태 동기화
+### Step 2: Base 브랜치 결정
+
+설정에서 `work_branch`와 `branch_strategy`를 읽어 base 브랜치를 결정합니다:
+1. `work_branch`가 설정되어 있으면 → 해당 값 사용
+2. `work_branch`가 비어있으면 → `branch_strategy`에 따라 결정 (`draft-main` → `main`, `draft-develop-main` → `develop`)
+
+### Step 3: 최신 상태 동기화
 
 ```bash
 git fetch origin
 ```
 
-### Step 3: Skip 이슈 알림
+### Step 4: Skip 이슈 알림
 
 설정에서 `notification` 값을 확인합니다 (비어있으면 이 Step을 건너뜁니다).
 
@@ -64,7 +70,7 @@ gh issue list \
 gh issue comment ${ISSUE_NUMBER} --body "<!-- notified -->"
 ```
 
-### Step 4: Ready 이슈 조회
+### Step 5: Ready 이슈 조회
 
 설정에서 label_prefix를 확인합니다 (기본값: `autopilot:`).
 
@@ -80,7 +86,7 @@ gh issue list \
 
 이슈가 없으면 "구현 대상 이슈 없음" 출력 후 종료.
 
-### Step 5: 의존성 분석 (Agent)
+### Step 6: 의존성 분석 (Agent)
 
 issue-dependency-analyzer 에이전트를 호출합니다 (background=false):
 
@@ -89,7 +95,7 @@ issue-dependency-analyzer 에이전트를 호출합니다 (background=false):
 
 결과: 배치 목록 (병렬 실행 가능한 이슈 그룹)
 
-### Step 6: WIP 라벨 추가
+### Step 7: WIP 라벨 추가
 
 현재 배치의 이슈들에 wip 라벨을 추가합니다 (중복 작업 방지):
 
@@ -97,7 +103,7 @@ issue-dependency-analyzer 에이전트를 호출합니다 (background=false):
 gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 ```
 
-### Step 7: 구현 (Agent Team)
+### Step 8: 구현 (Agent Team)
 
 첫 번째 배치(의존성 없는 이슈들)부터 순서대로 처리합니다.
 
@@ -114,7 +120,7 @@ gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 - issue_comments (분석 코멘트 포함, analyze-issue에서 생성된 구현 가이드 참조)
 - draft_branch: `draft/issue-{number}`
 
-### Step 8: 결과 수집
+### Step 9: 결과 수집
 
 모든 에이전트의 결과를 수집합니다.
 
@@ -125,7 +131,7 @@ gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 실패한 이슈:
 - wip 라벨 제거, 이슈에 실패 코멘트 추가
 
-### Step 9: 승격 (Agent Team)
+### Step 10: 승격 (Agent Team)
 
 성공한 각 이슈에 대해 branch-promoter 에이전트를 호출합니다:
 
@@ -133,25 +139,25 @@ gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 - draft_branch: `draft/issue-{number}`
 - issue_number
 - issue_title
-- branch_strategy: 설정에서 로딩
+- base_branch: 설정에서 결정 (work_branch > branch_strategy)
 - label_prefix
 - pr_type: "auto"
 
 **성공한 이슈 수가 3개 이하**: 순차 호출
 **4개 이상**: 병렬 호출 (background=true)
 
-### Step 10: 라벨 정리
+### Step 11: 라벨 정리
 
 - 승격 성공: `{label_prefix}wip` 제거, `{label_prefix}ready` 제거
 - 승격 실패: `{label_prefix}wip` 제거 (다음 cycle에서 재시도)
 
-### Step 11: CronCreate (interval 모드)
+### Step 12: CronCreate (interval 모드)
 
 interval이 지정된 경우에만 실행합니다:
 
 CronCreate를 호출하여 `/github-autopilot:build-issues`를 지정된 interval로 등록합니다.
 
-### Step 12: 결과 보고
+### Step 13: 결과 보고
 
 ```
 ## Build Issues 결과

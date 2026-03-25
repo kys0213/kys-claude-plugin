@@ -13,6 +13,7 @@ version: 1.0.0
 ```yaml
 ---
 branch_strategy: "draft-main"       # "draft-develop-main" | "draft-main"
+work_branch: ""                      # 에이전트 작업 base 브랜치 (비어있으면 branch_strategy에 따라 결정)
 auto_promote: true                   # draft → feature 자동 승격
 label_prefix: "autopilot:"          # GitHub 라벨 접두사
 spec_paths:                          # 스펙 파일 탐색 경로
@@ -30,7 +31,26 @@ notification: ""                     # skip 이슈 알림 방법 (자연어, 예
 
 설정 파일이 없으면 위 기본값을 사용한다.
 
+## Base 브랜치 결정
+
+에이전트가 작업할 base 브랜치는 다음 우선순위로 결정한다:
+
+1. `work_branch`가 설정되어 있으면 → 해당 브랜치를 base로 사용
+2. `work_branch`가 비어있으면 → `branch_strategy`에 따라 결정:
+   - `draft-main` → `main`
+   - `draft-develop-main` → `develop`
+
+```
+# 예시: work_branch가 "alpha"인 경우
+base_branch = "alpha"
+
+# 예시: work_branch가 비어있고 branch_strategy가 "draft-main"인 경우
+base_branch = "main"
+```
+
 ## Branch 계층 구조
+
+### work_branch 미설정 (기본)
 
 ```
 main              ← 프로덕션 (보호됨)
@@ -41,6 +61,22 @@ feature/issue-42  ← PR 대상, 사람이 리뷰
   │
 draft/issue-42    ← agent 전용 작업 공간
 ```
+
+### work_branch 설정 시 (예: alpha)
+
+```
+main              ← 프로덕션 (보호됨)
+  │
+develop           ← (선택) 통합 브랜치
+  │
+alpha             ← work_branch: 에이전트 작업 base
+  │
+feature/issue-42  ← PR 대상 (base: alpha)
+  │
+draft/issue-42    ← agent 전용 작업 공간 (alpha에서 분기)
+```
+
+> `work_branch → develop → main` 승격은 autopilot 범위 밖이며, 수동으로 관리한다.
 
 ## Draft Branch 규칙
 
@@ -84,9 +120,10 @@ git checkout -b feature/issue-{N} draft/issue-{N}
 # 2. remote push
 git push -u origin feature/issue-{N}
 
-# 3. PR 생성 (branch_strategy에 따라 base 결정)
-#    draft-main:         --base main
-#    draft-develop-main: --base develop
+# 3. PR 생성 (base 브랜치 결정: work_branch > branch_strategy)
+#    work_branch 설정 시:  --base {work_branch}
+#    draft-main:           --base main
+#    draft-develop-main:   --base develop
 gh pr create \
   --base {base_branch} \
   --title "feat(scope): issue #{N} description" \
