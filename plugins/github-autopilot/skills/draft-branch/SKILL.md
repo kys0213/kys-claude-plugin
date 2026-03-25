@@ -24,6 +24,7 @@ default_intervals:                   # autopilot dispatcher 기본 인터벌
   merge_prs: "10m"
   ci_watch: "20m"
   qa_boost: "1h"
+notification: ""                     # skip 이슈 알림 방법 (자연어, 예: "Slack DM으로 @irene에게 알려줘")
 ---
 ```
 
@@ -52,9 +53,7 @@ draft/issue-42    ← agent 전용 작업 공간
 | 용도 | 패턴 | 예시 |
 |------|------|------|
 | 이슈 구현 | `draft/issue-{number}` | `draft/issue-42` |
-| QA 테스트 | `draft/qa-{short-hash}` | `draft/qa-a1b2c3` |
 | 승격 후 | `feature/issue-{number}` | `feature/issue-42` |
-| QA 승격 후 | `feature/qa-{short-hash}` | `feature/qa-a1b2c3` |
 
 ## 승격 (Promote) 프로세스
 
@@ -100,13 +99,7 @@ git branch -D draft/issue-{N}
 
 ## GitHub 라벨 체계
 
-| 라벨 | 용도 | 생성 시점 |
-|------|------|-----------|
-| `{label_prefix}ready` | 구현 대상 이슈 | gap-watch |
-| `{label_prefix}wip` | 구현 진행 중 | build-issues |
-| `{label_prefix}auto` | autopilot 생성 PR | branch-promoter |
-| `{label_prefix}ci-failure` | CI 실패 이슈 | ci-watch |
-| `{label_prefix}qa` | QA 테스트 PR | qa-boost |
+라벨 체계, 필수 규칙, fingerprint 기반 중복 방지는 **issue-label 스킬**을 참조한다.
 
 ## Always Pull First (필수 규칙)
 

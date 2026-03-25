@@ -79,23 +79,14 @@ gh issue comment ${ISSUE_NUMBER} --body "${ANALYSIS_COMMENT}"
 gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}ready"
 ```
 
-#### needs-clarification 판정
+#### skip 판정
 
 ```bash
-# 질문 코멘트 추가
+# 분석 코멘트 추가 (라벨은 부여하지 않음)
 gh issue comment ${ISSUE_NUMBER} --body "${ANALYSIS_COMMENT}"
 ```
 
-라벨은 추가하지 않습니다.
-
-#### too-complex 판정
-
-```bash
-# 분할 제안 코멘트 추가
-gh issue comment ${ISSUE_NUMBER} --body "${ANALYSIS_COMMENT}"
-```
-
-라벨은 추가하지 않습니다.
+라벨을 추가하지 않습니다. 코멘트에 사유(모호한 요구사항 / 분할 필요)를 명시하여 이슈 작성자가 수정할 수 있도록 합니다.
 
 ### Step 7: 결과 보고
 
@@ -105,12 +96,11 @@ gh issue comment ${ISSUE_NUMBER} --body "${ANALYSIS_COMMENT}"
 | Issue | Title | 판정 |
 |-------|-------|------|
 | #42 | Add user auth | ✅ Ready |
-| #43 | Redesign entire system | 🔀 Too Complex |
-| #44 | Fix something | ❓ Needs Clarification |
+| #43 | Redesign entire system | ⏭️ Skip (분할 필요) |
+| #44 | Fix something | ⏭️ Skip (요구사항 모호) |
 
 - Ready: 1건 (autopilot:ready 라벨 추가됨)
-- Needs Clarification: 1건
-- Too Complex: 1건
+- Skip: 2건 (코멘트만 게시)
 - Skipped: 0건
 ```
 

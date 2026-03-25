@@ -107,6 +107,7 @@ default_intervals:
   merge_prs: "10m"
   ci_watch: "20m"
   qa_boost: "1h"
+notification: ""              # skip 이슈 알림 방법 (자연어, 예: "Slack DM으로 @irene에게 알려줘")
 ---
 
 # github-autopilot Configuration
@@ -115,7 +116,20 @@ default_intervals:
 위 YAML frontmatter의 값을 프로젝트에 맞게 수정하세요.
 ```
 
-### Step 4: 결과 보고
+### Step 4: GitHub 라벨 생성
+
+autopilot이 사용하는 라벨을 레포에 일괄 생성합니다.
+`label_prefix`는 Step 3에서 생성한 설정 파일의 값을 사용합니다 (기본값: `autopilot:`).
+
+```bash
+# 이미 존재하는 라벨은 skip (--force 없음)
+gh label create "{label_prefix}ready" --color "0E8A16" --description "Autopilot 구현 대상" 2>/dev/null || true
+gh label create "{label_prefix}wip" --color "FBCA04" --description "Autopilot 구현 진행 중" 2>/dev/null || true
+gh label create "{label_prefix}ci-failure" --color "D93F0B" --description "CI 실패 이슈" 2>/dev/null || true
+gh label create "{label_prefix}auto" --color "1D76DB" --description "Autopilot 자동 생성 PR" 2>/dev/null || true
+```
+
+### Step 5: 결과 보고
 
 설치된 파일 목록을 출력합니다:
 
@@ -128,6 +142,12 @@ default_intervals:
 
 ### 설정 파일
 - github-autopilot.local.md ✅ (생성됨 / 이미 존재)
+
+### GitHub 라벨
+- autopilot:ready ✅
+- autopilot:wip ✅
+- autopilot:ci-failure ✅
+- autopilot:auto ✅
 
 ### 다음 단계
 1. `github-autopilot.local.md`의 설정을 프로젝트에 맞게 수정하세요
