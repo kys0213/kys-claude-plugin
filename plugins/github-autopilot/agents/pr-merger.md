@@ -1,5 +1,5 @@
 ---
-description: (내부용) PR의 문제(conflict, CI 실패, review comments)를 진단하고 해결하여 머지를 시도하는 에이전트
+description: (내부용) PR의 문제(conflict, review comments)를 진단하고 해결하여 머지를 시도하는 에이전트
 model: sonnet
 tools: ["Read", "Glob", "Grep", "Bash", "Edit"]
 ---
@@ -13,7 +13,7 @@ tools: ["Read", "Glob", "Grep", "Bash", "Edit"]
 프롬프트로 전달받는 정보:
 - pr_number: PR 번호
 - pr_title: PR 제목
-- problems: 감지된 문제 목록 (conflict, ci_failure, review_changes_requested)
+- problems: 감지된 문제 목록 (conflict, review_changes_requested)
 
 ## 프로세스
 
@@ -53,18 +53,6 @@ git rebase --continue
 git push --force-with-lease origin ${HEAD_BRANCH}
 ```
 
-#### CI 실패 해결
-
-```bash
-gh run list --branch ${HEAD_BRANCH} --status failure --limit 1 --json databaseId
-gh run view ${RUN_ID} --log-failed 2>&1 | head -300
-```
-
-실패 분석 후 수정 가능한 경우:
-- lint 실패 → `cargo fmt`, `cargo clippy --fix`
-- 테스트 실패 → 코드 분석 후 수정
-- 수정 후 커밋 + push
-
 #### Review Comments 대응
 
 ```bash
@@ -90,7 +78,7 @@ gh pr merge ${PR_NUMBER} --squash --delete-branch
 {
   "pr_number": 50,
   "status": "merged",
-  "resolved_problems": ["conflict", "ci_failure"],
+  "resolved_problems": ["conflict"],
   "unresolved_problems": [],
   "commits_added": 2
 }
@@ -99,7 +87,6 @@ gh pr merge ${PR_NUMBER} --squash --delete-branch
 ## 에러 처리
 
 - 확신 없는 충돌: 해결하지 않고 보고 (`"status": "needs_human_review"`)
-- 3회 이상 CI 재실패: 포기하고 보고
 - 권한 문제: skip + 보고
 
 ## 주의사항

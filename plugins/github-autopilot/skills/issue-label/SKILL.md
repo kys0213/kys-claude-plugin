@@ -10,7 +10,7 @@ version: 1.1.0
 
 | 라벨 | 용도 | 부여 주체 |
 |------|------|-----------|
-| `{label_prefix}ready` | 구현 대상 이슈 | gap-issue-creator, qa-boost, ci-watch |
+| `{label_prefix}ready` | 구현 대상 이슈 | gap-issue-creator, qa-boost, ci-watch, test-watch |
 | `{label_prefix}wip` | 구현 진행 중 | build-issues |
 | `{label_prefix}ci-failure` | CI 실패 이슈 (ready와 함께 부여) | ci-watch |
 | `{label_prefix}auto` | autopilot 생성 PR | branch-promoter |
@@ -57,6 +57,7 @@ gh pr create \
 | gap-issue-creator | `gh issue create` | `{label_prefix}ready` |
 | qa-boost | `gh issue create` | `{label_prefix}ready` |
 | ci-watch | `gh issue create` | `{label_prefix}ci-failure` + `{label_prefix}ready` |
+| test-watch | `gh issue create` | `{label_prefix}ready` |
 | build-issues (구현 시작) | `gh issue edit --add-label` | `{label_prefix}wip` |
 | branch-promoter | `gh pr create` | `{label_prefix}auto` |
 
@@ -71,6 +72,7 @@ gh pr create \
 | gap-issue-creator | `gap:{spec_path}:{requirement_keyword}` | `gap:spec/auth.md:token-refresh` |
 | qa-boost | `qa:{source_file_path}:{test_type}` | `qa:src/auth/refresh.rs:unit` |
 | ci-watch | `ci:{workflow}:{branch}:{failure_type}` | `ci:validate.yml:main:test-failure` |
+| test-watch | `test:{test_name}:{failure_hash}` | `test:e2e:a1b2c3d4` |
 
 규칙:
 - 항상 소문자, 공백 없음

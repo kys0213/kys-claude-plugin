@@ -1,12 +1,12 @@
 ---
-description: "5개 autopilot 루프를 설정된 인터벌로 모두 시작합니다"
+description: "autopilot 루프를 설정된 인터벌로 모두 시작합니다 (기본 6개 + test_watch)"
 argument-hint: ""
 allowed-tools: ["Read", "CronCreate"]
 ---
 
 # Autopilot
 
-5개 autopilot 루프를 설정된 기본 인터벌로 모두 등록합니다.
+autopilot 루프를 설정된 기본 인터벌로 모두 등록합니다 (기본 6개 + test_watch 동적 루프).
 
 ## 사용법
 
@@ -22,7 +22,7 @@ allowed-tools: ["Read", "CronCreate"]
 
 ### Step 1: 설정 로딩
 
-`github-autopilot.local.md`에서 `default_intervals`를 읽습니다.
+`github-autopilot.local.md`에서 `default_intervals`와 `test_watch`를 읽습니다.
 
 기본값:
 ```yaml
@@ -31,18 +31,34 @@ default_intervals:
   build_issues: "15m"
   merge_prs: "10m"
   ci_watch: "20m"
+  ci_fix: "15m"
   qa_boost: "1h"
+test_watch: []
 ```
 
 ### Step 2: CronCreate 등록
 
-5개 루프를 순차적으로 CronCreate에 등록합니다:
+기본 6개 루프를 순차적으로 CronCreate에 등록합니다:
 
 1. CronCreate: `/github-autopilot:gap-watch` — interval: `{gap_watch}`
 2. CronCreate: `/github-autopilot:build-issues` — interval: `{build_issues}`
 3. CronCreate: `/github-autopilot:merge-prs` — interval: `{merge_prs}`
 4. CronCreate: `/github-autopilot:ci-watch` — interval: `{ci_watch}`
-5. CronCreate: `/github-autopilot:qa-boost` — interval: `{qa_boost}`
+5. CronCreate: `/github-autopilot:ci-fix` — interval: `{ci_fix}`
+6. CronCreate: `/github-autopilot:qa-boost` — interval: `{qa_boost}`
+
+### Step 2.5: Test Watch 루프 등록
+
+`test_watch` 배열이 비어있지 않으면, 각 스위트별 CronCreate를 추가 등록합니다:
+
+```
+# test_watch 배열의 각 항목별
+CronCreate: /github-autopilot:test-watch {suite.name} — interval: {suite.interval}
+```
+
+예시: `test_watch`에 e2e(2h)와 performance(6h)가 정의되어 있으면:
+- CronCreate: `/github-autopilot:test-watch e2e` — interval: `2h`
+- CronCreate: `/github-autopilot:test-watch performance` — interval: `6h`
 
 ### Step 3: 결과 출력
 
@@ -57,9 +73,12 @@ default_intervals:
 | Build Issues | /github-autopilot:build-issues | 15m |
 | Merge PRs | /github-autopilot:merge-prs | 10m |
 | CI Watch | /github-autopilot:ci-watch | 20m |
+| CI Fix | /github-autopilot:ci-fix | 15m |
 | QA Boost | /github-autopilot:qa-boost | 1h |
+| Test: e2e | /github-autopilot:test-watch e2e | 2h |
+| Test: performance | /github-autopilot:test-watch performance | 6h |
 
-5개 루프가 등록되었습니다. CronList로 상태를 확인할 수 있습니다.
+{N}개 루프가 등록되었습니다. CronList로 상태를 확인할 수 있습니다.
 ```
 
 ## 주의사항

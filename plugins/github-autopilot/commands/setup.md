@@ -107,8 +107,13 @@ default_intervals:
   build_issues: "15m"
   merge_prs: "10m"
   ci_watch: "20m"
+  ci_fix: "15m"
   qa_boost: "1h"
 notification: ""              # skip 이슈 알림 방법 (자연어, 예: "Slack DM으로 @irene에게 알려줘")
+quality_gate_command: ""      # 커스텀 quality gate 명령어 (비어있으면 자동 감지)
+max_consecutive_failures: 3   # 연속 실패 허용 횟수, 초과 시 에스컬레이션
+max_ci_fix_retries: 3         # CI fix 루프 최대 재시도 횟수
+test_watch: []                # 테스트 스위트 정의 (예: [{name: "e2e", command: "npm run test:e2e", interval: "2h"}])
 ---
 
 # github-autopilot Configuration
