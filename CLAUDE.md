@@ -79,3 +79,8 @@ lint, format, test가 실패하면 변경된 부분이 아니더라도 반드시
 ❌ chore(autodev): update dependencies   # 버전 범프 prefix 아님
 ❌ perf(autodev): optimize startup        # perf는 버전 범프 미지원
 ```
+
+## CI/CD
+
+- 버전 범프는 CI/CD (`release.yml`)에서 PR 머지 시 자동 실행됩니다. 수동으로 버전을 올리지 마세요.
+- PR 타이틀의 type prefix가 버전 범프 종류를 결정합니다 (`feat` → minor, `fix`/`refactor` → patch, `major` → major).

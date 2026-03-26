@@ -40,6 +40,15 @@ autopilot 라벨이 붙은 GitHub 이슈를 가져와 의존성을 분석하고,
 git fetch origin
 ```
 
+### Step 3.5: Pipeline Idle Check
+
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-idle.sh "{label_prefix}"
+```
+
+- **exit 0 (idle)**: `notification` 설정이 있으면 "autopilot 파이프라인 완료 — build-issues cycle 중단" 알림 발송. CronCreate를 등록하지 않고 종료.
+- **exit 1 (active)**: Step 4부터 정상 진행.
+
 ### Step 4: Skip 이슈 알림
 
 설정에서 `notification` 값을 확인합니다 (비어있으면 이 Step을 건너뜁니다).
