@@ -24,8 +24,21 @@ default_intervals:                   # autopilot dispatcher 기본 인터벌
   build_issues: "15m"
   merge_prs: "10m"
   ci_watch: "20m"
+  ci_fix: "15m"
   qa_boost: "1h"
 notification: ""                     # skip 이슈 알림 방법 (자연어, 예: "Slack DM으로 @irene에게 알려줘")
+quality_gate_command: ""             # 커스텀 quality gate 명령어 (비어있으면 자동 감지)
+max_consecutive_failures: 3          # 연속 실패 허용 횟수, 초과 시 에스컬레이션
+max_ci_fix_retries: 3                # CI fix 루프 최대 재시도 횟수
+test_watch: []                       # 테스트 스위트 정의 (아래 예시 참조)
+# test_watch:
+#   - name: "e2e"
+#     command: "npm run test:e2e"
+#     interval: "2h"
+#   - name: "performance"
+#     command: "cargo bench"
+#     interval: "6h"
+#     threshold: 10
 ---
 ```
 
@@ -97,18 +110,22 @@ draft/issue-42    ← agent 전용 작업 공간 (alpha에서 분기)
 
 모든 조건을 통과해야 승격 가능:
 
+`quality_gate_command`가 설정되어 있으면 해당 명령어를 실행한다. 미설정 시 프로젝트 파일 기반으로 자동 감지한다.
+
 ```bash
-# Rust 프로젝트
-cargo fmt --check
-cargo clippy -- -D warnings
-cargo test
+# 커스텀 quality gate (설정 시 우선 사용)
+# 예: quality_gate_command: "make lint && make test"
+${quality_gate_command}
 
-# Node.js 프로젝트
-npm run lint
-npm test
+# 자동 감지 (quality_gate_command 미설정 시)
+# Rust (Cargo.toml 존재)
+cargo fmt --check && cargo clippy -- -D warnings && cargo test
 
-# 범용
-# 프로젝트의 quality gate 명령어를 자동 감지하여 실행
+# Node.js (package.json 존재)
+npm run lint && npm test
+
+# Go (go.mod 존재)
+go fmt ./... && go vet ./... && go test ./...
 ```
 
 ### 승격 절차

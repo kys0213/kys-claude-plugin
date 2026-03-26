@@ -60,8 +60,10 @@ PR이 없으면 "머지 대상 PR 없음" 출력 후 종료.
 |------|------|
 | mergeable=MERGEABLE + CI 통과 + 리뷰 승인/없음 | **all-green** |
 | mergeable=CONFLICTING | **conflict** |
-| CI 실패 | **ci-failure** |
+| CI 실패 | **ci-pending** (ci-fix 루프에서 처리) |
 | reviewDecision=CHANGES_REQUESTED | **review-requested** |
+
+> **참고**: CI 실패 PR은 ci-fix 루프에서 tick 단위로 수정합니다. merge-prs는 CI 실패를 직접 수정하지 않습니다.
 
 ### Step 5: All-green PR 즉시 머지
 
@@ -81,7 +83,9 @@ gh pr merge ${PR_NUMBER} --squash --delete-branch
 각 에이전트에게 전달:
 - pr_number
 - pr_title
-- problems: 감지된 문제 목록 (conflict, ci_failure, review_changes_requested)
+- problems: 감지된 문제 목록 (conflict, review_changes_requested)
+
+> CI 실패는 ci-fix 루프에서 처리하므로 pr-merger에 전달하지 않습니다.
 
 **중요**: 사람이 명시적으로 `CHANGES_REQUESTED` 리뷰를 남긴 PR은 자동 머지하지 않습니다. pr-merger가 코멘트에 응답만 하고, 머지는 사람의 재리뷰 후 다음 cycle에서 처리합니다.
 

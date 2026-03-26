@@ -128,6 +128,7 @@ gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 - issue_body (요구사항, 영향 범위, 구현 가이드)
 - issue_comments (분석 코멘트 포함, analyze-issue에서 생성된 구현 가이드 참조)
 - draft_branch: `draft/issue-{number}`
+- quality_gate_command: 설정에서 읽은 값 (비어있으면 자동 감지)
 
 ### Step 9: 결과 수집
 
@@ -138,7 +139,57 @@ gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 - draft 브랜치에 커밋 완료
 
 실패한 이슈:
-- wip 라벨 제거, 이슈에 실패 코멘트 추가
+- wip 라벨 제거
+
+### Step 9.5: 에스컬레이션 체크
+
+실패한 이슈 각각에 대해 연속 실패 횟수를 확인합니다.
+
+```bash
+# 이슈 코멘트에서 실패 마커 조회
+gh issue view ${ISSUE_NUMBER} --json comments --jq '.comments[].body' | grep -o '<!-- autopilot:failure:[0-9]* -->' | tail -1
+```
+
+마커에서 현재 실패 횟수 N을 추출합니다 (마커 없으면 N=0).
+
+**N+1 >= `max_consecutive_failures` (기본: 3)**: 에스컬레이션
+- 구조화된 에스컬레이션 리포트를 이슈 코멘트로 게시:
+  ```markdown
+  ## Autopilot Escalation Report
+
+  **Consecutive failures**: {N+1}/{max_consecutive_failures}
+  **Failure category**: {failure_category}
+
+  ### Failure History
+  | Attempt | Category | Summary |
+  |---------|----------|---------|
+  | 1 | lint_failure | cargo clippy warnings |
+  | 2 | test_failure | assertion failed |
+  | ... | ... | ... |
+
+  ### Recommended Action
+  - 이 이슈는 autopilot이 자동 해결하기 어려운 문제입니다
+  - 사람의 검토가 필요합니다
+
+  <!-- autopilot:escalated -->
+  ```
+- `{label_prefix}ready` 라벨 제거 (재시도 중단)
+- `notification` 설정이 있으면 에스컬레이션 알림 발송
+
+**N+1 < threshold**: 재시도 예약
+- 실패 코멘트에 마커 포함:
+  ```markdown
+  Autopilot 구현 실패 (attempt {N+1}/{max_consecutive_failures})
+
+  **Category**: {failure_category}
+  **Reason**: {reason}
+  **Details**: {details}
+
+  다음 cycle에서 재시도합니다.
+
+  <!-- autopilot:failure:{N+1} -->
+  ```
+- `{label_prefix}ready` 라벨 유지 (다음 cycle 재시도)
 
 ### Step 10: 승격 (Agent Team)
 
