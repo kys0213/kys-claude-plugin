@@ -44,21 +44,9 @@ Read → Analyze → Loop(implement → verify) → Push → Halt
    - 최소 변경 원칙 (요청된 것만 구현)
    - SOLID 원칙 준수
 
-2. **검증**: quality gate 실행
-   ```bash
-   # quality_gate_command가 설정되어 있으면 해당 명령어 사용
-   ${quality_gate_command}
-
-   # 미설정 시 자동 감지:
-   # Rust (Cargo.toml 존재)
-   cargo fmt --check && cargo clippy -- -D warnings && cargo test
-
-   # Node.js (package.json 존재)
-   npm run lint && npm test
-
-   # Go (go.mod 존재)
-   go fmt ./... && go vet ./... && go test ./...
-   ```
+2. **검증**: draft-branch 스킬의 Quality Gate 규칙에 따라 검증
+   - `quality_gate_command`가 설정되어 있으면 해당 명령어 사용
+   - 미설정 시 프로젝트 파일 기반 자동 감지 (Cargo.toml → cargo, package.json → npm, go.mod → go)
 
 3. **실패 시 수정**: lint/test 실패 원인 분석 → 수정 → 재검증 (최대 3회)
    - 실패 분류: `lint_failure` | `test_failure` | `complexity_exceeded` | `dependency_error`
