@@ -16,7 +16,7 @@ PROMPT=$(echo "$INPUT" | jq -r '.tool_input.prompt // empty')
 
 # Check if prompt contains autopilot keywords
 AUTOPILOT_KEYWORDS="gap-detect|gap-watch|qa-boost|build-issues|ci-watch|autopilot"
-if ! echo "$PROMPT" | grep -qiE "$AUTOPILOT_KEYWORDS"; then
+if ! printf '%s' "$PROMPT" | grep -qiE "$AUTOPILOT_KEYWORDS"; then
   exit 0
 fi
 
