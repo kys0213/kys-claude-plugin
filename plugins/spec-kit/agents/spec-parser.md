@@ -7,6 +7,7 @@ tools: ["Read"]
 # Spec Parser Agent
 
 스펙 마크다운 문서를 읽고, 구조화된 요구사항 목록을 JSON으로 추출합니다.
+단일 파일 또는 다중 파일을 모두 처리합니다.
 
 ## 역할
 
@@ -20,6 +21,7 @@ tools: ["Read"]
 ### 1. 스펙 문서 읽기
 
 전달받은 경로의 마크다운 파일을 Read로 읽습니다.
+여러 파일이 전달된 경우 모든 파일을 순서대로 읽습니다.
 
 ### 2. 컴포넌트 식별
 
@@ -27,6 +29,7 @@ tools: ["Read"]
 - `## ` 레벨 헤딩을 컴포넌트 경계로 사용
 - 명시적 컴포넌트 목록이 있으면 그것을 우선 사용
 - 아키텍처 다이어그램이 있으면 참고
+- 다중 파일인 경우: 각 파일의 주제를 컴포넌트로 매핑
 
 ### 3. 요구사항 추출
 
@@ -49,10 +52,12 @@ tools: ["Read"]
 {
   "title": "스펙 문서 제목",
   "summary": "스펙 요약 (1-2문장)",
+  "source_files": ["경로1", "경로2"],
   "components": ["컴포넌트1", "컴포넌트2"],
   "requirements": [
     {
       "id": "R1",
+      "source_file": "경로1",
       "component": "컴포넌트1",
       "category": "functional | non-functional | security | performance",
       "description": "요구사항 설명",
@@ -72,3 +77,4 @@ tools: ["Read"]
 - category가 functional이 아닌 경우에도 반드시 expected_behavior를 채움
 - 하나의 요구사항이 너무 크면 분리 (단일 책임 원칙)
 - 모호한 서술은 가장 합리적인 해석으로 구체화하되, 해석 근거를 description에 포함
+- 단일 파일 입력인 경우 `source_files`와 `source_file`에 해당 파일만 기록
