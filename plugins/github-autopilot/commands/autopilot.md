@@ -1,7 +1,7 @@
 ---
 description: "autopilot 루프를 설정된 인터벌로 모두 시작합니다 (기본 6개 + test_watch + custom_loops)"
 argument-hint: ""
-allowed-tools: ["Read", "Bash"]
+allowed-tools: ["Read", "Bash", "Skill"]
 ---
 
 # Autopilot
@@ -19,6 +19,24 @@ autopilot 루프를 설정된 인터벌로 모두 시작합니다. 각 루프는
 - 설정 파일: !`cat github-autopilot.local.md 2>/dev/null | head -30 || echo "설정 파일 없음 - 기본값 사용"`
 
 ## 작업 프로세스
+
+### Step 0: 초기 설정 확인
+
+`github-autopilot.local.md` 파일이 존재하는지 확인합니다.
+
+```bash
+test -f github-autopilot.local.md
+```
+
+**파일이 없으면**: 초기 설정이 필요합니다. 사용자에게 안내 후 `/github-autopilot:setup`을 실행합니다:
+
+```
+autopilot 설정 파일이 없습니다. 초기 설정을 먼저 진행합니다.
+```
+
+→ Skill("/github-autopilot:setup") 실행 후 종료. setup 완료 후 사용자가 다시 `/autopilot`을 실행합니다.
+
+**파일이 있으면**: Step 1로 진행.
 
 ### Step 1: 세션 초기화
 
