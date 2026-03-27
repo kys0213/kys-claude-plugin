@@ -1,7 +1,7 @@
 ---
 description: "GitHub 이슈를 분석하여 autopilot 구현 가능 여부를 판단하고 autopilot:ready 라벨을 추가합니다"
 argument-hint: "<issue-numbers: #42 #43, 42 43, ...>"
-allowed-tools: ["Bash", "Read", "Agent"]
+allowed-tools: ["Bash", "Read", "Agent", "CronList", "CronDelete"]
 ---
 
 # Analyze Issue
@@ -102,6 +102,48 @@ gh issue comment ${ISSUE_NUMBER} --body "${ANALYSIS_COMMENT}"
 - Ready: 1건 (autopilot:ready 라벨 추가됨)
 - Skip: 2건 (코멘트만 게시)
 - Skipped: 0건
+```
+
+### Step 8: Idle Detection (cron 자동 종료)
+
+`/loop`으로 실행 중일 때, 분석 대상이 없는 상태가 지속되면 cron을 자동 종료합니다.
+
+- **idle 파일**: `IDLE_FILE=.autopilot-idle-count`
+- **종료 임계값**: `MAX_IDLE=3`
+
+#### 판정 기준
+
+- Step 4에서 **유효한 분석 대상 이슈가 0건**이면 해당 사이클을 **idle**로 판정
+  - 존재하지 않는 이슈, 이미 라벨이 있는 이슈, closed 이슈를 제외한 후 남은 이슈가 0건인 경우
+  - 인자 자체가 없어서 Step 1에서 종료된 경우도 idle로 판정
+- 분석 대상이 **1건이라도 있으면** idle count를 **0으로 리셋**
+
+#### 연속 idle 시 cron 종료
+
+연속 idle 횟수를 추적합니다:
+
+```bash
+IDLE_COUNT=$(cat "${IDLE_FILE}" 2>/dev/null || echo "0")
+```
+
+- **분석 대상 있음**: `echo "0" > "${IDLE_FILE}"`
+- **분석 대상 없음**: `IDLE_COUNT`를 1 증가시켜 저장
+
+**연속 `MAX_IDLE`회 idle**이면:
+
+1. `CronList`로 현재 등록된 cron 목록을 조회하여 `analyze-issue` 관련 cron ID를 찾음
+2. `CronDelete`로 해당 cron을 삭제
+3. idle count 파일을 삭제: `rm -f "${IDLE_FILE}"`
+4. 메시지 출력:
+
+```
+분석할 이슈가 없어 cron을 종료합니다 (연속 3회 idle)
+```
+
+**`MAX_IDLE`회 미만 idle**이면:
+
+```
+분석할 이슈가 없습니다 (연속 idle: {IDLE_COUNT}회 / {MAX_IDLE}회 시 cron 자동 종료)
 ```
 
 ## 주의사항
