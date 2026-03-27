@@ -20,6 +20,31 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ./.claude/hooks/gh-auth-check.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash ./.claude/hooks/branch-freshness-check.sh",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ./.claude/hooks/gh-auth-check.sh",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [
