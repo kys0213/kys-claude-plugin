@@ -1,7 +1,7 @@
 ---
 description: "최근 변경사항의 테스트 커버리지를 분석하고 누락된 테스트를 이슈로 발행합니다"
 argument-hint: "[commit_hash] [interval: 1h, 2h, ...]"
-allowed-tools: ["Bash", "Glob", "Read", "Grep", "CronCreate"]
+allowed-tools: ["Bash", "Glob", "Read", "Grep", "CronCreate", "CronDelete", "CronList"]
 ---
 
 # QA Boost
@@ -45,7 +45,12 @@ git pull --rebase origin $(git branch --show-current) 2>/dev/null || true
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-idle.sh "{label_prefix}"
 ```
 
-- **exit 0 (idle)**: `notification` 설정이 있으면 "autopilot 파이프라인 완료 — qa-boost cycle 중단" 알림 발송. CronCreate를 등록하지 않고 종료.
+- **exit 0 (idle)**: 기존 cron을 정리한 뒤 종료합니다.
+  1. CronList로 현재 등록된 cron 목록을 조회
+  2. `qa-boost`가 포함된 cron job을 찾아 CronDelete로 삭제
+  3. `notification` 설정이 있으면 "autopilot 파이프라인 완료 — qa-boost cycle 중단" 알림 발송
+  4. CronCreate를 등록하지 않고 종료
+- **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다 (CronCreate는 등록하여 다음 cycle에서 재시도).
 - **exit 1 (active)**: Step 3부터 정상 진행.
 
 ### Step 3: 변경사항 수집

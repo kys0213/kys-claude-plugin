@@ -1,7 +1,7 @@
 ---
 description: "autopilot PR을 CI/리뷰 상태 확인 후 머지합니다"
 argument-hint: "[interval: 10m, 30m, ...]"
-allowed-tools: ["Bash", "Read", "Agent", "CronCreate"]
+allowed-tools: ["Bash", "Read", "Agent", "CronCreate", "CronDelete", "CronList"]
 ---
 
 # Merge PRs
@@ -39,7 +39,12 @@ git fetch origin
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-idle.sh "{label_prefix}"
 ```
 
-- **exit 0 (idle)**: `notification` 설정이 있으면 "autopilot 파이프라인 완료 — merge-prs cycle 중단" 알림 발송. CronCreate를 등록하지 않고 종료.
+- **exit 0 (idle)**: 기존 cron을 정리한 뒤 종료합니다.
+  1. CronList로 현재 등록된 cron 목록을 조회
+  2. `merge-prs`가 포함된 cron job을 찾아 CronDelete로 삭제
+  3. `notification` 설정이 있으면 "autopilot 파이프라인 완료 — merge-prs cycle 중단" 알림 발송
+  4. CronCreate를 등록하지 않고 종료
+- **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다 (CronCreate는 등록하여 다음 cycle에서 재시도).
 - **exit 1 (active)**: Step 3부터 정상 진행.
 
 ### Step 3: PR 목록 조회
