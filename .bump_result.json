@@ -2,10 +2,10 @@
   "dry_run": false,
   "results": [
     {
-      "plugin": "github-autopilot",
-      "old_version": "0.7.0",
-      "new_version": "0.8.0",
-      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/github-autopilot/.claude-plugin/plugin.json",
+      "plugin": "spec-kit",
+      "old_version": "0.2.2",
+      "new_version": "0.3.0",
+      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/spec-kit/.claude-plugin/plugin.json",
       "marketplace_updated": true,
       "cargo_toml_updated": false
     }

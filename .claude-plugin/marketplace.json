@@ -154,7 +154,7 @@
       ],
       "name": "spec-kit",
       "source": "./plugins/spec-kit",
-      "version": "0.2.2"
+      "version": "0.3.0"
     },
     {
       "category": "automation",
