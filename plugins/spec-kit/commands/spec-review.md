@@ -1,5 +1,5 @@
 ---
-description: 작성된 스펙 문서의 완성도를 4가지 관점(구조, 상세, 검증, 일관성)으로 검증합니다
+description: 작성된 스펙 문서의 완성도를 4가지 관점(구조, 상세, 검증, 일관성)으로 병렬 검증합니다
 argument-hint: "<스펙파일 [스펙파일2 ...]>"
 allowed-tools: ["Task", "Glob", "Read", "AskUserQuestion"]
 ---
@@ -77,26 +77,91 @@ spec-parser 에이전트에게 확정된 파일 경로 목록을 전달합니다
 
 **반환값**: 구조화된 요구사항, 섹션, 용어집, 교차 참조 (JSON)
 
-### Step 3: 스펙 품질 검증 (spec-quality-checker)
+### Step 3a: 스펙 품질 검증 (spec-quality-checker)
 
+<<<<<<< HEAD
 spec-quality-checker 에이전트에게 파싱 결과를 전달합니다.
+=======
+spec-quality-checker 에이전트에게 파싱 결과를 전달합니다. A/B/C 관점만 평가합니다.
+>>>>>>> c666e9f (feat(spec-kit): add cross-reference-checker agent for structured D1-D5 validation)
 
-**Agent 호출** (`run_in_background=false`):
+**Agent 호출** (`run_in_background=true`):
 ```
-스펙 문서의 완성도를 4가지 관점으로 검증해주세요.
+스펙 문서의 완성도를 Big Picture, Detail, Verification 관점으로 검증해주세요.
+(Consistency 관점은 별도 에이전트가 수행합니다.)
 
 ## 파싱된 스펙 데이터
 [Step 2 결과 전체]
 
+<<<<<<< HEAD
 파싱 결과에 섹션 원문(sections.raw_text), 용어집(glossary), 교차 참조(cross_references)가 포함되어 있습니다.
+=======
+파싱 결과에 섹션 원문(sections.raw_text)이 포함되어 있습니다.
+>>>>>>> c666e9f (feat(spec-kit): add cross-reference-checker agent for structured D1-D5 validation)
 별도로 파일을 읽을 필요 없이 전달된 데이터만으로 평가하세요.
 ```
 
-**반환값**: 스펙 품질 리포트 (Markdown)
+**반환값**: A/B/C 관점 품질 리포트 (Markdown)
 
-### Step 4: 결과 출력
+### Step 3b: 교차 참조 일관성 검증 (cross-reference-checker)
 
-spec-quality-checker의 리포트를 사용자에게 출력합니다.
+cross-reference-checker 에이전트에게 구조화 데이터를 전달합니다. D 관점을 평가합니다.
+
+**Agent 호출** (`run_in_background=true`):
+```
+스펙 문서 간 일관성을 교차 참조 기반으로 검증해주세요.
+
+## 요구사항
+[requirements JSON]
+
+## 컴포넌트
+[components JSON]
+
+## 용어집
+[glossary JSON]
+
+## 교차 참조
+[cross_references JSON]
+```
+
+**반환값**: D 관점 일관성 리포트 (Markdown)
+
+> Step 3a와 3b는 `run_in_background=true`로 병렬 실행합니다. 두 Agent가 완료될 때까지 대기합니다.
+
+### Step 4: 결과 병합
+
+Step 3a 결과 (A/B/C 점수 + 상세)와 Step 3b 결과 (D 점수 + 상세)를 통합합니다.
+
+**종합 점수 산정**:
+```
+종합 점수 = (A + B + C + D) / 4
+```
+
+**통합 리포트 형식**:
+```markdown
+# 스펙 품질 리포트
+
+## 종합 점수
+
+| 관점 | 점수 | 등급 |
+|------|------|------|
+| Big Picture (전체 구조) | XX/100 | A/B/C/D |
+| Detail (상세 정의) | XX/100 | A/B/C/D |
+| Verification (검증 가능성) | XX/100 | A/B/C/D |
+| Consistency (일관성) | XX/100 | A/B/C/D |
+| **종합** | **XX/100** | **X** |
+
+등급 기준: A(90+), B(70-89), C(50-69), D(0-49)
+
+## 관점별 상세
+[Step 3a의 A/B/C 상세]
+[Step 3b의 D 상세]
+
+## 우선 보완 항목 (Top 5)
+[A/B/C/D 전체에서 미충족/부분충족 항목 중 영향도 상위 5개 선정]
+```
+
+통합 리포트를 사용자에게 출력합니다.
 
 ## 주의사항
 

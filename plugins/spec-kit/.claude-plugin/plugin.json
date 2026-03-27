@@ -13,6 +13,16 @@
     "./commands/spec-review.md",
     "./commands/design.md"
   ],
+<<<<<<< HEAD
+=======
+  "agents": [
+    "./agents/spec-parser.md",
+    "./agents/structure-mapper.md",
+    "./agents/gap-analyzer.md",
+    "./agents/spec-quality-checker.md",
+    "./agents/cross-reference-checker.md"
+  ],
+>>>>>>> 875d17d (feat(spec-kit): add cross-reference-checker agent for structured D1-D5 validation)
   "description": "스펙 설계, 검증, 갭 분석을 위한 통합 툴킷",
   "name": "spec-kit",
   "version": "0.2.1"
