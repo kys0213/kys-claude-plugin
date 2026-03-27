@@ -1,7 +1,7 @@
 ---
 description: "autopilot 루프를 설정된 인터벌로 모두 시작합니다 (기본 6개 + test_watch + custom_loops)"
 argument-hint: ""
-allowed-tools: ["Read", "Bash", "Skill"]
+allowed-tools: ["Read", "Bash", "Write", "Glob"]
 ---
 
 # Autopilot
@@ -16,7 +16,8 @@ autopilot 루프를 설정된 인터벌로 모두 시작합니다. 각 루프는
 
 ## Context
 
-- 설정 파일: !`cat github-autopilot.local.md 2>/dev/null | head -30 || echo "설정 파일 없음 - 기본값 사용"`
+- 설정 파일: !`cat github-autopilot.local.md 2>/dev/null | head -30 || echo "설정 파일 없음"`
+- Setup 절차: !`cat ${CLAUDE_PLUGIN_ROOT}/skills/setup-init/SKILL.md`
 
 ## 작업 프로세스
 
@@ -28,15 +29,15 @@ autopilot 루프를 설정된 인터벌로 모두 시작합니다. 각 루프는
 test -f github-autopilot.local.md
 ```
 
-**파일이 없으면**: 초기 설정이 필요합니다. 사용자에게 안내 후 `/github-autopilot:setup`을 실행합니다:
+**파일이 없으면**: setup-init 스킬을 참조하여 기본 설정을 자동 생성합니다:
 
-```
-autopilot 설정 파일이 없습니다. 초기 설정을 먼저 진행합니다.
-```
+1. 사용자에게 "설정 파일이 없습니다. 기본값으로 초기 설정을 진행합니다." 안내
+2. setup-init 스킬의 "설정 파일 템플릿"으로 `github-autopilot.local.md` 생성
+3. setup-init 스킬의 "Rules 파일"로 `.claude/rules/autopilot-*.md` 설치
+4. setup-init 스킬의 "GitHub 라벨" 명령으로 라벨 생성
+5. 설정 완료 후 Step 1로 진행
 
-→ Skill("/github-autopilot:setup") 실행 후 종료. setup 완료 후 사용자가 다시 `/autopilot`을 실행합니다.
-
-**파일이 있으면**: Step 1로 진행.
+**파일이 있으면**: Step 1로 바로 진행.
 
 ### Step 1: 세션 초기화
 
