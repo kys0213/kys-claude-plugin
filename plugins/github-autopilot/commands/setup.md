@@ -102,13 +102,26 @@ label_prefix: "autopilot:"
 spec_paths:
   - "spec/"
   - "docs/spec/"
-default_intervals:
-  gap_watch: "30m"
-  build_issues: "15m"
-  merge_prs: "10m"
-  ci_watch: "20m"
-  ci_fix: "15m"
-  qa_boost: "1h"
+loops:
+  gap_watch:
+    interval: "30m"
+    enabled: true
+  build_issues:
+    interval: "15m"
+    enabled: true
+  merge_prs:
+    interval: "10m"
+    enabled: true
+  ci_watch:
+    interval: "20m"
+    enabled: true
+  ci_fix:
+    interval: "15m"
+    enabled: true
+  qa_boost:
+    interval: "1h"
+    enabled: true
+custom_loops: []              # 사용자 정의 루프 (예: [{name: "e2e", command: "/my-project:run-e2e", interval: "2h"}])
 notification: ""              # skip 이슈 알림 방법 (자연어, 예: "Slack DM으로 @irene에게 알려줘")
 quality_gate_command: ""      # 커스텀 quality gate 명령어 (비어있으면 자동 감지)
 max_consecutive_failures: 3   # 연속 실패 허용 횟수, 초과 시 에스컬레이션
@@ -212,5 +225,5 @@ gh label create "{label_prefix}auto" --color "1D76DB" --description "Autopilot �
 ### 다음 단계
 1. `github-autopilot.local.md`의 설정을 프로젝트에 맞게 수정하세요
 2. `/github-autopilot:autopilot`으로 전체 루프를 시작하거나
-3. 개별 커맨드를 실행하세요 (예: `/github-autopilot:ci-watch 20m`)
+3. 개별 커맨드를 1회 실행하세요 (예: `/github-autopilot:gap-watch`)
 ```

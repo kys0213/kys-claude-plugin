@@ -1,7 +1,7 @@
 ---
 description: "최근 변경사항의 테스트 커버리지를 분석하고 누락된 테스트를 이슈로 발행합니다"
-argument-hint: "[commit_hash] [interval: 1h, 2h, ...]"
-allowed-tools: ["Bash", "Glob", "Read", "Grep", "CronCreate", "CronDelete", "CronList"]
+argument-hint: "[commit_hash]"
+allowed-tools: ["Bash", "Glob", "Read", "Grep"]
 ---
 
 # QA Boost
@@ -11,10 +11,8 @@ allowed-tools: ["Bash", "Glob", "Read", "Grep", "CronCreate", "CronDelete", "Cro
 ## 사용법
 
 ```bash
-/github-autopilot:qa-boost                    # 최근 20커밋 기준, 1회 실행
+/github-autopilot:qa-boost                    # 최근 20커밋 기준
 /github-autopilot:qa-boost abc1234            # 특정 커밋 이후 변경 분석
-/github-autopilot:qa-boost 1h                 # 1시간마다 반복
-/github-autopilot:qa-boost abc1234 1h         # 특정 커밋 기준 + 반복
 ```
 
 ## Context
@@ -27,10 +25,9 @@ allowed-tools: ["Bash", "Glob", "Read", "Grep", "CronCreate", "CronDelete", "Cro
 
 ### Step 1: 인자 파싱
 
-`$ARGUMENTS`에서 commit_hash와 interval을 추출합니다.
+`$ARGUMENTS`에서 commit_hash를 추출합니다.
 - `/^[0-9a-f]{7,40}$/` 패턴 매칭 → commit_hash
-- `/^\d+[smh]$/` 패턴 매칭 → interval 모드
-- 비어있으면 → 최근 20커밋 기준, 1회 실행 모드
+- 비어있으면 → 최근 20커밋 기준
 
 ### Step 2: 최신 상태 동기화
 
@@ -38,20 +35,6 @@ allowed-tools: ["Bash", "Glob", "Read", "Grep", "CronCreate", "CronDelete", "Cro
 git fetch origin
 git pull --rebase origin $(git branch --show-current) 2>/dev/null || true
 ```
-
-### Step 2.5: Pipeline Idle Check
-
-```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-idle.sh "{label_prefix}"
-```
-
-- **exit 0 (idle)**: 기존 cron을 정리한 뒤 종료합니다.
-  1. CronList로 현재 등록된 cron 목록을 조회
-  2. `qa-boost`가 포함된 cron job을 찾아 CronDelete로 삭제
-  3. `notification` 설정이 있으면 "autopilot 파이프라인 완료 — qa-boost cycle 중단" 알림 발송
-  4. CronCreate를 등록하지 않고 종료
-- **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다 (CronCreate는 등록하여 다음 cycle에서 재시도).
-- **exit 1 (active)**: Step 3부터 정상 진행.
 
 ### Step 3: 변경사항 수집
 
@@ -135,13 +118,7 @@ EOF
 )"
 ```
 
-### Step 7: CronCreate (interval 모드)
-
-interval이 지정된 경우에만 실행합니다:
-
-CronCreate를 호출하여 `/github-autopilot:qa-boost`를 지정된 interval로 등록합니다.
-
-### Step 8: 결과 보고
+### Step 7: 결과 보고
 
 ```
 ## QA Boost 결과

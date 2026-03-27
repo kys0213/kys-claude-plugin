@@ -1,12 +1,12 @@
 ---
-description: "autopilot 루프를 설정된 인터벌로 모두 시작합니다 (기본 6개 + test_watch)"
+description: "autopilot 루프를 설정된 인터벌로 모두 시작합니다 (기본 6개 + test_watch + custom_loops)"
 argument-hint: ""
-allowed-tools: ["Read", "CronCreate", "CronDelete", "CronList"]
+allowed-tools: ["Read", "Bash"]
 ---
 
 # Autopilot
 
-autopilot 루프를 설정된 기본 인터벌로 모두 등록합니다 (기본 6개 + test_watch 동적 루프).
+autopilot 루프를 설정된 인터벌로 모두 시작합니다. 각 루프는 `run-loop.sh`를 통해 백그라운드 프로세스로 실행됩니다.
 
 ## 사용법
 
@@ -16,73 +16,125 @@ autopilot 루프를 설정된 기본 인터벌로 모두 등록합니다 (기본
 
 ## Context
 
-- 설정 파일: !`cat github-autopilot.local.md 2>/dev/null | head -20 || echo "설정 파일 없음 - 기본값 사용"`
+- 설정 파일: !`cat github-autopilot.local.md 2>/dev/null | head -30 || echo "설정 파일 없음 - 기본값 사용"`
 
 ## 작업 프로세스
 
-### Step 1: 설정 로딩
+### Step 1: 세션 초기화
 
-`github-autopilot.local.md`에서 `default_intervals`와 `test_watch`를 읽습니다.
+autopilot 세션 ID와 로그 디렉토리를 생성합니다:
+
+```bash
+SESSION_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | head -c 8)
+REPO_NAME=$(basename "$(git rev-parse --show-toplevel 2>/dev/null || echo unknown)")
+LOG_DIR="/tmp/autopilot-${REPO_NAME}-${SESSION_ID}"
+mkdir -p "$LOG_DIR"
+```
+
+### Step 2: 설정 로딩
+
+`github-autopilot.local.md`에서 `loops`, `test_watch`, `custom_loops`, `label_prefix`를 읽습니다.
+
+#### 하위 호환
+
+- `loops` 키가 있으면 → 직접 사용
+- `default_intervals`만 있으면 → 각 항목을 `{interval: value, enabled: true}`로 변환
+- 둘 다 없으면 → 아래 기본값 사용
 
 기본값:
 ```yaml
-default_intervals:
-  gap_watch: "30m"
-  build_issues: "15m"
-  merge_prs: "10m"
-  ci_watch: "20m"
-  ci_fix: "15m"
-  qa_boost: "1h"
+loops:
+  gap_watch:
+    interval: "30m"
+    enabled: true
+  build_issues:
+    interval: "15m"
+    enabled: true
+  merge_prs:
+    interval: "10m"
+    enabled: true
+  ci_watch:
+    interval: "20m"
+    enabled: true
+  ci_fix:
+    interval: "15m"
+    enabled: true
+  qa_boost:
+    interval: "1h"
+    enabled: true
+label_prefix: "autopilot:"
 test_watch: []
+custom_loops: []
 ```
 
-### Step 2: CronCreate 등록
+### Step 3: 빌트인 루프 시작
 
-기본 6개 루프를 순차적으로 CronCreate에 등록합니다:
+`loops`에서 `enabled: true`인 항목에 대해 `Bash(run_in_background)`로 실행합니다.
 
-1. CronCreate: `/github-autopilot:gap-watch` — interval: `{gap_watch}`
-2. CronCreate: `/github-autopilot:build-issues` — interval: `{build_issues}`
-3. CronCreate: `/github-autopilot:merge-prs` — interval: `{merge_prs}`
-4. CronCreate: `/github-autopilot:ci-watch` — interval: `{ci_watch}`
-5. CronCreate: `/github-autopilot:ci-fix` — interval: `{ci_fix}`
-6. CronCreate: `/github-autopilot:qa-boost` — interval: `{qa_boost}`
+루프 이름 → 커맨드 매핑:
 
-### Step 2.5: Test Watch 루프 등록
+| Config Key | Command |
+|---|---|
+| gap_watch | /github-autopilot:gap-watch |
+| build_issues | /github-autopilot:build-issues |
+| merge_prs | /github-autopilot:merge-prs |
+| ci_watch | /github-autopilot:ci-watch |
+| ci_fix | /github-autopilot:ci-fix |
+| qa_boost | /github-autopilot:qa-boost |
 
-`test_watch` 배열이 비어있지 않으면, 각 스위트별 CronCreate를 추가 등록합니다:
-
+각 항목:
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/run-loop.sh "/github-autopilot:{command}" "{interval}" "{label_prefix}" "true" "${LOG_DIR}"
 ```
-# test_watch 배열의 각 항목별
-CronCreate: /github-autopilot:test-watch {suite.name} — interval: {suite.interval}
+
+### Step 3.5: Test Watch 루프 시작
+
+`test_watch` 배열이 비어있지 않으면, 각 스위트별 루프를 시작합니다:
+
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/run-loop.sh "/github-autopilot:test-watch {suite.name}" "{suite.interval}" "{label_prefix}" "true" "${LOG_DIR}"
 ```
 
-예시: `test_watch`에 e2e(2h)와 performance(6h)가 정의되어 있으면:
-- CronCreate: `/github-autopilot:test-watch e2e` — interval: `2h`
-- CronCreate: `/github-autopilot:test-watch performance` — interval: `6h`
+### Step 4: Custom 루프 시작
 
-### Step 3: 결과 출력
+`custom_loops` 배열이 비어있지 않으면, 각 항목에 대해 루프를 시작합니다:
 
-등록된 루프 목록을 테이블로 출력합니다:
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/run-loop.sh "{custom.command}" "{custom.interval}" "{label_prefix}" "false" "${LOG_DIR}"
+```
+
+> custom 루프는 idle check를 수행하지 않습니다 (`"false"`).
+
+### Step 5: 결과 출력
+
+시작된 루프 목록을 테이블로 출력합니다:
 
 ```
 ## Autopilot 시작
 
-| Loop | Command | Interval |
-|------|---------|----------|
-| Gap Watch | /github-autopilot:gap-watch | 30m |
-| Build Issues | /github-autopilot:build-issues | 15m |
-| Merge PRs | /github-autopilot:merge-prs | 10m |
-| CI Watch | /github-autopilot:ci-watch | 20m |
-| CI Fix | /github-autopilot:ci-fix | 15m |
-| QA Boost | /github-autopilot:qa-boost | 1h |
-| Test: e2e | /github-autopilot:test-watch e2e | 2h |
-| Test: performance | /github-autopilot:test-watch performance | 6h |
+**Session**: {SESSION_ID}
+**Logs**: {LOG_DIR}/
 
-{N}개 루프가 등록되었습니다. CronList로 상태를 확인할 수 있습니다.
+| Loop | Command | Interval | Type |
+|------|---------|----------|------|
+| Gap Watch | /github-autopilot:gap-watch | 30m | built-in |
+| Build Issues | /github-autopilot:build-issues | 15m | built-in |
+| Merge PRs | /github-autopilot:merge-prs | 10m | built-in |
+| CI Watch | /github-autopilot:ci-watch | 20m | built-in |
+| CI Fix | /github-autopilot:ci-fix | 15m | built-in |
+| QA Boost | /github-autopilot:qa-boost | 1h | built-in |
+| Test: e2e | /github-autopilot:test-watch e2e | 2h | test_watch |
+| Deploy Check | /my-project:deploy-check | 30m | custom |
+
+{N}개 루프가 시작되었습니다.
+pipeline이 idle 상태가 되면 빌트인 루프는 자동으로 종료됩니다.
+
+로그 확인: `ls {LOG_DIR}/` 또는 `cat {LOG_DIR}/gap-watch.log`
 ```
 
 ## 주의사항
 
-- 이미 등록된 동일 루프가 있으면 중복 등록하지 않음
-- 세션이 종료되면 모든 cron이 삭제됨 (세션 스코프)
-- 개별 루프를 중단하려면 CronDelete 사용
+- `/autopilot`을 다시 실행하면 새로운 세션(별도 LOG_DIR)으로 루프가 추가 spawn됩니다. 기존 루프를 먼저 종료하세요.
+- 세션 종료 시 모든 백그라운드 루프가 함께 종료됩니다.
+- 개별 커맨드를 1회 실행하려면 해당 커맨드를 직접 호출하세요 (예: `/github-autopilot:gap-watch`).
+- 각 루프의 실행 이력은 `{LOG_DIR}/{command}.log`에서 tick별 START/END/IDLE 로그로 확인할 수 있습니다.

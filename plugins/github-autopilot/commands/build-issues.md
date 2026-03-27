@@ -1,7 +1,7 @@
 ---
 description: "autopilot 이슈를 분석하고 draft 브랜치에서 구현 후 PR을 생성합니다"
-argument-hint: "[interval: 15m, 30m, ...]"
-allowed-tools: ["Bash", "Read", "Agent", "CronCreate", "CronDelete", "CronList"]
+argument-hint: ""
+allowed-tools: ["Bash", "Read", "Agent"]
 ---
 
 # Build Issues
@@ -11,8 +11,7 @@ autopilot 라벨이 붙은 GitHub 이슈를 가져와 의존성을 분석하고,
 ## 사용법
 
 ```bash
-/github-autopilot:build-issues          # 1회 실행
-/github-autopilot:build-issues 15m      # 15분마다 반복
+/github-autopilot:build-issues
 ```
 
 ## Context
@@ -22,39 +21,19 @@ autopilot 라벨이 붙은 GitHub 이슈를 가져와 의존성을 분석하고,
 
 ## 작업 프로세스
 
-### Step 1: 인자 파싱
-
-`$ARGUMENTS`에서 interval을 추출합니다.
-- `/^\d+[smh]$/` 패턴 매칭 → interval 모드
-- 비어있으면 → 1회 실행 모드
-
-### Step 2: Base 브랜치 결정
+### Step 1: Base 브랜치 결정
 
 설정에서 `work_branch`와 `branch_strategy`를 읽어 base 브랜치를 결정합니다:
 1. `work_branch`가 설정되어 있으면 → 해당 값 사용
 2. `work_branch`가 비어있으면 → `branch_strategy`에 따라 결정 (`draft-main` → `main`, `draft-develop-main` → `develop`)
 
-### Step 3: 최신 상태 동기화
+### Step 2: 최신 상태 동기화
 
 ```bash
 git fetch origin
 ```
 
-### Step 3.5: Pipeline Idle Check
-
-```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-idle.sh "{label_prefix}"
-```
-
-- **exit 0 (idle)**: 기존 cron을 정리한 뒤 종료합니다.
-  1. CronList로 현재 등록된 cron 목록을 조회
-  2. `build-issues`가 포함된 cron job을 찾아 CronDelete로 삭제
-  3. `notification` 설정이 있으면 "autopilot 파이프라인 완료 — build-issues cycle 중단" 알림 발송
-  4. CronCreate를 등록하지 않고 종료
-- **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다 (CronCreate는 등록하여 다음 cycle에서 재시도).
-- **exit 1 (active)**: Step 4부터 정상 진행.
-
-### Step 4: Skip 이슈 알림
+### Step 3: Skip 이슈 알림
 
 설정에서 `notification` 값을 확인합니다 (비어있으면 이 Step을 건너뜁니다).
 
@@ -84,7 +63,7 @@ gh issue list \
 gh issue comment ${ISSUE_NUMBER} --body "<!-- notified -->"
 ```
 
-### Step 5: Ready 이슈 조회
+### Step 4: Ready 이슈 조회
 
 설정에서 label_prefix를 확인합니다 (기본값: `autopilot:`).
 
@@ -100,7 +79,7 @@ gh issue list \
 
 이슈가 없으면 "구현 대상 이슈 없음" 출력 후 종료.
 
-### Step 6: 의존성 분석 (Agent)
+### Step 5: 의존성 분석 (Agent)
 
 issue-dependency-analyzer 에이전트를 호출합니다 (background=false):
 
@@ -109,7 +88,7 @@ issue-dependency-analyzer 에이전트를 호출합니다 (background=false):
 
 결과: 배치 목록 (병렬 실행 가능한 이슈 그룹)
 
-### Step 7: WIP 라벨 추가
+### Step 6: WIP 라벨 추가
 
 현재 배치의 이슈들에 wip 라벨을 추가합니다 (중복 작업 방지):
 
@@ -117,7 +96,7 @@ issue-dependency-analyzer 에이전트를 호출합니다 (background=false):
 gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 ```
 
-### Step 8: 구현 (Agent Team)
+### Step 7: 구현 (Agent Team)
 
 첫 번째 배치(의존성 없는 이슈들)부터 순서대로 처리합니다.
 
@@ -135,7 +114,7 @@ gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 - draft_branch: `draft/issue-{number}`
 - quality_gate_command: 설정에서 읽은 값 (비어있으면 자동 감지)
 
-### Step 9: 결과 수집
+### Step 8: 결과 수집
 
 모든 에이전트의 결과를 수집합니다.
 
@@ -196,7 +175,7 @@ gh issue view ${ISSUE_NUMBER} --json comments --jq '.comments[].body' | grep -o 
   ```
 - `{label_prefix}ready` 라벨 유지 (다음 cycle 재시도)
 
-### Step 10: 승격 (Agent Team)
+### Step 9: 승격 (Agent Team)
 
 성공한 각 이슈에 대해 branch-promoter 에이전트를 호출합니다:
 
@@ -211,18 +190,12 @@ gh issue view ${ISSUE_NUMBER} --json comments --jq '.comments[].body' | grep -o 
 **성공한 이슈 수가 3개 이하**: 순차 호출
 **4개 이상**: 병렬 호출 (background=true)
 
-### Step 11: 라벨 정리
+### Step 10: 라벨 정리
 
 - 승격 성공: `{label_prefix}wip` 제거, `{label_prefix}ready` 제거
 - 승격 실패: `{label_prefix}wip` 제거 (다음 cycle에서 재시도)
 
-### Step 12: CronCreate (interval 모드)
-
-interval이 지정된 경우에만 실행합니다:
-
-CronCreate를 호출하여 `/github-autopilot:build-issues`를 지정된 interval로 등록합니다.
-
-### Step 13: 결과 보고
+### Step 11: 결과 보고
 
 ```
 ## Build Issues 결과
