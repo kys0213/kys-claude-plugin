@@ -1,7 +1,7 @@
 ---
 description: "autopilot 루프를 설정된 인터벌로 모두 시작합니다 (기본 6개 + test_watch)"
 argument-hint: ""
-allowed-tools: ["Read", "CronCreate"]
+allowed-tools: ["Read", "CronCreate", "CronDelete", "CronList"]
 ---
 
 # Autopilot
