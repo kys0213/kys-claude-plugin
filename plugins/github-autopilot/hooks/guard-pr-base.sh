@@ -18,22 +18,16 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
   exit 0
 fi
 
-# --- frontmatter에서 설정 파싱 ---
-parse_frontmatter_value() {
-  local key="$1"
-  sed -n '/^---$/,/^---$/p' "$CONFIG_FILE" \
-    | grep "^${key}:" \
-    | head -1 \
-    | sed "s/^${key}:[[:space:]]*//" \
-    | tr -d '"' \
-    | tr -d "'" \
-    | xargs  # trim whitespace
-}
+# frontmatter에서 work_branch, branch_strategy를 한 번에 파싱
+eval "$(awk '
+  /^---$/ { fm++; next }
+  fm == 1 && /^work_branch:/ { sub(/^work_branch:[[:space:]]*/, ""); gsub(/["'"'"']/, ""); printf "WORK_BRANCH=%s\n", $0 }
+  fm == 1 && /^branch_strategy:/ { sub(/^branch_strategy:[[:space:]]*/, ""); gsub(/["'"'"']/, ""); printf "BRANCH_STRATEGY=%s\n", $0 }
+  fm >= 2 { exit }
+' "$CONFIG_FILE")"
+WORK_BRANCH="${WORK_BRANCH:-}"
+BRANCH_STRATEGY="${BRANCH_STRATEGY:-}"
 
-WORK_BRANCH=$(parse_frontmatter_value "work_branch")
-BRANCH_STRATEGY=$(parse_frontmatter_value "branch_strategy")
-
-# --- 기대하는 base branch 결정 ---
 if [[ -n "$WORK_BRANCH" ]]; then
   EXPECTED_BASE="$WORK_BRANCH"
 elif [[ "$BRANCH_STRATEGY" == "draft-develop-main" ]]; then
@@ -43,56 +37,47 @@ else
   EXPECTED_BASE="main"
 fi
 
-# --- tool input에서 실제 base branch 추출 ---
 TOOL_INPUT=$(cat)
 TOOL_NAME="${CLAUDE_TOOL_USE_NAME:-}"
 
 extract_actual_base() {
   case "$TOOL_NAME" in
     mcp__github__create_pull_request)
-      # MCP tool: JSON input에서 base 필드 추출
       echo "$TOOL_INPUT" | grep -o '"base"[[:space:]]*:[[:space:]]*"[^"]*"' \
         | head -1 \
         | sed 's/.*"base"[[:space:]]*:[[:space:]]*"//' \
         | tr -d '"'
       ;;
     Bash)
-      # Bash tool: command에서 gh pr create --base 값 추출
       local cmd
       cmd=$(echo "$TOOL_INPUT" | grep -o '"command"[[:space:]]*:[[:space:]]*"[^"]*"' \
         | head -1 \
         | sed 's/.*"command"[[:space:]]*:[[:space:]]*"//' \
         | sed 's/"$//')
 
-      # gh pr create가 아니면 관심 없음
       if ! echo "$cmd" | grep -q 'gh pr create'; then
-        echo ""
         return
       fi
 
-      # --base 값 추출
-      echo "$cmd" | grep -oP '(?<=--base[[:space:]])\S+' | head -1 | tr -d '"' \
-        || echo "$cmd" | grep -oP '(?<=--base=)\S+' | head -1 | tr -d '"'
+      # --base <val> 또는 --base=<val> 모두 처리 (grep -P 대신 sed 사용 — macOS 호환)
+      echo "$cmd" | sed -n 's/.*--base[= ][[:space:]]*\([^ "]*\).*/\1/p' | head -1
       ;;
     *)
-      echo ""
       ;;
   esac
 }
 
 ACTUAL_BASE=$(extract_actual_base)
 
-# --- base를 지정하지 않은 경우 (관심 없는 tool call) → skip ---
 if [[ -z "$ACTUAL_BASE" ]]; then
   exit 0
 fi
 
-# --- 검증 ---
 if [[ "$ACTUAL_BASE" != "$EXPECTED_BASE" ]]; then
   echo "BLOCKED: PR base branch mismatch" >&2
   echo "  expected: $EXPECTED_BASE (from github-autopilot.local.md)" >&2
   echo "  actual:   $ACTUAL_BASE" >&2
-  echo "" >&2
+  echo >&2
   echo "github-autopilot.local.md의 work_branch 또는 branch_strategy 설정을 확인하세요." >&2
   exit 2
 fi
