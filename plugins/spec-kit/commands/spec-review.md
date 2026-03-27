@@ -79,11 +79,7 @@ spec-parser 에이전트에게 확정된 파일 경로 목록을 전달합니다
 
 ### Step 3a: 스펙 품질 검증 (spec-quality-checker)
 
-<<<<<<< HEAD
-spec-quality-checker 에이전트에게 파싱 결과를 전달합니다.
-=======
 spec-quality-checker 에이전트에게 파싱 결과를 전달합니다. A/B/C 관점만 평가합니다.
->>>>>>> c666e9f (feat(spec-kit): add cross-reference-checker agent for structured D1-D5 validation)
 
 **Agent 호출** (`run_in_background=true`):
 ```
@@ -93,11 +89,7 @@ spec-quality-checker 에이전트에게 파싱 결과를 전달합니다. A/B/C 
 ## 파싱된 스펙 데이터
 [Step 2 결과 전체]
 
-<<<<<<< HEAD
 파싱 결과에 섹션 원문(sections.raw_text), 용어집(glossary), 교차 참조(cross_references)가 포함되어 있습니다.
-=======
-파싱 결과에 섹션 원문(sections.raw_text)이 포함되어 있습니다.
->>>>>>> c666e9f (feat(spec-kit): add cross-reference-checker agent for structured D1-D5 validation)
 별도로 파일을 읽을 필요 없이 전달된 데이터만으로 평가하세요.
 ```
 
@@ -167,7 +159,7 @@ Step 3a 결과 (A/B/C 점수 + 상세)와 Step 3b 결과 (D 점수 + 상세)를 
 
 - **코드 분석 없음**: 이 커맨드는 스펙 문서만 평가합니다. 코드 갭 분석은 `/gap-detect`를 사용하세요.
 - **토큰 최적화**: MainAgent는 스펙 파일을 읽지 않음. 읽기는 모두 Sub-agent가 수행
+- **quality-checker는 파일을 읽지 않음** — 파싱 데이터만으로 평가
 - **스펙 형식 무관**: 마크다운 형식이 아닌 내용의 완성도를 평가
 - **다중 파일**: 여러 파일은 하나의 스펙 세트로 취급하여 통합 평가
 - **명시적 입력 우선**: 파일 경로를 직접 받는 것을 우선하고, 디렉터리/패턴 입력 시 반드시 사용자 확인을 거침
-- **quality-checker는 파일을 읽지 않음** — 파싱 데이터만으로 평가
