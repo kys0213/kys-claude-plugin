@@ -9,7 +9,8 @@
     "./agents/issue-dependency-analyzer.md",
     "./agents/issue-analyzer.md",
     "./agents/ci-fixer.md",
-    "./agents/test-analyzer.md"
+    "./agents/test-analyzer.md",
+    "./agents/spec-validator.md"
   ],
   "author": {
     "name": "kys0213"
