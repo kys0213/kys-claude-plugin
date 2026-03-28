@@ -1,7 +1,7 @@
 ---
 description: "autopilot 루프를 설정된 인터벌로 모두 시작합니다 (기본 6개 + test_watch + custom_loops)"
 argument-hint: ""
-allowed-tools: ["Read", "Bash", "Write", "Glob"]
+allowed-tools: ["Read", "Bash", "Write", "Glob", "AskUserQuestion"]
 ---
 
 # Autopilot
@@ -18,6 +18,7 @@ autopilot 루프를 설정된 인터벌로 모두 시작합니다. 각 루프는
 
 - 설정 파일: !`cat github-autopilot.local.md 2>/dev/null | head -30 || echo "설정 파일 없음"`
 - Setup 절차: !`cat ${CLAUDE_PLUGIN_ROOT}/skills/setup-init/SKILL.md`
+- Preflight 절차: !`cat ${CLAUDE_PLUGIN_ROOT}/skills/preflight-check/SKILL.md`
 
 ## 작업 프로세스
 
@@ -37,7 +38,28 @@ test -f github-autopilot.local.md
 4. setup-init 스킬의 "GitHub 라벨" 명령으로 라벨 생성
 5. 설정 완료 후 Step 1로 진행
 
-**파일이 있으면**: Step 1로 바로 진행.
+**파일이 있으면**: Step 0.5로 진행.
+
+### Step 0.5: Preflight Check
+
+preflight-check 스킬의 절차에 따라 환경을 검증합니다.
+
+1. **Convention Verification** — Rules 파일, CLAUDE.md 점검
+2. **Automation Environment Verification** — gh auth, hooks, quality gate, git remote 점검
+3. **Spec Existence Check** — spec_paths 경로에 스펙 파일 존재 확인
+
+결과를 테이블로 출력합니다.
+
+**모든 항목 PASS (WARN 허용)**: Step 1로 진행합니다.
+
+**FAIL 항목 있음**: `AskUserQuestion`으로 사용자에게 확인합니다.
+
+```
+결과물 퀄리티를 보장하기 어려운 환경입니다. 계속 진행하시겠습니까?
+```
+
+- **사용자 Yes** → `⚠️ Preflight FAIL 항목이 있지만 사용자 승인으로 계속 진행합니다.` 경고를 출력하고 Step 1로 진행
+- **사용자 No** → preflight-check 스킬의 해결 가이드를 출력하고 종료
 
 ### Step 1: 세션 초기화
 
