@@ -42,23 +42,32 @@ test -f github-autopilot.local.md
 
 ### Step 0.5: Preflight Check
 
-preflight-check 스킬의 절차에 따라 환경을 검증합니다.
+`preflight-check.sh` 스크립트로 환경을 검증합니다:
 
-1. **Convention Verification** — Rules 파일, CLAUDE.md 점검
-2. **Automation Environment Verification** — gh auth, hooks, quality gate, git remote 점검
-3. **Spec Existence Check** — spec_paths 경로에 스펙 파일 존재 확인
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/preflight-check.sh github-autopilot.local.md
+```
 
-결과를 테이블로 출력합니다.
+스크립트가 JSON 결과를 출력합니다. 결과를 파싱하여 테이블로 표시합니다:
 
-**모든 항목 PASS (WARN 허용)**: Step 1로 진행합니다.
+```
+| Check | Status | Detail |
+|-------|--------|--------|
+| CLAUDE.md | ✅ PASS | file tree, build commands, conventions 포함 |
+| Rules coverage | ⚠️ WARN | 미커버: src/auth (5/6) |
+| gh auth | ✅ PASS | authenticated |
+| ...
+```
 
-**FAIL 항목 있음**: `AskUserQuestion`으로 사용자에게 확인합니다.
+**exit 0 (모든 항목 PASS/WARN)**: Step 1로 진행합니다.
+
+**exit 1 (FAIL 항목 있음)**: `AskUserQuestion`으로 사용자에게 확인합니다.
 
 ```
 결과물 퀄리티를 보장하기 어려운 환경입니다. 계속 진행하시겠습니까?
 ```
 
-- **사용자 Yes** → `⚠️ Preflight FAIL 항목이 있지만 사용자 승인으로 계속 진행합니다.` 경고를 출력하고 Step 1로 진행
+- **사용자 Yes** → 경고 로그를 남기고 Step 1로 진행
 - **사용자 No** → preflight-check 스킬의 해결 가이드를 출력하고 종료
 
 ### Step 1: 세션 초기화
