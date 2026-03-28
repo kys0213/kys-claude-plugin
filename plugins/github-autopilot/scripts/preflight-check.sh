@@ -19,12 +19,19 @@ set -uo pipefail
 CONFIG_FILE="${1:-github-autopilot.local.md}"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
-# --- results accumulator ---
 RESULTS=()
 HAS_FAIL=false
 
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '%s' "$s"
+}
+
 add_result() {
-  local check="$1" status="$2" detail="$3"
+  local check="$1" status="$2" detail
+  detail="$(json_escape "$3")"
   RESULTS+=("{\"check\":\"${check}\",\"status\":\"${status}\",\"detail\":\"${detail}\"}")
   [[ "$status" == "FAIL" ]] && HAS_FAIL=true
 }
@@ -37,19 +44,16 @@ add_result() {
 if [[ -f "${REPO_ROOT}/CLAUDE.md" ]]; then
   claude_content=$(cat "${REPO_ROOT}/CLAUDE.md")
 
-  # 파일트리 존재 확인
   has_tree=false
   if echo "$claude_content" | grep -qE '(├|└|directory|structure|파일.?구조|file.?tree)'; then
     has_tree=true
   fi
 
-  # 빌드/테스트 명령어 확인
   has_build=false
   if echo "$claude_content" | grep -qE '(cargo|npm|go |make|pytest|jest|gradle|mvn)'; then
     has_build=true
   fi
 
-  # 기술스택/컨벤션 확인
   has_convention=false
   if echo "$claude_content" | grep -qE '(stack|convention|기술|원칙|principle|컨벤션)'; then
     has_convention=true
@@ -91,16 +95,14 @@ if [[ "${has_tree:-false}" == "true" ]]; then
     done
   fi
 
-  rules_coverage_str="${rules_coverage[*]:-}"
-
   covered=()
   uncovered=()
   while IFS= read -r dir; do
     [[ -z "$dir" ]] && continue
-    # 디렉토리가 rules의 paths 패턴에 매칭되는지 확인
     matched=false
     for pattern in "${rules_coverage[@]+"${rules_coverage[@]}"}"; do
-      if [[ "$dir" == "$pattern" ]] || [[ "$dir/"* == $pattern ]] || [[ "$pattern" == *"$dir"* ]] || [[ "$pattern" == "**" ]]; then
+      # pattern "**" covers everything; otherwise check if pattern contains dir name
+      if [[ "$pattern" == "**" ]] || [[ "$pattern" == *"$dir"* ]] || [[ "$dir" == "$pattern" ]]; then
         matched=true
         break
       fi

@@ -33,6 +33,19 @@ json_escape() {
   printf '%s' "$s"
 }
 
+# Build a JSON array from newline-separated input
+to_json_array() {
+  local input="$1"
+  local result="[" first=true
+  while IFS= read -r item; do
+    [[ -z "$item" ]] && continue
+    if [[ "$first" == "true" ]]; then first=false; else result+=","; fi
+    result+="\"$(json_escape "$item")\""
+  done <<< "$input"
+  result+="]"
+  printf '%s' "$result"
+}
+
 iso_timestamp() {
   date -u '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S'
 }
@@ -84,19 +97,14 @@ cmd_diff() {
     exit 0
   fi
 
-  # classify files: spec vs code
-  local spec_list=()
-  local code_list=()
-  local has_spec=false
+  local spec_files="" code_files=""
 
   while IFS= read -r file; do
     [[ -z "$file" ]] && continue
     local is_spec=false
 
-    # match against spec_paths patterns
     if [[ ${#spec_paths[@]} -gt 0 ]]; then
       for pattern in "${spec_paths[@]}"; do
-        # strip trailing slash for matching
         pattern="${pattern%/}"
         if [[ "$file" == ${pattern}* ]] || [[ "$file" == ${pattern}/* ]]; then
           is_spec=true
@@ -106,46 +114,21 @@ cmd_diff() {
     fi
 
     if [[ "$is_spec" == "true" ]]; then
-      spec_list+=("$file")
-      has_spec=true
+      spec_files+="${file}"$'\n'
     else
-      code_list+=("$file")
+      code_files+="${file}"$'\n'
     fi
   done <<< "$changed_files"
 
-  # build JSON arrays
-  local spec_json="["
-  local first=true
-  for f in "${spec_list[@]+"${spec_list[@]}"}"; do
-    [[ -z "$f" ]] && continue
-    if [[ "$first" == "true" ]]; then first=false; else spec_json+=","; fi
-    spec_json+="\"$(json_escape "$f")\""
-  done
-  spec_json+="]"
+  local all_json spec_json code_json
+  all_json=$(to_json_array "$changed_files")
+  spec_json=$(to_json_array "$spec_files")
+  code_json=$(to_json_array "$code_files")
 
-  local code_json="["
-  first=true
-  for f in "${code_list[@]+"${code_list[@]}"}"; do
-    [[ -z "$f" ]] && continue
-    if [[ "$first" == "true" ]]; then first=false; else code_json+=","; fi
-    code_json+="\"$(json_escape "$f")\""
-  done
-  code_json+="]"
-
-  local all_json="["
-  first=true
-  while IFS= read -r file; do
-    [[ -z "$file" ]] && continue
-    if [[ "$first" == "true" ]]; then first=false; else all_json+=","; fi
-    all_json+="\"$(json_escape "$file")\""
-  done <<< "$changed_files"
-  all_json+="]"
-
-  # determine status and exit code
-  if [[ "$has_spec" == "true" ]]; then
+  if [[ -n "$spec_files" ]]; then
     echo "{\"status\":\"spec_changed\",\"changed_files\":${all_json},\"spec_files\":${spec_json},\"code_files\":${code_json}}"
     exit 1
-  elif [[ ${#code_list[@]} -gt 0 ]]; then
+  elif [[ -n "$code_files" ]]; then
     echo "{\"status\":\"code_changed\",\"changed_files\":${all_json},\"spec_files\":${spec_json},\"code_files\":${code_json}}"
     exit 2
   else
@@ -175,27 +158,22 @@ cmd_status() {
   echo "Loop States (${STATE_DIR}):"
   echo "---"
 
+  local now_epoch
+  now_epoch="$(date +%s)"
+
   for state_file in "${STATE_DIR}"/*.state; do
     [[ ! -f "$state_file" ]] && continue
     found=true
 
-    local loop_name
+    local loop_name content hash timestamp
     loop_name="$(basename "$state_file" .state)"
-    local content
     content="$(cat "$state_file")"
-
-    local hash
     hash="$(echo "$content" | grep -o '"hash":"[^"]*"' | head -1 | cut -d'"' -f4)"
-    local timestamp
     timestamp="$(echo "$content" | grep -o '"timestamp":"[^"]*"' | head -1 | cut -d'"' -f4)"
 
-    # calculate age
     local age="unknown"
     if [[ -n "$timestamp" ]]; then
-      local now_epoch
       local ts_epoch
-      now_epoch="$(date +%s)"
-      # try GNU date first, then BSD date
       ts_epoch="$(date -d "$timestamp" +%s 2>/dev/null || date -j -f '%Y-%m-%dT%H:%M:%S' "$timestamp" +%s 2>/dev/null || echo "")"
 
       if [[ -n "$ts_epoch" ]]; then

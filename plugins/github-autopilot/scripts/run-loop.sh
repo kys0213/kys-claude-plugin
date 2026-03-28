@@ -68,7 +68,7 @@ fi
 log() {
   local level="$1" msg="$2"
   local ts
-  ts="$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S')"
+  ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S')"
   local line="[${ts}] ${level}  ${msg}"
   echo "$line"
   [[ -n "$LOG_FILE" ]] && echo "$line" >> "$LOG_FILE"
@@ -86,7 +86,6 @@ if [[ -f "$PID_FILE" ]]; then
     log "DUP" "already running (pid=${EXISTING_PID}), skipping"
     exit 0
   fi
-  # stale PID file, remove
   rm -f "$PID_FILE"
 fi
 
