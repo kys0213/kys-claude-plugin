@@ -19,7 +19,7 @@
 // ============================================================
 
 import { resolve, join } from 'node:path';
-import { chmod, readFile, appendFile, access, rename } from 'node:fs/promises';
+import { chmod, readFile, appendFile, access, rename, stat } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
 import { exec } from './core/shell';
 import type { Result } from './types';
@@ -60,6 +60,9 @@ export interface InstallerDeps {
 
   /** shell rc 파일에 PATH 추가 */
   addToPath(dir: string): Promise<{ shell: string; rcFile: string }>;
+
+  /** 소스 파일이 바이너리보다 최신인지 확인 */
+  isSourceNewer(): Promise<boolean>;
 }
 
 export interface Installer {
@@ -126,6 +129,8 @@ export function createInstaller(deps: InstallerDeps): Installer {
       } else {
         const cmp = compareSemVer(installedVersion, pluginVersion);
         if (cmp < 0) {
+          action = 'updated';
+        } else if (await deps.isSourceNewer()) {
           action = 'updated';
         } else {
           action = 'skipped';
@@ -218,6 +223,20 @@ export function createRealDeps(): InstallerDeps {
       return pathEnv.split(':').includes(dir);
     },
 
+    async isSourceNewer(): Promise<boolean> {
+      try {
+        const binaryMtime = (await stat(BINARY_PATH)).mtimeMs;
+        const glob = new Bun.Glob('src/**/*.ts');
+        for (const file of glob.scanSync({ cwd: PLUGIN_ROOT })) {
+          const mtime = (await stat(join(PLUGIN_ROOT, file))).mtimeMs;
+          if (mtime > binaryMtime) return true;
+        }
+        return false;
+      } catch {
+        return true;
+      }
+    },
+
     async addToPath(dir: string): Promise<{ shell: string; rcFile: string }> {
       const home = process.env.HOME!;
       const shell = process.env.SHELL?.includes('zsh') ? 'zsh' : 'bash';
@@ -252,7 +271,11 @@ async function main(): Promise<void> {
       console.log(`git-utils v${version} installed → ${binaryPath}`);
       break;
     case 'updated':
-      console.log(`git-utils updated: v${previousVersion} → v${version} (${binaryPath})`);
+      if (previousVersion === version) {
+        console.log(`git-utils v${version} rebuilt (stale binary detected) → ${binaryPath}`);
+      } else {
+        console.log(`git-utils updated: v${previousVersion} → v${version} (${binaryPath})`);
+      }
       break;
     case 'skipped':
       console.log(`git-utils v${version} is already up to date`);
