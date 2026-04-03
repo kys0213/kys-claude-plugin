@@ -18,6 +18,7 @@ function mockDeps(overrides: Partial<InstallerDeps> = {}): InstallerDeps {
     installBinary: async () => {},
     isInPath: () => true,
     addToPath: async () => ({ shell: 'bash', rcFile: '~/.bashrc' }),
+    isSourceNewer: async () => false,
     ...overrides,
   };
 }
@@ -120,6 +121,56 @@ describe('Installer', () => {
       await installer.run();
       expect(buildCalled).toBe(false);
       expect(installCalled).toBe(false);
+    });
+  });
+
+  describe('stale 바이너리 감지', () => {
+    test('버전 동일 + 소스가 더 최신 → build + install, action: "updated"', async () => {
+      let buildCalled = false;
+      let installCalled = false;
+      const installer = createInstaller(mockDeps({
+        getPluginVersion: async () => '3.0.0',
+        getInstalledVersion: async () => '3.0.0',
+        isSourceNewer: async () => true,
+        buildBinary: async () => { buildCalled = true; },
+        installBinary: async () => { installCalled = true; },
+      }));
+      const result = await installer.run();
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.data.action).toBe('updated');
+        expect(buildCalled).toBe(true);
+        expect(installCalled).toBe(true);
+      }
+    });
+
+    test('버전 동일 + 소스가 최신 아님 → action: "skipped"', async () => {
+      const installer = createInstaller(mockDeps({
+        getPluginVersion: async () => '3.0.0',
+        getInstalledVersion: async () => '3.0.0',
+        isSourceNewer: async () => false,
+      }));
+      const result = await installer.run();
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.data.action).toBe('skipped');
+      }
+    });
+
+    test('설치된 버전 > 플러그인 버전 + 소스가 더 최신 → action: "updated"', async () => {
+      let buildCalled = false;
+      const installer = createInstaller(mockDeps({
+        getPluginVersion: async () => '3.0.0',
+        getInstalledVersion: async () => '3.1.0',
+        isSourceNewer: async () => true,
+        buildBinary: async () => { buildCalled = true; },
+      }));
+      const result = await installer.run();
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.data.action).toBe('updated');
+        expect(buildCalled).toBe(true);
+      }
     });
   });
 
