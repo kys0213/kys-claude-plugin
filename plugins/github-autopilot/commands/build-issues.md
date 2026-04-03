@@ -100,6 +100,36 @@ gh issue list \
 
 이슈가 없으면 "구현 대상 이슈 없음" 출력 후 종료.
 
+### Step 5.5: 코멘트 기반 재작업 감지
+
+Step 5에서 제외된 이슈(ready 라벨 없음) 중, 코멘트에 재작업 요청이 포함된 이슈를 탐색합니다.
+
+```bash
+gh issue list \
+  --state open \
+  --json number,title,body,labels,comments \
+  --limit 50
+```
+
+필터 조건:
+- `{label_prefix}ready` 라벨이 **없음**
+- `{label_prefix}wip` 라벨이 **없음**
+- 코멘트에 재작업 키워드 포함: `재구현 필요`, `재작업`, `rework`, `다시 구현`, `re-implement`, `라우트가.*제거됨`
+- 해당 키워드가 포함된 코멘트 이후에 `<!-- autopilot:rework-resolved -->` 마커가 **없음** (이미 처리된 건 제외)
+
+해당 이슈가 발견되면:
+1. `{label_prefix}ready` 라벨을 재부여합니다:
+   ```bash
+   gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}ready"
+   ```
+2. 마커 코멘트를 남깁니다:
+   ```bash
+   gh issue comment ${ISSUE_NUMBER} --body "Autopilot: 코멘트에서 재작업 요청 감지 — ready 라벨 재부여
+
+   <!-- autopilot:rework-detected -->"
+   ```
+3. Step 5 결과 목록에 해당 이슈를 추가합니다.
+
 ### Step 6: 의존성 분석 (Agent)
 
 issue-dependency-analyzer 에이전트를 호출합니다 (background=false):
@@ -127,12 +157,13 @@ gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 - `isolation: "worktree"` 로 독립 작업 공간 확보
 - `run_in_background: true` 로 병렬 실행
 
-전달 정보:
+전달 정보 (**모든 항목 필수 — 생략 금지**):
 - issue_number
 - issue_title
 - issue_body (요구사항, 영향 범위, 구현 가이드)
-- issue_comments (분석 코멘트 포함, analyze-issue에서 생성된 구현 가이드 참조)
+- **issue_comments**: Step 5에서 가져온 comments 배열 **전체**를 반드시 포함한다. 분석 코멘트, 재작업 요청, 추가 컨텍스트가 포함되어 있으므로 절대 생략하지 않는다
 - draft_branch: `draft/issue-{number}`
+- base_branch: Step 2에서 결정한 base 브랜치
 - quality_gate_command: 설정에서 읽은 값 (비어있으면 자동 감지)
 
 ### Step 9: 결과 수집
