@@ -20,7 +20,7 @@
 
 import { resolve, join } from 'node:path';
 import { chmod, readFile, appendFile, access, rename, stat } from 'node:fs/promises';
-import { mkdirSync, statSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { exec } from './core/shell';
 import type { Result } from './types';
 
@@ -62,7 +62,7 @@ export interface InstallerDeps {
   addToPath(dir: string): Promise<{ shell: string; rcFile: string }>;
 
   /** 소스 파일이 바이너리보다 최신인지 확인 */
-  isSourceNewer(binaryPath: string): Promise<boolean>;
+  isSourceNewer(): Promise<boolean>;
 }
 
 export interface Installer {
@@ -130,7 +130,7 @@ export function createInstaller(deps: InstallerDeps): Installer {
         const cmp = compareSemVer(installedVersion, pluginVersion);
         if (cmp < 0) {
           action = 'updated';
-        } else if (await deps.isSourceNewer(BINARY_PATH)) {
+        } else if (await deps.isSourceNewer()) {
           action = 'updated';
         } else {
           action = 'skipped';
@@ -223,18 +223,16 @@ export function createRealDeps(): InstallerDeps {
       return pathEnv.split(':').includes(dir);
     },
 
-    async isSourceNewer(binaryPath: string): Promise<boolean> {
+    async isSourceNewer(): Promise<boolean> {
       try {
-        const binaryMtime = (await stat(binaryPath)).mtimeMs;
+        const binaryMtime = (await stat(BINARY_PATH)).mtimeMs;
         const glob = new Bun.Glob('src/**/*.ts');
-        let latestSrcMtime = 0;
         for (const file of glob.scanSync({ cwd: PLUGIN_ROOT })) {
-          const mtime = statSync(join(PLUGIN_ROOT, file)).mtimeMs;
-          if (mtime > latestSrcMtime) latestSrcMtime = mtime;
+          const mtime = (await stat(join(PLUGIN_ROOT, file))).mtimeMs;
+          if (mtime > binaryMtime) return true;
         }
-        return latestSrcMtime > binaryMtime;
+        return false;
       } catch {
-        // If we can't determine, assume rebuild needed
         return true;
       }
     },
