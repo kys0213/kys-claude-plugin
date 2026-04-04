@@ -41,6 +41,16 @@ git fetch origin
 `github-autopilot.local.md`에서 설정을 읽습니다.
 - `label_prefix`: 라벨 접두사 (기본값: `"autopilot:"`)
 
+### Step 3.5: CI Failure 이슈 자동 정리
+
+PR이 머지된 CI failure 이슈를 자동으로 close합니다:
+
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/close-merged-ci-issues.sh "{label_prefix}"
+```
+
+결과에서 close된 이슈가 있으면 Step 7 결과 보고에 포함합니다.
+
 ### Step 4: 이슈 조회
 
 각 이슈의 정보를 조회합니다:

@@ -79,9 +79,36 @@ gh pr create \
 - requirement_keyword는 핵심 키워드를 kebab-case로 변환 (2~4단어)
 - failure_type은 `test-failure`, `build-error`, `lint-error` 등 카테고리
 
-### 중복 검색 (스크립트)
+### 통합 이슈 생성 (권장)
 
-`scripts/check-duplicate.sh`를 사용하여 중복을 확인한다:
+`scripts/create-issue.sh`를 사용하면 중복 검사, 라벨 할당, fingerprint 삽입을 한 번에 처리한다:
+
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/create-issue.sh \
+  --type gap \
+  --title "feat(auth): implement token refresh" \
+  --body "$BODY" \
+  --fingerprint "gap:spec/auth.md:token-refresh" \
+  --label-prefix "autopilot:"
+```
+
+| 옵션 | 설명 |
+|------|------|
+| `--type` | 이슈 타입: `gap`, `ci-failure`, `qa`, `test` — 타입에 따라 라벨 자동 결정 |
+| `--title` | 이슈 제목 |
+| `--body` | 이슈 본문 (fingerprint 주석은 자동 삽입됨) |
+| `--fingerprint` | 중복 검사용 fingerprint |
+| `--label-prefix` | 라벨 접두사 (기본값: `autopilot:`) |
+| `--dry-run` | 실제 생성 없이 미리보기만 출력 |
+
+Exit codes:
+- `0`: 이슈 생성 성공
+- `1`: 중복 이슈 존재 (skip)
+- `2`: 사용법 오류
+
+### 중복 검색 (저수준)
+
+개별 중복 확인만 필요할 때는 `scripts/check-duplicate.sh`를 직접 사용할 수 있다:
 
 ```bash
 # 중복 확인 — exit 0이면 생성 가능, exit 1이면 중복
@@ -94,8 +121,6 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "gap:spec/auth.md:token-re
 {"duplicate": true, "issue_number": 42, "issue_title": "..."}  # 중복 → skip
 ```
 
-이슈를 생성하기 전에 **반드시 이 스크립트를 먼저 실행**한다.
-
 ### Body에 fingerprint 삽입
 
 이슈 body 맨 하단에 HTML 주석으로 삽입한다:
@@ -106,6 +131,23 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "gap:spec/auth.md:token-re
 ```
 
 이 주석이 중복 검색의 유일한 기준이므로 **절대 생략하지 않는다**.
+
+## CI Failure 이슈 자동 정리
+
+PR 머지 후 불필요하게 남아있는 CI failure 이슈를 자동으로 close한다:
+
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/close-merged-ci-issues.sh "autopilot:"
+```
+
+- `autopilot:ci-failure` 라벨이 있는 open 이슈를 조회
+- 이슈 제목에서 브랜치명을 추출 (`CI failure in {workflow} on {branch}` 형식)
+- 해당 브랜치의 PR이 MERGED 상태이면 이슈를 자동 close
+
+출력:
+```json
+{"closed": [{"number": 42, "title": "...", "branch": "..."}], "still_open": [...]}
+```
 
 ## 라벨 생성
 

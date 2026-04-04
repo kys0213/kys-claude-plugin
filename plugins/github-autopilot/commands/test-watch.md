@@ -88,19 +88,12 @@ test_watch:
 
 **passed / within_threshold**: 기록만 남김
 
-**failed**: 이슈 생성 프로세스 진행
+**failed**: 통합 이슈 생성 스크립트를 호출합니다. 스크립트가 fingerprint 중복 검사, 라벨 할당, fingerprint 주석 삽입을 모두 처리합니다:
 
-1. fingerprint 중복 확인:
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "test:${test_name}:${failure_hash}"
-   ```
+   FINGERPRINT="test:${test_name}:${failure_hash}"
 
-2. 중복이 아닌 경우 이슈 생성:
-   ```bash
-   gh issue create \
-     --title "fix: ${test_name} test failure - ${summary}" \
-     --label "{label_prefix}ready" \
-     --body "$(cat <<'EOF'
+   BODY="$(cat <<EOF
    ## 테스트 실패 분석
 
    - **Suite**: ${test_name}
@@ -115,12 +108,19 @@ test_watch:
    ## 수정 제안
 
    ${suggested_fix}
-
-   ---
-   <!-- fingerprint: test:${test_name}:${failure_hash} -->
    EOF
    )"
+
+   bash ${CLAUDE_PLUGIN_ROOT}/scripts/create-issue.sh \
+     --type test \
+     --title "fix: ${test_name} test failure - ${summary}" \
+     --body "$BODY" \
+     --fingerprint "$FINGERPRINT" \
+     --label-prefix "{label_prefix}"
    ```
+
+   - exit 0: 이슈 생성 성공
+   - exit 1: 중복 이슈 존재 → skip
 
 ### Step 6: CronCreate
 

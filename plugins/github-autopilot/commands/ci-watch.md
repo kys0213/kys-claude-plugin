@@ -55,21 +55,11 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-idle.sh "{label_prefix}"
 gh run list --status failure --limit 10 --json databaseId,name,headBranch,conclusion,createdAt
 ```
 
-### Step 4: 중복 이슈 필터링
+### Step 4: 실패 필터링
 
 설정에서 label_prefix를 확인합니다 (기본값: `autopilot:`).
 
-각 실패에 대해 **fingerprint 기반**으로 중복을 확인합니다 (issue-label 스킬 참조):
-
-```bash
-# fingerprint 형식: ci:{workflow}:{branch}:{failure_type}
-FINGERPRINT="ci:validate.yml:main:test-failure"
-
-# 중복 확인 — exit 1이면 skip
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "$FINGERPRINT"
-```
-
-중복이 아닌 실패만 Step 5로 진행합니다.
+Step 6에서 통합 이슈 생성 스크립트(`create-issue.sh`)가 fingerprint 중복 검사를 내장 처리하므로, 별도 중복 확인은 불필요합니다. 모든 실패를 Step 5로 전달합니다.
 
 ### Step 5: 실패 분석 (Agent Team)
 
@@ -83,16 +73,14 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "$FINGERPRINT"
 - run_name (워크플로우 이름)
 - head_branch (실패한 브랜치)
 
-### Step 6: Issue 생성
+### Step 6: Issue 생성 (통합 스크립트)
 
-분석 결과를 바탕으로 GitHub issue를 생성합니다:
+분석 결과를 바탕으로 통합 이슈 생성 스크립트를 호출합니다. 스크립트가 fingerprint 중복 검사, 라벨 할당, fingerprint 주석 삽입을 모두 처리합니다:
 
 ```bash
-gh issue create \
-  --title "fix: CI failure in ${WORKFLOW_NAME} on ${BRANCH}" \
-  --label "{label_prefix}ci-failure" \
-  --label "{label_prefix}ready" \
-  --body "$(cat <<'EOF'
+FINGERPRINT="ci:${WORKFLOW_NAME}:${BRANCH}:${FAILURE_TYPE}"
+
+BODY="$(cat <<EOF
 ## CI 실패 분석
 
 - **Run**: ${RUN_ID}
@@ -111,14 +99,19 @@ ${AFFECTED_FILES}
 ## 수정 제안
 
 ${SUGGESTED_FIX}
-
----
-<!-- fingerprint: ci:${WORKFLOW_NAME}:${BRANCH}:${FAILURE_TYPE} -->
 EOF
 )"
+
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/create-issue.sh \
+  --type ci-failure \
+  --title "fix: CI failure in ${WORKFLOW_NAME} on ${BRANCH}" \
+  --body "$BODY" \
+  --fingerprint "$FINGERPRINT" \
+  --label-prefix "{label_prefix}"
 ```
 
-> **중요**: `<!-- fingerprint: ... -->` 주석을 body 맨 하단에 반드시 포함한다.
+- exit 0: 이슈 생성 성공
+- exit 1: 중복 이슈 존재 → skip
 
 ### Step 7: CronCreate (interval 모드)
 

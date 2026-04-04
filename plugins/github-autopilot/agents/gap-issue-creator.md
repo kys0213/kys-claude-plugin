@@ -17,29 +17,17 @@ skills: ["issue-label"]
 
 ## 프로세스
 
-### 1. Fingerprint 생성 & 중복 확인
+### 1. 이슈 생성 (통합 스크립트)
 
-각 갭 항목에서 issue-label 스킬의 규칙에 따라 fingerprint를 생성하고, 스크립트로 중복을 확인합니다.
+갭 리포트에서 ❌ Missing 또는 ⚠️ Partial 항목을 추출하여, 각 항목에 대해 통합 이슈 생성 스크립트를 호출합니다.
+
+스크립트가 fingerprint 중복 검사, 라벨 할당, fingerprint 주석 삽입을 모두 처리합니다.
 
 ```bash
 # fingerprint 형식: gap:{spec_path}:{requirement_keyword}
 FINGERPRINT="gap:spec/auth.md:token-refresh"
 
-# 중복 확인 — exit 1이면 skip
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "$FINGERPRINT"
-```
-
-### 2. 이슈 생성
-
-갭 리포트에서 ❌ Missing 또는 ⚠️ Partial 항목을 추출하여 이슈를 생성합니다.
-
-각 이슈의 형식:
-
-```bash
-gh issue create \
-  --title "feat(scope): implement [requirement description]" \
-  --label "{label_prefix}ready" \
-  --body "$(cat <<'EOF'
+BODY="$(cat <<'EOF'
 ## 요구사항
 
 [갭 분석에서 추출한 요구사항 설명]
@@ -56,12 +44,19 @@ gh issue create \
 ## 구현 가이드
 
 [갭 분석에서 제안된 구현 방향]
-
----
-<!-- fingerprint: gap:{spec_file_path}:{requirement_keyword} -->
 EOF
 )"
+
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/create-issue.sh \
+  --type gap \
+  --title "feat(scope): implement [requirement description]" \
+  --body "$BODY" \
+  --fingerprint "$FINGERPRINT" \
+  --label-prefix "{label_prefix}"
 ```
+
+- exit 0: 이슈 생성 성공
+- exit 1: 중복 이슈 존재 → skip
 
 ### 3. 결과 보고
 
