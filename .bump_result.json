@@ -2,12 +2,12 @@
   "dry_run": false,
   "results": [
     {
-      "plugin": "git-utils",
-      "old_version": "2.4.0",
-      "new_version": "2.4.1",
-      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/git-utils/.claude-plugin/plugin.json",
+      "plugin": "github-autopilot",
+      "old_version": "0.8.1",
+      "new_version": "0.9.0",
+      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/github-autopilot/.claude-plugin/plugin.json",
       "marketplace_updated": true,
-      "cargo_toml_updated": false
+      "cargo_toml_updated": true
     }
   ]
 }
