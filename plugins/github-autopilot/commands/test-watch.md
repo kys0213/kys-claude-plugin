@@ -39,8 +39,7 @@ git fetch origin
 ### Step 2.5: Pipeline Idle Check
 
 ```bash
-AUTOPILOT_CLI="${CLAUDE_PLUGIN_ROOT}/cli/target/release/autopilot"
-$AUTOPILOT_CLI pipeline idle --label-prefix "{label_prefix}"
+autopilot pipeline idle --label-prefix "{label_prefix}"
 ```
 
 - **exit 0 (idle)**: 기존 cron을 정리한 뒤 종료합니다.
@@ -94,7 +93,7 @@ test_watch:
 autopilot CLI로 이슈를 생성합니다 (중복 확인 내장):
 
    ```bash
-   $AUTOPILOT_CLI issue create \
+   autopilot issue create \
      --title "fix: ${test_name} test failure - ${summary}" \
      --label "{label_prefix}ready" \
      --fingerprint "test:${test_name}:${failure_hash}" \

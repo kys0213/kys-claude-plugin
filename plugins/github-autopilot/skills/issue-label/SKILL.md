@@ -84,9 +84,7 @@ gh pr create \
 `autopilot issue create` 명령이 중복 확인 + 이슈 생성 + fingerprint 삽입을 한 번에 처리한다:
 
 ```bash
-AUTOPILOT_CLI="${CLAUDE_PLUGIN_ROOT}/cli/target/release/autopilot"
-
-$AUTOPILOT_CLI issue create \
+autopilot issue create \
   --title "feat(auth): implement token refresh" \
   --label "{label_prefix}ready" \
   --fingerprint "gap:spec/auth.md:token-refresh" \
@@ -101,7 +99,7 @@ Exit codes:
 중복 확인만 필요한 경우:
 
 ```bash
-$AUTOPILOT_CLI issue check-dup --fingerprint "gap:spec/auth.md:token-refresh"
+autopilot issue check-dup --fingerprint "gap:spec/auth.md:token-refresh"
 ```
 
 ### CI failure 이슈 자동 정리
@@ -109,7 +107,7 @@ $AUTOPILOT_CLI issue check-dup --fingerprint "gap:spec/auth.md:token-refresh"
 관련 PR이 머지된 CI failure 이슈를 자동 close:
 
 ```bash
-$AUTOPILOT_CLI issue close-resolved --label-prefix "{label_prefix}"
+autopilot issue close-resolved --label-prefix "{label_prefix}"
 ```
 
 ### Body fingerprint 삽입

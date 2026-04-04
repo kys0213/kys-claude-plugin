@@ -24,10 +24,8 @@ skills: ["issue-label"]
 각 이슈의 형식:
 
 ```bash
-AUTOPILOT_CLI="${CLAUDE_PLUGIN_ROOT}/cli/target/release/autopilot"
-
 # fingerprint 형식: gap:{spec_path}:{requirement_keyword}
-$AUTOPILOT_CLI issue create \
+autopilot issue create \
   --title "feat(scope): implement [requirement description]" \
   --label "{label_prefix}ready" \
   --fingerprint "gap:${SPEC_PATH}:${REQUIREMENT_KEYWORD}" \

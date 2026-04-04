@@ -36,8 +36,7 @@ git fetch origin
 ### Step 2.5: Pipeline Idle Check
 
 ```bash
-AUTOPILOT_CLI="${CLAUDE_PLUGIN_ROOT}/cli/target/release/autopilot"
-$AUTOPILOT_CLI pipeline idle --label-prefix "{label_prefix}"
+autopilot pipeline idle --label-prefix "{label_prefix}"
 ```
 
 - **exit 0 (idle)**: 기존 cron을 정리한 뒤 종료합니다.

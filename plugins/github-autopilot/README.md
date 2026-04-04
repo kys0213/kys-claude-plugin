@@ -105,19 +105,17 @@ notification: "Slack DM으로 @irene에게 알려줘"
 | `ci-watch` | `ci:{workflow}:{branch}:{failure_type}` | `ci:validate.yml:main:test-failure` |
 
 ```bash
-AUTOPILOT_CLI="${CLAUDE_PLUGIN_ROOT}/cli/target/release/autopilot"
-
 # 이슈 생성 (중복 확인 + fingerprint 삽입 내장)
-$AUTOPILOT_CLI issue create --title "..." --label "autopilot:ready" --fingerprint "gap:spec/auth.md:token-refresh" --body "..."
+autopilot issue create --title "..." --label "autopilot:ready" --fingerprint "gap:spec/auth.md:token-refresh" --body "..."
 
 # 중복 확인만
-$AUTOPILOT_CLI issue check-dup --fingerprint "gap:spec/auth.md:token-refresh"
+autopilot issue check-dup --fingerprint "gap:spec/auth.md:token-refresh"
 
 # CI failure 이슈 자동 정리 (PR 머지 시)
-$AUTOPILOT_CLI issue close-resolved --label-prefix "autopilot:"
+autopilot issue close-resolved --label-prefix "autopilot:"
 
 # 파이프라인 idle 체크
-$AUTOPILOT_CLI pipeline idle --label-prefix "autopilot:"
+autopilot pipeline idle --label-prefix "autopilot:"
 ```
 
 ## 커맨드

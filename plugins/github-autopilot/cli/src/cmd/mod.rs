@@ -5,7 +5,11 @@ pub mod pipeline;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "autopilot", about = "github-autopilot deterministic CLI")]
+#[command(
+    name = "autopilot",
+    version,
+    about = "github-autopilot deterministic CLI"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

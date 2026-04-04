@@ -42,8 +42,7 @@ git pull --rebase origin $(git branch --show-current) 2>/dev/null || true
 ### Step 2.5: Pipeline Idle Check
 
 ```bash
-AUTOPILOT_CLI="${CLAUDE_PLUGIN_ROOT}/cli/target/release/autopilot"
-$AUTOPILOT_CLI pipeline idle --label-prefix "{label_prefix}"
+autopilot pipeline idle --label-prefix "{label_prefix}"
 ```
 
 - **exit 0 (idle)**: 기존 cron을 정리한 뒤 종료합니다.
@@ -94,7 +93,7 @@ src/api/handler.rs   → tests/api_test.rs ⚠️ (있지만 handler 관련 테�
 # fingerprint 형식: qa:{source_file_path}:{test_type}
 FINGERPRINT="qa:src/auth/refresh.rs:unit"
 
-$AUTOPILOT_CLI issue check-dup --fingerprint "$FINGERPRINT"
+autopilot issue check-dup --fingerprint "$FINGERPRINT"
 ```
 
 중복인 갭은 skip합니다.
@@ -104,7 +103,7 @@ $AUTOPILOT_CLI issue check-dup --fingerprint "$FINGERPRINT"
 테스트 보강이 필요한 각 항목에 대해 autopilot CLI로 이슈를 생성합니다:
 
 ```bash
-$AUTOPILOT_CLI issue create \
+autopilot issue create \
   --title "test(scope): add missing tests for [source file/module]" \
   --label "{label_prefix}ready" \
   --fingerprint "qa:${SOURCE_FILE}:${TEST_TYPE}" \
