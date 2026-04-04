@@ -1,10 +1,11 @@
 use anyhow::Result;
+use std::sync::Arc;
 
-use crate::gh;
+use crate::gh::{self, GhOps};
 
 /// Check if the autopilot pipeline is idle (no active issues or PRs).
 /// Returns exit code: 0 = idle, 1 = active.
-pub fn idle(label_prefix: &str) -> Result<i32> {
+pub fn idle(client: Arc<dyn GhOps>, label_prefix: &str) -> Result<i32> {
     use super::labels;
     let ready_label = labels::with_prefix(label_prefix, labels::READY);
     let wip_label = labels::with_prefix(label_prefix, labels::WIP);
@@ -12,27 +13,39 @@ pub fn idle(label_prefix: &str) -> Result<i32> {
 
     let results = gh::run_parallel(vec![
         Box::new({
+            let gh = Arc::clone(&client);
             let label = ready_label.clone();
             move || {
-                count_items(&[
-                    "issue", "list", "--label", &label, "--state", "open", "--json", "number",
-                ])
+                gh::count_items(
+                    gh.as_ref(),
+                    &[
+                        "issue", "list", "--label", &label, "--state", "open", "--json", "number",
+                    ],
+                )
             }
         }),
         Box::new({
+            let gh = Arc::clone(&client);
             let label = wip_label.clone();
             move || {
-                count_items(&[
-                    "issue", "list", "--label", &label, "--state", "open", "--json", "number",
-                ])
+                gh::count_items(
+                    gh.as_ref(),
+                    &[
+                        "issue", "list", "--label", &label, "--state", "open", "--json", "number",
+                    ],
+                )
             }
         }),
         Box::new({
+            let gh = Arc::clone(&client);
             let label = auto_label.clone();
             move || {
-                count_items(&[
-                    "pr", "list", "--label", &label, "--state", "open", "--json", "number",
-                ])
+                gh::count_items(
+                    gh.as_ref(),
+                    &[
+                        "pr", "list", "--label", &label, "--state", "open", "--json", "number",
+                    ],
+                )
             }
         }),
     ]);
@@ -56,9 +69,4 @@ pub fn idle(label_prefix: &str) -> Result<i32> {
     } else {
         Ok(1)
     }
-}
-
-fn count_items(args: &[&str]) -> Result<u64> {
-    let items = gh::list_json(args)?;
-    Ok(items.len() as u64)
 }
