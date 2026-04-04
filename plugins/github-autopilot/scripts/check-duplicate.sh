@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# DEPRECATED: Use `autopilot issue check-dup --fingerprint <fp>` instead.
+# This script is kept for backward compatibility.
+#
 # check-duplicate.sh — fingerprint 기반 이슈 중복 검사
 #
 # Usage:

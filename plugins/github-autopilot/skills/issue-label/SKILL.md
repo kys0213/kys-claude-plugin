@@ -79,26 +79,40 @@ gh pr create \
 - requirement_keyword는 핵심 키워드를 kebab-case로 변환 (2~4단어)
 - failure_type은 `test-failure`, `build-error`, `lint-error` 등 카테고리
 
-### 중복 검색 (스크립트)
+### autopilot CLI를 사용한 이슈 생성 (권장)
 
-`scripts/check-duplicate.sh`를 사용하여 중복을 확인한다:
+`autopilot issue create` 명령이 중복 확인 + 이슈 생성 + fingerprint 삽입을 한 번에 처리한다:
 
 ```bash
-# 중복 확인 — exit 0이면 생성 가능, exit 1이면 중복
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "gap:spec/auth.md:token-refresh"
+autopilot issue create \
+  --title "feat(auth): implement token refresh" \
+  --label "{label_prefix}ready" \
+  --fingerprint "gap:spec/auth.md:token-refresh" \
+  --body "## 요구사항 ..."
 ```
 
-출력:
-```json
-{"duplicate": false}                                          # 생성 가능
-{"duplicate": true, "issue_number": 42, "issue_title": "..."}  # 중복 → skip
+Exit codes:
+- `0`: 이슈 생성됨 (JSON: `{"created": true, "issue_number": 42, "url": "..."}`)
+- `1`: 중복 존재, skip (JSON: `{"created": false, "duplicate": true, "issue_number": 42, ...}`)
+- `2`: 오류
+
+중복 확인만 필요한 경우:
+
+```bash
+autopilot issue check-dup --fingerprint "gap:spec/auth.md:token-refresh"
 ```
 
-이슈를 생성하기 전에 **반드시 이 스크립트를 먼저 실행**한다.
+### CI failure 이슈 자동 정리
 
-### Body에 fingerprint 삽입
+관련 PR이 머지된 CI failure 이슈를 자동 close:
 
-이슈 body 맨 하단에 HTML 주석으로 삽입한다:
+```bash
+autopilot issue close-resolved --label-prefix "{label_prefix}"
+```
+
+### Body fingerprint 삽입
+
+`autopilot issue create` 사용 시 body 하단에 fingerprint HTML 주석이 **자동 삽입**된다:
 
 ```markdown
 ---

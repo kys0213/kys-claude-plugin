@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# DEPRECATED: Use `autopilot pipeline idle --label-prefix <prefix>` instead.
+# This script is kept for backward compatibility.
+#
 # check-idle.sh — autopilot 파이프라인 idle 상태 검사
 #
 # Usage:

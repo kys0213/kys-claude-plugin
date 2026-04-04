@@ -38,7 +38,7 @@ git pull --rebase origin $(git branch --show-current) 2>/dev/null || true
 ### Step 2.5: Pipeline Idle Check
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-idle.sh "{label_prefix}"
+autopilot pipeline idle --label-prefix "{label_prefix}"
 ```
 
 - **exit 0 (idle)**: 기존 cron을 정리한 뒤 종료합니다.

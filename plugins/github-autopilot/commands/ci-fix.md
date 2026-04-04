@@ -36,7 +36,7 @@ git fetch origin
 ### Step 2.5: Pipeline Idle Check
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-idle.sh "{label_prefix}"
+autopilot pipeline idle --label-prefix "{label_prefix}"
 ```
 
 - **exit 0 (idle)**: `notification` 설정이 있으면 "autopilot 파이프라인 완료 — ci-fix cycle 중단" 알림 발송. CronCreate를 등록하지 않고 종료.

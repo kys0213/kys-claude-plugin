@@ -1,0 +1,22 @@
+[package]
+name = "autopilot"
+version = "0.8.1"
+edition = "2021"
+
+[lib]
+name = "autopilot"
+path = "src/lib.rs"
+
+[[bin]]
+name = "autopilot"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = true
+strip = true
