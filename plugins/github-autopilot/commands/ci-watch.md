@@ -1,7 +1,7 @@
 ---
 description: "CI 실패를 모니터링하고 분석하여 GitHub issue를 생성합니다"
-argument-hint: "[interval: 20m, 1h, ...]"
-allowed-tools: ["Bash", "Read", "Agent", "CronCreate", "CronDelete", "CronList"]
+argument-hint: ""
+allowed-tools: ["Bash", "Read", "Agent"]
 ---
 
 # CI Watch
@@ -11,10 +11,10 @@ GitHub Actions의 CI 실패를 감시하고, 실패 원인을 분석하여 GitHu
 ## 사용법
 
 ```bash
-/github-autopilot:ci-watch          # 1회 실행
-/github-autopilot:ci-watch 20m      # 20분마다 반복
-/github-autopilot:ci-watch 1h       # 1시간마다 반복
+/github-autopilot:ci-watch
 ```
+
+> 반복 실행은 `/github-autopilot:autopilot`이 `run-loop.sh`로 관리합니다.
 
 ## Context
 
@@ -23,39 +23,29 @@ GitHub Actions의 CI 실패를 감시하고, 실패 원인을 분석하여 GitHu
 
 ## 작업 프로세스
 
-### Step 1: 인자 파싱
-
-`$ARGUMENTS`에서 interval을 추출합니다.
-- `/^\d+[smh]$/` 패턴 매칭 → interval 모드
-- 비어있으면 → 1회 실행 모드
-
-### Step 2: 최신 상태 동기화
+### Step 1: 최신 상태 동기화
 
 ```bash
 git fetch origin
 ```
 
-### Step 2.5: Pipeline Idle Check
+### Step 1.5: Pipeline Idle Check
 
 ```bash
 autopilot pipeline idle --label-prefix "{label_prefix}"
 ```
 
-- **exit 0 (idle)**: 기존 cron을 정리한 뒤 종료합니다.
-  1. CronList로 현재 등록된 cron 목록을 조회
-  2. `ci-watch`가 포함된 cron job을 찾아 CronDelete로 삭제
-  3. `notification` 설정이 있으면 "autopilot 파이프라인 완료 — ci-watch cycle 중단" 알림 발송
-  4. CronCreate를 등록하지 않고 종료
-- **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다 (CronCreate는 등록하여 다음 cycle에서 재시도).
-- **exit 1 (active)**: Step 3부터 정상 진행.
+- **exit 0 (idle)**: `notification` 설정이 있으면 "autopilot 파이프라인 완료 — ci-watch cycle 중단" 알림 발송 후 종료합니다.
+- **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다.
+- **exit 1 (active)**: Step 2부터 정상 진행.
 
-### Step 3: CI 실패 목록 조회
+### Step 2: CI 실패 목록 조회
 
 ```bash
 gh run list --status failure --limit 10 --json databaseId,name,headBranch,conclusion,createdAt
 ```
 
-### Step 4: 중복 이슈 필터링
+### Step 3: 중복 이슈 필터링
 
 설정에서 label_prefix를 확인합니다 (기본값: `autopilot:`).
 
@@ -69,9 +59,9 @@ FINGERPRINT="ci:validate.yml:main:test-failure"
 autopilot issue check-dup --fingerprint "$FINGERPRINT"
 ```
 
-중복이 아닌 실패만 Step 5로 진행합니다.
+중복이 아닌 실패만 Step 4로 진행합니다.
 
-### Step 5: 실패 분석 (Agent Team)
+### Step 4: 실패 분석 (Agent Team)
 
 새로운 실패 각각에 대해 ci-failure-analyzer 에이전트를 호출합니다.
 
@@ -83,7 +73,7 @@ autopilot issue check-dup --fingerprint "$FINGERPRINT"
 - run_name (워크플로우 이름)
 - head_branch (실패한 브랜치)
 
-### Step 5.5: CI Failure 이슈 자동 정리
+### Step 4.5: CI Failure 이슈 자동 정리
 
 이슈를 생성하기 전에, 기존 CI failure 이슈 중 관련 PR이 이미 머지된 것을 정리합니다:
 
@@ -93,7 +83,7 @@ autopilot issue close-resolved --label-prefix "{label_prefix}"
 
 이 명령은 `{label_prefix}ci-failure` 라벨이 붙은 열린 이슈를 조회하여, 제목에서 브랜치명을 추출하고 해당 브랜치의 PR이 MERGED 상태이면 이슈를 자동 close합니다.
 
-### Step 6: Issue 생성
+### Step 5: Issue 생성
 
 분석 결과를 바탕으로 autopilot CLI로 이슈를 생성합니다:
 
@@ -128,14 +118,7 @@ EOF
 
 > **참고**: fingerprint HTML 주석은 CLI가 body 하단에 자동 삽입합니다.
 
-### Step 7: CronCreate (interval 모드)
-
-interval이 지정된 경우에만 실행합니다:
-
-CronCreate를 호출하여 `/github-autopilot:ci-watch` 를 지정된 interval로 등록합니다.
-등록 시 interval 인자는 포함하지 않습니다 (재귀 등록 방지).
-
-### Step 8: 결과 보고
+### Step 6: 결과 보고
 
 생성된 이슈 목록과 분석 요약을 사용자에게 출력합니다.
 

@@ -1,8 +1,10 @@
+pub mod check;
 pub mod issue;
 pub mod labels;
 pub mod pipeline;
+pub mod preflight;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
@@ -27,6 +29,42 @@ pub enum Commands {
         #[command(subcommand)]
         command: PipelineCommands,
     },
+    /// Change detection and state management
+    Check {
+        #[command(subcommand)]
+        command: CheckCommands,
+    },
+    /// Pre-flight environment verification
+    Preflight(PreflightArgs),
+}
+
+#[derive(Subcommand)]
+pub enum CheckCommands {
+    /// Diff since last mark, categorize spec vs code changes
+    Diff {
+        /// Loop name identifier
+        loop_name: String,
+        /// Comma-separated spec path prefixes
+        #[arg(long, value_delimiter = ',')]
+        spec_paths: Vec<String>,
+    },
+    /// Record current HEAD as analyzed
+    Mark {
+        /// Loop name identifier
+        loop_name: String,
+    },
+    /// Show state of all loops
+    Status,
+}
+
+#[derive(Args)]
+pub struct PreflightArgs {
+    /// Path to config file
+    #[arg(long, default_value = "github-autopilot.local.md")]
+    pub config: String,
+    /// Repository root directory
+    #[arg(long, default_value = ".")]
+    pub repo_root: String,
 }
 
 #[derive(Subcommand)]
