@@ -39,7 +39,8 @@ git fetch origin
 ### Step 2.5: Pipeline Idle Check
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-idle.sh "{label_prefix}"
+AUTOPILOT_CLI="${CLAUDE_PLUGIN_ROOT}/cli/target/release/autopilot"
+$AUTOPILOT_CLI pipeline idle --label-prefix "{label_prefix}"
 ```
 
 - **exit 0 (idle)**: 기존 cron을 정리한 뒤 종료합니다.
@@ -90,16 +91,13 @@ test_watch:
 
 **failed**: 이슈 생성 프로세스 진행
 
-1. fingerprint 중복 확인:
-   ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "test:${test_name}:${failure_hash}"
-   ```
+autopilot CLI로 이슈를 생성합니다 (중복 확인 내장):
 
-2. 중복이 아닌 경우 이슈 생성:
    ```bash
-   gh issue create \
+   $AUTOPILOT_CLI issue create \
      --title "fix: ${test_name} test failure - ${summary}" \
      --label "{label_prefix}ready" \
+     --fingerprint "test:${test_name}:${failure_hash}" \
      --body "$(cat <<'EOF'
    ## 테스트 실패 분석
 
@@ -115,12 +113,11 @@ test_watch:
    ## 수정 제안
 
    ${suggested_fix}
-
-   ---
-   <!-- fingerprint: test:${test_name}:${failure_hash} -->
    EOF
    )"
    ```
+
+   > **참고**: fingerprint HTML 주석은 CLI가 body 하단에 자동 삽입합니다. exit 1이면 중복(skip).
 
 ### Step 6: CronCreate
 

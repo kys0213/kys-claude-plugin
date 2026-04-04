@@ -96,7 +96,7 @@ notification: "Slack DM으로 @irene에게 알려줘"
 
 ## 중복 방지
 
-이슈 body에 fingerprint를 HTML 주석으로 삽입하고, `scripts/check-duplicate.sh`로 생성 전 검색합니다.
+이슈 body에 fingerprint를 HTML 주석으로 삽입하고, `autopilot` CLI로 중복을 확인합니다.
 
 | 소스 | fingerprint 형식 | 예시 |
 |------|-----------------|------|
@@ -105,8 +105,19 @@ notification: "Slack DM으로 @irene에게 알려줘"
 | `ci-watch` | `ci:{workflow}:{branch}:{failure_type}` | `ci:validate.yml:main:test-failure` |
 
 ```bash
-# 중복 확인 — exit 0이면 생성 가능, exit 1이면 중복
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "gap:spec/auth.md:token-refresh"
+AUTOPILOT_CLI="${CLAUDE_PLUGIN_ROOT}/cli/target/release/autopilot"
+
+# 이슈 생성 (중복 확인 + fingerprint 삽입 내장)
+$AUTOPILOT_CLI issue create --title "..." --label "autopilot:ready" --fingerprint "gap:spec/auth.md:token-refresh" --body "..."
+
+# 중복 확인만
+$AUTOPILOT_CLI issue check-dup --fingerprint "gap:spec/auth.md:token-refresh"
+
+# CI failure 이슈 자동 정리 (PR 머지 시)
+$AUTOPILOT_CLI issue close-resolved --label-prefix "autopilot:"
+
+# 파이프라인 idle 체크
+$AUTOPILOT_CLI pipeline idle --label-prefix "autopilot:"
 ```
 
 ## 커맨드

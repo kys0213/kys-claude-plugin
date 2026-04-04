@@ -38,7 +38,8 @@ git fetch origin
 ### Step 2.5: Pipeline Idle Check
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-idle.sh "{label_prefix}"
+AUTOPILOT_CLI="${CLAUDE_PLUGIN_ROOT}/cli/target/release/autopilot"
+$AUTOPILOT_CLI pipeline idle --label-prefix "{label_prefix}"
 ```
 
 - **exit 0 (idle)**: 기존 cron을 정리한 뒤 종료합니다.
@@ -66,7 +67,7 @@ gh run list --status failure --limit 10 --json databaseId,name,headBranch,conclu
 FINGERPRINT="ci:validate.yml:main:test-failure"
 
 # 중복 확인 — exit 1이면 skip
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "$FINGERPRINT"
+$AUTOPILOT_CLI issue check-dup --fingerprint "$FINGERPRINT"
 ```
 
 중복이 아닌 실패만 Step 5로 진행합니다.
@@ -83,15 +84,26 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/check-duplicate.sh "$FINGERPRINT"
 - run_name (워크플로우 이름)
 - head_branch (실패한 브랜치)
 
-### Step 6: Issue 생성
+### Step 5.5: CI Failure 이슈 자동 정리
 
-분석 결과를 바탕으로 GitHub issue를 생성합니다:
+이슈를 생성하기 전에, 기존 CI failure 이슈 중 관련 PR이 이미 머지된 것을 정리합니다:
 
 ```bash
-gh issue create \
+$AUTOPILOT_CLI issue close-resolved --label-prefix "{label_prefix}"
+```
+
+이 명령은 `{label_prefix}ci-failure` 라벨이 붙은 열린 이슈를 조회하여, 제목에서 브랜치명을 추출하고 해당 브랜치의 PR이 MERGED 상태이면 이슈를 자동 close합니다.
+
+### Step 6: Issue 생성
+
+분석 결과를 바탕으로 autopilot CLI로 이슈를 생성합니다:
+
+```bash
+$AUTOPILOT_CLI issue create \
   --title "fix: CI failure in ${WORKFLOW_NAME} on ${BRANCH}" \
   --label "{label_prefix}ci-failure" \
   --label "{label_prefix}ready" \
+  --fingerprint "ci:${WORKFLOW_NAME}:${BRANCH}:${FAILURE_TYPE}" \
   --body "$(cat <<'EOF'
 ## CI 실패 분석
 
@@ -111,14 +123,11 @@ ${AFFECTED_FILES}
 ## 수정 제안
 
 ${SUGGESTED_FIX}
-
----
-<!-- fingerprint: ci:${WORKFLOW_NAME}:${BRANCH}:${FAILURE_TYPE} -->
 EOF
 )"
 ```
 
-> **중요**: `<!-- fingerprint: ... -->` 주석을 body 맨 하단에 반드시 포함한다.
+> **참고**: fingerprint HTML 주석은 CLI가 body 하단에 자동 삽입합니다.
 
 ### Step 7: CronCreate (interval 모드)
 
