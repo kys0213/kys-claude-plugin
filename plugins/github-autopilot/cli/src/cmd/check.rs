@@ -48,6 +48,13 @@ fn state_dir(git: &dyn GitOps) -> Result<PathBuf> {
     Ok(PathBuf::from(format!("/tmp/autopilot-{repo}/state")))
 }
 
+fn validate_loop_name(name: &str) -> Result<()> {
+    if name.is_empty() || name.contains("..") || name.contains('/') || name.contains('\\') {
+        anyhow::bail!("invalid loop_name: {name}");
+    }
+    Ok(())
+}
+
 /// Check what changed since last analysis.
 ///
 /// Exit codes: 0=no_changes, 1=spec_changed, 2=code_changed, 3=first_run
@@ -57,6 +64,7 @@ pub fn diff(
     loop_name: &str,
     spec_paths: &[String],
 ) -> Result<i32> {
+    validate_loop_name(loop_name)?;
     let state_file = state_dir(git)?.join(format!("{loop_name}.state"));
 
     // Try reading state file; missing file means first run
@@ -114,6 +122,7 @@ pub fn diff(
 
 /// Record current HEAD as the last analyzed commit.
 pub fn mark(git: &dyn GitOps, fs: &dyn FsOps, loop_name: &str) -> Result<i32> {
+    validate_loop_name(loop_name)?;
     let state_file = state_dir(git)?.join(format!("{loop_name}.state"));
     let hash = git.rev_parse_head()?;
     let ts = utc_timestamp();
@@ -205,7 +214,7 @@ pub(crate) fn format_epoch_secs(secs: u64) -> String {
         30,
         31,
     ];
-    let mut mo = 0usize;
+    let mut mo = 11usize;
     for (i, &md) in month_days.iter().enumerate() {
         if days < md {
             mo = i;
@@ -254,5 +263,26 @@ mod tests {
     fn test_format_epoch_secs_year_boundary() {
         // 2025-01-01T00:00:00Z
         assert_eq!(format_epoch_secs(1735689600), "2025-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn test_format_epoch_secs_dec_31() {
+        // 1970-12-31T23:59:59Z — last second of the year (boundary case)
+        assert_eq!(format_epoch_secs(31535999), "1970-12-31T23:59:59Z");
+    }
+
+    #[test]
+    fn test_validate_loop_name_rejects_traversal() {
+        assert!(validate_loop_name("../etc/passwd").is_err());
+        assert!(validate_loop_name("foo/bar").is_err());
+        assert!(validate_loop_name("foo\\bar").is_err());
+        assert!(validate_loop_name("").is_err());
+    }
+
+    #[test]
+    fn test_validate_loop_name_accepts_valid() {
+        assert!(validate_loop_name("gap-watch").is_ok());
+        assert!(validate_loop_name("test-watch-e2e").is_ok());
+        assert!(validate_loop_name("build-issues").is_ok());
     }
 }
