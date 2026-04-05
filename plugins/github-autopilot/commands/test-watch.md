@@ -1,7 +1,7 @@
 ---
 description: "설정된 테스트 스위트를 주기적으로 실행하고 실패 시 이슈를 생성합니다"
-argument-hint: "<test_name> [interval]"
-allowed-tools: ["Bash", "Read", "Agent", "CronCreate", "CronDelete", "CronList"]
+argument-hint: "<test_name>"
+allowed-tools: ["Bash", "Read", "Agent"]
 ---
 
 # Test Watch
@@ -11,10 +11,11 @@ allowed-tools: ["Bash", "Read", "Agent", "CronCreate", "CronDelete", "CronList"]
 ## 사용법
 
 ```bash
-/github-autopilot:test-watch                    # 설정된 모든 스위트 1회 실행 + CronCreate 등록
-/github-autopilot:test-watch e2e                # e2e 스위트만 1회 실행
-/github-autopilot:test-watch e2e 2h             # e2e 스위트를 2시간마다 반복
+/github-autopilot:test-watch e2e                # e2e 스위트 1회 실행
+/github-autopilot:test-watch performance         # performance 스위트 1회 실행
 ```
+
+> 반복 실행은 `/github-autopilot:autopilot`이 `run-loop.sh`로 관리합니다.
 
 ## Context
 
@@ -25,10 +26,9 @@ allowed-tools: ["Bash", "Read", "Agent", "CronCreate", "CronDelete", "CronList"]
 
 ### Step 1: 인자 파싱
 
-`$ARGUMENTS`에서 test_name과 interval을 추출합니다.
+`$ARGUMENTS`에서 test_name을 추출합니다.
 - `{test_name}` → 특정 스위트 1회 실행
-- `{test_name} {interval}` → 특정 스위트 반복 실행
-- 비어있으면 → 전체 스위트 1회 실행 + 각 스위트별 CronCreate 등록
+- 비어있으면 → 전체 스위트 1회 실행
 
 ### Step 2: 최신 상태 동기화
 
@@ -42,12 +42,8 @@ git fetch origin
 autopilot pipeline idle --label-prefix "{label_prefix}"
 ```
 
-- **exit 0 (idle)**: 기존 cron을 정리한 뒤 종료합니다.
-  1. CronList로 현재 등록된 cron 목록을 조회
-  2. `test-watch`가 포함된 cron job을 찾아 CronDelete로 삭제
-  3. `notification` 설정이 있으면 "autopilot 파이프라인 완료 — test-watch cycle 중단" 알림 발송
-  4. CronCreate를 등록하지 않고 종료
-- **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다 (CronCreate는 등록하여 다음 cycle에서 재시도).
+- **exit 0 (idle)**: `notification` 설정이 있으면 "autopilot 파이프라인 완료 — test-watch cycle 중단" 알림 발송 후 종료합니다.
+- **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다.
 - **exit 1 (active)**: Step 3부터 정상 진행.
 
 ### Step 3: 테스트 스위트 로딩
@@ -118,21 +114,7 @@ autopilot CLI로 이슈를 생성합니다 (중복 확인 내장):
 
    > **참고**: fingerprint HTML 주석은 CLI가 body 하단에 자동 삽입합니다. exit 1이면 중복(skip).
 
-### Step 6: CronCreate
-
-**특정 스위트 + interval 지정**: 해당 스위트만 CronCreate 등록
-```
-CronCreate: /github-autopilot:test-watch {test_name} — interval: {interval}
-```
-
-**전체 실행 모드 (인자 없음)**: 각 스위트별 개별 CronCreate 등록
-```
-CronCreate: /github-autopilot:test-watch {suite.name} — interval: {suite.interval}
-```
-
-이렇게 하면 각 스위트가 자신의 interval에 따라 독립적으로 실행됩니다.
-
-### Step 7: 결과 보고
+### Step 6: 결과 보고
 
 ```
 ## Test Watch 결과
@@ -145,10 +127,6 @@ CronCreate: /github-autopilot:test-watch {suite.name} — interval: {suite.inter
 
 ### 생성된 이슈
 - #55: fix: e2e test failure - login flow timeout
-
-### CronCreate 등록
-- test-watch e2e → 2h interval
-- test-watch performance → 6h interval
 ```
 
 ## 주의사항
@@ -156,4 +134,3 @@ CronCreate: /github-autopilot:test-watch {suite.name} — interval: {suite.inter
 - issue-label 스킬의 라벨 필수 규칙과 fingerprint 규칙을 반드시 따른다
 - environment_error 분류의 실패는 이슈를 생성하지 않는다 (일시적 환경 문제)
 - 토큰 최적화: MainAgent는 설정 로딩과 이슈 생성만 수행, 테스트 실행/분석은 모두 Agent에 위임
-- 각 스위트가 독립적 CronCreate를 가지므로, 스위트 추가/제거 시 CronDelete로 정리 필요

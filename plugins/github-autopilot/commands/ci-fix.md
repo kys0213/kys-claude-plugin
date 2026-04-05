@@ -1,7 +1,7 @@
 ---
 description: "autopilot PR의 CI 실패를 tick 단위로 분석/수정합니다"
-argument-hint: "[interval: 10m, 30m, ...]"
-allowed-tools: ["Bash", "Read", "Agent", "CronCreate"]
+argument-hint: ""
+allowed-tools: ["Bash", "Read", "Agent"]
 ---
 
 # CI Fix
@@ -11,9 +11,10 @@ autopilot이 생성한 PR의 CI 실패를 감지하고, tick 단위로 수정을
 ## 사용법
 
 ```bash
-/github-autopilot:ci-fix          # 1회 실행
-/github-autopilot:ci-fix 15m      # 15분마다 반복
+/github-autopilot:ci-fix
 ```
+
+> 반복 실행은 `/github-autopilot:autopilot`이 `run-loop.sh`로 관리합니다.
 
 ## Context
 
@@ -21,28 +22,23 @@ autopilot이 생성한 PR의 CI 실패를 감지하고, tick 단위로 수정을
 
 ## 작업 프로세스
 
-### Step 1: 인자 파싱
-
-`$ARGUMENTS`에서 interval을 추출합니다.
-- `/^\d+[smh]$/` 패턴 매칭 → interval 모드
-- 비어있으면 → 1회 실행 모드
-
-### Step 2: 최신 상태 동기화
+### Step 1: 최신 상태 동기화
 
 ```bash
 git fetch origin
 ```
 
-### Step 2.5: Pipeline Idle Check
+### Step 1.5: Pipeline Idle Check
 
 ```bash
 autopilot pipeline idle --label-prefix "{label_prefix}"
 ```
 
-- **exit 0 (idle)**: `notification` 설정이 있으면 "autopilot 파이프라인 완료 — ci-fix cycle 중단" 알림 발송. CronCreate를 등록하지 않고 종료.
-- **exit 1 (active)**: Step 3부터 정상 진행.
+- **exit 0 (idle)**: `notification` 설정이 있으면 "autopilot 파이프라인 완료 — ci-fix cycle 중단" 알림 발송 후 종료합니다.
+- **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다.
+- **exit 1 (active)**: Step 2부터 정상 진행.
 
-### Step 3: CI 실패 PR 조회
+### Step 2: CI 실패 PR 조회
 
 설정에서 label_prefix를 확인합니다 (기본값: `autopilot:`).
 
@@ -54,7 +50,7 @@ statusCheckRollup에서 FAILURE 상태인 PR만 필터링합니다.
 
 CI 실패 PR이 없으면 "CI 실패 PR 없음" 출력 후 종료.
 
-### Step 4: 재시도 횟수 확인
+### Step 3: 재시도 횟수 확인
 
 각 CI 실패 PR의 코멘트에서 재시도 마커를 확인합니다:
 
@@ -79,9 +75,9 @@ gh pr view ${PR_NUMBER} --json comments --jq '.comments[].body' | grep -o '<!-- 
 - `notification` 설정이 있으면 알림 발송
 - 해당 PR을 skip하고 다음 PR로 진행
 
-**N < max_ci_fix_retries**: Step 5로 진행
+**N < max_ci_fix_retries**: Step 4로 진행
 
-### Step 5: CI 수정 (Agent Team)
+### Step 4: CI 수정 (Agent Team)
 
 수정 대상 PR 각각에 대해 ci-fixer 에이전트를 호출합니다:
 
@@ -96,7 +92,7 @@ gh pr view ${PR_NUMBER} --json comments --jq '.comments[].body' | grep -o '<!-- 
 - retry_count: N
 - quality_gate_command: 설정에서 읽은 값
 
-### Step 6: 결과 수집
+### Step 5: 결과 수집
 
 각 에이전트 결과를 처리합니다:
 
@@ -118,13 +114,7 @@ gh pr view ${PR_NUMBER} --json comments --jq '.comments[].body' | grep -o '<!-- 
 - PR에 실패 코멘트 게시 (재시도 마커 포함)
 - 다음 tick에서 다시 시도
 
-### Step 7: CronCreate (interval 모드)
-
-interval이 지정된 경우에만 실행합니다:
-
-CronCreate를 호출하여 `/github-autopilot:ci-fix`를 지정된 interval로 등록합니다.
-
-### Step 8: 결과 보고
+### Step 6: 결과 보고
 
 ```
 ## CI Fix 결과
