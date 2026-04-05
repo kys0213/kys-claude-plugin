@@ -34,6 +34,7 @@ fn create_skips_when_duplicate_exists() {
         label: vec!["autopilot:ready".to_string()],
         fingerprint: "gap:spec/auth.md:token-refresh".to_string(),
         body: "## Requirement".to_string(),
+        simhash: None,
     };
 
     let code = autopilot::cmd::issue::create(&gh, &args).unwrap();
@@ -58,6 +59,7 @@ fn create_creates_issue_when_no_duplicate() {
         label: vec!["autopilot:ready".to_string()],
         fingerprint: "gap:spec/auth.md:token-refresh".to_string(),
         body: "## Requirement".to_string(),
+        simhash: None,
     };
 
     let code = autopilot::cmd::issue::create(&gh, &args).unwrap();

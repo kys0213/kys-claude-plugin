@@ -19,6 +19,9 @@ fn main() {
                 IssueCommands::CloseResolved { label_prefix } => {
                     cmd::issue::close_resolved(client.as_ref(), &label_prefix)
                 }
+                IssueCommands::SearchSimilar(args) => {
+                    cmd::issue::search_similar(client.as_ref(), &args)
+                }
             }
         }
         Commands::Pipeline { command } => {
@@ -30,24 +33,25 @@ fn main() {
             }
         }
         Commands::Check { command } => {
-            let git_client = git::real();
-            let fs_client = fs::real();
+            use cmd::check::spec_code::SpecCodeAnalysis;
+            use cmd::check::stagnation::StagnationAnalysis;
+            use cmd::check::CheckService;
+
+            let svc = CheckService::new(
+                git::real(),
+                fs::real(),
+                vec![Box::new(SpecCodeAnalysis), Box::new(StagnationAnalysis)],
+            );
             match command {
                 CheckCommands::Diff {
                     loop_name,
                     spec_paths,
-                } => cmd::check::diff(
-                    git_client.as_ref(),
-                    fs_client.as_ref(),
-                    &loop_name,
-                    &spec_paths,
-                ),
-                CheckCommands::Mark { loop_name } => {
-                    cmd::check::mark(git_client.as_ref(), fs_client.as_ref(), &loop_name)
-                }
-                CheckCommands::Status => {
-                    cmd::check::status(git_client.as_ref(), fs_client.as_ref())
-                }
+                } => svc.diff(&loop_name, &spec_paths),
+                CheckCommands::Mark {
+                    loop_name,
+                    output_hash,
+                } => svc.mark(&loop_name, output_hash.as_deref()),
+                CheckCommands::Status => svc.status(),
             }
         }
         Commands::Preflight(PreflightArgs { config, repo_root }) => {

@@ -3,6 +3,7 @@ pub mod issue;
 pub mod labels;
 pub mod pipeline;
 pub mod preflight;
+pub mod simhash;
 
 use clap::{Args, Parser, Subcommand};
 
@@ -52,6 +53,9 @@ pub enum CheckCommands {
     Mark {
         /// Loop name identifier
         loop_name: String,
+        /// Optional simhash of analysis output (for stagnation tracking)
+        #[arg(long)]
+        output_hash: Option<String>,
     },
     /// Show state of all loops
     Status,
@@ -83,6 +87,8 @@ pub enum IssueCommands {
         #[arg(long, default_value = "autopilot:")]
         label_prefix: String,
     },
+    /// Search for similar issues by fingerprint and rank by simhash distance
+    SearchSimilar(issue::SearchSimilarArgs),
 }
 
 #[derive(Subcommand)]

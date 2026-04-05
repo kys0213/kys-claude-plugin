@@ -21,6 +21,25 @@ pub struct CreateArgs {
     /// Issue body (without fingerprint — it is appended automatically)
     #[arg(long)]
     pub body: String,
+
+    /// Optional simhash of gap analysis output (for stagnation tracking)
+    #[arg(long)]
+    pub simhash: Option<String>,
+}
+
+#[derive(Args)]
+pub struct SearchSimilarArgs {
+    /// Fingerprint to search for related issues
+    #[arg(long)]
+    pub fingerprint: String,
+
+    /// Current simhash to compare against
+    #[arg(long)]
+    pub simhash: String,
+
+    /// Maximum number of results
+    #[arg(long, default_value = "5")]
+    pub limit: usize,
 }
 
 /// Check if an open issue with the given fingerprint already exists.
@@ -57,7 +76,7 @@ pub fn create(gh: &dyn GhOps, args: &CreateArgs) -> Result<i32> {
         return Ok(1);
     }
 
-    let body = append_fingerprint(&args.body, &args.fingerprint);
+    let body = append_metadata(&args.body, &args.fingerprint, args.simhash.as_deref());
 
     let mut gh_args: Vec<&str> = vec!["issue", "create", "--title", &args.title, "--body", &body];
     for label in &args.label {
@@ -164,9 +183,85 @@ fn find_duplicate(gh: &dyn GhOps, fingerprint: &str) -> Result<Option<(u64, Stri
     }
 }
 
-/// Append fingerprint HTML comment to body.
+/// Search for issues with the same fingerprint and rank by simhash similarity.
+pub fn search_similar(gh: &dyn GhOps, args: &SearchSimilarArgs) -> Result<i32> {
+    let query_hash = super::simhash::parse_simhash(&args.simhash)
+        .ok_or_else(|| anyhow::anyhow!("invalid simhash: {}", args.simhash))?;
+
+    let search_query = format!("\"{}\" in:body", args.fingerprint);
+    let items = gh.list_json(&[
+        "issue",
+        "list",
+        "--state",
+        "all",
+        "--search",
+        &search_query,
+        "--json",
+        "number,title,state,body",
+        "--limit",
+        "50",
+    ])?;
+
+    let mut results: Vec<Value> = Vec::new();
+
+    for item in &items {
+        let number = item["number"].as_u64().unwrap_or(0);
+        let title = item["title"].as_str().unwrap_or("");
+        let state = item["state"].as_str().unwrap_or("OPEN");
+        let body = item["body"].as_str().unwrap_or("");
+
+        let issue_hash = extract_simhash_from_body(body);
+        let distance = match issue_hash {
+            Some(h) => super::simhash::hamming_distance(query_hash, h),
+            None => 64, // max distance if no simhash found
+        };
+
+        results.push(serde_json::json!({
+            "number": number,
+            "distance": distance,
+            "state": state,
+            "title": title,
+            "simhash": issue_hash.map(super::simhash::format_simhash),
+        }));
+    }
+
+    // Sort by distance ascending
+    results.sort_by_key(|r| r["distance"].as_u64().unwrap_or(64));
+    results.truncate(args.limit);
+
+    let out = serde_json::json!({
+        "query_simhash": super::simhash::format_simhash(query_hash),
+        "results": results,
+    });
+    println!("{out}");
+    Ok(0)
+}
+
+/// Extract simhash from issue body HTML comment.
+fn extract_simhash_from_body(body: &str) -> Option<u64> {
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("<!-- simhash:") {
+            if let Some(hex) = rest.strip_suffix("-->") {
+                return super::simhash::parse_simhash(hex.trim());
+            }
+        }
+    }
+    None
+}
+
+/// Append fingerprint (and optional simhash) HTML comments to body.
 pub fn append_fingerprint(body: &str, fingerprint: &str) -> String {
     format!("{body}\n\n---\n<!-- fingerprint: {fingerprint} -->")
+}
+
+/// Append fingerprint and optional simhash as HTML comments to body.
+fn append_metadata(body: &str, fingerprint: &str, simhash: Option<&str>) -> String {
+    let mut result = format!("{body}\n\n---\n<!-- fingerprint: {fingerprint} -->");
+    if let Some(sh) = simhash {
+        result.push_str(&format!("\n<!-- simhash: {sh} -->"));
+    }
+    result
 }
 
 fn extract_issue_number(url: &str) -> u64 {
@@ -197,6 +292,35 @@ mod tests {
         let result = append_fingerprint(body, fp);
         assert!(result.ends_with("<!-- fingerprint: ci:validate.yml:main:test-failure -->"));
         assert!(result.contains("---\n<!-- fingerprint:"));
+    }
+
+    #[test]
+    fn test_append_metadata_with_simhash() {
+        let body = "content";
+        let result = append_metadata(body, "gap:spec:token", Some("0xABCD"));
+        assert!(result.contains("<!-- fingerprint: gap:spec:token -->"));
+        assert!(result.contains("<!-- simhash: 0xABCD -->"));
+    }
+
+    #[test]
+    fn test_append_metadata_without_simhash() {
+        let body = "content";
+        let result = append_metadata(body, "gap:spec:token", None);
+        assert!(result.contains("<!-- fingerprint: gap:spec:token -->"));
+        assert!(!result.contains("simhash"));
+    }
+
+    #[test]
+    fn test_extract_simhash_from_body() {
+        let body =
+            "content\n---\n<!-- fingerprint: gap:x -->\n<!-- simhash: 0xA3F2B81C4D5E6F1B -->";
+        assert_eq!(extract_simhash_from_body(body), Some(0xA3F2B81C4D5E6F1B));
+    }
+
+    #[test]
+    fn test_extract_simhash_missing() {
+        let body = "content\n---\n<!-- fingerprint: gap:x -->";
+        assert_eq!(extract_simhash_from_body(body), None);
     }
 
     #[test]
