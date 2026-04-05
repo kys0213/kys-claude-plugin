@@ -4,19 +4,28 @@ use anyhow::Result;
 use autopilot::fs::FsOps;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// A mock FsOps backed by an in-memory file map.
 pub struct MockFs {
     files: HashMap<PathBuf, String>,
-    pub written: Mutex<Vec<(PathBuf, String)>>,
+    pub written: Arc<Mutex<Vec<(PathBuf, String)>>>,
+}
+
+impl Clone for MockFs {
+    fn clone(&self) -> Self {
+        Self {
+            files: self.files.clone(),
+            written: Arc::clone(&self.written),
+        }
+    }
 }
 
 impl MockFs {
     pub fn new() -> Self {
         Self {
             files: HashMap::new(),
-            written: Mutex::new(Vec::new()),
+            written: Arc::new(Mutex::new(Vec::new())),
         }
     }
 

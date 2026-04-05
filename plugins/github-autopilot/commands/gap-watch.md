@@ -64,6 +64,36 @@ gap-detector 에이전트를 호출합니다 (background=false):
 
 에이전트가 스펙 파싱 → 구조 매핑 → call chain 갭 분석을 통합 수행합니다.
 
+### Step 4.5: Stagnation Check
+
+갭 분석 리포트의 simhash를 계산하고 stagnation 여부를 판단합니다.
+
+1. **Simhash 계산**: 갭 분석 리포트(Step 4 결과)에서 ❌ Missing, ⚠️ Partial 항목의 텍스트를 추출하여 simhash를 계산합니다.
+
+```bash
+# 리포트에서 핵심 텍스트 추출 후 autopilot CLI로 simhash 생성은
+# gap-issue-creator가 내부적으로 수행합니다.
+```
+
+2. **이력 기록**: 현재 분석 결과의 simhash를 loop state에 기록합니다.
+
+```bash
+autopilot check mark gap-watch --output-hash "{simhash}"
+```
+
+3. **유사 이슈 검색**: 각 gap의 fingerprint에 대해 유사 이슈를 조회합니다.
+
+```bash
+autopilot issue search-similar \
+  --fingerprint "gap:{spec_path}:{requirement_keyword}" \
+  --simhash "{simhash}" \
+  --limit 5
+```
+
+4. **Stagnation 판정**: 유사 이슈 결과에서 distance ≤ 5인 closed 이슈가 2개 이상이면 stagnation으로 판정합니다.
+   - **Stagnation 감지**: Step 5에서 gap-issue-creator에 유사 이슈 목록과 함께 **resilience** 스킬의 persona 가이드를 전달합니다.
+   - **Stagnation 미감지**: 기존 흐름대로 Step 5를 진행합니다.
+
 ### Step 5: Issue 생성 (Agent)
 
 gap-issue-creator 에이전트를 호출합니다 (background=false):
@@ -71,9 +101,11 @@ gap-issue-creator 에이전트를 호출합니다 (background=false):
 전달 정보:
 - 갭 분석 리포트 (Step 4 결과)
 - label_prefix
+- **(stagnation 시 추가)** 유사 이슈 목록 (번호, distance, 상태) + resilience persona 가이드
 
 에이전트가 ❌ Missing, ⚠️ Partial 항목을 GitHub issue로 변환합니다.
 중복 이슈는 자동 필터링됩니다.
+stagnation이 감지된 gap은 과거 이슈를 참조하고 새 persona 관점으로 이슈를 생성합니다.
 
 ### Step 6: 결과 보고
 
@@ -86,3 +118,4 @@ gap-issue-creator 에이전트를 호출합니다 (background=false):
 - 토큰 최적화: MainAgent는 스펙/코드 파일을 직접 읽지 않음. 파일 경로만 수집하고 gap-detector에 위임
 - 스펙 파일 변경이 없어도 코드 변경으로 갭이 해소되었을 수 있으므로 매번 전체 분석
 - 기존 이슈와 중복되지 않도록 gap-issue-creator가 자동 필터링
+- stagnation 감지 시 resilience 스킬의 persona를 활용하여 다른 관점의 이슈를 생성
