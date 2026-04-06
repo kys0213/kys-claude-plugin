@@ -4,20 +4,36 @@ use super::analysis::{AnalysisContext, AnalysisOutcome, DiffAnalysis};
 use super::EXIT_STAGNATION;
 use crate::cmd::simhash;
 
-/// Minimum number of history entries to attempt pattern detection.
-const MIN_HISTORY_LEN: usize = 2;
+/// Default minimum number of history entries to attempt pattern detection.
+const DEFAULT_MIN_HISTORY_LEN: usize = 2;
 
-/// Hamming distance threshold: entries within this distance are considered "similar".
-const SIMILARITY_THRESHOLD: u32 = 5;
+/// Default hamming distance threshold: entries within this distance are considered "similar".
+const DEFAULT_SIMILARITY_THRESHOLD: u32 = 5;
 
-/// How many similar entries needed to flag stagnation.
-const STAGNATION_COUNT: usize = 2;
+/// Default number of similar entries needed to flag stagnation.
+const DEFAULT_STAGNATION_COUNT: usize = 2;
 
 /// Detects stagnation patterns by comparing simhash history in LoopState.
 ///
 /// If recent output hashes show repeated similar patterns, overrides
 /// the exit code to EXIT_STAGNATION and includes candidate details.
-pub struct StagnationAnalysis;
+///
+/// Thresholds are configurable for tuning with real gap report data (#578).
+pub struct StagnationAnalysis {
+    pub similarity_threshold: u32,
+    pub stagnation_count: usize,
+    pub min_history_len: usize,
+}
+
+impl Default for StagnationAnalysis {
+    fn default() -> Self {
+        Self {
+            similarity_threshold: DEFAULT_SIMILARITY_THRESHOLD,
+            stagnation_count: DEFAULT_STAGNATION_COUNT,
+            min_history_len: DEFAULT_MIN_HISTORY_LEN,
+        }
+    }
+}
 
 fn no_stagnation() -> AnalysisOutcome {
     AnalysisOutcome {
@@ -30,7 +46,7 @@ impl DiffAnalysis for StagnationAnalysis {
     fn analyze(&self, ctx: &AnalysisContext) -> Result<AnalysisOutcome> {
         let history = &ctx.state.output_history;
 
-        if history.len() < MIN_HISTORY_LEN {
+        if history.len() < self.min_history_len {
             return Ok(no_stagnation());
         }
 
@@ -57,10 +73,10 @@ impl DiffAnalysis for StagnationAnalysis {
 
         let similar_count = candidates
             .iter()
-            .filter(|c| c["distance"].as_u64().unwrap_or(64) <= SIMILARITY_THRESHOLD as u64)
+            .filter(|c| c["distance"].as_u64().unwrap_or(64) <= self.similarity_threshold as u64)
             .count();
 
-        if similar_count >= STAGNATION_COUNT {
+        if similar_count >= self.stagnation_count {
             Ok(AnalysisOutcome {
                 exit_override: Some(EXIT_STAGNATION),
                 extra_fields: serde_json::json!({
@@ -102,7 +118,7 @@ mod tests {
             code_files: &files,
             state: &state,
         };
-        let result = StagnationAnalysis.analyze(&ctx).unwrap();
+        let result = StagnationAnalysis::default().analyze(&ctx).unwrap();
         assert!(result.exit_override.is_none());
     }
 
@@ -127,7 +143,7 @@ mod tests {
             code_files: &files,
             state: &state,
         };
-        let result = StagnationAnalysis.analyze(&ctx).unwrap();
+        let result = StagnationAnalysis::default().analyze(&ctx).unwrap();
         assert!(result.exit_override.is_none());
     }
 
@@ -159,10 +175,135 @@ mod tests {
             code_files: &files,
             state: &state,
         };
-        let result = StagnationAnalysis.analyze(&ctx).unwrap();
+        let result = StagnationAnalysis::default().analyze(&ctx).unwrap();
         assert_eq!(result.exit_override, Some(EXIT_STAGNATION));
         assert!(result.extra_fields["stagnation"]["detected"]
             .as_bool()
             .unwrap());
+    }
+
+    #[test]
+    fn stricter_threshold_detects_more() {
+        let base: u64 = 0xA3F2B81C4D5E6F1B;
+        let slightly_different = base ^ 0x07; // 3 bits different
+        let (files, state) = make_ctx(vec![
+            OutputEntry {
+                simhash: simhash::format_simhash(base),
+                category: OutputCategory::GapAnalysis,
+                timestamp: "2026-01-01T00:00:00Z".to_string(),
+            },
+            OutputEntry {
+                simhash: simhash::format_simhash(slightly_different),
+                category: OutputCategory::GapAnalysis,
+                timestamp: "2026-01-02T00:00:00Z".to_string(),
+            },
+            OutputEntry {
+                simhash: simhash::format_simhash(base),
+                category: OutputCategory::GapAnalysis,
+                timestamp: "2026-01-03T00:00:00Z".to_string(),
+            },
+        ]);
+        let ctx = AnalysisContext {
+            loop_name: "gap-watch",
+            changed_files: &files,
+            spec_files: &[],
+            code_files: &files,
+            state: &state,
+        };
+
+        // Default threshold=5 detects (3 bits < 5)
+        let result = StagnationAnalysis::default().analyze(&ctx).unwrap();
+        assert_eq!(result.exit_override, Some(EXIT_STAGNATION));
+
+        // Tight threshold=2 does NOT detect (3 bits > 2)
+        let tight = StagnationAnalysis {
+            similarity_threshold: 2,
+            ..Default::default()
+        };
+        let result = tight.analyze(&ctx).unwrap();
+        assert!(result.exit_override.is_none());
+    }
+
+    #[test]
+    fn higher_stagnation_count_requires_more_matches() {
+        let base: u64 = 0xA3F2B81C4D5E6F1B;
+        let (files, state) = make_ctx(vec![
+            OutputEntry {
+                simhash: simhash::format_simhash(base),
+                category: OutputCategory::GapAnalysis,
+                timestamp: "2026-01-01T00:00:00Z".to_string(),
+            },
+            OutputEntry {
+                simhash: simhash::format_simhash(base ^ 0x01),
+                category: OutputCategory::GapAnalysis,
+                timestamp: "2026-01-02T00:00:00Z".to_string(),
+            },
+            OutputEntry {
+                simhash: simhash::format_simhash(base),
+                category: OutputCategory::GapAnalysis,
+                timestamp: "2026-01-03T00:00:00Z".to_string(),
+            },
+        ]);
+        let ctx = AnalysisContext {
+            loop_name: "gap-watch",
+            changed_files: &files,
+            spec_files: &[],
+            code_files: &files,
+            state: &state,
+        };
+
+        // Default count=2 detects (2 similar entries)
+        let result = StagnationAnalysis::default().analyze(&ctx).unwrap();
+        assert_eq!(result.exit_override, Some(EXIT_STAGNATION));
+
+        // Require count=5 → not enough matches
+        let high_count = StagnationAnalysis {
+            stagnation_count: 5,
+            ..Default::default()
+        };
+        let result = high_count.analyze(&ctx).unwrap();
+        assert!(result.exit_override.is_none());
+    }
+
+    #[test]
+    fn min_history_len_gates_detection() {
+        let base: u64 = 0xA3F2B81C4D5E6F1B;
+        // 3 entries: latest compares against 2 previous, both similar → stagnation
+        let (files, state) = make_ctx(vec![
+            OutputEntry {
+                simhash: simhash::format_simhash(base),
+                category: OutputCategory::GapAnalysis,
+                timestamp: "2026-01-01T00:00:00Z".to_string(),
+            },
+            OutputEntry {
+                simhash: simhash::format_simhash(base ^ 0x01),
+                category: OutputCategory::GapAnalysis,
+                timestamp: "2026-01-02T00:00:00Z".to_string(),
+            },
+            OutputEntry {
+                simhash: simhash::format_simhash(base),
+                category: OutputCategory::GapAnalysis,
+                timestamp: "2026-01-03T00:00:00Z".to_string(),
+            },
+        ]);
+        let ctx = AnalysisContext {
+            loop_name: "gap-watch",
+            changed_files: &files,
+            spec_files: &[],
+            code_files: &files,
+            state: &state,
+        };
+
+        // Default min_history=2, 3 entries → detection proceeds
+        let result = StagnationAnalysis::default().analyze(&ctx).unwrap();
+        assert_eq!(result.exit_override, Some(EXIT_STAGNATION));
+
+        // Require min_history=5 → not enough history, skips detection
+        let high_min = StagnationAnalysis {
+            min_history_len: 5,
+            ..Default::default()
+        };
+        let result = high_min.analyze(&ctx).unwrap();
+        assert!(result.exit_override.is_none());
     }
 }
