@@ -100,7 +100,7 @@ autopilot issue check-dup --fingerprint "$FINGERPRINT"
 ```bash
 autopilot issue create \
   --title "test(scope): add missing tests for [source file/module]" \
-  --label "{label_prefix}ready" \
+  --label "{label_prefix}qa-suggestion" \
   --fingerprint "qa:${SOURCE_FILE}:${TEST_TYPE}" \
   --body "$(cat <<'EOF'
 ## 테스트 보강 대상
@@ -152,6 +152,8 @@ EOF
 
 ## 주의사항
 
-- 테스트를 직접 구현하지 않음 — 이슈로 발행하여 build-issues 파이프라인에서 처리
+- 테스트를 직접 구현하지 않음 — 이슈로 발행하여 사용자가 검토 후 처리
+- `{label_prefix}qa-suggestion` 라벨을 사용하여 build-issues의 자동 처리 큐(`:ready`)와 분리
+- 사용자가 이슈를 검토 후 `{label_prefix}ready`로 라벨을 변경하면 build-issues가 처리
 - issue-label 스킬의 라벨 필수 규칙과 fingerprint 규칙을 반드시 따른다
 - 기존 이슈와 중복되지 않도록 fingerprint로 검사

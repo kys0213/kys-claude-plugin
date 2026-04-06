@@ -250,14 +250,19 @@ fn extract_simhash_from_body(body: &str) -> Option<u64> {
     None
 }
 
-/// Append fingerprint (and optional simhash) HTML comments to body.
+/// Append fingerprint (and optional simhash) to body.
+/// Fingerprint is stored both as searchable plain text (backtick code span)
+/// and as an HTML comment for structured extraction.
+/// GitHub's `in:body` search does NOT index HTML comments, so the plain text
+/// line is essential for `find_duplicate()` to work.
 pub fn append_fingerprint(body: &str, fingerprint: &str) -> String {
-    format!("{body}\n\n---\n<!-- fingerprint: {fingerprint} -->")
+    format!("{body}\n\n---\n`fingerprint: {fingerprint}`\n<!-- fingerprint: {fingerprint} -->")
 }
 
-/// Append fingerprint and optional simhash as HTML comments to body.
+/// Append fingerprint and optional simhash to body.
+/// Delegates to `append_fingerprint` for the base format, then appends simhash if present.
 fn append_metadata(body: &str, fingerprint: &str, simhash: Option<&str>) -> String {
-    let mut result = format!("{body}\n\n---\n<!-- fingerprint: {fingerprint} -->");
+    let mut result = append_fingerprint(body, fingerprint);
     if let Some(sh) = simhash {
         result.push_str(&format!("\n<!-- simhash: {sh} -->"));
     }
@@ -290,8 +295,8 @@ mod tests {
         let body = "## Summary\n\nSome content";
         let fp = "ci:validate.yml:main:test-failure";
         let result = append_fingerprint(body, fp);
-        assert!(result.ends_with("<!-- fingerprint: ci:validate.yml:main:test-failure -->"));
-        assert!(result.contains("---\n<!-- fingerprint:"));
+        assert!(result.contains("`fingerprint: ci:validate.yml:main:test-failure`"));
+        assert!(result.contains("<!-- fingerprint: ci:validate.yml:main:test-failure -->"));
     }
 
     #[test]

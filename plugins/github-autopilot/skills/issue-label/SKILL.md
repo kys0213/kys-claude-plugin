@@ -10,10 +10,11 @@ version: 1.1.0
 
 | 라벨 | 용도 | 부여 주체 |
 |------|------|-----------|
-| `{label_prefix}ready` | 구현 대상 이슈 | gap-issue-creator, qa-boost, ci-watch, test-watch |
+| `{label_prefix}ready` | 구현 대상 이슈 | gap-issue-creator, ci-watch, test-watch |
 | `{label_prefix}wip` | 구현 진행 중 | build-issues |
 | `{label_prefix}ci-failure` | CI 실패 이슈 (ready와 함께 부여) | ci-watch |
 | `{label_prefix}auto` | autopilot 생성 PR | branch-promoter |
+| `{label_prefix}qa-suggestion` | QA 테스트 제안 (사용자 검토 후 ready로 전환) | qa-boost |
 
 `label_prefix`는 `github-autopilot.local.md`에서 로딩한다 (기본값: `autopilot:`).
 
@@ -55,7 +56,7 @@ gh pr create \
 | 컴포넌트 | 명령어 | 필수 라벨 |
 |----------|--------|-----------|
 | gap-issue-creator | `gh issue create` | `{label_prefix}ready` |
-| qa-boost | `gh issue create` | `{label_prefix}ready` |
+| qa-boost | `gh issue create` | `{label_prefix}qa-suggestion` |
 | ci-watch | `gh issue create` | `{label_prefix}ci-failure` + `{label_prefix}ready` |
 | test-watch | `gh issue create` | `{label_prefix}ready` |
 | build-issues (구현 시작) | `gh issue edit --add-label` | `{label_prefix}wip` |
@@ -112,14 +113,18 @@ autopilot issue close-resolved --label-prefix "{label_prefix}"
 
 ### Body fingerprint 삽입
 
-`autopilot issue create` 사용 시 body 하단에 fingerprint HTML 주석이 **자동 삽입**된다:
+`autopilot issue create` 사용 시 body 하단에 fingerprint가 **자동 삽입**된다:
 
 ```markdown
 ---
+`fingerprint: {fingerprint_value}`
 <!-- fingerprint: {fingerprint_value} -->
 ```
 
-이 주석이 중복 검색의 유일한 기준이므로 **절대 생략하지 않는다**.
+- **backtick code span**: GitHub `in:body` 검색으로 인덱싱되어 `find_duplicate()`가 중복을 탐지
+- **HTML comment**: 구조적 추출 (simhash 등)에 사용
+
+두 형태 모두 필수이며 **절대 생략하지 않는다**.
 
 ## 라벨 생성
 
@@ -131,3 +136,4 @@ autopilot issue close-resolved --label-prefix "{label_prefix}"
 | `{label_prefix}wip` | `FBCA04` (yellow) |
 | `{label_prefix}ci-failure` | `D93F0B` (red) |
 | `{label_prefix}auto` | `1D76DB` (blue) |
+| `{label_prefix}qa-suggestion` | `C5DEF5` (light blue) |
