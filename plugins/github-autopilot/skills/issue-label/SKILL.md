@@ -15,6 +15,7 @@ version: 1.1.0
 | `{label_prefix}ci-failure` | CI 실패 이슈 (ready와 함께 부여) | ci-watch |
 | `{label_prefix}auto` | autopilot 생성 PR | branch-promoter |
 | `{label_prefix}qa-suggestion` | QA 테스트 제안 (사용자 검토 후 ready로 전환) | qa-boost |
+| `{label_prefix}spec-needed` | 역방향 갭 — 코드에 있지만 스펙에 없음, 스펙 보강 필요 | gap-watch (reverse) |
 
 `label_prefix`는 `github-autopilot.local.md`에서 로딩한다 (기본값: `autopilot:`).
 
@@ -74,6 +75,7 @@ gh pr create \
 | qa-boost | `qa:{source_file_path}:{test_type}` | `qa:src/auth/refresh.rs:unit` |
 | ci-watch | `ci:{workflow}:{branch}:{failure_type}` | `ci:validate.yml:main:test-failure` |
 | test-watch | `test:{test_name}:{failure_hash}` | `test:e2e:a1b2c3d4` |
+| gap-watch (reverse) | `rev-gap:{file_path}:{entry_point}` | `rev-gap:src/auth/oauth.rs:handle_callback` |
 
 규칙:
 - 항상 소문자, 공백 없음
@@ -137,3 +139,4 @@ autopilot issue close-resolved --label-prefix "{label_prefix}"
 | `{label_prefix}ci-failure` | `D93F0B` (red) |
 | `{label_prefix}auto` | `1D76DB` (blue) |
 | `{label_prefix}qa-suggestion` | `C5DEF5` (light blue) |
+| `{label_prefix}spec-needed` | `BFD4F2` (light green) |

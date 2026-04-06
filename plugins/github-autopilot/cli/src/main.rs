@@ -55,6 +55,7 @@ fn main() {
                     output_hash,
                 } => svc.mark(&loop_name, output_hash.as_deref()),
                 CheckCommands::Status => svc.status(),
+                CheckCommands::Health => svc.health(),
             }
         }
         Commands::Preflight(PreflightArgs { config, repo_root }) => {
