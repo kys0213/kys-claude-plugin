@@ -59,6 +59,8 @@ pub enum CheckCommands {
     },
     /// Show state of all loops
     Status,
+    /// Pipeline health report across all loops
+    Health,
 }
 
 #[derive(Args)]

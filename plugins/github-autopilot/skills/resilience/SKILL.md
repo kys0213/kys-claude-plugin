@@ -14,22 +14,41 @@ version: 1.0.0
 ## Stagnation 판단 기준
 
 CLI `autopilot check diff`가 exit 4를 반환하면 stagnation이다.
-출력 JSON의 `candidates` 배열에 hamming distance 순으로 정렬된 유사 이슈가 포함된다.
+출력 JSON에 `pattern_type`과 `recommended_persona`가 포함된다.
 
 ```json
 {
-  "status": "stagnation_candidates",
-  "current_simhash": "0xA3F2...",
-  "candidates": [
-    {"number": 42, "distance": 1, "state": "CLOSED", "title": "..."},
-    {"number": 58, "distance": 2, "state": "CLOSED", "title": "..."}
-  ]
+  "status": "stagnation",
+  "stagnation": {
+    "detected": true,
+    "pattern_type": "spinning",
+    "recommended_persona": "hacker",
+    "current_simhash": "0xA3F2...",
+    "similar_count": 3,
+    "candidates": [
+      {"simhash": "0x...", "distance": 1, "category": "gap-analysis", "timestamp": "..."}
+    ]
+  }
 }
 ```
 
-## Persona 선택
+## Pattern → Persona 매핑 (Deterministic)
 
-candidates의 distance 분포와 이슈 내용을 읽고, 아래 5가지 persona 중 적합한 것을 선택한다.
+CLI가 패턴을 분류하고 persona를 결정적으로 추천한다. `recommended_persona`가 있으면 그대로 사용한다.
+
+| pattern_type | Persona | 상황 |
+|---|---|---|
+| `spinning` | Hacker | 같은 해시 반복 (distance ≤ 3) |
+| `oscillation` | Architect | A↔B 교대 패턴 |
+| `no_drift` | Researcher | 전부 유사하나 개선 없음 |
+| `diminishing_returns` | Simplifier | 점진적 개선이나 여전히 유사 |
+| (all exhausted) | Contrarian | fallback — 위 4패턴에 해당하지 않거나 모든 persona 소진 시 |
+
+> `recommended_persona`가 없는 경우(하위 호환): 기존 방식대로 candidates의 distance 분포를 읽고 아래 5가지 persona 중 선택한다.
+
+## Persona 상세
+
+아래 5가지 persona 중 `recommended_persona` 또는 상황에 맞는 것을 사용한다.
 
 ### 1. Hacker
 

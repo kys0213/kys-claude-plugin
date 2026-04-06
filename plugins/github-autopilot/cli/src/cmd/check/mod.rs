@@ -10,6 +10,7 @@ use crate::fs::FsOps;
 use crate::git::GitOps;
 
 use analysis::{AnalysisContext, DiffAnalysis};
+use stagnation::classify_pattern;
 use state::{
     append_output_entry, read_state, state_dir, validate_loop_name, write_state, OutputEntry,
 };
@@ -208,6 +209,73 @@ impl CheckService {
             }
         }
 
+        Ok(0)
+    }
+
+    /// Pipeline health report across all loops.
+    pub fn health(&self) -> Result<i32> {
+        use crate::cmd::simhash;
+
+        let dir = state_dir(self.git.as_ref())?;
+        let files = match self.fs.list_files(&dir, "state") {
+            Ok(f) => f,
+            Err(_) => {
+                println!(r#"{{"loops":[],"overall":"healthy"}}"#);
+                return Ok(0);
+            }
+        };
+
+        if files.is_empty() {
+            println!(r#"{{"loops":[],"overall":"healthy"}}"#);
+            return Ok(0);
+        }
+
+        let mut loops = Vec::new();
+        let mut any_stagnation = false;
+
+        for file in &files {
+            let name = file
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            if let Ok(loop_state) = read_state(self.fs.as_ref(), file) {
+                let history = &loop_state.output_history;
+                let pattern = if history.len() >= 2 {
+                    let latest = &history[history.len() - 1];
+                    simhash::parse_simhash(&latest.simhash).and_then(|latest_hash| {
+                        classify_pattern(
+                            history,
+                            latest_hash,
+                            stagnation::DEFAULT_SIMILARITY_THRESHOLD,
+                        )
+                    })
+                } else {
+                    None
+                };
+
+                if pattern.is_some() {
+                    any_stagnation = true;
+                }
+
+                loops.push(serde_json::json!({
+                    "name": name,
+                    "hash": &loop_state.hash[..7.min(loop_state.hash.len())],
+                    "timestamp": loop_state.timestamp,
+                    "history_len": history.len(),
+                    "pattern_type": pattern,
+                    "recommended_persona": pattern.map(|p| p.recommended_persona()),
+                }));
+            }
+        }
+
+        let overall = if any_stagnation {
+            "degraded"
+        } else {
+            "healthy"
+        };
+        let out = serde_json::json!({ "loops": loops, "overall": overall });
+        println!("{out}");
         Ok(0)
     }
 }

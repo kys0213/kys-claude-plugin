@@ -56,11 +56,12 @@ EOF
 
 stagnation 컨텍스트가 전달된 경우, **resilience** 스킬을 참조하여 새 관점의 이슈를 생성합니다.
 
-1. 유사 이슈 목록에서 distance가 작은 순서대로 이슈 내용을 확인한다
-2. 과거 이슈에서 시도된 접근과 실패 사유를 파악한다
-3. 과거 이슈에서 이미 사용된 persona가 있으면 제외한다
-4. resilience 스킬의 persona 선택 기준에 따라 적합한 persona를 선택한다
-5. 해당 persona의 관점에서 새로운 구현 방향을 작성한다
+1. **`recommended_persona`가 있으면 그대로 사용한다** (CLI가 패턴 기반으로 결정적 추천)
+2. `recommended_persona`가 없으면 하위 호환: candidates의 distance 분포로 판단
+3. 유사 이슈 목록에서 distance가 작은 순서대로 이슈 내용을 확인한다
+4. 과거 이슈에서 시도된 접근과 실패 사유를 파악한다
+5. 과거 이슈에서 이미 사용된 persona가 있으면 다음 순위 persona를 사용한다
+6. 해당 persona의 관점에서 새로운 구현 방향을 작성한다
 
 ```bash
 autopilot issue create \
