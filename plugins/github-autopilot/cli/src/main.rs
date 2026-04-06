@@ -40,7 +40,10 @@ fn main() {
             let svc = CheckService::new(
                 git::real(),
                 fs::real(),
-                vec![Box::new(SpecCodeAnalysis), Box::new(StagnationAnalysis)],
+                vec![
+                    Box::new(SpecCodeAnalysis),
+                    Box::new(StagnationAnalysis::default()),
+                ],
             );
             match command {
                 CheckCommands::Diff {

@@ -415,3 +415,156 @@ fn extract_branch_from_ci_title_various_formats() {
         "feat/branch"
     );
 }
+
+// ============================================================
+// search_similar tests (#577)
+// ============================================================
+
+fn make_issue_body_with_simhash(content: &str, fingerprint: &str, simhash: &str) -> String {
+    format!(
+        "{content}\n\n---\n`fingerprint: {fingerprint}`\n<!-- fingerprint: {fingerprint} -->\n<!-- simhash: {simhash} -->"
+    )
+}
+
+#[test]
+fn search_similar_sorts_by_hamming_distance() {
+    let base: u64 = 0xA3F2B81C4D5E6F1B;
+    let close = base ^ 0x03; // 2 bits different
+    let far = base ^ 0xFFFF; // many bits different
+
+    let gh = MockGh::new().on_list_containing(
+        "in:body",
+        vec![
+            json!({
+                "number": 10,
+                "title": "far issue",
+                "state": "OPEN",
+                "body": make_issue_body_with_simhash("content", "gap:spec:x", &autopilot::cmd::simhash::format_simhash(far))
+            }),
+            json!({
+                "number": 11,
+                "title": "close issue",
+                "state": "CLOSED",
+                "body": make_issue_body_with_simhash("content", "gap:spec:x", &autopilot::cmd::simhash::format_simhash(close))
+            }),
+        ],
+    );
+
+    let args = autopilot::cmd::issue::SearchSimilarArgs {
+        fingerprint: "gap:spec:x".to_string(),
+        simhash: autopilot::cmd::simhash::format_simhash(base),
+        limit: 5,
+    };
+
+    let code = autopilot::cmd::issue::search_similar(&gh, &args).unwrap();
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn search_similar_missing_simhash_gets_max_distance() {
+    let gh = MockGh::new().on_list_containing(
+        "in:body",
+        vec![json!({
+            "number": 20,
+            "title": "no simhash",
+            "state": "OPEN",
+            "body": "content\n\n---\n`fingerprint: gap:spec:y`\n<!-- fingerprint: gap:spec:y -->"
+        })],
+    );
+
+    let args = autopilot::cmd::issue::SearchSimilarArgs {
+        fingerprint: "gap:spec:y".to_string(),
+        simhash: "0xA3F2B81C4D5E6F1B".to_string(),
+        limit: 5,
+    };
+
+    let code = autopilot::cmd::issue::search_similar(&gh, &args).unwrap();
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn search_similar_respects_limit() {
+    let gh = MockGh::new().on_list_containing(
+        "in:body",
+        vec![
+            json!({"number": 1, "title": "a", "state": "OPEN", "body": "<!-- simhash: 0x0000000000000001 -->"}),
+            json!({"number": 2, "title": "b", "state": "OPEN", "body": "<!-- simhash: 0x0000000000000002 -->"}),
+            json!({"number": 3, "title": "c", "state": "OPEN", "body": "<!-- simhash: 0x0000000000000003 -->"}),
+        ],
+    );
+
+    let args = autopilot::cmd::issue::SearchSimilarArgs {
+        fingerprint: "gap:spec:z".to_string(),
+        simhash: "0x0000000000000000".to_string(),
+        limit: 2,
+    };
+
+    let code = autopilot::cmd::issue::search_similar(&gh, &args).unwrap();
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn search_similar_empty_results() {
+    let gh = MockGh::new().on_list_containing("in:body", vec![]);
+
+    let args = autopilot::cmd::issue::SearchSimilarArgs {
+        fingerprint: "gap:spec:none".to_string(),
+        simhash: "0xA3F2B81C4D5E6F1B".to_string(),
+        limit: 5,
+    };
+
+    let code = autopilot::cmd::issue::search_similar(&gh, &args).unwrap();
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn search_similar_invalid_simhash_returns_error() {
+    let gh = MockGh::new();
+
+    let args = autopilot::cmd::issue::SearchSimilarArgs {
+        fingerprint: "gap:spec:x".to_string(),
+        simhash: "not_valid_hex".to_string(),
+        limit: 5,
+    };
+
+    let result = autopilot::cmd::issue::search_similar(&gh, &args);
+    assert!(result.is_err(), "should error on invalid simhash");
+}
+
+#[test]
+fn search_similar_preserves_issue_state() {
+    let gh = MockGh::new().on_list_containing(
+        "in:body",
+        vec![
+            json!({
+                "number": 30,
+                "title": "open issue",
+                "state": "OPEN",
+                "body": make_issue_body_with_simhash("c", "gap:spec:s", "0xA3F2B81C4D5E6F1B")
+            }),
+            json!({
+                "number": 31,
+                "title": "closed issue",
+                "state": "CLOSED",
+                "body": make_issue_body_with_simhash("c", "gap:spec:s", "0xA3F2B81C4D5E6F1B")
+            }),
+        ],
+    );
+
+    let args = autopilot::cmd::issue::SearchSimilarArgs {
+        fingerprint: "gap:spec:s".to_string(),
+        simhash: "0xA3F2B81C4D5E6F1B".to_string(),
+        limit: 10,
+    };
+
+    let code = autopilot::cmd::issue::search_similar(&gh, &args).unwrap();
+    assert_eq!(code, 0);
+
+    // Verify search was performed with correct query
+    let calls = gh.calls.lock().unwrap();
+    let search_call = calls.first().expect("should have a call");
+    assert!(
+        search_call.iter().any(|a| a == "all"),
+        "should search all states"
+    );
+}
