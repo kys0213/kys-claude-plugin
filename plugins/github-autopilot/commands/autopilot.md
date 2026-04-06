@@ -47,6 +47,34 @@ autopilot preflight --config github-autopilot.local.md --repo-root .
 - Exit 0: 모든 check PASS (WARN 허용) → 계속 진행
 - Exit 1: FAIL 항목 있음 → FAIL 항목을 사용자에게 보여주고 `/github-autopilot:setup` 안내 후 중단
 
+### Step 1.6: Spec Quality Gate
+
+설정에서 `spec_paths`와 `spec_quality_threshold`를 읽습니다 (기본값: `"C"`).
+
+`spec_paths`에 스펙 파일이 있으면, `spec-validator` 에이전트를 호출하여 스펙 품질을 평가합니다:
+
+전달 정보:
+- spec_files: `spec_paths`에서 `**/*.md`로 수집한 파일 목록
+- spec_quality_threshold: 설정값 (기본: `"C"`)
+
+결과 처리:
+- **overall_grade >= threshold**: Step 2로 진행
+- **overall_grade < threshold**: AskUserQuestion으로 사용자 확인
+
+```
+스펙 품질이 {overall_grade} 등급입니다 (기준: {threshold}).
+- A (Big Picture): {grade}
+- B (Detail): {grade}
+- C (Verification): {grade}
+
+자율주행 결과물의 품질을 보장하기 어렵습니다. 계속 진행하시겠습니까?
+```
+
+- **Yes**: 경고 로그를 남기고 Step 2로 진행
+- **No**: `/spec-kit:design` 또는 `/spec-kit:spec-review` 안내 후 종료
+
+> `spec_paths`에 파일이 없으면 이 단계를 skip합니다 (preflight에서 이미 확인).
+
 ### Step 2: 루프 시작
 
 `PLUGIN_ROOT`를 찾습니다 (이 command 파일이 위치한 플러그인의 루트):
