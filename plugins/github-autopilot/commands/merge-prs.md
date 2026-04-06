@@ -67,7 +67,24 @@ PR이 없으면 "머지 대상 PR 없음" 출력 후 종료.
 gh pr merge ${PR_NUMBER} --squash --delete-branch
 ```
 
-머지 성공 시 기록, 실패 시 문제 PR로 재분류.
+머지 성공 후 **관련 이슈 자동 close**:
+
+PR body에서 `Closes #N` 패턴을 추출하여 이슈를 명시적으로 닫습니다. `--squash` 머지 시 GitHub의 auto-close가 동작하지 않을 수 있으므로 fallback으로 직접 실행합니다:
+
+```bash
+# PR body에서 모든 Closes #N 이슈 번호를 추출 (macOS/Linux 호환)
+ISSUE_NUMBERS=$(gh pr view ${PR_NUMBER} --json body --jq '.body' | grep -oE 'Closes #[0-9]+' | grep -oE '[0-9]+')
+
+# 각 이슈에 대해: 아직 open이면 close
+for ISSUE_NUMBER in $ISSUE_NUMBERS; do
+  STATE=$(gh issue view "$ISSUE_NUMBER" --json state --jq '.state' 2>/dev/null || echo "")
+  if [ "$STATE" = "OPEN" ]; then
+    gh issue close "$ISSUE_NUMBER" --comment "Closed by PR #${PR_NUMBER} merge (autopilot)" 2>/dev/null || true
+  fi
+done
+```
+
+머지 실패 시 문제 PR로 재분류.
 
 ### Step 5: 문제 PR 해결 (Agent Team)
 

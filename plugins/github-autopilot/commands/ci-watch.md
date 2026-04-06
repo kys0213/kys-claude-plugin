@@ -42,8 +42,32 @@ autopilot pipeline idle --label-prefix "{label_prefix}"
 ### Step 2: CI 실패 목록 조회
 
 ```bash
-gh run list --status failure --limit 10 --json databaseId,name,headBranch,conclusion,createdAt
+gh run list --status failure --limit 10 --json databaseId,name,headBranch,conclusion,createdAt,event
 ```
+
+### Step 2.5: CI Failure 이슈 자동 정리
+
+이슈를 생성하기 **전에**, 기존 CI failure 이슈 중 관련 PR이 이미 머지된 것을 정리합니다:
+
+```bash
+autopilot issue close-resolved --label-prefix "{label_prefix}"
+```
+
+### Step 2.7: 오래된/머지된 PR 필터링
+
+Step 2의 결과에서 다음 조건에 해당하는 실패를 **제외**합니다:
+
+1. **머지/종료된 PR의 실패 제거**: `event`가 `pull_request`인 run에 대해 해당 `headBranch`의 PR 상태를 확인합니다:
+   ```bash
+   gh pr list --head "${HEAD_BRANCH}" --state merged --json number --limit 1
+   gh pr list --head "${HEAD_BRANCH}" --state closed --json number --limit 1
+   ```
+   - PR이 MERGED 또는 CLOSED → **skip** (이미 종료된 PR의 과거 실패)
+   - PR이 OPEN 또는 PR 없음 → 계속 진행
+
+2. **7일 이상 된 실패 제거**: `createdAt`이 현재 시각 기준 7일 이전이면 **skip** (단, default branch의 실패는 예외 — 만성 CI 실패를 놓치지 않기 위함)
+
+필터링 후 남은 실패만 Step 3로 진행합니다.
 
 ### Step 3: 중복 이슈 필터링
 
@@ -72,16 +96,6 @@ autopilot issue check-dup --fingerprint "$FINGERPRINT"
 - run_id
 - run_name (워크플로우 이름)
 - head_branch (실패한 브랜치)
-
-### Step 4.5: CI Failure 이슈 자동 정리
-
-이슈를 생성하기 전에, 기존 CI failure 이슈 중 관련 PR이 이미 머지된 것을 정리합니다:
-
-```bash
-autopilot issue close-resolved --label-prefix "{label_prefix}"
-```
-
-이 명령은 `{label_prefix}ci-failure` 라벨이 붙은 열린 이슈를 조회하여, 제목에서 브랜치명을 추출하고 해당 브랜치의 PR이 MERGED 상태이면 이슈를 자동 close합니다.
 
 ### Step 5: Issue 생성
 
