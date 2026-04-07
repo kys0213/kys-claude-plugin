@@ -112,21 +112,7 @@ paths:
 
 ### 모노레포에서의 paths
 
-모노레포에서는 패키지 레벨 prefix를 제거하고 범용 패턴을 사용합니다 (Section 7 참조):
-
-```yaml
-# Bad: 패키지명 하드코딩
-paths:
-  - "packages/api/**/*handler*.ts"
-  - "apps/web/**/components/**"
-
-# Good: 범용 패턴
-paths:
-  - "**/*handler*.ts"
-  - "**/components/**"
-```
-
-단, 패키지 간 컨벤션이 다른 경우에는 패키지별 규칙 파일을 분리합니다.
+모노레포에서의 범용화 패턴은 Section 7을 참조합니다.
 
 ---
 
@@ -265,7 +251,7 @@ paths:
 | `plugins/git-utils/src/commands/commit.ts` | `**/src/commands/**/*.ts` |
 | `plugins/git-utils/src/cli.ts` | `**/src/cli.ts` |
 | `packages/api/handlers/user_handler.go` | `**/handlers/**/*.go` |
-| `internal/auth/service/auth_service.go` | `**/*service*.go` |
+| `internal/auth/service/auth_service.go` | `**/service/**/*.go` |
 | `apps/web/src/components/Button.tsx` | `**/components/**/*.tsx` |
 
 ### 레이어 구조의 공통성 판단
@@ -315,7 +301,7 @@ paths:
 
 규칙 파일의 `paths:` 패턴을 작성한 후 아래 항목을 확인합니다:
 
-- [ ] 모든 `paths:` 패턴이 `**/`로 시작하는가? (특정 패키지명 하드코딩 금지)
+- [ ] 범용 적용 대상 `paths:` 패턴이 `**/`로 시작하는가? (의도적으로 범위를 제한해야 하는 경우 — 자동 생성 코드, 마이그레이션, 루트 설정 파일 등 — 는 특정 경로 사용 허용)
 - [ ] 플러그인/패키지명이 패턴에 포함되어 있지 않은가?
 - [ ] 동일 레이어의 여러 경로가 하나의 범용 패턴으로 통합되었는가?
 - [ ] Glob으로 매칭 테스트하여 의도한 파일만 매칭되는가?
