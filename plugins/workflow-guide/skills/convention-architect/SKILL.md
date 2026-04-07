@@ -112,15 +112,21 @@ paths:
 
 ### 모노레포에서의 paths
 
-모노레포에서는 패키지별 prefix를 추가합니다:
+모노레포에서는 패키지 레벨 prefix를 제거하고 범용 패턴을 사용합니다 (Section 7 참조):
 
 ```yaml
----
+# Bad: 패키지명 하드코딩
 paths:
   - "packages/api/**/*handler*.ts"
   - "apps/web/**/components/**"
----
+
+# Good: 범용 패턴
+paths:
+  - "**/*handler*.ts"
+  - "**/components/**"
 ```
+
+단, 패키지 간 컨벤션이 다른 경우에는 패키지별 규칙 파일을 분리합니다.
 
 ---
 
@@ -244,3 +250,73 @@ paths:
 
 - **공통**: `module-boundary.md`, `error-handling.md`, `testing.md`
 - **언어별**: prefix를 붙여 분리 (`go-`, `ts-`, `py-`, `rs-`)
+
+---
+
+## 7. 범용 패턴 변환 전략 (Generalization)
+
+### 절대 경로 → 와일드카드 경로 변환
+
+`paths:` frontmatter에는 특정 프로젝트/패키지 경로가 아닌 범용 와일드카드 패턴을 사용합니다. 이를 통해 규칙이 코드베이스 전체에 일관되게 적용됩니다.
+
+| Before (특정 경로) | After (범용 패턴) |
+|---|---|
+| `plugins/git-utils/src/core/git.ts` | `**/src/core/**/*.ts` |
+| `plugins/git-utils/src/commands/commit.ts` | `**/src/commands/**/*.ts` |
+| `plugins/git-utils/src/cli.ts` | `**/src/cli.ts` |
+| `packages/api/handlers/user_handler.go` | `**/handlers/**/*.go` |
+| `internal/auth/service/auth_service.go` | `**/*service*.go` |
+| `apps/web/src/components/Button.tsx` | `**/components/**/*.tsx` |
+
+### 레이어 구조의 공통성 판단
+
+동일한 아키텍처 레이어가 여러 패키지/모듈에 걸쳐 나타나면, 하나의 범용 패턴으로 통합합니다:
+
+```
+# 여러 패키지에 handlers/ 디렉토리가 존재
+packages/auth/handlers/login.go
+packages/user/handlers/profile.go
+packages/order/handlers/checkout.go
+
+# → 하나의 범용 패턴으로 통합
+paths: ["**/handlers/**/*.go"]
+```
+
+### 단일 위치 범용화 원칙
+
+현재 한 곳에만 존재하는 레이어라도 `**/` prefix를 사용합니다. 코드베이스가 확장되어 동일 레이어가 추가되면 규칙이 자동으로 적용됩니다.
+
+```yaml
+# Bad: 특정 위치에 고정
+paths: ["src/services/**/*.ts"]
+
+# Good: 향후 확장 대응
+paths: ["**/services/**/*.ts"]
+```
+
+### 모노레포에서의 범용화 패턴
+
+모노레포에서는 패키지 레벨 prefix를 제거하되, 레이어 디렉토리는 보존합니다:
+
+```yaml
+# Bad: 패키지명 하드코딩
+paths:
+  - "packages/api/src/controllers/**"
+  - "packages/admin/src/controllers/**"
+
+# Good: 패키지명 제거, 레이어만 보존
+paths:
+  - "**/src/controllers/**"
+```
+
+단, 패키지 간 컨벤션이 다른 경우에는 패키지별 규칙 파일을 분리합니다.
+
+### 체크리스트
+
+규칙 파일의 `paths:` 패턴을 작성한 후 아래 항목을 확인합니다:
+
+- [ ] 모든 `paths:` 패턴이 `**/`로 시작하는가? (특정 패키지명 하드코딩 금지)
+- [ ] 플러그인/패키지명이 패턴에 포함되어 있지 않은가?
+- [ ] 동일 레이어의 여러 경로가 하나의 범용 패턴으로 통합되었는가?
+- [ ] Glob으로 매칭 테스트하여 의도한 파일만 매칭되는가?
+- [ ] 패턴이 너무 넓어 관련 없는 파일까지 매칭되지 않는가?
