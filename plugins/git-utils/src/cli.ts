@@ -17,10 +17,11 @@
 //   pr       <title> [--description=<d>]
 //   reviews  [pr-number]
 //   guard    <write|commit> --project-dir=<p> --create-branch-script=<s> [--default-branch=<b>]
+//   pr-guard PR 중복 생성 방지 (Claude hook)
 //   hook     <register|unregister|list> [args...] [--timeout=<n>] [--project-dir=<p>]
 // ============================================================
 
-import { createGitService, createJiraService, createGitHubService, createGuardService } from './core';
+import { createGitService, createJiraService, createGitHubService, createGuardService, createPrGuardService } from './core';
 import { createCommitCommand } from './commands/commit';
 import { createBranchCommand } from './commands/branch';
 import { createPrCommand } from './commands/pr';
@@ -29,10 +30,30 @@ import { createHookCommand } from './commands/hook';
 import type { CommitType, GuardTarget } from './types';
 import { readFile } from 'node:fs/promises';
 
+// -- Stdin hook input parser (shared by guard & pr-guard) --
+
+interface HookStdinInput {
+  toolCommand?: string;
+  toolFilePath?: string;
+}
+
+async function readHookStdin(): Promise<HookStdinInput> {
+  try {
+    const stdin = await readFile('/dev/stdin', 'utf-8');
+    const hookInput = JSON.parse(stdin);
+    return {
+      toolCommand: hookInput?.tool_input?.command,
+      toolFilePath: hookInput?.tool_input?.file_path,
+    };
+  } catch {
+    return {};
+  }
+}
+
 /** plugin.json과 동기화 — build 시점에 bake됩니다 */
 export const VERSION = '3.0.0-alpha.0';
 
-const COMMANDS = ['commit', 'branch', 'pr', 'reviews', 'guard', 'hook'] as const;
+const COMMANDS = ['commit', 'branch', 'pr', 'reviews', 'guard', 'pr-guard', 'hook'] as const;
 type CommandName = (typeof COMMANDS)[number];
 
 // -- Args parser (lightweight, no deps) --
@@ -77,6 +98,7 @@ Commands:
   pr        Create a Pull Request
   reviews   Query unresolved PR review threads
   guard     Default branch guard (Claude hook)
+  pr-guard  PR duplicate creation guard (Claude hook)
   hook      Manage Claude Code hooks in settings.json
 
 Run 'git-utils <command> --help' for command-specific usage.
@@ -173,20 +195,7 @@ async function main(): Promise<void> {
         process.exit(1);
       }
 
-      // Read stdin for hook JSON (Claude hook provides tool input)
-      let toolCommand: string | undefined;
-      let toolFilePath: string | undefined;
-      try {
-        const stdin = await readFile('/dev/stdin', 'utf-8');
-        const hookInput = JSON.parse(stdin);
-        if (target === 'commit') {
-          toolCommand = hookInput?.tool_input?.command;
-        } else if (target === 'write') {
-          toolFilePath = hookInput?.tool_input?.file_path;
-        }
-      } catch {
-        // stdin not available or not JSON
-      }
+      const { toolCommand, toolFilePath } = await readHookStdin();
 
       // Parse protected branches (comma-separated)
       const protectedBranchesRaw = parsed.flags['protected-branches'] as string | undefined;
@@ -203,6 +212,20 @@ async function main(): Promise<void> {
         toolCommand,
         toolFilePath,
       });
+
+      if (!result.allowed) {
+        console.error(result.reason);
+        process.exit(2);
+      }
+      break;
+    }
+
+    case 'pr-guard': {
+      const prGuard = createPrGuardService(github);
+
+      const { toolCommand } = await readHookStdin();
+
+      const result = await prGuard.check({ toolCommand });
 
       if (!result.allowed) {
         console.error(result.reason);

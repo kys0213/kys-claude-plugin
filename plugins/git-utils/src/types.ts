@@ -185,6 +185,22 @@ export interface JiraTicket {
 }
 
 // ----------------------------------------------------------
+// PR Guard (← gh pr create 중복 방지)
+// ----------------------------------------------------------
+
+export interface PrGuardInput {
+  /** stdin으로 전달된 tool_input.command (gh pr create 패턴 매칭용) */
+  toolCommand?: string;
+}
+
+export interface PrGuardOutput {
+  allowed: boolean;
+  reason?: string;
+  /** 기존 PR 번호 (차단 시) */
+  prNumber?: number;
+}
+
+// ----------------------------------------------------------
 // Git State — core 모듈에서 공유
 // ----------------------------------------------------------
 

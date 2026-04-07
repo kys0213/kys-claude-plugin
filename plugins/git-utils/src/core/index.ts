@@ -6,3 +6,5 @@ export type { GitHubService } from './github';
 export { createGitHubService } from './github';
 export type { GuardService } from './guard';
 export { createGuardService } from './guard';
+export type { PrGuardService } from './pr-guard';
+export { createPrGuardService } from './pr-guard';
