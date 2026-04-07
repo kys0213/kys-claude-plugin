@@ -112,15 +112,7 @@ paths:
 
 ### 모노레포에서의 paths
 
-모노레포에서는 패키지별 prefix를 추가합니다:
-
-```yaml
----
-paths:
-  - "packages/api/**/*handler*.ts"
-  - "apps/web/**/components/**"
----
-```
+모노레포에서의 범용화 패턴은 Section 7을 참조합니다.
 
 ---
 
@@ -244,3 +236,48 @@ paths:
 
 - **공통**: `module-boundary.md`, `error-handling.md`, `testing.md`
 - **언어별**: prefix를 붙여 분리 (`go-`, `ts-`, `py-`, `rs-`)
+
+---
+
+## 7. paths 범용화 원칙
+
+### 핵심 원칙
+
+paths는 **레이어 구조**(역할)를 표현해야 하며, **위치**(컨테이너 경로)를 표현해서는 안 됩니다.
+
+### 판별 기준
+
+- **레이어**: 파일의 역할을 나타내는 디렉토리 (`core/`, `commands/`, `handlers/`, `service/` 등)
+- **위치**: 레이어가 속한 컨테이너 (`plugins/git-utils/`, `packages/api/`, `apps/web/` 등)
+- paths에는 레이어만 남기고, 위치는 `**/`로 대체합니다.
+
+### 범용화 알고리즘
+
+1. **레이어 식별**: 수집된 경로에서 역할을 나타내는 디렉토리를 구분
+2. **컨테이너 추상화**: 레이어 상위의 컨테이너 경로를 `**/`로 대체
+3. **교차 검증**: 범용 패턴이 동일 레이어의 파일만 매칭하는지 Glob 테스트
+4. **범위 조정**: 의도하지 않은 파일이 포함되면 패턴을 좁히거나 예외 명시
+
+### 예시 (원칙 적용)
+
+| 수집된 경로 | 레이어 | 컨테이너 | 범용 패턴 |
+|---|---|---|---|
+| `plugins/git-utils/src/core/git.ts` | `core/` | `plugins/git-utils/src/` | `**/core/**/*.ts` |
+| `apps/web/handlers/auth.go` | `handlers/` | `apps/web/` | `**/handlers/**/*.go` |
+| `internal/auth/service/auth_svc.go` | `service/` | `internal/auth/` | `**/service/**/*.go` |
+
+### 예외 (범용화하지 않는 경우)
+
+의도적으로 범위를 제한해야 하는 paths는 특정 경로를 그대로 사용합니다:
+
+- 자동 생성 코드 (`generated/`, `__generated__/`)
+- 마이그레이션 파일 (`migrations/`)
+- 루트 설정 파일 (`*.config.ts`, `*.toml`)
+
+### 체크리스트
+
+- [ ] paths가 레이어(역할)를 표현하는가, 위치(컨테이너)를 표현하는가?
+- [ ] 컨테이너 경로가 `**/`로 대체되었는가? (예외 제외)
+- [ ] 동일 레이어가 복수 위치에 존재할 때 하나의 패턴으로 통합되었는가?
+- [ ] Glob 테스트로 의도한 파일만 매칭되는지 확인했는가?
+- [ ] 의도적 범위 제한이 필요한 경우 예외로 명시했는가?
