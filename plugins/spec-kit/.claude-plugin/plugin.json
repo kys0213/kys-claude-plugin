@@ -3,6 +3,7 @@
     "./agents/spec-parser.md",
     "./agents/structure-mapper.md",
     "./agents/gap-analyzer.md",
+    "./agents/reverse-gap-analyzer.md",
     "./agents/spec-quality-checker.md",
     "./agents/cross-reference-checker.md"
   ],
