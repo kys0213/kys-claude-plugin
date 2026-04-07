@@ -26,7 +26,7 @@ gap-detect 커맨드에서 다음을 전달받습니다:
 
 ## 프로세스
 
-### Phase 1: Entry Point 분류
+### 1. Entry Point 분류
 
 각 entry point에 대해 스펙 요구사항과의 매핑 여부를 판정합니다.
 
@@ -54,9 +54,9 @@ Entry point의 기능이 요구사항에 명시되어 있는지 확인합니다:
 | **Under-specified** | 관련 요구사항은 있으나, 수용 기준이 불충분하거나 동작 설명이 모호함 |
 | **Unspecified** | 어떤 요구사항에도 매핑되지 않음. 스펙에 전혀 언급되지 않은 구현 |
 
-### Phase 2: Unspecified 항목 상세 분석
+### 2. Unspecified 항목 상세 분석
 
-Phase 1에서 Unspecified로 분류된 entry point에 대해 상세 분석을 수행합니다.
+Step 1에서 Unspecified로 분류된 entry point에 대해 상세 분석을 수행합니다.
 
 #### 2-1. 파일 Read
 
@@ -94,9 +94,11 @@ Grep: "함수명\s*\(" --type ts
 기능: 사용자 프로필 이미지를 S3에 업로드하고 URL을 반환하는 엔드포인트
 ```
 
-### Phase 3: 구조화된 JSON 결과 생성
+### 3. 구조화된 JSON 결과 생성
 
 분석 결과를 구조화된 JSON으로 생성합니다.
+
+> 이 JSON은 Step 4 마크다운 리포트 생성을 위한 내부 중간 결과입니다. 최종 출력은 Step 4의 마크다운 리포트입니다.
 
 #### ID 체계
 
@@ -153,9 +155,15 @@ Grep: "함수명\s*\(" --type ts
 }
 ```
 
-### Phase 4: 마크다운 리포트 출력
+### 4. 마크다운 리포트 출력
 
-Phase 3의 JSON 결과를 기반으로 마크다운 리포트를 생성합니다.
+Step 3의 JSON 결과를 기반으로 마크다운 리포트를 생성합니다.
+
+#### 역방향 커버리지 계산 공식
+
+```
+역방향 커버리지 = (Well-specified + Under-specified × 0.5) / 전체 Entry Points × 100
+```
 
 ```markdown
 ## 역방향 분석: Undocumented Implementations (Code → Spec)
@@ -191,9 +199,9 @@ Phase 3의 JSON 결과를 기반으로 마크다운 리포트를 생성합니다
 
 ## 주의사항
 
-- **Entry point 50개 초과 시**: 상위 30개만 상세 분석하고, 나머지는 분류만 수행. 샘플링 기준을 리포트 상단에 명시:
+- **Entry point 50개 초과 시**: 상위 30개만 상세 분석하고, 나머지는 분류만 수행. entry point 유형 기반 우선순위(외부 API > 데이터 변경 > 내부 서비스 > 유틸리티)로 선정합니다. 샘플링 기준을 리포트 상단에 명시:
   ```
-  ⚠️ Entry point가 N개로 50개를 초과합니다. severity 기반으로 상위 30개를 상세 분석했습니다.
+  ⚠️ Entry point가 N개로 50개를 초과합니다. entry point 유형 기반 우선순위로 상위 30개를 상세 분석했습니다.
   샘플링 기준: 외부 API > 데이터 변경 > 내부 서비스 > 유틸리티 순
   ```
 - **토큰 최적화**: entry point 파일만 읽기. 관련 없는 파일은 읽지 않음
