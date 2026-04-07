@@ -239,70 +239,45 @@ paths:
 
 ---
 
-## 7. 범용 패턴 변환 전략 (Generalization)
+## 7. paths 범용화 원칙
 
-### 절대 경로 → 와일드카드 경로 변환
+### 핵심 원칙
 
-`paths:` frontmatter에는 특정 프로젝트/패키지 경로가 아닌 범용 와일드카드 패턴을 사용합니다. 이를 통해 규칙이 코드베이스 전체에 일관되게 적용됩니다.
+paths는 **레이어 구조**(역할)를 표현해야 하며, **위치**(컨테이너 경로)를 표현해서는 안 됩니다.
 
-| Before (특정 경로) | After (범용 패턴) |
-|---|---|
-| `plugins/git-utils/src/core/git.ts` | `**/src/core/**/*.ts` |
-| `plugins/git-utils/src/commands/commit.ts` | `**/src/commands/**/*.ts` |
-| `plugins/git-utils/src/cli.ts` | `**/src/cli.ts` |
-| `packages/api/handlers/user_handler.go` | `**/handlers/**/*.go` |
-| `internal/auth/service/auth_service.go` | `**/service/**/*.go` |
-| `apps/web/src/components/Button.tsx` | `**/components/**/*.tsx` |
+### 판별 기준
 
-### 레이어 구조의 공통성 판단
+- **레이어**: 파일의 역할을 나타내는 디렉토리 (`core/`, `commands/`, `handlers/`, `service/` 등)
+- **위치**: 레이어가 속한 컨테이너 (`plugins/git-utils/`, `packages/api/`, `apps/web/` 등)
+- paths에는 레이어만 남기고, 위치는 `**/`로 대체합니다.
 
-동일한 아키텍처 레이어가 여러 패키지/모듈에 걸쳐 나타나면, 하나의 범용 패턴으로 통합합니다:
+### 범용화 알고리즘
 
-```
-# 여러 패키지에 handlers/ 디렉토리가 존재
-packages/auth/handlers/login.go
-packages/user/handlers/profile.go
-packages/order/handlers/checkout.go
+1. **레이어 식별**: 수집된 경로에서 역할을 나타내는 디렉토리를 구분
+2. **컨테이너 추상화**: 레이어 상위의 컨테이너 경로를 `**/`로 대체
+3. **교차 검증**: 범용 패턴이 동일 레이어의 파일만 매칭하는지 Glob 테스트
+4. **범위 조정**: 의도하지 않은 파일이 포함되면 패턴을 좁히거나 예외 명시
 
-# → 하나의 범용 패턴으로 통합
-paths: ["**/handlers/**/*.go"]
-```
+### 예시 (원칙 적용)
 
-### 단일 위치 범용화 원칙
+| 수집된 경로 | 레이어 | 컨테이너 | 범용 패턴 |
+|---|---|---|---|
+| `plugins/git-utils/src/core/git.ts` | `core/` | `plugins/git-utils/src/` | `**/core/**/*.ts` |
+| `apps/web/handlers/auth.go` | `handlers/` | `apps/web/` | `**/handlers/**/*.go` |
+| `internal/auth/service/auth_svc.go` | `service/` | `internal/auth/` | `**/service/**/*.go` |
 
-현재 한 곳에만 존재하는 레이어라도 `**/` prefix를 사용합니다. 코드베이스가 확장되어 동일 레이어가 추가되면 규칙이 자동으로 적용됩니다.
+### 예외 (범용화하지 않는 경우)
 
-```yaml
-# Bad: 특정 위치에 고정
-paths: ["src/services/**/*.ts"]
+의도적으로 범위를 제한해야 하는 paths는 특정 경로를 그대로 사용합니다:
 
-# Good: 향후 확장 대응
-paths: ["**/services/**/*.ts"]
-```
-
-### 모노레포에서의 범용화 패턴
-
-모노레포에서는 패키지 레벨 prefix를 제거하되, 레이어 디렉토리는 보존합니다:
-
-```yaml
-# Bad: 패키지명 하드코딩
-paths:
-  - "packages/api/src/controllers/**"
-  - "packages/admin/src/controllers/**"
-
-# Good: 패키지명 제거, 레이어만 보존
-paths:
-  - "**/src/controllers/**"
-```
-
-단, 패키지 간 컨벤션이 다른 경우에는 패키지별 규칙 파일을 분리합니다.
+- 자동 생성 코드 (`generated/`, `__generated__/`)
+- 마이그레이션 파일 (`migrations/`)
+- 루트 설정 파일 (`*.config.ts`, `*.toml`)
 
 ### 체크리스트
 
-규칙 파일의 `paths:` 패턴을 작성한 후 아래 항목을 확인합니다:
-
-- [ ] 범용 적용 대상 `paths:` 패턴이 `**/`로 시작하는가? (의도적으로 범위를 제한해야 하는 경우 — 자동 생성 코드, 마이그레이션, 루트 설정 파일 등 — 는 특정 경로 사용 허용)
-- [ ] 플러그인/패키지명이 패턴에 포함되어 있지 않은가?
-- [ ] 동일 레이어의 여러 경로가 하나의 범용 패턴으로 통합되었는가?
-- [ ] Glob으로 매칭 테스트하여 의도한 파일만 매칭되는가?
-- [ ] 패턴이 너무 넓어 관련 없는 파일까지 매칭되지 않는가?
+- [ ] paths가 레이어(역할)를 표현하는가, 위치(컨테이너)를 표현하는가?
+- [ ] 컨테이너 경로가 `**/`로 대체되었는가? (예외 제외)
+- [ ] 동일 레이어가 복수 위치에 존재할 때 하나의 패턴으로 통합되었는가?
+- [ ] Glob 테스트로 의도한 파일만 매칭되는지 확인했는가?
+- [ ] 의도적 범위 제한이 필요한 경우 예외로 명시했는가?

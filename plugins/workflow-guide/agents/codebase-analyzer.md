@@ -98,7 +98,7 @@ Glob: **/*.module.ts
 
 #### 범용 패턴 변환
 
-샘플링된 파일 경로를 paths frontmatter에 적합한 범용 패턴으로 변환합니다. 변환 규칙과 절차는 **convention-architect Skill Section 7 (범용 패턴 변환 전략)**을 따릅니다.
+샘플링된 파일 경로에서 레이어(역할)와 컨테이너(위치)를 분리하고, 컨테이너를 `**/`로 추상화합니다. 구체적인 판별 기준과 알고리즘은 **convention-architect Skill Section 7 (paths 범용화 원칙)**을 적용합니다.
 
 ### Step 5: 컨벤션 검증
 
@@ -109,7 +109,7 @@ Glob: **/*.module.ts
 3. **불일치 처리**:
    - 의도하지 않은 파일이 매칭되면 → 패턴을 좁힘
    - 패턴이 올바르지만 파일이 컨벤션에 맞지 않으면 → 규칙 설명에 주석으로 예외 사항을 기록
-4. **체크리스트**: convention-architect Skill Section 7의 체크리스트 항목을 확인
+4. **체크리스트**: convention-architect Skill Section 7 (paths 범용화 원칙)의 체크리스트 항목을 확인
 
 ### Step 6: 규칙 구조 제안 생성
 
