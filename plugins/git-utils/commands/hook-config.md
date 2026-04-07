@@ -50,6 +50,7 @@ hook이 두 범위에서 발견되었습니다.
 
 - `git-utils guard write` 포함 hook → Write/Edit Guard 활성화
 - `git-utils guard commit` 포함 hook → Commit Guard 활성화
+- `git-utils pr-guard` 포함 hook → PR Guard 활성화
 - 프로젝트 범위 vs 사용자 범위는 `--project-dir` 유무로 판별
 
 ## Step 3: 관리할 hook 선택
@@ -68,8 +69,9 @@ AskUserQuestion으로 관리할 hook을 선택받습니다:
 옵션:
 1. **Write/Edit Guard** - Write/Edit 시 기본 브랜치 차단
 2. **Commit Guard** - git commit 시 기본 브랜치 차단
-3. **모두** - 두 hook 모두 관리
-4. **취소** - 변경 없음
+3. **PR Guard** - gh pr create 시 중복 PR 차단
+4. **모두** - 모든 hook 관리
+5. **취소** - 변경 없음
 
 ## Step 4: 변경할 항목 선택
 
@@ -119,6 +121,23 @@ git-utils hook unregister PreToolUse \
 ```bash
 git-utils hook unregister PreToolUse \
   "git-utils guard commit --project-dir=\${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch'" \
+  --project-dir="$HOME"
+```
+
+#### PR Guard 비활성화
+
+**프로젝트 범위:**
+
+```bash
+git-utils hook unregister PreToolUse \
+  "git-utils pr-guard"
+```
+
+**사용자 범위:**
+
+```bash
+git-utils hook unregister PreToolUse \
+  "git-utils pr-guard" \
   --project-dir="$HOME"
 ```
 
@@ -175,6 +194,25 @@ git-utils hook register PreToolUse "Bash" \
 git-utils hook register PreToolUse "Bash" \
   "git-utils guard commit --project-dir=\${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch'" \
   --timeout=5 \
+  --project-dir="$HOME"
+```
+
+#### PR Guard 재설정
+
+**프로젝트 범위:**
+
+```bash
+git-utils hook register PreToolUse "Bash" \
+  "git-utils pr-guard" \
+  --timeout=10
+```
+
+**사용자 범위:**
+
+```bash
+git-utils hook register PreToolUse "Bash" \
+  "git-utils pr-guard" \
+  --timeout=10 \
   --project-dir="$HOME"
 ```
 

@@ -134,10 +134,11 @@ export function createGitHubService(cwd?: string): GitHubService {
     },
 
     async detectCurrentPrNumber(): Promise<number | null> {
-      const { stdout, exitCode } = await ghSafe('pr', 'view', '--json', 'number');
+      const { stdout, exitCode } = await ghSafe('pr', 'view', '--json', 'number,state');
       if (exitCode !== 0) return null;
       try {
-        const { number } = JSON.parse(stdout);
+        const { number, state } = JSON.parse(stdout);
+        if (state !== 'OPEN') return null;
         return typeof number === 'number' ? number : null;
       } catch {
         return null;

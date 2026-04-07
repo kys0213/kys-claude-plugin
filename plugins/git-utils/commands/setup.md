@@ -252,6 +252,25 @@ git-utils hook register PreToolUse "Bash" \
   --project-dir="$HOME"
 ```
 
+### PR Guard 등록
+
+#### 프로젝트 범위 선택 시
+
+```bash
+git-utils hook register PreToolUse "Bash" \
+  "git-utils pr-guard" \
+  --timeout=10
+```
+
+#### 사용자 범위 선택 시
+
+```bash
+git-utils hook register PreToolUse "Bash" \
+  "git-utils pr-guard" \
+  --timeout=10 \
+  --project-dir="$HOME"
+```
+
 `git-utils hook register`가 자동 처리하는 내용:
 - settings.json 파일이 없으면 생성
 - 기존 hook 배열에 새 hook 추가 (덮어쓰지 않음)
@@ -267,12 +286,17 @@ Default Branch Guard가 프로젝트에 설정되었습니다!
 설정된 hook:
 ├─ PreToolUse (Write|Edit) → git-utils guard write
 ├─ PreToolUse (Bash) → git-utils guard commit
+├─ PreToolUse (Bash) → git-utils pr-guard
 └─ .claude/settings.json (hook 등록됨)
 
 Default Branch Guard:
 ├─ Write/Edit 시 기본 브랜치({default_branch}) 감지 → 즉시 브랜치 생성 제안
 ├─ git commit 시도 시 기본 브랜치 감지 → 즉시 브랜치 생성 제안
 └─ rebase/merge/conflict/non-git 상태에서는 건너뜀
+
+PR Guard:
+├─ gh pr create 시 현재 브랜치에 열린 PR 감지 → 중복 생성 차단
+└─ gh CLI 오류 시 안전 모드(허용)로 동작
 
 설정을 변경하려면 /hook-config를 실행하세요.
 
@@ -287,6 +311,7 @@ Default Branch Guard가 사용자 설정에 등록되었습니다!
 설정된 hook:
 ├─ PreToolUse (Write|Edit) → git-utils guard write
 ├─ PreToolUse (Bash) → git-utils guard commit
+├─ PreToolUse (Bash) → git-utils pr-guard
 └─ ~/.claude/settings.json (hook 등록됨)
 
 Default Branch Guard:
@@ -294,6 +319,10 @@ Default Branch Guard:
 ├─ git commit 시도 시 기본 브랜치 감지 → 즉시 브랜치 생성 제안
 ├─ git 저장소가 아닌 프로젝트에서는 자동 건너뜀
 └─ rebase/merge/conflict 상태에서는 건너뜀
+
+PR Guard:
+├─ gh pr create 시 현재 브랜치에 열린 PR 감지 → 중복 생성 차단
+└─ gh CLI 오류 시 안전 모드(허용)로 동작
 
 설정을 변경하려면 /hook-config를 실행하세요.
 ```
