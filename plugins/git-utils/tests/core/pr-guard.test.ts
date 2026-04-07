@@ -51,6 +51,17 @@ describe('PrGuardService.check', () => {
       expect(result.allowed).toBe(true);
       expect(result.prNumber).toBeUndefined();
     });
+
+    test('merged PR이 있는 브랜치에서는 차단하지 않아야 함 (OPEN이 아닌 PR은 무시)', async () => {
+      // detectCurrentPrNumber()는 OPEN 상태가 아닌 PR에 대해 null을 반환
+      const guard = createPrGuardService(mockGitHub({
+        detectCurrentPrNumber: async () => null,
+      }));
+      const result = await guard.check({ toolCommand: 'gh pr create --title "new feature"' });
+
+      expect(result.allowed).toBe(true);
+      expect(result.prNumber).toBeUndefined();
+    });
   });
 
   describe('gh 실패 시 (안전 모드)', () => {

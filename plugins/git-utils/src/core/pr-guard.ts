@@ -12,6 +12,8 @@ export interface PrGuardService {
   check(input: PrGuardInput): Promise<PrGuardOutput>;
 }
 
+// Note: 이 패턴은 Claude의 Bash 도구가 생성하는 표준 형태의 gh CLI 명령을 대상으로 합니다.
+// `gh --repo owner/repo pr create` 같은 변형은 매칭하지 않습니다.
 const GH_PR_CREATE_PATTERN = /\bgh\s+pr\s+create\b/;
 
 export function createPrGuardService(github: GitHubService): PrGuardService {
