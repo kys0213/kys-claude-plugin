@@ -1,12 +1,12 @@
 ---
 description: "autopilot 루프를 설정된 인터벌로 모두 시작합니다 (기본 6개 + test_watch)"
 argument-hint: ""
-allowed-tools: ["Read", "Bash"]
+allowed-tools: ["Read", "Bash", "CronCreate"]
 ---
 
 # Autopilot
 
-autopilot 루프를 `run-loop.sh` + `Bash(run_in_background)` 기반으로 모두 시작합니다.
+autopilot 루프를 `CronCreate` 기반으로 모두 시작합니다.
 
 ## 사용법
 
@@ -77,32 +77,36 @@ autopilot preflight --config github-autopilot.local.md --repo-root .
 
 ### Step 2: 루프 시작
 
-`PLUGIN_ROOT`를 찾습니다 (이 command 파일이 위치한 플러그인의 루트):
+설정의 인터벌을 cron 표현식으로 변환합니다:
 
-```bash
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(dirname "$(dirname "$0")")}"
-SCRIPT="${PLUGIN_ROOT}/scripts/run-loop.sh"
-LABEL_PREFIX="{설정에서 읽은 label_prefix}"
-LOG_DIR="/tmp/autopilot-$(basename $(git rev-parse --show-toplevel))/logs"
-mkdir -p "$LOG_DIR"
-```
+| 인터벌 | cron 표현식 |
+|--------|------------|
+| `"10m"` | `"*/10 * * * *"` |
+| `"15m"` | `"*/15 * * * *"` |
+| `"20m"` | `"*/20 * * * *"` |
+| `"30m"` | `"*/30 * * * *"` |
+| `"1h"` | `"7 * * * *"` |
+| `"2h"` | `"7 */2 * * *"` |
+| `"6h"` | `"7 */6 * * *"` |
 
-기본 6개 루프를 `Bash(run_in_background)`로 시작합니다:
+> 분 단위(`Nm`)는 `*/N * * * *`, 시간 단위(`Nh`)는 `7 */N * * *` (`:00` 회피).
 
-1. `Bash(run_in_background)`: `bash "$SCRIPT" "/github-autopilot:gap-watch" "{gap_watch}" "$LABEL_PREFIX" true "$LOG_DIR"`
-2. `Bash(run_in_background)`: `bash "$SCRIPT" "/github-autopilot:build-issues" "{build_issues}" "$LABEL_PREFIX" true "$LOG_DIR"`
-3. `Bash(run_in_background)`: `bash "$SCRIPT" "/github-autopilot:merge-prs" "{merge_prs}" "$LABEL_PREFIX" true "$LOG_DIR"`
-4. `Bash(run_in_background)`: `bash "$SCRIPT" "/github-autopilot:ci-watch" "{ci_watch}" "$LABEL_PREFIX" true "$LOG_DIR"`
-5. `Bash(run_in_background)`: `bash "$SCRIPT" "/github-autopilot:ci-fix" "{ci_fix}" "$LABEL_PREFIX" true "$LOG_DIR"`
-6. `Bash(run_in_background)`: `bash "$SCRIPT" "/github-autopilot:qa-boost" "{qa_boost}" "$LABEL_PREFIX" true "$LOG_DIR"`
+기본 6개 루프를 `CronCreate`로 등록합니다:
+
+1. `CronCreate(cron: "{gap_watch_cron}", prompt: "/github-autopilot:gap-watch")`
+2. `CronCreate(cron: "{build_issues_cron}", prompt: "/github-autopilot:build-issues")`
+3. `CronCreate(cron: "{merge_prs_cron}", prompt: "/github-autopilot:merge-prs")`
+4. `CronCreate(cron: "{ci_watch_cron}", prompt: "/github-autopilot:ci-watch")`
+5. `CronCreate(cron: "{ci_fix_cron}", prompt: "/github-autopilot:ci-fix")`
+6. `CronCreate(cron: "{qa_boost_cron}", prompt: "/github-autopilot:qa-boost")`
 
 ### Step 2.5: Test Watch 루프 시작
 
-`test_watch` 배열이 비어있지 않으면, 각 스위트별 루프를 추가 시작합니다:
+`test_watch` 배열이 비어있지 않으면, 각 스위트별 루프를 추가 등록합니다:
 
 ```
 # test_watch 배열의 각 항목별
-Bash(run_in_background): bash "$SCRIPT" "/github-autopilot:test-watch {suite.name}" "{suite.interval}" "$LABEL_PREFIX" true "$LOG_DIR"
+CronCreate(cron: "{suite_interval_cron}", prompt: "/github-autopilot:test-watch {suite.name}")
 ```
 
 ### Step 3: 결과 출력
@@ -112,24 +116,23 @@ Bash(run_in_background): bash "$SCRIPT" "/github-autopilot:test-watch {suite.nam
 ```
 ## Autopilot 시작
 
-| Loop | Command | Interval |
-|------|---------|----------|
-| Gap Watch | /github-autopilot:gap-watch | 30m |
-| Build Issues | /github-autopilot:build-issues | 15m |
-| Merge PRs | /github-autopilot:merge-prs | 10m |
-| CI Watch | /github-autopilot:ci-watch | 20m |
-| CI Fix | /github-autopilot:ci-fix | 15m |
-| QA Boost | /github-autopilot:qa-boost | 1h |
-| Test: e2e | /github-autopilot:test-watch e2e | 2h |
+| Loop | Command | Interval | Cron |
+|------|---------|----------|------|
+| Gap Watch | /github-autopilot:gap-watch | 30m | */30 * * * * |
+| Build Issues | /github-autopilot:build-issues | 15m | */15 * * * * |
+| Merge PRs | /github-autopilot:merge-prs | 10m | */10 * * * * |
+| CI Watch | /github-autopilot:ci-watch | 20m | */20 * * * * |
+| CI Fix | /github-autopilot:ci-fix | 15m | */15 * * * * |
+| QA Boost | /github-autopilot:qa-boost | 1h | 7 * * * * |
+| Test: e2e | /github-autopilot:test-watch e2e | 2h | 7 */2 * * * |
 
-{N}개 루프가 시작되었습니다.
-로그: /tmp/autopilot-{repo}/logs/
-PID: /tmp/autopilot-{repo}/pids/
+{N}개 루프가 등록되었습니다.
+CronList로 확인 가능합니다.
 ```
 
 ## 주의사항
 
-- PID 파일 기반 중복 방지: 같은 루프가 이미 실행 중이면 자동 스킵
-- 세션 종료 시 background 프로세스도 종료됨
-- 개별 루프 PID 확인: `cat /tmp/autopilot-{repo}/pids/{loop-name}.pid`
-- 수동 종료: `kill $(cat /tmp/autopilot-{repo}/pids/{loop-name}.pid)`
+- CronCreate는 REPL이 idle일 때만 실행 — 이전 prompt 실행 중에는 자동 대기
+- 세션 종료 시 모든 cron job 자동 삭제
+- 7일 후 자동 만료 — 장기 운영 시 재등록 필요
+- 수동 해제: `CronDelete(id)` 또는 `CronList`로 확인

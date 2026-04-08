@@ -15,7 +15,7 @@ allowed-tools: ["Bash", "Read", "Agent"]
 /github-autopilot:test-watch performance         # performance 스위트 1회 실행
 ```
 
-> 반복 실행은 `/github-autopilot:autopilot`이 `run-loop.sh`로 관리합니다.
+> 반복 실행은 `/github-autopilot:autopilot`이 `CronCreate`로 관리합니다.
 
 ## Context
 
