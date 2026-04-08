@@ -141,7 +141,9 @@ autopilot agent가 설정된 base branch 외의 브랜치로 PR을 생성하는 
 
 #### 설치 방법
 
-`.claude/settings.local.json` 파일의 `hooks.PreToolUse` 배열에 아래 항목들을 추가합니다:
+`.claude/settings.local.json` 파일에 아래 hook들을 추가합니다:
+
+**hooks.PreToolUse**:
 
 ```json
 {
@@ -161,11 +163,20 @@ autopilot agent가 설정된 base branch 외의 브랜치로 PR을 생성하는 
       "type": "command",
       "command": "bash plugins/github-autopilot/hooks/guard-pr-base.sh",
       "timeout": 5
-    },
+    }
+  ]
+}
+```
+
+**hooks.SessionStart**:
+
+```json
+{
+  "hooks": [
     {
       "type": "command",
       "command": "bash plugins/github-autopilot/hooks/check-cli-version.sh",
-      "timeout": 5
+      "timeout": 10
     }
   ]
 }
@@ -173,10 +184,10 @@ autopilot agent가 설정된 base branch 외의 브랜치로 PR을 생성하는 
 
 #### Hook 설명
 
-| Hook | 트리거 | 동작 |
+| Hook | 이벤트 | 동작 |
 |------|--------|------|
-| `guard-pr-base.sh` | Bash, MCP PR 생성 | 설정된 base branch 외 PR 생성 차단 |
-| `check-cli-version.sh` | Bash | 세션당 1회, CLI 버전이 과거이면 업데이트 안내 |
+| `guard-pr-base.sh` | PreToolUse (Bash, MCP) | 설정된 base branch 외 PR 생성 차단 |
+| `check-cli-version.sh` | SessionStart | 세션 시작 시 CLI 버전이 과거이면 업데이트 안내 |
 
 #### 주의사항
 
