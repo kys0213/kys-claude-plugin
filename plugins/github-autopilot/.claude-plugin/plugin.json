@@ -28,19 +28,6 @@
     "./commands/test-watch.md"
   ],
   "description": "CronCreate 기반 자율 개발 루프 - gap 탐지, issue 구현, PR 머지, CI 감시/수정, QA 보강, 테스트 워치",
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/check-cli-version.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
-  },
   "name": "github-autopilot",
   "skills": [
     "./skills"
