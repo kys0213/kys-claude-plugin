@@ -15,7 +15,7 @@ allowed-tools: ["Bash", "Glob", "Read", "Grep"]
 /github-autopilot:qa-boost abc1234            # 특정 커밋 이후 변경 분석
 ```
 
-> 반복 실행은 `/github-autopilot:autopilot`이 `run-loop.sh`로 관리합니다.
+> 반복 실행은 `/github-autopilot:autopilot`이 `CronCreate`로 관리합니다.
 
 ## Context
 

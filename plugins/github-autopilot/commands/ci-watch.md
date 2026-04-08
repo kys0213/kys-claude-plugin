@@ -14,7 +14,7 @@ GitHub Actions의 CI 실패를 감시하고, 실패 원인을 분석하여 GitHu
 /github-autopilot:ci-watch
 ```
 
-> 반복 실행은 `/github-autopilot:autopilot`이 `run-loop.sh`로 관리합니다.
+> 반복 실행은 `/github-autopilot:autopilot`이 `CronCreate`로 관리합니다.
 
 ## Context
 

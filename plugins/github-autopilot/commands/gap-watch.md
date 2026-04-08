@@ -14,7 +14,7 @@ allowed-tools: ["Bash", "Glob", "Read", "Agent", "AskUserQuestion"]
 /github-autopilot:gap-watch
 ```
 
-> 반복 실행은 `/github-autopilot:autopilot`이 `run-loop.sh`로 관리합니다.
+> 반복 실행은 `/github-autopilot:autopilot`이 `CronCreate`로 관리합니다.
 
 ## Context
 

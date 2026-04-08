@@ -14,7 +14,7 @@ autopilot이 생성한 PR의 CI 실패를 감지하고, tick 단위로 수정을
 /github-autopilot:ci-fix
 ```
 
-> 반복 실행은 `/github-autopilot:autopilot`이 `run-loop.sh`로 관리합니다.
+> 반복 실행은 `/github-autopilot:autopilot`이 `CronCreate`로 관리합니다.
 
 ## Context
 
