@@ -1,5 +1,5 @@
 ---
-description: "autopilot 루프를 설정된 인터벌로 모두 시작합니다 (기본 6개 + test_watch)"
+description: "autopilot 루프를 설정된 인터벌로 모두 시작합니다 (기본 7개 + test_watch)"
 argument-hint: ""
 allowed-tools: ["Read", "Bash", "CronCreate"]
 ---
@@ -28,6 +28,7 @@ autopilot 루프를 `CronCreate` 기반으로 모두 시작합니다.
 ```yaml
 default_intervals:
   gap_watch: "30m"
+  analyze_issue: "20m"
   build_issues: "15m"
   merge_prs: "10m"
   ci_watch: "20m"
@@ -91,14 +92,15 @@ autopilot preflight --config github-autopilot.local.md --repo-root .
 
 > 분 단위(`Nm`)는 `*/N * * * *`, 시간 단위(`Nh`)는 `7 */N * * *` (`:00` 회피).
 
-기본 6개 루프를 `CronCreate`로 등록합니다:
+기본 7개 루프를 `CronCreate`로 등록합니다:
 
 1. `CronCreate(cron: "{gap_watch_cron}", prompt: "/github-autopilot:gap-watch")`
-2. `CronCreate(cron: "{build_issues_cron}", prompt: "/github-autopilot:build-issues")`
-3. `CronCreate(cron: "{merge_prs_cron}", prompt: "/github-autopilot:merge-prs")`
-4. `CronCreate(cron: "{ci_watch_cron}", prompt: "/github-autopilot:ci-watch")`
-5. `CronCreate(cron: "{ci_fix_cron}", prompt: "/github-autopilot:ci-fix")`
-6. `CronCreate(cron: "{qa_boost_cron}", prompt: "/github-autopilot:qa-boost")`
+2. `CronCreate(cron: "{analyze_issue_cron}", prompt: "/github-autopilot:analyze-issue")`
+3. `CronCreate(cron: "{build_issues_cron}", prompt: "/github-autopilot:build-issues")`
+4. `CronCreate(cron: "{merge_prs_cron}", prompt: "/github-autopilot:merge-prs")`
+5. `CronCreate(cron: "{ci_watch_cron}", prompt: "/github-autopilot:ci-watch")`
+6. `CronCreate(cron: "{ci_fix_cron}", prompt: "/github-autopilot:ci-fix")`
+7. `CronCreate(cron: "{qa_boost_cron}", prompt: "/github-autopilot:qa-boost")`
 
 ### Step 2.5: Test Watch 루프 시작
 
@@ -119,6 +121,7 @@ CronCreate(cron: "{suite_interval_cron}", prompt: "/github-autopilot:test-watch 
 | Loop | Command | Interval | Cron |
 |------|---------|----------|------|
 | Gap Watch | /github-autopilot:gap-watch | 30m | */30 * * * * |
+| Analyze Issue | /github-autopilot:analyze-issue | 20m | */20 * * * * |
 | Build Issues | /github-autopilot:build-issues | 15m | */15 * * * * |
 | Merge PRs | /github-autopilot:merge-prs | 10m | */10 * * * * |
 | CI Watch | /github-autopilot:ci-watch | 20m | */20 * * * * |

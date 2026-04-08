@@ -70,8 +70,12 @@ CronCreate 기반 자율 개발 루프 — gap 탐지, 테스트 갭 발행, CI 
 
 사람이 직접 등록한 이슈는 자동으로 라벨이 붙지 않습니다.
 
+**자동 탐색 모드** (autopilot 루프): `analyze-issue`가 주기적으로 라벨 없는 open 이슈를 탐색하여 자동 분석합니다.
+
+**수동 모드**: 특정 이슈를 직접 분석할 수도 있습니다.
+
 1. 사람이 이슈 등록
-2. `/analyze-issue #42` 실행 (사람이 트리거)
+2. `/analyze-issue #42` 실행 (사람이 트리거) 또는 autopilot 루프가 자동 탐색
 3. ready → `:ready` 라벨 → build-issues 파이프라인 진입
 4. skip → 코멘트만 게시, 다음 build-issues tick에서 `notification` 설정에 따라 알림
 
@@ -123,13 +127,13 @@ autopilot pipeline idle --label-prefix "autopilot:"
 | 커맨드 | 설명 |
 |--------|------|
 | `/github-autopilot:setup` | 초기 설정 (rules, 설정 파일, 라벨 생성) |
-| `/github-autopilot:autopilot` | 5개 루프를 설정된 인터벌로 모두 시작 |
+| `/github-autopilot:autopilot` | 7개 루프를 설정된 인터벌로 모두 시작 |
 | `/github-autopilot:gap-watch [interval]` | 스펙 갭 탐지 → 이슈 발행 |
 | `/github-autopilot:qa-boost [commit] [interval]` | 테스트 갭 탐지 → 이슈 발행 |
 | `/github-autopilot:ci-watch [interval]` | CI 실패 감지 → 이슈 발행 |
 | `/github-autopilot:build-issues [interval]` | `:ready` 이슈 구현 → PR |
 | `/github-autopilot:merge-prs [interval]` | `:auto` PR 머지 |
-| `/github-autopilot:analyze-issue <numbers>` | 사람 이슈 분석 (HITL) |
+| `/github-autopilot:analyze-issue [numbers]` | 이슈 분석 (인자 없으면 라벨 없는 이슈 자동 탐색) |
 
 ## 에이전트
 
@@ -159,9 +163,11 @@ spec_paths:
   - "docs/spec/"
 default_intervals:
   gap_watch: "30m"
+  analyze_issue: "20m"
   build_issues: "15m"
   merge_prs: "10m"
   ci_watch: "20m"
+  ci_fix: "15m"
   qa_boost: "1h"
 notification: ""
 ---
