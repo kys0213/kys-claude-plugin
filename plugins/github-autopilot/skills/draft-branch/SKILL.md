@@ -46,20 +46,10 @@ test_watch: []                       # 테스트 스위트 정의 (아래 예시
 
 ## Base 브랜치 결정
 
-에이전트가 작업할 base 브랜치는 다음 우선순위로 결정한다:
+**branch-sync** 스킬을 참조한다. 요약:
 
-1. `work_branch`가 설정되어 있으면 → 해당 브랜치를 base로 사용
-2. `work_branch`가 비어있으면 → `branch_strategy`에 따라 결정:
-   - `draft-main` → `main`
-   - `draft-develop-main` → `develop`
-
-```
-# 예시: work_branch가 "alpha"인 경우
-base_branch = "alpha"
-
-# 예시: work_branch가 비어있고 branch_strategy가 "draft-main"인 경우
-base_branch = "main"
-```
+1. `work_branch` 설정 시 → 해당 값 사용
+2. 미설정 시 → `branch_strategy`에 따라 결정 (`draft-main` → `main`, `draft-develop-main` → `develop`)
 
 ## Branch 계층 구조
 
@@ -157,15 +147,7 @@ git branch -D draft/issue-{N}
 
 ## Always Pull First (필수 규칙)
 
-autopilot의 모든 agent와 command는 작업 시작 전 반드시 최신 변경사항을 가져와야 한다.
-
-```bash
-git fetch origin
-# remote tracking 브랜치가 있는 경우:
-git pull --rebase origin $(git branch --show-current)
-```
-
-**이유**: autopilot은 주기적으로 실행되므로, 이전 실행 이후 다른 agent나 사람이 변경한 내용을 반영하지 않으면 충돌이나 중복 작업이 발생한다.
+**branch-sync** 스킬의 절차를 따른다. 모든 커맨드는 작업 시작 전 base 브랜치로 checkout + pull을 수행한다.
 
 ## Draft Branch 금지 사항
 

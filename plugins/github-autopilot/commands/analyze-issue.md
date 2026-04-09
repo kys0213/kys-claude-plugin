@@ -48,11 +48,12 @@ gh issue list --state open --json number,title,labels,comments --limit 50
 탐색 결과에서 이슈 번호 목록을 추출하여 Step 2로 진행합니다.
 탐색 결과가 없으면 "분석 대상 이슈 없음" 출력 후 Step 8(Idle Detection)으로 진행합니다.
 
-### Step 2: 최신 상태 동기화
+### Step 2: Base 브랜치 동기화
 
-```bash
-git fetch origin
-```
+**branch-sync** 스킬의 절차를 따릅니다:
+1. `github-autopilot.local.md`에서 `work_branch` / `branch_strategy` 읽기
+2. base 브랜치 결정 (work_branch > branch_strategy)
+3. `git fetch origin` → `git checkout {base_branch}` → `git pull --rebase`
 
 ### Step 3: 설정 로딩
 

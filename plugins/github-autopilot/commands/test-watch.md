@@ -30,11 +30,12 @@ allowed-tools: ["Bash", "Read", "Agent"]
 - `{test_name}` → 특정 스위트 1회 실행
 - 비어있으면 → 전체 스위트 1회 실행
 
-### Step 2: 최신 상태 동기화
+### Step 2: Base 브랜치 동기화
 
-```bash
-git fetch origin
-```
+**branch-sync** 스킬의 절차를 따릅니다:
+1. `github-autopilot.local.md`에서 `work_branch` / `branch_strategy` 읽기
+2. base 브랜치 결정 (work_branch > branch_strategy)
+3. `git fetch origin` → `git checkout {base_branch}` → `git pull --rebase`
 
 ### Step 2.5: Pipeline Idle Check
 

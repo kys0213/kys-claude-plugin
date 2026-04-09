@@ -23,19 +23,14 @@ autopilot 라벨이 붙은 GitHub 이슈를 가져와 의존성을 분석하고,
 
 ## 작업 프로세스
 
-### Step 1: Base 브랜치 결정
+### Step 1: Base 브랜치 동기화
 
-설정에서 `work_branch`와 `branch_strategy`를 읽어 base 브랜치를 결정합니다:
-1. `work_branch`가 설정되어 있으면 → 해당 값 사용
-2. `work_branch`가 비어있으면 → `branch_strategy`에 따라 결정 (`draft-main` → `main`, `draft-develop-main` → `develop`)
+**branch-sync** 스킬의 절차를 따릅니다:
+1. `github-autopilot.local.md`에서 `work_branch` / `branch_strategy` 읽기
+2. base 브랜치 결정 (work_branch > branch_strategy)
+3. `git fetch origin` → `git checkout {base_branch}` → `git pull --rebase`
 
-### Step 2: 최신 상태 동기화
-
-```bash
-git fetch origin
-```
-
-### Step 2.5: Pipeline Idle Check
+### Step 1.5: Pipeline Idle Check
 
 ```bash
 autopilot pipeline idle --label-prefix "{label_prefix}"
