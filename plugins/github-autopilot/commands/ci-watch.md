@@ -23,11 +23,9 @@ GitHub Actions의 CI 실패를 감시하고, 실패 원인을 분석하여 GitHu
 
 ## 작업 프로세스
 
-### Step 1: 최신 상태 동기화
+### Step 1: Base 브랜치 동기화
 
-```bash
-git fetch origin
-```
+**branch-sync** 스킬의 절차를 수행합니다.
 
 ### Step 1.5: Pipeline Idle Check
 

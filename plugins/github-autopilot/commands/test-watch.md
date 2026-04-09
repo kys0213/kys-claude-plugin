@@ -30,11 +30,9 @@ allowed-tools: ["Bash", "Read", "Agent"]
 - `{test_name}` → 특정 스위트 1회 실행
 - 비어있으면 → 전체 스위트 1회 실행
 
-### Step 2: 최신 상태 동기화
+### Step 2: Base 브랜치 동기화
 
-```bash
-git fetch origin
-```
+**branch-sync** 스킬의 절차를 수행합니다.
 
 ### Step 2.5: Pipeline Idle Check
 

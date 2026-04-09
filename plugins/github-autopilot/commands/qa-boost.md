@@ -31,12 +31,9 @@ allowed-tools: ["Bash", "Glob", "Read", "Grep"]
 - `/^[0-9a-f]{7,40}$/` 패턴 매칭 → commit_hash
 - 비어있으면 → 최근 20커밋 기준
 
-### Step 2: 최신 상태 동기화
+### Step 2: Base 브랜치 동기화
 
-```bash
-git fetch origin
-git pull --rebase origin $(git branch --show-current) 2>/dev/null || true
-```
+**branch-sync** 스킬의 절차를 수행합니다.
 
 ### Step 2.5: Pipeline Idle Check
 
