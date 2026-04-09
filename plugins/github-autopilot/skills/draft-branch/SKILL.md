@@ -46,10 +46,7 @@ test_watch: []                       # 테스트 스위트 정의 (아래 예시
 
 ## Base 브랜치 결정
 
-**branch-sync** 스킬을 참조한다. 요약:
-
-1. `work_branch` 설정 시 → 해당 값 사용
-2. 미설정 시 → `branch_strategy`에 따라 결정 (`draft-main` → `main`, `draft-develop-main` → `develop`)
+base 브랜치 결정 및 동기화는 **branch-sync** 스킬을 참조한다.
 
 ## Branch 계층 구조
 
@@ -144,10 +141,6 @@ git branch -D draft/issue-{N}
 ## GitHub 라벨 체계
 
 라벨 체계, 필수 규칙, fingerprint 기반 중복 방지는 **issue-label 스킬**을 참조한다.
-
-## Always Pull First (필수 규칙)
-
-**branch-sync** 스킬의 절차를 따른다. 모든 커맨드는 작업 시작 전 base 브랜치로 checkout + pull을 수행한다.
 
 ## Draft Branch 금지 사항
 

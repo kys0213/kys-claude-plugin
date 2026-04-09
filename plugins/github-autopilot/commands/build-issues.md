@@ -25,12 +25,9 @@ autopilot 라벨이 붙은 GitHub 이슈를 가져와 의존성을 분석하고,
 
 ### Step 1: Base 브랜치 동기화
 
-**branch-sync** 스킬의 절차를 따릅니다:
-1. `github-autopilot.local.md`에서 `work_branch` / `branch_strategy` 읽기
-2. base 브랜치 결정 (work_branch > branch_strategy)
-3. `git fetch origin` → `git checkout {base_branch}` → `git pull --rebase`
+**branch-sync** 스킬의 절차를 수행합니다.
 
-### Step 1.5: Pipeline Idle Check
+### Step 2: Pipeline Idle Check
 
 ```bash
 autopilot pipeline idle --label-prefix "{label_prefix}"
@@ -38,7 +35,7 @@ autopilot pipeline idle --label-prefix "{label_prefix}"
 
 - **exit 0 (idle)**: `notification` 설정이 있으면 "autopilot 파이프라인 완료 — build-issues cycle 중단" 알림 발송 후 종료합니다.
 - **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다.
-- **exit 1 (active)**: Step 3부터 정상 진행.
+- **exit 1 (active)**: Step 3부터 정상 진행
 
 ### Step 3: Skip 이슈 알림
 

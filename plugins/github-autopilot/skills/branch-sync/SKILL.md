@@ -34,8 +34,3 @@ git pull --rebase origin {base_branch} 2>/dev/null || true
 
 autopilot은 주기적으로 실행되므로, 이전 실행 이후 다른 agent나 사람이 변경한 내용을 반영하지 않으면 충돌이나 중복 작업이 발생한다. 또한 현재 체크아웃된 브랜치가 base 브랜치와 다를 수 있으므로, 명시적으로 base 브랜치로 전환해야 한다.
 
-## 예외
-
-- **ci-fix**: base 브랜치 동기화 후, 실제 작업은 PR의 head 브랜치에서 수행
-- **merge-prs**: base 브랜치 동기화 후, 실제 머지 판단은 PR 단위로 수행
-- **build-issues**: base 브랜치 동기화 후, 구현은 draft 브랜치에서 worktree isolation으로 수행
