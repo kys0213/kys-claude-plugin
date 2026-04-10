@@ -32,10 +32,14 @@ git pull --rebase origin ${HEAD_BRANCH}
 
 ### 2. CI 실패 로그 수집
 
+**반드시** CI 로그를 먼저 읽어 정확한 에러를 파악한다. 이후 모든 수정은 이 로그를 기준으로 방향을 결정한다.
+
 ```bash
 gh run list --branch ${HEAD_BRANCH} --status failure --limit 1 --json databaseId
 gh run view ${RUN_ID} --log-failed 2>&1 | head -500
 ```
+
+`gh run view ${RUN_ID} --log-failed`의 출력 결과가 수정의 **최우선 기준**이 된다. 로컬 도구 실행 결과가 아닌 CI 로그에 나타난 에러 메시지를 기반으로 수정 방향을 결정해야 한다.
 
 ### 3. 실패 분석
 
@@ -48,10 +52,17 @@ gh run view ${RUN_ID} --log-failed 2>&1 | head -500
 | 컴파일 에러 | `error[E`, `cannot find` | 타입/임포트 수정 |
 | 의존성 에러 | `could not resolve`, `npm ERR!` | 의존성 설치/수정 |
 
+### 3.5. CI 로그 기반 수정 원칙
+
+> **로컬 도구(cargo clippy, cargo fmt 등)의 출력이 CI 로그와 다를 수 있다.** Rust 버전 차이, 환경 차이 등으로 로컬에서는 통과하지만 CI에서 실패하는 경우가 빈번하다.
+
+- **CI 로그의 에러 메시지를 기준으로 수정한다.** 로컬 도구는 수정 후 검증 목적으로만 사용한다.
+- 로컬 clippy/fmt 결과만으로 수정하면 CI에서 동일 에러가 반복될 수 있다.
+
 ### 4. 수정 적용
 
-실패 유형에 따라 적절한 수정을 적용합니다:
-- lint: 자동 수정 도구 실행 후 잔여 경고 수동 수정
+CI 로그에서 파악한 정확한 에러를 기준으로 수정을 적용합니다. 자동 수정 도구(`cargo clippy --fix`, `cargo fmt` 등)는 보조 수단으로만 사용합니다:
+- lint: CI 로그의 경고/에러 메시지를 직접 확인하여 수정. 자동 수정 도구는 보조적으로 실행
 - test: 실패 테스트의 원인 코드 분석 → 코드 수정
 - build: 컴파일 에러 수정
 
@@ -97,6 +108,8 @@ git push origin ${HEAD_BRANCH}
 
 ## 주의사항
 
+- CI 로그가 최우선 소스. 로컬 clippy/fmt 결과와 CI 결과가 다를 수 있음 (Rust 버전 차이 등)
+- 반드시 `gh run view --log-failed`로 CI 에러를 확인한 후 수정 방향을 결정
 - `--force-with-lease` 사용하지 않음 (일반 push로 충분, rebase 안 함)
 - 수정 확신이 낮으면 push하지 않고 실패 보고
 - 이전 ci-fix 시도의 수정이 새로운 문제를 만든 경우, 이전 수정도 함께 분석
