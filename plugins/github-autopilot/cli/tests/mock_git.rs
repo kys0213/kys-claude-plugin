@@ -11,6 +11,8 @@ pub struct MockGit {
     existing_commits: HashSet<String>,
     remote: Result<String, String>,
     repo_name: String,
+    refs: HashMap<String, String>,
+    rev_list_counts: HashMap<String, u64>,
 }
 
 impl MockGit {
@@ -21,6 +23,8 @@ impl MockGit {
             existing_commits: HashSet::new(),
             remote: Ok("https://github.com/test/repo.git".to_string()),
             repo_name: "repo".to_string(),
+            refs: HashMap::new(),
+            rev_list_counts: HashMap::new(),
         }
     }
 
@@ -51,6 +55,17 @@ impl MockGit {
         self.repo_name = name.to_string();
         self
     }
+
+    pub fn with_ref(mut self, refname: &str, sha: &str) -> Self {
+        self.refs.insert(refname.to_string(), sha.to_string());
+        self
+    }
+
+    pub fn with_rev_list_count(mut self, from: &str, to: &str, count: u64) -> Self {
+        let key = format!("{from}..{to}");
+        self.rev_list_counts.insert(key, count);
+        self
+    }
 }
 
 impl GitOps for MockGit {
@@ -76,5 +91,21 @@ impl GitOps for MockGit {
 
     fn repo_name(&self) -> Result<String> {
         Ok(self.repo_name.clone())
+    }
+
+    fn fetch_remote(&self, _remote: &str, _branch: &str) -> Result<()> {
+        Ok(())
+    }
+
+    fn rev_parse_ref(&self, refname: &str) -> Result<String> {
+        self.refs
+            .get(refname)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("unknown ref: {refname}"))
+    }
+
+    fn rev_list_count(&self, from: &str, to: &str) -> Result<u64> {
+        let key = format!("{from}..{to}");
+        Ok(self.rev_list_counts.get(&key).copied().unwrap_or(0))
     }
 }

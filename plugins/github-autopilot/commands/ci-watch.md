@@ -1,6 +1,6 @@
 ---
 description: "CI 실패를 모니터링하고 분석하여 GitHub issue를 생성합니다"
-argument-hint: ""
+argument-hint: "[--run-id=<id> --branch=<branch>]"
 allowed-tools: ["Bash", "Read", "Agent"]
 ---
 
@@ -11,10 +11,11 @@ GitHub Actions의 CI 실패를 감시하고, 실패 원인을 분석하여 GitHu
 ## 사용법
 
 ```bash
-/github-autopilot:ci-watch
+/github-autopilot:ci-watch                                       # 전체 스캔 (cron 모드)
+/github-autopilot:ci-watch --run-id=12345 --branch=main          # 타겟 분석 (hybrid 모드)
 ```
 
-> 반복 실행은 `/github-autopilot:autopilot`이 `CronCreate`로 관리합니다.
+> 반복 실행은 `/github-autopilot:autopilot`이 CronCreate 또는 Monitor로 관리합니다.
 
 ## Context
 
@@ -22,6 +23,14 @@ GitHub Actions의 CI 실패를 감시하고, 실패 원인을 분석하여 GitHu
 - 현재 브랜치: !`git branch --show-current`
 
 ## 작업 프로세스
+
+### Step 0: 인자 파싱
+
+`$ARGUMENTS`에서 옵션을 추출합니다:
+- `--run-id=<id>`: 특정 CI run만 분석 (hybrid 모드에서 이벤트로 전달)
+- `--branch=<branch>`: 실패가 발생한 브랜치 (이벤트 컨텍스트)
+
+`--run-id`가 있으면 Step 2의 `gh run list` 쿼리를 건너뛰고 해당 run만 직접 분석합니다 (Step 3의 중복 확인은 수행).
 
 ### Step 1: Base 브랜치 동기화
 

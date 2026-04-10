@@ -34,14 +34,17 @@ label_prefix: "autopilot:"
 spec_paths:
   - "spec/"
   - "docs/spec/"
+event_mode: "hybrid"          # "hybrid" (이벤트 드리븐 + cron) | "cron" (기존 폴링 전용)
+monitor:
+  poll_sec: 60                # Events API 폴링 간격 (초). 서버의 X-Poll-Interval이 더 크면 자동 존중
 default_intervals:
-  gap_watch: "30m"
-  analyze_issue: "20m"
-  build_issues: "15m"
-  merge_prs: "10m"
-  ci_watch: "20m"
-  ci_fix: "15m"
-  qa_boost: "1h"
+  gap_watch: "30m"            # cron 모드에서만 사용
+  analyze_issue: "20m"        # cron 모드에서만 사용
+  build_issues: "15m"         # hybrid/cron 모두 사용
+  merge_prs: "10m"            # cron 모드에서만 사용
+  ci_watch: "20m"             # cron 모드에서만 사용
+  ci_fix: "15m"               # cron 모드에서만 사용
+  qa_boost: "1h"              # cron 모드에서만 사용
 notification: ""              # skip 이슈 알림 방법 (자연어, 예: "Slack DM으로 @irene에게 알려줘")
 quality_gate_command: ""      # 커스텀 quality gate 명령어 (비어있으면 자동 감지)
 max_consecutive_failures: 3   # 연속 실패 허용 횟수, 초과 시 에스컬레이션
@@ -62,6 +65,19 @@ test_watch: []                # 테스트 스위트 정의 (예: [{name: "e2e", 
 비어있으면 branch_strategy에 따라 자동 결정됩니다 (draft-main → main, draft-develop-main → develop).
 
 예시: `work_branch: "alpha"` → alpha에서 분기, PR base도 alpha
+
+## event_mode
+
+autopilot 루프의 실행 모드를 지정합니다.
+
+- **hybrid** (기본): Monitor 기반 이벤트 드리븐. main 브랜치 변경, CI 완료, 새 이슈 등의 이벤트가 발생할 때만 해당 커맨드를 트리거합니다. build-issues와 test-watch만 CronCreate로 동작합니다.
+- **cron**: 기존 CronCreate 기반 폴링. 모든 커맨드가 고정 간격으로 실행됩니다.
+
+## monitor
+
+hybrid 모드에서 Events API 폴링 간격(초)을 설정합니다.
+ETag 기반 conditional request를 사용하므로 변경이 없으면 rate limit을 소비하지 않습니다.
+서버의 `X-Poll-Interval` 헤더 값이 설정보다 크면 자동으로 존중합니다.
 ```
 
 ### Step 3: Hook 설치 (user scope)

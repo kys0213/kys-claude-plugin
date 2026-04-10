@@ -1,12 +1,15 @@
 ---
-description: "autopilot 루프를 설정된 인터벌로 모두 시작합니다 (기본 7개 + test_watch)"
+description: "autopilot 루프를 설정된 모드로 시작합니다 (event-driven hybrid 또는 cron 기반)"
 argument-hint: ""
-allowed-tools: ["Read", "Bash", "CronCreate"]
+allowed-tools: ["Read", "Bash", "CronCreate", "Monitor"]
 ---
 
 # Autopilot
 
-autopilot 루프를 `CronCreate` 기반으로 모두 시작합니다.
+설정의 `event_mode`에 따라 autopilot 루프를 시작합니다.
+
+- **hybrid** (기본): Monitor 기반 이벤트 드리븐 + CronCreate 혼합
+- **cron**: 기존 CronCreate 기반 폴링
 
 ## 사용법
 
@@ -22,10 +25,11 @@ autopilot 루프를 `CronCreate` 기반으로 모두 시작합니다.
 
 ### Step 1: 설정 로딩
 
-`github-autopilot.local.md`에서 `default_intervals`와 `test_watch`를 읽습니다.
+`github-autopilot.local.md`에서 설정을 읽습니다.
 
 기본값:
 ```yaml
+event_mode: "hybrid"
 default_intervals:
   gap_watch: "30m"
   analyze_issue: "20m"
@@ -34,6 +38,8 @@ default_intervals:
   ci_watch: "20m"
   ci_fix: "15m"
   qa_boost: "1h"
+monitor:
+  poll_sec: 60
 test_watch: []
 ```
 
@@ -76,7 +82,71 @@ autopilot preflight --config github-autopilot.local.md --repo-root .
 
 > `spec_paths`에 파일이 없으면 이 단계를 skip합니다 (preflight에서 이미 확인).
 
-### Step 2: 루프 시작
+### Step 2: 모드 분기
+
+`event_mode` 설정에 따라 분기합니다:
+
+- **`"hybrid"`** → Step 2A (이벤트 드리븐 + CronCreate 혼합)
+- **`"cron"`** → Step 2B (기존 CronCreate 전용)
+
+---
+
+### Step 2A: Hybrid 모드 (이벤트 드리븐)
+
+#### Phase A: Monitor 등록
+
+타겟 쿼리 기반 통합 Monitor 1개를 등록합니다:
+
+```
+Monitor(
+  command: "autopilot watch --poll-sec={poll_sec} --branch={base_branch} --branch-filter={branch_filter} --label-prefix={label_prefix}",
+  description: "push/CI/이슈 이벤트 감시 → gap-watch, qa-boost, ci-watch, ci-fix, merge-prs, analyze-issue 트리거",
+  persistent: true,
+  timeout_ms: 300000
+)
+```
+
+> `poll_sec`은 `monitor.poll_sec` 설정값 (기본: 5). push 감지는 매 tick, CI는 30초, 이슈는 60초 간격.
+> `base_branch`는 branch-sync 스킬의 base branch 결정 로직을 따릅니다.
+> `branch_filter`는 `ci_watch.branch_filter` 설정값 (기본: `"autopilot"`).
+> 상태는 `/tmp/autopilot-{repo}/state/watch.json`에 주기적으로 저장되어 세션 재시작 시 중복 emit을 방지합니다.
+
+Monitor가 출력하는 이벤트를 수신하면, 다음 규칙에 따라 디스패치합니다:
+
+| 이벤트 | 조건 | 액션 |
+|--------|------|------|
+| `MAIN_UPDATED before=<sha> after=<sha> count=<N>` | — | `/github-autopilot:gap-watch` 후 `/github-autopilot:qa-boost {before}` |
+| `CI_FAILURE run_id=<id> workflow=<name> branch=<branch>` | default branch | `/github-autopilot:ci-watch --run-id={run_id} --branch={branch}` |
+| `CI_FAILURE run_id=<id> workflow=<name> branch=<branch>` | autopilot branch | `/github-autopilot:ci-fix --branch={branch}` |
+| `CI_SUCCESS run_id=<id> workflow=<name> branch=<branch>` | autopilot branch | `/github-autopilot:merge-prs --branch={branch}` |
+| `NEW_ISSUE number=<N> title=<title>` | — | `/github-autopilot:analyze-issue {number}` |
+
+> 동시에 여러 이벤트가 도착하면 독립적인 이벤트는 병렬 디스패치합니다. 같은 브랜치에 CI_FAILURE와 CI_SUCCESS가 동시에 도착하면 최신 이벤트만 처리합니다.
+
+#### Phase B: CronCreate 등록 (폴링 유지 컴포넌트)
+
+폴링이 적합한 컴포넌트를 CronCreate로 등록합니다:
+
+1. `CronCreate(cron: "{build_issues_cron}", prompt: "/github-autopilot:build-issues")`
+2. test_watch 배열이 비어있지 않으면 각 스위트별:
+   `CronCreate(cron: "{suite_interval_cron}", prompt: "/github-autopilot:test-watch {suite.name}")`
+
+#### Phase C: Monitor Health Check
+
+Monitor 생존 감시를 위한 supervisor cron을 등록합니다:
+
+```
+CronCreate(
+  cron: "*/10 * * * *",
+  prompt: "Monitor health check: events Monitor가 살아있는지 확인합니다. 죽었으면 동일한 설정으로 재등록합니다."
+)
+```
+
+Step 3으로 진행합니다.
+
+---
+
+### Step 2B: Cron 모드 (기존 호환)
 
 설정의 인터벌을 cron 표현식으로 변환합니다:
 
@@ -102,21 +172,46 @@ autopilot preflight --config github-autopilot.local.md --repo-root .
 6. `CronCreate(cron: "{ci_fix_cron}", prompt: "/github-autopilot:ci-fix")`
 7. `CronCreate(cron: "{qa_boost_cron}", prompt: "/github-autopilot:qa-boost")`
 
-### Step 2.5: Test Watch 루프 시작
-
-`test_watch` 배열이 비어있지 않으면, 각 스위트별 루프를 추가 등록합니다:
-
+test_watch 배열이 비어있지 않으면 각 스위트별 루프 추가:
 ```
-# test_watch 배열의 각 항목별
 CronCreate(cron: "{suite_interval_cron}", prompt: "/github-autopilot:test-watch {suite.name}")
 ```
 
+Step 3으로 진행합니다.
+
+---
+
 ### Step 3: 결과 출력
 
-시작된 루프 목록을 테이블로 출력합니다:
+#### Hybrid 모드
 
 ```
-## Autopilot 시작
+## Autopilot 시작 (hybrid 모드)
+
+### Monitor (Events API, ETag 기반)
+
+| Watcher | 감시 이벤트 | 트리거 대상 | Poll |
+|---------|-----------|------------|------|
+| events | PushEvent (default branch) | gap-watch, qa-boost | {poll_sec}s |
+|        | WorkflowRunEvent (failure) | ci-watch, ci-fix | |
+|        | WorkflowRunEvent (success) | merge-prs | |
+|        | IssuesEvent (opened) | analyze-issue | |
+
+### CronCreate (폴링)
+
+| Loop | Command | Interval | Cron |
+|------|---------|----------|------|
+| Build Issues | /github-autopilot:build-issues | {interval} | {cron} |
+| Monitor Health | health check | 10m | */10 * * * * |
+| Test: {name} | /github-autopilot:test-watch {name} | {interval} | {cron} |
+
+Monitor 1개 + CronCreate {M}개 등록되었습니다.
+```
+
+#### Cron 모드
+
+```
+## Autopilot 시작 (cron 모드)
 
 | Loop | Command | Interval | Cron |
 |------|---------|----------|------|
@@ -135,7 +230,9 @@ CronList로 확인 가능합니다.
 
 ## 주의사항
 
-- CronCreate는 REPL이 idle일 때만 실행 — 이전 prompt 실행 중에는 자동 대기
-- 세션 종료 시 모든 cron job 자동 삭제
+- **hybrid 모드**: Monitor는 이벤트가 발생할 때만 커맨드를 트리거합니다. 변경이 없으면 실행하지 않습니다.
+- **cron 모드**: CronCreate는 REPL이 idle일 때만 실행됩니다.
+- 세션 종료 시 모든 Monitor와 CronCreate가 자동 정리됩니다.
 - 7일 후 자동 만료 — 장기 운영 시 재등록 필요
-- 수동 해제: `CronDelete(id)` 또는 `CronList`로 확인
+- 수동 해제: `CronDelete(id)` 또는 `TaskStop(id)` (Monitor용)
+- `event_mode: "cron"`으로 설정하면 기존과 100% 동일하게 동작합니다.
