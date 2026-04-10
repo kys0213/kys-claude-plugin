@@ -53,7 +53,7 @@ Glob으로 spec_paths에서 마크다운 파일을 수집합니다:
 > 다음 패턴에 해당하는 경로는 자동 제외합니다:
 > - 테스트 디렉토리: `tests/`, `test_fixtures/`, `benches/`
 > - 테스트 파일: `*_test.*`, `*_spec.*` (테스트 코드 자체)
-> - 인라인 fixture: `src/` 내부에서 `make_*_spec`, `mock_spec` 등으로 생성된 fixture는 실제 스펙이 아니므로 gap-detector가 Phase 1에서 추가 검증합니다.
+> - 인라인 fixture: gap-detector가 Phase 1에서 추가 검증합니다.
 
 스펙 파일이 없으면 에러 메시지 출력 후 종료.
 
