@@ -27,7 +27,13 @@ autopilot 라벨이 붙은 GitHub 이슈를 가져와 의존성을 분석하고,
 
 **branch-sync** 스킬의 절차를 수행합니다.
 
-### Step 2: Pipeline Idle Check
+### Step 2: 설정 로딩
+
+설정 파일(`github-autopilot.local.md`)에서 다음 값을 읽습니다:
+
+- `max_parallel_agents`: 동시에 실행할 최대 에이전트 수 (기본값: 3)
+
+### Step 2.5: Pipeline Idle Check
 
 ```bash
 autopilot pipeline idle --label-prefix "{label_prefix}"
@@ -134,7 +140,15 @@ gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 
 첫 번째 배치(의존성 없는 이슈들)부터 순서대로 처리합니다.
 
-각 배치 내 이슈들은 병렬로 구현합니다:
+각 배치 내 이슈들을 `max_parallel_agents` 단위로 분할하여 순차 그룹으로 실행합니다:
+
+- 배치 내 이슈가 `max_parallel_agents`보다 많으면:
+  1. 이슈를 `max_parallel_agents` 크기의 서브그룹으로 분할
+  2. 서브그룹 1 병렬 실행 → 완료 대기
+  3. 서브그룹 2 병렬 실행 → 완료 대기
+  4. ...반복
+- 예: `max_parallel_agents=3`, 배치 이슈 7개
+  → 그룹1: #1,#2,#3 (병렬) → 그룹2: #4,#5,#6 (병렬) → 그룹3: #7 (단독)
 
 각 이슈에 대해 issue-implementer 에이전트를 호출합니다:
 - `isolation: "worktree"` 로 독립 작업 공간 확보
@@ -222,8 +236,10 @@ gh issue view ${ISSUE_NUMBER} --json comments --jq '.comments[].body' | grep -o 
 - label_prefix
 - pr_type: "auto"
 
-**성공한 이슈 수가 3개 이하**: 순차 호출
-**4개 이상**: 병렬 호출 (background=true)
+성공한 이슈들을 `max_parallel_agents` 단위로 분할하여 순차 그룹으로 실행합니다:
+
+- 이슈 수가 `max_parallel_agents` 이하: 순차 호출
+- 이슈 수가 `max_parallel_agents` 초과: `max_parallel_agents` 크기의 서브그룹으로 분할하여 각 서브그룹을 병렬 실행 (background=true) → 완료 대기 → 다음 서브그룹 실행
 
 ### Step 10: 라벨 정리
 
@@ -241,6 +257,9 @@ gh issue view ${ISSUE_NUMBER} --json comments --jq '.comments[].body' | grep -o 
 ### 구현 대상
 - 대상 이슈: 5개
 - 배치: 3개 (batch 1: #42, #44 | batch 2: #43 | batch 3: #45)
+
+### 설정
+- max_parallel_agents: 3
 
 ### 구현
 - 성공: #42, #43, #44 (3건)
