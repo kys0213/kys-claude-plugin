@@ -38,11 +38,8 @@ pub enum Commands {
     },
     /// Pre-flight environment verification
     Preflight(PreflightArgs),
-    /// Watch repository events (event-driven autopilot)
-    Watch {
-        #[command(subcommand)]
-        command: watch::WatchCommands,
-    },
+    /// Watch for push, CI, and issue events (event-driven autopilot)
+    Watch(watch::WatchArgs),
 }
 
 #[derive(Subcommand)]

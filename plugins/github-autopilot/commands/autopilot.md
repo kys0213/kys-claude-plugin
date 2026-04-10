@@ -95,20 +95,21 @@ autopilot preflight --config github-autopilot.local.md --repo-root .
 
 #### Phase A: Monitor 등록
 
-GitHub Events API 기반 통합 Monitor 1개를 등록합니다:
+타겟 쿼리 기반 통합 Monitor 1개를 등록합니다:
 
 ```
 Monitor(
-  command: "autopilot watch events --poll-sec={poll_sec} --branch-filter={branch_filter}",
-  description: "GitHub 이벤트 감시 → gap-watch, qa-boost, ci-watch, ci-fix, merge-prs, analyze-issue 트리거",
+  command: "autopilot watch --poll-sec={poll_sec} --branch={base_branch} --branch-filter={branch_filter} --label-prefix={label_prefix}",
+  description: "push/CI/이슈 이벤트 감시 → gap-watch, qa-boost, ci-watch, ci-fix, merge-prs, analyze-issue 트리거",
   persistent: true,
   timeout_ms: 300000
 )
 ```
 
-> `poll_sec`은 `monitor.poll_sec` 설정값 (기본: 60). 서버의 `X-Poll-Interval` 헤더 값이 더 크면 자동으로 존중합니다.
+> `poll_sec`은 `monitor.poll_sec` 설정값 (기본: 5). push 감지는 매 tick, CI는 30초, 이슈는 60초 간격.
+> `base_branch`는 branch-sync 스킬의 base branch 결정 로직을 따릅니다.
 > `branch_filter`는 `ci_watch.branch_filter` 설정값 (기본: `"autopilot"`).
-> Events API는 ETag 기반 conditional request를 사용합니다. 변경이 없으면 304 Not Modified → rate limit 미소비.
+> 상태는 `/tmp/autopilot-{repo}/state/watch.json`에 주기적으로 저장되어 세션 재시작 시 중복 emit을 방지합니다.
 
 Monitor가 출력하는 이벤트를 수신하면, 다음 규칙에 따라 디스패치합니다:
 

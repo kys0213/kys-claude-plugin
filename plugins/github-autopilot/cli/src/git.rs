@@ -17,6 +17,15 @@ pub trait GitOps: Send + Sync {
 
     /// Return the basename of the repository root directory.
     fn repo_name(&self) -> Result<String>;
+
+    /// Fetch a specific branch from a remote.
+    fn fetch_remote(&self, remote: &str, branch: &str) -> Result<()>;
+
+    /// Resolve an arbitrary ref to a commit hash.
+    fn rev_parse_ref(&self, refname: &str) -> Result<String>;
+
+    /// Count commits in a range (from..to).
+    fn rev_list_count(&self, from: &str, to: &str) -> Result<u64>;
 }
 
 /// Real implementation that shells out to `git`.
@@ -53,6 +62,24 @@ impl GitOps for RealGit {
         let root = run_git(&["rev-parse", "--show-toplevel"])?;
         let name = root.rsplit('/').next().unwrap_or("unknown").to_string();
         Ok(name)
+    }
+
+    fn fetch_remote(&self, remote: &str, branch: &str) -> Result<()> {
+        let _ = Command::new("git")
+            .args(["fetch", remote, branch, "--quiet"])
+            .output()
+            .context("git not found")?;
+        Ok(())
+    }
+
+    fn rev_parse_ref(&self, refname: &str) -> Result<String> {
+        run_git(&["rev-parse", refname])
+    }
+
+    fn rev_list_count(&self, from: &str, to: &str) -> Result<u64> {
+        let range = format!("{from}..{to}");
+        let output = run_git(&["rev-list", "--count", &range])?;
+        output.parse().context("failed to parse rev-list count")
     }
 }
 

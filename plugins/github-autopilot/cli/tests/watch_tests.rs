@@ -1,241 +1,171 @@
+mod mock_git;
 mod mock_github;
 
-use autopilot::cmd::watch::events::{detect_events, BranchMode, EventFilter, WatchEvent};
-use autopilot::github::GitHub;
-use mock_github::{issues_event, push_event, workflow_run_event, MockGitHub};
+use autopilot::cmd::watch::ci::{detect_ci, BranchFilter};
+use autopilot::cmd::watch::issues::detect_issues;
+use autopilot::cmd::watch::push::detect_push;
+use autopilot::cmd::watch::WatchEvent;
+use autopilot::github::{CompletedRun, OpenIssue};
+use mock_git::MockGit;
 use std::collections::HashSet;
 
-fn autopilot_filter() -> EventFilter {
-    EventFilter {
-        default_branch: "main".to_string(),
-        branch_mode: BranchMode::Autopilot,
-    }
-}
-
-fn all_filter() -> EventFilter {
-    EventFilter {
-        default_branch: "main".to_string(),
-        branch_mode: BranchMode::All,
-    }
-}
-
-fn no_seen() -> HashSet<String> {
-    HashSet::new()
-}
-
-// ── PushEvent tests ──
+// ── Push detection tests ──
 
 #[test]
-fn push_on_default_branch_emits_main_updated() {
-    let gh = MockGitHub::new().with_events(vec![push_event("1", "main", "aaa", "bbb", 3)], "etag1");
-    let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
-    assert_eq!(events.len(), 1);
-    match &events[0] {
+fn push_detects_new_commits() {
+    let git = MockGit::new()
+        .with_ref("origin/main", "new_sha")
+        .with_rev_list_count("old_sha", "new_sha", 3);
+    let result = detect_push(&git, "origin", "main", "old_sha");
+    assert!(result.is_some());
+    match result.unwrap() {
         WatchEvent::MainUpdated {
             before,
             after,
             count,
         } => {
-            assert_eq!(before, "aaa");
-            assert_eq!(after, "bbb");
-            assert_eq!(*count, 3);
+            assert_eq!(before, "old_sha");
+            assert_eq!(after, "new_sha");
+            assert_eq!(count, 3);
         }
         other => panic!("expected MainUpdated, got {other}"),
     }
 }
 
 #[test]
-fn push_on_feature_branch_ignored() {
-    let gh = MockGitHub::new().with_events(
-        vec![push_event("1", "feat/something", "aaa", "bbb", 1)],
-        "etag1",
-    );
-    let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
-    assert!(events.is_empty());
+fn push_no_event_when_unchanged() {
+    let git = MockGit::new().with_ref("origin/main", "same_sha");
+    let result = detect_push(&git, "origin", "main", "same_sha");
+    assert!(result.is_none());
 }
 
-// ── WorkflowRunEvent tests ──
-
 #[test]
-fn workflow_failure_on_autopilot_branch() {
-    let gh = MockGitHub::new().with_events(
-        vec![workflow_run_event(
-            "2",
-            100,
-            "CI",
-            "feature/issue-42",
-            "failure",
-        )],
-        "etag2",
-    );
-    let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
-    assert_eq!(events.len(), 1);
-    match &events[0] {
-        WatchEvent::CiFailure {
-            run_id,
-            workflow,
-            branch,
-        } => {
-            assert_eq!(*run_id, 100);
-            assert_eq!(workflow, "CI");
-            assert_eq!(branch, "feature/issue-42");
-        }
-        other => panic!("expected CiFailure, got {other}"),
+fn push_returns_none_on_resolve_failure() {
+    let git = MockGit::new(); // no ref configured → resolve fails
+    let result = detect_push(&git, "origin", "main", "old_sha");
+    assert!(result.is_none());
+}
+
+// ── CI detection tests ──
+
+fn run(id: u64, name: &str, branch: &str, conclusion: &str) -> CompletedRun {
+    CompletedRun {
+        id,
+        name: name.to_string(),
+        branch: branch.to_string(),
+        conclusion: conclusion.to_string(),
     }
 }
 
 #[test]
-fn workflow_success_on_autopilot_branch() {
-    let gh = MockGitHub::new().with_events(
-        vec![workflow_run_event(
-            "3",
-            200,
-            "Build",
-            "draft/issue-10",
-            "success",
-        )],
-        "etag3",
-    );
-    let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
+fn ci_detects_new_failure() {
+    let runs = vec![run(100, "CI", "main", "failure")];
+    let events = detect_ci(&runs, &HashSet::new(), "main", &BranchFilter::All);
     assert_eq!(events.len(), 1);
-    assert!(matches!(&events[0], WatchEvent::CiSuccess { .. }));
+    assert!(matches!(
+        &events[0],
+        WatchEvent::CiFailure { run_id: 100, .. }
+    ));
 }
 
 #[test]
-fn workflow_on_default_branch_detected() {
-    let gh = MockGitHub::new().with_events(
-        vec![workflow_run_event("4", 300, "CI", "main", "failure")],
-        "etag4",
-    );
-    let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
+fn ci_detects_new_success() {
+    let runs = vec![run(200, "Build", "feature/issue-1", "success")];
+    let events = detect_ci(&runs, &HashSet::new(), "main", &BranchFilter::Autopilot);
     assert_eq!(events.len(), 1);
-    assert!(matches!(&events[0], WatchEvent::CiFailure { .. }));
+    assert!(matches!(
+        &events[0],
+        WatchEvent::CiSuccess { run_id: 200, .. }
+    ));
 }
 
 #[test]
-fn workflow_on_user_branch_filtered_in_autopilot_mode() {
-    let gh = MockGitHub::new().with_events(
-        vec![workflow_run_event(
-            "5",
-            400,
-            "CI",
-            "user/my-feature",
-            "failure",
-        )],
-        "etag5",
-    );
-    let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
+fn ci_skips_seen_runs() {
+    let runs = vec![run(100, "CI", "main", "failure")];
+    let seen: HashSet<u64> = [100].into();
+    let events = detect_ci(&runs, &seen, "main", &BranchFilter::All);
     assert!(events.is_empty());
 }
 
 #[test]
-fn workflow_on_user_branch_allowed_in_all_mode() {
-    let gh = MockGitHub::new().with_events(
-        vec![workflow_run_event(
-            "5",
-            400,
-            "CI",
-            "user/my-feature",
-            "failure",
-        )],
-        "etag5",
-    );
-    let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &all_filter(), &no_seen());
+fn ci_filters_non_autopilot_branches() {
+    let runs = vec![run(100, "CI", "user/feature", "failure")];
+    let events = detect_ci(&runs, &HashSet::new(), "main", &BranchFilter::Autopilot);
+    assert!(events.is_empty());
+}
+
+#[test]
+fn ci_allows_all_branches_in_all_mode() {
+    let runs = vec![run(100, "CI", "user/feature", "failure")];
+    let events = detect_ci(&runs, &HashSet::new(), "main", &BranchFilter::All);
     assert_eq!(events.len(), 1);
 }
 
-// ── IssuesEvent tests ──
+#[test]
+fn ci_autopilot_allows_default_branch() {
+    let runs = vec![run(100, "CI", "main", "failure")];
+    let events = detect_ci(&runs, &HashSet::new(), "main", &BranchFilter::Autopilot);
+    assert_eq!(events.len(), 1);
+}
 
 #[test]
-fn new_issue_opened() {
-    let gh = MockGitHub::new().with_events(
-        vec![issues_event("6", "opened", 55, "Add OAuth support")],
-        "etag6",
-    );
-    let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
+fn ci_autopilot_allows_draft_branches() {
+    let runs = vec![run(100, "CI", "draft/issue-5", "success")];
+    let events = detect_ci(&runs, &HashSet::new(), "main", &BranchFilter::Autopilot);
+    assert_eq!(events.len(), 1);
+}
+
+#[test]
+fn ci_ignores_cancelled_runs() {
+    let runs = vec![run(100, "CI", "main", "cancelled")];
+    let events = detect_ci(&runs, &HashSet::new(), "main", &BranchFilter::All);
+    assert!(events.is_empty());
+}
+
+// ── Issue detection tests ──
+
+fn issue(number: u64, title: &str, labels: &[&str]) -> OpenIssue {
+    OpenIssue {
+        number,
+        title: title.to_string(),
+        labels: labels.iter().map(|l| l.to_string()).collect(),
+    }
+}
+
+#[test]
+fn issues_detects_new_unlabeled() {
+    let issues = vec![issue(55, "Add OAuth", &[])];
+    let events = detect_issues(&issues, &HashSet::new(), "autopilot:");
     assert_eq!(events.len(), 1);
     match &events[0] {
         WatchEvent::NewIssue { number, title } => {
             assert_eq!(*number, 55);
-            assert_eq!(title, "Add OAuth support");
+            assert_eq!(title, "Add OAuth");
         }
         other => panic!("expected NewIssue, got {other}"),
     }
 }
 
 #[test]
-fn issue_closed_ignored() {
-    let gh = MockGitHub::new().with_events(
-        vec![issues_event("7", "closed", 55, "Add OAuth support")],
-        "etag7",
-    );
-    let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
+fn issues_skips_labeled() {
+    let issues = vec![issue(55, "Add OAuth", &["autopilot:ready"])];
+    let events = detect_issues(&issues, &HashSet::new(), "autopilot:");
     assert!(events.is_empty());
 }
 
-// ── Filtering tests ──
+#[test]
+fn issues_skips_seen() {
+    let issues = vec![issue(55, "Add OAuth", &[])];
+    let seen: HashSet<u64> = [55].into();
+    let events = detect_issues(&issues, &seen, "autopilot:");
+    assert!(events.is_empty());
+}
 
 #[test]
-fn seen_events_skipped() {
-    let gh = MockGitHub::new().with_events(
-        vec![
-            push_event("10", "main", "a", "b", 1),
-            push_event("20", "main", "b", "c", 1),
-        ],
-        "etag8",
-    );
-    let resp = gh.fetch_events(None).unwrap().unwrap();
-    let seen: HashSet<String> = ["10".to_string()].into();
-    let events = detect_events(&resp, &autopilot_filter(), &seen);
+fn issues_allows_non_autopilot_labels() {
+    let issues = vec![issue(55, "Add OAuth", &["bug", "enhancement"])];
+    let events = detect_issues(&issues, &HashSet::new(), "autopilot:");
     assert_eq!(events.len(), 1);
-    match &events[0] {
-        WatchEvent::MainUpdated { after, .. } => assert_eq!(after, "c"),
-        other => panic!("expected MainUpdated, got {other}"),
-    }
-}
-
-#[test]
-fn empty_events_returns_empty() {
-    let gh = MockGitHub::new().with_events(vec![], "etag9");
-    let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
-    assert!(events.is_empty());
-}
-
-// ── 304 Not Modified test ──
-
-#[test]
-fn fetch_events_304_returns_none() {
-    let gh = MockGitHub::new().with_no_changes();
-    let result = gh.fetch_events(Some("old-etag")).unwrap();
-    assert!(result.is_none());
-}
-
-// ── Mixed events test ──
-
-#[test]
-fn mixed_events_all_detected() {
-    let gh = MockGitHub::new().with_events(
-        vec![
-            push_event("1", "main", "a", "b", 2),
-            workflow_run_event("2", 100, "CI", "feature/issue-1", "failure"),
-            issues_event("3", "opened", 10, "New feature"),
-            workflow_run_event("4", 200, "Build", "main", "success"),
-        ],
-        "etag-mix",
-    );
-    let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
-    assert_eq!(events.len(), 4);
 }
 
 // ── Display format tests ──
