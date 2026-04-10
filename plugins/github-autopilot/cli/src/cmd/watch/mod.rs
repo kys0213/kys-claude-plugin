@@ -3,7 +3,8 @@ pub mod events;
 use crate::github::GitHub;
 use anyhow::Result;
 use clap::Subcommand;
-use events::{detect_events, BranchMode, EventFilter};
+use events::{collect_ids, detect_events, BranchMode, EventFilter};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -42,37 +43,30 @@ impl WatchService {
             branch_mode: branch_mode.clone(),
         };
 
-        let mut etag: Option<String> = None;
-        let mut last_seen_id = String::from("0");
+        let mut seen_ids: HashSet<String> = HashSet::new();
         let mut poll_interval = Duration::from_secs(poll_sec);
 
         loop {
-            match self.github.fetch_events(etag.as_deref()) {
+            // Always fetch without ETag — GitHub's 300s cache makes conditional
+            // requests return 304 even when new events exist. seen_ids handles dedup.
+            match self.github.fetch_events(None) {
                 Ok(Some(response)) => {
                     if response.poll_interval > 0 {
                         let server_interval = Duration::from_secs(response.poll_interval);
                         poll_interval = poll_interval.max(server_interval);
                     }
 
-                    let events = detect_events(&response, &filter, &last_seen_id);
-
-                    if let Some(max_id) = response
-                        .events
-                        .iter()
-                        .filter_map(|e| e.id.parse::<u64>().ok())
-                        .max()
-                    {
-                        last_seen_id = max_id.to_string();
-                    }
-
-                    etag = Some(response.etag);
+                    let events = detect_events(&response, &filter, &seen_ids);
+                    seen_ids.extend(collect_ids(&response));
 
                     for event in events {
                         println!("{event}");
                     }
                 }
                 Ok(None) => {}
-                Err(_) => {}
+                Err(e) => {
+                    eprintln!("fetch error: {e:#}");
+                }
             }
 
             thread::sleep(poll_interval);

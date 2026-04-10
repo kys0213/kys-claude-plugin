@@ -3,6 +3,7 @@ mod mock_github;
 use autopilot::cmd::watch::events::{detect_events, BranchMode, EventFilter, WatchEvent};
 use autopilot::github::GitHub;
 use mock_github::{issues_event, push_event, workflow_run_event, MockGitHub};
+use std::collections::HashSet;
 
 fn autopilot_filter() -> EventFilter {
     EventFilter {
@@ -18,13 +19,17 @@ fn all_filter() -> EventFilter {
     }
 }
 
+fn no_seen() -> HashSet<String> {
+    HashSet::new()
+}
+
 // ── PushEvent tests ──
 
 #[test]
 fn push_on_default_branch_emits_main_updated() {
     let gh = MockGitHub::new().with_events(vec![push_event("1", "main", "aaa", "bbb", 3)], "etag1");
     let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), "0");
+    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
     assert_eq!(events.len(), 1);
     match &events[0] {
         WatchEvent::MainUpdated {
@@ -47,7 +52,7 @@ fn push_on_feature_branch_ignored() {
         "etag1",
     );
     let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), "0");
+    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
     assert!(events.is_empty());
 }
 
@@ -66,7 +71,7 @@ fn workflow_failure_on_autopilot_branch() {
         "etag2",
     );
     let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), "0");
+    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
     assert_eq!(events.len(), 1);
     match &events[0] {
         WatchEvent::CiFailure {
@@ -95,7 +100,7 @@ fn workflow_success_on_autopilot_branch() {
         "etag3",
     );
     let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), "0");
+    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
     assert_eq!(events.len(), 1);
     assert!(matches!(&events[0], WatchEvent::CiSuccess { .. }));
 }
@@ -107,7 +112,7 @@ fn workflow_on_default_branch_detected() {
         "etag4",
     );
     let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), "0");
+    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
     assert_eq!(events.len(), 1);
     assert!(matches!(&events[0], WatchEvent::CiFailure { .. }));
 }
@@ -125,7 +130,7 @@ fn workflow_on_user_branch_filtered_in_autopilot_mode() {
         "etag5",
     );
     let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), "0");
+    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
     assert!(events.is_empty());
 }
 
@@ -142,7 +147,7 @@ fn workflow_on_user_branch_allowed_in_all_mode() {
         "etag5",
     );
     let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &all_filter(), "0");
+    let events = detect_events(&resp, &all_filter(), &no_seen());
     assert_eq!(events.len(), 1);
 }
 
@@ -155,7 +160,7 @@ fn new_issue_opened() {
         "etag6",
     );
     let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), "0");
+    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
     assert_eq!(events.len(), 1);
     match &events[0] {
         WatchEvent::NewIssue { number, title } => {
@@ -173,14 +178,14 @@ fn issue_closed_ignored() {
         "etag7",
     );
     let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), "0");
+    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
     assert!(events.is_empty());
 }
 
 // ── Filtering tests ──
 
 #[test]
-fn old_events_skipped() {
+fn seen_events_skipped() {
     let gh = MockGitHub::new().with_events(
         vec![
             push_event("10", "main", "a", "b", 1),
@@ -189,8 +194,8 @@ fn old_events_skipped() {
         "etag8",
     );
     let resp = gh.fetch_events(None).unwrap().unwrap();
-    // last_seen_id = "10" → only event "20" should be returned
-    let events = detect_events(&resp, &autopilot_filter(), "10");
+    let seen: HashSet<String> = ["10".to_string()].into();
+    let events = detect_events(&resp, &autopilot_filter(), &seen);
     assert_eq!(events.len(), 1);
     match &events[0] {
         WatchEvent::MainUpdated { after, .. } => assert_eq!(after, "c"),
@@ -202,7 +207,7 @@ fn old_events_skipped() {
 fn empty_events_returns_empty() {
     let gh = MockGitHub::new().with_events(vec![], "etag9");
     let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), "0");
+    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
     assert!(events.is_empty());
 }
 
@@ -229,7 +234,7 @@ fn mixed_events_all_detected() {
         "etag-mix",
     );
     let resp = gh.fetch_events(None).unwrap().unwrap();
-    let events = detect_events(&resp, &autopilot_filter(), "0");
+    let events = detect_events(&resp, &autopilot_filter(), &no_seen());
     assert_eq!(events.len(), 4);
 }
 

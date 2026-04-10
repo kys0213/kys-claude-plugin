@@ -1,5 +1,6 @@
 use crate::github::{EventPayload, EventType, EventsResponse};
 use clap::ValueEnum;
+use std::collections::HashSet;
 use std::fmt;
 
 /// Filtered watch event emitted to stdout for Monitor consumption.
@@ -76,7 +77,6 @@ pub struct EventFilter {
     pub branch_mode: BranchMode,
 }
 
-/// Check if a branch matches the autopilot filter.
 fn is_autopilot_branch(branch: &str, default_branch: &str) -> bool {
     branch == default_branch
         || branch.starts_with("feature/issue-")
@@ -85,93 +85,89 @@ fn is_autopilot_branch(branch: &str, default_branch: &str) -> bool {
 
 /// Pure function: convert raw EventsResponse into filtered WatchEvents.
 ///
-/// Only returns events with id > last_seen_id (string comparison as numeric).
+/// Skips events whose id is in `seen_ids`. Returns new event IDs to add to the seen set.
 pub fn detect_events(
     response: &EventsResponse,
     filter: &EventFilter,
-    last_seen_id: &str,
+    seen_ids: &HashSet<String>,
 ) -> Vec<WatchEvent> {
-    let last_id: u64 = last_seen_id.parse().unwrap_or(0);
-
     response
         .events
         .iter()
-        .filter_map(|e| {
-            let eid: u64 = e.id.parse().unwrap_or(0);
-            if eid <= last_id {
-                return None;
+        .filter(|e| !seen_ids.contains(&e.id))
+        .filter_map(|e| match (&e.event_type, &e.payload) {
+            (
+                EventType::Push,
+                EventPayload::Push {
+                    branch,
+                    before,
+                    after,
+                    size,
+                },
+            ) => {
+                if branch == &filter.default_branch {
+                    Some(WatchEvent::MainUpdated {
+                        before: before.clone(),
+                        after: after.clone(),
+                        count: *size,
+                    })
+                } else {
+                    None
+                }
             }
-            match (&e.event_type, &e.payload) {
-                (
-                    EventType::Push,
-                    EventPayload::Push {
-                        branch,
-                        before,
-                        after,
-                        size,
-                    },
-                ) => {
-                    if branch == &filter.default_branch {
-                        Some(WatchEvent::MainUpdated {
-                            before: before.clone(),
-                            after: after.clone(),
-                            count: *size,
-                        })
-                    } else {
-                        None
-                    }
+            (
+                EventType::WorkflowRun,
+                EventPayload::WorkflowRun {
+                    run_id,
+                    name,
+                    branch,
+                    conclusion,
+                },
+            ) => {
+                let pass_filter = match &filter.branch_mode {
+                    BranchMode::All => true,
+                    BranchMode::Autopilot => is_autopilot_branch(branch, &filter.default_branch),
+                };
+                if !pass_filter {
+                    return None;
                 }
-                (
-                    EventType::WorkflowRun,
-                    EventPayload::WorkflowRun {
-                        run_id,
-                        name,
-                        branch,
-                        conclusion,
-                    },
-                ) => {
-                    let pass_filter = match &filter.branch_mode {
-                        BranchMode::All => true,
-                        BranchMode::Autopilot => {
-                            is_autopilot_branch(branch, &filter.default_branch)
-                        }
-                    };
-                    if !pass_filter {
-                        return None;
-                    }
-                    match conclusion.as_str() {
-                        "failure" => Some(WatchEvent::CiFailure {
-                            run_id: *run_id,
-                            workflow: name.clone(),
-                            branch: branch.clone(),
-                        }),
-                        "success" => Some(WatchEvent::CiSuccess {
-                            run_id: *run_id,
-                            workflow: name.clone(),
-                            branch: branch.clone(),
-                        }),
-                        _ => None,
-                    }
+                match conclusion.as_str() {
+                    "failure" => Some(WatchEvent::CiFailure {
+                        run_id: *run_id,
+                        workflow: name.clone(),
+                        branch: branch.clone(),
+                    }),
+                    "success" => Some(WatchEvent::CiSuccess {
+                        run_id: *run_id,
+                        workflow: name.clone(),
+                        branch: branch.clone(),
+                    }),
+                    _ => None,
                 }
-                (
-                    EventType::Issues,
-                    EventPayload::Issues {
-                        action,
-                        number,
-                        title,
-                    },
-                ) => {
-                    if action == "opened" {
-                        Some(WatchEvent::NewIssue {
-                            number: *number,
-                            title: title.clone(),
-                        })
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
             }
+            (
+                EventType::Issues,
+                EventPayload::Issues {
+                    action,
+                    number,
+                    title,
+                },
+            ) => {
+                if action == "opened" {
+                    Some(WatchEvent::NewIssue {
+                        number: *number,
+                        title: title.clone(),
+                    })
+                } else {
+                    None
+                }
+            }
+            _ => None,
         })
         .collect()
+}
+
+/// Collect all event IDs from a response into a set.
+pub fn collect_ids(response: &EventsResponse) -> HashSet<String> {
+    response.events.iter().map(|e| e.id.clone()).collect()
 }
