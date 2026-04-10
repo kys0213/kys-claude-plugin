@@ -95,8 +95,6 @@ autopilot preflight --config github-autopilot.local.md --repo-root .
 
 #### Phase A: Monitor 등록
 
-**event-dispatch** 스킬의 디스패치 규칙에 따라 이벤트를 처리합니다.
-
 GitHub Events API 기반 통합 Monitor 1개를 등록합니다:
 
 ```
@@ -112,11 +110,17 @@ Monitor(
 > `branch_filter`는 `ci_watch.branch_filter` 설정값 (기본: `"autopilot"`).
 > Events API는 ETag 기반 conditional request를 사용합니다. 변경이 없으면 304 Not Modified → rate limit 미소비.
 
-이벤트 출력 포맷:
-- `MAIN_UPDATED before=<sha> after=<sha> count=<N>` → gap-watch + qa-boost 트리거
-- `CI_FAILURE run_id=<id> workflow=<name> branch=<branch>` → ci-watch 또는 ci-fix 트리거
-- `CI_SUCCESS run_id=<id> workflow=<name> branch=<branch>` → merge-prs 트리거
-- `NEW_ISSUE number=<N> title=<title>` → analyze-issue 트리거
+Monitor가 출력하는 이벤트를 수신하면, 다음 규칙에 따라 디스패치합니다:
+
+| 이벤트 | 조건 | 액션 |
+|--------|------|------|
+| `MAIN_UPDATED before=<sha> after=<sha> count=<N>` | — | `/github-autopilot:gap-watch` 후 `/github-autopilot:qa-boost {before}` |
+| `CI_FAILURE run_id=<id> workflow=<name> branch=<branch>` | default branch | `/github-autopilot:ci-watch --run-id={run_id} --branch={branch}` |
+| `CI_FAILURE run_id=<id> workflow=<name> branch=<branch>` | autopilot branch | `/github-autopilot:ci-fix --branch={branch}` |
+| `CI_SUCCESS run_id=<id> workflow=<name> branch=<branch>` | autopilot branch | `/github-autopilot:merge-prs --branch={branch}` |
+| `NEW_ISSUE number=<N> title=<title>` | — | `/github-autopilot:analyze-issue {number}` |
+
+> 동시에 여러 이벤트가 도착하면 독립적인 이벤트는 병렬 디스패치합니다. 같은 브랜치에 CI_FAILURE와 CI_SUCCESS가 동시에 도착하면 최신 이벤트만 처리합니다.
 
 #### Phase B: CronCreate 등록 (폴링 유지 컴포넌트)
 
