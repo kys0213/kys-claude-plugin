@@ -4,6 +4,7 @@ pub mod labels;
 pub mod pipeline;
 pub mod preflight;
 pub mod simhash;
+pub mod watch;
 
 use clap::{Args, Parser, Subcommand};
 
@@ -37,6 +38,11 @@ pub enum Commands {
     },
     /// Pre-flight environment verification
     Preflight(PreflightArgs),
+    /// Watch repository events (event-driven autopilot)
+    Watch {
+        #[command(subcommand)]
+        command: watch::WatchCommands,
+    },
 }
 
 #[derive(Subcommand)]

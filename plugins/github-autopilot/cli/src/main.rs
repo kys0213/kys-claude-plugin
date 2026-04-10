@@ -1,7 +1,7 @@
 use autopilot::cmd::{
     CheckCommands, Cli, Commands, IssueCommands, PipelineCommands, PreflightArgs,
 };
-use autopilot::{cmd, fs, gh, git};
+use autopilot::{cmd, fs, gh, git, github};
 use clap::Parser;
 use std::path::Path;
 
@@ -58,6 +58,15 @@ fn main() {
                 CheckCommands::Health => svc.health(),
             }
         }
+        Commands::Watch { command } => github::real().and_then(|client| {
+            let svc = cmd::watch::WatchService::new(client);
+            match command {
+                cmd::watch::WatchCommands::Events {
+                    poll_sec,
+                    branch_filter,
+                } => svc.run_events(&branch_filter, poll_sec),
+            }
+        }),
         Commands::Preflight(PreflightArgs { config, repo_root }) => {
             let client = gh::real();
             let git_client = git::real();

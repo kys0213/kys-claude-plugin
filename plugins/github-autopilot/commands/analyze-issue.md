@@ -120,9 +120,11 @@ gh issue comment ${ISSUE_NUMBER} --body "${ANALYSIS_COMMENT}"
 - Skipped: 0건
 ```
 
-### Step 8: Idle Detection (cron 자동 종료)
+### Step 8: Idle Detection (cron 모드 전용)
 
-`/loop`으로 실행 중일 때, 분석 대상이 없는 상태가 지속되면 cron을 자동 종료합니다.
+> **hybrid 모드에서는 이 단계를 skip합니다.** 이벤트 기반이므로 이슈가 없으면 트리거 자체가 발생하지 않습니다.
+
+`/loop` 또는 cron 모드로 실행 중일 때, 분석 대상이 없는 상태가 지속되면 cron을 자동 종료합니다.
 
 - **idle 파일**: `IDLE_FILE=.autopilot-idle-count`
 - **종료 임계값**: `MAX_IDLE=3`

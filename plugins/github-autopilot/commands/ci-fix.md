@@ -1,6 +1,6 @@
 ---
 description: "autopilot PR의 CI 실패를 tick 단위로 분석/수정합니다"
-argument-hint: ""
+argument-hint: "[--branch=<branch>]"
 allowed-tools: ["Bash", "Read", "Agent"]
 ---
 
@@ -11,16 +11,24 @@ autopilot이 생성한 PR의 CI 실패를 감지하고, tick 단위로 수정을
 ## 사용법
 
 ```bash
-/github-autopilot:ci-fix
+/github-autopilot:ci-fix                         # 전체 스캔 (cron 모드)
+/github-autopilot:ci-fix --branch=feature/issue-42  # 타겟 브랜치 (hybrid 모드)
 ```
 
-> 반복 실행은 `/github-autopilot:autopilot`이 `CronCreate`로 관리합니다.
+> 반복 실행은 `/github-autopilot:autopilot`이 CronCreate 또는 Monitor로 관리합니다.
 
 ## Context
 
 - 설정 파일: !`cat github-autopilot.local.md 2>/dev/null | head -20 || echo "설정 파일 없음 - 기본값 사용"`
 
 ## 작업 프로세스
+
+### Step 0: 인자 파싱
+
+`$ARGUMENTS`에서 옵션을 추출합니다:
+- `--branch=<branch>`: 특정 브랜치의 PR만 대상으로 처리 (hybrid 모드에서 이벤트로 전달)
+
+`--branch`가 있으면 Step 2에서 해당 브랜치의 PR만 조회합니다.
 
 ### Step 1: Base 브랜치 동기화
 
@@ -130,7 +138,8 @@ gh pr view ${PR_NUMBER} --json comments --jq '.comments[].body' | grep -o '<!-- 
 
 ## 주의사항
 
-- 1 tick = 1 수정 시도. CI 실행 완료를 기다리지 않음
+- **cron 모드**: 1 tick = 1 수정 시도. CI 실행 완료를 기다리지 않음
+- **hybrid 모드**: fix push 후 one-shot Monitor로 CI 완료를 감시하여 즉시 반응
 - CI가 아직 실행 중인 PR은 skip (statusCheckRollup에 PENDING이 있으면)
 - merge-prs 루프와의 역할 분리: ci-fix는 CI 수정만, merge-prs는 conflict/review만
 - 토큰 최적화: MainAgent는 PR 목록 조회와 마커 관리만 수행, CI 분석/수정은 모두 Agent에 위임
