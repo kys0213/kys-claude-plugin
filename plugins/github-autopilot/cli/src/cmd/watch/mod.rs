@@ -57,7 +57,9 @@ impl WatchService {
                     }
 
                     let events = detect_events(&response, &filter, &seen_ids);
-                    seen_ids.extend(collect_ids(&response));
+                    // Replace (not extend) — API only returns recent events,
+                    // so old IDs naturally age out. Keeps memory bounded.
+                    seen_ids = collect_ids(&response);
 
                     for event in events {
                         println!("{event}");
