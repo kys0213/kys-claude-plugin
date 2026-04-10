@@ -236,10 +236,7 @@ gh issue view ${ISSUE_NUMBER} --json comments --jq '.comments[].body' | grep -o 
 - label_prefix
 - pr_type: "auto"
 
-성공한 이슈들을 `max_parallel_agents` 단위로 분할하여 순차 그룹으로 실행합니다:
-
-- 이슈 수가 `max_parallel_agents` 이하: 순차 호출
-- 이슈 수가 `max_parallel_agents` 초과: `max_parallel_agents` 크기의 서브그룹으로 분할하여 각 서브그룹을 병렬 실행 (background=true) → 완료 대기 → 다음 서브그룹 실행
+성공한 이슈들을 Step 7과 동일한 `max_parallel_agents` 서브그룹 방식으로 실행합니다.
 
 ### Step 10: 라벨 정리
 
