@@ -39,8 +39,6 @@ gh run list --branch ${HEAD_BRANCH} --status failure --limit 1 --json databaseId
 gh run view ${RUN_ID} --log-failed 2>&1 | head -500
 ```
 
-`gh run view ${RUN_ID} --log-failed`의 출력 결과가 수정의 **최우선 기준**이 된다. 로컬 도구 실행 결과가 아닌 CI 로그에 나타난 에러 메시지를 기반으로 수정 방향을 결정해야 한다.
-
 ### 3. 실패 분석
 
 로그를 분석하여 실패 유형을 분류합니다:
@@ -61,8 +59,8 @@ gh run view ${RUN_ID} --log-failed 2>&1 | head -500
 
 ### 4. 수정 적용
 
-CI 로그에서 파악한 정확한 에러를 기준으로 수정을 적용합니다. 자동 수정 도구(`cargo clippy --fix`, `cargo fmt` 등)는 보조 수단으로만 사용합니다:
-- lint: CI 로그의 경고/에러 메시지를 직접 확인하여 수정. 자동 수정 도구는 보조적으로 실행
+Step 3.5의 원칙에 따라 수정을 적용합니다:
+- lint: 자동 수정 도구(`cargo clippy --fix`, `cargo fmt` 등)는 보조 수단으로만 사용
 - test: 실패 테스트의 원인 코드 분석 → 코드 수정
 - build: 컴파일 에러 수정
 
@@ -108,8 +106,7 @@ git push origin ${HEAD_BRANCH}
 
 ## 주의사항
 
-- CI 로그가 최우선 소스. 로컬 clippy/fmt 결과와 CI 결과가 다를 수 있음 (Rust 버전 차이 등)
-- 반드시 `gh run view --log-failed`로 CI 에러를 확인한 후 수정 방향을 결정
+- CI 로그 우선 원칙은 Step 3.5 참조
 - `--force-with-lease` 사용하지 않음 (일반 push로 충분, rebase 안 함)
 - 수정 확신이 낮으면 push하지 않고 실패 보고
 - 이전 ci-fix 시도의 수정이 새로운 문제를 만든 경우, 이전 수정도 함께 분석
