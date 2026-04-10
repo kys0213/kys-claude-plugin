@@ -19,7 +19,20 @@ spec-kit의 3단계 분석 패턴(spec-parser → structure-mapper → gap-analy
 
 ### Phase 1: 스펙 파싱
 
-각 스펙 파일을 읽고 구조화된 요구사항을 추출합니다:
+요구사항을 추출하기 전에, 전달받은 spec_files 각각에 대해 아래 조건에 해당하면 **skip**합니다:
+
+1. **테스트 디렉토리 경로**: 경로에 `tests/`, `test_fixtures/`, `benches/`가 포함된 파일
+2. **테스트 파일 패턴**: 파일명이 `*_test.*`, `*_spec.{rs,ts,js,go,py}`인 파일 (`.md` 파일은 제외 -- `auth_spec.md` 같은 정상 스펙 파일의 false negative 방지)
+3. **테스트 코드 내 fixture** (비-마크다운 파일에만 적용): 파일 내용에 `#[cfg(test)]`, `mod tests {`, `#[test]`가 포함된 파일. `.md` 파일은 코드 예시로 이러한 키워드를 포함할 수 있으므로 콘텐츠 체크를 적용하지 않음
+
+skip된 파일은 리포트의 맨 앞에 다음 형식으로 기록합니다:
+```
+## Filtered Files
+- Filtered: tests/gap_detection.rs (test fixture)
+- Filtered: test_fixtures/sample_spec.md (test directory)
+```
+
+필터링을 통과한 각 스펙 파일을 읽고 구조화된 요구사항을 추출합니다:
 
 - **컴포넌트 목록**: 스펙에서 언급된 모듈/서비스/기능 단위
 - **요구사항**: 각 컴포넌트의 기능 요구사항 (명시적 + 암시적)
