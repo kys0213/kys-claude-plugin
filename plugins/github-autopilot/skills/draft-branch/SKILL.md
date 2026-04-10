@@ -29,6 +29,7 @@ default_intervals:                   # autopilot dispatcher 기본 인터벌
 notification: ""                     # skip 이슈 알림 방법 (자연어, 예: "Slack DM으로 @irene에게 알려줘")
 quality_gate_command: ""             # 커스텀 quality gate 명령어 (비어있으면 자동 감지)
 max_consecutive_failures: 3          # 연속 실패 허용 횟수, 초과 시 에스컬레이션
+max_parallel_agents: 3               # 동시에 실행할 최대 에이전트 수
 max_ci_fix_retries: 3                # CI fix 루프 최대 재시도 횟수
 test_watch: []                       # 테스트 스위트 정의 (아래 예시 참조)
 # test_watch:
