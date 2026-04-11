@@ -67,9 +67,10 @@ Prompt: |
 
 ### Step 2: 가치관 인터뷰 (HITL)
 
-분석 결과에서 자동감지된 항목을 프리필하고, 사용자에게 확인·수정을 받습니다. 3회의 AskUserQuestion으로 진행합니다.
+분석 결과에서 자동감지된 항목을 프리필하고, 사용자에게 확인·수정을 받습니다.
+convention-architect Skill Section 8의 카테고리를 따르되, 2회의 AskUserQuestion으로 진행합니다.
 
-**Q1: 프로젝트 맥락** (codebase-analyzer 결과 프리필)
+**Q1: 프로젝트 맥락 + 엔지니어링 트레이드오프** (codebase-analyzer 결과 프리필)
 
 ```
 AskUserQuestion: |
@@ -81,25 +82,17 @@ AskUserQuestion: |
     1. 프로젝트 유형: [제품 / 라이브러리 / 내부 도구 / 오픈소스]
     2. 팀 구성: [1인 / 소규모 / 대규모]
 
-  "yes"로 확인하거나 수정할 항목을 알려주세요.
+  충돌할 때의 우선순위 (기본값은 *표시):
+    3. 가독성 ↔ 성능: [*가독성 / 균형 / 성능]
+    4. 명시성 ↔ 간결성: [*명시적 / 균형 / 간결]
+    5. 안정성 ↔ 속도: [*안정성 / 균형 / 속도]
+    6. 추상화 시점: [이른 추상화 / *Rule of 3 / 명시적 중복]
+
+  "yes"로 전체 확인, 또는 번호와 선택지를 알려주세요.
+  (예: "1: 내부 도구, 4: 간결")
 ```
 
-**Q2: 엔지니어링 트레이드오프**
-
-```
-AskUserQuestion: |
-  충돌할 때의 우선순위를 선택해주세요 (기본값은 *표시):
-
-    1. 가독성 ↔ 성능: [*가독성 / 균형 / 성능]
-    2. 명시성 ↔ 간결성: [*명시적 / 균형 / 간결]
-    3. 안정성 ↔ 속도: [*안정성 / 균형 / 속도]
-    4. 추상화 시점: [이른 추상화 / *Rule of 3 / 명시적 중복]
-
-  "yes"로 기본값 선택, 또는 번호와 선택지를 알려주세요.
-  (예: "2: 간결, 4: 이른 추상화")
-```
-
-**Q3: 문서화 컨벤션** (document-analyzer 결과 프리필)
+**Q2: 문서화 컨벤션** (document-analyzer 결과 프리필)
 
 ```
 AskUserQuestion: |
@@ -116,15 +109,39 @@ AskUserQuestion: |
   "yes"로 확인하거나 수정할 항목을 알려주세요.
 ```
 
-document-analyzer가 "문서 부족" 상태를 반환한 경우, Q3에서 프리필 없이 직접 질문합니다.
+document-analyzer가 "문서 부족" 상태를 반환한 경우, Q2에서 프리필 없이 직접 질문합니다.
 
 ### Step 3: CLAUDE.md 섹션 생성 (HITL)
 
 인터뷰 결과를 종합하여 CLAUDE.md에 추가할 섹션을 생성합니다.
 
 1. **기존 CLAUDE.md 확인**: `Read`로 기존 내용을 읽어서 `## 프로젝트 맥락`, `## 엔지니어링 가치`, `## 문서화` 섹션 존재 여부 확인
-2. **섹션 생성**: convention-architect Skill Section 9의 템플릿을 기반으로, 인터뷰 답변 + 분석 결과를 채워 섹션을 생성
+2. **섹션 생성**: 인터뷰 답변 + 분석 결과를 아래 템플릿에 채워 생성
 3. **사용자에게 제시**: 생성된 섹션을 보여주고 승인 요청
+
+**CLAUDE.md 섹션 템플릿** (convention-architect Skill Section 9의 배치 기준 참조):
+
+```markdown
+## 프로젝트 맥락
+
+- **종류**: {project_type}
+- **단계**: {project_stage}
+- **팀**: {team_composition}
+- **주요 독자**: {primary_audience}
+
+## 엔지니어링 가치
+
+- {value_1} > {counter_1} ({exception})
+- {value_2} > {counter_2} ({exception})
+- ...
+
+## 문서화
+
+- **톤**: {tone}
+- **언어**: {language_rule}
+- **독자**: {audience}
+- **용어**: {terminology_convention}
+```
 
 ```
 AskUserQuestion: |

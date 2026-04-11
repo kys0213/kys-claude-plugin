@@ -47,6 +47,8 @@ Glob: *.sln
 
 ### Step 1-A: LSP 사용 가능 여부 확인
 
+**convention-architect Skill Section 10 (LSP-Enhanced Analysis)**의 전략을 따릅니다.
+
 Step 1에서 감지된 언어에 해당하는 LSP 서버의 존재 여부를 확인합니다:
 
 ```bash
@@ -57,14 +59,7 @@ which pylsp 2>/dev/null && echo "lsp:pylsp"
 ```
 
 - **사용 가능**: Step 2에서 LSP 기반 정밀 분석 진행
-- **사용 불가**: Glob/Grep fallback 진행 + 설치 안내를 출력에 포함
-
-```
-⚠️ {LSP명}이 설치되어 있지 않습니다.
-  설치: {설치 명령}
-  LSP 기반 분석 시 더 정확한 구조 파악이 가능합니다.
-  → grep 기반 fallback으로 진행합니다.
-```
+- **사용 불가**: Glob/Grep fallback 진행 + 설치 안내를 출력에 포함 (설치 명령은 convention-architect Skill Section 10 참조)
 
 ### Step 2: 디렉토리 구조 분석
 
@@ -119,13 +114,7 @@ Glob: **/*.module.ts
 
 #### LSP 기반 정밀 분석 (사용 가능 시)
 
-LSP가 사용 가능한 경우, Glob/Grep에 추가하여 다음 분석을 수행합니다:
-
-- **`documentSymbol`**: 샘플 파일의 심볼 구조 (클래스/함수/인터페이스 비율) → 레이어 패턴 정밀 감지
-- **`goToImplementation`**: 인터페이스 구현체 존재 여부 → 추상화 수준 판단
-- **`findReferences`**: 주요 심볼의 참조 방향 → 의존성 흐름, 모듈 경계 파악
-
-LSP 사용 불가 시 이 단계를 건너뛰고 기존 Glob/Grep 기반 분석만 수행합니다.
+LSP가 사용 가능한 경우, **convention-architect Skill Section 10**의 operation 목록을 참고하여 Glob/Grep에 추가 분석을 수행합니다. LSP 사용 불가 시 이 단계를 건너뛰고 기존 Glob/Grep 기반 분석만 수행합니다.
 
 #### 범용 패턴 변환
 
@@ -175,7 +164,9 @@ git shortlog -sn --no-merges | head -10
 | TODO/FIXME 코멘트 다수 | 속도 우선, 부채 허용 |
 | 타입 정의 별도 분리 | 계약 기반 설계 |
 
-LSP 사용 가능 시 `goToImplementation`, `findReferences`로 더 정확한 판단이 가능합니다.
+LSP 사용 가능 시 convention-architect Skill Section 10의 operation으로 더 정확한 판단이 가능합니다.
+
+**참고**: 독자 수준/문서 톤 분석은 document-analyzer가 담당합니다. 이 에이전트는 코드 구조에 집중합니다.
 
 ### Step 7: 규칙 구조 제안 생성
 
