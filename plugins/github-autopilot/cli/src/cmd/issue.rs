@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::Args;
 use serde_json::Value;
+use std::io::Read as _;
 
 use crate::gh::GhOps;
 
@@ -276,6 +277,85 @@ fn extract_issue_number(url: &str) -> u64 {
         .unwrap_or(0)
 }
 
+#[derive(Args)]
+pub struct DetectOverlapArgs {
+    /// Hamming distance threshold — pairs at or below this are flagged
+    #[arg(long, default_value = "15")]
+    pub threshold: u32,
+}
+
+/// Detect overlapping issues by simhash text similarity.
+/// Reads issues from stdin as JSON array: `[{"number":N,"title":"...","body":"..."}]`
+/// Outputs pairs whose hamming distance is at or below the threshold.
+pub fn detect_overlap(args: &DetectOverlapArgs) -> Result<i32> {
+    let mut input = String::new();
+    std::io::stdin()
+        .read_to_string(&mut input)
+        .context("failed to read stdin")?;
+
+    let issues: Vec<Value> = serde_json::from_str(&input).context("failed to parse stdin JSON")?;
+
+    let result = compute_overlaps(&issues, args.threshold);
+    println!("{result}");
+    Ok(0)
+}
+
+/// Pure function for testability: compute pairwise overlaps.
+pub fn compute_overlaps(issues: &[Value], threshold: u32) -> Value {
+    // Compute simhash for each issue from title + body
+    let hashed: Vec<(u64, &Value)> = issues
+        .iter()
+        .map(|issue| {
+            let title = issue["title"].as_str().unwrap_or("");
+            let body = issue["body"].as_str().unwrap_or("");
+            let text = format!("{title}\n{body}");
+            let tokens = super::simhash::tokenize_weighted(&text);
+            let hash = super::simhash::weighted_simhash(&tokens);
+            (hash, issue)
+        })
+        .collect();
+
+    let mut review_required: Vec<Value> = Vec::new();
+
+    for i in 0..hashed.len() {
+        for j in (i + 1)..hashed.len() {
+            let distance = super::simhash::hamming_distance(hashed[i].0, hashed[j].0);
+            if distance <= threshold {
+                let num_a = hashed[i].1["number"].as_u64().unwrap_or(0);
+                let num_b = hashed[j].1["number"].as_u64().unwrap_or(0);
+                review_required.push(serde_json::json!({
+                    "pair": [num_a, num_b],
+                    "distance": distance,
+                    "issues": [
+                        {
+                            "number": num_a,
+                            "title": hashed[i].1["title"],
+                            "body": hashed[i].1["body"],
+                        },
+                        {
+                            "number": num_b,
+                            "title": hashed[j].1["title"],
+                            "body": hashed[j].1["body"],
+                        }
+                    ]
+                }));
+            }
+        }
+    }
+
+    // Sort by distance ascending (most similar first)
+    review_required.sort_by_key(|r| r["distance"].as_u64().unwrap_or(64));
+
+    let total = issues.len();
+    let pairs_checked = total * (total.saturating_sub(1)) / 2;
+
+    serde_json::json!({
+        "review_required": review_required,
+        "total_issues": total,
+        "pairs_checked": pairs_checked,
+    })
+}
+
 /// Extract branch name from CI failure issue title.
 /// Expected format: "fix: CI failure in {workflow} on {branch}"
 pub fn extract_branch_from_ci_title(title: &str) -> String {
@@ -335,6 +415,108 @@ mod tests {
             42
         );
         assert_eq!(extract_issue_number("not-a-url"), 0);
+    }
+
+    #[test]
+    fn detect_overlap_flags_similar_issues() {
+        let issues = vec![
+            serde_json::json!({"number": 1, "title": "JWT token refresh middleware 추가", "body": "middleware 레이어에 JWT refresh token 로직을 추가합니다. src/auth/middleware.rs 수정 필요"}),
+            serde_json::json!({"number": 2, "title": "JWT token refresh handler 구현", "body": "JWT refresh token 처리 handler를 구현합니다. src/auth/handler.rs에 추가"}),
+            serde_json::json!({"number": 3, "title": "데이터베이스 마이그레이션 스크립트 작성", "body": "PostgreSQL 스키마 변경을 위한 마이그레이션 파일을 생성합니다. migrations/001_add_users.sql"}),
+        ];
+        // Use generous threshold to find the actual distance, then verify
+        let debug = compute_overlaps(&issues, 64);
+        let all_pairs = debug["review_required"].as_array().unwrap();
+        // Find the distance between issues 1 and 2
+        let pair_12 = all_pairs
+            .iter()
+            .find(|r| {
+                let p = r["pair"].as_array().unwrap();
+                p[0].as_u64() == Some(1) && p[1].as_u64() == Some(2)
+            })
+            .expect("pair 1-2 should exist");
+        let dist_12 = pair_12["distance"].as_u64().unwrap();
+        // Find the distance between issues 1 and 3
+        let pair_13 = all_pairs
+            .iter()
+            .find(|r| {
+                let p = r["pair"].as_array().unwrap();
+                p[0].as_u64() == Some(1) && p[1].as_u64() == Some(3)
+            })
+            .expect("pair 1-3 should exist");
+        let dist_13 = pair_13["distance"].as_u64().unwrap();
+        // Similar issues (1,2) should have smaller distance than dissimilar (1,3)
+        assert!(
+            dist_12 < dist_13,
+            "issues 1&2 (dist={dist_12}) should be more similar than 1&3 (dist={dist_13})"
+        );
+
+        // Now use a threshold that captures 1-2 but not 1-3
+        let result = compute_overlaps(&issues, dist_12 as u32);
+        let review = result["review_required"].as_array().unwrap();
+        assert!(
+            review.iter().any(|r| {
+                let pair = r["pair"].as_array().unwrap();
+                pair[0].as_u64() == Some(1) && pair[1].as_u64() == Some(2)
+            }),
+            "expected issues 1 and 2 to be flagged, got: {review:?}"
+        );
+        // Issue 3 should not overlap with 1 or 2
+        assert!(
+            !review.iter().any(|r| {
+                let pair = r["pair"].as_array().unwrap();
+                pair.iter().any(|n| n.as_u64() == Some(3))
+            }),
+            "issue 3 should not be in any overlap pair"
+        );
+    }
+
+    #[test]
+    fn detect_overlap_empty_input() {
+        let result = compute_overlaps(&[], 15);
+        assert_eq!(result["review_required"].as_array().unwrap().len(), 0);
+        assert_eq!(result["total_issues"], 0);
+        assert_eq!(result["pairs_checked"], 0);
+    }
+
+    #[test]
+    fn detect_overlap_single_issue() {
+        let issues = vec![serde_json::json!({"number": 1, "title": "test", "body": "body"})];
+        let result = compute_overlaps(&issues, 15);
+        assert_eq!(result["review_required"].as_array().unwrap().len(), 0);
+        assert_eq!(result["pairs_checked"], 0);
+    }
+
+    #[test]
+    fn detect_overlap_threshold_filters() {
+        let issues = vec![
+            serde_json::json!({"number": 1, "title": "JWT token refresh middleware 추가", "body": "middleware 레이어에 JWT refresh"}),
+            serde_json::json!({"number": 2, "title": "JWT token refresh handler 구현", "body": "JWT refresh token handler 구현"}),
+        ];
+        // Very strict threshold should filter out
+        let strict = compute_overlaps(&issues, 0);
+        assert_eq!(strict["review_required"].as_array().unwrap().len(), 0);
+
+        // Generous threshold should include
+        let generous = compute_overlaps(&issues, 30);
+        assert!(!generous["review_required"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn detect_overlap_includes_issue_context() {
+        let issues = vec![
+            serde_json::json!({"number": 10, "title": "same task A", "body": "same body content here"}),
+            serde_json::json!({"number": 11, "title": "same task A", "body": "same body content here"}),
+        ];
+        let result = compute_overlaps(&issues, 64);
+        let review = result["review_required"].as_array().unwrap();
+        assert_eq!(review.len(), 1);
+        let pair = &review[0];
+        assert_eq!(pair["distance"], 0);
+        // Verify full context is included
+        let pair_issues = pair["issues"].as_array().unwrap();
+        assert_eq!(pair_issues[0]["title"], "same task A");
+        assert_eq!(pair_issues[1]["body"], "same body content here");
     }
 
     #[test]

@@ -9,21 +9,25 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Issue { command } => {
-            let client = gh::real();
-            match command {
-                IssueCommands::CheckDup { fingerprint } => {
-                    cmd::issue::check_dup(client.as_ref(), &fingerprint)
-                }
-                IssueCommands::Create(args) => cmd::issue::create(client.as_ref(), &args),
-                IssueCommands::CloseResolved { label_prefix } => {
-                    cmd::issue::close_resolved(client.as_ref(), &label_prefix)
-                }
-                IssueCommands::SearchSimilar(args) => {
-                    cmd::issue::search_similar(client.as_ref(), &args)
+        Commands::Issue { command } => match command {
+            IssueCommands::DetectOverlap(args) => cmd::issue::detect_overlap(&args),
+            _ => {
+                let client = gh::real();
+                match command {
+                    IssueCommands::CheckDup { fingerprint } => {
+                        cmd::issue::check_dup(client.as_ref(), &fingerprint)
+                    }
+                    IssueCommands::Create(args) => cmd::issue::create(client.as_ref(), &args),
+                    IssueCommands::CloseResolved { label_prefix } => {
+                        cmd::issue::close_resolved(client.as_ref(), &label_prefix)
+                    }
+                    IssueCommands::SearchSimilar(args) => {
+                        cmd::issue::search_similar(client.as_ref(), &args)
+                    }
+                    IssueCommands::DetectOverlap(_) => unreachable!(),
                 }
             }
-        }
+        },
         Commands::Pipeline { command } => {
             let client = gh::real();
             match command {

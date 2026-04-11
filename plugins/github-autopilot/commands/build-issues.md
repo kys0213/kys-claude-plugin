@@ -128,6 +128,24 @@ issue-dependency-analyzer 에이전트를 호출합니다 (background=false):
 
 결과: 배치 목록 (병렬 실행 가능한 이슈 그룹)
 
+### Step 6.5: 이슈 간 유사도 검사
+
+첫 번째 배치(병렬 실행 대상) 내 이슈들의 텍스트 유사도를 측정합니다:
+
+```bash
+echo '${BATCH_ISSUES_JSON}' | autopilot issue detect-overlap --threshold 15
+```
+
+- 입력: 배치 내 이슈들의 `[{"number", "title", "body"}]` JSON
+- 출력: `review_required` 배열에 유사도가 높은 이슈 쌍 + 양쪽 본문 포함
+
+`review_required`가 비어있으면 Step 7로 진행합니다.
+
+`review_required`에 항목이 있으면:
+1. 해당 이슈 쌍의 **제목, 본문, 유사도 distance**를 issue-dependency-analyzer에 추가 context로 전달합니다.
+2. "이 이슈들이 유사한 내용을 다루고 있습니다. 같은 파일을 수정할 가능성이 있으므로 병렬/순차 실행 여부를 판단해주세요."
+3. dependency-analyzer가 순차 실행이 필요하다고 판단하면 배치를 재구성합니다.
+
 ### Step 7: WIP 라벨 추가
 
 현재 배치의 이슈들에 wip 라벨을 추가합니다 (중복 작업 방지):
