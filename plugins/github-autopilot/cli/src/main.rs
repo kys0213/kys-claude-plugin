@@ -1,5 +1,5 @@
 use autopilot::cmd::{
-    CheckCommands, Cli, Commands, IssueCommands, PipelineCommands, PreflightArgs,
+    CheckCommands, Cli, Commands, IssueCommands, PipelineCommands, PreflightArgs, WorktreeCommands,
 };
 use autopilot::{cmd, fs, gh, git, github};
 use clap::Parser;
@@ -69,6 +69,13 @@ fn main() {
                 &args.label_prefix,
                 args.poll_sec,
             )
+        }
+        Commands::Worktree { command } => {
+            let git_client = git::real();
+            let svc = cmd::worktree::WorktreeService::new(git_client);
+            match command {
+                WorktreeCommands::Cleanup { branch } => svc.cleanup(&branch),
+            }
         }
         Commands::Preflight(PreflightArgs { config, repo_root }) => {
             let client = gh::real();

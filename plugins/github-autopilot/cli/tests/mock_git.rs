@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 
 use anyhow::{bail, Result};
-use autopilot::git::GitOps;
+use autopilot::git::{GitOps, WorktreeEntry};
 use std::collections::{HashMap, HashSet};
+use std::sync::Mutex;
 
 /// A mock GitOps that returns predefined responses.
 pub struct MockGit {
@@ -13,6 +14,13 @@ pub struct MockGit {
     repo_name: String,
     refs: HashMap<String, String>,
     rev_list_counts: HashMap<String, u64>,
+    worktrees: Vec<WorktreeEntry>,
+    removed_worktrees: Mutex<Vec<String>>,
+    deleted_branches: Mutex<Vec<String>>,
+    pruned: Mutex<bool>,
+    fail_worktree_list: bool,
+    fail_worktree_remove: bool,
+    fail_branch_delete: bool,
 }
 
 impl MockGit {
@@ -25,7 +33,49 @@ impl MockGit {
             repo_name: "repo".to_string(),
             refs: HashMap::new(),
             rev_list_counts: HashMap::new(),
+            worktrees: Vec::new(),
+            removed_worktrees: Mutex::new(Vec::new()),
+            deleted_branches: Mutex::new(Vec::new()),
+            pruned: Mutex::new(false),
+            fail_worktree_list: false,
+            fail_worktree_remove: false,
+            fail_branch_delete: false,
         }
+    }
+
+    pub fn with_fail_worktree_list(mut self) -> Self {
+        self.fail_worktree_list = true;
+        self
+    }
+
+    pub fn with_fail_worktree_remove(mut self) -> Self {
+        self.fail_worktree_remove = true;
+        self
+    }
+
+    pub fn with_fail_branch_delete(mut self) -> Self {
+        self.fail_branch_delete = true;
+        self
+    }
+
+    pub fn with_worktree(mut self, path: &str, branch: Option<&str>) -> Self {
+        self.worktrees.push(WorktreeEntry {
+            path: path.to_string(),
+            branch: branch.map(String::from),
+        });
+        self
+    }
+
+    pub fn removed_worktrees(&self) -> Vec<String> {
+        self.removed_worktrees.lock().unwrap().clone()
+    }
+
+    pub fn deleted_branches(&self) -> Vec<String> {
+        self.deleted_branches.lock().unwrap().clone()
+    }
+
+    pub fn was_pruned(&self) -> bool {
+        *self.pruned.lock().unwrap()
     }
 
     pub fn with_head(mut self, hash: &str) -> Self {
@@ -107,5 +157,36 @@ impl GitOps for MockGit {
     fn rev_list_count(&self, from: &str, to: &str) -> Result<u64> {
         let key = format!("{from}..{to}");
         Ok(self.rev_list_counts.get(&key).copied().unwrap_or(0))
+    }
+
+    fn worktree_list(&self) -> Result<Vec<WorktreeEntry>> {
+        if self.fail_worktree_list {
+            bail!("worktree list failed");
+        }
+        Ok(self.worktrees.clone())
+    }
+
+    fn worktree_remove(&self, path: &str) -> Result<()> {
+        if self.fail_worktree_remove {
+            bail!("worktree remove failed");
+        }
+        self.removed_worktrees
+            .lock()
+            .unwrap()
+            .push(path.to_string());
+        Ok(())
+    }
+
+    fn worktree_prune(&self) -> Result<()> {
+        *self.pruned.lock().unwrap() = true;
+        Ok(())
+    }
+
+    fn branch_delete(&self, name: &str) -> Result<()> {
+        if self.fail_branch_delete {
+            bail!("branch delete failed");
+        }
+        self.deleted_branches.lock().unwrap().push(name.to_string());
+        Ok(())
     }
 }
