@@ -103,33 +103,7 @@ impl GitOps for RealGit {
 
     fn worktree_list(&self) -> Result<Vec<WorktreeEntry>> {
         let output = run_git(&["worktree", "list", "--porcelain"])?;
-        let mut entries = Vec::new();
-        let mut current_path: Option<String> = None;
-        let mut current_branch: Option<String> = None;
-
-        for line in output.lines() {
-            if let Some(path) = line.strip_prefix("worktree ") {
-                // Flush previous entry
-                if let Some(p) = current_path.take() {
-                    entries.push(WorktreeEntry {
-                        path: p,
-                        branch: current_branch.take(),
-                    });
-                }
-                current_path = Some(path.to_string());
-                current_branch = None;
-            } else if let Some(branch) = line.strip_prefix("branch refs/heads/") {
-                current_branch = Some(branch.to_string());
-            }
-        }
-        // Flush last entry
-        if let Some(p) = current_path {
-            entries.push(WorktreeEntry {
-                path: p,
-                branch: current_branch,
-            });
-        }
-        Ok(entries)
+        Ok(parse_worktree_porcelain(&output))
     }
 
     fn worktree_remove(&self, path: &str) -> Result<()> {
@@ -165,4 +139,136 @@ fn run_git(args: &[&str]) -> Result<String> {
 /// Convenience: create a boxed real client.
 pub fn real() -> Box<dyn GitOps> {
     Box::new(RealGit)
+}
+
+/// Parse `git worktree list --porcelain` output into structured entries.
+pub fn parse_worktree_porcelain(output: &str) -> Vec<WorktreeEntry> {
+    let mut entries = Vec::new();
+    let mut current_path: Option<String> = None;
+    let mut current_branch: Option<String> = None;
+
+    for line in output.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            if let Some(p) = current_path.take() {
+                entries.push(WorktreeEntry {
+                    path: p,
+                    branch: current_branch.take(),
+                });
+            }
+            current_path = Some(path.to_string());
+            current_branch = None;
+        } else if let Some(branch) = line.strip_prefix("branch refs/heads/") {
+            current_branch = Some(branch.to_string());
+        }
+    }
+    if let Some(p) = current_path {
+        entries.push(WorktreeEntry {
+            path: p,
+            branch: current_branch,
+        });
+    }
+    entries
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_single_main_worktree() {
+        let output = "\
+worktree /repo
+HEAD abc1234
+branch refs/heads/main
+";
+        let entries = parse_worktree_porcelain(output);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, "/repo");
+        assert_eq!(entries[0].branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn parse_multiple_worktrees() {
+        let output = "\
+worktree /repo
+HEAD abc1234
+branch refs/heads/main
+
+worktree /repo/.claude/worktrees/agent-1
+HEAD def5678
+branch refs/heads/feature/issue-42
+
+worktree /repo/.claude/worktrees/agent-2
+HEAD 9ab0123
+branch refs/heads/draft/issue-99
+";
+        let entries = parse_worktree_porcelain(output);
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[1].path, "/repo/.claude/worktrees/agent-1");
+        assert_eq!(entries[1].branch.as_deref(), Some("feature/issue-42"));
+        assert_eq!(entries[2].branch.as_deref(), Some("draft/issue-99"));
+    }
+
+    #[test]
+    fn parse_detached_head_worktree() {
+        let output = "\
+worktree /repo
+HEAD abc1234
+branch refs/heads/main
+
+worktree /repo/.claude/worktrees/agent-1
+HEAD def5678
+detached
+";
+        let entries = parse_worktree_porcelain(output);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[1].path, "/repo/.claude/worktrees/agent-1");
+        assert!(entries[1].branch.is_none());
+    }
+
+    #[test]
+    fn parse_bare_worktree() {
+        let output = "\
+worktree /repo.git
+bare
+";
+        let entries = parse_worktree_porcelain(output);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, "/repo.git");
+        assert!(entries[0].branch.is_none());
+    }
+
+    #[test]
+    fn parse_empty_output() {
+        let entries = parse_worktree_porcelain("");
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn parse_path_with_spaces() {
+        let output = "\
+worktree /home/user/my project/repo
+HEAD abc1234
+branch refs/heads/main
+";
+        let entries = parse_worktree_porcelain(output);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, "/home/user/my project/repo");
+        assert_eq!(entries[0].branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn parse_nested_branch_name() {
+        let output = "\
+worktree /repo/.claude/worktrees/agent-1
+HEAD abc1234
+branch refs/heads/feat/autopilot/deep-nested
+";
+        let entries = parse_worktree_porcelain(output);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].branch.as_deref(),
+            Some("feat/autopilot/deep-nested")
+        );
+    }
 }
