@@ -93,6 +93,15 @@ for ISSUE_NUMBER in $ISSUE_NUMBERS; do
 done
 ```
 
+머지 성공 후 **로컬 worktree 자동 정리**:
+
+머지된 브랜치에 연결된 worktree가 남아있으면 정리합니다. worktree가 남아있으면 `git branch -D`가 실패하고 `cannot delete branch used by worktree` 경고가 반복됩니다.
+
+```bash
+HEAD_BRANCH=$(gh pr view ${PR_NUMBER} --json headRefName --jq '.headRefName')
+autopilot worktree cleanup --branch "${HEAD_BRANCH}"
+```
+
 머지 실패 시 문제 PR로 재분류.
 
 ### Step 5: 문제 PR 해결 (Agent Team)

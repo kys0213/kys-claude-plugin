@@ -26,6 +26,25 @@ pub trait GitOps: Send + Sync {
 
     /// Count commits in a range (from..to).
     fn rev_list_count(&self, from: &str, to: &str) -> Result<u64>;
+
+    /// List all worktrees and their associated branches.
+    fn worktree_list(&self) -> Result<Vec<WorktreeEntry>>;
+
+    /// Force-remove a worktree at the given path.
+    fn worktree_remove(&self, path: &str) -> Result<()>;
+
+    /// Prune stale worktree metadata.
+    fn worktree_prune(&self) -> Result<()>;
+
+    /// Delete a local branch.
+    fn branch_delete(&self, name: &str) -> Result<()>;
+}
+
+/// A worktree entry from `git worktree list --porcelain`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeEntry {
+    pub path: String,
+    pub branch: Option<String>,
 }
 
 /// Real implementation that shells out to `git`.
@@ -80,6 +99,52 @@ impl GitOps for RealGit {
         let range = format!("{from}..{to}");
         let output = run_git(&["rev-list", "--count", &range])?;
         output.parse().context("failed to parse rev-list count")
+    }
+
+    fn worktree_list(&self) -> Result<Vec<WorktreeEntry>> {
+        let output = run_git(&["worktree", "list", "--porcelain"])?;
+        let mut entries = Vec::new();
+        let mut current_path: Option<String> = None;
+        let mut current_branch: Option<String> = None;
+
+        for line in output.lines() {
+            if let Some(path) = line.strip_prefix("worktree ") {
+                // Flush previous entry
+                if let Some(p) = current_path.take() {
+                    entries.push(WorktreeEntry {
+                        path: p,
+                        branch: current_branch.take(),
+                    });
+                }
+                current_path = Some(path.to_string());
+                current_branch = None;
+            } else if let Some(branch) = line.strip_prefix("branch refs/heads/") {
+                current_branch = Some(branch.to_string());
+            }
+        }
+        // Flush last entry
+        if let Some(p) = current_path {
+            entries.push(WorktreeEntry {
+                path: p,
+                branch: current_branch,
+            });
+        }
+        Ok(entries)
+    }
+
+    fn worktree_remove(&self, path: &str) -> Result<()> {
+        run_git(&["worktree", "remove", path, "--force"])?;
+        Ok(())
+    }
+
+    fn worktree_prune(&self) -> Result<()> {
+        run_git(&["worktree", "prune"])?;
+        Ok(())
+    }
+
+    fn branch_delete(&self, name: &str) -> Result<()> {
+        run_git(&["branch", "-D", name])?;
+        Ok(())
     }
 }
 

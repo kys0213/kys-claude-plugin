@@ -5,6 +5,7 @@ pub mod pipeline;
 pub mod preflight;
 pub mod simhash;
 pub mod watch;
+pub mod worktree;
 
 use clap::{Args, Parser, Subcommand};
 
@@ -40,6 +41,11 @@ pub enum Commands {
     Preflight(PreflightArgs),
     /// Watch for push, CI, and issue events (event-driven autopilot)
     Watch(watch::WatchArgs),
+    /// Worktree lifecycle management
+    Worktree {
+        #[command(subcommand)]
+        command: WorktreeCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -94,6 +100,16 @@ pub enum IssueCommands {
     },
     /// Search for similar issues by fingerprint and rank by simhash distance
     SearchSimilar(issue::SearchSimilarArgs),
+}
+
+#[derive(Subcommand)]
+pub enum WorktreeCommands {
+    /// Clean up worktree and local branch after PR merge
+    Cleanup {
+        /// Branch name to clean up
+        #[arg(long)]
+        branch: String,
+    },
 }
 
 #[derive(Subcommand)]
