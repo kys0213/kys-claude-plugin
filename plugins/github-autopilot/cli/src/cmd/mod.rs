@@ -100,6 +100,8 @@ pub enum IssueCommands {
     },
     /// Search for similar issues by fingerprint and rank by simhash distance
     SearchSimilar(issue::SearchSimilarArgs),
+    /// Detect overlapping issues by text similarity (stdin JSON)
+    DetectOverlap(issue::DetectOverlapArgs),
 }
 
 #[derive(Subcommand)]
