@@ -302,40 +302,36 @@ pub fn detect_overlap(args: &DetectOverlapArgs) -> Result<i32> {
 
 /// Pure function for testability: compute pairwise overlaps.
 pub fn compute_overlaps(issues: &[Value], threshold: u32) -> Value {
-    // Compute simhash for each issue from title + body
-    let hashed: Vec<(u64, &Value)> = issues
+    let hashes: Vec<u64> = issues
         .iter()
         .map(|issue| {
             let title = issue["title"].as_str().unwrap_or("");
             let body = issue["body"].as_str().unwrap_or("");
             let text = format!("{title}\n{body}");
             let tokens = super::simhash::tokenize_weighted(&text);
-            let hash = super::simhash::weighted_simhash(&tokens);
-            (hash, issue)
+            super::simhash::weighted_simhash(&tokens)
         })
         .collect();
 
     let mut review_required: Vec<Value> = Vec::new();
 
-    for i in 0..hashed.len() {
-        for j in (i + 1)..hashed.len() {
-            let distance = super::simhash::hamming_distance(hashed[i].0, hashed[j].0);
+    for i in 0..hashes.len() {
+        for j in (i + 1)..hashes.len() {
+            let distance = super::simhash::hamming_distance(hashes[i], hashes[j]);
             if distance <= threshold {
-                let num_a = hashed[i].1["number"].as_u64().unwrap_or(0);
-                let num_b = hashed[j].1["number"].as_u64().unwrap_or(0);
                 review_required.push(serde_json::json!({
-                    "pair": [num_a, num_b],
+                    "pair": [issues[i]["number"], issues[j]["number"]],
                     "distance": distance,
                     "issues": [
                         {
-                            "number": num_a,
-                            "title": hashed[i].1["title"],
-                            "body": hashed[i].1["body"],
+                            "number": issues[i]["number"],
+                            "title": issues[i]["title"],
+                            "body": issues[i]["body"],
                         },
                         {
-                            "number": num_b,
-                            "title": hashed[j].1["title"],
-                            "body": hashed[j].1["body"],
+                            "number": issues[j]["number"],
+                            "title": issues[j]["title"],
+                            "body": issues[j]["body"],
                         }
                     ]
                 }));
@@ -343,7 +339,6 @@ pub fn compute_overlaps(issues: &[Value], threshold: u32) -> Value {
         }
     }
 
-    // Sort by distance ascending (most similar first)
     review_required.sort_by_key(|r| r["distance"].as_u64().unwrap_or(64));
 
     let total = issues.len();
