@@ -269,3 +269,4 @@ CronList로 확인 가능합니다.
 - 7일 후 자동 만료 — 장기 운영 시 재등록 필요
 - 수동 해제: `CronDelete(id)` 또는 `TaskStop(id)` (Monitor용)
 - `event_mode: "cron"`으로 설정하면 기존과 100% 동일하게 동작합니다.
+- **idle auto-shutdown**: 각 cron 루프는 연속 `idle_shutdown.max_idle`회 (기본: 5) idle 시 자동 해제됩니다. 새 이벤트 발생 시 autopilot이 해당 루프를 재등록합니다.

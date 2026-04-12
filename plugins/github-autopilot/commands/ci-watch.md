@@ -46,6 +46,25 @@ autopilot pipeline idle --label-prefix "{label_prefix}"
 - **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다.
 - **exit 1 (active)**: Step 2부터 정상 진행.
 
+### Step 1.7: Idle Count Check
+
+이전 Step의 결과가 "대상 없음"(idle)이면, 연속 idle 횟수를 기록합니다.
+
+```bash
+autopilot check mark ci-watch --status idle
+```
+
+설정에서 `idle_shutdown.max_idle` 값을 읽습니다 (기본값: 5).
+
+연속 idle 횟수가 `max_idle` 이상이면:
+1. `autopilot cron self-delete --name "ci-watch"` 로 cron을 자동 해제합니다.
+2. "연속 {N}회 idle — cron 자동 해제" 메시지를 출력하고 종료합니다.
+
+실제 작업을 수행하면 idle count를 리셋합니다:
+```bash
+autopilot check mark ci-watch --status active
+```
+
 ### Step 2: CI 실패 목록 조회
 
 ```bash
@@ -120,9 +139,11 @@ FINGERPRINT="ci:validate.yml:main:test-failure"
 autopilot issue check-dup --fingerprint "$FINGERPRINT"
 ```
 
-중복이 아닌 실패만 Step 4로 진행합니다.
+중복이 아닌 실패만 Step 4로 진행합니다. 필터링 후 남은 실패가 0건이면 `autopilot check mark ci-watch --status idle` 후 종료합니다.
 
 ### Step 4: 실패 분석 (Agent Team)
+
+분석을 시작하기 전에 idle count를 리셋합니다: `autopilot check mark ci-watch --status active`
 
 새로운 실패 각각에 대해 ci-failure-analyzer 에이전트를 호출합니다.
 
