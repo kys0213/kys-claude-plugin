@@ -194,11 +194,20 @@ gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 - `isolation: "worktree"` 로 독립 작업 공간 확보
 - `run_in_background: true` 로 병렬 실행
 
+각 이슈의 comments를 필터링합니다:
+
+```bash
+echo '${COMMENTS_JSON}' | autopilot issue filter-comments
+```
+
+출력의 `comments`가 필터링된 코멘트, `failure_analysis`가 실패 패턴 분석 결과입니다.
+
 전달 정보 (**모든 항목 필수 — 생략 금지**):
 - issue_number
 - issue_title
 - issue_body (요구사항, 영향 범위, 구현 가이드)
-- **issue_comments**: Step 5에서 가져온 comments 배열 **전체**를 반드시 포함한다. 분석 코멘트, 재작업 요청, 추가 컨텍스트가 포함되어 있으므로 절대 생략하지 않는다
+- **issue_comments**: `filter-comments` 출력의 `comments` 배열. 불필요한 내부 마커와 중복 실패 코멘트가 제거되어 있다
+- **recommended_persona**: `filter-comments` 출력의 `failure_analysis.recommended_persona` (null이면 생략). 같은 카테고리의 실패가 반복되면 persona가 추천된다
 - draft_branch: `draft/issue-{number}`
 - base_branch: Step 1에서 결정한 base 브랜치
 - quality_gate_command: 설정에서 읽은 값 (비어있으면 자동 감지)
