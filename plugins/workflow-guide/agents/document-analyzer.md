@@ -25,14 +25,13 @@ tools: ["Read", "Glob", "Grep"]
 ```
 Glob: README.md
 Glob: CONTRIBUTING.md
-Glob: CHANGELOG.md
 Glob: docs/**/*.md
 Glob: **/*.md
 ```
 
-`**/*.md` 결과에서 다음은 제외합니다:
+결과에서 다음은 제외합니다:
 - `node_modules/`, `vendor/`, `.claude/`, `dist/`, `build/`
-- 자동 생성 파일 (`CHANGELOG.md` 등 도구 생성물은 패턴 분석에서 제외)
+- 자동 생성 파일: `CHANGELOG.md`, `LICENSE`, `package-lock.json` 등 도구 생성물
 
 수집된 문서가 **3개 미만**이면 다음을 반환하고 종료합니다:
 

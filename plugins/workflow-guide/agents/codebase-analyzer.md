@@ -142,7 +142,9 @@ LSP가 사용 가능한 경우, **convention-architect Skill Section 10**의 ope
 | `package.json`에 `main`, `types` 필드 | 라이브러리 |
 | `package.json`에 `bin` 필드 | CLI 도구 |
 | `Dockerfile`, deploy 스크립트 존재 | 제품/서비스 |
-| `LICENSE`, `CONTRIBUTING.md` 존재 | 오픈소스 |
+| `LICENSE` + `CONTRIBUTING.md` + GitHub public repo (복합 시그널) | 오픈소스 |
+
+**참고**: `LICENSE` 단독으로는 약한 시그널입니다 (사내 프로젝트도 보유). 복수 시그널 조합으로 판단합니다.
 
 **팀 규모 감지**:
 
