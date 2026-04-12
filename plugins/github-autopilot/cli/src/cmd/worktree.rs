@@ -38,6 +38,11 @@ impl WorktreeService {
                 }
                 if entry.worktree_removed {
                     eprintln!("Removed worktree for branch '{}'", entry.branch);
+                } else {
+                    eprintln!(
+                        "Failed to remove worktree for branch '{}' (path '{}')",
+                        entry.branch, entry.path
+                    );
                 }
             }
         }
