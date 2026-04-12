@@ -444,17 +444,9 @@ enum CommentCategory {
 fn classify_comment(body: &str) -> CommentCategory {
     let trimmed = body.trim();
 
-    // Internal markers (body is mostly just the marker)
-    if trimmed == "<!-- notified -->"
-        || trimmed == "<!-- autopilot:rework-detected -->"
-        || trimmed.contains("<!-- autopilot:escalated -->")
-    {
-        return CommentCategory::InternalMarker;
-    }
-
-    // Marker-only comments or comments containing rework-detected/notified markers
-    // (these are internal tracking, even when wrapped with descriptive text)
+    // Internal markers: autopilot tracking comments not useful for implementer
     if trimmed.contains("<!-- autopilot:rework-detected -->")
+        || trimmed.contains("<!-- autopilot:escalated -->")
         || is_marker_only(trimmed, "<!-- notified -->")
     {
         return CommentCategory::InternalMarker;
@@ -534,18 +526,18 @@ fn analyze_failures(failure_comments: &[(usize, Value)]) -> Value {
         });
     }
 
-    let mut sorted: Vec<_> = failure_comments.to_vec();
-    sorted.sort_by_key(|(attempt, _)| *attempt);
+    let mut indices: Vec<usize> = (0..failure_comments.len()).collect();
+    indices.sort_by_key(|&i| failure_comments[i].0);
 
-    let categories: Vec<Option<String>> = sorted
+    let categories: Vec<Option<String>> = indices
         .iter()
-        .map(|(_, comment)| {
-            let body = comment["body"].as_str().unwrap_or("");
+        .map(|&i| {
+            let body = failure_comments[i].1["body"].as_str().unwrap_or("");
             extract_failure_category(body)
         })
         .collect();
 
-    let latest = sorted.last().unwrap();
+    let latest = &failure_comments[*indices.last().unwrap()];
     let latest_attempt = latest.0;
     let latest_category = categories.last().cloned().flatten();
 
@@ -570,7 +562,7 @@ fn analyze_failures(failure_comments: &[(usize, Value)]) -> Value {
     };
 
     serde_json::json!({
-        "total_failures": sorted.len(),
+        "total_failures": failure_comments.len(),
         "latest_attempt": latest_attempt,
         "latest_category": latest_category,
         "categories": categories,
