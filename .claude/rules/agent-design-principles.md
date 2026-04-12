@@ -1,6 +1,6 @@
 ---
 paths:
-  - "**/*.md"
+  - "**/plugin.json"
 ---
 
 # Agent Design Principles

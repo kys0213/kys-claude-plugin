@@ -1,3 +1,8 @@
+---
+paths:
+  - "**/.github/**"
+---
+
 # Git Workflow Rules
 
 ## PR 타이틀 규칙
