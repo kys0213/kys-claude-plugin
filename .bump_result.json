@@ -3,8 +3,8 @@
   "results": [
     {
       "plugin": "github-autopilot",
-      "old_version": "0.13.1",
-      "new_version": "0.13.2",
+      "old_version": "0.13.2",
+      "new_version": "0.13.3",
       "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/github-autopilot/.claude-plugin/plugin.json",
       "marketplace_updated": true,
       "cargo_toml_updated": true
