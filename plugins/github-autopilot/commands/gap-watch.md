@@ -54,6 +54,8 @@ Glob으로 spec_paths에서 마크다운 파일을 수집합니다:
 > - 테스트 디렉토리: `tests/`, `test_fixtures/`, `benches/`
 > - 테스트 파일: `*_test.*`, `*_spec.{rs,ts,js,go,py}` (테스트 코드 자체, `.md`는 제외)
 > - 인라인 fixture: gap-detector가 Phase 1에서 추가 검증합니다.
+> - **실존 검증**: Glob 결과의 각 파일 경로가 실제로 존재하는지 `[ -f ]`로 확인합니다.
+> - **ID 형식 필터**: spec ID가 테스트 픽스처 패턴(`spec-*-test`, `spec-no-*`, `spec-term` 등 하이픈으로 연결된 짧은 ID)인 경우 경고를 로그에 남기고 사용자에게 확인을 요청합니다.
 
 스펙 파일이 없으면 에러 메시지 출력 후 종료.
 
