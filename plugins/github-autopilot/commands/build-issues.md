@@ -163,8 +163,9 @@ gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 - 배치 내 이슈가 `max_parallel_agents`보다 많으면:
   1. 이슈를 `max_parallel_agents` 크기의 서브그룹으로 분할
   2. 서브그룹 1 병렬 실행 → 완료 대기
-  3. 서브그룹 2 병렬 실행 → 완료 대기
-  4. ...반복
+  3. **Rate limit 체크**: 결과에 rate limit(429) 에러가 있으면 → 60초 대기 후 다음 서브그룹 진행
+  4. 서브그룹 2 병렬 실행 → 완료 대기
+  5. ...반복
 - 예: `max_parallel_agents=3`, 배치 이슈 7개
   → 그룹1: #1,#2,#3 (병렬) → 그룹2: #4,#5,#6 (병렬) → 그룹3: #7 (단독)
 
@@ -195,6 +196,11 @@ gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 ### Step 9.5: 에스컬레이션 체크
 
 실패한 이슈 각각에 대해 연속 실패 횟수를 확인합니다.
+
+**Rate limit(429) 실패는 코드 문제가 아니므로 특별 처리합니다:**
+- 실패 마커(failure count) 증가 없이 wip 라벨만 제거
+- 다음 cycle에서 자동 재시도
+- 에스컬레이션 대상에서 제외
 
 ```bash
 # 이슈 코멘트에서 실패 마커 조회
