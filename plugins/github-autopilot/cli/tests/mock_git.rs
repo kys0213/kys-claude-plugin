@@ -21,6 +21,9 @@ pub struct MockGit {
     fail_worktree_list: bool,
     fail_worktree_remove: bool,
     fail_branch_delete: bool,
+    uncommitted_worktrees: HashSet<String>,
+    committed_worktrees: Mutex<Vec<(String, String)>>,
+    fail_commit: bool,
 }
 
 impl MockGit {
@@ -40,6 +43,9 @@ impl MockGit {
             fail_worktree_list: false,
             fail_worktree_remove: false,
             fail_branch_delete: false,
+            uncommitted_worktrees: HashSet::new(),
+            committed_worktrees: Mutex::new(Vec::new()),
+            fail_commit: false,
         }
     }
 
@@ -56,6 +62,20 @@ impl MockGit {
     pub fn with_fail_branch_delete(mut self) -> Self {
         self.fail_branch_delete = true;
         self
+    }
+
+    pub fn with_uncommitted_worktree(mut self, path: &str) -> Self {
+        self.uncommitted_worktrees.insert(path.to_string());
+        self
+    }
+
+    pub fn with_fail_commit(mut self) -> Self {
+        self.fail_commit = true;
+        self
+    }
+
+    pub fn committed_worktrees(&self) -> Vec<(String, String)> {
+        self.committed_worktrees.lock().unwrap().clone()
     }
 
     pub fn with_worktree(mut self, path: &str, branch: Option<&str>) -> Self {
@@ -187,6 +207,21 @@ impl GitOps for MockGit {
             bail!("branch delete failed");
         }
         self.deleted_branches.lock().unwrap().push(name.to_string());
+        Ok(())
+    }
+
+    fn has_uncommitted_changes(&self, worktree_path: &str) -> Result<bool> {
+        Ok(self.uncommitted_worktrees.contains(worktree_path))
+    }
+
+    fn commit_all_in_worktree(&self, worktree_path: &str, message: &str) -> Result<()> {
+        if self.fail_commit {
+            bail!("commit failed");
+        }
+        self.committed_worktrees
+            .lock()
+            .unwrap()
+            .push((worktree_path.to_string(), message.to_string()));
         Ok(())
     }
 }

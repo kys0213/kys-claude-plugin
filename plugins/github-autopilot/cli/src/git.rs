@@ -38,6 +38,12 @@ pub trait GitOps: Send + Sync {
 
     /// Delete a local branch.
     fn branch_delete(&self, name: &str) -> Result<()>;
+
+    /// Check whether a worktree has uncommitted changes (staged or unstaged).
+    fn has_uncommitted_changes(&self, worktree_path: &str) -> Result<bool>;
+
+    /// Stage all changes and commit in a specific worktree.
+    fn commit_all_in_worktree(&self, worktree_path: &str, message: &str) -> Result<()>;
 }
 
 /// A worktree entry from `git worktree list --porcelain`.
@@ -118,6 +124,17 @@ impl GitOps for RealGit {
 
     fn branch_delete(&self, name: &str) -> Result<()> {
         run_git(&["branch", "-D", name])?;
+        Ok(())
+    }
+
+    fn has_uncommitted_changes(&self, worktree_path: &str) -> Result<bool> {
+        let output = run_git(&["-C", worktree_path, "status", "--porcelain"])?;
+        Ok(!output.is_empty())
+    }
+
+    fn commit_all_in_worktree(&self, worktree_path: &str, message: &str) -> Result<()> {
+        run_git(&["-C", worktree_path, "add", "-A"])?;
+        run_git(&["-C", worktree_path, "commit", "-m", message])?;
         Ok(())
     }
 }
