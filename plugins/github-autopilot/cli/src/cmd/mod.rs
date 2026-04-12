@@ -112,6 +112,8 @@ pub enum WorktreeCommands {
         #[arg(long)]
         branch: String,
     },
+    /// Remove stale draft/* worktrees, preserving branches with partial commits
+    CleanupStale,
 }
 
 #[derive(Subcommand)]

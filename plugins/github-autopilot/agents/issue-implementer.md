@@ -24,6 +24,12 @@ skills: ["draft-branch"]
 
 ### Phase 1: 분석
 
+0. **이전 작업 확인**:
+   - `git branch --list draft/issue-{N}`으로 기존 draft 브랜치 존재 여부 확인
+   - 있으면: checkout 후 `git log --oneline -5`로 이전 작업 내용 파악. `wip: partial work` 커밋이 있으면 이전 cycle에서 중단된 작업이므로 이어서 진행
+   - issue_comments에서 최신 failure marker(`<!-- autopilot:failure:N -->`)의 실패 카테고리와 사유를 읽고, 동일한 실수를 반복하지 않도록 접근 방식을 조정
+   - 없으면: base_branch에서 새 draft 브랜치 생성
+
 1. **이슈 요구사항 정리**: body와 comments에서 구현 항목, 수용 기준 추출 (comments의 "Autopilot 분석 결과" 섹션에 영향 범위와 구현 가이드가 포함되어 있을 수 있음)
 2. **코드베이스 파악**:
    - 영향 범위의 파일/모듈 읽기

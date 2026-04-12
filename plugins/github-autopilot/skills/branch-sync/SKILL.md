@@ -10,6 +10,16 @@ autopilot의 모든 커맨드가 작업 시작 전 수행하는 공통 동기화
 
 ## 절차
 
+### 0. Stale Worktree 정리
+
+```bash
+autopilot worktree cleanup-stale
+```
+
+이전 cycle에서 정리되지 못한 `draft/*` worktree를 정리한다.
+uncommitted changes는 partial commit으로 브랜치에 보존한 뒤 worktree만 제거한다.
+draft 브랜치 자체는 삭제하지 않으므로, 다음 cycle에서 이전 작업을 이어받을 수 있다.
+
 ### 1. 설정 로딩
 
 `github-autopilot.local.md` frontmatter에서 `work_branch`와 `branch_strategy`를 읽는다.

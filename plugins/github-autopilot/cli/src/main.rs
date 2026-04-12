@@ -79,6 +79,7 @@ fn main() {
             let svc = cmd::worktree::WorktreeService::new(git_client);
             match command {
                 WorktreeCommands::Cleanup { branch } => svc.cleanup(&branch),
+                WorktreeCommands::CleanupStale => svc.cleanup_stale_cmd(),
             }
         }
         Commands::Preflight(PreflightArgs { config, repo_root }) => {
