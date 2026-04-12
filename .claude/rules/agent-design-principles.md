@@ -1,9 +1,6 @@
 ---
 paths:
   - "**/plugin.json"
-  - "**/commands/*.md"
-  - "**/agents/*.md"
-  - "**/skills/**/SKILL.md"
 ---
 
 # Agent Design Principles

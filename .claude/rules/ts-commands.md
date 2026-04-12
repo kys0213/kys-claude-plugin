@@ -43,6 +43,7 @@ export function createBranchCommand(deps: BranchDeps) {
       }
 
       // 3. 성공 결과 반환
+      const baseBranch = await deps.git.detectDefaultBranch();
       return { ok: true, data: { branchName: input.branchName, baseBranch } };
     },
   };

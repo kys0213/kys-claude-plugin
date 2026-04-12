@@ -3,7 +3,6 @@ paths:
   - "**/tests/**/*.rs"
   - "**/*_test.rs"
   - "**/*_tests.rs"
-  - "**/tests/*.rs"
 ---
 
 # Test 컨벤션
