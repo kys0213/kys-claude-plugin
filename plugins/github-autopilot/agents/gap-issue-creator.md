@@ -22,6 +22,20 @@ skills: ["issue-label", "resilience"]
 
 갭 리포트에서 ❌ Missing 또는 ⚠️ Partial 항목을 추출하여, autopilot CLI로 이슈를 생성합니다. CLI가 fingerprint 중복 확인과 이슈 생성을 한 번에 처리합니다.
 
+#### 스펙 파일 실존 검증
+
+각 갭 항목의 스펙 경로가 실제 파일로 존재하는지 확인합니다:
+
+```bash
+if [ ! -f "${SPEC_PATH}" ]; then
+  echo "SKIP: 스펙 파일 미존재 — ${SPEC_PATH}"
+  # skipped_missing에 추가하고 이슈 생성을 건너뜀
+  continue
+fi
+```
+
+스펙 파일이 존재하지 않는 갭은 `skipped_missing` 목록에 추가하고 이슈를 생성하지 않습니다.
+
 #### 일반 이슈 (stagnation 미감지 시)
 
 ```bash
@@ -115,6 +129,9 @@ EOF
   ],
   "skipped_duplicates": [
     {"fingerprint": "gap:spec/api.md:rate-limiting", "existing_issue": 38}
+  ],
+  "skipped_missing": [
+    {"spec_path": "spec-pipeline-create", "requirement": "Pipeline Issue Creation", "reason": "spec file not found"}
   ]
 }
 ```

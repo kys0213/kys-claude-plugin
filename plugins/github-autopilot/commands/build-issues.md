@@ -43,6 +43,25 @@ autopilot pipeline idle --label-prefix "{label_prefix}"
 - **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다.
 - **exit 1 (active)**: Step 4부터 정상 진행
 
+### Step 3.5: Idle Count Check
+
+이전 Step의 결과가 "대상 없음"(idle)이면, 연속 idle 횟수를 기록합니다.
+
+```bash
+autopilot check mark build-issues --status idle
+```
+
+설정에서 `idle_shutdown.max_idle` 값을 읽습니다 (기본값: 5).
+
+연속 idle 횟수가 `max_idle` 이상이면:
+1. `autopilot cron self-delete --name "build-issues"` 로 cron을 자동 해제합니다.
+2. "연속 {N}회 idle — cron 자동 해제" 메시지를 출력하고 종료합니다.
+
+실제 작업을 수행하면 idle count를 리셋합니다:
+```bash
+autopilot check mark build-issues --status active
+```
+
 ### Step 4: Skip 이슈 알림
 
 설정에서 `notification` 값을 확인합니다 (비어있으면 이 Step을 건너뜁니다).
@@ -87,7 +106,7 @@ gh issue list \
 
 이미 `{label_prefix}wip` 라벨이 붙은 이슈는 제외합니다 (진행 중인 작업).
 
-이슈가 없으면 "구현 대상 이슈 없음" 출력 후 종료.
+이슈가 없으면 `autopilot check mark build-issues --status idle` 후 "구현 대상 이슈 없음" 출력 후 종료.
 
 ### Step 5.5: 코멘트 기반 재작업 감지
 
@@ -155,6 +174,8 @@ gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 ```
 
 ### Step 8: 구현 (Agent Team)
+
+구현을 시작하기 전에 idle count를 리셋합니다: `autopilot check mark build-issues --status active`
 
 첫 번째 배치(의존성 없는 이슈들)부터 순서대로 처리합니다.
 

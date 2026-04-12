@@ -47,6 +47,25 @@ autopilot pipeline idle --label-prefix "{label_prefix}"
 - **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다.
 - **exit 1 (active)**: Step 2부터 정상 진행.
 
+### Step 1.7: Idle Count Check
+
+이전 Step의 결과가 "대상 없음"(idle)이면, 연속 idle 횟수를 기록합니다.
+
+```bash
+autopilot check mark merge-prs --status idle
+```
+
+설정에서 `idle_shutdown.max_idle` 값을 읽습니다 (기본값: 5).
+
+연속 idle 횟수가 `max_idle` 이상이면:
+1. `autopilot cron self-delete --name "merge-prs"` 로 cron을 자동 해제합니다.
+2. "연속 {N}회 idle — cron 자동 해제" 메시지를 출력하고 종료합니다.
+
+실제 작업을 수행하면 idle count를 리셋합니다:
+```bash
+autopilot check mark merge-prs --status active
+```
+
 ### Step 2: PR 목록 조회
 
 설정에서 label_prefix를 확인합니다 (기본값: `autopilot:`).
@@ -55,7 +74,7 @@ autopilot pipeline idle --label-prefix "{label_prefix}"
 gh pr list --label "{label_prefix}auto" --state open --json number,title,mergeable,statusCheckRollup,reviewDecision,headRefName,baseRefName --limit 20
 ```
 
-PR이 없으면 "머지 대상 PR 없음" 출력 후 종료.
+PR이 없으면 `autopilot check mark merge-prs --status idle` 후 "머지 대상 PR 없음" 출력 후 종료.
 
 ### Step 3: PR 분류
 
@@ -71,6 +90,8 @@ PR이 없으면 "머지 대상 PR 없음" 출력 후 종료.
 > **참고**: CI 실패 PR은 ci-fix 루프에서 tick 단위로 수정합니다. merge-prs는 CI 실패를 직접 수정하지 않습니다.
 
 ### Step 4: All-green PR 즉시 머지
+
+머지를 시작하기 전에 idle count를 리셋합니다: `autopilot check mark merge-prs --status active`
 
 ```bash
 gh pr merge ${PR_NUMBER} --squash --delete-branch
