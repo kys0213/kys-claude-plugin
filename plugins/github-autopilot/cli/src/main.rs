@@ -27,6 +27,7 @@ fn main() {
                 let client = gh::real();
                 cmd::issue::search_similar(client.as_ref(), &args)
             }
+            IssueCommands::FilterComments => cmd::issue::filter_comments(),
         },
         Commands::Pipeline { command } => {
             let client = gh::real();

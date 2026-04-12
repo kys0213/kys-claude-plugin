@@ -102,6 +102,8 @@ pub enum IssueCommands {
     SearchSimilar(issue::SearchSimilarArgs),
     /// Detect overlapping issues by text similarity (stdin JSON)
     DetectOverlap(issue::DetectOverlapArgs),
+    /// Filter issue comments for implementer agents (stdin JSON)
+    FilterComments,
 }
 
 #[derive(Subcommand)]

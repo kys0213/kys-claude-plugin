@@ -351,6 +351,234 @@ pub fn compute_overlaps(issues: &[Value], threshold: u32) -> Value {
     })
 }
 
+/// Persona rotation order for repeated build failures (matches resilience skill).
+const PERSONAS: &[&str] = &[
+    "hacker",
+    "researcher",
+    "simplifier",
+    "architect",
+    "contrarian",
+];
+
+/// Filter issue comments for implementer agents and analyze failure patterns.
+/// Reads comments from stdin as JSON array: `[{"body":"..."}]`
+/// Outputs filtered comments + failure analysis with optional persona recommendation.
+pub fn filter_comments() -> Result<i32> {
+    let mut input = String::new();
+    std::io::stdin()
+        .read_to_string(&mut input)
+        .context("failed to read stdin")?;
+
+    let comments: Vec<Value> =
+        serde_json::from_str(&input).context("failed to parse stdin JSON")?;
+
+    let result = compute_filtered_comments(&comments);
+    println!("{result}");
+    Ok(0)
+}
+
+/// Pure function for testability: filter comments and analyze failure patterns.
+pub fn compute_filtered_comments(comments: &[Value]) -> Value {
+    let mut analysis_comments = Vec::new();
+    let mut failure_comments: Vec<(usize, Value)> = Vec::new(); // (attempt, comment)
+    let mut rework_comments: Vec<(usize, Value)> = Vec::new(); // (index, comment)
+    let mut other_comments = Vec::new();
+
+    for (i, comment) in comments.iter().enumerate() {
+        let body = comment["body"].as_str().unwrap_or("");
+        let category = classify_comment(body);
+
+        match category {
+            CommentCategory::InternalMarker | CommentCategory::PrLink => {
+                // excluded
+            }
+            CommentCategory::Analysis => {
+                analysis_comments.push(comment.clone());
+            }
+            CommentCategory::FailureMarker => {
+                let attempt = extract_failure_attempt(body).unwrap_or(0);
+                failure_comments.push((attempt, comment.clone()));
+            }
+            CommentCategory::ReworkRequest => {
+                rework_comments.push((i, comment.clone()));
+            }
+            CommentCategory::Other => {
+                other_comments.push(comment.clone());
+            }
+        }
+    }
+
+    // Keep only latest failure and rework
+    let latest_failure = failure_comments.iter().max_by_key(|(attempt, _)| *attempt);
+    let latest_rework = rework_comments.last();
+
+    let mut filtered = Vec::new();
+    filtered.extend(analysis_comments);
+    filtered.extend(other_comments);
+    if let Some((_, comment)) = latest_rework {
+        filtered.push(comment.clone());
+    }
+    if let Some((_, comment)) = latest_failure {
+        filtered.push(comment.clone());
+    }
+
+    // Failure analysis
+    let failure_analysis = analyze_failures(&failure_comments);
+
+    serde_json::json!({
+        "comments": filtered,
+        "failure_analysis": failure_analysis,
+    })
+}
+
+#[derive(Debug, PartialEq)]
+enum CommentCategory {
+    Analysis,
+    FailureMarker,
+    ReworkRequest,
+    InternalMarker,
+    PrLink,
+    Other,
+}
+
+fn classify_comment(body: &str) -> CommentCategory {
+    let trimmed = body.trim();
+
+    // Internal markers (body is mostly just the marker)
+    if trimmed == "<!-- notified -->"
+        || trimmed == "<!-- autopilot:rework-detected -->"
+        || trimmed.contains("<!-- autopilot:escalated -->")
+    {
+        return CommentCategory::InternalMarker;
+    }
+
+    // Marker-only comments or comments containing rework-detected/notified markers
+    // (these are internal tracking, even when wrapped with descriptive text)
+    if trimmed.contains("<!-- autopilot:rework-detected -->")
+        || is_marker_only(trimmed, "<!-- notified -->")
+    {
+        return CommentCategory::InternalMarker;
+    }
+
+    // PR link
+    if trimmed.contains("PR created by autopilot") {
+        return CommentCategory::PrLink;
+    }
+
+    // Failure marker
+    if trimmed.contains("<!-- autopilot:failure:") {
+        return CommentCategory::FailureMarker;
+    }
+
+    // Analysis comment
+    if trimmed.contains("Autopilot 분석 결과") {
+        return CommentCategory::Analysis;
+    }
+
+    // Rework request
+    if has_rework_keyword(trimmed) {
+        return CommentCategory::ReworkRequest;
+    }
+
+    CommentCategory::Other
+}
+
+fn is_marker_only(body: &str, marker: &str) -> bool {
+    let without_marker = body.replace(marker, "");
+    without_marker.trim().is_empty()
+}
+
+fn has_rework_keyword(body: &str) -> bool {
+    const KEYWORDS: &[&str] = &[
+        "재구현 필요",
+        "재작업",
+        "rework",
+        "다시 구현",
+        "re-implement",
+    ];
+    KEYWORDS.iter().any(|kw| body.contains(kw))
+}
+
+fn extract_failure_attempt(body: &str) -> Option<usize> {
+    // Match <!-- autopilot:failure:N -->
+    let marker = "<!-- autopilot:failure:";
+    if let Some(start) = body.find(marker) {
+        let rest = &body[start + marker.len()..];
+        if let Some(end) = rest.find(" -->") {
+            return rest[..end].parse().ok();
+        }
+    }
+    None
+}
+
+fn extract_failure_category(body: &str) -> Option<String> {
+    // Match **Category**: value or Category: value
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("**Category**:") {
+            return Some(rest.trim().to_string());
+        }
+        if let Some(rest) = trimmed.strip_prefix("Category:") {
+            return Some(rest.trim().to_string());
+        }
+    }
+    None
+}
+
+fn analyze_failures(failure_comments: &[(usize, Value)]) -> Value {
+    if failure_comments.is_empty() {
+        return serde_json::json!({
+            "total_failures": 0,
+            "repeated_category": false,
+            "recommended_persona": null,
+        });
+    }
+
+    let mut sorted: Vec<_> = failure_comments.to_vec();
+    sorted.sort_by_key(|(attempt, _)| *attempt);
+
+    let categories: Vec<Option<String>> = sorted
+        .iter()
+        .map(|(_, comment)| {
+            let body = comment["body"].as_str().unwrap_or("");
+            extract_failure_category(body)
+        })
+        .collect();
+
+    let latest = sorted.last().unwrap();
+    let latest_attempt = latest.0;
+    let latest_category = categories.last().cloned().flatten();
+
+    // Check if the same category is repeated consecutively
+    let repeated = if categories.len() >= 2 {
+        let last = categories.last().unwrap();
+        let second_last = &categories[categories.len() - 2];
+        last.is_some() && last == second_last
+    } else {
+        false
+    };
+
+    let persona = if repeated {
+        // Count consecutive same-category failures from the end
+        let target = categories.last().unwrap();
+        let consecutive = categories.iter().rev().take_while(|c| c == &target).count();
+        // Pick persona: 2 consecutive → index 0 (hacker), 3 → index 1, etc.
+        let idx = (consecutive - 2).min(PERSONAS.len() - 1);
+        Some(PERSONAS[idx])
+    } else {
+        None
+    };
+
+    serde_json::json!({
+        "total_failures": sorted.len(),
+        "latest_attempt": latest_attempt,
+        "latest_category": latest_category,
+        "categories": categories,
+        "repeated_category": repeated,
+        "recommended_persona": persona,
+    })
+}
+
 /// Extract branch name from CI failure issue title.
 /// Expected format: "fix: CI failure in {workflow} on {branch}"
 pub fn extract_branch_from_ci_title(title: &str) -> String {
@@ -521,5 +749,340 @@ mod tests {
             "feat/add-auth"
         );
         assert_eq!(extract_branch_from_ci_title("some other title"), "");
+    }
+
+    // --- filter_comments tests ---
+
+    #[test]
+    fn filter_excludes_internal_markers() {
+        let comments = vec![
+            serde_json::json!({"body": "<!-- notified -->"}),
+            serde_json::json!({"body": "<!-- autopilot:rework-detected -->"}),
+            serde_json::json!({"body": "## Autopilot Escalation Report\n\n<!-- autopilot:escalated -->"}),
+            serde_json::json!({"body": "Autopilot 분석 결과: 영향 범위는 auth 모듈"}),
+        ];
+        let result = compute_filtered_comments(&comments);
+        let filtered = result["comments"].as_array().unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert!(filtered[0]["body"].as_str().unwrap().contains("분석 결과"));
+    }
+
+    #[test]
+    fn filter_excludes_pr_links() {
+        let comments = vec![
+            serde_json::json!({"body": "PR created by autopilot: #50"}),
+            serde_json::json!({"body": "사용자 코멘트: 이 부분 수정해주세요"}),
+        ];
+        let result = compute_filtered_comments(&comments);
+        let filtered = result["comments"].as_array().unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert!(filtered[0]["body"]
+            .as_str()
+            .unwrap()
+            .contains("수정해주세요"));
+    }
+
+    #[test]
+    fn filter_keeps_only_latest_failure() {
+        let comments = vec![
+            serde_json::json!({"body": "Autopilot 구현 실패 (attempt 1/3)\n\n**Category**: lint_failure\n**Reason**: clippy\n\n<!-- autopilot:failure:1 -->"}),
+            serde_json::json!({"body": "Autopilot 구현 실패 (attempt 2/3)\n\n**Category**: test_failure\n**Reason**: assertion\n\n<!-- autopilot:failure:2 -->"}),
+        ];
+        let result = compute_filtered_comments(&comments);
+        let filtered = result["comments"].as_array().unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert!(filtered[0]["body"].as_str().unwrap().contains("failure:2"));
+    }
+
+    #[test]
+    fn filter_keeps_only_latest_rework() {
+        let comments = vec![
+            serde_json::json!({"body": "재구현 필요 — API 스펙 변경됨"}),
+            serde_json::json!({"body": "재작업 — 새로운 요구사항 추가"}),
+        ];
+        let result = compute_filtered_comments(&comments);
+        let filtered = result["comments"].as_array().unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert!(filtered[0]["body"]
+            .as_str()
+            .unwrap()
+            .contains("새로운 요구사항"));
+    }
+
+    #[test]
+    fn filter_preserves_all_analysis_and_user_comments() {
+        let comments = vec![
+            serde_json::json!({"body": "Autopilot 분석 결과: 첫 번째 분석"}),
+            serde_json::json!({"body": "Autopilot 분석 결과: 두 번째 분석"}),
+            serde_json::json!({"body": "사용자: 이건 중요한 코멘트"}),
+        ];
+        let result = compute_filtered_comments(&comments);
+        let filtered = result["comments"].as_array().unwrap();
+        assert_eq!(filtered.len(), 3);
+    }
+
+    #[test]
+    fn filter_empty_comments() {
+        let result = compute_filtered_comments(&[]);
+        let filtered = result["comments"].as_array().unwrap();
+        assert!(filtered.is_empty());
+        assert_eq!(result["failure_analysis"]["total_failures"], 0);
+    }
+
+    #[test]
+    fn failure_analysis_no_failures() {
+        let comments = vec![serde_json::json!({"body": "Autopilot 분석 결과: 분석 내용"})];
+        let result = compute_filtered_comments(&comments);
+        let analysis = &result["failure_analysis"];
+        assert_eq!(analysis["total_failures"], 0);
+        assert_eq!(analysis["repeated_category"], false);
+        assert!(analysis["recommended_persona"].is_null());
+    }
+
+    #[test]
+    fn failure_analysis_detects_repeated_category() {
+        let comments = vec![
+            serde_json::json!({"body": "실패\n\n**Category**: lint_failure\n\n<!-- autopilot:failure:1 -->"}),
+            serde_json::json!({"body": "실패\n\n**Category**: lint_failure\n\n<!-- autopilot:failure:2 -->"}),
+        ];
+        let result = compute_filtered_comments(&comments);
+        let analysis = &result["failure_analysis"];
+        assert_eq!(analysis["total_failures"], 2);
+        assert_eq!(analysis["repeated_category"], true);
+        assert_eq!(analysis["recommended_persona"], "hacker");
+    }
+
+    #[test]
+    fn failure_analysis_no_persona_for_different_categories() {
+        let comments = vec![
+            serde_json::json!({"body": "실패\n\n**Category**: lint_failure\n\n<!-- autopilot:failure:1 -->"}),
+            serde_json::json!({"body": "실패\n\n**Category**: test_failure\n\n<!-- autopilot:failure:2 -->"}),
+        ];
+        let result = compute_filtered_comments(&comments);
+        let analysis = &result["failure_analysis"];
+        assert_eq!(analysis["total_failures"], 2);
+        assert_eq!(analysis["repeated_category"], false);
+        assert!(analysis["recommended_persona"].is_null());
+    }
+
+    #[test]
+    fn failure_analysis_persona_rotates_with_consecutive_failures() {
+        let comments = vec![
+            serde_json::json!({"body": "실패\n\n**Category**: test_failure\n\n<!-- autopilot:failure:1 -->"}),
+            serde_json::json!({"body": "실패\n\n**Category**: test_failure\n\n<!-- autopilot:failure:2 -->"}),
+            serde_json::json!({"body": "실패\n\n**Category**: test_failure\n\n<!-- autopilot:failure:3 -->"}),
+        ];
+        let result = compute_filtered_comments(&comments);
+        let analysis = &result["failure_analysis"];
+        assert_eq!(analysis["total_failures"], 3);
+        // 3 consecutive same category → persona index 1 → "researcher"
+        assert_eq!(analysis["recommended_persona"], "researcher");
+    }
+
+    #[test]
+    fn classify_comment_categories() {
+        assert_eq!(
+            classify_comment("<!-- notified -->"),
+            CommentCategory::InternalMarker
+        );
+        assert_eq!(
+            classify_comment("<!-- autopilot:rework-detected -->"),
+            CommentCategory::InternalMarker
+        );
+        assert_eq!(
+            classify_comment("Report\n<!-- autopilot:escalated -->"),
+            CommentCategory::InternalMarker
+        );
+        assert_eq!(
+            classify_comment("PR created by autopilot: #50"),
+            CommentCategory::PrLink
+        );
+        assert_eq!(
+            classify_comment("실패\n<!-- autopilot:failure:1 -->"),
+            CommentCategory::FailureMarker
+        );
+        assert_eq!(
+            classify_comment("Autopilot 분석 결과: 영향 범위"),
+            CommentCategory::Analysis
+        );
+        assert_eq!(
+            classify_comment("재구현 필요"),
+            CommentCategory::ReworkRequest
+        );
+        assert_eq!(
+            classify_comment("일반 사용자 코멘트"),
+            CommentCategory::Other
+        );
+    }
+
+    #[test]
+    fn extract_failure_attempt_parses_correctly() {
+        assert_eq!(
+            extract_failure_attempt("text <!-- autopilot:failure:3 --> more"),
+            Some(3)
+        );
+        assert_eq!(extract_failure_attempt("no marker"), None);
+        assert_eq!(
+            extract_failure_attempt("<!-- autopilot:failure:12 -->"),
+            Some(12)
+        );
+    }
+
+    #[test]
+    fn extract_failure_category_parses_both_formats() {
+        assert_eq!(
+            extract_failure_category("**Category**: lint_failure"),
+            Some("lint_failure".to_string())
+        );
+        assert_eq!(
+            extract_failure_category("Category: test_failure"),
+            Some("test_failure".to_string())
+        );
+        assert_eq!(extract_failure_category("no category"), None);
+    }
+
+    #[test]
+    fn filter_realistic_cycle_scenario() {
+        // Simulates a real issue with 3 failed cycles + rework + analysis
+        let comments = vec![
+            serde_json::json!({"body": "Autopilot 분석 결과: auth 모듈에 refresh token 로직 추가 필요\n\n## 영향 범위\n- src/auth/mod.rs\n- src/auth/token.rs"}),
+            serde_json::json!({"body": "Autopilot 구현 실패 (attempt 1/3)\n\n**Category**: lint_failure\n**Reason**: cargo clippy warnings\n\n<!-- autopilot:failure:1 -->"}),
+            serde_json::json!({"body": "<!-- notified -->"}),
+            serde_json::json!({"body": "PR created by autopilot: #50"}),
+            serde_json::json!({"body": "재구현 필요 — API 스펙이 변경됨"}),
+            serde_json::json!({"body": "Autopilot: 코멘트에서 재작업 요청 감지 — ready 라벨 재부여\n\n<!-- autopilot:rework-detected -->"}),
+            serde_json::json!({"body": "Autopilot 구현 실패 (attempt 2/3)\n\n**Category**: lint_failure\n**Reason**: cargo clippy warnings\n\n<!-- autopilot:failure:2 -->"}),
+            serde_json::json!({"body": "사용자: 이 함수의 리턴 타입을 Result로 바꿔주세요"}),
+        ];
+        let result = compute_filtered_comments(&comments);
+        let filtered = result["comments"].as_array().unwrap();
+
+        // Should keep: analysis(1) + user comment(1) + latest rework(1) + latest failure(1) = 4
+        assert_eq!(filtered.len(), 4);
+
+        // Verify excluded: notified, PR link, rework-detected marker, failure:1
+        let all_bodies: Vec<&str> = filtered
+            .iter()
+            .map(|c| c["body"].as_str().unwrap())
+            .collect();
+        assert!(all_bodies.iter().any(|b| b.contains("분석 결과")));
+        assert!(all_bodies.iter().any(|b| b.contains("리턴 타입")));
+        assert!(all_bodies.iter().any(|b| b.contains("재구현 필요")));
+        assert!(all_bodies.iter().any(|b| b.contains("failure:2")));
+        assert!(!all_bodies.iter().any(|b| b.contains("failure:1")));
+        assert!(!all_bodies.iter().any(|b| b.contains("notified")));
+        assert!(!all_bodies.iter().any(|b| b.contains("PR created")));
+
+        // Failure analysis: 2 consecutive lint_failure → hacker
+        let analysis = &result["failure_analysis"];
+        assert_eq!(analysis["total_failures"], 2);
+        assert_eq!(analysis["repeated_category"], true);
+        assert_eq!(analysis["recommended_persona"], "hacker");
+    }
+
+    #[test]
+    fn persona_rotates_through_all_five() {
+        let comments: Vec<Value> = (1..=6)
+            .map(|i| {
+                serde_json::json!({"body": format!(
+                    "실패\n\n**Category**: test_failure\n\n<!-- autopilot:failure:{i} -->"
+                )})
+            })
+            .collect();
+        let result = compute_filtered_comments(&comments);
+        let analysis = &result["failure_analysis"];
+
+        // 6 consecutive → persona index min(6-2, 4) = 4 → "contrarian"
+        assert_eq!(analysis["recommended_persona"], "contrarian");
+    }
+
+    #[test]
+    fn persona_caps_at_contrarian_beyond_five() {
+        let comments: Vec<Value> = (1..=10)
+            .map(|i| {
+                serde_json::json!({"body": format!(
+                    "실패\n\n**Category**: lint_failure\n\n<!-- autopilot:failure:{i} -->"
+                )})
+            })
+            .collect();
+        let result = compute_filtered_comments(&comments);
+        let analysis = &result["failure_analysis"];
+
+        // 10 consecutive → capped at index 4 → "contrarian"
+        assert_eq!(analysis["recommended_persona"], "contrarian");
+    }
+
+    #[test]
+    fn category_break_resets_persona() {
+        // A, A, B, B → last two are B, repeated=true, consecutive B=2 → hacker
+        let comments = vec![
+            serde_json::json!({"body": "실패\n\n**Category**: lint_failure\n\n<!-- autopilot:failure:1 -->"}),
+            serde_json::json!({"body": "실패\n\n**Category**: lint_failure\n\n<!-- autopilot:failure:2 -->"}),
+            serde_json::json!({"body": "실패\n\n**Category**: test_failure\n\n<!-- autopilot:failure:3 -->"}),
+            serde_json::json!({"body": "실패\n\n**Category**: test_failure\n\n<!-- autopilot:failure:4 -->"}),
+        ];
+        let result = compute_filtered_comments(&comments);
+        let analysis = &result["failure_analysis"];
+        assert_eq!(analysis["repeated_category"], true);
+        // Consecutive test_failure = 2 → index 0 → "hacker" (reset, not continuing from lint)
+        assert_eq!(analysis["recommended_persona"], "hacker");
+    }
+
+    #[test]
+    fn failure_markers_sorted_by_attempt_not_order() {
+        // Comments arrive out of order (attempt 2 before attempt 1)
+        let comments = vec![
+            serde_json::json!({"body": "실패\n\n**Category**: lint_failure\n\n<!-- autopilot:failure:2 -->"}),
+            serde_json::json!({"body": "실패\n\n**Category**: lint_failure\n\n<!-- autopilot:failure:1 -->"}),
+        ];
+        let result = compute_filtered_comments(&comments);
+        let filtered = result["comments"].as_array().unwrap();
+
+        // Latest by attempt number (2), not by array position
+        assert_eq!(filtered.len(), 1);
+        assert!(filtered[0]["body"].as_str().unwrap().contains("failure:2"));
+
+        let analysis = &result["failure_analysis"];
+        assert_eq!(analysis["latest_attempt"], 2);
+        assert_eq!(analysis["repeated_category"], true);
+    }
+
+    #[test]
+    fn single_failure_no_persona() {
+        let comments = vec![
+            serde_json::json!({"body": "실패\n\n**Category**: lint_failure\n\n<!-- autopilot:failure:1 -->"}),
+        ];
+        let result = compute_filtered_comments(&comments);
+        let analysis = &result["failure_analysis"];
+        assert_eq!(analysis["total_failures"], 1);
+        assert_eq!(analysis["repeated_category"], false);
+        assert!(analysis["recommended_persona"].is_null());
+    }
+
+    #[test]
+    fn empty_or_null_body_handled_without_panic() {
+        let comments = vec![
+            serde_json::json!({"body": ""}),
+            serde_json::json!({"body": null}),
+            serde_json::json!({"other_field": "no body"}),
+            serde_json::json!({"body": "실제 사용자 코멘트"}),
+        ];
+        let result = compute_filtered_comments(&comments);
+        // Should not panic; user comment is preserved
+        let filtered = result["comments"].as_array().unwrap();
+        assert!(filtered
+            .iter()
+            .any(|c| c["body"].as_str().unwrap_or("") == "실제 사용자 코멘트"));
+    }
+
+    #[test]
+    fn rework_detected_with_meaningful_text_excluded() {
+        // The marker comment has text before the marker — still excluded
+        let comments = vec![
+            serde_json::json!({"body": "Autopilot: 코멘트에서 재작업 요청 감지 — ready 라벨 재부여\n\n<!-- autopilot:rework-detected -->"}),
+        ];
+        let result = compute_filtered_comments(&comments);
+        let filtered = result["comments"].as_array().unwrap();
+        assert!(filtered.is_empty());
     }
 }

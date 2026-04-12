@@ -15,7 +15,8 @@ skills: ["draft-branch"]
 - issue_number: 이슈 번호
 - issue_title: 이슈 제목
 - issue_body: 이슈 본문 (요구사항, 영향 범위, 구현 가이드)
-- issue_comments: 이슈 코멘트 (analyze-issue의 분석 결과 포함 — 영향 범위, 구현 가이드 참조)
+- issue_comments: 필터링된 이슈 코멘트 (analyze-issue의 분석 결과 포함 — 영향 범위, 구현 가이드 참조)
+- recommended_persona: (optional) 반복 실패 시 추천되는 접근 전환 persona. 아래 Persona 가이드 참조
 - draft_branch: 작업할 draft 브랜치명
 - base_branch: draft 브랜치를 분기할 base 브랜치 (work_branch 또는 branch_strategy에서 결정된 값)
 - quality_gate_command: (optional) 커스텀 quality gate 명령어. 비어있으면 자동 감지
@@ -103,6 +104,20 @@ Closes #${ISSUE_NUMBER}"
   "partial_work": true
 }
 ```
+
+## Persona 가이드 (반복 실패 시)
+
+`recommended_persona`가 전달되면, 이전과 같은 접근이 반복 실패했다는 뜻이다. 해당 persona의 관점으로 접근 방식을 전환한다:
+
+| Persona | 핵심 질문 | 접근 |
+|---------|----------|------|
+| **hacker** | 제약을 우회할 수 있는가? | 당연시하는 가정을 의심하고 다른 경로로 해결 |
+| **researcher** | 정보가 부족한가? | 에러 메시지를 다시 읽고 공식 문서에서 정확한 케이스 확인 |
+| **simplifier** | 복잡성이 문제인가? | 동작하는 가장 단순한 것을 찾고 불필요한 것 제거 |
+| **architect** | 구조가 잘못되었나? | 현재 구조의 근본적 불일치를 찾고 최소한의 구조 변경 제안 |
+| **contrarian** | 올바른 문제를 풀고 있나? | 모든 가정의 반대를 고려하고 문제 자체를 의심 |
+
+persona가 없으면 일반적인 구현 프로세스를 따른다.
 
 ## 주의사항
 
