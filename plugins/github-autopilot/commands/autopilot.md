@@ -82,6 +82,21 @@ autopilot preflight --config github-autopilot.local.md --repo-root .
 
 > `spec_paths`에 파일이 없으면 이 단계를 skip합니다 (preflight에서 이미 확인).
 
+### Step 1.7: 초기 Gap 분석
+
+autopilot 시작 시 기존 갭을 감지하기 위해 `/github-autopilot:gap-watch`를 1회 실행합니다.
+
+> 이벤트 드리븐 모드에서는 `MAIN_UPDATED` 이벤트가 발생해야 gap-watch가 트리거되므로, 시작 시점에 이미 존재하는 갭은 이 단계에서 감지합니다.
+
+1. `spec_paths`에 스펙 파일이 있으면 `/github-autopilot:gap-watch`를 실행합니다
+2. 발견된 갭이 이슈로 등록됩니다
+3. 결과 로그:
+   - 이슈 생성됨: "초기 갭 분석 완료 — {N}건 이슈 등록"
+   - 갭 없음: "초기 갭 분석 완료 — 갭 없음"
+
+> `spec_paths`에 파일이 없으면 이 단계를 skip합니다 (Step 1.6과 동일 조건).
+> hybrid/cron 모드 모두 동일하게 적용됩니다.
+
 ### Step 2: 모드 분기
 
 `event_mode` 설정에 따라 분기합니다:
