@@ -40,6 +40,8 @@ default_intervals:
   qa_boost: "1h"
 monitor:
   poll_sec: 60
+idle_shutdown:
+  max_idle: 5
 test_watch: []
 ```
 

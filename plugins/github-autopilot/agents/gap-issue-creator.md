@@ -27,7 +27,6 @@ skills: ["issue-label", "resilience"]
 각 갭 항목의 스펙 경로가 실제 파일로 존재하는지 확인합니다:
 
 ```bash
-# 스펙 파일 경로가 실제로 존재하는지 확인
 if [ ! -f "${SPEC_PATH}" ]; then
   echo "SKIP: 스펙 파일 미존재 — ${SPEC_PATH}"
   # skipped_missing에 추가하고 이슈 생성을 건너뜀
