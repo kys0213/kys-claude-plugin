@@ -1,7 +1,7 @@
 ---
 description: 코드베이스의 언어, 프레임워크, 디렉토리 구조를 분석하여 규칙 파일 구조를 제안합니다
 model: sonnet
-tools: ["Read", "Glob", "Grep", "Bash"]
+tools: ["Read", "Glob", "Grep", "Bash", "LSP"]
 skills: ["convention-architect"]
 ---
 
@@ -44,6 +44,22 @@ Glob: *.sln
 - `go.mod`: require에서 `go-chi/chi`, `uber-go/fx`, `gin-gonic/gin` 등 확인
 - `Cargo.toml`: dependencies에서 `actix-web`, `axum` 등 확인
 - `pyproject.toml`: dependencies에서 `fastapi`, `django` 등 확인
+
+### Step 1-A: LSP 사용 가능 여부 확인
+
+**convention-architect Skill Section 10 (LSP-Enhanced Analysis)**의 전략을 따릅니다.
+
+Step 1에서 감지된 언어에 해당하는 LSP 서버의 존재 여부를 확인합니다:
+
+```bash
+which rust-analyzer 2>/dev/null && echo "lsp:rust-analyzer"
+which gopls 2>/dev/null && echo "lsp:gopls"
+which typescript-language-server 2>/dev/null && echo "lsp:typescript-language-server"
+which pylsp 2>/dev/null && echo "lsp:pylsp"
+```
+
+- **사용 가능**: Step 2에서 LSP 기반 정밀 분석 진행
+- **사용 불가**: Glob/Grep fallback 진행 + 설치 안내를 출력에 포함 (설치 명령은 convention-architect Skill Section 10 참조)
 
 ### Step 2: 디렉토리 구조 분석
 
@@ -96,6 +112,10 @@ Glob: **/*.module.ts
 
 실제 존재하는 패턴만 규칙 파일에 반영합니다.
 
+#### LSP 기반 정밀 분석 (사용 가능 시)
+
+LSP가 사용 가능한 경우, **convention-architect Skill Section 10**의 operation 목록을 참고하여 Glob/Grep에 추가 분석을 수행합니다. LSP 사용 불가 시 이 단계를 건너뛰고 기존 Glob/Grep 기반 분석만 수행합니다.
+
 #### 범용 패턴 변환
 
 샘플링된 파일 경로에서 레이어(역할)와 컨테이너(위치)를 분리하고, 컨테이너를 `**/`로 추상화합니다. 구체적인 판별 기준과 알고리즘은 **convention-architect Skill Section 7 (paths 범용화 원칙)**을 적용합니다.
@@ -111,7 +131,46 @@ Glob: **/*.module.ts
    - 패턴이 올바르지만 파일이 컨벤션에 맞지 않으면 → 규칙 설명에 주석으로 예외 사항을 기록
 4. **체크리스트**: convention-architect Skill Section 7 (paths 범용화 원칙)의 체크리스트 항목을 확인
 
-### Step 6: 규칙 구조 제안 생성
+### Step 6: 프로젝트 맥락 자동감지
+
+코드베이스에서 프로젝트의 맥락과 엔지니어링 성향을 추론합니다.
+
+**프로젝트 유형 감지**:
+
+| 시그널 | 추론 |
+|--------|------|
+| `package.json`에 `main`, `types` 필드 | 라이브러리 |
+| `package.json`에 `bin` 필드 | CLI 도구 |
+| `Dockerfile`, deploy 스크립트 존재 | 제품/서비스 |
+| `LICENSE` + `CONTRIBUTING.md` + GitHub public repo (복합 시그널) | 오픈소스 |
+
+**참고**: `LICENSE` 단독으로는 약한 시그널입니다 (사내 프로젝트도 보유). 복수 시그널 조합으로 판단합니다.
+
+**팀 규모 감지**:
+
+```bash
+git shortlog -sn --no-merges | head -10
+```
+
+- 커밋터 1명 → 1인
+- 커밋터 2~5명 → 소규모
+- 커밋터 6명+ → 대규모
+- `.github/CODEOWNERS` 존재 시 내용 확인
+
+**엔지니어링 성향 감지**:
+
+| 관찰 | 추론 |
+|------|------|
+| interface/trait 파일 비율 높음 | 추상화·명시성 중시 |
+| 테스트 커버리지 높음 (test 파일 비율) | 안정성 우선 |
+| TODO/FIXME 코멘트 다수 | 속도 우선, 부채 허용 |
+| 타입 정의 별도 분리 | 계약 기반 설계 |
+
+LSP 사용 가능 시 convention-architect Skill Section 10의 operation으로 더 정확한 판단이 가능합니다.
+
+**참고**: 독자 수준/문서 톤 분석은 document-analyzer가 담당합니다. 이 에이전트는 코드 구조에 집중합니다.
+
+### Step 7: 규칙 구조 제안 생성
 
 분석 결과를 종합하여 다음 형식으로 제안합니다:
 
@@ -136,6 +195,15 @@ Glob: **/*.module.ts
 | 5 | `dto.md` | `["**/*.dto.ts"]` | DTO 설계 컨벤션 |
 | 6 | `module.md` | `["**/*.module.ts"]` | 모듈 경계 컨벤션 |
 | 7 | `testing.md` | `["**/*.spec.ts", "**/*.test.ts"]` | 테스트 컨벤션 |
+
+### 자동 감지된 프로젝트 컨텍스트
+
+| 항목 | 감지 값 | 근거 |
+|------|---------|------|
+| 프로젝트 유형 | 라이브러리 | package.json에 main, types 필드 |
+| 팀 규모 | 소규모 (3명) | git shortlog 3명, CODEOWNERS 2명 |
+| 추상화 수준 | 높음 | interface 15개, 구현체 대비 높은 비율 |
+| 테스트 성향 | 안정성 우선 | test 파일 비율 30%, CI 설정 존재 |
 
 ### Gap 분석 (기존 규칙이 있는 경우)
 
