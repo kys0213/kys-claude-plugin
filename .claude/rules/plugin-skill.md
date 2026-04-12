@@ -5,14 +5,12 @@ paths:
 
 # Plugin Skill 명세 컨벤션
 
-> Skill은 여러 Command/Agent가 공유하는 도메인 지식이다. 정적 지식만 담고, 응집도 높게 구조화한다.
+> SKILL.md 파일의 작성 형식 규칙. 설계 원칙(SRP, 정적 지식, Skill 폭발 방지)은 `agent-design-principles.md` 참조.
 
 ## 원칙
 
 1. **Frontmatter 필수**: `name`, `description`, `version`을 반드시 설정한다
-2. **정적 지식만**: 동적으로 변하는 정보(현재 이슈, 오늘의 우선순위 등)는 포함하지 않는다
-3. **응집도 유지**: 하나의 Skill은 하나의 도메인만 다룬다. JWT, Session을 따로 분리하지 않고 `auth-patterns`로 통합한다
-4. **섹션 체계**: 원칙 → 프로세스 → 예시 → 출력 형식 순서로 구조화한다
+2. **섹션 체계**: 원칙 → 프로세스 → 예시 → 출력 형식 순서로 구조화한다
 
 ## DO
 

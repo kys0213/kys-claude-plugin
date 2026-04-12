@@ -5,12 +5,12 @@ paths:
 
 # Plugin Command 명세 컨벤션
 
-> Command는 사용자가 직접 호출하는 진입점이다. 역할, 입출력, 권한이 명세에서 명확히 드러나야 한다.
+> Command 명세 파일의 작성 형식 규칙. 설계 원칙(진입점 역할, 위임 구조, 멱등성)은 `agent-design-principles.md` 참조.
 
 ## 원칙
 
 1. **Frontmatter 필수**: `description`, `allowed-tools`는 반드시 설정한다
-2. **위임 구조 명시**: command가 직접 로직을 구현하지 않고 어떤 agent/script에 위임하는지 명시한다
+2. **위임 대상 명시**: 어떤 agent/script에 위임하는지, 커맨드와 출력 형식을 포함한다
 3. **에러 처리 명시**: 사전 조건 실패, 외부 도구 에러 케이스를 명세에 포함한다
 4. **Output Examples**: 성공/실패 케이스의 예시 출력을 포함한다
 
