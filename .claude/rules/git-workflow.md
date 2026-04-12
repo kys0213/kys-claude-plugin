@@ -1,6 +1,5 @@
 ---
 paths:
-  - "COMMIT_EDITMSG"
   - "**/.github/**"
 ---
 

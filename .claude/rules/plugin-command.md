@@ -62,17 +62,14 @@ git-utils branch <new-branch> [--base=<base-branch>]
 
 ## DON'T
 
-allowed-tools를 누락하거나, command에서 직접 비즈니스 로직을 구현하지 않는다:
+frontmatter를 누락하거나, 에러 케이스 없이 실행 흐름만 나열하지 않는다:
 
 ```markdown
----
-description: 브랜치 생성  ← 너무 간략, 입출력 불명확
-allowed-tools: ["Read", "Write", "Bash", "Glob", "Grep", "Task", "Edit"]  ← 모든 도구 나열
----
-
 # Branch
 
-git checkout -b $BRANCH  ← 위임 없이 직접 구현, 에러 처리 없음
+git checkout -b $BRANCH
+git push -u origin $BRANCH
+# ↑ description 없음, allowed-tools 없음, 에러 처리 없음, Output Examples 없음
 ```
 
 ## 체크리스트

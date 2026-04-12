@@ -48,19 +48,13 @@ version: 1.0.0
 
 ## DON'T
 
-Skill을 과도하게 세분화하거나, 동적 정보를 SKILL.md에 포함하지 않는다:
+frontmatter를 누락하거나, 섹션 체계 없이 나열하지 않는다:
 
 ```markdown
----
-name: jwt-validation  ← 너무 좁은 범위, auth-patterns으로 통합해야 함
-description: JWT 검증
-version: 1.0.0
----
+# 리뷰 가이드
 
-# JWT 검증
-
-현재 진행 중인 이슈: AUTH-123  ← 동적 정보 포함 금지
-오늘의 우선순위: 토큰 만료 처리  ← 대화로 전달해야 할 정보
+리뷰할 때 이런 점을 봐주세요...
+# ↑ name/description/version frontmatter 없음, 섹션 구분 없음
 ```
 
 ## validate 요구사항

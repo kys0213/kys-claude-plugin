@@ -51,18 +51,19 @@ MainAgent로부터 다음 형식의 프롬프트를 받습니다:
 
 ## DON'T
 
-모든 도구를 허용하거나, 입출력 계약 없이 애매한 역할을 정의하지 않는다:
+입출력 계약 없이 명세를 작성하지 않는다:
 
 ```markdown
 ---
-description: 도움을 주는 에이전트  ← 역할 불명확
-model: opus                          ← 단순 작업에 opus는 낭비
-tools: ["Read", "Write", "Bash", "Glob", "Grep", "Task", "Edit"]  ← 과도한 권한
+description: 코드 분석 에이전트
+model: sonnet
+tools: ["Read", "Glob"]
 ---
 
-# Helper
+# Code Analyzer
 
-뭐든 도와드립니다.  ← 입출력 계약 없음, 단일 책임 위반
+코드를 분석합니다.
+# ↑ 입력 형식, 출력 형식, 예외 처리 모두 누락
 ```
 
 ## 체크리스트
