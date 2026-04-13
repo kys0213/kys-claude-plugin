@@ -119,14 +119,6 @@ autopilot 시작 시 기존 갭과 미분석 이슈를 감지합니다.
 
 > hybrid/cron 모드 모두 동일하게 적용됩니다.
 
-#### 1.7c: 세션 통계 초기화
-
-```bash
-autopilot stats init
-```
-
-> `/tmp/autopilot-{repo}/session-stats.json`을 초기화합니다. 기존 파일이 있으면 덮어씁니다.
-
 ### Step 2: 모드 분기
 
 `event_mode` 설정에 따라 분기합니다:

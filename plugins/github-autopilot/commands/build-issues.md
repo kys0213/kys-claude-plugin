@@ -43,9 +43,7 @@ autopilot pipeline idle --label-prefix "{label_prefix}"
 - **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다.
 - **exit 1 (active)**: Step 4부터 정상 진행
 
-### Step 3.5: Idle Count Check + Adaptive Throttling
-
-> gap-watch Step 1.7에도 동일한 throttling 패턴이 적용됩니다. 로직 변경 시 양쪽을 함께 수정하세요.
+### Step 3.5: Idle Count Check
 
 이전 Step의 결과가 "대상 없음"(idle)이면, 연속 idle 횟수를 기록합니다.
 
@@ -55,20 +53,13 @@ autopilot check mark build-issues --status idle
 
 설정에서 `idle_shutdown.max_idle` 값을 읽습니다 (기본값: 5).
 
-연속 idle 횟수에 따라 동적으로 간격을 조정합니다:
+연속 idle 횟수가 `max_idle` 이상이면:
+1. `autopilot cron self-delete --name "build-issues"` 로 cron을 자동 해제합니다.
+2. "연속 {N}회 idle — cron 자동 해제" 메시지를 출력하고 종료합니다.
 
-| 연속 idle 횟수 | 동작 |
-|---------------|------|
-| 1~3회 | 현재 간격 유지 |
-| 4~`max_idle`-1회 | 간격 2배로 확대: `autopilot cron update --name "build-issues" --multiply 2` |
-| `max_idle`회 이상 | `autopilot cron self-delete --name "build-issues"` 로 자동 해제. "연속 {N}회 idle — cron 자동 해제" 출력 후 종료 |
-
-> 간격 확대는 한 번만 적용됩니다 (4회째에 2배로 변경 후, 5~max_idle-1회까지 유지).
-
-실제 작업을 수행하면 idle count를 리셋하고 간격을 원래 값으로 복원합니다:
+실제 작업을 수행하면 idle count를 리셋합니다:
 ```bash
 autopilot check mark build-issues --status active
-autopilot cron update --name "build-issues" --reset
 ```
 
 ### Step 4: Skip 이슈 알림
@@ -335,8 +326,6 @@ gh issue view ${ISSUE_NUMBER} --json comments --jq '.comments[].body' | grep -o 
 
 ### Step 12: 결과 보고
 
-#### 12a: Cycle 결과
-
 ```
 ## Build Issues 결과
 
@@ -362,36 +351,6 @@ gh issue view ${ISSUE_NUMBER} --json comments --jq '.comments[].body' | grep -o 
 - #43 → PR #51 (feature/issue-43)
 - #44 → PR #52 (feature/issue-44)
 ```
-
-#### 12b: 세션 누적 통계
-
-매 cycle 종료 시 세션 통계를 업데이트하고 출력합니다:
-
-```bash
-autopilot stats update \
-  --command build-issues \
-  --processed ${PROCESSED} \
-  --success ${SUCCESS} \
-  --failed ${FAILED} \
-  --false-positive ${FALSE_POSITIVE}
-
-autopilot stats show --command build-issues
-```
-
-출력 형식:
-```
-### 세션 누적 통계
-- 총 cycles: 15
-- 처리 이슈: 11건
-  - 성공 (PR 생성): 3건
-  - false positive (close): 6건
-  - 실패 (재시도/에스컬레이션): 2건
-- idle cycles: 8회 (현재 연속 2회)
-- 총 agent 호출: 9회
-```
-
-> 통계는 `/tmp/autopilot-{repo}/session-stats.json`에 세션 동안 누적됩니다.
-> 세션 시작 시(autopilot.md Step 1) 자동 초기화됩니다.
 
 ## 주의사항
 
