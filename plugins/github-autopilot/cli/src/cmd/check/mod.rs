@@ -148,7 +148,12 @@ impl CheckService {
     }
 
     /// Record current HEAD as the last analyzed commit.
-    pub fn mark(&self, loop_name: &str, output_hash: Option<&str>) -> Result<i32> {
+    pub fn mark(
+        &self,
+        loop_name: &str,
+        output_hash: Option<&str>,
+        status: Option<&str>,
+    ) -> Result<i32> {
         validate_loop_name(loop_name)?;
         let state_file = state_dir(self.git.as_ref())?.join(format!("{loop_name}.state"));
         let hash = self.git.rev_parse_head()?;
@@ -159,6 +164,13 @@ impl CheckService {
 
         loop_state.hash = hash.clone();
         loop_state.timestamp = ts.clone();
+
+        // Update idle count based on status
+        match status {
+            Some("idle") => loop_state.idle_count += 1,
+            Some("active") => loop_state.idle_count = 0,
+            _ => {}
+        }
 
         // Append output hash if provided
         if let Some(simhash) = output_hash {
@@ -173,7 +185,10 @@ impl CheckService {
         }
 
         write_state(self.fs.as_ref(), &state_file, &loop_state)?;
-        println!("marked {loop_name}: {hash} at {ts}");
+        println!(
+            "marked {loop_name}: {hash} at {ts} (idle_count: {})",
+            loop_state.idle_count
+        );
         Ok(0)
     }
 

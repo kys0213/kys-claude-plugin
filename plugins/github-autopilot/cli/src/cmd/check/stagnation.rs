@@ -202,6 +202,7 @@ mod tests {
             hash: "abc1234".to_string(),
             timestamp: "2026-01-01T00:00:00Z".to_string(),
             output_history: history,
+            ..Default::default()
         };
         (vec!["src/lib.rs".to_string()], state)
     }

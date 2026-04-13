@@ -15,6 +15,8 @@ pub struct LoopState {
     pub timestamp: String,
     #[serde(default)]
     pub output_history: Vec<OutputEntry>,
+    #[serde(default)]
+    pub idle_count: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -184,6 +186,7 @@ mod tests {
             hash: "abc".to_string(),
             timestamp: "2026-01-01T00:00:00Z".to_string(),
             output_history: Vec::new(),
+            ..Default::default()
         };
         for i in 0..15 {
             append_output_entry(

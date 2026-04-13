@@ -94,7 +94,7 @@ fn mark_writes_state_file() {
     let fs = MockFs::new();
 
     let code = make_svc(git, fs.clone())
-        .mark("build-issues", None)
+        .mark("build-issues", None, None)
         .unwrap();
     assert_eq!(code, 0);
 
@@ -117,7 +117,7 @@ fn mark_with_output_hash_appends_history() {
     let fs = MockFs::new();
 
     let code = make_svc(git, fs.clone())
-        .mark("gap-watch", Some("0xA3F2B81C4D5E6F1B"))
+        .mark("gap-watch", Some("0xA3F2B81C4D5E6F1B"), None)
         .unwrap();
     assert_eq!(code, 0);
 
@@ -142,6 +142,52 @@ fn status_shows_loops() {
 
     let code = make_svc(git, fs).status().unwrap();
     assert_eq!(code, 0);
+}
+
+#[test]
+fn mark_status_idle_increments_count() {
+    let git = MockGit::new().with_head("ccc3333");
+    let fs = MockFs::new();
+
+    make_svc(git, fs.clone())
+        .mark("build-issues", None, Some("idle"))
+        .unwrap();
+    let written = fs.written_files();
+    let state: serde_json::Value = serde_json::from_str(&written[0].1).unwrap();
+    assert_eq!(state["idle_count"], 1);
+}
+
+#[test]
+fn mark_status_active_resets_count() {
+    let git = MockGit::new().with_head("ccc3333");
+    let fs = MockFs::new().with_file(
+        "/tmp/autopilot-repo/state/build-issues.state",
+        r#"{"hash":"bbb2222","timestamp":"2026-01-01T00:00:00Z","idle_count":4}"#,
+    );
+
+    make_svc(git, fs.clone())
+        .mark("build-issues", None, Some("active"))
+        .unwrap();
+    let written = fs.written_files();
+    let state: serde_json::Value = serde_json::from_str(&written[0].1).unwrap();
+    assert_eq!(state["idle_count"], 0);
+}
+
+#[test]
+fn mark_backward_compat_without_idle_count() {
+    // Old state files without idle_count should default to 0
+    let git = MockGit::new().with_head("ccc3333");
+    let fs = MockFs::new().with_file(
+        "/tmp/autopilot-repo/state/gap-watch.state",
+        r#"{"hash":"aaa1111","timestamp":"2026-01-01T00:00:00Z"}"#,
+    );
+
+    make_svc(git, fs.clone())
+        .mark("gap-watch", None, Some("idle"))
+        .unwrap();
+    let written = fs.written_files();
+    let state: serde_json::Value = serde_json::from_str(&written[0].1).unwrap();
+    assert_eq!(state["idle_count"], 1);
 }
 
 #[test]
