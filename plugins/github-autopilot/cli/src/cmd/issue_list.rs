@@ -6,6 +6,12 @@ use crate::gh::GhOps;
 
 use super::labels;
 
+// HTML comment markers used across the autopilot pipeline
+const MARKER_ANALYSIS: &str = "Autopilot 분석 결과";
+const MARKER_FALSE_POSITIVE: &str = "<!-- autopilot:false-positive -->";
+const MARKER_ESCALATED: &str = "<!-- autopilot:escalated -->";
+const MARKER_REWORK_RESOLVED: &str = "<!-- autopilot:rework-resolved -->";
+
 #[derive(Clone, ValueEnum)]
 pub enum Stage {
     /// No autopilot label, no analysis comment
@@ -29,22 +35,14 @@ pub fn list(
     limit: usize,
 ) -> Result<i32> {
     let issues = fetch_issues(gh, stage, label_prefix, limit)?;
-    let filtered = filter_by_stage(&issues, stage, label_prefix);
 
-    let result: Vec<Value> = filtered
-        .into_iter()
+    let result: Vec<Value> = issues
+        .iter()
+        .filter(|issue| matches_stage(issue, stage, label_prefix))
         .filter(|issue| {
-            if let Some(req) = require_label {
-                let issue_labels = issue["labels"]
-                    .as_array()
-                    .map(|a| a.as_slice())
-                    .unwrap_or(&[]);
-                labels::has_exact_label(issue_labels, req)
-            } else {
-                true
-            }
+            require_label.is_none_or(|req| labels::has_exact_label(get_labels(issue), req))
         })
-        .map(|issue| slim_issue(&issue))
+        .map(|issue| slim_issue(issue))
         .collect();
 
     println!("{}", serde_json::to_string(&result)?);
@@ -60,28 +58,17 @@ fn fetch_issues(
     let limit_str = limit.to_string();
 
     match stage {
-        Stage::Ready => {
-            let ready_label = labels::with_prefix(label_prefix, labels::READY);
+        Stage::Ready | Stage::Wip => {
+            let suffix = match stage {
+                Stage::Ready => labels::READY,
+                _ => labels::WIP,
+            };
+            let label = labels::with_prefix(label_prefix, suffix);
             gh.list_json(&[
                 "issue",
                 "list",
                 "--label",
-                &ready_label,
-                "--state",
-                "open",
-                "--json",
-                "number,title,labels",
-                "--limit",
-                &limit_str,
-            ])
-        }
-        Stage::Wip => {
-            let wip_label = labels::with_prefix(label_prefix, labels::WIP);
-            gh.list_json(&[
-                "issue",
-                "list",
-                "--label",
-                &wip_label,
+                &label,
                 "--state",
                 "open",
                 "--json",
@@ -103,30 +90,38 @@ fn fetch_issues(
     }
 }
 
+fn get_labels(issue: &Value) -> &[Value] {
+    issue["labels"]
+        .as_array()
+        .map(|a| a.as_slice())
+        .unwrap_or(&[])
+}
+
+fn get_comments(issue: &Value) -> &[Value] {
+    issue["comments"]
+        .as_array()
+        .map(|a| a.as_slice())
+        .unwrap_or(&[])
+}
+
 /// Pure filtering logic — testable without gh calls.
 pub fn filter_by_stage(issues: &[Value], stage: &Stage, label_prefix: &str) -> Vec<Value> {
     issues
         .iter()
         .filter(|issue| matches_stage(issue, stage, label_prefix))
-        .cloned()
+        .map(|issue| slim_issue(issue))
         .collect()
 }
 
 fn matches_stage(issue: &Value, stage: &Stage, prefix: &str) -> bool {
-    let issue_labels = issue["labels"]
-        .as_array()
-        .map(|a| a.as_slice())
-        .unwrap_or(&[]);
-    let comments = issue["comments"]
-        .as_array()
-        .map(|a| a.as_slice())
-        .unwrap_or(&[]);
+    let issue_labels = get_labels(issue);
+    let comments = get_comments(issue);
 
     match stage {
         Stage::Unanalyzed => {
             !labels::has_prefixed_label(issue_labels, prefix)
-                && !has_comment_containing(comments, "Autopilot 분석 결과")
-                && !has_comment_containing(comments, "<!-- autopilot:false-positive -->")
+                && !has_comment_containing(comments, MARKER_ANALYSIS)
+                && !has_comment_containing(comments, MARKER_FALSE_POSITIVE)
         }
         Stage::Ready => {
             labels::has_label(issue_labels, prefix, labels::READY)
@@ -138,7 +133,7 @@ fn matches_stage(issue: &Value, stage: &Stage, prefix: &str) -> bool {
                 && has_rework_request(comments)
         }
         Stage::Wip => labels::has_label(issue_labels, prefix, labels::WIP),
-        Stage::Escalated => has_comment_containing(comments, "<!-- autopilot:escalated -->"),
+        Stage::Escalated => has_comment_containing(comments, MARKER_ESCALATED),
     }
 }
 
@@ -150,19 +145,18 @@ fn has_comment_containing(comments: &[Value], needle: &str) -> bool {
 
 fn has_rework_request(comments: &[Value]) -> bool {
     let mut has_keyword = false;
-    let mut resolved = false;
 
     for comment in comments {
         let body = comment["body"].as_str().unwrap_or("");
-        if super::issue::has_rework_keyword(body) {
-            has_keyword = true;
+        if body.contains(MARKER_REWORK_RESOLVED) {
+            return false;
         }
-        if body.contains("<!-- autopilot:rework-resolved -->") {
-            resolved = true;
+        if !has_keyword && super::issue::has_rework_keyword(body) {
+            has_keyword = true;
         }
     }
 
-    has_keyword && !resolved
+    has_keyword
 }
 
 fn slim_issue(issue: &Value) -> Value {
@@ -195,8 +189,6 @@ pub fn extract_fingerprint(body: &str, check_path: Option<&dyn Fn(&str) -> bool>
 fn extract_gap_fingerprint(body: &str) -> Option<(String, String, String)> {
     for line in body.lines() {
         let trimmed = line.trim();
-        // <!-- gap-fingerprint: gap:spec/auth.md:token-refresh -->
-        // <!-- fingerprint: gap:spec/auth.md:token-refresh -->
         for prefix in &["<!-- gap-fingerprint:", "<!-- fingerprint:"] {
             if let Some(rest) = trimmed.strip_prefix(prefix) {
                 if let Some(content) = rest.strip_suffix("-->") {
@@ -249,7 +241,7 @@ mod tests {
     fn extract_fingerprint_non_gap() {
         let body = "<!-- fingerprint: ci-failure:workflow:main -->";
         let result = extract_fingerprint(body, None);
-        assert_eq!(result["found"], false); // not a gap: prefix
+        assert_eq!(result["found"], false);
     }
 
     #[test]
@@ -321,6 +313,27 @@ mod tests {
     }
 
     #[test]
+    fn filter_ready_with_missing_labels_field() {
+        let issues = vec![serde_json::json!({
+            "number": 1, "title": "No labels field", "body": "",
+            "comments": []
+        })];
+        let result = filter_by_stage(&issues, &Stage::Ready, "autopilot:");
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn filter_with_malformed_label_object() {
+        let issues = vec![serde_json::json!({
+            "number": 1, "title": "Bad label", "body": "",
+            "labels": [{"id": 123}],
+            "comments": []
+        })];
+        let result = filter_by_stage(&issues, &Stage::Unanalyzed, "autopilot:");
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
     fn filter_rework_detects_keyword() {
         let issues = vec![serde_json::json!({
             "number": 1, "title": "Fix", "body": "",
@@ -346,31 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn filter_ready_with_missing_labels_field() {
-        // Issue JSON without a "labels" array — should not crash
-        let issues = vec![serde_json::json!({
-            "number": 1, "title": "No labels field", "body": "",
-            "comments": []
-        })];
-        let result = filter_by_stage(&issues, &Stage::Ready, "autopilot:");
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn filter_with_malformed_label_object() {
-        // Label without "name" field
-        let issues = vec![serde_json::json!({
-            "number": 1, "title": "Bad label", "body": "",
-            "labels": [{"id": 123}],
-            "comments": []
-        })];
-        let result = filter_by_stage(&issues, &Stage::Unanalyzed, "autopilot:");
-        assert_eq!(result.len(), 1); // no prefixed label found → unanalyzed
-    }
-
-    #[test]
     fn filter_rework_excludes_ready_labeled() {
-        // Issue with rework keyword BUT also has :ready — should NOT match rework stage
         let issues = vec![serde_json::json!({
             "number": 1, "title": "Fix", "body": "",
             "labels": [{"name": "autopilot:ready"}],
