@@ -104,15 +104,11 @@ autopilot 시작 시 기존 갭과 미분석 이슈를 감지합니다.
 
 세션 시작 전 생성된 이슈 중 autopilot 분석이 아직 되지 않은 이슈를 처리합니다.
 
-1. 열린 이슈를 조회합니다:
+1. CLI로 미분석 이슈를 조회합니다:
    ```bash
-   gh issue list --state open --json number,title,labels,comments --limit 20
+   autopilot issue list --stage unanalyzed --label-prefix "{label_prefix}" --limit 20
    ```
-2. 다음 조건을 모두 만족하는 이슈를 필터링합니다:
-   - `{label_prefix}`로 시작하는 라벨이 **없음** (autopilot 미처리)
-   - 코멘트에 `Autopilot 분석 결과`가 **없음** (분석 미완료)
-   - 코멘트에 `<!-- autopilot:false-positive -->`가 **없음** (이전에 false positive로 close된 이슈 제외)
-3. 해당 이슈들에 대해 `/github-autopilot:analyze-issue {number}`를 병렬 실행합니다 (`max_parallel_agents` 단위로 분할)
+2. 반환된 이슈들에 대해 `/github-autopilot:analyze-issue {number}`를 병렬 실행합니다 (`max_parallel_agents` 단위로 분할)
 4. 결과 로그:
    - 처리됨: "초기 이슈 분석 완료 — {N}건 분석 ({M}건 ready 라벨 부여)"
    - 대상 없음: "초기 이슈 분석 완료 — 미분석 이슈 없음"

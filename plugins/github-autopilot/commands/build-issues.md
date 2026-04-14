@@ -104,36 +104,17 @@ gh issue comment ${ISSUE_NUMBER} --body "<!-- notified -->"
 
 ### Step 5: Ready 이슈 조회
 
-설정에서 label_prefix를 확인합니다 (기본값: `autopilot:`).
-
 ```bash
-gh issue list \
-  --label "{label_prefix}ready" \
-  --state open \
-  --json number,title,body,labels,comments \
-  --limit 20
+autopilot issue list --stage ready --label-prefix "{label_prefix}" --limit 20
 ```
-
-이미 `{label_prefix}wip` 라벨이 붙은 이슈는 제외합니다 (진행 중인 작업).
 
 이슈가 없으면 `autopilot check mark build-issues --status idle` 후 "구현 대상 이슈 없음" 출력 후 종료.
 
 ### Step 5.5: 코멘트 기반 재작업 감지
 
-Step 5에서 제외된 이슈(ready 라벨 없음) 중, 코멘트에 재작업 요청이 포함된 이슈를 탐색합니다.
-
 ```bash
-gh issue list \
-  --state open \
-  --json number,title,body,labels,comments \
-  --limit 50
+autopilot issue list --stage rework --label-prefix "{label_prefix}"
 ```
-
-필터 조건:
-- `{label_prefix}ready` 라벨이 **없음**
-- `{label_prefix}wip` 라벨이 **없음**
-- 코멘트에 재작업 키워드 포함: `재구현 필요`, `재작업`, `rework`, `다시 구현`, `re-implement`, `라우트가.*제거됨`
-- 해당 키워드가 포함된 코멘트 이후에 `<!-- autopilot:rework-resolved -->` 마커가 **없음** (이미 처리된 건 제외)
 
 해당 이슈가 발견되면:
 1. `{label_prefix}ready` 라벨을 재부여합니다:
@@ -185,14 +166,18 @@ gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 
 ### Step 7.5: Gap 이슈 사전 검증
 
-현재 배치의 이슈 중 gap-fingerprint를 포함한 이슈의 스펙 파일 실존 여부를 확인합니다. gap-detector와 gap-issue-creator에서 이미 검증하지만, 이슈 생성 이후 스펙 파일이 삭제/이동된 경우를 방어합니다.
+현재 배치의 이슈 중 gap-fingerprint를 포함한 이슈의 스펙 파일 실존 여부를 CLI로 확인합니다.
 
-> Test-scope 필터링은 gap-detector Phase 2에서 수행되므로 여기서 중복 검사하지 않습니다.
+각 이슈의 body를 `extract-fingerprint`에 전달합니다:
 
-1. 이슈 body에서 fingerprint 추출: `<!-- gap-fingerprint: gap:{spec_path}:{requirement_keyword} -->`
-2. fingerprint가 없는 이슈는 검증을 건너뛰고 Step 8로 진행
-3. fingerprint가 있는 이슈: `[ -f "${SPEC_PATH}" ]`로 스펙 파일 실존 확인
-4. 스펙 파일이 없는 이슈:
+```bash
+echo "${ISSUE_BODY}" | autopilot issue extract-fingerprint
+# exit 0: {"found": true, "fingerprint": "...", "spec_path": "...", "spec_exists": true/false}
+# exit 1: {"found": false}  — gap 이슈가 아님, Step 8로 진행
+```
+
+- `found: false` 또는 `spec_exists: true` → Step 8로 진행
+- `spec_exists: false` → false positive, 이슈를 close:
    ```bash
    gh issue close ${ISSUE_NUMBER} --comment "$(cat <<'EOF'
    Autopilot: 스펙 파일이 존재하지 않아 false positive로 판정하여 close합니다.
