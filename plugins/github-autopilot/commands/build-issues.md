@@ -43,23 +43,33 @@ autopilot pipeline idle --label-prefix "{label_prefix}"
 - **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다.
 - **exit 1 (active)**: Step 4부터 정상 진행
 
-### Step 3.5: Idle Count Check
+### Step 3.5: Idle Count Check + Adaptive Throttling
 
-이전 Step의 결과가 "대상 없음"(idle)이면, 연속 idle 횟수를 기록합니다.
+> gap-watch Step 1.7에도 동일한 throttling 패턴이 적용됩니다. 로직 변경 시 양쪽을 함께 수정하세요.
+
+이전 Step의 결과가 "대상 없음"(idle)이면, CLI로 idle 횟수를 기록하고 출력에서 `idle_count`를 읽습니다.
 
 ```bash
 autopilot check mark build-issues --status idle
+# 출력: marked build-issues: abc1234 at 2026-04-13T10:00:00Z (idle_count: 4)
 ```
 
 설정에서 `idle_shutdown.max_idle` 값을 읽습니다 (기본값: 5).
 
-연속 idle 횟수가 `max_idle` 이상이면:
-1. `autopilot cron self-delete --name "build-issues"` 로 cron을 자동 해제합니다.
-2. "연속 {N}회 idle — cron 자동 해제" 메시지를 출력하고 종료합니다.
+출력의 `idle_count`에 따라 동적으로 간격을 조정합니다:
 
-실제 작업을 수행하면 idle count를 리셋합니다:
+| idle_count | 동작 |
+|------------|------|
+| 1~3 | 현재 간격 유지 |
+| 4~`max_idle`-1 | CronList로 현재 cron을 찾아 CronDelete 후, 간격 2배로 CronCreate 재등록 |
+| `max_idle` 이상 | CronList로 현재 cron을 찾아 CronDelete. "연속 {N}회 idle — cron 자동 해제" 출력 후 종료 |
+
+> 간격 확대는 한 번만 적용됩니다 (4회째에 2배로 변경 후, 5~max_idle-1까지 유지).
+
+실제 작업을 수행하면 idle count를 리셋하고, 간격이 변경되었으면 원래 간격으로 CronDelete → CronCreate합니다:
 ```bash
 autopilot check mark build-issues --status active
+# idle_count가 0으로 리셋됨 → 간격 복원 필요 시 CronDelete + CronCreate
 ```
 
 ### Step 4: Skip 이슈 알림
@@ -94,36 +104,17 @@ gh issue comment ${ISSUE_NUMBER} --body "<!-- notified -->"
 
 ### Step 5: Ready 이슈 조회
 
-설정에서 label_prefix를 확인합니다 (기본값: `autopilot:`).
-
 ```bash
-gh issue list \
-  --label "{label_prefix}ready" \
-  --state open \
-  --json number,title,body,labels,comments \
-  --limit 20
+autopilot issue list --stage ready --label-prefix "{label_prefix}" --limit 20
 ```
-
-이미 `{label_prefix}wip` 라벨이 붙은 이슈는 제외합니다 (진행 중인 작업).
 
 이슈가 없으면 `autopilot check mark build-issues --status idle` 후 "구현 대상 이슈 없음" 출력 후 종료.
 
 ### Step 5.5: 코멘트 기반 재작업 감지
 
-Step 5에서 제외된 이슈(ready 라벨 없음) 중, 코멘트에 재작업 요청이 포함된 이슈를 탐색합니다.
-
 ```bash
-gh issue list \
-  --state open \
-  --json number,title,body,labels,comments \
-  --limit 50
+autopilot issue list --stage rework --label-prefix "{label_prefix}"
 ```
-
-필터 조건:
-- `{label_prefix}ready` 라벨이 **없음**
-- `{label_prefix}wip` 라벨이 **없음**
-- 코멘트에 재작업 키워드 포함: `재구현 필요`, `재작업`, `rework`, `다시 구현`, `re-implement`, `라우트가.*제거됨`
-- 해당 키워드가 포함된 코멘트 이후에 `<!-- autopilot:rework-resolved -->` 마커가 **없음** (이미 처리된 건 제외)
 
 해당 이슈가 발견되면:
 1. `{label_prefix}ready` 라벨을 재부여합니다:
@@ -172,6 +163,35 @@ echo '${BATCH_ISSUES_JSON}' | autopilot issue detect-overlap --threshold 15
 ```bash
 gh issue edit ${ISSUE_NUMBER} --add-label "{label_prefix}wip"
 ```
+
+### Step 7.5: Gap 이슈 사전 검증
+
+현재 배치의 이슈 중 gap-fingerprint를 포함한 이슈의 스펙 파일 실존 여부를 CLI로 확인합니다.
+
+각 이슈의 body를 `extract-fingerprint`에 전달합니다:
+
+```bash
+echo "${ISSUE_BODY}" | autopilot issue extract-fingerprint
+# exit 0: {"found": true, "fingerprint": "...", "spec_path": "...", "spec_exists": true/false}
+# exit 1: {"found": false}  — gap 이슈가 아님, Step 8로 진행
+```
+
+- `found: false` 또는 `spec_exists: true` → Step 8로 진행
+- `spec_exists: false` → false positive, 이슈를 close:
+   ```bash
+   gh issue close ${ISSUE_NUMBER} --comment "$(cat <<'EOF'
+   Autopilot: 스펙 파일이 존재하지 않아 false positive로 판정하여 close합니다.
+
+   - spec path: 실제 스펙 파일 미존재
+
+   <!-- autopilot:false-positive -->
+   EOF
+   )"
+   gh issue edit ${ISSUE_NUMBER} --remove-label "{label_prefix}ready" --remove-label "{label_prefix}wip"
+   ```
+5. close된 이슈는 배치에서 제외하고 결과 보고에 포함
+
+배치에 남은 이슈가 없으면 Step 12로 진행합니다.
 
 ### Step 8: 구현 (Agent Team)
 
@@ -307,6 +327,9 @@ gh issue view ${ISSUE_NUMBER} --json comments --jq '.comments[].body' | grep -o 
 ### Skip 이슈 알림
 - 대기 중: #38 (알림 전송됨 → Slack DM)
 
+### 사전 검증 (Step 7.5)
+- false positive close: #55, #56 (test fixture spec)
+
 ### 구현 대상
 - 대상 이슈: 5개
 - 배치: 3개 (batch 1: #42, #44 | batch 2: #43 | batch 3: #45)
@@ -323,6 +346,24 @@ gh issue view ${ISSUE_NUMBER} --json comments --jq '.comments[].body' | grep -o 
 - #43 → PR #51 (feature/issue-43)
 - #44 → PR #52 (feature/issue-44)
 ```
+
+#### 12b: 세션 누적 통계
+
+매 cycle 종료 시 CLI로 세션 통계를 업데이트하고 출력합니다:
+
+```bash
+autopilot stats update \
+  --command build-issues \
+  --processed ${PROCESSED} \
+  --success ${SUCCESS} \
+  --failed ${FAILED} \
+  --false-positive ${FALSE_POSITIVE}
+
+autopilot stats show --command build-issues
+```
+
+> 통계는 `/tmp/autopilot-{repo}/state/session-stats.json`에 CLI가 누적 관리합니다.
+> 세션 시작 시(autopilot.md Step 1.7c) `autopilot stats init`으로 초기화됩니다.
 
 ## 주의사항
 

@@ -480,7 +480,7 @@ fn is_marker_only(body: &str, marker: &str) -> bool {
     without_marker.trim().is_empty()
 }
 
-fn has_rework_keyword(body: &str) -> bool {
+pub(crate) fn has_rework_keyword(body: &str) -> bool {
     const KEYWORDS: &[&str] = &[
         "재구현 필요",
         "재작업",

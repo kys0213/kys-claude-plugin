@@ -1,13 +1,15 @@
 pub mod check;
 pub mod issue;
+pub mod issue_list;
 pub mod labels;
 pub mod pipeline;
 pub mod preflight;
 pub mod simhash;
+pub mod stats;
 pub mod watch;
 pub mod worktree;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(
@@ -46,6 +48,11 @@ pub enum Commands {
         #[command(subcommand)]
         command: WorktreeCommands,
     },
+    /// Session statistics management
+    Stats {
+        #[command(subcommand)]
+        command: StatsCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -65,6 +72,9 @@ pub enum CheckCommands {
         /// Optional simhash of analysis output (for stagnation tracking)
         #[arg(long)]
         output_hash: Option<String>,
+        /// Loop status: "idle" increments idle counter, "active" resets it
+        #[arg(long)]
+        status: Option<LoopStatus>,
     },
     /// Show state of all loops
     Status,
@@ -104,6 +114,26 @@ pub enum IssueCommands {
     DetectOverlap(issue::DetectOverlapArgs),
     /// Filter issue comments for implementer agents (stdin JSON)
     FilterComments,
+    /// List issues filtered by lifecycle stage
+    List(ListArgs),
+    /// Extract gap-fingerprint from issue body (stdin)
+    ExtractFingerprint,
+}
+
+#[derive(Args)]
+pub struct ListArgs {
+    /// Lifecycle stage to filter by
+    #[arg(long)]
+    pub stage: issue_list::Stage,
+    /// Label prefix (default: "autopilot:")
+    #[arg(long, default_value = "autopilot:")]
+    pub label_prefix: String,
+    /// Only include issues with this exact label
+    #[arg(long)]
+    pub require_label: Option<String>,
+    /// Maximum number of issues to fetch
+    #[arg(long, default_value_t = 50)]
+    pub limit: usize,
 }
 
 #[derive(Subcommand)]
@@ -118,6 +148,12 @@ pub enum WorktreeCommands {
     CleanupStale,
 }
 
+#[derive(Clone, ValueEnum)]
+pub enum LoopStatus {
+    Idle,
+    Active,
+}
+
 #[derive(Subcommand)]
 pub enum PipelineCommands {
     /// Check if the autopilot pipeline is idle
@@ -125,5 +161,35 @@ pub enum PipelineCommands {
         /// Label prefix (default: "autopilot:")
         #[arg(long, default_value = "autopilot:")]
         label_prefix: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum StatsCommands {
+    /// Initialize (or reset) session statistics
+    Init,
+    /// Update statistics for a command
+    Update {
+        /// Command name (e.g. "build-issues")
+        #[arg(long)]
+        command: String,
+        /// Number of issues processed this cycle
+        #[arg(long, default_value_t = 0)]
+        processed: u32,
+        /// Number of successful implementations
+        #[arg(long, default_value_t = 0)]
+        success: u32,
+        /// Number of failed implementations
+        #[arg(long, default_value_t = 0)]
+        failed: u32,
+        /// Number of false positives closed
+        #[arg(long, default_value_t = 0)]
+        false_positive: u32,
+    },
+    /// Show session statistics
+    Show {
+        /// Filter by command name (omit for all)
+        #[arg(long)]
+        command: Option<String>,
     },
 }

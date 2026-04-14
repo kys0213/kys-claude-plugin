@@ -37,23 +37,33 @@ autopilot pipeline idle --label-prefix "{label_prefix}"
 - **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다.
 - **exit 1 (active)**: Step 2부터 정상 진행.
 
-### Step 1.7: Idle Count Check
+### Step 1.7: Idle Count Check + Adaptive Throttling
 
-이전 Step의 결과가 "대상 없음"(idle)이면, 연속 idle 횟수를 기록합니다.
+> build-issues Step 3.5에도 동일한 throttling 패턴이 적용됩니다. 로직 변경 시 양쪽을 함께 수정하세요.
+
+이전 Step의 결과가 "대상 없음"(idle)이면, CLI로 idle 횟수를 기록하고 출력에서 `idle_count`를 읽습니다.
 
 ```bash
 autopilot check mark gap-watch --status idle
+# 출력: marked gap-watch: abc1234 at 2026-04-13T10:00:00Z (idle_count: 4)
 ```
 
 설정에서 `idle_shutdown.max_idle` 값을 읽습니다 (기본값: 5).
 
-연속 idle 횟수가 `max_idle` 이상이면:
-1. `autopilot cron self-delete --name "gap-watch"` 로 cron을 자동 해제합니다.
-2. "연속 {N}회 idle — cron 자동 해제" 메시지를 출력하고 종료합니다.
+출력의 `idle_count`에 따라 동적으로 간격을 조정합니다:
 
-실제 작업을 수행하면 idle count를 리셋합니다:
+| idle_count | 동작 |
+|------------|------|
+| 1~3 | 현재 간격 유지 |
+| 4~`max_idle`-1 | CronList로 현재 cron을 찾아 CronDelete 후, 간격 2배로 CronCreate 재등록 |
+| `max_idle` 이상 | CronList로 현재 cron을 찾아 CronDelete. "연속 {N}회 idle — cron 자동 해제" 출력 후 종료 |
+
+> 간격 확대는 한 번만 적용됩니다 (4회째에 2배로 변경 후, 5~max_idle-1까지 유지).
+
+실제 작업을 수행하면 idle count를 리셋하고, 간격이 변경되었으면 원래 간격으로 CronDelete → CronCreate합니다:
 ```bash
 autopilot check mark gap-watch --status active
+# idle_count가 0으로 리셋됨 → 간격 복원 필요 시 CronDelete + CronCreate
 ```
 
 ### Step 2: 설정 로딩

@@ -148,7 +148,12 @@ impl CheckService {
     }
 
     /// Record current HEAD as the last analyzed commit.
-    pub fn mark(&self, loop_name: &str, output_hash: Option<&str>) -> Result<i32> {
+    pub fn mark(
+        &self,
+        loop_name: &str,
+        output_hash: Option<&str>,
+        status: Option<&crate::cmd::LoopStatus>,
+    ) -> Result<i32> {
         validate_loop_name(loop_name)?;
         let state_file = state_dir(self.git.as_ref())?.join(format!("{loop_name}.state"));
         let hash = self.git.rev_parse_head()?;
@@ -160,7 +165,12 @@ impl CheckService {
         loop_state.hash = hash.clone();
         loop_state.timestamp = ts.clone();
 
-        // Append output hash if provided
+        match status {
+            Some(crate::cmd::LoopStatus::Idle) => loop_state.idle_count += 1,
+            Some(crate::cmd::LoopStatus::Active) => loop_state.idle_count = 0,
+            None => {}
+        }
+
         if let Some(simhash) = output_hash {
             append_output_entry(
                 &mut loop_state,
@@ -173,7 +183,10 @@ impl CheckService {
         }
 
         write_state(self.fs.as_ref(), &state_file, &loop_state)?;
-        println!("marked {loop_name}: {hash} at {ts}");
+        println!(
+            "marked {loop_name}: {hash} at {ts} (idle_count: {})",
+            loop_state.idle_count
+        );
         Ok(0)
     }
 

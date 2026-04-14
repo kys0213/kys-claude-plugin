@@ -84,11 +84,13 @@ autopilot preflight --config github-autopilot.local.md --repo-root .
 
 > `spec_paths`에 파일이 없으면 이 단계를 skip합니다 (preflight에서 이미 확인).
 
-### Step 1.7: 초기 Gap 분석
+### Step 1.7: 초기 스캔 (Initial Scan)
 
-autopilot 시작 시 기존 갭을 감지하기 위해 `/github-autopilot:gap-watch`를 1회 실행합니다.
+autopilot 시작 시 기존 갭과 미분석 이슈를 감지합니다.
 
-> 이벤트 드리븐 모드에서는 `MAIN_UPDATED` 이벤트가 발생해야 gap-watch가 트리거되므로, 시작 시점에 이미 존재하는 갭은 이 단계에서 감지합니다.
+> 이벤트 드리븐 모드에서는 이벤트가 발생해야 각 커맨드가 트리거되므로, 시작 시점에 이미 존재하는 갭과 미분석 이슈는 이 단계에서 처리합니다.
+
+#### 1.7a: 초기 Gap 분석
 
 1. `spec_paths`에 스펙 파일이 있으면 `/github-autopilot:gap-watch`를 실행합니다
 2. 발견된 갭이 이슈로 등록됩니다
@@ -97,7 +99,29 @@ autopilot 시작 시 기존 갭을 감지하기 위해 `/github-autopilot:gap-wa
    - 갭 없음: "초기 갭 분석 완료 — 갭 없음"
 
 > `spec_paths`에 파일이 없으면 이 단계를 skip합니다 (Step 1.6과 동일 조건).
+
+#### 1.7b: 미분석 이슈 처리
+
+세션 시작 전 생성된 이슈 중 autopilot 분석이 아직 되지 않은 이슈를 처리합니다.
+
+1. CLI로 미분석 이슈를 조회합니다:
+   ```bash
+   autopilot issue list --stage unanalyzed --label-prefix "{label_prefix}" --limit 20
+   ```
+2. 반환된 이슈들에 대해 `/github-autopilot:analyze-issue {number}`를 병렬 실행합니다 (`max_parallel_agents` 단위로 분할)
+4. 결과 로그:
+   - 처리됨: "초기 이슈 분석 완료 — {N}건 분석 ({M}건 ready 라벨 부여)"
+   - 대상 없음: "초기 이슈 분석 완료 — 미분석 이슈 없음"
+
 > hybrid/cron 모드 모두 동일하게 적용됩니다.
+
+#### 1.7c: 세션 통계 초기화
+
+```bash
+autopilot stats init
+```
+
+> `/tmp/autopilot-{repo}/state/session-stats.json`을 초기화합니다. 기존 파일이 있으면 덮어씁니다.
 
 ### Step 2: 모드 분기
 

@@ -66,6 +66,26 @@ skip된 파일은 리포트의 맨 앞에 다음 형식으로 기록합니다:
    - 이벤트 리스너: `on_event`, `subscribe`
 4. **LSP 확인**: rust-analyzer, gopls, typescript-language-server 존재 여부
 
+#### Test Scope 제외
+
+Grep으로 entry point를 수집할 때, 다음 영역에서 발견된 매치는 **test scope**로 분류하여 갭 분석 대상에서 제외합니다:
+
+| 언어 | Test Scope 판별 기준 |
+|------|---------------------|
+| Rust | 매치 라인 상위에 `#[cfg(test)]` 또는 `mod tests {`가 있고, 해당 블록 내부에 위치 |
+| JS/TS | `describe(`, `it(`, `test(` 블록 내부 |
+| Go | `func Test*` 또는 `func Benchmark*` 함수 내부 |
+| Python | `class Test*` 또는 `def test_*` 내부 |
+
+**판별 방법**: Grep 매치의 전후 컨텍스트를 확인하여 test scope 경계를 탐지합니다. 컨텍스트 범위는 파일 구조에 맞게 조정합니다 (Rust의 `#[cfg(test)]`는 보통 파일 하단에 위치하므로 매치 이전 전체를 확인, JS/Go/Python은 함수/클래스 단위로 판별). 확실하지 않은 경우 production code로 간주합니다 (false negative 허용, false positive 방지).
+
+제외된 entry point는 리포트의 `Filtered Entries` 섹션에 기록합니다:
+```
+## Filtered Entries (Test Scope)
+- Filtered: src/cron.rs:125 `make_active_spec` (inside #[cfg(test)])
+- Filtered: src/pipeline.rs:300 `spec_fixture` (inside mod tests)
+```
+
 ### Phase 3: 갭 분석
 
 각 요구사항에 대해 entry point에서 call chain을 추적합니다:
@@ -80,6 +100,19 @@ skip된 파일은 리포트의 맨 앞에 다음 형식으로 기록합니다:
 | ✅ Implemented | call chain에서 요구사항의 핵심 로직이 확인됨 |
 | ⚠️ Partial | 일부 수용 기준만 충족, 나머지 미구현 |
 | ❌ Missing | entry point나 관련 코드가 전혀 없음 |
+| ⚠️ WARNING (spec-not-found) | spec_paths에 실제 파일이 없음 — Cross-validation 참조 |
+
+#### Spec ID Cross-validation
+
+갭으로 판정된 항목(❌ Missing, ⚠️ Partial)에 대해 **spec_paths 실존 검증**을 수행합니다: 갭의 스펙 경로가 설정의 `spec_paths` 디렉토리 내 실제 파일인지 확인합니다. 파일이 없으면 `⚠️ WARNING (spec-not-found)`로 재분류합니다.
+
+> Test-scope 필터링은 이미 Phase 2에서 수행되므로 여기서 중복 검사하지 않습니다.
+
+WARNING 항목은 리포트의 별도 섹션에 기록하며, gap-issue-creator는 이 항목에 대해 이슈를 생성하지 않습니다:
+```markdown
+## Warnings (이슈 생성 제외)
+- ⚠️ WARNING (spec-not-found): R-008 `spec-pipeline-create` — spec_paths에 파일 없음
+```
 
 ## 출력
 
