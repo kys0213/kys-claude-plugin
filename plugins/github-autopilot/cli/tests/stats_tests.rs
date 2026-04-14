@@ -100,6 +100,51 @@ fn update_active_cycle_resets_consecutive_idle() {
 }
 
 #[test]
+fn update_active_cycle_accumulates_agent_calls() {
+    let git = MockGit::new();
+    let fs = MockFs::new().with_file(
+        "/tmp/autopilot-repo/state/session-stats.json",
+        r#"{"started_at":"2026-04-13T00:00:00Z","commands":{"build-issues":{"total_cycles":1,"processed":3,"success":2,"failed":1,"false_positive":0,"idle_cycles":0,"consecutive_idle":0,"agent_calls":3}}}"#,
+    );
+    let svc = make_svc(git, fs.clone());
+
+    let code = svc.update("build-issues", 2, 2, 0, 0).unwrap();
+    assert_eq!(code, 0);
+
+    let written = fs.written_files();
+    let stats: serde_json::Value = serde_json::from_str(&written[0].1).unwrap();
+    let cmd = &stats["commands"]["build-issues"];
+    assert_eq!(cmd["agent_calls"], 5); // 3 + 2
+    assert_eq!(cmd["processed"], 5); // 3 + 2
+    assert_eq!(cmd["consecutive_idle"], 0);
+}
+
+#[test]
+fn update_multiple_commands_independent() {
+    let git = MockGit::new();
+    let fs = MockFs::new();
+    let svc = make_svc(git, fs.clone());
+
+    svc.update("build-issues", 1, 1, 0, 0).unwrap();
+
+    let written = fs.written_files();
+    let git2 = MockGit::new();
+    let fs2 = MockFs::new().with_file(
+        "/tmp/autopilot-repo/state/session-stats.json",
+        &written[0].1,
+    );
+    let svc2 = make_svc(git2, fs2.clone());
+
+    svc2.update("gap-watch", 0, 0, 0, 0).unwrap();
+
+    let written2 = fs2.written_files();
+    let stats: serde_json::Value = serde_json::from_str(&written2[0].1).unwrap();
+    assert_eq!(stats["commands"]["build-issues"]["total_cycles"], 1);
+    assert_eq!(stats["commands"]["gap-watch"]["total_cycles"], 1);
+    assert_eq!(stats["commands"]["gap-watch"]["idle_cycles"], 1);
+}
+
+#[test]
 fn show_returns_0_when_no_stats() {
     let git = MockGit::new();
     let fs = MockFs::new();

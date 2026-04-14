@@ -346,6 +346,60 @@ mod tests {
     }
 
     #[test]
+    fn filter_ready_with_missing_labels_field() {
+        // Issue JSON without a "labels" array — should not crash
+        let issues = vec![serde_json::json!({
+            "number": 1, "title": "No labels field", "body": "",
+            "comments": []
+        })];
+        let result = filter_by_stage(&issues, &Stage::Ready, "autopilot:");
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn filter_with_malformed_label_object() {
+        // Label without "name" field
+        let issues = vec![serde_json::json!({
+            "number": 1, "title": "Bad label", "body": "",
+            "labels": [{"id": 123}],
+            "comments": []
+        })];
+        let result = filter_by_stage(&issues, &Stage::Unanalyzed, "autopilot:");
+        assert_eq!(result.len(), 1); // no prefixed label found → unanalyzed
+    }
+
+    #[test]
+    fn filter_rework_excludes_ready_labeled() {
+        // Issue with rework keyword BUT also has :ready — should NOT match rework stage
+        let issues = vec![serde_json::json!({
+            "number": 1, "title": "Fix", "body": "",
+            "labels": [{"name": "autopilot:ready"}],
+            "comments": [{"body": "rework 필요"}]
+        })];
+        let result = filter_by_stage(&issues, &Stage::Rework, "autopilot:");
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn filter_wip() {
+        let issues = vec![
+            serde_json::json!({
+                "number": 1, "title": "In progress", "body": "",
+                "labels": [{"name": "autopilot:wip"}],
+                "comments": []
+            }),
+            serde_json::json!({
+                "number": 2, "title": "Not wip", "body": "",
+                "labels": [{"name": "autopilot:ready"}],
+                "comments": []
+            }),
+        ];
+        let result = filter_by_stage(&issues, &Stage::Wip, "autopilot:");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0]["number"], 1);
+    }
+
+    #[test]
     fn filter_escalated() {
         let issues = vec![
             serde_json::json!({

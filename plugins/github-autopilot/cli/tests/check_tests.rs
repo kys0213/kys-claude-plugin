@@ -174,6 +174,43 @@ fn mark_status_active_resets_count() {
 }
 
 #[test]
+fn mark_idle_accumulates_across_calls() {
+    let git = MockGit::new().with_head("ccc3333");
+    // Start with idle_count=3
+    let fs = MockFs::new().with_file(
+        "/tmp/autopilot-repo/state/build-issues.state",
+        r#"{"hash":"bbb2222","timestamp":"2026-01-01T00:00:00Z","idle_count":3}"#,
+    );
+
+    make_svc(git, fs.clone())
+        .mark(
+            "build-issues",
+            None,
+            Some(&autopilot::cmd::LoopStatus::Idle),
+        )
+        .unwrap();
+    let written = fs.written_files();
+    let state: serde_json::Value = serde_json::from_str(&written[0].1).unwrap();
+    assert_eq!(state["idle_count"], 4);
+}
+
+#[test]
+fn mark_without_status_preserves_idle_count() {
+    let git = MockGit::new().with_head("ccc3333");
+    let fs = MockFs::new().with_file(
+        "/tmp/autopilot-repo/state/build-issues.state",
+        r#"{"hash":"bbb2222","timestamp":"2026-01-01T00:00:00Z","idle_count":5}"#,
+    );
+
+    make_svc(git, fs.clone())
+        .mark("build-issues", None, None)
+        .unwrap();
+    let written = fs.written_files();
+    let state: serde_json::Value = serde_json::from_str(&written[0].1).unwrap();
+    assert_eq!(state["idle_count"], 5); // unchanged
+}
+
+#[test]
 fn mark_backward_compat_without_idle_count() {
     // Old state files without idle_count should default to 0
     let git = MockGit::new().with_head("ccc3333");
