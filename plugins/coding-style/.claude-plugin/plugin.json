@@ -1,0 +1,8 @@
+{
+  "author": {
+    "name": "kys0213"
+  },
+  "description": "개인 코딩 습관과 취향을 Hook/Rule로 관리하는 플러그인",
+  "name": "coding-style",
+  "version": "0.1.0"
+}
