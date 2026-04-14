@@ -9,7 +9,7 @@ pub mod stats;
 pub mod watch;
 pub mod worktree;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(
@@ -74,7 +74,7 @@ pub enum CheckCommands {
         output_hash: Option<String>,
         /// Loop status: "idle" increments idle counter, "active" resets it
         #[arg(long)]
-        status: Option<String>,
+        status: Option<LoopStatus>,
     },
     /// Show state of all loops
     Status,
@@ -146,6 +146,12 @@ pub enum WorktreeCommands {
     },
     /// Remove stale draft/* worktrees, preserving branches with partial commits
     CleanupStale,
+}
+
+#[derive(Clone, ValueEnum)]
+pub enum LoopStatus {
+    Idle,
+    Active,
 }
 
 #[derive(Subcommand)]

@@ -70,7 +70,7 @@ fn fetch_issues(
                 "--state",
                 "open",
                 "--json",
-                "number,title,body,labels,comments",
+                "number,title,labels",
                 "--limit",
                 &limit_str,
             ])
@@ -85,7 +85,7 @@ fn fetch_issues(
                 "--state",
                 "open",
                 "--json",
-                "number,title,body,labels,comments",
+                "number,title,labels",
                 "--limit",
                 &limit_str,
             ])
@@ -154,7 +154,7 @@ fn has_rework_request(comments: &[Value]) -> bool {
 
     for comment in comments {
         let body = comment["body"].as_str().unwrap_or("");
-        if super::issue::has_rework_keyword_pub(body) {
+        if super::issue::has_rework_keyword(body) {
             has_keyword = true;
         }
         if body.contains("<!-- autopilot:rework-resolved -->") {
@@ -179,7 +179,7 @@ pub fn extract_fingerprint(body: &str, check_path: Option<&dyn Fn(&str) -> bool>
 
     match fingerprint {
         Some((full, spec_path, keyword)) => {
-            let spec_exists = check_path.map_or(true, |f| f(&spec_path));
+            let spec_exists = check_path.is_none_or(|f| f(&spec_path));
             serde_json::json!({
                 "found": true,
                 "fingerprint": full,

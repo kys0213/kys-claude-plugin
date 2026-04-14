@@ -150,7 +150,7 @@ fn mark_status_idle_increments_count() {
     let fs = MockFs::new();
 
     make_svc(git, fs.clone())
-        .mark("build-issues", None, Some("idle"))
+        .mark("build-issues", None, Some(&autopilot::cmd::LoopStatus::Idle))
         .unwrap();
     let written = fs.written_files();
     let state: serde_json::Value = serde_json::from_str(&written[0].1).unwrap();
@@ -166,7 +166,7 @@ fn mark_status_active_resets_count() {
     );
 
     make_svc(git, fs.clone())
-        .mark("build-issues", None, Some("active"))
+        .mark("build-issues", None, Some(&autopilot::cmd::LoopStatus::Active))
         .unwrap();
     let written = fs.written_files();
     let state: serde_json::Value = serde_json::from_str(&written[0].1).unwrap();
@@ -183,7 +183,7 @@ fn mark_backward_compat_without_idle_count() {
     );
 
     make_svc(git, fs.clone())
-        .mark("gap-watch", None, Some("idle"))
+        .mark("gap-watch", None, Some(&autopilot::cmd::LoopStatus::Idle))
         .unwrap();
     let written = fs.written_files();
     let state: serde_json::Value = serde_json::from_str(&written[0].1).unwrap();

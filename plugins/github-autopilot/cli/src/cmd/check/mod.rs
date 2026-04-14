@@ -152,7 +152,7 @@ impl CheckService {
         &self,
         loop_name: &str,
         output_hash: Option<&str>,
-        status: Option<&str>,
+        status: Option<&crate::cmd::LoopStatus>,
     ) -> Result<i32> {
         validate_loop_name(loop_name)?;
         let state_file = state_dir(self.git.as_ref())?.join(format!("{loop_name}.state"));
@@ -165,14 +165,12 @@ impl CheckService {
         loop_state.hash = hash.clone();
         loop_state.timestamp = ts.clone();
 
-        // Update idle count based on status
         match status {
-            Some("idle") => loop_state.idle_count += 1,
-            Some("active") => loop_state.idle_count = 0,
-            _ => {}
+            Some(crate::cmd::LoopStatus::Idle) => loop_state.idle_count += 1,
+            Some(crate::cmd::LoopStatus::Active) => loop_state.idle_count = 0,
+            None => {}
         }
 
-        // Append output hash if provided
         if let Some(simhash) = output_hash {
             append_output_entry(
                 &mut loop_state,

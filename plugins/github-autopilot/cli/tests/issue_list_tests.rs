@@ -48,8 +48,7 @@ fn list_ready_with_require_label() {
         ],
     );
 
-    let code =
-        issue_list::list(&gh, &Stage::Ready, "autopilot:", Some("bug"), 50).unwrap();
+    let code = issue_list::list(&gh, &Stage::Ready, "autopilot:", Some("bug"), 50).unwrap();
     assert_eq!(code, 0);
     // Only issue #1 has "bug" label — output is captured via println
 }

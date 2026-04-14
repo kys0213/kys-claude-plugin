@@ -93,7 +93,7 @@ fn main() {
                     loop_name,
                     output_hash,
                     status,
-                } => svc.mark(&loop_name, output_hash.as_deref(), status.as_deref()),
+                } => svc.mark(&loop_name, output_hash.as_deref(), status.as_ref()),
                 CheckCommands::Status => svc.status(),
                 CheckCommands::Health => svc.health(),
             }
