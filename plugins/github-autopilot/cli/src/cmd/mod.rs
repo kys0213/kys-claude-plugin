@@ -1,5 +1,6 @@
 pub mod check;
 pub mod issue;
+pub mod issue_list;
 pub mod labels;
 pub mod pipeline;
 pub mod preflight;
@@ -113,6 +114,26 @@ pub enum IssueCommands {
     DetectOverlap(issue::DetectOverlapArgs),
     /// Filter issue comments for implementer agents (stdin JSON)
     FilterComments,
+    /// List issues filtered by lifecycle stage
+    List(ListArgs),
+    /// Extract gap-fingerprint from issue body (stdin)
+    ExtractFingerprint,
+}
+
+#[derive(Args)]
+pub struct ListArgs {
+    /// Lifecycle stage to filter by
+    #[arg(long)]
+    pub stage: issue_list::Stage,
+    /// Label prefix (default: "autopilot:")
+    #[arg(long, default_value = "autopilot:")]
+    pub label_prefix: String,
+    /// Only include issues with this exact label
+    #[arg(long)]
+    pub require_label: Option<String>,
+    /// Maximum number of issues to fetch
+    #[arg(long, default_value_t = 50)]
+    pub limit: usize,
 }
 
 #[derive(Subcommand)]

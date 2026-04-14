@@ -1,6 +1,6 @@
 use autopilot::cmd::{
-    CheckCommands, Cli, Commands, IssueCommands, PipelineCommands, PreflightArgs, StatsCommands,
-    WorktreeCommands,
+    CheckCommands, Cli, Commands, IssueCommands, ListArgs, PipelineCommands, PreflightArgs,
+    StatsCommands, WorktreeCommands,
 };
 use autopilot::{cmd, fs, gh, git, github};
 use clap::Parser;
@@ -29,6 +29,39 @@ fn main() {
                 cmd::issue::search_similar(client.as_ref(), &args)
             }
             IssueCommands::FilterComments => cmd::issue::filter_comments(),
+            IssueCommands::List(ListArgs {
+                stage,
+                label_prefix,
+                require_label,
+                limit,
+            }) => {
+                let client = gh::real();
+                cmd::issue_list::list(
+                    client.as_ref(),
+                    &stage,
+                    &label_prefix,
+                    require_label.as_deref(),
+                    limit,
+                )
+            }
+            IssueCommands::ExtractFingerprint => {
+                use std::io::Read as _;
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .expect("failed to read stdin");
+                let result = cmd::issue_list::extract_fingerprint(
+                    &input,
+                    Some(&|path: &str| std::path::Path::new(path).exists()),
+                );
+                let exit = if result["found"].as_bool() == Some(true) {
+                    0
+                } else {
+                    1
+                };
+                println!("{result}");
+                Ok(exit)
+            }
         },
         Commands::Pipeline { command } => {
             let client = gh::real();

@@ -480,6 +480,11 @@ fn is_marker_only(body: &str, marker: &str) -> bool {
     without_marker.trim().is_empty()
 }
 
+/// Public wrapper for issue_list module.
+pub fn has_rework_keyword_pub(body: &str) -> bool {
+    has_rework_keyword(body)
+}
+
 fn has_rework_keyword(body: &str) -> bool {
     const KEYWORDS: &[&str] = &[
         "재구현 필요",
