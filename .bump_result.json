@@ -2,20 +2,12 @@
   "dry_run": false,
   "results": [
     {
-      "plugin": "coding-style",
-      "old_version": "0.1.0",
-      "new_version": "0.2.0",
-      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/coding-style/.claude-plugin/plugin.json",
+      "plugin": "github-autopilot",
+      "old_version": "0.15.0",
+      "new_version": "0.16.0",
+      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/github-autopilot/.claude-plugin/plugin.json",
       "marketplace_updated": true,
-      "cargo_toml_updated": false
-    },
-    {
-      "plugin": "workflow-guide",
-      "old_version": "0.5.0",
-      "new_version": "0.6.0",
-      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/workflow-guide/.claude-plugin/plugin.json",
-      "marketplace_updated": true,
-      "cargo_toml_updated": false
+      "cargo_toml_updated": true
     }
   ]
 }
