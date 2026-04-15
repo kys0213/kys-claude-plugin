@@ -29,6 +29,16 @@ allowed-tools: ["Bash", "Glob", "Read", "Agent", "AskUserQuestion"]
 
 ### Step 1.5: Pipeline Idle Check
 
+먼저 gap-watch의 분석 이력이 존재하는지 확인합니다:
+
+```bash
+REPO=$(basename "$(git rev-parse --show-toplevel)")
+[ -f "/tmp/autopilot-${REPO}/state/gap-watch.state" ]
+```
+
+- **파일 없음 (exit 1)**: 분석 이력이 없습니다. idle check를 건너뛰고 **Step 2로 바로 진행**합니다.
+- **파일 있음 (exit 0)**: 분석 이력이 존재합니다. 아래 pipeline idle check를 수행합니다.
+
 ```bash
 autopilot pipeline idle --label-prefix "{label_prefix}"
 ```

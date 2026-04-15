@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 pub struct MockFs {
     files: HashMap<PathBuf, String>,
     pub written: Arc<Mutex<Vec<(PathBuf, String)>>>,
+    pub removed: Arc<Mutex<Vec<PathBuf>>>,
 }
 
 impl Clone for MockFs {
@@ -17,6 +18,7 @@ impl Clone for MockFs {
         Self {
             files: self.files.clone(),
             written: Arc::clone(&self.written),
+            removed: Arc::clone(&self.removed),
         }
     }
 }
@@ -26,6 +28,7 @@ impl MockFs {
         Self {
             files: HashMap::new(),
             written: Arc::new(Mutex::new(Vec::new())),
+            removed: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -37,6 +40,11 @@ impl MockFs {
     /// Return all files written during the test.
     pub fn written_files(&self) -> Vec<(PathBuf, String)> {
         self.written.lock().unwrap().clone()
+    }
+
+    /// Return all files removed during the test.
+    pub fn removed_files(&self) -> Vec<PathBuf> {
+        self.removed.lock().unwrap().clone()
     }
 }
 
@@ -69,5 +77,10 @@ impl FsOps for MockFs {
             .collect();
         files.sort();
         Ok(files)
+    }
+
+    fn remove_file(&self, path: &Path) -> Result<()> {
+        self.removed.lock().unwrap().push(path.to_path_buf());
+        Ok(())
     }
 }

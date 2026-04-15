@@ -153,6 +153,16 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh
 > export PATH="$HOME/.local/bin:$PATH"
 > ```
 
+### Step 4.5: 분석 이력 초기화
+
+기존 loop state를 리셋하여 첫 cycle에서 gap 분석이 반드시 실행되도록 합니다:
+
+```bash
+autopilot check reset
+```
+
+> 이전 설정의 state가 남아있으면 gap-watch가 idle로 판정하여 분석을 건너뛸 수 있습니다.
+
 ### Step 5: GitHub 라벨 생성
 
 autopilot이 사용하는 라벨을 레포에 일괄 생성합니다.

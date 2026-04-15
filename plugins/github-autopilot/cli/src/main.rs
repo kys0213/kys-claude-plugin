@@ -96,6 +96,7 @@ fn main() {
                 } => svc.mark(&loop_name, output_hash.as_deref(), status.as_ref()),
                 CheckCommands::Status => svc.status(),
                 CheckCommands::Health => svc.health(),
+                CheckCommands::Reset { loop_name } => svc.reset(loop_name.as_deref()),
             }
         }
         Commands::Watch(args) => {

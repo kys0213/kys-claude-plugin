@@ -150,7 +150,11 @@ fn mark_status_idle_increments_count() {
     let fs = MockFs::new();
 
     make_svc(git, fs.clone())
-        .mark("build-issues", None, Some(&autopilot::cmd::LoopStatus::Idle))
+        .mark(
+            "build-issues",
+            None,
+            Some(&autopilot::cmd::LoopStatus::Idle),
+        )
         .unwrap();
     let written = fs.written_files();
     let state: serde_json::Value = serde_json::from_str(&written[0].1).unwrap();
@@ -166,7 +170,11 @@ fn mark_status_active_resets_count() {
     );
 
     make_svc(git, fs.clone())
-        .mark("build-issues", None, Some(&autopilot::cmd::LoopStatus::Active))
+        .mark(
+            "build-issues",
+            None,
+            Some(&autopilot::cmd::LoopStatus::Active),
+        )
         .unwrap();
     let written = fs.written_files();
     let state: serde_json::Value = serde_json::from_str(&written[0].1).unwrap();
@@ -243,4 +251,58 @@ fn diff_backward_compat_with_old_state_format() {
         .diff("gap-watch", &["spec/".to_string()])
         .unwrap();
     assert_eq!(code, 2);
+}
+
+#[test]
+fn reset_single_loop_removes_state_file() {
+    let git = MockGit::new();
+    let fs = MockFs::new().with_file(
+        "/tmp/autopilot-repo/state/gap-watch.state",
+        r#"{"hash":"aaa1111","timestamp":"2026-01-01T00:00:00Z"}"#,
+    );
+
+    let code = make_svc(git, fs.clone()).reset(Some("gap-watch")).unwrap();
+    assert_eq!(code, 0);
+
+    let removed = fs.removed_files();
+    assert_eq!(removed.len(), 1);
+    assert!(removed[0].to_str().unwrap().contains("gap-watch.state"));
+}
+
+#[test]
+fn reset_all_loops_removes_all_state_files() {
+    let git = MockGit::new();
+    let fs = MockFs::new()
+        .with_file(
+            "/tmp/autopilot-repo/state/gap-watch.state",
+            r#"{"hash":"aaa1111","timestamp":"2026-01-01T00:00:00Z"}"#,
+        )
+        .with_file(
+            "/tmp/autopilot-repo/state/build-issues.state",
+            r#"{"hash":"bbb2222","timestamp":"2026-01-02T00:00:00Z"}"#,
+        );
+
+    let code = make_svc(git, fs.clone()).reset(None).unwrap();
+    assert_eq!(code, 0);
+
+    let removed = fs.removed_files();
+    assert_eq!(removed.len(), 2);
+}
+
+#[test]
+fn reset_nonexistent_loop_succeeds() {
+    let git = MockGit::new();
+    let fs = MockFs::new();
+
+    let code = make_svc(git, fs.clone()).reset(Some("gap-watch")).unwrap();
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn reset_rejects_invalid_loop_name() {
+    let git = MockGit::new();
+    let fs = MockFs::new();
+
+    let result = make_svc(git, fs).reset(Some("../etc/passwd"));
+    assert!(result.is_err());
 }
