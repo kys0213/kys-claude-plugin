@@ -65,7 +65,7 @@
       ],
       "name": "coding-style",
       "source": "./plugins/coding-style",
-      "version": "0.1.0"
+      "version": "0.2.0"
     },
     {
       "category": "productivity",
@@ -81,7 +81,7 @@
       "name": "workflow-guide",
       "source": "./plugins/workflow-guide",
       "strict": false,
-      "version": "0.5.0"
+      "version": "0.6.0"
     },
     {
       "category": "productivity",

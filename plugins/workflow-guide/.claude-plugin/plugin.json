@@ -4,5 +4,5 @@
   },
   "description": "Skill, Sub-agent, Slash Command 구조화 원칙 가이드 - 레이어드 아키텍처 기반 에이전트 설계 + convention-architect 워크플로우",
   "name": "workflow-guide",
-  "version": "0.5.0"
+  "version": "0.6.0"
 }
