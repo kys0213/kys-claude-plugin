@@ -1,5 +1,7 @@
 <!-- [coding-style:begin] DO NOT REMOVE THIS LINE -->
 
+**단순하게 접근하며 사전에 계획된 작업만 수행한다.**
+
 ## 설계 최우선 원칙 (Design First)
 
 **구현보다 설계가 반드시 먼저 진행되어야 합니다.**
