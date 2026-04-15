@@ -55,6 +55,20 @@
     },
     {
       "category": "productivity",
+      "description": "개인 코딩 습관과 취향을 Hook/Rule로 관리하는 플러그인",
+      "keywords": [
+        "coding-style",
+        "habits",
+        "simplify",
+        "hook",
+        "quality"
+      ],
+      "name": "coding-style",
+      "source": "./plugins/coding-style",
+      "version": "0.1.0"
+    },
+    {
+      "category": "productivity",
       "description": "레이어드 아키텍처 기반 에이전트 설계 원칙 가이드 + convention-architect 워크플로우",
       "keywords": [
         "workflow",
