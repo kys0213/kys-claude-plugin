@@ -14,6 +14,9 @@ pub trait FsOps: Send + Sync {
 
     /// List files in a directory (non-recursive) that match the given extension.
     fn list_files(&self, dir: &Path, extension: &str) -> Result<Vec<PathBuf>>;
+
+    /// Remove a file. Returns Ok(()) even if the file does not exist.
+    fn remove_file(&self, path: &Path) -> Result<()>;
 }
 
 /// Real implementation using `std::fs`.
@@ -53,6 +56,14 @@ impl FsOps for RealFs {
         }
         files.sort();
         Ok(files)
+    }
+
+    fn remove_file(&self, path: &Path) -> Result<()> {
+        match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(anyhow::anyhow!("failed to remove {}: {e}", path.display())),
+        }
     }
 }
 

@@ -42,7 +42,7 @@ pub fn list(
         .filter(|issue| {
             require_label.is_none_or(|req| labels::has_exact_label(get_labels(issue), req))
         })
-        .map(|issue| slim_issue(issue))
+        .map(slim_issue)
         .collect();
 
     println!("{}", serde_json::to_string(&result)?);
@@ -109,7 +109,7 @@ pub fn filter_by_stage(issues: &[Value], stage: &Stage, label_prefix: &str) -> V
     issues
         .iter()
         .filter(|issue| matches_stage(issue, stage, label_prefix))
-        .map(|issue| slim_issue(issue))
+        .map(slim_issue)
         .collect()
 }
 

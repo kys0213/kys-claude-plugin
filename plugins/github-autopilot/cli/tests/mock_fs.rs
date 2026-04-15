@@ -6,62 +6,76 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-/// A mock FsOps backed by an in-memory file map.
-pub struct MockFs {
+/// Shared mutable state for MockFs, enabling stateful multi-step tests.
+#[derive(Clone, Default)]
+struct Inner {
     files: HashMap<PathBuf, String>,
-    pub written: Arc<Mutex<Vec<(PathBuf, String)>>>,
+    written: Vec<(PathBuf, String)>,
+    removed: Vec<PathBuf>,
 }
 
-impl Clone for MockFs {
-    fn clone(&self) -> Self {
-        Self {
-            files: self.files.clone(),
-            written: Arc::clone(&self.written),
-        }
-    }
+/// A mock FsOps backed by an in-memory file map.
+/// Writes and removes mutate the internal file map so that subsequent
+/// reads, list_files, and file_exists calls reflect the changes.
+#[derive(Clone)]
+pub struct MockFs {
+    inner: Arc<Mutex<Inner>>,
 }
 
 impl MockFs {
     pub fn new() -> Self {
         Self {
-            files: HashMap::new(),
-            written: Arc::new(Mutex::new(Vec::new())),
+            inner: Arc::new(Mutex::new(Inner::default())),
         }
     }
 
-    pub fn with_file(mut self, path: &str, content: &str) -> Self {
-        self.files.insert(PathBuf::from(path), content.to_string());
+    pub fn with_file(self, path: &str, content: &str) -> Self {
+        self.inner
+            .lock()
+            .unwrap()
+            .files
+            .insert(PathBuf::from(path), content.to_string());
         self
     }
 
     /// Return all files written during the test.
     pub fn written_files(&self) -> Vec<(PathBuf, String)> {
-        self.written.lock().unwrap().clone()
+        self.inner.lock().unwrap().written.clone()
+    }
+
+    /// Return all files removed during the test.
+    pub fn removed_files(&self) -> Vec<PathBuf> {
+        self.inner.lock().unwrap().removed.clone()
     }
 }
 
 impl FsOps for MockFs {
     fn read_file(&self, path: &Path) -> Result<String> {
-        self.files
+        self.inner
+            .lock()
+            .unwrap()
+            .files
             .get(path)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("file not found: {}", path.display()))
     }
 
     fn write_file(&self, path: &Path, content: &str) -> Result<()> {
-        self.written
-            .lock()
-            .unwrap()
-            .push((path.to_path_buf(), content.to_string()));
+        let mut inner = self.inner.lock().unwrap();
+        let path = path.to_path_buf();
+        let content = content.to_string();
+        inner.files.insert(path.clone(), content.clone());
+        inner.written.push((path, content));
         Ok(())
     }
 
     fn file_exists(&self, path: &Path) -> bool {
-        self.files.contains_key(path)
+        self.inner.lock().unwrap().files.contains_key(path)
     }
 
     fn list_files(&self, dir: &Path, extension: &str) -> Result<Vec<PathBuf>> {
-        let mut files: Vec<PathBuf> = self
+        let inner = self.inner.lock().unwrap();
+        let mut files: Vec<PathBuf> = inner
             .files
             .keys()
             .filter(|p| p.parent() == Some(dir) && p.extension().map_or(false, |e| e == extension))
@@ -69,5 +83,12 @@ impl FsOps for MockFs {
             .collect();
         files.sort();
         Ok(files)
+    }
+
+    fn remove_file(&self, path: &Path) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.files.remove(path);
+        inner.removed.push(path.to_path_buf());
+        Ok(())
     }
 }

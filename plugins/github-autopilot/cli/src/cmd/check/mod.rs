@@ -12,7 +12,8 @@ use crate::git::GitOps;
 use analysis::{AnalysisContext, DiffAnalysis};
 use stagnation::classify_pattern;
 use state::{
-    append_output_entry, read_state, state_dir, validate_loop_name, write_state, OutputEntry,
+    append_output_entry, read_state, state_dir, state_file_path, validate_loop_name, write_state,
+    OutputEntry, STATE_EXT,
 };
 
 // Exit codes with business semantics
@@ -64,7 +65,7 @@ impl CheckService {
     /// Exit codes: 0=no_changes, 1=spec_changed, 2=code_changed, 3=first_run, 4=stagnation
     pub fn diff(&self, loop_name: &str, spec_paths: &[String]) -> Result<i32> {
         validate_loop_name(loop_name)?;
-        let state_file = state_dir(self.git.as_ref())?.join(format!("{loop_name}.state"));
+        let state_file = state_file_path(&state_dir(self.git.as_ref())?, loop_name);
 
         // Try reading state file; missing file means first run
         let state = match read_state(self.fs.as_ref(), &state_file) {
@@ -155,7 +156,7 @@ impl CheckService {
         status: Option<&crate::cmd::LoopStatus>,
     ) -> Result<i32> {
         validate_loop_name(loop_name)?;
-        let state_file = state_dir(self.git.as_ref())?.join(format!("{loop_name}.state"));
+        let state_file = state_file_path(&state_dir(self.git.as_ref())?, loop_name);
         let hash = self.git.rev_parse_head()?;
         let ts = state::utc_timestamp();
 
@@ -194,7 +195,7 @@ impl CheckService {
     pub fn status(&self) -> Result<i32> {
         let dir = state_dir(self.git.as_ref())?;
 
-        let files = match self.fs.list_files(&dir, "state") {
+        let files = match self.fs.list_files(&dir, STATE_EXT) {
             Ok(f) => f,
             Err(_) => {
                 println!("(no loop states found)");
@@ -230,7 +231,7 @@ impl CheckService {
         use crate::cmd::simhash;
 
         let dir = state_dir(self.git.as_ref())?;
-        let files = match self.fs.list_files(&dir, "state") {
+        let files = match self.fs.list_files(&dir, STATE_EXT) {
             Ok(f) => f,
             Err(_) => {
                 println!(r#"{{"loops":[],"overall":"healthy"}}"#);
@@ -289,6 +290,27 @@ impl CheckService {
         };
         let out = serde_json::json!({ "loops": loops, "overall": overall });
         println!("{out}");
+        Ok(0)
+    }
+
+    /// Reset (delete) state files. If loop_name is given, only that loop; otherwise all.
+    pub fn reset(&self, loop_name: Option<&str>) -> Result<i32> {
+        let dir = state_dir(self.git.as_ref())?;
+
+        if let Some(name) = loop_name {
+            validate_loop_name(name)?;
+            let state_file = state_file_path(&dir, name);
+            self.fs.remove_file(&state_file)?;
+            println!("reset {name}");
+        } else {
+            let files = self.fs.list_files(&dir, STATE_EXT).unwrap_or_default();
+            for file in &files {
+                self.fs.remove_file(file)?;
+            }
+            let count = files.len();
+            println!("reset {count} loop(s)");
+        }
+
         Ok(0)
     }
 }

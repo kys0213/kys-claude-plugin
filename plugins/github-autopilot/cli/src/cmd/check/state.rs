@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::fs::FsOps;
@@ -8,6 +8,14 @@ use crate::git::GitOps;
 
 /// Maximum number of output entries to keep in history (sliding window).
 const MAX_OUTPUT_HISTORY: usize = 10;
+
+/// File extension for loop state files.
+pub const STATE_EXT: &str = "state";
+
+/// Build the state file path for a given loop name.
+pub fn state_file_path(dir: &Path, loop_name: &str) -> PathBuf {
+    dir.join(format!("{loop_name}.{STATE_EXT}"))
+}
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct LoopState {
@@ -53,13 +61,13 @@ pub fn validate_loop_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn read_state(fs: &dyn FsOps, state_file: &std::path::Path) -> Result<LoopState> {
+pub fn read_state(fs: &dyn FsOps, state_file: &Path) -> Result<LoopState> {
     let content = fs.read_file(state_file)?;
     let state: LoopState = serde_json::from_str(&content)?;
     Ok(state)
 }
 
-pub fn write_state(fs: &dyn FsOps, state_file: &std::path::Path, state: &LoopState) -> Result<()> {
+pub fn write_state(fs: &dyn FsOps, state_file: &Path, state: &LoopState) -> Result<()> {
     fs.write_file(state_file, &serde_json::to_string(state)?)
 }
 

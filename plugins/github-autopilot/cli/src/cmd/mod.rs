@@ -80,6 +80,11 @@ pub enum CheckCommands {
     Status,
     /// Pipeline health report across all loops
     Health,
+    /// Reset (delete) loop state files
+    Reset {
+        /// Loop name to reset. If omitted, resets all loops.
+        loop_name: Option<String>,
+    },
 }
 
 #[derive(Args)]
