@@ -57,34 +57,37 @@
 ### 3.1 위치
 
 ```
-spec/<spec-paths>/*.md            # 형상관리 (기존, 변화 없음)
-<main-worktree>/.autopilot/state.db        # 로컬 task 상태 (gitignored)
-<main-worktree>/.autopilot/logs/<epic>/    # 구현 로그 (선택, gitignored)
+spec/<spec-paths>/*.md         # 형상관리 (기존, 변화 없음)
+.autopilot/state.db            # 로컬 task 상태 (gitignored)
+.autopilot/logs/<epic>/        # 구현 로그 (선택, gitignored)
 ```
 
-`.autopilot/` 를 **메인 worktree 루트** 에 두고, 자식 worktree 에서는 절대경로로 해석한다.
-
-`.git/` 안에 두지 않는 이유: `.git/` 은 git 의 내부 디렉토리이며 `git gc` / `git fsck` 등 내부 도구가 다루는 공간이다. 커스텀 파일을 두는 것은 관습 위반이며 잠재적 충돌 위험이 있다.
-
-worktree 공유 문제 해결: autopilot 은 worktree 기반 병렬 구현을 쓰므로 자식 worktree 도 메인과 동일 DB 를 봐야 한다. 어느 worktree 에서 실행되든 다음 해석으로 같은 경로를 얻는다:
-
-```bash
-common_dir=$(realpath "$(git rev-parse --git-common-dir)")
-main_worktree=$(dirname "$common_dir")
-state_db="$main_worktree/.autopilot/state.db"
-```
-
-`git rev-parse --git-common-dir` 는 어느 worktree 에서 실행해도 메인 `.git/` 을 반환하므로, 그 부모 디렉토리가 메인 worktree 의 루트가 된다. autopilot CLI 가 이 해석을 한 곳(예: `autopilot::paths::state_db()`)에서만 수행하면 모든 호출자가 자동으로 같은 DB 를 보게 된다.
-
-`.autopilot/` 는 `.gitignore` 한 줄로 추적에서 제외한다:
+`.autopilot/` 는 autopilot 루프가 실행되는 worktree 의 루트에 위치한다. `.gitignore` 한 줄로 추적에서 제외한다:
 
 ```gitignore
 /.autopilot/
 ```
 
-**제약**: 베어 레포 (working tree 가 없는 형태) 에서는 메인 worktree 가 존재하지 않으므로 autopilot 은 동작하지 않는다. 이는 unsupported 로 명시한다 (autopilot 자체가 작업 디렉토리를 전제로 한 도구이므로 실용적 제약은 없다).
+`.git/` 안에 두지 않는 이유: `.git/` 은 git 의 내부 디렉토리이며 `git gc` / `git fsck` 등 내부 도구가 다루는 공간이다. 커스텀 파일을 두는 것은 관습 위반이며 잠재적 충돌 위험이 있다.
 
-### 3.2 스키마
+### 3.2 DB 접근 주체
+
+DB 의 읽기/쓰기는 **autopilot 메인 루프(부모 에이전트)** 만 수행한다. `build-tasks` 가 worktree 를 만들어 병렬 구현을 띄울 때, 자식 implementer 에이전트는 DB 를 직접 만지지 않는다.
+
+| 주체 | 역할 | DB 접근 |
+|------|------|---------|
+| 메인 autopilot 루프 | task 큐잉, 상태 전이, 의존성/escalation 판정 | read + write |
+| 자식 implementer (worktree) | 받은 task 사양으로 코드 작성 + 브랜치 push | 없음 |
+
+자식이 DB 를 안 만지므로:
+
+- worktree 간 DB 공유 / 락 / 경로 해석 같은 복잡성 불필요
+- 자식이 비정상 종료해도 DB 무결성 영향 없음 (부모가 결과를 보고 attempts 증가 / status 갱신)
+- 부모는 단일 writer 이므로 SQLite 의 일반적 동시성 케이스 (다중 writer) 도 발생하지 않음
+
+이 단일-writer 가정 덕분에 같은 메인 루프 안에서 cron 으로 도는 여러 sub-loop (`gap-watch`, `build-tasks`, `merge-prs` 등) 만 동시 접근자를 고려하면 된다. 이는 SQLite WAL 모드로 충분히 처리된다.
+
+### 3.3 스키마
 
 ```sql
 CREATE TABLE epics (
@@ -152,7 +155,7 @@ UPDATE tasks
 -- changes() == 1 인 경우만 성공
 ```
 
-### 3.3 결정적 Task ID
+### 3.4 결정적 Task ID
 
 UUID 를 매번 새로 생성하면 spec 재분해 후 매칭이 안 된다. Task ID 는 **spec 내용으로부터 결정적으로 도출**한다.
 
@@ -168,7 +171,7 @@ task_id = sha256(epic_name || ":" || section_path || ":" || requirement_slug)[:1
 - `git fetch` 후 리모트 브랜치 이름 (`epic/<name>/<task_id>`) 과 1:1 매칭 가능
 - 다른 머신에서 `epic-resume` 해도 동일 task 식별 가능
 
-### 3.4 SQLite 선택 근거 (대안 비교)
+### 3.5 SQLite 선택 근거 (대안 비교)
 
 | 항목 | SQLite | 파일 기반 (YAML/JSONL) |
 |------|--------|----------------------|
