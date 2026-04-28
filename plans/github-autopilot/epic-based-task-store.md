@@ -58,15 +58,31 @@
 
 ```
 spec/<spec-paths>/*.md            # 형상관리 (기존, 변화 없음)
-.git/autopilot/state.db           # 로컬 task 상태 (gitignored, common-dir)
-.git/autopilot/logs/<epic>/       # 구현 로그 (선택, gitignored)
+<main-worktree>/.autopilot/state.db        # 로컬 task 상태 (gitignored)
+<main-worktree>/.autopilot/logs/<epic>/    # 구현 로그 (선택, gitignored)
 ```
 
-`.git/autopilot/` 위치 선택 이유:
+`.autopilot/` 를 **메인 worktree 루트** 에 두고, 자식 worktree 에서는 절대경로로 해석한다.
 
-- `git rev-parse --git-common-dir` 안에 두면 **모든 worktree 가 같은 DB 를 공유**한다. autopilot 이 worktree 기반 병렬 구현을 쓰기 때문에 자식 worktree 들도 부모와 동일 DB 를 봐야 한다.
-- `.autopilot/` 같이 working tree 에 두면 worktree 마다 분리되어 깨진다.
-- `.git/` 안은 git 이 추적하지 않으므로 별도 gitignore 가 불필요하다.
+`.git/` 안에 두지 않는 이유: `.git/` 은 git 의 내부 디렉토리이며 `git gc` / `git fsck` 등 내부 도구가 다루는 공간이다. 커스텀 파일을 두는 것은 관습 위반이며 잠재적 충돌 위험이 있다.
+
+worktree 공유 문제 해결: autopilot 은 worktree 기반 병렬 구현을 쓰므로 자식 worktree 도 메인과 동일 DB 를 봐야 한다. 어느 worktree 에서 실행되든 다음 해석으로 같은 경로를 얻는다:
+
+```bash
+common_dir=$(realpath "$(git rev-parse --git-common-dir)")
+main_worktree=$(dirname "$common_dir")
+state_db="$main_worktree/.autopilot/state.db"
+```
+
+`git rev-parse --git-common-dir` 는 어느 worktree 에서 실행해도 메인 `.git/` 을 반환하므로, 그 부모 디렉토리가 메인 worktree 의 루트가 된다. autopilot CLI 가 이 해석을 한 곳(예: `autopilot::paths::state_db()`)에서만 수행하면 모든 호출자가 자동으로 같은 DB 를 보게 된다.
+
+`.autopilot/` 는 `.gitignore` 한 줄로 추적에서 제외한다:
+
+```gitignore
+/.autopilot/
+```
+
+**제약**: 베어 레포 (working tree 가 없는 형태) 에서는 메인 worktree 가 존재하지 않으므로 autopilot 은 동작하지 않는다. 이는 unsupported 로 명시한다 (autopilot 자체가 작업 디렉토리를 전제로 한 도구이므로 실용적 제약은 없다).
 
 ### 3.2 스키마
 
