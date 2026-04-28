@@ -2,17 +2,15 @@
 
 > github-autopilot 의 작업 관리 모델을 "GitHub 이슈 = 작업 큐" 에서 "Epic 브랜치 + 로컬 Task Store" 로 재편하는 **컨셉 문서**.
 >
-> 이 문서는 동기 / 모델 / 큰 그림만 다룬다. 구체적 구현 스펙은 형제 문서로 분할되어 있다:
+> 이 문서는 동기 / 모델 / 큰 그림만 다룬다. 구체적 구현 스펙은 유스케이스 → 아키텍처 → 상세 스펙 → 테스트 순으로 형제 문서에 분할되어 있다:
 >
 > | 파일 | 다루는 범위 |
 > |------|-----------|
 > | `00-concept.md` (현재) | 동기, 모델, 데이터 흐름, 라이프사이클 |
-> | `01-task-store-spec.md` | TaskStore 모듈: 인터페이스, 스키마, 트랜잭션, 테스트 |
-> | `02-epic-lifecycle-spec.md` | epic-start / resume / stop CLI 와 알고리즘 |
-> | `03-reconciler-spec.md` | git remote ↔ DB 동기화 |
-> | `04-watch-integration-spec.md` | gap-watch / qa-boost / ci-watch 배선 변경 |
-> | `05-escalation-spec.md` | HITL escalation 트리거 / 포맷 / 사람-측 후처리 |
-> | `06-migration-spec.md` | 라벨 기반 → DB 기반 전환 절차 |
+> | `01-use-cases.md` | 페르소나별 시나리오. 인터페이스 도출의 출발점 |
+> | `02-architecture.md` | 모듈 경계, 의존성 방향, 트랜잭션 / 동시성 정책 |
+> | `03-detailed-spec.md` | TaskStore trait, 스키마, 알고리즘 의사코드, CLI 시그니처 |
+> | `04-test-scenarios.md` | 블랙박스 테스트 fixture (TDD 원칙용) |
 >
 > 본 시리즈는 `/develop` 워크플로우의 Phase 1 (DESIGN) 산출물이다. 구현 전 리뷰/승인이 선행되어야 한다.
 
