@@ -23,6 +23,12 @@ else
 fi
 
 # Verify gh CLI authentication
+# Skip the check when origin remote points to a local proxy (cloud autopilot
+# environment): the proxy handles auth itself, and `gh` CLI is not used.
+if git remote get-url origin 2>/dev/null | grep -qE '127\.0\.0\.1|localhost|local_proxy'; then
+  exit 0
+fi
+
 if ! gh auth status --hostname github.com &>/dev/null; then
   echo "BLOCK: GitHub CLI is not authenticated." >&2
   echo "Run 'gh auth login' to authenticate before proceeding." >&2
