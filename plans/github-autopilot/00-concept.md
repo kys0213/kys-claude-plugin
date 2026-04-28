@@ -1,8 +1,20 @@
-# Epic 기반 Task Store 설계
+# 00. Epic 기반 Task Store — 컨셉 문서
 
-> github-autopilot 의 작업 관리 모델을 "GitHub 이슈 = 작업 큐" 에서 "Epic 브랜치 + 로컬 Task Store" 로 재편하는 설계 문서.
+> github-autopilot 의 작업 관리 모델을 "GitHub 이슈 = 작업 큐" 에서 "Epic 브랜치 + 로컬 Task Store" 로 재편하는 **컨셉 문서**.
 >
-> 본 문서는 `/develop` 워크플로우의 Phase 1 (DESIGN) 산출물이다. 구현 전 리뷰/승인이 선행되어야 한다.
+> 이 문서는 동기 / 모델 / 큰 그림만 다룬다. 구체적 구현 스펙은 형제 문서로 분할되어 있다:
+>
+> | 파일 | 다루는 범위 |
+> |------|-----------|
+> | `00-concept.md` (현재) | 동기, 모델, 데이터 흐름, 라이프사이클 |
+> | `01-task-store-spec.md` | TaskStore 모듈: 인터페이스, 스키마, 트랜잭션, 테스트 |
+> | `02-epic-lifecycle-spec.md` | epic-start / resume / stop CLI 와 알고리즘 |
+> | `03-reconciler-spec.md` | git remote ↔ DB 동기화 |
+> | `04-watch-integration-spec.md` | gap-watch / qa-boost / ci-watch 배선 변경 |
+> | `05-escalation-spec.md` | HITL escalation 트리거 / 포맷 / 사람-측 후처리 |
+> | `06-migration-spec.md` | 라벨 기반 → DB 기반 전환 절차 |
+>
+> 본 시리즈는 `/develop` 워크플로우의 Phase 1 (DESIGN) 산출물이다. 구현 전 리뷰/승인이 선행되어야 한다.
 
 ## 1. 동기
 
