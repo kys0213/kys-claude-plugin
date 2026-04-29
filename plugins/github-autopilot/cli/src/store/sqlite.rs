@@ -11,8 +11,8 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::domain::{
-    DomainError, Epic, EpicStatus, Event, EventKind, Task, TaskFailureOutcome, TaskId, TaskSource,
-    TaskStatus,
+    DomainError, Epic, EpicStatus, Event, EventKind, Task, TaskFailureOutcome, TaskGraph, TaskId,
+    TaskSource, TaskStatus,
 };
 use crate::ports::task_store::{
     EpicPlan, EpicRepo, EventFilter, EventLog, NewWatchTask, ReconciliationPlan, Result, TaskRepo,
@@ -89,10 +89,6 @@ impl SqliteTaskStore {
 
 fn backend(e: rusqlite::Error) -> TaskStoreError {
     TaskStoreError::Backend(e.to_string())
-}
-
-fn unimpl(name: &str) -> TaskStoreError {
-    TaskStoreError::Backend(format!("sqlite::{name} not yet implemented"))
 }
 
 fn epic_from_row(row: &Row<'_>) -> rusqlite::Result<Epic> {
@@ -292,8 +288,113 @@ impl EpicRepo for SqliteTaskStore {
 }
 
 impl TaskRepo for SqliteTaskStore {
-    fn insert_epic_with_tasks(&self, _plan: EpicPlan, _now: DateTime<Utc>) -> Result<()> {
-        Err(unimpl("insert_epic_with_tasks"))
+    fn insert_epic_with_tasks(&self, plan: EpicPlan, now: DateTime<Utc>) -> Result<()> {
+        let mut seen = std::collections::BTreeSet::new();
+        for t in &plan.tasks {
+            if !seen.insert(t.id.clone()) {
+                return Err(DomainError::DuplicateTaskId(t.id.clone()).into());
+            }
+        }
+        for (a, b) in &plan.deps {
+            if !seen.contains(a) {
+                return Err(DomainError::UnknownDepTarget(a.clone()).into());
+            }
+            if !seen.contains(b) {
+                return Err(DomainError::UnknownDepTarget(b.clone()).into());
+            }
+        }
+        let graph = TaskGraph::build(plan.deps.iter().cloned());
+        if let Some(cycle) = graph.detect_cycle() {
+            return Err(DomainError::DepCycle(cycle).into());
+        }
+
+        let mut conn = self.conn.lock().expect("poisoned");
+        let tx = conn.transaction().map_err(backend)?;
+
+        let exists: Option<String> = tx
+            .query_row(
+                "SELECT status FROM epics WHERE name=?",
+                params![plan.epic.name],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(backend)?;
+        if let Some(status_str) = exists {
+            let status = EpicStatus::parse(&status_str).unwrap_or(EpicStatus::Active);
+            return Err(DomainError::EpicAlreadyExists(plan.epic.name.clone(), status).into());
+        }
+
+        tx.execute(
+            "INSERT INTO epics(name, spec_path, branch, status, created_at, completed_at)
+             VALUES (?, ?, ?, 'active', ?, NULL)",
+            params![
+                plan.epic.name,
+                plan.epic.spec_path.to_string_lossy(),
+                plan.epic.branch,
+                plan.epic.created_at,
+            ],
+        )
+        .map_err(backend)?;
+
+        for nt in &plan.tasks {
+            tx.execute(
+                "INSERT INTO tasks(id, epic_name, source, fingerprint, title, body,
+                                   status, attempts, branch, pr_number, escalated_issue,
+                                   created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, NULL, ?, ?)",
+                params![
+                    nt.id.as_str(),
+                    plan.epic.name,
+                    nt.source.as_str(),
+                    nt.fingerprint,
+                    nt.title,
+                    nt.body,
+                    now,
+                    now,
+                ],
+            )
+            .map_err(backend)?;
+        }
+
+        for (a, b) in &plan.deps {
+            tx.execute(
+                "INSERT INTO task_deps(task_id, depends_on) VALUES (?, ?)",
+                params![a.as_str(), b.as_str()],
+            )
+            .map_err(backend)?;
+        }
+
+        tx.execute(
+            "UPDATE tasks SET status='ready', updated_at=?
+              WHERE epic_name=? AND status='pending'
+                AND id NOT IN (SELECT task_id FROM task_deps)",
+            params![now, plan.epic.name],
+        )
+        .map_err(backend)?;
+
+        SqliteTaskStore::append_event_with(
+            &tx,
+            EventKind::EpicStarted,
+            Some(&plan.epic.name),
+            None,
+            &serde_json::json!({}),
+            now,
+        )
+        .map_err(backend)?;
+        for nt in &plan.tasks {
+            SqliteTaskStore::append_event_with(
+                &tx,
+                EventKind::TaskInserted,
+                Some(&plan.epic.name),
+                Some(&nt.id),
+                &serde_json::json!({"source": nt.source.as_str()}),
+                now,
+            )
+            .map_err(backend)?;
+        }
+
+        tx.commit().map_err(backend)?;
+        Ok(())
     }
 
     fn get_task(&self, id: &TaskId) -> Result<Option<Task>> {
@@ -350,30 +451,342 @@ impl TaskRepo for SqliteTaskStore {
         .map_err(backend)
     }
 
-    fn upsert_watch_task(&self, _task: NewWatchTask, _now: DateTime<Utc>) -> Result<UpsertOutcome> {
-        Err(unimpl("upsert_watch_task"))
+    fn upsert_watch_task(&self, task: NewWatchTask, now: DateTime<Utc>) -> Result<UpsertOutcome> {
+        let mut conn = self.conn.lock().expect("poisoned");
+        let tx = conn.transaction().map_err(backend)?;
+
+        let existing: Option<String> = tx
+            .query_row(
+                "SELECT id FROM tasks WHERE epic_name=? AND fingerprint=? LIMIT 1",
+                params![task.epic_name, task.fingerprint],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(backend)?;
+
+        if let Some(existing_id) = existing {
+            SqliteTaskStore::append_event_with(
+                &tx,
+                EventKind::WatchDuplicate,
+                Some(&task.epic_name),
+                Some(&TaskId::from_raw(existing_id.clone())),
+                &serde_json::json!({"fingerprint": task.fingerprint}),
+                now,
+            )
+            .map_err(backend)?;
+            tx.commit().map_err(backend)?;
+            return Ok(UpsertOutcome::DuplicateFingerprint(TaskId::from_raw(
+                existing_id,
+            )));
+        }
+
+        tx.execute(
+            "INSERT INTO tasks(id, epic_name, source, fingerprint, title, body,
+                               status, attempts, branch, pr_number, escalated_issue,
+                               created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'ready', 0, NULL, NULL, NULL, ?, ?)",
+            params![
+                task.id.as_str(),
+                task.epic_name,
+                task.source.as_str(),
+                task.fingerprint,
+                task.title,
+                task.body,
+                now,
+                now,
+            ],
+        )
+        .map_err(backend)?;
+
+        SqliteTaskStore::append_event_with(
+            &tx,
+            EventKind::TaskInserted,
+            Some(&task.epic_name),
+            Some(&task.id),
+            &serde_json::json!({"source": task.source.as_str(), "fingerprint": task.fingerprint}),
+            now,
+        )
+        .map_err(backend)?;
+
+        tx.commit().map_err(backend)?;
+        Ok(UpsertOutcome::Inserted(task.id))
     }
 
-    fn claim_next_task(&self, _epic: &str, _now: DateTime<Utc>) -> Result<Option<Task>> {
-        Err(unimpl("claim_next_task"))
+    fn claim_next_task(&self, epic: &str, now: DateTime<Utc>) -> Result<Option<Task>> {
+        let mut conn = self.conn.lock().expect("poisoned");
+        let tx = conn.transaction().map_err(backend)?;
+
+        let candidate_id: Option<String> = tx
+            .query_row(
+                "SELECT t.id FROM tasks t
+                  WHERE t.epic_name = ? AND t.status = 'ready'
+                    AND NOT EXISTS (
+                      SELECT 1 FROM task_deps d
+                      JOIN tasks dep ON dep.id = d.depends_on
+                      WHERE d.task_id = t.id AND dep.status != 'done'
+                    )
+                  ORDER BY t.created_at, t.id
+                  LIMIT 1",
+                params![epic],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(backend)?;
+
+        let id = match candidate_id {
+            Some(id) => id,
+            None => return Ok(None),
+        };
+
+        let updated = tx
+            .execute(
+                "UPDATE tasks SET status='wip', attempts = attempts + 1, updated_at=?
+                  WHERE id=? AND status='ready'",
+                params![now, id],
+            )
+            .map_err(backend)?;
+        if updated != 1 {
+            return Ok(None);
+        }
+
+        let task = tx
+            .query_row(
+                "SELECT id, epic_name, source, fingerprint, title, body, status, attempts,
+                        branch, pr_number, escalated_issue, created_at, updated_at
+                   FROM tasks WHERE id=?",
+                params![id],
+                task_from_row,
+            )
+            .map_err(backend)?;
+
+        SqliteTaskStore::append_event_with(
+            &tx,
+            EventKind::TaskClaimed,
+            Some(epic),
+            Some(&task.id),
+            &serde_json::json!({"attempts": task.attempts}),
+            now,
+        )
+        .map_err(backend)?;
+
+        tx.commit().map_err(backend)?;
+        Ok(Some(task))
     }
 
     fn complete_task_and_unblock(
         &self,
-        _id: &TaskId,
-        _pr_number: u64,
-        _now: DateTime<Utc>,
+        id: &TaskId,
+        pr_number: u64,
+        now: DateTime<Utc>,
     ) -> Result<UnblockReport> {
-        Err(unimpl("complete_task_and_unblock"))
+        let mut conn = self.conn.lock().expect("poisoned");
+        let tx = conn.transaction().map_err(backend)?;
+
+        let cur_status: Option<String> = tx
+            .query_row(
+                "SELECT status FROM tasks WHERE id=?",
+                params![id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(backend)?;
+        let cur = cur_status.ok_or_else(|| TaskStoreError::NotFound(format!("task '{id}'")))?;
+        if cur != "wip" {
+            let cur_status = TaskStatus::parse(&cur).unwrap_or(TaskStatus::Pending);
+            return Err(
+                DomainError::IllegalTransition(id.clone(), cur_status, TaskStatus::Done).into(),
+            );
+        }
+
+        let updated = tx
+            .execute(
+                "UPDATE tasks SET status='done', pr_number=?, updated_at=?
+                  WHERE id=? AND status='wip'",
+                params![pr_number as i64, now, id.as_str()],
+            )
+            .map_err(backend)?;
+        if updated != 1 {
+            return Err(DomainError::IllegalTransition(
+                id.clone(),
+                TaskStatus::Wip,
+                TaskStatus::Done,
+            )
+            .into());
+        }
+
+        let epic_name: String = tx
+            .query_row(
+                "SELECT epic_name FROM tasks WHERE id=?",
+                params![id.as_str()],
+                |row| row.get(0),
+            )
+            .map_err(backend)?;
+
+        SqliteTaskStore::append_event_with(
+            &tx,
+            EventKind::TaskCompleted,
+            Some(&epic_name),
+            Some(id),
+            &serde_json::json!({"pr_number": pr_number}),
+            now,
+        )
+        .map_err(backend)?;
+
+        let newly_ready_ids: Vec<String> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT d.task_id FROM task_deps d
+                     JOIN tasks t ON t.id = d.task_id
+                      WHERE d.depends_on = ?
+                        AND t.status IN ('pending','blocked')
+                        AND NOT EXISTS (
+                          SELECT 1 FROM task_deps d2
+                          JOIN tasks dep ON dep.id = d2.depends_on
+                          WHERE d2.task_id = d.task_id AND dep.status != 'done'
+                        )",
+                )
+                .map_err(backend)?;
+            let iter = stmt
+                .query_map(params![id.as_str()], |row| row.get::<_, String>(0))
+                .map_err(backend)?;
+            let mut out: Vec<String> = Vec::new();
+            for row in iter {
+                out.push(row.map_err(backend)?);
+            }
+            out
+        };
+
+        for nid in &newly_ready_ids {
+            tx.execute(
+                "UPDATE tasks SET status='ready', updated_at=?
+                  WHERE id=? AND status IN ('pending','blocked')",
+                params![now, nid],
+            )
+            .map_err(backend)?;
+            SqliteTaskStore::append_event_with(
+                &tx,
+                EventKind::TaskUnblocked,
+                Some(&epic_name),
+                Some(&TaskId::from_raw(nid.clone())),
+                &serde_json::json!({}),
+                now,
+            )
+            .map_err(backend)?;
+        }
+
+        tx.commit().map_err(backend)?;
+        Ok(UnblockReport {
+            completed: id.clone(),
+            newly_ready: newly_ready_ids.into_iter().map(TaskId::from_raw).collect(),
+        })
     }
 
     fn mark_task_failed(
         &self,
-        _id: &TaskId,
-        _max_attempts: u32,
-        _now: DateTime<Utc>,
+        id: &TaskId,
+        max_attempts: u32,
+        now: DateTime<Utc>,
     ) -> Result<TaskFailureOutcome> {
-        Err(unimpl("mark_task_failed"))
+        let mut conn = self.conn.lock().expect("poisoned");
+        let tx = conn.transaction().map_err(backend)?;
+
+        let row: Option<(String, i64, String)> = tx
+            .query_row(
+                "SELECT status, attempts, epic_name FROM tasks WHERE id=?",
+                params![id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(backend)?;
+        let (cur, attempts, epic_name) =
+            row.ok_or_else(|| TaskStoreError::NotFound(format!("task '{id}'")))?;
+        if cur != "wip" {
+            let cur_status = TaskStatus::parse(&cur).unwrap_or(TaskStatus::Pending);
+            return Err(
+                DomainError::IllegalTransition(id.clone(), cur_status, TaskStatus::Ready).into(),
+            );
+        }
+        let attempts = attempts as u32;
+
+        if attempts >= max_attempts {
+            tx.execute(
+                "UPDATE tasks SET status='escalated', updated_at=? WHERE id=?",
+                params![now, id.as_str()],
+            )
+            .map_err(backend)?;
+            SqliteTaskStore::append_event_with(
+                &tx,
+                EventKind::TaskFailed,
+                Some(&epic_name),
+                Some(id),
+                &serde_json::json!({"final": true, "attempts": attempts}),
+                now,
+            )
+            .map_err(backend)?;
+            SqliteTaskStore::append_event_with(
+                &tx,
+                EventKind::TaskEscalated,
+                Some(&epic_name),
+                Some(id),
+                &serde_json::json!({"attempts": attempts}),
+                now,
+            )
+            .map_err(backend)?;
+
+            let dependents: Vec<String> = {
+                let mut stmt = tx
+                    .prepare("SELECT task_id FROM task_deps WHERE depends_on=?")
+                    .map_err(backend)?;
+                let iter = stmt
+                    .query_map(params![id.as_str()], |row| row.get::<_, String>(0))
+                    .map_err(backend)?;
+                let mut out: Vec<String> = Vec::new();
+                for row in iter {
+                    out.push(row.map_err(backend)?);
+                }
+                out
+            };
+            for dep_id in dependents {
+                let updated = tx
+                    .execute(
+                        "UPDATE tasks SET status='blocked', updated_at=?
+                          WHERE id=? AND status IN ('pending','ready')",
+                        params![now, dep_id],
+                    )
+                    .map_err(backend)?;
+                if updated > 0 {
+                    SqliteTaskStore::append_event_with(
+                        &tx,
+                        EventKind::TaskBlocked,
+                        Some(&epic_name),
+                        Some(&TaskId::from_raw(dep_id.clone())),
+                        &serde_json::json!({"reason":"parent_escalated","parent": id.as_str()}),
+                        now,
+                    )
+                    .map_err(backend)?;
+                }
+            }
+
+            tx.commit().map_err(backend)?;
+            Ok(TaskFailureOutcome::Escalated { attempts })
+        } else {
+            tx.execute(
+                "UPDATE tasks SET status='ready', updated_at=? WHERE id=?",
+                params![now, id.as_str()],
+            )
+            .map_err(backend)?;
+            SqliteTaskStore::append_event_with(
+                &tx,
+                EventKind::TaskFailed,
+                Some(&epic_name),
+                Some(id),
+                &serde_json::json!({"final": false, "attempts": attempts}),
+                now,
+            )
+            .map_err(backend)?;
+            tx.commit().map_err(backend)?;
+            Ok(TaskFailureOutcome::Retried { attempts })
+        }
     }
 
     fn escalate_task(&self, id: &TaskId, issue_number: u64, now: DateTime<Utc>) -> Result<()> {
@@ -446,8 +859,213 @@ impl TaskRepo for SqliteTaskStore {
         Ok(())
     }
 
-    fn apply_reconciliation(&self, _plan: ReconciliationPlan, _now: DateTime<Utc>) -> Result<()> {
-        Err(unimpl("apply_reconciliation"))
+    fn apply_reconciliation(&self, plan: ReconciliationPlan, now: DateTime<Utc>) -> Result<()> {
+        let graph = TaskGraph::build(plan.deps.iter().cloned());
+        if let Some(cycle) = graph.detect_cycle() {
+            return Err(DomainError::DepCycle(cycle).into());
+        }
+
+        let mut conn = self.conn.lock().expect("poisoned");
+        let tx = conn.transaction().map_err(backend)?;
+
+        // Upsert epic as active, preserving created_at if existing.
+        let existing_created: Option<DateTime<Utc>> = tx
+            .query_row(
+                "SELECT created_at FROM epics WHERE name=?",
+                params![plan.epic.name],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(backend)?;
+        let created_at = existing_created.unwrap_or(plan.epic.created_at);
+        tx.execute(
+            "INSERT INTO epics(name, spec_path, branch, status, created_at, completed_at)
+             VALUES (?, ?, ?, 'active', ?, NULL)
+             ON CONFLICT(name) DO UPDATE SET
+               spec_path=excluded.spec_path,
+               branch=excluded.branch,
+               status='active',
+               completed_at=NULL",
+            params![
+                plan.epic.name,
+                plan.epic.spec_path.to_string_lossy(),
+                plan.epic.branch,
+                created_at,
+            ],
+        )
+        .map_err(backend)?;
+
+        // Upsert tasks: insert if missing, else update title/body (preserve attempts/status).
+        for nt in &plan.tasks {
+            let exists: bool = tx
+                .query_row(
+                    "SELECT 1 FROM tasks WHERE id=?",
+                    params![nt.id.as_str()],
+                    |_| Ok(true),
+                )
+                .optional()
+                .map_err(backend)?
+                .unwrap_or(false);
+            if exists {
+                tx.execute(
+                    "UPDATE tasks SET title=?, body=?, source=?, updated_at=?,
+                                       fingerprint = COALESCE(fingerprint, ?)
+                      WHERE id=?",
+                    params![
+                        nt.title,
+                        nt.body,
+                        nt.source.as_str(),
+                        now,
+                        nt.fingerprint,
+                        nt.id.as_str()
+                    ],
+                )
+                .map_err(backend)?;
+            } else {
+                tx.execute(
+                    "INSERT INTO tasks(id, epic_name, source, fingerprint, title, body,
+                                       status, attempts, branch, pr_number, escalated_issue,
+                                       created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, NULL, NULL, NULL, ?, ?)",
+                    params![
+                        nt.id.as_str(),
+                        plan.epic.name,
+                        nt.source.as_str(),
+                        nt.fingerprint,
+                        nt.title,
+                        nt.body,
+                        now,
+                        now,
+                    ],
+                )
+                .map_err(backend)?;
+            }
+        }
+
+        // Replace deps for plan tasks.
+        let plan_ids: Vec<String> = plan
+            .tasks
+            .iter()
+            .map(|t| t.id.as_str().to_string())
+            .collect();
+        if !plan_ids.is_empty() {
+            let placeholders = std::iter::repeat_n("?", plan_ids.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!("DELETE FROM task_deps WHERE task_id IN ({placeholders})");
+            let bind: Vec<&dyn rusqlite::ToSql> =
+                plan_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+            tx.execute(&sql, bind.as_slice()).map_err(backend)?;
+        }
+        for (a, b) in &plan.deps {
+            tx.execute(
+                "INSERT OR IGNORE INTO task_deps(task_id, depends_on) VALUES (?, ?)",
+                params![a.as_str(), b.as_str()],
+            )
+            .map_err(backend)?;
+        }
+
+        // Apply remote_state to set status and pr_number.
+        let in_remote: std::collections::BTreeSet<String> = plan
+            .remote_state
+            .iter()
+            .map(|r| r.task_id.as_str().to_string())
+            .collect();
+        for r in &plan.remote_state {
+            let desired = match (&r.pr, r.branch_exists) {
+                (Some(pr), _) if pr.merged => "done",
+                (Some(_), _) => "wip",
+                (None, true) => "wip",
+                (None, false) => {
+                    let deps_satisfied: i64 = tx
+                        .query_row(
+                            "SELECT CASE WHEN NOT EXISTS (
+                              SELECT 1 FROM task_deps d
+                              JOIN tasks dep ON dep.id = d.depends_on
+                              WHERE d.task_id = ? AND dep.status != 'done'
+                            ) THEN 1 ELSE 0 END",
+                            params![r.task_id.as_str()],
+                            |row| row.get(0),
+                        )
+                        .map_err(backend)?;
+                    if deps_satisfied == 1 {
+                        "ready"
+                    } else {
+                        "pending"
+                    }
+                }
+            };
+            let pr_num = r.pr.as_ref().map(|p| p.number as i64);
+            tx.execute(
+                "UPDATE tasks SET status=?, pr_number=COALESCE(?, pr_number), updated_at=?
+                  WHERE id=?",
+                params![desired, pr_num, now, r.task_id.as_str()],
+            )
+            .map_err(backend)?;
+        }
+
+        // For tasks in plan but not in remote_state: re-classify Pending only.
+        for nt in &plan.tasks {
+            if in_remote.contains(nt.id.as_str()) {
+                continue;
+            }
+            let cur: Option<String> = tx
+                .query_row(
+                    "SELECT status FROM tasks WHERE id=?",
+                    params![nt.id.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(backend)?;
+            if cur.as_deref() != Some("pending") {
+                continue;
+            }
+            let deps_satisfied: i64 = tx
+                .query_row(
+                    "SELECT CASE WHEN NOT EXISTS (
+                      SELECT 1 FROM task_deps d
+                      JOIN tasks dep ON dep.id = d.depends_on
+                      WHERE d.task_id = ? AND dep.status != 'done'
+                    ) THEN 1 ELSE 0 END",
+                    params![nt.id.as_str()],
+                    |row| row.get(0),
+                )
+                .map_err(backend)?;
+            let desired = if deps_satisfied == 1 {
+                "ready"
+            } else {
+                "pending"
+            };
+            tx.execute(
+                "UPDATE tasks SET status=?, updated_at=? WHERE id=? AND status='pending'",
+                params![desired, now, nt.id.as_str()],
+            )
+            .map_err(backend)?;
+        }
+
+        for branch in &plan.orphan_branches {
+            SqliteTaskStore::append_event_with(
+                &tx,
+                EventKind::Reconciled,
+                Some(&plan.epic.name),
+                None,
+                &serde_json::json!({"orphan_branch": branch}),
+                now,
+            )
+            .map_err(backend)?;
+        }
+        SqliteTaskStore::append_event_with(
+            &tx,
+            EventKind::Reconciled,
+            Some(&plan.epic.name),
+            None,
+            &serde_json::json!({"tasks": plan.tasks.len()}),
+            now,
+        )
+        .map_err(backend)?;
+
+        tx.commit().map_err(backend)?;
+        Ok(())
     }
 
     fn list_deps(&self, task_id: &TaskId) -> Result<Vec<TaskId>> {
