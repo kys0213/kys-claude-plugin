@@ -35,3 +35,6 @@ plugins/autodev/cli/target/
 # Plugin build outputs
 plugins/git-utils/dist/
 .claude/worktrees/
+
+# github-autopilot local task store cache
+.autopilot/
