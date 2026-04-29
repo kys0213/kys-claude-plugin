@@ -85,7 +85,10 @@ fn insert_creates_epic_tasks_deps_and_promotes_entry_points() {
     let kinds: Vec<EventKind> = events.iter().map(|e| e.kind).collect();
     assert!(kinds.contains(&EventKind::EpicStarted));
     assert_eq!(
-        kinds.iter().filter(|k| **k == EventKind::TaskInserted).count(),
+        kinds
+            .iter()
+            .filter(|k| **k == EventKind::TaskInserted)
+            .count(),
         3
     );
 }
@@ -149,7 +152,10 @@ fn claim_returns_oldest_ready_task() {
         )
         .unwrap();
 
-    let claimed = store.claim_next_task("e", t0() + Duration::seconds(20)).unwrap().unwrap();
+    let claimed = store
+        .claim_next_task("e", t0() + Duration::seconds(20))
+        .unwrap()
+        .unwrap();
     assert_eq!(claimed.id.as_str(), "A");
     assert_eq!(claimed.status, TaskStatus::Wip);
     assert_eq!(claimed.attempts, 1);
@@ -160,11 +166,7 @@ fn claim_skips_tasks_with_unsatisfied_deps() {
     let store = make_store();
     store
         .insert_epic_with_tasks(
-            plan(
-                "e",
-                vec![nt("A", "a"), nt("B", "b")],
-                vec![("B", "A")],
-            ),
+            plan("e", vec![nt("A", "a"), nt("B", "b")], vec![("B", "A")]),
             t0(),
         )
         .unwrap();
@@ -271,7 +273,11 @@ fn failure_below_max_returns_to_ready() {
         .unwrap();
     assert_eq!(outcome, TaskFailureOutcome::Retried { attempts: 1 });
     assert_eq!(
-        store.get_task(&TaskId::from_raw("A")).unwrap().unwrap().status,
+        store
+            .get_task(&TaskId::from_raw("A"))
+            .unwrap()
+            .unwrap()
+            .status,
         TaskStatus::Ready
     );
 }
@@ -281,18 +287,16 @@ fn failure_at_max_escalates_and_blocks_dependents() {
     let store = make_store();
     store
         .insert_epic_with_tasks(
-            plan(
-                "e",
-                vec![nt("A", "a"), nt("B", "b")],
-                vec![("B", "A")],
-            ),
+            plan("e", vec![nt("A", "a"), nt("B", "b")], vec![("B", "A")]),
             t0(),
         )
         .unwrap();
     // Drive A to attempts=3
     for _ in 0..3 {
         let _ = store.claim_next_task("e", t0()).unwrap().unwrap();
-        let _ = store.mark_task_failed(&TaskId::from_raw("A"), 3, t0()).unwrap();
+        let _ = store
+            .mark_task_failed(&TaskId::from_raw("A"), 3, t0())
+            .unwrap();
     }
     let by_id = |id: &str| store.get_task(&TaskId::from_raw(id)).unwrap().unwrap();
     assert_eq!(by_id("A").status, TaskStatus::Escalated);
@@ -371,7 +375,9 @@ fn reconcile_preserves_attempts_counter() {
         .insert_epic_with_tasks(plan("e", vec![nt("A", "a")], vec![]), t0())
         .unwrap();
     let _ = store.claim_next_task("e", t0()).unwrap().unwrap();
-    let _ = store.mark_task_failed(&TaskId::from_raw("A"), 3, t0()).unwrap();
+    let _ = store
+        .mark_task_failed(&TaskId::from_raw("A"), 3, t0())
+        .unwrap();
     let _ = store.claim_next_task("e", t0()).unwrap().unwrap();
     let plan = ReconciliationPlan {
         epic: epic("e"),
