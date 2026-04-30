@@ -152,12 +152,42 @@ fn body_claim_skips_tasks_with_unsatisfied_deps(store: Arc<dyn TaskStore>) {
     assert!(claimed_again.is_none());
 }
 
-fn body_claim_increments_attempts_on_each_call_after_revert(store: Arc<dyn TaskStore>) {
+fn body_release_claim_decrements_attempts(store: Arc<dyn TaskStore>) {
+    // claim → release_claim (UC-11 claim_lost) → claim should leave attempts at 1,
+    // not 2. release_claim cancels the bookkeeping +1 from claim so that lost
+    // claims do not consume an attempt budget.
     store
         .insert_epic_with_tasks(plan("e", vec![nt("A", "a")], vec![]), t0())
         .unwrap();
     let _ = store.claim_next_task("e", t0()).unwrap().unwrap();
-    store.revert_to_ready(&TaskId::from_raw("A"), t0()).unwrap();
+    store.release_claim(&TaskId::from_raw("A"), t0()).unwrap();
+    let claimed = store.claim_next_task("e", t0()).unwrap().unwrap();
+    assert_eq!(claimed.attempts, 1);
+}
+
+fn body_release_claim_rejects_non_wip(store: Arc<dyn TaskStore>) {
+    store
+        .insert_epic_with_tasks(plan("e", vec![nt("A", "a")], vec![]), t0())
+        .unwrap();
+    let err = store
+        .release_claim(&TaskId::from_raw("A"), t0())
+        .unwrap_err();
+    assert!(
+        format!("{err}").contains("illegal status transition"),
+        "expected illegal-transition, got: {err}"
+    );
+}
+
+fn body_mark_failed_preserves_attempts_for_retry(store: Arc<dyn TaskStore>) {
+    // Tried-and-failed should preserve the attempt count so that escalation
+    // counts toward max_attempts. Distinct from release_claim semantics.
+    store
+        .insert_epic_with_tasks(plan("e", vec![nt("A", "a")], vec![]), t0())
+        .unwrap();
+    let _ = store.claim_next_task("e", t0()).unwrap().unwrap();
+    let _ = store
+        .mark_task_failed(&TaskId::from_raw("A"), 3, t0())
+        .unwrap();
     let claimed = store.claim_next_task("e", t0()).unwrap().unwrap();
     assert_eq!(claimed.attempts, 2);
 }
@@ -403,6 +433,148 @@ fn body_upsert_watch_task_returns_duplicate_on_existing_fingerprint(store: Arc<d
     assert_eq!(tasks.len(), 1);
 }
 
+fn body_find_task_by_pr_returns_owning_task(store: Arc<dyn TaskStore>) {
+    store
+        .insert_epic_with_tasks(plan("e", vec![nt("A", "a"), nt("B", "b")], vec![]), t0())
+        .unwrap();
+    let _ = store.claim_next_task("e", t0()).unwrap().unwrap();
+    store
+        .complete_task_and_unblock(&TaskId::from_raw("A"), 42, t0())
+        .unwrap();
+    let found = store.find_task_by_pr(42).unwrap().unwrap();
+    assert_eq!(found.id.as_str(), "A");
+}
+
+fn body_find_task_by_pr_returns_none_when_unknown(store: Arc<dyn TaskStore>) {
+    assert!(store.find_task_by_pr(9999).unwrap().is_none());
+}
+
+fn body_find_active_by_spec_path_matches_active_only(store: Arc<dyn TaskStore>) {
+    store
+        .insert_epic_with_tasks(plan("e1", vec![], vec![]), t0())
+        .unwrap();
+    store
+        .insert_epic_with_tasks(plan("e2", vec![], vec![]), t0())
+        .unwrap();
+    store
+        .set_epic_status("e2", EpicStatus::Abandoned, t0() + Duration::seconds(1))
+        .unwrap();
+    let path = std::path::PathBuf::from("spec/e1.md");
+    let found = store.find_active_by_spec_path(&path).unwrap().unwrap();
+    assert_eq!(found.name, "e1");
+}
+
+fn body_find_active_by_spec_path_returns_none_when_no_match(store: Arc<dyn TaskStore>) {
+    store
+        .insert_epic_with_tasks(plan("e1", vec![], vec![]), t0())
+        .unwrap();
+    let path = std::path::PathBuf::from("spec/elsewhere.md");
+    assert!(store.find_active_by_spec_path(&path).unwrap().is_none());
+}
+
+fn body_force_status_bypasses_normal_transition(store: Arc<dyn TaskStore>) {
+    store
+        .insert_epic_with_tasks(plan("e", vec![nt("A", "a")], vec![]), t0())
+        .unwrap();
+    // Drive A into Escalated via the normal failure path, then jump straight
+    // back to Pending — a transition the normal graph would forbid.
+    for _ in 0..3 {
+        let _ = store.claim_next_task("e", t0()).unwrap().unwrap();
+        let _ = store
+            .mark_task_failed(&TaskId::from_raw("A"), 3, t0())
+            .unwrap();
+    }
+    store
+        .force_status(
+            &TaskId::from_raw("A"),
+            TaskStatus::Pending,
+            "manual reset",
+            t0(),
+        )
+        .unwrap();
+    let a = store.get_task(&TaskId::from_raw("A")).unwrap().unwrap();
+    assert_eq!(a.status, TaskStatus::Pending);
+}
+
+fn body_force_status_does_not_unblock_dependents(store: Arc<dyn TaskStore>) {
+    // After parent A is forced to Done, child B should remain Blocked —
+    // force_status is an operator override, not a normal completion.
+    store
+        .insert_epic_with_tasks(
+            plan("e", vec![nt("A", "a"), nt("B", "b")], vec![("B", "A")]),
+            t0(),
+        )
+        .unwrap();
+    for _ in 0..3 {
+        let _ = store.claim_next_task("e", t0()).unwrap().unwrap();
+        let _ = store
+            .mark_task_failed(&TaskId::from_raw("A"), 3, t0())
+            .unwrap();
+    }
+    let b_before = store.get_task(&TaskId::from_raw("B")).unwrap().unwrap();
+    assert_eq!(b_before.status, TaskStatus::Blocked);
+    store
+        .force_status(
+            &TaskId::from_raw("A"),
+            TaskStatus::Done,
+            "human fixed",
+            t0(),
+        )
+        .unwrap();
+    let b_after = store.get_task(&TaskId::from_raw("B")).unwrap().unwrap();
+    assert_eq!(b_after.status, TaskStatus::Blocked);
+}
+
+fn body_force_status_records_event_with_reason(store: Arc<dyn TaskStore>) {
+    store
+        .insert_epic_with_tasks(plan("e", vec![nt("A", "a")], vec![]), t0())
+        .unwrap();
+    store
+        .force_status(
+            &TaskId::from_raw("A"),
+            TaskStatus::Pending,
+            "rollback for repro",
+            t0(),
+        )
+        .unwrap();
+    let evs = store
+        .list_events(EventFilter {
+            kinds: vec![EventKind::TaskForceStatus],
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(evs.len(), 1);
+    assert_eq!(evs[0].payload["reason"], "rollback for repro");
+    assert_eq!(evs[0].payload["to"], "pending");
+}
+
+fn body_suppression_blocks_until_window_expires(store: Arc<dyn TaskStore>) {
+    let until = t0() + Duration::hours(1);
+    store.suppress("fp-1", "unmatched_watch", until).unwrap();
+    assert!(store
+        .is_suppressed("fp-1", "unmatched_watch", t0() + Duration::minutes(30))
+        .unwrap());
+    assert!(!store
+        .is_suppressed("fp-1", "unmatched_watch", t0() + Duration::hours(2))
+        .unwrap());
+}
+
+fn body_suppression_is_scoped_by_reason(store: Arc<dyn TaskStore>) {
+    store
+        .suppress("fp-1", "unmatched_watch", t0() + Duration::hours(1))
+        .unwrap();
+    assert!(!store
+        .is_suppressed("fp-1", "rejected_by_human", t0())
+        .unwrap());
+}
+
+fn body_suppression_clear_unblocks_immediately(store: Arc<dyn TaskStore>) {
+    let until = t0() + Duration::days(30);
+    store.suppress("fp-1", "r", until).unwrap();
+    store.clear("fp-1", "r").unwrap();
+    assert!(!store.is_suppressed("fp-1", "r", t0()).unwrap());
+}
+
 macro_rules! conformance_suite {
     ($($name:ident),* $(,)?) => {
         mod in_memory {
@@ -440,7 +612,9 @@ conformance_suite!(
     body_claim_returns_none_when_no_ready_task,
     body_claim_returns_oldest_ready_task,
     body_claim_skips_tasks_with_unsatisfied_deps,
-    body_claim_increments_attempts_on_each_call_after_revert,
+    body_release_claim_decrements_attempts,
+    body_release_claim_rejects_non_wip,
+    body_mark_failed_preserves_attempts_for_retry,
     body_claim_is_atomic_under_concurrent_callers,
     body_completing_a_task_unblocks_dependents_with_satisfied_deps,
     body_complete_rejects_when_status_not_wip,
@@ -451,6 +625,16 @@ conformance_suite!(
     body_reconcile_preserves_attempts_counter,
     body_upsert_watch_task_inserts_new_when_no_fingerprint_match,
     body_upsert_watch_task_returns_duplicate_on_existing_fingerprint,
+    body_find_task_by_pr_returns_owning_task,
+    body_find_task_by_pr_returns_none_when_unknown,
+    body_find_active_by_spec_path_matches_active_only,
+    body_find_active_by_spec_path_returns_none_when_no_match,
+    body_force_status_bypasses_normal_transition,
+    body_force_status_does_not_unblock_dependents,
+    body_force_status_records_event_with_reason,
+    body_suppression_blocks_until_window_expires,
+    body_suppression_is_scoped_by_reason,
+    body_suppression_clear_unblocks_immediately,
 );
 
 #[test]

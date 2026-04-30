@@ -109,7 +109,7 @@ impl<'a> TaskService<'a> {
         let id = TaskId::from_raw(task_id);
         let now = self.clock.now();
         self.store
-            .force_status(&id, TaskStatus::from(to), now)
+            .force_status(&id, TaskStatus::from(to), reason.unwrap_or(""), now)
             .with_context(|| format!("forcing status of task '{task_id}'"))?;
         if let Some(r) = reason {
             writeln!(out, "task '{task_id}' status forced to {:?} ({r})", to)?;

@@ -9,7 +9,7 @@ use crate::domain::{
 };
 use crate::ports::task_store::{
     EpicPlan, EpicRepo, EventFilter, EventLog, NewWatchTask, ReconciliationPlan, RemotePrState,
-    Result, TaskRepo, TaskStoreError, UnblockReport, UpsertOutcome,
+    Result, SuppressionRepo, TaskRepo, TaskStoreError, UnblockReport, UpsertOutcome,
 };
 
 #[derive(Default)]
@@ -18,6 +18,7 @@ struct State {
     tasks: BTreeMap<TaskId, Task>,
     deps: Vec<(TaskId, TaskId)>,
     events: Vec<Event>,
+    suppressions: BTreeMap<(String, String), DateTime<Utc>>,
 }
 
 #[derive(Default)]
@@ -128,6 +129,26 @@ impl EpicRepo for InMemoryTaskStore {
         );
         InMemoryTaskStore::push_event(&mut s, event);
         Ok(())
+    }
+
+    fn find_active_by_spec_path(&self, spec_path: &std::path::Path) -> Result<Option<Epic>> {
+        let s = self.state.lock().expect("poisoned");
+        let matches: Vec<&Epic> = s
+            .epics
+            .values()
+            .filter(|e| e.status == EpicStatus::Active && e.spec_path == spec_path)
+            .collect();
+        match matches.as_slice() {
+            [] => Ok(None),
+            [one] => Ok(Some((*one).clone())),
+            many => Err(DomainError::Inconsistency(format!(
+                "{} active epics share spec_path {:?}: {:?}",
+                many.len(),
+                spec_path,
+                many.iter().map(|e| &e.name).collect::<Vec<_>>()
+            ))
+            .into()),
+        }
     }
 }
 
@@ -537,30 +558,61 @@ impl TaskRepo for InMemoryTaskStore {
         Ok(())
     }
 
-    fn revert_to_ready(&self, id: &TaskId, now: DateTime<Utc>) -> Result<()> {
+    fn release_claim(&self, id: &TaskId, now: DateTime<Utc>) -> Result<()> {
         let mut s = self.state.lock().expect("poisoned");
         let task = s
             .tasks
             .get_mut(id)
             .ok_or_else(|| TaskStoreError::NotFound(format!("task '{id}'")))?;
         let cur = task.status;
-        if matches!(cur, TaskStatus::Done | TaskStatus::Escalated) {
+        if cur != TaskStatus::Wip {
             return Err(DomainError::IllegalTransition(id.clone(), cur, TaskStatus::Ready).into());
         }
         task.status = TaskStatus::Ready;
+        task.attempts = task.attempts.saturating_sub(1);
         task.updated_at = now;
         Ok(())
     }
 
-    fn force_status(&self, id: &TaskId, new_status: TaskStatus, now: DateTime<Utc>) -> Result<()> {
+    fn force_status(
+        &self,
+        id: &TaskId,
+        target: TaskStatus,
+        reason: &str,
+        now: DateTime<Utc>,
+    ) -> Result<()> {
         let mut s = self.state.lock().expect("poisoned");
-        let task = s
-            .tasks
-            .get_mut(id)
-            .ok_or_else(|| TaskStoreError::NotFound(format!("task '{id}'")))?;
-        task.status = new_status;
-        task.updated_at = now;
+        let (epic_name, prev) = {
+            let task = s
+                .tasks
+                .get_mut(id)
+                .ok_or_else(|| TaskStoreError::NotFound(format!("task '{id}'")))?;
+            let prev = task.status;
+            task.status = target;
+            task.updated_at = now;
+            (task.epic_name.clone(), prev)
+        };
+        let event = InMemoryTaskStore::make_event(
+            EventKind::TaskForceStatus,
+            Some(epic_name),
+            Some(id.clone()),
+            serde_json::json!({
+                "from": prev.as_str(),
+                "to": target.as_str(),
+                "reason": reason,
+            }),
+            now,
+        );
+        InMemoryTaskStore::push_event(&mut s, event);
         Ok(())
+    }
+
+    fn find_task_by_pr(&self, pr_number: u64) -> Result<Option<Task>> {
+        let s = self.state.lock().expect("poisoned");
+        Ok(s.tasks
+            .values()
+            .find(|t| t.pr_number == Some(pr_number))
+            .cloned())
     }
 
     fn apply_reconciliation(&self, plan: ReconciliationPlan, now: DateTime<Utc>) -> Result<()> {
@@ -714,6 +766,36 @@ fn remote_to_status(r: &crate::ports::task_store::RemoteTaskState, s: &State) ->
             }
         }
         (Some(_), false) => TaskStatus::Wip, // PR open without branch is unusual; treat as wip
+    }
+}
+
+impl SuppressionRepo for InMemoryTaskStore {
+    fn suppress(
+        &self,
+        fingerprint: &str,
+        reason: &str,
+        suppress_until: DateTime<Utc>,
+    ) -> Result<()> {
+        let mut s = self.state.lock().expect("poisoned");
+        s.suppressions.insert(
+            (fingerprint.to_string(), reason.to_string()),
+            suppress_until,
+        );
+        Ok(())
+    }
+
+    fn is_suppressed(&self, fingerprint: &str, reason: &str, now: DateTime<Utc>) -> Result<bool> {
+        let s = self.state.lock().expect("poisoned");
+        Ok(s.suppressions
+            .get(&(fingerprint.to_string(), reason.to_string()))
+            .is_some_and(|until| now < *until))
+    }
+
+    fn clear(&self, fingerprint: &str, reason: &str) -> Result<()> {
+        let mut s = self.state.lock().expect("poisoned");
+        s.suppressions
+            .remove(&(fingerprint.to_string(), reason.to_string()));
+        Ok(())
     }
 }
 

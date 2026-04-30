@@ -15,12 +15,13 @@ use crate::domain::{
     TaskSource, TaskStatus,
 };
 use crate::ports::task_store::{
-    EpicPlan, EpicRepo, EventFilter, EventLog, NewWatchTask, ReconciliationPlan, Result, TaskRepo,
-    TaskStoreError, UnblockReport, UpsertOutcome,
+    EpicPlan, EpicRepo, EventFilter, EventLog, NewWatchTask, ReconciliationPlan, Result,
+    SuppressionRepo, TaskRepo, TaskStoreError, UnblockReport, UpsertOutcome,
 };
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 const V1_SQL: &str = include_str!("migrations/V1__initial.sql");
+const V2_SQL: &str = include_str!("migrations/V2__lookup_indexes.sql");
 
 pub struct SqliteTaskStore {
     conn: Mutex<Connection>,
@@ -63,6 +64,7 @@ impl SqliteTaskStore {
 
         if !has_meta {
             conn.execute_batch(V1_SQL).map_err(backend)?;
+            conn.execute_batch(V2_SQL).map_err(backend)?;
             return Ok(());
         }
 
@@ -82,6 +84,10 @@ impl SqliteTaskStore {
                 found,
                 expected: SCHEMA_VERSION,
             });
+        }
+
+        if found < 2 {
+            conn.execute_batch(V2_SQL).map_err(backend)?;
         }
         Ok(())
     }
@@ -284,6 +290,32 @@ impl EpicRepo for SqliteTaskStore {
         )
         .map_err(backend)?;
         Ok(())
+    }
+
+    fn find_active_by_spec_path(&self, spec_path: &std::path::Path) -> Result<Option<Epic>> {
+        let conn = self.conn.lock().expect("poisoned");
+        let path_str = spec_path.to_string_lossy().to_string();
+        let mut stmt = conn
+            .prepare(
+                "SELECT * FROM epics WHERE status='active' AND spec_path=? ORDER BY name LIMIT 2",
+            )
+            .map_err(backend)?;
+        let mut rows = stmt
+            .query_map(params![path_str], epic_from_row)
+            .map_err(backend)?;
+        let first = match rows.next() {
+            None => return Ok(None),
+            Some(r) => r.map_err(backend)?,
+        };
+        if let Some(second) = rows.next() {
+            let second = second.map_err(backend)?;
+            return Err(DomainError::Inconsistency(format!(
+                "active epics share spec_path {path_str:?}: {} vs {}",
+                first.name, second.name
+            ))
+            .into());
+        }
+        Ok(Some(first))
     }
 }
 
@@ -819,7 +851,7 @@ impl TaskRepo for SqliteTaskStore {
         Ok(())
     }
 
-    fn revert_to_ready(&self, id: &TaskId, now: DateTime<Utc>) -> Result<()> {
+    fn release_claim(&self, id: &TaskId, now: DateTime<Utc>) -> Result<()> {
         let conn = self.conn.lock().expect("poisoned");
         let cur: Option<String> = conn
             .query_row(
@@ -832,31 +864,72 @@ impl TaskRepo for SqliteTaskStore {
         let cur = cur.ok_or_else(|| TaskStoreError::NotFound(format!("task '{id}'")))?;
         let cur_status = TaskStatus::parse(&cur)
             .ok_or_else(|| TaskStoreError::Backend(format!("invalid stored task status: {cur}")))?;
-        if matches!(cur_status, TaskStatus::Done | TaskStatus::Escalated) {
+        if cur_status != TaskStatus::Wip {
             return Err(
                 DomainError::IllegalTransition(id.clone(), cur_status, TaskStatus::Ready).into(),
             );
         }
         conn.execute(
-            "UPDATE tasks SET status='ready', updated_at=? WHERE id=?",
+            "UPDATE tasks
+                SET status='ready',
+                    attempts = MAX(attempts - 1, 0),
+                    updated_at=?
+              WHERE id=? AND status='wip'",
             params![now, id.as_str()],
         )
         .map_err(backend)?;
         Ok(())
     }
 
-    fn force_status(&self, id: &TaskId, new_status: TaskStatus, now: DateTime<Utc>) -> Result<()> {
+    fn force_status(
+        &self,
+        id: &TaskId,
+        target: TaskStatus,
+        reason: &str,
+        now: DateTime<Utc>,
+    ) -> Result<()> {
         let conn = self.conn.lock().expect("poisoned");
-        let updated = conn
-            .execute(
-                "UPDATE tasks SET status=?, updated_at=? WHERE id=?",
-                params![new_status.as_str(), now, id.as_str()],
+        let prev: Option<(String, String)> = conn
+            .query_row(
+                "SELECT epic_name, status FROM tasks WHERE id=?",
+                params![id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
+            .optional()
             .map_err(backend)?;
-        if updated == 0 {
-            return Err(TaskStoreError::NotFound(format!("task '{id}'")));
-        }
+        let (epic_name, prev_status_str) =
+            prev.ok_or_else(|| TaskStoreError::NotFound(format!("task '{id}'")))?;
+        conn.execute(
+            "UPDATE tasks SET status=?, updated_at=? WHERE id=?",
+            params![target.as_str(), now, id.as_str()],
+        )
+        .map_err(backend)?;
+        SqliteTaskStore::append_event_with(
+            &conn,
+            EventKind::TaskForceStatus,
+            Some(&epic_name),
+            Some(id),
+            &serde_json::json!({
+                "from": prev_status_str,
+                "to": target.as_str(),
+                "reason": reason,
+            }),
+            now,
+        )
+        .map_err(backend)?;
         Ok(())
+    }
+
+    fn find_task_by_pr(&self, pr_number: u64) -> Result<Option<Task>> {
+        let conn = self.conn.lock().expect("poisoned");
+        let mut stmt = conn
+            .prepare("SELECT * FROM tasks WHERE pr_number=? LIMIT 1")
+            .map_err(backend)?;
+        let task = stmt
+            .query_row(params![pr_number as i64], task_from_row)
+            .optional()
+            .map_err(backend)?;
+        Ok(task)
     }
 
     fn apply_reconciliation(&self, plan: ReconciliationPlan, now: DateTime<Utc>) -> Result<()> {
@@ -1084,6 +1157,49 @@ impl TaskRepo for SqliteTaskStore {
     }
 }
 
+impl SuppressionRepo for SqliteTaskStore {
+    fn suppress(
+        &self,
+        fingerprint: &str,
+        reason: &str,
+        suppress_until: DateTime<Utc>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().expect("poisoned");
+        conn.execute(
+            "INSERT INTO escalation_suppression(fingerprint, reason, suppress_until)
+             VALUES (?, ?, ?)
+             ON CONFLICT(fingerprint, reason) DO UPDATE SET suppress_until=excluded.suppress_until",
+            params![fingerprint, reason, suppress_until],
+        )
+        .map_err(backend)?;
+        Ok(())
+    }
+
+    fn is_suppressed(&self, fingerprint: &str, reason: &str, now: DateTime<Utc>) -> Result<bool> {
+        let conn = self.conn.lock().expect("poisoned");
+        let until: Option<DateTime<Utc>> = conn
+            .query_row(
+                "SELECT suppress_until FROM escalation_suppression
+                 WHERE fingerprint=? AND reason=?",
+                params![fingerprint, reason],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(backend)?;
+        Ok(until.is_some_and(|u| now < u))
+    }
+
+    fn clear(&self, fingerprint: &str, reason: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("poisoned");
+        conn.execute(
+            "DELETE FROM escalation_suppression WHERE fingerprint=? AND reason=?",
+            params![fingerprint, reason],
+        )
+        .map_err(backend)?;
+        Ok(())
+    }
+}
+
 impl EventLog for SqliteTaskStore {
     fn append_event(&self, event: &Event) -> Result<()> {
         let conn = self.conn.lock().expect("poisoned");
@@ -1148,7 +1264,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn open_in_memory_initializes_schema_v1() {
+    fn open_in_memory_initializes_to_current_schema() {
         let store = SqliteTaskStore::open_in_memory().expect("open");
         let conn = store.conn.lock().unwrap();
         let v: String = conn
@@ -1158,7 +1274,24 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(v, "1");
+        assert_eq!(v, SCHEMA_VERSION.to_string());
+    }
+
+    #[test]
+    fn migrates_v1_db_to_current() {
+        // Simulate an older DB at V1: only V1 SQL applied. open() should
+        // upgrade by running V2 forward migrations.
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(V1_SQL).unwrap();
+        SqliteTaskStore::migrate(&mut conn).unwrap();
+        let v: String = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key='schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(v, SCHEMA_VERSION.to_string());
     }
 
     #[test]
@@ -1174,7 +1307,7 @@ mod tests {
         match err {
             TaskStoreError::SchemaMismatch { found, expected } => {
                 assert_eq!(found, 999);
-                assert_eq!(expected, 1);
+                assert_eq!(expected, SCHEMA_VERSION);
             }
             other => panic!("expected SchemaMismatch, got {other:?}"),
         }
