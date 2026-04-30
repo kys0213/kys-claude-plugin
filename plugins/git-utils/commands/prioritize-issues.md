@@ -15,13 +15,87 @@ allowed-tools:
 
 ## 실행 흐름
 
-### Step 1: 열린 Issue 수집
+전체 흐름은 다음과 같습니다. 메타데이터 → 필터링 → 후보 압축 → 본문 조회 → 분석 → 출력 순으로 진행하여 tool result 크기 폭발을 방지합니다.
 
-```bash
-gh issue list --state open --json number,title,labels,createdAt,comments,body --limit 50
+```
+Step 1a: 메타데이터 수집 (body 제외)
+   ↓
+Step 1b: 머지/PR 상태로 필터링
+   ↓
+Step 1c: 상위 N개 후보 선정 후 body 조회
+   ↓
+Step 2: 우선순위 분석 + 의존성 그래프
+   ↓
+Step 3: 코드베이스 연관성 분석 (4단계 절차)
+   ↓
+Step 4: 우선순위 결과 출력
+   ↓
+Step 5: 다음 액션 제안
 ```
 
-모든 열린 issue를 가져옵니다.
+### Step 1a: 열린 Issue 메타데이터 수집 (body 제외)
+
+body는 한 issue당 수 KB까지 커질 수 있어 50개 이상이면 tool result가 잘립니다. 먼저 body를 제외한 메타데이터만 가져옵니다.
+
+```bash
+gh issue list --state open --json number,title,labels,createdAt,comments --limit 50
+```
+
+이 단계의 결과는 우선순위 후보 선별을 위한 기초 데이터로만 사용합니다.
+
+### Step 1b: 머지/PR 상태로 필터링
+
+작업이 이미 끝났거나 진행 중인 issue를 후보에서 제외합니다.
+
+#### (1) 최근 머지된 issue 자동 감지
+
+최근 100개 커밋에서 issue 번호를 추출합니다.
+
+```bash
+git log --oneline -100 | grep -oE '#[0-9]+' | sort -u
+```
+
+위 결과와 Step 1a의 열린 issue 번호를 교차하여, 매칭되는 issue는 다음과 같이 처리합니다:
+
+- 최종 출력에 `[머지됨]` 마커 표시
+- 사용자에게 close 제안 (Step 5에서 일괄 처리)
+- 우선순위 후보에서 제외
+
+#### (2) 연결된 PR/브랜치 상태 체크
+
+남은 후보 각각에 대해 연결된 PR을 조회합니다.
+
+```bash
+gh issue view <num> --json closedByPullRequests,number,title
+# 또는 검색 기반 조회
+gh pr list --state open --search "<issue_number> in:body"
+```
+
+| 상태 | 마커 | 후보 처리 |
+|------|------|-----------|
+| PR open 존재 | `[PR 진행 중 #<pr>]` | 우선순위 제외 |
+| PR closed/merged 존재 | `[머지됨]` | 우선순위 제외 + close 제안 |
+| 원격 브랜치만 존재 (PR 없음) | `[작업 시작됨]` | 후보 유지 (가중치 감점) |
+| 연결 없음 | (없음) | 후보 유지 |
+
+원격 브랜치 존재 여부는 다음으로 확인합니다:
+
+```bash
+git ls-remote --heads origin | grep -E "(issue[-_]?<num>|<num>[-_])"
+```
+
+### Step 1c: 상위 N개 후보 선정 후 body 조회
+
+Step 1a/1b를 거쳐 살아남은 후보를 Step 2 가중치 기준 **상위 10개**(또는 `--limit N` 인자)로 압축한 뒤, 그때서야 body를 조회합니다.
+
+```bash
+# 후보 번호 리스트를 받아 issue 하나씩 body 조회
+for num in $CANDIDATE_NUMBERS; do
+  gh issue view "$num" --json number,title,body,labels
+done
+```
+
+이렇게 하면 tool result에 들어가는 body 총량을 50개분에서 10개분으로 축소합니다.
 
 ### Step 2: 우선순위 분석
 
@@ -31,22 +105,95 @@ gh issue list --state open --json number,title,labels,createdAt,comments,body --
 |------|--------|------|
 | **긴급도** | 높음 | bug > enhancement > documentation |
 | **영향 범위** | 높음 | 핵심 기능 영향 여부 |
-| **의존성** | 중간 | 다른 issue가 이 작업에 의존하는지 |
+| **의존성 (피의존)** | 중간 | 다른 issue가 이 issue를 참조 → 가산점 |
+| **의존성 (선행)** | 중간 | 이 issue가 다른 미해결 issue에 의존 → 감점 |
 | **난이도** | 중간 | 구현 복잡도 (낮을수록 우선) |
 | **오래된 정도** | 낮음 | 오래 방치된 issue 가점 |
 | **댓글 수** | 낮음 | 관심도 지표 |
+| **작업 진행 흔적** | 낮음 | `[작업 시작됨]` 마커가 있으면 감점 |
+
+#### Issue 의존성 그래프 구축
+
+Step 1c에서 가져온 각 issue body에서 `#\d+` 패턴을 추출하여 참조 그래프를 만듭니다.
+
+```bash
+# 예: issue 본문에서 참조 추출
+echo "$BODY" | grep -oE '#[0-9]+' | sort -u
+```
+
+```
+references[issue_num] = [참조하는 다른 issue 번호들]
+referenced_by[issue_num] = [이 issue를 참조하는 issue 번호들]
+```
+
+가중치 계산 시:
+
+- `referenced_by`가 많을수록 가산점 (여러 issue가 이 작업을 기다림)
+- `references` 중 열린 상태가 있으면 감점 (선행 작업 미완료)
+
+출력 시 의존성 관계를 시각적으로 표시합니다:
+
+```
+#638
+  ← #526이 이 issue에 의존
+  → #634를 선행 요구
+```
 
 ### Step 3: 코드베이스 연관성 분석
 
-issue 내용과 현재 코드베이스를 대조하여:
+issue 내용과 현재 코드베이스의 연관성을 다음 4단계 절차로 검증합니다.
 
-- 관련 파일/모듈 식별
-- 현재 작업 중인 영역과의 연관성 확인
-- 구현 난이도 추정
+#### (1) body에서 파일 경로 패턴 추출
+
+issue body에서 코드 경로처럼 보이는 토큰을 추출합니다.
+
+```bash
+echo "$BODY" | grep -oE '(internal|src|plugins|crates|common|cmd|pkg|lib|app)/[A-Za-z0-9_./-]+'
+```
+
+추출된 경로 후보를 중복 제거하여 리스트화합니다.
+
+#### (2) ls / Glob으로 실제 존재 여부 검증
+
+각 경로가 실제로 존재하는지 확인합니다 (없는 경로는 거짓 양성으로 제외).
+
+```bash
+ls -d <path> 2>/dev/null
+# 또는 와일드카드
+```
+
+Glob 도구로 패턴 매칭을 보완합니다 (예: `plugins/**/<keyword>*`).
+
+#### (3) git log로 해당 영역의 최근 활동 빈도 확인
+
+검증된 경로 각각에 대해 최근 커밋 활동을 체크합니다.
+
+```bash
+git log --oneline --since='3 months ago' -- <path> | wc -l
+```
+
+활동 빈도가 높을수록 "활발하게 개발 중인 영역"으로 가산점.
+
+#### (4) 현재 작업과의 교차 분석
+
+현재 브랜치의 변경 영역과 issue 관련 경로를 교차하여 연관성을 평가합니다.
+
+```bash
+git diff main...HEAD --name-only
+```
+
+issue 관련 경로와 위 결과의 교집합이 있으면 "현재 작업과 연속성 있는 issue"로 가산점.
+
+이 단계의 산출물:
+
+- issue별 관련 파일/모듈 리스트
+- 최근 활동 빈도 점수
+- 현재 작업과의 연관성 점수
+- 구현 난이도 추정 (관련 파일 수 + 변경 영역 크기 기반)
 
 ### Step 4: 우선순위 결과 출력
 
-상위 5개 issue를 다음 형식으로 출력합니다:
+상위 5개 issue를 다음 형식으로 출력합니다. 머지/PR-진행 중 issue는 별도 섹션에 분리해 표시합니다.
 
 ```
 ## 추천 작업 순위
@@ -55,16 +202,80 @@ issue 내용과 현재 코드베이스를 대조하여:
 - 긴급도: ★★★
 - 영향 범위: ★★☆
 - 난이도: ★☆☆
-- 관련 파일: src/...
+- 관련 파일: plugins/git-utils/commands/...
+- 최근 활동: 12 commits / 3 months
+- 현재 작업과의 연관성: 높음 (겹치는 파일 2개)
+- 의존성:
+  ← #526, #527이 이 issue에 의존
+  → 선행 요구 없음
 - 추천 이유: ...
 
 ### 2위: ...
+
+## 참고: 정리 권장 issue
+
+### [머지됨] #NNN {제목}
+최근 커밋 abc1234에서 처리됨. close 권장.
+
+### [PR 진행 중] #NNN {제목} → PR #MMM
+이미 작업 중이므로 우선순위에서 제외.
+
+### [작업 시작됨] #NNN {제목}
+원격 브랜치 issue-NNN-foo 존재. PR 미생성 상태.
 ```
 
 ### Step 5: 다음 액션 제안
 
-사용자에게 선택지를 제공합니다:
+`AskUserQuestion`으로 사용자에게 선택지를 제공합니다:
 
 - 특정 issue 작업 시작 (브랜치 생성 포함)
-- issue에 코멘트 추가
+- `[머지됨]` 마커 issue 일괄 close
+- `[작업 시작됨]` 마커 issue의 기존 브랜치로 전환
+- 특정 issue에 코멘트 추가
 - 라벨 업데이트
+
+## 에러 처리
+
+**`gh` 인증 실패:**
+
+- `gh auth login` 안내
+
+**`gh issue list` 결과 0개:**
+
+- "열린 issue가 없습니다" 메시지 출력 후 종료
+
+**Step 1a 결과가 너무 커서 잘리는 경우 (방어적 처리):**
+
+- `--limit`을 절반으로 줄여 재시도하고 사용자에게 알림
+
+**`closedByPullRequests` 필드가 없는 gh 버전:**
+
+- `gh pr list --search` 폴백으로 자동 전환
+
+## Output Examples
+
+### 성공 케이스
+
+```
+## 추천 작업 순위
+
+### 1위: #642 epic store domain wiring
+- 긴급도: ★★★
+- 영향 범위: ★★★
+- 난이도: ★★☆
+- 관련 파일: plugins/github-autopilot/internal/epic/
+- 최근 활동: 8 commits / 3 months
+- 의존성: ← #645, #646이 의존
+
+## 참고: 정리 권장 issue
+
+### [머지됨] #641 skip idle check on first run
+커밋 e7f745e에서 처리됨. close 권장.
+```
+
+### 실패 케이스 (인증)
+
+```
+gh CLI 인증이 필요합니다. 다음 명령으로 로그인하세요:
+  gh auth login
+```
