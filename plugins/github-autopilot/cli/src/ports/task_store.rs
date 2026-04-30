@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
@@ -106,7 +108,7 @@ pub trait EpicRepo: Send + Sync {
     /// invariant is that at most one active epic owns a given spec; if two
     /// or more are observed, returns [`DomainError::Inconsistency`] so the
     /// caller can surface it rather than silently picking one.
-    fn find_active_by_spec_path(&self, spec_path: &std::path::Path) -> Result<Option<Epic>>;
+    fn find_active_by_spec_path(&self, spec_path: &Path) -> Result<Option<Epic>>;
 }
 
 pub trait TaskRepo: Send + Sync {

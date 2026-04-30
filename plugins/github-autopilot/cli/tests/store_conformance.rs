@@ -153,9 +153,6 @@ fn body_claim_skips_tasks_with_unsatisfied_deps(store: Arc<dyn TaskStore>) {
 }
 
 fn body_release_claim_decrements_attempts(store: Arc<dyn TaskStore>) {
-    // claim → release_claim (UC-11 claim_lost) → claim should leave attempts at 1,
-    // not 2. release_claim cancels the bookkeeping +1 from claim so that lost
-    // claims do not consume an attempt budget.
     store
         .insert_epic_with_tasks(plan("e", vec![nt("A", "a")], vec![]), t0())
         .unwrap();
@@ -179,8 +176,6 @@ fn body_release_claim_rejects_non_wip(store: Arc<dyn TaskStore>) {
 }
 
 fn body_mark_failed_preserves_attempts_for_retry(store: Arc<dyn TaskStore>) {
-    // Tried-and-failed should preserve the attempt count so that escalation
-    // counts toward max_attempts. Distinct from release_claim semantics.
     store
         .insert_epic_with_tasks(plan("e", vec![nt("A", "a")], vec![]), t0())
         .unwrap();
@@ -476,8 +471,6 @@ fn body_force_status_bypasses_normal_transition(store: Arc<dyn TaskStore>) {
     store
         .insert_epic_with_tasks(plan("e", vec![nt("A", "a")], vec![]), t0())
         .unwrap();
-    // Drive A into Escalated via the normal failure path, then jump straight
-    // back to Pending — a transition the normal graph would forbid.
     for _ in 0..3 {
         let _ = store.claim_next_task("e", t0()).unwrap().unwrap();
         let _ = store
@@ -497,8 +490,6 @@ fn body_force_status_bypasses_normal_transition(store: Arc<dyn TaskStore>) {
 }
 
 fn body_force_status_does_not_unblock_dependents(store: Arc<dyn TaskStore>) {
-    // After parent A is forced to Done, child B should remain Blocked —
-    // force_status is an operator override, not a normal completion.
     store
         .insert_epic_with_tasks(
             plan("e", vec![nt("A", "a"), nt("B", "b")], vec![("B", "A")]),

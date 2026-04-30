@@ -292,7 +292,7 @@ impl EpicRepo for SqliteTaskStore {
         Ok(())
     }
 
-    fn find_active_by_spec_path(&self, spec_path: &std::path::Path) -> Result<Option<Epic>> {
+    fn find_active_by_spec_path(&self, spec_path: &Path) -> Result<Option<Epic>> {
         let conn = self.conn.lock().expect("poisoned");
         let path_str = spec_path.to_string_lossy().to_string();
         let mut stmt = conn
@@ -899,6 +899,9 @@ impl TaskRepo for SqliteTaskStore {
             .map_err(backend)?;
         let (epic_name, prev_status_str) =
             prev.ok_or_else(|| TaskStoreError::NotFound(format!("task '{id}'")))?;
+        let prev = TaskStatus::parse(&prev_status_str).ok_or_else(|| {
+            TaskStoreError::Backend(format!("invalid stored task status: {prev_status_str}"))
+        })?;
         conn.execute(
             "UPDATE tasks SET status=?, updated_at=? WHERE id=?",
             params![target.as_str(), now, id.as_str()],
@@ -910,7 +913,7 @@ impl TaskRepo for SqliteTaskStore {
             Some(&epic_name),
             Some(id),
             &serde_json::json!({
-                "from": prev_status_str,
+                "from": prev.as_str(),
                 "to": target.as_str(),
                 "reason": reason,
             }),

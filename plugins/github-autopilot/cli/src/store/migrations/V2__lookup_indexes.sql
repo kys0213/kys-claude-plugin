@@ -1,12 +1,8 @@
--- Partial indexes for the lookup helpers added in the spec refinement.
--- find_task_by_pr / find_active_by_spec_path are called frequently from
--- MergeLoop and WatchDispatcher; full scans are unnecessary.
---
--- The indexes are partial because:
---   * Most tasks are not bound to a PR (pr_number IS NULL), so a full
+-- Partial indexes:
+--   * idx_tasks_pr_number — most tasks have pr_number IS NULL, so a full
 --     index would mostly store NULL keys.
---   * Only active epics are matched by spec_path; abandoned/completed
---     epics never participate in WatchDispatcher routing.
+--   * idx_epics_active_spec — abandoned/completed epics never participate
+--     in WatchDispatcher routing, so the index only needs active rows.
 
 CREATE INDEX IF NOT EXISTS idx_tasks_pr_number
   ON tasks(pr_number)

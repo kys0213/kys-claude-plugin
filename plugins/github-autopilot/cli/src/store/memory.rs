@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
@@ -131,7 +132,7 @@ impl EpicRepo for InMemoryTaskStore {
         Ok(())
     }
 
-    fn find_active_by_spec_path(&self, spec_path: &std::path::Path) -> Result<Option<Epic>> {
+    fn find_active_by_spec_path(&self, spec_path: &Path) -> Result<Option<Epic>> {
         let s = self.state.lock().expect("poisoned");
         let matches: Vec<&Epic> = s
             .epics
