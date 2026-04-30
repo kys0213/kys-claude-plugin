@@ -1281,6 +1281,25 @@ mod tests {
     }
 
     #[test]
+    fn v2_lookup_indexes_are_present() {
+        let store = SqliteTaskStore::open_in_memory().expect("open");
+        let conn = store.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_master
+                  WHERE type='index' AND name IN ('idx_tasks_pr_number','idx_epics_active_spec')",
+            )
+            .unwrap();
+        let names: std::collections::HashSet<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(names.contains("idx_tasks_pr_number"));
+        assert!(names.contains("idx_epics_active_spec"));
+    }
+
+    #[test]
     fn migrates_v1_db_to_current() {
         // Simulate an older DB at V1: only V1 SQL applied. open() should
         // upgrade by running V2 forward migrations.

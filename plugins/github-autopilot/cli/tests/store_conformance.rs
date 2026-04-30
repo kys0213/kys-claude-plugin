@@ -467,6 +467,25 @@ fn body_find_active_by_spec_path_returns_none_when_no_match(store: Arc<dyn TaskS
     assert!(store.find_active_by_spec_path(&path).unwrap().is_none());
 }
 
+fn body_find_active_by_spec_path_rejects_invariant_violation(store: Arc<dyn TaskStore>) {
+    let shared = std::path::PathBuf::from("spec/shared.md");
+    let mk = |name: &str| Epic {
+        name: name.to_string(),
+        spec_path: shared.clone(),
+        branch: format!("epic/{name}"),
+        status: EpicStatus::Active,
+        created_at: t0(),
+        completed_at: None,
+    };
+    store.upsert_epic(&mk("e1")).unwrap();
+    store.upsert_epic(&mk("e2")).unwrap();
+    let err = store.find_active_by_spec_path(&shared).unwrap_err();
+    assert!(
+        format!("{err}").contains("inconsistency"),
+        "expected Inconsistency error, got: {err}"
+    );
+}
+
 fn body_force_status_bypasses_normal_transition(store: Arc<dyn TaskStore>) {
     store
         .insert_epic_with_tasks(plan("e", vec![nt("A", "a")], vec![]), t0())
@@ -620,6 +639,7 @@ conformance_suite!(
     body_find_task_by_pr_returns_none_when_unknown,
     body_find_active_by_spec_path_matches_active_only,
     body_find_active_by_spec_path_returns_none_when_no_match,
+    body_find_active_by_spec_path_rejects_invariant_violation,
     body_force_status_bypasses_normal_transition,
     body_force_status_does_not_unblock_dependents,
     body_force_status_records_event_with_reason,
