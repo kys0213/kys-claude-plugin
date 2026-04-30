@@ -31,6 +31,7 @@ pub enum EventKind {
     MigratedFromIssue,
     EscalationResolved,
     WatchDuplicate,
+    TaskForceStatus,
 }
 
 impl EventKind {
@@ -52,6 +53,7 @@ impl EventKind {
             EventKind::MigratedFromIssue => "migrated_from_issue",
             EventKind::EscalationResolved => "escalation_resolved",
             EventKind::WatchDuplicate => "watch_duplicate",
+            EventKind::TaskForceStatus => "task_force_status",
         }
     }
 
@@ -73,6 +75,7 @@ impl EventKind {
             "migrated_from_issue" => EventKind::MigratedFromIssue,
             "escalation_resolved" => EventKind::EscalationResolved,
             "watch_duplicate" => EventKind::WatchDuplicate,
+            "task_force_status" => EventKind::TaskForceStatus,
             _ => return None,
         })
     }
