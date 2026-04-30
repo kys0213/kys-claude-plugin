@@ -6,6 +6,7 @@ pub mod pipeline;
 pub mod preflight;
 pub mod simhash;
 pub mod stats;
+pub mod task;
 pub mod watch;
 pub mod worktree;
 
@@ -52,6 +53,46 @@ pub enum Commands {
     Stats {
         #[command(subcommand)]
         command: StatsCommands,
+    },
+    /// Operator-facing task store diagnostics
+    Task {
+        #[command(subcommand)]
+        command: TaskCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum TaskCommands {
+    /// List tasks in an epic
+    List {
+        /// Epic name
+        #[arg(long)]
+        epic: String,
+        /// Filter by status
+        #[arg(long)]
+        status: Option<task::TaskStatusArg>,
+        /// Output JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show details of a single task
+    Show {
+        /// Task id
+        task_id: String,
+        /// Output JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Force a task into a specific status (operator override)
+    ForceStatus {
+        /// Task id
+        task_id: String,
+        /// Target status
+        #[arg(long)]
+        to: task::TaskStatusArg,
+        /// Optional reason recorded with the override
+        #[arg(long)]
+        reason: Option<String>,
     },
 }
 
