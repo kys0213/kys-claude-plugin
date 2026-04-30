@@ -23,7 +23,7 @@
 +----------------------------v---------------------------+
 |                    Orchestration                       |
 |  EpicManager  BuildLoop  WatchDispatcher  Reconciler   |
-|              MergeLoop   Escalator                     |
+|  MergeLoop    Escalator  EscalationWatcher             |
 +----------------------------+---------------------------+
                              |
 +----------------------------v---------------------------+
@@ -94,9 +94,10 @@ plugins/github-autopilot/cli/src/
 │   ├── epic_manager.rs              # start / resume / stop / status
 │   ├── build_loop.rs                # claim → IM 호출 → push 결과 처리
 │   ├── watch_dispatcher.rs          # watch 결과 → epic 매칭 / append / escalate
-│   ├── merge_loop.rs                # PR 머지 + task done 전이
+│   ├── merge_loop.rs                # PR 머지 + task done 전이 + epic 완료 판정
 │   ├── reconciler.rs                # git remote ↔ DB
-│   └── escalator.rs                 # escalation 이슈 + suppression
+│   ├── escalator.rs                 # escalation 이슈 + suppression
+│   └── escalation_watcher.rs        # escalated task 의 issue close 폴링 → reconcile
 │
 └── cmd/                             # CLI 핸들러 (clap subcommand 매핑)
     ├── mod.rs
@@ -289,9 +290,9 @@ src/store/migrations/
 | 3 | TaskStore | claim 시 deps 필터, complete 시 unblock_dependents |
 | 4-5 | TaskStore + GitClient + SpecDecomposer + GitHubClient | Reconciler::reconcile_epic → fetch + ls-remote + PR 스캔 → apply_reconciliation |
 | 6 | TaskStore | WatchDispatcher::dispatch → epic 매칭 → upsert task |
-| 7-9 | GitHubClient + TaskStore | Escalator::escalate → 이슈 발행 + escalated_issue 기록 |
+| 7-9 | GitHubClient + TaskStore | Escalator::escalate → 이슈 발행 + escalated_issue 기록. EscalationWatcher → 사람이 close 한 이슈 자동 인식 → reconcile |
 | 8 | TaskStore | mark_task_failed → outcome 분기 |
-| 10 | TaskStore + Notifier | EpicManager::check_completion → notifier.send |
+| 10 | TaskStore + Notifier | MergeLoop::tick → all_tasks_done 판정 → notifier.send. escalated 잔류 시 EpicCompleted 미발송 (사람이 force-status 또는 코드 push 로 해소해야 함) |
 | 11 | GitClient | BuildLoop 의 push reject 처리 (DB 변경 없음) |
 | 12 | TaskStore | EpicManager::stop → epic.status=abandoned |
 | 13 | TaskStore + GitHubClient | MigrateCommand → import_issue → upsert task + 이슈 라벨 정리 |

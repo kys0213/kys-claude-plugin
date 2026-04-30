@@ -89,6 +89,7 @@ pub enum EventKind {
     TaskInserted, TaskClaimed, TaskStarted, TaskCompleted, TaskFailed,
     TaskEscalated, TaskBlocked, TaskUnblocked,
     Reconciled, ClaimLost, MigratedFromIssue, EscalationResolved,
+    TaskForceStatus,    // 운영자 force_status (payload: {target, reason})
 }
 ```
 
@@ -117,6 +118,12 @@ pub trait EpicRepo {
     fn get_epic(&self, name: &str) -> Result<Option<Epic>>;
     fn list_epics(&self, status: Option<EpicStatus>) -> Result<Vec<Epic>>;
     fn set_epic_status(&self, name: &str, status: EpicStatus, at: DateTime<Utc>) -> Result<()>;
+
+    /// 활성 epic 중 spec_path 가 일치하는 것을 반환. WatchDispatcher 가 갭 발견 시
+    /// "이 spec 이 어느 활성 epic 에 속하는지" 매칭에 사용 (UC-6).
+    /// 동일 spec_path 의 active epic 은 최대 1개라는 invariant 가정 — 2개 이상 발견 시
+    /// `Err(DomainError::Inconsistency)` 반환.
+    fn find_active_by_spec_path(&self, spec_path: &Path) -> Result<Option<Epic>>;
 }
 
 pub trait TaskRepo {
@@ -124,6 +131,10 @@ pub trait TaskRepo {
     fn get_task(&self, id: &TaskId) -> Result<Option<Task>>;
     fn list_tasks_by_epic(&self, epic: &str, status: Option<TaskStatus>) -> Result<Vec<Task>>;
     fn find_by_fingerprint(&self, epic: &str, fp: &str) -> Result<Option<Task>>;
+
+    /// 머지된 PR 번호로 task 역조회. MergeLoop 가 PR 머지 후 task.status='done' 전이
+    /// 대상을 찾기 위해 사용 (UC-2, §5.8).
+    fn find_task_by_pr(&self, pr_number: u64) -> Result<Option<Task>>;
 
     fn upsert_watch_task(&self, task: NewWatchTask, now: DateTime<Utc>) -> Result<UpsertOutcome>;
 
@@ -141,11 +152,23 @@ pub trait TaskRepo {
         &self, id: &TaskId, issue_number: u64, now: DateTime<Utc>
     ) -> Result<()>;
 
-    fn revert_to_ready(&self, id: &TaskId, now: DateTime<Utc>) -> Result<()>;
+    /// 시도조차 실패한 claim 을 되돌린다 (UC-11 의 push reject = claim_lost).
+    /// `claim_next_task` 에서 +1 된 attempts 를 차감하여 max_attempts 카운트에 영향이
+    /// 없도록 한다. 상태 wip → ready, 변화량 != 1 이면 IllegalTransition.
+    /// 주의: push 후 CI 실패 / 구현 실패는 `mark_task_failed` 사용 (attempts 보존).
+    fn release_claim(&self, id: &TaskId, now: DateTime<Utc>) -> Result<()>;
 
     fn apply_reconciliation(&self, plan: ReconciliationPlan, now: DateTime<Utc>) -> Result<()>;
 
     fn list_deps(&self, task_id: &TaskId) -> Result<Vec<TaskId>>;
+
+    /// 운영자 오버라이드 (CLI `task force-status`). 일반 상태 전이 검증을 우회하지만,
+    /// (a) 도메인 enum 에 정의된 상태로만 전이 가능, (b) reason 을 events 에 기록한다.
+    /// 의존성 재평가 / 자식 unblock 은 수행하지 않는다 — 필요하면 호출자가 reconcile
+    /// 또는 후속 메서드를 명시적으로 호출.
+    fn force_status(
+        &self, id: &TaskId, target: TaskStatus, reason: &str, now: DateTime<Utc>
+    ) -> Result<()>;
 }
 
 pub trait EventLog {
@@ -153,8 +176,20 @@ pub trait EventLog {
     fn list_events(&self, filter: EventFilter) -> Result<Vec<Event>>;
 }
 
-pub trait TaskStore: EpicRepo + TaskRepo + EventLog + Send + Sync {}
-impl<T: EpicRepo + TaskRepo + EventLog + Send + Sync> TaskStore for T {}
+/// HITL escalation 의 fingerprint 기반 중복 발행 억제 (UC-7).
+/// 동일 fingerprint + reason 조합이 suppress_until 시점까지 escalate 되지 않게 한다.
+pub trait SuppressionRepo {
+    fn suppress(
+        &self, fingerprint: &str, reason: &str, suppress_until: DateTime<Utc>
+    ) -> Result<()>;
+    fn is_suppressed(
+        &self, fingerprint: &str, reason: &str, now: DateTime<Utc>
+    ) -> Result<bool>;
+    fn clear(&self, fingerprint: &str, reason: &str) -> Result<()>;
+}
+
+pub trait TaskStore: EpicRepo + TaskRepo + EventLog + SuppressionRepo + Send + Sync {}
+impl<T: EpicRepo + TaskRepo + EventLog + SuppressionRepo + Send + Sync> TaskStore for T {}
 ```
 
 보조 타입:
@@ -253,6 +288,7 @@ pub trait GitHubClient: Send + Sync {
     fn add_issue_labels(&self, number: u64, labels: &[String]) -> Result<()>;
     fn remove_issue_labels(&self, number: u64, labels: &[String]) -> Result<()>;
     fn list_issues(&self, filter: IssueFilter) -> Result<Vec<IssueRef>>;
+    fn get_issue(&self, number: u64) -> Result<Option<IssueRef>>;
 
     fn create_pr(&self, req: CreatePr) -> Result<u64>;
     fn merge_pr(&self, number: u64, method: MergeMethod) -> Result<()>;
@@ -263,7 +299,13 @@ pub trait GitHubClient: Send + Sync {
 pub struct CreateIssue { pub title: String, pub body: String, pub labels: Vec<String> }
 pub struct CreatePr { pub head: String, pub base: String, pub title: String, pub body: String, pub labels: Vec<String> }
 pub struct PrRef { pub number: u64, pub head: String, pub base: String, pub merged: bool, pub closed: bool, pub labels: Vec<String> }
-pub struct IssueRef { pub number: u64, pub title: String, pub labels: Vec<String>, pub body_meta: Option<EscalationMeta> }
+pub struct IssueRef {
+    pub number: u64,
+    pub title: String,
+    pub closed: bool,
+    pub labels: Vec<String>,
+    pub body_meta: Option<EscalationMeta>,
+}
 pub struct IssueFilter { pub labels: Vec<String>, pub state: IssueState }
 pub enum IssueState { Open, Closed, All }
 pub enum MergeMethod { Squash, Merge, Rebase }
@@ -391,9 +433,16 @@ CREATE TABLE escalation_suppression (
 
 CREATE INDEX idx_tasks_epic_status ON tasks(epic_name, status);
 CREATE INDEX idx_tasks_fingerprint ON tasks(fingerprint);
+CREATE INDEX idx_tasks_pr_number   ON tasks(pr_number) WHERE pr_number IS NOT NULL;
+CREATE INDEX idx_epics_active_spec ON epics(spec_path) WHERE status='active';
 CREATE INDEX idx_events_epic_at ON events(epic_name, at);
 CREATE INDEX idx_events_task_at ON events(task_id, at);
 ```
+
+신규 인덱스 사유:
+
+- `idx_tasks_pr_number` — `find_task_by_pr` 의 O(1) 조회 (대부분 task 가 PR 미할당이므로 partial index 로 크기 절감).
+- `idx_epics_active_spec` — `find_active_by_spec_path` 가 watch 빈번 호출이라 partial index 권장. 동일 spec_path 의 active epic 은 1개라는 invariant 와 일치.
 
 마이그레이션 적용: 시작 시 `meta.schema_version` 을 읽고 누락된 V_n 을 순서대로 실행. 단일 트랜잭션 안에서 적용.
 
@@ -564,7 +613,7 @@ idempotency: 동일 plan 으로 N번 호출해도 결과 동일. attempts 카운
 
 ```
 fn dispatch_finding(finding: WatchFinding):
-  match epic_for_spec(finding.spec_path):
+  match task_store.find_active_by_spec_path(finding.spec_path):
     Some(epic):
       task_id = TaskId::new_deterministic(epic.name, finding.section, finding.requirement)
       outcome = task_store.upsert_watch_task(NewWatchTask{
@@ -577,10 +626,14 @@ fn dispatch_finding(finding: WatchFinding):
       }, now)
       log event accordingly
     None:
-      if escalation_suppressed(finding.fingerprint): return
+      if task_store.is_suppressed(finding.fingerprint, "unmatched_watch", now): return
       issue_number = github.create_issue(escalation_template(finding))
       task_store.append_event(kind='escalated', payload={...})
-      task_store.suppress(finding.fingerprint, reason='unmatched_watch', until = now + 24h)
+      task_store.suppress(
+        finding.fingerprint,
+        reason="unmatched_watch",
+        suppress_until = now + Duration::hours(escalation_suppression_window_hours),
+      )
 ```
 
 `upsert_watch_task` 는 fingerprint 충돌 시 `DuplicateFingerprint(existing_id)` 반환, orchestration 에서 이를 보고 신규 발행 skip.
@@ -595,29 +648,77 @@ fn tick():
       if task is None: break
       branch = format!("{prefix}/{epic.name}/{task.id}", prefix=epic_branch_prefix)
       spawn_implementer(epic, task, branch)
-        on_success(pr_number) -> task_store.complete_task_and_unblock(...)
-        on_push_rejected     -> task_store.revert_to_ready(task.id, now)
-                                  task_store.append_event(kind='claim_lost', ...)
-        on_other_failure     -> outcome = task_store.mark_task_failed(task.id, max_attempts, now)
-                                  if Escalated: escalator.escalate(...)
+        on_pr_created(pr_number) ->
+            -- PR 생성 성공. 머지는 MergeLoop 가 후속 처리.
+            task_store.append_event(kind='task_started', task=task.id, payload={pr: pr_number})
+        on_push_rejected         ->
+            -- UC-11: 다른 머신 / 다른 sub-loop 가 먼저 가져감. 시도 회복.
+            task_store.release_claim(task.id, now)
+            task_store.append_event(kind='claim_lost', task=task.id)
+        on_implementation_failed ->
+            -- 코드 작성 실패 / push 후 PR 생성 실패 / CI 실패 등. 시도는 보존.
+            outcome = task_store.mark_task_failed(task.id, max_attempts, now)
+            if Escalated: escalator.escalate(task)
 ```
+
+`release_claim` 과 `mark_task_failed` 의 선택 기준: **시도조차 못 했으면** `release_claim`, **시도했으나 실패** 면 `mark_task_failed`.
 
 ### 5.8 MergeLoop tick (UC-2, UC-10)
 
 ```
 fn tick():
-  prs = github.list_prs_targeting(epic.branch, labels=[":auto"], state=open)
-  for pr in prs:
-    if pr 의 ci 상태 통과 + 충돌 없음:
-      github.merge_pr(pr.number, MergeMethod::Squash)
-      task = task_store.find_by_pr(pr.number)
-      task_store.complete_task_and_unblock(task.id, pr.number, now)
+  for epic in active_epics:
+    prs = github.list_prs_targeting(epic.branch, labels=[":auto"], state=open)
+    for pr in prs:
+      if pr 의 ci 상태 통과 + 충돌 없음:
+        github.merge_pr(pr.number, MergeMethod::Squash)
+        task = task_store.find_task_by_pr(pr.number)
+        if task is Some: task_store.complete_task_and_unblock(task.id, pr.number, now)
 
-  -- epic 완료 판정
-  if all_tasks_terminal(epic):       -- done | (escalated AND issue_closed)
-    epic_manager.complete(epic.name)
-    notifier.send(EpicCompleted { epic: epic.name })
+    -- epic 완료 판정
+    -- "사람이 close 한 escalated" 의 자동 인식은 §5.9 EscalationWatcher 가 별도로 처리.
+    -- 본 루프에서는 task.status ∈ {done} 여부만 본다.
+    if all_tasks_done(epic):
+      epic_manager.complete(epic.name)
+      notifier.send(EpicCompleted { epic: epic.name })
 ```
+
+### 5.9 EscalationWatcher tick (UC-9, UC-10)
+
+`EscalationWatcher` 는 escalated task 의 GitHub 이슈 close 를 주기 폴링하여 사람의 직접 해소를
+자동 인식한다. MergeLoop 와 분리한 이유: SRP — MergeLoop 는 PR 머지 흐름만, 본 루프는
+escalation 해소 흐름만 담당. 폴링 주기는 MergeLoop 보다 길게 (예: 5분).
+
+```
+fn tick():
+  for epic in active_epics:
+    escalated = task_store.list_tasks_by_epic(epic.name, status=Escalated)
+    for task in escalated:
+      if task.escalated_issue is None: continue
+      issue = github.get_issue(task.escalated_issue)
+      if issue is None or !issue.closed: continue
+
+      -- 사람이 issue 를 close 했음. 두 케이스:
+      -- (a) 사람이 직접 코드를 작성하여 epic 브랜치에 PR 머지 → reconcile 이 done 으로 인식
+      -- (b) 단순 거부 / 무시 close → suppression 등록 (해당 fingerprint 추가 escalate 차단)
+      reconciler.reconcile_epic(epic.name, now)
+      task_after = task_store.get_task(task.id)
+      if task_after.status != Done:
+        -- (b) 케이스. 사람이 코드 작업 없이 close 한 것으로 간주.
+        if task.fingerprint is Some:
+          task_store.suppress(
+            task.fingerprint, reason="rejected_by_human",
+            suppress_until = now + Duration::days(30),
+          )
+        task_store.append_event(kind='escalation_resolved',
+                                payload={resolution: 'rejected'}, task=task.id)
+      else:
+        task_store.append_event(kind='escalation_resolved',
+                                payload={resolution: 'human_fixed'}, task=task.id)
+```
+
+**중요한 invariant**: 본 루프는 `force_status` 를 직접 호출하지 않는다. 상태 전이는 reconcile
+(idempotent) 또는 다른 정상 경로를 통해서만 일어난다.
 
 ## 6. CLI 시그니처 (clap)
 
@@ -666,6 +767,10 @@ pub enum DomainError {
     IllegalTransition(TaskId, TaskStatus, TaskStatus),
     #[error("epic '{0}' already exists with status {1:?}")]
     EpicAlreadyExists(String, EpicStatus),
+    /// 데이터 불변식 위반 (예: 동일 spec_path 의 active epic 이 2개 이상).
+    /// 정상 흐름에서는 발생할 수 없으며, 발생 시 사람 개입 필요.
+    #[error("inconsistency: {0}")]
+    Inconsistency(String),
 }
 
 // ports/task_store.rs

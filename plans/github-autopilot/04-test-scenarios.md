@@ -144,10 +144,18 @@ test: claim_is_atomic_under_concurrent_callers
   then:  정확히 한쪽만 Some(A) 를 받고 다른 쪽은 None
          get_task(A).attempts == 1   # 한 번만 증가
 
-test: claim_increments_attempts_on_each_call
+test: claim_increments_attempts_only_on_real_attempt
   given: 1 ready task A
-  when:  claim → revert_to_ready → claim
+  when:  claim → release_claim → claim
+  then:  attempts == 1
+         -- release_claim 은 시도조차 못 한 경우(UC-11)에 사용되며,
+         -- claim 의 +1 을 차감하여 max_attempts 카운트에 영향 없음
+
+test: mark_task_failed_preserves_attempts_for_retry
+  given: 1 ready task A, max_attempts=3
+  when:  claim → mark_task_failed (Retried) → claim → mark_task_failed (Retried)
   then:  attempts == 2
+         -- 시도 후 실패는 attempts 보존 (escalation 카운트에 반영)
 ```
 
 ### 4.3 complete_task_and_unblock
@@ -226,7 +234,77 @@ test: upsert_watch_task_returns_duplicate_on_existing_fingerprint
          no new task inserted
 ```
 
-### 4.7 schema_version 일관성 (SQLite 전용)
+### 4.7 lookup helpers
+
+```
+test: find_task_by_pr_returns_owning_task
+  given: A(done, pr_number=42), B(wip, pr_number=None)
+  when:  find_task_by_pr(42)
+  then:  Ok(Some(A))
+
+test: find_task_by_pr_returns_none_when_unknown
+  when:  find_task_by_pr(9999)
+  then:  Ok(None)
+
+test: find_active_by_spec_path_matches_active_only
+  given: epic e1(active, spec="spec/auth.md"), e2(abandoned, spec="spec/auth.md")
+  when:  find_active_by_spec_path("spec/auth.md")
+  then:  Ok(Some(e1))   # abandoned 는 제외
+
+test: find_active_by_spec_path_returns_none_when_no_match
+  given: epic e1(active, spec="spec/payments.md")
+  when:  find_active_by_spec_path("spec/auth.md")
+  then:  Ok(None)
+
+test: find_active_by_spec_path_rejects_invariant_violation
+  given: epic e1(active, spec="spec/auth.md"), e2(active, spec="spec/auth.md")
+         # 정상 흐름에서는 만들 수 없으나 직접 삽입했다고 가정
+  when:  find_active_by_spec_path("spec/auth.md")
+  then:  Err(DomainError::Inconsistency(_))
+```
+
+### 4.8 force_status
+
+```
+test: force_status_bypasses_normal_transition
+  given: A(escalated)
+  when:  force_status(A, target=Pending, reason="manual reset")
+  then:  A.status == 'pending'
+         events kind 에 reason 이 payload 로 기록됨
+
+test: force_status_does_not_unblock_dependents
+  given: A(escalated), B(blocked, deps=[A])
+  when:  force_status(A, target=Done, reason="human fixed")
+  then:  A.status == 'done'
+         B.status == 'blocked'   # force_status 는 자식 unblock 안 함
+         # → 호출자가 별도로 reconcile / 메서드를 호출해야 함
+
+test: force_status_records_event_with_reason
+  given: A(wip)
+  when:  force_status(A, target=Ready, reason="rollback")
+  then:  events 에 force_status 기록, payload.reason == "rollback"
+```
+
+### 4.9 suppression
+
+```
+test: suppression_blocks_until_window_expires
+  fixture: clock at t0
+  when:  suppress(fp="fp-1", reason="unmatched_watch", until=t0+1h)
+         is_suppressed(fp-1, "unmatched_watch", at=t0+30m) -> true
+         is_suppressed(fp-1, "unmatched_watch", at=t0+2h)  -> false
+
+test: suppression_is_scoped_by_reason
+  when:  suppress(fp="fp-1", reason="unmatched_watch", ...)
+         is_suppressed(fp-1, "rejected_by_human", now) -> false
+
+test: suppression_clear_unblocks_immediately
+  when:  suppress(fp-1, "r", until=far_future)
+         clear(fp-1, "r")
+         is_suppressed(fp-1, "r", now) -> false
+```
+
+### 4.10 schema_version 일관성 (SQLite 전용)
 
 ```
 test: sqlite_initializes_schema_v1_on_empty_db
@@ -420,6 +498,27 @@ test: uc9d_human_fixed_directly_marks_done_on_resume
   fixture: A.status='escalated', 사람이 직접 코드 push 후 PR merged
   when:  EpicManager::resume(...)
   then:  reconcile 로 A.status='done' 으로 전이
+
+test: uc9_escalation_watcher_picks_up_human_close_without_resume
+  fixture:
+    epic "e" active, A.status='escalated', A.escalated_issue=#42
+    github.issues[42].closed = true
+    git.remote: PR head=epic/e/<A_id> base=epic/e merged=true
+    decomposer: tasks 에 A 포함
+  when:  EscalationWatcher::tick()
+  then:  A.status == 'done'
+         events kind='escalation_resolved', payload.resolution=='human_fixed'
+         # resume 호출 없이 자동 인식
+
+test: uc9_escalation_watcher_records_rejection_on_close_without_code
+  fixture:
+    epic "e" active, A.status='escalated', A.escalated_issue=#42, fingerprint='fp-A'
+    github.issues[42].closed = true
+    git.remote: 해당 task 의 feature 브랜치 / PR 없음
+  when:  EscalationWatcher::tick()
+  then:  A.status == 'escalated' 유지   # reconcile 결과 done 아님
+         suppression(fp='fp-A', reason='rejected_by_human') 활성
+         events kind='escalation_resolved', payload.resolution=='rejected'
 ```
 
 ### UC-10. Epic 완료
@@ -442,12 +541,12 @@ test: uc10_does_not_complete_with_open_escalations
 ### UC-11. 동시 진행 자연 차단
 
 ```
-test: uc11_push_reject_reverts_task_to_ready
+test: uc11_push_reject_releases_claim_without_attempt_charge
   fixture: BuildLoop 가 task A 를 claim, IM 이 push 시도하나 git.push_rejects 로 reject
   when:  IM 결과 처리
   then:  A.status == 'ready'
          events kind='claim_lost'
-         tasks 의 attempts 는 증가했지만 다음 cycle 에 다시 claim 가능
+         A.attempts == 0   # release_claim 으로 차감되어 다음 cycle 에서 새 시도
 
 test: uc11_concurrent_claim_yields_one_winner
   given: store 에 ready task A 1건
