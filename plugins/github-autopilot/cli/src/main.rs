@@ -2,6 +2,7 @@ use autopilot::cmd::{
     CheckCommands, Cli, Commands, IssueCommands, ListArgs, PipelineCommands, PreflightArgs,
     StatsCommands, TaskCommands, WorktreeCommands,
 };
+use autopilot::config::Config;
 use autopilot::store::SqliteTaskStore;
 use autopilot::{cmd, fs, gh, git, github};
 use clap::Parser;
@@ -10,6 +11,13 @@ use std::path::{Path, PathBuf};
 
 fn main() {
     let cli = Cli::parse();
+    let config = match load_config(cli.config.as_deref()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e:#}");
+            std::process::exit(2);
+        }
+    };
 
     let result = match cli.command {
         Commands::Issue { command } => match command {
@@ -150,7 +158,7 @@ fn main() {
             )
         }
         Commands::Task { command } => {
-            let db_path = task_store_db_path();
+            let db_path = task_store_db_path(&config);
             let store = match SqliteTaskStore::open(&db_path) {
                 Ok(s) => s,
                 Err(e) => {
@@ -159,7 +167,11 @@ fn main() {
                 }
             };
             let clock = cmd::task::default_clock();
-            let svc = cmd::task::task_service(&store, &clock);
+            let svc = cmd::task::TaskService::with_max_attempts(
+                &store,
+                &clock,
+                config.epic.default_max_attempts,
+            );
             let mut out = stdout();
             match command {
                 TaskCommands::List { epic, status, json } => {
@@ -202,7 +214,7 @@ fn main() {
             }
         }
         Commands::Epic { command } => {
-            let db_path = task_store_db_path();
+            let db_path = task_store_db_path(&config);
             let store = match SqliteTaskStore::open(&db_path) {
                 Ok(s) => s,
                 Err(e) => {
@@ -232,6 +244,45 @@ fn main() {
                 }
             }
         }
+        Commands::Suppress { command } => {
+            let db_path = task_store_db_path(&config);
+            let store = match SqliteTaskStore::open(&db_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("failed to open task store at {}: {e}", db_path.display());
+                    std::process::exit(2);
+                }
+            };
+            let clock = cmd::task::default_clock();
+            let svc = cmd::suppress::suppress_service(&store, &clock);
+            let mut out = stdout();
+            match command {
+                cmd::suppress::SuppressCommands::Add(args) => {
+                    svc.add(&args.fingerprint, &args.reason, &args.until, &mut out)
+                }
+                cmd::suppress::SuppressCommands::Check(args) => {
+                    svc.check(&args.fingerprint, &args.reason, &mut out)
+                }
+                cmd::suppress::SuppressCommands::Clear(args) => {
+                    svc.clear(&args.fingerprint, &args.reason, &mut out)
+                }
+            }
+        }
+        Commands::Events { command } => {
+            let db_path = task_store_db_path(&config);
+            let store = match SqliteTaskStore::open(&db_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("failed to open task store at {}: {e}", db_path.display());
+                    std::process::exit(2);
+                }
+            };
+            let svc = cmd::events::events_service(&store);
+            let mut out = stdout();
+            match command {
+                cmd::events::EventsCommands::List(args) => svc.list(&args, &mut out),
+            }
+        }
     };
 
     match result {
@@ -243,13 +294,21 @@ fn main() {
     }
 }
 
-fn task_store_db_path() -> PathBuf {
+fn task_store_db_path(config: &Config) -> PathBuf {
     if let Ok(p) = std::env::var("AUTOPILOT_DB_PATH") {
         return PathBuf::from(p);
     }
-    let dir = PathBuf::from(".autopilot");
-    if !dir.exists() {
-        let _ = std::fs::create_dir_all(&dir);
+    let path = config.storage.db_path.clone();
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
     }
-    dir.join("state.db")
+    path
+}
+
+fn load_config(explicit: Option<&Path>) -> anyhow::Result<Config> {
+    let default_path = PathBuf::from("autopilot.toml");
+    let path = explicit.unwrap_or(default_path.as_path());
+    Config::load(path)
 }

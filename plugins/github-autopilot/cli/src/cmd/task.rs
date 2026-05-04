@@ -17,10 +17,10 @@ use crate::domain::{DomainError, Task, TaskFailureOutcome, TaskId, TaskSource, T
 use crate::ports::clock::{Clock, StdClock};
 use crate::ports::task_store::{NewWatchTask, TaskStore, TaskStoreError, UpsertOutcome};
 
-/// Task fail threshold above which `mark_task_failed` escalates instead of
-/// retrying. PR-C will wire this from a config file; for v1 it's fixed.
-// TODO(PR-C): wire from config (`max_attempts` in github-autopilot.local.md).
-const DEFAULT_MAX_ATTEMPTS: u32 = 3;
+/// Default `max_attempts` used when no config / explicit override is present.
+/// `main.rs` now resolves this from `autopilot.toml` (`epic.default_max_attempts`)
+/// and threads it into [`TaskService::with_max_attempts`].
+pub const DEFAULT_MAX_ATTEMPTS: u32 = 3;
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
 pub enum TaskStatusArg {
@@ -67,11 +67,24 @@ impl From<TaskSourceArg> for TaskSource {
 pub struct TaskService<'a> {
     store: &'a dyn TaskStore,
     clock: &'a dyn Clock,
+    max_attempts: u32,
 }
 
 impl<'a> TaskService<'a> {
     pub fn new(store: &'a dyn TaskStore, clock: &'a dyn Clock) -> Self {
-        Self { store, clock }
+        Self::with_max_attempts(store, clock, DEFAULT_MAX_ATTEMPTS)
+    }
+
+    pub fn with_max_attempts(
+        store: &'a dyn TaskStore,
+        clock: &'a dyn Clock,
+        max_attempts: u32,
+    ) -> Self {
+        Self {
+            store,
+            clock,
+            max_attempts,
+        }
     }
 
     pub fn list(
@@ -331,7 +344,7 @@ impl<'a> TaskService<'a> {
         let now = self.clock.now();
         let outcome = self
             .store
-            .mark_task_failed(&id, DEFAULT_MAX_ATTEMPTS, now)
+            .mark_task_failed(&id, self.max_attempts, now)
             .with_context(|| format!("failing task '{task_id}'"))?;
         write_json(out, &FailReport::from(outcome))?;
         Ok(0)

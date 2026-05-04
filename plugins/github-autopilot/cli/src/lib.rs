@@ -1,4 +1,5 @@
 pub mod cmd;
+pub mod config;
 pub mod domain;
 pub mod fs;
 pub mod gh;
