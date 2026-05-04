@@ -187,7 +187,12 @@ git log --since='3 months ago' --name-only --pretty=format: \
 현재 브랜치의 변경 영역과 issue 관련 경로를 교차하여 연관성을 평가합니다.
 
 ```bash
-git diff main...HEAD --name-only
+# default 브랜치 동적 조회 — main 외 (master/develop 등) 레포 대응
+DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null \
+  | sed 's@^refs/remotes/origin/@@' \
+  || echo main)
+
+git diff "${DEFAULT_BRANCH}...HEAD" --name-only
 ```
 
 issue 관련 경로와 위 결과의 교집합이 있으면 "현재 작업과 연속성 있는 issue"로 가산점.
