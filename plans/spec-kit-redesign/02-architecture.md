@@ -1,0 +1,251 @@
+# Architecture — L1/L2 인터페이스, 호출 흐름
+
+## 전체 흐름
+
+```
+/spec-kit:spec-review (커맨드)
+  │
+  ├─ Step 1: spec 파일 목록 수집 + frontmatter 파싱 (related_paths)
+  │
+  ├─ Step 2: L1 에이전트 N개 병렬 spawn (Haiku)
+  │            ├─ file-pair-observer(spec_file=A.md, code_paths=...)
+  │            ├─ file-pair-observer(spec_file=B.md, code_paths=...)
+  │            └─ ...
+  │
+  ├─ Step 3: 각 L1 출력에 대한 인용 검증 (오케스트레이터)
+  │            ├─ file:line 범위가 실재하는가
+  │            ├─ 인용 excerpt 가 그 라인의 substring 인가
+  │            └─ 검증 실패 항목 drop + 경고
+  │
+  ├─ Step 4: L2 에이전트 spawn (Sonnet) — L1 검증 통과 리포트만 입력
+  │            └─ gap-analyzer
+  │
+  ├─ Step 5: L2 출력에 대한 인용 검증 (오케스트레이터)
+  │            └─ L2 가 인용한 L1 항목 ID 가 실재하는가
+  │
+  └─ Step 6: 최종 리포트 출력
+```
+
+## L1: file-pair-observer
+
+### Frontmatter
+
+```yaml
+---
+description: (내부용) /spec-kit:spec-review 가 호출하는 per-file 관찰 에이전트. spec 파일 1개와 관련 code 영역을 읽고 사실만 나열.
+model: haiku
+tools: ["Read", "Glob", "Grep"]
+---
+```
+
+`tools` 에 Read/Glob/Grep 부여. spec 파일과 code 를 직접 읽어야 인용 가능.
+
+### 입력 형식
+
+오케스트레이터로부터 다음 형식의 프롬프트:
+
+```
+# File Observation Request
+
+## Spec 파일
+- 경로: {spec_file_path}
+
+## 관련 code 경로 (Hint)
+{related_paths_from_frontmatter, 없으면 비움}
+
+## 자율 탐색 허용 범위
+- 위 경로 + 그 경로에서 import/require 된 인접 파일
+
+## 출력 (아래 스키마 엄수)
+[출력 스키마 보기 → 03-detailed-spec.md]
+```
+
+### 출력 형식 요약 (상세는 03)
+
+```markdown
+# Per-File Report: {spec_file_path}
+
+## Spec Claims
+- [S{n}] `{file}:{line_start}-{line_end}` — "{원문 인용, 50자 이내 요약 가능}"
+
+## Code Observations
+- [C{n}] `{file}:{line}` — `{code 단편 또는 시그니처}`
+
+## Mismatches
+- [S{n}] vs [C{n}] — {일치 / 차이 한 줄}
+
+## Gaps
+- [G{n}] {Spec 만 / Code 만 / 부분 구현} — {참조 ID + 한 줄 설명}
+
+## Notes (선택)
+- [N{n}] `{file}:{line}` — "{모호한 표현 인용}" (모호 사유 한 줄)
+```
+
+### 제약
+
+- 종합/추론 금지. **나열만**
+- 모든 항목에 file:line 인용 필수
+- 인용은 원문을 그대로 (자유 의역 금지)
+- 원문 발췌가 너무 길면 "..." 으로 생략 표시 (가공 금지)
+
+## L2: gap-analyzer
+
+### Frontmatter
+
+```yaml
+---
+description: (내부용) /spec-kit:spec-review 의 종합 분석 에이전트. L1 리포트들을 받아 code↔spec gap 과 spec↔spec gap 을 식별.
+model: sonnet
+tools: []
+---
+```
+
+`tools: []` — L2 는 raw 파일 안 봄. L1 리포트만 처리.
+
+### 입력 형식
+
+```
+# Gap Analysis Request
+
+## L1 Reports (검증 통과분)
+
+### Report 1
+{database.md report 본문}
+
+### Report 2
+{proxy.md report 본문}
+...
+
+## 출력 (아래 스키마 엄수)
+[출력 스키마 보기 → 03-detailed-spec.md]
+```
+
+### 출력 형식 요약
+
+```markdown
+# Spec Review Report
+
+## Code ↔ Spec Gaps
+
+### [{severity}] {제목}
+- 증거 (L1 인용):
+  - {report_name} {claim_id}
+  - ...
+- {판단/권장}
+
+## Spec ↔ Spec Gaps
+
+### [{severity}] {제목}
+- 증거 (L1 인용):
+  - {report_a} {S/C/G id}
+  - {report_b} {S/C/G id}
+- {판단/권장}
+
+## Notes (모호한 spec 항목)
+
+### [{severity}] {제목}
+- 증거: {report} {N id}
+- {권장}
+```
+
+### 제약
+
+- L1 에 없는 사실 추가 금지
+- 모든 결론에 L1 인용 (report_name + claim_id)
+- 우선순위/판단은 자유롭게 (L2 의 본업) — 단 사실은 L1 인용에서만
+
+## 입력 결정 — `related_paths` 처리
+
+L1 의 "관련 code 영역" 결정 방식 (옵션 C 채택):
+
+### 1차: spec 파일 frontmatter
+
+```yaml
+---
+title: Database Schema
+related_paths:
+  - migrations/
+  - internal/dao/
+---
+```
+
+명시되어 있으면 그대로 사용.
+
+### 2차: 자율 보강
+
+frontmatter 가 비어 있거나 불충분할 때 L1 에이전트가 Glob/Grep 으로 보강:
+
+- spec 파일 본문에 등장하는 식별자/경로 패턴을 grep
+- 프로젝트 루트의 디렉토리 구조 (Glob `*/`) 와 spec 헤딩을 매칭
+- 발견된 경로를 입력에 추가하고 출력 메타에 기록
+
+### 3차: 사용자 확인 (선택)
+
+자율 보강 결과가 너무 많거나 적으면 오케스트레이터가 사용자에게 confirm 요청.
+
+## 호출자 변경 (commands)
+
+### `/spec-kit:spec-review` (개정)
+
+기존: `spec-parser` → 6개 checker 호출 → 통합
+
+신: 위 "전체 흐름" 그대로
+
+### `/spec-kit:spec-quality` (있다면)
+
+L2 만 단독 호출하는 모드 추가 가능. 기존 `spec-quality-checker` 단독 호출 use case 대체.
+
+### 기타 의존자
+
+`gap-analyzer`, `reverse-gap-analyzer`, `structure-mapper`, `cross-reference-checker`, `spec-quality-checker`, `spec-parser` 를 직접 호출하는 곳:
+
+```bash
+grep -rn "spec-parser\|cross-reference-checker\|spec-quality-checker\|gap-analyzer\|reverse-gap-analyzer\|structure-mapper" plugins/
+```
+
+마이그레이션 단계에서 호출 지점을 모두 새 흐름으로 전환.
+
+## 마이그레이션 단계
+
+### Phase 1 (이 PR 이후)
+
+설계 합의. 코드 변경 없음.
+
+### Phase 2 — 신규 에이전트 추가
+
+- `plugins/spec-kit/agents/file-pair-observer.md` (L1) 추가
+- `plugins/spec-kit/agents/gap-analyzer-v2.md` (L2) 추가 (기존 `gap-analyzer.md` 와 이름 충돌 회피)
+- 단위 검증: 단일 spec 파일에 대해 L1 호출, 출력 검증
+
+### Phase 3 — 오케스트레이터 추가
+
+- `/spec-kit:spec-review-v2` 커맨드 신설 (병행 운영)
+- 인용 검증 로직 (L1 인용이 실파일에 있는지, L2 인용이 L1 에 있는지)
+- 기존 `/spec-kit:spec-review` 와 동일 입력으로 비교 테스트
+
+### Phase 4 — 호출자 마이그레이션
+
+- 기존 `/spec-kit:spec-review` 를 새 흐름으로 교체
+- `gap-analyzer`, `reverse-gap-analyzer` 등을 호출하는 다른 커맨드/스킬 마이그레이션
+
+### Phase 5 — 구 에이전트 deprecate
+
+- 6개 기존 에이전트에 `**DEPRECATED**` 헤더 추가
+- 한 릴리스 후 삭제
+
+### Phase 6 — 정리
+
+- `gap-analyzer-v2.md` → `gap-analyzer.md` (이름 환원)
+- 마이그레이션 노트 정리
+
+## 위험 평가
+
+| 위험 | 영향 | 완화 |
+|------|------|------|
+| L1 토큰 비용 증가 | 중 | 병렬 호출 + Haiku 단가. 실측 후 결정 |
+| `related_paths` frontmatter 미설정 spec 다수 | 중 | 자율 보강 fallback. 점진 추가 |
+| 기존 호출자 마이그레이션 누락 | 고 | grep 기반 의존성 매트릭스 작성 후 체크 |
+| L2 가 L1 사실을 왜곡 | 중 | 인용 검증으로 차단 |
+| Haiku 가 인용 형식 어김 | 중 | few-shot example + 사후 검증 + 재시도 |
+
+다음 문서(`03-detailed-spec.md`)에서 출력 스키마 / 인용 형식 / 검증 알고리즘을 정확히 정의.
