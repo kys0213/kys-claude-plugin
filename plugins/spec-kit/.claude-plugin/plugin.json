@@ -18,5 +18,5 @@
   ],
   "description": "스펙 설계, 검증, 갭 분석을 위한 통합 툴킷",
   "name": "spec-kit",
-  "version": "0.3.0"
+  "version": "0.4.0"
 }
