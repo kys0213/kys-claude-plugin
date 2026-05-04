@@ -302,3 +302,95 @@ fn reconcile_returns_exit_1_when_epic_missing() {
     assert_eq!(code, 1);
     assert!(out.contains("not found"));
 }
+
+#[test]
+fn reconcile_rejects_duplicate_task_id_in_plan() {
+    let (store, clock) = fixture();
+    let svc = EpicService::new(store.as_ref(), &clock);
+    let _ = capture(|w| svc.create("e", Path::new("spec/e.md"), None, w));
+
+    let plan = NamedTempFile::new().unwrap();
+    let lines = [
+        r#"{"kind":"task","id":"aaaaaaaaaaaa","title":"first"}"#,
+        r#"{"kind":"task","id":"aaaaaaaaaaaa","title":"duplicate"}"#,
+    ];
+    {
+        let mut f = std::fs::File::create(plan.path()).unwrap();
+        for l in &lines {
+            writeln!(f, "{l}").unwrap();
+        }
+    }
+
+    let mut buf: Vec<u8> = Vec::new();
+    let err = svc.reconcile("e", plan.path(), &mut buf).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("duplicate task id 'aaaaaaaaaaaa'"),
+        "error: {msg}"
+    );
+    assert!(store.list_tasks_by_epic("e", None).unwrap().is_empty());
+}
+
+#[test]
+fn reconcile_rejects_unknown_task_source() {
+    let (store, clock) = fixture();
+    let svc = EpicService::new(store.as_ref(), &clock);
+    let _ = capture(|w| svc.create("e", Path::new("spec/e.md"), None, w));
+
+    let plan = NamedTempFile::new().unwrap();
+    {
+        let mut f = std::fs::File::create(plan.path()).unwrap();
+        writeln!(
+            f,
+            r#"{{"kind":"task","id":"aaaaaaaaaaaa","title":"x","source":"telepathy"}}"#
+        )
+        .unwrap();
+    }
+    let mut buf: Vec<u8> = Vec::new();
+    let err = svc.reconcile("e", plan.path(), &mut buf).unwrap_err();
+    assert!(format!("{err:#}").contains("unknown source 'telepathy'"));
+}
+
+#[test]
+fn reconcile_skips_blank_and_comment_lines() {
+    let (store, clock) = fixture();
+    let svc = EpicService::new(store.as_ref(), &clock);
+    let _ = capture(|w| svc.create("e", Path::new("spec/e.md"), None, w));
+
+    let plan = NamedTempFile::new().unwrap();
+    {
+        let mut f = std::fs::File::create(plan.path()).unwrap();
+        writeln!(f, "# leading comment").unwrap();
+        writeln!(f).unwrap();
+        writeln!(
+            f,
+            r#"{{"kind":"task","id":"aaaaaaaaaaaa","title":"first"}}"#
+        )
+        .unwrap();
+        writeln!(f, "   ").unwrap();
+    }
+    let (code, _) = capture(|w| svc.reconcile("e", plan.path(), w));
+    assert_eq!(code, 0);
+    assert_eq!(store.list_tasks_by_epic("e", None).unwrap().len(), 1);
+}
+
+#[test]
+fn list_renders_human_table_when_not_json() {
+    let (store, clock) = fixture();
+    let svc = EpicService::new(store.as_ref(), &clock);
+    let _ = capture(|w| svc.create("alpha", Path::new("spec/a.md"), None, w));
+    let (code, out) = capture(|w| svc.list(None, false, w));
+    assert_eq!(code, 0);
+    assert!(out.contains("alpha"));
+    assert!(out.contains("epic/alpha"));
+    assert!(out.contains("active"));
+}
+
+#[test]
+fn list_emits_placeholder_when_empty() {
+    let (store, clock) = fixture();
+    let svc = EpicService::new(store.as_ref(), &clock);
+    let (code, out) = capture(|w| svc.list(None, false, w));
+    assert_eq!(code, 0);
+    assert!(out.contains("(no epics)"));
+}
