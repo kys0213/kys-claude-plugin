@@ -329,17 +329,7 @@ impl<'a> TaskService<'a> {
             .store
             .mark_task_failed(&id, DEFAULT_MAX_ATTEMPTS, now)
             .with_context(|| format!("failing task '{task_id}'"))?;
-        let payload = match outcome {
-            TaskFailureOutcome::Retried { attempts } => FailReport {
-                outcome: "retried",
-                attempts,
-            },
-            TaskFailureOutcome::Escalated { attempts } => FailReport {
-                outcome: "escalated",
-                attempts,
-            },
-        };
-        write_json(out, &payload)?;
+        write_json(out, &FailReport::from(outcome))?;
         Ok(0)
     }
 
@@ -382,6 +372,21 @@ struct BatchLine {
 struct FailReport {
     outcome: &'static str,
     attempts: u32,
+}
+
+impl From<TaskFailureOutcome> for FailReport {
+    fn from(o: TaskFailureOutcome) -> Self {
+        match o {
+            TaskFailureOutcome::Retried { attempts } => Self {
+                outcome: "retried",
+                attempts,
+            },
+            TaskFailureOutcome::Escalated { attempts } => Self {
+                outcome: "escalated",
+                attempts,
+            },
+        }
+    }
 }
 
 pub fn task_service<'a>(store: &'a dyn TaskStore, clock: &'a dyn Clock) -> TaskService<'a> {
