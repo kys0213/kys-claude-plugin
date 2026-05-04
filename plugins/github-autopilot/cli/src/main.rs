@@ -173,6 +173,37 @@ fn main() {
                 } => svc.force_status(&task_id, to, reason.as_deref(), &mut out),
             }
         }
+        Commands::Epic { command } => {
+            let db_path = task_store_db_path();
+            let store = match SqliteTaskStore::open(&db_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("failed to open task store at {}: {e}", db_path.display());
+                    std::process::exit(2);
+                }
+            };
+            let clock = cmd::task::default_clock();
+            let svc = cmd::epic::epic_service(&store, &clock);
+            let mut out = stdout();
+            match command {
+                cmd::epic::EpicCommands::Create(args) => {
+                    svc.create(&args.name, &args.spec, args.branch.as_deref(), &mut out)
+                }
+                cmd::epic::EpicCommands::List(args) => svc.list(args.status, args.json, &mut out),
+                cmd::epic::EpicCommands::Get(args) => svc.get(&args.name, args.json, &mut out),
+                cmd::epic::EpicCommands::Status(args) => {
+                    svc.status(args.name.as_deref(), args.json, &mut out)
+                }
+                cmd::epic::EpicCommands::Complete(args) => svc.complete(&args.name, &mut out),
+                cmd::epic::EpicCommands::Abandon(args) => svc.abandon(&args.name, &mut out),
+                cmd::epic::EpicCommands::Reconcile(args) => {
+                    svc.reconcile(&args.name, &args.plan, &mut out)
+                }
+                cmd::epic::EpicCommands::FindBySpecPath(args) => {
+                    svc.find_by_spec_path(&args.spec, args.json, &mut out)
+                }
+            }
+        }
     };
 
     match result {
