@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
+use crate::cmd::output::write_json;
 use crate::domain::{Event, EventKind, TaskId};
 use crate::ports::task_store::{EventFilter, EventLog};
 
@@ -157,12 +158,6 @@ impl<'a> From<&'a Event> for EventRecord<'a> {
             payload: &e.payload,
         }
     }
-}
-
-fn write_json<T: Serialize>(out: &mut dyn Write, value: &T) -> Result<()> {
-    serde_json::to_writer(&mut *out, value)?;
-    writeln!(out)?;
-    Ok(())
 }
 
 pub fn events_service(store: &dyn EventLog) -> EventsService<'_> {

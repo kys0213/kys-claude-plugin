@@ -4,6 +4,7 @@ pub mod events;
 pub mod issue;
 pub mod issue_list;
 pub mod labels;
+pub mod output;
 pub mod pipeline;
 pub mod preflight;
 pub mod simhash;

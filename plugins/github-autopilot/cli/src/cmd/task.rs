@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
+use crate::cmd::output::write_json;
 use crate::cmd::simhash;
 use crate::domain::{DomainError, Task, TaskFailureOutcome, TaskId, TaskSource, TaskStatus};
 use crate::ports::clock::{Clock, StdClock};
@@ -415,12 +416,6 @@ fn render_task(t: &Task, json: bool, out: &mut dyn Write) -> Result<()> {
         return write_json(out, t);
     }
     print_task_human(t, out)
-}
-
-fn write_json<T: Serialize>(out: &mut dyn Write, value: &T) -> Result<()> {
-    serde_json::to_writer(&mut *out, value)?;
-    writeln!(out)?;
-    Ok(())
 }
 
 fn derive_fingerprint(title: &str, body: Option<&str>) -> String {
