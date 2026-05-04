@@ -1,15 +1,10 @@
-//! L3 CLI integration tests for `autopilot epic` subcommands.
-//!
-//! Drives `EpicService` directly with `InMemoryTaskStore` + `FixedClock`
-//! and checks stdout / exit-code stability per spec §5 (04-test-scenarios).
-
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use autopilot::cmd::epic::{EpicService, EpicStatusFilter};
 use autopilot::domain::{Epic, EpicStatus, EventKind, TaskId, TaskStatus};
-use autopilot::ports::clock::FixedClock;
+use autopilot::ports::clock::{Clock, FixedClock};
 use autopilot::ports::task_store::{EpicPlan, EventFilter, NewTask, TaskStore};
 use autopilot::store::InMemoryTaskStore;
 use chrono::{TimeZone, Utc};
@@ -81,7 +76,7 @@ fn list_filters_by_status_and_renders_json() {
     let _ = capture(|w| svc.create("a", Path::new("spec/a.md"), None, w));
     let _ = capture(|w| svc.create("b", Path::new("spec/b.md"), None, w));
     store
-        .set_epic_status("b", EpicStatus::Completed, clock_now(&clock))
+        .set_epic_status("b", EpicStatus::Completed, clock.now())
         .unwrap();
 
     let (code, out) = capture(|w| svc.list(Some(EpicStatusFilter::Active), true, w));
@@ -109,8 +104,7 @@ fn status_groups_tasks_by_state() {
     let (store, clock) = fixture();
     let svc = EpicService::new(store.as_ref(), &clock);
 
-    // Insert epic with two tasks; one promoted to ready, one pending behind a dep
-    let now = clock_now(&clock);
+    let now = clock.now();
     store
         .insert_epic_with_tasks(
             EpicPlan {
@@ -219,10 +213,9 @@ fn find_by_spec_path_returns_exit_1_when_no_match() {
 
 #[test]
 fn find_by_spec_path_returns_exit_3_on_inconsistency() {
-    // Two active epics share a spec_path → invariant violation.
     let store: Arc<dyn TaskStore> = Arc::new(InMemoryTaskStore::new());
     let clock = FixedClock::new(Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap());
-    let now = clock_now(&clock);
+    let now = clock.now();
     for name in ["a", "b"] {
         store
             .insert_epic_with_tasks(
@@ -267,7 +260,6 @@ fn reconcile_applies_jsonl_plan_and_is_idempotent() {
         }
     }
 
-    // First call: tasks created, dependent stays pending
     let (code1, _) = capture(|w| svc.reconcile("e", plan.path(), w));
     assert_eq!(code1, 0);
     let tasks = store.list_tasks_by_epic("e", None).unwrap();
@@ -278,7 +270,6 @@ fn reconcile_applies_jsonl_plan_and_is_idempotent() {
 
     let snapshot1 = store.list_tasks_by_epic("e", None).unwrap();
 
-    // Second call: store state unchanged (events accumulate, tasks stable)
     let (code2, _) = capture(|w| svc.reconcile("e", plan.path(), w));
     assert_eq!(code2, 0);
     let snapshot2 = store.list_tasks_by_epic("e", None).unwrap();
@@ -310,9 +301,4 @@ fn reconcile_returns_exit_1_when_epic_missing() {
     let (code, out) = capture(|w| svc.reconcile("ghost", plan.path(), w));
     assert_eq!(code, 1);
     assert!(out.contains("not found"));
-}
-
-fn clock_now(c: &FixedClock) -> chrono::DateTime<Utc> {
-    use autopilot::ports::clock::Clock;
-    c.now()
 }

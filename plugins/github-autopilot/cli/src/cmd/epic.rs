@@ -1,8 +1,8 @@
 //! Epic ledger subcommands.
 //!
-//! Pure ledger surface: every operation is a thin adapter over a `TaskStore`
-//! call. The agent owns spec decomposition, git, and GitHub interactions; this
-//! module only persists state and exposes audit-friendly output.
+//! Pure ledger surface: every operation is a thin adapter over `TaskStore`.
+//! Agents own spec decomposition, git, and GitHub; this module only
+//! persists state.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
@@ -166,60 +166,51 @@ impl<'a> EpicService<'a> {
         let filter = status.and_then(EpicStatusFilter::to_status);
         let epics = self.store.list_epics(filter).context("listing epics")?;
         if json {
-            serde_json::to_writer(&mut *out, &epics)?;
-            writeln!(out)?;
-        } else if epics.is_empty() {
+            return write_json(out, &epics).map(|()| 0);
+        }
+        if epics.is_empty() {
             writeln!(out, "(no epics)")?;
-        } else {
+            return Ok(0);
+        }
+        writeln!(
+            out,
+            "NAME                STATUS      BRANCH                    SPEC"
+        )?;
+        for e in &epics {
             writeln!(
                 out,
-                "NAME                STATUS      BRANCH                    SPEC"
+                "{:<18}  {:<10}  {:<24}  {}",
+                e.name,
+                e.status.as_str(),
+                e.branch,
+                e.spec_path.display()
             )?;
-            for e in &epics {
-                writeln!(
-                    out,
-                    "{:<18}  {:<10}  {:<24}  {}",
-                    e.name,
-                    e.status.as_str(),
-                    e.branch,
-                    e.spec_path.display()
-                )?;
-            }
         }
         Ok(0)
     }
 
     pub fn get(&self, name: &str, json: bool, out: &mut dyn Write) -> Result<i32> {
-        let epic = self
+        let Some(epic) = self
             .store
             .get_epic(name)
-            .with_context(|| format!("fetching epic '{name}'"))?;
-        match epic {
-            Some(e) => {
-                if json {
-                    serde_json::to_writer(&mut *out, &e)?;
-                    writeln!(out)?;
-                } else {
-                    print_epic_human(&e, out)?;
-                }
-                Ok(0)
-            }
-            None => {
-                writeln!(out, "epic '{name}' not found")?;
-                Ok(1)
-            }
-        }
+            .with_context(|| format!("fetching epic '{name}'"))?
+        else {
+            writeln!(out, "epic '{name}' not found")?;
+            return Ok(1);
+        };
+        render_epic(&epic, json, out)?;
+        Ok(0)
     }
 
     pub fn status(&self, name: Option<&str>, json: bool, out: &mut dyn Write) -> Result<i32> {
         let epics: Vec<Epic> = match name {
-            Some(n) => match self.store.get_epic(n)? {
-                Some(e) => vec![e],
-                None => {
+            Some(n) => {
+                let Some(e) = self.store.get_epic(n)? else {
                     writeln!(out, "epic '{n}' not found")?;
                     return Ok(1);
-                }
-            },
+                };
+                vec![e]
+            }
             None => self.store.list_epics(Some(EpicStatus::Active))?,
         };
 
@@ -240,66 +231,62 @@ impl<'a> EpicService<'a> {
             reports.push(EpicStatusReport {
                 epic: e.name.clone(),
                 status: e.status,
+                total: tasks.len(),
                 counts,
-                total: tasks.len() as u32,
             });
         }
 
         if json {
-            serde_json::to_writer(&mut *out, &reports)?;
-            writeln!(out)?;
-        } else if reports.is_empty() {
+            return write_json(out, &reports).map(|()| 0);
+        }
+        if reports.is_empty() {
             writeln!(out, "(no active epics)")?;
-        } else {
+            return Ok(0);
+        }
+        writeln!(
+            out,
+            "EPIC               STATUS     PEND READY  WIP  BLK DONE  ESC TOTAL"
+        )?;
+        for r in &reports {
             writeln!(
                 out,
-                "EPIC               STATUS     PEND READY  WIP  BLK DONE  ESC TOTAL"
+                "{:<18} {:<10} {:>4} {:>5} {:>4} {:>4} {:>4} {:>4} {:>5}",
+                r.epic,
+                r.status.as_str(),
+                r.counts.pending,
+                r.counts.ready,
+                r.counts.wip,
+                r.counts.blocked,
+                r.counts.done,
+                r.counts.escalated,
+                r.total
             )?;
-            for r in &reports {
-                writeln!(
-                    out,
-                    "{:<18} {:<10} {:>4} {:>5} {:>4} {:>4} {:>4} {:>4} {:>5}",
-                    r.epic,
-                    r.status.as_str(),
-                    r.counts.pending,
-                    r.counts.ready,
-                    r.counts.wip,
-                    r.counts.blocked,
-                    r.counts.done,
-                    r.counts.escalated,
-                    r.total
-                )?;
-            }
         }
         Ok(0)
     }
 
     pub fn complete(&self, name: &str, out: &mut dyn Write) -> Result<i32> {
-        self.set_status(name, EpicStatus::Completed, "completed", out)
+        self.set_status(name, EpicStatus::Completed, out)
     }
 
     pub fn abandon(&self, name: &str, out: &mut dyn Write) -> Result<i32> {
-        self.set_status(name, EpicStatus::Abandoned, "abandoned", out)
+        self.set_status(name, EpicStatus::Abandoned, out)
     }
 
-    fn set_status(
-        &self,
-        name: &str,
-        target: EpicStatus,
-        verb: &str,
-        out: &mut dyn Write,
-    ) -> Result<i32> {
+    fn set_status(&self, name: &str, target: EpicStatus, out: &mut dyn Write) -> Result<i32> {
         let now = self.clock.now();
         match self.store.set_epic_status(name, target, now) {
             Ok(()) => {
-                writeln!(out, "epic '{name}' {verb}")?;
+                writeln!(out, "epic '{name}' {}", target.as_str())?;
                 Ok(0)
             }
             Err(TaskStoreError::NotFound(_)) => {
                 writeln!(out, "epic '{name}' not found")?;
                 Ok(1)
             }
-            Err(e) => Err(e).with_context(|| format!("setting epic '{name}' to {verb}")),
+            Err(e) => {
+                Err(e).with_context(|| format!("setting epic '{name}' to {}", target.as_str()))
+            }
         }
     }
 
@@ -311,12 +298,7 @@ impl<'a> EpicService<'a> {
     ) -> Result<i32> {
         match self.store.find_active_by_spec_path(spec_path) {
             Ok(Some(e)) => {
-                if json {
-                    serde_json::to_writer(&mut *out, &e)?;
-                    writeln!(out)?;
-                } else {
-                    print_epic_human(&e, out)?;
-                }
+                render_epic(&e, json, out)?;
                 Ok(0)
             }
             Ok(None) => {
@@ -378,11 +360,14 @@ struct StatusCounts {
 struct EpicStatusReport {
     epic: String,
     status: EpicStatus,
+    total: usize,
     counts: StatusCounts,
-    total: u32,
 }
 
-fn print_epic_human(e: &Epic, out: &mut dyn Write) -> Result<()> {
+fn render_epic(e: &Epic, json: bool, out: &mut dyn Write) -> Result<()> {
+    if json {
+        return write_json(out, e);
+    }
     writeln!(out, "name:         {}", e.name)?;
     writeln!(out, "status:       {}", e.status.as_str())?;
     writeln!(out, "branch:       {}", e.branch)?;
@@ -391,6 +376,12 @@ fn print_epic_human(e: &Epic, out: &mut dyn Write) -> Result<()> {
     if let Some(ts) = e.completed_at {
         writeln!(out, "completed_at: {}", ts.to_rfc3339())?;
     }
+    Ok(())
+}
+
+fn write_json<T: Serialize>(out: &mut dyn Write, value: &T) -> Result<()> {
+    serde_json::to_writer(&mut *out, value)?;
+    writeln!(out)?;
     Ok(())
 }
 
@@ -474,7 +465,9 @@ fn parse_reconcile_jsonl(plan_path: &Path, existing: Epic) -> Result<Reconciliat
                     title,
                     body,
                 };
-                tasks.insert(id, nt);
+                if tasks.insert(id.clone(), nt).is_some() {
+                    anyhow::bail!("duplicate task id '{id}' on line {}", lineno + 1);
+                }
             }
             PlanLine::Dep { task, depends_on } => {
                 deps.push((TaskId::from_raw(&task), TaskId::from_raw(&depends_on)));
