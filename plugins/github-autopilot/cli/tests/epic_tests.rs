@@ -25,6 +25,28 @@ where
     (code, String::from_utf8(buf).expect("utf-8"))
 }
 
+fn expect_err<F>(f: F) -> String
+where
+    F: FnOnce(&mut Vec<u8>) -> anyhow::Result<i32>,
+{
+    let mut buf: Vec<u8> = Vec::new();
+    format!("{:#}", f(&mut buf).unwrap_err())
+}
+
+fn seed_epic(svc: &EpicService, name: &str) {
+    let path = format!("spec/{name}.md");
+    let _ = capture(|w| svc.create(name, Path::new(&path), None, w));
+}
+
+fn write_plan_jsonl(lines: &[&str]) -> NamedTempFile {
+    let f = NamedTempFile::new().unwrap();
+    let mut h = std::fs::File::create(f.path()).unwrap();
+    for l in lines {
+        writeln!(h, "{l}").unwrap();
+    }
+    f
+}
+
 #[test]
 fn create_persists_epic_and_emits_started_event() {
     let (store, clock) = fixture();
@@ -307,23 +329,14 @@ fn reconcile_returns_exit_1_when_epic_missing() {
 fn reconcile_rejects_duplicate_task_id_in_plan() {
     let (store, clock) = fixture();
     let svc = EpicService::new(store.as_ref(), &clock);
-    let _ = capture(|w| svc.create("e", Path::new("spec/e.md"), None, w));
+    seed_epic(&svc, "e");
 
-    let plan = NamedTempFile::new().unwrap();
-    let lines = [
+    let plan = write_plan_jsonl(&[
         r#"{"kind":"task","id":"aaaaaaaaaaaa","title":"first"}"#,
         r#"{"kind":"task","id":"aaaaaaaaaaaa","title":"duplicate"}"#,
-    ];
-    {
-        let mut f = std::fs::File::create(plan.path()).unwrap();
-        for l in &lines {
-            writeln!(f, "{l}").unwrap();
-        }
-    }
+    ]);
 
-    let mut buf: Vec<u8> = Vec::new();
-    let err = svc.reconcile("e", plan.path(), &mut buf).unwrap_err();
-    let msg = format!("{err:#}");
+    let msg = expect_err(|w| svc.reconcile("e", plan.path(), w));
     assert!(
         msg.contains("duplicate task id 'aaaaaaaaaaaa'"),
         "error: {msg}"
@@ -335,50 +348,45 @@ fn reconcile_rejects_duplicate_task_id_in_plan() {
 fn reconcile_rejects_unknown_task_source() {
     let (store, clock) = fixture();
     let svc = EpicService::new(store.as_ref(), &clock);
-    let _ = capture(|w| svc.create("e", Path::new("spec/e.md"), None, w));
+    seed_epic(&svc, "e");
 
-    let plan = NamedTempFile::new().unwrap();
-    {
-        let mut f = std::fs::File::create(plan.path()).unwrap();
-        writeln!(
-            f,
-            r#"{{"kind":"task","id":"aaaaaaaaaaaa","title":"x","source":"telepathy"}}"#
-        )
-        .unwrap();
-    }
-    let mut buf: Vec<u8> = Vec::new();
-    let err = svc.reconcile("e", plan.path(), &mut buf).unwrap_err();
-    assert!(format!("{err:#}").contains("unknown source 'telepathy'"));
+    let plan = write_plan_jsonl(&[
+        r#"{"kind":"task","id":"aaaaaaaaaaaa","title":"x","source":"telepathy"}"#,
+    ]);
+    let msg = expect_err(|w| svc.reconcile("e", plan.path(), w));
+    assert!(msg.contains("unknown source 'telepathy'"), "error: {msg}");
+    // No partial write on parse error.
+    assert!(store.list_tasks_by_epic("e", None).unwrap().is_empty());
 }
 
 #[test]
 fn reconcile_skips_blank_and_comment_lines() {
     let (store, clock) = fixture();
     let svc = EpicService::new(store.as_ref(), &clock);
-    let _ = capture(|w| svc.create("e", Path::new("spec/e.md"), None, w));
+    seed_epic(&svc, "e");
 
-    let plan = NamedTempFile::new().unwrap();
-    {
-        let mut f = std::fs::File::create(plan.path()).unwrap();
-        writeln!(f, "# leading comment").unwrap();
-        writeln!(f).unwrap();
-        writeln!(
-            f,
-            r#"{{"kind":"task","id":"aaaaaaaaaaaa","title":"first"}}"#
-        )
-        .unwrap();
-        writeln!(f, "   ").unwrap();
-    }
+    // The `#`-prefixed line is itself valid JSON; if the parser stripped `#`
+    // *after* trying to deserialize it would either error or insert task
+    // `cccccccccccc`. Asserting only `aaaa...` is created proves `#` is
+    // recognized as a comment marker before parse.
+    let plan = write_plan_jsonl(&[
+        r#"# {"kind":"task","id":"cccccccccccc","title":"comment"}"#,
+        "",
+        r#"{"kind":"task","id":"aaaaaaaaaaaa","title":"first"}"#,
+        "   ",
+    ]);
     let (code, _) = capture(|w| svc.reconcile("e", plan.path(), w));
     assert_eq!(code, 0);
-    assert_eq!(store.list_tasks_by_epic("e", None).unwrap().len(), 1);
+    let tasks = store.list_tasks_by_epic("e", None).unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].id.as_str(), "aaaaaaaaaaaa");
 }
 
 #[test]
 fn list_renders_human_table_when_not_json() {
     let (store, clock) = fixture();
     let svc = EpicService::new(store.as_ref(), &clock);
-    let _ = capture(|w| svc.create("alpha", Path::new("spec/a.md"), None, w));
+    seed_epic(&svc, "alpha");
     let (code, out) = capture(|w| svc.list(None, false, w));
     assert_eq!(code, 0);
     assert!(out.contains("alpha"));
