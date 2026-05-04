@@ -51,7 +51,7 @@
       ],
       "name": "git-utils",
       "source": "./plugins/git-utils",
-      "version": "2.4.1"
+      "version": "2.4.2"
     },
     {
       "category": "productivity",
