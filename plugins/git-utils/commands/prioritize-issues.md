@@ -149,8 +149,10 @@ issue 내용과 현재 코드베이스의 연관성을 다음 4단계 절차로 
 issue body에서 코드 경로처럼 보이는 토큰을 추출합니다. 디렉토리 후보는 레포의 실제 최상위 디렉토리에서 동적으로 수집해 다양한 레이아웃에 대응합니다.
 
 ```bash
-# 레포 최상위 디렉토리를 정규식 OR 그룹으로 변환
-ROOTS=$(ls -d */ 2>/dev/null | tr -d '/' | paste -sd '|' -)
+# 디렉토리명에 정규식 메타문자가 있으면 grep -E 패턴이 깨지므로 사전 escape
+ROOTS=$(ls -d */ 2>/dev/null | tr -d '/' \
+  | sed 's/[][\\.^$*+?()|]/\\&/g' \
+  | paste -sd '|' -)
 
 echo "$BODY" | grep -oE "(${ROOTS})/[A-Za-z0-9_./-]+" | sort -u
 ```
