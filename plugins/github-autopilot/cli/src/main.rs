@@ -2,6 +2,7 @@ use autopilot::cmd::{
     CheckCommands, Cli, Commands, IssueCommands, ListArgs, PipelineCommands, PreflightArgs,
     StatsCommands, TaskCommands, WorktreeCommands,
 };
+use autopilot::config::Config;
 use autopilot::store::SqliteTaskStore;
 use autopilot::{cmd, fs, gh, git, github};
 use clap::Parser;
@@ -10,6 +11,13 @@ use std::path::{Path, PathBuf};
 
 fn main() {
     let cli = Cli::parse();
+    let config = match load_config(cli.config.as_deref()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e:#}");
+            std::process::exit(2);
+        }
+    };
 
     let result = match cli.command {
         Commands::Issue { command } => match command {
@@ -150,27 +158,101 @@ fn main() {
             )
         }
         Commands::Task { command } => {
-            let db_path = task_store_db_path();
-            let store = match SqliteTaskStore::open(&db_path) {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("failed to open task store at {}: {e}", db_path.display());
-                    std::process::exit(2);
-                }
-            };
+            let store = open_store(&config);
             let clock = cmd::task::default_clock();
-            let svc = cmd::task::task_service(&store, &clock);
+            let svc = cmd::task::TaskService::with_max_attempts(
+                &store,
+                &clock,
+                config.epic.default_max_attempts,
+            );
             let mut out = stdout();
             match command {
                 TaskCommands::List { epic, status, json } => {
                     svc.list(&epic, status, json, &mut out)
                 }
                 TaskCommands::Show { task_id, json } => svc.show(&task_id, json, &mut out),
+                TaskCommands::Get { task_id, json } => svc.show(&task_id, json, &mut out),
                 TaskCommands::ForceStatus {
                     task_id,
                     to,
                     reason,
                 } => svc.force_status(&task_id, to, reason.as_deref(), &mut out),
+                TaskCommands::Add {
+                    epic,
+                    id,
+                    title,
+                    body,
+                    fingerprint,
+                    source,
+                } => svc.add(
+                    &epic,
+                    &id,
+                    &title,
+                    body.as_deref(),
+                    fingerprint.as_deref(),
+                    source,
+                    &mut out,
+                ),
+                TaskCommands::AddBatch { epic, from } => svc.add_batch(&epic, &from, &mut out),
+                TaskCommands::FindByPr { pr_number, json } => {
+                    svc.find_by_pr(pr_number, json, &mut out)
+                }
+                TaskCommands::Claim { epic, json } => svc.claim(&epic, json, &mut out),
+                TaskCommands::Release { task_id } => svc.release(&task_id, &mut out),
+                TaskCommands::Complete { task_id, pr } => svc.complete(&task_id, pr, &mut out),
+                TaskCommands::Fail { task_id } => svc.fail(&task_id, &mut out),
+                TaskCommands::Escalate { task_id, issue } => {
+                    svc.escalate(&task_id, issue, &mut out)
+                }
+            }
+        }
+        Commands::Epic { command } => {
+            let store = open_store(&config);
+            let clock = cmd::task::default_clock();
+            let svc = cmd::epic::epic_service(&store, &clock);
+            let mut out = stdout();
+            match command {
+                cmd::epic::EpicCommands::Create(args) => {
+                    svc.create(&args.name, &args.spec, args.branch.as_deref(), &mut out)
+                }
+                cmd::epic::EpicCommands::List(args) => svc.list(args.status, args.json, &mut out),
+                cmd::epic::EpicCommands::Get(args) => svc.get(&args.name, args.json, &mut out),
+                cmd::epic::EpicCommands::Status(args) => {
+                    svc.status(args.name.as_deref(), args.json, &mut out)
+                }
+                cmd::epic::EpicCommands::Complete(args) => svc.complete(&args.name, &mut out),
+                cmd::epic::EpicCommands::Abandon(args) => svc.abandon(&args.name, &mut out),
+                cmd::epic::EpicCommands::Reconcile(args) => {
+                    svc.reconcile(&args.name, &args.plan, &mut out)
+                }
+                cmd::epic::EpicCommands::FindBySpecPath(args) => {
+                    svc.find_by_spec_path(&args.spec, args.json, &mut out)
+                }
+            }
+        }
+        Commands::Suppress { command } => {
+            let store = open_store(&config);
+            let clock = cmd::task::default_clock();
+            let svc = cmd::suppress::suppress_service(&store, &clock);
+            let mut out = stdout();
+            match command {
+                cmd::suppress::SuppressCommands::Add(args) => {
+                    svc.add(&args.fingerprint, &args.reason, &args.until, &mut out)
+                }
+                cmd::suppress::SuppressCommands::Check(args) => {
+                    svc.check(&args.fingerprint, &args.reason, &mut out)
+                }
+                cmd::suppress::SuppressCommands::Clear(args) => {
+                    svc.clear(&args.fingerprint, &args.reason, &mut out)
+                }
+            }
+        }
+        Commands::Events { command } => {
+            let store = open_store(&config);
+            let svc = cmd::events::events_service(&store);
+            let mut out = stdout();
+            match command {
+                cmd::events::EventsCommands::List(args) => svc.list(&args, &mut out),
             }
         }
     };
@@ -184,13 +266,35 @@ fn main() {
     }
 }
 
-fn task_store_db_path() -> PathBuf {
+fn task_store_db_path(config: &Config) -> PathBuf {
     if let Ok(p) = std::env::var("AUTOPILOT_DB_PATH") {
         return PathBuf::from(p);
     }
-    let dir = PathBuf::from(".autopilot");
-    if !dir.exists() {
-        let _ = std::fs::create_dir_all(&dir);
+    let path = config.storage.db_path.clone();
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
     }
-    dir.join("state.db")
+    path
+}
+
+fn load_config(explicit: Option<&Path>) -> anyhow::Result<Config> {
+    let default_path = PathBuf::from("autopilot.toml");
+    let path = explicit.unwrap_or(default_path.as_path());
+    Config::load(path)
+}
+
+/// Opens the SQLite task store at the configured path, exiting with code 2
+/// on failure. Centralizes the error message so every `Commands::*` arm that
+/// needs the store stays a one-liner.
+fn open_store(config: &Config) -> SqliteTaskStore {
+    let db_path = task_store_db_path(config);
+    match SqliteTaskStore::open(&db_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("failed to open task store at {}: {e}", db_path.display());
+            std::process::exit(2);
+        }
+    }
 }

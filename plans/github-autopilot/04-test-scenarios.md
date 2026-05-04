@@ -4,38 +4,32 @@
 
 ## 1. 테스트 레이어와 격리
 
+Ledger 모델에서 autopilot 의 책임은 TaskStore + CLI 까지다. 그 위의 워크플로 (UC-1~13 의 시나리오 통합) 검증은 **agent 측의 책임** 이다 — 본 spec 의 범위 밖.
+
 | 레이어 | 대상 | 어댑터 | 격리 단위 |
 |--------|------|--------|----------|
 | **L1. Domain** | pure 함수 / 타입 (TaskId, TaskGraph, deps cycle) | 없음 | 함수별 단위 |
 | **L2. Store conformance** | TaskStore 의 트랜잭션 의미 (LSP) | `InMemoryTaskStore` + `SqliteTaskStore` 양쪽에 동일 suite 실행 | 메서드 + tx 경계 |
-| **L3. Orchestration** | EpicManager / BuildLoop / WatchDispatcher / MergeLoop / Reconciler / Escalator | 모든 포트는 fake (InMemoryTaskStore, FakeGit, FakeGitHub, FakeDecomposer, FakeNotifier, FixedClock) | UC 1건 = 1 시나리오 |
-| **L4. Property** | 결정적 ID 충돌, reconcile 멱등성, 동시 claim 의 원자성 | proptest 기반 임의 입력 | 불변식별 |
+| **L3. CLI 통합** | clap 진입점 ↔ TaskStore 연결, JSON 출력 / exit code | `InMemoryTaskStore` + `FixedClock` 주입 | 명령 1건 |
+| **L4. Property** | 결정적 ID 충돌, attempts 단조성, reconcile 멱등성, 동시 claim 원자성 | proptest 기반 임의 입력 | 불변식별 |
 
-CLI 진입점 / SQLite 어댑터의 실 SQL 동작은 L2 가 담당한다. 별도 e2e (실제 git/GitHub) 테스트는 본 문서 범위 밖 — CI 환경에서 수동 smoke 만 수행.
+E2E (실제 git / GitHub) 테스트와 agent 측 워크플로 통합은 본 문서 범위 밖.
 
 ## 2. 공통 fixture 형식
 
-각 시나리오는 다음 YAML-like 구조로 표기한다 (실제 구현에서는 builder 함수 권장):
+L2 / L3 / L4 모두 in-memory store 와 fixed clock 을 기본 fixture 로 사용. agent 와의 통합 fixture (FakeGit / FakeGitHub / FakeDecomposer / FakeNotifier) 는 더 이상 본 spec 의 책임이 아니다.
 
 ```yaml
 fixture:
   clock:
     now: "2026-04-28T09:00:00Z"
-  epic:
-    name: "auth-token-refresh"
-    spec_path: "spec/auth.md"
-    branch: "epic/auth-token-refresh"
-  decomposer:
-    tasks:
-      - { section: "## 인증", req: "토큰 갱신",   id: "<derived>" }
-      - { section: "## 인증", req: "401 재시도", id: "<derived>" }
-    deps: []
-  git:
-    initial_branches: ["main"]
-    push_rejects: []
-  github:
-    issues: []
-    prs: []
+  store: in-memory   # 또는 sqlite (conformance 비교)
+  epics:
+    - { name: "auth-token-refresh", spec_path: "spec/auth.md", status: "active" }
+  tasks:
+    - { id: "<derived>", epic: "auth-token-refresh", status: "ready", title: "..." }
+  deps: []
+  events: []
 ```
 
 `<derived>` 는 결정적 ID 함수의 결과 (테스트 setup 에서 계산하여 매칭).
@@ -144,10 +138,18 @@ test: claim_is_atomic_under_concurrent_callers
   then:  정확히 한쪽만 Some(A) 를 받고 다른 쪽은 None
          get_task(A).attempts == 1   # 한 번만 증가
 
-test: claim_increments_attempts_on_each_call
+test: claim_increments_attempts_only_on_real_attempt
   given: 1 ready task A
-  when:  claim → revert_to_ready → claim
+  when:  claim → release_claim → claim
+  then:  attempts == 1
+         -- release_claim 은 시도조차 못 한 경우(UC-11)에 사용되며,
+         -- claim 의 +1 을 차감하여 max_attempts 카운트에 영향 없음
+
+test: mark_task_failed_preserves_attempts_for_retry
+  given: 1 ready task A, max_attempts=3
+  when:  claim → mark_task_failed (Retried) → claim → mark_task_failed (Retried)
   then:  attempts == 2
+         -- 시도 후 실패는 attempts 보존 (escalation 카운트에 반영)
 ```
 
 ### 4.3 complete_task_and_unblock
@@ -226,7 +228,77 @@ test: upsert_watch_task_returns_duplicate_on_existing_fingerprint
          no new task inserted
 ```
 
-### 4.7 schema_version 일관성 (SQLite 전용)
+### 4.7 lookup helpers
+
+```
+test: find_task_by_pr_returns_owning_task
+  given: A(done, pr_number=42), B(wip, pr_number=None)
+  when:  find_task_by_pr(42)
+  then:  Ok(Some(A))
+
+test: find_task_by_pr_returns_none_when_unknown
+  when:  find_task_by_pr(9999)
+  then:  Ok(None)
+
+test: find_active_by_spec_path_matches_active_only
+  given: epic e1(active, spec="spec/auth.md"), e2(abandoned, spec="spec/auth.md")
+  when:  find_active_by_spec_path("spec/auth.md")
+  then:  Ok(Some(e1))   # abandoned 는 제외
+
+test: find_active_by_spec_path_returns_none_when_no_match
+  given: epic e1(active, spec="spec/payments.md")
+  when:  find_active_by_spec_path("spec/auth.md")
+  then:  Ok(None)
+
+test: find_active_by_spec_path_rejects_invariant_violation
+  given: epic e1(active, spec="spec/auth.md"), e2(active, spec="spec/auth.md")
+         # 정상 흐름에서는 만들 수 없으나 직접 삽입했다고 가정
+  when:  find_active_by_spec_path("spec/auth.md")
+  then:  Err(DomainError::Inconsistency(_))
+```
+
+### 4.8 force_status
+
+```
+test: force_status_bypasses_normal_transition
+  given: A(escalated)
+  when:  force_status(A, target=Pending, reason="manual reset")
+  then:  A.status == 'pending'
+         events kind 에 reason 이 payload 로 기록됨
+
+test: force_status_does_not_unblock_dependents
+  given: A(escalated), B(blocked, deps=[A])
+  when:  force_status(A, target=Done, reason="human fixed")
+  then:  A.status == 'done'
+         B.status == 'blocked'   # force_status 는 자식 unblock 안 함
+         # → 호출자가 별도로 reconcile / 메서드를 호출해야 함
+
+test: force_status_records_event_with_reason
+  given: A(wip)
+  when:  force_status(A, target=Ready, reason="rollback")
+  then:  events 에 force_status 기록, payload.reason == "rollback"
+```
+
+### 4.9 suppression
+
+```
+test: suppression_blocks_until_window_expires
+  fixture: clock at t0
+  when:  suppress(fp="fp-1", reason="unmatched_watch", until=t0+1h)
+         is_suppressed(fp-1, "unmatched_watch", at=t0+30m) -> true
+         is_suppressed(fp-1, "unmatched_watch", at=t0+2h)  -> false
+
+test: suppression_is_scoped_by_reason
+  when:  suppress(fp="fp-1", reason="unmatched_watch", ...)
+         is_suppressed(fp-1, "rejected_by_human", now) -> false
+
+test: suppression_clear_unblocks_immediately
+  when:  suppress(fp-1, "r", until=far_future)
+         clear(fp-1, "r")
+         is_suppressed(fp-1, "r", now) -> false
+```
+
+### 4.10 schema_version 일관성 (SQLite 전용)
 
 ```
 test: sqlite_initializes_schema_v1_on_empty_db
@@ -240,261 +312,64 @@ test: sqlite_rejects_unknown_higher_version
   then:  Err(SchemaMismatch{found:999, expected:1})
 ```
 
-## 5. L3: Orchestration 시나리오 (UC ↔ 테스트)
 
-각 시나리오는 fake 어댑터로 wiring 한 orchestration 컴포넌트를 호출하고 외부 관찰점 (DB, FakeGit ref 그래프, FakeGitHub 이슈/PR, FakeNotifier 메시지) 으로 사후 조건을 검증한다.
+## 5. L3: CLI 통합
 
-### UC-1. Epic 시작
-
-```
-test: uc1_epic_start_creates_branch_and_seeds_tasks
-  fixture:
-    git: branches=[main], working_tree_clean=true
-    decomposer: tasks=[(s1,r1), (s2,r2)], deps=[]
-  when:  EpicManager::start({ name:"e", spec:"spec/auth.md" })
-  then:
-    git.branches contains "epic/e"
-    git.pushed contains "epic/e"
-    store.list_epics() == [Epic{name:"e", status='active', ...}]
-    store.list_tasks_by_epic("e") -> 2 tasks, 둘 다 status='ready'
-    store.events: epic_started + 2x task_inserted
-
-test: uc1_epic_start_rolls_back_on_decomposer_failure
-  fixture: decomposer.fail = SpecNotFound
-  when:  EpicManager::start({ name:"e", spec:"missing.md" })
-  then:  Err(_)
-         store.list_epics() empty
-         git.branches unchanged
-
-test: uc1_epic_start_rejects_dirty_working_tree
-  fixture: git.working_tree_clean=false
-  when:  EpicManager::start(...)
-  then:  Err(GitError::DirtyWorkingTree)
-
-test: uc1_epic_start_rejects_when_active_epic_with_same_name
-  fixture: store has epic "e" with status='active'
-  when:  EpicManager::start({ name:"e" })
-  then:  Err(EpicAlreadyExists)
-```
-
-### UC-2. Task 자동 구현 사이클
+CLI 진입점이 trait 메서드를 올바르게 디스패치하고 JSON 출력 / exit code 가 안정적인지 검증한다. `InMemoryTaskStore` + `FixedClock` 을 직접 주입하고 `assert_cmd` 또는 동등 도구로 stdout / exit code 를 검사한다.
 
 ```
-test: uc2_full_cycle_claim_to_merged
-  fixture:
-    epic "e" with 1 ready task A
-    fake_implementer: on_invoke push branch successfully
-    github: empty
-  when:
-    BuildLoop::tick()           -> claim A, IM push, branch_promoter create PR #100
-    MergeLoop::tick()           -> CI ok 가정, merge PR #100
-  then:
-    A.status == 'done'
-    A.pr_number == 100
-    events sequence: task_claimed, task_started, task_completed
-    github.prs[100].merged == true
+test: cli_epic_create_persists_and_emits_event
+  given: empty store
+  when:  `autopilot epic create --name e --spec spec/e.md`
+  then:  exit 0
+         store.list_epics() == [Epic{name="e", status=active, ...}]
+         events: epic_started
 
-test: uc2_push_failure_returns_task_to_ready
-  fixture: fake_implementer pushes successfully but branch_promoter fails to create PR
-  when:  BuildLoop::tick()
-  then:  A.status == 'ready'
-         events: task_failed (non-final)
+test: cli_task_claim_outputs_next_ready_task_as_json
+  given: epic e with task A(ready)
+  when:  `autopilot task claim --epic e --json`
+  then:  exit 0
+         stdout JSON: {"id":"...A...","status":"wip","attempts":1,...}
+         get_task(A).status == Wip
+
+test: cli_task_claim_signals_no_ready_via_exit_code
+  given: epic e with no ready task
+  when:  `autopilot task claim --epic e`
+  then:  exit 1   # "no ready task" 신호 (사용자 에러 아님)
+
+test: cli_task_complete_updates_pr_and_unblocks
+  given: A(wip), B(pending, deps=[A])
+  when:  `autopilot task complete <A.id> --pr 42`
+  then:  A.status == Done, A.pr_number == 42
+         B.status == Ready
+
+test: cli_task_fail_reports_outcome
+  given: A(wip, attempts=2), max_attempts=3
+  when:  `autopilot task fail <A.id>`
+  then:  exit 0
+         stdout JSON: {"outcome":"retried","attempts":2}
+         A.status == Ready
+
+  when (한번 더 claim → fail): 동일 호출
+  then:  stdout JSON: {"outcome":"escalated","attempts":3}
+         A.status == Escalated
+
+test: cli_suppress_check_returns_proper_exit_code
+  given: suppress(fp="x", reason="r", until=t0+1h)
+  when:  `autopilot suppress check --fingerprint x --reason r`
+  then:  exit 0   # 억제 중
+
+  when (window 만료 후): 동일 호출
+  then:  exit 1   # 억제 안 됨
+
+test: cli_epic_reconcile_applies_plan_idempotently
+  given: empty store
+  when:  `autopilot epic reconcile --name e --plan <plan.jsonl>` 두 번
+  then:  두 번째 호출 후 store 상태 == 첫 번째 호출 후 상태
+         events 에 reconciled 가 2건
 ```
 
-### UC-3. 의존성 있는 Task
-
-```
-test: uc3_dependent_task_not_claimed_until_parent_done
-  fixture: tasks A(ready), B(pending, deps=[A])
-  when:
-    claim_next_task -> A
-    complete_task_and_unblock(A, pr=1)
-    claim_next_task -> ?
-  then:  세 번째 결과는 Some(B)
-         events: A.completed before B.claimed
-
-test: uc3_escalated_parent_blocks_child
-  fixture: A(wip, attempts=max), B(pending, deps=[A])
-  when:  mark_task_failed(A, max_attempts) → Escalated
-  then:  B.status == 'blocked'
-```
-
-### UC-4. Epic 이어받기
-
-```
-test: uc4_resume_reconstructs_state_from_remote
-  fixture:
-    store: empty (다른 머신 또는 DB 손실 가정)
-    git.remote_branches: ["epic/e", "epic/e/<idA>", "epic/e/<idB>"]
-    github.prs: [{head:"epic/e/<idA>", base:"epic/e", merged:true, number:10}]
-    decomposer: tasks=[A,B,C]   # idA,idB,idC 결정적
-  when:  EpicManager::resume("e")
-  then:
-    A.status == 'done', A.pr_number == 10
-    B.status == 'wip'           # 브랜치만 있고 PR 없음
-    C.status == 'ready'         # 브랜치 없음, deps 만족
-    events: kind='reconciled'
-
-test: uc4_resume_reports_orphan_branch
-  fixture: remote has "epic/e/<unknown_id>"
-  when:  EpicManager::resume("e")
-  then:  events 에 reconciled.payload.orphan_branch=="epic/e/<unknown_id>" 1건
-```
-
-### UC-5. DB 손실 후 복구
-
-```
-test: uc5_lost_db_recovers_via_resume
-  fixture: 같은 fixture 를 두 번 실행 — 첫 번째는 실 DB, 두 번째는 DB 파일 삭제 후 resume
-  then:  두 번째 실행 후 store 상태가 첫 번째의 의미적 상태와 일치
-         단, attempts 카운터는 0 으로 재설정 (허용 손실)
-```
-
-### UC-6. Watch 매칭 task append
-
-```
-test: uc6_gap_watch_appends_task_when_spec_matches_active_epic
-  fixture: active epic "e" with spec_path="spec/auth.md"
-  when:  WatchDispatcher::dispatch(GapFinding {
-           spec_path:"spec/auth.md",
-           section:"## 인증", req:"새로운 갭",
-           fingerprint:"fp-1"
-         })
-  then:  store.list_tasks_by_epic("e") 가 1건 증가
-         새 task.source == 'gap-watch'
-         github.issues empty   # 매칭됐으므로 이슈 발행 없음
-
-test: uc6_duplicate_fingerprint_is_no_op
-  fixture: epic "e" 에 이미 fingerprint="fp-1" 인 task
-  when:  WatchDispatcher::dispatch(finding with fp-1)
-  then:  store.tasks count unchanged
-         events kind='watch_duplicate' 1건
-```
-
-### UC-7. Watch 미매칭 escalation
-
-```
-test: uc7_unmatched_watch_creates_escalation_issue
-  fixture: 활성 epic 의 spec_path 와 다른 path
-  when:  WatchDispatcher::dispatch(finding)
-  then:  github.issues count == 1
-         issue.labels contains "autopilot:hitl-needed"
-         store.tasks unchanged (미매칭 watch 는 task 미생성)
-         escalation_suppression 에 fingerprint 기록
-
-test: uc7_suppressed_fingerprint_skips_issue
-  fixture: escalation_suppression 에 fp 가 활성 (now < suppress_until)
-  when:  WatchDispatcher::dispatch(finding with fp)
-  then:  github.issues count unchanged
-```
-
-### UC-8. 반복 실패 escalation
-
-```
-test: uc8_max_attempts_creates_escalation_issue
-  fixture: A(wip, attempts=2), max_attempts=3
-  when:
-    mark_task_failed(A, max=3)        # → Retried{attempts:2}
-    re-claim → mark_task_failed(A, max=3)   # 이제 attempts=3 → Escalated
-    Escalator::escalate(A)             # GitHub 이슈 발행
-  then:  github.issues count == 1
-         A.escalated_issue == issue.number
-         A.status == 'escalated'
-```
-
-### UC-9. 사람이 escalation 처리
-
-```
-test: uc9a_resolved_by_starting_new_epic
-  fixture: open escalation issue with epic="none"
-  when:  사람이 EpicManager::start(...) 로 새 epic 시작
-  then:  새 epic 활성화. 기존 escalation 이슈는 사람이 close 해야 닫힘 (자동 close 안함)
-
-test: uc9b_resolved_by_absorbing_into_existing_epic
-  fixture: 활성 epic "e" + open escalation issue
-  when:  analyze-issue 가 이슈 본문 → spec 매칭 후 task append
-  then:  store 에 새 task 1건, source='human', body 에 issue_number 메타
-         이슈는 코멘트 추가 후 close
-
-test: uc9d_human_fixed_directly_marks_done_on_resume
-  fixture: A.status='escalated', 사람이 직접 코드 push 후 PR merged
-  when:  EpicManager::resume(...)
-  then:  reconcile 로 A.status='done' 으로 전이
-```
-
-### UC-10. Epic 완료
-
-```
-test: uc10_all_tasks_done_completes_epic_and_notifies
-  fixture: epic "e" 의 마지막 task A 가 wip → done 으로 전이 직후
-  when:  MergeLoop::tick() 가 마지막 PR 머지 후 epic 완료 판정
-  then:  epic.status == 'completed'
-         notifier.sent contains EpicCompleted{ epic:"e" }
-         no automatic main-merge PR 생성  # main 머지는 사람의 몫
-
-test: uc10_does_not_complete_with_open_escalations
-  fixture: epic 의 task 들 중 하나가 escalated 이고 issue 가 open
-  when:  MergeLoop::tick()
-  then:  epic.status == 'active' 유지
-         notifier.sent 에 EpicCompleted 없음
-```
-
-### UC-11. 동시 진행 자연 차단
-
-```
-test: uc11_push_reject_reverts_task_to_ready
-  fixture: BuildLoop 가 task A 를 claim, IM 이 push 시도하나 git.push_rejects 로 reject
-  when:  IM 결과 처리
-  then:  A.status == 'ready'
-         events kind='claim_lost'
-         tasks 의 attempts 는 증가했지만 다음 cycle 에 다시 claim 가능
-
-test: uc11_concurrent_claim_yields_one_winner
-  given: store 에 ready task A 1건
-  when:  두 BuildLoop 인스턴스가 동시에 claim
-  then:  한 쪽만 Some(A), 다른 쪽 None
-         tasks.attempts == 1
-         events kind='task_claimed' 1건
-```
-
-### UC-12. Epic 강제 중단
-
-```
-test: uc12_stop_marks_abandoned_and_keeps_branches
-  fixture: epic "e" with task A(wip)
-  when:  EpicManager::stop("e", purge_branches=false)
-  then:  epic.status == 'abandoned'
-         A.status == 'wip' (보존)
-         git.remote_branches contains "epic/e" (삭제 안 함)
-
-test: uc12_stop_with_purge_deletes_unmerged_branches
-  fixture: epic with feature branches, 일부 PR merged
-  when:  EpicManager::stop("e", purge_branches=true)
-  then:  머지된 PR 의 feature 브랜치만 삭제
-         미머지 feature 브랜치는 보존 (작업 손실 방지)
-```
-
-### UC-13. 마이그레이션
-
-```
-test: uc13_import_issue_creates_task_and_strips_label
-  fixture:
-    epic "e" active, spec_path="spec/auth.md"
-    github.issues = [{ number:5, title:"...", labels:[":ready"], body:"...spec/auth.md..." }]
-  when:  MigrateCommand::import_issue(5)
-  then:
-    store.list_tasks_by_epic("e") 1건 증가
-    new_task.source == 'human'
-    new_task.body contains "issue #5"
-    github.issues[5].labels does NOT contain ":ready"
-    github.issues[5].comments contains "task <id> 로 흡수됨"
-
-test: uc13_unmatched_issue_falls_back_to_escalation
-  fixture: 이슈의 spec 매칭 실패
-  when:  MigrateCommand::import_issue(5)
-  then:  task 생성 안 됨
-         이슈는 그대로 유지 (사람이 수동 처리)
-```
+L3 의 의도는 **CLI 인자 파싱 / 트레이트 디스패치 / JSON 출력** 의 안정성. 비즈니스 로직 검증은 L2 가 담당하므로 L3 는 가벼운 분량으로 유지.
 
 ## 6. L4: Property 테스트
 
@@ -503,10 +378,13 @@ proptest: deterministic_task_id_no_collision_in_realistic_corpus
   generator: 1000개 spec section/requirement 쌍 (Korean+English mix, 길이 1..200)
   property: { TaskId(...) } 가 모두 unique 하거나 입력이 정규화 후 동일
 
-proptest: claim_invariant_attempts_monotonic
-  for any sequence of (claim → mark_failed | revert) operations:
-    task.attempts 는 단조 증가 (감소하지 않음)
-    final status ∈ {ready, wip, escalated, done}
+proptest: attempts_bounded_by_real_attempts
+  for any sequence of operations from {claim, mark_failed, release_claim, complete}:
+    let real_attempts =
+        (# of claim) - (# of release_claim immediately following the matching claim)
+    final task.attempts == real_attempts
+    final task.attempts 는 결코 0 미만이 되지 않음 (saturating_sub 보장)
+    final status ∈ {Ready, Wip, Escalated, Done, Pending, Blocked}
 
 proptest: reconcile_idempotent_under_arbitrary_remote_state
   generator: 임의 remote_state (브랜치 + PR 조합)
@@ -525,42 +403,40 @@ proptest: dep_graph_topological_order_respects_constraints
 
 | Fake | 보장 동작 |
 |------|----------|
-| `InMemoryTaskStore` | 단일 `Mutex<State>` 로 모든 메서드 atomic. SqliteTaskStore 와 같은 트랜잭션 의미 |
-| `FakeGitClient` | 가상 ref 그래프. `push_rejects` 리스트에 등록된 브랜치는 항상 `Rejected` 반환. push 성공 시 ref 추가 |
-| `FakeGitHubClient` | 이슈/PR 의 in-memory store. PR.merged 는 명시적 `merge_pr` 호출 시에만 true |
-| `FakeDecomposer` | fixture 의 tasks/deps 를 그대로 반환. `fail` 옵션 시 지정된 에러 반환 |
-| `FakeNotifier` | 호출 시 메시지를 `sent: Vec<NotificationEvent>` 에 누적 |
+| `InMemoryTaskStore` | 단일 `Mutex<State>` 로 모든 메서드 atomic. `SqliteTaskStore` 와 같은 트랜잭션 의미 |
 | `FixedClock` | `now()` 가 고정. 테스트가 명시적으로 advance 가능 |
+
+git / github / decompose / notifier 의 fake 는 **본 spec 의 책임이 아니다** — agent 측에서 자기 워크플로 통합 테스트에 필요할 때 만든다.
 
 ### 7.2 Builder 함수 (예)
 
 ```rust
-let world = TestWorld::new()
-    .with_clock_at("2026-04-28T09:00:00Z")
-    .with_active_epic("e", spec="spec/auth.md")
-    .with_tasks(&["A", "B"])
-    .with_deps(&[("B", "A")])
-    .with_remote_branches(&["epic/e", "epic/e/<A_id>"])
-    .with_merged_pr(number=10, head="epic/e/<A_id>", base="epic/e");
+let store = Arc::new(InMemoryTaskStore::new()) as Arc<dyn TaskStore>;
+let clock = FixedClock::at("2026-04-28T09:00:00Z");
 
-let outcome = world.epic_manager().resume("e")?;
-world.assert_task_status("A", TaskStatus::Done);
-world.assert_task_status("B", TaskStatus::Wip);
+store.insert_epic_with_tasks(plan("e", vec![nt("A","a"), nt("B","b")],
+                                  vec![("B","A")]), clock.now())?;
+store.claim_next_task("e", clock.now())?;       // A → Wip
+store.complete_task_and_unblock(&id("A"), 42, clock.now())?;
+assert_eq!(store.get_task(&id("A"))?.unwrap().status, TaskStatus::Done);
+assert_eq!(store.get_task(&id("B"))?.unwrap().status, TaskStatus::Ready);
 ```
 
-빌더는 03 의 도메인 타입 + 결정적 ID 함수를 사용하여 fixture 의 `<A_id>` 를 자동 계산한다.
+빌더는 03 의 도메인 타입 + 결정적 ID 함수를 사용한다. CLI L3 테스트에서는 `assert_cmd::Command` 같은 도구로 실행 + stdout / exit code 검사.
 
 ## 8. 카버리지 목표
 
 - L1: 100% (pure 함수 — 작성 즉시 모두 다룰 수 있음)
 - L2: TaskStore trait 의 모든 public 메서드에 ≥1 시나리오 + LSP suite 전체 양 구현체 통과
-- L3: 01 의 13개 UC 마다 ≥1 happy path + ≥1 대안 흐름
+- L3: 03 §6 의 ledger CLI 명령마다 ≥1 happy path 시나리오. 에러 / 빈 결과 / JSON 형식 검증 포함
 - L4: 본 문서에 명시된 4개 property 모두 통과
 
 CI 게이트: 위 목표 미달 시 PR 차단.
 
+UC-1~13 시나리오 (01 의 사용자 흐름 통합 검증) 는 **agent 측의 책임** — 본 문서의 카버리지 항목 아님.
+
 ## 9. 본 문서의 변경 정책
 
-- UC 가 추가/변경되면 (01 갱신) 본 문서의 L3 시나리오도 함께 추가
-- 03 의 시그니처가 변경되면 본 문서의 코드 단편도 함께 갱신
-- 신규 시나리오는 가능한 한 기존 fixture builder 를 재사용
+- 03 의 시그니처가 변경되면 본 문서의 L2 / L3 / L4 코드 단편도 함께 갱신
+- ledger CLI 명령이 추가되면 L3 에 happy path 시나리오 추가
+- 신규 property 가 도출되면 L4 에 추가

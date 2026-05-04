@@ -1,11 +1,15 @@
 pub mod check;
+pub mod epic;
+pub mod events;
 pub mod issue;
 pub mod issue_list;
 pub mod labels;
+pub mod output;
 pub mod pipeline;
 pub mod preflight;
 pub mod simhash;
 pub mod stats;
+pub mod suppress;
 pub mod task;
 pub mod watch;
 pub mod worktree;
@@ -19,6 +23,10 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
     about = "github-autopilot deterministic CLI"
 )]
 pub struct Cli {
+    /// Path to autopilot.toml; defaults to `./autopilot.toml` if it exists
+    #[arg(long, global = true)]
+    pub config: Option<std::path::PathBuf>,
+
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -59,6 +67,21 @@ pub enum Commands {
         #[command(subcommand)]
         command: TaskCommands,
     },
+    /// Epic ledger operations
+    Epic {
+        #[command(subcommand)]
+        command: epic::EpicCommands,
+    },
+    /// Fingerprint suppression for HITL alerts
+    Suppress {
+        #[command(subcommand)]
+        command: suppress::SuppressCommands,
+    },
+    /// Event log queries
+    Events {
+        #[command(subcommand)]
+        command: events::EventsCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -83,6 +106,14 @@ pub enum TaskCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Show details of a single task (alias of `show`, spec-canonical name)
+    Get {
+        /// Task id
+        task_id: String,
+        /// Output JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Force a task into a specific status (operator override)
     ForceStatus {
         /// Task id
@@ -93,6 +124,79 @@ pub enum TaskCommands {
         /// Optional reason recorded with the override
         #[arg(long)]
         reason: Option<String>,
+    },
+    /// Insert (or detect duplicate of) a watch-style task
+    Add {
+        /// Epic name
+        #[arg(long)]
+        epic: String,
+        /// Task id (deterministic 12-hex-char id)
+        #[arg(long)]
+        id: String,
+        /// Title
+        #[arg(long)]
+        title: String,
+        /// Optional body / description
+        #[arg(long)]
+        body: Option<String>,
+        /// Override fingerprint (hex). When omitted, derived from title+body.
+        #[arg(long)]
+        fingerprint: Option<String>,
+        /// Origin tag (defaults to `human`)
+        #[arg(long, default_value = "human")]
+        source: task::TaskSourceArg,
+    },
+    /// Insert tasks from a JSONL batch file
+    AddBatch {
+        /// Epic name
+        #[arg(long)]
+        epic: String,
+        /// JSONL file. Each line: {"id":"...","title":"...","body?":"...","fingerprint?":"...","source?":"..."}
+        #[arg(long)]
+        from: std::path::PathBuf,
+    },
+    /// Look up a task by the PR number it owns
+    FindByPr {
+        /// PR number
+        pr_number: u64,
+        /// Output JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Atomically claim the next ready task on an epic (Ready -> Wip)
+    Claim {
+        /// Epic name
+        #[arg(long)]
+        epic: String,
+        /// Output JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Release a Wip claim back to Ready (UC-11 push-reject path)
+    Release {
+        /// Task id
+        task_id: String,
+    },
+    /// Mark a task as completed and unblock its dependents
+    Complete {
+        /// Task id
+        task_id: String,
+        /// Owning PR number
+        #[arg(long)]
+        pr: u64,
+    },
+    /// Record a failed attempt; outputs JSON {"outcome":"retried|escalated","attempts":N}
+    Fail {
+        /// Task id
+        task_id: String,
+    },
+    /// Attach the HITL escalation issue number to a task
+    Escalate {
+        /// Task id
+        task_id: String,
+        /// HITL issue number
+        #[arg(long)]
+        issue: u64,
     },
 }
 

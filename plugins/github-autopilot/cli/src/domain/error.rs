@@ -20,4 +20,7 @@ pub enum DomainError {
 
     #[error("duplicate task id in plan: {0}")]
     DuplicateTaskId(TaskId),
+
+    #[error("inconsistency: {0}")]
+    Inconsistency(String),
 }
