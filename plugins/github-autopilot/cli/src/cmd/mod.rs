@@ -1,4 +1,5 @@
 pub mod check;
+pub mod epic;
 pub mod issue;
 pub mod issue_list;
 pub mod labels;
@@ -58,6 +59,11 @@ pub enum Commands {
     Task {
         #[command(subcommand)]
         command: TaskCommands,
+    },
+    /// Epic ledger operations
+    Epic {
+        #[command(subcommand)]
+        command: epic::EpicCommands,
     },
 }
 
