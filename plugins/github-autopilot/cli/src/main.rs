@@ -166,11 +166,39 @@ fn main() {
                     svc.list(&epic, status, json, &mut out)
                 }
                 TaskCommands::Show { task_id, json } => svc.show(&task_id, json, &mut out),
+                TaskCommands::Get { task_id, json } => svc.show(&task_id, json, &mut out),
                 TaskCommands::ForceStatus {
                     task_id,
                     to,
                     reason,
                 } => svc.force_status(&task_id, to, reason.as_deref(), &mut out),
+                TaskCommands::Add {
+                    epic,
+                    id,
+                    title,
+                    body,
+                    fingerprint,
+                    source,
+                } => svc.add(
+                    &epic,
+                    &id,
+                    &title,
+                    body.as_deref(),
+                    fingerprint.as_deref(),
+                    source,
+                    &mut out,
+                ),
+                TaskCommands::AddBatch { epic, from } => svc.add_batch(&epic, &from, &mut out),
+                TaskCommands::FindByPr { pr_number, json } => {
+                    svc.find_by_pr(pr_number, json, &mut out)
+                }
+                TaskCommands::Claim { epic, json } => svc.claim(&epic, json, &mut out),
+                TaskCommands::Release { task_id } => svc.release(&task_id, &mut out),
+                TaskCommands::Complete { task_id, pr } => svc.complete(&task_id, pr, &mut out),
+                TaskCommands::Fail { task_id } => svc.fail(&task_id, &mut out),
+                TaskCommands::Escalate { task_id, issue } => {
+                    svc.escalate(&task_id, issue, &mut out)
+                }
             }
         }
         Commands::Epic { command } => {
