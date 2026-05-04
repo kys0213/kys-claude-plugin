@@ -285,7 +285,10 @@ impl TaskRepo for InMemoryTaskStore {
     fn upsert_watch_task(&self, task: NewWatchTask, now: DateTime<Utc>) -> Result<UpsertOutcome> {
         let mut s = self.state.lock().expect("poisoned");
 
-        // Duplicate fingerprint check
+        if s.tasks.contains_key(&task.id) {
+            return Err(DomainError::DuplicateTaskId(task.id).into());
+        }
+
         if let Some(existing) = s
             .tasks
             .values()
@@ -399,7 +402,7 @@ impl TaskRepo for InMemoryTaskStore {
             .ok_or_else(|| TaskStoreError::NotFound(format!("task '{id}'")))?;
         if task.status != TaskStatus::Wip {
             let cur = task.status;
-            return Err(DomainError::IllegalTransition(id.clone(), cur, TaskStatus::Done).into());
+            return Err(DomainError::RequiresStatus(id.clone(), TaskStatus::Wip, cur).into());
         }
         task.status = TaskStatus::Done;
         task.pr_number = Some(pr_number);
@@ -467,7 +470,7 @@ impl TaskRepo for InMemoryTaskStore {
             .ok_or_else(|| TaskStoreError::NotFound(format!("task '{id}'")))?;
         if task.status != TaskStatus::Wip {
             let cur = task.status;
-            return Err(DomainError::IllegalTransition(id.clone(), cur, TaskStatus::Ready).into());
+            return Err(DomainError::RequiresStatus(id.clone(), TaskStatus::Wip, cur).into());
         }
         let attempts = task.attempts;
         let epic_name = task.epic_name.clone();
@@ -567,7 +570,7 @@ impl TaskRepo for InMemoryTaskStore {
             .ok_or_else(|| TaskStoreError::NotFound(format!("task '{id}'")))?;
         let cur = task.status;
         if cur != TaskStatus::Wip {
-            return Err(DomainError::IllegalTransition(id.clone(), cur, TaskStatus::Ready).into());
+            return Err(DomainError::RequiresStatus(id.clone(), TaskStatus::Wip, cur).into());
         }
         task.status = TaskStatus::Ready;
         task.attempts = task.attempts.saturating_sub(1);

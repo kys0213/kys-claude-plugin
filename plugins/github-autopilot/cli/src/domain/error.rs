@@ -12,6 +12,15 @@ pub enum DomainError {
     #[error("illegal status transition for task {0}: {1:?} -> {2:?}")]
     IllegalTransition(TaskId, TaskStatus, TaskStatus),
 
+    /// Precondition failure: the operation needs the task to currently be in a
+    /// specific status, but it isn't. Distinct from [`Self::IllegalTransition`]
+    /// (which describes an attempted-target failure): here, the *current*
+    /// status is the bug, not the target.
+    ///
+    /// Args: `(task_id, required_current_status, actual_current_status)`.
+    #[error("task {0} requires status {1:?}, was {2:?}")]
+    RequiresStatus(TaskId, TaskStatus, TaskStatus),
+
     #[error("epic '{0}' already exists with status {1:?}")]
     EpicAlreadyExists(String, EpicStatus),
 

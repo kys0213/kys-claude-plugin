@@ -3,9 +3,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use autopilot::cmd::task::{TaskService, TaskSourceArg, TaskStatusArg};
-use autopilot::domain::{Epic, EpicStatus, EventKind, TaskId, TaskSource, TaskStatus};
+use autopilot::domain::{DomainError, Epic, EpicStatus, EventKind, TaskId, TaskSource, TaskStatus};
 use autopilot::ports::clock::{Clock, FixedClock};
-use autopilot::ports::task_store::{EpicPlan, EventFilter, NewTask, TaskStore};
+use autopilot::ports::task_store::{
+    EpicPlan, EventFilter, NewTask, NewWatchTask, TaskStore, TaskStoreError,
+};
 use autopilot::store::InMemoryTaskStore;
 use chrono::{TimeZone, Utc};
 use tempfile::NamedTempFile;
@@ -476,6 +478,99 @@ fn find_by_pr_returns_exit_1_when_no_match() {
     let (code, out) = capture(|w| svc.find_by_pr(404, false, w));
     assert_eq!(code, 1);
     assert!(out.contains("no task owns PR #404"), "stdout: {out}");
+}
+
+// ---------- Bug 1: same task_id, different fingerprint ----------
+
+/// CLI-surface check: re-adding the same task id (different body so distinct
+/// fingerprint) must print a friendly message and exit 1, never propagate
+/// the raw SQLite UNIQUE error.
+#[test]
+fn add_with_existing_id_and_different_body_returns_friendly_error() {
+    let (store, clock) = fixture();
+    let svc = TaskService::new(store.as_ref(), &clock);
+    let (_, _) = capture(|w| {
+        svc.add(
+            "e",
+            "aaaaaaaaaaaa",
+            "first",
+            Some("body one"),
+            None,
+            TaskSourceArg::Human,
+            w,
+        )
+    });
+    let (code, out) = capture(|w| {
+        svc.add(
+            "e",
+            "aaaaaaaaaaaa",
+            "second",
+            Some("body two — different content => different fingerprint"),
+            None,
+            TaskSourceArg::Human,
+            w,
+        )
+    });
+    assert_eq!(code, 1, "stdout: {out}");
+    assert!(
+        out.contains("task 'aaaaaaaaaaaa' already exists"),
+        "stdout: {out}"
+    );
+}
+
+// ---------- Bug 2: RequiresStatus error semantics ----------
+
+#[test]
+fn fail_from_ready_returns_requires_status_error() {
+    let (store, clock) = fixture();
+    let svc = TaskService::new(store.as_ref(), &clock);
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
+    // Task is Ready (never claimed). fail() should surface RequiresStatus(_, Wip, Ready).
+    let mut buf: Vec<u8> = Vec::new();
+    let err = svc.fail("aaaaaaaaaaaa", &mut buf).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("requires status Wip") && msg.contains("was Ready"),
+        "expected RequiresStatus(_, Wip, Ready), got: {msg}"
+    );
+}
+
+#[test]
+fn complete_from_ready_returns_requires_status_error() {
+    let (store, clock) = fixture();
+    let svc = TaskService::new(store.as_ref(), &clock);
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
+    let mut buf: Vec<u8> = Vec::new();
+    let err = svc.complete("aaaaaaaaaaaa", 99, &mut buf).unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("requires status Wip") && msg.contains("was Ready"),
+        "expected RequiresStatus(_, Wip, Ready), got: {msg}"
+    );
+}
+
+#[test]
+fn release_from_done_returns_requires_status_error_via_cli() {
+    let (store, clock) = fixture();
+    let svc = TaskService::new(store.as_ref(), &clock);
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
+    // Drive the task to Done via force_status, then release should reject.
+    store
+        .force_status(
+            &TaskId::from_raw("aaaaaaaaaaaa"),
+            TaskStatus::Done,
+            "test",
+            clock.now(),
+        )
+        .unwrap();
+    // CLI's `release` catches the precondition failure and prints a friendly
+    // message with exit 1 — verify the surface matches the new variant.
+    let (code, out) = capture(|w| svc.release("aaaaaaaaaaaa", w));
+    assert_eq!(code, 1);
+    assert!(
+        out.contains("cannot be released from done"),
+        "stdout: {out}"
+    );
 }
 
 // Force-status arg type still routes through TaskService::force_status; smoke

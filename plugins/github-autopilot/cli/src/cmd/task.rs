@@ -188,19 +188,21 @@ impl<'a> TaskService<'a> {
             title: title.to_string(),
             body: body.map(str::to_string),
         };
-        match self
-            .store
-            .upsert_watch_task(nt, now)
-            .with_context(|| format!("adding task '{task_id}' to epic '{epic}'"))?
-        {
-            UpsertOutcome::Inserted(id) => {
+        match self.store.upsert_watch_task(nt, now) {
+            Ok(UpsertOutcome::Inserted(id)) => {
                 writeln!(out, "inserted task {}", id.as_str())?;
+                Ok(0)
             }
-            UpsertOutcome::DuplicateFingerprint(id) => {
+            Ok(UpsertOutcome::DuplicateFingerprint(id)) => {
                 writeln!(out, "duplicate of task {}", id.as_str())?;
+                Ok(0)
             }
+            Err(TaskStoreError::Domain(DomainError::DuplicateTaskId(_))) => {
+                writeln!(out, "task '{task_id}' already exists")?;
+                Ok(1)
+            }
+            Err(e) => Err(e).with_context(|| format!("adding task '{task_id}' to epic '{epic}'")),
         }
-        Ok(0)
     }
 
     /// Reads `path` as JSONL where each line describes a single watch task.
@@ -302,11 +304,11 @@ impl<'a> TaskService<'a> {
                 writeln!(out, "task '{task_id}' not found")?;
                 Ok(1)
             }
-            Err(TaskStoreError::Domain(DomainError::IllegalTransition(_, from, _))) => {
+            Err(TaskStoreError::Domain(DomainError::RequiresStatus(_, _, actual))) => {
                 writeln!(
                     out,
                     "task '{task_id}' cannot be released from {} (must be wip)",
-                    from.as_str()
+                    actual.as_str()
                 )?;
                 Ok(1)
             }

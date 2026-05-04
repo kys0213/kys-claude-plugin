@@ -3,6 +3,8 @@ use autopilot::cmd::{
     StatsCommands, TaskCommands, WorktreeCommands,
 };
 use autopilot::config::Config;
+use autopilot::domain::DomainError;
+use autopilot::ports::task_store::TaskStoreError;
 use autopilot::store::SqliteTaskStore;
 use autopilot::{cmd, fs, gh, git, github};
 use clap::Parser;
@@ -178,15 +180,15 @@ fn main() {
                     reason,
                 } => svc.force_status(&task_id, to, reason.as_deref(), &mut out),
                 TaskCommands::Add {
+                    task_id,
                     epic,
-                    id,
                     title,
                     body,
                     fingerprint,
                     source,
                 } => svc.add(
                     &epic,
-                    &id,
+                    &task_id,
                     &title,
                     body.as_deref(),
                     fingerprint.as_deref(),
@@ -261,9 +263,27 @@ fn main() {
         Ok(code) => std::process::exit(code),
         Err(e) => {
             eprintln!("{e:#}");
-            std::process::exit(2);
+            std::process::exit(exit_code_for(&e));
         }
     }
+}
+
+/// Maps a propagated error to a process exit code: `1` for user errors,
+/// `2` (default) for transient / unexpected failures.
+fn exit_code_for(e: &anyhow::Error) -> i32 {
+    for cause in e.chain() {
+        if let Some(domain) = cause.downcast_ref::<DomainError>() {
+            if matches!(domain, DomainError::DuplicateTaskId(_)) {
+                return 1;
+            }
+        }
+        if let Some(TaskStoreError::Domain(DomainError::DuplicateTaskId(_))) =
+            cause.downcast_ref::<TaskStoreError>()
+        {
+            return 1;
+        }
+    }
+    2
 }
 
 fn task_store_db_path(config: &Config) -> PathBuf {
