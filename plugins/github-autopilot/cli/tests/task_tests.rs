@@ -58,6 +58,23 @@ fn write_jsonl(lines: &[&str]) -> NamedTempFile {
     f
 }
 
+/// Insert a watch-style task into epic 'e' through the public `add` path with
+/// a sane default title/source. Cuts the 7-arg ceremony at call sites that
+/// only care that the task exists with a known fingerprint.
+fn seed_via_add(svc: &TaskService<'_>, id: &str, fingerprint: &str) {
+    let mut buf: Vec<u8> = Vec::new();
+    svc.add(
+        "e",
+        id,
+        "x",
+        None,
+        Some(fingerprint),
+        TaskSourceArg::Human,
+        &mut buf,
+    )
+    .expect("seed_via_add");
+}
+
 /// Insert a task into epic `e` directly via the store, in a given starting status.
 /// Used to bypass the `add` lifecycle for tests that focus on later transitions.
 fn seed_task(
@@ -88,13 +105,8 @@ fn seed_task(
         });
         deps.push((TaskId::from_raw(id), TaskId::from_raw(*d)));
     }
-    // Each call uses a fresh epic to avoid duplicate inserts; instead, we
-    // upsert into the existing epic via reconcile-like behavior. The simplest
-    // path: open a brand-new epic with these tasks.
-    // ... but tests want everything under "e", so use force_status after insert.
-    //
-    // Strategy: insert via insert_epic_with_tasks fails on existing epic, so
-    // we rely on `apply_reconciliation` to upsert. Build a minimal plan.
+    // Upsert the new tasks/deps into existing epic 'e' via a minimal
+    // reconciliation plan, then nudge to a non-default status if requested.
     use autopilot::ports::task_store::ReconciliationPlan;
     let existing = store
         .get_epic("e")
@@ -262,9 +274,7 @@ fn add_batch_inserts_multiple_tasks_skipping_duplicates() {
 
 #[test]
 fn add_batch_rejects_malformed_line() {
-    let (_store, clock) = fixture();
-    let store: Arc<dyn TaskStore> = Arc::new(InMemoryTaskStore::new());
-    seed_epic(store.as_ref(), &clock, "e");
+    let (store, clock) = fixture();
     let svc = TaskService::new(store.as_ref(), &clock);
 
     // Missing required `title` field.
@@ -283,17 +293,7 @@ fn add_batch_rejects_malformed_line() {
 fn get_renders_same_as_show() {
     let (store, clock) = fixture();
     let svc = TaskService::new(store.as_ref(), &clock);
-    let (_, _) = capture(|w| {
-        svc.add(
-            "e",
-            "aaaaaaaaaaaa",
-            "x",
-            None,
-            Some("0x1"),
-            TaskSourceArg::Human,
-            w,
-        )
-    });
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
     // `get` is wired in main.rs to call `show`. Verify they produce identical output.
     let (c1, out_show) = capture(|w| svc.show("aaaaaaaaaaaa", true, w));
     let (c2, out_get) = capture(|w| svc.show("aaaaaaaaaaaa", true, w));
@@ -310,17 +310,7 @@ fn get_renders_same_as_show() {
 fn claim_outputs_next_ready_task_as_json() {
     let (store, clock) = fixture();
     let svc = TaskService::new(store.as_ref(), &clock);
-    let (_, _) = capture(|w| {
-        svc.add(
-            "e",
-            "aaaaaaaaaaaa",
-            "first",
-            None,
-            Some("0x1"),
-            TaskSourceArg::Human,
-            w,
-        )
-    });
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
 
     let (code, out) = capture(|w| svc.claim("e", true, w));
     assert_eq!(code, 0);
@@ -387,17 +377,7 @@ fn complete_updates_pr_and_unblocks_dependents() {
 fn fail_with_attempts_below_max_outputs_retried_outcome() {
     let (store, clock) = fixture();
     let svc = TaskService::new(store.as_ref(), &clock);
-    let _ = capture(|w| {
-        svc.add(
-            "e",
-            "aaaaaaaaaaaa",
-            "x",
-            None,
-            Some("0x1"),
-            TaskSourceArg::Human,
-            w,
-        )
-    });
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
     // First claim => attempts=1
     let _ = capture(|w| svc.claim("e", false, w));
     let (code, out) = capture(|w| svc.fail("aaaaaaaaaaaa", w));
@@ -417,57 +397,26 @@ fn fail_with_attempts_below_max_outputs_retried_outcome() {
 fn fail_with_attempts_at_max_outputs_escalated_outcome() {
     let (store, clock) = fixture();
     let svc = TaskService::new(store.as_ref(), &clock);
-    let _ = capture(|w| {
-        svc.add(
-            "e",
-            "aaaaaaaaaaaa",
-            "x",
-            None,
-            Some("0x1"),
-            TaskSourceArg::Human,
-            w,
-        )
-    });
-    // claim+fail 3 times; on the 3rd fail, attempts is already 3 → Escalated.
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
+    // claim+fail 3 times; the 3rd fail crosses max_attempts and emits the
+    // escalated JSON outcome (and persists status=Escalated, attempts=3).
+    let mut last: Option<(i32, String)> = None;
     for _ in 0..3 {
         let _ = capture(|w| svc.claim("e", false, w));
-        let (_, _) = capture(|w| svc.fail("aaaaaaaaaaaa", w));
+        last = Some(capture(|w| svc.fail("aaaaaaaaaaaa", w)));
     }
-    // After three retries, the task is Escalated; final fail call shouldn't
-    // happen — verify state directly.
+    let (code, out) = last.expect("loop ran 3 times");
+    assert_eq!(code, 0);
+    let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(v["outcome"], "escalated");
+    assert_eq!(v["attempts"], 3);
+
     let t = store
         .get_task(&TaskId::from_raw("aaaaaaaaaaaa"))
         .unwrap()
         .unwrap();
     assert_eq!(t.status, TaskStatus::Escalated);
     assert_eq!(t.attempts, 3);
-
-    // Also verify a fresh scenario: claim once but pre-set attempts=3 via
-    // direct claim sequence; the 3rd fail outputs escalated JSON.
-    let (store2, clock2) = fixture();
-    let svc2 = TaskService::new(store2.as_ref(), &clock2);
-    let _ = capture(|w| {
-        svc2.add(
-            "e",
-            "bbbbbbbbbbbb",
-            "y",
-            None,
-            Some("0x2"),
-            TaskSourceArg::Human,
-            w,
-        )
-    });
-    // attempts will reach 3 on the 3rd claim, then fail → Escalated
-    let _ = capture(|w| svc2.claim("e", false, w));
-    let (_, _) = capture(|w| svc2.fail("bbbbbbbbbbbb", w));
-    let _ = capture(|w| svc2.claim("e", false, w));
-    let (_, _) = capture(|w| svc2.fail("bbbbbbbbbbbb", w));
-    let _ = capture(|w| svc2.claim("e", false, w));
-    let (code, out) = capture(|w| svc2.fail("bbbbbbbbbbbb", w));
-    assert_eq!(code, 0);
-    let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
-    assert_eq!(v["outcome"], "escalated");
-    assert_eq!(v["attempts"], 3);
 }
 
 // ---------- escalate ----------
@@ -476,17 +425,7 @@ fn fail_with_attempts_at_max_outputs_escalated_outcome() {
 fn escalate_sets_escalated_issue_field() {
     let (store, clock) = fixture();
     let svc = TaskService::new(store.as_ref(), &clock);
-    let _ = capture(|w| {
-        svc.add(
-            "e",
-            "aaaaaaaaaaaa",
-            "x",
-            None,
-            Some("0x1"),
-            TaskSourceArg::Human,
-            w,
-        )
-    });
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
     let (code, _) = capture(|w| svc.escalate("aaaaaaaaaaaa", 99, w));
     assert_eq!(code, 0);
     let t = store
@@ -502,17 +441,7 @@ fn escalate_sets_escalated_issue_field() {
 fn release_decrements_attempts_and_reverts_to_ready() {
     let (store, clock) = fixture();
     let svc = TaskService::new(store.as_ref(), &clock);
-    let _ = capture(|w| {
-        svc.add(
-            "e",
-            "aaaaaaaaaaaa",
-            "x",
-            None,
-            Some("0x1"),
-            TaskSourceArg::Human,
-            w,
-        )
-    });
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
     let _ = capture(|w| svc.claim("e", false, w)); // attempts=1, status=wip
     let (code, _) = capture(|w| svc.release("aaaaaaaaaaaa", w));
     assert_eq!(code, 0);
@@ -530,17 +459,7 @@ fn release_decrements_attempts_and_reverts_to_ready() {
 fn find_by_pr_returns_task_when_present() {
     let (store, clock) = fixture();
     let svc = TaskService::new(store.as_ref(), &clock);
-    let _ = capture(|w| {
-        svc.add(
-            "e",
-            "aaaaaaaaaaaa",
-            "x",
-            None,
-            Some("0x1"),
-            TaskSourceArg::Human,
-            w,
-        )
-    });
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
     let _ = capture(|w| svc.claim("e", false, w));
     let _ = capture(|w| svc.complete("aaaaaaaaaaaa", 77, w));
     let (code, out) = capture(|w| svc.find_by_pr(77, true, w));
@@ -567,17 +486,7 @@ fn find_by_pr_returns_exit_1_when_no_match() {
 fn force_status_still_routes_through_service() {
     let (store, clock) = fixture();
     let svc = TaskService::new(store.as_ref(), &clock);
-    let _ = capture(|w| {
-        svc.add(
-            "e",
-            "aaaaaaaaaaaa",
-            "x",
-            None,
-            Some("0x1"),
-            TaskSourceArg::Human,
-            w,
-        )
-    });
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
     let (code, _) = capture(|w| svc.force_status("aaaaaaaaaaaa", TaskStatusArg::Done, None, w));
     assert_eq!(code, 0);
     let t = store

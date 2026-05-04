@@ -133,13 +133,17 @@ impl<'a> TaskService<'a> {
     ) -> Result<i32> {
         let id = TaskId::from_raw(task_id);
         let now = self.clock.now();
+        let target = TaskStatus::from(to);
         self.store
-            .force_status(&id, TaskStatus::from(to), reason.unwrap_or(""), now)
+            .force_status(&id, target, reason.unwrap_or(""), now)
             .with_context(|| format!("forcing status of task '{task_id}'"))?;
-        if let Some(r) = reason {
-            writeln!(out, "task '{task_id}' status forced to {:?} ({r})", to)?;
-        } else {
-            writeln!(out, "task '{task_id}' status forced to {:?}", to)?;
+        match reason {
+            Some(r) => writeln!(
+                out,
+                "task '{task_id}' status forced to {} ({r})",
+                target.as_str()
+            )?,
+            None => writeln!(out, "task '{task_id}' status forced to {}", target.as_str())?,
         }
         Ok(0)
     }
@@ -360,12 +364,8 @@ struct BatchLine {
     fingerprint: Option<String>,
     #[serde(default)]
     source: Option<String>,
-    // section/requirement are accepted for forward compat but unused at the
-    // ledger surface (NewWatchTask doesn't carry them).
-    #[serde(default, rename = "section")]
-    _section: Option<String>,
-    #[serde(default, rename = "requirement")]
-    _requirement: Option<String>,
+    // Unknown fields (e.g. section/requirement on watch payloads) are silently
+    // accepted by serde, keeping the JSONL contract forward-compatible.
 }
 
 #[derive(Debug, Serialize)]
@@ -533,5 +533,25 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(task.status, TaskStatus::Done);
+        // Output uses canonical lowercase status (TaskStatus::as_str), matching
+        // the rest of the CLI. Specifically NOT the {:?} debug form (`Done`).
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("forced to done"), "stdout: {s}");
+        assert!(s.contains("(manual)"), "stdout: {s}");
+    }
+
+    #[test]
+    fn force_status_without_reason_omits_parens() {
+        let (store, clock) = fixture();
+        let svc = TaskService::new(store.as_ref(), &clock);
+        let mut buf: Vec<u8> = Vec::new();
+        svc.force_status("a1b2c3d4e5f6", TaskStatusArg::Wip, None, &mut buf)
+            .unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("forced to wip"), "stdout: {s}");
+        assert!(
+            !s.contains('('),
+            "stdout should not contain '(' when reason is None: {s}"
+        );
     }
 }
