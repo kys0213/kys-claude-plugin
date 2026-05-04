@@ -12,15 +12,16 @@ use anyhow::{Context, Result};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
+use crate::cmd::output::write_json;
 use crate::cmd::simhash;
 use crate::domain::{DomainError, Task, TaskFailureOutcome, TaskId, TaskSource, TaskStatus};
 use crate::ports::clock::{Clock, StdClock};
 use crate::ports::task_store::{NewWatchTask, TaskStore, TaskStoreError, UpsertOutcome};
 
-/// Task fail threshold above which `mark_task_failed` escalates instead of
-/// retrying. PR-C will wire this from a config file; for v1 it's fixed.
-// TODO(PR-C): wire from config (`max_attempts` in github-autopilot.local.md).
-const DEFAULT_MAX_ATTEMPTS: u32 = 3;
+/// Default `max_attempts` used when no config / explicit override is present.
+/// `main.rs` now resolves this from `autopilot.toml` (`epic.default_max_attempts`)
+/// and threads it into [`TaskService::with_max_attempts`].
+pub const DEFAULT_MAX_ATTEMPTS: u32 = 3;
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
 pub enum TaskStatusArg {
@@ -67,11 +68,24 @@ impl From<TaskSourceArg> for TaskSource {
 pub struct TaskService<'a> {
     store: &'a dyn TaskStore,
     clock: &'a dyn Clock,
+    max_attempts: u32,
 }
 
 impl<'a> TaskService<'a> {
     pub fn new(store: &'a dyn TaskStore, clock: &'a dyn Clock) -> Self {
-        Self { store, clock }
+        Self::with_max_attempts(store, clock, DEFAULT_MAX_ATTEMPTS)
+    }
+
+    pub fn with_max_attempts(
+        store: &'a dyn TaskStore,
+        clock: &'a dyn Clock,
+        max_attempts: u32,
+    ) -> Self {
+        Self {
+            store,
+            clock,
+            max_attempts,
+        }
     }
 
     pub fn list(
@@ -331,7 +345,7 @@ impl<'a> TaskService<'a> {
         let now = self.clock.now();
         let outcome = self
             .store
-            .mark_task_failed(&id, DEFAULT_MAX_ATTEMPTS, now)
+            .mark_task_failed(&id, self.max_attempts, now)
             .with_context(|| format!("failing task '{task_id}'"))?;
         write_json(out, &FailReport::from(outcome))?;
         Ok(0)
@@ -402,12 +416,6 @@ fn render_task(t: &Task, json: bool, out: &mut dyn Write) -> Result<()> {
         return write_json(out, t);
     }
     print_task_human(t, out)
-}
-
-fn write_json<T: Serialize>(out: &mut dyn Write, value: &T) -> Result<()> {
-    serde_json::to_writer(&mut *out, value)?;
-    writeln!(out)?;
-    Ok(())
 }
 
 fn derive_fingerprint(title: &str, body: Option<&str>) -> String {

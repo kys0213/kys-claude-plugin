@@ -1,12 +1,15 @@
 pub mod check;
 pub mod epic;
+pub mod events;
 pub mod issue;
 pub mod issue_list;
 pub mod labels;
+pub mod output;
 pub mod pipeline;
 pub mod preflight;
 pub mod simhash;
 pub mod stats;
+pub mod suppress;
 pub mod task;
 pub mod watch;
 pub mod worktree;
@@ -20,6 +23,10 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
     about = "github-autopilot deterministic CLI"
 )]
 pub struct Cli {
+    /// Path to autopilot.toml; defaults to `./autopilot.toml` if it exists
+    #[arg(long, global = true)]
+    pub config: Option<std::path::PathBuf>,
+
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -64,6 +71,16 @@ pub enum Commands {
     Epic {
         #[command(subcommand)]
         command: epic::EpicCommands,
+    },
+    /// Fingerprint suppression for HITL alerts
+    Suppress {
+        #[command(subcommand)]
+        command: suppress::SuppressCommands,
+    },
+    /// Event log queries
+    Events {
+        #[command(subcommand)]
+        command: events::EventsCommands,
     },
 }
 

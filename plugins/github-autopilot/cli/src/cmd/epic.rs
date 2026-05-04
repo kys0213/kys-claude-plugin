@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use clap::{Args, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 
+use crate::cmd::output::write_json;
 use crate::domain::{DomainError, Epic, EpicStatus, TaskId, TaskSource, TaskStatus};
 use crate::ports::clock::Clock;
 use crate::ports::task_store::{
@@ -376,12 +377,6 @@ fn render_epic(e: &Epic, json: bool, out: &mut dyn Write) -> Result<()> {
     if let Some(ts) = e.completed_at {
         writeln!(out, "completed_at: {}", ts.to_rfc3339())?;
     }
-    Ok(())
-}
-
-fn write_json<T: Serialize>(out: &mut dyn Write, value: &T) -> Result<()> {
-    serde_json::to_writer(&mut *out, value)?;
-    writeln!(out)?;
     Ok(())
 }
 
