@@ -257,89 +257,7 @@ pub struct EventFilter {
 }
 ```
 
-### 2.2 GitClient
-
-```rust
-// ports/git.rs
-pub trait GitClient: Send + Sync {
-    fn current_branch(&self) -> Result<String>;
-    fn working_tree_clean(&self) -> Result<bool>;
-
-    fn fetch_origin(&self, refspec: Option<&str>) -> Result<()>;
-    fn ls_remote_branches(&self, prefix: &str) -> Result<Vec<String>>;
-    fn create_branch_from(&self, new_branch: &str, base: &str) -> Result<()>;
-    fn push_branch(&self, branch: &str) -> Result<PushOutcome>;
-    fn delete_remote_branch(&self, branch: &str) -> Result<()>;
-
-    fn rev_parse(&self, refname: &str) -> Result<Option<String>>;
-}
-
-pub enum PushOutcome { Created, FastForward, Rejected(String) }
-```
-
-### 2.3 GitHubClient
-
-```rust
-// ports/github.rs
-pub trait GitHubClient: Send + Sync {
-    fn create_issue(&self, req: CreateIssue) -> Result<u64>;
-    fn close_issue(&self, number: u64) -> Result<()>;
-    fn add_issue_comment(&self, number: u64, body: &str) -> Result<()>;
-    fn add_issue_labels(&self, number: u64, labels: &[String]) -> Result<()>;
-    fn remove_issue_labels(&self, number: u64, labels: &[String]) -> Result<()>;
-    fn list_issues(&self, filter: IssueFilter) -> Result<Vec<IssueRef>>;
-    fn get_issue(&self, number: u64) -> Result<Option<IssueRef>>;
-
-    fn create_pr(&self, req: CreatePr) -> Result<u64>;
-    fn merge_pr(&self, number: u64, method: MergeMethod) -> Result<()>;
-    fn list_prs_targeting(&self, base_branch: &str) -> Result<Vec<PrRef>>;
-    fn get_pr(&self, number: u64) -> Result<Option<PrRef>>;
-}
-
-pub struct CreateIssue { pub title: String, pub body: String, pub labels: Vec<String> }
-pub struct CreatePr { pub head: String, pub base: String, pub title: String, pub body: String, pub labels: Vec<String> }
-pub struct PrRef { pub number: u64, pub head: String, pub base: String, pub merged: bool, pub closed: bool, pub labels: Vec<String> }
-pub struct IssueRef {
-    pub number: u64,
-    pub title: String,
-    pub closed: bool,
-    pub labels: Vec<String>,
-    pub body_meta: Option<EscalationMeta>,
-}
-pub struct IssueFilter { pub labels: Vec<String>, pub state: IssueState }
-pub enum IssueState { Open, Closed, All }
-pub enum MergeMethod { Squash, Merge, Rebase }
-```
-
-### 2.4 SpecDecomposer
-
-```rust
-// ports/decompose.rs
-pub trait SpecDecomposer: Send + Sync {
-    fn decompose(&self, spec_path: &Path, epic_name: &str) -> Result<DecomposeOutput>;
-}
-
-pub struct DecomposeOutput {
-    pub tasks: Vec<NewTask>,            // id 는 결정적
-    pub deps: Vec<(TaskId, TaskId)>,
-}
-```
-
-### 2.5 Notifier
-
-```rust
-// ports/notifier.rs
-pub trait Notifier: Send + Sync {
-    fn send(&self, event: NotificationEvent) -> Result<()>;
-}
-
-pub enum NotificationEvent {
-    EpicCompleted { epic: String },
-    EscalationOpened { epic: Option<String>, task: Option<TaskId>, issue: u64 },
-}
-```
-
-### 2.6 Clock
+### 2.2 Clock
 
 ```rust
 // ports/clock.rs
@@ -609,151 +527,132 @@ fn apply_reconciliation(plan: ReconciliationPlan, now):
 
 idempotency: 동일 plan 으로 N번 호출해도 결과 동일. attempts 카운터는 보존되며 status 는 리모트 기준으로 권위적으로 재설정.
 
-### 5.6 WatchDispatcher (UC-6, UC-7)
+### 5.6 Agent 측 흐름 (의사코드, 참고용)
+
+본 §5 의 알고리즘은 모두 autopilot 내부 (TaskStore 메서드) 의 것이다. Agent 는 이들을 CLI 로
+호출하며 자기 흐름은 자유롭게 설계한다. 권장 패턴:
 
 ```
-fn dispatch_finding(finding: WatchFinding):
-  match task_store.find_active_by_spec_path(finding.spec_path):
-    Some(epic):
-      task_id = TaskId::new_deterministic(epic.name, finding.section, finding.requirement)
-      outcome = task_store.upsert_watch_task(NewWatchTask{
-        id: task_id,
-        epic_name: epic.name,
-        source: finding.source,
-        fingerprint: finding.fingerprint,
-        title: finding.title,
-        body: finding.body,
-      }, now)
-      log event accordingly
-    None:
-      if task_store.is_suppressed(finding.fingerprint, "unmatched_watch", now): return
-      issue_number = github.create_issue(escalation_template(finding))
-      task_store.append_event(kind='escalated', payload={...})
-      task_store.suppress(
-        finding.fingerprint,
-        reason="unmatched_watch",
-        suppress_until = now + Duration::hours(escalation_suppression_window_hours),
-      )
-```
+# Watch dispatch (UC-6, UC-7)
+fn agent_dispatch_finding(finding):
+  let epic = `autopilot epic find-by-spec-path <finding.spec_path>` (JSON)
+  if epic is Some:
+    `autopilot task add --epic <epic.name> --id <det_id>
+                       --section <finding.section> --requirement <finding.req>
+                       --fingerprint <finding.fp> --source gap-watch`
+    # autopilot 이 fingerprint 중복 시 DuplicateFingerprint 로 응답 → no-op
+  else:
+    if `autopilot suppress check --fingerprint <fp> --reason unmatched_watch`:
+      return
+    issue_n = `gh issue create --label autopilot:hitl-needed ...`
+    `autopilot suppress add --fingerprint <fp> --reason unmatched_watch --until <now+24h>`
 
-`upsert_watch_task` 는 fingerprint 충돌 시 `DuplicateFingerprint(existing_id)` 반환, orchestration 에서 이를 보고 신규 발행 skip.
+# Build cycle (UC-2, UC-11)
+fn agent_build_tick():
+  for epic in `autopilot epic list --status active` (JSON):
+    while parallel_count < max_parallel:
+      let task = `autopilot task claim --epic <epic.name>` or break
+      let branch = format!("epic/{}/{}", epic.name, task.id)
+      result = implement_and_push(branch, task)
+      match result:
+        PrCreated(n)   -> `autopilot task complete --id <task.id> --pr <n>`
+        PushRejected   -> `autopilot task release --id <task.id>`   # UC-11
+        OtherFailure   ->
+          let outcome = `autopilot task fail --id <task.id>`
+          if outcome == Escalated:
+            issue_n = `gh issue create --label autopilot:hitl-needed ...`
+            `autopilot task escalate --id <task.id> --issue <issue_n>`
 
-### 5.7 BuildLoop tick (UC-2, UC-11)
-
-```
-fn tick():
+# Escalation resolution polling (UC-9)
+fn agent_escalation_tick():
   for epic in active_epics:
-    while parallel_agents < max_parallel_agents:
-      task = task_store.claim_next_task(epic.name, now)
-      if task is None: break
-      branch = format!("{prefix}/{epic.name}/{task.id}", prefix=epic_branch_prefix)
-      spawn_implementer(epic, task, branch)
-        on_pr_created(pr_number) ->
-            -- PR 생성 성공. 머지는 MergeLoop 가 후속 처리.
-            task_store.append_event(kind='task_started', task=task.id, payload={pr: pr_number})
-        on_push_rejected         ->
-            -- UC-11: 다른 머신 / 다른 sub-loop 가 먼저 가져감. 시도 회복.
-            task_store.release_claim(task.id, now)
-            task_store.append_event(kind='claim_lost', task=task.id)
-        on_implementation_failed ->
-            -- 코드 작성 실패 / push 후 PR 생성 실패 / CI 실패 등. 시도는 보존.
-            outcome = task_store.mark_task_failed(task.id, max_attempts, now)
-            if Escalated: escalator.escalate(task)
-```
-
-`release_claim` 과 `mark_task_failed` 의 선택 기준: **시도조차 못 했으면** `release_claim`, **시도했으나 실패** 면 `mark_task_failed`.
-
-### 5.8 MergeLoop tick (UC-2, UC-10)
-
-```
-fn tick():
-  for epic in active_epics:
-    prs = github.list_prs_targeting(epic.branch, labels=[":auto"], state=open)
-    for pr in prs:
-      if pr 의 ci 상태 통과 + 충돌 없음:
-        github.merge_pr(pr.number, MergeMethod::Squash)
-        task = task_store.find_task_by_pr(pr.number)
-        if task is Some: task_store.complete_task_and_unblock(task.id, pr.number, now)
-
-    -- epic 완료 판정
-    -- "사람이 close 한 escalated" 의 자동 인식은 §5.9 EscalationWatcher 가 별도로 처리.
-    -- 본 루프에서는 task.status ∈ {done} 여부만 본다.
-    if all_tasks_done(epic):
-      epic_manager.complete(epic.name)
-      notifier.send(EpicCompleted { epic: epic.name })
-```
-
-### 5.9 EscalationWatcher tick (UC-9, UC-10)
-
-`EscalationWatcher` 는 escalated task 의 GitHub 이슈 close 를 주기 폴링하여 사람의 직접 해소를
-자동 인식한다. MergeLoop 와 분리한 이유: SRP — MergeLoop 는 PR 머지 흐름만, 본 루프는
-escalation 해소 흐름만 담당. 폴링 주기는 MergeLoop 보다 길게 (예: 5분).
-
-```
-fn tick():
-  for epic in active_epics:
-    escalated = task_store.list_tasks_by_epic(epic.name, status=Escalated)
-    for task in escalated:
+    for task in `autopilot task list --epic <epic.name> --status escalated`:
       if task.escalated_issue is None: continue
-      issue = github.get_issue(task.escalated_issue)
-      if issue is None or !issue.closed: continue
-
-      -- 사람이 issue 를 close 했음. 두 케이스:
-      -- (a) 사람이 직접 코드를 작성하여 epic 브랜치에 PR 머지 → reconcile 이 done 으로 인식
-      -- (b) 단순 거부 / 무시 close → suppression 등록 (해당 fingerprint 추가 escalate 차단)
-      reconciler.reconcile_epic(epic.name, now)
-      task_after = task_store.get_task(task.id)
-      if task_after.status != Done:
-        -- (b) 케이스. 사람이 코드 작업 없이 close 한 것으로 간주.
-        if task.fingerprint is Some:
-          task_store.suppress(
-            task.fingerprint, reason="rejected_by_human",
-            suppress_until = now + Duration::days(30),
-          )
-        task_store.append_event(kind='escalation_resolved',
-                                payload={resolution: 'rejected'}, task=task.id)
-      else:
-        task_store.append_event(kind='escalation_resolved',
-                                payload={resolution: 'human_fixed'}, task=task.id)
+      let issue = gh.get_issue(task.escalated_issue)
+      if not issue.closed: continue
+      # 사람이 close 했음. reconcile 시도 → done 이면 자연 흡수, 아니면 suppress 등록
+      let plan = build_reconcile_plan(epic, monitor, git)
+      `autopilot epic reconcile --name <epic.name> --plan <plan.jsonl>`
+      let task_after = `autopilot task get <task.id>`
+      if task_after.status != "done":
+        `autopilot suppress add --fingerprint <task.fingerprint>
+                                --reason rejected_by_human --until <now+30d>`
 ```
 
-**중요한 invariant**: 본 루프는 `force_status` 를 직접 호출하지 않는다. 상태 전이는 reconcile
-(idempotent) 또는 다른 정상 경로를 통해서만 일어난다.
+이 흐름은 단지 권장 구현일 뿐 — agent 는 자유롭게 구성할 수 있다. autopilot 의 트레이트 메서드
+계약 (§2, §5.1-§5.5) 만 만족하면 된다.
 
 ## 6. CLI 시그니처 (clap)
 
-`autopilot epic <subcommand>`:
+전 명령은 `--json` 출력 옵션을 지원하며, 기본은 사람용 요약. exit code: 0 정상 / 1 사용자 에러 / 2 일시적 시스템 에러 (재시도 가치 있음) / 3 영구적 시스템 에러.
+
+### 6.1 `autopilot epic` (Ledger CLI)
 
 ```
-autopilot epic start   --spec <PATH> --name <NAME> [--from-branch <REF>] [--dry-run]
-autopilot epic resume  <NAME> [--reset-attempts]
-autopilot epic stop    <NAME> [--purge-branches]
-autopilot epic status  [<NAME>] [--json]
-autopilot epic list    [--status active|completed|abandoned|all]
+autopilot epic create     --name <NAME> --spec <PATH> [--branch <REF>]
+                          [--from-branch <REF>]                              # branch 기본값: epic/<NAME>
+autopilot epic list       [--status active|completed|abandoned|all] [--json]
+autopilot epic get        <NAME> [--json]
+autopilot epic status     [<NAME>] [--json]                                  # task 상태 카운트
+autopilot epic complete   <NAME>                                             # status='completed' + 알림은 agent 책임
+autopilot epic abandon    <NAME>
+autopilot epic reconcile  --name <NAME> --plan <FILE>                        # JSONL: tasks + deps + remote_state + orphan_branches
+
+autopilot epic find-by-spec-path <PATH> [--json]                             # invariant 위반 시 exit 3 + Inconsistency 메시지
 ```
 
-`autopilot task <subcommand>` (운영자용 진단/오버라이드):
+### 6.2 `autopilot task` (Ledger CLI)
 
 ```
-autopilot task list    --epic <NAME> [--status <STATUS>] [--json]
-autopilot task show    <TASK_ID> [--json]
-autopilot task force-status <TASK_ID> --to <STATUS> [--reason <TEXT>]
+autopilot task add        --epic <NAME> --id <TASK_ID>
+                          [--section <PATH>] [--requirement <TEXT>]
+                          [--title <TEXT>] [--body <TEXT>]
+                          [--fingerprint <FP>]
+                          [--source decompose|gap-watch|qa-boost|ci-watch|human]
+autopilot task add-batch  --epic <NAME> --from <FILE>                        # JSONL: NewTask 한 줄에 1건
+autopilot task list       --epic <NAME> [--status <STATUS>] [--json]
+autopilot task get        <TASK_ID> [--json]
+autopilot task find-by-pr <PR_NUMBER> [--json]
+
+autopilot task claim      --epic <NAME> [--json]                             # 다음 ready task 원자적 wip 전환
+autopilot task release    <TASK_ID>                                          # UC-11 claim_lost (attempts -1)
+autopilot task complete   <TASK_ID> --pr <NUMBER>
+autopilot task fail       <TASK_ID>                                          # exit 0 + Retried | Escalated 출력
+autopilot task escalate   <TASK_ID> --issue <NUMBER>
+autopilot task force-status <TASK_ID> --to <STATUS> [--reason <TEXT>]        # 운영자 override
 ```
 
-`autopilot migrate <subcommand>`:
+### 6.3 `autopilot suppress` (Ledger CLI)
 
 ```
-autopilot migrate import-issue <ISSUE_NUMBER> [--epic <NAME>]
-autopilot migrate scan-issues  [--label <LABEL>=":ready"]      # 후보 목록만 출력
+autopilot suppress add    --fingerprint <FP> --reason <TEXT> --until <ISO8601>
+autopilot suppress check  --fingerprint <FP> --reason <TEXT>                 # exit 0=억제 중 / exit 1=아님
+autopilot suppress clear  --fingerprint <FP> --reason <TEXT>
 ```
 
-기존 명령 변화 (04 watch-integration 에서 자세히):
+### 6.4 `autopilot events` (Ledger CLI)
 
-- `autopilot pipeline build-tasks` (build-issues 대체)
-- `autopilot pipeline merge-prs` (의미 동일, task store 업데이트 추가)
-- `autopilot watch run` (gap/qa/ci 통합 진입, 기존 유지)
+```
+autopilot events list     [--epic <NAME>] [--task <TASK_ID>] [--kind <KIND>...]
+                          [--since <ISO8601>] [--limit <N>] [--json]
+```
 
-출력 포맷: 기본은 사람용 표/요약, `--json` 일 때 stable schema. exit code: 0 정상 / 1 사용자 에러 / 2 일시적 시스템 에러 (재시도 가치 있음) / 3 영구적 시스템 에러.
+### 6.5 기존 헬퍼 명령
+
+`watch run`, `pipeline idle`, `worktree`, `issue`, `issue list`, `labels`, `preflight`, `simhash`, `stats`, `check` 는 기존 시그니처 그대로. **ledger 와 결합되지 않음** — agent 가 자기 흐름에서 자유롭게 호출.
+
+### 6.6 입출력 형식 (JSONL)
+
+`epic reconcile --plan` 의 JSONL 한 줄 예시:
+
+```json
+{"kind":"task","id":"a1b2c3d4e5f6","title":"...","section":"## 인증","requirement":"토큰 갱신","fingerprint":null}
+{"kind":"dep","task":"b2c3d4e5f6a1","depends_on":"a1b2c3d4e5f6"}
+{"kind":"remote_state","task_id":"a1b2c3d4e5f6","branch_exists":true,"pr":{"number":42,"merged":true,"closed":true}}
+{"kind":"orphan_branch","ref":"epic/auth/old-task-id"}
+```
+
+`task add-batch --from` 의 JSONL: 각 줄이 NewTask (`id`, `title`, `body?`, `section?`, `requirement?`, `fingerprint?`, `source`).
 
 ## 7. 에러 타입
 
@@ -767,6 +666,10 @@ pub enum DomainError {
     IllegalTransition(TaskId, TaskStatus, TaskStatus),
     #[error("epic '{0}' already exists with status {1:?}")]
     EpicAlreadyExists(String, EpicStatus),
+    #[error("dep references unknown task: {0}")]
+    UnknownDepTarget(TaskId),
+    #[error("duplicate task id in plan: {0}")]
+    DuplicateTaskId(TaskId),
     /// 데이터 불변식 위반 (예: 동일 spec_path 의 active epic 이 2개 이상).
     /// 정상 흐름에서는 발생할 수 없으며, 발생 시 사람 개입 필요.
     #[error("inconsistency: {0}")]
@@ -780,52 +683,30 @@ pub enum TaskStoreError {
     #[error("storage backend: {0}")]        Backend(String),
     #[error("schema mismatch: at v{found}, expected v{expected}")]
     SchemaMismatch { found: u32, expected: u32 },
+    #[error("not found: {0}")]              NotFound(String),
     #[error(transparent)]                   Domain(#[from] DomainError),
-}
-
-// 동일 패턴으로:
-pub enum GitError      { NotARepo, FetchFailed(String), PushRejected(String), Other(String) }
-pub enum GitHubError   { Network(String), NotFound, Unauthorized, RateLimited, Other(String) }
-pub enum DecomposeError{ SpecNotFound(PathBuf), Parse(String), Other(String) }
-
-// orchestration/error.rs
-#[derive(Debug, thiserror::Error)]
-pub enum OrchestrationError {
-    #[error(transparent)] Store(#[from] TaskStoreError),
-    #[error(transparent)] Git(#[from] GitError),
-    #[error(transparent)] GitHub(#[from] GitHubError),
-    #[error(transparent)] Decompose(#[from] DecomposeError),
-    #[error(transparent)] Domain(#[from] DomainError),
-    #[error("inconsistency: {0}")] Inconsistency(String),
 }
 ```
 
-CLI 진입점은 `OrchestrationError` 를 받아 사용자 메시지 + exit code 매핑.
+git / GitHub / 분해 실패 / 알림 실패 등 외부 도구 에러는 **agent 의 영역** 으로 autopilot 의 트레이트 시스템에 들어가지 않는다. CLI 진입점은 `TaskStoreError` 를 사용자 메시지 + exit code 로 매핑한다.
 
 ## 8. 설정 스키마
 
-`autopilot.toml` (기본 위치는 기존 설정 컨벤션 유지):
+`autopilot.toml` (기본 위치는 기존 설정 컨벤션 유지). Ledger 관련 항목만 정의:
 
 ```toml
 [storage]
 db_path = ".autopilot/state.db"
 
 [epic]
-branch_prefix       = "epic/"
-max_attempts        = 3
-deps_cycle_check    = true
+max_attempts = 3                   # task fail → outcome=Escalated 임계
+hitl_label   = "autopilot:hitl-needed"   # 정보용; agent 측이 사용
 
-[hitl]
-label                                = "autopilot:hitl-needed"
-escalation_suppression_window_hours  = 24
-
-[concurrency]
-max_parallel_agents = 4
-sqlite_busy_timeout_ms = 5000
-
-[migration]
-epic_based = true                  # false 면 기존 라벨 기반 동작 유지 (06 spec)
+[suppression]
+default_window_hours = 24          # suppress add 의 --until 기본 (선택)
 ```
+
+다른 헬퍼 명령 (gh / git / watch / pipeline ...) 의 설정은 별도 섹션으로 유지되며 ledger 와 독립.
 
 설정 우선순위: CLI 플래그 > 환경변수 (`AUTOPILOT_*`) > 파일 > 기본값. 시작 시 유효성 검사 실패면 즉시 종료 (exit 1).
 
