@@ -207,36 +207,39 @@ grep -rn "spec-parser\|cross-reference-checker\|spec-quality-checker\|gap-analyz
 
 ## 마이그레이션 단계
 
-### Phase 1 (이 PR 이후)
+플러그인 배포가 자동 버전 범프를 처리하므로 내부 에이전트/커맨드의 점진 cohabitation 은 불필요하다. v2 suffix 와 deprecate-then-rename 단계를 생략하고 **3-Phase 아토믹 마이그레이션**으로 진행한다.
+
+### Phase 1 — 설계 (이 PR)
 
 설계 합의. 코드 변경 없음.
 
-### Phase 2 — 신규 에이전트 추가
+### Phase 2 — 신규 에이전트 추가 (additive)
 
 - `plugins/spec-kit/agents/file-pair-observer.md` (L1) 추가
-- `plugins/spec-kit/agents/gap-analyzer-v2.md` (L2) 추가 (기존 `gap-analyzer.md` 와 이름 충돌 회피)
-- 단위 검증: 단일 spec 파일에 대해 L1 호출, 출력 검증
+- `plugins/spec-kit/agents/gap-aggregator.md` (L2) 추가 (역할 기반 이름 — legacy `gap-analyzer.md` 와 자연스레 공존)
+- 단위 검증: 단일 spec 파일에 대해 L1 호출 → 출력 스키마 검증, 수기 작성 L1 리포트로 L2 호출 → 출력 검증
+- legacy 에이전트는 그대로 유지 (커맨드들이 여전히 호출)
 
-### Phase 3 — 오케스트레이터 추가
+### Phase 3 — 아토믹 마이그레이션
 
-- `/spec-kit:spec-review-v2` 커맨드 신설 (병행 운영)
-- 인용 검증 로직 (L1 인용이 실파일에 있는지, L2 인용이 L1 에 있는지)
-- 기존 `/spec-kit:spec-review` 와 동일 입력으로 비교 테스트
+한 PR 에서 다음을 동시에 수행. 부분 적용 시 깨지므로 분할 불가:
 
-### Phase 4 — 호출자 마이그레이션
+- `plugins/spec-kit/commands/spec-review.md` 새 흐름으로 재작성 (file-pair-observer × N → 인용 검증 → gap-aggregator)
+- `plugins/spec-kit/commands/gap-detect.md` 도 동일 흐름으로 재작성 (또는 spec-review 로 흡수)
+- 인용 검증 로직 추가 (L1 인용이 실파일 substring 매치, L2 인용이 검증 통과 L1 항목 ID 실재)
+- legacy 에이전트 6개 삭제:
+  - `spec-parser.md`
+  - `cross-reference-checker.md`
+  - `spec-quality-checker.md`
+  - `gap-analyzer.md` (gap-aggregator 가 대체)
+  - `reverse-gap-analyzer.md`
+  - `structure-mapper.md`
+- `plugins/github-autopilot/agents/gap-detector.md` 의 doc 참조 (`spec-parser → structure-mapper → gap-analyzer`) 갱신
+- e2e 회귀: 동일 spec-set 으로 v1 결과와 비교, `04-test-scenarios.md` 의 통과 기준 충족 확인
 
-- 기존 `/spec-kit:spec-review` 를 새 흐름으로 교체
-- `gap-analyzer`, `reverse-gap-analyzer` 등을 호출하는 다른 커맨드/스킬 마이그레이션
+### Phase 후속 — 사용자 노출 변경
 
-### Phase 5 — 구 에이전트 deprecate
-
-- 6개 기존 에이전트에 `**DEPRECATED**` 헤더 추가
-- 한 릴리스 후 삭제
-
-### Phase 6 — 정리
-
-- `gap-analyzer-v2.md` → `gap-analyzer.md` (이름 환원)
-- 마이그레이션 노트 정리
+CI 의 자동 버전 범프가 `feat:` prefix 로 minor 범프를 트리거. 릴리스 노트에 "spec-kit 가 2-layer 구조로 재작성됨, 사용자 노출 인터페이스(`/spec-kit:spec-review`, `/spec-kit:gap-detect`)는 동일하나 내부 동작/출력 형식이 변경됨" 명시.
 
 ## 위험 평가
 

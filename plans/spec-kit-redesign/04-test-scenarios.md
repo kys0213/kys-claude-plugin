@@ -154,23 +154,20 @@ grep -rn "spec-parser\|cross-reference-checker\|spec-quality-checker\|gap-analyz
 각 호출 지점별로:
 - 마이그레이션 필요 여부
 - 신구조에서의 대체 호출
-- Phase 4 에서 변경
+- Phase 3 에서 변경
 
 ### 5.2 Phase 별 회귀 테스트
 
 | Phase | 테스트 |
 |-------|--------|
-| Phase 2 (L1/L2 신설) | 단일 spec 입력으로 L1, L2 단독 실행 정상 동작 |
-| Phase 3 (오케스트레이터 신설) | `/spec-kit:spec-review-v2` 결과가 v1 과 동일 spec-set 에서 동등 발견 |
-| Phase 4 (호출자 마이그레이션) | 마이그레이션된 호출자 각각의 기존 e2e 테스트 통과 |
-| Phase 5 (구 에이전트 deprecate) | DEPRECATED 헤더만 — 동작 변경 없음 |
-| Phase 6 (정리) | v2 → v1 이름 환원 후 모든 호출자 정상 |
+| Phase 2 (L1/L2 신설) | 단일 spec 입력으로 L1, L2 단독 실행 정상 동작 (legacy 에이전트는 그대로) |
+| Phase 3 (아토믹 마이그레이션) | 재작성된 `/spec-kit:spec-review` / `/spec-kit:gap-detect` 가 동일 spec-set 에서 v1 과 동등 발견. legacy 6개 에이전트 0회 호출 (grep 확인). github-autopilot 의 doc 참조 갱신 확인 |
 
 ### 5.3 통과 기준
 
 - Phase 3 비교 테스트: 동일 spec-set 에서 finding 의 90% 이상 일치 (10% 신규 발견은 허용)
-- Phase 4 e2e: 모든 호출자 회귀 없음
-- Phase 6 후: 기존 6개 에이전트 0회 호출 (grep 으로 확인)
+- Phase 3 e2e: 모든 호출자 (spec-review, gap-detect, github-autopilot/gap-detector 의 doc 참조) 회귀 없음
+- Phase 3 후: 기존 6개 에이전트 (`spec-parser`, `cross-reference-checker`, `spec-quality-checker`, `gap-analyzer` (legacy), `reverse-gap-analyzer`, `structure-mapper`) 0회 호출 + 파일 삭제 (grep 확인)
 
 ## 6. 사용자 시나리오 dogfooding
 
@@ -187,7 +184,7 @@ grep -rn "spec-parser\|cross-reference-checker\|spec-quality-checker\|gap-analyz
 
 ## 7. 통과 기준 종합
 
-신구조 채택 결정 (Phase 4 진입) 의 게이트:
+Phase 3 (아토믹 마이그레이션) 진입 게이트:
 
 - [ ] 환각 회귀 (1.x): 100% drop, finding 미발생
 - [ ] 정확도 (2.x): D1-D5/A/B/C 95% 이상 회귀, 신규 케이스 5+
