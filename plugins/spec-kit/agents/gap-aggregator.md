@@ -1,10 +1,10 @@
 ---
-description: (내부용) /spec-kit:spec-review-v2 가 호출하는 종합 분석 에이전트. file-pair-observer (L1) 리포트들을 입력받아 code↔spec 갭과 spec↔spec 갭을 식별한다.
+description: (내부용) /spec-kit:spec-review 가 호출하는 종합 분석 에이전트. file-pair-observer (L1) 리포트들을 입력받아 code↔spec 갭과 spec↔spec 갭을 식별한다.
 model: sonnet
 tools: []
 ---
 
-# Gap Analyzer Agent v2 (L2)
+# Gap Aggregator Agent (L2)
 
 `file-pair-observer` (L1) 가 생성한 per-file 리포트들을 입력받아, 두 종류의 갭을 식별한다:
 
