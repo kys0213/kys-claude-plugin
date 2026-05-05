@@ -55,7 +55,7 @@ ledger-integration 7개 PR + ledger-followups 5개 PR이 모두 머지된 이후
 | 2 | `/github-autopilot:autopilot` | **Step 2.5** (PR #681) ledger 상태 스냅샷 + **work-ledger / stale-task-review cron 등록** (PR #684 F2 / #688 F5 / #695 P2) | 기존 cron + work-ledger(10m) + stale-task-review(30m) 등록. Step 2.5 출력. 등록 실패 없음 |
 | 3 | `/github-autopilot:gap-watch` | **Step 5a** (PR #662, #663) — ledger epic 부트스트랩 + per-issue ledger task 쓰기 (observer) | 기존 GitHub issue 생성 흐름 그대로. ledger 실패 시 `WARN: ...` 로그만 |
 | 4 | `/github-autopilot:ci-watch` | **Step 5a/5c** (PR #664) — `ci-backlog` epic 부트스트랩 + per-failure ledger task 쓰기 (observer) | 기존 CI 분석 + issue 생성 그대로 |
-| 5 | `/github-autopilot:qa-boost` | **Step 5.5** (PR #665) — `qa-backlog` epic 부트스트랩 + per-finding ledger task 쓰기 (observer) | 기존 테스트 갭 분석 + issue 생성 그대로 |
+| 5 | `/github-autopilot:qa-boost` | **ledger-only writer** (epic/watch-unified) — `qa-backlog` epic 부트스트랩 + per-finding ledger task 쓰기. **GitHub issue 생성 제거** (work-ledger reader가 task를 claim하여 PR을 직접 발행) | 테스트 갭 분석 후 ledger task만 기록. issue/라벨 흐름 없음 |
 | 6 | `/github-autopilot:build-issues` | 없음 | 기존 ready 이슈 → draft → PR 흐름 그대로 |
 | 7 | `/github-autopilot:merge-prs` | **Step 4 + Step 5 모두 ledger close-the-loop 호출** — Step 5 pr-merger 에이전트 (PR #666) + Step 4 all-green fast-path inline (PR #686 F1) | all-green PR과 문제 PR 모두 머지 직후 ledger close (best-effort) |
 | 8 | `/github-autopilot:analyze-issue` | 없음 | 기존 라벨 부여 흐름 그대로 |
