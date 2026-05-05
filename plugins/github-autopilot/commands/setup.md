@@ -45,6 +45,10 @@ default_intervals:
   ci_watch: "20m"             # cron 모드에서만 사용
   ci_fix: "15m"               # cron 모드에서만 사용
   qa_boost: "1h"              # cron 모드에서만 사용
+  work_ledger: "10m"          # cron 모드에서만 사용 — hybrid는 Monitor TASK_READY 디스패치
+  release_stale: "30m"        # cron 모드에서만 사용 — hybrid는 Monitor STALE_WIP 디스패치
+stale_wip:
+  threshold: "1h"             # hybrid: autopilot watch --stale-threshold 입력 / cron: stale-task-review --before 입력
 notification: ""              # skip 이슈 알림 방법 (자연어, 예: "Slack DM으로 @irene에게 알려줘")
 quality_gate_command: ""      # 커스텀 quality gate 명령어 (비어있으면 자동 감지)
 max_consecutive_failures: 3   # 연속 실패 허용 횟수, 초과 시 에스컬레이션
