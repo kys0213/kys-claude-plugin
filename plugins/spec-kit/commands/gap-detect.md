@@ -1,175 +1,185 @@
 ---
-description: 스펙 문서 기반으로 구현 코드의 갭을 entry point별 call chain 분석으로 검출합니다
-argument-hint: "<스펙파일> [코드경로] [--reverse]"
-allowed-tools: ["Task", "Glob", "Read"]
+description: 스펙 문서와 구현 코드 간 갭(미구현, 부분 구현, 발산, spec 부재 코드)을 file:line 인용으로 검출합니다
+argument-hint: "<스펙파일> [관련코드경로 ...]"
+allowed-tools: ["Task", "Glob", "Read", "Grep", "AskUserQuestion"]
 ---
 
-# 갭 분석 커맨드 (/gap-detect)
+# Gap Detect (/gap-detect)
 
-스펙 문서에서 요구사항을 추출하고, entry point별 call chain을 추적하여 구현 갭을 분석합니다.
-LSP가 설치되어 있으면 정밀한 call hierarchy를 사용하고, 없으면 grep fallback + 안내를 제공합니다.
+스펙 ↔ 코드 갭을 검출합니다. `/spec-review` 와 동일한 file-pair-observer (L1) + gap-aggregator (L2) 백본을 사용하지만, 출력에서 **Code ↔ Spec Gaps** 섹션을 우선 표시하고 다른 관점은 보조로 노출합니다.
+
+> **새 흐름**: file-pair-observer 가 spec 과 code 양방향 관찰을 한꺼번에 수행하므로 별도 `--reverse` 옵션은 더 이상 필요하지 않습니다 (`SPEC_ONLY` / `CODE_ONLY` / `PARTIAL` / `DIVERGENT` 분류로 자동 표현됨).
 
 ## 사용법
 
 ```bash
 /gap-detect "docs/auth-spec.md"
 /gap-detect "docs/auth-spec.md" "src/auth"
-/gap-detect "plans/design.md" "src/**/*.rs"
-/gap-detect "docs/auth-spec.md" --reverse
-/gap-detect "docs/auth-spec.md" "src/auth" --reverse
+/gap-detect "plans/design.md" "src/**/*.rs" "internal/auth/"
 ```
 
 | 인자 | 필수 | 설명 |
 |------|------|------|
 | 스펙파일 | Yes | 분석 대상 스펙 마크다운 경로 |
-| 코드경로 | No | 구현 코드 경로/패턴 (미지정 시 스펙에서 추론) |
-| --reverse | No | 역방향 갭 분석 추가 실행 (코드 → 스펙 방향) |
+| 관련코드경로 | No | 구현 코드 경로/패턴 (미지정 시 spec frontmatter `related_paths` 또는 자율 보강) |
 
 ## 작업 프로세스
 
 ### Step 1: 입력 파싱
 
-사용자 요청에서 추출:
-- **스펙 파일 경로**: 마크다운 파일 (필수)
-- **코드 경로**: glob 패턴 또는 디렉토리 (선택)
-- **--reverse 플래그**: 역방향 분석 실행 여부 (선택)
+- **스펙 파일 경로** 추출 (필수). Glob 으로 존재 확인. 없으면 즉시 에러.
+- **관련 code 경로** 추출 (선택). 명시되면 spec frontmatter 보다 우선 사용.
 
-인자 파싱 규칙:
-- `--`로 시작하는 인자는 옵션으로 처리 (`--reverse` 플래그 설정)
-- `--`로 시작하지 않는 인자는 경로로 처리 (첫 번째는 스펙 파일, 두 번째는 코드 경로)
+### Step 2: 관련 코드 경로 결정
 
-스펙 파일이 존재하는지 Glob으로 확인. 없으면 즉시 에러:
+- 사용자가 명시한 경로 → 그대로 사용
+- 없으면 spec 파일 frontmatter `related_paths` 사용
+- 둘 다 없으면 spec 본문에서 식별자/경로 패턴을 Grep 으로 추출 → 후보 추정 → AskUserQuestion 으로 확인
+
+### Step 3: file-pair-observer (L1) 호출
+
+`run_in_background=false` (단일 spec). 입력 프롬프트:
+
 ```
-Error: 스펙 파일을 찾을 수 없습니다: [경로]
-```
+# File Observation Request
 
-### Step 2: 스펙 파싱 (spec-parser)
+## Spec 파일
+- 경로: {spec_file_path}
 
-spec-parser 에이전트에게 스펙 파일 경로를 전달합니다.
+## 관련 code 경로
+{resolved_paths}
 
-**Agent 호출** (`run_in_background=false`):
-```
-스펙 파일을 분석하여 구조화된 요구사항 목록을 추출해주세요.
+## 자율 탐색 허용 범위
+- 위 경로 + 그 경로에서 import 된 인접 파일
 
-스펙 파일: [경로]
-```
-
-**반환값**: 구조화된 요구사항 목록 (JSON)
-
-### Step 3: 구조 매핑 + Entry Point 추출 (structure-mapper)
-
-structure-mapper 에이전트에게 요구사항의 컴포넌트 목록과 코드 경로를 전달합니다.
-
-**Agent 호출** (`run_in_background=false`):
-```
-스펙의 컴포넌트를 기반으로 코드 구조를 매핑하고, entry point를 추출해주세요.
-LSP 도구 존재 여부도 확인해주세요.
-
-컴포넌트: [Step 2에서 추출한 components]
-코드 경로: [사용자 지정 경로 또는 프로젝트 루트]
+## 출력
+file-pair-observer 의 출력 스키마를 엄수하여 per-file 리포트 반환.
 ```
 
-**반환값**: 매핑 + entry point 목록 + LSP 상태 (JSON)
+### Step 4: L1 인용 검증
 
-**LSP 안내 출력**: structure-mapper가 `lsp_warnings`를 반환하면, 사용자에게 즉시 출력합니다:
+`/spec-review` Step 4 와 동일한 검증 절차:
+
+- 인용된 file:line 범위 실재 확인
+- 발췌가 substring/prefix 매치 (공백 정규화)
+- ID 일관성 / dangling reference 검증
+- drop 비율 50% 초과 시 재시도 (최대 3회)
+- drop 로그를 사용자에게 노출
+
+### Step 5: gap-aggregator (L2) 호출
+
+검증 통과 L1 리포트를 입력으로 spawn (`run_in_background=false`, sonnet). 단일 spec 인 경우 spec↔spec gaps 섹션은 비게 되고, code↔spec gaps 섹션이 핵심 출력이 된다.
+
 ```
-⚠️ LSP 안내
-[lsp_warnings 내용을 그대로 출력]
-```
-이 안내는 절대 생략하지 않습니다.
+# Gap Analysis Request
 
-### Step 4: 갭 분석 (gap-analyzer)
+## L1 Reports (검증 통과분)
 
-Step 2의 요구사항 + Step 3의 매핑/entry point/LSP 정보를 모두 전달합니다.
+### Report: {spec_filename}
+{L1 리포트 본문, drop 정제본}
 
-**Agent 호출** (`run_in_background=false`):
-```
-스펙 요구사항과 코드의 갭을 entry point별 call chain 기반으로 분석해주세요.
-
-## 요구사항
-[Step 2 결과 전체]
-
-## 컴포넌트-파일 매핑
-[Step 3 mappings]
-
-## Entry Points
-[Step 3 entry_points]
-
-## LSP 사용 가능 여부
-[Step 3 lsp_available]
+## 출력
+gap-aggregator 의 출력 스키마를 엄수.
 ```
 
-**반환값**: 종합 갭 분석 리포트 (Markdown)
+### Step 6: L2 인용 검증
 
-### Step 5: 분석 방식 기록
+`/spec-review` Step 6 과 동일.
 
-LSP 안내가 있었다면 분석 방식을 기록해 둡니다 (최종 출력 시 사용):
-```
-📋 분석 방식: LSP call hierarchy (정밀) / grep fallback (추정)
-```
+### Step 7: 최종 리포트 출력
 
-> 결과 출력은 Step 7에서 일괄 수행합니다.
-
-### Step 6: 역방향 갭 분석 (--reverse 옵션 시에만 실행)
-
-`--reverse` 옵션이 지정된 경우, reverse-gap-analyzer 에이전트를 호출하여 코드 → 스펙 방향의 갭을 분석합니다.
-
-**Agent 호출** (`run_in_background=false`):
-```
-코드의 entry point를 스펙 요구사항과 대조하여 미지정 구현을 탐지해주세요.
-
-## 요구사항
-[Step 2 결과 전체]
-
-## 컴포넌트-파일 매핑
-[Step 3 mappings]
-
-## Entry Points
-[Step 3 entry_points]
-
-## LSP 사용 가능 여부
-[Step 3 lsp_available]
-```
-
-**반환값**: 역방향 갭 분석 리포트 (Markdown)
-
-### Step 7: 최종 결과 출력
-
-#### --reverse 미지정 시
-
-gap-analyzer의 정방향 리포트를 사용자에게 출력합니다.
-
-#### --reverse 지정 시
-
-정방향 리포트에서 "종합 권장사항" 섹션을 **제외**하고 출력합니다 (아래 통합 종합 권장사항으로 대체되므로 중복 방지).
-이어서 역방향 리포트를 출력하고, 통합 종합 권장사항 섹션을 추가합니다:
+Code ↔ Spec Gaps 를 우선 표시. 부속 섹션(Spec↔Spec gaps, Notes) 은 발견 시에만 노출.
 
 ```markdown
+# Gap Detection Report
+
+## Summary
+- spec_file: {경로}
+- code_paths_examined: {목록}
+- code_spec_gaps: HIGH=N, MEDIUM=N, LOW=N
+- generated_at: ...
+
+## Code ↔ Spec Gaps
+{L2 의 Code↔Spec Gaps 섹션 그대로}
+
+{spec↔spec 또는 notes 가 있을 경우에만:}
+
+## 부수 발견
+
+### Spec ↔ Spec (다중 spec 비교 시 발견된 일관성 이슈)
+{L2 의 Spec↔Spec Gaps 섹션 — 단일 spec 분석에서는 보통 비어 있음}
+
+### Notes (모호한 spec 표현)
+{L2 의 Notes 섹션}
+
 ---
 
-# 종합 권장사항 (정방향 + 역방향)
-
-## Critical (즉시 조치)
-1. [정방향: 미구현 요구사항]
-2. [역방향: critical severity의 Unspecified 항목]
-
-## Important (조치 권장)
-1. [정방향: 부분 구현 보완]
-2. [역방향: warning severity의 Unspecified 항목]
-3. [역방향: Under-specified 항목]
-
-## 참고사항
-1. [정방향: 경미한 개선 포인트]
-2. [역방향: info severity의 Unspecified 항목]
-
-## 스펙-코드 일치도
-- 정방향 커버리지 (스펙 → 코드): XX%
-- 역방향 커버리지 (코드 → 스펙): YY%
+## 검증 통계
+- L1 리포트 통과: M / N
+- L1 항목 drop: K건
+- L2 finding drop: J건
+- 분석 모델: file-pair-observer (haiku) + gap-aggregator (sonnet)
 ```
 
 ## 주의사항
 
-- **토큰 최적화**: MainAgent는 파일 내용을 읽지 않음. 파일 읽기는 모두 Sub-agent가 수행
-- **코드 경로 미지정 시**: structure-mapper가 스펙의 컴포넌트명을 기반으로 프로젝트 내 관련 디렉토리를 자동 탐색
-- **LSP 안내는 반드시 출력**: 미설치된 LSP가 있으면 설치 가이드를 사용자에게 보여주고, fallback으로 진행
-- **--reverse 옵션**: 역방향 분석은 정방향 분석 완료 후 실행. 정방향 분석 로직은 수정하지 않음
+- **`/spec-review` 와 백본 동일**, 출력 emphasis 만 다름. 다중 spec 분석은 `/spec-review` 사용 권장.
+- **`--reverse` 옵션 제거**: 새 백본이 spec→code, code→spec 방향을 모두 자연스럽게 표현 (`SPEC_ONLY` / `CODE_ONLY` / `PARTIAL` / `DIVERGENT`).
+- **frontmatter `related_paths` 권장** — 정확한 코드 영역 지정으로 자율 보강 노이즈를 줄임.
+- **인용 검증 silent fail 금지** — 모든 drop 은 사용자에게 노출.
+
+## 에러 처리
+
+**spec 파일 미존재**: Step 1 에서 즉시 에러.
+
+**code 경로 미해결 (frontmatter 없음 + 자율 보강 실패)**: 사용자에게 명시적 경로 입력 요청.
+
+**L1 50% drop (3회 재시도 후)**: 사용자 confirm — 진행 또는 중단.
+
+**L2 finding 0개**: "갭 없음" 메시지와 함께 정상 종료.
+
+## Output Examples
+
+### 갭 발견
+
+```markdown
+# Gap Detection Report
+
+## Summary
+- spec_file: docs/auth-spec.md
+- code_paths_examined: [internal/auth/]
+- code_spec_gaps: HIGH=1, MEDIUM=1, LOW=0
+- generated_at: 2026-05-05T...
+
+## Code ↔ Spec Gaps
+
+### [HIGH] Refresh token 회전 미구현
+- 증거:
+  - auth-spec.md:G1 — SPEC_ONLY — "Refresh token 회전: 매 사용 시 새 토큰 발급" (auth-spec.md:200-215) → 해당 영역 code 미발견
+- 분류: SPEC_ONLY
+- 권장: refresh 핸들러에 회전 로직 추가 또는 spec 에서 제거
+
+### [MEDIUM] API key 인증 spec 누락
+- 증거:
+  - auth-spec.md:G3 — CODE_ONLY — `internal/auth/api_key.go:20` 존재, spec 미언급
+- 분류: CODE_ONLY
+- 권장: spec 에 추가 또는 code 제거
+
+---
+
+## 검증 통계
+- L1 리포트 통과: 1 / 1
+- L1 항목 drop: 0건
+```
+
+### 갭 없음
+
+```markdown
+# Gap Detection Report
+
+## Summary
+- spec_file: docs/auth-spec.md
+- code_spec_gaps: HIGH=0, MEDIUM=0, LOW=0
+
+✅ 검출된 갭 없음. spec 과 code 가 일치.
+```

@@ -7,7 +7,7 @@ tools: ["Read", "Glob", "Grep", "Bash", "LSP"]
 # Gap Detector
 
 스펙 문서에서 요구사항을 추출하고, 코드의 entry point별 call chain을 추적하여 구현 갭을 분석합니다.
-spec-kit의 3단계 분석 패턴(spec-parser → structure-mapper → gap-analyzer)을 단일 에이전트에서 통합 수행합니다.
+spec-kit의 file-pair-observer + gap-aggregator 흐름과 동일한 spec↔code 대조 패턴을 단일 에이전트에서 통합 수행합니다.
 
 ## 입력
 
