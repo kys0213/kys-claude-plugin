@@ -487,6 +487,19 @@ impl TaskRepo for SqliteTaskStore {
         let mut conn = self.conn.lock().expect("poisoned");
         let tx = conn.transaction().map_err(backend)?;
 
+        let id_exists: bool = tx
+            .query_row(
+                "SELECT 1 FROM tasks WHERE id=?",
+                params![task.id.as_str()],
+                |_| Ok(true),
+            )
+            .optional()
+            .map_err(backend)?
+            .unwrap_or(false);
+        if id_exists {
+            return Err(DomainError::DuplicateTaskId(task.id).into());
+        }
+
         let existing: Option<String> = tx
             .query_row(
                 "SELECT id FROM tasks WHERE epic_name=? AND fingerprint=? LIMIT 1",
@@ -626,7 +639,7 @@ impl TaskRepo for SqliteTaskStore {
         if cur != "wip" {
             let cur_status = TaskStatus::parse(&cur).unwrap_or(TaskStatus::Pending);
             return Err(
-                DomainError::IllegalTransition(id.clone(), cur_status, TaskStatus::Done).into(),
+                DomainError::RequiresStatus(id.clone(), TaskStatus::Wip, cur_status).into(),
             );
         }
 
@@ -638,12 +651,15 @@ impl TaskRepo for SqliteTaskStore {
             )
             .map_err(backend)?;
         if updated != 1 {
-            return Err(DomainError::IllegalTransition(
-                id.clone(),
-                TaskStatus::Wip,
-                TaskStatus::Done,
-            )
-            .into());
+            let actual: String = tx
+                .query_row(
+                    "SELECT status FROM tasks WHERE id=?",
+                    params![id.as_str()],
+                    |row| row.get(0),
+                )
+                .map_err(backend)?;
+            let actual = TaskStatus::parse(&actual).unwrap_or(TaskStatus::Pending);
+            return Err(DomainError::RequiresStatus(id.clone(), TaskStatus::Wip, actual).into());
         }
 
         let epic_name: String = tx
@@ -735,7 +751,7 @@ impl TaskRepo for SqliteTaskStore {
         if cur != "wip" {
             let cur_status = TaskStatus::parse(&cur).unwrap_or(TaskStatus::Pending);
             return Err(
-                DomainError::IllegalTransition(id.clone(), cur_status, TaskStatus::Ready).into(),
+                DomainError::RequiresStatus(id.clone(), TaskStatus::Wip, cur_status).into(),
             );
         }
         let attempts = attempts as u32;
@@ -866,7 +882,7 @@ impl TaskRepo for SqliteTaskStore {
             .ok_or_else(|| TaskStoreError::Backend(format!("invalid stored task status: {cur}")))?;
         if cur_status != TaskStatus::Wip {
             return Err(
-                DomainError::IllegalTransition(id.clone(), cur_status, TaskStatus::Ready).into(),
+                DomainError::RequiresStatus(id.clone(), TaskStatus::Wip, cur_status).into(),
             );
         }
         conn.execute(

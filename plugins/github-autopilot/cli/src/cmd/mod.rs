@@ -127,12 +127,11 @@ pub enum TaskCommands {
     },
     /// Insert (or detect duplicate of) a watch-style task
     Add {
+        /// Task id (deterministic 12-hex-char id)
+        task_id: String,
         /// Epic name
         #[arg(long)]
         epic: String,
-        /// Task id (deterministic 12-hex-char id)
-        #[arg(long)]
-        id: String,
         /// Title
         #[arg(long)]
         title: String,

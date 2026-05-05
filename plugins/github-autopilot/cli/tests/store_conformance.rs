@@ -10,11 +10,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use autopilot::domain::{
-    Epic, EpicStatus, EventKind, TaskFailureOutcome, TaskGraph, TaskId, TaskSource, TaskStatus,
+    DomainError, Epic, EpicStatus, EventKind, TaskFailureOutcome, TaskGraph, TaskId, TaskSource,
+    TaskStatus,
 };
 use autopilot::ports::task_store::{
     EpicPlan, EventFilter, NewTask, NewWatchTask, ReconciliationPlan, RemotePrState,
-    RemoteTaskState, TaskStore, UpsertOutcome,
+    RemoteTaskState, TaskStore, TaskStoreError, UpsertOutcome,
 };
 use chrono::{DateTime, Duration, TimeZone, Utc};
 
@@ -170,8 +171,8 @@ fn body_release_claim_rejects_non_wip(store: Arc<dyn TaskStore>) {
         .release_claim(&TaskId::from_raw("A"), t0())
         .unwrap_err();
     assert!(
-        format!("{err}").contains("illegal status transition"),
-        "expected illegal-transition, got: {err}"
+        format!("{err}").contains("requires status Wip"),
+        "expected RequiresStatus(_, Wip, _), got: {err}"
     );
 }
 
@@ -245,7 +246,7 @@ fn body_complete_rejects_when_status_not_wip(store: Arc<dyn TaskStore>) {
     let err = store
         .complete_task_and_unblock(&TaskId::from_raw("A"), 1, t0())
         .unwrap_err();
-    assert!(format!("{err}").contains("illegal status transition"));
+    assert!(format!("{err}").contains("requires status Wip"));
 }
 
 fn body_failure_below_max_returns_to_ready(store: Arc<dyn TaskStore>) {
@@ -426,6 +427,45 @@ fn body_upsert_watch_task_returns_duplicate_on_existing_fingerprint(store: Arc<d
     }
     let tasks = store.list_tasks_by_epic("e", None).unwrap();
     assert_eq!(tasks.len(), 1);
+}
+
+fn body_upsert_watch_task_rejects_same_id_with_different_fingerprint(store: Arc<dyn TaskStore>) {
+    store
+        .insert_epic_with_tasks(plan("e", vec![], vec![]), t0())
+        .unwrap();
+    store
+        .upsert_watch_task(
+            NewWatchTask {
+                id: TaskId::from_raw("watch1"),
+                epic_name: "e".to_string(),
+                source: TaskSource::Human,
+                fingerprint: "fp-1".to_string(),
+                title: "first".to_string(),
+                body: None,
+            },
+            t0(),
+        )
+        .unwrap();
+    let err = store
+        .upsert_watch_task(
+            NewWatchTask {
+                id: TaskId::from_raw("watch1"),
+                epic_name: "e".to_string(),
+                source: TaskSource::Human,
+                fingerprint: "fp-2".to_string(),
+                title: "second".to_string(),
+                body: Some("different body".to_string()),
+            },
+            t0(),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            TaskStoreError::Domain(DomainError::DuplicateTaskId(id)) if id.as_str() == "watch1"
+        ),
+        "expected DuplicateTaskId, got: {err:?}"
+    );
 }
 
 fn body_find_task_by_pr_returns_owning_task(store: Arc<dyn TaskStore>) {
@@ -635,6 +675,7 @@ conformance_suite!(
     body_reconcile_preserves_attempts_counter,
     body_upsert_watch_task_inserts_new_when_no_fingerprint_match,
     body_upsert_watch_task_returns_duplicate_on_existing_fingerprint,
+    body_upsert_watch_task_rejects_same_id_with_different_fingerprint,
     body_find_task_by_pr_returns_owning_task,
     body_find_task_by_pr_returns_none_when_unknown,
     body_find_active_by_spec_path_matches_active_only,
