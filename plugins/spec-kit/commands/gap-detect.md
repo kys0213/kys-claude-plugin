@@ -25,6 +25,8 @@ allowed-tools: ["Task", "Glob", "Read", "Grep", "AskUserQuestion"]
 
 ## 작업 프로세스
 
+> **오케스트레이터 측정 가이드 (Step 7 footer 입력용)**: `/spec-review` "오케스트레이터 측정 가이드" 블록과 동일 (`t_start`/`t_end`/`wall_clock_sec`, `n_l1_initial`/`n_l1_fix`/`n_l2_refix`/`n_auditor`). 단일 spec 이므로 `n_l1_initial = 1` 로 시작.
+
 ### Step 1: 입력 파싱
 
 - **스펙 파일 경로** 추출 (필수). Glob 으로 존재 확인. 없으면 즉시 에러.
@@ -131,7 +133,13 @@ Code ↔ Spec Gaps 를 우선 표시. 부속 섹션(Spec↔Spec gaps, Notes) 은
 - L1 항목 drop: K건
 - gap-auditor 반복: I회 (major issue 0 까지)
 - gap-auditor drop (잔여 major): L건 (분류별)
+- 호출 횟수:
+  - L1 (file-pair-observer): {n_l1_initial}회 + 인용 fix {n_l1_fix}회
+  - L2 (gap-aggregator): 1회 + 재호출 {n_l2_refix}회
+  - gap-auditor: {n_auditor}회
+- wall-clock: ~{wall_clock_sec}초 (Step 1 시작 ~ Step 7 출력 직전)
 - 분석 모델: L1 haiku + L2 sonnet + gap-auditor sonnet
+- (참고) 토큰 측정은 Task 도구가 노출 시 추가, 미노출 시 생략
 ```
 
 ## 주의사항
@@ -185,6 +193,11 @@ Code ↔ Spec Gaps 를 우선 표시. 부속 섹션(Spec↔Spec gaps, Notes) 은
 - L1 항목 drop: 0건
 - gap-auditor 반복: 0회 (major issue 0 까지)
 - gap-auditor drop (잔여 major): 0건
+- 호출 횟수:
+  - L1 (file-pair-observer): 1회 + 인용 fix 0회
+  - L2 (gap-aggregator): 1회 + 재호출 0회
+  - gap-auditor: 1회
+- wall-clock: ~28초 (Step 1 시작 ~ Step 7 출력 직전)
 - 분석 모델: L1 haiku + L2 sonnet + gap-auditor sonnet
 ```
 
