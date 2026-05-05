@@ -25,21 +25,7 @@ allowed-tools: ["Task", "Glob", "Read", "Grep", "AskUserQuestion"]
 
 ## 작업 프로세스
 
-> **오케스트레이터 측정 가이드 (Step 7 footer 입력용)**
->
-> Step 1 ~ Step 7 진행 중 다음 값을 자체 측정해서 누적한다 (별도 측정 도구는 없음, LLM 이 직접 카운트).
->
-> - **시작 시각** (`t_start`): Step 1 시작 직전 timestamp
-> - **종료 시각** (`t_end`): Step 7 출력 직전 timestamp
-> - **wall-clock**: `t_end - t_start` (초 단위, 정수 반올림)
-> - **호출 횟수** (재시도 / 피드백 fix 호출 모두 포함):
->   - `n_l1_initial`: Step 3 의 file-pair-observer 초회 호출 수 (단일 spec 이면 1)
->   - `n_l1_fix`: Step 4 피드백 루프 fix 호출 수
->   - `n_l2_initial = 1` (Step 5 초회)
->   - `n_l2_refix`: Step 6 audit 루프 L2 재호출 수
->   - `n_auditor`: Step 6 의 gap-auditor 호출 수 (초회 + 루프 + retry)
->
-> 측정값은 Step 7 footer 의 "호출 횟수" / "wall-clock" 항목에 채워 넣는다. 토큰 측정은 Task 도구가 노출할 때만 추가 (미노출 시 생략).
+> **오케스트레이터 측정 가이드 (Step 7 footer 입력용)**: `/spec-review` "오케스트레이터 측정 가이드" 블록과 동일 (`t_start`/`t_end`/`wall_clock_sec`, `n_l1_initial`/`n_l1_fix`/`n_l2_refix`/`n_auditor`). 단일 spec 이므로 `n_l1_initial = 1` 로 시작.
 
 ### Step 1: 입력 파싱
 
