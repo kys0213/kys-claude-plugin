@@ -126,7 +126,7 @@ claimed task들을 `max_parallel_agents` 단위로 분할하여 issue-implemente
 - `base_branch`: 결정된 base
 - `pr_type`: `auto`
 
-> **알려진 follow-up**: 현재 branch-promoter는 입력에 `issue_number`가 있을 때 PR body에 `Closes #{issue_number}`를 자동 삽입합니다. 본 커맨드는 `issue_number`를 전달하지 않아 promoter의 missing-key 처리에 의존합니다. promoter가 누락된 경우에도 안전하게 PR을 생성하도록 명세에 추가하는 작업은 별도 이슈로 surface (PR 설명 참조).
+> branch-promoter는 `issue_number`가 비어 있으면 PR body의 `Closes #N` 라인과 이슈 코멘트 단계를 자동으로 생략합니다. ledger task 경로에서는 `issue_number`를 전달하지 않으므로 GitHub 이슈와 무관한 PR이 안전하게 생성됩니다.
 
 PR 생성 성공 시:
 - task는 **Wip 상태로 유지** — `task complete`는 호출하지 않습니다 (pr-merger의 책임)
