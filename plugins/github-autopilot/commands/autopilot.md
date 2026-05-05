@@ -240,6 +240,49 @@ Step 3으로 진행합니다.
 
 ---
 
+### Step 2.5: Ledger 상태 스냅샷
+
+루프 등록이 끝난 직후, 각 backlog epic의 ledger 상태를 한 번 스냅샷하여 사용자에게 보여줍니다. "어떤 backlog에 task가 몇 개 쌓여 있고, 라이프사이클의 어디에 있는가" 를 한 눈에 보여주는 정보성 단계입니다.
+
+> 정보성 출력입니다. 실패해도 autopilot 사이클을 중단하지 않습니다 (failure isolation).
+
+```bash
+echo "## 📋 Ledger 상태"
+for EPIC in gap-backlog ci-backlog qa-backlog; do
+  if ! JSON=$(autopilot epic status "$EPIC" --json 2>/dev/null); then
+    # 아직 부트스트랩되지 않은 epic은 INFO로 안내하고 skip (WARN 아님 — 정보성)
+    echo "- $EPIC: (epic not yet bootstrapped)"
+    continue
+  fi
+  echo "$JSON" | jq -r --arg e "$EPIC" \
+    '.[0] | "- \($e): \(.counts.ready) ready · \(.counts.wip) wip · \(.counts.done) done · \(.counts.escalated) escalated"'
+done
+
+echo
+echo "### 최근 이벤트 (최대 5건)"
+autopilot events list --limit 5 2>/dev/null || echo "(이벤트 조회 실패 — skipped)"
+```
+
+**`autopilot epic status --json` 응답 형식** (cli/src/cmd/epic.rs::EpicStatusReport): 길이 1 배열, 각 원소는 `{ epic, status, total, counts: { pending, ready, wip, blocked, done, escalated } }`. 단일 epic 조회 시에도 배열이므로 `.[0]`로 언랩합니다. 존재하지 않는 epic은 exit 1 + stderr `"epic '<name>' not found"` — 위 스니펫은 stderr를 버리고 "(epic not yet bootstrapped)"로 표시합니다.
+
+**예상 출력 예시**:
+
+```
+## 📋 Ledger 상태
+- gap-backlog: 12 ready · 1 wip · 5 done · 0 escalated
+- ci-backlog: 3 ready · 0 wip · 8 done · 0 escalated
+- qa-backlog: (epic not yet bootstrapped)
+
+### 최근 이벤트 (최대 5건)
+AT                         KIND            EPIC          TASK   PAYLOAD-SUMMARY
+2026-05-05T01:19:45+00:00  task_inserted   gap-backlog   g1     {"source":"gap-watch",...}
+2026-05-05T01:19:45+00:00  task_claimed    gap-backlog   g1     {"attempts":1}
+```
+
+Step 3으로 진행합니다.
+
+---
+
 ### Step 3: 결과 출력
 
 #### Hybrid 모드
