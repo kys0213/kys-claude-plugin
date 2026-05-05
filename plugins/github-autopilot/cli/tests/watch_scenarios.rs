@@ -28,6 +28,7 @@ use std::sync::Arc;
 use autopilot::cmd::watch::ci::BranchFilter;
 use autopilot::cmd::watch::{TickState, WatchArgs, WatchEvent, WatchService};
 use autopilot::domain::{Epic, EpicStatus, TaskId, TaskSource, TaskStatus};
+use autopilot::fs::FsOps;
 use autopilot::ports::clock::{Clock, FixedClock};
 use autopilot::ports::task_store::{EpicPlan, NewTask, NewWatchTask, TaskStore};
 use autopilot::store::SqliteTaskStore;
@@ -35,6 +36,7 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 use mock_fs::MockFs;
 use mock_git::MockGit;
 use mock_github::MockGitHub;
+use std::collections::HashSet;
 use tempfile::TempDir;
 
 // ── Fixture ─────────────────────────────────────────────────────────────
@@ -594,5 +596,489 @@ fn scenario_two_epics_emit_independent_events() {
         dones,
         vec![("A", 1)],
         "only A is fully done; B has b2 open. got {evs:?}"
+    );
+}
+
+// ── Resilience helpers ──────────────────────────────────────────────────
+
+/// Returns the path the production code uses for `watch.json` when the
+/// repo name is `test-repo` (matching `MockGit::with_repo_name`).
+///
+/// The format is owned by `WatchService::state_path` — kept inline in
+/// production rather than exposed as a helper. Resilience scenarios that
+/// need to pre-seed `MockFs` with state must mirror that format here.
+fn watch_state_path() -> std::path::PathBuf {
+    std::path::PathBuf::from("/tmp/autopilot-test-repo/state/watch.json")
+}
+
+/// Per-tick env builder that lets resilience scenarios inject a custom
+/// `MockGitHub` and a pre-populated `MockFs`. The store + clock + args
+/// match `Fixture::new` for parity with the happy-path scenarios.
+struct ResilienceEnv {
+    _tmp: TempDir,
+    store: Arc<dyn TaskStore>,
+    clock: Arc<FixedClock>,
+    fs: MockFs,
+    svc: WatchService,
+    args: WatchArgs,
+    ts: TickState,
+}
+
+impl ResilienceEnv {
+    fn build(now: DateTime<Utc>, stale_secs: u64, github: MockGitHub, fs: MockFs) -> Self {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let db_path = tmp.path().join("autopilot.db");
+        let store: Arc<dyn TaskStore> =
+            Arc::new(SqliteTaskStore::open(&db_path).expect("open sqlite"));
+        let clock = Arc::new(FixedClock::new(now));
+        let github = Arc::new(github);
+        let git = MockGit::new().with_repo_name("test-repo");
+        let fs_clone = fs.clone();
+        let svc = WatchService::new(github, Box::new(git), Box::new(fs_clone))
+            .with_store(Arc::clone(&store))
+            .with_clock(Arc::clone(&clock) as Arc<_>);
+        let args = WatchArgs {
+            poll_sec: 0,
+            branch: "main".to_string(),
+            branch_filter: BranchFilter::All,
+            label_prefix: "autopilot:".to_string(),
+            stale_threshold: format!("{stale_secs}s"),
+            ledger_events: true,
+        };
+        let ts = svc.init_tick_state(&args).expect("init tick state");
+        Self {
+            _tmp: tmp,
+            store,
+            clock,
+            fs,
+            svc,
+            args,
+            ts,
+        }
+    }
+
+    fn tick(&mut self) -> Vec<WatchEvent> {
+        self.svc.tick_once(&mut self.ts, &self.args)
+    }
+
+    fn advance(&self, dur: Duration) {
+        self.clock.advance(dur);
+    }
+}
+
+fn new_issues(events: &[WatchEvent]) -> Vec<u64> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            WatchEvent::NewIssue { number, .. } => Some(*number),
+            _ => None,
+        })
+        .collect()
+}
+
+// ── Scenario 8 (resilience): GitHub fetch failure recovers ──────────────
+
+/// Tick N: `list_open_issues` returns `Err(...)` (transient gh failure).
+/// Tick N+1: same call returns Ok with an unseen issue. The daemon must
+/// not panic, must not corrupt persisted state, and must emit the
+/// `NEW_ISSUE` exactly once on the recovery tick — as if the failed tick
+/// had not happened.
+///
+/// Issues run on `ISSUE_TICK_INTERVAL` (every 12 ticks at base poll, but
+/// tick 0 always fires). We drive tick 0 with a failing mock and tick 12
+/// with a healthy mock by reconstructing the service — this mirrors how
+/// a real transient failure surfaces: state survives, dedupe set is
+/// rebuilt on next successful poll.
+#[test]
+fn scenario_github_fetch_failure_recovers_on_next_tick() {
+    // First service: failing on the first list_open_issues call.
+    let github_failing = MockGitHub::new().with_fail_issues_first_n(1);
+    let env = ResilienceEnv::build(t0(), 60, github_failing, MockFs::new());
+    let mut env = env;
+
+    // Tick 0 hits the failing list_open_issues path. The daemon must
+    // ignore the error (no panic) and emit no NEW_ISSUE. seen_issue_numbers
+    // also stays whatever init seeded it with (init's seeding path may
+    // also fail, leaving it empty).
+    let evs = env.tick();
+    assert!(
+        new_issues(&evs).is_empty(),
+        "failing list_open_issues must not emit NEW_ISSUE; got {evs:?}"
+    );
+
+    // Sanity: the failed tick must not corrupt watch.json.
+    // (No state-save tick has fired yet; verify no garbage was written.)
+    for (path, content) in env.fs.written_files() {
+        if path.ends_with("watch.json") {
+            // Anything written must be valid JSON.
+            serde_json::from_str::<serde_json::Value>(&content)
+                .expect("any persisted watch.json must be valid JSON");
+        }
+    }
+
+    // Second service: same store, healthy GitHub returning a fresh issue
+    // and one already-seen issue. Tick 0 of this service simulates "next
+    // tick" after recovery — it should emit NEW_ISSUE for the unseen
+    // issue and treat the seen issue as already known.
+    //
+    // We carry forward the prior `seen_issue_numbers` so the recovery
+    // tick's seeding does not silently swallow the new issue (mirroring
+    // the same pattern as `scenario_github_and_ledger_emit_in_same_tick`).
+    env.advance(Duration::seconds(5));
+    let healthy_issues = vec![
+        autopilot::github::OpenIssue {
+            number: 100,
+            title: "Pre-existing".to_string(),
+            labels: vec![],
+        },
+        autopilot::github::OpenIssue {
+            number: 101,
+            title: "Fresh after recovery".to_string(),
+            labels: vec![],
+        },
+    ];
+    // Pretend the prior daemon had already seen issue 100 (e.g. via an
+    // earlier successful poll the test doesn't simulate); only 101 is new.
+    let mut seen_carry: HashSet<u64> = HashSet::new();
+    seen_carry.insert(100);
+
+    let svc2 = WatchService::new(
+        Arc::new(MockGitHub::new().with_issues(healthy_issues)),
+        Box::new(MockGit::new().with_repo_name("test-repo")),
+        Box::new(MockFs::new()),
+    )
+    .with_store(Arc::clone(&env.store))
+    .with_clock(Arc::clone(&env.clock) as Arc<_>);
+    let mut ts2 = svc2.init_tick_state(&env.args).expect("init");
+    ts2.seen_issue_numbers = seen_carry;
+
+    let evs = svc2.tick_once(&mut ts2, &env.args);
+    assert_eq!(
+        new_issues(&evs),
+        vec![101],
+        "recovery tick must emit NEW_ISSUE 101 only; got {evs:?}"
+    );
+}
+
+// ── Scenario 9 (resilience): no prior watch.json ────────────────────────
+
+/// Pre-existing SQLite state (events from prior daemon runs) but no
+/// `watch.json` file at all. `init_tick_state` must seed cursors from
+/// `clock.now()` so historical ledger events are NOT replayed.
+#[test]
+fn scenario_no_prior_watch_json_does_not_replay_history() {
+    // Pre-populate SQLite with a completed task at t0.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let db_path = tmp.path().join("autopilot.db");
+    let store: Arc<dyn TaskStore> = Arc::new(SqliteTaskStore::open(&db_path).expect("open sqlite"));
+    let now = t0();
+    store
+        .insert_epic_with_tasks(
+            EpicPlan {
+                epic: epic("e9", now),
+                tasks: vec![new_task("t1", "T1")],
+                deps: vec![],
+            },
+            now,
+        )
+        .expect("insert");
+    store.claim_next_task("e9", now).expect("claim");
+    store
+        .complete_task_and_unblock(&TaskId::from_raw("t1"), 1, now)
+        .expect("complete");
+
+    // Fresh daemon: empty MockFs (load_state returns default), clock
+    // advanced past the historical events.
+    let later = now + Duration::seconds(60);
+    let clock = Arc::new(FixedClock::new(later));
+    let github = Arc::new(MockGitHub::new());
+    let git = MockGit::new().with_repo_name("test-repo");
+    let fs = MockFs::new(); // no watch.json present
+    assert!(
+        !fs.file_exists(&watch_state_path()),
+        "precondition: watch.json must not exist"
+    );
+    let svc = WatchService::new(github, Box::new(git), Box::new(fs))
+        .with_store(Arc::clone(&store))
+        .with_clock(Arc::clone(&clock) as Arc<_>);
+    let args = WatchArgs {
+        poll_sec: 0,
+        branch: "main".to_string(),
+        branch_filter: BranchFilter::All,
+        label_prefix: "autopilot:".to_string(),
+        stale_threshold: "60s".to_string(),
+        ledger_events: true,
+    };
+    let mut ts = svc.init_tick_state(&args).expect("init");
+
+    let evs = svc.tick_once(&mut ts, &args);
+    assert!(
+        ready(&evs).is_empty() && epic_done(&evs).is_empty(),
+        "fresh daemon with absent watch.json must not backfill history; got {evs:?}"
+    );
+}
+
+// ── Scenario 10 (resilience): corrupted watch.json ──────────────────────
+
+/// `watch.json` exists but is invalid JSON. Current behavior (documented
+/// here so the contract is explicit): `load_state` swallows the parse
+/// error and falls back to default, which means the daemon recovers
+/// silently — historical events are NOT replayed because the cursor is
+/// re-seeded to `now`.
+///
+/// This is a deliberate UX choice: a corrupted cursor file should not
+/// brick the daemon. If the policy ever changes (e.g. fail-loud), this
+/// test must change with it.
+#[test]
+fn scenario_corrupted_watch_json_recovers_gracefully() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let db_path = tmp.path().join("autopilot.db");
+    let store: Arc<dyn TaskStore> = Arc::new(SqliteTaskStore::open(&db_path).expect("open sqlite"));
+
+    // Pre-existing completed task — would replay if cursor were treated
+    // as "from beginning of time".
+    let now = t0();
+    store
+        .insert_epic_with_tasks(
+            EpicPlan {
+                epic: epic("e10", now),
+                tasks: vec![new_task("t1", "T1")],
+                deps: vec![],
+            },
+            now,
+        )
+        .expect("insert");
+    store.claim_next_task("e10", now).expect("claim");
+    store
+        .complete_task_and_unblock(&TaskId::from_raw("t1"), 1, now)
+        .expect("complete");
+
+    // MockFs pre-seeded with garbage at the watch.json path.
+    let fs = MockFs::new().with_file(
+        watch_state_path().to_str().expect("utf-8 watch.json path"),
+        "{this is not valid json,,,",
+    );
+    let later = now + Duration::seconds(60);
+    let clock = Arc::new(FixedClock::new(later));
+    let github = Arc::new(MockGitHub::new());
+    let git = MockGit::new().with_repo_name("test-repo");
+
+    let svc = WatchService::new(github, Box::new(git), Box::new(fs))
+        .with_store(Arc::clone(&store))
+        .with_clock(Arc::clone(&clock) as Arc<_>);
+    let args = WatchArgs {
+        poll_sec: 0,
+        branch: "main".to_string(),
+        branch_filter: BranchFilter::All,
+        label_prefix: "autopilot:".to_string(),
+        stale_threshold: "60s".to_string(),
+        ledger_events: true,
+    };
+
+    // init_tick_state must not panic on corrupted JSON.
+    let mut ts = svc.init_tick_state(&args).expect("init must not error");
+
+    // First tick: no replay, no panic.
+    let evs = svc.tick_once(&mut ts, &args);
+    assert!(
+        ready(&evs).is_empty() && epic_done(&evs).is_empty(),
+        "corrupted watch.json must fall back to fresh state, not replay; got {evs:?}"
+    );
+}
+
+// ── Scenario 11 (event integrity): same NEW_ISSUE seen twice ────────────
+
+/// `MockGitHub` returns the same open issue on tick 0 and the next
+/// issue-poll tick. The dedupe via `seen_issue_numbers` must ensure
+/// `NEW_ISSUE` is emitted at most once across both ticks.
+///
+/// Note: `init_tick_state` seeds `seen_issue_numbers` from the first
+/// successful `list_open_issues`, so a pre-existing issue is treated as
+/// already-known on tick 0. We start with an empty list, then introduce
+/// the issue between ticks — this is the closest analogue to "PR seen on
+/// two consecutive ticks" the watch surface supports.
+#[test]
+fn scenario_same_issue_seen_twice_emits_once() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let db = tmp.path().join("autopilot.db");
+    let store: Arc<dyn TaskStore> = Arc::new(SqliteTaskStore::open(&db).expect("open"));
+    let clock = Arc::new(FixedClock::new(t0()));
+    let args = WatchArgs {
+        poll_sec: 0,
+        branch: "main".to_string(),
+        branch_filter: BranchFilter::All,
+        label_prefix: "autopilot:".to_string(),
+        stale_threshold: "60s".to_string(),
+        ledger_events: true,
+    };
+
+    // First service: empty issue list at init time so seeding doesn't
+    // pre-mark anything.
+    let svc1 = WatchService::new(
+        Arc::new(MockGitHub::new()),
+        Box::new(MockGit::new().with_repo_name("test-repo")),
+        Box::new(MockFs::new()),
+    )
+    .with_store(Arc::clone(&store))
+    .with_clock(Arc::clone(&clock) as Arc<_>);
+    let mut ts1 = svc1.init_tick_state(&args).expect("init");
+    let _ = svc1.tick_once(&mut ts1, &args);
+
+    // Second service: introduces issue 7. First poll → emits NEW_ISSUE 7.
+    clock.advance(Duration::seconds(1));
+    let svc2 = WatchService::new(
+        Arc::new(
+            MockGitHub::new().with_issues(vec![autopilot::github::OpenIssue {
+                number: 7,
+                title: "First sighting".to_string(),
+                labels: vec![],
+            }]),
+        ),
+        Box::new(MockGit::new().with_repo_name("test-repo")),
+        Box::new(MockFs::new()),
+    )
+    .with_store(Arc::clone(&store))
+    .with_clock(Arc::clone(&clock) as Arc<_>);
+    let mut ts2 = svc2.init_tick_state(&args).expect("init");
+    ts2.seen_issue_numbers = ts1.seen_issue_numbers.clone(); // carry empty
+    let evs_first = svc2.tick_once(&mut ts2, &args);
+    assert_eq!(
+        new_issues(&evs_first),
+        vec![7],
+        "first sighting must emit NEW_ISSUE 7; got {evs_first:?}"
+    );
+
+    // Same issue persists on the next tick. With the standard tick
+    // intervals issue polling fires at tick % ISSUE_TICK_INTERVAL == 0;
+    // we drive the next poll explicitly by resetting tick to 0 (the
+    // service has no public API to fast-forward, so we rely on the fact
+    // that the seeded `seen_issue_numbers` already covers this case).
+    ts2.tick = 0; // force next tick to hit the issue-poll branch
+    let evs_second = svc2.tick_once(&mut ts2, &args);
+    assert!(
+        new_issues(&evs_second).is_empty(),
+        "duplicate sighting must not re-emit NEW_ISSUE; got {evs_second:?}"
+    );
+}
+
+// ── Scenario 12 (event integrity): ready→claim same tick, no STALE_WIP ──
+
+/// Two-part integrity guard for the "Ready → claim in the same tick
+/// window" race:
+///
+/// **Part A** — a task inserted and immediately claimed (both at the
+/// same logical `now`) before any tick fires. The detector reads
+/// **current** task status, so `TASK_READY` is intentionally suppressed
+/// for the already-Wip task (this is a deliberate design choice; the
+/// detector does not replay historical Ready transitions). What matters
+/// is the negative invariant: `STALE_WIP` MUST NOT fire, because the
+/// task's `updated_at` is `now`, not `now - threshold`.
+///
+/// **Part B** — a task whose `TASK_READY` already fired on tick N then
+/// gets claimed before tick N+1. Tick N+1 must emit neither `TASK_READY`
+/// (already emitted) nor `STALE_WIP` (just claimed).
+///
+/// This guards the time-ordering invariant: `STALE_WIP` derives from
+/// `list_stale(now - threshold)` over current Wip rows; a freshly
+/// claimed task must never qualify, regardless of how many ledger events
+/// fire on the same tick.
+#[test]
+fn scenario_ready_then_claim_same_tick_no_stale_wip() {
+    // ── Part A: insert + claim before any tick ──
+    let mut fx = Fixture::new(/*stale_secs=*/ 5);
+    ensure_epic(&fx.store, "e12a", fx.now());
+    fx.store
+        .upsert_watch_task(watch_task("t1", "e12a"), fx.now())
+        .expect("upsert");
+    fx.store
+        .claim_next_task("e12a", fx.now())
+        .expect("claim")
+        .expect("ready task to claim");
+
+    let evs = fx.tick();
+    assert!(
+        ready(&evs).is_empty(),
+        "TASK_READY must be suppressed when task is already Wip at observation time; got {evs:?}"
+    );
+    assert!(
+        stale(&evs).is_empty(),
+        "STALE_WIP must not fire for a task claimed `now`; got {evs:?}"
+    );
+
+    // ── Part B: insert → tick (READY) → claim → tick (no STALE_WIP) ──
+    let mut fx2 = Fixture::new(/*stale_secs=*/ 5);
+    ensure_epic(&fx2.store, "e12b", fx2.now());
+    fx2.store
+        .upsert_watch_task(watch_task("t2", "e12b"), fx2.now())
+        .expect("upsert");
+
+    let evs = fx2.tick();
+    assert_eq!(
+        ready(&evs),
+        vec![("e12b", "t2")],
+        "TASK_READY must fire on first tick when status is Ready; got {evs:?}"
+    );
+    assert!(stale(&evs).is_empty());
+
+    // External CLI claims between ticks; very little time passes.
+    fx2.advance(Duration::seconds(1));
+    fx2.store
+        .claim_next_task("e12b", fx2.now())
+        .expect("claim")
+        .expect("ready task to claim");
+
+    let evs = fx2.tick();
+    assert!(
+        ready(&evs).is_empty(),
+        "TASK_READY must not re-emit; got {evs:?}"
+    );
+    assert!(
+        stale(&evs).is_empty(),
+        "STALE_WIP must not fire for a task claimed within the threshold; got {evs:?}"
+    );
+}
+
+// ── Scenario 13 (event integrity): clock-skew protection ────────────────
+
+/// Documents a known limitation: if `last_event_at` in `watch.json` is
+/// somehow ahead of `clock.now()` (system clock moved backward, or the
+/// state file was copied from another machine), the SQLite query
+/// `at >= since` will silently filter out events whose `at == now`.
+/// `TASK_READY` / `EPIC_DONE` then stop firing until real time catches
+/// up to the stored future cursor.
+///
+/// Per the C5 task brief, this scenario is **deferred** — fixing it is a
+/// judgment call that should be made alongside a concrete recovery
+/// policy (e.g. clamp `since` to `min(last_event_at, now)`, or warn and
+/// re-anchor). The test below describes the desired behavior and is
+/// marked `#[ignore]` so CI passes while the policy is decided.
+///
+/// To reproduce the bug interactively, remove `#[ignore]` and run
+/// `cargo test -p autopilot scenario_clock_skew_does_not_freeze_emission`.
+#[test]
+#[ignore = "TODO(C5): clock-skew re-anchor policy not yet implemented; see PR body"]
+fn scenario_clock_skew_does_not_freeze_emission() {
+    let mut fx = Fixture::new(/*stale_secs=*/ 60);
+
+    // Force the ledger cursor into the future by 1 hour. In production
+    // this happens when the system clock jumps backward between daemon
+    // restarts.
+    fx.ts.state.ledger.last_event_at = Some(fx.now() + Duration::hours(1));
+
+    // Insert a task at the (logical) current time.
+    ensure_epic(&fx.store, "e13", fx.now());
+    fx.store
+        .upsert_watch_task(watch_task("t1", "e13"), fx.now())
+        .expect("upsert");
+
+    // Desired behavior: the daemon detects the future cursor, re-anchors
+    // to `now`, and emits TASK_READY for t1. Current behavior: the SQL
+    // filter `at >= since` excludes the freshly inserted row, and no
+    // event fires until real time catches up an hour later.
+    let evs = fx.tick();
+    assert_eq!(
+        ready(&evs),
+        vec![("e13", "t1")],
+        "clock-skew must not freeze TASK_READY emission; got {evs:?}"
     );
 }
