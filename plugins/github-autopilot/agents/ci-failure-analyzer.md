@@ -67,7 +67,7 @@ gh pr list --head "${HEAD_BRANCH}" --json number,title,files --limit 1
 
 ## 출력
 
-JSON 리포트를 stdout에 출력합니다. 오케스트레이터(`/github-autopilot:ci-watch`)가 이 결과를 기반으로 GitHub issue를 생성하고, 동일 fingerprint로 autopilot ledger의 `ci-backlog` epic에도 task를 기록합니다.
+JSON 리포트를 stdout에 출력합니다. 호출한 오케스트레이터가 이 결과를 기반으로 GitHub issue를 생성하고, 동일 fingerprint로 autopilot ledger의 `ci-backlog` epic에도 task를 기록합니다.
 
 ### Fingerprint 계약
 
