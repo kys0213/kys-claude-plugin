@@ -67,10 +67,25 @@ gh pr list --head "${HEAD_BRANCH}" --json number,title,files --limit 1
 
 ## 출력
 
-JSON 리포트를 stdout에 출력합니다. 오케스트레이터가 이 결과를 기반으로 GitHub issue를 생성합니다.
+JSON 리포트를 stdout에 출력합니다. 오케스트레이터(`/github-autopilot:ci-watch`)가 이 결과를 기반으로 GitHub issue를 생성하고, 동일 fingerprint로 autopilot ledger의 `ci-backlog` epic에도 task를 기록합니다.
+
+### Fingerprint 계약
+
+오케스트레이터는 다음 형식으로 fingerprint를 합성합니다 (Step 3 중복 확인 / Step 5b 이슈 생성 / Step 5c ledger 쓰기 모두 동일 값 사용):
+
+```
+ci:{run_name}:{branch}:{failure_type}
+```
+
+- `run_name`: 워크플로우 이름 (입력의 `run_name`)
+- `branch`: 실패 브랜치 (입력의 `head_branch`)
+- `failure_type`: 본 에이전트가 결정한 분류 값 (위 표의 영문 키 — `compile_error`, `test_failure`, `lint_failure`, `timeout`, `dependency_error`, `permission_error` 등)
+
+따라서 `failure_type`은 **결정적**(같은 원인 → 같은 값)이어야 하며, 동일 원인의 여러 실패는 하나의 리포트로 통합되어야 합니다. 이 값이 흔들리면 ledger task id(sha256 12자리)와 issue 중복 판정이 동시에 깨집니다.
 
 ## 주의사항
 
 - 로그가 500줄을 초과하면 핵심 에러 메시지만 추출
 - 동일 원인의 여러 실패는 하나의 리포트로 통합
 - 환경 문제(flaky test, infra issue)와 코드 문제를 구분
+- `failure_type` 값은 fingerprint의 일부이므로 같은 원인에 대해 항상 동일하게 분류한다 (위의 Fingerprint 계약 참조)

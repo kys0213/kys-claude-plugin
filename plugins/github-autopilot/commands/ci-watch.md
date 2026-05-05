@@ -155,16 +155,42 @@ autopilot issue check-dup --fingerprint "$FINGERPRINT"
 - run_name (워크플로우 이름)
 - head_branch (실패한 브랜치)
 
-### Step 5: Issue 생성
+### Step 5: Issue 생성 + Ledger 동기 기록
+
+#### Step 5a: Ledger Epic 부트스트랩
+
+이슈 생성 루프 진입 직전에, 결정적 ledger의 `ci-backlog` epic이 존재하도록 한 번만 보장합니다 (idempotent).
+
+```bash
+EPIC_NAME="ci-backlog"
+EPIC_SPEC="specs/ci-backlog.md"
+out=$(autopilot epic create --name "$EPIC_NAME" --spec "$EPIC_SPEC" 2>&1) || true
+case "$out" in
+  *"created"*|*"already exists"*)
+    # 정상: 새로 생성 또는 이미 존재 (epic create는 이미 존재 시 exit 1)
+    ;;
+  *)
+    # 실패해도 GitHub issue 흐름은 그대로 진행 (ledger는 observer)
+    echo "WARN: ci-backlog epic 부트스트랩 실패 — ledger 쓰기는 skip됩니다: $out"
+    EPIC_NAME=""
+    ;;
+esac
+```
+
+> ledger는 GitHub issue 생성과 독립적인 부가 기록입니다. epic 부트스트랩이 실패하면 `EPIC_NAME=""`로 설정하여 이번 cycle의 ledger 쓰기를 모두 skip합니다 (ci-watch cycle 자체는 계속 진행).
+
+#### Step 5b: Issue 생성
 
 분석 결과를 바탕으로 autopilot CLI로 이슈를 생성합니다:
 
 ```bash
+FINGERPRINT="ci:${WORKFLOW_NAME}:${BRANCH}:${FAILURE_TYPE}"
+
 autopilot issue create \
   --title "fix: CI failure in ${WORKFLOW_NAME} on ${BRANCH}" \
   --label "{label_prefix}ci-failure" \
   --label "{label_prefix}ready" \
-  --fingerprint "ci:${WORKFLOW_NAME}:${BRANCH}:${FAILURE_TYPE}" \
+  --fingerprint "$FINGERPRINT" \
   --body "$(cat <<'EOF'
 ## CI 실패 분석
 
@@ -190,6 +216,30 @@ EOF
 
 > **참고**: fingerprint HTML 주석은 CLI가 body 하단에 자동 삽입합니다.
 
+#### Step 5c: Ledger 동기 기록 (observer)
+
+GitHub issue 생성이 성공한 경우(중복 skip 제외)에만, `EPIC_NAME`이 비어있지 않다면 동일 fingerprint로 ledger task를 기록합니다. ledger 실패는 WARN으로 로그하고 ci-watch cycle을 절대 막지 않습니다.
+
+```bash
+if [ -n "${EPIC_NAME:-}" ]; then
+  # task id는 fingerprint의 sha256 앞 12자리(hex). 동일 fingerprint → 동일 id (idempotent).
+  TASK_ID=$(printf '%s' "$FINGERPRINT" | shasum -a 256 | cut -c1-12)
+  autopilot task add "$TASK_ID" \
+    --epic "$EPIC_NAME" \
+    --title "fix: CI failure in ${WORKFLOW_NAME} on ${BRANCH}" \
+    --fingerprint "$FINGERPRINT" \
+    --source ci-watch \
+    || echo "WARN: ledger task add 실패 (issue는 정상 생성됨) — 계속 진행"
+fi
+```
+
+> CLI 동작:
+> - 신규 fingerprint: `inserted task <id>` (exit 0)
+> - 이미 등록된 fingerprint: `duplicate of task <id>` (exit 0, no-op)
+> - epic 미존재 / 환경 오류: 비-zero exit → WARN 로그 후 무시 (GitHub issue는 이미 생성됨)
+>
+> fingerprint 형식과 결정성 요건은 `ci-failure-analyzer`의 *Fingerprint 계약* 섹션에 정의되어 있습니다 (Step 3 중복 확인과 동일 값).
+
 ### Step 6: 결과 보고
 
 생성된 이슈 목록과 분석 요약을 사용자에게 출력합니다.
@@ -199,3 +249,4 @@ EOF
 - issue-label 스킬의 라벨 필수 규칙과 fingerprint 규칙을 반드시 따른다
 - 토큰 최적화: MainAgent는 CI 로그를 직접 읽지 않음. 모든 로그 분석은 ci-failure-analyzer 에이전트가 수행
 - flaky test와 실제 실패를 구분하여 라벨링
+- ledger 쓰기는 GitHub issue 흐름의 보조 observer다. ledger 실패가 issue 생성 결과를 무효화하지 않도록 `|| echo WARN ...` 패턴으로 격리한다 (Step 5c)
