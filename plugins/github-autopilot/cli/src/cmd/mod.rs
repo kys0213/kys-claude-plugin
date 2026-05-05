@@ -319,7 +319,9 @@ pub enum StatsCommands {
     Init,
     /// Update statistics for a command
     Update {
-        /// Command name (e.g. "build-issues")
+        /// Command name. Canonical: build-issues, gap-watch, qa-boost,
+        /// ci-watch, pr-merger, merge-prs, work-ledger. Unknown but
+        /// well-formed names are accepted with a stderr warning.
         #[arg(long)]
         command: String,
         /// Number of issues processed this cycle
