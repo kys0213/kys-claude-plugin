@@ -93,6 +93,163 @@ fn e2e_help_subcommand_exits_zero() {
         .stdout(predicate::str::contains("autopilot"));
 }
 
+// ---------- F1: input validation wiring ----------
+//
+// These scenarios lock in the F1 (cli-ux-finish) wiring of `TaskId::parse`
+// and `--spec` existence checks into the `task add` and `epic create`
+// CLI handlers. The validation primitives have been on `main` since PR
+// #709; F1 just makes them visible at the binary surface so a typoed id
+// or missing path surfaces as exit code 1 with an actionable stderr
+// instead of silently inserting garbage.
+
+#[test]
+fn e2e_task_add_rejects_non_hex_id() {
+    // Lock: 12-char id with non-hex chars => `UserInputError` mapped to
+    // exit code 1, stderr names the offending input and the expected
+    // shape. Stdout stays empty (no row inserted, no "inserted task" line).
+    let ws = Workspace::new();
+    ws.touch("specs/demo.md");
+    ws.cmd()
+        .args([
+            "epic",
+            "create",
+            "--name",
+            "demo",
+            "--spec",
+            "specs/demo.md",
+        ])
+        .assert()
+        .success();
+
+    ws.cmd()
+        .args([
+            "task",
+            "add",
+            "ZZZZZZZZZZZZ",
+            "--epic",
+            "demo",
+            "--title",
+            "non-hex id",
+        ])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::is_empty())
+        .stderr(
+            predicate::str::contains("invalid task id")
+                .and(predicate::str::contains("lowercase hex")),
+        );
+
+    // Confirm no row landed under that id (or any other) — `task list`
+    // should report the empty-state placeholder.
+    ws.cmd()
+        .args(["task", "list", "--epic", "demo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(no tasks)"));
+}
+
+#[test]
+fn e2e_task_add_rejects_wrong_length_id() {
+    // Lock: shorter-than-12 id surfaces the length-specific error message
+    // from `TaskIdParseError::InvalidLength` so an operator can tell
+    // whether they truncated vs. fat-fingered a hex char.
+    let ws = Workspace::new();
+    ws.touch("specs/demo.md");
+    ws.cmd()
+        .args([
+            "epic",
+            "create",
+            "--name",
+            "demo",
+            "--spec",
+            "specs/demo.md",
+        ])
+        .assert()
+        .success();
+
+    ws.cmd()
+        .args([
+            "task", "add", "abc", "--epic", "demo", "--title", "short id",
+        ])
+        .assert()
+        .code(1)
+        .stderr(
+            predicate::str::contains("invalid task id")
+                .and(predicate::str::contains("3 characters")),
+        );
+}
+
+#[test]
+fn e2e_task_add_accepts_valid_hex_id() {
+    // Counter-test: the validation gate must not regress the happy path —
+    // a canonical 12-char lowercase hex id still inserts and round-trips
+    // through `task list`.
+    let ws = Workspace::new();
+    ws.touch("specs/demo.md");
+    ws.cmd()
+        .args([
+            "epic",
+            "create",
+            "--name",
+            "demo",
+            "--spec",
+            "specs/demo.md",
+        ])
+        .assert()
+        .success();
+
+    ws.cmd()
+        .args([
+            "task",
+            "add",
+            "a1b2c3d4e5f6",
+            "--epic",
+            "demo",
+            "--title",
+            "valid hex id",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("inserted task a1b2c3d4e5f6"));
+
+    ws.cmd()
+        .args(["task", "list", "--epic", "demo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("a1b2c3d4e5f6"));
+}
+
+#[test]
+fn e2e_epic_create_rejects_missing_spec() {
+    // Lock: `--spec <path>` that doesn't exist on disk surfaces a
+    // `UserInputError` (exit 1) with a message naming the missing path,
+    // and **does not** insert an epic row.
+    let ws = Workspace::new();
+    // Deliberately *not* calling `ws.touch` — the spec path must not exist.
+    ws.cmd()
+        .args([
+            "epic",
+            "create",
+            "--name",
+            "foo",
+            "--spec",
+            "specs/does-not-exist.md",
+        ])
+        .assert()
+        .code(1)
+        .stderr(
+            predicate::str::contains("does not exist")
+                .and(predicate::str::contains("specs/does-not-exist.md")),
+        );
+
+    // Confirm the rejection happened before the insert.
+    ws.cmd()
+        .args(["epic", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(no epics)"));
+}
+
 #[test]
 fn e2e_task_add_then_list_shows_task() {
     // Happy-path round-trip across three commands sharing one SQLite
@@ -105,6 +262,7 @@ fn e2e_task_add_then_list_shows_task() {
     let task_id = "abc123def456"; // 12 hex chars, matches deterministic id format
     let title = "c1 demo task";
 
+    ws.touch("specs/demo.md");
     ws.cmd()
         .args([
             "epic",
@@ -146,6 +304,7 @@ fn e2e_task_lifecycle_full_flow() {
     let ws = Workspace::new();
     let task_id = "abc123def456";
 
+    ws.touch("specs/demo.md");
     ws.cmd()
         .args([
             "epic",
@@ -228,6 +387,7 @@ fn e2e_task_lifecycle_full_flow() {
 fn e2e_task_add_same_fingerprint_is_idempotent() {
     let ws = Workspace::new();
 
+    ws.touch("specs/demo.md");
     ws.cmd()
         .args([
             "epic",
@@ -298,6 +458,7 @@ fn e2e_task_add_same_fingerprint_is_idempotent() {
 fn e2e_epic_create_status_complete_flow() {
     let ws = Workspace::new();
 
+    ws.touch("specs/demo.md");
     ws.cmd()
         .args([
             "epic",
@@ -311,8 +472,8 @@ fn e2e_epic_create_status_complete_flow() {
         .success()
         .stdout(predicate::str::contains("epic 'demo' created"));
 
-    // TODO(C3): `epic create --spec` accepts a path that does not exist on
-    // disk. C3 should decide whether to validate or document the behavior.
+    // F1 (cli-ux-finish) wired in the spec-existence check — see
+    // `e2e_epic_create_rejects_missing_spec` for the rejection path.
 
     ws.cmd()
         .args(["epic", "get", "demo"])
@@ -376,6 +537,7 @@ fn e2e_epic_create_status_complete_flow() {
 fn e2e_blocked_task_becomes_claimable_after_parent_completes() {
     let ws = Workspace::new();
 
+    ws.touch("specs/demo.md");
     ws.cmd()
         .args([
             "epic",
@@ -475,6 +637,7 @@ fn e2e_task_list_filters_by_epic_and_status() {
     let ws = Workspace::new();
 
     for epic in ["alpha", "beta"] {
+        ws.touch(&format!("specs/{epic}.md"));
         ws.cmd()
             .args([
                 "epic",

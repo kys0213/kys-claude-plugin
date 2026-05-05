@@ -141,6 +141,11 @@ impl<'a> EpicService<'a> {
     /// `idempotent` is true *and* its `spec_path` matches the requested one.
     /// A name collision with a different spec path is still reported as an
     /// error (exit 1) — semantic mismatch must not be silently accepted.
+    ///
+    /// Validates that `spec_path` exists on disk before any store mutation —
+    /// a typo'd `--spec` argument would otherwise silently land an epic
+    /// pointing at nothing. Returns a [`UserInputError`] (exit code 1) when
+    /// the path is missing.
     pub fn create_with_options(
         &self,
         name: &str,
@@ -149,6 +154,14 @@ impl<'a> EpicService<'a> {
         idempotent: bool,
         out: &mut dyn Write,
     ) -> Result<i32> {
+        if !spec_path.try_exists().unwrap_or(false) {
+            return Err(anyhow::Error::new(crate::domain::UserInputError::new(
+                format!(
+                    "epic create: spec file '{}' does not exist",
+                    spec_path.display()
+                ),
+            )));
+        }
         let now = self.clock.now();
         let epic = Epic {
             name: name.to_string(),

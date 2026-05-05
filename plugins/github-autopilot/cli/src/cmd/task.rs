@@ -165,6 +165,13 @@ impl<'a> TaskService<'a> {
     /// Inserts (or detects duplicate of) a watch-style task on `epic`.
     /// Auto-derives a fingerprint from `title + body` when `fingerprint` is
     /// `None`, so callers don't need to mirror the simhash recipe.
+    ///
+    /// Validates `task_id` via [`TaskId::parse`] before any store mutation
+    /// so a typoed id is rejected as a `UserInputError` (exit code 1) rather
+    /// than silently inserting a row whose id will never match the
+    /// deterministic form. Read-only lookups (`task show`, `task release`,
+    /// ...) keep using [`TaskId::from_raw`] — there a missing-id lookup
+    /// already surfaces the typo without corrupting state.
     #[allow(clippy::too_many_arguments)]
     pub fn add(
         &self,
@@ -176,12 +183,14 @@ impl<'a> TaskService<'a> {
         source: TaskSourceArg,
         out: &mut dyn Write,
     ) -> Result<i32> {
+        let id = TaskId::parse(task_id)
+            .map_err(|e| anyhow::Error::new(crate::domain::UserInputError::new(e.to_string())))?;
         let now = self.clock.now();
         let fp = fingerprint
             .map(str::to_string)
             .unwrap_or_else(|| derive_fingerprint(title, body));
         let nt = NewWatchTask {
-            id: TaskId::from_raw(task_id),
+            id,
             epic_name: epic.to_string(),
             source: source.into(),
             fingerprint: fp,
@@ -231,13 +240,20 @@ impl<'a> TaskService<'a> {
                 })?,
                 None => TaskSource::Human,
             };
+            let id = TaskId::parse(&parsed.id).map_err(|e| {
+                anyhow::Error::new(crate::domain::UserInputError::new(format!(
+                    "{} (line {})",
+                    e,
+                    lineno + 1
+                )))
+            })?;
             let title = parsed.title;
             let body = parsed.body;
             let fp = parsed
                 .fingerprint
                 .unwrap_or_else(|| derive_fingerprint(&title, body.as_deref()));
             let nt = NewWatchTask {
-                id: TaskId::from_raw(&parsed.id),
+                id,
                 epic_name: epic.to_string(),
                 source,
                 fingerprint: fp,

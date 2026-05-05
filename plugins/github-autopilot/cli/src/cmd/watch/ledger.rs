@@ -59,6 +59,34 @@ impl LedgerState {
             self.last_event_at = Some(now);
         }
     }
+
+    /// Clamps a future `last_event_at` cursor down to `now` and clears
+    /// any dedupe keys tied to the now-stale boundary timestamp.
+    ///
+    /// Returns the original future timestamp when a clamp happens (so
+    /// callers can warn once), or `None` when the cursor is already
+    /// `<= now` (the normal case — no-op, no warn).
+    ///
+    /// Why this exists: `last_event_at` is loaded from `watch.json` and
+    /// fed to `TaskStore::list_events` as `WHERE at >= since`. If it's
+    /// ever in the future (NTP correction, OS clock manipulation,
+    /// `watch.json` copied across hosts), every freshly-inserted event
+    /// gets filtered out and `TASK_READY` / `EPIC_DONE` / `STALE_WIP`
+    /// emission freezes until real time catches up. Clamping at the read
+    /// boundary unfreezes emission immediately while preserving history.
+    pub fn clamp_future_cursor(&mut self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        match self.last_event_at {
+            Some(at) if at > now => {
+                self.last_event_at = Some(now);
+                // The dedupe set is keyed by the (now-stale) future
+                // timestamp; clearing avoids accidentally suppressing
+                // legitimate events that happen to land at `now`.
+                self.seen_keys.clear();
+                Some(at)
+            }
+            _ => None,
+        }
+    }
 }
 
 fn key_of(kind: EventKind, task_id: Option<&TaskId>, at: DateTime<Utc>) -> String {
