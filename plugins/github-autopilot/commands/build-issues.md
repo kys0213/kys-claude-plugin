@@ -33,15 +33,24 @@ autopilot 라벨이 붙은 GitHub 이슈를 가져와 의존성을 분석하고,
 
 - `max_parallel_agents`: 동시에 실행할 최대 에이전트 수 (기본값: 3)
 
-### Step 3: Pipeline Idle Check
+### Step 3: Pipeline Idle / Capacity Check
+
+Step 2에서 읽은 `max_parallel_agents`를 capacity로 전달합니다. wip 라벨 수가 capacity에 도달했는지 한 번의 호출로 함께 판정하여, 동시 실행 충돌을 사전에 차단합니다.
 
 ```bash
-autopilot pipeline idle --label-prefix "{label_prefix}"
+autopilot pipeline idle \
+  --label-prefix "{label_prefix}" \
+  --max-parallel ${max_parallel_agents}
 ```
 
-- **exit 0 (idle)**: `notification` 설정이 있으면 "autopilot 파이프라인 완료 — build-issues cycle 중단" 알림 발송 후 종료합니다.
-- **exit 2 (error)**: 스크립트 실행 환경 오류. 에러 메시지를 출력하고 이번 cycle을 skip합니다.
-- **exit 1 (active)**: Step 4부터 정상 진행
+| exit code | 의미 | 동작 |
+|-----------|------|------|
+| `0` (idle) | `ready + wip + prs == 0` | `notification` 설정이 있으면 "autopilot 파이프라인 완료 — build-issues cycle 중단" 알림 발송 후 종료합니다. |
+| `1` (active, 여유 있음) | wip < `max_parallel_agents` | Step 4부터 정상 진행합니다. |
+| `3` (at-capacity) | wip ≥ `max_parallel_agents` | "capacity full (wip: ${WIP_COUNT}/${max_parallel_agents}) — next cron tick에 재시도"를 출력하고 **즉시 종료**합니다. dependency-analyzer / filter-comments / issue-implementer 등 모든 agent 호출을 건너뜁니다. (이번 cycle에서는 이슈 분석/dispatch 비용을 발생시키지 않습니다.) |
+| `2` (error) | 스크립트 실행 환경 오류 | 에러 메시지를 출력하고 이번 cycle을 skip합니다. |
+
+> `--max-parallel`을 생략하면 기존 idle/active 동작으로 동작하지만, build-issues는 항상 capacity를 함께 검사해야 하므로 이 인자를 필수로 전달합니다.
 
 ### Step 3.5: Idle Count Check + Adaptive Throttling
 
@@ -231,6 +240,8 @@ echo '${COMMENTS_JSON}' | autopilot issue filter-comments
 - draft_branch: `draft/issue-{number}`
 - base_branch: Step 1에서 결정한 base 브랜치
 - quality_gate_command: 설정에서 읽은 값 (비어있으면 자동 감지)
+
+> **Worktree origin freshness**: implementer는 worktree 진입 시 반드시 `origin/{base_branch}`를 fetch한 뒤 draft 브랜치를 생성/rebase해야 합니다. 자세한 절차는 `agents/issue-implementer.md` Phase 1 Step 0 참조. MainAgent의 로컬 base가 stale일 수 있으므로 base_branch만 전달하고 freshness 보장은 implementer 책임입니다.
 
 ### Step 9: 결과 수집
 

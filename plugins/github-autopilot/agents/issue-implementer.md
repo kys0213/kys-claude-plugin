@@ -25,11 +25,25 @@ skills: ["draft-branch"]
 
 ### Phase 1: 분석
 
-0. **이전 작업 확인**:
+0. **이전 작업 확인 및 origin 동기화**:
+
+   > **WHY**: worktree는 MainAgent의 로컬 base 브랜치 tip에서 생성된다. MainAgent의 로컬이 `origin/{base_branch}`보다 뒤처져 있으면 stale snapshot 위에서 작업하게 되어 "spec/README.md missing" 같은 false `invalid_premise` 실패가 발생한다. 따라서 작업 시작 전 반드시 origin에서 최신 base를 fetch해야 한다.
+
    - `git branch --list draft/issue-{N}`으로 기존 draft 브랜치 존재 여부 확인
-   - 있으면: checkout 후 `git log --oneline -5`로 이전 작업 내용 파악. `wip: partial work` 커밋이 있으면 이전 cycle에서 중단된 작업이므로 이어서 진행
-   - issue_comments에서 최신 failure marker(`<!-- autopilot:failure:N -->`)의 실패 카테고리와 사유를 읽고, 동일한 실수를 반복하지 않도록 접근 방식을 조정
-   - 없으면: base_branch에서 새 draft 브랜치 생성
+   - **있으면 (resume)**: checkout 후 `origin/{base_branch}`로 rebase하여 wip 커밋을 최신 base 위에 다시 올린다.
+     ```bash
+     git fetch origin {base_branch}
+     git checkout draft/issue-{N}
+     git rebase origin/{base_branch}   # wip 커밋 보존, 최신 base에 재적용
+     ```
+     - `git log --oneline -5`로 이전 작업 내용 파악. `wip: partial work` 커밋이 있으면 이전 cycle에서 중단된 작업이므로 이어서 진행
+     - rebase 충돌이 발생하면 freshness 문제가 아니라 실제 의미적 충돌이다. 자동 해결을 시도하지 말고 `failure_category: dependency_error`로 보고 후 중단한다.
+     - issue_comments에서 최신 failure marker(`<!-- autopilot:failure:N -->`)의 실패 카테고리와 사유를 읽고, 동일한 실수를 반복하지 않도록 접근 방식을 조정
+   - **없으면 (new)**: `origin/{base_branch}`에서 새 draft 브랜치 생성한다.
+     ```bash
+     git fetch origin {base_branch}
+     git checkout -b draft/issue-{N} origin/{base_branch}
+     ```
 
 1. **이슈 요구사항 정리**: body와 comments에서 구현 항목, 수용 기준 추출 (comments의 "Autopilot 분석 결과" 섹션에 영향 범위와 구현 가이드가 포함되어 있을 수 있음)
 2. **코드베이스 파악**:

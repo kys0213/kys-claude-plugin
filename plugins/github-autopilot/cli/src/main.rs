@@ -78,9 +78,10 @@ fn main() {
         Commands::Pipeline { command } => {
             let client = gh::real();
             match command {
-                PipelineCommands::Idle { label_prefix } => {
-                    cmd::pipeline::idle(client, &label_prefix)
-                }
+                PipelineCommands::Idle {
+                    label_prefix,
+                    max_parallel,
+                } => cmd::pipeline::idle(client, &label_prefix, max_parallel),
             }
         }
         Commands::Check { command } => {

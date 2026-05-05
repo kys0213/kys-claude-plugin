@@ -244,6 +244,29 @@ fi
 
 생성된 이슈 목록과 분석 요약을 사용자에게 출력합니다.
 
+### Step 6b: 세션 누적 통계
+
+매 cycle 종료 시 CLI로 세션 통계를 업데이트하고 출력합니다:
+
+- `PROCESSED` = Step 2 + 2.7 필터링 후 분석 진입한 CI 실패 수 (중복 skip 포함하여 ci-failure-analyzer가 호출되는 항목)
+- `SUCCESS` = Step 5b에서 GitHub issue 생성에 성공한 항목 수 (ledger task 기록은 best-effort observer라 별도 카운트 불필요)
+- `FAILED` = issue 생성 시도가 비-zero exit으로 실패한 항목 수
+- `FALSE_POSITIVE` = Step 3 fingerprint 중복 또는 Step 2.7에서 머지/오래된 PR로 skip된 항목 수
+
+```bash
+autopilot stats update \
+  --command ci-watch \
+  --processed ${PROCESSED} \
+  --success ${SUCCESS} \
+  --failed ${FAILED} \
+  --false-positive ${FALSE_POSITIVE}
+
+autopilot stats show --command ci-watch
+```
+
+> CLI는 `processed=0`이면 `idle_cycles`를, `processed>0`이면 `agent_calls`를 자동 누적합니다.
+> 통계는 `/tmp/autopilot-{repo}/state/session-stats.json`에 누적되며, 세션 시작 시(autopilot.md Step 1.7c) `autopilot stats init`으로 초기화됩니다.
+
 ## 주의사항
 
 - issue-label 스킬의 라벨 필수 규칙과 fingerprint 규칙을 반드시 따른다
