@@ -32,10 +32,10 @@ allowed-tools: ["Bash", "Read", "Agent"]
 | 구현 / 커밋 | issue-implementer 에이전트 |
 | draft → feature 승격 + PR open | branch-promoter 에이전트 |
 | PR 머지 | merge-prs (pr-merger) |
-| Wip → Done | pr-merger의 ledger close-the-loop (`task complete --pr`) |
+| Wip → Done | merge-prs의 ledger close-the-loop (Step 4 fast-path inline + Step 5 pr-merger, `task complete --pr`) |
 | Wip → Ready 또는 Escalated (실패) | **work-ledger (이 커맨드)** — `task fail` |
 
-PR 머지 시 Wip→Done 전환은 **항상 pr-merger가** 수행합니다. 이 커맨드는 PR 생성에 성공하면 task를 Wip 상태로 두고, pr-merger가 close-the-loop을 닫을 때까지 기다립니다.
+PR 머지 시 Wip→Done 전환은 **merge-prs 가** 수행합니다 — Step 4 (all-green fast-path) 또는 Step 5 (pr-merger 경로) 어느 쪽이든 동일한 inline close-the-loop 로직이 호출됩니다. 이 커맨드는 PR 생성에 성공하면 task를 Wip 상태로 두고, merge-prs 가 close-the-loop을 닫을 때까지 기다립니다.
 
 ## 작업 프로세스
 

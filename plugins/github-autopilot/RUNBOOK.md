@@ -55,7 +55,7 @@ ledger-integration 6개 PR이 머지된 이후에도 기존 7개 watcher와 setu
 | 4 | `/github-autopilot:ci-watch` | **Step 5a/5c 추가** (PR #664) — `ci-backlog` epic 부트스트랩 + per-failure ledger task 쓰기 (observer) | 기존 CI 분석 + issue 생성 그대로 |
 | 5 | `/github-autopilot:qa-boost` | **Step 5.5 추가** (PR #665) — `qa-backlog` epic 부트스트랩 + per-finding ledger task 쓰기 (observer) | 기존 테스트 갭 분석 + issue 생성 그대로 |
 | 6 | `/github-autopilot:build-issues` | 없음 | 기존 ready 이슈 → draft → PR 흐름 그대로 |
-| 7 | `/github-autopilot:merge-prs` | **간접 영향** — Step 5의 pr-merger 에이전트가 머지 후 ledger close-the-loop 호출 (PR #666). Step 4 (all-green fast path)는 변경 없음 | all-green PR은 기존 squash merge. 문제 PR은 pr-merger가 처리 후 ledger 닫기 시도 |
+| 7 | `/github-autopilot:merge-prs` | **Step 4 + Step 5 모두 ledger close-the-loop 호출** — Step 5 pr-merger 에이전트 (PR #666) + Step 4 all-green fast-path inline (B.1 follow-up 해소) | all-green PR과 문제 PR 모두 머지 직후 ledger close 시도 (best-effort) |
 | 8 | `/github-autopilot:analyze-issue` | 없음 | 기존 라벨 부여 흐름 그대로 |
 | 9 | `/github-autopilot:ci-fix` | 없음 | 기존 tick 단위 CI 수정 그대로 |
 | 10 | `/github-autopilot:test-watch <suite>` | 없음 | 기존 테스트 스위트 실행 그대로 |
@@ -65,7 +65,7 @@ ledger-integration 6개 PR이 머지된 이후에도 기존 7개 watcher와 setu
 
 ### B.1 알려진 갭 (회귀 아님, follow-up)
 
-- **`merge-prs.md` Step 4 fast-path는 ledger close-the-loop을 호출하지 않습니다**. all-green PR을 `gh pr merge` 로 직접 머지하므로, 해당 PR을 소유한 ledger task 는 Wip로 남게 됩니다. PR #666의 follow-up 항목 — Step 4도 pr-merger 경유로 통일하거나 inline ledger close 호출을 추가해야 함.
+- ~~`merge-prs.md` Step 4 fast-path는 ledger close-the-loop을 호출하지 않습니다~~ — **해소됨**. fast-path도 pr-merger와 동일한 inline `find-by-pr` → `task complete --pr` 호출을 수행합니다 (best-effort, set -e safe). E.5 절도 함께 무효화됩니다.
 - `branch-promoter` 가 `issue_number` 누락 시 PR body에 `Closes #N` 을 어떻게 처리하는지 명시되지 않았습니다 (PR #674 follow-up #1).
 - `autopilot stats update --command work-ledger` 의 허용 여부가 미확인 (PR #674 follow-up #2).
 
@@ -429,17 +429,17 @@ gh issue list --search "$FP" --label "autopilot:ready"
 
 ledger 만 있고 issue 가 없으면 다음 writer cycle 에서 동일 fingerprint 로 새 issue 가 생성되며, ledger task add 는 duplicate id 로 흡수됩니다 (안전).
 
-### E.5 `merge-prs` Step 4 fast-path 미지원
+### E.5 `merge-prs` Step 4 fast-path (해소됨)
 
-all-green PR 은 `merge-prs` Step 4 에서 직접 `gh pr merge` 되므로 ledger close-the-loop 이 호출되지 않습니다 (B.1 follow-up). 임시 우회:
+이전에는 all-green PR 이 Step 4 fast-path 에서 직접 `gh pr merge` 되어 ledger close-the-loop 이 호출되지 않는 갭이 있었습니다. 현재 fast-path 도 인라인으로 `find-by-pr` → `task complete --pr` 를 호출하므로 별도 우회가 필요하지 않습니다.
+
+ledger 호출이 어떤 이유로든 실패해도 fast-path 머지 결과는 변하지 않습니다. 그래도 task 가 Wip 으로 남아 있다면 수동 복구:
 
 ```bash
 # 머지된 PR 번호로 수동 close
 $BIN task find-by-pr <PR_NUMBER> --json | jq -r '.id' \
   | xargs -I{} $BIN task complete {} --pr <PR_NUMBER>
 ```
-
-근본 해결은 `merge-prs.md` Step 4 도 pr-merger 경유로 통일하거나 inline ledger 호출을 추가하는 follow-up PR 입니다.
 
 ---
 
