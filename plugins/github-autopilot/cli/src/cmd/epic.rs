@@ -49,6 +49,11 @@ pub struct CreateArgs {
     /// Defaults to `epic/<NAME>` when omitted.
     #[arg(long)]
     pub branch: Option<String>,
+    /// Tolerate an existing epic with the same name + spec path (exit 0
+    /// instead of 1). A name collision with a *different* spec path is still
+    /// an error.
+    #[arg(long)]
+    pub idempotent: bool,
 }
 
 #[derive(Args)]
@@ -129,6 +134,21 @@ impl<'a> EpicService<'a> {
         branch: Option<&str>,
         out: &mut dyn Write,
     ) -> Result<i32> {
+        self.create_with_options(name, spec_path, branch, false, out)
+    }
+
+    /// Like [`Self::create`] but tolerates a pre-existing epic when
+    /// `idempotent` is true *and* its `spec_path` matches the requested one.
+    /// A name collision with a different spec path is still reported as an
+    /// error (exit 1) — semantic mismatch must not be silently accepted.
+    pub fn create_with_options(
+        &self,
+        name: &str,
+        spec_path: &Path,
+        branch: Option<&str>,
+        idempotent: bool,
+        out: &mut dyn Write,
+    ) -> Result<i32> {
         let now = self.clock.now();
         let epic = Epic {
             name: name.to_string(),
@@ -151,8 +171,32 @@ impl<'a> EpicService<'a> {
                 Ok(0)
             }
             Err(TaskStoreError::Domain(DomainError::EpicAlreadyExists(n, st))) => {
-                writeln!(out, "epic '{n}' already exists ({})", st.as_str())?;
-                Ok(1)
+                let existing = if idempotent {
+                    self.store
+                        .get_epic(name)
+                        .with_context(|| format!("loading existing epic '{name}'"))?
+                } else {
+                    None
+                };
+                match existing {
+                    Some(e) if e.spec_path == spec_path => {
+                        writeln!(out, "epic '{n}' already exists (idempotent)")?;
+                        Ok(0)
+                    }
+                    Some(e) => {
+                        writeln!(
+                            out,
+                            "epic '{n}' already exists with different spec_path: {} (requested {})",
+                            e.spec_path.display(),
+                            spec_path.display()
+                        )?;
+                        Ok(1)
+                    }
+                    None => {
+                        writeln!(out, "epic '{n}' already exists ({})", st.as_str())?;
+                        Ok(1)
+                    }
+                }
             }
             Err(e) => Err(e).with_context(|| format!("creating epic '{name}'")),
         }
