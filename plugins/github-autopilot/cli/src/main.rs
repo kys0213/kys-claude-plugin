@@ -115,13 +115,12 @@ fn main() {
             let client = github::real();
             let git_client = git::real();
             let fs_client = fs::real();
-            let svc = cmd::watch::WatchService::new(client, git_client, fs_client);
-            svc.run(
-                &args.branch,
-                &args.branch_filter,
-                &args.label_prefix,
-                args.poll_sec,
-            )
+            let mut svc = cmd::watch::WatchService::new(client, git_client, fs_client);
+            if args.ledger_events {
+                let store = std::sync::Arc::new(open_store(&config));
+                svc = svc.with_store(store);
+            }
+            svc.run(&args)
         }
         Commands::Worktree { command } => {
             let git_client = git::real();
