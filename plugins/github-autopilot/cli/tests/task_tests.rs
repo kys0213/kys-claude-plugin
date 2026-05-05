@@ -455,6 +455,81 @@ fn release_decrements_attempts_and_reverts_to_ready() {
     assert_eq!(t.attempts, 0);
 }
 
+// ---------- release-stale ----------
+
+/// CLI surface: claim a task at t0, advance the FixedClock past the cutoff,
+/// then `release-stale --before 1m` (60s) must recover it. Validates the
+/// human-readable count output and the JSON-array variant.
+#[test]
+fn release_stale_recovers_after_clock_advances_past_cutoff() {
+    let (store, clock) = fixture();
+    let svc = TaskService::new(store.as_ref(), &clock);
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
+    let _ = capture(|w| svc.claim("e", false, w)); // attempts=1, status=wip, updated_at=t0
+
+    // Advance the clock 5 minutes past the claim — the task is now "stale"
+    // relative to a 1-minute cutoff.
+    clock.advance(chrono::Duration::minutes(5));
+
+    let (code, out) = capture(|w| svc.release_stale(60, false, w));
+    assert_eq!(code, 0);
+    assert!(out.contains("released 1 stale tasks"), "stdout: {out}");
+    assert!(out.contains("aaaaaaaaaaaa"), "stdout: {out}");
+
+    let t = store
+        .get_task(&TaskId::from_raw("aaaaaaaaaaaa"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(t.status, TaskStatus::Ready);
+    assert_eq!(t.attempts, 0);
+
+    let evs = store
+        .list_events(EventFilter {
+            kinds: vec![EventKind::TaskReleasedStale],
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(evs.len(), 1);
+}
+
+#[test]
+fn release_stale_with_no_stale_tasks_exits_0_and_reports_zero() {
+    let (store, clock) = fixture();
+    let svc = TaskService::new(store.as_ref(), &clock);
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
+    let _ = capture(|w| svc.claim("e", false, w));
+    // Clock has NOT advanced — the claim is fresh, cutoff trims nothing.
+    let (code, out) = capture(|w| svc.release_stale(3_600, false, w));
+    assert_eq!(code, 0);
+    assert!(out.contains("released 0 stale tasks"), "stdout: {out}");
+}
+
+#[test]
+fn release_stale_json_emits_array_of_recovered_ids() {
+    let (store, clock) = fixture();
+    let svc = TaskService::new(store.as_ref(), &clock);
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
+    let _ = capture(|w| svc.claim("e", false, w));
+    clock.advance(chrono::Duration::hours(2));
+    let (code, out) = capture(|w| svc.release_stale(3_600, true, w));
+    assert_eq!(code, 0);
+    let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(v, serde_json::json!(["aaaaaaaaaaaa"]));
+}
+
+#[test]
+fn parse_duration_seconds_supports_compound_units() {
+    use autopilot::cmd::task::parse_duration_seconds;
+    assert_eq!(parse_duration_seconds("30s").unwrap(), 30);
+    assert_eq!(parse_duration_seconds("5m").unwrap(), 300);
+    assert_eq!(parse_duration_seconds("1h").unwrap(), 3_600);
+    assert_eq!(parse_duration_seconds("2h30m").unwrap(), 9_000);
+    assert!(parse_duration_seconds("").is_err());
+    assert!(parse_duration_seconds("1d").is_err());
+    assert!(parse_duration_seconds("0s").is_err());
+    assert!(parse_duration_seconds("90").is_err()); // trailing digits, no unit
+}
+
 // ---------- find-by-pr ----------
 
 #[test]

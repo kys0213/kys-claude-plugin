@@ -201,6 +201,17 @@ fn main() {
                 }
                 TaskCommands::Claim { epic, json } => svc.claim(&epic, json, &mut out),
                 TaskCommands::Release { task_id } => svc.release(&task_id, &mut out),
+                TaskCommands::ReleaseStale {
+                    before,
+                    before_seconds,
+                    json,
+                } => match resolve_before_seconds(before.as_deref(), before_seconds) {
+                    Ok(secs) => svc.release_stale(secs, json, &mut out),
+                    Err(msg) => {
+                        eprintln!("{msg}");
+                        std::process::exit(2);
+                    }
+                },
                 TaskCommands::Complete { task_id, pr } => svc.complete(&task_id, pr, &mut out),
                 TaskCommands::Fail { task_id } => svc.fail(&task_id, &mut out),
                 TaskCommands::Escalate { task_id, issue } => {
@@ -307,6 +318,23 @@ fn load_config(explicit: Option<&Path>) -> anyhow::Result<Config> {
     let default_path = PathBuf::from("autopilot.toml");
     let path = explicit.unwrap_or(default_path.as_path());
     Config::load(path)
+}
+
+/// Resolves `--before <duration>` / `--before-seconds <N>` into a positive
+/// seconds threshold for `task release-stale`. Clap already enforces mutual
+/// exclusion; this wrapper picks whichever was provided and forwards the
+/// duration parser's error message verbatim. Returns Err with a
+/// human-readable message when both are missing or parsing fails.
+fn resolve_before_seconds(
+    before: Option<&str>,
+    before_seconds: Option<i64>,
+) -> std::result::Result<i64, String> {
+    match (before, before_seconds) {
+        (Some(s), _) => cmd::task::parse_duration_seconds(s),
+        (None, Some(n)) if n > 0 => Ok(n),
+        (None, Some(n)) => Err(format!("--before-seconds must be positive: got {n}")),
+        (None, None) => Err("must supply --before <duration> or --before-seconds <N>".to_string()),
+    }
 }
 
 /// Opens the SQLite task store at the configured path, exiting with code 2

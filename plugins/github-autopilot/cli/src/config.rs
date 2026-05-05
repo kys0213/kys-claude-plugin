@@ -30,6 +30,12 @@ pub struct StorageConfig {
 #[serde(default)]
 pub struct EpicConfig {
     pub default_max_attempts: u32,
+    /// Cutoff (in seconds) used by `task release-stale` to identify Wip
+    /// tasks whose claim went stale. The cron supervisor passes this when
+    /// no `--before`/`--before-seconds` is supplied. Defaults to 1 hour —
+    /// long enough to absorb slow CI/build-times, short enough that a real
+    /// orphan doesn't sit unclaimed for an entire day.
+    pub stale_wip_threshold_seconds: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -54,6 +60,7 @@ impl Default for EpicConfig {
     fn default() -> Self {
         Self {
             default_max_attempts: 3,
+            stale_wip_threshold_seconds: 3_600,
         }
     }
 }

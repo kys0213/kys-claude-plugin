@@ -897,6 +897,59 @@ impl TaskRepo for SqliteTaskStore {
         Ok(())
     }
 
+    fn release_stale(&self, before: DateTime<Utc>, now: DateTime<Utc>) -> Result<Vec<TaskId>> {
+        let mut conn = self.conn.lock().expect("poisoned");
+        let tx = conn.transaction().map_err(backend)?;
+
+        let stale: Vec<(String, String, u32)> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT id, epic_name, attempts FROM tasks
+                       WHERE status='wip' AND updated_at < ?
+                       ORDER BY updated_at, id",
+                )
+                .map_err(backend)?;
+            let rows = stmt
+                .query_map(params![before], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)? as u32,
+                    ))
+                })
+                .map_err(backend)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(backend)?
+        };
+
+        let mut recovered = Vec::with_capacity(stale.len());
+        for (id, epic_name, prev_attempts) in stale {
+            tx.execute(
+                "UPDATE tasks
+                    SET status='ready',
+                        attempts = MAX(attempts - 1, 0),
+                        updated_at=?
+                  WHERE id=? AND status='wip'",
+                params![now, id],
+            )
+            .map_err(backend)?;
+            let task_id = TaskId::from_raw(&id);
+            SqliteTaskStore::append_event_with(
+                &tx,
+                EventKind::TaskReleasedStale,
+                Some(&epic_name),
+                Some(&task_id),
+                &serde_json::json!({"prev_attempts": prev_attempts}),
+                now,
+            )
+            .map_err(backend)?;
+            recovered.push(task_id);
+        }
+
+        tx.commit().map_err(backend)?;
+        Ok(recovered)
+    }
+
     fn force_status(
         &self,
         id: &TaskId,

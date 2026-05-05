@@ -32,6 +32,11 @@ pub enum EventKind {
     EscalationResolved,
     WatchDuplicate,
     TaskForceStatus,
+    /// Bulk recovery of a Wip task whose claim went stale (worker crashed,
+    /// worktree destroyed, ctrl-C). Same effect as `release_claim` (Wip →
+    /// Ready, attempts decremented), but emitted explicitly so the audit
+    /// trail can distinguish "operator released" from "system reaped".
+    TaskReleasedStale,
 }
 
 impl EventKind {
@@ -54,6 +59,7 @@ impl EventKind {
             EventKind::EscalationResolved => "escalation_resolved",
             EventKind::WatchDuplicate => "watch_duplicate",
             EventKind::TaskForceStatus => "task_force_status",
+            EventKind::TaskReleasedStale => "task_released_stale",
         }
     }
 
@@ -76,6 +82,7 @@ impl EventKind {
             "escalation_resolved" => EventKind::EscalationResolved,
             "watch_duplicate" => EventKind::WatchDuplicate,
             "task_force_status" => EventKind::TaskForceStatus,
+            "task_released_stale" => EventKind::TaskReleasedStale,
             _ => return None,
         })
     }
