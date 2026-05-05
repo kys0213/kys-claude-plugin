@@ -9,7 +9,8 @@
     "./commands/develop.md",
     "./commands/implement.md",
     "./commands/multi-review.md",
-    "./commands/review-to-issues.md"
+    "./commands/review-to-issues.md",
+    "./commands/retro.md"
   ],
   "description": "통합 개발 워크플로우: 설계 → 리뷰 → 구현 → 머지를 하나의 파이프라인으로",
   "name": "develop-workflow",
