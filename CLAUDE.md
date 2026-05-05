@@ -15,8 +15,6 @@
 ✅ 요청 → 요구사항 정리 → 사이드이펙트 조사 → 설계 → 승인 → 구현
 ```
 
-> `/develop` 워크플로우를 사용하면 이 원칙이 Phase 1 (DESIGN) → Phase 2 (REVIEW) → Phase 3 (IMPLEMENT) 순서로 자동 적용됩니다.
-
 ## 책임 경계 (CLI vs Skill/Agent)
 
 도구와 지능을 분리합니다. 경계가 흐려지면 사용자가 생각하는 책임 범위와 작업 에이전트가 생각하는 책임 범위가 어긋나서 같은 코드를 두고 다른 기대치로 일하게 됩니다.
@@ -79,13 +77,12 @@ lint, format, test가 실패하면 변경된 부분이 아니더라도 반드시
 
 ```
 ❌ 내가 변경한 파일이 아니니까 무시
-✅ pre-push hook 또는 CI에서 실패하면 해당 오류를 모두 수정한 뒤 push
+✅ CI에서 실패하면 해당 오류를 모두 수정한 뒤 push
 ```
 
 - `cargo fmt --check` 실패 → `cargo fmt` 실행하여 수정
 - `cargo clippy -- -D warnings` 실패 → clippy 경고를 코드 수정 또는 `#[allow]`로 해결
 - `cargo test` 실패 → 테스트가 통과하도록 수정
-- pre-push hook은 **모든** Rust 프로젝트를 검증합니다 (변경 여부 무관)
 
 ## PR 타이틀 / 커밋 메시지 규칙
 
