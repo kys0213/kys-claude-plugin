@@ -775,9 +775,12 @@ fn fail_from_ready_returns_requires_status_error() {
     let mut buf: Vec<u8> = Vec::new();
     let err = svc.fail("aaaaaaaaaaaa", &mut buf).unwrap_err();
     let msg = format!("{err:#}");
+    // C3: RequiresStatus message uses lowercase canonical statuses and an
+    // actionable suffix. Pin both halves so a future copy edit doesn't
+    // silently re-introduce the cryptic `Wip`/`Ready` debug form.
     assert!(
-        msg.contains("requires status Wip") && msg.contains("was Ready"),
-        "expected RequiresStatus(_, Wip, Ready), got: {msg}"
+        msg.contains("requires status 'wip'") && msg.contains("was 'ready'"),
+        "expected RequiresStatus(_, wip, ready), got: {msg}"
     );
 }
 
@@ -790,8 +793,8 @@ fn complete_from_ready_returns_requires_status_error() {
     let err = svc.complete("aaaaaaaaaaaa", 99, &mut buf).unwrap_err();
     let msg = format!("{err:#}");
     assert!(
-        msg.contains("requires status Wip") && msg.contains("was Ready"),
-        "expected RequiresStatus(_, Wip, Ready), got: {msg}"
+        msg.contains("requires status 'wip'") && msg.contains("was 'ready'"),
+        "expected RequiresStatus(_, wip, ready), got: {msg}"
     );
 }
 

@@ -21,9 +21,51 @@ impl TaskId {
         Self(raw.into())
     }
 
+    /// Validates that `raw` is shaped like a deterministic task id —
+    /// 12 lowercase hex characters — and returns a `TaskId`. Returns
+    /// `Err(TaskIdParseError)` with an actionable message otherwise.
+    ///
+    /// Use this on every CLI input boundary that mutates state (e.g.,
+    /// `task add <task_id>`, `task add-batch`) so a typo can't silently
+    /// insert a row whose id will never match the deterministic form.
+    /// Read-only paths (`task show`, `task release`, ...) may keep
+    /// using [`Self::from_raw`] — a missing-id lookup already surfaces
+    /// the typo without corrupting state.
+    pub fn parse(raw: &str) -> Result<Self, TaskIdParseError> {
+        if raw.len() != TASK_ID_HEX_LEN {
+            return Err(TaskIdParseError::InvalidLength {
+                got: raw.to_string(),
+                len: raw.len(),
+            });
+        }
+        if !raw
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, 'a'..='f'))
+        {
+            return Err(TaskIdParseError::InvalidChars {
+                got: raw.to_string(),
+            });
+        }
+        Ok(Self(raw.to_string()))
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// Length of a deterministic task id (lowercase hex prefix of SHA-256).
+pub const TASK_ID_HEX_LEN: usize = 12;
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum TaskIdParseError {
+    #[error(
+        "invalid task id '{got}': expected 12 lowercase hex characters (e.g. 'a1b2c3d4e5f6'), got {len} characters"
+    )]
+    InvalidLength { got: String, len: usize },
+
+    #[error("invalid task id '{got}': must contain only lowercase hex characters [0-9a-f]")]
+    InvalidChars { got: String },
 }
 
 impl std::fmt::Display for TaskId {
@@ -117,5 +159,48 @@ mod tests {
         assert_eq!(slug("hello   world!!!"), "hello-world");
         assert_eq!(slug("---abc---"), "abc");
         assert_eq!(slug("foo/bar.baz"), "foo-bar-baz");
+    }
+
+    #[test]
+    fn parse_accepts_canonical_form() {
+        let id = TaskId::parse("a1b2c3d4e5f6").unwrap();
+        assert_eq!(id.as_str(), "a1b2c3d4e5f6");
+    }
+
+    #[test]
+    fn parse_rejects_wrong_length() {
+        let err = TaskId::parse("abc").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("12 lowercase hex"), "msg: {msg}");
+        assert!(msg.contains("got 3 characters"), "msg: {msg}");
+    }
+
+    #[test]
+    fn parse_rejects_uppercase() {
+        let err = TaskId::parse("A1B2C3D4E5F6").unwrap_err();
+        assert!(err.to_string().contains("lowercase hex"));
+    }
+
+    #[test]
+    fn parse_rejects_non_hex_chars() {
+        let err = TaskId::parse("g1b2c3d4e5f6").unwrap_err();
+        assert!(err.to_string().contains("lowercase hex"));
+    }
+
+    #[test]
+    fn parse_rejects_typo() {
+        // The kind of input the task description warned about: an 11-char
+        // id (typo from copy/paste) should be rejected with an actionable
+        // length message rather than silently accepted by the store.
+        let err = TaskId::parse("a1b2c3d4e5f").unwrap_err();
+        assert!(err.to_string().contains("got 11 characters"));
+    }
+
+    #[test]
+    fn parse_accepts_deterministic_output() {
+        // The deterministic generator's output must round-trip through parse —
+        // that's the contract that makes parse() a safe gate on user input.
+        let id = TaskId::new_deterministic("e", "## section", "requirement");
+        TaskId::parse(id.as_str()).expect("deterministic id must parse");
     }
 }
