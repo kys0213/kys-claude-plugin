@@ -44,6 +44,7 @@ kys-claude-plugin/
 - `/develop` - 전체 워크플로우 (설계 → 리뷰 → 구현)
 - `/implement` - 구현 단계
 - `/multi-review` - 멀티 LLM 코드 리뷰
+- `/retro` - 세션 회고: 변경 범위 수집 → 분류 → 분석 위임 → 검증 gap 도출
 
 **사용:**
 ```bash
