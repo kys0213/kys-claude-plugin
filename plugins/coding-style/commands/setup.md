@@ -63,8 +63,11 @@ AskUserQuestion으로 설치 내용을 미리 보여주고 확인받습니다:
 
 ```
 ~/.claude/CLAUDE.md에 다음 코딩 원칙을 {추가|업데이트}합니다:
-  - 설계 최우선 (Design First)
-  - SOLID / TDD
+  - 설계 최우선 (Design First) + EnterPlanMode 안내
+  - SOLID (refactoring 패턴 reference)
+  - Decomposition / Fail Fast
+  - Testing (Review-Driven / Black-box TDD / Testability First / Mock / E2E)
+  - Code Comments / Refactoring Findings / Verification Before Action
   - 코드 품질 게이트
   - /simplify 마무리 검토
 
@@ -129,8 +132,11 @@ coding-style 설치 완료!
   Stop hook : ~/.claude/settings.json ({installed|already exists})
 
 포함된 원칙:
-  - 설계 최우선 (Design First)
-  - SOLID / TDD
+  - 설계 최우선 (Design First) + EnterPlanMode 안내
+  - SOLID (refactoring 패턴 reference)
+  - Decomposition / Fail Fast
+  - Testing (Review-Driven / Black-box TDD / Testability First / Mock / E2E)
+  - Code Comments / Refactoring Findings / Verification Before Action
   - 코드 품질 게이트
   - /simplify 마무리 검토
 ```
@@ -163,8 +169,11 @@ coding-style 설치 완료!
   Stop hook : ~/.claude/settings.json (installed)
 
 포함된 원칙:
-  - 설계 최우선 (Design First)
-  - SOLID / TDD
+  - 설계 최우선 (Design First) + EnterPlanMode 안내
+  - SOLID (refactoring 패턴 reference)
+  - Decomposition / Fail Fast
+  - Testing (Review-Driven / Black-box TDD / Testability First / Mock / E2E)
+  - Code Comments / Refactoring Findings / Verification Before Action
   - 코드 품질 게이트
   - /simplify 마무리 검토
 ```
