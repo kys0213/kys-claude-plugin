@@ -2,7 +2,8 @@
   "agents": [
     "./agents/file-pair-observer.md",
     "./agents/gap-aggregator.md",
-    "./agents/gap-auditor.md"
+    "./agents/gap-auditor.md",
+    "./agents/spec-annotator.md"
   ],
   "author": {
     "name": "kys0213"
@@ -11,7 +12,8 @@
     "./commands/gap-detect.md",
     "./commands/spec-review.md",
     "./commands/design.md",
-    "./commands/design-detail.md"
+    "./commands/design-detail.md",
+    "./commands/annotate-spec.md"
   ],
   "description": "스펙 설계, 검증, 갭 분석을 위한 통합 툴킷",
   "name": "spec-kit",
