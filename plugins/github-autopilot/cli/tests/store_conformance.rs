@@ -342,9 +342,16 @@ fn body_release_claim_rejects_non_wip(store: Arc<dyn TaskStore>) {
     let err = store
         .release_claim(&TaskId::from_raw("A"), t0())
         .unwrap_err();
+    // C3 reworded RequiresStatus to lowercase canonical statuses with
+    // an actionable suffix (`task claim ...` / `task set-status ...`).
+    let msg = format!("{err}");
     assert!(
-        format!("{err}").contains("requires status Wip"),
-        "expected RequiresStatus(_, Wip, _), got: {err}"
+        msg.contains("requires status 'wip'"),
+        "expected RequiresStatus(_, Wip, _), got: {msg}"
+    );
+    assert!(
+        msg.contains("task claim") || msg.contains("set-status"),
+        "expected actionable hint in: {msg}"
     );
 }
 
@@ -418,7 +425,8 @@ fn body_complete_rejects_when_status_not_wip(store: Arc<dyn TaskStore>) {
     let err = store
         .complete_task_and_unblock(&TaskId::from_raw("A"), 1, t0())
         .unwrap_err();
-    assert!(format!("{err}").contains("requires status Wip"));
+    // Match the C3 lowercase canonical-status message.
+    assert!(format!("{err}").contains("requires status 'wip'"));
 }
 
 fn body_failure_below_max_returns_to_ready(store: Arc<dyn TaskStore>) {
