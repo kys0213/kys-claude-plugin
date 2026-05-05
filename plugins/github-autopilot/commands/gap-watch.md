@@ -199,6 +199,29 @@ gap-detector의 Phase 4 결과에서 ❌ Unspecified 항목을 처리합니다.
 
 > 운영자가 결과를 직접 확인하려면: `autopilot epic status gap-backlog --json` 또는 `autopilot task list --epic gap-backlog`. GitHub issue 검색으로는 더 이상 보이지 않습니다.
 
+#### 6b: 세션 누적 통계
+
+매 cycle 종료 시 CLI로 세션 통계를 업데이트하고 출력합니다:
+
+- `PROCESSED` = ledger에 등록된 gap task 수 (정방향 + 역방향 `created` 합)
+- `SUCCESS` = 동일 (ledger 쓰기 성공이 곧 success)
+- `FAILED` = `0` (gap-watch는 ledger 쓰기 외에 실패 분류가 없음)
+- `FALSE_POSITIVE` = spec 미존재 등으로 필터링된 WARNING 항목 수
+
+```bash
+autopilot stats update \
+  --command gap-watch \
+  --processed ${PROCESSED} \
+  --success ${SUCCESS} \
+  --failed ${FAILED} \
+  --false-positive ${FALSE_POSITIVE}
+
+autopilot stats show --command gap-watch
+```
+
+> CLI는 `processed=0`이면 `idle_cycles`를, `processed>0`이면 `agent_calls`를 자동 누적합니다.
+> 통계는 `/tmp/autopilot-{repo}/state/session-stats.json`에 누적되며, 세션 시작 시(autopilot.md Step 1.7c) `autopilot stats init`으로 초기화됩니다.
+
 ## 주의사항
 
 - 토큰 최적화: MainAgent는 스펙/코드 파일을 직접 읽지 않음. 파일 경로만 수집하고 gap-detector에 위임

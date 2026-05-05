@@ -180,6 +180,29 @@ EOF
 
 > task id는 fingerprint의 sha256 첫 12-hex-char입니다. 동일 fingerprint 재실행 시 duplicate로 흡수되며 무해합니다.
 
+### Step 7b: 세션 누적 통계
+
+매 cycle 종료 시 CLI로 세션 통계를 업데이트하고 출력합니다:
+
+- `PROCESSED` = ledger에 기록된 QA task 수 (insert + duplicate 합 — Step 6 진입 항목 수)
+- `SUCCESS` = 신규로 inserted된 task 수 (`duplicate of ...` 흡수는 제외)
+- `FAILED` = `task add`가 비-zero exit (id 충돌 등)으로 WARN된 항목 수
+- `FALSE_POSITIVE` = `0` (qa-boost는 false-positive 분류 단계가 없음)
+
+```bash
+autopilot stats update \
+  --command qa-boost \
+  --processed ${PROCESSED} \
+  --success ${SUCCESS} \
+  --failed ${FAILED} \
+  --false-positive ${FALSE_POSITIVE}
+
+autopilot stats show --command qa-boost
+```
+
+> CLI는 `processed=0`이면 `idle_cycles`를, `processed>0`이면 `agent_calls`를 자동 누적합니다.
+> 통계는 `/tmp/autopilot-{repo}/state/session-stats.json`에 누적되며, 세션 시작 시(autopilot.md Step 1.7c) `autopilot stats init`으로 초기화됩니다.
+
 ## 주의사항
 
 - 테스트를 직접 구현하지 않음 — ledger task로 기록하여 work-ledger reader가 처리
