@@ -31,42 +31,39 @@ allowed-tools:
 
 ### Step 1: spec 디렉토리 감지
 
-후보 경로를 `Glob`으로 탐색합니다:
+#### 1-A. 기존 룰 파일 감지 (early-exit 체크)
 
-```
-Glob: spec/
-Glob: specs/
-Glob: docs/spec/
-Glob: .spec/
-```
+`Glob: .claude/rules/spec-*.md`로 이미 존재하는 룰 파일 목록을 확보합니다.
 
-가장 먼저 발견된 디렉토리를 `spec_root`로 채택합니다. 여러 개가 발견되면 Step 2에서 사용자에게 선택을 요청합니다.
+- `--gap-only` 옵션이고 `concern/design/flow` 3개가 모두 존재하면 **여기서 즉시 종료**합니다 (이후 단계 스킵).
+- 그 외에는 결과를 Step 3 충돌 해결 입력으로 전달합니다.
 
-발견된 `spec_root` 내부에서 다음을 확인합니다:
+#### 1-B. 후보 경로 + 내부 구조 + 프로젝트명 (병렬 수집)
 
-| 후보 | 매칭 카테고리 |
+다음 호출을 **하나의 메시지에 묶어 병렬로 실행**합니다 (의존 관계 없음):
+
+| 호출 | 목적 |
 |---|---|
-| `{spec_root}/concerns/**/*.md` | **concern** |
-| `{spec_root}/README.md` 또는 `{spec_root}/DESIGN.md` | **design** |
-| `{spec_root}/flows/**/*.md` | **flow** |
+| `Glob: {spec,specs,docs/spec,.spec}/{README,DESIGN}.md` | spec 루트 후보 + design 카테고리 |
+| `Glob: {spec,specs,docs/spec,.spec}/concerns/**/*.md` | concern 카테고리 |
+| `Glob: {spec,specs,docs/spec,.spec}/flows/**/*.md` | flow 카테고리 |
+| `Read: package.json` | 프로젝트명 후보 1 |
+| `Read: go.mod` | 프로젝트명 후보 2 |
+| `Read: Cargo.toml` | 프로젝트명 후보 3 |
+| `Read: pyproject.toml` | 프로젝트명 후보 4 |
 
-발견되지 않은 카테고리는 후속 단계에서 기본 비활성으로 표시됩니다 (사용자가 명시 추가 가능).
+존재하지 않는 파일에 대한 `Read` 에러는 무시합니다.
 
-#### 프로젝트명 추출
+#### 1-C. 결과 합성
 
-다음 우선순위로 프로젝트명을 추출합니다:
-
-1. `package.json`의 `name`
-2. `go.mod`의 `module` 마지막 segment
-3. `Cargo.toml`의 `[package].name`
-4. `pyproject.toml`의 `[project].name` 또는 `[tool.poetry].name`
-5. 위가 없으면 git remote 또는 디렉토리명
-
-추출 실패 시 placeholder `{project}`로 둔 채 Step 2에서 사용자에게 직접 묻습니다.
-
-#### 기존 룰 파일 감지
-
-`Glob: .claude/rules/spec-*.md`를 실행하여 이미 존재하는 룰 파일 목록을 확보합니다. `--gap-only` 옵션이면 이 목록에 포함된 카테고리는 후속 단계에서 자동 skip됩니다.
+- **`spec_root`**: Glob 결과의 첫 번째 경로 prefix(`spec` / `specs` / `docs/spec` / `.spec`). 여러 prefix가 동시에 잡히면 Step 2에서 사용자에게 enumerated 선택지로 제시.
+- **카테고리 활성 여부**:
+  - concern: `{spec_root}/concerns/**/*.md` 매칭 ≥ 1
+  - design: `{spec_root}/README.md` 또는 `{spec_root}/DESIGN.md` 매칭
+  - flow: `{spec_root}/flows/**/*.md` 매칭 ≥ 1
+  - 미발견 카테고리는 비활성 (사용자가 Step 2에서 강제 활성화 가능)
+- **`{project}`** (단일 placeholder, `{project_name}` 사용 안 함): 우선순위 — `package.json#name` > `go.mod#module` 마지막 segment > `Cargo.toml#[package].name` > `pyproject.toml#[project].name` 또는 `[tool.poetry].name` > git remote / 디렉토리명. 모두 실패 시 placeholder 유지하고 Step 2에서 사용자 입력 요청.
+- **`{concerns_path}`** = `{spec_root}/concerns`, **`{flows_path}`** = `{spec_root}/flows` (Step 4 frontmatter `paths:` 치환에 사용).
 
 ### Step 2: 감지 결과 확인 (HITL)
 
@@ -74,8 +71,8 @@ Glob: .spec/
 AskUserQuestion: |
   자동 감지 결과:
     - spec 루트: {spec_root}
-    - 프로젝트명: {project_name}
-    - 발견 카테고리: {concern: yes/no, design: yes/no, flow: yes/no}
+    - 프로젝트명: {project}
+    - 발견 카테고리: concern={yes/no}, design={yes/no}, flow={yes/no}
     - 기존 룰 파일: {existing_files}
 
   이대로 진행할까요?
@@ -86,28 +83,41 @@ AskUserQuestion: |
     5. cancel
 ```
 
-후보 경로가 0개이면 `AskUserQuestion`으로 직접 입력을 받거나 종료합니다.
+**spec 루트 후보가 여러 개**일 때(예: `spec/`와 `docs/spec/` 둘 다 존재)는 위 질문 대신 enumerated 선택지로 먼저 단일 루트를 확정합니다:
 
-### Step 3: 룰 파일 구조 제안 (HITL)
+```
+AskUserQuestion: |
+  여러 spec 루트가 감지되었습니다. 사용할 루트를 선택하세요:
+    1. spec/
+    2. docs/spec/
+    ...
+```
+
+**후보 경로가 0개**이면 `AskUserQuestion`으로 사용자에게 spec 루트 직접 입력을 요청하거나 종료합니다.
+
+### Step 3: 룰 파일 구조 제안 + 충돌 해결 (HITL)
 
 활성 카테고리별로 다음 구조를 제안합니다:
 
 | 카테고리 | 파일 | paths frontmatter (예시) |
 |---|---|---|
-| concern | `.claude/rules/spec-concern.md` | `["{spec_root}/concerns/**/*.md"]` |
+| concern | `.claude/rules/spec-concern.md` | `["{concerns_path}/**/*.md"]` |
 | design | `.claude/rules/spec-design.md` | `["{spec_root}/README.md", "{spec_root}/DESIGN.md"]` |
-| flow | `.claude/rules/spec-flow.md` | `["{spec_root}/flows/**/*.md"]` |
+| flow | `.claude/rules/spec-flow.md` | `["{flows_path}/**/*.md"]` |
+
+Step 1-A에서 감지한 기존 룰 파일이 있으면 같은 질문에서 **충돌 해결 옵션을 함께 노출**합니다 (`--gap-only`이면 자동 skip되어 이 질문이 표시되지 않음).
 
 ```
 AskUserQuestion: |
   생성 후보:
-    - [x] .claude/rules/spec-concern.md   (paths: spec/concerns/**/*.md)
-    - [x] .claude/rules/spec-design.md    (paths: spec/README.md, spec/DESIGN.md)
-    - [ ] .claude/rules/spec-flow.md      (감지 안 됨)
+    1. [new]      .claude/rules/spec-concern.md   (paths: spec/concerns/**/*.md)
+    2. [overwrite] .claude/rules/spec-design.md   (기존 파일 존재)
+    3. [skip]     .claude/rules/spec-flow.md      (감지 안 됨)
 
   옵션:
-    - "yes": 체크된 항목 생성
-    - 번호 (예: "1,3"): 선택만 생성
+    - "yes": 체크된 항목 생성 (기존 파일은 overwrite)
+    - 번호 (예: "1,2"): 선택만 생성
+    - 항목별 skip/merge 변경 가능 (예: "2: skip" — 2번을 skip으로 변경)
     - "no": 취소
     - paths 수정 요청 가능
 ```
@@ -116,19 +126,16 @@ AskUserQuestion: |
 
 승인된 카테고리별로 아래 템플릿을 사용해 `.claude/rules/spec-*.md`를 `Write`합니다.
 
-`{project}`, `{spec_root}`, `{concerns_path}`, `{flows_path}`는 Step 1/2에서 결정된 값으로 치환합니다. 결정 안 된 경우 placeholder를 그대로 둡니다 (사용자가 후속 편집).
+치환 변수 (Step 1-C에서 산출됨):
 
-세 파일 모두 상단에 **다이어그램 분담 표**를 공통 인용하여 단독 로드되어도 의미가 통하게 합니다.
+| 변수 | 값 |
+|---|---|
+| `{project}` | 프로젝트명 (`package.json` 등에서 추출, 실패 시 사용자 입력) |
+| `{spec_root}` | 확정된 spec 루트 (`spec`, `docs/spec` 등) |
+| `{concerns_path}` | `{spec_root}/concerns` |
+| `{flows_path}` | `{spec_root}/flows` |
 
-#### 공통 헤더 — 다이어그램 분담 표
-
-스펙 트리 전반에서 시각화 위치를 종류별로 분담합니다.
-
-| 다이어그램 종류 | 위치 | 판단 기준 |
-|---|---|---|
-| 시스템 전체 아키텍처 (블록, 책임 분배) | **design** | 시스템 전체 그림인가 |
-| 단일 컴포넌트 정적 구조 (ERD, 상태 머신, 관계도) | **concern** | 시간축 없는 정적 구조인가 |
-| 시스템 간 시간축 인터랙션 (요청·응답 흐름) | **flow** | 시간축이 있는 시퀀스인가 |
+세 파일은 같은 `## 다이어그램 분담` 섹션을 자체 포함합니다. 단독 로드 시에도 의미가 통하도록 의도된 중복이며, 컬럼 라벨은 모두 `종류 | 위치 | 기준`으로 통일합니다.
 
 #### 템플릿 1 — `spec-concern.md`
 
@@ -332,7 +339,7 @@ scaffold-spec-rules 완료!
 
 감지 결과:
   spec 루트: {spec_root}
-  프로젝트명: {project_name}
+  프로젝트명: {project}
 
 생성된 룰 파일:
   .claude/rules/spec-concern.md   (paths: {concerns_path}/**/*.md)
@@ -359,8 +366,8 @@ scaffold-spec-rules 완료!
 
 **기존 룰 파일 충돌:**
 
-- 사용자에게 덮어쓸지 / skip할지 / merge할지 선택 요청
-- `--gap-only` 옵션은 충돌 시 자동 skip
+- Step 3 HITL에서 항목별 `[overwrite]/[skip]/[merge]` 선택 (기본 overwrite)
+- `--gap-only` 옵션은 충돌 시 자동 skip되어 Step 3에서 표시되지 않음
 
 **`.claude/rules/` 디렉토리 부재:**
 
