@@ -154,6 +154,51 @@ fn show_returns_0_when_no_stats() {
 }
 
 #[test]
+fn update_accepts_work_ledger() {
+    let git = MockGit::new();
+    let fs = MockFs::new();
+    let svc = make_svc(git, fs.clone());
+
+    let code = svc.update("work-ledger", 5, 3, 1, 0).unwrap();
+    assert_eq!(code, 0);
+
+    let written = fs.written_files();
+    let stats: serde_json::Value = serde_json::from_str(&written[0].1).unwrap();
+    let cmd = &stats["commands"]["work-ledger"];
+    assert_eq!(cmd["processed"], 5);
+    assert_eq!(cmd["success"], 3);
+    assert_eq!(cmd["failed"], 1);
+}
+
+#[test]
+fn update_rejects_empty_command() {
+    let git = MockGit::new();
+    let fs = MockFs::new();
+    let svc = make_svc(git, fs);
+    assert!(svc.update("", 1, 1, 0, 0).is_err());
+}
+
+#[test]
+fn update_rejects_path_traversal_command() {
+    let git = MockGit::new();
+    let fs = MockFs::new();
+    let svc = make_svc(git, fs);
+    assert!(svc.update("../etc/passwd", 1, 1, 0, 0).is_err());
+}
+
+#[test]
+fn update_accepts_unknown_well_formed_command() {
+    let git = MockGit::new();
+    let fs = MockFs::new();
+    let svc = make_svc(git, fs.clone());
+    let code = svc.update("future-loop", 1, 1, 0, 0).unwrap();
+    assert_eq!(code, 0);
+    let written = fs.written_files();
+    let stats: serde_json::Value = serde_json::from_str(&written[0].1).unwrap();
+    assert_eq!(stats["commands"]["future-loop"]["processed"], 1);
+}
+
+#[test]
 fn show_with_command_filter() {
     let git = MockGit::new();
     let fs = MockFs::new().with_file(
