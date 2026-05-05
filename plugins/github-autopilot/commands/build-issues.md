@@ -232,6 +232,8 @@ echo '${COMMENTS_JSON}' | autopilot issue filter-comments
 - base_branch: Step 1에서 결정한 base 브랜치
 - quality_gate_command: 설정에서 읽은 값 (비어있으면 자동 감지)
 
+> **Worktree origin freshness**: implementer는 worktree 진입 시 반드시 `origin/{base_branch}`를 fetch한 뒤 draft 브랜치를 생성/rebase해야 합니다. 자세한 절차는 `agents/issue-implementer.md` Phase 1 Step 0 참조. MainAgent의 로컬 base가 stale일 수 있으므로 base_branch만 전달하고 freshness 보장은 implementer 책임입니다.
+
 ### Step 9: 결과 수집
 
 모든 에이전트의 결과를 수집합니다.
