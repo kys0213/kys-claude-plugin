@@ -4,5 +4,5 @@
   },
   "description": "메인 에이전트가 코드를 직접 편집하지 않고 sub-agent/agent-team에 위임해 작업을 관리하는 오케스트레이터 패턴 가이드",
   "name": "orchestrator",
-  "version": "0.1.0"
+  "version": "0.2.0"
 }
