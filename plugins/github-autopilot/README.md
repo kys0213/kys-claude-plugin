@@ -134,6 +134,7 @@ autopilot pipeline idle --label-prefix "autopilot:"
 | `/github-autopilot:build-issues [interval]` | `:ready` 이슈 구현 → PR |
 | `/github-autopilot:merge-prs [interval]` | `:auto` PR 머지 |
 | `/github-autopilot:analyze-issue [numbers]` | 이슈 분석 (인자 없으면 라벨 없는 이슈 자동 탐색) |
+| `/github-autopilot:work-ledger` | ledger Ready task를 epic당 1개씩 claim → issue-implementer 디스패치 → PR open (첫 reader) |
 
 ## 에이전트
 
@@ -147,6 +148,68 @@ autopilot pipeline idle --label-prefix "autopilot:"
 | `branch-promoter` | haiku | build-issues | draft → feature 브랜치 승격 + PR (:auto 라벨) |
 | `pr-merger` | - | merge-prs | PR 문제 해결 (conflict, CI 실패) |
 | `ci-failure-analyzer` | - | ci-watch | CI 로그 분석 → 실패 원인 리포트 |
+
+## Ledger Integration
+
+GitHub 이슈 파이프라인과 별도로, 결정적 SQLite ledger(`autopilot` CLI의 `epic`/`task`/`events` 서브커맨드)를 운영합니다. 4개의 writer가 task를 기록하고, 1개의 reader가 task를 claim하며, `pr-merger`가 PR 머지 시 close-the-loop을 닫습니다.
+
+| Backlog Epic | Writer | 역할 |
+|--------------|--------|------|
+| `gap-backlog` | `/github-autopilot:gap-watch` | 스펙 갭 발견 시 GitHub issue와 동시에 ledger task 기록 (observer) |
+| `qa-backlog` | `/github-autopilot:qa-boost` | 테스트 갭 발견 시 GitHub issue와 동시에 ledger task 기록 (observer) |
+| `ci-backlog` | `/github-autopilot:ci-watch` | CI 실패 발견 시 GitHub issue와 동시에 ledger task 기록 (observer) |
+| (모든 epic) | `pr-merger` 에이전트 | PR 머지 후 `task complete --pr <N>` 호출하여 Wip→Done 전환 |
+| (모든 epic) | `/github-autopilot:work-ledger` | 첫 reader — Ready task를 epic당 1개씩 round-robin claim → `issue-implementer` 디스패치 → PR open → Wip 유지 |
+
+`/github-autopilot:autopilot` 시작 시 Step 2.5 (PR #681)에서 epic 상태 스냅샷과 최근 이벤트 5건을 출력합니다 (best-effort, 실패해도 cycle은 계속).
+
+상세 lifecycle:
+
+```
+Ready ──claim──> Wip ──fail (retried)──> Ready (attempts++)
+                  │     fail (escalated, attempts >= max)──> Escalated
+                  └──complete --pr <N>──> Done   (pr-merger close-the-loop)
+                  └──release──> Ready (attempts unchanged, transient infra failures only)
+```
+
+Ledger 쓰기는 GitHub issue 흐름의 **보조 observer**입니다. ledger CLI 실패는 `|| echo WARN ...` 패턴으로 격리되어, GitHub issue 생성/PR 머지 결과를 절대 무효화하지 않습니다.
+
+### E2E Smoke Verification
+
+릴리스 바이너리(`plugins/github-autopilot/cli/target/release/autopilot`) 빌드 후 다음 명령으로 ledger 통합을 검증할 수 있습니다 (전체 시나리오는 [`RUNBOOK.md`](./RUNBOOK.md) 참조):
+
+```bash
+BIN=plugins/github-autopilot/cli/target/release/autopilot
+export AUTOPILOT_DB_PATH=/tmp/autopilot-smoke.db
+rm -f $AUTOPILOT_DB_PATH
+
+# 1) 3개 backlog epic 부트스트랩 (멱등)
+for E in gap-backlog qa-backlog ci-backlog; do
+  $BIN epic create --name "$E" --spec "spec/$E.md" --idempotent
+done
+
+# 2) writer 시뮬레이션 (gap-watch / qa-boost / ci-watch가 내부적으로 호출하는 형태)
+FP="gap:spec/auth.md:token-refresh"
+TID=$(printf '%s' "$FP" | shasum -a 256 | cut -c1-12)
+$BIN task add "$TID" --epic gap-backlog \
+  --title "spec gap: token-refresh in spec/auth.md" \
+  --fingerprint "$FP" --source gap-watch
+
+# 3) reader 시뮬레이션 (work-ledger가 호출하는 claim → fail → escalate)
+$BIN task claim --epic gap-backlog --json
+$BIN task fail "$TID"            # {"outcome":"retried","attempts":1}
+
+# 4) pr-merger close-the-loop 시뮬레이션
+$BIN task claim --epic gap-backlog --json > /dev/null
+$BIN task complete "$TID" --pr 999
+$BIN task find-by-pr 999          # status=done, pr_number=999
+
+# 5) ledger 상태 스냅샷 (autopilot Step 2.5와 동일한 호출)
+$BIN epic status
+$BIN events list --limit 5
+```
+
+각 명령의 기대 출력은 `RUNBOOK.md` Sections C/D 참조.
 
 ## 설정
 
