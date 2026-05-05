@@ -151,28 +151,41 @@ autopilot pipeline idle --label-prefix "autopilot:"
 
 ## Ledger Integration
 
-GitHub 이슈 파이프라인과 별도로, 결정적 SQLite ledger(`autopilot` CLI의 `epic`/`task`/`events` 서브커맨드)를 운영합니다. 4개의 writer가 task를 기록하고, 1개의 reader가 task를 claim하며, `pr-merger`가 PR 머지 시 close-the-loop을 닫습니다.
+GitHub 이슈 파이프라인과 별도로, 결정적 SQLite ledger(`autopilot` CLI의 `epic`/`task`/`events` 서브커맨드)를 운영합니다. **ledger-followups 롤업 (PR #684–#688) 머지 이후 lifecycle 은 완전 자동입니다**: writer cron 이 task 를 기록하고, work-ledger reader cron (10m) 이 claim 하고, issue-implementer → branch-promoter 가 구현 + PR 을 열고, pr-merger 가 머지 시 close-the-loop 을 닫고, release-stale cron (30m) 이 worker crash / ctrl-C 발생 시 stale Wip 을 회수합니다. 운영자는 cron 등록 후 자리를 비울 수 있습니다.
 
 | Backlog Epic | Writer | 역할 |
 |--------------|--------|------|
-| `gap-backlog` | `/github-autopilot:gap-watch` | 스펙 갭 발견 시 GitHub issue와 동시에 ledger task 기록 (observer) |
-| `qa-backlog` | `/github-autopilot:qa-boost` | 테스트 갭 발견 시 GitHub issue와 동시에 ledger task 기록 (observer) |
-| `ci-backlog` | `/github-autopilot:ci-watch` | CI 실패 발견 시 GitHub issue와 동시에 ledger task 기록 (observer) |
-| (모든 epic) | `pr-merger` 에이전트 | PR 머지 후 `task complete --pr <N>` 호출하여 Wip→Done 전환 |
-| (모든 epic) | `/github-autopilot:work-ledger` | 첫 reader — Ready task를 epic당 1개씩 round-robin claim → `issue-implementer` 디스패치 → PR open → Wip 유지 |
+| `gap-backlog` | `/github-autopilot:gap-watch` (cron) | 스펙 갭 발견 시 GitHub issue와 동시에 ledger task 기록 (observer) |
+| `qa-backlog` | `/github-autopilot:qa-boost` (cron) | 테스트 갭 발견 시 GitHub issue와 동시에 ledger task 기록 (observer) |
+| `ci-backlog` | `/github-autopilot:ci-watch` (cron) | CI 실패 발견 시 GitHub issue와 동시에 ledger task 기록 (observer) |
+| (모든 epic) | `pr-merger` 에이전트 + `merge-prs` Step 4 fast-path | PR 머지 후 `task complete --pr <N>` 호출 (Wip→Done). PR #666 + PR #686 (F1) |
+| (모든 epic) | `/github-autopilot:work-ledger` (**10m cron**, PR #684 F2) | reader — Ready task를 epic당 1개씩 round-robin claim → `issue-implementer` 디스패치 → `branch-promoter` (Closes #N suppress when missing, PR #685 F3) → PR open |
+| (모든 epic) | `autopilot task release-stale --before 1h` (**30m cron**, PR #688 F5) | stale Wip 자동 회수 — worker crash / ctrl-C / worktree 파괴 시 attempts 감소 후 Ready 로 복귀 |
 
-`/github-autopilot:autopilot` 시작 시 Step 2.5 (PR #681)에서 epic 상태 스냅샷과 최근 이벤트 5건을 출력합니다 (best-effort, 실패해도 cycle은 계속).
-
-상세 lifecycle:
+자동화된 lifecycle:
 
 ```
-Ready ──claim──> Wip ──fail (retried)──> Ready (attempts++)
-                  │     fail (escalated, attempts >= max)──> Escalated
-                  └──complete --pr <N>──> Done   (pr-merger close-the-loop)
-                  └──release──> Ready (attempts unchanged, transient infra failures only)
+gap/qa/ci-watch (writer cron) ──task add──> Ready
+                                              │  work-ledger cron (10m)
+                                              ▼
+                                             Wip ──fail (retried)──> Ready (attempts++)
+                                              │   fail (escalated, attempts >= max)──> Escalated
+                                              │   complete --pr <N>──> Done   (merge-prs Step 4/5)
+                                              │   release-stale (30m)──> Ready (worker crash 복구)
+                                              └─ release ──> Ready (transient infra failures only)
 ```
+
+`/github-autopilot:autopilot` 시작 시 Step 2.5 (PR #681)에서 epic 상태 스냅샷과 최근 이벤트 5건을 출력합니다 (best-effort). `autopilot stats update --command work-ledger` 도 canonical 목록에 포함되어 (PR #687 F4) 모든 loop의 통계가 일관되게 수집됩니다.
 
 Ledger 쓰기는 GitHub issue 흐름의 **보조 observer**입니다. ledger CLI 실패는 `|| echo WARN ...` 패턴으로 격리되어, GitHub issue 생성/PR 머지 결과를 절대 무효화하지 않습니다.
+
+### Follow-up 처리 현황 (모두 해소)
+
+- **F1 (PR #686)** — `merge-prs` Step 4 fast-path 도 `find-by-pr` → `task complete --pr` inline 호출 (best-effort).
+- **F2 (PR #684)** — `/github-autopilot:work-ledger` 가 autopilot Step 2 에서 10m cron 으로 자동 등록.
+- **F3 (PR #685)** — `branch-promoter` 가 `issue_number` 누락 시 PR body 에서 `Closes #N` 줄 suppress (깨진 링크 방지).
+- **F4 (PR #687)** — `autopilot stats update --command work-ledger` 가 canonical 목록에 포함 (`--command` 는 free string 유지).
+- **F5 (PR #688)** — `autopilot task release-stale --before <duration>` + 30m cron 으로 stale Wip 자동 회수 (idempotent).
 
 ### E2E Smoke Verification
 

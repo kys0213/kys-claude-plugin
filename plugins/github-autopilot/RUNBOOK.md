@@ -1,6 +1,8 @@
 # github-autopilot Acceptance Runbook
 
-ledger-integration 시리즈(PR #662 / #663 / #664 / #665 / #666 / #674 / #681) 머지 이후, **신규 사용자가 플러그인을 설치하고 기존 autopilot 흐름과 새 ledger 흐름을 모두 검증할 수 있도록** 단계별로 정리한 runbook입니다.
+ledger-integration 시리즈(PR #662 / #663 / #664 / #665 / #666 / #674 / #681)와 ledger-followups 롤업(PR #684 / #685 / #686 / #687 / #688) 머지 이후, **신규 사용자가 플러그인을 설치하고 기존 autopilot 흐름과 자동으로 돌아가는 ledger 흐름을 모두 검증할 수 있도록** 단계별로 정리한 runbook입니다.
+
+ledger-followups 롤업으로 work-ledger reader와 stale-Wip 회수가 cron 기반으로 동작하므로 ledger lifecycle은 이제 **수동 호출 없이 자동**입니다. Section F 참조.
 
 이 문서의 모든 출력은 실제로 `plugins/github-autopilot/cli/target/release/autopilot` 바이너리(v0.22.0)에 대해 실행한 결과입니다. 임의로 만들어낸 출력이 아닙니다.
 
@@ -45,29 +47,40 @@ export AUTOPILOT_DB_PATH=/tmp/autopilot-runbook.db
 
 ## Section B: Existing Autopilot Regression Smoke
 
-ledger-integration 6개 PR이 머지된 이후에도 기존 7개 watcher와 setup/autopilot/test-watch 가 동일하게 동작해야 합니다. 각 커맨드를 1회씩 실행하여 회귀 없는지 확인합니다.
+ledger-integration 7개 PR + ledger-followups 5개 PR이 모두 머지된 이후에도 기존 watcher와 setup/autopilot/test-watch 가 동일하게 동작해야 합니다. 각 커맨드를 1회씩 실행하여 회귀 없는지 확인합니다.
 
-| # | 커맨드 | 변경 영향 (T1-T6) | 기대 동작 |
-|---|--------|--------------------|----------|
+| # | 커맨드 | 변경 영향 | 기대 동작 |
+|---|--------|----------|----------|
 | 1 | `/github-autopilot:setup` | 없음 | 설정 파일 생성 + 라벨 생성 (A.2와 동일) |
-| 2 | `/github-autopilot:autopilot` | **Step 2.5 추가** (PR #681) — cron 등록 직후 ledger 상태 스냅샷 출력 (best-effort) | 기존 7개 cron 등록 + 새 Step 2.5 출력. 등록 실패 없음 |
-| 3 | `/github-autopilot:gap-watch` | **Step 5a 추가** (PR #662, #663) — ledger epic 부트스트랩 + per-issue ledger task 쓰기 (observer) | 기존 GitHub issue 생성 흐름 그대로. ledger 실패 시 `WARN: ...` 로그만 |
-| 4 | `/github-autopilot:ci-watch` | **Step 5a/5c 추가** (PR #664) — `ci-backlog` epic 부트스트랩 + per-failure ledger task 쓰기 (observer) | 기존 CI 분석 + issue 생성 그대로 |
-| 5 | `/github-autopilot:qa-boost` | **Step 5.5 추가** (PR #665) — `qa-backlog` epic 부트스트랩 + per-finding ledger task 쓰기 (observer) | 기존 테스트 갭 분석 + issue 생성 그대로 |
+| 2 | `/github-autopilot:autopilot` | **Step 2.5** (PR #681) ledger 상태 스냅샷 + **work-ledger / release-stale cron 등록** (PR #684 F2 / #688 F5) | 기존 cron + work-ledger(10m) + release-stale(30m) 등록. Step 2.5 출력. 등록 실패 없음 |
+| 3 | `/github-autopilot:gap-watch` | **Step 5a** (PR #662, #663) — ledger epic 부트스트랩 + per-issue ledger task 쓰기 (observer) | 기존 GitHub issue 생성 흐름 그대로. ledger 실패 시 `WARN: ...` 로그만 |
+| 4 | `/github-autopilot:ci-watch` | **Step 5a/5c** (PR #664) — `ci-backlog` epic 부트스트랩 + per-failure ledger task 쓰기 (observer) | 기존 CI 분석 + issue 생성 그대로 |
+| 5 | `/github-autopilot:qa-boost` | **Step 5.5** (PR #665) — `qa-backlog` epic 부트스트랩 + per-finding ledger task 쓰기 (observer) | 기존 테스트 갭 분석 + issue 생성 그대로 |
 | 6 | `/github-autopilot:build-issues` | 없음 | 기존 ready 이슈 → draft → PR 흐름 그대로 |
-| 7 | `/github-autopilot:merge-prs` | **Step 4 + Step 5 모두 ledger close-the-loop 호출** — Step 5 pr-merger 에이전트 (PR #666) + Step 4 all-green fast-path inline (B.1 follow-up 해소) | all-green PR과 문제 PR 모두 머지 직후 ledger close 시도 (best-effort) |
+| 7 | `/github-autopilot:merge-prs` | **Step 4 + Step 5 모두 ledger close-the-loop 호출** — Step 5 pr-merger 에이전트 (PR #666) + Step 4 all-green fast-path inline (PR #686 F1) | all-green PR과 문제 PR 모두 머지 직후 ledger close (best-effort) |
 | 8 | `/github-autopilot:analyze-issue` | 없음 | 기존 라벨 부여 흐름 그대로 |
 | 9 | `/github-autopilot:ci-fix` | 없음 | 기존 tick 단위 CI 수정 그대로 |
 | 10 | `/github-autopilot:test-watch <suite>` | 없음 | 기존 테스트 스위트 실행 그대로 |
-| 11 | `/github-autopilot:work-ledger` | **신규 명령** (PR #674) — 첫 reader. 기존 명령에는 영향 없음 | round-robin claim → issue-implementer → branch-promoter → PR open |
+| 11 | `/github-autopilot:work-ledger` | **첫 reader** (PR #674) + **autopilot cron 등록** (PR #684 F2, 10m cadence) | round-robin claim → issue-implementer → branch-promoter → PR open |
+| 12 | `branch-promoter` 에이전트 | **`issue_number` 누락 시 `Closes #N` 줄 suppress** (PR #685 F3) | issue 없는 ledger PR도 깨진 `Closes #` 없이 정상 생성 |
+| 13 | `autopilot stats update --command work-ledger` | **canonical loop 목록에 추가** (PR #687 F4) — `--command`는 free string 유지, 알려진 목록 검증만 추가 | work-ledger / 기타 모든 loop의 stats가 정상 기록 |
+| 14 | `autopilot task release-stale --before <D>` | **신규 + cron 등록** (PR #688 F5, 30m cadence) — stale Wip 회수 후 Ready로 전환, attempts 감소, idempotent | worker crash / ctrl-C / worktree 파괴 시 자동 복구 |
 
 **Section B 회귀 판정**: 모든 기존 커맨드는 ledger 호출 실패와 무관하게 정상 종료해야 합니다. 모든 ledger 추가 단계는 best-effort observer 패턴 (`|| echo WARN ...`) 으로 격리되어 있습니다.
 
-### B.1 알려진 갭 (회귀 아님, follow-up)
+### B.1 follow-up 처리 현황 (모두 해소됨)
 
-- ~~`merge-prs.md` Step 4 fast-path는 ledger close-the-loop을 호출하지 않습니다~~ — **해소됨**. fast-path도 pr-merger와 동일한 inline `find-by-pr` → `task complete --pr` 호출을 수행합니다 (best-effort, set -e safe). E.5 절도 함께 무효화됩니다.
-- `branch-promoter` 가 `issue_number` 누락 시 PR body에 `Closes #N` 을 어떻게 처리하는지 명시되지 않았습니다 (PR #674 follow-up #1).
-- `autopilot stats update --command work-ledger` 의 허용 여부가 미확인 (PR #674 follow-up #2).
+ledger-followups 롤업으로 다음 follow-up이 모두 해소되었습니다:
+
+| ID | 항목 | 해소 PR |
+|----|------|---------|
+| F1 | `merge-prs.md` Step 4 fast-path가 ledger close-the-loop을 호출하지 않음 | #686 (`fix(github-autopilot): close ledger loop in merge-prs fast-path`) |
+| F2 | `/github-autopilot:work-ledger` 가 cron에 등록되지 않아 수동 실행 필요 | #684 (`feat(github-autopilot): register work-ledger in autopilot cron`, 10m) |
+| F3 | `branch-promoter` 가 `issue_number` 누락 시 `Closes #N` 처리 미명시 | #685 (`fix(github-autopilot): suppress Closes #N when issue_number missing`) |
+| F4 | `autopilot stats update --command work-ledger` 허용 여부 미확인 | #687 (`feat(github-autopilot): accept work-ledger in stats --command`) |
+| F5 | stale Wip 자동 감지/복구 부재 (lease/heartbeat 미도입) | #688 (`feat(github-autopilot): add stale-Wip task recovery`, 30m cron) |
+
+> F5는 lease/heartbeat이 아닌 **시간 기반 cutoff** (`updated_at` 비교) 로 해소되었습니다. lease/heartbeat 정교화는 별도 follow-up으로 carry-forward 됩니다 (Section F 참조).
 
 ---
 
@@ -396,13 +409,18 @@ done
 
 `task add` 는 동일 id가 이미 있으면 exit 1 + `task '<id>' already exists` — `|| echo WARN ...` 로 흡수합니다 (PR #662 / #664 / #665 의 writer 패턴).
 
-### E.3 stale Wip 복구
+### E.3 stale Wip 복구 (자동화됨)
 
-`work-ledger` 가 task 를 claim 한 후 `issue-implementer` 가 크래시했거나 PR 을 열지 못해 `task fail` 호출조차 실패한 경우, task 는 Wip 로 남습니다. 운영자 수동 복구:
+`work-ledger` 가 task 를 claim 한 후 `issue-implementer` 가 크래시했거나 PR 을 열지 못해 `task fail` 호출조차 실패한 경우, task 는 Wip 로 남습니다. **PR #688 (F5) 이후 `autopilot task release-stale --before <duration>` 가 30m cron 으로 등록되어 자동 복구됩니다** (cutoff 기본값 1h). 회수 시 attempts 감소 + `task_released_stale` 이벤트가 기록됩니다. 빈 케이스는 exit 0 (idempotent).
+
+수동 점검/복구가 필요한 경우:
 
 ```bash
 # 어떤 task가 stale Wip 인지 확인
 $BIN task list --epic gap-backlog | awk '$2=="wip"'
+
+# 자동 cron 과 동일한 회수 (cutoff 즉시 적용)
+$BIN task release-stale --before 1h --json
 
 # Wip → Ready 강제 전환 (attempts 보존)
 $BIN task release <task_id>
@@ -411,7 +429,7 @@ $BIN task release <task_id>
 $BIN task force-status <task_id> ready
 ```
 
-자동 stale-Wip 감지는 PR #674 의 follow-up 항목입니다 (lease/heartbeat 도입 필요).
+> lease/heartbeat 기반 정교화 (worker liveness 직접 추적) 는 carry-forward follow-up 입니다 (Section F).
 
 ### E.4 ledger ↔ GitHub issue 정합성 점검
 
@@ -429,17 +447,71 @@ gh issue list --search "$FP" --label "autopilot:ready"
 
 ledger 만 있고 issue 가 없으면 다음 writer cycle 에서 동일 fingerprint 로 새 issue 가 생성되며, ledger task add 는 duplicate id 로 흡수됩니다 (안전).
 
-### E.5 `merge-prs` Step 4 fast-path (해소됨)
+### E.5 `merge-prs` Step 4 fast-path (해소됨, PR #686)
 
-이전에는 all-green PR 이 Step 4 fast-path 에서 직접 `gh pr merge` 되어 ledger close-the-loop 이 호출되지 않는 갭이 있었습니다. 현재 fast-path 도 인라인으로 `find-by-pr` → `task complete --pr` 를 호출하므로 별도 우회가 필요하지 않습니다.
+이전에는 all-green PR 이 Step 4 fast-path 에서 직접 `gh pr merge` 되어 ledger close-the-loop 이 호출되지 않는 갭이 있었습니다 (B.1 의 알려진 갭). **PR #686 (F1) 이후 fast-path 도 인라인으로 `find-by-pr` → `task complete --pr` 를 호출하므로 우회가 필요하지 않습니다** (best-effort, set -e safe — ledger 실패 시 머지 결과는 변하지 않음).
 
-ledger 호출이 어떤 이유로든 실패해도 fast-path 머지 결과는 변하지 않습니다. 그래도 task 가 Wip 으로 남아 있다면 수동 복구:
+그래도 task 가 Wip 으로 남아 있다면 수동 복구:
 
 ```bash
 # 머지된 PR 번호로 수동 close
 $BIN task find-by-pr <PR_NUMBER> --json | jq -r '.id' \
   | xargs -I{} $BIN task complete {} --pr <PR_NUMBER>
 ```
+
+---
+
+## Section F: Auto-running Operation
+
+ledger-followups 롤업으로 ledger lifecycle은 **수동 호출 없이 cron 으로 완전 자동화** 되었습니다. 운영자는 한 번 `/github-autopilot:autopilot` 으로 cron supervisor를 등록한 뒤 자리를 비울 수 있습니다.
+
+### F.1 자동화된 사이클
+
+```
+gap-watch / qa-boost / ci-watch (writer)
+        │  task add (best-effort)
+        ▼
+   ledger Ready queue
+        │  work-ledger cron (10m, PR #684)  ← 더 이상 수동 호출 X
+        ▼
+        Wip (claimed)
+        │  issue-implementer → branch-promoter (Closes #N suppress when missing, PR #685)
+        ▼
+        PR open (autopilot:auto)
+        │  merge-prs Step 4/5 (fast-path + pr-merger 모두 close, PR #666 + #686)
+        ▼
+        Done
+
+       (worker crash / ctrl-C 발생 시)
+   stale Wip → release-stale cron (30m, PR #688) → Ready (attempts 감소)
+```
+
+### F.2 등록되는 cron (autopilot Step 2)
+
+| 라벨 | 명령 | 기본 주기 | 출처 |
+|------|------|----------|------|
+| Build Issues | `/github-autopilot:build-issues` | 15m | 기존 |
+| Gap Watch | `/github-autopilot:gap-watch` | 30m | 기존 (writer) |
+| QA Boost | `/github-autopilot:qa-boost` | 1h | 기존 (writer) |
+| CI Watch | `/github-autopilot:ci-watch` | 20m | 기존 (writer) |
+| CI Fix | `/github-autopilot:ci-fix` | 15m | 기존 |
+| Merge PRs | `/github-autopilot:merge-prs` | 10m | 기존 (close-the-loop 통합) |
+| **Work Ledger** | `/github-autopilot:work-ledger` | **10m** | **PR #684 (F2)** |
+| **Release Stale** | `autopilot task release-stale --before {stale_wip.threshold}` | **30m** | **PR #688 (F5)** |
+| Test Watch | `/github-autopilot:test-watch <suite>` | per-suite | 기존 |
+
+### F.3 운영자 액션
+
+이 시점부터 운영자에게 필요한 일상 액션은 다음 두 가지뿐입니다:
+
+1. **HITL 처리**: `escalated` task / `:hitl` 라벨 issue 검토 후 결정 (`task escalate` 또는 운영자 판단 머지/close).
+2. **idle 점검**: `autopilot stats show` 로 모든 loop이 처리 중인지 주기적으로 확인 (work-ledger 포함, PR #687).
+
+writer 발견 → ledger 기록 → reader claim → 구현 → PR open → 머지 → ledger close 의 모든 단계가 cron 만으로 진행됩니다. 평시에는 운영자 개입이 필요 없습니다.
+
+### F.4 검증
+
+`make validate` (594 pass / 10 warnings / 0 fail) + `cargo test` (341 tests) + Section C/D smoke 가 모두 통과하는 상태가 자동 운영의 안전 기준입니다. PR 머지 시 CI/CD 가 검증을 강제합니다.
 
 ---
 
@@ -454,3 +526,8 @@ $BIN task find-by-pr <PR_NUMBER> --json | jq -r '.id' \
 | #666 | pr-merger close-the-loop (`task find-by-pr` → `task complete --pr`) |
 | #674 | `/github-autopilot:work-ledger` (첫 reader) |
 | #681 | `autopilot.md` Step 2.5 ledger 상태 스냅샷 |
+| #684 | F2 — `work-ledger` cron 등록 (10m) |
+| #685 | F3 — branch-promoter `Closes #N` suppress (issue 없는 ledger PR) |
+| #686 | F1 — `merge-prs` Step 4 fast-path ledger close 통합 |
+| #687 | F4 — `stats update --command work-ledger` 허용 (canonical 목록) |
+| #688 | F5 — stale-Wip 자동 회수 (`task release-stale` + 30m cron) |
