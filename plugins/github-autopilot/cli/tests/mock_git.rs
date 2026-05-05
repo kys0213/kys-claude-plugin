@@ -26,6 +26,12 @@ pub struct MockGit {
     fail_commit: bool,
 }
 
+impl Default for MockGit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockGit {
     pub fn new() -> Self {
         Self {
