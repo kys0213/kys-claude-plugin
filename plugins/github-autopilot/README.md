@@ -128,7 +128,7 @@ autopilot pipeline idle --label-prefix "autopilot:"
 |--------|------|
 | `/github-autopilot:setup` | 초기 설정 (rules, 설정 파일, 라벨 생성) |
 | `/github-autopilot:autopilot` | 7개 루프를 설정된 인터벌로 모두 시작 |
-| `/github-autopilot:gap-watch [interval]` | 스펙 갭 탐지 → 이슈 발행 |
+| `/github-autopilot:gap-watch [interval]` | 스펙 갭 탐지 → ledger task 등록 (gap-backlog epic, GitHub issue 미생성) |
 | `/github-autopilot:qa-boost [commit] [interval]` | 테스트 갭 탐지 → 이슈 발행 |
 | `/github-autopilot:ci-watch [interval]` | CI 실패 감지 → 이슈 발행 |
 | `/github-autopilot:build-issues [interval]` | `:ready` 이슈 구현 → PR |
@@ -141,7 +141,7 @@ autopilot pipeline idle --label-prefix "autopilot:"
 | 에이전트 | model | 호출 위치 | 역할 |
 |----------|-------|----------|------|
 | `gap-detector` | - | gap-watch | 스펙 파싱 → 구조 매핑 → call chain 갭 분석 |
-| `gap-issue-creator` | haiku | gap-watch | 갭 리포트 → GitHub 이슈 생성 (fingerprint 중복 검사 포함) |
+| `gap-ledger-writer` | haiku | gap-watch | 갭 리포트 → autopilot ledger task 등록 (gap-backlog epic, fingerprint 기반 멱등) |
 | `issue-analyzer` | sonnet | analyze-issue | 이슈 분석 → ready/skip 판정 (HITL) |
 | `issue-dependency-analyzer` | - | build-issues | 이슈 간 의존성 → 배치 분류 |
 | `issue-implementer` | opus | build-issues | worktree에서 이슈 구현 |
@@ -155,7 +155,7 @@ GitHub 이슈 파이프라인과 별도로, 결정적 SQLite ledger(`autopilot` 
 
 | Backlog Epic | Writer | 역할 |
 |--------------|--------|------|
-| `gap-backlog` | `/github-autopilot:gap-watch` (cron) | 스펙 갭 발견 시 GitHub issue와 동시에 ledger task 기록 (observer) |
+| `gap-backlog` | `/github-autopilot:gap-watch` (cron) | 스펙 갭 발견 시 ledger task만 기록 (ledger-only writer — GitHub issue 미생성) |
 | `qa-backlog` | `/github-autopilot:qa-boost` (cron) | 테스트 갭 발견 시 GitHub issue와 동시에 ledger task 기록 (observer) |
 | `ci-backlog` | `/github-autopilot:ci-watch` (cron) | CI 실패 발견 시 GitHub issue와 동시에 ledger task 기록 (observer) |
 | (모든 epic) | `pr-merger` 에이전트 + `merge-prs` Step 4 fast-path | PR 머지 후 `task complete --pr <N>` 호출 (Wip→Done). PR #666 + PR #686 (F1) |
