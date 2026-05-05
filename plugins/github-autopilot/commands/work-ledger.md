@@ -32,10 +32,10 @@ allowed-tools: ["Bash", "Read", "Agent"]
 | 구현 / 커밋 | issue-implementer 에이전트 |
 | draft → feature 승격 + PR open | branch-promoter 에이전트 |
 | PR 머지 | merge-prs (pr-merger) |
-| Wip → Done | pr-merger의 ledger close-the-loop (`task complete --pr`) |
+| Wip → Done | merge-prs의 ledger close-the-loop (Step 4 fast-path inline + Step 5 pr-merger, `task complete --pr`) |
 | Wip → Ready 또는 Escalated (실패) | **work-ledger (이 커맨드)** — `task fail` |
 
-PR 머지 시 Wip→Done 전환은 **항상 pr-merger가** 수행합니다. 이 커맨드는 PR 생성에 성공하면 task를 Wip 상태로 두고, pr-merger가 close-the-loop을 닫을 때까지 기다립니다.
+PR 머지 시 Wip→Done 전환은 **merge-prs 가** 수행합니다 — Step 4 (all-green fast-path) 또는 Step 5 (pr-merger 경로) 어느 쪽이든 동일한 inline close-the-loop 로직이 호출됩니다. 이 커맨드는 PR 생성에 성공하면 task를 Wip 상태로 두고, merge-prs 가 close-the-loop을 닫을 때까지 기다립니다.
 
 ## 작업 프로세스
 
@@ -126,7 +126,7 @@ claimed task들을 `max_parallel_agents` 단위로 분할하여 issue-implemente
 - `base_branch`: 결정된 base
 - `pr_type`: `auto`
 
-> **알려진 follow-up**: 현재 branch-promoter는 입력에 `issue_number`가 있을 때 PR body에 `Closes #{issue_number}`를 자동 삽입합니다. 본 커맨드는 `issue_number`를 전달하지 않아 promoter의 missing-key 처리에 의존합니다. promoter가 누락된 경우에도 안전하게 PR을 생성하도록 명세에 추가하는 작업은 별도 이슈로 surface (PR 설명 참조).
+> branch-promoter는 `issue_number`가 비어 있으면 PR body의 `Closes #N` 라인과 이슈 코멘트 단계를 자동으로 생략합니다. ledger task 경로에서는 `issue_number`를 전달하지 않으므로 GitHub 이슈와 무관한 PR이 안전하게 생성됩니다.
 
 PR 생성 성공 시:
 - task는 **Wip 상태로 유지** — `task complete`는 호출하지 않습니다 (pr-merger의 책임)

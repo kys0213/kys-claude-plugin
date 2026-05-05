@@ -2,11 +2,28 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::cmd::check::state::{state_dir, utc_timestamp};
+use crate::cmd::check::state::{state_dir, utc_timestamp, validate_loop_name};
 use crate::fs::FsOps;
 use crate::git::GitOps;
 
 const STATS_FILE: &str = "session-stats.json";
+
+/// Canonical autopilot loop / cron command names that emit stats.
+///
+/// `--command` is intentionally a free string so new loops can land without a
+/// CLI release, but values *should* match this list. Unknown names are accepted
+/// (a warning is emitted on stderr) so we never block a new command from
+/// recording stats; rejecting only happens for structurally invalid values
+/// (empty, path-traversal characters — see `validate_loop_name`).
+pub const KNOWN_COMMANDS: &[&str] = &[
+    "build-issues",
+    "gap-watch",
+    "qa-boost",
+    "ci-watch",
+    "pr-merger",
+    "merge-prs",
+    "work-ledger",
+];
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct SessionStats {
@@ -57,6 +74,13 @@ impl StatsService {
         failed: u32,
         false_positive: u32,
     ) -> Result<i32> {
+        validate_loop_name(command)?;
+        if !KNOWN_COMMANDS.contains(&command) {
+            eprintln!(
+                "warning: --command {command:?} is not in the canonical list ({}). Recording anyway.",
+                KNOWN_COMMANDS.join(", ")
+            );
+        }
         let path = state_dir(self.git.as_ref())?.join(STATS_FILE);
         let mut stats = self.read_or_init(&path)?;
 
@@ -85,6 +109,9 @@ impl StatsService {
 
     /// Show session statistics.
     pub fn show(&self, command: Option<&str>) -> Result<i32> {
+        if let Some(name) = command {
+            validate_loop_name(name)?;
+        }
         let path = state_dir(self.git.as_ref())?.join(STATS_FILE);
         let stats = match self.fs.read_file(&path) {
             Ok(content) => serde_json::from_str::<SessionStats>(&content)?,
@@ -111,6 +138,23 @@ impl StatsService {
                 started_at: utc_timestamp(),
                 commands: HashMap::new(),
             }),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_commands_includes_work_ledger() {
+        assert!(KNOWN_COMMANDS.contains(&"work-ledger"));
+    }
+
+    #[test]
+    fn all_canonical_names_pass_validation() {
+        for name in KNOWN_COMMANDS {
+            assert!(validate_loop_name(name).is_ok(), "rejected: {name}");
         }
     }
 }

@@ -578,6 +578,35 @@ impl TaskRepo for InMemoryTaskStore {
         Ok(())
     }
 
+    fn release_stale(&self, before: DateTime<Utc>, now: DateTime<Utc>) -> Result<Vec<TaskId>> {
+        let mut s = self.state.lock().expect("poisoned");
+        let stale: Vec<(TaskId, String, u32)> = s
+            .tasks
+            .values()
+            .filter(|t| t.status == TaskStatus::Wip && t.updated_at < before)
+            .map(|t| (t.id.clone(), t.epic_name.clone(), t.attempts))
+            .collect();
+
+        let mut recovered = Vec::with_capacity(stale.len());
+        for (id, epic_name, prev_attempts) in stale {
+            if let Some(task) = s.tasks.get_mut(&id) {
+                task.status = TaskStatus::Ready;
+                task.attempts = task.attempts.saturating_sub(1);
+                task.updated_at = now;
+            }
+            let event = InMemoryTaskStore::make_event(
+                EventKind::TaskReleasedStale,
+                Some(epic_name),
+                Some(id.clone()),
+                serde_json::json!({"prev_attempts": prev_attempts}),
+                now,
+            );
+            InMemoryTaskStore::push_event(&mut s, event);
+            recovered.push(id);
+        }
+        Ok(recovered)
+    }
+
     fn force_status(
         &self,
         id: &TaskId,
