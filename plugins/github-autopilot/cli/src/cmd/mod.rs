@@ -354,11 +354,23 @@ pub enum LoopStatus {
 
 #[derive(Subcommand)]
 pub enum PipelineCommands {
-    /// Check if the autopilot pipeline is idle
+    /// Check if the autopilot pipeline is idle.
+    ///
+    /// Exit codes:
+    ///   0 — idle (no ready, wip, or open autopilot PRs)
+    ///   1 — active (work in flight, capacity check skipped or below cap)
+    ///   3 — at-capacity (only when --max-parallel is set and wip >= N).
+    ///       Skip dispatching new work; the in-flight cycle is still running.
     Idle {
         /// Label prefix (default: "autopilot:")
         #[arg(long, default_value = "autopilot:")]
         label_prefix: String,
+        /// Optional WIP capacity. When set, exit `3` is returned if the
+        /// number of `:wip` issues already meets/exceeds this value (i.e.
+        /// the pipeline is active and at-capacity). Without this flag the
+        /// command falls back to the legacy idle/active contract.
+        #[arg(long)]
+        max_parallel: Option<u64>,
     },
 }
 
