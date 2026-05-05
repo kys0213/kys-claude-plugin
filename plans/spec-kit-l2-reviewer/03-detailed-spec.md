@@ -1,10 +1,10 @@
-# Detailed Spec — gap-reviewer 에이전트
+# Detailed Spec — gap-auditor 에이전트
 
 ## 에이전트 frontmatter
 
 ```yaml
 ---
-description: (내부용) /spec-kit:spec-review · /spec-kit:gap-detect 가 호출하는 의미 검증 에이전트. L2 finding 의 분류/심각도/증거 매칭을 비평한다.
+description: (내부용) /spec-kit:spec-review · /spec-kit:gap-detect 가 호출하는 통합 감사 에이전트. L2 finding 의 인용 정확성 + 의미 적합성을 단일 게이트로 검증한다.
 model: sonnet
 tools: []
 ---
@@ -12,7 +12,7 @@ tools: []
 
 `tools: []` — raw 파일 접근 금지. L1 reports + L2 output 만 입력으로 받는다.
 
-## 분류 기준 (reviewer 가 사용)
+## 분류 기준 (gap-auditor 가 사용)
 
 ### Code↔Spec Gap 분류
 
@@ -44,8 +44,9 @@ tools: []
 
 ### Major (루프 발생)
 
-| 코드 | 카테고리 | 정의 | reviewer 가 권장하는 조치 |
-|------|----------|------|---------------------------|
+| 코드 | 카테고리 | 정의 | gap-auditor 가 권장하는 조치 |
+|------|----------|------|-----------------------------|
+| `M-0` | INVALID_CITATION | 인용 ID 미실재 또는 발췌가 L1 항목과 의미적으로 어긋남 | 인용 정정 또는 finding 제거 |
 | `M-1` | EVIDENCE_CONCLUSION_MISMATCH | 인용된 L1 항목이 L2 결론을 뒷받침하지 않음 | 결론 수정 또는 finding 제거 |
 | `M-2` | MISCLASSIFICATION | 분류가 정의에 부합하지 않음 | 분류 변경 |
 | `M-3` | SEVERITY_MISJUDGMENT | severity 가 기준과 어긋남 | severity 변경 |
@@ -61,10 +62,10 @@ tools: []
 | `m-2` | EVIDENCE_AUGMENTATION | 추가 인용으로 강화 가능 |
 | `m-3` | ALTERNATIVE_ACTION | 더 나은 권장 액션 존재 |
 
-## 에이전트 입력 (orchestrator → reviewer)
+## 에이전트 입력 (orchestrator → gap-auditor)
 
 ```
-# L2 Review Request
+# Gap Audit Request
 
 ## L1 Reports (검증 통과분)
 
@@ -76,9 +77,27 @@ tools: []
 
 ...
 
-## L2 Output (검토 대상)
+## L2 Output (감사 대상)
 
 {Code↔Spec Gaps / Spec↔Spec Gaps / Notes 섹션 그대로}
+
+## 감사 책임
+
+다음을 모두 검증한다:
+
+1. **인용 정확성 (M-0)**:
+   - 모든 finding 의 {report}:{ID} 인용이 L1 reports 에 실재하는가
+   - L2 가 발췌한 텍스트가 해당 L1 항목의 발췌와 의미적으로 일치하는가
+
+2. **인용-결론 매칭 (M-1)**:
+   - 인용된 L1 항목이 finding 의 결론을 실제로 뒷받침하는가
+   - 도메인/컨텍스트가 같은 사안을 가리키는가
+
+3. **분류 정확성 (M-2)**: 아래 분류 기준에 따른 분류인가
+
+4. **심각도 정확성 (M-3)**: 아래 severity 기준에 따른 등급인가
+
+5. **중복 / 누락 / false positive (M-4, M-5, M-6)**
 
 ## 분류 기준 (요약)
 
@@ -100,13 +119,13 @@ tools: []
 - LOW: 표현/명명
 
 ## 출력
-gap-reviewer 의 출력 스키마를 엄수.
+gap-auditor 의 출력 스키마를 엄수.
 ```
 
 ## 에이전트 출력
 
 ```markdown
-# L2 Review Report
+# Gap Audit Report
 
 ## Metadata
 - l2_findings_total: N
@@ -116,27 +135,28 @@ gap-reviewer 의 출력 스키마를 엄수.
 - [R1] {finding_id} — M-{N}: {category}
   - 사유: {1-2 문장. L1 evidence 와 L2 결론의 어긋남을 구체적으로}
   - 근거 L1 인용: {report:ID}, {report:ID}
-  - 권장: {분류 변경 / severity 변경 / finding 제거 / finding 추가 / dedupe}
+  - 권장: {분류 변경 / severity 변경 / finding 제거 / finding 추가 / dedupe / 인용 정정}
 
 ## Minor Issues
 - [r1] {finding_id} — m-{N}: {category}
   - 사유: {한 줄}
 
 ## Notes
-- (없음 또는 reviewer 가 추가로 관찰한 메타 정보)
+- (없음 또는 gap-auditor 가 추가로 관찰한 메타 정보)
 ```
 
 빈 섹션은 `(없음)` 한 줄. 스키마 일관성 유지.
 
-## 에이전트 제약 (gap-reviewer 본문에 포함)
+## 에이전트 제약 (gap-auditor 본문에 포함)
 
-- **raw 파일 접근 금지**: L1 reports 의 인용을 그대로 신뢰. L1 인용 검증은 별도 단계에서 끝남.
+- **raw 파일 접근 금지**: L1 reports 의 인용을 그대로 신뢰. raw 파일 인용 검증은 별도 단계에서 끝남.
 - **L1 인용 외 새 인용 금지**: 모든 evidence 는 `{report}:{ID}` 형식.
-- **수정 권한 없음**: 비평만. finding 의 본문을 다시 쓰지 마라. 수정은 L2 가 다음 호출에서 수행.
+- **수정 권한 없음**: 지적만. finding 의 본문을 다시 쓰지 마라. 수정은 L2 가 다음 호출에서 수행.
 - **무한 nitpicking 금지**: 같은 finding 에 대해 동일한 minor 사유를 여러 번 보고하지 마라.
 - **분류 변경 권장 시 정확한 타깃 분류 명시**: "DEFINITION_CONFLICT 가 아니다" 가 아니라 "INTERFACE_DRIFT 로 변경" 처럼.
 - **severity 변경 권장 시 정확한 타깃 명시**: "HIGH → MEDIUM" 처럼.
 - **major / minor 분류 신중**: 확신이 없으면 minor. major 는 명백한 오류만.
+- **인용 검증은 의미 일치까지** : 글자 그대로의 string compare 가 아니라 의미 동치성. paraphrasing 이라도 같은 사실을 가리키면 통과. 다른 사실을 가리키면 M-0.
 - **`<tool_call>` / `<tool_response>` 같은 가짜 블록 출력 금지** (L1 의 #639 환각 회귀 방지).
 
 ## L2 fix request 형식 (orchestrator → L2 재호출)
@@ -150,12 +170,12 @@ gap-reviewer 의 출력 스키마를 엄수.
 ## L1 Reports (재첨부)
 {변경 없음}
 
-## Reviewer Major Issues
+## Audit Major Issues
 
 ### [R1] {finding_id} — M-{N}: {category}
 - 현재 finding 본문:
   {원문 발췌}
-- 사유: {reviewer reasoning}
+- 사유: {auditor reasoning}
 - 근거 L1 인용: {report:ID}
 - 권장 조치: {구체적}
 
@@ -164,10 +184,11 @@ gap-reviewer 의 출력 스키마를 엄수.
 ## 지시
 - Major 이슈만 수정.
 - 통과 finding (major 표기 없는 것) 은 절대 변경 금지.
-- M-5 (MISSED_OBVIOUS_GAP) 의 경우 새 finding 추가 가능 — L1 인용은 reviewer 가 제시한 것 사용.
+- M-0 (INVALID_CITATION) 의 경우 인용 정정 또는 finding 제거.
+- M-5 (MISSED_OBVIOUS_GAP) 의 경우 새 finding 추가 가능 — L1 인용은 auditor 가 제시한 것 사용.
 - M-4 (DUPLICATE_FINDING) 의 경우 finding 통합/제거.
-- 분류 변경 시 reviewer 가 권장한 분류 사용.
-- severity 변경 시 reviewer 가 권장한 값 사용.
+- 분류 변경 시 auditor 가 권장한 분류 사용.
+- severity 변경 시 auditor 가 권장한 값 사용.
 - 출력 스키마는 gap-aggregator 의 기존 스키마 그대로.
 ```
 
@@ -187,7 +208,7 @@ def has_progress(prev_major_ids, curr_major):
 
 ## 최종 리포트 통합
 
-`/spec-kit:spec-review` Step 7 출력에 reviewer 통계 추가:
+`/spec-kit:spec-review` Step 7 출력에 audit 통계 추가:
 
 ```markdown
 # Spec Review Report
@@ -200,14 +221,14 @@ def has_progress(prev_major_ids, curr_major):
 - spec 파일: N
 - L1 리포트 통과: M / N
 - L1 항목 drop: K건
-- L2 finding drop (인용): J건
-- L2 reviewer 반복: I회 (major issue 0 까지)
-- L2 reviewer drop (잔여 major): L건 (분류별)
-- 분석 모델: L1 haiku × N + L2 sonnet + reviewer sonnet
+- gap-auditor 반복: I회 (major issue 0 까지)
+- gap-auditor drop (잔여 major): L건 (분류별)
+- 분석 모델: L1 haiku × N + L2 sonnet + gap-auditor sonnet
 ```
 
 ## 호환성
 
-- gap-aggregator 의 출력 스키마는 변경하지 않음 → reviewer 추가는 backward-compatible
+- gap-aggregator 의 출력 스키마는 변경하지 않음 → gap-auditor 추가는 backward-compatible
 - L1 (file-pair-observer) 변경 없음
-- 호출 커맨드 (`/spec-review`, `/gap-detect`) 만 Step 6.5 추가
+- mechanical L2 인용 검증 단계는 **제거** — `/spec-review` 와 `/gap-detect` 에서 Step 6 을 gap-auditor 호출로 교체
+- 호출 커맨드 (`/spec-review`, `/gap-detect`) 의 Step 6 만 변경
