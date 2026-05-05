@@ -1,7 +1,8 @@
 {
   "agents": [
     "./agents/file-pair-observer.md",
-    "./agents/gap-aggregator.md"
+    "./agents/gap-aggregator.md",
+    "./agents/gap-auditor.md"
   ],
   "author": {
     "name": "kys0213"
