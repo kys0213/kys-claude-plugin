@@ -186,6 +186,22 @@
       "name": "github-autopilot",
       "source": "./plugins/github-autopilot",
       "version": "0.25.0"
+    },
+    {
+      "category": "productivity",
+      "description": "메인 에이전트가 직접 코드를 편집하지 않고 sub-agent/agent-team/worktree에 위임해 복합 작업을 관리하는 오케스트레이터 패턴 가이드",
+      "keywords": [
+        "orchestrator",
+        "delegation",
+        "sub-agent",
+        "agent-team",
+        "worktree",
+        "parallel",
+        "workflow"
+      ],
+      "name": "orchestrator",
+      "source": "./plugins/orchestrator",
+      "version": "0.1.0"
     }
   ]
 }
