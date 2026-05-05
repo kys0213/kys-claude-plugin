@@ -207,6 +207,29 @@ fi
 - 실패: #54 (conflict resolution failed)
 ```
 
+### Step 6b: 세션 누적 통계
+
+매 cycle 종료 시 CLI로 세션 통계를 업데이트하고 출력합니다:
+
+- `PROCESSED` = Step 2에서 평가 대상이 된 PR 수 (all-green + 문제 PR 합)
+- `SUCCESS` = Step 4 fast-path 또는 Step 5 pr-merger 경유로 머지 완료된 PR 수
+- `FAILED` = 머지 시도/문제 해결이 실패한 PR 수 (conflict 미해결, pr-merger fail 등)
+- `FALSE_POSITIVE` = `0` (merge-prs는 false-positive 분류 단계가 없음 — 사람 CHANGES_REQUESTED 보류는 success/failed 어느 쪽도 아니며 다음 cycle로 넘김)
+
+```bash
+autopilot stats update \
+  --command merge-prs \
+  --processed ${PROCESSED} \
+  --success ${SUCCESS} \
+  --failed ${FAILED} \
+  --false-positive ${FALSE_POSITIVE}
+
+autopilot stats show --command merge-prs
+```
+
+> CLI는 `processed=0`이면 `idle_cycles`를, `processed>0`이면 `agent_calls`를 자동 누적합니다.
+> 통계는 `/tmp/autopilot-{repo}/state/session-stats.json`에 누적되며, 세션 시작 시(autopilot.md Step 1.7c) `autopilot stats init`으로 초기화됩니다.
+
 ## 주의사항
 
 - 사람의 CHANGES_REQUESTED 리뷰가 있는 PR은 자동 머지 금지
