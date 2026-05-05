@@ -440,10 +440,22 @@ pub fn task_service<'a>(store: &'a dyn TaskStore, clock: &'a dyn Clock) -> TaskS
     TaskService::new(store, clock)
 }
 
-/// Parses a Go-style duration (`30s`, `5m`, `1h`, `2h30m`) to seconds.
-/// Intentionally minimal — supports `s`/`m`/`h` units, integer counts,
-/// and concatenation. Anything unrecognized is rejected so callers can
-/// fall back to `--before-seconds` rather than silently round-trip.
+/// Parses a Go-style duration (`30s`, `5m`, `1h`, `1d`, `1w`, `2h30m`,
+/// `2d12h`, `1w3d`, `2d12h30m`) to seconds.
+///
+/// Supported units (fixed length only — month/year are intentionally
+/// omitted because they're variable-length and ambiguous):
+/// - `s` = 1 second
+/// - `m` = 60 seconds
+/// - `h` = 3 600 seconds
+/// - `d` = 86 400 seconds
+/// - `w` = 604 800 seconds
+///
+/// Unit ordering is **not** enforced — the result is the sum of every
+/// `<count><unit>` part regardless of order. Empty input, missing units
+/// (`90`), unknown units (`1y`, `1mo`), zero/negative totals, and
+/// integer overflow all return `Err` with a message naming the offending
+/// fragment.
 pub fn parse_duration_seconds(s: &str) -> std::result::Result<i64, String> {
     if s.is_empty() {
         return Err("empty duration".to_string());
@@ -463,10 +475,12 @@ pub fn parse_duration_seconds(s: &str) -> std::result::Result<i64, String> {
         if !saw_digit {
             return Err(format!("invalid duration '{s}': unit '{c}' without count"));
         }
-        let mult = match c {
+        let mult: i64 = match c {
             's' => 1,
             'm' => 60,
             'h' => 3_600,
+            'd' => 86_400,
+            'w' => 604_800,
             _ => return Err(format!("invalid duration '{s}': unknown unit '{c}'")),
         };
         let part = acc

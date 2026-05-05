@@ -520,14 +520,39 @@ fn release_stale_json_emits_array_of_recovered_ids() {
 #[test]
 fn parse_duration_seconds_supports_compound_units() {
     use autopilot::cmd::task::parse_duration_seconds;
+    // Single units
     assert_eq!(parse_duration_seconds("30s").unwrap(), 30);
     assert_eq!(parse_duration_seconds("5m").unwrap(), 300);
     assert_eq!(parse_duration_seconds("1h").unwrap(), 3_600);
+    assert_eq!(parse_duration_seconds("1d").unwrap(), 86_400);
+    assert_eq!(parse_duration_seconds("1w").unwrap(), 604_800);
+    // Compound units
     assert_eq!(parse_duration_seconds("2h30m").unwrap(), 9_000);
+    assert_eq!(
+        parse_duration_seconds("2d12h").unwrap(),
+        2 * 86_400 + 12 * 3_600
+    );
+    assert_eq!(
+        parse_duration_seconds("1w3d").unwrap(),
+        7 * 86_400 + 3 * 86_400
+    );
+    assert_eq!(parse_duration_seconds("1h30m").unwrap(), 5_400);
+    assert_eq!(
+        parse_duration_seconds("2d12h30m").unwrap(),
+        2 * 86_400 + 12 * 3_600 + 30 * 60
+    );
+    // Rejected inputs
     assert!(parse_duration_seconds("").is_err());
-    assert!(parse_duration_seconds("1d").is_err());
     assert!(parse_duration_seconds("0s").is_err());
     assert!(parse_duration_seconds("90").is_err()); // trailing digits, no unit
+    assert!(parse_duration_seconds("-1d").is_err()); // negative not supported
+    let err_y = parse_duration_seconds("1y").unwrap_err();
+    assert!(
+        err_y.contains("unknown unit") && err_y.contains('y'),
+        "unexpected message for `1y`: {err_y}"
+    );
+    // `1mo` is rejected because `o` is not a recognized unit (after `1m` parses)
+    assert!(parse_duration_seconds("1mo").is_err());
 }
 
 // ---------- find-by-pr ----------
