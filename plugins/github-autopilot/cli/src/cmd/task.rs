@@ -292,11 +292,51 @@ impl<'a> TaskService<'a> {
         }
     }
 
+    /// Read-only observation: returns Wip tasks whose `updated_at` is older
+    /// than `now - before_seconds`, **without** modifying them. Companion to
+    /// `release_stale`: per `CLAUDE.md` "책임 경계", deciding what to do with
+    /// each stale task (release / fail / escalate / leave alone) is the
+    /// agent's call — this CLI primitive only surfaces the candidates.
+    /// Emits the same `Task` JSON shape used by `find-by-pr --json`, so the
+    /// agent has every field needed for review (epic_name, updated_at,
+    /// attempts, status, ...). Always exits 0 — empty list is normal.
+    pub fn list_stale(&self, before_seconds: i64, json: bool, out: &mut dyn Write) -> Result<i32> {
+        let now = self.clock.now();
+        let cutoff = now - chrono::Duration::seconds(before_seconds);
+        let stale = self
+            .store
+            .list_stale(cutoff)
+            .with_context(|| format!("listing stale Wip tasks older than {before_seconds}s"))?;
+        if json {
+            return write_json(out, &stale).map(|()| 0);
+        }
+        if stale.is_empty() {
+            writeln!(out, "(no stale Wip tasks)")?;
+        } else {
+            writeln!(out, "ID            EPIC          ATTEMPTS  UPDATED_AT")?;
+            for t in &stale {
+                writeln!(
+                    out,
+                    "{:<12}  {:<12}  {:>8}  {}",
+                    t.id.as_str(),
+                    t.epic_name,
+                    t.attempts,
+                    t.updated_at.to_rfc3339()
+                )?;
+            }
+        }
+        Ok(0)
+    }
+
     /// Reaps Wip tasks whose claim went stale (worker crashed / ctrl-C /
     /// worktree destroyed) by reverting them to Ready. Same effect as
     /// per-task `release` but driven by a `before` cutoff. Emits a
     /// `TaskReleasedStale` event per recovered task. Always exits 0 on the
     /// happy path — empty recovery is normal.
+    ///
+    /// Per `CLAUDE.md` "책임 경계", this remains an emergency operator
+    /// primitive — the recommended flow is agent-driven review via
+    /// `list_stale` + per-task `release` / `fail` / `escalate` calls.
     pub fn release_stale(
         &self,
         before_seconds: i64,

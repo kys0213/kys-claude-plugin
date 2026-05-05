@@ -578,6 +578,24 @@ impl TaskRepo for InMemoryTaskStore {
         Ok(())
     }
 
+    fn list_stale(&self, before: DateTime<Utc>) -> Result<Vec<Task>> {
+        let s = self.state.lock().expect("poisoned");
+        let mut stale: Vec<Task> = s
+            .tasks
+            .values()
+            .filter(|t| t.status == TaskStatus::Wip && t.updated_at < before)
+            .cloned()
+            .collect();
+        // Stable order (older claims first, ties broken by id) so JSON output
+        // is deterministic — the agent reviewer relies on this ordering.
+        stale.sort_by(|a, b| {
+            a.updated_at
+                .cmp(&b.updated_at)
+                .then_with(|| a.id.as_str().cmp(b.id.as_str()))
+        });
+        Ok(stale)
+    }
+
     fn release_stale(&self, before: DateTime<Utc>, now: DateTime<Utc>) -> Result<Vec<TaskId>> {
         let mut s = self.state.lock().expect("poisoned");
         let stale: Vec<(TaskId, String, u32)> = s

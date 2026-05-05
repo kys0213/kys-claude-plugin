@@ -409,25 +409,32 @@ done
 
 `task add` 는 동일 id가 이미 있으면 exit 1 + `task '<id>' already exists` — `|| echo WARN ...` 로 흡수합니다 (PR #662 / #664 / #665 의 writer 패턴).
 
-### E.3 stale Wip 복구 (자동화됨)
+### E.3 stale Wip 복구 (관찰 + 에이전트 판단)
 
-`work-ledger` 가 task 를 claim 한 후 `issue-implementer` 가 크래시했거나 PR 을 열지 못해 `task fail` 호출조차 실패한 경우, task 는 Wip 로 남습니다. **PR #688 (F5) 이후 `autopilot task release-stale --before <duration>` 가 30m cron 으로 등록되어 자동 복구됩니다** (cutoff 기본값 1h). 회수 시 attempts 감소 + `task_released_stale` 이벤트가 기록됩니다. 빈 케이스는 exit 0 (idempotent).
+`work-ledger` 가 task 를 claim 한 후 `issue-implementer` 가 크래시했거나 PR 을 열지 못해 `task fail` 호출조차 실패한 경우, task 는 Wip 로 남습니다. PR #688 은 cron 으로 자동 bulk-release 했지만, 이후 리팩토링 (`/github-autopilot:stale-task-review`) 으로 **CLI 관찰 + 에이전트 결정** 구조로 바뀌었습니다. CLI 가 stale 후보를 read-only 로 surface 하고 (`autopilot task list-stale --before <duration>`), 에이전트가 task 별로 release / fail / escalate / leave alone 을 판단합니다. CLAUDE.md "책임 경계: CLI vs Skill/Agent" 에 따른 구조입니다 — 결정적 변환은 CLI, 컨텍스트 의존 판단은 에이전트.
+
+자동 cron 등록은 `/github-autopilot:autopilot` Step 2 가 처리합니다 (30m cadence, `stale-task-review` cron 으로 등록).
 
 수동 점검/복구가 필요한 경우:
 
 ```bash
-# 어떤 task가 stale Wip 인지 확인
-$BIN task list --epic gap-backlog | awk '$2=="wip"'
+# stale Wip 후보 관찰 (read-only)
+$BIN task list-stale --before 1h --json
 
-# 자동 cron 과 동일한 회수 (cutoff 즉시 적용)
-$BIN task release-stale --before 1h --json
+# 단건 release (에이전트 권장 경로)
+$BIN task release-stale --task-id <task_id>
 
-# Wip → Ready 강제 전환 (attempts 보존)
+# 단건 release (alias — 동일 효과)
 $BIN task release <task_id>
+
+# 비상시 bulk release (에이전트 우회 — 운영자 판단으로 일괄 회수)
+$BIN task release-stale --before 1h --json
 
 # Wip → 명시적 status 강제 변경 (operator override)
 $BIN task force-status <task_id> ready
 ```
+
+> `release-stale --task-id` 와 `release-stale --before` 는 mutually exclusive — clap 이 parser 단계에서 거부합니다.
 
 > lease/heartbeat 기반 정교화 (worker liveness 직접 추적) 는 carry-forward follow-up 입니다 (Section F).
 
@@ -497,7 +504,7 @@ gap-watch / qa-boost / ci-watch (writer)
 | CI Fix | `/github-autopilot:ci-fix` | 15m | 기존 |
 | Merge PRs | `/github-autopilot:merge-prs` | 10m | 기존 (close-the-loop 통합) |
 | **Work Ledger** | `/github-autopilot:work-ledger` | **10m** | **PR #684 (F2)** |
-| **Release Stale** | `autopilot task release-stale --before {stale_wip.threshold}` | **30m** | **PR #688 (F5)** |
+| **Stale Task Review** | `/github-autopilot:stale-task-review --before {stale_wip.threshold}` | **30m** | **PR #688 (F5) + agent split** |
 | Test Watch | `/github-autopilot:test-watch <suite>` | per-suite | 기존 |
 
 ### F.3 운영자 액션
