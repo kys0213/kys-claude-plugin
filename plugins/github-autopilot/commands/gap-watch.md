@@ -140,16 +140,42 @@ autopilot issue search-similar \
 
 ### Step 5: Issue 생성 (Agent)
 
+#### Step 5a: Ledger Epic 부트스트랩
+
+gap-issue-creator 호출 직전에, 결정적 ledger의 `gap-backlog` epic이 존재하도록 한 번만 보장합니다 (idempotent).
+
+```bash
+EPIC_NAME="gap-backlog"
+EPIC_SPEC="spec/gap-backlog.md"
+out=$(autopilot epic create --name "$EPIC_NAME" --spec "$EPIC_SPEC" 2>&1) || true
+case "$out" in
+  *"created"*|*"already exists"*)
+    # 정상: 새로 생성 또는 이미 존재 (epic create는 이미 존재 시 exit 1)
+    ;;
+  *)
+    # 실패해도 GitHub issue 흐름은 그대로 진행 (ledger는 observer)
+    echo "WARN: gap-backlog epic 부트스트랩 실패 — ledger 쓰기는 skip됩니다: $out"
+    EPIC_NAME=""
+    ;;
+esac
+```
+
+> ledger는 GitHub issue 생성과 독립적인 부가 기록입니다. epic 부트스트랩이 실패하면 `EPIC_NAME=""`로 설정하여 gap-issue-creator가 ledger 쓰기를 skip하도록 합니다.
+
+#### Step 5b: Agent 호출
+
 gap-issue-creator 에이전트를 호출합니다 (background=false):
 
 전달 정보:
 - 갭 분석 리포트 (Step 4 결과)
 - label_prefix
+- **ledger_epic**: `$EPIC_NAME` (비어있으면 ledger 쓰기 skip)
 - **(stagnation 시 추가)** 유사 이슈 목록 (번호, distance, 상태) + resilience persona 가이드
 
 에이전트가 ❌ Missing, ⚠️ Partial 항목을 GitHub issue로 변환합니다.
 중복 이슈는 자동 필터링됩니다.
 stagnation이 감지된 gap은 과거 이슈를 참조하고 새 persona 관점으로 이슈를 생성합니다.
+GitHub issue가 성공적으로 생성되면 동일 fingerprint로 ledger task도 함께 기록합니다 (observer).
 
 생성된 이슈가 0건이면 `autopilot check mark gap-watch --status idle` 후 Step 6으로 진행합니다.
 생성된 이슈가 1건 이상이면 `autopilot check mark gap-watch --status active` 후 Step 5.5로 진행합니다.
