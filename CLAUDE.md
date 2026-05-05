@@ -17,6 +17,38 @@
 
 > `/develop` 워크플로우를 사용하면 이 원칙이 Phase 1 (DESIGN) → Phase 2 (REVIEW) → Phase 3 (IMPLEMENT) 순서로 자동 적용됩니다.
 
+## 책임 경계 (CLI vs Skill/Agent)
+
+도구와 지능을 분리합니다. 경계가 흐려지면 사용자가 생각하는 책임 범위와 작업 에이전트가 생각하는 책임 범위가 어긋나서 같은 코드를 두고 다른 기대치로 일하게 됩니다.
+
+### CLI는 결정적 도구
+
+- 동일 입력 → 동일 출력. 판단·우선순위·자연어 해석을 포함하지 않습니다.
+- 재사용성을 최우선으로 합니다. 에이전트가 반복적·기계적 작업을 단일 호출로 끝낼 수 있어야 합니다 (Excel이 매번 표 그리기를 대체한 것처럼).
+- **인자로 받은 만큼만 동작합니다**. 인자가 없으면 거부하거나 명시된 기본값을 사용합니다 — "지금 상황을 보고 알아서 추측"하지 않습니다.
+
+예: `task add`, `task claim`, `epic status --json`, `task list-stale --before <duration>`, `task release-stale --task-id <ID>`. 모두 입력→출력이 명시적이고 멱등이거나 명확한 상태 전이.
+
+### Skill/Agent는 지능적 판단
+
+- 컨텍스트·도메인 지식·자연어 해석으로 "무엇을 호출할지", "어느 epic을 우선할지", "stale 작업을 release할지 fail할지" 결정합니다.
+- 결정 후 CLI를 도구로 호출해 결정적 상태 전이를 수행합니다.
+- 같은 컨텍스트에서도 더 나은 판단이 있으면 다른 결정을 내릴 수 있습니다 (CLI는 절대 그래선 안 됨).
+
+예: work-ledger 스킬이 `epic status --json`으로 backlog 깊이를 보고 처리 epic 결정 / gap-detector가 spec ↔ 구현 차이를 자연어로 해석해 fingerprint 만들 입력을 합성.
+
+### 판단 기준
+
+- **변환 (transform)**: CLI에 둡니다. 동일 입력 → 동일 출력 보장이 핵심.
+- **결정 (judgment)**: Skill/Agent에 둡니다. 컨텍스트 의존, reasoning이 사람에게 검토 가능해야 합니다.
+- 헷갈리면 "두 번 호출해서 결과가 항상 같아야 하나?"를 묻습니다. 같아야 하면 CLI, 다를 수 있으면 Skill.
+
+### 안티패턴
+
+- ❌ CLI가 "임계값을 backlog 크기에 따라 자동 조정" → 결정을 도구에 묻음. 임계값 결정은 Skill로 올리고 CLI는 인자로 받습니다.
+- ❌ Skill이 fingerprint를 자체 구현 → 결정적 변환을 지능에 묻음. 같은 입력도 매번 결과 다를 위험. CLI 호출로 위임합니다.
+- ✅ CLI는 인자만큼만, Skill은 인자 결정 + 결과 해석.
+
 ## 구현 원칙 (Implementation Principles)
 
 ### SOLID
