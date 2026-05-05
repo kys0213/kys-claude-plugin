@@ -628,3 +628,66 @@ fn ledger_state_round_trips_through_json() {
         "restart must not replay; got {after_restart:?}"
     );
 }
+
+// ── Clock-skew clamp: unit tests for `LedgerState::clamp_future_cursor` ──
+
+#[test]
+fn clamp_future_cursor_returns_original_and_clears_dedupe() {
+    let now = ledger_base_time();
+    let future = now + Duration::hours(1);
+    let mut state = LedgerState {
+        last_event_at: Some(future),
+        ..Default::default()
+    };
+    // Seed a stale dedupe key tied to the future timestamp.
+    state
+        .seen_keys
+        .insert(format!("task_inserted|t1|{}", future.timestamp_micros()));
+
+    let result = state.clamp_future_cursor(now);
+
+    assert_eq!(result, Some(future), "clamp must return original future");
+    assert_eq!(
+        state.last_event_at,
+        Some(now),
+        "cursor must be clamped to now"
+    );
+    assert!(
+        state.seen_keys.is_empty(),
+        "dedupe keys tied to the stale boundary must be cleared"
+    );
+}
+
+#[test]
+fn clamp_future_cursor_is_noop_when_cursor_at_now() {
+    let now = ledger_base_time();
+    let mut state = LedgerState {
+        last_event_at: Some(now),
+        ..Default::default()
+    };
+    let result = state.clamp_future_cursor(now);
+    assert_eq!(result, None, "cursor == now is healthy, not skew");
+    assert_eq!(state.last_event_at, Some(now));
+}
+
+#[test]
+fn clamp_future_cursor_is_noop_when_cursor_in_past() {
+    let now = ledger_base_time();
+    let past = now - Duration::hours(1);
+    let mut state = LedgerState {
+        last_event_at: Some(past),
+        ..Default::default()
+    };
+    let result = state.clamp_future_cursor(now);
+    assert_eq!(result, None);
+    assert_eq!(state.last_event_at, Some(past));
+}
+
+#[test]
+fn clamp_future_cursor_is_noop_when_cursor_unset() {
+    let now = ledger_base_time();
+    let mut state = LedgerState::default();
+    let result = state.clamp_future_cursor(now);
+    assert_eq!(result, None, "no cursor → nothing to clamp");
+    assert_eq!(state.last_event_at, None);
+}

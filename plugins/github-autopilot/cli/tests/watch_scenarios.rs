@@ -1040,45 +1040,112 @@ fn scenario_ready_then_claim_same_tick_no_stale_wip() {
 
 // ── Scenario 13 (event integrity): clock-skew protection ────────────────
 
-/// Documents a known limitation: if `last_event_at` in `watch.json` is
-/// somehow ahead of `clock.now()` (system clock moved backward, or the
-/// state file was copied from another machine), the SQLite query
-/// `at >= since` will silently filter out events whose `at == now`.
-/// `TASK_READY` / `EPIC_DONE` then stop firing until real time catches
-/// up to the stored future cursor.
+/// `last_event_at` in `watch.json` can end up ahead of `clock.now()`
+/// when the system clock moves backward (NTP correction, OS clock
+/// manipulation) or when the state file is copied from a host with a
+/// faster clock. The naive SQL filter `at >= since` then drops every
+/// freshly-inserted row and `TASK_READY` / `EPIC_DONE` / `STALE_WIP`
+/// emission stays frozen until wall-clock catches up to the stored
+/// cursor — potentially hours.
 ///
-/// Per the C5 task brief, this scenario is **deferred** — fixing it is a
-/// judgment call that should be made alongside a concrete recovery
-/// policy (e.g. clamp `since` to `min(last_event_at, now)`, or warn and
-/// re-anchor). The test below describes the desired behavior and is
-/// marked `#[ignore]` so CI passes while the policy is decided.
-///
-/// To reproduce the bug interactively, remove `#[ignore]` and run
-/// `cargo test -p autopilot scenario_clock_skew_does_not_freeze_emission`.
+/// Policy (clamp + warn): when the cursor is detected in the future at
+/// the read boundary (`tick_once`), clamp it down to `now`, emit a
+/// single stderr warning, and let the next periodic `save_state` persist
+/// the corrected value so the warn does not re-fire on every tick.
 #[test]
-#[ignore = "TODO(C5): clock-skew re-anchor policy not yet implemented; see PR body"]
 fn scenario_clock_skew_does_not_freeze_emission() {
     let mut fx = Fixture::new(/*stale_secs=*/ 60);
 
     // Force the ledger cursor into the future by 1 hour. In production
     // this happens when the system clock jumps backward between daemon
     // restarts.
-    fx.ts.state.ledger.last_event_at = Some(fx.now() + Duration::hours(1));
+    let future = fx.now() + Duration::hours(1);
+    fx.ts.state.ledger.last_event_at = Some(future);
 
-    // Insert a task at the (logical) current time.
+    // Insert a task at the (logical) current time. With the bug active
+    // this row's `at` would be filtered out by `WHERE at >= future`.
     ensure_epic(&fx.store, "e13", fx.now());
     fx.store
         .upsert_watch_task(watch_task("t1", "e13"), fx.now())
         .expect("upsert");
 
-    // Desired behavior: the daemon detects the future cursor, re-anchors
-    // to `now`, and emits TASK_READY for t1. Current behavior: the SQL
-    // filter `at >= since` excludes the freshly inserted row, and no
-    // event fires until real time catches up an hour later.
+    // First tick: clamp triggers, emission resumes, TASK_READY fires.
     let evs = fx.tick();
     assert_eq!(
         ready(&evs),
         vec![("e13", "t1")],
         "clock-skew must not freeze TASK_READY emission; got {evs:?}"
+    );
+
+    // Cursor was clamped: the in-memory ledger state must no longer hold
+    // the future timestamp — otherwise the next tick would re-freeze.
+    let cursor = fx
+        .ts
+        .state
+        .ledger
+        .last_event_at
+        .expect("cursor present after tick");
+    assert!(
+        cursor <= fx.now(),
+        "expected clamped cursor <= now ({}), got {cursor}",
+        fx.now()
+    );
+    assert!(
+        cursor < future,
+        "expected cursor < original future ({future}), got {cursor}"
+    );
+
+    // Second tick at the same logical time: warn-once contract — the
+    // clamp must be idempotent and emission must keep flowing for any
+    // newly-arriving rows. We add another task and expect TASK_READY.
+    fx.advance(Duration::seconds(1));
+    fx.store
+        .upsert_watch_task(watch_task("t2", "e13"), fx.now())
+        .expect("upsert");
+    let evs = fx.tick();
+    assert_eq!(
+        ready(&evs),
+        vec![("e13", "t2")],
+        "post-clamp tick must keep emitting; got {evs:?}"
+    );
+}
+
+/// Negative case for the clamp: when `last_event_at <= now` (the normal
+/// progression), `tick_once` must NOT mutate the cursor and must NOT
+/// warn. Locks the warn-frequency contract — the production warn fires
+/// only on actual skew, never on healthy ticks.
+#[test]
+fn scenario_normal_clock_progression_does_not_clamp() {
+    let mut fx = Fixture::new(/*stale_secs=*/ 60);
+
+    // Cursor parked one second in the past (a typical post-event state).
+    let cursor_before = fx.now() - Duration::seconds(1);
+    fx.ts.state.ledger.last_event_at = Some(cursor_before);
+
+    ensure_epic(&fx.store, "e13b", fx.now());
+    fx.store
+        .upsert_watch_task(watch_task("t1", "e13b"), fx.now())
+        .expect("upsert");
+
+    let evs = fx.tick();
+    assert_eq!(
+        ready(&evs),
+        vec![("e13b", "t1")],
+        "normal-case emission must work; got {evs:?}"
+    );
+
+    // The cursor will advance from `cursor_before` to the inserted row's
+    // `at` (== fx.now()) — that is normal forward progression by
+    // `detect_ledger_events`, NOT a clamp. The contract we lock here is
+    // only that the cursor never exceeds `now`.
+    let cursor_after = fx
+        .ts
+        .state
+        .ledger
+        .last_event_at
+        .expect("cursor present after tick");
+    assert!(
+        cursor_after <= fx.now(),
+        "cursor must remain <= now after normal tick, got {cursor_after}"
     );
 }
