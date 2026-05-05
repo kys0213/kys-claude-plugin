@@ -3,7 +3,7 @@ use autopilot::cmd::{
     StatsCommands, TaskCommands, WorktreeCommands,
 };
 use autopilot::config::Config;
-use autopilot::domain::DomainError;
+use autopilot::domain::{DomainError, UserInputError};
 use autopilot::ports::task_store::TaskStoreError;
 use autopilot::store::SqliteTaskStore;
 use autopilot::{cmd, fs, gh, git, github};
@@ -308,6 +308,9 @@ fn main() {
 /// `2` (default) for transient / unexpected failures.
 fn exit_code_for(e: &anyhow::Error) -> i32 {
     for cause in e.chain() {
+        if cause.downcast_ref::<UserInputError>().is_some() {
+            return 1;
+        }
         if let Some(domain) = cause.downcast_ref::<DomainError>() {
             if matches!(domain, DomainError::DuplicateTaskId(_)) {
                 return 1;

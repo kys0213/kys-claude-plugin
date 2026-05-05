@@ -247,6 +247,52 @@ fn add_detects_duplicate_fingerprint_and_returns_same_id() {
     assert_eq!(dup_events.len(), 1);
 }
 
+#[test]
+fn add_rejects_invalid_task_id_before_store_mutation() {
+    // F1 wiring lock: a non-canonical id (wrong length / non-hex chars) is
+    // rejected via `TaskId::parse` before any store mutation, surfacing as
+    // an anyhow error chain that carries the parser message. The store
+    // remains empty so the typo cannot land a phantom row.
+    let (store, clock) = fixture();
+    let svc = TaskService::new(store.as_ref(), &clock);
+
+    // Wrong length.
+    let mut buf: Vec<u8> = Vec::new();
+    let err = svc
+        .add(
+            "e",
+            "abc",
+            "title",
+            None,
+            Some("0xDEADBEEF"),
+            TaskSourceArg::Human,
+            &mut buf,
+        )
+        .unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(msg.contains("invalid task id"), "error: {msg}");
+    assert!(msg.contains("3 characters"), "error: {msg}");
+
+    // Non-hex chars.
+    let mut buf: Vec<u8> = Vec::new();
+    let err = svc
+        .add(
+            "e",
+            "ZZZZZZZZZZZZ",
+            "title",
+            None,
+            Some("0xDEADBEEF"),
+            TaskSourceArg::Human,
+            &mut buf,
+        )
+        .unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(msg.contains("lowercase hex"), "error: {msg}");
+
+    // Store stayed clean across both rejections.
+    assert!(store.list_tasks_by_epic("e", None).unwrap().is_empty());
+}
+
 // ---------- add-batch ----------
 
 #[test]
