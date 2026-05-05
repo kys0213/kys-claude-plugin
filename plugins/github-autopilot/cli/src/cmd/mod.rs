@@ -176,6 +176,22 @@ pub enum TaskCommands {
         /// Task id
         task_id: String,
     },
+    /// Reap stale Wip tasks (claims older than `--before`) back to Ready.
+    /// Idempotent: empty case exits 0. Used by the cron supervisor to
+    /// recover from worker crashes / ctrl-C / worktree destruction.
+    ReleaseStale {
+        /// Go-style duration: `30s`, `5m`, `1h`, `2h30m`. Mutually
+        /// exclusive with `--before-seconds`.
+        #[arg(long, conflicts_with = "before_seconds")]
+        before: Option<String>,
+        /// Raw seconds threshold. Bypasses duration parsing. Mutually
+        /// exclusive with `--before`.
+        #[arg(long)]
+        before_seconds: Option<i64>,
+        /// Output recovered ids as a JSON array (default: human count)
+        #[arg(long)]
+        json: bool,
+    },
     /// Mark a task as completed and unblock its dependents
     Complete {
         /// Task id

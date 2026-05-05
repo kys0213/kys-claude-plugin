@@ -151,6 +151,15 @@ pub trait TaskRepo: Send + Sync {
     /// `attempts` and feeds escalation.
     fn release_claim(&self, id: &TaskId, now: DateTime<Utc>) -> Result<()>;
 
+    /// Bulk-recovers Wip tasks whose `updated_at` is older than `before`,
+    /// reverting each to Ready with `attempts` decremented (same effect as
+    /// `release_claim`). Used by the cron supervisor to reap orphaned claims
+    /// after worker crashes / ctrl-C / worktree destruction so the task can
+    /// reach another worker. Each recovered task gets a `TaskReleasedStale`
+    /// event for audit. Returns the ids of recovered tasks (empty when no
+    /// stale Wip exists — idempotent).
+    fn release_stale(&self, before: DateTime<Utc>, now: DateTime<Utc>) -> Result<Vec<TaskId>>;
+
     /// Operator override (CLI `task force-status`). Bypasses the normal
     /// transition graph but records `reason` in the emitted event for audit.
     /// Does NOT cascade dependents (no auto-unblock / auto-block); the

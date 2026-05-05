@@ -163,6 +163,101 @@ fn body_release_claim_decrements_attempts(store: Arc<dyn TaskStore>) {
     assert_eq!(claimed.attempts, 1);
 }
 
+fn body_release_stale_recovers_old_wip_tasks(store: Arc<dyn TaskStore>) {
+    // Two tasks claimed at t0 (Wip), one task claimed at t0+10m. Cutoff at
+    // t0+5m must recover only the older one. Validates: status -> Ready,
+    // attempts decremented, TaskReleasedStale event emitted.
+    store
+        .insert_epic_with_tasks(
+            plan("e", vec![nt("A", "a"), nt("B", "b"), nt("C", "c")], vec![]),
+            t0(),
+        )
+        .unwrap();
+    let _ = store.claim_next_task("e", t0()).unwrap().unwrap(); // A
+    let _ = store.claim_next_task("e", t0()).unwrap().unwrap(); // B
+    let _ = store
+        .claim_next_task("e", t0() + Duration::minutes(10))
+        .unwrap()
+        .unwrap(); // C — fresh
+
+    let recovered = store
+        .release_stale(t0() + Duration::minutes(5), t0() + Duration::minutes(11))
+        .unwrap();
+    let mut ids: Vec<String> = recovered.iter().map(|i| i.as_str().to_string()).collect();
+    ids.sort();
+    assert_eq!(ids, vec!["A".to_string(), "B".to_string()]);
+
+    let by_id = |id: &str| store.get_task(&TaskId::from_raw(id)).unwrap().unwrap();
+    assert_eq!(by_id("A").status, TaskStatus::Ready);
+    assert_eq!(by_id("A").attempts, 0);
+    assert_eq!(by_id("B").status, TaskStatus::Ready);
+    assert_eq!(by_id("B").attempts, 0);
+    assert_eq!(by_id("C").status, TaskStatus::Wip); // untouched
+
+    let evs = store
+        .list_events(EventFilter {
+            kinds: vec![EventKind::TaskReleasedStale],
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(evs.len(), 2);
+    let ev_ids: Vec<String> = evs
+        .iter()
+        .map(|e| e.task_id.as_ref().unwrap().as_str().to_string())
+        .collect();
+    assert!(ev_ids.contains(&"A".to_string()));
+    assert!(ev_ids.contains(&"B".to_string()));
+}
+
+fn body_release_stale_skips_recent_wip_tasks(store: Arc<dyn TaskStore>) {
+    // Single Wip task with updated_at younger than cutoff — must be skipped
+    // and exit with empty list. Idempotent on the empty case.
+    store
+        .insert_epic_with_tasks(plan("e", vec![nt("A", "a")], vec![]), t0())
+        .unwrap();
+    let _ = store
+        .claim_next_task("e", t0() + Duration::minutes(10))
+        .unwrap()
+        .unwrap();
+    let recovered = store
+        .release_stale(t0() + Duration::minutes(5), t0() + Duration::minutes(11))
+        .unwrap();
+    assert!(recovered.is_empty());
+    let a = store.get_task(&TaskId::from_raw("A")).unwrap().unwrap();
+    assert_eq!(a.status, TaskStatus::Wip);
+    assert_eq!(a.attempts, 1);
+}
+
+fn body_release_stale_skips_non_wip_tasks(store: Arc<dyn TaskStore>) {
+    // Tasks in non-Wip statuses (Done, Ready, Escalated) with stale
+    // updated_at must be untouched even though their timestamp is older
+    // than the cutoff.
+    store
+        .insert_epic_with_tasks(
+            plan("e", vec![nt("A", "a"), nt("B", "b"), nt("C", "c")], vec![]),
+            t0(),
+        )
+        .unwrap();
+    // A: claim+complete (Done). B: stays Ready. C: force to Escalated.
+    let _ = store.claim_next_task("e", t0()).unwrap().unwrap();
+    store
+        .complete_task_and_unblock(&TaskId::from_raw("A"), 1, t0())
+        .unwrap();
+    store
+        .force_status(&TaskId::from_raw("C"), TaskStatus::Escalated, "test", t0())
+        .unwrap();
+
+    let recovered = store
+        .release_stale(t0() + Duration::hours(1), t0() + Duration::hours(2))
+        .unwrap();
+    assert!(recovered.is_empty());
+
+    let by_id = |id: &str| store.get_task(&TaskId::from_raw(id)).unwrap().unwrap();
+    assert_eq!(by_id("A").status, TaskStatus::Done);
+    assert_eq!(by_id("B").status, TaskStatus::Ready);
+    assert_eq!(by_id("C").status, TaskStatus::Escalated);
+}
+
 fn body_release_claim_rejects_non_wip(store: Arc<dyn TaskStore>) {
     store
         .insert_epic_with_tasks(plan("e", vec![nt("A", "a")], vec![]), t0())
@@ -664,6 +759,9 @@ conformance_suite!(
     body_claim_skips_tasks_with_unsatisfied_deps,
     body_release_claim_decrements_attempts,
     body_release_claim_rejects_non_wip,
+    body_release_stale_recovers_old_wip_tasks,
+    body_release_stale_skips_recent_wip_tasks,
+    body_release_stale_skips_non_wip_tasks,
     body_mark_failed_preserves_attempts_for_retry,
     body_claim_is_atomic_under_concurrent_callers,
     body_completing_a_task_unblocks_dependents_with_satisfied_deps,

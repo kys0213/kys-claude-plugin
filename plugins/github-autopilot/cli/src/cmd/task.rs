@@ -292,6 +292,37 @@ impl<'a> TaskService<'a> {
         }
     }
 
+    /// Reaps Wip tasks whose claim went stale (worker crashed / ctrl-C /
+    /// worktree destroyed) by reverting them to Ready. Same effect as
+    /// per-task `release` but driven by a `before` cutoff. Emits a
+    /// `TaskReleasedStale` event per recovered task. Always exits 0 on the
+    /// happy path — empty recovery is normal.
+    pub fn release_stale(
+        &self,
+        before_seconds: i64,
+        json: bool,
+        out: &mut dyn Write,
+    ) -> Result<i32> {
+        let now = self.clock.now();
+        let cutoff = now - chrono::Duration::seconds(before_seconds);
+        let recovered = self
+            .store
+            .release_stale(cutoff, now)
+            .with_context(|| format!("releasing stale Wip tasks older than {before_seconds}s"))?;
+        if json {
+            let ids: Vec<&str> = recovered.iter().map(|i| i.as_str()).collect();
+            write_json(out, &ids)?;
+        } else if recovered.is_empty() {
+            writeln!(out, "released 0 stale tasks")?;
+        } else {
+            writeln!(out, "released {} stale tasks:", recovered.len())?;
+            for id in &recovered {
+                writeln!(out, "  {}", id.as_str())?;
+            }
+        }
+        Ok(0)
+    }
+
     pub fn release(&self, task_id: &str, out: &mut dyn Write) -> Result<i32> {
         let id = TaskId::from_raw(task_id);
         let now = self.clock.now();
@@ -407,6 +438,55 @@ impl From<TaskFailureOutcome> for FailReport {
 
 pub fn task_service<'a>(store: &'a dyn TaskStore, clock: &'a dyn Clock) -> TaskService<'a> {
     TaskService::new(store, clock)
+}
+
+/// Parses a Go-style duration (`30s`, `5m`, `1h`, `2h30m`) to seconds.
+/// Intentionally minimal — supports `s`/`m`/`h` units, integer counts,
+/// and concatenation. Anything unrecognized is rejected so callers can
+/// fall back to `--before-seconds` rather than silently round-trip.
+pub fn parse_duration_seconds(s: &str) -> std::result::Result<i64, String> {
+    if s.is_empty() {
+        return Err("empty duration".to_string());
+    }
+    let mut total: i64 = 0;
+    let mut acc: i64 = 0;
+    let mut saw_digit = false;
+    for c in s.chars() {
+        if let Some(d) = c.to_digit(10) {
+            acc = acc
+                .checked_mul(10)
+                .and_then(|v| v.checked_add(d as i64))
+                .ok_or_else(|| format!("duration overflow: {s}"))?;
+            saw_digit = true;
+            continue;
+        }
+        if !saw_digit {
+            return Err(format!("invalid duration '{s}': unit '{c}' without count"));
+        }
+        let mult = match c {
+            's' => 1,
+            'm' => 60,
+            'h' => 3_600,
+            _ => return Err(format!("invalid duration '{s}': unknown unit '{c}'")),
+        };
+        let part = acc
+            .checked_mul(mult)
+            .ok_or_else(|| format!("duration overflow: {s}"))?;
+        total = total
+            .checked_add(part)
+            .ok_or_else(|| format!("duration overflow: {s}"))?;
+        acc = 0;
+        saw_digit = false;
+    }
+    if saw_digit {
+        return Err(format!(
+            "invalid duration '{s}': trailing digits without unit"
+        ));
+    }
+    if total <= 0 {
+        return Err(format!("duration must be positive: {s}"));
+    }
+    Ok(total)
 }
 
 pub fn default_clock() -> StdClock {
