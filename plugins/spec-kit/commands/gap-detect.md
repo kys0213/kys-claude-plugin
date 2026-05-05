@@ -56,15 +56,18 @@ allowed-tools: ["Task", "Glob", "Read", "Grep", "AskUserQuestion"]
 file-pair-observer 의 출력 스키마를 엄수하여 per-file 리포트 반환.
 ```
 
-### Step 4: L1 인용 검증
+### Step 4: L1 인용 검증 + 피드백 루프
 
-`/spec-review` Step 4 와 동일한 검증 절차:
+`/spec-review` Step 4 와 동일한 절차:
 
 - 인용된 file:line 범위 실재 확인
 - 발췌가 substring/prefix 매치 (공백 정규화)
 - ID 일관성 / dangling reference 검증
-- drop 비율 50% 초과 시 재시도 (최대 3회)
-- drop 로그를 사용자에게 노출
+- 실패 항목이 있으면 **피드백 루프**: 실패 ID + 적힌 발췌 + 실제 파일 내용을 묶어 L1 에 fix request 전송 → 재검증 → 진전 있으면 반복 (최대 3회), 진전 없으면 종료
+- 정제본 통과 비율 < 50% 시 사용자 confirm (제외 또는 중단)
+- 모든 drop 을 사용자에게 노출
+
+상세 알고리즘과 피드백 프롬프트 형식은 `/spec-review` Step 4.3 ~ 4.7 참조.
 
 ### Step 5: gap-aggregator (L2) 호출
 
