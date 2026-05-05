@@ -10,12 +10,13 @@ version: 1.1.0
 
 | 라벨 | 용도 | 부여 주체 |
 |------|------|-----------|
-| `{label_prefix}ready` | 구현 대상 이슈 | gap-issue-creator, ci-watch, test-watch |
+| `{label_prefix}ready` | 구현 대상 이슈 | ci-watch, test-watch |
 | `{label_prefix}wip` | 구현 진행 중 | build-issues |
 | `{label_prefix}ci-failure` | CI 실패 이슈 (ready와 함께 부여) | ci-watch |
 | `{label_prefix}auto` | autopilot 생성 PR | branch-promoter |
 | `{label_prefix}qa-suggestion` | QA 테스트 제안 (사용자 검토 후 ready로 전환) | qa-boost |
-| `{label_prefix}spec-needed` | 역방향 갭 — 코드에 있지만 스펙에 없음, 스펙 보강 필요 | gap-watch (reverse) |
+
+> **참고**: gap-watch는 ledger-only writer로 전환되었으므로 GitHub 라벨을 사용하지 않습니다 (정방향/역방향 모두 `gap-backlog` ledger epic에 task로 기록). 과거의 `{label_prefix}spec-needed` 라벨은 더 이상 부여되지 않습니다 — 역방향 갭은 `rev-gap:*` fingerprint로 ledger에서 식별합니다.
 
 `label_prefix`는 `github-autopilot.local.md`에서 로딩한다 (기본값: `autopilot:`).
 
@@ -56,7 +57,6 @@ gh pr create \
 
 | 컴포넌트 | 명령어 | 필수 라벨 |
 |----------|--------|-----------|
-| gap-issue-creator | `gh issue create` | `{label_prefix}ready` |
 | qa-boost | `gh issue create` | `{label_prefix}qa-suggestion` |
 | ci-watch | `gh issue create` | `{label_prefix}ci-failure` + `{label_prefix}ready` |
 | test-watch | `gh issue create` | `{label_prefix}ready` |
@@ -71,11 +71,11 @@ gh pr create \
 
 | 컴포넌트 | fingerprint 형식 | 예시 |
 |----------|-----------------|------|
-| gap-issue-creator | `gap:{spec_path}:{requirement_keyword}` | `gap:spec/auth.md:token-refresh` |
+| gap-ledger-writer (정방향) | `gap:{spec_path}:{requirement_keyword}` | `gap:spec/auth.md:token-refresh` |
+| gap-ledger-writer (역방향) | `rev-gap:{file_path}:{entry_point}` | `rev-gap:src/auth/oauth.rs:handle_callback` |
 | qa-boost | `qa:{source_file_path}:{test_type}` | `qa:src/auth/refresh.rs:unit` |
 | ci-watch | `ci:{workflow}:{branch}:{failure_type}` | `ci:validate.yml:main:test-failure` |
 | test-watch | `test:{test_name}:{failure_hash}` | `test:e2e:a1b2c3d4` |
-| gap-watch (reverse) | `rev-gap:{file_path}:{entry_point}` | `rev-gap:src/auth/oauth.rs:handle_callback` |
 
 규칙:
 - 항상 소문자, 공백 없음

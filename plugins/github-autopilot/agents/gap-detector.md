@@ -108,7 +108,7 @@ Grep으로 entry point를 수집할 때, 다음 영역에서 발견된 매치는
 
 > Test-scope 필터링은 이미 Phase 2에서 수행되므로 여기서 중복 검사하지 않습니다.
 
-WARNING 항목은 리포트의 별도 섹션에 기록하며, gap-issue-creator는 이 항목에 대해 이슈를 생성하지 않습니다:
+WARNING 항목은 리포트의 별도 섹션에 기록하며, 다운스트림(gap-ledger-writer)은 이 항목에 대해 task를 생성하지 않습니다:
 ```markdown
 ## Warnings (이슈 생성 제외)
 - ⚠️ WARNING (spec-not-found): R-008 `spec-pipeline-create` — spec_paths에 파일 없음

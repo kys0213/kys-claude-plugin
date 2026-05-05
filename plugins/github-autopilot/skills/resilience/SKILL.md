@@ -1,6 +1,6 @@
 ---
 name: resilience
-description: 유사 세대진화(stagnation) 감지 시 lateral thinking persona를 적용하여 새로운 접근으로 이슈를 생성하는 가이드. gap-watch, gap-issue-creator가 참조
+description: 유사 세대진화(stagnation) 감지 시 lateral thinking persona를 적용하여 새로운 접근으로 이슈를 생성하는 가이드. GitHub issue body의 simhash 기반 — gap-watch는 ledger-only로 전환되며 잠정 미사용 (ledger 기반 stagnation은 follow-up).
 version: 1.0.0
 ---
 
@@ -149,7 +149,7 @@ CLI가 패턴을 분류하고 persona를 결정적으로 추천한다. `recommen
 
 ## 이슈 생성 가이드
 
-stagnation 감지 시, gap-issue-creator는 다음 구조로 이슈를 생성한다:
+stagnation 감지 시, 호출자(예: 향후 ledger 기반 stagnation reader)는 다음 구조로 task body를 생성한다:
 
 ```markdown
 ## 요구사항

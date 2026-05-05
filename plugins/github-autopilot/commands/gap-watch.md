@@ -1,12 +1,14 @@
 ---
-description: "스펙 기반 구현 갭을 탐지하여 GitHub issue를 자동 생성합니다"
+description: "스펙 기반 구현 갭을 탐지하여 autopilot ledger task로 등록합니다 (GitHub issue 생성 없음)"
 argument-hint: ""
 allowed-tools: ["Bash", "Glob", "Read", "Agent", "AskUserQuestion"]
 ---
 
 # Gap Watch
 
-스펙 문서와 구현 코드 사이의 갭을 분석하고, 발견된 갭을 GitHub issue로 등록합니다.
+스펙 문서와 구현 코드 사이의 갭을 분석하고, 발견된 갭을 **autopilot ledger task**로 등록합니다.
+
+> **책임 경계**: gap-watch는 autopilot 내부 to-do 작성자입니다. 결과는 SQLite ledger의 `gap-backlog` epic에만 기록되며 GitHub issue는 생성하지 않습니다 (CLAUDE.md "책임 경계" — 팀원 visible UI 노이즈 최소화). 다운스트림인 `/github-autopilot:work-ledger`가 ledger task를 claim하여 implementer → PR 흐름으로 진행합니다.
 
 ## 사용법
 
@@ -80,7 +82,7 @@ autopilot check mark gap-watch --status active
 
 `github-autopilot.local.md`에서 설정을 읽습니다.
 - `spec_paths`: 스펙 파일 탐색 경로 (기본값: `["spec/", "docs/spec/"]`)
-- `label_prefix`: 라벨 접두사 (기본값: `"autopilot:"`)
+- `label_prefix`: 라벨 접두사 (역방향 분석에서 reverse-gap-ignore 파일 경로 명명 등에만 사용. ledger task에는 라벨이 부여되지 않습니다.)
 
 ### Step 3: 스펙 파일 수집
 
@@ -105,76 +107,41 @@ gap-detector 에이전트를 호출합니다 (background=false):
 전달 정보:
 - spec_files: Step 3에서 수집한 스펙 파일 경로 목록
 - code_path: 프로젝트 루트
+- (선택) reverse: `true`이면 Phase 4 역방향 분석을 활성화하여 코드에 있지만 스펙에 없는 entry point를 추가로 보고합니다.
 
 에이전트가 스펙 파싱 → 구조 매핑 → call chain 갭 분석을 통합 수행합니다.
 
-### Step 4.5: Stagnation Check
+### Step 5: Ledger Task 등록 (Agent)
 
-갭 분석 리포트의 simhash를 계산하고 stagnation 여부를 판단합니다.
+#### Step 5a: Ledger Epic 부트스트랩 (필수)
 
-1. **Simhash 계산**: 갭 분석 리포트(Step 4 결과)에서 ❌ Missing, ⚠️ Partial 항목의 텍스트를 추출하여 simhash를 계산합니다.
+gap-ledger-writer 호출 직전에, 결정적 ledger의 `gap-backlog` epic이 존재하도록 한 번만 보장합니다 (idempotent).
 
-```bash
-# 리포트에서 핵심 텍스트 추출 후 autopilot CLI로 simhash 생성은
-# gap-issue-creator가 내부적으로 수행합니다.
-```
-
-2. **이력 기록**: 현재 분석 결과의 simhash를 loop state에 기록합니다.
-
-```bash
-autopilot check mark gap-watch --output-hash "{simhash}"
-```
-
-3. **유사 이슈 검색**: 각 gap의 fingerprint에 대해 유사 이슈를 조회합니다.
-
-```bash
-autopilot issue search-similar \
-  --fingerprint "gap:{spec_path}:{requirement_keyword}" \
-  --simhash "{simhash}" \
-  --limit 5
-```
-
-4. **Stagnation 판정**: 유사 이슈 결과에서 distance ≤ 5인 closed 이슈가 2개 이상이면 stagnation으로 판정합니다.
-   - **Stagnation 감지**: Step 5에서 gap-issue-creator에 유사 이슈 목록과 함께 **resilience** 스킬의 persona 가이드를 전달합니다.
-   - **Stagnation 미감지**: 기존 흐름대로 Step 5를 진행합니다.
-
-### Step 5: Issue 생성 (Agent)
-
-#### Step 5a: Ledger Epic 부트스트랩
-
-gap-issue-creator 호출 직전에, 결정적 ledger의 `gap-backlog` epic이 존재하도록 한 번만 보장합니다 (idempotent).
-
-`--idempotent` 플래그는 동일한 spec_path로 epic이 이미 존재하면 exit 0으로 정상 종료합니다. spec_path가 다르면 의미적 충돌이므로 여전히 exit 1로 보고됩니다.
+`--idempotent` 플래그는 동일한 spec_path로 epic이 이미 존재하면 exit 0으로 정상 종료합니다. spec_path가 다르면 의미적 충돌이므로 exit 1로 보고됩니다.
 
 ```bash
 EPIC_NAME="gap-backlog"
 EPIC_SPEC="spec/gap-backlog.md"
 if ! autopilot epic create --name "$EPIC_NAME" --spec "$EPIC_SPEC" --idempotent; then
-  # 실패해도 GitHub issue 흐름은 그대로 진행 (ledger는 observer)
-  echo "WARN: gap-backlog epic 부트스트랩 실패 — ledger 쓰기는 skip됩니다"
-  EPIC_NAME=""
+  echo "ERROR: gap-backlog epic 부트스트랩 실패 — ledger 쓰기 불가, cycle 중단"
+  exit 1
 fi
 ```
 
-> ledger는 GitHub issue 생성과 독립적인 부가 기록입니다. epic 부트스트랩이 실패하면 `EPIC_NAME=""`로 설정하여 gap-issue-creator가 ledger 쓰기를 skip하도록 합니다.
+> **중요**: ledger-only writer로 전환되면서 epic 부트스트랩 실패는 더 이상 best-effort observer가 아닌 **blocker**입니다. epic 없이는 task를 등록할 수 없으므로 cycle을 중단합니다.
 
-#### Step 5b: Agent 호출
+#### Step 5b: Agent 호출 (정방향 갭)
 
-gap-issue-creator 에이전트를 호출합니다 (background=false):
+gap-ledger-writer 에이전트를 호출합니다 (background=false):
 
 전달 정보:
-- 갭 분석 리포트 (Step 4 결과)
-- label_prefix
-- **ledger_epic**: `$EPIC_NAME` (비어있으면 ledger 쓰기 skip)
-- **(stagnation 시 추가)** 유사 이슈 목록 (번호, distance, 상태) + resilience persona 가이드
+- **gap_report**: Step 4의 마크다운 리포트 (정방향 ❌ Missing / ⚠️ Partial 항목)
+- **ledger_epic**: `$EPIC_NAME`
+- **reverse_mode**: `false` (정방향)
 
-에이전트가 ❌ Missing, ⚠️ Partial 항목을 GitHub issue로 변환합니다.
-중복 이슈는 자동 필터링됩니다.
-stagnation이 감지된 gap은 과거 이슈를 참조하고 새 persona 관점으로 이슈를 생성합니다.
-GitHub issue가 성공적으로 생성되면 동일 fingerprint로 ledger task도 함께 기록합니다 (observer).
+에이전트가 ❌ Missing, ⚠️ Partial 항목을 ledger task로 변환합니다. 동일 fingerprint의 기존 task는 `skipped_duplicates`로 자동 흡수됩니다 (idempotent).
 
-생성된 이슈가 0건이면 `autopilot check mark gap-watch --status idle` 후 Step 6으로 진행합니다.
-생성된 이슈가 1건 이상이면 `autopilot check mark gap-watch --status active` 후 Step 5.5로 진행합니다.
+`created` 카운트를 누적 변수에 저장하고 Step 5.5로 진행합니다. `check mark` 호출은 정방향 + 역방향 결과를 모두 합산한 후 Step 6 직전에 1회만 수행합니다 (idle/active 판정의 일관성 확보).
 
 ### Step 5.5: 역방향 갭 분석 + HITL (Reverse Gap)
 
@@ -193,14 +160,15 @@ gap-detector의 Phase 4 결과에서 ❌ Unspecified 항목을 처리합니다.
 2. `src/api/internal.rs:health_check` — 내부 헬스체크
 
 각 항목의 처리 방법을 선택하세요 (번호:선택 형식, 예: 1:a 2:c):
-(a) spec-needed 이슈 생성 — 스펙 보강 필요
+(a) ledger task 생성 — 스펙 보강 필요 (rev-gap fingerprint, gap-backlog epic)
 (b) internal 마킹 — 의도적 확장, 향후 분석에서 제외
 (c) skip — 이번 cycle에서만 건너뜀
 ```
 
 3. **선택 결과 처리**:
-   - **(a) spec-needed 이슈**: gap-issue-creator에 위임하여 `{label_prefix}spec-needed` 라벨로 이슈 생성
+   - **(a) ledger task**: gap-ledger-writer를 `reverse_mode=true`로 다시 호출하여 ❌ Unspecified 항목만 `gap-backlog` epic에 등록.
      - fingerprint 형식: `rev-gap:{file_path}:{entry_point}`
+     - body에 "스펙 보강 필요" 컨텍스트가 포함됩니다.
    - **(b) internal 마킹**: `.claude/.autopilot/reverse-gap-ignore.json`에 해당 entry point를 기록
      - 다음 cycle에서 Phase 4 결과에서 자동 제외
    - **(c) skip**: 이번 cycle에서만 무시 (다음 cycle에 다시 표시)
@@ -216,18 +184,27 @@ gap-detector의 Phase 4 결과에서 ❌ Unspecified 항목을 처리합니다.
 }
 ```
 
-### Step 6: 결과 보고
+### Step 6: idle/active 마킹 및 결과 보고
 
-갭 분석 요약과 생성된 이슈 목록을 사용자에게 출력합니다:
+정방향(Step 5b) + 역방향(Step 5.5 (a) 선택) 결과의 `created` 카운트를 합산합니다.
+
+- 합계가 0이면 `autopilot check mark gap-watch --status idle`
+- 합계가 1 이상이면 `autopilot check mark gap-watch --status active`
+
+이후 갭 분석 요약과 등록된 ledger task 목록을 사용자에게 출력합니다:
 - 전체 요구사항 수, Implemented/Partial/Missing 수
 - (역방향 분석 시) 전체 entry point 수, Well-specified/Under-specified/Unspecified 수
-- 생성된 이슈 번호 + 제목
+- 등록된 ledger task id + 제목 (정방향 / 역방향 분리)
+- skip된 항목 수 (duplicates / missing spec / warnings)
+
+> 운영자가 결과를 직접 확인하려면: `autopilot epic status gap-backlog --json` 또는 `autopilot task list --epic gap-backlog`. GitHub issue 검색으로는 더 이상 보이지 않습니다.
 
 ## 주의사항
 
 - 토큰 최적화: MainAgent는 스펙/코드 파일을 직접 읽지 않음. 파일 경로만 수집하고 gap-detector에 위임
 - 스펙 파일 변경이 없어도 코드 변경으로 갭이 해소되었을 수 있으므로 매번 전체 분석
-- 기존 이슈와 중복되지 않도록 gap-issue-creator가 자동 필터링
-- stagnation 감지 시 resilience 스킬의 persona를 활용하여 다른 관점의 이슈를 생성
+- 동일 fingerprint의 기존 ledger task는 자동 흡수되므로 별도의 중복 검사가 필요 없습니다
+- **GitHub issue는 생성하지 않습니다** — `autopilot:ready` 라벨이 부여된 갭 이슈는 더 이상 만들어지지 않습니다. 운영자는 `autopilot epic status gap-backlog` / `autopilot task list --epic gap-backlog`로 결과를 확인합니다.
 - 역방향 분석(Step 5.5)은 `reverse: true` 전달 시에만 활성화
 - reverse-gap-ignore.json의 internal 항목은 다음 cycle부터 자동 제외
+- stagnation/persona 기반 lateral thinking은 GitHub issue body에서 simhash를 추출하는 구조였으므로 ledger-only 전환과 함께 잠정 제거되었습니다 (ledger 기반 stagnation 감지는 추후 follow-up).
