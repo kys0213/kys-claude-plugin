@@ -3,11 +3,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use autopilot::cmd::task::{TaskService, TaskSourceArg, TaskStatusArg};
-use autopilot::domain::{DomainError, Epic, EpicStatus, EventKind, TaskId, TaskSource, TaskStatus};
+use autopilot::domain::{Epic, EpicStatus, EventKind, TaskId, TaskSource, TaskStatus};
 use autopilot::ports::clock::{Clock, FixedClock};
-use autopilot::ports::task_store::{
-    EpicPlan, EventFilter, NewTask, NewWatchTask, TaskStore, TaskStoreError,
-};
+use autopilot::ports::task_store::{EpicPlan, EventFilter, NewTask, TaskStore};
 use autopilot::store::InMemoryTaskStore;
 use chrono::{TimeZone, Utc};
 use tempfile::NamedTempFile;

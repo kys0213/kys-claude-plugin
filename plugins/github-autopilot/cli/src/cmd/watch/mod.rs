@@ -108,15 +108,15 @@ impl fmt::Display for WatchEvent {
 // ── Persisted State ──
 
 #[derive(Serialize, Deserialize, Default)]
-struct WatchState {
+pub struct WatchState {
     #[serde(default)]
-    last_push_sha: String,
+    pub last_push_sha: String,
     #[serde(default)]
-    seen_run_ids: Vec<u64>,
+    pub seen_run_ids: Vec<u64>,
     #[serde(default)]
-    seen_issue_numbers: Vec<u64>,
+    pub seen_issue_numbers: Vec<u64>,
     #[serde(default)]
-    ledger: LedgerState,
+    pub ledger: LedgerState,
 }
 
 // ── CLI ──
@@ -155,6 +155,22 @@ const CI_TICK_INTERVAL: u64 = 6; // every 6 ticks (30s at 5s base)
 const ISSUE_TICK_INTERVAL: u64 = 12; // every 12 ticks (60s at 5s base)
 const STATE_SAVE_INTERVAL: u64 = 60; // every 60 ticks (5min at 5s base)
 
+/// Per-tick mutable state for [`WatchService::tick_once`]. Held across
+/// ticks (and persisted via `save_state` periodically) so the daemon
+/// remembers cursors / dedupe sets between iterations.
+///
+/// Exposed publicly so blackbox tests in `tests/watch_scenarios.rs` can
+/// drive the loop one tick at a time without `thread::sleep`.
+pub struct TickState {
+    pub stale_threshold_secs: i64,
+    pub default_branch: String,
+    pub last_sha: String,
+    pub seen_run_ids: HashSet<u64>,
+    pub seen_issue_numbers: HashSet<u64>,
+    pub state: WatchState,
+    pub tick: u64,
+}
+
 pub struct WatchService {
     github: Arc<dyn GitHub>,
     git: Box<dyn GitOps>,
@@ -192,11 +208,28 @@ impl WatchService {
     }
 
     pub fn run(&self, args: &WatchArgs) -> Result<i32> {
+        let mut ts = match self.init_tick_state(args) {
+            Ok(ts) => ts,
+            Err(code) => return Ok(code),
+        };
+
+        loop {
+            for event in self.tick_once(&mut ts, args) {
+                println!("{event}");
+            }
+            thread::sleep(Duration::from_secs(args.poll_sec));
+        }
+    }
+
+    /// Builds a fresh [`TickState`] from persisted state + initial seeding.
+    /// Mirrors what `run` does before its first iteration. On invalid args
+    /// returns the exit code so `run` can return it cleanly.
+    pub fn init_tick_state(&self, args: &WatchArgs) -> std::result::Result<TickState, i32> {
         let stale_threshold_secs = match parse_duration_seconds(&args.stale_threshold) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("invalid --stale-threshold: {e}");
-                return Ok(2);
+                return Err(2);
             }
         };
         let default_branch = self
@@ -207,7 +240,7 @@ impl WatchService {
         // Seed ledger cursor on first run so we don't backfill historical events.
         state.ledger.seed(self.clock.now());
 
-        let mut last_sha = if state.last_push_sha.is_empty() {
+        let last_sha = if state.last_push_sha.is_empty() {
             // Initialize with current remote SHA
             let _ = self.git.fetch_remote("origin", &args.branch);
             let refname = format!("origin/{}", args.branch);
@@ -232,67 +265,81 @@ impl WatchService {
             }
         }
 
-        let mut tick: u64 = 0;
+        Ok(TickState {
+            stale_threshold_secs,
+            default_branch,
+            last_sha,
+            seen_run_ids,
+            seen_issue_numbers,
+            state,
+            tick: 0,
+        })
+    }
 
-        loop {
-            // Push: every tick
-            if let Some(event) = push::detect_push(&*self.git, "origin", &args.branch, &last_sha) {
-                if let WatchEvent::MainUpdated { ref after, .. } = event {
-                    last_sha = after.clone();
-                }
-                println!("{event}");
+    /// Runs one iteration of the watch loop and returns the events that
+    /// would have been printed. `ts` is mutated for the next tick.
+    ///
+    /// Pure with respect to time (`self.clock`) and external systems
+    /// (`self.github`, `self.store`, `self.fs`), so blackbox tests drive
+    /// it without sleeping.
+    pub fn tick_once(&self, ts: &mut TickState, args: &WatchArgs) -> Vec<WatchEvent> {
+        let mut out: Vec<WatchEvent> = Vec::new();
+
+        // Push: every tick
+        if let Some(event) = push::detect_push(&*self.git, "origin", &args.branch, &ts.last_sha) {
+            if let WatchEvent::MainUpdated { ref after, .. } = event {
+                ts.last_sha = after.clone();
             }
-
-            // CI: every CI_TICK_INTERVAL ticks
-            if tick.is_multiple_of(CI_TICK_INTERVAL) {
-                if let Ok(runs) = self.github.list_completed_runs(20) {
-                    let events =
-                        ci::detect_ci(&runs, &seen_run_ids, &default_branch, &args.branch_filter);
-                    seen_run_ids = runs.iter().map(|r| r.id).collect();
-                    for event in events {
-                        println!("{event}");
-                    }
-                }
-            }
-
-            // Issues: every ISSUE_TICK_INTERVAL ticks
-            if tick.is_multiple_of(ISSUE_TICK_INTERVAL) {
-                if let Ok(issues) = self.github.list_open_issues(50) {
-                    let events =
-                        issues::detect_issues(&issues, &seen_issue_numbers, &args.label_prefix);
-                    seen_issue_numbers = issues.iter().map(|i| i.number).collect();
-                    for event in events {
-                        println!("{event}");
-                    }
-                }
-            }
-
-            // Ledger: every tick (when enabled and a store is attached)
-            if args.ledger_events {
-                if let Some(store) = self.store.as_ref() {
-                    let events = ledger::detect_ledger_events(
-                        store.as_ref(),
-                        &mut state.ledger,
-                        self.clock.now(),
-                        stale_threshold_secs,
-                    );
-                    for event in events {
-                        println!("{event}");
-                    }
-                }
-            }
-
-            // Save state periodically
-            if tick > 0 && tick.is_multiple_of(STATE_SAVE_INTERVAL) {
-                state.last_push_sha = last_sha.clone();
-                state.seen_run_ids = seen_run_ids.iter().copied().collect();
-                state.seen_issue_numbers = seen_issue_numbers.iter().copied().collect();
-                let _ = self.save_state(&state);
-            }
-
-            tick += 1;
-            thread::sleep(Duration::from_secs(args.poll_sec));
+            out.push(event);
         }
+
+        // CI: every CI_TICK_INTERVAL ticks
+        if ts.tick.is_multiple_of(CI_TICK_INTERVAL) {
+            if let Ok(runs) = self.github.list_completed_runs(20) {
+                let events = ci::detect_ci(
+                    &runs,
+                    &ts.seen_run_ids,
+                    &ts.default_branch,
+                    &args.branch_filter,
+                );
+                ts.seen_run_ids = runs.iter().map(|r| r.id).collect();
+                out.extend(events);
+            }
+        }
+
+        // Issues: every ISSUE_TICK_INTERVAL ticks
+        if ts.tick.is_multiple_of(ISSUE_TICK_INTERVAL) {
+            if let Ok(issues) = self.github.list_open_issues(50) {
+                let events =
+                    issues::detect_issues(&issues, &ts.seen_issue_numbers, &args.label_prefix);
+                ts.seen_issue_numbers = issues.iter().map(|i| i.number).collect();
+                out.extend(events);
+            }
+        }
+
+        // Ledger: every tick (when enabled and a store is attached)
+        if args.ledger_events {
+            if let Some(store) = self.store.as_ref() {
+                let events = ledger::detect_ledger_events(
+                    store.as_ref(),
+                    &mut ts.state.ledger,
+                    self.clock.now(),
+                    ts.stale_threshold_secs,
+                );
+                out.extend(events);
+            }
+        }
+
+        // Save state periodically
+        if ts.tick > 0 && ts.tick.is_multiple_of(STATE_SAVE_INTERVAL) {
+            ts.state.last_push_sha = ts.last_sha.clone();
+            ts.state.seen_run_ids = ts.seen_run_ids.iter().copied().collect();
+            ts.state.seen_issue_numbers = ts.seen_issue_numbers.iter().copied().collect();
+            let _ = self.save_state(&ts.state);
+        }
+
+        ts.tick += 1;
+        out
     }
 
     fn state_path(&self) -> std::path::PathBuf {

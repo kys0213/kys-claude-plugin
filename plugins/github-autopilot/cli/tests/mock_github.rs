@@ -9,6 +9,12 @@ pub struct MockGitHub {
     open_issues: Vec<OpenIssue>,
 }
 
+impl Default for MockGitHub {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockGitHub {
     pub fn new() -> Self {
         Self {

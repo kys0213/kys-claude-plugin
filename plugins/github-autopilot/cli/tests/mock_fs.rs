@@ -22,6 +22,12 @@ pub struct MockFs {
     inner: Arc<Mutex<Inner>>,
 }
 
+impl Default for MockFs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockFs {
     pub fn new() -> Self {
         Self {
@@ -78,7 +84,7 @@ impl FsOps for MockFs {
         let mut files: Vec<PathBuf> = inner
             .files
             .keys()
-            .filter(|p| p.parent() == Some(dir) && p.extension().map_or(false, |e| e == extension))
+            .filter(|p| p.parent() == Some(dir) && p.extension().is_some_and(|e| e == extension))
             .cloned()
             .collect();
         files.sort();

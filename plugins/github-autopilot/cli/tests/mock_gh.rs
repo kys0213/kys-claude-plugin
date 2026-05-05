@@ -11,14 +11,22 @@ pub struct MockGh {
     pub calls: Mutex<Vec<Vec<String>>>,
 }
 
+type MatchFn = Box<dyn Fn(&[&str]) -> bool + Send>;
+
 struct MockResponse {
-    match_fn: Box<dyn Fn(&[&str]) -> bool + Send>,
+    match_fn: MatchFn,
     result: MockResult,
 }
 
 enum MockResult {
     Run(String),
     ListJson(Vec<Value>),
+}
+
+impl Default for MockGh {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MockGh {
