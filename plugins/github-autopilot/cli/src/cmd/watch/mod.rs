@@ -320,10 +320,23 @@ impl WatchService {
         // Ledger: every tick (when enabled and a store is attached)
         if args.ledger_events {
             if let Some(store) = self.store.as_ref() {
+                let now = self.clock.now();
+                // Clock-skew defense: if `last_event_at` is in the future
+                // (NTP rollback, watch.json copied across hosts, OS clock
+                // manipulation), the SQLite filter `at >= since` will drop
+                // every fresh event and freeze emission until real time
+                // catches up. Clamp at the read boundary, warn once, and
+                // let the next periodic save persist the corrected cursor.
+                if let Some(future) = ts.state.ledger.clamp_future_cursor(now) {
+                    eprintln!(
+                        "watch.json clock skew detected: last_event_at={future} > now={now}; \
+                         clamping. Likely cause: NTP correction or watch.json copied across hosts."
+                    );
+                }
                 let events = ledger::detect_ledger_events(
                     store.as_ref(),
                     &mut ts.state.ledger,
-                    self.clock.now(),
+                    now,
                     ts.stale_threshold_secs,
                 );
                 out.extend(events);
