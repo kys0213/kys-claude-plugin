@@ -421,20 +421,37 @@ done
 # stale Wip 후보 관찰 (read-only)
 $BIN task list-stale --before 1h --json
 
-# 단건 release (에이전트 권장 경로)
-$BIN task release-stale --task-id <task_id>
-
-# 단건 release (alias — 동일 효과)
+# 단건 release (권장 경로 — 단건 회수의 canonical 이름)
 $BIN task release <task_id>
+
+# 단건 release (deprecated alias — 신규 호출자는 `release` 를 사용)
+$BIN task release-stale --task-id <task_id>
 
 # 비상시 bulk release (에이전트 우회 — 운영자 판단으로 일괄 회수)
 $BIN task release-stale --before 1h --json
 
-# Wip → 명시적 status 강제 변경 (operator override)
-$BIN task force-status <task_id> ready
+# Wip → 명시적 status 변경 (operator override; canonical 이름)
+$BIN task set-status <task_id> --to ready
+
+# (deprecated alias for one release; 동일 효과)
+$BIN task force-status <task_id> --to ready
 ```
 
 > `release-stale --task-id` 와 `release-stale --before` 는 mutually exclusive — clap 이 parser 단계에서 거부합니다.
+
+#### Naming audit 결과 (PR #696)
+
+| 명령 | 평가 | 권장 |
+|------|------|------|
+| `add` / `add-batch` / `list` / `claim` / `complete` / `fail` / `escalate` | 명확 | 유지 |
+| `show` / `get` | 동일 명령 (alias) | 유지, RUNBOOK 에 alias 명시 |
+| `find-by-pr` / `list-stale` | 명확 (다른 의도) | 유지 |
+| `release` | 단건 Wip→Ready (attempts 감소). canonical 단건 회수 이름 | 유지 |
+| `release-stale --before <D>` | bulk-only (운영자 우회) | 유지 |
+| `release-stale --task-id <ID>` | `release <ID>` 와 100% 동일 — `-stale` suffix 는 오해 유발 | **deprecated alias** (한 릴리스 유지). 신규 호출은 `release <ID>` |
+| `force-status` → `set-status` | "force" 는 일회성 override 뉘앙스, "set" 이 직관적 | **rename** + `force-status` deprecated alias |
+
+`show ↔ get` 은 모두 단일 task 조회로 동일하게 동작합니다. `get` 이 spec-canonical 이며 `show` 가 humans-facing helper alias 입니다 — 어느 쪽을 호출해도 결과가 동일합니다.
 
 > lease/heartbeat 기반 정교화 (worker liveness 직접 추적) 는 carry-forward follow-up 입니다 (Section F).
 

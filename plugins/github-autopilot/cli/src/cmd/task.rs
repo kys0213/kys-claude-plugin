@@ -328,15 +328,17 @@ impl<'a> TaskService<'a> {
         Ok(0)
     }
 
-    /// Reaps Wip tasks whose claim went stale (worker crashed / ctrl-C /
-    /// worktree destroyed) by reverting them to Ready. Same effect as
-    /// per-task `release` but driven by a `before` cutoff. Emits a
-    /// `TaskReleasedStale` event per recovered task. Always exits 0 on the
-    /// happy path — empty recovery is normal.
+    /// Bulk recovery: reaps every Wip task whose claim went stale (worker
+    /// crashed / ctrl-C / worktree destroyed) by reverting them to Ready.
+    /// Driven by a `before` cutoff — same effect as per-task `release` for
+    /// each candidate. Emits a `TaskReleasedStale` event per recovered task.
+    /// Always exits 0 on the happy path — empty recovery is normal.
     ///
     /// Per `CLAUDE.md` "책임 경계", this remains an emergency operator
     /// primitive — the recommended flow is agent-driven review via
-    /// `list_stale` + per-task `release` / `fail` / `escalate` calls.
+    /// `list_stale` + per-task `release` / `fail` / `escalate` calls. Per-task
+    /// recovery should call `release` directly; `release-stale --task-id`
+    /// remains a deprecated alias for back-compat (PR #696 audit).
     pub fn release_stale(
         &self,
         before_seconds: i64,

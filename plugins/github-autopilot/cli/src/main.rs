@@ -174,7 +174,7 @@ fn main() {
                 }
                 TaskCommands::Show { task_id, json } => svc.show(&task_id, json, &mut out),
                 TaskCommands::Get { task_id, json } => svc.show(&task_id, json, &mut out),
-                TaskCommands::ForceStatus {
+                TaskCommands::SetStatus {
                     task_id,
                     to,
                     reason,
@@ -219,9 +219,10 @@ fn main() {
                     json,
                 } => {
                     if let Some(id) = task_id {
-                        // Per-task path reuses `release` so the transition is
-                        // identical to manual `task release` — see CLAUDE.md
-                        // "책임 경계" for why this branch exists.
+                        // Deprecated per-task alias: routes to `release` so the
+                        // transition is identical to manual `task release`.
+                        // Kept for back-compat (PR #696 audit) — new callers
+                        // should use `task release <ID>` directly.
                         svc.release(&id, &mut out)
                     } else {
                         match resolve_before_seconds(before.as_deref(), before_seconds) {
