@@ -1,13 +1,18 @@
 pub mod ci;
 pub mod issues;
+pub mod ledger;
 pub mod push;
 
+use crate::cmd::task::parse_duration_seconds;
 use crate::fs::FsOps;
 use crate::git::GitOps;
 use crate::github::GitHub;
+use crate::ports::clock::{Clock, StdClock};
+use crate::ports::task_store::TaskStore;
 use anyhow::{Context, Result};
 use ci::BranchFilter;
 use clap::Args;
+use ledger::LedgerState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
@@ -38,6 +43,21 @@ pub enum WatchEvent {
     NewIssue {
         number: u64,
         title: String,
+    },
+    /// Ledger: a task is now Ready with no unmet deps.
+    TaskReady {
+        epic: String,
+        task_id: String,
+    },
+    /// Ledger: every task in `epic` is Done.
+    EpicDone {
+        epic: String,
+        total: u64,
+    },
+    /// Ledger: Wip tasks past the stale threshold (one event per epic).
+    StaleWip {
+        epic: String,
+        candidates: Vec<String>,
     },
 }
 
@@ -71,6 +91,16 @@ impl fmt::Display for WatchEvent {
             WatchEvent::NewIssue { number, title } => {
                 write!(f, "NEW_ISSUE number={number} title={title}")
             }
+            WatchEvent::TaskReady { epic, task_id } => {
+                write!(f, "TASK_READY epic={epic} task_id={task_id}")
+            }
+            WatchEvent::EpicDone { epic, total } => {
+                write!(f, "EPIC_DONE epic={epic} total={total}")
+            }
+            WatchEvent::StaleWip { epic, candidates } => {
+                let json = serde_json::to_string(candidates).unwrap_or_else(|_| "[]".to_string());
+                write!(f, "STALE_WIP candidates={json} epic={epic}")
+            }
         }
     }
 }
@@ -85,6 +115,8 @@ struct WatchState {
     seen_run_ids: Vec<u64>,
     #[serde(default)]
     seen_issue_numbers: Vec<u64>,
+    #[serde(default)]
+    ledger: LedgerState,
 }
 
 // ── CLI ──
@@ -103,6 +135,17 @@ pub struct WatchArgs {
     /// Label prefix for issue filtering
     #[arg(long, default_value = "autopilot:")]
     pub label_prefix: String,
+    /// Stale threshold for STALE_WIP detection (Go-style duration: `30s`,
+    /// `5m`, `1h`, `1d`). Wip tasks with `updated_at` older than `now -
+    /// threshold` are reported once per tick.
+    #[arg(long, default_value = "1h")]
+    pub stale_threshold: String,
+    /// Emit ledger events (TASK_READY / EPIC_DONE / STALE_WIP) on each
+    /// tick by polling the SQLite events table. Disable with
+    /// `--no-ledger-events` for back-compat with pre-ledger Monitor
+    /// dispatchers.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    pub ledger_events: bool,
 }
 
 // ── Service ──
@@ -116,34 +159,66 @@ pub struct WatchService {
     github: Arc<dyn GitHub>,
     git: Box<dyn GitOps>,
     fs: Box<dyn FsOps>,
+    /// Optional ledger store. `None` means ledger emission is unavailable
+    /// (e.g. SQLite open failed); the loop will still emit GitHub events.
+    store: Option<Arc<dyn TaskStore>>,
+    clock: Arc<dyn Clock>,
 }
 
 impl WatchService {
     pub fn new(github: Arc<dyn GitHub>, git: Box<dyn GitOps>, fs: Box<dyn FsOps>) -> Self {
-        Self { github, git, fs }
+        Self {
+            github,
+            git,
+            fs,
+            store: None,
+            clock: Arc::new(StdClock),
+        }
     }
 
-    pub fn run(
-        &self,
-        branch: &str,
-        branch_filter: &BranchFilter,
-        label_prefix: &str,
-        poll_sec: u64,
-    ) -> Result<i32> {
-        let default_branch = self.github.default_branch().unwrap_or(branch.to_string());
-        let state = self.load_state();
+    /// Attaches a ledger store so this service can emit `TASK_READY`,
+    /// `EPIC_DONE`, and `STALE_WIP` events alongside the existing GitHub
+    /// events.
+    pub fn with_store(mut self, store: Arc<dyn TaskStore>) -> Self {
+        self.store = Some(store);
+        self
+    }
+
+    /// Replaces the default `StdClock`. Used by tests that need
+    /// deterministic timestamps via `FixedClock`.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    pub fn run(&self, args: &WatchArgs) -> Result<i32> {
+        let stale_threshold_secs = match parse_duration_seconds(&args.stale_threshold) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("invalid --stale-threshold: {e}");
+                return Ok(2);
+            }
+        };
+        let default_branch = self
+            .github
+            .default_branch()
+            .unwrap_or(args.branch.to_string());
+        let mut state = self.load_state();
+        // Seed ledger cursor on first run so we don't backfill historical events.
+        state.ledger.seed(self.clock.now());
 
         let mut last_sha = if state.last_push_sha.is_empty() {
             // Initialize with current remote SHA
-            let _ = self.git.fetch_remote("origin", branch);
-            let refname = format!("origin/{branch}");
+            let _ = self.git.fetch_remote("origin", &args.branch);
+            let refname = format!("origin/{}", args.branch);
             self.git.rev_parse_ref(&refname).unwrap_or_default()
         } else {
-            state.last_push_sha
+            state.last_push_sha.clone()
         };
 
-        let mut seen_run_ids: HashSet<u64> = state.seen_run_ids.into_iter().collect();
-        let mut seen_issue_numbers: HashSet<u64> = state.seen_issue_numbers.into_iter().collect();
+        let mut seen_run_ids: HashSet<u64> = state.seen_run_ids.iter().copied().collect();
+        let mut seen_issue_numbers: HashSet<u64> =
+            state.seen_issue_numbers.iter().copied().collect();
 
         // Seed seen sets on first run to avoid emitting all existing items
         if seen_run_ids.is_empty() {
@@ -161,7 +236,7 @@ impl WatchService {
 
         loop {
             // Push: every tick
-            if let Some(event) = push::detect_push(&*self.git, "origin", branch, &last_sha) {
+            if let Some(event) = push::detect_push(&*self.git, "origin", &args.branch, &last_sha) {
                 if let WatchEvent::MainUpdated { ref after, .. } = event {
                     last_sha = after.clone();
                 }
@@ -172,7 +247,7 @@ impl WatchService {
             if tick.is_multiple_of(CI_TICK_INTERVAL) {
                 if let Ok(runs) = self.github.list_completed_runs(20) {
                     let events =
-                        ci::detect_ci(&runs, &seen_run_ids, &default_branch, branch_filter);
+                        ci::detect_ci(&runs, &seen_run_ids, &default_branch, &args.branch_filter);
                     seen_run_ids = runs.iter().map(|r| r.id).collect();
                     for event in events {
                         println!("{event}");
@@ -183,8 +258,24 @@ impl WatchService {
             // Issues: every ISSUE_TICK_INTERVAL ticks
             if tick.is_multiple_of(ISSUE_TICK_INTERVAL) {
                 if let Ok(issues) = self.github.list_open_issues(50) {
-                    let events = issues::detect_issues(&issues, &seen_issue_numbers, label_prefix);
+                    let events =
+                        issues::detect_issues(&issues, &seen_issue_numbers, &args.label_prefix);
                     seen_issue_numbers = issues.iter().map(|i| i.number).collect();
+                    for event in events {
+                        println!("{event}");
+                    }
+                }
+            }
+
+            // Ledger: every tick (when enabled and a store is attached)
+            if args.ledger_events {
+                if let Some(store) = self.store.as_ref() {
+                    let events = ledger::detect_ledger_events(
+                        store.as_ref(),
+                        &mut state.ledger,
+                        self.clock.now(),
+                        stale_threshold_secs,
+                    );
                     for event in events {
                         println!("{event}");
                     }
@@ -193,15 +284,14 @@ impl WatchService {
 
             // Save state periodically
             if tick > 0 && tick.is_multiple_of(STATE_SAVE_INTERVAL) {
-                let _ = self.save_state(&WatchState {
-                    last_push_sha: last_sha.clone(),
-                    seen_run_ids: seen_run_ids.iter().copied().collect(),
-                    seen_issue_numbers: seen_issue_numbers.iter().copied().collect(),
-                });
+                state.last_push_sha = last_sha.clone();
+                state.seen_run_ids = seen_run_ids.iter().copied().collect();
+                state.seen_issue_numbers = seen_issue_numbers.iter().copied().collect();
+                let _ = self.save_state(&state);
             }
 
             tick += 1;
-            thread::sleep(Duration::from_secs(poll_sec));
+            thread::sleep(Duration::from_secs(args.poll_sec));
         }
     }
 
