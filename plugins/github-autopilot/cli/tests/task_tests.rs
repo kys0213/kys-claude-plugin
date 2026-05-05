@@ -838,3 +838,35 @@ fn force_status_still_routes_through_service() {
         .unwrap();
     assert_eq!(t.status, TaskStatus::Done);
 }
+
+// ---------- set-status (rename of force-status, with deprecated alias) ----------
+
+/// Both `set-status` (canonical post-rename) and `force-status` (deprecated
+/// alias kept for one release) must parse to the same `TaskCommands::SetStatus`
+/// variant with identical field values — this is what backwards-compat means
+/// at the CLI surface (PR #696 audit).
+fn assert_set_status_parses(subcmd: &str) {
+    use autopilot::cmd::{Cli, Commands, TaskCommands};
+    use clap::Parser;
+    let cli = Cli::try_parse_from(["autopilot", "task", subcmd, "aaaaaaaaaaaa", "--to", "done"])
+        .unwrap_or_else(|e| panic!("`task {subcmd}` should parse: {e}"));
+    match cli.command {
+        Commands::Task {
+            command: TaskCommands::SetStatus { task_id, to, .. },
+        } => {
+            assert_eq!(task_id, "aaaaaaaaaaaa");
+            assert_eq!(to, TaskStatusArg::Done);
+        }
+        _ => panic!("`task {subcmd}` did not resolve to SetStatus variant"),
+    }
+}
+
+#[test]
+fn set_status_parses_as_canonical_name() {
+    assert_set_status_parses("set-status");
+}
+
+#[test]
+fn force_status_alias_still_parses_to_set_status() {
+    assert_set_status_parses("force-status");
+}

@@ -56,7 +56,7 @@ CLAUDE.md "책임 경계 (CLI vs Skill/Agent)" 에 따라:
 - worker crash / ctrl-C / worktree 강제 삭제 등 일시적 사유
 - attempts 가 max_attempts 미만이고 다른 worker 가 다시 집어들 여지 있음
 
-> 명령: `autopilot task release-stale --task-id <ID>`. 이 CLI 는 attempts 를 1 감소시키고 Ready 로 되돌립니다 (`release_claim` 과 동일 효과).
+> 명령: `autopilot task release <ID>`. 이 CLI 는 attempts 를 1 감소시키고 Ready 로 되돌립니다 (`release_claim` 과 동일 효과). `release-stale --task-id <ID>` 는 동일 효과의 deprecated alias 이며 기존 호출자 호환을 위해 유지됩니다 — 신규 호출은 `release` 를 사용합니다 (PR #696 audit 참조).
 
 ### 4. leave alone
 
@@ -69,8 +69,8 @@ drop-through 케이스 (가능한 한 보수적으로 사용):
 각 task 결정 후 즉시 해당 CLI 를 실행합니다. 한 task 의 실행 실패가 다른 task 의 처리를 막지 않도록, 각 명령은 독립 호출하고 실패 시 stderr 만 기록한 뒤 다음으로 진행합니다.
 
 ```bash
-# release
-autopilot task release-stale --task-id <ID> || echo "WARN: release failed for <ID>"
+# release (per-task — same primitive as manual `task release`)
+autopilot task release <ID> || echo "WARN: release failed for <ID>"
 
 # fail
 autopilot task fail <ID> || echo "WARN: fail failed for <ID>"
@@ -79,6 +79,8 @@ autopilot task fail <ID> || echo "WARN: fail failed for <ID>"
 ISSUE=$(gh issue create --title "stale task <ID>" --body "..." --json number -q '.number')
 autopilot task escalate <ID> --issue "$ISSUE" || echo "WARN: escalate failed for <ID>"
 ```
+
+> Legacy: `autopilot task release-stale --task-id <ID>` 는 `release <ID>` 와 100% 동일한 효과의 deprecated alias 입니다 (PR #696 audit). 기존 자동화 스크립트 호환을 위해 유지하지만, 신규 호출은 `release` 를 사용합니다 — `-stale` suffix 는 "stale 한 것을 release" 로 오해를 일으켜 단건 회수에 부적합한 이름입니다.
 
 ## 출력
 
