@@ -214,9 +214,13 @@ fn main() {
             let svc = cmd::epic::epic_service(&store, &clock);
             let mut out = stdout();
             match command {
-                cmd::epic::EpicCommands::Create(args) => {
-                    svc.create(&args.name, &args.spec, args.branch.as_deref(), &mut out)
-                }
+                cmd::epic::EpicCommands::Create(args) => svc.create_with_options(
+                    &args.name,
+                    &args.spec,
+                    args.branch.as_deref(),
+                    args.idempotent,
+                    &mut out,
+                ),
                 cmd::epic::EpicCommands::List(args) => svc.list(args.status, args.json, &mut out),
                 cmd::epic::EpicCommands::Get(args) => svc.get(&args.name, args.json, &mut out),
                 cmd::epic::EpicCommands::Status(args) => {

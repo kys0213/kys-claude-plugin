@@ -92,6 +92,51 @@ fn create_returns_exit_1_when_epic_already_exists() {
 }
 
 #[test]
+fn create_idempotent_creates_when_epic_missing() {
+    let (store, clock) = fixture();
+    let svc = EpicService::new(store.as_ref(), &clock);
+
+    let (code, out) =
+        capture(|w| svc.create_with_options("e", Path::new("spec/e.md"), None, true, w));
+    assert_eq!(code, 0, "stdout: {out}");
+    assert!(out.contains("created"), "stdout: {out}");
+    let e = store.get_epic("e").unwrap().unwrap();
+    assert_eq!(e.spec_path, PathBuf::from("spec/e.md"));
+}
+
+#[test]
+fn create_idempotent_succeeds_when_epic_exists_with_same_spec() {
+    let (store, clock) = fixture();
+    let svc = EpicService::new(store.as_ref(), &clock);
+    let _ = capture(|w| svc.create("e", Path::new("spec/e.md"), None, w));
+
+    let (code, out) =
+        capture(|w| svc.create_with_options("e", Path::new("spec/e.md"), None, true, w));
+    assert_eq!(code, 0, "stdout: {out}");
+    assert!(out.contains("already exists (idempotent)"), "stdout: {out}");
+    // Single epic — no duplicate row inserted.
+    assert_eq!(store.list_epics(None).unwrap().len(), 1);
+}
+
+#[test]
+fn create_idempotent_errors_when_epic_exists_with_different_spec() {
+    let (store, clock) = fixture();
+    let svc = EpicService::new(store.as_ref(), &clock);
+    let _ = capture(|w| svc.create("e", Path::new("spec/e.md"), None, w));
+
+    let (code, out) =
+        capture(|w| svc.create_with_options("e", Path::new("spec/other.md"), None, true, w));
+    assert_eq!(code, 1, "stdout: {out}");
+    assert!(
+        out.contains("different spec_path"),
+        "stdout should explain mismatch: {out}"
+    );
+    // Existing epic untouched.
+    let e = store.get_epic("e").unwrap().unwrap();
+    assert_eq!(e.spec_path, PathBuf::from("spec/e.md"));
+}
+
+#[test]
 fn list_filters_by_status_and_renders_json() {
     let (store, clock) = fixture();
     let svc = EpicService::new(store.as_ref(), &clock);

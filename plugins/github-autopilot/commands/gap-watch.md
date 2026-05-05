@@ -144,20 +144,16 @@ autopilot issue search-similar \
 
 gap-issue-creator 호출 직전에, 결정적 ledger의 `gap-backlog` epic이 존재하도록 한 번만 보장합니다 (idempotent).
 
+`--idempotent` 플래그는 동일한 spec_path로 epic이 이미 존재하면 exit 0으로 정상 종료합니다. spec_path가 다르면 의미적 충돌이므로 여전히 exit 1로 보고됩니다.
+
 ```bash
 EPIC_NAME="gap-backlog"
 EPIC_SPEC="spec/gap-backlog.md"
-out=$(autopilot epic create --name "$EPIC_NAME" --spec "$EPIC_SPEC" 2>&1) || true
-case "$out" in
-  *"created"*|*"already exists"*)
-    # 정상: 새로 생성 또는 이미 존재 (epic create는 이미 존재 시 exit 1)
-    ;;
-  *)
-    # 실패해도 GitHub issue 흐름은 그대로 진행 (ledger는 observer)
-    echo "WARN: gap-backlog epic 부트스트랩 실패 — ledger 쓰기는 skip됩니다: $out"
-    EPIC_NAME=""
-    ;;
-esac
+if ! autopilot epic create --name "$EPIC_NAME" --spec "$EPIC_SPEC" --idempotent; then
+  # 실패해도 GitHub issue 흐름은 그대로 진행 (ledger는 observer)
+  echo "WARN: gap-backlog epic 부트스트랩 실패 — ledger 쓰기는 skip됩니다"
+  EPIC_NAME=""
+fi
 ```
 
 > ledger는 GitHub issue 생성과 독립적인 부가 기록입니다. epic 부트스트랩이 실패하면 `EPIC_NAME=""`로 설정하여 gap-issue-creator가 ledger 쓰기를 skip하도록 합니다.
