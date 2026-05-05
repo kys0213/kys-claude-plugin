@@ -897,6 +897,24 @@ impl TaskRepo for SqliteTaskStore {
         Ok(())
     }
 
+    fn list_stale(&self, before: DateTime<Utc>) -> Result<Vec<Task>> {
+        let conn = self.conn.lock().expect("poisoned");
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, epic_name, source, fingerprint, title, body, status, attempts,
+                        branch, pr_number, escalated_issue, created_at, updated_at
+                   FROM tasks
+                  WHERE status='wip' AND updated_at < ?
+                  ORDER BY updated_at, id",
+            )
+            .map_err(backend)?;
+        let rows = stmt
+            .query_map(params![before], task_from_row)
+            .map_err(backend)?
+            .collect::<std::result::Result<Vec<_>, _>>();
+        rows.map_err(backend)
+    }
+
     fn release_stale(&self, before: DateTime<Utc>, now: DateTime<Utc>) -> Result<Vec<TaskId>> {
         let mut conn = self.conn.lock().expect("poisoned");
         let tx = conn.transaction().map_err(backend)?;

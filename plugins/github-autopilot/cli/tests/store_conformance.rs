@@ -163,6 +163,83 @@ fn body_release_claim_decrements_attempts(store: Arc<dyn TaskStore>) {
     assert_eq!(claimed.attempts, 1);
 }
 
+fn body_list_stale_returns_old_wip_tasks_without_modifying_them(store: Arc<dyn TaskStore>) {
+    // Two old Wip tasks + one fresh Wip task. list_stale must return the
+    // two old ones in deterministic (updated_at, id) order, and must NOT
+    // mutate any task: status stays Wip, attempts unchanged, no
+    // TaskReleasedStale event emitted (read-only contract).
+    store
+        .insert_epic_with_tasks(
+            plan("e", vec![nt("A", "a"), nt("B", "b"), nt("C", "c")], vec![]),
+            t0(),
+        )
+        .unwrap();
+    let _ = store.claim_next_task("e", t0()).unwrap().unwrap(); // A — old
+    let _ = store.claim_next_task("e", t0()).unwrap().unwrap(); // B — old
+    let _ = store
+        .claim_next_task("e", t0() + Duration::minutes(10))
+        .unwrap()
+        .unwrap(); // C — fresh
+
+    let stale = store.list_stale(t0() + Duration::minutes(5)).unwrap();
+    let ids: Vec<String> = stale.iter().map(|t| t.id.as_str().to_string()).collect();
+    assert_eq!(ids, vec!["A".to_string(), "B".to_string()]);
+    // Returned shape: full Task records — caller (agent) sees epic_name,
+    // updated_at, attempts, status to make per-task decisions.
+    assert!(stale.iter().all(|t| t.status == TaskStatus::Wip));
+    assert!(stale.iter().all(|t| t.epic_name == "e"));
+    assert!(stale.iter().all(|t| t.attempts == 1));
+
+    // Read-only: nothing changed.
+    let by_id = |id: &str| store.get_task(&TaskId::from_raw(id)).unwrap().unwrap();
+    assert_eq!(by_id("A").status, TaskStatus::Wip);
+    assert_eq!(by_id("B").status, TaskStatus::Wip);
+    assert_eq!(by_id("C").status, TaskStatus::Wip);
+    assert_eq!(by_id("A").attempts, 1);
+    let evs = store
+        .list_events(EventFilter {
+            kinds: vec![EventKind::TaskReleasedStale],
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(
+        evs.is_empty(),
+        "list_stale must not emit TaskReleasedStale: {evs:?}"
+    );
+}
+
+fn body_list_stale_skips_recent_or_non_wip_tasks(store: Arc<dyn TaskStore>) {
+    // A recent Wip + tasks in non-Wip statuses (Done, Ready, Escalated) with
+    // stale `updated_at` must all be excluded. Same boundary contract as
+    // release_stale, just observation-only.
+    store
+        .insert_epic_with_tasks(
+            plan(
+                "e",
+                vec![nt("A", "a"), nt("B", "b"), nt("C", "c"), nt("D", "d")],
+                vec![],
+            ),
+            t0(),
+        )
+        .unwrap();
+    // A: claim+complete (Done). B: stays Ready. C: force to Escalated.
+    // D: claim recently (Wip, but fresh — must be excluded).
+    let _ = store.claim_next_task("e", t0()).unwrap().unwrap();
+    store
+        .complete_task_and_unblock(&TaskId::from_raw("A"), 1, t0())
+        .unwrap();
+    store
+        .force_status(&TaskId::from_raw("C"), TaskStatus::Escalated, "test", t0())
+        .unwrap();
+    let _ = store
+        .claim_next_task("e", t0() + Duration::minutes(10))
+        .unwrap()
+        .unwrap(); // D — fresh
+
+    let stale = store.list_stale(t0() + Duration::minutes(5)).unwrap();
+    assert!(stale.is_empty(), "expected empty list, got {stale:?}");
+}
+
 fn body_release_stale_recovers_old_wip_tasks(store: Arc<dyn TaskStore>) {
     // Two tasks claimed at t0 (Wip), one task claimed at t0+10m. Cutoff at
     // t0+5m must recover only the older one. Validates: status -> Ready,
@@ -759,6 +836,8 @@ conformance_suite!(
     body_claim_skips_tasks_with_unsatisfied_deps,
     body_release_claim_decrements_attempts,
     body_release_claim_rejects_non_wip,
+    body_list_stale_returns_old_wip_tasks_without_modifying_them,
+    body_list_stale_skips_recent_or_non_wip_tasks,
     body_release_stale_recovers_old_wip_tasks,
     body_release_stale_skips_recent_wip_tasks,
     body_release_stale_skips_non_wip_tasks,

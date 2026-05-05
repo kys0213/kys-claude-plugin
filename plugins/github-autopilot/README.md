@@ -151,7 +151,7 @@ autopilot pipeline idle --label-prefix "autopilot:"
 
 ## Ledger Integration
 
-GitHub 이슈 파이프라인과 별도로, 결정적 SQLite ledger(`autopilot` CLI의 `epic`/`task`/`events` 서브커맨드)를 운영합니다. **ledger-followups 롤업 (PR #684–#688) 머지 이후 lifecycle 은 완전 자동입니다**: writer cron 이 task 를 기록하고, work-ledger reader cron (10m) 이 claim 하고, issue-implementer → branch-promoter 가 구현 + PR 을 열고, pr-merger 가 머지 시 close-the-loop 을 닫고, release-stale cron (30m) 이 worker crash / ctrl-C 발생 시 stale Wip 을 회수합니다. 운영자는 cron 등록 후 자리를 비울 수 있습니다.
+GitHub 이슈 파이프라인과 별도로, 결정적 SQLite ledger(`autopilot` CLI의 `epic`/`task`/`events` 서브커맨드)를 운영합니다. **ledger-followups 롤업 (PR #684–#688) + ledger-polish 롤업 (PR #693–#696) 머지 이후 lifecycle 은 완전 자동입니다**: writer cron 이 task 를 기록하고, work-ledger reader cron (10m, **by-depth priority strategy**) 이 claim 하고, issue-implementer → branch-promoter 가 구현 + PR 을 열고, pr-merger 가 머지 시 close-the-loop 을 닫고, stale-task-review cron (30m) 이 worker crash / ctrl-C 발생 시 **CLI 관찰 + 에이전트 결정** 흐름으로 회수합니다. 운영자는 cron 등록 후 자리를 비울 수 있습니다.
 
 | Backlog Epic | Writer | 역할 |
 |--------------|--------|------|
@@ -159,19 +159,48 @@ GitHub 이슈 파이프라인과 별도로, 결정적 SQLite ledger(`autopilot` 
 | `qa-backlog` | `/github-autopilot:qa-boost` (cron) | 테스트 갭 발견 시 GitHub issue와 동시에 ledger task 기록 (observer) |
 | `ci-backlog` | `/github-autopilot:ci-watch` (cron) | CI 실패 발견 시 GitHub issue와 동시에 ledger task 기록 (observer) |
 | (모든 epic) | `pr-merger` 에이전트 + `merge-prs` Step 4 fast-path | PR 머지 후 `task complete --pr <N>` 호출 (Wip→Done). PR #666 + PR #686 (F1) |
-| (모든 epic) | `/github-autopilot:work-ledger` (**10m cron**, PR #684 F2) | reader — Ready task를 epic당 1개씩 round-robin claim → `issue-implementer` 디스패치 → `branch-promoter` (Closes #N suppress when missing, PR #685 F3) → PR open |
-| (모든 epic) | `autopilot task release-stale --before 1h` (**30m cron**, PR #688 F5) | stale Wip 자동 회수 — worker crash / ctrl-C / worktree 파괴 시 attempts 감소 후 Ready 로 복귀 |
+| (모든 epic) | `/github-autopilot:work-ledger` (**10m cron**, PR #684 F2) | reader — Ready task를 epic당 1개씩 selection strategy 로 claim → `issue-implementer` 디스패치 → `branch-promoter` (Closes #N suppress when missing, PR #685 F3) → PR open. **default `by-depth`** (PR #694 P1) |
+| (모든 epic) | `/github-autopilot:stale-task-review --before <D>` (**30m cron**, PR #695 P2) | stale Wip 회수 — `autopilot task list-stale --json` (read-only) → `stale-task-reviewer` 에이전트가 task 별 release / fail / escalate / leave alone 결정 |
 
-자동화된 lifecycle:
+### Epic priority strategy (PR #694 P1)
+
+`/github-autopilot:work-ledger` 의 epic claim 순서는 default 가 `by-depth` (각 epic 의 ready 큐 깊이가 큰 순) 입니다. `github-autopilot.local.md` frontmatter 또는 `WORK_LEDGER_PRIORITY` 환경변수로 override 합니다:
+
+```yaml
+work_ledger:
+  priority: "by-depth"      # default — lazy fairness, 깊은 큐가 굶지 않음
+  # 또는: "by-age" — oldest created_at 우선
+  # 또는: "round-robin" — PR #694 이전과 동일 (back-compat)
+  # 또는: ["gap-backlog", "qa-backlog", "ci-backlog"] — 명시 리스트 순회
+```
+
+CLI 자체는 변경되지 않았습니다 — 판단은 Skill 레이어 (CLAUDE.md "책임 경계: CLI vs Skill/Agent") 가 `epic status --json` 으로 ranking 을 결정한 뒤 기존 `task claim --epic <NAME>` 을 호출합니다.
+
+### Stale 회수: list-stale + agent decision (PR #695 P2)
+
+PR #688 (F5) 의 cron 은 `autopilot task release-stale --before <D>` 를 직접 호출하여 cutoff 보다 오래된 모든 Wip 을 자동 bulk-release 했습니다. PR #695 (P2) 이후 cron 은 `/github-autopilot:stale-task-review` 를 호출하며, 이 skill 은 새 read-only CLI (`autopilot task list-stale --json`) 로 후보를 관찰하고 `stale-task-reviewer` 에이전트가 task 별로 결정합니다 (release / fail / escalate / leave alone). 결정적 변환은 CLI, 컨텍스트 의존 판단은 에이전트 — CLAUDE.md "책임 경계" 적용.
+
+bulk `autopilot task release-stale --before <D>` 는 운영자 비상 우회용으로 CLI 에 유지됩니다 (날짜/주 단위 지원: `1d`, `1w`, `2d12h` — PR #693 P4).
+
+### Naming clarity (PR #696 P3)
+
+PR #696 의 user-facing audit 후 두 명령이 더 직관적인 이름으로 정리되었습니다:
+
+- `task force-status <ID> --to <STATUS>` → **`task set-status <ID> --to <STATUS>`** (canonical). `force-status` 는 deprecated alias 로 한 릴리스 더 유지됩니다.
+- 단건 회수는 **`task release <ID>`** 가 canonical 입니다. `task release-stale --task-id <ID>` 는 100% 동일 효과의 deprecated alias 로 유지됩니다 (`-stale` suffix 가 단건 회수에 부적합).
+
+자동화 스크립트를 신규 작성한다면 canonical 이름을 사용하세요. 기존 호출자는 한 릴리스 더 동작합니다.
+
+### 자동화된 lifecycle
 
 ```
 gap/qa/ci-watch (writer cron) ──task add──> Ready
-                                              │  work-ledger cron (10m)
+                                              │  work-ledger cron (10m, by-depth strategy)
                                               ▼
                                              Wip ──fail (retried)──> Ready (attempts++)
                                               │   fail (escalated, attempts >= max)──> Escalated
                                               │   complete --pr <N>──> Done   (merge-prs Step 4/5)
-                                              │   release-stale (30m)──> Ready (worker crash 복구)
+                                              │   stale-task-review (30m) ──> agent per-task decision
                                               └─ release ──> Ready (transient infra failures only)
 ```
 
@@ -185,7 +214,14 @@ Ledger 쓰기는 GitHub issue 흐름의 **보조 observer**입니다. ledger CLI
 - **F2 (PR #684)** — `/github-autopilot:work-ledger` 가 autopilot Step 2 에서 10m cron 으로 자동 등록.
 - **F3 (PR #685)** — `branch-promoter` 가 `issue_number` 누락 시 PR body 에서 `Closes #N` 줄 suppress (깨진 링크 방지).
 - **F4 (PR #687)** — `autopilot stats update --command work-ledger` 가 canonical 목록에 포함 (`--command` 는 free string 유지).
-- **F5 (PR #688)** — `autopilot task release-stale --before <duration>` + 30m cron 으로 stale Wip 자동 회수 (idempotent).
+- **F5 (PR #688)** — `autopilot task release-stale --before <duration>` + 30m cron 으로 stale Wip 자동 회수 (idempotent). cron 동작 진화 사항은 위 "Stale 회수" 서브섹션 참조.
+
+### Ledger-polish 롤업 (P1–P4)
+
+- **P1 (PR #694)** — work-ledger epic priority strategy: `by-depth` default + Skill-side ranking. CLI 변경 없음.
+- **P2 (PR #695)** — stale 회수를 CLI observation (`list-stale`, read-only) + agent decision (`stale-task-reviewer`) 으로 분리. cron 동작 변경.
+- **P3 (PR #696)** — task 서브커맨드 naming clarity: `set-status` rename, `release` canonical for single-task recovery (`force-status`/`release-stale --task-id` deprecated alias).
+- **P4 (PR #693)** — duration parser `d`/`w` 단위 지원 (`mo`/`y` 는 가변 길이라 의도적 미지원).
 
 ### E2E Smoke Verification
 

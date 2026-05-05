@@ -158,7 +158,19 @@ pub trait TaskRepo: Send + Sync {
     /// reach another worker. Each recovered task gets a `TaskReleasedStale`
     /// event for audit. Returns the ids of recovered tasks (empty when no
     /// stale Wip exists — idempotent).
+    ///
+    /// Per `CLAUDE.md` "책임 경계", the **decision** of when to bulk-recover
+    /// vs review per-task is the agent's call (see `list_stale`); this CLI
+    /// path remains as an emergency operator primitive.
     fn release_stale(&self, before: DateTime<Utc>, now: DateTime<Utc>) -> Result<Vec<TaskId>>;
+
+    /// Read-only observation of Wip tasks whose `updated_at` is older than
+    /// `before`. Returns the same set of tasks that `release_stale` would
+    /// reap, but **without** modifying any state. Companion to the agent-
+    /// driven recovery flow: agent calls `list_stale` → reviews each task
+    /// → decides per-task to call `release_claim` / `mark_task_failed` /
+    /// `escalate_task`. Empty result is normal (idempotent observation).
+    fn list_stale(&self, before: DateTime<Utc>) -> Result<Vec<Task>>;
 
     /// Operator override (CLI `task force-status`). Bypasses the normal
     /// transition graph but records `reason` in the emitted event for audit.

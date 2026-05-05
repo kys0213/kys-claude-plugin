@@ -455,7 +455,155 @@ fn release_decrements_attempts_and_reverts_to_ready() {
     assert_eq!(t.attempts, 0);
 }
 
-// ---------- release-stale ----------
+// ---------- list-stale ----------
+
+#[test]
+fn list_stale_json_returns_array_of_full_task_records() {
+    // Mirrors `find-by-pr --json` shape: an array of full Task objects, so
+    // the agent reviewer has every field needed (epic_name, updated_at,
+    // attempts, status, ...).
+    let (store, clock) = fixture();
+    let svc = TaskService::new(store.as_ref(), &clock);
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
+    let _ = capture(|w| svc.claim("e", false, w));
+    clock.advance(chrono::Duration::minutes(5));
+
+    let (code, out) = capture(|w| svc.list_stale(60, true, w));
+    assert_eq!(code, 0);
+    let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+    let arr = v.as_array().expect("array");
+    assert_eq!(arr.len(), 1);
+    let t = &arr[0];
+    assert_eq!(t["id"], "aaaaaaaaaaaa");
+    assert_eq!(t["epic_name"], "e");
+    assert_eq!(t["status"], "wip");
+    assert_eq!(t["attempts"], 1);
+    // `updated_at` is the canonical "claimed_at" surrogate the spec calls out.
+    assert!(t.get("updated_at").is_some());
+}
+
+#[test]
+fn list_stale_does_not_modify_tasks() {
+    // Read-only contract: after list-stale the task is still Wip with the
+    // same attempts count and no TaskReleasedStale event was emitted.
+    let (store, clock) = fixture();
+    let svc = TaskService::new(store.as_ref(), &clock);
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
+    let _ = capture(|w| svc.claim("e", false, w));
+    clock.advance(chrono::Duration::hours(2));
+
+    let (code, _) = capture(|w| svc.list_stale(60, true, w));
+    assert_eq!(code, 0);
+    let t = store
+        .get_task(&TaskId::from_raw("aaaaaaaaaaaa"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(t.status, TaskStatus::Wip);
+    assert_eq!(t.attempts, 1);
+    let evs = store
+        .list_events(EventFilter {
+            kinds: vec![EventKind::TaskReleasedStale],
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(evs.is_empty());
+}
+
+#[test]
+fn list_stale_empty_exits_0_without_modifying() {
+    // No claim → no Wip → empty list, exit 0 (idempotent observation).
+    let (store, clock) = fixture();
+    let svc = TaskService::new(store.as_ref(), &clock);
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
+
+    let (code, out) = capture(|w| svc.list_stale(3_600, true, w));
+    assert_eq!(code, 0);
+    let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(v, serde_json::json!([]));
+}
+
+// ---------- release-stale (clap parser) ----------
+
+/// `release-stale --task-id <ID> --before 1h` must fail at the parser level
+/// with a clap "cannot be used with" error — clap enforces the
+/// mutual-exclusion contract before we ever reach the service layer.
+#[test]
+fn release_stale_rejects_task_id_combined_with_before() {
+    use autopilot::cmd::Cli;
+    use clap::Parser;
+    let result = Cli::try_parse_from([
+        "autopilot",
+        "task",
+        "release-stale",
+        "--task-id",
+        "aaaaaaaaaaaa",
+        "--before",
+        "1h",
+    ]);
+    let err = match result {
+        Ok(_) => panic!("expected mutual-exclusion error, got Ok"),
+        Err(e) => e,
+    };
+    let s = err.to_string();
+    assert!(
+        s.contains("cannot be used with") || s.contains("conflicts with"),
+        "expected mutual-exclusion error, got: {s}"
+    );
+}
+
+#[test]
+fn release_stale_rejects_task_id_combined_with_before_seconds() {
+    use autopilot::cmd::Cli;
+    use clap::Parser;
+    let result = Cli::try_parse_from([
+        "autopilot",
+        "task",
+        "release-stale",
+        "--task-id",
+        "aaaaaaaaaaaa",
+        "--before-seconds",
+        "60",
+    ]);
+    let err = match result {
+        Ok(_) => panic!("expected mutual-exclusion error, got Ok"),
+        Err(e) => e,
+    };
+    assert!(err.to_string().contains("cannot be used with"));
+}
+
+// ---------- release-stale (per-task + bulk) ----------
+
+/// `release-stale --task-id <ID>` is the agent-recommended path: it reuses
+/// the existing per-task `release` primitive so it recovers exactly one
+/// task while leaving its peers untouched, even when both are stale.
+#[test]
+fn release_stale_per_task_recovers_only_the_named_task() {
+    let (store, clock) = fixture();
+    let svc = TaskService::new(store.as_ref(), &clock);
+    seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
+    seed_via_add(&svc, "bbbbbbbbbbbb", "0x2");
+    let _ = capture(|w| svc.claim("e", false, w)); // claim a (oldest first)
+    let _ = capture(|w| svc.claim("e", false, w)); // claim b
+    clock.advance(chrono::Duration::hours(2));
+
+    // Per-task path: same primitive as `task release <id>`.
+    let (code, _) = capture(|w| svc.release("aaaaaaaaaaaa", w));
+    assert_eq!(code, 0);
+
+    let a = store
+        .get_task(&TaskId::from_raw("aaaaaaaaaaaa"))
+        .unwrap()
+        .unwrap();
+    let b = store
+        .get_task(&TaskId::from_raw("bbbbbbbbbbbb"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(a.status, TaskStatus::Ready);
+    assert_eq!(a.attempts, 0);
+    // b is still stale-Wip — agent decides separately what to do with it.
+    assert_eq!(b.status, TaskStatus::Wip);
+    assert_eq!(b.attempts, 1);
+}
 
 /// CLI surface: claim a task at t0, advance the FixedClock past the cutoff,
 /// then `release-stale --before 1m` (60s) must recover it. Validates the
@@ -520,14 +668,39 @@ fn release_stale_json_emits_array_of_recovered_ids() {
 #[test]
 fn parse_duration_seconds_supports_compound_units() {
     use autopilot::cmd::task::parse_duration_seconds;
+    // Single units
     assert_eq!(parse_duration_seconds("30s").unwrap(), 30);
     assert_eq!(parse_duration_seconds("5m").unwrap(), 300);
     assert_eq!(parse_duration_seconds("1h").unwrap(), 3_600);
+    assert_eq!(parse_duration_seconds("1d").unwrap(), 86_400);
+    assert_eq!(parse_duration_seconds("1w").unwrap(), 604_800);
+    // Compound units
     assert_eq!(parse_duration_seconds("2h30m").unwrap(), 9_000);
+    assert_eq!(
+        parse_duration_seconds("2d12h").unwrap(),
+        2 * 86_400 + 12 * 3_600
+    );
+    assert_eq!(
+        parse_duration_seconds("1w3d").unwrap(),
+        7 * 86_400 + 3 * 86_400
+    );
+    assert_eq!(parse_duration_seconds("1h30m").unwrap(), 5_400);
+    assert_eq!(
+        parse_duration_seconds("2d12h30m").unwrap(),
+        2 * 86_400 + 12 * 3_600 + 30 * 60
+    );
+    // Rejected inputs
     assert!(parse_duration_seconds("").is_err());
-    assert!(parse_duration_seconds("1d").is_err());
     assert!(parse_duration_seconds("0s").is_err());
     assert!(parse_duration_seconds("90").is_err()); // trailing digits, no unit
+    assert!(parse_duration_seconds("-1d").is_err()); // negative not supported
+    let err_y = parse_duration_seconds("1y").unwrap_err();
+    assert!(
+        err_y.contains("unknown unit") && err_y.contains('y'),
+        "unexpected message for `1y`: {err_y}"
+    );
+    // `1mo` is rejected because `o` is not a recognized unit (after `1m` parses)
+    assert!(parse_duration_seconds("1mo").is_err());
 }
 
 // ---------- find-by-pr ----------
@@ -664,4 +837,36 @@ fn force_status_still_routes_through_service() {
         .unwrap()
         .unwrap();
     assert_eq!(t.status, TaskStatus::Done);
+}
+
+// ---------- set-status (rename of force-status, with deprecated alias) ----------
+
+/// Both `set-status` (canonical post-rename) and `force-status` (deprecated
+/// alias kept for one release) must parse to the same `TaskCommands::SetStatus`
+/// variant with identical field values — this is what backwards-compat means
+/// at the CLI surface (PR #696 audit).
+fn assert_set_status_parses(subcmd: &str) {
+    use autopilot::cmd::{Cli, Commands, TaskCommands};
+    use clap::Parser;
+    let cli = Cli::try_parse_from(["autopilot", "task", subcmd, "aaaaaaaaaaaa", "--to", "done"])
+        .unwrap_or_else(|e| panic!("`task {subcmd}` should parse: {e}"));
+    match cli.command {
+        Commands::Task {
+            command: TaskCommands::SetStatus { task_id, to, .. },
+        } => {
+            assert_eq!(task_id, "aaaaaaaaaaaa");
+            assert_eq!(to, TaskStatusArg::Done);
+        }
+        _ => panic!("`task {subcmd}` did not resolve to SetStatus variant"),
+    }
+}
+
+#[test]
+fn set_status_parses_as_canonical_name() {
+    assert_set_status_parses("set-status");
+}
+
+#[test]
+fn force_status_alias_still_parses_to_set_status() {
+    assert_set_status_parses("force-status");
 }

@@ -174,7 +174,7 @@ fn main() {
                 }
                 TaskCommands::Show { task_id, json } => svc.show(&task_id, json, &mut out),
                 TaskCommands::Get { task_id, json } => svc.show(&task_id, json, &mut out),
-                TaskCommands::ForceStatus {
+                TaskCommands::SetStatus {
                     task_id,
                     to,
                     reason,
@@ -201,17 +201,39 @@ fn main() {
                 }
                 TaskCommands::Claim { epic, json } => svc.claim(&epic, json, &mut out),
                 TaskCommands::Release { task_id } => svc.release(&task_id, &mut out),
-                TaskCommands::ReleaseStale {
+                TaskCommands::ListStale {
                     before,
                     before_seconds,
                     json,
                 } => match resolve_before_seconds(before.as_deref(), before_seconds) {
-                    Ok(secs) => svc.release_stale(secs, json, &mut out),
+                    Ok(secs) => svc.list_stale(secs, json, &mut out),
                     Err(msg) => {
                         eprintln!("{msg}");
                         std::process::exit(2);
                     }
                 },
+                TaskCommands::ReleaseStale {
+                    task_id,
+                    before,
+                    before_seconds,
+                    json,
+                } => {
+                    if let Some(id) = task_id {
+                        // Deprecated per-task alias: routes to `release` so the
+                        // transition is identical to manual `task release`.
+                        // Kept for back-compat (PR #696 audit) — new callers
+                        // should use `task release <ID>` directly.
+                        svc.release(&id, &mut out)
+                    } else {
+                        match resolve_before_seconds(before.as_deref(), before_seconds) {
+                            Ok(secs) => svc.release_stale(secs, json, &mut out),
+                            Err(msg) => {
+                                eprintln!("{msg}");
+                                std::process::exit(2);
+                            }
+                        }
+                    }
+                }
                 TaskCommands::Complete { task_id, pr } => svc.complete(&task_id, pr, &mut out),
                 TaskCommands::Fail { task_id } => svc.fail(&task_id, &mut out),
                 TaskCommands::Escalate { task_id, issue } => {

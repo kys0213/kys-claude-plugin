@@ -114,8 +114,13 @@ pub enum TaskCommands {
         #[arg(long)]
         json: bool,
     },
-    /// Force a task into a specific status (operator override)
-    ForceStatus {
+    /// Set a task to a specific status (operator override).
+    ///
+    /// Renamed from `force-status` for clarity — "set" describes the
+    /// effect more directly than "force". `force-status` remains as a
+    /// deprecated alias for one release.
+    #[command(alias = "force-status")]
+    SetStatus {
         /// Task id
         task_id: String,
         /// Target status
@@ -176,10 +181,12 @@ pub enum TaskCommands {
         /// Task id
         task_id: String,
     },
-    /// Reap stale Wip tasks (claims older than `--before`) back to Ready.
-    /// Idempotent: empty case exits 0. Used by the cron supervisor to
-    /// recover from worker crashes / ctrl-C / worktree destruction.
-    ReleaseStale {
+    /// Read-only: list Wip tasks whose claim is older than `--before`.
+    /// Companion to `release` / `release-stale`: agents call `list-stale`
+    /// first, review each candidate, then dispatch per-task to `release`
+    /// (canonical), `fail`, or `escalate` based on judgment (per CLAUDE.md
+    /// "책임 경계"). Always exits 0 — empty list is normal.
+    ListStale {
         /// Go-style duration: `30s`, `5m`, `1h`, `2h30m`. Mutually
         /// exclusive with `--before-seconds`.
         #[arg(long, conflicts_with = "before_seconds")]
@@ -188,7 +195,33 @@ pub enum TaskCommands {
         /// exclusive with `--before`.
         #[arg(long)]
         before_seconds: Option<i64>,
-        /// Output recovered ids as a JSON array (default: human count)
+        /// Output stale tasks as a JSON array (default: human table)
+        #[arg(long)]
+        json: bool,
+    },
+    /// Recover stale Wip tasks back to Ready. Two mutually exclusive modes:
+    /// `--before <duration>` (canonical) bulk releases every Wip task older
+    /// than the cutoff — emergency operator use, the agent-reviewed per-task
+    /// flow is preferred per CLAUDE.md "책임 경계". `--task-id <ID>` is a
+    /// deprecated alias for `task release <ID>` (functionally identical
+    /// post-P2; kept for one release for back-compat). Idempotent: empty
+    /// case exits 0.
+    ReleaseStale {
+        /// Single task id to release (per-task path). Mutually exclusive
+        /// with `--before` and `--before-seconds`.
+        #[arg(long, conflicts_with_all = ["before", "before_seconds"])]
+        task_id: Option<String>,
+        /// Go-style duration for bulk release: `30s`, `5m`, `1h`, `2h30m`.
+        /// Mutually exclusive with `--task-id` and `--before-seconds`.
+        #[arg(long, conflicts_with = "before_seconds")]
+        before: Option<String>,
+        /// Raw seconds threshold for bulk release. Mutually exclusive with
+        /// `--task-id` and `--before`.
+        #[arg(long)]
+        before_seconds: Option<i64>,
+        /// Output recovered ids as a JSON array (default: human count).
+        /// Ignored when `--task-id` is used (per-task path emits a single
+        /// confirmation line).
         #[arg(long)]
         json: bool,
     },
