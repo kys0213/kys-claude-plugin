@@ -1,7 +1,7 @@
 {
   "agents": [
     "./agents/gap-detector.md",
-    "./agents/gap-issue-creator.md",
+    "./agents/gap-ledger-writer.md",
     "./agents/issue-implementer.md",
     "./agents/branch-promoter.md",
     "./agents/pr-merger.md",

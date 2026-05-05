@@ -1,6 +1,6 @@
 ---
 description: "ledger의 Ready task를 claim하여 issue-implementer로 구현하고 PR을 생성합니다 (첫 reader)"
-argument-hint: ""
+argument-hint: "[--epic <NAME>]"
 allowed-tools: ["Bash", "Read", "Agent"]
 ---
 
@@ -11,10 +11,15 @@ allowed-tools: ["Bash", "Read", "Agent"]
 ## 사용법
 
 ```bash
+# 1) 이벤트 드리븐 모드 (autopilot Monitor가 TASK_READY 이벤트 수신 시 호출)
+/github-autopilot:work-ledger --epic <NAME>
+
+# 2) 매뉴얼 / cron 모드 (인자 없음 — 모든 epic을 selection strategy로 순회)
 /github-autopilot:work-ledger
 ```
 
-> 반복 실행은 `/github-autopilot:autopilot`이 `CronCreate`로 관리합니다.
+> hybrid 모드에서는 `autopilot watch` daemon이 `TASK_READY epic=<E> task_id=<ID>` 이벤트를 emit하면 Monitor가 `--epic <E>`를 붙여 호출합니다 (PR #701 W1 / autopilot.md Phase A 디스패치 표). 해당 호출은 Step 4 (selection strategy)를 skip하고 단일 epic만 claim합니다.
+> cron 모드 또는 매뉴얼 호출(인자 없음)은 기존 by-depth selection strategy를 그대로 사용합니다.
 
 ## Context
 
@@ -72,7 +77,9 @@ done
 
 ### Step 4: Selection Strategy (어느 epic부터 claim할 것인가)
 
-> **Why this is a Skill decision, not a CLI flag.** `CLAUDE.md` §"책임 경계 (CLI vs Skill/Agent)"는 우선순위 결정을 명시적으로 Skill의 책임으로 둡니다. CLI(`epic status --json`, `task claim --epic <NAME>`)는 결정적이고 인자만큼만 동작해야 하며, 같은 입력에 매번 같은 결과를 돌려줘야 합니다. "어느 backlog가 지금 우선인가"는 런타임 상태 의존적인 *판단*이므로 이 markdown(=Skill) 안에서 결정하고, 결정 결과만 기존 CLI에 인자로 넘깁니다. 이 커맨드는 그 원칙의 정전(canonical) 사례입니다.
+> **`--epic <NAME>` 인자가 주어지면 이 단계를 skip합니다** — Monitor가 이미 `TASK_READY` 이벤트로 epic을 지정했으므로 selection strategy는 불필요합니다. `RANKED=("$EPIC")` 단일 원소 배열로 두고 Step 5로 진행합니다.
+
+> **Why this is a Skill decision, not a CLI flag.** `CLAUDE.md` §"책임 경계 (CLI vs Skill/Agent)"는 우선순위 결정을 명시적으로 Skill의 책임으로 둡니다. CLI(`epic status --json`, `task claim --epic <NAME>`)는 결정적이고 인자만큼만 동작해야 하며, 같은 입력에 매번 같은 결과를 돌려줘야 합니다. "어느 backlog가 지금 우선인가"는 런타임 상태 의존적인 *판단*이므로 이 markdown(=Skill) 안에서 결정하고, 결정 결과만 기존 CLI에 인자로 넘깁니다. 이 커맨드는 그 원칙의 정전(canonical) 사례입니다 (인자 없는 경우에 한해).
 
 **설정 (override)**: `github-autopilot.local.md` frontmatter `[work_ledger] priority`에서 전략을 지정합니다.
 
@@ -128,7 +135,11 @@ esac
 
 ### Step 5: Task Claim (RANKED 순서대로 epic당 1개)
 
+`--epic <NAME>` 호출이면 `RANKED`는 단일 epic, 인자 없는 호출이면 Step 4의 selection strategy 결과입니다. 두 경로 모두 동일한 루프를 사용합니다 — CLI는 호출 패턴을 모릅니다.
+
 ```bash
+# --epic 인자가 있으면: RANKED=("$EPIC_ARG"), Step 4 skip
+# 인자가 없으면: Step 4의 selection strategy 결과 사용
 CLAIMED_JSON="[]"
 for EPIC in "${RANKED[@]}"; do
   out=$(autopilot task claim --epic "$EPIC" --json 2>/dev/null)
@@ -137,7 +148,7 @@ for EPIC in "${RANKED[@]}"; do
     # claim 성공 → CLAIMED_JSON에 누적 (epic 메타데이터 포함)
     CLAIMED_JSON=$(printf '%s' "$CLAIMED_JSON" | jq --argjson t "$out" --arg e "$EPIC" '. + [$t + {epic: $e}]')
   fi
-  # exit 1: empty queue (정상, by-depth/by-age는 사전 필터링되지만 race로 빌 수 있음) → skip
+  # exit 1: empty queue (정상 — by-depth/by-age는 사전 필터링되지만 race로 빌 수 있음, --epic 호출은 이벤트와 claim 사이의 race)
   # exit 2+: 환경 오류 → WARN 후 skip
   if [ "$rc" -ge 2 ]; then
     echo "WARN: task claim --epic $EPIC 실패 (exit $rc) — skip"
@@ -145,7 +156,7 @@ for EPIC in "${RANKED[@]}"; do
 done
 ```
 
-**Failure isolation**: `claim` exit 1 (empty queue)은 정상이고, exit ≥ 2는 WARN 후 해당 epic만 skip합니다. 상세 분기는 §"에러 처리" 표 참조.
+**Failure isolation**: `claim` exit 1 (empty queue)은 정상이고, exit ≥ 2는 WARN 후 해당 epic만 skip합니다. `--epic` 호출에서도 동일 — 이벤트와 claim 사이의 race로 큐가 비어있으면 다음 `TASK_READY` 이벤트에서 재시도됩니다. 상세 분기는 §"에러 처리" 표 참조.
 
 `CLAIMED_JSON`이 빈 배열이면 "Ready task 없음" 출력 후 Step 8 (결과 보고)로 이동합니다.
 

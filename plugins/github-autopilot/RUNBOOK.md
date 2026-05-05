@@ -1,10 +1,10 @@
 # github-autopilot Acceptance Runbook
 
-ledger-integration 시리즈(PR #662 / #663 / #664 / #665 / #666 / #674 / #681), ledger-followups 롤업(PR #684 / #685 / #686 / #687 / #688), 그리고 ledger-polish 롤업(PR #693 / #694 / #695 / #696) 머지 이후, **신규 사용자가 플러그인을 설치하고 기존 autopilot 흐름과 자동으로 돌아가는 ledger 흐름을 모두 검증할 수 있도록** 단계별로 정리한 runbook입니다.
+ledger-integration 시리즈(PR #662 / #663 / #664 / #665 / #666 / #674 / #681), ledger-followups 롤업(PR #684 / #685 / #686 / #687 / #688), ledger-polish 롤업(PR #693 / #694 / #695 / #696), 그리고 watch-unified 롤업(PR #699 / #700 / #701 / #702) 머지 이후, **신규 사용자가 플러그인을 설치하고 기존 autopilot 흐름과 자동으로 돌아가는 ledger 흐름을 모두 검증할 수 있도록** 단계별로 정리한 runbook입니다.
 
-ledger-followups 롤업으로 work-ledger reader와 stale-Wip 회수가 cron 기반으로 동작하므로 ledger lifecycle은 이제 **수동 호출 없이 자동**입니다 (Section G). ledger-polish 롤업으로 epic 우선순위와 stale 회수 결정이 CLI에서 Skill/Agent 레이어로 이동했고, 단건 회수 명령 이름이 더 직관적으로 정리되었습니다 (Section F).
+ledger-followups 롤업으로 work-ledger reader와 stale-Wip 회수가 cron 기반으로 동작하므로 ledger lifecycle은 이제 **수동 호출 없이 자동**입니다 (Section G). ledger-polish 롤업으로 epic 우선순위와 stale 회수 결정이 CLI에서 Skill/Agent 레이어로 이동했고, 단건 회수 명령 이름이 더 직관적으로 정리되었습니다 (Section F). watch-unified 롤업으로 (a) gap-watch / qa-boost가 ledger-only writer로 전환되어 GitHub issue 노이즈가 사라졌고, (b) `autopilot watch` daemon이 SQLite events를 폴링하여 `TASK_READY` / `STALE_WIP` / `EPIC_DONE` 이벤트를 emit하며 Monitor가 이를 디스패치합니다 — hybrid 모드에서 ledger 관련 cron이 제거되었습니다 (Section G).
 
-이 문서의 모든 출력은 실제로 `plugins/github-autopilot/cli/target/release/autopilot` 바이너리(v0.24.0)에 대해 실행한 결과입니다. 임의로 만들어낸 출력이 아닙니다.
+이 문서의 모든 출력은 실제로 `plugins/github-autopilot/cli/target/release/autopilot` 바이너리(v0.25.0)에 대해 실행한 결과입니다. 임의로 만들어낸 출력이 아닙니다.
 
 ---
 
@@ -17,7 +17,7 @@ ledger-followups 롤업으로 work-ledger reader와 stale-Wip 회수가 cron 기
 ```bash
 cargo build --release --manifest-path plugins/github-autopilot/cli/Cargo.toml
 ./plugins/github-autopilot/cli/target/release/autopilot --version
-# autopilot 0.22.0
+# autopilot 0.25.0
 ```
 
 이후 모든 섹션은 레포 루트에서 `BIN=plugins/github-autopilot/cli/target/release/autopilot` 를 가정합니다.
@@ -43,25 +43,45 @@ export AUTOPILOT_DB_PATH=/tmp/autopilot-runbook.db
 
 > 본 runbook의 Sections C/D는 격리된 DB 경로를 가정합니다.
 
+### A.4 stale Wip 임계값 (W1, PR #701)
+
+`autopilot watch` daemon이 `STALE_WIP` 이벤트를 emit할 때 사용할 cutoff 입니다. hybrid 모드에서는 이 값을 기준으로 Monitor가 `stale-task-review` 를 디스패치하므로 운영 환경에 맞게 설정합니다.
+
+```yaml
+# github-autopilot.local.md frontmatter
+stale_wip:
+  threshold: "1h"          # default — Wip claim이 1h를 넘으면 STALE_WIP emit
+```
+
+CLI 직접 호출 시:
+
+```bash
+autopilot watch --stale-threshold 1h     # default
+autopilot watch --stale-threshold 30m    # 더 빠른 회수
+autopilot watch --stale-threshold 1d     # 장기 작업 환경
+```
+
+`s` / `m` / `h` / `d` / `w` 모두 지원 (PR #693 P4의 duration parser 재사용). cron 모드에서는 동일 값이 `release-stale --before <D>` 의 cutoff 로 사용됩니다.
+
 ---
 
 ## Section B: Existing Autopilot Regression Smoke
 
-ledger-integration 7개 PR + ledger-followups 5개 PR이 모두 머지된 이후에도 기존 watcher와 setup/autopilot/test-watch 가 동일하게 동작해야 합니다. 각 커맨드를 1회씩 실행하여 회귀 없는지 확인합니다.
+ledger-integration 7개 PR + ledger-followups 5개 PR + ledger-polish 4개 PR + watch-unified 4개 PR이 모두 머지된 이후에도 기존 watcher와 setup/autopilot/test-watch 가 동일하게 동작해야 합니다. 각 커맨드를 1회씩 실행하여 회귀 없는지 확인합니다.
 
 | # | 커맨드 | 변경 영향 | 기대 동작 |
 |---|--------|----------|----------|
 | 1 | `/github-autopilot:setup` | 없음 | 설정 파일 생성 + 라벨 생성 (A.2와 동일) |
-| 2 | `/github-autopilot:autopilot` | **Step 2.5** (PR #681) ledger 상태 스냅샷 + **work-ledger / stale-task-review cron 등록** (PR #684 F2 / #688 F5 / #695 P2) | 기존 cron + work-ledger(10m) + stale-task-review(30m) 등록. Step 2.5 출력. 등록 실패 없음 |
-| 3 | `/github-autopilot:gap-watch` | **Step 5a** (PR #662, #663) — ledger epic 부트스트랩 + per-issue ledger task 쓰기 (observer) | 기존 GitHub issue 생성 흐름 그대로. ledger 실패 시 `WARN: ...` 로그만 |
-| 4 | `/github-autopilot:ci-watch` | **Step 5a/5c** (PR #664) — `ci-backlog` epic 부트스트랩 + per-failure ledger task 쓰기 (observer) | 기존 CI 분석 + issue 생성 그대로 |
-| 5 | `/github-autopilot:qa-boost` | **Step 5.5** (PR #665) — `qa-backlog` epic 부트스트랩 + per-finding ledger task 쓰기 (observer) | 기존 테스트 갭 분석 + issue 생성 그대로 |
+| 2 | `/github-autopilot:autopilot` | **Step 2.5** (PR #681) ledger 상태 스냅샷 + **hybrid: work-ledger / stale-task-review cron 제거, Monitor 디스패치로 전환** (W1 PR #701 + W4 PR #702) / **cron: 기존대로 cron 등록** | hybrid 모드: cron은 build_issues + Monitor health + test_watch만. work-ledger / stale-task-review는 `TASK_READY` / `STALE_WIP` 이벤트 발생 시에만 트리거. cron 모드: 기존 동작 유지 |
+| 3 | `/github-autopilot:gap-watch` | **W2 (PR #700) ledger-only writer 전환** — GitHub issue 생성 제거, `gap-backlog` epic에 ledger task만 기록 (gap-ledger-writer agent). 정방향/역방향 갭 모두 동일 epic. | GitHub issue는 생성되지 않음. 결과는 `autopilot epic status gap-backlog` / `autopilot task list --epic gap-backlog` 로 확인. epic 부트스트랩 실패는 cycle blocker (best-effort 아님) |
+| 4 | `/github-autopilot:ci-watch` | **Step 5a/5c** (PR #664) — `ci-backlog` epic 부트스트랩 + per-failure ledger task 쓰기 (observer). watch-unified 롤업에서도 dual-write 유지 (CI 실패는 팀 가시성 필요) | 기존 CI 분석 + issue 생성 그대로 |
+| 5 | `/github-autopilot:qa-boost` | **W3 (PR #699) ledger-only writer** — `qa-backlog` epic 부트스트랩 + per-finding ledger task 쓰기. **GitHub issue 생성 제거** (work-ledger reader가 task를 claim하여 PR을 직접 발행) | 테스트 갭 분석 후 ledger task만 기록. issue/라벨 흐름 없음 |
 | 6 | `/github-autopilot:build-issues` | 없음 | 기존 ready 이슈 → draft → PR 흐름 그대로 |
 | 7 | `/github-autopilot:merge-prs` | **Step 4 + Step 5 모두 ledger close-the-loop 호출** — Step 5 pr-merger 에이전트 (PR #666) + Step 4 all-green fast-path inline (PR #686 F1) | all-green PR과 문제 PR 모두 머지 직후 ledger close (best-effort) |
 | 8 | `/github-autopilot:analyze-issue` | 없음 | 기존 라벨 부여 흐름 그대로 |
 | 9 | `/github-autopilot:ci-fix` | 없음 | 기존 tick 단위 CI 수정 그대로 |
 | 10 | `/github-autopilot:test-watch <suite>` | 없음 | 기존 테스트 스위트 실행 그대로 |
-| 11 | `/github-autopilot:work-ledger` | **첫 reader** (PR #674) + **autopilot cron 등록** (PR #684 F2, 10m cadence) | round-robin claim → issue-implementer → branch-promoter → PR open |
+| 11 | `/github-autopilot:work-ledger` | **첫 reader** (PR #674) + **hybrid: Monitor `TASK_READY` 디스패치 (`--epic <NAME>`)** (W4 PR #702) / **cron: 기존 10m cadence 유지** (PR #684 F2) | hybrid: 이벤트마다 단일 epic claim → issue-implementer → branch-promoter → PR open. cron: round-robin / by-depth 전체 epic 순회 |
 | 12 | `branch-promoter` 에이전트 | **`issue_number` 누락 시 `Closes #N` 줄 suppress** (PR #685 F3) | issue 없는 ledger PR도 깨진 `Closes #` 없이 정상 생성 |
 | 13 | `autopilot stats update --command work-ledger` | **canonical loop 목록에 추가** (PR #687 F4) — `--command`는 free string 유지, 알려진 목록 검증만 추가 | work-ledger / 기타 모든 loop의 stats가 정상 기록 |
 | 14 | `autopilot task release-stale --before <D>` | **신규** (PR #688 F5, bulk-release) — stale Wip 회수 후 Ready로 전환, attempts 감소, idempotent. **PR #695 (P2) 이후 cron은 `release-stale` 직접 호출이 아닌 `/github-autopilot:stale-task-review` 가 등록됨** (CLI 관찰 + 에이전트 결정) | bulk 호출은 운영자 우회용으로 유지, 평시 회수는 에이전트 결정 |
@@ -69,6 +89,8 @@ ledger-integration 7개 PR + ledger-followups 5개 PR이 모두 머지된 이후
 | 16 | `/github-autopilot:work-ledger` priority strategy | **신규 (PR #694 P1)** — `work_ledger.priority` 설정으로 `by-depth` (default) / `by-age` / `round-robin` / 명시 리스트. CLI는 변경 없음, 판단은 Skill | 깊은 큐가 굶지 않음 (lazy fairness). 자세한 사용법은 `commands/work-ledger.md` 참조 |
 | 17 | `autopilot task set-status <ID> --to <STATUS>` | **신규 canonical 이름 (PR #696 P3)** — `force-status` 의 직관적 rename. `force-status` 는 deprecated alias 로 유지 | 운영자 override (Wip→Ready 등). PR #696 audit 결과는 Section E.3 참조 |
 | 18 | duration parser `d`/`w` units | **확장 (PR #693 P4)** — `--before 1d` / `--before 1w` / `--before 2d12h` 등 지원. `mo`/`y` 는 가변 길이라 의도적으로 제외 | day/week threshold 사용 시 `--before-seconds 86400` fallback 불필요 |
+| 19 | `autopilot watch --stale-threshold <D>` | **W1 (PR #701)** — daemon이 SQLite events를 폴링하여 `TASK_READY` / `STALE_WIP` / `EPIC_DONE` 이벤트를 stdout으로 emit. idempotency state는 `watch.json` (`last_event_at` / `seen_keys` / `epics_done` / `stale_seen`) | hybrid 모드에서 Monitor 디스패치의 입력. cron 모드에는 영향 없음 |
+| 20 | hybrid Monitor: `TASK_READY` → `work-ledger --epic <E>` / `STALE_WIP` → `stale-task-review --candidates <JSON>` | **W4 (PR #702)** — Phase A 디스패치 표 3행 추가, Phase B work_ledger / release_stale cron 제거. `EPIC_DONE` 은 로그만 (TODO: feat-epic-flow epic에서 epic-rollup 디스패치) | hybrid 모드는 Ready/stale 발생 즉시 디스패치 (cron tick 대기 없음). 동일 이벤트 dedup은 daemon `watch.json` state로 보장 |
 
 **Section B 회귀 판정**: 모든 기존 커맨드는 ledger 호출 실패와 무관하게 정상 종료해야 합니다. 모든 ledger 추가 단계는 best-effort observer 패턴 (`|| echo WARN ...`) 으로 격리되어 있습니다.
 
@@ -426,12 +448,14 @@ done
 
 `work-ledger` 가 task 를 claim 한 후 `issue-implementer` 가 크래시했거나 PR 을 열지 못해 `task fail` 호출조차 실패한 경우, task 는 Wip 로 남습니다.
 
-**[중요] cron 동작 변화** — PR #688 의 cron 은 `autopilot task release-stale --before <D>` 를 직접 호출하여 cutoff 보다 오래된 모든 Wip 을 **자동 bulk-release** 했습니다. PR #695 (P2) 이후 cron 은 **`/github-autopilot:stale-task-review` 를 호출**하며, 이 skill 은 `autopilot task list-stale --json` 으로 후보를 **관찰만** 하고 `stale-task-reviewer` 에이전트가 task 별로 release / fail / escalate / leave alone 을 결정합니다. 즉:
+**[중요] 트리거 동작 변화** — PR #688 의 cron 은 `autopilot task release-stale --before <D>` 를 직접 호출하여 cutoff 보다 오래된 모든 Wip 을 **자동 bulk-release** 했습니다. PR #695 (P2) 이후 cron 은 **`/github-autopilot:stale-task-review` 를 호출**하며, 이 skill 은 `autopilot task list-stale --json` 으로 후보를 **관찰만** 하고 `stale-task-reviewer` 에이전트가 task 별로 release / fail / escalate / leave alone 을 결정합니다. **W4 (PR #702) 이후 hybrid 모드의 트리거는 cron 이 아닌 Monitor (`STALE_WIP` 이벤트) 가 됩니다** — daemon 이 list-stale 결과를 events 로 emit 하므로 skill 은 list-stale 호출을 skip 하고 `--candidates <JSON>` 만 받습니다. 즉:
 
-- **이전 (PR #688)**: cron → CLI auto-recovery (모두 release). 빠르지만 무차별.
-- **현재 (PR #695)**: cron → CLI list-stale (read-only) → agent per-task decision. CLAUDE.md "책임 경계: CLI vs Skill/Agent" — 결정적 변환은 CLI, 컨텍스트 의존 판단은 에이전트.
+- **PR #688**: cron → CLI auto-recovery (모두 release). 빠르지만 무차별.
+- **PR #695**: cron → CLI list-stale (read-only) → agent per-task decision. CLAUDE.md "책임 경계: CLI vs Skill/Agent" — 결정적 변환은 CLI, 컨텍스트 의존 판단은 에이전트.
+- **W4 PR #702 (hybrid)**: daemon `STALE_WIP` event → Monitor → skill `--candidates` → agent per-task decision. cron 폴링 제거, 이벤트 발생 즉시 디스패치.
+- **W4 PR #702 (cron mode, legacy)**: PR #695 동작 유지 (cron → skill → list-stale → agent).
 
-자동 cron 등록은 `/github-autopilot:autopilot` Step 2 가 처리합니다 (30m cadence, `stale-task-review` cron 으로 등록). bulk `release-stale --before <D>` 는 운영자 비상 우회용으로 CLI 에 유지됩니다 (Section F 참조).
+자동 cron 등록은 `/github-autopilot:autopilot` Step 2 가 처리합니다 — hybrid 모드에서는 등록되지 않고, cron 모드에서만 30m cadence 로 등록됩니다. bulk `release-stale --before <D>` 는 운영자 비상 우회용으로 CLI 에 유지됩니다 (Section F 참조).
 
 수동 점검/복구가 필요한 경우:
 
@@ -473,21 +497,21 @@ $BIN task force-status <task_id> --to ready
 
 > lease/heartbeat 기반 정교화 (worker liveness 직접 추적) 는 carry-forward follow-up 입니다 (Section F).
 
-### E.4 ledger ↔ GitHub issue 정합성 점검
+### E.4 ledger ↔ GitHub issue 정합성 점검 (ci-watch only)
 
-writer 3종은 동일 fingerprint 로 GitHub issue 와 ledger task 를 동시에 생성하지만, 한쪽만 성공하는 경우가 발생할 수 있습니다 (네트워크 / SQLite 락 등):
+watch-unified 롤업 (W2 PR #700, W3 PR #699) 이후 **gap-watch / qa-boost 는 GitHub issue 를 생성하지 않습니다** — ledger-only writer 입니다 (Section F.6 "External / Internal boundary" 참조). 따라서 정합성 점검이 필요한 writer 는 `ci-watch` 하나뿐입니다:
 
 ```bash
-# fingerprint 로 ledger task 존재 확인
-FP="gap:spec/auth.md:token-refresh"
+# fingerprint 로 ledger task 존재 확인 (ci-backlog)
+FP="ci:validate.yml:main:test-failure"
 TID=$(printf '%s' "$FP" | shasum -a 256 | cut -c1-12)
-$BIN task list --epic gap-backlog | grep "$TID"
+$BIN task list --epic ci-backlog | grep "$TID"
 
-# 같은 fingerprint 의 GitHub issue
-gh issue list --search "$FP" --label "autopilot:ready"
+# 같은 fingerprint 의 GitHub issue (ci-watch 는 dual-write 유지 — 팀 가시성)
+gh issue list --search "$FP" --label "autopilot:ci-failure"
 ```
 
-ledger 만 있고 issue 가 없으면 다음 writer cycle 에서 동일 fingerprint 로 새 issue 가 생성되며, ledger task add 는 duplicate id 로 흡수됩니다 (안전).
+ledger 만 있고 issue 가 없으면 다음 ci-watch cycle 에서 동일 fingerprint 로 새 issue 가 생성되며, ledger task add 는 duplicate id 로 흡수됩니다 (안전). gap-backlog / qa-backlog 는 GitHub issue 와 비교할 대상이 없으므로 ledger 자체의 정합성만 확인하면 됩니다 (`task list` / `epic status` / `events list`).
 
 ### E.5 `merge-prs` Step 4 fast-path (해소됨, PR #686)
 
@@ -568,21 +592,40 @@ $BIN task find-by-pr <PR_NUMBER> --json | jq -r '.id' \
   | xargs -I{} $BIN task complete {} --pr <PR_NUMBER>
 ```
 
+### F.6 External vs Internal boundary (watch-unified 롤업)
+
+watch-unified 롤업 (W2 PR #700, W3 PR #699) 이후 자동 발견 to-do 가 어디에 저장되는지 명확히 분리되었습니다. 운영자/팀이 어디를 봐야 하는지 결정할 때 이 경계를 참고하세요:
+
+| 보관소 | 항목 | 가시성 / 이유 |
+|--------|------|-------------|
+| **GitHub (External)** | 사람이 등록한 issue, PR (review/merge), CI 실패 (`ci-watch` dual-write — `:ci-failure` 라벨) | 팀이 직접 보고 협업해야 하는 항목. UI / notification 흐름이 필요. |
+| **SQLite Ledger (Internal)** | gap-watch 로 발견된 spec gap (`gap-backlog`), qa-boost 로 발견된 test gap (`qa-backlog`), 향후 feature epic (feat-epic-flow epic 에서 추가 예정) | autopilot 의 내부 to-do — 팀에 노출하면 노이즈만 됩니다. work-ledger reader 가 직접 claim 하여 PR 을 발행하므로 GitHub 경유 없이 닫힙니다. |
+
+이 경계의 운영적 의미:
+
+- **gap/qa 발견은 GitHub issue 가 되지 않습니다** — `gh issue list` 에 보이지 않으므로 운영자는 `autopilot epic status gap-backlog` / `autopilot task list --epic qa-backlog` 로 직접 점검합니다.
+- **ci-watch 는 예외적으로 dual-write 를 유지합니다** — CI 실패는 팀이 즉시 알아야 하는 신호 (broken main branch). `ci-backlog` ledger task 는 work-ledger reader 가 처리할 입력이고, `:ci-failure` issue 는 팀 가시성용입니다.
+- **사람이 등록한 issue 는 그대로 build-issues 파이프라인** 으로 들어갑니다 — `analyze-issue` 가 `:ready` 라벨을 부여하면 기존 흐름이 동일하게 동작합니다 (HITL 진입점은 변경 없음).
+- **future feature epics (feat-epic-flow)** 도 ledger 에 정의될 예정 — 운영자는 spec 으로 epic 을 등록하고 work-ledger reader 가 task 를 claim 합니다. GitHub issue 는 만들지 않습니다.
+
+> 이 경계는 CLAUDE.md "책임 경계" 의 도메인 적용입니다 — 사람과 협업하는 채널 (GitHub) 과 자동화 내부 큐 (SQLite) 를 분리해 인지 부하를 줄입니다.
+
 ---
 
 ## Section G: Auto-running Operation
 
-ledger-followups 롤업 + ledger-polish 롤업으로 ledger lifecycle 은 **수동 호출 없이 cron 으로 완전 자동화** 되었습니다. 운영자는 한 번 `/github-autopilot:autopilot` 으로 cron supervisor 를 등록한 뒤 자리를 비울 수 있습니다.
+ledger-followups + ledger-polish + watch-unified 롤업으로 ledger lifecycle 은 **수동 호출 없이 자동화** 되었습니다. **hybrid 모드** (default) 에서는 `autopilot watch` daemon 이 ledger 이벤트를 emit 하고 Monitor 가 즉시 디스패치하므로 cron 폴링이 거의 사라졌습니다 (W1 PR #701 + W4 PR #702). **cron 모드** 는 기존 동작을 그대로 유지합니다.
 
-### G.1 자동화된 사이클
+### G.1 자동화된 사이클 (hybrid 모드)
 
 ```
 gap-watch / qa-boost / ci-watch (writer)
         │  task add (best-effort)
         ▼
    ledger Ready queue
-        │  work-ledger cron (10m, PR #684)
-        │  by-depth strategy (PR #694 P1) — Skill 이 ranking
+        │  autopilot watch daemon (SQLite events 폴링, W1 PR #701)
+        │  emit: TASK_READY epic=<E> task_id=<ID>
+        │  Monitor 디스패치: /github-autopilot:work-ledger --epic <E>
         ▼
         Wip (claimed)
         │  issue-implementer → branch-promoter (Closes #N suppress when missing, PR #685)
@@ -590,27 +633,36 @@ gap-watch / qa-boost / ci-watch (writer)
         PR open (autopilot:auto)
         │  merge-prs Step 4/5 (fast-path + pr-merger 모두 close, PR #666 + #686)
         ▼
-        Done
+        Done — daemon emit: EPIC_DONE epic=<E> total=<N> (현재 로그만, TODO: epic-rollup)
 
        (worker crash / ctrl-C 발생 시)
-   stale Wip → stale-task-review cron (30m, PR #695 P2)
-                ├─ list-stale (read-only) → stale-task-reviewer agent
+   stale Wip → daemon emit: STALE_WIP candidates=<JSON> epic=<E>
+                Monitor 디스패치: /github-autopilot:stale-task-review --candidates <JSON>
+                ├─ list-stale skip (daemon이 이미 필터링) → stale-task-reviewer agent
                 └─ per-task 결정: release / fail / escalate / leave alone
 ```
 
+> daemon 은 `watch.json` 의 `last_event_at` / `seen_keys` / `epics_done` / `stale_seen` state 로 idempotency 를 보장하므로 동일 이벤트가 두 번 디스패치되지 않습니다.
+
 ### G.2 등록되는 cron (autopilot Step 2)
 
-| 라벨 | 명령 | 기본 주기 | 출처 |
-|------|------|----------|------|
-| Build Issues | `/github-autopilot:build-issues` | 15m | 기존 |
-| Gap Watch | `/github-autopilot:gap-watch` | 30m | 기존 (writer) |
-| QA Boost | `/github-autopilot:qa-boost` | 1h | 기존 (writer) |
-| CI Watch | `/github-autopilot:ci-watch` | 20m | 기존 (writer) |
-| CI Fix | `/github-autopilot:ci-fix` | 15m | 기존 |
-| Merge PRs | `/github-autopilot:merge-prs` | 10m | 기존 (close-the-loop 통합) |
-| **Work Ledger** | `/github-autopilot:work-ledger` (priority=`by-depth` default) | **10m** | **PR #684 (F2) + PR #694 (P1)** |
-| **Stale Task Review** | `/github-autopilot:stale-task-review --before {stale_wip.threshold}` | **30m** | **PR #688 (F5) → PR #695 (P2)**: list-stale + agent decision |
-| Test Watch | `/github-autopilot:test-watch <suite>` | per-suite | 기존 |
+**hybrid 모드** (default): cron 등록이 최소화됩니다 — ledger lifecycle 은 Monitor 가 처리.
+
+| 라벨 | 트리거 | 기본 주기 | 출처 |
+|------|--------|----------|------|
+| Monitor (events + ledger) | push / CI / issues / TASK_READY / STALE_WIP / EPIC_DONE | poll_sec (기본 60s) | W1 PR #701 + W4 PR #702 |
+| Build Issues (cron) | `/github-autopilot:build-issues` | 15m | 기존 (GitHub issues 직접 폴링) |
+| Monitor Health (cron) | health check | 30m | 기존 (#620) |
+| Test Watch (cron) | `/github-autopilot:test-watch <suite>` | per-suite | 기존 |
+
+**cron 모드** (legacy): 모든 루프가 cron 으로 동작.
+
+| 라벨 | 명령 | 기본 주기 |
+|------|------|----------|
+| Gap Watch / Analyze Issue / Build Issues / Merge PRs / CI Watch / CI Fix / QA Boost | (각 커맨드) | 30m / 20m / 15m / 10m / 20m / 15m / 1h |
+| Work Ledger | `/github-autopilot:work-ledger` (priority=`by-depth` default) | 10m |
+| Stale Task Review | `/github-autopilot:stale-task-review --before {stale_wip.threshold}` | 30m |
+| Test Watch | `/github-autopilot:test-watch <suite>` | per-suite |
 
 ### G.3 운영자 액션
 
@@ -619,11 +671,11 @@ gap-watch / qa-boost / ci-watch (writer)
 1. **HITL 처리**: `escalated` task / `:hitl` 라벨 issue 검토 후 결정 (`task escalate` 또는 운영자 판단 머지/close).
 2. **idle 점검**: `autopilot stats show` 로 모든 loop이 처리 중인지 주기적으로 확인 (work-ledger 포함, PR #687).
 
-writer 발견 → ledger 기록 → reader claim (by-depth) → 구현 → PR open → 머지 → ledger close 의 모든 단계가 cron 만으로 진행됩니다. 평시에는 운영자 개입이 필요 없습니다. 비상 시 수동 명령은 Section F 참조.
+writer 발견 → ledger 기록 → reader claim (by-depth) → 구현 → PR open → 머지 → ledger close 의 모든 단계가 자동으로 진행됩니다 (hybrid: Monitor 디스패치, cron: cron tick). 평시에는 운영자 개입이 필요 없습니다. 비상 시 수동 명령은 Section F 참조.
 
 ### G.4 검증
 
-`make validate` (8984 pass / 11 warnings / 0 fail) + `cargo test` (353 tests) + Section C/D smoke 가 모두 통과하는 상태가 자동 운영의 안전 기준입니다. PR 머지 시 CI/CD 가 검증을 강제합니다.
+`make validate` (590 pass / 11 warnings / 0 fail) + `cargo test` (364 tests, watch-unified 롤업 시점) + Section C/D smoke + W1 daemon end-to-end smoke (TASK_READY → STALE_WIP → EPIC_DONE) 가 모두 통과하는 상태가 자동 운영의 안전 기준입니다. PR 머지 시 CI/CD 가 검증을 강제합니다.
 
 ---
 
@@ -647,3 +699,7 @@ writer 발견 → ledger 기록 → reader claim (by-depth) → 구현 → PR op
 | #694 | **P1** — work-ledger epic priority strategy (`by-depth` default + Skill-side ranking) |
 | #695 | **P2** — stale 회수를 CLI observation (`list-stale`) + agent decision (`stale-task-reviewer`) 으로 분리 |
 | #696 | **P3** — task 서브커맨드 naming clarity (`set-status` rename, `release` canonical) |
+| #699 | **W3** — qa-boost ledger-only writer (GitHub issue 생성 제거) |
+| #700 | **W2** — gap-watch ledger-only writer (gap-issue-creator → gap-ledger-writer rename) |
+| #701 | **W1** — `autopilot watch` daemon이 SQLite events 폴링하여 `TASK_READY` / `STALE_WIP` / `EPIC_DONE` 이벤트 emit (`--stale-threshold` 신규) |
+| #702 | **W4** — Monitor 디스패치 표에 ledger 이벤트 3행 추가 + hybrid 모드의 work_ledger / release_stale cron 제거 |
