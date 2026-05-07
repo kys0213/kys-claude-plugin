@@ -210,6 +210,8 @@ fn main() {
                     body,
                     fingerprint,
                     source,
+                    simhash_input,
+                    paths,
                 } => svc.add(
                     &epic,
                     &task_id,
@@ -217,6 +219,8 @@ fn main() {
                     body.as_deref(),
                     fingerprint.as_deref(),
                     source,
+                    simhash_input.as_deref(),
+                    &paths,
                     &mut out,
                 ),
                 TaskCommands::AddBatch { epic, from } => svc.add_batch(&epic, &from, &mut out),
