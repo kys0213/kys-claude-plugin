@@ -1,501 +1,373 @@
-use anyhow::Result;
+//! Ledger-native stagnation detection (`autopilot check stagnation`).
+//!
+//! Per `plans/ledger-stagnation-redesign.md`, the GitHub-issue-body
+//! fingerprint flow is retired and stagnation is now grouped over ledger
+//! tasks via a hybrid (simhash hamming distance OR path Jaccard) similarity
+//! query. The CLI is a deterministic primitive: same input → same output,
+//! threshold decisions live in the calling Skill (CLAUDE.md "책임 경계").
+//!
+//! The service:
+//! 1. Fetches the current task by id.
+//! 2. Asks the [`TaskStore`] for similar tasks via
+//!    [`TaskRepo::list_similar_tasks`] (hybrid OR; set is the union).
+//! 3. Counts the candidates `N` and bands the result:
+//!    - `N < n_threshold` → `status="ok"`, exit 0.
+//!    - `n_threshold ≤ N < n_escalate` → `status="stagnation"`, exit 4.
+//!    - `N ≥ n_escalate` → `status="escalate"`, exit 5.
+//! 4. Emits the spec §3.10 JSON to `out` so hooks / Skills can read it
+//!    directly without touching SQLite.
+//!
+//! `recommended_persona` follows the same rotation as
+//! `cmd::issue::filter_comments` (`PERSONAS` array) so a human reading
+//! both surfaces sees a consistent "next persona" suggestion.
+
+use std::io::Write;
+
+use anyhow::{Context, Result};
 use serde::Serialize;
 
-use super::analysis::{AnalysisContext, AnalysisOutcome, DiffAnalysis};
-use super::EXIT_STAGNATION;
-use crate::cmd::check::state::OutputEntry;
-use crate::cmd::simhash;
+use crate::cmd::output::write_json;
+use crate::domain::event::{EventKind, EventPayload};
+use crate::domain::simhash::{hamming_distance, jaccard_similarity};
+use crate::domain::{Task, TaskId, TaskStatus};
+use crate::ports::task_store::{EventFilter, TaskStore};
 
-/// Default minimum number of history entries to attempt pattern detection.
-const DEFAULT_MIN_HISTORY_LEN: usize = 2;
+/// Exit code: `n_threshold ≤ N < n_escalate` similar tasks detected. Hook
+/// converts this into a redirect prompt without auto-escalating.
+pub const EXIT_STAGNATION: i32 = 4;
 
-/// Default hamming distance threshold: entries within this distance are considered "similar".
-pub const DEFAULT_SIMILARITY_THRESHOLD: u32 = 5;
+/// Exit code: `N ≥ n_escalate` similar tasks detected. Hook should call
+/// `autopilot task escalate` automatically.
+pub const EXIT_ESCALATE: i32 = 5;
 
-/// Default number of similar entries needed to flag stagnation.
-const DEFAULT_STAGNATION_COUNT: usize = 2;
+/// Persona rotation order. Mirrors `cmd::issue::PERSONAS` so the same
+/// `consecutive_failures → persona` mapping appears in both filter-comments
+/// and ledger stagnation outputs.
+pub const PERSONAS: &[&str] = &[
+    "hacker",
+    "researcher",
+    "simplifier",
+    "architect",
+    "contrarian",
+];
 
-/// Classified stagnation pattern types (priority order).
-#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum PatternType {
-    /// Same hash repeating (distance ≤ 3 for all pairs)
-    Spinning,
-    /// A↔B alternating pattern (even/odd entries cluster separately)
-    Oscillation,
-    /// All entries similar but no improvement trend
-    NoDrift,
-    /// Distances gradually decreasing but still within threshold
-    DiminishingReturns,
+/// Configuration for [`StagnationService::check`]. Every field is required
+/// — the CLI surface fills defaults via clap (`max-distance=3`,
+/// `min-jaccard=0.5`, `n-threshold=3`, `n-escalate=5`).
+#[derive(Debug, Clone, Copy)]
+pub struct StagnationConfig {
+    /// Hamming distance upper bound (inclusive) for the simhash dimension.
+    /// Spec §3.4 default `T = 3`.
+    pub max_distance: u32,
+    /// Jaccard ratio lower bound (inclusive) for the path-set dimension.
+    /// Spec §3.4 default `J = 0.5`.
+    pub min_jaccard: f64,
+    /// `N`: candidate count that flips status from `ok` to `stagnation`.
+    /// Default 3.
+    pub n_threshold: u32,
+    /// `N_esc`: candidate count that flips status to `escalate`. Default 5.
+    /// Must satisfy `n_escalate >= n_threshold`; not asserted because clap
+    /// already accepts both as user input — invalid combinations are
+    /// surfaced to the operator via the band logic (escalate dominates).
+    pub n_escalate: u32,
 }
 
-impl PatternType {
-    /// Deterministic persona recommendation per pattern.
-    pub fn recommended_persona(self) -> &'static str {
-        match self {
-            PatternType::Spinning => "hacker",
-            PatternType::Oscillation => "architect",
-            PatternType::NoDrift => "researcher",
-            PatternType::DiminishingReturns => "simplifier",
-        }
-    }
-}
-
-/// Detects stagnation patterns by comparing simhash history in LoopState.
-///
-/// If recent output hashes show repeated similar patterns, overrides
-/// the exit code to EXIT_STAGNATION and includes candidate details.
-///
-/// Thresholds are configurable for tuning with real gap report data (#578).
-pub struct StagnationAnalysis {
-    pub similarity_threshold: u32,
-    pub stagnation_count: usize,
-    pub min_history_len: usize,
-}
-
-impl Default for StagnationAnalysis {
+impl Default for StagnationConfig {
     fn default() -> Self {
         Self {
-            similarity_threshold: DEFAULT_SIMILARITY_THRESHOLD,
-            stagnation_count: DEFAULT_STAGNATION_COUNT,
-            min_history_len: DEFAULT_MIN_HISTORY_LEN,
+            max_distance: 3,
+            min_jaccard: 0.5,
+            n_threshold: 3,
+            n_escalate: 5,
         }
     }
 }
 
-/// Classify the stagnation pattern from a history of simhashes.
-/// Returns None if no stagnation pattern is detected.
-///
-/// Priority: Spinning > Oscillation > NoDrift > DiminishingReturns
-pub fn classify_pattern(
-    history: &[OutputEntry],
-    latest_hash: u64,
-    threshold: u32,
-) -> Option<PatternType> {
-    let distances: Vec<u32> = history[..history.len() - 1]
-        .iter()
-        .filter_map(|e| simhash::parse_simhash(&e.simhash))
-        .map(|h| simhash::hamming_distance(latest_hash, h))
-        .collect();
-
-    if distances.is_empty() {
-        return None;
-    }
-
-    // Spinning: all distances very small (≤ 3)
-    let spinning_threshold = 3.min(threshold);
-    if distances.len() >= 2 && distances.iter().all(|&d| d <= spinning_threshold) {
-        return Some(PatternType::Spinning);
-    }
-
-    // Oscillation: parse full hash sequence, check even/odd clustering
-    if distances.len() >= 3 {
-        let hashes: Vec<u64> = history
-            .iter()
-            .filter_map(|e| simhash::parse_simhash(&e.simhash))
-            .collect();
-        if hashes.len() >= 4 {
-            let even_similar = (0..hashes.len() - 2)
-                .filter(|&i| simhash::hamming_distance(hashes[i], hashes[i + 2]) <= threshold)
-                .count();
-            let odd_different = (0..hashes.len() - 1)
-                .filter(|&i| simhash::hamming_distance(hashes[i], hashes[i + 1]) > threshold)
-                .count();
-            // At least 2 even-skip matches and most adjacent pairs are different
-            if even_similar >= 2 && odd_different >= hashes.len() / 2 {
-                return Some(PatternType::Oscillation);
-            }
-        }
-    }
-
-    // NoDrift: all within threshold, no clear improvement trend
-    if distances.len() >= 2 && distances.iter().all(|&d| d <= threshold) {
-        // Check if NOT diminishing (no clear downward trend)
-        let is_diminishing = distances.windows(2).all(|w| w[1] <= w[0]);
-        if !is_diminishing || distances.first() == distances.last() {
-            return Some(PatternType::NoDrift);
-        }
-    }
-
-    // DiminishingReturns: distances are decreasing and all within threshold
-    if distances.len() >= 2 && distances.iter().all(|&d| d <= threshold) {
-        let is_diminishing = distances.windows(2).all(|w| w[1] <= w[0]);
-        if is_diminishing && distances.first() != distances.last() {
-            return Some(PatternType::DiminishingReturns);
-        }
-    }
-
-    None
+/// Stagnation status banding. Drives both the CLI exit code and the JSON
+/// `status` field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StagnationStatus {
+    Ok,
+    Stagnation,
+    Escalate,
 }
 
-fn no_stagnation() -> AnalysisOutcome {
-    AnalysisOutcome {
-        exit_override: None,
-        extra_fields: serde_json::json!({}),
+impl StagnationStatus {
+    pub fn exit_code(self) -> i32 {
+        match self {
+            StagnationStatus::Ok => 0,
+            StagnationStatus::Stagnation => EXIT_STAGNATION,
+            StagnationStatus::Escalate => EXIT_ESCALATE,
+        }
     }
 }
 
-impl DiffAnalysis for StagnationAnalysis {
-    fn analyze(&self, ctx: &AnalysisContext) -> Result<AnalysisOutcome> {
-        let history = &ctx.state.output_history;
+/// Outcome label for a single similar task. Mirrors spec §3.10
+/// (`failed | completed | wip | ...`). Derived from the live `TaskStatus`,
+/// not from event history — the events log is consulted only to extract
+/// `failure_reason`.
+fn outcome_label(status: TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Done => "completed",
+        TaskStatus::Escalated => "failed",
+        TaskStatus::Wip => "wip",
+        TaskStatus::Ready => "ready",
+        TaskStatus::Pending => "pending",
+        TaskStatus::Blocked => "blocked",
+    }
+}
 
-        if history.len() < self.min_history_len {
-            return Ok(no_stagnation());
-        }
+/// Reads the most recent `TaskFailed` event payload for a task and returns
+/// a short human-readable reason string. The current `EventPayload::TaskFailed`
+/// only carries `is_final` and `attempts` — there is no free-form `reason`
+/// field today, so we synthesize one. Callers should treat `None` as
+/// "task hasn't failed yet".
+fn derive_failure_reason(store: &dyn TaskStore, task_id: &TaskId) -> Option<String> {
+    let events = store
+        .list_events(EventFilter {
+            task: Some(task_id.clone()),
+            kinds: vec![EventKind::TaskFailed],
+            ..Default::default()
+        })
+        .ok()?;
+    let last = events.last()?;
+    if let EventPayload::TaskFailed { is_final, attempts } = &last.payload {
+        let phase = if *is_final { "final" } else { "retry" };
+        Some(format!("{phase} after {attempts} attempts"))
+    } else {
+        None
+    }
+}
 
-        let latest = &history[history.len() - 1];
-        let latest_hash = match simhash::parse_simhash(&latest.simhash) {
-            Some(h) => h,
-            None => return Ok(no_stagnation()),
+/// Service that orchestrates ledger-based stagnation detection. Holds only
+/// references — the caller decides the lifetime of the store. Mirrors the
+/// shape of [`crate::cmd::task::TaskService`] so wiring in `main.rs` is
+/// uniform.
+pub struct StagnationService<'a> {
+    store: &'a dyn TaskStore,
+}
+
+impl<'a> StagnationService<'a> {
+    pub fn new(store: &'a dyn TaskStore) -> Self {
+        Self { store }
+    }
+
+    /// Runs the full check pipeline for `task_id` and writes the spec §3.10
+    /// JSON to `out`. Returns the exit code (0 / 4 / 5) for `main.rs` to
+    /// propagate to the OS.
+    ///
+    /// Errors:
+    /// - `task_id` not found → wraps a `TaskStoreError::NotFound` for the
+    ///   `main.rs` mapper, which exits 2 by default.
+    /// - missing `simhash` and `affected_paths` on the current task → still
+    ///   runs the query (treated as `simhash = 0`, `paths = []`); typically
+    ///   yields zero candidates → `status="ok"` exit 0.
+    pub fn check(
+        &self,
+        task_id: &TaskId,
+        config: &StagnationConfig,
+        out: &mut dyn Write,
+    ) -> Result<i32> {
+        let current = self
+            .store
+            .get_task(task_id)
+            .with_context(|| format!("loading task '{task_id}'"))?
+            .ok_or_else(|| anyhow::anyhow!("task '{task_id}' not found"))?;
+
+        let cur_simhash = current.simhash.unwrap_or(0);
+        let cur_paths: Vec<String> = current.affected_paths.clone().unwrap_or_default();
+
+        let similar = self
+            .store
+            .list_similar_tasks(
+                &current.id,
+                cur_simhash,
+                config.max_distance,
+                &cur_paths,
+                config.min_jaccard,
+            )
+            .with_context(|| format!("listing similar tasks for '{task_id}'"))?;
+
+        let n = similar.len() as u32;
+        let status = if n >= config.n_escalate {
+            StagnationStatus::Escalate
+        } else if n >= config.n_threshold {
+            StagnationStatus::Stagnation
+        } else {
+            StagnationStatus::Ok
         };
 
-        let mut candidates = Vec::new();
-        for entry in &history[..history.len() - 1] {
-            if let Some(h) = simhash::parse_simhash(&entry.simhash) {
-                let distance = simhash::hamming_distance(latest_hash, h);
-                candidates.push(serde_json::json!({
-                    "simhash": simhash::format_simhash(h),
-                    "distance": distance,
-                    "category": entry.category,
-                    "timestamp": entry.timestamp,
-                }));
-            }
+        let report = build_report(self.store, &current, &similar, status);
+        write_json(out, &report)?;
+        Ok(status.exit_code())
+    }
+}
+
+// ── JSON report shaping ────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+struct CurrentTaskJson {
+    id: String,
+    simhash: Option<String>,
+    affected_paths: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct SimilarityJson {
+    simhash_distance: Option<u32>,
+    jaccard: f64,
+    shared_paths: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct SimilarTaskJson {
+    id: String,
+    title: String,
+    similarity: SimilarityJson,
+    outcome: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure_reason: Option<String>,
+    completed_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct PatternJson {
+    shared_paths: Vec<String>,
+    common_failure_categories: Vec<String>,
+    consecutive_failures: u32,
+}
+
+#[derive(Debug, Serialize)]
+struct StagnationReport {
+    status: StagnationStatus,
+    current_task: CurrentTaskJson,
+    similar_tasks: Vec<SimilarTaskJson>,
+    pattern: PatternJson,
+    recommended_persona: Option<&'static str>,
+}
+
+fn build_report(
+    store: &dyn TaskStore,
+    current: &Task,
+    similar: &[Task],
+    status: StagnationStatus,
+) -> StagnationReport {
+    let cur_paths_owned: Vec<String> = current.affected_paths.clone().unwrap_or_default();
+
+    let mut similar_json: Vec<SimilarTaskJson> = Vec::with_capacity(similar.len());
+    let mut failures_among_similar: u32 = 0;
+    for t in similar {
+        let simhash_distance = match (current.simhash, t.simhash) {
+            (Some(a), Some(b)) => Some(hamming_distance(a, b)),
+            _ => None,
+        };
+        let other_paths = t.affected_paths.clone().unwrap_or_default();
+        let jaccard = jaccard_similarity(&cur_paths_owned, &other_paths);
+        let shared_paths: Vec<String> = match &t.affected_paths {
+            Some(p) => p
+                .iter()
+                .filter(|x| cur_paths_owned.iter().any(|c| c == *x))
+                .cloned()
+                .collect(),
+            None => Vec::new(),
+        };
+        if matches!(t.status, TaskStatus::Escalated) {
+            failures_among_similar += 1;
         }
+        let failure_reason = derive_failure_reason(store, &t.id);
+        similar_json.push(SimilarTaskJson {
+            id: t.id.as_str().to_string(),
+            title: t.title.clone(),
+            similarity: SimilarityJson {
+                simhash_distance,
+                jaccard,
+                shared_paths,
+            },
+            outcome: outcome_label(t.status),
+            failure_reason,
+            completed_at: t.updated_at,
+        });
+    }
 
-        candidates.sort_by_key(|c| c["distance"].as_u64().unwrap_or(64));
-
-        let similar_count = candidates
+    // Pattern.shared_paths = paths present in EVERY similar task AND in
+    // the current task. Determined intersectionally; degrades gracefully
+    // when no candidate has a path set (in which case `all` over an empty
+    // iter is vacuously true — guard explicitly).
+    let any_candidate_has_paths = similar
+        .iter()
+        .any(|t| t.affected_paths.as_ref().is_some_and(|p| !p.is_empty()));
+    let pattern_shared: Vec<String> = if !cur_paths_owned.is_empty() && any_candidate_has_paths {
+        cur_paths_owned
             .iter()
-            .filter(|c| c["distance"].as_u64().unwrap_or(64) <= self.similarity_threshold as u64)
-            .count();
-
-        if similar_count >= self.stagnation_count {
-            let pattern = classify_pattern(history, latest_hash, self.similarity_threshold);
-            let persona = pattern.map(|p| p.recommended_persona());
-
-            Ok(AnalysisOutcome {
-                exit_override: Some(EXIT_STAGNATION),
-                extra_fields: serde_json::json!({
-                    "stagnation": {
-                        "detected": true,
-                        "pattern_type": pattern,
-                        "recommended_persona": persona,
-                        "current_simhash": simhash::format_simhash(latest_hash),
-                        "similar_count": similar_count,
-                        "candidates": candidates,
-                    }
-                }),
+            .filter(|p| {
+                similar
+                    .iter()
+                    .filter_map(|t| t.affected_paths.as_ref())
+                    .all(|sp| sp.iter().any(|s| s == *p))
             })
-        } else {
-            Ok(no_stagnation())
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    // The persona table is keyed by `consecutive` per `cmd::issue.rs:553`:
+    // 2 → PERSONAS[0], 3 → PERSONAS[1], capped at the last entry. We use
+    // the count of similar tasks (which already excludes the current one)
+    // plus 1 for the current attempt, mirroring the "consecutive failures
+    // including this one" semantic.
+    let _ = failures_among_similar; // reserved for future
+    let recommended_persona = match status {
+        StagnationStatus::Ok => None,
+        _ => {
+            let consecutive = (similar.len() as u32 + 1).max(2);
+            let idx = (consecutive as usize - 2).min(PERSONAS.len() - 1);
+            Some(PERSONAS[idx])
         }
+    };
+
+    StagnationReport {
+        status,
+        current_task: CurrentTaskJson {
+            id: current.id.as_str().to_string(),
+            simhash: current.simhash.map(|h| format!("0x{h:016x}")),
+            affected_paths: cur_paths_owned,
+        },
+        similar_tasks: similar_json,
+        pattern: PatternJson {
+            shared_paths: pattern_shared,
+            common_failure_categories: Vec::new(),
+            consecutive_failures: similar.len() as u32,
+        },
+        recommended_persona,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cmd::check::state::{LoopState, OutputCategory, OutputEntry};
 
-    fn make_ctx(history: Vec<OutputEntry>) -> (Vec<String>, LoopState) {
-        let state = LoopState {
-            hash: "abc1234".to_string(),
-            timestamp: "2026-01-01T00:00:00Z".to_string(),
-            output_history: history,
-            ..Default::default()
-        };
-        (vec!["src/lib.rs".to_string()], state)
+    #[test]
+    fn outcome_label_maps_terminal_states() {
+        assert_eq!(outcome_label(TaskStatus::Done), "completed");
+        assert_eq!(outcome_label(TaskStatus::Escalated), "failed");
+        assert_eq!(outcome_label(TaskStatus::Wip), "wip");
     }
 
     #[test]
-    fn no_stagnation_with_empty_history() {
-        let (files, state) = make_ctx(vec![]);
-        let ctx = AnalysisContext {
-            loop_name: "gap-watch",
-            changed_files: &files,
-            spec_files: &[],
-            code_files: &files,
-            state: &state,
-        };
-        let result = StagnationAnalysis::default().analyze(&ctx).unwrap();
-        assert!(result.exit_override.is_none());
+    fn config_defaults_match_spec() {
+        let c = StagnationConfig::default();
+        assert_eq!(c.max_distance, 3);
+        assert!((c.min_jaccard - 0.5).abs() < 1e-9);
+        assert_eq!(c.n_threshold, 3);
+        assert_eq!(c.n_escalate, 5);
     }
 
     #[test]
-    fn no_stagnation_with_different_hashes() {
-        let (files, state) = make_ctx(vec![
-            OutputEntry {
-                simhash: "0x0000000000000001".to_string(),
-                category: OutputCategory::GapAnalysis,
-                timestamp: "2026-01-01T00:00:00Z".to_string(),
-            },
-            OutputEntry {
-                simhash: "0xFFFFFFFFFFFFFFFF".to_string(),
-                category: OutputCategory::GapAnalysis,
-                timestamp: "2026-01-02T00:00:00Z".to_string(),
-            },
-        ]);
-        let ctx = AnalysisContext {
-            loop_name: "gap-watch",
-            changed_files: &files,
-            spec_files: &[],
-            code_files: &files,
-            state: &state,
-        };
-        let result = StagnationAnalysis::default().analyze(&ctx).unwrap();
-        assert!(result.exit_override.is_none());
-    }
-
-    #[test]
-    fn detects_stagnation_with_similar_hashes() {
-        let base: u64 = 0xA3F2B81C4D5E6F1B;
-        let similar = base ^ 0x01; // 1 bit different
-        let (files, state) = make_ctx(vec![
-            OutputEntry {
-                simhash: simhash::format_simhash(base),
-                category: OutputCategory::GapAnalysis,
-                timestamp: "2026-01-01T00:00:00Z".to_string(),
-            },
-            OutputEntry {
-                simhash: simhash::format_simhash(similar),
-                category: OutputCategory::GapAnalysis,
-                timestamp: "2026-01-02T00:00:00Z".to_string(),
-            },
-            OutputEntry {
-                simhash: simhash::format_simhash(base),
-                category: OutputCategory::GapAnalysis,
-                timestamp: "2026-01-03T00:00:00Z".to_string(),
-            },
-        ]);
-        let ctx = AnalysisContext {
-            loop_name: "gap-watch",
-            changed_files: &files,
-            spec_files: &[],
-            code_files: &files,
-            state: &state,
-        };
-        let result = StagnationAnalysis::default().analyze(&ctx).unwrap();
-        assert_eq!(result.exit_override, Some(EXIT_STAGNATION));
-        assert!(result.extra_fields["stagnation"]["detected"]
-            .as_bool()
-            .unwrap());
-    }
-
-    #[test]
-    fn stricter_threshold_detects_more() {
-        let base: u64 = 0xA3F2B81C4D5E6F1B;
-        let slightly_different = base ^ 0x07; // 3 bits different
-        let (files, state) = make_ctx(vec![
-            OutputEntry {
-                simhash: simhash::format_simhash(base),
-                category: OutputCategory::GapAnalysis,
-                timestamp: "2026-01-01T00:00:00Z".to_string(),
-            },
-            OutputEntry {
-                simhash: simhash::format_simhash(slightly_different),
-                category: OutputCategory::GapAnalysis,
-                timestamp: "2026-01-02T00:00:00Z".to_string(),
-            },
-            OutputEntry {
-                simhash: simhash::format_simhash(base),
-                category: OutputCategory::GapAnalysis,
-                timestamp: "2026-01-03T00:00:00Z".to_string(),
-            },
-        ]);
-        let ctx = AnalysisContext {
-            loop_name: "gap-watch",
-            changed_files: &files,
-            spec_files: &[],
-            code_files: &files,
-            state: &state,
-        };
-
-        // Default threshold=5 detects (3 bits < 5)
-        let result = StagnationAnalysis::default().analyze(&ctx).unwrap();
-        assert_eq!(result.exit_override, Some(EXIT_STAGNATION));
-
-        // Tight threshold=2 does NOT detect (3 bits > 2)
-        let tight = StagnationAnalysis {
-            similarity_threshold: 2,
-            ..Default::default()
-        };
-        let result = tight.analyze(&ctx).unwrap();
-        assert!(result.exit_override.is_none());
-    }
-
-    #[test]
-    fn higher_stagnation_count_requires_more_matches() {
-        let base: u64 = 0xA3F2B81C4D5E6F1B;
-        let (files, state) = make_ctx(vec![
-            OutputEntry {
-                simhash: simhash::format_simhash(base),
-                category: OutputCategory::GapAnalysis,
-                timestamp: "2026-01-01T00:00:00Z".to_string(),
-            },
-            OutputEntry {
-                simhash: simhash::format_simhash(base ^ 0x01),
-                category: OutputCategory::GapAnalysis,
-                timestamp: "2026-01-02T00:00:00Z".to_string(),
-            },
-            OutputEntry {
-                simhash: simhash::format_simhash(base),
-                category: OutputCategory::GapAnalysis,
-                timestamp: "2026-01-03T00:00:00Z".to_string(),
-            },
-        ]);
-        let ctx = AnalysisContext {
-            loop_name: "gap-watch",
-            changed_files: &files,
-            spec_files: &[],
-            code_files: &files,
-            state: &state,
-        };
-
-        // Default count=2 detects (2 similar entries)
-        let result = StagnationAnalysis::default().analyze(&ctx).unwrap();
-        assert_eq!(result.exit_override, Some(EXIT_STAGNATION));
-
-        // Require count=5 → not enough matches
-        let high_count = StagnationAnalysis {
-            stagnation_count: 5,
-            ..Default::default()
-        };
-        let result = high_count.analyze(&ctx).unwrap();
-        assert!(result.exit_override.is_none());
-    }
-
-    #[test]
-    fn min_history_len_gates_detection() {
-        let base: u64 = 0xA3F2B81C4D5E6F1B;
-        // 3 entries: latest compares against 2 previous, both similar → stagnation
-        let (files, state) = make_ctx(vec![
-            OutputEntry {
-                simhash: simhash::format_simhash(base),
-                category: OutputCategory::GapAnalysis,
-                timestamp: "2026-01-01T00:00:00Z".to_string(),
-            },
-            OutputEntry {
-                simhash: simhash::format_simhash(base ^ 0x01),
-                category: OutputCategory::GapAnalysis,
-                timestamp: "2026-01-02T00:00:00Z".to_string(),
-            },
-            OutputEntry {
-                simhash: simhash::format_simhash(base),
-                category: OutputCategory::GapAnalysis,
-                timestamp: "2026-01-03T00:00:00Z".to_string(),
-            },
-        ]);
-        let ctx = AnalysisContext {
-            loop_name: "gap-watch",
-            changed_files: &files,
-            spec_files: &[],
-            code_files: &files,
-            state: &state,
-        };
-
-        // Default min_history=2, 3 entries → detection proceeds
-        let result = StagnationAnalysis::default().analyze(&ctx).unwrap();
-        assert_eq!(result.exit_override, Some(EXIT_STAGNATION));
-
-        // Require min_history=5 → not enough history, skips detection
-        let high_min = StagnationAnalysis {
-            min_history_len: 5,
-            ..Default::default()
-        };
-        let result = high_min.analyze(&ctx).unwrap();
-        assert!(result.exit_override.is_none());
-    }
-
-    fn entry(hash: u64) -> OutputEntry {
-        OutputEntry {
-            simhash: simhash::format_simhash(hash),
-            category: OutputCategory::GapAnalysis,
-            timestamp: "2026-01-01T00:00:00Z".to_string(),
-        }
-    }
-
-    #[test]
-    fn classifies_spinning_pattern() {
-        let base: u64 = 0xA3F2B81C4D5E6F1B;
-        let history = vec![
-            entry(base),
-            entry(base ^ 0x01),
-            entry(base),
-            entry(base ^ 0x01),
-        ];
-        let pattern = classify_pattern(&history, base ^ 0x01, 5);
-        assert_eq!(pattern, Some(PatternType::Spinning));
-        assert_eq!(PatternType::Spinning.recommended_persona(), "hacker");
-    }
-
-    #[test]
-    fn classifies_oscillation_pattern() {
-        let a: u64 = 0xA3F2B81C4D5E6F1B;
-        let b: u64 = 0x1234567890ABCDEF; // very different from a
-                                         // A, B, A, B → even indices similar, odd pairs different
-        let history = vec![entry(a), entry(b), entry(a), entry(b)];
-        let pattern = classify_pattern(&history, b, 5);
-        assert_eq!(pattern, Some(PatternType::Oscillation));
-        assert_eq!(PatternType::Oscillation.recommended_persona(), "architect");
-    }
-
-    #[test]
-    fn classifies_no_drift_pattern() {
-        let base: u64 = 0xA3F2B81C4D5E6F1B;
-        // All within threshold but not spinning (distance > 3 but ≤ 5)
-        let history = vec![
-            entry(base ^ 0x0F), // 4 bits from latest
-            entry(base ^ 0x17), // ~4 bits from latest
-            entry(base ^ 0x0F), // 4 bits from latest
-            entry(base),        // latest
-        ];
-        let pattern = classify_pattern(&history, base, 5);
-        assert_eq!(pattern, Some(PatternType::NoDrift));
-        assert_eq!(PatternType::NoDrift.recommended_persona(), "researcher");
-    }
-
-    #[test]
-    fn classifies_diminishing_returns() {
-        let base: u64 = 0xA3F2B81C4D5E6F1B;
-        // Distances decreasing: 5, 3, 1
-        let history = vec![
-            entry(base ^ 0x1F), // 5 bits
-            entry(base ^ 0x07), // 3 bits
-            entry(base ^ 0x01), // 1 bit
-            entry(base),        // latest
-        ];
-        let pattern = classify_pattern(&history, base, 5);
-        assert_eq!(pattern, Some(PatternType::DiminishingReturns));
-        assert_eq!(
-            PatternType::DiminishingReturns.recommended_persona(),
-            "simplifier"
-        );
-    }
-
-    #[test]
-    fn no_pattern_when_insufficient_history() {
-        let base: u64 = 0xA3F2B81C4D5E6F1B;
-        let history = vec![entry(base)];
-        let pattern = classify_pattern(&history, base, 5);
-        assert_eq!(pattern, None);
-    }
-
-    #[test]
-    fn stagnation_output_includes_pattern_and_persona() {
-        let base: u64 = 0xA3F2B81C4D5E6F1B;
-        let (files, state) = make_ctx(vec![entry(base), entry(base ^ 0x01), entry(base)]);
-        let ctx = AnalysisContext {
-            loop_name: "gap-watch",
-            changed_files: &files,
-            spec_files: &[],
-            code_files: &files,
-            state: &state,
-        };
-        let result = StagnationAnalysis::default().analyze(&ctx).unwrap();
-        assert_eq!(result.exit_override, Some(EXIT_STAGNATION));
-
-        let stag = &result.extra_fields["stagnation"];
-        assert!(stag["pattern_type"].is_string());
-        assert!(stag["recommended_persona"].is_string());
+    fn status_exit_codes() {
+        assert_eq!(StagnationStatus::Ok.exit_code(), 0);
+        assert_eq!(StagnationStatus::Stagnation.exit_code(), 4);
+        assert_eq!(StagnationStatus::Escalate.exit_code(), 5);
     }
 }

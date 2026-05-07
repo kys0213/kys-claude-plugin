@@ -1345,6 +1345,53 @@ impl TaskRepo for SqliteTaskStore {
             .map_err(backend)?;
         Ok(rows)
     }
+
+    fn list_similar_tasks(
+        &self,
+        exclude: &TaskId,
+        simhash: u64,
+        max_distance: u32,
+        paths: &[String],
+        min_jaccard: f64,
+    ) -> Result<Vec<Task>> {
+        use crate::domain::simhash::{hamming_distance, jaccard_similarity};
+        let conn = self.conn.lock().expect("poisoned");
+        // Pull every task that has at least one similarity dimension
+        // populated (rows pre-V3 are skipped by the WHERE clause). Filter
+        // distance / Jaccard in-process — set sizes are small and the
+        // domain primitives keep the rule in one place.
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, epic_name, source, fingerprint, title, body, status, attempts,
+                        branch, pr_number, escalated_issue, simhash, affected_paths,
+                        created_at, updated_at
+                   FROM tasks
+                  WHERE id != ?
+                    AND (simhash IS NOT NULL OR affected_paths IS NOT NULL)
+                  ORDER BY created_at, id",
+            )
+            .map_err(backend)?;
+        let candidates = stmt
+            .query_map(params![exclude.as_str()], task_from_row)
+            .map_err(backend)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(backend)?;
+        let out = candidates
+            .into_iter()
+            .filter(|t: &Task| {
+                let simhash_match = t
+                    .simhash
+                    .map(|h| hamming_distance(h, simhash) <= max_distance)
+                    .unwrap_or(false);
+                let jaccard_match = match &t.affected_paths {
+                    Some(p) => jaccard_similarity(p, paths) >= min_jaccard,
+                    None => false,
+                };
+                simhash_match || jaccard_match
+            })
+            .collect();
+        Ok(out)
+    }
 }
 
 impl SuppressionRepo for SqliteTaskStore {

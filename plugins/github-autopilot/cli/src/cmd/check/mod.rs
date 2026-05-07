@@ -10,7 +10,6 @@ use crate::fs::FsOps;
 use crate::git::GitOps;
 
 use analysis::{AnalysisContext, DiffAnalysis};
-use stagnation::classify_pattern;
 use state::{
     append_output_entry, read_state, state_dir, state_file_path, validate_loop_name, write_state,
     OutputEntry, STATE_EXT,
@@ -21,7 +20,12 @@ pub const EXIT_NO_CHANGES: i32 = 0;
 pub const EXIT_SPEC_CHANGED: i32 = 1;
 pub const EXIT_CODE_CHANGED: i32 = 2;
 pub const EXIT_FIRST_RUN: i32 = 3;
-pub const EXIT_STAGNATION: i32 = 4;
+/// Stagnation detected (3 ≤ N < 5 similar ledger tasks). Re-exported from
+/// the `stagnation` module so existing call sites keep working after the
+/// ledger-native rewrite.
+pub const EXIT_STAGNATION: i32 = stagnation::EXIT_STAGNATION;
+/// Auto-escalate threshold reached (N ≥ 5 similar ledger tasks).
+pub const EXIT_ESCALATE: i32 = stagnation::EXIT_ESCALATE;
 
 #[derive(Serialize)]
 struct DiffResult {
@@ -227,9 +231,15 @@ impl CheckService {
     }
 
     /// Pipeline health report across all loops.
+    ///
+    /// Per the C10 ledger-stagnation redesign
+    /// (`plans/ledger-stagnation-redesign.md`), simhash-based pattern
+    /// classification has moved out of the loop-state pipeline and into
+    /// `autopilot check stagnation` (ledger-native). `health` is now a
+    /// pure overview: it reports the last seen HEAD and history length per
+    /// loop and always marks the pipeline as `healthy` — operators should
+    /// run `check stagnation --task <id>` for the per-task assessment.
     pub fn health(&self) -> Result<i32> {
-        use crate::cmd::simhash;
-
         let dir = state_dir(self.git.as_ref())?;
         let files = match self.fs.list_files(&dir, STATE_EXT) {
             Ok(f) => f,
@@ -245,7 +255,6 @@ impl CheckService {
         }
 
         let mut loops = Vec::new();
-        let mut any_stagnation = false;
 
         for file in &files {
             let name = file
@@ -254,41 +263,16 @@ impl CheckService {
                 .unwrap_or_default();
 
             if let Ok(loop_state) = read_state(self.fs.as_ref(), file) {
-                let history = &loop_state.output_history;
-                let pattern = if history.len() >= 2 {
-                    let latest = &history[history.len() - 1];
-                    simhash::parse_simhash(&latest.simhash).and_then(|latest_hash| {
-                        classify_pattern(
-                            history,
-                            latest_hash,
-                            stagnation::DEFAULT_SIMILARITY_THRESHOLD,
-                        )
-                    })
-                } else {
-                    None
-                };
-
-                if pattern.is_some() {
-                    any_stagnation = true;
-                }
-
                 loops.push(serde_json::json!({
                     "name": name,
                     "hash": &loop_state.hash[..7.min(loop_state.hash.len())],
                     "timestamp": loop_state.timestamp,
-                    "history_len": history.len(),
-                    "pattern_type": pattern,
-                    "recommended_persona": pattern.map(|p| p.recommended_persona()),
+                    "history_len": loop_state.output_history.len(),
                 }));
             }
         }
 
-        let overall = if any_stagnation {
-            "degraded"
-        } else {
-            "healthy"
-        };
-        let out = serde_json::json!({ "loops": loops, "overall": overall });
+        let out = serde_json::json!({ "loops": loops, "overall": "healthy" });
         println!("{out}");
         Ok(0)
     }
