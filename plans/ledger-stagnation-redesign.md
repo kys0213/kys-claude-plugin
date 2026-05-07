@@ -71,7 +71,7 @@ autopilot 모드는 사람 개입 없이 task 를 dispatch 하므로, 같은 iss
 
 - **조건부 escalate**: 1차 감지 시 hook 은 redirect prompt 만 노출 (persona / 영역 변경 권유).
 - 같은 그룹의 후속 task 가 N≥N\_esc (= 5) 까지 도달해도 stagnation 이 풀리지 않으면, hook 이 **자동으로 escalate event 를 ledger 에 기록** + 사람 개입 요청 prompt 를 노출한다.
-- escalate 동작은 ledger 에 `TaskEscalated` event 를 emit 하는 형태로 구현한다 (기존 `EventKind` 재사용 가능 여부는 Open Question).
+- escalate 동작은 ledger 에 `TaskEscalated` event 를 emit 하는 형태로 구현한다. **기존 `EventKind` 에 이미 존재** (`cli/src/domain/event.rs:55`, `as_str()` 매핑은 line 82) 하므로 새 variant 추가 / 마이그레이션 작업은 불필요. 본 epic 에선 기존 event 를 그대로 재사용한다.
 
 ### 3.6 LLM 사용 (C-2 hybrid)
 
@@ -87,9 +87,7 @@ autopilot 모드는 사람 개입 없이 task 를 dispatch 하므로, 같은 iss
 
 ### 3.8 Hook 설계
 
-- PreToolUse hook (Bash matcher) 이 다음 명령 패턴을 감지한다.
-  - `autopilot task claim ...`
-  - 그 외 task 진입 명령 (epic 마무리 시 영역 정의 — Open Question).
+- PreToolUse hook (Bash matcher) 이 `autopilot task claim ...` 명령만을 대상으로 한다. `task add` 시점은 worker 와 무관하게 ledger 에 task 가 들어오는 단계일 뿐이라 stagnation redirect 의 본질 (worker 진로 차단) 과 맞지 않다. 추가 명령으로의 확장은 운영 데이터를 보고 follow-up 에서 결정.
 - 감지 시 hook 이 `autopilot check stagnation --task <id>` 를 호출한다.
 - exit code 별 hook 동작:
 
@@ -197,11 +195,11 @@ N≥N\_esc (escalate) 인 경우 위 prompt 끝에 다음 라인 추가:
 | `cli/src/store/memory.rs` | 동일 (in-memory 테스트 backend) |
 | `cli/src/cmd/task.rs::add` / `add_batch` | `--simhash-input` / `--paths` 인자 처리. 미지정 시 `derive_simhash(title + body)` fallback |
 | `cli/src/cmd/check/stagnation.rs` | 기존 simhash 코드를 base 로 ledger-native 재작성 (501 라인 → 새 흐름) |
-| `cli/src/cmd/check/mod.rs` | `check stagnation` 서브명령 노출 (또는 기존 `check diff` 와 통합 — Open Question) |
+| `cli/src/cmd/check/mod.rs` | `check stagnation` 을 별개 서브명령으로 노출 (`check diff` 와 통합하지 않음 — SRP / clap 구조 분리 우선) |
 | `cli/src/cmd/mod.rs` | clap 인자 정의 |
 | `cli/src/main.rs::exit_code_for` | exit 4 / exit 5 분류 추가 |
 | Skill: `plugins/github-autopilot/skills/resilience/SKILL.md` | 입력 형태 갱신 (ledger-based stagnation JSON 수신), Haiku verify 가이드 추가 |
-| Hook: PreToolUse 등록 위치 | `plugins/github-autopilot/.claude-plugin/...` 어디 — Open Question (현재 plugin hook 등록 표준 확인 필요) |
+| Hook: PreToolUse 등록 위치 | 스크립트는 `plugins/github-autopilot/hooks/<name>.sh` (이번 epic 의 hook 은 `protect-stagnation.sh` 가 자연스러움 — 정확한 이름은 구현 단계에서 확정). 사용자 settings.json 에 `bash ${CLAUDE_PLUGIN_ROOT}/hooks/<name>.sh` 형태로 등록하고, `commands/setup.md` 에 등록 가이드 한 절을 추가한다 (`hooks/guard-pr-base.sh` / `hooks/check-cli-version.sh` 등록 사례를 따름). |
 | Test: `cli/tests/check_stagnation_tests.rs` (신규) | scenario 테스트 (in-memory store + Hybrid 알고리즘 검증) |
 
 ## 5. Acceptance Criteria
@@ -211,7 +209,7 @@ N≥N\_esc (escalate) 인 경우 위 prompt 끝에 다음 라인 추가:
 - [ ] PreToolUse hook 이 `task claim` 직전에 stagnation 체크를 수행하고 redirect prompt 를 stderr 로 노출한다 (exit 2).
 - [ ] N ≥ N\_esc 인 경우 hook 이 자동으로 `autopilot task escalate` 를 호출하고 ledger 에 escalate event 를 기록한다.
 - [ ] `cargo fmt --check` / `cargo clippy --tests -- -D warnings` / `cargo test` 모두 통과.
-- [ ] `resilience` SKILL.md 가 새 흐름을 반영한다 (입력 / 출력 / persona 가이드 / Haiku verify 절차).
+- [ ] `resilience` SKILL.md 가 새 흐름을 반영한다 (입력 / 출력 / persona 가이드 / Haiku verify 절차). **본 epic 의 acceptance 는 SKILL.md 가이드 문서 갱신까지로 한정** — 실제 Haiku 호출 코드는 별도 후속 epic.
 
 ## 6. Out of Scope / Future Work
 
@@ -224,15 +222,22 @@ N≥N\_esc (escalate) 인 경우 위 prompt 끝에 다음 라인 추가:
 | Simhash 알고리즘 교체 / 다중 알고리즘 보관 | Storage 옵션 B (단일 컬럼) 을 채택했으므로, 다중 알고리즘 동시 보관은 향후 schema 확장이 필요할 때 재검토. |
 | 기존 row 의 simhash / paths backfill SQL | 정책상 수행하지 않는다. 새 task 부터만 채운다. |
 
-## 7. Open Questions
+## 7. Resolved Decisions
 
-spec 검토 / 구현 착수 전에 결론이 필요한 항목.
+spec 검토 단계에서 다음 결정이 확정되었다.
 
-1. **`TaskEscalated` event 가 기존 `EventKind` 에 있는가, 새 variant 가 필요한가?** — 코드 검토 후 spec 갱신 가능. 새 variant 가 필요하면 마이그레이션 영향도 추가 정리.
-2. **`check stagnation` 이 기존 `check diff` 명령과 통합할 만한가, 별개 서브명령인가?** — clap 구조 / 사용자 호출 빈도 / Skill 호출 패턴을 보고 결정.
-3. **PreToolUse hook 등록 표준** — plugin 레벨에서 hook 을 어떻게 표현하나? `plugins/github-autopilot/.claude-plugin/` 안의 다른 plugin hook 등록 사례를 검토 후 결론.
-4. **Skill 의 Haiku verify 호출 인터페이스** — 본 epic 에선 가이드 문서만 정리하고, 실제 호출 코드 (어떤 SDK / 어떤 함수) 는 별도 후속 epic 으로 분리.
-5. **"task claim 외 task 진입 명령" 의 범위** — `claim` 외에 어떤 명령이 stagnation 체크 대상인지. epic 마무리 시 PreToolUse matcher 패턴 확정 필요.
+1. **TaskEscalated event 는 기존 `EventKind` 에 이미 존재** (`cli/src/domain/event.rs:55`, `as_str()` 매핑은 line 82). 새 variant 추가 불필요. 본 epic 에선 escalate 흐름이 기존 event 를 그대로 재사용한다.
+
+2. **`check stagnation` 은 별개 서브명령으로 정의**한다. `check diff` 와 통합하지 않음. 이유: SRP — stagnation 은 다른 책임 (similarity grouping vs diff comparison) 이며 clap 구조도 명확히 분리되는 게 가독성/유지보수에 유리하다.
+
+3. **PreToolUse hook 등록은 plugin 표준을 따른다**:
+   - 스크립트 위치: `plugins/github-autopilot/hooks/<name>.sh` (이번 epic 의 hook 은 `protect-stagnation.sh` 가 자연스러움 — 정확한 이름은 구현 단계에서 확정)
+   - 사용자 settings.json 에 `bash ${CLAUDE_PLUGIN_ROOT}/hooks/<name>.sh` 형태로 등록
+   - `commands/setup.md` 에 등록 가이드 한 절 추가 (`hooks/guard-pr-base.sh` / `hooks/check-cli-version.sh` 의 등록 사례를 따름)
+
+4. **Skill 의 Haiku verify 호출 인터페이스는 본 epic 에선 SKILL.md 가이드 문서까지만 정리**한다. 실제 코드 호출 (어떤 SDK / 어떤 함수) 은 별도 후속 epic 으로 분리. 본 epic 의 Acceptance Criteria 도 가이드 문서까지로 한정한다.
+
+5. **Hook matcher 범위는 `autopilot task claim` 만**으로 한정한다. `add` 시점은 worker 와 무관하게 ledger 에 task 가 들어오는 단계일 뿐이라 stagnation redirect 의 본질 (worker 진로 차단) 과 맞지 않다. 추가 명령으로 확장은 운영 데이터를 보고 follow-up 에서 결정.
 
 ## 8. References
 
