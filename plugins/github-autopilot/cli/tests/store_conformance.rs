@@ -260,9 +260,28 @@ fn body_release_stale_recovers_old_wip_tasks(store: Arc<dyn TaskStore>) {
     let recovered = store
         .release_stale(t0() + Duration::minutes(5), t0() + Duration::minutes(11))
         .unwrap();
-    let mut ids: Vec<String> = recovered.iter().map(|i| i.as_str().to_string()).collect();
+    // The returned Vec<Task> must reflect post-release state — Ready with
+    // attempts decremented — so callers can use a single parser shared with
+    // `list_stale` (Vec<Task>).
+    let mut ids: Vec<String> = recovered
+        .iter()
+        .map(|t| t.id.as_str().to_string())
+        .collect();
     ids.sort();
     assert_eq!(ids, vec!["A".to_string(), "B".to_string()]);
+    for t in &recovered {
+        assert_eq!(
+            t.status,
+            TaskStatus::Ready,
+            "released task must be Ready: {:?}",
+            t
+        );
+        assert_eq!(
+            t.attempts, 0,
+            "released task must have decremented attempts: {:?}",
+            t
+        );
+    }
 
     let by_id = |id: &str| store.get_task(&TaskId::from_raw(id)).unwrap().unwrap();
     assert_eq!(by_id("A").status, TaskStatus::Ready);
