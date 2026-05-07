@@ -13,7 +13,6 @@ tools: ["Read", "Glob", "Grep"]
 - **추론/요약/의견 금지** — 매칭 결과 그대로 나열한다. "아마 X 같다", "추정하건대" 같은 표현 금지.
 - **모호한 매칭은 LOW 로 분류, 임의 채택 금지** — 거짓 매핑은 자율 보강 fallback 보다 더 해롭다.
 - **spec 파일 자체를 수정하지 않는다.** Edit 도구 권한이 없으며, frontmatter 작성/갱신은 `/spec-kit:annotate-spec` 의 책임이다.
-- **HIGH 만 자동 채택 권장** — MEDIUM / LOW 는 사용자 confirm 필수.
 - **새 인용 금지** — Glob/Grep 매칭 결과의 경로만 사용한다. 가공된 경로 추측 금지.
 - `<tool_call>` / `<tool_response>` 같은 가짜 블록을 텍스트로 출력하지 않는다.
 
