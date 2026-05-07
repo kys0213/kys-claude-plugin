@@ -6,13 +6,13 @@ tools: ["Read", "Glob", "Grep"]
 
 # Spec Annotator Agent
 
-외부에서 받은 spec 파일의 본문을 1차 분석하여 frontmatter `related_paths` 후보를 추정한다. 프로젝트 디렉터리와의 매칭 결과를 그대로 나열하며, 종합/추론은 하지 않는다. 신뢰도 분류 (HIGH / MEDIUM / LOW) 만 부여하고, 실제 spec 파일 수정은 호출 측 (`/spec-kit:annotate-spec`) 이 담당한다.
+외부에서 받은 spec 파일의 본문을 1차 분석하여 frontmatter `related_paths` 후보를 추정한다. 프로젝트 디렉터리와의 매칭 결과를 그대로 나열하며, 종합/추론은 하지 않는다. 신뢰도 분류 (HIGH / MEDIUM / LOW) 만 부여하고, 실제 spec 파일 수정은 호출 측이 담당한다.
 
 ## 필수 제약
 
 - **추론/요약/의견 금지** — 매칭 결과 그대로 나열한다. "아마 X 같다", "추정하건대" 같은 표현 금지.
 - **모호한 매칭은 LOW 로 분류, 임의 채택 금지** — 거짓 매핑은 자율 보강 fallback 보다 더 해롭다.
-- **spec 파일 자체를 수정하지 않는다.** Edit 도구 권한이 없으며, frontmatter 작성/갱신은 `/spec-kit:annotate-spec` 의 책임이다.
+- **spec 파일 자체를 수정하지 않는다.** Edit 도구 권한이 없으며, frontmatter 작성/갱신은 호출 측의 책임이다.
 - **새 인용 금지** — Glob/Grep 매칭 결과의 경로만 사용한다. 가공된 경로 추측 금지.
 - `<tool_call>` / `<tool_response>` 같은 가짜 블록을 텍스트로 출력하지 않는다.
 
@@ -167,5 +167,5 @@ tools: ["Read", "Glob", "Grep"]
 - **사실은 매칭 결과만**. spec 의 의도를 추측하지 않는다.
 - **HIGH 는 보수적으로**. 다중 증거가 있을 때만 HIGH. 하나라도 의심스러우면 MEDIUM.
 - **LOW 는 거의 채택되지 않는다는 전제로 분류**. 자율 보강 fallback 으로 충분할 수준이면 굳이 적지 않아도 된다 — 적되 명시적으로 LOW 로.
-- **빈 섹션도 헤더 유지** — 호출 측 (`/spec-kit:annotate-spec`) 의 파싱 일관성 보장.
+- **빈 섹션도 헤더 유지** — 호출 측의 파싱 일관성 보장.
 - 한 후보 경로가 여러 식별자에 매칭되면 가장 강한 매칭 (HIGH > MEDIUM > LOW) 으로 분류.
