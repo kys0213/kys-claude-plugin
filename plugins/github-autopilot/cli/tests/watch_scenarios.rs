@@ -171,6 +171,8 @@ fn watch_task(id: &str, epic: &str) -> NewWatchTask {
         fingerprint: format!("fp-{id}"),
         title: format!("Task {id}"),
         body: None,
+        simhash: None,
+        affected_paths: None,
     }
 }
 

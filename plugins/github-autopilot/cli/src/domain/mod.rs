@@ -2,6 +2,7 @@ pub mod deps;
 pub mod epic;
 pub mod error;
 pub mod event;
+pub mod simhash;
 pub mod task;
 pub mod task_id;
 

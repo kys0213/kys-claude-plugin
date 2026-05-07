@@ -196,6 +196,8 @@ impl<'a> TaskService<'a> {
             fingerprint: fp,
             title: title.to_string(),
             body: body.map(str::to_string),
+            simhash: None,
+            affected_paths: None,
         };
         match self.store.upsert_watch_task(nt, now) {
             Ok(UpsertOutcome::Inserted(id)) => {
@@ -259,6 +261,8 @@ impl<'a> TaskService<'a> {
                 fingerprint: fp,
                 title,
                 body,
+                simhash: None,
+                affected_paths: None,
             };
             match self
                 .store
