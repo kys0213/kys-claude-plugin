@@ -596,7 +596,7 @@ impl TaskRepo for InMemoryTaskStore {
         Ok(stale)
     }
 
-    fn release_stale(&self, before: DateTime<Utc>, now: DateTime<Utc>) -> Result<Vec<TaskId>> {
+    fn release_stale(&self, before: DateTime<Utc>, now: DateTime<Utc>) -> Result<Vec<Task>> {
         let mut s = self.state.lock().expect("poisoned");
         let stale: Vec<(TaskId, String, u32)> = s
             .tasks
@@ -607,11 +607,17 @@ impl TaskRepo for InMemoryTaskStore {
 
         let mut recovered = Vec::with_capacity(stale.len());
         for (id, epic_name, prev_attempts) in stale {
-            if let Some(task) = s.tasks.get_mut(&id) {
+            // Apply the release transition then snapshot the post-release
+            // Task so the returned vec matches `list_stale`'s shape (each
+            // Task carries Ready status + decremented attempts).
+            let snapshot = if let Some(task) = s.tasks.get_mut(&id) {
                 task.status = TaskStatus::Ready;
                 task.attempts = task.attempts.saturating_sub(1);
                 task.updated_at = now;
-            }
+                Some(task.clone())
+            } else {
+                None
+            };
             let event = InMemoryTaskStore::make_event(
                 EventKind::TaskReleasedStale,
                 Some(epic_name),
@@ -620,7 +626,9 @@ impl TaskRepo for InMemoryTaskStore {
                 now,
             );
             InMemoryTaskStore::push_event(&mut s, event);
-            recovered.push(id);
+            if let Some(task) = snapshot {
+                recovered.push(task);
+            }
         }
         Ok(recovered)
     }

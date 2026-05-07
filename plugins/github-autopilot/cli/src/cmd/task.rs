@@ -368,14 +368,14 @@ impl<'a> TaskService<'a> {
             .release_stale(cutoff, now)
             .with_context(|| format!("releasing stale Wip tasks older than {before_seconds}s"))?;
         if json {
-            let ids: Vec<&str> = recovered.iter().map(|i| i.as_str()).collect();
-            write_json(out, &ids)?;
-        } else if recovered.is_empty() {
+            return write_json(out, &recovered).map(|()| 0);
+        }
+        if recovered.is_empty() {
             writeln!(out, "released 0 stale tasks")?;
         } else {
             writeln!(out, "released {} stale tasks:", recovered.len())?;
-            for id in &recovered {
-                writeln!(out, "  {}", id.as_str())?;
+            for t in &recovered {
+                writeln!(out, "  {}", t.id.as_str())?;
             }
         }
         Ok(0)

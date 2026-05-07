@@ -156,13 +156,16 @@ pub trait TaskRepo: Send + Sync {
     /// `release_claim`). Used by the cron supervisor to reap orphaned claims
     /// after worker crashes / ctrl-C / worktree destruction so the task can
     /// reach another worker. Each recovered task gets a `TaskReleasedStale`
-    /// event for audit. Returns the ids of recovered tasks (empty when no
-    /// stale Wip exists — idempotent).
+    /// event for audit. Returns the recovered tasks — each `Task` reflects
+    /// the post-release state (`status = Ready`, `attempts` decremented,
+    /// `updated_at = now`), matching the `Vec<Task>` shape produced by
+    /// `list_stale` so callers can use a single parser. Empty result is
+    /// normal (idempotent).
     ///
     /// Per `CLAUDE.md` "책임 경계", the **decision** of when to bulk-recover
     /// vs review per-task is the agent's call (see `list_stale`); this CLI
     /// path remains as an emergency operator primitive.
-    fn release_stale(&self, before: DateTime<Utc>, now: DateTime<Utc>) -> Result<Vec<TaskId>>;
+    fn release_stale(&self, before: DateTime<Utc>, now: DateTime<Utc>) -> Result<Vec<Task>>;
 
     /// Read-only observation of Wip tasks whose `updated_at` is older than
     /// `before`. Returns the same set of tasks that `release_stale` would

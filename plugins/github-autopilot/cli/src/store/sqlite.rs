@@ -915,7 +915,7 @@ impl TaskRepo for SqliteTaskStore {
         rows.map_err(backend)
     }
 
-    fn release_stale(&self, before: DateTime<Utc>, now: DateTime<Utc>) -> Result<Vec<TaskId>> {
+    fn release_stale(&self, before: DateTime<Utc>, now: DateTime<Utc>) -> Result<Vec<Task>> {
         let mut conn = self.conn.lock().expect("poisoned");
         let tx = conn.transaction().map_err(backend)?;
 
@@ -961,7 +961,19 @@ impl TaskRepo for SqliteTaskStore {
                 now,
             )
             .map_err(backend)?;
-            recovered.push(task_id);
+            // Re-read the post-update row so the returned `Task` reflects
+            // the Ready/decremented state (matches `list_stale`'s shape).
+            let task = tx
+                .query_row(
+                    "SELECT id, epic_name, source, fingerprint, title, body, status, attempts,
+                            branch, pr_number, escalated_issue, created_at, updated_at
+                       FROM tasks
+                      WHERE id=?",
+                    params![id],
+                    task_from_row,
+                )
+                .map_err(backend)?;
+            recovered.push(task);
         }
 
         tx.commit().map_err(backend)?;
