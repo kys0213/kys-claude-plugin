@@ -45,6 +45,15 @@ pub struct NewWatchTask {
     pub fingerprint: String,
     pub title: String,
     pub body: Option<String>,
+    /// Optional 64-bit weighted simhash signature for the task (see
+    /// `domain::simhash::derive_simhash`). Populated by `task add` /
+    /// `task add-batch` for ledger-based stagnation detection. Older
+    /// callers that don't supply it leave the column NULL.
+    pub simhash: Option<u64>,
+    /// Optional top-N affected source paths (line-count desc) for the
+    /// path-set side of hybrid stagnation similarity. JSON-encoded by the
+    /// store backends; absent when the caller didn't pass `--paths`.
+    pub affected_paths: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,6 +199,29 @@ pub trait TaskRepo: Send + Sync {
     fn apply_reconciliation(&self, plan: ReconciliationPlan, now: DateTime<Utc>) -> Result<()>;
 
     fn list_deps(&self, task_id: &TaskId) -> Result<Vec<TaskId>>;
+
+    /// Returns tasks whose simhash signature is within `max_distance` hamming
+    /// bits of `simhash` **OR** whose `affected_paths` Jaccard similarity
+    /// with `paths` is at least `min_jaccard`. The candidate set is the
+    /// union of both dimensions per `plans/ledger-stagnation-redesign.md`
+    /// §3.3 (hybrid OR).
+    ///
+    /// `exclude` is the task being inspected — it must not appear in the
+    /// returned list (a task is not similar to itself for the purpose of
+    /// stagnation grouping). Tasks whose `simhash` is `None` and whose
+    /// `affected_paths` is `None` (rows that pre-date the V3 schema) are
+    /// silently skipped because neither dimension can match.
+    ///
+    /// Order is implementation-defined; callers should not rely on it.
+    /// Implementations should keep this method side-effect free.
+    fn list_similar_tasks(
+        &self,
+        exclude: &TaskId,
+        simhash: u64,
+        max_distance: u32,
+        paths: &[String],
+        min_jaccard: f64,
+    ) -> Result<Vec<Task>>;
 }
 
 pub trait EventLog: Send + Sync {

@@ -19,9 +19,10 @@ use crate::ports::task_store::{
     SuppressionRepo, TaskRepo, TaskStoreError, UnblockReport, UpsertOutcome,
 };
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 const V1_SQL: &str = include_str!("migrations/V1__initial.sql");
 const V2_SQL: &str = include_str!("migrations/V2__lookup_indexes.sql");
+const V3_SQL: &str = include_str!("migrations/V3__simhash_paths.sql");
 
 pub struct SqliteTaskStore {
     conn: Mutex<Connection>,
@@ -65,6 +66,7 @@ impl SqliteTaskStore {
         if !has_meta {
             conn.execute_batch(V1_SQL).map_err(backend)?;
             conn.execute_batch(V2_SQL).map_err(backend)?;
+            conn.execute_batch(V3_SQL).map_err(backend)?;
             return Ok(());
         }
 
@@ -88,6 +90,9 @@ impl SqliteTaskStore {
 
         if found < 2 {
             conn.execute_batch(V2_SQL).map_err(backend)?;
+        }
+        if found < 3 {
+            conn.execute_batch(V3_SQL).map_err(backend)?;
         }
         Ok(())
     }
@@ -133,6 +138,17 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
             format!("invalid task source: {source_str}").into(),
         )
     })?;
+    let affected_paths: Option<Vec<String>> =
+        match row.get::<_, Option<String>>("affected_paths")? {
+            Some(json) => Some(serde_json::from_str(&json).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    format!("invalid affected_paths JSON: {e}").into(),
+                )
+            })?),
+            None => None,
+        };
     Ok(Task {
         id: TaskId::from_raw(row.get::<_, String>("id")?),
         epic_name: row.get("epic_name")?,
@@ -147,6 +163,10 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
         escalated_issue: row
             .get::<_, Option<i64>>("escalated_issue")?
             .map(|n| n as u64),
+        // SQLite stores i64; bit-cast preserves the original u64 simhash
+        // pattern even when the high bit makes the i64 negative.
+        simhash: row.get::<_, Option<i64>>("simhash")?.map(|n| n as u64),
+        affected_paths,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
     })
@@ -456,7 +476,8 @@ impl TaskRepo for SqliteTaskStore {
         let conn = self.conn.lock().expect("poisoned");
         conn.query_row(
             "SELECT id, epic_name, source, fingerprint, title, body, status, attempts,
-                    branch, pr_number, escalated_issue, created_at, updated_at
+                    branch, pr_number, escalated_issue, simhash, affected_paths,
+                    created_at, updated_at
                FROM tasks WHERE id=?",
             params![id.as_str()],
             task_from_row,
@@ -470,13 +491,15 @@ impl TaskRepo for SqliteTaskStore {
         let mut stmt = if status.is_some() {
             conn.prepare(
                 "SELECT id, epic_name, source, fingerprint, title, body, status, attempts,
-                        branch, pr_number, escalated_issue, created_at, updated_at
+                        branch, pr_number, escalated_issue, simhash, affected_paths,
+                        created_at, updated_at
                    FROM tasks WHERE epic_name=? AND status=? ORDER BY created_at, id",
             )
         } else {
             conn.prepare(
                 "SELECT id, epic_name, source, fingerprint, title, body, status, attempts,
-                        branch, pr_number, escalated_issue, created_at, updated_at
+                        branch, pr_number, escalated_issue, simhash, affected_paths,
+                        created_at, updated_at
                    FROM tasks WHERE epic_name=? ORDER BY created_at, id",
             )
         }
@@ -497,7 +520,8 @@ impl TaskRepo for SqliteTaskStore {
         let conn = self.conn.lock().expect("poisoned");
         conn.query_row(
             "SELECT id, epic_name, source, fingerprint, title, body, status, attempts,
-                    branch, pr_number, escalated_issue, created_at, updated_at
+                    branch, pr_number, escalated_issue, simhash, affected_paths,
+                    created_at, updated_at
                FROM tasks WHERE epic_name=? AND fingerprint=? LIMIT 1",
             params![epic, fingerprint],
             task_from_row,
@@ -550,11 +574,21 @@ impl TaskRepo for SqliteTaskStore {
             )));
         }
 
+        let affected_paths_json = task
+            .affected_paths
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|e| TaskStoreError::Backend(format!("affected_paths serialize: {e}")))?;
+        // u64 → i64 bit-cast preserves the simhash signature even when the
+        // high bit makes the i64 negative (rusqlite stores INTEGER as i64).
+        let simhash_i64 = task.simhash.map(|h| h as i64);
         tx.execute(
             "INSERT INTO tasks(id, epic_name, source, fingerprint, title, body,
                                status, attempts, branch, pr_number, escalated_issue,
+                               simhash, affected_paths,
                                created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, 'ready', 0, NULL, NULL, NULL, ?, ?)",
+             VALUES (?, ?, ?, ?, ?, ?, 'ready', 0, NULL, NULL, NULL, ?, ?, ?, ?)",
             params![
                 task.id.as_str(),
                 task.epic_name,
@@ -562,6 +596,8 @@ impl TaskRepo for SqliteTaskStore {
                 task.fingerprint,
                 task.title,
                 task.body,
+                simhash_i64,
+                affected_paths_json,
                 now,
                 now,
             ],
@@ -625,7 +661,8 @@ impl TaskRepo for SqliteTaskStore {
         let task = tx
             .query_row(
                 "SELECT id, epic_name, source, fingerprint, title, body, status, attempts,
-                        branch, pr_number, escalated_issue, created_at, updated_at
+                        branch, pr_number, escalated_issue, simhash, affected_paths,
+                        created_at, updated_at
                    FROM tasks WHERE id=?",
                 params![id],
                 task_from_row,
@@ -947,7 +984,8 @@ impl TaskRepo for SqliteTaskStore {
         let mut stmt = conn
             .prepare(
                 "SELECT id, epic_name, source, fingerprint, title, body, status, attempts,
-                        branch, pr_number, escalated_issue, created_at, updated_at
+                        branch, pr_number, escalated_issue, simhash, affected_paths,
+                        created_at, updated_at
                    FROM tasks
                   WHERE status='wip' AND updated_at < ?
                   ORDER BY updated_at, id",
@@ -1011,7 +1049,8 @@ impl TaskRepo for SqliteTaskStore {
             let task = tx
                 .query_row(
                     "SELECT id, epic_name, source, fingerprint, title, body, status, attempts,
-                            branch, pr_number, escalated_issue, created_at, updated_at
+                            branch, pr_number, escalated_issue, simhash, affected_paths,
+                            created_at, updated_at
                        FROM tasks
                       WHERE id=?",
                     params![id],
@@ -1305,6 +1344,53 @@ impl TaskRepo for SqliteTaskStore {
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(backend)?;
         Ok(rows)
+    }
+
+    fn list_similar_tasks(
+        &self,
+        exclude: &TaskId,
+        simhash: u64,
+        max_distance: u32,
+        paths: &[String],
+        min_jaccard: f64,
+    ) -> Result<Vec<Task>> {
+        use crate::domain::simhash::{hamming_distance, jaccard_similarity};
+        let conn = self.conn.lock().expect("poisoned");
+        // Pull every task that has at least one similarity dimension
+        // populated (rows pre-V3 are skipped by the WHERE clause). Filter
+        // distance / Jaccard in-process — set sizes are small and the
+        // domain primitives keep the rule in one place.
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, epic_name, source, fingerprint, title, body, status, attempts,
+                        branch, pr_number, escalated_issue, simhash, affected_paths,
+                        created_at, updated_at
+                   FROM tasks
+                  WHERE id != ?
+                    AND (simhash IS NOT NULL OR affected_paths IS NOT NULL)
+                  ORDER BY created_at, id",
+            )
+            .map_err(backend)?;
+        let candidates = stmt
+            .query_map(params![exclude.as_str()], task_from_row)
+            .map_err(backend)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(backend)?;
+        let out = candidates
+            .into_iter()
+            .filter(|t: &Task| {
+                let simhash_match = t
+                    .simhash
+                    .map(|h| hamming_distance(h, simhash) <= max_distance)
+                    .unwrap_or(false);
+                let jaccard_match = match &t.affected_paths {
+                    Some(p) => jaccard_similarity(p, paths) >= min_jaccard,
+                    None => false,
+                };
+                simhash_match || jaccard_match
+            })
+            .collect();
+        Ok(out)
     }
 }
 

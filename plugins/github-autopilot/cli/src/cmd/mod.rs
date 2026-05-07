@@ -149,13 +149,35 @@ pub enum TaskCommands {
         /// Origin tag (defaults to `human`)
         #[arg(long, default_value = "human")]
         source: task::TaskSourceArg,
+        /// Override simhash input text. When omitted, derived from
+        /// `title + "\n" + body` and fed into the domain `derive_simhash`
+        /// transform. Used by ledger-based stagnation detection (C10).
+        #[arg(long)]
+        simhash_input: Option<String>,
+        /// Comma-separated affected file paths (top N by line count, descending).
+        /// Stored as JSON-encoded list for the path-set side of hybrid
+        /// stagnation similarity. Empty list (the default) leaves the
+        /// `affected_paths` column NULL.
+        #[arg(long, value_delimiter = ',')]
+        paths: Vec<String>,
     },
-    /// Insert tasks from a JSONL batch file
+    /// Insert tasks from a JSONL batch file. Each line accepts the
+    /// following schema (all fields except `id` and `title` are optional):
+    ///
+    /// ```json
+    /// {"id":"...","title":"...","body":"...","fingerprint":"...",
+    ///  "simhash_input":"...","paths":["p1","p2"],"source":"..."}
+    /// ```
+    ///
+    /// `simhash_input` / `paths` mirror the `task add --simhash-input` /
+    /// `--paths` flags: when present they override the derived defaults,
+    /// when absent the simhash is derived from `title + "\n" + body` and
+    /// `affected_paths` stays NULL.
     AddBatch {
         /// Epic name
         #[arg(long)]
         epic: String,
-        /// JSONL file. Each line: {"id":"...","title":"...","body?":"...","fingerprint?":"...","source?":"..."}
+        /// JSONL file. See command help for the full per-line schema.
         #[arg(long)]
         from: std::path::PathBuf,
     },
@@ -278,6 +300,36 @@ pub enum CheckCommands {
         /// Loop name to reset. If omitted, resets all loops.
         loop_name: Option<String>,
     },
+    /// Detect ledger-based stagnation for a single task and emit the
+    /// hybrid (simhash distance OR path Jaccard) similarity report.
+    ///
+    /// Exit codes:
+    ///   0 — ok (no stagnation pattern)
+    ///   4 — stagnation detected (n_threshold ≤ N < n_escalate)
+    ///   5 — escalate required (N ≥ n_escalate)
+    Stagnation(CheckStagnationArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct CheckStagnationArgs {
+    /// Task id whose stagnation status is being assessed.
+    #[arg(long)]
+    pub task: String,
+    /// Max simhash hamming distance (inclusive). Spec §3.4 default `T = 3`.
+    #[arg(long, default_value_t = 3)]
+    pub max_distance: u32,
+    /// Min Jaccard similarity for the affected-paths dimension (inclusive).
+    /// Spec §3.4 default `J = 0.5`.
+    #[arg(long, default_value_t = 0.5)]
+    pub min_jaccard: f64,
+    /// `N`: similar-task count that flips status from `ok` to `stagnation`.
+    /// Spec §3.4 default 3.
+    #[arg(long, default_value_t = 3)]
+    pub n_threshold: u32,
+    /// `N_esc`: similar-task count that flips status to `escalate`. Spec
+    /// §3.4 default 5.
+    #[arg(long, default_value_t = 5)]
+    pub n_escalate: u32,
 }
 
 #[derive(Args)]

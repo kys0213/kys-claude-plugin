@@ -166,6 +166,12 @@ impl<'a> TaskService<'a> {
     /// Auto-derives a fingerprint from `title + body` when `fingerprint` is
     /// `None`, so callers don't need to mirror the simhash recipe.
     ///
+    /// `simhash_input` overrides the text fed into `domain::simhash::derive_simhash`
+    /// (default: `title + "\n" + body`) so callers can pin the stagnation
+    /// signature to a stable canonical form. `paths` is the affected-paths list
+    /// for the path-set side of hybrid stagnation similarity — empty leaves
+    /// the column NULL.
+    ///
     /// Validates `task_id` via [`TaskId::parse`] before any store mutation
     /// so a typoed id is rejected as a `UserInputError` (exit code 1) rather
     /// than silently inserting a row whose id will never match the
@@ -181,6 +187,8 @@ impl<'a> TaskService<'a> {
         body: Option<&str>,
         fingerprint: Option<&str>,
         source: TaskSourceArg,
+        simhash_input: Option<&str>,
+        paths: &[String],
         out: &mut dyn Write,
     ) -> Result<i32> {
         let id = TaskId::parse(task_id)
@@ -189,6 +197,12 @@ impl<'a> TaskService<'a> {
         let fp = fingerprint
             .map(str::to_string)
             .unwrap_or_else(|| derive_fingerprint(title, body));
+        let simhash_value = derive_task_simhash(simhash_input, title, body);
+        let affected_paths = if paths.is_empty() {
+            None
+        } else {
+            Some(paths.to_vec())
+        };
         let nt = NewWatchTask {
             id,
             epic_name: epic.to_string(),
@@ -196,6 +210,8 @@ impl<'a> TaskService<'a> {
             fingerprint: fp,
             title: title.to_string(),
             body: body.map(str::to_string),
+            simhash: Some(simhash_value),
+            affected_paths,
         };
         match self.store.upsert_watch_task(nt, now) {
             Ok(UpsertOutcome::Inserted(id)) => {
@@ -252,6 +268,11 @@ impl<'a> TaskService<'a> {
             let fp = parsed
                 .fingerprint
                 .unwrap_or_else(|| derive_fingerprint(&title, body.as_deref()));
+            let simhash_value =
+                derive_task_simhash(parsed.simhash_input.as_deref(), &title, body.as_deref());
+            let affected_paths = parsed
+                .paths
+                .and_then(|p| if p.is_empty() { None } else { Some(p) });
             let nt = NewWatchTask {
                 id,
                 epic_name: epic.to_string(),
@@ -259,6 +280,8 @@ impl<'a> TaskService<'a> {
                 fingerprint: fp,
                 title,
                 body,
+                simhash: Some(simhash_value),
+                affected_paths,
             };
             match self
                 .store
@@ -469,6 +492,15 @@ struct BatchLine {
     fingerprint: Option<String>,
     #[serde(default)]
     source: Option<String>,
+    /// Optional override text for the simhash signature (mirrors
+    /// `task add --simhash-input`). Falls back to `title + "\n" + body`
+    /// when omitted.
+    #[serde(default)]
+    simhash_input: Option<String>,
+    /// Optional affected-paths list for ledger-based stagnation similarity
+    /// (mirrors `task add --paths`). Empty/missing leaves the column NULL.
+    #[serde(default)]
+    paths: Option<Vec<String>>,
     // Unknown fields (e.g. section/requirement on watch payloads) are silently
     // accepted by serde, keeping the JSONL contract forward-compatible.
 }
@@ -577,6 +609,25 @@ fn derive_fingerprint(title: &str, body: Option<&str>) -> String {
     simhash::format_simhash(simhash::weighted_simhash(&simhash::tokenize_weighted(
         &composite,
     )))
+}
+
+/// Resolve the simhash signature for a watch-style task.
+///
+/// Priority order matches the CLI contract for `task add` /
+/// `task add-batch`:
+/// 1. If `simhash_input` is `Some`, hash that text verbatim — caller has
+///    pinned the canonical form.
+/// 2. Otherwise hash `title + "\n" + body`, mirroring [`derive_fingerprint`].
+///
+/// Always returns a value (never `None`) so the ledger column is filled
+/// for every newly-inserted watch task; pre-V3 NULL rows continue to bypass
+/// stagnation comparison via the store-side filter.
+fn derive_task_simhash(simhash_input: Option<&str>, title: &str, body: Option<&str>) -> u64 {
+    use crate::domain::simhash::derive_simhash;
+    match simhash_input {
+        Some(text) => derive_simhash(text),
+        None => derive_simhash(&format!("{title}\n{}", body.unwrap_or(""))),
+    }
 }
 
 fn print_task_human(t: &Task, out: &mut dyn Write) -> Result<()> {

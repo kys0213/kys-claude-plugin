@@ -70,6 +70,8 @@ fn seed_via_add(svc: &TaskService<'_>, id: &str, fingerprint: &str) {
         None,
         Some(fingerprint),
         TaskSourceArg::Human,
+        None,
+        &[],
         &mut buf,
     )
     .expect("seed_via_add");
@@ -145,6 +147,8 @@ fn add_with_explicit_fingerprint_persists_task_and_emits_event() {
             Some("body"),
             Some("0xDEADBEEF"),
             TaskSourceArg::Human,
+            None,
+            &[],
             w,
         )
     });
@@ -185,6 +189,8 @@ fn add_auto_derives_fingerprint_from_title_and_body() {
             Some("add interceptor for throttling"),
             None,
             TaskSourceArg::Human,
+            None,
+            &[],
             w,
         )
     });
@@ -213,6 +219,8 @@ fn add_detects_duplicate_fingerprint_and_returns_same_id() {
             None,
             Some("0xDEADBEEF"),
             TaskSourceArg::Human,
+            None,
+            &[],
             w,
         )
     });
@@ -224,6 +232,8 @@ fn add_detects_duplicate_fingerprint_and_returns_same_id() {
             None,
             Some("0xDEADBEEF"),
             TaskSourceArg::Human,
+            None,
+            &[],
             w,
         )
     });
@@ -266,6 +276,8 @@ fn add_rejects_invalid_task_id_before_store_mutation() {
             None,
             Some("0xDEADBEEF"),
             TaskSourceArg::Human,
+            None,
+            &[],
             &mut buf,
         )
         .unwrap_err();
@@ -283,6 +295,8 @@ fn add_rejects_invalid_task_id_before_store_mutation() {
             None,
             Some("0xDEADBEEF"),
             TaskSourceArg::Human,
+            None,
+            &[],
             &mut buf,
         )
         .unwrap_err();
@@ -291,6 +305,135 @@ fn add_rejects_invalid_task_id_before_store_mutation() {
 
     // Store stayed clean across both rejections.
     assert!(store.list_tasks_by_epic("e", None).unwrap().is_empty());
+}
+
+#[test]
+fn add_default_derives_nonzero_simhash_and_leaves_paths_null() {
+    // C10-I1b lock: when neither `--simhash-input` nor `--paths` is
+    // supplied, `task add` derives the simhash from `title + "\n" + body`
+    // (so stagnation detection has a stable signature for every newly-
+    // inserted watch task) and leaves `affected_paths` NULL.
+    let (store, clock) = fixture();
+    let svc = TaskService::new(store.as_ref(), &clock);
+    capture(|w| {
+        svc.add(
+            "e",
+            "aaaaaaaaaaaa",
+            "rate limiter middleware",
+            Some("interceptor for throttling"),
+            None,
+            TaskSourceArg::Human,
+            None,
+            &[],
+            w,
+        )
+    });
+    let task = store
+        .get_task(&TaskId::from_raw("aaaaaaaaaaaa"))
+        .unwrap()
+        .unwrap();
+    assert!(
+        task.simhash.is_some(),
+        "default simhash should be derived, got {:?}",
+        task.simhash
+    );
+    assert_ne!(
+        task.simhash.unwrap(),
+        0,
+        "non-trivial title/body must hash to non-zero simhash"
+    );
+    assert!(
+        task.affected_paths.is_none(),
+        "no --paths => affected_paths NULL, got {:?}",
+        task.affected_paths
+    );
+}
+
+#[test]
+fn add_with_explicit_simhash_input_and_paths_persists_them() {
+    // C10-I1b lock: explicit `--simhash-input <text>` overrides the
+    // derived signature (caller pinned the canonical form), and
+    // `--paths a.rs,b.rs` lands as the affected-paths list verbatim.
+    use autopilot::domain::simhash::derive_simhash;
+    let (store, clock) = fixture();
+    let svc = TaskService::new(store.as_ref(), &clock);
+    let custom = "canonical stagnation signature payload";
+    let paths: Vec<String> = vec!["src/a.rs".into(), "src/b.rs".into()];
+    capture(|w| {
+        svc.add(
+            "e",
+            "aaaaaaaaaaaa",
+            "title that would otherwise drive simhash",
+            Some("body that would otherwise drive simhash"),
+            None,
+            TaskSourceArg::Human,
+            Some(custom),
+            &paths,
+            w,
+        )
+    });
+    let task = store
+        .get_task(&TaskId::from_raw("aaaaaaaaaaaa"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        task.simhash,
+        Some(derive_simhash(custom)),
+        "explicit --simhash-input must win over derived default"
+    );
+    assert_eq!(task.affected_paths.as_deref(), Some(paths.as_slice()));
+}
+
+#[test]
+fn add_simhash_is_deterministic_for_same_title_body() {
+    // C10-I1b lock: `derive_simhash(title\nbody)` is a pure function, so
+    // two distinct task ids with identical title+body+no override must
+    // share the simhash signature. Stagnation detection relies on this
+    // deterministic property.
+    let (store, clock) = fixture();
+    let svc = TaskService::new(store.as_ref(), &clock);
+    capture(|w| {
+        svc.add(
+            "e",
+            "aaaaaaaaaaaa",
+            "rate limiter",
+            Some("identical body"),
+            // Distinct fingerprints prevent the second insert from being
+            // treated as a duplicate of the first; we want both rows to
+            // land so we can compare their simhash values.
+            Some("0xAAAA"),
+            TaskSourceArg::Human,
+            None,
+            &[],
+            w,
+        )
+    });
+    capture(|w| {
+        svc.add(
+            "e",
+            "bbbbbbbbbbbb",
+            "rate limiter",
+            Some("identical body"),
+            Some("0xBBBB"),
+            TaskSourceArg::Human,
+            None,
+            &[],
+            w,
+        )
+    });
+    let a = store
+        .get_task(&TaskId::from_raw("aaaaaaaaaaaa"))
+        .unwrap()
+        .unwrap();
+    let b = store
+        .get_task(&TaskId::from_raw("bbbbbbbbbbbb"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        a.simhash, b.simhash,
+        "identical title+body must yield identical simhash"
+    );
+    assert!(a.simhash.is_some());
 }
 
 // ---------- add-batch ----------
@@ -797,6 +940,8 @@ fn add_with_existing_id_and_different_body_returns_friendly_error() {
             Some("body one"),
             None,
             TaskSourceArg::Human,
+            None,
+            &[],
             w,
         )
     });
@@ -808,6 +953,8 @@ fn add_with_existing_id_and_different_body_returns_friendly_error() {
             Some("body two — different content => different fingerprint"),
             None,
             TaskSourceArg::Human,
+            None,
+            &[],
             w,
         )
     });

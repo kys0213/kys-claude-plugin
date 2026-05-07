@@ -88,30 +88,52 @@ fn main() {
         }
         Commands::Check { command } => {
             use cmd::check::spec_code::SpecCodeAnalysis;
-            use cmd::check::stagnation::StagnationAnalysis;
+            use cmd::check::stagnation::{StagnationConfig, StagnationService};
             use cmd::check::CheckService;
+            use cmd::CheckStagnationArgs;
 
-            let svc = CheckService::new(
-                git::real(),
-                fs::real(),
-                vec![
-                    Box::new(SpecCodeAnalysis),
-                    Box::new(StagnationAnalysis::default()),
-                ],
-            );
             match command {
-                CheckCommands::Diff {
-                    loop_name,
-                    spec_paths,
-                } => svc.diff(&loop_name, &spec_paths),
-                CheckCommands::Mark {
-                    loop_name,
-                    output_hash,
-                    status,
-                } => svc.mark(&loop_name, output_hash.as_deref(), status.as_ref()),
-                CheckCommands::Status => svc.status(),
-                CheckCommands::Health => svc.health(),
-                CheckCommands::Reset { loop_name } => svc.reset(loop_name.as_deref()),
+                CheckCommands::Stagnation(CheckStagnationArgs {
+                    task,
+                    max_distance,
+                    min_jaccard,
+                    n_threshold,
+                    n_escalate,
+                }) => {
+                    let store = open_store(&config);
+                    let svc = StagnationService::new(&store);
+                    let task_id = autopilot::domain::TaskId::from_raw(task);
+                    let cfg = StagnationConfig {
+                        max_distance,
+                        min_jaccard,
+                        n_threshold,
+                        n_escalate,
+                    };
+                    let mut out = stdout();
+                    svc.check(&task_id, &cfg, &mut out)
+                }
+                other => {
+                    let svc = CheckService::new(
+                        git::real(),
+                        fs::real(),
+                        vec![Box::new(SpecCodeAnalysis)],
+                    );
+                    match other {
+                        CheckCommands::Diff {
+                            loop_name,
+                            spec_paths,
+                        } => svc.diff(&loop_name, &spec_paths),
+                        CheckCommands::Mark {
+                            loop_name,
+                            output_hash,
+                            status,
+                        } => svc.mark(&loop_name, output_hash.as_deref(), status.as_ref()),
+                        CheckCommands::Status => svc.status(),
+                        CheckCommands::Health => svc.health(),
+                        CheckCommands::Reset { loop_name } => svc.reset(loop_name.as_deref()),
+                        CheckCommands::Stagnation(_) => unreachable!("handled above"),
+                    }
+                }
             }
         }
         Commands::Watch(args) => {
@@ -188,6 +210,8 @@ fn main() {
                     body,
                     fingerprint,
                     source,
+                    simhash_input,
+                    paths,
                 } => svc.add(
                     &epic,
                     &task_id,
@@ -195,6 +219,8 @@ fn main() {
                     body.as_deref(),
                     fingerprint.as_deref(),
                     source,
+                    simhash_input.as_deref(),
+                    &paths,
                     &mut out,
                 ),
                 TaskCommands::AddBatch { epic, from } => svc.add_batch(&epic, &from, &mut out),

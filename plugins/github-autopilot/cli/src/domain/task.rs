@@ -16,6 +16,19 @@ pub struct Task {
     pub branch: Option<String>,
     pub pr_number: Option<u64>,
     pub escalated_issue: Option<u64>,
+    /// 64-bit weighted simhash signature derived from the task's title/body
+    /// (or skill-supplied text). Used by ledger-based stagnation detection
+    /// (see `plans/ledger-stagnation-redesign.md` §3.3). Old rows that
+    /// pre-date the V3 schema migration leave this `None`; new tasks fill
+    /// it via `task add` / `task add-batch`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub simhash: Option<u64>,
+    /// Top-N source paths affected by this task (line-count desc), used as
+    /// the path-set side of the hybrid stagnation similarity check
+    /// (Jaccard ≥ J). `None` for tasks created before V3 or when the
+    /// caller didn't supply `--paths`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub affected_paths: Option<Vec<String>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
