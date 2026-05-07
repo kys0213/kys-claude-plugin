@@ -144,7 +144,7 @@ else
 fi
 ```
 
-**머지 종료 코드 가드 (#643):** 위 `if gh pr merge ...; then ... else ... fi` 구조는 머지 실패 시 후속 작업이 무조건 실행되어 이슈가 잘못 close 되거나 worktree 가 잘못 제거되는 것을 방지합니다. 동일한 가드가 `commands/merge-prs.md` Step 4 (fast-path) 에도 적용되어 있습니다.
+**머지 종료 코드 가드 (#643):** 위 `if gh pr merge ...; then ... else ... fi` 구조는 머지 실패 시 후속 작업이 무조건 실행되어 이슈가 잘못 close 되거나 worktree 가 잘못 제거되는 것을 방지합니다.
 
 **Failure isolation 원칙 (머지 성공 경로의 ledger close-the-loop):**
 
