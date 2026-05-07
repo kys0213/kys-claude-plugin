@@ -285,6 +285,8 @@ fn ledger_emits_task_ready_when_watch_task_inserted() {
                 fingerprint: "fp-t1".to_string(),
                 title: "T1".to_string(),
                 body: None,
+                simhash: None,
+                affected_paths: None,
             },
             now,
         )
@@ -360,6 +362,8 @@ fn ledger_skips_task_ready_when_task_no_longer_ready() {
                 fingerprint: "fp-t1".to_string(),
                 title: "T1".to_string(),
                 body: None,
+                simhash: None,
+                affected_paths: None,
             },
             now,
         )
@@ -500,6 +504,8 @@ fn ledger_does_not_re_emit_task_ready_on_second_tick() {
                 fingerprint: "fp-t1".to_string(),
                 title: "T1".to_string(),
                 body: None,
+                simhash: None,
+                affected_paths: None,
             },
             now,
         )
@@ -610,6 +616,8 @@ fn ledger_state_round_trips_through_json() {
                 fingerprint: "fp-t1".to_string(),
                 title: "T1".to_string(),
                 body: None,
+                simhash: None,
+                affected_paths: None,
             },
             now,
         )

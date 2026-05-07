@@ -211,6 +211,8 @@ impl TaskRepo for InMemoryTaskStore {
                 branch: None,
                 pr_number: None,
                 escalated_issue: None,
+                simhash: None,
+                affected_paths: None,
                 created_at: now,
                 updated_at: now,
             };
@@ -337,6 +339,8 @@ impl TaskRepo for InMemoryTaskStore {
             branch: None,
             pr_number: None,
             escalated_issue: None,
+            simhash: task.simhash,
+            affected_paths: task.affected_paths.clone(),
             created_at: now,
             updated_at: now,
         };
@@ -755,6 +759,8 @@ impl TaskRepo for InMemoryTaskStore {
                         branch: None,
                         pr_number: None,
                         escalated_issue: None,
+                        simhash: None,
+                        affected_paths: None,
                         created_at: now,
                         updated_at: now,
                     };

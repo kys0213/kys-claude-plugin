@@ -583,6 +583,8 @@ fn body_upsert_watch_task_inserts_new_when_no_fingerprint_match(store: Arc<dyn T
                 fingerprint: "fp-1".to_string(),
                 title: "watch finding".to_string(),
                 body: None,
+                simhash: None,
+                affected_paths: None,
             },
             t0(),
         )
@@ -603,6 +605,8 @@ fn body_upsert_watch_task_returns_duplicate_on_existing_fingerprint(store: Arc<d
                 fingerprint: "fp-1".to_string(),
                 title: "first".to_string(),
                 body: None,
+                simhash: None,
+                affected_paths: None,
             },
             t0(),
         )
@@ -616,6 +620,8 @@ fn body_upsert_watch_task_returns_duplicate_on_existing_fingerprint(store: Arc<d
                 fingerprint: "fp-1".to_string(),
                 title: "duplicate".to_string(),
                 body: None,
+                simhash: None,
+                affected_paths: None,
             },
             t0(),
         )
@@ -641,6 +647,8 @@ fn body_upsert_watch_task_rejects_same_id_with_different_fingerprint(store: Arc<
                 fingerprint: "fp-1".to_string(),
                 title: "first".to_string(),
                 body: None,
+                simhash: None,
+                affected_paths: None,
             },
             t0(),
         )
@@ -654,6 +662,8 @@ fn body_upsert_watch_task_rejects_same_id_with_different_fingerprint(store: Arc<
                 fingerprint: "fp-2".to_string(),
                 title: "second".to_string(),
                 body: Some("different body".to_string()),
+                simhash: None,
+                affected_paths: None,
             },
             t0(),
         )

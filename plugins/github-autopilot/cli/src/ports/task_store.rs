@@ -45,6 +45,15 @@ pub struct NewWatchTask {
     pub fingerprint: String,
     pub title: String,
     pub body: Option<String>,
+    /// Optional 64-bit weighted simhash signature for the task (see
+    /// `domain::simhash::derive_simhash`). Populated by `task add` /
+    /// `task add-batch` for ledger-based stagnation detection. Older
+    /// callers that don't supply it leave the column NULL.
+    pub simhash: Option<u64>,
+    /// Optional top-N affected source paths (line-count desc) for the
+    /// path-set side of hybrid stagnation similarity. JSON-encoded by the
+    /// store backends; absent when the caller didn't pass `--paths`.
+    pub affected_paths: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
