@@ -11,8 +11,8 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::domain::{
-    DomainError, Epic, EpicStatus, Event, EventKind, Task, TaskFailureOutcome, TaskGraph, TaskId,
-    TaskSource, TaskStatus,
+    DomainError, Epic, EpicStatus, Event, EventKind, EventPayload, ReconciledPayload, Task,
+    TaskFailureOutcome, TaskGraph, TaskId, TaskSource, TaskStatus,
 };
 use crate::ports::task_store::{
     EpicPlan, EpicRepo, EventFilter, EventLog, NewWatchTask, ReconciliationPlan, Result,
@@ -153,6 +153,7 @@ fn task_from_row(row: &Row<'_>) -> rusqlite::Result<Task> {
 }
 
 fn event_from_row(row: &Row<'_>) -> rusqlite::Result<Event> {
+    let row_id: i64 = row.get("id").unwrap_or(0);
     let kind_str: String = row.get("kind")?;
     let kind = EventKind::parse(&kind_str).ok_or_else(|| {
         rusqlite::Error::FromSqlConversionFailure(
@@ -162,8 +163,17 @@ fn event_from_row(row: &Row<'_>) -> rusqlite::Result<Event> {
         )
     })?;
     let payload_str: String = row.get("payload")?;
-    let payload: serde_json::Value =
-        serde_json::from_str(&payload_str).unwrap_or(serde_json::Value::Object(Default::default()));
+    let payload: EventPayload = serde_json::from_str(&payload_str).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            format!(
+                "failed to deserialize event payload at row {row_id}: {e}; \
+                 if upgrading from older schema, reset the ledger DB"
+            )
+            .into(),
+        )
+    })?;
     let task_id: Option<String> = row.get("task_id")?;
     Ok(Event {
         task_id: task_id.map(TaskId::from_raw),
@@ -180,16 +190,28 @@ impl SqliteTaskStore {
         kind: EventKind,
         epic: Option<&str>,
         task: Option<&TaskId>,
-        payload: &serde_json::Value,
+        payload: &EventPayload,
         at: DateTime<Utc>,
     ) -> rusqlite::Result<()> {
+        debug_assert_eq!(
+            kind,
+            payload.kind(),
+            "append_event_with: kind {kind:?} does not match payload variant {:?}",
+            payload.kind()
+        );
+        let payload_json = serde_json::to_string(payload).map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("failed to serialize event payload: {e}"),
+            )))
+        })?;
         conn.execute(
             "INSERT INTO events(epic_name, task_id, kind, payload, at) VALUES (?, ?, ?, ?, ?)",
             params![
                 epic,
                 task.map(|t| t.as_str().to_string()),
                 kind.as_str(),
-                payload.to_string(),
+                payload_json,
                 at,
             ],
         )?;
@@ -280,15 +302,13 @@ impl EpicRepo for SqliteTaskStore {
             EpicStatus::Completed => EventKind::EpicCompleted,
             EpicStatus::Abandoned => EventKind::EpicAbandoned,
         };
-        SqliteTaskStore::append_event_with(
-            &conn,
-            kind,
-            Some(name),
-            None,
-            &serde_json::json!({}),
-            at,
-        )
-        .map_err(backend)?;
+        let payload = match status {
+            EpicStatus::Active => EventPayload::EpicStarted,
+            EpicStatus::Completed => EventPayload::EpicCompleted,
+            EpicStatus::Abandoned => EventPayload::EpicAbandoned,
+        };
+        SqliteTaskStore::append_event_with(&conn, kind, Some(name), None, &payload, at)
+            .map_err(backend)?;
         Ok(())
     }
 
@@ -409,7 +429,7 @@ impl TaskRepo for SqliteTaskStore {
             EventKind::EpicStarted,
             Some(&plan.epic.name),
             None,
-            &serde_json::json!({}),
+            &EventPayload::EpicStarted,
             now,
         )
         .map_err(backend)?;
@@ -419,7 +439,10 @@ impl TaskRepo for SqliteTaskStore {
                 EventKind::TaskInserted,
                 Some(&plan.epic.name),
                 Some(&nt.id),
-                &serde_json::json!({"source": nt.source.as_str()}),
+                &EventPayload::TaskInserted {
+                    source: nt.source.as_str().to_string(),
+                    fingerprint: None,
+                },
                 now,
             )
             .map_err(backend)?;
@@ -515,7 +538,9 @@ impl TaskRepo for SqliteTaskStore {
                 EventKind::WatchDuplicate,
                 Some(&task.epic_name),
                 Some(&TaskId::from_raw(existing_id.clone())),
-                &serde_json::json!({"fingerprint": task.fingerprint}),
+                &EventPayload::WatchDuplicate {
+                    fingerprint: task.fingerprint.clone(),
+                },
                 now,
             )
             .map_err(backend)?;
@@ -548,7 +573,10 @@ impl TaskRepo for SqliteTaskStore {
             EventKind::TaskInserted,
             Some(&task.epic_name),
             Some(&task.id),
-            &serde_json::json!({"source": task.source.as_str(), "fingerprint": task.fingerprint}),
+            &EventPayload::TaskInserted {
+                source: task.source.as_str().to_string(),
+                fingerprint: Some(task.fingerprint.clone()),
+            },
             now,
         )
         .map_err(backend)?;
@@ -609,7 +637,9 @@ impl TaskRepo for SqliteTaskStore {
             EventKind::TaskClaimed,
             Some(epic),
             Some(&task.id),
-            &serde_json::json!({"attempts": task.attempts}),
+            &EventPayload::TaskClaimed {
+                attempts: task.attempts,
+            },
             now,
         )
         .map_err(backend)?;
@@ -675,7 +705,7 @@ impl TaskRepo for SqliteTaskStore {
             EventKind::TaskCompleted,
             Some(&epic_name),
             Some(id),
-            &serde_json::json!({"pr_number": pr_number}),
+            &EventPayload::TaskCompleted { pr_number },
             now,
         )
         .map_err(backend)?;
@@ -716,7 +746,7 @@ impl TaskRepo for SqliteTaskStore {
                 EventKind::TaskUnblocked,
                 Some(&epic_name),
                 Some(&TaskId::from_raw(nid.clone())),
-                &serde_json::json!({}),
+                &EventPayload::TaskUnblocked,
                 now,
             )
             .map_err(backend)?;
@@ -767,7 +797,10 @@ impl TaskRepo for SqliteTaskStore {
                 EventKind::TaskFailed,
                 Some(&epic_name),
                 Some(id),
-                &serde_json::json!({"final": true, "attempts": attempts}),
+                &EventPayload::TaskFailed {
+                    is_final: true,
+                    attempts,
+                },
                 now,
             )
             .map_err(backend)?;
@@ -776,7 +809,10 @@ impl TaskRepo for SqliteTaskStore {
                 EventKind::TaskEscalated,
                 Some(&epic_name),
                 Some(id),
-                &serde_json::json!({"attempts": attempts}),
+                &EventPayload::TaskEscalated {
+                    attempts: Some(attempts),
+                    issue: None,
+                },
                 now,
             )
             .map_err(backend)?;
@@ -808,7 +844,10 @@ impl TaskRepo for SqliteTaskStore {
                         EventKind::TaskBlocked,
                         Some(&epic_name),
                         Some(&TaskId::from_raw(dep_id.clone())),
-                        &serde_json::json!({"reason":"parent_escalated","parent": id.as_str()}),
+                        &EventPayload::TaskBlocked {
+                            reason: "parent_escalated".to_string(),
+                            parent: id.as_str().to_string(),
+                        },
                         now,
                     )
                     .map_err(backend)?;
@@ -828,7 +867,10 @@ impl TaskRepo for SqliteTaskStore {
                 EventKind::TaskFailed,
                 Some(&epic_name),
                 Some(id),
-                &serde_json::json!({"final": false, "attempts": attempts}),
+                &EventPayload::TaskFailed {
+                    is_final: false,
+                    attempts,
+                },
                 now,
             )
             .map_err(backend)?;
@@ -860,7 +902,10 @@ impl TaskRepo for SqliteTaskStore {
             EventKind::TaskEscalated,
             Some(&epic_name),
             Some(id),
-            &serde_json::json!({"issue": issue_number}),
+            &EventPayload::TaskEscalated {
+                attempts: None,
+                issue: Some(issue_number),
+            },
             now,
         )
         .map_err(backend)?;
@@ -915,7 +960,7 @@ impl TaskRepo for SqliteTaskStore {
         rows.map_err(backend)
     }
 
-    fn release_stale(&self, before: DateTime<Utc>, now: DateTime<Utc>) -> Result<Vec<TaskId>> {
+    fn release_stale(&self, before: DateTime<Utc>, now: DateTime<Utc>) -> Result<Vec<Task>> {
         let mut conn = self.conn.lock().expect("poisoned");
         let tx = conn.transaction().map_err(backend)?;
 
@@ -957,11 +1002,23 @@ impl TaskRepo for SqliteTaskStore {
                 EventKind::TaskReleasedStale,
                 Some(&epic_name),
                 Some(&task_id),
-                &serde_json::json!({"prev_attempts": prev_attempts}),
+                &EventPayload::TaskReleasedStale { prev_attempts },
                 now,
             )
             .map_err(backend)?;
-            recovered.push(task_id);
+            // Re-read the post-update row so the returned `Task` reflects
+            // the Ready/decremented state (matches `list_stale`'s shape).
+            let task = tx
+                .query_row(
+                    "SELECT id, epic_name, source, fingerprint, title, body, status, attempts,
+                            branch, pr_number, escalated_issue, created_at, updated_at
+                       FROM tasks
+                      WHERE id=?",
+                    params![id],
+                    task_from_row,
+                )
+                .map_err(backend)?;
+            recovered.push(task);
         }
 
         tx.commit().map_err(backend)?;
@@ -999,11 +1056,11 @@ impl TaskRepo for SqliteTaskStore {
             EventKind::TaskForceStatus,
             Some(&epic_name),
             Some(id),
-            &serde_json::json!({
-                "from": prev.as_str(),
-                "to": target.as_str(),
-                "reason": reason,
-            }),
+            &EventPayload::TaskForceStatus {
+                from: prev.as_str().to_string(),
+                to: target.as_str().to_string(),
+                reason: reason.to_string(),
+            },
             now,
         )
         .map_err(backend)?;
@@ -1212,7 +1269,9 @@ impl TaskRepo for SqliteTaskStore {
                 EventKind::Reconciled,
                 Some(&plan.epic.name),
                 None,
-                &serde_json::json!({"orphan_branch": branch}),
+                &EventPayload::Reconciled(ReconciledPayload::OrphanBranch {
+                    orphan_branch: branch.clone(),
+                }),
                 now,
             )
             .map_err(backend)?;
@@ -1222,7 +1281,9 @@ impl TaskRepo for SqliteTaskStore {
             EventKind::Reconciled,
             Some(&plan.epic.name),
             None,
-            &serde_json::json!({"tasks": plan.tasks.len()}),
+            &EventPayload::Reconciled(ReconciledPayload::Summary {
+                tasks: plan.tasks.len() as u64,
+            }),
             now,
         )
         .map_err(backend)?;
@@ -1308,7 +1369,7 @@ impl EventLog for SqliteTaskStore {
     fn list_events(&self, filter: EventFilter) -> Result<Vec<Event>> {
         let conn = self.conn.lock().expect("poisoned");
         let mut sql =
-            String::from("SELECT epic_name, task_id, kind, payload, at FROM events WHERE 1=1");
+            String::from("SELECT id, epic_name, task_id, kind, payload, at FROM events WHERE 1=1");
         let mut binds: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         if let Some(epic) = &filter.epic {
             sql.push_str(" AND epic_name=?");

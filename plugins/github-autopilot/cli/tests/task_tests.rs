@@ -697,7 +697,10 @@ fn release_stale_with_no_stale_tasks_exits_0_and_reports_zero() {
 }
 
 #[test]
-fn release_stale_json_emits_array_of_recovered_ids() {
+fn release_stale_json_emits_array_of_recovered_tasks() {
+    // `release-stale --json` mirrors `list-stale --json` shape — both emit
+    // `[Task]` so agents can share a single parser. Each element reflects
+    // the post-release state (status=ready, attempts decremented).
     let (store, clock) = fixture();
     let svc = TaskService::new(store.as_ref(), &clock);
     seed_via_add(&svc, "aaaaaaaaaaaa", "0x1");
@@ -706,7 +709,12 @@ fn release_stale_json_emits_array_of_recovered_ids() {
     let (code, out) = capture(|w| svc.release_stale(3_600, true, w));
     assert_eq!(code, 0);
     let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
-    assert_eq!(v, serde_json::json!(["aaaaaaaaaaaa"]));
+    let arr = v.as_array().expect("release-stale --json must be array");
+    assert_eq!(arr.len(), 1);
+    let t = &arr[0];
+    assert_eq!(t["id"], "aaaaaaaaaaaa");
+    assert_eq!(t["status"], "ready");
+    assert_eq!(t["attempts"], 0);
 }
 
 #[test]

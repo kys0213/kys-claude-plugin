@@ -12,7 +12,7 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 
 use crate::cmd::output::write_json;
-use crate::domain::{Event, EventKind, TaskId};
+use crate::domain::{Event, EventKind, EventPayload, TaskId};
 use crate::ports::task_store::{EventFilter, EventLog};
 
 const PAYLOAD_PREVIEW_LIMIT: usize = 40;
@@ -126,12 +126,23 @@ fn render_table(events: &[Event], out: &mut dyn Write) -> Result<()> {
     Ok(())
 }
 
-fn payload_preview(value: &serde_json::Value) -> String {
-    let s = if value.is_null() {
-        "-".to_string()
+fn payload_preview(payload: &EventPayload) -> String {
+    // Convert via `serde_json::Value` so the table preview keeps its prior
+    // shape (compact JSON, "-" for empty objects). Round-tripping through
+    // Value also lets us strip the `kind` discriminator that the typed enum
+    // adds — it is redundant in the preview column since `KIND` is already
+    // shown to the left.
+    let value = serde_json::to_value(payload).unwrap_or(serde_json::Value::Null);
+    let preview_value = if let serde_json::Value::Object(mut map) = value {
+        map.remove("kind");
+        if map.is_empty() {
+            return "-".to_string();
+        }
+        serde_json::Value::Object(map)
     } else {
-        value.to_string()
+        value
     };
+    let s = preview_value.to_string();
     if s.chars().count() <= PAYLOAD_PREVIEW_LIMIT {
         return s;
     }
@@ -145,7 +156,7 @@ struct EventRecord<'a> {
     kind: &'static str,
     epic: Option<&'a str>,
     task: Option<&'a str>,
-    payload: &'a serde_json::Value,
+    payload: &'a EventPayload,
 }
 
 impl<'a> From<&'a Event> for EventRecord<'a> {

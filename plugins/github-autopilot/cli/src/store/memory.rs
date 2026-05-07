@@ -5,8 +5,8 @@ use std::sync::Mutex;
 use chrono::{DateTime, Utc};
 
 use crate::domain::{
-    DomainError, Epic, EpicStatus, Event, EventKind, Task, TaskFailureOutcome, TaskGraph, TaskId,
-    TaskStatus,
+    DomainError, Epic, EpicStatus, Event, EventKind, EventPayload, ReconciledPayload, Task,
+    TaskFailureOutcome, TaskGraph, TaskId, TaskStatus,
 };
 use crate::ports::task_store::{
     EpicPlan, EpicRepo, EventFilter, EventLog, NewWatchTask, ReconciliationPlan, RemotePrState,
@@ -70,9 +70,15 @@ impl InMemoryTaskStore {
         kind: EventKind,
         epic: Option<String>,
         task: Option<TaskId>,
-        payload: serde_json::Value,
+        payload: EventPayload,
         at: DateTime<Utc>,
     ) -> Event {
+        debug_assert_eq!(
+            kind,
+            payload.kind(),
+            "make_event: kind {kind:?} does not match payload variant {:?}",
+            payload.kind()
+        );
         Event {
             task_id: task,
             epic_name: epic,
@@ -121,13 +127,12 @@ impl EpicRepo for InMemoryTaskStore {
             EpicStatus::Completed => EventKind::EpicCompleted,
             EpicStatus::Abandoned => EventKind::EpicAbandoned,
         };
-        let event = InMemoryTaskStore::make_event(
-            kind,
-            Some(name.to_string()),
-            None,
-            serde_json::json!({}),
-            at,
-        );
+        let payload = match status {
+            EpicStatus::Active => EventPayload::EpicStarted,
+            EpicStatus::Completed => EventPayload::EpicCompleted,
+            EpicStatus::Abandoned => EventPayload::EpicAbandoned,
+        };
+        let event = InMemoryTaskStore::make_event(kind, Some(name.to_string()), None, payload, at);
         InMemoryTaskStore::push_event(&mut s, event);
         Ok(())
     }
@@ -238,7 +243,7 @@ impl TaskRepo for InMemoryTaskStore {
                 EventKind::EpicStarted,
                 Some(epic.name.clone()),
                 None,
-                serde_json::json!({}),
+                EventPayload::EpicStarted,
                 now,
             ),
         );
@@ -249,7 +254,10 @@ impl TaskRepo for InMemoryTaskStore {
                     EventKind::TaskInserted,
                     Some(epic.name.clone()),
                     Some(nt.id.clone()),
-                    serde_json::json!({"source": nt.source.as_str()}),
+                    EventPayload::TaskInserted {
+                        source: nt.source.as_str().to_string(),
+                        fingerprint: None,
+                    },
                     now,
                 ),
             );
@@ -304,7 +312,9 @@ impl TaskRepo for InMemoryTaskStore {
                     EventKind::WatchDuplicate,
                     Some(task.epic_name.clone()),
                     Some(existing.id.clone()),
-                    serde_json::json!({"fingerprint": task.fingerprint}),
+                    EventPayload::WatchDuplicate {
+                        fingerprint: task.fingerprint.clone(),
+                    },
                     now,
                 ),
             );
@@ -338,7 +348,10 @@ impl TaskRepo for InMemoryTaskStore {
                 EventKind::TaskInserted,
                 Some(task.epic_name.clone()),
                 Some(id.clone()),
-                serde_json::json!({"source": task.source.as_str(), "fingerprint": task.fingerprint}),
+                EventPayload::TaskInserted {
+                    source: task.source.as_str().to_string(),
+                    fingerprint: Some(task.fingerprint.clone()),
+                },
                 now,
             ),
         );
@@ -381,7 +394,9 @@ impl TaskRepo for InMemoryTaskStore {
                 EventKind::TaskClaimed,
                 Some(epic.to_string()),
                 Some(snapshot.id.clone()),
-                serde_json::json!({"attempts": snapshot.attempts}),
+                EventPayload::TaskClaimed {
+                    attempts: snapshot.attempts,
+                },
                 now,
             ),
         );
@@ -415,7 +430,7 @@ impl TaskRepo for InMemoryTaskStore {
                 EventKind::TaskCompleted,
                 Some(epic_name.clone()),
                 Some(id.clone()),
-                serde_json::json!({"pr_number": pr_number}),
+                EventPayload::TaskCompleted { pr_number },
                 now,
             ),
         );
@@ -444,7 +459,7 @@ impl TaskRepo for InMemoryTaskStore {
                         EventKind::TaskUnblocked,
                         Some(epic_name.clone()),
                         Some(dep_task_id),
-                        serde_json::json!({}),
+                        EventPayload::TaskUnblocked,
                         now,
                     ),
                 );
@@ -484,7 +499,10 @@ impl TaskRepo for InMemoryTaskStore {
                     EventKind::TaskFailed,
                     Some(epic_name.clone()),
                     Some(id.clone()),
-                    serde_json::json!({"final": true, "attempts": attempts}),
+                    EventPayload::TaskFailed {
+                        is_final: true,
+                        attempts,
+                    },
                     now,
                 ),
             );
@@ -494,7 +512,10 @@ impl TaskRepo for InMemoryTaskStore {
                     EventKind::TaskEscalated,
                     Some(epic_name.clone()),
                     Some(id.clone()),
-                    serde_json::json!({"attempts": attempts}),
+                    EventPayload::TaskEscalated {
+                        attempts: Some(attempts),
+                        issue: None,
+                    },
                     now,
                 ),
             );
@@ -516,7 +537,10 @@ impl TaskRepo for InMemoryTaskStore {
                             EventKind::TaskBlocked,
                             Some(epic_name.clone()),
                             Some(dep_id),
-                            serde_json::json!({"reason": "parent_escalated", "parent": id.as_str()}),
+                            EventPayload::TaskBlocked {
+                                reason: "parent_escalated".to_string(),
+                                parent: id.as_str().to_string(),
+                            },
                             now,
                         ),
                     );
@@ -532,7 +556,10 @@ impl TaskRepo for InMemoryTaskStore {
                     EventKind::TaskFailed,
                     Some(epic_name),
                     Some(id.clone()),
-                    serde_json::json!({"final": false, "attempts": attempts}),
+                    EventPayload::TaskFailed {
+                        is_final: false,
+                        attempts,
+                    },
                     now,
                 ),
             );
@@ -555,7 +582,10 @@ impl TaskRepo for InMemoryTaskStore {
                 EventKind::TaskEscalated,
                 Some(epic_name),
                 Some(id.clone()),
-                serde_json::json!({"issue": issue_number}),
+                EventPayload::TaskEscalated {
+                    attempts: None,
+                    issue: Some(issue_number),
+                },
                 now,
             ),
         );
@@ -596,7 +626,7 @@ impl TaskRepo for InMemoryTaskStore {
         Ok(stale)
     }
 
-    fn release_stale(&self, before: DateTime<Utc>, now: DateTime<Utc>) -> Result<Vec<TaskId>> {
+    fn release_stale(&self, before: DateTime<Utc>, now: DateTime<Utc>) -> Result<Vec<Task>> {
         let mut s = self.state.lock().expect("poisoned");
         let stale: Vec<(TaskId, String, u32)> = s
             .tasks
@@ -607,20 +637,28 @@ impl TaskRepo for InMemoryTaskStore {
 
         let mut recovered = Vec::with_capacity(stale.len());
         for (id, epic_name, prev_attempts) in stale {
-            if let Some(task) = s.tasks.get_mut(&id) {
+            // Apply the release transition then snapshot the post-release
+            // Task so the returned vec matches `list_stale`'s shape (each
+            // Task carries Ready status + decremented attempts).
+            let snapshot = if let Some(task) = s.tasks.get_mut(&id) {
                 task.status = TaskStatus::Ready;
                 task.attempts = task.attempts.saturating_sub(1);
                 task.updated_at = now;
-            }
+                Some(task.clone())
+            } else {
+                None
+            };
             let event = InMemoryTaskStore::make_event(
                 EventKind::TaskReleasedStale,
                 Some(epic_name),
                 Some(id.clone()),
-                serde_json::json!({"prev_attempts": prev_attempts}),
+                EventPayload::TaskReleasedStale { prev_attempts },
                 now,
             );
             InMemoryTaskStore::push_event(&mut s, event);
-            recovered.push(id);
+            if let Some(task) = snapshot {
+                recovered.push(task);
+            }
         }
         Ok(recovered)
     }
@@ -647,11 +685,11 @@ impl TaskRepo for InMemoryTaskStore {
             EventKind::TaskForceStatus,
             Some(epic_name),
             Some(id.clone()),
-            serde_json::json!({
-                "from": prev.as_str(),
-                "to": target.as_str(),
-                "reason": reason,
-            }),
+            EventPayload::TaskForceStatus {
+                from: prev.as_str().to_string(),
+                to: target.as_str().to_string(),
+                reason: reason.to_string(),
+            },
             now,
         );
         InMemoryTaskStore::push_event(&mut s, event);
@@ -778,7 +816,9 @@ impl TaskRepo for InMemoryTaskStore {
                     EventKind::Reconciled,
                     Some(epic_name.clone()),
                     None,
-                    serde_json::json!({"orphan_branch": branch}),
+                    EventPayload::Reconciled(ReconciledPayload::OrphanBranch {
+                        orphan_branch: branch.clone(),
+                    }),
                     now,
                 ),
             );
@@ -790,7 +830,9 @@ impl TaskRepo for InMemoryTaskStore {
                 EventKind::Reconciled,
                 Some(epic_name.clone()),
                 None,
-                serde_json::json!({"tasks": plan.tasks.len()}),
+                EventPayload::Reconciled(ReconciledPayload::Summary {
+                    tasks: plan.tasks.len() as u64,
+                }),
                 now,
             ),
         );

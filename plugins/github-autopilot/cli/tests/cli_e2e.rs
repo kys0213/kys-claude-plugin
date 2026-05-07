@@ -946,13 +946,14 @@ fn json_schema_task_list_stale() {
 
 #[test]
 fn json_schema_task_release_stale() {
-    // Lock: `task release-stale --json` -> JSON **array of task id
-    // strings**, NOT an array of Task objects. This is the one place the
-    // CLI emits a "thin" id list rather than full Task records, so we
-    // pin both shape and element type.
+    // Lock: `task release-stale --json` -> JSON **array of Task objects**,
+    // matching `task list-stale --json` so agents can use a single parser.
+    // Each element reflects the post-release state (status=ready, attempts
+    // decremented from the claim).
     let ws = Workspace::new();
     let task_id = "abc123def456";
-    seed_epic_with_task(&ws, "demo", task_id, "release-stale demo");
+    let title = "release-stale demo";
+    seed_epic_with_task(&ws, "demo", task_id, title);
     ws.cmd()
         .args(["task", "claim", "--epic", "demo"])
         .assert()
@@ -965,14 +966,19 @@ fn json_schema_task_release_stale() {
     );
     assert!(
         json.is_array(),
-        "release-stale --json must emit an array of ids"
+        "release-stale --json must emit an array of Task objects"
     );
-    let ids = json.as_array().unwrap();
-    assert_eq!(ids.len(), 1, "one task should be released");
-    let id = ids[0]
-        .as_str()
-        .expect("release-stale --json elements must be strings");
-    assert_eq!(id, task_id);
+    let tasks = json.as_array().unwrap();
+    assert_eq!(tasks.len(), 1, "one task should be released");
+    assert_task_shape(&tasks[0], task_id, "demo", title);
+    assert_eq!(
+        tasks[0]["status"], "ready",
+        "released task must be Ready (post-release state)"
+    );
+    assert_eq!(
+        tasks[0]["attempts"], 0,
+        "released task must have decremented attempts"
+    );
 }
 
 #[test]
