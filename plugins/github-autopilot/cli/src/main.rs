@@ -12,11 +12,13 @@ use std::io::stdout;
 use std::path::{Path, PathBuf};
 
 fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
     let cli = Cli::parse();
     let config = match load_config(cli.config.as_deref()) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("{e:#}");
+            log::error!("{e:#}");
             std::process::exit(2);
         }
     };
@@ -208,7 +210,7 @@ fn main() {
                 } => match resolve_before_seconds(before.as_deref(), before_seconds) {
                     Ok(secs) => svc.list_stale(secs, json, &mut out),
                     Err(msg) => {
-                        eprintln!("{msg}");
+                        log::error!("{msg}");
                         std::process::exit(2);
                     }
                 },
@@ -228,7 +230,7 @@ fn main() {
                         match resolve_before_seconds(before.as_deref(), before_seconds) {
                             Ok(secs) => svc.release_stale(secs, json, &mut out),
                             Err(msg) => {
-                                eprintln!("{msg}");
+                                log::error!("{msg}");
                                 std::process::exit(2);
                             }
                         }
@@ -299,7 +301,7 @@ fn main() {
     match result {
         Ok(code) => std::process::exit(code),
         Err(e) => {
-            eprintln!("{e:#}");
+            log::error!("{e:#}");
             std::process::exit(exit_code_for(&e));
         }
     }
@@ -370,7 +372,7 @@ fn open_store(config: &Config) -> SqliteTaskStore {
     match SqliteTaskStore::open(&db_path) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("failed to open task store at {}: {e}", db_path.display());
+            log::error!("failed to open task store at {}: {e}", db_path.display());
             std::process::exit(2);
         }
     }
