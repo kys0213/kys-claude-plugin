@@ -20,7 +20,6 @@ pub const KNOWN_COMMANDS: &[&str] = &[
     "gap-watch",
     "qa-boost",
     "ci-watch",
-    "pr-merger",
     "merge-prs",
     "work-ledger",
 ];
