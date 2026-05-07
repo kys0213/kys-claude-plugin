@@ -793,8 +793,13 @@ fn body_force_status_records_event_with_reason(store: Arc<dyn TaskStore>) {
         })
         .unwrap();
     assert_eq!(evs.len(), 1);
-    assert_eq!(evs[0].payload["reason"], "rollback for repro");
-    assert_eq!(evs[0].payload["to"], "pending");
+    match &evs[0].payload {
+        autopilot::domain::EventPayload::TaskForceStatus { reason, to, .. } => {
+            assert_eq!(reason, "rollback for repro");
+            assert_eq!(to, "pending");
+        }
+        other => panic!("expected TaskForceStatus payload, got {other:?}"),
+    }
 }
 
 fn body_suppression_blocks_until_window_expires(store: Arc<dyn TaskStore>) {

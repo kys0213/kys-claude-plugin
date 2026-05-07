@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use autopilot::cmd::events::{EventsService, ListArgs};
-use autopilot::domain::{Event, EventKind, TaskId};
+use autopilot::domain::{Event, EventKind, EventPayload, TaskId};
 use autopilot::ports::task_store::TaskStore;
 use autopilot::store::InMemoryTaskStore;
 use chrono::{DateTime, TimeZone, Utc};
@@ -16,36 +16,66 @@ fn fixture_with_events() -> Arc<dyn TaskStore> {
     let store: Arc<dyn TaskStore> = Arc::new(InMemoryTaskStore::new());
     let t0 = base_time();
     // (epic, task, kind, +seconds)
-    let seeds: &[(Option<&str>, Option<&str>, EventKind, i64)] = &[
-        (Some("e1"), None, EventKind::EpicStarted, 0),
+    let seeds: Vec<(Option<&str>, Option<&str>, EventKind, EventPayload, i64)> = vec![
+        (
+            Some("e1"),
+            None,
+            EventKind::EpicStarted,
+            EventPayload::EpicStarted,
+            0,
+        ),
         (
             Some("e1"),
             Some("aaaaaaaaaaaa"),
             EventKind::TaskInserted,
+            EventPayload::TaskInserted {
+                source: "spec".into(),
+                fingerprint: None,
+            },
             10,
         ),
-        (Some("e1"), Some("aaaaaaaaaaaa"), EventKind::TaskClaimed, 20),
+        (
+            Some("e1"),
+            Some("aaaaaaaaaaaa"),
+            EventKind::TaskClaimed,
+            EventPayload::TaskClaimed { attempts: 1 },
+            20,
+        ),
         (
             Some("e1"),
             Some("bbbbbbbbbbbb"),
             EventKind::TaskInserted,
+            EventPayload::TaskInserted {
+                source: "spec".into(),
+                fingerprint: None,
+            },
             30,
         ),
-        (Some("e2"), None, EventKind::EpicStarted, 40),
+        (
+            Some("e2"),
+            None,
+            EventKind::EpicStarted,
+            EventPayload::EpicStarted,
+            40,
+        ),
         (
             Some("e2"),
             Some("cccccccccccc"),
             EventKind::TaskInserted,
+            EventPayload::TaskInserted {
+                source: "spec".into(),
+                fingerprint: None,
+            },
             50,
         ),
     ];
-    for (epic, task, kind, sec) in seeds {
+    for (epic, task, kind, payload, sec) in seeds {
         let event = Event {
             task_id: task.map(TaskId::from_raw),
             epic_name: epic.map(|s| s.to_string()),
-            kind: *kind,
-            payload: serde_json::Value::Null,
-            at: t0 + chrono::Duration::seconds(*sec),
+            kind,
+            payload,
+            at: t0 + chrono::Duration::seconds(sec),
         };
         store.append_event(&event).unwrap();
     }

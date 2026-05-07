@@ -8,6 +8,6 @@ pub mod task_id;
 pub use deps::{CycleError, TaskGraph};
 pub use epic::{Epic, EpicStatus};
 pub use error::{DomainError, UserInputError};
-pub use event::{Event, EventKind};
+pub use event::{Event, EventKind, EventPayload, ReconciledPayload};
 pub use task::{Task, TaskFailureOutcome, TaskSource, TaskStatus};
 pub use task_id::{TaskId, TaskIdParseError};
