@@ -850,6 +850,42 @@ impl TaskRepo for InMemoryTaskStore {
         let s = self.state.lock().expect("poisoned");
         Ok(InMemoryTaskStore::deps_of(&s, task_id))
     }
+
+    fn list_similar_tasks(
+        &self,
+        exclude: &TaskId,
+        simhash: u64,
+        max_distance: u32,
+        paths: &[String],
+        min_jaccard: f64,
+    ) -> Result<Vec<Task>> {
+        use crate::domain::simhash::{hamming_distance, jaccard_similarity};
+        let s = self.state.lock().expect("poisoned");
+        let mut out: Vec<Task> = s
+            .tasks
+            .values()
+            .filter(|t| &t.id != exclude)
+            .filter(|t| {
+                let simhash_match = t
+                    .simhash
+                    .map(|h| hamming_distance(h, simhash) <= max_distance)
+                    .unwrap_or(false);
+                let jaccard_match = match &t.affected_paths {
+                    Some(p) => jaccard_similarity(p, paths) >= min_jaccard,
+                    None => false,
+                };
+                simhash_match || jaccard_match
+            })
+            .cloned()
+            .collect();
+        // Stable order so JSON output is deterministic — tests rely on it.
+        out.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.as_str().cmp(b.id.as_str()))
+        });
+        Ok(out)
+    }
 }
 
 fn remote_to_status(r: &crate::ports::task_store::RemoteTaskState, s: &State) -> TaskStatus {
