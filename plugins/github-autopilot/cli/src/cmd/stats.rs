@@ -75,8 +75,8 @@ impl StatsService {
     ) -> Result<i32> {
         validate_loop_name(command)?;
         if !KNOWN_COMMANDS.contains(&command) {
-            eprintln!(
-                "warning: --command {command:?} is not in the canonical list ({}). Recording anyway.",
+            log::warn!(
+                "--command {command:?} is not in the canonical list ({}). Recording anyway.",
                 KNOWN_COMMANDS.join(", ")
             );
         }

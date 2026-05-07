@@ -228,7 +228,7 @@ impl WatchService {
         let stale_threshold_secs = match parse_duration_seconds(&args.stale_threshold) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("invalid --stale-threshold: {e}");
+                log::error!("invalid --stale-threshold: {e}");
                 return Err(2);
             }
         };
@@ -328,7 +328,7 @@ impl WatchService {
                 // catches up. Clamp at the read boundary, warn once, and
                 // let the next periodic save persist the corrected cursor.
                 if let Some(future) = ts.state.ledger.clamp_future_cursor(now) {
-                    eprintln!(
+                    log::warn!(
                         "watch.json clock skew detected: last_event_at={future} > now={now}; \
                          clamping. Likely cause: NTP correction or watch.json copied across hosts."
                     );
