@@ -1,182 +1,205 @@
 ---
 name: resilience
-description: 유사 세대진화(stagnation) 감지 시 lateral thinking persona를 적용하여 새로운 접근으로 이슈를 생성하는 가이드. GitHub issue body의 simhash 기반 — gap-watch는 ledger-only로 전환되며 잠정 미사용 (ledger 기반 stagnation은 follow-up).
-version: 1.0.0
+description: ledger-based stagnation 감지 결과를 받아 lateral thinking persona 를 적용하여 worker 의 새 접근을 유도하는 가이드. CLI primitive (simhash + Jaccard) 로 후보를 좁히고 Haiku 로 정밀 검증.
+version: 2.0.0
 ---
 
-# Resilience: Stagnation Detection & Lateral Thinking
+# Resilience: Ledger-Based Stagnation Redirect
 
 ## 개요
 
-같은 gap이 반복 감지되고 유사한 접근이 반복 실패할 때, CLI가 simhash 기반으로 stagnation을 감지한다.
-이 스킬은 감지된 패턴에 맞는 **lateral thinking persona**를 선택하여 근본적으로 다른 접근의 이슈를 생성하도록 안내한다.
+autopilot 모드는 사람 개입 없이 task 를 dispatch 하므로, 같은 영역을 반복 시도하다 무한 루프에 빠질 위험이 있다.
+이 스킬은 PreToolUse hook 이 `autopilot check stagnation` 을 호출하여 받은 ledger 기반 결과 JSON 을 해석하고, worker 가 task 를 claim 하기 직전에 **새로운 방향으로 진로를 재설정**하도록 안내한다.
 
-## Stagnation 판단 기준
+진입 시점: worker 가 `autopilot task claim ...` 을 실행 → PreToolUse hook 이 `autopilot check stagnation --task <id>` 호출 → exit 4 (stagnation) 또는 5 (escalate) 이면 본 스킬 발동.
 
-CLI `autopilot check diff`가 exit 4를 반환하면 stagnation이다.
-출력 JSON에 `pattern_type`과 `recommended_persona`가 포함된다.
+CLI 는 deterministic primitive (simhash hamming distance, path Jaccard) 만 담당하고, 본 스킬이 후보 검증 / persona 매핑 / 진로 변경 prompt 합성을 책임진다.
+
+## 1. 입력 — Ledger Stagnation JSON
+
+CLI 가 stdout 으로 다음 형태의 JSON 을 출력한다 (`plans/ledger-stagnation-redesign.md` §3.10).
 
 ```json
 {
   "status": "stagnation",
-  "stagnation": {
-    "detected": true,
-    "pattern_type": "spinning",
-    "recommended_persona": "hacker",
-    "current_simhash": "0xA3F2...",
-    "similar_count": 3,
-    "candidates": [
-      {"simhash": "0x...", "distance": 1, "category": "gap-analysis", "timestamp": "..."}
-    ]
-  }
+  "current_task": {
+    "id": "abc123",
+    "simhash": "0x...",
+    "affected_paths": ["src/cmd/task.rs"]
+  },
+  "similar_tasks": [
+    {
+      "id": "def456",
+      "title": "...",
+      "similarity": {
+        "simhash_distance": 2,
+        "jaccard": 0.75,
+        "shared_paths": ["src/cmd/task.rs"]
+      },
+      "outcome": "failed",
+      "failure_reason": "test_compile_error",
+      "completed_at": "2026-..."
+    }
+  ],
+  "pattern": {
+    "shared_paths": ["src/cmd/task.rs"],
+    "common_failure_categories": ["test_compile_error"],
+    "consecutive_failures": 3
+  },
+  "recommended_persona": "hacker"
 }
 ```
 
-## Pattern → Persona 매핑 (Deterministic)
+| 필드 | 의미 |
+|------|------|
+| `status` | `"ok"` / `"stagnation"` / `"escalate"` 중 하나. CLI exit code 와 1:1 매핑 (0/4/5). |
+| `current_task` | claim 직전인 task. simhash + affected_paths 동봉. |
+| `similar_tasks` | hybrid (simhash distance ≤ T **또는** Jaccard ≥ J) 로 잡힌 후보. 각 항목에 distance / jaccard / shared_paths / outcome / failure_reason 이 들어 있다. |
+| `pattern.shared_paths` | 모든 후보가 공통으로 가지는 path. 좁을수록 영역이 갇혀 있다는 신호. |
+| `pattern.common_failure_categories` | 후보들이 공유하는 실패 카테고리. |
+| `pattern.consecutive_failures` | 같은 카테고리로 연속 실패한 횟수. persona index 결정에 사용. |
+| `recommended_persona` | CLI 가 결정적으로 추천한 persona (없으면 `null`). |
 
-CLI가 패턴을 분류하고 persona를 결정적으로 추천한다. `recommended_persona`가 있으면 그대로 사용한다.
+## 2. Haiku Verify 호출 가이드
 
-| pattern_type | Persona | 상황 |
-|---|---|---|
-| `spinning` | Hacker | 같은 해시 반복 (distance ≤ 3) |
-| `oscillation` | Architect | A↔B 교대 패턴 |
-| `no_drift` | Researcher | 전부 유사하나 개선 없음 |
-| `diminishing_returns` | Simplifier | 점진적 개선이나 여전히 유사 |
-| (all exhausted) | Contrarian | fallback — 위 4패턴에 해당하지 않거나 모든 persona 소진 시 |
+simhash + Jaccard 는 후보 좁히기에는 유용하지만 false positive 를 완전히 제거하지 못한다.
+후보가 충분히 모인 경우에만 Haiku 에게 "정말 같은 문제인가" 를 검증시킨다.
 
-> `recommended_persona`가 없는 경우(하위 호환): 기존 방식대로 candidates의 distance 분포를 읽고 아래 5가지 persona 중 선택한다.
+### 호출 여부 판단
 
-## Persona 상세
+| `similar_tasks.len()` | 동작 |
+|-----------------------|------|
+| 0 | status 가 stagnation 이 될 수 없으므로 본 스킬은 발동하지 않는다. |
+| 1–2 | simhash + Jaccard 만으로 trust. Haiku 호출 생략. |
+| 3+ | Haiku verify 호출 권장. false positive 비용보다 검증 비용이 더 작다. |
 
-아래 5가지 persona 중 `recommended_persona` 또는 상황에 맞는 것을 사용한다.
+### Prompt 템플릿
 
-### 1. Hacker
+```
+System:
+당신은 software task 의 유사도를 판단하는 검증자입니다.
+"같은 문제 / 같은 영역 / 같은 접근법" 인 task 그룹만 골라야 합니다.
+파일 경로가 겹친다는 이유만으로 같은 문제라고 판단하지 마세요.
 
-**철학**: 제약을 우회한다. 불가능을 거부한다.
+User:
+다음 N+1 개 task 중, current_task 와 정말 같은 문제인 task id 만 JSON 배열로 반환하세요.
+출력 형식: {"verified_similar": ["id1", "id2"]}
 
-**적합한 상황**: 같은 에러가 반복 (distance ≤ 3인 이슈가 3개 이상)
+current_task:
+  id: abc123
+  title: "..."
+  affected_paths: ["..."]
+  body: "..."
 
-**접근 지침**:
-1. 명시적/암시적 제약 조건을 나열한다
-2. 각 제약이 실제로 필수인지 의심한다
-3. 제약을 우회하여 다른 경로로 문제를 해결한다
-4. "잘못된 것"을 시도했을 때 무엇이 깨지는지 탐색한다
-
-**탐색 질문**:
-- 우리가 당연시하는 가정 중 사실이 아닌 것은?
-- 이 문제를 완전히 우회하면 어떻게 되는가?
-- 코드 대신 데이터로 해결할 수 있는가?
-
----
-
-### 2. Researcher
-
-**철학**: 정보 부족이 근본 원인이다. 추측을 멈추고 증거를 찾아라.
-
-**적합한 상황**: 진전 없음 (다양한 접근을 시도했지만 모두 실패)
-
-**접근 지침**:
-1. 알 수 없는 것(지식 갭)을 정의한다
-2. 에러 메시지를 다시 주의 깊게 읽는다
-3. 공식 문서에서 정확한 케이스를 확인한다
-4. 증거 기반 가설을 세운다
-
-**탐색 질문**:
-- 이 문제를 해결하기 위해 부족한 정보는 무엇인가?
-- 에러 메시지를 정말 주의 깊게 읽었는가?
-- 최근 변경된 것 중 이 문제를 유발했을 수 있는 것은?
-
----
-
-### 3. Simplifier
-
-**철학**: 복잡성은 진전의 적이다. 제거할 수 있는 것을 찾아라.
-
-**적합한 상황**: 점점 복잡해지는 시도 (distance가 점차 증가하지만 계속 실패)
-
-**접근 지침**:
-1. 관련된 모든 컴포넌트를 나열한다
-2. 각 컴포넌트가 정말 필수인지 도전한다
-3. "동작하는 가장 단순한 것"을 찾는다
-4. YAGNI: 지금 필요하지 않은 것은 제거한다
-
-**탐색 질문**:
-- 핵심 가치를 잃지 않고 제거할 수 있는 것은?
-- 이 복잡성이 그 비용을 정당화하는가?
-- 기능의 절반을 제거하면 어떻게 되는가?
-
----
-
-### 4. Architect
-
-**철학**: 아키텍처와 싸우고 있다면, 아키텍처가 잘못된 것이다.
-
-**적합한 상황**: A→B→A 진동 (distance가 교대로 크고 작은 패턴)
-
-**접근 지침**:
-1. 구조적 증상을 식별한다 (반복 버그, 강한 커플링)
-2. 현재 구조를 매핑한다 (추상화, 책임, 데이터 흐름)
-3. 근본적 불일치를 찾는다 (처음부터 잘못된 가정)
-4. 최소한의 구조 변경을 제안한다 (전체 재작성이 아닌)
-
-**탐색 질문**:
-- 아키텍처와 싸우고 있는가, 함께 일하고 있는가?
-- 어떤 추상화가 누수(leak)되고 있는가?
-- 처음부터 다시 설계한다면 이렇게 할 것인가?
-
----
-
-### 5. Contrarian
-
-**철학**: 모든 가정을 검증한다. 위대한 진리의 반대도 종종 또 다른 진리이다.
-
-**적합한 상황**: 위 4가지 persona가 모두 이미 시도되었거나, 패턴이 불분명할 때 (fallback)
-
-**접근 지침**:
-1. 모든 가정을 나열한다 (명시적 + 암시적)
-2. 각 가정의 반대를 고려한다
-3. 문제 자체를 의심한다
-4. "아무것도 하지 않으면?"을 질문한다
-5. "당연한" 해결책의 반대를 시도한다
-
-**탐색 질문**:
-- 우리 가정의 반대가 사실이라면?
-- 방지하려는 것이 실제로 일어나야 하는 것이라면?
-- 올바른 문제를 풀고 있는가?
-- 아무것도 하지 않으면 어떻게 되는가?
-
----
-
-## 이슈 생성 가이드
-
-stagnation 감지 시, 호출자(예: 향후 ledger 기반 stagnation reader)는 다음 구조로 task body를 생성한다:
-
-```markdown
-## 요구사항
-[기존과 동일한 gap 설명]
-
-## 과거 시도 이력
-- #{이슈번호} ({상태}): [접근 요약] — [실패 사유]
-- #{이슈번호} ({상태}): [접근 요약] — [실패 사유]
-
-## 새로운 접근 ({Persona} Persona)
-[선택된 persona의 관점에서 작성한 새로운 구현 방향]
-
-### 탐색 질문
-- [persona별 질문 중 이 상황에 적합한 것 2-3개]
-
-## 영향 범위
-[기존과 동일]
+candidates:
+  - id: def456
+    title: "..."
+    affected_paths: ["..."]
+    failure_reason: "..."
+  - id: ghi789
+    ...
 ```
 
-## Persona 선택 우선순위
+### 응답 처리
 
-1. candidates를 distance 순으로 읽고 과거 이슈 본문을 확인한다
-2. 과거 이슈에서 이미 사용된 persona가 있으면 제외한다
-3. 패턴에 맞는 persona를 선택한다:
-   - 같은 해시 반복 → Hacker
-   - 진전 없음 → Researcher
-   - 복잡도 증가 → Simplifier
-   - A↔B 진동 → Architect
-   - 위 모두 해당 없음 또는 소진 → Contrarian
-4. 모든 persona가 소진되면 이슈 본문에 "모든 자동 접근이 소진됨 — 사람의 검토 필요"를 명시한다
+- 응답에서 `verified_similar` 만 사용한다. 다른 필드 / 자유 텍스트는 무시.
+- false positive 로 분류된 task 는 stagnation 그룹에서 제외한다.
+- 재평가: verified 그룹의 크기가 새로운 N 이 된다. N < 3 이면 stagnation 판정을 철회하고 worker 에게 진행 허용 메시지를 노출한다.
+- N ≥ 3 이면 다음 단계 (persona 매핑 + redirect prompt) 로 진행한다.
+
+> 본 epic 에서는 Haiku 호출의 실제 SDK 코드는 다루지 않는다. 위 prompt / 응답 처리는 가이드까지만이며, 실제 호출은 후속 epic 에서 구현한다.
+
+## 3. Persona 매핑
+
+PERSONAS 배열은 `cli/src/cmd/issue.rs:355` 의 정의를 그대로 따른다 (CLI 와 Skill 이 동일한 순서를 공유한다).
+
+```
+[ "hacker", "researcher", "simplifier", "architect", "contrarian" ]
+```
+
+`pattern.consecutive_failures` 횟수에 따라 index 를 결정한다.
+
+| consecutive_failures | index | persona |
+|----------------------|-------|---------|
+| 2 | 0 | hacker |
+| 3 | 1 | researcher |
+| 4 | 2 | simplifier |
+| 5 | 3 | architect |
+| 6+ | 4 | contrarian (clamp) |
+
+`recommended_persona` 가 채워져 있으면 그대로 사용한다. CLI 가 이미 동일 매핑을 적용한 결과이므로 재계산하지 않는다.
+
+### Persona 행동 양식 (worker prompt 주입용)
+
+| persona | 핵심 메시지 |
+|---------|-------------|
+| hacker | 제약 자체를 의심하라. "이 제약이 정말 필수인가" — 우회 경로 / 다른 진입점 탐색. |
+| researcher | 추측을 멈추고 증거를 모아라. 에러 메시지를 다시 정독, 문서 / 소스 grep 으로 정확한 케이스 확인. |
+| simplifier | 복잡성을 제거하라. YAGNI. "동작하는 가장 단순한 것" 을 먼저 만들고 점진 확장. |
+| architect | 구조 자체를 의심하라. 같은 영역에서 반복 실패하면 추상화 누수가 원인일 수 있다. 최소 구조 변경 제안. |
+| contrarian | 모든 가정을 뒤집어라. "아무것도 하지 않으면" / "당연한 해결책의 반대" 를 시도. |
+
+## 4. Worker 진로 변경 가이드
+
+stagnation 판정이 유지되면 hook 은 worker 가 보는 stderr 에 redirect prompt 를 노출한다 (spec §3.11). 본 스킬이 prompt 합성에 사용할 원칙은 다음과 같다.
+
+### 4.1 기본 구조
+
+```
+[STAGNATION DETECTED] task <id>
+This task's territory is exhausted — N similar tasks have failed before:
+  - shared paths: <pattern.shared_paths>
+  - shared failure category: <pattern.common_failure_categories> (<consecutive_failures> consecutive)
+
+DO NOT proceed with the same approach. Try one of:
+  1. <영역 변경 제안>
+  2. Persona shift: "<persona>" — <핵심 메시지>
+
+Recommended persona: <persona>
+```
+
+### 4.2 강조 규칙
+
+- **shared_paths 가 좁다 (≤ 2 개)**: "이 영역 밖으로 시야 넓혀라. 호출 측 / 설정 / 인접 모듈을 의심하라" 를 추가.
+- **common_failure_categories 가 같다**: "같은 진단 카테고리 (`<category>`) 가 반복된다. 다른 카테고리로 의심 범위를 옮겨라" 를 추가.
+- **persona 가 결정되었다**: 해당 persona 의 행동 양식 (위 표) 을 그대로 prompt 에 주입한다. worker 가 persona 정의를 다시 추론하지 않도록 명시 노출.
+
+### 4.3 worker prompt 에 들어갈 항목 체크리스트
+
+- [ ] `pattern.shared_paths` 명시 (좁으면 "영역 밖으로" 강조)
+- [ ] `pattern.common_failure_categories` 명시 (반복이면 "다른 카테고리 의심" 강조)
+- [ ] persona 이름 + 핵심 메시지 + 탐색 질문 1–2 개
+- [ ] 과거 실패 task id 목록 (`similar_tasks[].id`) — worker 가 ledger 에서 직접 조회 가능하도록
+
+## 5. Escalate 단계 (status = "escalate")
+
+CLI exit 5 인 경우 (`pattern.consecutive_failures` 가 N_esc=5 이상에 도달) 본 스킬은 **Haiku 검증을 생략**하고 즉시 사람 개입 요청 메시지를 노출한다.
+
+- ledger 의 `TaskEscalated` event 는 hook 이 이미 emit 한 상태 (spec §3.5).
+- 본 스킬은 worker prompt 끝에 다음 라인을 추가한다.
+
+```
+ESCALATED to human review — autopilot task escalate <id> has been called automatically.
+DO NOT retry. Wait for human direction.
+```
+
+- persona shift 권유는 escalate 단계에서는 부수적이다. 메인 메시지는 "사람 개입 필요" 임을 분명히 한다.
+
+## 6. 한계 / Out of Scope
+
+본 epic (C10) 에서는 다음을 다루지 **않는다**. 후속 epic 으로 분리한다.
+
+| 항목 | 비고 |
+|------|------|
+| Haiku 호출 코드 (SDK 클라이언트 / 비용 가드) | 본 스킬은 prompt 가이드까지. 실제 호출 흐름은 별도. |
+| Mid-dispatch 강제 종료 | worker 가 작업 중일 때 ledger event 를 보고 `TaskStop` + 재dispatch 하는 흐름. 본 epic 은 pre-dispatch only (claim 직전 hook). |
+| Simhash / Jaccard 알고리즘 교체 | Storage 옵션 B (단일 컬럼) 로 시작. 다중 알고리즘 동시 보관은 schema 확장이 필요할 때 재검토. |
+| 기존 row 의 simhash / paths backfill | 정책상 수행하지 않음. 새 task 부터만 채워진다. |
+
+## 7. 참조
+
+- 스펙: `plans/ledger-stagnation-redesign.md` (§3.6 LLM 사용, §3.10 결과 JSON, §3.11 Hook prompt, §5 Acceptance)
+- PERSONAS 배열 정의: `plugins/github-autopilot/cli/src/cmd/issue.rs:355`
+- Persona 결정 로직 (consecutive → index): 같은 파일 `:553`
+- TaskEscalated event: `plugins/github-autopilot/cli/src/domain/event.rs:55`
+- 책임 경계 원칙: 레포 루트 `CLAUDE.md` "책임 경계 (CLI vs Skill/Agent)"
