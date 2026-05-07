@@ -12,11 +12,19 @@ fn base_time() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()
 }
 
+type EventSeed<'a> = (
+    Option<&'a str>,
+    Option<&'a str>,
+    EventKind,
+    EventPayload,
+    i64,
+);
+
 fn fixture_with_events() -> Arc<dyn TaskStore> {
     let store: Arc<dyn TaskStore> = Arc::new(InMemoryTaskStore::new());
     let t0 = base_time();
-    // (epic, task, kind, +seconds)
-    let seeds: Vec<(Option<&str>, Option<&str>, EventKind, EventPayload, i64)> = vec![
+    // (epic, task, kind, payload, +seconds)
+    let seeds: Vec<EventSeed> = vec![
         (
             Some("e1"),
             None,
