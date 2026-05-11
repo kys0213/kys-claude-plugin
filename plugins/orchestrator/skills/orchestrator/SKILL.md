@@ -1,10 +1,26 @@
 ---
 name: orchestrator
-description: 메인 에이전트가 직접 코드를 편집하지 않고 sub-agent/agent-team/worktree에 위임해 복합 작업을 관리하는 오케스트레이터 모드. 독립적이거나 병렬화 가능한 복수의 작업을 분해·위임·추적·통합해야 할 때, 또는 장기 진행 작업에 식별/제어가 필요한 agent team을 다룰 때 사용. 메인이 Edit/Write로 직접 코드를 수정하려 할 때도 이 스킬을 먼저 검토하여 위임으로 전환할지 판단한다.
+description: Use this skill when delegating work to multiple sub-agents, agent-teams, or worktrees — parallel fan-out, sequential pipelines, long-running agent teams, or any moment the main agent is about to use Edit/Write directly (delegate instead). Triggers include "여러 작업 병렬로", "동시에 처리", "에이전트 나눠서", "worktree로 분리", "위임해서", "팀으로 작업", "delegate", "parallel agents", "fan-out", "agent team", "sub-agent", "dispatch multiple", "split into tasks", "run in parallel".
 version: 0.1.0
 ---
 
 # Orchestrator Skill
+
+## When to use (트리거 케이스)
+
+이 스킬을 트리거해야 하는 상황:
+
+- 사용자가 **2개 이상의 독립 작업**을 한 번에 요청 ("A랑 B랑 C 같이 해줘", "동시에 처리해줘")
+- **병렬 fan-out**이 가능해 보일 때 ("여러 파일 동시에", "병렬로", "parallel", "in parallel")
+- **sub-agent / agent-team / worktree 위임**을 명시적으로 요청 ("나눠서", "팀으로", "에이전트 여러 개", "delegate", "dispatch")
+- **장기 진행 작업**에 식별 가능한 agent team이 필요할 때 (designer/implementer/reviewer 등)
+- **머지 조정**이 필요한 다중 변경 (여러 worktree 결과 통합, 충돌 해결 위임)
+- **메인 에이전트가 Edit/Write/NotebookEdit로 직접 코드를 수정하려는 모든 순간** — 위임으로 전환할지 먼저 검토
+
+트리거하면 안 되는 상황:
+- 단일 파일의 단순 편집 (오버헤드만 늘어남)
+- 사용자가 직접 메인이 처리하라고 명시한 경우
+- 1턴 안에 끝나는 read-only 조사
 
 ## 사고 모드 (Mental Model)
 
