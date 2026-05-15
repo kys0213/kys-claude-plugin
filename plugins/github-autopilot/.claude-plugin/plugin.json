@@ -10,7 +10,8 @@
     "./agents/issue-analyzer.md",
     "./agents/ci-fixer.md",
     "./agents/test-analyzer.md",
-    "./agents/spec-validator.md"
+    "./agents/spec-validator.md",
+    "./agents/stale-task-reviewer.md"
   ],
   "author": {
     "name": "kys0213"
@@ -25,7 +26,9 @@
     "./commands/setup.md",
     "./commands/analyze-issue.md",
     "./commands/ci-fix.md",
-    "./commands/test-watch.md"
+    "./commands/test-watch.md",
+    "./commands/work-ledger.md",
+    "./commands/stale-task-review.md"
   ],
   "description": "CronCreate 기반 자율 개발 루프 - gap 탐지, issue 구현, PR 머지, CI 감시/수정, QA 보강, 테스트 워치",
   "name": "github-autopilot",

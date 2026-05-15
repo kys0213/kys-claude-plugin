@@ -334,9 +334,12 @@ pub struct CheckStagnationArgs {
 
 #[derive(Args)]
 pub struct PreflightArgs {
-    /// Path to config file
-    #[arg(long, default_value = "github-autopilot.local.md")]
-    pub config: String,
+    /// Path to the autopilot markdown config (e.g. `github-autopilot.local.md`).
+    /// Renamed from `--config` to avoid clap arg-id collision with the global
+    /// `--config <autopilot.toml>` (different type/default caused a runtime
+    /// downcast TypeId panic — see issue #755).
+    #[arg(long = "autopilot-md", default_value = "github-autopilot.local.md")]
+    pub autopilot_md: String,
     /// Repository root directory
     #[arg(long, default_value = ".")]
     pub repo_root: String,

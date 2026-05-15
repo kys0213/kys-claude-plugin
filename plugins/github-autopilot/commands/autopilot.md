@@ -54,7 +54,7 @@ test_watch: []
 `autopilot preflight` CLI로 환경을 검증합니다:
 
 ```bash
-autopilot preflight --config github-autopilot.local.md --repo-root .
+autopilot preflight --autopilot-md github-autopilot.local.md --repo-root .
 ```
 
 - Exit 0: 모든 check PASS (WARN 허용) → 계속 진행
