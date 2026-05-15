@@ -108,6 +108,8 @@ git-utils pr "Fix memory leak" --description="Added proper cleanup in worker thr
 
 **출력 (JSON):** `{ "url": "...", "title": "...", "baseBranch": "..." }`
 
+**PR 본문 스타일:** 토스 PR 템플릿 4단 고정 (왜 / 무엇을 / 어떻게 / 확인 방법) + 친근한 해요체 단문 + 정보는 개조식. IT 특성화 고등학생도 이해 가능한 수준으로 약어/사내용어는 풀어쓰기. 상세 규칙과 예시는 `.claude/rules/git-workflow.md` 의 "PR 본문 작성 스타일" 참조.
+
 ### 4. 미해결 리뷰 조회
 
 ```bash
