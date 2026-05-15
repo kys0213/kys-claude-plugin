@@ -171,7 +171,10 @@ fn main() {
                 StatsCommands::Show { command } => svc.show(command.as_deref()),
             }
         }
-        Commands::Preflight(PreflightArgs { config, repo_root }) => {
+        Commands::Preflight(PreflightArgs {
+            autopilot_md,
+            repo_root,
+        }) => {
             let client = gh::real();
             let git_client = git::real();
             let fs_client = fs::real();
@@ -179,7 +182,7 @@ fn main() {
                 client.as_ref(),
                 git_client.as_ref(),
                 fs_client.as_ref(),
-                &config,
+                &autopilot_md,
                 Path::new(&repo_root),
             )
         }

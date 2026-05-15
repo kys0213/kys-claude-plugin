@@ -1231,3 +1231,35 @@ fn json_schema_task_list_header_behavior() {
             "ID            STATUS     ATTEMPTS  TITLE",
         ));
 }
+
+// ---------- Issue #755: preflight clap arg-id collision regression ----------
+//
+// `preflight` used to declare a subcommand-local `--config: String` with a
+// default value, colliding at runtime with the global `--config: Option<PathBuf>`.
+// Any invocation of `autopilot preflight ...` panicked inside clap with a
+// "Mismatch between definition and access of `config`" downcast error before
+// any check ran. The fix renamed the subcommand option to `--autopilot-md`;
+// these tests lock in that the parser no longer panics on `preflight` invocations.
+
+#[test]
+fn e2e_preflight_help_does_not_panic() {
+    let ws = Workspace::new();
+    ws.cmd()
+        .args(["preflight", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--autopilot-md"));
+}
+
+#[test]
+fn e2e_preflight_runs_without_clap_panic() {
+    // Empty workspace: every check FAILs/WARNs, but the binary must reach
+    // the JSON report path and exit 1 — never panic inside clap.
+    let ws = Workspace::new();
+    ws.cmd()
+        .arg("preflight")
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("CLAUDE.md"))
+        .stderr(predicate::str::contains("TypeId").not());
+}
