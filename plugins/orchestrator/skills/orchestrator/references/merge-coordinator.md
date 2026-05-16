@@ -7,7 +7,21 @@ user-invocable: false
 
 # Merge Coordinator
 
-병렬 sub-agent들이 worktree에 결과를 남긴 뒤, 그 결과를 안정적으로 통합하는 단계. **메인은 직접 머지/충돌 해결을 하지 않고**, 순서를 결정하고 충돌은 `git-utils:git-resolve` 등에 위임한다.
+병렬 sub-agent들이 worktree에 결과를 남긴 뒤, 그 결과를 epic 브랜치로 안정적으로 통합하는 단계. **메인은 직접 머지/충돌 해결을 하지 않고**, 순서를 결정하고 충돌은 `git-utils:git-resolve` 등에 위임한다.
+
+## 머지 대상: epic 브랜치
+
+이 단계의 머지 target은 **현재 epic 브랜치**다. main 브랜치가 아니다.
+
+```
+worktree A (sub-agent A의 브랜치)  ─┐
+worktree B (sub-agent B의 브랜치)  ─┼─→ epic/<name>   (이 스킬 범위)
+worktree C (sub-agent C의 브랜치)  ─┘
+
+epic/<name> → main 머지는 사용자 결정 / 별도 release 절차 (범위 밖)
+```
+
+따라서 아래 절차에서 `base`로 표기된 곳은 모두 **현재 epic 브랜치**를 의미한다.
 
 ## 머지 순서 결정 (기본 규칙)
 
@@ -45,7 +59,7 @@ user-invocable: false
 3. 머지 순서 결정 (위 규칙 적용)
 
 4. 순차 머지 시도
-   - base 브랜치를 최신화 → 후보 브랜치를 머지/리베이스
+   - epic 브랜치(base)에 후보 브랜치를 머지/리베이스 — 메인은 epic 브랜치 working tree에 그대로 머무름
    - 충돌 없음 → 다음 후보로
    - 충돌 발생 → 위임 (아래 참조)
 
@@ -70,10 +84,10 @@ user-invocable: false
 Agent({
   description: "Resolve merge conflict for branch <X>",
   prompt: """
-    base: <base-branch>
-    target: <feature-branch>
+    base: epic/<name>           # 현재 epic 브랜치
+    target: <feature-branch>     # sub-agent worktree의 브랜치
     충돌이 발생했다. git-utils:git-resolve 스킬을 사용해 파일별로 충돌을 해결하고
-    rebase를 완료해라.
+    epic 브랜치 위로 rebase 를 완료해라.
     완료 후 변경된 파일 목록과 최종 커밋 해시를 보고해라.
   """
 })
@@ -133,12 +147,12 @@ Agent({
 병렬 위임 시 사전에 disjoint를 검증했더라도, 결과 단계에서 다시 한번 확인하면 안전하다.
 
 ```
-git diff --name-only <base>...<branch_A>  # A가 변경한 파일
-git diff --name-only <base>...<branch_B>  # B가 변경한 파일
+git diff --name-only epic/<name>...<branch_A>  # A가 변경한 파일 (base = epic 브랜치)
+git diff --name-only epic/<name>...<branch_B>  # B가 변경한 파일
 → 교집합이 있으면 충돌 가능성 ↑ → 머지 순서를 신중히
 ```
 
-이 검사는 메인이 직접 수행 (Bash) — 짧고 결정적.
+이 검사는 메인이 epic 브랜치에서 직접 수행 (Bash) — 짧고 결정적.
 
 ---
 
@@ -169,6 +183,7 @@ git diff --name-only <base>...<branch_B>  # B가 변경한 파일
 3. **머지 실패 무시**: 한 후보 충돌 → 그냥 건너뛰고 다음 진행 → 누락 발생. 보고 + 결정.
 4. **worktree 방치**: 머지 완료 후 정리 안 함 → 디스크/git 상태 오염.
 5. **base 미동기화 머지**: 오래된 base 위에 머지 시도 → 무의미한 충돌. 머지 직전 base pull 필수.
+6. **main으로 바로 머지**: epic 브랜치를 거치지 않고 sub-agent 결과를 main으로 직접 머지 → epic 브랜치 전략 위반. 이 단계의 target은 항상 epic 브랜치.
 
 ---
 
@@ -176,10 +191,11 @@ git diff --name-only <base>...<branch_B>  # B가 변경한 파일
 
 머지 단계 진입 전:
 
+- [ ] 메인이 여전히 epic 브랜치 + 메인 working tree에 있는가?
 - [ ] 후보 브랜치 목록을 수집했는가?
 - [ ] 의존성 + 변경 파일 overlap을 파악했는가?
 - [ ] 머지 순서를 결정했는가? (의존성 없는 것 → 적은 변경 → 알파벳)
-- [ ] base 브랜치를 최신화했는가?
+- [ ] base(=epic 브랜치)를 최신화했는가?
 
 머지 진행 중:
 
