@@ -4,7 +4,6 @@ argument-hint: "[--gap-only]"
 allowed-tools:
   - Glob
   - Read
-  - Write
   - AskUserQuestion
   - Bash
 ---
@@ -127,7 +126,7 @@ AskUserQuestion: |
 
 ### Step 4: 룰 파일 생성
 
-승인된 카테고리별로 `${CLAUDE_PLUGIN_ROOT}/templates/spec-*.md` 템플릿을 `Read` 한 뒤, 아래 치환 변수를 적용해 `.claude/rules/spec-*.md`로 `Write` 합니다.
+승인된 카테고리별로 `render-template` CLI 를 호출하여 placeholder 를 치환한 결과를 `.claude/rules/spec-*.md` 로 작성합니다. 에이전트는 변수 값 결정만 수행하고, 템플릿 Read·치환·Write 는 모두 CLI 에 위임합니다 (결정적 변환, 멱등).
 
 | 카테고리 | 템플릿 | 출력 |
 |---|---|---|
@@ -144,6 +143,25 @@ AskUserQuestion: |
 | `{spec_root}` | 확정된 spec 루트 (`spec`, `docs/spec` 등) |
 | `{concerns_path}` | `{spec_root}/concerns` |
 | `{flows_path}` | `{spec_root}/flows` |
+
+#### 호출 방식
+
+승인된 카테고리마다 다음을 `Bash` 로 실행합니다 (카테고리 개수만큼 반복):
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/../../common/scripts/render-template.sh \
+  ${CLAUDE_PLUGIN_ROOT}/templates/spec-<category>.md \
+  .claude/rules/spec-<category>.md \
+  project=<project> \
+  spec_root=<spec_root> \
+  concerns_path=<concerns_path> \
+  flows_path=<flows_path>
+```
+
+**출력 (stdout):** `rendered: .claude/rules/spec-<category>.md`
+**Exit 0**: 성공. **Exit 1**: 템플릿 부재 또는 placeholder 인자 누락. **Exit 2**: 인자 형식 오류.
+
+CLI 는 출력 디렉토리(`.claude/rules/`)가 없으면 `mkdir -p` 자동, 출력 파일이 존재하면 덮어쓰기 (Step 3 HITL 가 이미 overwrite 를 결정한 후 호출). 한국어 placeholder 비슷한 패턴(예: `{컴포넌트명}`, `{유스케이스명}`)은 정규식 `\{[a-zA-Z_][a-zA-Z0-9_]*\}` 비매칭이므로 본문 예시 자리에 그대로 보존됩니다.
 
 concern/design/flow 세 파일은 같은 `## 다이어그램 분담` 섹션을 자체 포함합니다. 단독 로드 시에도 의미가 통하도록 의도된 중복이며, 컬럼 라벨은 모두 `종류 | 위치 | 기준`으로 통일합니다. common 은 도메인 무관 톤 정책이므로 다이어그램 분담을 포함하지 않습니다.
 
@@ -189,7 +207,16 @@ scaffold-spec-rules 완료!
 
 **`.claude/rules/` 디렉토리 부재:**
 
-- `Bash: mkdir -p .claude/rules`로 생성 후 진행
+- `render-template.sh` 가 출력 경로의 부모 디렉토리를 자동 `mkdir -p` 하므로 별도 처리 불필요
+
+**`render-template.sh` exit 1 (placeholder 누락):**
+
+- Step 1-C 산출 변수 4개(project, spec_root, concerns_path, flows_path) 중 하나가 비어 있다는 신호 — Step 1-C 로 돌아가 재시도하거나 사용자에게 누락 변수 직접 입력 요청
+- stderr 메시지에 누락 키가 표시됨: `missing values for placeholder(s): <key>`
+
+**`render-template.sh` exit 2 (인자 형식 오류):**
+
+- 에이전트 호출 인자 조립 버그 — Bash 명령 구성을 점검하고 재시도
 
 ## Output Examples
 
