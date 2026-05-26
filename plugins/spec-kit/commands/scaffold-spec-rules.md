@@ -15,7 +15,7 @@ allowed-tools:
 
 ## Overview
 
-스펙 문서를 다루는 프로젝트가 `concern / design / flow` 3종 컨벤션을 표준화하여 사용할 수 있도록, 발견된 디렉토리 구조에 맞는 룰 파일만 골라 생성합니다.
+스펙 문서를 다루는 프로젝트가 `common / concern / design / flow` 4종 컨벤션을 표준화하여 사용할 수 있도록, 공통 룰(common)은 spec 루트가 확정되면 항상 생성하고 도메인별 룰은 발견된 디렉토리 구조에 맞춰 생성합니다.
 
 5단계 워크플로우:
 
@@ -35,7 +35,7 @@ allowed-tools:
 
 `Glob: .claude/rules/spec-*.md`로 이미 존재하는 룰 파일 목록을 확보합니다.
 
-- `--gap-only` 옵션이고 `concern/design/flow` 3개가 모두 존재하면 **여기서 즉시 종료**합니다 (이후 단계 스킵).
+- `--gap-only` 옵션이고 `common/concern/design/flow` 4개가 모두 존재하면 **여기서 즉시 종료**합니다 (이후 단계 스킵).
 - 그 외에는 결과를 Step 3 충돌 해결 입력으로 전달합니다.
 
 #### 1-B. 후보 경로 + 내부 구조 + 프로젝트명 (병렬 수집)
@@ -58,10 +58,11 @@ allowed-tools:
 
 - **`spec_root`**: Glob 결과의 첫 번째 경로 prefix(`spec` / `specs` / `docs/spec` / `.spec`). 여러 prefix가 동시에 잡히면 Step 2에서 사용자에게 enumerated 선택지로 제시.
 - **카테고리 활성 여부**:
+  - common: spec_root가 확정되면 **항상 활성** (모든 spec 문서에 적용되는 공통 톤 정책)
   - concern: `{spec_root}/concerns/**/*.md` 매칭 ≥ 1
   - design: `{spec_root}/README.md` 또는 `{spec_root}/DESIGN.md` 매칭
   - flow: `{spec_root}/flows/**/*.md` 매칭 ≥ 1
-  - 미발견 카테고리는 비활성 (사용자가 Step 2에서 강제 활성화 가능)
+  - 미발견 카테고리(common 제외)는 비활성 (사용자가 Step 2에서 강제 활성화 가능)
 - **`{project}`** (단일 placeholder, `{project_name}` 사용 안 함): 우선순위 — `package.json#name` > `go.mod#module` 마지막 segment > `Cargo.toml#[package].name` > `pyproject.toml#[project].name` 또는 `[tool.poetry].name` > git remote / 디렉토리명. 모두 실패 시 placeholder 유지하고 Step 2에서 사용자 입력 요청.
 - **`{concerns_path}`** = `{spec_root}/concerns`, **`{flows_path}`** = `{spec_root}/flows` (Step 4 frontmatter `paths:` 치환에 사용).
 
@@ -73,6 +74,7 @@ AskUserQuestion: |
     - spec 루트: {spec_root}
     - 프로젝트명: {project}
     - 발견 카테고리: concern={yes/no}, design={yes/no}, flow={yes/no}
+    - common: 항상 생성 (spec 전반 공통 톤 정책)
     - 기존 룰 파일: {existing_files}
 
   이대로 진행할까요?
@@ -101,6 +103,7 @@ AskUserQuestion: |
 
 | 카테고리 | 파일 | paths frontmatter (예시) |
 |---|---|---|
+| common | `.claude/rules/spec-common.md` | `["{spec_root}/**/*.md"]` |
 | concern | `.claude/rules/spec-concern.md` | `["{concerns_path}/**/*.md"]` |
 | design | `.claude/rules/spec-design.md` | `["{spec_root}/README.md", "{spec_root}/DESIGN.md"]` |
 | flow | `.claude/rules/spec-flow.md` | `["{flows_path}/**/*.md"]` |
@@ -135,7 +138,7 @@ AskUserQuestion: |
 | `{concerns_path}` | `{spec_root}/concerns` |
 | `{flows_path}` | `{spec_root}/flows` |
 
-세 파일은 같은 `## 다이어그램 분담` 섹션을 자체 포함합니다. 단독 로드 시에도 의미가 통하도록 의도된 중복이며, 컬럼 라벨은 모두 `종류 | 위치 | 기준`으로 통일합니다.
+concern/design/flow 세 파일은 같은 `## 다이어그램 분담` 섹션을 자체 포함합니다. 단독 로드 시에도 의미가 통하도록 의도된 중복이며, 컬럼 라벨은 모두 `종류 | 위치 | 기준`으로 통일합니다. common 은 도메인 무관 톤 정책이므로 다이어그램 분담을 포함하지 않습니다.
 
 #### 템플릿 1 — `spec-concern.md`
 
@@ -330,6 +333,73 @@ paths: ["{flows_path}/**/*.md"]
 - 실제 SQL/코드 스니펫 금지 — ASCII 시퀀스 또는 슈도코드만
 ```
 
+#### 템플릿 4 — `spec-common.md`
+
+```markdown
+---
+name: spec-common
+description: 스펙 문서 작성 컨벤션 — 공통 톤 정책 (모든 spec 문서에 적용)
+paths: ["{spec_root}/**/*.md"]
+---
+
+# Spec Common Rules
+
+> `{spec_root}/` 전반(README/DESIGN/concerns/flows/openapi)에 공통으로 적용되는 톤 정책과 spec ↔ code 정합성 정책.
+
+## 독자 친화 톤
+
+### 핵심 원칙
+
+| 항목 | 정책 |
+|------|------|
+| 독자 대상 | 특성화 고등학생도 이해 가능한 수준 |
+| 문체 | 친근한 해요체 ("~해요", "~예요", "~돼요") 단문 위주 |
+| 길이 | 한 문장은 짧게. 한 단락 = 한 주제. 구구절절 설명 금지 |
+| 시각화 | 텍스트 설명보다 다이어그램·표·예시가 우선 |
+| 용어 | 영어 약어/전문용어는 처음 등장 시 한국어 풀이 한 번 — 이후 약어만 |
+
+### 작성 형식
+
+- 헤딩은 짧게. 질문형 권장 ("어떻게 동작해요?", "왜 이렇게 만들었어요?")
+- 문단 시작에 한 줄 요약 (TL;DR 느낌)
+- 본문은 bullet / 표 / 다이어그램 우선
+- 긴 prose 블록은 분할
+- 동작 흐름은 ASCII 다이어그램 또는 mermaid 로
+- 정책 케이스는 표로
+- 상태 머신은 다이어그램으로
+- 인터페이스 책임은 표로 (단, 함수 시그니처 표는 여전히 금지)
+
+### 시각화 우선 원칙
+
+다음은 무조건 시각화 (표/다이어그램):
+
+| 대상 | 형태 |
+|------|------|
+| 트리거 / 처리 / 응답 흐름 | ASCII flow 또는 mermaid sequence |
+| 케이스별 정책 (입력 → 결정) | 표 |
+| 컴포넌트 간 관계 | ASCII 박스 또는 mermaid graph |
+| 상태 라이프사이클 | 상태 머신 다이어그램 |
+| 라벨 / cardinality 정책 | 표 |
+
+### 톤 변환 예시
+
+✗ Before (딱딱한 톤)
+
+> `AccessAuthorizer` port 의 실제 반환값은 `{Allowed, AccessLevel, Reason}` 이며, `ManagerAuthAuthorizer` 가 일률 `AccessLevel=write` 부여하는 임시 정책으로, 차등 모델 재도입은 별도 설계로 분리한다.
+
+✓ After (독자 친화 톤)
+
+> AccessAuthorizer 는 세 가지를 알려줘요.
+>
+> | 필드 | 의미 |
+> |------|------|
+> | Allowed | 접근 가능? (true/false) |
+> | AccessLevel | 권한 수준 (지금은 무조건 `write`) |
+> | Reason | 거부 사유 (감사 로그용) |
+>
+> AccessLevel 이 `write` 고정인 이유? **차등 모델은 아직 안 정해졌어요**. 정해지면 별도 설계로 다시 다룰 예정이에요.
+```
+
 ### Step 5: 결과 요약
 
 생성된 파일과 paths를 출력합니다:
@@ -342,6 +412,7 @@ scaffold-spec-rules 완료!
   프로젝트명: {project}
 
 생성된 룰 파일:
+  .claude/rules/spec-common.md    (paths: {spec_root}/**/*.md)
   .claude/rules/spec-concern.md   (paths: {concerns_path}/**/*.md)
   .claude/rules/spec-design.md    (paths: {spec_root}/README.md, {spec_root}/DESIGN.md)
   .claude/rules/spec-flow.md      (paths: {flows_path}/**/*.md)
@@ -381,9 +452,10 @@ scaffold-spec-rules 완료!
 감지 결과:
   spec 루트: spec/
   프로젝트명: my-service
-  카테고리: concern (yes), design (yes), flow (yes)
+  카테고리: common (always), concern (yes), design (yes), flow (yes)
 
 생성된 룰 파일:
+  .claude/rules/spec-common.md    (paths: spec/**/*.md)
   .claude/rules/spec-concern.md   (paths: spec/concerns/**/*.md)
   .claude/rules/spec-design.md    (paths: spec/README.md, spec/DESIGN.md)
   .claude/rules/spec-flow.md      (paths: spec/flows/**/*.md)
