@@ -1,0 +1,9 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "author": {
+    "name": "kys0213"
+  },
+  "description": "통합 개발 워크플로우 — spec/git/autopilot/orchestrator/coding-style/workflow 를 단일 책임 경계로 큐레이션 (WIP: Epic 1 #765 진행 중)",
+  "name": "atelier",
+  "version": "0.1.0"
+}
