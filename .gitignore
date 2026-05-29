@@ -38,3 +38,6 @@ plugins/git-utils/dist/
 
 # github-autopilot local task store cache
 .autopilot/
+
+# orchestrator autonomous-mode decision logs (ephemeral, shared at completion)
+.orchestrator/
