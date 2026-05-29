@@ -53,8 +53,12 @@ atelier setup <module>
 | Phase | 내용 | 상태 |
 |---|---|---|
 | Phase 0 | 사전 검증 | ✅ |
-| Phase 1 | 골격 (plugin.json · README · marketplace WIP entry) | 🚧 |
-| Phase 2 | CLI 통합 (Rust 단일 바이너리) | ⬜ |
-| Phase 3 | commands / agents / skills / hooks 이동 + namespace 치환 | ⬜ |
-| Phase 4 | CI 인프라 (validate · rust-binary · frozen 게이트 · bumpversion 제외) | ⬜ |
-| Phase 5 | 흡수 6개 freeze | ⬜ |
+| Phase 1 | 골격 (plugin.json · README · marketplace WIP entry) | ✅ |
+| Phase 2 | CLI 통합 (Rust 단일 바이너리) | ⬜ (후속 PR) |
+| Phase 3 | commands / agents / skills / hooks 이동 + namespace 치환 | ✅ |
+| Phase 4 | CI 인프라 (validate · rust-binary · frozen 게이트 · bumpversion 제외) | ⬜ (후속 PR) |
+| Phase 5 | 흡수 6개 freeze | ✅ |
+
+> **현재 상태**: 콘텐츠 통합(commands/agents/skills/hooks)과 freeze 가 완료되었습니다.
+> CLI 는 아직 흡수 6개 plugin 의 기존 빌드(git-utils bun, github-autopilot Rust)에 의존합니다 —
+> 단일 `atelier` 바이너리 포팅(Phase 2)과 CI 인프라(Phase 4)는 후속 PR 에서 진행됩니다.
