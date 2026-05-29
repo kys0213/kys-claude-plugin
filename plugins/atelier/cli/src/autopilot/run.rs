@@ -1,3 +1,8 @@
+//! Autopilot dispatch entry point. Extracted from the original `main.rs` so the
+//! top-level atelier router can invoke `atelier autopilot <args>` by re-parsing
+//! the autopilot clap surface and delegating here. Behavior is identical to the
+//! original standalone `autopilot` binary.
+
 use crate::autopilot::cmd::{
     CheckCommands, Cli, Commands, IssueCommands, ListArgs, PipelineCommands, PreflightArgs,
     StatsCommands, TaskCommands, WorktreeCommands,
@@ -10,10 +15,9 @@ use crate::autopilot::{cmd, fs, gh, git, github};
 use std::io::stdout;
 use std::path::{Path, PathBuf};
 
-/// Runs the `autopilot` subsystem with an already-parsed [`Cli`] and returns a
-/// process exit code. Extracted from the former standalone `main()` so the
-/// top-level `atelier` binary can route `atelier autopilot <...>` here while
-/// keeping autopilot's full clap tree intact (Phase 2a/2b).
+/// Runs the autopilot subsystem and returns a process exit code. Never returns
+/// `Err`; all error mapping to exit codes happens here (mirroring the original
+/// `main`), so the caller can simply `std::process::exit` on the result.
 pub fn run(cli: Cli) -> i32 {
     let config = match load_config(cli.config.as_deref()) {
         Ok(c) => c,
@@ -240,7 +244,7 @@ pub fn run(cli: Cli) -> i32 {
                     Ok(secs) => svc.list_stale(secs, json, &mut out),
                     Err(msg) => {
                         log::error!("{msg}");
-                        std::process::exit(2);
+                        return 2;
                     }
                 },
                 TaskCommands::ReleaseStale {
@@ -260,7 +264,7 @@ pub fn run(cli: Cli) -> i32 {
                             Ok(secs) => svc.release_stale(secs, json, &mut out),
                             Err(msg) => {
                                 log::error!("{msg}");
-                                std::process::exit(2);
+                                return 2;
                             }
                         }
                     }

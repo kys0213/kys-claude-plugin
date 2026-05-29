@@ -115,6 +115,7 @@ dependencies = [
  "hex",
  "log",
  "predicates",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",

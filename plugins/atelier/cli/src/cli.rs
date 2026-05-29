@@ -1,45 +1,54 @@
-//! Top-level `atelier` clap router.
-//!
-//! Routes to absorbed subsystems. Each subsystem owns its own clap tree, so we
-//! capture its arguments verbatim and re-parse them with the subsystem's parser
-//! (`Cli::parse_from`). This keeps the autopilot CLI surface byte-for-byte
-//! compatible — `atelier autopilot <X>` behaves exactly like the old
-//! `autopilot <X>` (Phase 2b: regression 0).
-use clap::{Parser, Subcommand};
+//! Top-level atelier clap router. Dispatches `atelier <subsystem> <args...>` to
+//! the absorbed subsystems by re-parsing the trailing args with each
+//! subsystem's own clap surface. This keeps the subsystems' argument grammars
+//! independent and unchanged from their standalone CLIs.
+
+use clap::Parser;
 
 #[derive(Parser)]
 #[command(
     name = "atelier",
     version,
-    about = "통합 개발 워크플로우 CLI — autopilot / git 서브시스템 라우터"
+    about = "Unified development workflow CLI (git, autopilot, ...)"
 )]
 pub struct AtelierCli {
     #[command(subcommand)]
     pub command: AtelierCommand,
 }
 
-#[derive(Subcommand)]
+#[derive(clap::Subcommand)]
 pub enum AtelierCommand {
-    /// github-autopilot deterministic CLI (replaces the `autopilot` binary)
+    /// github-autopilot deterministic CLI
+    #[command(disable_help_flag = true)]
     Autopilot {
-        /// Arguments forwarded verbatim to the autopilot subsystem parser.
+        /// Arguments forwarded verbatim to the autopilot subsystem
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// git-utils workflow automation CLI
+    #[command(disable_help_flag = true)]
+    Git {
+        /// Arguments forwarded verbatim to the git subsystem
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
 }
 
-/// Parses the top-level args and dispatches to the matching subsystem, returning
-/// a process exit code.
+/// Parses argv and dispatches to the selected subsystem, returning a process
+/// exit code. Each subsystem re-parses its own args so its grammar (and
+/// `--help`/`--version`) behaves exactly as the standalone CLI did.
 pub fn run() -> i32 {
     let cli = AtelierCli::parse();
     match cli.command {
         AtelierCommand::Autopilot { args } => {
-            // Re-parse with autopilot's own clap tree. `parse_from` expects the
-            // program name as argv[0]; use "autopilot" so help/error text and
-            // `--version` read naturally.
+            // Re-prepend the binary name so clap's argv[0] expectation holds.
             let argv = std::iter::once("autopilot".to_string()).chain(args);
             let autopilot_cli = crate::autopilot::cmd::Cli::parse_from(argv);
             crate::autopilot::run::run(autopilot_cli)
+        }
+        AtelierCommand::Git { args } => {
+            let argv = std::iter::once("git".to_string()).chain(args);
+            crate::git::run_from(argv)
         }
     }
 }
