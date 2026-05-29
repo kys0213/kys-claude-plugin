@@ -142,6 +142,12 @@ skills/autopilot-pipeline/
 
 command 변화: `autopilot/*` 11개가 해당 reference 를 로드하는 thin controller 로. 결정적 상태 전이(task add/claim, epic status 등)는 **`atelier autopilot` CLI 호출**로 위임 (이미 CLI 보유).
 
+> **중복 수렴 (중요)**: autopilot 은 현재 build-issues·merge-prs·autopilot 에서 \"Agent Team\",
+> worktree, 병렬 dispatch 를 **자체 서술**하고 `pr-merger` agent 가 머지를 직접 다룬다. 이는
+> orchestrator skill 과 중복이다. autopilot-pipeline 은 위임·worktree·머지 메커니즘을 **재구현하지
+> 않고 orchestrator skill 에 위임**한다 (§4.5). reference 에는 \"무엇을 위임할지\"만 두고 \"어떻게
+> 병렬화/머지할지\"는 orchestrator 가 단일 소유.
+
 ### 4.3 git 도메인
 
 기존 **`git`** skill(261) 을 references 로 확장 (신규 top-level skill 없음):
@@ -165,10 +171,52 @@ skills/git/
 이미 skill 중심 (convention-architect, agent-design-principles). **변경 최소** — 모범 사례로 유지.
 `workflow/scaffold-conventions`(rename됨)·`workflow/install` 은 현 구조 유지.
 
-### 4.5 orchestrator / coding-style 도메인
+### 4.5 cross-cutting 기반 skill (orchestrator, resilience) + coding-style
 
-- orchestrator: 이미 references 패턴의 모범. 그대로 (skill 이름·구조 보존).
-- coding-style: templates/CLAUDE.md → `skills/coding-style/` (02 §1). hook(suggest-simplify)은 그대로.
+모든 skill 이 \"관심사(slash) 도메인\"인 것은 아니다. orchestrator·resilience 는 **다른 도메인
+skill 과 메인 에이전트가 공통으로 의존하는 가로지르는 기반(foundation)** 이다. 06 의 슬래시
+표면에 넣지 않고, 풍부한 트리거 description 으로 **모델이 자동 호출**하게 둔다.
+
+**skill 3계층 분류** (atelier 의 13개를 역할로 정리):
+
+| 계층 | 호출 | skill |
+|---|---|---|
+| 관심사(domain) | user-invocable 슬래시 + 모델 (06) | spec-workflow, autopilot-pipeline, git, workflow(convention) |
+| **기반(foundation)** | 모델 자동 (슬래시 X) | **orchestrator**, resilience |
+| 헬퍼(SRP) | 모델 자동 (슬래시 X) | draft-branch, issue-label, branch-sync, issue-report, spec-criteria, agent-design-principles, coding-style |
+
+#### orchestrator — 통합의 모범이자 단일 위임 엔진
+
+- 이미 command/agent/CLI 없이 **순수 skill + references 4개**(delegation-patterns·worktree-lifecycle·
+  agent-monitor·merge-coordinator). atelier 가 목표하는 패턴 그 자체 → **구조·이름 그대로 보존**.
+- **단일 소유(single owner) 원칙**: 병렬/순차 판단, worktree 토폴로지, agent team, **머지 조정**은
+  orchestrator 만 소유한다. autopilot-pipeline·git 은 여기에 위임한다 (§4.2 수렴).
+- **cross-plugin 참조 내부화**: orchestrator 진입 절차의 `git-utils:/epic init`·`git-utils:/git-branch`
+  참조와, spec-kit `gap-auditor` → orchestrator 참조는 atelier 내부 namespace 로 치환 (02 §2.2 의 13건에 포함).
+
+#### 머지/충돌 로직 수렴 (3곳 → 1곳)
+
+현재 충돌·머지 책임이 **세 곳**에 흩어져 있다:
+
+```
+orchestrator/references/merge-coordinator.md   ← 병렬 결과 통합 (canonical 후보)
+github-autopilot/agents/pr-merger.md           ← autopilot PR 머지
+git-utils/commands/git-resolve.md              ← rebase 충돌 해결
+```
+
+Epic 2 수렴 방향:
+- **merge-coordinator 를 canonical** 로. \"여러 변경을 어떤 순서로, 충돌을 어떻게 위임\"의 단일 출처.
+- git skill `references/conflict-resolution.md`(§4.3) 는 충돌 *해결 전략* 만 담고 조정은 위임.
+- autopilot `pr-merger` agent 는 service 레이어로 남되, 머지 *판단* 은 orchestrator 를 참조.
+
+#### resilience — 실패/재시도 기반
+
+autopilot 의 실패 처리(retry/backoff/escalation) 지식. autopilot-pipeline 이 의존. 그대로 유지하되
+\"언제 에스컬레이션\" 판단의 단일 출처로 (§5 의 판단 항목과 정합).
+
+#### coding-style
+
+templates/CLAUDE.md → `skills/coding-style/` (02 §1). hook(suggest-simplify)은 그대로. SRP 헬퍼.
 
 ### 4.6 신규 top-level skill 합계
 
