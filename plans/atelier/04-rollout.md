@@ -13,7 +13,7 @@
 ## 1. PR 분할 원칙
 
 - **각 PR 은 독립적으로 머지 가능하고 CI 가 green** 이어야 한다.
-- atelier 가 동작 가능해지기 전까지는 **frozen / marketplace 변경을 하지 않는다** (사용자 노출 지연).
+- atelier 가 Phase 4 까지 동작 확인되기 전까지는 **frozen 적용을 하지 않는다** (롤백 가능성 확보). marketplace 에 atelier 자체는 Phase 1 부터 \"WIP\" 라벨로 등록된다 — validate 도구의 marketplace-sync 강제 때문 (Phase 1 결정 참고).
 - CLI 포팅(Phase 2)은 가장 큰 작업이므로 단독 PR. TDD 로 진행 (02 §4.3 의 테스트 이전 포함).
 - 각 PR title 은 git-workflow.md 형식 + 버전 범프 규칙 준수.
 
@@ -35,10 +35,15 @@
 
 `feat(atelier): scaffold plugin skeleton`
 
-- `plugins/atelier/.claude-plugin/plugin.json` (`0.1.0`, commands/agents/skills 키 명시)
-- 빈 디렉토리 구조 (02 §1) + README 초안 (6→1 매핑표 placeholder)
-- marketplace.json 에 atelier entry **아직 추가 안 함** (동작 전이라 노출 금지)
-- 검증: `make validate` 통과 (빈 plugin 이라도 스키마 적합)
+- `plugins/atelier/.claude-plugin/plugin.json` (`0.1.0`)
+- `plugins/atelier/README.md` 초안 (6→1 매핑표 + 슬래시 표면 placeholder)
+- **marketplace.json 에 atelier 0.1.0 entry 등록** (description 에 \"WIP / Epic 1 진행 중\" 명시)
+- 검증: `make validate` 통과 (marketplace-sync 포함)
+
+> **결정 근거**: `tools/validate` 의 marketplace-sync 체크는 `plugin.json` 존재 시 marketplace 등록을
+> **invariant 로 강제**한다. 04 초안의 \"Phase 1 = marketplace 노출 안 함\" 분리는 도구가 허용하지
+> 않아 폐기. 빈 plugin 이 노출돼도 실해는 없으며(install 시 0개 capability), description 으로
+> 의도가 명시된다. Phase 5a 의 marketplace 등록은 본 단계로 흡수되고, Phase 5 는 freeze 작업만 남는다.
 
 ### Phase 2 — CLI 통합 (`feat`, 최대 작업)
 
@@ -91,20 +96,17 @@
 - frozen 게이트 추가 (§3.2)
 - bumpversion freeze 제외 목록 (§4)
 
-### Phase 5 — marketplace 노출 + freeze (`feat` / `docs`)
+### Phase 5 — freeze (`docs`)
 
-두 PR 로 분리:
+`docs(atelier): freeze absorbed plugins`
 
-**5a. `feat(atelier): publish atelier to marketplace`**
-- marketplace.json 에 atelier entry 추가 (02 §7.1)
-- atelier README 완성 (6→1 매핑표, 마이그레이션 가이드 링크)
-
-**5b. `docs(atelier): freeze absorbed plugins`** (버전 범프 없는 `docs`)
 - 6개 README 에 ❄️ 배지 (03 §B.2)
 - marketplace 6개 entry 에 `deprecated`/`replacedBy` (또는 폴백)
+- atelier marketplace entry 의 description 갱신 (\"WIP\" → 정식 안내, Phase 1 의 placeholder 제거)
 - `docs` type 이라 frozen plugin 버전 범프 안 됨 (03 §B.3)
 
-> 5a 가 머지되어 atelier 가 동작 확인된 뒤에만 5b 진행.
+> Phase 1 흡수로 \"5a publish\" 단계가 사라졌다. 5 는 freeze 단독.
+> atelier 가 Phase 4 까지 동작 검증된 뒤에만 진행.
 
 ---
 
