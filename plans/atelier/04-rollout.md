@@ -52,9 +52,12 @@
 순서 (02 §4.3, TDD):
 
 ```
-2a. autopilot Rust crate 를 plugins/atelier/cli/ 로 이동
+2a. autopilot Rust crate 를 plugins/atelier/cli/ 로 **복사** (이동 아님)
+    - ⚠️ 정정: 초안의 "이동"은 00-concept §4.2 freeze 정책("복사하되 이동하지
+      않는다 — 롤백 보장")과 충돌. frozen github-autopilot/cli 원본을 보존하기
+      위해 **복사**로 확정. atelier/cli 는 사본.
     - Cargo.toml: name="atelier", bin="atelier"
-    - src/autopilot/ 하위로 기존 모듈 이동, lib.rs/main.rs 재구성
+    - src/autopilot/ 하위로 모듈 배치, lib.rs/main.rs/cli.rs 재구성
     - [package.metadata.ci].targets 추가 (rust-binary.yml 빌드용)
 2b. clap 최상위 라우터(cli.rs): atelier autopilot <...> 동작 복원
     - 기존 autopilot 테스트 전부 green 유지

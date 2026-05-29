@@ -1,0 +1,408 @@
+use crate::autopilot::cmd::{
+    CheckCommands, Cli, Commands, IssueCommands, ListArgs, PipelineCommands, PreflightArgs,
+    StatsCommands, TaskCommands, WorktreeCommands,
+};
+use crate::autopilot::config::Config;
+use crate::autopilot::domain::{DomainError, UserInputError};
+use crate::autopilot::ports::task_store::TaskStoreError;
+use crate::autopilot::store::SqliteTaskStore;
+use crate::autopilot::{cmd, fs, gh, git, github};
+use std::io::stdout;
+use std::path::{Path, PathBuf};
+
+/// Runs the `autopilot` subsystem with an already-parsed [`Cli`] and returns a
+/// process exit code. Extracted from the former standalone `main()` so the
+/// top-level `atelier` binary can route `atelier autopilot <...>` here while
+/// keeping autopilot's full clap tree intact (Phase 2a/2b).
+pub fn run(cli: Cli) -> i32 {
+    let config = match load_config(cli.config.as_deref()) {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!("{e:#}");
+            return 2;
+        }
+    };
+
+    let result = match cli.command {
+        Commands::Issue { command } => match command {
+            IssueCommands::DetectOverlap(args) => cmd::issue::detect_overlap(&args),
+            IssueCommands::CheckDup { fingerprint } => {
+                let client = gh::real();
+                cmd::issue::check_dup(client.as_ref(), &fingerprint)
+            }
+            IssueCommands::Create(args) => {
+                let client = gh::real();
+                cmd::issue::create(client.as_ref(), &args)
+            }
+            IssueCommands::CloseResolved { label_prefix } => {
+                let client = gh::real();
+                cmd::issue::close_resolved(client.as_ref(), &label_prefix)
+            }
+            IssueCommands::SearchSimilar(args) => {
+                let client = gh::real();
+                cmd::issue::search_similar(client.as_ref(), &args)
+            }
+            IssueCommands::FilterComments => cmd::issue::filter_comments(),
+            IssueCommands::List(ListArgs {
+                stage,
+                label_prefix,
+                require_label,
+                limit,
+            }) => {
+                let client = gh::real();
+                cmd::issue_list::list(
+                    client.as_ref(),
+                    &stage,
+                    &label_prefix,
+                    require_label.as_deref(),
+                    limit,
+                )
+            }
+            IssueCommands::ExtractFingerprint => {
+                use std::io::Read as _;
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .expect("failed to read stdin");
+                let result = cmd::issue_list::extract_fingerprint(
+                    &input,
+                    Some(&|path: &str| std::path::Path::new(path).exists()),
+                );
+                let exit = if result["found"].as_bool() == Some(true) {
+                    0
+                } else {
+                    1
+                };
+                println!("{result}");
+                Ok(exit)
+            }
+        },
+        Commands::Pipeline { command } => {
+            let client = gh::real();
+            match command {
+                PipelineCommands::Idle {
+                    label_prefix,
+                    max_parallel,
+                } => cmd::pipeline::idle(client, &label_prefix, max_parallel),
+            }
+        }
+        Commands::Check { command } => {
+            use cmd::check::spec_code::SpecCodeAnalysis;
+            use cmd::check::stagnation::{StagnationConfig, StagnationService};
+            use cmd::check::CheckService;
+            use cmd::CheckStagnationArgs;
+
+            match command {
+                CheckCommands::Stagnation(CheckStagnationArgs {
+                    task,
+                    max_distance,
+                    min_jaccard,
+                    n_threshold,
+                    n_escalate,
+                }) => {
+                    let store = open_store(&config);
+                    let svc = StagnationService::new(&store);
+                    let task_id = crate::autopilot::domain::TaskId::from_raw(task);
+                    let cfg = StagnationConfig {
+                        max_distance,
+                        min_jaccard,
+                        n_threshold,
+                        n_escalate,
+                    };
+                    let mut out = stdout();
+                    svc.check(&task_id, &cfg, &mut out)
+                }
+                other => {
+                    let svc = CheckService::new(
+                        git::real(),
+                        fs::real(),
+                        vec![Box::new(SpecCodeAnalysis)],
+                    );
+                    match other {
+                        CheckCommands::Diff {
+                            loop_name,
+                            spec_paths,
+                        } => svc.diff(&loop_name, &spec_paths),
+                        CheckCommands::Mark {
+                            loop_name,
+                            output_hash,
+                            status,
+                        } => svc.mark(&loop_name, output_hash.as_deref(), status.as_ref()),
+                        CheckCommands::Status => svc.status(),
+                        CheckCommands::Health => svc.health(),
+                        CheckCommands::Reset { loop_name } => svc.reset(loop_name.as_deref()),
+                        CheckCommands::Stagnation(_) => unreachable!("handled above"),
+                    }
+                }
+            }
+        }
+        Commands::Watch(args) => {
+            let client = github::real();
+            let git_client = git::real();
+            let fs_client = fs::real();
+            let mut svc = cmd::watch::WatchService::new(client, git_client, fs_client);
+            if args.ledger_events {
+                let store = std::sync::Arc::new(open_store(&config));
+                svc = svc.with_store(store);
+            }
+            svc.run(&args)
+        }
+        Commands::Worktree { command } => {
+            let git_client = git::real();
+            let svc = cmd::worktree::WorktreeService::new(git_client);
+            match command {
+                WorktreeCommands::Cleanup { branch } => svc.cleanup(&branch),
+                WorktreeCommands::CleanupStale => svc.cleanup_stale_cmd(),
+            }
+        }
+        Commands::Stats { command } => {
+            let git_client = git::real();
+            let fs_client = fs::real();
+            let svc = cmd::stats::StatsService::new(git_client, fs_client);
+            match command {
+                StatsCommands::Init => svc.init(),
+                StatsCommands::Update {
+                    command,
+                    processed,
+                    success,
+                    failed,
+                    false_positive,
+                } => svc.update(&command, processed, success, failed, false_positive),
+                StatsCommands::Show { command } => svc.show(command.as_deref()),
+            }
+        }
+        Commands::Preflight(PreflightArgs {
+            autopilot_md,
+            repo_root,
+        }) => {
+            let client = gh::real();
+            let git_client = git::real();
+            let fs_client = fs::real();
+            cmd::preflight::run(
+                client.as_ref(),
+                git_client.as_ref(),
+                fs_client.as_ref(),
+                &autopilot_md,
+                Path::new(&repo_root),
+            )
+        }
+        Commands::Task { command } => {
+            let store = open_store(&config);
+            let clock = cmd::task::default_clock();
+            let svc = cmd::task::TaskService::with_max_attempts(
+                &store,
+                &clock,
+                config.epic.default_max_attempts,
+            );
+            let mut out = stdout();
+            match command {
+                TaskCommands::List { epic, status, json } => {
+                    svc.list(&epic, status, json, &mut out)
+                }
+                TaskCommands::Show { task_id, json } => svc.show(&task_id, json, &mut out),
+                TaskCommands::Get { task_id, json } => svc.show(&task_id, json, &mut out),
+                TaskCommands::SetStatus {
+                    task_id,
+                    to,
+                    reason,
+                } => svc.force_status(&task_id, to, reason.as_deref(), &mut out),
+                TaskCommands::Add {
+                    task_id,
+                    epic,
+                    title,
+                    body,
+                    fingerprint,
+                    source,
+                    simhash_input,
+                    paths,
+                } => svc.add(
+                    &epic,
+                    &task_id,
+                    &title,
+                    body.as_deref(),
+                    fingerprint.as_deref(),
+                    source,
+                    simhash_input.as_deref(),
+                    &paths,
+                    &mut out,
+                ),
+                TaskCommands::AddBatch { epic, from } => svc.add_batch(&epic, &from, &mut out),
+                TaskCommands::FindByPr { pr_number, json } => {
+                    svc.find_by_pr(pr_number, json, &mut out)
+                }
+                TaskCommands::Claim { epic, json } => svc.claim(&epic, json, &mut out),
+                TaskCommands::Release { task_id } => svc.release(&task_id, &mut out),
+                TaskCommands::ListStale {
+                    before,
+                    before_seconds,
+                    json,
+                } => match resolve_before_seconds(before.as_deref(), before_seconds) {
+                    Ok(secs) => svc.list_stale(secs, json, &mut out),
+                    Err(msg) => {
+                        log::error!("{msg}");
+                        std::process::exit(2);
+                    }
+                },
+                TaskCommands::ReleaseStale {
+                    task_id,
+                    before,
+                    before_seconds,
+                    json,
+                } => {
+                    if let Some(id) = task_id {
+                        // Deprecated per-task alias: routes to `release` so the
+                        // transition is identical to manual `task release`.
+                        // Kept for back-compat (PR #696 audit) — new callers
+                        // should use `task release <ID>` directly.
+                        svc.release(&id, &mut out)
+                    } else {
+                        match resolve_before_seconds(before.as_deref(), before_seconds) {
+                            Ok(secs) => svc.release_stale(secs, json, &mut out),
+                            Err(msg) => {
+                                log::error!("{msg}");
+                                std::process::exit(2);
+                            }
+                        }
+                    }
+                }
+                TaskCommands::Complete { task_id, pr } => svc.complete(&task_id, pr, &mut out),
+                TaskCommands::Fail { task_id } => svc.fail(&task_id, &mut out),
+                TaskCommands::Escalate { task_id, issue } => {
+                    svc.escalate(&task_id, issue, &mut out)
+                }
+            }
+        }
+        Commands::Epic { command } => {
+            let store = open_store(&config);
+            let clock = cmd::task::default_clock();
+            let svc = cmd::epic::epic_service(&store, &clock);
+            let mut out = stdout();
+            match command {
+                cmd::epic::EpicCommands::Create(args) => svc.create_with_options(
+                    &args.name,
+                    &args.spec,
+                    args.branch.as_deref(),
+                    args.idempotent,
+                    &mut out,
+                ),
+                cmd::epic::EpicCommands::List(args) => svc.list(args.status, args.json, &mut out),
+                cmd::epic::EpicCommands::Get(args) => svc.get(&args.name, args.json, &mut out),
+                cmd::epic::EpicCommands::Status(args) => {
+                    svc.status(args.name.as_deref(), args.json, &mut out)
+                }
+                cmd::epic::EpicCommands::Complete(args) => svc.complete(&args.name, &mut out),
+                cmd::epic::EpicCommands::Abandon(args) => svc.abandon(&args.name, &mut out),
+                cmd::epic::EpicCommands::Reconcile(args) => {
+                    svc.reconcile(&args.name, &args.plan, &mut out)
+                }
+                cmd::epic::EpicCommands::FindBySpecPath(args) => {
+                    svc.find_by_spec_path(&args.spec, args.json, &mut out)
+                }
+            }
+        }
+        Commands::Suppress { command } => {
+            let store = open_store(&config);
+            let clock = cmd::task::default_clock();
+            let svc = cmd::suppress::suppress_service(&store, &clock);
+            let mut out = stdout();
+            match command {
+                cmd::suppress::SuppressCommands::Add(args) => {
+                    svc.add(&args.fingerprint, &args.reason, &args.until, &mut out)
+                }
+                cmd::suppress::SuppressCommands::Check(args) => {
+                    svc.check(&args.fingerprint, &args.reason, &mut out)
+                }
+                cmd::suppress::SuppressCommands::Clear(args) => {
+                    svc.clear(&args.fingerprint, &args.reason, &mut out)
+                }
+            }
+        }
+        Commands::Events { command } => {
+            let store = open_store(&config);
+            let svc = cmd::events::events_service(&store);
+            let mut out = stdout();
+            match command {
+                cmd::events::EventsCommands::List(args) => svc.list(&args, &mut out),
+            }
+        }
+    };
+
+    match result {
+        Ok(code) => code,
+        Err(e) => {
+            log::error!("{e:#}");
+            exit_code_for(&e)
+        }
+    }
+}
+
+/// Maps a propagated error to a process exit code: `1` for user errors,
+/// `2` (default) for transient / unexpected failures.
+fn exit_code_for(e: &anyhow::Error) -> i32 {
+    for cause in e.chain() {
+        if cause.downcast_ref::<UserInputError>().is_some() {
+            return 1;
+        }
+        if let Some(domain) = cause.downcast_ref::<DomainError>() {
+            if matches!(domain, DomainError::DuplicateTaskId(_)) {
+                return 1;
+            }
+        }
+        if let Some(TaskStoreError::Domain(DomainError::DuplicateTaskId(_))) =
+            cause.downcast_ref::<TaskStoreError>()
+        {
+            return 1;
+        }
+    }
+    2
+}
+
+fn task_store_db_path(config: &Config) -> PathBuf {
+    if let Ok(p) = std::env::var("AUTOPILOT_DB_PATH") {
+        return PathBuf::from(p);
+    }
+    let path = config.storage.db_path.clone();
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+    path
+}
+
+fn load_config(explicit: Option<&Path>) -> anyhow::Result<Config> {
+    let default_path = PathBuf::from("autopilot.toml");
+    let path = explicit.unwrap_or(default_path.as_path());
+    Config::load(path)
+}
+
+/// Resolves `--before <duration>` / `--before-seconds <N>` into a positive
+/// seconds threshold for `task release-stale`. Clap already enforces mutual
+/// exclusion; this wrapper picks whichever was provided and forwards the
+/// duration parser's error message verbatim. Returns Err with a
+/// human-readable message when both are missing or parsing fails.
+fn resolve_before_seconds(
+    before: Option<&str>,
+    before_seconds: Option<i64>,
+) -> std::result::Result<i64, String> {
+    match (before, before_seconds) {
+        (Some(s), _) => cmd::task::parse_duration_seconds(s),
+        (None, Some(n)) if n > 0 => Ok(n),
+        (None, Some(n)) => Err(format!("--before-seconds must be positive: got {n}")),
+        (None, None) => Err("must supply --before <duration> or --before-seconds <N>".to_string()),
+    }
+}
+
+/// Opens the SQLite task store at the configured path, exiting with code 2
+/// on failure. Centralizes the error message so every `Commands::*` arm that
+/// needs the store stays a one-liner.
+fn open_store(config: &Config) -> SqliteTaskStore {
+    let db_path = task_store_db_path(config);
+    match SqliteTaskStore::open(&db_path) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("failed to open task store at {}: {e}", db_path.display());
+            std::process::exit(2);
+        }
+    }
+}

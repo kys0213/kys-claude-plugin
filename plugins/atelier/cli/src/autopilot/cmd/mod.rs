@@ -1,0 +1,462 @@
+pub mod check;
+pub mod epic;
+pub mod events;
+pub mod issue;
+pub mod issue_list;
+pub mod labels;
+pub mod output;
+pub mod pipeline;
+pub mod preflight;
+pub mod simhash;
+pub mod stats;
+pub mod suppress;
+pub mod task;
+pub mod watch;
+pub mod worktree;
+
+use clap::{Args, Parser, Subcommand, ValueEnum};
+
+#[derive(Parser)]
+#[command(
+    name = "autopilot",
+    version,
+    about = "github-autopilot deterministic CLI"
+)]
+pub struct Cli {
+    /// Path to autopilot.toml; defaults to `./autopilot.toml` if it exists
+    #[arg(long, global = true)]
+    pub config: Option<std::path::PathBuf>,
+
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand)]
+pub enum Commands {
+    /// Issue management
+    Issue {
+        #[command(subcommand)]
+        command: IssueCommands,
+    },
+    /// Pipeline status
+    Pipeline {
+        #[command(subcommand)]
+        command: PipelineCommands,
+    },
+    /// Change detection and state management
+    Check {
+        #[command(subcommand)]
+        command: CheckCommands,
+    },
+    /// Pre-flight environment verification
+    Preflight(PreflightArgs),
+    /// Watch for push, CI, and issue events (event-driven autopilot)
+    Watch(watch::WatchArgs),
+    /// Worktree lifecycle management
+    Worktree {
+        #[command(subcommand)]
+        command: WorktreeCommands,
+    },
+    /// Session statistics management
+    Stats {
+        #[command(subcommand)]
+        command: StatsCommands,
+    },
+    /// Operator-facing task store diagnostics
+    Task {
+        #[command(subcommand)]
+        command: TaskCommands,
+    },
+    /// Epic ledger operations
+    Epic {
+        #[command(subcommand)]
+        command: epic::EpicCommands,
+    },
+    /// Fingerprint suppression for HITL alerts
+    Suppress {
+        #[command(subcommand)]
+        command: suppress::SuppressCommands,
+    },
+    /// Event log queries
+    Events {
+        #[command(subcommand)]
+        command: events::EventsCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum TaskCommands {
+    /// List tasks in an epic
+    List {
+        /// Epic name
+        #[arg(long)]
+        epic: String,
+        /// Filter by status
+        #[arg(long)]
+        status: Option<task::TaskStatusArg>,
+        /// Output JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show details of a single task
+    Show {
+        /// Task id
+        task_id: String,
+        /// Output JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show details of a single task (alias of `show`, spec-canonical name)
+    Get {
+        /// Task id
+        task_id: String,
+        /// Output JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set a task to a specific status (operator override).
+    ///
+    /// Renamed from `force-status` for clarity — "set" describes the
+    /// effect more directly than "force". `force-status` remains as a
+    /// deprecated alias for one release.
+    #[command(alias = "force-status")]
+    SetStatus {
+        /// Task id
+        task_id: String,
+        /// Target status
+        #[arg(long)]
+        to: task::TaskStatusArg,
+        /// Optional reason recorded with the override
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Insert (or detect duplicate of) a watch-style task
+    Add {
+        /// Task id (deterministic 12-hex-char id)
+        task_id: String,
+        /// Epic name
+        #[arg(long)]
+        epic: String,
+        /// Title
+        #[arg(long)]
+        title: String,
+        /// Optional body / description
+        #[arg(long)]
+        body: Option<String>,
+        /// Override fingerprint (hex). When omitted, derived from title+body.
+        #[arg(long)]
+        fingerprint: Option<String>,
+        /// Origin tag (defaults to `human`)
+        #[arg(long, default_value = "human")]
+        source: task::TaskSourceArg,
+        /// Override simhash input text. When omitted, derived from
+        /// `title + "\n" + body` and fed into the domain `derive_simhash`
+        /// transform. Used by ledger-based stagnation detection (C10).
+        #[arg(long)]
+        simhash_input: Option<String>,
+        /// Comma-separated affected file paths (top N by line count, descending).
+        /// Stored as JSON-encoded list for the path-set side of hybrid
+        /// stagnation similarity. Empty list (the default) leaves the
+        /// `affected_paths` column NULL.
+        #[arg(long, value_delimiter = ',')]
+        paths: Vec<String>,
+    },
+    /// Insert tasks from a JSONL batch file. Each line accepts the
+    /// following schema (all fields except `id` and `title` are optional):
+    ///
+    /// ```json
+    /// {"id":"...","title":"...","body":"...","fingerprint":"...",
+    ///  "simhash_input":"...","paths":["p1","p2"],"source":"..."}
+    /// ```
+    ///
+    /// `simhash_input` / `paths` mirror the `task add --simhash-input` /
+    /// `--paths` flags: when present they override the derived defaults,
+    /// when absent the simhash is derived from `title + "\n" + body` and
+    /// `affected_paths` stays NULL.
+    AddBatch {
+        /// Epic name
+        #[arg(long)]
+        epic: String,
+        /// JSONL file. See command help for the full per-line schema.
+        #[arg(long)]
+        from: std::path::PathBuf,
+    },
+    /// Look up a task by the PR number it owns
+    FindByPr {
+        /// PR number
+        pr_number: u64,
+        /// Output JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Atomically claim the next ready task on an epic (Ready -> Wip)
+    Claim {
+        /// Epic name
+        #[arg(long)]
+        epic: String,
+        /// Output JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Release a Wip claim back to Ready (UC-11 push-reject path)
+    Release {
+        /// Task id
+        task_id: String,
+    },
+    /// Read-only: list Wip tasks whose claim is older than `--before`.
+    /// Companion to `release` / `release-stale`: agents call `list-stale`
+    /// first, review each candidate, then dispatch per-task to `release`
+    /// (canonical), `fail`, or `escalate` based on judgment (per CLAUDE.md
+    /// "책임 경계"). Always exits 0 — empty list is normal.
+    ListStale {
+        /// Go-style duration: `30s`, `5m`, `1h`, `2h30m`. Mutually
+        /// exclusive with `--before-seconds`.
+        #[arg(long, conflicts_with = "before_seconds")]
+        before: Option<String>,
+        /// Raw seconds threshold. Bypasses duration parsing. Mutually
+        /// exclusive with `--before`.
+        #[arg(long)]
+        before_seconds: Option<i64>,
+        /// Output stale tasks as a JSON array (default: human table)
+        #[arg(long)]
+        json: bool,
+    },
+    /// Recover stale Wip tasks back to Ready. Two mutually exclusive modes:
+    /// `--before <duration>` (canonical) bulk releases every Wip task older
+    /// than the cutoff — emergency operator use, the agent-reviewed per-task
+    /// flow is preferred per CLAUDE.md "책임 경계". `--task-id <ID>` is a
+    /// deprecated alias for `task release <ID>` (functionally identical
+    /// post-P2; kept for one release for back-compat). Idempotent: empty
+    /// case exits 0.
+    ReleaseStale {
+        /// Single task id to release (per-task path). Mutually exclusive
+        /// with `--before` and `--before-seconds`.
+        #[arg(long, conflicts_with_all = ["before", "before_seconds"])]
+        task_id: Option<String>,
+        /// Go-style duration for bulk release: `30s`, `5m`, `1h`, `2h30m`.
+        /// Mutually exclusive with `--task-id` and `--before-seconds`.
+        #[arg(long, conflicts_with = "before_seconds")]
+        before: Option<String>,
+        /// Raw seconds threshold for bulk release. Mutually exclusive with
+        /// `--task-id` and `--before`.
+        #[arg(long)]
+        before_seconds: Option<i64>,
+        /// Output recovered ids as a JSON array (default: human count).
+        /// Ignored when `--task-id` is used (per-task path emits a single
+        /// confirmation line).
+        #[arg(long)]
+        json: bool,
+    },
+    /// Mark a task as completed and unblock its dependents
+    Complete {
+        /// Task id
+        task_id: String,
+        /// Owning PR number
+        #[arg(long)]
+        pr: u64,
+    },
+    /// Record a failed attempt; outputs JSON {"outcome":"retried|escalated","attempts":N}
+    Fail {
+        /// Task id
+        task_id: String,
+    },
+    /// Attach the HITL escalation issue number to a task
+    Escalate {
+        /// Task id
+        task_id: String,
+        /// HITL issue number
+        #[arg(long)]
+        issue: u64,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum CheckCommands {
+    /// Diff since last mark, categorize spec vs code changes
+    Diff {
+        /// Loop name identifier
+        loop_name: String,
+        /// Comma-separated spec path prefixes
+        #[arg(long, value_delimiter = ',')]
+        spec_paths: Vec<String>,
+    },
+    /// Record current HEAD as analyzed
+    Mark {
+        /// Loop name identifier
+        loop_name: String,
+        /// Optional simhash of analysis output (for stagnation tracking)
+        #[arg(long)]
+        output_hash: Option<String>,
+        /// Loop status: "idle" increments idle counter, "active" resets it
+        #[arg(long)]
+        status: Option<LoopStatus>,
+    },
+    /// Show state of all loops
+    Status,
+    /// Pipeline health report across all loops
+    Health,
+    /// Reset (delete) loop state files
+    Reset {
+        /// Loop name to reset. If omitted, resets all loops.
+        loop_name: Option<String>,
+    },
+    /// Detect ledger-based stagnation for a single task and emit the
+    /// hybrid (simhash distance OR path Jaccard) similarity report.
+    ///
+    /// Exit codes:
+    ///   0 — ok (no stagnation pattern)
+    ///   4 — stagnation detected (n_threshold ≤ N < n_escalate)
+    ///   5 — escalate required (N ≥ n_escalate)
+    Stagnation(CheckStagnationArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct CheckStagnationArgs {
+    /// Task id whose stagnation status is being assessed.
+    #[arg(long)]
+    pub task: String,
+    /// Max simhash hamming distance (inclusive). Spec §3.4 default `T = 3`.
+    #[arg(long, default_value_t = 3)]
+    pub max_distance: u32,
+    /// Min Jaccard similarity for the affected-paths dimension (inclusive).
+    /// Spec §3.4 default `J = 0.5`.
+    #[arg(long, default_value_t = 0.5)]
+    pub min_jaccard: f64,
+    /// `N`: similar-task count that flips status from `ok` to `stagnation`.
+    /// Spec §3.4 default 3.
+    #[arg(long, default_value_t = 3)]
+    pub n_threshold: u32,
+    /// `N_esc`: similar-task count that flips status to `escalate`. Spec
+    /// §3.4 default 5.
+    #[arg(long, default_value_t = 5)]
+    pub n_escalate: u32,
+}
+
+#[derive(Args)]
+pub struct PreflightArgs {
+    /// Path to the autopilot markdown config (e.g. `github-autopilot.local.md`).
+    /// Renamed from `--config` to avoid clap arg-id collision with the global
+    /// `--config <autopilot.toml>` (different type/default caused a runtime
+    /// downcast TypeId panic — see issue #755).
+    #[arg(long = "autopilot-md", default_value = "github-autopilot.local.md")]
+    pub autopilot_md: String,
+    /// Repository root directory
+    #[arg(long, default_value = ".")]
+    pub repo_root: String,
+}
+
+#[derive(Subcommand)]
+pub enum IssueCommands {
+    /// Check if a fingerprint already exists in open issues
+    CheckDup {
+        /// Fingerprint string to search for
+        #[arg(long)]
+        fingerprint: String,
+    },
+    /// Create an issue with fingerprint dedup
+    Create(issue::CreateArgs),
+    /// Close CI-failure issues whose branch PR has been merged
+    CloseResolved {
+        /// Label prefix (default: "autopilot:")
+        #[arg(long, default_value = "autopilot:")]
+        label_prefix: String,
+    },
+    /// Search for similar issues by fingerprint and rank by simhash distance
+    SearchSimilar(issue::SearchSimilarArgs),
+    /// Detect overlapping issues by text similarity (stdin JSON)
+    DetectOverlap(issue::DetectOverlapArgs),
+    /// Filter issue comments for implementer agents (stdin JSON)
+    FilterComments,
+    /// List issues filtered by lifecycle stage
+    List(ListArgs),
+    /// Extract gap-fingerprint from issue body (stdin)
+    ExtractFingerprint,
+}
+
+#[derive(Args)]
+pub struct ListArgs {
+    /// Lifecycle stage to filter by
+    #[arg(long)]
+    pub stage: issue_list::Stage,
+    /// Label prefix (default: "autopilot:")
+    #[arg(long, default_value = "autopilot:")]
+    pub label_prefix: String,
+    /// Only include issues with this exact label
+    #[arg(long)]
+    pub require_label: Option<String>,
+    /// Maximum number of issues to fetch
+    #[arg(long, default_value_t = 50)]
+    pub limit: usize,
+}
+
+#[derive(Subcommand)]
+pub enum WorktreeCommands {
+    /// Clean up worktree and local branch after PR merge
+    Cleanup {
+        /// Branch name to clean up
+        #[arg(long)]
+        branch: String,
+    },
+    /// Remove stale draft/* worktrees, preserving branches with partial commits
+    CleanupStale,
+}
+
+#[derive(Clone, ValueEnum)]
+pub enum LoopStatus {
+    Idle,
+    Active,
+}
+
+#[derive(Subcommand)]
+pub enum PipelineCommands {
+    /// Check if the autopilot pipeline is idle.
+    ///
+    /// Exit codes:
+    ///   0 — idle (no ready, wip, or open autopilot PRs)
+    ///   1 — active (work in flight, capacity check skipped or below cap)
+    ///   3 — at-capacity (only when --max-parallel is set and wip >= N).
+    ///       Skip dispatching new work; the in-flight cycle is still running.
+    Idle {
+        /// Label prefix (default: "autopilot:")
+        #[arg(long, default_value = "autopilot:")]
+        label_prefix: String,
+        /// Optional WIP capacity. When set, exit `3` is returned if the
+        /// number of `:wip` issues already meets/exceeds this value (i.e.
+        /// the pipeline is active and at-capacity). Without this flag the
+        /// command falls back to the legacy idle/active contract.
+        #[arg(long)]
+        max_parallel: Option<u64>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum StatsCommands {
+    /// Initialize (or reset) session statistics
+    Init,
+    /// Update statistics for a command
+    Update {
+        /// Command name. Canonical: build-issues, gap-watch, qa-boost,
+        /// ci-watch, merge-prs, work-ledger. Unknown but well-formed
+        /// names are accepted with a stderr warning.
+        #[arg(long)]
+        command: String,
+        /// Number of issues processed this cycle
+        #[arg(long, default_value_t = 0)]
+        processed: u32,
+        /// Number of successful implementations
+        #[arg(long, default_value_t = 0)]
+        success: u32,
+        /// Number of failed implementations
+        #[arg(long, default_value_t = 0)]
+        failed: u32,
+        /// Number of false positives closed
+        #[arg(long, default_value_t = 0)]
+        false_positive: u32,
+    },
+    /// Show session statistics
+    Show {
+        /// Filter by command name (omit for all)
+        #[arg(long)]
+        command: Option<String>,
+    },
+}
