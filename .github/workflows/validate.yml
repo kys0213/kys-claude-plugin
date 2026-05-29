@@ -48,9 +48,14 @@ jobs:
           else
             echo "autodev_changed=false" >> $GITHUB_OUTPUT
           fi
+          if echo "$CHANGED" | grep -q '^plugins/atelier/cli/'; then
+            echo "atelier_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "atelier_changed=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Setup Rust
-        if: steps.check_rust.outputs.sw_changed == 'true' || steps.check_rust.outputs.autodev_changed == 'true'
+        if: steps.check_rust.outputs.sw_changed == 'true' || steps.check_rust.outputs.autodev_changed == 'true' || steps.check_rust.outputs.atelier_changed == 'true'
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
       # ── suggest-workflow checks ──
@@ -88,6 +93,54 @@ jobs:
         run: |
           cargo check
           cargo test
+
+      # ── atelier checks ──
+      - name: atelier fmt check
+        if: steps.check_rust.outputs.atelier_changed == 'true'
+        working-directory: plugins/atelier/cli
+        run: cargo fmt --check
+
+      - name: atelier clippy
+        if: steps.check_rust.outputs.atelier_changed == 'true'
+        working-directory: plugins/atelier/cli
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: atelier check and test
+        if: steps.check_rust.outputs.atelier_changed == 'true'
+        working-directory: plugins/atelier/cli
+        run: |
+          cargo check
+          cargo test
+
+      # ── frozen plugin gate ──
+      # atelier 로 흡수된 6개 plugin 은 snapshot freeze 상태다 (plans/atelier/00-concept §4).
+      # 후속 개발은 plugins/atelier/ 에서만 한다. frozen 경로 변경 PR 은 차단하되,
+      # README.md 변경(배지)과 freeze-exception 라벨은 예외로 허용한다 (04-rollout §3.2).
+      - name: Block changes to frozen plugins
+        env:
+          LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          FROZEN="git-utils github-autopilot spec-kit workflow-guide coding-style orchestrator"
+          CHANGED=$(git diff --name-only origin/main...HEAD)
+          if echo "$LABELS" | grep -q 'freeze-exception'; then
+            echo "freeze-exception label present — skipping frozen gate"
+            exit 0
+          fi
+          violations=""
+          for p in $FROZEN; do
+            v=$(echo "$CHANGED" | grep "^plugins/$p/" | grep -v "^plugins/$p/README.md" || true)
+            if [ -n "$v" ]; then
+              violations="$violations\n$v"
+            fi
+          done
+          if [ -n "$violations" ]; then
+            echo "::error::frozen plugin(s) modified outside README.md"
+            echo -e "$violations"
+            echo ""
+            echo "후속 개발은 plugins/atelier/ 에서 하세요. 긴급 패치는 freeze-exception 라벨을 붙이세요."
+            exit 1
+          fi
+          echo "✓ no frozen plugin violations"
 
       - name: Check PR title format
         env:
