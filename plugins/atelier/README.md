@@ -54,11 +54,17 @@ atelier setup <module>
 |---|---|---|
 | Phase 0 | 사전 검증 | ✅ |
 | Phase 1 | 골격 (plugin.json · README · marketplace WIP entry) | ✅ |
-| Phase 2 | CLI 통합 (Rust 단일 바이너리) | ⬜ (후속 PR) |
+| Phase 2 | CLI 통합 (Rust 단일 바이너리 — autopilot 흡수 + git-utils 포팅) | ✅ |
 | Phase 3 | commands / agents / skills / hooks 이동 + namespace 치환 | ✅ |
-| Phase 4 | CI 인프라 (validate · rust-binary · frozen 게이트 · bumpversion 제외) | ⬜ (후속 PR) |
+| Phase 4 | CI 인프라 (validate · rust-binary · frozen 게이트 · bumpversion 제외) | ✅ |
 | Phase 5 | 흡수 6개 freeze | ✅ |
 
-> **현재 상태**: 콘텐츠 통합(commands/agents/skills/hooks)과 freeze 가 완료되었습니다.
-> CLI 는 아직 흡수 6개 plugin 의 기존 빌드(git-utils bun, github-autopilot Rust)에 의존합니다 —
-> 단일 `atelier` 바이너리 포팅(Phase 2)과 CI 인프라(Phase 4)는 후속 PR 에서 진행됩니다.
+> **현재 상태**: Epic 1 (atelier consolidation) 의 모든 Phase 가 완료되었습니다.
+> 단일 `atelier` 바이너리가 `atelier autopilot <...>` 와 `atelier git <...>` 를 모두 제공합니다
+> (582 tests green). 흡수 6개 plugin 은 snapshot freeze 상태로 보존됩니다.
+>
+> 후속: Epic 2 ([#766](https://github.com/kys0213/kys-claude-plugin/issues/766)) — Fat Controller
+> 해체 + capability 슬래시를 관심사 단위 skill 로 통합.
+>
+> ⚠️ `gh` CLI 의존 git 명령(pr create, reviews, pr-guard)은 mock 단위 테스트만 완료 —
+> 실제 `gh`/네트워크 라이브 검증은 정식 릴리스 전 별도 수행이 필요합니다.
