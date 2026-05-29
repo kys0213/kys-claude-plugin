@@ -8,15 +8,15 @@ allowed-tools: ["Bash", "Glob", "Read", "Agent", "AskUserQuestion"]
 
 스펙 문서와 구현 코드 사이의 갭을 분석하고, 발견된 갭을 **autopilot ledger task**로 등록합니다.
 
-> **책임 경계**: gap-watch는 autopilot 내부 to-do 작성자입니다. 결과는 SQLite ledger의 `gap-backlog` epic에만 기록되며 GitHub issue는 생성하지 않습니다 (CLAUDE.md "책임 경계" — 팀원 visible UI 노이즈 최소화). 다운스트림인 `/atelier:autopilot/work-ledger`가 ledger task를 claim하여 implementer → PR 흐름으로 진행합니다.
+> **책임 경계**: gap-watch는 autopilot 내부 to-do 작성자입니다. 결과는 SQLite ledger의 `gap-backlog` epic에만 기록되며 GitHub issue는 생성하지 않습니다 (CLAUDE.md "책임 경계" — 팀원 visible UI 노이즈 최소화). 다운스트림인 `/atelier:work-ledger`가 ledger task를 claim하여 implementer → PR 흐름으로 진행합니다.
 
 ## 사용법
 
 ```bash
-/atelier:autopilot/gap-watch
+/atelier:gap-watch
 ```
 
-> 반복 실행은 `/atelier:autopilot/autopilot`이 `CronCreate`로 관리합니다.
+> 반복 실행은 `/atelier:autopilot`이 `CronCreate`로 관리합니다.
 
 ## Context
 

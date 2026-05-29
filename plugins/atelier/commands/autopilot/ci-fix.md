@@ -11,11 +11,11 @@ autopilot이 생성한 PR의 CI 실패를 감지하고, tick 단위로 수정을
 ## 사용법
 
 ```bash
-/atelier:autopilot/ci-fix                         # 전체 스캔 (cron 모드)
-/atelier:autopilot/ci-fix --branch=feature/issue-42  # 타겟 브랜치 (hybrid 모드)
+/atelier:ci-fix                         # 전체 스캔 (cron 모드)
+/atelier:ci-fix --branch=feature/issue-42  # 타겟 브랜치 (hybrid 모드)
 ```
 
-> 반복 실행은 `/atelier:autopilot/autopilot`이 CronCreate 또는 Monitor로 관리합니다.
+> 반복 실행은 `/atelier:autopilot`이 CronCreate 또는 Monitor로 관리합니다.
 
 ## Context
 

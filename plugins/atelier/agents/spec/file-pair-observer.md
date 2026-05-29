@@ -1,5 +1,5 @@
 ---
-description: (내부용) /atelier:spec/spec-review 가 호출하는 per-file 관찰 에이전트. spec 파일 1개와 관련 code 영역을 직접 읽고 사실만 나열한다.
+description: (내부용) /atelier:spec-review 가 호출하는 per-file 관찰 에이전트. spec 파일 1개와 관련 code 영역을 직접 읽고 사실만 나열한다.
 model: haiku
 tools: ["Read", "Glob", "Grep"]
 ---

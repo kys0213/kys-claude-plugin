@@ -198,7 +198,7 @@ related_paths:
 
 ## Frontmatter `related_paths` 권고
 
-컴포넌트/플로우 spec 상단에도 YAML frontmatter 로 `related_paths` 를 채우는 것을 **권장**한다. 후속 `/atelier:spec/spec-review` 와 `/atelier:spec/gap-detect` 가 이 필드를 코드 영역 매핑 Hint 로 사용하기 때문에, 채워두면 분석 정확도가 크게 올라간다 (없으면 본문에서 자율 보강 fallback 으로 추정하지만 정확도가 낮다).
+컴포넌트/플로우 spec 상단에도 YAML frontmatter 로 `related_paths` 를 채우는 것을 **권장**한다. 후속 `/atelier:spec-review` 와 `/atelier:gap-detect` 가 이 필드를 코드 영역 매핑 Hint 로 사용하기 때문에, 채워두면 분석 정확도가 크게 올라간다 (없으면 본문에서 자율 보강 fallback 으로 추정하지만 정확도가 낮다).
 
 `/design-detail` 은 `/design` 의 후속이므로, 이미 부모 DESIGN.md 의 frontmatter 가 채워져 있다면 그 값을 출발점으로 삼고 **이 컴포넌트/플로우에 한정된 더 좁은 경로로 보강**한다 (예: DESIGN.md 가 `crates/foo/` 를 가리키면, 컴포넌트 spec 은 `crates/foo/src/daemon.rs` 같이 더 구체적으로).
 
@@ -214,7 +214,7 @@ related_paths:
 
 - 본문에서 명시적으로 언급된 모듈/타입/식별자를 프로젝트 디렉터리 구조와 매칭한다 (예: 컴포넌트가 `Daemon` trait 를 정의하면 → `crates/foo-daemon/src/lib.rs`).
 - **확실한 경로만** 적는다. 추정에 자신 없는 경로는 적지 말고 비워라 — 잘못된 Hint 는 자율 보강 fallback 보다 더 해롭다.
-- 모호하면 빈 리스트로 두거나 frontmatter 자체를 생략해도 된다. 사용자가 후속 `/atelier:spec/spec-review` 또는 수동 편집으로 보강할 수 있다.
+- 모호하면 빈 리스트로 두거나 frontmatter 자체를 생략해도 된다. 사용자가 후속 `/atelier:spec-review` 또는 수동 편집으로 보강할 수 있다.
 - 신규 설계라 코드가 아직 없으면 비워둔다.
 
 ---

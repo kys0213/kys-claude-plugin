@@ -21,10 +21,10 @@ Rebase 중 발생한 충돌을 파일별로 하나씩 리뷰하며 분할정복 
 
 ## Usage
 
-- `/git-resolve` - 충돌 상태 확인 및 대화형 해결 시작
-- `/git-resolve --continue` - 현재 충돌 해결 완료 후 rebase 계속
-- `/git-resolve --abort` - rebase 전체 취소 (원래 상태로 복원)
-- `/git-resolve --skip` - 현재 커밋 건너뛰고 다음 커밋으로
+- `/atelier:resolve` - 충돌 상태 확인 및 대화형 해결 시작
+- `/atelier:resolve --continue` - 현재 충돌 해결 완료 후 rebase 계속
+- `/atelier:resolve --abort` - rebase 전체 취소 (원래 상태로 복원)
+- `/atelier:resolve --skip` - 현재 커밋 건너뛰고 다음 커밋으로
 
 ## Execution
 
@@ -81,7 +81,7 @@ CONFLICTED_FILES=$(git diff --name-only --diff-filter=U)
 if [ -z "$CONFLICTED_FILES" ]; then
   echo "✓ No conflicts remaining in current commit."
   echo ""
-  echo "Run '/git-resolve --continue' to proceed with rebase."
+  echo "Run '/atelier:resolve --continue' to proceed with rebase."
   exit 0
 fi
 
@@ -191,8 +191,8 @@ if [ -z "$REMAINING" ]; then
   echo "✅ All conflicts in current commit resolved!"
   echo ""
   echo "Next steps:"
-  echo "  /git-resolve --continue  # Continue rebase"
-  echo "  /git-resolve --abort     # Cancel entire rebase"
+  echo "  /atelier:resolve --continue  # Continue rebase"
+  echo "  /atelier:resolve --abort     # Cancel entire rebase"
 else
   echo ""
   echo "⚠️ Remaining conflicts:"
@@ -245,11 +245,11 @@ git checkout feature/my-work
 git rebase origin/main
 
 # 3. 충돌 발생 시
-/git-resolve
+/atelier:resolve
 # → 파일별로 충돌 해결
 
 # 4. 해결 완료 후
-/git-resolve --continue
+/atelier:resolve --continue
 ```
 
 ### 시나리오 2: 복잡한 충돌 - 양쪽 변경 모두 필요
@@ -276,10 +276,10 @@ import { ServiceC } from './serviceC';
 
 ```bash
 # 현재 커밋 건너뛰기
-/git-resolve --skip
+/atelier:resolve --skip
 
 # 또는 전체 rebase 취소
-/git-resolve --abort
+/atelier:resolve --abort
 ```
 
 ## 주의사항
@@ -301,10 +301,10 @@ import { ServiceC } from './serviceC';
 
 | 명령어 | 설명 |
 |--------|------|
-| `/git-resolve` | 충돌 상태 확인 및 대화형 해결 |
-| `/git-resolve --continue` | 현재 충돌 해결 완료, rebase 계속 |
-| `/git-resolve --abort` | rebase 전체 취소 |
-| `/git-resolve --skip` | 현재 커밋 건너뛰기 |
+| `/atelier:resolve` | 충돌 상태 확인 및 대화형 해결 |
+| `/atelier:resolve --continue` | 현재 충돌 해결 완료, rebase 계속 |
+| `/atelier:resolve --abort` | rebase 전체 취소 |
+| `/atelier:resolve --skip` | 현재 커밋 건너뛰기 |
 
 | Git 상태 명령어 | 설명 |
 |----------------|------|

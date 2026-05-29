@@ -11,11 +11,11 @@ GitHub Actions의 CI 실패를 감시하고, 실패 원인을 분석하여 GitHu
 ## 사용법
 
 ```bash
-/atelier:autopilot/ci-watch                                       # 전체 스캔 (cron 모드)
-/atelier:autopilot/ci-watch --run-id=12345 --branch=main          # 타겟 분석 (hybrid 모드)
+/atelier:ci-watch                                       # 전체 스캔 (cron 모드)
+/atelier:ci-watch --run-id=12345 --branch=main          # 타겟 분석 (hybrid 모드)
 ```
 
-> 반복 실행은 `/atelier:autopilot/autopilot`이 CronCreate 또는 Monitor로 관리합니다.
+> 반복 실행은 `/atelier:autopilot`이 CronCreate 또는 Monitor로 관리합니다.
 
 ## Context
 

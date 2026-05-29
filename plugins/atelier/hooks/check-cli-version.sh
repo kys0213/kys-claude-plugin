@@ -38,7 +38,7 @@ fi
 
 # --- 설치된 CLI 버전 확인 ---
 if ! command -v autopilot &> /dev/null; then
-  echo "autopilot CLI가 설치되어 있지 않습니다. /github-autopilot:setup 을 실행하여 설치하세요."
+  echo "autopilot CLI가 설치되어 있지 않습니다. /atelier:setup 을 실행하여 설치하세요."
   exit 0
 fi
 
@@ -72,7 +72,7 @@ CMP=$?
 set -e
 
 if [[ "$CMP" -eq 2 ]]; then
-  echo "autopilot CLI 업데이트 필요: v${INSTALLED_VERSION} → v${PLUGIN_VERSION}. /github-autopilot:setup 또는 bash ${PLUGIN_ROOT}/scripts/ensure-binary.sh 를 실행하세요."
+  echo "autopilot CLI 업데이트 필요: v${INSTALLED_VERSION} → v${PLUGIN_VERSION}. /atelier:setup 또는 bash ${PLUGIN_ROOT}/scripts/ensure-binary.sh 를 실행하세요."
 fi
 
 exit 0

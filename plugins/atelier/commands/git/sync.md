@@ -17,11 +17,11 @@ allowed-tools:
 
 ## Usage
 
-- `/git-sync` - 기본 브랜치로 동기화
-- `/git-sync develop` - develop 브랜치로 동기화
-- `/git-sync --force` - stash 후 기본 브랜치로 동기화
-- `/git-sync develop --force` - stash 후 develop으로 동기화
-- `/git-sync --force develop` - 위와 동일 (순서 무관)
+- `/atelier:sync` - 기본 브랜치로 동기화
+- `/atelier:sync develop` - develop 브랜치로 동기화
+- `/atelier:sync --force` - stash 후 기본 브랜치로 동기화
+- `/atelier:sync develop --force` - stash 후 develop으로 동기화
+- `/atelier:sync --force develop` - 위와 동일 (순서 무관)
 
 ## Execution
 
@@ -58,7 +58,7 @@ fi
 ```bash
 # --force 플래그 없이 변경사항이 있으면 중단
 if [ -n "$CHANGES" ] && [ "$FORCE" != "true" ]; then
-  echo "⚠️ Uncommitted changes detected. Use /git-sync --force to stash and continue."
+  echo "⚠️ Uncommitted changes detected. Use /atelier:sync --force to stash and continue."
   exit 1
 fi
 

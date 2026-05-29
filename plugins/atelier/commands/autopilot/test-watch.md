@@ -11,11 +11,11 @@ allowed-tools: ["Bash", "Read", "Agent"]
 ## 사용법
 
 ```bash
-/atelier:autopilot/test-watch e2e                # e2e 스위트 1회 실행
-/atelier:autopilot/test-watch performance         # performance 스위트 1회 실행
+/atelier:test-watch e2e                # e2e 스위트 1회 실행
+/atelier:test-watch performance         # performance 스위트 1회 실행
 ```
 
-> 반복 실행은 `/atelier:autopilot/autopilot`이 `CronCreate`로 관리합니다.
+> 반복 실행은 `/atelier:autopilot`이 `CronCreate`로 관리합니다.
 
 ## Context
 

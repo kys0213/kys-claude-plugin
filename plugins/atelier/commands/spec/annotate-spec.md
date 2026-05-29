@@ -6,9 +6,9 @@ allowed-tools: ["Task", "Read", "Edit", "Glob", "Grep", "AskUserQuestion"]
 
 # Annotate Spec (/annotate-spec)
 
-외부에서 받은 spec 파일은 보통 frontmatter `related_paths` 가 비어 있다. `/atelier:spec/spec-review` 와 `/atelier:spec/gap-detect` 가 자율 보강 fallback 에 의존해 정확도가 낮아진다.
+외부에서 받은 spec 파일은 보통 frontmatter `related_paths` 가 비어 있다. `/atelier:spec-review` 와 `/atelier:gap-detect` 가 자율 보강 fallback 에 의존해 정확도가 낮아진다.
 
-이 커맨드는 spec 본문을 1차 분석하여 코드 경로 후보를 추정하고, 사용자 confirm 후 spec 파일 frontmatter 에 직접 write back 한다. `/atelier:spec/design` / `/atelier:spec/design-detail` 의 frontmatter 권고와 같은 효과를 design 단계가 없는 외부 spec 에도 적용한다.
+이 커맨드는 spec 본문을 1차 분석하여 코드 경로 후보를 추정하고, 사용자 confirm 후 spec 파일 frontmatter 에 직접 write back 한다. `/atelier:design` / `/atelier:design-detail` 의 frontmatter 권고와 같은 효과를 design 단계가 없는 외부 spec 에도 적용한다.
 
 ## 사용법
 
@@ -297,5 +297,5 @@ Error: spec 파일의 YAML frontmatter 가 깨져 있습니다.
 
 ⚠️ 프로젝트에서 매칭되는 경로를 찾지 못했습니다.
 
-빈 frontmatter (related_paths: []) 가 추가되었습니다. 추후 수동으로 보강하거나 `/atelier:spec/annotate-spec` 을 다시 실행할 수 있습니다.
+빈 frontmatter (related_paths: []) 가 추가되었습니다. 추후 수동으로 보강하거나 `/atelier:annotate-spec` 을 다시 실행할 수 있습니다.
 ```

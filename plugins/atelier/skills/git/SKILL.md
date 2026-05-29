@@ -196,20 +196,20 @@ git push origin main       # 금지
 git-utils branch feature/my-work
 git-utils commit feat "my changes"
 git-utils pr "My feature"
-# → Merge 승인 대기 → /git-sync → git branch -d feature/my-work
+# → Merge 승인 대기 → /atelier:sync → git branch -d feature/my-work
 ```
 
 ---
 
 ## Conflict 해결
 
-Rebase 중 충돌이 발생하면 `/git-resolve` 커맨드를 사용합니다.
+Rebase 중 충돌이 발생하면 conflict 해결 커맨드(아래 예시)를 사용합니다.
 
 ```bash
-/git-resolve              # 충돌 상태 확인 및 대화형 해결
-/git-resolve --continue   # rebase 계속
-/git-resolve --abort      # rebase 취소
-/git-resolve --skip       # 현재 커밋 건너뛰기
+/atelier:resolve              # 충돌 상태 확인 및 대화형 해결
+/atelier:resolve --continue   # rebase 계속
+/atelier:resolve --abort      # rebase 취소
+/atelier:resolve --skip       # 현재 커밋 건너뛰기
 ```
 
 ---
@@ -220,11 +220,11 @@ Rebase 중 충돌이 발생하면 `/git-resolve` 커맨드를 사용합니다.
 |--------|------|
 | `/unresolved-reviews [PR]` | 미해결 리뷰 조회 |
 | `/check-ci [PR]` | CI 실패 분석 |
-| `/git-sync [branch]` | 브랜치 전환 및 동기화 |
-| `/git-branch [name]` | 대화형 브랜치 생성 |
+| `/atelier:sync [branch]` | 브랜치 전환 및 동기화 |
+| `/atelier:branch [name]` | 대화형 브랜치 생성 |
 | `/commit-and-pr` | 커밋 + PR 자동 생성 |
 | `/merge-pr` | PR 머지 및 정리 |
-| `/git-resolve` | Rebase conflict 해결 |
+| `/atelier:resolve` | Rebase conflict 해결 |
 | `/setup` | 플러그인 초기 설정 |
 | `/hook-config` | Guard hook 관리 |
 

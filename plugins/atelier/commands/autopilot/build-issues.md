@@ -11,10 +11,10 @@ autopilot 라벨이 붙은 GitHub 이슈를 가져와 의존성을 분석하고,
 ## 사용법
 
 ```bash
-/atelier:autopilot/build-issues
+/atelier:build-issues
 ```
 
-> 반복 실행은 `/atelier:autopilot/autopilot`이 `CronCreate`로 관리합니다.
+> 반복 실행은 `/atelier:autopilot`이 `CronCreate`로 관리합니다.
 
 ## Context
 

@@ -11,11 +11,11 @@ allowed-tools: ["Bash", "Glob", "Read", "Grep"]
 ## 사용법
 
 ```bash
-/atelier:autopilot/qa-boost                    # 최근 20커밋 기준, 1회 실행
-/atelier:autopilot/qa-boost abc1234            # 특정 커밋 이후 변경 분석
+/atelier:qa-boost                    # 최근 20커밋 기준, 1회 실행
+/atelier:qa-boost abc1234            # 특정 커밋 이후 변경 분석
 ```
 
-> 반복 실행은 `/atelier:autopilot/autopilot`이 `CronCreate`로 관리합니다.
+> 반복 실행은 `/atelier:autopilot`이 `CronCreate`로 관리합니다.
 
 ## Context
 
@@ -159,7 +159,7 @@ EOF
 > - 신규 task id + 기존 fingerprint: `duplicate of task <existing-id>` (exit 0, no-op)
 > - 기존 task id (재실행): `task '<id>' already exists` (exit 1, no-op) — `|| echo WARN ...` 가 흡수합니다
 >
-> task가 기록되면 `/atelier:autopilot/work-ledger` reader가 cron tick에 claim하여 `issue-implementer` → `branch-promoter`로 PR을 직접 발행합니다 (build-issues 파이프라인 우회).
+> task가 기록되면 `/atelier:work-ledger` reader가 cron tick에 claim하여 `issue-implementer` → `branch-promoter`로 PR을 직접 발행합니다 (build-issues 파이프라인 우회).
 
 ### Step 7: 결과 보고
 

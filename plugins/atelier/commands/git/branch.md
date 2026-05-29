@@ -18,10 +18,10 @@ default 브랜치 또는 지정한 base 브랜치를 최신화한 후 신규 브
 
 ## Usage
 
-- `/git-branch` - 브랜치 이름을 대화형으로 입력받음
-- `/git-branch feature/new-feature` - default 브랜치 기반으로 생성
-- `/git-branch feature/new-feature develop` - develop 브랜치 기반으로 생성
-- `/git-branch fix/hotfix release/1.0` - release/1.0 브랜치 기반으로 생성
+- `/atelier:branch` - 브랜치 이름을 대화형으로 입력받음
+- `/atelier:branch feature/new-feature` - default 브랜치 기반으로 생성
+- `/atelier:branch feature/new-feature develop` - develop 브랜치 기반으로 생성
+- `/atelier:branch fix/hotfix release/1.0` - release/1.0 브랜치 기반으로 생성
 
 ## Execution
 

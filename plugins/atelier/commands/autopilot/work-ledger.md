@@ -12,10 +12,10 @@ allowed-tools: ["Bash", "Read", "Agent"]
 
 ```bash
 # 1) 이벤트 드리븐 모드 (autopilot Monitor가 TASK_READY 이벤트 수신 시 호출)
-/atelier:autopilot/work-ledger --epic <NAME>
+/atelier:work-ledger --epic <NAME>
 
 # 2) 매뉴얼 / cron 모드 (인자 없음 — 모든 epic을 selection strategy로 순회)
-/atelier:autopilot/work-ledger
+/atelier:work-ledger
 ```
 
 > hybrid 모드에서는 `autopilot watch` daemon이 `TASK_READY epic=<E> task_id=<ID>` 이벤트를 emit하면 Monitor가 `--epic <E>`를 붙여 호출합니다 (PR #701 W1 / autopilot.md Phase A 디스패치 표). 해당 호출은 Step 4 (selection strategy)를 skip하고 단일 epic만 claim합니다.

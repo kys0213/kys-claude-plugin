@@ -1,5 +1,5 @@
 ---
-description: (내부용) /atelier:spec/spec-review · /atelier:spec/gap-detect 가 호출하는 통합 감사 에이전트. L2 finding 의 인용 정확성 + 의미 적합성을 단일 게이트로 검증한다.
+description: (내부용) /atelier:spec-review · /atelier:gap-detect 가 호출하는 통합 감사 에이전트. L2 finding 의 인용 정확성 + 의미 적합성을 단일 게이트로 검증한다.
 model: sonnet
 tools: []
 ---
