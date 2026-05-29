@@ -27,6 +27,7 @@ user-invocable: false
 - 종료 조건 (done_when):     무엇이 충족되면 끝인가 (검증 가능해야 함)
 - 예산:                      max_loops, max_redispatch_per_task, (가능하면) 시간/턴 상한
 - 자동 중단 (hard_stops):    무엇이 발생하면 예산과 무관하게 멈추고 보고하는가
+- 결정 기록 위치 (log_dir):  .orchestrator/<epic>/decisions/ (gitignore, 완료 시 요약 공유)
 ```
 
 진입 후에는 이 계약 범위 안에서 **보고 없이** 진행한다. 계약을 벗어나는 순간(예산 소진 또는 hard stop)에만 멈추고 보고한다.
@@ -36,30 +37,35 @@ user-invocable: false
 ## 자율 실행 루프
 
 ```
-contract = {done_when, max_loops, max_redispatch_per_task, hard_stops}
+contract = {done_when, max_loops, max_redispatch_per_task, hard_stops, log_dir}
 loop_count = 0
 
 while not satisfied(contract.done_when) and loop_count < contract.max_loops:
     loop_count += 1
     tasks = decompose(remaining_work)                 # 분해
+    log_decision("분해", tasks, refs=[대화, CLAUDE.md, rules])
     dispatch(tasks, isolation="worktree",             # 위임 (base = epic 브랜치)
              run_in_background=true)
+    log_decision("병렬/순차 + 위임 형태", ...)
     results = await_completion_notifications()        # 모니터 (sleep/poll 금지)
 
     for r in results:
         if r.failed:
             handle_failure(r)                         # 자동 재위임 규칙 (아래)
+            log_decision("재위임 판단", r, refs=[실패이력, agent-monitor.md])
 
     merge_coordinate(results)                         # 머지 — 충돌은 자동 위임 (아래)
+    log_decision("머지 순서 / 충돌 처리", ...)
     remaining_work = recompute_remaining()            # 진전 측정
 
     if no_progress(loop_count) or hit_hard_stop():
+        log_decision("에스컬레이션", reason)
         break
 
-escalate_or_report(reason)                            # 완료 / 예산소진 / 에스컬레이션
+escalate_or_report(reason, decision_log=contract.log_dir)   # 완료 / 예산소진 / 에스컬레이션
 ```
 
-루프의 각 단계는 기존 references를 그대로 따른다 (`delegation-patterns`, `worktree-lifecycle`, `merge-coordinator`). 자율 모드가 바꾸는 것은 **실패/충돌을 만났을 때 사용자에게 묻지 않고 가드레일 안에서 스스로 처리한다**는 점뿐이다.
+루프의 각 단계는 기존 references를 그대로 따른다 (`delegation-patterns`, `worktree-lifecycle`, `merge-coordinator`). 자율 모드가 바꾸는 것은 **실패/충돌을 만났을 때 사용자에게 묻지 않고 가드레일 안에서 스스로 처리한다**는 점, 그리고 **모든 자율 결정을 사후 검토 가능하도록 기록한다**는 점이다 (아래 *의사결정 기록* 참조).
 
 ---
 
@@ -110,6 +116,70 @@ escalate_or_report(reason)                            # 완료 / 예산소진 / 
 
 ---
 
+## 의사결정 기록 (Decision Log)
+
+자율 모드에서는 메인이 사람에게 묻지 않고 스스로 결정한다. CLAUDE.md의 "**결정(judgment)은 reasoning이 사람에게 검토 가능해야 한다**" 원칙에 따라, 모든 자율 결정은 **참고한 근거와 함께 기록**되어 사후 검토 가능해야 한다. 기록 없이 자율 주행하면 사용자가 "왜 그렇게 했는지"를 복원할 수 없다.
+
+### 결정 시 참고 소스
+
+각 자율 결정을 내리기 **전에** 메인은 다음을 참고한다 (그리고 어떤 소스를 봤는지 기록한다):
+
+| 소스 | 무엇을 얻는가 |
+|------|--------------|
+| 대화 내용 | 사용자의 요구·제약·우선순위·이전 합의 |
+| `CLAUDE.md` | 설계 최우선, 책임 경계(CLI vs Skill), SOLID/TDD, 품질 게이트 |
+| `.claude/rules/*` | 커밋/브랜치 규칙, 플러그인 컨벤션 등 결정적 규칙 |
+| spec / 설계 문서 | 작업 대상의 명세와 의도 |
+| 코드·git 상태 | 현재 사실 (Read/Bash로 결정적 확인) |
+
+### 기록 위치
+
+```
+.orchestrator/<epic>/decisions/      ← gitignore됨 (.autopilot/ · .review-output/ 와 동일 패턴)
+```
+
+- **커밋하지 않는다** — 자율 런의 휘발성 작업 산출물. 완료 시점에 요약해 사용자에게 공유한다.
+- 파일 구성: append-only 단일 로그 `decisions/log.md` 또는 결정별 개별 파일 `decisions/NNNN-<slug>.md`. 결정적 파일명으로 재현성을 확보한다.
+- epic마다 디렉토리를 분리해 런 간 기록이 섞이지 않게 한다.
+
+### 기록 시점
+
+다음 자율 결정이 발생할 때마다 append한다:
+
+- 작업 분해 방식 (어떻게 쪼갰는가)
+- 병렬 vs 순차 + 위임 형태(단발/team) 선택
+- 재위임 여부 + prompt 보강 내용
+- 머지 순서 + 자동 충돌 해결 위임
+- 에스컬레이션 판단 (멈춤 vs 계속)
+- 종료 조건 충족 판정
+
+### 기록 형식 (한 결정 = 한 항목)
+
+```markdown
+## <ISO timestamp> · <결정 요약>
+- 상황: 무엇을 결정해야 했는가
+- 참고: 본 소스 (대화 / CLAUDE.md §책임경계 / rules/git-workflow.md / 코드 상태 …)
+- 결정: 무엇을 선택했는가
+- 근거: 왜 (참고 소스와 연결)
+- 대안: 고려했으나 택하지 않은 것 + 이유
+- 영향: 어떤 작업/브랜치에 적용됐는가
+```
+
+### 완료 시 공유
+
+작업 완료(또는 에스컬레이션) 시점에 메인은 decision log를 **종료 보고에 함께 포함**한다:
+
+```
+의사결정 요약:
+- 총 결정 수: N
+- 주요 분기: <병렬화/재위임/에스컬레이션 등 핵심 결정 3~5개>
+- 전체 로그: .orchestrator/<epic>/decisions/  (사후 검토용)
+```
+
+전체 로그는 gitignore되어 커밋되지 않으므로, 보고에 경로를 안내해 사용자가 직접 열어볼 수 있게 한다.
+
+---
+
 ## 가드레일 (Guardrails)
 
 폭주를 막는 핵심. 모두 진입 시 계약에 고정된다.
@@ -143,11 +213,12 @@ opt-in 전면 허용이라도 다음은 **항상** 멈추고 사람에게 보고
 ## 보고 (자율 모드)
 
 ```
-진입 시:   자율 계약 1회 보고 (종료 조건 / 예산 / hard stop)
-진행 중:   침묵 (정상 루프는 보고하지 않음)
-           — 단 hard stop / 에스컬레이션 발생 시 즉시 보고
+진입 시:   자율 계약 1회 보고 (종료 조건 / 예산 / hard stop / 결정 기록 위치)
+진행 중:   침묵 (정상 루프는 보고하지 않음) — 단 결정은 log_dir에 계속 append
+           — hard stop / 에스컬레이션 발생 시 즉시 보고
 종료 시:   종료 사유 (완료 / 예산 소진 / 에스컬레이션)
            + 루프 횟수 + 머지 결과 + 미해결 항목
+           + 의사결정 요약 (총 결정 수 / 주요 분기 / 전체 로그 경로)
 ```
 
 ---
@@ -162,6 +233,8 @@ opt-in 전면 허용이라도 다음은 **항상** 멈추고 사람에게 보고
 6. **opt-in 없이 자율**: 사용자가 명시하지 않았는데 자동 모드로 진입 → 기본은 휴먼-인-더-루프. 반드시 opt-in 후에만.
 7. **sleep / poll**: 자율 루프에서도 완료 알림을 사용. `Bash sleep` 루프 금지.
 8. **epic 경계 이탈**: 자율이라는 이유로 main 머지/배포까지 자동 → 자율은 epic 브랜치 안에서만. 경계 밖은 에스컬레이션.
+9. **결정 기록 누락**: 근거를 남기지 않고 자율 주행 → 사용자가 사후에 "왜"를 복원 불가. 모든 분기 결정은 참고 소스와 함께 `log_dir`에 기록.
+10. **결정 로그 커밋**: 휘발성 자율 산출물을 epic 브랜치에 커밋 → repo 오염. `.orchestrator/`는 gitignore, 완료 시 요약으로만 공유.
 
 ---
 
@@ -173,6 +246,7 @@ opt-in 전면 허용이라도 다음은 **항상** 멈추고 사람에게 보고
 - [ ] 종료 조건이 명령으로 판정 가능한 형태인가?
 - [ ] 예산(`max_loops` / `max_redispatch_per_task` / no-progress)을 계약에 고정했는가?
 - [ ] hard stop(에스컬레이션) 조건을 정의했는가?
+- [ ] 결정 기록 위치(`.orchestrator/<epic>/decisions/`)를 계약에 고정했는가?
 - [ ] 자율 계약을 사용자에게 1회 보고했는가?
 
 루프 중:
@@ -180,9 +254,11 @@ opt-in 전면 허용이라도 다음은 **항상** 멈추고 사람에게 보고
 - [ ] 매 루프 종료 시 종료 조건을 결정적으로 재평가하는가?
 - [ ] 재위임 / 머지 / 충돌 해결이 예산을 소모하며 카운트되는가?
 - [ ] 진전을 수치로 측정하는가? (체감 아님)
+- [ ] 각 분기 결정을 참고 소스와 함께 `log_dir`에 기록하는가?
 - [ ] hard stop 발생 시 예산과 무관하게 즉시 멈추는가?
 
 종료 시:
 
 - [ ] 종료 사유(완료 / 예산 소진 / 에스컬레이션)를 보고했는가?
+- [ ] 의사결정 요약(총 수 / 주요 분기 / 로그 경로)을 보고에 포함했는가?
 - [ ] 미해결 항목과 남은 worktree를 정리/보고했는가?
