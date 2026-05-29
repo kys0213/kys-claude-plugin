@@ -1,3 +1,7 @@
+> ❄️ **Snapshot freeze** — 이 플러그인은 v0.30.1 에서 동결되었습니다.
+> 후속 개발은 [atelier](../atelier/) 에서 진행됩니다.
+> 마이그레이션: `plugins/atelier/README.md` 참조.
+
 # github-autopilot
 
 CronCreate 기반 자율 개발 루프 — gap 탐지, 테스트 갭 발행, CI 감시, 이슈 구현, PR 머지를 자동화합니다.

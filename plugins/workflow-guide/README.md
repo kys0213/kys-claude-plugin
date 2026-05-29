@@ -1,3 +1,7 @@
+> ❄️ **Snapshot freeze** — 이 플러그인은 v0.6.0 에서 동결되었습니다.
+> 후속 개발은 [atelier](../atelier/) 에서 진행됩니다.
+> 마이그레이션: `plugins/atelier/README.md` 참조.
+
 # workflow-guide
 
 Skill, Sub-agent, Slash Command 구조화 원칙 가이드 플러그인.
