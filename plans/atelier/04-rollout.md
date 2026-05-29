@@ -229,9 +229,19 @@ validate.yml 의 \"Check PR title format\" / \"version bump prefix\" step 은 at
 
 ## 6. 작업 추적
 
-- #738 (marketplace governance epic) 의 sub-epic 으로 \"atelier consolidation\" 신규 이슈 생성.
-- Phase 1~5 를 각각 sub-issue 또는 task 로 분해.
+#738 (marketplace governance epic) 아래 **두 개의 sub-epic** (05 §7.1 의 단계 분리):
+
+```
+#738 marketplace governance
+├── Epic 1: atelier consolidation   ← 이 문서(04) Phase 1~5. 이동 전용.
+│     └ Phase 1~5 를 각각 sub-issue / task 로 분해.
+└── Epic 2: atelier skill extraction ← 05 §4~6. Epic 1 머지·안정화 후 개설.
+      └ spec-workflow / autopilot-pipeline / git references 추출 (도메인별 PR).
+```
+
+- 본 문서(04)의 Phase 1~5 는 **Epic 1** 에만 해당. Fat Controller 는 이동 단계에서 그대로 옮긴다.
 - 각 PR title scope 는 `atelier` (코드) 또는 해당 도메인.
+- Epic 2 는 Epic 1 완료 후 별도 착수 — 05 가 그 설계서.
 
 ## 7. 리스크 요약
 
