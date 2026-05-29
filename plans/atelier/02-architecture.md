@@ -1,8 +1,15 @@
 # Atelier — 아키텍처
 
-> **상태**: 설계 단계 (00, 01의 후속)
+> **상태**: 설계 단계 (00, 01의 후속) · **2026-05-29 정정** (Epic 1 구현 중 발견)
 > **입력**: 01-inventory.md (자산/참조/충돌 매트릭스)
 > **출력**: 03-migration.md, 04-rollout.md 의 구현 지침
+
+> 🔧 **정정 요약 (§1.1·§1.2·§2.1·§2.2)**: 본 문서 초안은 "`commands/` 하위폴더 = 슬래시
+> namespace"(`/atelier:git/sync`)를 가정했으나, Claude Code 는 **폴더를 무시하고 파일명만**
+> 슬래시로 노출한다(`/atelier:sync`). 폴더는 디스크 정리용일 뿐이다. 기능·충돌 회피는 영향
+> 없으며(plugin.json 명시 등록 + 파일명 고유), 슬래시의 도메인 식별성은 **Epic 2 의 관심사 skill
+> 통합**(06-invocation-surface)이 최종 권위로 제공한다. 아래 본문의 폴더형 슬래시 표기는 정정 박스로
+> 표시했다.
 
 이 문서는 atelier의 최종 디렉토리 구조, namespace 정책, hook 재배치, CLI 통합 형태,
 중복 책임 통합 방안, marketplace.json 변경안을 단일 그림으로 확정한다.
@@ -145,20 +152,36 @@ plugins/atelier/
 
 01-inventory 에서 \"33개 충돌 없음, setup 만 1건\"으로 봤지만,
 **\"혼동 유발 유사 이름\"** (예: `merge-pr` vs `merge-prs`, `gap-detect` vs `gap-watch`)을
-폴더로 분리해 의미적으로 격리한다. Claude Code 슬래시 발견은 폴더 prefix 를 함께 보여주므로
-사용자가 `/atelier:git:merge-pr` vs `/atelier:autopilot:merge-prs` 식으로 식별 가능.
+폴더로 분리해 **디스크 상에서** 도메인별로 격리한다.
+
+> ⚠️ **정정 (검증된 사실)**: 폴더는 **슬래시 namespace 가 아니다**. Claude Code 는 plugin 의
+> `commands/` 하위폴더를 **무시하고 파일명만** 슬래시로 노출한다 — `commands/git/sync.md` 의
+> 실제 호출은 `/atelier:git/sync` 가 아니라 **`/atelier:sync`** 다. (출처: code.claude.com/docs
+> "How a skill gets its command name".) 따라서 폴더 그룹화는 **레포 정리(탐색·소유 구분)** 목적일
+> 뿐이며 슬래시 식별성을 주지 않는다. plugin.json 의 `commands` 배열에 각 파일 경로를 명시
+> 등록하므로 폴더가 있어도 33개 커맨드는 flat 하게 모두 로드된다 (파일명 고유라 충돌 0).
+> 슬래시에서 도메인 그룹을 보이게 하는 것은 **Epic 2 의 관심사 skill 통합**(06)이 담당한다 —
+> capability 슬래시 35개를 user-invocable skill ~5개(`/atelier:spec`, `/atelier:git`,
+> `/atelier:autopilot`, `/atelier:workflow`, `/atelier:setup`)로 수렴. 폴더 namespace 가
+> 동작하지 않아도 최종 호출 표면은 영향받지 않는다.
 
 > **명명 규칙**: 폴더는 \"기능 도메인\" 단위. `git`, `autopilot`, `spec`, `workflow` 4개. coding-style/orchestrator 는 명령 0개라 폴더 없음. agent 도 동일 규칙.
 
 ### 1.2 rename 목록
 
-| 출신 plugin | 원본 이름 | atelier 이름 | 사유 |
+> ⚠️ **정정**: 아래 rename 의 원래 근거였던 "폴더 prefix 중복 제거"는 §1.1 정정으로 **무효**다
+> (폴더가 슬래시에 반영되지 않아 `git/sync` 는 `/atelier:sync` 가 되어 `git` 출신 정보가 슬래시에서
+> 사라진다). Epic 1 에서는 **동작 보존이 최우선**이므로 파일은 아래 경로로 옮기되, capability 슬래시
+> 표기 자체가 Epic 2 에서 관심사 skill 로 흡수되어 사라지는 **잠정 상태**임을 전제한다. 슬래시에
+> 도메인을 보존하는 최종 식별성은 관심사 skill(`/atelier:git` 등)이 제공한다.
+
+| 출신 plugin | 원본 이름 | atelier 파일 경로 | 실제 슬래시 (flat) |
 |---|---|---|---|
-| git-utils | `git-sync` | `git/sync` | 폴더 prefix 가 `git` 이라 중복 제거 |
-| git-utils | `git-branch` | `git/branch` | 동일 |
-| git-utils | `git-resolve` | `git/resolve` | 동일 |
-| spec-kit | `scaffold-spec-rules` | `spec/scaffold-rules` | 폴더 prefix 로 `spec` 명시 |
-| workflow-guide | `scaffold-rules` | `workflow/scaffold-conventions` | spec/scaffold-rules 와 의미 분리 |
+| git-utils | `git-sync` | `commands/git/sync.md` | `/atelier:sync` |
+| git-utils | `git-branch` | `commands/git/branch.md` | `/atelier:branch` |
+| git-utils | `git-resolve` | `commands/git/resolve.md` | `/atelier:resolve` |
+| spec-kit | `scaffold-spec-rules` | `commands/spec/scaffold-rules.md` | `/atelier:scaffold-rules` |
+| workflow-guide | `scaffold-rules` | `commands/workflow/scaffold-conventions.md` | `/atelier:scaffold-conventions` |
 
 ---
 
@@ -167,20 +190,29 @@ plugins/atelier/
 ### 2.1 원칙
 
 atelier 는 **단일 namespace**. plugin 접두사(`spec-kit:`, `git-utils:`, `github-autopilot:`) 는 **전부 제거**한다.
-slash 호출 경로는 폴더 그룹 prefix 로만 표현한다 (`atelier:git/branch` 등).
+slash 호출 경로는 **flat 파일명**으로 표현된다 (`/atelier:branch` — §1.1 정정 참고: 폴더는
+슬래시에 반영되지 않음). 도메인 그룹 식별은 Epic 2 의 관심사 skill(`/atelier:git`)로 제공한다.
 
 ### 2.2 13건 cross-plugin 참조 치환 규칙
 
 01 §3 매트릭스의 13건을 다음 일괄 규칙으로 치환한다.
 
-| 원본 패턴 | 치환 |
-|---|---|
-| `git-utils:/<cmd>` | `atelier:git/<cmd>` |
-| `git-utils:<skill-or-cmd>` | `atelier:<skill-or-cmd>` (skill 이름은 변경 없음) |
-| `/spec-kit:<cmd>` | `/atelier:spec/<cmd>` |
-| `/github-autopilot:<cmd>` | `/atelier:autopilot/<cmd>` |
-| 문서 경로 `plugins/<name>/...` | `plugins/atelier/...` 로 갱신 (예시 코드 포함) |
-| `orchestrator` 단어 그대로 (skill 이름) | 변경 없음 |
+> ⚠️ **정정**: cross-plugin 접두사 제거는 유효하나, 치환 후 슬래시 형태는 §1.1 정정에 따라
+> **flat**(`/atelier:<cmd>`)이다. 폴더형 `/atelier:git/<cmd>` 는 실제로 동작하지 않는다. 아래 표의
+> 치환 대상은 "더 이상 존재하지 않는 cross-plugin 접두사를 제거"하는 것이 핵심이며, 최종 슬래시
+> 표기는 Epic 2 관심사 skill(`/atelier:git` 등)로 수렴한다.
+
+| 원본 패턴 | 치환 (Epic 1, flat) | 비고 |
+|---|---|---|
+| `git-utils:/<cmd>` | `/atelier:<cmd>` | 접두사 제거 + flat |
+| `git-utils:<skill>` | `<skill>` (skill 이름 그대로) | skill 은 접두사 없이 이름 호출 |
+| `/spec-kit:<cmd>` | `/atelier:<cmd>` | 접두사 제거 + flat |
+| `/github-autopilot:<cmd>` | `/atelier:<cmd>` | 접두사 제거 + flat |
+| 문서 경로 `plugins/<name>/...` | `plugins/atelier/...` | 예시 코드 포함 |
+| `orchestrator` 단어 그대로 (skill 이름) | 변경 없음 | |
+
+> rename 된 커맨드의 옛 이름 참조(`git-sync`→`sync`, `scaffold-spec-rules`→`scaffold-rules`)도
+> 본문에서 새 슬래시(`/atelier:sync` 등)로 정정한다.
 
 치환은 `04-rollout.md` 의 검증 체크리스트에서 정규식 grep 으로 0건 확인한다.
 

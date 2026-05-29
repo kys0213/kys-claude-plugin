@@ -178,7 +178,9 @@ validate.yml 의 \"Check PR title format\" / \"version bump prefix\" step 은 at
 
 ```
 □ atelier 단독 설치 후 /atelier:setup 동작 (git/autopilot/style/all)
-□ /atelier:git/* , /atelier:autopilot/* , /atelier:spec/* , /atelier:workflow/* 슬래시 노출
+□ 33개 커맨드가 flat 슬래시로 노출 (/atelier:<파일명> — 폴더는 namespace 아님, 02 §1.1 정정)
+  · 예: /atelier:sync, /atelier:design, /atelier:build-issues (폴더형 /atelier:git/sync 아님)
+  · 관심사 단위 슬래시(/atelier:git 등)는 Epic 2 에서 제공
 □ atelier autopilot <기존 명령> = 기존 autopilot 동작 동일 (회귀 0)
 □ atelier git <기존 명령> = 기존 git-utils 동작 동일 (회귀 0)
 □ hook 4종 트리거 정상 (SessionStart, Stop 등)
@@ -189,10 +191,12 @@ validate.yml 의 \"Check PR title format\" / \"version bump prefix\" step 은 at
 ### 5.2 namespace / 참조 정합
 
 ```
-□ rg 'git-utils:|spec-kit:|github-autopilot:' plugins/atelier  → 0건
+□ rg 'git-utils:|spec-kit:|github-autopilot:' plugins/atelier  → 0건 (cross-plugin 접두사)
 □ rg 'plugins/(git-utils|github-autopilot|spec-kit|workflow-guide|coding-style|orchestrator)/' plugins/atelier  → 0건 (문서 예시 경로까지 치환)
-□ 슬래시 커맨드 이름 충돌 0건 (setup 단일)
-□ skill 이름 10개 모두 보존 (git, orchestrator, convention-architect, ...)
+□ rg 'spec-validator' plugins/atelier  → 0건 (gap-auditor 로 흡수)
+□ rg 'scaffold-spec-rules' plugins/atelier  → 0건 (scaffold-rules 로 rename)
+□ 슬래시 커맨드 파일명 충돌 0건 (flat 펼침 기준 — 폴더 무관, setup 단일)
+□ skill 이름 11개 모두 보존 (git, orchestrator, convention-architect, ..., coding-style)
 □ agent 19개 (spec-validator 제거 확인)
 ```
 
