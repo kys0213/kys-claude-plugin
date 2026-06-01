@@ -134,23 +134,9 @@ fn read_hook_stdin() -> (Option<String>, Option<String>) {
 }
 
 /// Prints a successful command result as pretty JSON (exit 0) or an error to
-/// stderr (exit 1), mirroring the TS `output()` helper.
+/// stderr (exit 1), mirroring the TS `output()` helper. Works for any
+/// `Serialize` payload, including raw `serde_json::Value` (hook list).
 fn output<T: Serialize>(result: CmdResult<T>) -> i32 {
-    match result {
-        CmdResult::Ok(data) => {
-            let json = serde_json::to_string_pretty(&data).unwrap_or_else(|_| "null".to_string());
-            println!("{json}");
-            0
-        }
-        CmdResult::Err(e) => {
-            eprintln!("Error: {e}");
-            1
-        }
-    }
-}
-
-/// Like [`output`] but for raw `serde_json::Value` payloads (hook list).
-fn output_value(result: CmdResult<serde_json::Value>) -> i32 {
     match result {
         CmdResult::Ok(data) => {
             let json = serde_json::to_string_pretty(&data).unwrap_or_else(|_| "null".to_string());
@@ -348,7 +334,7 @@ pub fn run(cli: Cli) -> i32 {
                         project_dir,
                     };
                     match hook.list(&input) {
-                        Ok(result) => output_value(result),
+                        Ok(result) => output(result),
                         Err(e) => {
                             eprintln!("Error: {e}");
                             1

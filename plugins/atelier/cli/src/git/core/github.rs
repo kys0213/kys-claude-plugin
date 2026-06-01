@@ -90,13 +90,13 @@ impl RealGitHubService {
         if self.cwd.is_none() && self.gh_host.is_none() {
             return None;
         }
-        let mut env = HashMap::new();
-        if let Some(host) = &self.gh_host {
-            env.insert("GH_HOST".to_string(), host.clone());
-        }
+        let env = self
+            .gh_host
+            .as_ref()
+            .map(|host| HashMap::from([("GH_HOST".to_string(), host.clone())]));
         Some(ExecOptions {
             cwd: self.cwd.clone(),
-            env: if env.is_empty() { None } else { Some(env) },
+            env,
         })
     }
 

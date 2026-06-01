@@ -187,17 +187,16 @@ impl GitService for RealGitService {
     }
 
     fn checkout(&self, branch: &str, options: Option<&CheckoutOptions>) -> Result<(), String> {
-        let mut args: Vec<String> = vec!["checkout".to_string()];
+        let mut args: Vec<&str> = vec!["checkout"];
         if options.map(|o| o.create).unwrap_or(false) {
-            args.push("-b".to_string());
+            args.push("-b");
         }
-        args.push(branch.to_string());
+        args.push(branch);
         if let Some(track) = options.and_then(|o| o.track.as_ref()) {
-            args.push("--track".to_string());
-            args.push(track.clone());
+            args.push("--track");
+            args.push(track);
         }
-        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-        self.git(&arg_refs).map(|_| ())
+        self.git(&args).map(|_| ())
     }
 
     fn commit(&self, message: &str) -> Result<(), String> {
