@@ -20,6 +20,17 @@ fn git_help_exits_zero() {
 }
 
 #[test]
+fn git_no_subcommand_prints_usage_and_exits_zero() {
+    // Matches the standalone git-utils CLI: no args prints usage + exit 0,
+    // not clap's default missing-subcommand error (exit 2).
+    atelier()
+        .arg("git")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Usage"));
+}
+
+#[test]
 fn git_version_exits_zero() {
     atelier()
         .args(["git", "--version"])

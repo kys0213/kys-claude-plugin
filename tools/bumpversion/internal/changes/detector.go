@@ -149,6 +149,13 @@ func findDependentPlugins(repoRoot string, commonFiles []string) ([]Package, err
 			continue
 		}
 
+		// Frozen plugins are never bumped (GetPluginsOnly filters them too),
+		// so skip the grep entirely instead of doing the subprocess work and
+		// discarding the result later.
+		if IsFrozen(entry.Name()) {
+			continue
+		}
+
 		pluginPath := filepath.Join(pluginsDir, entry.Name())
 
 		// Check if any file in this plugin references a common file

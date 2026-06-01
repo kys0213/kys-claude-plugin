@@ -32,7 +32,7 @@ use serde::Serialize;
 )]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -163,7 +163,20 @@ where
 
 /// Runs a parsed git CLI, returning a process exit code.
 pub fn run(cli: Cli) -> i32 {
-    match cli.command {
+    // No subcommand: print usage and exit 0, matching the standalone
+    // `git-utils` CLI (cli.ts prints usage + exit 0 on no args) rather than
+    // clap's default missing-subcommand error (exit 2).
+    let command = match cli.command {
+        Some(c) => c,
+        None => {
+            use clap::CommandFactory;
+            let _ = Cli::command().print_help();
+            println!();
+            return 0;
+        }
+    };
+
+    match command {
         Commands::Commit {
             commit_type,
             description,
