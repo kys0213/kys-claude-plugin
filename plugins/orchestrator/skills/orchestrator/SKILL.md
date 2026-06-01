@@ -152,6 +152,7 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 | `references/worktree-lifecycle.md` | 병렬 dispatch 직전, 또는 worktree 정리/머지를 다룰 때 |
 | `references/agent-monitor.md` | 백그라운드 agent를 띄웠고 진행 상황을 추적해야 할 때 |
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
+| `references/autonomous-driving.md` | 사용자가 자율 모드를 명시 opt-in 했을 때 (사람 개입 없이 루프 self-drive, 가드레일/종료 조건) |
 
 ---
 
@@ -208,6 +209,8 @@ SendMessage({to: "designer", message: "..."})
 - **종료 시**: 머지된 결과, 미머지 항목, 사용자 결정이 필요한 충돌 요약
 
 자동 개입(SendMessage 등으로 agent에 명령 주입)은 **하지 않는다**. 정체나 실패는 사용자에게 보고하고 결정을 받는다.
+
+**예외 — 자율 모드(opt-in)**: 사용자가 자율 실행을 명시적으로 요청한 경우에 한해, 가드레일(종료 조건·예산·자동 중단) 안에서 자동 재위임·머지·충돌 해결을 사람 개입 없이 진행할 수 있다. 진입 조건, 자율 계약, 에스컬레이션 규칙은 `references/autonomous-driving.md` 참조. opt-in이 없으면 위 휴먼-인-더-루프 원칙이 기본이다.
 
 ---
 
