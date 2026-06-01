@@ -5,7 +5,9 @@
 
 use crate::git::core::shell::{exec, exec_or_throw, ExecOptions};
 use crate::git::types::{ReviewComment, ReviewThread};
+use regex::Regex;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 pub struct ReviewThreadsResult {
     pub pr_title: String,
@@ -53,23 +55,19 @@ query($owner: String!, $repo: String!, $number: Int!) {
 }
 "#;
 
+/// Matches `export GH_HOST="<value>"` with flexible inter-token whitespace,
+/// mirroring the TS `loadGhHost` regex `^export\s+GH_HOST="(.+)"` (multiline,
+/// greedy value).
+static GH_HOST_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?m)^export\s+GH_HOST="(.+)""#).unwrap());
+
 /// Reads `GH_HOST` from `~/.git-workflow-env` (matching the TS loadGhHost).
 fn load_gh_host() -> Option<String> {
     let home = std::env::var("HOME").ok()?;
     let env_path = std::path::Path::new(&home).join(".git-workflow-env");
     let content = std::fs::read_to_string(env_path).ok()?;
-    for line in content.lines() {
-        // matches: export GH_HOST="..."
-        if let Some(rest) = line.strip_prefix("export GH_HOST=\"") {
-            if let Some(end) = rest.find('"') {
-                let val = &rest[..end];
-                if !val.is_empty() {
-                    return Some(val.to_string());
-                }
-            }
-        }
-    }
-    None
+    let val = GH_HOST_PATTERN.captures(&content)?.get(1)?.as_str();
+    (!val.is_empty()).then(|| val.to_string())
 }
 
 pub struct RealGitHubService {
@@ -208,5 +206,50 @@ impl GitHubService for RealGitHubService {
             return Ok(None);
         }
         Ok(parsed["number"].as_i64())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GH_HOST_PATTERN;
+
+    /// Extracts the captured GH_HOST value, mirroring `load_gh_host`'s parse.
+    fn parse(content: &str) -> Option<&str> {
+        GH_HOST_PATTERN
+            .captures(content)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str())
+    }
+
+    #[test]
+    fn single_space_form() {
+        assert_eq!(
+            parse(r#"export GH_HOST="github.example.com""#),
+            Some("github.example.com")
+        );
+    }
+
+    #[test]
+    fn flexible_whitespace_between_export_and_var() {
+        // The TS regex uses `\s+`; tabs and multiple spaces must still match.
+        assert_eq!(
+            parse("export\tGH_HOST=\"ghe.tab.com\""),
+            Some("ghe.tab.com")
+        );
+        assert_eq!(
+            parse(r#"export   GH_HOST="ghe.spaces.com""#),
+            Some("ghe.spaces.com")
+        );
+    }
+
+    #[test]
+    fn matches_amid_other_lines() {
+        let content = "# config\nexport FOO=\"bar\"\nexport GH_HOST=\"ghe.multi.com\"\n";
+        assert_eq!(parse(content), Some("ghe.multi.com"));
+    }
+
+    #[test]
+    fn no_match_when_absent() {
+        assert_eq!(parse("export FOO=\"bar\"\n"), None);
     }
 }
