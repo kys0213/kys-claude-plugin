@@ -1,6 +1,6 @@
 # 브랜치 동기화 전략
 
-`/atelier:sync` 가 지정 브랜치(또는 기본 브랜치)로 전환 후 원격 최신 상태로 동기화하는 절차와 판단.
+`git` skill(또는 `atelier git sync` CLI)이 지정 브랜치(또는 기본 브랜치)로 전환 후 원격 최신 상태로 동기화하는 절차와 판단.
 
 ## 인자 파싱
 
@@ -27,7 +27,7 @@ fi
 ```bash
 # --force 없이 변경사항 있으면 중단
 if [ -n "$CHANGES" ] && [ "$FORCE" != "true" ]; then
-  echo "⚠️ Uncommitted changes detected. Use /atelier:sync --force to stash and continue."
+  echo "⚠️ Uncommitted changes detected. Use --force to stash and continue."
   exit 1
 fi
 # --force 면 stash (버리지 않음)

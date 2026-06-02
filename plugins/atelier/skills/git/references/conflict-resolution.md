@@ -1,6 +1,32 @@
 # Rebase 충돌 해결 판단
 
-`/atelier:resolve` 가 rebase 충돌을 파일별로 분할정복하며 해결할 때의 판단 프로토콜. 충돌 조정(여러 변경을 어떤 순서로 통합할지)이 필요하면 `orchestrator` skill 의 `references/merge-coordinator.md` 가 canonical 이며, 이 문서는 **단일 rebase 의 파일별 해결 전략**만 다룬다.
+`git` skill 이 rebase 충돌을 파일별로 분할정복하며 해결할 때의 판단 프로토콜. 충돌 조정(여러 변경을 어떤 순서로 통합할지)이 필요하면 `orchestrator` skill 의 `references/merge-coordinator.md` 가 canonical 이며, 이 문서는 **단일 rebase 의 파일별 해결 전략**만 다룬다.
+
+## 인자 처리 (--continue / --abort / --skip)
+
+사용자가 rebase 진행 제어를 요청하면 먼저 인자를 처리한다.
+
+```bash
+case "$1" in
+  --continue)
+    # 미해결 충돌 가드: 남은 충돌이 있으면 rebase --continue 전에 거부 (exit 1)
+    UNRESOLVED=$(git diff --name-only --diff-filter=U)
+    if [ -n "$UNRESOLVED" ]; then
+      echo "⚠️ 아직 해결되지 않은 충돌이 있습니다:"
+      echo "$UNRESOLVED" | while read f; do echo "  - $f"; done
+      echo "충돌을 먼저 해결한 후 다시 시도하세요."
+      exit 1
+    fi
+    git rebase --continue; exit $? ;;
+  --abort)
+    git rebase --abort
+    echo "✓ Rebase aborted. Returned to original state."; exit 0 ;;
+  --skip)
+    git rebase --skip; exit $? ;;
+esac
+```
+
+인자가 없으면 아래 대화형 해결로 진입한다. (rebase 미진행 시 안내 후 종료, 충돌 0건이면 `--continue` 안내.)
 
 ## 파일별 분할정복 절차
 
@@ -52,7 +78,7 @@ Upstream/Base 브랜치의 코드 (예: origin/main)
 
 ## 실전 시나리오
 
-**Feature 브랜치를 main 에 rebase**: `git fetch origin` → `git checkout feature/my-work` → `git rebase origin/main` → 충돌 시 `/atelier:resolve` → 해결 후 `/atelier:resolve --continue`.
+**Feature 브랜치를 main 에 rebase**: `git fetch origin` → `git checkout feature/my-work` → `git rebase origin/main` → 충돌 시 이 절차로 파일별 해결 → 해결 후 `--continue` 인자 처리.
 
 **양쪽 변경 모두 필요** (예: 서로 다른 import 추가): Manual 선택 후 양쪽을 병합:
 ```typescript

@@ -43,6 +43,12 @@ autopilot check mark {cmd} --status idle
 | `max_idle` 이상 | CronList 로 현재 cron 을 찾아 CronDelete. "연속 {N}회 idle — cron 자동 해제" 출력 후 종료 |
 
 > 간격 확대는 한 번만 적용된다 (4회째에 2배로 변경 후, 5~max_idle-1 까지 유지).
+>
+> **통합 노트 (Epic 2)**: 통합 전 ci-watch·ci-fix·merge-prs·qa-boost 는 더 단순한
+> idle shutdown(`autopilot cron self-delete` at max_idle, interval-doubling 없음)을
+> 썼다. 본 reference 로 수렴하면서 build-issues·gap-watch 의 adaptive throttling 으로
+> **모든 autopilot 커맨드를 일관화**했다 — 위 4개는 interval-doubling 동작을 새로 얻는다.
+> 의도된 일관화이며, 정체 시 cron 부하를 더 부드럽게 줄인다.
 
 실제 작업을 수행하면 idle count 를 리셋하고, 간격이 변경되었으면 원래 간격으로 복원한다:
 
