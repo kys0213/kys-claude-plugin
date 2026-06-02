@@ -1,19 +1,17 @@
----
-name: resilience
-description: ledger-based stagnation 감지 결과를 받아 lateral thinking persona 를 적용하여 worker 의 새 접근을 유도하는 가이드. CLI primitive (simhash + Jaccard) 로 후보를 좁히고 Haiku 로 정밀 검증.
-version: 2.0.0
----
+# Stagnation Redirect (task 단위 정체 방어)
 
-# Resilience: Ledger-Based Stagnation Redirect
+> `autopilot` skill 의 reference. autopilot 자율 모드에서 worker 가 같은 영역을
+> 반복 시도하다 무한 루프에 빠지는 것을 막는 **task 단위** 방어 로직이다. (루프 단위 방어는
+> `orchestrator` skill 의 `references/autonomous-driving.md` 가 담당 — 두 층위는 상호 보완.)
 
 ## 개요
 
 autopilot 모드는 사람 개입 없이 task 를 dispatch 하므로, 같은 영역을 반복 시도하다 무한 루프에 빠질 위험이 있다.
-이 스킬은 PreToolUse hook 이 `autopilot check stagnation` 을 호출하여 받은 ledger 기반 결과 JSON 을 해석하고, worker 가 task 를 claim 하기 직전에 **새로운 방향으로 진로를 재설정**하도록 안내한다.
+이 reference 는 PreToolUse hook(`protect-stagnation.sh`)이 `autopilot check stagnation` 을 호출하여 받은 ledger 기반 결과 JSON 을 해석하고, worker 가 task 를 claim 하기 직전에 **새로운 방향으로 진로를 재설정**하도록 안내한다.
 
-진입 시점: worker 가 `autopilot task claim ...` 을 실행 → PreToolUse hook 이 `autopilot check stagnation --task <id>` 호출 → exit 4 (stagnation) 또는 5 (escalate) 이면 본 스킬 발동.
+진입 시점: worker 가 `autopilot task claim ...` 을 실행 → PreToolUse hook 이 `autopilot check stagnation --task <id>` 호출 → exit 4 (stagnation) 또는 5 (escalate) 이면 본 redirect 발동.
 
-CLI 는 deterministic primitive (simhash hamming distance, path Jaccard) 만 담당하고, 본 스킬이 후보 검증 / persona 매핑 / 진로 변경 prompt 합성을 책임진다.
+CLI 는 deterministic primitive (simhash hamming distance, path Jaccard) 만 담당하고, 이 redirect 가 후보 검증 / persona 매핑 / 진로 변경 prompt 합성을 책임진다.
 
 ## 1. 입력 — Ledger Stagnation JSON
 

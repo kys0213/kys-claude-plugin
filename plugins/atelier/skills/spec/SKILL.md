@@ -1,11 +1,27 @@
 ---
-name: spec-workflow
-description: 스펙 설계·리뷰·갭 분석의 공통 프로토콜. spec↔code / spec↔spec 갭을 file:line 인용으로 검출하고, L1(관찰)→L2(종합)→audit(감사) 레이어로 분석하거나, 대화형으로 spec 을 설계하거나, 외부 spec 에 frontmatter 를 주석할 때 사용합니다. spec-review·gap-detect·design·annotate-spec 커맨드가 이 skill 의 references 를 로드합니다.
+name: spec
+description: 스펙 설계·리뷰·갭 분석의 단일 진입점. "스펙 리뷰해줘", "spec↔code 갭 봐줘", "설계하자/큰그림 잡자", "컴포넌트 상세 설계", "외부 spec 에 related_paths 주석" 같은 요청에 사용합니다. 슬래시로 직접 호출하거나 맥락에서 모델이 자동 호출합니다. L1(관찰)→L2(종합)→audit(감사) 레이어로 file:line 인용 기반 분석.
 ---
 
-# spec-workflow
+# spec
 
-스펙 문서를 다루는 모든 워크플로우(리뷰·갭 분석·설계·주석)의 **공통 도메인 지식**입니다. 개별 커맨드는 진입점(인자 파싱 + 오케스트레이션)만 담고, 프로토콜·종료 조건·출력 포맷 같은 도메인 지식은 이 skill 의 `references/` 에서 progressive disclosure 로 로드합니다.
+스펙 문서를 다루는 모든 워크플로우(리뷰·갭 분석·설계·주석)의 **관심사 단위 진입점이자 공통 도메인 지식**입니다. 사용자가 spec 슬래시로 진입하거나 모델이 맥락에서 자동 호출하며, 의도에 따라 아래 `references/` 로 디스패치합니다.
+
+## 진입 라우팅 (의도 → reference)
+
+spec 슬래시 또는 모델 자동 호출로 진입하면, 사용자의 자연어 의도를 분류해 해당 흐름을 수행합니다.
+
+| 사용자 의도 (예) | 흐름 | 로드할 references |
+|---|---|---|
+| "스펙 리뷰", "이 spec 들 검증", 다중 spec 대조 | spec-review (다중 spec, L1 병렬) | file-observation → gap-audit-loop → report-format(spec-review) |
+| "갭 봐줘", "spec 과 code 차이", 단일 spec | gap-detect (단일 spec, code↔spec 우선) | file-observation → gap-audit-loop → report-format(gap-detect) |
+| "설계하자", "큰그림", "아키텍처 잡자" | design (Big Picture 핑퐁) | design-protocol |
+| "컴포넌트 상세", "이 흐름 설계", concerns/flows | design-detail | design-protocol |
+| "related_paths 채워줘", 외부 spec 주석 | annotate | annotation |
+
+입력 인자(spec 파일 경로 등)가 함께 오면 그대로 사용하고, 없으면 AskUserQuestion 으로 확인합니다. 결정적 동작은 없으며(전부 판단/분석), 모든 분석은 sub-agent 에 위임합니다.
+
+스펙 문서를 다루는 워크플로우의 프로토콜·종료 조건·출력 포맷은 이 skill 의 `references/` 에서 progressive disclosure 로 로드합니다.
 
 ## 레이어 모델 (L1 → L2 → audit)
 

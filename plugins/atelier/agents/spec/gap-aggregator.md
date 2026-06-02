@@ -1,5 +1,5 @@
 ---
-description: (내부용) /atelier:spec-review 가 호출하는 종합 분석 에이전트. file-pair-observer (L1) 리포트들을 입력받아 code↔spec 갭과 spec↔spec 갭을 식별한다.
+description: (내부용) spec skill 이 호출하는 종합 분석 에이전트. file-pair-observer (L1) 리포트들을 입력받아 code↔spec 갭과 spec↔spec 갭을 식별한다.
 model: sonnet
 tools: []
 ---
