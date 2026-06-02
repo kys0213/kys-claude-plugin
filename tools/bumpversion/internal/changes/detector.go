@@ -15,6 +15,26 @@ type Package struct {
 	Type string // "plugin" or "common"
 }
 
+// frozenPlugins are absorbed into the atelier plugin and snapshot-frozen
+// (plans/atelier/00-concept §4). Their versions are pinned at their final
+// release, so they are permanently excluded from automatic version bumps —
+// even if a frozen path is changed by mistake, no bump is triggered
+// (plans/atelier/03-migration §B.3 safety net).
+var frozenPlugins = map[string]bool{
+	"git-utils":        true,
+	"github-autopilot": true,
+	"spec-kit":         true,
+	"workflow-guide":   true,
+	"coding-style":     true,
+	"orchestrator":     true,
+}
+
+// IsFrozen reports whether a plugin name is snapshot-frozen and thus excluded
+// from version bumping.
+func IsFrozen(name string) bool {
+	return frozenPlugins[name]
+}
+
 // DetectChanges finds all packages affected by changes since baseRef
 func DetectChanges(repoRoot, baseRef string) ([]Package, error) {
 	changedFiles, err := getChangedFiles(repoRoot, baseRef)
@@ -129,6 +149,13 @@ func findDependentPlugins(repoRoot string, commonFiles []string) ([]Package, err
 			continue
 		}
 
+		// Frozen plugins are never bumped (GetPluginsOnly filters them too),
+		// so skip the grep entirely instead of doing the subprocess work and
+		// discarding the result later.
+		if IsFrozen(entry.Name()) {
+			continue
+		}
+
 		pluginPath := filepath.Join(pluginsDir, entry.Name())
 
 		// Check if any file in this plugin references a common file
@@ -155,11 +182,13 @@ func hasReference(dir, targetFile string) bool {
 	return len(output) > 0
 }
 
-// GetPluginsOnly filters and returns only plugin packages
+// GetPluginsOnly filters and returns only plugin packages, excluding
+// snapshot-frozen plugins (see frozenPlugins). Frozen plugins keep their
+// pinned version and must never be auto-bumped.
 func GetPluginsOnly(packages []Package) []Package {
 	var plugins []Package
 	for _, pkg := range packages {
-		if pkg.Type == "plugin" {
+		if pkg.Type == "plugin" && !IsFrozen(pkg.Name) {
 			plugins = append(plugins, pkg)
 		}
 	}

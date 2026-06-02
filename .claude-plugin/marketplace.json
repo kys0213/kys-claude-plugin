@@ -8,6 +8,24 @@
   "plugins": [
     {
       "category": "productivity",
+      "description": "통합 개발 워크플로우 — spec, git, autopilot, orchestrator, coding-style, workflow-guide 를 단일 책임 경계로 큐레이션 (WIP: Epic 1 #765 진행 중)",
+      "keywords": [
+        "atelier",
+        "workflow",
+        "spec",
+        "git",
+        "autopilot",
+        "orchestrator",
+        "coding-style",
+        "convention",
+        "ddd"
+      ],
+      "name": "atelier",
+      "source": "./plugins/atelier",
+      "version": "0.1.0"
+    },
+    {
+      "category": "productivity",
       "description": "통합 개발 워크플로우: 설계 → 리뷰 → 구현을 하나의 파이프라인으로 (멀티 LLM 지원)",
       "keywords": [
         "develop",
@@ -37,7 +55,7 @@
     },
     {
       "category": "productivity",
-      "description": "Git 워크플로우 자동화 - 브랜치, 커밋, PR, 머지, 동기화, conflict 해결, Issue 관리",
+      "description": "❄️ Snapshot — atelier 로 이전됨. 후속 개발 없음. Git 워크플로우 자동화 - 브랜치, 커밋, PR, 머지, 동기화, conflict 해결, Issue 관리",
       "keywords": [
         "git",
         "branch",
@@ -51,11 +69,13 @@
       ],
       "name": "git-utils",
       "source": "./plugins/git-utils",
-      "version": "2.4.2"
+      "version": "2.4.2",
+      "deprecated": true,
+      "replacedBy": "atelier"
     },
     {
       "category": "productivity",
-      "description": "개인 코딩 습관과 취향을 Hook/Rule로 관리하는 플러그인",
+      "description": "❄️ Snapshot — atelier 로 이전됨. 후속 개발 없음. 개인 코딩 습관과 취향을 Hook/Rule로 관리하는 플러그인",
       "keywords": [
         "coding-style",
         "habits",
@@ -65,11 +85,13 @@
       ],
       "name": "coding-style",
       "source": "./plugins/coding-style",
-      "version": "0.3.0"
+      "version": "0.3.0",
+      "deprecated": true,
+      "replacedBy": "atelier"
     },
     {
       "category": "productivity",
-      "description": "레이어드 아키텍처 기반 에이전트 설계 원칙 가이드 + convention-architect 워크플로우",
+      "description": "❄️ Snapshot — atelier 로 이전됨. 후속 개발 없음. 레이어드 아키텍처 기반 에이전트 설계 원칙 가이드 + convention-architect 워크플로우",
       "keywords": [
         "workflow",
         "design-principles",
@@ -81,7 +103,9 @@
       "name": "workflow-guide",
       "source": "./plugins/workflow-guide",
       "strict": false,
-      "version": "0.6.0"
+      "version": "0.6.0",
+      "deprecated": true,
+      "replacedBy": "atelier"
     },
     {
       "category": "productivity",
@@ -156,7 +180,7 @@
     },
     {
       "category": "productivity",
-      "description": "스펙 설계, 검증, 갭 분석 통합 툴킷 — 대화형 설계, 스펙 품질 검증, LSP 기반 코드 갭 분석",
+      "description": "❄️ Snapshot — atelier 로 이전됨. 후속 개발 없음. 스펙 설계, 검증, 갭 분석 통합 툴킷 — 대화형 설계, 스펙 품질 검증, LSP 기반 코드 갭 분석",
       "keywords": [
         "spec",
         "design",
@@ -168,11 +192,13 @@
       ],
       "name": "spec-kit",
       "source": "./plugins/spec-kit",
-      "version": "0.7.1"
+      "version": "0.7.1",
+      "deprecated": true,
+      "replacedBy": "atelier"
     },
     {
       "category": "automation",
-      "description": "CronCreate 기반 자율 개발 루프 — gap 탐지, issue 구현, PR 머지, CI 감시, QA 보강",
+      "description": "❄️ Snapshot — atelier 로 이전됨. 후속 개발 없음. CronCreate 기반 자율 개발 루프 — gap 탐지, issue 구현, PR 머지, CI 감시, QA 보강",
       "keywords": [
         "autopilot",
         "automation",
@@ -185,11 +211,13 @@
       ],
       "name": "github-autopilot",
       "source": "./plugins/github-autopilot",
-      "version": "0.30.1"
+      "version": "0.30.1",
+      "deprecated": true,
+      "replacedBy": "atelier"
     },
     {
       "category": "productivity",
-      "description": "메인 에이전트가 직접 코드를 편집하지 않고 sub-agent/agent-team/worktree에 위임해 복합 작업을 관리하는 오케스트레이터 패턴 가이드",
+      "description": "❄️ Snapshot — atelier 로 이전됨. 후속 개발 없음. 메인 에이전트가 직접 코드를 편집하지 않고 sub-agent/agent-team/worktree에 위임해 복합 작업을 관리하는 오케스트레이터 패턴 가이드",
       "keywords": [
         "orchestrator",
         "delegation",
@@ -201,7 +229,9 @@
       ],
       "name": "orchestrator",
       "source": "./plugins/orchestrator",
-      "version": "0.3.0"
+      "version": "0.3.0",
+      "deprecated": true,
+      "replacedBy": "atelier"
     }
   ]
 }
