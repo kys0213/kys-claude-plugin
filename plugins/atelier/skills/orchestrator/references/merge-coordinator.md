@@ -7,7 +7,7 @@ user-invocable: false
 
 # Merge Coordinator
 
-병렬 sub-agent들이 worktree에 결과를 남긴 뒤, 그 결과를 epic 브랜치로 안정적으로 통합하는 단계. **메인은 직접 머지/충돌 해결을 하지 않고**, 순서를 결정하고 충돌은 `atelier:git/resolve` 등에 위임한다.
+병렬 sub-agent들이 worktree에 결과를 남긴 뒤, 그 결과를 epic 브랜치로 안정적으로 통합하는 단계. **메인은 직접 머지/충돌 해결을 하지 않고**, 순서를 결정하고 충돌은 `atelier:resolve` 등에 위임한다.
 
 ## 머지 대상: epic 브랜치
 
@@ -76,9 +76,11 @@ epic/<name> → main 머지는 사용자 결정 / 별도 release 절차 (범위 
 
 메인은 충돌 해결을 직접 하지 않는다.
 
-### 옵션 A: `atelier:git/resolve` 스킬에 위임
+### 옵션 A: 충돌 해결을 sub-agent 에 위임
 
-`git-resolve`는 rebase 충돌을 파일별로 리뷰하며 해결한다. 메인은 이 스킬을 트리거할 sub-agent를 호출한다.
+파일별 충돌 해결 전략(Ours/Theirs/Manual, rebase marker 의미)은 `git` skill 의
+`references/conflict-resolution.md` 가 단일 출처다 (`/atelier:resolve` 커맨드가 이를 사용).
+메인은 이 전략을 트리거할 sub-agent 를 호출한다.
 
 ```
 Agent({
@@ -86,8 +88,8 @@ Agent({
   prompt: """
     base: epic/<name>           # 현재 epic 브랜치
     target: <feature-branch>     # sub-agent worktree의 브랜치
-    충돌이 발생했다. atelier:git/resolve 스킬을 사용해 파일별로 충돌을 해결하고
-    epic 브랜치 위로 rebase 를 완료해라.
+    충돌이 발생했다. git skill 의 references/conflict-resolution.md 전략(또는
+    /atelier:resolve)으로 파일별로 충돌을 해결하고 epic 브랜치 위로 rebase 를 완료해라.
     완료 후 변경된 파일 목록과 최종 커밋 해시를 보고해라.
   """
 })

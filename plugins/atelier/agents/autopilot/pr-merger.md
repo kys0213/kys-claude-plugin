@@ -34,17 +34,10 @@ git fetch origin ${BASE_BRANCH}
 git rebase origin/${BASE_BRANCH}
 ```
 
-충돌 발생 시:
-1. `git diff --name-only --diff-filter=U`로 충돌 파일 목록
-2. 각 충돌 파일의 `<<<<<<<` ~ `>>>>>>>` 마커 분석
-3. 양측 변경 의도 파악 후 Edit로 해결
-
-| 상황 | 전략 |
-|------|------|
-| 서로 다른 부분 수정 | 양측 모두 반영 |
-| 동일 부분, 호환 가능 | 두 변경 통합 |
-| 동일 부분, 상충 | 최신 의도 우선 + 기능 보존 |
-| 구조적 변경 | 새 구조에 맞게 재적용 |
+충돌 발생 시 파일별 해결 전략(Ours/Theirs/Manual, marker 의미, 양측 의도 통합)은
+`git` skill 의 `references/conflict-resolution.md` 가 단일 출처다. 여러 변경의 머지
+*조정*(순서·worktree 통합)이 필요하면 `orchestrator` skill 의
+`references/merge-coordinator.md` 를 따른다 (canonical 단일 소유, 05 §4.5).
 
 해결 후:
 ```bash

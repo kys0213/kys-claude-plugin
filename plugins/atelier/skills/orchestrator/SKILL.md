@@ -67,7 +67,7 @@ main
 
 1. **현재 브랜치가 epic 브랜치인가?**
    - `git branch --show-current` 확인
-   - `main` / 일반 feature 브랜치라면 epic 브랜치를 먼저 만들거나 사용자에게 어떤 epic 브랜치로 진입할지 물어본다 (`atelier:git/epic init <name>` 또는 `atelier:git/branch epic/<name>`).
+   - `main` / 일반 feature 브랜치라면 epic 브랜치를 먼저 만들거나 사용자에게 어떤 epic 브랜치로 진입할지 물어본다 (`atelier:epic init <name>` 또는 `atelier:branch epic/<name>`).
 2. **현재 메인이 다른 worktree 안에 있지 않은가?**
    - `git rev-parse --show-toplevel` 가 repo의 메인 working tree여야 함
    - worktree 안에서 오케스트레이터를 시작했다면 즉시 메인 working tree로 빠져나오도록 사용자에게 보고
