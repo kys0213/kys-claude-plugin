@@ -13,7 +13,45 @@ export interface GuardService {
   check(input: GuardInput): Promise<GuardOutput>;
 }
 
-const GIT_COMMIT_PATTERN = /\bgit\b.*\bcommit\b/;
+/** `commit` 서브커맨드 다음에 오기 전 값을 받는(=다음 토큰을 소비하는) git 글로벌 옵션 */
+const VALUE_TAKING_GLOBAL_OPTS = new Set([
+  '-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--exec-path',
+]);
+
+/**
+ * 명령어가 실제로 `git commit`을 **실행**하는지 토큰 기반으로 판정합니다.
+ *
+ * 기존 `/\bgit\b.*\bcommit\b/` 정규식은 substring 매칭이라
+ * `gh issue create --body "...git commit..."` 처럼 본문/변수 안에 'git'과 'commit'이
+ * 들어간 명령까지 false positive로 차단했습니다 (#754).
+ *
+ * 이 함수는 셸 구분자(`&&`, `||`, `;`, `|`, 개행)로 세그먼트를 나눈 뒤,
+ * 각 세그먼트의 **실제 명령 토큰**이 `git`이고 그 서브커맨드가 `commit`일 때만 true를 반환합니다.
+ * (가드 목적상 따옴표 내부까지 엄밀히 파싱하지는 않습니다.)
+ */
+export function isGitCommitCommand(command: string): boolean {
+  const segments = command.split(/&&|\|\||[;\n|]/);
+  for (const seg of segments) {
+    const tokens = seg.trim().split(/\s+/).filter(Boolean);
+
+    // 선행 환경변수 할당 제거 (예: `GIT_AUTHOR_NAME=x git commit`)
+    let i = 0;
+    while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
+    if (i >= tokens.length) continue;
+
+    // 명령 토큰이 git(또는 /usr/bin/git 같은 경로 형태)인지 확인
+    const cmd = tokens[i];
+    if (cmd !== 'git' && !cmd.endsWith('/git')) continue;
+
+    // git 다음의 첫 비옵션 토큰 = 서브커맨드. 값을 받는 글로벌 옵션은 값 토큰까지 건너뜀.
+    let j = i + 1;
+    while (j < tokens.length && tokens[j].startsWith('-')) {
+      j += VALUE_TAKING_GLOBAL_OPTS.has(tokens[j]) ? 2 : 1;
+    }
+    if (j < tokens.length && tokens[j] === 'commit') return true;
+  }
+  return false;
+}
 
 /**
  * 파일 경로가 프로젝트 디렉토리 내부에 있는지 확인합니다.
@@ -66,8 +104,8 @@ export function createGuardService(git: GitService): GuardService {
         }
       }
 
-      // commit guard: git commit 패턴이 아니면 패스
-      if (input.target === 'commit' && (!input.toolCommand || !GIT_COMMIT_PATTERN.test(input.toolCommand))) {
+      // commit guard: 실제 git commit 명령이 아니면 패스 (substring false positive 방지 — #754)
+      if (input.target === 'commit' && (!input.toolCommand || !isGitCommitCommand(input.toolCommand))) {
         return pass('not a git commit command');
       }
 
@@ -121,6 +159,9 @@ export function createGuardService(git: GitService): GuardService {
         defaultBranch,
         reason: [
           `[Branch Guard] 보호 브랜치(${currentBranch})에서 ${action}.`,
+          // 진단 정보: 어느 디렉토리/브랜치를 기준으로 판정했는지 노출 (worktree 디버깅 용이성 — #754)
+          `  평가 디렉토리: ${input.projectDir}`,
+          `  감지된 브랜치: ${currentBranch} (기본 브랜치: ${defaultBranch})`,
           `먼저 새 브랜치를 생성해주세요:`,
           `  ${input.createBranchScript} <branch-name>`,
         ].join('\n'),

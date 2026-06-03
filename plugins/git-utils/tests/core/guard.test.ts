@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { createGuardService, isInsideProjectDir, isInsideAnyGitRepo } from '../../src/core/guard';
+import { createGuardService, isInsideProjectDir, isInsideAnyGitRepo, isGitCommitCommand } from '../../src/core/guard';
 import type { GitService } from '../../src/core/git';
 import type { GuardInput } from '../../src/types';
 
@@ -206,6 +206,68 @@ describe('GuardService.check', () => {
       const guard = createGuardService(mockGit());
       const result = await guard.check(commitInput);
       expect(result.allowed).toBe(true);
+    });
+
+    test('gh issue create 본문에 "git commit" 텍스트가 있어도 → allowed: true (false positive 방지 #754)', async () => {
+      const guard = createGuardService(mockGit());
+      const result = await guard.check({
+        ...commitInput,
+        toolCommand: 'gh issue create --title "x" --body "먼저 git commit 후 push 하세요"',
+      });
+      expect(result.allowed).toBe(true);
+    });
+
+    test('curl 본문 변수에 git commit substring이 있어도 → allowed: true', async () => {
+      const guard = createGuardService(mockGit());
+      const result = await guard.check({
+        ...commitInput,
+        toolCommand: 'curl -X POST -d "git commit message log" https://example.com',
+      });
+      expect(result.allowed).toBe(true);
+    });
+
+    test('선행 환경변수 + git commit이면 → allowed: false (차단)', async () => {
+      const guard = createGuardService(mockGit());
+      const result = await guard.check({
+        ...commitInput,
+        toolCommand: 'GIT_AUTHOR_NAME=bot git commit -m "x"',
+      });
+      expect(result.allowed).toBe(false);
+    });
+
+    test('값을 받는 글로벌 옵션 뒤 commit이면 → allowed: false (git -C path commit)', async () => {
+      const guard = createGuardService(mockGit());
+      const result = await guard.check({
+        ...commitInput,
+        toolCommand: 'git -C /repo -c user.name=x commit -m "x"',
+      });
+      expect(result.allowed).toBe(false);
+    });
+  });
+
+  describe('isGitCommitCommand (토큰 기반 판정)', () => {
+    test('실제 git commit → true', () => {
+      expect(isGitCommitCommand('git commit -m "x"')).toBe(true);
+      expect(isGitCommitCommand('git add . && git commit -m "x"')).toBe(true);
+      expect(isGitCommitCommand('GIT_AUTHOR_NAME=bot git commit')).toBe(true);
+      expect(isGitCommitCommand('git -C /repo commit -m "x"')).toBe(true);
+      expect(isGitCommitCommand('/usr/bin/git commit')).toBe(true);
+    });
+
+    test('git 비-commit 서브커맨드 → false', () => {
+      expect(isGitCommitCommand('git push origin main')).toBe(false);
+      expect(isGitCommitCommand('git log --oneline')).toBe(false);
+      expect(isGitCommitCommand('git commit-graph write')).toBe(false); // commit-graph는 commit 아님
+    });
+
+    test('git 명령이 아닌데 본문에 git commit substring → false (#754)', () => {
+      expect(isGitCommitCommand('gh issue create --body "git commit 하세요"')).toBe(false);
+      expect(isGitCommitCommand('echo "git commit"')).toBe(false);
+      expect(isGitCommitCommand('curl -d "git commit" https://x')).toBe(false);
+    });
+
+    test('빈 문자열 → false', () => {
+      expect(isGitCommitCommand('')).toBe(false);
     });
   });
 

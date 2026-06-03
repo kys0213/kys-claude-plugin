@@ -188,12 +188,17 @@ async function main(): Promise<void> {
     }
 
     case 'guard': {
-      const guard = createGuardService(git);
       const target = parsed.positional[0] as GuardTarget;
       if (!target || !['write', 'commit'].includes(target)) {
         console.error('Usage: git-utils guard <write|commit> --project-dir=<p> --create-branch-script=<s>');
         process.exit(1);
       }
+
+      // 브랜치 판정은 projectDir(hook의 ${CLAUDE_PROJECT_DIR}) 기준으로 수행해야 한다.
+      // 기본 git 서비스는 process.cwd()(=하네스 셸 cwd, 보통 메인 worktree)를 쓰므로
+      // worktree에서 항상 메인 브랜치로 오판정하는 false positive가 발생한다 (#754).
+      const projectDir = (parsed.flags['project-dir'] as string) || process.cwd();
+      const guard = createGuardService(createGitService(projectDir));
 
       const { toolCommand, toolFilePath } = await readHookStdin();
 
@@ -205,7 +210,7 @@ async function main(): Promise<void> {
 
       const result = await guard.check({
         target,
-        projectDir: (parsed.flags['project-dir'] as string) || process.cwd(),
+        projectDir,
         createBranchScript: (parsed.flags['create-branch-script'] as string) || 'git-utils branch',
         defaultBranch: parsed.flags['default-branch'] as string | undefined,
         protectedBranches,
