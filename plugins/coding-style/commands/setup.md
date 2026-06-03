@@ -121,6 +121,29 @@ coding-style Stop hook이 이미 등록되어 있습니다.
 
 **주의:** 기존 hooks 설정이 있으면 `Stop`만 추가하고, 다른 hook은 건드리지 않습니다.
 
+> ⚠️ **`${CLAUDE_PLUGIN_ROOT}` 리터럴 보존 (필수)**
+>
+> `command` 값에는 **`${CLAUDE_PLUGIN_ROOT}` 문자열을 리터럴 그대로** 기록해야 합니다.
+> 가독성·검증을 위해 실제 절대경로(`/Users/.../plugins/cache/.../0.x.y/hooks/...`)로
+> **절대 풀어 쓰지 마세요.** 변수를 expand해서 박으면 플러그인이 업데이트되어 버전
+> 디렉토리가 바뀔 때 hook 경로가 깨져 매 턴 hook error가 발생합니다.
+> `${CLAUDE_PLUGIN_ROOT}` 해석은 Claude Code 런타임에 맡깁니다.
+
+### 2-3. 등록 검증
+
+Write 직후 `~/.claude/settings.json`을 다시 읽어 다음을 확인합니다:
+
+```bash
+cat ~/.claude/settings.json
+```
+
+- `suggest-simplify.sh`를 호출하는 Stop hook 항목이 존재하는가
+- 해당 `command`에 **리터럴 `${CLAUDE_PLUGIN_ROOT}`** 가 포함되어 있는가
+
+`${CLAUDE_PLUGIN_ROOT}` 대신 절대경로(`/Users/...` 또는 `/home/...`)가 박혀 있으면,
+해당 항목의 `command`를 `bash ${CLAUDE_PLUGIN_ROOT}/hooks/suggest-simplify.sh`로
+다시 교체한 뒤 저장합니다. 검증을 통과하지 못하면 설치 성공 메시지를 출력하지 않습니다.
+
 ## Step 3: 결과 확인
 
 설치 완료 후 요약을 출력합니다:
