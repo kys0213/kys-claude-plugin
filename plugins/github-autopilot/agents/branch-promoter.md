@@ -45,11 +45,13 @@ git push -u origin "$FEATURE_BRANCH"
 ### 3. PR 생성
 
 ```bash
-# base 브랜치 결정 (우선순위: work_branch > branch_strategy)
-# work_branch 설정 시 → work_branch (예: "alpha")
-# draft-main → main
-# draft-develop-main → develop
-BASE_BRANCH="${WORK_BRANCH:-main}"  # work_branch가 있으면 사용, 없으면 전략에 따라 결정
+# base 브랜치는 호출 측(branch-sync)에서 이미 결정되어 입력(base_branch)으로 전달됩니다.
+# 우선순위: work_branch > branch_strategy. 직접 재계산하지 말고 전달받은 값을 사용합니다.
+#   - work_branch 설정 시 → work_branch (예: "alpha")
+#   - branch_strategy: "draft-develop-main" → develop
+#   - branch_strategy: "draft-main" 또는 미설정 → main
+# (입력에 base_branch가 누락된 경우에만 안전하게 main으로 폴백)
+BASE_BRANCH="${BASE_BRANCH:-main}"
 
 # ISSUE_NUMBER가 비어 있으면 ${VAR:+...} 확장이 빈 문자열로 평가되어 Closes 라인이 사라집니다
 gh pr create \
