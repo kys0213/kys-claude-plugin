@@ -1,5 +1,5 @@
 ---
-description: (내부용) /atelier:gap-watch에서 호출되는 갭 분석 리포트 → autopilot ledger task 변환 에이전트
+description: (내부용) autopilot skill 의 gap-watch reference 에서 호출되는 갭 분석 리포트 → autopilot ledger task 변환 에이전트
 model: haiku
 tools: ["Bash"]
 ---

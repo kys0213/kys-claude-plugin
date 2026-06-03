@@ -9,26 +9,28 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/kys0213/kys-claude-plugin/tools/validate/internal/architecture"
+	"github.com/kys0213/kys-claude-plugin/tools/validate/internal/extraction"
 	"github.com/kys0213/kys-claude-plugin/tools/validate/internal/path"
 	"github.com/kys0213/kys-claude-plugin/tools/validate/internal/spec"
 	"github.com/kys0213/kys-claude-plugin/tools/validate/internal/version"
 )
 
 var (
-	specsOnly    = flag.Bool("specs-only", false, "Run only spec validation")
-	pathsOnly    = flag.Bool("paths-only", false, "Run only path validation")
-	versionsOnly = flag.Bool("versions-only", false, "Run only version validation")
-	archOnly     = flag.Bool("arch-only", false, "Run only architecture validation")
-	skipVersions = flag.Bool("skip-versions", false, "Skip version validation (for CI)")
-	verbose      = flag.Bool("verbose", false, "Verbose output")
-	shortVerbose = flag.Bool("v", false, "Verbose output (short)")
+	specsOnly      = flag.Bool("specs-only", false, "Run only spec validation")
+	pathsOnly      = flag.Bool("paths-only", false, "Run only path validation")
+	versionsOnly   = flag.Bool("versions-only", false, "Run only version validation")
+	archOnly       = flag.Bool("arch-only", false, "Run only architecture validation")
+	extractionOnly = flag.Bool("extraction-only", false, "Run only extraction-completeness validation")
+	skipVersions   = flag.Bool("skip-versions", false, "Skip version validation (for CI)")
+	verbose        = flag.Bool("verbose", false, "Verbose output")
+	shortVerbose   = flag.Bool("v", false, "Verbose output (short)")
 )
 
 func main() {
 	flag.Parse()
 
 	isVerbose := *verbose || *shortVerbose
-	runAll := !*specsOnly && !*pathsOnly && !*versionsOnly && !*archOnly
+	runAll := !*specsOnly && !*pathsOnly && !*versionsOnly && !*archOnly && !*extractionOnly
 
 	// Get repo root
 	repoRoot := "."
@@ -110,7 +112,7 @@ func main() {
 
 	// 4. Architecture validation
 	if runAll || *archOnly {
-		cyan.Println("🏗️  [4/4] Validating Architecture...")
+		cyan.Println("🏗️  [4/5] Validating Architecture...")
 		gray.Println("    Checking layer dependencies, content similarity, responsibilities")
 		fmt.Println()
 
@@ -124,6 +126,24 @@ func main() {
 		totalPassed += len(results.Passed)
 		totalFailed += len(results.Failed)
 		totalWarnings += len(results.Warnings)
+		fmt.Println()
+	}
+
+	// 5. Extraction-completeness validation
+	if runAll || *extractionOnly {
+		cyan.Println("🧩 [5/5] Validating Extraction Completeness...")
+		gray.Println("    Checking refactor-invariant tokens survived (skill references)")
+		fmt.Println()
+
+		results, err := extraction.Validate(repoRoot)
+		if err != nil {
+			red.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		printExtractionResults(results.Passed, results.Failed, isVerbose)
+		totalPassed += len(results.Passed)
+		totalFailed += len(results.Failed)
 		fmt.Println()
 	}
 
@@ -146,6 +166,29 @@ func main() {
 		green.Println("✅ Validation PASSED")
 		fmt.Println()
 		os.Exit(0)
+	}
+}
+
+func printExtractionResults(passed []extraction.Result, failed []extraction.Result, verbose bool) {
+	red := color.New(color.FgRed)
+	green := color.New(color.FgGreen)
+	gray := color.New(color.FgHiBlack)
+
+	for _, result := range failed {
+		red.Printf("  ✗ %s\n", result.File)
+		gray.Printf("    Type: %s\n", result.Type)
+		for _, err := range result.Errors {
+			red.Printf("    → %s\n", err)
+		}
+		fmt.Println()
+	}
+
+	if verbose {
+		for _, result := range passed {
+			green.Printf("  ✓ %s\n", result.Type)
+		}
+	} else if len(passed) > 0 {
+		green.Printf("  ✓ %d invariants present\n", len(passed))
 	}
 }
 
