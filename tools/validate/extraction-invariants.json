@@ -1,0 +1,33 @@
+{
+  "_comment": "Extraction completeness invariants for the atelier plugin. After Epic 2 moved Fat-Controller command logic into skill references, these tokens MUST remain present somewhere under plugins/atelier/ (skills + surviving commands). If a refactor drops one, validate fails — catching the class of regression where thinning a command loses load-bearing content (e.g. design output structures, the #643 merge guard, the rebase --continue conflict guard). Each invariant: a token (literal substring) that must appear in >=1 file under the listed search root, with a human reason.",
+  "search_roots": [
+    "plugins/atelier/skills",
+    "plugins/atelier/commands"
+  ],
+  "invariants": [
+    {"domain": "spec/design", "token": "## OCP 확장점", "reason": "design DESIGN.md 출력 구조 섹션"},
+    {"domain": "spec/design", "token": "## 미결정 사항", "reason": "design DESIGN.md 출력 구조 섹션"},
+    {"domain": "spec/design", "token": "## 관심사 분리", "reason": "design DESIGN.md 출력 구조 섹션"},
+    {"domain": "spec/design-detail", "token": "## 핵심 로직", "reason": "design-detail concerns 출력 구조"},
+    {"domain": "spec/design-detail", "token": "## 흐름 다이어그램", "reason": "design-detail flows 출력 구조"},
+    {"domain": "spec/design-detail", "token": "3개 이상", "reason": "design-detail 수렴 임계값 (design 4개와 구분)"},
+    {"domain": "spec/design-detail", "token": "spec/concerns/", "reason": "design-detail 컴포넌트 저장 경로"},
+    {"domain": "spec/design-detail", "token": "spec/flows/", "reason": "design-detail 플로우 저장 경로"},
+    {"domain": "spec/review", "token": "excerpt mismatch", "reason": "L1 인용 검증 실패 사유"},
+    {"domain": "spec/review", "token": "gap-auditor", "reason": "audit 단일 게이트 에이전트"},
+    {"domain": "spec/annotate", "token": "## 에러 처리", "reason": "annotate 에러 처리 (매칭 0건/retry)"},
+    {"domain": "git/resolve", "token": "diff-filter=U", "reason": "rebase --continue 미해결 충돌 가드"},
+    {"domain": "git/resolve", "token": "rebase --abort", "reason": "resolve --abort 인자 처리"},
+    {"domain": "git/sync", "token": "auto-stash before git-sync", "reason": "sync --force stash 정책"},
+    {"domain": "git/prioritize", "token": "closedByPullRequests", "reason": "이슈 우선순위 PR 상태 필터"},
+    {"domain": "autopilot/merge", "token": "#643", "reason": "머지 종료코드 가드 (실패 시 이슈 오close 방지)"},
+    {"domain": "autopilot/merge", "token": "--squash --delete-branch", "reason": "PR squash merge 실행"},
+    {"domain": "autopilot/build", "token": "max_consecutive_failures", "reason": "build 에스컬레이션 임계값"},
+    {"domain": "autopilot/build", "token": "autopilot issue extract-fingerprint", "reason": "gap 이슈 false-positive 사전 검증"},
+    {"domain": "autopilot/ci", "token": "max_ci_fix_retries", "reason": "ci-fix 재시도 한도"},
+    {"domain": "autopilot/pipeline", "token": "at-capacity", "reason": "pipeline capacity check (exit 3)"},
+    {"domain": "autopilot/stagnation", "token": "consecutive_failures", "reason": "정체 persona index 결정"},
+    {"domain": "autopilot/stagnation", "token": "recommended_persona", "reason": "정체 redirect persona"},
+    {"domain": "autopilot/ledger", "token": "by-depth", "reason": "work-ledger epic 선택 전략"}
+  ]
+}
