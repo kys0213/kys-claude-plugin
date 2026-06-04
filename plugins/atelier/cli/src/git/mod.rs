@@ -2,3 +2,4 @@
 //! plugin (TypeScript) into the unified atelier Rust CLI.
 
 pub mod core;
+pub mod types;

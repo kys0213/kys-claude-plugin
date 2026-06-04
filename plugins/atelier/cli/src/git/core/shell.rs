@@ -17,10 +17,16 @@ pub struct ExecResult {
     pub exit_code: i32,
 }
 
-/// Runs `command` (argv form, `command[0]` is the program), optionally in
-/// `cwd`. Returns the captured output without ever returning an error for a
-/// non-zero exit — the exit code is surfaced in [`ExecResult::exit_code`].
+/// Runs `command` (argv form, `command[0]` is the program) in `cwd`. Thin
+/// wrapper over [`exec_env`] with no extra environment.
 pub fn exec(command: &[&str], cwd: Option<&Path>) -> Result<ExecResult> {
+    exec_env(command, cwd, &[])
+}
+
+/// Like [`exec`] but layers `env` (key/value pairs) on top of the inherited
+/// environment. Never returns an error for a non-zero exit — the exit code is
+/// surfaced in [`ExecResult::exit_code`].
+pub fn exec_env(command: &[&str], cwd: Option<&Path>, env: &[(&str, &str)]) -> Result<ExecResult> {
     let (program, args) = command
         .split_first()
         .ok_or_else(|| anyhow::anyhow!("exec: empty command"))?;
@@ -28,6 +34,9 @@ pub fn exec(command: &[&str], cwd: Option<&Path>) -> Result<ExecResult> {
     cmd.args(args);
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
+    }
+    for (k, v) in env {
+        cmd.env(k, v);
     }
     let output = cmd
         .output()
