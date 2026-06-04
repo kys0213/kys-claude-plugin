@@ -1,7 +1,7 @@
 //! Black-box port of git-utils `tests/core/jira.test.ts`
 //! (`JiraService.detectTicket`).
 
-use atelier::git::jira::{detect_ticket, JiraTicket};
+use atelier::git::core::jira::{detect_ticket, JiraTicket};
 
 fn ticket(raw: &str, normalized: &str) -> JiraTicket {
     JiraTicket {
