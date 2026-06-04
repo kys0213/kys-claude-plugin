@@ -3,6 +3,7 @@
 
 pub mod git;
 pub mod github;
+pub mod guard;
 pub mod jira;
 pub mod pr_guard;
 pub mod shell;
