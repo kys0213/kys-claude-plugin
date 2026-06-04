@@ -202,6 +202,23 @@
       "name": "orchestrator",
       "source": "./plugins/orchestrator",
       "version": "0.2.0"
+    },
+    {
+      "category": "productivity",
+      "description": "[WIP — Epic 1 진행 중] 통합 개발 워크플로우 plugin: git·spec·autopilot·workflow를 단일 큐레이션. 설계: plans/atelier/",
+      "keywords": [
+        "atelier",
+        "workflow",
+        "unified",
+        "develop",
+        "autopilot",
+        "spec",
+        "git"
+      ],
+      "name": "atelier",
+      "source": "./plugins/atelier",
+      "strict": false,
+      "version": "0.1.0"
     }
   ]
 }
