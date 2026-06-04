@@ -35,6 +35,10 @@ tempfile = "3"
 features = []
 
 [[package.metadata.ci.targets]]
+os = "ubuntu-latest"
+artifact-suffix = "linux-x86_64"
+
+[[package.metadata.ci.targets]]
 os = "macos-latest"
 artifact-suffix = "darwin-aarch64"
 

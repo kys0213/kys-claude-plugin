@@ -2,7 +2,7 @@
 paths:
   - "**/hooks/**"
   - "**/scripts/**"
-  - "**/cmd/hook/**"
+  - "**/cli/src/hook/**"
 ---
 
 # 도구 층 경계: CLI · 스크립트 · 훅
@@ -27,11 +27,11 @@ paths:
 ### DO
 
 ```jsonc
-// settings.json 훅 등록 — 바이너리 직접 호출, 부재 시 skip
-"command": "command -v autopilot >/dev/null 2>&1 && autopilot hook guard-pr-base || exit 0"
+// settings.json 훅 등록 — 통합 바이너리 직접 호출, 부재 시 skip
+"command": "command -v atelier >/dev/null 2>&1 && atelier hook guard-pr-base || exit 0"
 ```
 ```rust
-// src/cmd/hook/guard_pr_base.rs — 로직은 CLI에. stdin(JSON) 읽고 결정 JSON 출력.
+// plugins/atelier/cli/src/hook/guard_pr_base.rs — 로직은 CLI에. stdin(JSON) 읽고 결정 JSON 출력.
 ```
 
 ### DON'T

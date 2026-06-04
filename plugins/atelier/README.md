@@ -17,7 +17,10 @@
 | `coding-style` | `skills/coding-style/` |
 | `orchestrator` | `skills/orchestrator/`, `docs/orchestrator-pattern.md` |
 
-분리 유지(흡수 안 함): `develop-workflow`, `suggest-workflow`, `autodev`, `hud`, `external-llm`, `barrier-sync`, `openclaw-docker`.
+흡수하지 않는 plugin은 두 부류다 (concept §3.2 / §3.3):
+
+- **영구 분리** (성격이 다른 인프라): `external-llm`, `barrier-sync`, `openclaw-docker`
+- **일단 유지, atelier 안정화 후 제거 검토**: `suggest-workflow`, `autodev`, `develop-workflow`, `hud`
 
 ## 슬래시 표면 (placeholder)
 

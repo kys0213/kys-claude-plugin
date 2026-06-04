@@ -4,7 +4,12 @@ use clap::{Parser, Subcommand};
 /// subcommand group; this crate currently routes the `autopilot` group, with
 /// further groups folded in as the consolidation progresses.
 #[derive(Parser)]
-#[command(name = "atelier", version, about = "Unified development workflow CLI")]
+#[command(
+    name = "atelier",
+    version,
+    propagate_version = true,
+    about = "Unified development workflow CLI"
+)]
 pub struct Atelier {
     #[command(subcommand)]
     pub command: Group,

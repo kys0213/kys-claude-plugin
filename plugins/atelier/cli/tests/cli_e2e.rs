@@ -1,11 +1,17 @@
-//! End-to-end black-box tests for the `autopilot` binary.
+//! End-to-end black-box tests for the `atelier` binary's `autopilot`
+//! subcommand group (`atelier autopilot <...>`).
 //!
 //! Unlike the in-process tests under `tests/*_tests.rs` (which construct
 //! `TaskService` directly and exercise pure Rust APIs), these tests **spawn
 //! the actual binary** via `assert_cmd`. They cover the `clap` argparse
-//! layer, the routing in `main.rs`, and the real `stdout` / `stderr` /
-//! exit-code surface that operators see — the gap C1 of `cli-ux-hardening`
-//! is filling.
+//! layer, the routing in `main.rs` / `cli.rs`, and the real `stdout` /
+//! `stderr` / exit-code surface that operators see — the gap C1 of
+//! `cli-ux-hardening` is filling.
+//!
+//! The shared [`Workspace::cmd`] helper builds `atelier autopilot ...`
+//! (i.e. it injects the `autopilot` subcommand). Top-level `atelier`
+//! behavior (version/help/routing) is covered separately by the
+//! `top_level_*` tests, which spawn the binary without that prefix.
 //!
 //! Each test owns a `TempDir` workspace and points the binary's SQLite
 //! store there via `AUTOPILOT_DB_PATH` (the env var honored by
@@ -83,11 +89,54 @@ impl Default for Workspace {
 
 #[test]
 fn e2e_help_subcommand_exits_zero() {
-    // Sanity: the binary boots, clap renders its help, exit code is 0,
-    // and stdout mentions the binary name. If this fails the harness
-    // itself is broken — every other e2e scenario depends on it.
+    // Sanity: the binary boots, clap renders `atelier autopilot --help`,
+    // exit code is 0, and the usage line names the `autopilot` subcommand.
+    // If this fails the harness itself is broken — every other e2e scenario
+    // depends on it.
     let ws = Workspace::new();
     ws.cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("autopilot"));
+}
+
+// ---------- top-level `atelier` router (cli.rs) ----------
+//
+// These spawn the binary WITHOUT the `autopilot` prefix the `Workspace`
+// harness injects, so they exercise the top-level `Atelier` parser and
+// `Group` routing directly.
+
+#[test]
+fn top_level_version_prints_semver() {
+    // `atelier --version` must print a semver and exit 0.
+    Command::cargo_bin("atelier")
+        .expect("locate `atelier` cargo binary")
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"\d+\.\d+\.\d+").unwrap());
+}
+
+#[test]
+fn top_level_autopilot_version_propagates() {
+    // Regression: `atelier autopilot --version` must succeed (propagated
+    // from the top-level command), not error with "unexpected argument".
+    // This is the natural translation of the old `autopilot --version`.
+    Command::cargo_bin("atelier")
+        .expect("locate `atelier` cargo binary")
+        .args(["autopilot", "--version"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_match(r"\d+\.\d+\.\d+").unwrap());
+}
+
+#[test]
+fn top_level_help_lists_autopilot_group() {
+    // `atelier --help` boots the top-level router and lists the autopilot
+    // subcommand group.
+    Command::cargo_bin("atelier")
+        .expect("locate `atelier` cargo binary")
         .arg("--help")
         .assert()
         .success()
