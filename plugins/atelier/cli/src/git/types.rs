@@ -76,3 +76,17 @@ pub struct GuardOutput {
     pub current_branch: Option<String>,
     pub default_branch: Option<String>,
 }
+
+/// Input to the `branch` command.
+#[derive(Debug, Clone)]
+pub struct BranchInput {
+    pub branch_name: String,
+    pub base_branch: Option<String>,
+}
+
+/// Output of the `branch` command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchOutput {
+    pub branch_name: String,
+    pub base_branch: String,
+}
