@@ -1,0 +1,305 @@
+pub mod analysis;
+pub mod spec_code;
+pub mod stagnation;
+pub mod state;
+
+use anyhow::Result;
+use serde::Serialize;
+
+use crate::autopilot::fs::FsOps;
+use crate::autopilot::git::GitOps;
+
+use analysis::{AnalysisContext, DiffAnalysis};
+use state::{
+    append_output_entry, read_state, state_dir, state_file_path, validate_loop_name, write_state,
+    OutputEntry, STATE_EXT,
+};
+
+// Exit codes with business semantics
+pub const EXIT_NO_CHANGES: i32 = 0;
+pub const EXIT_SPEC_CHANGED: i32 = 1;
+pub const EXIT_CODE_CHANGED: i32 = 2;
+pub const EXIT_FIRST_RUN: i32 = 3;
+/// Stagnation detected (3 ≤ N < 5 similar ledger tasks). Re-exported from
+/// the `stagnation` module so existing call sites keep working after the
+/// ledger-native rewrite.
+pub const EXIT_STAGNATION: i32 = stagnation::EXIT_STAGNATION;
+/// Auto-escalate threshold reached (N ≥ 5 similar ledger tasks).
+pub const EXIT_ESCALATE: i32 = stagnation::EXIT_ESCALATE;
+
+#[derive(Serialize)]
+struct DiffResult {
+    status: String,
+    changed_files: Vec<String>,
+    #[serde(flatten)]
+    extra: serde_json::Value,
+}
+
+impl DiffResult {
+    fn empty(status: &str) -> Self {
+        Self {
+            status: status.to_string(),
+            changed_files: vec![],
+            extra: serde_json::json!({"spec_files": [], "code_files": []}),
+        }
+    }
+}
+
+/// Service that orchestrates change detection and analysis.
+///
+/// Dependencies are injected via constructor. Analysis strategies
+/// are pluggable via the `DiffAnalysis` trait (OCP).
+pub struct CheckService {
+    git: Box<dyn GitOps>,
+    fs: Box<dyn FsOps>,
+    analyzers: Vec<Box<dyn DiffAnalysis>>,
+}
+
+impl CheckService {
+    pub fn new(
+        git: Box<dyn GitOps>,
+        fs: Box<dyn FsOps>,
+        analyzers: Vec<Box<dyn DiffAnalysis>>,
+    ) -> Self {
+        Self { git, fs, analyzers }
+    }
+
+    /// Check what changed since last analysis.
+    ///
+    /// Exit codes: 0=no_changes, 1=spec_changed, 2=code_changed, 3=first_run, 4=stagnation
+    pub fn diff(&self, loop_name: &str, spec_paths: &[String]) -> Result<i32> {
+        validate_loop_name(loop_name)?;
+        let state_file = state_file_path(&state_dir(self.git.as_ref())?, loop_name);
+
+        // Try reading state file; missing file means first run
+        let state = match read_state(self.fs.as_ref(), &state_file) {
+            Ok(s) => s,
+            Err(_) => return print_and_exit(&DiffResult::empty("first_run"), EXIT_FIRST_RUN),
+        };
+
+        if !self.git.commit_exists(&state.hash)? {
+            return print_and_exit(&DiffResult::empty("first_run"), EXIT_FIRST_RUN);
+        }
+
+        let current = self.git.rev_parse_head()?;
+
+        if state.hash == current {
+            return print_and_exit(&DiffResult::empty("no_changes"), EXIT_NO_CHANGES);
+        }
+
+        let changed = self.git.diff_name_only(&state.hash, &current)?;
+
+        if changed.is_empty() {
+            return print_and_exit(&DiffResult::empty("no_changes"), EXIT_NO_CHANGES);
+        }
+
+        // Classify files into spec vs code
+        let mut spec_files = Vec::new();
+        let mut code_files = Vec::new();
+        for file in &changed {
+            let is_spec = spec_paths
+                .iter()
+                .any(|prefix| file.starts_with(prefix.trim_end_matches('/')));
+            if is_spec {
+                spec_files.push(file.clone());
+            } else {
+                code_files.push(file.clone());
+            }
+        }
+
+        // Default exit code from file classification
+        let (status, mut exit) = if !spec_files.is_empty() {
+            ("spec_changed", EXIT_SPEC_CHANGED)
+        } else {
+            ("code_changed", EXIT_CODE_CHANGED)
+        };
+
+        // Run analysis pipeline
+        let ctx = AnalysisContext {
+            loop_name,
+            changed_files: &changed,
+            spec_files: &spec_files,
+            code_files: &code_files,
+            state: &state,
+        };
+
+        let mut merged_extra = serde_json::json!({
+            "spec_files": spec_files,
+            "code_files": code_files,
+        });
+
+        for analyzer in &self.analyzers {
+            let outcome = analyzer.analyze(&ctx)?;
+            if let Some(override_exit) = outcome.exit_override {
+                exit = override_exit;
+            }
+            if let serde_json::Value::Object(map) = outcome.extra_fields {
+                for (k, v) in map {
+                    merged_extra[k] = v;
+                }
+            }
+        }
+
+        let result = DiffResult {
+            status: if exit == EXIT_STAGNATION {
+                "stagnation".to_string()
+            } else {
+                status.to_string()
+            },
+            changed_files: changed,
+            extra: merged_extra,
+        };
+        print_and_exit(&result, exit)
+    }
+
+    /// Record current HEAD as the last analyzed commit.
+    pub fn mark(
+        &self,
+        loop_name: &str,
+        output_hash: Option<&str>,
+        status: Option<&crate::autopilot::cmd::LoopStatus>,
+    ) -> Result<i32> {
+        validate_loop_name(loop_name)?;
+        let state_file = state_file_path(&state_dir(self.git.as_ref())?, loop_name);
+        let hash = self.git.rev_parse_head()?;
+        let ts = state::utc_timestamp();
+
+        // Read existing state or create new one
+        let mut loop_state = read_state(self.fs.as_ref(), &state_file).unwrap_or_default();
+
+        loop_state.hash = hash.clone();
+        loop_state.timestamp = ts.clone();
+
+        match status {
+            Some(crate::autopilot::cmd::LoopStatus::Idle) => loop_state.idle_count += 1,
+            Some(crate::autopilot::cmd::LoopStatus::Active) => loop_state.idle_count = 0,
+            None => {}
+        }
+
+        if let Some(simhash) = output_hash {
+            append_output_entry(
+                &mut loop_state,
+                OutputEntry {
+                    simhash: simhash.to_string(),
+                    category: state::OutputCategory::GapAnalysis,
+                    timestamp: ts.clone(),
+                },
+            );
+        }
+
+        write_state(self.fs.as_ref(), &state_file, &loop_state)?;
+        println!(
+            "marked {loop_name}: {hash} at {ts} (idle_count: {})",
+            loop_state.idle_count
+        );
+        Ok(0)
+    }
+
+    /// Show state of all loops.
+    pub fn status(&self) -> Result<i32> {
+        let dir = state_dir(self.git.as_ref())?;
+
+        let files = match self.fs.list_files(&dir, STATE_EXT) {
+            Ok(f) => f,
+            Err(_) => {
+                println!("(no loop states found)");
+                return Ok(0);
+            }
+        };
+
+        if files.is_empty() {
+            println!("(no loop states found)");
+            return Ok(0);
+        }
+
+        println!("{:<20}  {:<9}  TIMESTAMP", "LOOP", "HASH");
+        println!("{}", "-".repeat(55));
+
+        for file in &files {
+            let name = file
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            if let Ok(state) = read_state(self.fs.as_ref(), file) {
+                let short = &state.hash[..7.min(state.hash.len())];
+                println!("{:<20}  {:<9}  {}", name, short, state.timestamp);
+            }
+        }
+
+        Ok(0)
+    }
+
+    /// Pipeline health report across all loops.
+    ///
+    /// Per the C10 ledger-stagnation redesign
+    /// (`plans/ledger-stagnation-redesign.md`), simhash-based pattern
+    /// classification has moved out of the loop-state pipeline and into
+    /// `autopilot check stagnation` (ledger-native). `health` is now a
+    /// pure overview: it reports the last seen HEAD and history length per
+    /// loop and always marks the pipeline as `healthy` — operators should
+    /// run `check stagnation --task <id>` for the per-task assessment.
+    pub fn health(&self) -> Result<i32> {
+        let dir = state_dir(self.git.as_ref())?;
+        let files = match self.fs.list_files(&dir, STATE_EXT) {
+            Ok(f) => f,
+            Err(_) => {
+                println!(r#"{{"loops":[],"overall":"healthy"}}"#);
+                return Ok(0);
+            }
+        };
+
+        if files.is_empty() {
+            println!(r#"{{"loops":[],"overall":"healthy"}}"#);
+            return Ok(0);
+        }
+
+        let mut loops = Vec::new();
+
+        for file in &files {
+            let name = file
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            if let Ok(loop_state) = read_state(self.fs.as_ref(), file) {
+                loops.push(serde_json::json!({
+                    "name": name,
+                    "hash": &loop_state.hash[..7.min(loop_state.hash.len())],
+                    "timestamp": loop_state.timestamp,
+                    "history_len": loop_state.output_history.len(),
+                }));
+            }
+        }
+
+        let out = serde_json::json!({ "loops": loops, "overall": "healthy" });
+        println!("{out}");
+        Ok(0)
+    }
+
+    /// Reset (delete) state files. If loop_name is given, only that loop; otherwise all.
+    pub fn reset(&self, loop_name: Option<&str>) -> Result<i32> {
+        let dir = state_dir(self.git.as_ref())?;
+
+        if let Some(name) = loop_name {
+            validate_loop_name(name)?;
+            let state_file = state_file_path(&dir, name);
+            self.fs.remove_file(&state_file)?;
+            println!("reset {name}");
+        } else {
+            let files = self.fs.list_files(&dir, STATE_EXT).unwrap_or_default();
+            for file in &files {
+                self.fs.remove_file(file)?;
+            }
+            let count = files.len();
+            println!("reset {count} loop(s)");
+        }
+
+        Ok(0)
+    }
+}
+
+fn print_and_exit(result: &DiffResult, exit: i32) -> Result<i32> {
+    println!("{}", serde_json::to_string(result)?);
+    Ok(exit)
+}
