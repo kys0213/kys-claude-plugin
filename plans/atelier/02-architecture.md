@@ -300,6 +300,46 @@ clap derive 사용. autopilot 의 기존 Cargo 패턴(`clap = { version = "4", f
 - 루트 Makefile 에 `make build-cli` 추가: `cargo build --release --manifest-path plugins/atelier/cli/Cargo.toml`.
 - CI: 기존 autopilot Rust 테스트 워크플로우를 atelier crate 로 경로 이동.
 
+### 4.6 훅 로직의 CLI 흡수 (`atelier hook <name>`)
+
+근거 규칙: `.claude/rules/tool-layer-boundary.md` — **훅에 든 결정적 로직은 셸이 아니라 CLI 서브커맨드**에 두고, 등록 진입점만 thin shim으로 남긴다. atelier는 단일 `atelier` 바이너리를 가지므로, per-plugin 훅의 bash 로직을 `atelier hook <name>` 으로 흡수해 크로스플랫폼 + 블랙박스 테스트 가능하게 만든다. **타깃 바이너리는 `atelier`이지 흡수되어 사라지는 `autopilot`이 아니다.**
+
+흡수 대상 3개 훅 (github-autopilot 출신, §2 `hooks/` 디렉토리):
+
+| 훅 | 현재 | atelier 처리 |
+|----|------|-------------|
+| `guard-pr-base.sh` | config 파싱 + PR base 검증/차단 **전부 bash** | **`atelier hook guard-pr-base` 로 이전** (파일럿) |
+| `protect-stagnation.sh` | 이미 `autopilot check stagnation`/`task escalate` 위임, 셸은 stdin 파싱·N≥5 해석 | 파싱/해석 로직 `atelier hook protect-stagnation` 으로 이전 (후속) |
+| `check-cli-version.sh` | 바이너리 설치/버전 비교 | **부트스트랩 → 셸 유지** (바이너리 전에 도는 코드) |
+
+#### 진입점 등록
+
+```jsonc
+// 권고: 바레 바이너리 + graceful guard (atelier 는 단일 설치 바이너리, 모든 호출이 이미 바레 atelier <subcmd>)
+"command": "command -v atelier >/dev/null 2>&1 && atelier hook guard-pr-base || exit 0"
+```
+기존 사용자 settings.json의 옛 `bash .../hooks/*.sh` 등록은 §3.4 경로 재작성 절차에 편승해 위 형태로 교체한다.
+
+#### 파일럿: `guard-pr-base` 동작 계약 (회귀 없이 이전)
+
+- **입력**: env `CLAUDE_PROJECT_DIR`, `CLAUDE_TOOL_USE_NAME`, stdin(JSON tool input), 파일 `github-autopilot.local.md` frontmatter(`work_branch`/`branch_strategy`)
+- **EXPECTED_BASE**: `work_branch` > (`branch_strategy==draft-develop-main` → `develop`) > `main`
+- **ACTUAL_BASE**: `mcp__github__create_pull_request` → `.base`; `Bash` → `gh pr create` 의 `--base[= ]<val>`; 그 외 없음
+- **출력/exit (★ 호환 핵심)**: config 없음/추출 불가/일치 → `exit 0`; 불일치 → stderr(`BLOCKED: PR base branch mismatch` + expected/actual) + `exit 2`. 신규 JSON permissionDecision 규약으로 바꾸지 않고 **기존 exit-code(0/2) 규약 그대로 재현** (autopilot `check stagnation` 의 0/4/5 선례와 정합).
+
+#### 코드 위치 / 설계
+
+```
+plugins/atelier/cli/src/
+  hook/mod.rs            # HookCommands enum (atelier hook <subcmd>)
+  hook/guard_pr_base.rs  # 순수 함수: expected_base() / actual_base() / decide()
+  autopilot/config.rs    # github-autopilot.local.md frontmatter 파서 (신규 — 현재 어느 crate에도 없음)
+```
+
+순수 함수(`expected_base`/`actual_base`/`decide`)로 분리해 단위 테스트하고, 진입점에서 `Decision`→exit/stderr 변환. TDD 블랙박스 테스트 `tests/hook_guard_pr_base.rs` (assert_cmd): 비프로젝트·일치·불일치(mcp/Bash)·draft-develop-main·대상외도구·base없음 등 10케이스. **테스트 먼저 작성 → fail → 구현.**
+
+> 이 절은 `plans/github-autopilot/05-hook-cli-migration.md` 를 흡수한 단일 출처다. 해당 문서는 superseded.
+
 ---
 
 ## 5. 중복 책임 통합
