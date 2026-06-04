@@ -5,7 +5,8 @@
 mod git_mocks;
 
 use atelier::git::core::guard::{
-    create_guard_service, is_inside_any_git_repo, is_inside_project_dir, GuardService,
+    create_guard_service, is_git_commit_command, is_inside_any_git_repo, is_inside_project_dir,
+    GuardService,
 };
 use atelier::git::types::{GitSpecialState, GuardInput, GuardTarget};
 use git_mocks::MockGit;
@@ -199,6 +200,53 @@ fn commit_target_no_command_passes() {
     let mut input = base_input();
     input.target = GuardTarget::Commit;
     assert!(check(MockGit::default(), &input).allowed);
+}
+
+#[test]
+fn commit_target_gh_issue_body_substring_passes() {
+    // 본문에 "git commit" 텍스트가 있어도 실제 git 명령이 아니므로 통과 (#754).
+    let mut input = base_input();
+    input.target = GuardTarget::Commit;
+    input.tool_command =
+        Some(r#"gh issue create --title "x" --body "먼저 git commit 후 push 하세요""#.to_string());
+    assert!(check(MockGit::default(), &input).allowed);
+}
+
+#[test]
+fn commit_target_env_prefix_blocked() {
+    let mut input = base_input();
+    input.target = GuardTarget::Commit;
+    input.tool_command = Some("GIT_AUTHOR_NAME=bot git commit -m \"x\"".to_string());
+    assert!(!check(MockGit::default(), &input).allowed);
+}
+
+#[test]
+fn commit_target_global_opts_blocked() {
+    let mut input = base_input();
+    input.target = GuardTarget::Commit;
+    input.tool_command = Some("git -C /repo -c user.name=x commit -m \"x\"".to_string());
+    assert!(!check(MockGit::default(), &input).allowed);
+}
+
+#[test]
+fn is_git_commit_command_cases() {
+    // 실제 git commit
+    assert!(is_git_commit_command("git commit -m \"x\""));
+    assert!(is_git_commit_command("git add . && git commit -m \"x\""));
+    assert!(is_git_commit_command("GIT_AUTHOR_NAME=bot git commit"));
+    assert!(is_git_commit_command("git -C /repo commit -m \"x\""));
+    assert!(is_git_commit_command("/usr/bin/git commit"));
+    // git 의 비-commit 서브커맨드
+    assert!(!is_git_commit_command("git push origin main"));
+    assert!(!is_git_commit_command("git log --oneline"));
+    assert!(!is_git_commit_command("git commit-graph write")); // commit-graph는 commit 아님
+                                                               // git 명령이 아닌데 본문에 substring
+    assert!(!is_git_commit_command(
+        "gh issue create --body \"git commit 하세요\""
+    ));
+    assert!(!is_git_commit_command("echo \"git commit\""));
+    assert!(!is_git_commit_command("curl -d \"git commit\" https://x"));
+    assert!(!is_git_commit_command(""));
 }
 
 #[test]

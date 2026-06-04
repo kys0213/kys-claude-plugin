@@ -11,6 +11,13 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 
 > ⚠️ 모든 hook 은 user scope(`~/.claude/settings.json`)에 등록됩니다.
 > hook 명령은 `${CLAUDE_PLUGIN_ROOT}/hooks/<file>.sh` 형태로, atelier plugin 컨텍스트에서 해석됩니다.
+>
+> ⚠️ **`${CLAUDE_PLUGIN_ROOT}` 리터럴 보존 (필수)**: settings.json 에 기록할 때
+> `${CLAUDE_PLUGIN_ROOT}` 문자열을 **리터럴 그대로** 써야 합니다. 가독성/검증을 위해 실제
+> 절대경로(`/Users/.../plugins/cache/.../<version>/hooks/...`)로 **절대 풀어 쓰지 마세요.**
+> 변수를 expand 해서 박으면 plugin 업데이트로 버전 디렉토리가 바뀔 때 hook 경로가 깨져 매
+> 도구 호출마다 `No such file or directory` hook error 가 발생합니다. `${CLAUDE_PLUGIN_ROOT}`
+> 해석은 Claude Code 런타임에 맡깁니다.
 
 ## Step 1 — 설치 모듈 선택
 
@@ -87,6 +94,12 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 ```
 
 > **멱등성**: 이미 atelier 경로로 재작성된 settings.json 에 재실행하면 변경 0건이어야 합니다.
+
+> **등록 검증 (필수)**: 기록 직후 `~/.claude/settings.json` 을 다시 읽어, 각 hook command 에
+> **리터럴 `${CLAUDE_PLUGIN_ROOT}`** 가 포함되어 있는지 확인합니다. 절대경로(`/Users/...`,
+> `/home/...`)로 박혀 있으면 `${CLAUDE_PLUGIN_ROOT}/hooks/<file>.sh` 형태로 다시 교체한 뒤
+> 저장합니다. 검증 실패 시 설치 성공 메시지를 출력하지 않습니다. `atelier autopilot preflight`
+> 가 hook 누락을 경고하면 settings.json 을 수동 편집하지 말고 `/atelier:setup` 을 재실행하세요.
 
 치환 대상:
 

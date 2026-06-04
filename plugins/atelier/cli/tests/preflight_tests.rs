@@ -45,6 +45,65 @@ fn all_pass_returns_0() {
 }
 
 #[test]
+fn guard_hook_in_user_scope_passes() {
+    // setup이 user scope(~/.claude/settings.json)에 hook을 설치한 경우에도
+    // preflight이 PASS로 인식해야 한다 (#731 — project scope만 보던 회귀 수정).
+    let home = std::env::var("HOME").expect("HOME must be set in test env");
+    let user_settings = format!("{home}/.claude/settings.json");
+
+    let gh = MockGh::new().on_run_containing("auth", "Logged in");
+    let git = MockGit::new();
+    let fs = MockFs::new()
+        .with_file(
+            "/repo/CLAUDE.md",
+            "# Project\n├── src/\ncargo test\nconvention principle",
+        )
+        .with_file("/repo/.claude/rules/rust.md", "paths:\n  - \"src/\"")
+        .with_file(
+            &user_settings,
+            r#"{"hooks": {"PreToolUse": "guard-pr-base"}}"#,
+        )
+        .with_file("config.local.md", config_content())
+        .with_file("/repo/spec/auth.md", "# Auth spec");
+
+    let code = atelier::autopilot::cmd::preflight::run(
+        &gh,
+        &git,
+        &fs,
+        "config.local.md",
+        "/repo".as_ref(),
+    )
+    .unwrap();
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn unknown_branch_strategy_warns_but_returns_0() {
+    // branch_strategy 오타는 silent fallback 대신 WARN을 띄우되 hard FAIL은 아님 (#758).
+    let gh = MockGh::new().on_run_containing("auth", "Logged in");
+    let git = MockGit::new();
+    let fs = MockFs::new()
+        .with_file(
+            "/repo/CLAUDE.md",
+            "# Project\n├── src/\ncargo test\nconvention principle",
+        )
+        .with_file(
+            "config.local.md",
+            "branch_strategy: \"draft-develup-main\"\nwork_branch: \"\"\n",
+        );
+
+    let code = atelier::autopilot::cmd::preflight::run(
+        &gh,
+        &git,
+        &fs,
+        "config.local.md",
+        "/repo".as_ref(),
+    )
+    .unwrap();
+    assert_eq!(code, 0);
+}
+
+#[test]
 fn missing_claude_md_returns_1() {
     let gh = MockGh::new().on_run_containing("auth", "Logged in");
     let git = MockGit::new();

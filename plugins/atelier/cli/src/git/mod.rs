@@ -267,7 +267,10 @@ pub fn run(cli: Cli) -> i32 {
             });
             let create_branch_script =
                 create_branch_script.unwrap_or_else(|| "atelier git branch".to_string());
-            let git = create_git_service(None);
+            // 브랜치 판정은 project_dir(hook의 ${CLAUDE_PROJECT_DIR}) 기준으로 수행한다.
+            // None(=process cwd, 보통 메인 worktree)을 쓰면 worktree에서 항상 메인
+            // 브랜치로 오판정하는 false positive가 발생한다 (#754).
+            let git = create_git_service(Some(project_dir.clone()));
             let guard = create_guard_service(&git);
             let deps = commands::guard::GuardCommandDeps { guard: &guard };
             let input = GuardInput {

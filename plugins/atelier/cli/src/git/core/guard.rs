@@ -4,12 +4,89 @@
 
 use crate::git::core::git::GitService;
 use crate::git::types::{GuardInput, GuardOutput, GuardTarget};
-use regex::Regex;
 use std::path::{Component, Path, PathBuf};
-use std::sync::LazyLock;
 
-static GIT_COMMIT_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\bgit\b.*\bcommit\b").unwrap());
+/// Value-taking git global options that consume the following token, so the
+/// `commit` subcommand detection can skip over `-C <path>`, `-c <k=v>`, etc.
+const VALUE_TAKING_GLOBAL_OPTS: &[&str] = &[
+    "-C",
+    "-c",
+    "--git-dir",
+    "--work-tree",
+    "--namespace",
+    "--super-prefix",
+    "--exec-path",
+];
+
+/// True when `token` looks like a leading shell env assignment (`FOO=bar`).
+fn is_env_assignment(token: &str) -> bool {
+    match token.split_once('=') {
+        Some((name, _)) => {
+            !name.is_empty()
+                && name.chars().enumerate().all(|(i, c)| {
+                    if i == 0 {
+                        c.is_ascii_alphabetic() || c == '_'
+                    } else {
+                        c.is_ascii_alphanumeric() || c == '_'
+                    }
+                })
+        }
+        None => false,
+    }
+}
+
+/// Decides whether `command` actually *invokes* `git commit`, rather than
+/// merely containing the substrings "git" and "commit" somewhere (e.g. inside
+/// a quoted `--body` of `gh issue create`). The previous `\bgit\b.*\bcommit\b`
+/// regex was a substring match and produced false positives that blocked
+/// unrelated commands on protected branches (#754).
+///
+/// Splits on shell separators (`&&`, `||`, `;`, `|`, newline) and only matches
+/// when a segment's actual command token is `git` and its subcommand is
+/// `commit`. (Quoting is not parsed exhaustively — this is a guard heuristic.)
+pub fn is_git_commit_command(command: &str) -> bool {
+    let normalized = command
+        .replace("&&", "\n")
+        .replace("||", "\n")
+        .replace([';', '|'], "\n");
+
+    for segment in normalized.split('\n') {
+        let tokens: Vec<&str> = segment.split_whitespace().collect();
+
+        // Skip leading env assignments (e.g. `GIT_AUTHOR_NAME=x git commit`).
+        let mut i = 0;
+        while i < tokens.len() && is_env_assignment(tokens[i]) {
+            i += 1;
+        }
+        let Some(&cmd) = tokens.get(i) else {
+            continue;
+        };
+
+        // Command token must be `git` (or a path ending in `/git`).
+        if cmd != "git" && !cmd.ends_with("/git") {
+            continue;
+        }
+
+        // First non-option token after `git` is the subcommand. Value-taking
+        // global options consume their value token too.
+        let mut j = i + 1;
+        while let Some(tok) = tokens.get(j) {
+            if tok.starts_with('-') {
+                j += if VALUE_TAKING_GLOBAL_OPTS.contains(tok) {
+                    2
+                } else {
+                    1
+                };
+            } else {
+                break;
+            }
+        }
+        if tokens.get(j) == Some(&"commit") {
+            return true;
+        }
+    }
+    false
+}
 
 /// Normalizes a path the way Node's `path.resolve` does for the comparison:
 /// makes it absolute against cwd if relative, then lexically collapses
@@ -107,13 +184,13 @@ impl GuardService for RealGuardService<'_> {
             }
         }
 
-        // commit guard: not a git commit command → pass.
+        // commit guard: not a git commit command → pass (substring false
+        // positives are avoided by token-based detection — #754).
         if input.target == GuardTarget::Commit {
             let is_commit = input
                 .tool_command
                 .as_ref()
-                .map(|c| !c.is_empty() && GIT_COMMIT_PATTERN.is_match(c))
-                .unwrap_or(false);
+                .is_some_and(|c| is_git_commit_command(c));
             if !is_commit {
                 return pass(Some("not a git commit command"));
             }
@@ -173,6 +250,9 @@ impl GuardService for RealGuardService<'_> {
         };
         let reason = [
             format!("[Branch Guard] 보호 브랜치({current_branch})에서 {action}."),
+            // 진단 정보: 어느 디렉토리/브랜치를 기준으로 판정했는지 노출 (worktree 디버깅 — #754)
+            format!("  평가 디렉토리: {}", input.project_dir),
+            format!("  감지된 브랜치: {current_branch} (기본 브랜치: {default_branch})"),
             "먼저 새 브랜치를 생성해주세요:".to_string(),
             format!("  {} <branch-name>", input.create_branch_script),
         ]
