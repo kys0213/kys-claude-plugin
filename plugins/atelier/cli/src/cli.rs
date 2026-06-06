@@ -19,4 +19,6 @@ pub struct Atelier {
 pub enum Group {
     /// GitHub autopilot — autonomous dev loop (gap detect, implement, merge, CI)
     Autopilot(crate::autopilot::cmd::AutopilotCli),
+    /// Git workflow — branch, commit, PR, reviews
+    Git(crate::git::cli::GitCli),
 }

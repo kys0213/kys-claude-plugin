@@ -7,5 +7,6 @@ fn main() {
     let cli = Atelier::parse();
     match cli.command {
         Group::Autopilot(autopilot_cli) => atelier::autopilot::run(autopilot_cli),
+        Group::Git(git_cli) => atelier::git::cli::run(git_cli),
     }
 }

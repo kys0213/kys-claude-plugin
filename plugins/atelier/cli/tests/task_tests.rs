@@ -1063,7 +1063,9 @@ fn assert_set_status_parses(subcmd: &str) {
         "done",
     ])
     .unwrap_or_else(|e| panic!("`task {subcmd}` should parse: {e}"));
-    let Group::Autopilot(autopilot) = cli.command;
+    let Group::Autopilot(autopilot) = cli.command else {
+        panic!("expected autopilot group");
+    };
     match autopilot.command {
         Commands::Task {
             command: TaskCommands::SetStatus { task_id, to, .. },
