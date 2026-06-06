@@ -5,3 +5,4 @@
 pub mod branch;
 pub mod commit;
 pub mod pr;
+pub mod reviews;

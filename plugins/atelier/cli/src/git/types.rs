@@ -29,6 +29,13 @@ pub struct ReviewsOutput {
     pub threads: Vec<ReviewThread>,
 }
 
+/// Input to the `reviews` command.
+#[derive(Debug, Clone, Default)]
+pub struct ReviewsInput {
+    /// Explicit PR number; when absent the current branch's PR is detected.
+    pub pr_number: Option<i64>,
+}
+
 /// Input to the PR-creation guard.
 #[derive(Debug, Clone, Default)]
 pub struct PrGuardInput {
