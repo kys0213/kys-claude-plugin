@@ -36,6 +36,45 @@ pub struct ReviewsInput {
     pub pr_number: Option<i64>,
 }
 
+/// Input to `hook register`.
+#[derive(Debug, Clone)]
+pub struct HookRegisterInput {
+    pub hook_type: String,
+    pub matcher: String,
+    pub command: String,
+    pub timeout: Option<i64>,
+    pub project_dir: Option<String>,
+}
+
+/// Output of `hook register`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookRegisterOutput {
+    /// `"created"` or `"updated"`.
+    pub action: String,
+    pub command: String,
+}
+
+/// Input to `hook unregister`.
+#[derive(Debug, Clone)]
+pub struct HookUnregisterInput {
+    pub hook_type: String,
+    pub command: String,
+    pub project_dir: Option<String>,
+}
+
+/// Output of `hook unregister`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookUnregisterOutput {
+    pub command: String,
+}
+
+/// Input to `hook list`.
+#[derive(Debug, Clone, Default)]
+pub struct HookListInput {
+    pub hook_type: Option<String>,
+    pub project_dir: Option<String>,
+}
+
 /// Input to the PR-creation guard.
 #[derive(Debug, Clone, Default)]
 pub struct PrGuardInput {
