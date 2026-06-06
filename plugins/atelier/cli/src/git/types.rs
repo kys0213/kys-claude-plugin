@@ -90,3 +90,26 @@ pub struct BranchOutput {
     pub branch_name: String,
     pub base_branch: String,
 }
+
+/// Conventional-commit types accepted by the `commit` command.
+pub const COMMIT_TYPES: [&str; 8] = [
+    "feat", "fix", "docs", "style", "refactor", "test", "chore", "perf",
+];
+
+/// Input to the `commit` command. `commit_type` is a raw string so an invalid
+/// type surfaces as a command error (matching the TS contract).
+#[derive(Debug, Clone)]
+pub struct CommitInput {
+    pub commit_type: String,
+    pub description: String,
+    pub scope: Option<String>,
+    pub body: Option<String>,
+    pub skip_add: bool,
+}
+
+/// Output of the `commit` command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitOutput {
+    pub subject: String,
+    pub jira_ticket: Option<String>,
+}

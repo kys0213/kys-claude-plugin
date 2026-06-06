@@ -3,3 +3,4 @@
 //! `Result<Output, String>` (the `{ ok, data } | { ok, error }` union in TS).
 
 pub mod branch;
+pub mod commit;
