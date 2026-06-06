@@ -113,3 +113,19 @@ pub struct CommitOutput {
     pub subject: String,
     pub jira_ticket: Option<String>,
 }
+
+/// Input to the `pr` command.
+#[derive(Debug, Clone)]
+pub struct PrInput {
+    pub title: String,
+    pub description: Option<String>,
+}
+
+/// Output of the `pr` command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrOutput {
+    pub url: String,
+    pub title: String,
+    pub base_branch: String,
+    pub jira_ticket: Option<String>,
+}
