@@ -52,6 +52,17 @@ fn write_settings(dir: &std::path::Path, settings: &Value) -> Result<(), String>
     std::fs::write(settings_path(dir), format!("{body}\n")).map_err(|e| e.to_string())
 }
 
+/// True when any of a matcher entry's hooks invoke `command`.
+fn invokes_command(matcher: &Value, command: &str) -> bool {
+    matcher
+        .get("hooks")
+        .and_then(Value::as_array)
+        .is_some_and(|hs| {
+            hs.iter()
+                .any(|h| h.get("command").and_then(Value::as_str) == Some(command))
+        })
+}
+
 /// `hook register` — adds (or replaces) a matcher under `hook_type`.
 pub fn register(input: &HookRegisterInput) -> Result<HookRegisterOutput, String> {
     let dir = project_dir(&input.project_dir);
@@ -76,11 +87,8 @@ pub fn register(input: &HookRegisterInput) -> Result<HookRegisterOutput, String>
             .ok_or("hook type entry is not an array")?;
 
         let existing = arr.iter().position(|h| {
-            h.get("matcher") == Some(&json!(input.matcher))
-                || h.get("hooks").and_then(Value::as_array).is_some_and(|hs| {
-                    hs.iter()
-                        .any(|x| x.get("command") == Some(&json!(input.command)))
-                })
+            h.get("matcher").and_then(Value::as_str) == Some(input.matcher.as_str())
+                || invokes_command(h, &input.command)
         });
 
         action = if let Some(i) = existing {
@@ -119,12 +127,7 @@ pub fn unregister(input: &HookUnregisterInput) -> Result<HookUnregisterOutput, S
             return Err(format!("No hooks found for type: {}", input.hook_type));
         };
         let initial = arr.len();
-        arr.retain(|h| {
-            !h.get("hooks").and_then(Value::as_array).is_some_and(|hs| {
-                hs.iter()
-                    .any(|x| x.get("command") == Some(&json!(input.command)))
-            })
-        });
+        arr.retain(|h| !invokes_command(h, &input.command));
         if arr.len() == initial {
             return Err(format!("Hook not found: {}", input.command));
         }

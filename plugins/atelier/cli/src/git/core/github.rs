@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::git::types::{ReviewComment, ReviewThread, ReviewsOutput};
 
-use super::shell::{exec_env, ExecResult};
+use super::shell::{exec_env, exec_env_or_throw, ExecResult};
 
 /// GitHub operations used by the command layer. Injectable for testing.
 pub trait GitHubService {
@@ -96,16 +96,9 @@ impl RealGitHubService {
     }
 
     fn gh(&self, args: &[&str]) -> Result<String> {
-        let result = self.gh_safe(args)?;
-        if result.exit_code != 0 {
-            anyhow::bail!(
-                "Command failed (exit {}): gh {}\n{}",
-                result.exit_code,
-                args.join(" "),
-                result.stderr
-            );
-        }
-        Ok(result.stdout)
+        let mut command = vec!["gh"];
+        command.extend_from_slice(args);
+        exec_env_or_throw(&command, self.cwd(), &self.env())
     }
 }
 

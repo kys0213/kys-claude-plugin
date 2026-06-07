@@ -55,7 +55,16 @@ pub fn exec_env(command: &[&str], cwd: Option<&Path>, env: &[(&str, &str)]) -> R
 /// Like [`exec`] but returns an error (with stderr) when the command exits
 /// non-zero. On success, returns the trimmed stdout.
 pub fn exec_or_throw(command: &[&str], cwd: Option<&Path>) -> Result<String> {
-    let result = exec(command, cwd)?;
+    exec_env_or_throw(command, cwd, &[])
+}
+
+/// [`exec_or_throw`] with extra environment (see [`exec_env`]).
+pub fn exec_env_or_throw(
+    command: &[&str],
+    cwd: Option<&Path>,
+    env: &[(&str, &str)],
+) -> Result<String> {
+    let result = exec_env(command, cwd, env)?;
     if result.exit_code != 0 {
         bail!(
             "Command failed (exit {}): {}\n{}",
