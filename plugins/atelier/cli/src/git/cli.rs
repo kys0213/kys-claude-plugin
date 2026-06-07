@@ -312,7 +312,9 @@ fn dispatch_hook(command: HookCommand) -> i32 {
     }
 }
 
-/// Reads stdin as JSON (the PreToolUse hook payload); empty/invalid → `{}`.
+/// Reads stdin as JSON (the PreToolUse hook payload). Empty/invalid input
+/// falls back to `{}`; other JSON shapes are kept and indexed safely (missing
+/// keys resolve to `Value::Null`).
 fn read_stdin_json() -> Value {
     let mut buf = String::new();
     let _ = std::io::stdin().read_to_string(&mut buf);

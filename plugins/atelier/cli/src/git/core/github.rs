@@ -125,8 +125,12 @@ impl GitHubService for RealGitHubService {
         let repo_info = self.gh(&["repo", "view", "--json", "owner,name"])?;
         let repo: serde_json::Value =
             serde_json::from_str(&repo_info).context("parse `gh repo view` JSON")?;
-        let owner = repo["owner"]["login"].as_str().unwrap_or_default();
-        let name = repo["name"].as_str().unwrap_or_default();
+        let owner = repo["owner"]["login"].as_str().ok_or_else(|| {
+            anyhow::anyhow!("unexpected `gh repo view` output: missing owner.login")
+        })?;
+        let name = repo["name"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("unexpected `gh repo view` output: missing name"))?;
 
         let number_arg = format!("number={pr_number}");
         let query_arg = format!("query={REVIEW_THREADS_QUERY}");
@@ -148,6 +152,9 @@ impl GitHubService for RealGitHubService {
         let data: serde_json::Value =
             serde_json::from_str(&result).context("parse `gh api graphql` JSON")?;
         let pr = &data["data"]["repository"]["pullRequest"];
+        if pr.is_null() {
+            anyhow::bail!("PR #{pr_number} not found in `gh api graphql` response");
+        }
 
         let threads = pr["reviewThreads"]["nodes"]
             .as_array()

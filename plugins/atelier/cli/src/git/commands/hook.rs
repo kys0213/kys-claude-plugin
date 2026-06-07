@@ -68,7 +68,7 @@ pub fn register(input: &HookRegisterInput) -> Result<HookRegisterOutput, String>
         let hooks = settings
             .get_mut("hooks")
             .and_then(Value::as_object_mut)
-            .expect("hooks ensured object");
+            .ok_or("settings `hooks` is not an object")?;
         let arr = hooks
             .entry(input.hook_type.clone())
             .or_insert_with(|| json!([]))
@@ -111,7 +111,7 @@ pub fn unregister(input: &HookUnregisterInput) -> Result<HookUnregisterOutput, S
         let hooks = settings
             .get_mut("hooks")
             .and_then(Value::as_object_mut)
-            .expect("hooks ensured object");
+            .ok_or("settings `hooks` is not an object")?;
         let Some(arr) = hooks
             .get_mut(&input.hook_type)
             .and_then(Value::as_array_mut)

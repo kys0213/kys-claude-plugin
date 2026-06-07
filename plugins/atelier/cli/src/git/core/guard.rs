@@ -48,7 +48,12 @@ pub fn is_inside_project_dir(file_path: &str, project_dir: &str) -> bool {
 /// nearest existing ancestor and looking for a `.git` entry.
 pub fn is_inside_any_git_repo(file_path: &str) -> bool {
     let resolved = lexical_abs(file_path);
-    let mut dir = resolved.parent().map(Path::to_path_buf).unwrap_or(resolved);
+    // Ascend over directories only; if the path has no parent (e.g. "/"),
+    // fall back to root rather than probing the file path itself.
+    let mut dir = resolved
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("/"));
 
     // Ascend to the first existing directory (cheaper than probing each level).
     while dir.parent().is_some() && !dir.exists() {
