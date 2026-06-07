@@ -4,6 +4,7 @@
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+use tempfile::TempDir;
 
 fn atelier() -> Command {
     Command::cargo_bin("atelier").expect("locate `atelier` cargo binary")
@@ -44,4 +45,99 @@ fn git_invalid_commit_type_errors() {
 fn git_unknown_subcommand_errors() {
     // clap rejects unknown subcommands (exit 2).
     atelier().args(["git", "unknown-cmd"]).assert().failure();
+}
+
+// ---------- guard (reads hook payload on stdin) ----------
+
+#[test]
+fn git_guard_allows_non_commit_command() {
+    // A non-`git commit` Bash command is allowed (exit 0), proving the guard
+    // reads the stdin payload and routes correctly. `--project-dir` is a temp
+    // dir (not a repo), so no real git side effects.
+    let t = TempDir::new().unwrap();
+    atelier()
+        .args([
+            "git",
+            "guard",
+            "--target",
+            "commit",
+            "--project-dir",
+            t.path().to_str().unwrap(),
+        ])
+        .write_stdin(r#"{"tool_input":{"command":"ls -la"}}"#)
+        .assert()
+        .success();
+}
+
+#[test]
+fn git_guard_empty_stdin_allows() {
+    // No payload → nothing to guard → allowed.
+    let t = TempDir::new().unwrap();
+    atelier()
+        .args([
+            "git",
+            "guard",
+            "--target",
+            "write",
+            "--project-dir",
+            t.path().to_str().unwrap(),
+        ])
+        .write_stdin("")
+        .assert()
+        .success();
+}
+
+// ---------- hook (registers into .claude/settings.json) ----------
+
+#[test]
+fn git_hook_register_writes_settings() {
+    let t = TempDir::new().unwrap();
+    let dir = t.path().to_str().unwrap();
+    atelier()
+        .args([
+            "git",
+            "hook",
+            "register",
+            "--type",
+            "PreToolUse",
+            "--matcher",
+            "Bash",
+            "--command",
+            "atelier git guard --target commit",
+            "--project-dir",
+            dir,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("created hook"));
+
+    let settings = std::fs::read_to_string(t.path().join(".claude").join("settings.json")).unwrap();
+    assert!(settings.contains("atelier git guard --target commit"));
+}
+
+#[test]
+fn git_hook_list_reports_registered() {
+    let t = TempDir::new().unwrap();
+    let dir = t.path().to_str().unwrap();
+    atelier()
+        .args([
+            "git",
+            "hook",
+            "register",
+            "--type",
+            "PreToolUse",
+            "--matcher",
+            "Bash",
+            "--command",
+            "x.sh",
+            "--project-dir",
+            dir,
+        ])
+        .assert()
+        .success();
+    atelier()
+        .args(["git", "hook", "list", "--project-dir", dir])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("PreToolUse"));
 }
