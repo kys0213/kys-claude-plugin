@@ -10,6 +10,26 @@ fn atelier() -> Command {
     Command::cargo_bin("atelier").expect("locate `atelier` cargo binary")
 }
 
+/// Initialise a git repo on `main` with one commit (no remote).
+fn init_repo_on_main(dir: &std::path::Path) {
+    let run = |args: &[&str]| {
+        let ok = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .expect("spawn git")
+            .success();
+        assert!(ok, "git {args:?} failed");
+    };
+    run(&["init", "-b", "main"]);
+    run(&["config", "user.email", "t@t.com"]);
+    run(&["config", "user.name", "T"]);
+    run(&["config", "commit.gpgsign", "false"]);
+    std::fs::write(dir.join("README.md"), "x").unwrap();
+    run(&["add", "."]);
+    run(&["commit", "-m", "init"]);
+}
+
 #[test]
 fn git_help_lists_commands() {
     atelier()
@@ -85,6 +105,37 @@ fn git_guard_empty_stdin_allows() {
         .write_stdin("")
         .assert()
         .success();
+}
+
+#[test]
+fn git_guard_resolves_relative_file_path_against_project_dir() {
+    // Regression: a relative `tool_input.file_path` must resolve against
+    // `--project-dir`, not the process cwd. The guard's project repo is on a
+    // protected branch (main), so a relative path inside the project must
+    // BLOCK (exit 2) even though the process runs from an unrelated non-git
+    // directory. Before the fix the path resolved against the (non-git) cwd
+    // and was wrongly treated as "outside any git repository" → allowed.
+    let repo = TempDir::new().unwrap();
+    init_repo_on_main(repo.path());
+    let elsewhere = TempDir::new().unwrap(); // non-git working directory
+
+    Command::cargo_bin("atelier")
+        .unwrap()
+        .current_dir(elsewhere.path())
+        .args([
+            "git",
+            "guard",
+            "--target",
+            "write",
+            "--project-dir",
+            repo.path().to_str().unwrap(),
+            "--default-branch",
+            "main",
+        ])
+        .write_stdin(r#"{"tool_input":{"file_path":"x.txt"}}"#)
+        .assert()
+        .failure()
+        .code(2);
 }
 
 // ---------- hook (registers into .claude/settings.json) ----------

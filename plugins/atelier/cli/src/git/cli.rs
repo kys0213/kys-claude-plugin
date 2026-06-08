@@ -246,7 +246,20 @@ fn run_guard(
     let payload = read_stdin_json();
     let tool_input = &payload["tool_input"];
     let tool_command = tool_input["command"].as_str().map(str::to_string);
-    let tool_file_path = tool_input["file_path"].as_str().map(str::to_string);
+    // Resolve a relative file path against `project_dir`, not the process cwd:
+    // the guard's path checks treat relatives as cwd-relative, which would
+    // misjudge "inside the project" when the hook runs from a different
+    // directory than the project root.
+    let tool_file_path = tool_input["file_path"].as_str().map(|p| {
+        if PathBuf::from(p).is_absolute() {
+            p.to_string()
+        } else {
+            PathBuf::from(&project_dir)
+                .join(p)
+                .to_string_lossy()
+                .into_owned()
+        }
+    });
 
     let git = RealGitService::new(Some(PathBuf::from(&project_dir)));
     let out = RealGuardService::new(&git).check(&GuardInput {
