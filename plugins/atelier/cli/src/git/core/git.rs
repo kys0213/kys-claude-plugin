@@ -22,6 +22,11 @@ pub struct PushOptions {
 
 pub trait GitService {
     fn detect_default_branch(&self) -> Result<String, String>;
+    /// Like `detect_default_branch` but never mutates repo state. Skips the
+    /// `git remote set-head` step (Method 2) so it is safe to call from a
+    /// PreToolUse guard on every tool invocation. Used by the branch guard;
+    /// `detect_default_branch` keeps the writing fallback for branch/PR flows.
+    fn detect_default_branch_readonly(&self) -> Result<String, String>;
     fn get_current_branch(&self) -> String;
     fn branch_exists(&self, name: &str, location: BranchLocation) -> bool;
     fn is_inside_work_tree(&self) -> bool;
@@ -74,27 +79,20 @@ impl RealGitService {
         let r = exec(&full, self.opts().as_ref());
         (r.stdout, r.exit_code)
     }
-}
 
-impl GitService for RealGitService {
-    fn detect_default_branch(&self) -> Result<String, String> {
-        // Method 1: cached origin/HEAD
-        let (head, head_exit) = self.git_safe(&["symbolic-ref", "refs/remotes/origin/HEAD"]);
-        if head_exit == 0 && !head.is_empty() {
-            return Ok(head.replace("refs/remotes/origin/", ""));
+    /// Method 1: read the cached `refs/remotes/origin/HEAD` symbolic ref.
+    /// Pure read — never mutates repo state.
+    fn read_origin_head(&self) -> Option<String> {
+        let (head, exit) = self.git_safe(&["symbolic-ref", "refs/remotes/origin/HEAD"]);
+        if exit == 0 && !head.is_empty() {
+            Some(head.replace("refs/remotes/origin/", ""))
+        } else {
+            None
         }
+    }
 
-        // Method 2: auto-detect from remote
-        let _ = exec(
-            &["git", "remote", "set-head", "origin", "--auto"],
-            self.opts().as_ref(),
-        );
-        let (head2, head_exit2) = self.git_safe(&["symbolic-ref", "refs/remotes/origin/HEAD"]);
-        if head_exit2 == 0 && !head2.is_empty() {
-            return Ok(head2.replace("refs/remotes/origin/", ""));
-        }
-
-        // Method 3: fallback to common names
+    /// Method 3: probe common default-branch names on the remote. Pure read.
+    fn probe_common_default(&self) -> Option<String> {
         for name in ["main", "develop", "master"] {
             let (_, exit) = self.git_safe(&[
                 "show-ref",
@@ -103,11 +101,42 @@ impl GitService for RealGitService {
                 &format!("refs/remotes/origin/{name}"),
             ]);
             if exit == 0 {
-                return Ok(name.to_string());
+                return Some(name.to_string());
             }
         }
+        None
+    }
+}
 
-        Err("Could not detect default branch. Make sure you have a remote configured.".to_string())
+const NO_DEFAULT_BRANCH: &str =
+    "Could not detect default branch. Make sure you have a remote configured.";
+
+impl GitService for RealGitService {
+    fn detect_default_branch(&self) -> Result<String, String> {
+        // Method 1: cached origin/HEAD
+        if let Some(branch) = self.read_origin_head() {
+            return Ok(branch);
+        }
+
+        // Method 2: auto-detect from remote (mutates refs/remotes/origin/HEAD)
+        let _ = exec(
+            &["git", "remote", "set-head", "origin", "--auto"],
+            self.opts().as_ref(),
+        );
+        if let Some(branch) = self.read_origin_head() {
+            return Ok(branch);
+        }
+
+        // Method 3: fallback to common names
+        self.probe_common_default()
+            .ok_or_else(|| NO_DEFAULT_BRANCH.to_string())
+    }
+
+    fn detect_default_branch_readonly(&self) -> Result<String, String> {
+        // Method 1 + Method 3 only — no `set-head` write (see #779).
+        self.read_origin_head()
+            .or_else(|| self.probe_common_default())
+            .ok_or_else(|| NO_DEFAULT_BRANCH.to_string())
     }
 
     fn get_current_branch(&self) -> String {

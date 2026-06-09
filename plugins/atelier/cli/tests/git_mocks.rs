@@ -23,6 +23,7 @@ pub struct MockGit {
     pub is_inside_work_tree: Box<dyn Fn() -> bool>,
     pub get_current_branch: Box<dyn Fn() -> String>,
     pub detect_default_branch: Box<dyn Fn() -> R<String>>,
+    pub detect_default_branch_readonly: Box<dyn Fn() -> R<String>>,
     pub get_special_state: Box<dyn Fn() -> GitSpecialState>,
     pub branch_exists: Box<dyn Fn(&str, BranchLocation) -> bool>,
     pub has_uncommitted_changes: Box<dyn Fn() -> bool>,
@@ -40,6 +41,7 @@ impl Default for MockGit {
             is_inside_work_tree: Box::new(|| true),
             get_current_branch: Box::new(|| "main".to_string()),
             detect_default_branch: Box::new(|| Ok("main".to_string())),
+            detect_default_branch_readonly: Box::new(|| Ok("main".to_string())),
             get_special_state: Box::new(|| GitSpecialState {
                 rebase: false,
                 merge: false,
@@ -60,6 +62,9 @@ impl Default for MockGit {
 impl GitService for MockGit {
     fn detect_default_branch(&self) -> R<String> {
         (self.detect_default_branch)()
+    }
+    fn detect_default_branch_readonly(&self) -> R<String> {
+        (self.detect_default_branch_readonly)()
     }
     fn get_current_branch(&self) -> String {
         (self.get_current_branch)()

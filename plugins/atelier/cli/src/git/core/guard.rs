@@ -11,33 +11,43 @@ use std::sync::LazyLock;
 static GIT_COMMIT_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\bgit\b.*\bcommit\b").unwrap());
 
-/// Normalizes a path the way Node's `path.resolve` does for the comparison:
-/// makes it absolute against cwd if relative, then lexically collapses
-/// `.`/`..` without touching the filesystem.
-fn resolve_lexical(p: &str) -> PathBuf {
-    let path = Path::new(p);
-    let mut base = if path.is_absolute() {
+/// Lexically collapses `.`/`..` in `path` (relative to `base`) without touching
+/// the filesystem. A relative `path` is anchored at `base` rather than the
+/// process cwd — the guard runs as a PreToolUse hook whose cwd may differ from
+/// the project (worktree / subagent contexts), so resolving against cwd
+/// mis-judges relative `file_path`s (#780).
+fn resolve_against(base: &Path, path: &str) -> PathBuf {
+    let path = Path::new(path);
+    let mut out = if path.is_absolute() {
         PathBuf::new()
     } else {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
+        base.to_path_buf()
     };
     for comp in path.components() {
         match comp {
             Component::ParentDir => {
-                base.pop();
+                out.pop();
             }
             Component::CurDir => {}
-            other => base.push(other.as_os_str()),
+            other => out.push(other.as_os_str()),
         }
     }
-    base
+    out
+}
+
+/// Resolves `project_dir` itself, anchoring a relative project dir at the
+/// process cwd (the project dir is the anchor, so there is no better base).
+fn resolve_project_dir(project_dir: &str) -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+    resolve_against(&cwd, project_dir)
 }
 
 /// Port of TS `isInsideProjectDir`: true when `file_path` is the project dir
 /// itself or strictly inside it (no `..` escape, not a sibling prefix match).
+/// Relative `file_path`s are resolved against `project_dir` (#780).
 pub fn is_inside_project_dir(file_path: &str, project_dir: &str) -> bool {
-    let project = resolve_lexical(project_dir);
-    let file = resolve_lexical(file_path);
+    let project = resolve_project_dir(project_dir);
+    let file = resolve_against(&project, file_path);
     match file.strip_prefix(&project) {
         Ok(rel) => {
             // rel == '' (same dir) or a normal relative descendant.
@@ -49,8 +59,10 @@ pub fn is_inside_project_dir(file_path: &str, project_dir: &str) -> bool {
 
 /// Port of TS `isInsideAnyGitRepo`: walks up from the file's directory looking
 /// for a `.git` entry, skipping non-existent leading directories first.
-pub fn is_inside_any_git_repo(file_path: &str) -> bool {
-    let resolved = resolve_lexical(file_path);
+/// Relative `file_path`s are resolved against `project_dir`, not the process
+/// cwd, so the walk starts inside the project (#780).
+pub fn is_inside_any_git_repo(file_path: &str, project_dir: &str) -> bool {
+    let resolved = resolve_against(&resolve_project_dir(project_dir), file_path);
     let mut dir = resolved.parent().map(PathBuf::from).unwrap_or(resolved);
     let root = PathBuf::from("/");
 
@@ -100,7 +112,7 @@ impl GuardService for RealGuardService<'_> {
         if input.target == GuardTarget::Write {
             if let Some(file_path) = &input.tool_file_path {
                 if !is_inside_project_dir(file_path, &input.project_dir)
-                    && !is_inside_any_git_repo(file_path)
+                    && !is_inside_any_git_repo(file_path, &input.project_dir)
                 {
                     return pass(Some("file is outside any git repository"));
                 }
@@ -127,7 +139,9 @@ impl GuardService for RealGuardService<'_> {
         // Resolve default branch.
         let default_branch = match &input.default_branch {
             Some(b) => b.clone(),
-            None => match self.git.detect_default_branch() {
+            // Read-only detection — the guard must not mutate repo state
+            // (no `git remote set-head`) on every tool invocation (#779).
+            None => match self.git.detect_default_branch_readonly() {
                 Ok(b) => b,
                 Err(_) => return pass(Some("could not detect default branch")),
             },
