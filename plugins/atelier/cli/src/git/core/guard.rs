@@ -46,9 +46,12 @@ fn resolve_project_dir(project_dir: &str) -> PathBuf {
 /// itself or strictly inside it (no `..` escape, not a sibling prefix match).
 /// Relative `file_path`s are resolved against `project_dir` (#780).
 pub fn is_inside_project_dir(file_path: &str, project_dir: &str) -> bool {
-    let project = resolve_project_dir(project_dir);
-    let file = resolve_against(&project, file_path);
-    match file.strip_prefix(&project) {
+    inside_project_dir(&resolve_project_dir(project_dir), file_path)
+}
+
+fn inside_project_dir(project: &Path, file_path: &str) -> bool {
+    let file = resolve_against(project, file_path);
+    match file.strip_prefix(project) {
         Ok(rel) => {
             // rel == '' (same dir) or a normal relative descendant.
             rel.as_os_str().is_empty() || !rel.starts_with("..")
@@ -62,7 +65,11 @@ pub fn is_inside_project_dir(file_path: &str, project_dir: &str) -> bool {
 /// Relative `file_path`s are resolved against `project_dir`, not the process
 /// cwd, so the walk starts inside the project (#780).
 pub fn is_inside_any_git_repo(file_path: &str, project_dir: &str) -> bool {
-    let resolved = resolve_against(&resolve_project_dir(project_dir), file_path);
+    inside_any_git_repo(&resolve_project_dir(project_dir), file_path)
+}
+
+fn inside_any_git_repo(project: &Path, file_path: &str) -> bool {
+    let resolved = resolve_against(project, file_path);
     let mut dir = resolved.parent().map(PathBuf::from).unwrap_or(resolved);
     let root = PathBuf::from("/");
 
@@ -111,8 +118,11 @@ impl GuardService for RealGuardService<'_> {
         // write guard: file outside the project directory.
         if input.target == GuardTarget::Write {
             if let Some(file_path) = &input.tool_file_path {
-                if !is_inside_project_dir(file_path, &input.project_dir)
-                    && !is_inside_any_git_repo(file_path, &input.project_dir)
+                // Resolve project_dir once for both path checks (one
+                // current_dir() syscall instead of two per tool invocation).
+                let project = resolve_project_dir(&input.project_dir);
+                if !inside_project_dir(&project, file_path)
+                    && !inside_any_git_repo(&project, file_path)
                 {
                     return pass(Some("file is outside any git repository"));
                 }
