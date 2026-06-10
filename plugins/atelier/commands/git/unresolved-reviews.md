@@ -14,10 +14,10 @@ PR의 미해결 리뷰 코멘트를 조회하고 정리합니다.
 
 ### Step 1: 미해결 리뷰 조회
 
-`git-utils reviews` CLI를 실행하여 리뷰 쓰레드를 가져옵니다.
+`atelier git reviews` CLI를 실행하여 리뷰 쓰레드를 가져옵니다.
 
 ```bash
-git-utils reviews [PR_NUMBER]
+atelier git reviews [PR_NUMBER]
 ```
 
 > PR 번호 미지정 시 현재 브랜치의 PR을 자동 감지합니다.

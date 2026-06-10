@@ -115,7 +115,7 @@ fn register_same_command_updates() {
 }
 
 #[test]
-fn register_same_matcher_different_command_updates() {
+fn register_same_matcher_different_command_appends_to_group() {
     let fs = MockFs::new();
     fs.set(
         &settings_path(),
@@ -124,12 +124,68 @@ fn register_same_matcher_different_command_updates() {
     let hook = create_hook_command(&fs);
     let r = hook.register(&reg("Stop", "*", "bash new.sh")).unwrap();
     match r {
-        CmdResult::Ok(d) => assert_eq!(d.action, "updated"),
+        CmdResult::Ok(d) => assert_eq!(d.action, "created"),
         _ => panic!(),
     }
     let s = settings(&fs);
     assert_eq!(s["hooks"]["Stop"].as_array().unwrap().len(), 1);
-    assert_eq!(s["hooks"]["Stop"][0]["hooks"][0]["command"], "bash new.sh");
+    let group = s["hooks"]["Stop"][0]["hooks"].as_array().unwrap();
+    assert_eq!(group.len(), 2);
+    assert_eq!(group[0]["command"], "bash old.sh");
+    assert_eq!(group[1]["command"], "bash new.sh");
+}
+
+#[test]
+fn register_same_matcher_multiple_commands_coexist() {
+    // setup scenario (#772): PreToolUse/Bash holds commit guard + autopilot
+    // hooks side by side — registering one must not clobber the others.
+    let fs = MockFs::new();
+    let hook = create_hook_command(&fs);
+    hook.register(&reg("PreToolUse", "Bash", "atelier git guard commit"))
+        .unwrap();
+    hook.register(&reg("PreToolUse", "Bash", "guard-pr-base.sh"))
+        .unwrap();
+    hook.register(&reg("PreToolUse", "Bash", "protect-stagnation.sh"))
+        .unwrap();
+    let s = settings(&fs);
+    assert_eq!(s["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
+    let group = s["hooks"]["PreToolUse"][0]["hooks"].as_array().unwrap();
+    let commands: Vec<&str> = group
+        .iter()
+        .map(|h| h["command"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        commands,
+        vec![
+            "atelier git guard commit",
+            "guard-pr-base.sh",
+            "protect-stagnation.sh"
+        ]
+    );
+}
+
+#[test]
+fn register_is_idempotent_for_same_matcher_and_command() {
+    let fs = MockFs::new();
+    let hook = create_hook_command(&fs);
+    hook.register(&reg("PreToolUse", "Bash", "atelier git guard commit"))
+        .unwrap();
+    let r = hook
+        .register(&reg("PreToolUse", "Bash", "atelier git guard commit"))
+        .unwrap();
+    match r {
+        CmdResult::Ok(d) => assert_eq!(d.action, "updated"),
+        _ => panic!(),
+    }
+    let s = settings(&fs);
+    assert_eq!(s["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        s["hooks"]["PreToolUse"][0]["hooks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -207,6 +263,28 @@ fn unregister_missing_hook_fails() {
         CmdResult::Err(e) => assert!(e.contains("not found")),
         _ => panic!("expected err"),
     }
+}
+
+#[test]
+fn unregister_keeps_sibling_hooks_in_matcher_group() {
+    let fs = MockFs::new();
+    fs.set(
+        &settings_path(),
+        r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"atelier git guard commit"},{"type":"command","command":"guard-pr-base.sh"}]}]}}"#,
+    );
+    let hook = create_hook_command(&fs);
+    let r = hook
+        .unregister(&HookUnregisterInput {
+            hook_type: "PreToolUse".to_string(),
+            command: "guard-pr-base.sh".to_string(),
+            project_dir: Some(PROJECT_DIR.to_string()),
+        })
+        .unwrap();
+    assert!(r.is_ok());
+    let s = settings(&fs);
+    let group = s["hooks"]["PreToolUse"][0]["hooks"].as_array().unwrap();
+    assert_eq!(group.len(), 1);
+    assert_eq!(group[0]["command"], "atelier git guard commit");
 }
 
 #[test]

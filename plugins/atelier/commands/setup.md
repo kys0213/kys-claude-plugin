@@ -7,10 +7,27 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 # atelier setup
 
 흡수된 6개 plugin(git-utils, github-autopilot, coding-style, ...)의 설정을 단일 진입점으로 통합합니다.
-모듈을 선택해 설치하고, 기존 frozen plugin 경로로 등록된 hook 을 atelier 경로로 마이그레이션합니다.
+모듈을 선택해 설치하고, 기존 frozen plugin 경로로 등록된 hook 을 atelier 로 마이그레이션합니다.
 
 > ⚠️ 모든 hook 은 user scope(`~/.claude/settings.json`)에 등록됩니다.
-> hook 명령은 `${CLAUDE_PLUGIN_ROOT}/hooks/<file>.sh` 형태로, atelier plugin 컨텍스트에서 해석됩니다.
+> 등록은 LLM 이 settings.json 을 직접 편집하지 않고 **`atelier git hook register` CLI** 로 수행합니다
+> (`.claude/rules/tool-layer-boundary.md`). `--project-dir "$HOME"` 을 주면 `~/.claude/settings.json` 에 기록됩니다.
+
+등록되는 command 는 두 형태뿐입니다:
+
+- **CLI 직접 호출** (결정적 로직이 CLI 에 있는 hook): `atelier git guard write ...` — 바이너리가 PATH 에서 해석되므로 버전 비의존
+- **`${CLAUDE_PLUGIN_ROOT}` 리터럴 shim** (#776 에서 CLI 이전 예정인 `.sh` hook): 절대경로로 expand 하지 않고 리터럴 그대로 기록
+
+## Step 0 — atelier CLI 보장 (공통 선행)
+
+모든 모듈이 hook 등록에 CLI 를 사용하므로 가장 먼저 실행합니다:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
+```
+
+- plugin.json 버전과 설치된 `atelier --version` 을 SemVer 비교해 필요 시 빌드/설치합니다 (`~/.local/bin/atelier`)
+- 실패하면(cargo 부재 등) 이후 Step 을 진행하지 말고 에러를 안내합니다
 
 ## Step 1 — 설치 모듈 선택
 
@@ -19,7 +36,7 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 | 선택 | 수행 동작 | 출처 |
 |---|---|---|
 | `git` | GitHub 인증 확인 + `~/.git-workflow-env` 생성 + Default Branch Guard hook | git-utils setup |
-| `autopilot` | `github-autopilot.local.md` 생성 + autopilot hook 3개 등록 + atelier CLI 빌드/설치 | github-autopilot setup |
+| `autopilot` | `github-autopilot.local.md` 생성 + autopilot hook 3개 등록 | github-autopilot setup |
 | `style` | `~/.claude/CLAUDE.md` 코딩 원칙 + Stop hook 등록 | coding-style setup |
 | `all` | 위 세 가지 전부 | 신규 |
 
@@ -32,29 +49,46 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
    gh auth status || gh auth login
    ```
 2. 환경 설정 파일 생성 (기존 git-utils 와 동일 스키마, 경로 `~/.git-workflow-env`).
-3. Default Branch Guard hook 등록 — `~/.claude/settings.json` 의 `PreToolUse` 에 추가:
+3. **기본 브랜치 감지** — guard 는 읽기전용이라 비표준 기본 브랜치(예: `trunk`)를 런타임에 감지하지 못할 수 있으므로,
+   1회성인 setup 시점에 full detection(set-head 포함)으로 감지해 주입합니다 (#785):
+   ```bash
+   DEFAULT_BRANCH=$(bash "${CLAUDE_PLUGIN_ROOT}/scripts/detect-default-branch.sh")
+   ```
+   감지 실패 시(remote 없음 등) `--default-branch` 를 생략하고 guard 의 런타임 감지에 맡깁니다.
+4. Default Branch Guard hook 2종 등록 — `.sh` 경로가 아니라 **CLI 커맨드를 직접** 기록합니다:
+   ```bash
+   atelier git hook register PreToolUse "Write|Edit" \
+     'atelier git guard write --project-dir "${CLAUDE_PROJECT_DIR:-.}" --default-branch '"${DEFAULT_BRANCH}" \
+     --project-dir "$HOME"
+
+   atelier git hook register PreToolUse "Bash" \
+     'atelier git guard commit --project-dir "${CLAUDE_PROJECT_DIR:-.}" --default-branch '"${DEFAULT_BRANCH}" \
+     --project-dir "$HOME"
+   ```
+   > `${CLAUDE_PROJECT_DIR:-.}` 는 **리터럴로 보존**해야 합니다 (hook 실행 시점에 셸이 expand).
+   > 반면 `${DEFAULT_BRANCH}` 는 setup 시점 감지값으로 expand 해서 기록합니다.
+
+   결과적으로 settings.json 에는 다음과 같이 기록됩니다:
    ```json
-   { "command": "${CLAUDE_PLUGIN_ROOT}/scripts/default-branch-guard-hook.sh" }
+   { "type": "command", "command": "atelier git guard commit --project-dir \"${CLAUDE_PROJECT_DIR:-.}\" --default-branch main" }
    ```
 
 ## Step 2b — autopilot 모듈
 
 1. 프로젝트 설정 파일 `github-autopilot.local.md` 생성 (기존 스키마/경로 동일 — 호환).
-2. atelier CLI 빌드/설치 (단일 `atelier` 바이너리):
+2. autopilot hook 3종 등록 — 로직이 아직 `.sh` 에 있으므로(#776 에서 CLI 이전 예정) `${CLAUDE_PLUGIN_ROOT}` 리터럴 shim 으로 기록:
    ```bash
-   cargo build --release --manifest-path "${CLAUDE_PLUGIN_ROOT}/cli/Cargo.toml"
-   # 빌드된 바이너리를 PATH 에 링크 (예: ~/.local/bin/atelier)
+   atelier git hook register SessionStart "*" \
+     '${CLAUDE_PLUGIN_ROOT}/hooks/check-cli-version.sh' --project-dir "$HOME"
+
+   atelier git hook register PreToolUse "Bash" \
+     '${CLAUDE_PLUGIN_ROOT}/hooks/guard-pr-base.sh' --project-dir "$HOME"
+
+   atelier git hook register PreToolUse "Bash" \
+     '${CLAUDE_PLUGIN_ROOT}/hooks/protect-stagnation.sh' --project-dir "$HOME"
    ```
-3. autopilot hook 3종을 `~/.claude/settings.json` 에 등록:
-   ```json
-   {
-     "SessionStart": [{ "command": "${CLAUDE_PLUGIN_ROOT}/hooks/check-cli-version.sh" }],
-     "PreToolUse":   [
-       { "command": "${CLAUDE_PLUGIN_ROOT}/hooks/guard-pr-base.sh" },
-       { "command": "${CLAUDE_PLUGIN_ROOT}/hooks/protect-stagnation.sh" }
-     ]
-   }
-   ```
+   > `PreToolUse`/`Bash` matcher 는 git 모듈의 commit guard 와 공유됩니다 — `hook register` 는 같은 matcher
+   > 그룹에 command 를 append 하므로 서로 덮어쓰지 않습니다.
 
 > autopilot SQLite store(ledger/task DB)는 기존 스키마/경로를 계승하므로 마이그레이션 불필요.
 
@@ -63,40 +97,41 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 1. `~/.claude/CLAUDE.md` 에 코딩 원칙 템플릿 병합 (워터마크 기반 중복 확인 — 기존 coding-style 로직 동일):
    - 템플릿 원본: `${CLAUDE_PLUGIN_ROOT}/templates/claude-md/CLAUDE.md`
 2. Stop hook 등록:
-   ```json
-   { "Stop": [{ "command": "${CLAUDE_PLUGIN_ROOT}/hooks/suggest-simplify.sh" }] }
+   ```bash
+   atelier git hook register Stop "*" \
+     '${CLAUDE_PLUGIN_ROOT}/hooks/suggest-simplify.sh' --project-dir "$HOME"
    ```
 
 ## Step 3 — 기존 hook 마이그레이션 (frozen → atelier)
 
 기존 6개 plugin 사용자는 `~/.claude/settings.json` 에 **frozen plugin 경로**의 hook 이 박혀 있습니다.
-이를 atelier 경로로 재작성합니다. (상세: `plans/atelier/03-migration.md §A.3`)
+이를 atelier 로 재작성합니다. (상세: `plans/atelier/03-migration.md §A.3`)
 
 ```
-1. ~/.claude/settings.json 읽기 (없으면 skip)
-2. hooks 의 모든 command 문자열 순회
-3. 다음 정규식에 매칭되는 entry 수집:
+1. atelier git hook list --project-dir "$HOME" 으로 현재 등록 현황 조회 (없으면 skip)
+2. 출력의 모든 command 문자열 순회, 다음 정규식에 매칭되는 entry 수집:
      .*/plugins/(github-autopilot|coding-style)/hooks/(<file>)\.sh
      .*/plugins/git-utils/scripts/(default-branch-guard.*)\.sh
-4. 매칭 entry 를 atelier 경로로 치환:
-     hooks/<file>.sh   → ${CLAUDE_PLUGIN_ROOT}/hooks/<file>.sh
-     scripts/<file>.sh → ${CLAUDE_PLUGIN_ROOT}/scripts/<file>.sh
-5. 중복 제거: 같은 hook 이 frozen + atelier 양쪽에 있으면 atelier 만 남김
-6. 변경 전 settings.json 을 settings.json.bak-<timestamp> 로 백업
-7. 사용자에게 diff 를 보여주고 AskUserQuestion 으로 확인 후 기록
+     .*/plugins/atelier/scripts/(default-branch-guard.*)\.sh   # 구버전 atelier setup 잔재
+3. 변경 전 ~/.claude/settings.json 을 settings.json.bak-<timestamp> 로 백업 (cp)
+4. 사용자에게 치환 목록을 보여주고 AskUserQuestion 으로 확인
+5. 매칭 entry 마다: atelier git hook unregister <type> <old-command> --project-dir "$HOME"
+   → 아래 표의 대응 command 로 atelier git hook register (hook register 는 command 기준
+   중복 제거를 하므로 frozen + atelier 양쪽에 있던 hook 도 한 개만 남음)
 ```
 
-> **멱등성**: 이미 atelier 경로로 재작성된 settings.json 에 재실행하면 변경 0건이어야 합니다.
+> **멱등성**: 이미 atelier 로 재작성된 settings.json 에 재실행하면 변경 0건이어야 합니다.
 
 치환 대상:
 
-| frozen 경로 | atelier 경로 |
+| frozen 경로 | atelier 등록 command |
 |---|---|
-| `github-autopilot/hooks/check-cli-version.sh` | `atelier/hooks/check-cli-version.sh` |
-| `github-autopilot/hooks/guard-pr-base.sh` | `atelier/hooks/guard-pr-base.sh` |
-| `github-autopilot/hooks/protect-stagnation.sh` | `atelier/hooks/protect-stagnation.sh` |
-| `coding-style/hooks/suggest-simplify.sh` | `atelier/hooks/suggest-simplify.sh` |
-| `git-utils/scripts/default-branch-guard*.sh` | `atelier/scripts/default-branch-guard*.sh` |
+| `github-autopilot/hooks/check-cli-version.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/check-cli-version.sh` (리터럴) |
+| `github-autopilot/hooks/guard-pr-base.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/guard-pr-base.sh` (리터럴) |
+| `github-autopilot/hooks/protect-stagnation.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/protect-stagnation.sh` (리터럴) |
+| `coding-style/hooks/suggest-simplify.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/suggest-simplify.sh` (리터럴) |
+| `git-utils/scripts/default-branch-guard-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard write ...` (Step 2a 형식) |
+| `git-utils/scripts/default-branch-guard-commit-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard commit ...` (Step 2a 형식) |
 
 ## Step 4 — CLI alias (선택)
 
@@ -108,3 +143,26 @@ alias git-utils='atelier git'
 ```
 
 거부 시 안내 문구만 출력합니다. 기존 바이너리는 setup 이 삭제하지 않습니다 (외부 도구를 함부로 지우지 않음).
+
+## 에러 처리
+
+**ensure-binary 실패 (cargo 미설치 등):**
+- 이후 Step 을 중단하고 Rust toolchain 설치를 안내합니다 (`rustup`)
+
+**기본 브랜치 감지 실패 (remote 미설정):**
+- `--default-branch` 없이 guard 를 등록하고, 비표준 기본 브랜치 repo 에서는 보호가 제한될 수 있음을 안내합니다
+
+**settings.json 이 깨진 JSON 인 경우:**
+- `hook register` 가 덮어쓰기를 거부하고 에러를 반환합니다 — 사용자에게 파일 상태를 보여주고 수동 복구를 안내합니다
+
+## Output Examples
+
+**등록 성공:**
+```json
+{ "action": "created", "command": "atelier git guard commit --project-dir \"${CLAUDE_PROJECT_DIR:-.}\" --default-branch main" }
+```
+
+**재실행 (멱등):**
+```json
+{ "action": "updated", "command": "atelier git guard commit --project-dir \"${CLAUDE_PROJECT_DIR:-.}\" --default-branch main" }
+```

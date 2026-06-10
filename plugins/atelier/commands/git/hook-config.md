@@ -13,14 +13,14 @@ allowed-tools:
 
 ## Step 1: 현재 설정 확인
 
-`git-utils hook list`로 프로젝트와 사용자 범위의 hook을 탐색합니다:
+`atelier git hook list`로 프로젝트와 사용자 범위의 hook을 탐색합니다:
 
 ```bash
 # 프로젝트 범위 확인
-git-utils hook list PreToolUse
+atelier git hook list PreToolUse
 
 # 사용자 범위 확인
-git-utils hook list PreToolUse --project-dir="$HOME"
+atelier git hook list PreToolUse --project-dir="$HOME"
 ```
 
 ### 설정이 없는 경우
@@ -46,11 +46,11 @@ hook이 두 범위에서 발견되었습니다.
 
 ## Step 2: 현재 설정 파싱
 
-`git-utils hook list` 결과(JSON)에서 설정 상태를 파악합니다.
+`atelier git hook list` 결과(JSON)에서 설정 상태를 파악합니다.
 
-- `git-utils guard write` 포함 hook → Write/Edit Guard 활성화
-- `git-utils guard commit` 포함 hook → Commit Guard 활성화
-- `git-utils pr-guard` 포함 hook → PR Guard 활성화
+- `atelier git guard write` 포함 hook → Write/Edit Guard 활성화
+- `atelier git guard commit` 포함 hook → Commit Guard 활성화
+- `atelier git pr-guard` 포함 hook → PR Guard 활성화
 - 프로젝트 범위 vs 사용자 범위는 `--project-dir` 유무로 판별
 
 ## Step 3: 관리할 hook 선택
@@ -95,15 +95,15 @@ hook 스크립트와 settings.json 등록을 모두 제거합니다.
 **프로젝트 범위:**
 
 ```bash
-git-utils hook unregister PreToolUse \
-  "git-utils guard write --project-dir=$PROJECT_DIR --create-branch-script='git-utils branch' --default-branch=$DEFAULT_BRANCH"
+atelier git hook unregister PreToolUse \
+  "atelier git guard write --project-dir=$PROJECT_DIR --create-branch-script='atelier git branch' --default-branch=$DEFAULT_BRANCH"
 ```
 
 **사용자 범위:**
 
 ```bash
-git-utils hook unregister PreToolUse \
-  "git-utils guard write --project-dir=\${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch'" \
+atelier git hook unregister PreToolUse \
+  "atelier git guard write --project-dir=\${CLAUDE_PROJECT_DIR:-.} --create-branch-script='atelier git branch'" \
   --project-dir="$HOME"
 ```
 
@@ -112,15 +112,15 @@ git-utils hook unregister PreToolUse \
 **프로젝트 범위:**
 
 ```bash
-git-utils hook unregister PreToolUse \
-  "git-utils guard commit --project-dir=$PROJECT_DIR --create-branch-script='git-utils branch' --default-branch=$DEFAULT_BRANCH"
+atelier git hook unregister PreToolUse \
+  "atelier git guard commit --project-dir=$PROJECT_DIR --create-branch-script='atelier git branch' --default-branch=$DEFAULT_BRANCH"
 ```
 
 **사용자 범위:**
 
 ```bash
-git-utils hook unregister PreToolUse \
-  "git-utils guard commit --project-dir=\${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch'" \
+atelier git hook unregister PreToolUse \
+  "atelier git guard commit --project-dir=\${CLAUDE_PROJECT_DIR:-.} --create-branch-script='atelier git branch'" \
   --project-dir="$HOME"
 ```
 
@@ -129,15 +129,15 @@ git-utils hook unregister PreToolUse \
 **프로젝트 범위:**
 
 ```bash
-git-utils hook unregister PreToolUse \
-  "git-utils pr-guard"
+atelier git hook unregister PreToolUse \
+  "atelier git pr-guard"
 ```
 
 **사용자 범위:**
 
 ```bash
-git-utils hook unregister PreToolUse \
-  "git-utils pr-guard" \
+atelier git hook unregister PreToolUse \
+  "atelier git pr-guard" \
   --project-dir="$HOME"
 ```
 
@@ -164,16 +164,16 @@ hook 스크립트를 최신 template으로 재생성합니다.
 PROJECT_DIR=$(pwd)
 DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo 'main')
 
-git-utils hook register PreToolUse "Write|Edit" \
-  "git-utils guard write --project-dir=$PROJECT_DIR --create-branch-script='git-utils branch' --default-branch=$DEFAULT_BRANCH" \
+atelier git hook register PreToolUse "Write|Edit" \
+  "atelier git guard write --project-dir=$PROJECT_DIR --create-branch-script='atelier git branch' --default-branch=$DEFAULT_BRANCH" \
   --timeout=5
 ```
 
 **사용자 범위:**
 
 ```bash
-git-utils hook register PreToolUse "Write|Edit" \
-  "git-utils guard write --project-dir=\${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch'" \
+atelier git hook register PreToolUse "Write|Edit" \
+  "atelier git guard write --project-dir=\${CLAUDE_PROJECT_DIR:-.} --create-branch-script='atelier git branch'" \
   --timeout=5 \
   --project-dir="$HOME"
 ```
@@ -183,16 +183,16 @@ git-utils hook register PreToolUse "Write|Edit" \
 **프로젝트 범위:**
 
 ```bash
-git-utils hook register PreToolUse "Bash" \
-  "git-utils guard commit --project-dir=$PROJECT_DIR --create-branch-script='git-utils branch' --default-branch=$DEFAULT_BRANCH" \
+atelier git hook register PreToolUse "Bash" \
+  "atelier git guard commit --project-dir=$PROJECT_DIR --create-branch-script='atelier git branch' --default-branch=$DEFAULT_BRANCH" \
   --timeout=5
 ```
 
 **사용자 범위:**
 
 ```bash
-git-utils hook register PreToolUse "Bash" \
-  "git-utils guard commit --project-dir=\${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch'" \
+atelier git hook register PreToolUse "Bash" \
+  "atelier git guard commit --project-dir=\${CLAUDE_PROJECT_DIR:-.} --create-branch-script='atelier git branch'" \
   --timeout=5 \
   --project-dir="$HOME"
 ```
@@ -202,16 +202,16 @@ git-utils hook register PreToolUse "Bash" \
 **프로젝트 범위:**
 
 ```bash
-git-utils hook register PreToolUse "Bash" \
-  "git-utils pr-guard" \
+atelier git hook register PreToolUse "Bash" \
+  "atelier git pr-guard" \
   --timeout=10
 ```
 
 **사용자 범위:**
 
 ```bash
-git-utils hook register PreToolUse "Bash" \
-  "git-utils pr-guard" \
+atelier git hook register PreToolUse "Bash" \
+  "atelier git pr-guard" \
   --timeout=10 \
   --project-dir="$HOME"
 ```

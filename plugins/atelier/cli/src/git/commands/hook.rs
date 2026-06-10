@@ -49,6 +49,28 @@ fn serialize_settings(settings: &Value) -> String {
     s
 }
 
+/// Removes `command` from every matcher entry of a hook-type array, pruning
+/// entries whose `hooks` list becomes empty. Returns whether anything was
+/// removed. Sibling commands sharing a matcher group are left untouched.
+fn remove_command(arr: &mut Vec<Value>, command: &str) -> bool {
+    let mut removed = false;
+    for entry in arr.iter_mut() {
+        if let Some(hs) = entry.get_mut("hooks").and_then(|h| h.as_array_mut()) {
+            let before = hs.len();
+            hs.retain(|hk| hk.get("command").and_then(|c| c.as_str()) != Some(command));
+            removed |= hs.len() != before;
+        }
+    }
+    arr.retain(|entry| {
+        entry
+            .get("hooks")
+            .and_then(|h| h.as_array())
+            .map(|h| !h.is_empty())
+            .unwrap_or(true)
+    });
+    removed
+}
+
 impl HookCommand<'_> {
     /// Reads settings, ensuring `hooks` is present as an object. Returns the
     /// outer `Err` on malformed JSON (so the caller refuses to overwrite).
@@ -81,7 +103,11 @@ impl HookCommand<'_> {
             .write_file(&settings_path(project_dir), &serialize_settings(settings))
     }
 
-    /// Registers (or updates) a hook entry. See port notes for matching rules.
+    /// Registers (or updates) a hook command. Identity is the command string:
+    /// any prior registration of the same command (under any matcher) is
+    /// removed, then the command is appended to the matcher group — so several
+    /// commands can share one matcher (e.g. multiple PreToolUse/Bash guards,
+    /// #772) and re-registering is idempotent.
     pub fn register(
         &self,
         input: &HookRegisterInput,
@@ -95,40 +121,36 @@ impl HookCommand<'_> {
             .or_insert_with(|| Value::Array(vec![]));
         let arr = arr.as_array_mut().ok_or("hook type is not an array")?;
 
-        // Build the hook entry.
+        let existed = remove_command(arr, &input.command);
+
+        // Build the hook object.
         let mut hook_entry = Map::new();
         hook_entry.insert("type".to_string(), json!("command"));
         hook_entry.insert("command".to_string(), json!(input.command));
         if let Some(timeout) = input.timeout {
             hook_entry.insert("timeout".to_string(), json!(timeout));
         }
-        let new_hook = json!({
-            "matcher": input.matcher,
-            "hooks": [Value::Object(hook_entry)],
-        });
 
-        // Find existing entry by matcher OR by any nested command.
-        let existing_index = arr.iter().position(|h| {
-            let matcher_match = h.get("matcher").and_then(|m| m.as_str()) == Some(&input.matcher);
-            let command_match = h
-                .get("hooks")
-                .and_then(|hs| hs.as_array())
-                .map(|hs| {
-                    hs.iter().any(|hk| {
-                        hk.get("command").and_then(|c| c.as_str()) == Some(&input.command)
-                    })
-                })
-                .unwrap_or(false);
-            matcher_match || command_match
-        });
+        // Append to the entry with the same matcher, creating it if absent.
+        let group = arr
+            .iter_mut()
+            .find(|h| h.get("matcher").and_then(|m| m.as_str()) == Some(&input.matcher));
+        match group {
+            Some(entry) => {
+                entry["hooks"]
+                    .as_array_mut()
+                    .ok_or("hooks is not an array")?
+                    .push(Value::Object(hook_entry));
+            }
+            None => {
+                arr.push(json!({
+                    "matcher": input.matcher,
+                    "hooks": [Value::Object(hook_entry)],
+                }));
+            }
+        }
 
-        let action = if let Some(idx) = existing_index {
-            arr[idx] = new_hook;
-            "updated"
-        } else {
-            arr.push(new_hook);
-            "created"
-        };
+        let action = if existed { "updated" } else { "created" };
 
         self.write_settings(&project_dir, &settings)?;
         Ok(CmdResult::Ok(HookRegisterOutput {
@@ -153,20 +175,11 @@ impl HookCommand<'_> {
 
         let mut settings = self.read_settings(&project_dir)?;
 
-        let has_type = settings["hooks"]
-            .get(&input.hook_type)
-            .map(|v| !v.is_null())
-            .unwrap_or(false);
-        if !has_type {
-            return Ok(CmdResult::Err(format!(
-                "No hooks found for type: {}",
-                input.hook_type
-            )));
-        }
-
         let hooks = settings["hooks"].as_object_mut().unwrap();
-        let arr = hooks.get_mut(&input.hook_type).unwrap().as_array().cloned();
-        let arr = match arr {
+        let arr = match hooks
+            .get_mut(&input.hook_type)
+            .and_then(|v| v.as_array_mut())
+        {
             Some(a) => a,
             None => {
                 return Ok(CmdResult::Err(format!(
@@ -175,31 +188,13 @@ impl HookCommand<'_> {
                 )))
             }
         };
-        let initial = arr.len();
-        let filtered: Vec<Value> = arr
-            .into_iter()
-            .filter(|h| {
-                let has_cmd = h
-                    .get("hooks")
-                    .and_then(|hs| hs.as_array())
-                    .map(|hs| {
-                        hs.iter().any(|hk| {
-                            hk.get("command").and_then(|c| c.as_str()) == Some(&input.command)
-                        })
-                    })
-                    .unwrap_or(false);
-                !has_cmd
-            })
-            .collect();
 
-        if filtered.len() == initial {
+        if !remove_command(arr, &input.command) {
             return Ok(CmdResult::Err(format!("Hook not found: {}", input.command)));
         }
 
-        if filtered.is_empty() {
+        if arr.is_empty() {
             hooks.remove(&input.hook_type);
-        } else {
-            hooks.insert(input.hook_type.clone(), Value::Array(filtered));
         }
 
         // If hooks object is empty, drop it entirely.
