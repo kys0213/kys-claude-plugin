@@ -175,17 +175,6 @@ impl HookCommand<'_> {
 
         let mut settings = self.read_settings(&project_dir)?;
 
-        let has_type = settings["hooks"]
-            .get(&input.hook_type)
-            .map(|v| !v.is_null())
-            .unwrap_or(false);
-        if !has_type {
-            return Ok(CmdResult::Err(format!(
-                "No hooks found for type: {}",
-                input.hook_type
-            )));
-        }
-
         let hooks = settings["hooks"].as_object_mut().unwrap();
         let arr = match hooks
             .get_mut(&input.hook_type)
