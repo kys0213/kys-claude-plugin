@@ -142,6 +142,49 @@ fn detect_default_branch_develop() {
 }
 
 #[test]
+fn detect_default_branch_readonly_uses_cached_head() {
+    let (_r, local) = setup();
+    assert_eq!(
+        svc(local.path()).detect_default_branch_readonly().unwrap(),
+        "main"
+    );
+}
+
+#[test]
+fn detect_default_branch_readonly_does_not_write_origin_head() {
+    let (_r, local) = setup();
+    // Remove the cached symbolic ref so Method 1 misses; readonly must fall
+    // back to Method 3 (probe common names) WITHOUT running `set-head`.
+    sh(
+        &[
+            "git",
+            "symbolic-ref",
+            "--delete",
+            "refs/remotes/origin/HEAD",
+        ],
+        local.path(),
+    );
+
+    assert_eq!(
+        svc(local.path()).detect_default_branch_readonly().unwrap(),
+        "main"
+    );
+
+    // The ref must still be absent — readonly detection has no side effects.
+    let head_present = Command::new("git")
+        .args(["symbolic-ref", "refs/remotes/origin/HEAD"])
+        .current_dir(local.path())
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(
+        !head_present,
+        "detect_default_branch_readonly must not recreate refs/remotes/origin/HEAD"
+    );
+}
+
+#[test]
 fn detect_default_branch_no_remote_errors() {
     let local = TempDir::new().unwrap();
     sh(&["git", "init"], local.path());

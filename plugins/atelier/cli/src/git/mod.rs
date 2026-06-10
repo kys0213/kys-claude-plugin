@@ -267,7 +267,10 @@ pub fn run(cli: Cli) -> i32 {
             });
             let create_branch_script =
                 create_branch_script.unwrap_or_else(|| "atelier git branch".to_string());
-            let git = create_git_service(None);
+            // Pin the git service to project_dir so branch / special-state /
+            // default-branch detection reflect the project, not the hook's
+            // process cwd (worktree / subagent contexts) — see #780.
+            let git = create_git_service(Some(project_dir.clone()));
             let guard = create_guard_service(&git);
             let deps = commands::guard::GuardCommandDeps { guard: &guard };
             let input = GuardInput {
