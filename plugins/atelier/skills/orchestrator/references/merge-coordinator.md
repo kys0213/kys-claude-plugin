@@ -140,7 +140,7 @@ Agent({
 | 머지 실패, 사용자가 보류 결정 | 그대로 둠 — 사용자가 나중에 처리 |
 | 머지 실패, 사용자가 폐기 결정 | worktree 삭제 + 브랜치 삭제 |
 
-정리는 `git-utils` 또는 `git worktree remove` Bash 호출로 수행. 메인이 직접 해도 되고, sub-agent에 위임해도 된다 (변경이 없으니 위험도 낮음).
+정리는 `atelier git` 또는 `git worktree remove` Bash 호출로 수행. 메인이 직접 해도 되고, sub-agent에 위임해도 된다 (변경이 없으니 위험도 낮음).
 
 ---
 

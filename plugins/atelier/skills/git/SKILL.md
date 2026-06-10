@@ -226,7 +226,7 @@ Rebase 중 충돌이 발생하면 `references/conflict-resolution.md` 의 파일
 
 1. **작은 단위 커밋**: TODO별로 명확한 진행상황 추적
 2. **PR Only**: 모든 병합은 반드시 Pull Request를 통해서만
-3. **atelier git CLI 사용**: 복잡한 git 명령어 대신 `git-utils` CLI 활용
+3. **atelier git CLI 사용**: 복잡한 git 명령어 대신 `atelier git` CLI 활용
 4. **Rebase 우선**: merge 대신 rebase로 깔끔한 히스토리 유지
 
 ---
