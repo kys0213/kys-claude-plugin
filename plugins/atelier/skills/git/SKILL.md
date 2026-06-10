@@ -1,6 +1,6 @@
 ---
 name: git
-description: ALWAYS use this skill for ANY git-related task (commit, branch, PR, status, diff, log, conflict resolution). Provides automatic quality validation and enforces project conventions. Use git-utils CLI for all operations.
+description: ALWAYS use this skill for ANY git-related task (commit, branch, PR, status, diff, log, conflict resolution). Provides automatic quality validation and enforces project conventions. Use atelier git CLI for all operations.
 allowed-tools: Bash
 ---
 
@@ -33,31 +33,31 @@ allowed-tools: Bash
 
 ---
 
-## git-utils CLI
+## atelier git CLI
 
-모든 git 워크플로우 작업은 `git-utils` CLI로 처리합니다. `/setup` 실행 시 `~/.local/bin/git-utils`에 설치됩니다.
+모든 git 워크플로우 작업은 `atelier git` CLI로 처리합니다. setup 실행 시 단일 `atelier` 바이너리가 `~/.local/bin/atelier`에 설치됩니다.
 
 ```bash
-git-utils --version    # 버전 확인
-git-utils --help       # 전체 도움말
+atelier git --version    # 버전 확인
+atelier git --help       # 전체 도움말
 ```
 
 ### 1. 브랜치 생성
 
 ```bash
-git-utils branch <branch-name> [--base=<branch>]
+atelier git branch <branch-name> [--base=<branch>]
 ```
 
 **예시:**
 
 ```bash
 # 기본 브랜치(main/master) 기반
-git-utils branch feature/user-auth
-git-utils branch feat/WAD-0212
+atelier git branch feature/user-auth
+atelier git branch feat/WAD-0212
 
 # 특정 브랜치 기반
-git-utils branch feature/user-auth --base=develop
-git-utils branch fix/hotfix --base=release/1.0
+atelier git branch feature/user-auth --base=develop
+atelier git branch fix/hotfix --base=release/1.0
 ```
 
 **동작:** fetch → base checkout → pull → checkout -b (자동)
@@ -67,22 +67,22 @@ git-utils branch fix/hotfix --base=release/1.0
 ### 2. 커밋 생성
 
 ```bash
-git-utils commit <type> <description> [--scope=<s>] [--body=<b>] [--skip-add]
+atelier git commit <type> <description> [--scope=<s>] [--body=<b>] [--skip-add]
 ```
 
 **예시:**
 
 ```bash
 # Jira 브랜치 (feat/wad-0212)에서
-git-utils commit feat "implement user authentication"
+atelier git commit feat "implement user authentication"
 # → [WAD-0212] feat: implement user authentication
 
 # 일반 브랜치에서 scope 지정
-git-utils commit feat "implement user authentication" --scope=auth
+atelier git commit feat "implement user authentication" --scope=auth
 # → feat(auth): implement user authentication
 
 # 상세 설명 포함
-git-utils commit feat "add authentication" --scope=auth --body="- Add JWT tokens"
+atelier git commit feat "add authentication" --scope=auth --body="- Add JWT tokens"
 ```
 
 **지원 타입:** `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `perf`
@@ -94,14 +94,14 @@ git-utils commit feat "add authentication" --scope=auth --body="- Add JWT tokens
 ### 3. PR 생성
 
 ```bash
-git-utils pr <title> [--description=<d>]
+atelier git pr <title> [--description=<d>]
 ```
 
 **예시:**
 
 ```bash
-git-utils pr "Implement user authentication"
-git-utils pr "Fix memory leak" --description="Added proper cleanup in worker threads"
+atelier git pr "Implement user authentication"
+atelier git pr "Fix memory leak" --description="Added proper cleanup in worker threads"
 ```
 
 **자동 처리:** 기본 브랜치 감지, Jira 티켓 포함, push + PR 생성
@@ -113,7 +113,7 @@ git-utils pr "Fix memory leak" --description="Added proper cleanup in worker thr
 ### 4. 미해결 리뷰 조회
 
 ```bash
-git-utils reviews [pr-number]
+atelier git reviews [pr-number]
 ```
 
 **출력 (JSON):** PR 제목, URL, 리뷰 쓰레드 목록
@@ -121,7 +121,7 @@ git-utils reviews [pr-number]
 ### 5. Default Branch Guard
 
 ```bash
-git-utils guard <write|commit> --project-dir=<p> --create-branch-script=<s> [--default-branch=<b>]
+atelier git guard <write|commit> --project-dir=<p> --create-branch-script=<s> [--default-branch=<b>]
 ```
 
 - 기본 브랜치에서 차단 시 exit 2, 통과 시 exit 0
@@ -129,9 +129,9 @@ git-utils guard <write|commit> --project-dir=<p> --create-branch-script=<s> [--d
 ### 6. Hook 관리
 
 ```bash
-git-utils hook register <hookType> <matcher> <command> [--timeout=<n>] [--project-dir=<p>]
-git-utils hook unregister <hookType> <command> [--project-dir=<p>]
-git-utils hook list [hookType] [--project-dir=<p>]
+atelier git hook register <hookType> <matcher> <command> [--timeout=<n>] [--project-dir=<p>]
+atelier git hook unregister <hookType> <command> [--project-dir=<p>]
+atelier git hook list [hookType] [--project-dir=<p>]
 ```
 
 ---
@@ -141,20 +141,20 @@ git-utils hook list [hookType] [--project-dir=<p>]
 ### Jira 티켓 작업 (feat/wad-0212)
 
 ```bash
-git-utils branch feat/wad-0212
-git-utils commit feat "implement user authentication"
+atelier git branch feat/wad-0212
+atelier git commit feat "implement user authentication"
 # → [WAD-0212] feat: implement user authentication
-git-utils pr "Implement user authentication"
+atelier git pr "Implement user authentication"
 # → PR 제목: [WAD-0212] Implement user authentication
 ```
 
 ### 일반 Feature 작업
 
 ```bash
-git-utils branch feature/user-auth
-git-utils commit feat "implement user authentication" --scope=auth
+atelier git branch feature/user-auth
+atelier git commit feat "implement user authentication" --scope=auth
 # → feat(auth): implement user authentication
-git-utils pr "Add user authentication"
+atelier git pr "Add user authentication"
 ```
 
 ---
@@ -193,9 +193,9 @@ git push origin main       # 금지
 ### 올바른 프로세스
 
 ```bash
-git-utils branch feature/my-work
-git-utils commit feat "my changes"
-git-utils pr "My feature"
+atelier git branch feature/my-work
+atelier git commit feat "my changes"
+atelier git pr "My feature"
 # → Merge 승인 대기 → atelier git sync (CLI) → git branch -d feature/my-work
 ```
 
@@ -226,7 +226,7 @@ Rebase 중 충돌이 발생하면 `references/conflict-resolution.md` 의 파일
 
 1. **작은 단위 커밋**: TODO별로 명확한 진행상황 추적
 2. **PR Only**: 모든 병합은 반드시 Pull Request를 통해서만
-3. **git-utils CLI 사용**: 복잡한 git 명령어 대신 `git-utils` CLI 활용
+3. **atelier git CLI 사용**: 복잡한 git 명령어 대신 `git-utils` CLI 활용
 4. **Rebase 우선**: merge 대신 rebase로 깔끔한 히스토리 유지
 
 ---
@@ -241,9 +241,9 @@ Rebase 중 충돌이 발생하면 `references/conflict-resolution.md` 의 파일
 | Commit Guard | `Bash` | `git commit` 명령 |
 
 ### 동작 방식
-1. PreToolUse hook → `git-utils guard write` 또는 `git-utils guard commit` 실행
+1. PreToolUse hook → `atelier git guard write` 또는 `atelier git guard commit` 실행
 2. 현재 브랜치가 기본 브랜치(main/master)인지 확인
-3. 기본 브랜치이면 exit 2로 차단 → Claude가 `git-utils branch`로 새 브랜치 생성
+3. 기본 브랜치이면 exit 2로 차단 → Claude가 `atelier git branch`로 새 브랜치 생성
 4. 브랜치 이동 후 재시도 시 pass
 
 ### 특징
