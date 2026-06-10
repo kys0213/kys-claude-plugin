@@ -78,5 +78,5 @@ atelier setup <module>
 > Fat Controller 14개가 관심사 skill(`spec`/`autopilot`/`git`) + `references/` 로 해체되었습니다.
 > 슬래시 표면은 capability 35개 → 관심사 단위로 수렴, 흡수 6개 plugin 은 snapshot freeze 보존.
 >
-> ⚠️ `gh` CLI 의존 git 명령(pr create, reviews, pr-guard)은 mock 단위 테스트만 완료 —
+> ⚠️ `gh` CLI 의존 git 명령(pr create, reviews, guard pr)은 mock 단위 테스트만 완료 —
 > 실제 `gh`/네트워크 라이브 검증은 정식 릴리스 전 별도 수행이 필요합니다.

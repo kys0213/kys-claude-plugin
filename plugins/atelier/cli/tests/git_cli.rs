@@ -71,7 +71,30 @@ fn git_guard_missing_target_usage() {
         .write_stdin("{}")
         .assert()
         .code(1)
-        .stderr(predicate::str::contains("Usage"));
+        .stderr(predicate::str::contains("Usage"))
+        .stderr(predicate::str::contains("pr"));
+}
+
+#[test]
+fn git_guard_pr_non_matching_command_passes() {
+    // A non-`gh pr create` command passes the PR guard before any gh lookup,
+    // so this is deterministic without a gh binary or network.
+    atelier()
+        .args(["git", "guard", "pr"])
+        .write_stdin(r#"{"tool_input":{"command":"echo hello"}}"#)
+        .assert()
+        .code(0);
+}
+
+#[test]
+fn git_pr_guard_alias_non_matching_command_passes() {
+    // Legacy alias of `guard pr` — must keep the same contract for hooks
+    // registered before the unified guard surface.
+    atelier()
+        .args(["git", "pr-guard"])
+        .write_stdin(r#"{"tool_input":{"command":"echo hello"}}"#)
+        .assert()
+        .code(0);
 }
 
 #[test]

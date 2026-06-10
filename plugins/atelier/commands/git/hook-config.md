@@ -50,7 +50,7 @@ hook이 두 범위에서 발견되었습니다.
 
 - `atelier git guard write` 포함 hook → Write/Edit Guard 활성화
 - `atelier git guard commit` 포함 hook → Commit Guard 활성화
-- `atelier git pr-guard` 포함 hook → PR Guard 활성화
+- `atelier git guard pr` 또는 `atelier git pr-guard`(legacy alias) 포함 hook → PR Guard 활성화
 - 프로젝트 범위 vs 사용자 범위는 `--project-dir` 유무로 판별
 
 ## Step 3: 관리할 hook 선택
@@ -130,15 +130,15 @@ atelier git hook unregister PreToolUse \
 
 ```bash
 atelier git hook unregister PreToolUse \
-  "atelier git pr-guard"
+  "atelier git guard pr"   # legacy 설치는 "atelier git pr-guard" — Step 2에서 찾은 문자열 사용
 ```
 
 **사용자 범위:**
 
 ```bash
 atelier git hook unregister PreToolUse \
-  "atelier git pr-guard" \
-  --project-dir="$HOME"
+  "atelier git guard pr" \
+  --project-dir="$HOME"   # legacy 설치는 "atelier git pr-guard" — Step 2에서 찾은 문자열 사용
 ```
 
 완료 메시지:
@@ -203,7 +203,7 @@ atelier git hook register PreToolUse "Bash" \
 
 ```bash
 atelier git hook register PreToolUse "Bash" \
-  "atelier git pr-guard" \
+  "atelier git guard pr" \
   --timeout=10
 ```
 
@@ -211,7 +211,7 @@ atelier git hook register PreToolUse "Bash" \
 
 ```bash
 atelier git hook register PreToolUse "Bash" \
-  "atelier git pr-guard" \
+  "atelier git guard pr" \
   --timeout=10 \
   --project-dir="$HOME"
 ```
