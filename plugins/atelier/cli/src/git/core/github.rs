@@ -72,24 +72,30 @@ fn load_gh_host() -> Option<String> {
 
 pub struct RealGitHubService {
     cwd: Option<String>,
-    gh_host: Option<String>,
+    // Lazy: the env-file read only happens on the first gh invocation, so
+    // constructing the service (e.g. for a guard target that never consults
+    // gh) costs no I/O.
+    gh_host: std::cell::OnceCell<Option<String>>,
 }
 
 /// Constructs the real GitHub service bound to an optional working directory.
 pub fn create_github_service(cwd: Option<String>) -> RealGitHubService {
     RealGitHubService {
         cwd,
-        gh_host: load_gh_host(),
+        gh_host: std::cell::OnceCell::new(),
     }
 }
 
 impl RealGitHubService {
+    fn gh_host(&self) -> &Option<String> {
+        self.gh_host.get_or_init(load_gh_host)
+    }
     fn opts(&self) -> Option<ExecOptions> {
-        if self.cwd.is_none() && self.gh_host.is_none() {
+        let gh_host = self.gh_host();
+        if self.cwd.is_none() && gh_host.is_none() {
             return None;
         }
-        let env = self
-            .gh_host
+        let env = gh_host
             .as_ref()
             .map(|host| HashMap::from([("GH_HOST".to_string(), host.clone())]));
         Some(ExecOptions {

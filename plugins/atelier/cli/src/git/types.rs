@@ -167,6 +167,24 @@ pub struct GuardDecision {
     pub reason: Option<String>,
 }
 
+impl From<GuardOutput> for GuardDecision {
+    fn from(out: GuardOutput) -> Self {
+        GuardDecision {
+            allowed: out.allowed,
+            reason: out.reason,
+        }
+    }
+}
+
+impl From<PrGuardOutput> for GuardDecision {
+    fn from(out: PrGuardOutput) -> Self {
+        GuardDecision {
+            allowed: out.allowed,
+            reason: out.reason,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------

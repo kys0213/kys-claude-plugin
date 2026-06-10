@@ -26,30 +26,25 @@ pub struct GuardCommandInput {
 pub fn run(deps: &GuardCommandDeps, input: &GuardCommandInput) -> GuardDecision {
     match &input.target {
         GuardCommandTarget::Pr { command } => check_pr(deps.pr_guard, command.clone()),
-        GuardCommandTarget::Branch(target) => {
-            let out = deps.branch_guard.check(&GuardInput {
+        GuardCommandTarget::Branch(target) => deps
+            .branch_guard
+            .check(&GuardInput {
                 target: target.clone(),
                 project_dir: input.project_dir.clone(),
                 create_branch_script: input.create_branch_script.clone(),
                 default_branch: input.default_branch.clone(),
                 protected_branches: input.protected_branches.clone(),
-            });
-            GuardDecision {
-                allowed: out.allowed,
-                reason: out.reason,
-            }
-        }
+            })
+            .into(),
     }
 }
 
 /// PR-guard check without branch configuration — shared by the `guard pr`
 /// dispatch above and the legacy `pr-guard` alias.
 pub fn check_pr(pr_guard: &dyn PrGuardService, command: Option<String>) -> GuardDecision {
-    let out = pr_guard.check(&PrGuardInput {
-        tool_command: command,
-    });
-    GuardDecision {
-        allowed: out.allowed,
-        reason: out.reason,
-    }
+    pr_guard
+        .check(&PrGuardInput {
+            tool_command: command,
+        })
+        .into()
 }

@@ -118,19 +118,18 @@ impl GuardService for RealGuardService<'_> {
         // Target-specific prefilters; the payload lives on the variant (#777).
         match &input.target {
             // write guard: file outside the project directory.
-            GuardTarget::Write {
-                file_path: Some(file_path),
-            } => {
-                // Resolve project_dir once for both path checks (one
-                // current_dir() syscall instead of two per tool invocation).
-                let project = resolve_project_dir(&input.project_dir);
-                if !inside_project_dir(&project, file_path)
-                    && !inside_any_git_repo(&project, file_path)
-                {
-                    return pass(Some("file is outside any git repository"));
+            GuardTarget::Write { file_path } => {
+                if let Some(file_path) = file_path {
+                    // Resolve project_dir once for both path checks (one
+                    // current_dir() syscall instead of two per tool invocation).
+                    let project = resolve_project_dir(&input.project_dir);
+                    if !inside_project_dir(&project, file_path)
+                        && !inside_any_git_repo(&project, file_path)
+                    {
+                        return pass(Some("file is outside any git repository"));
+                    }
                 }
             }
-            GuardTarget::Write { file_path: None } => {}
             // commit guard: not a git commit command → pass.
             GuardTarget::Commit { command } => {
                 let is_commit = command
