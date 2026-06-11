@@ -28,6 +28,9 @@ user-invocable: false
 - 예산:                      max_loops, max_redispatch_per_task, (가능하면) 시간/턴 상한
 - 자동 중단 (hard_stops):    무엇이 발생하면 예산과 무관하게 멈추고 보고하는가
 - 결정 기록 위치 (log_dir):  .orchestrator/<epic>/decisions/ (gitignore, 완료 시 요약 공유)
+- 통합 검증 (integration_verify): (선택) worktree에서 실행 불가한 인프라 의존 테스트
+                             - command: 실행할 명령 (예: "PROFILE=local-dev pnpm test src/storage/__test__/*.e2e.test.ts")
+                             - run_at: before_merge | after_merge
 ```
 
 진입 후에는 이 계약 범위 안에서 **보고 없이** 진행한다. 계약을 벗어나는 순간(예산 소진 또는 hard stop)에만 멈추고 보고한다.
@@ -48,6 +51,7 @@ while not satisfied(contract.done_when) and loop_count < contract.max_loops:
              run_in_background=true)
     log_decision("병렬/순차 + 위임 형태", ...)
     results = await_completion_notifications()        # 모니터 (sleep/poll 금지)
+    assert_topology()                                 # 가드: branch == epic + status clean (아래)
 
     for r in results:
         if r.failed:
@@ -55,6 +59,8 @@ while not satisfied(contract.done_when) and loop_count < contract.max_loops:
             log_decision("재위임 판단", r, refs=[실패이력, agent-monitor.md])
 
     merge_coordinate(results)                         # 머지 — 충돌은 자동 위임 (아래)
+    assert_topology()                                 # 가드: 매 머지 직후에도 (#783)
+    run_integration_verify(contract)                  # 인프라 의존 테스트 — 메인이 직접 Bash (아래)
     log_decision("머지 순서 / 충돌 처리", ...)
     remaining_work = recompute_remaining()            # 진전 측정
 
@@ -113,6 +119,26 @@ escalate_or_report(reason, decision_log=contract.log_dir)   # 완료 / 예산소
             실패 → 재시도 1회 → 그래도 실패면 hard stop → 에스컬레이션
 도메인 의미 충돌 (코드로 판정 불가) → 즉시 에스컬레이션 (자동 해결 금지)
 ```
+
+### 토폴로지 가드 (assert_topology)
+
+sub-agent의 격리 이탈로 메인 working tree branch가 sub-agent 브랜치로 switch되는 사고가 실제 자율 런에서 3회 재현됐다 (#783). 자율 모드는 보고 없이 연속 진행하므로 오염이 후속 dispatch/머지로 전파되기 전에 잡아야 한다. **매 sub-agent 완료 알림 수신 직후 + 매 머지 직후** 실행:
+
+```bash
+git branch --show-current    # epic/<name> 이어야 함
+git status --short           # clean 이어야 함
+```
+
+위반 시 **hard stop** — `merge-coordinator.md`의 복구 절차(rebase abort → epic checkout)로 복구한 뒤 즉시 에스컬레이션한다. 자율 재개는 사용자 결정.
+
+### 통합 검증 (integration_verify)
+
+worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외부 서비스 토큰 등)에 접근할 수 없다 (#782). 따라서:
+
+- 인프라 의존 테스트는 **처음부터 sub-agent worktree 검증 범위에서 제외**하고 dispatch prompt에 명시한다 — sub-agent의 테스트 결과에 환경 의존 실패 noise가 끼지 않도록.
+- 계약에 `integration_verify`가 정의되어 있으면, `run_at` 시점(before_merge / after_merge)에 **메인이 epic 브랜치 메인 working tree에서 직접 Bash로 실행**한다 (메인의 Edit/Write 금지 정책에 해당 없음 — Bash 검증은 허용).
+- 실패 시: `before_merge`면 해당 머지를 진행하지 않고, `after_merge`면 후속 루프를 진행하지 않는다. 두 경우 모두 hard stop → 에스컬레이션.
+- `done_when` 평가에 integration_verify 통과를 포함한다 — 계약에 정의됐다면 이것이 통과하지 않은 채 "완료"를 선언하지 않는다.
 
 ---
 
@@ -201,6 +227,8 @@ escalate_or_report(reason, decision_log=contract.log_dir)   # 완료 / 예산소
 opt-in 전면 허용이라도 다음은 **항상** 멈추고 사람에게 보고한다 (예산과 무관, 우선 적용):
 
 - **되돌리기 어렵거나 외부로 나가는 행위**: force push, main 브랜치 머지, 배포, 외부 서비스 호출, 데이터 삭제 — 자율 모드는 epic 브랜치 안에서만 자율이고, 그 경계를 넘는 행위는 자동화 대상이 아니다.
+- **토폴로지 위반**: 메인 working tree branch가 epic 브랜치가 아니게 되거나 의도치 않은 변경이 발견됨 — 복구 후 즉시 보고 (#783).
+- **integration_verify 실패**: 계약에 정의된 인프라 의존 검증이 실패 — 자동 머지/루프 진행 금지 (#782).
 - **도메인 의미 충돌**: 의도가 갈리는 머지 충돌 (코드로 판정 불가).
 - **예산 소진**: 루프 상한 / 재위임 한도 / no-progress 도달.
 - **원인 불명확한 반복 실패**: 같은 실패가 재위임에도 계속됨.
@@ -235,6 +263,8 @@ opt-in 전면 허용이라도 다음은 **항상** 멈추고 사람에게 보고
 8. **epic 경계 이탈**: 자율이라는 이유로 main 머지/배포까지 자동 → 자율은 epic 브랜치 안에서만. 경계 밖은 에스컬레이션.
 9. **결정 기록 누락**: 근거를 남기지 않고 자율 주행 → 사용자가 사후에 "왜"를 복원 불가. 모든 분기 결정은 참고 소스와 함께 `log_dir`에 기록.
 10. **결정 로그 커밋**: 휘발성 자율 산출물을 epic 브랜치에 커밋 → repo 오염. `.orchestrator/`는 gitignore, 완료 시 요약으로만 공유.
+11. **토폴로지 가드 생략**: 완료 알림/머지 후 메인 branch 확인 없이 연속 진행 → 오염된 HEAD 위에서 다음 dispatch의 worktree base가 잘못 잡힘 (#783).
+12. **인프라 의존 테스트를 worktree 검증에 포함**: sub-agent가 접근 불가한 환경 의존 테스트를 worktree에서 실행 → 환경 실패 noise로 PR 검증 신뢰도 저하. 계약의 `integration_verify`로 분리해 메인이 실행 (#782).
 
 ---
 
@@ -249,8 +279,14 @@ opt-in 전면 허용이라도 다음은 **항상** 멈추고 사람에게 보고
 - [ ] 결정 기록 위치(`.orchestrator/<epic>/decisions/`)를 계약에 고정했는가?
 - [ ] 자율 계약을 사용자에게 1회 보고했는가?
 
+진입 전 (계약):
+
+- [ ] 인프라 의존 테스트가 있다면 `integration_verify` (command + run_at)를 계약에 정의했는가?
+
 루프 중:
 
+- [ ] 매 sub-agent 완료 직후 + 매 머지 직후 토폴로지 가드를 실행하는가?
+- [ ] 계약의 integration_verify를 run_at 시점에 메인이 직접 실행하는가?
 - [ ] 매 루프 종료 시 종료 조건을 결정적으로 재평가하는가?
 - [ ] 재위임 / 머지 / 충돌 해결이 예산을 소모하며 카운트되는가?
 - [ ] 진전을 수치로 측정하는가? (체감 아님)
