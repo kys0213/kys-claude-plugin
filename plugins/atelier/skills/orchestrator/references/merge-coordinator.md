@@ -60,15 +60,41 @@ epic/<name> → main 머지는 사용자 결정 / 별도 release 절차 (범위 
 
 4. 순차 머지 시도
    - epic 브랜치(base)에 후보 브랜치를 머지/리베이스 — 메인은 epic 브랜치 working tree에 그대로 머무름
+   - PR 머지는 `gh pr merge <N> --squash --delete-branch` 사용 (--delete-branch로 서버측 + 로컬 브랜치 모두 정리)
    - 충돌 없음 → 다음 후보로
    - 충돌 발생 → 위임 (아래 참조)
 
-5. 머지 완료 후 worktree 정리
+5. 토폴로지 가드 (매 머지 직후, 생략 금지)
+   - assert `git branch --show-current` == epic 브랜치
+   - 불일치 시 즉시 복구 + 에스컬레이션 (아래 "머지 후 토폴로지 가드" 참조)
+
+6. 머지 완료 후 worktree 정리
    - 머지된 worktree 삭제
    - 폐기된 worktree도 사용자 확인 후 삭제
 
-6. 사용자에게 결과 요약 보고
+7. 사용자에게 결과 요약 보고
 ```
+
+---
+
+## 머지 후 토폴로지 가드
+
+실사례에서 `gh pr merge --squash` 후 메인 working tree의 current branch가 sub-agent 브랜치로 의도치 않게 switch된 사고가 발생했다 (#783). 메인은 항상 epic 브랜치에 있어야 하므로, **매 머지 직후** 다음 1줄 가드를 실행한다:
+
+```bash
+[ "$(git branch --show-current)" = "epic/<name>" ] || echo "TOPOLOGY VIOLATION"
+```
+
+불일치 발견 시 복구 절차:
+
+```bash
+git rebase --abort 2>/dev/null   # rebase 진행 중이면 중단
+git checkout epic/<name>
+git pull --rebase origin epic/<name>
+git branch -D <잘못 switch된 sub-agent 브랜치>   # 로컬에 남았으면 정리
+```
+
+복구 후 **반드시 에스컬레이션** — 어떤 명령 직후 발생했는지, working tree가 clean했는지를 사용자에게 보고한다. 자율 모드라도 이 가드 실패는 hard stop이다 (`autonomous-driving.md`).
 
 ---
 
@@ -186,6 +212,7 @@ git diff --name-only epic/<name>...<branch_B>  # B가 변경한 파일
 4. **worktree 방치**: 머지 완료 후 정리 안 함 → 디스크/git 상태 오염.
 5. **base 미동기화 머지**: 오래된 base 위에 머지 시도 → 무의미한 충돌. 머지 직전 base pull 필수.
 6. **main으로 바로 머지**: epic 브랜치를 거치지 않고 sub-agent 결과를 main으로 직접 머지 → epic 브랜치 전략 위반. 이 단계의 target은 항상 epic 브랜치.
+7. **머지 후 가드 생략**: `gh pr merge` 후 current branch 확인 없이 다음 git 명령 진행 → 메인이 sub-agent 브랜치 위에서 작업하는 토폴로지 위반을 뒤늦게 발견 (#783). 매 머지 직후 가드 필수.
 
 ---
 
@@ -202,6 +229,8 @@ git diff --name-only epic/<name>...<branch_B>  # B가 변경한 파일
 머지 진행 중:
 
 - [ ] 충돌 발생 시 직접 편집하지 않고 위임/보고했는가?
+- [ ] PR 머지에 `--squash --delete-branch` 옵션을 사용했는가?
+- [ ] 매 머지 직후 `git branch --show-current` == epic 브랜치를 확인했는가?
 
 머지 종료 후:
 

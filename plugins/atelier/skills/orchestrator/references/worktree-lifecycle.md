@@ -70,7 +70,17 @@ Agent({description: "task B", isolation: "worktree", run_in_background: true,
 
 ## 결과 수령 후 처리
 
-worktree agent의 결과는 후속 단계로 위임한다:
+**모든 sub-agent 완료 알림 수신 직후, 다른 처리에 앞서 토폴로지 가드를 실행한다** (실사례에서 sub-agent가 메인 working tree state를 변형해 메인 branch가 switch된 사고가 3회 재현됨 — #783):
+
+```bash
+git branch --show-current   # epic/<name> 이어야 함
+git status --short          # clean 이어야 함 (메인은 편집하지 않으므로)
+```
+
+- branch 불일치 → `git checkout epic/<name>` 으로 복구 + 에스컬레이션 (자율 모드라도 hard stop)
+- 의도치 않은 변경 발견 → `git stash push -u` 로 보존 후 사용자 보고 (해당 변경이 worktree로 갔어야 할 sub-agent 작업물일 수 있음)
+
+가드 통과 후 결과를 후속 단계로 위임한다:
 
 - **변경 없음** → 자동 정리됨. 추가 조치 불필요.
 - **변경 있음 (성공/실패 무관)** → `merge-coordinator.md`로 이동. 머지 순서 결정, 충돌 처리, 정리 책임이 그쪽에 있다.
@@ -109,6 +119,7 @@ worktree agent의 결과는 후속 단계로 위임한다:
 3. **메인이 worktree에 진입**: EnterWorktree로 메인이 들어가서 직접 편집 → 오케스트레이터 원칙 위반.
 4. **worktree 누수**: 결과를 받은 뒤 머지/폐기 결정을 안 하고 방치 → 디스크/git 상태 오염.
 5. **epic 브랜치 아닌 곳에서 dispatch**: main이나 임의 feature 브랜치에서 worktree sub-agent 호출 → worktree base가 epic이 아니게 되어 결과 머지 경로가 어긋남.
+6. **완료 알림 후 가드 생략**: sub-agent 완료 직후 메인 branch/status 확인 없이 다음 단계 진행 → sub-agent의 격리 이탈(Edit 절대경로 트랩 등)로 변형된 메인 state 위에서 후속 작업이 진행됨 (#783).
 
 ---
 
@@ -125,5 +136,6 @@ worktree agent의 결과는 후속 단계로 위임한다:
 dispatch 후:
 
 - [ ] 완료 알림을 기다리는 중에 sleep/poll을 하고 있지 않은가?
+- [ ] 완료 알림 수신 직후 토폴로지 가드(`git branch --show-current` + `git status --short`)를 실행했는가?
 - [ ] 각 결과의 worktree 상태(변경 유무)를 파악했는가?
 - [ ] 변경 있는 결과를 `merge-coordinator.md` 단계로 넘겼는가? (이 파일의 책임은 여기서 끝)
