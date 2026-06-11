@@ -12,13 +12,11 @@ use git_mocks::MockGit;
 
 fn base_input() -> GuardInput {
     GuardInput {
-        target: GuardTarget::Write,
+        target: GuardTarget::Write { file_path: None },
         project_dir: "/tmp/test".to_string(),
         create_branch_script: "./create-branch.sh".to_string(),
         default_branch: None,
         protected_branches: None,
-        tool_command: None,
-        tool_file_path: None,
     }
 }
 
@@ -157,47 +155,52 @@ fn write_block_reason_mentions_action_and_script() {
 #[test]
 fn commit_target_not_git_commit_passes() {
     let mut input = base_input();
-    input.target = GuardTarget::Commit;
-    input.tool_command = Some("git push origin main".to_string());
+    input.target = GuardTarget::Commit {
+        command: Some("git push origin main".to_string()),
+    };
     assert!(check(MockGit::default(), &input).allowed);
 }
 
 #[test]
 fn commit_target_git_commit_on_default_blocked() {
     let mut input = base_input();
-    input.target = GuardTarget::Commit;
-    input.tool_command = Some("git commit -m \"test\"".to_string());
+    input.target = GuardTarget::Commit {
+        command: Some("git commit -m \"test\"".to_string()),
+    };
     assert!(!check(MockGit::default(), &input).allowed);
 }
 
 #[test]
 fn commit_target_compound_command_blocked() {
     let mut input = base_input();
-    input.target = GuardTarget::Commit;
-    input.tool_command = Some("git add . && git commit -m \"test\"".to_string());
+    input.target = GuardTarget::Commit {
+        command: Some("git add . && git commit -m \"test\"".to_string()),
+    };
     assert!(!check(MockGit::default(), &input).allowed);
 }
 
 #[test]
 fn commit_target_git_log_passes() {
     let mut input = base_input();
-    input.target = GuardTarget::Commit;
-    input.tool_command = Some("git log --oneline".to_string());
+    input.target = GuardTarget::Commit {
+        command: Some("git log --oneline".to_string()),
+    };
     assert!(check(MockGit::default(), &input).allowed);
 }
 
 #[test]
 fn commit_target_empty_command_passes() {
     let mut input = base_input();
-    input.target = GuardTarget::Commit;
-    input.tool_command = Some(String::new());
+    input.target = GuardTarget::Commit {
+        command: Some(String::new()),
+    };
     assert!(check(MockGit::default(), &input).allowed);
 }
 
 #[test]
 fn commit_target_no_command_passes() {
     let mut input = base_input();
-    input.target = GuardTarget::Commit;
+    input.target = GuardTarget::Commit { command: None };
     assert!(check(MockGit::default(), &input).allowed);
 }
 
@@ -214,7 +217,9 @@ fn block_reason_contains_branch_name() {
 fn outside_project_and_outside_git_repo_passes() {
     let mut input = base_input();
     input.project_dir = "/home/user/my-project".to_string();
-    input.tool_file_path = Some("/home/user/.claude/settings.json".to_string());
+    input.target = GuardTarget::Write {
+        file_path: Some("/home/user/.claude/settings.json".to_string()),
+    };
     let out = check(MockGit::default(), &input);
     assert!(out.allowed);
     assert_eq!(
@@ -230,12 +235,14 @@ fn outside_project_but_inside_other_git_repo_blocked() {
     let this_project = std::env::current_dir().unwrap();
     let mut input = base_input();
     input.project_dir = "/some/other/project".to_string();
-    input.tool_file_path = Some(
-        this_project
-            .join("Cargo.toml")
-            .to_string_lossy()
-            .to_string(),
-    );
+    input.target = GuardTarget::Write {
+        file_path: Some(
+            this_project
+                .join("Cargo.toml")
+                .to_string_lossy()
+                .to_string(),
+        ),
+    };
     assert!(!check(MockGit::default(), &input).allowed);
 }
 
@@ -243,7 +250,9 @@ fn outside_project_but_inside_other_git_repo_blocked() {
 fn inside_project_on_default_blocked() {
     let mut input = base_input();
     input.project_dir = "/home/user/my-project".to_string();
-    input.tool_file_path = Some("/home/user/my-project/src/index.ts".to_string());
+    input.target = GuardTarget::Write {
+        file_path: Some("/home/user/my-project/src/index.ts".to_string()),
+    };
     assert!(!check(MockGit::default(), &input).allowed);
 }
 
@@ -253,22 +262,15 @@ fn inside_project_on_feature_passes() {
     git.get_current_branch = Box::new(|| "feat/something".to_string());
     let mut input = base_input();
     input.project_dir = "/home/user/my-project".to_string();
-    input.tool_file_path = Some("/home/user/my-project/src/index.ts".to_string());
+    input.target = GuardTarget::Write {
+        file_path: Some("/home/user/my-project/src/index.ts".to_string()),
+    };
     assert!(check(git, &input).allowed);
 }
 
 #[test]
 fn no_tool_file_path_runs_default_guard() {
     assert!(!check(MockGit::default(), &base_input()).allowed);
-}
-
-#[test]
-fn commit_target_ignores_tool_file_path() {
-    let mut input = base_input();
-    input.target = GuardTarget::Commit;
-    input.tool_file_path = Some("/external/path/file.txt".to_string());
-    input.tool_command = Some("git commit -m \"test\"".to_string());
-    assert!(!check(MockGit::default(), &input).allowed);
 }
 
 // ---- path helpers ----
@@ -357,6 +359,8 @@ fn relative_file_path_outside_project_on_default_blocks() {
     // is_inside_project_dir must be true so we fall through to the branch guard.
     let mut input = base_input();
     input.project_dir = "/home/user/my-project".to_string();
-    input.tool_file_path = Some("src/index.ts".to_string());
+    input.target = GuardTarget::Write {
+        file_path: Some("src/index.ts".to_string()),
+    };
     assert!(!check(MockGit::default(), &input).allowed);
 }

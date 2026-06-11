@@ -115,29 +115,30 @@ impl GuardService for RealGuardService<'_> {
             default_branch: None,
         };
 
-        // write guard: file outside the project directory.
-        if input.target == GuardTarget::Write {
-            if let Some(file_path) = &input.tool_file_path {
-                // Resolve project_dir once for both path checks (one
-                // current_dir() syscall instead of two per tool invocation).
-                let project = resolve_project_dir(&input.project_dir);
-                if !inside_project_dir(&project, file_path)
-                    && !inside_any_git_repo(&project, file_path)
-                {
-                    return pass(Some("file is outside any git repository"));
+        // Target-specific prefilters; the payload lives on the variant (#777).
+        match &input.target {
+            // write guard: file outside the project directory.
+            GuardTarget::Write { file_path } => {
+                if let Some(file_path) = file_path {
+                    // Resolve project_dir once for both path checks (one
+                    // current_dir() syscall instead of two per tool invocation).
+                    let project = resolve_project_dir(&input.project_dir);
+                    if !inside_project_dir(&project, file_path)
+                        && !inside_any_git_repo(&project, file_path)
+                    {
+                        return pass(Some("file is outside any git repository"));
+                    }
                 }
             }
-        }
-
-        // commit guard: not a git commit command → pass.
-        if input.target == GuardTarget::Commit {
-            let is_commit = input
-                .tool_command
-                .as_ref()
-                .map(|c| !c.is_empty() && GIT_COMMIT_PATTERN.is_match(c))
-                .unwrap_or(false);
-            if !is_commit {
-                return pass(Some("not a git commit command"));
+            // commit guard: not a git commit command → pass.
+            GuardTarget::Commit { command } => {
+                let is_commit = command
+                    .as_ref()
+                    .map(|c| !c.is_empty() && GIT_COMMIT_PATTERN.is_match(c))
+                    .unwrap_or(false);
+                if !is_commit {
+                    return pass(Some("not a git commit command"));
+                }
             }
         }
 
@@ -190,7 +191,7 @@ impl GuardService for RealGuardService<'_> {
         }
 
         // On a protected branch → block.
-        let action = if input.target == GuardTarget::Commit {
+        let action = if matches!(input.target, GuardTarget::Commit { .. }) {
             "커밋할 수 없습니다"
         } else {
             "파일을 수정하려 합니다"

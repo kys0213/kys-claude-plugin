@@ -23,7 +23,7 @@ paths:
 **모두 `atelier` 바이너리의 서브커맨드**로 구현한다.
 
 ```
-atelier git guard --target <write|commit|pr>   # PreToolUse 가드 판단
+atelier git guard <write|commit|pr>             # PreToolUse 가드 판단
 atelier git hook <register|unregister|list>     # settings.json 편집
 atelier autopilot check stagnation              # stdin payload 해석
 ```
@@ -43,7 +43,7 @@ atelier autopilot check stagnation              # stdin payload 해석
 
   ```jsonc
   // ✅ 버전 비의존 — 바이너리가 PATH/등록 경로에서 해석됨
-  { "command": "atelier git guard --target commit" }
+  { "command": "atelier git guard commit" }
 
   // ✅ shim 경유가 필요하면 리터럴 ${CLAUDE_PLUGIN_ROOT} 보존 (expand 금지)
   { "command": "${CLAUDE_PLUGIN_ROOT}/hooks/check-cli-version.sh" }

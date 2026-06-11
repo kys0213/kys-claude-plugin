@@ -18,8 +18,8 @@ use crate::git::core::guard::create_guard_service;
 use crate::git::core::jira::create_jira_service;
 use crate::git::core::pr_guard::create_pr_guard_service;
 use crate::git::types::{
-    BranchInput, CmdResult, CommitInput, GuardInput, GuardTarget, HookListInput, HookRegisterInput,
-    HookUnregisterInput, PrGuardInput, PrInput, ReviewsInput,
+    BranchInput, CmdResult, CommitInput, GuardCommandTarget, GuardDecision, GuardTarget,
+    HookListInput, HookRegisterInput, HookUnregisterInput, PrInput, ReviewsInput,
 };
 use clap::{Parser, Subcommand};
 use serde::Serialize;
@@ -67,9 +67,9 @@ pub enum Commands {
     },
     /// Query unresolved PR review threads
     Reviews { pr_number: Option<i64> },
-    /// Default branch guard (Claude hook)
+    /// Tool guard (Claude hook): branch protection or PR duplicate check
     Guard {
-        /// write | commit
+        /// write | commit | pr
         target: Option<String>,
         #[arg(long = "project-dir")]
         project_dir: Option<String>,
@@ -80,7 +80,7 @@ pub enum Commands {
         #[arg(long = "protected-branches")]
         protected_branches: Option<String>,
     },
-    /// PR duplicate creation guard (Claude hook)
+    /// Deprecated alias of `guard pr`
     #[command(name = "pr-guard")]
     PrGuard,
     /// Manage Claude Code hooks in settings.json
@@ -131,6 +131,18 @@ fn read_hook_stdin() -> (Option<String>, Option<String>) {
         }
         Err(_) => (None, None),
     }
+}
+
+/// Maps a guard decision to the hook exit contract: allow → 0, block → reason
+/// on stderr + exit 2 (PreToolUse deny signal).
+fn guard_exit(decision: GuardDecision) -> i32 {
+    if decision.allowed {
+        return 0;
+    }
+    if let Some(reason) = decision.reason {
+        eprintln!("{reason}");
+    }
+    2
 }
 
 /// Prints a successful command result as pretty JSON (exit 0) or an error to
@@ -245,15 +257,33 @@ pub fn run(cli: Cli) -> i32 {
             default_branch,
             protected_branches,
         } => {
+            // Validate the target before touching stdin: an invalid target
+            // must print usage immediately (not block on a missing pipe) and
+            // must not consume the stream.
             let target = match target.as_deref() {
-                Some("write") => GuardTarget::Write,
-                Some("commit") => GuardTarget::Commit,
+                Some("write") => {
+                    let (_, tool_file_path) = read_hook_stdin();
+                    GuardCommandTarget::Branch(GuardTarget::Write {
+                        file_path: tool_file_path,
+                    })
+                }
+                Some("commit") => {
+                    let (tool_command, _) = read_hook_stdin();
+                    GuardCommandTarget::Branch(GuardTarget::Commit {
+                        command: tool_command,
+                    })
+                }
+                Some("pr") => {
+                    let (tool_command, _) = read_hook_stdin();
+                    GuardCommandTarget::Pr {
+                        command: tool_command,
+                    }
+                }
                 _ => {
-                    eprintln!("Usage: atelier git guard <write|commit> --project-dir=<p> --create-branch-script=<s>");
+                    eprintln!("Usage: atelier git guard <write|commit|pr> --project-dir=<p> --create-branch-script=<s>");
                     return 1;
                 }
             };
-            let (tool_command, tool_file_path) = read_hook_stdin();
             let protected = protected_branches.map(|raw| {
                 raw.split(',')
                     .map(|b| b.trim().to_string())
@@ -271,39 +301,29 @@ pub fn run(cli: Cli) -> i32 {
             // default-branch detection reflect the project, not the hook's
             // process cwd (worktree / subagent contexts) — see #780.
             let git = create_git_service(Some(project_dir.clone()));
-            let guard = create_guard_service(&git);
-            let deps = commands::guard::GuardCommandDeps { guard: &guard };
-            let input = GuardInput {
+            let branch_guard = create_guard_service(&git);
+            let github = create_github_service(None);
+            let pr_guard = create_pr_guard_service(&github);
+            let deps = commands::guard::GuardCommandDeps {
+                branch_guard: &branch_guard,
+                pr_guard: &pr_guard,
+            };
+            let input = commands::guard::GuardCommandInput {
                 target,
                 project_dir,
                 create_branch_script,
                 default_branch,
                 protected_branches: protected,
-                tool_command,
-                tool_file_path,
             };
-            let result = commands::guard::run(&deps, &input);
-            if !result.allowed {
-                if let Some(reason) = result.reason {
-                    eprintln!("{reason}");
-                }
-                return 2;
-            }
-            0
+            guard_exit(commands::guard::run(&deps, &input))
         }
         Commands::PrGuard => {
+            // Legacy alias of `guard pr` — kept so hooks registered before
+            // the unified `guard` surface (#777) keep working.
             let github = create_github_service(None);
-            let guard = create_pr_guard_service(&github);
+            let pr_guard = create_pr_guard_service(&github);
             let (tool_command, _) = read_hook_stdin();
-            let input = PrGuardInput { tool_command };
-            let result = crate::git::core::pr_guard::PrGuardService::check(&guard, &input);
-            if !result.allowed {
-                if let Some(reason) = result.reason {
-                    eprintln!("{reason}");
-                }
-                return 2;
-            }
-            0
+            guard_exit(commands::guard::check_pr(&pr_guard, tool_command))
         }
         Commands::Hook {
             sub,

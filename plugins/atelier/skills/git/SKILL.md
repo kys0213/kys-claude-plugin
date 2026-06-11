@@ -118,13 +118,14 @@ atelier git reviews [pr-number]
 
 **출력 (JSON):** PR 제목, URL, 리뷰 쓰레드 목록
 
-### 5. Default Branch Guard
+### 5. Tool Guard (branch 보호 · PR 중복)
 
 ```bash
-atelier git guard <write|commit> --project-dir=<p> --create-branch-script=<s> [--default-branch=<b>]
+atelier git guard <write|commit|pr> --project-dir=<p> --create-branch-script=<s> [--default-branch=<b>]
 ```
 
-- 기본 브랜치에서 차단 시 exit 2, 통과 시 exit 0
+- `write`/`commit`: 기본 브랜치(보호 브랜치)에서 차단 시 exit 2, 통과 시 exit 0
+- `pr`: 현재 브랜치에 열린 PR이 있으면 `gh pr create` 차단 (exit 2). branch 옵션 불필요. legacy alias: `atelier git pr-guard`
 
 ### 6. Hook 관리
 
