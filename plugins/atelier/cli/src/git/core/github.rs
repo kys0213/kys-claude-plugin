@@ -56,10 +56,11 @@ query($owner: String!, $repo: String!, $number: Int!) {
 "#;
 
 /// Matches `export GH_HOST="<value>"` with flexible inter-token whitespace,
-/// mirroring the TS `loadGhHost` regex `^export\s+GH_HOST="(.+)"` (multiline,
-/// greedy value).
+/// after the TS `loadGhHost` regex — but with `[^"]+` instead of the TS
+/// greedy `.+`, which would capture up to the LAST quote on the line (e.g.
+/// a trailing `# see "docs"` comment would corrupt the host).
 static GH_HOST_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?m)^export\s+GH_HOST="(.+)""#).unwrap());
+    LazyLock::new(|| Regex::new(r#"(?m)^export\s+GH_HOST="([^"]+)""#).unwrap());
 
 /// Reads `GH_HOST` from `~/.git-workflow-env` (matching the TS loadGhHost).
 fn load_gh_host() -> Option<String> {
@@ -74,15 +75,15 @@ pub struct RealGitHubService {
     cwd: Option<String>,
     // Lazy: the env-file read only happens on the first gh invocation, so
     // constructing the service (e.g. for a guard target that never consults
-    // gh) costs no I/O.
-    gh_host: std::cell::OnceCell<Option<String>>,
+    // gh) costs no I/O. OnceLock (not cell::OnceCell) keeps the service Sync.
+    gh_host: std::sync::OnceLock<Option<String>>,
 }
 
 /// Constructs the real GitHub service bound to an optional working directory.
 pub fn create_github_service(cwd: Option<String>) -> RealGitHubService {
     RealGitHubService {
         cwd,
-        gh_host: std::cell::OnceCell::new(),
+        gh_host: std::sync::OnceLock::new(),
     }
 }
 
@@ -232,6 +233,16 @@ mod tests {
         assert_eq!(
             parse(r#"export GH_HOST="github.example.com""#),
             Some("github.example.com")
+        );
+    }
+
+    #[test]
+    fn trailing_quoted_text_does_not_extend_capture() {
+        // Greedy `.+` would capture up to the last quote on the line; the
+        // value must stop at the closing quote of the assignment.
+        assert_eq!(
+            parse(r#"export GH_HOST="ghe.corp.com" # see "docs""#),
+            Some("ghe.corp.com")
         );
     }
 

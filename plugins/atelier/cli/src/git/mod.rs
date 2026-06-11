@@ -257,17 +257,28 @@ pub fn run(cli: Cli) -> i32 {
             default_branch,
             protected_branches,
         } => {
-            let (tool_command, tool_file_path) = read_hook_stdin();
+            // Validate the target before touching stdin: an invalid target
+            // must print usage immediately (not block on a missing pipe) and
+            // must not consume the stream.
             let target = match target.as_deref() {
-                Some("write") => GuardCommandTarget::Branch(GuardTarget::Write {
-                    file_path: tool_file_path,
-                }),
-                Some("commit") => GuardCommandTarget::Branch(GuardTarget::Commit {
-                    command: tool_command,
-                }),
-                Some("pr") => GuardCommandTarget::Pr {
-                    command: tool_command,
-                },
+                Some("write") => {
+                    let (_, tool_file_path) = read_hook_stdin();
+                    GuardCommandTarget::Branch(GuardTarget::Write {
+                        file_path: tool_file_path,
+                    })
+                }
+                Some("commit") => {
+                    let (tool_command, _) = read_hook_stdin();
+                    GuardCommandTarget::Branch(GuardTarget::Commit {
+                        command: tool_command,
+                    })
+                }
+                Some("pr") => {
+                    let (tool_command, _) = read_hook_stdin();
+                    GuardCommandTarget::Pr {
+                        command: tool_command,
+                    }
+                }
                 _ => {
                     eprintln!("Usage: atelier git guard <write|commit|pr> --project-dir=<p> --create-branch-script=<s>");
                     return 1;
