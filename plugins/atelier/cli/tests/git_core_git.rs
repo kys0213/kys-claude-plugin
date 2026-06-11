@@ -278,7 +278,8 @@ fn uncommitted_untracked() {
 fn special_state_normal() {
     let (_r, local) = setup();
     let state = svc(local.path()).get_special_state();
-    assert!(!state.rebase && !state.merge && !state.detached);
+    assert!(!state.rebase && !state.merge && !state.detached());
+    assert_eq!(state.current_branch, "main");
 }
 
 #[test]
@@ -286,7 +287,7 @@ fn special_state_detached() {
     let (_r, local) = setup();
     let hash = sh(&["git", "rev-parse", "HEAD"], local.path());
     sh(&["git", "checkout", &hash], local.path());
-    assert!(svc(local.path()).get_special_state().detached);
+    assert!(svc(local.path()).get_special_state().detached());
 }
 
 #[test]

@@ -200,11 +200,10 @@ impl GitService for RealGitService {
         };
         let rebase = resolve("rebase-merge").exists() || resolve("rebase-apply").exists();
         let merge = resolve("MERGE_HEAD").exists();
-        let detached = self.get_current_branch().is_empty();
         GitSpecialState {
             rebase,
             merge,
-            detached,
+            current_branch: self.get_current_branch(),
         }
     }
 

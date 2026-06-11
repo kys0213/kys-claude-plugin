@@ -167,6 +167,18 @@ pub struct GuardDecision {
     pub reason: Option<String>,
 }
 
+impl GuardDecision {
+    /// PreToolUse hook exit contract: allow → 0, block → 2 (deny signal).
+    /// Lives on the decision type so the CLI edge only prints and returns.
+    pub fn exit_code(&self) -> i32 {
+        if self.allowed {
+            0
+        } else {
+            2
+        }
+    }
+}
+
 impl From<GuardOutput> for GuardDecision {
     fn from(out: GuardOutput) -> Self {
         GuardDecision {
@@ -252,9 +264,19 @@ pub struct PrGuardOutput {
 // Git special state — shared by core modules
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Special-state snapshot taken in a single round-trip: carrying the current
+/// branch here lets the guard read rebase/merge/detached *and* the branch from
+/// one `get_special_state` call instead of a second subprocess (#778).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitSpecialState {
     pub rebase: bool,
     pub merge: bool,
-    pub detached: bool,
+    pub current_branch: String,
+}
+
+impl GitSpecialState {
+    /// Detached HEAD — `git branch --show-current` prints nothing.
+    pub fn detached(&self) -> bool {
+        self.current_branch.is_empty()
+    }
 }

@@ -24,7 +24,9 @@ pub struct MockGit {
     pub get_current_branch: Box<dyn Fn() -> String>,
     pub detect_default_branch: Box<dyn Fn() -> R<String>>,
     pub detect_default_branch_readonly: Box<dyn Fn() -> R<String>>,
-    pub get_special_state: Box<dyn Fn() -> GitSpecialState>,
+    /// `(rebase, merge)` flags for `get_special_state`; `current_branch` is
+    /// derived from `get_current_branch`, mirroring `RealGitService` (#778).
+    pub special_state_flags: Box<dyn Fn() -> (bool, bool)>,
     pub branch_exists: Box<dyn Fn(&str, BranchLocation) -> bool>,
     pub has_uncommitted_changes: Box<dyn Fn() -> bool>,
     pub fetch: Box<dyn Fn() -> R<()>>,
@@ -42,11 +44,7 @@ impl Default for MockGit {
             get_current_branch: Box::new(|| "main".to_string()),
             detect_default_branch: Box::new(|| Ok("main".to_string())),
             detect_default_branch_readonly: Box::new(|| Ok("main".to_string())),
-            get_special_state: Box::new(|| GitSpecialState {
-                rebase: false,
-                merge: false,
-                detached: false,
-            }),
+            special_state_flags: Box::new(|| (false, false)),
             branch_exists: Box::new(|_, _| false),
             has_uncommitted_changes: Box::new(|| false),
             fetch: Box::new(|| Ok(())),
@@ -79,7 +77,12 @@ impl GitService for MockGit {
         (self.has_uncommitted_changes)()
     }
     fn get_special_state(&self) -> GitSpecialState {
-        (self.get_special_state)()
+        let (rebase, merge) = (self.special_state_flags)();
+        GitSpecialState {
+            rebase,
+            merge,
+            current_branch: (self.get_current_branch)(),
+        }
     }
     fn fetch(&self, _remote: Option<&str>) -> R<()> {
         (self.fetch)()

@@ -5,7 +5,65 @@
 
 use crate::git::core::guard::GuardService;
 use crate::git::core::pr_guard::PrGuardService;
-use crate::git::types::{GuardCommandTarget, GuardDecision, GuardInput, PrGuardInput};
+use crate::git::types::{GuardCommandTarget, GuardDecision, GuardInput, GuardTarget, PrGuardInput};
+
+/// PreToolUse hook payload fields the guard targets consume. `parse` is
+/// swallow-all — any read/JSON failure yields all-`None`, preserving the TS
+/// `readHookStdin` behavior. Lives in the command layer so the payload schema
+/// is deterministic, testable logic; the CLI edge only reads stdin (#778).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HookPayload {
+    pub command: Option<String>,
+    pub file_path: Option<String>,
+}
+
+impl HookPayload {
+    pub fn parse(raw: &str) -> HookPayload {
+        match serde_json::from_str::<serde_json::Value>(raw) {
+            Ok(v) => HookPayload {
+                command: v["tool_input"]["command"].as_str().map(|s| s.to_string()),
+                file_path: v["tool_input"]["file_path"].as_str().map(|s| s.to_string()),
+            },
+            Err(_) => HookPayload::default(),
+        }
+    }
+}
+
+/// Guard target name as parsed from argv. Splitting parse from payload
+/// binding lets the CLI reject an invalid target *before* consuming stdin
+/// (usage error must not block on a missing pipe).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuardTargetKind {
+    Write,
+    Commit,
+    Pr,
+}
+
+impl GuardTargetKind {
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "write" => Some(Self::Write),
+            "commit" => Some(Self::Commit),
+            "pr" => Some(Self::Pr),
+            _ => None,
+        }
+    }
+
+    /// Binds exactly the payload field this target's check consumes.
+    pub fn into_target(self, payload: HookPayload) -> GuardCommandTarget {
+        match self {
+            Self::Write => GuardCommandTarget::Branch(GuardTarget::Write {
+                file_path: payload.file_path,
+            }),
+            Self::Commit => GuardCommandTarget::Branch(GuardTarget::Commit {
+                command: payload.command,
+            }),
+            Self::Pr => GuardCommandTarget::Pr {
+                command: payload.command,
+            },
+        }
+    }
+}
 
 pub struct GuardCommandDeps<'a> {
     pub branch_guard: &'a dyn GuardService,
