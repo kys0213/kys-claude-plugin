@@ -7,7 +7,7 @@ mod git_mocks;
 use atelier::git::core::guard::{
     create_guard_service, is_inside_any_git_repo, is_inside_project_dir, GuardService,
 };
-use atelier::git::types::{GitSpecialState, GuardInput, GuardTarget};
+use atelier::git::types::{GuardInput, GuardTarget};
 use git_mocks::MockGit;
 
 fn base_input() -> GuardInput {
@@ -35,33 +35,22 @@ fn not_a_git_repo_passes() {
 #[test]
 fn rebase_passes() {
     let mut git = MockGit::default();
-    git.get_special_state = Box::new(|| GitSpecialState {
-        rebase: true,
-        merge: false,
-        detached: false,
-    });
+    git.special_state_flags = Box::new(|| (true, false));
     assert!(check(git, &base_input()).allowed);
 }
 
 #[test]
 fn merge_passes() {
     let mut git = MockGit::default();
-    git.get_special_state = Box::new(|| GitSpecialState {
-        rebase: false,
-        merge: true,
-        detached: false,
-    });
+    git.special_state_flags = Box::new(|| (false, true));
     assert!(check(git, &base_input()).allowed);
 }
 
 #[test]
 fn detached_passes() {
+    // Detached HEAD: `git branch --show-current` prints nothing.
     let mut git = MockGit::default();
-    git.get_special_state = Box::new(|| GitSpecialState {
-        rebase: false,
-        merge: false,
-        detached: true,
-    });
+    git.get_current_branch = Box::new(String::new);
     assert!(check(git, &base_input()).allowed);
 }
 
@@ -202,6 +191,50 @@ fn commit_target_no_command_passes() {
     let mut input = base_input();
     input.target = GuardTarget::Commit { command: None };
     assert!(check(MockGit::default(), &input).allowed);
+}
+
+// ---- #754: "git commit" inside quoted text must not match ----
+
+#[test]
+fn commit_target_double_quoted_text_passes() {
+    let mut input = base_input();
+    input.target = GuardTarget::Commit {
+        command: Some(r#"gh issue create --body "remember to git commit often""#.to_string()),
+    };
+    let out = check(MockGit::default(), &input);
+    assert!(out.allowed);
+    assert_eq!(out.reason.as_deref(), Some("not a git commit command"));
+}
+
+#[test]
+fn commit_target_single_quoted_text_passes() {
+    let mut input = base_input();
+    input.target = GuardTarget::Commit {
+        command: Some("gh pr comment 1 --body 'please git commit first'".to_string()),
+    };
+    assert!(check(MockGit::default(), &input).allowed);
+}
+
+#[test]
+fn commit_target_real_commit_with_quoted_message_blocked() {
+    // The quoted message is stripped, but `git ... commit` stays outside the
+    // quotes, so a real commit is still matched.
+    let mut input = base_input();
+    input.target = GuardTarget::Commit {
+        command: Some(r#"git commit -m "this is not a git commit hint""#.to_string()),
+    };
+    assert!(!check(MockGit::default(), &input).allowed);
+}
+
+#[test]
+fn commit_target_escaped_quotes_stay_conservative() {
+    // `\"` is a literal quote char, not a quote opener — the text still
+    // matches and blocks (conservative toward the old behavior).
+    let mut input = base_input();
+    input.target = GuardTarget::Commit {
+        command: Some(r#"echo \"git commit\""#.to_string()),
+    };
+    assert!(!check(MockGit::default(), &input).allowed);
 }
 
 #[test]

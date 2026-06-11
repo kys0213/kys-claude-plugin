@@ -11,6 +11,48 @@ use std::sync::LazyLock;
 static GIT_COMMIT_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\bgit\b.*\bcommit\b").unwrap());
 
+/// Replaces single-/double-quoted segments with a space so quoted text
+/// arguments can't false-positive the commit matcher — on a protected branch,
+/// `gh issue create --body "... git commit ..."` must not be treated as a
+/// commit (#754). Trade-off: a commit nested entirely inside quotes
+/// (`bash -c "git commit"`) is no longer matched; the guard is a guard-rail,
+/// not an escape-proof sandbox.
+fn strip_quoted(command: &str) -> String {
+    let mut out = String::with_capacity(command.len());
+    let mut chars = command.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            // An escaped char never opens/closes a quote; keep it verbatim so
+            // `echo \"git commit\"` stays conservative (still matches).
+            '\\' => {
+                if let Some(next) = chars.next() {
+                    out.push(next);
+                }
+            }
+            '\'' => {
+                for q in chars.by_ref() {
+                    if q == '\'' {
+                        break;
+                    }
+                }
+                out.push(' ');
+            }
+            '"' => {
+                while let Some(q) = chars.next() {
+                    if q == '\\' {
+                        chars.next();
+                    } else if q == '"' {
+                        break;
+                    }
+                }
+                out.push(' ');
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 /// Lexically collapses `.`/`..` in `path` (relative to `base`) without touching
 /// the filesystem. A relative `path` is anchored at `base` rather than the
 /// process cwd — the guard runs as a PreToolUse hook whose cwd may differ from
@@ -130,11 +172,13 @@ impl GuardService for RealGuardService<'_> {
                     }
                 }
             }
-            // commit guard: not a git commit command → pass.
+            // commit guard: not a git commit command → pass. Quoted segments
+            // are stripped so text arguments mentioning "git commit" don't
+            // match (#754).
             GuardTarget::Commit { command } => {
                 let is_commit = command
                     .as_ref()
-                    .map(|c| !c.is_empty() && GIT_COMMIT_PATTERN.is_match(c))
+                    .map(|c| !c.is_empty() && GIT_COMMIT_PATTERN.is_match(&strip_quoted(c)))
                     .unwrap_or(false);
                 if !is_commit {
                     return pass(Some("not a git commit command"));
@@ -168,18 +212,20 @@ impl GuardService for RealGuardService<'_> {
             }
         }
 
-        // Guard 2: special state (rebase/merge) → pass.
+        // Guard 2: special state (rebase/merge) → pass. The snapshot also
+        // carries the current branch, so guards 2–3 and the branch check cost
+        // one `get_special_state` round-trip, not a second subprocess (#778).
         let state = self.git.get_special_state();
         if state.rebase || state.merge {
             return pass(Some("special git state (rebase/merge)"));
         }
 
         // Guard 3: detached HEAD → pass.
-        if state.detached {
+        if state.detached() {
             return pass(Some("detached HEAD"));
         }
 
-        let current_branch = self.git.get_current_branch();
+        let current_branch = state.current_branch;
 
         if !protected.contains(&current_branch) {
             return GuardOutput {

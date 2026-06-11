@@ -11,6 +11,7 @@ pub mod commands;
 pub mod core;
 pub mod types;
 
+use crate::git::commands::guard::{GuardTargetKind, HookPayload};
 use crate::git::commands::hook::{create_hook_command, HookFs};
 use crate::git::core::git::create_git_service;
 use crate::git::core::github::create_github_service;
@@ -18,8 +19,8 @@ use crate::git::core::guard::create_guard_service;
 use crate::git::core::jira::create_jira_service;
 use crate::git::core::pr_guard::create_pr_guard_service;
 use crate::git::types::{
-    BranchInput, CmdResult, CommitInput, GuardCommandTarget, GuardDecision, GuardTarget,
-    HookListInput, HookRegisterInput, HookUnregisterInput, PrInput, ReviewsInput,
+    BranchInput, CmdResult, CommitInput, GuardDecision, HookListInput, HookRegisterInput,
+    HookUnregisterInput, PrInput, ReviewsInput,
 };
 use clap::{Parser, Subcommand};
 use serde::Serialize;
@@ -114,35 +115,24 @@ impl HookFs for RealHookFs {
     }
 }
 
-/// Reads the Claude hook JSON from stdin, extracting `tool_input.command` and
-/// `tool_input.file_path`. Returns `(None, None)` on any parse error, matching
-/// the TS `readHookStdin` swallow-all behavior.
-fn read_hook_stdin() -> (Option<String>, Option<String>) {
+/// Reads stdin to a string (empty on read failure). Parsing the hook payload
+/// is command logic (`HookPayload::parse`); only the I/O lives here (#778).
+fn read_stdin_raw() -> String {
     use std::io::Read as _;
     let mut buf = String::new();
-    if std::io::stdin().read_to_string(&mut buf).is_err() {
-        return (None, None);
-    }
-    match serde_json::from_str::<serde_json::Value>(&buf) {
-        Ok(v) => {
-            let cmd = v["tool_input"]["command"].as_str().map(|s| s.to_string());
-            let fp = v["tool_input"]["file_path"].as_str().map(|s| s.to_string());
-            (cmd, fp)
-        }
-        Err(_) => (None, None),
-    }
+    let _ = std::io::stdin().read_to_string(&mut buf);
+    buf
 }
 
-/// Maps a guard decision to the hook exit contract: allow → 0, block → reason
-/// on stderr + exit 2 (PreToolUse deny signal).
+/// Prints the block reason and returns the decision's exit code — the 0/2
+/// hook contract itself lives on `GuardDecision::exit_code` (#778).
 fn guard_exit(decision: GuardDecision) -> i32 {
-    if decision.allowed {
-        return 0;
+    if !decision.allowed {
+        if let Some(reason) = &decision.reason {
+            eprintln!("{reason}");
+        }
     }
-    if let Some(reason) = decision.reason {
-        eprintln!("{reason}");
-    }
-    2
+    decision.exit_code()
 }
 
 /// Prints a successful command result as pretty JSON (exit 0) or an error to
@@ -260,30 +250,14 @@ pub fn run(cli: Cli) -> i32 {
             // Validate the target before touching stdin: an invalid target
             // must print usage immediately (not block on a missing pipe) and
             // must not consume the stream.
-            let target = match target.as_deref() {
-                Some("write") => {
-                    let (_, tool_file_path) = read_hook_stdin();
-                    GuardCommandTarget::Branch(GuardTarget::Write {
-                        file_path: tool_file_path,
-                    })
-                }
-                Some("commit") => {
-                    let (tool_command, _) = read_hook_stdin();
-                    GuardCommandTarget::Branch(GuardTarget::Commit {
-                        command: tool_command,
-                    })
-                }
-                Some("pr") => {
-                    let (tool_command, _) = read_hook_stdin();
-                    GuardCommandTarget::Pr {
-                        command: tool_command,
-                    }
-                }
-                _ => {
+            let kind = match target.as_deref().and_then(GuardTargetKind::parse) {
+                Some(kind) => kind,
+                None => {
                     eprintln!("Usage: atelier git guard <write|commit|pr> --project-dir=<p> --create-branch-script=<s>");
                     return 1;
                 }
             };
+            let target = kind.into_target(HookPayload::parse(&read_stdin_raw()));
             let protected = protected_branches.map(|raw| {
                 raw.split(',')
                     .map(|b| b.trim().to_string())
@@ -322,8 +296,8 @@ pub fn run(cli: Cli) -> i32 {
             // the unified `guard` surface (#777) keep working.
             let github = create_github_service(None);
             let pr_guard = create_pr_guard_service(&github);
-            let (tool_command, _) = read_hook_stdin();
-            guard_exit(commands::guard::check_pr(&pr_guard, tool_command))
+            let payload = HookPayload::parse(&read_stdin_raw());
+            guard_exit(commands::guard::check_pr(&pr_guard, payload.command))
         }
         Commands::Hook {
             sub,
