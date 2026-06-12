@@ -21,6 +21,15 @@ use std::path::{Path, PathBuf};
 pub fn run(cli: Cli) -> i32 {
     let config = match load_config(cli.config.as_deref()) {
         Ok(c) => c,
+        // PreToolUse guards are best-effort and run on every matching tool
+        // call: a corrupt autopilot.toml must degrade to defaults (allow),
+        // not exit 2 — exit 2 would block every Bash call in the project
+        // (the bash hooks fell through on any internal failure). Every
+        // other command keeps the strict contract.
+        Err(e) if matches!(cli.command, Commands::Hook { .. }) => {
+            log::warn!("{e:#} — hook guard proceeding with default config");
+            Config::default()
+        }
         Err(e) => {
             log::error!("{e:#}");
             return 2;

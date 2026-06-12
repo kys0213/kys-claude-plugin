@@ -1270,3 +1270,41 @@ fn e2e_preflight_runs_without_clap_panic() {
         .stdout(predicate::str::contains("CLAUDE.md"))
         .stderr(predicate::str::contains("TypeId").not());
 }
+
+// ---------- hook guards: best-effort config loading ----------
+//
+// PreToolUse guards run on every matching tool call, so a corrupt
+// `autopilot.toml` in the project root must degrade to defaults (allow)
+// instead of exit 2 — exit 2 would block every Bash call in the project.
+// Non-hook commands keep the strict contract (corrupt config → exit 2).
+
+#[test]
+fn e2e_hook_guards_allow_on_corrupt_config() {
+    let ws = Workspace::new();
+    std::fs::write(ws.touch("autopilot.toml"), "storage = [not toml").unwrap();
+
+    ws.cmd()
+        .args(["hook", "guard-pr-base"])
+        .write_stdin(r#"{"tool_name":"Bash","tool_input":{"command":"ls"}}"#)
+        .assert()
+        .success();
+
+    ws.cmd()
+        .args(["hook", "protect-stagnation"])
+        .write_stdin(
+            r#"{"tool_name":"Bash","tool_input":{"command":"autopilot task claim --epic e"}}"#,
+        )
+        .assert()
+        .success();
+}
+
+#[test]
+fn e2e_non_hook_commands_still_fail_on_corrupt_config() {
+    let ws = Workspace::new();
+    std::fs::write(ws.touch("autopilot.toml"), "storage = [not toml").unwrap();
+
+    ws.cmd()
+        .args(["task", "list", "--epic", "e"])
+        .assert()
+        .code(2);
+}
