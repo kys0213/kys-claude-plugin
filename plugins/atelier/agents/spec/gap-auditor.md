@@ -243,7 +243,7 @@ gap-auditor 의 출력 스키마를 엄수.
 
 ## 모드 2: Spec Quality Grading
 
-autopilot 의 Spec Quality Gate (autopilot skill `references/startup.md` Step 2) 또는 "스펙 품질 평가" 요청 시 수행한다. `tools: []` 이므로 **평가 기준과 spec 파일 내용은 모두 입력 프롬프트로 전달받는다**.
+autopilot 의 Spec Quality Gate (autopilot skill `references/startup.md` §"Spec Quality Gate") 또는 "스펙 품질 평가" 요청 시 수행한다. `tools: []` 이므로 **평가 기준과 spec 파일 내용은 모두 입력 프롬프트로 전달받는다**.
 
 ### 입력 형식
 

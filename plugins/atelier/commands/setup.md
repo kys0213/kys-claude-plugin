@@ -140,8 +140,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 | `github-autopilot/hooks/guard-pr-base.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/guard-pr-base.sh` (리터럴) |
 | `github-autopilot/hooks/protect-stagnation.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/protect-stagnation.sh` (리터럴) |
 | `coding-style/hooks/suggest-simplify.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/suggest-simplify.sh` (리터럴) |
-| `git-utils/scripts/default-branch-guard-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard write ...` (Step 2a 형식) |
-| `git-utils/scripts/default-branch-guard-commit-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard commit ...` (Step 2a 형식) |
+| `git-utils/scripts/default-branch-guard-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard write ...` (§"git 모듈" 등록 형식) |
+| `git-utils/scripts/default-branch-guard-commit-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard commit ...` (§"git 모듈" 등록 형식) |
 
 ## Step 4 — CLI alias (선택)
 
@@ -172,7 +172,7 @@ alias git-utils='atelier git'
 3. **대상 선택** — AskUserQuestion: [Write/Edit Guard] [Commit Guard] [PR Guard] [모두] [취소]
 4. **액션 선택** — AskUserQuestion: [비활성화] [재설정] [취소]
    - **비활성화**: 대상 hook 마다 `atelier git hook unregister PreToolUse "<Step 2에서 찾은 command 문자열 그대로>" [--project-dir "$HOME"]`
-   - **재설정**: 비활성화와 동일하게 unregister 후, Step 2a (guard 2종) / PR Guard 는 `atelier git hook register PreToolUse "Bash" 'atelier git guard pr' --timeout=10 [--project-dir "$HOME"]` 형식으로 재등록
+   - **재설정**: 비활성화와 동일하게 unregister 후, §"git 모듈"의 등록 형식(guard 2종) / PR Guard 는 `atelier git hook register PreToolUse "Bash" 'atelier git guard pr' --timeout=10 [--project-dir "$HOME"]` 형식으로 재등록
 5. **결과 출력**: 제거/갱신된 settings 경로와 항목을 안내하고, 재활성화는 모듈 설치(Step 1)로 가능함을 알립니다.
 
 > unregister 의 command 인자는 **list 에서 발견된 문자열 그대로** 사용합니다 (legacy `pr-guard` 설치분 포함 — 추측으로 새 형식을 만들지 않음).
