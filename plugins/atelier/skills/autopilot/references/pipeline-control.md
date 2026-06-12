@@ -4,7 +4,7 @@
 
 ## 1. Base 브랜치 동기화
 
-`branch-sync` 스킬의 절차를 수행한다.
+`references/branch-sync.md` 의 절차를 수행한다.
 
 ## 2. Pipeline Idle / Capacity Check
 

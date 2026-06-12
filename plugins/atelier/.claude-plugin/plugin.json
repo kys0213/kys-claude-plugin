@@ -26,14 +26,7 @@
   },
   "commands": [
     "./commands/autopilot/autopilot.md",
-    "./commands/git/commit-and-pr.md",
-    "./commands/git/commit-and-push.md",
-    "./commands/git/hook-config.md",
-    "./commands/git/prioritize-issues.md",
-    "./commands/git/unresolved-reviews.md",
-    "./commands/setup.md",
-    "./commands/workflow/install.md",
-    "./commands/workflow/scaffold-conventions.md"
+    "./commands/setup.md"
   ],
   "description": "통합 개발 워크플로우 — spec/git/autopilot/orchestrator/coding-style/workflow 를 관심사 단위 skill 로 큐레이션한 단일 plugin",
   "name": "atelier",

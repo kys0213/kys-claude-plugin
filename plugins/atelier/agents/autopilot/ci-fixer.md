@@ -2,7 +2,7 @@
 description: (내부용) PR의 CI 실패를 분석하고 수정하는 에이전트
 model: sonnet
 tools: ["Read", "Glob", "Grep", "Bash", "Edit"]
-skills: ["draft-branch"]
+skills: ["autopilot"]
 ---
 
 # CI Fixer
@@ -66,7 +66,7 @@ Step 3.5의 원칙에 따라 수정을 적용합니다:
 
 ### 5. 로컬 검증
 
-draft-branch 스킬의 Quality Gate 규칙에 따라 검증합니다. `quality_gate_command`가 설정되어 있으면 해당 명령어를 사용하고, 미설정 시 프로젝트 파일 기반으로 자동 감지합니다.
+autopilot skill `references/draft-branch.md` 의 Quality Gate 규칙에 따라 검증합니다. `quality_gate_command`가 설정되어 있으면 해당 명령어를 사용하고, 미설정 시 프로젝트 파일 기반으로 자동 감지합니다.
 
 ### 6. 커밋 및 Push
 

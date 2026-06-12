@@ -1,6 +1,6 @@
 ---
 name: setup
-description: atelier 통합 환경을 초기화합니다 (git / autopilot / style 모듈 선택 + 기존 hook 마이그레이션)
+description: atelier 통합 환경을 초기화합니다 (git / autopilot / style / workflow 모듈 선택 + 기존 hook 마이그레이션 + guard hook 관리)
 allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 ---
 
@@ -38,9 +38,12 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 | `git` | GitHub 인증 확인 + `~/.git-workflow-env` 생성 + Default Branch Guard hook | git-utils setup |
 | `autopilot` | `github-autopilot.local.md` 생성 + autopilot hook 3개 등록 | github-autopilot setup |
 | `style` | `~/.claude/CLAUDE.md` 코딩 원칙 + Stop hook 등록 | coding-style setup |
-| `all` | 위 세 가지 전부 | 신규 |
+| `workflow` | `.claude/rules/agent-design-principles.md` 룰 설치 | workflow-guide install |
+| `all` | 위 네 가지 전부 | 신규 |
 
 선택된 모듈만 아래 해당 Step 을 수행합니다.
+
+> 이미 설치된 환경에서 guard hook 만 비활성화/재설정하려면 Step 5 (hook 관리 모드)로 바로 진행합니다.
 
 ## Step 2a — git 모듈
 
@@ -92,7 +95,14 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 
 > autopilot SQLite store(ledger/task DB)는 기존 스키마/경로를 계승하므로 마이그레이션 불필요.
 
-## Step 2c — style 모듈
+## Step 2c — workflow 모듈
+
+`workflow` skill 의 §"설계 원칙 룰 설치" 절차를 수행합니다:
+
+1. `.claude/rules/` 디렉토리가 없으면 생성, 대상 파일이 존재하면 덮어쓸지 AskUserQuestion 으로 확인
+2. `${CLAUDE_PLUGIN_ROOT}/rules/agent-design-principles.md` 를 **내용 수정 없이 그대로** `.claude/rules/agent-design-principles.md` 에 복사
+
+## Step 2d — style 모듈
 
 1. `~/.claude/CLAUDE.md` 에 코딩 원칙 템플릿 병합 (워터마크 기반 중복 확인 — 기존 coding-style 로직 동일):
    - 템플릿 원본: `${CLAUDE_PLUGIN_ROOT}/templates/claude-md/CLAUDE.md`
@@ -130,8 +140,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 | `github-autopilot/hooks/guard-pr-base.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/guard-pr-base.sh` (리터럴) |
 | `github-autopilot/hooks/protect-stagnation.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/protect-stagnation.sh` (리터럴) |
 | `coding-style/hooks/suggest-simplify.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/suggest-simplify.sh` (리터럴) |
-| `git-utils/scripts/default-branch-guard-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard write ...` (Step 2a 형식) |
-| `git-utils/scripts/default-branch-guard-commit-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard commit ...` (Step 2a 형식) |
+| `git-utils/scripts/default-branch-guard-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard write ...` (§"git 모듈" 등록 형식) |
+| `git-utils/scripts/default-branch-guard-commit-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard commit ...` (§"git 모듈" 등록 형식) |
 
 ## Step 4 — CLI alias (선택)
 
@@ -143,6 +153,29 @@ alias git-utils='atelier git'
 ```
 
 거부 시 안내 문구만 출력합니다. 기존 바이너리는 setup 이 삭제하지 않습니다 (외부 도구를 함부로 지우지 않음).
+
+## Step 5 — Hook 관리 모드 (비활성화 / 재설정)
+
+설치가 아니라 "hook 꺼줘 / 다시 등록해줘" 요청이면 이 모드만 수행합니다.
+
+1. **현황 조회** — 프로젝트/사용자 양쪽 범위를 탐색합니다:
+   ```bash
+   atelier git hook list PreToolUse
+   atelier git hook list PreToolUse --project-dir "$HOME"
+   ```
+   - 양쪽 모두 없으면: "hook이 설정되지 않았습니다. 먼저 모듈 설치(Step 1)를 진행하세요." 안내 후 종료
+   - 양쪽 모두 있으면: AskUserQuestion 으로 관리할 범위 선택 (프로젝트 `.claude/` vs 사용자 `~/.claude/`)
+2. **설정 파싱** — list 출력(JSON)의 command 문자열로 활성 hook 을 판별합니다:
+   - `atelier git guard write` 포함 → Write/Edit Guard
+   - `atelier git guard commit` 포함 → Commit Guard
+   - `atelier git guard pr` 또는 `atelier git pr-guard`(legacy alias) 포함 → PR Guard
+3. **대상 선택** — AskUserQuestion: [Write/Edit Guard] [Commit Guard] [PR Guard] [모두] [취소]
+4. **액션 선택** — AskUserQuestion: [비활성화] [재설정] [취소]
+   - **비활성화**: 대상 hook 마다 `atelier git hook unregister PreToolUse "<Step 2에서 찾은 command 문자열 그대로>" [--project-dir "$HOME"]`
+   - **재설정**: 비활성화와 동일하게 unregister 후, §"git 모듈"의 등록 형식(guard 2종) / PR Guard 는 `atelier git hook register PreToolUse "Bash" 'atelier git guard pr' --timeout=10 [--project-dir "$HOME"]` 형식으로 재등록
+5. **결과 출력**: 제거/갱신된 settings 경로와 항목을 안내하고, 재활성화는 모듈 설치(Step 1)로 가능함을 알립니다.
+
+> unregister 의 command 인자는 **list 에서 발견된 문자열 그대로** 사용합니다 (legacy `pr-guard` 설치분 포함 — 추측으로 새 형식을 만들지 않음).
 
 ## 에러 처리
 

@@ -10,6 +10,8 @@ tools: []
 
 raw spec/code 파일은 읽지 않는다. L1 reports + L2 findings 만이 사실의 원천이다.
 
+> 두 번째 모드로 **Spec Quality Grading** (스펙 품질 등급 산정)을 수행한다 — §"모드 2" 참조. 입력 프롬프트에 L2 Output 이 있으면 audit 모드, "Spec Quality Grading Request" 헤더가 있으면 grading 모드다.
+
 ## 필수 제약
 
 - **raw 파일 접근 금지** (`tools: []`). L1 reports 의 인용을 그대로 신뢰한다. raw 파일 인용 검증은 L1 단계에서 끝났다.
@@ -237,6 +239,54 @@ gap-auditor 의 출력 스키마를 엄수.
 
 ## Notes
 (없음)
+```
+
+## 모드 2: Spec Quality Grading
+
+autopilot 의 Spec Quality Gate (autopilot skill `references/startup.md` §"Spec Quality Gate") 또는 "스펙 품질 평가" 요청 시 수행한다. `tools: []` 이므로 **평가 기준과 spec 파일 내용은 모두 입력 프롬프트로 전달받는다**.
+
+### 입력 형식
+
+```
+# Spec Quality Grading Request
+
+## 평가 기준
+{spec skill references/quality-criteria.md 본문 — 4관점 체크리스트 + 점수·등급 기준}
+
+## Spec Files
+
+### File: {path_1}
+{spec 파일 본문 1}
+
+### File: {path_2}
+{spec 파일 본문 2}
+...
+```
+
+### 평가 절차
+
+1. 각 spec 파일에 대해 평가 기준의 관점별(A: Big Picture, B: Detail, C: Verification, D: Consistency) 체크 항목을 충족 1.0 / 부분 충족 0.5 / 미충족 0.0 으로 채점
+2. 평가 기준의 점수 산정식으로 관점별 점수 → 등급(A/B/C/D) 산정
+3. 전체 파일의 관점별 등급을 종합해 `overall_grade` 결정 (가장 낮은 관점 등급 기준 — 보수적)
+
+### 출력 형식
+
+```markdown
+# Spec Quality Report
+
+## Metadata
+- spec_files_total: {N}
+- generated_at: {ISO 8601}
+
+## Grades
+- overall_grade: {A|B|C|D}
+- A (Big Picture): {grade} ({score}/100)
+- B (Detail): {grade} ({score}/100)
+- C (Verification): {grade} ({score}/100)
+- D (Consistency): {grade} ({score}/100)
+
+## 미충족 항목 (관점별 상위 3개)
+- [{관점}{번호}] {체크 항목} — {어느 spec 에서 무엇이 부족한지 한 줄}
 ```
 
 ## 예외/실패 처리

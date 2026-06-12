@@ -1,12 +1,6 @@
----
-name: spec-criteria
-description: 스펙 문서 품질 평가 기준 — Big Picture, Detail, Verification, Consistency 4관점
-version: 1.0.0
----
-
 # Spec Quality Criteria
 
-스펙 문서의 완성도를 평가하는 4가지 관점과 각 관점의 세부 체크리스트입니다.
+스펙 문서의 완성도를 평가하는 4가지 관점(Big Picture / Detail / Verification / Consistency)과 각 관점의 세부 체크리스트입니다. autopilot 의 Spec Quality Gate 와 "스펙 품질 평가" 요청 시 이 기준으로 등급을 산정합니다.
 
 ## 관점 A: Big Picture (전체 구조)
 

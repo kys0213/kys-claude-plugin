@@ -12,10 +12,10 @@ spec 설계 → 리뷰 → 구현 → PR 머지까지의 전체 흐름을 하나
 
 | 기존 plugin | 동결 버전 | atelier 내 위치 |
 |---|---|---|
-| `git-utils` | 2.4.2 | `commands/git/*`, `skills/git/`, `cli/` (Rust 포팅) |
-| `github-autopilot` | 0.30.1 | `commands/autopilot/*`, `agents/autopilot/*`, `skills/{branch-sync,draft-branch,issue-label}/`, `skills/autopilot/`(+resilience→references), `cli/` |
-| `spec-kit` | 0.7.1 | `commands/spec/*`, `agents/spec/*`, `skills/{issue-report,spec-criteria}/`, `templates/spec/` |
-| `workflow-guide` | 0.6.0 | `commands/workflow/*`, `agents/workflow/*`, `skills/{convention-architect,agent-design-principles}/`, `rules/` |
+| `git-utils` | 2.4.2 | `skills/git/`(+references), `cli/` (Rust 포팅) |
+| `github-autopilot` | 0.30.1 | `commands/autopilot/*`, `agents/autopilot/*`, `skills/issue-label/`, `skills/autopilot/`(+resilience·branch-sync·draft-branch→references), `cli/` |
+| `spec-kit` | 0.7.1 | `agents/spec/*`, `skills/spec/`(+issue-report·spec-criteria→references), `templates/spec/` |
+| `workflow-guide` | 0.6.0 | `agents/workflow/*`, `skills/{workflow,agent-design-principles}/`, `rules/` |
 | `coding-style` | 0.3.0 | `skills/coding-style/`, `templates/claude-md/` |
 | `orchestrator` | 0.2.0 | `skills/orchestrator/` |
 
@@ -28,22 +28,20 @@ Epic 2 ([#766](https://github.com/kys0213/kys-claude-plugin/issues/766))에서 c
 ### 관심사 skill (슬래시 + 모델 자동 호출)
 
 ```
-/atelier:spec        # 스펙 설계/리뷰/갭분석/주석 — 자연어 의도로 디스패치
-/atelier:autopilot   # 자율 개발 루프 진입점 (CLI daemon + 내부 skill references 디스패치)
-/atelier:git         # git 판단 작업 (충돌 해결·우선순위·동기화 전략)
+/atelier:spec        # 스펙 설계/리뷰/갭분석/주석/품질평가 — 자연어 의도로 디스패치
+/atelier:git         # git 워크플로우 (커밋·push·PR·충돌 해결·리뷰 정리·이슈 우선순위)
+/atelier:workflow    # 컨벤션 scaffold·.claude/rules 설계·설계 원칙 룰 설치·워크플로우 리뷰
 ```
 
 ### 유지 command (deliberate 진입점)
 
 ```
-/atelier:setup               # 통합 setup (git / autopilot / style 모듈)
-/atelier:commit-and-pr       # 커밋 + PR 생성
-/atelier:commit-and-push     # 커밋 + push
-/atelier:unresolved-reviews  # 미해결 리뷰 조회
-/atelier:prioritize-issues   # 이슈 우선순위 추천
-/atelier:hook-config         # hook 설정 관리
-/atelier:install /atelier:scaffold-conventions  # workflow 컨벤션
+/atelier:setup       # 통합 setup (git / autopilot / style / workflow 모듈 + hook 관리)
+/atelier:autopilot   # 자율 개발 루프 진입점 (CLI daemon + 내부 skill references 디스패치)
 ```
+
+capability 슬래시(commit-and-pr, prioritize-issues, hook-config, scaffold-conventions 등)는
+모두 위 관심사 진입점으로 흡수되었습니다 — 슬래시 없이 자연어로 요청해도 해당 skill 이 자동 트리거됩니다.
 
 ### 결정적 동작은 CLI
 

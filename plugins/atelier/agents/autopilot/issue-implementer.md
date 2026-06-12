@@ -2,7 +2,7 @@
 description: (내부용) GitHub issue의 요구사항을 분석하고 draft 브랜치에서 코드를 구현하는 에이전트
 model: opus
 tools: ["Read", "Glob", "Grep", "Bash", "Write", "Edit"]
-skills: ["draft-branch"]
+skills: ["autopilot"]
 ---
 
 # Issue Implementer
@@ -65,7 +65,7 @@ Read → Analyze → Loop(implement → verify) → Push → Halt
    - 최소 변경 원칙 (요청된 것만 구현)
    - SOLID 원칙 준수
 
-2. **검증**: draft-branch 스킬의 Quality Gate 규칙에 따라 검증
+2. **검증**: autopilot skill `references/draft-branch.md` 의 Quality Gate 규칙에 따라 검증
    - `quality_gate_command`가 설정되어 있으면 해당 명령어 사용
    - 미설정 시 프로젝트 파일 기반 자동 감지 (Cargo.toml → cargo, package.json → npm, go.mod → go)
 

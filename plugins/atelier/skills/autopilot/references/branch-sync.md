@@ -1,12 +1,6 @@
----
-name: branch-sync
-description: autopilot 공통 브랜치 동기화 절차. 모든 커맨드의 Step 1에서 참조하여 설정 기반 base 브랜치로 checkout + pull을 수행
-version: 1.0.0
----
-
 # Branch Sync
 
-autopilot의 모든 커맨드가 작업 시작 전 수행하는 공통 동기화 절차.
+autopilot의 모든 커맨드가 작업 시작 전 수행하는 공통 동기화 절차. 설정 기반 base 브랜치 결정과 checkout + pull 을 단일 출처로 정의한다 (`pipeline-control.md` Step 1 이 로드).
 
 ## 절차
 

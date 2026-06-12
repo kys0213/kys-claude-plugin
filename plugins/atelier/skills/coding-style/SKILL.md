@@ -1,11 +1,12 @@
 ---
 name: coding-style
+user-invocable: false
 description: 코딩 스타일·컨벤션 원칙. 코드를 작성하거나 리뷰할 때 CLAUDE.md 코딩 원칙을 적용하거나, 변경 후 단순화(/simplify)를 제안할 때 사용합니다.
 ---
 
 # coding-style
 
-프로젝트의 코딩 스타일과 컨벤션 원칙을 제공합니다. atelier 의 다른 skill/agent(예: `convention-architect`, `codebase-analyzer`)가 코딩 원칙을 참조할 때 이 skill 을 로드합니다.
+프로젝트의 코딩 스타일과 컨벤션 원칙을 제공합니다. atelier 의 다른 skill/agent(예: `workflow`, `codebase-analyzer`)가 코딩 원칙을 참조할 때 이 skill 을 로드합니다.
 
 ## 코딩 원칙 템플릿
 
