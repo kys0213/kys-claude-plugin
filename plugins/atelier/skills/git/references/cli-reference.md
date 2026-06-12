@@ -102,7 +102,7 @@ atelier git hook unregister <hookType> <command> [--project-dir=<p>]
 atelier git hook list [hookType] [--project-dir=<p>]
 ```
 
-> guard hook 의 등록·비활성화·재설정 절차는 `/atelier:setup` 의 hook 관리 모드가 담당한다.
+> guard hook 의 등록·비활성화·재설정 절차는 통합 setup 의 hook 관리 모드가 담당한다.
 
 ---
 

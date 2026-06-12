@@ -30,7 +30,7 @@ allowed-tools: Bash
 [ -f ~/.git-workflow-env ] && source ~/.git-workflow-env
 ```
 
-- `/atelier:setup`으로 `~/.git-workflow-env` 생성 (GH_HOST 등)
+- 통합 setup 의 git 모듈이 `~/.git-workflow-env` 를 생성 (GH_HOST 등)
 - GitHub Enterprise 사용 시 필수
 
 ---
@@ -98,7 +98,7 @@ atelier git pr "My feature"
 2. 기본 브랜치이면 exit 2로 차단 → Claude가 `atelier git branch`로 새 브랜치 생성 → 재시도 시 pass
 3. 네트워크 호출 없이 로컬 캐시만 사용. rebase/merge/detached HEAD 상태와 기본 브랜치 감지 실패 시에는 차단하지 않음 (안전)
 
-hook 의 등록·비활성화·재설정은 `/atelier:setup` 의 hook 관리 모드가 담당합니다.
+hook 의 등록·비활성화·재설정은 통합 setup 의 hook 관리 모드가 담당합니다.
 
 ---
 
