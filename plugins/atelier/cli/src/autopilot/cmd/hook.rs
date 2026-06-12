@@ -207,20 +207,54 @@ static CLAIM_POSITIONAL_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"autopilot\s+task\s+claim\s+([a-f0-9]+)\b").unwrap());
 static CLAIM_TASK_FLAG_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"--task\s*[= ]\s*([a-f0-9]+)\b").unwrap());
+static CLAIM_EPIC_FLAG: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"--epic\s*[= ]\s*['"]?([^\s'"]+)"#).unwrap());
 
-/// Extracts the task id from an `autopilot task claim` command, or `None`
-/// when the command is not a claim or carries no task id (the current claim
-/// surface is `task claim --epic <name>`, which selects the next ready task
-/// server-side — there is no id to pre-check, so the guard passes).
-pub fn extract_claim_task_id(command: Option<&str>) -> Option<String> {
+/// What an `autopilot task claim` command is about to claim: an explicit
+/// task id (legacy `claim <id>` / `--task <id>` forms) or the next ready
+/// task of an epic (`claim --epic <name>`, the current surface).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClaimTarget {
+    Task(String),
+    Epic(String),
+}
+
+/// Parses an `autopilot task claim` command into its claim target, or
+/// `None` when the command is not a claim (or names neither a task nor an
+/// epic — the CLI rejects that claim itself, so the guard passes). An
+/// explicit task id wins over `--epic`.
+pub fn parse_claim_target(command: Option<&str>) -> Option<ClaimTarget> {
     let cmd = command?;
     if !CLAIM_CMD.is_match(cmd) {
         return None;
     }
-    CLAIM_POSITIONAL_ID
+    if let Some(c) = CLAIM_POSITIONAL_ID
         .captures(cmd)
         .or_else(|| CLAIM_TASK_FLAG_ID.captures(cmd))
-        .map(|c| c.get(1).unwrap().as_str().to_string())
+    {
+        return Some(ClaimTarget::Task(c.get(1).unwrap().as_str().to_string()));
+    }
+    CLAIM_EPIC_FLAG
+        .captures(cmd)
+        .map(|c| ClaimTarget::Epic(c.get(1).unwrap().as_str().to_string()))
+}
+
+/// Resolves the claim target to a concrete task id and runs the stagnation
+/// check. Epic targets peek the next ready task (the one this claim would
+/// pick); an epic with no ready task allows — the claim itself will no-op.
+pub fn protect_stagnation_guard(
+    store: &dyn TaskStore,
+    config: &StagnationConfig,
+    target: &ClaimTarget,
+) -> Result<HookDecision> {
+    let task_id = match target {
+        ClaimTarget::Task(id) => id.clone(),
+        ClaimTarget::Epic(name) => match store.peek_next_task(name)? {
+            Some(task) => task.id.as_str().to_string(),
+            None => return Ok(HookDecision::allow()),
+        },
+    };
+    protect_stagnation_check(store, config, &task_id)
 }
 
 /// Runs the ledger stagnation check for `task_id` and converts the banded

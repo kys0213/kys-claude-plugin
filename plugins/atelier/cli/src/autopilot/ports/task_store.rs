@@ -137,6 +137,14 @@ pub trait TaskRepo: Send + Sync {
 
     fn claim_next_task(&self, epic: &str, now: DateTime<Utc>) -> Result<Option<Task>>;
 
+    /// Read-only twin of [`TaskRepo::claim_next_task`]: returns the task the
+    /// next claim on `epic` would pick (same selection rule — ready, deps
+    /// done, oldest `created_at` then id) without transitioning it. Guards
+    /// (`autopilot hook protect-stagnation`) use this to pre-check the
+    /// candidate of an epic-scoped claim. Inherently racy against a
+    /// concurrent claim — callers must treat the result as advisory.
+    fn peek_next_task(&self, epic: &str) -> Result<Option<Task>>;
+
     fn complete_task_and_unblock(
         &self,
         id: &TaskId,

@@ -9,7 +9,7 @@
 autopilot 모드는 사람 개입 없이 task 를 dispatch 하므로, 같은 영역을 반복 시도하다 무한 루프에 빠질 위험이 있다.
 이 reference 는 PreToolUse hook(`atelier autopilot hook protect-stagnation`, #776 으로 CLI 이전)이 ledger 기반 stagnation check 결과 JSON 을 해석하고, worker 가 task 를 claim 하기 직전에 **새로운 방향으로 진로를 재설정**하도록 안내한다.
 
-진입 시점: worker 가 `autopilot task claim ...` 을 실행 → PreToolUse hook 이 인프로세스로 stagnation check(`autopilot check stagnation --task <id>` 와 동일 로직) 수행 → exit 4 (stagnation) 또는 5 (escalate) 이면 본 redirect 발동.
+진입 시점: worker 가 `autopilot task claim ...` 을 실행 → PreToolUse hook 이 claim 대상 task 를 해석(명시적 task id, 또는 `--epic <name>` 이면 해당 epic 의 next-ready task 를 read-only peek — claim 과 동일한 선택 규칙)하고 인프로세스로 stagnation check(`autopilot check stagnation --task <id>` 와 동일 로직) 수행 → exit 4 (stagnation) 또는 5 (escalate) 이면 본 redirect 발동.
 
 CLI 는 deterministic primitive (simhash hamming distance, path Jaccard) 만 담당하고, 이 redirect 가 후보 검증 / persona 매핑 / 진로 변경 prompt 합성을 책임진다.
 

@@ -153,6 +153,39 @@ fn body_claim_skips_tasks_with_unsatisfied_deps(store: Arc<dyn TaskStore>) {
     assert!(claimed_again.is_none());
 }
 
+fn body_peek_returns_claim_candidate_without_transition(store: Arc<dyn TaskStore>) {
+    store
+        .insert_epic_with_tasks(
+            plan("e", vec![nt("A", "a"), nt("B", "b")], vec![("B", "A")]),
+            t0(),
+        )
+        .unwrap();
+
+    // Peek picks the same candidate a claim would (A — B's dep unsatisfied)
+    // without transitioning it.
+    let peeked = store.peek_next_task("e").unwrap().unwrap();
+    assert_eq!(peeked.id.as_str(), "A");
+    assert_eq!(peeked.status, TaskStatus::Ready);
+    assert_eq!(peeked.attempts, 0);
+
+    // Repeated peeks are stable; the subsequent claim still gets A fresh.
+    let peeked_again = store.peek_next_task("e").unwrap().unwrap();
+    assert_eq!(peeked_again.id.as_str(), "A");
+    let claimed = store.claim_next_task("e", t0()).unwrap().unwrap();
+    assert_eq!(claimed.id.as_str(), "A");
+    assert_eq!(claimed.attempts, 1);
+}
+
+fn body_peek_returns_none_when_no_ready_task(store: Arc<dyn TaskStore>) {
+    assert!(store.peek_next_task("e").unwrap().is_none());
+    store
+        .insert_epic_with_tasks(plan("e", vec![nt("A", "a")], vec![]), t0())
+        .unwrap();
+    let _ = store.claim_next_task("e", t0()).unwrap().unwrap();
+    // A is Wip now — nothing left to peek.
+    assert!(store.peek_next_task("e").unwrap().is_none());
+}
+
 fn body_release_claim_decrements_attempts(store: Arc<dyn TaskStore>) {
     store
         .insert_epic_with_tasks(plan("e", vec![nt("A", "a")], vec![]), t0())
@@ -876,6 +909,8 @@ conformance_suite!(
     body_claim_returns_none_when_no_ready_task,
     body_claim_returns_oldest_ready_task,
     body_claim_skips_tasks_with_unsatisfied_deps,
+    body_peek_returns_claim_candidate_without_transition,
+    body_peek_returns_none_when_no_ready_task,
     body_release_claim_decrements_attempts,
     body_release_claim_rejects_non_wip,
     body_list_stale_returns_old_wip_tasks_without_modifying_them,

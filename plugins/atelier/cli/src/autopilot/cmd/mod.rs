@@ -106,9 +106,11 @@ pub enum HookCommands {
         autopilot_md: String,
     },
     /// Stagnation guard for `task claim` commands: reads the PreToolUse
-    /// payload from stdin, runs the ledger stagnation check for the claimed
-    /// task id, and blocks (exit 2) with a redirect/escalate prompt on the
-    /// stagnation bands. Best-effort: store or check errors → exit 0.
+    /// payload from stdin, resolves the claim target (explicit task id, or
+    /// the epic's next ready task for `claim --epic`), runs the ledger
+    /// stagnation check, and blocks (exit 2) with a redirect/escalate
+    /// prompt on the stagnation bands. Best-effort: store or check errors
+    /// → exit 0.
     ProtectStagnation(HookStagnationArgs),
 }
 

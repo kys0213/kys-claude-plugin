@@ -11,7 +11,8 @@ use std::sync::Arc;
 
 use atelier::autopilot::cmd::check::stagnation::StagnationConfig;
 use atelier::autopilot::cmd::hook::{
-    extract_claim_task_id, guard_pr_base, protect_stagnation_check, HookToolPayload,
+    guard_pr_base, parse_claim_target, protect_stagnation_check, protect_stagnation_guard,
+    ClaimTarget, HookToolPayload,
 };
 use atelier::autopilot::domain::{TaskId, TaskSource};
 use atelier::autopilot::ports::task_store::{NewWatchTask, TaskStore};
@@ -252,51 +253,68 @@ fn guard_ignores_keys_outside_frontmatter() {
 // ── protect-stagnation: claim-command parsing ──────────────────────────
 
 #[test]
-fn claim_id_none_for_unrelated_command() {
-    assert_eq!(extract_claim_task_id(Some("cargo test")), None);
-    assert_eq!(extract_claim_task_id(None), None);
+fn claim_target_none_for_unrelated_command() {
+    assert_eq!(parse_claim_target(Some("cargo test")), None);
+    assert_eq!(parse_claim_target(None), None);
 }
 
 #[test]
-fn claim_id_none_for_epic_claim_surface() {
-    // Current CLI claims by epic, not by task id — no id to check.
+fn claim_target_epic_for_epic_claim_surface() {
+    // Current CLI claims by epic — the guard peeks the next ready task.
     assert_eq!(
-        extract_claim_task_id(Some("atelier autopilot task claim --epic foo")),
-        None
+        parse_claim_target(Some("atelier autopilot task claim --epic foo")),
+        Some(ClaimTarget::Epic("foo".to_string()))
+    );
+    assert_eq!(
+        parse_claim_target(Some("autopilot task claim --epic=\"my-epic\" --json")),
+        Some(ClaimTarget::Epic("my-epic".to_string()))
     );
 }
 
 #[test]
-fn claim_id_extracted_from_positional_form() {
+fn claim_target_task_from_positional_form() {
     assert_eq!(
-        extract_claim_task_id(Some("autopilot task claim abc123def456")),
-        Some("abc123def456".to_string())
+        parse_claim_target(Some("autopilot task claim abc123def456")),
+        Some(ClaimTarget::Task("abc123def456".to_string()))
     );
     assert_eq!(
-        extract_claim_task_id(Some(
+        parse_claim_target(Some(
             "cd x && atelier autopilot task claim abc123def456 --json"
         )),
-        Some("abc123def456".to_string())
+        Some(ClaimTarget::Task("abc123def456".to_string()))
     );
 }
 
 #[test]
-fn claim_id_extracted_from_task_flag() {
+fn claim_target_task_from_task_flag() {
     assert_eq!(
-        extract_claim_task_id(Some("autopilot task claim --task abc123def456")),
-        Some("abc123def456".to_string())
+        parse_claim_target(Some("autopilot task claim --task abc123def456")),
+        Some(ClaimTarget::Task("abc123def456".to_string()))
     );
     assert_eq!(
-        extract_claim_task_id(Some("autopilot task claim --task=abc123def456")),
-        Some("abc123def456".to_string())
+        parse_claim_target(Some("autopilot task claim --task=abc123def456")),
+        Some(ClaimTarget::Task("abc123def456".to_string()))
     );
 }
 
 #[test]
-fn claim_id_requires_claim_context() {
-    // `--task <id>` on a non-claim command must not trigger the guard.
+fn claim_target_task_wins_over_epic() {
     assert_eq!(
-        extract_claim_task_id(Some("autopilot check stagnation --task abc123def456")),
+        parse_claim_target(Some("autopilot task claim --epic foo --task abc123def456")),
+        Some(ClaimTarget::Task("abc123def456".to_string()))
+    );
+}
+
+#[test]
+fn claim_target_requires_claim_context() {
+    // `--task <id>` / `--epic <name>` on a non-claim command must not
+    // trigger the guard.
+    assert_eq!(
+        parse_claim_target(Some("autopilot check stagnation --task abc123def456")),
+        None
+    );
+    assert_eq!(
+        parse_claim_target(Some("autopilot task list --epic foo")),
         None
     );
 }
@@ -382,6 +400,56 @@ fn escalate_band_blocks_with_human_review_prompt() {
         reason.contains("task escalate bbbbbbbbbb99"),
         "manual escalate instruction present: {reason}"
     );
+}
+
+// ── protect-stagnation: epic-scoped claim peeks the next ready task ────
+
+#[test]
+fn epic_claim_blocks_when_next_ready_task_stagnates() {
+    // 5 mutually-similar ready tasks; the guard must check the one the
+    // claim would pick (smallest id, "aaaaaaaaaa00") — its 4 similar
+    // siblings land in the stagnation band.
+    let store = store_with_similar(4);
+    let d = protect_stagnation_guard(
+        store.as_ref(),
+        &StagnationConfig::default(),
+        &ClaimTarget::Epic("epic-a".to_string()),
+    )
+    .expect("guard runs");
+    assert!(!d.allowed);
+    let reason = d.reason.unwrap();
+    assert!(
+        reason.contains("[STAGNATION DETECTED] task aaaaaaaaaa00"),
+        "guard checks the peeked claim candidate: {reason}"
+    );
+}
+
+#[test]
+fn epic_claim_allows_when_no_ready_task() {
+    let store: Arc<dyn TaskStore> = Arc::new(InMemoryTaskStore::new());
+    let d = protect_stagnation_guard(
+        store.as_ref(),
+        &StagnationConfig::default(),
+        &ClaimTarget::Epic("ghost".to_string()),
+    )
+    .expect("guard runs");
+    assert!(d.allowed, "empty epic → claim will no-op → allow");
+}
+
+#[test]
+fn task_target_checks_that_task_directly() {
+    let store = store_with_similar(3);
+    let d = protect_stagnation_guard(
+        store.as_ref(),
+        &StagnationConfig::default(),
+        &ClaimTarget::Task("bbbbbbbbbb99".to_string()),
+    )
+    .expect("guard runs");
+    assert!(!d.allowed);
+    assert!(d
+        .reason
+        .unwrap()
+        .contains("[STAGNATION DETECTED] task bbbbbbbbbb99"));
 }
 
 #[test]

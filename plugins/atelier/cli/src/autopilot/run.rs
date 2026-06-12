@@ -355,9 +355,9 @@ pub fn run(cli: Cli) -> i32 {
             }
             HookCommands::ProtectStagnation(args) => {
                 let payload = cmd::hook::HookToolPayload::parse(&read_stdin_raw());
-                match cmd::hook::extract_claim_task_id(payload.command.as_deref()) {
+                match cmd::hook::parse_claim_target(payload.command.as_deref()) {
                     None => Ok(0),
-                    Some(task_id) => {
+                    Some(target) => {
                         // Best-effort: a guard must never block the claim
                         // because the store is missing or the check errored
                         // (parity with the bash hook's fall-through arms).
@@ -375,10 +375,10 @@ pub fn run(cli: Cli) -> i32 {
                         };
                         match SqliteTaskStore::open(&db_path) {
                             Err(_) => Ok(0),
-                            Ok(store) => match cmd::hook::protect_stagnation_check(
+                            Ok(store) => match cmd::hook::protect_stagnation_guard(
                                 &store,
                                 &stagnation_cfg,
-                                &task_id,
+                                &target,
                             ) {
                                 Ok(decision) => Ok(hook_exit(decision)),
                                 Err(_) => Ok(0),

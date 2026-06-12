@@ -362,6 +362,23 @@ impl TaskRepo for InMemoryTaskStore {
         Ok(UpsertOutcome::Inserted(id))
     }
 
+    fn peek_next_task(&self, epic: &str) -> Result<Option<Task>> {
+        let s = self.state.lock().expect("poisoned");
+        // Same candidate selection as claim_next_task, minus the transition.
+        let mut candidates: Vec<&Task> = s
+            .tasks
+            .values()
+            .filter(|t| t.epic_name == epic && t.status == TaskStatus::Ready)
+            .filter(|t| InMemoryTaskStore::all_deps_done(&s, &t.id))
+            .collect();
+        candidates.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        Ok(candidates.first().map(|t| (*t).clone()))
+    }
+
     fn claim_next_task(&self, epic: &str, now: DateTime<Utc>) -> Result<Option<Task>> {
         let mut s = self.state.lock().expect("poisoned");
         // Candidates: ready tasks in this epic with all deps Done, ordered by created_at then id

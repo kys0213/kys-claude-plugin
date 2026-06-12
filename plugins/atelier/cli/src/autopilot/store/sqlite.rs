@@ -685,6 +685,29 @@ impl TaskRepo for SqliteTaskStore {
         Ok(Some(task))
     }
 
+    fn peek_next_task(&self, epic: &str) -> Result<Option<Task>> {
+        let conn = self.conn.lock().expect("poisoned");
+        // Same candidate query as claim_next_task, minus the transition.
+        conn.query_row(
+            "SELECT t.id, t.epic_name, t.source, t.fingerprint, t.title, t.body, t.status,
+                    t.attempts, t.branch, t.pr_number, t.escalated_issue, t.simhash,
+                    t.affected_paths, t.created_at, t.updated_at
+               FROM tasks t
+              WHERE t.epic_name = ? AND t.status = 'ready'
+                AND NOT EXISTS (
+                  SELECT 1 FROM task_deps d
+                  JOIN tasks dep ON dep.id = d.depends_on
+                  WHERE d.task_id = t.id AND dep.status != 'done'
+                )
+              ORDER BY t.created_at, t.id
+              LIMIT 1",
+            params![epic],
+            task_from_row,
+        )
+        .optional()
+        .map_err(backend)
+    }
+
     fn complete_task_and_unblock(
         &self,
         id: &TaskId,
