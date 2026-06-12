@@ -7,7 +7,7 @@
 //! stderr). The CLI edge in `run.rs` only reads stdin/env and maps the
 //! returned [`HookDecision`] to the process exit code.
 
-use std::io::Write as _;
+use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::LazyLock;
 
@@ -292,7 +292,7 @@ pub fn protect_stagnation_check(
 /// Formats the stagnation redirect prompt from the check report, mirroring
 /// the jq template in the bash hook.
 fn redirect_prompt(task_id: &str, report: &Value) -> String {
-    let mut out = Vec::new();
+    let mut out = String::new();
     let similar = report["similar_tasks"].as_array().map_or(0, |a| a.len());
     let _ = writeln!(out, "[STAGNATION DETECTED] task {task_id}");
     let _ = writeln!(
@@ -322,7 +322,7 @@ fn redirect_prompt(task_id: &str, report: &Value) -> String {
             let _ = writeln!(out, "  2. Different approach to the same problem");
         }
     }
-    String::from_utf8_lossy(&out).trim_end().to_string()
+    out.trim_end().to_string()
 }
 
 fn escalate_prompt(task_id: &str) -> String {

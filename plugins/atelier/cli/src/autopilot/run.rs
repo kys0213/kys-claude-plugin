@@ -357,34 +357,7 @@ pub fn run(cli: Cli) -> i32 {
                 let payload = cmd::hook::HookToolPayload::parse(&read_stdin_raw());
                 match cmd::hook::parse_claim_target(payload.command.as_deref()) {
                     None => Ok(0),
-                    Some(target) => {
-                        // Best-effort: a guard must never block the claim
-                        // because the store is missing or the check errored
-                        // (parity with the bash hook's fall-through arms).
-                        // A read-only guard must also not CREATE the store —
-                        // no existing DB means no ledger to consult.
-                        let db_path = resolve_db_path(&config);
-                        if !db_path.exists() {
-                            return 0;
-                        }
-                        let stagnation_cfg = cmd::check::stagnation::StagnationConfig {
-                            max_distance: args.max_distance,
-                            min_jaccard: args.min_jaccard,
-                            n_threshold: args.n_threshold,
-                            n_escalate: args.n_escalate,
-                        };
-                        match SqliteTaskStore::open(&db_path) {
-                            Err(_) => Ok(0),
-                            Ok(store) => match cmd::hook::protect_stagnation_guard(
-                                &store,
-                                &stagnation_cfg,
-                                &target,
-                            ) {
-                                Ok(decision) => Ok(hook_exit(decision)),
-                                Err(_) => Ok(0),
-                            },
-                        }
-                    }
+                    Some(target) => Ok(protect_stagnation_exit(&config, &args, &target)),
                 }
             }
         },
@@ -452,16 +425,45 @@ fn resolve_db_path(config: &Config) -> PathBuf {
 }
 
 fn task_store_db_path(config: &Config) -> PathBuf {
-    if let Ok(p) = std::env::var("AUTOPILOT_DB_PATH") {
-        return PathBuf::from(p);
-    }
-    let path = config.storage.db_path.clone();
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() && !parent.exists() {
-            let _ = std::fs::create_dir_all(parent);
+    let path = resolve_db_path(config);
+    // Parent auto-creation applies only to the config-derived default; an
+    // explicit AUTOPILOT_DB_PATH override is used as-is.
+    if std::env::var("AUTOPILOT_DB_PATH").is_err() {
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() && !parent.exists() {
+                let _ = std::fs::create_dir_all(parent);
+            }
         }
     }
     path
+}
+
+/// Edge wiring for `hook protect-stagnation`: probes the store path without
+/// creating it, opens the store, and maps every infra failure to exit 0 so
+/// the guard can never block a claim on its own account (best-effort parity
+/// with the bash hook's fall-through arms).
+fn protect_stagnation_exit(
+    config: &Config,
+    args: &cmd::HookStagnationArgs,
+    target: &cmd::hook::ClaimTarget,
+) -> i32 {
+    let db_path = resolve_db_path(config);
+    if !db_path.exists() {
+        return 0;
+    }
+    let Ok(store) = SqliteTaskStore::open(&db_path) else {
+        return 0;
+    };
+    let stagnation_cfg = cmd::check::stagnation::StagnationConfig {
+        max_distance: args.max_distance,
+        min_jaccard: args.min_jaccard,
+        n_threshold: args.n_threshold,
+        n_escalate: args.n_escalate,
+    };
+    match cmd::hook::protect_stagnation_guard(&store, &stagnation_cfg, target) {
+        Ok(decision) => hook_exit(decision),
+        Err(_) => 0,
+    }
 }
 
 fn load_config(explicit: Option<&Path>) -> anyhow::Result<Config> {
