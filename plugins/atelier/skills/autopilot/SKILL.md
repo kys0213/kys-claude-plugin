@@ -38,7 +38,7 @@ autopilot 은 worktree·병렬 dispatch·머지 조정을 **자체 서술하지 
 | `references/gap-watch.md` | spec↔code 갭 감시 + ledger 등록 + 역방향 갭 | gap-watch |
 | `references/qa-boost.md` | 변경 기반 테스트 커버리지 보강 | qa-boost |
 | `references/ledger.md` | epic 선택 전략·task claim·디스패치·stale 회수 | work-ledger, stale-task-review |
-| `references/stagnation-redirect.md` | task 단위 정체 방어 (simhash/Jaccard → persona 재설정). PreToolUse hook(`protect-stagnation.sh`) 이 `autopilot check stagnation` exit 4/5 일 때 발동 | (hook 자동 트리거) |
+| `references/stagnation-redirect.md` | task 단위 정체 방어 (simhash/Jaccard → persona 재설정). PreToolUse hook(`atelier autopilot hook protect-stagnation`) 이 stagnation check exit 4/5 일 때 발동 | (hook 자동 트리거) |
 
 > **두 가지 정체 방어 (상호 보완)**: `stagnation-redirect.md` 는 **task 단위**(worker 가 같은 영역 반복) 방어, `orchestrator` skill 의 `references/autonomous-driving.md` 는 **루프 단위**(분해→위임→머지 self-drive 의 no_progress/예산) 방어를 담당합니다. 자율 모드 운용 시 두 층위가 함께 작동합니다.
 

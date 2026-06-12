@@ -4,8 +4,8 @@
 //! original standalone `autopilot` binary.
 
 use crate::autopilot::cmd::{
-    CheckCommands, Cli, Commands, IssueCommands, ListArgs, PipelineCommands, PreflightArgs,
-    StatsCommands, TaskCommands, WorktreeCommands,
+    CheckCommands, Cli, Commands, HookCommands, IssueCommands, ListArgs, PipelineCommands,
+    PreflightArgs, StatsCommands, TaskCommands, WorktreeCommands,
 };
 use crate::autopilot::config::Config;
 use crate::autopilot::domain::{DomainError, UserInputError};
@@ -182,12 +182,14 @@ pub fn run(cli: Cli) -> i32 {
             let client = gh::real();
             let git_client = git::real();
             let fs_client = fs::real();
+            let home = std::env::var("HOME").ok().map(PathBuf::from);
             cmd::preflight::run(
                 client.as_ref(),
                 git_client.as_ref(),
                 fs_client.as_ref(),
                 &autopilot_md,
                 Path::new(&repo_root),
+                home.as_deref(),
             )
         }
         Commands::Task { command } => {
@@ -329,6 +331,63 @@ pub fn run(cli: Cli) -> i32 {
                 cmd::events::EventsCommands::List(args) => svc.list(&args, &mut out),
             }
         }
+        Commands::Hook { command } => match command {
+            HookCommands::GuardPrBase {
+                project_dir,
+                autopilot_md,
+            } => {
+                let mut payload = cmd::hook::HookToolPayload::parse(&read_stdin_raw());
+                // Older registrations passed the tool name via env instead of
+                // the payload — keep it as a fallback.
+                if payload.tool_name.is_none() {
+                    payload.tool_name = std::env::var("CLAUDE_TOOL_USE_NAME").ok();
+                }
+                let dir = project_dir
+                    .or_else(|| std::env::var("CLAUDE_PROJECT_DIR").ok())
+                    .unwrap_or_else(|| ".".to_string());
+                let fs_client = fs::real();
+                Ok(hook_exit(cmd::hook::guard_pr_base(
+                    fs_client.as_ref(),
+                    Path::new(&dir),
+                    &autopilot_md,
+                    &payload,
+                )))
+            }
+            HookCommands::ProtectStagnation(args) => {
+                let payload = cmd::hook::HookToolPayload::parse(&read_stdin_raw());
+                match cmd::hook::extract_claim_task_id(payload.command.as_deref()) {
+                    None => Ok(0),
+                    Some(task_id) => {
+                        // Best-effort: a guard must never block the claim
+                        // because the store is missing or the check errored
+                        // (parity with the bash hook's fall-through arms).
+                        // A read-only guard must also not CREATE the store —
+                        // no existing DB means no ledger to consult.
+                        let db_path = resolve_db_path(&config);
+                        if !db_path.exists() {
+                            return 0;
+                        }
+                        let stagnation_cfg = cmd::check::stagnation::StagnationConfig {
+                            max_distance: args.max_distance,
+                            min_jaccard: args.min_jaccard,
+                            n_threshold: args.n_threshold,
+                            n_escalate: args.n_escalate,
+                        };
+                        match SqliteTaskStore::open(&db_path) {
+                            Err(_) => Ok(0),
+                            Ok(store) => match cmd::hook::protect_stagnation_check(
+                                &store,
+                                &stagnation_cfg,
+                                &task_id,
+                            ) {
+                                Ok(decision) => Ok(hook_exit(decision)),
+                                Err(_) => Ok(0),
+                            },
+                        }
+                    }
+                }
+            }
+        },
     };
 
     match result {
@@ -338,6 +397,27 @@ pub fn run(cli: Cli) -> i32 {
             exit_code_for(&e)
         }
     }
+}
+
+/// Reads stdin to a string (empty on read failure). Parsing the hook payload
+/// is command logic (`cmd::hook::HookToolPayload::parse`); only the I/O
+/// lives here, mirroring `git/mod.rs` (#778).
+fn read_stdin_raw() -> String {
+    use std::io::Read as _;
+    let mut buf = String::new();
+    let _ = std::io::stdin().read_to_string(&mut buf);
+    buf
+}
+
+/// Prints the block reason to stderr and returns the hook decision's exit
+/// code (0 allow / 2 block).
+fn hook_exit(decision: cmd::hook::HookDecision) -> i32 {
+    if !decision.allowed {
+        if let Some(reason) = &decision.reason {
+            eprintln!("{reason}");
+        }
+    }
+    decision.exit_code()
 }
 
 /// Maps a propagated error to a process exit code: `1` for user errors,
@@ -359,6 +439,16 @@ fn exit_code_for(e: &anyhow::Error) -> i32 {
         }
     }
     2
+}
+
+/// Resolves the task-store DB path (env override > config) without touching
+/// the filesystem — read-only callers (hook guards) use this to probe for an
+/// existing store.
+fn resolve_db_path(config: &Config) -> PathBuf {
+    if let Ok(p) = std::env::var("AUTOPILOT_DB_PATH") {
+        return PathBuf::from(p);
+    }
+    config.storage.db_path.clone()
 }
 
 fn task_store_db_path(config: &Config) -> PathBuf {

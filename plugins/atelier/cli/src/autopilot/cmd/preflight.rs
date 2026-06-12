@@ -38,12 +38,15 @@ impl CheckResult {
 }
 
 /// Run all preflight checks. Returns exit code 0 (no FAIL) or 1 (any FAIL).
+/// `home_dir` locates the user-scope `~/.claude/settings.json` for the hook
+/// check (#731); `None` falls back to project scope only.
 pub fn run(
     gh: &dyn GhOps,
     git: &dyn GitOps,
     fs: &dyn FsOps,
     config_path: &str,
     repo_root: &Path,
+    home_dir: Option<&Path>,
 ) -> Result<i32> {
     let mut results = Vec::new();
 
@@ -57,7 +60,7 @@ pub fn run(
     check_gh_auth(gh, &mut results);
 
     // B-2. Guard PR base hook
-    check_guard_hook(fs, repo_root, &mut results);
+    check_guard_hook(fs, repo_root, home_dir, &mut results);
 
     // B-3. Quality gate command
     check_quality_gate(fs, config_path, &mut results);
@@ -178,21 +181,47 @@ fn check_gh_auth(gh: &dyn GhOps, results: &mut Vec<CheckResult>) {
     }
 }
 
-fn check_guard_hook(fs: &dyn FsOps, repo_root: &Path, results: &mut Vec<CheckResult>) {
-    let settings = repo_root.join(".claude/settings.local.json");
-    if !fs.file_exists(&settings) {
-        results.push(CheckResult::warn("Hooks", "settings.local.json not found"));
-        return;
+/// Setup registers hooks in user scope (`~/.claude/settings.json`) while
+/// older flows wrote project scope — checking only one of them produced a
+/// chronic WARN that misled users into hand-editing settings (#731). Accept
+/// the hook in either scope; the registered command may be the legacy shim
+/// (`guard-pr-base.sh`) or the CLI form (`atelier autopilot hook
+/// guard-pr-base`) — both contain the `guard-pr-base` marker.
+fn check_guard_hook(
+    fs: &dyn FsOps,
+    repo_root: &Path,
+    home_dir: Option<&Path>,
+    results: &mut Vec<CheckResult>,
+) {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(home) = home_dir {
+        candidates.push(home.join(".claude/settings.json"));
+    }
+    candidates.push(repo_root.join(".claude/settings.local.json"));
+
+    let mut any_exists = false;
+    for settings in &candidates {
+        if !fs.file_exists(settings) {
+            continue;
+        }
+        any_exists = true;
+        if let Ok(content) = fs.read_file(settings) {
+            if content.contains("guard-pr-base") {
+                results.push(CheckResult::pass(
+                    "Hooks",
+                    &format!("guard-pr-base registered ({})", settings.display()),
+                ));
+                return;
+            }
+        }
     }
 
-    match fs.read_file(&settings) {
-        Ok(content) if content.contains("guard-pr-base") => {
-            results.push(CheckResult::pass("Hooks", "guard-pr-base registered"));
-        }
-        _ => {
-            results.push(CheckResult::warn("Hooks", "guard-pr-base hook not found"));
-        }
-    }
+    let detail = if any_exists {
+        "guard-pr-base hook not found — run /atelier:setup (autopilot module) instead of editing settings manually"
+    } else {
+        "no settings.json found (user or project scope)"
+    };
+    results.push(CheckResult::warn("Hooks", detail));
 }
 
 fn check_quality_gate(fs: &dyn FsOps, config_path: &str, results: &mut Vec<CheckResult>) {

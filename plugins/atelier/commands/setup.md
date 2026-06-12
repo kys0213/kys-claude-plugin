@@ -79,17 +79,19 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 ## Step 2b — autopilot 모듈
 
 1. 프로젝트 설정 파일 `github-autopilot.local.md` 생성 (기존 스키마/경로 동일 — 호환).
-2. autopilot hook 3종 등록 — 로직이 아직 `.sh` 에 있으므로(#776 에서 CLI 이전 예정) `${CLAUDE_PLUGIN_ROOT}` 리터럴 shim 으로 기록:
+2. autopilot hook 3종 등록 — guard-pr-base / protect-stagnation 은 로직이 CLI 로 이전되어(#776)
+   **CLI 커맨드를 직접** 기록하고, check-cli-version 만 부트스트랩 shim(`${CLAUDE_PLUGIN_ROOT}` 리터럴)으로 남깁니다:
    ```bash
    atelier git hook register SessionStart "*" \
      '${CLAUDE_PLUGIN_ROOT}/hooks/check-cli-version.sh' --project-dir "$HOME"
 
-   atelier git hook register PreToolUse "Bash" \
-     '${CLAUDE_PLUGIN_ROOT}/hooks/guard-pr-base.sh' --project-dir "$HOME"
+   atelier git hook register PreToolUse "Bash|mcp__github__create_pull_request" \
+     'atelier autopilot hook guard-pr-base --project-dir "${CLAUDE_PROJECT_DIR:-.}"' --project-dir "$HOME"
 
    atelier git hook register PreToolUse "Bash" \
-     '${CLAUDE_PLUGIN_ROOT}/hooks/protect-stagnation.sh' --project-dir "$HOME"
+     'atelier autopilot hook protect-stagnation' --project-dir "$HOME"
    ```
+   > `${CLAUDE_PROJECT_DIR:-.}` 는 **리터럴로 보존**해야 합니다 (hook 실행 시점에 셸이 expand).
    > `PreToolUse`/`Bash` matcher 는 git 모듈의 commit guard 와 공유됩니다 — `hook register` 는 같은 matcher
    > 그룹에 command 를 append 하므로 서로 덮어쓰지 않습니다.
 
@@ -123,6 +125,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
      .*/plugins/(github-autopilot|coding-style)/hooks/(<file>)\.sh
      .*/plugins/git-utils/scripts/(default-branch-guard.*)\.sh
      .*/plugins/atelier/scripts/(default-branch-guard.*)\.sh   # 구버전 atelier setup 잔재
+     \$\{CLAUDE_PLUGIN_ROOT\}/hooks/(guard-pr-base|protect-stagnation)\.sh   # CLI 이전(#776) 전 atelier shim
 3. 변경 전 ~/.claude/settings.json 을 settings.json.bak-<timestamp> 로 백업 (cp)
 4. 사용자에게 치환 목록을 보여주고 AskUserQuestion 으로 확인
 5. 매칭 entry 마다: atelier git hook unregister <type> <old-command> --project-dir "$HOME"
@@ -137,8 +140,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 | frozen 경로 | atelier 등록 command |
 |---|---|
 | `github-autopilot/hooks/check-cli-version.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/check-cli-version.sh` (리터럴) |
-| `github-autopilot/hooks/guard-pr-base.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/guard-pr-base.sh` (리터럴) |
-| `github-autopilot/hooks/protect-stagnation.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/protect-stagnation.sh` (리터럴) |
+| `github-autopilot/hooks/guard-pr-base.sh` (또는 구버전 atelier 동명 shim) | `atelier autopilot hook guard-pr-base --project-dir "${CLAUDE_PROJECT_DIR:-.}"` (§"autopilot 모듈" 등록 형식) |
+| `github-autopilot/hooks/protect-stagnation.sh` (또는 구버전 atelier 동명 shim) | `atelier autopilot hook protect-stagnation` |
 | `coding-style/hooks/suggest-simplify.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/suggest-simplify.sh` (리터럴) |
 | `git-utils/scripts/default-branch-guard-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard write ...` (§"git 모듈" 등록 형식) |
 | `git-utils/scripts/default-branch-guard-commit-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard commit ...` (§"git 모듈" 등록 형식) |

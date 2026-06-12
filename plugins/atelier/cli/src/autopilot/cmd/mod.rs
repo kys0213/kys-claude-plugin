@@ -1,6 +1,7 @@
 pub mod check;
 pub mod epic;
 pub mod events;
+pub mod hook;
 pub mod issue;
 pub mod issue_list;
 pub mod labels;
@@ -82,6 +83,52 @@ pub enum Commands {
         #[command(subcommand)]
         command: events::EventsCommands,
     },
+    /// PreToolUse hook guards (stdin JSON payload; exit 2 blocks the call)
+    Hook {
+        #[command(subcommand)]
+        command: HookCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum HookCommands {
+    /// Block PR creation (gh pr create / MCP create_pull_request) whose
+    /// base branch deviates from the autopilot config. Reads the PreToolUse
+    /// payload from stdin; missing config means "not an autopilot project"
+    /// → exit 0.
+    GuardPrBase {
+        /// Project directory holding the autopilot config (default:
+        /// $CLAUDE_PROJECT_DIR, then ".")
+        #[arg(long)]
+        project_dir: Option<String>,
+        /// Autopilot markdown config filename, resolved under --project-dir
+        #[arg(long, default_value = "github-autopilot.local.md")]
+        autopilot_md: String,
+    },
+    /// Stagnation guard for `task claim` commands: reads the PreToolUse
+    /// payload from stdin, runs the ledger stagnation check for the claimed
+    /// task id, and blocks (exit 2) with a redirect/escalate prompt on the
+    /// stagnation bands. Best-effort: store or check errors → exit 0.
+    ProtectStagnation(HookStagnationArgs),
+}
+
+/// Stagnation thresholds for the claim-guard hook. Defaults mirror
+/// [`CheckStagnationArgs`]; the task id comes from the claim command in the
+/// stdin payload rather than a flag.
+#[derive(Args, Debug, Clone)]
+pub struct HookStagnationArgs {
+    /// Max simhash hamming distance (inclusive).
+    #[arg(long, default_value_t = 3)]
+    pub max_distance: u32,
+    /// Min Jaccard similarity for the affected-paths dimension (inclusive).
+    #[arg(long, default_value_t = 0.5)]
+    pub min_jaccard: f64,
+    /// `N`: similar-task count that flips status from `ok` to `stagnation`.
+    #[arg(long, default_value_t = 3)]
+    pub n_threshold: u32,
+    /// `N_esc`: similar-task count that flips status to `escalate`.
+    #[arg(long, default_value_t = 5)]
+    pub n_escalate: u32,
 }
 
 #[derive(Subcommand)]

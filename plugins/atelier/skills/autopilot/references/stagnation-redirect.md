@@ -7,9 +7,9 @@
 ## 개요
 
 autopilot 모드는 사람 개입 없이 task 를 dispatch 하므로, 같은 영역을 반복 시도하다 무한 루프에 빠질 위험이 있다.
-이 reference 는 PreToolUse hook(`protect-stagnation.sh`)이 `autopilot check stagnation` 을 호출하여 받은 ledger 기반 결과 JSON 을 해석하고, worker 가 task 를 claim 하기 직전에 **새로운 방향으로 진로를 재설정**하도록 안내한다.
+이 reference 는 PreToolUse hook(`atelier autopilot hook protect-stagnation`, #776 으로 CLI 이전)이 ledger 기반 stagnation check 결과 JSON 을 해석하고, worker 가 task 를 claim 하기 직전에 **새로운 방향으로 진로를 재설정**하도록 안내한다.
 
-진입 시점: worker 가 `autopilot task claim ...` 을 실행 → PreToolUse hook 이 `autopilot check stagnation --task <id>` 호출 → exit 4 (stagnation) 또는 5 (escalate) 이면 본 redirect 발동.
+진입 시점: worker 가 `autopilot task claim ...` 을 실행 → PreToolUse hook 이 인프로세스로 stagnation check(`autopilot check stagnation --task <id>` 와 동일 로직) 수행 → exit 4 (stagnation) 또는 5 (escalate) 이면 본 redirect 발동.
 
 CLI 는 deterministic primitive (simhash hamming distance, path Jaccard) 만 담당하고, 이 redirect 가 후보 검증 / persona 매핑 / 진로 변경 prompt 합성을 책임진다.
 
@@ -173,12 +173,13 @@ Recommended persona: <persona>
 
 CLI exit 5 인 경우 (`pattern.consecutive_failures` 가 N_esc=5 이상에 도달) 본 스킬은 **Haiku 검증을 생략**하고 즉시 사람 개입 요청 메시지를 노출한다.
 
-- ledger 의 `TaskEscalated` event 는 hook 이 이미 emit 한 상태 (spec §3.5).
+- hook 은 escalate 를 자동 기록하지 **않는다** — `task escalate` 는 HITL issue 번호(`--issue <N>`)가
+  필수이고, HITL issue 생성은 judgment 영역이라 hook(결정적 도구)이 수행하지 않는다 (CLAUDE.md "책임 경계").
 - 본 스킬은 worker prompt 끝에 다음 라인을 추가한다.
 
 ```
-ESCALATED to human review — autopilot task escalate <id> has been called automatically.
-DO NOT retry. Wait for human direction.
+ESCALATION REQUIRED — DO NOT retry.
+HITL 이슈 생성 후 'atelier autopilot task escalate <id> --issue <N>' 으로 기록하고 사람의 지시를 기다리세요.
 ```
 
 - persona shift 권유는 escalate 단계에서는 부수적이다. 메인 메시지는 "사람 개입 필요" 임을 분명히 한다.

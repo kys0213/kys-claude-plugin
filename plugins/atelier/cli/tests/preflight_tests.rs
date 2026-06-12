@@ -39,6 +39,7 @@ fn all_pass_returns_0() {
         &fs,
         "config.local.md",
         "/repo".as_ref(),
+        None,
     )
     .unwrap();
     assert_eq!(code, 0);
@@ -56,6 +57,7 @@ fn missing_claude_md_returns_1() {
         &fs,
         "config.local.md",
         "/repo".as_ref(),
+        None,
     )
     .unwrap();
     assert_eq!(code, 1);
@@ -78,6 +80,7 @@ fn gh_auth_failure_returns_1() {
         &fs,
         "config.local.md",
         "/repo".as_ref(),
+        None,
     )
     .unwrap();
     assert_eq!(code, 1); // FAIL due to missing CLAUDE.md
@@ -99,6 +102,7 @@ fn partial_warn_returns_0() {
         &fs,
         "config.local.md",
         "/repo".as_ref(),
+        None,
     )
     .unwrap();
     // Only WARNs (missing file tree, no rules, no hooks, no config) but no hard FAIL
@@ -129,7 +133,42 @@ fn no_git_remote_returns_1() {
         &fs,
         "config.local.md",
         "/repo".as_ref(),
+        None,
     )
     .unwrap();
     assert_eq!(code, 1); // FAIL due to missing git remote
+}
+
+/// #731: setup registers the hook in user scope (~/.claude/settings.json);
+/// preflight must recognize it there instead of warning chronically.
+#[test]
+fn guard_hook_in_user_scope_passes() {
+    let gh = MockGh::new().on_run_containing("auth", "Logged in");
+    let git = MockGit::new();
+    let fs = MockFs::new()
+        .with_file(
+            "/repo/CLAUDE.md",
+            "# Project\n├── src/\ncargo test\nconvention principle",
+        )
+        .with_file("/repo/.claude/rules/rust.md", "paths:\n  - \"src/\"")
+        .with_file(
+            "/home/u/.claude/settings.json",
+            r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"command":"atelier autopilot hook guard-pr-base"}]}]}}"#,
+        )
+        .with_file("config.local.md", config_content())
+        .with_file("/repo/spec/auth.md", "# Auth spec");
+
+    let code = atelier::autopilot::cmd::preflight::run(
+        &gh,
+        &git,
+        &fs,
+        "config.local.md",
+        "/repo".as_ref(),
+        Some("/home/u".as_ref()),
+    )
+    .unwrap();
+    assert_eq!(
+        code, 0,
+        "user-scope registration must satisfy the hook check"
+    );
 }
