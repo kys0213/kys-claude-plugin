@@ -1,21 +1,6 @@
----
-description: 코드베이스를 분석하여 .claude/rules/ 구조를 자동 제안하고 생성합니다
-argument-hint: "[--gap-only]"
-allowed-tools:
-  - Task
-  - Glob
-  - Read
-  - Write
-  - AskUserQuestion
----
+# 컨벤션 scaffold 절차 (scaffold protocol)
 
-# Scaffold Rules Command
-
-> 코드베이스와 문서를 분석하여 프로젝트 가치관(CLAUDE.md)과 레이어별 규칙(.claude/rules/)을 자동 생성합니다.
-
-## Overview
-
-6단계 워크플로우로 진행됩니다:
+코드베이스와 문서를 분석하여 프로젝트 가치관(CLAUDE.md)과 레이어별 규칙(`.claude/rules/`)을 자동 생성하는 6단계 워크플로우.
 
 1. **병렬 분석**: 코드 구조 + 문서 패턴을 동시 분석
 2. **가치관 인터뷰**: 자동감지 결과를 기반으로 사용자 확인 (HITL)
@@ -24,9 +9,7 @@ allowed-tools:
 5. **규칙 생성**: 승인된 구조로 `.claude/rules/*.md` 파일 일괄 생성
 6. **결과 요약**: 전체 변경 사항 보고
 
-## Execution Steps
-
-### Step 1: 병렬 분석 (Sub-agent 위임)
+## Step 1: 병렬 분석 (Sub-agent 위임)
 
 codebase-analyzer와 document-analyzer를 **동시에** 실행합니다.
 
@@ -56,7 +39,7 @@ Prompt: |
   4. 구조 패턴 (헤딩, 리스트, 테이블)
 ```
 
-`$ARGUMENTS`에 `--gap-only`가 포함된 경우, codebase-analyzer 프롬프트에 다음을 추가합니다:
+gap 분석만 요청받은 경우(`--gap-only` 의도), codebase-analyzer 프롬프트에 다음을 추가합니다:
 
 ```
 기존 .claude/rules/ 파일이 있는 경우 gap 분석만 수행하세요.
@@ -65,10 +48,10 @@ Prompt: |
 
 두 에이전트의 결과를 모두 수신한 후 Step 2로 진행합니다.
 
-### Step 2: 가치관 인터뷰 (HITL)
+## Step 2: 가치관 인터뷰 (HITL)
 
 분석 결과에서 자동감지된 항목을 프리필하고, 사용자에게 확인·수정을 받습니다.
-convention-architect Skill Section 8의 카테고리를 따르되, 2회의 AskUserQuestion으로 진행합니다.
+`references/value-interview.md` §1 의 카테고리를 따르되, 2회의 AskUserQuestion으로 진행합니다.
 
 **Q1: 프로젝트 맥락 + 엔지니어링 트레이드오프** (codebase-analyzer 결과 프리필)
 
@@ -111,7 +94,7 @@ AskUserQuestion: |
 
 document-analyzer가 "문서 부족" 상태를 반환한 경우, Q2에서 프리필 없이 직접 질문합니다.
 
-### Step 3: CLAUDE.md 섹션 생성 (HITL)
+## Step 3: CLAUDE.md 섹션 생성 (HITL)
 
 인터뷰 결과를 종합하여 CLAUDE.md에 추가할 섹션을 생성합니다.
 
@@ -119,7 +102,7 @@ document-analyzer가 "문서 부족" 상태를 반환한 경우, Q2에서 프리
 2. **섹션 생성**: 인터뷰 답변 + 분석 결과를 아래 템플릿에 채워 생성
 3. **사용자에게 제시**: 생성된 섹션을 보여주고 승인 요청
 
-**CLAUDE.md 섹션 템플릿** (convention-architect Skill Section 9의 배치 기준 참조):
+**CLAUDE.md 섹션 템플릿** (`references/value-interview.md` §2 의 배치 기준 참조):
 
 ```markdown
 ## 프로젝트 맥락
@@ -159,7 +142,7 @@ AskUserQuestion: |
    - **삽입 위치**: 기존 내용의 마지막 섹션 뒤에 추가. CI/CD, 빌드 명령어 등 기존 섹션 사이에 끼워넣지 않음
 5. **거부 시**: 건너뛰고 Step 4로 진행
 
-### Step 4: 레이어별 규칙 승인 (HITL)
+## Step 4: 레이어별 규칙 승인 (HITL)
 
 codebase-analyzer의 규칙 구조 제안을 사용자에게 보여주고 확인합니다.
 
@@ -176,7 +159,7 @@ AskUserQuestion: |
 
 사용자가 거부하면 Step 6(결과 요약)으로 건너뜁니다.
 
-### Step 5: 규칙 파일 생성 (Sub-agent 위임)
+## Step 5: 규칙 파일 생성 (Sub-agent 위임)
 
 사용자가 승인한 구조로 rules-generator 에이전트에게 생성을 위임합니다.
 
@@ -193,12 +176,12 @@ Prompt: |
   - 50-150줄 이내
 ```
 
-### Step 6: 결과 요약
+## Step 6: 결과 요약
 
 전체 변경 사항을 보고합니다:
 
 ```
-scaffold-rules 완료!
+scaffold 완료!
 
 CLAUDE.md 변경:
   ✓ 프로젝트 맥락 섹션 추가

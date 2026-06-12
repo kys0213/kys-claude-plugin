@@ -2,7 +2,7 @@
 description: 승인된 규칙 구조를 기반으로 .claude/rules/*.md 파일을 일괄 생성합니다
 model: sonnet
 tools: ["Read", "Write", "Glob", "Grep", "Bash"]
-skills: ["convention-architect"]
+skills: ["workflow"]
 ---
 
 # Rules Generator Agent
@@ -40,7 +40,7 @@ Glob: **/*.controller.ts
 
 ### Step 1-A: paths 패턴 검증
 
-codebase-analyzer에서 1차 검증 완료된 패턴을 대상으로 2차 확인합니다. 각 규칙 파일의 `paths:` 패턴이 의도한 파일만 정확히 매칭하는지 검증합니다. **convention-architect Skill Section 7의 체크리스트**를 기준으로 확인합니다.
+codebase-analyzer에서 1차 검증 완료된 패턴을 대상으로 2차 확인합니다. 각 규칙 파일의 `paths:` 패턴이 의도한 파일만 정확히 매칭하는지 검증합니다. **workflow skill `references/rules-design.md` §paths 범용화 원칙의 체크리스트**를 기준으로 확인합니다.
 
 1. 각 `paths:` 패턴에 대해 Glob으로 실제 매칭되는 파일 목록을 수집
 2. 매칭된 파일 중 2-3개를 Read하여 해당 레이어의 컨벤션에 부합하는지 확인

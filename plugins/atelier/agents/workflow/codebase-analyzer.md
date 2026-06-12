@@ -2,7 +2,7 @@
 description: 코드베이스의 언어, 프레임워크, 디렉토리 구조를 분석하여 규칙 파일 구조를 제안합니다
 model: sonnet
 tools: ["Read", "Glob", "Grep", "Bash", "LSP"]
-skills: ["convention-architect"]
+skills: ["workflow"]
 ---
 
 # Codebase Analyzer Agent
@@ -47,7 +47,7 @@ Glob: *.sln
 
 ### Step 1-A: LSP 사용 가능 여부 확인
 
-**convention-architect Skill Section 10 (LSP-Enhanced Analysis)**의 전략을 따릅니다.
+**workflow skill `references/codebase-detection.md` §LSP-Enhanced Analysis** 의 전략을 따릅니다.
 
 Step 1에서 감지된 언어에 해당하는 LSP 서버의 존재 여부를 확인합니다:
 
@@ -59,7 +59,7 @@ which pylsp 2>/dev/null && echo "lsp:pylsp"
 ```
 
 - **사용 가능**: Step 2에서 LSP 기반 정밀 분석 진행
-- **사용 불가**: Glob/Grep fallback 진행 + 설치 안내를 출력에 포함 (설치 명령은 convention-architect Skill Section 10 참조)
+- **사용 불가**: Glob/Grep fallback 진행 + 설치 안내를 출력에 포함 (설치 명령은 workflow skill `references/codebase-detection.md` §LSP-Enhanced Analysis 참조)
 
 ### Step 2: 디렉토리 구조 분석
 
@@ -114,11 +114,11 @@ Glob: **/*.module.ts
 
 #### LSP 기반 정밀 분석 (사용 가능 시)
 
-LSP가 사용 가능한 경우, **convention-architect Skill Section 10**의 operation 목록을 참고하여 Glob/Grep에 추가 분석을 수행합니다. LSP 사용 불가 시 이 단계를 건너뛰고 기존 Glob/Grep 기반 분석만 수행합니다.
+LSP가 사용 가능한 경우, **workflow skill `references/codebase-detection.md` §LSP-Enhanced Analysis** 의 operation 목록을 참고하여 Glob/Grep에 추가 분석을 수행합니다. LSP 사용 불가 시 이 단계를 건너뛰고 기존 Glob/Grep 기반 분석만 수행합니다.
 
 #### 범용 패턴 변환
 
-샘플링된 파일 경로에서 레이어(역할)와 컨테이너(위치)를 분리하고, 컨테이너를 `**/`로 추상화합니다. 구체적인 판별 기준과 알고리즘은 **convention-architect Skill Section 7 (paths 범용화 원칙)**을 적용합니다.
+샘플링된 파일 경로에서 레이어(역할)와 컨테이너(위치)를 분리하고, 컨테이너를 `**/`로 추상화합니다. 구체적인 판별 기준과 알고리즘은 **workflow skill `references/rules-design.md` §paths 범용화 원칙**을 적용합니다.
 
 ### Step 5: 컨벤션 검증
 
@@ -129,7 +129,7 @@ LSP가 사용 가능한 경우, **convention-architect Skill Section 10**의 ope
 3. **불일치 처리**:
    - 의도하지 않은 파일이 매칭되면 → 패턴을 좁힘
    - 패턴이 올바르지만 파일이 컨벤션에 맞지 않으면 → 규칙 설명에 주석으로 예외 사항을 기록
-4. **체크리스트**: convention-architect Skill Section 7 (paths 범용화 원칙)의 체크리스트 항목을 확인
+4. **체크리스트**: workflow skill `references/rules-design.md` §paths 범용화 원칙의 체크리스트 항목을 확인
 
 ### Step 6: 프로젝트 맥락 자동감지
 
@@ -166,7 +166,7 @@ git shortlog -sn --no-merges | head -10
 | TODO/FIXME 코멘트 다수 | 속도 우선, 부채 허용 |
 | 타입 정의 별도 분리 | 계약 기반 설계 |
 
-LSP 사용 가능 시 convention-architect Skill Section 10의 operation으로 더 정확한 판단이 가능합니다.
+LSP 사용 가능 시 workflow skill `references/codebase-detection.md` 의 LSP operation으로 더 정확한 판단이 가능합니다.
 
 **참고**: 독자 수준/문서 톤 분석은 document-analyzer가 담당합니다. 이 에이전트는 코드 구조에 집중합니다.
 
