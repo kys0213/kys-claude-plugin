@@ -27,6 +27,7 @@ autopilot 은 worktree·병렬 dispatch·머지 조정을 **자체 서술하지 
 
 | reference | 언제 로드 | 출처 커맨드 |
 |---|---|---|
+| `references/startup.md` | autopilot 진입 시 시작 절차 전체 (preflight·품질 게이트·초기 스캔·Monitor/Cron 등록·스냅샷) | autopilot (진입점) |
 | `references/pipeline-control.md` | 모든 autopilot 커맨드 전처리 (idle/capacity/throttling) | 공통 |
 | `references/build-pipeline.md` | 이슈 구현 파이프라인 (capacity·의존성·재작업·에스컬레이션) | build-issues |
 | `references/ci.md` | CI 실패 분석/수정 | ci-watch, ci-fix |
