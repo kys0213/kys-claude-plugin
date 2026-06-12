@@ -42,10 +42,11 @@ autopilot preflight --autopilot-md github-autopilot.local.md --repo-root .
 
 설정에서 `spec_paths`와 `spec_quality_threshold`를 읽는다 (기본값: `"C"`).
 
-`spec_paths`에 스펙 파일이 있으면, `gap-auditor` 에이전트를 호출하여 스펙 품질을 평가한다:
+`spec_paths`에 스펙 파일이 있으면, `gap-auditor` 에이전트를 **Spec Quality Grading 모드**로 호출하여 스펙 품질을 평가한다 (gap-auditor 는 `tools: []` 이므로 기준과 파일 내용을 프롬프트로 전달):
 
 전달 정보:
-- spec_files: `spec_paths`에서 `**/*.md`로 수집한 파일 목록
+- 평가 기준: `spec` skill 의 `references/quality-criteria.md` 본문 (4관점 체크리스트 + 등급 기준)
+- spec_files: `spec_paths`에서 `**/*.md`로 수집한 파일들의 경로 + 본문
 - spec_quality_threshold: 설정값 (기본: `"C"`)
 
 결과 처리:
@@ -143,7 +144,7 @@ Monitor(
 등록 후 반환된 task ID를 `/tmp/autopilot-{repo}/state/watch.json`의 `task_id` 필드에 기록한다.
 
 > `poll_sec`은 `monitor.poll_sec` 설정값 (기본: 5). push 감지는 매 tick, CI는 30초, 이슈는 60초 간격.
-> `base_branch`는 branch-sync 스킬의 base branch 결정 로직을 따른다.
+> `base_branch`는 `references/branch-sync.md` 의 base branch 결정 로직을 따른다.
 > `branch_filter`는 `ci_watch.branch_filter` 설정값 (기본: `"autopilot"`).
 > 상태는 `/tmp/autopilot-{repo}/state/watch.json`에 주기적으로 저장되어 세션 재시작 시 중복 emit을 방지한다.
 

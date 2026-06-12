@@ -31,14 +31,14 @@ PR 머지 시 Wip→Done 전환은 **merge-prs 가** 수행한다 (Step 4 all-gr
 
 ### Step 1: Base 브랜치 동기화
 
-`branch-sync` 스킬의 절차를 수행한다.
+`references/branch-sync.md` 의 절차를 수행한다.
 
 ### Step 2: 설정 로딩
 
 `github-autopilot.local.md` frontmatter 에서 읽는다:
 - `max_parallel_agents`: 동시 실행 에이전트 수 (기본 3)
 - `quality_gate_command`: (optional) 커스텀 quality gate
-- `work_branch` / `branch_strategy`: base 브랜치 결정 (draft-branch 스킬)
+- `work_branch` / `branch_strategy`: base 브랜치 결정 (`references/draft-branch.md`)
 - `label_prefix`: GitHub 라벨 접두사 (기본 `autopilot:`)
 - `work_ledger.priority`: epic 우선순위 전략 — `"by-depth"`(default) / `"by-age"` / `"round-robin"` / `["epic-a", ...]` 명시 리스트. Step 4 참조.
 

@@ -1,10 +1,6 @@
----
-name: draft-branch
-description: Draft branch 라이프사이클, 승격 규칙, autopilot 설정 로딩 가이드. build-issues, qa-boost, branch-promoter 등 draft branch를 사용하는 모든 컴포넌트가 참조
-version: 1.0.0
----
-
 # Draft Branch Lifecycle & Configuration
+
+Draft branch 라이프사이클, 승격 규칙, autopilot 설정 로딩 가이드. build-pipeline·qa-boost 절차와 branch-promoter·ci-fixer·issue-implementer 등 draft branch 를 사용하는 모든 컴포넌트가 로드한다.
 
 ## 설정 로딩
 
@@ -47,7 +43,7 @@ test_watch: []                       # 테스트 스위트 정의 (아래 예시
 
 ## Base 브랜치 결정
 
-base 브랜치 결정 및 동기화는 **branch-sync** 스킬을 참조한다.
+base 브랜치 결정 및 동기화는 `references/branch-sync.md` 를 참조한다.
 
 ## Branch 계층 구조
 
