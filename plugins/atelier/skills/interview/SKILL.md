@@ -81,7 +81,7 @@ A(cceptance)  — "완료" 판정 기준?
 
 | reference | 언제 로드 | 내용 |
 |---|---|---|
-| `references/grill.md` | 기존 plan/design 을 심문(`grill`)할 때 | 결정 트리 순회, 의존성 해소 순서, 종료 조건, 합의 결정 출력 |
+| `references/grill.md` | 기존 plan/design 을 심문(`grill`)할 때 | 심문 지시문(설계 트리 가지별 해소·추천 답·한 번에 하나·코드 탐색 우선) + 종료/핸드오프 |
 | `references/brainstorm.md` | 무에서 설계(`brainstorm`)할 때 | 컨텍스트 탐색 → 명확화 질문 → 2–3 접근법 → 섹션별 설계 검증(+시각화 제안) → self-review → 승인 게이트 → 핸드오프 |
 
 ## 출처
