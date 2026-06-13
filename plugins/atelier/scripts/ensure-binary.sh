@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ensure-binary.sh — autopilot CLI 바이너리 버전 확인 및 조건부 빌드/설치
+# ensure-binary.sh — atelier CLI 바이너리 버전 확인 및 조건부 빌드/설치
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -7,7 +7,7 @@ PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CLI_DIR="$PLUGIN_DIR/cli"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 INSTALL_DIR="$HOME/.local/bin"
-BINARY_NAME="autopilot"
+BINARY_NAME="atelier"
 BINARY_PATH="$INSTALL_DIR/$BINARY_NAME"
 
 # --- Helper: SemVer 비교 ---
@@ -54,7 +54,7 @@ fi
 ACTION=""
 if [ -z "$INSTALLED_VERSION" ]; then
   ACTION="install"
-  echo "autopilot CLI not found. Installing v${PLUGIN_VERSION}..."
+  echo "atelier CLI not found. Installing v${PLUGIN_VERSION}..."
 else
   set +e
   compare_semver "$INSTALLED_VERSION" "$PLUGIN_VERSION"
@@ -63,9 +63,9 @@ else
 
   if [ "$CMP" -eq 2 ]; then
     ACTION="update"
-    echo "autopilot CLI outdated: v${INSTALLED_VERSION} → v${PLUGIN_VERSION}. Rebuilding..."
+    echo "atelier CLI outdated: v${INSTALLED_VERSION} → v${PLUGIN_VERSION}. Rebuilding..."
   else
-    echo "autopilot CLI is up to date (v${INSTALLED_VERSION})."
+    echo "atelier CLI is up to date (v${INSTALLED_VERSION})."
     exit 0
   fi
 fi
@@ -78,21 +78,21 @@ if ! command -v cargo &> /dev/null; then
 fi
 
 # --- 5. 빌드 ---
-echo "Building autopilot CLI..."
+echo "Building atelier CLI..."
 cargo build --release --manifest-path "$CLI_DIR/Cargo.toml"
 
 # --- 6. 설치 ---
 mkdir -p "$INSTALL_DIR"
-cp "$CLI_DIR/target/release/autopilot" "$BINARY_PATH"
+cp "$CLI_DIR/target/release/$BINARY_NAME" "$BINARY_PATH"
 chmod +x "$BINARY_PATH"
 
 # --- 7. 설치 확인 ---
 if "$BINARY_PATH" --version &> /dev/null; then
   NEW_VERSION=$("$BINARY_PATH" --version 2>/dev/null | awk '{print $NF}')
   if [ "$ACTION" = "install" ]; then
-    echo "autopilot CLI installed successfully (v${NEW_VERSION})."
+    echo "atelier CLI installed successfully (v${NEW_VERSION})."
   else
-    echo "autopilot CLI updated successfully: v${INSTALLED_VERSION} → v${NEW_VERSION}."
+    echo "atelier CLI updated successfully: v${INSTALLED_VERSION} → v${NEW_VERSION}."
   fi
 else
   echo "ERROR: Installation verification failed." >&2
