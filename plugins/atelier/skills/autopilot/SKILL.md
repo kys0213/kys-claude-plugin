@@ -38,6 +38,7 @@ autopilot 은 worktree·병렬 dispatch·머지 조정을 **자체 서술하지 
 | `references/merge.md` | PR 분류·머지·문제 해결 | merge-prs |
 | `references/gap-watch.md` | spec↔code 갭 감시 + ledger 등록 + 역방향 갭 | gap-watch |
 | `references/qa-boost.md` | 변경 기반 테스트 커버리지 보강 | qa-boost |
+| `references/issue-label.md` | 이슈/PR 라벨 규칙·fingerprint 기반 중복 방지 | build-pipeline·ci·gap-watch·qa-boost 등 이슈 생성 단계 |
 | `references/ledger.md` | epic 선택 전략·task claim·디스패치·stale 회수 | work-ledger, stale-task-review |
 | `references/stagnation-redirect.md` | task 단위 정체 방어 (simhash/Jaccard → persona 재설정). PreToolUse hook(`protect-stagnation.sh`) 이 `autopilot check stagnation` exit 4/5 일 때 발동 | (hook 자동 트리거) |
 

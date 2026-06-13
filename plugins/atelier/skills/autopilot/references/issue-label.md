@@ -1,11 +1,6 @@
----
-name: issue-label
-description: GitHub 이슈/PR 생성 시 라벨 지정 규칙과 fingerprint 기반 중복 방지 컨벤션. 이슈를 생성하거나 라벨을 변경하는 모든 컴포넌트가 참조
-version: 1.1.0
-user-invocable: false
----
-
 # Issue Label & Dedup Convention
+
+> autopilot 파이프라인이 GitHub 이슈/PR 을 생성·라벨링할 때의 컨벤션. 이슈를 생성하는 autopilot reference·agent 가 로드한다.
 
 ## 라벨 체계
 

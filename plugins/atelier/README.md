@@ -13,10 +13,10 @@ spec 설계 → 리뷰 → 구현 → PR 머지까지의 전체 흐름을 하나
 | 기존 plugin | 동결 버전 | atelier 내 위치 |
 |---|---|---|
 | `git-utils` | 2.4.2 | `skills/git/`(+references), `cli/` (Rust 포팅) |
-| `github-autopilot` | 0.30.1 | `commands/autopilot/*`, `agents/autopilot/*`, `skills/issue-label/`, `skills/autopilot/`(+resilience·branch-sync·draft-branch→references), `cli/` |
+| `github-autopilot` | 0.30.1 | `commands/autopilot/*`, `agents/autopilot/*`, `skills/autopilot/`(+resilience·branch-sync·draft-branch·issue-label→references), `cli/` |
 | `spec-kit` | 0.7.1 | `agents/spec/*`, `skills/spec-write/`·`skills/spec-review/`(+issue-report·spec-criteria→references), `templates/spec/` |
 | `workflow-guide` | 0.6.0 | `agents/workflow/*`, `skills/{workflow,agent-design-principles}/`, `rules/` |
-| `coding-style` | 0.3.0 | `skills/coding-style/`, `templates/claude-md/` |
+| `coding-style` | 0.3.0 | `templates/claude-md/`, `hooks/suggest-simplify.sh` |
 | `orchestrator` | 0.2.0 | `skills/orchestrator/` |
 
 흡수된 6개 plugin은 **snapshot freeze** 됩니다 — 삭제하지 않고 동결 상태로 보존하며, 후속 개발은 atelier에서만 진행합니다. 마이그레이션 절차는 [`plans/atelier/03-migration.md`](../../plans/atelier/03-migration.md)를 참조하세요.

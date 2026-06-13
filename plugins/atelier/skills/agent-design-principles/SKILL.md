@@ -131,6 +131,38 @@ Skill 20개 → 시스템 프롬프트에 20개 description 상주 (과다)
 
 ---
 
+### 3.5 Skill vs Rule 경계 — 암묵지 vs 컨벤션
+
+같은 지식을 skill 로 둘지 rule 로 둘지 흔들리지 않도록, **무엇이 담겼나**로 가른다:
+
+| | skill | rule (`.claude/rules/`) |
+|---|---|---|
+| 본질 | 코드·문서만으로는 알 수 없는 **외부 지식·전문성(암묵지)** — "전문가는 이럴 때 이렇게 판단한다" | 이 프로젝트에 종속적이고 **언젠가 바뀌거나 사라질 컨벤션·규칙** |
+| 수명 | 프로젝트와 무관하게 durable | 프로젝트와 함께 늙고 사라짐 |
+| 발동 | 모델이 맥락에서 **로드할지 판단**(on-demand) | 파일 경로(`paths`)에 걸리면 **자동 주입**(강제) |
+| 예 | spec 갭 분석법, 위임/병렬화 판단, 설계 교리 | 커밋 형식, 라벨 규칙, 디렉터리 컨벤션 |
+
+판단 한 줄: **"코드를 읽어서 나오는가?"** 나오면 컨벤션(rule). 안 나오는 전문성이면 skill.
+
+**전문성이 이 프로젝트의 강제 컨벤션으로 굳을 때 (두 층 분리)** — 하나로 합치지 않는다:
+
+- **skill = 전문성("왜")의 단일 출처**. 교본·예제·판단 기준은 여기만 둔다.
+- **rule = 이 repo 의 얇은 결정체("무엇을")**. `paths` 로 강제하되 skill 을 **참조만** 하고 내용을 재서술하지 않는다.
+
+> ❌ 안티패턴: skill 의 교본을 rule 에 압축 복붙 → 두 곳이 따로 늙어(stale) 어긋난다. rule 은 "이 skill 을 따른다 + repo 특화 바인딩"만 담는다.
+
+**항상 적용되는 지식은 skill 이 아니다**: 코드 쓸 때마다 늘 적용돼야 하는 원칙(SOLID·design-first 등)은 on-demand 로드 대상이 아니라 **CLAUDE.md/rule(자동 주입)** 에 둔다. skill 슬롯은 *가끔* 맥락에서 끌어오는 지식에만 쓴다 (description 은 항상 컨텍스트를 점유하므로).
+
+### 3.6 진입점: Command vs user-invocable Skill
+
+사용자 진입점은 Command 와 user-invocable Skill 둘 다 될 수 있다. 가르는 기준은 **"모델이 자동 트리거해도 되나?"** 하나다:
+
+- **Command** (`commands/`): User 만 발동. 모델이 멋대로 실행하면 곤란한 것(비용·비가역·명시적 셋업). 예: setup, autopilot 데몬.
+- **user-invocable Skill** (`skills/`, `user-invocable: true`): User + 모델 맥락 자동 발동. 도메인이 맞으면 모델이 알아서 꺼내써야 하는 것. 예: git, interview, spec, workflow, orchestrator.
+- **Protocol Skill** (`skills/`, `user-invocable: false`): 단독 호출은 무의미하고 특정 커맨드/데몬이 내부 디스패치하는 절차 본문. 예: autopilot skill.
+
+---
+
 ### 4. MCP = Adapter Pattern
 
 **원칙**: 외부 시스템과의 인터페이스를 캡슐화.
