@@ -1,7 +1,8 @@
 ---
 name: coding-style
-user-invocable: false
 description: 코딩 스타일·컨벤션 원칙. 코드를 작성하거나 리뷰할 때 CLAUDE.md 코딩 원칙을 적용하거나, 변경 후 단순화(/simplify)를 제안할 때 사용합니다.
+version: 1.0.0
+user-invocable: false
 ---
 
 # coding-style

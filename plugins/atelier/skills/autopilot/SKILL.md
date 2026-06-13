@@ -1,7 +1,8 @@
 ---
 name: autopilot
-user-invocable: false
 description: 자율 개발 루프의 파이프라인 제어와 단계별 프로토콜. base 동기화·idle/capacity 판정·adaptive throttling·ledger 운영의 공통 규칙과, 이슈 구현(build)·CI 감시/수정·PR 머지·spec 갭 감시·QA 보강·ledger 운영·정체 방어의 절차를 담습니다. autopilot 진입점이 CronCreate/Monitor 로 이 skill 의 references 를 내부 디스패치합니다.
+version: 1.0.0
+user-invocable: false
 ---
 
 # autopilot

@@ -1,6 +1,6 @@
 ---
-name: setup
 description: atelier 통합 환경을 초기화합니다 (git / autopilot / style / workflow 모듈 선택 + 기존 hook 마이그레이션 + guard hook 관리)
+argument-hint: ""
 allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 ---
 

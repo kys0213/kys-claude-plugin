@@ -1,6 +1,7 @@
 ---
 name: spec-review
 description: 작성된 스펙 문서를 코드와 대조 분석하고 품질을 평가하는 스킬. "스펙 리뷰해줘", "spec↔code 갭 봐줘", "이 spec 들 검증", "스펙 품질 평가", "외부 spec 에 related_paths 주석" 같은 요청에 사용합니다. 슬래시로 직접 호출하거나 맥락에서 모델이 자동 호출합니다. 스펙 문서 작성은 `spec-write`, 설계 대화는 `interview` 스킬이 담당합니다. L1(관찰)→L2(종합)→audit(감사) 레이어로 file:line 인용 기반 분석.
+version: 1.0.0
 ---
 
 # spec-review

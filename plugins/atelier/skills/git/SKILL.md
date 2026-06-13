@@ -1,6 +1,7 @@
 ---
 name: git
 description: ALWAYS use this skill for ANY git-related task (commit, push, branch, PR, status, diff, log, conflict resolution, unresolved review followup, issue prioritization). Provides automatic quality validation and enforces project conventions. Use atelier git CLI for all operations.
+version: 1.0.0
 allowed-tools: Bash
 ---
 
