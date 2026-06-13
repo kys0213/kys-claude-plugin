@@ -73,7 +73,7 @@ A(cceptance)  — "완료" 판정 기준?
 
 | 대상 | interview 와의 차이 | 핸드오프 |
 |---|---|---|
-| `spec:design` | 분기는 **상태 기준**: 의도·요구사항이 아직 모호하면 interview, 의도는 합의됐고 아키텍처 구조(다중 컴포넌트)를 스펙 문서로 잡는 단계면 spec:design. interview 의 산출은 대화 내 합의(미니 명세·설계 요약), spec:design 의 산출은 스펙 문서 | brainstorm 중 아키텍처 규모로 판명되거나 설계의 문서 영속화가 필요하면 `spec:design` 으로 에스컬레이트. 역방향: spec:design 진입 시 의도가 아직 모호하면 interview 를 먼저 권한다 |
+| `spec:design` | 분기는 **상태 기준**: 의도·요구사항이 아직 모호하면 interview, 의도는 합의됐고 아키텍처 구조(다중 컴포넌트)를 잡는 단계면 spec:design. brainstorm 도 설계 문서를 산출하지만 **단일 작업 범위**이며 `related_paths` frontmatter 로 spec 스킬이 소비 가능한 형식으로 쓴다 | brainstorm 중 아키텍처/다중 컴포넌트 규모로 판명되면 `spec:design` 으로 에스컬레이트. 역방향: spec:design 진입 시 의도가 아직 모호하면 interview 를 먼저 권한다 |
 | Plan Mode | interview 는 *무엇을/왜*(의도). Plan Mode 는 *어떻게*(코드 변경 단계 설계) | quick/brainstorm 으로 의도가 확정되고 코드 변경이 필요하면 Plan Mode 로 넘긴다 |
 | `autopilot` | 자율 루프와 무관. interview 는 사람↔에이전트 대화 전용 | 해당 없음 |
 
@@ -82,8 +82,8 @@ A(cceptance)  — "완료" 판정 기준?
 | reference | 언제 로드 | 내용 |
 |---|---|---|
 | `references/grill.md` | 기존 plan/design 을 심문(`grill`)할 때 | 심문 지시문(설계 트리 가지별 해소·추천 답·한 번에 하나·코드 탐색 우선) + 종료/핸드오프 |
-| `references/brainstorm.md` | 무에서 설계(`brainstorm`)할 때 | 컨텍스트 탐색 → 명확화 질문 → 2–3 접근법 → 섹션별 설계 검증(+시각화 제안) → self-review → 승인 게이트 → 핸드오프 |
+| `references/brainstorm.md` | 무에서 설계(`brainstorm`)할 때 | 충실 포팅된 전체 플로우: HARD-GATE·"단순함" 안티패턴·task 체크리스트·스코프 분해 판정 → 명확화(객관식 선호) → 2–3 접근법 → 섹션별 설계(격리 설계·기존 코드 규율) → 설계 문서(related_paths)·self-review·사용자 리뷰 게이트 → Plan Mode 전환·시각 자료 |
 
 ## 출처
 
-`grill`/`brainstorm` 모드의 인터뷰·설계 게이트 개념은 [obra/superpowers](https://github.com/obra/superpowers) (MIT License, © 2025 Jesse Vincent) 의 `brainstorming`·`grill-me` 스킬에서 차용해 atelier 컨벤션·책임 경계에 맞게 재작성했습니다.
+`grill`/`brainstorm` 모드는 [obra/superpowers](https://github.com/obra/superpowers) (MIT License, © 2025 Jesse Vincent) 의 `grill-me`·`brainstorming` 스킬이 원본입니다. grill 은 원본 지시문을 보존했고, brainstorm 은 생태계 바인딩 4곳(writing-plans→Plan Mode, browser visual companion→AskUserQuestion·markdown 다이어그램, 체크리스트→TaskCreate, 문서 위치→프로젝트 spec 컨벤션)만 치환한 충실 포팅입니다. MIT 고지는 `references/brainstorm.md` 머리에 명시되어 있습니다.
