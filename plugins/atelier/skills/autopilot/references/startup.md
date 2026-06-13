@@ -45,7 +45,7 @@ autopilot preflight --autopilot-md github-autopilot.local.md --repo-root .
 `spec_paths`에 스펙 파일이 있으면, `gap-auditor` 에이전트를 **Spec Quality Grading 모드**로 호출하여 스펙 품질을 평가한다 (gap-auditor 는 `tools: []` 이므로 기준과 파일 내용을 프롬프트로 전달):
 
 전달 정보:
-- 평가 기준: `spec` skill 의 `references/quality-criteria.md` 본문 (4관점 체크리스트 + 등급 기준)
+- 평가 기준: `spec-review` skill 의 `references/quality-criteria.md` 본문 (4관점 체크리스트 + 등급 기준)
 - spec_files: `spec_paths`에서 `**/*.md`로 수집한 파일들의 경로 + 본문
 - spec_quality_threshold: 설정값 (기본: `"C"`)
 

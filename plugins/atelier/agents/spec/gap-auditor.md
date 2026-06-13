@@ -1,5 +1,5 @@
 ---
-description: (내부용) spec skill 이 호출하는 통합 감사 에이전트. L2 finding 의 인용 정확성 + 의미 적합성을 단일 게이트로 검증한다.
+description: (내부용) spec-review skill 이 호출하는 통합 감사 에이전트. L2 finding 의 인용 정확성 + 의미 적합성을 단일 게이트로 검증한다.
 model: sonnet
 tools: []
 ---
@@ -251,7 +251,7 @@ autopilot 의 Spec Quality Gate (autopilot skill `references/startup.md` §"Spec
 # Spec Quality Grading Request
 
 ## 평가 기준
-{spec skill references/quality-criteria.md 본문 — 4관점 체크리스트 + 점수·등급 기준}
+{spec-review skill references/quality-criteria.md 본문 — 4관점 체크리스트 + 점수·등급 기준}
 
 ## Spec Files
 
