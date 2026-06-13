@@ -83,7 +83,7 @@ atelier git reviews [pr-number]
 
 **출력 (JSON):** PR 제목, URL, 리뷰 쓰레드 목록
 
-> PR 번호 미지정 시 현재 브랜치의 PR 을 자동 감지한다. 결과 해석·후속 액션 제안은 `references/review-followup.md`.
+> PR 번호 미지정 시 현재 브랜치의 PR 을 자동 감지한다. 결과 해석·후속 액션(리뷰 정리) 제안은 git skill 이 직접 판단한다.
 
 ## 5. Tool Guard (branch 보호 · PR 중복)
 
