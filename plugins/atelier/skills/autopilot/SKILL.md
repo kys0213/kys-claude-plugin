@@ -1,7 +1,8 @@
 ---
 name: autopilot
-user-invocable: false
 description: 자율 개발 루프의 파이프라인 제어와 단계별 프로토콜. base 동기화·idle/capacity 판정·adaptive throttling·ledger 운영의 공통 규칙과, 이슈 구현(build)·CI 감시/수정·PR 머지·spec 갭 감시·QA 보강·ledger 운영·정체 방어의 절차를 담습니다. autopilot 진입점이 CronCreate/Monitor 로 이 skill 의 references 를 내부 디스패치합니다.
+version: 1.0.0
+user-invocable: false
 ---
 
 # autopilot
@@ -37,6 +38,7 @@ autopilot 은 worktree·병렬 dispatch·머지 조정을 **자체 서술하지 
 | `references/merge.md` | PR 분류·머지·문제 해결 | merge-prs |
 | `references/gap-watch.md` | spec↔code 갭 감시 + ledger 등록 + 역방향 갭 | gap-watch |
 | `references/qa-boost.md` | 변경 기반 테스트 커버리지 보강 | qa-boost |
+| `references/issue-label.md` | 이슈/PR 라벨 규칙·fingerprint 기반 중복 방지 | 이슈/PR 을 생성·라벨링하는 단계 (ci-watch·build-issues·branch-promoter 등) |
 | `references/ledger.md` | epic 선택 전략·task claim·디스패치·stale 회수 | work-ledger, stale-task-review |
 | `references/stagnation-redirect.md` | task 단위 정체 방어 (simhash/Jaccard → persona 재설정). PreToolUse hook(`protect-stagnation.sh`) 이 `autopilot check stagnation` exit 4/5 일 때 발동 | (hook 자동 트리거) |
 

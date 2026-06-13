@@ -210,7 +210,7 @@ LSP 사용 가능 시 workflow skill `references/codebase-detection.md` 의 LSP 
 | 상태 | 파일 | 비고 |
 |------|------|------|
 | 누락 | `service.md` | 서비스 레이어 규칙 없음 |
-| paths 미설정 | `coding-style.md` | 항상 로드됨 → paths 추가 권장 |
+| paths 미설정 | `naming.md` | 항상 로드됨 → paths 추가 권장 |
 ```
 
 ## Output

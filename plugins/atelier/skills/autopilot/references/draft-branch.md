@@ -137,7 +137,7 @@ git branch -D draft/issue-{N}
 
 ## GitHub 라벨 체계
 
-라벨 체계, 필수 규칙, fingerprint 기반 중복 방지는 **issue-label 스킬**을 참조한다.
+라벨 체계, 필수 규칙, fingerprint 기반 중복 방지는 **`references/issue-label.md`**를 참조한다.
 
 ## Draft Branch 금지 사항
 

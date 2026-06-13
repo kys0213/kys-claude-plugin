@@ -68,7 +68,7 @@ default branch 실패는 만성 CI 실패를 놓치지 않도록 7일 이내, no
 
 ### Step 3: 중복 이슈 필터링
 
-설정의 label_prefix 확인(기본 `autopilot:`). 각 실패를 **fingerprint 기반**으로 중복 확인 (issue-label 스킬 참조):
+설정의 label_prefix 확인(기본 `autopilot:`). 각 실패를 **fingerprint 기반**으로 중복 확인 (`references/issue-label.md` 참조):
 
 ```bash
 # fingerprint 형식: ci:{workflow}:{branch}:{failure_type}
@@ -178,7 +178,7 @@ autopilot stats show --command ci-watch
 
 ### ci-watch 원칙
 
-- issue-label 스킬의 라벨 필수 규칙·fingerprint 규칙을 따른다.
+- `references/issue-label.md` 의 라벨 필수 규칙·fingerprint 규칙을 따른다.
 - 토큰 최적화: MainAgent 는 CI 로그를 직접 읽지 않음. 모든 로그 분석은 ci-failure-analyzer 가 수행.
 - flaky test 와 실제 실패를 구분해 라벨링.
 - ledger 쓰기는 보조 observer — 실패가 issue 생성 결과를 무효화하지 않도록 `|| echo WARN ...` 로 격리 (Step 5c).

@@ -8,7 +8,7 @@
   "plugins": [
     {
       "category": "productivity",
-      "description": "통합 개발 워크플로우 — spec, git, autopilot, orchestrator, coding-style, workflow-guide 를 단일 책임 경계로 큐레이션",
+      "description": "통합 개발 워크플로우 — spec, git, autopilot, orchestrator, workflow 를 단일 책임 경계로 큐레이션",
       "keywords": [
         "atelier",
         "workflow",
