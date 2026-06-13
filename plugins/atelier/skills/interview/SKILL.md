@@ -25,13 +25,13 @@ version: 1.0.0
 
 ### 종료와 핸드오프
 
-모든 가지가 해소되면(또는 사용자가 충분하다고 하면) 합의된 결정 목록을 요약한다. 코드 변경이 필요하면 Plan Mode 로, 아키텍처 규모면 `spec:design` 으로 핸드오프한다. 합의 전에는 구현을 시작하지 않는다.
+모든 가지가 해소되면(또는 사용자가 충분하다고 하면) 합의된 결정 목록을 요약한다. 코드 변경이 필요하면 Plan Mode 로, 합의된 설계를 스펙 문서로 남겨야 하면 `spec` 의 `write` 로 핸드오프한다. 합의 전에는 구현을 시작하지 않는다.
 
 ## 책임 경계
 
 | 대상 | 차이 | 핸드오프 |
 |---|---|---|
-| `spec:design` | 의도·요구사항이 아직 모호하면 interview, 의도는 합의됐고 아키텍처 구조(다중 컴포넌트)를 잡는 단계면 spec:design. brainstorm 도 설계 문서를 산출하지만 **단일 작업 범위**이며 `related_paths` frontmatter 로 spec 스킬이 소비 가능한 형식으로 쓴다 | brainstorm 중 아키텍처/다중 컴포넌트 규모로 판명되면 `spec:design` 으로 에스컬레이트 |
+| `spec` | **대화 ≠ 문서**. interview 는 설계를 *대화로 합의*(brainstorm: 무에서 / grill: 기존 계획 도전)하고, spec(`write`)은 *합의된 설계를 스펙 문서로 형식화*(DESIGN/concerns/flows)하고 리뷰·갭 분석한다 | 합의된 설계를 장기 스펙 문서로 남길 땐 spec `write` 로, 단일 작업 구현은 Plan Mode 로 |
 | Plan Mode | interview 는 *무엇을/왜*(의도·설계 합의), Plan Mode 는 *어떻게*(코드 변경 단계) | 의도가 확정되고 코드 변경이 필요하면 Plan Mode 로 넘긴다 |
 | `autopilot` | 자율 루프와 무관, 사람↔에이전트 대화 전용 | 해당 없음 |
 
