@@ -1,89 +1,40 @@
 ---
 name: interview
-description: 작업 착수 전 의도·설계를 사람과 합의하는 인터뷰 메타스킬. "의도부터 확정하자", "grill me / 이 계획 심문해줘 / 스트레스 테스트", "같이 brainstorm 하자 / 설계 같이 잡자" 같은 요청에 사용합니다. 슬래시로 직접 호출하거나 모델이 모호한 요청을 감지하면 사용을 제안하며, quick(의도 확정)·grill(기존 계획 심문)·brainstorm(무에서 설계) 모드로 라우팅합니다.
+description: 작업 착수 전 계획·설계를 사람과 대화로 다지는 인터뷰 메타스킬. "grill me / 이 계획 심문해줘 / 스트레스 테스트해줘", "같이 brainstorm 하자 / 설계 같이 잡자 / 막연한데 방향 잡아줘" 같은 요청에 사용합니다. 슬래시로 직접 호출하거나 모델이 모호한 요청을 감지하면 사용을 제안합니다. 기본은 기존 계획을 심문(grill)하고, 무에서 설계를 시작할 땐 brainstorm 으로 전환합니다.
 version: 1.0.0
 ---
 
 # interview
 
-코드를 건드리기 **전에** 의도·제약·완료 기준을 사람과 합의해 오해와 오버엔지니어링을 차단하는 단일 진입점입니다. atelier 의 **설계 최우선(Design First)** 원칙을 대화 단계에서 강제합니다.
+코드를 건드리기 전에 계획·설계를 사람과 대화로 다진다. 두 모드가 있다.
 
-사용자가 interview 슬래시로 진입하거나 모델이 맥락에서 자동 호출하며, 자연어 의도를 분류해 아래 모드로 디스패치합니다.
-
-## 진입 라우팅 (의도 → 모드)
-
-| 사용자 의도 (예) | 모드 | 로드할 reference |
+| 의도 | 모드 | 동작 |
 |---|---|---|
-| "이거 정리/개선해줘"(모호), "뭐부터 할지 의도부터", 단발 작업 착수 | `quick` (기본) | (인라인) |
-| "grill me", "이 계획 심문해줘", "내 plan 스트레스 테스트", 기존 설계 검증 | `grill` | `references/grill.md` |
-| "같이 brainstorm", "설계 같이 잡자", "막연한데 방향 잡아줘", 무에서 설계 | `brainstorm` | `references/brainstorm.md` |
+| 이미 계획/설계/접근안이 있고 빈틈을 찾고 싶다 (기본) | grill | 아래 인라인 지시 |
+| 아직 구체안이 없어 무에서 설계를 시작한다 | brainstorm | `references/brainstorm.md` 로드 |
 
-입력 인자(대상 파일·기존 plan 경로 등)가 함께 오면 그대로 사용하고, 없으면 직접 묻습니다. 결정적 동작은 없으며 전부 **판단/대화**입니다.
+요청이 "막연한 아이디어 → 설계"면 brainstorm, "이 계획 검증/심문"이면 grill 이다. 헷갈리면 사용자에게 한 번 확인한다.
 
-## 공통 원칙 (3모드 공유)
+## grill (기본)
 
-1. **질문은 한 번에 하나씩** — 한꺼번에 쏟지 않는다. 답을 받아 다음 가지를 정한다.
-2. **각 질문마다 추천 답을 함께 제시** — 사용자가 0부터 생각하지 않게, "내 추천은 X (이유)" 형태로 default 를 제안.
-3. **코드베이스로 답할 수 있으면 질문하지 말고 탐색한다** — prior art·기존 컨벤션·영향 범위는 Grep/Read 로 직접 확인 후 사실로 제시. 사람의 시간은 *판단이 필요한 지점*에만 쓴다.
-4. **승인 전 구현 금지 (Hard Gate)** — 미니 명세/설계를 제시하고 사용자가 "go"(또는 승인)하기 전에는 코드 작성·스캐폴딩·파일 변경을 시작하지 않는다. 작업이 단순해 보여도 동일하게 적용한다.
+이 계획의 모든 측면에 대해 **공유된 이해에 도달할 때까지 집요하게 인터뷰하라**. 설계 트리의 각 가지를 내려가며, 결정 사이의 의존성을 하나씩 해소하라. 각 질문마다 추천 답을 함께 제시하라.
 
-## quick 모드 (기본) — RG-CN-A 의도 확정
+질문은 한 번에 하나씩만 하라.
 
-단발 작업의 의도를 3–5분 안에 확정한다. 아래 5개 축을 **순서대로, 한 번에 하나씩** 확인하되, 코드베이스로 답 가능한 항목은 먼저 탐색해 "내가 확인한 사실"로 제시하고 사용자에겐 판단만 요청한다.
+질문이 코드베이스 탐색으로 답해질 수 있다면, 묻지 말고 코드베이스를 탐색하라.
 
-```
-R(estate)     — 내가 이해한 요청 = ... (2~3 bullet 로 재진술)
-G(oal)        — 진짜 달성하려는 건? 왜 이걸 하는가
-C(onstraints) — 지켜야 할 컨벤션/제약? (있으면 코드베이스에서 먼저 탐색)
-N(on-goals)   — 명시적으로 안 건드릴 것?
-A(cceptance)  — "완료" 판정 기준?
-```
+### 종료와 핸드오프
 
-옵션 항목 (5축 사이의 고정 위치에 삽입):
-- **Prior art**: C(onstraints) 확인 **전에** 코드베이스를 직접 탐색해 비슷한 패턴을 사실로 제시 (질문 아님)
-- **Risk surface**: A(cceptance) 까지 끝난 **뒤**, 다중 해석·넓은 영향 같은 위험 신호가 남아 있으면 마지막 1회 "가장 위험한 오해 후보"를 확인
+모든 가지가 해소되면(또는 사용자가 충분하다고 하면) 합의된 결정 목록을 요약한다. 코드 변경이 필요하면 Plan Mode 로, 아키텍처 규모면 `spec:design` 으로 핸드오프한다. 합의 전에는 구현을 시작하지 않는다.
 
-### quick 산출물 — 5줄 미니 명세
-확인이 끝나면 아래를 출력하고 사용자의 "go" 를 기다린다.
+## 책임 경계
 
-```
-요청(R): ...
-목표(G): ...
-제약(C): ...
-비목표(N): ...
-완료(A): ...
-→ 이대로 진행할까요? ("go" 또는 수정사항)
-```
-
-## 자동 발동 트리거 (모델이 호출 제안)
-
-다음 신호 중 하나 이상이면 사용자에게 interview 사용을 **제안**한다 (강제하지 않음):
-- 동사가 추상적: "정리", "개선", "최적화", "리팩터"
-- 객체가 모호하거나 다중 해석 가능
-- 영향 범위가 5+ 파일로 추정됨
-- 새 기능/리팩터 키워드 + 컨벤션·제약 미언급
-
-## Skip 조건 (발동하지 않음)
-
-- 한 줄 수정, 오타, 단순 조회
-- 사용자가 "그냥 해" 류 빠른 진행을 명시
-- 이미 Plan Mode / `spec` 설계에 진입한 상태 (중복 게이트 방지)
-
-## 책임 경계 (중복 방지)
-
-| 대상 | interview 와의 차이 | 핸드오프 |
+| 대상 | 차이 | 핸드오프 |
 |---|---|---|
-| `spec:design` | 분기는 **상태 기준**: 의도·요구사항이 아직 모호하면 interview, 의도는 합의됐고 아키텍처 구조(다중 컴포넌트)를 잡는 단계면 spec:design. brainstorm 도 설계 문서를 산출하지만 **단일 작업 범위**이며 `related_paths` frontmatter 로 spec 스킬이 소비 가능한 형식으로 쓴다 | brainstorm 중 아키텍처/다중 컴포넌트 규모로 판명되면 `spec:design` 으로 에스컬레이트. 역방향: spec:design 진입 시 의도가 아직 모호하면 interview 를 먼저 권한다 |
-| Plan Mode | interview 는 *무엇을/왜*(의도). Plan Mode 는 *어떻게*(코드 변경 단계 설계) | quick/brainstorm 으로 의도가 확정되고 코드 변경이 필요하면 Plan Mode 로 넘긴다 |
-| `autopilot` | 자율 루프와 무관. interview 는 사람↔에이전트 대화 전용 | 해당 없음 |
-
-## references 로드 가이드
-
-| reference | 언제 로드 | 내용 |
-|---|---|---|
-| `references/grill.md` | 기존 plan/design 을 심문(`grill`)할 때 | 심문 지시문(설계 트리 가지별 해소·추천 답·한 번에 하나·코드 탐색 우선) + 종료/핸드오프 |
-| `references/brainstorm.md` | 무에서 설계(`brainstorm`)할 때 | 충실 포팅된 전체 플로우: HARD-GATE·"단순함" 안티패턴·task 체크리스트·스코프 분해 판정 → 명확화(객관식 선호) → 2–3 접근법 → 섹션별 설계(격리 설계·기존 코드 규율) → 설계 문서(related_paths)·self-review·사용자 리뷰 게이트 → Plan Mode 전환·시각 자료 |
+| `spec:design` | 의도·요구사항이 아직 모호하면 interview, 의도는 합의됐고 아키텍처 구조(다중 컴포넌트)를 잡는 단계면 spec:design. brainstorm 도 설계 문서를 산출하지만 **단일 작업 범위**이며 `related_paths` frontmatter 로 spec 스킬이 소비 가능한 형식으로 쓴다 | brainstorm 중 아키텍처/다중 컴포넌트 규모로 판명되면 `spec:design` 으로 에스컬레이트 |
+| Plan Mode | interview 는 *무엇을/왜*(의도·설계 합의), Plan Mode 는 *어떻게*(코드 변경 단계) | 의도가 확정되고 코드 변경이 필요하면 Plan Mode 로 넘긴다 |
+| `autopilot` | 자율 루프와 무관, 사람↔에이전트 대화 전용 | 해당 없음 |
 
 ## 출처
 
-`grill`/`brainstorm` 모드는 [obra/superpowers](https://github.com/obra/superpowers) (MIT License, © 2025 Jesse Vincent) 의 `grill-me`·`brainstorming` 스킬이 원본입니다. grill 은 원본 지시문을 보존했고, brainstorm 은 생태계 바인딩 4곳(writing-plans→Plan Mode, browser visual companion→AskUserQuestion·markdown 다이어그램, 체크리스트→TaskCreate, 문서 위치→프로젝트 spec 컨벤션)만 치환한 충실 포팅입니다. MIT 고지는 `references/brainstorm.md` 머리에 명시되어 있습니다.
+`grill`·`brainstorm` 은 [obra/superpowers](https://github.com/obra/superpowers) (MIT License, © 2025 Jesse Vincent) 의 `grill-me`·`brainstorming` 스킬이 원본입니다. grill 은 원본 지시문을 보존했고, brainstorm 은 생태계 바인딩 4곳(writing-plans→Plan Mode, browser visual companion→AskUserQuestion·markdown 다이어그램, 체크리스트→TaskCreate, 문서 위치→프로젝트 spec 컨벤션)만 치환한 충실 포팅입니다. MIT 고지는 `references/brainstorm.md` 머리에 명시되어 있습니다.
