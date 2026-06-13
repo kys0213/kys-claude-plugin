@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check-cli-version.sh — SessionStart hook
-# 세션 시작 시 autopilot CLI 버전이 plugin.json과 일치하는지 확인합니다.
+# 세션 시작 시 atelier CLI 버전이 plugin.json과 일치하는지 확인합니다.
 # 과거 버전이면 업데이트 안내를 출력합니다.
 #
 # 트리거: SessionStart
@@ -37,12 +37,12 @@ if [[ -z "$PLUGIN_VERSION" ]]; then
 fi
 
 # --- 설치된 CLI 버전 확인 ---
-if ! command -v autopilot &> /dev/null; then
-  echo "autopilot CLI가 설치되어 있지 않습니다. /atelier:setup 을 실행하여 설치하세요."
+if ! command -v atelier &> /dev/null; then
+  echo "atelier CLI가 설치되어 있지 않습니다. /atelier:setup 을 실행하여 설치하세요."
   exit 0
 fi
 
-INSTALLED_VERSION=$(autopilot --version 2>/dev/null | awk '{print $NF}' || echo "")
+INSTALLED_VERSION=$(atelier --version 2>/dev/null | awk '{print $NF}' || echo "")
 
 if [[ -z "$INSTALLED_VERSION" ]]; then
   exit 0
@@ -72,7 +72,7 @@ CMP=$?
 set -e
 
 if [[ "$CMP" -eq 2 ]]; then
-  echo "autopilot CLI 업데이트 필요: v${INSTALLED_VERSION} → v${PLUGIN_VERSION}. /atelier:setup 또는 bash ${PLUGIN_ROOT}/scripts/ensure-binary.sh 를 실행하세요."
+  echo "atelier CLI 업데이트 필요: v${INSTALLED_VERSION} → v${PLUGIN_VERSION}. /atelier:setup 또는 bash ${PLUGIN_ROOT}/scripts/ensure-binary.sh 를 실행하세요."
 fi
 
 exit 0
