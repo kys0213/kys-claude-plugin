@@ -31,6 +31,8 @@ Epic 2 ([#766](https://github.com/kys0213/kys-claude-plugin/issues/766))에서 c
 /atelier:spec        # 스펙 설계/리뷰/갭분석/주석/품질평가 — 자연어 의도로 디스패치
 /atelier:git         # git 워크플로우 (커밋·push·PR·충돌 해결·리뷰 정리·이슈 우선순위)
 /atelier:workflow    # 컨벤션 scaffold·.claude/rules 설계·설계 원칙 룰 설치·워크플로우 리뷰
+/atelier:orchestrator # 위임/병렬 분해·worktree 격리·머지 조정 (자율 모드 포함)
+/atelier:interview   # 계획 심문(grill)·무에서 설계(brainstorm)
 ```
 
 ### 유지 command (deliberate 진입점)
