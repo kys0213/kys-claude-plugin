@@ -2,10 +2,9 @@
 
 합의된 설계를 스펙 문서로 적는 절차와 형식. **설계를 생각하고 도전하며 합의에 이르는 대화는 `interview`(brainstorm: 무에서 설계 / grill: 기존 계획 심문)에서 끝낸다.** 여기서는 그 결과를 정해진 구조로 형식화한다 — `write`(Big Picture DESIGN.md)와 `write-detail`(컴포넌트/플로우 상세)이 이 컨벤션을 공유한다.
 
-## 진입 전 맥락 파악
+## 진입 전 맥락 파악 (write-detail)
 
-- **write (Big Picture)**: 합의된 설계 내용(또는 사용자가 제시한 방향)을 입력으로 받는다. 없으면 먼저 `interview` 로 설계를 합의하도록 안내한다.
-- **write-detail (컴포넌트/플로우)**: `spec/DESIGN.md` 또는 `**/DESIGN*.md` 를 Glob 으로 찾아 Read 한다. 없으면 AskUserQuestion: "Big Picture 스펙(DESIGN.md)을 찾을 수 없습니다. `write` 로 먼저 만들거나 기존 경로를 알려주세요." 기존 `spec/concerns/`·`spec/flows/` 및 관련 코드도 파악한다.
+`write-detail` 은 Big Picture 를 전제하므로 `spec/DESIGN.md`(또는 `**/DESIGN*.md`)를 Glob 으로 찾아 Read 한다. 없으면 AskUserQuestion 으로 `write` 를 먼저 만들거나 기존 경로를 확인하고, 기존 `spec/concerns/`·`spec/flows/` 및 관련 코드도 파악한다.
 
 ## 깊이 기준
 

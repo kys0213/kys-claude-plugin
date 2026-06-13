@@ -31,7 +31,5 @@ version: 1.0.0
 
 ## 공통 원칙
 
-- **합의 후 형식화** — 설계 자체는 interview 에서 합의한다. spec-write 는 합의된 내용을 구조화하며, 새로운 설계 결정을 임의로 내리지 않는다.
-- **최종 승인 전까지 파일 저장 안 함** — 내용을 제시하고 동의받은 뒤 Write.
-- **`related_paths` frontmatter 권장** — 후속 `spec-review` 가 코드 영역 매핑 Hint 로 사용한다. 확실한 경로만 적고, 신규라 코드가 없으면 비운다.
-- **깊이 분리** — Big Picture(DESIGN.md)는 컴포넌트 목록·책임·데이터 흐름까지, 상세(concerns/flows)는 인터페이스·핵심 로직(의사코드)·에러까지. 큰그림과 상세를 중복 기술하지 않는다.
+- **합의 후 형식화** — 설계 결정은 interview 에서 합의한다. spec-write 는 합의된 내용을 구조화할 뿐, 새 설계 결정을 임의로 내리지 않는다.
+- 작성 원칙(승인 전 저장 금지·`related_paths`·깊이 분리)과 출력 구조는 `references/authoring.md` 가 canonical 이다.
