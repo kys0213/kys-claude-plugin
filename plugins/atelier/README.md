@@ -14,7 +14,7 @@ spec 설계 → 리뷰 → 구현 → PR 머지까지의 전체 흐름을 하나
 |---|---|---|
 | `git-utils` | 2.4.2 | `skills/git/`(+references), `cli/` (Rust 포팅) |
 | `github-autopilot` | 0.30.1 | `commands/autopilot/*`, `agents/autopilot/*`, `skills/issue-label/`, `skills/autopilot/`(+resilience·branch-sync·draft-branch→references), `cli/` |
-| `spec-kit` | 0.7.1 | `agents/spec/*`, `skills/spec/`(+issue-report·spec-criteria→references), `templates/spec/` |
+| `spec-kit` | 0.7.1 | `agents/spec/*`, `skills/spec-write/`·`skills/spec-review/`(+issue-report·spec-criteria→references), `templates/spec/` |
 | `workflow-guide` | 0.6.0 | `agents/workflow/*`, `skills/{workflow,agent-design-principles}/`, `rules/` |
 | `coding-style` | 0.3.0 | `skills/coding-style/`, `templates/claude-md/` |
 | `orchestrator` | 0.2.0 | `skills/orchestrator/` |
@@ -73,7 +73,7 @@ atelier setup <module>
 
 > **현재 상태**: Epic 1 (consolidation) + Epic 2 (skill extraction) 완료.
 > 단일 `atelier` 바이너리가 `atelier autopilot <...>` / `atelier git <...>` 를 제공하고(582 tests green),
-> Fat Controller 14개가 관심사 skill(`spec`/`autopilot`/`git`) + `references/` 로 해체되었습니다.
+> Fat Controller 14개가 관심사 skill(`spec-write`/`spec-review`/`autopilot`/`git`) + `references/` 로 해체되었습니다.
 > 슬래시 표면은 capability 35개 → 관심사 단위로 수렴, 흡수 6개 plugin 은 snapshot freeze 보존.
 >
 > ⚠️ `gh` CLI 의존 git 명령(pr create, reviews, guard pr)은 mock 단위 테스트만 완료 —

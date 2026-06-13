@@ -25,13 +25,14 @@ version: 1.0.0
 
 ### 종료와 핸드오프
 
-모든 가지가 해소되면(또는 사용자가 충분하다고 하면) 합의된 결정 목록을 요약한다. 코드 변경이 필요하면 Plan Mode 로, 합의된 설계를 스펙 문서로 남겨야 하면 `spec` 의 `write` 로 핸드오프한다. 합의 전에는 구현을 시작하지 않는다.
+모든 가지가 해소되면(또는 사용자가 충분하다고 하면) 합의된 결정 목록을 요약한다. 코드 변경이 필요하면 Plan Mode 로, 합의된 설계를 스펙 문서로 남겨야 하면 `spec-write` 로 핸드오프한다. 합의 전에는 구현을 시작하지 않는다.
 
 ## 책임 경계
 
 | 대상 | 차이 | 핸드오프 |
 |---|---|---|
-| `spec` | **대화 ≠ 문서**. interview 는 설계를 *대화로 합의*(brainstorm: 무에서 / grill: 기존 계획 도전)하고, spec(`write`)은 *합의된 설계를 스펙 문서로 형식화*(DESIGN/concerns/flows)하고 리뷰·갭 분석한다 | 합의된 설계를 장기 스펙 문서로 남길 땐 spec `write` 로, 단일 작업 구현은 Plan Mode 로 |
+| `spec-write` | **대화 ≠ 문서**. interview 는 설계를 *대화로 합의*(brainstorm: 무에서 / grill: 기존 계획 도전)하고, `spec-write` 는 *합의된 설계를 스펙 문서로 형식화*(DESIGN/concerns/flows)한다 | 합의된 설계를 장기 스펙 문서로 남길 땐 `spec-write`, 단일 작업 구현은 Plan Mode 로 |
+| `spec-review` | 작성된 스펙을 *코드와 대조 분석*(L1/L2/audit)·품질 평가하는 단계. interview 의 설계 도전(grill)과 다른 활동 | 스펙 작성 후 코드 정합 확인이 필요하면 `spec-review` 로 |
 | Plan Mode | interview 는 *무엇을/왜*(의도·설계 합의), Plan Mode 는 *어떻게*(코드 변경 단계) | 의도가 확정되고 코드 변경이 필요하면 Plan Mode 로 넘긴다 |
 | `autopilot` | 자율 루프와 무관, 사람↔에이전트 대화 전용 | 해당 없음 |
 

@@ -1,5 +1,5 @@
 ---
-description: (내부용) spec skill 의 annotation reference 가 호출하는 1차 분석 에이전트. spec 본문에서 식별자/경로 패턴을 추출하고 프로젝트 디렉터리와 매칭하여 related_paths 후보를 추정한다.
+description: (내부용) spec-review skill 의 annotation reference 가 호출하는 1차 분석 에이전트. spec 본문에서 식별자/경로 패턴을 추출하고 프로젝트 디렉터리와 매칭하여 related_paths 후보를 추정한다.
 model: haiku
 tools: ["Read", "Glob", "Grep"]
 ---
