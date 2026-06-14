@@ -157,6 +157,22 @@ fn output<T: Serialize>(result: CmdResult<T>) -> i32 {
     }
 }
 
+/// Prints a successful scalar as a bare line (exit 0) or an error to stderr
+/// (exit 1). Unlike `output()`, emits no JSON — for single scalar values
+/// consumed by shells via `$(...)`, e.g. `default-branch`.
+fn output_plain(result: Result<String, String>) -> i32 {
+    match result {
+        Ok(value) => {
+            println!("{value}");
+            0
+        }
+        Err(e) => {
+            eprintln!("Error: {e}");
+            1
+        }
+    }
+}
+
 /// Parses `argv` (including the leading program name) with the git clap surface
 /// and runs the selected command, returning a process exit code.
 pub fn run_from<I, T>(argv: I) -> i32
@@ -246,20 +262,11 @@ pub fn run(cli: Cli) -> i32 {
             output(commands::reviews::run(&deps, &input))
         }
         Commands::DefaultBranch { project_dir } => {
-            // Bare-string output (not the `output()` JSON helper): the value is a
-            // single scalar consumed by `setup`'s `$(...)` and baked into the
-            // branch-guard hook config — token-minimal and shell-friendly.
-            let git = create_git_service(project_dir);
-            match git.detect_default_branch() {
-                Ok(branch) => {
-                    println!("{branch}");
-                    0
-                }
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    1
-                }
-            }
+            // Plain scalar via `output_plain` (not the `output()` JSON helper):
+            // consumed by setup's `$(...)` and baked into the branch-guard hook
+            // config. Uses the mutating `detect_default_branch()` so setup warms
+            // `origin/HEAD`; the guard uses the readonly variant at runtime (#779).
+            output_plain(create_git_service(project_dir).detect_default_branch())
         }
         Commands::Guard {
             target,

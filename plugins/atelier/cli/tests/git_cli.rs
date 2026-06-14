@@ -141,10 +141,10 @@ fn git_hook_register_then_list_roundtrip() {
         .stdout(predicate::str::contains("Stop").and(predicate::str::contains("bash hook.sh")));
 }
 
-/// Bare remote + local clone on `main` with `origin/HEAD` set, so the CLI can
-/// resolve a default branch. Mirrors `git_core_git.rs`'s setup; kept inline
-/// (2 call sites, below the rust-test.md factory-extraction threshold).
-fn repo_with_default_branch() -> (tempfile::TempDir, tempfile::TempDir) {
+/// Local repo with `origin/HEAD` → `main` set directly. No remote/commit/push
+/// needed: `detect_default_branch` resolves this via Method 1 (`symbolic-ref`
+/// read), which is all the bare-scalar output test asserts.
+fn repo_with_default_branch() -> tempfile::TempDir {
     use std::process::Command as Proc;
     fn run(args: &[&str], cwd: &std::path::Path) {
         let ok = Proc::new(args[0])
@@ -155,27 +155,8 @@ fn repo_with_default_branch() -> (tempfile::TempDir, tempfile::TempDir) {
             .success();
         assert!(ok, "command failed: {args:?}");
     }
-    let remote = tempfile::TempDir::new().unwrap();
-    run(&["git", "init", "--bare"], remote.path());
     let local = tempfile::TempDir::new().unwrap();
     run(&["git", "init", "-b", "main"], local.path());
-    run(&["git", "config", "user.email", "t@t.com"], local.path());
-    run(&["git", "config", "user.name", "t"], local.path());
-    run(&["git", "config", "commit.gpgsign", "false"], local.path());
-    std::fs::write(local.path().join("README.md"), "x").unwrap();
-    run(&["git", "add", "."], local.path());
-    run(&["git", "commit", "-m", "init"], local.path());
-    run(
-        &[
-            "git",
-            "remote",
-            "add",
-            "origin",
-            remote.path().to_str().unwrap(),
-        ],
-        local.path(),
-    );
-    run(&["git", "push", "-u", "origin", "main"], local.path());
     run(
         &[
             "git",
@@ -185,14 +166,14 @@ fn repo_with_default_branch() -> (tempfile::TempDir, tempfile::TempDir) {
         ],
         local.path(),
     );
-    (remote, local)
+    local
 }
 
 #[test]
 fn git_default_branch_prints_plain_name() {
     // Locks the deliberate contract: a bare scalar (`main\n`), NOT the JSON the
     // other subcommands emit — exact stdout match proves no braces/quotes.
-    let (_remote, local) = repo_with_default_branch();
+    let local = repo_with_default_branch();
     atelier()
         .args([
             "git",
