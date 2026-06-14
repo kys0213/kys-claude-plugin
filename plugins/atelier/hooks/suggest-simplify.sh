@@ -2,9 +2,14 @@
 # Stop hook: 코드/문서 변경이 있으면 /simplify 검토를 제안합니다.
 #
 # 동작:
+#   0. style 모듈 opt-in 확인 (~/.claude/CLAUDE.md 워터마크) — 없으면 종료
 #   1. git status --porcelain으로 작업 트리 변경사항 확인
 #   2. 변경된 파일이 있으면 /simplify 추천 메시지 출력
 #   3. 변경이 없으면 무출력 (exit 0)
+
+# plugin-declared 라 모든 세션에서 실행된다. style 모듈을 설치한 사용자
+# (~/.claude/CLAUDE.md 에 coding-style 워터마크가 병합됨)에게만 제안한다.
+grep -q '\[coding-style:begin\]' "${HOME}/.claude/CLAUDE.md" 2>/dev/null || exit 0
 
 # git repo가 아니면 종료
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0

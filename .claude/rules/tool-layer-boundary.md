@@ -54,12 +54,17 @@ atelier autopilot check stagnation              # stdin payload 해석
 
 - 등록 자체도 결정적 변환이므로 `atelier git hook register <type> <matcher> <command>`
   로 수행한다. LLM 이 `Write` 로 settings.json 을 직접 편집하지 않는다 (#762).
-- **plugin-declared hook**: setup·프로젝트 설정과 무관하게 플러그인 활성화만으로 모든
-  세션에 적용돼야 하는 config-free·non-blocking hook(예: `check-cli-version`)은
-  플러그인 루트의 `hooks/hooks.json` 에 리터럴 `${CLAUDE_PLUGIN_ROOT}` 로 선언한다.
-  이는 settings.json 편집이 아니므로 `hook register` 가 필요 없고, 활성 플러그인 버전
-  경로로 해석돼 frozen 이 없다. 반대로 프로젝트별 설정이나 차단(exit 2)이 필요한 hook
-  (guard 류)은 opt-in 이라 `hook register` 로 settings.json 에 등록한다.
+- **플러그인 번들 `.sh` hook 은 `hooks/hooks.json` 으로 선언한다 (setup-register 금지).**
+  슬래시 커맨드(`/atelier:setup`)는 로드 시점에 본문의 `${CLAUDE_PLUGIN_ROOT}` 를 *그때의*
+  버전 절대경로로 expand 한다 — 단일 따옴표도 못 막는다. 그래서 setup 이 `.sh` shim 을
+  `hook register` 로 등록하면 settings.json 에 버전 절대경로가 박혀 **업데이트마다 frozen**
+  된다(0.4.x 잔재의 원인). 반면 `hooks/hooks.json` 의 `${CLAUDE_PLUGIN_ROOT}` 는 Claude Code
+  가 hook **실행 시점**에 활성 버전으로 해석하므로 frozen 이 없다. 차단(exit 2) 여부와 무관하며,
+  모든 세션에 적용돼도 안전하도록 스크립트가 **self-gate**(config 파일 / 명령 패턴 / 워터마크)한다.
+- **예외 — setup 시점 값 주입이 필요한 hook**: git guard 처럼 `--default-branch <감지값>` 등
+  프로젝트별 값을 setup 이 1회 감지해 박아야 하는 hook 은 `hook register` 로 등록한다. 단
+  이때도 `.sh` 경로가 아니라 **CLI 커맨드 직접**(`atelier git guard ...`) 형태라 PATH 해석으로
+  버전 비의존이다.
 
 ## 판단 기준
 
@@ -67,7 +72,8 @@ atelier autopilot check stagnation              # stdin payload 해석
 |---|---|---|
 | 가드/카운트/파싱/포맷 | CLI 서브커맨드 | 동일 입력 → 동일 출력, 테스트 가능 |
 | 바이너리 보장·버전 확인 | shim (`.sh`) | 부트스트랩은 CLI 가 없을 때 동작해야 함 |
-| settings.json 편집 | `hook register` (CLI) | 결정적 변환, 경로 하드코딩 방지 |
+| 플러그인 번들 `.sh` hook 등록 | `hooks/hooks.json` (plugin-declared) | 실행 시점 `${CLAUDE_PLUGIN_ROOT}` 해석 → frozen 없음 |
+| setup 시점 값 주입 hook 등록 | `hook register` (CLI 커맨드 직접) | 프로젝트별 값 주입 필요, PATH 해석으로 버전 비의존 |
 
 헷갈리면 "두 번 호출해서 결과가 항상 같아야 하나?"를 묻는다. 같아야 하면 CLI,
 부트스트랩(바이너리가 아직 없을 수 있음)이면 shim.

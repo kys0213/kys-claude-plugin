@@ -13,6 +13,10 @@
 
 set -e
 
+# plugin-declared 라 모든 Bash 호출에서 실행된다. autopilot 프로젝트가 아니면
+# stdin·jq·정규식 전부 건너뛰고 즉시 종료 (stagnation 체크는 autopilot ledger 가 전제).
+[ -f "${CLAUDE_PROJECT_DIR:-.}/github-autopilot.local.md" ] || exit 0
+
 input=$(cat)
 
 # jq 부재 시 best-effort 통과 (가드가 머지 자체를 막지 않게)

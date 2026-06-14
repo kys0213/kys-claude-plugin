@@ -13,10 +13,9 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 > 등록은 LLM 이 settings.json 을 직접 편집하지 않고 **`atelier git hook register` CLI** 로 수행합니다
 > (`.claude/rules/tool-layer-boundary.md`). `--project-dir "$HOME"` 을 주면 `~/.claude/settings.json` 에 기록됩니다.
 
-등록되는 command 는 두 형태뿐입니다:
+setup 이 settings.json 에 등록하는 hook 은 **CLI 직접 호출 형태뿐**입니다 (`atelier git guard write ...` — 바이너리가 PATH 에서 해석되므로 버전 비의존). 이는 setup 시점에 프로젝트별 값(예: `--default-branch <감지값>`)을 주입해야 하기 때문입니다.
 
-- **CLI 직접 호출** (결정적 로직이 CLI 에 있는 hook): `atelier git guard write ...` — 바이너리가 PATH 에서 해석되므로 버전 비의존
-- **`${CLAUDE_PLUGIN_ROOT}` 리터럴 shim** (#776 에서 CLI 이전 예정인 `.sh` hook): 절대경로로 expand 하지 않고 리터럴 그대로 기록
+> 플러그인에 번들된 `.sh` hook(`check-cli-version`·`guard-pr-base`·`protect-stagnation`·`suggest-simplify`)은 setup 이 등록하지 않습니다 — 플러그인이 `hooks/hooks.json` 으로 직접 선언하고, 각 스크립트가 내부에서 self-gate(autopilot config / 명령 패턴 / style 워터마크)합니다. `${CLAUDE_PLUGIN_ROOT}` 가 hook 실행 시점에 활성 버전으로 해석돼 frozen 이 없습니다 (`.claude/rules/tool-layer-boundary.md`).
 
 ## Step 0 — atelier CLI 보장 (공통 선행)
 
@@ -29,9 +28,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 - plugin.json 버전과 설치된 `atelier --version` 을 SemVer 비교해 필요 시 빌드/설치합니다 (`~/.local/bin/atelier`)
 - 실패하면(cargo 부재 등) 이후 Step 을 진행하지 말고 에러를 안내합니다
 
-> CLI 버전 드리프트 알림(SessionStart)은 setup 이 등록하지 않습니다 — 플러그인이 `hooks/hooks.json` 으로
-> 직접 선언해 활성화 시 자동 적용됩니다(`${CLAUDE_PLUGIN_ROOT}` 해석으로 버전 frozen 없음). Step 0 이
-> *setup 시점* 바이너리를 보장하면, 그 hook 이 *이후 드리프트*를 알리는 한 쌍입니다.
+> Step 0 은 *setup 시점* 바이너리를 보장하고, plugin-declared SessionStart hook(`check-cli-version`)이
+> *이후 버전 드리프트*를 알립니다 — 둘이 한 쌍입니다.
 
 ## Step 1 — 설치 모듈 선택
 
@@ -90,17 +88,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 ## Step 2b — autopilot 모듈
 
 1. 프로젝트 설정 파일 `github-autopilot.local.md` 생성 (기존 스키마/경로 동일 — 호환).
-2. autopilot hook 2종 등록 — 로직이 아직 `.sh` 에 있으므로(#776 에서 CLI 이전 예정) `${CLAUDE_PLUGIN_ROOT}` 리터럴 shim 으로 기록 (버전 드리프트 알림 hook 은 setup 이 등록하지 않음 — Step 0 안내 참조, 플러그인이 `hooks/hooks.json` 으로 직접 선언):
-   ```bash
-   atelier git hook register PreToolUse "Bash" \
-     '${CLAUDE_PLUGIN_ROOT}/hooks/guard-pr-base.sh' --project-dir "$HOME"
 
-   atelier git hook register PreToolUse "Bash" \
-     '${CLAUDE_PLUGIN_ROOT}/hooks/protect-stagnation.sh' --project-dir "$HOME"
-   ```
-   > `PreToolUse`/`Bash` matcher 는 git 모듈의 commit guard 와 공유됩니다 — `hook register` 는 같은 matcher
-   > 그룹에 command 를 append 하므로 서로 덮어쓰지 않습니다.
-
+> autopilot hook(`guard-pr-base`·`protect-stagnation`)은 setup 이 등록하지 않습니다 — 플러그인이 `hooks/hooks.json` 으로 직접 선언하고, 두 스크립트가 `github-autopilot.local.md` 존재로 self-gate 합니다. 따라서 위 1번(config 파일 생성)만으로 활성화됩니다.
+>
 > autopilot SQLite store(ledger/task DB)는 기존 스키마/경로를 계승하므로 마이그레이션 불필요.
 
 ## Step 2c — workflow 모듈
@@ -114,11 +104,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 
 1. `~/.claude/CLAUDE.md` 에 코딩 원칙 템플릿 병합 (워터마크 기반 중복 확인 — 기존 coding-style 로직 동일):
    - 템플릿 원본: `${CLAUDE_PLUGIN_ROOT}/templates/claude-md/CLAUDE.md`
-2. Stop hook 등록:
-   ```bash
-   atelier git hook register Stop "*" \
-     '${CLAUDE_PLUGIN_ROOT}/hooks/suggest-simplify.sh' --project-dir "$HOME"
-   ```
+
+> `/simplify` 제안 Stop hook(`suggest-simplify`)은 setup 이 등록하지 않습니다 — 플러그인이 `hooks/hooks.json` 으로 직접 선언하고, 스크립트가 `~/.claude/CLAUDE.md` 의 `[coding-style:begin]` 워터마크로 self-gate 합니다. 따라서 위 1번(템플릿 병합)만으로 활성화됩니다.
 
 ## Step 3 — 기존 hook 마이그레이션 (frozen → atelier)
 
@@ -147,9 +134,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 | frozen 경로 | atelier 등록 command |
 |---|---|
 | `github-autopilot/hooks/check-cli-version.sh` | **제거만** (재등록 안 함) — 플러그인이 `hooks/hooks.json` 으로 직접 선언 |
-| `github-autopilot/hooks/guard-pr-base.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/guard-pr-base.sh` (리터럴) |
-| `github-autopilot/hooks/protect-stagnation.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/protect-stagnation.sh` (리터럴) |
-| `coding-style/hooks/suggest-simplify.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/suggest-simplify.sh` (리터럴) |
+| `github-autopilot/hooks/guard-pr-base.sh` | **제거만** (재등록 안 함) — 플러그인이 `hooks/hooks.json` 으로 직접 선언 |
+| `github-autopilot/hooks/protect-stagnation.sh` | **제거만** (재등록 안 함) — 플러그인이 `hooks/hooks.json` 으로 직접 선언 |
+| `coding-style/hooks/suggest-simplify.sh` | **제거만** (재등록 안 함) — 플러그인이 `hooks/hooks.json` 으로 직접 선언 |
 | `git-utils/scripts/default-branch-guard-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard write ...` (§"git 모듈" 등록 형식) |
 | `git-utils/scripts/default-branch-guard-commit-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard commit ...` (§"git 모듈" 등록 형식) |
 
