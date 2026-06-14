@@ -199,8 +199,8 @@ SubAgent (별도 Context):
 # Bad: LLM이 매번 컨벤션을 해석하며 토큰 소비
 "브랜치명은 feat/ 접두사를 쓰고, 소문자 kebab-case로..."
 
-# Good: 스크립트가 컨벤션을 캡슐화
-bash scripts/create-branch.sh feat my-feature
+# Good: CLI 가 컨벤션을 캡슐화
+atelier git branch feat/my-feature
 # LLM은 결과만 확인
 ```
 
@@ -284,8 +284,8 @@ TODO: 리팩토링 필요한 파일 목록...
 # Bad: 브랜치 이름 규칙을 매번 LLM이 해석
 "브랜치명은 type/description 형식이고, type은 feat, fix, refactor 중 하나..."
 
-# Good: 스크립트로 캡슐화
-bash scripts/create-branch.sh $TYPE $DESCRIPTION
+# Good: CLI 로 캡슐화
+atelier git branch $TYPE/$DESCRIPTION
 ```
 
 ---

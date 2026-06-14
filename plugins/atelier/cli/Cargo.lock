@@ -105,7 +105,7 @@ dependencies = [
 
 [[package]]
 name = "atelier"
-version = "0.4.3"
+version = "0.5.2"
 dependencies = [
  "anyhow",
  "assert_cmd",

@@ -14,7 +14,7 @@ fn base_input() -> GuardInput {
     GuardInput {
         target: GuardTarget::Write { file_path: None },
         project_dir: "/tmp/test".to_string(),
-        create_branch_script: "./create-branch.sh".to_string(),
+        create_branch_script: "atelier git branch".to_string(),
         default_branch: None,
         protected_branches: None,
     }
@@ -83,6 +83,19 @@ fn default_branch_develop_blocked() {
 }
 
 #[test]
+fn empty_default_branch_falls_back_to_detection() {
+    // A setup that detected nothing must not bake `""` as the protected branch —
+    // empty is treated as absence, so the guard falls back to readonly detection
+    // and still blocks the real default (MockGit default: current + detect = main).
+    let mut input = base_input();
+    input.default_branch = Some(String::new());
+    assert!(
+        !check(MockGit::default(), &input).allowed,
+        "empty --default-branch must not bypass protection on the real default branch"
+    );
+}
+
+#[test]
 fn develop_protected_even_when_default_is_main() {
     let mut git = MockGit::default();
     git.get_current_branch = Box::new(|| "develop".to_string());
@@ -138,7 +151,7 @@ fn write_block_reason_mentions_action_and_script() {
     let out = check(MockGit::default(), &base_input());
     let reason = out.reason.unwrap();
     assert!(reason.contains("파일을 수정하려 합니다"));
-    assert!(reason.contains("./create-branch.sh"));
+    assert!(reason.contains("atelier git branch"));
 }
 
 #[test]

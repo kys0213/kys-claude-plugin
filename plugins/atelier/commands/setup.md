@@ -55,21 +55,28 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 3. **기본 브랜치 감지** — guard 는 읽기전용이라 비표준 기본 브랜치(예: `trunk`)를 런타임에 감지하지 못할 수 있으므로,
    1회성인 setup 시점에 full detection(set-head 포함)으로 감지해 주입합니다 (#785):
    ```bash
-   DEFAULT_BRANCH=$(bash "${CLAUDE_PLUGIN_ROOT}/scripts/detect-default-branch.sh")
+   # 실패(remote 없음 등)는 stderr 로 노출하되 setup 은 계속 진행 — 빈 값이면 아래에서 플래그를 생략
+   DEFAULT_BRANCH=$(atelier git default-branch || true)
    ```
-   감지 실패 시(remote 없음 등) `--default-branch` 를 생략하고 guard 의 런타임 감지에 맡깁니다.
-4. Default Branch Guard hook 2종 등록 — `.sh` 경로가 아니라 **CLI 커맨드를 직접** 기록합니다:
+   감지 실패 시(remote 없음 등) `--default-branch` 를 **생략**하고 guard 의 런타임 감지에 맡깁니다.
+4. Default Branch Guard hook 2종 등록 — `.sh` 경로가 아니라 **CLI 커맨드를 직접** 기록합니다.
+   감지값이 비어있으면 `--default-branch` 플래그 자체를 빼야 합니다 (빈 플래그를 박으면 hook 실행 시 clap 이
+   값 누락으로 exit 2 → 모든 편집 차단되거나, 빈 브랜치로 guard 가 무력화됨):
    ```bash
+   # 비어있으면 플래그 생략, 값이 있으면 ' --default-branch <값>' 만 덧붙임
+   DB_FLAG=""
+   [ -n "$DEFAULT_BRANCH" ] && DB_FLAG=" --default-branch $DEFAULT_BRANCH"
+
    atelier git hook register PreToolUse "Write|Edit" \
-     'atelier git guard write --project-dir "${CLAUDE_PROJECT_DIR:-.}" --default-branch '"${DEFAULT_BRANCH}" \
+     'atelier git guard write --project-dir "${CLAUDE_PROJECT_DIR:-.}"'"$DB_FLAG" \
      --project-dir "$HOME"
 
    atelier git hook register PreToolUse "Bash" \
-     'atelier git guard commit --project-dir "${CLAUDE_PROJECT_DIR:-.}" --default-branch '"${DEFAULT_BRANCH}" \
+     'atelier git guard commit --project-dir "${CLAUDE_PROJECT_DIR:-.}"'"$DB_FLAG" \
      --project-dir "$HOME"
    ```
    > `${CLAUDE_PROJECT_DIR:-.}` 는 **리터럴로 보존**해야 합니다 (hook 실행 시점에 셸이 expand).
-   > 반면 `${DEFAULT_BRANCH}` 는 setup 시점 감지값으로 expand 해서 기록합니다.
+   > 반면 `$DB_FLAG`(감지값) 는 setup 시점에 expand 해서 기록합니다 — 빈 값이면 플래그가 통째로 빠집니다.
 
    결과적으로 settings.json 에는 다음과 같이 기록됩니다:
    ```json

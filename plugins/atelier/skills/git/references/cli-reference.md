@@ -106,6 +106,18 @@ atelier git hook list [hookType] [--project-dir=<p>]
 
 ---
 
+## 7. 기본 브랜치 감지
+
+```bash
+atelier git default-branch [--project-dir=<p>]
+```
+
+**동작:** `origin/HEAD`(캐시) → `remote set-head --auto` → main/develop/master 순으로 감지 (set-head 포함 full detection).
+
+**출력:** 기본 브랜치 이름 **평문 한 줄** (JSON 아님 — `$(...)` 로 바로 소비). 감지 실패 시 stderr `Error:` + exit 1. setup 의 기본 브랜치 주입에 사용한다.
+
+---
+
 ## 워크플로우 예시
 
 ### Jira 티켓 작업 (feat/wad-0212)

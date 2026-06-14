@@ -191,12 +191,16 @@ impl GuardService for RealGuardService<'_> {
             return pass(Some("not a git repository"));
         }
 
-        // Resolve default branch.
-        let default_branch = match &input.default_branch {
-            Some(b) => b.clone(),
+        // Resolve default branch. An empty/whitespace value (e.g. a setup that
+        // detected nothing and recorded a bare `--default-branch`) is treated as
+        // absence — not a real branch named "" — so the guard falls back to
+        // detection and still protects the true default instead of silently
+        // protecting nothing.
+        let default_branch = match input.default_branch.as_deref().map(str::trim) {
+            Some(b) if !b.is_empty() => b.to_string(),
             // Read-only detection — the guard must not mutate repo state
             // (no `git remote set-head`) on every tool invocation (#779).
-            None => match self.git.detect_default_branch_readonly() {
+            _ => match self.git.detect_default_branch_readonly() {
                 Ok(b) => b,
                 Err(_) => return pass(Some("could not detect default branch")),
             },

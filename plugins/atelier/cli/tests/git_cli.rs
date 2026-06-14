@@ -140,3 +140,65 @@ fn git_hook_register_then_list_roundtrip() {
         .success()
         .stdout(predicate::str::contains("Stop").and(predicate::str::contains("bash hook.sh")));
 }
+
+/// Local repo with `origin/HEAD` → `main` set directly. No remote/commit/push
+/// needed: `detect_default_branch` resolves this via Method 1 (`symbolic-ref`
+/// read), which is all the bare-scalar output test asserts.
+fn repo_with_default_branch() -> tempfile::TempDir {
+    use std::process::Command as Proc;
+    fn run(args: &[&str], cwd: &std::path::Path) {
+        let ok = Proc::new(args[0])
+            .args(&args[1..])
+            .current_dir(cwd)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "command failed: {args:?}");
+    }
+    let local = tempfile::TempDir::new().unwrap();
+    run(&["git", "init", "-b", "main"], local.path());
+    run(
+        &[
+            "git",
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ],
+        local.path(),
+    );
+    local
+}
+
+#[test]
+fn git_default_branch_prints_plain_name() {
+    // Locks the deliberate contract: a bare scalar (`main\n`), NOT the JSON the
+    // other subcommands emit — exact stdout match proves no braces/quotes.
+    let local = repo_with_default_branch();
+    atelier()
+        .args([
+            "git",
+            "default-branch",
+            "--project-dir",
+            local.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout("main\n");
+}
+
+#[test]
+fn git_default_branch_no_remote_errors() {
+    // No remote → detection exhausts all methods → handled error on stderr, exit 1
+    // (so setup omits `--default-branch` and falls back to the guard's runtime detection).
+    let tmp = tempfile::TempDir::new().unwrap();
+    atelier()
+        .args([
+            "git",
+            "default-branch",
+            "--project-dir",
+            tmp.path().to_str().unwrap(),
+        ])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("Error:"));
+}
