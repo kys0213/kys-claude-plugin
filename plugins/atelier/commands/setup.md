@@ -29,19 +29,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 - plugin.json 버전과 설치된 `atelier --version` 을 SemVer 비교해 필요 시 빌드/설치합니다 (`~/.local/bin/atelier`)
 - 실패하면(cargo 부재 등) 이후 Step 을 진행하지 말고 에러를 안내합니다
 
-## Step 0b — CLI 버전 드리프트 알림 hook (공통)
-
-Step 0 은 **setup 시점**의 바이너리만 보장합니다. 이후 플러그인이 업데이트되면 설치본이 뒤처질 수 있으므로,
-세션 시작마다 드리프트를 알리는 SessionStart hook 을 등록합니다 (autopilot 여부와 무관 — atelier 를 쓰는 모든
-환경의 공통 CLI 라이프사이클 관심사). hook 은 atelier 미설치 시 무음이라 미사용 환경에 노이즈를 주지 않습니다:
-
-```bash
-atelier git hook register SessionStart "*" \
-  '${CLAUDE_PLUGIN_ROOT}/hooks/check-cli-version.sh' --project-dir "$HOME"
-```
-
-> `${CLAUDE_PLUGIN_ROOT}` 는 **리터럴로 보존**합니다 (hook 실행 시점에 활성 플러그인 버전 경로로 해석 →
-> 버전 업데이트마다 자동으로 최신 스크립트를 가리킴). 절대경로로 expand 하면 frozen 되어 드리프트를 못 잡습니다.
+> CLI 버전 드리프트 알림(SessionStart)은 setup 이 등록하지 않습니다 — 플러그인이 `hooks/hooks.json` 으로
+> 직접 선언해 활성화 시 자동 적용됩니다(`${CLAUDE_PLUGIN_ROOT}` 해석으로 버전 frozen 없음). Step 0 이
+> *setup 시점* 바이너리를 보장하면, 그 hook 이 *이후 드리프트*를 알리는 한 쌍입니다.
 
 ## Step 1 — 설치 모듈 선택
 
