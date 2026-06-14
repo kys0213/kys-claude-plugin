@@ -55,7 +55,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 3. **기본 브랜치 감지** — guard 는 읽기전용이라 비표준 기본 브랜치(예: `trunk`)를 런타임에 감지하지 못할 수 있으므로,
    1회성인 setup 시점에 full detection(set-head 포함)으로 감지해 주입합니다 (#785):
    ```bash
-   DEFAULT_BRANCH=$(bash "${CLAUDE_PLUGIN_ROOT}/scripts/detect-default-branch.sh")
+   DEFAULT_BRANCH=$(atelier git default-branch 2>/dev/null || true)
    ```
    감지 실패 시(remote 없음 등) `--default-branch` 를 생략하고 guard 의 런타임 감지에 맡깁니다.
 4. Default Branch Guard hook 2종 등록 — `.sh` 경로가 아니라 **CLI 커맨드를 직접** 기록합니다:

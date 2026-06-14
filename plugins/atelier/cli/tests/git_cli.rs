@@ -140,3 +140,84 @@ fn git_hook_register_then_list_roundtrip() {
         .success()
         .stdout(predicate::str::contains("Stop").and(predicate::str::contains("bash hook.sh")));
 }
+
+/// Bare remote + local clone on `main` with `origin/HEAD` set, so the CLI can
+/// resolve a default branch. Mirrors `git_core_git.rs`'s setup; kept inline
+/// (2 call sites, below the rust-test.md factory-extraction threshold).
+fn repo_with_default_branch() -> (tempfile::TempDir, tempfile::TempDir) {
+    use std::process::Command as Proc;
+    fn run(args: &[&str], cwd: &std::path::Path) {
+        let ok = Proc::new(args[0])
+            .args(&args[1..])
+            .current_dir(cwd)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "command failed: {args:?}");
+    }
+    let remote = tempfile::TempDir::new().unwrap();
+    run(&["git", "init", "--bare"], remote.path());
+    let local = tempfile::TempDir::new().unwrap();
+    run(&["git", "init", "-b", "main"], local.path());
+    run(&["git", "config", "user.email", "t@t.com"], local.path());
+    run(&["git", "config", "user.name", "t"], local.path());
+    run(&["git", "config", "commit.gpgsign", "false"], local.path());
+    std::fs::write(local.path().join("README.md"), "x").unwrap();
+    run(&["git", "add", "."], local.path());
+    run(&["git", "commit", "-m", "init"], local.path());
+    run(
+        &[
+            "git",
+            "remote",
+            "add",
+            "origin",
+            remote.path().to_str().unwrap(),
+        ],
+        local.path(),
+    );
+    run(&["git", "push", "-u", "origin", "main"], local.path());
+    run(
+        &[
+            "git",
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ],
+        local.path(),
+    );
+    (remote, local)
+}
+
+#[test]
+fn git_default_branch_prints_plain_name() {
+    // Locks the deliberate contract: a bare scalar (`main\n`), NOT the JSON the
+    // other subcommands emit — exact stdout match proves no braces/quotes.
+    let (_remote, local) = repo_with_default_branch();
+    atelier()
+        .args([
+            "git",
+            "default-branch",
+            "--project-dir",
+            local.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout("main\n");
+}
+
+#[test]
+fn git_default_branch_no_remote_errors() {
+    // No remote → detection exhausts all methods → handled error on stderr, exit 1
+    // (so setup omits `--default-branch` and falls back to the guard's runtime detection).
+    let tmp = tempfile::TempDir::new().unwrap();
+    atelier()
+        .args([
+            "git",
+            "default-branch",
+            "--project-dir",
+            tmp.path().to_str().unwrap(),
+        ])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("Error:"));
+}

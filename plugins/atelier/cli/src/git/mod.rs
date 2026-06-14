@@ -13,7 +13,7 @@ pub mod types;
 
 use crate::git::commands::guard::{GuardTargetKind, HookPayload};
 use crate::git::commands::hook::{create_hook_command, HookFs};
-use crate::git::core::git::create_git_service;
+use crate::git::core::git::{create_git_service, GitService};
 use crate::git::core::github::create_github_service;
 use crate::git::core::guard::create_guard_service;
 use crate::git::core::jira::create_jira_service;
@@ -68,6 +68,11 @@ pub enum Commands {
     },
     /// Query unresolved PR review threads
     Reviews { pr_number: Option<i64> },
+    /// Detect the repository's default branch (prints the bare branch name)
+    DefaultBranch {
+        #[arg(long = "project-dir")]
+        project_dir: Option<String>,
+    },
     /// Tool guard (Claude hook): branch protection or PR duplicate check
     Guard {
         /// write | commit | pr
@@ -239,6 +244,22 @@ pub fn run(cli: Cli) -> i32 {
             let deps = commands::reviews::ReviewsDeps { github: &github };
             let input = ReviewsInput { pr_number };
             output(commands::reviews::run(&deps, &input))
+        }
+        Commands::DefaultBranch { project_dir } => {
+            // Bare-string output (not the `output()` JSON helper): the value is a
+            // single scalar consumed by `setup`'s `$(...)` and baked into the
+            // branch-guard hook config — token-minimal and shell-friendly.
+            let git = create_git_service(project_dir);
+            match git.detect_default_branch() {
+                Ok(branch) => {
+                    println!("{branch}");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    1
+                }
+            }
         }
         Commands::Guard {
             target,
