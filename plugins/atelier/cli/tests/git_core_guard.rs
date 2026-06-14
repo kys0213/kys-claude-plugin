@@ -83,6 +83,19 @@ fn default_branch_develop_blocked() {
 }
 
 #[test]
+fn empty_default_branch_falls_back_to_detection() {
+    // A setup that detected nothing must not bake `""` as the protected branch —
+    // empty is treated as absence, so the guard falls back to readonly detection
+    // and still blocks the real default (MockGit default: current + detect = main).
+    let mut input = base_input();
+    input.default_branch = Some(String::new());
+    assert!(
+        !check(MockGit::default(), &input).allowed,
+        "empty --default-branch must not bypass protection on the real default branch"
+    );
+}
+
+#[test]
 fn develop_protected_even_when_default_is_main() {
     let mut git = MockGit::default();
     git.get_current_branch = Box::new(|| "develop".to_string());
