@@ -1,23 +1,14 @@
 #!/usr/bin/env bash
 # check-cli-version.sh — SessionStart hook
-# 세션 시작 시 atelier CLI 버전이 plugin.json과 일치하는지 확인합니다.
-# 과거 버전이면 업데이트 안내를 출력합니다.
+# 세션 시작 시 설치된 atelier CLI 버전이 활성 플러그인 버전과 일치하는지 확인합니다.
 #
-# 트리거: SessionStart
+# 트리거: SessionStart (글로벌 등록 — atelier 설치 여부로 스스로 판단)
 # 동작:
-#   - autopilot 프로젝트가 아니면 → exit 0 (skip)
-#   - CLI 미설치 또는 과거 버전 → 안내 출력 후 exit 0
-#   - 최신 버전 → exit 0
+#   - atelier CLI 미설치 → exit 0 (무음 — atelier 미사용 환경 배려)
+#   - 설치 버전 < 플러그인 버전 → 업데이트 안내 한 줄 출력 후 exit 0
+#   - 최신/상위 버전 → exit 0 (무음)
 
 set -euo pipefail
-
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
-CONFIG_FILE="${PROJECT_DIR}/github-autopilot.local.md"
-
-# autopilot 프로젝트가 아니면 skip
-if [[ ! -f "$CONFIG_FILE" ]]; then
-  exit 0
-fi
 
 # stdin 소비 (SessionStart hook은 session info를 stdin으로 받음)
 cat > /dev/null
@@ -36,9 +27,8 @@ if [[ -z "$PLUGIN_VERSION" ]]; then
   exit 0
 fi
 
-# --- 설치된 CLI 버전 확인 ---
+# --- 설치된 CLI 버전 확인 (미설치면 무음 skip — atelier 미사용 환경) ---
 if ! command -v atelier &> /dev/null; then
-  echo "atelier CLI가 설치되어 있지 않습니다. /atelier:setup 을 실행하여 설치하세요."
   exit 0
 fi
 
