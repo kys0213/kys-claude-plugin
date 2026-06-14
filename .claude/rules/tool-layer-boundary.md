@@ -54,6 +54,12 @@ atelier autopilot check stagnation              # stdin payload 해석
 
 - 등록 자체도 결정적 변환이므로 `atelier git hook register <type> <matcher> <command>`
   로 수행한다. LLM 이 `Write` 로 settings.json 을 직접 편집하지 않는다 (#762).
+- **plugin-declared hook**: setup·프로젝트 설정과 무관하게 플러그인 활성화만으로 모든
+  세션에 적용돼야 하는 config-free·non-blocking hook(예: `check-cli-version`)은
+  플러그인 루트의 `hooks/hooks.json` 에 리터럴 `${CLAUDE_PLUGIN_ROOT}` 로 선언한다.
+  이는 settings.json 편집이 아니므로 `hook register` 가 필요 없고, 활성 플러그인 버전
+  경로로 해석돼 frozen 이 없다. 반대로 프로젝트별 설정이나 차단(exit 2)이 필요한 hook
+  (guard 류)은 opt-in 이라 `hook register` 로 settings.json 에 등록한다.
 
 ## 판단 기준
 
