@@ -90,7 +90,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 ## Step 2b — autopilot 모듈
 
 1. 프로젝트 설정 파일 `github-autopilot.local.md` 생성 (기존 스키마/경로 동일 — 호환).
-2. autopilot hook 2종 등록 — 로직이 아직 `.sh` 에 있으므로(#776 에서 CLI 이전 예정) `${CLAUDE_PLUGIN_ROOT}` 리터럴 shim 으로 기록 (버전 드리프트 알림 hook 은 Step 0b 에서 공통 등록):
+2. autopilot hook 2종 등록 — 로직이 아직 `.sh` 에 있으므로(#776 에서 CLI 이전 예정) `${CLAUDE_PLUGIN_ROOT}` 리터럴 shim 으로 기록 (버전 드리프트 알림 hook 은 setup 이 등록하지 않음 — Step 0 안내 참조, 플러그인이 `hooks/hooks.json` 으로 직접 선언):
    ```bash
    atelier git hook register PreToolUse "Bash" \
      '${CLAUDE_PLUGIN_ROOT}/hooks/guard-pr-base.sh' --project-dir "$HOME"
@@ -135,7 +135,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 4. 사용자에게 치환 목록을 보여주고 AskUserQuestion 으로 확인
 5. 매칭 entry 마다: atelier git hook unregister <type> <old-command> --project-dir "$HOME"
    → 아래 표의 대응 command 로 atelier git hook register (hook register 는 command 기준
-   중복 제거를 하므로 frozen + atelier 양쪽에 있던 hook 도 한 개만 남음)
+   중복 제거를 하므로 frozen + atelier 양쪽에 있던 hook 도 한 개만 남음).
+   단, 표에서 "제거만" 으로 표시된 hook 은 plugin-declared 로 대체됐으므로 unregister 만
+   하고 재등록하지 않는다 (재등록 시 hooks.json 선언과 SessionStart 이중 실행)
 ```
 
 > **멱등성**: 이미 atelier 로 재작성된 settings.json 에 재실행하면 변경 0건이어야 합니다.
@@ -144,7 +146,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 
 | frozen 경로 | atelier 등록 command |
 |---|---|
-| `github-autopilot/hooks/check-cli-version.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/check-cli-version.sh` (리터럴) |
+| `github-autopilot/hooks/check-cli-version.sh` | **제거만** (재등록 안 함) — 플러그인이 `hooks/hooks.json` 으로 직접 선언 |
 | `github-autopilot/hooks/guard-pr-base.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/guard-pr-base.sh` (리터럴) |
 | `github-autopilot/hooks/protect-stagnation.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/protect-stagnation.sh` (리터럴) |
 | `coding-style/hooks/suggest-simplify.sh` | `${CLAUDE_PLUGIN_ROOT}/hooks/suggest-simplify.sh` (리터럴) |

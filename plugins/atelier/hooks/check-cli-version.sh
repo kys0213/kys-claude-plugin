@@ -10,6 +10,10 @@
 
 set -euo pipefail
 
+# atelier 미설치 환경은 가장 싼 builtin 검사로 먼저 가른다 — 이 hook 은 모든 세션에서
+# 실행되므로(미설치가 다수), plugin.json 파싱·stdin 처리 전에 즉시 종료한다.
+command -v atelier &> /dev/null || exit 0
+
 # stdin 소비 (SessionStart hook은 session info를 stdin으로 받음)
 cat > /dev/null
 
@@ -27,11 +31,7 @@ if [[ -z "$PLUGIN_VERSION" ]]; then
   exit 0
 fi
 
-# --- 설치된 CLI 버전 확인 (미설치면 무음 skip — atelier 미사용 환경) ---
-if ! command -v atelier &> /dev/null; then
-  exit 0
-fi
-
+# --- 설치된 CLI 버전 확인 ---
 INSTALLED_VERSION=$(atelier --version 2>/dev/null | awk '{print $NF}' || echo "")
 
 if [[ -z "$INSTALLED_VERSION" ]]; then
