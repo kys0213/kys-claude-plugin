@@ -38,8 +38,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 | 선택 | 수행 동작 | 출처 |
 |---|---|---|
 | `git` | GitHub 인증 확인 + `~/.git-workflow-env` 생성 + Default Branch Guard hook | git-utils setup |
-| `autopilot` | `github-autopilot.local.md` 생성 + autopilot hook 3개 등록 | github-autopilot setup |
-| `style` | `~/.claude/CLAUDE.md` 코딩 원칙 + Stop hook 등록 | coding-style setup |
+| `autopilot` | `github-autopilot.local.md` 생성 (autopilot hook 은 plugin-declared, config 로 self-gate) | github-autopilot setup |
+| `style` | `~/.claude/CLAUDE.md` 코딩 원칙 병합 (Stop hook 은 plugin-declared, 워터마크로 self-gate) | coding-style setup |
 | `workflow` | `.claude/rules/agent-design-principles.md` 룰 설치 | workflow-guide install |
 | `all` | 위 네 가지 전부 | 신규 |
 
@@ -87,9 +87,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 
 ## Step 2b — autopilot 모듈
 
-1. 프로젝트 설정 파일 `github-autopilot.local.md` 생성 (기존 스키마/경로 동일 — 호환).
+프로젝트 설정 파일 `github-autopilot.local.md` 를 생성합니다 (기존 스키마/경로 동일 — 호환).
 
-> autopilot hook(`guard-pr-base`·`protect-stagnation`)은 setup 이 등록하지 않습니다 — 플러그인이 `hooks/hooks.json` 으로 직접 선언하고, 두 스크립트가 `github-autopilot.local.md` 존재로 self-gate 합니다. 따라서 위 1번(config 파일 생성)만으로 활성화됩니다.
+> autopilot hook(`guard-pr-base`·`protect-stagnation`)은 setup 이 등록하지 않습니다 — 플러그인이 `hooks/hooks.json` 으로 직접 선언하고, 두 스크립트가 `github-autopilot.local.md` 존재로 self-gate 합니다. 따라서 config 파일 생성만으로 활성화됩니다.
 >
 > autopilot SQLite store(ledger/task DB)는 기존 스키마/경로를 계승하므로 마이그레이션 불필요.
 
@@ -102,10 +102,11 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 
 ## Step 2d — style 모듈
 
-1. `~/.claude/CLAUDE.md` 에 코딩 원칙 템플릿 병합 (워터마크 기반 중복 확인 — 기존 coding-style 로직 동일):
-   - 템플릿 원본: `${CLAUDE_PLUGIN_ROOT}/templates/claude-md/CLAUDE.md`
+`~/.claude/CLAUDE.md` 에 코딩 원칙 템플릿을 병합합니다 (워터마크 기반 중복 확인 — 기존 coding-style 로직 동일):
 
-> `/simplify` 제안 Stop hook(`suggest-simplify`)은 setup 이 등록하지 않습니다 — 플러그인이 `hooks/hooks.json` 으로 직접 선언하고, 스크립트가 `~/.claude/CLAUDE.md` 의 `[coding-style:begin]` 워터마크로 self-gate 합니다. 따라서 위 1번(템플릿 병합)만으로 활성화됩니다.
+- 템플릿 원본: `${CLAUDE_PLUGIN_ROOT}/templates/claude-md/CLAUDE.md`
+
+> `/simplify` 제안 Stop hook(`suggest-simplify`)은 setup 이 등록하지 않습니다 — 플러그인이 `hooks/hooks.json` 으로 직접 선언하고, 스크립트가 `~/.claude/CLAUDE.md` 의 `[coding-style:begin]` 워터마크로 self-gate 합니다. 따라서 템플릿 병합만으로 활성화됩니다.
 
 ## Step 3 — 기존 hook 마이그레이션 (frozen → atelier)
 
