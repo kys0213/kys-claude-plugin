@@ -1,6 +1,6 @@
 ---
 name: grill
-description: 이미 있는 계획·설계·접근안의 빈틈을 대화로 찾아내는 심문 스킬. "이 계획 심문해줘 / grill me / 스트레스 테스트 해줘 / 이 설계 도전해줘 / 빈틈 찾아줘 / 가정 깨봐" 처럼 검토할 구체안이 이미 있을 때 사용합니다. 슬래시로 직접 호출하거나 모델이 미검증 계획을 감지하면 제안합니다. 아직 구체안이 없어 무에서 설계를 시작하는 요청은 `brainstorm` 스킬을 씁니다.
+description: Interview the user relentlessly about a plan or design until reaching shared understanding, resolving each branch of the decision tree. Use when user wants to stress-test a plan, get grilled on their design, or mentions "grill me".
 version: 1.0.0
 ---
 

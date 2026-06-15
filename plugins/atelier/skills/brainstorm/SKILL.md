@@ -1,6 +1,6 @@
 ---
 name: brainstorm
-description: 막연한 아이디어에서 출발해 대화로 완전한 설계와 스펙을 만들어내는 brainstorm 스킬. "같이 brainstorm 하자 / 설계 같이 잡자 / 막연한데 방향 잡아줘 / 무에서 시작하자 / 뭘 만들지부터 정하자" 처럼 아직 구체안이 없을 때 사용합니다. 슬래시로 직접 호출하거나 모델이 모호한 출발점을 감지하면 제안합니다. 이미 있는 계획·설계를 심문·검증하는 요청은 `grill` 스킬을 씁니다.
+description: You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.
 version: 1.0.0
 ---
 
