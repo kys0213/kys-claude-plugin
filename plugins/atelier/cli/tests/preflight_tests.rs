@@ -26,10 +26,6 @@ fn all_pass_returns_0() {
             "# Project\n├── src/\ncargo test\nconvention principle",
         )
         .with_file("/repo/.claude/rules/rust.md", "paths:\n  - \"src/\"")
-        .with_file(
-            "/repo/.claude/settings.local.json",
-            r#"{"hooks": "guard-pr-base"}"#,
-        )
         .with_file("config.local.md", config_content())
         .with_file("/repo/spec/auth.md", "# Auth spec");
 
@@ -105,7 +101,6 @@ fn partial_warn_returns_0() {
     // except: Git Remote check — MockGit has remote_url Ok by default → PASS
     // CLAUDE.md → WARN (missing file tree)
     // Rules → WARN (no dir)
-    // Hooks → WARN (no settings file)
     // Quality Gate → WARN (no config)
     // Spec files → WARN (no config)
     // gh auth → PASS
