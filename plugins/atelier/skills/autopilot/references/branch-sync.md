@@ -14,19 +14,17 @@ autopilot worktree cleanup-stale
 uncommitted changes는 partial commit으로 브랜치에 보존한 뒤 worktree만 제거한다.
 draft 브랜치 자체는 삭제하지 않으므로, 다음 cycle에서 이전 작업을 이어받을 수 있다.
 
-### 1. 설정 로딩
+### 1. Base 브랜치 결정
 
-`github-autopilot.local.md` frontmatter에서 `work_branch`와 `branch_strategy`를 읽는다.
+`github-autopilot.local.md` 의 `work_branch` > `branch_strategy` 규칙으로 base 브랜치를 결정한다. 이 결정적 계산은 CLI 단일 출처가 담당하며, 결과는 모든 하위 에이전트에 `base_branch` 입력으로 전달된다(에이전트는 재계산하지 않는다):
 
-### 2. Base 브랜치 결정
+```bash
+base_branch=$(atelier autopilot base-branch)
+```
 
-| 우선순위 | 조건 | base 브랜치 |
-|---------|------|------------|
-| 1 | `work_branch`가 설정됨 | `work_branch` 값 (예: `"alpha"`) |
-| 2 | `branch_strategy: "draft-develop-main"` | `develop` |
-| 3 | `branch_strategy: "draft-main"` 또는 기본값 | `main` |
+규칙(참고): `work_branch` 설정 시 그 값 / `branch_strategy: "draft-develop-main"` → `develop` / `"draft-main"`·미설정 → `main`.
 
-### 3. Fetch + Checkout + Pull
+### 2. Fetch + Checkout + Pull
 
 ```bash
 git fetch origin

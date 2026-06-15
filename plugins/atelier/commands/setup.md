@@ -15,7 +15,7 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 
 setup 이 settings.json 에 등록하는 hook 은 **CLI 직접 호출 형태뿐**입니다 (`atelier git guard write ...` — 바이너리가 PATH 에서 해석되므로 버전 비의존). 이는 setup 시점에 프로젝트별 값(예: `--default-branch <감지값>`)을 주입해야 하기 때문입니다.
 
-> 플러그인에 번들된 `.sh` hook(`check-cli-version`·`guard-pr-base`·`protect-stagnation`·`suggest-simplify`)은 플러그인이 `hooks/hooks.json` 으로 직접 선언합니다. 차단형(`guard-pr-base`·`protect-stagnation`)은 autopilot config·명령 패턴으로 self-gate 해 비대상 세션에서 no-op 이고, advisory형(`check-cli-version`·`suggest-simplify`)은 비차단이라 모든 세션에 적용돼도 안전합니다. `${CLAUDE_PLUGIN_ROOT}` 가 hook 실행 시점에 활성 버전으로 해석돼 frozen 이 없습니다 (`.claude/rules/tool-layer-boundary.md`).
+> 플러그인에 번들된 `.sh` hook(`check-cli-version`·`suggest-simplify`)은 플러그인이 `hooks/hooks.json` 으로 직접 선언합니다. 둘 다 비차단 advisory 라 모든 세션에 적용돼도 안전합니다. `${CLAUDE_PLUGIN_ROOT}` 가 hook 실행 시점에 활성 버전으로 해석돼 frozen 이 없습니다 (`.claude/rules/tool-layer-boundary.md`).
 
 ## Step 0 — atelier CLI 보장 (공통 선행)
 
@@ -115,7 +115,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
      .*/plugins/(github-autopilot|coding-style)/hooks/(<file>)\.sh
      .*/plugins/git-utils/scripts/(default-branch-guard.*)\.sh
      .*/plugins/atelier/scripts/(default-branch-guard.*)\.sh   # 구버전 atelier setup 잔재
-     .*/atelier/[^/]*/hooks/(check-cli-version|guard-pr-base|protect-stagnation|suggest-simplify)\.sh   # 구버전 atelier setup 이 frozen 버전경로로 박은 .sh shim (이제 plugin-declared → "제거만")
+     .*/atelier/[^/]*/hooks/(check-cli-version|guard-pr-base|protect-stagnation|suggest-simplify)\.sh   # 구버전 atelier setup 이 frozen 버전경로로 박은 .sh shim (이제 plugin-declared 또는 #776 에서 삭제됨 → "제거만")
 3. 변경 전 ~/.claude/settings.json 을 settings.json.bak-<timestamp> 로 백업 (cp)
 4. 사용자에게 치환 목록을 보여주고 AskUserQuestion 으로 확인
 5. 매칭 entry 마다: atelier git hook unregister <type> <old-command> --project-dir "$HOME"
@@ -132,8 +132,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 | frozen 경로 | atelier 등록 command |
 |---|---|
 | `github-autopilot/hooks/check-cli-version.sh` | **제거만** (재등록 안 함) — 플러그인이 `hooks/hooks.json` 으로 직접 선언 |
-| `github-autopilot/hooks/guard-pr-base.sh` | **제거만** (재등록 안 함) — 플러그인이 `hooks/hooks.json` 으로 직접 선언 |
-| `github-autopilot/hooks/protect-stagnation.sh` | **제거만** (재등록 안 함) — 플러그인이 `hooks/hooks.json` 으로 직접 선언 |
+| `github-autopilot/hooks/guard-pr-base.sh` | **제거만** (재등록 안 함) — 스크립트 삭제됨 (#776: base 계산은 `atelier autopilot base-branch` CLI 로 이전) |
+| `github-autopilot/hooks/protect-stagnation.sh` | **제거만** (재등록 안 함) — 스크립트 삭제됨 (#776) |
 | `coding-style/hooks/suggest-simplify.sh` | **제거만** (재등록 안 함) — 플러그인이 `hooks/hooks.json` 으로 직접 선언 |
 | `git-utils/scripts/default-branch-guard-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard write ...` (§"git 모듈" 등록 형식) |
 | `git-utils/scripts/default-branch-guard-commit-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard commit ...` (§"git 모듈" 등록 형식) |
