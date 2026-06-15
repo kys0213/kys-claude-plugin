@@ -32,7 +32,8 @@ Epic 2 ([#766](https://github.com/kys0213/kys-claude-plugin/issues/766))에서 c
 /atelier:git         # git 워크플로우 (커밋·push·PR·충돌 해결·리뷰 정리·이슈 우선순위)
 /atelier:workflow    # 컨벤션 scaffold·.claude/rules 설계·설계 원칙 룰 설치·워크플로우 리뷰
 /atelier:orchestrator # 위임/병렬 분해·worktree 격리·머지 조정 (자율 모드 포함)
-/atelier:interview   # 계획 심문(grill)·무에서 설계(brainstorm)
+/atelier:grill       # 이미 있는 계획·설계를 대화로 심문 (빈틈·가정 드러내기)
+/atelier:brainstorm  # 무에서 설계를 대화로 생성 (발산→수렴)
 ```
 
 ### 유지 command (deliberate 진입점)

@@ -1,6 +1,6 @@
 ---
 name: spec-review
-description: 작성된 스펙 문서를 코드와 대조 분석하고 품질을 평가하는 스킬. "스펙 리뷰해줘", "spec↔code 갭 봐줘", "이 spec 들 검증", "스펙 품질 평가", "외부 spec 에 related_paths 주석" 같은 요청에 사용합니다. 슬래시로 직접 호출하거나 맥락에서 모델이 자동 호출합니다. 스펙 문서 작성은 `spec-write`, 설계 대화는 `interview` 스킬이 담당합니다. L1(관찰)→L2(종합)→audit(감사) 레이어로 file:line 인용 기반 분석.
+description: 작성된 스펙 문서를 코드와 대조 분석하고 품질을 평가하는 스킬. "스펙 리뷰해줘", "spec↔code 갭 봐줘", "이 spec 들 검증", "스펙 품질 평가", "외부 spec 에 related_paths 주석" 같은 요청에 사용합니다. 슬래시로 직접 호출하거나 맥락에서 모델이 자동 호출합니다. 스펙 문서 작성은 `spec-write`, 설계 대화는 `brainstorm`(무에서 설계)·`grill`(기존 계획 심문) 스킬이 담당합니다. L1(관찰)→L2(종합)→audit(감사) 레이어로 file:line 인용 기반 분석.
 version: 1.0.0
 ---
 
@@ -8,7 +8,7 @@ version: 1.0.0
 
 작성된 스펙 문서를 **코드와 대조 분석·평가·주석**하는 스킬입니다. 사용자가 spec-review 슬래시로 진입하거나 모델이 맥락에서 자동 호출하며, 의도에 따라 아래 `references/` 로 디스패치합니다.
 
-> 스펙 문서를 **작성**하려면 `spec-write`, 설계를 **대화로 합의**하려면 `interview` 를 씁니다. spec-review 는 이미 존재하는 스펙을 분석하는 단계입니다.
+> 스펙 문서를 **작성**하려면 `spec-write`, 설계를 **대화로 합의**하려면 `brainstorm`(무에서 설계)·`grill`(기존 계획 심문)을 씁니다. spec-review 는 이미 존재하는 스펙을 분석하는 단계입니다.
 
 ## 진입 라우팅 (의도 → reference)
 

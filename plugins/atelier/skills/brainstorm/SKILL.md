@@ -1,9 +1,17 @@
-# interview — brainstorm 모드
+---
+name: brainstorm
+description: 막연한 아이디어에서 출발해 대화로 완전한 설계와 스펙을 만들어내는 brainstorm 스킬. "같이 brainstorm 하자 / 설계 같이 잡자 / 막연한데 방향 잡아줘 / 무에서 시작하자 / 뭘 만들지부터 정하자" 처럼 아직 구체안이 없을 때 사용합니다. 슬래시로 직접 호출하거나 모델이 모호한 출발점을 감지하면 제안합니다. 이미 있는 계획·설계를 심문·검증하는 요청은 `grill` 스킬을 씁니다.
+version: 1.0.0
+---
+
+# brainstorm
 
 > Adapted from [obra/superpowers](https://github.com/obra/superpowers) `brainstorming` skill — MIT License, © 2025 Jesse Vincent.
 > 생태계 바인딩 4곳만 atelier 로 치환: writing-plans → Plan Mode / browser visual companion → AskUserQuestion·markdown 다이어그램 / 체크리스트 → TaskCreate / 문서 위치 → 프로젝트 spec 컨벤션.
 
 아이디어를 자연스러운 협업 대화를 통해 완전한 설계와 스펙으로 발전시킨다. 현재 프로젝트 컨텍스트를 이해하는 데서 출발해, 질문을 한 번에 하나씩 던져 아이디어를 다듬는다. 무엇을 만드는지 이해되면 설계를 제시하고 사용자 승인을 받는다.
+
+이 스킬은 **무에서 설계를 만드는** 발산→수렴 활동이다. 이미 손에 든 계획·설계가 있고 그 빈틈을 찾고 싶다면 이 스킬이 아니라 `grill` 스킬을 쓴다 — brainstorm 이 설계를 만든 뒤 그 설계를 심문하고 싶을 때 `grill` 로 핸드오프한다.
 
 <HARD-GATE>
 설계를 제시하고 사용자가 승인하기 전까지는 어떤 구현 스킬도 호출하지 말고, 코드를 쓰지 말고, 프로젝트를 스캐폴딩하지 말고, 어떤 구현 행동도 하지 마라. 체감 난이도와 무관하게 모든 프로젝트에 적용된다.
@@ -59,7 +67,7 @@ digraph brainstorming {
 }
 ```
 
-**종착 상태는 Plan Mode 진입이다.** 다른 어떤 구현 스킬도 호출하지 않는다. brainstorm 이후의 유일한 다음 단계는 Plan Mode 다.
+**종착 상태는 Plan Mode 진입이다.** 다른 어떤 구현 스킬도 호출하지 않는다. brainstorm 이후의 유일한 다음 단계는 Plan Mode 다. (만든 설계를 심문하고 싶으면 `grill` 로 핸드오프한 뒤 Plan Mode 로 간다.)
 
 ## 프로세스
 
