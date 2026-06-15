@@ -119,6 +119,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
      .*/plugins/(github-autopilot|coding-style)/hooks/(<file>)\.sh
      .*/plugins/git-utils/scripts/(default-branch-guard.*)\.sh
      .*/plugins/atelier/scripts/(default-branch-guard.*)\.sh   # 구버전 atelier setup 잔재
+     .*/atelier/[^/]*/hooks/(check-cli-version|guard-pr-base|protect-stagnation|suggest-simplify)\.sh   # 구버전 atelier setup 이 frozen 버전경로로 박은 .sh shim (이제 plugin-declared → "제거만")
 3. 변경 전 ~/.claude/settings.json 을 settings.json.bak-<timestamp> 로 백업 (cp)
 4. 사용자에게 치환 목록을 보여주고 AskUserQuestion 으로 확인
 5. 매칭 entry 마다: atelier git hook unregister <type> <old-command> --project-dir "$HOME"
