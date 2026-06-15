@@ -4,8 +4,8 @@
 //! original standalone `autopilot` binary.
 
 use crate::autopilot::cmd::{
-    CheckCommands, Cli, Commands, IssueCommands, ListArgs, PipelineCommands, PreflightArgs,
-    StatsCommands, TaskCommands, WorktreeCommands,
+    BaseBranchArgs, CheckCommands, Cli, Commands, IssueCommands, ListArgs, PipelineCommands,
+    PreflightArgs, StatsCommands, TaskCommands, WorktreeCommands,
 };
 use crate::autopilot::config::Config;
 use crate::autopilot::domain::{DomainError, UserInputError};
@@ -189,6 +189,13 @@ pub fn run(cli: Cli) -> i32 {
                 &autopilot_md,
                 Path::new(&repo_root),
             )
+        }
+        Commands::BaseBranch(BaseBranchArgs { project_dir }) => {
+            println!(
+                "{}",
+                crate::autopilot::autopilot_md::resolve_base_branch(Path::new(&project_dir))
+            );
+            Ok(0)
         }
         Commands::Task { command } => {
             let store = open_store(&config);

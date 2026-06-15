@@ -56,13 +56,10 @@ pub fn run(
     // B-1. gh auth
     check_gh_auth(gh, &mut results);
 
-    // B-2. Guard PR base hook
-    check_guard_hook(fs, repo_root, &mut results);
-
-    // B-3. Quality gate command
+    // B-2. Quality gate command
     check_quality_gate(fs, config_path, &mut results);
 
-    // B-4. Git remote
+    // B-3. Git remote
     check_git_remote(git, &mut results);
 
     // C. Spec files existence
@@ -175,23 +172,6 @@ fn check_gh_auth(gh: &dyn GhOps, results: &mut Vec<CheckResult>) {
     match gh.run(&["auth", "status"]) {
         Ok(_) => results.push(CheckResult::pass("gh auth", "authenticated")),
         Err(_) => results.push(CheckResult::fail("gh auth", "gh auth login required")),
-    }
-}
-
-fn check_guard_hook(fs: &dyn FsOps, repo_root: &Path, results: &mut Vec<CheckResult>) {
-    let settings = repo_root.join(".claude/settings.local.json");
-    if !fs.file_exists(&settings) {
-        results.push(CheckResult::warn("Hooks", "settings.local.json not found"));
-        return;
-    }
-
-    match fs.read_file(&settings) {
-        Ok(content) if content.contains("guard-pr-base") => {
-            results.push(CheckResult::pass("Hooks", "guard-pr-base registered"));
-        }
-        _ => {
-            results.push(CheckResult::warn("Hooks", "guard-pr-base hook not found"));
-        }
     }
 }
 

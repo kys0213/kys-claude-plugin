@@ -121,10 +121,7 @@ git checkout -b feature/issue-{N} draft/issue-{N}
 # 2. remote push
 git push -u origin feature/issue-{N}
 
-# 3. PR 생성 (base 브랜치 결정: work_branch > branch_strategy)
-#    work_branch 설정 시:  --base {work_branch}
-#    draft-main:           --base main
-#    draft-develop-main:   --base develop
+# 3. PR 생성 — base 는 branch-sync 가 `atelier autopilot base-branch` 로 결정한 {base_branch}
 gh pr create \
   --base {base_branch} \
   --title "feat(scope): issue #{N} description" \

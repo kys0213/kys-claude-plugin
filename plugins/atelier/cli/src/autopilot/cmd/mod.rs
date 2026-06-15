@@ -82,6 +82,16 @@ pub enum Commands {
         #[command(subcommand)]
         command: events::EventsCommands,
     },
+    /// Resolve the PR base branch from github-autopilot.local.md
+    /// (`work_branch` > `branch_strategy`). Prints the branch name, one line.
+    BaseBranch(BaseBranchArgs),
+}
+
+#[derive(Args)]
+pub struct BaseBranchArgs {
+    /// Project directory containing `github-autopilot.local.md`.
+    #[arg(long = "project-dir", default_value = ".")]
+    pub project_dir: String,
 }
 
 #[derive(Subcommand)]

@@ -3,6 +3,7 @@
 //! original `autopilot` crate; only the crate-relative paths were re-rooted
 //! under `crate::autopilot::*` during the consolidation move.
 
+pub mod autopilot_md;
 pub mod cmd;
 pub mod config;
 pub mod domain;

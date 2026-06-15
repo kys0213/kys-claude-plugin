@@ -1,5 +1,10 @@
 # Stagnation Redirect (task 단위 정체 방어)
 
+> ⚠️ **현재 비활성 (deferred, #776).** 이 redirect 를 구동하던 PreToolUse 훅(`protect-stagnation.sh`)은
+> 실제 claim 경로(`autopilot task claim --epic <NAME>`)가 task id 를 주지 않아 구조적으로 못 떠서 제거됐다.
+> `autopilot check stagnation` CLI core(simhash/Jaccard)는 유지되며, 올바른 고도는 `task claim` 이 task 를
+> 고른 직후 내부에서 stagnation 을 검사하는 것이다 — 그 통합 시 본 redirect 로직을 재사용한다.
+>
 > `autopilot` skill 의 reference. autopilot 자율 모드에서 worker 가 같은 영역을
 > 반복 시도하다 무한 루프에 빠지는 것을 막는 **task 단위** 방어 로직이다. (루프 단위 방어는
 > `orchestrator` skill 의 `references/autonomous-driving.md` 가 담당 — 두 층위는 상호 보완.)

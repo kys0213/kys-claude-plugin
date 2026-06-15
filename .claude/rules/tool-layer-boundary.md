@@ -81,8 +81,10 @@ atelier autopilot check stagnation              # stdin payload 해석
 
 ## 안티패턴
 
-- ❌ bash 가 config 를 파싱하고 PR base 를 검증해 차단 (`guard-pr-base.sh`) — 로직을
-  `atelier ... guard` 로 올린다 (#776).
+- ❌ stateless PreToolUse 훅으로 PR base 를 검증해 차단 — 정당한 promotion·hotfix 까지
+  false-block 한다. 결정적 부분(base 계산)만 CLI 단일 출처(`atelier autopilot base-branch`)로
+  올리고, 생성 측(branch-promoter)이 처음부터 올바른 base 를 쓰게 한다. 가드 자체는 두지 않는다
+  (#776 에서 `guard-pr-base.sh` 제거).
 - ❌ setup 이 `bash <version-path>/hooks/x.sh` 를 settings.json 에 기록 — `hook register`
   로 `atelier ...` 또는 리터럴 `${CLAUDE_PLUGIN_ROOT}` 를 기록한다 (#762, #772).
 - ✅ shim 은 바이너리 보장 후 `exec atelier ...`, 로직은 CLI, 등록은 `hook register`.
