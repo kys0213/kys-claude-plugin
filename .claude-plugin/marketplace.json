@@ -22,7 +22,7 @@
       ],
       "name": "atelier",
       "source": "./plugins/atelier",
-      "version": "0.5.5"
+      "version": "0.5.6"
     },
     {
       "category": "productivity",
