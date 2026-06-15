@@ -65,7 +65,19 @@ pub fn base_branch_from_content(content: &str) -> String {
 /// Extracts `key: value` — strips an inline `# comment`, surrounding quotes,
 /// and whitespace. Returns `None` if the line isn't this key.
 fn field_value(line: &str, key: &str) -> Option<String> {
-    let rest = line.strip_prefix(key)?.trim_start().strip_prefix(':')?;
+    let rest = line
+        .strip_prefix(key)?
+        .trim_start()
+        .strip_prefix(':')?
+        .trim();
+    // A quoted value owns everything up to its closing quote, so a `#` inside
+    // it (e.g. a branch name) is not mistaken for the start of an inline comment.
+    if let Some(quote) = rest.chars().next().filter(|c| *c == '"' || *c == '\'') {
+        if let Some(end) = rest[1..].find(quote) {
+            return Some(rest[1..=end].to_string());
+        }
+    }
+    // Unquoted (or an unterminated quote): strip an inline `# comment`.
     let val = rest.split('#').next().unwrap_or("").trim();
     Some(val.trim_matches(['"', '\'']).trim().to_string())
 }
@@ -108,6 +120,13 @@ mod tests {
     fn first_occurrence_wins() {
         let c = "---\nwork_branch: \"alpha\"\nwork_branch: \"beta\"\n---";
         assert_eq!(resolve(c), "alpha");
+    }
+
+    #[test]
+    fn hash_inside_quoted_value_is_preserved() {
+        // A quoted value owns its `#`; only an unquoted trailing `#` is a comment.
+        let c = "---\nwork_branch: \"feat#1\"\n---";
+        assert_eq!(resolve(c), "feat#1");
     }
 
     #[test]
