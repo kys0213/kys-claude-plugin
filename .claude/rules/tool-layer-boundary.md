@@ -59,8 +59,9 @@ atelier autopilot check stagnation              # stdin payload 해석
   버전 절대경로로 expand 한다 — 단일 따옴표도 못 막는다. 그래서 setup 이 `.sh` shim 을
   `hook register` 로 등록하면 settings.json 에 버전 절대경로가 박혀 **업데이트마다 frozen**
   된다(0.4.x 잔재의 원인). 반면 `hooks/hooks.json` 의 `${CLAUDE_PLUGIN_ROOT}` 는 Claude Code
-  가 hook **실행 시점**에 활성 버전으로 해석하므로 frozen 이 없다. 차단(exit 2) 여부와 무관하며,
-  모든 세션에 적용돼도 안전하도록 스크립트가 **self-gate**(config 파일 / 명령 패턴 / 워터마크)한다.
+  가 hook **실행 시점**에 활성 버전으로 해석하므로 frozen 이 없다. 모든 세션에 적용되므로 안전이
+  전제다 — 차단(exit 2)형 hook 은 **self-gate**(config 파일 / 명령 패턴)로 비대상 세션에서 no-op 하고,
+  advisory(비차단)형 hook 은 출력만 하므로 게이트 없이 둔다.
 - **예외 — setup 시점 값 주입이 필요한 hook**: git guard 처럼 `--default-branch <감지값>` 등
   프로젝트별 값을 setup 이 1회 감지해 박아야 하는 hook 은 `hook register` 로 등록한다. 단
   이때도 `.sh` 경로가 아니라 **CLI 커맨드 직접**(`atelier git guard ...`) 형태라 PATH 해석으로

@@ -15,7 +15,7 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 
 setup 이 settings.json 에 등록하는 hook 은 **CLI 직접 호출 형태뿐**입니다 (`atelier git guard write ...` — 바이너리가 PATH 에서 해석되므로 버전 비의존). 이는 setup 시점에 프로젝트별 값(예: `--default-branch <감지값>`)을 주입해야 하기 때문입니다.
 
-> 플러그인에 번들된 `.sh` hook(`check-cli-version`·`guard-pr-base`·`protect-stagnation`·`suggest-simplify`)은 setup 이 등록하지 않습니다 — 플러그인이 `hooks/hooks.json` 으로 직접 선언하고, 각 스크립트가 내부에서 self-gate(autopilot config / 명령 패턴 / style 워터마크)합니다. `${CLAUDE_PLUGIN_ROOT}` 가 hook 실행 시점에 활성 버전으로 해석돼 frozen 이 없습니다 (`.claude/rules/tool-layer-boundary.md`).
+> 플러그인에 번들된 `.sh` hook(`check-cli-version`·`guard-pr-base`·`protect-stagnation`·`suggest-simplify`)은 플러그인이 `hooks/hooks.json` 으로 직접 선언합니다. 차단형(`guard-pr-base`·`protect-stagnation`)은 autopilot config·명령 패턴으로 self-gate 해 비대상 세션에서 no-op 이고, advisory형(`check-cli-version`·`suggest-simplify`)은 비차단이라 모든 세션에 적용돼도 안전합니다. `${CLAUDE_PLUGIN_ROOT}` 가 hook 실행 시점에 활성 버전으로 해석돼 frozen 이 없습니다 (`.claude/rules/tool-layer-boundary.md`).
 
 ## Step 0 — atelier CLI 보장 (공통 선행)
 
@@ -39,7 +39,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 |---|---|---|
 | `git` | GitHub 인증 확인 + `~/.git-workflow-env` 생성 + Default Branch Guard hook | git-utils setup |
 | `autopilot` | `github-autopilot.local.md` 생성 (autopilot hook 은 plugin-declared, config 로 self-gate) | github-autopilot setup |
-| `style` | `~/.claude/CLAUDE.md` 코딩 원칙 병합 (Stop hook 은 plugin-declared, 워터마크로 self-gate) | coding-style setup |
+| `style` | `~/.claude/CLAUDE.md` 코딩 원칙 병합 | coding-style setup |
 | `workflow` | `.claude/rules/agent-design-principles.md` 룰 설치 | workflow-guide install |
 | `all` | 위 네 가지 전부 | 신규 |
 
@@ -87,10 +87,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 
 ## Step 2b — autopilot 모듈
 
-프로젝트 설정 파일 `github-autopilot.local.md` 를 생성합니다 (기존 스키마/경로 동일 — 호환).
+프로젝트 설정 파일 `github-autopilot.local.md` 를 생성합니다 (기존 스키마/경로 동일 — 호환). autopilot hook 은 이 config 존재로 self-gate 하므로 생성만으로 활성화됩니다.
 
-> autopilot hook(`guard-pr-base`·`protect-stagnation`)은 setup 이 등록하지 않습니다 — 플러그인이 `hooks/hooks.json` 으로 직접 선언하고, 두 스크립트가 `github-autopilot.local.md` 존재로 self-gate 합니다. 따라서 config 파일 생성만으로 활성화됩니다.
->
 > autopilot SQLite store(ledger/task DB)는 기존 스키마/경로를 계승하므로 마이그레이션 불필요.
 
 ## Step 2c — workflow 모듈
@@ -102,11 +100,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 
 ## Step 2d — style 모듈
 
-`~/.claude/CLAUDE.md` 에 코딩 원칙 템플릿을 병합합니다 (워터마크 기반 중복 확인 — 기존 coding-style 로직 동일):
+`~/.claude/CLAUDE.md` 에 코딩 원칙 템플릿을 병합합니다 (워터마크 기반 중복 확인 — 기존 coding-style 로직 동일).
 
 - 템플릿 원본: `${CLAUDE_PLUGIN_ROOT}/templates/claude-md/CLAUDE.md`
-
-> `/simplify` 제안 Stop hook(`suggest-simplify`)은 setup 이 등록하지 않습니다 — 플러그인이 `hooks/hooks.json` 으로 직접 선언하고, 스크립트가 `~/.claude/CLAUDE.md` 의 `[coding-style:begin]` 워터마크로 self-gate 합니다. 따라서 템플릿 병합만으로 활성화됩니다.
 
 ## Step 3 — 기존 hook 마이그레이션 (frozen → atelier)
 
