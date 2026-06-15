@@ -19,12 +19,27 @@ pub fn resolve_base_branch(project_dir: &Path) -> String {
 
 /// Pure resolution from the config text. `work_branch` (non-empty) wins;
 /// otherwise `branch_strategy == "draft-develop-main"` → `develop`; else `main`.
+///
+/// Only the first YAML frontmatter block (between the opening and closing `---`)
+/// is config; the markdown body below may legitimately mention these keys in
+/// prose or fenced examples. Keys are matched at column 0, so a nested mapping
+/// entry is not mistaken for a top-level field.
 pub fn base_branch_from_content(content: &str) -> String {
     let mut work_branch: Option<String> = None;
     let mut branch_strategy: Option<String> = None;
 
+    let mut in_frontmatter = false;
     for line in content.lines() {
-        let line = line.trim();
+        if line.trim_end() == "---" {
+            if in_frontmatter {
+                break; // closing fence — the rest of the file is body
+            }
+            in_frontmatter = true;
+            continue;
+        }
+        if !in_frontmatter {
+            continue;
+        }
         if work_branch.is_none() {
             if let Some(v) = field_value(line, "work_branch") {
                 work_branch = Some(v);
@@ -85,13 +100,29 @@ mod tests {
     #[test]
     fn inline_comment_and_unquoted_are_handled() {
         // The documented schema ships inline comments; values may be unquoted.
-        let c = "branch_strategy: draft-develop-main   # draft-develop-main | draft-main";
+        let c = "---\nbranch_strategy: draft-develop-main   # draft-develop-main | draft-main\n---";
         assert_eq!(resolve(c), "develop");
     }
 
     #[test]
     fn first_occurrence_wins() {
-        let c = "work_branch: \"alpha\"\nwork_branch: \"beta\"";
+        let c = "---\nwork_branch: \"alpha\"\nwork_branch: \"beta\"\n---";
         assert_eq!(resolve(c), "alpha");
+    }
+
+    #[test]
+    fn body_after_frontmatter_does_not_leak() {
+        // Key absent from frontmatter but mentioned in the markdown body (prose,
+        // example, fenced block) must not be read as config.
+        let c = "---\nbranch_strategy: \"draft-main\"\n---\n\n# Notes\nwork_branch: alpha\n";
+        assert_eq!(resolve(c), "main");
+    }
+
+    #[test]
+    fn indented_keys_are_not_matched() {
+        // A nested mapping entry is not a top-level key.
+        let c =
+            "---\nsome_map:\n  work_branch: nested\nbranch_strategy: \"draft-develop-main\"\n---";
+        assert_eq!(resolve(c), "develop");
     }
 }
