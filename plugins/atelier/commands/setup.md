@@ -58,7 +58,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
    1회성인 setup 시점에 두 가지를 합니다 (#785, #779):
    ```bash
    # (a) #779 warm-up — 로컬 origin/HEAD 를 채워, bake 가 비어도 guard 런타임 readonly 감지가
-   #     비표준 기본 브랜치(trunk 등)·비-GitHub remote 에서도 동작하게 한다 (git-only, 오프라인 무관).
+   #     비표준 기본 브랜치(trunk 등)·비-GitHub remote 에서도 동작하게 한다.
+   #     gh/인증은 불필요하지만 --auto 는 origin 에 1회 질의하므로 remote 가 닿아야 한다(오프라인이면 no-op).
    git remote set-head origin --auto 2>/dev/null || true
    # (b) 명시적 pin 용 값 — GitHub repo 면 gh 로 조회해 아래에서 --default-branch 로 박는다.
    #     실패(인증 안 됨·비-GitHub·gh 없음)는 빈 값으로 두고 setup 은 계속 진행 — 빈 값이면 플래그 생략.
