@@ -45,7 +45,8 @@ atelier git guard <write|commit|pr> --project-dir=<p> [--create-branch-script=<s
   `--create-branch-script` 값(기본 `git switch -c`)을 출력한다.
 - `pr`: 현재 브랜치에 열린 PR 이 있으면 `gh pr create` 차단 (exit 2). branch 옵션 불필요. legacy alias: `atelier git pr-guard`.
 - `--default-branch` 미지정 시 guard 가 런타임에 readonly 감지(`origin/HEAD` → main/develop/master 추측)한다.
-  비표준 기본 브랜치 보호를 위해 setup 이 `gh` 로 감지해 박는다 (B 절 참조).
+  setup 이 (a) `git remote set-head` 로 `origin/HEAD` 를 warm-up 해 이 readonly 경로가 비표준 기본 브랜치도
+  해결하게 하고, (b) GitHub repo 면 `gh` 로 감지한 값을 `--default-branch` 로 박는다 (#779, B 절 참조).
 
 ## 3. Hook 관리
 
