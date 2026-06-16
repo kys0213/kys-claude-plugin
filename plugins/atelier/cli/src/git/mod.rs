@@ -13,14 +13,12 @@ pub mod types;
 
 use crate::git::commands::guard::{GuardTargetKind, HookPayload};
 use crate::git::commands::hook::{create_hook_command, HookFs};
-use crate::git::core::git::{create_git_service, GitService};
+use crate::git::core::git::create_git_service;
 use crate::git::core::github::create_github_service;
 use crate::git::core::guard::create_guard_service;
-use crate::git::core::jira::create_jira_service;
 use crate::git::core::pr_guard::create_pr_guard_service;
 use crate::git::types::{
-    BranchInput, CmdResult, CommitInput, GuardDecision, HookListInput, HookRegisterInput,
-    HookUnregisterInput, PrInput, ReviewsInput,
+    CmdResult, GuardDecision, HookListInput, HookRegisterInput, HookUnregisterInput, ReviewsInput,
 };
 use clap::{Parser, Subcommand};
 use serde::Serialize;
@@ -38,41 +36,8 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Smart commit with Jira ticket detection
-    Commit {
-        /// Commit type (feat, fix, docs, ...)
-        commit_type: String,
-        /// Commit description
-        #[arg(default_value = "")]
-        description: String,
-        #[arg(long)]
-        scope: Option<String>,
-        #[arg(long)]
-        body: Option<String>,
-        #[arg(long = "skip-add")]
-        skip_add: bool,
-    },
-    /// Create a new branch from base branch
-    Branch {
-        #[arg(default_value = "")]
-        branch_name: String,
-        #[arg(long)]
-        base: Option<String>,
-    },
-    /// Create a Pull Request
-    Pr {
-        #[arg(default_value = "")]
-        title: String,
-        #[arg(long)]
-        description: Option<String>,
-    },
     /// Query unresolved PR review threads
     Reviews { pr_number: Option<i64> },
-    /// Detect the repository's default branch (prints the bare branch name)
-    DefaultBranch {
-        #[arg(long = "project-dir")]
-        project_dir: Option<String>,
-    },
     /// Tool guard (Claude hook): branch protection or PR duplicate check
     Guard {
         /// write | commit | pr
@@ -157,22 +122,6 @@ fn output<T: Serialize>(result: CmdResult<T>) -> i32 {
     }
 }
 
-/// Prints a successful scalar as a bare line (exit 0) or an error to stderr
-/// (exit 1). Unlike `output()`, emits no JSON — for single scalar values
-/// consumed by shells via `$(...)`, e.g. `default-branch`.
-fn output_plain(result: Result<String, String>) -> i32 {
-    match result {
-        Ok(value) => {
-            println!("{value}");
-            0
-        }
-        Err(e) => {
-            eprintln!("Error: {e}");
-            1
-        }
-    }
-}
-
 /// Parses `argv` (including the leading program name) with the git clap surface
 /// and runs the selected command, returning a process exit code.
 pub fn run_from<I, T>(argv: I) -> i32
@@ -200,73 +149,11 @@ pub fn run(cli: Cli) -> i32 {
     };
 
     match command {
-        Commands::Commit {
-            commit_type,
-            description,
-            scope,
-            body,
-            skip_add,
-        } => {
-            let git = create_git_service(None);
-            let jira = create_jira_service();
-            let deps = commands::commit::CommitDeps {
-                git: &git,
-                jira: &jira,
-            };
-            let input = CommitInput {
-                commit_type,
-                description,
-                scope,
-                body,
-                skip_add,
-            };
-            match commands::commit::run(&deps, &input) {
-                Ok(result) => output(result),
-                Err(e) => {
-                    eprintln!("{e}");
-                    1
-                }
-            }
-        }
-        Commands::Branch { branch_name, base } => {
-            let git = create_git_service(None);
-            let deps = commands::branch::BranchDeps { git: &git };
-            let input = BranchInput {
-                branch_name,
-                base_branch: base,
-            };
-            match commands::branch::run(&deps, &input) {
-                Ok(result) => output(result),
-                Err(e) => {
-                    eprintln!("{e}");
-                    1
-                }
-            }
-        }
-        Commands::Pr { title, description } => {
-            let git = create_git_service(None);
-            let jira = create_jira_service();
-            let github = create_github_service(None);
-            let deps = commands::pr::PrDeps {
-                git: &git,
-                jira: &jira,
-                github: &github,
-            };
-            let input = PrInput { title, description };
-            output(commands::pr::run(&deps, &input))
-        }
         Commands::Reviews { pr_number } => {
             let github = create_github_service(None);
             let deps = commands::reviews::ReviewsDeps { github: &github };
             let input = ReviewsInput { pr_number };
             output(commands::reviews::run(&deps, &input))
-        }
-        Commands::DefaultBranch { project_dir } => {
-            // Plain scalar via `output_plain` (not the `output()` JSON helper):
-            // consumed by setup's `$(...)` and baked into the branch-guard hook
-            // config. Uses the mutating `detect_default_branch()` so setup warms
-            // `origin/HEAD`; the guard uses the readonly variant at runtime (#779).
-            output_plain(create_git_service(project_dir).detect_default_branch())
         }
         Commands::Guard {
             target,
@@ -298,10 +185,10 @@ pub fn run(cli: Cli) -> i32 {
                     .unwrap_or_default()
             });
             let create_branch_script =
-                create_branch_script.unwrap_or_else(|| "atelier git branch".to_string());
-            // Pin the git service to project_dir so branch / special-state /
-            // default-branch detection reflect the project, not the hook's
-            // process cwd (worktree / subagent contexts) — see #780.
+                create_branch_script.unwrap_or_else(|| "git switch -c".to_string());
+            // Pin the git service to project_dir so special-state / default-branch
+            // detection reflect the project, not the hook's process cwd (worktree /
+            // subagent contexts) — see #780.
             let git = create_git_service(Some(project_dir.clone()));
             let branch_guard = create_guard_service(&git);
             let github = create_github_service(None);

@@ -1,8 +1,9 @@
-//! Port of `git-utils/tests/core/git.test.ts` — integration tests against real
-//! temporary git repositories (bare remote + local clone), exercising
-//! `RealGitService` end-to-end.
+//! Port of `git-utils/tests/core/git.test.ts`, trimmed to the reads the branch
+//! guard consumes after the git CLI was narrowed (guard/hook/reviews):
+//! readonly default-branch detection, work-tree check, and special-state.
+//! Integration tests run against real temporary git repositories.
 
-use atelier::git::core::git::{create_git_service, BranchLocation, GitService};
+use atelier::git::core::git::{create_git_service, GitService};
 use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
@@ -70,78 +71,6 @@ fn svc(dir: &Path) -> impl GitService {
 }
 
 #[test]
-fn detect_default_branch_from_origin_head() {
-    let (_r, local) = setup();
-    assert_eq!(svc(local.path()).detect_default_branch().unwrap(), "main");
-}
-
-#[test]
-fn detect_default_branch_fallback_main() {
-    let (_r, local) = setup();
-    sh(
-        &[
-            "git",
-            "symbolic-ref",
-            "--delete",
-            "refs/remotes/origin/HEAD",
-        ],
-        local.path(),
-    );
-    assert_eq!(svc(local.path()).detect_default_branch().unwrap(), "main");
-}
-
-#[test]
-fn detect_default_branch_master() {
-    let remote = TempDir::new().unwrap();
-    sh(&["git", "init", "--bare"], remote.path());
-    let local = TempDir::new().unwrap();
-    sh(&["git", "init", "-b", "master"], local.path());
-    config_identity(local.path());
-    std::fs::write(local.path().join("README.md"), "init").unwrap();
-    sh(&["git", "add", "."], local.path());
-    sh(&["git", "commit", "-m", "init"], local.path());
-    sh(
-        &[
-            "git",
-            "remote",
-            "add",
-            "origin",
-            remote.path().to_str().unwrap(),
-        ],
-        local.path(),
-    );
-    sh(&["git", "push", "-u", "origin", "master"], local.path());
-    assert_eq!(svc(local.path()).detect_default_branch().unwrap(), "master");
-}
-
-#[test]
-fn detect_default_branch_develop() {
-    let remote = TempDir::new().unwrap();
-    sh(&["git", "init", "--bare"], remote.path());
-    let local = TempDir::new().unwrap();
-    sh(&["git", "init", "-b", "develop"], local.path());
-    config_identity(local.path());
-    std::fs::write(local.path().join("README.md"), "init").unwrap();
-    sh(&["git", "add", "."], local.path());
-    sh(&["git", "commit", "-m", "init"], local.path());
-    sh(
-        &[
-            "git",
-            "remote",
-            "add",
-            "origin",
-            remote.path().to_str().unwrap(),
-        ],
-        local.path(),
-    );
-    sh(&["git", "push", "-u", "origin", "develop"], local.path());
-    assert_eq!(
-        svc(local.path()).detect_default_branch().unwrap(),
-        "develop"
-    );
-}
-
-#[test]
 fn detect_default_branch_readonly_uses_cached_head() {
     let (_r, local) = setup();
     assert_eq!(
@@ -185,53 +114,17 @@ fn detect_default_branch_readonly_does_not_write_origin_head() {
 }
 
 #[test]
-fn detect_default_branch_no_remote_errors() {
+fn detect_default_branch_readonly_no_remote_errors() {
     let local = TempDir::new().unwrap();
     sh(&["git", "init"], local.path());
     config_identity(local.path());
     std::fs::write(local.path().join("README.md"), "init").unwrap();
     sh(&["git", "add", "."], local.path());
     sh(&["git", "commit", "-m", "init"], local.path());
-    let err = svc(local.path()).detect_default_branch().unwrap_err();
+    let err = svc(local.path())
+        .detect_default_branch_readonly()
+        .unwrap_err();
     assert!(err.contains("Could not detect default branch"));
-}
-
-#[test]
-fn current_branch_normal() {
-    let (_r, local) = setup();
-    assert_eq!(svc(local.path()).get_current_branch(), "main");
-}
-
-#[test]
-fn current_branch_detached_is_empty() {
-    let (_r, local) = setup();
-    let hash = sh(&["git", "rev-parse", "HEAD"], local.path());
-    sh(&["git", "checkout", &hash], local.path());
-    assert_eq!(svc(local.path()).get_current_branch(), "");
-}
-
-#[test]
-fn branch_exists_local() {
-    let (_r, local) = setup();
-    assert!(svc(local.path()).branch_exists("main", BranchLocation::Local));
-}
-
-#[test]
-fn branch_not_exists_local() {
-    let (_r, local) = setup();
-    assert!(!svc(local.path()).branch_exists("nonexistent", BranchLocation::Local));
-}
-
-#[test]
-fn branch_exists_remote() {
-    let (_r, local) = setup();
-    assert!(svc(local.path()).branch_exists("main", BranchLocation::Remote));
-}
-
-#[test]
-fn branch_not_exists_any() {
-    let (_r, local) = setup();
-    assert!(!svc(local.path()).branch_exists("nonexistent", BranchLocation::Any));
 }
 
 #[test]
@@ -244,34 +137,6 @@ fn inside_work_tree_true() {
 fn inside_work_tree_false() {
     let non_git = TempDir::new().unwrap();
     assert!(!svc(non_git.path()).is_inside_work_tree());
-}
-
-#[test]
-fn uncommitted_none() {
-    let (_r, local) = setup();
-    assert!(!svc(local.path()).has_uncommitted_changes());
-}
-
-#[test]
-fn uncommitted_unstaged() {
-    let (_r, local) = setup();
-    std::fs::write(local.path().join("README.md"), "modified").unwrap();
-    assert!(svc(local.path()).has_uncommitted_changes());
-}
-
-#[test]
-fn uncommitted_staged() {
-    let (_r, local) = setup();
-    std::fs::write(local.path().join("README.md"), "staged").unwrap();
-    sh(&["git", "add", "README.md"], local.path());
-    assert!(svc(local.path()).has_uncommitted_changes());
-}
-
-#[test]
-fn uncommitted_untracked() {
-    let (_r, local) = setup();
-    std::fs::write(local.path().join("new-file.txt"), "new").unwrap();
-    assert!(svc(local.path()).has_uncommitted_changes());
 }
 
 #[test]
@@ -288,24 +153,4 @@ fn special_state_detached() {
     let hash = sh(&["git", "rev-parse", "HEAD"], local.path());
     sh(&["git", "checkout", &hash], local.path());
     assert!(svc(local.path()).get_special_state().detached());
-}
-
-#[test]
-fn add_tracked_stages_tracked() {
-    let (_r, local) = setup();
-    std::fs::write(local.path().join("README.md"), "tracked change").unwrap();
-    svc(local.path()).add_tracked().unwrap();
-    let staged = sh(&["git", "diff", "--cached", "--name-only"], local.path());
-    assert!(staged.contains("README.md"));
-}
-
-#[test]
-fn add_tracked_ignores_untracked() {
-    let (_r, local) = setup();
-    std::fs::write(local.path().join("untracked.txt"), "new file").unwrap();
-    std::fs::write(local.path().join("README.md"), "tracked change").unwrap();
-    svc(local.path()).add_tracked().unwrap();
-    let staged = sh(&["git", "diff", "--cached", "--name-only"], local.path());
-    assert!(!staged.contains("untracked.txt"));
-    assert!(staged.contains("README.md"));
 }

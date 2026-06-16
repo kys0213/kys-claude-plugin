@@ -14,7 +14,7 @@ fn base_input() -> GuardInput {
     GuardInput {
         target: GuardTarget::Write { file_path: None },
         project_dir: "/tmp/test".to_string(),
-        create_branch_script: "atelier git branch".to_string(),
+        create_branch_script: "git switch -c".to_string(),
         default_branch: None,
         protected_branches: None,
     }
@@ -151,7 +151,7 @@ fn write_block_reason_mentions_action_and_script() {
     let out = check(MockGit::default(), &base_input());
     let reason = out.reason.unwrap();
     assert!(reason.contains("파일을 수정하려 합니다"));
-    assert!(reason.contains("atelier git branch"));
+    assert!(reason.contains("git switch -c"));
 }
 
 #[test]

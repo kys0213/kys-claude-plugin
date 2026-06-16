@@ -46,17 +46,17 @@ Epic 2 ([#766](https://github.com/kys0213/kys-claude-plugin/issues/766))에서 c
 capability 슬래시(commit-and-pr, prioritize-issues, hook-config, scaffold-conventions 등)는
 모두 위 관심사 진입점으로 흡수되었습니다 — 슬래시 없이 자연어로 요청해도 해당 skill 이 자동 트리거됩니다.
 
-### 결정적 동작은 CLI
+### 기계적 호출만 CLI
 
-`atelier git <branch|commit|pr|...>`, `atelier autopilot <task|epic|check|...>` 등 동일 입력→동일 출력의 결정적 연산은 슬래시도 skill 도 아닌 Rust CLI 가 담당합니다 (CLAUDE.md 책임 경계).
+`atelier git <reviews|guard|hook>`, `atelier autopilot <task|epic|check|...>` 등 hook·구조화 read 처럼 **기계적 호출이 꼭 필요한** 연산은 슬래시도 skill 도 아닌 Rust CLI 가 담당합니다 (CLAUDE.md 책임 경계). 커밋·브랜치·PR 은 git/gh 가 이미 결정적이라 CLI 로 감싸지 않고, skill 이 컨벤션을 적용해 plain git/gh 로 실행합니다.
 
 ## CLI
 
 atelier는 단일 Rust crate(`cli/`)로 빌드되며, 바이너리 `atelier` 하나가 subcommand로 라우팅합니다.
 
 ```
-atelier git <subcmd>         # git-utils 대체 (TypeScript → Rust 포팅)
-atelier autopilot <subcmd>   # 기존 autopilot 바이너리 대체
+atelier git <reviews|guard|hook>   # git-utils 의 기계적 호출 표면 (TypeScript → Rust 포팅)
+atelier autopilot <subcmd>         # 기존 autopilot 바이너리 대체
 atelier hook <subcmd>
 atelier setup <module>
 ```
@@ -79,5 +79,5 @@ atelier setup <module>
 > Fat Controller 14개가 관심사 skill(`spec-write`/`spec-review`/`autopilot`/`git`) + `references/` 로 해체되었습니다.
 > 슬래시 표면은 capability 35개 → 관심사 단위로 수렴, 흡수 6개 plugin 은 snapshot freeze 보존.
 >
-> ⚠️ `gh` CLI 의존 git 명령(pr create, reviews, guard pr)은 mock 단위 테스트만 완료 —
+> ⚠️ `gh` CLI 의존 git 명령(reviews, guard pr)은 mock 단위 테스트만 완료 —
 > 실제 `gh`/네트워크 라이브 검증은 정식 릴리스 전 별도 수행이 필요합니다.
