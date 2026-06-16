@@ -70,7 +70,7 @@ fn default_branch_main_blocked() {
 fn default_branch_master_blocked() {
     let mut git = MockGit::default();
     git.current_branch = Box::new(|| "master".to_string());
-    git.detect_default_branch_readonly = Box::new(|| Ok("master".to_string()));
+    git.detect_default_branch = Box::new(|| Ok("master".to_string()));
     assert!(!check(git, &base_input()).allowed);
 }
 
@@ -78,7 +78,7 @@ fn default_branch_master_blocked() {
 fn default_branch_develop_blocked() {
     let mut git = MockGit::default();
     git.current_branch = Box::new(|| "develop".to_string());
-    git.detect_default_branch_readonly = Box::new(|| Ok("develop".to_string()));
+    git.detect_default_branch = Box::new(|| Ok("develop".to_string()));
     assert!(!check(git, &base_input()).allowed);
 }
 
@@ -99,7 +99,7 @@ fn empty_default_branch_falls_back_to_detection() {
 fn develop_protected_even_when_default_is_main() {
     let mut git = MockGit::default();
     git.current_branch = Box::new(|| "develop".to_string());
-    git.detect_default_branch_readonly = Box::new(|| Ok("main".to_string()));
+    git.detect_default_branch = Box::new(|| Ok("main".to_string()));
     let out = check(git, &base_input());
     assert!(!out.allowed);
     assert_eq!(out.current_branch.as_deref(), Some("develop"));
@@ -110,7 +110,7 @@ fn develop_protected_even_when_default_is_main() {
 fn extra_protected_branches_blocked() {
     let mut git = MockGit::default();
     git.current_branch = Box::new(|| "staging".to_string());
-    git.detect_default_branch_readonly = Box::new(|| Ok("main".to_string()));
+    git.detect_default_branch = Box::new(|| Ok("main".to_string()));
     let mut input = base_input();
     input.protected_branches = Some(vec!["staging".to_string(), "release".to_string()]);
     let out = check(git, &input);
@@ -122,7 +122,7 @@ fn extra_protected_branches_blocked() {
 fn branch_not_in_protected_passes() {
     let mut git = MockGit::default();
     git.current_branch = Box::new(|| "feat/something".to_string());
-    git.detect_default_branch_readonly = Box::new(|| Ok("main".to_string()));
+    git.detect_default_branch = Box::new(|| Ok("main".to_string()));
     let mut input = base_input();
     input.protected_branches = Some(vec!["staging".to_string()]);
     assert!(check(git, &input).allowed);
@@ -142,7 +142,7 @@ fn explicit_default_branch_used() {
 #[test]
 fn detect_failure_passes_safe_mode() {
     let mut git = MockGit::default();
-    git.detect_default_branch_readonly = Box::new(|| Err("no remote".to_string()));
+    git.detect_default_branch = Box::new(|| Err("no remote".to_string()));
     assert!(check(git, &base_input()).allowed);
 }
 
@@ -152,6 +152,16 @@ fn write_block_reason_mentions_action_and_script() {
     let reason = out.reason.unwrap();
     assert!(reason.contains("파일을 수정하려 합니다"));
     assert!(reason.contains("git switch -c"));
+}
+
+#[test]
+fn block_reason_uses_default_script_when_empty() {
+    // No --create-branch-script supplied (CLI forwards an empty string): the
+    // guard must fall back to its own default, not render a bare `  <branch>`.
+    let mut input = base_input();
+    input.create_branch_script = String::new();
+    let reason = check(MockGit::default(), &input).reason.unwrap();
+    assert!(reason.contains(atelier::git::core::guard::DEFAULT_CREATE_BRANCH_SCRIPT));
 }
 
 #[test]

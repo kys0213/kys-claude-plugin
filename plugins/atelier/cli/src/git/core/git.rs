@@ -9,11 +9,13 @@ use crate::git::core::shell::{exec, ExecOptions};
 use crate::git::types::GitSpecialState;
 
 pub trait GitService {
-    /// Detects the repository's default branch WITHOUT mutating repo state
-    /// (no `git remote set-head`), so it is safe to call from a PreToolUse
-    /// guard on every tool invocation (#779). Method 1 reads the cached
-    /// `refs/remotes/origin/HEAD`; Method 3 probes common branch names.
-    fn detect_default_branch_readonly(&self) -> Result<String, String>;
+    /// Detects the repository's default branch. MUST NOT mutate repo state
+    /// (no `git remote set-head`): the branch guard calls this on every
+    /// PreToolUse invocation (#779), so it has to stay a pure read. Method 1
+    /// reads the cached `refs/remotes/origin/HEAD`; Method 3 probes common
+    /// branch names. (Setup warms `origin/HEAD` once so Method 1 resolves
+    /// non-standard defaults — see commands/setup.md.)
+    fn detect_default_branch(&self) -> Result<String, String>;
     fn is_inside_work_tree(&self) -> bool;
     fn get_special_state(&self) -> GitSpecialState;
 }
@@ -86,7 +88,7 @@ impl RealGitService {
 }
 
 impl GitService for RealGitService {
-    fn detect_default_branch_readonly(&self) -> Result<String, String> {
+    fn detect_default_branch(&self) -> Result<String, String> {
         // Method 1 + Method 3 only — no `set-head` write (see #779).
         self.read_origin_head()
             .or_else(|| self.probe_common_default())

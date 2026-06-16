@@ -21,7 +21,7 @@ type R<T> = Result<T, String>;
 pub struct MockGit {
     pub is_inside_work_tree: Box<dyn Fn() -> bool>,
     pub current_branch: Box<dyn Fn() -> String>,
-    pub detect_default_branch_readonly: Box<dyn Fn() -> R<String>>,
+    pub detect_default_branch: Box<dyn Fn() -> R<String>>,
     /// `(rebase, merge)` flags for `get_special_state`; `current_branch` is the
     /// branch the snapshot reports, mirroring `RealGitService` (#778).
     pub special_state_flags: Box<dyn Fn() -> (bool, bool)>,
@@ -32,15 +32,15 @@ impl Default for MockGit {
         MockGit {
             is_inside_work_tree: Box::new(|| true),
             current_branch: Box::new(|| "main".to_string()),
-            detect_default_branch_readonly: Box::new(|| Ok("main".to_string())),
+            detect_default_branch: Box::new(|| Ok("main".to_string())),
             special_state_flags: Box::new(|| (false, false)),
         }
     }
 }
 
 impl GitService for MockGit {
-    fn detect_default_branch_readonly(&self) -> R<String> {
-        (self.detect_default_branch_readonly)()
+    fn detect_default_branch(&self) -> R<String> {
+        (self.detect_default_branch)()
     }
     fn is_inside_work_tree(&self) -> bool {
         (self.is_inside_work_tree)()

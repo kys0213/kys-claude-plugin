@@ -184,8 +184,9 @@ pub fn run(cli: Cli) -> i32 {
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_default()
             });
-            let create_branch_script =
-                create_branch_script.unwrap_or_else(|| "git switch -c".to_string());
+            // Forward the flag as-is; the guard core supplies its own default
+            // (DEFAULT_CREATE_BRANCH_SCRIPT) when this is empty.
+            let create_branch_script = create_branch_script.unwrap_or_default();
             // Pin the git service to project_dir so special-state / default-branch
             // detection reflect the project, not the hook's process cwd (worktree /
             // subagent contexts) — see #780.

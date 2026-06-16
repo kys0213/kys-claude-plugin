@@ -71,16 +71,16 @@ fn svc(dir: &Path) -> impl GitService {
 }
 
 #[test]
-fn detect_default_branch_readonly_uses_cached_head() {
+fn detect_default_branch_uses_cached_head() {
     let (_r, local) = setup();
     assert_eq!(
-        svc(local.path()).detect_default_branch_readonly().unwrap(),
+        svc(local.path()).detect_default_branch().unwrap(),
         "main"
     );
 }
 
 #[test]
-fn detect_default_branch_readonly_does_not_write_origin_head() {
+fn detect_default_branch_does_not_write_origin_head() {
     let (_r, local) = setup();
     // Remove the cached symbolic ref so Method 1 misses; readonly must fall
     // back to Method 3 (probe common names) WITHOUT running `set-head`.
@@ -95,7 +95,7 @@ fn detect_default_branch_readonly_does_not_write_origin_head() {
     );
 
     assert_eq!(
-        svc(local.path()).detect_default_branch_readonly().unwrap(),
+        svc(local.path()).detect_default_branch().unwrap(),
         "main"
     );
 
@@ -109,12 +109,12 @@ fn detect_default_branch_readonly_does_not_write_origin_head() {
         .success();
     assert!(
         !head_present,
-        "detect_default_branch_readonly must not recreate refs/remotes/origin/HEAD"
+        "detect_default_branch must not recreate refs/remotes/origin/HEAD"
     );
 }
 
 #[test]
-fn detect_default_branch_readonly_no_remote_errors() {
+fn detect_default_branch_no_remote_errors() {
     let local = TempDir::new().unwrap();
     sh(&["git", "init"], local.path());
     config_identity(local.path());
@@ -122,7 +122,7 @@ fn detect_default_branch_readonly_no_remote_errors() {
     sh(&["git", "add", "."], local.path());
     sh(&["git", "commit", "-m", "init"], local.path());
     let err = svc(local.path())
-        .detect_default_branch_readonly()
+        .detect_default_branch()
         .unwrap_err();
     assert!(err.contains("Could not detect default branch"));
 }
