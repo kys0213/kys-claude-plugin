@@ -46,6 +46,8 @@ user-invocable: false
           No  → 단발 sub-agent (병렬 fan-out도 단발 여러 개)
 ```
 
+> **review→fix 반복이 예상되면 team 우선**: 구현 → 리뷰 → 수정처럼 한 작업이 여러 라운드를 도는 경우, 매 라운드를 단발로 재위임하면 컨텍스트 손실·셋업 비용이 반복된다. implementer + reviewer를 한 team에 두고 내부 SendMessage로 수정 사이클을 돌리는 편이 낫다. 자율 모드는 리뷰어 게이트로 이 반복이 **항상** 발생하므로 team을 기본으로 한다 — `autonomous-driving.md §위임 형태: agent team 적극 활용` 참조.
+
 ---
 
 ## Prompt 작성 원칙
