@@ -47,9 +47,10 @@ while not satisfied(contract.done_when) and loop_count < contract.max_loops:
     loop_count += 1
     tasks = decompose(remaining_work)                 # 분해
     log_decision("분해", tasks, refs=[대화, CLAUDE.md, rules])
-    dispatch(tasks, isolation="worktree",             # 위임 (base = epic 브랜치)
-             run_in_background=true)
-    log_decision("병렬/순차 + 위임 형태", ...)
+    dispatch(tasks, isolation="worktree",             # 위임 (base = epic 브랜치, agent team 우선)
+             run_in_background=true,
+             model=main_allocates_per_task)           # 모델 배분 — 메인 판단 (아래 모델 분배)
+    log_decision("병렬/순차 + 위임 형태(team) + 모델 배분", ...)
     results = await_completion_notifications()        # 모니터 (sleep/poll 금지)
     assert_topology()                                 # 가드: branch == epic + status clean (아래)
 
@@ -57,8 +58,13 @@ while not satisfied(contract.done_when) and loop_count < contract.max_loops:
         if r.failed:
             handle_failure(r)                         # 자동 재위임 규칙 (아래)
             log_decision("재위임 판단", r, refs=[실패이력, agent-monitor.md])
+            continue
+        verdict = review(r)                           # 작업별 리뷰어 게이트 (team 내 reviewer 역할)
+        if verdict.rejected:
+            handle_review_rejection(r, verdict)       # team 내부 fix(SendMessage) 우선, 안 되면 재위임 (max_redispatch 예산 소모)
+            log_decision("리뷰 거부 → team fix/재위임", verdict, refs=[리뷰 findings])
 
-    merge_coordinate(results)                         # 머지 — 충돌은 자동 위임 (아래)
+    merge_coordinate(passed_results)                  # 리뷰 통과분만 머지 — 충돌은 자동 위임 (아래)
     assert_topology()                                 # 가드: 매 머지 직후에도 (#783)
     run_integration_verify(contract)                  # 인프라 의존 테스트 — 메인이 직접 Bash (아래)
     log_decision("머지 순서 / 충돌 처리", ...)
@@ -75,11 +81,56 @@ escalate_or_report(reason, decision_log=contract.log_dir)   # 완료 / 예산소
 
 ---
 
+## 모델 분배 (Model Allocation)
+
+자율 루프는 분해·구현·리뷰를 여러 sub-agent로 나눠 돌린다. 메인은 **각 작업의 성격에 맞게 모델을 배분**한다 — 고정 매핑이 아니라 메인의 판단이다. CLAUDE.md 책임 경계상 모델 선택은 컨텍스트 의존 *결정(judgment)*이지 결정적 *변환(transform)*이 아니므로, 고정표/CLI에 박지 않고 메인이 작업마다 정한다.
+
+원칙:
+
+- **역량을 작업에 맞춘다**: 작업의 난이도·리스크·되돌리기 비용에 모델 역량을 맞춘다. 판단·설계·미묘한 리뷰는 더 강한 모델, 기계적·반복적 구현은 더 가벼운 모델.
+- **비싼 모델은 품질을 좌우하는 지점에 아낀다**: 분해/조율(메인 자신), 자동 머지의 유일한 안전장치인 리뷰 게이트처럼 판단이 결과 품질을 결정하는 곳에 집중한다.
+- **고정 배분을 박지 않는다**: 모델이 더 똑똑해지면 같은 작업을 더 가벼운 tier로 내릴 수 있어야 하므로, 매 dispatch마다 "지금도 이 역량이 필요한가"를 재평가한다. 모델 tier 정의는 `delegation-patterns.md §모델 선택` 표가 단일 출처 — 시작 기준으로만 참조하고 여기서 중복 정의하지 않는다.
+
+기록: 모델 배분도 자율 결정이므로, 표준 heuristic을 벗어난 선택(예: 평소 가벼운 tier에 맡기던 구현을 더 강한 모델로 올림)은 근거와 함께 decision log에 남긴다.
+
+---
+
+## 메인 컨텍스트 격리 (Main Context Isolation)
+
+긴 자율 루프에서 메인이 매 작업의 파일 내용·전체 diff·리뷰 전문을 자기 컨텍스트에 쌓으면, 루프가 길어질수록 메인 컨텍스트가 포화되어 조율 판단 품질이 떨어진다. 자율 모드에서 메인은 **조율에 필요한 최소 상태만** 보유한다.
+
+원칙:
+
+- **무거운 일은 sub-agent 컨텍스트에서**: 읽기·편집·리뷰는 전부 sub-agent가 자기 컨텍스트에서 수행한다. 메인은 **구조화된 압축 요약**(작업 ID, 변경 파일 목록, pass/reject, 다음 행동)만 받고, 전체 diff·파일/리뷰 findings 전문은 끌어오지 않는다.
+- **근거는 외부에 남기고 경로만 참조**: 자세한 판단 근거는 decision log / worktree에 남기고 메인은 경로만 보유한다.
+- **메인 직접 Read는 결정적 사실로 제한**: 메인이 직접 Read/Bash하는 것은 조율 판단에 필요한 결정적 사실(git 상태, 테스트 exit code, 토폴로지 가드)로 한정한다 — 코드 본문 통독은 sub-agent 몫이다.
+
+---
+
+## 위임 형태: agent team 적극 활용 (Prefer Agent Team)
+
+자율 루프는 본질적으로 **구현 → 리뷰 → 수정**을 반복하는 구조다. 단발 sub-agent는 한 번의 prompt → 한 번의 결과로 끝나 매 라운드를 처음부터 재위임해야 하므로, 자율 모드는 **agent team을 우선**한다.
+
+team을 우선하는 이유:
+
+- **리뷰어 게이트와 맞물림**: implementer + reviewer(필요 시 designer)를 한 team 역할로 두면, 리뷰 거부 시 findings를 implementer에게 **team 내부 SendMessage로 전달해 바로 수정**한다 — 새 worktree 재위임의 컨텍스트 손실·셋업 비용 없이 수렴이 빠르다.
+- **장기 런에서 식별·제어 가능**: 이름으로 SendMessage해 정체 해소·단계 전환을 지시할 수 있다 (*자동 개입 규칙*이 허용).
+- **컨텍스트 격리 강화**: 한 작업의 반복 맥락이 team 안에 머물러 메인으로 전문(全文)이 올라오지 않는다.
+
+구성:
+
+- **feature/task 하나 = team 하나**. 역할 (designer 선택) → implementer → reviewer. 구성·이름·수명·`isolation: "worktree"` 규칙은 모두 `delegation-patterns.md §TeamCreate 사용 패턴`을 따른다 (team이어도 편집 멤버는 worktree 격리 면제 없음).
+- **review→fix는 team 내부에서**: reviewer reject → 같은 team의 implementer에게 SendMessage → 수정 → 재리뷰. 이 사이클도 `max_redispatch_per_task` 예산을 동일하게 소모한다 (team 안이라고 무한 반복 금지). 소진 → hard stop → 에스컬레이션.
+
+단발은 review→fix 반복이 없는 read-only 1회성에만 쓴다. 자율 모드는 리뷰어 게이트가 필수라 **편집 작업은 대부분 team이 유리**하며, 의심스러우면 team을 고른다.
+
+---
+
 ## 종료 조건 (Done)
 
 종료 조건은 **명시적이고 검증 가능**해야 한다. 모호한 종료 조건은 루프를 영원히 돌리거나 환각으로 조기 종료시킨다.
 
-- ✅ 검증 가능: "모든 작업 머지 완료 + `cargo test` green + `cargo fmt --check`/`clippy -D warnings` 통과"
+- ✅ 검증 가능: "모든 작업이 리뷰 통과 후 머지 완료 + `cargo test` green + `cargo fmt --check`/`clippy -D warnings` 통과"
 - ❌ 검증 불가: "코드가 좋아 보이면", "대충 다 되면"
 - 매 루프 종료 시 종료 조건을 **결정적으로** 재평가한다 — Bash로 테스트/빌드/lint를 실행하고 git 상태를 확인해 판정. 메인의 주관적 "다 된 것 같다"에 맡기지 않는다.
 
@@ -109,6 +160,27 @@ escalate_or_report(reason, decision_log=contract.log_dir)   # 완료 / 예산소
 
 - `redispatch_count[task] > max_redispatch_per_task` → hard stop → 에스컬레이션
 - 재위임 prompt에는 **이전 시도가 어디까지 갔고 무엇이 실패했는지**를 반드시 담는다 (sub-agent는 메인 대화를 못 봄).
+
+### 리뷰어 게이트 (자동, 머지 전)
+
+자율 모드는 사람이 PR을 보지 않는다. 따라서 **각 작업의 결과를 epic 브랜치에 머지하기 전에 리뷰어 sub-agent가 검증**하는 게이트를 둔다. 구현 sub-agent가 스스로 "통과했다"고 말하는 것에 머지를 맡기지 않는다 (자기 검증 편향).
+
+- **역할 분리**: 구현과 리뷰는 **다른 sub-agent**다. 리뷰어는 구현자의 worktree(또는 diff)를 입력으로 받아 epic 브랜치 base 기준 변경을 검토한다. 같은 agent가 자기 코드를 리뷰하게 하지 않는다.
+- **검토 범위**: 요구사항 충족, 회귀 위험, CLAUDE.md 품질 게이트(테스트/lint/포맷), 설계 원칙(SOLID 등) 위반, worktree 격리 준수.
+- **출력**: `pass` / `reject` + 구체적 사유(`파일:라인`). reject 사유는 재위임 prompt에 그대로 실을 수 있는 자기완결 형태로 받는다.
+
+```
+구현 완료 → 리뷰어 검증
+  pass   → 머지 후보로 승급 (이후 merge_coordinate)
+  reject → 재위임 (리뷰 findings를 prompt에 포함, max_redispatch_per_task 예산 소모)
+            예산 소진 → hard stop → 에스컬레이션
+```
+
+- 리뷰(코드 품질·요구사항 충족)와 `integration_verify`(인프라 의존 동작)는 둘 다 머지 전 게이트이며 둘 다 통과해야 머지한다 — 리뷰는 작업별, integration_verify는 루프별로 돈다.
+- 리뷰어 거부는 실패와 동일하게 **`max_redispatch_per_task`를 소모**한다 — 리뷰 전용 새 예산을 만들지 않는다. 무한 재위임을 막는다.
+- 리뷰어 모델도 위 *모델 분배* 원칙으로 메인이 작업 리스크에 맞춰 정한다 (자동 머지의 유일한 안전장치이므로 보통 더 강한 역량을 둘 가치가 있으나, 고정은 아님).
+- 컨텍스트 격리: 리뷰어의 상세 findings·diff는 리뷰어 컨텍스트에 남기고, 메인은 verdict + 압축 요약만 받는다.
+- `done_when` 평가에 **"머지된 모든 작업이 리뷰 통과"**를 포함한다.
 
 ### 머지 / 충돌 (자동)
 
@@ -265,6 +337,12 @@ opt-in 전면 허용이라도 다음은 **항상** 멈추고 사람에게 보고
 10. **결정 로그 커밋**: 휘발성 자율 산출물을 epic 브랜치에 커밋 → repo 오염. `.orchestrator/`는 gitignore, 완료 시 요약으로만 공유.
 11. **토폴로지 가드 생략**: 완료 알림/머지 후 메인 branch 확인 없이 연속 진행 → 오염된 HEAD 위에서 다음 dispatch의 worktree base가 잘못 잡힘 (#783).
 12. **인프라 의존 테스트를 worktree 검증에 포함**: sub-agent가 접근 불가한 환경 의존 테스트를 worktree에서 실행 → 환경 실패 noise로 PR 검증 신뢰도 저하. 계약의 `integration_verify`로 분리해 메인이 실행 (#782).
+13. **리뷰 없는 자동 머지**: 구현 sub-agent의 자기 보고만 믿고 머지 → 자기 검증 편향으로 결함 통과. 머지 전 별도 리뷰어 게이트 필수.
+14. **자기 코드 자기 리뷰**: 구현한 agent가 자기 결과를 리뷰 → 게이트 무력화. 리뷰어는 항상 구현자와 다른 sub-agent.
+15. **리뷰 전용 무한 재위임**: 리뷰 거부를 `max_redispatch_per_task` 예산 밖에서 반복 → 폭주. 리뷰 거부도 동일 예산을 소모하고 소진 시 에스컬레이션.
+16. **고정 모델 매핑 박기**: "구현은 항상 X, 리뷰는 항상 Y"로 못 박음 → 모델이 똑똑해져도 비효율 유지. 매 dispatch마다 작업 리스크에 맞춰 재평가.
+17. **메인 컨텍스트로 전문 끌어오기**: 전체 diff·파일 전문·리뷰 findings 전문을 메인이 직접 통독 → 긴 루프에서 메인 컨텍스트 포화. 메인은 압축 요약 + verdict만 수령.
+18. **review→fix를 매번 단발 재위임**: 리뷰 거부마다 새 단발 sub-agent를 처음부터 띄움 → 컨텍스트 손실·셋업 비용 반복, 수렴 느림. implementer+reviewer를 한 team에 두고 내부 SendMessage로 수정 사이클을 돌린다.
 
 ---
 
@@ -287,6 +365,11 @@ opt-in 전면 허용이라도 다음은 **항상** 멈추고 사람에게 보고
 
 - [ ] 매 sub-agent 완료 직후 + 매 머지 직후 토폴로지 가드를 실행하는가?
 - [ ] 계약의 integration_verify를 run_at 시점에 메인이 직접 실행하는가?
+- [ ] 위임 형태로 **agent team을 우선**했는가? (implementer + reviewer 역할, review→fix를 team 내부 SendMessage로)
+- [ ] 각 작업을 **머지 전 리뷰어**(구현자와 다른 역할/agent)로 검증하는가?
+- [ ] 리뷰 거부가 `max_redispatch_per_task` 예산을 소모하며 카운트되는가?
+- [ ] 각 작업의 모델을 작업 리스크에 맞춰 배분하고, 비표준 선택은 기록하는가?
+- [ ] 메인이 전문 대신 압축 요약 + verdict만 수령하는가? (컨텍스트 격리)
 - [ ] 매 루프 종료 시 종료 조건을 결정적으로 재평가하는가?
 - [ ] 재위임 / 머지 / 충돌 해결이 예산을 소모하며 카운트되는가?
 - [ ] 진전을 수치로 측정하는가? (체감 아님)

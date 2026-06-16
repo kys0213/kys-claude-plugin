@@ -46,6 +46,8 @@ user-invocable: false
           No  → 단발 sub-agent (병렬 fan-out도 단발 여러 개)
 ```
 
+> **review→fix 반복이 예상되면 team 우선**: 구현 → 리뷰 → 수정처럼 한 작업이 여러 라운드를 도는 경우, 매 라운드를 단발로 재위임하면 컨텍스트 손실·셋업 비용이 반복된다. implementer + reviewer를 한 team에 두고 내부 SendMessage로 수정 사이클을 돌리는 편이 낫다. 자율 모드는 리뷰어 게이트로 이 반복이 **항상** 발생하므로 team을 기본으로 한다 — `autonomous-driving.md §위임 형태: agent team 적극 활용` 참조.
+
 ---
 
 ## Prompt 작성 원칙
@@ -146,6 +148,8 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 | 단순 분류, 포맷 변환, 짧은 추출 | `haiku` |
 
 지정하지 않으면 부모 모델을 상속한다. 단순 작업에 opus 사용은 비용 낭비.
+
+이 표는 **고정값이 아니라 시작 heuristic**이다. 모델이 더 똑똑해지면 같은 작업을 더 가벼운 tier로 내려 효율을 높일 수 있어야 하므로, 작업마다 "지금도 이 역량이 필요한가"를 재평가한다. 자율 루프에서의 작업별 모델 배분 원칙은 `autonomous-driving.md §모델 분배` 참조.
 
 ---
 
