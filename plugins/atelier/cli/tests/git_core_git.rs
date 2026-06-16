@@ -73,10 +73,7 @@ fn svc(dir: &Path) -> impl GitService {
 #[test]
 fn detect_default_branch_uses_cached_head() {
     let (_r, local) = setup();
-    assert_eq!(
-        svc(local.path()).detect_default_branch().unwrap(),
-        "main"
-    );
+    assert_eq!(svc(local.path()).detect_default_branch().unwrap(), "main");
 }
 
 #[test]
@@ -94,10 +91,7 @@ fn detect_default_branch_does_not_write_origin_head() {
         local.path(),
     );
 
-    assert_eq!(
-        svc(local.path()).detect_default_branch().unwrap(),
-        "main"
-    );
+    assert_eq!(svc(local.path()).detect_default_branch().unwrap(), "main");
 
     // The ref must still be absent — readonly detection has no side effects.
     let head_present = Command::new("git")
@@ -121,9 +115,7 @@ fn detect_default_branch_no_remote_errors() {
     std::fs::write(local.path().join("README.md"), "init").unwrap();
     sh(&["git", "add", "."], local.path());
     sh(&["git", "commit", "-m", "init"], local.path());
-    let err = svc(local.path())
-        .detect_default_branch()
-        .unwrap_err();
+    let err = svc(local.path()).detect_default_branch().unwrap_err();
     assert!(err.contains("Could not detect default branch"));
 }
 
