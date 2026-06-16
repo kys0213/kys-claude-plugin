@@ -89,8 +89,7 @@ escalate_or_report(reason, decision_log=contract.log_dir)   # 완료 / 예산소
 
 - **역량을 작업에 맞춘다**: 작업의 난이도·리스크·되돌리기 비용에 모델 역량을 맞춘다. 판단·설계·미묘한 리뷰는 더 강한 모델, 기계적·반복적 구현은 더 가벼운 모델.
 - **비싼 모델은 품질을 좌우하는 지점에 아낀다**: 분해/조율(메인 자신), 자동 머지의 유일한 안전장치인 리뷰 게이트처럼 판단이 결과 품질을 결정하는 곳에 집중한다.
-- **고정 배분을 박지 않는다**: 모델이 더 똑똑해지면 같은 작업을 더 가벼운 tier로 내려 효율을 높일 수 있어야 한다. 매 dispatch마다 "이 작업에 지금도 이 역량이 필요한가"를 재평가한다 — 한 번 정한 매핑을 관성으로 유지하지 않는다.
-- **시작 heuristic은 출발점**: `delegation-patterns.md §모델 선택` 표를 시작 기준으로 참조하되, 천장이 아니라 출발점으로 본다. 모델 tier의 단일 정의 출처는 그 표이며 여기서 중복 정의하지 않는다.
+- **고정 배분을 박지 않는다**: 모델이 더 똑똑해지면 같은 작업을 더 가벼운 tier로 내릴 수 있어야 하므로, 매 dispatch마다 "지금도 이 역량이 필요한가"를 재평가한다. 모델 tier 정의는 `delegation-patterns.md §모델 선택` 표가 단일 출처 — 시작 기준으로만 참조하고 여기서 중복 정의하지 않는다.
 
 기록: 모델 배분도 자율 결정이므로, 표준 heuristic을 벗어난 선택(예: 평소 가벼운 tier에 맡기던 구현을 더 강한 모델로 올림)은 근거와 함께 decision log에 남긴다.
 
@@ -102,36 +101,28 @@ escalate_or_report(reason, decision_log=contract.log_dir)   # 완료 / 예산소
 
 원칙:
 
-- **무거운 일은 sub-agent 컨텍스트에서**: 읽기·편집·리뷰는 전부 sub-agent가 자기 컨텍스트에서 수행한다. 메인은 결과를 **구조화된 압축 요약**(작업 ID, 변경 파일 목록, pass/reject, 다음 행동)으로만 받는다.
-- **전문(全文)을 끌어오지 않는다**: 전체 diff·파일 전문·리뷰 findings 전문을 메인 컨텍스트로 가져오지 않는다. 세부가 필요하면 sub-agent에 위임해 거기서 처리한다.
+- **무거운 일은 sub-agent 컨텍스트에서**: 읽기·편집·리뷰는 전부 sub-agent가 자기 컨텍스트에서 수행한다. 메인은 **구조화된 압축 요약**(작업 ID, 변경 파일 목록, pass/reject, 다음 행동)만 받고, 전체 diff·파일/리뷰 findings 전문은 끌어오지 않는다.
 - **근거는 외부에 남기고 경로만 참조**: 자세한 판단 근거는 decision log / worktree에 남기고 메인은 경로만 보유한다.
 - **메인 직접 Read는 결정적 사실로 제한**: 메인이 직접 Read/Bash하는 것은 조율 판단에 필요한 결정적 사실(git 상태, 테스트 exit code, 토폴로지 가드)로 한정한다 — 코드 본문 통독은 sub-agent 몫이다.
-
-이는 리뷰어 게이트와 맞물린다: 리뷰어의 상세 findings는 리뷰어 컨텍스트에 두고, 메인은 verdict(pass/reject)와 요약만 받아 머지 여부만 판단한다.
 
 ---
 
 ## 위임 형태: agent team 적극 활용 (Prefer Agent Team)
 
-자율 모드는 단발 sub-agent보다 **agent team을 우선**한다. 단발은 한 번의 prompt → 한 번의 결과로 끝나 review→fix 반복마다 매번 처음부터 재위임해야 하지만, 자율 루프는 본질적으로 **구현 → 리뷰 → 수정**을 반복하는 구조라 team이 더 잘 맞는다.
+자율 루프는 본질적으로 **구현 → 리뷰 → 수정**을 반복하는 구조다. 단발 sub-agent는 한 번의 prompt → 한 번의 결과로 끝나 매 라운드를 처음부터 재위임해야 하므로, 자율 모드는 **agent team을 우선**한다.
 
 team을 우선하는 이유:
 
-- **리뷰어 게이트와 자연스럽게 맞물림**: implementer + reviewer(필요 시 designer)를 한 team의 역할로 두면, 리뷰 거부 시 reviewer findings를 implementer에게 **team 내부 SendMessage로 전달해 바로 수정**한다. 매번 새 worktree로 재위임할 때 생기는 컨텍스트 손실·셋업 비용 없이 수렴이 빠르다.
-- **장기 런에서 식별·제어 가능**: 이름으로 SendMessage해 정체 해소·단계 전환을 지시할 수 있다 (자율 모드는 *자동 개입 규칙* 표에서 계획된 단계 전환 + 정체 해소용 SendMessage를 허용한다).
-- **컨텍스트 격리 강화**: 한 작업의 반복 맥락이 team 안에 머물러 메인으로 전문(全文)이 올라오지 않는다 — *메인 컨텍스트 격리* 원칙을 직접 돕는다.
+- **리뷰어 게이트와 맞물림**: implementer + reviewer(필요 시 designer)를 한 team 역할로 두면, 리뷰 거부 시 findings를 implementer에게 **team 내부 SendMessage로 전달해 바로 수정**한다 — 새 worktree 재위임의 컨텍스트 손실·셋업 비용 없이 수렴이 빠르다.
+- **장기 런에서 식별·제어 가능**: 이름으로 SendMessage해 정체 해소·단계 전환을 지시할 수 있다 (*자동 개입 규칙*이 허용).
+- **컨텍스트 격리 강화**: 한 작업의 반복 맥락이 team 안에 머물러 메인으로 전문(全文)이 올라오지 않는다.
 
 구성:
 
-- **feature/task 하나 = team 하나**. 역할: (designer 선택) → implementer(`isolation: "worktree"`) → reviewer. 구성/이름/수명 규칙은 `delegation-patterns.md §TeamCreate 사용 패턴`을 따른다.
-- **review→fix는 team 내부에서**: reviewer reject → 같은 team의 implementer에게 SendMessage로 findings 전달 → 수정 → 재리뷰. 이 사이클도 `max_redispatch_per_task` 예산을 동일하게 소모한다(team 안이라고 무한 반복 금지). 예산 소진 → hard stop → 에스컬레이션.
-- **worktree 격리는 그대로**: team이어도 편집하는 멤버는 항상 `isolation: "worktree"`. team이 격리를 면제하지 않는다.
-- **정리**: team은 `TeamDelete` 전까지 남는다 — 작업 완료 시 worktree와 함께 정리한다.
+- **feature/task 하나 = team 하나**. 역할 (designer 선택) → implementer → reviewer. 구성·이름·수명·`isolation: "worktree"` 규칙은 모두 `delegation-patterns.md §TeamCreate 사용 패턴`을 따른다 (team이어도 편집 멤버는 worktree 격리 면제 없음).
+- **review→fix는 team 내부에서**: reviewer reject → 같은 team의 implementer에게 SendMessage → 수정 → 재리뷰. 이 사이클도 `max_redispatch_per_task` 예산을 동일하게 소모한다 (team 안이라고 무한 반복 금지). 소진 → hard stop → 에스컬레이션.
 
-단발이 여전히 맞는 경우(예외):
-
-- review→fix 반복이 사실상 없을 만큼 사소하고 독립적인 read-only 분석 1회성. 단 자율 모드는 리뷰어 게이트가 필수라 **편집 작업은 대부분 team이 유리**하다.
-- team 오버헤드가 이득을 넘는 게 명백할 때만 단발을 고른다. 의심스러우면 team.
+단발은 review→fix 반복이 없는 read-only 1회성에만 쓴다. 자율 모드는 리뷰어 게이트가 필수라 **편집 작업은 대부분 team이 유리**하며, 의심스러우면 team을 고른다.
 
 ---
 
@@ -185,7 +176,7 @@ team을 우선하는 이유:
             예산 소진 → hard stop → 에스컬레이션
 ```
 
-- 리뷰는 **머지 전(before_merge) 코드 품질/요구사항 게이트**다 — `integration_verify`와 같은 위치이되 보는 것이 다르다 (리뷰 = 코드 품질·요구사항 충족, integration_verify = 인프라 의존 동작 검증). 둘 다 통과해야 머지한다.
+- 리뷰(코드 품질·요구사항 충족)와 `integration_verify`(인프라 의존 동작)는 둘 다 머지 전 게이트이며 둘 다 통과해야 머지한다 — 리뷰는 작업별, integration_verify는 루프별로 돈다.
 - 리뷰어 거부는 실패와 동일하게 **`max_redispatch_per_task`를 소모**한다 — 리뷰 전용 새 예산을 만들지 않는다. 무한 재위임을 막는다.
 - 리뷰어 모델도 위 *모델 분배* 원칙으로 메인이 작업 리스크에 맞춰 정한다 (자동 머지의 유일한 안전장치이므로 보통 더 강한 역량을 둘 가치가 있으나, 고정은 아님).
 - 컨텍스트 격리: 리뷰어의 상세 findings·diff는 리뷰어 컨텍스트에 남기고, 메인은 verdict + 압축 요약만 받는다.
