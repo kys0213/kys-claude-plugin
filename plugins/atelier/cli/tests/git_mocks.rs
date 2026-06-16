@@ -20,10 +20,10 @@ type R<T> = Result<T, String>;
 /// Mockable `GitService` — only the reads the branch guard consumes.
 pub struct MockGit {
     pub is_inside_work_tree: Box<dyn Fn() -> bool>,
-    pub get_current_branch: Box<dyn Fn() -> String>,
+    pub current_branch: Box<dyn Fn() -> String>,
     pub detect_default_branch_readonly: Box<dyn Fn() -> R<String>>,
-    /// `(rebase, merge)` flags for `get_special_state`; `current_branch` is
-    /// derived from `get_current_branch`, mirroring `RealGitService` (#778).
+    /// `(rebase, merge)` flags for `get_special_state`; `current_branch` is the
+    /// branch the snapshot reports, mirroring `RealGitService` (#778).
     pub special_state_flags: Box<dyn Fn() -> (bool, bool)>,
 }
 
@@ -31,7 +31,7 @@ impl Default for MockGit {
     fn default() -> Self {
         MockGit {
             is_inside_work_tree: Box::new(|| true),
-            get_current_branch: Box::new(|| "main".to_string()),
+            current_branch: Box::new(|| "main".to_string()),
             detect_default_branch_readonly: Box::new(|| Ok("main".to_string())),
             special_state_flags: Box::new(|| (false, false)),
         }
@@ -50,7 +50,7 @@ impl GitService for MockGit {
         GitSpecialState {
             rebase,
             merge,
-            current_branch: (self.get_current_branch)(),
+            current_branch: (self.current_branch)(),
         }
     }
 }
