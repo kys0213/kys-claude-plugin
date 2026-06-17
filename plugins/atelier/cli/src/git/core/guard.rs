@@ -16,6 +16,22 @@ static GIT_COMMIT_PATTERN: LazyLock<Regex> =
 /// renders it), not the CLI router that merely forwards the flag.
 pub const DEFAULT_CREATE_BRANCH_SCRIPT: &str = "git switch -c";
 
+/// Branch names that are conventional repository defaults across most repos.
+/// These are protected unconditionally — independent of detection and of any
+/// `--default-branch` pin — so a single user-scope guard hook can't leave a
+/// repo's real default unprotected just because the pin was detected in a
+/// different repo (#810). Non-standard defaults (e.g. a custom branch name) are
+/// still covered by per-repo detection and the pin, both unioned in below.
+const CONVENTIONAL_DEFAULTS: &[&str] = &["main", "master", "develop", "trunk"];
+
+/// Appends `branch` to `set` if non-empty and not already present, keeping the
+/// protected set free of duplicates without imposing an ordering.
+fn push_unique(set: &mut Vec<String>, branch: &str) {
+    if !branch.is_empty() && !set.iter().any(|b| b == branch) {
+        set.push(branch.to_string());
+    }
+}
+
 /// Replaces single-/double-quoted segments with a space so quoted text
 /// arguments can't false-positive the commit matcher — on a protected branch,
 /// `gh issue create --body "... git commit ..."` must not be treated as a
@@ -196,30 +212,44 @@ impl GuardService for RealGuardService<'_> {
             return pass(Some("not a git repository"));
         }
 
-        // Resolve default branch. An empty/whitespace value (e.g. a setup that
-        // detected nothing and recorded a bare `--default-branch`) is treated as
-        // absence — not a real branch named "" — so the guard falls back to
-        // detection and still protects the true default instead of silently
-        // protecting nothing.
-        let default_branch = match input.default_branch.as_deref().map(str::trim) {
-            Some(b) if !b.is_empty() => b.to_string(),
-            // Read-only detection — the guard must not mutate repo state
-            // (no `git remote set-head`) on every tool invocation (#779).
-            _ => match self.git.detect_default_branch() {
-                Ok(b) => b,
-                Err(_) => return pass(Some("could not detect default branch")),
-            },
-        };
+        // Resolve the default-branch inputs. An empty/whitespace pin (e.g. a
+        // setup that detected nothing and recorded a bare `--default-branch`) is
+        // treated as absence — not a real branch named "".
+        let pin = input
+            .default_branch
+            .as_deref()
+            .map(str::trim)
+            .filter(|b| !b.is_empty());
+        // Read-only detection — the guard must not mutate repo state (no
+        // `git remote set-head`) on every tool invocation (#779). Detection runs
+        // even when a pin is present so a global hook's pin from one repo can't
+        // suppress another repo's real default (#810); a failure is non-fatal
+        // because the conventional defaults below still cover the common cases.
+        let detected = self.git.detect_default_branch().ok();
 
-        // Protected set: default + develop + extras.
-        let mut protected: Vec<String> = vec![default_branch.clone(), "develop".to_string()];
+        // Protected set: conventional defaults (always) ∪ detected ∪ pin ∪
+        // extras. The union is what makes a single user-scope hook safe across
+        // repos with different defaults (#810).
+        let mut protected: Vec<String> = Vec::new();
+        for name in CONVENTIONAL_DEFAULTS {
+            push_unique(&mut protected, name);
+        }
+        if let Some(b) = &detected {
+            push_unique(&mut protected, b);
+        }
+        if let Some(b) = pin {
+            push_unique(&mut protected, b);
+        }
         if let Some(extras) = &input.protected_branches {
             for b in extras {
-                if !protected.contains(b) {
-                    protected.push(b.clone());
-                }
+                push_unique(&mut protected, b);
             }
         }
+
+        // Default branch reported back (informational): the pin if explicit,
+        // else detection. May be `None` when neither is available yet the guard
+        // still blocks on a conventional default.
+        let default_branch = pin.map(str::to_string).or(detected);
 
         // Guard 2: special state (rebase/merge) → pass. The snapshot also
         // carries the current branch, so guards 2–3 and the branch check cost
@@ -241,7 +271,7 @@ impl GuardService for RealGuardService<'_> {
                 allowed: true,
                 reason: None,
                 current_branch: Some(current_branch),
-                default_branch: Some(default_branch),
+                default_branch,
             };
         }
 
@@ -268,7 +298,7 @@ impl GuardService for RealGuardService<'_> {
             allowed: false,
             reason: Some(reason),
             current_branch: Some(current_branch),
-            default_branch: Some(default_branch),
+            default_branch,
         }
     }
 }
