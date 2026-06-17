@@ -212,6 +212,19 @@ impl GuardService for RealGuardService<'_> {
             return pass(Some("not a git repository"));
         }
 
+        // Guards 2–3: special git state short-circuits *before* any
+        // default-branch work, so a rebase/merge/detached invocation skips the
+        // detection subprocess and the protected-set allocation entirely. The
+        // snapshot also carries the current branch, so the branch check below
+        // reuses it rather than spawning a second subprocess (#778).
+        let state = self.git.get_special_state();
+        if state.rebase || state.merge {
+            return pass(Some("special git state (rebase/merge)"));
+        }
+        if state.detached() {
+            return pass(Some("detached HEAD"));
+        }
+
         // Resolve the default-branch inputs. An empty/whitespace pin (e.g. a
         // setup that detected nothing and recorded a bare `--default-branch`) is
         // treated as absence — not a real branch named "".
@@ -250,19 +263,6 @@ impl GuardService for RealGuardService<'_> {
         // else detection. May be `None` when neither is available yet the guard
         // still blocks on a conventional default.
         let default_branch = pin.map(str::to_string).or(detected);
-
-        // Guard 2: special state (rebase/merge) → pass. The snapshot also
-        // carries the current branch, so guards 2–3 and the branch check cost
-        // one `get_special_state` round-trip, not a second subprocess (#778).
-        let state = self.git.get_special_state();
-        if state.rebase || state.merge {
-            return pass(Some("special git state (rebase/merge)"));
-        }
-
-        // Guard 3: detached HEAD → pass.
-        if state.detached() {
-            return pass(Some("detached HEAD"));
-        }
 
         let current_branch = state.current_branch;
 
