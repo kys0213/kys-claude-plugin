@@ -21,68 +21,6 @@ impl<T> CmdResult<T> {
 }
 
 // ---------------------------------------------------------------------------
-// Commit
-// ---------------------------------------------------------------------------
-
-pub const COMMIT_TYPES: [&str; 8] = [
-    "feat", "fix", "docs", "style", "refactor", "test", "chore", "perf",
-];
-
-#[derive(Debug, Clone)]
-pub struct CommitInput {
-    pub commit_type: String,
-    pub description: String,
-    pub scope: Option<String>,
-    pub body: Option<String>,
-    pub skip_add: bool,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct CommitOutput {
-    pub subject: String,
-    #[serde(rename = "jiraTicket", skip_serializing_if = "Option::is_none")]
-    pub jira_ticket: Option<String>,
-}
-
-// ---------------------------------------------------------------------------
-// Branch
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct BranchInput {
-    pub branch_name: String,
-    pub base_branch: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct BranchOutput {
-    #[serde(rename = "branchName")]
-    pub branch_name: String,
-    #[serde(rename = "baseBranch")]
-    pub base_branch: String,
-}
-
-// ---------------------------------------------------------------------------
-// PR
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct PrInput {
-    pub title: String,
-    pub description: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct PrOutput {
-    pub url: String,
-    pub title: String,
-    #[serde(rename = "baseBranch")]
-    pub base_branch: String,
-    #[serde(rename = "jiraTicket", skip_serializing_if = "Option::is_none")]
-    pub jira_ticket: Option<String>,
-}
-
-// ---------------------------------------------------------------------------
 // Reviews
 // ---------------------------------------------------------------------------
 
@@ -232,16 +170,6 @@ pub struct HookRegisterOutput {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct HookUnregisterOutput {
     pub command: String,
-}
-
-// ---------------------------------------------------------------------------
-// Jira
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JiraTicket {
-    pub raw: String,
-    pub normalized: String,
 }
 
 // ---------------------------------------------------------------------------

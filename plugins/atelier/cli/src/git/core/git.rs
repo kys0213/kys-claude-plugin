@@ -1,50 +1,23 @@
-//! Git operations — port of `git-utils/src/core/git.ts`. The `GitService`
-//! trait abstracts the git CLI so commands can be unit-tested with mocks
-//! (constructor injection); `RealGitService` shells out via `core::shell`.
-//! Method semantics (argument order, fallback chains, error propagation)
-//! match the TS factory exactly.
+//! Git reads consumed by the branch guard — a trimmed port of
+//! `git-utils/src/core/git.ts`. After the git CLI was narrowed to its
+//! mechanical surface (guard/hook/reviews), the guard is the only consumer of
+//! `GitService`, so the trait exposes just the three reads it needs;
+//! `RealGitService` shells out via `core::shell`. Commit/branch/PR flows now
+//! run as plain git/gh under the `git` skill's conventions, not through here.
 
-use crate::git::core::shell::{exec, exec_or_throw, ExecOptions};
+use crate::git::core::shell::{exec, ExecOptions};
 use crate::git::types::GitSpecialState;
 
-/// Options for `checkout`.
-#[derive(Debug, Clone, Default)]
-pub struct CheckoutOptions {
-    pub create: bool,
-    pub track: Option<String>,
-}
-
-/// Options for `push`.
-#[derive(Debug, Clone, Default)]
-pub struct PushOptions {
-    pub set_upstream: bool,
-}
-
 pub trait GitService {
+    /// Detects the repository's default branch. MUST NOT mutate repo state
+    /// (no `git remote set-head`): the branch guard calls this on every
+    /// PreToolUse invocation (#779), so it has to stay a pure read. Method 1
+    /// reads the cached `refs/remotes/origin/HEAD`; Method 3 probes common
+    /// branch names. (Setup warms `origin/HEAD` once so Method 1 resolves
+    /// non-standard defaults — see commands/setup.md.)
     fn detect_default_branch(&self) -> Result<String, String>;
-    /// Like `detect_default_branch` but never mutates repo state. Skips the
-    /// `git remote set-head` step (Method 2) so it is safe to call from a
-    /// PreToolUse guard on every tool invocation. Used by the branch guard;
-    /// `detect_default_branch` keeps the writing fallback for branch/PR flows.
-    fn detect_default_branch_readonly(&self) -> Result<String, String>;
-    fn get_current_branch(&self) -> String;
-    fn branch_exists(&self, name: &str, location: BranchLocation) -> bool;
     fn is_inside_work_tree(&self) -> bool;
-    fn has_uncommitted_changes(&self) -> bool;
     fn get_special_state(&self) -> GitSpecialState;
-    fn fetch(&self, remote: Option<&str>) -> Result<(), String>;
-    fn checkout(&self, branch: &str, options: Option<&CheckoutOptions>) -> Result<(), String>;
-    fn commit(&self, message: &str) -> Result<(), String>;
-    fn push(&self, branch: &str, options: Option<&PushOptions>) -> Result<(), String>;
-    fn pull(&self, branch: &str) -> Result<(), String>;
-    fn add_tracked(&self) -> Result<(), String>;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BranchLocation {
-    Local,
-    Remote,
-    Any,
 }
 
 /// Real `GitService` bound to an optional working directory.
@@ -57,19 +30,15 @@ pub fn create_git_service(cwd: Option<String>) -> RealGitService {
     RealGitService { cwd }
 }
 
+const NO_DEFAULT_BRANCH: &str =
+    "Could not detect default branch. Make sure you have a remote configured.";
+
 impl RealGitService {
     fn opts(&self) -> Option<ExecOptions> {
         self.cwd.as_ref().map(|cwd| ExecOptions {
             cwd: Some(cwd.clone()),
             env: None,
         })
-    }
-
-    /// `execOrThrow(['git', ...args])`.
-    fn git(&self, args: &[&str]) -> Result<String, String> {
-        let mut full = vec!["git"];
-        full.extend_from_slice(args);
-        exec_or_throw(&full, self.opts().as_ref())
     }
 
     /// `exec(['git', ...args])` returning (stdout, exit_code).
@@ -106,81 +75,29 @@ impl RealGitService {
         }
         None
     }
-}
 
-const NO_DEFAULT_BRANCH: &str =
-    "Could not detect default branch. Make sure you have a remote configured.";
-
-impl GitService for RealGitService {
-    fn detect_default_branch(&self) -> Result<String, String> {
-        // Method 1: cached origin/HEAD
-        if let Some(branch) = self.read_origin_head() {
-            return Ok(branch);
-        }
-
-        // Method 2: auto-detect from remote (mutates refs/remotes/origin/HEAD)
-        let _ = exec(
-            &["git", "remote", "set-head", "origin", "--auto"],
-            self.opts().as_ref(),
-        );
-        if let Some(branch) = self.read_origin_head() {
-            return Ok(branch);
-        }
-
-        // Method 3: fallback to common names
-        self.probe_common_default()
-            .ok_or_else(|| NO_DEFAULT_BRANCH.to_string())
-    }
-
-    fn detect_default_branch_readonly(&self) -> Result<String, String> {
-        // Method 1 + Method 3 only — no `set-head` write (see #779).
-        self.read_origin_head()
-            .or_else(|| self.probe_common_default())
-            .ok_or_else(|| NO_DEFAULT_BRANCH.to_string())
-    }
-
-    fn get_current_branch(&self) -> String {
+    /// Current branch name, empty on detached HEAD. Private helper for
+    /// `get_special_state` (the guard reads the branch off the state snapshot).
+    fn current_branch(&self) -> String {
         let (stdout, exit) = self.git_safe(&["branch", "--show-current"]);
         if exit != 0 {
             return String::new();
         }
         stdout
     }
+}
 
-    fn branch_exists(&self, name: &str, location: BranchLocation) -> bool {
-        if matches!(location, BranchLocation::Local | BranchLocation::Any) {
-            let (_, exit) = self.git_safe(&[
-                "show-ref",
-                "--verify",
-                "--quiet",
-                &format!("refs/heads/{name}"),
-            ]);
-            if exit == 0 {
-                return true;
-            }
-        }
-        if matches!(location, BranchLocation::Remote | BranchLocation::Any) {
-            let (_, exit) = self.git_safe(&[
-                "show-ref",
-                "--verify",
-                "--quiet",
-                &format!("refs/remotes/origin/{name}"),
-            ]);
-            if exit == 0 {
-                return true;
-            }
-        }
-        false
+impl GitService for RealGitService {
+    fn detect_default_branch(&self) -> Result<String, String> {
+        // Method 1 + Method 3 only — no `set-head` write (see #779).
+        self.read_origin_head()
+            .or_else(|| self.probe_common_default())
+            .ok_or_else(|| NO_DEFAULT_BRANCH.to_string())
     }
 
     fn is_inside_work_tree(&self) -> bool {
         let (_, exit) = self.git_safe(&["rev-parse", "--is-inside-work-tree"]);
         exit == 0
-    }
-
-    fn has_uncommitted_changes(&self) -> bool {
-        let (stdout, _) = self.git_safe(&["status", "--porcelain"]);
-        !stdout.is_empty()
     }
 
     fn get_special_state(&self) -> GitSpecialState {
@@ -203,51 +120,7 @@ impl GitService for RealGitService {
         GitSpecialState {
             rebase,
             merge,
-            current_branch: self.get_current_branch(),
+            current_branch: self.current_branch(),
         }
-    }
-
-    fn fetch(&self, remote: Option<&str>) -> Result<(), String> {
-        let remote = remote.unwrap_or("origin");
-        // Mirrors TS: uses `exec` (ignores failures at the call site).
-        let _ = exec(&["git", "fetch", remote, "--prune"], self.opts().as_ref());
-        Ok(())
-    }
-
-    fn checkout(&self, branch: &str, options: Option<&CheckoutOptions>) -> Result<(), String> {
-        let mut args: Vec<&str> = vec!["checkout"];
-        if options.map(|o| o.create).unwrap_or(false) {
-            args.push("-b");
-        }
-        args.push(branch);
-        if let Some(track) = options.and_then(|o| o.track.as_ref()) {
-            args.push("--track");
-            args.push(track);
-        }
-        self.git(&args).map(|_| ())
-    }
-
-    fn commit(&self, message: &str) -> Result<(), String> {
-        self.git(&["commit", "-m", message]).map(|_| ())
-    }
-
-    fn push(&self, branch: &str, options: Option<&PushOptions>) -> Result<(), String> {
-        let mut args: Vec<&str> = vec!["push"];
-        if options.map(|o| o.set_upstream).unwrap_or(false) {
-            args.push("-u");
-        }
-        args.push("origin");
-        args.push(branch);
-        self.git(&args).map(|_| ())
-    }
-
-    fn pull(&self, branch: &str) -> Result<(), String> {
-        // Mirrors TS: uses `exec` (failures ignored at call site).
-        let _ = exec(&["git", "pull", "origin", branch], self.opts().as_ref());
-        Ok(())
-    }
-
-    fn add_tracked(&self) -> Result<(), String> {
-        self.git(&["add", "-u"]).map(|_| ())
     }
 }

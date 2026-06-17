@@ -51,7 +51,7 @@ fn input_with(target: GuardCommandTarget) -> GuardCommandInput {
     GuardCommandInput {
         target,
         project_dir: "/tmp/test".to_string(),
-        create_branch_script: "atelier git branch".to_string(),
+        create_branch_script: "git switch -c".to_string(),
         default_branch: None,
         protected_branches: None,
     }

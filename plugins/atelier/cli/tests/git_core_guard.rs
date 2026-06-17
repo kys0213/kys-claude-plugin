@@ -14,7 +14,7 @@ fn base_input() -> GuardInput {
     GuardInput {
         target: GuardTarget::Write { file_path: None },
         project_dir: "/tmp/test".to_string(),
-        create_branch_script: "atelier git branch".to_string(),
+        create_branch_script: "git switch -c".to_string(),
         default_branch: None,
         protected_branches: None,
     }
@@ -50,14 +50,14 @@ fn merge_passes() {
 fn detached_passes() {
     // Detached HEAD: `git branch --show-current` prints nothing.
     let mut git = MockGit::default();
-    git.get_current_branch = Box::new(String::new);
+    git.current_branch = Box::new(String::new);
     assert!(check(git, &base_input()).allowed);
 }
 
 #[test]
 fn non_default_branch_passes() {
     let mut git = MockGit::default();
-    git.get_current_branch = Box::new(|| "feat/something".to_string());
+    git.current_branch = Box::new(|| "feat/something".to_string());
     assert!(check(git, &base_input()).allowed);
 }
 
@@ -69,16 +69,16 @@ fn default_branch_main_blocked() {
 #[test]
 fn default_branch_master_blocked() {
     let mut git = MockGit::default();
-    git.get_current_branch = Box::new(|| "master".to_string());
-    git.detect_default_branch_readonly = Box::new(|| Ok("master".to_string()));
+    git.current_branch = Box::new(|| "master".to_string());
+    git.detect_default_branch = Box::new(|| Ok("master".to_string()));
     assert!(!check(git, &base_input()).allowed);
 }
 
 #[test]
 fn default_branch_develop_blocked() {
     let mut git = MockGit::default();
-    git.get_current_branch = Box::new(|| "develop".to_string());
-    git.detect_default_branch_readonly = Box::new(|| Ok("develop".to_string()));
+    git.current_branch = Box::new(|| "develop".to_string());
+    git.detect_default_branch = Box::new(|| Ok("develop".to_string()));
     assert!(!check(git, &base_input()).allowed);
 }
 
@@ -98,8 +98,8 @@ fn empty_default_branch_falls_back_to_detection() {
 #[test]
 fn develop_protected_even_when_default_is_main() {
     let mut git = MockGit::default();
-    git.get_current_branch = Box::new(|| "develop".to_string());
-    git.detect_default_branch_readonly = Box::new(|| Ok("main".to_string()));
+    git.current_branch = Box::new(|| "develop".to_string());
+    git.detect_default_branch = Box::new(|| Ok("main".to_string()));
     let out = check(git, &base_input());
     assert!(!out.allowed);
     assert_eq!(out.current_branch.as_deref(), Some("develop"));
@@ -109,8 +109,8 @@ fn develop_protected_even_when_default_is_main() {
 #[test]
 fn extra_protected_branches_blocked() {
     let mut git = MockGit::default();
-    git.get_current_branch = Box::new(|| "staging".to_string());
-    git.detect_default_branch_readonly = Box::new(|| Ok("main".to_string()));
+    git.current_branch = Box::new(|| "staging".to_string());
+    git.detect_default_branch = Box::new(|| Ok("main".to_string()));
     let mut input = base_input();
     input.protected_branches = Some(vec!["staging".to_string(), "release".to_string()]);
     let out = check(git, &input);
@@ -121,8 +121,8 @@ fn extra_protected_branches_blocked() {
 #[test]
 fn branch_not_in_protected_passes() {
     let mut git = MockGit::default();
-    git.get_current_branch = Box::new(|| "feat/something".to_string());
-    git.detect_default_branch_readonly = Box::new(|| Ok("main".to_string()));
+    git.current_branch = Box::new(|| "feat/something".to_string());
+    git.detect_default_branch = Box::new(|| Ok("main".to_string()));
     let mut input = base_input();
     input.protected_branches = Some(vec!["staging".to_string()]);
     assert!(check(git, &input).allowed);
@@ -131,7 +131,7 @@ fn branch_not_in_protected_passes() {
 #[test]
 fn explicit_default_branch_used() {
     let mut git = MockGit::default();
-    git.get_current_branch = Box::new(|| "custom-default".to_string());
+    git.current_branch = Box::new(|| "custom-default".to_string());
     let mut input = base_input();
     input.default_branch = Some("custom-default".to_string());
     let out = check(git, &input);
@@ -142,7 +142,7 @@ fn explicit_default_branch_used() {
 #[test]
 fn detect_failure_passes_safe_mode() {
     let mut git = MockGit::default();
-    git.detect_default_branch_readonly = Box::new(|| Err("no remote".to_string()));
+    git.detect_default_branch = Box::new(|| Err("no remote".to_string()));
     assert!(check(git, &base_input()).allowed);
 }
 
@@ -151,7 +151,17 @@ fn write_block_reason_mentions_action_and_script() {
     let out = check(MockGit::default(), &base_input());
     let reason = out.reason.unwrap();
     assert!(reason.contains("파일을 수정하려 합니다"));
-    assert!(reason.contains("atelier git branch"));
+    assert!(reason.contains("git switch -c"));
+}
+
+#[test]
+fn block_reason_uses_default_script_when_empty() {
+    // No --create-branch-script supplied (CLI forwards an empty string): the
+    // guard must fall back to its own default, not render a bare `  <branch>`.
+    let mut input = base_input();
+    input.create_branch_script = String::new();
+    let reason = check(MockGit::default(), &input).reason.unwrap();
+    assert!(reason.contains(atelier::git::core::guard::DEFAULT_CREATE_BRANCH_SCRIPT));
 }
 
 #[test]
@@ -305,7 +315,7 @@ fn inside_project_on_default_blocked() {
 #[test]
 fn inside_project_on_feature_passes() {
     let mut git = MockGit::default();
-    git.get_current_branch = Box::new(|| "feat/something".to_string());
+    git.current_branch = Box::new(|| "feat/something".to_string());
     let mut input = base_input();
     input.project_dir = "/home/user/my-project".to_string();
     input.target = GuardTarget::Write {

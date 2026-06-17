@@ -11,6 +11,11 @@ use std::sync::LazyLock;
 static GIT_COMMIT_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\bgit\b.*\bcommit\b").unwrap());
 
+/// Branch-creation command shown in the block message when the caller passes no
+/// `--create-branch-script`. The default lives with the guard (the code that
+/// renders it), not the CLI router that merely forwards the flag.
+pub const DEFAULT_CREATE_BRANCH_SCRIPT: &str = "git switch -c";
+
 /// Replaces single-/double-quoted segments with a space so quoted text
 /// arguments can't false-positive the commit matcher — on a protected branch,
 /// `gh issue create --body "... git commit ..."` must not be treated as a
@@ -200,7 +205,7 @@ impl GuardService for RealGuardService<'_> {
             Some(b) if !b.is_empty() => b.to_string(),
             // Read-only detection — the guard must not mutate repo state
             // (no `git remote set-head`) on every tool invocation (#779).
-            _ => match self.git.detect_default_branch_readonly() {
+            _ => match self.git.detect_default_branch() {
                 Ok(b) => b,
                 Err(_) => return pass(Some("could not detect default branch")),
             },
@@ -246,10 +251,16 @@ impl GuardService for RealGuardService<'_> {
         } else {
             "파일을 수정하려 합니다"
         };
+        // Fall back to the default command when no script was supplied, so the
+        // CLI router can forward the raw `Option` without embedding the policy.
+        let script = match input.create_branch_script.trim() {
+            "" => DEFAULT_CREATE_BRANCH_SCRIPT,
+            s => s,
+        };
         let reason = [
             format!("[Branch Guard] 보호 브랜치({current_branch})에서 {action}."),
             "먼저 새 브랜치를 생성해주세요:".to_string(),
-            format!("  {} <branch-name>", input.create_branch_script),
+            format!("  {script} <branch-name>"),
         ]
         .join("\n");
 

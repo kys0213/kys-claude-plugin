@@ -54,13 +54,22 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
    gh auth status || gh auth login
    ```
 2. 환경 설정 파일 생성 (기존 git-utils 와 동일 스키마, 경로 `~/.git-workflow-env`).
-3. **기본 브랜치 감지** — guard 는 읽기전용이라 비표준 기본 브랜치(예: `trunk`)를 런타임에 감지하지 못할 수 있으므로,
-   1회성인 setup 시점에 full detection(set-head 포함)으로 감지해 주입합니다 (#785):
+3. **기본 브랜치 감지 + warm-up** — guard 는 읽기전용이라 비표준 기본 브랜치(예: `trunk`)를 런타임에 감지하지 못할 수 있으므로,
+   1회성인 setup 시점에 두 가지를 합니다 (#785, #779). **둘 다 보호 대상 프로젝트 repo 를 기준으로 실행**해야 합니다 —
+   가드 런타임이 `--project-dir "${CLAUDE_PROJECT_DIR:-.}"` 로 그 repo 의 `origin/HEAD` 를 읽기 때문입니다(#780). setup 의
+   cwd 가 다른 repo($HOME·multi-repo workspace)이면 엉뚱한 repo 를 warm 하거나 그 repo 의 기본 브랜치를 박게 됩니다:
    ```bash
-   # 실패(remote 없음 등)는 stderr 로 노출하되 setup 은 계속 진행 — 빈 값이면 아래에서 플래그를 생략
-   DEFAULT_BRANCH=$(atelier git default-branch || true)
+   PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"   # 가드 런타임과 동일한 앵커
+   # (a) #779 warm-up — 프로젝트 repo 의 origin/HEAD 를 채워, bake 가 비어도 guard 런타임 readonly 감지가
+   #     비표준 기본 브랜치(trunk 등)·비-GitHub remote 에서도 동작하게 한다.
+   #     gh/인증은 불필요하지만 --auto 는 origin 에 1회 질의하므로 remote 가 닿아야 한다(오프라인이면 no-op).
+   git -C "$PROJECT_DIR" remote set-head origin --auto 2>/dev/null || true
+   # (b) 명시적 pin 용 값 — GitHub repo 면 gh 로 조회해 아래에서 --default-branch 로 박는다. gh 는 cwd 의
+   #     remote 로 repo 를 추론하므로 프로젝트 repo 안에서 실행한다.
+   #     실패(인증 안 됨·비-GitHub·gh 없음)는 빈 값으로 두고 setup 은 계속 진행 — 빈 값이면 플래그 생략.
+   DEFAULT_BRANCH=$( (cd "$PROJECT_DIR" && gh repo view --json defaultBranchRef -q .defaultBranchRef.name) 2>/dev/null || true )
    ```
-   감지 실패 시(remote 없음 등) `--default-branch` 를 **생략**하고 guard 의 런타임 감지에 맡깁니다.
+   gh 조회가 실패해 `--default-branch` 를 **생략**해도, (a) 의 warm-up 덕분에 guard 의 런타임 readonly 감지(`origin/HEAD` → main/develop/master)가 기본 브랜치를 해결한다.
 4. Default Branch Guard hook 2종 등록 — `.sh` 경로가 아니라 **CLI 커맨드를 직접** 기록합니다.
    감지값이 비어있으면 `--default-branch` 플래그 자체를 빼야 합니다 (빈 플래그를 박으면 hook 실행 시 clap 이
    값 누락으로 exit 2 → 모든 편집 차단되거나, 빈 브랜치로 guard 가 무력화됨):

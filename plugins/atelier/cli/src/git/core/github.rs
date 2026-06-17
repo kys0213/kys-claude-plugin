@@ -15,15 +15,7 @@ pub struct ReviewThreadsResult {
     pub threads: Vec<ReviewThread>,
 }
 
-pub struct CreatePrOptions<'a> {
-    pub base: &'a str,
-    pub title: &'a str,
-    pub body: &'a str,
-}
-
 pub trait GitHubService {
-    fn is_authenticated(&self) -> bool;
-    fn create_pr(&self, options: &CreatePrOptions) -> Result<String, String>;
     fn get_review_threads(&self, pr_number: i64) -> Result<ReviewThreadsResult, String>;
     fn detect_current_pr_number(&self) -> Result<Option<i64>, String>;
 }
@@ -120,25 +112,6 @@ impl RealGitHubService {
 }
 
 impl GitHubService for RealGitHubService {
-    fn is_authenticated(&self) -> bool {
-        let (_, exit) = self.gh_safe(&["auth", "status"]);
-        exit == 0
-    }
-
-    fn create_pr(&self, options: &CreatePrOptions) -> Result<String, String> {
-        let url = self.gh(&[
-            "pr",
-            "create",
-            "--base",
-            options.base,
-            "--title",
-            options.title,
-            "--body",
-            options.body,
-        ])?;
-        Ok(url.trim().to_string())
-    }
-
     fn get_review_threads(&self, pr_number: i64) -> Result<ReviewThreadsResult, String> {
         let repo_info = self.gh(&["repo", "view", "--json", "owner,name"])?;
         let repo_json: serde_json::Value =

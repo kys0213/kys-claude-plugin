@@ -196,11 +196,11 @@ SubAgent (별도 Context):
 판단이 필요 없는 작업은 셸 스크립트나 CLI로 캡슐화합니다.
 
 ```bash
-# Bad: LLM이 매번 컨벤션을 해석하며 토큰 소비
-"브랜치명은 feat/ 접두사를 쓰고, 소문자 kebab-case로..."
+# Bad: LLM이 매번 settings.json 구조를 해석하며 편집
+"PreToolUse 훅을 추가하고 matcher 는 Write|Edit, command 는..."
 
-# Good: CLI 가 컨벤션을 캡슐화
-atelier git branch feat/my-feature
+# Good: CLI 가 결정적 편집을 캡슐화
+atelier git hook register PreToolUse "Write|Edit" "atelier git guard write"
 # LLM은 결과만 확인
 ```
 
@@ -281,11 +281,11 @@ TODO: 리팩토링 필요한 파일 목록...
 ### 5. LLM에게 결정적 로직 위임
 
 ```yaml
-# Bad: 브랜치 이름 규칙을 매번 LLM이 해석
-"브랜치명은 type/description 형식이고, type은 feat, fix, refactor 중 하나..."
+# Bad: stagnation 카운트 해석·차단 판단을 매번 LLM이 수행
+"최근 이벤트가 N개 미만이고 같은 파일이 반복되면 정체로 보고..."
 
-# Good: CLI 로 캡슐화
-atelier git branch $TYPE/$DESCRIPTION
+# Good: 결정적 판단을 CLI 로 캡슐화
+atelier autopilot check stagnation   # stdin payload → 판정 결과
 ```
 
 ---
