@@ -34,6 +34,7 @@ version: 0.1.0
 ### 메인 에이전트가 해도 되는 일
 - `Read`, `Glob`, `Grep`, `Bash(git status / git log / git diff --stat)` — 작업 분해와 위험도 판단을 위한 조사
 - `Agent`, `SendMessage`, `Monitor` — 위임과 조율 (agent team은 `Agent`의 `name`으로 spawn — 실험 플래그 필요, `TeamCreate`는 제거됨)
+- `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate` — 다중 작업의 분배·의존성·소유권·상태 추적 (선택; 작업이 多·의존성이 있을 때. `references/agent-monitor.md §Task 시스템`)
 - 결과물 취합 후 사용자에게 보고
 
 ### 메인 에이전트가 하면 안 되는 일
@@ -152,7 +153,7 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 |------|-------------|
 | `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때 |
 | `references/worktree-lifecycle.md` | 병렬 dispatch 직전, 또는 worktree 정리/머지를 다룰 때 |
-| `references/agent-monitor.md` | 백그라운드 agent를 띄웠고 진행 상황을 추적해야 할 때 |
+| `references/agent-monitor.md` | 백그라운드 agent 진행 추적, 또는 Task 시스템으로 다중 작업 상태·의존성을 추적할 때 |
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
 | `references/autonomous-driving.md` | 사용자가 자율 모드를 명시 opt-in 했을 때 (사람 개입 없이 루프 self-drive, 가드레일/종료 조건) |
 

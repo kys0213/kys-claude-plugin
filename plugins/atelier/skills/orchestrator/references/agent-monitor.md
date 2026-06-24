@@ -62,6 +62,32 @@ Monitor({...})  # 백그라운드 프로세스의 라인별 알림
 
 ---
 
+## Task 시스템으로 다중 작업 추적 (선택)
+
+작업이 여러 개이고 **의존성·소유권·진행 상태**를 구조적으로 추적해야 할 때, ad-hoc 메모 대신 Task 시스템을 쓴다. 단순 1~2개 fan-out에는 불필요하다 (오버헤드만 큼 — Monitor와 같은 절제 원칙).
+
+```
+TaskCreate({subject: "auth 리팩토링", description: "<범위/검증 기준>"})  # pending으로 생성
+TaskUpdate({taskId: "2", addBlockedBy: ["1"]})                          # 의존성: 1 완료 전 2 claim 불가
+TaskUpdate({taskId: "1", owner: "<agent name>"})                        # 소유권(claim)
+TaskList()                                                              # pending·미소유·non-blocked = 작업 가능
+TaskGet({taskId: "1"})                                                  # 전체 요구사항/blockedBy 확인
+TaskUpdate({taskId: "1", status: "completed"})                         # 완료 → blocked 작업 자동 해제
+```
+
+용도:
+
+- **작업 분배**: 분해된 단위를 `TaskCreate`로 등록하고, dispatch한 agent를 `owner`로 표시한다.
+- **의존성**: `addBlockedBy`로 순차 의존을 표현 — blocked task는 선행 완료 전 claim되지 않는다.
+- **진행 추적**: `TaskList`로 pending/in_progress/completed 상태를 결정적으로 조회한다.
+
+주의:
+
+- Task 시스템은 **작업 상태**(분배·의존성·소유권)를 추적하는 것이지 agent의 **출력**을 추적하지 않는다. agent 결과는 여전히 **완료 알림 + Agent 결과**로 받는다.
+- `TaskOutput`/`.output` 파일을 agent 추적에 쓰지 말 것 — deprecated이며, local agent의 `.output`은 전체 transcript symlink라 메인 컨텍스트를 넘치게 한다.
+
+---
+
 ## SendMessage: 사용자 결정 후에만
 
 ```
@@ -121,6 +147,7 @@ SendMessage({to: "<agent_name>", message: "..."})
 - **자동 재시도는 1회까지만** 검토 (외부 환경 원인이 명백할 때). 그 이상은 보고.
 - **불명확하면 항상 사용자에게**. 임의 추정으로 prompt 수정 → 본래 의도와 어긋날 위험.
 - **재위임 시에도 자기완결성 유지**: 이전 실패 정보를 새 prompt에 포함 (어디까지 진행됐고 무엇이 실패했는지).
+- **agentId로 재개**: 완료된 background agent는 `SendMessage({to: "<agentId>", ...})`로 컨텍스트를 유지한 채 다시 깨워 이어갈 수 있다 (spawn 결과의 agentId, 형식 `a...`). 직전 실패 맥락이 이미 그 agent에 남아 있으면 새 자기완결 prompt를 처음부터 짜는 비용을 던다. 단 외부 환경이 아니라 prompt 결함이 원인이면 새 위임이 더 깨끗하다.
 
 ---
 
