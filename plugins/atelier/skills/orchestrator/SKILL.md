@@ -34,7 +34,7 @@ version: 0.1.0
 ### 메인 에이전트가 해도 되는 일
 - `Read`, `Glob`, `Grep`, `Bash(git status / git log / git diff --stat)` — 작업 분해와 위험도 판단을 위한 조사
 - `Agent`, `SendMessage`, `Monitor` — 위임과 조율 (agent team은 `Agent`의 `name`으로 spawn — 실험 플래그 필요, `TeamCreate`는 제거됨)
-- `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate` — 다중 작업의 분배·의존성·소유권·상태 추적 (선택; 작업이 多·의존성이 있을 때. `references/agent-monitor.md §Task 시스템`)
+- `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate` — 다중 작업의 분배·의존성·상태 추적 (선택; `references/agent-monitor.md §Task 시스템`)
 - 결과물 취합 후 사용자에게 보고
 
 ### 메인 에이전트가 하면 안 되는 일
@@ -139,7 +139,7 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 | 여러 agent 협업·식별/제어 필요 (read-only 조율) | agent team | `Agent({name, ...})` + `SendMessage` (실험 플래그 필요·`team_name` 무시·편집 격리는 subagent) |
 | 파일 충돌 위험 있는 병렬 | worktree-isolated | `Agent({isolation: "worktree", ...})` |
 
-> **격리는 subagent만 보장**: agent team teammate는 공유 checkout이라 worktree 격리가 없다 (`team_name`은 받지만 무시됨). 편집·격리가 필요하면 team이 아니라 `isolation:"worktree"` 단발 subagent로. team은 read-only 조율/리뷰 전용이며, 그 안에서도 실제 편집은 격리 subagent에 위임한다.
+> **격리는 subagent만 보장**: agent team teammate는 공유 checkout이라 worktree 격리가 없다. 편집·격리는 team이 아니라 `isolation:"worktree"` subagent로, team은 조율 전용이다.
 
 자세한 판단 기준과 prompt 작성법은 `references/delegation-patterns.md`.
 
@@ -203,7 +203,6 @@ Agent({name: "implementer", run_in_background: true,     # 편집은 직접 X
        prompt: "<실제 편집은 Agent({isolation:'worktree'}) subagent로 위임>"})
 # 진행 중 개입 (name으로 식별, team_name은 무시됨)
 SendMessage({to: "reviewer", message: "..."})
-# team은 session 종료 시 자동 정리 (TeamDelete 없음)
 ```
 
 ---
