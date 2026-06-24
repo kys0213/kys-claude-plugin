@@ -372,6 +372,7 @@ opt-in 전면 허용이라도 다음은 **항상** 멈추고 사람에게 보고
 - [ ] 계약의 integration_verify를 run_at 시점에 메인이 직접 실행하는가?
 - [ ] 편집·격리가 필요한 작업을 **`isolation:"worktree"` subagent**에 위임했는가? (teammate 직접 편집 금지 — team은 공유 checkout)
 - [ ] 작업이 多·의존성이 있으면 Task 시스템(`TaskCreate`/`addBlockedBy`/`owner`)으로 상태를 추적하는가? (`agent-monitor.md §Task 시스템`)
+- [ ] 리스크 큰/되돌리기 어려운 편집은 **계획 우선 게이트**(계획 받아 승인 후 편집 재위임)를 거쳤는가? (`delegation-patterns.md §계획 우선 게이트`)
 - [ ] team을 썼다면 실험 플래그가 활성이고, 편집은 그 안의 격리 subagent로 위임했는가? (조율은 SendMessage)
 - [ ] 각 작업을 **머지 전 리뷰어**(구현자와 다른 역할/agent)로 검증하는가?
 - [ ] 리뷰 거부가 `max_redispatch_per_task` 예산을 소모하며 카운트되는가?
