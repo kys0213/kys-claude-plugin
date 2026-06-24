@@ -47,10 +47,10 @@ while not satisfied(contract.done_when) and loop_count < contract.max_loops:
     loop_count += 1
     tasks = decompose(remaining_work)                 # 분해
     log_decision("분해", tasks, refs=[대화, CLAUDE.md, rules])
-    dispatch(tasks, isolation="worktree",             # 위임 (base = epic 브랜치, agent team 우선)
+    dispatch(tasks, isolation="worktree",             # 위임 (base = epic 브랜치 — 편집은 격리 subagent)
              run_in_background=true,
              model=main_allocates_per_task)           # 모델 배분 — 메인 판단 (아래 모델 분배)
-    log_decision("병렬/순차 + 위임 형태(team) + 모델 배분", ...)
+    log_decision("병렬/순차 + 위임 형태(subagent/team) + 모델 배분", ...)
     results = await_completion_notifications()        # 모니터 (sleep/poll 금지)
     assert_topology()                                 # 가드: branch == epic + status clean (아래)
 
@@ -59,10 +59,10 @@ while not satisfied(contract.done_when) and loop_count < contract.max_loops:
             handle_failure(r)                         # 자동 재위임 규칙 (아래)
             log_decision("재위임 판단", r, refs=[실패이력, agent-monitor.md])
             continue
-        verdict = review(r)                           # 작업별 리뷰어 게이트 (team 내 reviewer 역할)
+        verdict = review(r)                           # 작업별 리뷰어 게이트 (reviewer subagent 또는 teammate)
         if verdict.rejected:
-            handle_review_rejection(r, verdict)       # team 내부 fix(SendMessage) 우선, 안 되면 재위임 (max_redispatch 예산 소모)
-            log_decision("리뷰 거부 → team fix/재위임", verdict, refs=[리뷰 findings])
+            handle_review_rejection(r, verdict)       # 격리 subagent 재위임(실패 맥락 포함), team이면 SendMessage로 조율 (max_redispatch 예산 소모)
+            log_decision("리뷰 거부 → 재위임/조율", verdict, refs=[리뷰 findings])
 
     merge_coordinate(passed_results)                  # 리뷰 통과분만 머지 — 충돌은 자동 위임 (아래)
     assert_topology()                                 # 가드: 매 머지 직후에도 (#783)
@@ -107,22 +107,27 @@ escalate_or_report(reason, decision_log=contract.log_dir)   # 완료 / 예산소
 
 ---
 
-## 위임 형태: agent team 적극 활용 (Prefer Agent Team)
+## 위임 형태: 편집은 격리 subagent, 조율은 team
 
-자율 루프는 본질적으로 **구현 → 리뷰 → 수정**을 반복하는 구조다. 단발 sub-agent는 한 번의 prompt → 한 번의 결과로 끝나 매 라운드를 처음부터 재위임해야 하므로, 자율 모드는 **agent team을 우선**한다.
+자율 루프는 본질적으로 **구현 → 리뷰 → 수정**을 반복하는 구조다. 두 책임을 분리한다: **편집·격리는 `isolation:"worktree"` subagent가**(하베스트 보장), **조율은 team이**(공유 checkout).
 
-team을 우선하는 이유:
+핵심 제약:
 
-- **리뷰어 게이트와 맞물림**: implementer + reviewer(필요 시 designer)를 한 team 역할로 두면, 리뷰 거부 시 findings를 implementer에게 **team 내부 SendMessage로 전달해 바로 수정**한다 — 새 worktree 재위임의 컨텍스트 손실·셋업 비용 없이 수렴이 빠르다.
+- **격리는 subagent만 보장한다**: agent team teammate는 공유 checkout이라 per-teammate worktree 격리가 없다 — 같은 파일을 편집하면 덮어쓴다. `team_name`은 받지만 무시된다. 따라서 **편집은 teammate가 직접 하지 않고 `isolation:"worktree"` subagent에 위임**한다.
+- **team은 실험 기능이다**: `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`이 없으면 teammate가 spawn되지 않는다. 플래그가 없는 환경에서는 team을 쓰지 않고 단발 격리 subagent 재위임으로 review→fix를 돈다.
+
+team을 쓸 때의 이득 (실험 플래그 활성 시):
+
+- **리뷰어 게이트 조율**: reviewer teammate + implementer teammate를 한 team에 두면, 리뷰 거부 findings를 **team 내부 SendMessage로 전달**해 다음 라운드를 조율한다 (실제 편집은 implementer가 격리 subagent로 위임).
 - **장기 런에서 식별·제어 가능**: 이름으로 SendMessage해 정체 해소·단계 전환을 지시할 수 있다 (*자동 개입 규칙*이 허용).
 - **컨텍스트 격리 강화**: 한 작업의 반복 맥락이 team 안에 머물러 메인으로 전문(全文)이 올라오지 않는다.
 
 구성:
 
-- **feature/task 하나 = team 하나**. 역할 (designer 선택) → implementer → reviewer. 구성·이름·수명·`isolation: "worktree"` 규칙은 모두 `delegation-patterns.md §TeamCreate 사용 패턴`을 따른다 (team이어도 편집 멤버는 worktree 격리 면제 없음).
-- **review→fix는 team 내부에서**: reviewer reject → 같은 team의 implementer에게 SendMessage → 수정 → 재리뷰. 이 사이클도 `max_redispatch_per_task` 예산을 동일하게 소모한다 (team 안이라고 무한 반복 금지). 소진 → hard stop → 에스컬레이션.
+- **feature/task 하나 = team 하나**(실험 플래그 시). reviewer + implementer 역할. 구성·이름·수명은 `delegation-patterns.md §Agent team 사용 패턴`을 따른다. **편집 격리는 team이 아니라 그 안에서 띄우는 `isolation:"worktree"` subagent가 책임진다** — teammate에게 worktree 이동을 위임하지 않는다 (격리가 프롬프트 희망으로 격하 → 공유 checkout 오염, #783).
+- **review→fix 조율**: reviewer reject → implementer에게 SendMessage → implementer가 격리 subagent로 수정 재위임 → 재리뷰. 이 사이클도 `max_redispatch_per_task` 예산을 동일하게 소모한다 (무한 반복 금지). 소진 → hard stop → 에스컬레이션.
 
-단발은 review→fix 반복이 없는 read-only 1회성에만 쓴다. 자율 모드는 리뷰어 게이트가 필수라 **편집 작업은 대부분 team이 유리**하며, 의심스러우면 team을 고른다.
+플래그가 없거나 조율이 불필요하면 **단발 격리 subagent 재위임**(이전 실패 맥락 포함)으로 review→fix를 돈다. 의심스러우면 단발 subagent를 고른다 — 격리가 항상 보장되기 때문이다.
 
 ---
 
@@ -342,7 +347,7 @@ opt-in 전면 허용이라도 다음은 **항상** 멈추고 사람에게 보고
 15. **리뷰 전용 무한 재위임**: 리뷰 거부를 `max_redispatch_per_task` 예산 밖에서 반복 → 폭주. 리뷰 거부도 동일 예산을 소모하고 소진 시 에스컬레이션.
 16. **고정 모델 매핑 박기**: "구현은 항상 X, 리뷰는 항상 Y"로 못 박음 → 모델이 똑똑해져도 비효율 유지. 매 dispatch마다 작업 리스크에 맞춰 재평가.
 17. **메인 컨텍스트로 전문 끌어오기**: 전체 diff·파일 전문·리뷰 findings 전문을 메인이 직접 통독 → 긴 루프에서 메인 컨텍스트 포화. 메인은 압축 요약 + verdict만 수령.
-18. **review→fix를 매번 단발 재위임**: 리뷰 거부마다 새 단발 sub-agent를 처음부터 띄움 → 컨텍스트 손실·셋업 비용 반복, 수렴 느림. implementer+reviewer를 한 team에 두고 내부 SendMessage로 수정 사이클을 돌린다.
+18. **teammate에 편집 격리 기대**: team은 공유 checkout이라 worktree 격리가 없는데 teammate가 직접 편집 → 덮어쓰기/메인 오염(#783). 편집은 `isolation:"worktree"` subagent에 위임하고 team은 조율만. 또한 단발 재위임 시 이전 실패 맥락을 새 prompt에 포함해 컨텍스트 손실을 줄인다.
 
 ---
 
@@ -365,7 +370,10 @@ opt-in 전면 허용이라도 다음은 **항상** 멈추고 사람에게 보고
 
 - [ ] 매 sub-agent 완료 직후 + 매 머지 직후 토폴로지 가드를 실행하는가?
 - [ ] 계약의 integration_verify를 run_at 시점에 메인이 직접 실행하는가?
-- [ ] 위임 형태로 **agent team을 우선**했는가? (implementer + reviewer 역할, review→fix를 team 내부 SendMessage로)
+- [ ] 편집·격리가 필요한 작업을 **`isolation:"worktree"` subagent**에 위임했는가? (teammate 직접 편집 금지 — team은 공유 checkout)
+- [ ] 작업이 多·의존성이 있으면 Task 시스템(`TaskCreate`/`addBlockedBy`/`owner`)으로 상태를 추적하는가? (`agent-monitor.md §Task 시스템`)
+- [ ] 리스크 큰/되돌리기 어려운 편집은 **계획 우선 게이트**(계획 받아 승인 후 편집 재위임)를 거쳤는가? (`delegation-patterns.md §계획 우선 게이트`)
+- [ ] team을 썼다면 실험 플래그가 활성이고, 편집은 그 안의 격리 subagent로 위임했는가? (조율은 SendMessage)
 - [ ] 각 작업을 **머지 전 리뷰어**(구현자와 다른 역할/agent)로 검증하는가?
 - [ ] 리뷰 거부가 `max_redispatch_per_task` 예산을 소모하며 카운트되는가?
 - [ ] 각 작업의 모델을 작업 리스크에 맞춰 배분하고, 비표준 선택은 기록하는가?

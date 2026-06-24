@@ -33,7 +33,8 @@ version: 0.1.0
 
 ### 메인 에이전트가 해도 되는 일
 - `Read`, `Glob`, `Grep`, `Bash(git status / git log / git diff --stat)` — 작업 분해와 위험도 판단을 위한 조사
-- `Agent`, `TeamCreate`, `SendMessage`, `Monitor` — 위임과 조율
+- `Agent`, `SendMessage`, `Monitor` — 위임과 조율 (agent team은 `Agent`의 `name`으로 spawn — 실험 플래그 필요, `TeamCreate`는 제거됨)
+- `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate` — 다중 작업의 분배·의존성·상태 추적 (선택; `references/agent-monitor.md §Task 시스템`)
 - 결과물 취합 후 사용자에게 보고
 
 ### 메인 에이전트가 하면 안 되는 일
@@ -135,8 +136,10 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 | 상황 | 형태 | 도구 |
 |------|------|------|
 | 1회성 독립 작업, 결과물 단일 | 단발 sub-agent | `Agent({...})` |
-| 여러 agent 협업 또는 장기 진행, 식별/제어 필요 | agent team | `TeamCreate` + `Agent({team_name, name})` + `SendMessage` |
+| 여러 agent 협업·식별/제어 필요 (read-only 조율) | agent team | `Agent({name, ...})` + `SendMessage` (실험 플래그 필요·`team_name` 무시·편집 격리는 subagent) |
 | 파일 충돌 위험 있는 병렬 | worktree-isolated | `Agent({isolation: "worktree", ...})` |
+
+> **격리는 subagent만 보장**: agent team teammate는 공유 checkout이라 worktree 격리가 없다. 편집·격리는 team이 아니라 `isolation:"worktree"` subagent로, team은 조율 전용이다.
 
 자세한 판단 기준과 prompt 작성법은 `references/delegation-patterns.md`.
 
@@ -150,7 +153,7 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 |------|-------------|
 | `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때 |
 | `references/worktree-lifecycle.md` | 병렬 dispatch 직전, 또는 worktree 정리/머지를 다룰 때 |
-| `references/agent-monitor.md` | 백그라운드 agent를 띄웠고 진행 상황을 추적해야 할 때 |
+| `references/agent-monitor.md` | 백그라운드 agent 진행 추적, 또는 Task 시스템으로 다중 작업 상태·의존성을 추적할 때 |
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
 | `references/autonomous-driving.md` | 사용자가 자율 모드를 명시 opt-in 했을 때 (사람 개입 없이 루프 self-drive, 가드레일/종료 조건) |
 
@@ -190,14 +193,16 @@ result_A = Agent({description: "task A", prompt: "..."})
 Agent({description: "task B", prompt: "<task B + A의 결과 요약>"})
 ```
 
-### Agent team
+### Agent team (조율 전용 — 실험 플래그 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 필요)
 
 ```
-TeamCreate({name: "feature-x"})
-Agent({team_name: "feature-x", name: "designer", run_in_background: true, ...})
-Agent({team_name: "feature-x", name: "implementer", run_in_background: true, ...})
-# 진행 중 개입
-SendMessage({to: "designer", message: "..."})
+# team은 공유 checkout — 편집 격리 없음. 편집은 isolated subagent에 위임.
+Agent({name: "reviewer", run_in_background: true,        # read-only 조율/리뷰
+       prompt: "<epic diff 검토, 편집 X>"})
+Agent({name: "implementer", run_in_background: true,     # 편집은 직접 X
+       prompt: "<실제 편집은 Agent({isolation:'worktree'}) subagent로 위임>"})
+# 진행 중 개입 (name으로 식별, team_name은 무시됨)
+SendMessage({to: "reviewer", message: "..."})
 ```
 
 ---
