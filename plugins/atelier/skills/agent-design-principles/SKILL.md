@@ -157,9 +157,9 @@ Skill 20개 → 시스템 프롬프트에 20개 description 상주 (과다)
 
 사용자 진입점은 Command 와 user-invocable Skill 둘 다 될 수 있다. 가르는 기준은 **"모델이 자동 트리거해도 되나?"** 하나다:
 
-- **Command** (`commands/`): User 만 발동. 모델이 멋대로 실행하면 곤란한 것(비용·비가역·명시적 셋업). 예: setup, autopilot 데몬.
+- **Command** (`commands/`): User 만 발동. 모델이 멋대로 실행하면 곤란한 것(비용·비가역·명시적 셋업). 예: setup.
 - **user-invocable Skill** (`skills/`, `user-invocable: true`): User + 모델 맥락 자동 발동. 도메인이 맞으면 모델이 알아서 꺼내써야 하는 것. 예: git, grill, brainstorm, spec-write·spec-review, workflow, orchestrator.
-- **Protocol Skill** (`skills/`, `user-invocable: false`): 단독 호출은 무의미하고 특정 커맨드/데몬이 내부 디스패치하는 절차 본문. 예: autopilot skill.
+- **Protocol Skill** (`skills/`, `user-invocable: false`): 단독 호출은 무의미하고 특정 커맨드/상위 skill 이 내부 디스패치하는 절차 본문. 예: orchestrator 의 `references/` 프로토콜 문서.
 - **Reference Skill** (`skills/`, `user-invocable: false`): 단독으로 읽어도 의미 있는 durable 전문성·지식 본문. 커맨드가 디스패치하지 않고, 모델이나 다른 컴포넌트(agent 의 `skills:` 선언, rule 포인터)가 맥락에서 on-demand 로 로드한다. 예: 이 `agent-design-principles` skill 자체. (항상-적용 컨벤션은 §3.5 에 따라 rule 로 내려가므로, 여기 남는 건 가끔 로드하는 전문성뿐이다.)
 
 ---
@@ -281,11 +281,11 @@ TODO: 리팩토링 필요한 파일 목록...
 ### 5. LLM에게 결정적 로직 위임
 
 ```yaml
-# Bad: stagnation 카운트 해석·차단 판단을 매번 LLM이 수행
-"최근 이벤트가 N개 미만이고 같은 파일이 반복되면 정체로 보고..."
+# Bad: 기본 브랜치 보호 여부를 매번 LLM이 해석·판단
+"현재 브랜치가 main/master/develop 중 하나면 커밋을 막아야 하고..."
 
 # Good: 결정적 판단을 CLI 로 캡슐화
-atelier autopilot check stagnation   # stdin payload → 판정 결과
+atelier git guard commit   # 현재 브랜치 → 차단/통과 판정
 ```
 
 ---

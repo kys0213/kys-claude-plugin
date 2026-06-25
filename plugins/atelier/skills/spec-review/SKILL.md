@@ -53,7 +53,7 @@ spec-review 슬래시 또는 모델 자동 호출로 진입하면, 사용자의 
 | `references/gap-audit-loop.md` | L2 종합 + audit 감사 수행 시 | gap-aggregator 입력, gap-auditor 단일 게이트, audit 루프 정책, fix request 형식, 실패 모드 |
 | `references/report-format.md` | 최종 리포트 출력 시 | spec-review / gap-detect 출력 구조, 검증 통계 footer, Output Examples |
 | `references/annotation.md` | 외부 spec frontmatter 주석(`annotate-spec`) 시 | spec-annotator 호출, 신뢰도별 confirm, frontmatter 갱신 모드 |
-| `references/quality-criteria.md` | 스펙 품질 평가·등급 산정 시 (autopilot Spec Quality Gate 포함) | Big Picture/Detail/Verification/Consistency 4관점 체크리스트, 점수·등급 기준 |
+| `references/quality-criteria.md` | 스펙 품질 평가·등급 산정 시 | Big Picture/Detail/Verification/Consistency 4관점 체크리스트, 점수·등급 기준 |
 | `references/issue-report.md` | 분석 결과를 심각도 기반 이슈 리포트로 보고할 때 | severity 기준, 이슈 항목 구조, 마크다운 출력 형식 |
 
 ## 공통 원칙
