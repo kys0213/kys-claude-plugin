@@ -156,6 +156,7 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 | `references/agent-monitor.md` | 백그라운드 agent 진행 추적, 또는 Task 시스템으로 다중 작업 상태·의존성을 추적할 때 |
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
 | `references/autonomous-driving.md` | 자율 루프(분해→위임→머지 self-drive)를 돌릴 때 — **오케스트레이터 기본 동작**. 계약·가드레일·종료 조건·에스컬레이션 (단발 fan-out 1회면 불필요) |
+| `references/spec-driven-review.md` | 자율주행이 **spec 문서를 입력으로 구현**할 때 — 팀 모드로 검토자(spec↔구현)·QA 매니저(spec↔테스트)를 상주시켜 worktree 코드를 계속 리뷰·개선하는 게이트 (spec 입력이 없으면 불필요) |
 
 ---
 
