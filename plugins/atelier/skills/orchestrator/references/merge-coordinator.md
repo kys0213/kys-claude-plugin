@@ -9,6 +9,8 @@ user-invocable: false
 
 병렬 sub-agent들이 worktree에 결과를 남긴 뒤, 그 결과를 epic 브랜치로 안정적으로 통합하는 단계. **메인은 직접 머지/충돌 해결을 하지 않고**, 순서를 결정하고 충돌은 `git` skill 의 `references/conflict-resolution.md` 전략에 위임한다.
 
+> **모드별 차이**: 오케스트레이터 **기본 동작은 자율 주행**이라 충돌 없는 머지는 보고 없이 자동 진행하고, 충돌은 `git-resolve` sub-agent 에 자동 위임한다(`autonomous-driving.md §머지/충돌`). 사용자가 **HITL 로 opt-out** 한 경우에만 머지 전 보고 후 결정을 받는다(옵션 B). 단 도메인 의미 충돌·토폴로지 위반은 두 모드 모두 에스컬레이션이다.
+
 ## 머지 대상: epic 브랜치
 
 이 단계의 머지 target은 **현재 epic 브랜치**다. main 브랜치가 아니다.

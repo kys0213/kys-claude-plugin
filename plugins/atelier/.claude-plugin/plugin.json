@@ -1,17 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "agents": [
-    "./agents/autopilot/branch-promoter.md",
-    "./agents/autopilot/ci-failure-analyzer.md",
-    "./agents/autopilot/ci-fixer.md",
-    "./agents/autopilot/gap-detector.md",
-    "./agents/autopilot/gap-ledger-writer.md",
-    "./agents/autopilot/issue-analyzer.md",
-    "./agents/autopilot/issue-dependency-analyzer.md",
-    "./agents/autopilot/issue-implementer.md",
-    "./agents/autopilot/pr-merger.md",
-    "./agents/autopilot/stale-task-reviewer.md",
-    "./agents/autopilot/test-analyzer.md",
     "./agents/spec/file-pair-observer.md",
     "./agents/spec/gap-aggregator.md",
     "./agents/spec/gap-auditor.md",
@@ -25,10 +14,9 @@
     "name": "kys0213"
   },
   "commands": [
-    "./commands/autopilot/autopilot.md",
     "./commands/setup.md"
   ],
-  "description": "통합 개발 워크플로우 — spec/git/autopilot/orchestrator/workflow 를 관심사 단위 skill 로 큐레이션한 단일 plugin",
+  "description": "통합 개발 워크플로우 — spec/git/orchestrator/workflow 를 관심사 단위 skill 로 큐레이션한 단일 plugin",
   "name": "atelier",
   "skills": [
     "./skills"

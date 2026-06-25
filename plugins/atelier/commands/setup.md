@@ -1,12 +1,12 @@
 ---
-description: atelier 통합 환경을 초기화합니다 (git / autopilot / style / workflow 모듈 선택 + 기존 hook 마이그레이션 + guard hook 관리)
+description: atelier 통합 환경을 초기화합니다 (git / style / workflow 모듈 선택 + 기존 hook 마이그레이션 + guard hook 관리)
 argument-hint: ""
 allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 ---
 
 # atelier setup
 
-흡수된 6개 plugin(git-utils, github-autopilot, coding-style, ...)의 설정을 단일 진입점으로 통합합니다.
+흡수된 plugin(git-utils, coding-style, workflow-guide 등)의 설정을 단일 진입점으로 통합합니다.
 모듈을 선택해 설치하고, 기존 frozen plugin 경로로 등록된 hook 을 atelier 로 마이그레이션합니다.
 
 > ⚠️ 모든 hook 은 user scope(`~/.claude/settings.json`)에 등록됩니다.
@@ -38,10 +38,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 | 선택 | 수행 동작 | 출처 |
 |---|---|---|
 | `git` | GitHub 인증 확인 + `~/.git-workflow-env` 생성 + Default Branch Guard hook | git-utils setup |
-| `autopilot` | `github-autopilot.local.md` 생성 (autopilot hook 은 plugin-declared, config 로 self-gate) | github-autopilot setup |
 | `style` | `~/.claude/CLAUDE.md` 코딩 원칙 병합 | coding-style setup |
 | `workflow` | `.claude/rules/agent-design-principles.md` 룰 설치 | workflow-guide install |
-| `all` | 위 네 가지 전부 | 신규 |
+| `all` | 위 세 가지 전부 | 신규 |
 
 선택된 모듈만 아래 해당 Step 을 수행합니다.
 
@@ -94,20 +93,14 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
    { "type": "command", "command": "atelier git guard commit --project-dir \"${CLAUDE_PROJECT_DIR:-.}\" --default-branch main" }
    ```
 
-## Step 2b — autopilot 모듈
-
-프로젝트 설정 파일 `github-autopilot.local.md` 를 생성합니다 (기존 스키마/경로 동일 — 호환). autopilot hook 은 이 config 존재로 self-gate 하므로 생성만으로 활성화됩니다.
-
-> autopilot SQLite store(ledger/task DB)는 기존 스키마/경로를 계승하므로 마이그레이션 불필요.
-
-## Step 2c — workflow 모듈
+## Step 2b — workflow 모듈
 
 `workflow` skill 의 §"설계 원칙 룰 설치" 절차를 수행합니다:
 
 1. `.claude/rules/` 디렉토리가 없으면 생성, 대상 파일이 존재하면 덮어쓸지 AskUserQuestion 으로 확인
 2. `${CLAUDE_PLUGIN_ROOT}/rules/agent-design-principles.md` 를 **내용 수정 없이 그대로** `.claude/rules/agent-design-principles.md` 에 복사
 
-## Step 2d — style 모듈
+## Step 2c — style 모듈
 
 `~/.claude/CLAUDE.md` 에 코딩 원칙 템플릿을 병합합니다 (워터마크 기반 중복 확인 — 기존 coding-style 로직 동일).
 
@@ -141,7 +134,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 | frozen 경로 | atelier 등록 command |
 |---|---|
 | `github-autopilot/hooks/check-cli-version.sh` | **제거만** (재등록 안 함) — 플러그인이 `hooks/hooks.json` 으로 직접 선언 |
-| `github-autopilot/hooks/guard-pr-base.sh` | **제거만** (재등록 안 함) — 스크립트 삭제됨 (#776: base 계산은 `atelier autopilot base-branch` CLI 로 이전) |
+| `github-autopilot/hooks/guard-pr-base.sh` | **제거만** (재등록 안 함) — 스크립트 삭제됨 (#776) |
 | `github-autopilot/hooks/protect-stagnation.sh` | **제거만** (재등록 안 함) — 스크립트 삭제됨 (#776) |
 | `coding-style/hooks/suggest-simplify.sh` | **제거만** (재등록 안 함) — 플러그인이 `hooks/hooks.json` 으로 직접 선언 |
 | `git-utils/scripts/default-branch-guard-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard write ...` (§"git 모듈" 등록 형식) |
@@ -149,10 +142,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 
 ## Step 4 — CLI alias (선택)
 
-기존 `autopilot` / `git-utils` 호출 호환을 위해 셸 rc 에 alias 추가를 **AskUserQuestion 으로 동의받은 경우에만** 제안합니다:
+기존 `git-utils` 호출 호환을 위해 셸 rc 에 alias 추가를 **AskUserQuestion 으로 동의받은 경우에만** 제안합니다:
 
 ```bash
-alias autopilot='atelier autopilot'
 alias git-utils='atelier git'
 ```
 

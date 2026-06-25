@@ -38,7 +38,6 @@ version: 1.0.0
 | `spec-write` | **대화 ≠ 문서**. grill 은 설계를 *대화로 도전*하고, `spec-write` 는 *합의된 설계를 스펙 문서로 형식화*(DESIGN/concerns/flows)한다 | 합의된 설계를 장기 스펙 문서로 남길 땐 `spec-write`, 단일 작업 구현은 Plan Mode 로 |
 | `spec-review` | 작성된 스펙을 *코드와 대조 분석*(L1/L2/audit)·품질 평가하는 단계. grill 의 설계 도전과 다른 활동 | 스펙 작성 후 코드 정합 확인이 필요하면 `spec-review` 로 |
 | Plan Mode | grill 은 *무엇을/왜*(의도·설계 합의), Plan Mode 는 *어떻게*(코드 변경 단계) | 의도가 확정되고 코드 변경이 필요하면 Plan Mode 로 넘긴다 |
-| `autopilot` | 자율 루프와 무관, 사람↔에이전트 대화 전용 | 해당 없음 |
 
 ## 출처
 

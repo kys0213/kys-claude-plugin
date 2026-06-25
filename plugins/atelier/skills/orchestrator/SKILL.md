@@ -68,7 +68,7 @@ main
 
 1. **현재 브랜치가 epic 브랜치인가?**
    - `git branch --show-current` 확인
-   - `main` / 일반 feature 브랜치라면 epic 브랜치를 먼저 만들거나 사용자에게 어떤 epic 브랜치로 진입할지 물어본다 (`atelier:epic init <name>` 또는 `atelier:branch epic/<name>`).
+   - `main` / 일반 feature 브랜치라면 epic 브랜치를 먼저 만들거나 사용자에게 어떤 epic 브랜치로 진입할지 물어본다 (`git` skill 의 브랜치 생성 또는 plain `git checkout -b epic/<name>`).
 2. **현재 메인이 다른 worktree 안에 있지 않은가?**
    - `git rev-parse --show-toplevel` 가 repo의 메인 working tree여야 함
    - worktree 안에서 오케스트레이터를 시작했다면 즉시 메인 working tree로 빠져나오도록 사용자에게 보고
@@ -155,7 +155,7 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 | `references/worktree-lifecycle.md` | 병렬 dispatch 직전, 또는 worktree 정리/머지를 다룰 때 |
 | `references/agent-monitor.md` | 백그라운드 agent 진행 추적, 또는 Task 시스템으로 다중 작업 상태·의존성을 추적할 때 |
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
-| `references/autonomous-driving.md` | 사용자가 자율 모드를 명시 opt-in 했을 때 (사람 개입 없이 루프 self-drive, 가드레일/종료 조건) |
+| `references/autonomous-driving.md` | 자율 루프(분해→위임→머지 self-drive)를 돌릴 때 — **오케스트레이터 기본 동작**. 계약·가드레일·종료 조건·에스컬레이션 (단발 fan-out 1회면 불필요) |
 
 ---
 
@@ -209,13 +209,15 @@ SendMessage({to: "reviewer", message: "..."})
 
 ## 사용자 보고 원칙
 
-- **시작 시**: 분해된 작업 목록 + 병렬/순차 결정 + 그 이유를 한 번에 보고
-- **진행 중**: 정체/실패 감지 시에만 보고 (정상 진행은 침묵)
-- **종료 시**: 머지된 결과, 미머지 항목, 사용자 결정이 필요한 충돌 요약
+오케스트레이터는 **기본적으로 자율 주행**한다 — 진입 시 자율 계약을 1회 보고하고, 가드레일(종료 조건·예산·자동 중단) 안에서 자동 재위임·머지·충돌 해결을 사람 개입 없이 진행한다. 자율 계약·루프·에스컬레이션 규칙은 `references/autonomous-driving.md` 가 단일 소유한다.
 
-자동 개입(SendMessage 등으로 agent에 명령 주입)은 **하지 않는다**. 정체나 실패는 사용자에게 보고하고 결정을 받는다.
+- **시작 시**: 분해된 작업 목록 + 병렬/순차 결정 + 자율 계약(종료 조건·예산·hard stop·결정 기록 위치)을 한 번에 보고
+- **진행 중**: 침묵 (정상 루프는 보고하지 않음) — hard stop / 에스컬레이션 발생 시에만 즉시 보고
+- **종료 시**: 종료 사유(완료/예산 소진/에스컬레이션) + 머지 결과 + 미해결 항목 + 의사결정 요약
 
-**예외 — 자율 모드(opt-in)**: 사용자가 자율 실행을 명시적으로 요청한 경우에 한해, 가드레일(종료 조건·예산·자동 중단) 안에서 자동 재위임·머지·충돌 해결을 사람 개입 없이 진행할 수 있다. 진입 조건, 자율 계약, 에스컬레이션 규칙은 `references/autonomous-driving.md` 참조. opt-in이 없으면 위 휴먼-인-더-루프 원칙이 기본이다.
+단, 에스컬레이션 조건(되돌리기 어려운 행위·토폴로지 위반·도메인 의미 충돌·예산 소진 등)은 자율 모드라도 **항상** 멈추고 보고한다 (`references/autonomous-driving.md §에스컬레이션`).
+
+**opt-out — 휴먼-인-더-루프**: 사용자가 단계별 확인을 명시하면(예: "확인받으면서", "단계마다 물어봐", "babysit", "자동으로 머지하지 마") 자율 주행을 끄고 휴먼-인-더-루프로 전환한다. 이때는 자동 개입(SendMessage 명령 주입·자동 머지·자동 충돌 해결)을 하지 않고, 정체·실패·머지 결정을 사용자에게 보고하고 결정을 받는다 (`agent-monitor.md` / `merge-coordinator.md` 의 HITL 규칙).
 
 ---
 

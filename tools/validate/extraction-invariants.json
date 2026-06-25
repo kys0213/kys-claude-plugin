@@ -16,15 +16,6 @@
     {"domain": "spec/review", "token": "gap-auditor", "reason": "audit 단일 게이트 에이전트"},
     {"domain": "spec/annotate", "token": "## 에러 처리", "reason": "annotate 에러 처리 (매칭 0건/retry)"},
     {"domain": "git/resolve", "token": "diff-filter=U", "reason": "rebase --continue 미해결 충돌 가드"},
-    {"domain": "git/resolve", "token": "rebase --abort", "reason": "resolve --abort 인자 처리"},
-    {"domain": "autopilot/merge", "token": "#643", "reason": "머지 종료코드 가드 (실패 시 이슈 오close 방지)"},
-    {"domain": "autopilot/merge", "token": "--squash --delete-branch", "reason": "PR squash merge 실행"},
-    {"domain": "autopilot/build", "token": "max_consecutive_failures", "reason": "build 에스컬레이션 임계값"},
-    {"domain": "autopilot/build", "token": "autopilot issue extract-fingerprint", "reason": "gap 이슈 false-positive 사전 검증"},
-    {"domain": "autopilot/ci", "token": "max_ci_fix_retries", "reason": "ci-fix 재시도 한도"},
-    {"domain": "autopilot/pipeline", "token": "at-capacity", "reason": "pipeline capacity check (exit 3)"},
-    {"domain": "autopilot/stagnation", "token": "consecutive_failures", "reason": "정체 persona index 결정"},
-    {"domain": "autopilot/stagnation", "token": "recommended_persona", "reason": "정체 redirect persona"},
-    {"domain": "autopilot/ledger", "token": "by-depth", "reason": "work-ledger epic 선택 전략"}
+    {"domain": "git/resolve", "token": "rebase --abort", "reason": "resolve --abort 인자 처리"}
   ]
 }
