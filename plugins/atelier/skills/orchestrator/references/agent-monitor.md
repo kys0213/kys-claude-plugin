@@ -1,6 +1,6 @@
 ---
 name: agent-monitor
-description: 백그라운드 sub-agent/team 진행 추적, 정체/실패 시 보고 패턴, 재위임 판단 기준. 자동 개입 금지. orchestrator 스킬 내부 참조 문서.
+description: 백그라운드 sub-agent/team 진행 추적, 정체/실패 시 보고 패턴, 재위임 판단 기준. 휴먼-인-더-루프(opt-out) 모드의 자동 개입 금지 규칙. orchestrator 스킬 내부 참조 문서.
 version: 0.1.0
 user-invocable: false
 ---
@@ -8,6 +8,8 @@ user-invocable: false
 # Agent Monitor
 
 백그라운드로 위임한 sub-agent / agent team의 진행을 추적하고, 정체나 실패를 사용자에게 보고하는 패턴. **자동 개입은 하지 않는다** — 결정은 사용자가 한다.
+
+> **적용 범위**: 이 문서의 "자동 개입 금지·보고 후 결정" 규칙은 사용자가 **휴먼-인-더-루프로 opt-out** 했을 때 적용된다. 오케스트레이터 **기본 동작은 자율 주행**이며(`autonomous-driving.md`), 자율 모드에서는 가드레일 안에서 자동 재위임·머지를 진행한다. 단 진행 추적·정체 감지·재위임 판단 기준 자체는 두 모드 공통으로 쓴다.
 
 ## 기본 원칙
 
