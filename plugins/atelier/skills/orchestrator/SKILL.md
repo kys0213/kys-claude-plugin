@@ -28,13 +28,13 @@ version: 0.1.0
 
 ```
 ❌ 메인이 Edit/Write로 코드 작성
-✅ 메인은 Read/Bash로 상태 파악 + Agent로 위임 + SendMessage로 조율
+✅ 메인은 Read/Bash로 상태 파악 + Task로 일감 분리·상태 관리 + Agent로 위임 + SendMessage로 조율
 ```
 
 ### 메인 에이전트가 해도 되는 일
 - `Read`, `Glob`, `Grep`, `Bash(git status / git log / git diff --stat)` — 작업 분해와 위험도 판단을 위한 조사
 - `Agent`, `SendMessage`, `Monitor` — 위임과 조율 (agent team은 `Agent`의 `name`으로 spawn — 실험 플래그 필요, `TeamCreate`는 제거됨)
-- `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate` — 다중 작업의 분배·의존성·상태 추적 (선택; `references/agent-monitor.md §Task 시스템`)
+- `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate` — 일감을 분리하고 상태를 관리하는 것은 **메인 에이전트의 핵심 룰**이다. 편집을 위임하는 관리자로서 메인의 본업은 일감을 추적 가능한 Task로 쪼개고 상태를 갱신하는 것 — 다중 작업이면 항상 적용하고 단발 1회만 예외다 (`references/agent-monitor.md §Task 시스템`)
 - 결과물 취합 후 사용자에게 보고
 
 ### 메인 에이전트가 하면 안 되는 일
@@ -106,6 +106,17 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 
 각 단계의 상세 패턴은 아래 references에 있다.
 
+### 일감을 Task로 분리·관리하는 것은 메인의 핵심 룰
+
+메인 에이전트는 편집자가 아니라 **관리자**다(위 *사고 모드*). 관리자의 본업은 일감을 추적 가능한 단위로 쪼개고 그 상태를 끝까지 관리하는 것이다. 따라서 1단계에서 분해한 일감 목록을 메인의 머릿속이나 대화 흐름에만 두지 말고 **Task 시스템(`TaskCreate`/`TaskList`/`TaskGet`/`TaskUpdate`)으로 분리·등록·갱신**하는 것은 선택이 아니라 메인의 핵심 룰이다. 일감이 목록이 아니라 추적 가능한 상태 객체가 되어야 메인과 사용자 모두 진행 상황을 한눈에 본다.
+
+- **분리**: 분해된 각 독립 단위 = Task 1개. dispatch 전에 등록해 "무엇을 할 것인가"를 먼저 가시화한다.
+- **상태 추적**: dispatch 시 `in_progress`, 머지/완료 시 `completed`로 갱신해 진행률이 목록에 드러나게 한다.
+- **의존성·소유자**: 순차 의존이 있으면 Task의 의존성(blocked-by)으로, 어느 worktree/agent가 맡았는지는 owner로 표기해 병렬 상태를 추적한다.
+- **적용 범위**: 다중 작업이거나 의존성이 있으면 **항상** 적용한다. 단발 1회 작업만 오버헤드라 예외로 생략한다.
+
+상세 사용법(필드·의존성·owner)은 `references/agent-monitor.md §Task 시스템`이 단일 출처다. 자율 모드에서의 Task 추적 규칙은 `references/autonomous-driving.md`를 따른다.
+
 ---
 
 ## 병렬 vs 순차 결정 트리
@@ -156,6 +167,7 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 | `references/agent-monitor.md` | 백그라운드 agent 진행 추적, 또는 Task 시스템으로 다중 작업 상태·의존성을 추적할 때 |
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
 | `references/autonomous-driving.md` | 자율 루프(분해→위임→머지 self-drive)를 돌릴 때 — **오케스트레이터 기본 동작**. 계약·가드레일·종료 조건·에스컬레이션 (단발 fan-out 1회면 불필요) |
+| `references/spec-driven-review.md` | 자율주행이 **spec 문서를 입력으로 구현**할 때 — 팀 모드로 검토자(spec↔구현)·QA 매니저(spec↔테스트)를 상주시켜 worktree 코드를 계속 리뷰·개선하는 게이트 (spec 입력이 없으면 불필요) |
 
 ---
 
