@@ -106,6 +106,17 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 
 각 단계의 상세 패턴은 아래 references에 있다.
 
+### 일감 목록은 Task로 분리해 가시성을 높인다
+
+1단계에서 분해한 일감 목록을 메인의 머릿속이나 대화 흐름에만 두지 말고, **Task 시스템(`TaskCreate`/`TaskList`/`TaskGet`/`TaskUpdate`)으로 분리·등록**한다. 일감이 목록이 아니라 추적 가능한 상태 객체가 되면 메인과 사용자 모두 진행 상황을 한눈에 본다.
+
+- **분리**: 분해된 각 독립 단위 = Task 1개. dispatch 전에 등록해 "무엇을 할 것인가"를 먼저 가시화한다.
+- **상태 추적**: dispatch 시 `in_progress`, 머지/완료 시 `completed`로 갱신해 진행률이 목록에 드러나게 한다.
+- **의존성·소유자**: 순차 의존이 있으면 Task의 의존성(blocked-by)으로, 어느 worktree/agent가 맡았는지는 owner로 표기해 병렬 상태를 추적한다.
+- **권장 범위**: 작업이 2개 이상이거나 의존성이 있을 때. 단발 1회 작업은 오버헤드라 생략한다.
+
+상세 사용법(필드·의존성·owner)은 `references/agent-monitor.md §Task 시스템`이 단일 출처다. 자율 모드에서의 Task 추적 규칙은 `references/autonomous-driving.md`를 따른다.
+
 ---
 
 ## 병렬 vs 순차 결정 트리
