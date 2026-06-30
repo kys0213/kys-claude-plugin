@@ -100,8 +100,9 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 3. 실행 계획 (Plan)         → 병렬/순차 결정 + 위임 형태(단발/team) 결정
 4. 위임 (Dispatch)          → Agent 호출 (worktree isolation, base = epic 브랜치)
 5. 모니터링 (Monitor)       → 진행 추적, 정체 감지, 사용자 보고
-6. 머지 조정 (Coordinate)   → 결과를 epic 브랜치로 통합 + 충돌 위임 + worktree 정리
-7. 보고 (Report)            → 사용자에게 결과 요약
+6. 검토·QA 게이트 (Gate)    → 작업마다 검토 에이전트 + QA 에이전트(검증 테스트 추가) 필수, 둘 다 pass여야 머지
+7. 머지 조정 (Coordinate)   → 게이트 통과분만 epic 브랜치로 통합 + 충돌 위임 + worktree 정리
+8. 보고 (Report)            → 사용자에게 결과 요약
 ```
 
 각 단계의 상세 패턴은 아래 references에 있다.
@@ -116,6 +117,23 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 - **적용 범위**: 다중 작업이거나 의존성이 있으면 **항상** 적용한다. 단발 1회 작업만 오버헤드라 예외로 생략한다.
 
 상세 사용법(필드·의존성·owner)은 `references/agent-monitor.md §Task 시스템`이 단일 출처다. 자율 모드에서의 Task 추적 규칙은 `references/autonomous-driving.md`를 따른다.
+
+### 작업 케이스마다 검토 에이전트·QA 에이전트는 필수 (Review & QA Gate)
+
+메인은 **어떤 작업도 검증 없이 머지하지 않는다.** 코드를 바꾸는 각 작업(work case)은 구현이 끝나면 머지 전에 두 전용 에이전트를 **반드시** 거친다 — Task 분리가 핵심 룰인 것과 동급의 필수 규칙이다. 게이트를 references에 묻어두지 말고 매 작업마다 본문 규칙으로 강제한다.
+
+- **검토 에이전트 (reviewer)**: 구현이 요구사항/spec을 충족하는지, 회귀·설계원칙(SOLID)·품질 게이트(test/lint/format) 위반이 없는지 검토한다. `구현 ↔ 요구사항` 차원. 출력은 `pass`/`reject` + `파일:라인` 사유.
+- **QA 에이전트 (qa)**: 그 변경을 검증하는 **테스트를 추가·보강**하고, 각 요구사항·flow·엣지케이스에 대응 테스트가 있는지 판정한다. `요구사항 ↔ 테스트` 차원. 테스트가 없거나 비었으면(빈 assert·항상 통과) **검증용 테스트를 작성해 채운다**. 출력은 `pass`/`reject` + 누락 케이스 목록.
+
+필수 규칙:
+
+- 두 에이전트는 **구현 sub-agent와 다른 agent**다 — 자기 코드 자기 검증 금지.
+- 두 차원은 **AND**다 — 검토 `pass` + QA `pass`(추가한 검증 테스트 green) 둘 다여야 머지 후보로 승급한다. 하나라도 `reject`면 findings를 자기완결 prompt에 실어 재위임한다.
+- QA 에이전트의 테스트 추가도 편집이므로 **`isolation:"worktree"` subagent로 위임**한다 (메인은 직접 편집하지 않는다 — *사고 모드*).
+- 게이트 거부 재위임은 자율 모드의 `max_redispatch_per_task` 예산을 동일하게 소모한다 (게이트 전용 새 예산 금지).
+- 예외는 Task 룰과 동일하게 **단발 1회·read-only 작업만**이다. 코드를 바꾸는 모든 작업은 이 게이트를 거친다.
+
+특수화: spec 문서를 입력으로 구현하면 이 게이트는 `references/spec-driven-review.md`(검토자=spec↔구현, QA 매니저=spec↔테스트)로 특수화되고, spec이 없는 일반 구현은 `references/autonomous-driving.md §리뷰어·QA 게이트`를 따른다. **어느 경우든 검토 + QA 두 에이전트는 생략 불가**다.
 
 ---
 
@@ -166,8 +184,8 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 | `references/worktree-lifecycle.md` | 병렬 dispatch 직전, 또는 worktree 정리/머지를 다룰 때 |
 | `references/agent-monitor.md` | 백그라운드 agent 진행 추적, 또는 Task 시스템으로 다중 작업 상태·의존성을 추적할 때 |
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
-| `references/autonomous-driving.md` | 자율 루프(분해→위임→머지 self-drive)를 돌릴 때 — **오케스트레이터 기본 동작**. 계약·가드레일·종료 조건·에스컬레이션 (단발 fan-out 1회면 불필요) |
-| `references/spec-driven-review.md` | 자율주행이 **spec 문서를 입력으로 구현**할 때 — 팀 모드로 검토자(spec↔구현)·QA 매니저(spec↔테스트)를 상주시켜 worktree 코드를 계속 리뷰·개선하는 게이트 (spec 입력이 없으면 불필요) |
+| `references/autonomous-driving.md` | 자율 루프(분해→위임→머지 self-drive)를 돌릴 때 — **오케스트레이터 기본 동작**. 계약·가드레일·종료 조건·에스컬레이션 + **작업마다 필수인 리뷰어·QA 게이트**(검토 + 검증 테스트 추가)의 단일 출처 (단발 fan-out 1회면 불필요) |
+| `references/spec-driven-review.md` | 검토·QA 게이트가 **spec 문서를 입력으로 구현**하는 경우의 특수화 — 팀 모드로 검토자(spec↔구현)·QA 매니저(spec↔테스트)를 상주시켜 worktree 코드를 계속 리뷰·개선 (spec 입력이 없으면 일반 게이트 사용) |
 
 ---
 
