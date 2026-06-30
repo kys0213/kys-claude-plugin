@@ -141,9 +141,63 @@ fn explicit_default_branch_used() {
 
 #[test]
 fn detect_failure_passes_safe_mode() {
+    // Detection failed AND the current branch is not a conventional default:
+    // the guard can't prove this is a protected branch, so it allows (safe
+    // mode). Conventional names are handled separately (see below).
     let mut git = MockGit::default();
+    git.current_branch = Box::new(|| "wip".to_string());
     git.detect_default_branch = Box::new(|| Err("no remote".to_string()));
     assert!(check(git, &base_input()).allowed);
+}
+
+#[test]
+fn conventional_default_blocked_without_detection() {
+    // #810: a conventional default name must be protected even when detection
+    // fails and no pin is supplied — a branch literally named "main" is almost
+    // certainly the default regardless of remote state.
+    let mut git = MockGit::default();
+    git.current_branch = Box::new(|| "main".to_string());
+    git.detect_default_branch = Box::new(|| Err("no remote".to_string()));
+    assert!(!check(git, &base_input()).allowed);
+}
+
+#[test]
+fn trunk_protected_as_conventional() {
+    // `trunk` is a conventional default; protected without pin or extras.
+    let mut git = MockGit::default();
+    git.current_branch = Box::new(|| "trunk".to_string());
+    git.detect_default_branch = Box::new(|| Ok("main".to_string()));
+    assert!(!check(git, &base_input()).allowed);
+}
+
+#[test]
+fn foreign_pin_does_not_unprotect_local_default() {
+    // #810 core: a user-scope hook pins `--default-branch develop` (detected in
+    // another repo), but this repo's default is `master`. The pin must not
+    // suppress protection of this repo's real default — being on `master` is
+    // still blocked because (a) master is conventional and (b) detection runs
+    // even with a pin and is unioned in.
+    let mut git = MockGit::default();
+    git.current_branch = Box::new(|| "master".to_string());
+    git.detect_default_branch = Box::new(|| Ok("master".to_string()));
+    let mut input = base_input();
+    input.default_branch = Some("develop".to_string());
+    assert!(
+        !check(git, &input).allowed,
+        "a pin from another repo must not unprotect this repo's default branch"
+    );
+}
+
+#[test]
+fn pin_supplements_non_conventional_default() {
+    // A pin for a non-conventional default (e.g. a repo whose default is a
+    // custom name) is still honored on top of conventional + detected.
+    let mut git = MockGit::default();
+    git.current_branch = Box::new(|| "release-train".to_string());
+    git.detect_default_branch = Box::new(|| Ok("main".to_string()));
+    let mut input = base_input();
+    input.default_branch = Some("release-train".to_string());
+    assert!(!check(git, &input).allowed);
 }
 
 #[test]
