@@ -40,6 +40,7 @@ user-invocable: false
 - **검토자는 "코드가 spec을 만족하나"**, **QA 매니저는 "테스트가 spec을 만족하나"**. 검토자는 테스트 커버리지의 충분성을 판정하지 않고, QA 매니저는 구현 로직의 정합성을 판정하지 않는다.
 - 둘 다 **구현 sub-agent와 다른 agent**다 (자기 코드 자기 리뷰 금지 — `autonomous-driving.md` 안티패턴 #14).
 - 두 게이트는 **AND**다 — 둘 다 `pass`여야 머지 후보로 승급한다. 하나라도 `reject`면 재위임.
+- **DBA 조건부 게이트는 spec 모드에서도 생략되지 않는다** — spec 작업이 DB에 접촉하면(스키마·마이그레이션·쿼리·ORM 모델) `autonomous-driving.md §리뷰어·QA 게이트`의 DBA 에이전트가 세 번째 차원으로 추가되어 AND에 포함된다.
 
 ---
 

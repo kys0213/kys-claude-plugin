@@ -175,6 +175,7 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 
 | 작업 유형 | 권장 모델 |
 |-----------|-----------|
+| 요구사항 분해·설계 심문 (아키텍트 협의체 — `architect-council.md`) | `fable` (기본) 또는 `opus` |
 | 복잡한 설계, 어려운 디버깅, 아키텍처 판단 | `opus` |
 | 일반 구현, 코드 리뷰, 테스트 작성 | `sonnet` |
 | 단순 분류, 포맷 변환, 짧은 추출 | `haiku` |
@@ -182,6 +183,15 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 지정하지 않으면 부모 모델을 상속한다. 단순 작업에 opus 사용은 비용 낭비.
 
 이 표는 **고정값이 아니라 시작 heuristic**이다. 모델이 더 똑똑해지면 같은 작업을 더 가벼운 tier로 내려 효율을 높일 수 있어야 하므로, 작업마다 "지금도 이 역량이 필요한가"를 재평가한다. 자율 루프에서의 작업별 모델 배분 원칙은 `autonomous-driving.md §모델 분배` 참조.
+
+### fable 배분 정책 (고정 제약 — 이 문서가 단일 출처)
+
+위 재평가 원칙에는 예외인 **정책 envelope**이 하나 있다. 최상위 tier(`fable`)는 배분 heuristic의 대상이 아니라 역할로 고정된다:
+
+- **floor — 아키텍트 협의체**: brainstorm·grill 아키텍트(요구사항 분해·설계 심문)는 `fable`(기본) 또는 `opus`를 유지하고 그 아래 tier로 내리지 않는다. 분해·검증의 품질이 스웜 다운스트림 전체(구현·게이트·머지)의 상한을 결정하기 때문이다.
+- **ceiling — 협의체 외 전 역할**: 구현·검토(reviewer)·QA(qa-manager)·DBA·충돌 해결·일반 분석 등 협의체가 아닌 모든 sub-agent는 `fable`을 쓰지 않는다. `opus` 이하에서 위 heuristic과 `autonomous-driving.md §모델 분배` 원칙대로 배분한다.
+
+부모 모델이 `fable`인 세션에서는 **상속(모델 미지정)도 ceiling 위반**이다 — 협의체 외 dispatch에는 반드시 `model`을 명시한다. envelope 안에서의 tier 선택은 여전히 메인의 판단이다 (envelope은 범위 제약이지 고정 매핑이 아니다).
 
 ---
 
@@ -196,4 +206,5 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 - [ ] 편집하는 sub-agent라면 `isolation: "worktree"`를 켰는가?
 - [ ] worktree dispatch라면 prompt에 worktree 격리 준수(경로 prefix 검증 + 부모 repo 수정 금지)를 명시했는가?
 - [ ] 모델 선택이 작업 난이도와 맞는가?
+- [ ] fable 배분 정책을 지키는가? (아키텍트 협의체 = floor, 그 외 역할 = fable 금지 — 부모가 fable이면 `model` 명시)
 - [ ] team의 경우 name이 의미 있고 유니크한가?

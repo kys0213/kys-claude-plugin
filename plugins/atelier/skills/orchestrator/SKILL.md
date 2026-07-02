@@ -95,12 +95,14 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 
 ```
 0. 진입 확인 (Entry)        → 현재가 epic 브랜치 + 메인 working tree인지 확인
-1. 분해 (Decompose)        → 작업을 독립 단위로 쪼갠다
+1. 분해 (Decompose)        → 작업을 독립 단위로 쪼갠다 — 복잡·모호한 요구는 아키텍트 협의체
+                             (brainstorm→grill 심문·검증)에 위임해 검증된 task 를 도출 (`references/architect-council.md`)
 2. 위험도 분석 (Analyze)    → 단위 간 파일/의존성 충돌 위험 식별
 3. 실행 계획 (Plan)         → 병렬/순차 결정 + 위임 형태(단발/team) 결정
 4. 위임 (Dispatch)          → Agent 호출 (worktree isolation, base = epic 브랜치)
 5. 모니터링 (Monitor)       → 진행 추적, 정체 감지, 사용자 보고
-6. 검토·QA 게이트 (Gate)    → 작업마다 검토 에이전트 + QA 에이전트(검증 테스트 추가) 필수, 둘 다 pass여야 머지
+6. 검토·QA 게이트 (Gate)    → 작업마다 검토 에이전트 + QA 에이전트(검증 테스트 추가) 필수 + DB 접촉 작업은
+                             DBA 에이전트 추가, 전부 pass여야 머지
 7. 머지 조정 (Coordinate)   → 게이트 통과분만 epic 브랜치로 통합 + 충돌 위임 + worktree 정리
 8. 보고 (Report)            → 사용자에게 결과 요약
 ```
@@ -124,11 +126,13 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 
 - **검토 에이전트 (reviewer)**: 구현이 요구사항/spec을 충족하는지, 회귀·설계원칙(SOLID)·품질 게이트(test/lint/format) 위반이 없는지 검토한다 (`구현 ↔ 요구사항`).
 - **QA 에이전트 (qa)**: 각 요구사항·flow·엣지케이스에 대응 테스트가 있는지 판정하고, 없거나 비었으면 **검증용 테스트를 추가·보강해 채운다** (`요구사항 ↔ 테스트`).
+- **DBA 에이전트 (dba) — 조건부**: 작업이 DB에 접촉하면(스키마·마이그레이션·쿼리·ORM 모델 변경) 추가로 소집한다 — 스키마 변경 안전성(하위 호환·락·롤백)·쿼리 성능(인덱스·N+1)·데이터 정합성을 검증한다 (`구현 ↔ DB 안전성`).
 
 규칙:
 
-- 두 에이전트는 **구현 sub-agent와 다른 agent**다 — 자기 코드 자기 검증 금지.
-- **AND 게이트**: 검토 `pass` + QA `pass`(추가한 검증 테스트 green) 둘 다여야 머지 후보로 승급. 하나라도 `reject`면 findings를 실어 재위임한다.
+- 게이트 에이전트들은 **구현 sub-agent와 다른 agent**다 — 자기 코드 자기 검증 금지.
+- **AND 게이트**: 검토 `pass` + QA `pass`(추가한 검증 테스트 green) + (DB 접촉 시) DBA `pass` 전부여야 머지 후보로 승급. 하나라도 `reject`면 findings를 실어 재위임한다.
+- **모델 배분은 fable 배분 정책 안에서**: 아키텍트 협의체(brainstorm·grill)만 최상위 tier(floor)를 쓰고, 구현·검토·QA·DBA 등 그 외 모든 역할은 최상위 tier 금지(ceiling) — `references/delegation-patterns.md §fable 배분 정책`이 단일 출처.
 - QA의 테스트 추가도 편집이므로 **`isolation:"worktree"` subagent로 위임**한다 (메인은 직접 편집하지 않는다 — *사고 모드*).
 - 예외는 Task 룰과 동일하게 **단발 1회·read-only 작업만**이다.
 
@@ -179,7 +183,8 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 
 | 파일 | 언제 읽을지 |
 |------|-------------|
-| `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때 |
+| `references/architect-council.md` | 분해(1단계) 시 요구가 복잡·모호해 brainstorm→grill 아키텍트 협의체로 분석·검증 후 task 를 도출할 때 |
+| `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때 — 모델 tier 표와 fable 배분 정책 포함 |
 | `references/worktree-lifecycle.md` | 병렬 dispatch 직전, 또는 worktree 정리/머지를 다룰 때 |
 | `references/agent-monitor.md` | 백그라운드 agent 진행 추적, 또는 Task 시스템으로 다중 작업 상태·의존성을 추적할 때 |
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
