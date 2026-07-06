@@ -132,7 +132,7 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 
 - 게이트 에이전트들은 **구현 sub-agent와 다른 agent**다 — 자기 코드 자기 검증 금지.
 - **AND 게이트**: 검토 `pass` + QA `pass`(추가한 검증 테스트 green) + (DB 접촉 시) DBA `pass` 전부여야 머지 후보로 승급. 하나라도 `reject`면 findings를 실어 재위임한다.
-- **모델 배분은 fable 배분 정책 안에서**: 아키텍트 협의체(brainstorm·grill)만 최상위 tier(floor)를 쓰고, 구현·검토·QA·DBA 등 그 외 모든 역할은 최상위 tier 금지(ceiling) — `references/delegation-patterns.md §fable 배분 정책`이 단일 출처.
+- **모델 배분은 모델 라우팅 전략 안에서**: fable은 오케스트레이터(메인) 전용이고, 아키텍트 협의체(brainstorm·grill)·구현·검토·QA·DBA 등 위임되는 모든 역할은 `opus`/`sonnet`/`haiku`로 배분한다 — 위 §모델 라우팅 전략이 단일 출처.
 - QA의 테스트 추가도 편집이므로 **`isolation:"worktree"` subagent로 위임**한다 (메인은 직접 편집하지 않는다 — *사고 모드*).
 - 예외는 Task 룰과 동일하게 **단발 1회·read-only 작업만**이다.
 
@@ -177,6 +177,36 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 
 ---
 
+## 모델 라우팅 전략 (Model Routing)
+
+모델 라우팅에는 **하나의 고정 제약(envelope)**과 그 안에서의 **작업별 heuristic**이 있다. envelope는 이 문서가 단일 출처이며, 재평가 대상이 아니다.
+
+### fable 예약 정책 (고정 제약 — 단일 출처)
+
+```
+✅ fable = 오케스트레이터(메인 에이전트) 전용
+✅ 위임되는 모든 sub-agent = opus / sonnet / haiku
+❌ 협의체·구현·검토·QA·DBA 등 어떤 sub-agent도 fable 사용 금지
+```
+
+- **fable은 오케스트레이터(메인 에이전트) 전용이다.** 분해·위임·조율·머지 판단을 총괄하는 오케스트레이션 역할만 최상위 tier(`fable`)를 쓴다. fable의 역량은 스웜 전체의 흐름을 잡는 메인에 예약한다.
+- **위임되는 모든 sub-agent는 fable을 쓰지 않는다.** 아키텍트 협의체(brainstorm·grill)·구현·검토(reviewer)·QA·DBA·충돌 해결·일반 분석 등 dispatch되는 모든 역할은 `opus` / `sonnet` / `haiku` 안에서만 배분한다.
+- 부모(메인) 모델이 `fable`인 세션에서는 **상속(모델 미지정)도 위반**이다 — 위임되는 모든 dispatch에는 반드시 `model`을 명시해 fable 상속을 끊는다.
+- 이 제약은 heuristic이 아니라 **정책**이다. 모델이 더 똑똑해져도 재평가하지 않는다. envelope **안에서의** tier 선택만 아래 heuristic으로 판단한다.
+
+### 위임 tier heuristic (envelope 안 — opus / sonnet / haiku)
+
+| 작업 유형 | 시작 tier |
+|-----------|-----------|
+| 요구사항 분해·설계 심문(아키텍트 협의체), 복잡한 설계·어려운 디버깅·아키텍처 판단 | `opus` |
+| 일반 구현, 코드 리뷰, 테스트 작성 | `sonnet` |
+| 단순 분류, 포맷 변환, 짧은 추출 | `haiku` |
+
+- 이 표는 **고정 매핑이 아니라 시작 heuristic**이다 — 작업마다 "지금도 이 역량이 필요한가"를 재평가하고, 표준을 벗어난 선택은 근거와 함께 decision log에 남긴다.
+- 자율 루프의 작업별 배분 원칙은 `references/autonomous-driving.md §모델 분배`, tier별 상세·prompt 작성은 `references/delegation-patterns.md §모델 선택`.
+
+---
+
 ## References (필요할 때만 로드)
 
 메인 컨텍스트 절약을 위해 아래 파일은 **명시적으로 필요한 단계에서만** Read한다.
@@ -184,7 +214,7 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 | 파일 | 언제 읽을지 |
 |------|-------------|
 | `references/architect-council.md` | 분해(1단계) 시 요구가 복잡·모호해 brainstorm→grill 아키텍트 협의체로 분석·검증 후 task 를 도출할 때 |
-| `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때 — 모델 tier 표와 fable 배분 정책 포함 |
+| `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때 — 위임 tier 표 상세 포함 (fable 예약 정책 envelope 자체는 위 §모델 라우팅 전략이 단일 출처) |
 | `references/worktree-lifecycle.md` | 병렬 dispatch 직전, 또는 worktree 정리/머지를 다룰 때 |
 | `references/agent-monitor.md` | 백그라운드 agent 진행 추적, 또는 Task 시스템으로 다중 작업 상태·의존성을 추적할 때 |
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |

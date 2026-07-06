@@ -47,10 +47,10 @@ user-invocable: false
 
 ```
 round = 0
-design = Agent({description: "상황 분석·설계", model: <아키텍트 tier>,
+design = Agent({description: "상황 분석·설계", model: "opus",   # 위임 envelope 최상위 (fable은 오케스트레이터 전용)
                 prompt: "<요구사항 원문 + brainstorm 자세 + 자율 어댑테이션 규칙 + 출력 계약>"})
 while round < max_council_rounds:                  # 계약에 고정 (기본 2)
-    verdict = Agent({description: "설계 심문", model: <아키텍트 tier>,
+    verdict = Agent({description: "설계 심문", model: "opus",
                      prompt: "<design 전문 + grill 자세 + findings 형식>"})
     if verdict.pass: break
     round += 1
@@ -85,7 +85,7 @@ log_decision("협의체 분해", design, verdict)        # decision log (autonom
 
 ## 모델 정책
 
-협의체 아키텍트의 모델은 **`delegation-patterns.md §모델 선택`의 fable 배분 정책(고정 제약)**을 따른다 — 요구사항 분해·검증의 품질이 다운스트림 전체를 좌우하므로 두 아키텍트는 최상위 tier(floor)를 유지하고, 협의체 외 모든 역할은 최상위 tier를 쓰지 않는다(ceiling). tier 정의와 정책 전문은 그 문서가 단일 출처다 — 여기서 중복 정의하지 않는다.
+협의체 아키텍트도 **위임되는 sub-agent이므로 `fable`을 쓰지 않는다** — `fable`은 오케스트레이터(메인) 전용이다 (`SKILL.md §모델 라우팅 전략`의 fable 예약 정책). 다만 요구사항 분해·검증의 품질이 다운스트림 전체를 좌우하므로 두 아키텍트는 **위임 envelope의 최상위(`opus`)**로 시작한다. tier 정의와 정책 전문은 `SKILL.md §모델 라우팅 전략`(envelope) + `delegation-patterns.md §모델 선택`(tier 표)이 단일 출처다 — 여기서 중복 정의하지 않는다.
 
 ---
 
@@ -96,7 +96,7 @@ log_decision("협의체 분해", design, verdict)        # decision log (autonom
 3. **가정을 조용히 삼킴**: 탐색으로 답 못 한 질문을 가정 표시 없이 설계에 녹임 → 사후에 "왜"를 복원 불가. 가정은 명시하고 grill이 위험도를 판정한다.
 4. **모든 요구에 협의체 강제**: 자명한 단순 fan-out까지 협의체 왕복 → 오버헤드만 증가. 생략 기준(위 §언제 쓰는가)을 따른다.
 5. **협의체 예산 없는 왕복**: brainstorm↔grill을 pass까지 무한 반복 → 폭주. `max_council_rounds` 소진 시 에스컬레이션.
-6. **아키텍트 tier 강등**: 비용 절약으로 협의체를 가벼운 모델에 맡김 → 잘못된 분해 비용이 절약분을 압도. floor는 정책이며 재평가 대상이 아니다.
+6. **아키텍트 tier 강등**: 비용 절약으로 협의체를 가벼운 모델에 맡김 → 잘못된 분해 비용이 절약분을 압도. 위임 envelope의 최상위(`opus`)로 시작하되, `fable`은 오케스트레이터 전용이라 협의체에도 쓰지 않는다.
 
 ---
 
@@ -104,7 +104,7 @@ log_decision("협의체 분해", design, verdict)        # decision log (autonom
 
 - [ ] 협의체 소집/생략 판단을 기준(복잡·모호 vs 자명·spec 입력)에 따라 내렸는가?
 - [ ] brainstorm·grill 아키텍트가 서로 다른 sub-agent인가?
-- [ ] 두 아키텍트 모델이 fable 배분 정책의 floor를 지키는가?
+- [ ] 두 아키텍트 모델이 위임 envelope 최상위(`opus`)로 시작하고, `fable`(오케스트레이터 전용)을 쓰지 않는가?
 - [ ] 탐색으로 해소 못 한 질문이 명시적 가정 또는 에스컬레이션 항목으로 남았는가?
 - [ ] task 목록이 출력 계약(파일·의존성·위험도·검증 기준·DB 접촉 여부)을 채웠는가?
 - [ ] grill pass(또는 에스컬레이션 처리) 후에만 dispatch를 시작했는가?
