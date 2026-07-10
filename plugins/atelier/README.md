@@ -57,9 +57,57 @@ atelier는 단일 Rust crate(`cli/`)로 빌드되며, 바이너리 `atelier` 하
 
 ```
 atelier git <reviews|guard|hook>   # git-utils 의 기계적 호출 표면 (TypeScript → Rust 포팅)
+atelier notify ask-question        # AskUserQuestion hook 페이로드를 메시지 채널로 전달
+atelier notify notification        # Notification hook (권한 요청·유휴 대기)을 채널로 전달
 ```
 
 기존 `git-utils` 호출 호환을 위한 alias는 `/atelier:setup`이 안내합니다.
+
+## 대기 알림 (notify)
+
+세션이 사용자 입력을 기다리기 시작하는 순간을 사전 설정된 채널로 전달합니다 —
+웹/원격 세션처럼 자리를 비운 상황에서 "지금 세션이 나를 기다린다"를 Slack 등으로 알 수 있습니다.
+
+| hook 이벤트 | 시점 | 전달 내용 |
+|---|---|---|
+| `PreToolUse` (matcher `AskUserQuestion`) | Claude 가 질문 도구를 호출 | 질문·선택지 전문 |
+| `Notification` | 도구 **권한 요청**, 유휴 대기 | 알림 메시지 (예: "Claude needs your permission to use Bash") |
+
+- **훅**: 둘 다 plugin 번들 `hooks/hooks.json` 으로 자동 선언됩니다 (별도 setup 불필요).
+  shim(`notify-relay.sh`)은 부트스트랩만, 파싱·채널 결정·전송은 CLI 담당.
+- **advisory 계약**: 어떤 경우에도 exit 0 — 채널 미설정이면 무음 no-op, 전송 실패는
+  JSON 리포트로만 남고 도구 호출을 절대 차단하지 않습니다 (curl `--max-time 5`).
+
+### 채널 설정
+
+env 가 있으면 env 만, 없으면 프로젝트 config 파일을 읽습니다:
+
+```bash
+# 1순위: env
+export ATELIER_NOTIFY_SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
+export ATELIER_NOTIFY_WEBHOOK_URL="https://my-relay.example/hook"   # 범용 JSON POST
+```
+
+```jsonc
+// 2순위: <project>/.claude/atelier-notify.json — webhook URL 은 시크릿이므로 gitignore 권장
+{
+  "channels": [
+    { "type": "slack", "webhookUrl": "https://hooks.slack.com/services/..." },
+    { "type": "webhook", "url": "https://my-relay.example/hook" }
+  ]
+}
+```
+
+- `slack`: Incoming Webhook 으로 사람이 읽는 `{"text": ...}` 메시지 전송.
+- `webhook`: 구조화 이벤트(`{"event":"ask_user_question"|"notification", ...}`)를
+  임의 URL 로 POST — Discord relay·메일 브리지·자체 서버 등 어떤 수신기든 연결 가능.
+  이메일 등 새 채널은 `Channel` enum 확장 지점으로 남겨두었습니다.
+
+설정 확인은 페이로드를 직접 흘려보면 됩니다:
+
+```bash
+echo '{"tool_input":{"questions":[{"question":"test?"}]}}' | atelier notify ask-question
+```
 
 ## 상태
 

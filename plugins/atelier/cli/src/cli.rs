@@ -9,7 +9,7 @@ use clap::Parser;
 #[command(
     name = "atelier",
     version,
-    about = "Unified development workflow CLI (git)"
+    about = "Unified development workflow CLI (git, notify)"
 )]
 pub struct AtelierCli {
     #[command(subcommand)]
@@ -25,6 +25,13 @@ pub enum AtelierCommand {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Channel notifications for Claude Code hooks
+    #[command(disable_help_flag = true)]
+    Notify {
+        /// Arguments forwarded verbatim to the notify subsystem
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 /// Parses argv and dispatches to the selected subsystem, returning a process
@@ -36,6 +43,10 @@ pub fn run() -> i32 {
         AtelierCommand::Git { args } => {
             let argv = std::iter::once("git".to_string()).chain(args);
             crate::git::run_from(argv)
+        }
+        AtelierCommand::Notify { args } => {
+            let argv = std::iter::once("notify".to_string()).chain(args);
+            crate::notify::run_from(argv)
         }
     }
 }
