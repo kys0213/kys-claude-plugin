@@ -1,6 +1,6 @@
-//! Notify subsystem types. `AskQuestionPayload` is the parsed PreToolUse
-//! payload for the `AskUserQuestion` tool; `Channel` is a resolved delivery
-//! target; `NotifyOutput` is the JSON report the CLI prints.
+//! Notify subsystem data types: parsed hook payloads and the JSON report the
+//! CLI prints. Channel behavior lives under `channel/`; the canonical event
+//! wrapper lives in `event`.
 
 use serde::Serialize;
 
@@ -31,39 +31,6 @@ pub struct NotificationPayload {
     pub session_id: Option<String>,
     pub cwd: Option<String>,
     pub message: Option<String>,
-}
-
-/// A resolved delivery channel. New channel kinds (e.g. email) extend this
-/// enum plus `command`'s body dispatch — nothing else changes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Channel {
-    Slack {
-        webhook_url: String,
-    },
-    Webhook {
-        url: String,
-    },
-    /// Local JSONL sink: one structured event per line, appended to `path`.
-    /// The poll-friendly counterpart of the push channels — a Claude Code
-    /// Monitor (`tail -F <path>`) turns each appended line into an event.
-    File {
-        path: String,
-    },
-    /// OS notification banner on the same machine (osascript / notify-send).
-    /// Catches "working in another window" without network or secrets.
-    Desktop,
-}
-
-impl Channel {
-    /// Stable kind name used in reports and the config file `type` field.
-    pub fn kind(&self) -> &'static str {
-        match self {
-            Channel::Slack { .. } => "slack",
-            Channel::Webhook { .. } => "webhook",
-            Channel::File { .. } => "file",
-            Channel::Desktop => "desktop",
-        }
-    }
 }
 
 /// Per-channel delivery result.

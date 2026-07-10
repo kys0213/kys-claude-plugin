@@ -1,132 +1,47 @@
 //! Black-box tests for the notify command cores (`ask-question`,
-//! `notification`) with a stub poster: channel fan-out, per-channel body
-//! selection, no-op gates, and the failure-is-data (never an error) contract.
+//! `notification`): channel fan-out, per-channel body selection, no-op gates,
+//! and the failure-is-data (never an error) contract. Channels are resolved
+//! through the public config surface so these tests survive internal
+//! refactoring of the channel modules.
 
-use atelier::notify::command::{run_ask_question, run_notification, NotifyDeps};
-use atelier::notify::types::{AskQuestionPayload, Channel, NotificationPayload, Question};
-use std::cell::RefCell;
+mod notify_support;
 
-/// Poster stub recording every post; URLs listed in `fail` return Err.
-struct StubPoster {
-    posts: RefCell<Vec<(String, String)>>,
-    fail: Vec<String>,
-}
+use atelier::notify::channel::desktop::ENV_DESKTOP;
+use atelier::notify::channel::file::ENV_PATH as ENV_FILE;
+use atelier::notify::channel::slack::ENV_WEBHOOK_URL as ENV_SLACK_WEBHOOK_URL;
+use atelier::notify::channel::webhook::ENV_URL as ENV_WEBHOOK_URL;
+use atelier::notify::command::{run_ask_question, run_notification};
+use atelier::notify::config::resolve_channels;
+use atelier::notify::types::{AskQuestionPayload, NotificationPayload, Question};
+use notify_support::{ask_payload, env, fs, fx, StubAppender, StubDesktop, StubPoster};
 
-impl StubPoster {
-    fn new(fail: &[&str]) -> Self {
-        StubPoster {
-            posts: RefCell::new(Vec::new()),
-            fail: fail.iter().map(|s| s.to_string()).collect(),
-        }
-    }
-}
-
-impl atelier::notify::transport::HttpPoster for StubPoster {
-    fn post_json(&self, url: &str, body: &str) -> Result<(), String> {
-        self.posts
-            .borrow_mut()
-            .push((url.to_string(), body.to_string()));
-        if self.fail.iter().any(|f| f == url) {
-            return Err("boom".to_string());
-        }
-        Ok(())
-    }
-}
-
-/// Appender stub recording every append; paths listed in `fail` return Err.
-struct StubAppender {
-    appends: RefCell<Vec<(String, String)>>,
-    fail: Vec<String>,
-}
-
-impl StubAppender {
-    fn new(fail: &[&str]) -> Self {
-        StubAppender {
-            appends: RefCell::new(Vec::new()),
-            fail: fail.iter().map(|s| s.to_string()).collect(),
-        }
-    }
-}
-
-impl atelier::notify::transport::FileAppender for StubAppender {
-    fn append_line(&self, path: &str, line: &str) -> Result<(), String> {
-        self.appends
-            .borrow_mut()
-            .push((path.to_string(), line.to_string()));
-        if self.fail.iter().any(|f| f == path) {
-            return Err("disk full".to_string());
-        }
-        Ok(())
-    }
-}
-
-/// Desktop stub recording every banner; `fail` makes it return Err.
-struct StubDesktop {
-    banners: RefCell<Vec<(String, String)>>,
-    fail: bool,
-}
-
-impl StubDesktop {
-    fn new(fail: bool) -> Self {
-        StubDesktop {
-            banners: RefCell::new(Vec::new()),
-            fail,
-        }
-    }
-}
-
-impl atelier::notify::transport::DesktopNotifier for StubDesktop {
-    fn notify(&self, title: &str, body: &str) -> Result<(), String> {
-        self.banners
-            .borrow_mut()
-            .push((title.to_string(), body.to_string()));
-        if self.fail {
-            return Err("no notifier".to_string());
-        }
-        Ok(())
-    }
-}
-
-fn deps<'a>(
-    poster: &'a StubPoster,
-    appender: &'a StubAppender,
-    desktop: &'a StubDesktop,
-) -> NotifyDeps<'a> {
-    NotifyDeps {
-        poster,
-        appender,
-        desktop,
-    }
-}
-
-fn payload() -> AskQuestionPayload {
-    AskQuestionPayload {
+fn notification_payload() -> NotificationPayload {
+    NotificationPayload {
         session_id: Some("s1".to_string()),
         cwd: Some("/work/repo".to_string()),
-        questions: vec![Question {
-            header: Some("Auth".to_string()),
-            question: "Which auth method?".to_string(),
-            options: vec!["OAuth".to_string(), "API key".to_string()],
-            multi_select: false,
-        }],
+        message: Some("Claude needs your permission to use Bash".to_string()),
     }
 }
 
 #[test]
 fn fans_out_to_all_channels_with_channel_specific_bodies() {
-    let poster = StubPoster::new(&[]);
-    let appender = StubAppender::new(&[]);
-    let desktop = StubDesktop::new(false);
-    let channels = vec![
-        Channel::Slack {
-            webhook_url: "https://hooks.slack.com/x".to_string(),
-        },
-        Channel::Webhook {
-            url: "https://generic.example/hook".to_string(),
-        },
-    ];
+    let (poster, appender, desktop) = (
+        StubPoster::new(&[]),
+        StubAppender::new(&[]),
+        StubDesktop::new(false),
+    );
+    let fx = fx(&poster, &appender, &desktop);
+    let channels = resolve_channels(
+        &env(&[
+            (ENV_SLACK_WEBHOOK_URL, "https://hooks.slack.com/x"),
+            (ENV_WEBHOOK_URL, "https://generic.example/hook"),
+        ]),
+        &fs(&[]),
+        "/proj",
+        &fx,
+    );
 
-    let out = run_ask_question(&deps(&poster, &appender, &desktop), &channels, &payload());
+    let out = run_ask_question(&channels, &ask_payload());
 
     assert!(out.notified);
     assert_eq!(out.reports.len(), 2);
@@ -157,52 +72,49 @@ fn fans_out_to_all_channels_with_channel_specific_bodies() {
 
 #[test]
 fn no_channels_is_a_silent_noop() {
-    let poster = StubPoster::new(&[]);
-    let appender = StubAppender::new(&[]);
-    let desktop = StubDesktop::new(false);
-    let out = run_ask_question(&deps(&poster, &appender, &desktop), &[], &payload());
+    let out = run_ask_question(&[], &ask_payload());
     assert!(!out.notified);
     assert!(out.reports.is_empty());
-    assert!(poster.posts.borrow().is_empty());
 }
 
 #[test]
 fn payload_without_questions_is_a_silent_noop() {
-    let poster = StubPoster::new(&[]);
-    let appender = StubAppender::new(&[]);
-    let desktop = StubDesktop::new(false);
-    let channels = vec![Channel::Slack {
-        webhook_url: "https://hooks.slack.com/x".to_string(),
-    }];
-    let out = run_ask_question(
-        &deps(&poster, &appender, &desktop),
-        &channels,
-        &AskQuestionPayload::default(),
+    let (poster, appender, desktop) = (
+        StubPoster::new(&[]),
+        StubAppender::new(&[]),
+        StubDesktop::new(false),
     );
+    let fx = fx(&poster, &appender, &desktop);
+    let channels = resolve_channels(
+        &env(&[(ENV_SLACK_WEBHOOK_URL, "https://hooks.slack.com/x")]),
+        &fs(&[]),
+        "/proj",
+        &fx,
+    );
+    let out = run_ask_question(&channels, &AskQuestionPayload::default());
     assert!(!out.notified);
     assert!(poster.posts.borrow().is_empty());
 }
 
 #[test]
 fn notification_fans_out_with_message_bodies() {
-    let poster = StubPoster::new(&[]);
-    let appender = StubAppender::new(&[]);
-    let desktop = StubDesktop::new(false);
-    let channels = vec![
-        Channel::Slack {
-            webhook_url: "https://hooks.slack.com/x".to_string(),
-        },
-        Channel::Webhook {
-            url: "https://generic.example/hook".to_string(),
-        },
-    ];
-    let payload = NotificationPayload {
-        session_id: Some("s1".to_string()),
-        cwd: Some("/work/repo".to_string()),
-        message: Some("Claude needs your permission to use Bash".to_string()),
-    };
+    let (poster, appender, desktop) = (
+        StubPoster::new(&[]),
+        StubAppender::new(&[]),
+        StubDesktop::new(false),
+    );
+    let fx = fx(&poster, &appender, &desktop);
+    let channels = resolve_channels(
+        &env(&[
+            (ENV_SLACK_WEBHOOK_URL, "https://hooks.slack.com/x"),
+            (ENV_WEBHOOK_URL, "https://generic.example/hook"),
+        ]),
+        &fs(&[]),
+        "/proj",
+        &fx,
+    );
 
-    let out = run_notification(&deps(&poster, &appender, &desktop), &channels, &payload);
+    let out = run_notification(&channels, &notification_payload());
 
     assert!(out.notified);
     let posts = poster.posts.borrow();
@@ -221,39 +133,47 @@ fn notification_fans_out_with_message_bodies() {
 
 #[test]
 fn notification_without_message_is_a_silent_noop() {
-    let poster = StubPoster::new(&[]);
-    let appender = StubAppender::new(&[]);
-    let desktop = StubDesktop::new(false);
-    let channels = vec![Channel::Slack {
-        webhook_url: "https://hooks.slack.com/x".to_string(),
-    }];
-    let out = run_notification(
-        &deps(&poster, &appender, &desktop),
-        &channels,
-        &NotificationPayload::default(),
+    let (poster, appender, desktop) = (
+        StubPoster::new(&[]),
+        StubAppender::new(&[]),
+        StubDesktop::new(false),
     );
+    let fx = fx(&poster, &appender, &desktop);
+    let channels = resolve_channels(
+        &env(&[(ENV_SLACK_WEBHOOK_URL, "https://hooks.slack.com/x")]),
+        &fs(&[]),
+        "/proj",
+        &fx,
+    );
+    let out = run_notification(&channels, &NotificationPayload::default());
     assert!(!out.notified);
     assert!(poster.posts.borrow().is_empty());
 }
 
 #[test]
 fn file_channel_appends_structured_event_line() {
-    let poster = StubPoster::new(&[]);
-    let appender = StubAppender::new(&[]);
-    let desktop = StubDesktop::new(false);
-    let channels = vec![Channel::File {
-        path: "/home/u/.claude/atelier-notify/events.jsonl".to_string(),
-    }];
+    let (poster, appender, desktop) = (
+        StubPoster::new(&[]),
+        StubAppender::new(&[]),
+        StubDesktop::new(false),
+    );
+    let fx = fx(&poster, &appender, &desktop);
+    let channels = resolve_channels(
+        &env(&[(ENV_FILE, "/home/u/.claude/atelier-notify/events.jsonl")]),
+        &fs(&[]),
+        "/proj",
+        &fx,
+    );
 
-    let out = run_ask_question(&deps(&poster, &appender, &desktop), &channels, &payload());
+    let out = run_ask_question(&channels, &ask_payload());
 
     assert!(out.notified);
     assert!(poster.posts.borrow().is_empty());
     let appends = appender.appends.borrow();
     assert_eq!(appends.len(), 1);
     assert_eq!(appends[0].0, "/home/u/.claude/atelier-notify/events.jsonl");
-    // The appended line is the structured (webhook) body — one event per
-    // line, so a Monitor tailing the file gets exactly one event per line.
+    // The appended line is the structured event — one event per line, so a
+    // Monitor tailing the file gets exactly one event per line.
     assert!(!appends[0].1.contains('\n'));
     let event: serde_json::Value = serde_json::from_str(&appends[0].1).unwrap();
     assert_eq!(event["event"], "ask_user_question");
@@ -262,14 +182,20 @@ fn file_channel_appends_structured_event_line() {
 
 #[test]
 fn file_append_failure_is_reported_not_raised() {
-    let poster = StubPoster::new(&[]);
-    let appender = StubAppender::new(&["/full/events.jsonl"]);
-    let desktop = StubDesktop::new(false);
-    let channels = vec![Channel::File {
-        path: "/full/events.jsonl".to_string(),
-    }];
+    let (poster, appender, desktop) = (
+        StubPoster::new(&[]),
+        StubAppender::new(&["/full/events.jsonl"]),
+        StubDesktop::new(false),
+    );
+    let fx = fx(&poster, &appender, &desktop);
+    let channels = resolve_channels(
+        &env(&[(ENV_FILE, "/full/events.jsonl")]),
+        &fs(&[]),
+        "/p",
+        &fx,
+    );
 
-    let out = run_ask_question(&deps(&poster, &appender, &desktop), &channels, &payload());
+    let out = run_ask_question(&channels, &ask_payload());
 
     assert!(!out.notified);
     let report = out.reports.iter().find(|r| r.channel == "file").unwrap();
@@ -279,19 +205,22 @@ fn file_append_failure_is_reported_not_raised() {
 
 #[test]
 fn desktop_channel_gets_banner_with_first_question() {
-    let poster = StubPoster::new(&[]);
-    let appender = StubAppender::new(&[]);
-    let desktop = StubDesktop::new(false);
-    let channels = vec![Channel::Desktop];
+    let (poster, appender, desktop) = (
+        StubPoster::new(&[]),
+        StubAppender::new(&[]),
+        StubDesktop::new(false),
+    );
+    let fx = fx(&poster, &appender, &desktop);
+    let channels = resolve_channels(&env(&[(ENV_DESKTOP, "1")]), &fs(&[]), "/proj", &fx);
 
-    let mut p = payload();
+    let mut p = ask_payload();
     p.questions.push(Question {
         header: None,
         question: "Second?".to_string(),
         options: vec![],
         multi_select: false,
     });
-    let out = run_ask_question(&deps(&poster, &appender, &desktop), &channels, &p);
+    let out = run_ask_question(&channels, &p);
 
     assert!(out.notified);
     {
@@ -306,12 +235,7 @@ fn desktop_channel_gets_banner_with_first_question() {
     }
 
     // Notification event gets its own title and the raw message.
-    let np = NotificationPayload {
-        session_id: None,
-        cwd: Some("/work/repo".to_string()),
-        message: Some("Claude needs your permission to use Bash".to_string()),
-    };
-    run_notification(&deps(&poster, &appender, &desktop), &channels, &np);
+    run_notification(&channels, &notification_payload());
     let banners = desktop.banners.borrow();
     let (title, body) = &banners[1];
     assert_eq!(title, "Claude 입력 대기");
@@ -320,14 +244,16 @@ fn desktop_channel_gets_banner_with_first_question() {
 
 #[test]
 fn desktop_failure_is_reported_not_raised() {
-    let poster = StubPoster::new(&[]);
-    let appender = StubAppender::new(&[]);
-    let desktop = StubDesktop::new(true);
-    let out = run_ask_question(
-        &deps(&poster, &appender, &desktop),
-        &[Channel::Desktop],
-        &payload(),
+    let (poster, appender, desktop) = (
+        StubPoster::new(&[]),
+        StubAppender::new(&[]),
+        StubDesktop::new(true),
     );
+    let fx = fx(&poster, &appender, &desktop);
+    let channels = resolve_channels(&env(&[(ENV_DESKTOP, "1")]), &fs(&[]), "/proj", &fx);
+
+    let out = run_ask_question(&channels, &ask_payload());
+
     assert!(!out.notified);
     let report = out.reports.iter().find(|r| r.channel == "desktop").unwrap();
     assert!(!report.ok);
@@ -336,19 +262,23 @@ fn desktop_failure_is_reported_not_raised() {
 
 #[test]
 fn delivery_failure_is_reported_not_raised() {
-    let poster = StubPoster::new(&["https://hooks.slack.com/x"]);
-    let appender = StubAppender::new(&[]);
-    let desktop = StubDesktop::new(false);
-    let channels = vec![
-        Channel::Slack {
-            webhook_url: "https://hooks.slack.com/x".to_string(),
-        },
-        Channel::Webhook {
-            url: "https://generic.example/hook".to_string(),
-        },
-    ];
+    let (poster, appender, desktop) = (
+        StubPoster::new(&["https://hooks.slack.com/x"]),
+        StubAppender::new(&[]),
+        StubDesktop::new(false),
+    );
+    let fx = fx(&poster, &appender, &desktop);
+    let channels = resolve_channels(
+        &env(&[
+            (ENV_SLACK_WEBHOOK_URL, "https://hooks.slack.com/x"),
+            (ENV_WEBHOOK_URL, "https://generic.example/hook"),
+        ]),
+        &fs(&[]),
+        "/proj",
+        &fx,
+    );
 
-    let out = run_ask_question(&deps(&poster, &appender, &desktop), &channels, &payload());
+    let out = run_ask_question(&channels, &ask_payload());
 
     // One channel failed but the other succeeded → still notified, and the
     // failure is data in the report.
