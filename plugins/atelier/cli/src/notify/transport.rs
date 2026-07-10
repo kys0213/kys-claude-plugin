@@ -17,6 +17,47 @@ pub trait FileAppender {
     fn append_line(&self, path: &str, line: &str) -> Result<(), String>;
 }
 
+/// OS notification banner the `desktop` channel depends on (injectable for
+/// tests).
+pub trait DesktopNotifier {
+    fn notify(&self, title: &str, body: &str) -> Result<(), String>;
+}
+
+/// Escapes a string for embedding in an AppleScript double-quoted literal.
+pub fn applescript_quote(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+pub struct RealDesktopNotifier;
+
+impl DesktopNotifier for RealDesktopNotifier {
+    #[cfg(target_os = "macos")]
+    fn notify(&self, title: &str, body: &str) -> Result<(), String> {
+        let script = format!(
+            "display notification \"{}\" with title \"{}\"",
+            applescript_quote(body),
+            applescript_quote(title)
+        );
+        run_notifier(&["osascript", "-e", &script])
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn notify(&self, title: &str, body: &str) -> Result<(), String> {
+        run_notifier(&["notify-send", title, body])
+    }
+}
+
+fn run_notifier(command: &[&str]) -> Result<(), String> {
+    let result = exec(command, None);
+    if result.exit_code != 0 {
+        return Err(format!(
+            "{} exit {}: {}",
+            command[0], result.exit_code, result.stderr
+        ));
+    }
+    Ok(())
+}
+
 pub struct RealFileAppender;
 
 impl FileAppender for RealFileAppender {

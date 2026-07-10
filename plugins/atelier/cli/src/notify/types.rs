@@ -49,6 +49,9 @@ pub enum Channel {
     File {
         path: String,
     },
+    /// OS notification banner on the same machine (osascript / notify-send).
+    /// Catches "working in another window" without network or secrets.
+    Desktop,
 }
 
 impl Channel {
@@ -58,6 +61,7 @@ impl Channel {
             Channel::Slack { .. } => "slack",
             Channel::Webhook { .. } => "webhook",
             Channel::File { .. } => "file",
+            Channel::Desktop => "desktop",
         }
     }
 }

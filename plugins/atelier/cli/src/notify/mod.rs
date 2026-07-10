@@ -13,7 +13,7 @@ pub mod transport;
 pub mod types;
 
 use crate::notify::config::{resolve_channels, ConfigEnv, ConfigFs};
-use crate::notify::transport::{CurlPoster, RealFileAppender};
+use crate::notify::transport::{CurlPoster, RealDesktopNotifier, RealFileAppender};
 use crate::notify::types::{AskQuestionPayload, NotificationPayload, NotifyOutput};
 use clap::{Parser, Subcommand};
 
@@ -85,6 +85,7 @@ fn dispatch(
     let deps = command::NotifyDeps {
         poster: &CurlPoster,
         appender: &RealFileAppender,
+        desktop: &RealDesktopNotifier,
     };
     let output = run(&deps, &channels, &raw);
     let json = serde_json::to_string_pretty(&output).unwrap_or_else(|_| "null".to_string());

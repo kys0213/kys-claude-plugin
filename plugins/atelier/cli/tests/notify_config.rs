@@ -3,7 +3,8 @@
 //! channels (no-op), never an error.
 
 use atelier::notify::config::{
-    resolve_channels, ConfigEnv, ConfigFs, ENV_FILE, ENV_SLACK_WEBHOOK_URL, ENV_WEBHOOK_URL,
+    resolve_channels, ConfigEnv, ConfigFs, ENV_DESKTOP, ENV_FILE, ENV_SLACK_WEBHOOK_URL,
+    ENV_WEBHOOK_URL,
 };
 use atelier::notify::types::Channel;
 use std::collections::HashMap;
@@ -146,6 +147,56 @@ fn config_file_resolves_file_channel() {
         channels,
         vec![Channel::File {
             path: "/home/u/.claude/atelier-notify/events.jsonl".to_string()
+        }]
+    );
+}
+
+#[test]
+fn env_desktop_var_resolves_desktop_channel_when_truthy() {
+    let on = resolve_channels(&env(&[(ENV_DESKTOP, "1")]), &fs(&[]), "/proj");
+    assert_eq!(on, vec![Channel::Desktop]);
+
+    for falsy in ["0", "false", "FALSE", ""] {
+        let off = resolve_channels(&env(&[(ENV_DESKTOP, falsy)]), &fs(&[]), "/proj");
+        assert!(off.is_empty(), "expected no channels for {falsy:?}");
+    }
+}
+
+#[test]
+fn config_file_resolves_desktop_channel() {
+    let file = r#"{"channels":[{"type":"desktop"}]}"#;
+    let channels = resolve_channels(
+        &env(&[]),
+        &fs(&[("/proj/.claude/atelier-notify.json", file)]),
+        "/proj",
+    );
+    assert_eq!(channels, vec![Channel::Desktop]);
+}
+
+#[test]
+fn falls_back_to_global_home_config_when_project_config_missing() {
+    let global = r#"{"channels":[{"type":"desktop"}]}"#;
+    let channels = resolve_channels(
+        &env(&[("HOME", "/home/u")]),
+        &fs(&[("/home/u/.claude/atelier-notify.json", global)]),
+        "/proj",
+    );
+    assert_eq!(channels, vec![Channel::Desktop]);
+
+    // Project config wins over the global one when both exist.
+    let project = r#"{"channels":[{"type":"webhook","url":"https://p.example/hook"}]}"#;
+    let channels = resolve_channels(
+        &env(&[("HOME", "/home/u")]),
+        &fs(&[
+            ("/proj/.claude/atelier-notify.json", project),
+            ("/home/u/.claude/atelier-notify.json", global),
+        ]),
+        "/proj",
+    );
+    assert_eq!(
+        channels,
+        vec![Channel::Webhook {
+            url: "https://p.example/hook".to_string()
         }]
     );
 }
