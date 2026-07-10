@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Use this skill when delegating work to multiple sub-agents, agent-teams, or worktrees — parallel fan-out, sequential pipelines, long-running agent teams, or any moment the main agent is about to use Edit/Write directly (delegate instead). Triggers include "여러 작업 병렬로", "동시에 처리", "에이전트 나눠서", "worktree로 분리", "위임해서", "팀으로 작업", "delegate", "parallel agents", "fan-out", "agent team", "sub-agent", "dispatch multiple", "split into tasks", "run in parallel".
+description: Use this skill when delegating work to multiple sub-agents, agent-teams, or worktrees — parallel fan-out, sequential pipelines, long-running agent teams, document deliverables (writing reports, specs, or write-up docs is also delegated Write work), or any moment the main agent is about to use Edit/Write directly (delegate instead). Triggers include "여러 작업 병렬로", "동시에 처리", "에이전트 나눠서", "worktree로 분리", "위임해서", "팀으로 작업", "리포트 작성", "보고서로 정리", "스펙 문서 작성", "분석 결과 문서화", "delegate", "parallel agents", "fan-out", "agent team", "sub-agent", "dispatch multiple", "split into tasks", "run in parallel", "write a report", "draft a spec", "write up findings".
 version: 0.1.0
 ---
 
@@ -15,6 +15,7 @@ version: 0.1.0
 - **sub-agent / agent-team / worktree 위임**을 명시적으로 요청 ("나눠서", "팀으로", "에이전트 여러 개", "delegate", "dispatch")
 - **장기 진행 작업**에 식별 가능한 agent team이 필요할 때 (designer/implementer/reviewer 등)
 - **머지 조정**이 필요한 다중 변경 (여러 worktree 결과 통합, 충돌 해결 위임)
+- **문서 산출물 작업** — 리포트·스펙·정리 문서 작성 요청 ("리포트로 정리해줘", "스펙 문서 만들어줘", "분석 보고서 작성") — 문서 작성도 Write 작업이므로 위임 대상
 - **메인 에이전트가 Edit/Write/NotebookEdit로 직접 코드를 수정하려는 모든 순간** — 위임으로 전환할지 먼저 검토
 
 트리거하면 안 되는 상황:
@@ -138,6 +139,22 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 
 특수화: spec 문서를 입력으로 구현하면 `references/spec-driven-review.md`(검토자=spec↔구현, QA 매니저=spec↔테스트)로 특수화되고, spec이 없으면 `references/autonomous-driving.md §리뷰어·QA 게이트`를 따른다 — 게이트 거부의 재위임 예산·기록 등 세부 규칙은 그 문서가 단일 출처다.
 
+### 병렬 fan-out 복원력 — 실패한 조각도 누락 없이 (Resilience)
+
+대규모 fan-out(예: 15개 이상 agent)에서는 일부 agent가 504 Gateway Time-out·API 에러로 죽는 것을 정상 케이스로 전제한다. 실패가 조용히 누락되면 최종 취합 리포트의 수치 일관성이 깨진다.
+
+```
+❌ 전체 완료 대기 → 일부 실패 → 실패분 빠진 채 취합 → 미완성/수치 불일치
+✅ 완료 즉시 체크포인트 → 실패는 재시도 → 소진 시 폴백 → 실패·폴백까지 보고에 명시
+```
+
+- **체크포인트**: 각 agent 결과는 완료 즉시 파일로 저장한다 — 전체 완료를 기다리지 않는다 (저장 주체는 agent 자신 — 메인의 Edit/Write 금지 유지).
+- **재시도**: gateway/API 에러로 실패한 agent는 같은 prompt로 N회(기본 3회)까지 재시도한다.
+- **폴백**: 재시도 소진 시 해당 조각은 메인의 read-only 직접 분석 또는 조건을 바꾼 새 agent 재위임으로 대체해 취합을 완성한다 — 미완성 상태로 종료하지 않는다. 폴백도 편집이 필요하면 위임한다 (*사고 모드*).
+- **투명 보고**: 최종 보고에 어떤 agent가 실패/재시도/폴백되었는지 명시한다 — "실패한 건도 누락 없이 보고" 원칙의 fan-out 구체화다.
+
+상세 절차(체크포인트 파일 규약·재시도 예산·폴백 판단)는 `references/agent-monitor.md §fan-out 복원력`이 단일 출처다.
+
 ---
 
 ## 병렬 vs 순차 결정 트리
@@ -205,6 +222,28 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 - 이 표는 **고정 매핑이 아니라 시작 heuristic**이다 — 작업마다 "지금도 이 역량이 필요한가"를 재평가하고, 표준을 벗어난 선택은 근거와 함께 decision log에 남긴다.
 - 자율 루프의 작업별 배분 원칙은 `references/autonomous-driving.md §모델 분배`, tier별 상세·prompt 작성은 `references/delegation-patterns.md §모델 선택`.
 
+### 역할별 모델 정책 설정 (exclude / allow — 단일 출처)
+
+특정 모델을 reviewer/QA 등 역할에서 제외하라는 지시를 매 세션 반복하지 않도록, 역할별 허용/제외 모델을 **영구 설정 파일**로 선언할 수 있다. 선언 위치·조회 순서·스키마는 이 절이 단일 출처다.
+
+- **조회 순서**: 프로젝트 `.claude/orchestrator-policy.yaml` → 사용자 `~/.claude/orchestrator-policy.yaml` — 프로젝트 설정이 우선한다. **정책 파일이 없으면** 현행 기본 tier heuristic(위 표)을 그대로 쓴다.
+- **스키마**:
+
+  ```yaml
+  orchestrator:
+    roles:
+      reviewer:
+        exclude_models: [<model-name>]
+      qa:
+        exclude_models: [<model-name>]
+        # allow_models: [<model-name>] — 필요 시 허용 목록으로 제한 (목록 밖은 전부 차단)
+  ```
+
+- **dispatch 시 적용**: 정책과 충돌하는 모델 배정은 차단하고, envelope(opus/sonnet/haiku) 안의 대체 모델로 라우팅한다.
+- **fable 예약 정책은 설정으로 override 불가**: 이 설정은 envelope 안의 tier 선택만 조정한다. `allow_models`에 fable을 넣어도 무시된다 — 위 고정 제약이 항상 우선한다.
+
+차단 시 대체 모델 선택 등 상세 적용 로직은 `references/delegation-patterns.md §역할별 모델 정책 적용`.
+
 ---
 
 ## References (필요할 때만 로드)
@@ -214,9 +253,9 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 | 파일 | 언제 읽을지 |
 |------|-------------|
 | `references/architect-council.md` | 분해(1단계) 시 요구가 복잡·모호해 brainstorm→grill 아키텍트 협의체로 분석·검증 후 task 를 도출할 때 |
-| `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때 — 위임 tier 표 상세 포함 (fable 예약 정책 envelope 자체는 위 §모델 라우팅 전략이 단일 출처) |
+| `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때 — 위임 tier 표 상세 + 역할별 모델 정책(exclude/allow) 적용 로직 포함 (envelope·정책 스키마 자체는 위 §모델 라우팅 전략이 단일 출처) |
 | `references/worktree-lifecycle.md` | 병렬 dispatch 직전, 또는 worktree 정리/머지를 다룰 때 |
-| `references/agent-monitor.md` | 백그라운드 agent 진행 추적, 또는 Task 시스템으로 다중 작업 상태·의존성을 추적할 때 |
+| `references/agent-monitor.md` | 백그라운드 agent 진행 추적, Task 시스템으로 다중 작업 상태·의존성을 추적할 때, 또는 대규모 fan-out에서 실패 대비 복원력(체크포인트·재시도·폴백) 절차를 적용할 때 |
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
 | `references/autonomous-driving.md` | 자율 루프(분해→위임→머지 self-drive)를 돌릴 때 — **오케스트레이터 기본 동작**. 계약·가드레일·종료 조건·에스컬레이션 + **작업마다 필수인 리뷰어·QA 게이트**(검토 + 검증 테스트 추가)의 단일 출처 (단발 fan-out 1회면 불필요) |
 | `references/spec-driven-review.md` | 검토·QA 게이트가 **spec 문서를 입력으로 구현**하는 경우의 특수화 — 팀 모드로 검토자(spec↔구현)·QA 매니저(spec↔테스트)를 상주시켜 worktree 코드를 계속 리뷰·개선 (spec 입력이 없으면 일반 게이트 사용) |
