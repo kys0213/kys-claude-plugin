@@ -113,28 +113,45 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 채널을 설정합니다. 훅 자체는 플러그인이 `hooks/hooks.json` 으로 이미 선언하므로(advisory,
 채널 미설정 시 무음 no-op) **채널 설정 파일만 만들면 활성화**됩니다.
 
+채널은 코드가 아니라 **명령 선언**입니다 (`exec` argv + `stdin` 템플릿 — 스키마·템플릿
+변수는 README §"대기 알림" 참조). setup 은 자주 쓰는 채널의 선언을 대신 써주는 역할입니다.
+
 1. `AskUserQuestion` 으로 채널을 선택합니다 (multiSelect):
 
    | 선택 | 용도 | 필요 입력 |
    |---|---|---|
-   | `desktop` | 같은 머신에서 딴 작업 중일 때 OS 알림 배너 (macOS osascript / Linux notify-send) | 없음 |
+   | `desktop` | 같은 머신에서 딴 작업 중일 때 OS 알림 배너 | 없음 (OS 는 setup 이 감지) |
    | `slack` | 자리에 없을 때 폰/Slack 으로 push | Incoming Webhook URL (Other 로 입력받음) |
-   | `file` | 워처 세션이 Monitor(`tail -F`)로 반응하는 로컬 JSONL 싱크 | 없음 (기본 경로 사용) |
+   | `sink` | 워처 세션이 Monitor(`tail -F`)로 반응하는 로컬 JSONL 싱크 | 없음 (기본 경로 사용) |
 
 2. 선택 결과로 **글로벌 설정** `~/.claude/atelier-notify.json` 을 작성합니다
-   (모든 프로젝트의 세션에 적용 — 프로젝트별로 다르게 하려면 `<project>/.claude/atelier-notify.json` 이 우선):
+   (모든 프로젝트의 세션에 적용 — 프로젝트별로 다르게 하려면 `<project>/.claude/atelier-notify.json` 이 우선).
+   선택하지 않은 채널 항목은 넣지 않고, 기존 파일이 있으면 덮어쓸지 AskUserQuestion 으로 확인합니다.
 
-   ```json
-   {
-     "channels": [
-       { "type": "desktop" },
-       { "type": "slack", "webhookUrl": "<입력받은 URL>" },
-       { "type": "file", "path": "~/.claude/atelier-notify/events.jsonl" }
-     ]
-   }
-   ```
-
-   선택하지 않은 채널 항목은 넣지 않습니다. 기존 파일이 있으면 덮어쓸지 AskUserQuestion 으로 확인합니다.
+   - `desktop` — **OS 별로 다른 명령**을 기록합니다 (`uname` 으로 감지):
+     - Linux:
+       ```json
+       { "name": "desktop", "exec": ["notify-send", "{title}", "{body}"] }
+       ```
+     - macOS (이스케이프 대신 argv 전달 — injection 안전):
+       ```json
+       { "name": "desktop", "exec": ["osascript","-e",
+         "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv)\nend run",
+         "{title}", "{body}"] }
+       ```
+   - `slack`:
+     ```json
+     { "name": "slack",
+       "exec": ["curl","-sS","--fail","--max-time","4","-X","POST",
+                "-H","Content-Type: application/json","--data","@-","<입력받은 URL>"],
+       "stdin": "{\"text\": {text#json}}" }
+     ```
+   - `sink`:
+     ```json
+     { "name": "sink",
+       "exec": ["sh","-c","mkdir -p \"$HOME/.claude/atelier-notify\" && cat >> \"$HOME/.claude/atelier-notify/events.jsonl\""],
+       "stdin": "{json}\n" }
+     ```
 
 3. 검증 — 테스트 페이로드를 흘려 각 채널 리포트가 `"ok": true` 인지 확인합니다:
 
@@ -147,8 +164,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 
 - Slack webhook URL 이 비어 있거나 `https://` 로 시작하지 않으면 재입력을 요청합니다.
 - 검증 리포트에 `"ok": false` 가 있으면 해당 채널의 `error` 메시지를 보여주고
-  (예: Linux 에서 `notify-send` 미설치 → `libnotify` 설치 안내), 설정 파일은 그대로 둡니다 —
-  hook 은 advisory 라 실패해도 세션에 영향이 없습니다.
+  (예: Linux 에서 `notify-send` 미설치 → `libnotify` 설치 안내, `timed out` → 명령/네트워크 확인),
+  설정 파일은 그대로 둡니다 — hook 은 advisory 라 실패해도 세션에 영향이 없습니다.
 - webhook URL 은 시크릿입니다. 프로젝트 설정 파일로 만들 경우 `.gitignore` 에 포함됐는지 확인합니다.
 
 ## Step 3 — 기존 hook 마이그레이션 (frozen → atelier)

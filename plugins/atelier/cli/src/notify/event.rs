@@ -12,6 +12,15 @@ pub enum Event<'p> {
 }
 
 impl Event<'_> {
+    /// Stable event kind name — the `event` field of the structured JSON and
+    /// the value channel `events` filters match against.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Event::AskQuestion(_) => "ask_user_question",
+            Event::Notification(_) => "notification",
+        }
+    }
+
     /// Project directory the event originated from, when the hook supplied it.
     pub fn cwd(&self) -> Option<&str> {
         match self {

@@ -1,29 +1,30 @@
 //! Notify subsystem — routes Claude Code hook events (`AskUserQuestion`
-//! PreToolUse, Notification) to configured message channels. Layering:
+//! PreToolUse, Notification) to user-declared channel commands. A channel is
+//! **config, not code**: an argv command plus optional stdin template
+//! (`config::ChannelSpec`), so wiring a new channel (Slack, desktop banner,
+//! telegram-send, anything) is a config edit. Layering:
 //!
-//! - `channel/` — one module per channel owning its config shape, rendering,
-//!   and delivery (SRP); new channels register in `channel::registry()` only
-//!   (OCP — no other layer changes).
-//! - `config` — resolution precedence (env → project → global), channel-blind.
-//! - `command` — event gates + fan-out, channel-blind.
-//! - `transport` — pure-I/O ports (curl / file append / OS notifier).
+//! - `config` — resolution precedence + spec schema (channels as pure data)
+//! - `render` — deterministic event → template variables ({title}, {text}, …)
+//! - `command` — event gates + fan-out (substitute → run)
+//! - `exec` — the single side effect: spawn argv without a shell, with a
+//!   deadline
 //!
 //! Runs as advisory hooks, so the exit-code contract differs from the git
 //! subsystem: **every path exits 0** — exit 2 would block the observed tool,
 //! and even a usage error must stay advisory. Failures are reported in the
 //! JSON output instead.
 
-pub mod channel;
 pub mod command;
 pub mod config;
 pub mod event;
+pub mod exec;
 pub mod payload;
-pub mod transport;
+pub mod render;
 pub mod types;
 
-use crate::notify::channel::Effects;
-use crate::notify::config::{resolve_channels, ConfigEnv, ConfigFs};
-use crate::notify::transport::{CurlPoster, RealDesktopNotifier, RealFileAppender};
+use crate::notify::config::{resolve_channels, ChannelSpec, ConfigEnv, ConfigFs};
+use crate::notify::exec::RealCommandRunner;
 use crate::notify::types::{AskQuestionPayload, NotificationPayload, NotifyOutput};
 use clap::{Parser, Subcommand};
 
@@ -79,26 +80,21 @@ fn read_stdin_raw() -> String {
     buf
 }
 
-/// Shared edge wiring: resolve channels for the project with the real I/O
-/// ports, run the event's command core over stdin, print the JSON report.
+/// Shared edge wiring: resolve channel specs for the project, run the event's
+/// command core over stdin with the real runner, print the JSON report.
 /// Always 0.
 fn dispatch(
     project_dir: Option<String>,
-    run: impl FnOnce(&[Box<dyn channel::NotifyChannel + '_>], &str) -> NotifyOutput,
+    run: impl FnOnce(&RealCommandRunner, &[ChannelSpec], &str) -> NotifyOutput,
 ) -> i32 {
     let project_dir = project_dir.unwrap_or_else(|| {
         std::env::current_dir()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default()
     });
-    let fx = Effects {
-        poster: &CurlPoster,
-        appender: &RealFileAppender,
-        desktop: &RealDesktopNotifier,
-    };
-    let channels = resolve_channels(&RealEnv, &RealFs, &project_dir, &fx);
+    let channels = resolve_channels(&RealEnv, &RealFs, &project_dir);
     let raw = read_stdin_raw();
-    let output = run(&channels, &raw);
+    let output = run(&RealCommandRunner, &channels, &raw);
     let json = serde_json::to_string_pretty(&output).unwrap_or_else(|_| "null".to_string());
     println!("{json}");
     0
@@ -121,11 +117,11 @@ where
     };
 
     match cli.command {
-        Some(Commands::AskQuestion { project_dir }) => dispatch(project_dir, |channels, raw| {
-            command::run_ask_question(channels, &AskQuestionPayload::parse(raw))
+        Some(Commands::AskQuestion { project_dir }) => dispatch(project_dir, |runner, ch, raw| {
+            command::run_ask_question(runner, ch, &AskQuestionPayload::parse(raw))
         }),
-        Some(Commands::Notification { project_dir }) => dispatch(project_dir, |channels, raw| {
-            command::run_notification(channels, &NotificationPayload::parse(raw))
+        Some(Commands::Notification { project_dir }) => dispatch(project_dir, |runner, ch, raw| {
+            command::run_notification(runner, ch, &NotificationPayload::parse(raw))
         }),
         None => {
             use clap::CommandFactory;
