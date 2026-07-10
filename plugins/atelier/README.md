@@ -86,6 +86,7 @@ env 가 있으면 env 만, 없으면 프로젝트 config 파일을 읽습니다:
 # 1순위: env
 export ATELIER_NOTIFY_SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
 export ATELIER_NOTIFY_WEBHOOK_URL="https://my-relay.example/hook"   # 범용 JSON POST
+export ATELIER_NOTIFY_FILE="~/.claude/atelier-notify/events.jsonl"  # 로컬 JSONL 싱크
 ```
 
 ```jsonc
@@ -93,15 +94,35 @@ export ATELIER_NOTIFY_WEBHOOK_URL="https://my-relay.example/hook"   # 범용 JSO
 {
   "channels": [
     { "type": "slack", "webhookUrl": "https://hooks.slack.com/services/..." },
-    { "type": "webhook", "url": "https://my-relay.example/hook" }
+    { "type": "webhook", "url": "https://my-relay.example/hook" },
+    { "type": "file", "path": "~/.claude/atelier-notify/events.jsonl" }
   ]
 }
 ```
 
-- `slack`: Incoming Webhook 으로 사람이 읽는 `{"text": ...}` 메시지 전송.
+- `slack`: Incoming Webhook 으로 사람이 읽는 `{"text": ...}` 메시지 전송 (push).
 - `webhook`: 구조화 이벤트(`{"event":"ask_user_question"|"notification", ...}`)를
-  임의 URL 로 POST — Discord relay·메일 브리지·자체 서버 등 어떤 수신기든 연결 가능.
+  임의 URL 로 POST (push) — Discord relay·메일 브리지·자체 서버 등 수신 서버가 있을 때.
   이메일 등 새 채널은 `Channel` enum 확장 지점으로 남겨두었습니다.
+- `file`: 같은 구조화 이벤트를 **한 줄 JSONL 로 append** (poll) — 수신 서버가 없는
+  로컬 소비자용. `~/` 는 `$HOME` 으로 확장되고 디렉토리는 자동 생성됩니다.
+
+### Monitor 도구로 소비 (polling)
+
+[Monitor 도구](https://code.claude.com/docs/en/tools-reference#monitor-tool)는 webhook 을
+수신하는 게 아니라 **백그라운드 명령의 stdout 라인 = 이벤트**로 받는 폴링 모델입니다.
+`file` 채널이 그 짝입니다 — 워처 세션에서 이벤트 파일을 tail 하면 다른 세션이 입력을
+기다리기 시작하는 순간 라인 단위로 반응할 수 있습니다:
+
+```
+# 워처 세션에서 Claude 에게:
+"~/.claude/atelier-notify/events.jsonl 을 tail -F 로 모니터링하다가
+ 이벤트가 오면 어떤 세션이 뭘 기다리는지 알려줘"
+```
+
+전 세션 공용 싱크(`~/.claude/...`)로 두면 모든 프로젝트의 대기 이벤트가 한 파일에
+모입니다. 플러그인 자동 monitor 선언(`monitors/monitors.json`)은 모든 세션이 서로의
+이벤트에 반응해 노이즈가 되므로 넣지 않았습니다 — 워처 세션에서만 opt-in 하세요.
 
 설정 확인은 페이로드를 직접 흘려보면 됩니다:
 

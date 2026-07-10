@@ -37,8 +37,18 @@ pub struct NotificationPayload {
 /// enum plus `command`'s body dispatch — nothing else changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Channel {
-    Slack { webhook_url: String },
-    Webhook { url: String },
+    Slack {
+        webhook_url: String,
+    },
+    Webhook {
+        url: String,
+    },
+    /// Local JSONL sink: one structured event per line, appended to `path`.
+    /// The poll-friendly counterpart of the push channels — a Claude Code
+    /// Monitor (`tail -F <path>`) turns each appended line into an event.
+    File {
+        path: String,
+    },
 }
 
 impl Channel {
@@ -47,6 +57,7 @@ impl Channel {
         match self {
             Channel::Slack { .. } => "slack",
             Channel::Webhook { .. } => "webhook",
+            Channel::File { .. } => "file",
         }
     }
 }

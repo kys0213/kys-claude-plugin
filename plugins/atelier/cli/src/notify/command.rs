@@ -6,13 +6,14 @@
 use crate::notify::message::{
     notification_slack_body, notification_webhook_body, slack_body, webhook_body,
 };
-use crate::notify::transport::HttpPoster;
+use crate::notify::transport::{FileAppender, HttpPoster};
 use crate::notify::types::{
     AskQuestionPayload, Channel, NotificationPayload, NotifyOutput, SendReport,
 };
 
 pub struct NotifyDeps<'a> {
     pub poster: &'a dyn HttpPoster,
+    pub appender: &'a dyn FileAppender,
 }
 
 /// Delivers an `AskUserQuestion` payload. No channels (not configured) or no
@@ -52,7 +53,9 @@ pub fn run_notification(
     )
 }
 
-/// Shared fan-out: posts the channel-appropriate body to each channel.
+/// Shared fan-out: delivers the channel-appropriate body to each channel —
+/// push channels get an HTTP POST, the file channel gets a JSONL append of
+/// the structured (webhook) body so pollers read one event per line.
 fn deliver(
     deps: &NotifyDeps,
     channels: &[Channel],
@@ -62,11 +65,12 @@ fn deliver(
     let reports: Vec<SendReport> = channels
         .iter()
         .map(|channel| {
-            let (url, body) = match channel {
-                Channel::Slack { webhook_url } => (webhook_url, slack_body),
-                Channel::Webhook { url } => (url, webhook_body),
+            let result = match channel {
+                Channel::Slack { webhook_url } => deps.poster.post_json(webhook_url, slack_body),
+                Channel::Webhook { url } => deps.poster.post_json(url, webhook_body),
+                Channel::File { path } => deps.appender.append_line(path, webhook_body),
             };
-            match deps.poster.post_json(url, body) {
+            match result {
                 Ok(()) => SendReport {
                     channel: channel.kind().to_string(),
                     ok: true,

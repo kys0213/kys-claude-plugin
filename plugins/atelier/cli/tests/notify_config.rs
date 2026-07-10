@@ -3,7 +3,7 @@
 //! channels (no-op), never an error.
 
 use atelier::notify::config::{
-    resolve_channels, ConfigEnv, ConfigFs, ENV_SLACK_WEBHOOK_URL, ENV_WEBHOOK_URL,
+    resolve_channels, ConfigEnv, ConfigFs, ENV_FILE, ENV_SLACK_WEBHOOK_URL, ENV_WEBHOOK_URL,
 };
 use atelier::notify::types::Channel;
 use std::collections::HashMap;
@@ -97,6 +97,56 @@ fn falls_back_to_config_file_when_no_env() {
                 url: "https://file.example/hook".to_string()
             },
         ]
+    );
+}
+
+#[test]
+fn env_file_var_resolves_file_channel_with_home_expansion() {
+    let channels = resolve_channels(
+        &env(&[
+            (ENV_FILE, "~/.claude/atelier-notify/events.jsonl"),
+            ("HOME", "/home/u"),
+        ]),
+        &fs(&[]),
+        "/proj",
+    );
+    assert_eq!(
+        channels,
+        vec![Channel::File {
+            path: "/home/u/.claude/atelier-notify/events.jsonl".to_string()
+        }]
+    );
+
+    // Absolute path passes through untouched; no HOME leaves `~/` as-is.
+    let abs = resolve_channels(&env(&[(ENV_FILE, "/var/log/e.jsonl")]), &fs(&[]), "/proj");
+    assert_eq!(
+        abs,
+        vec![Channel::File {
+            path: "/var/log/e.jsonl".to_string()
+        }]
+    );
+    let no_home = resolve_channels(&env(&[(ENV_FILE, "~/e.jsonl")]), &fs(&[]), "/proj");
+    assert_eq!(
+        no_home,
+        vec![Channel::File {
+            path: "~/e.jsonl".to_string()
+        }]
+    );
+}
+
+#[test]
+fn config_file_resolves_file_channel() {
+    let file = r#"{"channels":[{"type":"file","path":"~/.claude/atelier-notify/events.jsonl"}]}"#;
+    let channels = resolve_channels(
+        &env(&[("HOME", "/home/u")]),
+        &fs(&[("/proj/.claude/atelier-notify.json", file)]),
+        "/proj",
+    );
+    assert_eq!(
+        channels,
+        vec![Channel::File {
+            path: "/home/u/.claude/atelier-notify/events.jsonl".to_string()
+        }]
     );
 }
 
