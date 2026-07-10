@@ -29,6 +29,14 @@ if git remote get-url origin 2>/dev/null | grep -qE '127\.0\.0\.1|localhost|loca
   exit 0
 fi
 
+# Same cloud case, different signal: managed environments may rewrite origin
+# to https://github.com while git auth flows through an agent proxy/token and
+# `gh` is not installed at all. An absent binary can never be authenticated,
+# and any `gh ...` command will fail loudly on its own — so don't block.
+if ! command -v gh &>/dev/null; then
+  exit 0
+fi
+
 if ! gh auth status --hostname github.com &>/dev/null; then
   echo "BLOCK: GitHub CLI is not authenticated." >&2
   echo "Run 'gh auth login' to authenticate before proceeding." >&2
