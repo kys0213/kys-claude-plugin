@@ -66,8 +66,13 @@ CLI 인자 형식·출력 계약·git 정책(커밋 형식·브랜치 명명·PR
 1. **변경사항 확인**: `git status` + `git diff --stat`. 변경이 없으면 안내 후 종료.
 2. **안전 검사**: 현재 브랜치가 기본 브랜치(main/master)이면 경고하고 AskUserQuestion 으로 확인 — 거부 시 `git switch -c` 로 새 브랜치 생성을 제안. (PreToolUse guard 가 차단하기도 함.)
 3. **커밋 메시지 판단**: 사용자가 메시지를 주면 그대로, 없으면 변경 내용을 분석해 type/scope/description 을 결정. 브랜치명에서 Jira 티켓을 감지해 형식을 선택. 민감 파일(`.env`, `credentials*` 등)은 스테이징에서 제외.
-4. **실행 (plain git/gh)**: `git add -u && git commit -m "<형식 적용한 subject>"` → (push 요청 시) `git push -u origin {브랜치}` → (PR 요청 시) `gh pr create --title ... --body ...`.
-5. **결과 안내**: 커밋 subject / PR URL 을 사용자에게 출력.
+4. **PR pre-check (PR 요청 시)**: diff 스코프를 확정하기 **전에** 브랜치·머지 상태를 검증합니다. 아래 3가지 확인 없이 PR 스코프를 확정하지 않습니다.
+   1. **base 와의 관계 확인**: `git fetch origin --prune` 후 `git log --oneline origin/<base>..HEAD` 로 base 에 없는 커밋만 스코프에 담기는지 확인
+   2. **이미 머지되었는지 확인**: `gh pr list --state merged --search` + merge-base 비교로 동일 변경이 이미 base(develop/main)에 머지되지 않았는지 확인 — 확인 없이 diff 만 보고 스코핑하면 중복 PR 이 생깁니다
+   3. **열린 동일 목적 PR 확인**: `gh pr list --state open` 으로 같은 목적의 PR 이 이미 열려 있는지 확인
+   back-merge/hotfix 세션처럼 레포 상태 파악이 흔들렸다면 pre-check 를 처음부터 다시 수행합니다. 상세 명령 예시는 `references/cli-reference.md` §B.3 참조.
+5. **실행 (plain git/gh)**: `git add -u && git commit -m "<형식 적용한 subject>"` → (push 요청 시) `git push -u origin {브랜치}` → (PR 요청 시) `gh pr create --title ... --body ...`.
+6. **결과 안내**: 커밋 subject / PR URL 을 사용자에게 출력.
 
 > 형식·명명·PR 본문 규칙은 `references/cli-reference.md` §B 참조.
 
@@ -92,6 +97,27 @@ git push -u origin feature/my-work
 gh pr create --title "My feature" --body "..."
 # → Merge 승인 대기 → git switch <base> && git pull → git branch -d feature/my-work
 ```
+
+### force-push 금지
+
+hook 차단 여부와 **별개로 에이전트 스스로 지키는 정책**입니다.
+
+```bash
+git push --force origin feature/my-work              # 금지
+git push --force-with-lease origin feature/my-work   # 금지
+```
+
+- force-push 를 시도하지 않습니다. history 재작성이 필요하면 대안을 먼저 제시합니다: `git revert`, 새 커밋으로 수정, 새 브랜치에서 재작업.
+
+### push 권한 거부 시 사용자 위임
+
+- push/force-push 가 permission denied 되면 **같은 명령을 재시도하지 않습니다** — 반복 재시도는 레포 상태 추적만 잃게 합니다.
+- 대신 실행할 정확한 명령(브랜치·remote 포함 전체 커맨드)을 정리해 사용자에게 실행을 위임합니다.
+
+### hotfix / back-merge 상태 재확인
+
+- hotfix 는 **target 브랜치(master/main) 기반 워크플로우**를 따릅니다 — develop 기반 워크플로우와 혼동하지 않습니다.
+- back-merge 시 `git status`, `git log --graph --oneline` 으로 현재 레포 상태를 먼저 재확인한 뒤 진행합니다.
 
 ---
 

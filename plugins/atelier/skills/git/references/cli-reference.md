@@ -109,6 +109,29 @@ git commit -m "<subject>" [-m "<body>"]
 
 ## 3. PR 생성
 
+### PR pre-check (스코프 확정 전 필수)
+
+diff 스코프를 확정하기 전에 브랜치·머지 상태를 검증한다. 3가지 확인 없이 스코프를 확정하지 않는다.
+
+```bash
+# 1. base 와의 관계 확인 — base 에 없는 커밋만 스코프에 담기는지
+git fetch origin --prune
+git log --oneline origin/<base>..HEAD
+
+# 2. 동일 변경이 이미 base 에 머지되었는지 확인
+gh pr list --state merged --search "<핵심 키워드>" --limit 10
+git merge-base --is-ancestor HEAD origin/<base> && echo "HEAD 가 이미 base 에 포함됨 — PR 불필요"
+
+# 3. 열린 동일 목적 PR 존재 여부 확인
+gh pr list --state open --search "<핵심 키워드>"
+gh pr list --head <branch>   # 현재 브랜치의 기존 PR
+```
+
+- 1번 출력이 비어 있으면 base 에 더할 커밋이 없다 — PR 을 만들지 않고 사용자에게 상태를 보고한다.
+- back-merge/hotfix 세션에서 레포 상태 파악이 흔들렸다면 pre-check 를 처음부터 다시 수행한다.
+
+### 실행
+
 ```bash
 git push -u origin <branch>
 gh pr create --base <default-branch> --title "<title>" --body "<body>"

@@ -191,6 +191,23 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 
 정책 전문(envelope 정의)은 **`SKILL.md §모델 라우팅 전략`이 단일 출처**다 — 여기서 중복 정의하지 않는다. 부모 모델이 `fable`인 세션에서는 상속(모델 미지정)도 위반이므로 위임 dispatch에는 반드시 `model`을 명시한다. envelope 안에서의 tier 선택은 여전히 메인의 판단이다 (envelope은 범위 제약이지 고정 매핑이 아니다).
 
+### 역할별 모델 정책 적용 (exclude / allow)
+
+역할별 exclude/allow 정책의 선언 위치·조회 순서·스키마는 **`SKILL.md §역할별 모델 정책 설정`이 단일 출처**다 (프로젝트 `.claude/orchestrator-policy.yaml` → 사용자 `~/.claude/orchestrator-policy.yaml`, 프로젝트 우선). 여기서는 dispatch 시 적용 판단 로직만 다룬다.
+
+적용 순서 (dispatch마다):
+
+1. **후보 선정**: 위 tier heuristic으로 시작 tier의 모델을 후보로 정한다.
+2. **정책 대조**: 해당 역할(reviewer/qa/dba/implementer 등)의 `exclude_models`에 후보가 있으면 배정을 차단한다. `allow_models`가 선언돼 있으면 목록 밖 모델도 전부 차단으로 취급한다.
+3. **대체 라우팅**: 차단되면 envelope(opus/sonnet/haiku) 안에서 대체한다 — reviewer/QA/DBA처럼 판정 품질이 게이트인 역할은 인접 상위 tier 우선, 그 외 역할은 인접 하위 tier 우선. 대체 배정은 표준 heuristic을 벗어난 선택이므로 근거와 함께 decision log에 남긴다.
+4. **배정 불가**: 정책이 envelope 세 tier를 전부 차단하면 설정 오류다 — 임의로 정책을 무시하고 배정하지 말고, 에스컬레이션(사용자 보고)한다.
+
+규칙:
+
+- **역할 단위 override**: 프로젝트 파일에 정의된 역할은 프로젝트 정책만 적용하고, 정의되지 않은 역할만 사용자 파일로 fallback한다 (파일 전체 병합이 아니라 역할 단위 우선).
+- **정책 파일이 없으면** 이 절차 전체를 건너뛰고 현행 기본 tier heuristic만 쓴다.
+- **fable 예약 정책은 설정으로 override 불가**: `allow_models`에 fable이 있어도 무시한다. 이 정책은 envelope 안의 선택만 조정한다 (위 §fable 예약 정책).
+
 ---
 
 ## 체크리스트
@@ -204,5 +221,6 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 - [ ] 편집하는 sub-agent라면 `isolation: "worktree"`를 켰는가?
 - [ ] worktree dispatch라면 prompt에 worktree 격리 준수(경로 prefix 검증 + 부모 repo 수정 금지)를 명시했는가?
 - [ ] 모델 선택이 작업 난이도와 맞는가?
-- [ ] fable 예약 정책을 지키는가? (fable = 오케스트레이터 전용 — 협의체 포함 위임 sub-agent는 fable 금지, 부모가 fable이면 `model` 명시)
+- [ ] 역할별 모델 정책 파일이 있으면 exclude/allow를 대조했는가? (차단 시 envelope 안 대체 라우팅 + decision log)
+- [ ] fable 예약 정책을 지키는가? (fable = 오케스트레이터 전용 — 협의체 포함 위임 sub-agent는 fable 금지, 부모가 fable이면 `model` 명시, 정책 설정으로 override 불가)
 - [ ] team의 경우 name이 의미 있고 유니크한가?
