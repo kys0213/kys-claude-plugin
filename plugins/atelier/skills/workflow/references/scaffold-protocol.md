@@ -65,11 +65,11 @@ AskUserQuestion: |
     1. 프로젝트 유형: [제품 / 라이브러리 / 내부 도구 / 오픈소스]
     2. 팀 구성: [1인 / 소규모 / 대규모]
 
-  충돌할 때의 우선순위 (기본값은 *표시):
-    3. 가독성 ↔ 성능: [*가독성 / 균형 / 성능]
-    4. 명시성 ↔ 간결성: [*명시적 / 균형 / 간결]
-    5. 안정성 ↔ 속도: [*안정성 / 균형 / 속도]
-    6. 추상화 시점: [이른 추상화 / *Rule of 3 / 명시적 중복]
+  충돌할 때의 우선순위 (항목·선택지·기본값은 references/value-interview.md §B 트레이드오프 표 참조):
+    3. 가독성 ↔ 성능
+    4. 명시성 ↔ 간결성
+    5. 안정성 ↔ 속도
+    6. 추상화 시점
 
   "yes"로 전체 확인, 또는 번호와 선택지를 알려주세요.
   (예: "1: 내부 도구, 4: 간결")
@@ -126,14 +126,7 @@ document-analyzer가 "문서 부족" 상태를 반환한 경우, Q2에서 프리
 - **용어**: {terminology_convention}
 ```
 
-```
-AskUserQuestion: |
-  아래 내용을 CLAUDE.md에 추가합니다:
-
-  {generated_sections}
-
-  "yes"로 추가, "no"로 건너뛰기, 또는 수정 사항을 알려주세요.
-```
+생성된 섹션(`{generated_sections}`)을 보여주고 AskUserQuestion으로 확인합니다 — "yes"(추가) / "no"(건너뛰기) / 수정 사항 중 선택.
 
 4. **승인 시**: CLAUDE.md에 섹션 추가
    - CLAUDE.md **없으면**: 생성된 섹션으로 새 파일 `Write`
@@ -146,16 +139,7 @@ AskUserQuestion: |
 
 codebase-analyzer의 규칙 구조 제안을 사용자에게 보여주고 확인합니다.
 
-```
-AskUserQuestion: |
-  위 규칙 파일 구조를 생성하시겠습니까?
-
-  옵션:
-  - "yes" 또는 "y": 전체 생성
-  - 번호 (예: "1,3,5"): 선택한 파일만 생성
-  - "no" 또는 "n": 취소
-  - 직접 수정 요청 가능 (예: "service.md의 paths를 수정해주세요")
-```
+위 규칙 파일 구조를 생성할지 AskUserQuestion으로 확인합니다 — "yes"(전체 생성) / 번호 선택(예: "1,3,5", 해당 파일만 생성) / "no"(취소) / 직접 수정 요청 중 선택.
 
 사용자가 거부하면 Step 6(결과 요약)으로 건너뜁니다.
 
@@ -178,21 +162,4 @@ Prompt: |
 
 ## Step 6: 결과 요약
 
-전체 변경 사항을 보고합니다:
-
-```
-scaffold 완료!
-
-CLAUDE.md 변경:
-  ✓ 프로젝트 맥락 섹션 추가
-  ✓ 엔지니어링 가치 섹션 추가
-  ✓ 문서화 컨벤션 섹션 추가
-
-생성된 규칙 파일:
-  .claude/rules/controller.md  (paths: **/*.controller.ts)
-  .claude/rules/service.md     (paths: **/*.service.ts)
-  .claude/rules/testing.md     (paths: **/*.spec.ts)
-
-CLAUDE.md = 나침반 (항상 로드, 프로젝트 가치관)
-.claude/rules/ = 지도 (해당 파일 수정 시 로드, 레이어별 컨벤션)
-```
+전체 변경 사항을 보고합니다: CLAUDE.md = 나침반(항상 로드, 프로젝트 가치관), `.claude/rules/` = 지도(해당 파일 수정 시 로드, 레이어별 컨벤션).
