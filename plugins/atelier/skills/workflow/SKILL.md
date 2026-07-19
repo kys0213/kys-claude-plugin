@@ -41,4 +41,5 @@ version: 1.0.0
 - **분석은 sub-agent 에 위임**: codebase-analyzer / document-analyzer / rules-generator / workflow-reviewer. 메인 에이전트는 인터뷰·승인(HITL)과 결과 취합만 합니다.
 - **HITL 필수**: CLAUDE.md 와 `.claude/rules/` 변경은 반드시 사용자 승인 후 수행합니다.
 - **paths 는 레이어를 표현**: 위치(컨테이너)가 아닌 역할(레이어) 기준 — `references/rules-design.md` §paths 범용화 원칙.
+- **규칙 본문은 원칙을 표현**: 현재 구현 스냅샷이 아닌 역할·계약·불변식 기준 — `references/rules-design.md` §규칙 내용 범용화 원칙.
 - 코딩 원칙 자체는 setup 이 주입하는 CLAUDE.md(템플릿 `templates/claude-md/CLAUDE.md`), 에이전트 레이어링 교리는 `agent-design-principles` skill 이 단일 출처입니다.
