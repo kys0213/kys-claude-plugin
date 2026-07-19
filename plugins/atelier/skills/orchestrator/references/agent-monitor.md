@@ -29,14 +29,7 @@ user-invocable: false
 
 ## 백그라운드 위임 기본형
 
-```
-Agent({
-  description: "...",
-  prompt: "<자기완결>",
-  run_in_background: true,
-  isolation: "worktree",  # 필요 시
-})
-```
+`Agent`에 `run_in_background: true`(필요 시 `isolation: "worktree"`)를 지정해 자기완결적 prompt로 호출한다.
 
 - `run_in_background: true`로 띄우면 메인은 다른 일 진행 가능
 - 완료 시 자동 알림 — **sleep / poll 금지**
@@ -46,11 +39,7 @@ Agent({
 
 ## 진행 상황 추적 (Monitor 도구)
 
-장시간 백그라운드 작업의 stdout 스트림을 읽고 싶을 때:
-
-```
-Monitor({...})  # 백그라운드 프로세스의 라인별 알림
-```
+장시간 백그라운드 작업의 stdout 스트림을 라인별 알림으로 읽고 싶을 때 `Monitor` 도구를 쓴다.
 
 ### 언제 사용
 - 정말 긴 빌드/테스트 결과를 line-by-line으로 봐야 할 때
@@ -91,10 +80,6 @@ TaskUpdate({taskId: "1", status: "completed"})                         # 완료 
 ---
 
 ## SendMessage: 사용자 결정 후에만
-
-```
-SendMessage({to: "<agent_name>", message: "..."})
-```
 
 ### 허용 케이스
 - 사용자가 명시적으로 "그 agent에게 이렇게 전달해줘"라고 지시
@@ -156,11 +141,6 @@ SendMessage({to: "<agent_name>", message: "..."})
 
 재시도 예산을 소진한 조각은 버리지 않고 대체 경로로 채운다. **취합을 미완성 상태로 종료하지 않는다.**
 
-```
-❌ 재시도 소진 → 해당 조각 없이 취합 종료 (조용한 누락)
-✅ 재시도 소진 → read-only 직접 분석 또는 조건 바꾼 재위임으로 채움 → 보고에 폴백 명시
-```
-
 - **read-only 분석·요약 수준의 조각** → 메인이 `Read`/`Glob`/`Grep`으로 직접 분석해 채운다 (읽기·보고는 메인의 허용 범위 — *사고 모드* 위반 아님).
 - **편집이 필요한 조각** → 메인이 편집권을 회수하지 않는다. 조건을 바꿔(다른 tier/모델, 범위 축소, prompt 보강) **새 agent로 재위임**한다.
 - 그래도 채울 수 없으면 해당 조각을 "미완(사유 포함)"으로 명시해 취합에 포함한다 — 조용한 누락이 아니라 명시적 구멍이어야 한다.
@@ -172,9 +152,6 @@ SendMessage({to: "<agent_name>", message: "..."})
 ```
 | 조각 | 상태 | 비고 |
 |------|------|------|
-| task-03 | 성공 | 1회 시도 |
-| task-07 | 성공 (재시도 2회) | 504 × 2 |
-| task-11 | 폴백 (메인 직접 분석) | 재시도 3회 소진 |
 ```
 
 - 취합 수치(합계·통계)는 **체크포인트 파일 기준**으로 계산해 보고 수치와 실제 산출물의 불일치를 막는다.
@@ -203,20 +180,11 @@ SendMessage({to: "<agent_name>", message: "..."})
 
 ## team 진행 추적
 
-agent team(실험 플래그 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 필요)의 경우 여러 agent가 동시에 진행 중일 수 있다.
+agent team(실험 플래그 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 필요)의 경우 여러 agent가 동시에 진행 중일 수 있다. team spawn 패턴(`Agent({name, ...})` + `SendMessage`)은 `references/delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다.
 
-```
-# team은 공유 checkout — 편집 격리 없음. 편집은 각 teammate가 isolated subagent로 위임.
-Agent({name: "reviewer", run_in_background: true, ...})      # team_name은 무시됨
-Agent({name: "implementer", run_in_background: true, ...})
-
-# 진행 추적
-- 각 agent의 완료 알림이 별개로 도착
-- name으로 식별 가능 → 어떤 역할이 끝났는지 즉시 파악
-- 한 agent가 다른 agent의 결과를 기다려야 할 때:
-   * 미리 의존성을 명시한 prompt로 띄움 (reviewer 결과를 받아 처리하도록)
-   * 또는 메인이 한 단계 완료 후 다음 단계를 호출 (순차)
-```
+- team은 공유 checkout이라 편집 격리가 없다 — 편집은 각 teammate가 `isolation:"worktree"` subagent로 위임한다.
+- 각 agent의 완료 알림이 별개로 도착하고, name으로 식별해 어떤 역할이 끝났는지 즉시 파악한다.
+- 한 agent가 다른 agent의 결과를 기다려야 할 때: 미리 의존성을 명시한 prompt로 띄우거나, 메인이 한 단계 완료 후 다음 단계를 호출한다(순차).
 
 team은 session 종료 시 **자동 정리**된다 (`TeamDelete` 없음 — 제거된 도구). 별도 정리 단계가 필요 없다.
 
