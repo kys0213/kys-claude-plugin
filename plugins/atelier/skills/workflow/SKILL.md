@@ -33,7 +33,7 @@ version: 1.0.0
 |---|---|---|
 | `references/scaffold-protocol.md` | 컨벤션 scaffold 수행 시 | 6단계 HITL 워크플로우 (병렬 분석 → 인터뷰 → CLAUDE.md → 규칙 생성) |
 | `references/codebase-detection.md` | 코드베이스 분석 시 (codebase-analyzer) | 언어/프레임워크/구조 감지 시그널, LSP-Enhanced Analysis |
-| `references/rules-design.md` | 규칙 구조 제안·생성·검증 시 | 레이어 매핑, paths 전략, 규칙 템플릿, 다중 언어, paths 범용화 원칙 |
+| `references/rules-design.md` | 규칙 구조 제안·생성·검증 시 | 레이어 매핑, paths 전략, 규칙 템플릿, 다중 언어, paths 범용화 원칙, 규칙 내용 범용화 원칙 |
 | `references/value-interview.md` | 가치관 인터뷰·CLAUDE.md 배치 결정 시 | 인터뷰 카테고리, CLAUDE.md vs rules 배치 기준 |
 
 ## 공통 원칙
