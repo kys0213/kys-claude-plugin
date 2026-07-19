@@ -33,7 +33,7 @@ version: 1.0.0
 |---|---|---|
 | `references/scaffold-protocol.md` | 컨벤션 scaffold 수행 시 | 6단계 HITL 워크플로우 (병렬 분석 → 인터뷰 → CLAUDE.md → 규칙 생성) |
 | `references/codebase-detection.md` | 코드베이스 분석 시 (codebase-analyzer) | 언어/프레임워크/구조 감지 시그널, LSP-Enhanced Analysis |
-| `references/rules-design.md` | 규칙 구조 제안·생성·검증 시 | 레이어 매핑, paths 전략, 규칙 템플릿, 다중 언어, paths 범용화 원칙 |
+| `references/rules-design.md` | 규칙 구조 제안·생성·검증 시 | 레이어 매핑, paths 전략, 규칙 템플릿, 다중 언어, paths 범용화 원칙, 규칙 내용 범용화 원칙 |
 | `references/value-interview.md` | 가치관 인터뷰·CLAUDE.md 배치 결정 시 | 인터뷰 카테고리, CLAUDE.md vs rules 배치 기준 |
 
 ## 공통 원칙
@@ -41,4 +41,5 @@ version: 1.0.0
 - **분석은 sub-agent 에 위임**: codebase-analyzer / document-analyzer / rules-generator / workflow-reviewer. 메인 에이전트는 인터뷰·승인(HITL)과 결과 취합만 합니다.
 - **HITL 필수**: CLAUDE.md 와 `.claude/rules/` 변경은 반드시 사용자 승인 후 수행합니다.
 - **paths 는 레이어를 표현**: 위치(컨테이너)가 아닌 역할(레이어) 기준 — `references/rules-design.md` §paths 범용화 원칙.
+- **규칙 본문은 원칙을 표현**: 현재 구현 스냅샷이 아닌 역할·계약·불변식 기준 — `references/rules-design.md` §규칙 내용 범용화 원칙.
 - 코딩 원칙 자체는 setup 이 주입하는 CLAUDE.md(템플릿 `templates/claude-md/CLAUDE.md`), 에이전트 레이어링 교리는 `agent-design-principles` skill 이 단일 출처입니다.
