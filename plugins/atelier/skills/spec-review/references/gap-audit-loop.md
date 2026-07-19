@@ -61,28 +61,7 @@ gap-auditor 의 출력 스키마를 엄수.
 
 ### 루프 정책
 
-```
-iter = 0
-prev_major_ids = None
-l2_output = L2 종합 결과
-
-while iter < 3:
-    audit = call_gap_auditor(l1_reports, l2_output, iter)
-    major = audit.major_issues
-    if not major:
-        break  # 종료 조건 1: major == 0
-    if iter > 0 and {m.finding_id for m in major} == prev_major_ids:
-        break  # 종료 조건 2: 동일 finding 들이 같은 사유로 반복 (진전 없음)
-    fix_prompt = build_l2_fix_request(l1_reports, l2_output, major)
-    l2_output = call_l2_fix(fix_prompt)  # L2 재진입
-    prev_major_ids = {m.finding_id for m in major}
-    iter += 1
-
-# 종료 조건 3: iter == 3 도달 — 강제 종료
-# 잔여 major 는 drop log 로 사용자 가시 노출
-if major:
-    log_audit_drop(major)
-```
+gap-auditor 를 호출해 major 이슈가 있으면 L2 fix request 로 재진입하는 것을 반복한다. 반복 종료 조건은 뒤의 "종료 조건 (3가지)" 절과 동일하다.
 
 상세 알고리즘은 `plans/spec-kit-l2-reviewer/02-architecture.md` §"루프 통합" 참조.
 
