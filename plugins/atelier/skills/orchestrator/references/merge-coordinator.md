@@ -13,15 +13,7 @@ user-invocable: false
 
 ## 머지 대상: epic 브랜치
 
-이 단계의 머지 target은 **현재 epic 브랜치**다. main 브랜치가 아니다.
-
-```
-worktree A (sub-agent A의 브랜치)  ─┐
-worktree B (sub-agent B의 브랜치)  ─┼─→ epic/<name>   (이 스킬 범위)
-worktree C (sub-agent C의 브랜치)  ─┘
-
-epic/<name> → main 머지는 사용자 결정 / 별도 release 절차 (범위 밖)
-```
+이 단계의 머지 target은 **현재 epic 브랜치**다. main 브랜치가 아니다. 각 worktree(sub-agent 브랜치)는 epic 브랜치로 합류하고, epic 브랜치에서 main으로의 머지는 사용자 결정 / 별도 release 절차로 이 스킬 범위 밖이다.
 
 따라서 아래 절차에서 `base`로 표기된 곳은 모두 **현재 epic 브랜치**를 의미한다.
 
@@ -108,51 +100,20 @@ git branch -D <잘못 switch된 sub-agent 브랜치>   # 로컬에 남았으면 
 
 파일별 충돌 해결 전략(Ours/Theirs/Manual, rebase marker 의미)은 `git` skill 의
 `references/conflict-resolution.md` 가 단일 출처다 (git skill 이 로드).
-메인은 이 전략을 트리거할 sub-agent 를 호출한다.
-
-```
-Agent({
-  description: "Resolve merge conflict for branch <X>",
-  prompt: """
-    base: epic/<name>           # 현재 epic 브랜치
-    target: <feature-branch>     # sub-agent worktree의 브랜치
-    충돌이 발생했다. git skill 의 references/conflict-resolution.md 전략으로
-    파일별로 충돌을 해결하고 epic 브랜치 위로 rebase 를 완료해라.
-    완료 후 변경된 파일 목록과 최종 커밋 해시를 보고해라.
-  """
-})
-```
+메인은 이 전략을 트리거할 sub-agent 를 호출한다. prompt에는 최소 `base: epic/<name>`, `target: <feature-branch>`, "git skill의 `references/conflict-resolution.md` 전략으로 해결 후 epic 브랜치 위로 rebase, 완료 후 변경 파일·커밋 해시 보고"를 포함한다.
 
 ### 옵션 B: 사용자에게 보고
 
 - 충돌이 의미상 판단을 요구하는 경우 (도메인 로직, 의도 충돌)
 - 또는 사용자가 직접 처리하길 선호하는 경우
 
-```
-보고 형식:
-- 어떤 두 브랜치가 충돌했는가
-- 충돌 파일 목록
-- 메인이 본 충돌의 성격 (단순 라인 겹침 / 의미 차이 / 구조 변경 등)
-- 다음 액션 선택지 (자동 시도 / 사용자 직접 / 한쪽 폐기)
-```
+보고 형식은 아래 §보고 형식과 동일하다(단일 출처).
 
 ---
 
 ## 머지 실패 처리
 
-위임된 충돌 해결이 실패한 경우:
-
-```
-1. 부분 머지 상태 확인 (이미 머지된 후보, 미머지 후보)
-2. 사용자에게 보고
-   - 어디까지 진행됐는가
-   - 무엇이 실패했는가
-   - 다음 액션 선택지:
-     a. 충돌 해결 재시도 (다른 prompt로)
-     b. 해당 브랜치 보류 (다음에 사용자가 직접 처리)
-     c. 해당 브랜치 폐기
-3. 사용자 결정에 따라 진행
-```
+위임된 충돌 해결이 실패한 경우 부분 머지 상태(이미 머지된 후보/미머지 후보)를 확인하고, 아래 §보고 형식으로 사용자에게 보고한 뒤 결정에 따라 진행한다.
 
 **금지**: 메인이 자체 판단으로 충돌 부분을 직접 편집해 머지를 강제 진행 — 오케스트레이터 원칙 위반.
 
@@ -193,14 +154,15 @@ git diff --name-only epic/<name>...<branch_B>  # B가 변경한 파일
 ```
 머지 결과:
 - 성공: branch_A → main, branch_B → main
-- 실패: branch_C (충돌, <파일 목록>)
+- 실패: branch_C (충돌 — <파일 목록>, 성격: 단순 라인 겹침 / 의미 차이 / 구조 변경)
 - 보류: branch_D (사용자 결정 대기)
 
 남은 worktree:
 - <경로> (branch_C, 충돌 해결 미완)
 
 다음 액션 제안:
-- branch_C 재시도 prompt 작성
+- branch_C 재시도 prompt 작성 (다른 조건으로)
+- 해당 브랜치 보류 또는 폐기
 - 또는 사용자 직접 처리
 ```
 
