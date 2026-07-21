@@ -74,7 +74,11 @@ epic/<name> → main 머지는 사용자 결정 / 별도 release 절차 (범위 
    - 머지된 worktree 삭제
    - 폐기된 worktree도 사용자 확인 후 삭제
 
-7. 사용자에게 결과 요약 보고
+7. 최종 통합 검증 게이트 (아래 "최종 통합 검증 게이트 (final HEAD full-suite)" 참조)
+   - epic 브랜치 최종 HEAD clean 확인 후 전체 테스트 스위트 1회 실행
+   - green이어야 완료 선언 가능 (HEAD sha 기록)
+
+8. 사용자에게 결과 요약 보고
 ```
 
 ---
@@ -97,6 +101,27 @@ git branch -D <잘못 switch된 sub-agent 브랜치>   # 로컬에 남았으면 
 ```
 
 복구 후 **반드시 에스컬레이션** — 어떤 명령 직후 발생했는지, working tree가 clean했는지를 사용자에게 보고한다. 자율 모드라도 이 가드 실패는 hard stop이다 (`autonomous-driving.md`).
+
+---
+
+## 최종 통합 검증 게이트 (final HEAD full-suite)
+
+모든 머지 후보가 epic 브랜치로 통합된 뒤에도, 개별 worktree가 각자 green이었다는 사실이 머지 결합 후 회귀가 없음을 보장하지는 않는다. 통합이 끝나면 **epic 브랜치 최종 HEAD**에서 전체 테스트 스위트를 1회 더 실행한다.
+
+```
+1. epic 브랜치 최종 HEAD에서 `git status` clean 확인
+   - 미커밋 변경/untracked 잔여물이 있으면 먼저 정리 후 재확인
+2. 전체 테스트 스위트 1회 실행 (변경 파일 한정/부분 실행 금지)
+3. HEAD sha 기록 (`git rev-parse HEAD`)
+```
+
+**완료 선언 조건**: '작업 완료' 보고는 이 최종 HEAD green을 전제로 한다. 중간 브랜치나 개별 worktree의 green 결과만으로는 완료를 선언하지 않는다 — 각 worktree가 개별적으로 green이어도 머지 결합 지점(인터페이스, 전역 상태, 실행 순서 등)에서 회귀가 발생할 수 있기 때문이다.
+
+보고에는 스위트가 실행된 **HEAD sha**를 반드시 명시한다 (아래 "보고 형식" 참조).
+
+**실패 시**: 완료 선언 금지. 회귀 원인 파악 후 수정을 위임한다 — 메인 직접 편집 금지 원칙은 이 단계에도 동일하게 적용된다 ("충돌 시 위임" 절차 참조).
+
+인프라 의존 테스트(DB, 외부 서비스 등)는 자율 모드 통합 단계에서 메인 working tree 기준 별도 검증 대상이다 (#782). 본 게이트는 인프라 의존 여부와 무관하게, epic 브랜치 최종 HEAD 전체 스위트 실행을 완료 선언의 전제 조건으로 규정하는 상위 규칙이다.
 
 ---
 
@@ -196,6 +221,10 @@ git diff --name-only epic/<name>...<branch_B>  # B가 변경한 파일
 - 실패: branch_C (충돌, <파일 목록>)
 - 보류: branch_D (사용자 결정 대기)
 
+최종 통합 검증 게이트:
+- HEAD sha: <sha>
+- 전체 스위트 결과: green | red (red면 완료 선언 보류, 원인/재위임 계획 명시)
+
 남은 worktree:
 - <경로> (branch_C, 충돌 해결 미완)
 
@@ -215,6 +244,7 @@ git diff --name-only epic/<name>...<branch_B>  # B가 변경한 파일
 5. **base 미동기화 머지**: 오래된 base 위에 머지 시도 → 무의미한 충돌. 머지 직전 base pull 필수.
 6. **main으로 바로 머지**: epic 브랜치를 거치지 않고 sub-agent 결과를 main으로 직접 머지 → epic 브랜치 전략 위반. 이 단계의 target은 항상 epic 브랜치.
 7. **머지 후 가드 생략**: `gh pr merge` 후 current branch 확인 없이 다음 git 명령 진행 → 메인이 sub-agent 브랜치 위에서 작업하는 토폴로지 위반을 뒤늦게 발견 (#783). 매 머지 직후 가드 필수.
+8. **조기 완료 선언**: 개별 worktree/중간 브랜치 green만으로 완료 보고 → 머지 결합 후 회귀 가능성을 놓침. epic 브랜치 최종 HEAD 전체 스위트 green과 HEAD sha 명시를 완료 선언의 전제로 한다.
 
 ---
 
@@ -237,4 +267,6 @@ git diff --name-only epic/<name>...<branch_B>  # B가 변경한 파일
 머지 종료 후:
 
 - [ ] worktree를 정리했는가?
+- [ ] 최종 HEAD(clean 상태)에서 전체 테스트 스위트를 1회 실행하고 green을 확인했는가?
+- [ ] 보고에 스위트 실행 HEAD sha를 명시했는가?
 - [ ] 사용자에게 결과 요약을 보고했는가?
