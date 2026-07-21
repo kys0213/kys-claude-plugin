@@ -71,10 +71,29 @@ CLI 인자 형식·출력 계약·git 정책(커밋 형식·브랜치 명명·PR
    2. **이미 머지되었는지 확인**: `gh pr list --state merged --search` + merge-base 비교로 동일 변경이 이미 base(develop/main)에 머지되지 않았는지 확인 — 확인 없이 diff 만 보고 스코핑하면 중복 PR 이 생깁니다
    3. **열린 동일 목적 PR 확인**: `gh pr list --state open` 으로 같은 목적의 PR 이 이미 열려 있는지 확인
    back-merge/hotfix 세션처럼 레포 상태 파악이 흔들렸다면 pre-check 를 처음부터 다시 수행합니다. 상세 명령 예시는 `references/cli-reference.md` §B.3 참조.
+   > pre-check 와 별개로, PR 스코프를 확정하는 시점에는 아래 §PR 단위 원칙(요청 1건=PR 1개, base 확정 보고)을 함께 적용합니다.
 5. **실행 (plain git/gh)**: `git add -u && git commit -m "<형식 적용한 subject>"` → (push 요청 시) `git push -u origin {브랜치}` → (PR 요청 시) `gh pr create --title ... --body ...`.
 6. **결과 안내**: 커밋 subject / PR URL 을 사용자에게 출력.
 
 > 형식·명명·PR 본문 규칙은 `references/cli-reference.md` §B 참조.
+
+---
+
+## PR 단위 원칙 (요청 1건 = PR 1개)
+
+**기본값: 사용자 요청 1건 = 외부로 나가는 PR 1개.** 내부 분해 단위(Task, worktree 브랜치)는 PR을 생성하지 않는다 — epic/feature 브랜치로 수렴 후 삭제한다.
+
+```
+사용자 요청 1건
+  └─ epic/feature 브랜치 1개   ← PR은 여기서만, 1개
+       ├─ 내부 분해 Task N개        (PR 생성 금지)
+       └─ worktree 브랜치 N개       (epic으로 머지 후 삭제, PR 생성 금지)
+```
+
+- **핵심은 브랜치 수 제한이 아니라 PR 생성 권한을 요청 단위 1곳으로 모으는 것** — 내부 분해 단위에는 PR 권한을 주지 않는다.
+- orchestrator가 요청 1건을 Task 여러 개로 분해하는 것, sub-agent worktree 브랜치가 여러 개 생기는 것은 이 규칙과 충돌하지 않는다 — Task 분해·worktree 브랜치는 이 규칙이 말하는 '단위'가 아니다. worktree 브랜치는 PR 없이 epic 브랜치로 수렴 후 삭제된다 (`orchestrator` skill `references/merge-coordinator.md` §머지 대상: epic 브랜치가 canonical).
+- PR 분할(스태킹 포함)이 필요하다고 판단되면 **만들기 전에** 분할 근거와 함께 사용자 확인을 받는다 (예: 대형 마이그레이션처럼 리뷰 가능성 때문에 분할이 나은 경우).
+- PR 생성 전 base 브랜치를 확정 보고한다 — 위 §커밋·push·PR 워크플로우 4번의 base 관계 확인 절차와 연결된다.
 
 ---
 
