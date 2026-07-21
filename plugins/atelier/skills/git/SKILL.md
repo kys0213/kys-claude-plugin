@@ -55,7 +55,7 @@ git 연산마다 **정답 도구가 하나**입니다. setup 실행 시 단일 `
 > 커밋·브랜치·PR 은 `atelier git` 으로 감싸지 않습니다 — git/gh 가 이미 결정적이라 래핑이 더할 게 없습니다.
 > 대신 Jira/Conventional 형식·브랜치 명명·base 분기 같은 **컨벤션을 에이전트가 적용**해 plain git/gh 로 실행합니다.
 
-CLI 인자 형식·출력 계약·git 정책(커밋 형식·브랜치 명명·PR 본문 스타일)·워크플로우 예시는 `references/cli-reference.md` 를 로드합니다.
+CLI 인자 형식·출력 계약·git 정책(커밋 형식·브랜치 명명·PR 본문 스타일)은 `references/cli-reference.md` 를 로드합니다.
 
 ---
 
@@ -101,32 +101,11 @@ CLI 인자 형식·출력 계약·git 정책(커밋 형식·브랜치 명명·PR
 
 ### 기본 브랜치 직접 수정 금지
 
-```bash
-git checkout main
-git commit -m "..."        # 금지
-git push origin main       # 금지
-```
-
-### 올바른 프로세스
-
-```bash
-git fetch origin --prune && git switch -c feature/my-work origin/main
-git add -u && git commit -m "feat(scope): my changes"
-git push -u origin feature/my-work
-gh pr create --title "My feature" --body "..."
-# → Merge 승인 대기 → git switch <base> && git pull → git branch -d feature/my-work
-```
+기본 브랜치(main/master)에서 직접 `git commit` 또는 `git push` 하지 않습니다 — 항상 위 워크플로우대로 새 브랜치를 만들어 작업합니다.
 
 ### force-push 금지
 
-hook 차단 여부와 **별개로 에이전트 스스로 지키는 정책**입니다.
-
-```bash
-git push --force origin feature/my-work              # 금지
-git push --force-with-lease origin feature/my-work   # 금지
-```
-
-- force-push 를 시도하지 않습니다. history 재작성이 필요하면 대안을 먼저 제시합니다: `git revert`, 새 커밋으로 수정, 새 브랜치에서 재작업.
+hook 차단 여부와 **별개로 에이전트 스스로 지키는 정책**입니다. `git push --force` / `--force-with-lease` 를 시도하지 않습니다. history 재작성이 필요하면 대안을 먼저 제시합니다: `git revert`, 새 커밋으로 수정, 새 브랜치에서 재작업.
 
 ### push 권한 거부 시 사용자 위임
 

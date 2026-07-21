@@ -67,6 +67,8 @@ digraph brainstorming {
 }
 ```
 
+흐름이 바뀌면 위 체크리스트와 이 다이어그램을 함께 갱신한다.
+
 **종착 상태는 Plan Mode 진입이다.** 다른 어떤 구현 스킬도 호출하지 않는다. brainstorm 이후의 유일한 다음 단계는 Plan Mode 다. (만든 설계를 심문하고 싶으면 `grill` 로 핸드오프한 뒤 Plan Mode 로 간다.)
 
 ## 프로세스
