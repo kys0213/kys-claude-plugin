@@ -25,12 +25,7 @@ version: 0.1.0
 
 ## 사고 모드 (Mental Model)
 
-이 스킬을 트리거한 순간부터 메인 에이전트는 **편집자가 아니라 관리자**다.
-
-```
-❌ 메인이 Edit/Write로 코드 작성
-✅ 메인은 Read/Bash로 상태 파악 + Task로 일감 분리·상태 관리 + Agent로 위임 + SendMessage로 조율
-```
+이 스킬을 트리거한 순간부터 메인 에이전트는 **편집자가 아니라 관리자**다 — Edit/Write로 직접 코드를 작성하지 않고, Read/Bash로 상태를 파악하고 Task로 일감을 분리·관리하며 Agent로 위임하고 SendMessage로 조율한다.
 
 ### 메인 에이전트가 해도 되는 일
 - `Read`, `Glob`, `Grep`, `Bash(git status / git log / git diff --stat)` — 작업 분해와 위험도 판단을 위한 조사
@@ -74,21 +69,6 @@ main
    - `git rev-parse --show-toplevel` 가 repo의 메인 working tree여야 함
    - worktree 안에서 오케스트레이터를 시작했다면 즉시 메인 working tree로 빠져나오도록 사용자에게 보고
 3. **이후 모든 sub-agent dispatch는 `isolation: "worktree"` 로** — base는 현재 epic 브랜치 (Agent isolation이 자동으로 현재 HEAD를 base로 worktree를 만든다)
-
-### 메인의 동작 범위
-
-```
-epic 브랜치 위에서 메인이 하는 일:
-  - Read / Glob / Grep / Bash(git status, git log, git diff)
-  - Agent(isolation: "worktree", ...) 로 sub-agent dispatch
-  - 결과 수령 → 머지 순서 결정 → 충돌은 위임 → epic 브랜치로 머지
-  - 사용자 보고
-
-epic 브랜치 위에서 메인이 하지 않는 일:
-  - Edit / Write / NotebookEdit
-  - EnterWorktree / git checkout <다른 브랜치>
-  - 직접 코드 작성, 직접 충돌 해결
-```
 
 ---
 
@@ -143,11 +123,6 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 
 대규모 fan-out(예: 15개 이상 agent)에서는 일부 agent가 504 Gateway Time-out·API 에러로 죽는 것을 정상 케이스로 전제한다. 실패가 조용히 누락되면 최종 취합 리포트의 수치 일관성이 깨진다.
 
-```
-❌ 전체 완료 대기 → 일부 실패 → 실패분 빠진 채 취합 → 미완성/수치 불일치
-✅ 완료 즉시 체크포인트 → 실패는 재시도 → 소진 시 폴백 → 실패·폴백까지 보고에 명시
-```
-
 - **체크포인트**: 각 agent 결과는 완료 즉시 파일로 저장한다 — 전체 완료를 기다리지 않는다 (저장 주체는 agent 자신 — 메인의 Edit/Write 금지 유지).
 - **재시도**: gateway/API 에러로 실패한 agent는 같은 prompt로 N회(기본 3회)까지 재시도한다.
 - **폴백**: 재시도 소진 시 해당 조각은 메인의 read-only 직접 분석 또는 조건을 바꾼 새 agent 재위임으로 대체해 취합을 완성한다 — 미완성 상태로 종료하지 않는다. 폴백도 편집이 필요하면 위임한다 (*사고 모드*).
@@ -199,12 +174,6 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 모델 라우팅에는 **하나의 고정 제약(envelope)**과 그 안에서의 **작업별 heuristic**이 있다. envelope는 이 문서가 단일 출처이며, 재평가 대상이 아니다.
 
 ### fable 예약 정책 (고정 제약 — 단일 출처)
-
-```
-✅ fable = 오케스트레이터(메인 에이전트) 전용
-✅ 위임되는 모든 sub-agent = opus / sonnet / haiku
-❌ 협의체·구현·검토·QA·DBA 등 어떤 sub-agent도 fable 사용 금지
-```
 
 - **fable은 오케스트레이터(메인 에이전트) 전용이다.** 분해·위임·조율·머지 판단을 총괄하는 오케스트레이션 역할만 최상위 tier(`fable`)를 쓴다. fable의 역량은 스웜 전체의 흐름을 잡는 메인에 예약한다.
 - **위임되는 모든 sub-agent는 fable을 쓰지 않는다.** 아키텍트 협의체(brainstorm·grill)·구현·검토(reviewer)·QA·DBA·충돌 해결·일반 분석 등 dispatch되는 모든 역할은 `opus` / `sonnet` / `haiku` 안에서만 배분한다.
@@ -259,54 +228,6 @@ epic 브랜치 위에서 메인이 하지 않는 일:
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
 | `references/autonomous-driving.md` | 자율 루프(분해→위임→머지 self-drive)를 돌릴 때 — **오케스트레이터 기본 동작**. 계약·가드레일·종료 조건·에스컬레이션 + **작업마다 필수인 리뷰어·QA 게이트**(검토 + 검증 테스트 추가)의 단일 출처 (단발 fan-out 1회면 불필요) |
 | `references/spec-driven-review.md` | 검토·QA 게이트가 **spec 문서를 입력으로 구현**하는 경우의 특수화 — 팀 모드로 검토자(spec↔구현)·QA 매니저(spec↔테스트)를 상주시켜 worktree 코드를 계속 리뷰·개선 (spec 입력이 없으면 일반 게이트 사용) |
-
----
-
-## 빠른 참조: 의사코드
-
-### 병렬 fan-out (worktree-isolated)
-
-```
-# 0. 진입 확인
-assert current_branch.startswith("epic/")
-assert in_main_working_tree()
-
-# 1. 분해 + 위험도 분석
-files_A = analyze_changes(task_A)
-files_B = analyze_changes(task_B)
-assert disjoint(files_A, files_B)
-
-# 2. 병렬 dispatch (worktree base = 현재 epic 브랜치)
-Agent({description: "task A", subagent_type: "general-purpose",
-       isolation: "worktree", run_in_background: true,
-       prompt: "<자기완결적 컨텍스트 + task A + base=epic/<name>>"})
-Agent({description: "task B", subagent_type: "general-purpose",
-       isolation: "worktree", run_in_background: true,
-       prompt: "<자기완결적 컨텍스트 + task B + base=epic/<name>>"})
-
-# 3. 완료 알림 수신 후 결과를 epic 브랜치로 머지
-# (merge-coordinator.md 참조)
-```
-
-### 순차 (의존성 있음)
-
-```
-result_A = Agent({description: "task A", prompt: "..."})
-# A 결과를 B 입력으로 전달
-Agent({description: "task B", prompt: "<task B + A의 결과 요약>"})
-```
-
-### Agent team (조율 전용 — 실험 플래그 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 필요)
-
-```
-# team은 공유 checkout — 편집 격리 없음. 편집은 isolated subagent에 위임.
-Agent({name: "reviewer", run_in_background: true,        # read-only 조율/리뷰
-       prompt: "<epic diff 검토, 편집 X>"})
-Agent({name: "implementer", run_in_background: true,     # 편집은 직접 X
-       prompt: "<실제 편집은 Agent({isolation:'worktree'}) subagent로 위임>"})
-# 진행 중 개입 (name으로 식별, team_name은 무시됨)
-SendMessage({to: "reviewer", message: "..."})
-```
 
 ---
 

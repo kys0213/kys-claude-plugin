@@ -72,82 +72,14 @@ Code ↔ Spec Gaps 를 우선 표시. 부속 섹션(Spec↔Spec gaps, Notes)은 
 
 ## Output Examples
 
-### spec-review 성공
-
-```markdown
-# Spec Review Report
-
-## Summary
-- spec_files_reviewed: 2
-- l1_reports_received: 2
-- code_spec_gaps: HIGH=1, MEDIUM=2, LOW=0
-- spec_spec_gaps: HIGH=1, MEDIUM=0, LOW=0
-- generated_at: 2026-05-05T...
-
-## Code ↔ Spec Gaps
-### [HIGH] Rate limiting 미구현
-- 증거:
-  - auth.md:G1 — "all writes are rate-limited"
-- 분류: SPEC_ONLY
-- 권장: rate limit middleware 추가 또는 spec 에서 제거
-
-## Spec ↔ Spec Gaps
-### [HIGH] content_type 의미 충돌
-- 증거:
-  - database.md:S1 — "content_type 컬럼은 VARCHAR(255)"
-  - proxy.md:S2 — "content_type 은 ENUM('json','multipart','form')"
-- 분류: DEFINITION_CONFLICT
-- 권장: ...
-
-## Notes (모호함)
-(없음)
-```
-
-### gap-detect 갭 발견
-
-```markdown
-# Gap Detection Report
-
-## Summary
-- spec_file: docs/auth-spec.md
-- code_paths_examined: [internal/auth/]
-- code_spec_gaps: HIGH=1, MEDIUM=1, LOW=0
-
-## Code ↔ Spec Gaps
-
-### [HIGH] Refresh token 회전 미구현
-- 증거:
-  - auth-spec.md:G1 — SPEC_ONLY — "Refresh token 회전: 매 사용 시 새 토큰 발급" (auth-spec.md:200-215) → 해당 영역 code 미발견
-- 분류: SPEC_ONLY
-- 권장: refresh 핸들러에 회전 로직 추가 또는 spec 에서 제거
-```
-
 ### gap-detect 갭 없음
 
+code_spec_gaps 가 모두 0이면 위 "gap-detect 출력" 의 `## Code ↔ Spec Gaps` 섹션 대신 다음 한 줄만 출력한다:
+
 ```markdown
-# Gap Detection Report
-
-## Summary
-- spec_file: docs/auth-spec.md
-- code_spec_gaps: HIGH=0, MEDIUM=0, LOW=0
-
 ✅ 검출된 갭 없음. spec 과 code 가 일치.
 ```
 
-### drop 발생 시 (공통)
+### drop 발생 시
 
-```markdown
-🛡️ 인용 검증 결과
-  - 통과 리포트: 2 / 2
-  - 항목별 drop: 3건
-    - excerpt mismatch: 2건 (database.md:S5, database.md:C7)
-    - line out of range: 1건 (proxy.md:S2)
-  - 재시도: 0회
-
-🔍 의미 + 인용 통합 감사 결과
-  - L2 호출: 2회 (초회 1 + 재호출 1)
-  - gap-auditor 호출: 2회
-  - major drop: 1건 (분류별 breakdown)
-    - M-3 severity misjudgment: 1건
-  - minor: 2건 (루프 미발생, 정보 제공)
-```
+인용 검증 drop 로그와 gap-auditor drop 로그의 실제 출력 형식은 각각 `file-observation.md` §"Drop 로그 노출", `gap-audit-loop.md` §"drop log 노출" 참조.

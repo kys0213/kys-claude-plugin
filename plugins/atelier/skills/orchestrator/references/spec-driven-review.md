@@ -46,38 +46,14 @@ user-invocable: false
 
 ## 팀 구성 (실험 플래그 활성 시)
 
-`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`일 때, spec 구현 작업 하나에 **조율 전용 team**을 둔다. team은 공유 checkout이므로 **편집은 절대 teammate가 직접 하지 않고 `isolation:"worktree"` subagent에 위임**한다 (`delegation-patterns.md §Agent team 사용 패턴`, #783).
+`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`일 때, spec 구현 작업 하나에 **조율 전용 team**을 둔다. team spawn·SendMessage 개입·편집 격리(teammate는 편집하지 않고 `isolation:"worktree"` subagent에 위임)의 일반 패턴은 `delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다 (#783).
 
-```
-# 구현은 격리 subagent (편집·격리 보장)
-impl = Agent({
-  description: "<task> 구현",
-  isolation: "worktree", run_in_background: true,
-  prompt: "<자기완결 컨텍스트 + spec 경로 전문 인용 + base=epic/<name> + 격리 준수>"
-})
+spec 모드에서 달라지는 것은 두 teammate의 **검증 질문**뿐이다:
 
-# 검토자 — read-only 조율 teammate
-Agent({
-  name: "spec-reviewer", run_in_background: true,
-  description: "spec↔구현 적합성 검토",
-  prompt: "<spec 문서 경로 + 검토할 worktree diff. 편집하지 말 것.
-           구현이 spec 요구사항을 충족하는지 'spec 항목 ↔ 파일:라인'으로 판정.
-           pass/reject + 미충족·초과 구현 목록 반환.>"
-})
+- **spec-reviewer**: 구현이 spec 요구사항을 충족하는지 `spec 항목 ↔ 파일:라인`으로 판정 → `pass`/`reject` + 미충족·초과 구현 목록.
+- **qa-manager**: spec의 각 flow/concern에 대응 테스트가 있는지, 테스트가 의도를 실제로 검증하는지 `spec flow ↔ 테스트:라인`으로 판정 → `pass`/`reject` + 누락 케이스 목록.
 
-# QA 매니저 — read-only 조율 teammate
-Agent({
-  name: "qa-manager", run_in_background: true,
-  description: "spec↔테스트 적합성 검증",
-  prompt: "<spec 문서 경로 + worktree 테스트 코드. 편집하지 말 것.
-           spec의 각 flow/concern에 대응 테스트가 있는지, 테스트가 의도를
-           실제로 검증하는지 'spec flow ↔ 테스트:라인'으로 판정.
-           pass/reject + 누락 케이스 목록 반환.>"
-})
-
-# 거부 findings를 team 내부 SendMessage로 전달 → 수정은 다시 격리 subagent로
-SendMessage({to: "spec-reviewer", message: "<재검토 요청 또는 범위 조정>"})
-```
+구현 자체는 격리 subagent(`isolation:"worktree"`)에 위임하고, 거부 findings는 team 내부 SendMessage로 두 teammate에 전달한다.
 
 > teammate의 상세 findings·diff는 teammate 컨텍스트에 남기고, 메인은 두 게이트의 **verdict + 압축 요약(누락/초과 항목)** 만 받는다 (`autonomous-driving.md §메인 컨텍스트 격리`).
 

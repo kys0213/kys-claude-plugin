@@ -13,26 +13,13 @@ user-invocable: false
 
 오케스트레이터에서 worktree는 **항상 epic 브랜치 위의 sub-agent 격리 수단**이다. 메인은 worktree를 사용하지 않는다.
 
-```
-epic/<name>          ← 메인 에이전트 (오케스트레이션만)
-  ├─ worktree A      ← sub-agent A (base: epic/<name>)
-  ├─ worktree B      ← sub-agent B (base: epic/<name>)
-  └─ worktree C      ← sub-agent C (base: epic/<name>)
-```
-
 - 모든 sub-agent worktree의 **base는 현재 epic 브랜치**
 - sub-agent 결과는 **epic 브랜치로 머지** (main 직접 머지 X)
 - 메인은 epic 브랜치의 **메인 working tree**에 머문다 — EnterWorktree 금지
 
 ## 사용 방식: Agent isolation 한 가지만
 
-```
-Agent({
-  isolation: "worktree",
-  run_in_background: true,
-  prompt: "..."  # epic 브랜치 이름을 컨텍스트에 포함
-})
-```
+`Agent`에 `isolation: "worktree"`와 `run_in_background: true`를 지정하고, prompt에 epic 브랜치 이름을 컨텍스트로 포함한다.
 
 - Agent가 자동으로 worktree를 만들고 그 안에서 작업 (현재 HEAD = epic 브랜치를 base로 함)
 - **변경이 없으면 자동 정리** — 메인이 신경 쓸 필요 없음
