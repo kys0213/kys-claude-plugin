@@ -61,7 +61,7 @@ sub-agent는 **메인 대화 히스토리를 보지 못한다**. prompt는 자�
 ❌ "위에서 말한 파일을 수정해줘"
 ```
 
-**Edit 절대경로 트랩**: worktree 격리 sub-agent라도 Edit tool의 file_path가 부모 repo의 절대경로를 가리키면 메인 working tree가 직접 수정된다 — 실사례 3회 재현 (#783). Bash cwd가 worktree여도 Edit는 별개이므로, prompt에 worktree 격리 준수(위 7번)를 반드시 명시한다. sub-agent가 이를 어기고 부모 repo를 변형하면 메인 branch switch까지 이어질 수 있다.
+**Edit 절대경로 트랩**: worktree 격리 sub-agent라도 Edit tool의 file_path가 부모 repo의 절대경로를 가리키면 격리를 우회해 메인 working tree가 직접 수정된다. Bash cwd가 worktree여도 Edit는 별개 경로 판정이므로, prompt에 worktree 격리 준수(위 7번)를 반드시 명시한다. 부모 repo가 변형되면 메인 branch switch까지 이어질 수 있다.
 
 ---
 
@@ -84,7 +84,7 @@ sub-agent는 **메인 대화 히스토리를 보지 못한다**. prompt는 자�
 
 **작업 agent는 문제 해결을 다른 agent에게 재위임하지 않는다.** 막히면 또 다른 agent를 spawn하지 말고 실패 사유와 함께 종료한다. 재위임 여부 판단은 오케스트레이터의 몫이다 (`agent-monitor.md §재위임 판단 기준` 참조).
 
-근거: 구현 agent가 스스로 중첩 재위임 체인을 만들면 오케스트레이터가 위임 트리 전체를 파악하지 못해 수동 halt 후 별도 fix agent를 투입해야 했던 실사례가 있다. 위임 깊이를 평평하게 유지해야 오케스트레이터가 각 agent의 상태를 직접 추적·개입할 수 있다.
+근거: 구현 agent가 스스로 중첩 재위임 체인을 만들면 오케스트레이터가 위임 트리 전체를 파악하지 못해 상태 추적·개입 경로를 잃는다. 위임 깊이를 평평하게 유지해야 오케스트레이터가 각 agent를 직접 추적·중단할 수 있다.
 
 ---
 
@@ -149,31 +149,25 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 - `name`이 식별자다. 세션 내에서 유니크해야 한다 (`team_name`은 무시되므로 쓰지 않는다).
 - `run_in_background: true`로 띄워야 SendMessage로 개입할 수 있다.
 - team은 session 종료 시 **자동 정리**된다 (`TeamDelete` 없음). 별도 정리 단계 불필요.
-- **편집 격리는 team이 아니라 subagent의 `isolation:"worktree"`가 보장한다.** teammate에게 worktree 이동을 위임하지 말 것 — 격리가 도구 보장에서 프롬프트 희망으로 격하되어 공유 checkout(메인 epic 브랜치)이 오염될 수 있다 (#783).
+- **편집 격리는 team이 아니라 subagent의 `isolation:"worktree"`가 보장한다.** teammate에게 worktree 이동을 위임하지 말 것 — 격리가 도구 보장에서 프롬프트 희망으로 격하되어 공유 checkout(메인 epic 브랜치)이 오염될 수 있다.
 
 ---
 
 ## 모델 선택
 
-`Agent` 호출 시 `model` 옵션으로 sub-agent 모델을 지정할 수 있다.
+`Agent` 호출 시 `model` 옵션으로 sub-agent 모델을 지정한다. 역할 기준 원칙(오케스트레이터는 위임 sub-agent보다 낮은 tier로 내려가지 않는다 / 위임 dispatch에는 항상 `model` 명시 / 특정 모델명을 문서에 박지 않는다)은 **`SKILL.md §모델 라우팅 전략`이 단일 출처**다 — 여기서 재서술하지 않는다.
 
-위임되는 sub-agent는 **`fable`을 쓰지 않는다** — `fable`은 오케스트레이터(메인) 전용이다 (아래 §fable 예약 정책). 위임 tier는 `opus`/`sonnet`/`haiku` 안에서 고른다:
+작업 유형 → 시작 tier 표는 **이 절이 단일 출처**다:
 
-| 작업 유형 | 권장 모델 |
-|-----------|-----------|
-| 요구사항 분해·설계 심문 (아키텍트 협의체 — `architect-council.md`), 복잡한 설계·어려운 디버깅·아키텍처 판단 | `opus` |
-| 일반 구현, 코드 리뷰, 테스트 작성 | `sonnet` |
-| 단순 분류, 포맷 변환, 짧은 추출 | `haiku` |
+| 작업 유형 | 시작 tier (역량 수준) |
+|-----------|----------------------|
+| 요구사항 분해·설계 심문 (아키텍트 협의체 — `architect-council.md`), 복잡한 설계·어려운 디버깅·아키텍처 판단 | 최상위 |
+| 일반 구현, 코드 리뷰, 테스트 작성 | 중간 |
+| 단순 분류, 포맷 변환, 짧은 추출 | 경량 |
 
-부모 모델이 `fable`이면 지정하지 않을 때 fable을 상속하므로 **위임에는 반드시 `model`을 명시**한다 (아래 §fable 예약 정책). 단순 작업에 opus 사용은 비용 낭비.
-
-이 표는 **고정값이 아니라 시작 heuristic**이다. 모델이 더 똑똑해지면 같은 작업을 더 가벼운 tier로 내려 효율을 높일 수 있어야 하므로, 작업마다 "지금도 이 역량이 필요한가"를 재평가한다. 자율 루프에서의 작업별 모델 배분 원칙은 `autonomous-driving.md §모델 분배` 참조.
-
-### fable 예약 정책 (고정 제약)
-
-위 재평가 원칙에는 예외인 **정책 envelope**이 하나 있다. 최상위 tier(`fable`)는 배분 heuristic의 대상이 아니라 역할로 고정된다 — **`fable`은 오케스트레이터(메인 에이전트) 전용이고, 위임되는 모든 sub-agent(아키텍트 협의체·구현·검토(reviewer)·QA(qa-manager)·DBA·충돌 해결·일반 분석 등)는 `fable`을 쓰지 않는다.** 위임 역할은 위 표대로 `opus` 이하에서 배분한다.
-
-정책 전문(envelope 정의)은 **`SKILL.md §모델 라우팅 전략`이 단일 출처**다 — 여기서 중복 정의하지 않는다. 부모 모델이 `fable`인 세션에서는 상속(모델 미지정)도 위반이므로 위임 dispatch에는 반드시 `model`을 명시한다. envelope 안에서의 tier 선택은 여전히 메인의 판단이다 (envelope은 범위 제약이지 고정 매핑이 아니다).
+- **역량 수준 ↔ 실제 모델명 매핑은 dispatch 시점 판단**이다. 세대가 바뀌면 같은 작업이 더 가벼운 tier로 내려갈 수 있어야 하므로 문서에 모델명을 고정하지 않는다.
+- 이 표는 고정값이 아니라 **시작 heuristic**이다 — 작업마다 "지금도 이 역량이 필요한가"를 재평가하고, 벗어난 선택은 근거와 함께 decision log에 남긴다. 자율 루프에서의 배분 원칙은 `autonomous-driving.md §모델 분배` 참조.
+- 단순 작업에 최상위 tier를 쓰는 것은 비용 낭비다.
 
 ### 역할별 모델 정책 적용 (exclude / allow)
 
@@ -183,14 +177,14 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 
 1. **후보 선정**: 위 tier heuristic으로 시작 tier의 모델을 후보로 정한다.
 2. **정책 대조**: 해당 역할(reviewer/qa/dba/implementer 등)의 `exclude_models`에 후보가 있으면 배정을 차단한다. `allow_models`가 선언돼 있으면 목록 밖 모델도 전부 차단으로 취급한다.
-3. **대체 라우팅**: 차단되면 envelope(opus/sonnet/haiku) 안에서 대체한다 — reviewer/QA/DBA처럼 판정 품질이 게이트인 역할은 인접 상위 tier 우선, 그 외 역할은 인접 하위 tier 우선. 대체 배정은 표준 heuristic을 벗어난 선택이므로 근거와 함께 decision log에 남긴다.
-4. **배정 불가**: 정책이 envelope 세 tier를 전부 차단하면 설정 오류다 — 임의로 정책을 무시하고 배정하지 말고, 에스컬레이션(사용자 보고)한다.
+3. **대체 라우팅**: 차단되면 인접 tier로 대체한다 — reviewer/QA/DBA처럼 판정 품질이 게이트인 역할은 인접 상위 tier 우선, 그 외 역할은 인접 하위 tier 우선. 대체 배정은 표준 heuristic을 벗어난 선택이므로 근거와 함께 decision log에 남긴다.
+4. **배정 불가**: 정책이 모든 tier를 차단하면 설정 오류다 — 임의로 정책을 무시하고 배정하지 말고, 에스컬레이션(사용자 보고)한다.
 
 규칙:
 
 - **역할 단위 override**: 프로젝트 파일에 정의된 역할은 프로젝트 정책만 적용하고, 정의되지 않은 역할만 사용자 파일로 fallback한다 (파일 전체 병합이 아니라 역할 단위 우선).
 - **정책 파일이 없으면** 이 절차 전체를 건너뛰고 현행 기본 tier heuristic만 쓴다.
-- **fable 예약 정책은 설정으로 override 불가**: `allow_models`에 fable이 있어도 무시한다. 이 정책은 envelope 안의 선택만 조정한다 (위 §fable 예약 정책).
+- **역할 기준 원칙은 설정으로 override 불가**: 이 정책은 역할별 tier 선택 범위만 좁힌다 (`SKILL.md §모델 라우팅 전략`).
 
 ---
 
@@ -205,7 +199,7 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 - [ ] 편집하는 sub-agent라면 `isolation: "worktree"`를 켰는가?
 - [ ] worktree dispatch라면 prompt에 worktree 격리 준수(경로 prefix 검증 + 부모 repo 수정 금지)를 명시했는가?
 - [ ] prompt에 재위임 금지 문구(§위임 깊이 제한)를 포함했는가? (team teammate → isolated subagent 편집 위임 1단계는 예외)
-- [ ] 모델 선택이 작업 난이도와 맞는가?
-- [ ] 역할별 모델 정책 파일이 있으면 exclude/allow를 대조했는가? (차단 시 envelope 안 대체 라우팅 + decision log)
-- [ ] fable 예약 정책을 지키는가? (fable = 오케스트레이터 전용 — 협의체 포함 위임 sub-agent는 fable 금지, 부모가 fable이면 `model` 명시, 정책 설정으로 override 불가)
+- [ ] 모델 선택이 작업 난이도와 맞는가? (dispatch에 `model`을 명시했는가 — 상속 금지)
+- [ ] 역할별 모델 정책 파일이 있으면 exclude/allow를 대조했는가? (차단 시 인접 tier 대체 라우팅 + decision log)
+- [ ] 오케스트레이터가 위임 sub-agent보다 낮은 tier로 내려가지 않는가? (`SKILL.md §모델 라우팅 전략`)
 - [ ] team의 경우 name이 의미 있고 유니크한가?
