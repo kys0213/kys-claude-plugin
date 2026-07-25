@@ -11,7 +11,7 @@
 set -e
 
 RUST_DIRS=(
-  "plugins/autodev/cli"
+  "plugins/atelier/cli"
   "plugins/suggest-workflow/cli"
 )
 
