@@ -74,9 +74,6 @@ claude --plugin-dir /path/to/plugins/external-llm
 ### 검증 도구
 
 ```bash
-# 의존성 설치
-npm install
-
 # 전체 검증 실행
 npm run validate
 
@@ -123,7 +120,9 @@ npm run validate:versions  # 버전 검증
 ## 요구사항
 
 - Claude Code CLI
-- Node.js 20+ (개발 시)
+- Go 1.21+ (`tools/` 빌드 시)
+- Rust 1.93.1 (`plugins/atelier/cli`, `plugins/suggest-workflow/cli` 빌드 시)
+- (선택) Node.js (npm → make 래퍼 스크립트 사용 시)
 - (선택) OpenAI Codex CLI - `/invoke-codex` 사용 시
 - (선택) Google Gemini CLI - `/invoke-gemini` 사용 시
 

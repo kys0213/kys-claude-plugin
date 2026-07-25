@@ -70,7 +70,7 @@ atelier git <reviews|guard|hook>   # git-utils 의 기계적 호출 표면 (Type
 | Phase 1 | 골격 (plugin.json · README · marketplace WIP entry) | ✅ |
 | Phase 2 | CLI 통합 (Rust 단일 바이너리 — autopilot 흡수 + git-utils 포팅) | ✅ |
 | Phase 3 | commands / agents / skills / hooks 이동 + namespace 치환 | ✅ |
-| Phase 4 | CI 인프라 (validate · rust-binary · frozen 게이트 · bumpversion 제외) | ✅ |
+| Phase 4 | CI 인프라 (validate · rust-binary) | ✅ |
 | Phase 5 | 흡수 6개 제거 (`autodev`·`develop-workflow` 포함) | ✅ |
 
 > **현재 상태**: Epic 1 (consolidation) + Epic 2 (skill extraction) 완료.
