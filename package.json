@@ -10,16 +10,6 @@
     "validate:paths": "make validate-paths",
     "validate:versions": "make validate-versions",
     "validate:arch": "make validate-arch",
-    "detect": "make detect",
-    "lint": "eslint 'plugins/**/*.ts'",
-    "lint:fix": "eslint 'plugins/**/*.ts' --fix",
-    "typecheck": "tsc --build",
-    "check": "npm run lint && npm run typecheck"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.39.2",
-    "eslint": "^9.39.2",
-    "globals": "^17.3.0",
-    "typescript-eslint": "^8.54.0"
+    "detect": "make detect"
   }
 }
