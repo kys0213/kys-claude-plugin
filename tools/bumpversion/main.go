@@ -87,7 +87,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		pkgsToProcess = changes.GetPluginsOnly(detected)
+		pkgsToProcess = changes.GetPluginsOnly(detected, repoRoot)
 	}
 
 	if len(pkgsToProcess) == 0 {

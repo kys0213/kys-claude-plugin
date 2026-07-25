@@ -1,66 +1,42 @@
 package changes
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
-func TestGetPluginsOnlyExcludesFrozen(t *testing.T) {
+func TestGetPluginsOnlyExcludesMissingDirectories(t *testing.T) {
+	repoRoot := t.TempDir()
+
+	pluginsDir := filepath.Join(repoRoot, "plugins")
+	if err := os.MkdirAll(filepath.Join(pluginsDir, "atelier"), 0o755); err != nil {
+		t.Fatalf("failed to create fixture plugin dir: %v", err)
+	}
+	// "removed-plugin" is intentionally not created on disk, simulating a
+	// plugin package detected from stale diff/ref data whose directory has
+	// since been deleted from the working tree.
+
 	pkgs := []Package{
 		{Name: "atelier", Path: "plugins/atelier", Type: "plugin"},
-		{Name: "git-utils", Path: "plugins/git-utils", Type: "plugin"},
-		{Name: "github-autopilot", Path: "plugins/github-autopilot", Type: "plugin"},
-		{Name: "spec-kit", Path: "plugins/spec-kit", Type: "plugin"},
-		{Name: "workflow-guide", Path: "plugins/workflow-guide", Type: "plugin"},
-		{Name: "coding-style", Path: "plugins/coding-style", Type: "plugin"},
-		{Name: "orchestrator", Path: "plugins/orchestrator", Type: "plugin"},
-		{Name: "autodev", Path: "plugins/autodev", Type: "plugin"},
+		{Name: "removed-plugin", Path: "plugins/removed-plugin", Type: "plugin"},
 		{Name: "common-thing", Path: "common/thing", Type: "common"},
 	}
 
-	got := GetPluginsOnly(pkgs)
+	got := GetPluginsOnly(pkgs, repoRoot)
 
 	gotNames := make(map[string]bool)
 	for _, p := range got {
 		gotNames[p.Name] = true
 	}
 
-	// frozen plugins must be excluded
-	for _, frozen := range []string{
-		"git-utils", "github-autopilot", "spec-kit",
-		"workflow-guide", "coding-style", "orchestrator",
-	} {
-		if gotNames[frozen] {
-			t.Errorf("frozen plugin %q should be excluded from bump candidates", frozen)
-		}
-	}
-
-	// active plugins must remain
 	if !gotNames["atelier"] {
-		t.Error("atelier should be included")
+		t.Error("atelier should be included: its directory exists in the working tree")
 	}
-	if !gotNames["autodev"] {
-		t.Error("autodev should be included")
+	if gotNames["removed-plugin"] {
+		t.Error("removed-plugin should be excluded: its directory does not exist in the working tree")
 	}
-
-	// common packages are not plugins
 	if gotNames["common-thing"] {
 		t.Error("common package should not be returned by GetPluginsOnly")
-	}
-}
-
-func TestIsFrozen(t *testing.T) {
-	cases := map[string]bool{
-		"git-utils":        true,
-		"github-autopilot": true,
-		"spec-kit":         true,
-		"workflow-guide":   true,
-		"coding-style":     true,
-		"orchestrator":     true,
-		"atelier":          false,
-		"autodev":          false,
-		"suggest-workflow": false,
-	}
-	for name, want := range cases {
-		if got := IsFrozen(name); got != want {
-			t.Errorf("IsFrozen(%q) = %v, want %v", name, got, want)
-		}
 	}
 }
