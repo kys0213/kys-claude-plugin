@@ -1,6 +1,6 @@
 ---
 name: spec-review
-description: 작성된 스펙 문서를 코드와 대조 분석하고 품질을 평가하는 스킬. "스펙 리뷰해줘", "spec↔code 갭 봐줘", "이 spec 들 검증", "스펙 품질 평가", "외부 spec 에 related_paths 주석" 같은 요청에 사용합니다. 슬래시로 직접 호출하거나 맥락에서 모델이 자동 호출합니다. 스펙 문서 작성은 `spec-write`, 설계 대화는 `brainstorm`(무에서 설계)·`grill`(기존 계획 심문) 스킬이 담당합니다. L1(관찰)→L2(종합)→audit(감사) 레이어로 file:line 인용 기반 분석.
+description: 작성된 스펙 문서를 코드와 대조 분석하고 품질을 평가하는 스킬. "스펙 리뷰해줘", "spec↔code 갭 봐줘", "이 spec 들 검증", "스펙 품질 평가", "외부 spec 에 related_paths 주석" 같은 요청에 사용합니다. 슬래시로 직접 호출하거나 맥락에서 모델이 자동 호출합니다. 스펙 문서 작성은 `spec-write`, 설계 대화는 `grill` 스킬이 담당합니다. L1(관찰)→L2(종합)→audit(감사) 레이어로 file:line 인용 기반 분석.
 version: 1.0.0
 ---
 
@@ -8,7 +8,7 @@ version: 1.0.0
 
 작성된 스펙 문서를 **코드와 대조 분석·평가·주석**하는 스킬입니다. 사용자가 spec-review 슬래시로 진입하거나 모델이 맥락에서 자동 호출하며, 의도에 따라 아래 `references/` 로 디스패치합니다.
 
-> 스펙 문서를 **작성**하려면 `spec-write`, 설계를 **대화로 합의**하려면 `brainstorm`(무에서 설계)·`grill`(기존 계획 심문)을 씁니다. spec-review 는 이미 존재하는 스펙을 분석하는 단계입니다.
+> 스펙 문서를 **작성**하려면 `spec-write`, 설계를 **대화로 합의**하려면 `grill`을 씁니다. spec-review 는 이미 존재하는 스펙을 분석하는 단계입니다.
 
 ## 진입 라우팅 (의도 → reference)
 
@@ -29,11 +29,13 @@ spec-review 슬래시 또는 모델 자동 호출로 진입하면, 사용자의 
 
 스펙 분석은 3개 레이어로 구성됩니다. 각 레이어는 독립 sub-agent 이며, 메인 에이전트는 오케스트레이션(인용 검증 + 피드백 루프)만 합니다.
 
-| 레이어 | 에이전트 | 모델 | 역할 |
-|---|---|---|---|
-| **L1 관찰** | `file-pair-observer` | haiku | spec 1개 + 관련 code 를 읽고 사실을 `file:line` 인용으로 나열 (per-file 리포트) |
-| **L2 종합** | `gap-aggregator` | sonnet | 검증 통과한 L1 리포트들을 cross-file 로 종합 → gap finding |
-| **audit 감사** | `gap-auditor` | sonnet | L2 finding 의 인용 정확성(M-0) + 의미 적합성(M-1~M-6) 단일 게이트 감사 |
+| 레이어 | 에이전트 | 역할 |
+|---|---|---|
+| **L1 관찰** | `file-pair-observer` | spec 1개 + 관련 code 를 읽고 사실을 `file:line` 인용으로 나열 (per-file 리포트) |
+| **L2 종합** | `gap-aggregator` | 검증 통과한 L1 리포트들을 cross-file 로 종합 → gap finding |
+| **audit 감사** | `gap-auditor` | L2 finding 의 인용 정확성(M-0) + 의미 적합성(M-1~M-6) 단일 게이트 감사 |
+
+> 레이어별 모델은 각 에이전트 정의(frontmatter)를 따른다 — 이 표는 역할 분담만 규정하며 모델 고정 매핑의 출처가 아니다.
 
 ## 인용 검증 철학 (silent fail 금지)
 
