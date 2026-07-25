@@ -14,28 +14,36 @@
 codebase-analyzer와 document-analyzer를 **동시에** 실행합니다.
 
 ```
-Task: codebase-analyzer (run_in_background=true)
-Prompt: |
-  현재 프로젝트의 코드베이스를 분석하여 .claude/rules/ 규칙 파일 구조를 제안해주세요.
+Agent({
+  subagent_type: "atelier:codebase-analyzer",
+  description: "코드베이스 규칙 구조 분석",
+  run_in_background: true,
+  prompt: |
+    현재 프로젝트의 코드베이스를 분석하여 .claude/rules/ 규칙 파일 구조를 제안해주세요.
 
-  분석 항목:
-  1. 언어/프레임워크 감지
-  2. 디렉토리 구조 패턴
-  3. 기존 .claude/rules/ 파일 gap 분석
-  4. 실제 파일 패턴 샘플링
-  5. 프로젝트 맥락 자동감지 (유형, 팀 규모, 엔지니어링 성향)
+    분석 항목:
+    1. 언어/프레임워크 감지
+    2. 디렉토리 구조 패턴
+    3. 기존 .claude/rules/ 파일 gap 분석
+    4. 실제 파일 패턴 샘플링
+    5. 프로젝트 맥락 자동감지 (유형, 팀 규모, 엔지니어링 성향)
+})
 ```
 
 ```
-Task: document-analyzer (run_in_background=true)
-Prompt: |
-  현재 프로젝트의 문서를 분석하여 문서화 컨벤션을 추출해주세요.
+Agent({
+  subagent_type: "atelier:document-analyzer",
+  description: "문서화 컨벤션 분석",
+  run_in_background: true,
+  prompt: |
+    현재 프로젝트의 문서를 분석하여 문서화 컨벤션을 추출해주세요.
 
-  분석 항목:
-  1. 문체 (종결어미 패턴)
-  2. 언어 혼용 패턴
-  3. 톤과 독자 수준
-  4. 구조 패턴 (헤딩, 리스트, 테이블)
+    분석 항목:
+    1. 문체 (종결어미 패턴)
+    2. 언어 혼용 패턴
+    3. 톤과 독자 수준
+    4. 구조 패턴 (헤딩, 리스트, 테이블)
+})
 ```
 
 gap 분석만 요청받은 경우(`--gap-only` 의도), codebase-analyzer 프롬프트에 다음을 추가합니다:
@@ -147,16 +155,19 @@ codebase-analyzer의 규칙 구조 제안을 사용자에게 보여주고 확인
 사용자가 승인한 구조로 rules-generator 에이전트에게 생성을 위임합니다.
 
 ```
-Task: rules-generator
-Prompt: |
-  다음 승인된 규칙 파일을 생성해주세요:
+Agent({
+  subagent_type: "atelier:rules-generator",
+  description: "승인된 규칙 파일 생성",
+  prompt: |
+    다음 승인된 규칙 파일을 생성해주세요:
 
-  [사용자가 승인한 규칙 파일 목록]
+    [사용자가 승인한 규칙 파일 목록]
 
-  각 파일은:
-  - paths: frontmatter 필수 포함
-  - 관찰된 패턴을 일반화한 원칙 수준 DO/DON'T (구조 수준 패턴만, 실제 코드 복붙 금지)
-  - 50-150줄 이내
+    각 파일은:
+    - paths: frontmatter 필수 포함
+    - 관찰된 패턴을 일반화한 원칙 수준 DO/DON'T (구조 수준 패턴만, 실제 코드 복붙 금지)
+    - 50-150줄 이내
+})
 ```
 
 ## Step 6: 결과 요약

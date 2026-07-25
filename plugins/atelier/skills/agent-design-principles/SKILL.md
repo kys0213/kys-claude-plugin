@@ -65,7 +65,7 @@ Spring의 `@RestController`, Express의 `router.get()`처럼 Slash Command는 �
 
 #### allowed-tools 가이드
 
-위임엔 `Task`/`Glob`(경로 수집 후 위임), 직접 실행엔 `Bash`/`Read`, 실행 전 확인이 필요하면 `AskUserQuestion`을 쓴다.
+위임엔 `Agent`/`Glob`(경로 수집 후 위임), 직접 실행엔 `Bash`/`Read`, 실행 전 확인이 필요하면 `AskUserQuestion`을 쓴다.
 
 ---
 
@@ -77,15 +77,11 @@ Service 계층이 여러 Repository와 Domain 객체를 조율하듯이, Sub-age
 
 #### model 선택 기준
 
-| 작업 유형 | model | 예시 |
-|----------|-------|------|
-| 복잡한 추론, 설계 판단 | `opus` | 아키텍처 설계, 복잡한 코드 생성 |
-| 코드 분석, 리뷰, 구현 | `sonnet` | 코드 리뷰, 일반 구현, 리팩토링 |
-| 단순 분류, 파싱, 변환 | `haiku` | 파일 분류, 포맷 변환, 간단한 추출 |
+특정 모델명을 작업 유형에 고정 매핑하지 않는다. 대신 **작업의 난이도·리스크·되돌리기 비용**에 역량을 맞추고, dispatch 시점마다 재평가한다 — 되돌리기 쉬운 단순 작업엔 가벼운 모델을, 판단 오류의 대가가 큰 작업(아키텍처 설계, 비가역 변경)엔 강한 모델을 배정한다. 구체적인 배정 기준과 재평가 절차는 `orchestrator` skill 이 canonical 이다.
 
 #### tools 최소 권한 원칙
 
-역할에 필요한 도구만 부여한다 (예: 읽기 전용 리뷰 Agent는 `["Read", "Glob", "Grep"]`, 오케스트레이션 Agent는 `["Task", "Glob"]`).
+역할에 필요한 도구만 부여한다 (예: 읽기 전용 리뷰 Agent는 `["Read", "Glob", "Grep"]`, 오케스트레이션 Agent는 `["Agent", "Glob"]`).
 
 ---
 
@@ -106,10 +102,12 @@ Claude는 시작 시 **모든 Skill의 메타데이터**(name/description)를 �
   → Yes: 분리 유지
   → No: 해당 Command/Agent에 인라인
 
-"이 Skill의 내용이 200줄을 넘는가?"
-  → Yes: 분리 고려
+"이 Skill이 다루는 관심사가 둘 이상인가?"
+  → Yes: 분리 고려 (SRP 위반 신호)
   → No: 인라인이 더 효율적일 수 있음
 ```
+
+> 줄 수 자체는 분리 판단 기준이 아니다 — 관심사가 하나면 길어도 유지한다. SKILL.md 파일 자체의 길이 제약(50~500줄)은 CI `validate` 가 별도로 강제한다.
 
 ---
 
@@ -140,7 +138,7 @@ Claude는 시작 시 **모든 Skill의 메타데이터**(name/description)를 �
 사용자 진입점은 Command 와 user-invocable Skill 둘 다 될 수 있다. 가르는 기준은 **"모델이 자동 트리거해도 되나?"** 하나다:
 
 - **Command** (`commands/`): User 만 발동. 모델이 멋대로 실행하면 곤란한 것(비용·비가역·명시적 셋업). 예: setup.
-- **user-invocable Skill** (`skills/`, `user-invocable: true`): User + 모델 맥락 자동 발동. 도메인이 맞으면 모델이 알아서 꺼내써야 하는 것. 예: git, grill, brainstorm, spec-write·spec-review, workflow, orchestrator.
+- **user-invocable Skill** (`skills/`, `user-invocable: true`): User + 모델 맥락 자동 발동. 도메인이 맞으면 모델이 알아서 꺼내써야 하는 것. 예: git, grill, spec-write·spec-review, workflow, orchestrator.
 - **Protocol Skill** (`skills/`, `user-invocable: false`): 단독 호출은 무의미하고 특정 커맨드/상위 skill 이 내부 디스패치하는 절차 본문. 예: orchestrator 의 `references/` 프로토콜 문서.
 - **Reference Skill** (`skills/`, `user-invocable: false`): 단독으로 읽어도 의미 있는 durable 전문성·지식 본문. 커맨드가 디스패치하지 않고, 모델이나 다른 컴포넌트(agent 의 `skills:` 선언, rule 포인터)가 맥락에서 on-demand 로 로드한다. 예: 이 `agent-design-principles` skill 자체. (항상-적용 컨벤션은 §3.5 에 따라 rule 로 내려가므로, 여기 남는 건 가끔 로드하는 전문성뿐이다.)
 
@@ -162,7 +160,7 @@ Claude는 시작 시 **모든 Skill의 메타데이터**(name/description)를 �
 
 #### 전략 1: Glob 경로만 수집 → Sub-agent가 읽기
 
-MainAgent는 Glob으로 경로만 수집해 Task로 위임하고, 실제 파일 읽기는 별도 컨텍스트를 가진 Sub-agent가 수행해 MainAgent의 토큰을 절약합니다.
+MainAgent는 Glob으로 경로만 수집해 Agent로 위임하고, 실제 파일 읽기는 별도 컨텍스트를 가진 Sub-agent가 수행해 MainAgent의 토큰을 절약합니다.
 
 #### 전략 2: 결정적 로직은 스크립트로 분리
 
