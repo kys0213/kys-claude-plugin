@@ -38,7 +38,7 @@ user-invocable: false
 핵심 경계:
 
 - **검토자는 "코드가 spec을 만족하나"**, **QA 매니저는 "테스트가 spec을 만족하나"**. 검토자는 테스트 커버리지의 충분성을 판정하지 않고, QA 매니저는 구현 로직의 정합성을 판정하지 않는다.
-- 둘 다 **구현 sub-agent와 다른 agent**다 (자기 코드 자기 리뷰 금지 — `autonomous-driving.md` 안티패턴 #14).
+- 둘 다 **구현 sub-agent와 다른 agent**다 (자기 코드 자기 리뷰 금지 — `autonomous-driving.md §리뷰어·QA 게이트`).
 - 두 게이트는 **AND**다 — 둘 다 `pass`여야 머지 후보로 승급한다. 하나라도 `reject`면 재위임.
 - **DBA 조건부 게이트는 spec 모드에서도 생략되지 않는다** — spec 작업이 DB에 접촉하면(스키마·마이그레이션·쿼리·ORM 모델) `autonomous-driving.md §리뷰어·QA 게이트`의 DBA 에이전트가 세 번째 차원으로 추가되어 AND에 포함된다.
 
@@ -46,14 +46,9 @@ user-invocable: false
 
 ## 팀 구성 (실험 플래그 활성 시)
 
-`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`일 때, spec 구현 작업 하나에 **조율 전용 team**을 둔다. team spawn·SendMessage 개입·편집 격리(teammate는 편집하지 않고 `isolation:"worktree"` subagent에 위임)의 일반 패턴은 `delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다 (#783).
+`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`일 때, spec 구현 작업 하나에 **조율 전용 team**을 둔다. team spawn·SendMessage 개입·편집 격리(teammate는 편집하지 않고 `isolation:"worktree"` subagent에 위임)의 일반 패턴은 `delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다.
 
-spec 모드에서 달라지는 것은 두 teammate의 **검증 질문**뿐이다:
-
-- **spec-reviewer**: 구현이 spec 요구사항을 충족하는지 `spec 항목 ↔ 파일:라인`으로 판정 → `pass`/`reject` + 미충족·초과 구현 목록.
-- **qa-manager**: spec의 각 flow/concern에 대응 테스트가 있는지, 테스트가 의도를 실제로 검증하는지 `spec flow ↔ 테스트:라인`으로 판정 → `pass`/`reject` + 누락 케이스 목록.
-
-구현 자체는 격리 subagent(`isolation:"worktree"`)에 위임하고, 거부 findings는 team 내부 SendMessage로 두 teammate에 전달한다.
+spec 모드에서 달라지는 것은 두 teammate(spec-reviewer / qa-manager)의 **검증 질문**뿐이며, 그 내용은 위 §두 게이트의 책임 분리 표에 있다. 구현 자체는 격리 subagent(`isolation:"worktree"`)에 위임하고, 거부 findings는 team 내부 SendMessage로 두 teammate에 전달한다.
 
 > teammate의 상세 findings·diff는 teammate 컨텍스트에 남기고, 메인은 두 게이트의 **verdict + 압축 요약(누락/초과 항목)** 만 받는다 (`autonomous-driving.md §메인 컨텍스트 격리`).
 
@@ -65,7 +60,7 @@ spec 모드에서 달라지는 것은 두 teammate의 **검증 질문**뿐이다
 
 ## continuous review → improve 루프
 
-worktree 코드를 한 번 보고 끝내지 않고, **머지 전까지 두 게이트가 통과할 때까지** 검증·개선을 반복한다. 이 사이클은 `autonomous-driving.md`의 작업별 리뷰어·QA 게이트 안에 들어가며, **동일한 `max_redispatch_per_task` 예산을 소모**한다 (게이트 전용 새 예산을 만들지 않는다 — 안티패턴 #15).
+worktree 코드를 한 번 보고 끝내지 않고, **머지 전까지 두 게이트가 통과할 때까지** 검증·개선을 반복한다. 이 사이클은 `autonomous-driving.md`의 작업별 리뷰어·QA 게이트 안에 들어가며, **동일한 `max_redispatch_per_task` 예산을 소모**한다 (게이트 전용 새 예산을 만들지 않는다).
 
 ```
 구현 완료 (격리 subagent)
@@ -101,7 +96,7 @@ worktree 코드를 한 번 보고 끝내지 않고, **머지 전까지 두 게�
 
 1. **검토자·QA 차원 혼합**: 한 agent에게 "구현도 보고 테스트도 봐줘" → 둘 다 얕아진다. 차원을 분리한 두 게이트로 둔다.
 2. **OR 게이트화**: 한쪽만 pass인데 머지 → spec 미충족 또는 테스트 공백이 통과. 둘 다 pass여야 머지 (AND).
-3. **teammate 직접 편집**: 검토자/QA가 발견한 문제를 자기가 고침 → 공유 checkout 오염(#783). 수정은 격리 subagent로 위임, team은 조율·판정만.
+3. **teammate 직접 편집**: 검토자/QA가 발견한 문제를 자기가 고침 → 공유 checkout 오염. 수정은 격리 subagent로 위임, team은 조율·판정만.
 4. **자기 코드 자기 리뷰**: 구현 subagent가 검토자/QA를 겸함 → 게이트 무력화. 항상 구현과 다른 agent.
 5. **모호한 거부 재위임**: "spec 더 잘 지켜라" → sub-agent가 무엇을 고칠지 모름. `spec 위치 ↔ 코드 위치`로 구체화.
 6. **게이트 전용 무한 재위임**: 두 게이트 거부를 예산 밖에서 반복 → 폭주. `max_redispatch_per_task`를 동일하게 소모, 소진 시 에스컬레이션.

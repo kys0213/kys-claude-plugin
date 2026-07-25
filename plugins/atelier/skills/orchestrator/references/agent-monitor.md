@@ -53,9 +53,9 @@ user-invocable: false
 
 ---
 
-## Task 시스템으로 다중 작업 추적 (선택)
+## Task 시스템으로 다중 작업 추적
 
-작업이 여러 개이고 **의존성·소유권·진행 상태**를 구조적으로 추적해야 할 때, ad-hoc 메모 대신 Task 시스템을 쓴다. 단순 1~2개 fan-out에는 불필요하다 (오버헤드만 큼 — Monitor와 같은 절제 원칙).
+일감을 Task로 분리·관리하는 것은 **메인 에이전트의 핵심 룰**이다 — 다중 작업이거나 의존성이 있으면 **항상** 적용하고, **단발 1회 작업만 예외**다 (`SKILL.md §일감을 Task로 분리·관리하는 것은 메인의 핵심 룰`). ad-hoc 메모로 대체하지 않는다. 이 절은 필드·의존성·owner 등 상세 사용법의 단일 출처다.
 
 ```
 TaskCreate({subject: "auth 리팩토링", description: "<범위/검증 기준>"})  # pending으로 생성
@@ -187,9 +187,8 @@ TaskUpdate({taskId: "1", status: "completed"})                         # 완료 
 
 ## team 진행 추적
 
-agent team(실험 플래그 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 필요)의 경우 여러 agent가 동시에 진행 중일 수 있다. team spawn 패턴(`Agent({name, ...})` + `SendMessage`)은 `references/delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다.
+agent team(실험 플래그 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 필요)의 경우 여러 agent가 동시에 진행 중일 수 있다. team spawn 패턴과 편집 격리 제약(`Agent({name, ...})` + `SendMessage`, teammate는 편집하지 않음)은 `references/delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다.
 
-- team은 공유 checkout이라 편집 격리가 없다 — 편집은 각 teammate가 `isolation:"worktree"` subagent로 위임한다.
 - 각 agent의 완료 알림이 별개로 도착하고, name으로 식별해 어떤 역할이 끝났는지 즉시 파악한다.
 - 한 agent가 다른 agent의 결과를 기다려야 할 때: 미리 의존성을 명시한 prompt로 띄우거나, 메인이 한 단계 완료 후 다음 단계를 호출한다(순차).
 
@@ -202,7 +201,7 @@ team은 session 종료 시 **자동 정리**된다 (`TeamDelete` 없음 — 제�
 1. **sleep + 폴링**: `Bash sleep 60 && check` 루프로 진행 상황 확인 → 금지. 알림이 자동으로 옴.
 2. **메인의 자동 개입**: 정체 감지 → 자동으로 SendMessage로 "재시도해줘" 보냄 → 폭주 위험. 사용자에게 보고.
 3. **모든 진행을 사용자에게 보고**: 정상 진행도 일일이 알림 → 노이즈. 정체/실패 시에만 보고.
-4. **teammate에 편집 격리 기대**: team은 공유 checkout이라 worktree 격리가 없다 → teammate가 직접 편집하면 충돌/덮어쓰기. 편집은 `isolation:"worktree"` subagent로 위임.
+4. **teammate에 편집 격리 기대**: 편집은 `isolation:"worktree"` subagent로 위임 (`delegation-patterns.md §Agent team 사용 패턴`).
 5. **Monitor 남발**: 일반 위임에도 Monitor 도구 사용 → 불필요한 컨텍스트. `run_in_background`만으로 충분.
 
 ---

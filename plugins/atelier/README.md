@@ -28,12 +28,13 @@ Epic 2 ([#766](https://github.com/kys0213/kys-claude-plugin/issues/766))에서 c
 ### 관심사 skill (슬래시 + 모델 자동 호출)
 
 ```
-/atelier:spec        # 스펙 설계/리뷰/갭분석/주석/품질평가 — 자연어 의도로 디스패치
-/atelier:git         # git 워크플로우 (커밋·push·PR·충돌 해결·리뷰 정리·이슈 우선순위)
-/atelier:workflow    # 컨벤션 scaffold·.claude/rules 설계·설계 원칙 룰 설치·워크플로우 리뷰
+/atelier:spec-write   # 합의된 설계를 스펙 문서 계층(DESIGN→concerns→flows)으로 작성
+/atelier:spec-review  # 작성된 스펙을 코드와 대조 분석·품질평가·주석 (spec↔code 갭분석)
+/atelier:report-write # 보고서 작문 기준 (문체·용어·청중 적응) — 리포트/정리 문서 작성 시 사용
+/atelier:git          # git 워크플로우 (커밋·push·PR·충돌 해결·리뷰 정리·이슈 우선순위)
+/atelier:workflow     # 컨벤션 scaffold·.claude/rules 설계·설계 원칙 룰 설치·워크플로우 리뷰
 /atelier:orchestrator # 위임/병렬 분해·worktree 격리·머지 조정 (기본 자율 주행, HITL opt-out)
-/atelier:grill       # 이미 있는 계획·설계를 대화로 심문 (빈틈·가정 드러내기)
-/atelier:brainstorm  # 무에서 설계를 대화로 생성 (발산→수렴)
+/atelier:grill        # 설계를 대화로 생성(발산→수렴)하거나 이미 있는 계획을 심문 (빈틈·가정 드러내기)
 ```
 
 ### 유지 command (deliberate 진입점)

@@ -45,8 +45,9 @@ loop_count = 0
 while not satisfied(contract.done_when) and loop_count < contract.max_loops:
     loop_count += 1
     tasks = decompose(remaining_work)                 # 분해 — 복잡·모호한 요구는 아키텍트 협의체
-                                                      # (brainstorm→grill 검증, architect-council.md)로
-                                                      # 위임하고, 자명한 작업만 메인이 직접 쪼갠다
+                                                      # (설계 생성 → 별도 agent 심문·검증,
+                                                      #  architect-council.md)로 위임하고,
+                                                      # 자명한 작업만 메인이 직접 쪼갠다
     log_decision("분해", tasks, refs=[대화, CLAUDE.md, rules, 협의체 산출물])
     dispatch(tasks, isolation="worktree",             # 위임 (base = epic 브랜치 — 편집은 격리 subagent)
              run_in_background=true,
@@ -66,7 +67,7 @@ while not satisfied(contract.done_when) and loop_count < contract.max_loops:
             log_decision("게이트 거부 → 재위임/조율", verdict, refs=[검토/QA findings])
 
     merge_coordinate(passed_results)                  # 리뷰 통과분만 머지 — 충돌은 자동 위임 (아래)
-    assert_topology()                                 # 가드: 매 머지 직후에도 (#783)
+    assert_topology()                                 # 가드: 매 머지 직후에도
     run_integration_verify(contract)                  # 인프라 의존 테스트 — 메인이 직접 Bash (아래)
     log_decision("머지 순서 / 충돌 처리", ...)
     remaining_work = recompute_remaining()            # 진전 측정
@@ -90,8 +91,7 @@ escalate_or_report(reason, decision_log=contract.log_dir)   # 완료 / 예산소
 
 - **역량을 작업에 맞춘다**: 작업의 난이도·리스크·되돌리기 비용에 모델 역량을 맞춘다. 판단·설계·미묘한 리뷰는 더 강한 모델, 기계적·반복적 구현은 더 가벼운 모델.
 - **비싼 모델은 품질을 좌우하는 지점에 아낀다**: 분해/조율(메인 자신), 자동 머지의 유일한 안전장치인 리뷰 게이트처럼 판단이 결과 품질을 결정하는 곳에 집중한다.
-- **고정 배분을 박지 않는다**: 모델이 더 똑똑해지면 같은 작업을 더 가벼운 tier로 내릴 수 있어야 하므로, 매 dispatch마다 "지금도 이 역량이 필요한가"를 재평가한다. 모델 tier 정의는 `delegation-patterns.md §모델 선택` 표가 단일 출처 — 시작 기준으로만 참조하고 여기서 중복 정의하지 않는다.
-- **단, fable 예약 정책은 정책이지 heuristic이 아니다**: `fable`은 오케스트레이터(메인) 전용이고, 위임되는 모든 sub-agent(아키텍트 협의체·구현·검토·QA·DBA 등)는 `opus`/`sonnet`/`haiku` 안에서만 배분한다. 이 envelope은 재평가 대상이 아니며, envelope **안에서의** tier 선택만 위 원칙대로 판단한다. 정책 전문은 `SKILL.md §모델 라우팅 전략`이 단일 출처다.
+- **고정 배분을 박지 않는다**: 모델이 더 똑똑해지면 같은 작업을 더 가벼운 tier로 내릴 수 있어야 하므로, 매 dispatch마다 "지금도 이 역량이 필요한가"를 재평가한다. 작업 유형 → 시작 tier 표는 `delegation-patterns.md §모델 선택`이, 역할 기준 원칙(오케스트레이터는 위임 sub-agent보다 낮은 tier로 내려가지 않는다 / 위임 dispatch에는 항상 `model` 명시)은 `SKILL.md §모델 라우팅 전략`이 단일 출처다 — 여기서 재서술하지 않는다.
 
 기록: 모델 배분도 자율 결정이므로, 표준 heuristic을 벗어난 선택(예: 평소 가벼운 tier에 맡기던 구현을 더 강한 모델로 올림)은 근거와 함께 decision log에 남긴다.
 
@@ -113,10 +113,10 @@ escalate_or_report(reason, decision_log=contract.log_dir)   # 완료 / 예산소
 
 자율 루프는 본질적으로 **구현 → 리뷰 → 수정**을 반복하는 구조다. 두 책임을 분리한다: **편집·격리는 `isolation:"worktree"` subagent가**(하베스트 보장), **조율은 team이**(공유 checkout).
 
-핵심 제약:
+핵심 제약 (team의 격리 특성·실험 플래그 전제는 `delegation-patterns.md §Agent team 사용 패턴`이 단일 출처):
 
-- **격리는 subagent만 보장한다**: agent team teammate는 공유 checkout이라 per-teammate worktree 격리가 없다 — 같은 파일을 편집하면 덮어쓴다. `team_name`은 받지만 무시된다. 따라서 **편집은 teammate가 직접 하지 않고 `isolation:"worktree"` subagent에 위임**한다.
-- **team은 실험 기능이다**: `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`이 없으면 teammate가 spawn되지 않는다. 플래그가 없는 환경에서는 team을 쓰지 않고 단발 격리 subagent 재위임으로 review→fix를 돈다.
+- **편집은 teammate가 직접 하지 않고 `isolation:"worktree"` subagent에 위임**한다.
+- 실험 플래그가 없는 환경에서는 team을 쓰지 않고 단발 격리 subagent 재위임으로 review→fix를 돈다.
 
 team을 쓸 때의 이득 (실험 플래그 활성 시):
 
@@ -126,7 +126,7 @@ team을 쓸 때의 이득 (실험 플래그 활성 시):
 
 구성:
 
-- **feature/task 하나 = team 하나**(실험 플래그 시). reviewer + implementer 역할. 구성·이름·수명은 `delegation-patterns.md §Agent team 사용 패턴`을 따른다. **편집 격리는 team이 아니라 그 안에서 띄우는 `isolation:"worktree"` subagent가 책임진다** — teammate에게 worktree 이동을 위임하지 않는다 (격리가 프롬프트 희망으로 격하 → 공유 checkout 오염, #783).
+- **feature/task 하나 = team 하나**(실험 플래그 시). reviewer + implementer 역할. 구성·이름·수명은 `delegation-patterns.md §Agent team 사용 패턴`을 따른다. **편집 격리는 team이 아니라 그 안에서 띄우는 `isolation:"worktree"` subagent가 책임진다** — teammate에게 worktree 이동을 위임하지 않는다.
 - **review→fix 조율**: reviewer reject → implementer에게 SendMessage → implementer가 격리 subagent로 수정 재위임 → 재리뷰. 이 사이클도 `max_redispatch_per_task` 예산을 동일하게 소모한다 (무한 반복 금지). 소진 → hard stop → 에스컬레이션.
 
 플래그가 없거나 조율이 불필요하면 **단발 격리 subagent 재위임**(이전 실패 맥락 포함)으로 review→fix를 돈다. 의심스러우면 단발 subagent를 고른다 — 격리가 항상 보장되기 때문이다.
@@ -188,7 +188,7 @@ HITL(opt-out) 모드에서 금지된 행위가 자율 모드(기본)에서는 **
 - **spec 기반 구현이면** 이 게이트를 `spec-driven-review.md`로 특수화한다 — 검토자(spec↔구현 적합성) + QA 매니저(spec↔테스트 적합성) 두 차원을 팀 모드로 상주시켜 worktree 코드를 계속 검증·개선한다 (예산·재위임·기록은 이 문서 규칙을 그대로 따른다). spec이 없어도 위 일반 검토·QA 게이트는 생략하지 않는다.
 - 게이트(코드 품질·요구사항 충족 + 검증 테스트)와 `integration_verify`(인프라 의존 동작)는 둘 다 머지 전 게이트이며 둘 다 통과해야 머지한다 — 게이트는 작업별, integration_verify는 루프별로 돈다.
 - 게이트 거부는 실패와 동일하게 **`max_redispatch_per_task`를 소모**한다 — 게이트 전용 새 예산을 만들지 않는다. 무한 재위임을 막는다.
-- 검토·QA·DBA 모델도 위 *모델 분배* 원칙으로 메인이 작업 리스크에 맞춰 정한다 (자동 머지의 유일한 안전장치이므로 보통 더 강한 역량을 둘 가치가 있으나, 고정은 아님 — 단 fable 예약 정책상 위임 역할이므로 `opus` 이하에서).
+- 검토·QA·DBA 모델도 위 *모델 분배* 원칙으로 메인이 작업 리스크에 맞춰 정한다 — 자동 머지의 유일한 안전장치이므로 보통 더 강한 역량을 둘 가치가 있으나 고정은 아니다.
 - 컨텍스트 격리: 게이트 에이전트들의 상세 findings·diff는 각자 컨텍스트에 남기고, 메인은 verdict + 압축 요약만 받는다.
 - `done_when` 평가에 **"머지된 모든 작업이 검토 통과 + QA 검증 테스트 green (+ DB 접촉 작업은 DBA 통과)"**을 포함한다.
 
@@ -204,18 +204,13 @@ HITL(opt-out) 모드에서 금지된 행위가 자율 모드(기본)에서는 **
 
 ### 토폴로지 가드 (assert_topology)
 
-sub-agent의 격리 이탈로 메인 working tree branch가 sub-agent 브랜치로 switch되는 사고가 실제 자율 런에서 3회 재현됐다 (#783). 자율 모드는 보고 없이 연속 진행하므로 오염이 후속 dispatch/머지로 전파되기 전에 잡아야 한다. **매 sub-agent 완료 알림 수신 직후 + 매 머지 직후** 실행:
+자율 모드는 보고 없이 연속 진행하므로, sub-agent의 격리 이탈로 메인 working tree가 오염되면 그것이 후속 dispatch/머지로 전파되기 전에 잡아야 한다. **매 sub-agent 완료 알림 수신 직후 + 매 머지 직후** 실행한다 — 가드 명령과 복구 절차는 `merge-coordinator.md §토폴로지 가드`가 단일 출처다.
 
-```bash
-git branch --show-current    # epic/<name> 이어야 함
-git status --short           # clean 이어야 함
-```
-
-위반 시 **hard stop** — `merge-coordinator.md`의 복구 절차(rebase abort → epic checkout)로 복구한 뒤 즉시 에스컬레이션한다. 자율 재개는 사용자 결정.
+위반 시 **hard stop** — 복구 후 즉시 에스컬레이션하고, 자율 재개는 사용자 결정에 맡긴다.
 
 ### 통합 검증 (integration_verify)
 
-worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외부 서비스 토큰 등)에 접근할 수 없다 (#782). 따라서:
+worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외부 서비스 토큰 등)에 접근할 수 없다. 따라서:
 
 - 인프라 의존 테스트는 **처음부터 sub-agent worktree 검증 범위에서 제외**하고 dispatch prompt에 명시한다 — sub-agent의 테스트 결과에 환경 의존 실패 noise가 끼지 않도록.
 - 계약에 `integration_verify`가 정의되어 있으면, `run_at` 시점(before_merge / after_merge)에 **메인이 epic 브랜치 메인 working tree에서 직접 Bash로 실행**한다 (메인의 Edit/Write 금지 정책에 해당 없음 — Bash 검증은 허용).
@@ -326,8 +321,8 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 자율 주행이 기본이라도 다음은 **항상** 멈추고 사람에게 보고한다 (예산과 무관, 우선 적용):
 
 - **되돌리기 어렵거나 외부로 나가는 행위**: force push, main 브랜치 머지, 배포, 외부 서비스 호출, 데이터 삭제 — 자율 모드는 epic 브랜치 안에서만 자율이고, 그 경계를 넘는 행위는 자동화 대상이 아니다.
-- **토폴로지 위반**: 메인 working tree branch가 epic 브랜치가 아니게 되거나 의도치 않은 변경이 발견됨 — 복구 후 즉시 보고 (#783).
-- **integration_verify 실패**: 계약에 정의된 인프라 의존 검증이 실패 — 자동 머지/루프 진행 금지 (#782).
+- **토폴로지 위반**: 메인 working tree branch가 epic 브랜치가 아니게 되거나 의도치 않은 변경이 발견됨 — 복구 후 즉시 보고.
+- **integration_verify 실패**: 계약에 정의된 인프라 의존 검증이 실패 — 자동 머지/루프 진행 금지.
 - **도메인 의미 충돌**: 의도가 갈리는 머지 충돌 (코드로 판정 불가).
 - **예산 소진**: 루프 상한 / 재위임 한도 / no-progress 도달.
 - **원인 불명확한 반복 실패**: 같은 실패가 재위임에도 계속됨.
@@ -352,28 +347,20 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 
 ## 안티패턴
 
-1. **종료 조건 없는 자율**: "알아서 끝까지"만 받고 `done_when` 미정의 → 무한 루프. 진입을 거부하고 검증 가능한 종료 조건부터 합의한다.
-2. **검증 불가능한 종료 판정**: 메인 주관으로 "다 된 것 같다" → 환각 종료. Bash 명령 결과로 판정.
-3. **가드레일 없는 재위임**: 예산 없이 실패 → 재위임을 무한 반복 → 폭주. 카운트 필수.
-4. **hard stop 무시**: 되돌리기 어려운 행위까지 자동화 → 사고. 에스컬레이션 조건은 예산과 무관하게 우선한다.
-5. **무진전 방치**: 루프는 도는데 종료 조건에 가까워지지 않음 → 예산만 소모. no-progress 감지로 조기 중단.
-6. **opt-out 무시**: 사용자가 단계별 확인(HITL)을 명시했는데 자율로 밀어붙임 → 자율은 기본이지만 opt-out 은 존중한다. HITL 요청 시 자동 개입을 멈추고 보고 후 결정을 받는다.
-7. **sleep / poll**: 자율 루프에서도 완료 알림을 사용. `Bash sleep` 루프 금지.
-8. **epic 경계 이탈**: 자율이라는 이유로 main 머지/배포까지 자동 → 자율은 epic 브랜치 안에서만. 경계 밖은 에스컬레이션.
-9. **결정 기록 누락**: 근거를 남기지 않고 자율 주행 → 사용자가 사후에 "왜"를 복원 불가. 모든 분기 결정은 참고 소스와 함께 `log_dir`에 기록.
-10. **결정 로그 커밋**: 휘발성 자율 산출물을 epic 브랜치에 커밋 → repo 오염. `.orchestrator/`는 gitignore, 완료 시 요약으로만 공유.
-11. **토폴로지 가드 생략**: 완료 알림/머지 후 메인 branch 확인 없이 연속 진행 → 오염된 HEAD 위에서 다음 dispatch의 worktree base가 잘못 잡힘 (#783).
-12. **인프라 의존 테스트를 worktree 검증에 포함**: sub-agent가 접근 불가한 환경 의존 테스트를 worktree에서 실행 → 환경 실패 noise로 PR 검증 신뢰도 저하. 계약의 `integration_verify`로 분리해 메인이 실행 (#782).
-13. **리뷰·QA 없는 자동 머지**: 구현 sub-agent의 자기 보고만 믿고 머지 → 자기 검증 편향으로 결함 통과. 머지 전 검토 에이전트 + QA 에이전트 게이트 필수.
-14. **자기 코드 자기 리뷰**: 구현한 agent가 자기 결과를 검토/QA → 게이트 무력화. 검토·QA 에이전트는 항상 구현자와 다른 sub-agent.
-15. **게이트 전용 무한 재위임**: 검토/QA 거부를 `max_redispatch_per_task` 예산 밖에서 반복 → 폭주. 게이트 거부도 동일 예산을 소모하고 소진 시 에스컬레이션.
-16. **고정 모델 매핑 박기**: "구현은 항상 X, 리뷰는 항상 Y"로 못 박음 → 모델이 똑똑해져도 비효율 유지. 매 dispatch마다 작업 리스크에 맞춰 재평가. 단 **fable 예약 정책(fable = 오케스트레이터 전용 / 위임은 opus 이하)은 매핑이 아니라 정책 envelope**이라 재평가 대상이 아니다 (`SKILL.md §모델 라우팅 전략`).
-17. **메인 컨텍스트로 전문 끌어오기**: 전체 diff·파일 전문·리뷰 findings 전문을 메인이 직접 통독 → 긴 루프에서 메인 컨텍스트 포화. 메인은 압축 요약 + verdict만 수령.
-18. **teammate에 편집 격리 기대**: team은 공유 checkout이라 worktree 격리가 없는데 teammate가 직접 편집 → 덮어쓰기/메인 오염(#783). 편집은 `isolation:"worktree"` subagent에 위임하고 team은 조율만. 또한 단발 재위임 시 이전 실패 맥락을 새 prompt에 포함해 컨텍스트 손실을 줄인다.
-19. **경계 분명한 seam 도 일괄 hard-stop**: 내부 구현/계약만 빈 엣지까지 전부 에스컬레이션 → 채우면 될 빈자리 때문에 슬라이스 전체가 멈춤. contract/interface 로 격리하고 loud stub 을 둔 채 전진, 미결 seam 은 깃발로 보고 (*모호한 seam — isolate-and-continue*).
-20. **silent stub fallback**: 격리 stub 이 조용히 기본값으로 "동작하는 척" → 스펙 불일치를 숨겨 디버깅 망침. stub 은 inert / throw 로 드러내고 보고한다 — silent fallback 금지.
-21. **검증 테스트 생략**: 구현만 머지하고 그 변경을 검증하는 테스트를 안 만듦 → 회귀를 잡을 그물이 없음. QA 에이전트가 각 작업마다 검증용 테스트를 추가·보강하고 green을 확인해야 머지한다 (spec 유무와 무관).
-22. **DB 변경을 일반 검토로만 통과**: 스키마·마이그레이션·쿼리 변경을 reviewer/QA만으로 머지 → 락·하위 호환·인덱스 누락 같은 DB 특유 위험이 통과. DB 접촉 판정(플래그 + 변경 파일 검사)에 걸리면 DBA 게이트를 생략하지 않는다.
+1. **종료 조건이 없거나 검증 불가능**: `done_when` 미정의 상태로 "알아서 끝까지" 진입 → 무한 루프. 메인 주관의 "다 된 것 같다" 판정 → 환각 종료. 검증 가능한 종료 조건부터 합의하고, 판정은 명령 결과로 한다.
+2. **예산 없는 반복**: 실패·게이트 거부를 예산 밖에서 무한 재위임하거나, 진전 없이 루프만 계속 → 폭주·예산 소모. 재위임과 게이트 거부는 **같은** `max_redispatch_per_task`를 소모하고, no-progress를 감지해 조기 중단한다.
+3. **hard stop·경계 무시**: 되돌리기 어려운 행위(force push·main 머지·배포)까지 자동화 → 사고. 자율은 epic 브랜치 안에서만이고, 에스컬레이션 조건은 예산과 무관하게 우선한다.
+4. **opt-out 무시**: 사용자가 HITL을 명시했는데 자율로 밀어붙임 → 자율은 기본이지만 opt-out은 존중한다. 자동 개입을 멈추고 보고 후 결정을 받는다.
+5. **sleep / poll**: 자율 루프에서도 완료 알림을 사용. `Bash sleep` 루프 금지.
+6. **결정 기록 누락 / 로그 커밋**: 근거 없이 자율 주행하면 사후에 "왜"를 복원 불가. 반대로 휘발성 로그를 epic 브랜치에 커밋하면 repo 오염. 분기 결정은 참고 소스와 함께 `log_dir`에 기록하되 `.orchestrator/`는 gitignore, 완료 시 요약으로만 공유.
+7. **토폴로지 가드 생략**: 완료 알림/머지 후 메인 branch 확인 없이 연속 진행 → 오염된 HEAD 위에서 다음 dispatch의 worktree base가 잘못 잡힘.
+8. **인프라 의존 테스트를 worktree 검증에 포함**: sub-agent가 접근 불가한 환경 의존 테스트를 worktree에서 실행 → 환경 실패 noise로 검증 신뢰도 저하. 계약의 `integration_verify`로 분리해 메인이 실행.
+9. **게이트 무력화**: 구현 sub-agent의 자기 보고만 믿고 머지하거나, 구현한 agent가 자기 결과를 검토/QA → 자기 검증 편향으로 결함 통과. 게이트 에이전트는 항상 구현자와 다른 sub-agent다.
+10. **검증 테스트·DBA 게이트 생략**: 구현만 머지하고 검증 테스트를 안 만들면 회귀를 잡을 그물이 없다(spec 유무와 무관). DB 접촉 판정에 걸렸는데 reviewer/QA만으로 통과시키면 락·하위 호환·인덱스 누락 같은 DB 특유 위험이 그대로 들어간다.
+11. **고정 모델 매핑 박기**: "구현은 항상 X, 리뷰는 항상 Y"로 못 박음 → 모델 세대가 바뀌어도 비효율 유지. 매 dispatch마다 작업 리스크에 맞춰 재평가한다 (역할 기준 원칙은 `SKILL.md §모델 라우팅 전략`).
+12. **메인 컨텍스트로 전문 끌어오기**: 전체 diff·파일 전문·리뷰 findings 전문을 메인이 직접 통독 → 긴 루프에서 메인 컨텍스트 포화. 메인은 압축 요약 + verdict만 수령.
+13. **teammate에 편집 격리 기대**: teammate가 공유 checkout을 직접 편집 → 덮어쓰기/메인 오염. 편집은 `isolation:"worktree"` subagent에 위임하고 team은 조율만. 단발 재위임 시에는 이전 실패 맥락을 새 prompt에 포함해 컨텍스트 손실을 줄인다.
+14. **seam 처리 실패 — 일괄 hard-stop 또는 silent stub**: 내부 구현/계약만 빈 엣지까지 전부 에스컬레이션하면 채우면 될 빈자리에 슬라이스 전체가 멈춘다. 반대로 격리 stub이 조용히 기본값으로 "동작하는 척"하면 스펙 불일치를 숨겨 디버깅을 망친다. contract/interface로 격리하고 **inert / throw 하는 loud stub**을 둔 채 전진, 미결 seam은 깃발로 보고 (*모호한 seam — isolate-and-continue*).
 
 ---
 
@@ -383,34 +370,23 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 
 - [ ] 사용자가 HITL 로 opt-out 하지 않았는가? (opt-out 시 자율 진입 금지)
 - [ ] 종료 조건이 명령으로 판정 가능한 형태인가?
-- [ ] 예산(`max_loops` / `max_redispatch_per_task` / no-progress)을 계약에 고정했는가?
-- [ ] hard stop(에스컬레이션) 조건을 정의했는가?
-- [ ] 결정 기록 위치(`.orchestrator/<epic>/decisions/`)를 계약에 고정했는가?
-- [ ] 자율 계약을 사용자에게 1회 보고했는가?
-
-진입 전 (계약):
-
+- [ ] 예산(`max_loops` / `max_redispatch_per_task` / no-progress)과 hard stop 조건을 계약에 고정했는가?
+- [ ] 결정 기록 위치(`.orchestrator/<epic>/decisions/`)를 고정하고 자율 계약을 1회 보고했는가?
 - [ ] 인프라 의존 테스트가 있다면 `integration_verify` (command + run_at)를 계약에 정의했는가?
 
 루프 중:
 
-- [ ] 매 sub-agent 완료 직후 + 매 머지 직후 토폴로지 가드를 실행하는가?
+- [ ] 복잡·모호한 요구의 분해를 아키텍트 협의체에 위임했는가? (`architect-council.md` — 자명한 작업만 메인 직접 분해)
+- [ ] 작업이 다중이거나 의존성이 있으면 Task 시스템(`TaskCreate`/`addBlockedBy`/`owner`)으로 상태를 추적하는가? (`agent-monitor.md §Task 시스템`)
+- [ ] 편집·격리가 필요한 작업을 **`isolation:"worktree"` subagent**에 위임했는가? (team을 썼다면 조율만 — SendMessage)
+- [ ] 리스크 큰/되돌리기 어려운 편집은 **계획 우선 게이트**를 거쳤는가? (`delegation-patterns.md §계획 우선 게이트`)
+- [ ] 각 작업을 머지 전 **검토 + QA (+ DB 접촉 시 DBA)** 게이트로, 구현자와 다른 agent가 검증하고 전부 pass(AND)여야 머지하는가? (QA가 추가한 검증 테스트 green 포함)
+- [ ] 재위임·게이트 거부·충돌 해결이 `max_redispatch_per_task` 예산을 소모하며 카운트되는가?
+- [ ] 매 sub-agent 완료 직후 + 매 머지 직후 토폴로지 가드를 실행하는가? (`merge-coordinator.md §토폴로지 가드`)
 - [ ] 계약의 integration_verify를 run_at 시점에 메인이 직접 실행하는가?
-- [ ] 편집·격리가 필요한 작업을 **`isolation:"worktree"` subagent**에 위임했는가? (teammate 직접 편집 금지 — team은 공유 checkout)
-- [ ] 작업이 多·의존성이 있으면 Task 시스템(`TaskCreate`/`addBlockedBy`/`owner`)으로 상태를 추적하는가? (`agent-monitor.md §Task 시스템`)
-- [ ] 리스크 큰/되돌리기 어려운 편집은 **계획 우선 게이트**(계획 받아 승인 후 편집 재위임)를 거쳤는가? (`delegation-patterns.md §계획 우선 게이트`)
-- [ ] team을 썼다면 실험 플래그가 활성이고, 편집은 그 안의 격리 subagent로 위임했는가? (조율은 SendMessage)
-- [ ] 복잡·모호한 요구의 분해를 아키텍트 협의체(brainstorm→grill 검증)에 위임했는가? (`architect-council.md` — 자명한 작업만 메인 직접 분해)
-- [ ] 각 작업을 **머지 전 검토 에이전트 + QA 에이전트**(둘 다 구현자와 다른 agent)로 검증하는가? (코드 변경은 예외 없이)
-- [ ] DB 접촉 작업(플래그 또는 변경 파일 검사)에 **DBA 에이전트**를 조건부 게이트로 붙였는가?
-- [ ] QA 에이전트가 검증용 테스트를 추가·보강하고, 추가한 테스트가 green인가?
-- [ ] 검토 + QA (+ DB 접촉 시 DBA) 전부 pass(AND)여야 머지하는가?
-- [ ] 게이트 거부가 `max_redispatch_per_task` 예산을 소모하며 카운트되는가?
-- [ ] 각 작업의 모델을 작업 리스크에 맞춰 배분하고, 비표준 선택은 기록하는가? (fable 예약 정책 envelope 준수 — fable = 오케스트레이터 전용 / 위임은 opus·sonnet·haiku)
+- [ ] 각 작업의 모델을 리스크에 맞춰 배분하고(dispatch에 `model` 명시), 비표준 선택은 기록하는가?
 - [ ] 메인이 전문 대신 압축 요약 + verdict만 수령하는가? (컨텍스트 격리)
-- [ ] 매 루프 종료 시 종료 조건을 결정적으로 재평가하는가?
-- [ ] 재위임 / 머지 / 충돌 해결이 예산을 소모하며 카운트되는가?
-- [ ] 진전을 수치로 측정하는가? (체감 아님)
+- [ ] 매 루프 종료 시 종료 조건을 결정적으로 재평가하고 진전을 수치로 측정하는가? (체감 아님)
 - [ ] 각 분기 결정을 참고 소스와 함께 `log_dir`에 기록하는가?
 - [ ] hard stop 발생 시 예산과 무관하게 즉시 멈추는가?
 

@@ -61,8 +61,7 @@ worktree 브랜치는 PR을 생성하지 않고 epic 브랜치로 수렴 후 삭
    - 충돌 발생 → 위임 (아래 참조)
 
 5. 토폴로지 가드 (매 머지 직후, 생략 금지)
-   - assert `git branch --show-current` == epic 브랜치
-   - 불일치 시 즉시 복구 + 에스컬레이션 (아래 "머지 후 토폴로지 가드" 참조)
+   - 명령·복구 절차는 아래 §토폴로지 가드 참조 — 불일치 시 즉시 복구 + 에스컬레이션
 
 6. 머지 완료 후 worktree 정리
    - 머지된 worktree 삭제
@@ -77,12 +76,13 @@ worktree 브랜치는 PR을 생성하지 않고 epic 브랜치로 수렴 후 삭
 
 ---
 
-## 머지 후 토폴로지 가드
+## 토폴로지 가드 (명령·복구 절차 단일 출처)
 
-실사례에서 `gh pr merge --squash` 후 메인 working tree의 current branch가 sub-agent 브랜치로 의도치 않게 switch된 사고가 발생했다 (#783). 메인은 항상 epic 브랜치에 있어야 하므로, **매 머지 직후** 다음 1줄 가드를 실행한다:
+메인은 항상 epic 브랜치의 메인 working tree에 있어야 한다. 머지 명령이나 sub-agent의 격리 이탈로 메인의 current branch가 sub-agent 브랜치로 switch되면, 오염된 HEAD 위에서 후속 dispatch의 worktree base가 잘못 잡히고 머지 경로가 어긋난다. 가드 명령과 복구 절차는 이 절이 단일 출처이며, **언제 실행하는가**는 각 단계 문서가 정한다 — 매 sub-agent 완료 알림 직후(`worktree-lifecycle.md`), 매 머지 직후(아래 §표준 절차 5), 자율 루프의 `assert_topology()`(`autonomous-driving.md`).
 
 ```bash
-[ "$(git branch --show-current)" = "epic/<name>" ] || echo "TOPOLOGY VIOLATION"
+git branch --show-current    # epic/<name> 이어야 함
+git status --short           # clean 이어야 함 (메인은 편집하지 않으므로)
 ```
 
 불일치 발견 시 복구 절차:
@@ -93,6 +93,8 @@ git checkout epic/<name>
 git pull --rebase origin epic/<name>
 git branch -D <잘못 switch된 sub-agent 브랜치>   # 로컬에 남았으면 정리
 ```
+
+의도치 않은 변경이 있으면 `git stash push -u` 로 보존한 뒤 보고한다 — 그 변경이 worktree로 갔어야 할 sub-agent 작업물일 수 있으므로 버리지 않는다.
 
 복구 후 **반드시 에스컬레이션** — 어떤 명령 직후 발생했는지, working tree가 clean했는지를 사용자에게 보고한다. 자율 모드라도 이 가드 실패는 hard stop이다 (`autonomous-driving.md`).
 
@@ -115,7 +117,7 @@ git branch -D <잘못 switch된 sub-agent 브랜치>   # 로컬에 남았으면 
 
 **실패 시**: 완료 선언 금지. 회귀 원인 파악 후 수정을 위임한다 — 메인 직접 편집 금지 원칙은 이 단계에도 동일하게 적용된다 ("충돌 시 위임" 절차 참조).
 
-인프라 의존 테스트(DB, 외부 서비스 등)는 자율 모드 통합 단계에서 메인 working tree 기준 별도 검증 대상이다 (#782). 본 게이트는 인프라 의존 여부와 무관하게, epic 브랜치 최종 HEAD 전체 스위트 실행을 완료 선언의 전제 조건으로 규정하는 상위 규칙이다.
+인프라 의존 테스트(DB, 외부 서비스 등)는 자율 모드 통합 단계에서 메인 working tree 기준 별도 검증 대상이다 (`autonomous-driving.md §통합 검증`). 본 게이트는 인프라 의존 여부와 무관하게, epic 브랜치 최종 HEAD 전체 스위트 실행을 완료 선언의 전제 조건으로 규정하는 상위 규칙이다.
 
 ---
 
@@ -207,7 +209,7 @@ git diff --name-only epic/<name>...<branch_B>  # B가 변경한 파일
 4. **worktree 방치**: 머지 완료 후 정리 안 함 → 디스크/git 상태 오염.
 5. **base 미동기화 머지**: 오래된 base 위에 머지 시도 → 무의미한 충돌. 머지 직전 base pull 필수.
 6. **main으로 바로 머지**: epic 브랜치를 거치지 않고 sub-agent 결과를 main으로 직접 머지 → epic 브랜치 전략 위반. 이 단계의 target은 항상 epic 브랜치.
-7. **머지 후 가드 생략**: 머지 직후 current branch 확인 없이 다음 git 명령 진행 → 메인이 sub-agent 브랜치 위에서 작업하는 토폴로지 위반을 뒤늦게 발견 (#783). 매 머지 직후 가드 필수.
+7. **머지 후 가드 생략**: 머지 직후 current branch 확인 없이 다음 git 명령 진행 → 메인이 sub-agent 브랜치 위에서 작업하는 토폴로지 위반을 뒤늦게 발견. 매 머지 직후 가드 필수.
 8. **조기 완료 선언**: 개별 worktree/중간 브랜치 green만으로 완료 보고 → 머지 결합 후 회귀 가능성을 놓침. epic 브랜치 최종 HEAD 전체 스위트 green과 HEAD sha 명시를 완료 선언의 전제로 한다.
 
 ---

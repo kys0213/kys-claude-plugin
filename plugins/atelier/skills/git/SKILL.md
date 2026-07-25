@@ -158,6 +158,6 @@ hook 의 등록·비활성화·재설정은 통합 setup 의 hook 관리 모드�
 ## 핵심 원칙
 
 1. **작은 단위 커밋**: TODO별로 명확한 진행상황 추적
-2. **PR Only**: 모든 병합은 반드시 Pull Request를 통해서만
+2. **외부 병합은 PR Only**: 외부로 나가는 병합(요청 단위 결과를 base 브랜치에 반영)은 반드시 Pull Request를 통해서만. 내부 분해 단위(worktree 브랜치)는 PR 없이 epic 브랜치로 로컬 수렴 후 삭제한다 (§PR 단위 원칙 참조).
 3. **도구 경계 준수**: hook·guard·reviews 는 `atelier git` CLI, 커밋·브랜치·PR 은 컨벤션을 적용한 plain git/gh
 4. **Rebase 우선**: merge 대신 rebase로 깔끔한 히스토리 유지

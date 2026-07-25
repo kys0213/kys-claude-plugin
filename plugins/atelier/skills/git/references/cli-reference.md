@@ -46,7 +46,7 @@ atelier git guard <write|commit|pr> --project-dir=<p> [--create-branch-script=<s
 - `pr`: 현재 브랜치에 열린 PR 이 있으면 `gh pr create` 차단 (exit 2). branch 옵션 불필요. legacy alias: `atelier git pr-guard`.
 - `--default-branch` 미지정 시 guard 가 런타임에 readonly 감지(`origin/HEAD` → main/develop/master 추측)한다.
   setup 이 (a) `git remote set-head` 로 `origin/HEAD` 를 warm-up 해 이 readonly 경로가 비표준 기본 브랜치도
-  해결하게 하고, (b) GitHub repo 면 `gh` 로 감지한 값을 `--default-branch` 로 박는다 (#779, B 절 참조).
+  해결하게 하고, (b) GitHub repo 면 `gh` 로 감지한 값을 `--default-branch` 로 박는다 (B 절 참조).
 
 ## 3. Hook 관리
 
@@ -56,7 +56,7 @@ atelier git hook unregister <hookType> <command> [--project-dir=<p>]
 atelier git hook list [hookType] [--project-dir=<p>]
 ```
 
-> settings.json 편집은 결정적 변환이라 CLI 가 담당한다 (LLM 이 직접 Write 하지 않음, #762).
+> settings.json 편집은 결정적 변환이라 CLI 가 담당한다 (LLM 이 직접 Write 하지 않음).
 > guard hook 의 등록·비활성화·재설정 절차는 통합 setup 의 hook 관리 모드가 담당한다.
 
 ---
