@@ -1,6 +1,6 @@
 # 코드베이스 감지 (detection)
 
-코드베이스의 언어·프레임워크·디렉토리 구조를 감지하는 시그널과 LSP 활용 전략. codebase-analyzer 가 분석 시 로드한다.
+코드베이스의 언어·프레임워크·디렉토리 구조를 감지하는 시그널. codebase-analyzer 가 분석 시 로드한다.
 
 ## 1. 언어/프레임워크 감지 파일
 
@@ -25,22 +25,3 @@
 | **Feature-based** | `features/`, `modules/` 하위에 기능별 디렉토리 |
 | **Flat** | 루트에 모든 파일이 혼재 |
 | **Monorepo** | `packages/`, `apps/`, `services/` |
-
----
-
-## 4. LSP-Enhanced Analysis
-
-코드 구조 분석 시 LSP가 사용 가능하면 Glob/Grep보다 정확한 정보를 얻을 수 있으므로, 가능하면 LSP 기반으로 분석하고 불가능할 때만 Glob/Grep으로 대체합니다.
-
-### 활용 가능한 operation
-
-| LSP operation | 얻는 정보 |
-|---|---|
-| `documentSymbol` | 레이어 패턴 (클래스/함수/인터페이스 비율) |
-| `goToImplementation` | 추상화 수준 (DIP 준수 여부) |
-| `findReferences` | 의존 방향, 모듈 경계 |
-| `workspaceSymbol` | 전체 레이어 분류 |
-
-### 언어별 LSP
-
-Rust는 rust-analyzer, Go는 gopls, TypeScript/JS는 typescript-language-server, Python은 pylsp를 사용합니다 (설치 명령은 각 도구의 표준 방식을 따름).

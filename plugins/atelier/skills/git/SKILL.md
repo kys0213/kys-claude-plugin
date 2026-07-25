@@ -2,7 +2,7 @@
 name: git
 description: ALWAYS use this skill for ANY git-related task (commit, push, branch, PR, status, diff, log, conflict resolution, unresolved review followup, issue prioritization). Provides automatic quality validation and enforces project conventions. Mechanical calls (guard/hook/reviews) go through the atelier git CLI; commit/branch/PR run as plain git/gh applying the conventions below.
 version: 1.0.0
-allowed-tools: Bash
+allowed-tools: Bash, AskUserQuestion
 ---
 
 # Git Workflow Skill
@@ -103,9 +103,14 @@ CLI 인자 형식·출력 계약·git 정책(커밋 형식·브랜치 명명·PR
 
 기본 브랜치(main/master)에서 직접 `git commit` 또는 `git push` 하지 않습니다 — 항상 위 워크플로우대로 새 브랜치를 만들어 작업합니다.
 
-### force-push 금지
+### force-push 정책
 
-hook 차단 여부와 **별개로 에이전트 스스로 지키는 정책**입니다. `git push --force` / `--force-with-lease` 를 시도하지 않습니다. history 재작성이 필요하면 대안을 먼저 제시합니다: `git revert`, 새 커밋으로 수정, 새 브랜치에서 재작업.
+hook 차단 여부와 **별개로 에이전트 스스로 지키는 정책**입니다.
+
+- `git push --force` 는 어떤 경우에도 사용하지 않습니다.
+- `--force-with-lease` 는 **이미 push 된 브랜치를 rebase 한 직후** (`references/conflict-resolution.md` 흐름) 한 가지 경우에만 허용합니다.
+- 기본 브랜치(main/master)에는 어떤 형태의 force-push 도 하지 않습니다.
+- 그 외의 history 재작성이 필요하면 대안을 먼저 제시합니다: `git revert`, 새 커밋으로 수정, 새 브랜치에서 재작업.
 
 ### push 권한 거부 시 사용자 위임
 
