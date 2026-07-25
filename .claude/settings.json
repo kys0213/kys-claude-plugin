@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "git-utils guard write --project-dir=${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch' --default-branch=main",
+            "command": "atelier git guard write --project-dir=${CLAUDE_PROJECT_DIR:-.} --default-branch=main",
             "timeout": 5
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "git-utils guard commit --project-dir=${CLAUDE_PROJECT_DIR:-.} --create-branch-script='git-utils branch' --default-branch=main",
+            "command": "atelier git guard commit --project-dir=${CLAUDE_PROJECT_DIR:-.} --default-branch=main",
             "timeout": 5
           },
           {
