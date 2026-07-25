@@ -10,7 +10,7 @@ spec 설계 → 리뷰 → 구현 → PR 머지까지의 전체 흐름을 하나
 
 ## 흡수 매핑 (6 → 1)
 
-| 기존 plugin | 동결 버전 | atelier 내 위치 |
+| 기존 plugin | 제거 시점 버전 | atelier 내 위치 |
 |---|---|---|
 | `git-utils` | 2.4.2 | `skills/git/`(+references), `cli/` (Rust 포팅) |
 | `github-autopilot` | 0.30.1 | **제거됨** — 에이전트 스웜이 클로드만으로 동작하게 되어 GitHub 이슈 구동 autopilot 루프를 걷어내고, 자율 개발은 `skills/orchestrator/`(기본 자율 주행)가 담당 |
@@ -19,7 +19,7 @@ spec 설계 → 리뷰 → 구현 → PR 머지까지의 전체 흐름을 하나
 | `coding-style` | 0.3.0 | `templates/claude-md/`, `hooks/suggest-simplify.sh` |
 | `orchestrator` | 0.2.0 | `skills/orchestrator/` |
 
-흡수된 6개 plugin은 **snapshot freeze** 됩니다 — 삭제하지 않고 동결 상태로 보존하며, 후속 개발은 atelier에서만 진행합니다. 마이그레이션 절차는 [`plans/atelier/03-migration.md`](../../plans/atelier/03-migration.md)를 참조하세요.
+흡수된 6개 plugin은 저장소에서 **제거되었습니다** — git history만 참조 가능하며, 후속 개발은 atelier에서만 진행합니다. `autodev`, `develop-workflow`도 함께 제거되었습니다. 마이그레이션 이력은 [`plans/atelier/03-migration.md`](../../plans/atelier/03-migration.md)를 참조하세요.
 
 ## 슬래시 표면 (관심사 단위)
 
@@ -71,7 +71,7 @@ atelier git <reviews|guard|hook>   # git-utils 의 기계적 호출 표면 (Type
 | Phase 2 | CLI 통합 (Rust 단일 바이너리 — autopilot 흡수 + git-utils 포팅) | ✅ |
 | Phase 3 | commands / agents / skills / hooks 이동 + namespace 치환 | ✅ |
 | Phase 4 | CI 인프라 (validate · rust-binary · frozen 게이트 · bumpversion 제외) | ✅ |
-| Phase 5 | 흡수 6개 freeze | ✅ |
+| Phase 5 | 흡수 6개 제거 (`autodev`·`develop-workflow` 포함) | ✅ |
 
 > **현재 상태**: Epic 1 (consolidation) + Epic 2 (skill extraction) 완료.
 > 에이전트 스웜이 클로드만으로 동작하게 되어 GitHub 이슈 구동 autopilot 서브시스템(skill·agents·commands·CLI 모듈)을 제거하고,
