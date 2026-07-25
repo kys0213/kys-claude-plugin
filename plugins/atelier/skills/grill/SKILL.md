@@ -1,44 +1,61 @@
 ---
 name: grill
-description: Interview the user relentlessly about a plan or design until reaching shared understanding, resolving each branch of the decision tree. Use when user wants to stress-test a plan, get grilled on their design, or mentions "grill me".
+description: You MUST use this before any creative work — creating features, building components, adding functionality, or modifying behavior — and whenever a request is ambiguous. Interviews the user one question at a time until intent is synced; generates a design from scratch when none exists, and stress-tests it before implementation. 트리거 - 새 기능, 설계해줘, 만들어줘, 이거 어떻게 할까, 계획 검토, 심문, grill me.
 version: 1.0.0
 ---
 
 # grill
 
-이미 손에 든 계획·설계·접근안이 있을 때, 코드를 건드리기 전에 그 계획을 사람과의 대화로 집요하게 심문해 빈틈을 드러낸다. 무에서 새 설계를 만드는 일이 아니라 **있는 것을 무너뜨려 보는** 활동이다.
+요청이 들어오면 **모호함이 해소될 때까지 한 번에 하나씩 질문하는 자세**다. 코드를 건드리기 전에 심문으로 빈틈을 드러낸다.
 
-## 전제
+심문의 본질은 트집이 아니라 **동기화**다. 모호한 요청을 이해할 때까지 되물어 사용자와 에이전트의 이해를 맞춰 놓는 과정이 핵심이다. 이 과정이 부족하면 결과물이 나온 뒤에야 "왜 이렇게 했냐"고 되묻게 되고, 그때는 이미 잘못된 방향으로 만들어진 뒤다.
 
-이 스킬은 검토 대상(계획/설계/접근안)이 **이미 존재한다**고 가정한다. 아직 구체안이 없고 막연한 아이디어에서 출발한다면 이 스킬이 아니라 `brainstorm` 스킬로 간다 — 거기서 설계를 만든 뒤, 그 설계를 심문하고 싶을 때 다시 grill 로 핸드오프한다.
+## 발동
+
+이 스킬은 **자세(posture)이지 단계가 아니다**. 창작·변경 요청이 들어오면 항상 켜져 있다. 심문 대상은 이미 손에 든 계획일 수도, 사용자의 요청 자체일 수도 있다 — 검토할 구체안이 존재해야만 발동하는 것이 아니다.
 
 ## 자세 (posture)
 
-이 계획의 모든 측면에 대해 **공유된 이해에 도달할 때까지 집요하게 인터뷰하라**. 설계 트리의 각 가지를 내려가며, 결정 사이의 의존성을 하나씩 해소하라. 각 질문마다 추천 답을 함께 제시하라.
+공유된 이해에 도달할 때까지 집요하게 인터뷰하라. 설계 트리의 각 가지를 내려가며, 결정 사이의 의존성을 하나씩 해소하라. 각 질문마다 추천 답을 함께 제시하라.
 
 - **질문은 한 번에 하나씩만** 하라. 여러 질문으로 압도하지 않는다.
 - 질문이 코드베이스 탐색으로 답해질 수 있다면, 묻지 말고 코드베이스를 탐색하라.
+- 가능하면 객관식을 선호한다 (AskUserQuestion) — 답하기 쉬운 형태가 동기화를 빠르게 한다.
 - 빈틈·미검증 가정·암묵적 trade-off 를 드러내는 데 집중한다. 동의가 아니라 이해가 목표다.
-- 유연하게: 답이 새 가지를 열면 그 가지로 내려간다. 정해진 체크리스트를 강제하지 않는다 — 그 rigid 한 9단계 프로세스는 `brainstorm` 의 몫이고, grill 은 계획의 형태에 맞춰 움직이는 자세(posture)다.
+- 유연하게: 답이 새 가지를 열면 그 가지로 내려간다. 정해진 체크리스트를 강제하지 않고 대상의 형태에 맞춰 움직인다.
+
+## 질문 깊이는 모호함에 비례한다
+
+심문의 양은 대상의 크기가 아니라 **남아 있는 모호함의 양**으로 정한다.
+
+- **모호함이 없을 때 — 의도 재진술**: 무엇을(필드/조건/메서드), 어디서(파일/위치), 어떻게 바꾸는지 한 문장으로 재진술하고 확인을 받으면 통과다. 이것이 이 자세의 최소 발현이며, 별도의 경량 경로가 아니다.
+- **모호할수록 가지를 내려간다**: 해석이 둘 이상으로 갈리면 질문한다. 특히 diff/비교 로직 변경, rename 인지 동작 변경인지처럼 문구가 중의적인 요청에서는 재진술만으로 끝내지 않는다.
+- 그럴듯한 해석이 하나 떠올랐다고 그것이 사용자의 의도라고 단정하지 않는다.
+
+<HARD-GATE>
+합의 전에는 구현을 시작하지 않는다. 코드를 쓰지 말고, 프로젝트를 스캐폴딩하지 말고, 구현 스킬을 호출하지 마라.
+</HARD-GATE>
+
+## 설계 생성으로의 분기
+
+심문 결과 **검토할 설계가 아예 없다**고 드러나면(막연한 아이디어에서 출발했거나, 요청이 여러 서브시스템을 담고 있어 분해가 먼저 필요한 경우) `references/design-generation.md` 를 로드해 **설계 생성 활동**으로 전환한다.
+
+설계가 만들어지면 다시 이 자세로 돌아와 그 설계를 심문한다.
+
+**생성과 검증은 분리한다.** 설계 생성 활동이 자기 산출물을 스스로 최종 검증하지 않는다. 자기가 만든 것을 자기가 승인하면 같은 눈이 같은 빈틈을 두 번 놓친다 — 검증은 이 심문 자세와 사용자 리뷰가 담당한다.
 
 ## 종료와 핸드오프
 
-모든 가지가 해소되면(또는 사용자가 충분하다고 하면) 합의된 결정 목록을 요약한다. 그다음:
+모든 가지가 해소되면(또는 사용자가 충분하다고 하면) 합의된 결정 목록을 요약한다. 그다음 필요에 따라:
 
-- 코드 변경이 필요하면 **Plan Mode** 로 — *어떻게* 바꿀지 구현 계획을 세운다.
-- 합의된 설계를 장기 스펙 문서로 남겨야 하면 **`spec-write`** 로 — 정해진 구조(DESIGN/concerns/flows)로 형식화한다.
-
-합의 전에는 구현을 시작하지 않는다.
+- **코드 변경**: Plan Mode 로 *어떻게* 바꿀지 구현 계획을 세우거나, 작업이 여러 갈래로 나뉘면 `orchestrator` 로 위임한다.
+- **장기 스펙 문서**: `spec-write` 로 정해진 구조(DESIGN/concerns/flows)에 맞춰 형식화한다.
 
 ## 책임 경계
 
 | 대상 | 차이 | 핸드오프 |
 |---|---|---|
-| `brainstorm` | grill 은 *있는 계획*을 심문한다(수렴·비평), brainstorm 은 *무에서 설계*를 생성한다(발산→수렴) | 검토할 구체안이 없으면 `brainstorm` 으로. brainstorm 이 설계를 만든 뒤 심문이 필요하면 grill 로 |
-| `spec-write` | **대화 ≠ 문서**. grill 은 설계를 *대화로 도전*하고, `spec-write` 는 *합의된 설계를 스펙 문서로 형식화*(DESIGN/concerns/flows)한다 | 합의된 설계를 장기 스펙 문서로 남길 땐 `spec-write`, 단일 작업 구현은 Plan Mode 로 |
-| `spec-review` | 작성된 스펙을 *코드와 대조 분석*(L1/L2/audit)·품질 평가하는 단계. grill 의 설계 도전과 다른 활동 | 스펙 작성 후 코드 정합 확인이 필요하면 `spec-review` 로 |
-| Plan Mode | grill 은 *무엇을/왜*(의도·설계 합의), Plan Mode 는 *어떻게*(코드 변경 단계) | 의도가 확정되고 코드 변경이 필요하면 Plan Mode 로 넘긴다 |
-
-## 출처
-
-`grill` 은 [obra/superpowers](https://github.com/obra/superpowers) (MIT License, © 2025 Jesse Vincent) 의 `grill-me` 스킬이 원본입니다. 원본 지시문(집요한 인터뷰 자세·한 번에 한 질문·코드베이스 우선 탐색)을 보존했고, 핸드오프만 atelier 생태계(Plan Mode / `spec-write` / `brainstorm`)로 바인딩했습니다.
+| `spec-write` | **대화 ≠ 문서**. grill 은 설계를 *대화로 도전*하고, `spec-write` 는 *합의된 설계를 스펙 문서로 형식화*(DESIGN/concerns/flows)한다 | 합의된 설계를 장기 스펙 문서로 남길 때 |
+| `spec-review` | 작성된 스펙을 *코드와 대조 분석*(L1/L2/audit)·품질 평가하는 단계. grill 의 설계 도전과 다른 활동 | 스펙 작성 후 코드 정합 확인이 필요할 때 |
+| Plan Mode | grill 은 *무엇을/왜*(의도·설계 합의), Plan Mode 는 *어떻게*(코드 변경 단계) | 의도가 확정되고 코드 변경이 필요할 때 |
+| `orchestrator` | grill 은 대화로 합의를 만들고, `orchestrator` 는 합의된 작업을 sub-agent·worktree 로 분해해 실행한다 | 합의된 작업이 병렬·다단계로 나뉠 때 |
