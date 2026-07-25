@@ -77,7 +77,8 @@ main
 ```
 0. 진입 확인 (Entry)        → 현재가 epic 브랜치 + 메인 working tree인지 확인
 1. 분해 (Decompose)        → 작업을 독립 단위로 쪼갠다 — 복잡·모호한 요구는 아키텍트 협의체
-                             (brainstorm→grill 심문·검증)에 위임해 검증된 task 를 도출 (`references/architect-council.md`)
+                             (설계 생성 → 별도 agent 의 심문·검증)에 위임해 검증된 task 를 도출
+                             (`references/architect-council.md`)
 2. 위험도 분석 (Analyze)    → 단위 간 파일/의존성 충돌 위험 식별
 3. 실행 계획 (Plan)         → 병렬/순차 결정 + 위임 형태(단발/team) 결정
 4. 위임 (Dispatch)          → Agent 호출 (worktree isolation, base = epic 브랜치)
@@ -103,21 +104,16 @@ main
 
 ### 작업 케이스마다 검토 에이전트·QA 에이전트는 필수 (Review & QA Gate)
 
-코드를 바꾸는 각 작업(work case)은 구현이 끝나면 머지 전에 두 전용 에이전트를 **반드시** 거친다 — Task 분리가 핵심 룰인 것과 동급의 필수 규칙이다. 게이트가 references에 묻혀 누락되지 않도록 본문에 항상 로드되는 규칙으로 둔다.
+코드를 바꾸는 각 작업(work case)은 구현이 끝나면 머지 전에 전용 게이트 에이전트를 **반드시** 거친다 — Task 분리가 핵심 룰인 것과 동급의 필수 규칙이다. 게이트가 references에 묻혀 누락되지 않도록, **적용 여부**만 본문에 항상 로드되는 규칙으로 둔다.
 
-- **검토 에이전트 (reviewer)**: 구현이 요구사항/spec을 충족하는지, 회귀·설계원칙(SOLID)·품질 게이트(test/lint/format) 위반이 없는지 검토한다 (`구현 ↔ 요구사항`).
-- **QA 에이전트 (qa)**: 각 요구사항·flow·엣지케이스에 대응 테스트가 있는지 판정하고, 없거나 비었으면 **검증용 테스트를 추가·보강해 채운다** (`요구사항 ↔ 테스트`).
-- **DBA 에이전트 (dba) — 조건부**: 작업이 DB에 접촉하면(스키마·마이그레이션·쿼리·ORM 모델 변경) 추가로 소집한다 — 스키마 변경 안전성(하위 호환·락·롤백)·쿼리 성능(인덱스·N+1)·데이터 정합성을 검증한다 (`구현 ↔ DB 안전성`).
-
-규칙:
-
+- **검토 에이전트 (reviewer)** — `구현 ↔ 요구사항`, **QA 에이전트 (qa)** — `요구사항 ↔ 테스트`(누락 시 검증 테스트를 추가·보강), **DBA 에이전트 (dba)** — DB 접촉 작업만 조건부로 `구현 ↔ DB 안전성`.
+- **AND 게이트**: 전부 `pass`여야 머지 후보로 승급. 하나라도 `reject`면 findings를 실어 재위임한다.
 - 게이트 에이전트들은 **구현 sub-agent와 다른 agent**다 — 자기 코드 자기 검증 금지.
-- **AND 게이트**: 검토 `pass` + QA `pass`(추가한 검증 테스트 green) + (DB 접촉 시) DBA `pass` 전부여야 머지 후보로 승급. 하나라도 `reject`면 findings를 실어 재위임한다.
-- **모델 배분은 모델 라우팅 전략 안에서**: fable은 오케스트레이터(메인) 전용이고, 아키텍트 협의체(brainstorm·grill)·구현·검토·QA·DBA 등 위임되는 모든 역할은 `opus`/`sonnet`/`haiku`로 배분한다 — 위 §모델 라우팅 전략이 단일 출처.
 - QA의 테스트 추가도 편집이므로 **`isolation:"worktree"` subagent로 위임**한다 (메인은 직접 편집하지 않는다 — *사고 모드*).
+- 게이트 역할의 tier는 아래 §모델 라우팅 전략에 따라 dispatch 시점에 정한다 — 자동 머지의 유일한 안전장치라 보통 더 높은 역량을 둘 가치가 있다.
 - 예외는 Task 룰과 동일하게 **단발 1회·read-only 작업만**이다.
 
-특수화: spec 문서를 입력으로 구현하면 `references/spec-driven-review.md`(검토자=spec↔구현, QA 매니저=spec↔테스트)로 특수화되고, spec이 없으면 `references/autonomous-driving.md §리뷰어·QA 게이트`를 따른다 — 게이트 거부의 재위임 예산·기록 등 세부 규칙은 그 문서가 단일 출처다.
+역할별 입력·검증 질문·출력 계약, DB 접촉 판정, 게이트 거부의 재위임 예산·기록 등 세부 규칙은 `references/autonomous-driving.md §리뷰어·QA 게이트`가 단일 출처다. spec 문서를 입력으로 구현하는 경우만 `references/spec-driven-review.md`(검토자=spec↔구현, QA 매니저=spec↔테스트)로 특수화된다.
 
 ### 병렬 fan-out 복원력 — 실패한 조각도 누락 없이 (Resilience)
 
@@ -163,7 +159,7 @@ main
 | 여러 agent 협업·식별/제어 필요 (read-only 조율) | agent team | `Agent({name, ...})` + `SendMessage` (실험 플래그 필요·`team_name` 무시·편집 격리는 subagent) |
 | 파일 충돌 위험 있는 병렬 | worktree-isolated | `Agent({isolation: "worktree", ...})` |
 
-> **격리는 subagent만 보장**: agent team teammate는 공유 checkout이라 worktree 격리가 없다. 편집·격리는 team이 아니라 `isolation:"worktree"` subagent로, team은 조율 전용이다.
+> **격리는 subagent만 보장**: agent team teammate는 공유 checkout이라 worktree 격리가 없다 — 편집·격리는 `isolation:"worktree"` subagent, team은 조율 전용 (`references/delegation-patterns.md §Agent team 사용 패턴`이 단일 출처).
 
 자세한 판단 기준과 prompt 작성법은 `references/delegation-patterns.md`.
 
@@ -171,25 +167,16 @@ main
 
 ## 모델 라우팅 전략 (Model Routing)
 
-모델 라우팅에는 **하나의 고정 제약(envelope)**과 그 안에서의 **작업별 heuristic**이 있다. envelope는 이 문서가 단일 출처이며, 재평가 대상이 아니다.
+모델 라우팅에는 **역할 기준 원칙**과 그 안에서의 **작업별 tier heuristic**이 있다. 원칙은 이 절이 단일 출처다.
 
-### fable 예약 정책 (고정 제약 — 단일 출처)
+### 역할 기준 원칙 (단일 출처)
 
-- **fable은 오케스트레이터(메인 에이전트) 전용이다.** 분해·위임·조율·머지 판단을 총괄하는 오케스트레이션 역할만 최상위 tier(`fable`)를 쓴다. fable의 역량은 스웜 전체의 흐름을 잡는 메인에 예약한다.
-- **위임되는 모든 sub-agent는 fable을 쓰지 않는다.** 아키텍트 협의체(brainstorm·grill)·구현·검토(reviewer)·QA·DBA·충돌 해결·일반 분석 등 dispatch되는 모든 역할은 `opus` / `sonnet` / `haiku` 안에서만 배분한다.
-- 부모(메인) 모델이 `fable`인 세션에서는 **상속(모델 미지정)도 위반**이다 — 위임되는 모든 dispatch에는 반드시 `model`을 명시해 fable 상속을 끊는다.
-- 이 제약은 heuristic이 아니라 **정책**이다. 모델이 더 똑똑해져도 재평가하지 않는다. envelope **안에서의** tier 선택만 아래 heuristic으로 판단한다.
+- **오케스트레이터(메인)는 위임되는 어떤 sub-agent보다 낮은 역량 tier로 내려가지 않는다.** 분해·위임·조율·머지 판단이 스웜 전체 결과의 상한을 결정하기 때문이다.
+- **위임 dispatch에는 항상 `model`을 명시한다** — 상속에 맡기면 메인의 tier가 그대로 번져 배분 자체가 무의미해진다.
+- **tier 선택은 고정 매핑이 아니라 heuristic**이다 — 작업의 난이도·리스크·되돌리기 비용에 맞춰 매 dispatch 재평가하고, 표준을 벗어난 선택은 근거와 함께 decision log에 남긴다.
+- **특정 모델명을 문서에 박지 않는다** — 모델 세대가 바뀌어도 이 원칙이 그대로 성립해야 한다. 역량 수준(최상위/중간/경량)과 실제 모델명의 매핑은 dispatch 시점 판단에 맡긴다.
 
-### 위임 tier heuristic (envelope 안 — opus / sonnet / haiku)
-
-| 작업 유형 | 시작 tier |
-|-----------|-----------|
-| 요구사항 분해·설계 심문(아키텍트 협의체), 복잡한 설계·어려운 디버깅·아키텍처 판단 | `opus` |
-| 일반 구현, 코드 리뷰, 테스트 작성 | `sonnet` |
-| 단순 분류, 포맷 변환, 짧은 추출 | `haiku` |
-
-- 이 표는 **고정 매핑이 아니라 시작 heuristic**이다 — 작업마다 "지금도 이 역량이 필요한가"를 재평가하고, 표준을 벗어난 선택은 근거와 함께 decision log에 남긴다.
-- 자율 루프의 작업별 배분 원칙은 `references/autonomous-driving.md §모델 분배`, tier별 상세·prompt 작성은 `references/delegation-patterns.md §모델 선택`.
+작업 유형 → 시작 tier 표는 `references/delegation-patterns.md §모델 선택`이 단일 출처다 (여기서 중복 정의하지 않는다). 자율 루프의 작업별 배분 원칙은 `references/autonomous-driving.md §모델 분배`.
 
 ### 역할별 모델 정책 설정 (exclude / allow — 단일 출처)
 
@@ -208,8 +195,8 @@ main
         # allow_models: [<model-name>] — 필요 시 허용 목록으로 제한 (목록 밖은 전부 차단)
   ```
 
-- **dispatch 시 적용**: 정책과 충돌하는 모델 배정은 차단하고, envelope(opus/sonnet/haiku) 안의 대체 모델로 라우팅한다.
-- **fable 예약 정책은 설정으로 override 불가**: 이 설정은 envelope 안의 tier 선택만 조정한다. `allow_models`에 fable을 넣어도 무시된다 — 위 고정 제약이 항상 우선한다.
+- **dispatch 시 적용**: 정책과 충돌하는 모델 배정은 차단하고, 인접 tier의 대체 모델로 라우팅한다.
+- **역할 기준 원칙은 설정으로 override 불가**: 이 설정은 역할별 tier 선택 범위만 좁힌다. 오케스트레이터가 위임 sub-agent보다 낮은 tier로 내려가는 배정이나 `model` 미지정 상속은 설정으로 허용되지 않는다 — 위 역할 기준 원칙이 항상 우선한다.
 
 차단 시 대체 모델 선택 등 상세 적용 로직은 `references/delegation-patterns.md §역할별 모델 정책 적용`.
 
@@ -221,8 +208,8 @@ main
 
 | 파일 | 언제 읽을지 |
 |------|-------------|
-| `references/architect-council.md` | 분해(1단계) 시 요구가 복잡·모호해 brainstorm→grill 아키텍트 협의체로 분석·검증 후 task 를 도출할 때 |
-| `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때 — 위임 tier 표 상세 + 역할별 모델 정책(exclude/allow) 적용 로직 포함 (envelope·정책 스키마 자체는 위 §모델 라우팅 전략이 단일 출처) |
+| `references/architect-council.md` | 분해(1단계) 시 요구가 복잡·모호해 아키텍트 협의체(설계 생성 ↔ 심문 검증)로 분석·검증 후 task 를 도출할 때 |
+| `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때 — **작업 유형 → tier 표의 단일 출처** + 역할별 모델 정책(exclude/allow) 적용 로직 포함 (역할 기준 원칙·정책 스키마 자체는 위 §모델 라우팅 전략이 단일 출처) |
 | `references/worktree-lifecycle.md` | 병렬 dispatch 직전, 또는 worktree 정리/머지를 다룰 때 |
 | `references/agent-monitor.md` | 백그라운드 agent 진행 추적, Task 시스템으로 다중 작업 상태·의존성을 추적할 때, 또는 대규모 fan-out에서 실패 대비 복원력(체크포인트·재시도·폴백) 절차를 적용할 때 |
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
