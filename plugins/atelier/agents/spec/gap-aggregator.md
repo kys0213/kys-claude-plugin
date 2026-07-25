@@ -70,10 +70,12 @@ raw spec/code 파일은 읽지 않는다. L1 리포트의 인용으로만 결론
 
 여러 리포트의 `## Spec Claims` 와 `## Code Observations` 를 cross-check:
 
-- **DEFINITION_CONFLICT**: 두 리포트가 같은 용어/개념을 다르게 정의 (예: `[A:S3]` 와 `[B:S2]` 가 같은 용어를 다르게 설명)
-- **INTERFACE_DRIFT**: 같은 인터페이스/엔드포인트의 시그니처를 다르게 명세
-- **TERM_AMBIGUITY**: 한 spec 이 다른 spec 의 용어를 정의 없이 가정
-- **REQUIREMENT_OVERLAP**: 요구사항이 중복되거나 모순
+분류 정의는 **gap-auditor 명세 §분류 기준이 canonical** 이다. 아래는 동일 정의의 사본이며, 변경 시 gap-auditor 쪽과 반드시 동기화한다:
+
+- **DEFINITION_CONFLICT**: 같은 도메인 개념을 두 spec 이 다른 값/타입/범위로 정의 (예: `[A:S3]` 와 `[B:S2]` 가 같은 용어를 다르게 설명)
+- **INTERFACE_DRIFT**: 두 spec 이 같은 컴포넌트의 인터페이스/책임 경계를 다르게 기술
+- **TERM_AMBIGUITY**: 같은 용어가 두 spec 에서 다른 의미로 사용. 도메인 미일치
+- **REQUIREMENT_OVERLAP**: 두 spec 이 같은 요구사항을 다른 표현으로 중복 기술 (충돌 아님 — 충돌은 `DEFINITION_CONFLICT`)
 
 같은 code 영역 (`C{n}`) 을 가리키는 서로 다른 spec 주장은 강력한 증거다.
 
@@ -83,11 +85,13 @@ raw spec/code 파일은 읽지 않는다. L1 리포트의 인용으로만 결론
 
 ### 5. Severity 부여
 
+Severity 기준은 **gap-auditor 명세 §Severity 기준이 canonical** 이다. 아래는 동일 정의의 사본이며, 변경 시 gap-auditor 쪽과 반드시 동기화한다:
+
 | 등급 | 기준 |
 |------|------|
-| HIGH | 사용자 영향 직접 / 보안 / 데이터 무결성 / spec 전제와 code 가 정반대 |
-| MEDIUM | 기능 영향 있으나 우회 가능 / 부분 구현 / 모호함이 다중 해석 야기 |
-| LOW | 문서화 누락 / 미세 표기 차이 / 스타일 |
+| HIGH | production 동작/데이터/보안에 직접 영향. spec 의 핵심 약속 위반. 사용자 가시 결함 |
+| MEDIUM | 동작 영향은 제한적이지만 spec 와 code 가 의미 있게 발산. 향후 유지보수에 영향 |
+| LOW | 표현/명명 불일치, 누락된 doc, 무해한 변동. 정보 가치 |
 
 ### 6. 출력
 

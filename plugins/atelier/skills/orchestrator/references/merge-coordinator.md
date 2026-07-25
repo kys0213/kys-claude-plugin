@@ -33,7 +33,7 @@ worktree 브랜치는 PR을 생성하지 않고 epic 브랜치로 수렴 후 삭
    - 큰 변경이 나중에 들어오면 작은 변경의 충돌 위험을 흡수
 
 3. 알파벳 순 (재현성)
-   - 위 두 기준이 동률이면 brnach/path 알파벳 순
+   - 위 두 기준이 동률이면 branch/path 알파벳 순
    - 같은 입력에 같은 결과 → 디버깅 쉬움
 ```
 
@@ -56,7 +56,7 @@ worktree 브랜치는 PR을 생성하지 않고 epic 브랜치로 수렴 후 삭
 
 4. 순차 머지 시도
    - epic 브랜치(base)에 후보 브랜치를 머지/리베이스 — 메인은 epic 브랜치 working tree에 그대로 머무름
-   - PR 머지는 `gh pr merge <N> --squash --delete-branch` 사용 (--delete-branch로 서버측 + 로컬 브랜치 모두 정리)
+   - 로컬 머지로 수행: `git merge <branch>` 후 머지된 브랜치 삭제 — worktree 브랜치는 PR 을 생성하지 않으므로 `gh pr merge` 를 사용하지 않는다 (§머지 대상: epic 브랜치)
    - 충돌 없음 → 다음 후보로
    - 충돌 발생 → 위임 (아래 참조)
 
@@ -180,7 +180,7 @@ git diff --name-only epic/<name>...<branch_B>  # B가 변경한 파일
 
 ```
 머지 결과:
-- 성공: branch_A → main, branch_B → main
+- 성공: branch_A → epic/<name>, branch_B → epic/<name>
 - 실패: branch_C (충돌 — <파일 목록>, 성격: 단순 라인 겹침 / 의미 차이 / 구조 변경)
 - 보류: branch_D (사용자 결정 대기)
 
@@ -207,7 +207,7 @@ git diff --name-only epic/<name>...<branch_B>  # B가 변경한 파일
 4. **worktree 방치**: 머지 완료 후 정리 안 함 → 디스크/git 상태 오염.
 5. **base 미동기화 머지**: 오래된 base 위에 머지 시도 → 무의미한 충돌. 머지 직전 base pull 필수.
 6. **main으로 바로 머지**: epic 브랜치를 거치지 않고 sub-agent 결과를 main으로 직접 머지 → epic 브랜치 전략 위반. 이 단계의 target은 항상 epic 브랜치.
-7. **머지 후 가드 생략**: `gh pr merge` 후 current branch 확인 없이 다음 git 명령 진행 → 메인이 sub-agent 브랜치 위에서 작업하는 토폴로지 위반을 뒤늦게 발견 (#783). 매 머지 직후 가드 필수.
+7. **머지 후 가드 생략**: 머지 직후 current branch 확인 없이 다음 git 명령 진행 → 메인이 sub-agent 브랜치 위에서 작업하는 토폴로지 위반을 뒤늦게 발견 (#783). 매 머지 직후 가드 필수.
 8. **조기 완료 선언**: 개별 worktree/중간 브랜치 green만으로 완료 보고 → 머지 결합 후 회귀 가능성을 놓침. epic 브랜치 최종 HEAD 전체 스위트 green과 HEAD sha 명시를 완료 선언의 전제로 한다.
 
 ---
@@ -225,7 +225,6 @@ git diff --name-only epic/<name>...<branch_B>  # B가 변경한 파일
 머지 진행 중:
 
 - [ ] 충돌 발생 시 직접 편집하지 않고 위임/보고했는가?
-- [ ] PR 머지에 `--squash --delete-branch` 옵션을 사용했는가?
 - [ ] 매 머지 직후 `git branch --show-current` == epic 브랜치를 확인했는가?
 
 머지 종료 후:

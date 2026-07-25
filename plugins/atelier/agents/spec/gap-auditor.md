@@ -65,6 +65,8 @@ gap-auditor 의 출력 스키마를 엄수.
 
 ## 분류 기준
 
+> 이 절의 분류/Severity 정의가 **canonical** 이다. gap-aggregator 명세에 있는 동일 정의는 사본이며, 이 절을 변경하면 그쪽도 함께 동기화한다.
+
 ### Code↔Spec Gap 분류
 
 | 분류 | 정의 |
