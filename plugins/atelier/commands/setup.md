@@ -54,12 +54,12 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
    ```
 2. 환경 설정 파일 생성 (기존 git-utils 와 동일 스키마, 경로 `~/.git-workflow-env`).
 3. **기본 브랜치 감지 + warm-up** — guard 는 읽기전용이라 비표준 기본 브랜치(예: `trunk`)를 런타임에 감지하지 못할 수 있으므로,
-   1회성인 setup 시점에 두 가지를 합니다 (#785, #779). **둘 다 보호 대상 프로젝트 repo 를 기준으로 실행**해야 합니다 —
-   가드 런타임이 `--project-dir "${CLAUDE_PROJECT_DIR:-.}"` 로 그 repo 의 `origin/HEAD` 를 읽기 때문입니다(#780). setup 의
+   1회성인 setup 시점에 두 가지를 합니다. **둘 다 보호 대상 프로젝트 repo 를 기준으로 실행**해야 합니다 —
+   가드 런타임이 `--project-dir "${CLAUDE_PROJECT_DIR:-.}"` 로 그 repo 의 `origin/HEAD` 를 읽기 때문입니다. setup 의
    cwd 가 다른 repo($HOME·multi-repo workspace)이면 엉뚱한 repo 를 warm 하거나 그 repo 의 기본 브랜치를 박게 됩니다:
    ```bash
    PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"   # 가드 런타임과 동일한 앵커
-   # (a) #779 warm-up — 프로젝트 repo 의 origin/HEAD 를 채워, bake 가 비어도 guard 런타임 readonly 감지가
+   # (a) warm-up — 프로젝트 repo 의 origin/HEAD 를 채워, bake 가 비어도 guard 런타임 readonly 감지가
    #     비표준 기본 브랜치(trunk 등)·비-GitHub remote 에서도 동작하게 한다.
    #     gh/인증은 불필요하지만 --auto 는 origin 에 1회 질의하므로 remote 가 닿아야 한다(오프라인이면 no-op).
    git -C "$PROJECT_DIR" remote set-head origin --auto 2>/dev/null || true
@@ -117,7 +117,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
      .*/plugins/(github-autopilot|coding-style)/hooks/(<file>)\.sh
      .*/plugins/git-utils/scripts/(default-branch-guard.*)\.sh
      .*/plugins/atelier/scripts/(default-branch-guard.*)\.sh   # 구버전 atelier setup 잔재
-     .*/atelier/[^/]*/hooks/(check-cli-version|guard-pr-base|protect-stagnation|suggest-simplify)\.sh   # 구버전 atelier setup 이 frozen 버전경로로 박은 .sh shim (이제 plugin-declared 또는 #776 에서 삭제됨 → "제거만")
+     .*/atelier/[^/]*/hooks/(check-cli-version|guard-pr-base|protect-stagnation|suggest-simplify)\.sh   # 구버전 atelier setup 이 frozen 버전경로로 박은 .sh shim (이제 plugin-declared 로 선언되었거나 스크립트 자체가 삭제됨 → "제거만")
 3. 변경 전 ~/.claude/settings.json 을 settings.json.bak-<timestamp> 로 백업 (cp)
 4. 사용자에게 치환 목록을 보여주고 AskUserQuestion 으로 확인
 5. 매칭 entry 마다: atelier git hook unregister <type> <old-command> --project-dir "$HOME"
@@ -134,8 +134,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 | frozen 경로 | atelier 등록 command |
 |---|---|
 | `github-autopilot/hooks/check-cli-version.sh` | **제거만** (재등록 안 함) — 플러그인이 `hooks/hooks.json` 으로 직접 선언 |
-| `github-autopilot/hooks/guard-pr-base.sh` | **제거만** (재등록 안 함) — 스크립트 삭제됨 (#776) |
-| `github-autopilot/hooks/protect-stagnation.sh` | **제거만** (재등록 안 함) — 스크립트 삭제됨 (#776) |
+| `github-autopilot/hooks/guard-pr-base.sh` | **제거만** (재등록 안 함) — 스크립트 삭제됨 |
+| `github-autopilot/hooks/protect-stagnation.sh` | **제거만** (재등록 안 함) — 스크립트 삭제됨 |
 | `coding-style/hooks/suggest-simplify.sh` | **제거만** (재등록 안 함) — 플러그인이 `hooks/hooks.json` 으로 직접 선언 |
 | `git-utils/scripts/default-branch-guard-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard write ...` (§"git 모듈" 등록 형식) |
 | `git-utils/scripts/default-branch-guard-commit-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard commit ...` (§"git 모듈" 등록 형식) |
