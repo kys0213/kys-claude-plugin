@@ -95,7 +95,7 @@ lint, format, test가 실패하면 변경된 부분이 아니더라도 반드시
 ```
 
 - **type**: `feat`, `fix`, `refactor`, `docs`, `ci`, `chore`, `test`, `perf`
-- **scope**: 변경 대상 디렉토리 (예: `develop-workflow`, `hooks`, `autodev`)
+- **scope**: 변경 대상 디렉토리 (예: `atelier`, `hooks`, `suggest-workflow`)
 - **description**: 영어 소문자 시작, 마침표 없음, 명령형 현재 시제, 50자 이내
 
 ### `plugins/` 또는 `common/` 코드 변경이 포함된 PR
@@ -103,10 +103,10 @@ lint, format, test가 실패하면 변경된 부분이 아니더라도 반드시
 버전 범프를 트리거하는 type만 허용됩니다: `feat`, `fix`, `refactor`, `docs`
 
 ```
-✅ refactor(autodev): extract conflict detection helpers
-✅ feat(develop-workflow): add multi-LLM support
-❌ chore(autodev): update dependencies   # 버전 범프 prefix 아님
-❌ perf(autodev): optimize startup        # perf는 버전 범프 미지원
+✅ refactor(atelier): extract conflict detection helpers
+✅ feat(barrier-sync): add multi-LLM support
+❌ chore(atelier): update dependencies   # 버전 범프 prefix 아님
+❌ perf(atelier): optimize startup        # perf는 버전 범프 미지원
 ```
 
 ## CI/CD

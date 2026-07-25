@@ -31,7 +31,7 @@ FIFO 기반 barrier 패턴:
 **SubagentStop hook은 현재 등록된 것이 없다** → 충돌 없음.
 
 단, 사용자가 이 플러그인을 설치할 때 `settings.local.json`에 SubagentStop hook을 수동 등록해야 한다.
-→ `/barrier-setup` 커맨드에서 `git-utils hook register` 또는 직접 JSON 편집으로 자동화 가능.
+→ `/barrier-setup` 커맨드에서 `atelier git hook register` 또는 직접 JSON 편집으로 자동화 가능.
 
 ### 2. plugin.json의 hooks 필드
 

@@ -1,8 +1,7 @@
 ---
 name: Feature Request
-about: Suggest a new feature for autodev
+about: Suggest a new feature for one of this repo's plugins
 title: "feat: "
-labels: autodev:analyze
 assignees: ""
 ---
 
@@ -24,10 +23,12 @@ assignees: ""
 
 ## 수정 대상 (Affected Components)
 
-- [ ] CLI (`plugins/autodev/cli/`)
-- [ ] Daemon
-- [ ] GitHub Collector
-- [ ] Claw
+- [ ] atelier
+- [ ] hud
+- [ ] external-llm
+- [ ] suggest-workflow
+- [ ] barrier-sync
+- [ ] openclaw-docker
 - [ ] 기타: <!-- 설명 -->
 
 ## 추가 정보 (Additional Context)

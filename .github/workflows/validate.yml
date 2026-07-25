@@ -43,11 +43,6 @@ jobs:
           else
             echo "sw_changed=false" >> $GITHUB_OUTPUT
           fi
-          if echo "$CHANGED" | grep -q '^plugins/autodev/'; then
-            echo "autodev_changed=true" >> $GITHUB_OUTPUT
-          else
-            echo "autodev_changed=false" >> $GITHUB_OUTPUT
-          fi
           if echo "$CHANGED" | grep -q '^plugins/atelier/cli/'; then
             echo "atelier_changed=true" >> $GITHUB_OUTPUT
           else
@@ -55,7 +50,7 @@ jobs:
           fi
 
       - name: Setup Rust
-        if: steps.check_rust.outputs.sw_changed == 'true' || steps.check_rust.outputs.autodev_changed == 'true' || steps.check_rust.outputs.atelier_changed == 'true'
+        if: steps.check_rust.outputs.sw_changed == 'true' || steps.check_rust.outputs.atelier_changed == 'true'
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
       # ── suggest-workflow checks ──
@@ -72,24 +67,6 @@ jobs:
       - name: suggest-workflow check and test
         if: steps.check_rust.outputs.sw_changed == 'true'
         working-directory: plugins/suggest-workflow/cli
-        run: |
-          cargo check
-          cargo test
-
-      # ── autodev checks ──
-      - name: autodev fmt check
-        if: steps.check_rust.outputs.autodev_changed == 'true'
-        working-directory: plugins/autodev/cli
-        run: cargo fmt --check
-
-      - name: autodev clippy
-        if: steps.check_rust.outputs.autodev_changed == 'true'
-        working-directory: plugins/autodev/cli
-        run: cargo clippy -- -D warnings
-
-      - name: autodev check and test
-        if: steps.check_rust.outputs.autodev_changed == 'true'
-        working-directory: plugins/autodev/cli
         run: |
           cargo check
           cargo test
