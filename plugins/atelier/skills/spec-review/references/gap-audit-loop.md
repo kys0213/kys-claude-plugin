@@ -63,8 +63,6 @@ gap-auditor 의 출력 스키마를 엄수.
 
 gap-auditor 를 호출해 major 이슈가 있으면 L2 fix request 로 재진입하는 것을 반복한다. 반복 종료 조건은 뒤의 "종료 조건 (3가지)" 절과 동일하다.
 
-상세 알고리즘은 `plans/spec-kit-l2-reviewer/02-architecture.md` §"루프 통합" 참조.
-
 ### L2 fix request 형식
 
 ```

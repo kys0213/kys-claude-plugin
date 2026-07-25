@@ -140,4 +140,4 @@ gh pr create --base <default-branch> --title "<title>" --body "<body>"
 - base 는 `gh` 가 자동 감지하므로 명시 안 해도 되지만, 비표준 기본 브랜치면 `--base` 로 지정한다.
 - Jira 브랜치면 제목을 `[TICKET] <title>` 로 prefix 한다.
 - **PR 본문 스타일:** 토스 PR 템플릿 4단 고정(왜 / 무엇을 / 어떻게 / 확인 방법) + 친근한 해요체 단문 + 개조식.
-  약어/사내용어는 풀어쓴다. 상세 규칙·예시는 `.claude/rules/git-workflow.md` 의 "PR 본문 작성 스타일" 참조.
+  약어/사내용어는 풀어쓴다.

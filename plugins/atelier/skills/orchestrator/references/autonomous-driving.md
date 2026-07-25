@@ -266,7 +266,7 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 ```markdown
 ## <ISO timestamp> · <결정 요약>
 - 상황: 무엇을 결정해야 했는가
-- 참고: 본 소스 (대화 / CLAUDE.md §책임경계 / rules/git-workflow.md / 코드 상태 …)
+- 참고: 본 소스 (대화 / CLAUDE.md / .claude/rules/*.md / 코드 상태 …)
 - 결정: 무엇을 선택했는가
 - 근거: 왜 (참고 소스와 연결)
 - 대안: 고려했으나 택하지 않은 것 + 이유
