@@ -378,7 +378,7 @@ func GetBumpTypeFromPRTitle(title string) BumpType {
 }
 
 // GetScopeFromPRTitle extracts the scope from a conventional commit PR title
-// e.g., "feat(git-utils): add branch detection" returns "git-utils"
+// e.g., "feat(atelier): add branch detection" returns "atelier"
 func GetScopeFromPRTitle(title string) string {
 	re := regexp.MustCompile(`^\w+\(([^)]+)\):`)
 	match := re.FindStringSubmatch(title)

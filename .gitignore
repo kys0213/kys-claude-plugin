@@ -30,14 +30,5 @@ tools/bumpversion/bumpversion
 
 # Rust build artifacts
 plugins/suggest-workflow/cli/target/
-plugins/autodev/cli/target/
 
-# Plugin build outputs
-plugins/git-utils/dist/
 .claude/worktrees/
-
-# github-autopilot local task store cache
-.autopilot/
-
-# orchestrator autonomous-mode decision logs (ephemeral, shared at completion)
-.orchestrator/

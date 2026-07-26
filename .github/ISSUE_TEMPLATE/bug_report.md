@@ -1,8 +1,7 @@
 ---
 name: Bug Report
-about: Report a bug in autodev
+about: Report a bug in one of this repo's plugins
 title: "bug: "
-labels: autodev:analyze
 assignees: ""
 ---
 
@@ -26,16 +25,17 @@ assignees: ""
 
 ## 영향 범위 (Impact)
 
-- [ ] 데몬 전체 중단
-- [ ] 특정 레포 처리 불가
+- [ ] 플러그인 전체 중단
+- [ ] 특정 명령/스킬 처리 불가
 - [ ] 특정 기능 오동작
 - [ ] UI/UX 문제
 - [ ] 기타
 
 ## 환경 (Environment)
 
+- 영향받는 플러그인 (Affected plugin):
 - OS:
-- autodev version:
+- 플러그인 버전 (Plugin version):
 - Rust version (if applicable):
 
 ## 추가 정보 (Additional Context)

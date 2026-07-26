@@ -43,13 +43,16 @@ allowed-tools:
 ### Step 1: 인자 확인 및 브랜치 이름 요청
 ...
 
-### Step 2: git-utils CLI 실행
+### Step 2: 브랜치 생성 (plain git)
+
+브랜치 생성은 atelier CLI가 아니라 plain git으로 수행한다 (`atelier git`은 `reviews`/`guard`/`hook`만 제공, 별도 `branch` 서브커맨드 없음):
 
 \`\`\`bash
-git-utils branch <new-branch> [--base=<base-branch>]
+git fetch origin <base-branch>
+git switch -c <new-branch> origin/<base-branch>
 \`\`\`
 
-**출력 (JSON):** `{ "branchName": "...", "baseBranch": "..." }`
+**출력:** 생성된 브랜치 이름과 base 브랜치를 사용자에게 안내
 
 ## 에러 처리
 

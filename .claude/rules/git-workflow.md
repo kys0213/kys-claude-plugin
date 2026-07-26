@@ -29,7 +29,7 @@ PR 타이틀은 반드시 Conventional Commits 형식을 따릅니다:
 ### Scope (권장)
 
 - **플러그인 변경**: `plugins/` 하위 디렉토리 이름을 scope로 사용
-  - 예: `plugins/develop-workflow/` → `feat(develop-workflow): ...`
+  - 예: `plugins/atelier/` → `feat(atelier): ...`
 - **플러그인 외 변경**: `hooks`, `scripts`, `common` 등 해당 디렉토리 이름을 scope로 사용
 
 ### Description (필수)
@@ -42,10 +42,10 @@ PR 타이틀은 반드시 Conventional Commits 형식을 따릅니다:
 ### 예시
 
 ```
-feat(develop-workflow): add multi-LLM support
+feat(atelier): add multi-LLM support
 fix(hooks): resolve path issue in settings.local.json
 refactor(scripts): simplify tc-config init logic
-docs(develop-workflow): update architecture diagram
+docs(atelier): update architecture diagram
 ci: add GitHub Actions for CLI build
 chore(cli): update dependencies
 ```
@@ -67,13 +67,13 @@ chore(cli): update dependencies
 ```
 # plugins/ 변경 포함 PR
 ✅ refactor(suggest-workflow): improve Rust logic
-✅ fix(git-utils): resolve path issue
-✅ feat(develop-workflow): add multi-LLM support
-✅ docs(autodev): add code review report
+✅ fix(hud): resolve path issue
+✅ feat(atelier): add multi-LLM support
+✅ docs(barrier-sync): add code review report
 
 # plugins/ 변경 포함 PR — CI 실패
 ❌ chore(suggest-workflow): update dependencies  # 버전 범프 prefix 아님
-❌ perf(git-utils): optimize startup              # perf는 버전 범프 미지원
+❌ perf(hud): optimize startup                    # perf는 버전 범프 미지원
 ```
 
 > **주의**: CI의 `validate.yml`에서 `Check version bump prefix for code changes` 단계로 검증됩니다. PR 생성 시 변경 대상 디렉토리를 확인하고 적절한 type을 선택하세요.
@@ -83,8 +83,8 @@ chore(cli): update dependencies
 ```
 ❌ Update stuff                    # type 없음
 ❌ feat: Add new feature.          # 마침표, 대문자
-❌ FEAT(git-utils): add feature    # type 대문자
-❌ feat(git-utils) add feature     # 콜론 없음
+❌ FEAT(atelier): add feature      # type 대문자
+❌ feat(atelier) add feature       # 콜론 없음
 ```
 
 ## 커밋 메시지 규칙
@@ -155,7 +155,7 @@ PR **본문(description)** 은 다음 규칙을 따릅니다. (타이틀/커밋 
 - Pre-commit 훅으로 막으면 안전해요.
 
 ## 무엇을
-- `git-utils guard commit` 명령을 추가했어요.
+- `atelier git guard commit` 명령을 추가했어요.
 - PreToolUse 훅에 등록되도록 `/setup`을 수정했어요.
 
 ## 어떻게

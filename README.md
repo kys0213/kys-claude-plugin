@@ -8,8 +8,8 @@ Claude Code 플러그인 모음
 # 마켓플레이스 추가
 /plugin marketplace add kys0213/kys-claude-plugin
 
-# develop-workflow 플러그인 설치 (설계/리뷰/구현 통합 워크플로우)
-/plugin install develop-workflow@kys-claude-plugin
+# atelier 플러그인 설치 (spec 설계 → 리뷰 → 구현 → git/PR 워크플로우 통합)
+/plugin install atelier@kys-claude-plugin
 
 # external-llm 플러그인 설치 (외부 LLM 호출)
 /plugin install external-llm@kys-claude-plugin
@@ -25,29 +25,35 @@ kys-claude-plugin/
 │       └── call-gemini.sh
 │
 └── plugins/
-    ├── develop-workflow/   # 통합 개발 워크플로우 (설계/리뷰/구현)
+    ├── atelier/           # 통합 개발 워크플로우 (spec 설계 → 리뷰 → 구현 → git/PR)
     ├── external-llm/      # 외부 LLM 호출 인프라
-    ├── git-utils/         # Git 워크플로우 자동화
+    ├── hud/               # Claude Code 상태줄 (색상·진행률·클릭 링크)
     ├── suggest-workflow/  # 세션 분석 기반 워크플로우 제안
-    └── workflow-guide/    # 에이전트 설계 원칙 가이드
+    ├── barrier-sync/      # 병렬 백그라운드 Task 동기화 (FIFO barrier)
+    └── openclaw-docker/   # OpenClaw Docker 환경 관리
 ```
 
 ## 플러그인
 
-### develop-workflow
+### atelier
 
-통합 개발 워크플로우: 설계 → 리뷰 → 구현을 하나의 파이프라인으로 (멀티 LLM 지원)
+통합 개발 워크플로우: spec 설계 → 리뷰 → 구현 → PR 머지까지 하나의 책임 경계 안에서 제공 (자세한 내용은 `plugins/atelier/README.md` 참고)
 
-**Commands:**
-- `/outline` - 상위 레벨 아키텍처 설계 (멀티 LLM)
-- `/design` - Contract 기반 상세 설계 (멀티 LLM)
-- `/develop` - 전체 워크플로우 (설계 → 리뷰 → 구현)
-- `/implement` - 구현 단계
-- `/multi-review` - 멀티 LLM 코드 리뷰
+**Skills (슬래시 + 모델 자동 호출):**
+- `/atelier:spec-write` - 합의된 설계를 스펙 문서 계층(DESIGN→concerns→flows)으로 작성
+- `/atelier:spec-review` - 작성된 스펙을 코드와 대조 분석·품질평가·주석
+- `/atelier:report-write` - 보고서 작문 기준 (문체·용어·청중 적응)
+- `/atelier:git` - git 워크플로우 (커밋·push·PR·충돌 해결·리뷰 정리·이슈 우선순위)
+- `/atelier:workflow` - 컨벤션 scaffold·.claude/rules 설계·설계 원칙 룰 설치
+- `/atelier:orchestrator` - 위임/병렬 분해·worktree 격리·머지 조정 (기본 자율 주행)
+- `/atelier:grill` - 설계를 대화로 생성하거나 이미 있는 계획을 심문
+
+**Command:**
+- `/atelier:setup` - 통합 setup (git / style / workflow 모듈 + hook 관리)
 
 **사용:**
 ```bash
-claude --plugin-dir /path/to/plugins/develop-workflow
+claude --plugin-dir /path/to/plugins/atelier
 ```
 
 ### external-llm
@@ -68,9 +74,6 @@ claude --plugin-dir /path/to/plugins/external-llm
 ### 검증 도구
 
 ```bash
-# 의존성 설치
-npm install
-
 # 전체 검증 실행
 npm run validate
 
@@ -117,7 +120,9 @@ npm run validate:versions  # 버전 검증
 ## 요구사항
 
 - Claude Code CLI
-- Node.js 20+ (개발 시)
+- Go 1.21+ (`tools/` 빌드 시)
+- Rust 1.93.1 (`plugins/atelier/cli`, `plugins/suggest-workflow/cli` 빌드 시)
+- (선택) Node.js (npm → make 래퍼 스크립트 사용 시)
 - (선택) OpenAI Codex CLI - `/invoke-codex` 사용 시
 - (선택) Google Gemini CLI - `/invoke-gemini` 사용 시
 
