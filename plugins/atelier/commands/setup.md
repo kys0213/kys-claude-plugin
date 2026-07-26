@@ -69,6 +69,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
    DEFAULT_BRANCH=$( (cd "$PROJECT_DIR" && gh repo view --json defaultBranchRef -q .defaultBranchRef.name) 2>/dev/null || true )
    ```
    gh 조회가 실패해 `--default-branch` 를 **생략**해도, (a) 의 warm-up 덕분에 guard 의 런타임 readonly 감지(`origin/HEAD` → main/develop/master)가 기본 브랜치를 해결한다.
+   > `--default-branch` pin 은 **대체가 아니라 보강**이다 (#810). guard 는 pin 유무와 무관하게 관례 기본값(`main/master/develop/trunk`)과 런타임 readonly 감지 결과를 항상 보호 대상에 합집합으로 포함하므로, 한 repo 에서 감지한 pin 이 user scope hook 에 박혀도 다른 repo 의 기본 브랜치 보호를 막지 않는다. pin 은 비표준 기본 브랜치(예: 커스텀 이름)를 추가 보강하는 힌트일 뿐이다.
 4. Default Branch Guard hook 2종 등록 — `.sh` 경로가 아니라 **CLI 커맨드를 직접** 기록합니다.
    감지값이 비어있으면 `--default-branch` 플래그 자체를 빼야 합니다 (빈 플래그를 박으면 hook 실행 시 clap 이
    값 누락으로 exit 2 → 모든 편집 차단되거나, 빈 브랜치로 guard 가 무력화됨):
@@ -179,7 +180,7 @@ alias git-utils='atelier git'
 - 이후 Step 을 중단하고 Rust toolchain 설치를 안내합니다 (`rustup`)
 
 **기본 브랜치 감지 실패 (remote 미설정):**
-- `--default-branch` 없이 guard 를 등록하고, 비표준 기본 브랜치 repo 에서는 보호가 제한될 수 있음을 안내합니다
+- `--default-branch` 없이 guard 를 등록합니다. 관례 기본값(`main/master/develop/trunk`)은 감지 없이도 항상 보호되므로(#810), 비표준 기본 브랜치(예: 커스텀 이름) repo 에서만 보호가 제한될 수 있음을 안내합니다
 
 **settings.json 이 깨진 JSON 인 경우:**
 - `hook register` 가 덮어쓰기를 거부하고 에러를 반환합니다 — 사용자에게 파일 상태를 보여주고 수동 복구를 안내합니다
