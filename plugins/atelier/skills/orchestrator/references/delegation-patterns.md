@@ -150,7 +150,7 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 - `run_in_background: true`로 띄워야 SendMessage로 개입할 수 있다.
 - team은 session 종료 시 **자동 정리**된다 (`TeamDelete` 없음). 별도 정리 단계 불필요.
 - **편집 격리는 team이 아니라 subagent의 `isolation:"worktree"`가 보장한다.** teammate에게 worktree 이동을 위임하지 말 것 — 격리가 도구 보장에서 프롬프트 희망으로 격하되어 공유 checkout(메인 epic 브랜치)이 오염될 수 있다.
-- **read-only teammate의 권한 제한도 프롬프트가 아니라 도구로 건다.** 같은 이유다 — "편집하지 말 것"이라고 써 두는 것과 `Edit`/`Write`가 애초에 없는 것은 보장 수준이 다르다. 권한을 고정하고 싶은 teammate는 인라인 prompt 대신 **tools 화이트리스트가 박힌 agent 정의**를 만들어 `agentType`으로 지정한다 (선례: 자문 역할 `advisor` — `Read`/`Glob`/`Grep`만 주어 편집·`SendMessage`·재위임을 구조적으로 차단).
+- **teammate의 권한은 도구로 제한할 수 없다 — 계약 + 사후 탐지로만 관리한다.** 별도 agent 정의를 지정해 tools를 좁히는 경로(`subagent_type`)는 **단발 subagent의 것**이고, team spawn과 결합한 선례가 없다. 따라서 read-only teammate라도 실제로는 편집·`SendMessage`가 가능하다. 금지는 prompt에 계약으로 명시하고, 위반은 **토폴로지 가드로 탐지**한다(사전 차단 아님 — `merge-coordinator.md §토폴로지 가드`). 도구 수준 보장이 꼭 필요한 역할이면 team이 아니라 단발 subagent를 고른다.
 
 ---
 
@@ -205,5 +205,5 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 - [ ] 모델 선택이 작업 난이도와 맞는가? (dispatch에 `model`을 명시했는가 — 상속 금지)
 - [ ] 역할별 모델 정책 파일이 있으면 exclude/allow를 대조했는가? (차단 시 인접 tier 대체 라우팅 + decision log)
 - [ ] 오케스트레이터가 **집행 위임** sub-agent보다 낮은 tier로 내려가지 않는가? (상위 tier는 자문 조회만 예외 — `SKILL.md §자문 조회`)
-- [ ] 권한을 고정해야 하는 read-only teammate를 인라인 prompt 대신 tools 화이트리스트 정의 파일로 spawn했는가?
+- [ ] read-only teammate라면 금지를 prompt 계약으로 명시하고, 위반 탐지를 토폴로지 가드에 맡겼는가? (도구 제한은 team에서 불가)
 - [ ] team의 경우 name이 의미 있고 유니크한가?
