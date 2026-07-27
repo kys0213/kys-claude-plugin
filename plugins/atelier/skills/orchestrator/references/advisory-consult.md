@@ -49,23 +49,41 @@ sub-agent)과 달리 산출물이 권고이고, 결정권은 메인에 100% 남�
 
 ---
 
+## 정책·메커니즘 분리 — 정의는 권한 경계만 고정한다
+
+`advisor` agent 정의는 **페르소나가 아니라 권한 shell 이다.** 협의체와 같은 원리로(`architect-council.md §설계 원칙`) 골격만 고정하고 역할 구성은 런타임에 주입한다.
+
+| | 고정 (메커니즘) | 주입 (정책) |
+|---|---|---|
+| 무엇 | 도구 권한(`Read`/`Glob`/`Grep`), 출력 계약, 결정권 없음 | 관점, 이름, **자문자 수**, 질문 범위, 모델 |
+| 왜 | 프롬프트로 거는 제한은 보장이 아니다 — `Agent` 호출에는 도구를 제한하는 인자가 없어 정의 파일이 유일한 강제 수단이다 | 어떤 관점이 필요한지는 문제마다 다르다 |
+
+따라서 **자문자는 하나가 아니어도 된다.** 같은 shell 을 관점만 바꿔 여러 번 spawn 하면 자문 스웜이 된다 — 성능·보안·마이그레이션 안전성처럼 서로 다른 렌즈를 병렬로 붙이고, 권고가 갈리는 지점 자체를 메인의 판단 재료로 쓴다. 관점 조합·인원은 문제를 보고 메인이 정한다 (기본값 답습 금지 — §안티패턴 8).
+
 ## 소집 절차
 
 ```
 require(flag_on AND policy.advisor.allow_models)   # 없으면 자문 없이 원래 에스컬레이션으로
-advisor = Agent({
-  name: "advisor",                                 # team member — 식별자
-  agentType: "advisor",                            # tools 화이트리스트가 박힌 정의 파일
-  model: policy.roles.advisor.allow_models[0],     # 정책에서 주입 (문서에 모델명 없음)
-  run_in_background: true,
-  description: "<무엇에 대한 자문인가>",
-  prompt: "<자문 패킷 — 아래 입력 계약>"
-})
-advice = await_completion()
-# 필요하면 SendMessage({to: "advisor", ...}) 로 반문 — 왕복도 예산을 소모
-decision = main_decides(advice)                    # 채택 / 부분채택 / 기각 — 메인의 판단
-log_decision("자문 요청 + 채택 판단", advice, decision)
+
+perspectives = main_decides_lenses(question)       # 정책 — 문제에 맞춰 1개 이상 (스웜 가능)
+for p in perspectives:                             # 같은 shell, 관점만 다름
+    Agent({
+      name: f"advisor-{p.slug}",                   # team member — 세션 내 유니크
+      agentType: "advisor",                        # 권한 shell (tools 화이트리스트)
+      model: policy.roles.advisor.allow_models[0], # 정책에서 주입 (문서에 모델명 없음)
+      run_in_background: true,
+      description: "<무엇에 대한 자문인가>",
+      prompt: "<자문 패킷 — 관점 p 주입, 아래 입력 계약>"
+    })
+advices = await_completion_notifications()         # 병렬 — 서로 기다리지 않음
+# 필요하면 SendMessage({to: "advisor-<slug>", ...}) 로 반문 — 왕복도 예산을 소모
+decision = main_decides(advices)                   # 채택 / 부분채택 / 기각 — 메인의 판단
+                                                   # 권고가 갈리면 그 대립 자체를 근거로 기록
+log_decision("자문 요청 + 채택 판단", advices, decision)
 ```
+
+- 자문자 수와 무관하게 **예산은 소집 1회당 `max_advisory_consults` 1을 소모**한다 — 관점을 나눈 것이지 왕복을 늘린 것이 아니다.
+- 권고가 서로 충돌하면 메인이 임의로 평균 내지 말고 **대립 지점을 decision log 에 남기고** 판단한다. 갈린다는 사실 자체가 정보다.
 
 ---
 
@@ -75,6 +93,7 @@ advisor 는 메인 대화를 보지 못한다. 패킷은 자기완결적이어�
 
 ```
 ## 자문 요청
+- 관점:        이 자문자가 맡을 렌즈 (예: 마이그레이션 안전성) — 스웜이면 자문자마다 다르다
 - 배경:        지금 무엇을 하고 있는가 (epic 목표 1~2문장)
 - 막힌 지점:   무엇 때문에 자문을 요청하는가 (트리거 번호 포함)
 - 질문:        답을 원하는 구체적 질문 (모호한 "봐주세요" 금지)
@@ -148,6 +167,9 @@ advisor 는 메인 대화를 보지 못한다. 패킷은 자기완결적이어�
    원하는 구체적 질문을 넘긴다.
 7. **정책 미선언인데 임의 모델로 소집**: 문서나 메인 판단으로 모델명을 골라 자문 → 정책 우회.
    `advisor` 미선언은 "경로 없음"이지 "아무 모델이나"가 아니다.
+8. **관점을 고정으로 답습**: 어떤 문제든 자문자 1명·같은 렌즈로 소집 → 정의 파일이 권한 shell 이
+   아니라 페르소나로 굳는다. 관점·인원은 정책이므로 문제를 보고 정한다 (§정책·메커니즘 분리).
+   반대로 관점을 잘게 쪼개 무의미하게 늘리는 것도 비용만 늘린다 — 판단이 갈릴 축으로만 나눈다.
 
 ---
 
@@ -157,7 +179,9 @@ advisor 는 메인 대화를 보지 못한다. 패킷은 자기완결적이어�
 - [ ] 트리거 4개 중 하나에 해당하는가? (상시 소집 아님)
 - [ ] `max_advisory_consults` 예산이 남았는가?
 - [ ] team member 로 소집했는가? (단발 subagent 폴백 금지)
-- [ ] `agentType` 으로 tools 화이트리스트가 박힌 정의 파일을 썼는가? (인라인 prompt 로 대체 금지)
+- [ ] `agentType` 으로 tools 화이트리스트가 박힌 정의를 썼는가? (인라인 prompt 로 대체 금지)
+- [ ] 이 문제에 필요한 **관점 조합·자문자 수**를 판단해 주입했는가? (기본값 답습 아님)
+- [ ] 권고가 갈렸다면 평균 내지 않고 대립 지점을 기록했는가?
 - [ ] `model` 을 정책에서 주입했는가? (문서·메인 임의 선택 금지)
 - [ ] 패킷이 자기완결적이고, 긴 근거는 경로로 넘겼는가?
 - [ ] 권고를 채택/부분채택/기각 판단과 사유로 decision log 에 남겼는가?
