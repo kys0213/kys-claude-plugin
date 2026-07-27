@@ -79,12 +79,14 @@ while round < max_council_rounds:                  # 계약에 고정 (기본 2)
     design = await_revision()
 
 if not verdict.pass or verdict.has_domain_decisions:
+    advisory_consult_if_available()                # tie-break — 자문 경로가 가용할 때만 (advisory-consult.md 트리거 1)
     escalate()                                     # 미해소 findings/도메인 결정과 함께 보고
 tasks = design.tasks                               # 검증된 task 목록 → TaskCreate + dispatch
 log_decision("협의체 분해", design, verdict)        # decision log (autonomous-driving.md §의사결정 기록)
 ```
 
 - 라운드는 `max_council_rounds` 예산을 소모한다 — 소진 시 hard stop 후 미해소 findings와 함께 에스컬레이션.
+- **예산 소진 tie-break**: 에스컬레이션 직전에 상위 tier 자문을 소집할 수 있다 — 협의체 팀에 좌석 하나를 더하는 형태다(`advisory-consult.md` 트리거 1). 단 자문은 **협의체 pass를 대체하지 않는다** — 권고를 받아도 검증되지 않은 분해로 dispatch하지 않는다(메커니즘 3). 자문 경로가 비활성이면 그대로 에스컬레이션한다.
 - 협의체 산출물 전문은 decision log에 남기고, 메인은 **task 목록 + 가정/에스컬레이션 요약**만 컨텍스트에 유지한다 (`autonomous-driving.md §메인 컨텍스트 격리`).
 - team spawn·SendMessage 개입의 일반 패턴은 `delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다.
 

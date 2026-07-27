@@ -25,6 +25,9 @@ user-invocable: false
 자율 계약:
 - 종료 조건 (done_when):     무엇이 충족되면 끝인가 (검증 가능해야 함)
 - 예산:                      max_loops, max_redispatch_per_task, (가능하면) 시간/턴 상한
+- 자문 (advisory):           가용 여부 + max_advisory_consults (기본 2)
+                             — 가용 = agent team 플래그 on AND 정책에 advisor 선언
+                               (SKILL.md §진입 시 체크 / §역할별 모델 정책 설정)
 - 자동 중단 (hard_stops):    무엇이 발생하면 예산과 무관하게 멈추고 보고하는가
 - 결정 기록 위치 (log_dir):  .orchestrator/<epic>/decisions/ (gitignore, 완료 시 요약 공유)
 - 통합 검증 (integration_verify): (선택) worktree에서 실행 불가한 인프라 의존 테스트
@@ -166,6 +169,7 @@ HITL(opt-out) 모드에서 금지된 행위가 자율 모드(기본)에서는 **
 ```
 
 - `redispatch_count[task] > max_redispatch_per_task` → hard stop → 에스컬레이션
+- **같은 자리를 맴돌면(게이트 reject → 재위임이 반복) 에스컬레이션 직전에 상위 tier 자문을 소집할 수 있다** (`advisory-consult.md` 트리거 2). 자문은 재위임이 아니므로 `max_redispatch_per_task`를 소모하지 않고 `max_advisory_consults`를 쓴다. 자문 경로가 비활성이면 그대로 에스컬레이션한다.
 - 재위임 prompt에는 **이전 시도가 어디까지 갔고 무엇이 실패했는지**를 반드시 담는다 (sub-agent는 메인 대화를 못 봄).
 
 ### 리뷰어·QA 게이트 (자동, 머지 전 — 작업마다 필수)
@@ -253,6 +257,7 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 - 병렬 vs 순차 + 위임 형태(단발/team) 선택
 - 재위임 여부 + prompt 보강 내용
 - 머지 순서 + 자동 충돌 해결 위임
+- 자문 요청 + 권고에 대한 채택/부분채택/기각 판단 (기각도 사유와 함께 — `advisory-consult.md §메인의 처리 의무`)
 - 에스컬레이션 판단 (멈춤 vs 계속)
 - 종료 조건 충족 판정
 
@@ -330,6 +335,8 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 
 에스컬레이션 = 멈추고 **현재 상태 + 남은 작업 + 막힌 지점 + 선택지**를 한 번에 보고.
 
+**자문 경로와의 관계**: 자문이 가용하면 일부 에스컬레이션(협의체 예산 소진·게이트 재위임 루프·되돌리기 어려운 결정) 직전에 상위 tier 권고를 한 번 받아볼 수 있다 — 그래도 **에스컬레이션 조건 자체는 유지된다**. 자문은 멈추는 판단을 대체하지 않고 보고에 실을 근거를 더할 뿐이다. 반대로 advisor가 `critical` 권고를 내면 그 자체가 에스컬레이션 트리거로 승격된다 (`advisory-consult.md`). 자문 경로가 비활성이면 종전대로 바로 에스컬레이션한다.
+
 ---
 
 ## 보고 (자율 모드)
@@ -373,6 +380,7 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 - [ ] 예산(`max_loops` / `max_redispatch_per_task` / no-progress)과 hard stop 조건을 계약에 고정했는가?
 - [ ] 결정 기록 위치(`.orchestrator/<epic>/decisions/`)를 고정하고 자율 계약을 1회 보고했는가?
 - [ ] 인프라 의존 테스트가 있다면 `integration_verify` (command + run_at)를 계약에 정의했는가?
+- [ ] 자문 가용 여부(플래그 + `advisor` 정책)를 진입 시 확정하고 `max_advisory_consults`를 계약에 고정했는가? (정책 선언 + 플래그 off 조합이면 계약 보고에 1회 명시)
 
 루프 중:
 
@@ -387,6 +395,7 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 - [ ] 각 작업의 모델을 리스크에 맞춰 배분하고(dispatch에 `model` 명시), 비표준 선택은 기록하는가?
 - [ ] 메인이 전문 대신 압축 요약 + verdict만 수령하는가? (컨텍스트 격리)
 - [ ] 매 루프 종료 시 종료 조건을 결정적으로 재평가하고 진전을 수치로 측정하는가? (체감 아님)
+- [ ] 자문을 소집했다면 트리거·예산 안이었고, 권고의 채택/부분채택/기각을 사유와 함께 기록했는가? (`critical`은 에스컬레이션으로 승격)
 - [ ] 각 분기 결정을 참고 소스와 함께 `log_dir`에 기록하는가?
 - [ ] hard stop 발생 시 예산과 무관하게 즉시 멈추는가?
 

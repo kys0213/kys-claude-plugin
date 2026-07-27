@@ -69,6 +69,9 @@ main
    - `git rev-parse --show-toplevel` 가 repo의 메인 working tree여야 함
    - worktree 안에서 오케스트레이터를 시작했다면 즉시 메인 working tree로 빠져나오도록 사용자에게 보고
 3. **이후 모든 sub-agent dispatch는 `isolation: "worktree"` 로** — base는 현재 epic 브랜치 (Agent isolation이 자동으로 현재 HEAD를 base로 worktree를 만든다)
+4. **agent team 실험 플래그가 켜져 있는가?** — `printenv CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` (read-only Bash, 메인 허용 범위). 이 한 번의 확인으로 team이 전제인 두 경로의 가용성을 **진입 시 확정**한다. 트리거 시점에 가서 확인하면 이미 다른 경로를 다 태운 뒤라 늦다.
+   - **off → 자문 경로 비활성** (아래 §자문 조회): 자문 트리거에 도달해도 소집하지 않고 원래 하려던 에스컬레이션으로 진행한다. 자문 경로만 닫는 것이고 오케스트레이션 전체를 멈추지 않는다.
+   - **off → 아키텍트 협의체는 소집 시점에 에스컬레이션** (`references/architect-council.md` 메커니즘 5) — 협의체는 검증 없는 분해를 막는 필수 관문이라 반응이 다르다.
 
 ---
 
@@ -171,12 +174,28 @@ main
 
 ### 역할 기준 원칙 (단일 출처)
 
-- **오케스트레이터(메인)는 위임되는 어떤 sub-agent보다 낮은 역량 tier로 내려가지 않는다.** 분해·위임·조율·머지 판단이 스웜 전체 결과의 상한을 결정하기 때문이다.
+- **오케스트레이터(메인)는 집행 위임되는 어떤 sub-agent보다 낮은 역량 tier로 내려가지 않는다.** 분해·위임·조율·머지 판단이 스웜 전체 결과의 상한을 결정하기 때문이다. 이 원칙은 **집행 위임**(코드·문서를 만드는 sub-agent)에 적용되며, 아래 §자문 조회가 유일한 예외다.
 - **위임 dispatch에는 항상 `model`을 명시한다** — 상속에 맡기면 메인의 tier가 그대로 번져 배분 자체가 무의미해진다.
 - **tier 선택은 고정 매핑이 아니라 heuristic**이다 — 작업의 난이도·리스크·되돌리기 비용에 맞춰 매 dispatch 재평가하고, 표준을 벗어난 선택은 근거와 함께 decision log에 남긴다.
 - **특정 모델명을 문서에 박지 않는다** — 모델 세대가 바뀌어도 이 원칙이 그대로 성립해야 한다. 역량 수준(최상위/중간/경량)과 실제 모델명의 매핑은 dispatch 시점 판단에 맡긴다.
 
 작업 유형 → 시작 tier 표는 `references/delegation-patterns.md §모델 선택`이 단일 출처다 (여기서 중복 정의하지 않는다). 자율 루프의 작업별 배분 원칙은 `references/autonomous-driving.md §모델 분배`.
+
+### 자문 조회 — 상위 tier 예외 (단일 출처)
+
+위임에는 두 종류가 있다. 위 역할 기준 원칙은 **집행 위임**의 규칙이고, **자문 조회**는 tier 방향이 반대인 별도 경로다.
+
+| | 집행 위임 (executive) | 자문 조회 (advisory) |
+|---|---|---|
+| 산출물 | 코드·문서 (편집) | 권고 + 근거 (read-only) |
+| 결정권 | sub-agent 결과를 메인이 머지 판단 | **메인에 100% 잔류** — advisor는 `pass`/`reject` 권한이 없다 |
+| tier | 메인 ≥ sub-agent | **메인 < advisor 허용** (유일한 예외) |
+| 실행 형태 | `isolation:"worktree"` subagent | **team member 전용** (단발 subagent 폴백 금지) |
+
+예외가 원칙을 훼손하지 않는 이유: 역할 기준 원칙의 근거는 "메인의 판단이 스웜 결과의 **상한**을 결정한다"이고, 자문은 그 상한을 **올리는** 방향이기 때문이다. 결정권이 메인을 떠나는 순간 이 근거가 무너지므로, advisor의 역할 제한은 프롬프트가 아니라 **`advisor` agent 정의의 tools 화이트리스트로 강제**한다 (인라인 prompt 대신 `agentType`으로 지정 — 편집·`SendMessage`·재위임 도구가 애초에 없다).
+
+- **사용 조건 2개**: 진입 시 확정한 agent team 플래그(위 §진입 시 체크 4) **AND** 정책의 `advisor` 역할 선언. 하나라도 없으면 자문 경로는 사용 불가이며, 자문 없이 원래 에스컬레이션으로 진행한다.
+- **상시 경로가 아니다**: 자문은 에스컬레이션 직전 한 단계다. 소집 트리거·패킷 계약·출력 계약·수명은 `references/advisory-consult.md`가 단일 출처다.
 
 ### 역할별 모델 정책 설정 (exclude / allow — 단일 출처)
 
@@ -193,8 +212,12 @@ main
       qa:
         exclude_models: [<model-name>]
         # allow_models: [<model-name>] — 필요 시 허용 목록으로 제한 (목록 밖은 전부 차단)
+      advisor:
+        allow_models: [<model-name>]   # 자문에 쓸 상위 tier 모델. 미선언 = 자문 경로 비활성
   ```
 
+- **`advisor`만 기본값이 반대**: 다른 역할은 미선언 시 기본 tier heuristic으로 진행하지만, `advisor`는 **미선언이면 경로 자체가 없다**(opt-in 기능). 자문에 쓸 모델은 문서에 박지 않고 여기서만 선언한다.
+- **선언됐는데 플래그가 꺼진 경우**: 조용히 끄지 않고 진입 보고에 1회 명시한다 — "advisor가 정책에 선언돼 있으나 agent team 플래그가 꺼져 있어 자문 경로를 비활성화합니다". 정책 미선언 + 플래그 off면 원래 없던 기능이므로 침묵한다.
 - **dispatch 시 적용**: 정책과 충돌하는 모델 배정은 차단하고, 인접 tier의 대체 모델로 라우팅한다.
 - **역할 기준 원칙은 설정으로 override 불가**: 이 설정은 역할별 tier 선택 범위만 좁힌다. 오케스트레이터가 위임 sub-agent보다 낮은 tier로 내려가는 배정이나 `model` 미지정 상속은 설정으로 허용되지 않는다 — 위 역할 기준 원칙이 항상 우선한다.
 
@@ -214,6 +237,7 @@ main
 | `references/agent-monitor.md` | 백그라운드 agent 진행 추적, Task 시스템으로 다중 작업 상태·의존성을 추적할 때, 또는 대규모 fan-out에서 실패 대비 복원력(체크포인트·재시도·폴백) 절차를 적용할 때 |
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
 | `references/autonomous-driving.md` | 자율 루프(분해→위임→머지 self-drive)를 돌릴 때 — **오케스트레이터 기본 동작**. 계약·가드레일·종료 조건·에스컬레이션 + **작업마다 필수인 리뷰어·QA 게이트**(검토 + 검증 테스트 추가)의 단일 출처 (단발 fan-out 1회면 불필요) |
+| `references/advisory-consult.md` | 상위 tier 자문을 소집할 때 (협의체 예산 소진 tie-break, 게이트 재위임 루프, 되돌리기 어려운 결정, 사용자 요청) — **소집 트리거·패킷 계약·출력 계약·수명의 단일 출처** (집행/자문 분리와 tier 예외 원칙 자체는 위 §모델 라우팅 전략이 단일 출처). 진입 시 플래그가 off로 확정됐으면 읽을 필요 없다 |
 | `references/spec-driven-review.md` | 검토·QA 게이트가 **spec 문서를 입력으로 구현**하는 경우의 특수화 — 팀 모드로 검토자(spec↔구현)·QA 매니저(spec↔테스트)를 상주시켜 worktree 코드를 계속 리뷰·개선 (spec 입력이 없으면 일반 게이트 사용) |
 
 ---
@@ -241,3 +265,5 @@ main
 5. **무한 폴링**: `Bash sleep` 루프로 agent 상태 확인 → 금지. `run_in_background: true` + 완료 알림 사용.
 6. **메인이 worktree에서 시작**: 메인을 worktree에 진입시킨 채 오케스트레이션 → 머지 경로 꼬임. 메인은 epic 브랜치의 메인 working tree에서만 동작.
 7. **epic 브랜치 우회**: main 또는 임의 feature 브랜치에서 sub-agent를 바로 dispatch → 결과를 어디로 모을지 모호. 반드시 epic 브랜치를 만들고 거기서 dispatch.
+8. **자문 흉내**: 자문 경로가 비활성(플래그 off 또는 `advisor` 미선언)인데 단발 subagent 1회 왕복이나 메인 자신의 판단을 "자문 결과"로 포장 → 실질 없이 기록만 남는다. 경로가 없으면 없는 대로 진행하고, 그 시점의 판단은 **메인 자신의 판단으로 명시**한다.
+9. **고무도장 메인**: 상위 tier라는 이유로 권고를 검토 없이 채택 → 실질 오케스트레이터가 advisor가 되고 메인은 전달자로 전락한다. 결정권은 메인에 있고, 채택도 기각도 사유와 함께 기록한다.

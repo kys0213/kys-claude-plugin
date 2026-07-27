@@ -17,7 +17,7 @@ spec 설계 → 리뷰 → 구현 → PR 머지까지의 전체 흐름을 하나
 | `spec-kit` | 0.7.1 | `agents/spec/*`, `skills/spec-write/`·`skills/spec-review/`(+issue-report·spec-criteria→references), `templates/spec/` |
 | `workflow-guide` | 0.6.0 | `agents/workflow/*`, `skills/{workflow,agent-design-principles}/`, `rules/` |
 | `coding-style` | 0.3.0 | `templates/claude-md/`, `hooks/suggest-simplify.sh` |
-| `orchestrator` | 0.2.0 | `skills/orchestrator/` |
+| `orchestrator` | 0.2.0 | `skills/orchestrator/`(+references), `agents/orchestrator/*` |
 
 흡수된 6개 plugin은 저장소에서 **제거되었습니다** — git history만 참조 가능하며, 후속 개발은 atelier에서만 진행합니다. `autodev`, `develop-workflow`도 함께 제거되었습니다. 마이그레이션 이력은 [`plans/atelier/03-migration.md`](../../plans/atelier/03-migration.md)를 참조하세요.
 

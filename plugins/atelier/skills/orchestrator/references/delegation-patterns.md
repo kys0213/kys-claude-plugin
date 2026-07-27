@@ -150,6 +150,7 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 - `run_in_background: true`로 띄워야 SendMessage로 개입할 수 있다.
 - team은 session 종료 시 **자동 정리**된다 (`TeamDelete` 없음). 별도 정리 단계 불필요.
 - **편집 격리는 team이 아니라 subagent의 `isolation:"worktree"`가 보장한다.** teammate에게 worktree 이동을 위임하지 말 것 — 격리가 도구 보장에서 프롬프트 희망으로 격하되어 공유 checkout(메인 epic 브랜치)이 오염될 수 있다.
+- **read-only teammate의 권한 제한도 프롬프트가 아니라 도구로 건다.** 같은 이유다 — "편집하지 말 것"이라고 써 두는 것과 `Edit`/`Write`가 애초에 없는 것은 보장 수준이 다르다. 권한을 고정하고 싶은 teammate는 인라인 prompt 대신 **tools 화이트리스트가 박힌 agent 정의**를 만들어 `agentType`으로 지정한다 (선례: 자문 역할 `advisor` — `Read`/`Glob`/`Grep`만 주어 편집·`SendMessage`·재위임을 구조적으로 차단).
 
 ---
 
@@ -168,6 +169,7 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 - **역량 수준 ↔ 실제 모델명 매핑은 dispatch 시점 판단**이다. 세대가 바뀌면 같은 작업이 더 가벼운 tier로 내려갈 수 있어야 하므로 문서에 모델명을 고정하지 않는다.
 - 이 표는 고정값이 아니라 **시작 heuristic**이다 — 작업마다 "지금도 이 역량이 필요한가"를 재평가하고, 벗어난 선택은 근거와 함께 decision log에 남긴다. 자율 루프에서의 배분 원칙은 `autonomous-driving.md §모델 분배` 참조.
 - 단순 작업에 최상위 tier를 쓰는 것은 비용 낭비다.
+- 이 표는 **집행 위임**(코드·문서를 만드는 sub-agent)의 tier heuristic이다. 메인보다 상위 tier에 의견만 구하는 **자문 조회**는 이 표 밖의 별도 경로다 — 원칙은 `SKILL.md §자문 조회`, 절차는 `advisory-consult.md`가 단일 출처다.
 
 ### 역할별 모델 정책 적용 (exclude / allow)
 
@@ -184,6 +186,7 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 
 - **역할 단위 override**: 프로젝트 파일에 정의된 역할은 프로젝트 정책만 적용하고, 정의되지 않은 역할만 사용자 파일로 fallback한다 (파일 전체 병합이 아니라 역할 단위 우선).
 - **정책 파일이 없으면** 이 절차 전체를 건너뛰고 현행 기본 tier heuristic만 쓴다.
+- **`advisor` 역할은 위 4단계를 타지 않는다**: 자문은 집행 tier 배분이 아니라 opt-in 경로라, 미선언이면 대체 라우팅 없이 **경로가 비활성**이고 선언된 모델만 쓴다 (`SKILL.md §역할별 모델 정책 설정`). 정책이 없다고 메인이 임의로 상위 모델을 골라 자문하지 않는다.
 - **역할 기준 원칙은 설정으로 override 불가**: 이 정책은 역할별 tier 선택 범위만 좁힌다 (`SKILL.md §모델 라우팅 전략`).
 
 ---
@@ -201,5 +204,6 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 - [ ] prompt에 재위임 금지 문구(§위임 깊이 제한)를 포함했는가? (team teammate → isolated subagent 편집 위임 1단계는 예외)
 - [ ] 모델 선택이 작업 난이도와 맞는가? (dispatch에 `model`을 명시했는가 — 상속 금지)
 - [ ] 역할별 모델 정책 파일이 있으면 exclude/allow를 대조했는가? (차단 시 인접 tier 대체 라우팅 + decision log)
-- [ ] 오케스트레이터가 위임 sub-agent보다 낮은 tier로 내려가지 않는가? (`SKILL.md §모델 라우팅 전략`)
+- [ ] 오케스트레이터가 **집행 위임** sub-agent보다 낮은 tier로 내려가지 않는가? (상위 tier는 자문 조회만 예외 — `SKILL.md §자문 조회`)
+- [ ] 권한을 고정해야 하는 read-only teammate를 인라인 prompt 대신 tools 화이트리스트 정의 파일로 spawn했는가?
 - [ ] team의 경우 name이 의미 있고 유니크한가?
