@@ -1,0 +1,30 @@
+# orchestrator 역할별 모델 정책
+#
+# 조회 순서: 프로젝트 .claude/orchestrator-policy.yaml → 사용자 ~/.claude/orchestrator-policy.yaml
+#            (프로젝트 우선, 역할 단위 override)
+#
+# 이 파일은 전부 주석 처리된 상태로 배치됩니다. 주석을 푸는 역할만 정책이 적용되고,
+# 선언하지 않은 역할은 오케스트레이터의 기본 tier heuristic 을 그대로 씁니다
+# (advisor 만 예외 — 아래 참조). 따라서 파일을 그냥 두면 동작이 바뀌지 않습니다.
+#
+# 상세 규칙은 orchestrator 스킬의 §역할별 모델 정책 설정 을 참조하세요.
+
+# orchestrator:
+#   roles:
+#     # ── 게이트 역할 ────────────────────────────────────────────────
+#     # 미선언 시 기본 tier heuristic 사용. 특정 모델을 이 역할에서 빼고 싶을 때만 선언합니다.
+#     reviewer:
+#       exclude_models: [<model-name>]
+#     qa:
+#       exclude_models: [<model-name>]
+#       # allow_models 를 쓰면 목록 밖 모델은 전부 차단됩니다 (exclude 보다 강한 제한).
+#       # allow_models: [<model-name>]
+#     dba:
+#       exclude_models: [<model-name>]
+#
+#     # ── 자문 역할 (opt-in) ─────────────────────────────────────────
+#     # 다른 역할과 기본값이 반대입니다: 미선언 = 자문 경로 자체가 비활성.
+#     # 메인보다 상위 역량 모델에게 의견만 구하는 경로이며, 여기 적은 모델만 쓰입니다.
+#     # agent team 실험 플래그(CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1)도 함께 필요합니다.
+#     advisor:
+#       allow_models: [<model-name>]

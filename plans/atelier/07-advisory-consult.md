@@ -85,7 +85,23 @@ team spawn(`Agent({name})`)과 결합한 사례는 없다. 따라서:
 부수 효과로 **레이어 의존 위반도 사라진다**: `tools/validate` 는 skill 이 agent 경로를 참조하는 것을
 역방향 의존 오류로 잡는데(초안에서 실제로 실패했다), 참조할 agent 파일 자체가 없어졌다.
 
-### 2.8 보고·기록
+### 2.8 정책 파일이 실물로 존재하지 않았다
+
+`orchestrator-policy.yaml` 은 `e9f92d5`(#829)에서 들어온 **문서상 규약**이고, 조사 시점에
+프로젝트·사용자 어느 쪽에도 파일이 없었으며 이를 읽는 코드(CLI/hook)도 없었다. 소비자는
+메인 에이전트가 dispatch 시점에 `Read` 로 읽는 것뿐이다.
+
+기존 역할(reviewer/qa)은 미선언 시 기본 heuristic 으로 진행하므로 파일 부재가 문제되지 않았다.
+그러나 `advisor` 는 **미선언 = 비활성**이라 파일이 없으면 자문이 영구 비활성이다 — 켜는 방법을
+아무도 모르는 opt-in 은 설계가 아니라 누락이다. 따라서:
+
+- setup 의 `orchestrator` 모듈이 **전부 주석 처리된 템플릿**을 배치한다. 배치만으로는 어떤 역할도
+  선언되지 않아 **기존 동작이 바뀌지 않는다** (하위 호환 유지).
+- 모델명은 사용자 결정이므로 setup 이 임의로 채우지 않고 물어본다 — 모델 선택을 command 레이어
+  (사용자 상호작용)에 두는 것은 CLAUDE.md 책임 경계와도 일치한다.
+- 플래그 on + `advisor` 미선언 조합에서 **1회 안내**한다 (침묵하면 기능 존재를 알 수 없다).
+
+### 2.9 보고·기록
 
 자율 계약 보고에 자문 가용 여부가 추가되고, decision log 기록 시점에 "자문 요청/채택 판단"이
 추가된다. 정책에 `advisor` 가 선언됐는데 플래그가 꺼져 있으면 **진입 보고에 1회 명시**한다
@@ -188,6 +204,8 @@ orchestrator:
 | `references/architect-council.md` | 예산 소진 시 tie-break 좌석 |
 | `references/autonomous-driving.md` | 에스컬레이션 직전 훅 + 계약·기록 필드 |
 | `references/delegation-patterns.md` | advisor 역할 정책 적용 + teammate 권한 한계(계약 + 토폴로지 가드) 명시 |
+| `templates/orchestrator/policy.yaml` | **신규** — 전부 주석 처리된 정책 템플릿 (§2.8) |
+| `commands/setup.md` | `orchestrator` 모듈 추가 — 템플릿 배치 + 자문 opt-in 문답 (덮어쓰기 금지) |
 
 별도 agent 정의 파일은 두지 않는다 (§2.7).
 

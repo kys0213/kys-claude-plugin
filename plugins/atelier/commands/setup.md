@@ -1,5 +1,5 @@
 ---
-description: atelier 통합 환경을 초기화합니다 (git / style / workflow 모듈 선택 + 기존 hook 마이그레이션 + guard hook 관리)
+description: atelier 통합 환경을 초기화합니다 (git / style / workflow / orchestrator 모듈 선택 + 기존 hook 마이그레이션 + guard hook 관리)
 argument-hint: ""
 allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 ---
@@ -40,7 +40,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 | `git` | GitHub 인증 확인 + `~/.git-workflow-env` 생성 + Default Branch Guard hook | git-utils setup |
 | `style` | `~/.claude/CLAUDE.md` 코딩 원칙 병합 | coding-style setup |
 | `workflow` | `.claude/rules/agent-design-principles.md` 룰 설치 | workflow-guide install |
-| `all` | 위 세 가지 전부 | 신규 |
+| `orchestrator` | `orchestrator-policy.yaml` 배치 (역할별 모델 정책 · 자문 경로 opt-in) | 신규 |
+| `all` | 위 네 가지 전부 | 신규 |
 
 선택된 모듈만 아래 해당 Step 을 수행합니다.
 
@@ -105,6 +106,28 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 `~/.claude/CLAUDE.md` 에 코딩 원칙 템플릿을 병합합니다 (워터마크 기반 중복 확인 — 기존 coding-style 로직 동일).
 
 - 템플릿 원본: `${CLAUDE_PLUGIN_ROOT}/templates/claude-md/CLAUDE.md`
+
+## Step 2d — orchestrator 모듈
+
+오케스트레이터의 역할별 모델 정책 파일을 배치합니다. 이 파일이 없으면 `advisor`(자문) 경로는
+켤 방법이 없고, 나머지 역할은 기본 tier heuristic 으로만 동작합니다.
+
+- 템플릿 원본: `${CLAUDE_PLUGIN_ROOT}/templates/orchestrator/policy.yaml`
+
+1. **배치 위치를 AskUserQuestion 으로 선택**합니다 — 프로젝트 `.claude/orchestrator-policy.yaml`
+   (해당 repo 에만 적용) 또는 사용자 `~/.claude/orchestrator-policy.yaml` (모든 repo 기본값).
+   조회는 프로젝트 → 사용자 순이며 역할 단위로 override 됩니다.
+2. **대상 파일이 이미 있으면 덮어쓰지 않습니다.** 현재 선언된 역할 목록을 보여주고, 병합이
+   필요하면 어떤 키를 추가해야 하는지 안내한 뒤 이 Step 을 종료합니다 (기존 정책 유실 방지).
+3. 없으면 템플릿을 **내용 수정 없이 그대로** 복사합니다. 템플릿은 전부 주석 처리되어 있어
+   복사만으로는 동작이 바뀌지 않습니다.
+4. **자문 경로를 켤지 AskUserQuestion 으로 확인**합니다. 켠다고 하면 사용할 모델명을 입력받아
+   `advisor.allow_models` 블록의 주석만 해제해 기록합니다 — 모델명은 사용자 결정이므로 임의로
+   채우지 않습니다. 켜지 않으면 주석 상태 그대로 둡니다 (나중에 직접 편집 가능).
+5. 자문 경로를 켠 경우, `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 이 함께 필요함을 안내합니다 —
+   플래그가 없으면 정책을 선언해도 자문은 비활성입니다.
+
+> **멱등성**: 재실행 시 이미 파일이 있으면 2번에서 멈추므로 변경 0건입니다.
 
 ## Step 3 — 기존 hook 마이그레이션 (frozen → atelier)
 
@@ -184,6 +207,12 @@ alias git-utils='atelier git'
 **settings.json 이 깨진 JSON 인 경우:**
 - `hook register` 가 덮어쓰기를 거부하고 에러를 반환합니다 — 사용자에게 파일 상태를 보여주고 수동 복구를 안내합니다
 
+**orchestrator-policy.yaml 이 이미 있는 경우:**
+- 덮어쓰지 않고 현재 선언된 역할을 보여준 뒤, 추가가 필요한 키만 안내합니다 (기존 정책 유실 방지)
+
+**자문 모델명을 입력받지 못한 경우:**
+- `advisor` 블록을 주석 상태로 두고 종료합니다 — 임의의 모델명을 채워 넣지 않습니다
+
 ## Output Examples
 
 **등록 성공:**
@@ -194,4 +223,18 @@ alias git-utils='atelier git'
 **재실행 (멱등):**
 ```json
 { "action": "updated", "command": "atelier git guard commit --project-dir \"${CLAUDE_PROJECT_DIR:-.}\" --default-branch main" }
+```
+
+**orchestrator 모듈 — 신규 배치:**
+```
+✓ .claude/orchestrator-policy.yaml 생성 (템플릿 — 전부 주석)
+  자문 경로: 비활성 (advisor 미선언)
+  → 켜려면 advisor.allow_models 주석을 해제하고 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 설정
+```
+
+**orchestrator 모듈 — 기존 파일 유지:**
+```
+· .claude/orchestrator-policy.yaml 이미 존재 — 덮어쓰지 않음
+  선언된 역할: reviewer, qa
+  자문을 쓰려면 advisor.allow_models 키를 추가하세요
 ```

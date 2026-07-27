@@ -40,7 +40,7 @@ Epic 2 ([#766](https://github.com/kys0213/kys-claude-plugin/issues/766))에서 c
 ### 유지 command (deliberate 진입점)
 
 ```
-/atelier:setup       # 통합 setup (git / style / workflow 모듈 + hook 관리)
+/atelier:setup       # 통합 setup (git / style / workflow / orchestrator 모듈 + hook 관리)
 ```
 
 자율 개발 루프는 별도 진입점 없이 `/atelier:orchestrator` 가 기본 자율 주행으로 수행합니다.
