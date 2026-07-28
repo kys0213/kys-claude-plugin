@@ -26,8 +26,7 @@ user-invocable: false
 - 종료 조건 (done_when):     무엇이 충족되면 끝인가 (검증 가능해야 함)
 - 예산:                      max_loops, max_redispatch_per_task, (가능하면) 시간/턴 상한
 - 자문 (advisory):           가용 여부 + max_advisory_consults (기본 2)
-                             — 가용 = agent team 플래그 on AND 정책에 advisor 선언
-                               (SKILL.md §진입 시 체크 / §역할별 모델 정책 설정)
+                             — 가용 = agent team 플래그 on (SKILL.md §진입 시 체크)
 - 자동 중단 (hard_stops):    무엇이 발생하면 예산과 무관하게 멈추고 보고하는가
 - 결정 기록 위치 (log_dir):  .orchestrator/<epic>/decisions/ (gitignore, 완료 시 요약 공유)
 - 통합 검증 (integration_verify): (선택) worktree에서 실행 불가한 인프라 의존 테스트
@@ -155,7 +154,7 @@ HITL(opt-out) 모드에서 금지된 행위가 자율 모드(기본)에서는 **
 | 자동 재위임 | 외부환경 원인 1회만 | 예산(`max_redispatch_per_task`) 한도 내 반복 |
 | SendMessage 명령 주입 | 금지 | 계획된 단계 전환 + 정체 해소용 허용 |
 | 자동 머지 | 보고 후 진행 | 충돌 없으면 자동 |
-| 자동 충돌 해결 | 위임/보고 후 결정 | `git-resolve` sub-agent에 자동 위임 |
+| 자동 충돌 해결 | 위임/보고 후 결정 | 충돌 해결 전담 sub-agent에 자동 위임 |
 
 각 행위는 **예산을 소모**한다. 예산이 소진되거나 hard stop에 닿으면 그 즉시 멈춘다.
 
@@ -200,7 +199,7 @@ HITL(opt-out) 모드에서 금지된 행위가 자율 모드(기본)에서는 **
 
 ```
 충돌 없음 → merge-coordinator 순서 규칙대로 자동 머지
-충돌 발생 → git-resolve sub-agent에 자동 위임
+충돌 발생 → 충돌 해결 전담 sub-agent에 자동 위임 (`git` 스킬의 충돌 해결 정책을 입력으로)
             성공 → 계속
             실패 → 재시도 1회 → 그래도 실패면 hard stop → 에스컬레이션
 도메인 의미 충돌 (코드로 판정 불가) → 즉시 에스컬레이션 (자동 해결 금지)
@@ -380,7 +379,7 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 - [ ] 예산(`max_loops` / `max_redispatch_per_task` / no-progress)과 hard stop 조건을 계약에 고정했는가?
 - [ ] 결정 기록 위치(`.orchestrator/<epic>/decisions/`)를 고정하고 자율 계약을 1회 보고했는가?
 - [ ] 인프라 의존 테스트가 있다면 `integration_verify` (command + run_at)를 계약에 정의했는가?
-- [ ] 자문 가용 여부(플래그 + `advisor` 정책)를 진입 시 확정하고 `max_advisory_consults`를 계약에 고정했는가? (정책 선언 + 플래그 off 조합이면 계약 보고에 1회 명시)
+- [ ] 자문 가용 여부(team 플래그)를 진입 시 확정하고 `max_advisory_consults`를 계약에 고정했는가?
 
 루프 중:
 
