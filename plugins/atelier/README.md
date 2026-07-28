@@ -4,7 +4,7 @@
 > 설계: [`plans/atelier/`](../../plans/atelier/) · 상위 epic: [#738](https://github.com/kys0213/kys-claude-plugin/issues/738)
 
 **atelier**(공방)는 개발 워크플로우를 처음부터 끝까지 책임지는 단일 큐레이션 plugin입니다.
-spec 설계 → 리뷰 → 구현 → PR 머지까지의 전체 흐름을 하나의 책임 경계 안에서 제공합니다.
+설계 합의 → spec 작성 → 구현 → 리뷰 → PR 머지까지의 전체 흐름을 하나의 책임 경계 안에서 제공합니다.
 
 흩어져 있던 6개 plugin을 흡수해, 묵시적 의존과 중복 책임을 명시적 단일 namespace로 정리합니다.
 
@@ -14,7 +14,7 @@ spec 설계 → 리뷰 → 구현 → PR 머지까지의 전체 흐름을 하나
 |---|---|---|
 | `git-utils` | 2.4.2 | `skills/git/`(+references), `cli/` (Rust 포팅) |
 | `github-autopilot` | 0.30.1 | **제거됨** — 에이전트 스웜이 클로드만으로 동작하게 되어 GitHub 이슈 구동 autopilot 루프를 걷어내고, 자율 개발은 `skills/orchestrator/`(기본 자율 주행)가 담당 |
-| `spec-kit` | 0.7.1 | `agents/spec/*`, `skills/spec-write/`·`skills/spec-review/`(+issue-report·spec-criteria→references), `templates/spec/` |
+| `spec-kit` | 0.7.1 | `skills/spec-write/`, `templates/spec/` |
 | `workflow-guide` | 0.6.0 | `agents/workflow/*`, `skills/{workflow,agent-design-principles}/`, `rules/` |
 | `coding-style` | 0.3.0 | `templates/claude-md/`, `hooks/suggest-simplify.sh` |
 | `orchestrator` | 0.2.0 | `skills/orchestrator/`(+references) |
@@ -29,8 +29,7 @@ Epic 2 ([#766](https://github.com/kys0213/kys-claude-plugin/issues/766))에서 c
 
 ```
 /atelier:spec-write   # 합의된 설계를 스펙 문서 계층(DESIGN→concerns→flows)으로 작성
-/atelier:spec-review  # 작성된 스펙을 코드와 대조 분석·품질평가·주석 (spec↔code 갭분석)
-/atelier:report-write # 보고서 작문 기준 (문체·용어·청중 적응) — 리포트/정리 문서 작성 시 사용
+/atelier:communicate  # 맥락 전달 작문 기준 (독자 수준·맥락 이전·채널 적응) — 공유/보고/문서 작성 시 사용
 /atelier:git          # git 워크플로우 (커밋·push·PR·충돌 해결·리뷰 정리·이슈 우선순위)
 /atelier:workflow     # 컨벤션 scaffold·.claude/rules 설계·설계 원칙 룰 설치·워크플로우 리뷰
 /atelier:orchestrator # 위임/병렬 분해·worktree 격리·머지 조정 (기본 자율 주행, HITL opt-out)

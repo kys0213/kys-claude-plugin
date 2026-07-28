@@ -1,6 +1,6 @@
 ---
 name: spec-write
-description: 합의된 설계를 스펙 문서 계층으로 작성하는 스킬. "이 설계를 스펙 문서로 적어줘", "DESIGN.md 작성", "큰그림 스펙 적어줘", "컴포넌트 스펙 작성", "이 흐름 문서화" 같은 요청에 사용합니다. 설계를 대화로 합의하는 단계는 `grill` 스킬, 작성된 스펙을 코드와 대조 분석하는 단계는 `spec-review` 스킬이 담당합니다. 여기서는 합의된 설계를 정해진 구조(DESIGN→concerns→flows)로 형식화합니다.
+description: 합의된 설계를 스펙 문서 계층으로 작성하는 스킬. "이 설계를 스펙 문서로 적어줘", "DESIGN.md 작성", "큰그림 스펙 적어줘", "컴포넌트 스펙 작성", "이 흐름 문서화" 같은 요청에 사용합니다. 설계를 대화로 합의하는 단계는 `grill` 스킬이 담당합니다. 여기서는 합의된 설계를 정해진 구조(DESIGN→concerns→flows)로 형식화합니다.
 version: 1.0.0
 ---
 
@@ -18,8 +18,6 @@ version: 1.0.0
 | "컴포넌트 스펙 작성", "이 흐름 문서화", concerns/flows | write-detail (상세) | `spec/concerns/*.md`, `spec/flows/*.md` |
 
 > **설계를 아직 합의하지 않았다면** 대화로 먼저 합의합니다 — 막연한 아이디어부터 기존 계획 심문까지 `grill` 스킬을 먼저 씁니다. spec-write 는 **합의된 설계를 문서로 형식화**하는 단계입니다.
->
-> **작성한 스펙이 실제 코드와 맞는지 확인**하려면 `spec-review` 스킬(spec↔code 갭 분석)을 씁니다.
 
 입력 인자(설계 내용, 저장 경로 등)가 함께 오면 그대로 사용하고, 없으면 AskUserQuestion 으로 확인합니다.
 
@@ -39,7 +37,7 @@ version: 1.0.0
 
 - ❌ 합의되지 않은 설계를 spec-write 단계에서 즉흥적으로 결정 → `grill` 로 돌아가 먼저 합의한다.
 - ❌ write-detail 에서 Big Picture 내용을 다시 풀어씀 → DESIGN.md 를 링크로 참조하고 상세만 적는다.
-- ❌ `related_paths` 를 추정으로 채움 → 확신 없으면 비워두고 `spec-review` 의 annotate 흐름에 맡긴다.
+- ❌ `related_paths` 를 추정으로 채움 → 확신 없으면 비워둔다. 틀린 경로는 없는 것보다 나쁘다.
 - ❌ 승인 전에 파일을 먼저 저장 → 내용 제시 → 승인 → orchestrator 위임 Write 순서를 지킨다.
 
 ## 공통 원칙
