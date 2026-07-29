@@ -26,7 +26,8 @@ user-invocable: false
 - 종료 조건 (done_when):     무엇이 충족되면 끝인가 (검증 가능해야 함)
 - 예산:                      max_loops, max_redispatch_per_task, (가능하면) 시간/턴 상한
 - 자문 (advisory):           가용 여부 + max_advisory_consults (기본 2)
-                             — 가용 = agent team 플래그 on (SKILL.md §진입 시 체크)
+                             — 가용 = team 가용 판정 (SKILL.md §진입 시 체크 4,
+                               권위 신호는 `Agent` 스키마의 `name`. 자문은 team 필수 등급)
 - 자동 중단 (hard_stops):    무엇이 발생하면 예산과 무관하게 멈추고 보고하는가
 - 결정 기록 위치 (log_dir):  .orchestrator/<epic>/decisions/ (gitignore, 완료 시 요약 공유)
 - 통합 검증 (integration_verify): (선택) worktree에서 실행 불가한 인프라 의존 테스트
@@ -115,12 +116,12 @@ escalate_or_report(reason, decision_log=contract.log_dir)   # 완료 / 예산소
 
 자율 루프는 본질적으로 **구현 → 리뷰 → 수정**을 반복하는 구조다. 두 책임을 분리한다: **편집·격리는 `isolation:"worktree"` subagent가**(하베스트 보장), **조율은 team이**(공유 checkout).
 
-핵심 제약 (team의 격리 특성·실험 플래그 전제는 `delegation-patterns.md §Agent team 사용 패턴`이 단일 출처):
+핵심 제약 (team의 격리 특성·가용 전제는 `delegation-patterns.md §Agent team 사용 패턴`이 단일 출처):
 
 - **편집은 teammate가 직접 하지 않고 `isolation:"worktree"` subagent에 위임**한다.
-- 실험 플래그가 없는 환경에서는 team을 쓰지 않고 단발 격리 subagent 재위임으로 review→fix를 돈다.
+- review→fix 루프는 `SKILL.md §team mode 강제 등급`의 **선호** 등급이다 — 편집이 개입하고 격리를 보장하는 것은 team이 아니라 격리 subagent이므로, team이 비가용이면 단발 격리 subagent 재위임으로 돈다(폴백 허용). **이 폴백 허용은 선호 등급 경로에만 적용된다** — 자문·협의체는 필수 등급이라 폴백이 위반이다.
 
-team을 쓸 때의 이득 (실험 플래그 활성 시):
+team을 쓸 때의 이득 (team 가용 시):
 
 - **리뷰어·QA 게이트 조율**: reviewer/qa teammate + implementer teammate를 한 team에 두면, 게이트 거부 findings를 **team 내부 SendMessage로 전달**해 다음 라운드를 조율한다 (실제 편집은 implementer가 격리 subagent로 위임).
 - **장기 런에서 식별·제어 가능**: 이름으로 SendMessage해 정체 해소·단계 전환을 지시할 수 있다 (*자동 개입 규칙*이 허용).
@@ -128,10 +129,10 @@ team을 쓸 때의 이득 (실험 플래그 활성 시):
 
 구성:
 
-- **feature/task 하나 = team 하나**(실험 플래그 시). reviewer + implementer 역할. 구성·이름·수명은 `delegation-patterns.md §Agent team 사용 패턴`을 따른다. **편집 격리는 team이 아니라 그 안에서 띄우는 `isolation:"worktree"` subagent가 책임진다** — teammate에게 worktree 이동을 위임하지 않는다.
+- **feature/task 하나 = team 하나**(team 가용 시). reviewer + implementer 역할. 구성·이름·수명은 `delegation-patterns.md §Agent team 사용 패턴`을 따른다. **편집 격리는 team이 아니라 그 안에서 띄우는 `isolation:"worktree"` subagent가 책임진다** — teammate에게 worktree 이동을 위임하지 않는다.
 - **review→fix 조율**: reviewer reject → implementer에게 SendMessage → implementer가 격리 subagent로 수정 재위임 → 재리뷰. 이 사이클도 `max_redispatch_per_task` 예산을 동일하게 소모한다 (무한 반복 금지). 소진 → hard stop → 에스컬레이션.
 
-플래그가 없거나 조율이 불필요하면 **단발 격리 subagent 재위임**(이전 실패 맥락 포함)으로 review→fix를 돈다. 의심스러우면 단발 subagent를 고른다 — 격리가 항상 보장되기 때문이다.
+team이 비가용이거나 조율이 불필요하면 **단발 격리 subagent 재위임**(이전 실패 맥락 포함)으로 review→fix를 돈다. 이 선호 등급 안에서는 의심스러우면 단발 subagent를 고른다 — 격리가 항상 보장되기 때문이다. **단, 이 "의심스러우면 단발" 기본값을 필수 등급 경로(자문·협의체)로 옮기지 않는다** — 거기서는 단발이 경로의 실질 자체를 없앤다.
 
 ---
 
@@ -272,6 +273,15 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 - 영향: 어떤 작업/브랜치에 적용됐는가
 ```
 
+**team 필수 등급 경로(자문·협의체)의 기록에는 두 필드를 추가로 반드시 남긴다** (`SKILL.md §team mode 강제 등급` 가드 2):
+
+```markdown
+- 실행 형태: teammate | subagent      ← 폴백 여부를 사후에 판별할 유일한 근거
+- 판정 근거: 스키마 | env             ← team 가용 판정을 어느 신호로 내렸는가
+```
+
+두 필드가 없으면 "team으로 돌렸다"는 서술을 검증할 방법이 없어 감사가 성립하지 않는다 — 필수 등급 경로의 기록으로 인정하지 않는다.
+
 ### 완료 시 공유
 
 작업 완료(또는 에스컬레이션) 시점에 메인은 decision log를 **종료 보고에 함께 포함**한다:
@@ -379,7 +389,8 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 - [ ] 예산(`max_loops` / `max_redispatch_per_task` / no-progress)과 hard stop 조건을 계약에 고정했는가?
 - [ ] 결정 기록 위치(`.orchestrator/<epic>/decisions/`)를 고정하고 자율 계약을 1회 보고했는가?
 - [ ] 인프라 의존 테스트가 있다면 `integration_verify` (command + run_at)를 계약에 정의했는가?
-- [ ] 자문 가용 여부(team 플래그)를 진입 시 확정하고 `max_advisory_consults`를 계약에 고정했는가?
+- [ ] 자문 가용 여부(team 가용 판정 — 권위 신호는 `Agent` 스키마의 `name`)를 진입 시 확정하고 `max_advisory_consults`를 계약에 고정했는가?
+- [ ] 필수 등급 경로(자문·협의체)를 team으로 돌렸고, spawn 확인 + `실행 형태`·`판정 근거` 필드를 기록했는가?
 
 루프 중:
 

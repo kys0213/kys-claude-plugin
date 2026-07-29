@@ -29,7 +29,7 @@ version: 0.1.0
 
 ### 메인 에이전트가 해도 되는 일
 - `Read`, `Glob`, `Grep`, `Bash(git status / git log / git diff --stat)` — 작업 분해와 위험도 판단을 위한 조사
-- `Agent`, `SendMessage`, `Monitor` — 위임과 조율 (agent team은 `Agent`의 `name`으로 spawn — 실험 플래그 필요, `TeamCreate`는 제거됨)
+- `Agent`, `SendMessage`, `Monitor` — 위임과 조율 (agent team은 `Agent`의 `name`으로 spawn — 가용 판정은 아래 §진입 시 체크 4, `TeamCreate`는 제거됨)
 - `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate` — 일감을 분리하고 상태를 관리하는 것은 **메인 에이전트의 핵심 룰**이다. 편집을 위임하는 관리자로서 메인의 본업은 일감을 추적 가능한 Task로 쪼개고 상태를 갱신하는 것 — 다중 작업이면 항상 적용하고 단발 1회만 예외다 (`references/agent-monitor.md §Task 시스템`)
 - 결과물 취합 후 사용자에게 보고
 
@@ -69,9 +69,13 @@ main
    - `git rev-parse --show-toplevel` 가 repo의 메인 working tree여야 함
    - worktree 안에서 오케스트레이터를 시작했다면 즉시 메인 working tree로 빠져나오도록 사용자에게 보고
 3. **이후 모든 sub-agent dispatch는 `isolation: "worktree"` 로** — base는 현재 epic 브랜치 (Agent isolation이 자동으로 현재 HEAD를 base로 worktree를 만든다)
-4. **agent team 실험 플래그가 켜져 있는가?** — `printenv CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` (read-only Bash, 메인 허용 범위). 이 한 번의 확인으로 team이 전제인 두 경로의 가용성을 **진입 시 확정**한다. 트리거 시점에 가서 확인하면 이미 다른 경로를 다 태운 뒤라 늦다.
-   - **off → 자문 경로 비활성** (아래 §자문 조회): 자문 트리거에 도달해도 소집하지 않고 원래 하려던 에스컬레이션으로 진행한다. 자문 경로만 닫는 것이고 오케스트레이션 전체를 멈추지 않는다.
-   - **off → 아키텍트 협의체는 소집 시점에 에스컬레이션** (`references/architect-council.md` 메커니즘 5) — 협의체는 검증 없는 분해를 막는 필수 관문이라 반응이 다르다.
+4. **agent team이 이번 세션에서 가용한가?** — 판정 신호는 둘이고 **우선순위가 있다**:
+   1. **1차 (권위): `Agent` 도구 스키마에 `name` 파라미터가 노출되는가.** teammate spawn을 실제로 결정하는 것은 런타임이 노출한 스키마이므로 이쪽이 사실이다.
+   2. **2차 (보조): `printenv CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`** (read-only Bash). Bash 도구는 메인과 다른 프로세스로 뜨므로 메인 프로세스의 env를 반영한다는 보장이 없다 — **단독 판정 근거로 쓰지 않는다**.
+   - **둘이 엇갈리면 1차(스키마)를 따른다.** env가 비어 있어도 스키마에 `name`이 있으면 **가용**이다 — 이 false negative가 team 전제 경로 전체를 조용히 죽이는 가장 흔한 실패다.
+   - 판정 결과와 **어느 신호로 판정했는지**를 진입 보고 1줄 + decision log에 남긴다. 근거 없는 "플래그 off"는 판정이 아니다.
+   - 이 한 번의 확인으로 team이 전제인 경로들의 가용성을 **진입 시 확정**한다 (트리거 시점에 확인하면 이미 다른 경로를 다 태운 뒤라 늦다). 단, 필수 등급 경로의 **첫 spawn이 teammate로 뜨지 않으면 1회 재판정**한다 (아래 §team mode 강제 등급).
+   - **off 확정 시의 반응은 경로마다 다르다** — 아래 §team mode 강제 등급이 단일 출처다.
 
 ---
 
@@ -159,12 +163,30 @@ main
 | 상황 | 형태 | 도구 |
 |------|------|------|
 | 1회성 독립 작업, 결과물 단일 | 단발 sub-agent | `Agent({...})` |
-| 여러 agent 협업·식별/제어 필요 (read-only 조율) | agent team | `Agent({name, ...})` + `SendMessage` (실험 플래그 필요·`team_name` 무시·편집 격리는 subagent) |
+| 여러 agent 협업·식별/제어 필요 (read-only 조율) | agent team | `Agent({name, ...})` + `SendMessage` (가용 판정 §진입 시 체크 4·`team_name` 무시·편집 격리는 subagent) |
 | 파일 충돌 위험 있는 병렬 | worktree-isolated | `Agent({isolation: "worktree", ...})` |
 
 > **격리는 subagent만 보장**: agent team teammate는 공유 checkout이라 worktree 격리가 없다 — 편집·격리는 `isolation:"worktree"` subagent, team은 조율 전용 (`references/delegation-patterns.md §Agent team 사용 패턴`이 단일 출처).
 
 자세한 판단 기준과 prompt 작성법은 `references/delegation-patterns.md`.
+
+### team mode 강제 등급 (단일 출처)
+
+team을 "쓰면 좋다"로 두면 폴백이 사실상 기본값이 되어 team 전제 경로가 조용히 사라진다. 경로별 **강제 등급을 2단계로 확정**하고, 등급별 반응을 이 절이 단일 소유한다.
+
+**등급 기준**: 경로의 본질이 **read-only 조율(편집 없음)**이면 `필수`다 — team의 유일한 실질 비용인 공유 checkout 오염 위험이 애초에 없으므로 강제하지 못할 이유가 없고, 왕복 조율이라는 실익만 남는다. 반대로 **편집이 개입**하는 경로는 `선호`다 — 격리를 보장하는 것은 team이 아니라 `isolation:"worktree"` subagent이므로 단발 폴백이 본질을 잃지 않는다.
+
+| 경로 | 등급 | team 가용인데 단발로 대체 | team 비가용 |
+|------|------|---------------------------|-------------|
+| 자문 조회 (`references/advisory-consult.md`) | **필수** | **위반** — 그 왕복은 자문이 아니다. 결과를 채택하지 않고 위반을 기록 | 자문 생략하고 원래 하려던 에스컬레이션으로 진행 |
+| 아키텍트 협의체 (`references/architect-council.md`) | **필수** | **위반** — "협의체를 돌렸다"는 기록만 남는다 | 폴백 없이 즉시 에스컬레이션 |
+| spec 검토·QA 게이트 (`references/spec-driven-review.md`) | 선호 | 허용 — 단발 subagent 2개로 두 검증 차원 유지 | 동일 폴백 |
+| review→fix 루프 (`references/autonomous-driving.md`) | 선호 | 허용 — 단발 격리 subagent 재위임 | 동일 폴백 |
+
+**필수 등급에는 가드 두 개가 붙는다** (없으면 강제가 아니라 권고다):
+
+1. **spawn 확인** — 필수 경로의 첫 `Agent({name, ...})` 직후, 그 agent가 실제 teammate로 떴는지 확인한다(`SendMessage`로 도달 가능한 식별자인가). teammate가 아니면 **진입 판정을 1회 재판정**하고, 재판정도 비가용이면 폴백하지 말고 위 표의 "team 비가용" 열대로 처리한다.
+2. **decision log 필수 필드** — 필수 경로의 결정 기록에 **`실행 형태`(teammate / subagent)와 `판정 근거`(스키마 / env)**를 반드시 남긴다 (`references/autonomous-driving.md §의사결정 기록`). 이 두 필드가 없으면 폴백 여부를 사후에 판별할 수 없어 감사 자체가 성립하지 않는다.
 
 ---
 
@@ -196,7 +218,7 @@ main
 
 - **역할 제한은 계약이지 도구 보장이 아니다**: teammate는 도구 권한을 제한할 수단이 없다(agent 정의 지정은 단발 subagent의 경로다). 편집·`SendMessage`·재위임 금지는 **패킷의 금지 계약**으로 걸고, 위반은 **자문 소집 전후의 토폴로지 가드로 사후 탐지**한다. 왕복 조율(자문의 실질)과 도구 보장은 현재 동시에 얻을 수 없으며, 이 경로는 왕복을 택했다 — 없는 보장을 있다고 적지 않는다.
 
-- **사용 조건**: 진입 시 확정한 agent team 플래그(위 §진입 시 체크 4). 꺼져 있으면 자문 경로는 사용 불가이며, 자문 없이 원래 에스컬레이션으로 진행한다.
+- **사용 조건**: 진입 시 확정한 team 가용 판정(위 §진입 시 체크 4). 자문은 **team 필수 등급**이다 — advisor는 편집하지 않는 read-only 역할이라 공유 checkout 비용이 없고 왕복 조율이라는 실익만 남기 때문이다(위 §team mode 강제 등급). 비가용이면 자문 경로는 사용 불가이며, 자문 없이 원래 에스컬레이션으로 진행한다. 가용인데 단발 subagent로 대체하는 것은 **위반**이다.
 - **고정하는 것은 계약, 관점·인원은 런타임 주입**: 어떤 렌즈로 몇 명을 붙일지는 문제를 보고 메인이 정한다 — 관점을 나눠 **자문 스웜**으로 소집할 수 있다 (협의체와 같은 정책·메커니즘 분리).
 - **상시 경로가 아니다**: 자문은 에스컬레이션 직전 한 단계다. 소집 트리거·패킷 계약·출력 계약·수명은 `references/advisory-consult.md`가 단일 출처다.
 
@@ -223,7 +245,7 @@ main
 | `references/agent-monitor.md` | 백그라운드 agent 진행 추적, Task 시스템으로 다중 작업 상태·의존성을 추적할 때, 또는 대규모 fan-out에서 실패 대비 복원력(체크포인트·재시도·폴백) 절차를 적용할 때 |
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
 | `references/autonomous-driving.md` | 자율 루프(분해→위임→머지 self-drive)를 돌릴 때 — **오케스트레이터 기본 동작**. 계약·가드레일·종료 조건·에스컬레이션 + **작업마다 필수인 리뷰어·QA 게이트**(검토 + 검증 테스트 추가)의 단일 출처 (단발 fan-out 1회면 불필요) |
-| `references/advisory-consult.md` | 상위 tier 자문을 소집할 때 (협의체 예산 소진 tie-break, 게이트 재위임 루프, 되돌리기 어려운 결정, 사용자 요청) — **소집 트리거·패킷 계약·출력 계약·수명의 단일 출처** (집행/자문 분리와 tier 예외 원칙 자체는 위 §모델 라우팅 전략이 단일 출처). 진입 시 플래그가 off로 확정됐으면 읽을 필요 없다 |
+| `references/advisory-consult.md` | 상위 tier 자문을 소집할 때 (협의체 예산 소진 tie-break, 게이트 재위임 루프, 되돌리기 어려운 결정, 사용자 요청) — **소집 트리거·패킷 계약·출력 계약·수명의 단일 출처** (집행/자문 분리와 tier 예외 원칙 자체는 위 §모델 라우팅 전략이 단일 출처). 진입 시 team 비가용으로 확정됐으면 읽을 필요 없다 |
 | `references/spec-driven-review.md` | 검토·QA 게이트가 **spec 문서를 입력으로 구현**하는 경우의 특수화 — 팀 모드로 검토자(spec↔구현)·QA 매니저(spec↔테스트)를 상주시켜 worktree 코드를 계속 리뷰·개선 (spec 입력이 없으면 일반 게이트 사용) |
 
 ---
@@ -251,5 +273,6 @@ main
 5. **무한 폴링**: `Bash sleep` 루프로 agent 상태 확인 → 금지. `run_in_background: true` + 완료 알림 사용.
 6. **메인이 worktree에서 시작**: 메인을 worktree에 진입시킨 채 오케스트레이션 → 머지 경로 꼬임. 메인은 epic 브랜치의 메인 working tree에서만 동작.
 7. **epic 브랜치 우회**: main 또는 임의 feature 브랜치에서 sub-agent를 바로 dispatch → 결과를 어디로 모을지 모호. 반드시 epic 브랜치를 만들고 거기서 dispatch.
-8. **자문 흉내**: 자문 경로가 비활성(플래그 off 또는 `advisor` 미선언)인데 단발 subagent 1회 왕복이나 메인 자신의 판단을 "자문 결과"로 포장 → 실질 없이 기록만 남는다. 경로가 없으면 없는 대로 진행하고, 그 시점의 판단은 **메인 자신의 판단으로 명시**한다.
+8. **자문 흉내**: 자문 경로가 비활성인데 단발 subagent 1회 왕복이나 메인 자신의 판단을 "자문 결과"로 포장 → 실질 없이 기록만 남는다. 경로가 없으면 없는 대로 진행하고, 그 시점의 판단은 **메인 자신의 판단으로 명시**한다. 필수 등급 경로의 폴백은 decision log의 `실행 형태` 필드로 사후 탐지된다 (§team mode 강제 등급).
 9. **고무도장 메인**: 상위 tier라는 이유로 권고를 검토 없이 채택 → 실질 오케스트레이터가 advisor가 되고 메인은 전달자로 전락한다. 결정권은 메인에 있고, 채택도 기각도 사유와 함께 기록한다.
+10. **env 한 줄로 team 비가용 단정**: `printenv`가 비었다는 이유만으로 team 경로를 닫음 → Bash는 메인과 다른 프로세스라 false negative가 구조적으로 발생하고, 판정 하나가 틀리면 team 전제 경로가 동시에 죽는다. 권위 있는 신호는 `Agent` 스키마의 `name`이다 (§진입 시 체크 4).

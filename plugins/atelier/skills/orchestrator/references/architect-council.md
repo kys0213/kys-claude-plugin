@@ -19,7 +19,9 @@ user-invocable: false
 2. **검증자 ≠ 생성자.** 자기 설계를 자기가 심문하지 않는다 (게이트의 자기 검증 편향 방지와 동일 원리).
 3. **검증 pass 전 dispatch 금지.** 검증되지 않은 task 후보로 구현을 시작하지 않는다.
 4. **예산(`max_council_rounds`) 소진 시 에스컬레이션.** 무한 심문 금지 — 미해소 findings와 함께 멈추고 보고한다.
-5. **team mode 필수.** 실험 플래그(`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`)가 없으면 단발 subagent로 **조용히 폴백하지 않고 즉시 에스컬레이션**한다. 폴백은 "협의체를 돌렸다"는 겉모습만 남기고 라운드 간 맥락 유지·상호 반박이라는 실질을 잃게 하므로, 스펙 불일치를 폴백으로 숨기지 않는다는 Fail Fast 원칙에 따라 드러내고 멈춘다.
+5. **team mode 필수.** 협의체는 `SKILL.md §team mode 강제 등급`의 **필수** 등급이다 — 두 자세 모두 read-only 분석이라 공유 checkout 오염 비용이 없고(아래 §두 자세), 라운드 간 맥락 유지·상호 반박이라는 실익만 남기 때문이다. team 이 비가용이면 단발 subagent 로 **조용히 폴백하지 않고 즉시 에스컬레이션**한다 — 스펙 불일치를 폴백으로 숨기지 않는다는 Fail Fast 원칙에 따라 드러내고 멈춘다.
+   - 가용 판정은 진입 시 1회 확정된 것을 따른다 (`SKILL.md §진입 시 체크 4` — 권위 신호는 `Agent` 스키마의 `name`, `printenv` 는 보조. env 만 보고 비가용으로 단정하지 않는다).
+   - 필수 등급의 가드 두 개(**spawn 확인**, decision log 의 **`실행 형태`·`판정 근거` 필수 필드**)를 그대로 적용한다 — 상세 절차는 `advisory-consult.md §spawn 확인` / `§기록`과 동일하다.
 
 ### 정책 (자유 — 강제하지 않음)
 
@@ -66,10 +68,12 @@ user-invocable: false
 ## 협의체 루프
 
 ```
-require(EXPERIMENTAL_AGENT_TEAMS)                  # 없으면 폴백 없이 즉시 에스컬레이션 (메커니즘 5)
+require(team_available)                            # 비가용이면 폴백 없이 즉시 에스컬레이션 (메커니즘 5)
 round = 0
 design = Agent({name: "<설계 생성 역할>", run_in_background: true,
                 prompt: "<요구사항 원문 + 설계 생성 자세 + 자율 어댑테이션 규칙 + 출력 계약>"})
+assert_teammate_spawned(design)                    # 필수 등급 가드 — teammate 아니면 1회 재판정,
+                                                   # 그래도 아니면 폴백 없이 에스컬레이션
 while round < max_council_rounds:                  # 계약에 고정 (기본 2)
     verdict = Agent({name: "<심문 검증 역할>", run_in_background: true,
                      prompt: "<design 전문 + 심문 자세 + 주입할 관점 + findings 형식>"})
@@ -82,7 +86,8 @@ if not verdict.pass or verdict.has_domain_decisions:
     advisory_consult_if_available()                # tie-break — 자문 경로가 가용할 때만 (advisory-consult.md 트리거 1)
     escalate()                                     # 미해소 findings/도메인 결정과 함께 보고
 tasks = design.tasks                               # 검증된 task 목록 → TaskCreate + dispatch
-log_decision("협의체 분해", design, verdict)        # decision log (autonomous-driving.md §의사결정 기록)
+log_decision("협의체 분해", design, verdict,
+             실행_형태="teammate", 판정_근거="<스키마|env>")   # 필수 등급 필드 (메커니즘 5)
 ```
 
 - 라운드는 `max_council_rounds` 예산을 소모한다 — 소진 시 hard stop 후 미해소 findings와 함께 에스컬레이션.
@@ -118,7 +123,7 @@ log_decision("협의체 분해", design, verdict)        # decision log (autonom
 
 1. **메인이 협의체를 겸함**: 메인이 직접 설계·심문을 수행 → 분석 전문이 메인 컨텍스트를 포화시키고 자기 설계 자기 심문이 된다. 두 자세 모두 sub-agent로 위임한다.
 2. **검증 pass 전 dispatch**: 심문이 끝나기 전에 task 후보를 먼저 실행 → 검증 안 된 분해로 스웜 전체가 잘못된 방향으로 진행.
-3. **team mode 없이 조용히 폴백**: 실험 플래그가 없다고 단발 subagent 왕복으로 대체 → 협의체의 실질(라운드 간 맥락 유지·상호 반박)을 잃은 채 "돌렸다"는 기록만 남는다. 폴백하지 말고 에스컬레이션한다.
+3. **team mode 없이 조용히 폴백**: team 이 없다고 단발 subagent 왕복으로 대체 → 협의체의 실질(라운드 간 맥락 유지·상호 반박)을 잃은 채 "돌렸다"는 기록만 남는다. 폴백하지 말고 에스컬레이션한다. 이 위반은 spawn 확인(사전)과 `실행 형태` 필드(사후)로 탐지된다 (메커니즘 5). `printenv` 가 비었다는 이유만으로 비가용을 단정하는 것도 같은 실패의 입구다 — 권위 신호는 `Agent` 스키마의 `name` 이다.
 4. **가정을 조용히 삼킴**: 탐색으로 답 못 한 질문을 가정 표시 없이 설계에 녹임 → 사후에 "왜"를 복원 불가. 가정은 명시하고 검증자가 위험도를 판정한다.
 5. **모든 요구에 협의체 강제**: 자명한 단순 fan-out까지 협의체 왕복 → 오버헤드만 증가. 생략 기준(위 §언제 쓰는가)을 따른다.
 6. **협의체 예산 없는 왕복**: pass까지 무한 반복 → 폭주. `max_council_rounds` 소진 시 에스컬레이션.
@@ -134,7 +139,8 @@ log_decision("협의체 분해", design, verdict)        # decision log (autonom
 - [ ] 검증자가 생성자와 다른 agent인가? (메커니즘 2)
 - [ ] 검증 pass(또는 에스컬레이션 처리) 후에만 dispatch를 시작했는가? (메커니즘 3)
 - [ ] `max_council_rounds` 예산을 계약에 고정하고 소진 시 에스컬레이션하는가? (메커니즘 4)
-- [ ] team mode로 돌렸는가? 실험 플래그가 없으면 폴백 없이 에스컬레이션했는가? (메커니즘 5)
+- [ ] team mode로 돌렸는가? 비가용이면 폴백 없이 에스컬레이션했는가? (메커니즘 5)
+- [ ] 가용 판정을 **스키마 신호 기준**으로 내리고, **spawn 확인** + decision log `실행 형태`·`판정 근거` 필드를 남겼는가? (메커니즘 5 가드)
 - [ ] 이 문제에 필요한 관점 조합·역할 개수를 판단해 주입했는가? (정책 — 기본값 답습 아님)
 - [ ] 탐색으로 해소 못 한 질문이 명시적 가정 또는 에스컬레이션 항목으로 남았는가?
 - [ ] task 목록이 출력 계약(파일·의존성·위험도·검증 기준·DB 접촉 여부)을 채웠는가?

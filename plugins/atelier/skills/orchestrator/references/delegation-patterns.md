@@ -18,7 +18,7 @@ user-invocable: false
 - 작업이 독립적이고 외부 개입 없이 끝남
 - 한 번의 prompt → 한 번의 결과
 
-### Agent team (`Agent`의 `name` 파라미터 — 실험 플래그)
+### Agent team (`Agent`의 `name` 파라미터 — 가용 시)
 
 **적합한 상황**:
 - 여러 agent가 같은 작업 컨텍스트를 공유 (한 feature를 여러 역할로 협업)
@@ -36,7 +36,7 @@ user-invocable: false
           No  → 단발 sub-agent (병렬 fan-out도 단발 여러 개)
 ```
 
-> **review→fix 반복이 예상되면 team으로 조율**(실험 플래그 시): 구현 → 리뷰 → 수정처럼 한 작업이 여러 라운드를 도는 경우, 매 라운드를 단발로 재위임하면 컨텍스트 손실·셋업 비용이 반복된다. reviewer teammate + implementer teammate를 한 team에 두고 내부 SendMessage로 수정 사이클을 돌리되, **실제 파일 편집은 implementer가 직접 하지 않고 `isolation:"worktree"` subagent에 위임**한다 (team은 공유 checkout이라 편집 격리가 없다). 실험 플래그가 없으면 team 대신 단발 subagent 재위임(실패 맥락 포함)으로 반복한다 — `autonomous-driving.md §위임 형태` 참조.
+> **review→fix 반복이 예상되면 team으로 조율**(team 가용 시 — 선호 등급): 구현 → 리뷰 → 수정처럼 한 작업이 여러 라운드를 도는 경우, 매 라운드를 단발로 재위임하면 컨텍스트 손실·셋업 비용이 반복된다. reviewer teammate + implementer teammate를 한 team에 두고 내부 SendMessage로 수정 사이클을 돌리되, **실제 파일 편집은 implementer가 직접 하지 않고 `isolation:"worktree"` subagent에 위임**한다 (team은 공유 checkout이라 편집 격리가 없다). team이 비가용이면 단발 subagent 재위임(실패 맥락 포함)으로 반복한다 — `autonomous-driving.md §위임 형태` 참조.
 
 ---
 
@@ -110,7 +110,7 @@ Agent({
 })
 ```
 
-- **도구 의존 없음**: `mode:"plan"` 같은 파라미터에 의존하지 않으므로 런타임 차이와 무관하게 동작한다. (team을 쓰고 실험 플래그가 있으면 teammate의 plan 승인 기능으로 대체 가능 — 단 보장 경로는 위 2-스텝 패턴이다.)
+- **도구 의존 없음**: `mode:"plan"` 같은 파라미터에 의존하지 않으므로 런타임 차이와 무관하게 동작한다. (team이 가용하면 teammate의 plan 승인 기능으로 대체 가능 — 단 보장 경로는 위 2-스텝 패턴이다.)
 - **자율 모드 연계**: 리스크 큰 작업의 사전 게이트로, 계획 승인 실패는 hard stop / 에스컬레이션으로 처리한다 (`autonomous-driving.md`).
 - 단순·저위험 작업엔 쓰지 않는다 (왕복 비용만 늘어남) — isolation·Monitor와 같은 절제 원칙.
 
@@ -118,7 +118,9 @@ Agent({
 
 ## Agent team 사용 패턴
 
-> **전제**: agent team은 실험 기능 — `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`이 설정돼야 동작한다. 플래그가 없으면 teammate가 spawn되지 않는다. 과거의 `TeamCreate`/`TeamDelete` 도구는 제거됐고, `Agent`의 `team_name` 인자는 받지만 무시된다 — 세션마다 암묵적 team 하나가 있고 `name`으로 바로 spawn하며, session 종료 시 자동 정리된다.
+> **전제**: agent team은 실험 기능이라 세션마다 가용 여부가 다르다. **가용 판정의 권위 신호는 `Agent` 도구 스키마에 `name` 파라미터가 노출되는지**이며, `printenv CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`는 보조 신호다(Bash는 메인과 다른 프로세스라 단독 근거가 못 된다) — 판정 절차는 `SKILL.md §진입 시 체크 4`, 경로별 강제 등급은 `SKILL.md §team mode 강제 등급`이 단일 출처다. 과거의 `TeamCreate`/`TeamDelete` 도구는 제거됐고, `Agent`의 `team_name` 인자는 받지만 무시된다 — 세션마다 암묵적 team 하나가 있고 `name`으로 바로 spawn하며, session 종료 시 자동 정리된다.
+>
+> **`name`을 넘겼다고 teammate로 떴다는 보장은 없다** — `team_name`이 조용히 무시되는 선례가 이미 있다. team 필수 등급 경로는 첫 spawn 직후 `SendMessage`로 도달 가능한 식별자인지 **spawn 확인**을 실행한다 (`advisory-consult.md §spawn 확인`).
 
 > **team은 공유 checkout이다 — per-teammate worktree 격리가 없다.** 같은 파일을 두 teammate가 편집하면 덮어쓴다. 따라서 **편집·격리가 필요한 작업은 teammate가 직접 하지 않고 isolated subagent에 위임**한다. team은 read-only 조율/리뷰만 맡는다.
 

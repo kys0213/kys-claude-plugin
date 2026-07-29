@@ -187,7 +187,7 @@ TaskUpdate({taskId: "1", status: "completed"})                         # 완료 
 
 ## team 진행 추적
 
-agent team(실험 플래그 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 필요)의 경우 여러 agent가 동시에 진행 중일 수 있다. team spawn 패턴과 편집 격리 제약(`Agent({name, ...})` + `SendMessage`, teammate는 편집하지 않음)은 `references/delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다.
+agent team(가용 판정은 `SKILL.md §진입 시 체크 4`)의 경우 여러 agent가 동시에 진행 중일 수 있다. team spawn 패턴과 편집 격리 제약(`Agent({name, ...})` + `SendMessage`, teammate는 편집하지 않음)은 `references/delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다.
 
 - 각 agent의 완료 알림이 별개로 도착하고, name으로 식별해 어떤 역할이 끝났는지 즉시 파악한다.
 - 한 agent가 다른 agent의 결과를 기다려야 할 때: 미리 의존성을 명시한 prompt로 띄우거나, 메인이 한 단계 완료 후 다음 단계를 호출한다(순차).
