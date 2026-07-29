@@ -87,14 +87,24 @@ description 에 "(내부용) spec-review skill 이 호출하는" 으로 명시�
 따라서 4단을 PR 전용 양식이 아니라 **자리와 무관한 질문 세트**로 일반화하고, PR 은 그 질문 세트가
 고정 양식을 만난 경우로 둔다.
 
-### 3.3 단일 출처 분할 (git ↔ communicate)
+### 3.3 로딩 계층으로 나눈다 (CLAUDE.md ↔ 스킬)
 
-| 소유 | 내용 |
-|---|---|
-| `git/references/cli-reference.md` | PR 본문의 **섹션 4단 고정** (양식) |
-| `communicate/SKILL.md` | 그 안을 채우는 **작문 기준** (독자 수준·맥락 이전·용어·문체) |
+스킬 트리거는 확률적이다. `orchestrator` 의 description 이 "리포트 작성"·"보고서로 정리" 같은
+문구를 이미 잡고 있어, 사용자가 그렇게 말하면 **위임 판단에서 끝나고 작문 기준은 로드되지 않을**
+수 있다. 두 스킬은 경쟁 관계가 아닌데(누가 쓰는가 vs 어떻게 쓰는가) 트리거 표면이 겹친 것이다.
 
-양쪽에 교차 참조를 달아 중복 서술을 막는다.
+스킬끼리 서로를 참조해 푸는 대신 **로딩 계층을 나눈다**:
+
+| 소유 | 내용 | 로딩 |
+|---|---|---|
+| `templates/claude-md/CLAUDE.md` | 기준선 — 독자·문체·네 가지(왜/무엇을/어떻게/확인 방법)·대화 잔재 제거·자가 점검 | **항상** |
+| `communicate` 스킬 | 적용법 — 영향 환산 예시·용어 처리표·청중별 우선순위·체크리스트 | 트리거 시 |
+| `communicate/references/delivery-context.md` | 놓을 자리의 성질 축 | 자리가 정해졌을 때 |
+| `git/references/cli-reference.md` | PR 본문의 **섹션 4단 고정** (양식) | PR 작성 시 |
+
+기준선이 항상 로드되므로 스킬이 안 불려도 최소 품질이 보장되고, 스킬은 깊은 기준만 담아 가벼워진다.
+CLAUDE.md 의 orchestrator 항목에도 "위임하더라도 작문 기준은 이 문서를 따른다"를 명시해 두 축을
+분리했다.
 
 ### 3.4 새로 들어간 것
 
@@ -123,6 +133,7 @@ description 에 "(내부용) spec-review skill 이 호출하는" 으로 명시�
 | `skills/report-write/` → `skills/communicate/` | 이름·축 변경 + 맥락 이전·읽기 수준 추가 |
 | `skills/communicate/references/delivery-context.md` | **신규** — 성질 축별 적응 기준 |
 | `skills/git/references/cli-reference.md` | communicate 와의 단일 출처 분할 명시 |
+| `templates/claude-md/CLAUDE.md` | 기준선을 항상 로드되는 계층에 배치 (§3.3) + orchestrator 항목에 작문 기준 분리 명시 |
 | `skills/spec-write/` · `skills/grill/` · `skills/agent-design-principles/` | spec-review 참조 제거 |
 | `skills/orchestrator/references/spec-driven-review.md` | "spec-review 레이어를 빌려온다" 문단 → 게이트 범위 서술로 교체 |
 | `README.md` · `plugins/atelier/README.md` | 슬래시 목록·흡수 매핑 갱신 |
