@@ -98,7 +98,8 @@ description 에 "(내부용) spec-review skill 이 호출하는" 으로 명시�
 | 소유 | 내용 | 로딩 |
 |---|---|---|
 | `templates/claude-md/CLAUDE.md` | 기준선 — 독자·문체·네 가지(왜/무엇을/어떻게/확인 방법)·대화 잔재 제거·자가 점검 | **항상** |
-| `communicate` 스킬 | 적용법 — 영향 환산 예시·용어 처리표·청중별 우선순위·체크리스트 | 트리거 시 |
+| `communicate/SKILL.md` | 기준선 요약 + **맥락 이전** + 라우팅 + 체크리스트 | 트리거 시 |
+| `communicate/references/writing-standards.md` | 적용법 — 영향 환산 예시·용어 처리·문장/어미·청중별 우선순위 | 문장을 고칠 때 |
 | `communicate/references/delivery-context.md` | 놓을 자리의 성질 축 | 자리가 정해졌을 때 |
 | `git/references/cli-reference.md` | PR 본문의 **섹션 4단 고정** (양식) | PR 작성 시 |
 
@@ -132,6 +133,7 @@ CLAUDE.md 의 orchestrator 항목에도 "위임하더라도 작문 기준은 이
 | `tools/validate/extraction-invariants.json` | `spec/review` 도메인 2개 제거 (12 → 10) |
 | `skills/report-write/` → `skills/communicate/` | 이름·축 변경 + 맥락 이전·읽기 수준 추가 |
 | `skills/communicate/references/delivery-context.md` | **신규** — 성질 축별 적응 기준 |
+| `skills/communicate/references/writing-standards.md` | **신규** — 적용 상세 (SKILL.md 에서 분리) |
 | `skills/git/references/cli-reference.md` | communicate 와의 단일 출처 분할 명시 |
 | `templates/claude-md/CLAUDE.md` | 기준선을 항상 로드되는 계층에 배치 (§3.3) + orchestrator 항목에 작문 기준 분리 명시 |
 | `skills/spec-write/` · `skills/grill/` · `skills/agent-design-principles/` | spec-review 참조 제거 |
