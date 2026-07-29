@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Use this skill when delegating work to multiple sub-agents, agent-teams, or worktrees — parallel fan-out, sequential pipelines, long-running agent teams, document deliverables (writing reports, specs, or write-up docs is also delegated Write work), or any moment the main agent is about to use Edit/Write directly (delegate instead). Triggers include "여러 작업 병렬로", "동시에 처리", "에이전트 나눠서", "worktree로 분리", "위임해서", "팀으로 작업", "리포트 작성", "보고서로 정리", "스펙 문서 작성", "분석 결과 문서화", "delegate", "parallel agents", "fan-out", "agent team", "sub-agent", "dispatch multiple", "split into tasks", "run in parallel", "write a report", "draft a spec", "write up findings".
+description: Use this skill for any multi-unit work delegated to sub-agents, agent-teams, or worktrees — parallel fan-out, sequential pipelines, long-running agent teams, document deliverables (writing reports, specs, or write-up docs is also delegated Write work), multi-branch research and investigation (codebase surveys, side-effect analysis, comparing options — read-only work counts too), or any moment the main agent is about to use Edit/Write directly (delegate instead). Scope is set by scale, not by kind. Triggers include "여러 작업 병렬로", "동시에 처리", "에이전트 나눠서", "worktree로 분리", "위임해서", "팀으로 작업", "리포트 작성", "보고서로 정리", "스펙 문서 작성", "분석 결과 문서화", "조사해줘", "리서치", "코드베이스 파악", "영향 범위 분석", "사이드이펙트 조사", "여러 방안 비교", "delegate", "parallel agents", "fan-out", "agent team", "sub-agent", "dispatch multiple", "split into tasks", "run in parallel", "write a report", "draft a spec", "write up findings", "research", "investigate", "survey the codebase", "analyze impact", "compare approaches".
 version: 0.1.0
 ---
 
@@ -16,19 +16,22 @@ version: 0.1.0
 - **장기 진행 작업**에 식별 가능한 agent team이 필요할 때 (designer/implementer/reviewer 등)
 - **머지 조정**이 필요한 다중 변경 (여러 worktree 결과 통합, 충돌 해결 위임)
 - **문서 산출물 작업** — 리포트·스펙·정리 문서 작성 요청 ("리포트로 정리해줘", "스펙 문서 만들어줘", "분석 보고서 작성") — 문서 작성도 Write 작업이므로 위임 대상
+- **여러 갈래로 벌어지는 리서치·조사·분석** — 코드베이스 파악, 사이드이펙트·영향 범위 조사, 방안 비교, 자료 수집 ("조사해줘", "리서치", "어디에 영향 가는지 봐줘", "여러 방안 비교"). **read-only 라고 위임 대상에서 빠지지 않는다** — 오히려 병렬 fan-out 이 가장 잘 듣는 자리이고, 메인이 직접 다 읽으면 조율에 써야 할 컨텍스트가 조사 원문으로 채워진다 (`references/autonomous-driving.md §메인 컨텍스트 격리`)
 - **메인 에이전트가 Edit/Write/NotebookEdit로 직접 코드를 수정하려는 모든 순간** — 위임으로 전환할지 먼저 검토
+
+**적용 범위는 작업의 종류가 아니라 규모로 정한다.** 구현이냐 문서냐 조사냐로 가르지 않는다 — 여러 단위로 쪼개지거나, 병렬로 벌릴 수 있거나, 메인 컨텍스트를 크게 먹으면 위임 대상이다.
 
 트리거하면 안 되는 상황:
 - 단일 파일의 단순 편집 (오버헤드만 늘어남)
 - 사용자가 직접 메인이 처리하라고 명시한 경우
-- 1턴 안에 끝나는 read-only 조사
+- 1턴 안에 끝나는 단발 조회 (파일 하나 확인, git 상태, 테스트 결과 등 결정적 사실 확인)
 
 ## 사고 모드 (Mental Model)
 
 이 스킬을 트리거한 순간부터 메인 에이전트는 **편집자가 아니라 관리자**다 — Edit/Write로 직접 코드를 작성하지 않고, Read/Bash로 상태를 파악하고 Task로 일감을 분리·관리하며 Agent로 위임하고 SendMessage로 조율한다.
 
 ### 메인 에이전트가 해도 되는 일
-- `Read`, `Glob`, `Grep`, `Bash(git status / git log / git diff --stat)` — 작업 분해와 위험도 판단을 위한 조사
+- `Read`, `Glob`, `Grep`, `Bash(git status / git log / git diff --stat)` — 작업 분해와 위험도 판단에 필요한 **결정적 사실 확인**에 한정한다. 본격적인 조사·리서치(코드베이스 파악, 영향 범위 분석, 방안 비교)는 메인이 통독하지 않고 **위임**한다 — 그 원문이 메인 컨텍스트에 쌓이면 조율 판단 품질이 떨어진다 (`references/autonomous-driving.md §메인 컨텍스트 격리`)
 - `Agent`, `SendMessage`, `Monitor` — 위임과 조율 (agent team은 `Agent`의 `name`으로 spawn — 가용 판정은 아래 §진입 시 체크 4, `TeamCreate`는 제거됨)
 - `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate` — 일감을 분리하고 상태를 관리하는 것은 **메인 에이전트의 핵심 룰**이다. 편집을 위임하는 관리자로서 메인의 본업은 일감을 추적 가능한 Task로 쪼개고 상태를 갱신하는 것 — 다중 작업이면 항상 적용하고 단발 1회만 예외다 (`references/agent-monitor.md §Task 시스템`)
 - 결과물 취합 후 사용자에게 보고
