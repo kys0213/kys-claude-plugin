@@ -25,9 +25,12 @@ user-invocable: false
 자율 계약:
 - 종료 조건 (done_when):     무엇이 충족되면 끝인가 (검증 가능해야 함)
 - 예산:                      max_loops, max_redispatch_per_task, (가능하면) 시간/턴 상한
-- 자문 (advisory):           가용 여부 + max_advisory_consults (기본 2)
+- 자문 (advisory):           가용 여부 + max_advisory_consults
                              — 가용 = team 가용 판정 (SKILL.md §진입 시 체크 4,
                                권위 신호는 `Agent` 스키마의 `name`. 자문은 team 필수 등급)
+                             — 가용이면 기본 2, **비가용이면 0 (경로 차단)**
+                               예산 0 = 트리거에 도달해도 쓸 수 있는 것이 없다는 뜻이며,
+                               폴백 여지를 남기지 않는다 (advisory-consult.md §게이트 0)
 - 자동 중단 (hard_stops):    무엇이 발생하면 예산과 무관하게 멈추고 보고하는가
 - 결정 기록 위치 (log_dir):  .orchestrator/<epic>/decisions/ (gitignore, 완료 시 요약 공유)
 - 통합 검증 (integration_verify): (선택) worktree에서 실행 불가한 인프라 의존 테스트
