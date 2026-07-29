@@ -56,6 +56,5 @@ version: 1.0.0
 | 대상 | 차이 | 핸드오프 |
 |---|---|---|
 | `spec-write` | **대화 ≠ 문서**. grill 은 설계를 *대화로 도전*하고, `spec-write` 는 *합의된 설계를 스펙 문서로 형식화*(DESIGN/concerns/flows)한다 | 합의된 설계를 장기 스펙 문서로 남길 때 |
-| `spec-review` | 작성된 스펙을 *코드와 대조 분석*(L1/L2/audit)·품질 평가하는 단계. grill 의 설계 도전과 다른 활동 | 스펙 작성 후 코드 정합 확인이 필요할 때 |
 | Plan Mode | grill 은 *무엇을/왜*(의도·설계 합의), Plan Mode 는 *어떻게*(코드 변경 단계) | 의도가 확정되고 코드 변경이 필요할 때 |
 | `orchestrator` | grill 은 대화로 합의를 만들고, `orchestrator` 는 합의된 작업을 sub-agent·worktree 로 분해해 실행한다 | 합의된 작업이 병렬·다단계로 나뉠 때 |

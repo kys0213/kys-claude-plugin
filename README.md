@@ -41,8 +41,7 @@ kys-claude-plugin/
 
 **Skills (슬래시 + 모델 자동 호출):**
 - `/atelier:spec-write` - 합의된 설계를 스펙 문서 계층(DESIGN→concerns→flows)으로 작성
-- `/atelier:spec-review` - 작성된 스펙을 코드와 대조 분석·품질평가·주석
-- `/atelier:report-write` - 보고서 작문 기준 (문체·용어·청중 적응)
+- `/atelier:communicate` - 맥락을 팀에 전달하는 작문 기준 (독자 수준·맥락 이전·채널 적응)
 - `/atelier:git` - git 워크플로우 (커밋·push·PR·충돌 해결·리뷰 정리·이슈 우선순위)
 - `/atelier:workflow` - 컨벤션 scaffold·.claude/rules 설계·설계 원칙 룰 설치
 - `/atelier:orchestrator` - 위임/병렬 분해·worktree 격리·머지 조정 (기본 자율 주행)

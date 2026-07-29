@@ -1,10 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "agents": [
-    "./agents/spec/file-pair-observer.md",
-    "./agents/spec/gap-aggregator.md",
-    "./agents/spec/gap-auditor.md",
-    "./agents/spec/spec-annotator.md",
     "./agents/workflow/codebase-analyzer.md",
     "./agents/workflow/document-analyzer.md",
     "./agents/workflow/rules-generator.md",

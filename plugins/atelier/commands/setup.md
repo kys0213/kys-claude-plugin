@@ -195,3 +195,4 @@ alias git-utils='atelier git'
 ```json
 { "action": "updated", "command": "atelier git guard commit --project-dir \"${CLAUDE_PROJECT_DIR:-.}\" --default-branch main" }
 ```
+

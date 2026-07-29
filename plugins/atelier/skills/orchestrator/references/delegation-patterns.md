@@ -150,6 +150,7 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 - `run_in_background: true`로 띄워야 SendMessage로 개입할 수 있다.
 - team은 session 종료 시 **자동 정리**된다 (`TeamDelete` 없음). 별도 정리 단계 불필요.
 - **편집 격리는 team이 아니라 subagent의 `isolation:"worktree"`가 보장한다.** teammate에게 worktree 이동을 위임하지 말 것 — 격리가 도구 보장에서 프롬프트 희망으로 격하되어 공유 checkout(메인 epic 브랜치)이 오염될 수 있다.
+- **teammate의 권한은 도구로 제한할 수 없다 — 계약 + 사후 탐지로만 관리한다.** 별도 agent 정의를 지정해 tools를 좁히는 경로(`subagent_type`)는 **단발 subagent의 것**이고, team spawn과 결합한 선례가 없다. 따라서 read-only teammate라도 실제로는 편집·`SendMessage`가 가능하다. 금지는 prompt에 계약으로 명시하고, 위반은 **토폴로지 가드로 탐지**한다(사전 차단 아님 — `merge-coordinator.md §토폴로지 가드`). 도구 수준 보장이 꼭 필요한 역할이면 team이 아니라 단발 subagent를 고른다.
 
 ---
 
@@ -168,23 +169,7 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 - **역량 수준 ↔ 실제 모델명 매핑은 dispatch 시점 판단**이다. 세대가 바뀌면 같은 작업이 더 가벼운 tier로 내려갈 수 있어야 하므로 문서에 모델명을 고정하지 않는다.
 - 이 표는 고정값이 아니라 **시작 heuristic**이다 — 작업마다 "지금도 이 역량이 필요한가"를 재평가하고, 벗어난 선택은 근거와 함께 decision log에 남긴다. 자율 루프에서의 배분 원칙은 `autonomous-driving.md §모델 분배` 참조.
 - 단순 작업에 최상위 tier를 쓰는 것은 비용 낭비다.
-
-### 역할별 모델 정책 적용 (exclude / allow)
-
-역할별 exclude/allow 정책의 선언 위치·조회 순서·스키마는 **`SKILL.md §역할별 모델 정책 설정`이 단일 출처**다 (프로젝트 `.claude/orchestrator-policy.yaml` → 사용자 `~/.claude/orchestrator-policy.yaml`, 프로젝트 우선). 여기서는 dispatch 시 적용 판단 로직만 다룬다.
-
-적용 순서 (dispatch마다):
-
-1. **후보 선정**: 위 tier heuristic으로 시작 tier의 모델을 후보로 정한다.
-2. **정책 대조**: 해당 역할(reviewer/qa/dba/implementer 등)의 `exclude_models`에 후보가 있으면 배정을 차단한다. `allow_models`가 선언돼 있으면 목록 밖 모델도 전부 차단으로 취급한다.
-3. **대체 라우팅**: 차단되면 인접 tier로 대체한다 — reviewer/QA/DBA처럼 판정 품질이 게이트인 역할은 인접 상위 tier 우선, 그 외 역할은 인접 하위 tier 우선. 대체 배정은 표준 heuristic을 벗어난 선택이므로 근거와 함께 decision log에 남긴다.
-4. **배정 불가**: 정책이 모든 tier를 차단하면 설정 오류다 — 임의로 정책을 무시하고 배정하지 말고, 에스컬레이션(사용자 보고)한다.
-
-규칙:
-
-- **역할 단위 override**: 프로젝트 파일에 정의된 역할은 프로젝트 정책만 적용하고, 정의되지 않은 역할만 사용자 파일로 fallback한다 (파일 전체 병합이 아니라 역할 단위 우선).
-- **정책 파일이 없으면** 이 절차 전체를 건너뛰고 현행 기본 tier heuristic만 쓴다.
-- **역할 기준 원칙은 설정으로 override 불가**: 이 정책은 역할별 tier 선택 범위만 좁힌다 (`SKILL.md §모델 라우팅 전략`).
+- 이 표는 **집행 위임**(코드·문서를 만드는 sub-agent)의 tier heuristic이다. 메인보다 상위 tier에 의견만 구하는 **자문 조회**는 이 표 밖의 별도 경로다 — 원칙은 `SKILL.md §자문 조회`, 절차는 `advisory-consult.md`가 단일 출처다.
 
 ---
 
@@ -200,6 +185,7 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 - [ ] worktree dispatch라면 prompt에 worktree 격리 준수(경로 prefix 검증 + 부모 repo 수정 금지)를 명시했는가?
 - [ ] prompt에 재위임 금지 문구(§위임 깊이 제한)를 포함했는가? (team teammate → isolated subagent 편집 위임 1단계는 예외)
 - [ ] 모델 선택이 작업 난이도와 맞는가? (dispatch에 `model`을 명시했는가 — 상속 금지)
-- [ ] 역할별 모델 정책 파일이 있으면 exclude/allow를 대조했는가? (차단 시 인접 tier 대체 라우팅 + decision log)
-- [ ] 오케스트레이터가 위임 sub-agent보다 낮은 tier로 내려가지 않는가? (`SKILL.md §모델 라우팅 전략`)
+- [ ] 사용자가 준 역할별 모델 제약이 있으면 반영했는가? (제약으로 막히면 인접 tier 대체 + decision log)
+- [ ] 오케스트레이터가 **집행 위임** sub-agent보다 낮은 tier로 내려가지 않는가? (상위 tier는 자문 조회만 예외 — `SKILL.md §자문 조회`)
+- [ ] read-only teammate라면 금지를 prompt 계약으로 명시하고, 위반 탐지를 토폴로지 가드에 맡겼는가? (도구 제한은 team에서 불가)
 - [ ] team의 경우 name이 의미 있고 유니크한가?
