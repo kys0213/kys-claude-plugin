@@ -54,6 +54,7 @@ sub-agent는 **메인 대화 히스토리를 보지 못한다**. prompt는 자�
 6. **검증 기준**: 완료를 어떻게 확인할지 (테스트, 빌드, 특정 체크 등)
 7. **worktree 격리 준수** (`isolation: "worktree"` dispatch 시 필수): 모든 Edit/Write의 file_path와 Bash cwd가 자기 worktree 경로(`.claude/worktrees/agent-...`) 안인지 매 호출 전 검증하고, 부모 repo(메인 working tree)의 파일을 절대 직접 수정하지 말 것. 부모 repo에 의도치 않은 변경을 만들었음을 발견하면 직접 reset/checkout 하지 말고 변경을 stash로 보존한 뒤 보고할 것.
 8. **재위임 금지**: "이 작업을 다른 agent에게 재위임하지 말고 직접 수행하라. 막히면 실패 사유와 함께 종료하라"를 prompt에 포함할 것 (단, team teammate의 편집 격리용 isolated subagent 위임 1단계는 예외 — §위임 깊이 제한 참조).
+9. **base 확인** (`isolation: "worktree"` dispatch 시 필수): worktree의 base가 dispatch 시점 epic 브랜치 HEAD라는 보장은 없다. 작업 시작 전 base를 확인하고, 통합 브랜치(epic 브랜치) HEAD보다 뒤처져 있으면 fast-forward/rebase한 뒤 시작하라고 prompt에 명시할 것.
 
 ### 안티패턴
 
@@ -63,6 +64,19 @@ sub-agent는 **메인 대화 히스토리를 보지 못한다**. prompt는 자�
 
 **Edit 절대경로 트랩**: worktree 격리 sub-agent라도 Edit tool의 file_path가 부모 repo의 절대경로를 가리키면 격리를 우회해 메인 working tree가 직접 수정된다. Bash cwd가 worktree여도 Edit는 별개 경로 판정이므로, prompt에 worktree 격리 준수(위 7번)를 반드시 명시한다. 부모 repo가 변형되면 메인 branch switch까지 이어질 수 있다.
 
+### 산문 → 블록 변환 위임: 모호함을 확정하지 않기
+
+산문은 모호한 채로 존재할 수 있지만 블록(트리·우선순위 블록)은 그럴 수 없다 — 분기에 넣으려면 어느 가지로 보낼지 정해야 하므로, 변환 행위 자체가 확정을 강요한다. "모호하면 고치지 말고 보고하라"는 지시만으로는 이 압력을 막지 못한다.
+
+**규칙**: 원문의 모호함이 블록 구조로 표현되지 않으면, 블록 안에서 임의로 해소하지 말고 블록 밖에 "미확정" 항목으로 남긴다.
+
+```
+- **<조건/항목>의 미확정 지점**: 원문은 …인데, 이것이 A인지 B인지는 원문이 정하지 않았다.
+  여기서 확정하지 않는다.
+```
+
+산문 → 블록 변환을 위임하는 prompt에는 "발견하면 고치지 말고 보고하라"와 함께 이 형식(미확정 항목으로 명시적으로 남기기)을 대체 출구로 함께 지시한다 — 금지만 주고 출구를 주지 않으면 재발한다.
+
 ---
 
 ## isolation 결정
@@ -70,7 +84,7 @@ sub-agent는 **메인 대화 히스토리를 보지 못한다**. prompt는 자�
 | 옵션 | 사용 시점 |
 |------|-----------|
 | 없음 (기본) | 읽기 전용 분석 sub-agent (epic 브랜치 자체에서 실행, 편집 X) |
-| `isolation: "worktree"` | 코드를 변경하는 모든 sub-agent — epic 브랜치를 base로 한 worktree에서 작업 |
+| `isolation: "worktree"` | 코드를 변경하는 모든 sub-agent — worktree는 자동으로 만들어지나, base가 dispatch 시점 epic 브랜치 HEAD라는 보장은 없다 (위 §Prompt 작성 원칙 필수 포함 요소 9번) |
 
 오케스트레이터 토폴로지에서는 **편집하는 sub-agent는 항상 `isolation: "worktree"`** 다. 메인이 epic 브랜치를 점유하고 있으므로 같은 working tree에서 sub-agent가 편집하면 메인 상태가 오염된다. isolation worktree는 변경이 없으면 자동 정리되고, 변경이 있으면 worktree 경로와 브랜치명이 결과에 포함된다. 자세한 머지/정리는 `worktree-lifecycle.md`.
 
@@ -187,6 +201,7 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 - [ ] 단발/team 선택이 작업 성격과 맞는가?
 - [ ] 편집하는 sub-agent라면 `isolation: "worktree"`를 켰는가?
 - [ ] worktree dispatch라면 prompt에 worktree 격리 준수(경로 prefix 검증 + 부모 repo 수정 금지)를 명시했는가?
+- [ ] worktree dispatch라면 prompt에 base 확인·동기화 지시(§필수 포함 요소 9번)를 포함했는가?
 - [ ] prompt에 재위임 금지 문구(§위임 깊이 제한)를 포함했는가? (team teammate → isolated subagent 편집 위임 1단계는 예외)
 - [ ] 모델 선택이 작업 난이도와 맞는가? (dispatch에 `model`을 명시했는가 — 상속 금지)
 - [ ] 사용자가 준 역할별 모델 제약이 있으면 반영했는가? (제약으로 막히면 인접 tier 대체 + decision log)

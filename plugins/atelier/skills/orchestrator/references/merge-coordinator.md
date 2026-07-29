@@ -48,6 +48,9 @@ worktree 브랜치는 PR을 생성하지 않고 epic 브랜치로 수렴 후 삭
 1. 머지 후보 수집
    - 각 sub-agent 결과에서 worktree 경로 + 브랜치명 추출
    - 변경 없음 → 후보에서 제외 (자동 정리됨)
+   - 각 후보의 merge-base 확인 (`git merge-base epic/<name> <branch>`) — worktree base가 dispatch
+     시점 epic 브랜치 HEAD였다는 보장은 없으므로 (`delegation-patterns.md §Prompt 작성 원칙 필수
+     포함 요소` 9번), 뒤처진 base 위에서 작업됐다면 통합 전 최신 HEAD 기준으로도 유효한지 확인한다
 
 2. 의존성 그래프 구성
    - 메인이 dispatch 단계에서 알고 있는 의존성을 활용
@@ -61,25 +64,28 @@ worktree 브랜치는 PR을 생성하지 않고 epic 브랜치로 수렴 후 삭
    - 충돌 없음 → 다음 후보로
    - 충돌 발생 → 위임 (아래 참조)
 
-5. 토폴로지 가드 (매 머지 직후, 생략 금지)
+5. 통합 커밋 authorship 확인 (매 머지 직후, 생략 금지)
+   - 명령·정정 절차는 아래 §Authorship 확인 참조 — committer가 위임한 sub-agent 자신으로 남아있으면 정정
+
+6. 토폴로지 가드 (매 머지 직후, 생략 금지)
    - 명령·복구 절차는 아래 §토폴로지 가드 참조 — 불일치 시 즉시 복구 + 에스컬레이션
 
-6. 머지 완료 후 worktree 정리
+7. 머지 완료 후 worktree 정리
    - 머지된 worktree 삭제
    - 폐기된 worktree도 사용자 확인 후 삭제
 
-7. 최종 통합 검증 게이트 (아래 "최종 통합 검증 게이트 (final HEAD full-suite)" 참조)
+8. 최종 통합 검증 게이트 (아래 "최종 통합 검증 게이트 (final HEAD full-suite)" 참조)
    - epic 브랜치 최종 HEAD clean 확인 후 전체 테스트 스위트 1회 실행
    - green이어야 완료 선언 가능 (HEAD sha 기록)
 
-8. 사용자에게 결과 요약 보고
+9. 사용자에게 결과 요약 보고
 ```
 
 ---
 
 ## 토폴로지 가드 (명령·복구 절차 단일 출처)
 
-메인은 항상 epic 브랜치의 메인 working tree에 있어야 한다. 머지 명령이나 sub-agent의 격리 이탈로 메인의 current branch가 sub-agent 브랜치로 switch되면, 오염된 HEAD 위에서 후속 dispatch의 worktree base가 잘못 잡히고 머지 경로가 어긋난다. 가드 명령과 복구 절차는 이 절이 단일 출처이며, **언제 실행하는가**는 각 단계 문서가 정한다 — 매 sub-agent 완료 알림 직후(`worktree-lifecycle.md`), 매 머지 직후(아래 §표준 절차 5), 자율 루프의 `assert_topology()`(`autonomous-driving.md`).
+메인은 항상 epic 브랜치의 메인 working tree에 있어야 한다. 머지 명령이나 sub-agent의 격리 이탈로 메인의 current branch가 sub-agent 브랜치로 switch되면, 오염된 HEAD 위에서 후속 dispatch의 worktree base가 잘못 잡히고 머지 경로가 어긋난다. 가드 명령과 복구 절차는 이 절이 단일 출처이며, **언제 실행하는가**는 각 단계 문서가 정한다 — 매 sub-agent 완료 알림 직후(`worktree-lifecycle.md`), 매 머지 직후(아래 §표준 절차 6), 자율 루프의 `assert_topology()`(`autonomous-driving.md`).
 
 ```bash
 git branch --show-current    # epic/<name> 이어야 함
@@ -98,6 +104,19 @@ git branch -D <잘못 switch된 sub-agent 브랜치>   # 로컬에 남았으면 
 의도치 않은 변경이 있으면 `git stash push -u` 로 보존한 뒤 보고한다 — 그 변경이 worktree로 갔어야 할 sub-agent 작업물일 수 있으므로 버리지 않는다.
 
 복구 후 **반드시 에스컬레이션** — 어떤 명령 직후 발생했는지, working tree가 clean했는지를 사용자에게 보고한다. 자율 모드라도 이 가드 실패는 hard stop이다 (`autonomous-driving.md`).
+
+---
+
+## Authorship 확인 (통합 후 committer 정정)
+
+sub-agent worktree에서 만든 커밋을 epic 브랜치로 가져오면(머지·cherry-pick·rebase 어떤 경로든), 그 커밋의 committer가 위임한 sub-agent 자신의 git 아이덴티티로 남을 수 있다. 통합을 수행한 것은 오케스트레이터(메인) 자신인데 committer가 위임자로 남으면 통합 이력이 실제 수행자와 어긋나고, 원격에서 서명·계정 매칭이 안 되면 Unverified로 표시된다.
+
+- **확인**: 매 머지/cherry-pick/rebase 직후, 새로 들어온 커밋의 committer가 위임한 sub-agent가 아니라 오케스트레이터 자신인지 확인한다 (`git log --format='%H %cn %ce' -n <N>` 등). 구체 아이덴티티 값(이메일 등)은 이 문서가 규정하지 않는다 — 프로젝트/환경의 git 설정을 따른다.
+- **정정**: committer가 위임한 sub-agent로 남아 있으면 정정한다. `--reset-author`는 committer뿐 아니라 **author까지** 현재 사용자로 덮어써 sub-agent의 저작자 표시를 지운다는 점에 주의 — author 보존 여부에 따라 명령이 갈린다.
+  - committer만 갱신하고 author(sub-agent 저작자 표시)는 유지: `git commit --amend --no-edit` (단일 커밋) / `git rebase --exec 'git commit --amend --no-edit' <base>` (여러 커밋)
+  - author까지 오케스트레이터로 정정: `git commit --amend --no-edit --reset-author` (단일 커밋) / `git rebase --exec 'git commit --amend --no-edit --reset-author' <base>` (여러 커밋)
+  - 어느 쪽을 쓸지는 프로젝트 판단이다 — 이 문서는 하나로 확정하지 않는다.
+- 이 확인은 위 §토폴로지 가드와 같은 시점(매 머지 직후)에 함께 수행한다.
 
 ---
 
@@ -212,6 +231,7 @@ git diff --name-only epic/<name>...<branch_B>  # B가 변경한 파일
 6. **main으로 바로 머지**: epic 브랜치를 거치지 않고 sub-agent 결과를 main으로 직접 머지 → epic 브랜치 전략 위반. 이 단계의 target은 항상 epic 브랜치.
 7. **머지 후 가드 생략**: 머지 직후 current branch 확인 없이 다음 git 명령 진행 → 메인이 sub-agent 브랜치 위에서 작업하는 토폴로지 위반을 뒤늦게 발견. 매 머지 직후 가드 필수.
 8. **조기 완료 선언**: 개별 worktree/중간 브랜치 green만으로 완료 보고 → 머지 결합 후 회귀 가능성을 놓침. epic 브랜치 최종 HEAD 전체 스위트 green과 HEAD sha 명시를 완료 선언의 전제로 한다.
+9. **통합 후 authorship 미확인**: 머지/cherry-pick/rebase로 sub-agent 커밋을 가져온 뒤 committer 확인 없이 다음 단계로 진행 → 통합을 수행한 오케스트레이터가 아니라 위임한 sub-agent가 committer로 남을 수 있다. 매 머지 직후 확인 필수 (§Authorship 확인).
 
 ---
 
@@ -224,11 +244,13 @@ git diff --name-only epic/<name>...<branch_B>  # B가 변경한 파일
 - [ ] 의존성 + 변경 파일 overlap을 파악했는가?
 - [ ] 머지 순서를 결정했는가? (의존성 없는 것 → 적은 변경 → 알파벳)
 - [ ] base(=epic 브랜치)를 최신화했는가?
+- [ ] 각 후보 브랜치의 merge-base를 확인했는가? (뒤처진 base 위에서 작업됐다면 최신 HEAD 기준 유효성 재확인)
 
 머지 진행 중:
 
 - [ ] 충돌 발생 시 직접 편집하지 않고 위임/보고했는가?
 - [ ] 매 머지 직후 `git branch --show-current` == epic 브랜치를 확인했는가?
+- [ ] 매 머지 직후 통합 커밋의 committer가 오케스트레이터 자신인지 확인하고, 위임한 sub-agent로 남아있으면 정정했는가?
 
 머지 종료 후:
 

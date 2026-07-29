@@ -71,7 +71,7 @@ main
 2. **현재 메인이 다른 worktree 안에 있지 않은가?**
    - `git rev-parse --show-toplevel` 가 repo의 메인 working tree여야 함
    - worktree 안에서 오케스트레이터를 시작했다면 즉시 메인 working tree로 빠져나오도록 사용자에게 보고
-3. **이후 모든 sub-agent dispatch는 `isolation: "worktree"` 로** — base는 현재 epic 브랜치 (Agent isolation이 자동으로 현재 HEAD를 base로 worktree를 만든다)
+3. **이후 모든 sub-agent dispatch는 `isolation: "worktree"` 로** — worktree의 base가 dispatch 시점 epic 브랜치 HEAD라는 보장은 없다. dispatch prompt에 base 확인·동기화 지시를 반드시 포함한다 (`references/delegation-patterns.md §Prompt 작성 원칙 필수 포함 요소` 9번이 단일 출처)
 4. **agent team이 이번 세션에서 가용한가?**
 
 ```
@@ -329,3 +329,4 @@ team을 "쓰면 좋다"로 두면 폴백이 사실상 기본값이 되어 team �
 9. **고무도장 메인**: 상위 tier라는 이유로 권고를 검토 없이 채택 → 실질 오케스트레이터가 advisor가 되고 메인은 전달자로 전락한다. 결정권은 메인에 있고, 채택도 기각도 사유와 함께 기록한다.
 10. **자문 tier가 다른 역할로 번짐**: "자문은 X 모델로"라는 역할 지목 제약을 받고 discovery·조사·구현까지 X로 dispatch → 상위 tier 예외가 전역 기본값이 되어 집행 위임의 tier 상한이 무너지고 비용도 폭증한다. 자문 외의 모든 위임은 집행 위임이며 메인 tier를 넘지 못한다 (§역할 기준 원칙 / §역할별 모델 제약).
 11. **env 한 줄로 team 비가용 단정**: `printenv`가 비었다는 이유만으로 team 경로를 닫음 → Bash는 메인과 다른 프로세스라 false negative가 구조적으로 발생하고, 판정 하나가 틀리면 team 전제 경로가 동시에 죽는다. 권위 있는 신호는 `Agent` 스키마의 `name`이다 (§진입 시 체크 4).
+12. **블록 변환 위임 시 모호함 확정 유도**: 산문 → ASCII 블록 변환을 위임하며 "미확정 항목으로 남기라"는 대체 출구 없이 "고치지 말고 보고하라"만 지시 → 블록화 자체가 확정을 강요해 위반이 재발한다. 위임 prompt에 미확정 항목 형식을 함께 지시한다 (`references/delegation-patterns.md §Prompt 작성 원칙`이 단일 출처).
