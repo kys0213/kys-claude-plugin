@@ -13,7 +13,7 @@ user-invocable: false
 
 오케스트레이터에서 worktree는 **항상 epic 브랜치 위의 sub-agent 격리 수단**이다. 메인은 worktree를 사용하지 않는다.
 
-- 모든 sub-agent worktree의 **base는 현재 epic 브랜치**
+- 모든 sub-agent worktree는 **현재 epic 브랜치 기준으로 동기화된 상태에서 작업**한다 (자동 보장 아님 — 확인·동기화는 `delegation-patterns.md §Prompt 작성 원칙 필수 포함 요소` 9번이 단일 출처)
 - sub-agent 결과는 **epic 브랜치로 머지** (main 직접 머지 X)
 - 메인은 epic 브랜치의 **메인 working tree**에 머문다 — EnterWorktree 금지
 
@@ -21,7 +21,7 @@ user-invocable: false
 
 `Agent`에 `isolation: "worktree"`와 `run_in_background: true`를 지정하고, prompt에 epic 브랜치 이름을 컨텍스트로 포함한다.
 
-- Agent가 자동으로 worktree를 만들고 그 안에서 작업 (현재 HEAD = epic 브랜치를 base로 함)
+- Agent가 자동으로 worktree를 만들고 그 안에서 작업 (base가 dispatch 시점 epic 브랜치 HEAD라는 보장은 없다 — 확인·동기화는 `delegation-patterns.md §Prompt 작성 원칙 필수 포함 요소` 9번이 단일 출처)
 - **변경이 없으면 자동 정리** — 메인이 신경 쓸 필요 없음
 - **변경이 있으면** 결과에 worktree 경로와 브랜치명이 포함됨
 - 병렬 fan-out에 가장 적합
@@ -43,7 +43,7 @@ files_B = analyze_files(task_B)
 if not disjoint(files_A, files_B):
     → 순차로 전환 (worktree 병렬 X)
 
-# Dispatch (worktree base는 자동으로 현재 HEAD = epic 브랜치)
+# Dispatch (worktree base는 자동 보장되지 않음 — prompt에 base 확인·동기화 지시 포함)
 Agent({description: "task A", isolation: "worktree", run_in_background: true,
        prompt: "<자기완결, epic 브랜치 이름 포함>"})
 Agent({description: "task B", isolation: "worktree", run_in_background: true,

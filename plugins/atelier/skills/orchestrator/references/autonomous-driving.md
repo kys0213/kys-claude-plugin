@@ -25,8 +25,12 @@ user-invocable: false
 자율 계약:
 - 종료 조건 (done_when):     무엇이 충족되면 끝인가 (검증 가능해야 함)
 - 예산:                      max_loops, max_redispatch_per_task, (가능하면) 시간/턴 상한
-- 자문 (advisory):           가용 여부 + max_advisory_consults (기본 2)
-                             — 가용 = agent team 플래그 on (SKILL.md §진입 시 체크)
+- 자문 (advisory):           가용 여부 + max_advisory_consults
+                             — 가용 = team 가용 판정 (SKILL.md §진입 시 체크 4,
+                               권위 신호는 `Agent` 스키마의 `name`. 자문은 team 필수 등급)
+                             — 가용이면 기본 2, **비가용이면 0 (경로 차단)**
+                               예산 0 = 트리거에 도달해도 쓸 수 있는 것이 없다는 뜻이며,
+                               폴백 여지를 남기지 않는다 (advisory-consult.md §게이트 0)
 - 자동 중단 (hard_stops):    무엇이 발생하면 예산과 무관하게 멈추고 보고하는가
 - 결정 기록 위치 (log_dir):  .orchestrator/<epic>/decisions/ (gitignore, 완료 시 요약 공유)
 - 통합 검증 (integration_verify): (선택) worktree에서 실행 불가한 인프라 의존 테스트
@@ -115,12 +119,12 @@ escalate_or_report(reason, decision_log=contract.log_dir)   # 완료 / 예산소
 
 자율 루프는 본질적으로 **구현 → 리뷰 → 수정**을 반복하는 구조다. 두 책임을 분리한다: **편집·격리는 `isolation:"worktree"` subagent가**(하베스트 보장), **조율은 team이**(공유 checkout).
 
-핵심 제약 (team의 격리 특성·실험 플래그 전제는 `delegation-patterns.md §Agent team 사용 패턴`이 단일 출처):
+핵심 제약 (team의 격리 특성·가용 전제는 `delegation-patterns.md §Agent team 사용 패턴`이 단일 출처):
 
 - **편집은 teammate가 직접 하지 않고 `isolation:"worktree"` subagent에 위임**한다.
-- 실험 플래그가 없는 환경에서는 team을 쓰지 않고 단발 격리 subagent 재위임으로 review→fix를 돈다.
+- review→fix 루프는 `SKILL.md §team mode 강제 등급`의 **선호** 등급이다 — 편집이 개입하고 격리를 보장하는 것은 team이 아니라 격리 subagent이므로, team이 비가용이면 단발 격리 subagent 재위임으로 돈다(폴백 허용). **이 폴백 허용은 선호 등급 경로에만 적용된다** — 자문·협의체는 필수 등급이라 폴백이 위반이다.
 
-team을 쓸 때의 이득 (실험 플래그 활성 시):
+team을 쓸 때의 이득 (team 가용 시):
 
 - **리뷰어·QA 게이트 조율**: reviewer/qa teammate + implementer teammate를 한 team에 두면, 게이트 거부 findings를 **team 내부 SendMessage로 전달**해 다음 라운드를 조율한다 (실제 편집은 implementer가 격리 subagent로 위임).
 - **장기 런에서 식별·제어 가능**: 이름으로 SendMessage해 정체 해소·단계 전환을 지시할 수 있다 (*자동 개입 규칙*이 허용).
@@ -128,10 +132,10 @@ team을 쓸 때의 이득 (실험 플래그 활성 시):
 
 구성:
 
-- **feature/task 하나 = team 하나**(실험 플래그 시). reviewer + implementer 역할. 구성·이름·수명은 `delegation-patterns.md §Agent team 사용 패턴`을 따른다. **편집 격리는 team이 아니라 그 안에서 띄우는 `isolation:"worktree"` subagent가 책임진다** — teammate에게 worktree 이동을 위임하지 않는다.
+- **feature/task 하나 = team 하나**(team 가용 시). reviewer + implementer 역할. 구성·이름·수명은 `delegation-patterns.md §Agent team 사용 패턴`을 따른다. **편집 격리는 team이 아니라 그 안에서 띄우는 `isolation:"worktree"` subagent가 책임진다** — teammate에게 worktree 이동을 위임하지 않는다.
 - **review→fix 조율**: reviewer reject → implementer에게 SendMessage → implementer가 격리 subagent로 수정 재위임 → 재리뷰. 이 사이클도 `max_redispatch_per_task` 예산을 동일하게 소모한다 (무한 반복 금지). 소진 → hard stop → 에스컬레이션.
 
-플래그가 없거나 조율이 불필요하면 **단발 격리 subagent 재위임**(이전 실패 맥락 포함)으로 review→fix를 돈다. 의심스러우면 단발 subagent를 고른다 — 격리가 항상 보장되기 때문이다.
+team이 비가용이거나 조율이 불필요하면 **단발 격리 subagent 재위임**(이전 실패 맥락 포함)으로 review→fix를 돈다. 이 선호 등급 안에서는 의심스러우면 단발 subagent를 고른다 — 격리가 항상 보장되기 때문이다.
 
 ---
 
@@ -152,11 +156,13 @@ HITL(opt-out) 모드에서 금지된 행위가 자율 모드(기본)에서는 **
 | 행위 | HITL (opt-out) | 자율 (기본) |
 |------|----------|-------------------|
 | 자동 재위임 | 외부환경 원인 1회만 | 예산(`max_redispatch_per_task`) 한도 내 반복 |
-| SendMessage 명령 주입 | 금지 | 계획된 단계 전환 + 정체 해소용 허용 |
+| **집행 agent에 대한** SendMessage 명령 주입 | 금지 | 계획된 단계 전환 + 정체 해소용 허용 |
 | 자동 머지 | 보고 후 진행 | 충돌 없으면 자동 |
 | 자동 충돌 해결 | 위임/보고 후 결정 | 충돌 해결 전담 sub-agent에 자동 위임 |
 
 각 행위는 **예산을 소모**한다. 예산이 소진되거나 hard stop에 닿으면 그 즉시 멈춘다.
+
+주어가 **집행 agent**인 데 유의한다 — 집행 중이 아닌 상대와의 왕복(자문 반문 등)은 애초에 이 표의 대상이 아니며, 허용 여부는 `agent-monitor.md §SendMessage`가 단일 소유한다.
 
 ### 재위임 (자동)
 
@@ -272,6 +278,15 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 - 영향: 어떤 작업/브랜치에 적용됐는가
 ```
 
+**team 필수 등급 경로(자문·협의체)의 기록에는 두 필드를 추가로 반드시 남긴다** (`SKILL.md §team mode 강제 등급` 가드 2):
+
+```markdown
+- 실행 형태: teammate | subagent      ← 폴백 여부를 사후에 판별할 유일한 근거
+- 판정 근거: 스키마 | env             ← team 가용 판정을 어느 신호로 내렸는가
+```
+
+두 필드가 없으면 "team으로 돌렸다"는 서술을 검증할 방법이 없어 감사가 성립하지 않는다 — 필수 등급 경로의 기록으로 인정하지 않는다.
+
 ### 완료 시 공유
 
 작업 완료(또는 에스컬레이션) 시점에 메인은 decision log를 **종료 보고에 함께 포함**한다:
@@ -324,17 +339,38 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 
 자율 주행이 기본이라도 다음은 **항상** 멈추고 사람에게 보고한다 (예산과 무관, 우선 적용):
 
-- **되돌리기 어렵거나 외부로 나가는 행위**: force push, main 브랜치 머지, 배포, 외부 서비스 호출, 데이터 삭제 — 자율 모드는 epic 브랜치 안에서만 자율이고, 그 경계를 넘는 행위는 자동화 대상이 아니다.
-- **토폴로지 위반**: 메인 working tree branch가 epic 브랜치가 아니게 되거나 의도치 않은 변경이 발견됨 — 복구 후 즉시 보고.
-- **integration_verify 실패**: 계약에 정의된 인프라 의존 검증이 실패 — 자동 머지/루프 진행 금지.
-- **도메인 의미 충돌**: 의도가 갈리는 머지 충돌 (코드로 판정 불가).
-- **예산 소진**: 루프 상한 / 재위임 한도 / no-progress 도달.
-- **원인 불명확한 반복 실패**: 같은 실패가 재위임에도 계속됨.
-- **종료 조건 자체가 검증 불가능해짐**: 테스트 인프라 붕괴 등으로 done 판정이 불가능.
+```
+에스컬레이션 판정
+  │
+  └─ 아래 7개 중 하나라도 해당하는가
+       │  1. 되돌리기 어렵거나 외부로 나가는 행위
+       │       force push · main 브랜치 머지 · 배포 · 외부 서비스 호출 · 데이터 삭제
+       │  2. 토폴로지 위반
+       │       메인 working tree branch ≠ epic 브랜치 / 의도치 않은 변경 발견
+       │       → 복구 후 즉시 보고 (아래 참고)
+       │  3. integration_verify 실패
+       │       계약에 정의된 인프라 의존 검증 실패 → 자동 머지·루프 진행 금지
+       │  4. 도메인 의미 충돌
+       │       의도가 갈리는 머지 충돌 (코드로 판정 불가)
+       │  5. 예산 소진
+       │       루프 상한 / 재위임 한도 / no-progress 도달
+       │  6. 원인 불명확한 반복 실패
+       │       같은 실패가 재위임에도 계속됨
+       │  7. 종료 조건 자체가 검증 불가능해짐
+       │       테스트 인프라 붕괴 등으로 done 판정 불가
+       │
+       ├─ Yes ─→ 멈추고 보고
+       └─ No  ─→ 루프 계속
+```
 
-에스컬레이션 = 멈추고 **현재 상태 + 남은 작업 + 막힌 지점 + 선택지**를 한 번에 보고.
+- **조건 2의 미확정 지점**: 원문은 토폴로지 위반에만 "복구 후 즉시 보고"를 덧붙였는데, 이것이 보고 *순서*만 규정하는지 공통 보고 포맷을 대체하는지는 원문이 정하지 않았다. 여기서 확정하지 않는다.
+- **1의 경계 근거**: 자율 모드는 epic 브랜치 안에서만 자율이고, 그 경계를 넘는 행위는 자동화 대상이 아니다.
 
-**자문 경로와의 관계**: 자문이 가용하면 일부 에스컬레이션(협의체 예산 소진·게이트 재위임 루프·되돌리기 어려운 결정) 직전에 상위 tier 권고를 한 번 받아볼 수 있다 — 그래도 **에스컬레이션 조건 자체는 유지된다**. 자문은 멈추는 판단을 대체하지 않고 보고에 실을 근거를 더할 뿐이다. 반대로 advisor가 `critical` 권고를 내면 그 자체가 에스컬레이션 트리거로 승격된다 (`advisory-consult.md`). 자문 경로가 비활성이면 종전대로 바로 에스컬레이션한다.
+에스컬레이션 = 멈추고 **현재 상태 + 남은 작업 + 막힌 지점 + 선택지**를 한 번에 보고 (아래 자문 경로의 에스컬레이션에도 동일 적용).
+
+**자문 경로와의 관계**: 자문이 가용하면 일부 에스컬레이션(협의체 예산 소진·게이트 재위임 루프·되돌리기 어려운 결정) 직전에 상위 tier 권고를 한 번 받아볼 수 있다 — 그래도 **에스컬레이션 조건 자체는 유지된다**. 자문은 멈추는 판단을 대체하지 않고 보고에 실을 근거를 더할 뿐이다. 가용성 게이트와 예산 분기를 포함한 절차는 `advisory-consult.md §게이트 0`이 단일 출처다. 자문 경로가 비활성이면 종전대로 바로 에스컬레이션한다.
+
+- **advisor `critical` 승격**: 자문 결과가 `critical`이면 그 자체가 위 7개 조건과 별개로 에스컬레이션 트리거로 승격된다 (`advisory-consult.md`).
 
 ---
 
@@ -379,7 +415,8 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 - [ ] 예산(`max_loops` / `max_redispatch_per_task` / no-progress)과 hard stop 조건을 계약에 고정했는가?
 - [ ] 결정 기록 위치(`.orchestrator/<epic>/decisions/`)를 고정하고 자율 계약을 1회 보고했는가?
 - [ ] 인프라 의존 테스트가 있다면 `integration_verify` (command + run_at)를 계약에 정의했는가?
-- [ ] 자문 가용 여부(team 플래그)를 진입 시 확정하고 `max_advisory_consults`를 계약에 고정했는가?
+- [ ] 자문 가용 여부(team 가용 판정 — 권위 신호는 `Agent` 스키마의 `name`)를 진입 시 확정하고 `max_advisory_consults`를 계약에 고정했는가?
+- [ ] 필수 등급 경로(자문·협의체)를 team으로 돌렸고, spawn 확인 + `실행 형태`·`판정 근거` 필드를 기록했는가?
 
 루프 중:
 

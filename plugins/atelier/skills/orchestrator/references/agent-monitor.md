@@ -84,12 +84,15 @@ TaskUpdate({taskId: "1", status: "completed"})                         # 완료 
 ### 허용 케이스
 - 사용자가 명시적으로 "그 agent에게 이렇게 전달해줘"라고 지시
 - agent team 내에서 단계 전환 (예: reviewer 결과를 implementer에 전달) — 이미 계획된 흐름
+- **자문자(advisor)에 대한 반문** — 권고 → 메인 반문 → 재답변의 왕복 (`advisory-consult.md §소집 절차`). 이 왕복이 자문을 team 필수 등급으로 만든 근거이므로, 막으면 자문 경로 자체가 성립하지 않는다. HITL 모드에서도 허용된다.
 
 ### 금지 케이스
 - 메인이 자체 판단으로 정체된 agent에 "다시 시도해줘" 보내기 → 폭주 위험
 - 실패한 agent에 자동으로 수정 지시 보내기 → 사용자가 모르게 진행 방향 변경됨
 
-원칙: **새 정보는 사용자에게서만 온다**. 메인이 만들어낸 지시를 sub-agent에 주입하지 않음.
+원칙: **집행 중인 agent에 메인이 만들어낸 새 지시를 주입하지 않는다**. 금지의 근거는 둘이다 — 폭주 위험, 그리고 사용자가 모르게 진행 방향이 바뀌는 것.
+
+자문 반문이 예외인 이유는 그 두 근거가 구조적으로 성립하지 않기 때문이다: advisor는 **편집권도 결정권도 없어** 진행 방향을 바꿀 수 없고(권고만 반환), 왕복이 `max_advisory_consults` 예산을 소모해 폭주하지 않는다. 근거가 없는데 규칙만 적용하면 자문의 실질을 잃는다.
 
 ---
 
@@ -187,7 +190,7 @@ TaskUpdate({taskId: "1", status: "completed"})                         # 완료 
 
 ## team 진행 추적
 
-agent team(실험 플래그 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 필요)의 경우 여러 agent가 동시에 진행 중일 수 있다. team spawn 패턴과 편집 격리 제약(`Agent({name, ...})` + `SendMessage`, teammate는 편집하지 않음)은 `references/delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다.
+agent team(가용 판정은 `SKILL.md §진입 시 체크 4`)의 경우 여러 agent가 동시에 진행 중일 수 있다. team spawn 패턴과 편집 격리 제약(`Agent({name, ...})` + `SendMessage`, teammate는 편집하지 않음)은 `references/delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다.
 
 - 각 agent의 완료 알림이 별개로 도착하고, name으로 식별해 어떤 역할이 끝났는지 즉시 파악한다.
 - 한 agent가 다른 agent의 결과를 기다려야 할 때: 미리 의존성을 명시한 prompt로 띄우거나, 메인이 한 단계 완료 후 다음 단계를 호출한다(순차).
@@ -217,7 +220,7 @@ team은 session 종료 시 **자동 정리**된다 (`TeamDelete` 없음 — 제�
 
 - [ ] 정상 진행은 침묵하고 있는가?
 - [ ] 정체/실패만 사용자에게 보고하는가?
-- [ ] 자동으로 SendMessage를 보내려 하고 있지 않은가? (사용자 결정 우선)
+- [ ] 자동으로 SendMessage를 보내려 하고 있지 않은가? (사용자 결정 우선 — 단 자문 반문은 허용)
 - [ ] fan-out이면 각 agent 완료 즉시 체크포인트를 확인하고 있는가? (전체 완료 대기 금지)
 - [ ] gateway/API 에러 실패는 재시도 예산(기본 3회) 안에서 재위임하고 있는가?
 - [ ] 편집 목적 agent의 완료 수령 시 실제 diff 존재를 확인했는가? (§no-op run 감지)

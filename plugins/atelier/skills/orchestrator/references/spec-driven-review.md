@@ -44,17 +44,19 @@ user-invocable: false
 
 ---
 
-## 팀 구성 (실험 플래그 활성 시)
+## 팀 구성 (team 가용 시)
 
-`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`일 때, spec 구현 작업 하나에 **조율 전용 team**을 둔다. team spawn·SendMessage 개입·편집 격리(teammate는 편집하지 않고 `isolation:"worktree"` subagent에 위임)의 일반 패턴은 `delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다.
+이 게이트는 `SKILL.md §team mode 강제 등급`의 **선호** 등급이다 — 게이트의 본질은 team이 아니라 **구현과 분리된 두 검증 차원**이고 편집이 개입하므로, team이 없으면 단발 폴백으로도 본질이 유지된다(아래 §폴백).
+
+team이 가용하면 spec 구현 작업 하나에 **조율 전용 team**을 둔다. team spawn·SendMessage 개입·편집 격리(teammate는 편집하지 않고 `isolation:"worktree"` subagent에 위임)의 일반 패턴은 `delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다.
 
 spec 모드에서 달라지는 것은 두 teammate(spec-reviewer / qa-manager)의 **검증 질문**뿐이며, 그 내용은 위 §두 게이트의 책임 분리 표에 있다. 구현 자체는 격리 subagent(`isolation:"worktree"`)에 위임하고, 거부 findings는 team 내부 SendMessage로 두 teammate에 전달한다.
 
 > teammate의 상세 findings·diff는 teammate 컨텍스트에 남기고, 메인은 두 게이트의 **verdict + 압축 요약(누락/초과 항목)** 만 받는다 (`autonomous-driving.md §메인 컨텍스트 격리`).
 
-### 폴백 — 실험 플래그 없음
+### 폴백 — team 비가용 (선호 등급이므로 허용)
 
-플래그가 없으면 team을 쓰지 않고 **단발 격리/read-only subagent 2개**로 같은 두 게이트를 돈다 — 검토자 subagent + QA 매니저 subagent를 병렬 dispatch하고, 거부 시 이전 findings를 새 구현 prompt에 자기완결적으로 실어 재위임한다. 의심스러우면 폴백을 고른다 — 게이트의 본질은 team이 아니라 **구현과 분리된 두 검증 차원**이기 때문이다.
+team이 비가용이면 **단발 격리/read-only subagent 2개**로 같은 두 게이트를 돈다 — 검토자 subagent + QA 매니저 subagent를 병렬 dispatch하고, 거부 시 이전 findings를 새 구현 prompt에 자기완결적으로 실어 재위임한다. 이 게이트 안에서는 의심스러우면 폴백을 고른다 — 게이트의 본질은 team이 아니라 두 검증 차원이기 때문이다.
 
 ---
 
@@ -119,6 +121,6 @@ worktree 코드를 한 번 보고 끝내지 않고, **머지 전까지 두 게�
 - [ ] 편집(개선)은 teammate가 아니라 `isolation:"worktree"` subagent로 위임했는가?
 - [ ] 거부 findings를 `spec 위치 ↔ 코드 위치`로 구체화해 재위임 prompt에 실었는가?
 - [ ] 게이트 거부가 `max_redispatch_per_task` 예산을 소모하며 카운트되는가?
-- [ ] 실험 플래그가 없으면 단발 subagent 2개 폴백으로 두 차원을 유지하는가?
+- [ ] team이 비가용이면 단발 subagent 2개 폴백으로 두 차원을 유지하는가? (선호 등급 — 폴백 허용)
 - [ ] 메인이 verdict + 압축 요약만 받고, 거부 사유를 decision log에 기록하는가?
 - [ ] `done_when`에 "모든 spec 작업이 검토자·QA 둘 다 pass"를 포함했는가?
