@@ -21,7 +21,7 @@ user-invocable: false
 4. **예산(`max_council_rounds`) 소진 시 에스컬레이션.** 무한 심문 금지 — 미해소 findings와 함께 멈추고 보고한다.
 5. **team mode 필수.** 협의체는 `SKILL.md §team mode 강제 등급`의 **필수** 등급이다 — 심문은 라운드 간 맥락이 이어져야 성립하는데 단발 subagent는 직전 라운드를 기억하지 못해 **상호 반박 자체가 불가능**하고(대체 불가), 두 자세 모두 read-only 분석이라 강제 비용도 없기 때문이다(아래 §두 자세). team 이 비가용이면 단발 subagent 로 **조용히 폴백하지 않고 즉시 에스컬레이션**한다 — 스펙 불일치를 폴백으로 숨기지 않는다는 Fail Fast 원칙에 따라 드러내고 멈춘다.
    - 가용 판정은 진입 시 1회 확정된 것을 따른다 (`SKILL.md §진입 시 체크 4` — 권위 신호는 `Agent` 스키마의 `name`, `printenv` 는 보조. env 만 보고 비가용으로 단정하지 않는다).
-   - 필수 등급의 가드 두 개(**spawn 확인**, decision log 의 **`실행 형태`·`판정 근거` 필수 필드**)를 그대로 적용한다 — 상세 절차는 `advisory-consult.md §spawn 확인` / `§기록`과 동일하다.
+   - 필수 등급의 가드 두 개(**spawn 확인**, decision log 의 **`실행 형태`·`판정 근거` 필수 필드**)를 그대로 적용한다 — 절차는 `delegation-patterns.md §spawn 확인`, 기록 형식은 `autonomous-driving.md §의사결정 기록`이 단일 출처다.
 
 ### 정책 (자유 — 강제하지 않음)
 

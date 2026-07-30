@@ -58,8 +58,6 @@ spec 모드에서 달라지는 것은 두 teammate(spec-reviewer / qa-manager)�
 
 team이 비가용이면 **단발 격리/read-only subagent 2개**로 같은 두 게이트를 돈다 — 검토자 subagent + QA 매니저 subagent를 병렬 dispatch하고, 거부 시 이전 findings를 새 구현 prompt에 자기완결적으로 실어 재위임한다. 이 게이트 안에서는 의심스러우면 폴백을 고른다 — 게이트의 본질은 team이 아니라 두 검증 차원이기 때문이다.
 
-> **이 폴백 기본값을 필수 등급 경로로 옮기지 않는다.** 자문(`advisory-consult.md`)과 아키텍트 협의체(`architect-council.md`)는 read-only 조율이 본질이라 team 필수 등급이고, 거기서 단발 폴백은 경로의 실질을 없애는 위반이다.
-
 ---
 
 ## continuous review → improve 루프

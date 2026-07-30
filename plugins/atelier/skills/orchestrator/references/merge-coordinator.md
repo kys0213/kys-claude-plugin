@@ -64,28 +64,28 @@ worktree 브랜치는 PR을 생성하지 않고 epic 브랜치로 수렴 후 삭
    - 충돌 없음 → 다음 후보로
    - 충돌 발생 → 위임 (아래 참조)
 
-5. 통합 커밋 authorship 확인 (매 머지 직후, 생략 금지)
-   - 명령·정정 절차는 아래 §Authorship 확인 참조 — committer가 위임한 sub-agent 자신으로 남아있으면 정정
+5. 머지 직후 가드 (매 머지 직후, 생략 금지)
+   불변식마다 (확인 → 위반 시 처리). **새 불변식이 생기면 이 목록에 한 줄 추가한다** — 단계를
+   신설하지 않는다 (단계를 늘리면 번호가 밀려 교차 참조까지 함께 고쳐야 한다).
+   - branch == epic 브랜치 + working tree clean → 복구 + 에스컬레이션 (아래 §토폴로지 가드)
+   - committer == 오케스트레이터 자신           → 정정 (아래 §Authorship 확인)
 
-6. 토폴로지 가드 (매 머지 직후, 생략 금지)
-   - 명령·복구 절차는 아래 §토폴로지 가드 참조 — 불일치 시 즉시 복구 + 에스컬레이션
-
-7. 머지 완료 후 worktree 정리
+6. 머지 완료 후 worktree 정리
    - 머지된 worktree 삭제
    - 폐기된 worktree도 사용자 확인 후 삭제
 
-8. 최종 통합 검증 게이트 (아래 "최종 통합 검증 게이트 (final HEAD full-suite)" 참조)
+7. 최종 통합 검증 게이트 (아래 "최종 통합 검증 게이트 (final HEAD full-suite)" 참조)
    - epic 브랜치 최종 HEAD clean 확인 후 전체 테스트 스위트 1회 실행
    - green이어야 완료 선언 가능 (HEAD sha 기록)
 
-9. 사용자에게 결과 요약 보고
+8. 사용자에게 결과 요약 보고
 ```
 
 ---
 
 ## 토폴로지 가드 (명령·복구 절차 단일 출처)
 
-메인은 항상 epic 브랜치의 메인 working tree에 있어야 한다. 머지 명령이나 sub-agent의 격리 이탈로 메인의 current branch가 sub-agent 브랜치로 switch되면, 오염된 HEAD 위에서 후속 dispatch의 worktree base가 잘못 잡히고 머지 경로가 어긋난다. 가드 명령과 복구 절차는 이 절이 단일 출처이며, **언제 실행하는가**는 각 단계 문서가 정한다 — 매 sub-agent 완료 알림 직후(`worktree-lifecycle.md`), 매 머지 직후(아래 §표준 절차 6), 자율 루프의 `assert_topology()`(`autonomous-driving.md`).
+메인은 항상 epic 브랜치의 메인 working tree에 있어야 한다. 머지 명령이나 sub-agent의 격리 이탈로 메인의 current branch가 sub-agent 브랜치로 switch되면, 오염된 HEAD 위에서 후속 dispatch의 worktree base가 잘못 잡히고 머지 경로가 어긋난다. 가드 명령과 복구 절차는 이 절이 단일 출처이며, **언제 실행하는가**는 각 단계 문서가 정한다 — 매 sub-agent 완료 알림 직후(`worktree-lifecycle.md`), 매 머지 직후(위 §표준 절차 5 머지 직후 가드), 자율 루프의 `assert_topology()`(`autonomous-driving.md`).
 
 ```bash
 git branch --show-current    # epic/<name> 이어야 함
@@ -116,7 +116,7 @@ sub-agent worktree에서 만든 커밋을 epic 브랜치로 가져오면(머지�
   - committer만 갱신하고 author(sub-agent 저작자 표시)는 유지: `git commit --amend --no-edit` (단일 커밋) / `git rebase --exec 'git commit --amend --no-edit' <base>` (여러 커밋)
   - author까지 오케스트레이터로 정정: `git commit --amend --no-edit --reset-author` (단일 커밋) / `git rebase --exec 'git commit --amend --no-edit --reset-author' <base>` (여러 커밋)
   - 어느 쪽을 쓸지는 프로젝트 판단이다 — 이 문서는 하나로 확정하지 않는다.
-- 이 확인은 위 §토폴로지 가드와 같은 시점(매 머지 직후)에 함께 수행한다.
+- 실행 시점은 §표준 절차 5(머지 직후 가드)의 한 불변식으로 관리된다 — 토폴로지 가드와 같은 시점이다.
 
 ---
 

@@ -135,7 +135,7 @@ team을 쓸 때의 이득 (team 가용 시):
 - **feature/task 하나 = team 하나**(team 가용 시). reviewer + implementer 역할. 구성·이름·수명은 `delegation-patterns.md §Agent team 사용 패턴`을 따른다. **편집 격리는 team이 아니라 그 안에서 띄우는 `isolation:"worktree"` subagent가 책임진다** — teammate에게 worktree 이동을 위임하지 않는다.
 - **review→fix 조율**: reviewer reject → implementer에게 SendMessage → implementer가 격리 subagent로 수정 재위임 → 재리뷰. 이 사이클도 `max_redispatch_per_task` 예산을 동일하게 소모한다 (무한 반복 금지). 소진 → hard stop → 에스컬레이션.
 
-team이 비가용이거나 조율이 불필요하면 **단발 격리 subagent 재위임**(이전 실패 맥락 포함)으로 review→fix를 돈다. 이 선호 등급 안에서는 의심스러우면 단발 subagent를 고른다 — 격리가 항상 보장되기 때문이다. **단, 이 "의심스러우면 단발" 기본값을 필수 등급 경로(자문·협의체)로 옮기지 않는다** — 거기서는 단발이 경로의 실질 자체를 없앤다.
+team이 비가용이거나 조율이 불필요하면 **단발 격리 subagent 재위임**(이전 실패 맥락 포함)으로 review→fix를 돈다. 이 선호 등급 안에서는 의심스러우면 단발 subagent를 고른다 — 격리가 항상 보장되기 때문이다.
 
 ---
 
@@ -156,12 +156,13 @@ HITL(opt-out) 모드에서 금지된 행위가 자율 모드(기본)에서는 **
 | 행위 | HITL (opt-out) | 자율 (기본) |
 |------|----------|-------------------|
 | 자동 재위임 | 외부환경 원인 1회만 | 예산(`max_redispatch_per_task`) 한도 내 반복 |
-| SendMessage 명령 주입 | 금지 | 계획된 단계 전환 + 정체 해소용 허용 |
-| SendMessage 자문 반문 | **허용** (예산 소모) | **허용** (예산 소모) — advisor는 편집·결정권이 없어 두 모드 모두 동일 |
+| **집행 agent에 대한** SendMessage 명령 주입 | 금지 | 계획된 단계 전환 + 정체 해소용 허용 |
 | 자동 머지 | 보고 후 진행 | 충돌 없으면 자동 |
 | 자동 충돌 해결 | 위임/보고 후 결정 | 충돌 해결 전담 sub-agent에 자동 위임 |
 
 각 행위는 **예산을 소모**한다. 예산이 소진되거나 hard stop에 닿으면 그 즉시 멈춘다.
+
+주어가 **집행 agent**인 데 유의한다 — 집행 중이 아닌 상대와의 왕복(자문 반문 등)은 애초에 이 표의 대상이 아니며, 허용 여부는 `agent-monitor.md §SendMessage`가 단일 소유한다.
 
 ### 재위임 (자동)
 

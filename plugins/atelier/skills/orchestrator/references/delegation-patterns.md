@@ -55,6 +55,7 @@ sub-agent는 **메인 대화 히스토리를 보지 못한다**. prompt는 자�
 7. **worktree 격리 준수** (`isolation: "worktree"` dispatch 시 필수): 모든 Edit/Write의 file_path와 Bash cwd가 자기 worktree 경로(`.claude/worktrees/agent-...`) 안인지 매 호출 전 검증하고, 부모 repo(메인 working tree)의 파일을 절대 직접 수정하지 말 것. 부모 repo에 의도치 않은 변경을 만들었음을 발견하면 직접 reset/checkout 하지 말고 변경을 stash로 보존한 뒤 보고할 것.
 8. **재위임 금지**: "이 작업을 다른 agent에게 재위임하지 말고 직접 수행하라. 막히면 실패 사유와 함께 종료하라"를 prompt에 포함할 것 (단, team teammate의 편집 격리용 isolated subagent 위임 1단계는 예외 — §위임 깊이 제한 참조).
 9. **base 확인** (`isolation: "worktree"` dispatch 시 필수): worktree의 base가 dispatch 시점 epic 브랜치 HEAD라는 보장은 없다. 작업 시작 전 base를 확인하고, 통합 브랜치(epic 브랜치) HEAD보다 뒤처져 있으면 fast-forward/rebase한 뒤 시작하라고 prompt에 명시할 것.
+10. **금지에는 출구를 함께 준다**: 금지 계약을 넣을 때는 "대신 무엇을 하라"를 반드시 같이 적는다. 금지만 주면 sub-agent는 그 상황에서 뭐라도 해야 하므로 위반이 재발한다. 위 7·8번이 이미 이 형태다 — 7번은 부모 repo 오염 금지에 "stash로 보존한 뒤 보고"를, 8번은 재위임 금지에 "실패 사유와 함께 종료"를 출구로 붙였다. 새 금지를 추가할 때도 같은 짝을 지킨다.
 
 ### 안티패턴
 
@@ -64,18 +65,14 @@ sub-agent는 **메인 대화 히스토리를 보지 못한다**. prompt는 자�
 
 **Edit 절대경로 트랩**: worktree 격리 sub-agent라도 Edit tool의 file_path가 부모 repo의 절대경로를 가리키면 격리를 우회해 메인 working tree가 직접 수정된다. Bash cwd가 worktree여도 Edit는 별개 경로 판정이므로, prompt에 worktree 격리 준수(위 7번)를 반드시 명시한다. 부모 repo가 변형되면 메인 branch switch까지 이어질 수 있다.
 
-### 산문 → 블록 변환 위임: 모호함을 확정하지 않기
+### 적용 사례 — 산문 → 블록 변환 위임
 
-산문은 모호한 채로 존재할 수 있지만 블록(트리·우선순위 블록)은 그럴 수 없다 — 분기에 넣으려면 어느 가지로 보낼지 정해야 하므로, 변환 행위 자체가 확정을 강요한다. "모호하면 고치지 말고 보고하라"는 지시만으로는 이 압력을 막지 못한다.
-
-**규칙**: 원문의 모호함이 블록 구조로 표현되지 않으면, 블록 안에서 임의로 해소하지 말고 블록 밖에 "미확정" 항목으로 남긴다.
+위 10번(금지에는 출구를)이 실제로 걸리는 자리 하나. 산문은 모호한 채로 존재할 수 있지만 블록(트리·우선순위 블록)은 그럴 수 없어, **변환 행위 자체가 확정을 강요**한다. 따라서 "모호하면 확정하지 마라"는 금지에 붙일 출구를 함께 준다 — 블록 밖 "미확정" 항목:
 
 ```
 - **<조건/항목>의 미확정 지점**: 원문은 …인데, 이것이 A인지 B인지는 원문이 정하지 않았다.
   여기서 확정하지 않는다.
 ```
-
-산문 → 블록 변환을 위임하는 prompt에는 "발견하면 고치지 말고 보고하라"와 함께 이 형식(미확정 항목으로 명시적으로 남기기)을 대체 출구로 함께 지시한다 — 금지만 주고 출구를 주지 않으면 재발한다.
 
 ---
 
@@ -134,7 +131,7 @@ Agent({
 
 > **전제**: agent team은 실험 기능이라 세션마다 가용 여부가 다르다. **가용 판정의 권위 신호는 `Agent` 도구 스키마에 `name` 파라미터가 노출되는지**이며, `printenv CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`는 보조 신호다(Bash는 메인과 다른 프로세스라 단독 근거가 못 된다) — 판정 절차는 `SKILL.md §진입 시 체크 4`, 경로별 강제 등급은 `SKILL.md §team mode 강제 등급`이 단일 출처다. 과거의 `TeamCreate`/`TeamDelete` 도구는 제거됐고, `Agent`의 `team_name` 인자는 받지만 무시된다 — 세션마다 암묵적 team 하나가 있고 `name`으로 바로 spawn하며, session 종료 시 자동 정리된다.
 >
-> **`name`을 넘겼다고 teammate로 떴다는 보장은 없다** — `team_name`이 조용히 무시되는 선례가 이미 있다. team 필수 등급 경로는 첫 spawn 직후 `SendMessage`로 도달 가능한 식별자인지 **spawn 확인**을 실행한다 (`advisory-consult.md §spawn 확인`).
+> **`name`을 넘겼다고 teammate로 떴다는 보장은 없다** — `team_name`이 조용히 무시되는 선례가 이미 있다. team 필수 등급 경로는 아래 §spawn 확인을 실행한다.
 
 > **team은 공유 checkout이다 — per-teammate worktree 격리가 없다.** 같은 파일을 두 teammate가 편집하면 덮어쓴다. 따라서 **편집·격리가 필요한 작업은 teammate가 직접 하지 않고 isolated subagent에 위임**한다. team은 read-only 조율/리뷰만 맡는다.
 
@@ -166,7 +163,24 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 - `run_in_background: true`로 띄워야 SendMessage로 개입할 수 있다.
 - team은 session 종료 시 **자동 정리**된다 (`TeamDelete` 없음). 별도 정리 단계 불필요.
 - **편집 격리는 team이 아니라 subagent의 `isolation:"worktree"`가 보장한다.** teammate에게 worktree 이동을 위임하지 말 것 — 격리가 도구 보장에서 프롬프트 희망으로 격하되어 공유 checkout(메인 epic 브랜치)이 오염될 수 있다.
-- **teammate의 권한은 도구로 제한할 수 없다 — 계약 + 사후 탐지로만 관리한다.** 별도 agent 정의를 지정해 tools를 좁히는 경로(`subagent_type`)는 **단발 subagent의 것**이고, team spawn과 결합한 선례가 없다. 따라서 read-only teammate라도 실제로는 편집·`SendMessage`가 가능하다. 금지는 prompt에 계약으로 명시하고, 위반은 **토폴로지 가드로 탐지**한다(사전 차단 아님 — `merge-coordinator.md §토폴로지 가드`). 도구 수준 보장이 꼭 필요한 역할이면 team이 아니라 단발 subagent를 고른다.
+- **teammate의 권한은 도구로 제한할 수 없다 — 계약 + 사후 탐지로만 관리한다.** (spawn 성공 여부의 검증은 아래 §spawn 확인) 별도 agent 정의를 지정해 tools를 좁히는 경로(`subagent_type`)는 **단발 subagent의 것**이고, team spawn과 결합한 선례가 없다. 따라서 read-only teammate라도 실제로는 편집·`SendMessage`가 가능하다. 금지는 prompt에 계약으로 명시하고, 위반은 **토폴로지 가드로 탐지**한다(사전 차단 아님 — `merge-coordinator.md §토폴로지 가드`). 도구 수준 보장이 꼭 필요한 역할이면 team이 아니라 단발 subagent를 고른다.
+
+### spawn 확인 (단일 출처)
+
+`Agent({name})`을 호출했다고 teammate로 떴다는 보장은 없다 — `team_name` 인자가 조용히 무시되는 선례가 이미 있다. **team 필수 등급 경로**(`SKILL.md §team mode 강제 등급`)는 첫 spawn 직후 이 확인을 실행한다.
+
+```
+첫 Agent({name, ...}) 직후
+  │
+  └─ 그 agent가 SendMessage로 도달 가능한 식별자인가?
+       ├─ Yes ─→ 그대로 진행
+       └─ No  ─→ 진입 판정을 1회 재판정 (Agent 스키마의 `name` 노출 여부 재확인)
+                   ├─ 가용  ─→ 재소집
+                   └─ 비가용 ─→ 폴백 금지. 해당 경로의 "team 비가용" 처리로
+                                (§team mode 강제 등급 표)
+```
+
+확인을 건너뛰면 단발 subagent 왕복이 필수 등급 경로의 결과로 기록된다 — 사전 장치가 이것뿐이라 생략하면 사후 탐지(decision log의 `실행 형태`)만 남는다.
 
 ---
 
