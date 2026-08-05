@@ -27,7 +27,8 @@ user-invocable: false
 - 예산:                      max_loops, max_redispatch_per_task, (가능하면) 시간/턴 상한
 - 자문 (advisory):           가용 여부 + max_advisory_consults
                              — 가용 = team 가용 판정 (SKILL.md §진입 시 체크 4,
-                               권위 신호는 `Agent` 스키마의 `name`. 자문은 team 필수 등급)
+                               권위 신호는 `SendMessage` 왕복 도달 가능성.
+                               자문은 team 필수 등급)
                              — 가용이면 기본 2, **비가용이면 0 (경로 차단)**
                                예산 0 = 트리거에 도달해도 쓸 수 있는 것이 없다는 뜻이며,
                                폴백 여지를 남기지 않는다 (advisory-consult.md §게이트 0)
@@ -282,7 +283,7 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 
 ```markdown
 - 실행 형태: teammate | subagent      ← 폴백 여부를 사후에 판별할 유일한 근거
-- 판정 근거: 스키마 | env             ← team 가용 판정을 어느 신호로 내렸는가
+- 판정 근거: 왕복(name) | 왕복(agentId) | env   ← team 가용 판정을 어느 신호로 내렸는가
 ```
 
 두 필드가 없으면 "team으로 돌렸다"는 서술을 검증할 방법이 없어 감사가 성립하지 않는다 — 필수 등급 경로의 기록으로 인정하지 않는다.
@@ -411,11 +412,12 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 진입 전:
 
 - [ ] 사용자가 HITL 로 opt-out 하지 않았는가? (opt-out 시 자율 진입 금지)
+- [ ] 조율 도구(`SendMessage`/`Monitor`/`Task*`) 스키마를 `ToolSearch`로 확보했는가? (`SKILL.md §진입 시 체크 0` — 미확보면 왕복 경로가 전부 죽는다)
 - [ ] 종료 조건이 명령으로 판정 가능한 형태인가?
 - [ ] 예산(`max_loops` / `max_redispatch_per_task` / no-progress)과 hard stop 조건을 계약에 고정했는가?
 - [ ] 결정 기록 위치(`.orchestrator/<epic>/decisions/`)를 고정하고 자율 계약을 1회 보고했는가?
 - [ ] 인프라 의존 테스트가 있다면 `integration_verify` (command + run_at)를 계약에 정의했는가?
-- [ ] 자문 가용 여부(team 가용 판정 — 권위 신호는 `Agent` 스키마의 `name`)를 진입 시 확정하고 `max_advisory_consults`를 계약에 고정했는가?
+- [ ] 자문 가용 여부(team 가용 판정 — 권위 신호는 `SendMessage` 왕복 도달 가능성)를 진입 시 확정하고 `max_advisory_consults`를 계약에 고정했는가?
 - [ ] 필수 등급 경로(자문·협의체)를 team으로 돌렸고, spawn 확인 + `실행 형태`·`판정 근거` 필드를 기록했는가?
 
 루프 중:
@@ -423,6 +425,7 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 - [ ] 복잡·모호한 요구의 분해를 아키텍트 협의체에 위임했는가? (`architect-council.md` — 자명한 작업만 메인 직접 분해)
 - [ ] 작업이 다중이거나 의존성이 있으면 Task 시스템(`TaskCreate`/`addBlockedBy`/`owner`)으로 상태를 추적하는가? (`agent-monitor.md §Task 시스템`)
 - [ ] 편집·격리가 필요한 작업을 **`isolation:"worktree"` subagent**에 위임했는가? (team을 썼다면 조율만 — SendMessage)
+- [ ] 모든 background dispatch의 prompt에 **보고 채널**(`SendMessage({to: "main", ...})`)을 넣었는가? (`delegation-patterns.md §필수 포함 요소` 11번 — 빠지면 agent가 막혀도 묻지 못하고 임의 가정으로 진행한다)
 - [ ] 리스크 큰/되돌리기 어려운 편집은 **계획 우선 게이트**를 거쳤는가? (`delegation-patterns.md §계획 우선 게이트`)
 - [ ] 각 작업을 머지 전 **검토 + QA (+ DB 접촉 시 DBA)** 게이트로, 구현자와 다른 agent가 검증하고 전부 pass(AND)여야 머지하는가? (QA가 추가한 검증 테스트 green 포함)
 - [ ] 재위임·게이트 거부·충돌 해결이 `max_redispatch_per_task` 예산을 소모하며 카운트되는가?

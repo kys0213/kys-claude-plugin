@@ -32,9 +32,13 @@ version: 0.1.0
 
 ### 메인 에이전트가 해도 되는 일
 - `Read`, `Glob`, `Grep`, `Bash(git status / git log / git diff --stat)` — 작업 분해와 위험도 판단에 필요한 **결정적 사실 확인**에 한정한다. 본격적인 조사·리서치(코드베이스 파악, 영향 범위 분석, 방안 비교)는 메인이 통독하지 않고 **위임**한다 — 그 원문이 메인 컨텍스트에 쌓이면 조율 판단 품질이 떨어진다 (`references/autonomous-driving.md §메인 컨텍스트 격리`)
-- `Agent`, `SendMessage`, `Monitor` — 위임과 조율 (agent team은 `Agent`의 `name`으로 spawn — 가용 판정은 아래 §진입 시 체크 4, `TeamCreate`는 제거됨)
+- `Agent`, `SendMessage`, `Monitor` — 위임과 조율 (spawn한 agent에 **다시 말을 거는 유일한 수단이 `SendMessage`**다 — 가용 판정은 아래 §진입 시 체크 4, `TeamCreate`는 제거됨)
 - `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate` — 일감을 분리하고 상태를 관리하는 것은 **메인 에이전트의 핵심 룰**이다. 편집을 위임하는 관리자로서 메인의 본업은 일감을 추적 가능한 Task로 쪼개고 상태를 갱신하는 것 — 다중 작업이면 항상 적용하고 단발 1회만 예외다 (`references/agent-monitor.md §Task 시스템`)
 - 결과물 취합 후 사용자에게 보고
+
+> **위 조율 도구는 대부분 deferred tool이다 — 이름만 노출돼 있고 스키마는 로드돼 있지 않다.** `SendMessage`·`Monitor`·`TaskCreate`/`TaskList`/`TaskGet`/`TaskUpdate`는 `ToolSearch`로 스키마를 **먼저 확보한 뒤에만** 호출할 수 있고, 확보 없이 호출하면 `InputValidationError`로 실패한다. 진입 시 1회 확보한다 (§진입 시 체크 0).
+>
+> **문서에 이름이 적혀 있다는 것과 지금 호출할 수 있다는 것은 다르다.** 이 착각의 결과는 "도구가 없다"는 명시적 에러가 아니라 **조율 경로가 조용히 사라지는 것**이다 — 왕복을 못 하니 단발로 대체하고, 판정은 비가용으로 떨어지고, 필수 등급 경로는 에스컬레이션만 남긴다. 확보를 건너뛴 세션은 team 경로 전체를 잃은 채로 진행된다.
 
 ### 메인 에이전트가 하면 안 되는 일
 - `Edit`, `Write`, `NotebookEdit` — 코드 편집은 항상 sub-agent에 위임
@@ -65,6 +69,17 @@ main
 
 오케스트레이터 트리거 직후, 위임을 시작하기 전에 메인이 확인할 것:
 
+0. **조율 도구의 스키마를 확보했는가?** (다른 모든 체크보다 먼저)
+
+```
+ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskUpdate"})
+```
+
+   - **1회만 한다.** 확보된 스키마는 세션 내내 유효하므로 매 dispatch마다 반복하지 않는다.
+   - `SendMessage`가 확보되지 않으면 **왕복 조율 수단이 없는 것**이므로 체크 4는 자동으로 비가용이다 (아래 판정 트리의 0단계).
+   - 결과에 없는 도구는 이 런타임에 없는 것이다. 이름을 추측해 호출하지 않는다.
+   - 이 체크를 건너뛰면 실패가 dispatch 이후에야, 그것도 "조율이 왜 안 되지"라는 형태로 드러난다.
+
 1. **현재 브랜치가 epic 브랜치인가?**
    - `git branch --show-current` 확인
    - `main` / 일반 feature 브랜치라면 epic 브랜치를 먼저 만들거나 사용자에게 어떤 epic 브랜치로 진입할지 물어본다 (`git` skill 의 브랜치 생성 또는 plain `git checkout -b epic/<name>`).
@@ -72,14 +87,19 @@ main
    - `git rev-parse --show-toplevel` 가 repo의 메인 working tree여야 함
    - worktree 안에서 오케스트레이터를 시작했다면 즉시 메인 working tree로 빠져나오도록 사용자에게 보고
 3. **이후 모든 sub-agent dispatch는 `isolation: "worktree"` 로** — worktree의 base가 dispatch 시점 epic 브랜치 HEAD라는 보장은 없다. dispatch prompt에 base 확인·동기화 지시를 반드시 포함한다 (`references/delegation-patterns.md §Prompt 작성 원칙 필수 포함 요소` 9번이 단일 출처)
-4. **agent team이 이번 세션에서 가용한가?**
+4. **왕복 조율(team)이 이번 세션에서 가용한가?**
+
+**판정하는 대상은 "team이라는 기능이 켜져 있는가"가 아니라 "spawn한 agent에게 다시 말을 걸 수 있는가"다.** 필수 등급이 요구하는 실질은 *직전 라운드를 기억하는 상대와의 왕복*이고(§team mode 강제 등급 기준 1), 그것을 주는 것은 `name`이라는 파라미터가 아니라 `SendMessage`라는 채널이다.
 
 ```
-team 가용 판정
+왕복 조율(team) 가용 판정
   │
-  ├─ [1차 · 권위] Agent 도구 스키마에 `name` 파라미터가 있는가?
-  │     ├─ Yes ──→ 가용        (env가 비어 있어도 가용)
-  │     └─ No  ──→ 비가용      (env에 값이 있어도 비가용)
+  ├─ [0 · 전제] SendMessage 스키마를 확보했는가? (§진입 시 체크 0)
+  │     └─ No ──→ 비가용 확정. 왕복 수단 자체가 없다 (1·2차를 볼 필요 없음)
+  │
+  ├─ [1차 · 권위] spawn한 agent를 SendMessage로 다시 지목할 수 있는가?
+  │     ├─ Agent 스키마에 `name` 있음 ──→ 가용 · 지목자 = name
+  │     └─ `name` 없음 ────────────────→ 가용 · 지목자 = spawn 결과의 agentId (`a...` 형식)
   │
   └─ [2차 · 보조] printenv CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
         └─ 1차를 확인할 수 없을 때만 참고. 단독으로 비가용을 확정하지 못한다.
@@ -87,11 +107,13 @@ team 가용 판정
   기록  판정 결과 + 사용한 신호 → 진입 보고 1줄 + decision log
         (근거 없는 "플래그 off"는 판정이 아니다)
   시점  진입 시 1회 확정. 트리거 시점 재확인 없음
-  정정  필수 등급 경로의 첫 spawn이 teammate가 아니면 → 1회 재판정
+  정정  필수 등급 경로의 첫 spawn이 왕복 가능한 상대가 아니면 → 1회 재판정
   이후  비가용 시의 반응은 경로마다 다름 → §team mode 강제 등급
 ```
 
-   - 스키마가 권위인 이유: teammate spawn을 실제로 결정하는 것은 런타임이 노출한 스키마다. **Bash는 메인과 다른 프로세스로 뜨므로** env가 메인 프로세스를 반영한다는 보장이 없고, 이 false negative가 team 전제 경로 전체를 한 번에 죽이는 가장 흔한 실패다.
+   - **`name` 부재는 비가용이 아니다.** `name`이 없는 런타임에서는 `Agent({run_in_background: true})`가 돌려주는 `agentId`가 그대로 지목자가 되고, 그 agent에 `SendMessage`를 보내면 **직전까지의 transcript에서 이어서 재개**된다. 즉 필수 등급이 요구하는 "라운드 간 맥락 유지"가 agentId 경로에서도 그대로 성립한다 — 이름이 편할 뿐 실질은 같다. `name` 하나를 보고 비가용으로 단정하면 자문·협의체가 통째로 죽는데, 정작 왕복은 가능한 상태다.
+   - **채널이 권위인 이유**: 왕복을 실제로 결정하는 것은 spawn 인자가 아니라 재개 채널이다. `team_name`처럼 받아만 놓고 무시되는 인자의 선례가 이미 있으므로, 인자의 존재는 능력의 증거가 못 된다.
+   - **env를 권위로 쓰지 않는 이유**: **Bash는 메인과 다른 프로세스로 뜨므로** env가 메인 프로세스를 반영한다는 보장이 없다. 이 false negative가 team 전제 경로 전체를 한 번에 죽이는 가장 흔한 실패다.
    - 진입 시 확정하는 이유: 트리거 시점에 확인하면 이미 다른 경로를 다 태운 뒤라 늦다.
 
 ---
@@ -99,7 +121,8 @@ team 가용 판정
 ## 표준 절차 (Workflow)
 
 ```
-0. 진입 확인 (Entry)        → 현재가 epic 브랜치 + 메인 working tree인지 확인
+0. 진입 확인 (Entry)        → 조율 도구 스키마 확보(ToolSearch) + 현재가 epic 브랜치·메인
+                             working tree인지 확인 + 왕복 조율 가용 판정
 1. 분해 (Decompose)        → 작업을 독립 단위로 쪼갠다 — 복잡·모호한 요구는 아키텍트 협의체
                              (설계 생성 → 별도 agent 의 심문·검증)에 위임해 검증된 task 를 도출
                              (`references/architect-council.md`)
@@ -180,7 +203,7 @@ team 가용 판정
 | 상황 | 형태 | 도구 |
 |------|------|------|
 | 1회성 독립 작업, 결과물 단일 | 단발 sub-agent | `Agent({...})` |
-| 여러 agent 협업·식별/제어 필요 (read-only 조율) | agent team | `Agent({name, ...})` + `SendMessage` (가용 판정 §진입 시 체크 4·`team_name` 무시·편집 격리는 subagent) |
+| 여러 agent 협업·식별/제어 필요 (read-only 조율) | agent team | `Agent({name, ...})` — `name` 없는 런타임이면 `Agent({run_in_background: true})` + 반환 `agentId` — 에 `SendMessage` (가용 판정 §진입 시 체크 4·`team_name` 무시·편집 격리는 subagent) |
 | 파일 충돌 위험 있는 병렬 | worktree-isolated | `Agent({isolation: "worktree", ...})` |
 
 > **격리는 subagent만 보장**: agent team teammate는 공유 checkout이라 worktree 격리가 없다 — 편집·격리는 `isolation:"worktree"` subagent, team은 조율 전용 (`references/delegation-patterns.md §Agent team 사용 패턴`이 단일 출처).
@@ -322,5 +345,7 @@ team을 "쓰면 좋다"로 두면 폴백이 사실상 기본값이 되어 team �
 8. **자문 흉내**: 자문 경로가 비활성인데 단발 subagent 1회 왕복이나 메인 자신의 판단을 "자문 결과"로 포장 → 실질 없이 기록만 남는다. 경로가 없으면 없는 대로 진행하고, 그 시점의 판단은 **메인 자신의 판단으로 명시**한다. 필수 등급 경로의 폴백은 decision log의 `실행 형태` 필드로 사후 탐지된다 (§team mode 강제 등급).
 9. **고무도장 메인**: 상위 tier라는 이유로 권고를 검토 없이 채택 → 실질 오케스트레이터가 advisor가 되고 메인은 전달자로 전락한다. 결정권은 메인에 있고, 채택도 기각도 사유와 함께 기록한다.
 10. **자문 tier가 다른 역할로 번짐**: "자문은 X 모델로"라는 역할 지목 제약을 받고 discovery·조사·구현까지 X로 dispatch → 상위 tier 예외가 전역 기본값이 되어 집행 위임의 tier 상한이 무너지고 비용도 폭증한다. 자문 외의 모든 위임은 집행 위임이며 메인 tier를 넘지 못한다 (§역할 기준 원칙 / §역할별 모델 제약).
-11. **env 한 줄로 team 비가용 단정**: `printenv`가 비었다는 이유만으로 team 경로를 닫음 → 판정 하나가 틀리면 team 전제 경로가 동시에 죽는다. 권위 있는 신호는 `Agent` 스키마의 `name`이다 (§진입 시 체크 4).
+11. **신호 하나로 team 비가용 단정**: `printenv`가 비었다는 이유로, 또는 `Agent` 스키마에 `name`이 없다는 이유로 team 경로를 닫음 → 판정 하나가 틀리면 team 전제 경로가 동시에 죽는다. 권위 있는 신호는 **`SendMessage`로 다시 지목할 수 있는가**이고, `name`이 없으면 `agentId`로 같은 왕복을 한다 (§진입 시 체크 4).
 12. **출구 없는 금지**: dispatch prompt에 금지만 넣고 "대신 무엇을 하라"를 안 줌 → sub-agent는 그 상황에서 뭐라도 해야 하므로 위반이 재발한다. 금지에는 항상 출구를 짝으로 붙인다 (`references/delegation-patterns.md §필수 포함 요소` 10번이 단일 출처).
+13. **보고 채널 없는 위임**: background agent에 목적·범위만 주고 "무엇으로 보고하라"를 안 줌 → **agent의 plain text 출력은 메인에 도달하지 않으므로** 중간 보고·질의·부분 결과가 통째로 유실되고, 메인에는 침묵으로 보인다. 완료 알림만 남아 "일은 했는데 답이 없는" 상태가 된다. dispatch prompt에 `SendMessage({to: "main"})` 보고 채널을 반드시 포함한다 (`references/delegation-patterns.md §필수 포함 요소` 11번이 단일 출처).
+14. **deferred 도구를 이름만 보고 호출**: 문서에 `SendMessage`가 적혀 있으니 쓸 수 있다고 가정 → 스키마 미확보 상태의 호출이 `InputValidationError`로 실패하고, 조율을 포기한 채 단발로 흘러간다. 진입 시 `ToolSearch`로 1회 확보한다 (§진입 시 체크 0).

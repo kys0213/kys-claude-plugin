@@ -18,7 +18,7 @@ user-invocable: false
 - 작업이 독립적이고 외부 개입 없이 끝남
 - 한 번의 prompt → 한 번의 결과
 
-### Agent team (`Agent`의 `name` 파라미터 — 가용 시)
+### Agent team (`Agent`의 `name` 파라미터, 없으면 spawn 결과의 `agentId` — 가용 시)
 
 **적합한 상황**:
 - 여러 agent가 같은 작업 컨텍스트를 공유 (한 feature를 여러 역할로 협업)
@@ -50,12 +50,26 @@ sub-agent는 **메인 대화 히스토리를 보지 못한다**. prompt는 자�
 2. **컨텍스트**: 작업 배경, 관련 파일 경로 (전체 경로), 이미 알려진 제약
 3. **브랜치**: base epic 브랜치 이름 (sub-agent는 자기 worktree만 보지 메인 대화의 epic 브랜치를 모름)
 4. **범위**: 무엇을 하고 무엇을 하지 말 것
-5. **출력 형식**: 결과를 어떤 형태로 돌려줄지 (파일 변경? 요약? JSON?)
+5. **출력 형식**: 결과를 어떤 형태로 돌려줄지 (파일 변경? 요약? JSON?). **어떤 채널로** 돌려줄지는 아래 11번이 따로 규정한다 — 형식만 주고 채널을 빼면 결과가 만들어지고도 메인에 도달하지 않는다.
 6. **검증 기준**: 완료를 어떻게 확인할지 (테스트, 빌드, 특정 체크 등)
 7. **worktree 격리 준수** (`isolation: "worktree"` dispatch 시 필수): 모든 Edit/Write의 file_path와 Bash cwd가 자기 worktree 경로(`.claude/worktrees/agent-...`) 안인지 매 호출 전 검증하고, 부모 repo(메인 working tree)의 파일을 절대 직접 수정하지 말 것. 부모 repo에 의도치 않은 변경을 만들었음을 발견하면 직접 reset/checkout 하지 말고 변경을 stash로 보존한 뒤 보고할 것.
 8. **재위임 금지**: "이 작업을 다른 agent에게 재위임하지 말고 직접 수행하라. 막히면 실패 사유와 함께 종료하라"를 prompt에 포함할 것 (단, team teammate의 편집 격리용 isolated subagent 위임 1단계는 예외 — §위임 깊이 제한 참조).
 9. **base 확인** (`isolation: "worktree"` dispatch 시 필수): worktree의 base가 dispatch 시점 epic 브랜치 HEAD라는 보장은 없다. 작업 시작 전 base를 확인하고, 통합 브랜치(epic 브랜치) HEAD보다 뒤처져 있으면 fast-forward/rebase한 뒤 시작하라고 prompt에 명시할 것.
 10. **금지에는 출구를 함께 준다**: 금지 계약을 넣을 때는 "대신 무엇을 하라"를 반드시 같이 적는다. 금지만 주면 sub-agent는 그 상황에서 뭐라도 해야 하므로 위반이 재발한다. 위 7·8번이 이미 이 형태다 — 7번은 부모 repo 오염 금지에 "stash로 보존한 뒤 보고"를, 8번은 재위임 금지에 "실패 사유와 함께 종료"를 출구로 붙였다. 새 금지를 추가할 때도 같은 짝을 지킨다.
+11. **보고 채널** (`run_in_background: true` dispatch 시 필수): **sub-agent가 그냥 출력한 텍스트는 메인에 보이지 않는다.** 메인에게 말하려면 `SendMessage({to: "main", ...})`를 호출해야 하고, 그것이 유일한 채널이다. 따라서 prompt에 다음을 명시한다 — "진행 보고·질문·부분 결과는 `SendMessage({to: "main", summary: "<5-10 단어>", message: "<내용>"})`으로 보내라. 그냥 출력하면 메인에 전달되지 않는다."
+
+### 보고 채널을 빼면 생기는 일 (11번의 근거)
+
+최종 완료 알림에는 agent의 마지막 출력이 실려 오므로 **짧은 단발 작업은 채널이 없어도 성공한 것처럼 보인다.** 그래서 이 결함은 조용하다. 유실되는 것은 완료 이전의 전부다:
+
+| 상황 | 채널 없음 | 채널 있음 |
+|------|-----------|-----------|
+| 중간 진행 보고 | 유실 — 메인에는 침묵으로 보임 | 도착 |
+| 막혔을 때의 질문 | 유실 → agent가 임의로 가정하고 진행 | 도착 → 메인이 결정 |
+| 부분 결과 (긴 작업) | 완료까지 아무것도 안 옴 | 점진 도착 |
+| 왕복 조율 (필수 등급 경로) | **성립 불가** | 성립 |
+
+특히 필수 등급 경로(자문·협의체)는 왕복이 실질이므로, 상대에게 답신 채널을 주지 않으면 **소집해놓고 대화가 안 되는** 상태가 된다 — team이 가용한데도 결과적으로 단발과 같아진다. 이때의 증상은 에러가 아니라 "agent가 답을 안 한다"이므로 원인을 찾기 어렵다.
 
 ### 안티패턴
 
@@ -129,7 +143,9 @@ Agent({
 
 ## Agent team 사용 패턴
 
-> **전제**: agent team은 실험 기능이라 세션마다 가용 여부가 다르다. **가용 판정의 권위 신호는 `Agent` 도구 스키마에 `name` 파라미터가 노출되는지**이며, `printenv CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`는 보조 신호다(Bash는 메인과 다른 프로세스라 단독 근거가 못 된다) — 판정 절차는 `SKILL.md §진입 시 체크 4`, 경로별 강제 등급은 `SKILL.md §team mode 강제 등급`이 단일 출처다. 과거의 `TeamCreate`/`TeamDelete` 도구는 제거됐고, `Agent`의 `team_name` 인자는 받지만 무시된다 — 세션마다 암묵적 team 하나가 있고 `name`으로 바로 spawn하며, session 종료 시 자동 정리된다.
+> **전제**: agent team은 실험 기능이라 세션마다 가용 여부가 다르다. **가용 판정의 권위 신호는 spawn한 agent를 `SendMessage`로 다시 지목할 수 있는지**이며, `printenv CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`는 보조 신호다(Bash는 메인과 다른 프로세스라 단독 근거가 못 된다) — 판정 절차는 `SKILL.md §진입 시 체크 4`, 경로별 강제 등급은 `SKILL.md §team mode 강제 등급`이 단일 출처다. 과거의 `TeamCreate`/`TeamDelete` 도구는 제거됐고, `Agent`의 `team_name` 인자는 받지만 무시된다 — 세션마다 암묵적 team 하나가 있고 `name`으로 바로 spawn하며, session 종료 시 자동 정리된다.
+>
+> **`name`이 없는 런타임에서도 team은 성립한다.** `Agent` 스키마에 `name`이 없으면 `run_in_background: true`로 띄우고 **spawn 결과의 `agentId`(`a...` 형식)를 지목자로 쓴다** — 그 agent에 `SendMessage`를 보내면 직전까지의 transcript에서 재개되므로 라운드 간 맥락이 유지된다. 이름이 있으면 이름이 낫다(완료된 agent에도 계속 유효하고, 읽기 쉽다). 없다고 비가용으로 처리하면 필수 등급 경로가 이유 없이 죽는다.
 >
 > **`name`을 넘겼다고 teammate로 떴다는 보장은 없다** — `team_name`이 조용히 무시되는 선례가 이미 있다. team 필수 등급 경로는 아래 §spawn 확인을 실행한다.
 
@@ -137,30 +153,38 @@ Agent({
 
 ```
 # 조율 전용 teammate (read-only). 편집은 nested isolated subagent로.
+# prompt에는 반드시 보고 채널을 포함한다 (§필수 포함 요소 11번).
 Agent({
   name: "reviewer",
   run_in_background: true,
   description: "Auth review",
-  prompt: "<epic 브랜치 diff를 검토. 편집하지 말 것.>"
+  prompt: "<epic 브랜치 diff를 검토. 편집하지 말 것.
+           검토 결과와 질문은 SendMessage({to:'main', ...})으로 보내라 —
+           그냥 출력하면 메인에 전달되지 않는다.>"
 })
 
-Agent({
-  name: "implementer",
+const impl = Agent({          // ← 반환값을 버리지 않는다. name이 없는 런타임에서는
+  name: "implementer",        //    여기 담긴 agentId가 유일한 지목자다.
   run_in_background: true,
   description: "Auth implementation (조율)",
   prompt: "<설계 입력을 받아, 실제 편집은 Agent({isolation:'worktree'})
            단발 subagent로 위임하라. 이 teammate 자신은 공유 checkout을
-           직접 편집하지 말 것.>"
+           직접 편집하지 말 것.
+           진행 보고·차단 사유는 SendMessage({to:'main', ...})으로 보내라.>"
 })
 
-# 중간 개입 (name으로 식별)
-SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지시>"})
+# 중간 개입 — name이 있으면 name으로, 없으면 spawn 결과의 agentId로 지목
+SendMessage({to: "implementer",   // name 없는 런타임: impl.agentId ("a...")
+             summary: "<5-10 단어 요약>",
+             message: "<우선순위 변경 또는 수정 지시>"})
 ```
 
 ### Team 사용 시 주의
 
-- `name`이 식별자다. 세션 내에서 유니크해야 한다 (`team_name`은 무시되므로 쓰지 않는다).
+- **지목자는 `name`, 없으면 spawn 결과의 `agentId`다.** `name`을 쓸 수 있으면 세션 내에서 유니크해야 하고(같은 이름을 나중 agent가 가져가면 그쪽이 이긴다), 없으면 spawn 반환값의 `agentId`를 보관해 둔다 — **`Agent` 호출의 반환값을 버리면 그 agent와 다시 대화할 방법이 사라진다.** (`team_name`은 무시되므로 쓰지 않는다.)
+- **`SendMessage`는 deferred tool이다** — 진입 시 `ToolSearch`로 스키마를 확보하지 않았으면 이 절의 모든 호출이 실패한다 (`SKILL.md §진입 시 체크 0`).
 - `run_in_background: true`로 띄워야 SendMessage로 개입할 수 있다.
+- **답신 채널은 저절로 생기지 않는다.** teammate가 메인에게 말하려면 `SendMessage({to: "main", ...})`를 호출해야 하며, 그 지시는 spawn prompt에 들어 있어야 한다 (§필수 포함 요소 11번). 빠뜨리면 조율이 편도가 되어 team을 쓴 의미가 없어진다.
 - team은 session 종료 시 **자동 정리**된다 (`TeamDelete` 없음). 별도 정리 단계 불필요.
 - **편집 격리는 team이 아니라 subagent의 `isolation:"worktree"`가 보장한다.** teammate에게 worktree 이동을 위임하지 말 것 — 격리가 도구 보장에서 프롬프트 희망으로 격하되어 공유 checkout(메인 epic 브랜치)이 오염될 수 있다.
 - **teammate의 권한은 도구로 제한할 수 없다 — 계약 + 사후 탐지로만 관리한다.** (spawn 성공 여부의 검증은 아래 §spawn 확인) 별도 agent 정의를 지정해 tools를 좁히는 경로(`subagent_type`)는 **단발 subagent의 것**이고, team spawn과 결합한 선례가 없다. 따라서 read-only teammate라도 실제로는 편집·`SendMessage`가 가능하다. 금지는 prompt에 계약으로 명시하고, 위반은 **토폴로지 가드로 탐지**한다(사전 차단 아님 — `merge-coordinator.md §토폴로지 가드`). 도구 수준 보장이 꼭 필요한 역할이면 team이 아니라 단발 subagent를 고른다.
@@ -169,18 +193,31 @@ SendMessage({to: "implementer", message: "<우선순위 변경 또는 수정 지
 
 `Agent({name})`을 호출했다고 teammate로 떴다는 보장은 없다 — `team_name` 인자가 조용히 무시되는 선례가 이미 있다. **team 필수 등급 경로**(`SKILL.md §team mode 강제 등급`)는 첫 spawn 직후 이 확인을 실행한다.
 
+**확인 방법은 관찰이 아니라 실제 왕복 1회다.** "teammate처럼 보인다"로 판정하지 않는다 — 지목자를 손에 넣었는지, 그 지목자로 보낸 메시지가 실제로 나가는지를 본다.
+
 ```
-첫 Agent({name, ...}) 직후
+첫 Agent({name?, run_in_background: true, ...}) 직후
   │
-  └─ 그 agent가 SendMessage로 도달 가능한 식별자인가?
-       ├─ Yes ─→ 그대로 진행
-       └─ No  ─→ 진입 판정을 1회 재판정 (Agent 스키마의 `name` 노출 여부 재확인)
-                   ├─ 가용  ─→ 재소집
-                   └─ 비가용 ─→ 폴백 금지. 해당 경로의 "team 비가용" 처리로
-                                (§team mode 강제 등급 표)
+  ├─ [1] spawn 결과에서 지목자를 확보했는가?
+  │        name을 넘겼으면 name, 아니면 반환된 agentId ("a..." 형식)
+  │        └─ 못 얻음 ─→ [3]으로
+  │
+  ├─ [2] 그 지목자로 SendMessage를 1회 실제로 보낸다
+  │        (첫 조율 지시를 겸한다 — 확인용 빈 메시지를 따로 보내지 않는다)
+  │        ├─ 성공 ──────────→ 왕복 성립. 그대로 진행
+  │        └─ 에러 ──────────→ [3]으로
+  │             · InputValidationError → 스키마 미확보다.
+  │                ToolSearch로 확보 후 1회 재시도 (SKILL.md §진입 시 체크 0)
+  │             · 수신자 없음         → 지목자가 틀렸다. [3]으로
+  │
+  └─ [3] 진입 판정을 1회 재판정 (§진입 시 체크 4의 0·1차를 다시)
+           ├─ 가용  ─→ 재소집
+           └─ 비가용 ─→ 폴백 금지. 해당 경로의 "team 비가용" 처리로
+                        (§team mode 강제 등급 표)
 ```
 
-확인을 건너뛰면 단발 subagent 왕복이 필수 등급 경로의 결과로 기록된다 — 사전 장치가 이것뿐이라 생략하면 사후 탐지(decision log의 `실행 형태`)만 남는다.
+- **`name` 미노출은 [3]의 비가용 사유가 아니다.** agentId 경로가 남아 있으므로 [1]에서 반환값을 확인하는 것으로 충분하다.
+- 확인을 건너뛰면 단발 subagent 왕복이 필수 등급 경로의 결과로 기록된다 — 사전 장치가 이것뿐이라 생략하면 사후 탐지(decision log의 `실행 형태`)만 남는다.
 
 ---
 
