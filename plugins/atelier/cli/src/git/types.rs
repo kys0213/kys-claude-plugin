@@ -208,6 +208,81 @@ pub struct HookUnregisterOutput {
 }
 
 // ---------------------------------------------------------------------------
+// Guard setup
+// ---------------------------------------------------------------------------
+
+/// A default-branch name known to be non-blank. The empty string being
+/// unrepresentable is what keeps a *bare* `--default-branch` out of
+/// settings.json: the flag is only ever emitted from a `DetectedBranch`, and a
+/// value-less flag would make the guard hook fail clap parsing with exit 2 —
+/// which Claude Code reads as "block", denying every edit.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct DetectedBranch(String);
+
+impl DetectedBranch {
+    /// Sole entry point: trims, and treats a blank result as absence rather
+    /// than as a branch literally named "".
+    pub fn new(raw: &str) -> Option<Self> {
+        let trimmed = raw.trim();
+        (!trimmed.is_empty()).then(|| DetectedBranch(trimmed.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Which settings.json a hook registration targets.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HookScope {
+    User,
+    Project,
+}
+
+impl HookScope {
+    /// Directory whose `.claude/settings.json` this scope writes: user scope
+    /// resolves `$HOME`, project scope stays on the project itself.
+    pub fn settings_dir(&self, project_dir: &str) -> Result<String, String> {
+        match self {
+            HookScope::User => std::env::var("HOME")
+                .map_err(|_| "HOME is not set — cannot resolve the user scope".to_string()),
+            HookScope::Project => Ok(project_dir.to_string()),
+        }
+    }
+
+    /// Whether a detected default branch may be baked into the guard command.
+    /// User scope must not: one global pin forces a single repository's default
+    /// branch onto every project (#810). The setup-time `origin/HEAD` warm-up
+    /// lets the guard's read-only detection resolve non-standard defaults at
+    /// runtime instead, so dropping the pin costs no protection.
+    pub fn pins_default_branch(&self) -> bool {
+        matches!(self, HookScope::Project)
+    }
+}
+
+/// What `setup guard` did (or, under `--dry-run`, would do). `commands` is the
+/// registered form, so callers can show the exact strings without re-reading
+/// settings.json — and a reviewer can see at a glance whether a pin was added.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct GuardSetupOutput {
+    pub scope: HookScope,
+    #[serde(rename = "settingsPath")]
+    pub settings_path: String,
+    /// `None` when nothing was pinned — either detection failed or the scope
+    /// forbids pinning.
+    #[serde(rename = "defaultBranch")]
+    pub default_branch: Option<String>,
+    #[serde(rename = "originHeadWarmed")]
+    pub origin_head_warmed: bool,
+    pub commands: Vec<String>,
+    /// Stale guard registrations retired by the prefix purge (migration).
+    pub removed: Vec<String>,
+    #[serde(rename = "dryRun")]
+    pub dry_run: bool,
+}
+
+// ---------------------------------------------------------------------------
 // PR Guard
 // ---------------------------------------------------------------------------
 

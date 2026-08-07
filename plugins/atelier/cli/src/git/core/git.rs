@@ -8,6 +8,19 @@
 use crate::git::core::shell::{exec, ExecOptions};
 use crate::git::types::GitSpecialState;
 
+/// The one repo mutation the git subsystem performs, kept off `GitService` on
+/// purpose: that trait's contract forbids mutation because the guard calls it
+/// on every PreToolUse invocation (#779). Warming `origin/HEAD` is a setup-time
+/// act — once, deliberately — so it gets its own trait and only setup depends
+/// on it (ISP).
+pub trait OriginHeadWarmer {
+    /// Fills the cached `refs/remotes/origin/HEAD` so the guard's read-only
+    /// detection resolves non-standard defaults (`trunk`, …) later. Returns
+    /// whether it succeeded; failure (offline, no remote, no auth) is reported,
+    /// not fatal — setup continues without it.
+    fn warm_origin_head(&self) -> bool;
+}
+
 pub trait GitService {
     /// Detects the repository's default branch. MUST NOT mutate repo state
     /// (no `git remote set-head`): the branch guard calls this on every
@@ -87,6 +100,15 @@ impl RealGitService {
     }
 }
 
+impl OriginHeadWarmer for RealGitService {
+    fn warm_origin_head(&self) -> bool {
+        // Runs in the service's pinned cwd, so setup warms the project repo
+        // rather than whatever directory the session happens to sit in (#780).
+        let (_, exit) = self.git_safe(&["remote", "set-head", "origin", "--auto"]);
+        exit == 0
+    }
+}
+
 impl GitService for RealGitService {
     fn detect_default_branch(&self) -> Result<String, String> {
         // Method 1 + Method 3 only — no `set-head` write (see #779).
@@ -122,5 +144,28 @@ impl GitService for RealGitService {
             merge,
             current_branch: self.current_branch(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::git::types::DetectedBranch;
+
+    /// A branch name is what `detect_default_branch` / `gh` hand back, so the
+    /// constructor guarding this type is what stops a blank detection from
+    /// becoming a value-less `--default-branch` in settings.json.
+    #[test]
+    fn detected_branch_rejects_empty_and_whitespace() {
+        assert_eq!(DetectedBranch::new(""), None);
+        assert_eq!(DetectedBranch::new("   "), None);
+        assert_eq!(DetectedBranch::new("\n\t "), None);
+    }
+
+    #[test]
+    fn detected_branch_trims() {
+        assert_eq!(
+            DetectedBranch::new("  main\n").map(|b| b.as_str().to_string()),
+            Some("main".to_string())
+        );
     }
 }

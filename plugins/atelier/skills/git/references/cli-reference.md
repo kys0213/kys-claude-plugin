@@ -6,7 +6,7 @@
 
 ```bash
 atelier git --version    # 버전 확인
-atelier git --help       # 전체 도움말 (reviews / guard / hook / pr-guard)
+atelier git --help       # 전체 도움말 (reviews / guard / hook / setup / pr-guard)
 ```
 
 ## 도구 경계 (이 연산엔 이 도구 하나)
@@ -15,7 +15,7 @@ atelier git --help       # 전체 도움말 (reviews / guard / hook / pr-guard)
 |---|---|---|
 | 조회·plumbing (정책 없음, determinism 더할 것 없음) | **plain `git`** | `status`, `diff`, `log`, `push` |
 | 컨벤션을 담은 쓰기 (정책 적용) | **plain `git` / `gh`** | 커밋(Jira·Conventional), 브랜치(명명·base), PR(`gh pr create`) |
-| 바이너리 필수 (hook·구조화 read) | **`atelier git`** | `guard`, `pr-guard`, `hook`, `reviews` |
+| 바이너리 필수 (hook·구조화 read·hook 설치) | **`atelier git`** | `guard`, `pr-guard`, `hook`, `setup`, `reviews` |
 
 리트머스: *"gh 출력을 구조화하거나, PreToolUse hook 이거나, settings.json 편집인가?"*
 → Yes 면 `atelier git`, No(순수 조회·컨벤션 쓰기)면 plain `git`/`gh`.
@@ -45,8 +45,10 @@ atelier git guard <write|commit|pr> --project-dir=<p> [--create-branch-script=<s
   `--create-branch-script` 값(기본 `git switch -c`)을 출력한다.
 - `pr`: 현재 브랜치에 열린 PR 이 있으면 `gh pr create` 차단 (exit 2). branch 옵션 불필요. legacy alias: `atelier git pr-guard`.
 - `--default-branch` 미지정 시 guard 가 런타임에 readonly 감지(`origin/HEAD` → main/develop/master 추측)한다.
-  setup 이 (a) `git remote set-head` 로 `origin/HEAD` 를 warm-up 해 이 readonly 경로가 비표준 기본 브랜치도
-  해결하게 하고, (b) GitHub repo 면 `gh` 로 감지한 값을 `--default-branch` 로 박는다 (B 절 참조).
+  이 값을 박는 것은 `atelier git setup guard` 의 책임이다 (§4).
+
+> **이 명령은 hook 런타임이다.** stdin 으로 PreToolUse 페이로드를 받고 exit 2 로 차단을 신호한다.
+> 등록·설치용으로 호출하지 않는다 — 그건 §4 다.
 
 ## 3. Hook 관리
 
@@ -57,7 +59,56 @@ atelier git hook list [hookType] [--project-dir=<p>]
 ```
 
 > settings.json 편집은 결정적 변환이라 CLI 가 담당한다 (LLM 이 직접 Write 하지 않음).
-> guard hook 의 등록·비활성화·재설정 절차는 통합 setup 의 hook 관리 모드가 담당한다.
+> `register` 는 command **완전 일치**로만 기존 항목을 지운다 — 옛 형식(예: 꼬리에 `--default-branch main`)을
+> 정리하려면 §4 를 쓴다. 개별 hook(PR Guard 등) 등록에만 직접 사용한다.
+
+## 4. Guard hook 설치 (`setup guard`)
+
+```bash
+atelier git setup guard --project-dir <PATH> --scope <user|project> [--dry-run]
+```
+
+Write/Edit·Commit guard 2종의 감지·마이그레이션·등록을 한 번에 수행하는 **설치** 명령이다. §2 의 guard
+(런타임)와 별개 surface 인 이유: 런타임은 exit 2 가 "차단" 이라 설치 실패를 그 코드로 신호할 수 없다.
+이 명령은 성공 시 JSON + exit 0, 실패 시 `Error: ...` + exit 1 이며 **절대 exit 2 를 내지 않는다.**
+
+수행 순서:
+
+1. `git remote set-head origin --auto` (project-dir 기준) — `origin/HEAD` warm-up. 실패해도 계속 진행하고
+   `originHeadWarmed: false` 로 보고한다.
+2. 기본 브랜치 감지 — `gh repo view --json defaultBranchRef` → 실패 시 readonly 감지. 값이 없거나 공백이면
+   **`--default-branch` 플래그를 통째로 생략**한다 (값 없는 플래그는 hook 실행 시 clap 파싱 실패 → exit 2 →
+   모든 편집 차단).
+3. `atelier git guard write `/`atelier git guard commit ` **접두** 일치 기존 엔트리 제거 (마이그레이션).
+4. `PreToolUse`/`Write|Edit` + `PreToolUse`/`Bash` 를 **단일 쓰기**로 등록.
+
+- `--scope user` 는 `--default-branch` 를 박지 않는다 — 전역 pin 하나가 모든 프로젝트에 한 repo 의 기본
+  브랜치를 강요하기 때문(#810). 1단계 warm-up 이 런타임 감지로 대체한다. pin 이 필요하면 `--scope project`.
+- `--project-dir` 는 **보호 대상 repo** 다 (warm-up·감지의 앵커). settings.json 경로는 scope 가 정한다:
+  `user` → `$HOME/.claude/settings.json`, `project` → `<project-dir>/.claude/settings.json`.
+- settings.json 에는 `--project-dir "${CLAUDE_PROJECT_DIR:-.}"` 가 **리터럴로** 기록된다 (hook 실행 시점 expand).
+- `--dry-run` 은 계획(등록될 command, 제거될 항목)만 출력하고 파일을 쓰지 않는다.
+- 재실행은 멱등이다.
+
+**출력 (JSON):**
+
+```json
+{
+  "scope": "project",
+  "settingsPath": "/work/my-repo/.claude/settings.json",
+  "defaultBranch": "trunk",
+  "originHeadWarmed": true,
+  "commands": [
+    "atelier git guard write --project-dir \"${CLAUDE_PROJECT_DIR:-.}\" --default-branch trunk",
+    "atelier git guard commit --project-dir \"${CLAUDE_PROJECT_DIR:-.}\" --default-branch trunk"
+  ],
+  "removed": [],
+  "dryRun": false
+}
+```
+
+> `removed` 는 접두 매칭으로 정리된 옛 등록분이다 — 비어 있지 않으면 마이그레이션이 일어난 것이다.
+> guard hook 의 비활성화·재설정 절차는 통합 setup 의 hook 관리 모드가 담당한다.
 
 ---
 
