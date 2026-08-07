@@ -1,63 +1,19 @@
-//! Port of `git-utils/tests/commands/hook.test.ts` — in-memory FS mock.
+//! Port of `git-utils/tests/commands/hook.test.ts` — in-memory FS mock, plus
+//! the batch (`register_many`) contract: one write, purge-before-register.
 
-use atelier::git::commands::hook::{create_hook_command, HookFs};
-use atelier::git::types::{CmdResult, HookListInput, HookRegisterInput, HookUnregisterInput};
+mod git_mocks;
+
+use atelier::git::commands::hook::create_hook_command;
+use atelier::git::types::{
+    CmdResult, HookListInput, HookRegisterInput, HookRegisterManyInput, HookRegistration,
+    HookUnregisterInput,
+};
+use git_mocks::MockFs;
 use serde_json::Value;
-use std::cell::RefCell;
-use std::collections::HashMap;
 
 const PROJECT_DIR: &str = "/tmp/test-project";
 fn settings_path() -> String {
     format!("{PROJECT_DIR}/.claude/settings.json")
-}
-
-/// In-memory FS matching the TS `createMockFs`: `exists` returns true for a key
-/// or any key under `<path>/`.
-struct MockFs {
-    files: RefCell<HashMap<String, String>>,
-}
-
-impl MockFs {
-    fn new() -> Self {
-        MockFs {
-            files: RefCell::new(HashMap::new()),
-        }
-    }
-    fn set(&self, path: &str, content: &str) {
-        self.files
-            .borrow_mut()
-            .insert(path.to_string(), content.to_string());
-    }
-    fn get(&self, path: &str) -> Option<String> {
-        self.files.borrow().get(path).cloned()
-    }
-}
-
-impl HookFs for MockFs {
-    fn read_file(&self, path: &str) -> Result<String, String> {
-        self.files
-            .borrow()
-            .get(path)
-            .cloned()
-            .ok_or_else(|| format!("File not found: {path}"))
-    }
-    fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
-        self.files
-            .borrow_mut()
-            .insert(path.to_string(), content.to_string());
-        Ok(())
-    }
-    fn exists(&self, path: &str) -> bool {
-        let files = self.files.borrow();
-        if files.contains_key(path) {
-            return true;
-        }
-        let prefix = format!("{path}/");
-        files.keys().any(|k| k.starts_with(&prefix))
-    }
-    fn mkdir(&self, _path: &str) -> Result<(), String> {
-        Ok(())
-    }
 }
 
 fn reg(hook_type: &str, matcher: &str, command: &str) -> HookRegisterInput {
@@ -413,4 +369,164 @@ fn broken_json_errors_without_overwrite() {
     assert!(result.is_err());
     // Original content untouched.
     assert_eq!(fs.get(&settings_path()).unwrap(), "{broken json");
+}
+
+// ---- register_many (batch) ----
+
+fn registration(hook_type: &str, matcher: &str, command: &str) -> HookRegistration {
+    HookRegistration {
+        hook_type: hook_type.to_string(),
+        matcher: matcher.to_string(),
+        command: command.to_string(),
+        timeout: None,
+    }
+}
+
+fn batch(hooks: Vec<HookRegistration>) -> HookRegisterManyInput {
+    HookRegisterManyInput {
+        hooks,
+        remove_command_prefixes: Vec::new(),
+        project_dir: Some(PROJECT_DIR.to_string()),
+        dry_run: false,
+    }
+}
+
+#[test]
+fn register_many_writes_settings_once() {
+    // The reason the batch exists: N separate `register` calls are N
+    // read-modify-writes, so a failure midway leaves settings half-registered.
+    let fs = MockFs::new();
+    let hook = create_hook_command(&fs);
+    hook.register_many(&batch(vec![
+        registration("PreToolUse", "Write|Edit", "guard write"),
+        registration("PreToolUse", "Bash", "guard commit"),
+    ]))
+    .unwrap();
+    assert_eq!(fs.write_count(), 1);
+    let s = settings(&fs);
+    assert_eq!(s["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn register_many_reports_action_per_hook() {
+    let fs = MockFs::new();
+    let hook = create_hook_command(&fs);
+    hook.register(&reg("PreToolUse", "Bash", "guard commit"))
+        .unwrap();
+    let r = hook
+        .register_many(&batch(vec![
+            registration("PreToolUse", "Write|Edit", "guard write"),
+            registration("PreToolUse", "Bash", "guard commit"),
+        ]))
+        .unwrap();
+    match r {
+        CmdResult::Ok(out) => {
+            let actions: Vec<&str> = out.registered.iter().map(|o| o.action.as_str()).collect();
+            assert_eq!(actions, vec!["created", "updated"]);
+        }
+        _ => panic!(),
+    }
+}
+
+#[test]
+fn register_many_purges_prefix_matches_before_registering() {
+    // Exact-command replacement cannot retire an entry whose trailing flags
+    // differ; the prefix purge is what keeps a stale pin from double-running.
+    let fs = MockFs::new();
+    fs.set(
+        &settings_path(),
+        r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"guard commit --default-branch main"}]}]}}"#,
+    );
+    let hook = create_hook_command(&fs);
+    let r = hook
+        .register_many(&HookRegisterManyInput {
+            hooks: vec![registration("PreToolUse", "Bash", "guard commit")],
+            remove_command_prefixes: vec!["guard commit ".to_string()],
+            project_dir: Some(PROJECT_DIR.to_string()),
+            dry_run: false,
+        })
+        .unwrap();
+    match r {
+        CmdResult::Ok(out) => assert_eq!(out.removed, vec!["guard commit --default-branch main"]),
+        _ => panic!(),
+    }
+    let s = settings(&fs);
+    let group = s["hooks"]["PreToolUse"][0]["hooks"].as_array().unwrap();
+    assert_eq!(group.len(), 1);
+    assert_eq!(group[0]["command"], "guard commit");
+}
+
+#[test]
+fn register_many_purge_does_not_remove_what_it_just_registered() {
+    // The registered command shares the purged prefix (re-install case), so
+    // purging after registering would delete the fresh entry.
+    let fs = MockFs::new();
+    let hook = create_hook_command(&fs);
+    hook.register_many(&HookRegisterManyInput {
+        hooks: vec![registration("PreToolUse", "Bash", "guard commit --x 1")],
+        remove_command_prefixes: vec!["guard commit ".to_string()],
+        project_dir: Some(PROJECT_DIR.to_string()),
+        dry_run: false,
+    })
+    .unwrap();
+    let s = settings(&fs);
+    assert_eq!(
+        s["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+        "guard commit --x 1"
+    );
+}
+
+#[test]
+fn register_many_purge_spares_unrelated_commands() {
+    let fs = MockFs::new();
+    fs.set(
+        &settings_path(),
+        r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"guard commit --default-branch main"},{"type":"command","command":"protect-stagnation.sh"}]}]}}"#,
+    );
+    let hook = create_hook_command(&fs);
+    hook.register_many(&HookRegisterManyInput {
+        hooks: vec![registration("PreToolUse", "Bash", "guard commit")],
+        remove_command_prefixes: vec!["guard commit ".to_string()],
+        project_dir: Some(PROJECT_DIR.to_string()),
+        dry_run: false,
+    })
+    .unwrap();
+    let s = settings(&fs);
+    let commands: Vec<&str> = s["hooks"]["PreToolUse"][0]["hooks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["command"].as_str().unwrap())
+        .collect();
+    assert_eq!(commands, vec!["protect-stagnation.sh", "guard commit"]);
+}
+
+#[test]
+fn register_many_dry_run_does_not_write() {
+    let fs = MockFs::new();
+    fs.set(
+        &settings_path(),
+        r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"guard commit --default-branch main"}]}]}}"#,
+    );
+    let before = fs.get(&settings_path()).unwrap();
+    let hook = create_hook_command(&fs);
+    let r = hook
+        .register_many(&HookRegisterManyInput {
+            hooks: vec![registration("PreToolUse", "Bash", "guard commit")],
+            remove_command_prefixes: vec!["guard commit ".to_string()],
+            project_dir: Some(PROJECT_DIR.to_string()),
+            dry_run: true,
+        })
+        .unwrap();
+    // The plan is still computed and reported...
+    match r {
+        CmdResult::Ok(out) => {
+            assert_eq!(out.removed.len(), 1);
+            assert_eq!(out.registered.len(), 1);
+        }
+        _ => panic!(),
+    }
+    // ...but nothing reached the filesystem.
+    assert_eq!(fs.write_count(), 0);
+    assert_eq!(fs.get(&settings_path()).unwrap(), before);
 }

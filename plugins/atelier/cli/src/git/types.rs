@@ -148,6 +148,41 @@ pub struct HookRegisterInput {
     pub project_dir: Option<String>,
 }
 
+/// One hook registration inside a batch. Carries no `project_dir`: the
+/// settings file is a property of the batch, not of the individual hook.
+#[derive(Debug, Clone)]
+pub struct HookRegistration {
+    pub hook_type: String,
+    pub matcher: String,
+    pub command: String,
+    pub timeout: Option<i64>,
+}
+
+/// A batch of hook mutations applied in a single read-modify-write. Registering
+/// N hooks with N `register` calls means N writes, so a failure midway leaves
+/// settings.json half-registered; the batch collapses that to one write.
+#[derive(Debug, Clone, Default)]
+pub struct HookRegisterManyInput {
+    /// Applied after the prefix purge, in order.
+    pub hooks: Vec<HookRegistration>,
+    /// Commands starting with any of these are dropped from every hook type
+    /// before the registrations are applied. `register` replaces a hook by
+    /// *exact* command match, which cannot retire an older registration whose
+    /// trailing flags differ — the purge is the migration lever for that.
+    pub remove_command_prefixes: Vec<String>,
+    pub project_dir: Option<String>,
+    /// Compute the result but skip the write, so a caller can show the planned
+    /// change before touching a shared settings.json.
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct HookRegisterManyOutput {
+    pub registered: Vec<HookRegisterOutput>,
+    /// Commands dropped by the prefix purge, in discovery order.
+    pub removed: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct HookUnregisterInput {
     pub hook_type: String,
