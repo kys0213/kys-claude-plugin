@@ -96,6 +96,66 @@ fn git_hook_list_empty_in_temp_project() {
 }
 
 #[test]
+fn git_setup_guard_never_exits_two() {
+    // `setup guard` installs hooks, it is not one. Exit 2 is Claude Code's
+    // "block" signal, so this surface must never produce it — which is why the
+    // installer lives outside `guard` rather than inside it.
+    let tmp = tempfile::TempDir::new().unwrap();
+    atelier()
+        .args([
+            "git",
+            "setup",
+            "guard",
+            "--project-dir",
+            tmp.path().to_str().unwrap(),
+            "--scope",
+            "project",
+        ])
+        .assert()
+        .code(predicate::ne(2));
+}
+
+#[test]
+fn git_setup_guard_dry_run_writes_no_settings() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    atelier()
+        .args([
+            "git",
+            "setup",
+            "guard",
+            "--project-dir",
+            tmp.path().to_str().unwrap(),
+            "--scope",
+            "project",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("${CLAUDE_PROJECT_DIR:-.}"));
+    assert!(!tmp.path().join(".claude/settings.json").exists());
+}
+
+#[test]
+fn git_setup_guard_unknown_scope_is_usage_error() {
+    // An unparseable scope must fail at the argument boundary rather than
+    // silently defaulting to one of the two settings files.
+    let tmp = tempfile::TempDir::new().unwrap();
+    atelier()
+        .args([
+            "git",
+            "setup",
+            "guard",
+            "--project-dir",
+            tmp.path().to_str().unwrap(),
+            "--scope",
+            "global",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value").or(predicate::str::contains("global")));
+}
+
+#[test]
 fn git_hook_register_then_list_roundtrip() {
     let tmp = tempfile::TempDir::new().unwrap();
     let dir = tmp.path().to_str().unwrap();

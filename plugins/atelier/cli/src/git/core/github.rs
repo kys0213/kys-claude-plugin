@@ -4,7 +4,7 @@
 //! parses the review-threads GraphQL response into the same shapes as the TS.
 
 use crate::git::core::shell::{exec, exec_or_throw, ExecOptions};
-use crate::git::types::{ReviewComment, ReviewThread};
+use crate::git::types::{DetectedBranch, ReviewComment, ReviewThread};
 use regex::Regex;
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -18,6 +18,16 @@ pub struct ReviewThreadsResult {
 pub trait GitHubService {
     fn get_review_threads(&self, pr_number: i64) -> Result<ReviewThreadsResult, String>;
     fn detect_current_pr_number(&self) -> Result<Option<i64>, String>;
+}
+
+/// The forge's own answer for "what is this repository's default branch".
+/// Split from `GitHubService` because setup consumes only this one call and
+/// must not depend on the review-thread surface (ISP).
+pub trait RepoDefaultBranch {
+    /// `None` on any failure — no `gh`, not authenticated, non-GitHub remote,
+    /// blank answer. Absence is the documented setup contract ("fall back to
+    /// the empty value and carry on"), not an error to propagate.
+    fn default_branch(&self) -> Option<DetectedBranch>;
 }
 
 const REVIEW_THREADS_QUERY: &str = r#"
@@ -108,6 +118,25 @@ impl RealGitHubService {
         full.extend_from_slice(args);
         let r = exec(&full, self.opts().as_ref());
         (r.stdout, r.exit_code)
+    }
+}
+
+impl RepoDefaultBranch for RealGitHubService {
+    fn default_branch(&self) -> Option<DetectedBranch> {
+        let (stdout, exit) = self.gh_safe(&[
+            "repo",
+            "view",
+            "--json",
+            "defaultBranchRef",
+            "-q",
+            ".defaultBranchRef.name",
+        ]);
+        if exit != 0 {
+            return None;
+        }
+        // `gh` resolves the repository from the cwd's remote, so the service
+        // must be constructed pinned to the project directory.
+        DetectedBranch::new(&stdout)
     }
 }
 

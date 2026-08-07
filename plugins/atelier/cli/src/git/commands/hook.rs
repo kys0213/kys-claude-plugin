@@ -3,12 +3,17 @@
 //! abstracted behind `HookFs` so the logic is unit-testable with an in-memory
 //! mock, mirroring the TS `deps.fs` injection.
 //!
+//! Writes are batch-atomic: `register_many` applies a purge plus any number of
+//! registrations to one in-memory settings value and writes it once, so a
+//! multi-hook install can never land half-registered. `register` is the
+//! single-hook case of that batch.
+//!
 //! Settings are serialized with 2-space indentation and a trailing newline to
 //! match the TS `JSON.stringify(settings, null, 2) + '\n'` output.
 
 use crate::git::types::{
-    CmdResult, HookListInput, HookRegisterInput, HookRegisterOutput, HookUnregisterInput,
-    HookUnregisterOutput,
+    CmdResult, HookListInput, HookRegisterInput, HookRegisterManyInput, HookRegisterManyOutput,
+    HookRegisterOutput, HookRegistration, HookUnregisterInput, HookUnregisterOutput,
 };
 use serde_json::{json, Map, Value};
 
@@ -30,7 +35,9 @@ pub fn create_hook_command(fs: &dyn HookFs) -> HookCommand<'_> {
     HookCommand { fs }
 }
 
-fn settings_path(project_dir: &str) -> String {
+/// Settings file a scope directory maps to. Public so callers that report the
+/// file they touched (e.g. `setup guard`) do not re-derive the layout.
+pub fn settings_path(project_dir: &str) -> String {
     format!("{project_dir}/.claude/settings.json")
 }
 
@@ -49,16 +56,21 @@ fn serialize_settings(settings: &Value) -> String {
     s
 }
 
-/// Removes `command` from every matcher entry of a hook-type array, pruning
-/// entries whose `hooks` list becomes empty. Returns whether anything was
-/// removed. Sibling commands sharing a matcher group are left untouched.
-fn remove_command(arr: &mut Vec<Value>, command: &str) -> bool {
-    let mut removed = false;
+/// Removes every hook whose command satisfies `matches` from each matcher entry
+/// of a hook-type array, pruning entries whose `hooks` list becomes empty.
+/// Returns the removed command strings. Sibling commands sharing a matcher
+/// group are left untouched.
+fn remove_where(arr: &mut Vec<Value>, matches: &dyn Fn(&str) -> bool) -> Vec<String> {
+    let mut removed = Vec::new();
     for entry in arr.iter_mut() {
         if let Some(hs) = entry.get_mut("hooks").and_then(|h| h.as_array_mut()) {
-            let before = hs.len();
-            hs.retain(|hk| hk.get("command").and_then(|c| c.as_str()) != Some(command));
-            removed |= hs.len() != before;
+            hs.retain(|hk| match hk.get("command").and_then(|c| c.as_str()) {
+                Some(cmd) if matches(cmd) => {
+                    removed.push(cmd.to_string());
+                    false
+                }
+                _ => true,
+            });
         }
     }
     arr.retain(|entry| {
@@ -69,6 +81,92 @@ fn remove_command(arr: &mut Vec<Value>, command: &str) -> bool {
             .unwrap_or(true)
     });
     removed
+}
+
+/// Exact-command removal — the identity rule `register`/`unregister` use.
+fn remove_command(arr: &mut Vec<Value>, command: &str) -> bool {
+    !remove_where(arr, &|c| c == command).is_empty()
+}
+
+/// Drops every hook whose command starts with one of `prefixes`, across all
+/// hook types, pruning hook types left empty. Returns the removed commands.
+fn purge_prefixes(settings: &mut Value, prefixes: &[String]) -> Vec<String> {
+    if prefixes.is_empty() {
+        return Vec::new();
+    }
+    let hooks = match settings["hooks"].as_object_mut() {
+        Some(h) => h,
+        None => return Vec::new(),
+    };
+    let mut removed = Vec::new();
+    let mut emptied = Vec::new();
+    for (hook_type, value) in hooks.iter_mut() {
+        if let Some(arr) = value.as_array_mut() {
+            removed.extend(remove_where(arr, &|cmd| {
+                prefixes.iter().any(|p| cmd.starts_with(p.as_str()))
+            }));
+            if arr.is_empty() {
+                emptied.push(hook_type.clone());
+            }
+        }
+    }
+    for hook_type in emptied {
+        hooks.remove(&hook_type);
+    }
+    removed
+}
+
+/// Applies one registration to an in-memory settings value. Identity is the
+/// command string: any prior registration of the same command (under any
+/// matcher) is removed, then the command is appended to the matcher group — so
+/// several commands can share one matcher (e.g. multiple PreToolUse/Bash
+/// guards, #772) and re-registering is idempotent. No I/O happens here; the
+/// batch writes once after every registration has been applied.
+fn apply_registration(
+    settings: &mut Value,
+    reg: &HookRegistration,
+) -> Result<HookRegisterOutput, String> {
+    let hooks = settings["hooks"]
+        .as_object_mut()
+        .ok_or("hooks is not an object")?;
+    let arr = hooks
+        .entry(reg.hook_type.clone())
+        .or_insert_with(|| Value::Array(vec![]));
+    let arr = arr.as_array_mut().ok_or("hook type is not an array")?;
+
+    let existed = remove_command(arr, &reg.command);
+
+    // Build the hook object.
+    let mut hook_entry = Map::new();
+    hook_entry.insert("type".to_string(), json!("command"));
+    hook_entry.insert("command".to_string(), json!(reg.command));
+    if let Some(timeout) = reg.timeout {
+        hook_entry.insert("timeout".to_string(), json!(timeout));
+    }
+
+    // Append to the entry with the same matcher, creating it if absent.
+    let group = arr
+        .iter_mut()
+        .find(|h| h.get("matcher").and_then(|m| m.as_str()) == Some(&reg.matcher));
+    match group {
+        Some(entry) => {
+            entry["hooks"]
+                .as_array_mut()
+                .ok_or("hooks is not an array")?
+                .push(Value::Object(hook_entry));
+        }
+        None => {
+            arr.push(json!({
+                "matcher": reg.matcher,
+                "hooks": [Value::Object(hook_entry)],
+            }));
+        }
+    }
+
+    Ok(HookRegisterOutput {
+        action: if existed { "updated" } else { "created" }.to_string(),
+        command: reg.command.clone(),
+    })
 }
 
 impl HookCommand<'_> {
@@ -103,60 +201,56 @@ impl HookCommand<'_> {
             .write_file(&settings_path(project_dir), &serialize_settings(settings))
     }
 
-    /// Registers (or updates) a hook command. Identity is the command string:
-    /// any prior registration of the same command (under any matcher) is
-    /// removed, then the command is appended to the matcher group — so several
-    /// commands can share one matcher (e.g. multiple PreToolUse/Bash guards,
-    /// #772) and re-registering is idempotent.
+    /// Applies a batch — prefix purge first, then the registrations — against a
+    /// single read and a single write. Ordering matters: a registration whose
+    /// command shares the purged prefix (the common re-install case) must
+    /// survive, so the purge runs before anything is added.
+    pub fn register_many(
+        &self,
+        input: &HookRegisterManyInput,
+    ) -> Result<CmdResult<HookRegisterManyOutput>, String> {
+        let project_dir = default_project_dir(&input.project_dir);
+        let mut settings = self.read_settings(&project_dir)?;
+
+        let removed = purge_prefixes(&mut settings, &input.remove_command_prefixes);
+
+        let mut registered = Vec::with_capacity(input.hooks.len());
+        for reg in &input.hooks {
+            registered.push(apply_registration(&mut settings, reg)?);
+        }
+
+        if !input.dry_run {
+            self.write_settings(&project_dir, &settings)?;
+        }
+        Ok(CmdResult::Ok(HookRegisterManyOutput {
+            registered,
+            removed,
+        }))
+    }
+
+    /// Registers (or updates) a single hook command — the one-element batch.
     pub fn register(
         &self,
         input: &HookRegisterInput,
     ) -> Result<CmdResult<HookRegisterOutput>, String> {
-        let project_dir = default_project_dir(&input.project_dir);
-        let mut settings = self.read_settings(&project_dir)?;
-
-        let hooks = settings["hooks"].as_object_mut().unwrap();
-        let arr = hooks
-            .entry(input.hook_type.clone())
-            .or_insert_with(|| Value::Array(vec![]));
-        let arr = arr.as_array_mut().ok_or("hook type is not an array")?;
-
-        let existed = remove_command(arr, &input.command);
-
-        // Build the hook object.
-        let mut hook_entry = Map::new();
-        hook_entry.insert("type".to_string(), json!("command"));
-        hook_entry.insert("command".to_string(), json!(input.command));
-        if let Some(timeout) = input.timeout {
-            hook_entry.insert("timeout".to_string(), json!(timeout));
-        }
-
-        // Append to the entry with the same matcher, creating it if absent.
-        let group = arr
-            .iter_mut()
-            .find(|h| h.get("matcher").and_then(|m| m.as_str()) == Some(&input.matcher));
-        match group {
-            Some(entry) => {
-                entry["hooks"]
-                    .as_array_mut()
-                    .ok_or("hooks is not an array")?
-                    .push(Value::Object(hook_entry));
-            }
-            None => {
-                arr.push(json!({
-                    "matcher": input.matcher,
-                    "hooks": [Value::Object(hook_entry)],
-                }));
-            }
-        }
-
-        let action = if existed { "updated" } else { "created" };
-
-        self.write_settings(&project_dir, &settings)?;
-        Ok(CmdResult::Ok(HookRegisterOutput {
-            action: action.to_string(),
-            command: input.command.clone(),
-        }))
+        let batch = HookRegisterManyInput {
+            hooks: vec![HookRegistration {
+                hook_type: input.hook_type.clone(),
+                matcher: input.matcher.clone(),
+                command: input.command.clone(),
+                timeout: input.timeout,
+            }],
+            remove_command_prefixes: Vec::new(),
+            project_dir: input.project_dir.clone(),
+            dry_run: false,
+        };
+        Ok(match self.register_many(&batch)? {
+            CmdResult::Ok(out) => match out.registered.into_iter().next() {
+                Some(one) => CmdResult::Ok(one),
+                None => CmdResult::Err("registration produced no result".to_string()),
+            },
+            CmdResult::Err(e) => CmdResult::Err(e),
+        })
     }
 
     /// Unregisters a hook by command, pruning empty containers.
