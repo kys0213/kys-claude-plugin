@@ -9,6 +9,8 @@ user-invocable: false
 
 병렬 작업의 격리와 dispatch 사전 검증을 다룬다. **결과 수령 후 머지/충돌/정리 책임은 `merge-coordinator.md`로 위임한다** (라이프사이클 파일은 격리 패턴까지만 다룸).
 
+> **적용 범위**: 이 문서 전체가 **무거운 경로**(tracked 파일 변경을 만드는 런) 전용이다. 경량 경로는 격리할 쓰기가 없어 worktree를 만들지 않는다 — 판정은 `SKILL.md §경로 판정 게이트`가 단일 출처다.
+
 ## 토폴로지: epic 브랜치 + worktree 격리
 
 오케스트레이터에서 worktree는 **항상 epic 브랜치 위의 sub-agent 격리 수단**이다. 메인은 worktree를 사용하지 않는다.

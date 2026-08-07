@@ -32,6 +32,9 @@ user-invocable: false
                              — 가용이면 기본 2, **비가용이면 0 (경로 차단)**
                                예산 0 = 트리거에 도달해도 쓸 수 있는 것이 없다는 뜻이며,
                                폴백 여지를 남기지 않는다 (advisory-consult.md §게이트 0)
+- 경로 (path):               경량 | 무거운 — 진입 시 1회 판정 (SKILL.md §경로 판정 게이트)
+                             경량이면 isolation·토폴로지 가드·머지 조정이 빠진다.
+                             계획 밖 tracked 편집이 생기면 §경로 전환으로 무거운 경로로 올린다
 - 자동 중단 (hard_stops):    무엇이 발생하면 예산과 무관하게 멈추고 보고하는가
 - 결정 기록 위치 (log_dir):  .orchestrator/<epic>/decisions/ (gitignore, 완료 시 요약 공유)
 - 통합 검증 (integration_verify): (선택) worktree에서 실행 불가한 인프라 의존 테스트
@@ -46,7 +49,8 @@ user-invocable: false
 ## 자율 실행 루프
 
 ```
-contract = {done_when, max_loops, max_redispatch_per_task, hard_stops, log_dir}
+contract = {done_when, max_loops, max_redispatch_per_task, hard_stops, log_dir, path}
+heavy = (contract.path == "무거운")                    # 진입 판정 — SKILL.md §경로 판정 게이트
 loop_count = 0
 
 while not satisfied(contract.done_when) and loop_count < contract.max_loops:
@@ -56,12 +60,14 @@ while not satisfied(contract.done_when) and loop_count < contract.max_loops:
                                                       #  architect-council.md)로 위임하고,
                                                       # 자명한 작업만 메인이 직접 쪼갠다
     log_decision("분해", tasks, refs=[대화, CLAUDE.md, rules, 협의체 산출물])
-    dispatch(tasks, isolation="worktree",             # 위임 (base = epic 브랜치 — 편집은 격리 subagent)
-             run_in_background=true,
-             model=main_allocates_per_task)           # 모델 배분 — 메인 판단 (아래 모델 분배)
+    dispatch(tasks,                                   # 위임 — isolation은 경로 판정이 정한다
+             isolation=("worktree" if heavy else None),  #   무거운: base = epic 브랜치, 편집은 격리 subagent
+             run_in_background=true,                     #   경량: 격리할 tracked 쓰기가 없다.
+             model=main_allocates_per_task)              #         대신 산출 경로 계약을 prompt에 싣는다
     log_decision("병렬/순차 + 위임 형태(subagent/team) + 모델 배분", ...)
     results = await_completion_notifications()        # 모니터 (sleep/poll 금지)
-    assert_topology()                                 # 가드: branch == epic + status clean (아래)
+    if heavy: assert_topology()                       # 가드: branch == epic + status clean (아래)
+                                                      # 경량은 불변식이 성립하지 않아 생략
 
     for r in results:
         if r.failed:
@@ -73,8 +79,9 @@ while not satisfied(contract.done_when) and loop_count < contract.max_loops:
             handle_gate_rejection(r, verdict)         # 격리 subagent 재위임(실패 맥락 포함), team이면 SendMessage로 조율 (max_redispatch 예산 소모)
             log_decision("게이트 거부 → 재위임/조율", verdict, refs=[검토/QA findings])
 
-    merge_coordinate(passed_results)                  # 리뷰 통과분만 머지 — 충돌은 자동 위임 (아래)
-    assert_topology()                                 # 가드: 매 머지 직후에도
+    if heavy:                                         # 경량은 머지 대상이 없다 (SKILL.md §경로 판정 게이트)
+        merge_coordinate(passed_results)              # 리뷰 통과분만 머지 — 충돌은 자동 위임 (아래)
+        assert_topology()                             # 가드: 매 머지 직후에도
     run_integration_verify(contract)                  # 인프라 의존 테스트 — 메인이 직접 Bash (아래)
     log_decision("머지 순서 / 충돌 처리", ...)
     remaining_work = recompute_remaining()            # 진전 측정
@@ -215,6 +222,8 @@ HITL(opt-out) 모드에서 금지된 행위가 자율 모드(기본)에서는 **
 ### 토폴로지 가드 (assert_topology)
 
 자율 모드는 보고 없이 연속 진행하므로, sub-agent의 격리 이탈로 메인 working tree가 오염되면 그것이 후속 dispatch/머지로 전파되기 전에 잡아야 한다. **매 sub-agent 완료 알림 수신 직후 + 매 머지 직후** 실행한다 — 가드 명령과 복구 절차는 `merge-coordinator.md §토폴로지 가드`가 단일 출처다.
+
+**적용 범위는 무거운 경로다.** 경량 경로는 `branch == epic`이라는 불변식 자체가 없어 가드가 판정할 대상이 없다 (`SKILL.md §경로 판정 게이트`). 경량에서 tracked 편집이 필요해지면 가드를 되살리는 것은 §경로 전환의 5단계다.
 
 위반 시 **hard stop** — 복구 후 즉시 에스컬레이션하고, 자율 재개는 사용자 결정에 맡긴다.
 
@@ -427,7 +436,7 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 4. **opt-out 무시**: 사용자가 HITL을 명시했는데 자율로 밀어붙임 → 자율은 기본이지만 opt-out은 존중한다. 자동 개입을 멈추고 보고 후 결정을 받는다.
 5. **sleep / poll**: 자율 루프에서도 완료 알림을 사용. `Bash sleep` 루프 금지.
 6. **결정 기록 누락 / 로그 커밋**: 근거 없이 자율 주행하면 사후에 "왜"를 복원 불가. 반대로 휘발성 로그를 epic 브랜치에 커밋하면 repo 오염. 분기 결정은 참고 소스와 함께 `log_dir`에 기록하되 `.orchestrator/`는 gitignore, 완료 시 요약으로만 공유.
-7. **토폴로지 가드 생략**: 완료 알림/머지 후 메인 branch 확인 없이 연속 진행 → 오염된 HEAD 위에서 다음 dispatch의 worktree base가 잘못 잡힘.
+7. **토폴로지 가드 생략** (무거운 경로): 완료 알림/머지 후 메인 branch 확인 없이 연속 진행 → 오염된 HEAD 위에서 다음 dispatch의 worktree base가 잘못 잡힘. 경량 경로에서의 생략은 판정 결과이므로 이 안티패턴이 아니다 — 대신 판정 자체를 빠뜨리는 것이 `SKILL.md §안티패턴 15`다.
 8. **인프라 의존 테스트를 worktree 검증에 포함**: sub-agent가 접근 불가한 환경 의존 테스트를 worktree에서 실행 → 환경 실패 noise로 검증 신뢰도 저하. 계약의 `integration_verify`로 분리해 메인이 실행.
 9. **게이트 무력화**: 구현 sub-agent의 자기 보고만 믿고 머지하거나, 구현한 agent가 자기 결과를 검토/QA → 자기 검증 편향으로 결함 통과. 게이트 에이전트는 항상 구현자와 다른 sub-agent다.
 10. **검증 테스트·DBA 게이트 생략**: 구현만 머지하고 검증 테스트를 안 만들면 회귀를 잡을 그물이 없다(spec 유무와 무관). DB 접촉 판정에 걸렸는데 reviewer/QA만으로 통과시키면 락·하위 호환·인덱스 누락 같은 DB 특유 위험이 그대로 들어간다.
@@ -461,7 +470,8 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 - [ ] 리스크 큰/되돌리기 어려운 편집은 **계획 우선 게이트**를 거쳤는가? (`delegation-patterns.md §계획 우선 게이트`)
 - [ ] 각 작업을 머지 전 **검토 + QA (+ DB 접촉 시 DBA)** 게이트로, 구현자와 다른 agent가 검증하고 전부 pass(AND)여야 머지하는가? (QA가 추가한 검증 테스트 green 포함)
 - [ ] 재위임·게이트 거부·충돌 해결이 `max_redispatch_per_task` 예산을 소모하며 카운트되는가?
-- [ ] 매 sub-agent 완료 직후 + 매 머지 직후 토폴로지 가드를 실행하는가? (`merge-coordinator.md §토폴로지 가드`)
+- [ ] (무거운 경로) 매 sub-agent 완료 직후 + 매 머지 직후 토폴로지 가드를 실행하는가? (`merge-coordinator.md §토폴로지 가드`)
+- [ ] 자율 계약에 경로 판정(경량/무거운)과 그 근거를 실었는가? (`SKILL.md §경로 판정 게이트`)
 - [ ] 계약의 integration_verify를 run_at 시점에 메인이 직접 실행하는가?
 - [ ] 각 작업의 모델을 리스크에 맞춰 배분하고(dispatch에 `model` 명시), 비표준 선택은 기록하는가?
 - [ ] 메인이 전문 대신 압축 요약 + verdict만 수령하는가? (컨텍스트 격리)
