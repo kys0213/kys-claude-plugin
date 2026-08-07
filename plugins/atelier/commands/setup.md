@@ -15,7 +15,7 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 
 setup 이 settings.json 에 등록하는 hook 은 **CLI 직접 호출 형태뿐**입니다 (`atelier git guard write ...` — 바이너리가 PATH 에서 해석되므로 버전 비의존). 이는 setup 시점에 프로젝트별 값(예: `--default-branch <감지값>`)을 주입해야 하기 때문입니다.
 
-> 플러그인에 번들된 `.sh` hook(`check-cli-version`·`suggest-simplify`)은 플러그인이 `hooks/hooks.json` 으로 직접 선언합니다. 둘 다 비차단 advisory 라 모든 세션에 적용돼도 안전합니다. `${CLAUDE_PLUGIN_ROOT}` 가 hook 실행 시점에 활성 버전으로 해석돼 frozen 이 없습니다 (`.claude/rules/tool-layer-boundary.md`).
+> 플러그인에 번들된 `.sh` hook(`check-cli-version`·`session-baseline`·`suggest-simplify`)은 플러그인이 `hooks/hooks.json` 으로 직접 선언합니다. 셋 다 비차단 advisory 라 모든 세션에 적용돼도 안전합니다. `${CLAUDE_PLUGIN_ROOT}` 가 hook 실행 시점에 활성 버전으로 해석돼 frozen 이 없습니다 (`.claude/rules/tool-layer-boundary.md`).
 
 ## Step 0 — atelier CLI 보장 (공통 선행)
 
