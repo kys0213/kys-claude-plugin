@@ -1,4 +1,6 @@
 //! Subprocess execution utility — port of `git-utils/src/core/shell.ts`.
+//! Shared: the git services and the session repository reader both shell out
+//! through it, and neither subsystem should have to depend on the other for it.
 //! `exec` never throws and returns trimEnd'd stdout/stderr plus the exit code;
 //! `exec_or_throw` returns the trimmed stdout or an error string on non-zero
 //! exit, embedding the same message format as the TS `execOrThrow`.

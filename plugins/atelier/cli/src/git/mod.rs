@@ -21,6 +21,7 @@ use crate::git::types::{
     CmdResult, GuardDecision, HookListInput, HookRegisterInput, HookScope, HookUnregisterInput,
     ReviewsInput,
 };
+use crate::shared::process::{default_project_dir, read_stdin_raw};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 
@@ -110,15 +111,6 @@ impl HookFs for RealHookFs {
     }
 }
 
-/// Reads stdin to a string (empty on read failure). Parsing the hook payload
-/// is command logic (`HookPayload::parse`); only the I/O lives here (#778).
-fn read_stdin_raw() -> String {
-    use std::io::Read as _;
-    let mut buf = String::new();
-    let _ = std::io::stdin().read_to_string(&mut buf);
-    buf
-}
-
 /// Prints the block reason and returns the decision's exit code — the 0/2
 /// hook contract itself lives on `GuardDecision::exit_code` (#778).
 fn guard_exit(decision: GuardDecision) -> i32 {
@@ -204,11 +196,7 @@ pub fn run(cli: Cli) -> i32 {
                     .filter(|b| !b.is_empty())
                     .collect::<Vec<_>>()
             });
-            let project_dir = project_dir.unwrap_or_else(|| {
-                std::env::current_dir()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_default()
-            });
+            let project_dir = default_project_dir(project_dir);
             // Forward the flag as-is; the guard core supplies its own default
             // (DEFAULT_CREATE_BRANCH_SCRIPT) when this is empty.
             let create_branch_script = create_branch_script.unwrap_or_default();

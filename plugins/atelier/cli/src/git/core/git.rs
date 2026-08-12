@@ -2,11 +2,11 @@
 //! `git-utils/src/core/git.ts`. After the git CLI was narrowed to its
 //! mechanical surface (guard/hook/reviews), the guard is the only consumer of
 //! `GitService`, so the trait exposes just the three reads it needs;
-//! `RealGitService` shells out via `core::shell`. Commit/branch/PR flows now
+//! `RealGitService` shells out via `shared::shell`. Commit/branch/PR flows now
 //! run as plain git/gh under the `git` skill's conventions, not through here.
 
-use crate::git::core::shell::{exec, ExecOptions};
 use crate::git::types::GitSpecialState;
+use crate::shared::shell::{exec, ExecOptions};
 
 /// The one repo mutation the git subsystem performs, kept off `GitService` on
 /// purpose: that trait's contract forbids mutation because the guard calls it

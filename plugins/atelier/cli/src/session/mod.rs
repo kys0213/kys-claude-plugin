@@ -18,6 +18,7 @@ use crate::session::commands::simplify::{render_banner, SimplifyDecision};
 use crate::session::commands::SessionDeps;
 use crate::session::core::baseline::{FsBaselineStore, DEFAULT_TTL};
 use crate::session::core::repo::create_repo_reader;
+use crate::shared::process::{default_project_dir, read_stdin_raw};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -54,24 +55,13 @@ fn state_dir() -> std::path::PathBuf {
     std::env::temp_dir().join("atelier-sessions")
 }
 
-/// Reads stdin to a string (empty on read failure); parsing is command logic.
-fn read_stdin_raw() -> String {
-    use std::io::Read as _;
-    let mut buf = String::new();
-    let _ = std::io::stdin().read_to_string(&mut buf);
-    buf
-}
-
 /// Resolves the project anchor: the explicit flag first, then the payload cwd,
 /// then the process cwd. Never guesses beyond those documented fallbacks.
 fn resolve_project_dir(flag: Option<String>, payload: &SessionPayload) -> String {
-    flag.filter(|d| !d.is_empty())
-        .or_else(|| payload.cwd.clone().filter(|d| !d.is_empty()))
-        .unwrap_or_else(|| {
-            std::env::current_dir()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| ".".to_string())
-        })
+    default_project_dir(
+        flag.filter(|d| !d.is_empty())
+            .or_else(|| payload.cwd.clone().filter(|d| !d.is_empty())),
+    )
 }
 
 /// The subsystem's only stdout write. #725 (moving hook output to
