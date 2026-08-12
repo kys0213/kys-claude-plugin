@@ -95,7 +95,7 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
 ```
 
 - **판정 시점의 산출물 계획을 기준으로 한다.** 계획 밖 편집이 생기면 아래 §경로 전환.
-- **git 레포가 아니면서 편집이 필요한 경우**는 경량 경로가 아니라 **격리 불가**다 — worktree 격리가 성립하지 않음을 사용자에게 보고하고, 순차 dispatch로 낮춘다.
+- **git 레포가 아니면서 편집이 필요한 경우**는 경량 경로가 아니다 — 판정은 `references/delegation-patterns.md §경로 판정 경계 케이스`가 단일 출처다.
 - 판정 결과 + 근거를 진입 보고 1줄과 decision log에 남긴다. **생략은 판정이 아니다.**
 
 | 규칙 | 경량 | 근거 |
@@ -165,7 +165,7 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
 전환 트리거: 계획에 없던 tracked 파일 편집이 필요해진 순간
   1. 편집 dispatch를 시작하지 않는다 (선-dispatch 후-체크 금지)
   2. 생략했던 체크 1·2·3을 지금 실행한다 (late gate)
-       비-git이면 → 격리 불가로 보고하고 순차 dispatch로 낮춘다
+       비-git이면 → delegation-patterns.md §경로 판정 경계 케이스
   3. 기존 Task는 그대로 유지한다 — 재분해하지 않는다
   4. decision log에 `경로 전환` + 전환 사유 + 전환 시점을 남긴다
   5. 이후 dispatch는 전부 무거운 경로 규칙 (토폴로지 가드 재개)
@@ -178,26 +178,21 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
 ## 표준 절차 (Workflow)
 
 ```
-0. 진입 확인 (Entry)        → 조율 도구 스키마 확보(ToolSearch) + 경량/무거운 경로 판정
-                             + (무거운 경로면) epic 브랜치·메인 working tree 확인
-                             + 왕복 조율 가용 판정
+0. 진입 확인 (Entry)        → 조율 도구 스키마 확보(ToolSearch) + 경로 판정 게이트 + §진입 시 체크
 1. 분해 (Decompose)        → 작업을 독립 단위로 쪼갠다 — 복잡·모호한 요구는 아키텍트 협의체
                              (설계 생성 → 별도 agent 의 심문·검증)에 위임해 검증된 task 를 도출
                              (`references/architect-council.md`)
-2. 위험도 분석 (Analyze)    → 단위 간 충돌 위험 식별 (무거운: 파일/의존성, 경량: 외부 리소스·rate limit)
+2. 위험도 분석 (Analyze)    → 단위 간 충돌 위험 식별
 3. 실행 계획 (Plan)         → 병렬/순차 결정 + 위임 형태(단발/team) 결정
-4. 위임 (Dispatch)          → Agent 호출 (무거운: worktree isolation, base = epic 브랜치
-                             / 경량: isolation 없음 + 산출 경로 계약)
+4. 위임 (Dispatch)          → Agent 호출 (`references/delegation-patterns.md`)
 5. 모니터링 (Monitor)       → 진행 추적, 정체 감지, 사용자 보고
 6. 검토·QA 게이트 (Gate)    → 작업마다 검토 에이전트 + QA 에이전트(검증 테스트 추가) 필수 + DB 접촉 작업은
                              DBA 에이전트 추가, 전부 pass여야 머지
-                             (경량: 외부 쓰기 전 검토 1회로 축소)
 7. 머지 조정 (Coordinate)   → 게이트 통과분만 epic 브랜치로 통합 + 충돌 위임 + worktree 정리
-                             (경량: 머지 대상이 없어 생략)
 8. 보고 (Report)            → 사용자에게 결과 요약
 ```
 
-각 단계의 상세 패턴은 아래 references에 있다. 무거운/경량 경로가 갈리는 단계는 §경로 판정 게이트의 유지·생략 표가 단일 출처다.
+각 단계의 상세 패턴은 아래 references에 있다. **경로별 차이(어느 단계가 유지·축소·생략되는지)는 §경로 판정 게이트의 유지·생략 표가 단일 출처다.**
 
 ### 일감을 Task로 분리·관리하는 것은 메인의 핵심 룰
 
@@ -220,7 +215,7 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
 - QA의 테스트 추가도 편집이므로 **`isolation:"worktree"` subagent로 위임**한다 (메인은 직접 편집하지 않는다 — *사고 모드*).
 - 게이트 역할의 tier는 아래 §모델 라우팅 전략에 따라 dispatch 시점에 정한다 — 자동 머지의 유일한 안전장치라 보통 더 높은 역량을 둘 가치가 있다.
 - 예외는 Task 룰과 동일하게 **단발 1회·read-only 작업만**이다.
-- **경량 경로는 조건부 유지**다: 순수 read-only 조사는 위 예외로 게이트가 빠지지만, **외부 시스템에 쓰는 작업**(이슈 등록·PR 코멘트·배포)은 되돌리기 비용이 있으므로 **쓰기 전 검토 1회**로 축소해 유지한다 (§경로 판정 게이트).
+- 경로별 차이는 §경로 판정 게이트의 유지·생략 표를 따른다.
 
 역할별 입력·검증 질문·출력 계약, DB 접촉 판정, 게이트 거부의 재위임 예산·기록 등 세부 규칙은 `references/autonomous-driving.md §리뷰어·QA 게이트`가 단일 출처다. spec 문서를 입력으로 구현하는 경우만 `references/spec-driven-review.md`(검토자=spec↔구현, QA 매니저=spec↔테스트)로 특수화된다.
 
@@ -258,7 +253,7 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
 - **병렬의 비용**: 머지 시 충돌 → 사람 개입 필요
 - **기본 규칙**: 의심스러우면 순차. 병렬은 disjoint가 명백할 때만.
 
-**경량 경로에서는 축이 바뀐다.** 겹칠 파일이 없으므로 "변경 파일 집합" 대신 **외부 리소스**를 disjoint 판정의 축으로 쓴다 — 같은 API의 rate limit, 같은 이슈·PR·배포 대상을 동시에 건드리는가. 축만 바뀌고 규칙은 같다: 의심스러우면 순차다.
+경로별 차이(경량에서 disjoint 판정 축이 무엇으로 바뀌는지)는 §경로 판정 게이트의 유지·생략 표를 따른다. 축이 바뀌어도 규칙은 같다: 의심스러우면 순차다.
 
 ---
 
@@ -404,8 +399,8 @@ team을 "쓰면 좋다"로 두면 폴백이 사실상 기본값이 되어 team �
 3. **컨텍스트 의존 prompt**: "위에서 말한 그 파일을" 같은 prompt → sub-agent는 메인 대화를 못 봄. 자기완결적으로 작성.
 4. **Reference 일괄 로드**: 시작하자마자 4개 reference를 모두 Read → 컨텍스트 낭비. 단계별로 필요할 때만.
 5. **무한 폴링**: `Bash sleep` 루프로 agent 상태 확인 → 금지. `run_in_background: true` + 완료 알림 사용.
-6. **메인이 worktree에서 시작** (무거운 경로): 메인을 worktree에 진입시킨 채 오케스트레이션 → 머지 경로 꼬임. 메인은 epic 브랜치의 메인 working tree에서만 동작.
-7. **epic 브랜치 우회** (무거운 경로): main 또는 임의 feature 브랜치에서 sub-agent를 바로 dispatch → 결과를 어디로 모을지 모호. 반드시 epic 브랜치를 만들고 거기서 dispatch.
+6. **메인이 worktree에서 시작** (적용 경로는 §경로 판정 게이트): 메인을 worktree에 진입시킨 채 오케스트레이션 → 머지 경로 꼬임. 메인은 epic 브랜치의 메인 working tree에서만 동작.
+7. **epic 브랜치 우회** (적용 경로는 §경로 판정 게이트): main 또는 임의 feature 브랜치에서 sub-agent를 바로 dispatch → 결과를 어디로 모을지 모호. 반드시 epic 브랜치를 만들고 거기서 dispatch.
 8. **자문 흉내**: 자문 경로가 비활성인데 단발 subagent 1회 왕복이나 메인 자신의 판단을 "자문 결과"로 포장 → 실질 없이 기록만 남는다. 경로가 없으면 없는 대로 진행하고, 그 시점의 판단은 **메인 자신의 판단으로 명시**한다. 필수 등급 경로의 폴백은 decision log의 `실행 형태` 필드로 사후 탐지된다 (§team mode 강제 등급).
 9. **고무도장 메인**: 상위 tier라는 이유로 권고를 검토 없이 채택 → 실질 오케스트레이터가 advisor가 되고 메인은 전달자로 전락한다. 결정권은 메인에 있고, 채택도 기각도 사유와 함께 기록한다.
 10. **자문 tier가 다른 역할로 번짐**: "자문은 X 모델로"라는 역할 지목 제약을 받고 discovery·조사·구현까지 X로 dispatch → 상위 tier 예외가 전역 기본값이 되어 집행 위임의 tier 상한이 무너지고 비용도 폭증한다. 자문 외의 모든 위임은 집행 위임이며 메인 tier를 넘지 못한다 (§역할 기준 원칙 / §역할별 모델 제약).

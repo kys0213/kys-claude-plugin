@@ -12,7 +12,7 @@ user-invocable: false
 - **검토자 (spec-reviewer)**: worktree 코드가 **spec대로 구현됐는지** (요구사항 충족 ↔ 구현)
 - **QA 매니저 (qa-manager)**: **spec대로 테스트 케이스가 작성됐는지** (spec의 각 flow/concern ↔ 테스트 커버리지)
 
-> **적용 범위**: **무거운 경로** 전용이다. 이 게이트는 worktree 코드를 머지 전에 검증하는 절차라, tracked 변경이 없는 경량 경로에는 검증 대상이 없다 (`SKILL.md §경로 판정 게이트`).
+> **적용 범위**: 이 문서 전체가 **무거운 경로** 전용이다 (판정: `SKILL.md` §경로 판정 게이트).
 
 이 문서는 `autonomous-driving.md §리뷰어·QA 게이트`의 일반 게이트를 **spec 맥락으로 특수화**한 것이다 — 예산·재위임·decision log·에스컬레이션·토폴로지 가드 등 공통 규칙은 `autonomous-driving.md`가 단일 소유하며 여기서 중복 정의하지 않는다.
 
