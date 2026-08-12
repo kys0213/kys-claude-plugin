@@ -5,41 +5,31 @@
 use crate::session::commands::SessionDeps;
 use crate::session::core::baseline::{is_valid_session_id, Baseline};
 
-/// Why a baseline was not written. Every variant is a silent no-op for the
-/// caller — this command never blocks a session.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SkipReason {
-    /// Missing id, or one that fails the path-traversal guard.
-    InvalidSessionId,
-    NotAGitRepo,
-    StoreError,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BaselineOutcome {
-    Recorded,
-    /// Already recorded earlier in this session (resume/compact/clear re-fire).
-    AlreadyPresent,
-    Skipped(SkipReason),
-}
-
 /// Snapshots the repository and stores it as the session baseline, but only if
 /// this session has none yet.
-pub fn run(deps: &SessionDeps, session_id: &str) -> BaselineOutcome {
+///
+/// Returns nothing: every way this can decline — a rejected id, no repository,
+/// a failed write — is a silent no-op, and both callers act the same on all of
+/// them. This command never blocks a session.
+pub fn run(deps: &SessionDeps, session_id: &str) {
     if !is_valid_session_id(session_id) {
-        return BaselineOutcome::Skipped(SkipReason::InvalidSessionId);
+        return;
+    }
+    // SessionStart re-fires on resume/compact/clear, and `save_if_absent`
+    // discards the snapshot every time after it. Ask the store first: one file
+    // read settles it, where the snapshot below costs three git processes.
+    if deps.store.load(session_id).is_some() {
+        return;
     }
     if !deps.repo.is_inside_work_tree() {
-        return BaselineOutcome::Skipped(SkipReason::NotAGitRepo);
+        return;
     }
     let snapshot = Baseline {
         head: deps.repo.head(),
         dirty: deps.repo.dirty_files(),
         notified: false,
     };
-    match deps.store.save_if_absent(session_id, &snapshot) {
-        Ok(true) => BaselineOutcome::Recorded,
-        Ok(false) => BaselineOutcome::AlreadyPresent,
-        Err(_) => BaselineOutcome::Skipped(SkipReason::StoreError),
-    }
+    // Still `save_if_absent`, not `save`: the early return above is a fast
+    // path, this is the guarantee that a concurrent write is never clobbered.
+    let _ = deps.store.save_if_absent(session_id, &snapshot);
 }

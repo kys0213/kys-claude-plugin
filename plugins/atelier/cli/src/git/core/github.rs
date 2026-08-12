@@ -3,8 +3,8 @@
 //! implementation reads `GH_HOST` from `~/.git-workflow-env`, calls `gh`, and
 //! parses the review-threads GraphQL response into the same shapes as the TS.
 
-use crate::git::core::shell::{exec, exec_or_throw, ExecOptions};
 use crate::git::types::{DetectedBranch, ReviewComment, ReviewThread};
+use crate::shared::shell::{exec, exec_or_throw, ExecOptions};
 use regex::Regex;
 use std::collections::HashMap;
 use std::sync::LazyLock;

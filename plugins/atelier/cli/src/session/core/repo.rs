@@ -1,13 +1,18 @@
 //! Repository reads the session commands consume. The trait keeps the commands
 //! testable in memory (DIP); `GitRepoReader` shells out to git.
 //!
+//! `is_inside_work_tree` is answered by the git subsystem's `RealGitService`
+//! rather than by a second implementation here, so both subsystems draw the
+//! "inside a repo" line in exactly one place.
+//!
 //! Every read is pinned to `project_dir` via `git -C`: a Stop hook's process
 //! cwd can be a worktree or a subagent's directory, not the project (#780).
 //! Every failure collapses to "nothing" — these back an advisory hook that must
 //! stay silent in an empty repo, outside a repo, or after a rebase dropped the
 //! baseline commit.
 
-use crate::git::core::shell::exec;
+use crate::git::core::git::{create_git_service, GitService, RealGitService};
+use crate::shared::shell::exec;
 use std::collections::BTreeSet;
 
 pub trait RepoReader {
@@ -24,11 +29,17 @@ pub trait RepoReader {
 /// Real reader bound to a project directory.
 pub struct GitRepoReader {
     project_dir: String,
+    /// Answers `is_inside_work_tree`. Held rather than reimplemented so the two
+    /// subsystems cannot disagree about whether a directory is inside a repo —
+    /// the guard and the session hooks must draw that line the same way.
+    git: RealGitService,
 }
 
 pub fn create_repo_reader(project_dir: impl Into<String>) -> GitRepoReader {
+    let project_dir = project_dir.into();
     GitRepoReader {
-        project_dir: project_dir.into(),
+        git: create_git_service(Some(project_dir.clone())),
+        project_dir,
     }
 }
 
@@ -72,8 +83,7 @@ fn parse_paths_z(raw: &str) -> BTreeSet<String> {
 
 impl RepoReader for GitRepoReader {
     fn is_inside_work_tree(&self) -> bool {
-        let (stdout, exit) = self.git(&["rev-parse", "--is-inside-work-tree"]);
-        exit == 0 && stdout.trim() == "true"
+        GitService::is_inside_work_tree(&self.git)
     }
 
     fn head(&self) -> Option<String> {

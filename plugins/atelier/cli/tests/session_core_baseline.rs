@@ -2,23 +2,11 @@
 //! session hooks depend on (never clobber, never escape the state dir, never
 //! grow unbounded, never expose a half-written file).
 
+mod session_mocks;
+
 use atelier::session::core::baseline::{Baseline, BaselineStore, FsBaselineStore, DEFAULT_TTL};
-use std::collections::BTreeSet;
+use session_mocks::{baseline, SESSION};
 use std::time::Duration;
-
-const SESSION: &str = "sess-abc12345";
-
-fn paths(items: &[&str]) -> BTreeSet<String> {
-    items.iter().map(|s| s.to_string()).collect()
-}
-
-fn baseline(head: &str, dirty: &[&str]) -> Baseline {
-    Baseline {
-        head: Some(head.to_string()),
-        dirty: paths(dirty),
-        notified: false,
-    }
-}
 
 fn entries(dir: &std::path::Path) -> Vec<String> {
     let Ok(read) = std::fs::read_dir(dir) else {

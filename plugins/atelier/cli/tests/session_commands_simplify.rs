@@ -2,93 +2,13 @@
 //! the repository are in-memory doubles, so every rule is pinned without a git
 //! repo or a temp directory.
 
+mod session_mocks;
+
 use atelier::session::commands::simplify::{run, SilentReason, SimplifyDecision};
 use atelier::session::commands::SessionDeps;
-use atelier::session::core::baseline::{Baseline, BaselineStore};
-use atelier::session::core::repo::RepoReader;
-use std::cell::RefCell;
-use std::collections::{BTreeSet, HashMap};
-
-const SESSION: &str = "sess-abc12345";
-
-/// In-memory `BaselineStore`.
-#[derive(Default)]
-struct MemStore {
-    entries: RefCell<HashMap<String, Baseline>>,
-}
-
-impl MemStore {
-    fn with(session_id: &str, baseline: Baseline) -> Self {
-        let store = MemStore::default();
-        store
-            .entries
-            .borrow_mut()
-            .insert(session_id.to_string(), baseline);
-        store
-    }
-    fn get(&self, session_id: &str) -> Option<Baseline> {
-        self.entries.borrow().get(session_id).cloned()
-    }
-}
-
-impl BaselineStore for MemStore {
-    fn load(&self, session_id: &str) -> Option<Baseline> {
-        self.entries.borrow().get(session_id).cloned()
-    }
-    fn save(&self, session_id: &str, baseline: &Baseline) -> Result<(), String> {
-        self.entries
-            .borrow_mut()
-            .insert(session_id.to_string(), baseline.clone());
-        Ok(())
-    }
-}
-
-/// In-memory `RepoReader` describing one repository state.
-struct MemRepo {
-    inside_work_tree: bool,
-    head: Option<String>,
-    dirty: BTreeSet<String>,
-    /// Files each base commit reports as changed since, keyed by commit.
-    committed: HashMap<String, BTreeSet<String>>,
-}
-
-impl Default for MemRepo {
-    fn default() -> Self {
-        MemRepo {
-            inside_work_tree: true,
-            head: Some("head1".to_string()),
-            dirty: BTreeSet::new(),
-            committed: HashMap::new(),
-        }
-    }
-}
-
-impl RepoReader for MemRepo {
-    fn is_inside_work_tree(&self) -> bool {
-        self.inside_work_tree
-    }
-    fn head(&self) -> Option<String> {
-        self.head.clone()
-    }
-    fn dirty_files(&self) -> BTreeSet<String> {
-        self.dirty.clone()
-    }
-    fn files_changed_since(&self, base_head: &str) -> BTreeSet<String> {
-        self.committed.get(base_head).cloned().unwrap_or_default()
-    }
-}
-
-fn paths(items: &[&str]) -> BTreeSet<String> {
-    items.iter().map(|s| s.to_string()).collect()
-}
-
-fn baseline(head: &str, dirty: &[&str]) -> Baseline {
-    Baseline {
-        head: Some(head.to_string()),
-        dirty: paths(dirty),
-        notified: false,
-    }
-}
+use atelier::session::core::baseline::BaselineStore;
+use session_mocks::{baseline, paths, MemRepo, MemStore, SESSION};
+use std::collections::HashMap;
 
 fn notified_files(decision: &SimplifyDecision) -> (Vec<String>, usize) {
     match decision {
@@ -113,7 +33,7 @@ fn notify_when_session_adds_code_file() {
     assert_eq!(files, vec!["src/lib.rs".to_string()]);
     assert_eq!(total, 1);
     // Notifying marks the session so the banner does not repeat every Stop.
-    assert!(store.get(SESSION).unwrap().notified);
+    assert!(store.load(SESSION).unwrap().notified);
 }
 
 #[test]
@@ -134,7 +54,7 @@ fn silent_when_all_dirty_predates_session() {
         run(&deps, SESSION),
         SimplifyDecision::Silent(SilentReason::NoSessionChanges)
     );
-    assert!(!store.get(SESSION).unwrap().notified);
+    assert!(!store.load(SESSION).unwrap().notified);
 }
 
 #[test]
@@ -262,7 +182,7 @@ fn silent_when_baseline_absent_and_records_it() {
         run(&deps, SESSION),
         SimplifyDecision::Silent(SilentReason::NoBaseline)
     );
-    let recorded = store.get(SESSION).expect("baseline recorded on Stop");
+    let recorded = store.load(SESSION).expect("baseline recorded on Stop");
     assert_eq!(recorded.head.as_deref(), Some("head5"));
     assert_eq!(recorded.dirty, paths(&["src/pre-existing.rs"]));
     assert!(!recorded.notified);

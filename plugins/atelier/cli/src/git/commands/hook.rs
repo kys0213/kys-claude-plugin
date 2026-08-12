@@ -15,6 +15,7 @@ use crate::git::types::{
     CmdResult, HookListInput, HookRegisterInput, HookRegisterManyInput, HookRegisterManyOutput,
     HookRegisterOutput, HookRegistration, HookUnregisterInput, HookUnregisterOutput,
 };
+use crate::shared::process::default_project_dir;
 use serde_json::{json, Map, Value};
 
 /// Filesystem operations the hook command depends on. Errors are surfaced as
@@ -39,14 +40,6 @@ pub fn create_hook_command(fs: &dyn HookFs) -> HookCommand<'_> {
 /// file they touched (e.g. `setup guard`) do not re-derive the layout.
 pub fn settings_path(project_dir: &str) -> String {
     format!("{project_dir}/.claude/settings.json")
-}
-
-fn default_project_dir(explicit: &Option<String>) -> String {
-    explicit.clone().unwrap_or_else(|| {
-        std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default()
-    })
 }
 
 /// Serializes settings the same way the TS code does: 2-space indent + newline.
@@ -209,7 +202,7 @@ impl HookCommand<'_> {
         &self,
         input: &HookRegisterManyInput,
     ) -> Result<CmdResult<HookRegisterManyOutput>, String> {
-        let project_dir = default_project_dir(&input.project_dir);
+        let project_dir = default_project_dir(input.project_dir.clone());
         let mut settings = self.read_settings(&project_dir)?;
 
         let removed = purge_prefixes(&mut settings, &input.remove_command_prefixes);
@@ -258,7 +251,7 @@ impl HookCommand<'_> {
         &self,
         input: &HookUnregisterInput,
     ) -> Result<CmdResult<HookUnregisterOutput>, String> {
-        let project_dir = default_project_dir(&input.project_dir);
+        let project_dir = default_project_dir(input.project_dir.clone());
         let path = settings_path(&project_dir);
         if !self.fs.exists(&path) {
             return Ok(CmdResult::Err(format!(
@@ -310,7 +303,7 @@ impl HookCommand<'_> {
 
     /// Lists hooks, optionally filtered to a single hook type.
     pub fn list(&self, input: &HookListInput) -> Result<CmdResult<Value>, String> {
-        let project_dir = default_project_dir(&input.project_dir);
+        let project_dir = default_project_dir(input.project_dir.clone());
         let settings = self.read_settings(&project_dir)?;
 
         if let Some(hook_type) = &input.hook_type {

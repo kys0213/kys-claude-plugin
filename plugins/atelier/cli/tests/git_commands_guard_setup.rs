@@ -15,26 +15,42 @@ use std::rc::Rc;
 
 const PROJECT_DIR: &str = "/tmp/guard-setup-project";
 
-/// Assembles the deps and runs, so each test states only what it varies.
-fn setup(
-    fs: &MockFs,
-    warmer: &MockWarmer,
-    git: &MockGit,
-    gh: &MockGitHub,
+/// One setup run's world. Defaults describe the ordinary case — a successful
+/// warm-up, a repository that detects `main`, no `gh`, project scope, a real
+/// write — so each test names only what it varies with `..Default::default()`.
+struct Scenario {
+    warmer: MockWarmer,
+    git: MockGit,
+    gh: MockGitHub,
     scope: HookScope,
     dry_run: bool,
-) -> CmdResult<GuardSetupOutput> {
+}
+
+impl Default for Scenario {
+    fn default() -> Self {
+        Scenario {
+            warmer: MockWarmer::default(),
+            git: MockGit::default(),
+            gh: MockGitHub::default(),
+            scope: HookScope::Project,
+            dry_run: false,
+        }
+    }
+}
+
+/// Assembles the deps and runs, so each test states only what it varies.
+fn setup(fs: &MockFs, s: Scenario) -> CmdResult<GuardSetupOutput> {
     let hook = create_hook_command(fs);
     let deps = GuardSetupDeps {
-        warmer,
-        git,
-        gh,
+        warmer: &s.warmer,
+        git: &s.git,
+        gh: &s.gh,
         hook: &hook,
     };
     let input = GuardSetupInput {
         project_dir: PROJECT_DIR.to_string(),
-        scope,
-        dry_run,
+        scope: s.scope,
+        dry_run: s.dry_run,
     };
     run(&deps, &input)
 }
@@ -90,11 +106,10 @@ fn omits_default_branch_flag_when_detection_fails() {
     let fs = MockFs::new();
     let out = ok(setup(
         &fs,
-        &MockWarmer::default(),
-        &git_without_detection(),
-        &MockGitHub::default(),
-        HookScope::Project,
-        false,
+        Scenario {
+            git: git_without_detection(),
+            ..Default::default()
+        },
     ));
     assert_eq!(out.default_branch, None);
     for command in &out.commands {
@@ -117,11 +132,11 @@ fn omits_flag_when_gh_returns_blank_or_whitespace() {
         };
         let out = ok(setup(
             &fs,
-            &MockWarmer::default(),
-            &git_without_detection(),
-            &gh,
-            HookScope::Project,
-            false,
+            Scenario {
+                git: git_without_detection(),
+                gh,
+                ..Default::default()
+            },
         ));
         assert_eq!(out.default_branch, None, "blank input {blank:?}");
         assert!(out.commands.iter().all(|c| !c.contains("--default-branch")));
@@ -133,11 +148,11 @@ fn emits_default_branch_flag_when_detected() {
     let fs = MockFs::new();
     let out = ok(setup(
         &fs,
-        &MockWarmer::default(),
-        &git_without_detection(),
-        &gh_returning("trunk"),
-        HookScope::Project,
-        false,
+        Scenario {
+            git: git_without_detection(),
+            gh: gh_returning("trunk"),
+            ..Default::default()
+        },
     ));
     assert_eq!(out.default_branch, Some("trunk".to_string()));
     assert!(out
@@ -155,11 +170,10 @@ fn falls_back_to_git_detection_when_gh_is_unavailable() {
     };
     let out = ok(setup(
         &fs,
-        &MockWarmer::default(),
-        &git,
-        &MockGitHub::default(),
-        HookScope::Project,
-        false,
+        Scenario {
+            git,
+            ..Default::default()
+        },
     ));
     assert_eq!(out.default_branch, Some("develop".to_string()));
 }
@@ -173,11 +187,11 @@ fn user_scope_never_pins_default_branch() {
     let fs = MockFs::new();
     let out = ok(setup(
         &fs,
-        &MockWarmer::default(),
-        &MockGit::default(),
-        &gh_returning("trunk"),
-        HookScope::User,
-        false,
+        Scenario {
+            gh: gh_returning("trunk"),
+            scope: HookScope::User,
+            ..Default::default()
+        },
     ));
     assert_eq!(out.default_branch, None);
     assert!(
@@ -192,11 +206,10 @@ fn project_scope_pins_detected_default_branch() {
     let fs = MockFs::new();
     let out = ok(setup(
         &fs,
-        &MockWarmer::default(),
-        &MockGit::default(),
-        &gh_returning("trunk"),
-        HookScope::Project,
-        false,
+        Scenario {
+            gh: gh_returning("trunk"),
+            ..Default::default()
+        },
     ));
     assert_eq!(out.default_branch, Some("trunk".to_string()));
     assert_eq!(
@@ -218,11 +231,10 @@ fn preserves_literal_claude_project_dir_placeholder() {
     let fs = MockFs::new();
     let out = ok(setup(
         &fs,
-        &MockWarmer::default(),
-        &MockGit::default(),
-        &gh_returning("main"),
-        HookScope::Project,
-        false,
+        Scenario {
+            gh: gh_returning("main"),
+            ..Default::default()
+        },
     ));
     let raw = fs.get(&out.settings_path).unwrap();
     assert!(
@@ -239,11 +251,10 @@ fn registers_both_write_and_commit_guards_in_single_write() {
     let fs = MockFs::new();
     let out = ok(setup(
         &fs,
-        &MockWarmer::default(),
-        &git_without_detection(),
-        &MockGitHub::default(),
-        HookScope::Project,
-        false,
+        Scenario {
+            git: git_without_detection(),
+            ..Default::default()
+        },
     ));
     // One write: two `register` calls would leave a half-registered file if the
     // second failed.
@@ -295,7 +306,15 @@ fn warm_up_runs_before_detection_against_project_dir() {
     };
 
     let fs = MockFs::new();
-    let out = ok(setup(&fs, &warmer, &git, &gh, HookScope::Project, false));
+    let out = ok(setup(
+        &fs,
+        Scenario {
+            warmer,
+            git,
+            gh,
+            ..Default::default()
+        },
+    ));
     assert_eq!(
         calls.snapshot(),
         vec![
@@ -323,11 +342,11 @@ fn warm_up_failure_does_not_abort_setup() {
     };
     let out = ok(setup(
         &fs,
-        &warmer,
-        &MockGit::default(),
-        &gh_returning("main"),
-        HookScope::Project,
-        false,
+        Scenario {
+            warmer,
+            gh: gh_returning("main"),
+            ..Default::default()
+        },
     ));
     assert!(!out.origin_head_warmed);
     assert_eq!(out.commands.len(), 2);
@@ -342,20 +361,18 @@ fn rerun_is_idempotent_no_duplicate_hooks() {
     for _ in 0..3 {
         ok(setup(
             &fs,
-            &MockWarmer::default(),
-            &MockGit::default(),
-            &gh_returning("main"),
-            HookScope::Project,
-            false,
+            Scenario {
+                gh: gh_returning("main"),
+                ..Default::default()
+            },
         ));
     }
     let out = ok(setup(
         &fs,
-        &MockWarmer::default(),
-        &MockGit::default(),
-        &gh_returning("main"),
-        HookScope::Project,
-        false,
+        Scenario {
+            gh: gh_returning("main"),
+            ..Default::default()
+        },
     ));
     let commands = registered_commands(&written(&fs, &out));
     assert_eq!(
@@ -389,11 +406,11 @@ fn removes_stale_guard_entry_with_previous_pin() {
 
     let out = ok(setup(
         &fs,
-        &MockWarmer::default(),
-        &git_without_detection(),
-        &MockGitHub::default(),
-        HookScope::User,
-        false,
+        Scenario {
+            git: git_without_detection(),
+            scope: HookScope::User,
+            ..Default::default()
+        },
     ));
     // Reported so setup can show the user what was retired.
     assert_eq!(out.removed.len(), 0, "user scope writes elsewhere");
@@ -401,11 +418,10 @@ fn removes_stale_guard_entry_with_previous_pin() {
     // Same scenario under project scope, where the stale file actually lives.
     let out = ok(setup(
         &fs,
-        &MockWarmer::default(),
-        &git_without_detection(),
-        &MockGitHub::default(),
-        HookScope::Project,
-        false,
+        Scenario {
+            git: git_without_detection(),
+            ..Default::default()
+        },
     ));
     assert_eq!(
         out.removed.len(),
@@ -446,11 +462,11 @@ fn dry_run_does_not_write_settings() {
     let fs = MockFs::new();
     let out = ok(setup(
         &fs,
-        &MockWarmer::default(),
-        &MockGit::default(),
-        &gh_returning("main"),
-        HookScope::Project,
-        true,
+        Scenario {
+            gh: gh_returning("main"),
+            dry_run: true,
+            ..Default::default()
+        },
     ));
     assert!(out.dry_run);
     assert_eq!(fs.write_count(), 0);
