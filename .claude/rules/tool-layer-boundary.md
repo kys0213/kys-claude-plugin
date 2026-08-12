@@ -23,9 +23,10 @@ paths:
 **모두 `atelier` 바이너리의 서브커맨드**로 구현한다.
 
 ```
-atelier git guard <write|commit|pr>             # PreToolUse 가드 판단
-atelier git hook <register|unregister|list>     # settings.json 편집
-atelier autopilot check stagnation              # stdin payload 해석
+atelier git guard <write|commit|pr>              # PreToolUse 가드 판단
+atelier git hook <register|unregister|list>      # settings.json 편집
+atelier git setup guard --scope <user|project>   # guard hook 2종 등록 (감지→정리→쓰기)
+atelier autopilot check stagnation               # stdin payload 해석
 ```
 
 - 동일 입력 → 동일 출력. 단위 테스트로 동작을 고정한다 (`tests/git_core_guard.rs` 등).
@@ -63,9 +64,11 @@ atelier autopilot check stagnation              # stdin payload 해석
   전제다 — 차단(exit 2)형 hook 은 **self-gate**(config 파일 / 명령 패턴)로 비대상 세션에서 no-op 하고,
   advisory(비차단)형 hook 은 출력만 하므로 게이트 없이 둔다.
 - **예외 — setup 시점 값 주입이 필요한 hook**: git guard 처럼 `--default-branch <감지값>` 등
-  프로젝트별 값을 setup 이 1회 감지해 박아야 하는 hook 은 `hook register` 로 등록한다. 단
-  이때도 `.sh` 경로가 아니라 **CLI 커맨드 직접**(`atelier git guard ...`) 형태라 PATH 해석으로
-  버전 비의존이다.
+  프로젝트별 값을 setup 이 1회 감지해 박아야 하는 hook 은 전용 진입점
+  `atelier git setup guard --scope <user|project>` 로 등록한다 — warm-up → 기본 브랜치 감지 →
+  기존 항목 접두 매칭 정리 → 단일 쓰기를 원자적으로 수행하며, `hook register` 는 그 안에서 쓰이는
+  하위 수단이다. 단 이때도 settings.json 에 기록되는 것은 `.sh` 경로가 아니라
+  **CLI 커맨드 직접**(`atelier git guard ...`) 형태라 PATH 해석으로 버전 비의존이다.
 
 ## 판단 기준
 
@@ -74,7 +77,7 @@ atelier autopilot check stagnation              # stdin payload 해석
 | 가드/카운트/파싱/포맷 | CLI 서브커맨드 | 동일 입력 → 동일 출력, 테스트 가능 |
 | 바이너리 보장·버전 확인 | shim (`.sh`) | 부트스트랩은 CLI 가 없을 때 동작해야 함 |
 | 플러그인 번들 `.sh` hook 등록 | `hooks/hooks.json` (plugin-declared) | 실행 시점 `${CLAUDE_PLUGIN_ROOT}` 해석 → frozen 없음 |
-| setup 시점 값 주입 hook 등록 | `hook register` (CLI 커맨드 직접) | 프로젝트별 값 주입 필요, PATH 해석으로 버전 비의존 |
+| setup 시점 값 주입 hook 등록 | `git setup guard` (내부에서 `hook register`) | 프로젝트별 값 주입 필요, PATH 해석으로 버전 비의존 |
 
 헷갈리면 "두 번 호출해서 결과가 항상 같아야 하나?"를 묻는다. 같아야 하면 CLI,
 부트스트랩(바이너리가 아직 없을 수 있음)이면 shim.
@@ -87,4 +90,4 @@ atelier autopilot check stagnation              # stdin payload 해석
   (#776 에서 `guard-pr-base.sh` 제거).
 - ❌ setup 이 `bash <version-path>/hooks/x.sh` 를 settings.json 에 기록 — `hook register`
   로 `atelier ...` 또는 리터럴 `${CLAUDE_PLUGIN_ROOT}` 를 기록한다 (#762, #772).
-- ✅ shim 은 바이너리 보장 후 `exec atelier ...`, 로직은 CLI, 등록은 `hook register`.
+- ✅ shim 은 바이너리 보장 후 `exec atelier ...`, 로직은 CLI, 등록은 CLI 커맨드로 (guard 는 `git setup guard`, 그 외는 `hook register`).
