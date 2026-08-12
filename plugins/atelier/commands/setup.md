@@ -59,26 +59,14 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
    ```bash
    atelier git setup guard --project-dir "${CLAUDE_PROJECT_DIR:-.}" --scope user
    ```
-   `--project-dir` 는 **보호 대상 프로젝트 repo** 여야 합니다 (가드 런타임과 동일한 앵커). setup 의 cwd 가
-   다른 repo($HOME·multi-repo workspace)이면 엉뚱한 repo 를 warm 하거나 그 repo 의 기본 브랜치를 박게 됩니다.
+   `--project-dir` 에는 **보호 대상 프로젝트 repo** 를 넘깁니다. setup 의 cwd 가 다른 repo($HOME·multi-repo
+   workspace)이면 엉뚱한 repo 가 기준이 되므로 `${CLAUDE_PROJECT_DIR:-.}` 를 그대로 씁니다.
 
-   서브커맨드가 결정적으로 수행하는 것:
+   성공하면 등록된 command 와 정리된 옛 엔트리를 JSON 으로 보고합니다 (아래 §Output Examples). 실패하면
+   `Error: ...` 를 stderr 에 출력하고 exit 1 이므로, 이후 Step 을 진행하지 말고 사용자에게 안내합니다.
 
-   | 단계 | 동작 |
-   |---|---|
-   | warm-up | 프로젝트 repo 에 `git remote set-head origin --auto` — `origin/HEAD` 를 채워 guard 런타임의 readonly 감지가 비표준 기본 브랜치(`trunk` 등)·비-GitHub remote 에서도 동작하게 합니다. 실패(오프라인·remote 없음)해도 계속 진행하고 결과의 `originHeadWarmed` 로 보고합니다. |
-   | 감지 | `gh repo view --json defaultBranchRef` → 실패 시 readonly 감지. 둘 다 실패하거나 값이 공백이면 **`--default-branch` 플래그를 아예 생략**합니다 (빈 플래그를 박으면 hook 실행 시 clap 이 값 누락으로 exit 2 → 모든 편집 차단). |
-   | 마이그레이션 | `atelier git guard write `/`atelier git guard commit ` **접두**로 시작하는 기존 엔트리를 제거합니다. `hook register` 는 command 완전 일치로만 중복을 지우므로, 옛 `--default-branch main` 이 박힌 항목은 신규 등록과 문자열이 달라 그냥 두면 **guard 가 2번 실행**됩니다. 같은 matcher 의 다른 hook 은 건드리지 않습니다. |
-   | 등록 | `PreToolUse`/`Write|Edit` 와 `PreToolUse`/`Bash` 2종을 **단일 쓰기**로 기록합니다 (중간 실패로 half-registered 상태가 남지 않음). |
-
-   - **`--scope user` 는 `--default-branch` 를 박지 않습니다.** 전역 pin 하나가 모든 프로젝트에 한 repo 의 기본
-     브랜치를 강요하기 때문입니다 (#810). warm-up 이 런타임 감지로 대체하므로 보호 수준은 그대로입니다.
-     프로젝트별 pin 이 필요하면 그 repo 에서 `--scope project` 로 실행합니다.
-   - `${CLAUDE_PROJECT_DIR:-.}` 는 settings.json 에 **리터럴로 보존**됩니다 (hook 실행 시점에 셸이 expand).
-   - 재실행은 멱등입니다.
-
-   `$HOME` 의 settings.json 을 쓰기 전에 결과를 먼저 확인하려면 `--dry-run` 을 붙입니다 — 계획(등록될 command,
-   제거될 항목)을 JSON 으로만 출력하고 파일은 건드리지 않습니다.
+   > 서브커맨드의 수행 순서·플래그 의미(warm-up·감지·마이그레이션·등록, `--scope`, `--dry-run`, 멱등성)는
+   > `skills/git/references/cli-reference.md` §4. Guard hook 설치 (`setup guard`) 가 단일 출처입니다.
 
 ## Step 2b — workflow 모듈
 
@@ -180,42 +168,7 @@ alias git-utils='atelier git'
 
 ## Output Examples
 
-**guard 등록 성공 (user scope — pin 없음):**
-```json
-{
-  "scope": "user",
-  "settingsPath": "/Users/me/.claude/settings.json",
-  "defaultBranch": null,
-  "originHeadWarmed": true,
-  "commands": [
-    "atelier git guard write --project-dir \"${CLAUDE_PROJECT_DIR:-.}\"",
-    "atelier git guard commit --project-dir \"${CLAUDE_PROJECT_DIR:-.}\""
-  ],
-  "removed": [],
-  "dryRun": false
-}
-```
-
-**옛 형식이 남아 있던 경우 (마이그레이션 — `removed` 로 보고):**
-```json
-{
-  "scope": "user",
-  "settingsPath": "/Users/me/.claude/settings.json",
-  "defaultBranch": null,
-  "originHeadWarmed": true,
-  "commands": [
-    "atelier git guard write --project-dir \"${CLAUDE_PROJECT_DIR:-.}\"",
-    "atelier git guard commit --project-dir \"${CLAUDE_PROJECT_DIR:-.}\""
-  ],
-  "removed": [
-    "atelier git guard write --project-dir \"${CLAUDE_PROJECT_DIR:-.}\" --default-branch main",
-    "atelier git guard commit --project-dir \"${CLAUDE_PROJECT_DIR:-.}\" --default-branch main"
-  ],
-  "dryRun": false
-}
-```
-
-**project scope (감지값 pin):**
+**guard 등록 성공 (project scope — 감지값 pin):**
 ```json
 {
   "scope": "project",
@@ -230,6 +183,9 @@ alias git-utils='atelier git'
   "dryRun": false
 }
 ```
+
+- user scope 는 `"defaultBranch": null` 이고 `commands` 에 `--default-branch` 가 붙지 않습니다.
+- 마이그레이션이 일어나면 `"removed"` 에 정리된 옛 command 가 담깁니다 (비어 있으면 정리할 것이 없었다는 뜻).
 
 **PR Guard 등 개별 hook 등록 (`hook register`):**
 ```json
