@@ -26,14 +26,11 @@ const DOC_EXTENSIONS: &[&str] = &[
 /// Extensionless (or dot-prefixed) names in the same category.
 const DOC_FILENAMES: &[&str] = &["LICENSE", ".gitignore"];
 
-/// Everything the decision depends on. Assembled by the caller from the hook
-/// payload, the stored baseline and the repository.
+/// Everything the decision depends on. Assembled by the caller from the stored
+/// baseline and the repository — every field is read by `decide`, so building
+/// one never costs a repository read the decision does not use.
 pub struct SimplifyInput {
-    pub session_id: String,
     pub baseline: Option<Baseline>,
-    /// Current `HEAD` — carried for diagnostics; the commit contribution is
-    /// already resolved into `committed`.
-    pub head: Option<String>,
     /// Paths currently dirty (`git status --porcelain`).
     pub dirty: BTreeSet<String>,
     /// Paths changed by commits made since the baseline `HEAD`.
@@ -44,7 +41,8 @@ pub struct SimplifyInput {
 /// in tests and future logging, even though all of them print nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SilentReason {
-    /// No session id on stdin — session attribution is impossible.
+    /// Missing or malformed session id — attribution is impossible. Rejected at
+    /// the `run` edge, so `decide` never sees an unattributable input.
     NoSessionId,
     /// Nothing recorded for this session, so every dirty file may predate it.
     NoBaseline,
@@ -93,19 +91,19 @@ fn session_changes(baseline: &Baseline, input: &SimplifyInput) -> BTreeSet<Strin
         .collect()
 }
 
-/// Pure decision: same input, same answer.
-pub fn decide(input: SimplifyInput) -> SimplifyDecision {
-    if input.session_id.trim().is_empty() {
-        return SimplifyDecision::Silent(SilentReason::NoSessionId);
-    }
-    let Some(baseline) = input.baseline.clone() else {
+/// Pure decision: same input, same answer. Borrows its input so the baseline's
+/// path set is never copied to be read.
+pub fn decide(input: &SimplifyInput) -> SimplifyDecision {
+    let Some(baseline) = input.baseline.as_ref() else {
         return SimplifyDecision::Silent(SilentReason::NoBaseline);
     };
+    // Kept although `run` short-circuits on it: the rule belongs to the pure
+    // decision, so `decide` stays answerable on its own.
     if baseline.notified {
         return SimplifyDecision::Silent(SilentReason::AlreadyNotified);
     }
 
-    let changes = session_changes(&baseline, &input);
+    let changes = session_changes(baseline, input);
     if changes.is_empty() {
         return SimplifyDecision::Silent(SilentReason::NoSessionChanges);
     }
@@ -151,25 +149,33 @@ pub fn run(deps: &SessionDeps, session_id: &str) -> SimplifyDecision {
         baseline_command::run(deps, session_id);
         return SimplifyDecision::Silent(SilentReason::NoBaseline);
     };
+    // Stop fires on every turn, but the banner is worth showing once. Answer
+    // from the flag we already loaded: past this point nothing can change the
+    // decision, so the repository reads below would be spawned and discarded.
+    if baseline.notified {
+        return SimplifyDecision::Silent(SilentReason::AlreadyNotified);
+    }
 
     let committed = baseline
         .head
         .as_deref()
         .map(|head| deps.repo.files_changed_since(head))
         .unwrap_or_default();
-    let decision = decide(SimplifyInput {
-        session_id: session_id.to_string(),
-        baseline: Some(baseline.clone()),
-        head: deps.repo.head(),
+    let input = SimplifyInput {
+        baseline: Some(baseline),
         dirty: deps.repo.dirty_files(),
         committed,
-    });
+    };
+    let decision = decide(&input);
 
     if matches!(decision, SimplifyDecision::Notify { .. }) {
-        let mut notified = baseline;
-        notified.mark_notified();
-        // A failed write only costs a repeated banner — never a blocked Stop.
-        let _ = deps.store.save(session_id, &notified);
+        // `decide` only borrowed the input, so the baseline moves back out
+        // instead of being cloned to be marked.
+        if let Some(mut notified) = input.baseline {
+            notified.mark_notified();
+            // A failed write only costs a repeated banner — never a blocked Stop.
+            let _ = deps.store.save(session_id, &notified);
+        }
     }
     decision
 }

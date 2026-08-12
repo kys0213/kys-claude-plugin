@@ -29,6 +29,12 @@ pub fn run(deps: &SessionDeps, session_id: &str) -> BaselineOutcome {
     if !is_valid_session_id(session_id) {
         return BaselineOutcome::Skipped(SkipReason::InvalidSessionId);
     }
+    // SessionStart re-fires on resume/compact/clear, and `save_if_absent`
+    // discards the snapshot every time after it. Ask the store first: one file
+    // read settles it, where the snapshot below costs three git processes.
+    if deps.store.load(session_id).is_some() {
+        return BaselineOutcome::AlreadyPresent;
+    }
     if !deps.repo.is_inside_work_tree() {
         return BaselineOutcome::Skipped(SkipReason::NotAGitRepo);
     }
