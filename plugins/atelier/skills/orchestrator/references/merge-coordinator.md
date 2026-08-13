@@ -19,6 +19,8 @@ user-invocable: false
 
 따라서 아래 절차에서 `base`로 표기된 곳은 모두 **현재 epic 브랜치**를 의미한다.
 
+**언제·어떻게 머지하는가는 이 문서가 정하지 않는다** — 머지 시점 정책(배치 vs 즉시+rebase 전파), 통합 방식(rebase 후 `--ff-only`), 브랜치 네이밍은 `branch-strategy.md`가 단일 출처다. 이 문서는 그 정책 아래에서 **후보 간 순서를 정하고 충돌·정리·검증을 처리**한다.
+
 worktree 브랜치는 PR을 생성하지 않고 epic 브랜치로 수렴 후 삭제된다 — 외부로 나가는 PR은 사용자 요청 1건당 1개가 기본값이며, 그 규칙은 `git` skill `SKILL.md §PR 단위 원칙`이 단일 출처다.
 
 ## 머지 순서 결정 (기본 규칙)
@@ -47,8 +49,15 @@ worktree 브랜치는 PR을 생성하지 않고 epic 브랜치로 수렴 후 삭
 ## 표준 절차
 
 ```
+0. 머지 시점 확인 (배치 정책)
+   - 기본값은 배치 머지 — in-flight sub-agent가 남아 있으면 아직 머지하지 않는다
+   - 즉시 머지(B안)를 택했으면 매 머지 직후 in-flight 전부에 rebase 전파 (5번 가드에 포함)
+   - 정책과 근거는 `branch-strategy.md §base drift 전파`가 단일 출처
+
 1. 머지 후보 수집
-   - 각 sub-agent 결과에서 worktree 경로 + 브랜치명 추출
+   - `git branch --list 'epic/<name>/t*'` 로 수집 — 네이밍 규약이 있으므로 결과 텍스트에
+     의존하지 않는다 (`branch-strategy.md §브랜치 네이밍`). 결과를 유실한 agent의 작업물도 여기 잡힌다
+   - 각 sub-agent 결과에서 worktree 경로 + 브랜치명을 대조 (목록과 어긋나면 고아 브랜치)
    - 변경 없음 → 후보에서 제외 (자동 정리됨)
    - 각 후보의 merge-base 확인 (`git merge-base epic/<name> <branch>`) — worktree base가 dispatch
      시점 epic 브랜치 HEAD였다는 보장은 없으므로 (`delegation-patterns.md §Prompt 작성 원칙 필수
@@ -61,16 +70,20 @@ worktree 브랜치는 PR을 생성하지 않고 epic 브랜치로 수렴 후 삭
 3. 머지 순서 결정 (위 규칙 적용)
 
 4. 순차 머지 시도
-   - epic 브랜치(base)에 후보 브랜치를 머지/리베이스 — 메인은 epic 브랜치 working tree에 그대로 머무름
-   - 로컬 머지로 수행: `git merge <branch>` 후 머지된 브랜치 삭제 — worktree 브랜치는 PR 을 생성하지 않으므로 `gh pr merge` 를 사용하지 않는다 (§머지 대상: epic 브랜치)
+   - **rebase 후 `--ff-only`** 로 통합 — 방식은 `branch-strategy.md §머지 방식`이 단일 출처다
+     (`git merge` 로 머지 커밋을 만들면 rebase 누락이 조용히 통과한다)
+   - 메인은 epic 브랜치 working tree에 그대로 머무름. rebase는 worktree 쪽에서 수행·위임한다
+   - 로컬 통합으로 수행 후 머지된 브랜치 삭제 — worktree 브랜치는 PR 을 생성하지 않으므로 `gh pr merge` 를 사용하지 않는다 (§머지 대상: epic 브랜치)
    - 충돌 없음 → 다음 후보로
-   - 충돌 발생 → 위임 (아래 참조)
+   - 충돌 발생 → 위임 (아래 참조). **같은 파일이 2회 이상 충돌하면 재위임을 멈추고 재분해**한다 (`branch-strategy.md §충돌 반복`)
 
 5. 머지 직후 가드 (매 머지 직후, 생략 금지)
    불변식마다 (확인 → 위반 시 처리). **새 불변식이 생기면 이 목록에 한 줄 추가한다** — 단계를
    신설하지 않는다 (단계를 늘리면 번호가 밀려 교차 참조까지 함께 고쳐야 한다).
    - branch == epic 브랜치 + working tree clean → 복구 + 에스컬레이션 (아래 §토폴로지 가드)
    - committer == 오케스트레이터 자신           → 정정 (아래 §Authorship 확인)
+   - in-flight worktree가 epic 최신 HEAD 기준  → rebase 전파 (`branch-strategy.md §base drift 전파`.
+     배치 머지(기본)면 in-flight가 없으므로 자동 충족)
 
 6. 머지 완료 후 worktree 정리
    - 머지된 worktree 삭제
@@ -129,8 +142,12 @@ sub-agent worktree에서 만든 커밋을 epic 브랜치로 가져오면(머지�
 ```
 1. epic 브랜치 최종 HEAD에서 `git status` clean 확인
    - 미커밋 변경/untracked 잔여물이 있으면 먼저 정리 후 재확인
-2. 전체 테스트 스위트 1회 실행 (변경 파일 한정/부분 실행 금지)
-3. HEAD sha 기록 (`git rev-parse HEAD`)
+2. main 역방향 drift 흡수 (branch-strategy.md §epic ← main 역방향 drift)
+   - git fetch origin <default-branch>
+   - git rev-list --count epic/<name>..origin/<default-branch> 가 0이 아니면 main을 epic에 머지
+     (rebase 아님 — epic은 worktree들의 공유 base다)
+3. 전체 테스트 스위트 1회 실행 (변경 파일 한정/부분 실행 금지)
+4. HEAD sha 기록 (`git rev-parse HEAD`) — 흡수 후의 HEAD여야 한다
 ```
 
 **완료 선언 조건**: '작업 완료' 보고는 이 최종 HEAD green을 전제로 한다. 중간 브랜치나 개별 worktree의 green 결과만으로는 완료를 선언하지 않는다 — 각 worktree가 개별적으로 green이어도 머지 결합 지점(인터페이스, 전역 상태, 실행 순서 등)에서 회귀가 발생할 수 있기 때문이다.
@@ -233,7 +250,9 @@ git diff --name-only epic/<name>...<branch_B>  # B가 변경한 파일
 6. **main으로 바로 머지**: epic 브랜치를 거치지 않고 sub-agent 결과를 main으로 직접 머지 → epic 브랜치 전략 위반. 이 단계의 target은 항상 epic 브랜치.
 7. **머지 후 가드 생략**: 머지 직후 current branch 확인 없이 다음 git 명령 진행 → 메인이 sub-agent 브랜치 위에서 작업하는 토폴로지 위반을 뒤늦게 발견. 매 머지 직후 가드 필수.
 8. **조기 완료 선언**: 개별 worktree/중간 브랜치 green만으로 완료 보고 → 머지 결합 후 회귀 가능성을 놓침. epic 브랜치 최종 HEAD 전체 스위트 green과 HEAD sha 명시를 완료 선언의 전제로 한다.
-9. **통합 후 authorship 미확인**: 머지/cherry-pick/rebase로 sub-agent 커밋을 가져온 뒤 committer 확인 없이 다음 단계로 진행 → 통합을 수행한 오케스트레이터가 아니라 위임한 sub-agent가 committer로 남을 수 있다. 매 머지 직후 확인 필수 (§Authorship 확인).
+9. **in-flight 방치 머지**: 아직 돌고 있는 sub-agent가 있는데 먼저 끝난 결과를 머지하고 알리지 않음 → 남은 worktree가 옛 base 위에서 계속 작업한다. 기본은 배치 머지이고, 즉시 머지했으면 전부에 rebase를 전파한다 (`branch-strategy.md §base drift 전파`).
+10. **완료 선언 전 main drift 미확인**: epic이 main보다 뒤처진 채 최종 스위트를 green으로 보고 → main 기준으로는 깨진 상태로 완료를 선언한다. 게이트 직전에 흡수 후 스위트를 다시 돌린다 (`branch-strategy.md §epic ← main 역방향 drift`).
+11. **통합 후 authorship 미확인**: 머지/cherry-pick/rebase로 sub-agent 커밋을 가져온 뒤 committer 확인 없이 다음 단계로 진행 → 통합을 수행한 오케스트레이터가 아니라 위임한 sub-agent가 committer로 남을 수 있다. 매 머지 직후 확인 필수 (§Authorship 확인).
 
 ---
 
@@ -242,7 +261,8 @@ git diff --name-only epic/<name>...<branch_B>  # B가 변경한 파일
 머지 단계 진입 전:
 
 - [ ] 메인이 여전히 epic 브랜치 + 메인 working tree에 있는가?
-- [ ] 후보 브랜치 목록을 수집했는가?
+- [ ] 머지 시점 정책을 확인했는가? (기본=배치 — in-flight가 남아 있으면 아직 머지하지 않는다)
+- [ ] 후보 브랜치 목록을 `git branch --list 'epic/<name>/t*'` 로 수집했는가? (결과 텍스트 의존 X)
 - [ ] 의존성 + 변경 파일 overlap을 파악했는가?
 - [ ] 머지 순서를 결정했는가? (의존성 없는 것 → 적은 변경 → 알파벳)
 - [ ] base(=epic 브랜치)를 최신화했는가?
@@ -250,13 +270,17 @@ git diff --name-only epic/<name>...<branch_B>  # B가 변경한 파일
 
 머지 진행 중:
 
+- [ ] 통합을 `rebase → merge --ff-only` 로 했는가? (`--ff-only` 실패 = rebase 누락 신호)
 - [ ] 충돌 발생 시 직접 편집하지 않고 위임/보고했는가?
+- [ ] 같은 파일 충돌 횟수를 파일 단위로 세고 있는가? (2회 → hot-spot 재분류, 3회 → 에스컬레이션)
+- [ ] (즉시 머지 정책이면) 매 머지 직후 in-flight worktree 전부에 rebase를 전파했는가?
 - [ ] 매 머지 직후 `git branch --show-current` == epic 브랜치를 확인했는가?
 - [ ] 매 머지 직후 통합 커밋의 committer가 오케스트레이터 자신인지 확인하고, 위임한 sub-agent로 남아있으면 정정했는가?
 
 머지 종료 후:
 
 - [ ] worktree를 정리했는가?
-- [ ] 최종 HEAD(clean 상태)에서 전체 테스트 스위트를 1회 실행하고 green을 확인했는가?
+- [ ] epic이 `origin/<default-branch>` 보다 뒤처졌는지 확인하고, 뒤처졌으면 main을 흡수했는가?
+- [ ] 최종 HEAD(clean 상태 · main 흡수 후)에서 전체 테스트 스위트를 1회 실행하고 green을 확인했는가?
 - [ ] 보고에 스위트 실행 HEAD sha를 명시했는가?
 - [ ] 사용자에게 결과 요약을 보고했는가?

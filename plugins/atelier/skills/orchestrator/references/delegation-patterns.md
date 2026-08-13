@@ -54,9 +54,10 @@ sub-agent는 **메인 대화 히스토리를 보지 못한다**. prompt는 자�
 6. **검증 기준**: 완료를 어떻게 확인할지 (테스트, 빌드, 특정 체크 등)
 7. **worktree 격리 준수** (`isolation: "worktree"` dispatch 시 필수): 모든 Edit/Write의 file_path와 Bash cwd가 자기 worktree 경로(`.claude/worktrees/agent-...`) 안인지 매 호출 전 검증하고, 부모 repo(메인 working tree)의 파일을 절대 직접 수정하지 말 것. 부모 repo에 의도치 않은 변경을 만들었음을 발견하면 직접 reset/checkout 하지 말고 변경을 stash로 보존한 뒤 보고할 것.
 8. **재위임 금지**: "이 작업을 다른 agent에게 재위임하지 말고 직접 수행하라. 막히면 실패 사유와 함께 종료하라"를 prompt에 포함할 것 (단, team teammate의 편집 격리용 isolated subagent 위임 1단계는 예외 — §위임 깊이 제한 참조).
-9. **base 확인** (`isolation: "worktree"` dispatch 시 필수): worktree의 base가 dispatch 시점 epic 브랜치 HEAD라는 보장은 없다. 작업 시작 전 base를 확인하고, 통합 브랜치(epic 브랜치) HEAD보다 뒤처져 있으면 fast-forward/rebase한 뒤 시작하라고 prompt에 명시할 것.
+9. **base 확인 + 브랜치 지정** (`isolation: "worktree"` dispatch 시 필수): worktree의 base가 dispatch 시점 epic 브랜치 HEAD라는 보장은 없다. 작업 시작 전 base를 확인하고, 통합 브랜치(epic 브랜치) HEAD보다 뒤처져 있으면 fast-forward/rebase한 뒤 시작하라고 prompt에 명시할 것. 이어서 **`git switch -c epic/<name>/t<task-id>-<slug>` 로 규약 브랜치를 만들고 그 위에서만 커밋**하라고 지시한다 — 자동 생성된 agent 식별자 이름을 그대로 두면 머지 후보 수집이 결과 텍스트에만 의존하게 된다 (`branch-strategy.md §브랜치 네이밍`). dispatch **이후** epic HEAD가 움직여 생기는 drift는 이 지시로 커버되지 않는다 — 그건 메인이 전파한다 (`branch-strategy.md §base drift 전파`).
 10. **금지에는 출구를 함께 준다**: 금지 계약을 넣을 때는 "대신 무엇을 하라"를 반드시 같이 적는다. 금지만 주면 sub-agent는 그 상황에서 뭐라도 해야 하므로 위반이 재발한다. 위 7·8번이 이미 이 형태다 — 7번은 부모 repo 오염 금지에 "stash로 보존한 뒤 보고"를, 8번은 재위임 금지에 "실패 사유와 함께 종료"를 출구로 붙였다. 새 금지를 추가할 때도 같은 짝을 지킨다.
 11. **보고 채널** (`run_in_background: true` dispatch 시 필수): **sub-agent가 그냥 출력한 텍스트는 메인에 보이지 않는다.** 메인에게 말하려면 `SendMessage({to: "main", ...})`를 호출해야 하고, 그것이 유일한 채널이다. 따라서 prompt에 다음을 명시한다 — "진행 보고·질문·부분 결과는 `SendMessage({to: "main", summary: "<5-10 단어>", message: "<내용>"})`으로 보내라. 그냥 출력하면 메인에 전달되지 않는다."
+12. **hot-spot 편집 금지 + 출구** (병렬 dispatch 시, 겹치는 hot-spot이 있으면 필수): 여러 작업이 항목을 append하게 되는 파일(의존성 lock, 모듈 re-export, 라우트·DI 등록, 마이그레이션 순번)은 목록으로 명시해 편집을 금지하고, **필요한 항목을 보고하라**는 출구를 짝지어 준다 (위 10번의 형태이며, 보고는 11번의 채널을 쓴다). 계약 문구와 통합 task 처리는 `branch-strategy.md §hot-spot 파일`이 단일 출처다.
 
 ### 보고 채널을 빼면 생기는 일 (11번의 근거)
 
@@ -311,7 +312,8 @@ SendMessage({to: "implementer",   // name 없는 런타임: impl.agentId ("a..."
 - [ ] 단발/team 선택이 작업 성격과 맞는가?
 - [ ] 편집하는 sub-agent라면 `isolation: "worktree"`를 켰는가?
 - [ ] worktree dispatch라면 prompt에 worktree 격리 준수(경로 prefix 검증 + 부모 repo 수정 금지)를 명시했는가?
-- [ ] worktree dispatch라면 prompt에 base 확인·동기화 지시(§필수 포함 요소 9번)를 포함했는가?
+- [ ] worktree dispatch라면 prompt에 base 확인·동기화 + `epic/<name>/t<task-id>-<slug>` 브랜치 전환 지시(§필수 포함 요소 9번)를 포함했는가?
+- [ ] 겹치는 hot-spot이 있는 병렬 dispatch라면 편집 금지 + 보고 형식(§필수 포함 요소 12번)을 넣었는가?
 - [ ] prompt에 재위임 금지 문구(§위임 깊이 제한)를 포함했는가? (team teammate → isolated subagent 편집 위임 1단계는 예외)
 - [ ] 모델 선택이 작업 난이도와 맞는가? (dispatch에 `model`을 명시했는가 — 상속 금지)
 - [ ] 사용자가 준 역할별 모델 제약이 있으면 반영했는가? (제약으로 막히면 인접 tier 대체 + decision log)
