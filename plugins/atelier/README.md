@@ -16,7 +16,7 @@
 | `github-autopilot` | 0.30.1 | **제거됨** — 에이전트 스웜이 클로드만으로 동작하게 되어 GitHub 이슈 구동 autopilot 루프를 걷어내고, 자율 개발은 `skills/orchestrator/`(기본 자율 주행)가 담당 |
 | `spec-kit` | 0.7.1 | `skills/spec-write/`, `templates/spec/` |
 | `workflow-guide` | 0.6.0 | `agents/workflow/*`, `skills/{workflow,agent-design-principles}/`, `rules/` |
-| `coding-style` | 0.3.0 | `templates/claude-md/`, `hooks/suggest-simplify.sh` |
+| `coding-style` | 0.3.0 | `templates/claude-md/`, `hooks/{suggest-simplify,session-baseline}.sh` (판정은 `cli/src/session/`) |
 | `orchestrator` | 0.2.0 | `skills/orchestrator/`(+references) |
 
 흡수된 6개 plugin은 저장소에서 **제거되었습니다** — git history만 참조 가능하며, 후속 개발은 atelier에서만 진행합니다. `autodev`, `develop-workflow`도 함께 제거되었습니다. 마이그레이션 이력은 [`plans/atelier/03-migration.md`](../../plans/atelier/03-migration.md)를 참조하세요.
@@ -56,8 +56,15 @@ capability 슬래시(commit-and-pr, prioritize-issues, hook-config, scaffold-con
 atelier는 단일 Rust crate(`cli/`)로 빌드되며, 바이너리 `atelier` 하나가 subcommand로 라우팅합니다.
 
 ```
-atelier git <reviews|guard|hook>   # git-utils 의 기계적 호출 표면 (TypeScript → Rust 포팅)
+atelier git <reviews|guard|hook>          # git-utils 의 기계적 호출 표면 (TypeScript → Rust 포팅)
+atelier session <baseline|simplify-check> # 세션 경계 인식 hook (SessionStart / Stop)
 ```
+
+`session` 은 "이 세션이 무엇을 바꿨는가"를 판정합니다. SessionStart 에 저장소 상태
+(HEAD + dirty 목록)를 `${TMPDIR:-/tmp}/atelier-sessions/<session_id>.json` 에 기록하고
+(없을 때만 — resume/compact 안전), Stop 에 `(현재 dirty − 베이스라인 dirty) ∪ (베이스라인
+HEAD 이후 커밋된 파일)` 이 코드 파일을 포함할 때만 `/simplify` 를 제안합니다. 세션당 1회,
+비차단(항상 exit 0)입니다.
 
 기존 `git-utils` 호출 호환을 위한 alias는 `/atelier:setup`이 안내합니다.
 

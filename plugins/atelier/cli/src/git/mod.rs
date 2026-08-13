@@ -18,8 +18,10 @@ use crate::git::core::github::create_github_service;
 use crate::git::core::guard::create_guard_service;
 use crate::git::core::pr_guard::create_pr_guard_service;
 use crate::git::types::{
-    CmdResult, GuardDecision, HookListInput, HookRegisterInput, HookUnregisterInput, ReviewsInput,
+    CmdResult, GuardDecision, HookListInput, HookRegisterInput, HookScope, HookUnregisterInput,
+    ReviewsInput,
 };
+use crate::shared::process::{default_project_dir, read_stdin_raw};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 
@@ -65,6 +67,30 @@ pub enum Commands {
         #[arg(long = "project-dir")]
         project_dir: Option<String>,
     },
+    /// Install atelier's Claude Code integration
+    Setup {
+        #[command(subcommand)]
+        target: SetupCommand,
+    },
+}
+
+/// Installers under `setup`. Kept off `Commands::Guard` deliberately: guard is
+/// the hook runtime whose exit 2 means "block", so an install failure routed
+/// through it would read as a denial instead of an error.
+#[derive(Subcommand)]
+pub enum SetupCommand {
+    /// Detect the default branch and register the write/commit guard hooks
+    Guard {
+        /// Repository the guards protect — anchors warm-up and detection
+        #[arg(long = "project-dir")]
+        project_dir: String,
+        /// Settings file to write: `user` (`$HOME/.claude`) or `project`
+        #[arg(long = "scope", value_enum)]
+        scope: HookScope,
+        /// Report the planned change without writing settings.json
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
 }
 
 /// Real filesystem for the hook command.
@@ -83,15 +109,6 @@ impl HookFs for RealHookFs {
     fn mkdir(&self, path: &str) -> Result<(), String> {
         std::fs::create_dir_all(path).map_err(|e| e.to_string())
     }
-}
-
-/// Reads stdin to a string (empty on read failure). Parsing the hook payload
-/// is command logic (`HookPayload::parse`); only the I/O lives here (#778).
-fn read_stdin_raw() -> String {
-    use std::io::Read as _;
-    let mut buf = String::new();
-    let _ = std::io::stdin().read_to_string(&mut buf);
-    buf
 }
 
 /// Prints the block reason and returns the decision's exit code — the 0/2
@@ -179,11 +196,7 @@ pub fn run(cli: Cli) -> i32 {
                     .filter(|b| !b.is_empty())
                     .collect::<Vec<_>>()
             });
-            let project_dir = project_dir.unwrap_or_else(|| {
-                std::env::current_dir()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_default()
-            });
+            let project_dir = default_project_dir(project_dir);
             // Forward the flag as-is; the guard core supplies its own default
             // (DEFAULT_CREATE_BRANCH_SCRIPT) when this is empty.
             let create_branch_script = create_branch_script.unwrap_or_default();
@@ -273,5 +286,34 @@ pub fn run(cli: Cli) -> i32 {
                 }
             }
         }
+        Commands::Setup { target } => match target {
+            SetupCommand::Guard {
+                project_dir,
+                scope,
+                dry_run,
+            } => {
+                // Both services are pinned to the project directory: the
+                // warm-up must touch that repo's origin/HEAD, and `gh` infers
+                // the repository from its cwd's remote (#780).
+                let git = create_git_service(Some(project_dir.clone()));
+                let github = create_github_service(Some(project_dir.clone()));
+                let fs = RealHookFs;
+                let hook = create_hook_command(&fs);
+                let deps = commands::guard_setup::GuardSetupDeps {
+                    warmer: &git,
+                    git: &git,
+                    gh: &github,
+                    hook: &hook,
+                };
+                let input = commands::guard_setup::GuardSetupInput {
+                    project_dir,
+                    scope,
+                    dry_run,
+                };
+                // `output`, not `guard_exit`: this command installs hooks, it is
+                // not one, so it must never signal 2 (Claude Code's "block").
+                output(commands::guard_setup::run(&deps, &input))
+            }
+        },
     }
 }

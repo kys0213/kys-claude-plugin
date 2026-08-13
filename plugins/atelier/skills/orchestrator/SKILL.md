@@ -43,15 +43,17 @@ version: 0.1.0
 ### 메인 에이전트가 하면 안 되는 일
 - `Edit`, `Write`, `NotebookEdit` — 코드 편집은 항상 sub-agent에 위임
 - 코드 작성을 직접 수행 (sub-agent 실패 시에도 편집권을 가져오지 않음 → 사용자에게 보고)
-- `EnterWorktree` / `git checkout <other-branch>` 로 worktree 또는 다른 브랜치로 진입 — 메인은 epic 브랜치에서만 동작
+- `EnterWorktree` / `git checkout <other-branch>` 로 worktree 또는 다른 브랜치로 진입 — 메인은 진입 시점의 브랜치에 머문다 (무거운 경로에서는 그것이 epic 브랜치다)
 
 ---
 
 ## 진입 절차 (Entry Procedure)
 
-**오케스트레이터는 반드시 epic 브랜치 전략으로 동작한다.** 메인 에이전트는 worktree가 아니라 epic 브랜치에 체크아웃된 상태로 작업하고, agent team으로 위임된 sub-agent들만 worktree로 격리한다. 이 토폴로지를 어기면 머지 경로가 꼬이고 메인이 직접 편집하게 되어 오케스트레이터 원칙이 깨진다.
+**버전 관리 이력에 남을 변경을 만드는 런은 반드시 epic 브랜치 전략으로 동작한다.** 메인 에이전트는 worktree가 아니라 epic 브랜치에 체크아웃된 상태로 작업하고, 위임된 sub-agent들만 worktree로 격리한다. 이 토폴로지를 어기면 머지 경로가 꼬이고 메인이 직접 편집하게 되어 오케스트레이터 원칙이 깨진다.
 
-### 토폴로지
+**tracked 변경을 만들지 않는 런에는 이 전략이 성립하지 않는다** — 머지할 대상도, 격리할 쓰기도 없다. 어느 쪽인지는 아래 §경로 판정 게이트가 먼저 정하고, 이 절의 토폴로지와 체크 1·2·3은 **무거운 경로에만** 적용된다.
+
+### 토폴로지 (무거운 경로)
 
 ```
 main
@@ -79,6 +81,36 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
    - `SendMessage`가 확보되지 않으면 **왕복 조율 수단이 없는 것**이므로 체크 4는 자동으로 비가용이다 (아래 판정 트리의 0단계).
    - 결과에 없는 도구는 이 런타임에 없는 것이다. 이름을 추측해 호출하지 않는다.
    - 이 체크를 건너뛰면 실패가 dispatch 이후에야, 그것도 "조율이 왜 안 되지"라는 형태로 드러난다.
+
+### 경로 판정 게이트 (체크 0 직후, 체크 1 앞)
+
+체크 0을 마치면 **이번 런이 버전 관리 이력에 남을 변경을 만드는가**를 먼저 정한다. 판정 기준은 "git 레포 안인가"가 아니다 — 레포 안이어도 이력에 남지 않으면 경량 경로다.
+
+```
+이번 런의 계획된 산출물에 tracked 파일 변경이 있는가?
+  ├─ No  → 경량 경로 (체크 1·2·3 건너뛰고 체크 4·5로)
+  │        예: 외부 시스템 산출물(이슈 등록·PR 코멘트), read-only fan-out 조사,
+  │            repo 밖·gitignore 경로에만 쓰는 산출물(scratchpad, .orchestrator/)
+  └─ Yes → 무거운 경로 (체크 1~5 전부)
+```
+
+- **판정 시점의 산출물 계획을 기준으로 한다.** 계획 밖 편집이 생기면 아래 §경로 전환.
+- **git 레포가 아니면서 편집이 필요한 경우**는 경량 경로가 아니다 — 판정은 `references/delegation-patterns.md §경로 판정 경계 케이스`가 단일 출처다.
+- 판정 결과 + 근거를 진입 보고 1줄과 decision log에 남긴다. **생략은 판정이 아니다.**
+
+| 규칙 | 경량 | 근거 |
+|---|---|---|
+| 조율 도구 스키마 확보(체크 0) · 왕복 조율 판정(체크 4) | 유지 | 조율 경로의 공유 전제이고, 자문·협의체는 read-only다 |
+| Task 분리·상태 추적 · 응답 계약 + 보고 채널 · fan-out 복원력 · 취합 보고 | 유지 | 관리자 본업이라 편집 유무와 무관하다 (§안티패턴 13) |
+| 병렬/순차 결정 트리 | 유지(축 변경) | 충돌 축이 "파일 집합"에서 "외부 리소스·rate limit"으로 바뀐다 |
+| preflight (체크 5) | 유지·강화 | 외부 쓰기 인증이 곧 공유 의존이다 |
+| 리뷰어·QA 게이트 | 조건부 유지 | 외부 쓰기는 되돌리기 비용이 있어 **쓰기 전 검토 1회**로 축소한다 |
+| epic 브랜치 체크(체크 1) · worktree 격리(체크 2·3) | 생략 | 머지 대상도, 격리할 쓰기도 없다 |
+| 토폴로지 가드 · 머지 조정 | 생략 | 가드 불변식(branch == epic)이 성립하지 않는다 |
+
+경계 케이스(조사 리포트를 파일로 남김, 조사 → 구현 연결 등)의 판정은 `references/delegation-patterns.md §경로 판정 경계 케이스`가 단일 출처다.
+
+### 진입 시 체크 (이어서)
 
 1. **현재 브랜치가 epic 브랜치인가?**
    - `git branch --show-current` 확인
@@ -127,19 +159,32 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
    - 위 **체크 0이 이 판정의 한 사례다** — `SendMessage` 스키마가 없으면 조율 경로 전체가 죽으므로 공유 전제이고, 그래서 다른 모든 체크보다 먼저 온다
    - 진입에서 확인하는 이유: 이 부류의 실패는 dispatch 뒤에 드러나면 **이미 진행한 작업까지 함께 잃는다.** 같은 확인이 런 시작 시점에는 가장 싸다
 
+### 경로 전환 (경량 → 무거운)
+
+```
+전환 트리거: 계획에 없던 tracked 파일 편집이 필요해진 순간
+  1. 편집 dispatch를 시작하지 않는다 (선-dispatch 후-체크 금지)
+  2. 생략했던 체크 1·2·3을 지금 실행한다 (late gate)
+       비-git이면 → delegation-patterns.md §경로 판정 경계 케이스
+  3. 기존 Task는 그대로 유지한다 — 재분해하지 않는다
+  4. decision log에 `경로 전환` + 전환 사유 + 전환 시점을 남긴다
+  5. 이후 dispatch는 전부 무거운 경로 규칙 (토폴로지 가드 재개)
+```
+
+**역방향(무거운 → 경량) 전환은 없다.** 브랜치가 이미 있으면 계속 쓴다 — 되돌려서 얻을 것이 없고, 만들어 둔 머지 경로만 잃는다.
+
 ---
 
 ## 표준 절차 (Workflow)
 
 ```
-0. 진입 확인 (Entry)        → 조율 도구 스키마 확보(ToolSearch) + 현재가 epic 브랜치·메인
-                             working tree인지 확인 + 왕복 조율 가용 판정
+0. 진입 확인 (Entry)        → 조율 도구 스키마 확보(ToolSearch) + 경로 판정 게이트 + §진입 시 체크
 1. 분해 (Decompose)        → 작업을 독립 단위로 쪼갠다 — 복잡·모호한 요구는 아키텍트 협의체
                              (설계 생성 → 별도 agent 의 심문·검증)에 위임해 검증된 task 를 도출
                              (`references/architect-council.md`)
-2. 위험도 분석 (Analyze)    → 단위 간 파일/의존성 충돌 위험 식별
+2. 위험도 분석 (Analyze)    → 단위 간 충돌 위험 식별
 3. 실행 계획 (Plan)         → 병렬/순차 결정 + 위임 형태(단발/team) 결정
-4. 위임 (Dispatch)          → Agent 호출 (worktree isolation, base = epic 브랜치)
+4. 위임 (Dispatch)          → Agent 호출 (`references/delegation-patterns.md`)
 5. 모니터링 (Monitor)       → 진행 추적, 정체 감지, 사용자 보고
 6. 검토·QA 게이트 (Gate)    → 작업마다 검토 에이전트 + QA 에이전트(검증 테스트 추가) 필수 + DB 접촉 작업은
                              DBA 에이전트 추가, 전부 pass여야 머지
@@ -147,7 +192,7 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
 8. 보고 (Report)            → 사용자에게 결과 요약
 ```
 
-각 단계의 상세 패턴은 아래 references에 있다.
+각 단계의 상세 패턴은 아래 references에 있다. **경로별 차이(어느 단계가 유지·축소·생략되는지)는 §경로 판정 게이트의 유지·생략 표가 단일 출처다.**
 
 ### 일감을 Task로 분리·관리하는 것은 메인의 핵심 룰
 
@@ -170,6 +215,7 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
 - QA의 테스트 추가도 편집이므로 **`isolation:"worktree"` subagent로 위임**한다 (메인은 직접 편집하지 않는다 — *사고 모드*).
 - 게이트 역할의 tier는 아래 §모델 라우팅 전략에 따라 dispatch 시점에 정한다 — 자동 머지의 유일한 안전장치라 보통 더 높은 역량을 둘 가치가 있다.
 - 예외는 Task 룰과 동일하게 **단발 1회·read-only 작업만**이다.
+- 경로별 차이는 §경로 판정 게이트의 유지·생략 표를 따른다.
 
 역할별 입력·검증 질문·출력 계약, DB 접촉 판정, 게이트 거부의 재위임 예산·기록 등 세부 규칙은 `references/autonomous-driving.md §리뷰어·QA 게이트`가 단일 출처다. spec 문서를 입력으로 구현하는 경우만 `references/spec-driven-review.md`(검토자=spec↔구현, QA 매니저=spec↔테스트)로 특수화된다.
 
@@ -206,6 +252,8 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
 - **병렬의 이득**: 시간 단축, 독립 컨텍스트
 - **병렬의 비용**: 머지 시 충돌 → 사람 개입 필요
 - **기본 규칙**: 의심스러우면 순차. 병렬은 disjoint가 명백할 때만.
+
+경로별 차이(경량에서 disjoint 판정 축이 무엇으로 바뀌는지)는 §경로 판정 게이트의 유지·생략 표를 따른다. 축이 바뀌어도 규칙은 같다: 의심스러우면 순차다.
 
 ---
 
@@ -320,7 +368,7 @@ team을 "쓰면 좋다"로 두면 폴백이 사실상 기본값이 되어 team �
 | 파일 | 언제 읽을지 |
 |------|-------------|
 | `references/architect-council.md` | 분해(1단계) 시 요구가 복잡·모호해 아키텍트 협의체(설계 생성 ↔ 심문 검증)로 분석·검증 후 task 를 도출할 때 |
-| `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때, **원인 불명 결함·회귀를 조사할 때**(§근본원인 swarm — 축 분해·증거 계약·가설 랭킹) — **작업 유형 → tier 표의 단일 출처** (역할 기준 원칙·역할별 모델 제약은 위 §모델 라우팅 전략이 단일 출처) |
+| `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때, **경로 판정이 경계 케이스일 때**(§경로 판정 경계 케이스가 단일 출처), **원인 불명 결함·회귀를 조사할 때**(§근본원인 swarm — 축 분해·증거 계약·가설 랭킹) — **작업 유형 → tier 표의 단일 출처** (역할 기준 원칙·역할별 모델 제약은 위 §모델 라우팅 전략이 단일 출처) |
 | `references/worktree-lifecycle.md` | 병렬 dispatch 직전, 또는 worktree 정리/머지를 다룰 때 |
 | `references/agent-monitor.md` | 백그라운드 agent 진행 추적, Task 시스템으로 다중 작업 상태·의존성을 추적할 때, 또는 대규모 fan-out에서 실패 대비 복원력(체크포인트·재시도·폴백) 절차를 적용할 때 |
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
@@ -351,8 +399,8 @@ team을 "쓰면 좋다"로 두면 폴백이 사실상 기본값이 되어 team �
 3. **컨텍스트 의존 prompt**: "위에서 말한 그 파일을" 같은 prompt → sub-agent는 메인 대화를 못 봄. 자기완결적으로 작성.
 4. **Reference 일괄 로드**: 시작하자마자 4개 reference를 모두 Read → 컨텍스트 낭비. 단계별로 필요할 때만.
 5. **무한 폴링**: `Bash sleep` 루프로 agent 상태 확인 → 금지. `run_in_background: true` + 완료 알림 사용.
-6. **메인이 worktree에서 시작**: 메인을 worktree에 진입시킨 채 오케스트레이션 → 머지 경로 꼬임. 메인은 epic 브랜치의 메인 working tree에서만 동작.
-7. **epic 브랜치 우회**: main 또는 임의 feature 브랜치에서 sub-agent를 바로 dispatch → 결과를 어디로 모을지 모호. 반드시 epic 브랜치를 만들고 거기서 dispatch.
+6. **메인이 worktree에서 시작** (적용 경로는 §경로 판정 게이트): 메인을 worktree에 진입시킨 채 오케스트레이션 → 머지 경로 꼬임. 메인은 epic 브랜치의 메인 working tree에서만 동작.
+7. **epic 브랜치 우회** (적용 경로는 §경로 판정 게이트): main 또는 임의 feature 브랜치에서 sub-agent를 바로 dispatch → 결과를 어디로 모을지 모호. 반드시 epic 브랜치를 만들고 거기서 dispatch.
 8. **자문 흉내**: 자문 경로가 비활성인데 단발 subagent 1회 왕복이나 메인 자신의 판단을 "자문 결과"로 포장 → 실질 없이 기록만 남는다. 경로가 없으면 없는 대로 진행하고, 그 시점의 판단은 **메인 자신의 판단으로 명시**한다. 필수 등급 경로의 폴백은 decision log의 `실행 형태` 필드로 사후 탐지된다 (§team mode 강제 등급).
 9. **고무도장 메인**: 상위 tier라는 이유로 권고를 검토 없이 채택 → 실질 오케스트레이터가 advisor가 되고 메인은 전달자로 전락한다. 결정권은 메인에 있고, 채택도 기각도 사유와 함께 기록한다.
 10. **자문 tier가 다른 역할로 번짐**: "자문은 X 모델로"라는 역할 지목 제약을 받고 discovery·조사·구현까지 X로 dispatch → 상위 tier 예외가 전역 기본값이 되어 집행 위임의 tier 상한이 무너지고 비용도 폭증한다. 자문 외의 모든 위임은 집행 위임이며 메인 tier를 넘지 못한다 (§역할 기준 원칙 / §역할별 모델 제약).
@@ -360,3 +408,4 @@ team을 "쓰면 좋다"로 두면 폴백이 사실상 기본값이 되어 team �
 12. **출구 없는 금지**: dispatch prompt에 금지만 넣고 "대신 무엇을 하라"를 안 줌 → sub-agent는 그 상황에서 뭐라도 해야 하므로 위반이 재발한다. 금지에는 항상 출구를 짝으로 붙인다 (`references/delegation-patterns.md §필수 포함 요소` 10번이 단일 출처).
 13. **보고 채널 없는 위임**: background agent에 목적·범위만 주고 "무엇으로 보고하라"를 안 줌 → **agent의 plain text 출력은 메인에 도달하지 않으므로** 중간 보고·질의·부분 결과가 통째로 유실되고, 메인에는 침묵으로 보인다. 완료 알림만 남아 "일은 했는데 답이 없는" 상태가 된다. dispatch prompt에 `SendMessage({to: "main"})` 보고 채널을 반드시 포함한다 (`references/delegation-patterns.md §필수 포함 요소` 11번이 단일 출처).
 14. **deferred 도구를 이름만 보고 호출**: 문서에 `SendMessage`가 적혀 있으니 쓸 수 있다고 가정 → 스키마 미확보 상태의 호출이 `InputValidationError`로 실패하고, 조율을 포기한 채 단발로 흘러간다. 진입 시 `ToolSearch`로 1회 확보한다 (§진입 시 체크 0).
+15. **근거 없는 체크 생략**: 조사·이슈 등록처럼 편집이 없어 보인다는 이유로 경로 판정 없이 체크 1·2·3을 건너뜀 → 같은 생략이 tracked 편집이 섞인 런에서도 반복되고, 사후에는 판정한 것인지 빠뜨린 것인지 구분되지 않는다. 경량 경로는 **판정한 결과**여야 하며, 판정 결과와 근거를 진입 보고와 decision log에 남긴다 (§경로 판정 게이트).

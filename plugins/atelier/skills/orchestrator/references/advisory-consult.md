@@ -98,7 +98,7 @@ team 이 비가용이면 **자문 경로는 사용 불가**다. 이때 트리거
 | 다른 teammate 에게 지시 (`SendMessage`) | 계약 | 메인이 조율 단일 창구임을 계약에 명시 — 자문자는 메인하고만 대화 |
 | 능동적 스코프 확장·재위임 | 계약 | 출력 계약 위반으로 처리, 해당 권고를 기각하고 기록 |
 
-- **자문 소집 전후로 토폴로지 가드를 실행한다** (`merge-coordinator.md §토폴로지 가드`). 사전 차단이 아니라 **사후 탐지**이므로 생략하면 오염을 놓친다.
+- **자문 소집 전후로 토폴로지 가드를 실행한다** (`merge-coordinator.md §토폴로지 가드`). 사전 차단이 아니라 **사후 탐지**이므로 생략하면 오염을 놓친다. 이 가드의 **적용 범위: 무거운 경로** (판정: `SKILL.md` §경로 판정 게이트). 자문 경로 자체는 read-only라 두 경로 모두에서 그대로 살아 있다.
 - 도구 수준 보장이 꼭 필요하면 그것은 team 이 아니라 단발 subagent 의 영역이다 — 왕복 조율(자문의 실질)과 도구 보장은 현재 **동시에 얻을 수 없다**. 이 경로는 왕복을 택했다.
 - 계약 위반이 실제로 발생하면 그 자문 결과를 채택하지 않고 decision log 에 남긴다 (권고의 신뢰도 자체가 깨진 것).
 
@@ -117,7 +117,7 @@ team 이 비가용이면 **자문 경로는 사용 불가**다. 이때 트리거
 
 ```
 require(team_available)                            # 비가용이면 자문 없이 원래 에스컬레이션으로
-assert_topology()                                  # 소집 전 기준선 (clean 확인)
+assert_topology()                                  # 소집 전 기준선 (clean 확인) — 무거운 경로만
 
 perspectives = main_decides_lenses(question)       # 문제에 맞춰 1개 이상 (스웜 가능)
 for p in perspectives:                             # 같은 계약, 관점만 다름
@@ -135,7 +135,7 @@ assert_teammate_spawned(advisors)                  # 첫 spawn 직후 — 아래
                                                    # 폴백 없이 자문 생략 + 에스컬레이션
 
 advices = await_completion_notifications()         # 병렬 — 서로 기다리지 않음
-assert_topology()                                  # 소집 후 — 계약 위반(편집) 탐지
+assert_topology()                                  # 소집 후 — 계약 위반(편집) 탐지 (무거운 경로만)
 # 필요하면 SendMessage({to: "advisor-<slug>", ...}) 로 반문 — 왕복도 예산을 소모
 decision = main_decides(advices)                   # 채택 / 부분채택 / 기각 — 메인의 판단
                                                    # 권고가 갈리면 그 대립 자체를 근거로 기록

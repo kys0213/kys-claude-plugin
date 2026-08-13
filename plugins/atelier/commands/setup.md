@@ -9,13 +9,15 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 흡수된 plugin(git-utils, coding-style, workflow-guide 등)의 설정을 단일 진입점으로 통합합니다.
 모듈을 선택해 설치하고, 기존 frozen plugin 경로로 등록된 hook 을 atelier 로 마이그레이션합니다.
 
-> ⚠️ 모든 hook 은 user scope(`~/.claude/settings.json`)에 등록됩니다.
-> 등록은 LLM 이 settings.json 을 직접 편집하지 않고 **`atelier git hook register` CLI** 로 수행합니다
-> (`.claude/rules/tool-layer-boundary.md`). `--project-dir "$HOME"` 을 주면 `~/.claude/settings.json` 에 기록됩니다.
+> ⚠️ 기본적으로 모든 hook 은 user scope(`~/.claude/settings.json`)에 등록됩니다.
+> 등록은 LLM 이 settings.json 을 직접 편집하지 않고 **atelier CLI** 로 수행합니다
+> (`.claude/rules/tool-layer-boundary.md`).
+> - Default Branch Guard 2종 → `atelier git setup guard --scope <user|project>` (감지·마이그레이션·등록을 한 번에)
+> - 그 외 개별 hook → `atelier git hook register ... --project-dir "$HOME"`
 
 setup 이 settings.json 에 등록하는 hook 은 **CLI 직접 호출 형태뿐**입니다 (`atelier git guard write ...` — 바이너리가 PATH 에서 해석되므로 버전 비의존). 이는 setup 시점에 프로젝트별 값(예: `--default-branch <감지값>`)을 주입해야 하기 때문입니다.
 
-> 플러그인에 번들된 `.sh` hook(`check-cli-version`·`suggest-simplify`)은 플러그인이 `hooks/hooks.json` 으로 직접 선언합니다. 둘 다 비차단 advisory 라 모든 세션에 적용돼도 안전합니다. `${CLAUDE_PLUGIN_ROOT}` 가 hook 실행 시점에 활성 버전으로 해석돼 frozen 이 없습니다 (`.claude/rules/tool-layer-boundary.md`).
+> 플러그인에 번들된 `.sh` hook(`check-cli-version`·`session-baseline`·`suggest-simplify`)은 플러그인이 `hooks/hooks.json` 으로 직접 선언합니다. 셋 다 비차단 advisory 라 모든 세션에 적용돼도 안전합니다. `${CLAUDE_PLUGIN_ROOT}` 가 hook 실행 시점에 활성 버전으로 해석돼 frozen 이 없습니다 (`.claude/rules/tool-layer-boundary.md`).
 
 ## Step 0 — atelier CLI 보장 (공통 선행)
 
@@ -53,45 +55,18 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
    gh auth status || gh auth login
    ```
 2. 환경 설정 파일 생성 (기존 git-utils 와 동일 스키마, 경로 `~/.git-workflow-env`).
-3. **기본 브랜치 감지 + warm-up** — guard 는 읽기전용이라 비표준 기본 브랜치(예: `trunk`)를 런타임에 감지하지 못할 수 있으므로,
-   1회성인 setup 시점에 두 가지를 합니다. **둘 다 보호 대상 프로젝트 repo 를 기준으로 실행**해야 합니다 —
-   가드 런타임이 `--project-dir "${CLAUDE_PROJECT_DIR:-.}"` 로 그 repo 의 `origin/HEAD` 를 읽기 때문입니다. setup 의
-   cwd 가 다른 repo($HOME·multi-repo workspace)이면 엉뚱한 repo 를 warm 하거나 그 repo 의 기본 브랜치를 박게 됩니다:
+3. **Default Branch Guard hook 등록** — 감지·마이그레이션·등록을 서브커맨드 한 번으로 끝냅니다:
    ```bash
-   PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"   # 가드 런타임과 동일한 앵커
-   # (a) warm-up — 프로젝트 repo 의 origin/HEAD 를 채워, bake 가 비어도 guard 런타임 readonly 감지가
-   #     비표준 기본 브랜치(trunk 등)·비-GitHub remote 에서도 동작하게 한다.
-   #     gh/인증은 불필요하지만 --auto 는 origin 에 1회 질의하므로 remote 가 닿아야 한다(오프라인이면 no-op).
-   git -C "$PROJECT_DIR" remote set-head origin --auto 2>/dev/null || true
-   # (b) 명시적 pin 용 값 — GitHub repo 면 gh 로 조회해 아래에서 --default-branch 로 박는다. gh 는 cwd 의
-   #     remote 로 repo 를 추론하므로 프로젝트 repo 안에서 실행한다.
-   #     실패(인증 안 됨·비-GitHub·gh 없음)는 빈 값으로 두고 setup 은 계속 진행 — 빈 값이면 플래그 생략.
-   DEFAULT_BRANCH=$( (cd "$PROJECT_DIR" && gh repo view --json defaultBranchRef -q .defaultBranchRef.name) 2>/dev/null || true )
+   atelier git setup guard --project-dir "${CLAUDE_PROJECT_DIR:-.}" --scope user
    ```
-   gh 조회가 실패해 `--default-branch` 를 **생략**해도, (a) 의 warm-up 덕분에 guard 의 런타임 readonly 감지(`origin/HEAD` → main/develop/master)가 기본 브랜치를 해결한다.
-4. Default Branch Guard hook 2종 등록 — `.sh` 경로가 아니라 **CLI 커맨드를 직접** 기록합니다.
-   감지값이 비어있으면 `--default-branch` 플래그 자체를 빼야 합니다 (빈 플래그를 박으면 hook 실행 시 clap 이
-   값 누락으로 exit 2 → 모든 편집 차단되거나, 빈 브랜치로 guard 가 무력화됨):
-   ```bash
-   # 비어있으면 플래그 생략, 값이 있으면 ' --default-branch <값>' 만 덧붙임
-   DB_FLAG=""
-   [ -n "$DEFAULT_BRANCH" ] && DB_FLAG=" --default-branch $DEFAULT_BRANCH"
+   `--project-dir` 에는 **보호 대상 프로젝트 repo** 를 넘깁니다. setup 의 cwd 가 다른 repo($HOME·multi-repo
+   workspace)이면 엉뚱한 repo 가 기준이 되므로 `${CLAUDE_PROJECT_DIR:-.}` 를 그대로 씁니다.
 
-   atelier git hook register PreToolUse "Write|Edit" \
-     'atelier git guard write --project-dir "${CLAUDE_PROJECT_DIR:-.}"'"$DB_FLAG" \
-     --project-dir "$HOME"
+   성공하면 등록된 command 와 정리된 옛 엔트리를 JSON 으로 보고합니다 (아래 §Output Examples). 실패하면
+   `Error: ...` 를 stderr 에 출력하고 exit 1 이므로, 이후 Step 을 진행하지 말고 사용자에게 안내합니다.
 
-   atelier git hook register PreToolUse "Bash" \
-     'atelier git guard commit --project-dir "${CLAUDE_PROJECT_DIR:-.}"'"$DB_FLAG" \
-     --project-dir "$HOME"
-   ```
-   > `${CLAUDE_PROJECT_DIR:-.}` 는 **리터럴로 보존**해야 합니다 (hook 실행 시점에 셸이 expand).
-   > 반면 `$DB_FLAG`(감지값) 는 setup 시점에 expand 해서 기록합니다 — 빈 값이면 플래그가 통째로 빠집니다.
-
-   결과적으로 settings.json 에는 다음과 같이 기록됩니다:
-   ```json
-   { "type": "command", "command": "atelier git guard commit --project-dir \"${CLAUDE_PROJECT_DIR:-.}\" --default-branch main" }
-   ```
+   > 서브커맨드의 수행 순서·플래그 의미(warm-up·감지·마이그레이션·등록, `--scope`, `--dry-run`, 멱등성)는
+   > `skills/git/references/cli-reference.md` §4. Guard hook 설치 (`setup guard`) 가 단일 출처입니다.
 
 ## Step 2b — workflow 모듈
 
@@ -137,8 +112,12 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 | `github-autopilot/hooks/guard-pr-base.sh` | **제거만** (재등록 안 함) — 스크립트 삭제됨 |
 | `github-autopilot/hooks/protect-stagnation.sh` | **제거만** (재등록 안 함) — 스크립트 삭제됨 |
 | `coding-style/hooks/suggest-simplify.sh` | **제거만** (재등록 안 함) — 플러그인이 `hooks/hooks.json` 으로 직접 선언 |
-| `git-utils/scripts/default-branch-guard-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard write ...` (§"git 모듈" 등록 형식) |
-| `git-utils/scripts/default-branch-guard-commit-hook.sh` (또는 구버전 atelier 동명 스크립트) | `atelier git guard commit ...` (§"git 모듈" 등록 형식) |
+| `git-utils/scripts/default-branch-guard-hook.sh` (또는 구버전 atelier 동명 스크립트) | **unregister 만** — 재등록은 `atelier git setup guard` 가 담당 |
+| `git-utils/scripts/default-branch-guard-commit-hook.sh` (또는 구버전 atelier 동명 스크립트) | **unregister 만** — 재등록은 `atelier git setup guard` 가 담당 |
+
+> guard 2종은 개별 `hook register` 로 재등록하지 않습니다. `atelier git setup guard` 를 1회 실행하면 옛 형식
+> (`--default-branch <값>` 이 박힌 구버전 atelier 등록분 포함)을 접두 매칭으로 정리하고 신규 형식으로 다시
+> 등록합니다. 위 정규식으로 찾은 `.sh` 경로 항목만 unregister 하고, 나머지는 서브커맨드에 맡깁니다.
 
 ## Step 4 — CLI alias (선택)
 
@@ -168,7 +147,9 @@ alias git-utils='atelier git'
 3. **대상 선택** — AskUserQuestion: [Write/Edit Guard] [Commit Guard] [PR Guard] [모두] [취소]
 4. **액션 선택** — AskUserQuestion: [비활성화] [재설정] [취소]
    - **비활성화**: 대상 hook 마다 `atelier git hook unregister PreToolUse "<Step 2에서 찾은 command 문자열 그대로>" [--project-dir "$HOME"]`
-   - **재설정**: 비활성화와 동일하게 unregister 후, §"git 모듈"의 등록 형식(guard 2종) / PR Guard 는 `atelier git hook register PreToolUse "Bash" 'atelier git guard pr' --timeout=10 [--project-dir "$HOME"]` 형식으로 재등록
+   - **재설정**:
+     - Write/Edit·Commit Guard → `atelier git setup guard --project-dir "${CLAUDE_PROJECT_DIR:-.}" --scope <user|project>` 를 실행합니다. 옛 엔트리 제거와 재등록을 함께 처리하므로 별도 unregister 가 필요 없습니다 (§"git 모듈" 참조).
+     - PR Guard → unregister 후 `atelier git hook register PreToolUse "Bash" 'atelier git guard pr' --timeout=10 [--project-dir "$HOME"]` 로 재등록합니다.
 5. **결과 출력**: 제거/갱신된 settings 경로와 항목을 안내하고, 재활성화는 모듈 설치(Step 1)로 가능함을 알립니다.
 
 > unregister 의 command 인자는 **list 에서 발견된 문자열 그대로** 사용합니다 (legacy `pr-guard` 설치분 포함 — 추측으로 새 형식을 만들지 않음).
@@ -179,20 +160,35 @@ alias git-utils='atelier git'
 - 이후 Step 을 중단하고 Rust toolchain 설치를 안내합니다 (`rustup`)
 
 **기본 브랜치 감지 실패 (remote 미설정):**
-- `--default-branch` 없이 guard 를 등록하고, 비표준 기본 브랜치 repo 에서는 보호가 제한될 수 있음을 안내합니다
+- `atelier git setup guard` 가 `--default-branch` 없이 guard 를 등록하고 `"defaultBranch": null` 로 보고합니다.
+  실패가 아니므로 setup 은 계속 진행합니다 — 비표준 기본 브랜치 repo 에서는 보호가 제한될 수 있음을 안내합니다
 
 **settings.json 이 깨진 JSON 인 경우:**
-- `hook register` 가 덮어쓰기를 거부하고 에러를 반환합니다 — 사용자에게 파일 상태를 보여주고 수동 복구를 안내합니다
+- 덮어쓰기를 거부하고 `Error: <message>` 를 stderr 에 출력하며 exit 1 로 끝납니다 — 사용자에게 파일 상태를 보여주고 수동 복구를 안내합니다
 
 ## Output Examples
 
-**등록 성공:**
+**guard 등록 성공 (project scope — 감지값 pin):**
 ```json
-{ "action": "created", "command": "atelier git guard commit --project-dir \"${CLAUDE_PROJECT_DIR:-.}\" --default-branch main" }
+{
+  "scope": "project",
+  "settingsPath": "/work/my-repo/.claude/settings.json",
+  "defaultBranch": "trunk",
+  "originHeadWarmed": true,
+  "commands": [
+    "atelier git guard write --project-dir \"${CLAUDE_PROJECT_DIR:-.}\" --default-branch trunk",
+    "atelier git guard commit --project-dir \"${CLAUDE_PROJECT_DIR:-.}\" --default-branch trunk"
+  ],
+  "removed": [],
+  "dryRun": false
+}
 ```
 
-**재실행 (멱등):**
+- user scope 는 `"defaultBranch": null` 이고 `commands` 에 `--default-branch` 가 붙지 않습니다.
+- 마이그레이션이 일어나면 `"removed"` 에 정리된 옛 command 가 담깁니다 (비어 있으면 정리할 것이 없었다는 뜻).
+
+**PR Guard 등 개별 hook 등록 (`hook register`):**
 ```json
-{ "action": "updated", "command": "atelier git guard commit --project-dir \"${CLAUDE_PROJECT_DIR:-.}\" --default-branch main" }
+{ "action": "created", "command": "atelier git guard pr" }
 ```
 
