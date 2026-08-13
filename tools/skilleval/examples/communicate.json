@@ -1,0 +1,58 @@
+[
+  {
+    "query": "notes/work-log.md 내용을 팀 슬랙에 공유할 수 있게 정리해줘",
+    "expect": true,
+    "files": {
+      "notes/work-log.md": "# 2026-08-11\n- 결제 재시도 큐 도입. 실패 건을 30s/2m/10m 백오프로 3회 재시도\n- 재시도 중복 방지 위해 idempotency key 를 주문 ID 기반으로 생성\n- 스테이징에서 실패율 4.1% -> 0.3%\n- 남은 것: 재시도 소진 건 알림, 대시보드 패널\n"
+    }
+  },
+  {
+    "query": "CHANGES.md 보고 PR 설명 써줘",
+    "expect": true,
+    "files": {
+      "CHANGES.md": "- session baseline 기록을 bare repo 에서도 수행하도록 통일\n- cwd 폴백을 \".\" 로 통일 (기존 \"\" 는 spawn 실패)\n- shared/process.rs, shared/shell.rs 신설\n- session -> git 의존 제거\n"
+    }
+  },
+  {
+    "query": "auth.py 가 뭐 하는 코드인지 초보자도 알 수 있게 쉽게 설명해줘",
+    "expect": true,
+    "files": {
+      "auth.py": "import hmac, hashlib, time\n\ndef sign(secret: bytes, payload: bytes, ts: int) -> str:\n    msg = str(ts).encode() + b'.' + payload\n    return hmac.new(secret, msg, hashlib.sha256).hexdigest()\n\ndef verify(secret, payload, ts, sig, skew=300):\n    if abs(time.time() - ts) > skew:\n        return False\n    return hmac.compare_digest(sign(secret, payload, ts), sig)\n"
+    }
+  },
+  {
+    "query": "write up a summary of this week's work for the team",
+    "expect": true,
+    "files": {
+      "notes/week.md": "mon: shipped retry queue\ntue: idempotency keys keyed on order id\nwed: staging failure rate 4.1% -> 0.3%\nthu: started alerting for exhausted retries\nfri: review + docs\n"
+    }
+  },
+  {
+    "query": "rate_limiter.js 가 하는 일을 ELI5 로 설명해줘",
+    "expect": true,
+    "files": {
+      "rate_limiter.js": "const buckets = new Map();\nexport function allow(key, cap, refillPerSec) {\n  const now = Date.now() / 1000;\n  let b = buckets.get(key) ?? { tokens: cap, ts: now };\n  b.tokens = Math.min(cap, b.tokens + (now - b.ts) * refillPerSec);\n  b.ts = now;\n  if (b.tokens < 1) { buckets.set(key, b); return false; }\n  b.tokens -= 1; buckets.set(key, b); return true;\n}\n"
+    }
+  },
+  {
+    "query": "릴리스 노트 초안 잡아줘",
+    "expect": true,
+    "files": {
+      "CHANGELOG.draft": "feat: retry queue for failed payments\nfix: duplicate charge when retry raced with webhook\nrefactor: extract shared process helpers\n"
+    }
+  },
+  {
+    "query": "auth.py 의 타임스탬프 검증에 버그 있는지 보고 고쳐줘",
+    "expect": false,
+    "files": {
+      "auth.py": "import hmac, hashlib, time\n\ndef sign(secret: bytes, payload: bytes, ts: int) -> str:\n    msg = str(ts).encode() + b'.' + payload\n    return hmac.new(secret, msg, hashlib.sha256).hexdigest()\n\ndef verify(secret, payload, ts, sig, skew=300):\n    if abs(time.time() - ts) > skew:\n        return False\n    return hmac.compare_digest(sign(secret, payload, ts), sig)\n"
+    }
+  },
+  {
+    "query": "rate_limiter.js 에 테스트 추가해줘",
+    "expect": false,
+    "files": {
+      "rate_limiter.js": "const buckets = new Map();\nexport function allow(key, cap, refillPerSec) {\n  const now = Date.now() / 1000;\n  let b = buckets.get(key) ?? { tokens: cap, ts: now };\n  b.tokens = Math.min(cap, b.tokens + (now - b.ts) * refillPerSec);\n  b.ts = now;\n  if (b.tokens < 1) { buckets.set(key, b); return false; }\n  b.tokens -= 1; buckets.set(key, b); return true;\n}\n"
+    }
+  }
+]

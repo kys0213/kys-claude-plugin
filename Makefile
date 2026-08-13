@@ -1,6 +1,7 @@
-.PHONY: help setup build test validate validate-ci detect clean
+.PHONY: help setup build test validate validate-ci detect clean skilleval
 
 BINARY := bin/validate
+SKILLEVAL := bin/skilleval
 
 # 기본 타겟
 help:
@@ -14,6 +15,7 @@ help:
 	@echo "  make validate-specs  스펙 검증만"
 	@echo "  make validate-paths  경로 검증만"
 	@echo "  make validate-arch   아키텍처 검증만 (레이어 의존성, 유사도, 책임)"
+	@echo "  make skilleval ARGS=\"...\"  스킬 트리거 측정 (claude 호출, 수동)"
 	@echo "  make detect          변경된 패키지 감지"
 	@echo "  make detect-from REF=<ref>  특정 ref 기준 변경 감지"
 	@echo "  make clean           빌드 결과물 정리"
@@ -36,11 +38,15 @@ build:
 	@mkdir -p bin
 	@cd tools/validate && go build -o ../../$(BINARY) .
 	@echo "Built: $(BINARY)"
+	@echo "Building skilleval tool..."
+	@cd tools/skilleval && go build -o ../../$(SKILLEVAL) .
+	@echo "Built: $(SKILLEVAL)"
 
 # Go 테스트
 test:
 	@echo "Running tests..."
 	@cd tools/validate && go test -v ./...
+	@cd tools/skilleval && go test -v ./...
 
 # 검증 (바이너리가 없으면 빌드)
 validate: $(BINARY)
@@ -64,6 +70,13 @@ validate-ci: $(BINARY)
 
 $(BINARY):
 	@$(MAKE) build
+
+$(SKILLEVAL):
+	@$(MAKE) build
+
+# 스킬 트리거 측정 (claude 를 실제로 호출하므로 CI 가 아니라 수동 실행용)
+skilleval: $(SKILLEVAL)
+	@./$(SKILLEVAL) $(ARGS)
 
 # 변경 감지
 detect:
