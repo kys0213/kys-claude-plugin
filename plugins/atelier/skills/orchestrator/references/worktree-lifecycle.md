@@ -15,8 +15,8 @@ user-invocable: false
 
 오케스트레이터에서 worktree는 **항상 epic 브랜치 위의 sub-agent 격리 수단**이다. 메인은 worktree를 사용하지 않는다.
 
-- 모든 sub-agent worktree는 **현재 epic 브랜치 기준으로 동기화된 상태에서 작업**한다 (자동 보장 아님 — 확인·동기화는 `delegation-patterns.md §Prompt 작성 원칙 필수 포함 요소` 9번이 단일 출처)
-- sub-agent 결과는 **epic 브랜치로 머지** (main 직접 머지 X)
+- 모든 sub-agent worktree는 **현재 epic 브랜치 기준으로 동기화된 상태에서 작업**한다 (자동 보장 아님 — 확인·동기화는 `delegation-patterns.md §Prompt 작성 원칙 필수 포함 요소` 9번이 단일 출처). dispatch **이후** epic HEAD가 움직여 생기는 drift는 별도 정책이다 (`branch-strategy.md §base drift 전파`)
+- sub-agent 결과는 **epic 브랜치로 머지** (main 직접 머지 X). 브랜치 이름은 자동 생성명을 쓰지 않고 `epic/<name>/t<task-id>-<slug>` 규약을 따른다 (`branch-strategy.md §브랜치 네이밍`)
 - 메인은 epic 브랜치의 **메인 working tree**에 머문다 — EnterWorktree 금지
 
 ## 사용 방식: Agent isolation 한 가지만
@@ -42,8 +42,9 @@ assert `git rev-parse --show-toplevel` == repo의 메인 working tree
 # 사전 검증: 작업들의 변경 파일 집합이 disjoint인가?
 files_A = analyze_files(task_A)  # Read/Glob/Grep으로 영향받을 파일 추정
 files_B = analyze_files(task_B)
-if not disjoint(files_A, files_B):
-    → 순차로 전환 (worktree 병렬 X)
+S = files_A ∩ files_B
+if S and not all_hot_spot(S):     # S 가 전부 hot-spot 이면 병렬 유지 +
+    → 순차로 전환 (worktree 병렬 X)  #   통합 task 분리 (branch-strategy.md §hot-spot 파일)
 
 # Dispatch (worktree base는 자동 보장되지 않음 — prompt에 base 확인·동기화 지시 포함)
 Agent({description: "task A", isolation: "worktree", run_in_background: true,
@@ -64,7 +65,7 @@ Agent({description: "task B", isolation: "worktree", run_in_background: true,
 가드 통과 후 결과를 후속 단계로 위임한다:
 
 - **변경 없음** → 자동 정리됨. 추가 조치 불필요.
-- **변경 있음 (성공/실패 무관)** → `merge-coordinator.md`로 이동. 머지 순서 결정, 충돌 처리, 정리 책임이 그쪽에 있다.
+- **변경 있음 (성공/실패 무관)** → `merge-coordinator.md`로 이동. 머지 순서 결정, 충돌 처리, 정리 책임이 그쪽에 있다. 단 **아직 in-flight인 sub-agent가 남아 있으면 기본값은 배치 머지**라 여기서 바로 머지하지 않는다 — 언제 머지할지의 정책은 `branch-strategy.md §base drift 전파`가 단일 출처다.
 - **재위임 판단 기준** → `agent-monitor.md` (외부 환경 vs prompt 결함 vs 불명확).
 
 이 파일은 격리 패턴까지만 다루고, 결과 통합 로직은 의도적으로 가지고 있지 않다.
@@ -110,8 +111,9 @@ Agent({description: "task B", isolation: "worktree", run_in_background: true,
 
 - [ ] 메인이 현재 epic 브랜치 + 메인 working tree에 있는가? (`git branch --show-current` / `git rev-parse --show-toplevel`)
 - [ ] 작업들의 변경 파일 집합을 추정했는가?
+- [ ] 겹치는 파일이 있다면 hot-spot 여부를 갈랐는가? (전부 hot-spot이면 병렬 유지 + 통합 task 분리 — `branch-strategy.md §hot-spot 파일`)
 - [ ] disjoint가 명확한가? (의심스러우면 순차)
-- [ ] 각 sub-agent prompt가 자기완결적이며 epic 브랜치 이름을 포함하는가?
+- [ ] 각 sub-agent prompt가 자기완결적이며 epic 브랜치 이름과 `epic/<name>/t<task-id>-<slug>` 전환 지시를 포함하는가?
 - [ ] `isolation: "worktree"`와 `run_in_background: true`를 켰는가?
 
 dispatch 후:

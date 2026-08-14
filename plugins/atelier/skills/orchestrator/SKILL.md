@@ -58,14 +58,14 @@ version: 0.1.0
 ```
 main
   └─ epic/<name>   ← 메인 에이전트 (read + dispatch + report)
-       ├─ worktree A (sub-agent A: 격리된 작업 브랜치, base = epic/<name>)
-       ├─ worktree B (sub-agent B: 격리된 작업 브랜치, base = epic/<name>)
-       └─ worktree C (sub-agent C: ...)
+       ├─ worktree A → epic/<name>/t1-<slug>  (sub-agent A, base = epic/<name>)
+       ├─ worktree B → epic/<name>/t2-<slug>  (sub-agent B, base = epic/<name>)
+       └─ worktree C → epic/<name>/t3-<slug>  (sub-agent C: ...)
 ```
 
 - **메인 = epic 브랜치 자체**. 절대 worktree로 들어가지 않는다.
-- **sub-agent = epic 브랜치를 base로 한 worktree**. 결과는 epic 브랜치로 머지한다.
-- **epic 브랜치 → main 머지는 이 스킬 범위 밖** (사용자 결정 / 별도 release 절차).
+- **sub-agent = epic 브랜치를 base로 한 worktree**. 결과는 epic 브랜치로 머지한다 — 통합 방식은 **rebase 후 `--ff-only`** 로 고정이고, 브랜치 네이밍·머지 방식·drift 처리의 단일 출처는 `references/branch-strategy.md`다.
+- **epic 브랜치 → main 머지는 이 스킬 범위 밖** (사용자 결정 / 별도 release 절차). 반대 방향(main이 움직여 epic이 뒤처짐)은 런 안에서 처리한다 (`references/branch-strategy.md §epic ← main 역방향 drift`).
 
 ### 진입 시 체크
 
@@ -232,6 +232,16 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
 
 ---
 
+## 분해는 충돌 경계로 쪼갠다 (병렬 판정 앞 단계)
+
+아래 병렬/순차 결정 트리는 **이미 쪼개진** 작업을 거르는 사후 필터다. 분해(1단계)가 충돌을 만들어 놓으면 트리는 그것을 전부 순차로 떨어뜨릴 수밖에 없다 — **병렬 이득은 판정이 아니라 분해에서 결정된다.**
+
+- **수직 슬라이스로 쪼갠다**: 기능 단위(A 기능의 모델+서비스+API+테스트)로 자른다. 레이어 수평 분해(모델 전부 / 서비스 전부 / 컨트롤러 전부)는 작업마다 같은 파일들을 훑게 되어 disjoint가 애초에 나오지 않는다.
+- **hot-spot은 별도 task로 뽑는다**: 작업들의 의도는 안 겹치는데 **같은 위치에 항목을 추가**하게 되는 파일은 병렬 작업에서 편집을 금지하고 마지막에 통합 task 1개로 순차 처리한다. 안 하면 **hot-spot 하나 때문에 fan-out 전체가 순차로 떨어진다** (사례·판정·계약은 `references/branch-strategy.md §hot-spot 파일`이 단일 출처).
+- **공유 인터페이스는 선행 task로 앞세운다**: 여러 작업이 같은 타입·시그니처를 필요로 하면 그 정의를 먼저 한 task로 확정·머지한 뒤 나머지를 병렬로 띄운다. 각자 정의하게 두면 머지에서 의미 충돌이 되고, 그건 자동 해결 대상이 아니다.
+
+---
+
 ## 병렬 vs 순차 결정 트리
 
 오케스트레이터의 가장 중요한 판단. **머지 시 충돌이 가장 적고 안정적인 쪽**을 선택한다.
@@ -244,8 +254,11 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
   │       의존성 있음? → 순차 (A 결과 → B 입력)
   │
   └─ overlap (같은 파일 수정)
-       └─ 같은 라인 영역 가능성? → 순차 (단일 worktree에서 직렬)
-          명확히 다른 영역? → 순차 권장 (안전), 병렬은 경험상 안전한 경우만
+       ├─ 겹치는 파일이 전부 hot-spot? → 병렬 유지 + hot-spot을 통합 task로 분리
+       │                                  (`references/branch-strategy.md §hot-spot 파일`)
+       └─ 그 외
+            같은 라인 영역 가능성? → 순차 (단일 worktree에서 직렬)
+            명확히 다른 영역? → 순차 권장 (안전), 병렬은 경험상 안전한 경우만
 ```
 
 판단 근거:
@@ -369,6 +382,7 @@ team을 "쓰면 좋다"로 두면 폴백이 사실상 기본값이 되어 team �
 |------|-------------|
 | `references/architect-council.md` | 분해(1단계) 시 요구가 복잡·모호해 아키텍트 협의체(설계 생성 ↔ 심문 검증)로 분석·검증 후 task 를 도출할 때 |
 | `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때, **경로 판정이 경계 케이스일 때**(§경로 판정 경계 케이스가 단일 출처), **원인 불명 결함·회귀를 조사할 때**(§근본원인 swarm — 축 분해·증거 계약·가설 랭킹) — **작업 유형 → tier 표의 단일 출처** (역할 기준 원칙·역할별 모델 제약은 위 §모델 라우팅 전략이 단일 출처) |
+| `references/branch-strategy.md` | 무거운 경로에서 **브랜치를 어떻게 운영할지** 정할 때 — worktree 브랜치 네이밍, hot-spot 파일 분리 계약, 머지 정책(배치 vs 즉시+전파), 통합 방식, epic ← main 역방향 흡수, 반복 충돌의 재분해 트리거. **위 여섯의 단일 출처** (분해 원칙은 위 §분해는 충돌 경계로 쪼갠다, 단일 rebase의 충돌 해결 전략은 `git` skill) |
 | `references/worktree-lifecycle.md` | 병렬 dispatch 직전, 또는 worktree 정리/머지를 다룰 때 |
 | `references/agent-monitor.md` | 백그라운드 agent 진행 추적, Task 시스템으로 다중 작업 상태·의존성을 추적할 때, 또는 대규모 fan-out에서 실패 대비 복원력(체크포인트·재시도·폴백) 절차를 적용할 때 |
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
@@ -409,3 +423,5 @@ team을 "쓰면 좋다"로 두면 폴백이 사실상 기본값이 되어 team �
 13. **보고 채널 없는 위임**: background agent에 목적·범위만 주고 "무엇으로 보고하라"를 안 줌 → **agent의 plain text 출력은 메인에 도달하지 않으므로** 중간 보고·질의·부분 결과가 통째로 유실되고, 메인에는 침묵으로 보인다. 완료 알림만 남아 "일은 했는데 답이 없는" 상태가 된다. dispatch prompt에 `SendMessage({to: "main"})` 보고 채널을 반드시 포함한다 (`references/delegation-patterns.md §필수 포함 요소` 11번이 단일 출처).
 14. **deferred 도구를 이름만 보고 호출**: 문서에 `SendMessage`가 적혀 있으니 쓸 수 있다고 가정 → 스키마 미확보 상태의 호출이 `InputValidationError`로 실패하고, 조율을 포기한 채 단발로 흘러간다. 진입 시 `ToolSearch`로 1회 확보한다 (§진입 시 체크 0).
 15. **근거 없는 체크 생략**: 조사·이슈 등록처럼 편집이 없어 보인다는 이유로 경로 판정 없이 체크 1·2·3을 건너뜀 → 같은 생략이 tracked 편집이 섞인 런에서도 반복되고, 사후에는 판정한 것인지 빠뜨린 것인지 구분되지 않는다. 경량 경로는 **판정한 결과**여야 하며, 판정 결과와 근거를 진입 보고와 decision log에 남긴다 (§경로 판정 게이트).
+16. **머지해놓고 in-flight 방치** (무거운 경로): 아직 돌고 있는 worktree가 있는데 먼저 끝난 결과를 머지하고 알리지 않음 → 옛 base 위의 작업이 **이미 머지된 수정을 되돌린 채 조용히 통과**할 수 있다. 기본은 배치 머지이고, 즉시 머지했으면 전부에 rebase를 전파한다 (`references/branch-strategy.md §base drift 전파`).
+17. **분해를 레이어로 쪼갬**: 모델 전부 / 서비스 전부 / 컨트롤러 전부로 나눔 → 작업마다 같은 파일을 훑어 disjoint가 애초에 안 나오고, 병렬/순차 트리가 전부 순차로 떨어뜨린다. 충돌은 판정이 아니라 분해에서 결정된다 (§분해는 충돌 경계로 쪼갠다).
