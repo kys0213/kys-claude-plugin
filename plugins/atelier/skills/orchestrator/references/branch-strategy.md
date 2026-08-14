@@ -59,6 +59,8 @@ epic/<name>/t<task-id>-<slug>     ← sub-agent worktree 브랜치
 - 마이그레이션 시퀀스 번호·순번이 있는 파일
 - i18n 리소스, 전역 상수 테이블, 피처플래그 목록
 
+**전형 사례이지 고정 목록이 아니다** — 판정은 위 정의(의도는 안 겹치는데 위치가 겹치는가)로 한다. 목록에 없다고 hot-spot이 아닌 것이 아니고, 레포마다 다른 것이 여기 걸린다.
+
 ### 판정 절차
 
 `worktree-lifecycle.md §충돌 위험 사전 분석`으로 구한 **겹치는 파일 집합 S** 를 그대로 순차 판정에 넣지 않는다:
@@ -144,13 +146,13 @@ git merge --ff-only epic/<name>/t<id>-<slug>  # epic 브랜치의 메인 working
 
 **rebase 로 고정하는 이유 셋**:
 
-1. 충돌 해결 정책의 단일 출처(`git` skill `references/conflict-resolution.md`)가 **rebase 전제**다 — 거기서 `--ours` 는 base, `--theirs` 는 내 커밋으로 merge와 정반대다. 통합 방식을 섞으면 그 문서가 절반의 경우에 **틀린 지침**이 된다
+1. 충돌 해결 정책의 단일 출처(`git` skill `references/conflict-resolution.md`)가 **rebase 전제**다 — 그 문서의 ours/theirs 방향은 merge와 반대이므로, 통합 방식을 섞으면 그 문서가 절반의 경우에 **틀린 지침**이 된다
 2. epic 히스토리가 선형이라 `git log --oneline epic/<name>` 이 그대로 task 단위 진행 기록이 된다
 3. 최종 통합 검증 게이트가 red일 때 revert·이분 탐색의 단위가 task와 일치한다
 
 **주의**:
 
-- 이미 push된 worktree 브랜치를 rebase하면 히스토리가 바뀐다 — `--force-with-lease` 만 쓴다(`--force` 금지). 정책은 `git` skill `§force-push 정책`이 단일 출처다
+- 이미 push된 worktree 브랜치를 rebase하면 히스토리가 바뀐다 — 이때 push 정책은 `git` skill `§force-push 정책`이 단일 출처다
 - **epic 브랜치 자체는 rebase하지 않는다** — sub-agent worktree들이 base로 삼는 공유 브랜치라 히스토리를 바꾸면 in-flight worktree가 전부 깨진다 (§5도 같은 이유로 merge다)
 
 ---
@@ -167,7 +169,8 @@ git rev-list --count epic/<name>..origin/<default-branch>
 - **확인 시점**: 최종 통합 검증 게이트 **직전 1회** (`merge-coordinator.md §최종 통합 검증 게이트`)
 - **0이 아니면 main을 epic에 머지한다** — rebase가 아니다 (§4 주의의 두 번째 항목과 같은 이유)
 - **머지 후 전체 스위트를 다시 돌린다.** 게이트의 green은 main을 흡수한 뒤의 HEAD 기준이어야 의미가 있다. 보고하는 HEAD sha도 흡수 후의 것이다
-- 충돌은 §4와 동일하게 위임한다. 도메인 의미 충돌이면 자율 모드라도 에스컬레이션(`autonomous-driving.md §에스컬레이션`)
+- **충돌 위임 패킷은 §4의 것을 그대로 쓰지 않는다.** 통합 경로의 기본 위임(`merge-coordinator.md §충돌 시 위임`)은 "해결 후 epic 위로 rebase"를 지시하는 **rebase 전제**인데, 이 흡수는 merge이고 epic은 rebase하면 안 되는 브랜치다. 패킷에 **"이것은 merge다 — epic 브랜치를 rebase하지 말 것"** 을 명시하고, ours/theirs 방향은 merge 기준으로 읽으라고 못 박는다 (방향 자체는 `git` skill `references/conflict-resolution.md`가 단일 출처)
+- 도메인 의미 충돌이면 자율 모드라도 에스컬레이션(`autonomous-driving.md §에스컬레이션`)
 
 **루프 중간에는 하지 않는다.** main을 흡수할 때마다 in-flight worktree 전부에 §3의 전파가 필요해져 비용이 곱해진다. 런이 길어 중간 흡수가 불가피하면 **배치 경계**(§3 A안의 머지 시점)에서만 한다.
 
@@ -185,6 +188,7 @@ git rev-list --count epic/<name>..origin/<default-branch>
 ```
 
 - **이 카운터는 `max_redispatch_per_task` 예산과 별개다** — 예산은 task 단위, 이것은 **파일 단위**다. task를 갈아치워도 파일이 같으면 카운트는 이어진다. 그래서 task 예산만으로는 이 패턴이 잡히지 않는다
+- **2·3은 기본값이다.** `max_redispatch_per_task` 와 같은 성격의 예산이므로, 런의 성격상 공유 파일을 여러 task가 정당하게 건드릴 수밖에 없으면 메인이 진입 시 다른 상한을 정하고 근거를 자율 계약·decision log에 남긴다. 조정 가능하다는 것이지 생략 가능하다는 뜻은 아니다
 - 재분류·직렬화·에스컬레이션은 전부 decision log에 남긴다 (`autonomous-driving.md §의사결정 기록`)
 
 ---

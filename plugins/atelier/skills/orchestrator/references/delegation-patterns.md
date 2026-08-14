@@ -57,7 +57,7 @@ sub-agent는 **메인 대화 히스토리를 보지 못한다**. prompt는 자�
 9. **base 확인 + 브랜치 지정** (`isolation: "worktree"` dispatch 시 필수): worktree의 base가 dispatch 시점 epic 브랜치 HEAD라는 보장은 없다. 작업 시작 전 base를 확인하고, 통합 브랜치(epic 브랜치) HEAD보다 뒤처져 있으면 fast-forward/rebase한 뒤 시작하라고 prompt에 명시할 것. 이어서 **`git switch -c epic/<name>/t<task-id>-<slug>` 로 규약 브랜치를 만들고 그 위에서만 커밋**하라고 지시한다 — 자동 생성된 agent 식별자 이름을 그대로 두면 머지 후보 수집이 결과 텍스트에만 의존하게 된다 (`branch-strategy.md §브랜치 네이밍`). dispatch **이후** epic HEAD가 움직여 생기는 drift는 이 지시로 커버되지 않는다 — 그건 메인이 전파한다 (`branch-strategy.md §base drift 전파`).
 10. **금지에는 출구를 함께 준다**: 금지 계약을 넣을 때는 "대신 무엇을 하라"를 반드시 같이 적는다. 금지만 주면 sub-agent는 그 상황에서 뭐라도 해야 하므로 위반이 재발한다. 위 7·8번이 이미 이 형태다 — 7번은 부모 repo 오염 금지에 "stash로 보존한 뒤 보고"를, 8번은 재위임 금지에 "실패 사유와 함께 종료"를 출구로 붙였다. 새 금지를 추가할 때도 같은 짝을 지킨다.
 11. **보고 채널** (`run_in_background: true` dispatch 시 필수): **sub-agent가 그냥 출력한 텍스트는 메인에 보이지 않는다.** 메인에게 말하려면 `SendMessage({to: "main", ...})`를 호출해야 하고, 그것이 유일한 채널이다. 따라서 prompt에 다음을 명시한다 — "진행 보고·질문·부분 결과는 `SendMessage({to: "main", summary: "<5-10 단어>", message: "<내용>"})`으로 보내라. 그냥 출력하면 메인에 전달되지 않는다."
-12. **hot-spot 편집 금지 + 출구** (병렬 dispatch 시, 겹치는 hot-spot이 있으면 필수): 여러 작업이 항목을 append하게 되는 파일(의존성 lock, 모듈 re-export, 라우트·DI 등록, 마이그레이션 순번)은 목록으로 명시해 편집을 금지하고, **필요한 항목을 보고하라**는 출구를 짝지어 준다 (위 10번의 형태이며, 보고는 11번의 채널을 쓴다). 계약 문구와 통합 task 처리는 `branch-strategy.md §hot-spot 파일`이 단일 출처다.
+12. **hot-spot 편집 금지 + 출구** (병렬 dispatch 시, 겹치는 hot-spot이 있으면 필수): 해당 파일들을 **목록으로 명시해** 편집을 금지하고, **필요한 항목을 보고하라**는 출구를 짝지어 준다 (위 10번의 형태이며, 보고는 11번의 채널을 쓴다). hot-spot 판정·계약 문구·통합 task 처리는 `branch-strategy.md §hot-spot 파일`이 단일 출처다.
 
 ### 보고 채널을 빼면 생기는 일 (11번의 근거)
 
