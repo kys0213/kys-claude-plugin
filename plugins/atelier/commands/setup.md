@@ -32,6 +32,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 
 > Step 0 은 *setup 시점* 바이너리를 보장하고, plugin-declared SessionStart hook(`check-cli-version`)이
 > *이후 버전 드리프트*를 알립니다 — 둘이 한 쌍입니다.
+> CLI 버전 갱신만 원하면 setup 대신 `/atelier:update` 를 실행하세요 — 모듈 설치·hook 등록 없이 갱신만 수행합니다.
 
 ## Step 1 — 설치 모듈 선택
 
