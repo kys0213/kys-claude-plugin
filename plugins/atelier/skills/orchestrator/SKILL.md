@@ -205,6 +205,14 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
 
 상세 사용법(필드·의존성·owner)은 `references/agent-monitor.md §Task 시스템`이 단일 출처다. 자율 모드에서의 Task 추적 규칙은 `references/autonomous-driving.md`를 따른다.
 
+### 디스패치 전·보고 수용 게이트 (Dispatch Preconditions)
+
+reference를 읽지 않아도 성립해야 하는 게이트 세 개다. 발동 시점만 여기 두고, 각 계약의 단일 출처는 지목된 reference다.
+
+- **implementer dispatch 전 — 설계 승인 마커 확인**: 마커가 없으면 dispatch하지 않고 설계 단계로 회귀한다 (`references/architect-council.md §설계 승인 마커`).
+- **테스트 작성이 포함된 구현 dispatch 전 — 테스트 인프라 발견**: 레포의 테스트 러너·픽스처·하네스·유사 기존 테스트가 file:line으로 인용되기 전에는 테스트 작성 단계에 진입시키지 않는다 (`references/delegation-patterns.md §테스트 인프라 발견`).
+- **sub-agent 보고 수용 전 — 증거 계약 확인**: 증거 없는 claim은 수용하지 않고 재디스패치하며, 부재 주장(negative claim)은 교차 검증 후에만 수용한다 (`references/delegation-patterns.md §증거 계약`).
+
 ### 작업 케이스마다 검토 에이전트·QA 에이전트는 필수 (Review & QA Gate)
 
 코드를 바꾸는 각 작업(work case)은 구현이 끝나면 머지 전에 전용 게이트 에이전트를 **반드시** 거친다 — Task 분리가 핵심 룰인 것과 동급의 필수 규칙이다. 게이트가 references에 묻혀 누락되지 않도록, **적용 여부**만 본문에 항상 로드되는 규칙으로 둔다.

@@ -48,7 +48,7 @@ version: 1.0.0
 
 모든 가지가 해소되면(또는 사용자가 충분하다고 하면) 합의된 결정 목록을 요약한다. 그다음 필요에 따라:
 
-- **코드 변경**: Plan Mode 로 *어떻게* 바꿀지 구현 계획을 세우거나, 작업이 여러 갈래로 나뉘면 `orchestrator` 로 위임한다.
+- **코드 변경**: Plan Mode 로 *어떻게* 바꿀지 구현 계획을 세우거나, 작업이 여러 갈래로 나뉘면 `orchestrator` 로 위임한다. 이때 합의된 결정 목록이 orchestrator 의 **설계 승인 마커** 입력이 된다 — orchestrator 는 마커 없이 구현 에이전트를 dispatch 하지 않는다 (계약: orchestrator `references/architect-council.md §설계 승인 마커`).
 - **장기 스펙 문서**: `spec-write` 로 정해진 구조(DESIGN/concerns/flows)에 맞춰 형식화한다.
 
 ## 책임 경계
