@@ -62,7 +62,7 @@ CMP=$?
 set -e
 
 if [[ "$CMP" -eq 2 ]]; then
-  echo "atelier CLI 업데이트 필요: v${INSTALLED_VERSION} → v${PLUGIN_VERSION}. /atelier:setup 또는 bash ${PLUGIN_ROOT}/scripts/ensure-binary.sh 를 실행하세요."
+  echo "atelier CLI 업데이트 필요: v${INSTALLED_VERSION} → v${PLUGIN_VERSION}. /atelier:update 를 실행하세요."
 fi
 
 exit 0
