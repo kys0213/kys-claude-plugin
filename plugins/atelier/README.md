@@ -56,9 +56,16 @@ capability 슬래시(commit-and-pr, prioritize-issues, hook-config, scaffold-con
 atelier는 단일 Rust crate(`cli/`)로 빌드되며, 바이너리 `atelier` 하나가 subcommand로 라우팅합니다.
 
 ```
+atelier drift <check|sync>                # setup 이 복사한 산출물의 드리프트 판정/갱신 (shell 스크립트 → Rust 포팅)
 atelier git <reviews|guard|hook>          # git-utils 의 기계적 호출 표면 (TypeScript → Rust 포팅)
 atelier session <baseline|simplify-check> # 세션 경계 인식 hook (SessionStart / Stop)
 ```
+
+`drift` 는 `/atelier:update`·`/atelier:setup` 명세가 호출하는 결정적 도구입니다.
+`check` 는 CLAUDE.md `[coding-style]` 블록과 `.claude/rules` 복사본을 플러그인 원본과
+비교해 `<check>=<STATUS>` 라인으로 보고하고 (exit 0 무드리프트 / 1 드리프트 / 2 오류),
+`sync --target <claude-md|rules>` 는 백업(`<file>.bak-<timestamp>`) 후 해당 산출물만
+원본으로 갱신합니다 — 신규 설치는 하지 않습니다 (setup 담당).
 
 `session` 은 "이 세션이 무엇을 바꿨는가"를 판정합니다. SessionStart 에 저장소 상태
 (HEAD + dirty 목록)를 `${TMPDIR:-/tmp}/atelier-sessions/<session_id>.json` 에 기록하고
