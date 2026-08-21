@@ -47,10 +47,10 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 
 선택된 모듈만 아래 해당 Step 을 수행합니다.
 
-> 이미 설치된 환경이라면 모듈 선택 전에 복사형 산출물 현황을 먼저 확인할 수 있습니다 (read-only):
+> 이미 설치된 환경이라면 모듈 선택 전에 복사형 산출물 현황을 먼저 확인할 수 있습니다 (read-only — CLI 설치가 전제이며, Step 0 이 이를 보장합니다):
 >
 > ```bash
-> bash "${CLAUDE_PLUGIN_ROOT}/scripts/check-drift.sh" --project-dir "${CLAUDE_PROJECT_DIR:-.}"
+> atelier drift check --plugin-root "${CLAUDE_PLUGIN_ROOT}" --project-dir "${CLAUDE_PROJECT_DIR:-.}"
 > ```
 >
 > `DRIFTED` 로 보고된 산출물의 모듈(`style` → CLAUDE.md 블록, `workflow` → rules 복사본)만 다시 선택하면 됩니다.

@@ -9,7 +9,7 @@ use clap::Parser;
 #[command(
     name = "atelier",
     version,
-    about = "Unified development workflow CLI (git, session)"
+    about = "Unified development workflow CLI (drift, git, session)"
 )]
 pub struct AtelierCli {
     #[command(subcommand)]
@@ -18,6 +18,13 @@ pub struct AtelierCli {
 
 #[derive(clap::Subcommand)]
 pub enum AtelierCommand {
+    /// Setup-copied artifact drift judgement and re-sync
+    #[command(disable_help_flag = true)]
+    Drift {
+        /// Arguments forwarded verbatim to the drift subsystem
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// git-utils workflow automation CLI
     #[command(disable_help_flag = true)]
     Git {
@@ -40,6 +47,10 @@ pub enum AtelierCommand {
 pub fn run() -> i32 {
     let cli = AtelierCli::parse();
     match cli.command {
+        AtelierCommand::Drift { args } => {
+            let argv = std::iter::once("drift".to_string()).chain(args);
+            crate::drift::run_from(argv)
+        }
         AtelierCommand::Git { args } => {
             let argv = std::iter::once("git".to_string()).chain(args);
             crate::git::run_from(argv)
