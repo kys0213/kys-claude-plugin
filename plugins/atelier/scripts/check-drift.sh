@@ -30,8 +30,10 @@ EOF
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-TEMPLATE_CLAUDE_MD="$PLUGIN_DIR/templates/claude-md/CLAUDE.md"
-TEMPLATE_RULES="$PLUGIN_DIR/rules/agent-design-principles.md"
+# shellcheck source=drift-common.sh
+. "$SCRIPT_DIR/drift-common.sh"
+TEMPLATE_CLAUDE_MD="$PLUGIN_DIR/$TEMPLATE_CLAUDE_MD_REL"
+TEMPLATE_RULES="$PLUGIN_DIR/$TEMPLATE_RULES_REL"
 USER_CLAUDE_MD="$HOME/.claude/CLAUDE.md"
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
 
@@ -87,13 +89,19 @@ report() {
 # --- 2. CLAUDE.md [coding-style] 블록 판정 ---
 # 템플릿 파일 자체가 begin/end 마커를 포함하므로, 사용자 CLAUDE.md 에서
 # 마커 구간(마커 라인 포함)을 추출해 템플릿 전문과 그대로 diff 한다.
-# 마커는 전체 라인으로 매칭한다 — 본문 다른 곳의 부분 문자열 언급에 오반응하지 않도록.
-BEGIN_MARKER='<!-- [coding-style:begin] DO NOT REMOVE THIS LINE -->'
-END_MARKER='<!-- [coding-style:end] DO NOT REMOVE THIS LINE -->'
 CLAUDE_MD_CHECK="claude-md-coding-style-block"
 
 has_marker() {
   grep -qxF "$1" "$USER_CLAUDE_MD"
+}
+
+# 마커 라인(전체 라인 일치) 포함 구간 추출 — sync-artifact.sh 와 동일 기준
+extract_block() {
+  awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
+    $0 == begin { inblock = 1 }
+    inblock { print }
+    $0 == end { inblock = 0 }
+  ' "$USER_CLAUDE_MD"
 }
 
 if [ ! -f "$USER_CLAUDE_MD" ]; then
@@ -104,7 +112,7 @@ elif ! has_marker "$BEGIN_MARKER"; then
   report "$CLAUDE_MD_CHECK" DRIFTED "(begin marker missing)"
 elif ! has_marker "$END_MARKER"; then
   report "$CLAUDE_MD_CHECK" DRIFTED "(end marker missing)"
-elif diff -q <(sed -n '/^<!-- \[coding-style:begin\] DO NOT REMOVE THIS LINE -->$/,/^<!-- \[coding-style:end\] DO NOT REMOVE THIS LINE -->$/p' "$USER_CLAUDE_MD") "$TEMPLATE_CLAUDE_MD" > /dev/null; then
+elif diff -q <(extract_block) "$TEMPLATE_CLAUDE_MD" > /dev/null; then
   report "$CLAUDE_MD_CHECK" OK
 else
   report "$CLAUDE_MD_CHECK" DRIFTED "($USER_CLAUDE_MD)"
@@ -113,7 +121,7 @@ fi
 # --- 3. .claude/rules 복사본 판정 ---
 # setup Step 2b 는 "내용 수정 없이 그대로" 복사하므로 byte-identical 이 계약이다.
 RULES_CHECK="rules/agent-design-principles.md"
-RULES_COPY="$PROJECT_DIR/.claude/rules/agent-design-principles.md"
+RULES_COPY="$PROJECT_DIR/$RULES_COPY_REL"
 if [ ! -f "$RULES_COPY" ]; then
   report "$RULES_CHECK" NOT_INSTALLED "($RULES_COPY)"
 elif diff -q "$RULES_COPY" "$TEMPLATE_RULES" > /dev/null; then
