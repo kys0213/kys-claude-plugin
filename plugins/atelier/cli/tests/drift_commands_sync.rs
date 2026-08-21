@@ -26,7 +26,7 @@ fn sync_claude_md_replaces_block_and_preserves_user_lines() {
     let backup = format!("{USER_CLAUDE_MD}.bak-{TS}");
     assert_eq!(
         line,
-        format!("synced: coding-style block in {USER_CLAUDE_MD} (backup: {backup})")
+        format!("synced: coding-style block in {USER_CLAUDE_MD} (backup: {backup})\n")
     );
     assert_eq!(
         fs.content(USER_CLAUDE_MD).unwrap(),
@@ -59,7 +59,7 @@ fn sync_rules_overwrites_copy_and_backs_up() {
 
     let line = run(&fs, SyncTarget::Rules).unwrap();
     let backup = format!("{RULES_COPY}.bak-{TS}");
-    assert_eq!(line, format!("synced: {RULES_COPY} (backup: {backup})"));
+    assert_eq!(line, format!("synced: {RULES_COPY} (backup: {backup})\n"));
     assert_eq!(fs.content(RULES_COPY).unwrap(), RULES_BODY);
     assert_eq!(
         fs.writes.borrow()[0],

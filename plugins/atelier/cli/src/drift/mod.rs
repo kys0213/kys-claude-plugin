@@ -30,7 +30,8 @@ pub mod core;
 use crate::drift::commands::DriftDeps;
 use crate::drift::core::artifact::{create_artifact_fs, create_backup_clock};
 use crate::drift::core::types::{DriftPaths, SyncTarget};
-use clap::{Parser, Subcommand};
+use crate::shared::process::default_project_dir;
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
@@ -47,53 +48,52 @@ pub struct Cli {
 pub enum Commands {
     /// Report per-artifact drift status (read-only)
     Check {
-        /// Plugin root holding the source template and rules files
-        #[arg(long = "plugin-root")]
-        plugin_root: String,
-        /// User CLAUDE.md path (default: $HOME/.claude/CLAUDE.md)
-        #[arg(long = "claude-md")]
-        claude_md: Option<String>,
-        /// Project root the rules copy lives under (default: ".")
-        #[arg(long = "project-dir")]
-        project_dir: Option<String>,
+        #[command(flatten)]
+        args: PathArgs,
     },
     /// Update one installed copy from its plugin source (never installs)
     Sync {
         /// Which installed copy to update
         #[arg(long = "target", value_enum)]
         target: SyncTarget,
-        /// Plugin root holding the source template and rules files
-        #[arg(long = "plugin-root")]
-        plugin_root: String,
-        /// User CLAUDE.md path (default: $HOME/.claude/CLAUDE.md)
-        #[arg(long = "claude-md")]
-        claude_md: Option<String>,
-        /// Project root the rules copy lives under (default: ".")
-        #[arg(long = "project-dir")]
-        project_dir: Option<String>,
+        #[command(flatten)]
+        args: PathArgs,
     },
 }
 
-/// Resolves the flag trio into concrete paths — the only place defaults (and
-/// therefore the environment) are consulted; the commands take resolved paths.
-fn resolve_paths(
+/// The flag trio every drift command shares.
+#[derive(Args)]
+pub struct PathArgs {
+    /// Plugin root holding the source template and rules files
+    #[arg(long = "plugin-root")]
     plugin_root: String,
+    /// User CLAUDE.md path (default: $HOME/.claude/CLAUDE.md)
+    #[arg(long = "claude-md")]
     claude_md: Option<String>,
+    /// Project root the rules copy lives under (default: the process cwd)
+    #[arg(long = "project-dir")]
     project_dir: Option<String>,
-) -> Result<DriftPaths, String> {
-    let claude_md = match claude_md {
-        Some(path) => path,
-        None => {
-            let home = std::env::var("HOME")
-                .map_err(|_| "HOME is not set — pass --claude-md explicitly".to_string())?;
-            format!("{home}/.claude/CLAUDE.md")
-        }
-    };
-    Ok(DriftPaths {
-        plugin_root,
-        claude_md,
-        project_dir: project_dir.unwrap_or_else(|| ".".to_string()),
-    })
+}
+
+impl PathArgs {
+    /// Resolves the flags into concrete paths — the only place defaults (and
+    /// therefore the environment) are consulted; the commands take resolved
+    /// paths.
+    fn resolve(self) -> Result<DriftPaths, String> {
+        let claude_md = match self.claude_md {
+            Some(path) => path,
+            None => {
+                let home = std::env::var("HOME")
+                    .map_err(|_| "HOME is not set — pass --claude-md explicitly".to_string())?;
+                format!("{home}/.claude/CLAUDE.md")
+            }
+        };
+        Ok(DriftPaths {
+            plugin_root: self.plugin_root,
+            claude_md,
+            project_dir: default_project_dir(self.project_dir),
+        })
+    }
 }
 
 /// The error edge: every failure is `Error: <message>` on stderr with exit 2,
@@ -113,17 +113,6 @@ where
     run(Cli::parse_from(argv))
 }
 
-/// Binds the real filesystem and clock, then hands the command its deps.
-fn with_deps(command: impl FnOnce(&DriftDeps) -> i32) -> i32 {
-    let fs = create_artifact_fs();
-    let clock = create_backup_clock();
-    let deps = DriftDeps {
-        fs: &fs,
-        clock: &clock,
-    };
-    command(&deps)
-}
-
 /// Runs a parsed drift CLI, returning a process exit code. The subsystem's
 /// only stdout render site — commands return values, never print.
 pub fn run(cli: Cli) -> i32 {
@@ -137,41 +126,34 @@ pub fn run(cli: Cli) -> i32 {
         }
     };
 
-    match command {
-        Commands::Check {
-            plugin_root,
-            claude_md,
-            project_dir,
-        } => {
-            let paths = match resolve_paths(plugin_root, claude_md, project_dir) {
-                Ok(paths) => paths,
+    let fs = create_artifact_fs();
+    let clock = create_backup_clock();
+    let deps = DriftDeps {
+        fs: &fs,
+        clock: &clock,
+    };
+    // Both arms share the resolve → run → render pipeline; only the rendered
+    // text and the exit code differ (check's 0/1 split lives on the report).
+    let (rendered, code) = match command {
+        Commands::Check { args } => {
+            match args
+                .resolve()
+                .and_then(|paths| commands::check::run(&deps, &paths))
+            {
+                Ok(report) => (report.render(), report.exit_code()),
                 Err(e) => return fail(&e),
-            };
-            with_deps(|deps| match commands::check::run(deps, &paths) {
-                Ok(report) => {
-                    print!("{}", report.render());
-                    report.exit_code()
-                }
-                Err(e) => fail(&e),
-            })
+            }
         }
-        Commands::Sync {
-            target,
-            plugin_root,
-            claude_md,
-            project_dir,
-        } => {
-            let paths = match resolve_paths(plugin_root, claude_md, project_dir) {
-                Ok(paths) => paths,
+        Commands::Sync { target, args } => {
+            match args
+                .resolve()
+                .and_then(|paths| commands::sync::run(&deps, &paths, target))
+            {
+                Ok(report) => (report.render(), 0),
                 Err(e) => return fail(&e),
-            };
-            with_deps(|deps| match commands::sync::run(deps, &paths, target) {
-                Ok(report) => {
-                    println!("{}", report.render());
-                    0
-                }
-                Err(e) => fail(&e),
-            })
+            }
         }
-    }
+    };
+    print!("{rendered}");
+    code
 }

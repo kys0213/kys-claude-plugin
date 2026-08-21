@@ -2,72 +2,68 @@
 //! the shell-compatible exit-code contract (0 no drift / 1 drift / 2 error),
 //! exercised against the real binary with TempDir fixtures.
 
+mod drift_mocks;
+
 use assert_cmd::Command;
+use atelier::drift::core::types::{RULES_COPY_REL, TEMPLATE_CLAUDE_MD_REL, TEMPLATE_RULES_REL};
+use drift_mocks::{block, RULES_BODY};
 use predicates::prelude::*;
 use std::path::Path;
-
-const BEGIN: &str = "<!-- [coding-style:begin] DO NOT REMOVE THIS LINE -->";
-const END: &str = "<!-- [coding-style:end] DO NOT REMOVE THIS LINE -->";
-const RULES_BODY: &str = "# Agent design principles\n";
 
 fn atelier() -> Command {
     Command::cargo_bin("atelier").expect("locate `atelier` cargo binary")
 }
 
-fn write(path: &Path, content: &str) {
+fn write(path: &str, content: &str) {
+    let path = Path::new(path);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, content).unwrap();
 }
 
-fn block(body: &str) -> String {
-    format!("{BEGIN}\n{body}\n{END}\n")
-}
-
-/// Builds a plugin root with both source files; the template block body is
-/// `tpl_body`. Returns (plugin_root, claude_md, project_dir) paths as strings.
+/// A TempDir holding a plugin root (both source files, template block body
+/// `tpl_body`), plus a fake user CLAUDE.md location and a project dir that
+/// `install` populates.
 struct Fixture {
     tmp: tempfile::TempDir,
 }
 
 impl Fixture {
     fn new(tpl_body: &str) -> Self {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let root = tmp.path().join("plugin");
+        let fx = Fixture {
+            tmp: tempfile::TempDir::new().unwrap(),
+        };
         write(
-            &root.join("templates/claude-md/CLAUDE.md"),
+            &fx.at(&format!("plugin/{TEMPLATE_CLAUDE_MD_REL}")),
             &block(tpl_body),
         );
-        write(&root.join("rules/agent-design-principles.md"), RULES_BODY);
-        Fixture { tmp }
+        write(&fx.at(&format!("plugin/{TEMPLATE_RULES_REL}")), RULES_BODY);
+        fx
+    }
+
+    /// Absolute path of `rel` inside the fixture's TempDir.
+    fn at(&self, rel: &str) -> String {
+        self.tmp.path().join(rel).to_str().unwrap().to_string()
     }
 
     fn plugin_root(&self) -> String {
-        self.tmp.path().join("plugin").to_str().unwrap().to_string()
+        self.at("plugin")
     }
 
     fn claude_md(&self) -> String {
-        self.tmp
-            .path()
-            .join("home/.claude/CLAUDE.md")
-            .to_str()
-            .unwrap()
-            .to_string()
+        self.at("home/.claude/CLAUDE.md")
     }
 
     fn project_dir(&self) -> String {
-        self.tmp.path().join("proj").to_str().unwrap().to_string()
+        self.at("proj")
     }
 
     fn install(&self, claude_md_body: &str) {
         write(
-            &self.tmp.path().join("home/.claude/CLAUDE.md"),
+            &self.claude_md(),
             &format!("# mine\n{}tail\n", block(claude_md_body)),
         );
         write(
-            &self
-                .tmp
-                .path()
-                .join("proj/.claude/rules/agent-design-principles.md"),
+            &format!("{}/{RULES_COPY_REL}", self.project_dir()),
             RULES_BODY,
         );
     }
@@ -146,7 +142,7 @@ fn drift_sync_then_check_roundtrip() {
         .stdout(predicate::str::contains("synced: coding-style block in"));
     fx.check().assert().success();
 
-    let backups: Vec<_> = std::fs::read_dir(fx.tmp.path().join("home/.claude"))
+    let backups: Vec<_> = std::fs::read_dir(fx.at("home/.claude"))
         .unwrap()
         .filter_map(|e| e.ok())
         .filter(|e| {

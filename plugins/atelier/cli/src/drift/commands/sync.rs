@@ -9,7 +9,7 @@
 
 use crate::drift::commands::{read_source, DriftDeps};
 use crate::drift::core::types::{
-    ArtifactContent, DriftPaths, SyncReport, SyncTarget, BEGIN_MARKER, END_MARKER,
+    scan_markers, ArtifactContent, DriftPaths, SyncReport, SyncTarget,
 };
 
 /// Routes the target to its sync routine.
@@ -40,16 +40,6 @@ fn read_target(deps: &DriftDeps, path: &str) -> Result<String, String> {
     }
 }
 
-/// Whole-line marker positions, in order of appearance.
-fn marker_positions(lines: &[&str], marker: &str) -> Vec<usize> {
-    lines
-        .iter()
-        .enumerate()
-        .filter(|(_, line)| **line == marker)
-        .map(|(idx, _)| idx)
-        .collect()
-}
-
 fn sync_claude_md(deps: &DriftDeps, paths: &DriftPaths) -> Result<SyncReport, String> {
     let template_path = paths.template_claude_md();
     if !deps.fs.exists(&template_path) {
@@ -73,27 +63,29 @@ fn sync_claude_md(deps: &DriftDeps, paths: &DriftPaths) -> Result<SyncReport, St
         ));
     }
     let lines: Vec<&str> = content.lines().collect();
-    let begins = marker_positions(&lines, BEGIN_MARKER);
-    let ends = marker_positions(&lines, END_MARKER);
+    let scan = scan_markers(&lines);
     // The range replacement is only safe against exactly one well-ordered
     // marker pair — forcing it through duplicated or reversed markers would
     // destroy user content outside the block.
-    let (begin_idx, end_idx) = match (begins.len(), ends.len()) {
-        (0, 0) => {
+    let (begin_idx, end_idx) = match (scan.begin, scan.end) {
+        (None, None) => {
             return Err(format!(
                 "coding-style block not installed in {user_path} — run /atelier:setup"
             ))
         }
-        (0, _) | (_, 0) => {
+        (None, Some(_)) | (Some(_), None) => {
             return Err(format!(
                 "broken coding-style block in {user_path} (one marker missing) — run /atelier:setup to reinstall"
             ))
         }
-        (1, 1) => (begins[0], ends[0]),
-        (begin_count, end_count) => {
-            return Err(format!(
-                "broken coding-style block in {user_path} (markers duplicated: begin={begin_count}, end={end_count}) — run /atelier:setup to reinstall"
-            ))
+        (Some(begin), Some(end)) => {
+            if scan.begin_count != 1 || scan.end_count != 1 {
+                return Err(format!(
+                    "broken coding-style block in {user_path} (markers duplicated: begin={}, end={}) — run /atelier:setup to reinstall",
+                    scan.begin_count, scan.end_count
+                ));
+            }
+            (begin, end)
         }
     };
     if begin_idx >= end_idx {
@@ -106,13 +98,24 @@ fn sync_claude_md(deps: &DriftDeps, paths: &DriftPaths) -> Result<SyncReport, St
     let backup_path = backup(deps, user_path, &content)?;
 
     // Replace the marker range (inclusive) with the full template line
-    // sequence — the template carries both markers itself.
-    let mut merged: Vec<&str> = Vec::new();
-    merged.extend(&lines[..begin_idx]);
-    merged.extend(template.lines());
-    merged.extend(&lines[end_idx + 1..]);
-    let mut new_content = merged.join("\n");
-    new_content.push('\n');
+    // sequence — the template carries both markers itself. Every line gets a
+    // trailing '\n' (join-plus-final-newline semantics).
+    let mut new_content = String::with_capacity(content.len() + template.len());
+    let merged = lines[..begin_idx]
+        .iter()
+        .copied()
+        .chain(template.lines())
+        .chain(lines[end_idx + 1..].iter().copied());
+    for line in merged {
+        new_content.push_str(line);
+        new_content.push('\n');
+    }
+    // Faithful to the previous `join("\n")` + `push('\n')`: an all-empty
+    // merge (empty template, block spanning the whole file) still writes a
+    // single newline.
+    if new_content.is_empty() {
+        new_content.push('\n');
+    }
     deps.fs.write(user_path, &new_content)?;
 
     Ok(SyncReport {

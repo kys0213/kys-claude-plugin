@@ -24,6 +24,43 @@ pub const RULES_COPY_REL: &str = ".claude/rules/agent-design-principles.md";
 pub const CLAUDE_MD_CHECK: &str = "claude-md-coding-style-block";
 pub const RULES_CHECK: &str = "rules/agent-design-principles.md";
 
+/// Marker occurrences in a line sequence. One scan shared by check
+/// (judgement) and sync (range replacement), so the two sides can never
+/// disagree about where the block is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MarkerScan {
+    /// Index of the first begin/end marker line, `None` when absent.
+    pub begin: Option<usize>,
+    pub end: Option<usize>,
+    pub begin_count: usize,
+    pub end_count: usize,
+}
+
+/// Scans `lines` for the markers — whole-line equality only, so a prose
+/// mention of the marker text inside a longer line never counts.
+pub fn scan_markers(lines: &[&str]) -> MarkerScan {
+    let mut scan = MarkerScan {
+        begin: None,
+        end: None,
+        begin_count: 0,
+        end_count: 0,
+    };
+    for (idx, line) in lines.iter().enumerate() {
+        if *line == BEGIN_MARKER {
+            if scan.begin.is_none() {
+                scan.begin = Some(idx);
+            }
+            scan.begin_count += 1;
+        } else if *line == END_MARKER {
+            if scan.end.is_none() {
+                scan.end = Some(idx);
+            }
+            scan.end_count += 1;
+        }
+    }
+    scan
+}
+
 /// A decoded artifact read. `NonUtf8` is a judgement input, not an error:
 /// user-side artifacts may legitimately hold bytes the UTF-8 plugin sources
 /// can never equal, and check must report that as drift instead of dying with
@@ -120,14 +157,8 @@ impl CheckReport {
         self.findings.iter().filter(|f| f.status == status).count()
     }
 
-    pub fn checked(&self) -> usize {
-        self.findings.len()
-    }
-    pub fn drifted(&self) -> usize {
+    fn drifted(&self) -> usize {
         self.count(ArtifactStatus::Drifted)
-    }
-    pub fn missing(&self) -> usize {
-        self.count(ArtifactStatus::NotInstalled)
     }
 
     /// Shell-compatible check contract: drift found → 1, otherwise 0
@@ -151,9 +182,9 @@ impl CheckReport {
         }
         out.push_str(&format!(
             "→ {} checked, {} drifted, {} missing\n",
-            self.checked(),
+            self.findings.len(),
             self.drifted(),
-            self.missing()
+            self.count(ArtifactStatus::NotInstalled)
         ));
         out
     }
@@ -170,13 +201,15 @@ pub struct SyncReport {
 
 impl SyncReport {
     /// The `synced:` stdout line, preserving the two shell formats.
+    /// Newline-terminated like `CheckReport::render`, so the CLI edge prints
+    /// both reports the same way.
     pub fn render(&self) -> String {
         match self.target {
             SyncTarget::ClaudeMd => format!(
-                "synced: coding-style block in {} (backup: {})",
+                "synced: coding-style block in {} (backup: {})\n",
                 self.path, self.backup
             ),
-            SyncTarget::Rules => format!("synced: {} (backup: {})", self.path, self.backup),
+            SyncTarget::Rules => format!("synced: {} (backup: {})\n", self.path, self.backup),
         }
     }
 }

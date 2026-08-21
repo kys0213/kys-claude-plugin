@@ -15,8 +15,8 @@
 
 use crate::drift::commands::{read_source, DriftDeps};
 use crate::drift::core::types::{
-    ArtifactContent, ArtifactStatus, CheckFinding, CheckReport, DriftPaths, BEGIN_MARKER,
-    CLAUDE_MD_CHECK, END_MARKER, RULES_CHECK,
+    scan_markers, ArtifactContent, ArtifactStatus, CheckFinding, CheckReport, DriftPaths,
+    CLAUDE_MD_CHECK, RULES_CHECK,
 };
 
 /// Judges both artifacts against their plugin sources.
@@ -45,32 +45,6 @@ fn finding(name: &str, status: ArtifactStatus, detail: Option<&str>) -> CheckFin
     }
 }
 
-/// Marker lines are recognized by whole-line equality only, so a prose
-/// mention of the marker text never counts.
-fn has_line(content: &str, marker: &str) -> bool {
-    content.lines().any(|line| line == marker)
-}
-
-/// The marker range as a line sequence — same toggle semantics as the shell
-/// awk: start collecting at the begin line, stop after the end line, keep
-/// scanning (a second begin after the end would reopen collection).
-fn extract_block(content: &str) -> Vec<&str> {
-    let mut block = Vec::new();
-    let mut inside = false;
-    for line in content.lines() {
-        if line == BEGIN_MARKER {
-            inside = true;
-        }
-        if inside {
-            block.push(line);
-        }
-        if line == END_MARKER {
-            inside = false;
-        }
-    }
-    block
-}
-
 fn check_claude_md(
     deps: &DriftDeps,
     user_path: &str,
@@ -95,31 +69,37 @@ fn check_claude_md(
         }
         ArtifactContent::Utf8(content) => content,
     };
-    match (
-        has_line(&content, BEGIN_MARKER),
-        has_line(&content, END_MARKER),
-    ) {
+    let lines: Vec<&str> = content.lines().collect();
+    let scan = scan_markers(&lines);
+    match (scan.begin, scan.end) {
         // No trace of the block: not installed, not broken.
-        (false, false) => Ok(finding(
+        (None, None) => Ok(finding(
             CLAUDE_MD_CHECK,
             ArtifactStatus::NotInstalled,
             Some(user_path),
         )),
-        (false, true) => Ok(finding(
+        (None, Some(_)) => Ok(finding(
             CLAUDE_MD_CHECK,
             ArtifactStatus::Drifted,
             Some("begin marker missing"),
         )),
-        (true, false) => Ok(finding(
+        (Some(_), None) => Ok(finding(
             CLAUDE_MD_CHECK,
             ArtifactStatus::Drifted,
             Some("end marker missing"),
         )),
-        (true, true) => {
-            // The template file itself contains both markers, so the extracted
-            // range compares against the template's full line sequence.
+        (Some(begin), Some(end)) => {
+            // The template file itself contains both markers, so the marker
+            // range (inclusive) compares against the template's full line
+            // sequence. Duplicated or reversed markers can never equal a
+            // template holding exactly one well-ordered pair, so the count
+            // and order guards reject them as DRIFTED without a compare.
             let template = read_source(deps, template_path)?;
-            if extract_block(&content) == template.lines().collect::<Vec<_>>() {
+            let intact = scan.begin_count == 1
+                && scan.end_count == 1
+                && begin < end
+                && lines[begin..=end].iter().copied().eq(template.lines());
+            if intact {
                 Ok(finding(CLAUDE_MD_CHECK, ArtifactStatus::Ok, None))
             } else {
                 Ok(finding(
