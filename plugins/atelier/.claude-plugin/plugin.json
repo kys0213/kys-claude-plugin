@@ -15,6 +15,9 @@
   ],
   "description": "통합 개발 워크플로우 — spec/git/orchestrator/workflow 를 관심사 단위 skill 로 큐레이션한 단일 plugin",
   "name": "atelier",
+  "outputStyles": [
+    "./output-styles"
+  ],
   "skills": [
     "./skills"
   ],
