@@ -208,11 +208,21 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
 
 ### 디스패치 전·보고 수용 게이트 (Dispatch Preconditions)
 
-reference를 읽지 않아도 성립해야 하는 게이트 세 개다. 발동 시점만 여기 두고, 각 계약의 단일 출처는 지목된 reference다.
+reference를 읽지 않아도 성립해야 하는 게이트 네 개다. 발동 시점만 여기 두고, 각 계약의 단일 출처는 지목된 절이다.
 
 - **implementer dispatch 전 — 설계 승인 마커 확인**: 마커가 없으면 dispatch하지 않고 설계 단계로 회귀한다 (`references/architect-council.md §설계 승인 마커`).
 - **테스트 작성이 포함된 구현 dispatch 전 — 테스트 인프라 발견**: 레포의 테스트 러너·픽스처·하네스·유사 기존 테스트가 file:line으로 인용되기 전에는 테스트 작성 단계에 진입시키지 않는다 (`references/delegation-patterns.md §테스트 인프라 발견`).
 - **sub-agent 보고 수용 전 — 증거 계약 확인**: 증거 없는 claim은 수용하지 않고 재디스패치하며, 부재 주장(negative claim)은 교차 검증 후에만 수용한다 (`references/delegation-patterns.md §증거 계약`).
+- **조사·리서치 위임 dispatch 전 — 탐색 예산 명시**: 예산 없는 조사형 prompt는 dispatch하지 않는다 (아래 §탐색 예산이 단일 출처).
+
+### 조사·리서치 위임의 탐색 예산 (Exploration Budget)
+
+조사·리서치형 위임(코드베이스 파악, 영향 범위 분석, 방안 비교 등 read-only discovery)은 "읽기만 하고 산출물이 없는" 루프로 빠지기 쉽다. 이를 구조적으로 차단하기 위해 조사형 dispatch prompt에는 **탐색 예산**을 반드시 명시한다.
+
+- **예산 명시**: read/search류 도구 호출 횟수 상한을 prompt에 숫자로 적는다. 기본 30회 — 작업 규모에 따라 메인이 조정하고, 조정했으면 근거를 decision log에 남긴다.
+- **소진 시 중간 산출물 3종**: 예산이 소진되면 탐색을 멈추고 다음을 먼저 제출하게 한다 — (a) 발견 사항, (b) 구체 계획(파일 경로 포함), (c) 미지 항목(무엇을 더 봐야 하는지).
+- **산출물 없는 연장 금지**: 중간 산출물 제출 전에는 추가 탐색을 계속하지 않는다. 추가 예산이 필요하면 미지 항목을 근거로 메인이 재위임을 판단한다 — 금지의 출구가 재위임 요청이다 (§안티패턴 12).
+- 이 계약은 dispatch prompt에 자기완결적으로 들어가야 한다 — sub-agent는 이 문서를 읽지 않는다 (§안티패턴 3).
 
 ### 작업 케이스마다 검토 에이전트·QA 에이전트는 필수 (Review & QA Gate)
 
