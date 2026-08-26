@@ -56,17 +56,8 @@ version: 0.1.0
 
 ### 토폴로지 (무거운 경로)
 
-```
-main
-  └─ epic/<name>   ← 메인 에이전트 (read + dispatch + report)
-       ├─ worktree A → epic/<name>/t1-<slug>  (sub-agent A, base = epic/<name>)
-       ├─ worktree B → epic/<name>/t2-<slug>  (sub-agent B, base = epic/<name>)
-       └─ worktree C → epic/<name>/t3-<slug>  (sub-agent C: ...)
-```
-
-- **메인 = epic 브랜치 자체**. 절대 worktree로 들어가지 않는다.
-- **sub-agent = epic 브랜치를 base로 한 worktree**. 결과는 epic 브랜치로 머지한다 — 통합 방식은 **rebase 후 `--ff-only`** 로 고정이고, 브랜치 네이밍·머지 방식·drift 처리의 단일 출처는 `references/branch-strategy.md`다.
-- **epic 브랜치 → main 머지는 이 스킬 범위 밖** (사용자 결정 / 별도 release 절차). 반대 방향(main이 움직여 epic이 뒤처짐)은 런 안에서 처리한다 (`references/branch-strategy.md §epic ← main 역방향 drift`).
+- **메인 = epic 브랜치 자체**(worktree 진입 금지) · **sub-agent = epic base의 worktree** — 통합은 rebase 후 `--ff-only` 고정, 브랜치 네이밍·머지 방식·drift 처리의 단일 출처는 `references/branch-strategy.md`다. 다이어그램·격리 상세: `references/worktree-lifecycle.md §토폴로지`.
+- **epic → main 머지는 이 스킬 범위 밖** — 역방향 drift는 런 안에서 처리한다 (`references/branch-strategy.md §epic ← main 역방향 drift`).
 
 ### 진입 시 체크
 
@@ -99,17 +90,7 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
 - **git 레포가 아니면서 편집이 필요한 경우**는 경량 경로가 아니다 — 판정은 `references/delegation-patterns.md §경로 판정 경계 케이스`가 단일 출처다.
 - 판정 결과 + 근거를 진입 보고 1줄과 decision log에 남긴다. **생략은 판정이 아니다.**
 
-| 규칙 | 경량 | 근거 |
-|---|---|---|
-| 조율 도구 스키마 확보(체크 0) · 왕복 조율 판정(체크 4) | 유지 | 조율 경로의 공유 전제이고, 자문·협의체는 read-only다 |
-| Task 분리·상태 추적 · 응답 계약 + 보고 채널 · fan-out 복원력 · 취합 보고 | 유지 | 관리자 본업이라 편집 유무와 무관하다 (§안티패턴 13) |
-| 병렬/순차 결정 트리 | 유지(축 변경) | 충돌 축이 "파일 집합"에서 "외부 리소스·rate limit"으로 바뀐다 |
-| preflight (체크 5) | 유지·강화 | 외부 쓰기 인증이 곧 공유 의존이다 |
-| 리뷰어·QA 게이트 | 조건부 유지 | 외부 쓰기는 되돌리기 비용이 있어 **쓰기 전 검토 1회**로 축소한다 |
-| epic 브랜치 체크(체크 1) · worktree 격리(체크 2·3) | 생략 | 머지 대상도, 격리할 쓰기도 없다 |
-| 토폴로지 가드 · 머지 조정 | 생략 | 가드 불변식(branch == epic)이 성립하지 않는다 |
-
-경계 케이스(조사 리포트를 파일로 남김, 조사 → 구현 연결 등)의 판정은 `references/delegation-patterns.md §경로 판정 경계 케이스`가 단일 출처다.
+경량 경로에서 생략되는 것은 체크 1·2·3, 토폴로지 가드, 머지 조정뿐이다 — 조율·Task·게이트·preflight·복원력·취합 보고는 편집 유무와 무관하게 유지되고, 리뷰·QA는 쓰기 전 검토 1회로 축소된다. 전체 유지·생략 표와 경계 케이스 판정은 `references/delegation-patterns.md §경로 판정 경계 케이스`가 단일 출처다.
 
 ### 진입 시 체크 (이어서)
 
@@ -146,30 +127,11 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
 
    - **name 부재는 비가용이 아니다** — agentId로 같은 왕복이 성립한다. 신호의 권위·env를 안 쓰는 이유는 `references/delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다.
 
-5. **위임 파이프라인이 의존하는 공유 전제가 지금 살아 있는가?** (preflight — dispatch 시작 전 마지막 확인)
-
-   판정 기준은 하나다 — **깨졌을 때 fan-out 전체가 죽는 공유 의존인가?**
-
-   - **대상**: 이번 런의 파이프라인이 실제로 거치는 것만 확인한다 — 위임·머지 경로가 쓰는 CLI의 인증 상태, 필수 외부 서비스 도달 여부 등. **고정된 명령 목록을 따르지 않는다.** 레포마다 파이프라인 의존이 다르고 목록은 곧 stale 해진다. 무엇에 의존하는지는 이번 런의 계획에서 도출한다
-   - **방법**: read-only 확인만 한다. 상태를 바꾸는 행위(로그인 시도, 토큰 갱신, 리소스 생성)는 preflight가 아니다
-   - **대상이 아닌 것**: 작업 하나만 죽이는 의존. 그건 재위임·게이트 경로가 처리한다 (§병렬 fan-out 복원력). 여기까지 넓히면 진입만 무거워지고 정작 공유 전제는 묻힌다
-   - **실패 시**: dispatch를 **시작하지 않는다.** 무엇을 확인하다 실패했는지 + 해제 방법(예: 로그인 명령)을 함께 즉시 보고한다
-   - 위 **체크 0이 이 판정의 한 사례다** — `SendMessage` 스키마가 없으면 조율 경로 전체가 죽으므로 공유 전제이고, 그래서 다른 모든 체크보다 먼저 온다
-   - 진입에서 확인하는 이유: 이 부류의 실패는 dispatch 뒤에 드러나면 **이미 진행한 작업까지 함께 잃는다.** 같은 확인이 런 시작 시점에는 가장 싸다
+5. **위임 파이프라인이 의존하는 공유 전제가 살아 있는가?** (preflight — dispatch 전 마지막 확인) — 판정 기준은 하나다: 깨졌을 때 fan-out 전체가 죽는 공유 의존인가. read-only 확인만 하고, 실패 시 dispatch를 시작하지 않고 해제 방법과 함께 즉시 보고한다. 대상 도출·경계는 `references/delegation-patterns.md §공유 전제 preflight`가 단일 출처다.
 
 ### 경로 전환 (경량 → 무거운)
 
-```
-전환 트리거: 계획에 없던 tracked 파일 편집이 필요해진 순간
-  1. 편집 dispatch를 시작하지 않는다 (선-dispatch 후-체크 금지)
-  2. 생략했던 체크 1·2·3을 지금 실행한다 (late gate)
-       비-git이면 → delegation-patterns.md §경로 판정 경계 케이스
-  3. 기존 Task는 그대로 유지한다 — 재분해하지 않는다
-  4. decision log에 `경로 전환` + 전환 사유 + 전환 시점을 남긴다
-  5. 이후 dispatch는 전부 무거운 경로 규칙 (토폴로지 가드 재개)
-```
-
-**역방향(무거운 → 경량) 전환은 없다.** 브랜치가 이미 있으면 계속 쓴다 — 되돌려서 얻을 것이 없고, 만들어 둔 머지 경로만 잃는다.
+전환 트리거: 계획에 없던 tracked 파일 편집이 필요해진 순간 — 편집 dispatch를 시작하기 전에 생략했던 체크 1·2·3을 late gate로 실행한다. 5단계 절차·기록 규칙은 `references/delegation-patterns.md §경로 전환`이 단일 출처다. **역방향(무거운 → 경량) 전환은 없다.**
 
 ---
 
@@ -190,7 +152,7 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
 8. 보고 (Report)            → 사용자에게 결과 요약
 ```
 
-각 단계의 상세 패턴은 아래 references에 있다. **경로별 차이(어느 단계가 유지·축소·생략되는지)는 §경로 판정 게이트의 유지·생략 표가 단일 출처다.**
+각 단계의 상세 패턴은 아래 references에 있다. **경로별 차이는 §경로 판정 게이트의 요지와 `references/delegation-patterns.md §경로 판정 경계 케이스`의 유지·생략 표를 따른다.**
 
 ### 일감을 Task로 분리·관리하는 것은 메인의 핵심 룰
 
@@ -210,17 +172,8 @@ reference를 읽지 않아도 성립해야 하는 게이트 다섯 개다. 발�
 - **implementer dispatch 전 — 설계 승인 마커 확인**: 마커가 없으면 dispatch하지 않고 설계 단계로 회귀한다 (`references/architect-council.md §설계 승인 마커`).
 - **테스트 작성이 포함된 구현 dispatch 전 — 테스트 인프라 발견**: 레포의 테스트 러너·픽스처·하네스·유사 기존 테스트가 file:line으로 인용되기 전에는 테스트 작성 단계에 진입시키지 않는다 (`references/delegation-patterns.md §테스트 인프라 발견`).
 - **sub-agent 보고 수용 전 — 증거 계약 확인**: 증거 없는 claim은 수용하지 않고 재디스패치하며, 부재 주장(negative claim)은 교차 검증 후에만 수용한다 (`references/delegation-patterns.md §증거 계약`).
-- **조사·리서치 위임 dispatch 전 — 탐색 예산 명시**: 예산 없는 조사형 prompt는 dispatch하지 않는다 (아래 §탐색 예산이 단일 출처).
+- **조사·리서치 위임 dispatch 전 — 탐색 예산 명시**: 예산 없는 조사형 prompt는 dispatch하지 않는다 (`references/delegation-patterns.md §탐색 예산`이 단일 출처).
 - **dispatch 시·보고 수용 시 — 기대 완료 시간과 중복·idle 판정**: 기대 완료 시간 없이 dispatch하지 않는다. 동일 내용의 재전송 보고는 첫 수신만 취합하고, 기대 시간을 넘긴 무보고 agent는 대기 연장이 아니라 취소 후 폴백·재위임으로 회부한다 (`references/agent-monitor.md §중복 보고 감지`·`§idle 판정`).
-
-### 조사·리서치 위임의 탐색 예산 (Exploration Budget)
-
-조사·리서치형 위임(코드베이스 파악, 영향 범위 분석, 방안 비교 등 read-only discovery)은 "읽기만 하고 산출물이 없는" 루프로 빠지기 쉽다. 이를 구조적으로 차단하기 위해 조사형 dispatch prompt에는 **탐색 예산**을 반드시 명시한다.
-
-- **예산 명시**: read/search류 도구 호출 횟수 상한을 prompt에 숫자로 적는다. 기본 30회 — 작업 규모에 따라 메인이 조정하고, 조정했으면 근거를 decision log에 남긴다.
-- **소진 시 중간 산출물 3종**: 예산이 소진되면 탐색을 멈추고 다음을 먼저 제출하게 한다 — (a) 발견 사항, (b) 구체 계획(파일 경로 포함), (c) 미지 항목(무엇을 더 봐야 하는지).
-- **산출물 없는 연장 금지**: 중간 산출물 제출 전에는 추가 탐색을 계속하지 않는다. 추가 예산이 필요하면 미지 항목을 근거로 메인이 재위임을 판단한다 — 금지의 출구가 재위임 요청이다 (§안티패턴 12).
-- 이 계약은 dispatch prompt에 자기완결적으로 들어가야 한다 — sub-agent는 이 문서를 읽지 않는다 (§안티패턴 3).
 
 ### 작업 케이스마다 검토 에이전트·QA 에이전트는 필수 (Review & QA Gate)
 
@@ -232,7 +185,6 @@ reference를 읽지 않아도 성립해야 하는 게이트 다섯 개다. 발�
 - QA의 테스트 추가도 편집이므로 **`isolation:"worktree"` subagent로 위임**한다 (메인은 직접 편집하지 않는다 — *사고 모드*).
 - 게이트 역할의 tier는 아래 §모델 라우팅에 따라 dispatch 시점에 정한다 — 자동 머지의 유일한 안전장치라 보통 더 높은 역량을 둘 가치가 있다.
 - 예외는 Task 룰과 동일하게 **단발 1회·read-only 작업만**이다.
-- 경로별 차이는 §경로 판정 게이트의 유지·생략 표를 따른다.
 
 역할별 입력·검증 질문·출력 계약, DB 접촉 판정, 게이트 거부의 재위임 예산·기록 등 세부 규칙은 `references/autonomous-driving.md §리뷰어·QA 게이트`가 단일 출처다. spec 문서를 입력으로 구현하는 경우만 `references/spec-driven-review.md`(검토자=spec↔구현, QA 매니저=spec↔테스트)로 특수화된다.
 
@@ -259,39 +211,14 @@ reference를 읽지 않아도 성립해야 하는 게이트 다섯 개다. 발�
 
 ---
 
-## 병렬 vs 순차 결정 트리
+## 병렬 vs 순차 판정 (요지)
 
-오케스트레이터의 가장 중요한 판단. **머지 시 충돌이 가장 적고 안정적인 쪽**을 선택한다.
-
-```
-작업 A, B의 변경 파일 집합을 식별
-  │
-  ├─ disjoint (겹치는 파일 없음)
-  │    └─ 의존성 없음? → 병렬 (각자 worktree-isolated agent)
-  │       의존성 있음? → 순차 (A 결과 → B 입력)
-  │
-  └─ overlap (같은 파일 수정)
-       ├─ 겹치는 파일이 전부 hot-spot? → 병렬 유지 + hot-spot을 통합 task로 분리
-       │                                  (`references/branch-strategy.md §hot-spot 파일`)
-       └─ 그 외
-            같은 라인 영역 가능성? → 순차 (단일 worktree에서 직렬)
-            명확히 다른 영역? → 순차 권장 (안전), 병렬은 경험상 안전한 경우만
-```
-
-판단 근거:
-- **병렬의 이득**: 시간 단축, 독립 컨텍스트
-- **병렬의 비용**: 머지 시 충돌 → 사람 개입 필요
-- **기본 규칙**: 의심스러우면 순차. 병렬은 disjoint가 명백할 때만.
-
-경로별 차이(경량에서 disjoint 판정 축이 무엇으로 바뀌는지)는 §경로 판정 게이트의 유지·생략 표를 따른다. 축이 바뀌어도 규칙은 같다: 의심스러우면 순차다 — 단, 이는 충돌 비용이 있는 작업의 규칙이다 (read-only 조사·감사는 아래 §조사·감사 작업의 기본값은 병렬 fan-out).
+- disjoint + 의존성 없음 → 병렬. overlap 또는 의심스러우면 → 순차 — 단, 겹침이 전부 hot-spot이면 병렬 유지 + 통합 task 분리 (`references/branch-strategy.md §hot-spot 파일`).
+- 전체 결정 트리·경량 경로의 충돌 축(외부 리소스·rate limit)은 `references/delegation-patterns.md §병렬 vs 순차 결정 트리`가 단일 출처다.
 
 ### 조사·감사 작업의 기본값은 병렬 fan-out
 
-위 트리의 "의심스러우면 순차"는 **충돌 비용** 때문에 있는 규칙이다. read-only 조사·감사·원인분석은 대개 충돌 축(파일 집합·외부 리소스)에 걸리는 것이 없고, 그렇다고 판정되면 기본값이 뒤집힌다 — **첫 행동이 관점별 병렬 fan-out이다.** 충돌 대상이 없는 조사를 순차로 시작할 근거로 "의심스러우면 순차"를 끌어오지 않는다.
-
-- 조사 요청을 받으면 메인이 순차 Bash/Read 탐색으로 조사를 시작하지 않는다 (§메인 에이전트가 해도 되는 일의 "결정적 사실 확인"은 조사 착수가 아니다). 관점(모듈·레이어·가설·이력 등)으로 분해해 N개 agent를 동시에 dispatch한다 — 관점 수는 메인이 정하되 특별한 근거가 없으면 3개 이상으로 하고, 근거를 decision log에 남긴다.
-- 각 조사 agent의 prompt에 §탐색 예산을 명시한다 (§디스패치 전·보고 수용 게이트).
-- 출구: 1턴 단발 조회(§When to use의 "트리거하면 안 되는 상황")는 fan-out 대상이 아니다. 관점이 정말 하나뿐이라 단일 agent로 충분하면 그 판정을 decision log에 남기고 진행한다 — 기록 없는 순차 시작은 판정이 아니라 관성이다.
+read-only 조사·감사·원인분석은 충돌 비용이 없어 "의심스러우면 순차"가 적용되지 않는다 — **첫 행동이 관점별 병렬 fan-out**(특별한 근거 없으면 3관점 이상)이고, 메인이 순차 Bash/Read 탐색으로 조사를 시작하지 않는다. 각 조사 prompt에 탐색 예산을 명시한다(§디스패치 전·보고 수용 게이트). 출구 판정(1턴 단발·단일 관점)은 `references/delegation-patterns.md §병렬 vs 순차 결정 트리`를 따른다.
 
 ---
 
@@ -331,7 +258,7 @@ reference를 읽지 않아도 성립해야 하는 게이트 다섯 개다. 발�
 | 파일 | 언제 읽을지 |
 |------|-------------|
 | `references/architect-council.md` | 분해(1단계) 시 요구가 복잡·모호해 아키텍트 협의체(설계 생성 ↔ 심문 검증)로 분석·검증 후 task 를 도출할 때 |
-| `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때, **경로 판정이 경계 케이스일 때**(§경로 판정 경계 케이스가 단일 출처), **team 강제 등급을 판정할 때**(§team mode 강제 등급이 단일 출처), **원인 불명 결함·회귀를 조사할 때**(§근본원인 swarm — 축 분해·증거 계약·가설 랭킹) — **작업 유형 → tier 표의 단일 출처** (역할 기준 원칙·역할별 모델 제약은 `references/model-routing.md`가 단일 출처) |
+| `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때, **경로 판정이 경계 케이스이거나 경로 전환·preflight·탐색 예산·병렬/순차 전체 트리를 적용할 때**(§경로 판정 경계 케이스·§경로 전환·§공유 전제 preflight·§탐색 예산·§병렬 vs 순차 결정 트리가 단일 출처), **team 강제 등급을 판정할 때**(§team mode 강제 등급이 단일 출처), **원인 불명 결함·회귀를 조사할 때**(§근본원인 swarm — 축 분해·증거 계약·가설 랭킹) — **작업 유형 → tier 표의 단일 출처** (역할 기준 원칙·역할별 모델 제약은 `references/model-routing.md`가 단일 출처) |
 | `references/model-routing.md` | dispatch의 model/tier를 정할 때 — 역할 기준 원칙(집행 tier 상한)·자문 tier 예외·역할별 모델 제약의 단일 출처 (작업 유형 → tier 표는 `delegation-patterns.md §모델 선택`) |
 | `references/branch-strategy.md` | 무거운 경로에서 **브랜치를 어떻게 운영할지** 정할 때 — worktree 브랜치 네이밍, hot-spot 파일 분리 계약, 머지 정책(배치 vs 즉시+전파), 통합 방식, epic ← main 역방향 흡수, 반복 충돌의 재분해 트리거. **위 여섯의 단일 출처** (분해 원칙은 위 §분해는 충돌 경계로 쪼갠다, 단일 rebase의 충돌 해결 전략은 `git` skill) |
 | `references/worktree-lifecycle.md` | 병렬 dispatch 직전, 또는 worktree 정리/머지를 다룰 때 |

@@ -73,7 +73,7 @@ epic/<name>/t<task-id>-<slug>     ← sub-agent worktree 브랜치
   ├─ S 가 전부 hot-spot ───────────→ 병렬 유지
   │                                  + S 를 통합 task 1개로 분리 (아래)
   │
-  └─ S 에 hot-spot 아닌 파일이 있다 → 순차 (SKILL.md 기존 규칙 그대로)
+  └─ S 에 hot-spot 아닌 파일이 있다 → 순차 (delegation-patterns.md §병렬 vs 순차 결정 트리의 순차 규칙 그대로)
 ```
 
 **이 분기가 없으면 hot-spot 파일 하나 때문에 fan-out 전체가 순차로 떨어진다.** 실제로 겹치는 것은 등록 한 줄뿐인데 병렬 이득을 통째로 잃는 것이 현재 판정의 실패 모드다.

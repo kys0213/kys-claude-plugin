@@ -34,7 +34,7 @@ user-invocable: false
                                폴백 여지를 남기지 않는다 (advisory-consult.md §게이트 0)
 - 경로 (path):               경량 | 무거운 — 진입 시 1회 판정 (SKILL.md §경로 판정 게이트)
                              경량이면 isolation·토폴로지 가드·머지 조정이 빠진다.
-                             계획 밖 tracked 편집이 생기면 §경로 전환으로 무거운 경로로 올린다
+                             계획 밖 tracked 편집이 생기면 SKILL.md §경로 전환으로 무거운 경로로 올린다
 - 자동 중단 (hard_stops):    무엇이 발생하면 예산과 무관하게 멈추고 보고하는가
 - 결정 기록 위치 (log_dir):  .orchestrator/<epic>/decisions/ (gitignore, 완료 시 요약 공유)
 - 통합 검증 (integration_verify): (선택) worktree에서 실행 불가한 인프라 의존 테스트
@@ -228,7 +228,7 @@ HITL(opt-out) 모드에서 금지된 행위가 자율 모드(기본)에서는 **
 
 자율 모드는 보고 없이 연속 진행하므로, sub-agent의 격리 이탈로 메인 working tree가 오염되면 그것이 후속 dispatch/머지로 전파되기 전에 잡아야 한다. **매 sub-agent 완료 알림 수신 직후 + 매 머지 직후** 실행한다 — 가드 명령과 복구 절차는 `merge-coordinator.md §토폴로지 가드`가 단일 출처다.
 
-**적용 범위: 무거운 경로** (판정: `SKILL.md` §경로 판정 게이트). 경량에서 tracked 편집이 필요해지면 가드를 되살리는 것은 `SKILL.md §경로 전환`의 5단계다.
+**적용 범위: 무거운 경로** (판정: `SKILL.md` §경로 판정 게이트). 경량에서 tracked 편집이 필요해지면 가드를 되살리는 것은 `delegation-patterns.md §경로 전환`의 5단계다.
 
 위반 시 **hard stop** — 복구 후 즉시 에스컬레이션하고, 자율 재개는 사용자 결정에 맡긴다.
 

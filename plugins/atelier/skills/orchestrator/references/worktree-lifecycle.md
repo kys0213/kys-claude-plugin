@@ -15,6 +15,14 @@ user-invocable: false
 
 오케스트레이터에서 worktree는 **항상 epic 브랜치 위의 sub-agent 격리 수단**이다. 메인은 worktree를 사용하지 않는다.
 
+```
+main
+  └─ epic/<name>   ← 메인 에이전트 (read + dispatch + report)
+       ├─ worktree A → epic/<name>/t1-<slug>  (sub-agent A, base = epic/<name>)
+       ├─ worktree B → epic/<name>/t2-<slug>  (sub-agent B, base = epic/<name>)
+       └─ worktree C → epic/<name>/t3-<slug>  (sub-agent C: ...)
+```
+
 - 모든 sub-agent worktree는 **현재 epic 브랜치 기준으로 동기화된 상태에서 작업**한다 (자동 보장 아님 — 확인·동기화는 `delegation-patterns.md §Prompt 작성 원칙 필수 포함 요소` 9번이 단일 출처). dispatch **이후** epic HEAD가 움직여 생기는 drift는 별도 정책이다 (`branch-strategy.md §base drift 전파`)
 - sub-agent 결과는 **epic 브랜치로 머지** (main 직접 머지 X). 브랜치 이름은 자동 생성명을 쓰지 않고 `epic/<name>/t<task-id>-<slug>` 규약을 따른다 (`branch-strategy.md §브랜치 네이밍`)
 - 메인은 epic 브랜치의 **메인 working tree**에 머문다 — EnterWorktree 금지
