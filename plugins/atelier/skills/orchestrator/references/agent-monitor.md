@@ -73,7 +73,7 @@ TaskUpdate({taskId: "1", status: "completed"})                         # 완료 
 
 - **작업 분배**: 분해된 단위를 `TaskCreate`로 등록하고, dispatch한 agent를 `owner`로 표시한다.
 - **의존성**: `addBlockedBy`로 순차 의존을 표현 — blocked task는 선행 완료 전 claim되지 않는다.
-- **진행 추적**: `TaskList`로 pending/in_progress/completed 상태를 결정적으로 조회한다.
+- **진행 추적**: `TaskList`로 pending/in_progress/completed 상태를 결정적으로 조회한다. dispatch 시 `in_progress`, 머지/완료 시 `completed`로 갱신해 진행률이 목록에 드러나게 한다.
 
 주의:
 

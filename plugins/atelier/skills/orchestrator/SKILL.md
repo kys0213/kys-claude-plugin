@@ -70,7 +70,7 @@ version: 0.1.0
 1. **현재 브랜치가 epic 브랜치인가?** — `git branch --show-current` 확인. `main` / 일반 feature 브랜치라면 epic 브랜치를 먼저 만들거나 사용자에게 어떤 epic 브랜치로 진입할지 물어본다 (`git` skill 의 브랜치 생성 또는 plain `git checkout -b epic/<name>`).
 2. **현재 메인이 다른 worktree 안에 있지 않은가?** — `git rev-parse --show-toplevel` 가 repo의 메인 working tree여야 한다. worktree 안에서 시작했다면 즉시 메인 working tree로 빠져나오도록 사용자에게 보고.
 3. **이후 모든 sub-agent dispatch는 `isolation: "worktree"` 로** — worktree의 base가 dispatch 시점 epic 브랜치 HEAD라는 보장은 없다. dispatch prompt에 base 확인·동기화 지시를 반드시 포함한다 (`references/delegation-patterns.md §Prompt 작성 원칙 필수 포함 요소` 9번이 단일 출처)
-4. **왕복 조율(team)이 이번 세션에서 가용한가?** — 판정하는 대상은 "team이라는 기능이 켜져 있는가"가 아니라 **"spawn한 agent에게 다시 말을 걸 수 있는가"**다. 필수 등급이 요구하는 실질은 *직전 라운드를 기억하는 상대와의 왕복*이고(§team mode 강제 등급 기준 1), 그것을 주는 것은 `name`이라는 파라미터가 아니라 `SendMessage`라는 채널이다.
+4. **왕복 조율(team)이 이번 세션에서 가용한가?** — 판정하는 대상은 "team이라는 기능이 켜져 있는가"가 아니라 **"spawn한 agent에게 다시 말을 걸 수 있는가"**다. 필수 등급이 요구하는 실질은 *직전 라운드를 기억하는 상대와의 왕복*이고(`references/delegation-patterns.md §team mode 강제 등급` 기준 1), 그것을 주는 것은 `name`이라는 파라미터가 아니라 `SendMessage`라는 채널이다.
 
 ```
 왕복 조율(team) 가용 판정
@@ -179,7 +179,7 @@ read-only 조사·감사·원인분석은 충돌 비용이 없어 "의심스러�
 ## 모델 라우팅 (요지)
 
 - **집행 위임(자문 제외 전부 — 구현·문서·리서치·조사·리뷰·게이트)의 tier ≤ 메인 tier, 예외 없음.** 매 dispatch에 `model` 명시 필수(상속 금지), 문서에 모델명을 박지 않는다. **자문 조회만 상위 tier 허용** — 권고 + 근거(read-only)만 사오고 결정권은 메인에 100% 잔류, team member 전용(필수 등급).
-- **team 비가용 = 자문 경로 차단**: 트리거에 도달해도 소집하지 않고, 무엇으로도 대체하지 않으며, 원래 하려던 에스컬레이션으로 진행하고 decision log에 남긴다. 사용자가 명시 요청해도 우회하지 못한다 (절차: `references/advisory-consult.md §게이트 0`, 자율 모드 `max_advisory_consults = 0`은 `references/autonomous-driving.md §자율 계약`이 단일 출처).
+- **team 비가용 = 자문 경로 차단**: 트리거에 도달해도 소집하지 않고, 무엇으로도 대체하지 않으며, 원래 하려던 에스컬레이션으로 진행하고 그 사실을 판정 근거와 함께 decision log에 남긴다. 사용자가 명시 요청해도 우회하지 못한다 (절차: `references/advisory-consult.md §게이트 0`, 자율 모드 `max_advisory_consults = 0`은 `references/autonomous-driving.md §자율 계약`이 단일 출처).
 - 판정 트리·집행/자문 대비 표·역할별 모델 제약은 `references/model-routing.md`가 단일 출처다. 작업 유형 → 시작 tier 표는 `references/delegation-patterns.md §모델 선택`.
 
 ## References (필요할 때만 로드)
@@ -217,7 +217,7 @@ read-only 조사·감사·원인분석은 충돌 비용이 없어 "의심스러�
 7. **epic 브랜치 우회** (적용 경로는 §경로 판정 게이트): 반드시 epic 브랜치를 만들고 거기서 dispatch한다.
 8. **자문 흉내**: 자문 경로 비활성 시 단발 왕복·자기 판단을 자문으로 포장 금지 — 메인 자신의 판단으로 명시하고, 폴백은 decision log의 `실행 형태` 필드로 사후 탐지된다 (`references/advisory-consult.md §안티패턴` / §team mode 강제 등급).
 9. **고무도장 메인**: 상위 tier 권고의 무검토 채택 금지 — 채택도 기각도 사유와 함께 기록한다 (`references/advisory-consult.md §안티패턴`).
-10. **자문 tier가 다른 역할로 번짐**: 자문 외의 모든 위임은 집행 위임이며 메인 tier를 넘지 못한다 (`references/model-routing.md §역할별 모델 제약`).
+10. **자문 tier가 다른 역할로 번짐**: 자문 외의 모든 위임은 집행 위임이며 메인 tier를 넘지 못한다 (`references/model-routing.md §역할 기준 원칙 / §역할별 모델 제약`).
 11. **신호 하나로 team 비가용 단정**: 권위 신호는 **`SendMessage`로 다시 지목할 수 있는가**이고, `name`이 없으면 `agentId`로 같은 왕복을 한다 (§진입 시 체크 4).
 12. **출구 없는 금지**: 금지에는 항상 "대신 무엇을 하라"를 출구로 짝지어 붙인다 (`references/delegation-patterns.md §필수 포함 요소` 10번이 단일 출처).
 13. **보고 채널 없는 위임**: agent의 plain text 출력은 메인에 도달하지 않는다 — dispatch prompt에 `SendMessage({to: "main"})` 보고 채널을 반드시 포함한다 (`references/delegation-patterns.md §필수 포함 요소` 11번이 단일 출처).
