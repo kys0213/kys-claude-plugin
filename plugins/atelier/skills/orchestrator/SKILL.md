@@ -144,10 +144,7 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
   이후  비가용 시의 반응은 경로마다 다름 → §team mode 강제 등급
 ```
 
-   - **`name` 부재는 비가용이 아니다.** `name`이 없는 런타임에서는 `Agent({run_in_background: true})`가 돌려주는 `agentId`가 그대로 지목자가 되고, 그 agent에 `SendMessage`를 보내면 **직전까지의 transcript에서 이어서 재개**된다. 즉 필수 등급이 요구하는 "라운드 간 맥락 유지"가 agentId 경로에서도 그대로 성립한다 — 이름이 편할 뿐 실질은 같다. `name` 하나를 보고 비가용으로 단정하면 자문·협의체가 통째로 죽는데, 정작 왕복은 가능한 상태다.
-   - **채널이 권위인 이유**: 왕복을 실제로 결정하는 것은 spawn 인자가 아니라 재개 채널이다. `team_name`처럼 받아만 놓고 무시되는 인자의 선례가 이미 있으므로, 인자의 존재는 능력의 증거가 못 된다.
-   - **env를 권위로 쓰지 않는 이유**: **Bash는 메인과 다른 프로세스로 뜨므로** env가 메인 프로세스를 반영한다는 보장이 없다. 이 false negative가 team 전제 경로 전체를 한 번에 죽이는 가장 흔한 실패다.
-   - 진입 시 확정하는 이유: 트리거 시점에 확인하면 이미 다른 경로를 다 태운 뒤라 늦다.
+   - **name 부재는 비가용이 아니다** — agentId로 같은 왕복이 성립한다. 신호의 권위·env를 안 쓰는 이유는 `references/delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다.
 
 5. **위임 파이프라인이 의존하는 공유 전제가 지금 살아 있는가?** (preflight — dispatch 시작 전 마지막 확인)
 
@@ -310,27 +307,11 @@ reference를 읽지 않아도 성립해야 하는 게이트 다섯 개다. 발�
 
 자세한 판단 기준과 prompt 작성법은 `references/delegation-patterns.md`.
 
-### team mode 강제 등급 (단일 출처)
+### team mode 강제 등급 (요지)
 
-team을 "쓰면 좋다"로 두면 폴백이 사실상 기본값이 되어 team 전제 경로가 조용히 사라진다. 경로별 **강제 등급을 2단계로 확정**하고, 등급별 반응을 이 절이 단일 소유한다.
-
-**등급 기준 — 두 조건을 모두 만족하면 `필수`다**:
-
-1. **대체 불가 (핵심)**: 경로의 본질이 **왕복 대화**인가. 단발 subagent는 매 왕복마다 패킷을 재합성해야 하고 **직전 라운드를 기억하지 못한다** — 반문·재답변·상호 반박이 성립하지 않으므로 폴백은 같은 일을 더 비싸게 하는 게 아니라 **아예 다른(그리고 실질 없는) 일**이 된다. 이것이 강제해야 하는 이유다.
-2. **비용 없음**: 경로가 **read-only 조율(편집 없음)**인가. team의 유일한 실질 비용인 공유 checkout 오염 위험이 애초에 없다. 이것이 강제해도 되는 이유다.
-
-둘 중 하나라도 어긋나면 `선호`다. 특히 **편집이 개입**하는 경로는 격리를 보장하는 것이 team이 아니라 `isolation:"worktree"` subagent이고, 검증 차원 자체는 단발로도 유지되므로 폴백이 본질을 잃지 않는다.
-
-| 경로 | 등급 | team 가용인데 단발로 대체 | team 비가용 |
-|------|------|---------------------------|-------------|
-| 자문 조회 (`references/advisory-consult.md`) | **필수** | **위반** — 권고→반문→재답변이 성립하지 않으므로 그 1회 왕복은 자문이 아니다. 결과를 채택하지 않고 위반을 기록 | 자문 생략하고 원래 하려던 에스컬레이션으로 진행 |
-| 아키텍트 협의체 (`references/architect-council.md`) | **필수** | **위반** — 라운드 간 맥락이 끊겨 상호 반박이 성립하지 않고, "협의체를 돌렸다"는 기록만 남는다 | 폴백 없이 즉시 에스컬레이션 |
-| spec 검토·QA 게이트 (`references/spec-driven-review.md`) | 선호 | 허용 — 단발 subagent 2개로 두 검증 차원 유지 | 동일 폴백 |
-| review→fix 루프 (`references/autonomous-driving.md`) | 선호 | 허용 — 단발 격리 subagent 재위임 | 동일 폴백 |
-
-**필수 등급에는 가드 두 개가 붙는다** (없으면 강제가 아니라 권고다): **spawn 확인**(teammate로 실제 떴는가)과 **decision log 필수 필드**(`실행 형태`·`판정 근거`). 절차는 `references/delegation-patterns.md §spawn 확인`, 기록 형식은 `references/autonomous-driving.md §의사결정 기록`이 단일 출처다.
-
-**등급별 기본값은 그 등급 안에서만 유효하다.** 선호 등급의 "의심스러우면 단발을 고른다"를 필수 등급으로 옮기지 않는다 — 거기서 단발은 경로의 실질 자체를 없앤다.
+- **필수**: 자문 조회 · 아키텍트 협의체 — 실질이 왕복 대화이고 read-only다. **가용인데 단발로 대체 = 위반**, 비가용이면 폴백 없이 원래의 에스컬레이션으로 진행한다.
+- **선호**: spec 검토·QA 게이트 · review→fix 루프 — 단발 폴백 허용.
+- 등급 기준·경로별 표·필수 등급 가드(spawn 확인 + decision log 필드)는 `references/delegation-patterns.md §team mode 강제 등급`이 단일 출처다.
 
 ---
 
@@ -350,7 +331,7 @@ team을 "쓰면 좋다"로 두면 폴백이 사실상 기본값이 되어 team �
 | 파일 | 언제 읽을지 |
 |------|-------------|
 | `references/architect-council.md` | 분해(1단계) 시 요구가 복잡·모호해 아키텍트 협의체(설계 생성 ↔ 심문 검증)로 분석·검증 후 task 를 도출할 때 |
-| `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때, **경로 판정이 경계 케이스일 때**(§경로 판정 경계 케이스가 단일 출처), **원인 불명 결함·회귀를 조사할 때**(§근본원인 swarm — 축 분해·증거 계약·가설 랭킹) — **작업 유형 → tier 표의 단일 출처** (역할 기준 원칙·역할별 모델 제약은 `references/model-routing.md`가 단일 출처) |
+| `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때, **경로 판정이 경계 케이스일 때**(§경로 판정 경계 케이스가 단일 출처), **team 강제 등급을 판정할 때**(§team mode 강제 등급이 단일 출처), **원인 불명 결함·회귀를 조사할 때**(§근본원인 swarm — 축 분해·증거 계약·가설 랭킹) — **작업 유형 → tier 표의 단일 출처** (역할 기준 원칙·역할별 모델 제약은 `references/model-routing.md`가 단일 출처) |
 | `references/model-routing.md` | dispatch의 model/tier를 정할 때 — 역할 기준 원칙(집행 tier 상한)·자문 tier 예외·역할별 모델 제약의 단일 출처 (작업 유형 → tier 표는 `delegation-patterns.md §모델 선택`) |
 | `references/branch-strategy.md` | 무거운 경로에서 **브랜치를 어떻게 운영할지** 정할 때 — worktree 브랜치 네이밍, hot-spot 파일 분리 계약, 머지 정책(배치 vs 즉시+전파), 통합 방식, epic ← main 역방향 흡수, 반복 충돌의 재분해 트리거. **위 여섯의 단일 출처** (분해 원칙은 위 §분해는 충돌 경계로 쪼갠다, 단일 rebase의 충돌 해결 전략은 `git` skill) |
 | `references/worktree-lifecycle.md` | 병렬 dispatch 직전, 또는 worktree 정리/머지를 다룰 때 |

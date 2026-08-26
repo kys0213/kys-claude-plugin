@@ -14,7 +14,7 @@ sub-agent)과 달리 산출물이 권고이고, 결정권은 메인에 100% 남�
 
 ## 전제 — team 필수 등급이다
 
-자문은 `SKILL.md §team mode 강제 등급`의 **필수** 경로다 (등급 기준: 대체 불가 + 비용 없음 —
+자문은 `delegation-patterns.md §team mode 강제 등급`의 **필수** 경로다 (등급 기준: 대체 불가 + 비용 없음 —
 아래 §왜 team member 전용인가가 이 경로에서의 근거를 소유한다). 따라서 자문자는 team member 로만
 실행하며 단발 subagent 폴백은 **금지**다 (§안티패턴 1).
 

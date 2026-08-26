@@ -227,9 +227,33 @@ Agent({
 
 ---
 
+## team mode 강제 등급 (단일 출처)
+
+team을 "쓰면 좋다"로 두면 폴백이 사실상 기본값이 되어 team 전제 경로가 조용히 사라진다. 경로별 **강제 등급을 2단계로 확정**하고, 등급별 반응을 이 절이 단일 소유한다. 요지는 `SKILL.md §team mode 강제 등급`이 본문에 둔다.
+
+**등급 기준 — 두 조건을 모두 만족하면 `필수`다**:
+
+1. **대체 불가 (핵심)**: 경로의 본질이 **왕복 대화**인가. 단발 subagent는 매 왕복마다 패킷을 재합성해야 하고 **직전 라운드를 기억하지 못한다** — 반문·재답변·상호 반박이 성립하지 않으므로 폴백은 같은 일을 더 비싸게 하는 게 아니라 **아예 다른(그리고 실질 없는) 일**이 된다. 이것이 강제해야 하는 이유다.
+2. **비용 없음**: 경로가 **read-only 조율(편집 없음)**인가. team의 유일한 실질 비용인 공유 checkout 오염 위험이 애초에 없다. 이것이 강제해도 되는 이유다.
+
+둘 중 하나라도 어긋나면 `선호`다. 특히 **편집이 개입**하는 경로는 격리를 보장하는 것이 team이 아니라 `isolation:"worktree"` subagent이고, 검증 차원 자체는 단발로도 유지되므로 폴백이 본질을 잃지 않는다.
+
+| 경로 | 등급 | team 가용인데 단발로 대체 | team 비가용 |
+|------|------|---------------------------|-------------|
+| 자문 조회 (`advisory-consult.md`) | **필수** | **위반** — 권고→반문→재답변이 성립하지 않으므로 그 1회 왕복은 자문이 아니다. 결과를 채택하지 않고 위반을 기록 | 자문 생략하고 원래 하려던 에스컬레이션으로 진행 |
+| 아키텍트 협의체 (`architect-council.md`) | **필수** | **위반** — 라운드 간 맥락이 끊겨 상호 반박이 성립하지 않고, "협의체를 돌렸다"는 기록만 남는다 | 폴백 없이 즉시 에스컬레이션 |
+| spec 검토·QA 게이트 (`spec-driven-review.md`) | 선호 | 허용 — 단발 subagent 2개로 두 검증 차원 유지 | 동일 폴백 |
+| review→fix 루프 (`autonomous-driving.md`) | 선호 | 허용 — 단발 격리 subagent 재위임 | 동일 폴백 |
+
+**필수 등급에는 가드 두 개가 붙는다** (없으면 강제가 아니라 권고다): **spawn 확인**(teammate로 실제 떴는가)과 **decision log 필수 필드**(`실행 형태`·`판정 근거`). 절차는 아래 §spawn 확인, 기록 형식은 `references/autonomous-driving.md §의사결정 기록`이 단일 출처다.
+
+**등급별 기본값은 그 등급 안에서만 유효하다.** 선호 등급의 "의심스러우면 단발을 고른다"를 필수 등급으로 옮기지 않는다 — 거기서 단발은 경로의 실질 자체를 없앤다.
+
+---
+
 ## Agent team 사용 패턴
 
-> **전제**: agent team은 실험 기능이라 세션마다 가용 여부가 다르다. **가용 판정의 권위 신호는 spawn한 agent를 `SendMessage`로 다시 지목할 수 있는지**이며, `printenv CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`는 보조 신호다(Bash는 메인과 다른 프로세스라 단독 근거가 못 된다) — 판정 절차는 `SKILL.md §진입 시 체크 4`, 경로별 강제 등급은 `SKILL.md §team mode 강제 등급`이 단일 출처다. 과거의 `TeamCreate`/`TeamDelete` 도구는 제거됐고, `Agent`의 `team_name` 인자는 받지만 무시된다 — 세션마다 암묵적 team 하나가 있고 `name`으로 바로 spawn하며, session 종료 시 자동 정리된다.
+> **전제**: agent team은 실험 기능이라 세션마다 가용 여부가 다르다. **가용 판정의 권위 신호는 spawn한 agent를 `SendMessage`로 다시 지목할 수 있는지**이며, `printenv CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`는 보조 신호다(Bash는 메인과 다른 프로세스라 단독 근거가 못 된다) — 판정 절차는 `SKILL.md §진입 시 체크 4`, 경로별 강제 등급은 위 §team mode 강제 등급이 단일 출처다. 판정은 진입 시 1회 확정한다 — 트리거 시점에 확인하면 이미 다른 경로를 다 태운 뒤라 늦다. 과거의 `TeamCreate`/`TeamDelete` 도구는 제거됐고, `Agent`의 `team_name` 인자는 받지만 무시된다 — 세션마다 암묵적 team 하나가 있고 `name`으로 바로 spawn하며, session 종료 시 자동 정리된다.
 >
 > **`name`이 없는 런타임에서도 team은 성립한다.** `Agent` 스키마에 `name`이 없으면 `run_in_background: true`로 띄우고 **spawn 결과의 `agentId`(`a...` 형식)를 지목자로 쓴다** — 그 agent에 `SendMessage`를 보내면 직전까지의 transcript에서 재개되므로 라운드 간 맥락이 유지된다. 이름이 있으면 이름이 낫다(완료된 agent에도 계속 유효하고, 읽기 쉽다). 없다고 비가용으로 처리하면 필수 등급 경로가 이유 없이 죽는다.
 >
@@ -277,7 +301,7 @@ SendMessage({to: "implementer",   // name 없는 런타임: impl.agentId ("a..."
 
 ### spawn 확인 (단일 출처)
 
-`Agent({name})`을 호출했다고 teammate로 떴다는 보장은 없다 — `team_name` 인자가 조용히 무시되는 선례가 이미 있다. **team 필수 등급 경로**(`SKILL.md §team mode 강제 등급`)는 첫 spawn 직후 이 확인을 실행한다.
+`Agent({name})`을 호출했다고 teammate로 떴다는 보장은 없다 — `team_name` 인자가 조용히 무시되는 선례가 이미 있다. **team 필수 등급 경로**(위 §team mode 강제 등급)는 첫 spawn 직후 이 확인을 실행한다.
 
 **확인 방법은 관찰이 아니라 실제 왕복 1회다.** "teammate처럼 보인다"로 판정하지 않는다 — 지목자를 손에 넣었는지, 그 지목자로 보낸 메시지가 실제로 나가는지를 본다.
 

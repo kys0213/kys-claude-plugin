@@ -130,7 +130,7 @@ escalate_or_report(reason, decision_log=contract.log_dir)   # 완료 / 예산소
 핵심 제약 (team의 격리 특성·가용 전제는 `delegation-patterns.md §Agent team 사용 패턴`이 단일 출처):
 
 - **편집은 teammate가 직접 하지 않고 `isolation:"worktree"` subagent에 위임**한다.
-- review→fix 루프는 `SKILL.md §team mode 강제 등급`의 **선호** 등급이다 — 편집이 개입하고 격리를 보장하는 것은 team이 아니라 격리 subagent이므로, team이 비가용이면 단발 격리 subagent 재위임으로 돈다(폴백 허용). **이 폴백 허용은 선호 등급 경로에만 적용된다** — 자문·협의체는 필수 등급이라 폴백이 위반이다.
+- review→fix 루프는 `delegation-patterns.md §team mode 강제 등급`의 **선호** 등급이다 — 편집이 개입하고 격리를 보장하는 것은 team이 아니라 격리 subagent이므로, team이 비가용이면 단발 격리 subagent 재위임으로 돈다(폴백 허용). **이 폴백 허용은 선호 등급 경로에만 적용된다** — 자문·협의체는 필수 등급이라 폴백이 위반이다.
 
 team을 쓸 때의 이득 (team 가용 시):
 
@@ -293,7 +293,7 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 - 영향: 어떤 작업/브랜치에 적용됐는가
 ```
 
-**team 필수 등급 경로(자문·협의체)의 기록에는 두 필드를 추가로 반드시 남긴다** (`SKILL.md §team mode 강제 등급` 가드 2):
+**team 필수 등급 경로(자문·협의체)의 기록에는 두 필드를 추가로 반드시 남긴다** (`delegation-patterns.md §team mode 강제 등급` 가드 2):
 
 ```markdown
 - 실행 형태: teammate | subagent      ← 폴백 여부를 사후에 판별할 유일한 근거
