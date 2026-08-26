@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Use this skill for any multi-unit work delegated to sub-agents, agent-teams, or worktrees — parallel fan-out, sequential pipelines, long-running agent teams, autonomous self-driving runs (decompose→dispatch→merge without human intervention), document deliverables (writing reports, specs, or write-up docs is also delegated Write work), multi-branch research and investigation (codebase surveys, side-effect analysis, comparing options — read-only work counts too), or any moment the main agent is about to use Edit/Write directly (delegate instead). Scope is set by scale, not by kind. Triggers include "자율주행", "자율주행모드", "자율 모드", "자율 주행으로", "알아서 끝까지", "여러 작업 병렬로", "동시에 처리", "에이전트 나눠서", "worktree로 분리", "위임해서", "팀으로 작업", "리포트 작성", "보고서로 정리", "스펙 문서 작성", "분석 결과 문서화", "조사해줘", "리서치", "코드베이스 파악", "영향 범위 분석", "사이드이펙트 조사", "여러 방안 비교", "autonomous mode", "self-driving", "hands-off run", "delegate", "parallel agents", "fan-out", "agent team", "sub-agent", "dispatch multiple", "split into tasks", "run in parallel", "write a report", "draft a spec", "write up findings", "research", "investigate", "survey the codebase", "analyze impact", "compare approaches".
+description: Use this skill for any multi-unit work delegated to sub-agents, agent-teams, or worktrees — parallel fan-out, sequential pipelines, long-running agent teams, autonomous self-driving runs (decompose→dispatch→merge without human intervention), document deliverables (writing reports, specs, or write-up docs is also delegated Write work), multi-branch research and investigation (codebase surveys, side-effect analysis, comparing options — read-only work counts too), or any moment the main agent is about to use Edit/Write directly (delegate instead). Scope is set by scale, not by kind. Triggers include "자율주행", "자율주행모드", "자율 모드", "자율 주행으로", "알아서 끝까지", "여러 작업 병렬로", "동시에 처리", "에이전트 나눠서", "worktree로 분리", "위임해서", "팀으로 작업", "리포트 작성", "보고서로 정리", "스펙 문서 작성", "분석 결과 문서화", "조사해줘", "리서치", "코드베이스 파악", "영향 범위 분석", "사이드이펙트 조사", "원인 분석", "감사해줘", "다시 검토해줘", "여러 방안 비교", "autonomous mode", "self-driving", "hands-off run", "delegate", "parallel agents", "fan-out", "agent team", "sub-agent", "dispatch multiple", "split into tasks", "run in parallel", "write a report", "draft a spec", "write up findings", "research", "investigate", "survey the codebase", "analyze impact", "root cause", "audit", "re-review", "compare approaches".
 version: 0.1.0
 ---
 
@@ -208,12 +208,13 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
 
 ### 디스패치 전·보고 수용 게이트 (Dispatch Preconditions)
 
-reference를 읽지 않아도 성립해야 하는 게이트 네 개다. 발동 시점만 여기 두고, 각 계약의 단일 출처는 지목된 절이다.
+reference를 읽지 않아도 성립해야 하는 게이트 다섯 개다. 발동 시점만 여기 두고, 각 계약의 단일 출처는 지목된 절이다.
 
 - **implementer dispatch 전 — 설계 승인 마커 확인**: 마커가 없으면 dispatch하지 않고 설계 단계로 회귀한다 (`references/architect-council.md §설계 승인 마커`).
 - **테스트 작성이 포함된 구현 dispatch 전 — 테스트 인프라 발견**: 레포의 테스트 러너·픽스처·하네스·유사 기존 테스트가 file:line으로 인용되기 전에는 테스트 작성 단계에 진입시키지 않는다 (`references/delegation-patterns.md §테스트 인프라 발견`).
 - **sub-agent 보고 수용 전 — 증거 계약 확인**: 증거 없는 claim은 수용하지 않고 재디스패치하며, 부재 주장(negative claim)은 교차 검증 후에만 수용한다 (`references/delegation-patterns.md §증거 계약`).
 - **조사·리서치 위임 dispatch 전 — 탐색 예산 명시**: 예산 없는 조사형 prompt는 dispatch하지 않는다 (아래 §탐색 예산이 단일 출처).
+- **dispatch 시·보고 수용 시 — 기대 완료 시간과 중복·idle 판정**: 기대 완료 시간 없이 dispatch하지 않는다. 동일 내용의 재전송 보고는 첫 수신만 취합하고, 기대 시간을 넘긴 무보고 agent는 대기 연장이 아니라 취소 후 폴백·재위임으로 회부한다 (`references/agent-monitor.md §중복 보고 감지`·`§idle 판정`).
 
 ### 조사·리서치 위임의 탐색 예산 (Exploration Budget)
 
@@ -285,7 +286,15 @@ reference를 읽지 않아도 성립해야 하는 게이트 네 개다. 발동 �
 - **병렬의 비용**: 머지 시 충돌 → 사람 개입 필요
 - **기본 규칙**: 의심스러우면 순차. 병렬은 disjoint가 명백할 때만.
 
-경로별 차이(경량에서 disjoint 판정 축이 무엇으로 바뀌는지)는 §경로 판정 게이트의 유지·생략 표를 따른다. 축이 바뀌어도 규칙은 같다: 의심스러우면 순차다.
+경로별 차이(경량에서 disjoint 판정 축이 무엇으로 바뀌는지)는 §경로 판정 게이트의 유지·생략 표를 따른다. 축이 바뀌어도 규칙은 같다: 의심스러우면 순차다 — 단, 이는 충돌 비용이 있는 작업의 규칙이다 (read-only 조사·감사는 아래 §조사·감사 작업의 기본값은 병렬 fan-out).
+
+### 조사·감사 작업의 기본값은 병렬 fan-out
+
+위 트리의 "의심스러우면 순차"는 **충돌 비용** 때문에 있는 규칙이다. read-only 조사·감사·원인분석은 대개 충돌 축(파일 집합·외부 리소스)에 걸리는 것이 없고, 그렇다고 판정되면 기본값이 뒤집힌다 — **첫 행동이 관점별 병렬 fan-out이다.** 충돌 대상이 없는 조사를 순차로 시작할 근거로 "의심스러우면 순차"를 끌어오지 않는다.
+
+- 조사 요청을 받으면 메인이 순차 Bash/Read 탐색으로 조사를 시작하지 않는다 (§메인 에이전트가 해도 되는 일의 "결정적 사실 확인"은 조사 착수가 아니다). 관점(모듈·레이어·가설·이력 등)으로 분해해 N개 agent를 동시에 dispatch한다 — 관점 수는 메인이 정하되 특별한 근거가 없으면 3개 이상으로 하고, 근거를 decision log에 남긴다.
+- 각 조사 agent의 prompt에 §탐색 예산을 명시한다 (§디스패치 전·보고 수용 게이트).
+- 출구: 1턴 단발 조회(§When to use의 "트리거하면 안 되는 상황")는 fan-out 대상이 아니다. 관점이 정말 하나뿐이라 단일 agent로 충분하면 그 판정을 decision log에 남기고 진행한다 — 기록 없는 순차 시작은 판정이 아니라 관성이다.
 
 ---
 
@@ -444,3 +453,4 @@ team을 "쓰면 좋다"로 두면 폴백이 사실상 기본값이 되어 team �
 15. **근거 없는 체크 생략**: 조사·이슈 등록처럼 편집이 없어 보인다는 이유로 경로 판정 없이 체크 1·2·3을 건너뜀 → 같은 생략이 tracked 편집이 섞인 런에서도 반복되고, 사후에는 판정한 것인지 빠뜨린 것인지 구분되지 않는다. 경량 경로는 **판정한 결과**여야 하며, 판정 결과와 근거를 진입 보고와 decision log에 남긴다 (§경로 판정 게이트).
 16. **머지해놓고 in-flight 방치** (무거운 경로): 아직 돌고 있는 worktree가 있는데 먼저 끝난 결과를 머지하고 알리지 않음 → 옛 base 위의 작업이 **이미 머지된 수정을 되돌린 채 조용히 통과**할 수 있다. 기본은 배치 머지이고, 즉시 머지했으면 전부에 rebase를 전파한다 (`references/branch-strategy.md §base drift 전파`).
 17. **분해를 레이어로 쪼갬**: 모델 전부 / 서비스 전부 / 컨트롤러 전부로 나눔 → 작업마다 같은 파일을 훑어 disjoint가 애초에 안 나오고, 병렬/순차 트리가 전부 순차로 떨어뜨린다. 충돌은 판정이 아니라 분해에서 결정된다 (§분해는 충돌 경계로 쪼갠다).
+18. **조사를 순차 단독 탐색으로 시작**: "일단 훑어보자"로 메인이 순차 Bash/Read 탐색을 시작 → 사용자가 중단하고 병렬 재지시하는 반복 마찰. read-only 조사·감사는 충돌 비용이 없어 순차를 택할 근거가 없다. 첫 행동은 관점별 병렬 fan-out이다 (§조사·감사 작업의 기본값은 병렬 fan-out).
