@@ -208,12 +208,13 @@ ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskU
 
 ### 디스패치 전·보고 수용 게이트 (Dispatch Preconditions)
 
-reference를 읽지 않아도 성립해야 하는 게이트 네 개다. 발동 시점만 여기 두고, 각 계약의 단일 출처는 지목된 절이다.
+reference를 읽지 않아도 성립해야 하는 게이트 다섯 개다. 발동 시점만 여기 두고, 각 계약의 단일 출처는 지목된 절이다.
 
 - **implementer dispatch 전 — 설계 승인 마커 확인**: 마커가 없으면 dispatch하지 않고 설계 단계로 회귀한다 (`references/architect-council.md §설계 승인 마커`).
 - **테스트 작성이 포함된 구현 dispatch 전 — 테스트 인프라 발견**: 레포의 테스트 러너·픽스처·하네스·유사 기존 테스트가 file:line으로 인용되기 전에는 테스트 작성 단계에 진입시키지 않는다 (`references/delegation-patterns.md §테스트 인프라 발견`).
 - **sub-agent 보고 수용 전 — 증거 계약 확인**: 증거 없는 claim은 수용하지 않고 재디스패치하며, 부재 주장(negative claim)은 교차 검증 후에만 수용한다 (`references/delegation-patterns.md §증거 계약`).
 - **조사·리서치 위임 dispatch 전 — 탐색 예산 명시**: 예산 없는 조사형 prompt는 dispatch하지 않는다 (아래 §탐색 예산이 단일 출처).
+- **보고 수용 전 — 중복·idle 판정**: 동일 내용의 재전송 보고는 첫 수신만 취합하고, dispatch 시점에 정한 기대 완료 시간을 넘긴 무보고 agent는 대기 연장이 아니라 폐기 후 폴백·재위임으로 회부한다 (`references/agent-monitor.md §중복 보고 감지`·`§idle 판정`).
 
 ### 조사·리서치 위임의 탐색 예산 (Exploration Budget)
 
