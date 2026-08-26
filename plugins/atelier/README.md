@@ -44,6 +44,12 @@ Epic 2 ([#766](https://github.com/kys0213/kys-claude-plugin/issues/766))에서 c
 
 자율 개발 루프는 별도 진입점 없이 `/atelier:orchestrator` 가 기본 자율 주행으로 수행합니다.
 
+### 출력 스타일 (플러그인 레벨 자동 적용)
+
+`output-styles/communicate.md` 가 `force-for-plugin` 으로 플러그인 활성화 시 자동 적용되어,
+매 턴의 채팅 응답을 communicate 스킬의 기준선(결론 먼저 · 해요체 단문 · 개조식 · 군더더기 제거)으로 정제합니다.
+대화 밖 독자용 산출물(슬랙 공유·PR 본문·문서)은 여전히 `/atelier:communicate` skill 이 담당합니다.
+
 capability 슬래시(commit-and-pr, prioritize-issues, hook-config, scaffold-conventions 등)는
 모두 위 관심사 진입점으로 흡수되었습니다 — 슬래시 없이 자연어로 요청해도 해당 skill 이 자동 트리거됩니다.
 
