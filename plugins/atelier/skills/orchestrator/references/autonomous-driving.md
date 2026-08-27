@@ -34,7 +34,7 @@ user-invocable: false
                                폴백 여지를 남기지 않는다 (advisory-consult.md §게이트 0)
 - 경로 (path):               경량 | 무거운 — 진입 시 1회 판정 (SKILL.md §경로 판정 게이트)
                              경량이면 isolation·토폴로지 가드·머지 조정이 빠진다.
-                             계획 밖 tracked 편집이 생기면 §경로 전환으로 무거운 경로로 올린다
+                             계획 밖 tracked 편집이 생기면 SKILL.md §경로 전환으로 무거운 경로로 올린다
 - 자동 중단 (hard_stops):    무엇이 발생하면 예산과 무관하게 멈추고 보고하는가
 - 결정 기록 위치 (log_dir):  .orchestrator/<epic>/decisions/ (gitignore, 완료 시 요약 공유)
 - 통합 검증 (integration_verify): (선택) worktree에서 실행 불가한 인프라 의존 테스트
@@ -105,7 +105,7 @@ escalate_or_report(reason, decision_log=contract.log_dir)   # 완료 / 예산소
 
 - **역량을 작업에 맞춘다**: 작업의 난이도·리스크·되돌리기 비용에 모델 역량을 맞춘다. 판단·설계·미묘한 리뷰는 더 강한 모델, 기계적·반복적 구현은 더 가벼운 모델.
 - **비싼 모델은 품질을 좌우하는 지점에 아낀다**: 분해/조율(메인 자신), 자동 머지의 유일한 안전장치인 리뷰 게이트처럼 판단이 결과 품질을 결정하는 곳에 집중한다.
-- **고정 배분을 박지 않는다**: 모델이 더 똑똑해지면 같은 작업을 더 가벼운 tier로 내릴 수 있어야 하므로, 매 dispatch마다 "지금도 이 역량이 필요한가"를 재평가한다. 작업 유형 → 시작 tier 표는 `delegation-patterns.md §모델 선택`이, 역할 기준 원칙(오케스트레이터는 위임 sub-agent보다 낮은 tier로 내려가지 않는다 / 위임 dispatch에는 항상 `model` 명시)은 `SKILL.md §모델 라우팅 전략`이 단일 출처다 — 여기서 재서술하지 않는다.
+- **고정 배분을 박지 않는다**: 모델이 더 똑똑해지면 같은 작업을 더 가벼운 tier로 내릴 수 있어야 하므로, 매 dispatch마다 "지금도 이 역량이 필요한가"를 재평가한다. 작업 유형 → 시작 tier 표는 `delegation-patterns.md §모델 선택`이, 역할 기준 원칙(오케스트레이터는 위임 sub-agent보다 낮은 tier로 내려가지 않는다 / 위임 dispatch에는 항상 `model` 명시)은 `model-routing.md §역할 기준 원칙`이 단일 출처다 — 여기서 재서술하지 않는다.
 
 기록: 모델 배분도 자율 결정이므로, 표준 heuristic을 벗어난 선택(예: 평소 가벼운 tier에 맡기던 구현을 더 강한 모델로 올림)은 근거와 함께 decision log에 남긴다.
 
@@ -130,7 +130,7 @@ escalate_or_report(reason, decision_log=contract.log_dir)   # 완료 / 예산소
 핵심 제약 (team의 격리 특성·가용 전제는 `delegation-patterns.md §Agent team 사용 패턴`이 단일 출처):
 
 - **편집은 teammate가 직접 하지 않고 `isolation:"worktree"` subagent에 위임**한다.
-- review→fix 루프는 `SKILL.md §team mode 강제 등급`의 **선호** 등급이다 — 편집이 개입하고 격리를 보장하는 것은 team이 아니라 격리 subagent이므로, team이 비가용이면 단발 격리 subagent 재위임으로 돈다(폴백 허용). **이 폴백 허용은 선호 등급 경로에만 적용된다** — 자문·협의체는 필수 등급이라 폴백이 위반이다.
+- review→fix 루프는 `delegation-patterns.md §team mode 강제 등급`의 **선호** 등급이다 — 편집이 개입하고 격리를 보장하는 것은 team이 아니라 격리 subagent이므로, team이 비가용이면 단발 격리 subagent 재위임으로 돈다(폴백 허용). **이 폴백 허용은 선호 등급 경로에만 적용된다** — 자문·협의체는 필수 등급이라 폴백이 위반이다.
 
 team을 쓸 때의 이득 (team 가용 시):
 
@@ -228,7 +228,7 @@ HITL(opt-out) 모드에서 금지된 행위가 자율 모드(기본)에서는 **
 
 자율 모드는 보고 없이 연속 진행하므로, sub-agent의 격리 이탈로 메인 working tree가 오염되면 그것이 후속 dispatch/머지로 전파되기 전에 잡아야 한다. **매 sub-agent 완료 알림 수신 직후 + 매 머지 직후** 실행한다 — 가드 명령과 복구 절차는 `merge-coordinator.md §토폴로지 가드`가 단일 출처다.
 
-**적용 범위: 무거운 경로** (판정: `SKILL.md` §경로 판정 게이트). 경량에서 tracked 편집이 필요해지면 가드를 되살리는 것은 `SKILL.md §경로 전환`의 5단계다.
+**적용 범위: 무거운 경로** (판정: `SKILL.md` §경로 판정 게이트). 경량에서 tracked 편집이 필요해지면 가드를 되살리는 것은 `delegation-patterns.md §경로 전환`의 5단계다.
 
 위반 시 **hard stop** — 복구 후 즉시 에스컬레이션하고, 자율 재개는 사용자 결정에 맡긴다.
 
@@ -293,7 +293,7 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 - 영향: 어떤 작업/브랜치에 적용됐는가
 ```
 
-**team 필수 등급 경로(자문·협의체)의 기록에는 두 필드를 추가로 반드시 남긴다** (`SKILL.md §team mode 강제 등급` 가드 2):
+**team 필수 등급 경로(자문·협의체)의 기록에는 두 필드를 추가로 반드시 남긴다** (`delegation-patterns.md §team mode 강제 등급` 가드 2):
 
 ```markdown
 - 실행 형태: teammate | subagent      ← 폴백 여부를 사후에 판별할 유일한 근거
@@ -445,7 +445,7 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 8. **인프라 의존 테스트를 worktree 검증에 포함**: sub-agent가 접근 불가한 환경 의존 테스트를 worktree에서 실행 → 환경 실패 noise로 검증 신뢰도 저하. 계약의 `integration_verify`로 분리해 메인이 실행.
 9. **게이트 무력화**: 구현 sub-agent의 자기 보고만 믿고 머지하거나, 구현한 agent가 자기 결과를 검토/QA → 자기 검증 편향으로 결함 통과. 게이트 에이전트는 항상 구현자와 다른 sub-agent다.
 10. **검증 테스트·DBA 게이트 생략**: 구현만 머지하고 검증 테스트를 안 만들면 회귀를 잡을 그물이 없다(spec 유무와 무관). DB 접촉 판정에 걸렸는데 reviewer/QA만으로 통과시키면 락·하위 호환·인덱스 누락 같은 DB 특유 위험이 그대로 들어간다.
-11. **고정 모델 매핑 박기**: "구현은 항상 X, 리뷰는 항상 Y"로 못 박음 → 모델 세대가 바뀌어도 비효율 유지. 매 dispatch마다 작업 리스크에 맞춰 재평가한다 (역할 기준 원칙은 `SKILL.md §모델 라우팅 전략`).
+11. **고정 모델 매핑 박기**: "구현은 항상 X, 리뷰는 항상 Y"로 못 박음 → 모델 세대가 바뀌어도 비효율 유지. 매 dispatch마다 작업 리스크에 맞춰 재평가한다 (역할 기준 원칙은 `model-routing.md §역할 기준 원칙`).
 12. **메인 컨텍스트로 전문 끌어오기**: 전체 diff·파일 전문·리뷰 findings 전문을 메인이 직접 통독 → 긴 루프에서 메인 컨텍스트 포화. 메인은 압축 요약 + verdict만 수령.
 13. **teammate에 편집 격리 기대**: teammate가 공유 checkout을 직접 편집 → 덮어쓰기/메인 오염. 편집은 `isolation:"worktree"` subagent에 위임하고 team은 조율만. 단발 재위임 시에는 이전 실패 맥락을 새 prompt에 포함해 컨텍스트 손실을 줄인다.
 14. **seam 처리 실패 — 일괄 hard-stop 또는 silent stub**: 내부 구현/계약만 빈 엣지까지 전부 에스컬레이션하면 채우면 될 빈자리에 슬라이스 전체가 멈춘다. 반대로 격리 stub이 조용히 기본값으로 "동작하는 척"하면 스펙 불일치를 숨겨 디버깅을 망친다. contract/interface로 격리하고 **inert / throw 하는 loud stub**을 둔 채 전진, 미결 seam은 깃발로 보고 (*모호한 seam — isolate-and-continue*).

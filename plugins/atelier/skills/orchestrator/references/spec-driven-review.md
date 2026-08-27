@@ -48,7 +48,7 @@ user-invocable: false
 
 ## 팀 구성 (team 가용 시)
 
-이 게이트는 `SKILL.md §team mode 강제 등급`의 **선호** 등급이다 — 게이트의 본질은 team이 아니라 **구현과 분리된 두 검증 차원**이고 편집이 개입하므로, team이 없으면 단발 폴백으로도 본질이 유지된다(아래 §폴백).
+이 게이트는 `delegation-patterns.md §team mode 강제 등급`의 **선호** 등급이다 — 게이트의 본질은 team이 아니라 **구현과 분리된 두 검증 차원**이고 편집이 개입하므로, team이 없으면 단발 폴백으로도 본질이 유지된다(아래 §폴백).
 
 team이 가용하면 spec 구현 작업 하나에 **조율 전용 team**을 둔다. team spawn·SendMessage 개입·편집 격리(teammate는 편집하지 않고 `isolation:"worktree"` subagent에 위임)의 일반 패턴은 `delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다.
 
