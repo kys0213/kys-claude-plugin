@@ -64,6 +64,9 @@ while not satisfied(contract.done_when) and loop_count < contract.max_loops:
              isolation=("worktree" if heavy else None),  #   무거운: base = epic 브랜치, 편집은 격리 subagent
              run_in_background=true,                     #   경량: 격리할 tracked 쓰기가 없다.
              model=main_allocates_per_task)              #         대신 산출 경로 계약을 prompt에 싣는다
+                                                      # 무거운 경로의 worktree dispatch는 직렬로 —
+                                                      # 매 dispatch 직후 assert_worktree_created()
+                                                      # (worktree-lifecycle.md §dispatch 생성 가드)
     log_decision("병렬/순차 + 위임 형태(subagent/team) + 모델 배분", ...)
     results = await_completion_notifications()        # 모니터 (sleep/poll 금지)
     if heavy: assert_topology()                       # 가드: branch == epic + status clean (아래)
@@ -226,7 +229,7 @@ HITL(opt-out) 모드에서 금지된 행위가 자율 모드(기본)에서는 **
 
 ### 토폴로지 가드 (assert_topology)
 
-자율 모드는 보고 없이 연속 진행하므로, sub-agent의 격리 이탈로 메인 working tree가 오염되면 그것이 후속 dispatch/머지로 전파되기 전에 잡아야 한다. **매 sub-agent 완료 알림 수신 직후 + 매 머지 직후** 실행한다 — 가드 명령과 복구 절차는 `merge-coordinator.md §토폴로지 가드`가 단일 출처다.
+자율 모드는 보고 없이 연속 진행하므로, sub-agent의 격리 이탈로 메인 working tree가 오염되면 그것이 후속 dispatch/머지로 전파되기 전에 잡아야 한다. **매 sub-agent 완료 알림 수신 직후 + 매 머지 직후** 실행한다 — 가드 명령과 복구 절차는 `merge-coordinator.md §토폴로지 가드`가 단일 출처다. 여기에 더해 **매 worktree dispatch 직후**에는 생성 가드(worktree 등장 + 메인 clean + cwd)를 실행한다 — 동일 batch 다중 dispatch race로 worktree를 못 받은 agent가 메인 트리에서 편집하는 유출은 완료 알림 시점 가드로는 늦게 잡히기 때문이다. 절차는 `worktree-lifecycle.md §dispatch 생성 가드`가 단일 출처다.
 
 **적용 범위: 무거운 경로** (판정: `SKILL.md` §경로 판정 게이트). 경량에서 tracked 편집이 필요해지면 가드를 되살리는 것은 `delegation-patterns.md §경로 전환`의 5단계다.
 
@@ -441,7 +444,7 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 4. **opt-out 무시**: 사용자가 HITL을 명시했는데 자율로 밀어붙임 → 자율은 기본이지만 opt-out은 존중한다. 자동 개입을 멈추고 보고 후 결정을 받는다.
 5. **sleep / poll**: 자율 루프에서도 완료 알림을 사용. `Bash sleep` 루프 금지.
 6. **결정 기록 누락 / 로그 커밋**: 근거 없이 자율 주행하면 사후에 "왜"를 복원 불가. 반대로 휘발성 로그를 epic 브랜치에 커밋하면 repo 오염. 분기 결정은 참고 소스와 함께 `log_dir`에 기록하되 `.orchestrator/`는 gitignore, 완료 시 요약으로만 공유.
-7. **토폴로지 가드 생략** (무거운 경로): 완료 알림/머지 후 메인 branch 확인 없이 연속 진행 → 오염된 HEAD 위에서 다음 dispatch의 worktree base가 잘못 잡힘. 경량 경로에서의 생략은 판정 결과이므로 이 안티패턴이 아니다 — 대신 판정 자체를 빠뜨리는 것이 `SKILL.md §안티패턴 15`다.
+7. **토폴로지 가드 생략** (무거운 경로): 완료 알림/머지/dispatch 직후 확인 없이 연속 진행 → 오염된 HEAD 위에서 다음 dispatch의 worktree base가 잘못 잡히거나, worktree를 못 받은 agent의 유출을 커밋된 뒤에야 발견. 같은 batch에 worktree dispatch를 2개 이상 싣는 것 자체가 이 유출의 알려진 원인이다 (`worktree-lifecycle.md §dispatch 생성 가드`). 경량 경로에서의 생략은 판정 결과이므로 이 안티패턴이 아니다 — 대신 판정 자체를 빠뜨리는 것이 `SKILL.md §안티패턴 15`다.
 8. **인프라 의존 테스트를 worktree 검증에 포함**: sub-agent가 접근 불가한 환경 의존 테스트를 worktree에서 실행 → 환경 실패 noise로 검증 신뢰도 저하. 계약의 `integration_verify`로 분리해 메인이 실행.
 9. **게이트 무력화**: 구현 sub-agent의 자기 보고만 믿고 머지하거나, 구현한 agent가 자기 결과를 검토/QA → 자기 검증 편향으로 결함 통과. 게이트 에이전트는 항상 구현자와 다른 sub-agent다.
 10. **검증 테스트·DBA 게이트 생략**: 구현만 머지하고 검증 테스트를 안 만들면 회귀를 잡을 그물이 없다(spec 유무와 무관). DB 접촉 판정에 걸렸는데 reviewer/QA만으로 통과시키면 락·하위 호환·인덱스 누락 같은 DB 특유 위험이 그대로 들어간다.
@@ -476,6 +479,7 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 - [ ] 각 작업을 머지 전 **검토 + QA (+ DB 접촉 시 DBA)** 게이트로, 구현자와 다른 agent가 검증하고 전부 pass(AND)여야 머지하는가? (QA가 추가한 검증 테스트 green 포함)
 - [ ] 재위임·게이트 거부·충돌 해결이 `max_redispatch_per_task` 예산을 소모하며 카운트되는가?
 - [ ] (무거운 경로) 같은 파일의 충돌 횟수를 task 예산과 **별개로** 세고 있는가? (`branch-strategy.md §충돌 반복`)
+- [ ] (무거운 경로) worktree dispatch를 한 메시지에 하나씩 직렬화하고, 매 dispatch 직후 생성 가드를 실행하는가? (`worktree-lifecycle.md §dispatch 생성 가드`)
 - [ ] (무거운 경로) 매 sub-agent 완료 직후 + 매 머지 직후 토폴로지 가드를 실행하는가? (`merge-coordinator.md §토폴로지 가드`)
 - [ ] 자율 계약에 경로 판정(경량/무거운)과 그 근거를 실었는가? (`SKILL.md §경로 판정 게이트`)
 - [ ] 계약의 integration_verify를 run_at 시점에 메인이 직접 실행하는가?

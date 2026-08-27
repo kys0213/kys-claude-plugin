@@ -54,15 +54,46 @@ S = files_A ∩ files_B
 if S and not all_hot_spot(S):     # S 가 전부 hot-spot 이면 병렬 유지 +
     → 순차로 전환 (worktree 병렬 X)  #   통합 task 분리 (branch-strategy.md §hot-spot 파일)
 
-# Dispatch (worktree base는 자동 보장되지 않음 — prompt에 base 확인·동기화 지시 포함)
+# Dispatch — 직렬로, 한 메시지에 하나씩 (같은 tool-call batch에 worktree dispatch를
+# 2개 이상 싣지 않는다 — 아래 §dispatch 생성 가드. base는 자동 보장되지 않음 —
+# prompt에 base 확인·동기화 지시 포함)
+before = snapshot(`git worktree list --porcelain`)
 Agent({description: "task A", isolation: "worktree", run_in_background: true,
        prompt: "<자기완결, epic 브랜치 이름 포함>"})
+assert_worktree_created(before)   # 생성 확인 후에야 다음 dispatch
+
+before = snapshot(`git worktree list --porcelain`)
 Agent({description: "task B", isolation: "worktree", run_in_background: true,
        prompt: "<자기완결, epic 브랜치 이름 포함>"})
+assert_worktree_created(before)
 
 # 메인은 epic 브랜치에서 다른 일 진행 또는 사용자 응대
+# (직렬화되는 것은 dispatch 행위뿐이다 — agent들은 background에서 여전히 병렬로 돈다)
 # 완료 알림 자동 도착 — sleep/poll 금지
 ```
+
+---
+
+## dispatch 생성 가드 (assert_worktree_created — 단일 출처)
+
+동일 tool-call batch에서 worktree-isolated agent를 2개 이상 동시 생성하면, worktree 생성이 직렬화되지 않아 한쪽이 누락되는 race가 알려져 있다. worktree를 받지 못한 agent는 **메인 working tree에서 직접 편집·커밋**해 격리 계약이 깨지고, 메인 shell cwd가 다른 agent의 worktree로 drift하는 부수효과도 관찰됐다. 완료 알림 시점의 토폴로지 가드로는 늦다 — 유출이 이미 커밋된 뒤다. 그래서 dispatch 시점에 두 가지를 지킨다:
+
+1. **직렬화**: worktree dispatch는 **한 메시지에 하나씩**. 이전 dispatch의 worktree 생성을 확인한 뒤에야 다음을 dispatch한다. 병렬성은 잃지 않는다 — `run_in_background: true` agent는 dispatch가 직렬이어도 실행은 병렬이다.
+2. **생성 검증**: 매 dispatch 직후 메인이 직접 Bash로 확인한다:
+
+```bash
+git worktree list --porcelain   # dispatch 전 스냅샷 대비 새 worktree가 실제 추가됐는가
+git status --short              # 메인 working tree가 여전히 clean인가
+git rev-parse --show-toplevel   # 메인 shell cwd가 메인 working tree인가 (worktree로 drift 감지)
+```
+
+위반 시 처리 (셋 중 하나라도):
+
+- **새 worktree 미등장** → 해당 agent가 격리 없이 돌고 있을 수 있다. **후속 dispatch를 중단**하고 해당 agent를 정지시킨 뒤 메인 working tree 오염 여부를 확인한다. 자율 모드면 hard stop이다 (`autonomous-driving.md §에스컬레이션` 조건 2와 동급 — 토폴로지 위반).
+- **메인 not clean** → 유출이 이미 시작된 것. 즉시 위와 동일하게 중단하고, 변경은 버리지 않고 보존한다 — 복구 절차는 `merge-coordinator.md §토폴로지 가드`가 단일 출처다.
+- **cwd drift** → 메인 working tree로 복귀 후 재검증한다 (오염 검사를 worktree 안에서 하면 결과가 그 worktree 것으로 바뀌어 가드 자체가 무의미해진다).
+
+주의: 검증 기준은 **worktree 등장 + 메인 clean + cwd**다. 규약 브랜치(`epic/<name>/t*`)는 agent가 작업 시작 후 스스로 전환하므로 dispatch 직후에는 아직 없을 수 있다 — 브랜치 존재를 생성 검증 기준으로 삼지 않는다.
 
 ---
 
@@ -110,6 +141,7 @@ Agent({description: "task B", isolation: "worktree", run_in_background: true,
 4. **worktree 누수**: 결과를 받은 뒤 머지/폐기 결정을 안 하고 방치 → 디스크/git 상태 오염.
 5. **epic 브랜치 아닌 곳에서 dispatch**: main이나 임의 feature 브랜치에서 worktree sub-agent 호출 → worktree base가 epic이 아니게 되어 결과 머지 경로가 어긋남.
 6. **완료 알림 후 가드 생략**: sub-agent 완료 직후 메인 branch/status 확인 없이 다음 단계 진행 → sub-agent의 격리 이탈(Edit 절대경로 트랩 등)로 변형된 메인 state 위에서 후속 작업이 진행됨.
+7. **단일 batch 다중 worktree dispatch**: 한 메시지(tool-call batch)에 worktree-isolated dispatch를 2개 이상 → 생성 race로 한쪽 worktree가 누락되고 그 agent의 편집이 메인 트리로 유출. 직렬 dispatch + 생성 가드 필수 (§dispatch 생성 가드).
 
 ---
 
@@ -123,9 +155,11 @@ Agent({description: "task B", isolation: "worktree", run_in_background: true,
 - [ ] disjoint가 명확한가? (의심스러우면 순차)
 - [ ] 각 sub-agent prompt가 자기완결적이며 epic 브랜치 이름과 `epic/<name>/t<task-id>-<slug>` 전환 지시를 포함하는가?
 - [ ] `isolation: "worktree"`와 `run_in_background: true`를 켰는가?
+- [ ] worktree dispatch를 한 메시지에 하나씩 싣고 있는가? (같은 batch 다중 dispatch 금지 — §dispatch 생성 가드)
 
 dispatch 후:
 
+- [ ] 매 dispatch 직후 생성 가드를 실행했는가? (worktree 등장 + 메인 clean + cwd — §dispatch 생성 가드)
 - [ ] 완료 알림을 기다리는 중에 sleep/poll을 하고 있지 않은가?
 - [ ] 완료 알림 수신 직후 토폴로지 가드를 실행했는가? (`merge-coordinator.md §토폴로지 가드`)
 - [ ] 각 결과의 worktree 상태(변경 유무)를 파악했는가?

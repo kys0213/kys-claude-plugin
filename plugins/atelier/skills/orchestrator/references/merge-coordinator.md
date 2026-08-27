@@ -100,7 +100,7 @@ worktree 브랜치는 PR을 생성하지 않고 epic 브랜치로 수렴 후 삭
 
 ## 토폴로지 가드 (명령·복구 절차 단일 출처)
 
-메인은 항상 epic 브랜치의 메인 working tree에 있어야 한다. 머지 명령이나 sub-agent의 격리 이탈로 메인의 current branch가 sub-agent 브랜치로 switch되면, 오염된 HEAD 위에서 후속 dispatch의 worktree base가 잘못 잡히고 머지 경로가 어긋난다. 가드 명령과 복구 절차는 이 절이 단일 출처이며, **언제 실행하는가**는 각 단계 문서가 정한다 — 매 sub-agent 완료 알림 직후(`worktree-lifecycle.md`), 매 머지 직후(위 §표준 절차 5 머지 직후 가드), 자율 루프의 `assert_topology()`(`autonomous-driving.md`).
+메인은 항상 epic 브랜치의 메인 working tree에 있어야 한다. 머지 명령이나 sub-agent의 격리 이탈로 메인의 current branch가 sub-agent 브랜치로 switch되면, 오염된 HEAD 위에서 후속 dispatch의 worktree base가 잘못 잡히고 머지 경로가 어긋난다. 가드 명령과 복구 절차는 이 절이 단일 출처이며, **언제 실행하는가**는 각 단계 문서가 정한다 — 매 sub-agent 완료 알림 직후(`worktree-lifecycle.md`), 매 머지 직후(위 §표준 절차 5 머지 직후 가드), 자율 루프의 `assert_topology()`(`autonomous-driving.md`). 매 worktree dispatch 직후에는 **생성 검증이 추가된** 별도 가드가 돈다 — 검사 항목과 절차는 `worktree-lifecycle.md §dispatch 생성 가드`가 단일 출처이고, 거기서 오염이 발견되면 복구는 이 절을 따른다.
 
 ```bash
 git branch --show-current    # epic/<name> 이어야 함
