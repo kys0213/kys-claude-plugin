@@ -76,7 +76,7 @@ Glob: .claude/rules/*.md
 기존 규칙 파일이 있으면:
 - 각 파일의 `paths:` frontmatter 확인
 - 코드베이스 레이어 대비 누락된 규칙 파악
-- `paths:` 미설정 파일 식별
+- 각 규칙의 로딩 모드(`paths:` 유무)가 규칙 성격과 일치하는지 판정 — 기준은 workflow skill `references/rules-design.md` §4 분석 기준 (paths 없음 자체는 결함이 아님)
 
 ### Step 4: 실제 파일 패턴 샘플링 및 범용화
 
@@ -188,7 +188,7 @@ git shortlog -sn --no-merges | head -10
 | 상태 | 파일 | 비고 |
 |------|------|------|
 | 누락 | `service.md` | 서비스 레이어 규칙 없음 |
-| paths 미설정 | `naming.md` | 항상 로드됨 → paths 추가 권장 |
+| 로딩 모드 불일치 | `naming.md` | 레이어 한정 컨벤션인데 상시 로드 → paths 추가 권장 |
 ```
 
 ## Output

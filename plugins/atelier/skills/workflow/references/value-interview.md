@@ -43,6 +43,7 @@ scaffold 시 프로젝트 가치관을 수집하는 인터뷰 카테고리와, �
 | 프로젝트 정체성 (유형, 단계, 팀) | CLAUDE.md | 항상 필요, 거의 변하지 않음 |
 | 엔지니어링 가치 (트레이드오프) | CLAUDE.md | 모든 코드에 적용, 레이어 무관 |
 | 문서화 컨벤션 | CLAUDE.md | 모든 문서에 적용, 경로 무관 |
+| 안전·금지 규칙 ("절대 하지 마라") | CLAUDE.md 또는 `.claude/rules/` (`paths:` 없이) | 세션 내내 유지 필요 — `paths:` 규칙은 `/compact` 후 자동 재주입 안 됨 (`rules-design.md` §재주입 한계) |
 | 아키텍처 레이어별 코딩 규칙 | `.claude/rules/` + `paths:` | 특정 파일 수정 시에만 필요 |
 
 CLAUDE.md 섹션의 구체적인 템플릿과 예시는 scaffold 절차(`references/scaffold-protocol.md`)가 인터뷰 결과를 기반으로 생성합니다.
