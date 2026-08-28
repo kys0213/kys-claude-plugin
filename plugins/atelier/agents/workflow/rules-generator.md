@@ -44,7 +44,7 @@ codebase-analyzer에서 1차 검증 완료된 패턴을 대상으로 2차 확인
 
 1. 각 `paths:` 패턴에 대해 Glob으로 실제 매칭되는 파일 목록을 수집
 2. 매칭된 파일 중 2-3개를 Read하여 해당 레이어의 컨벤션에 부합하는지 확인
-3. 패턴이 너무 넓거나 매칭 결과가 0건이면 패턴을 조정
+3. 패턴이 너무 넓으면 좁히고, 매칭 0건이면 좁히기 전에 glob 함정부터 확인 (`rules-design.md` §glob 함정)
 4. 검증 결과를 사용자에게 보고
 
 ### Step 2: 규칙 파일 생성
@@ -112,10 +112,9 @@ mkdir -p .claude/rules
 | 2 | `.claude/rules/service.md` | `**/*.service.ts` | 새로 생성 |
 | 3 | `.claude/rules/testing.md` | `**/*.spec.ts` | 새로 생성 |
 
-### Lazy Context Injection 확인
+### 로딩 모드 확인
 
-모든 규칙 파일에 `paths:` frontmatter가 설정되어 있습니다.
-해당 파일 수정 시에만 컨텍스트에 로드됩니다.
+각 규칙의 로딩 모드(`paths:` 유무)가 규칙 성격과 일치함을 확인했습니다 — 상시 로드 규칙이 있으면 의도임을 명시합니다.
 
 ### 다음 단계
 
@@ -132,4 +131,4 @@ mkdir -p .claude/rules
 - 규칙 파일 하나당 **50-150줄** 이내로 작성합니다 (토큰 효율)
 - 일반론이 아닌 프로젝트에 특화된 구체적 지침을 작성합니다 — 단, 특화 대상은 **원칙·구조·계약**이며 코드 스냅샷이 아닙니다
 - 실제 파일 코드 복붙·실제 식별자 인용을 금지합니다. 예시는 구조 수준(의사코드·형태 패턴)만 허용합니다 (`references/rules-design.md` §규칙 내용 범용화 원칙)
-- `paths:` frontmatter는 반드시 포함합니다 (Lazy Context Injection)
+- 레이어·언어 한정 규칙에는 `paths:` frontmatter를 포함합니다 (Lazy Context Injection). 안전·금지 등 모든 세션에서 유지돼야 하는 규칙은 `paths:` 없이 두거나 `CLAUDE.md`에 배치합니다 (`references/rules-design.md` §재주입 한계)
