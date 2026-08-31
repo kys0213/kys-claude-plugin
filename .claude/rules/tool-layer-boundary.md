@@ -9,7 +9,7 @@ paths:
 # Tool Layer Boundary — 훅 로직은 CLI, 등록은 thin shim
 
 > CLAUDE.md "책임 경계 (CLI vs Skill/Agent)" 절의 hook/CLI 적용 규칙.
-> 설계 근거: `plans/atelier/02-architecture.md` §3(setup), §4(CLI 통합).
+> 설계 배경(plan — 시점 기록): `plans/atelier/02-architecture.md` §3(setup), §4(CLI 통합). 현재 경계의 신뢰 소스는 이 문서와 코드다.
 
 훅(hook)·셸 스크립트와 CLI 서브커맨드 사이의 책임을 고정한다. 경계가 흐려지면
 결정적 로직이 테스트 불가능한 bash에 흩어지고, 설치 시점에 절대경로가 박혀

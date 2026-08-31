@@ -47,7 +47,8 @@ Claude, OpenAI Codex, Google Gemini 3개 LLM을 사용하여 파일을 종합적
 
 **파일 패턴 매핑**:
 - "src" / "코드" → `src/**/*.{ts,tsx,js,rs,py}`
-- "plans" / "설계" → `plans/*.md`
+- "spec" / "스펙" / "설계" → `spec/**/*.md` (제품 규격)
+- "plans" / "계획" → `plans/*.md` (시점 의사결정 기록 — 리뷰 대상일 때만)
 - "docs" / "문서" → `docs/**/*.md`
 - "plugins" → `plugins/**/*.md`
 - Glob 패턴이 직접 제공되면 그대로 사용

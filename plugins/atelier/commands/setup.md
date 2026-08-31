@@ -100,7 +100,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 ## Step 3 — 기존 hook 마이그레이션 (frozen → atelier)
 
 기존 6개 plugin 사용자는 `~/.claude/settings.json` 에 **frozen plugin 경로**의 hook 이 박혀 있습니다.
-이를 atelier 로 재작성합니다. (상세: `plans/atelier/03-migration.md §A.3`)
+이를 atelier 로 재작성합니다. 현재 절차는 아래가 전부이며, 설계 배경은 `plans/atelier/03-migration.md §A.3` (plan — 시점 기록) 참조.
 
 ```
 1. atelier git hook list --project-dir "$HOME" 으로 현재 등록 현황 조회 (없으면 skip)
