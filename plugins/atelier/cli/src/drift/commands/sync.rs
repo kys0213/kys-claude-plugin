@@ -9,14 +9,21 @@
 
 use crate::drift::commands::{read_source, DriftDeps};
 use crate::drift::core::types::{
-    scan_markers, ArtifactContent, DriftPaths, SyncReport, SyncTarget,
+    scan_markers, ArtifactContent, DriftPaths, SyncReport, SyncTarget, USER_RULES,
 };
 
-/// Routes the target to its sync routine.
-pub fn run(deps: &DriftDeps, paths: &DriftPaths, target: SyncTarget) -> Result<SyncReport, String> {
+/// Routes the target to its sync routine. A target is one `--target` value,
+/// not one file: user-rules covers every `USER_RULES` copy, so the result is a
+/// report list (single-element for the other targets).
+pub fn run(
+    deps: &DriftDeps,
+    paths: &DriftPaths,
+    target: SyncTarget,
+) -> Result<Vec<SyncReport>, String> {
     match target {
-        SyncTarget::ClaudeMd => sync_claude_md(deps, paths),
-        SyncTarget::Rules => sync_rules(deps, paths),
+        SyncTarget::ClaudeMd => sync_claude_md(deps, paths).map(|report| vec![report]),
+        SyncTarget::Rules => sync_rules(deps, paths).map(|report| vec![report]),
+        SyncTarget::UserRules => sync_user_rules(deps, paths),
     }
 }
 
@@ -145,4 +152,37 @@ fn sync_rules(deps: &DriftDeps, paths: &DriftPaths) -> Result<SyncReport, String
         path: copy_path,
         backup: backup_path,
     })
+}
+
+fn sync_user_rules(deps: &DriftDeps, paths: &DriftPaths) -> Result<Vec<SyncReport>, String> {
+    // The manifest syncs as a unit: every source and every installed copy is
+    // validated (and read) before the first write, so a refusal anywhere
+    // leaves all copies byte-for-byte untouched — the same "refuse before any
+    // write" contract the single-file targets keep.
+    let mut jobs = Vec::new();
+    for name in USER_RULES {
+        let template_path = paths.template_user_rule(name);
+        if !deps.fs.exists(&template_path) {
+            return Err(format!("plugin source file not found: {template_path}"));
+        }
+        let copy_path = paths.user_rule_copy(name);
+        if !deps.fs.exists(&copy_path) {
+            return Err(format!("not installed: {copy_path} — run /atelier:setup"));
+        }
+        let current = read_target(deps, &copy_path)?;
+        let source = read_source(deps, &template_path)?;
+        jobs.push((copy_path, current, source));
+    }
+
+    let mut reports = Vec::new();
+    for (copy_path, current, source) in jobs {
+        let backup_path = backup(deps, &copy_path, &current)?;
+        deps.fs.write(&copy_path, &source)?;
+        reports.push(SyncReport {
+            target: SyncTarget::UserRules,
+            path: copy_path,
+            backup: backup_path,
+        });
+    }
+    Ok(reports)
 }

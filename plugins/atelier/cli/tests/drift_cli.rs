@@ -5,8 +5,11 @@
 mod drift_mocks;
 
 use assert_cmd::Command;
-use atelier::drift::core::types::{RULES_COPY_REL, TEMPLATE_CLAUDE_MD_REL, TEMPLATE_RULES_REL};
-use drift_mocks::{block, RULES_BODY};
+use atelier::drift::core::types::{
+    RULES_COPY_REL, TEMPLATE_CLAUDE_MD_REL, TEMPLATE_RULES_REL, TEMPLATE_USER_RULES_DIR_REL,
+    USER_RULES,
+};
+use drift_mocks::{block, RULES_BODY, USER_RULE_BODY};
 use predicates::prelude::*;
 use std::path::Path;
 
@@ -37,6 +40,12 @@ impl Fixture {
             &block(tpl_body),
         );
         write(&fx.at(&format!("plugin/{TEMPLATE_RULES_REL}")), RULES_BODY);
+        for name in USER_RULES {
+            write(
+                &fx.at(&format!("plugin/{TEMPLATE_USER_RULES_DIR_REL}/{name}")),
+                USER_RULE_BODY,
+            );
+        }
         fx
     }
 
@@ -57,6 +66,10 @@ impl Fixture {
         self.at("proj")
     }
 
+    fn user_rules_dir(&self) -> String {
+        self.at("home/.claude/rules/atelier")
+    }
+
     fn install(&self, claude_md_body: &str) {
         write(
             &self.claude_md(),
@@ -66,6 +79,9 @@ impl Fixture {
             &format!("{}/{RULES_COPY_REL}", self.project_dir()),
             RULES_BODY,
         );
+        for name in USER_RULES {
+            write(&format!("{}/{name}", self.user_rules_dir()), USER_RULE_BODY);
+        }
     }
 
     fn check(&self) -> Command {
@@ -79,6 +95,8 @@ impl Fixture {
             &self.claude_md(),
             "--project-dir",
             &self.project_dir(),
+            "--user-rules-dir",
+            &self.user_rules_dir(),
         ]);
         cmd
     }
@@ -96,16 +114,47 @@ fn drift_bare_prints_help_and_exits_zero() {
 
 #[test]
 fn drift_check_in_sync_exits_zero() {
-    // Both artifacts matching their sources → OK lines, summary, exit 0.
+    // Every artifact matching its source → OK lines, summary, exit 0.
     let fx = Fixture::new("shared body");
     fx.install("shared body");
     fx.check()
         .assert()
         .success()
         .stdout(predicate::str::contains("claude-md-coding-style-block=OK"))
+        .stdout(predicate::str::contains("user-rules/plan-vs-spec.md=OK"))
         .stdout(predicate::str::contains(
-            "→ 2 checked, 0 drifted, 0 missing",
+            "→ 3 checked, 0 drifted, 0 missing",
         ));
+}
+
+#[test]
+fn drift_sync_user_rules_then_check_roundtrip() {
+    // sync --target user-rules brings an edited copy back to the source.
+    let fx = Fixture::new("body");
+    fx.install("body");
+    write(
+        &format!("{}/{}", fx.user_rules_dir(), USER_RULES[0]),
+        "locally edited\n",
+    );
+    atelier()
+        .args([
+            "drift",
+            "sync",
+            "--target",
+            "user-rules",
+            "--plugin-root",
+            &fx.plugin_root(),
+            "--claude-md",
+            &fx.claude_md(),
+            "--project-dir",
+            &fx.project_dir(),
+            "--user-rules-dir",
+            &fx.user_rules_dir(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("synced: "));
+    fx.check().assert().success();
 }
 
 #[test]

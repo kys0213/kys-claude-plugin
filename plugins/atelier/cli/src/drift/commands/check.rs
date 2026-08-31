@@ -16,25 +16,35 @@
 use crate::drift::commands::{read_source, DriftDeps};
 use crate::drift::core::types::{
     scan_markers, ArtifactContent, ArtifactStatus, CheckFinding, CheckReport, DriftPaths,
-    CLAUDE_MD_CHECK, RULES_CHECK,
+    CLAUDE_MD_CHECK, RULES_CHECK, USER_RULES, USER_RULES_CHECK_PREFIX,
 };
 
-/// Judges both artifacts against their plugin sources.
+/// Judges every artifact (CLAUDE.md block, rules copy, user-rules copies)
+/// against its plugin source.
 pub fn run(deps: &DriftDeps, paths: &DriftPaths) -> Result<CheckReport, String> {
     let template_claude_md = paths.template_claude_md();
     let template_rules = paths.template_rules();
-    for template in [&template_claude_md, &template_rules] {
+    let mut templates = vec![template_claude_md.clone(), template_rules.clone()];
+    templates.extend(USER_RULES.iter().map(|name| paths.template_user_rule(name)));
+    for template in &templates {
         if !deps.fs.exists(template) {
             return Err(format!("plugin source file not found: {template}"));
         }
     }
 
-    Ok(CheckReport {
-        findings: vec![
-            check_claude_md(deps, &paths.claude_md, &template_claude_md)?,
-            check_rules(deps, &paths.rules_copy(), &template_rules)?,
-        ],
-    })
+    let mut findings = vec![
+        check_claude_md(deps, &paths.claude_md, &template_claude_md)?,
+        check_verbatim_copy(deps, RULES_CHECK, &paths.rules_copy(), &template_rules)?,
+    ];
+    for name in USER_RULES {
+        findings.push(check_verbatim_copy(
+            deps,
+            &format!("{USER_RULES_CHECK_PREFIX}{name}"),
+            &paths.user_rule_copy(name),
+            &paths.template_user_rule(name),
+        )?);
+    }
+    Ok(CheckReport { findings })
 }
 
 fn finding(name: &str, status: ArtifactStatus, detail: Option<&str>) -> CheckFinding {
@@ -112,37 +122,32 @@ fn check_claude_md(
     }
 }
 
-fn check_rules(
+/// Judges one verbatim-copied artifact (the project rules copy and every
+/// user-rules copy share this contract: setup copies the file unchanged, so
+/// identical content is the judgement).
+fn check_verbatim_copy(
     deps: &DriftDeps,
+    name: &str,
     copy_path: &str,
     template_path: &str,
 ) -> Result<CheckFinding, String> {
     if !deps.fs.exists(copy_path) {
-        return Ok(finding(
-            RULES_CHECK,
-            ArtifactStatus::NotInstalled,
-            Some(copy_path),
-        ));
+        return Ok(finding(name, ArtifactStatus::NotInstalled, Some(copy_path)));
     }
     let copy = match deps.fs.read(copy_path)? {
         // Undecodable copy: differs from the UTF-8 source — drift, not error.
         ArtifactContent::NonUtf8 => {
             return Ok(finding(
-                RULES_CHECK,
+                name,
                 ArtifactStatus::Drifted,
                 Some("not valid UTF-8"),
             ))
         }
         ArtifactContent::Utf8(copy) => copy,
     };
-    // setup copies the file verbatim, so identical content is the contract.
     if copy == read_source(deps, template_path)? {
-        Ok(finding(RULES_CHECK, ArtifactStatus::Ok, None))
+        Ok(finding(name, ArtifactStatus::Ok, None))
     } else {
-        Ok(finding(
-            RULES_CHECK,
-            ArtifactStatus::Drifted,
-            Some(copy_path),
-        ))
+        Ok(finding(name, ArtifactStatus::Drifted, Some(copy_path)))
     }
 }

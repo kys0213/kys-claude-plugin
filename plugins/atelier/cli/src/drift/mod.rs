@@ -61,7 +61,7 @@ pub enum Commands {
     },
 }
 
-/// The flag trio every drift command shares.
+/// The flag set every drift command shares.
 #[derive(Args)]
 pub struct PathArgs {
     /// Plugin root holding the source template and rules files
@@ -73,25 +73,36 @@ pub struct PathArgs {
     /// Project root the rules copy lives under (default: the process cwd)
     #[arg(long = "project-dir")]
     project_dir: Option<String>,
+    /// Directory the user-scope rules copies live in
+    /// (default: $HOME/.claude/rules/atelier)
+    #[arg(long = "user-rules-dir")]
+    user_rules_dir: Option<String>,
 }
 
 impl PathArgs {
     /// Resolves the flags into concrete paths — the only place defaults (and
     /// therefore the environment) are consulted; the commands take resolved
-    /// paths.
+    /// paths. HOME is only required for the paths actually left to default.
     fn resolve(self) -> Result<DriftPaths, String> {
-        let claude_md = match self.claude_md {
-            Some(path) => path,
-            None => {
-                let home = std::env::var("HOME")
-                    .map_err(|_| "HOME is not set — pass --claude-md explicitly".to_string())?;
-                format!("{home}/.claude/CLAUDE.md")
+        fn home_based(explicit: Option<String>, flag: &str, rel: &str) -> Result<String, String> {
+            match explicit {
+                Some(path) => Ok(path),
+                None => {
+                    let home = std::env::var("HOME")
+                        .map_err(|_| format!("HOME is not set — pass {flag} explicitly"))?;
+                    Ok(format!("{home}/{rel}"))
+                }
             }
-        };
+        }
         Ok(DriftPaths {
             plugin_root: self.plugin_root,
-            claude_md,
+            claude_md: home_based(self.claude_md, "--claude-md", ".claude/CLAUDE.md")?,
             project_dir: default_project_dir(self.project_dir),
+            user_rules_dir: home_based(
+                self.user_rules_dir,
+                "--user-rules-dir",
+                ".claude/rules/atelier",
+            )?,
         })
     }
 }
@@ -149,7 +160,7 @@ pub fn run(cli: Cli) -> i32 {
                 .resolve()
                 .and_then(|paths| commands::sync::run(&deps, &paths, target))
             {
-                Ok(report) => (report.render(), 0),
+                Ok(reports) => (reports.iter().map(|r| r.render()).collect(), 0),
                 Err(e) => return fail(&e),
             }
         }

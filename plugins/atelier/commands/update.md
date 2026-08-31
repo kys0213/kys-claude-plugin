@@ -31,12 +31,13 @@ Step 1 (ensure-binary) 이 바이너리를 플러그인 버전으로 보장하�
 atelier drift check --plugin-root "${CLAUDE_PLUGIN_ROOT}" --project-dir "${CLAUDE_PROJECT_DIR:-.}"
 ```
 
-setup 이 스냅샷으로 복사한 두 산출물이 현재 플러그인 원본과 일치하는지 diff 로 판정합니다:
+setup 이 스냅샷으로 복사한 산출물이 현재 플러그인 원본과 일치하는지 diff 로 판정합니다:
 
 | 점검 대상 | 원본 |
 |---|---|
 | `~/.claude/CLAUDE.md` 의 `[coding-style:begin]~[end]` 블록 | `templates/claude-md/CLAUDE.md` |
 | `<project>/.claude/rules/agent-design-principles.md` | `rules/agent-design-principles.md` |
+| `~/.claude/rules/atelier/*.md` (user scope 정책 룰) | `rules/user/*.md` (CLI 의 `USER_RULES` 매니페스트) |
 
 - 출력은 `<check>=<STATUS>` 라인(STATUS: `OK` | `DRIFTED` | `NOT_INSTALLED`)과 요약 한 줄입니다
 - exit code: `0` 드리프트 없음 / `1` 드리프트 발견 / `2` CLI 오류. **exit 1 은 실패가 아니라 Step 3 의 입력입니다**
@@ -61,6 +62,14 @@ atelier drift sync --target claude-md --plugin-root "${CLAUDE_PLUGIN_ROOT}" --pr
   ```
 - **건너뛰기** 선택 시 파일을 건드리지 않고, 유지했다는 사실만 보고합니다
 - 질문할 수 없는 컨텍스트(자동화·headless)에서는 **묻지 않고 건너뛰기**로 처리합니다 — 덮어쓰기는 사용자 확인 없이는 수행하지 않습니다
+
+**`user-rules/*=DRIFTED`** → rules 복사본과 같은 방식으로 처리합니다 (사용자가 편집했을 수 있으므로 AskUserQuestion 확인 후에만 덮어쓰기, headless 는 건너뛰기). 덮어쓰기 선택 시:
+
+```bash
+atelier drift sync --target user-rules --plugin-root "${CLAUDE_PLUGIN_ROOT}" --project-dir "${CLAUDE_PROJECT_DIR:-.}"
+```
+
+`user-rules` 타겟은 매니페스트의 모든 파일을 한 번에 동기화하며, 파일마다 `synced:` 라인을 출력합니다.
 
 **`NOT_INSTALLED`** → 건너뜁니다. 신규 설치는 update 범위가 아니므로 필요 시 `/atelier:setup` 을 안내만 합니다.
 
@@ -93,7 +102,8 @@ Step 2·3 결과를 산출물별로 이어서 보고합니다:
 ```
 claude-md-coding-style-block=OK
 rules/agent-design-principles.md=OK
-→ 2 checked, 0 drifted, 0 missing
+user-rules/plan-vs-spec.md=OK
+→ 3 checked, 0 drifted, 0 missing
 ```
 
 **CLAUDE.md 블록 드리프트 → 자동 갱신:**
@@ -101,7 +111,8 @@ rules/agent-design-principles.md=OK
 ```
 claude-md-coding-style-block=DRIFTED (/Users/me/.claude/CLAUDE.md)
 rules/agent-design-principles.md=NOT_INSTALLED (./.claude/rules/agent-design-principles.md)
-→ 2 checked, 1 drifted, 1 missing
+user-rules/plan-vs-spec.md=OK
+→ 3 checked, 1 drifted, 1 missing
 ```
 
 ```

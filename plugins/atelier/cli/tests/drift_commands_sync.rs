@@ -10,7 +10,8 @@ use drift_mocks::*;
 
 fn run(fs: &MemFs, target: SyncTarget) -> Result<String, String> {
     let clock = FixedClock;
-    sync::run(&deps(fs, &clock), &paths(), target).map(|report| report.render())
+    sync::run(&deps(fs, &clock), &paths(), target)
+        .map(|reports| reports.iter().map(|r| r.render()).collect())
 }
 
 #[test]
@@ -65,6 +66,69 @@ fn sync_rules_overwrites_copy_and_backs_up() {
         fs.writes.borrow()[0],
         (backup, "locally edited\n".to_string())
     );
+}
+
+#[test]
+fn sync_user_rules_overwrites_copy_and_backs_up() {
+    // Every manifest copy is replaced wholesale with its plugin source.
+    let fs = MemFs::with_sources("body");
+    fs.insert(USER_RULE_COPY, "locally edited\n");
+
+    let line = run(&fs, SyncTarget::UserRules).unwrap();
+    let backup = format!("{USER_RULE_COPY}.bak-{TS}");
+    assert_eq!(
+        line,
+        format!("synced: {USER_RULE_COPY} (backup: {backup})\n")
+    );
+    assert_eq!(fs.content(USER_RULE_COPY).unwrap(), USER_RULE_BODY);
+    assert_eq!(
+        fs.writes.borrow()[0],
+        (backup, "locally edited\n".to_string())
+    );
+}
+
+#[test]
+fn refuses_when_user_rule_copy_absent_with_zero_writes() {
+    // Installing the user-rules copies is setup's job, not sync's.
+    let fs = MemFs::with_sources("body");
+
+    let err = run(&fs, SyncTarget::UserRules).unwrap_err();
+    assert_eq!(
+        err,
+        format!("not installed: {USER_RULE_COPY} — run /atelier:setup")
+    );
+    assert_eq!(fs.write_count(), 0);
+}
+
+#[test]
+fn refuses_non_utf8_user_rule_copy_with_zero_writes() {
+    // Same refusal as the project rules copy: no faithful backup, no write.
+    let fs = MemFs::with_sources("body");
+    fs.insert_bytes(USER_RULE_COPY, b"\xff\xfe not utf-8");
+
+    let err = run(&fs, SyncTarget::UserRules).unwrap_err();
+    assert_eq!(
+        err,
+        format!(
+            "{USER_RULE_COPY} is not valid UTF-8 — fix encoding or run /atelier:setup to reinstall"
+        )
+    );
+    assert_eq!(fs.write_count(), 0);
+}
+
+#[test]
+fn refuses_when_user_rule_source_missing_with_zero_writes() {
+    // A manifest entry without its plugin source is an environment error.
+    let fs = MemFs::with_sources("body");
+    fs.insert(USER_RULE_COPY, USER_RULE_BODY);
+    fs.files.borrow_mut().remove(TEMPLATE_USER_RULE);
+
+    let err = run(&fs, SyncTarget::UserRules).unwrap_err();
+    assert_eq!(
+        err,
+        format!("plugin source file not found: {TEMPLATE_USER_RULE}")
+    );
+    assert_eq!(fs.write_count(), 0);
 }
 
 #[test]
