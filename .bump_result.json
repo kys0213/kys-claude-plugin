@@ -3,11 +3,19 @@
   "results": [
     {
       "plugin": "atelier",
-      "old_version": "0.20.0",
-      "new_version": "0.20.1",
+      "old_version": "0.20.1",
+      "new_version": "0.21.0",
       "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/atelier/.claude-plugin/plugin.json",
       "marketplace_updated": true,
       "cargo_toml_updated": true
+    },
+    {
+      "plugin": "external-llm",
+      "old_version": "0.8.0",
+      "new_version": "0.9.0",
+      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/external-llm/.claude-plugin/plugin.json",
+      "marketplace_updated": true,
+      "cargo_toml_updated": false
     }
   ]
 }
