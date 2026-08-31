@@ -10,7 +10,9 @@
 
 use atelier::drift::commands::DriftDeps;
 use atelier::drift::core::artifact::{ArtifactFs, BackupClock};
-use atelier::drift::core::types::{ArtifactContent, DriftPaths, BEGIN_MARKER, END_MARKER};
+use atelier::drift::core::types::{
+    ArtifactContent, DriftPaths, BEGIN_MARKER, END_MARKER, POLICY_RULES,
+};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -20,14 +22,32 @@ pub const TS: &str = "20260821-120000";
 pub const PLUGIN_ROOT: &str = "/plugin";
 pub const USER_CLAUDE_MD: &str = "/home/u/.claude/CLAUDE.md";
 pub const PROJECT_DIR: &str = "/proj";
+pub const USER_RULES_DIR: &str = "/home/u/.claude/rules/atelier";
 
-/// Paths the commands derive from the fixture roots above.
+/// Paths the commands derive from the fixture roots above. The three policy
+/// constants are the paths of `POLICY_RULES[0]`, for tests that target one
+/// file.
 pub const TEMPLATE_CLAUDE_MD: &str = "/plugin/templates/claude-md/CLAUDE.md";
 pub const TEMPLATE_RULES: &str = "/plugin/rules/agent-design-principles.md";
 pub const RULES_COPY: &str = "/proj/.claude/rules/agent-design-principles.md";
+pub const TEMPLATE_USER_RULE: &str = "/plugin/rules/policies/spec-writing.md";
+pub const USER_RULE_COPY: &str = "/home/u/.claude/rules/atelier/spec-writing.md";
+pub const PROJECT_RULE_COPY: &str = "/proj/.claude/rules/atelier/spec-writing.md";
 
-/// Canonical rules source body used by the fixtures.
+/// Fixture-root paths of one policy manifest entry.
+pub fn template_policy_rule(name: &str) -> String {
+    format!("{PLUGIN_ROOT}/rules/policies/{name}")
+}
+pub fn user_rule_copy(name: &str) -> String {
+    format!("{USER_RULES_DIR}/{name}")
+}
+pub fn project_rule_copy(name: &str) -> String {
+    format!("{PROJECT_DIR}/.claude/rules/atelier/{name}")
+}
+
+/// Canonical rules source bodies used by the fixtures.
 pub const RULES_BODY: &str = "# Agent design principles\n\n- keep CLI deterministic\n";
+pub const USER_RULE_BODY: &str = "# Policy rule\n\n- plan is history, spec is policy\n";
 
 /// A coding-style block exactly as the template file ships it: the markers are
 /// part of the template itself.
@@ -41,6 +61,7 @@ pub fn paths() -> DriftPaths {
         plugin_root: PLUGIN_ROOT.to_string(),
         claude_md: USER_CLAUDE_MD.to_string(),
         project_dir: PROJECT_DIR.to_string(),
+        user_rules_dir: USER_RULES_DIR.to_string(),
     }
 }
 
@@ -65,13 +86,31 @@ impl MemFs {
             .insert(path.to_string(), bytes.to_vec());
     }
 
-    /// Fresh filesystem holding both plugin source files (template block body
-    /// `tpl_body`, rules source `RULES_BODY`) and nothing else.
+    /// Fresh filesystem holding every plugin source file (template block body
+    /// `tpl_body`, rules source `RULES_BODY`, every `POLICY_RULES` source as
+    /// `USER_RULE_BODY`) and nothing else.
     pub fn with_sources(tpl_body: &str) -> Self {
         let fs = MemFs::default();
         fs.insert(TEMPLATE_CLAUDE_MD, &block(tpl_body));
         fs.insert(TEMPLATE_RULES, RULES_BODY);
+        for name in POLICY_RULES {
+            fs.insert(&template_policy_rule(name), USER_RULE_BODY);
+        }
         fs
+    }
+
+    /// Installs every user-scope policy copy in sync with its source.
+    pub fn install_user_rule_copies(&self) {
+        for name in POLICY_RULES {
+            self.insert(&user_rule_copy(name), USER_RULE_BODY);
+        }
+    }
+
+    /// Installs every project-scope policy copy in sync with its source.
+    pub fn install_project_rule_copies(&self) {
+        for name in POLICY_RULES {
+            self.insert(&project_rule_copy(name), USER_RULE_BODY);
+        }
     }
 
     pub fn content(&self, path: &str) -> Option<String> {

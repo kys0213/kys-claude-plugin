@@ -1,7 +1,7 @@
 # atelier
 
 > Epic 1 (consolidation, [#765](https://github.com/kys0213/kys-claude-plugin/issues/765)) + Epic 2 (skill extraction, [#766](https://github.com/kys0213/kys-claude-plugin/issues/766)) 완료.
-> 설계: [`plans/atelier/`](../../plans/atelier/) · 상위 epic: [#738](https://github.com/kys0213/kys-claude-plugin/issues/738)
+> 설계 히스토리(plan — 시점 기록): [`plans/atelier/`](../../plans/atelier/) · 상위 epic: [#738](https://github.com/kys0213/kys-claude-plugin/issues/738)
 
 **atelier**(공방)는 개발 워크플로우를 처음부터 끝까지 책임지는 단일 큐레이션 plugin입니다.
 설계 합의 → spec 작성 → 구현 → 리뷰 → PR 머지까지의 전체 흐름을 하나의 책임 경계 안에서 제공합니다.

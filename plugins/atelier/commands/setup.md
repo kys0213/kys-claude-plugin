@@ -41,7 +41,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 | 선택 | 수행 동작 | 출처 |
 |---|---|---|
 | `git` | GitHub 인증 확인 + `~/.git-workflow-env` 생성 + Default Branch Guard hook | git-utils setup |
-| `style` | `~/.claude/CLAUDE.md` 코딩 원칙 병합 | coding-style setup |
+| `style` | `~/.claude/CLAUDE.md` 코딩 원칙 병합 + 문서 작성 정책 룰 설치 (user·project 스코프 선택) | coding-style setup |
 | `workflow` | `.claude/rules/agent-design-principles.md` 룰 설치 | workflow-guide install |
 | `all` | 위 세 가지 전부 | 신규 |
 
@@ -53,7 +53,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 > atelier drift check --plugin-root "${CLAUDE_PLUGIN_ROOT}" --project-dir "${CLAUDE_PROJECT_DIR:-.}"
 > ```
 >
-> `DRIFTED` 로 보고된 산출물의 모듈(`style` → CLAUDE.md 블록, `workflow` → rules 복사본)만 다시 선택하면 됩니다.
+> `DRIFTED` 로 보고된 산출물의 모듈(`style` → CLAUDE.md 블록·user rules 복사본, `workflow` → rules 복사본)만 다시 선택하면 됩니다.
 
 > 이미 설치된 환경에서 guard hook 만 비활성화/재설정하려면 Step 5 (hook 관리 모드)로 바로 진행합니다.
 
@@ -90,10 +90,17 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 
 - 템플릿 원본: `${CLAUDE_PLUGIN_ROOT}/templates/claude-md/CLAUDE.md`
 
+이어서 문서 작성 정책 룰(`paths:` 조건부 로드 — 해당 문서를 읽고 쓸 때만 주입)을 설치합니다. **설치 스코프를 AskUserQuestion 으로 선택**합니다:
+
+- 선택지: `[user (~/.claude/rules/atelier/ — 이 머신의 모든 프로젝트)]` `[project (<project>/.claude/rules/atelier/ — 이 레포 팀 공유, 버전 관리)]` `[둘 다]`
+- 선택된 스코프마다: 대상 디렉토리가 없으면 생성, 파일이 이미 존재하면 덮어쓸지 확인 후 `${CLAUDE_PLUGIN_ROOT}/rules/policies/` 의 정책 파일들을 **내용 수정 없이 그대로** 복사
+
+> 설치 대상 파일 목록은 CLI 의 `POLICY_RULES` 매니페스트(`drift/core/types.rs`)가 단일 출처입니다 — 이후 드리프트 점검·동기화(`drift check` / `drift sync --target user-rules|project-rules`)와 같은 목록을 봅니다.
+
 ## Step 3 — 기존 hook 마이그레이션 (frozen → atelier)
 
 기존 6개 plugin 사용자는 `~/.claude/settings.json` 에 **frozen plugin 경로**의 hook 이 박혀 있습니다.
-이를 atelier 로 재작성합니다. (상세: `plans/atelier/03-migration.md §A.3`)
+이를 atelier 로 재작성합니다. 현재 절차는 아래가 전부이며, 설계 배경은 `plans/atelier/03-migration.md §A.3` (plan — 시점 기록) 참조.
 
 ```
 1. atelier git hook list --project-dir "$HOME" 으로 현재 등록 현황 조회 (없으면 skip)

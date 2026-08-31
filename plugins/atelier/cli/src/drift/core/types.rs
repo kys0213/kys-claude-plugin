@@ -19,8 +19,23 @@ pub const TEMPLATE_CLAUDE_MD_REL: &str = "templates/claude-md/CLAUDE.md";
 pub const TEMPLATE_RULES_REL: &str = "rules/agent-design-principles.md";
 pub const RULES_COPY_REL: &str = ".claude/rules/agent-design-principles.md";
 
+/// Policy rules: plugin sources under `rules/policies/`, installed verbatim
+/// into the user rules directory (default `~/.claude/rules/atelier`) and/or
+/// the project rules directory (`<project>/.claude/rules/atelier`) — the
+/// installer chooses scope. The manifest is an explicit list, not a directory
+/// scan, so what setup installs and drift judges is pinned by the binary — a
+/// stray file in the source dir never ships. Distributing a new policy file =
+/// add it here and under `rules/policies/`.
+pub const TEMPLATE_POLICY_RULES_DIR_REL: &str = "rules/policies";
+pub const POLICY_RULES: &[&str] = &["spec-writing.md", "rules-writing.md", "plan-writing.md"];
+
+/// Project-relative directory the project-scope policy copies live in.
+pub const PROJECT_RULES_DIR_REL: &str = ".claude/rules/atelier";
+
 /// Check names as they appear on stdout — `commands/update.md` branches on
-/// these exact strings.
+/// these exact strings. Policy findings render as `user-rules/<file>` /
+/// `project-rules/<file>` per installed scope (assembled in
+/// `commands/check.rs`).
 pub const CLAUDE_MD_CHECK: &str = "claude-md-coding-style-block";
 pub const RULES_CHECK: &str = "rules/agent-design-principles.md";
 
@@ -80,6 +95,10 @@ pub enum SyncTarget {
     ClaudeMd,
     /// The project-local rules copy.
     Rules,
+    /// The user-scope policy copies (`POLICY_RULES`, or one via `--name`).
+    UserRules,
+    /// The project-scope policy copies (`POLICY_RULES`, or one via `--name`).
+    ProjectRules,
 }
 
 /// The three roots every drift command derives its file paths from. Resolved
@@ -93,6 +112,8 @@ pub struct DriftPaths {
     pub claude_md: String,
     /// Project root the rules copy lives under.
     pub project_dir: String,
+    /// Directory the user-scope rules copies live in.
+    pub user_rules_dir: String,
 }
 
 impl DriftPaths {
@@ -104,6 +125,18 @@ impl DriftPaths {
     }
     pub fn rules_copy(&self) -> String {
         format!("{}/{}", self.project_dir, RULES_COPY_REL)
+    }
+    pub fn template_policy_rule(&self, name: &str) -> String {
+        format!(
+            "{}/{}/{}",
+            self.plugin_root, TEMPLATE_POLICY_RULES_DIR_REL, name
+        )
+    }
+    pub fn user_rule_copy(&self, name: &str) -> String {
+        format!("{}/{}", self.user_rules_dir, name)
+    }
+    pub fn project_rule_copy(&self, name: &str) -> String {
+        format!("{}/{}/{}", self.project_dir, PROJECT_RULES_DIR_REL, name)
     }
 }
 
@@ -209,7 +242,9 @@ impl SyncReport {
                 "synced: coding-style block in {} (backup: {})\n",
                 self.path, self.backup
             ),
-            SyncTarget::Rules => format!("synced: {} (backup: {})\n", self.path, self.backup),
+            SyncTarget::Rules | SyncTarget::UserRules | SyncTarget::ProjectRules => {
+                format!("synced: {} (backup: {})\n", self.path, self.backup)
+            }
         }
     }
 }

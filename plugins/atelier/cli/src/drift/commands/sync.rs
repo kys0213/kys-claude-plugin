@@ -9,14 +9,53 @@
 
 use crate::drift::commands::{read_source, DriftDeps};
 use crate::drift::core::types::{
-    scan_markers, ArtifactContent, DriftPaths, SyncReport, SyncTarget,
+    scan_markers, ArtifactContent, DriftPaths, SyncReport, SyncTarget, POLICY_RULES,
 };
 
-/// Routes the target to its sync routine.
-pub fn run(deps: &DriftDeps, paths: &DriftPaths, target: SyncTarget) -> Result<SyncReport, String> {
+/// Routes the target to its sync routine. A target is one `--target` value,
+/// not one file: the policy targets cover every `POLICY_RULES` copy of their
+/// scope (or the single manifest entry `name` selects — check judges per
+/// file, so sync must be able to act per file without clobbering copies the
+/// user chose to keep), so the result is a report list (single-element for
+/// the other targets).
+pub fn run(
+    deps: &DriftDeps,
+    paths: &DriftPaths,
+    target: SyncTarget,
+    name: Option<&str>,
+) -> Result<Vec<SyncReport>, String> {
+    if let Some(name) = name {
+        if !matches!(target, SyncTarget::UserRules | SyncTarget::ProjectRules) {
+            return Err(
+                "--name is only supported with --target user-rules or project-rules".to_string(),
+            );
+        }
+        if !POLICY_RULES.contains(&name) {
+            return Err(format!(
+                "unknown policy rule: {name} — expected one of: {}",
+                POLICY_RULES.join(", ")
+            ));
+        }
+    }
     match target {
-        SyncTarget::ClaudeMd => sync_claude_md(deps, paths),
-        SyncTarget::Rules => sync_rules(deps, paths),
+        SyncTarget::ClaudeMd => sync_claude_md(deps, paths).map(|report| vec![report]),
+        SyncTarget::Rules => sync_verbatim_copies(
+            deps,
+            target,
+            &[(paths.rules_copy(), paths.template_rules())],
+        ),
+        SyncTarget::UserRules | SyncTarget::ProjectRules => {
+            let copy = |file: &str| match target {
+                SyncTarget::UserRules => paths.user_rule_copy(file),
+                _ => paths.project_rule_copy(file),
+            };
+            let pairs: Vec<(String, String)> = POLICY_RULES
+                .iter()
+                .filter(|file| name.is_none_or(|n| n == **file))
+                .map(|file| (copy(file), paths.template_policy_rule(file)))
+                .collect();
+            sync_verbatim_copies(deps, target, &pairs)
+        }
     }
 }
 
@@ -125,24 +164,43 @@ fn sync_claude_md(deps: &DriftDeps, paths: &DriftPaths) -> Result<SyncReport, St
     })
 }
 
-fn sync_rules(deps: &DriftDeps, paths: &DriftPaths) -> Result<SyncReport, String> {
-    let template_path = paths.template_rules();
-    if !deps.fs.exists(&template_path) {
-        return Err(format!("plugin source file not found: {template_path}"));
-    }
-    let copy_path = paths.rules_copy();
-    if !deps.fs.exists(&copy_path) {
-        return Err(format!("not installed: {copy_path} — run /atelier:setup"));
+/// Syncs verbatim-copy artifacts — the write-side mirror of
+/// `check_verbatim_copy`: the project rules copy and every user-rules copy
+/// share one contract, `(copy, template)` pairs overwritten wholesale.
+///
+/// The pair list syncs as a unit: every source and every installed copy is
+/// validated (and read) before the first write, so a refusal anywhere leaves
+/// all copies byte-for-byte untouched. One timestamp stamps every backup of
+/// the run.
+fn sync_verbatim_copies(
+    deps: &DriftDeps,
+    target: SyncTarget,
+    pairs: &[(String, String)],
+) -> Result<Vec<SyncReport>, String> {
+    let mut jobs = Vec::new();
+    for (copy_path, template_path) in pairs {
+        if !deps.fs.exists(template_path) {
+            return Err(format!("plugin source file not found: {template_path}"));
+        }
+        if !deps.fs.exists(copy_path) {
+            return Err(format!("not installed: {copy_path} — run /atelier:setup"));
+        }
+        let current = read_target(deps, copy_path)?;
+        let source = read_source(deps, template_path)?;
+        jobs.push((copy_path, current, source));
     }
 
-    let current = read_target(deps, &copy_path)?;
-    let source = read_source(deps, &template_path)?;
-    let backup_path = backup(deps, &copy_path, &current)?;
-    deps.fs.write(&copy_path, &source)?;
-
-    Ok(SyncReport {
-        target: SyncTarget::Rules,
-        path: copy_path,
-        backup: backup_path,
-    })
+    let stamp = deps.clock.backup_timestamp();
+    let mut reports = Vec::new();
+    for (copy_path, current, source) in jobs {
+        let backup_path = format!("{copy_path}.bak-{stamp}");
+        deps.fs.write(&backup_path, &current)?;
+        deps.fs.write(copy_path, &source)?;
+        reports.push(SyncReport {
+            target,
+            path: copy_path.clone(),
+            backup: backup_path,
+        });
+    }
+    Ok(reports)
 }
