@@ -29,7 +29,7 @@ fn all_in_sync_reports_ok_and_exit_zero() {
         report.render(),
         "claude-md-coding-style-block=OK\n\
          rules/agent-design-principles.md=OK\n\
-         user-rules/plan-vs-spec.md=OK\n\
+         user-rules/doc-hierarchy.md=OK\n\
          → 3 checked, 0 drifted, 0 missing\n"
     );
     assert_eq!(report.exit_code(), 0);
@@ -49,7 +49,7 @@ fn all_drifted_reports_drifted_and_exit_one() {
         format!(
             "claude-md-coding-style-block=DRIFTED ({USER_CLAUDE_MD})\n\
              rules/agent-design-principles.md=DRIFTED ({RULES_COPY})\n\
-             user-rules/plan-vs-spec.md=DRIFTED ({USER_RULE_COPY})\n\
+             user-rules/doc-hierarchy.md=DRIFTED ({USER_RULE_COPY})\n\
              → 3 checked, 3 drifted, 0 missing\n"
         )
     );
@@ -67,7 +67,7 @@ fn all_absent_reports_not_installed_and_exit_zero() {
         format!(
             "claude-md-coding-style-block=NOT_INSTALLED ({USER_CLAUDE_MD})\n\
              rules/agent-design-principles.md=NOT_INSTALLED ({RULES_COPY})\n\
-             user-rules/plan-vs-spec.md=NOT_INSTALLED ({USER_RULE_COPY})\n\
+             user-rules/doc-hierarchy.md=NOT_INSTALLED ({USER_RULE_COPY})\n\
              → 3 checked, 0 drifted, 3 missing\n"
         )
     );
@@ -212,6 +212,6 @@ fn non_utf8_user_rule_copy_is_drifted_not_an_error() {
     let report = run(&fs).unwrap();
     assert!(report
         .render()
-        .contains("user-rules/plan-vs-spec.md=DRIFTED (not valid UTF-8)"));
+        .contains("user-rules/doc-hierarchy.md=DRIFTED (not valid UTF-8)"));
     assert_eq!(report.exit_code(), 1);
 }

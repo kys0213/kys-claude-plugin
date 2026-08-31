@@ -121,7 +121,7 @@ fn drift_check_in_sync_exits_zero() {
         .assert()
         .success()
         .stdout(predicate::str::contains("claude-md-coding-style-block=OK"))
-        .stdout(predicate::str::contains("user-rules/plan-vs-spec.md=OK"))
+        .stdout(predicate::str::contains("user-rules/doc-hierarchy.md=OK"))
         .stdout(predicate::str::contains(
             "→ 3 checked, 0 drifted, 0 missing",
         ));

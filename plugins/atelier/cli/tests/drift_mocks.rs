@@ -23,17 +23,17 @@ pub const PROJECT_DIR: &str = "/proj";
 pub const USER_RULES_DIR: &str = "/home/u/.claude/rules/atelier";
 
 /// Paths the commands derive from the fixture roots above. The user-rule
-/// fixtures assume the `USER_RULES` manifest holds exactly `plan-vs-spec.md`.
+/// fixtures assume the `USER_RULES` manifest holds exactly `doc-hierarchy.md`.
 pub const TEMPLATE_CLAUDE_MD: &str = "/plugin/templates/claude-md/CLAUDE.md";
 pub const TEMPLATE_RULES: &str = "/plugin/rules/agent-design-principles.md";
 pub const RULES_COPY: &str = "/proj/.claude/rules/agent-design-principles.md";
-pub const TEMPLATE_USER_RULE: &str = "/plugin/rules/user/plan-vs-spec.md";
-pub const USER_RULE_COPY: &str = "/home/u/.claude/rules/atelier/plan-vs-spec.md";
-pub const USER_RULE_CHECK: &str = "user-rules/plan-vs-spec.md";
+pub const TEMPLATE_USER_RULE: &str = "/plugin/rules/user/doc-hierarchy.md";
+pub const USER_RULE_COPY: &str = "/home/u/.claude/rules/atelier/doc-hierarchy.md";
+pub const USER_RULE_CHECK: &str = "user-rules/doc-hierarchy.md";
 
 /// Canonical rules source bodies used by the fixtures.
 pub const RULES_BODY: &str = "# Agent design principles\n\n- keep CLI deterministic\n";
-pub const USER_RULE_BODY: &str = "# Plan vs Spec\n\n- plan is history, spec is policy\n";
+pub const USER_RULE_BODY: &str = "# Doc hierarchy\n\n- plan is history, spec is policy\n";
 
 /// A coding-style block exactly as the template file ships it: the markers are
 /// part of the template itself.

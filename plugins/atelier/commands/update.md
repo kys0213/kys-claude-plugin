@@ -102,7 +102,7 @@ Step 2·3 결과를 산출물별로 이어서 보고합니다:
 ```
 claude-md-coding-style-block=OK
 rules/agent-design-principles.md=OK
-user-rules/plan-vs-spec.md=OK
+user-rules/doc-hierarchy.md=OK
 → 3 checked, 0 drifted, 0 missing
 ```
 
@@ -111,7 +111,7 @@ user-rules/plan-vs-spec.md=OK
 ```
 claude-md-coding-style-block=DRIFTED (/Users/me/.claude/CLAUDE.md)
 rules/agent-design-principles.md=NOT_INSTALLED (./.claude/rules/agent-design-principles.md)
-user-rules/plan-vs-spec.md=OK
+user-rules/doc-hierarchy.md=OK
 → 3 checked, 1 drifted, 1 missing
 ```
 

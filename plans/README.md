@@ -6,4 +6,4 @@
 - 문서 안의 상태 표기(예: "설계 단계", "구현 전 승인 필요")는 작성 당시의 상태입니다. 현재 상태는 코드·이슈·PR에서 확인하세요.
 - 현재 동작·정책의 신뢰 소스는 코드와 spec 문서입니다. 판단이 필요하면 그쪽을 보세요.
 
-Plan vs Spec 구분 기준은 루트 [`CLAUDE.md`](../CLAUDE.md)의 "문서 계층 (Plan vs Spec)" 절을 참조하세요.
+Spec / Rules / Plan 구분 기준은 루트 [`CLAUDE.md`](../CLAUDE.md)의 "문서 계층 (Spec / Rules / Plan)" 절을 참조하세요.

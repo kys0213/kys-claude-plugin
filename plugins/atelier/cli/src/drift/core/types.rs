@@ -26,7 +26,7 @@ pub const RULES_COPY_REL: &str = ".claude/rules/agent-design-principles.md";
 /// never ships. Distributing a new policy file = add it here and under
 /// `rules/user/`.
 pub const TEMPLATE_USER_RULES_DIR_REL: &str = "rules/user";
-pub const USER_RULES: &[&str] = &["plan-vs-spec.md"];
+pub const USER_RULES: &[&str] = &["doc-hierarchy.md"];
 
 /// Check names as they appear on stdout — `commands/update.md` branches on
 /// these exact strings. User-rules findings render as `user-rules/<file>`.
