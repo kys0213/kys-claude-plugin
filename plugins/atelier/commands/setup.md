@@ -93,7 +93,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 이어서 user scope 정책 룰을 설치합니다 (Claude Code 의 `~/.claude/rules/` 자동 로드를 사용 — 모든 프로젝트 세션에 적용):
 
 1. `~/.claude/rules/atelier/` 디렉토리가 없으면 생성, 대상 파일이 존재하면 덮어쓸지 AskUserQuestion 으로 확인
-2. `${CLAUDE_PLUGIN_ROOT}/rules/user/` 의 정책 파일(현재 `doc-hierarchy.md`)을 **내용 수정 없이 그대로** `~/.claude/rules/atelier/` 에 복사
+2. `${CLAUDE_PLUGIN_ROOT}/rules/user/` 의 정책 파일들을 **내용 수정 없이 그대로** `~/.claude/rules/atelier/` 에 복사
 
 > 설치 대상 파일 목록은 CLI 의 `USER_RULES` 매니페스트(`drift/core/types.rs`)가 단일 출처입니다 — 이후 드리프트 점검·동기화(`drift check` / `drift sync --target user-rules`)와 같은 목록을 봅니다.
 

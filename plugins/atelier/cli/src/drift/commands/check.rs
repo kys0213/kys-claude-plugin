@@ -16,7 +16,7 @@
 use crate::drift::commands::{read_source, DriftDeps};
 use crate::drift::core::types::{
     scan_markers, ArtifactContent, ArtifactStatus, CheckFinding, CheckReport, DriftPaths,
-    CLAUDE_MD_CHECK, RULES_CHECK, USER_RULES, USER_RULES_CHECK_PREFIX,
+    CLAUDE_MD_CHECK, RULES_CHECK, USER_RULES,
 };
 
 /// Judges every artifact (CLAUDE.md block, rules copy, user-rules copies)
@@ -24,9 +24,14 @@ use crate::drift::core::types::{
 pub fn run(deps: &DriftDeps, paths: &DriftPaths) -> Result<CheckReport, String> {
     let template_claude_md = paths.template_claude_md();
     let template_rules = paths.template_rules();
-    let mut templates = vec![template_claude_md.clone(), template_rules.clone()];
-    templates.extend(USER_RULES.iter().map(|name| paths.template_user_rule(name)));
-    for template in &templates {
+    let user_templates: Vec<String> = USER_RULES
+        .iter()
+        .map(|name| paths.template_user_rule(name))
+        .collect();
+    for template in [&template_claude_md, &template_rules]
+        .into_iter()
+        .chain(&user_templates)
+    {
         if !deps.fs.exists(template) {
             return Err(format!("plugin source file not found: {template}"));
         }
@@ -36,12 +41,12 @@ pub fn run(deps: &DriftDeps, paths: &DriftPaths) -> Result<CheckReport, String> 
         check_claude_md(deps, &paths.claude_md, &template_claude_md)?,
         check_verbatim_copy(deps, RULES_CHECK, &paths.rules_copy(), &template_rules)?,
     ];
-    for name in USER_RULES {
+    for (name, template) in USER_RULES.iter().zip(&user_templates) {
         findings.push(check_verbatim_copy(
             deps,
-            &format!("{USER_RULES_CHECK_PREFIX}{name}"),
+            &format!("user-rules/{name}"),
             &paths.user_rule_copy(name),
-            &paths.template_user_rule(name),
+            template,
         )?);
     }
     Ok(CheckReport { findings })

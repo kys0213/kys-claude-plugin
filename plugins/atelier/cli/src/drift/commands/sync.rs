@@ -22,8 +22,18 @@ pub fn run(
 ) -> Result<Vec<SyncReport>, String> {
     match target {
         SyncTarget::ClaudeMd => sync_claude_md(deps, paths).map(|report| vec![report]),
-        SyncTarget::Rules => sync_rules(deps, paths).map(|report| vec![report]),
-        SyncTarget::UserRules => sync_user_rules(deps, paths),
+        SyncTarget::Rules => sync_verbatim_copies(
+            deps,
+            target,
+            &[(paths.rules_copy(), paths.template_rules())],
+        ),
+        SyncTarget::UserRules => {
+            let pairs: Vec<(String, String)> = USER_RULES
+                .iter()
+                .map(|name| (paths.user_rule_copy(name), paths.template_user_rule(name)))
+                .collect();
+            sync_verbatim_copies(deps, target, &pairs)
+        }
     }
 }
 
@@ -132,55 +142,41 @@ fn sync_claude_md(deps: &DriftDeps, paths: &DriftPaths) -> Result<SyncReport, St
     })
 }
 
-fn sync_rules(deps: &DriftDeps, paths: &DriftPaths) -> Result<SyncReport, String> {
-    let template_path = paths.template_rules();
-    if !deps.fs.exists(&template_path) {
-        return Err(format!("plugin source file not found: {template_path}"));
-    }
-    let copy_path = paths.rules_copy();
-    if !deps.fs.exists(&copy_path) {
-        return Err(format!("not installed: {copy_path} — run /atelier:setup"));
-    }
-
-    let current = read_target(deps, &copy_path)?;
-    let source = read_source(deps, &template_path)?;
-    let backup_path = backup(deps, &copy_path, &current)?;
-    deps.fs.write(&copy_path, &source)?;
-
-    Ok(SyncReport {
-        target: SyncTarget::Rules,
-        path: copy_path,
-        backup: backup_path,
-    })
-}
-
-fn sync_user_rules(deps: &DriftDeps, paths: &DriftPaths) -> Result<Vec<SyncReport>, String> {
-    // The manifest syncs as a unit: every source and every installed copy is
-    // validated (and read) before the first write, so a refusal anywhere
-    // leaves all copies byte-for-byte untouched — the same "refuse before any
-    // write" contract the single-file targets keep.
+/// Syncs verbatim-copy artifacts — the write-side mirror of
+/// `check_verbatim_copy`: the project rules copy and every user-rules copy
+/// share one contract, `(copy, template)` pairs overwritten wholesale.
+///
+/// The pair list syncs as a unit: every source and every installed copy is
+/// validated (and read) before the first write, so a refusal anywhere leaves
+/// all copies byte-for-byte untouched. One timestamp stamps every backup of
+/// the run.
+fn sync_verbatim_copies(
+    deps: &DriftDeps,
+    target: SyncTarget,
+    pairs: &[(String, String)],
+) -> Result<Vec<SyncReport>, String> {
     let mut jobs = Vec::new();
-    for name in USER_RULES {
-        let template_path = paths.template_user_rule(name);
-        if !deps.fs.exists(&template_path) {
+    for (copy_path, template_path) in pairs {
+        if !deps.fs.exists(template_path) {
             return Err(format!("plugin source file not found: {template_path}"));
         }
-        let copy_path = paths.user_rule_copy(name);
-        if !deps.fs.exists(&copy_path) {
+        if !deps.fs.exists(copy_path) {
             return Err(format!("not installed: {copy_path} — run /atelier:setup"));
         }
-        let current = read_target(deps, &copy_path)?;
-        let source = read_source(deps, &template_path)?;
+        let current = read_target(deps, copy_path)?;
+        let source = read_source(deps, template_path)?;
         jobs.push((copy_path, current, source));
     }
 
+    let stamp = deps.clock.backup_timestamp();
     let mut reports = Vec::new();
     for (copy_path, current, source) in jobs {
-        let backup_path = backup(deps, &copy_path, &current)?;
-        deps.fs.write(&copy_path, &source)?;
+        let backup_path = format!("{copy_path}.bak-{stamp}");
+        deps.fs.write(&backup_path, &current)?;
+        deps.fs.write(copy_path, &source)?;
         reports.push(SyncReport {
-            target: SyncTarget::UserRules,
-            path: copy_path,
+            target,
+            path: copy_path.clone(),
             backup: backup_path,
         });
     }

@@ -84,20 +84,30 @@ impl Fixture {
         }
     }
 
+    /// The path-flag set every drift invocation against this fixture takes.
+    fn path_flags(&self) -> [String; 8] {
+        [
+            "--plugin-root".into(),
+            self.plugin_root(),
+            "--claude-md".into(),
+            self.claude_md(),
+            "--project-dir".into(),
+            self.project_dir(),
+            "--user-rules-dir".into(),
+            self.user_rules_dir(),
+        ]
+    }
+
     fn check(&self) -> Command {
         let mut cmd = atelier();
-        cmd.args([
-            "drift",
-            "check",
-            "--plugin-root",
-            &self.plugin_root(),
-            "--claude-md",
-            &self.claude_md(),
-            "--project-dir",
-            &self.project_dir(),
-            "--user-rules-dir",
-            &self.user_rules_dir(),
-        ]);
+        cmd.args(["drift", "check"]).args(self.path_flags());
+        cmd
+    }
+
+    fn sync(&self, target: &str) -> Command {
+        let mut cmd = atelier();
+        cmd.args(["drift", "sync", "--target", target])
+            .args(self.path_flags());
         cmd
     }
 }
@@ -136,21 +146,7 @@ fn drift_sync_user_rules_then_check_roundtrip() {
         &format!("{}/{}", fx.user_rules_dir(), USER_RULES[0]),
         "locally edited\n",
     );
-    atelier()
-        .args([
-            "drift",
-            "sync",
-            "--target",
-            "user-rules",
-            "--plugin-root",
-            &fx.plugin_root(),
-            "--claude-md",
-            &fx.claude_md(),
-            "--project-dir",
-            &fx.project_dir(),
-            "--user-rules-dir",
-            &fx.user_rules_dir(),
-        ])
+    fx.sync("user-rules")
         .assert()
         .success()
         .stdout(predicate::str::contains("synced: "));
@@ -173,19 +169,7 @@ fn drift_sync_then_check_roundtrip() {
     // and a timestamped backup of the pre-sync file exists.
     let fx = Fixture::new("new body");
     fx.install("old body");
-    atelier()
-        .args([
-            "drift",
-            "sync",
-            "--target",
-            "claude-md",
-            "--plugin-root",
-            &fx.plugin_root(),
-            "--claude-md",
-            &fx.claude_md(),
-            "--project-dir",
-            &fx.project_dir(),
-        ])
+    fx.sync("claude-md")
         .assert()
         .success()
         .stdout(predicate::str::contains("synced: coding-style block in"));

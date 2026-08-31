@@ -29,7 +29,6 @@ pub const TEMPLATE_RULES: &str = "/plugin/rules/agent-design-principles.md";
 pub const RULES_COPY: &str = "/proj/.claude/rules/agent-design-principles.md";
 pub const TEMPLATE_USER_RULE: &str = "/plugin/rules/user/doc-hierarchy.md";
 pub const USER_RULE_COPY: &str = "/home/u/.claude/rules/atelier/doc-hierarchy.md";
-pub const USER_RULE_CHECK: &str = "user-rules/doc-hierarchy.md";
 
 /// Canonical rules source bodies used by the fixtures.
 pub const RULES_BODY: &str = "# Agent design principles\n\n- keep CLI deterministic\n";

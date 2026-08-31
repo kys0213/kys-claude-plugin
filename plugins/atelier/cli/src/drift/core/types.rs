@@ -29,10 +29,10 @@ pub const TEMPLATE_USER_RULES_DIR_REL: &str = "rules/user";
 pub const USER_RULES: &[&str] = &["doc-hierarchy.md"];
 
 /// Check names as they appear on stdout — `commands/update.md` branches on
-/// these exact strings. User-rules findings render as `user-rules/<file>`.
+/// these exact strings. User-rules findings render as `user-rules/<file>`
+/// (assembled in `commands/check.rs`).
 pub const CLAUDE_MD_CHECK: &str = "claude-md-coding-style-block";
 pub const RULES_CHECK: &str = "rules/agent-design-principles.md";
-pub const USER_RULES_CHECK_PREFIX: &str = "user-rules/";
 
 /// Marker occurrences in a line sequence. One scan shared by check
 /// (judgement) and sync (range replacement), so the two sides can never
