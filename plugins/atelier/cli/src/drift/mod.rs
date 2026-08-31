@@ -56,6 +56,9 @@ pub enum Commands {
         /// Which installed copy to update
         #[arg(long = "target", value_enum)]
         target: SyncTarget,
+        /// user-rules only: sync this one manifest file instead of all of them
+        #[arg(long = "name")]
+        name: Option<String>,
         #[command(flatten)]
         args: PathArgs,
     },
@@ -155,10 +158,10 @@ pub fn run(cli: Cli) -> i32 {
                 Err(e) => return fail(&e),
             }
         }
-        Commands::Sync { target, args } => {
+        Commands::Sync { target, name, args } => {
             match args
                 .resolve()
-                .and_then(|paths| commands::sync::run(&deps, &paths, target))
+                .and_then(|paths| commands::sync::run(&deps, &paths, target, name.as_deref()))
             {
                 Ok(reports) => (reports.iter().map(|r| r.render()).collect(), 0),
                 Err(e) => return fail(&e),

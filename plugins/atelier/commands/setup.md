@@ -90,7 +90,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 
 - 템플릿 원본: `${CLAUDE_PLUGIN_ROOT}/templates/claude-md/CLAUDE.md`
 
-이어서 user scope 정책 룰을 설치합니다 (Claude Code 의 `~/.claude/rules/` 자동 로드를 사용 — 모든 프로젝트 세션에 적용):
+이어서 user scope 정책 룰을 설치합니다 (Claude Code 의 `~/.claude/rules/` 자동 로드를 사용 — `paths:` 없는 룰은 모든 세션에 상시, `paths:` 있는 작성 가이드는 해당 문서를 읽고 쓸 때 조건부 로드):
 
 1. `~/.claude/rules/atelier/` 디렉토리가 없으면 생성, 대상 파일이 존재하면 덮어쓸지 AskUserQuestion 으로 확인
 2. `${CLAUDE_PLUGIN_ROOT}/rules/user/` 의 정책 파일들을 **내용 수정 없이 그대로** `~/.claude/rules/atelier/` 에 복사

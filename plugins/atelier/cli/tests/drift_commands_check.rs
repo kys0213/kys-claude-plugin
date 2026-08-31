@@ -5,12 +5,25 @@
 mod drift_mocks;
 
 use atelier::drift::commands::check;
-use atelier::drift::core::types::{CheckReport, BEGIN_MARKER, END_MARKER};
+use atelier::drift::core::types::{CheckReport, BEGIN_MARKER, END_MARKER, USER_RULES};
 use drift_mocks::*;
 
 fn run(fs: &MemFs) -> Result<CheckReport, String> {
     let clock = FixedClock;
     check::run(&deps(fs, &clock), &paths())
+}
+
+/// One `user-rules/<file>=<STATUS> (detail)` line per manifest entry, in
+/// manifest order — the detail column is derived from the file like the
+/// command derives it.
+fn user_rule_lines(status: &str, detail: fn(&str) -> Option<String>) -> String {
+    USER_RULES
+        .iter()
+        .map(|name| match detail(name) {
+            Some(detail) => format!("user-rules/{name}={status} ({detail})\n"),
+            None => format!("user-rules/{name}={status}\n"),
+        })
+        .collect()
 }
 
 #[test]
@@ -22,15 +35,18 @@ fn all_in_sync_reports_ok_and_exit_zero() {
         &format!("# mine\n{}tail\n", block("shared body")),
     );
     fs.insert(RULES_COPY, RULES_BODY);
-    fs.insert(USER_RULE_COPY, USER_RULE_BODY);
+    fs.install_user_rule_copies();
 
     let report = run(&fs).unwrap();
     assert_eq!(
         report.render(),
-        "claude-md-coding-style-block=OK\n\
-         rules/agent-design-principles.md=OK\n\
-         user-rules/doc-hierarchy.md=OK\n\
-         → 3 checked, 0 drifted, 0 missing\n"
+        format!(
+            "claude-md-coding-style-block=OK\n\
+             rules/agent-design-principles.md=OK\n\
+             {}→ {} checked, 0 drifted, 0 missing\n",
+            user_rule_lines("OK", |_| None),
+            2 + USER_RULES.len()
+        )
     );
     assert_eq!(report.exit_code(), 0);
 }
@@ -41,7 +57,9 @@ fn all_drifted_reports_drifted_and_exit_one() {
     let fs = MemFs::with_sources("new body");
     fs.insert(USER_CLAUDE_MD, &block("old body"));
     fs.insert(RULES_COPY, "locally edited\n");
-    fs.insert(USER_RULE_COPY, "locally edited\n");
+    for name in USER_RULES {
+        fs.insert(&user_rule_copy(name), "locally edited\n");
+    }
 
     let report = run(&fs).unwrap();
     assert_eq!(
@@ -49,8 +67,10 @@ fn all_drifted_reports_drifted_and_exit_one() {
         format!(
             "claude-md-coding-style-block=DRIFTED ({USER_CLAUDE_MD})\n\
              rules/agent-design-principles.md=DRIFTED ({RULES_COPY})\n\
-             user-rules/doc-hierarchy.md=DRIFTED ({USER_RULE_COPY})\n\
-             → 3 checked, 3 drifted, 0 missing\n"
+             {}→ {} checked, {} drifted, 0 missing\n",
+            user_rule_lines("DRIFTED", |name| Some(user_rule_copy(name))),
+            2 + USER_RULES.len(),
+            2 + USER_RULES.len()
         )
     );
     assert_eq!(report.exit_code(), 1);
@@ -67,8 +87,10 @@ fn all_absent_reports_not_installed_and_exit_zero() {
         format!(
             "claude-md-coding-style-block=NOT_INSTALLED ({USER_CLAUDE_MD})\n\
              rules/agent-design-principles.md=NOT_INSTALLED ({RULES_COPY})\n\
-             user-rules/doc-hierarchy.md=NOT_INSTALLED ({USER_RULE_COPY})\n\
-             → 3 checked, 0 drifted, 3 missing\n"
+             {}→ {} checked, 0 drifted, {} missing\n",
+            user_rule_lines("NOT_INSTALLED", |name| Some(user_rule_copy(name))),
+            2 + USER_RULES.len(),
+            2 + USER_RULES.len()
         )
     );
     assert_eq!(report.exit_code(), 0);

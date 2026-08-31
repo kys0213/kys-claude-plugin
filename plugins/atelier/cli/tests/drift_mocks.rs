@@ -10,7 +10,9 @@
 
 use atelier::drift::commands::DriftDeps;
 use atelier::drift::core::artifact::{ArtifactFs, BackupClock};
-use atelier::drift::core::types::{ArtifactContent, DriftPaths, BEGIN_MARKER, END_MARKER};
+use atelier::drift::core::types::{
+    ArtifactContent, DriftPaths, BEGIN_MARKER, END_MARKER, USER_RULES,
+};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -22,17 +24,25 @@ pub const USER_CLAUDE_MD: &str = "/home/u/.claude/CLAUDE.md";
 pub const PROJECT_DIR: &str = "/proj";
 pub const USER_RULES_DIR: &str = "/home/u/.claude/rules/atelier";
 
-/// Paths the commands derive from the fixture roots above. The user-rule
-/// fixtures assume the `USER_RULES` manifest holds exactly `doc-hierarchy.md`.
+/// Paths the commands derive from the fixture roots above. The two user-rule
+/// constants are the paths of `USER_RULES[0]`, for tests that target one file.
 pub const TEMPLATE_CLAUDE_MD: &str = "/plugin/templates/claude-md/CLAUDE.md";
 pub const TEMPLATE_RULES: &str = "/plugin/rules/agent-design-principles.md";
 pub const RULES_COPY: &str = "/proj/.claude/rules/agent-design-principles.md";
 pub const TEMPLATE_USER_RULE: &str = "/plugin/rules/user/doc-hierarchy.md";
 pub const USER_RULE_COPY: &str = "/home/u/.claude/rules/atelier/doc-hierarchy.md";
 
+/// Fixture-root paths of one user-rule manifest entry.
+pub fn template_user_rule(name: &str) -> String {
+    format!("{PLUGIN_ROOT}/rules/user/{name}")
+}
+pub fn user_rule_copy(name: &str) -> String {
+    format!("{USER_RULES_DIR}/{name}")
+}
+
 /// Canonical rules source bodies used by the fixtures.
 pub const RULES_BODY: &str = "# Agent design principles\n\n- keep CLI deterministic\n";
-pub const USER_RULE_BODY: &str = "# Doc hierarchy\n\n- plan is history, spec is policy\n";
+pub const USER_RULE_BODY: &str = "# User rule\n\n- plan is history, spec is policy\n";
 
 /// A coding-style block exactly as the template file ships it: the markers are
 /// part of the template itself.
@@ -72,14 +82,23 @@ impl MemFs {
     }
 
     /// Fresh filesystem holding every plugin source file (template block body
-    /// `tpl_body`, rules source `RULES_BODY`, user rule source
+    /// `tpl_body`, rules source `RULES_BODY`, every `USER_RULES` source as
     /// `USER_RULE_BODY`) and nothing else.
     pub fn with_sources(tpl_body: &str) -> Self {
         let fs = MemFs::default();
         fs.insert(TEMPLATE_CLAUDE_MD, &block(tpl_body));
         fs.insert(TEMPLATE_RULES, RULES_BODY);
-        fs.insert(TEMPLATE_USER_RULE, USER_RULE_BODY);
+        for name in USER_RULES {
+            fs.insert(&template_user_rule(name), USER_RULE_BODY);
+        }
         fs
+    }
+
+    /// Installs every `USER_RULES` copy in sync with its source.
+    pub fn install_user_rule_copies(&self) {
+        for name in USER_RULES {
+            self.insert(&user_rule_copy(name), USER_RULE_BODY);
+        }
     }
 
     pub fn content(&self, path: &str) -> Option<String> {
