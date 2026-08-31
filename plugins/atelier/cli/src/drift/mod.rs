@@ -56,7 +56,8 @@ pub enum Commands {
         /// Which installed copy to update
         #[arg(long = "target", value_enum)]
         target: SyncTarget,
-        /// user-rules only: sync this one manifest file instead of all of them
+        /// user-rules / project-rules only: sync this one manifest file
+        /// instead of all of them
         #[arg(long = "name")]
         name: Option<String>,
         #[command(flatten)]

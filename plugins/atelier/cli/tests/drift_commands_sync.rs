@@ -5,7 +5,7 @@
 mod drift_mocks;
 
 use atelier::drift::commands::sync;
-use atelier::drift::core::types::{SyncTarget, BEGIN_MARKER, END_MARKER, USER_RULES};
+use atelier::drift::core::types::{SyncTarget, BEGIN_MARKER, END_MARKER, POLICY_RULES};
 use drift_mocks::*;
 
 fn run_named(fs: &MemFs, target: SyncTarget, name: Option<&str>) -> Result<String, String> {
@@ -81,7 +81,7 @@ fn sync_user_rules_overwrites_copy_and_backs_up() {
     fs.insert(USER_RULE_COPY, "locally edited\n");
 
     let lines = run(&fs, SyncTarget::UserRules).unwrap();
-    let expected: String = USER_RULES
+    let expected: String = POLICY_RULES
         .iter()
         .map(|name| {
             let copy = user_rule_copy(name);
@@ -106,7 +106,7 @@ fn sync_user_rules_with_name_syncs_only_that_file() {
     let fs = MemFs::with_sources("body");
     fs.insert(USER_RULE_COPY, "locally edited\n");
 
-    let line = run_named(&fs, SyncTarget::UserRules, Some(USER_RULES[0])).unwrap();
+    let line = run_named(&fs, SyncTarget::UserRules, Some(POLICY_RULES[0])).unwrap();
     assert_eq!(
         line,
         format!("synced: {USER_RULE_COPY} (backup: {USER_RULE_COPY}.bak-{TS})\n")
@@ -117,24 +117,60 @@ fn sync_user_rules_with_name_syncs_only_that_file() {
 }
 
 #[test]
+fn sync_project_rules_overwrites_copy_and_backs_up() {
+    // The project-scope target mirrors the user-scope one on its own copies.
+    let fs = MemFs::with_sources("body");
+    fs.install_project_rule_copies();
+    fs.insert(PROJECT_RULE_COPY, "locally edited\n");
+
+    let lines = run(&fs, SyncTarget::ProjectRules).unwrap();
+    let expected: String = POLICY_RULES
+        .iter()
+        .map(|name| {
+            let copy = project_rule_copy(name);
+            format!("synced: {copy} (backup: {copy}.bak-{TS})\n")
+        })
+        .collect();
+    assert_eq!(lines, expected);
+    assert_eq!(fs.content(PROJECT_RULE_COPY).unwrap(), USER_RULE_BODY);
+}
+
+#[test]
+fn sync_project_rules_with_name_syncs_only_that_file() {
+    // --name works per scope: only the named project copy is touched.
+    let fs = MemFs::with_sources("body");
+    fs.insert(PROJECT_RULE_COPY, "locally edited\n");
+
+    let line = run_named(&fs, SyncTarget::ProjectRules, Some(POLICY_RULES[0])).unwrap();
+    assert_eq!(
+        line,
+        format!("synced: {PROJECT_RULE_COPY} (backup: {PROJECT_RULE_COPY}.bak-{TS})\n")
+    );
+    assert_eq!(fs.write_count(), 2);
+}
+
+#[test]
 fn refuses_unknown_user_rule_name_with_zero_writes() {
     // --name is validated against the manifest before anything is touched.
     let fs = MemFs::with_sources("body");
     fs.install_user_rule_copies();
 
     let err = run_named(&fs, SyncTarget::UserRules, Some("bogus.md")).unwrap_err();
-    assert!(err.starts_with("unknown user rule: bogus.md"));
+    assert!(err.starts_with("unknown policy rule: bogus.md"));
     assert_eq!(fs.write_count(), 0);
 }
 
 #[test]
-fn refuses_name_on_non_user_rules_target_with_zero_writes() {
+fn refuses_name_on_non_policy_target_with_zero_writes() {
     // --name has no meaning for single-artifact targets.
     let fs = MemFs::with_sources("body");
     fs.insert(RULES_COPY, RULES_BODY);
 
-    let err = run_named(&fs, SyncTarget::Rules, Some(USER_RULES[0])).unwrap_err();
-    assert_eq!(err, "--name is only supported with --target user-rules");
+    let err = run_named(&fs, SyncTarget::Rules, Some(POLICY_RULES[0])).unwrap_err();
+    assert_eq!(
+        err,
+        "--name is only supported with --target user-rules or project-rules"
+    );
     assert_eq!(fs.write_count(), 0);
 }
 

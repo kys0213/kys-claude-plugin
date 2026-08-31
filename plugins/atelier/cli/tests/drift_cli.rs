@@ -6,8 +6,8 @@ mod drift_mocks;
 
 use assert_cmd::Command;
 use atelier::drift::core::types::{
-    RULES_COPY_REL, TEMPLATE_CLAUDE_MD_REL, TEMPLATE_RULES_REL, TEMPLATE_USER_RULES_DIR_REL,
-    USER_RULES,
+    POLICY_RULES, RULES_COPY_REL, TEMPLATE_CLAUDE_MD_REL, TEMPLATE_POLICY_RULES_DIR_REL,
+    TEMPLATE_RULES_REL,
 };
 use drift_mocks::{block, RULES_BODY, USER_RULE_BODY};
 use predicates::prelude::*;
@@ -40,9 +40,9 @@ impl Fixture {
             &block(tpl_body),
         );
         write(&fx.at(&format!("plugin/{TEMPLATE_RULES_REL}")), RULES_BODY);
-        for name in USER_RULES {
+        for name in POLICY_RULES {
             write(
-                &fx.at(&format!("plugin/{TEMPLATE_USER_RULES_DIR_REL}/{name}")),
+                &fx.at(&format!("plugin/{TEMPLATE_POLICY_RULES_DIR_REL}/{name}")),
                 USER_RULE_BODY,
             );
         }
@@ -79,8 +79,12 @@ impl Fixture {
             &format!("{}/{RULES_COPY_REL}", self.project_dir()),
             RULES_BODY,
         );
-        for name in USER_RULES {
+        for name in POLICY_RULES {
             write(&format!("{}/{name}", self.user_rules_dir()), USER_RULE_BODY);
+            write(
+                &format!("{}/.claude/rules/atelier/{name}", self.project_dir()),
+                USER_RULE_BODY,
+            );
         }
     }
 
@@ -133,11 +137,15 @@ fn drift_check_in_sync_exits_zero() {
         .stdout(predicate::str::contains("claude-md-coding-style-block=OK"))
         .stdout(predicate::str::contains(format!(
             "user-rules/{}=OK",
-            USER_RULES[0]
+            POLICY_RULES[0]
+        )))
+        .stdout(predicate::str::contains(format!(
+            "project-rules/{}=OK",
+            POLICY_RULES[0]
         )))
         .stdout(predicate::str::contains(format!(
             "→ {} checked, 0 drifted, 0 missing",
-            2 + USER_RULES.len()
+            2 + 2 * POLICY_RULES.len()
         )));
 }
 
@@ -147,7 +155,7 @@ fn drift_sync_user_rules_then_check_roundtrip() {
     let fx = Fixture::new("body");
     fx.install("body");
     write(
-        &format!("{}/{}", fx.user_rules_dir(), USER_RULES[0]),
+        &format!("{}/{}", fx.user_rules_dir(), POLICY_RULES[0]),
         "locally edited\n",
     );
     fx.sync("user-rules")

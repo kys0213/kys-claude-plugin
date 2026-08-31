@@ -9,14 +9,15 @@
 
 use crate::drift::commands::{read_source, DriftDeps};
 use crate::drift::core::types::{
-    scan_markers, ArtifactContent, DriftPaths, SyncReport, SyncTarget, USER_RULES,
+    scan_markers, ArtifactContent, DriftPaths, SyncReport, SyncTarget, POLICY_RULES,
 };
 
 /// Routes the target to its sync routine. A target is one `--target` value,
-/// not one file: user-rules covers every `USER_RULES` copy (or the single
-/// manifest entry `name` selects — check judges per file, so sync must be able
-/// to act per file without clobbering copies the user chose to keep), so the
-/// result is a report list (single-element for the other targets).
+/// not one file: the policy targets cover every `POLICY_RULES` copy of their
+/// scope (or the single manifest entry `name` selects — check judges per
+/// file, so sync must be able to act per file without clobbering copies the
+/// user chose to keep), so the result is a report list (single-element for
+/// the other targets).
 pub fn run(
     deps: &DriftDeps,
     paths: &DriftPaths,
@@ -24,13 +25,15 @@ pub fn run(
     name: Option<&str>,
 ) -> Result<Vec<SyncReport>, String> {
     if let Some(name) = name {
-        if target != SyncTarget::UserRules {
-            return Err("--name is only supported with --target user-rules".to_string());
+        if !matches!(target, SyncTarget::UserRules | SyncTarget::ProjectRules) {
+            return Err(
+                "--name is only supported with --target user-rules or project-rules".to_string(),
+            );
         }
-        if !USER_RULES.contains(&name) {
+        if !POLICY_RULES.contains(&name) {
             return Err(format!(
-                "unknown user rule: {name} — expected one of: {}",
-                USER_RULES.join(", ")
+                "unknown policy rule: {name} — expected one of: {}",
+                POLICY_RULES.join(", ")
             ));
         }
     }
@@ -41,11 +44,15 @@ pub fn run(
             target,
             &[(paths.rules_copy(), paths.template_rules())],
         ),
-        SyncTarget::UserRules => {
-            let pairs: Vec<(String, String)> = USER_RULES
+        SyncTarget::UserRules | SyncTarget::ProjectRules => {
+            let copy = |file: &str| match target {
+                SyncTarget::UserRules => paths.user_rule_copy(file),
+                _ => paths.project_rule_copy(file),
+            };
+            let pairs: Vec<(String, String)> = POLICY_RULES
                 .iter()
                 .filter(|file| name.is_none_or(|n| n == **file))
-                .map(|file| (paths.user_rule_copy(file), paths.template_user_rule(file)))
+                .map(|file| (copy(file), paths.template_policy_rule(file)))
                 .collect();
             sync_verbatim_copies(deps, target, &pairs)
         }

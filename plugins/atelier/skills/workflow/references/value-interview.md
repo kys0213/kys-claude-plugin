@@ -36,7 +36,7 @@ scaffold 시 프로젝트 가치관을 수집하는 인터뷰 카테고리와, �
 
 ## 2. CLAUDE.md vs .claude/rules/ 배치 기준
 
-인터뷰 결과를 어디에 저장할지 결정하는 기준입니다. CLAUDE.md와 `.claude/rules/`는 모두 문서 계층의 **rules 레이어**(작업자가 어떻게 일하는가)입니다 — spec(제품 규격)·plan(시점 히스토리)과의 상위 구분은 `rules/user/doc-hierarchy.md`를 따르고, 이 절은 rules 레이어 안에서의 배치만 정합니다.
+인터뷰 결과를 어디에 저장할지 결정하는 기준입니다. CLAUDE.md와 `.claude/rules/`는 모두 문서 계층의 **rules 레이어**(작업자가 어떻게 일하는가)입니다 — spec(제품 규격)·plan(시점 히스토리)과의 상위 구분은 CLAUDE.md 코딩 원칙 블록의 "문서 계층 (Spec / Rules / Plan)" 절을 따르고, 이 절은 rules 레이어 안에서의 배치만 정합니다.
 
 | 내용 | 위치 | 이유 |
 |------|------|------|

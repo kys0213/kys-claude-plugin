@@ -16,21 +16,21 @@
 use crate::drift::commands::{read_source, DriftDeps};
 use crate::drift::core::types::{
     scan_markers, ArtifactContent, ArtifactStatus, CheckFinding, CheckReport, DriftPaths,
-    CLAUDE_MD_CHECK, RULES_CHECK, USER_RULES,
+    CLAUDE_MD_CHECK, POLICY_RULES, RULES_CHECK,
 };
 
-/// Judges every artifact (CLAUDE.md block, rules copy, user-rules copies)
-/// against its plugin source.
+/// Judges every artifact (CLAUDE.md block, rules copy, policy copies in both
+/// scopes) against its plugin source.
 pub fn run(deps: &DriftDeps, paths: &DriftPaths) -> Result<CheckReport, String> {
     let template_claude_md = paths.template_claude_md();
     let template_rules = paths.template_rules();
-    let user_templates: Vec<String> = USER_RULES
+    let policy_templates: Vec<String> = POLICY_RULES
         .iter()
-        .map(|name| paths.template_user_rule(name))
+        .map(|name| paths.template_policy_rule(name))
         .collect();
     for template in [&template_claude_md, &template_rules]
         .into_iter()
-        .chain(&user_templates)
+        .chain(&policy_templates)
     {
         if !deps.fs.exists(template) {
             return Err(format!("plugin source file not found: {template}"));
@@ -41,11 +41,21 @@ pub fn run(deps: &DriftDeps, paths: &DriftPaths) -> Result<CheckReport, String> 
         check_claude_md(deps, &paths.claude_md, &template_claude_md)?,
         check_verbatim_copy(deps, RULES_CHECK, &paths.rules_copy(), &template_rules)?,
     ];
-    for (name, template) in USER_RULES.iter().zip(&user_templates) {
+    // Policy copies are judged per scope: the installer chooses user and/or
+    // project scope, so an uninstalled scope reports NOT_INSTALLED (not drift).
+    for (name, template) in POLICY_RULES.iter().zip(&policy_templates) {
         findings.push(check_verbatim_copy(
             deps,
             &format!("user-rules/{name}"),
             &paths.user_rule_copy(name),
+            template,
+        )?);
+    }
+    for (name, template) in POLICY_RULES.iter().zip(&policy_templates) {
+        findings.push(check_verbatim_copy(
+            deps,
+            &format!("project-rules/{name}"),
+            &paths.project_rule_copy(name),
             template,
         )?);
     }

@@ -41,7 +41,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 | 선택 | 수행 동작 | 출처 |
 |---|---|---|
 | `git` | GitHub 인증 확인 + `~/.git-workflow-env` 생성 + Default Branch Guard hook | git-utils setup |
-| `style` | `~/.claude/CLAUDE.md` 코딩 원칙 병합 + `~/.claude/rules/atelier/` 정책 룰 설치 | coding-style setup |
+| `style` | `~/.claude/CLAUDE.md` 코딩 원칙 병합 + 문서 작성 정책 룰 설치 (user·project 스코프 선택) | coding-style setup |
 | `workflow` | `.claude/rules/agent-design-principles.md` 룰 설치 | workflow-guide install |
 | `all` | 위 세 가지 전부 | 신규 |
 
@@ -90,12 +90,12 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 
 - 템플릿 원본: `${CLAUDE_PLUGIN_ROOT}/templates/claude-md/CLAUDE.md`
 
-이어서 user scope 정책 룰을 설치합니다 (Claude Code 의 `~/.claude/rules/` 자동 로드를 사용 — `paths:` 없는 룰은 모든 세션에 상시, `paths:` 있는 작성 가이드는 해당 문서를 읽고 쓸 때 조건부 로드):
+이어서 문서 작성 정책 룰(`paths:` 조건부 로드 — 해당 문서를 읽고 쓸 때만 주입)을 설치합니다. **설치 스코프를 AskUserQuestion 으로 선택**합니다:
 
-1. `~/.claude/rules/atelier/` 디렉토리가 없으면 생성, 대상 파일이 존재하면 덮어쓸지 AskUserQuestion 으로 확인
-2. `${CLAUDE_PLUGIN_ROOT}/rules/user/` 의 정책 파일들을 **내용 수정 없이 그대로** `~/.claude/rules/atelier/` 에 복사
+- 선택지: `[user (~/.claude/rules/atelier/ — 이 머신의 모든 프로젝트)]` `[project (<project>/.claude/rules/atelier/ — 이 레포 팀 공유, 버전 관리)]` `[둘 다]`
+- 선택된 스코프마다: 대상 디렉토리가 없으면 생성, 파일이 이미 존재하면 덮어쓸지 확인 후 `${CLAUDE_PLUGIN_ROOT}/rules/policies/` 의 정책 파일들을 **내용 수정 없이 그대로** 복사
 
-> 설치 대상 파일 목록은 CLI 의 `USER_RULES` 매니페스트(`drift/core/types.rs`)가 단일 출처입니다 — 이후 드리프트 점검·동기화(`drift check` / `drift sync --target user-rules`)와 같은 목록을 봅니다.
+> 설치 대상 파일 목록은 CLI 의 `POLICY_RULES` 매니페스트(`drift/core/types.rs`)가 단일 출처입니다 — 이후 드리프트 점검·동기화(`drift check` / `drift sync --target user-rules|project-rules`)와 같은 목록을 봅니다.
 
 ## Step 3 — 기존 hook 마이그레이션 (frozen → atelier)
 
