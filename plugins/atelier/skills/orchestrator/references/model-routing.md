@@ -39,7 +39,7 @@ user-invocable: false
 - **상한이 기본값이 아닌 근거**: `≤ 메인 tier`는 초과를 막는 규칙이지 배정 기준이 아니다. 배정 기준은 작업 유형 → 시작 tier 표다 — 상한 규칙만 보고 모든 dispatch를 메인 tier(보통 최상위)로 수렴시키면 중간·경량 tier가 실질적으로 사라지고 비용이 폭증한다.
 - **버전 고정 ID를 안 박는 근거**: 세대가 바뀌어도 이 원칙이 그대로 성립해야 한다. 역량 수준 ↔ 실제 모델 매핑은 세대 비종속 alias 기본 매핑(아래 §tier ↔ 모델 alias 기본 매핑)에서 시작해 dispatch 시점에 재평가한다.
 
-작업 유형 → 시작 tier 표는 `delegation-patterns.md §모델 선택`이 단일 출처다 (여기서 중복 정의하지 않는다). 자율 루프의 작업별 배분 원칙은 `autonomous-driving.md §모델 분배`.
+작업 유형 → 시작 tier 표와 판정 원리(`§tier 판정 3질문` — 파급 범위·개방성·회수 비용)는 `delegation-patterns.md §모델 선택`이 단일 출처다 (여기서 중복 정의하지 않는다). 자율 루프의 작업별 배분 원칙은 `autonomous-driving.md §모델 분배`.
 
 ## tier ↔ 모델 alias 기본 매핑 (단일 출처)
 
