@@ -178,7 +178,8 @@ read-only 조사·감사·원인분석은 충돌 비용이 없어 "의심스러�
 
 ## 모델 라우팅 (요지)
 
-- **집행 위임(자문 제외 전부 — 구현·문서·리서치·조사·리뷰·게이트)의 tier ≤ 메인 tier, 예외 없음.** 매 dispatch에 `model` 명시 필수(상속 금지), 문서에 모델명을 박지 않는다. **자문 조회만 상위 tier 허용** — 권고 + 근거(read-only)만 사오고 결정권은 메인에 100% 잔류, team member 전용(필수 등급).
+- **집행 위임(자문 제외 전부 — 구현·문서·리서치·조사·리뷰·게이트)의 tier ≤ 메인 tier, 예외 없음.** 매 dispatch에 `model` 명시 필수(상속 금지), 문서에 버전 고정 모델 ID를 박지 않는다. **자문 조회만 상위 tier 허용** — 권고 + 근거(read-only)만 사오고 결정권은 메인에 100% 잔류, team member 전용(필수 등급).
+- **상한은 기본값이 아니다.** 배정은 작업 유형 → 시작 tier 표에서 시작하고, tier는 세대 비종속 alias 기본 매핑(최상위 `opus`·중간 `sonnet`·경량 `haiku`)으로 실제 모델에 내린다 — 일반 구현·리뷰·discovery까지 메인 tier로 수렴시키지 않는다 (`references/model-routing.md §tier ↔ 모델 alias 기본 매핑`이 단일 출처).
 - **team 비가용 = 자문 경로 차단**: 트리거에 도달해도 소집하지 않고, 무엇으로도 대체하지 않으며, 원래 하려던 에스컬레이션으로 진행하고 그 사실을 판정 근거와 함께 decision log에 남긴다. 사용자가 명시 요청해도 우회하지 못한다 (절차: `references/advisory-consult.md §게이트 0`, 자율 모드 `max_advisory_consults = 0`은 `references/autonomous-driving.md §자율 계약`이 단일 출처).
 - 판정 트리·집행/자문 대비 표·역할별 모델 제약은 `references/model-routing.md`가 단일 출처다. 작업 유형 → 시작 tier 표는 `references/delegation-patterns.md §모델 선택`.
 
@@ -188,7 +189,7 @@ read-only 조사·감사·원인분석은 충돌 비용이 없어 "의심스러�
 |------|-------------|
 | `references/architect-council.md` | 분해(1단계) 시 요구가 복잡·모호해 아키텍트 협의체(설계 생성 ↔ 심문 검증)로 분석·검증 후 task 를 도출할 때 |
 | `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때, **경로 판정이 경계 케이스이거나 경로 전환·preflight·탐색 예산·병렬/순차 전체 트리를 적용할 때**(§경로 판정 경계 케이스·§경로 전환·§공유 전제 preflight·§탐색 예산·§병렬 vs 순차 결정 트리가 단일 출처), **team 강제 등급을 판정할 때**(§team mode 강제 등급이 단일 출처), **원인 불명 결함·회귀를 조사할 때**(§근본원인 swarm — 축 분해·증거 계약·가설 랭킹) — **작업 유형 → tier 표의 단일 출처** (역할 기준 원칙·역할별 모델 제약은 `references/model-routing.md`가 단일 출처) |
-| `references/model-routing.md` | dispatch의 model/tier를 정할 때 — 역할 기준 원칙(집행 tier 상한)·자문 tier 예외·역할별 모델 제약의 단일 출처 (작업 유형 → tier 표는 `delegation-patterns.md §모델 선택`) |
+| `references/model-routing.md` | dispatch의 model/tier를 정할 때 — 역할 기준 원칙(집행 tier 상한)·자문 tier 예외·tier ↔ 모델 alias 기본 매핑·역할별 모델 제약의 단일 출처 (작업 유형 → tier 표는 `delegation-patterns.md §모델 선택`) |
 | `references/branch-strategy.md` | 무거운 경로에서 **브랜치를 어떻게 운영할지** 정할 때 — worktree 브랜치 네이밍, hot-spot 파일 분리 계약, 머지 정책(배치 vs 즉시+전파), 통합 방식, epic ← main 역방향 흡수, 반복 충돌의 재분해 트리거. **위 여섯의 단일 출처** (분해 원칙은 위 §분해는 충돌 경계로 쪼갠다, 단일 rebase의 충돌 해결 전략은 `git` skill) |
 | `references/worktree-lifecycle.md` | 병렬 dispatch 직전, 또는 worktree 정리/머지를 다룰 때 |
 | `references/agent-monitor.md` | 백그라운드 agent 진행 추적, Task 시스템으로 다중 작업 상태·의존성을 추적할 때, 또는 대규모 fan-out에서 실패 대비 복원력(체크포인트·재시도·폴백) 절차를 적용할 때 |
@@ -226,3 +227,4 @@ read-only 조사·감사·원인분석은 충돌 비용이 없어 "의심스러�
 16. **머지해놓고 in-flight 방치** (무거운 경로): 기본은 배치 머지이고, 즉시 머지했으면 전부에 rebase를 전파한다 (`references/branch-strategy.md §base drift 전파`).
 17. **분해를 레이어로 쪼갬**: 수평 분해는 disjoint가 애초에 안 나온다 — 충돌은 판정이 아니라 분해에서 결정된다 (§분해는 충돌 경계로 쪼갠다).
 18. **조사를 순차 단독 탐색으로 시작**: read-only 조사·감사는 순차를 택할 근거가 없다 — 첫 행동은 관점별 병렬 fan-out이다 (§조사·감사 작업의 기본값은 병렬 fan-out).
+19. **상한 수렴**: 집행 위임 전부를 메인 tier(보통 최상위)로 배정 금지 — 상한은 초과를 막는 규칙이지 기본값이 아니다. 중간·경량 tier 작업은 alias 기본 매핑(중간 `sonnet`·경량 `haiku`)에서 시작한다 (`references/model-routing.md §tier ↔ 모델 alias 기본 매핑`).

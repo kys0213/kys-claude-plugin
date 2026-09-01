@@ -421,7 +421,7 @@ SendMessage({to: "implementer",   // name 없는 런타임: impl.agentId ("a..."
 
 ## 모델 선택
 
-`Agent` 호출 시 `model` 옵션으로 sub-agent 모델을 지정한다. 역할 기준 원칙(오케스트레이터는 위임 sub-agent보다 낮은 tier로 내려가지 않는다 / 위임 dispatch에는 항상 `model` 명시 / 특정 모델명을 문서에 박지 않는다)은 **`model-routing.md §역할 기준 원칙`이 단일 출처**다 — 여기서 재서술하지 않는다.
+`Agent` 호출 시 `model` 옵션으로 sub-agent 모델을 지정한다. 역할 기준 원칙(오케스트레이터는 위임 sub-agent보다 낮은 tier로 내려가지 않는다 / 위임 dispatch에는 항상 `model` 명시 / 버전 고정 모델 ID를 문서에 박지 않는다)은 **`model-routing.md §역할 기준 원칙`이 단일 출처**다 — 여기서 재서술하지 않는다.
 
 작업 유형 → 시작 tier 표는 **이 절이 단일 출처**다:
 
@@ -433,7 +433,7 @@ SendMessage({to: "implementer",   // name 없는 런타임: impl.agentId ("a..."
 | 단순 분류, 포맷 변환, 짧은 추출 | 경량 |
 
 - **discovery 를 최상위 tier 로 올리지 않는다.** 넓게 읽고 추려 오는 일은 역량보다 **범위와 병렬성**이 결과를 좌우한다 — 같은 비용이면 상위 tier 하나보다 경량 여러 갈래가 더 넓게 훑는다. 조사 결과를 **해석**하는 것은 메인의 몫이고, 거기서 판단이 막히면 그때 별도 경로(자문 조회)를 쓴다.
-- **역량 수준 ↔ 실제 모델명 매핑은 dispatch 시점 판단**이다. 세대가 바뀌면 같은 작업이 더 가벼운 tier로 내려갈 수 있어야 하므로 문서에 모델명을 고정하지 않는다.
+- **tier를 실제 모델로 내릴 때는 세대 비종속 alias 기본 매핑에서 시작한다** — 최상위 `opus` / 중간 `sonnet` / 경량 `haiku` (`model-routing.md §tier ↔ 모델 alias 기본 매핑`이 단일 출처). 상한(≤ 메인 tier)은 초과를 막는 규칙이지 배정 기준이 아니다 — 일반 구현·리뷰·discovery를 근거 없이 메인 tier로 올려 전 dispatch가 최상위로 수렴하게 하지 않는다. 매핑을 벗어난 선택은 근거와 함께 decision log에 남긴다.
 - 이 표는 고정값이 아니라 **시작 heuristic**이다 — 작업마다 "지금도 이 역량이 필요한가"를 재평가하고, 벗어난 선택은 근거와 함께 decision log에 남긴다. 자율 루프에서의 배분 원칙은 `autonomous-driving.md §모델 분배` 참조.
 - 단순 작업에 최상위 tier를 쓰는 것은 비용 낭비다.
 - 이 표는 **집행 위임**(코드·문서를 만드는 sub-agent)의 tier heuristic이다. 메인보다 상위 tier에 의견만 구하는 **자문 조회**는 이 표 밖의 별도 경로다 — 원칙은 `model-routing.md §자문 조회 — 상위 tier 예외`, 절차는 `advisory-consult.md`가 단일 출처다.
@@ -454,6 +454,7 @@ SendMessage({to: "implementer",   // name 없는 런타임: impl.agentId ("a..."
 - [ ] 겹치는 hot-spot이 있는 병렬 dispatch라면 편집 금지 + 보고 형식(§필수 포함 요소 12번)을 넣었는가?
 - [ ] prompt에 재위임 금지 문구(§위임 깊이 제한)를 포함했는가? (team teammate → isolated subagent 편집 위임 1단계는 예외)
 - [ ] 모델 선택이 작업 난이도와 맞는가? (dispatch에 `model`을 명시했는가 — 상속 금지)
+- [ ] 중간·경량 tier 작업을 근거 없이 메인 tier(상한)로 올리지 않았는가? (기본은 alias 매핑 — 중간 `sonnet`·경량 `haiku`, `model-routing.md §tier ↔ 모델 alias 기본 매핑`)
 - [ ] 사용자가 준 역할별 모델 제약이 있으면 반영했는가? (제약으로 막히면 인접 tier 대체 + decision log)
 - [ ] 이 dispatch가 **집행 위임**(= 자문 4트리거가 아닌 전부, 리서치·조사 포함)이라면 tier가 메인을 넘지 않는가? (상위 tier는 자문 조회만 예외 — `model-routing.md §자문 조회 — 상위 tier 예외`)
 - [ ] 역할을 지목한 사용자 제약(예: "자문은 X 모델")을 **그 역할 밖으로 번지게** 하지 않았는가?
