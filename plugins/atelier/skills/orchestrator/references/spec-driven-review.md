@@ -23,6 +23,7 @@ user-invocable: false
 ## 언제 진입하는가
 
 - 자율 계약의 입력에 **spec 문서(`spec/DESIGN.md`, `spec/concerns/*`, `spec/flows/*` 또는 동등한 명세)가 있고**, 그 spec을 구현하는 작업을 dispatch할 때.
+- **진입 전제 — spec이 미결 없이 확정된 상태**: 입력 spec에 미결(TBD) 항목이 하나라도 있으면 이 게이트에 들어오지 못한다 — 그 전에 `autonomous-driving.md §spec 확정 게이트`가 구현 dispatch를 막고 hard stop한다. 이 문서의 두 게이트는 **확정된 spec**을 기준선으로 전제한다. 미결이 남은 spec을 기준선으로 검토·QA를 돌리면 "spec대로"의 기준 자체가 비어 있어 판정이 성립하지 않는다.
 - 트리거 발화 예: "spec 대로 구현하면서 검토자랑 QA 매니저 붙여서", "spec 기반 구현 자율주행", "구현이 spec 맞는지 / 테스트가 spec 맞는지 계속 봐줘".
 - spec 입력이 없으면(자유 구현·버그 수정 등) 이 게이트 대신 `autonomous-driving.md`의 **일반 리뷰어·QA 게이트**를 쓴다 (검토 + QA 두 차원은 거기서 동일하게 필수). 이 문서가 특수화하는 것은 QA의 **기준선**뿐이다 — 일반 게이트가 `테스트 ↔ 요구사항/엣지케이스`로 보는 커버리지를, spec이 있을 때 `테스트 ↔ spec flow/concern`으로 판정한다.
 
@@ -43,6 +44,13 @@ user-invocable: false
 - 둘 다 **구현 sub-agent와 다른 agent**다 (자기 코드 자기 리뷰 금지 — `autonomous-driving.md §리뷰어·QA 게이트`).
 - 두 게이트는 **AND**다 — 둘 다 `pass`여야 머지 후보로 승급한다. 하나라도 `reject`면 재위임.
 - **DBA 조건부 게이트는 spec 모드에서도 생략되지 않는다** — spec 작업이 DB에 접촉하면(스키마·마이그레이션·쿼리·ORM 모델) `autonomous-driving.md §리뷰어·QA 게이트`의 DBA 에이전트가 세 번째 차원으로 추가되어 AND에 포함된다.
+
+### 게이트 중 spec 미결 발견
+
+검토자·QA 매니저가 판정 도중 "spec이 이 항목을 정하지 않았다 / 미결로 두었다"를 발견하면 — 진입 스캔이 놓친 미결 표기, 구현이 드러낸 spec 사이의 모순, 구현이 필요로 하는데 spec이 결정을 비워 둔 계약 — verdict를 `pass`/`reject`가 아니라 **`spec-unresolved`** 로 보고한다 (해당 spec 위치 + 무엇이 정해져 있지 않은지).
+
+- 메인은 이 verdict를 **재위임 대상으로 다루지 않는다** — 구현을 고쳐서 해결되는 문제가 아니다. `max_redispatch_per_task`를 소모하지 않고 즉시 **hard stop**해 미결 목록 + 해소 경로(`grill` → `spec-write`)와 함께 보고한다 (`autonomous-driving.md §spec 확정 게이트`, 에스컬레이션 조건 8).
+- 게이트 agent가 미결을 스스로 해석해 "이렇게 구현했으면 pass"로 판정하는 것은 위반이다 — 게이트는 spec을 기준으로 판정할 뿐 spec을 대신 결정하지 않는다.
 
 ---
 
@@ -70,6 +78,7 @@ worktree 코드를 한 번 보고 끝내지 않고, **머지 전까지 두 게�
 구현 완료 (격리 subagent)
   → 검토자 + QA 매니저 병렬 검증           # 두 차원 동시
       둘 다 pass → 머지 후보로 승급
+      하나라도 spec-unresolved → hard stop (재위임 아님, 예산 미소모 — §게이트 중 spec 미결 발견)
       하나라도 reject →
         findings(spec 항목/누락 케이스 + 파일:라인)를 자기완결 prompt에 실어
         구현을 격리 subagent로 재위임        # redispatch_count[task] += 1
@@ -106,6 +115,7 @@ worktree 코드를 한 번 보고 끝내지 않고, **머지 전까지 두 게�
 6. **게이트 전용 무한 재위임**: 두 게이트 거부를 예산 밖에서 반복 → 폭주. `max_redispatch_per_task`를 동일하게 소모, 소진 시 에스컬레이션.
 7. **spec 없다고 QA 게이트 생략**: spec이 없으면 테스트↔spec 판정은 성립 안 되지만, QA 게이트 자체는 생략하지 않는다 → 일반 게이트의 테스트↔요구사항 QA로 폴백해 검증 테스트는 그대로 추가·검증한다.
 8. **메인이 findings 전문 통독**: 두 게이트의 상세 리포트를 메인이 직접 읽음 → 컨텍스트 포화. verdict + 압축 요약만 수령.
+9. **spec 미결을 reject로 처리해 재위임**: 게이트가 드러낸 "spec이 정하지 않았다"를 구현 결함처럼 findings에 실어 재구현시킴 → sub-agent가 미결을 임의로 결정해 코드로 굳히고, 예산만 소모한다. `spec-unresolved`는 재위임이 아니라 hard stop이다 (§게이트 중 spec 미결 발견).
 
 ---
 
@@ -114,6 +124,7 @@ worktree 코드를 한 번 보고 끝내지 않고, **머지 전까지 두 게�
 진입 (spec 구현 dispatch 시):
 
 - [ ] 입력에 검증 가능한 spec 문서가 있는가? (없으면 일반 리뷰어·QA 게이트로)
+- [ ] 입력 spec이 **미결 0**으로 확정됐는가? (`autonomous-driving.md §spec 확정 게이트` — 미결이 있으면 이 게이트에 들어오지 않고 hard stop)
 - [ ] 구현 sub-agent prompt에 spec 경로/전문을 자기완결적으로 실었는가?
 
 루프 중 (머지 전):
@@ -122,6 +133,7 @@ worktree 코드를 한 번 보고 끝내지 않고, **머지 전까지 두 게�
 - [ ] 두 게이트를 병렬로 돌리고 **둘 다 pass**여야 머지하는가? (AND)
 - [ ] 편집(개선)은 teammate가 아니라 `isolation:"worktree"` subagent로 위임했는가?
 - [ ] 거부 findings를 `spec 위치 ↔ 코드 위치`로 구체화해 재위임 prompt에 실었는가?
+- [ ] 게이트가 `spec-unresolved`를 보고하면 재위임이 아니라 hard stop으로 회부하는가? (§게이트 중 spec 미결 발견)
 - [ ] 게이트 거부가 `max_redispatch_per_task` 예산을 소모하며 카운트되는가?
 - [ ] team이 비가용이면 단발 subagent 2개 폴백으로 두 차원을 유지하는가? (선호 등급 — 폴백 허용)
 - [ ] 메인이 verdict + 압축 요약만 받고, 거부 사유를 decision log에 기록하는가?
