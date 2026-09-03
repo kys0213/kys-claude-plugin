@@ -16,7 +16,7 @@ user-invocable: false
 
 이 문서는 `autonomous-driving.md §리뷰어·QA 게이트`의 일반 게이트를 **spec 맥락으로 특수화**한 것이다 — 예산·재위임·decision log·에스컬레이션·토폴로지 가드 등 공통 규칙은 `autonomous-driving.md`가 단일 소유하며 여기서 중복 정의하지 않는다.
 
-> **범위**: 이 문서는 *자율 루프 안에서 머지 전 게이트*로 spec 적합성을 검증하는 것만 다룬다. 판정은 **게이트 수준의 pass/reject**이며, 그 이상의 전수 갭 분석(spec 전체 ↔ 코드베이스 전체 대조)은 이 게이트의 일이 아니다 — 필요하면 별도 작업으로 분리해 위임한다.
+> **범위**: 이 문서는 *자율 루프 안에서 머지 전 게이트*로 spec 적합성을 검증하는 것만 다룬다. 판정은 **게이트 수준의 `pass`/`reject`/`spec-unresolved`**이며, 그 이상의 전수 갭 분석(spec 전체 ↔ 코드베이스 전체 대조)은 이 게이트의 일이 아니다 — 필요하면 별도 작업으로 분리해 위임한다.
 
 ---
 
@@ -35,8 +35,8 @@ user-invocable: false
 
 | 역할 | 입력 | 검증 질문 | 출력 |
 |------|------|-----------|------|
-| **검토자 (spec-reviewer)** | spec 문서 + worktree diff (epic base 기준) | 구현이 spec의 요구사항/flow/제약을 **빠짐없이·과하지 않게** 충족하는가? 회귀 위험·설계 원칙(SOLID 등) 위반은? | `pass`/`reject` + `spec 항목 ↔ 파일:라인` 매핑, 미충족·초과 구현 목록 |
-| **QA 매니저 (qa-manager)** | spec 문서 + worktree의 테스트 코드 | spec의 각 flow/concern/엣지케이스에 **대응하는 테스트가 있는가**? 테스트가 spec 의도를 검증하는가(빈 assert·항상 통과 아님)? | `pass`/`reject` + `spec flow ↔ 테스트:라인` 커버리지 표, 누락 케이스 목록 |
+| **검토자 (spec-reviewer)** | spec 문서 + worktree diff (epic base 기준) | 구현이 spec의 요구사항/flow/제약을 **빠짐없이·과하지 않게** 충족하는가? 회귀 위험·설계 원칙(SOLID 등) 위반은? | `pass`/`reject`/`spec-unresolved` + `spec 항목 ↔ 파일:라인` 매핑, 미충족·초과 구현 목록 / `spec-unresolved`면 `spec 위치 + 무엇이 정해져 있지 않은지` (→ §게이트 중 spec 미결 발견) |
+| **QA 매니저 (qa-manager)** | spec 문서 + worktree의 테스트 코드 | spec의 각 flow/concern/엣지케이스에 **대응하는 테스트가 있는가**? 테스트가 spec 의도를 검증하는가(빈 assert·항상 통과 아님)? | `pass`/`reject`/`spec-unresolved` + `spec flow ↔ 테스트:라인` 커버리지 표, 누락 케이스 목록 / `spec-unresolved`면 `spec 위치 + 무엇이 정해져 있지 않은지` (→ §게이트 중 spec 미결 발견) |
 
 핵심 경계:
 
