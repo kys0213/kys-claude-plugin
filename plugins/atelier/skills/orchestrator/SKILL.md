@@ -125,7 +125,7 @@ version: 0.1.0
 
 reference를 읽지 않아도 성립해야 하는 게이트 여섯 개다. 발동 시점만 여기 두고, 각 계약의 단일 출처는 지목된 절이다.
 
-- **spec 입력 구현 dispatch 전 — spec 확정 확인 (hard stop)**: 입력 spec에 미결(TBD) 항목이 하나라도 있으면 dispatch하지 않고 hard stop한다 — task가 그 미결과 무관해 보여도 예외가 없고, 미결을 가정·stub·협의체 결정으로 메우지 않는다. 미결 목록 + 해소 경로(`grill` 심문 → `spec-write` 반영 → 재진입)를 보고하고 spec이 미결 없이 확정된 뒤에만 진입한다 (`references/autonomous-driving.md §spec 확정 게이트`).
+- **spec 입력 구현 dispatch 전 — spec 확정 확인 (hard stop)**: 입력 spec에 미결(TBD) 항목이 하나라도 있으면 dispatch하지 않고 hard stop한다 (`references/autonomous-driving.md §spec 확정 게이트`가 단일 출처).
 - **implementer dispatch 전 — 설계 승인 마커 확인**: 마커가 없으면 dispatch하지 않고 설계 단계로 회귀한다 (`references/architect-council.md §설계 승인 마커`).
 - **테스트 작성이 포함된 구현 dispatch 전 — 테스트 인프라 발견**: 레포의 테스트 러너·픽스처·하네스·유사 기존 테스트가 file:line으로 인용되기 전에는 테스트 작성 단계에 진입시키지 않는다 (`references/delegation-patterns.md §테스트 인프라 발견`).
 - **sub-agent 보고 수용 전 — 증거 계약 확인**: 증거 없는 claim은 수용하지 않고 재디스패치하며, 부재 주장(negative claim)은 교차 검증 후에만 수용한다 (`references/delegation-patterns.md §증거 계약`).
@@ -227,4 +227,4 @@ read-only 조사·감사·원인분석은 충돌 비용이 없어 "의심스러�
 16. **머지해놓고 in-flight 방치** (무거운 경로): 기본은 배치 머지이고, 즉시 머지했으면 전부에 rebase를 전파한다 (`references/branch-strategy.md §base drift 전파`).
 17. **분해를 레이어로 쪼갬**: 수평 분해는 disjoint가 애초에 안 나온다 — 충돌은 판정이 아니라 분해에서 결정된다 (§분해는 충돌 경계로 쪼갠다).
 18. **조사를 순차 단독 탐색으로 시작**: read-only 조사·감사는 순차를 택할 근거가 없다 — 첫 행동은 관점별 병렬 fan-out이다 (§조사·감사 작업의 기본값은 병렬 fan-out).
-19. **미결 spec 위에서 구현 진입**: spec에 TBD가 남아 있는데 "무관하다"·"사소하다"고 보고 dispatch하거나 미결을 가정·stub으로 메움 → 사용자가 내려야 할 판단이 코드로 굳는다. 미결이 하나라도 있으면 hard stop하고, spec이 확정된 뒤에만 진입한다 (§디스패치 전·보고 수용 게이트, `references/autonomous-driving.md §spec 확정 게이트`).
+19. **미결 spec 위에서 구현 진입**: TBD가 남은 spec으로 dispatch하면 사용자가 내려야 할 판단이 코드로 굳는다 — 미결이 하나라도 있으면 hard stop한다 (§디스패치 전·보고 수용 게이트, `references/autonomous-driving.md §spec 확정 게이트`).
