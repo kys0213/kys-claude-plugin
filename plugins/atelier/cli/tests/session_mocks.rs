@@ -112,6 +112,9 @@ pub struct MemBranchSync {
     pub default_branch: Option<String>,
     /// `(behind, ahead)`; `None` models a branch with no upstream.
     pub divergence: Option<(u32, u32)>,
+    /// Total reads across every method, so a test can pin that a rule
+    /// answering earlier in the order left the git reads untouched.
+    pub reads: Cell<usize>,
 }
 
 impl Default for MemBranchSync {
@@ -123,15 +126,24 @@ impl Default for MemBranchSync {
             current_branch: "feature/x".to_string(),
             default_branch: Some("main".to_string()),
             divergence: Some((0, 1)),
+            reads: Cell::new(0),
         }
+    }
+}
+
+impl MemBranchSync {
+    fn record_read(&self) {
+        self.reads.set(self.reads.get() + 1);
     }
 }
 
 impl BranchSyncReader for MemBranchSync {
     fn is_inside_work_tree(&self) -> bool {
+        self.record_read();
         self.inside_work_tree
     }
     fn special_state(&self) -> GitSpecialState {
+        self.record_read();
         GitSpecialState {
             rebase: self.rebase,
             merge: self.merge,
@@ -139,9 +151,11 @@ impl BranchSyncReader for MemBranchSync {
         }
     }
     fn default_branch(&self) -> Option<String> {
+        self.record_read();
         self.default_branch.clone()
     }
     fn upstream_divergence(&self) -> Option<(u32, u32)> {
+        self.record_read();
         self.divergence
     }
 }
