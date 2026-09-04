@@ -12,8 +12,9 @@
 //! because a Stop hook's exit 2 means "block on stderr" and a failing binary
 //! would then wedge every session end. The guarantee is this boundary's, not
 //! each command's: `run_from` swallows clap's own parse failures too, so a
-//! shim invoking a subcommand an older binary does not know still exits 0 and
-//! the shims stay plain `exec atelier session ...`.
+//! typo or a stale flag cannot block a Stop either. The shims still force
+//! exit 0 themselves — a binary predating a subcommand fails inside clap,
+//! before any of this code runs.
 //!
 //! What stdout carries differs by command: `baseline` prints nothing,
 //! `simplify-check` prints at most an advisory banner, and `push-check` may
@@ -102,8 +103,8 @@ fn emit_push_check(decision: &PushCheckDecision) {
 
 /// Parses `argv` (including the leading program name) with the session clap
 /// surface and runs the selected command. Always returns 0 — a parse failure
-/// prints clap's own message and still exits 0, which is what lets the shims
-/// hand this surface an argv an older binary would reject.
+/// prints clap's own message and still exits 0, so no argv this binary does
+/// understand can turn a Stop into a block.
 pub fn run_from<I, T>(argv: I) -> i32
 where
     I: IntoIterator<Item = T>,

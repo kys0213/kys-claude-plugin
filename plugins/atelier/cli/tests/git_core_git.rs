@@ -172,6 +172,28 @@ fn upstream_divergence_counts_local_only_commits() {
 }
 
 #[test]
+fn upstream_divergence_counts_upstream_only_commits() {
+    let (_r, local) = setup();
+    let base = sh(&["git", "rev-parse", "HEAD"], local.path());
+
+    // Push a commit, then rewind the branch off it: the commit now exists
+    // only on the upstream, which is the `behind` direction.
+    std::fs::write(local.path().join("b.txt"), "b").unwrap();
+    sh(&["git", "add", "."], local.path());
+    sh(&["git", "commit", "-m", "upstream only"], local.path());
+    sh(&["git", "push"], local.path());
+    sh(&["git", "reset", "--hard", &base], local.path());
+
+    assert_eq!(
+        svc(local.path()).upstream_divergence(),
+        Some(Divergence {
+            behind: 1,
+            ahead: 0
+        })
+    );
+}
+
+#[test]
 fn upstream_divergence_is_absent_without_an_upstream() {
     // Never pushed is not zero drift: `None` is what stops push-check from
     // reading an unconfigured branch as "already in sync".
