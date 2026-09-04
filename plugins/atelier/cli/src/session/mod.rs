@@ -4,19 +4,29 @@
 //! ```text
 //! atelier session baseline        --project-dir <dir>   # SessionStart
 //! atelier session simplify-check  --project-dir <dir>   # Stop
+//! atelier session push-check      --project-dir <dir>   # Stop
 //! ```
 //!
-//! Output contract: advisory only. Both commands read the hook payload from
-//! stdin, print at most a banner on stdout, and **always exit 0** — a Stop hook
-//! that fails must never interrupt a session.
+//! Output contract: every command reads the hook payload from stdin, writes to
+//! stdout only, and **always exits 0** — the exit code never carries a signal,
+//! because a Stop hook's exit 2 means "block on stderr" and a failing binary
+//! would then wedge every session end.
+//!
+//! What stdout carries differs by command: `baseline` prints nothing,
+//! `simplify-check` prints at most an advisory banner, and `push-check` may
+//! print a Stop `{"decision":"block","reason":…}` document — still on exit 0,
+//! which is how Claude Code reads a structured block.
 
 pub mod commands;
 pub mod core;
 
 use crate::session::commands::payload::SessionPayload;
+use crate::session::commands::push_check::{render_block_json, PushCheckDecision, PushCheckDeps};
 use crate::session::commands::simplify::{render_banner, SimplifyDecision};
 use crate::session::commands::SessionDeps;
 use crate::session::core::baseline::{FsBaselineStore, DEFAULT_TTL};
+use crate::session::core::branch_sync::create_branch_sync_reader;
+use crate::session::core::open_pr::create_open_pr_reader;
 use crate::session::core::repo::create_repo_reader;
 use crate::shared::process::{default_project_dir, read_stdin_raw};
 use clap::{Parser, Subcommand};
@@ -25,7 +35,7 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "session",
     version,
-    about = "Session-scoped hook helpers (baseline / simplify-check)"
+    about = "Session-scoped hook helpers (baseline / simplify-check / push-check)"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -47,6 +57,13 @@ pub enum Commands {
         #[arg(long = "project-dir")]
         project_dir: Option<String>,
     },
+    /// Stop: block when a branch with an open PR has unpushed commits
+    #[command(name = "push-check")]
+    PushCheck {
+        /// Project the git reads are anchored to (hook cwd may differ — #780)
+        #[arg(long = "project-dir")]
+        project_dir: Option<String>,
+    },
 }
 
 /// Directory holding one JSON file per session.
@@ -64,11 +81,19 @@ fn resolve_project_dir(flag: Option<String>, payload: &SessionPayload) -> String
     )
 }
 
-/// The subsystem's only stdout write. #725 (moving hook output to
+/// The simplify banner's only stdout write. #725 (moving hook output to
 /// `hookSpecificOutput.additionalContext`) has exactly this one site to change.
 fn emit(decision: &SimplifyDecision) {
     if let SimplifyDecision::Notify { files, total } = decision {
         print!("{}", render_banner(files, *total));
+    }
+}
+
+/// The push check's only stdout write: the Stop hook's block document, or
+/// nothing at all. Exit stays 0 either way — the JSON *is* the block signal.
+fn emit_push_check(decision: &PushCheckDecision) {
+    if let Some(json) = render_block_json(decision) {
+        println!("{json}");
     }
 }
 
@@ -98,7 +123,27 @@ fn with_deps(
     command(&deps, payload.session_id.as_deref().unwrap_or_default());
 }
 
-/// Runs a parsed session CLI. Always returns 0 — these hooks are non-blocking.
+/// Binds the branch and PR readers to the resolved project. Separate from
+/// `with_deps` because push-check shares none of its dependencies: assembling
+/// one set for both would make every command construct readers it never uses.
+fn with_push_check_deps(
+    project_dir: Option<String>,
+    payload: &SessionPayload,
+    command: impl FnOnce(&PushCheckDeps),
+) {
+    let project_dir = resolve_project_dir(project_dir, payload);
+    let branch = create_branch_sync_reader(project_dir.clone());
+    let open_pr = create_open_pr_reader(project_dir);
+    command(&PushCheckDeps {
+        branch: &branch,
+        open_pr: &open_pr,
+    });
+}
+
+/// Runs a parsed session CLI. Always returns 0: a Stop hook's exit 2 means
+/// "block on stderr", so any non-zero return here would turn a crash — or an
+/// unknown subcommand from an older binary — into a session that cannot end.
+/// `push-check`'s block travels in the stdout document instead.
 pub fn run(cli: Cli) -> i32 {
     let command = match cli.command {
         Some(c) => c,
@@ -118,6 +163,11 @@ pub fn run(cli: Cli) -> i32 {
         Commands::SimplifyCheck { project_dir } => with_deps(project_dir, &payload, |deps, id| {
             emit(&commands::simplify::run(deps, id));
         }),
+        Commands::PushCheck { project_dir } => {
+            with_push_check_deps(project_dir, &payload, |deps| {
+                emit_push_check(&commands::push_check::run(deps, payload.stop_hook_active));
+            })
+        }
     }
     0
 }

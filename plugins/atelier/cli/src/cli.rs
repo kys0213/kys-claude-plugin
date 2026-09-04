@@ -32,7 +32,7 @@ pub enum AtelierCommand {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Session-scoped hook helpers (baseline / simplify-check)
+    /// Session-scoped hook helpers (baseline / simplify-check / push-check)
     #[command(disable_help_flag = true)]
     Session {
         /// Arguments forwarded verbatim to the session subsystem
