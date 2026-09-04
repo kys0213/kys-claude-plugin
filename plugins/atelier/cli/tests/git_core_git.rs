@@ -4,6 +4,7 @@
 //! Integration tests run against real temporary git repositories.
 
 use atelier::git::core::git::{create_git_service, GitService};
+use atelier::git::types::Divergence;
 use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
@@ -145,4 +146,41 @@ fn special_state_detached() {
     let hash = sh(&["git", "rev-parse", "HEAD"], local.path());
     sh(&["git", "checkout", &hash], local.path());
     assert!(svc(local.path()).get_special_state().detached());
+}
+
+#[test]
+fn upstream_divergence_counts_local_only_commits() {
+    let (_r, local) = setup();
+    assert_eq!(
+        svc(local.path()).upstream_divergence(),
+        Some(Divergence {
+            behind: 0,
+            ahead: 0
+        })
+    );
+
+    std::fs::write(local.path().join("a.txt"), "a").unwrap();
+    sh(&["git", "add", "."], local.path());
+    sh(&["git", "commit", "-m", "local only"], local.path());
+    assert_eq!(
+        svc(local.path()).upstream_divergence(),
+        Some(Divergence {
+            behind: 0,
+            ahead: 1
+        })
+    );
+}
+
+#[test]
+fn upstream_divergence_is_absent_without_an_upstream() {
+    // Never pushed is not zero drift: `None` is what stops push-check from
+    // reading an unconfigured branch as "already in sync".
+    let local = TempDir::new().unwrap();
+    sh(&["git", "init", "-b", "main"], local.path());
+    config_identity(local.path());
+    std::fs::write(local.path().join("README.md"), "init").unwrap();
+    sh(&["git", "add", "."], local.path());
+    sh(&["git", "commit", "-m", "init"], local.path());
+
+    assert_eq!(svc(local.path()).upstream_divergence(), None);
 }

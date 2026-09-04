@@ -10,7 +10,10 @@
 //! Output contract: every command reads the hook payload from stdin, writes to
 //! stdout only, and **always exits 0** — the exit code never carries a signal,
 //! because a Stop hook's exit 2 means "block on stderr" and a failing binary
-//! would then wedge every session end.
+//! would then wedge every session end. The guarantee is this boundary's, not
+//! each command's: `run_from` swallows clap's own parse failures too, so a
+//! shim invoking a subcommand an older binary does not know still exits 0 and
+//! the shims stay plain `exec atelier session ...`.
 //!
 //! What stdout carries differs by command: `baseline` prints nothing,
 //! `simplify-check` prints at most an advisory banner, and `push-check` may
@@ -98,13 +101,23 @@ fn emit_push_check(decision: &PushCheckDecision) {
 }
 
 /// Parses `argv` (including the leading program name) with the session clap
-/// surface and runs the selected command. Always returns 0.
+/// surface and runs the selected command. Always returns 0 — a parse failure
+/// prints clap's own message and still exits 0, which is what lets the shims
+/// hand this surface an argv an older binary would reject.
 pub fn run_from<I, T>(argv: I) -> i32
 where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    run(Cli::parse_from(argv))
+    match Cli::try_parse_from(argv) {
+        Ok(cli) => run(cli),
+        // Covers `--help` and `--version`, which clap also reports as errors;
+        // `print` routes each to the stream clap picked for it.
+        Err(e) => {
+            let _ = e.print();
+            0
+        }
+    }
 }
 
 /// Binds the real store and repository reader to the resolved project, then
@@ -124,9 +137,9 @@ fn with_deps(
 }
 
 /// Runs a parsed session CLI. Always returns 0: a Stop hook's exit 2 means
-/// "block on stderr", so any non-zero return here would turn a crash — or an
-/// unknown subcommand from an older binary — into a session that cannot end.
-/// `push-check`'s block travels in the stdout document instead.
+/// "block on stderr", so any non-zero return here would turn a crash into a
+/// session that cannot end. `push-check`'s block travels in the stdout
+/// document instead.
 pub fn run(cli: Cli) -> i32 {
     let command = match cli.command {
         Some(c) => c,
