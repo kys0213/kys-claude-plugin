@@ -30,6 +30,17 @@ pub trait RepoDefaultBranch {
     fn default_branch(&self) -> Option<DetectedBranch>;
 }
 
+/// The one forge read `session push-check` makes: does the current branch
+/// have an open PR. Split from `GitHubService` because push-check consumes
+/// only this call and must not depend on the review-thread surface (ISP).
+pub trait OpenPr {
+    /// The open PR number for the current branch. `None` covers both "nothing
+    /// is open" and "the lookup could not answer" (no `gh`, not authenticated,
+    /// offline): an unanswerable forge never blocks the user, exactly as the
+    /// PR guard treats it.
+    fn open_pr_number(&self) -> Option<i64>;
+}
+
 const REVIEW_THREADS_QUERY: &str = r#"
 query($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
@@ -137,6 +148,12 @@ impl RepoDefaultBranch for RealGitHubService {
         // `gh` resolves the repository from the cwd's remote, so the service
         // must be constructed pinned to the project directory.
         DetectedBranch::new(&stdout)
+    }
+}
+
+impl OpenPr for RealGitHubService {
+    fn open_pr_number(&self) -> Option<i64> {
+        GitHubService::detect_current_pr_number(self).ok().flatten()
     }
 }
 

@@ -14,8 +14,8 @@ use std::collections::HashMap;
 
 use atelier::git::commands::hook::HookFs;
 use atelier::git::core::git::{GitService, OriginHeadWarmer};
-use atelier::git::core::github::{GitHubService, RepoDefaultBranch, ReviewThreadsResult};
-use atelier::git::types::{DetectedBranch, GitSpecialState};
+use atelier::git::core::github::{GitHubService, OpenPr, RepoDefaultBranch, ReviewThreadsResult};
+use atelier::git::types::{DetectedBranch, Divergence, GitSpecialState};
 
 type R<T> = Result<T, String>;
 
@@ -84,6 +84,9 @@ pub struct MockGit {
     /// `(rebase, merge)` flags for `get_special_state`; `current_branch` is the
     /// branch the snapshot reports, mirroring `RealGitService` (#778).
     pub special_state_flags: Box<dyn Fn() -> (bool, bool)>,
+    /// Drift against `@{upstream}`. Defaults to `None` — the honest answer for
+    /// a repository nobody configured an upstream on.
+    pub upstream_divergence: Box<dyn Fn() -> Option<Divergence>>,
 }
 
 impl Default for MockGit {
@@ -93,6 +96,7 @@ impl Default for MockGit {
             current_branch: Box::new(|| "main".to_string()),
             detect_default_branch: Box::new(|| Ok("main".to_string())),
             special_state_flags: Box::new(|| (false, false)),
+            upstream_divergence: Box::new(|| None),
         }
     }
 }
@@ -111,6 +115,9 @@ impl GitService for MockGit {
             merge,
             current_branch: (self.current_branch)(),
         }
+    }
+    fn upstream_divergence(&self) -> Option<Divergence> {
+        (self.upstream_divergence)()
     }
 }
 
@@ -146,6 +153,15 @@ impl GitHubService for MockGitHub {
     }
     fn detect_current_pr_number(&self) -> R<Option<i64>> {
         (self.detect_current_pr_number)()
+    }
+}
+
+impl OpenPr for MockGitHub {
+    /// Derived from `detect_current_pr_number` rather than from a field of its
+    /// own, exactly as `RealGitHubService` derives it — a failing lookup is
+    /// indistinguishable from "nothing open" to the caller.
+    fn open_pr_number(&self) -> Option<i64> {
+        (self.detect_current_pr_number)().ok().flatten()
     }
 }
 

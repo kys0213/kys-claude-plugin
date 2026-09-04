@@ -318,3 +318,13 @@ impl GitSpecialState {
         self.current_branch.is_empty()
     }
 }
+
+/// How far a branch has drifted from its upstream. Named fields rather than a
+/// `(u32, u32)` tuple so a caller reads `d.ahead`, never a position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Divergence {
+    /// Commits present on the upstream but not locally.
+    pub behind: u32,
+    /// Commits present locally but not on the upstream.
+    pub ahead: u32,
+}

@@ -20,13 +20,13 @@
 pub mod commands;
 pub mod core;
 
+use crate::git::core::git::create_git_service;
+use crate::git::core::github::create_github_service;
 use crate::session::commands::payload::SessionPayload;
 use crate::session::commands::push_check::{render_block_json, PushCheckDecision, PushCheckDeps};
 use crate::session::commands::simplify::{render_banner, SimplifyDecision};
 use crate::session::commands::SessionDeps;
 use crate::session::core::baseline::{FsBaselineStore, DEFAULT_TTL};
-use crate::session::core::branch_sync::create_branch_sync_reader;
-use crate::session::core::open_pr::create_open_pr_reader;
 use crate::session::core::repo::create_repo_reader;
 use crate::shared::process::{default_project_dir, read_stdin_raw};
 use clap::{Parser, Subcommand};
@@ -123,23 +123,6 @@ fn with_deps(
     command(&deps, payload.session_id.as_deref().unwrap_or_default());
 }
 
-/// Binds the branch and PR readers to the resolved project. Separate from
-/// `with_deps` because push-check shares none of its dependencies: assembling
-/// one set for both would make every command construct readers it never uses.
-fn with_push_check_deps(
-    project_dir: Option<String>,
-    payload: &SessionPayload,
-    command: impl FnOnce(&PushCheckDeps),
-) {
-    let project_dir = resolve_project_dir(project_dir, payload);
-    let branch = create_branch_sync_reader(project_dir.clone());
-    let open_pr = create_open_pr_reader(project_dir);
-    command(&PushCheckDeps {
-        branch: &branch,
-        open_pr: &open_pr,
-    });
-}
-
 /// Runs a parsed session CLI. Always returns 0: a Stop hook's exit 2 means
 /// "block on stderr", so any non-zero return here would turn a crash — or an
 /// unknown subcommand from an older binary — into a session that cannot end.
@@ -164,9 +147,16 @@ pub fn run(cli: Cli) -> i32 {
             emit(&commands::simplify::run(deps, id));
         }),
         Commands::PushCheck { project_dir } => {
-            with_push_check_deps(project_dir, &payload, |deps| {
-                emit_push_check(&commands::push_check::run(deps, payload.stop_hook_active));
-            })
+            // Both services pin their reads to the project (#780) — a Stop
+            // hook's process cwd can be a worktree or a subagent's directory.
+            let dir = resolve_project_dir(project_dir, &payload);
+            let git = create_git_service(Some(dir.clone()));
+            let github = create_github_service(Some(dir));
+            let deps = PushCheckDeps {
+                git: &git,
+                open_pr: &github,
+            };
+            emit_push_check(&commands::push_check::run(&deps, payload.stop_hook_active));
         }
     }
     0
