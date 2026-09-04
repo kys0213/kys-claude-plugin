@@ -123,8 +123,9 @@ version: 0.1.0
 
 ### 디스패치 전·보고 수용 게이트 (Dispatch Preconditions)
 
-reference를 읽지 않아도 성립해야 하는 게이트 다섯 개다. 발동 시점만 여기 두고, 각 계약의 단일 출처는 지목된 절이다.
+reference를 읽지 않아도 성립해야 하는 게이트 여섯 개다. 발동 시점만 여기 두고, 각 계약의 단일 출처는 지목된 절이다.
 
+- **spec 입력 구현 dispatch 전 — spec 확정 확인 (hard stop)**: 입력 spec에 미결(TBD) 항목이 하나라도 있으면 dispatch하지 않고 hard stop한다 (`references/autonomous-driving.md §spec 확정 게이트`가 단일 출처).
 - **implementer dispatch 전 — 설계 승인 마커 확인**: 마커가 없으면 dispatch하지 않고 설계 단계로 회귀한다 (`references/architect-council.md §설계 승인 마커`).
 - **테스트 작성이 포함된 구현 dispatch 전 — 테스트 인프라 발견**: 레포의 테스트 러너·픽스처·하네스·유사 기존 테스트가 file:line으로 인용되기 전에는 테스트 작성 단계에 진입시키지 않는다 (`references/delegation-patterns.md §테스트 인프라 발견`).
 - **sub-agent 보고 수용 전 — 증거 계약 확인**: 증거 없는 claim은 수용하지 않고 재디스패치하며, 부재 주장(negative claim)은 교차 검증 후에만 수용한다 (`references/delegation-patterns.md §증거 계약`).
@@ -195,14 +196,14 @@ read-only 조사·감사·원인분석은 충돌 비용이 없어 "의심스러�
 | `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
 | `references/autonomous-driving.md` | 자율 루프(분해→위임→머지 self-drive)를 돌릴 때 — **오케스트레이터 기본 동작**. 계약·가드레일·종료 조건·에스컬레이션 + **작업마다 필수인 리뷰어·QA 게이트**(검토 + 검증 테스트 추가)의 단일 출처 (단발 fan-out 1회면 불필요) |
 | `references/advisory-consult.md` | 상위 tier 자문을 소집할 때 (협의체 예산 소진 tie-break, 게이트 재위임 루프, 되돌리기 어려운 결정, 사용자 요청) — **소집 트리거·패킷 계약·출력 계약·수명의 단일 출처** (tier 예외 원칙 자체는 `references/model-routing.md`가 단일 출처). 진입 시 team 비가용으로 확정됐으면 읽을 필요 없다 |
-| `references/spec-driven-review.md` | 검토·QA 게이트가 **spec 문서를 입력으로 구현**하는 경우의 특수화 — 팀 모드로 검토자(spec↔구현)·QA 매니저(spec↔테스트)를 상주시켜 worktree 코드를 계속 리뷰·개선 (spec 입력이 없으면 일반 게이트 사용) |
+| `references/spec-driven-review.md` | 검토·QA 게이트가 **spec 문서를 입력으로 구현**하는 경우의 특수화 — 팀 모드로 검토자(spec↔구현)·QA 매니저(spec↔테스트)를 상주시켜 worktree 코드를 계속 리뷰·개선 (spec 입력이 없으면 일반 게이트 사용). 진입 전제는 **미결 0으로 확정된 spec**이다 (`references/autonomous-driving.md §spec 확정 게이트`) |
 
 ## 사용자 보고 원칙
 
 오케스트레이터는 **기본적으로 자율 주행**한다 — 진입 시 자율 계약을 1회 보고하고, 가드레일(종료 조건·예산·자동 중단) 안에서 자동 재위임·머지·충돌 해결을 사람 개입 없이 진행한다. 자율 계약·루프·에스컬레이션 규칙은 `references/autonomous-driving.md` 가 단일 소유한다.
 
 - **시작 시**: 분해된 작업 목록 + 병렬/순차 결정 + 자율 계약(종료 조건·예산·hard stop·결정 기록 위치)을 한 번에 보고
-- **진행 중**: 침묵 — 단, 에스컬레이션 조건(되돌리기 어려운 행위·토폴로지 위반·도메인 의미 충돌·예산 소진 등)은 자율 모드라도 **항상** 멈추고 즉시 보고한다 (`references/autonomous-driving.md §에스컬레이션`)
+- **진행 중**: 침묵 — 단, 에스컬레이션 조건(되돌리기 어려운 행위·토폴로지 위반·도메인 의미 충돌·예산 소진·spec 미결 발견 등)은 자율 모드라도 **항상** 멈추고 즉시 보고한다 (`references/autonomous-driving.md §에스컬레이션`)
 - **종료 시**: 종료 사유(완료/예산 소진/에스컬레이션) + 머지 결과 + 미해결 항목 + **3분류 판정 요약(DONE/BLOCKED/NOT-STARTED) + 핸드오프 파일 경로** + 의사결정 요약 (핸드오프 계약은 `references/autonomous-driving.md §종료 핸드오프`)
 - **opt-out — 휴먼-인-더-루프**: 사용자가 단계별 확인을 명시하면(예: "확인받으면서", "단계마다 물어봐", "babysit", "자동으로 머지하지 마") 자율 주행을 끄고 전환한다. 자동 개입(SendMessage 명령 주입·자동 머지·자동 충돌 해결)을 하지 않고, 정체·실패·머지 결정을 사용자에게 보고하고 결정을 받는다 (`agent-monitor.md` / `merge-coordinator.md` 의 HITL 규칙)
 
@@ -226,3 +227,4 @@ read-only 조사·감사·원인분석은 충돌 비용이 없어 "의심스러�
 16. **머지해놓고 in-flight 방치** (무거운 경로): 기본은 배치 머지이고, 즉시 머지했으면 전부에 rebase를 전파한다 (`references/branch-strategy.md §base drift 전파`).
 17. **분해를 레이어로 쪼갬**: 수평 분해는 disjoint가 애초에 안 나온다 — 충돌은 판정이 아니라 분해에서 결정된다 (§분해는 충돌 경계로 쪼갠다).
 18. **조사를 순차 단독 탐색으로 시작**: read-only 조사·감사는 순차를 택할 근거가 없다 — 첫 행동은 관점별 병렬 fan-out이다 (§조사·감사 작업의 기본값은 병렬 fan-out).
+19. **미결 spec 위에서 구현 진입**: TBD가 남은 spec으로 dispatch하면 사용자가 내려야 할 판단이 코드로 굳는다 — 미결이 하나라도 있으면 hard stop한다 (§디스패치 전·보고 수용 게이트, `references/autonomous-driving.md §spec 확정 게이트`).

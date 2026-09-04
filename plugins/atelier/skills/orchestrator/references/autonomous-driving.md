@@ -35,7 +35,12 @@ user-invocable: false
 - 경로 (path):               경량 | 무거운 — 진입 시 1회 판정 (SKILL.md §경로 판정 게이트)
                              경량이면 isolation·토폴로지 가드·머지 조정이 빠진다.
                              계획 밖 tracked 편집이 생기면 SKILL.md §경로 전환으로 무거운 경로로 올린다
+- spec 확정 (spec_resolved): spec 입력 런이면 진입 전 미결 스캔 결과 — 스캔한 spec 경로 목록 + 미결 0
+                             (미결이 있으면 그 목록)
+                             미결이 하나라도 있으면 계약을 세우지 않는다 (§spec 확정 게이트 — hard stop)
+                             spec 입력이 아니면 "해당 없음"으로 기록 (생략은 판정이 아니다)
 - 자동 중단 (hard_stops):    무엇이 발생하면 예산과 무관하게 멈추고 보고하는가
+                             (spec 입력 런이면 "spec 미결 발견"이 기본 포함)
 - 결정 기록 위치 (log_dir):  .orchestrator/<epic>/decisions/ (gitignore, 완료 시 요약 공유)
 - 통합 검증 (integration_verify): (선택) worktree에서 실행 불가한 인프라 의존 테스트
                              - command: 실행할 명령 (예: "PROFILE=local-dev pnpm test src/storage/__test__/*.e2e.test.ts")
@@ -49,7 +54,9 @@ user-invocable: false
 ## 자율 실행 루프
 
 ```
-contract = {done_when, max_loops, max_redispatch_per_task, hard_stops, log_dir, path}
+if spec_input: require_spec_resolved(spec_docs)       # spec 입력 런 — 미결이 하나라도 있으면 여기서
+                                                      # hard stop (§spec 확정 게이트). 계약도 세우지 않는다
+contract = {done_when, max_loops, max_redispatch_per_task, hard_stops, log_dir, path, spec_resolved}
 heavy = (contract.path == "무거운")                    # 진입 판정 — SKILL.md §경로 판정 게이트
 loop_count = 0
 
@@ -78,6 +85,9 @@ while not satisfied(contract.done_when) and loop_count < contract.max_loops:
             log_decision("재위임 판단", r, refs=[실패이력, agent-monitor.md])
             continue
         verdict = review_and_qa(r)                    # 작업별 검토·QA 게이트 (검토 + QA(검증 테스트 추가), 구현자와 다른 agent)
+        if verdict.spec_unresolved:                   # 게이트가 spec 미결을 드러냄 — 재위임 대상이 아니다
+            log_decision("spec 미결 발견 → hard stop", verdict)
+            break                                     # §spec 확정 게이트 (예산과 무관하게 멈춘다)
         if verdict.rejected:                           # 검토 reject 또는 QA reject (AND 게이트)
             handle_gate_rejection(r, verdict)         # 격리 subagent 재위임(실패 맥락 포함), team이면 SendMessage로 조율 (max_redispatch 예산 소모)
             log_decision("게이트 거부 → 재위임/조율", verdict, refs=[검토/QA findings])
@@ -336,7 +346,54 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 
 ---
 
+## spec 확정 게이트 (Spec Resolution Gate — hard stop)
+
+spec 문서를 입력으로 구현하는 자율 런은 **spec이 미결 없이 확정된 상태일 때만** 진입한다. 미결(TBD) 항목이 하나라도 남아 있으면 구현 dispatch 전에 **hard stop**하고 사용자에게 해소를 요청한다 — 예산·진전과 무관하게, 자율 계약을 세우기 전에 적용된다. spec은 "제품이 무엇이어야 하는가"의 신뢰 소스인데(CLAUDE.md 문서 계층), 미결이 남은 spec은 아직 규격이 아니다. 그 위에서 자율로 구현하면 미결이 코드 안에서 조용히 "결정"되어, 사용자가 내려야 할 판단이 구현 세부로 굳는다.
+
+### 판정
+
+dispatch 전에 입력 spec 문서 전부(아래 §범위)를 read-only로 스캔한다. 스캔이 잡아내는 신호는 세 종류이고, **결정적인 것은 미결 섹션뿐**이다. 나머지 둘은 수집한 뒤 판정한다.
+
+| 신호 | 예 | 처리 |
+|------|-----|------|
+| 미결 섹션에 항목이 남아 있음 | `## 미결 사항`, `## 미결정 사항`, `## TBD` 아래에 `없음`이 아닌 항목 | **결정적** — 그대로 미결 |
+| 본문의 미결 표기 | `TBD`, `미정`, `미확정`, `확정본 아님`, `추후 결정`, `?` | **후보** — 주변 문장을 읽고 판정 |
+| spec 사이의 모순 | 두 문서가 같은 계약을 다르게 서술하고 어느 쪽이 맞는지 정해지지 않음 | **판단** — 어느 쪽이 맞는지 정해졌는가 |
+
+**미결 섹션은 해석이 필요 없다.** spec 작성자가 "아직 정하지 않았다"고 직접 선언한 자리이므로, `없음`이 아닌 항목이 하나라도 있으면 그대로 미결이다.
+
+**본문 표기는 후보다.** 표기가 있다는 사실만으로 미결로 치면 과잉 발화한다 — 상태 기계 spec의 `미확정 주문`은 주문의 한 상태를 가리키는 도메인 용어이고, 플로우 문서의 의문형 제목 끝 `?`는 절 제목의 형식이지 열린 결정이 아니다. 그래서 표기를 **전부 수집한 뒤** 각각의 주변 문장을 읽고, 그 문장이 결정을 열어 둔 것인지(**미결**) 단어를 도메인 용어·수사로 쓴 것인지(**기각**)를 판정한다.
+
+확정 = 미결 섹션이 없거나 `없음`이고, 후보가 전부 기각됐고, 모순이 없다. 판정은 문서 텍스트로 내리며 메인의 "사소해 보인다"는 체감으로 통과시키지 않는다. 결과(스캔한 spec 경로 목록 + 미결 목록 또는 0)와 **모든 후보의 처분**(표기 + 위치 + 판정: 미결/기각 + 한 줄 근거)을 자율 계약의 `spec_resolved`와 decision log에 함께 남긴다. 게이트를 우회할 여지는 기각 쪽에 있으므로, 기각 하나하나가 사후 감사 가능해야 "사소해 보인다"가 기록 없이 통과하지 못한다.
+
+### 범위 — spec 전체, task 단위 면제 없음
+
+**입력 spec 집합은 사용자가 지정하거나, 메인이 진입 보고에서 명시적 경로 목록으로 선언한다.** 기본값은 spec 디렉토리 전체(`spec/DESIGN.md`, `spec/concerns/*`, `spec/flows/*` 또는 동등한 명세)다. 메인이 미결을 피하려고 집합을 좁히는 것은 금지한다 — 좁히는 것은 **사용자 결정**이고, 좁혀진 집합은 그 자체로 decision log 항목이다(근거 = 사용자 지시). 입력 목록을 좁히는 것은 아래 "이 task는 무관하다"와 같은 우회를 한 단계 위에서 하는 것이다: 문서를 목록에서 빼면 그 문서의 미결은 스캔되지 않고, 게이트는 통과한 것처럼 보인다.
+
+이번 런의 입력 spec **전체**가 대상이다. "이 task는 그 미결을 건드리지 않는다"는 이유로 부분 진입하지 않는다 — 무관 판정 자체가 메인의 재량이 되어 게이트의 우회 경로가 되고, 미결 항목이 다른 항목과 어떻게 얽혀 있는지는 spec이 확정되기 전에는 알 수 없다. 미결이 남은 spec에서 구현 가능한 부분만 먼저 하고 싶다면 그것은 **사용자가** 미결을 해소하거나 spec을 분리해 결정할 일이지, 자율 런이 대신 정하지 않는다.
+
+### 시점
+
+- **진입 시** — 자율 계약을 세우기 전 1회. 미결이 있으면 계약을 세우지 않는다.
+- **루프 중** — spec이 갱신됐거나, 검토자·QA 게이트가 "spec이 이 항목을 정하지 않았다 / 미결로 두었다"를 드러낸 시점. 게이트의 이 verdict(`spec_unresolved`)는 reject가 아니므로 **재위임 예산을 소모하지 않고 바로 hard stop**한다 (`spec-driven-review.md §게이트 중 spec 미결 발견`).
+
+### 동작 — 멈추고, 메우지 않는다
+
+hard stop 시 다음을 한 번에 보고한다: **미결 목록**(spec 경로 + 항목) + 현재 상태 + 남은 작업 + **해소 경로**. 해소 경로는 사용자와의 심문(`grill` — 미결·의문이 0이 될 때까지 재질문)으로 결정하고 `spec-write`로 본문에 반영한 뒤 재진입하는 것이다. 다음은 전부 **위반**이다:
+
+- 미결을 **가정**으로 덮고 진행 — 가정은 협의체가 탐색으로 답 못 한 질문에 쓰는 장치이지, spec이 명시적으로 미결로 선언한 항목을 대신 결정하는 장치가 아니다.
+- 미결을 **loud stub**으로 격리하고 전진 — 아래 §모호한 seam은 spec이 침묵하는 엣지에만 적용된다. spec이 미결로 **선언**한 항목은 seam이 아니라 결정 대기 상태다.
+- **협의체·자문**이 미결을 대신 확정 — spec의 미결은 사용자 결정 사항이다. 협의체는 확정된 spec을 task로 쪼갤 뿐이고(`architect-council.md §언제 쓰는가`), 자문은 권고만 낸다.
+
+### 해제 조건
+
+spec이 갱신되면 같은 판정을 다시 돌려 미결 0을 확인한 뒤에만 재진입한다. hard stop으로 종료하면 핸드오프(§종료 핸드오프)에 해당 작업을 `BLOCKED` + 해제 조건 = 미결 목록으로 남긴다. 다음 세션이 그 목록만 보고 무엇을 결정받아야 재개되는지 알 수 있어야 한다.
+
+---
+
 ## 모호한 seam — isolate-and-continue (hard-stop 대안)
+
+> **선행 조건**: 이 절은 **spec이 침묵하는 엣지**(또는 spec 입력이 없는 런)에만 적용된다. spec이 미결 섹션·TBD 표기로 **명시적으로 미결로 선언한 항목**은 seam이 아니라 결정 대기 상태이고, §spec 확정 게이트가 먼저 hard stop한다 — stub으로 격리해 전진하지 않는다.
 
 자율 루프에서 마주치는 모든 모호함이 에스컬레이션 대상은 아니다. **경계(seam)는 분명한데 내부 구현/외부 계약만 비어 있는** 엣지(미확정 외부 webhook 계약, 아직 안 정한 DM/알림 채널 등)는 멈추는 대신 **격리하고 전진**한다. 멈춰야 진행되는 것이 아니라 빈자리만 채우면 되는 종류라면, 슬라이스 전체를 보류시키는 hard-stop 은 과한 대응이다.
 
@@ -360,7 +417,7 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 ```
 에스컬레이션 판정
   │
-  └─ 아래 7개 중 하나라도 해당하는가
+  └─ 아래 8개 중 하나라도 해당하는가
        │  1. 되돌리기 어렵거나 외부로 나가는 행위
        │       force push · main 브랜치 머지 · 배포 · 외부 서비스 호출 · 데이터 삭제
        │  2. 토폴로지 위반
@@ -376,6 +433,9 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
        │       같은 실패가 재위임에도 계속됨
        │  7. 종료 조건 자체가 검증 불가능해짐
        │       테스트 인프라 붕괴 등으로 done 판정 불가
+       │  8. spec 미결 (spec 입력 런)
+       │       입력 spec에 미결(TBD) 항목 존재 — 진입 시 스캔 또는 루프 중 게이트가 발견
+       │       → 구현 dispatch 금지, 미결 목록 + 해소 경로(grill → spec-write)와 함께 보고 (§spec 확정 게이트)
        │
        ├─ Yes ─→ 멈추고 보고
        └─ No  ─→ 루프 계속
@@ -451,7 +511,8 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 11. **고정 모델 매핑 박기**: "구현은 항상 X, 리뷰는 항상 Y"로 못 박음 → 모델 세대가 바뀌어도 비효율 유지. 매 dispatch마다 작업 리스크에 맞춰 재평가한다 (역할 기준 원칙은 `model-routing.md §역할 기준 원칙`).
 12. **메인 컨텍스트로 전문 끌어오기**: 전체 diff·파일 전문·리뷰 findings 전문을 메인이 직접 통독 → 긴 루프에서 메인 컨텍스트 포화. 메인은 압축 요약 + verdict만 수령.
 13. **teammate에 편집 격리 기대**: teammate가 공유 checkout을 직접 편집 → 덮어쓰기/메인 오염. 편집은 `isolation:"worktree"` subagent에 위임하고 team은 조율만. 단발 재위임 시에는 이전 실패 맥락을 새 prompt에 포함해 컨텍스트 손실을 줄인다.
-14. **seam 처리 실패 — 일괄 hard-stop 또는 silent stub**: 내부 구현/계약만 빈 엣지까지 전부 에스컬레이션하면 채우면 될 빈자리에 슬라이스 전체가 멈춘다. 반대로 격리 stub이 조용히 기본값으로 "동작하는 척"하면 스펙 불일치를 숨겨 디버깅을 망친다. contract/interface로 격리하고 **inert / throw 하는 loud stub**을 둔 채 전진, 미결 seam은 깃발로 보고 (*모호한 seam — isolate-and-continue*).
+14. **seam 처리 실패 — 일괄 hard-stop 또는 silent stub**: 내부 구현/계약만 빈 엣지까지 전부 에스컬레이션하면 채우면 될 빈자리에 슬라이스 전체가 멈춘다. 반대로 격리 stub이 조용히 기본값으로 "동작하는 척"하면 스펙 불일치를 숨겨 디버깅을 망친다. contract/interface로 격리하고 **inert / throw 하는 loud stub**을 둔 채 전진, 미결 seam은 깃발로 보고 (*모호한 seam — isolate-and-continue*). 단 이 경로는 spec이 **침묵하는** 엣지 전용이다 — 아래 15번.
+15. **미결 spec 위에서 구현 진입**: spec에 TBD가 남아 있는데 "이 task와는 무관하다" / "사소하다"고 보고 dispatch하거나, 미결을 가정·loud stub·협의체 결정으로 메우고 전진 → 사용자가 내려야 할 판단이 코드 안에서 조용히 굳는다. spec 입력 런은 미결 0을 확인한 뒤에만 진입하고, 미결이 드러나면 예산과 무관하게 hard stop해 해소 경로(grill → spec-write)와 함께 보고한다 (§spec 확정 게이트).
 
 ---
 
@@ -461,6 +522,7 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 
 - [ ] 사용자가 HITL 로 opt-out 하지 않았는가? (opt-out 시 자율 진입 금지)
 - [ ] 조율 도구(`SendMessage`/`Monitor`/`Task*`) 스키마를 `ToolSearch`로 확보했는가? (`SKILL.md §진입 시 체크 0` — 미확보면 왕복 경로가 전부 죽는다)
+- [ ] spec 입력 런이면 입력 spec 전체를 미결 스캔해 **미결 0**을 확인하고, 스캔 경로 목록 + 후보 판정(미결/기각 + 근거)을 `spec_resolved`와 decision log에 기록했는가? (§spec 확정 게이트 — 미결이 하나라도 있으면 계약을 세우지 않고 hard stop, 미결 목록 + 해소 경로 보고)
 - [ ] 종료 조건이 명령으로 판정 가능한 형태인가?
 - [ ] 예산(`max_loops` / `max_redispatch_per_task` / no-progress)과 hard stop 조건을 계약에 고정했는가?
 - [ ] 결정 기록 위치(`.orchestrator/<epic>/decisions/`)를 고정하고 자율 계약을 1회 보고했는가?
@@ -488,6 +550,7 @@ worktree sub-agent는 인프라 의존 환경(내부 자격증명, live DB, 외�
 - [ ] 매 루프 종료 시 종료 조건을 결정적으로 재평가하고 진전을 수치로 측정하는가? (체감 아님)
 - [ ] 자문을 소집했다면 트리거·예산 안이었고, 권고의 채택/부분채택/기각을 사유와 함께 기록했는가? (`critical`은 에스컬레이션으로 승격)
 - [ ] 각 분기 결정을 참고 소스와 함께 `log_dir`에 기록하는가?
+- [ ] spec 갱신·게이트 verdict로 spec 미결이 드러나면 가정·stub·재위임이 아니라 **hard stop**으로 회부하는가? (§spec 확정 게이트)
 - [ ] hard stop 발생 시 예산과 무관하게 즉시 멈추는가?
 
 종료 시:
