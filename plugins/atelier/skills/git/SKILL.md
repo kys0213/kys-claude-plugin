@@ -79,6 +79,35 @@ CLI 인자 형식·출력 계약·git 정책(커밋 형식·브랜치 명명·PR
 
 ---
 
+## 열린 PR 최신화 원칙 (open PR = push까지가 완료)
+
+현재 브랜치에 **열린 PR이 있고** 로컬 HEAD가 upstream보다 앞서 있으면(ahead > 0), 작업 종료 전 **push까지가 완료 조건**이다. 커밋만 하고 종료하면 PR이 최신 커밋을 반영하지 못한 채로 남는다.
+
+**판정 (결정적)**:
+
+```bash
+git rev-list --left-right --count @{upstream}...HEAD   # "<behind> <ahead>"
+gh pr view --json number,state                          # 현재 브랜치의 열린 PR 존재 여부
+```
+
+- `ahead > 0` 이고 PR `state == "OPEN"` 이면 이 원칙이 적용된다.
+
+**Stop hook과의 관계**: `atelier session push-check` (Stop hook)가 이 조건을 감지하면 `[push-check]` 이유와 함께 `{"decision":"block","reason":...}` 로 Stop 을 block 한다. hook 은 **감지만** 하고 push 는 실행하지 않는다 — push 실행은 이 절의 정책에 따라 에이전트가 한다 (CLAUDE.md §책임 경계: CLI = 결정적 감지, Skill = 판단·실행). hook 은 `stop_hook_active` 조건으로 **최대 1회만** block 하므로 두 번째 Stop 시도에서는 막히지 않는다 — hook 은 안전망일 뿐이고, 완료 조건을 지키는 1차 책임은 에이전트의 종료 절차에 있다. CLI 표면은 `references/cli-reference.md` §A 참조.
+
+**판단 절차**:
+
+1. ahead 만 있고 behind 가 0이면 → `git push`.
+2. behind 도 있으면 rebase 필요 여부를 판단하고, force-push 가 필요하면 아래 §force-push 정책(`--force-with-lease` 는 이미 push 된 브랜치를 rebase 한 직후에만)을 따른다.
+3. push 가 permission denied 등으로 거부되면 아래 §push 권한 거부 시 사용자 위임 대로 재시도하지 않고 명령을 사용자에게 위임한다 — 이 경우 **위임 보고가 완료 조건을 대체**한다.
+
+**범위 밖** (이 원칙이 적용되지 않는 경우):
+
+- PR 이 없는 브랜치의 로컬 커밋 — 의도적 보류일 수 있다.
+- 미커밋 변경 — WIP 여부 판단은 에이전트 몫이다.
+- worktree 내부 분해 브랜치 — PR 을 만들지 않으므로 이 원칙의 대상이 아니다 (§PR 단위 원칙 참조).
+
+---
+
 ## PR 단위 원칙 (요청 1건 = PR 1개)
 
 **기본값: 사용자 요청 1건 = 외부로 나가는 PR 1개.** 내부 분해 단위(Task, worktree 브랜치)는 PR을 생성하지 않는다 — epic/feature 브랜치로 수렴 후 삭제한다.

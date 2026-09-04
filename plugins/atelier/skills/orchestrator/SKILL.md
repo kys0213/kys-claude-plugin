@@ -204,7 +204,7 @@ read-only 조사·감사·원인분석은 충돌 비용이 없어 "의심스러�
 
 - **시작 시**: 분해된 작업 목록 + 병렬/순차 결정 + 자율 계약(종료 조건·예산·hard stop·결정 기록 위치)을 한 번에 보고
 - **진행 중**: 침묵 — 단, 에스컬레이션 조건(되돌리기 어려운 행위·토폴로지 위반·도메인 의미 충돌·예산 소진·spec 미결 발견 등)은 자율 모드라도 **항상** 멈추고 즉시 보고한다 (`references/autonomous-driving.md §에스컬레이션`)
-- **종료 시**: 종료 사유(완료/예산 소진/에스컬레이션) + 머지 결과 + 미해결 항목 + **3분류 판정 요약(DONE/BLOCKED/NOT-STARTED) + 핸드오프 파일 경로** + 의사결정 요약 (핸드오프 계약은 `references/autonomous-driving.md §종료 핸드오프`)
+- **종료 시**: 종료 사유(완료/예산 소진/에스컬레이션) + 머지 결과 + 미해결 항목 + **3분류 판정 요약(DONE/BLOCKED/NOT-STARTED) + 핸드오프 파일 경로** + 원격 최신화 상태(열린 PR이 있으면 push 완료 여부 — 상세는 `references/autonomous-driving.md §종료 조건`/`§종료 핸드오프`, 판정은 `git` skill `SKILL.md` §열린 PR 최신화 원칙) + 의사결정 요약 (핸드오프 계약은 `references/autonomous-driving.md §종료 핸드오프`)
 - **opt-out — 휴먼-인-더-루프**: 사용자가 단계별 확인을 명시하면(예: "확인받으면서", "단계마다 물어봐", "babysit", "자동으로 머지하지 마") 자율 주행을 끄고 전환한다. 자동 개입(SendMessage 명령 주입·자동 머지·자동 충돌 해결)을 하지 않고, 정체·실패·머지 결정을 사용자에게 보고하고 결정을 받는다 (`agent-monitor.md` / `merge-coordinator.md` 의 HITL 규칙)
 
 ## 안티패턴

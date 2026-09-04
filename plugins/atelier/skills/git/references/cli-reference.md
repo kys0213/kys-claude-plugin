@@ -110,6 +110,15 @@ Write/Edit·Commit guard 2종의 감지·마이그레이션·등록을 한 번�
 > `removed` 는 접두 매칭으로 정리된 옛 등록분이다 — 비어 있지 않으면 마이그레이션이 일어난 것이다.
 > guard hook 의 비활성화·재설정 절차는 통합 setup 의 hook 관리 모드가 담당한다.
 
+## 5. push-check (Stop hook)
+
+`atelier session push-check` — 이 문서가 다루는 `atelier git` 이 아니라 `atelier session` 네임스페이스의 명령이지만,
+git 워크플로우 완료 조건(`git` skill `SKILL.md` §열린 PR 최신화 원칙)을 뒷받침하는 Stop hook 이라 여기 함께 적어 둔다.
+
+- **역할**: Stop hook. 현재 브랜치에 열린 PR + 로컬 `ahead > 0` 을 감지하면 `{"decision":"block","reason":"[push-check] ..."}` 를 출력해 Stop 을 block 한다.
+- **감지만 한다**: push 는 이 명령이 직접 수행하지 않는다 — block 이후 push 실행은 에이전트가 `git` skill 정책대로 한다.
+- **항상 exit 0** — guard(§2)처럼 exit 코드로 차단을 신호하지 않고, stdout 의 `decision` 필드로 신호한다.
+
 ---
 
 # B. git 정책 (에이전트가 plain git/gh 로 적용)
