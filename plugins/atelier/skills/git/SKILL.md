@@ -105,6 +105,7 @@ gh pr view --json number,state                          # 현재 브랜치의 �
 - PR 이 없는 브랜치의 로컬 커밋 — 의도적 보류일 수 있다.
 - 미커밋 변경 — WIP 여부 판단은 에이전트 몫이다.
 - worktree 내부 분해 브랜치 — PR 을 만들지 않으므로 이 원칙의 대상이 아니다 (§PR 단위 원칙 참조).
+- upstream 이 설정되지 않은 브랜치(`@{upstream}` 해석 실패) — `push-check` 는 이 경우 silent 이며, 에이전트는 첫 push 를 `git push -u origin <branch>` 로 하여 tracking 을 만든다 (§커밋·push·PR 워크플로우 5번과 동일).
 
 ---
 
