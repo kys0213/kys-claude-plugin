@@ -110,6 +110,15 @@ Write/Edit·Commit guard 2종의 감지·마이그레이션·등록을 한 번�
 > `removed` 는 접두 매칭으로 정리된 옛 등록분이다 — 비어 있지 않으면 마이그레이션이 일어난 것이다.
 > guard hook 의 비활성화·재설정 절차는 통합 setup 의 hook 관리 모드가 담당한다.
 
+## 5. push-check (Stop hook)
+
+```bash
+atelier session push-check --project-dir <dir>   # stdin: Stop hook payload
+```
+
+- **항상 exit 0** — guard(§2)처럼 exit 코드로 차단을 신호하지 않고, block 은 stdout 의 `{"decision":"block","reason":"[push-check] ..."}` 로 신호한다.
+- 판정 조건과 push 정책은 `git` skill `SKILL.md` §열린 PR 최신화 원칙 이 단일 출처다.
+
 ---
 
 # B. git 정책 (에이전트가 plain git/gh 로 적용)

@@ -5,7 +5,7 @@
 //! `RealGitService` shells out via `shared::shell`. Commit/branch/PR flows now
 //! run as plain git/gh under the `git` skill's conventions, not through here.
 
-use crate::git::types::GitSpecialState;
+use crate::git::types::{Divergence, GitSpecialState};
 use crate::shared::shell::{exec, ExecOptions};
 
 /// The one repo mutation the git subsystem performs, kept off `GitService` on
@@ -31,6 +31,19 @@ pub trait GitService {
     fn detect_default_branch(&self) -> Result<String, String>;
     fn is_inside_work_tree(&self) -> bool;
     fn get_special_state(&self) -> GitSpecialState;
+    /// Drift against `@{upstream}`. `None` whenever the read cannot answer at
+    /// all — no upstream configured, an empty repo, a detached HEAD, a
+    /// directory outside any work tree. Absence is "unknown", never zero drift.
+    fn upstream_divergence(&self) -> Option<Divergence>;
+}
+
+/// Parses `git rev-list --left-right --count <upstream>...HEAD` output — two
+/// counts, left (behind) then right (ahead), separated by whitespace.
+fn parse_divergence(raw: &str) -> Option<Divergence> {
+    let mut fields = raw.split_whitespace();
+    let behind = fields.next()?.parse().ok()?;
+    let ahead = fields.next()?.parse().ok()?;
+    Some(Divergence { behind, ahead })
 }
 
 /// Real `GitService` bound to an optional working directory.
@@ -145,11 +158,46 @@ impl GitService for RealGitService {
             current_branch: self.current_branch(),
         }
     }
+
+    fn upstream_divergence(&self) -> Option<Divergence> {
+        let (stdout, exit) =
+            self.git_safe(&["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]);
+        if exit != 0 {
+            return None;
+        }
+        parse_divergence(&stdout)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::git::types::DetectedBranch;
+    use super::parse_divergence;
+    use crate::git::types::{DetectedBranch, Divergence};
+
+    #[test]
+    fn parses_behind_then_ahead() {
+        assert_eq!(
+            parse_divergence("2\t3\n"),
+            Some(Divergence {
+                behind: 2,
+                ahead: 3
+            })
+        );
+        assert_eq!(
+            parse_divergence("0 0"),
+            Some(Divergence {
+                behind: 0,
+                ahead: 0
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_incomplete_or_non_numeric_output() {
+        assert_eq!(parse_divergence(""), None);
+        assert_eq!(parse_divergence("3"), None);
+        assert_eq!(parse_divergence("a\tb"), None);
+    }
 
     /// A branch name is what `detect_default_branch` / `gh` hand back, so the
     /// constructor guarding this type is what stops a blank detection from

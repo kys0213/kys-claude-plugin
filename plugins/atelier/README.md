@@ -64,7 +64,7 @@ atelier는 단일 Rust crate(`cli/`)로 빌드되며, 바이너리 `atelier` 하
 ```
 atelier drift <check|sync>                # setup 이 복사한 산출물의 드리프트 판정/갱신 (shell 스크립트 → Rust 포팅)
 atelier git <reviews|guard|hook>          # git-utils 의 기계적 호출 표면 (TypeScript → Rust 포팅)
-atelier session <baseline|simplify-check> # 세션 경계 인식 hook (SessionStart / Stop)
+atelier session <baseline|simplify-check|push-check> # 세션 경계 인식 hook (SessionStart / Stop)
 ```
 
 `drift` 는 `/atelier:update`·`/atelier:setup` 명세가 호출하는 결정적 도구입니다.
@@ -78,6 +78,10 @@ atelier session <baseline|simplify-check> # 세션 경계 인식 hook (SessionSt
 (없을 때만 — resume/compact 안전), Stop 에 `(현재 dirty − 베이스라인 dirty) ∪ (베이스라인
 HEAD 이후 커밋된 파일)` 이 코드 파일을 포함할 때만 `/simplify` 를 제안합니다. 세션당 1회,
 비차단(항상 exit 0)입니다.
+
+`push-check` 는 Stop 시점에 **열린 PR 이 있는 브랜치가 upstream 보다 ahead** 이면
+`{"decision":"block","reason":...}` 를 stdout 에 내보내 세션 종료를 막습니다 (항상 exit 0 —
+판정 조건과 push 정책은 `skills/git/SKILL.md` §열린 PR 최신화 원칙 이 단일 출처입니다).
 
 기존 `git-utils` 호출 호환을 위한 alias는 `/atelier:setup`이 안내합니다.
 
