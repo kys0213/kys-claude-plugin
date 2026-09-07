@@ -131,9 +131,9 @@ sub-agent의 검증 없는 보고가 잘못된 결론으로 전파되는 것을 
 | 옵션 | 사용 시점 |
 |------|-----------|
 | 없음 (기본) | 읽기 전용 분석 sub-agent (현재 브랜치에서 실행, 편집 X) — 경량 경로에서는 현재 브랜치가 epic이 아닌 것이 정상이다 |
-| `isolation: "worktree"` | 코드를 변경하는 모든 sub-agent — worktree는 자동으로 만들어지나, base가 dispatch 시점 epic 브랜치 HEAD라는 보장은 없다 (위 §Prompt 작성 원칙 필수 포함 요소 9번) |
+| `isolation: "worktree"` | git 저장소 안에서 파일을 수정하는 sub-agent — worktree는 자동으로 만들어지나, base가 dispatch 시점 epic 브랜치 HEAD라는 보장은 없다 (위 §Prompt 작성 원칙 필수 포함 요소 9번) |
 
-오케스트레이터 토폴로지에서는 **편집하는 sub-agent는 항상 `isolation: "worktree"`** 다. 메인이 epic 브랜치를 점유하고 있으므로 같은 working tree에서 sub-agent가 편집하면 메인 상태가 오염된다. isolation worktree는 변경이 없으면 자동 정리되고, 변경이 있으면 worktree 경로와 브랜치명이 결과에 포함된다. 자세한 머지/정리는 `worktree-lifecycle.md`.
+오케스트레이터 토폴로지에서는 **git 저장소 안에서 편집하는 sub-agent는 `isolation: "worktree"`** 다 (저장소 밖 편집은 아래 §경로 판정 경계 케이스의 판정을 따른다). 메인이 epic 브랜치를 점유하고 있으므로 같은 working tree에서 sub-agent가 편집하면 메인 상태가 오염된다. isolation worktree는 변경이 없으면 자동 정리되고, 변경이 있으면 worktree 경로와 브랜치명이 결과에 포함된다. 자세한 머지/정리는 `worktree-lifecycle.md`.
 
 이 표는 **단발 subagent에만 적용**된다. agent team teammate는 공유 checkout이라 `isolation` 인자로 격리되지 않으므로(아래 §Agent team 사용 패턴), 편집·격리가 필요하면 teammate가 아니라 isolated subagent를 쓴다.
 
