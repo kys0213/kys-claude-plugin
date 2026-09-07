@@ -69,7 +69,7 @@ version: 0.1.0
 
 1. **현재 브랜치가 epic 브랜치인가?** — `git branch --show-current` 확인. `main` / 일반 feature 브랜치라면 epic 브랜치를 먼저 만들거나 사용자에게 어떤 epic 브랜치로 진입할지 물어본다 (`git` skill 의 브랜치 생성 또는 plain `git checkout -b epic/<name>`).
 2. **현재 메인이 다른 worktree 안에 있지 않은가?** — `git rev-parse --show-toplevel` 가 repo의 메인 working tree여야 한다. worktree 안에서 시작했다면 즉시 메인 working tree로 빠져나오도록 사용자에게 보고.
-3. **이후 모든 sub-agent dispatch는 `isolation: "worktree"` 로** — worktree의 base가 dispatch 시점 epic 브랜치 HEAD라는 보장은 없다. dispatch prompt에 base 확인·동기화 지시를 반드시 포함한다 (`references/delegation-patterns.md §Prompt 작성 원칙 필수 포함 요소` 9번이 단일 출처)
+3. **git 저장소 안에서 파일을 수정하는 sub-agent는 `isolation: "worktree"` 로 dispatch한다** — 읽기 전용 조사·분석은 격리하지 않고 현재 브랜치에서 실행하며, 저장소 밖 편집은 격리가 성립하지 않으므로 `references/delegation-patterns.md §경로 판정 경계 케이스`의 판정을 따른다. 격리 dispatch에서는 worktree의 base가 dispatch 시점 epic 브랜치 HEAD라는 보장이 없으므로, dispatch prompt에 base 확인·동기화 지시를 반드시 포함한다 (`references/delegation-patterns.md §Prompt 작성 원칙 필수 포함 요소` 9번이 단일 출처)
 4. **왕복 조율(team)이 이번 세션에서 가용한가?** — 판정하는 대상은 "team이라는 기능이 켜져 있는가"가 아니라 **"spawn한 agent에게 다시 말을 걸 수 있는가"**다. 필수 등급이 요구하는 실질은 *직전 라운드를 기억하는 상대와의 왕복*이고(`references/delegation-patterns.md §team mode 강제 등급` 기준 1), 그것을 주는 것은 `name`이라는 파라미터가 아니라 `SendMessage`라는 채널이다.
 
 ```
@@ -166,7 +166,7 @@ read-only 조사·감사·원인분석은 충돌 비용이 없어 "의심스러�
 |------|------|------|
 | 1회성 독립 작업, 결과물 단일 | 단발 sub-agent | `Agent({...})` |
 | 여러 agent 협업·식별/제어 필요 (read-only 조율) | agent team | `Agent({name, ...})` — `name` 없는 런타임이면 `Agent({run_in_background: true})` + 반환 `agentId` — 에 `SendMessage` (가용 판정 §진입 시 체크 4·`team_name` 무시·편집 격리는 subagent) |
-| 파일 충돌 위험 있는 병렬 | worktree-isolated | `Agent({isolation: "worktree", ...})` |
+| 파일 충돌 위험 있는 병렬 — git 저장소 안에서 파일을 수정하는 sub-agent | worktree-isolated | `Agent({isolation: "worktree", ...})` |
 
 > **격리는 subagent만 보장** — teammate는 공유 checkout. 편집은 `isolation:"worktree"` subagent, team은 조율 전용 (`references/delegation-patterns.md §Agent team 사용 패턴`이 단일 출처).
 
