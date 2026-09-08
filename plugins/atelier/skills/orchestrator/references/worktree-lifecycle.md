@@ -20,7 +20,7 @@ worktree 격리를 실제로 거는 국면의 항목을 소유한다. 항목 하
 - dispatch 직후 `git worktree list --porcelain` 스냅샷에 새 worktree 가 등장했는가
 - `git status --short` — 메인 working tree 가 clean 한가
 - `git rev-parse --show-toplevel` — 메인 shell cwd 가 메인 working tree 인가
-- 가드 실행 조건: 세 명령을 메인 working tree 에서 실행했는가 — worktree 안에서 실행하면 결과가 그 worktree 것으로 바뀌어 가드가 무의미해진다. 규약 브랜치(`epic/<name>/t*`) 존재는 판정 기준이 아니다 — 작업 시작 후 스스로 전환하므로 dispatch 직후에는 아직 없을 수 있다
+- 가드 실행 조건: 세 명령을 메인 working tree 에서 실행했는가 — worktree 안에서 실행하면 결과가 그 worktree 것으로 바뀌어 가드가 무의미해진다. 규약 브랜치(`<epic>/t*`) 존재는 판정 기준이 아니다 — 작업 시작 후 스스로 전환하므로 dispatch 직후에는 아직 없을 수 있다
 
 ```mermaid
 flowchart TD
@@ -56,11 +56,11 @@ flowchart TD
 - `git branch --show-current` 가 epic 브랜치인가
 - `git status --short` 가 clean 인가 (메인은 편집하지 않는다) · `git rev-parse --show-toplevel` 이 메인 working tree 인가 — worktree 안에서 실행하면 그 worktree 의 branch·status 를 보게 된다
 - 현재 모드가 자율인가 HITL 인가 (→ D45)
-- epic 브랜치 확보는 → P01 — 이 가드는 확보된 이름을 전제로 런 중에 돈다
+- epic 브랜치 확보는 → P01 — 이 가드는 확보된 이름을 전제로 런 중에 돈다. 판정 기준은 → P01 이 확보한 이름과의 일치이며 `epic/` 접두 여부가 아니다
 
 ```mermaid
 flowchart TD
-  D22_q1{"메인 working tree 에서 본 branch 가 epic 인가"}
+  D22_q1{"메인 working tree 에서 본 branch 가 확보한 epic 이름과 같은가"}
   D22_q2{"메인 working tree 가 clean 한가"}
   D22_q3{"자율 모드인가"}
   D22_t1["가드 통과 — 다음 단계 진행"]
@@ -126,10 +126,10 @@ worktree 는 항상 epic 브랜치 위의 격리 수단이고, 메인은 epic �
 
 ```
 main
-  └─ epic/<name>          ← 메인 (read + dispatch + report)
-       ├─ worktree A → epic/<name>/t1-<slug>   (base = epic/<name>)
-       ├─ worktree B → epic/<name>/t2-<slug>   (base = epic/<name>)
-       └─ worktree C → epic/<name>/t3-<slug>   (base = epic/<name>)
+  └─ <epic>     ← 메인 (read + dispatch + report)
+       ├─ worktree A → <epic>/t1-<slug>   (base = <epic>)
+       ├─ worktree B → <epic>/t2-<slug>   (base = <epic>)
+       └─ worktree C → <epic>/t3-<slug>   (base = <epic>)
 ```
 
 1. 진입 확인 — `git branch --show-current` 가 epic 브랜치, `git rev-parse --show-toplevel` 이 메인 working tree (→ D22)
@@ -152,8 +152,8 @@ main
 1. 메인 working tree 로 복귀한다 — 복구 명령을 worktree 안에서 실행하면 엉뚱한 체크아웃을 고치게 된다
 2. 의도치 않은 변경이 있으면 `git stash push -u` 로 보존한다 — worktree 로 갔어야 할 산출물일 수 있어 버리지 않는다
 3. 진행 중인 rebase 가 있으면 `git rebase --abort` 로 중단한 뒤 복구를 시작한다
-4. `git checkout epic/<name>` (이름은 → P01 이 확보한 것)
-5. `git pull --ff-only origin epic/<name>`
+4. `git checkout <epic>` (이름은 → P01 이 확보한 것)
+5. `git pull --ff-only origin <epic>`
 6. 5 가 non-ff 로 거부되면 **hard stop 후 보고**한다. 갈라짐 자체가 토폴로지 위반의 증거이므로 epic 히스토리를 다시 쓰는 것은 금지한다 — 대신 갈라진 상태 그대로 보고한다 (자율이면 → D47, HITL 이면 → D45)
 7. 잘못 switch 된 브랜치가 로컬에 남았으면 `git branch -D <브랜치>`
 8. 어떤 명령 직후 발생했는지와 working tree 가 clean 했는지를 붙여 보고한다 (→ C13)
