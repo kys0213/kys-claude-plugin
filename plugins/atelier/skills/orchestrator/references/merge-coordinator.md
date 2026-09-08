@@ -59,10 +59,12 @@ flowchart TD
 ```
 
 **종단별 행동 계약**
-- 잎부터 머지 / 변경 파일 수가 적은 후보부터 → 결과를 기다리는 후보는 앞 후보의 통합이 끝난 뒤로 미루고, 큰 변경이 뒤에 들어와 작은 변경의 충돌을 흡수하게 둔다
+- 잎부터 머지 → 결과를 기다리는 후보는 앞 후보의 통합이 끝난 뒤로 미룬다
+- 변경 파일 수가 적은 후보부터 머지 → 큰 변경이 뒤에 들어와 작은 변경의 충돌을 흡수하게 둔다
 - 알파벳 순 확정 → 세 종단 공통으로, 확정한 순서와 근거를 decision log 에 남기고 (→ C05) 순서대로 한 후보씩 통합한다. 전 후보 동시 머지는 금지한다 — 한 후보씩 통합하며 매 머지 직후 가드를 돈다 (→ C12)
 
 **근거**: 이 순서는 충돌이 터졌을 때 사람이 처리할 양을 최소화하는 휴리스틱이고, 알파벳 순 종단이 같은 입력에 같은 순서를 보장한다.
+
 **후속**: → P07 → D42
 
 ## D41. 머지 후보 수집·제외 판정
@@ -97,8 +99,7 @@ flowchart TD
 <!-- needs: D40 D45 D13 -->
 
 **입력 신호**
-- 충돌 성격(단순 라인 겹침 / 구조 변경 / 도메인 의미 충돌) · 충돌 해결 위임의 성공·실패 · 모드가 자율인가 HITL 인가 (→ D45)
-- 같은 파일의 충돌 카운터 — 파일 단위이며 task 예산과 별개다. task 를 갈아치워도 파일이 같으면 이어진다 (→ C04)
+- 충돌 성격(단순 라인 겹침 / 구조 변경 / 도메인 의미 충돌) · 충돌 해결 위임의 성공·실패 · 모드가 자율인가 HITL 인가 (→ D45) · 같은 파일의 충돌 카운터(파일 단위이며 task 예산과 별개 — task 를 갈아치워도 파일이 같으면 이어진다, → C04)
 
 ```mermaid
 flowchart TD
@@ -182,40 +183,42 @@ flowchart TD
 <!-- needs: D40 -->
 
 **입력 신호**
-- 새로 들어온 커밋의 committer 가 오케스트레이터 자신인가 위임 대상의 아이덴티티인가 (`git log --format='%H %cn %ce'`) · 통합된 커밋이 하나인가 여럿인가
-- author(저작자 표시) 보존 방침이 프로젝트에 있는가 — 이 문서는 확정하지 않는다
+- committer 가 오케스트레이터 자신인지(`git log --format='%H %cn %ce'`, 통합 커밋 1개·여러 개) · author 보존 방침이 있는지, 있다면 보존·정정 중 무엇을 요구하며 지금 처리가 그 요구와 어긋나는지 — 방침 확정 자체는 이 문서가 하지 않는다
 
 ```mermaid
 flowchart TD
   D52_q1{"committer 가 오케스트레이터 자신인가"}
-  D52_q2{"author 보존 방침이 있는가"}
+  D52_q2{"author 보존 방침 상태가 무엇인가"}
   D52_t1["그대로 둔다"]
   D52_t2["committer 만 갱신"]
   D52_t3["author 까지 정정"]
+  D52_t4["기본값 적용 후 기록"]
   D52_n1(["→ D47"])
   D52_q1 -->|Yes| D52_t1
   D52_q1 -->|No| D52_q2
-  D52_q2 -->|보존| D52_t2
-  D52_q2 -->|정정| D52_t3
-  D52_q2 -->|방침 없음| D52_n1
+  D52_q2 -->|없음| D52_t4
+  D52_q2 -->|보존 — 지금 처리가 방침과 맞음| D52_t2
+  D52_q2 -->|정정 — 지금 처리가 방침과 맞음| D52_t3
+  D52_q2 -->|방침 위반| D52_n1
 ```
 
 **종단별 행동 계약**
-- 그대로 둔다 → 다음 후보의 통합으로 진행한다 (→ P07)
-- committer 만 갱신 / author 까지 정정 → 단일 커밋은 `git commit --amend --no-edit`, 여러 커밋은 `git rebase --exec 'git commit --amend --no-edit' <base>` 이고, author 까지 정정할 때만 `--reset-author` 를 더한다. 보존 방침이 있는데 `--reset-author` 를 쓰는 것은 금지한다 — author 까지 덮어써 저작자 표시가 지워지므로 그때는 committer 만 갱신한다. 아이덴티티 값 자체는 프로젝트·환경의 git 설정을 따른다
-- → D47 → 방침이 없으면 문서가 임의로 확정하지 않고 에스컬레이션한다
+- 그대로 둔다 → committer 가 이미 오케스트레이터 자신이면 다음 후보의 통합으로 진행한다 (→ P07)
+- 기본값 적용 후 기록 → 방침이 없으면 committer·author 를 유지하고 trailer(`Co-Authored-By` 등)로 저작자 표시를 보존하는 기본값을 적용한다. 방침 부재와 적용 사실을 decision log 에 남긴다 (→ C05)
+- committer 만 갱신 → 단일 커밋은 `git commit --amend --no-edit`, 여러 커밋은 `git rebase --exec 'git commit --amend --no-edit' <base>` 다. author 는 건드리지 않는다. 아이덴티티 값은 프로젝트·환경의 git 설정을 따른다
+- author 까지 정정 → 같은 명령에 `--reset-author` 를 더해 author 도 정정한다
+- → D47 → 방침을 지금 처리로 지킬 수 없으면(예: 보존 방침인데 통합 커밋 원저작자가 여럿이라 committer 갱신만으로 방침을 지킬 수 없는 경우) 임의로 진행하지 않고 에스컬레이션한다
 
 **근거**: 통합 이력이 실제 수행자와 어긋나면 원격에서 서명·계정 매칭이 안 돼 Unverified 로 남는다.
+
 **후속**: → C12
 
 ## 계약
 
 ## C10. 브랜치 네이밍 규약
 
-- 통합 브랜치는 `epic/<name>` (메인이 점유), 작업 브랜치는 `epic/<name>/t<task-id>-<slug>` 다
-- 격리 인자가 자동 생성하는 브랜치 이름은 agent 식별자라 작업 단위와 연결되지 않는다. **첫 커밋 전에** `git switch -c epic/<name>/t<task-id>-<slug>` 로 전환하라는 지시를 prompt 에 싣는다 (→ C02)
-- `t<task-id>` 는 Task 의 id 와 같은 값으로 둔다 — 어느 브랜치가 어느 Task 것인지 조회가 필요 없다 (→ C16)
-- `<slug>` 는 영소문자·하이픈, 3~5 단어. 커밋 메시지 규약(`.claude/rules/git-workflow.md`)과 달리 type prefix 를 붙이지 않는다
+- 통합 브랜치는 `epic/<name>` (메인이 점유), 작업 브랜치는 `epic/<name>/t<task-id>-<slug>` 다 — `t<task-id>` 는 Task 의 id 와 같은 값으로 둬 어느 브랜치가 어느 Task 것인지 조회가 필요 없게 한다 (→ C16)
+- 격리 인자가 자동 생성하는 브랜치 이름은 agent 식별자라 작업 단위와 연결되지 않는다. **첫 커밋 전에** `git switch -c epic/<name>/t<task-id>-<slug>` 로 전환하라는 지시를 prompt 에 싣는다 (→ C02). `<slug>` 는 영소문자·하이픈 3~5 단어이며, 커밋 메시지 규약(`.claude/rules/git-workflow.md`)과 달리 type prefix 를 붙이지 않는다
 - 작업 브랜치는 PR 을 만들지 않고 epic 브랜치로 수렴한 뒤 삭제되므로 브랜치명이 PR 타이틀이 되지 않는다 — 외부로 나가는 PR 단위는 `git` skill `SKILL.md §PR 단위 원칙`이 단일 출처다
 - **근거**: 이름이 규약이면 `git branch --list 'epic/<name>/t*'` 하나로 후보 수집이 결정적이 되고 고아 브랜치가 대조로 드러난다 (→ D41)
 
@@ -223,11 +226,9 @@ flowchart TD
 
 작업 브랜치 → epic 브랜치 통합은 rebase 후 fast-forward 로 고정한다. 판정하지 않는다.
 
-- worktree 쪽에서 `git -C <worktree> rebase epic/<name>` — 충돌은 위임한다 (→ D42)
-- epic 브랜치의 메인 working tree 에서 `git merge --ff-only epic/<name>/t<id>-<slug>`. 메인은 그 자리에 그대로 머무른다 (→ D22)
+- worktree 쪽에서 `git -C <worktree> rebase epic/<name>`(충돌은 위임 → D42) 후, epic 브랜치의 메인 working tree 에서 `git merge --ff-only epic/<name>/t<id>-<slug>` — 메인은 그 자리에 그대로 머무른다 (→ D22)
 - **근거**: 그냥 `git merge` 면 rebase 를 빠뜨려도 머지 커밋으로 조용히 통과해 이 계약이 지켜졌는지 사후에 알 수 없고, 충돌 해결 정책의 단일 출처(`git` skill `references/conflict-resolution.md`)도 rebase 전제라 방식을 섞으면 그 문서가 절반의 경우 틀린 지침이 된다
-- **epic 브랜치 자체는 rebase 하지 않는다** — 공유 base 라 히스토리를 바꾸면 in-flight worktree 가 전부 깨진다. 역방향 흡수를 merge 로 하는 것도 같은 이유다 (→ D43). 이미 push 된 작업 브랜치를 rebase 하면 히스토리가 바뀌며, 그때 push 정책은 `git` skill `§force-push 정책`이 단일 출처다
-- 통합은 로컬에서 수행한다 — 작업 브랜치는 PR 을 만들지 않으므로 `gh pr merge` 를 쓰지 않는다 (→ C10)
+- **epic 브랜치 자체는 rebase 하지 않는다** — 공유 base 라 히스토리를 바꾸면 in-flight worktree 가 전부 깨진다. 역방향 흡수를 merge 로 하는 것도 같은 이유다 (→ D43). 이미 push 된 작업 브랜치를 rebase 하면 히스토리가 바뀌며, 그때 push 정책은 `git` skill `§force-push 정책`이 단일 출처다. 통합은 로컬에서 수행하며, 작업 브랜치는 PR 을 만들지 않으므로 `gh pr merge` 를 쓰지 않는다 (→ C10)
 
 ## C12. 머지 직후 가드 불변식 목록
 
