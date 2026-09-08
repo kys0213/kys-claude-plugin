@@ -142,6 +142,8 @@ end_check() { # end_check <n> <검사명>
 #   BLOCK   file id kind start end lines mermaids
 #                                         # `## ` 로 열리는 블록. kind = D|C|P|STRUCT
 #   MERMAID file start lines q t edges    # mermaid 코드펜스 1개
+#                                         # q/t 는 줄수가 아니라 출현 횟수(한 줄
+#                                         # 인라인 다중 선언 허용, 설계 §3.4)
 #   FILELEN file lines
 # ---------------------------------------------------------------------------
 
@@ -190,9 +192,16 @@ while IFS= read -r f; do
       if (infence) {
         flines++
         if (lang == "mermaid") {
-          if (line ~ /[DCP][0-9][0-9]_q[0-9]+[ \t]*\{/) fq++
-          if (line ~ /[DCP][0-9][0-9]_t[0-9]+[ \t]*\[/) ft++
-          if (line ~ /[DCP][0-9][0-9]_n[0-9]+[ \t]*\(/) ft++
+          # 판정 노드·종단은 줄당 1회가 아니라 출현 횟수로 센다 — 인라인
+          # 스타일(예: `D30_q1{"…"} -->|Yes| D30_q2{"…"}`)은 규약상 허용되며
+          # 한 줄에 선언이 둘 이상일 수 있다. 선언(뒤에 `{`/`[`/`(`)만 세므로
+          # 같은 id 가 엣지에서 재사용되는 줄은 자연히 제외된다.
+          s = line
+          while (match(s, /[DCP][0-9][0-9]_q[0-9]+[ \t]*\{/)) { fq++; s = substr(s, RSTART + RLENGTH) }
+          s = line
+          while (match(s, /[DCP][0-9][0-9]_t[0-9]+[ \t]*\[/)) { ft++; s = substr(s, RSTART + RLENGTH) }
+          s = line
+          while (match(s, /[DCP][0-9][0-9]_n[0-9]+[ \t]*\(/)) { ft++; s = substr(s, RSTART + RLENGTH) }
           if (index(line, "-->") > 0) fe++
         }
         next
