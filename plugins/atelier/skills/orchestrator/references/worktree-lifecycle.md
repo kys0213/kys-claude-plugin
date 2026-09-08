@@ -56,6 +56,7 @@ flowchart TD
 - `git branch --show-current` 가 epic 브랜치인가
 - `git status --short` 가 clean 인가 (메인은 편집하지 않는다) · `git rev-parse --show-toplevel` 이 메인 working tree 인가 — worktree 안에서 실행하면 그 worktree 의 branch·status 를 보게 된다
 - 현재 모드가 자율인가 HITL 인가 (→ D45)
+- epic 브랜치 확보는 → P01 — 이 가드는 확보된 이름을 전제로 런 중에 돈다
 
 ```mermaid
 flowchart TD
@@ -75,8 +76,8 @@ flowchart TD
 
 **종단별 행동 계약**
 - 통과 → 완료 알림 직후였으면 결과 처리로(→ D51), 머지 직후였으면 다음 머지 후보로(→ D41) 넘어간다
-- 복구 후 hard stop → 복구는 → P09. 가드 실패를 자율 재량으로 넘기는 것은 금지한다 — 대신 루프를 멈추고 발생 지점을 붙여 에스컬레이션한다 (→ D47 · → C13)
-- 복구 후 보고 → 복구는 → P09. 복구 결과와 보존한 변경을 보고하고 결정을 받는다 (→ D45 · → C13)
+- 복구 후 hard stop → 복구는 → P09. 가드 실패를 자율 재량으로 넘기는 것은 금지한다 — 대신 루프를 멈추고 발생 지점을 붙여 에스컬레이션한다 (→ D47 · → C13). 다만 epic 이름이 아직 확보되지 않은 상태면 hard stop 대신 → P01 로 되돌아간다
+- 복구 후 보고 → 복구는 → P09. 복구 결과와 보존한 변경을 보고하고 결정을 받는다 (→ D45 · → C13). 다만 epic 이름이 아직 확보되지 않은 상태면 보고 대신 → P01 로 되돌아간다
 
 **근거**: 오염된 HEAD 위에서는 후속 dispatch 의 worktree base 가 잘못 잡히고 머지 경로가 어긋난다.
 
@@ -151,7 +152,7 @@ main
 1. 메인 working tree 로 복귀한다 — 복구 명령을 worktree 안에서 실행하면 엉뚱한 체크아웃을 고치게 된다
 2. 의도치 않은 변경이 있으면 `git stash push -u` 로 보존한다 — worktree 로 갔어야 할 산출물일 수 있어 버리지 않는다
 3. 진행 중인 rebase 가 있으면 `git rebase --abort` 로 중단한 뒤 복구를 시작한다
-4. `git checkout epic/<name>`
+4. `git checkout epic/<name>` (이름은 → P01 이 확보한 것)
 5. `git pull --ff-only origin epic/<name>`
 6. 5 가 non-ff 로 거부되면 **hard stop 후 보고**한다. 갈라짐 자체가 토폴로지 위반의 증거이므로 epic 히스토리를 다시 쓰는 것은 금지한다 — 대신 갈라진 상태 그대로 보고한다 (자율이면 → D47, HITL 이면 → D45)
 7. 잘못 switch 된 브랜치가 로컬에 남았으면 `git branch -D <브랜치>`
