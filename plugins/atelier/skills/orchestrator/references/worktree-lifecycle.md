@@ -20,7 +20,7 @@ worktree 격리를 실제로 거는 국면의 항목을 소유한다. 항목 하
 - dispatch 직후 `git worktree list --porcelain` 스냅샷에 새 worktree 가 등장했는가
 - `git status --short` — 메인 working tree 가 clean 한가
 - `git rev-parse --show-toplevel` — 메인 shell cwd 가 메인 working tree 인가
-- 가드 실행 조건: 세 명령을 메인 working tree 에서 실행했는가 — worktree 안에서 실행하면 결과가 그 worktree 것으로 바뀌어 가드가 무의미해진다. 규약 브랜치(`<epic>/t*`) 존재는 판정 기준이 아니다 — 작업 시작 후 스스로 전환하므로 dispatch 직후에는 아직 없을 수 있다
+- 가드 실행 조건: 세 명령을 메인 working tree 에서 실행했는가 — worktree 안에서 실행하면 결과가 그 worktree 것으로 바뀌어 가드가 무의미해진다. 규약 브랜치(`<epic>-t*`) 존재는 판정 기준이 아니다 — 작업 시작 후 스스로 전환하므로 dispatch 직후에는 아직 없을 수 있다
 
 ```mermaid
 flowchart TD
@@ -127,9 +127,9 @@ worktree 는 항상 epic 브랜치 위의 격리 수단이고, 메인은 epic �
 ```
 main
   └─ <epic>     ← 메인 (read + dispatch + report)
-       ├─ worktree A → <epic>/t1-<slug>   (base = <epic>)
-       ├─ worktree B → <epic>/t2-<slug>   (base = <epic>)
-       └─ worktree C → <epic>/t3-<slug>   (base = <epic>)
+       ├─ worktree A → <epic>-t1-<slug>   (base = <epic>)
+       ├─ worktree B → <epic>-t2-<slug>   (base = <epic>)
+       └─ worktree C → <epic>-t3-<slug>   (base = <epic>)
 ```
 
 1. 진입 확인 — `git branch --show-current` 가 epic 브랜치, `git rev-parse --show-toplevel` 이 메인 working tree (→ D22)
