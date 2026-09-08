@@ -5,7 +5,7 @@ version: 0.1.0
 user-invocable: false
 ---
 
-<!-- owns: D39 D40 D41 D42 D43 D44 D52 C10 C11 C12 P07 P08 -->
+<!-- owns: D39 D40 D41 D42 D43 D44 D52 | C10 C11 C12 | P07 P08 -->
 
 # Merge Coordinator
 
