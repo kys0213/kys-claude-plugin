@@ -71,8 +71,8 @@ flowchart TD
 <!-- needs: D39 D34 -->
 
 **입력 신호**
-- `git branch --list 'epic/<name>/t*'` 결과와 결과 보고의 worktree 경로·브랜치명이 대조되는가 (→ C10)
-- 각 후보의 변경 유무 · `git merge-base epic/<name> <branch>` 가 현재 epic HEAD 인가 · idle 로 취소한 편집 조각의 브랜치인가 (→ D34)
+- `git branch --list '<epic>-t*'` 결과와 결과 보고의 worktree 경로·브랜치명이 대조되는가 (→ C10)
+- 각 후보의 변경 유무 · `git merge-base <epic> <branch>` 가 현재 epic HEAD 인가 · idle 로 취소한 편집 조각의 브랜치인가 (→ D34)
 
 ```mermaid
 flowchart TD
@@ -127,7 +127,7 @@ flowchart TD
 <!-- needs: D44 -->
 
 **입력 신호**
-- `git rev-list --count epic/<name>..origin/<default-branch>` 가 0인가
+- `git rev-list --count <epic>..origin/<default-branch>` 가 0인가
 - 지금이 최종 통합 검증 게이트 직전인가, 루프 중간인가 (→ D39)
 
 ```mermaid
@@ -210,23 +210,22 @@ flowchart TD
 - → D47 → 방침을 지금 처리로 지킬 수 없으면(예: 보존 방침인데 통합 커밋 원저작자가 여럿이라 committer 갱신만으로 방침을 지킬 수 없는 경우) 임의로 진행하지 않고 에스컬레이션한다
 
 **근거**: 통합 이력이 실제 수행자와 어긋나면 원격에서 서명·계정 매칭이 안 돼 Unverified 로 남는다.
-
 **후속**: → C12
 
 ## 계약
 
 ## C10. 브랜치 네이밍 규약
 
-- 통합 브랜치는 `epic/<name>` (메인이 점유), 작업 브랜치는 `epic/<name>/t<task-id>-<slug>` 다 — `t<task-id>` 는 Task 의 id 와 같은 값으로 둬 어느 브랜치가 어느 Task 것인지 조회가 필요 없게 한다 (→ C16)
-- 격리 인자가 자동 생성하는 브랜치 이름은 agent 식별자라 작업 단위와 연결되지 않는다. **첫 커밋 전에** `git switch -c epic/<name>/t<task-id>-<slug>` 로 전환하라는 지시를 prompt 에 싣는다 (→ C02). `<slug>` 는 영소문자·하이픈 3~5 단어이며, 커밋 메시지 규약(`.claude/rules/git-workflow.md`)과 달리 type prefix 를 붙이지 않는다
+- `<epic>` 은 (→ P01) 이 확보한 브랜치의 **전체 이름**이다 — `epic/foo` 든 `claude/xyz` 든 확보한 이름을 그대로 쓰고 접두 형태를 요구하지 않는다. 그 브랜치를 메인이 점유하고, 작업 브랜치는 그 이름에 `-t` 접미를 붙인 `<epic>-t<task-id>-<slug>` 다 — `t<task-id>` 는 Task 의 id 와 같은 값으로 둬 어느 브랜치가 어느 Task 것인지 조회가 필요 없게 한다 (→ C16)
+- 격리 인자가 자동 생성하는 브랜치 이름은 agent 식별자라 작업 단위와 연결되지 않는다. **첫 커밋 전에** `git switch -c <epic>-t<task-id>-<slug>` 로 전환하라는 지시를 prompt 에 싣는다 (→ C02). `<slug>` 는 영소문자·하이픈 3~5 단어이며, 커밋 메시지 규약(`.claude/rules/git-workflow.md`)과 달리 type prefix 를 붙이지 않는다
 - 작업 브랜치는 PR 을 만들지 않고 epic 브랜치로 수렴한 뒤 삭제되므로 브랜치명이 PR 타이틀이 되지 않는다 — 외부로 나가는 PR 단위는 `git` skill `SKILL.md §PR 단위 원칙`이 단일 출처다
-- **근거**: 이름이 규약이면 `git branch --list 'epic/<name>/t*'` 하나로 후보 수집이 결정적이 되고 고아 브랜치가 대조로 드러난다 (→ D41)
+- **근거**: 확보한 이름에 `-t` 접미를 붙이면 `git branch --list '<epic>-t*'` 하나로 후보 수집이 결정적이 되고 고아 브랜치가 대조로 드러난다 (→ D41). 계층 `<epic>/…` 는 `<epic>` ref 가 존재하는 동안 만들 수 없다
 
 ## C11. 머지 방식 — rebase 후 `--ff-only`
 
 작업 브랜치 → epic 브랜치 통합은 rebase 후 fast-forward 로 고정한다. 판정하지 않는다.
 
-- worktree 쪽에서 `git -C <worktree> rebase epic/<name>`(충돌은 위임 → D42) 후, epic 브랜치의 메인 working tree 에서 `git merge --ff-only epic/<name>/t<id>-<slug>` — 메인은 그 자리에 그대로 머무른다 (→ D22)
+- worktree 쪽에서 `git -C <worktree> rebase <epic>`(충돌은 위임 → D42) 후, epic 브랜치의 메인 working tree 에서 `git merge --ff-only <epic>-t<id>-<slug>` — 메인은 그 자리에 그대로 머무른다 (→ D22)
 - **근거**: 그냥 `git merge` 면 rebase 를 빠뜨려도 머지 커밋으로 조용히 통과해 이 계약이 지켜졌는지 사후에 알 수 없고, 충돌 해결 정책의 단일 출처(`git` skill `references/conflict-resolution.md`)도 rebase 전제라 방식을 섞으면 그 문서가 절반의 경우 틀린 지침이 된다
 - **epic 브랜치 자체는 rebase 하지 않는다** — 공유 base 라 히스토리를 바꾸면 in-flight worktree 가 전부 깨진다. 역방향 흡수를 merge 로 하는 것도 같은 이유다 (→ D43). 이미 push 된 작업 브랜치를 rebase 하면 히스토리가 바뀌며, 그때 push 정책은 `git` skill `§force-push 정책`이 단일 출처다. 통합은 로컬에서 수행하며, 작업 브랜치는 PR 을 만들지 않으므로 `gh pr merge` 를 쓰지 않는다 (→ C10)
 
@@ -235,7 +234,8 @@ flowchart TD
 매 머지 직후 아래를 확인한다. 생략은 금지한다 — 실행 시점은 → P07 5단계다.
 
 - current branch == epic 브랜치 · working tree clean → 어긋나면 → D22 (복구 절차 → P09)
-- committer == 오케스트레이터 자신 → 어긋나면 → D52
+- HEAD == 방금 통합한 후보의 tip (ff-only 결과, → C11) → 어긋나면 → D47
+- author 방침 판정을 거쳤다 → 어긋나면 → D52
 - in-flight worktree 가 epic 최신 HEAD 기준 → 어긋나면 → D39
 - 새 불변식이 생기면 이 목록에 한 줄을 추가한다. 단계를 신설하는 것은 금지한다 — **근거**: 단계를 늘리면 번호가 밀려 교차 참조까지 함께 고쳐야 한다
 
@@ -244,7 +244,7 @@ flowchart TD
 ## P07. 머지 표준 절차
 
 1. 머지 시점 확인 — 지금 머지해도 되는 시점인가 (→ D39)
-2. 후보 수집·제외 (→ D41). 변경 파일 overlap 을 `git diff --name-only epic/<name>...<branch>` 로 다시 대조해 순서 판정의 입력으로 넘긴다 (→ D40)
+2. 후보 수집·제외 (→ D41). 변경 파일 overlap 을 `git diff --name-only <epic>...<branch>` 로 다시 대조해 순서 판정의 입력으로 넘긴다 (→ D40)
 3. 머지 순서 결정 (→ D40)
 4. 순서대로 한 후보씩 통합 (→ C11). 충돌이 나면 (→ D42)
 5. 머지 직후 가드 (→ C12) — 매 머지 직후, 생략 금지
@@ -255,6 +255,6 @@ flowchart TD
 ## P08. 최종 통합 검증 게이트
 
 1. epic 최종 HEAD 에서 `git status` clean 확인 — 미커밋 변경·untracked 잔여물이 있으면 먼저 정리하고 재확인한다
-2. 역방향 drift 흡수 (→ D43): `git fetch origin <default-branch>` → `git rev-list --count epic/<name>..origin/<default-branch>`
+2. 역방향 drift 흡수 (→ D43): `git fetch origin <default-branch>` → `git rev-list --count <epic>..origin/<default-branch>`
 3. 전체 테스트 스위트 1회 실행 — 변경 파일 한정·부분 실행 금지. 인프라 의존 테스트(DB·외부 서비스 등)는 이 게이트와 별개의 검증 대상이다 (→ D49)
 4. `git rev-parse HEAD` 로 HEAD sha 기록(흡수 후의 HEAD 여야 한다) 후 green·red 판정과 완료 선언 여부 (→ D44), 결과 보고 (→ C13)
