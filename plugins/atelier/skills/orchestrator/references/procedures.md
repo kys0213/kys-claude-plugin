@@ -7,7 +7,7 @@
 1. 조율 도구 스키마를 확보한다 — 다른 모든 단계보다 먼저 온다 (`references/contracts.md §도구 확보`).
 2. 경로를 판정한다 — 무거운 경로면 이후 전부, 경량 경로면 브랜치·토폴로지·격리 단계를 건너뛴다 (`references/contracts.md §기본값 표`).
 3. 모드를 판정한다 — 토폴로지 확인이 모드를 입력으로 쓰므로 그 앞에 온다 (`references/contracts.md §기본값 표`).
-4. **epic 브랜치를 확보한다** — 현재 브랜치가 epic 이면 그것을 이 런의 epic 으로 쓴다. 아니면 하네스·PR 이 지정한 작업 브랜치를 접두 형태와 무관하게 그대로 `<epic>` 으로 삼는다. 지정 브랜치도 없으면 자율은 새 epic 을 만들고 HITL 은 어느 epic 으로 진입할지 사용자 결정을 받는다. 확보하지 않은 채 다음 단계로 가는 것은 금지한다 — 토폴로지·머지·기록 경로가 모두 이 이름을 전제한다. 확보한 이름과 확보 방식을 진입 보고와 기록에 남긴다 (`references/contracts.md §브랜치 규약`).
+4. **epic 브랜치를 확보한다** — 경량 경로는 이 단계와 토폴로지 확인을 생략한다 (`references/contracts.md §기본값 표` 표 7). 현재 브랜치가 이미 이 런의 epic 으로 쓰이고 있으면 그것을 이 런의 epic 으로 쓴다. 아니면 하네스·PR 이 지정한 작업 브랜치를 접두 형태와 무관하게 그대로 `<epic>` 으로 삼는다. 지정 브랜치도 없으면 자율은 새 epic 을 만들고 HITL 은 어느 epic 으로 진입할지 사용자 결정을 받는다. 확보하지 않은 채 다음 단계로 가는 것은 금지한다 — 토폴로지·머지·기록 경로가 모두 이 이름을 전제한다. 확보한 이름과 확보 방식을 진입 보고와 기록에 남긴다 (`references/contracts.md §브랜치 규약`).
 5. 메인이 worktree 가 아니라 메인 working tree 의 epic 브랜치 위에서 clean 한지 확인한다 — 진입 이후에도 런 내내 같은 가드가 돈다.
 6. 왕복 조율 가용을 판정하고 공유 전제 preflight 를 돌린다 — 실패하면 dispatch 를 시작하지 않는다 (`references/contracts.md §왕복 조율 가용 판정과 spawn 확인` · `SKILL.md §정지 조건`).
 7. 각 단계의 판정 결과와 사용한 신호를 진입 보고 한 줄과 기록에 남긴다 — 근거 없는 생략은 판정이 아니다 (`references/contracts.md §사용자 보고 형식` · `references/contracts.md §기록 위치와 형식`).
@@ -24,6 +24,8 @@
 8. 남은 작업을 재계산해 종료 조건을 재평가한다 — 미충족이고 예산이 남으면 3 으로 되돌아가고, 충족되거나 예산이 소진되면 3분류 판정과 핸드오프를 남기고 종료한다 (`references/contracts.md §종료 핸드오프`).
 
 어느 단계에서든 정지 신호에 닿으면 그 즉시 종료 단계로 간다. 완료를 기다릴 때 `sleep` 이나 polling 은 쓰지 않는다.
+
+HITL 이면 같은 순서로 진행하되 계획 확정 · 게이트 결과 · 머지 전 · 종료 4지점에서 사용자 확인을 받는다 (`references/contracts.md §사용자 보고 형식`).
 
 ## 직렬 dispatch 와 토폴로지
 
@@ -64,6 +66,7 @@ main
 | 변경 있고 머지·폐기 미결정 | 머지 후보로 인계한다 — 아직 도착하지 않은 위임이 남아 있으면 여기서 바로 머지하지 않는다 |
 | 결정 끝 · 자율 | worktree 디렉토리와 머지된 브랜치를 정리한다 |
 | 결정 끝 · HITL | 정리 여부를 보고하고 결정을 받는다 — 보류면 그대로 두고 임의 삭제는 금지한다 |
+| git 에 미등록인 `.claude/worktrees/*` 디렉토리 | `git worktree prune` 후 남은 디렉토리 삭제 |
 
 ## 머지 표준 절차
 
@@ -77,8 +80,8 @@ main
 ## 최종 통합 검증 게이트
 
 1. epic 최종 HEAD 에서 `git status` clean 확인 — 미커밋 변경이나 untracked 잔여물이 있으면 먼저 정리하고 재확인한다.
-2. 원격 기본 브랜치와의 격차를 확인해 흡수한다 — `git fetch origin <default-branch>` → `git rev-list --count <epic>..origin/<default-branch>`.
-3. 전체 테스트 스위트를 한 번 실행한다 — 변경 파일 한정이나 부분 실행은 하지 않는다. 인프라 의존 테스트는 이 게이트와 별개의 검증 대상이다 (`SKILL.md §정지 조건`).
+2. 원격 기본 브랜치와의 격차를 확인해 흡수한다 — `<default-branch>` 는 `git symbolic-ref refs/remotes/origin/HEAD` 로 확정하고, 없으면 `main` 을 쓴다. `git fetch origin <default-branch>` → `git rev-list --count <epic>..origin/<default-branch>`.
+3. integration_verify 계약 명령을 한 번 실행한다 — tracked 변경이 없으면 해당 없음으로 기록한다. 변경 파일 한정이나 부분 실행은 하지 않는다. 인프라 의존 테스트는 이 게이트와 별개의 검증 대상이다 (`SKILL.md §정지 조건`).
 4. `git rev-parse HEAD` 로 흡수 후 HEAD sha 를 기록한 뒤 green·red 판정과 완료 선언 여부를 보고한다 (`references/contracts.md §사용자 보고 형식`).
 
 ## 아키텍트 협의체
