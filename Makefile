@@ -65,7 +65,7 @@ validate-versions: $(BINARY)
 validate-arch: $(BINARY)
 	@./$(BINARY) --arch-only .
 
-# 결정 그래프 상시 검사 (orchestrator) — plans/atelier/09-orchestrator-graph-restructure.md §9.2
+# 결정 그래프 상시 검사 (orchestrator) — plans/atelier/11-orchestrator-lean.md §9-e, .claude/rules/decision-graph.md
 validate-graph:
 	@bash scripts/check-decision-graph.sh plugins/atelier/skills/orchestrator
 
