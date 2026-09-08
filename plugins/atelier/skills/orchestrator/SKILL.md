@@ -5,226 +5,120 @@ version: 0.1.0
 ---
 
 # Orchestrator Skill
+<!-- owns: D01 D02 | P02 -->
 
-## When to use (트리거 케이스)
+여러 단위로 벌어지는 일을 분해 · 위임 · 통합하는 오케스트레이터의 라우터다. 판정 규칙은 각 항목이 소유하고, 이 파일은 진입 판정 둘과 단계 지도 하나만 갖는다.
 
-이 스킬을 트리거해야 하는 상황:
+## D01. 트리거 판정 (When to use)
+<!-- needs: -->
 
-- 사용자가 **자율주행 모드를 언급** ("자율주행모드로", "자율 주행으로 진행해", "알아서 끝까지 해줘", "autonomous mode") — 자율 루프(분해→위임→머지 self-drive)는 오케스트레이터의 기본 동작이므로 이 스킬로 진입한다 (`references/autonomous-driving.md`)
-- 사용자가 **2개 이상의 독립 작업**을 한 번에 요청 ("A랑 B랑 C 같이 해줘", "동시에 처리해줘") · **병렬 fan-out**이 가능해 보일 때 ("여러 파일 동시에", "병렬로", "parallel", "in parallel")
-- **sub-agent / agent-team / worktree 위임**을 명시적으로 요청 ("나눠서", "팀으로", "에이전트 여러 개", "delegate", "dispatch") · **장기 진행 작업**에 식별 가능한 agent team이 필요할 때 (designer/implementer/reviewer 등) · **머지 조정**이 필요한 다중 변경 (여러 worktree 결과 통합, 충돌 해결 위임)
-- **문서 산출물 작업** ("리포트로 정리해줘", "스펙 문서 만들어줘", "분석 보고서 작성") — 문서 작성도 Write 작업이므로 위임 대상 · **여러 갈래로 벌어지는 리서치·조사·분석** — 코드베이스 파악, 사이드이펙트·영향 범위 조사, 방안 비교, 자료 수집 ("조사해줘", "리서치", "어디에 영향 가는지 봐줘", "여러 방안 비교") — **read-only 라고 위임 대상에서 빠지지 않는다** (근거: `references/autonomous-driving.md §메인 컨텍스트 격리`)
-- **메인 에이전트가 Edit/Write/NotebookEdit로 직접 코드를 수정하려는 모든 순간** — 위임으로 전환할지 먼저 검토
+**입력 신호**
+- 요청이 여러 독립 단위로 쪼개지는가
+- 자율 주행 · 위임 · 팀 · worktree 를 사용자가 명시했는가
+- 산출물이 문서 · 리서치 · 조사인가 — read-only 도 대상에서 빠지지 않는다
+- 메인이 지금 tracked 파일을 직접 고치려는 순간인가
+- 규모 — 작업의 종류가 아니라 단위 수와 메인 컨텍스트 소모량
 
-**적용 범위는 작업의 종류가 아니라 규모로 정한다.** 구현이냐 문서냐 조사냐로 가르지 않는다 — 여러 단위로 쪼개지거나, 병렬로 벌릴 수 있거나, 메인 컨텍스트를 크게 먹으면 위임 대상이다.
-
-트리거하면 안 되는 상황: 단일 파일의 단순 편집(오버헤드만 늘어남) · 사용자가 직접 메인이 처리하라고 명시한 경우 · 1턴 안에 끝나는 단발 조회(파일 하나 확인, git 상태, 테스트 결과 등 결정적 사실 확인).
-
-## 사고 모드 (Mental Model)
-
-이 스킬을 트리거한 순간부터 메인 에이전트는 **편집자가 아니라 관리자**다 — Edit/Write로 직접 코드를 작성하지 않고, Read/Bash로 상태를 파악하고 Task로 일감을 분리·관리하며 Agent로 위임하고 SendMessage로 조율한다.
-
-### 메인 에이전트가 해도 되는 일
-- `Read`, `Glob`, `Grep`, `Bash(git status / git log / git diff --stat)` — 작업 분해와 위험도 판단에 필요한 **결정적 사실 확인**에 한정한다. 본격적인 조사·리서치(코드베이스 파악, 영향 범위 분석, 방안 비교)는 메인이 통독하지 않고 **위임**한다 — 그 원문이 메인 컨텍스트에 쌓이면 조율 판단 품질이 떨어진다 (`references/autonomous-driving.md §메인 컨텍스트 격리`)
-- `Agent`, `SendMessage`, `Monitor` — 위임과 조율 (spawn한 agent에 **다시 말을 거는 유일한 수단이 `SendMessage`**다 — 가용 판정은 아래 §진입 시 체크 4, `TeamCreate`는 제거됨). 결과물은 취합해 사용자에게 보고한다
-- `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate` — 일감을 분리하고 상태를 관리하는 것은 **메인 에이전트의 핵심 룰**이다. 편집을 위임하는 관리자로서 메인의 본업은 일감을 추적 가능한 Task로 쪼개고 상태를 갱신하는 것 — 다중 작업이면 항상 적용하고 단발 1회만 예외다 (`references/agent-monitor.md §Task 시스템`)
-
-> 위 조율 도구는 대부분 deferred tool이다 — `ToolSearch`로 스키마를 확보하기 전에는 호출할 수 없고(§진입 시 체크 0), 확보를 건너뛴 세션은 명시적 에러 없이 team 경로 전체를 조용히 잃는다.
-
-### 메인 에이전트가 하면 안 되는 일
-- `Edit`, `Write`, `NotebookEdit` — 코드 편집·작성은 항상 sub-agent에 위임한다. sub-agent 실패 시에도 편집권을 가져오지 않는다 → 사용자에게 보고
-- `EnterWorktree` / `git checkout <other-branch>` 로 worktree 또는 다른 브랜치로 진입 — 메인은 진입 시점의 브랜치에 머문다 (무거운 경로에서는 그것이 epic 브랜치다)
-
-## 진입 절차 (Entry Procedure)
-
-**버전 관리 이력에 남을 변경을 만드는 런은 반드시 epic 브랜치 전략으로 동작한다** — 메인은 worktree가 아니라 epic 브랜치에 체크아웃된 상태로 작업하고, 위임된 sub-agent들만 worktree로 격리한다. 반대로 **tracked 변경을 만들지 않는 런에는 이 전략이 성립하지 않는다** — 머지할 대상도, 격리할 쓰기도 없다. 어느 쪽인지는 아래 §경로 판정 게이트가 먼저 정하고, 이 절의 토폴로지와 체크 1·2·3은 **무거운 경로에만** 적용된다.
-
-### 토폴로지 (무거운 경로)
-
-- **메인 = epic 브랜치 자체**(worktree 진입 금지) · **sub-agent = epic base의 worktree** — 통합은 rebase 후 `--ff-only` 고정, 브랜치 네이밍·머지 방식·drift 처리의 단일 출처는 `references/branch-strategy.md`다. 다이어그램·격리 상세: `references/worktree-lifecycle.md §토폴로지`.
-- **epic → main 머지는 이 스킬 범위 밖** — 역방향 drift는 런 안에서 처리한다 (`references/branch-strategy.md §epic ← main 역방향 drift`).
-
-### 진입 시 체크
-
-0. **조율 도구의 스키마를 확보했는가?** (다른 모든 체크보다 먼저) — `ToolSearch({query: "select:SendMessage,Monitor,TaskCreate,TaskList,TaskGet,TaskUpdate"})`
-
-   - **1회만 한다** (확보된 스키마는 세션 내내 유효). `SendMessage`가 확보되지 않으면 **왕복 조율 수단이 없는 것**이므로 체크 4는 자동으로 비가용이다 (아래 판정 트리의 0단계). 결과에 없는 도구는 이 런타임에 없는 것이다 — 이름을 추측해 호출하지 않는다.
-
-### 경로 판정 게이트 (체크 0 직후, 체크 1 앞)
-
-체크 0을 마치면 **이번 런이 버전 관리 이력에 남을 변경을 만드는가**를 먼저 정한다. 판정 기준은 "git 레포 안인가"가 아니다 — 레포 안이어도 이력에 남지 않으면 경량 경로다.
-
-```
-이번 런의 계획된 산출물에 tracked 파일 변경이 있는가?
-  ├─ No  → 경량 경로 (체크 1·2·3 건너뛰고 체크 4·5로)
-  │        예: 외부 시스템 산출물(이슈 등록·PR 코멘트), read-only fan-out 조사, repo 밖·gitignore 산출물
-  └─ Yes → 무거운 경로 (체크 1~5 전부)
+```mermaid
+flowchart TD
+  D01_q1{"사용자가 메인 직접 처리를 명시했는가"} -->|Yes| D01_t1["스킬을 열지 않고 메인 턴 안에서 처리"]
+  D01_q1 -->|No| D01_q2{"1턴에 닫히는 결정적 사실 확인인가"}
+  D01_q2 -->|Yes| D01_t1
+  D01_q2 -->|No| D01_q3{"여러 단위로 쪼개지거나 메인 컨텍스트를 크게 먹는가"}
+  D01_q3 -->|Yes| D01_n1(["→ D02"])
+  D01_q3 -->|No| D01_t2["단일 파일 단순 편집으로 분류하고 열지 않음"]
 ```
 
-- **판정 시점의 산출물 계획을 기준으로 한다.** 계획 밖 편집이 생기면 아래 §경로 전환. 판정 결과 + 근거를 진입 보고 1줄과 decision log에 남긴다 — **생략은 판정이 아니다.**
-- **git 레포가 아니면서 편집이 필요한 경우**는 경량 경로가 아니다 — 판정은 `references/delegation-patterns.md §경로 판정 경계 케이스`가 단일 출처다.
-- 경량 경로에서 생략되는 것은 체크 1·2·3, 토폴로지 가드, 머지 조정뿐이다 — 조율·Task·게이트·preflight·복원력·취합 보고는 편집 유무와 무관하게 유지되고, 리뷰·QA는 쓰기 전 검토 1회로 축소된다. 전체 유지·생략 표와 경계 케이스 판정은 `references/delegation-patterns.md §경로 판정 경계 케이스`가 단일 출처다.
+**종단별 행동 계약**
+- 메인 턴 안에서 처리 → 스킬을 열지 않는다. 계획에 없던 tracked 편집이 뒤늦게 들어오면 이 판정으로 되돌아온다 (→ D07)
+- 열지 않음(단일 파일) → 열지 않기로 한 근거를 한 줄 남긴다. 근거 없는 생략은 판정이 아니다
+- → D02 → 진입 즉시 조율 도구 스키마부터 확보하고 (→ C01) 진입 절차로 넘어간다 (→ P01)
 
-### 진입 시 체크 (이어서)
+**근거**: 적용 범위는 작업의 종류가 아니라 규모로 갈린다 — 구현 · 문서 · 조사로 가르면 read-only 리서치가 부당하게 빠진다.
 
-1. **현재 브랜치가 epic 브랜치인가?** — `git branch --show-current` 확인. `main` / 일반 feature 브랜치라면 epic 브랜치를 먼저 만들거나 사용자에게 어떤 epic 브랜치로 진입할지 물어본다 (`git` skill 의 브랜치 생성 또는 plain `git checkout -b epic/<name>`).
-2. **현재 메인이 다른 worktree 안에 있지 않은가?** — `git rev-parse --show-toplevel` 가 repo의 메인 working tree여야 한다. worktree 안에서 시작했다면 즉시 메인 working tree로 빠져나오도록 사용자에게 보고.
-3. **git 저장소 안에서 파일을 수정하는 sub-agent는 `isolation: "worktree"` 로 dispatch한다** — 읽기 전용 조사·분석은 격리하지 않고 현재 브랜치에서 실행하며, 저장소 밖 편집은 격리가 성립하지 않으므로 `references/delegation-patterns.md §경로 판정 경계 케이스`의 판정을 따른다. 격리 dispatch에서는 worktree의 base가 dispatch 시점 epic 브랜치 HEAD라는 보장이 없으므로, dispatch prompt에 base 확인·동기화 지시를 반드시 포함한다 (`references/delegation-patterns.md §Prompt 작성 원칙 필수 포함 요소` 9번이 단일 출처)
-4. **왕복 조율(team)이 이번 세션에서 가용한가?** — 판정하는 대상은 "team이라는 기능이 켜져 있는가"가 아니라 **"spawn한 agent에게 다시 말을 걸 수 있는가"**다. 필수 등급이 요구하는 실질은 *직전 라운드를 기억하는 상대와의 왕복*이고(`references/delegation-patterns.md §team mode 강제 등급` 기준 1), 그것을 주는 것은 `name`이라는 파라미터가 아니라 `SendMessage`라는 채널이다.
+**후속**: → D02 → P01
 
-```
-왕복 조율(team) 가용 판정
-  │
-  ├─ [0 · 전제] SendMessage 스키마를 확보했는가? (§진입 시 체크 0)
-  │     └─ No ──→ 비가용 확정. 왕복 수단 자체가 없다 (1·2차를 볼 필요 없음)
-  │
-  ├─ [1차 · 권위] spawn한 agent를 SendMessage로 다시 지목할 수 있는가?
-  │     ├─ Agent 스키마에 `name` 있음 ──→ 가용 · 지목자 = name
-  │     └─ `name` 없음 ────────────────→ 가용 · 지목자 = spawn 결과의 agentId (`a...` 형식)
-  │
-  └─ [2차 · 보조] printenv CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
-        └─ 1차를 확인할 수 없을 때만 참고. 단독으로 비가용을 확정하지 못한다.
+## D02. 편집권 경계 (사고 모드)
+<!-- needs: D01 -->
 
-  기록  판정 결과 + 사용한 신호 → 진입 보고 1줄 + decision log
-        (근거 없는 "플래그 off"는 판정이 아니다)
-  시점  진입 시 1회 확정. 트리거 시점 재확인 없음
-  정정  필수 등급 경로의 첫 spawn이 왕복 가능한 상대가 아니면 → 1회 재판정
-  이후  비가용 시의 반응은 경로마다 다름 → §team mode 강제 등급
+**입력 신호**
+- 지금 하려는 행위가 tracked 파일을 바꾸는가 — 검증 테스트 추가 · 문서 작성 포함
+- 본격 조사 · 통독인가 — 코드베이스 파악 · 영향 범위 · 방안 비교
+- 조율 판단에 필요한 결정적 사실 확인인가 — 브랜치 · 상태 · 종료 코드 · 토폴로지
+- 통합 검증 명령인가 (→ D49)
+
+```mermaid
+flowchart TD
+  D02_q1{"tracked 파일을 바꾸는 행위인가"} -->|Yes| D02_t1["위임 — 압축 요약과 verdict 만 수령"]
+  D02_q1 -->|No| D02_q2{"본격 조사·통독인가"}
+  D02_q2 -->|Yes| D02_t1
+  D02_q2 -->|No| D02_q3{"조율 판단에 필요한 결정적 사실 확인인가"}
+  D02_q3 -->|Yes| D02_t2["메인 직접 수행"]
+  D02_q3 -->|No| D02_t1
 ```
 
-   - **name 부재는 비가용이 아니다** — agentId로 같은 왕복이 성립한다. 신호의 권위·env를 안 쓰는 이유는 `references/delegation-patterns.md §Agent team 사용 패턴`이 단일 출처다.
+**종단별 행동 계약**
+- 위임 → 원문 · 전체 diff · 리뷰 전문을 메인 컨텍스트로 끌어오는 것은 금지한다. 대신 작업 id · 변경 파일 목록 · verdict · 다음 행동만 받고 상세 근거는 기록 경로로만 보유한다 (→ C05 · → C13). 게이트가 붙이는 검증 테스트 추가도 편집이라 같은 경계를 받는다 (→ D30). 받은 쪽이 실패해도 편집권을 되찾지 않는다 — 대신 다시 위임하거나 (→ D33) 사용자에게 보고한다
+- 메인 직접 수행 → 확인 범위를 조율 판단에 필요한 사실로 한정하고, 코드 본문 통독으로 번지는 순간 위임으로 되돌린다. 진입 시점 브랜치를 벗어나 다른 브랜치 · worktree 로 옮겨 가는 것은 금지한다 — 대신 격리는 위임 쪽에만 준다 (→ D20 · → D22). 통합 검증 명령만이 메인 직접 수행의 예외다 (→ D49)
 
-5. **위임 파이프라인이 의존하는 공유 전제가 살아 있는가?** (preflight — dispatch 전 마지막 확인) — 판정 기준은 하나다: 깨졌을 때 fan-out 전체가 죽는 공유 의존인가. read-only 확인만 하고, 실패 시 dispatch를 시작하지 않고 해제 방법과 함께 즉시 보고한다. 대상 도출·경계는 `references/delegation-patterns.md §공유 전제 preflight`가 단일 출처다.
+**근거**: 메인이 원문을 쌓으면 루프가 길어질수록 컨텍스트가 포화되어 조율 판단 품질이 떨어진다.
 
-### 경로 전환 (경량 → 무거운)
+**후속**: → P01 → P02
 
-전환 트리거: 계획에 없던 tracked 파일 편집이 필요해진 순간 — 편집 dispatch를 시작하기 전에 생략했던 체크 1·2·3을 late gate로 실행한다. 5단계 절차·기록 규칙은 `references/delegation-patterns.md §경로 전환`이 단일 출처다. **역방향(무거운 → 경량) 전환은 없다.**
+## 필수 로드
 
-## 표준 절차 (Workflow)
+| 조건 | 파일 | 항목 |
+|---|---|---|
+| 진입 시 항상 | `references/entry-gates.md` | D03 D04 D45 |
+| D03 종단이 무거운 경로인 순간 | `references/worktree-lifecycle.md` | D21 |
+| D45 종단이 자율(기본)인 순간 | `references/autonomous-driving.md` | C04 |
 
+이 세 파일 밖의 reference 를 진입 시 일괄로 여는 것은 금지한다 — 대신 결정 라우팅 표가 지목하는 결정에 도달한 순간 그 파일만 연다.
+
+## P02. 표준 절차
+<!-- needs: D01 D02 -->
+
+단계 이름과 그 단계를 소유한 항목만 둔다. 경로 · 모드에 따른 단계의 유지 · 생략은 → D03 · → D45 가 정한다.
+
+```mermaid
+flowchart TD
+  P02_s0["0 · 진입 — 스키마 확보 · 경로 · 모드 판정 → P01"] --> P02_s1["1 · 분해 → D12"]
+  P02_s1 --> P02_s2["2 · 충돌 위험 사전 분석 → P10"]
+  P02_s2 --> P02_s3["3 · 실행 계획 — 순차 여부 · 위임 형태 → D14"]
+  P02_s3 --> P02_s4["4 · 위임 → D20"]
+  P02_s4 --> P02_s5["5 · 모니터링 → D34"]
+  P02_s5 --> P02_s6["6 · 검토 · QA 게이트 → D30"]
+  P02_s6 --> P02_s7["7 · 머지 조정 → D39"]
+  P02_s7 --> P02_s8["8 · 보고 → C13"]
 ```
-0. 진입 확인 (Entry)        → 조율 도구 스키마 확보(ToolSearch) + 경로 판정 게이트 + §진입 시 체크
-1. 분해 (Decompose)        → 독립 단위로 분해 — 복잡·모호한 요구는 아키텍트 협의체(설계 생성 →
-                             별도 agent 의 심문·검증)에 위임해 검증된 task 도출 (`references/architect-council.md`)
-2. 위험도 분석 (Analyze)    → 단위 간 충돌 위험 식별
-3. 실행 계획 (Plan)         → 병렬/순차 결정 + 위임 형태(단발/team) 결정
-4. 위임 (Dispatch)          → Agent 호출 (`references/delegation-patterns.md`)
-5. 모니터링 (Monitor)       → 진행 추적, 정체 감지, 사용자 보고
-6. 검토·QA 게이트 (Gate)    → 작업마다 검토 + QA(검증 테스트 추가) 필수 + DB 접촉 작업은 DBA 추가, 전부 pass여야 머지
-7. 머지 조정 (Coordinate)   → 게이트 통과분만 epic 브랜치로 통합 + 충돌 위임 + worktree 정리
-8. 보고 (Report)            → 사용자에게 결과 요약
-```
 
-각 단계의 상세 패턴은 아래 references에 있다. **경로별 차이는 §경로 판정 게이트의 요지와 `references/delegation-patterns.md §경로 판정 경계 케이스`의 유지·생략 표를 따른다.**
+**근거**: 각 단계 안의 분기는 지목된 항목이 소유한다 — 여기에 규칙을 한 줄이라도 다시 적으면 그것이 두 번째 사본이 된다.
 
-### 일감을 Task로 분리·관리하는 것은 메인의 핵심 룰
+## 디스패치 전 게이트 인덱스
 
-관리자의 본업은 일감을 추적 가능한 단위로 쪼개고 그 상태를 끝까지 관리하는 것이다(위 *사고 모드*) — 분해한 일감을 Task 시스템(`TaskCreate`/`TaskList`/`TaskGet`/`TaskUpdate`)으로 분리·등록·갱신하는 것은 선택이 아니라 메인의 핵심 룰이다. 다중 작업이거나 의존성이 있으면 **항상** 적용하고, 단발 1회 작업만 예외다. 상세 사용법(필드·의존성·owner)은 `references/agent-monitor.md §Task 시스템`이 단일 출처다. 자율 모드의 Task 추적 규칙은 `references/autonomous-driving.md`를 따른다.
+| 게이트가 발동하는 순간 | 항목 | 파일 |
+|---|---|---|
+| spec 입력 구현 dispatch 전 **(hard stop)** | **D11** | `autonomous-driving.md` |
+| implementer dispatch 전 | D10 | `architect-council.md` |
+| 테스트 작성 포함 dispatch 전 | D24 | `review-gates.md` |
+| 조사 · 리서치 dispatch 전 | D23 | `investigation.md` |
+| 모든 dispatch 시 (기대 완료 시간) | D34 | `agent-monitor.md` |
+| 보고 수용 전 (증거 · 중복) | D37 D36 | `investigation.md` · `agent-monitor.md` |
+| 매 dispatch 직후 · 완료 알림 직후 **(hard stop)** | **D21 D22** | `worktree-lifecycle.md` |
+| 루프 중 상시 **(hard stop)** | **D47 D49** | `autonomous-driving.md` |
 
-### 디스패치 전·보고 수용 게이트 (Dispatch Preconditions)
+## 결정 라우팅
 
-reference를 읽지 않아도 성립해야 하는 게이트 여섯 개다. 발동 시점만 여기 두고, 각 계약의 단일 출처는 지목된 절이다.
-
-- **spec 입력 구현 dispatch 전 — spec 확정 확인 (hard stop)**: 입력 spec에 미결(TBD) 항목이 하나라도 있으면 dispatch하지 않고 hard stop한다 (`references/autonomous-driving.md §spec 확정 게이트`가 단일 출처).
-- **implementer dispatch 전 — 설계 승인 마커 확인**: 마커가 없으면 dispatch하지 않고 설계 단계로 회귀한다 (`references/architect-council.md §설계 승인 마커`).
-- **테스트 작성이 포함된 구현 dispatch 전 — 테스트 인프라 발견**: 레포의 테스트 러너·픽스처·하네스·유사 기존 테스트가 file:line으로 인용되기 전에는 테스트 작성 단계에 진입시키지 않는다 (`references/delegation-patterns.md §테스트 인프라 발견`).
-- **sub-agent 보고 수용 전 — 증거 계약 확인**: 증거 없는 claim은 수용하지 않고 재디스패치하며, 부재 주장(negative claim)은 교차 검증 후에만 수용한다 (`references/delegation-patterns.md §증거 계약`).
-- **조사·리서치 위임 dispatch 전 — 탐색 예산 명시**: 예산 없는 조사형 prompt는 dispatch하지 않는다 (`references/delegation-patterns.md §탐색 예산`이 단일 출처).
-- **dispatch 시·보고 수용 시 — 기대 완료 시간과 중복·idle 판정**: 기대 완료 시간 없이 dispatch하지 않는다. 동일 내용의 재전송 보고는 첫 수신만 취합하고, 기대 시간을 넘긴 무보고 agent는 대기 연장이 아니라 취소 후 폴백·재위임으로 회부한다 (`references/agent-monitor.md §중복 보고 감지`·`§idle 판정`).
-
-### 작업 케이스마다 검토 에이전트·QA 에이전트는 필수 (Review & QA Gate)
-
-- **검토 에이전트 (reviewer)** — `구현 ↔ 요구사항`, **QA 에이전트 (qa)** — `요구사항 ↔ 테스트`(누락 시 검증 테스트를 추가·보강), **DBA 에이전트 (dba)** — DB 접촉 작업만 조건부로 `구현 ↔ DB 안전성`.
-- **AND 게이트**: 전부 `pass`여야 머지 후보로 승급. 하나라도 `reject`면 findings를 실어 재위임한다. 게이트 에이전트들은 **구현 sub-agent와 다른 agent**다 — 자기 코드 자기 검증 금지.
-- QA의 테스트 추가도 편집이므로 **`isolation:"worktree"` subagent로 위임**한다 (메인은 직접 편집하지 않는다 — *사고 모드*). 예외는 Task 룰과 동일하게 **단발 1회·read-only 작업만**이다.
-
-역할별 입력·검증 질문·출력 계약, DB 접촉 판정, 게이트 거부의 재위임 예산·기록 등 세부 규칙은 `references/autonomous-driving.md §리뷰어·QA 게이트`가 단일 출처다. spec 문서를 입력으로 구현하는 경우만 `references/spec-driven-review.md`(검토자=spec↔구현, QA 매니저=spec↔테스트)로 특수화된다.
-
-### 병렬 fan-out 복원력 (Resilience)
-
-대규모 fan-out에서는 일부 agent의 인프라 실패(504·API 에러)를 정상 케이스로 전제한다. 필수 규칙 4개 — **체크포인트**(완료 즉시 agent 자신이 파일 저장) · **재시도**(같은 prompt N회, 기본 3회) · **폴백**(소진 시 대체 경로로 취합 완성 — 미완성 종료 금지) · **투명 보고**(실패/재시도/폴백 명시). 상세 절차는 `references/agent-monitor.md §fan-out 복원력`이 단일 출처다.
-
-## 분해는 충돌 경계로 쪼갠다 (병렬 판정 앞 단계)
-
-병렬/순차 결정 트리는 **이미 쪼개진** 작업을 거르는 사후 필터다. 분해(1단계)가 충돌을 만들어 놓으면 트리는 그것을 전부 순차로 떨어뜨릴 수밖에 없다 — **병렬 이득은 판정이 아니라 분해에서 결정된다.**
-
-- **수직 슬라이스로 쪼갠다**: 기능 단위(A 기능의 모델+서비스+API+테스트)로 자른다. 레이어 수평 분해(모델 전부 / 서비스 전부 / 컨트롤러 전부)는 작업마다 같은 파일들을 훑게 되어 disjoint가 애초에 나오지 않는다.
-- **hot-spot은 별도 task로 뽑는다**: 작업들의 의도는 안 겹치는데 **같은 위치에 항목을 추가**하게 되는 파일은 병렬 작업에서 편집을 금지하고 마지막에 통합 task 1개로 순차 처리한다. 안 하면 **hot-spot 하나 때문에 fan-out 전체가 순차로 떨어진다** (사례·판정·계약은 `references/branch-strategy.md §hot-spot 파일`이 단일 출처).
-- **공유 인터페이스는 선행 task로 앞세운다**: 여러 작업이 같은 타입·시그니처를 필요로 하면 그 정의를 먼저 한 task로 확정·머지한 뒤 나머지를 병렬로 띄운다. 각자 정의하게 두면 머지에서 의미 충돌이 되고, 그건 자동 해결 대상이 아니다.
-
-## 병렬 vs 순차 판정 (요지)
-
-- disjoint + 의존성 없음 → 병렬. overlap 또는 의심스러우면 → 순차 — 단, 겹침이 전부 hot-spot이면 병렬 유지 + 통합 task 분리 (`references/branch-strategy.md §hot-spot 파일`). 전체 결정 트리·경량 경로의 충돌 축(외부 리소스·rate limit)은 `references/delegation-patterns.md §병렬 vs 순차 결정 트리`가 단일 출처다.
-
-### 조사·감사 작업의 기본값은 병렬 fan-out
-
-read-only 조사·감사·원인분석은 충돌 비용이 없어 "의심스러우면 순차"가 적용되지 않는다 — **첫 행동이 관점별 병렬 fan-out**(특별한 근거 없으면 3관점 이상)이고, 메인이 순차 Bash/Read 탐색으로 조사를 시작하지 않는다. 각 조사 prompt에 탐색 예산을 명시한다(§디스패치 전·보고 수용 게이트). 출구 판정(1턴 단발·단일 관점)은 `references/delegation-patterns.md §병렬 vs 순차 결정 트리`를 따른다.
-
-## 위임 형태 결정
-
-| 상황 | 형태 | 도구 |
-|------|------|------|
-| 1회성 독립 작업, 결과물 단일 | 단발 sub-agent | `Agent({...})` |
-| 여러 agent 협업·식별/제어 필요 (read-only 조율) | agent team | `Agent({name, ...})` — `name` 없는 런타임이면 `Agent({run_in_background: true})` + 반환 `agentId` — 에 `SendMessage` (가용 판정 §진입 시 체크 4·`team_name` 무시·편집 격리는 subagent) |
-| 파일 충돌 위험 있는 병렬 — git 저장소 안에서 파일을 수정하는 sub-agent | worktree-isolated | `Agent({isolation: "worktree", ...})` |
-
-> **격리는 subagent만 보장** — teammate는 공유 checkout. 편집은 `isolation:"worktree"` subagent, team은 조율 전용 (`references/delegation-patterns.md §Agent team 사용 패턴`이 단일 출처).
-
-자세한 판단 기준과 prompt 작성법은 `references/delegation-patterns.md`.
-
-### team mode 강제 등급 (요지)
-
-- **필수**: 자문 조회 · 아키텍트 협의체 — 실질이 왕복 대화이고 read-only다. **가용인데 단발로 대체 = 위반**, 비가용이면 폴백 없이 원래의 에스컬레이션으로 진행한다. **선호**: spec 검토·QA 게이트 · review→fix 루프 — 단발 폴백 허용.
-- 등급 기준·경로별 표·필수 등급 가드(spawn 확인 + decision log 필드)는 `references/delegation-patterns.md §team mode 강제 등급`이 단일 출처다.
-
-## 모델 라우팅 (요지)
-
-- **집행 위임(자문 제외 전부 — 구현·문서·리서치·조사·리뷰·게이트)의 tier ≤ 메인 tier, 예외 없음.** 매 dispatch에 `model` 명시 필수(상속 금지), 문서에 모델명을 박지 않는다. **자문 조회만 상위 tier 허용** — 권고 + 근거(read-only)만 사오고 결정권은 메인에 100% 잔류, team member 전용(필수 등급).
-- **team 비가용 = 자문 경로 차단**: 트리거에 도달해도 소집하지 않고, 무엇으로도 대체하지 않으며, 원래 하려던 에스컬레이션으로 진행하고 그 사실을 판정 근거와 함께 decision log에 남긴다. 사용자가 명시 요청해도 우회하지 못한다 (절차: `references/advisory-consult.md §게이트 0`, 자율 모드 `max_advisory_consults = 0`은 `references/autonomous-driving.md §자율 계약`이 단일 출처).
-- 판정 트리·집행/자문 대비 표·역할별 모델 제약은 `references/model-routing.md`가 단일 출처다. 작업 유형 → 시작 tier 표는 `references/delegation-patterns.md §모델 선택`.
-
-## References (필요할 때만 로드)
-
-| 파일 | 언제 읽을지 |
-|------|-------------|
-| `references/architect-council.md` | 분해(1단계) 시 요구가 복잡·모호해 아키텍트 협의체(설계 생성 ↔ 심문 검증)로 분석·검증 후 task 를 도출할 때 |
-| `references/delegation-patterns.md` | 위임 형태(단발 vs team)를 결정하거나 sub-agent prompt를 작성할 때, **경로 판정이 경계 케이스이거나 경로 전환·preflight·탐색 예산·병렬/순차 전체 트리를 적용할 때**(§경로 판정 경계 케이스·§경로 전환·§공유 전제 preflight·§탐색 예산·§병렬 vs 순차 결정 트리가 단일 출처), **team 강제 등급을 판정할 때**(§team mode 강제 등급이 단일 출처), **원인 불명 결함·회귀를 조사할 때**(§근본원인 swarm — 축 분해·증거 계약·가설 랭킹) — **작업 유형 → tier 표의 단일 출처** (역할 기준 원칙·역할별 모델 제약은 `references/model-routing.md`가 단일 출처) |
-| `references/model-routing.md` | dispatch의 model/tier를 정할 때 — 역할 기준 원칙(집행 tier 상한)·자문 tier 예외·역할별 모델 제약의 단일 출처 (작업 유형 → tier 표는 `delegation-patterns.md §모델 선택`) |
-| `references/branch-strategy.md` | 무거운 경로에서 **브랜치를 어떻게 운영할지** 정할 때 — worktree 브랜치 네이밍, hot-spot 파일 분리 계약, 머지 정책(배치 vs 즉시+전파), 통합 방식, epic ← main 역방향 흡수, 반복 충돌의 재분해 트리거. **위 여섯의 단일 출처** (분해 원칙은 위 §분해는 충돌 경계로 쪼갠다, 단일 rebase의 충돌 해결 전략은 `git` skill) |
-| `references/worktree-lifecycle.md` | 병렬 dispatch 직전, 또는 worktree 정리/머지를 다룰 때 |
-| `references/agent-monitor.md` | 백그라운드 agent 진행 추적, Task 시스템으로 다중 작업 상태·의존성을 추적할 때, 또는 대규모 fan-out에서 실패 대비 복원력(체크포인트·재시도·폴백) 절차를 적용할 때 |
-| `references/merge-coordinator.md` | 병렬 결과를 통합할 때 (순서 결정, 충돌 처리) |
-| `references/autonomous-driving.md` | 자율 루프(분해→위임→머지 self-drive)를 돌릴 때 — **오케스트레이터 기본 동작**. 계약·가드레일·종료 조건·에스컬레이션 + **작업마다 필수인 리뷰어·QA 게이트**(검토 + 검증 테스트 추가)의 단일 출처 (단발 fan-out 1회면 불필요) |
-| `references/advisory-consult.md` | 상위 tier 자문을 소집할 때 (협의체 예산 소진 tie-break, 게이트 재위임 루프, 되돌리기 어려운 결정, 사용자 요청) — **소집 트리거·패킷 계약·출력 계약·수명의 단일 출처** (tier 예외 원칙 자체는 `references/model-routing.md`가 단일 출처). 진입 시 team 비가용으로 확정됐으면 읽을 필요 없다 |
-| `references/spec-driven-review.md` | 검토·QA 게이트가 **spec 문서를 입력으로 구현**하는 경우의 특수화 — 팀 모드로 검토자(spec↔구현)·QA 매니저(spec↔테스트)를 상주시켜 worktree 코드를 계속 리뷰·개선 (spec 입력이 없으면 일반 게이트 사용). 진입 전제는 **미결 0으로 확정된 spec**이다 (`references/autonomous-driving.md §spec 확정 게이트`) |
-
-## 사용자 보고 원칙
-
-오케스트레이터는 **기본적으로 자율 주행**한다 — 진입 시 자율 계약을 1회 보고하고, 가드레일(종료 조건·예산·자동 중단) 안에서 자동 재위임·머지·충돌 해결을 사람 개입 없이 진행한다. 자율 계약·루프·에스컬레이션 규칙은 `references/autonomous-driving.md` 가 단일 소유한다.
-
-- **시작 시**: 분해된 작업 목록 + 병렬/순차 결정 + 자율 계약(종료 조건·예산·hard stop·결정 기록 위치)을 한 번에 보고
-- **진행 중**: 침묵 — 단, 에스컬레이션 조건(되돌리기 어려운 행위·토폴로지 위반·도메인 의미 충돌·예산 소진·spec 미결 발견 등)은 자율 모드라도 **항상** 멈추고 즉시 보고한다 (`references/autonomous-driving.md §에스컬레이션`)
-- **종료 시**: 종료 사유(완료/예산 소진/에스컬레이션) + 머지 결과 + 미해결 항목 + **3분류 판정 요약(DONE/BLOCKED/NOT-STARTED) + 핸드오프 파일 경로** + 원격 최신화 상태(열린 PR이 있으면 push 완료 여부 — 상세는 `references/autonomous-driving.md §종료 조건`, 판정은 `git` skill `SKILL.md` §열린 PR 최신화 원칙) + 의사결정 요약 (핸드오프 계약은 `references/autonomous-driving.md §종료 핸드오프`)
-- **opt-out — 휴먼-인-더-루프**: 사용자가 단계별 확인을 명시하면(예: "확인받으면서", "단계마다 물어봐", "babysit", "자동으로 머지하지 마") 자율 주행을 끄고 전환한다. 자동 개입(SendMessage 명령 주입·자동 머지·자동 충돌 해결)을 하지 않고, 정체·실패·머지 결정을 사용자에게 보고하고 결정을 받는다 (`agent-monitor.md` / `merge-coordinator.md` 의 HITL 규칙)
-
-## 안티패턴
-
-1. **편집권 회수**: sub-agent 실패 시 메인이 직접 Edit로 마무리 금지 — 다시 위임하거나 사용자에게 보고한다.
-2. **충돌 위험 무시한 병렬화**: disjoint 검증 없이 병렬 금지 — 의심스러우면 순차다.
-3. **컨텍스트 의존 prompt**: sub-agent는 메인 대화를 못 본다 — 자기완결적으로 작성한다 (`references/delegation-patterns.md §Prompt 작성 원칙`).
-4. **Reference 일괄 로드**: 시작하자마자 모든 reference를 Read 금지 — 단계별로 필요할 때만.
-5. **무한 폴링**: `Bash sleep` 루프 금지 — `run_in_background: true` + 완료 알림 사용.
-6. **메인이 worktree에서 시작** (적용 경로는 §경로 판정 게이트): 메인은 epic 브랜치의 메인 working tree에서만 동작한다.
-7. **epic 브랜치 우회** (적용 경로는 §경로 판정 게이트): 반드시 epic 브랜치를 만들고 거기서 dispatch한다.
-8. **자문 흉내**: 자문 경로 비활성 시 단발 왕복·자기 판단을 자문으로 포장 금지 — 메인 자신의 판단으로 명시하고, 폴백은 decision log의 `실행 형태` 필드로 사후 탐지된다 (`references/advisory-consult.md §안티패턴` / §team mode 강제 등급).
-9. **고무도장 메인**: 상위 tier 권고의 무검토 채택 금지 — 채택도 기각도 사유와 함께 기록한다 (`references/advisory-consult.md §안티패턴`).
-10. **자문 tier가 다른 역할로 번짐**: 자문 외의 모든 위임은 집행 위임이며 메인 tier를 넘지 못한다 (`references/model-routing.md §역할 기준 원칙 / §역할별 모델 제약`).
-11. **신호 하나로 team 비가용 단정**: 권위 신호는 **`SendMessage`로 다시 지목할 수 있는가**이고, `name`이 없으면 `agentId`로 같은 왕복을 한다 (§진입 시 체크 4).
-12. **출구 없는 금지**: 금지에는 항상 "대신 무엇을 하라"를 출구로 짝지어 붙인다 (`references/delegation-patterns.md §필수 포함 요소` 10번이 단일 출처).
-13. **보고 채널 없는 위임**: agent의 plain text 출력은 메인에 도달하지 않는다 — dispatch prompt에 `SendMessage({to: "main"})` 보고 채널을 반드시 포함한다 (`references/delegation-patterns.md §필수 포함 요소` 11번이 단일 출처).
-14. **deferred 도구를 이름만 보고 호출**: 스키마 미확보 호출은 `InputValidationError`로 실패한다 — 진입 시 `ToolSearch`로 1회 확보한다 (§진입 시 체크 0).
-15. **근거 없는 체크 생략**: 경량 경로는 **판정한 결과**여야 한다 — 판정 결과와 근거를 진입 보고와 decision log에 남긴다 (§경로 판정 게이트).
-16. **머지해놓고 in-flight 방치** (무거운 경로): 기본은 배치 머지이고, 즉시 머지했으면 전부에 rebase를 전파한다 (`references/branch-strategy.md §base drift 전파`).
-17. **분해를 레이어로 쪼갬**: 수평 분해는 disjoint가 애초에 안 나온다 — 충돌은 판정이 아니라 분해에서 결정된다 (§분해는 충돌 경계로 쪼갠다).
-18. **조사를 순차 단독 탐색으로 시작**: read-only 조사·감사는 순차를 택할 근거가 없다 — 첫 행동은 관점별 병렬 fan-out이다 (§조사·감사 작업의 기본값은 병렬 fan-out).
-19. **미결 spec 위에서 구현 진입**: TBD가 남은 spec으로 dispatch하면 사용자가 내려야 할 판단이 코드로 굳는다 — 미결이 하나라도 있으면 hard stop한다 (§디스패치 전·보고 수용 게이트, `references/autonomous-driving.md §spec 확정 게이트`).
+| 지금 무엇을 정하려는가 | 결정 | 계약 · 절차 | 파일 |
+|---|---|---|---|
+| 이 요청이 위임 대상인가 / 메인이 직접 할 수 있는 일인가 | D01 D02 | P02 | (이 파일) |
+| tracked 변경을 만드는가 / 왕복 조율이 되는가 / 자율인가 HITL 인가 / Task 로 쪼갤 것인가 | D03 D04 D06 D07 D45 D54 | C01 C16 P01 | `references/entry-gates.md` |
+| 분해를 협의체에 맡길 것인가 / 설계가 승인됐는가 / 재분해할 것인가 | D08 D09 D10 D12 D57 | C08 C09 C14 P04 | `references/architect-council.md` |
+| 병렬인가 순차인가 / 단발인가 team 인가 / 격리할 것인가 / prompt 에 무엇을 넣는가 | D05 D13 D14 D18 D19 D20 D25 D56 | C02 C03 P10 | `references/dispatch-planning.md` |
+| 조사를 몇 갈래로 벌릴 것인가 / 어떤 축으로 팔 것인가 / 보고를 수용할 것인가 | D15 D16 D17 D23 D37 | — | `references/investigation.md` |
+| 이 dispatch 의 tier 는 / 상위 tier 자문을 부를 것인가 | D26 D27 D28 D29 | C07 C15 P05 | `references/model-routing.md` |
+| worktree 가 실제로 생겼는가 / 메인이 제자리인가 / worktree 를 정리할 것인가 | **D21** **D22** D51 | P06 P09 | `references/worktree-lifecycle.md` |
+| 보고가 중복인가 / 무보고를 언제 끊는가 / 재위임할 것인가 / 어떻게 보고하는가 | D33 D34 D35 D36 D38 D46 D55 | C13 | `references/agent-monitor.md` |
+| 게이트를 몇 차원으로 세우는가 / verdict 를 어떻게 합치는가 | D24 D30 D31 D32 | P11 | `references/review-gates.md` |
+| 언제 · 어떤 순서로 머지하는가 / 충돌을 어떻게 / 끝났다고 선언해도 되는가 | D39 D40 D41 D42 D43 D44 D52 | C10 C11 C12 P07 P08 | `references/merge-coordinator.md` |
+| 예산은 / spec 이 확정됐는가 / 멈출 것인가 / 끝났는가 | **D11** **D47** D48 **D49** D50 D53 D58 | C04 C05 C06 P03 | `references/autonomous-driving.md` |
