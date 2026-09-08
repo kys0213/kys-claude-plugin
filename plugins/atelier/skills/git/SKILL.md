@@ -121,7 +121,7 @@ gh pr view --json number,state                          # 현재 브랜치의 �
 ```
 
 - **핵심은 브랜치 수 제한이 아니라 PR 생성 권한을 요청 단위 1곳으로 모으는 것** — 내부 분해 단위에는 PR 권한을 주지 않는다.
-- orchestrator가 요청 1건을 Task 여러 개로 분해하는 것, sub-agent worktree 브랜치가 여러 개 생기는 것은 이 규칙과 충돌하지 않는다 — Task 분해·worktree 브랜치는 이 규칙이 말하는 '단위'가 아니다. worktree 브랜치는 PR 없이 epic 브랜치로 수렴 후 삭제된다 (`orchestrator` skill `references/merge-coordinator.md` §머지 대상: epic 브랜치가 canonical).
+- orchestrator가 요청 1건을 Task 여러 개로 분해하는 것, sub-agent worktree 브랜치가 여러 개 생기는 것은 이 규칙과 충돌하지 않는다 — Task 분해·worktree 브랜치는 이 규칙이 말하는 '단위'가 아니다. worktree 브랜치는 PR 없이 epic 브랜치로 수렴 후 삭제된다 (`orchestrator` `references/contracts.md §머지 대상: epic 브랜치` 가 canonical).
 - PR 분할(스태킹 포함)이 필요하다고 판단되면 **만들기 전에** 분할 근거를 사용자에게 보고하고 결정을 받은 뒤 진행한다 (예: 대형 마이그레이션처럼 리뷰 가능성 때문에 분할이 나은 경우).
 - PR 생성 전 base 브랜치를 확정 보고한다 — 위 §커밋·push·PR 워크플로우 4번의 base 관계 확인 절차와 연결된다.
 
@@ -181,7 +181,7 @@ hook 의 등록·비활성화·재설정은 통합 setup 의 hook 관리 모드�
 | `references/conflict-resolution.md` | rebase 충돌의 ours/theirs 반전 gotcha·파일별 분할정복 정책 (mechanical git 은 모델이 직접) | "충돌 해결해줘" / rebase 중 |
 
 > hook·guard·구조화 read(reviews) 만 `atelier git` CLI 로 위임하고, 커밋·브랜치·PR 은 정책을 적용해 plain git/gh 로 실행합니다. references 는 **판단·정책**이 필요한 부분을 담습니다.
-> 여러 변경의 머지 조정(순서·worktree 통합)이 필요하면 `orchestrator` skill 의 `references/merge-coordinator.md` 가 canonical 입니다.
+> 여러 변경의 머지 조정(순서·worktree 통합)이 필요하면 머지 조정 절차는 `orchestrator` `references/procedures.md §머지 표준 절차`, 머지 대상 정책은 `references/contracts.md §머지 대상: epic 브랜치` 가 canonical 입니다.
 
 ---
 
