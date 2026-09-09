@@ -132,7 +132,7 @@ sub-agent 는 메인 대화 히스토리를 보지 못하므로 prompt 는 자�
 ## <ISO timestamp> · 설계 승인
 - 승인 출처: council pass | grill 합의 | 사용자 승인
 - 대상 task: <task id 목록>
-- 근거 경로: <협의체 결과 또는 합의 요약이 있는 위치>
+- 근거 경로: <협의체 결과 또는 합의 요약이 있는 위치 — grill 합의·사용자 승인이면 커밋된 `plans/YYYY-MM-DD-<slug>.md`>
 ```
 
 ## 대화 스킬의 자율 어댑테이션
