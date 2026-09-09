@@ -28,12 +28,12 @@ set -u
 # 폐지돼(규약 §8) `## D##.` 같은 예외 통로는 없다 — 새 절은 반드시 여기에
 # 등재돼야 하고, 그 마찰이 화이트리스트가 산문 재증식의 배출구가 되는 것을 막는다.
 #
-# `###` 이름(표 1~7)도 등재해 둔다 — 레벨만 바뀌어도 통과하도록.
+# `###` 이름(표 1~7, SKILL.md §기본값 표 소속)도 등재해 둔다 — 레벨만 바뀌어도 통과하도록.
 # 검사가 강제하는 대상은 `##` 뿐이다.
 STRUCT_HEADING_WHITELIST='불변식
 정지 조건
 표준 절차
-기본값
+기본값 표
 계약과 절차
 도구 확보
 왕복 조율 가용 판정과 spawn 확인
@@ -53,7 +53,6 @@ task 도출 계약
 Authorship
 사용자 보고 형식
 머지 대상: epic 브랜치
-기본값 표
 표 1 — 집행 tier
 표 2 — team 등급
 표 3 — 병렬 · 순차
@@ -73,8 +72,8 @@ worktree 정리
 
 # 크기 상한 (설계 §2 · 규약 §5). 값은 "넘으면 실패"하는 최대 허용치.
 # 상한 값의 소유처는 이 파일 하나다 — 규약 문서에 복사하지 않는다.
-LIMIT_SKILL=120             # SKILL.md. 121줄+ 실패
-LIMIT_CONTRACTS=320         # references/contracts.md. 321줄+ 실패
+LIMIT_SKILL=200             # SKILL.md (기본값 표 7개 포함). 201줄+ 실패
+LIMIT_CONTRACTS=250         # references/contracts.md. 251줄+ 실패
 LIMIT_PROCEDURES=160        # references/procedures.md. 161줄+ 실패
 LIMIT_TOTAL=600             # 위 세 파일 총합. 601줄+ 실패
 
