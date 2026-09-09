@@ -33,7 +33,7 @@ user-invocable: false
 6. **설계 문서 작성** (장기 스펙이 필요할 때만) — `spec-write` 컨벤션을 따라 작성·커밋
 7. **심문 자세로 복귀** — 생성된 설계·스펙을 `SKILL.md` 의 자세로 심문받는다. 생성자가 자기 산출물을 스스로 최종 검증하지 않는다
 8. **사용자의 리뷰** — 설계(및 작성된 문서)를 사용자가 검토한 뒤 진행
-9. **구현 전환** — Plan Mode 로 구현 계획을 세우거나, 여러 갈래면 `orchestrator` 로 위임
+9. **구현 전환** — Plan Mode 로 구현 계획을 세우거나, 여러 갈래면 `orchestrator` 로 위임. 승인된 계획은 `plans/YYYY-MM-DD-<slug>.md` 로 커밋한다
 
 ## Process Flow
 
@@ -114,7 +114,7 @@ digraph design_generation {
 **문서화:** (장기 스펙 문서가 필요할 때만)
 
 - 문서 작성은 **`spec-write` 스킬의 컨벤션**(`spec-write/references/authoring.md`)을 따른다 — 깊이 기준·출력 구조(DESIGN/concerns/flows)·`related_paths`·저장 경로 규약이 거기에 있다. 여기서는 합의된 설계를 그 컨벤션으로 형식화한다 (문서 형식을 자체 정의하지 않는다)
-- 단순 작업이라 장기 스펙이 불필요하면 이 단계를 건너뛰고 바로 심문 복귀로 간다 — 설계는 Plan Mode 의 plan 파일이 담는다
+- 단순 작업이라 장기 스펙이 불필요하면 이 단계를 건너뛰고 바로 심문 복귀로 간다 — 설계는 구현 전환 단계에서 `plans/` 에 남기는 plan 파일이 담는다
 
 **심문 복귀 (자기 검증 금지):**
 
@@ -132,6 +132,7 @@ digraph design_generation {
 
 - 단일 작업이면 **Plan Mode 로 진입**해 상세 구현 계획을 수립한다
 - 작업이 여러 갈래로 나뉘거나 장기 실행이 필요하면 **`orchestrator`** 로 위임해 분해한다
+- 어느 쪽이든 승인된 계획(합의된 결정·버린 대안·작업 순서)을 **프로젝트 루트의 `plans/YYYY-MM-DD-<slug>.md` 에 저장하고 `docs` 커밋으로 남긴다** — 헤더·경로 규약은 `plan-writing` 정책 룰을 따른다. Plan Mode 가 `~/.claude/plans/` 에 만든 파일은 기록으로 치지 않는다
 - 합의된 설계를 장기 스펙 문서로 남겨야 하면 `spec-write` 로 형식화한다
 
 ## 핵심 원칙
