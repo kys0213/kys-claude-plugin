@@ -132,7 +132,7 @@ digraph design_generation {
 
 - 단일 작업이면 **Plan Mode 로 진입**해 상세 구현 계획을 수립한다
 - 작업이 여러 갈래로 나뉘거나 장기 실행이 필요하면 **`orchestrator`** 로 위임해 분해한다
-- 어느 쪽이든 승인된 계획(합의된 결정·버린 대안·작업 순서)을 **`plans/YYYY-MM-DD-<slug>.md` 에 저장하고 `docs` 커밋으로 남긴다** — 헤더·경로 규약은 `plan-writing` 정책 룰을 따른다. Plan Mode 가 만든 임시 경로의 파일은 기록으로 치지 않는다
+- 어느 쪽이든 승인된 계획(합의된 결정·버린 대안·작업 순서)을 **프로젝트 루트의 `plans/YYYY-MM-DD-<slug>.md` 에 저장하고 `docs` 커밋으로 남긴다** — 헤더·경로 규약은 `plan-writing` 정책 룰을 따른다. Plan Mode 가 `~/.claude/plans/` 에 만든 파일은 기록으로 치지 않는다
 - 합의된 설계를 장기 스펙 문서로 남겨야 하면 `spec-write` 로 형식화한다
 
 ## 핵심 원칙

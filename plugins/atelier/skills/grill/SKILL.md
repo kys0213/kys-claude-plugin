@@ -67,7 +67,7 @@ version: 1.0.0
 
 모든 가지가 해소되어 미결·의문 목록이 비면(§미결·의문 해소 게이트) 합의된 결정 목록을 요약한다 — 마지막 줄은 `미결: 없음`이거나, 사용자가 보류한 항목의 목록이다. 그다음 필요에 따라:
 
-- **코드 변경**: Plan Mode 로 *어떻게* 바꿀지 구현 계획을 세우거나, 작업이 여러 갈래로 나뉘면 `orchestrator` 로 위임한다. 어느 쪽이든 합의된 결정 목록과 구현 계획을 **`plans/YYYY-MM-DD-<slug>.md` 로 저장하고 커밋한다** (경로·헤더 규약: `plan-writing` 정책 룰). Plan Mode 의 plan 파일은 repo 밖 임시 경로에 생기므로 그대로 두면 기록이 남지 않는다 — 승인된 내용을 이 경로로 옮기는 것까지가 핸드오프다. 이때 합의된 결정 목록이 orchestrator 의 **설계 승인 마커** 입력이 되고, 저장한 plan 경로가 마커의 근거 경로가 된다 — orchestrator 는 마커 없이 구현 에이전트를 dispatch 하지 않는다 (계약: `orchestrator` `references/contracts.md §설계 승인 마커`). 보류된 미결이 남아 있으면 자율 구현으로 넘기지 않는다 — 넘겨도 orchestrator 가 spec 확정 게이트에서 hard stop 한다.
+- **코드 변경**: Plan Mode 로 *어떻게* 바꿀지 구현 계획을 세우거나, 작업이 여러 갈래로 나뉘면 `orchestrator` 로 위임한다. 어느 쪽이든 합의된 결정 목록과 구현 계획을 **프로젝트 루트의 `plans/YYYY-MM-DD-<slug>.md` 로 저장하고 커밋한다** (경로·헤더 규약: `plan-writing` 정책 룰). Plan Mode 의 plan 파일은 repo 밖(`~/.claude/plans/`)에 생기므로 그대로 두면 기록이 남지 않는다 — 승인된 내용을 이 경로로 옮기는 것까지가 핸드오프다. 이때 합의된 결정 목록이 orchestrator 의 **설계 승인 마커** 입력이 되고, 저장한 plan 경로가 마커의 근거 경로가 된다 — orchestrator 는 마커 없이 구현 에이전트를 dispatch 하지 않는다 (계약: `orchestrator` `references/contracts.md §설계 승인 마커`). 보류된 미결이 남아 있으면 자율 구현으로 넘기지 않는다 — 넘겨도 orchestrator 가 spec 확정 게이트에서 hard stop 한다.
 - **장기 스펙 문서**: `spec-write` 로 정해진 구조(DESIGN/concerns/flows)에 맞춰 형식화한다. 미결이 없으면 미결 섹션은 `없음`으로, 보류된 미결이 있으면 그 항목만 미결 사항 섹션에 격리해 넘긴다.
 
 ## 책임 경계
