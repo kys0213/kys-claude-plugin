@@ -1,6 +1,6 @@
 # Rebase 충돌 해결 정책
 
-`git` skill 이 rebase 충돌을 해결할 때의 **판단·정책**. mechanical 한 git 사용법(`checkout --ours/--theirs`, `git add`, `--continue/--abort/--skip`, 마커 편집)은 모델이 직접 수행한다 — 여기에는 모델이 틀리기 쉬운 gotcha 와 진행 정책만 둔다. 여러 변경의 통합 순서 조정은 `orchestrator` skill 의 `references/merge-coordinator.md` 가 canonical 이며, 이 문서는 **단일 rebase 의 충돌 해결 전략**의 단일 출처다 (pr-merger·merge-coordinator 가 위임).
+`git` skill 이 rebase 충돌을 해결할 때의 **판단·정책**. mechanical 한 git 사용법(`checkout --ours/--theirs`, `git add`, `--continue/--abort/--skip`, 마커 편집)은 모델이 직접 수행한다 — 여기에는 모델이 틀리기 쉬운 gotcha 와 진행 정책만 둔다. 통합 순서 조정은 `orchestrator` `references/procedures.md §머지 표준 절차` 가 canonical (이 문서는 단일 rebase 충돌 해결 전략의 단일 출처) (pr-merger·merge-coordinator 가 위임).
 
 ## ⚠️ rebase 의 ours/theirs 는 merge 와 반대다 (가장 자주 틀림)
 

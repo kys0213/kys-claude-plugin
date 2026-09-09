@@ -1,4 +1,4 @@
-.PHONY: help setup build test validate validate-ci detect clean skilleval
+.PHONY: help setup build test validate validate-ci validate-graph detect clean skilleval
 
 BINARY := bin/validate
 SKILLEVAL := bin/skilleval
@@ -15,6 +15,7 @@ help:
 	@echo "  make validate-specs  스펙 검증만"
 	@echo "  make validate-paths  경로 검증만"
 	@echo "  make validate-arch   아키텍처 검증만 (레이어 의존성, 유사도, 책임)"
+	@echo "  make validate-graph  결정 그래프 검사 (orchestrator SKILL.md + references)"
 	@echo "  make skilleval ARGS=\"...\"  스킬 트리거 측정 (claude 호출, 수동)"
 	@echo "  make detect          변경된 패키지 감지"
 	@echo "  make detect-from REF=<ref>  특정 ref 기준 변경 감지"
@@ -64,9 +65,14 @@ validate-versions: $(BINARY)
 validate-arch: $(BINARY)
 	@./$(BINARY) --arch-only .
 
+# 결정 그래프 상시 검사 (orchestrator) — plans/atelier/11-orchestrator-lean.md §9-e, .claude/rules/decision-graph.md
+validate-graph:
+	@bash scripts/check-decision-graph.sh plugins/atelier/skills/orchestrator
+
 # CI용 검증 (버전 검증 제외 - 머지 시점에 자동 범프)
 validate-ci: $(BINARY)
 	@./$(BINARY) --skip-versions .
+	@$(MAKE) validate-graph
 
 $(BINARY):
 	@$(MAKE) build
