@@ -23,11 +23,18 @@ const (
 
 // Pre-compiled regexes for Cargo.toml parsing
 var (
-	cargoPackageRe       = regexp.MustCompile(`(?m)^\[package\]\s*$`)
-	cargoSectionRe       = regexp.MustCompile(`(?m)^\[`)
-	cargoVersionRe       = regexp.MustCompile(`(?m)^(version\s*=\s*")\d+\.\d+\.\d+(-[\w.]+)?(")\s*$`)
-	cargoVersionMatchRe  = regexp.MustCompile(`(?m)^version\s*=\s*"\d+\.\d+\.\d+(-[\w.]+)?"\s*$`)
-	cargoVersionExtract  = regexp.MustCompile(`(?m)^version\s*=\s*"(\d+\.\d+\.\d+(?:-[\w.]+)?)"\s*$`)
+	cargoPackageRe      = regexp.MustCompile(`(?m)^\[package\]\s*$`)
+	cargoSectionRe      = regexp.MustCompile(`(?m)^\[`)
+	cargoVersionRe      = regexp.MustCompile(`(?m)^(version\s*=\s*")\d+\.\d+\.\d+(-[\w.]+)?(")\s*$`)
+	cargoVersionMatchRe = regexp.MustCompile(`(?m)^version\s*=\s*"\d+\.\d+\.\d+(-[\w.]+)?"\s*$`)
+	cargoVersionExtract = regexp.MustCompile(`(?m)^version\s*=\s*"(\d+\.\d+\.\d+(?:-[\w.]+)?)"\s*$`)
+	cargoNameExtract    = regexp.MustCompile(`(?m)^name\s*=\s*"([^"]+)"\s*$`)
+)
+
+// Pre-compiled regexes for Cargo.lock parsing
+var (
+	cargoLockPackageRe = regexp.MustCompile(`(?m)^\[\[package\]\]\s*$`)
+	cargoLockSourceRe  = regexp.MustCompile(`(?m)^source\s*=\s*"`)
 )
 
 // BumpResult represents the result of a version bump operation
@@ -38,6 +45,7 @@ type BumpResult struct {
 	PluginJSON  string `json:"plugin_json"`
 	Marketplace bool   `json:"marketplace_updated"`
 	CargoToml   bool   `json:"cargo_toml_updated"`
+	CargoLock   bool   `json:"cargo_lock_updated"`
 }
 
 // Bumper handles version bumping operations
@@ -132,11 +140,28 @@ func (b *Bumper) bumpPlugin(pkg changes.Package, bumpType BumpType, marketplace 
 	if !b.DryRun {
 		// Validate Cargo.toml first (before any writes) to avoid partial updates
 		cargoTomlPath := filepath.Join(b.RepoRoot, pkg.Path, "cli", "Cargo.toml")
+		cargoLockPath := filepath.Join(b.RepoRoot, pkg.Path, "cli", "Cargo.lock")
 		hasCargoToml := false
+		hasCargoLock := false
+		crateName := ""
 		if _, err := os.Stat(cargoTomlPath); err == nil {
 			hasCargoToml = true
 			if _, err := parseCargoPackageSection(cargoTomlPath); err != nil {
 				return result, fmt.Errorf("Cargo.toml validation failed (no files modified): %w", err)
+			}
+
+			// Cargo.lock records the crate's own version, so it needs the same bump.
+			// Resolving the crate name from Cargo.toml keeps the lookup exact when the
+			// plugin directory and the crate are named differently.
+			crateName, err = ExtractCargoPackageName(cargoTomlPath)
+			if err != nil {
+				return result, fmt.Errorf("Cargo.toml validation failed (no files modified): %w", err)
+			}
+			if _, err := os.Stat(cargoLockPath); err == nil {
+				hasCargoLock = true
+				if _, err := parseCargoLockLocalPackage(cargoLockPath, crateName); err != nil {
+					return result, fmt.Errorf("Cargo.lock validation failed (no files modified): %w", err)
+				}
 			}
 		}
 
@@ -161,6 +186,14 @@ func (b *Bumper) bumpPlugin(pkg changes.Package, bumpType BumpType, marketplace 
 			}
 			result.CargoToml = true
 		}
+
+		// Update Cargo.lock (already validated above)
+		if hasCargoLock {
+			if err := b.bumpCargoLock(cargoLockPath, crateName, newVersion); err != nil {
+				return result, fmt.Errorf("Cargo.lock update failed: %w", err)
+			}
+			result.CargoLock = true
+		}
 	}
 
 	return result, nil
@@ -168,9 +201,9 @@ func (b *Bumper) bumpPlugin(pkg changes.Package, bumpType BumpType, marketplace 
 
 // cargoPackageInfo holds the parsed [package] section of a Cargo.toml file.
 type cargoPackageInfo struct {
-	fullText   string // entire file content
-	sectionStart int  // byte offset where [package] header ends
-	sectionEnd   int  // byte offset where the next section starts (or EOF)
+	fullText     string // entire file content
+	sectionStart int    // byte offset where [package] header ends
+	sectionEnd   int    // byte offset where the next section starts (or EOF)
 	section      string // content between [package] and next section
 }
 
@@ -237,6 +270,102 @@ func (b *Bumper) bumpCargoToml(path, newVersion string) error {
 
 	updatedSection := cargoVersionRe.ReplaceAllString(info.section, "${1}"+newVersion+"${3}")
 	updated := info.fullText[:info.sectionStart] + updatedSection + info.fullText[info.sectionEnd:]
+
+	return os.WriteFile(path, []byte(updated), 0644)
+}
+
+// ExtractCargoPackageName reads a Cargo.toml and returns the crate name from the [package] section.
+func ExtractCargoPackageName(path string) (string, error) {
+	info, err := parseCargoPackageSection(path)
+	if err != nil {
+		return "", err
+	}
+
+	match := cargoNameExtract.FindStringSubmatch(info.section)
+	if match == nil {
+		return "", fmt.Errorf("no name field found in [package] section of %s", path)
+	}
+	return match[1], nil
+}
+
+// cargoLockPackageInfo holds the located [[package]] block of a Cargo.lock file.
+type cargoLockPackageInfo struct {
+	fullText   string // entire file content
+	blockStart int    // byte offset where the [[package]] header ends
+	blockEnd   int    // byte offset where the next [[package]] starts (or EOF)
+	block      string // content of the located block
+}
+
+// parseCargoLockLocalPackage locates the [[package]] entry for crateName in a Cargo.lock file.
+//
+// Cargo.lock records the workspace-local crate's own version, so a bump must update it too.
+// The local entry is the one WITHOUT a `source` field — registry and git entries carry a
+// source (and a checksum) and must never be rewritten, even when they share the crate name.
+func parseCargoLockLocalPackage(path, crateName string) (*cargoLockPackageInfo, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	text := string(content)
+
+	headers := cargoLockPackageRe.FindAllStringIndex(text, -1)
+	if len(headers) == 0 {
+		return nil, fmt.Errorf("no [[package]] entries found in %s", path)
+	}
+
+	var found []*cargoLockPackageInfo
+	for i, header := range headers {
+		blockEnd := len(text)
+		if i+1 < len(headers) {
+			blockEnd = headers[i+1][0]
+		}
+		block := text[header[1]:blockEnd]
+
+		nameMatch := cargoNameExtract.FindStringSubmatch(block)
+		if nameMatch == nil || nameMatch[1] != crateName {
+			continue
+		}
+		if cargoLockSourceRe.MatchString(block) {
+			continue
+		}
+
+		matches := cargoVersionMatchRe.FindAllStringIndex(block, -1)
+		if len(matches) == 0 {
+			return nil, fmt.Errorf("no version field found in [[package]] %q of %s", crateName, path)
+		}
+		if len(matches) > 1 {
+			return nil, fmt.Errorf("multiple version fields found in [[package]] %q of %s", crateName, path)
+		}
+
+		found = append(found, &cargoLockPackageInfo{
+			fullText:   text,
+			blockStart: header[1],
+			blockEnd:   blockEnd,
+			block:      block,
+		})
+	}
+
+	if len(found) == 0 {
+		return nil, fmt.Errorf("no workspace-local [[package]] entry named %q found in %s", crateName, path)
+	}
+	if len(found) > 1 {
+		return nil, fmt.Errorf("multiple workspace-local [[package]] entries named %q found in %s", crateName, path)
+	}
+
+	return found[0], nil
+}
+
+// bumpCargoLock updates the version of the workspace-local package entry in a Cargo.lock file.
+// Only that entry's version line is rewritten, so dependency versions and checksums are left intact.
+func (b *Bumper) bumpCargoLock(path, crateName, newVersion string) error {
+	info, err := parseCargoLockLocalPackage(path, crateName)
+	if err != nil {
+		return err
+	}
+
+	updatedBlock := cargoVersionRe.ReplaceAllString(info.block, "${1}"+newVersion+"${3}")
+	updated := info.fullText[:info.blockStart] + updatedBlock + info.fullText[info.blockEnd:]
 
 	return os.WriteFile(path, []byte(updated), 0644)
 }

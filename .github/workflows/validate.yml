@@ -62,14 +62,14 @@ jobs:
       - name: suggest-workflow clippy
         if: steps.check_rust.outputs.sw_changed == 'true'
         working-directory: plugins/suggest-workflow/cli
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --locked -- -D warnings
 
       - name: suggest-workflow check and test
         if: steps.check_rust.outputs.sw_changed == 'true'
         working-directory: plugins/suggest-workflow/cli
         run: |
-          cargo check
-          cargo test
+          cargo check --locked
+          cargo test --locked
 
       # ── atelier checks ──
       - name: atelier fmt check
@@ -80,14 +80,14 @@ jobs:
       - name: atelier clippy
         if: steps.check_rust.outputs.atelier_changed == 'true'
         working-directory: plugins/atelier/cli
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: atelier check and test
         if: steps.check_rust.outputs.atelier_changed == 'true'
         working-directory: plugins/atelier/cli
         run: |
-          cargo check
-          cargo test
+          cargo check --locked
+          cargo test --locked
 
       - name: Check PR title format
         env:
