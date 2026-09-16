@@ -185,6 +185,9 @@ func main() {
 				if r.CargoToml {
 					gray.Println("    Cargo.toml: updated")
 				}
+				if r.CargoLock {
+					gray.Println("    Cargo.lock: updated")
+				}
 			}
 		}
 		fmt.Println()
