@@ -18,6 +18,21 @@
 - 기존 코드를 참조하되, 스펙이 기존 구조에 종속되지 않도록 한다. **리트머스**: 동작·계약이 그대로인 리팩토링에 스펙 본문을 고쳐야 한다면 구현 세부에 결합된 것이다 — 동작·계약·정책 수준으로 끌어올려 적고, 구현 구조·경계의 지속 원칙은 스펙이 아니라 rules(`.claude/rules/`)로 보낸다 (`related_paths` 경로 갱신은 예외).
 - frontmatter `related_paths` 를 채운다 — 스펙을 읽는 사람·에이전트가 해당 코드 영역을 바로 찾을 수 있게 하는 힌트다. 본문에서 언급된 모듈/디렉터리/식별자를 프로젝트 구조와 매칭하되, **확실한 경로만** 적는다(추정에 자신 없으면 비움). 신규 설계라 코드가 아직 없으면 비워둔다.
 
+### 다이어그램 형식
+
+| 대상 | 기본 형식 |
+|------|-----------|
+| 컴포넌트 배치·관계 | mermaid `flowchart` |
+| 트리거 → 처리 → 응답 흐름 (시간축) | mermaid `sequenceDiagram` |
+| 상태 라이프사이클 | mermaid `stateDiagram-v2` |
+
+- **ASCII 예외**: mermaid 로 표현이 어색한 경우(한 줄짜리 파이프라인 `A → B → C` 등)에만 ASCII 를 쓴다.
+- **문법 검증**: 작성 후 mermaid 블록을 `.mmd` 로 추출해 `mmdc` 렌더가 성공하는지 확인한다 — 실패하면 문법을 고친 뒤 재검증한다.
+  ```bash
+  SPEC=spec/DESIGN.md   # 검증할 문서 경로로 교체
+  awk '/^```mermaid/{f=1;n++;next}/^```/{f=0}f{print > ("/tmp/d"n".mmd")}' "$SPEC" && for m in /tmp/d*.mmd; do npx -y -p @mermaid-js/mermaid-cli mmdc -i "$m" -o "${m%.mmd}.svg" || echo "FAIL $m"; done
+  ```
+
 ## 출력 구조
 
 ### write → DESIGN.md
@@ -45,7 +60,7 @@ related_paths:
 {설명}
 
 ## 전체 구조
-{ASCII 다이어그램: 컴포넌트 배치와 데이터 흐름}
+{mermaid flowchart: 컴포넌트 배치와 데이터 흐름}
 
 ## 관심사 분리
 | 레이어 | 책임 | 비고 |
@@ -114,7 +129,7 @@ related_paths:
 > {한 문장 요약}
 
 ## 흐름 다이어그램
-{ASCII 다이어그램}
+{mermaid sequenceDiagram: 트리거 → 컴포넌트 → 데이터 → 결과}
 
 ## 단계별 설명
 {각 단계: 트리거 → 컴포넌트 → 데이터 → 결과}
