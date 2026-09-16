@@ -34,7 +34,7 @@ spec은 **제품이 무엇이어야 하는가**(정책·계약·시스템 큰그
 - 문단 시작에 한 줄 요약 (TL;DR 느낌)
 - 본문은 bullet / 표 / 다이어그램 우선
 - 긴 prose 블록은 분할
-- 동작 흐름은 ASCII 다이어그램 또는 mermaid 로
+- 동작 흐름은 mermaid 다이어그램으로 — ASCII 는 mermaid 로 표현이 어색한 경우(한 줄 파이프라인 등)에만
 - 정책 케이스는 표로
 - 상태 머신은 다이어그램으로
 - 인터페이스 책임은 표로 (단, 함수 시그니처 표는 여전히 금지)
@@ -45,10 +45,10 @@ spec은 **제품이 무엇이어야 하는가**(정책·계약·시스템 큰그
 
 | 대상 | 형태 |
 |------|------|
-| 트리거 / 처리 / 응답 흐름 | ASCII flow 또는 mermaid sequence |
+| 트리거 / 처리 / 응답 흐름 | mermaid sequenceDiagram |
 | 케이스별 정책 (입력 → 결정) | 표 |
-| 컴포넌트 간 관계 | ASCII 박스 또는 mermaid graph |
-| 상태 라이프사이클 | 상태 머신 다이어그램 |
+| 컴포넌트 간 관계 | mermaid flowchart |
+| 상태 라이프사이클 | mermaid stateDiagram-v2 |
 | 라벨 / cardinality 정책 | 표 |
 
 ### 톤 변환 예시

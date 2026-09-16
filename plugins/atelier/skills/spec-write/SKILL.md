@@ -39,6 +39,7 @@ version: 1.0.0
 - ❌ write-detail 에서 Big Picture 내용을 다시 풀어씀 → DESIGN.md 를 링크로 참조하고 상세만 적는다.
 - ❌ `related_paths` 를 추정으로 채움 → 확신 없으면 비워둔다. 틀린 경로는 없는 것보다 나쁘다.
 - ❌ 승인 전에 파일을 먼저 저장 → 내용 제시 → 승인 → orchestrator 위임 Write 순서를 지킨다.
+- ❌ 다이어그램을 ASCII 로 작성 → mermaid 가 기본이고 ASCII 는 표현이 어색한 경우의 예외다 (형식 기준은 `references/authoring.md`).
 
 ## 공통 원칙
 
