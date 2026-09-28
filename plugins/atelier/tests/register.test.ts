@@ -164,6 +164,26 @@ describe('register', () => {
     expect(seen).toBe('note')
   })
 
+  test('an empty compact-note string from the CLI is still appended', async ($, on) => {
+    on('process.run', () => ({
+      value: { exitCode: 0, stdout: JSON.stringify({ instructions: '' }), stderr: '' },
+    }))
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+
+    let seen: string | undefined
+
+    on('session.compact', ($, e) => {
+      seen = e.instructions
+
+      return { messages: [MSG] }
+    })
+
+    await $.session.start({ cwd: '/work', surface: null, isInteractive: false })
+    await $.session.compact({ instructions: 'existing note', messages: [MSG] } as never)
+
+    expect(seen).toBe('existing note\n\n')
+  })
+
   test('a subagent compaction never calls the CLI and keeps instructions as they are', async ($, on) => {
     let called = false
 

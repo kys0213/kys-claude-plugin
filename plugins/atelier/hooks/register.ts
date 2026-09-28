@@ -13,11 +13,6 @@ type SpawnFact = {
   subagent_type: string
 }
 
-/**
- * Calls `atelier orchestrator <sub>` and decodes its JSON stdout with
- * `decode`. A missing binary, a non-zero exit, a timeout, unparseable
- * stdout, or a `decode` mismatch all fall back to `neutral`.
- */
 async function askCli<T>(
   $: EngineInterface,
   sub: string,
@@ -101,9 +96,9 @@ export function register(on: On): void {
       return next(e)
     }
 
-    const note = await askCli($, 'compact-note', decodeInstructions, '')
+    const note = await askCli<string | null>($, 'compact-note', decodeInstructions, null)
 
-    if (note === '') {
+    if (note === null) {
       return next(e)
     }
 
