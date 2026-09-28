@@ -1,8 +1,3 @@
-//! End-to-end black-box tests for `atelier orchestrator spawn-check`. Same
-//! hard contract as `session` (see `tests/session_cli.rs`): this binary
-//! backs a function-hooks adapter that must never see a nonzero exit, so
-//! unparseable stdin and unknown subcommands must still succeed.
-
 use assert_cmd::Command;
 use serde_json::Value;
 

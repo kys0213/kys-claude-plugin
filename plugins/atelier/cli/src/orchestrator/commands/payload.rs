@@ -21,8 +21,6 @@ pub fn parse_spawn_facts(raw: &str) -> Option<SpawnFacts> {
     })
 }
 
-/// A field read as a JSON string, `null`, or absent key — the three shapes
-/// `optional_nullable_string` accepts.
 enum NullableField {
     Unspecified,
     Value(String),

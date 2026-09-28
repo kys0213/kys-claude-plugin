@@ -3,7 +3,7 @@
 //! than one place.
 
 /// Declaration order doubles as the ladder order — `derive(Ord)` gives
-/// `Haiku < Sonnet < Opus < Fable`, matching the sheet.
+/// `Haiku < Sonnet < Opus < Fable`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Tier {
     Haiku,
