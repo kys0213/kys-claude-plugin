@@ -1,4 +1,6 @@
 {
+  "description": "agent.spawn 사실과 tool.call{Agent} 을 짝지어 atelier orchestrator spawn-check 로 model 규약 경고를 얻어 모델에 전달하고, main session.compact 에 atelier orchestrator compact-note 지시를 덧붙인다. CLI 호출 실패는 원래 결과를 그대로 통과시킨다(fail-open).",
+  "modules": ["./register.ts"],
   "hooks": {
     "SessionStart": [
       {
