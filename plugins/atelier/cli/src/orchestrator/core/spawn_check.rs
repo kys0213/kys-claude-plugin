@@ -5,9 +5,6 @@
 
 use super::tier::Tier;
 
-/// Facts about one `agent.spawn` dispatch, already lenient-defaulted by the
-/// caller (`commands::payload::parse_spawn_facts`) — this module only
-/// interprets them, it never guesses at a missing field.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SpawnFacts {
     /// The model the dispatch site passed, if any (alias or full id).

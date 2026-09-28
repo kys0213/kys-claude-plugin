@@ -9,11 +9,11 @@
 //! atelier orchestrator compact-note    # session.compact
 //! ```
 //!
-//! Output contract, same as `session` (`crate::session` module docs): stdin
-//! JSON in, one line of stdout JSON out, and **always exit 0** — including
-//! unparseable stdin and clap parse failures — because a hooks-module caller
-//! treats a nonzero exit or malformed stdout as "drop this adapter's
-//! contribution", never as a signal worth surfacing to the user.
+//! Output contract: stdin JSON in, one line of stdout JSON out, and
+//! **always exit 0** — including unparseable stdin and clap parse failures
+//! — because a hooks-module caller treats a nonzero exit or malformed
+//! stdout as "drop this adapter's contribution", never as a signal worth
+//! surfacing to the user.
 
 pub mod commands;
 pub mod core;
