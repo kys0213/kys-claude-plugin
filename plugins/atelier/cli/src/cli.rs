@@ -39,6 +39,13 @@ pub enum AtelierCommand {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Orchestrator dispatch-rule checks for function hooks (spawn-check / compact-note)
+    #[command(disable_help_flag = true)]
+    Orchestrator {
+        /// Arguments forwarded verbatim to the orchestrator subsystem
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 /// Parses argv and dispatches to the selected subsystem, returning a process
@@ -58,6 +65,10 @@ pub fn run() -> i32 {
         AtelierCommand::Session { args } => {
             let argv = std::iter::once("session".to_string()).chain(args);
             crate::session::run_from(argv)
+        }
+        AtelierCommand::Orchestrator { args } => {
+            let argv = std::iter::once("orchestrator".to_string()).chain(args);
+            crate::orchestrator::run_from(argv)
         }
     }
 }
