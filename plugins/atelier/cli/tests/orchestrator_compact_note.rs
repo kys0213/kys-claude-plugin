@@ -1,5 +1,5 @@
 //! End-to-end black-box tests for `atelier orchestrator compact-note`. The
-//! output never varies with input (plan decision 1): stdin is ignored
+//! output never varies with input: stdin is ignored
 //! entirely, the process always exits 0, and stdout is one line of
 //! `{"instructions": "..."}` with a non-empty instruction string.
 

@@ -1,8 +1,6 @@
-//! Execution-tier ladder mirrored from
-//! `plugins/atelier/skills/orchestrator/SKILL.md` §기본값 표 표 1 사전 기준.
-//! That table is the canonical source for which generation names map to
-//! which tier and what a main model's execution-delegation cap is — when a
-//! new model generation ships, update both there and here.
+//! Execution-tier ladder for model generation names. This ladder is mirrored
+//! elsewhere in the repo, so a new model generation needs updating in more
+//! than one place.
 
 /// A dispatch model's tier on the Fable > Opus > Sonnet > Haiku ladder.
 /// Declaration order doubles as the ladder order — `derive(Ord)` gives
@@ -36,10 +34,9 @@ impl Tier {
         }
     }
 
-    /// The execution-delegation tier cap for a main model at this tier
-    /// (SKILL.md §기본값 표 표 1 사전 기준: Fable → Opus, Opus → Opus,
-    /// Sonnet → Sonnet, Haiku → Haiku — Fable is never used for execution
-    /// delegation itself).
+    /// The execution-delegation tier cap for a main model at this tier:
+    /// Fable → Opus, Opus → Opus, Sonnet → Sonnet, Haiku → Haiku — Fable is
+    /// never used for execution delegation itself.
     pub fn execution_cap(self) -> Tier {
         match self {
             Tier::Fable => Tier::Opus,

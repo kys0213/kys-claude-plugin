@@ -1,6 +1,6 @@
 //! `orchestrator compact-note` — the fixed compaction-preservation notice.
-//! No stdin: this command's output never varies with input (plan decision
-//! 1). The hooks module calls it unconditionally from `session.compact` when
+//! No stdin: this command's output never varies with input. The hooks
+//! module calls it unconditionally from `session.compact` when
 //! the compacting context is the main loop (`agentId` absent), and the
 //! instruction text itself is what tells the summarizer whether an
 //! orchestrator run was actually in progress.

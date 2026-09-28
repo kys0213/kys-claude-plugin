@@ -38,7 +38,7 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// agent.spawn / tool.call{Agent}: warn on model-unspecified or
-    /// tier-cap-exceeded dispatch (orchestrator 불변식 21)
+    /// tier-cap-exceeded dispatch
     #[command(name = "spawn-check")]
     SpawnCheck,
     /// session.compact (main loop only): instruct the summarizer to preserve

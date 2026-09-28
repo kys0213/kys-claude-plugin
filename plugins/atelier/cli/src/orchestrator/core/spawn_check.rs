@@ -1,7 +1,7 @@
-//! Deterministic `agent.spawn` dispatch-rule checks (orchestrator 불변식
-//! 21). Both rules only apply to non-fork dispatches — a fork inherits the
-//! parent process wholesale and never picks a model at all, so neither "model
-//! unspecified" nor "tier cap exceeded" can be judged.
+//! Deterministic `agent.spawn` dispatch-rule checks. Both rules only apply
+//! to non-fork dispatches — a fork inherits the parent process wholesale and
+//! never picks a model at all, so neither "model unspecified" nor "tier cap
+//! exceeded" can be judged.
 
 use super::tier::Tier;
 
@@ -21,8 +21,7 @@ pub struct SpawnFacts {
 }
 
 /// True when `model` counts as "not specified": absent, blank, or the
-/// literal `inherit` (case-insensitive) — the three spellings Claude Code
-/// uses for "same as parent".
+/// literal `inherit` (case-insensitive).
 fn is_unspecified(model: &Option<String>) -> bool {
     match model {
         None => true,
@@ -34,7 +33,7 @@ fn is_unspecified(model: &Option<String>) -> bool {
 }
 
 /// Rule A: a non-fork dispatch with no explicit model silently inherits the
-/// parent's, drifting from the tier table without anyone deciding it should.
+/// parent's.
 fn rule_unspecified_model(facts: &SpawnFacts) -> Option<String> {
     if facts.fork || !is_unspecified(&facts.model) {
         return None;
@@ -52,10 +51,9 @@ fn rule_unspecified_model(facts: &SpawnFacts) -> Option<String> {
     ))
 }
 
-/// Rule B: a non-fork execution delegation above the parent's tier cap
-/// (SKILL.md §기본값 표 표 1 사전 기준). Fires only when both sides' tiers
-/// can be judged — an unrecognized model or parent id means "cannot judge",
-/// not "assume worst case".
+/// Rule B: a non-fork execution delegation above the parent's tier cap.
+/// Fires only when both sides' tiers can be judged — an unrecognized model
+/// or parent id means "cannot judge", not "assume worst case".
 fn rule_tier_cap_exceeded(facts: &SpawnFacts) -> Option<String> {
     if facts.fork {
         return None;

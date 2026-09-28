@@ -166,7 +166,7 @@ fn full_model_ids_are_all_detected() {
     );
 }
 
-// --- Rule B: opus parent within cap (non-blocking finding 3) -----------------
+// --- Rule B: opus parent within cap -----------------------------------------
 
 #[test]
 fn rule_b_opus_parent_allows_sonnet_delegation() {
@@ -196,7 +196,7 @@ fn empty_stdin_yields_empty_warnings() {
     assert!(warnings_for("").is_empty());
 }
 
-// --- Strict input schema (finding 2) ------------------------------------------
+// --- Strict input schema ------------------------------------------------------
 //
 // The caller (function hooks module) always sends well-typed facts. A
 // wrong-typed field is the caller's bug, and defaulting it leniently would
