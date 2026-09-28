@@ -1,12 +1,6 @@
 import type { EngineInterface, On } from 'claude-code'
 
 /**
- * Every CLI call is fail-open: a missing binary, a non-zero exit, a timeout
- * or output that does not parse as the expected shape all fall back to
- * returning the original hook result untouched.
- */
-
-/**
  * The `agent.spawn` facts a dispatch needs for `spawn-check`, held from
  * `agent.spawn` until the matching `tool.call { tool: 'Agent' }` consumes
  * them, keyed by the shared `tool_use_id`.
@@ -19,55 +13,39 @@ type SpawnFact = {
   subagent_type: string
 }
 
-async function runOrchestrator(
+/**
+ * Calls `atelier orchestrator <sub>` and decodes its JSON stdout with
+ * `decode`. A missing binary, a non-zero exit, a timeout, unparseable
+ * stdout, or a `decode` mismatch all fall back to `neutral`.
+ */
+async function askCli<T>(
   $: EngineInterface,
   sub: string,
+  decode: (parsed: unknown) => T | undefined,
+  neutral: T,
   stdin?: string,
-): Promise<unknown> {
-  let result: { exitCode: number; stdout: string; stderr: string }
-
+): Promise<T> {
   try {
-    result = await $.process.run(['atelier', 'orchestrator', sub], {
-      stdin,
-      timeoutMs: 5000,
-    })
+    const r = await $.process.run(['atelier', 'orchestrator', sub], { stdin, timeoutMs: 5000 })
+    return r.exitCode === 0 ? (decode(JSON.parse(r.stdout)) ?? neutral) : neutral
   } catch {
-    return undefined
-  }
-
-  if (result.exitCode !== 0) {
-    return undefined
-  }
-
-  try {
-    return JSON.parse(result.stdout)
-  } catch {
-    return undefined
+    return neutral
   }
 }
 
-async function spawnCheck(
-  $: EngineInterface,
-  fact: SpawnFact,
-): Promise<readonly string[] | undefined> {
-  const parsed = await runOrchestrator($, 'spawn-check', JSON.stringify(fact))
-
+function decodeWarnings(parsed: unknown): readonly string[] | undefined {
   if (typeof parsed !== 'object' || parsed === null) {
     return undefined
   }
 
   const warnings = (parsed as Record<string, unknown>).warnings
 
-  if (!Array.isArray(warnings) || !warnings.every(w => typeof w === 'string')) {
-    return undefined
-  }
-
-  return warnings as readonly string[]
+  return Array.isArray(warnings) && warnings.every(w => typeof w === 'string')
+    ? (warnings as readonly string[])
+    : undefined
 }
 
-async function compactNote($: EngineInterface): Promise<string | undefined> {
-  const parsed = await runOrchestrator($, 'compact-note')
-
+function decodeInstructions(parsed: unknown): string | undefined {
   if (typeof parsed !== 'object' || parsed === null) {
     return undefined
   }
@@ -109,9 +87,9 @@ export function register(on: On): void {
       return r
     }
 
-    const warnings = await spawnCheck($, fact)
+    const warnings = await askCli($, 'spawn-check', decodeWarnings, [], JSON.stringify(fact))
 
-    if (warnings === undefined || warnings.length === 0) {
+    if (warnings.length === 0) {
       return r
     }
 
@@ -123,9 +101,9 @@ export function register(on: On): void {
       return next(e)
     }
 
-    const note = await compactNote($)
+    const note = await askCli($, 'compact-note', decodeInstructions, '')
 
-    if (note === undefined) {
+    if (note === '') {
       return next(e)
     }
 
