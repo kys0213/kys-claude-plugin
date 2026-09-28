@@ -20,8 +20,6 @@ pub struct SpawnFacts {
     pub subagent_type: String,
 }
 
-/// True when `model` counts as "not specified": absent, blank, or the
-/// literal `inherit` (case-insensitive).
 fn is_unspecified(model: &Option<String>) -> bool {
     match model {
         None => true,
@@ -32,8 +30,6 @@ fn is_unspecified(model: &Option<String>) -> bool {
     }
 }
 
-/// Rule A: a non-fork dispatch with no explicit model silently inherits the
-/// parent's.
 fn rule_unspecified_model(facts: &SpawnFacts) -> Option<String> {
     if facts.fork || !is_unspecified(&facts.model) {
         return None;
@@ -51,9 +47,6 @@ fn rule_unspecified_model(facts: &SpawnFacts) -> Option<String> {
     ))
 }
 
-/// Rule B: a non-fork execution delegation above the parent's tier cap.
-/// Fires only when both sides' tiers can be judged — an unrecognized model
-/// or parent id means "cannot judge", not "assume worst case".
 fn rule_tier_cap_exceeded(facts: &SpawnFacts) -> Option<String> {
     if facts.fork {
         return None;
@@ -73,10 +66,6 @@ fn rule_tier_cap_exceeded(facts: &SpawnFacts) -> Option<String> {
     }
 }
 
-/// Runs every rule independently and collects whichever fire. The rules are
-/// not treated as mutually exclusive by this function — today rule A only
-/// fires when `model` is unspecified, which leaves rule B nothing to detect,
-/// but a future rule must not have to assume that relationship holds.
 pub fn check(facts: &SpawnFacts) -> Vec<String> {
     [rule_unspecified_model(facts), rule_tier_cap_exceeded(facts)]
         .into_iter()

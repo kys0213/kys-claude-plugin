@@ -5,8 +5,6 @@
 //! instruction text itself is what tells the summarizer whether an
 //! orchestrator run was actually in progress.
 
-/// The conditional instruction appended to compaction: preserve orchestrator
-/// run state if one was in progress, otherwise ignore this notice.
 pub fn instructions() -> String {
     "orchestrator 런이 진행 중이었다면, 이번 요약에 epic 브랜치 전체 이름, log_dir 경로, \
      등록된 task 들의 id 와 상태, 담당 agent 이름, 진행 중인 worktree 경로, 남은 작업, \

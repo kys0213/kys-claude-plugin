@@ -19,25 +19,8 @@ import type {
  */
 const TOOL_USE_ID = 'toolu_1'
 
-/**
- * The parent model a dispatch's `agent.spawn` carries as `parentModel`.
- */
 const PARENT_MODEL = 'claude-haiku-4-5-20251001'
 
-/**
- * Registers the bottom `agent.spawn` and `tool.call { tool: 'Agent' }`
- * hooks for one dispatch, then raises both, sharing `TOOL_USE_ID`, as the
- * engine raises them together for one real Agent call.
- *
- * @param $ the test's `$`
- * @param on the test's `on`; every hook here must be registered before any
- *   `$` call the test has already made
- * @param opts `model` as the Agent tool call itself named it (absent when
- *   none given); `spawnResult` what the bottom `agent.spawn` hook answers;
- *   `callResult` what the bottom `tool.call` hook answers (`{ result: 'hi' }`
- *   when omitted); `fork` whether the dispatch is a fork (false when omitted)
- * @returns the `tool.call`'s result
- */
 async function dispatchAgentCall(
   $: EngineInterface,
   on: On,

@@ -2,7 +2,6 @@
 //! elsewhere in the repo, so a new model generation needs updating in more
 //! than one place.
 
-/// A dispatch model's tier on the Fable > Opus > Sonnet > Haiku ladder.
 /// Declaration order doubles as the ladder order — `derive(Ord)` gives
 /// `Haiku < Sonnet < Opus < Fable`, matching the sheet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -14,11 +13,8 @@ pub enum Tier {
 }
 
 impl Tier {
-    /// Detects a tier from a free-form model id or alias by case-insensitive
-    /// substring match (`fable`/`mythos` → Fable, `opus` → Opus, `sonnet` →
-    /// Sonnet, `haiku` → Haiku). Returns `None` when no known tier name
-    /// appears — callers must treat that as "cannot judge", never as the
-    /// lowest tier.
+    /// Returns `None` when no known tier name appears — callers must treat
+    /// that as "cannot judge", never as the lowest tier.
     pub fn detect(raw: &str) -> Option<Tier> {
         let lower = raw.to_lowercase();
         if lower.contains("fable") || lower.contains("mythos") {
@@ -34,9 +30,6 @@ impl Tier {
         }
     }
 
-    /// The execution-delegation tier cap for a main model at this tier:
-    /// Fable → Opus, Opus → Opus, Sonnet → Sonnet, Haiku → Haiku — Fable is
-    /// never used for execution delegation itself.
     pub fn execution_cap(self) -> Tier {
         match self {
             Tier::Fable => Tier::Opus,

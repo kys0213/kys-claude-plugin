@@ -3,29 +3,13 @@
 use crate::orchestrator::core::spawn_check::SpawnFacts;
 use serde_json::Value;
 
-/// Parses the `agent.spawn` facts JSON. Returns `None` when stdin is empty,
-/// not valid JSON, or the JSON does not satisfy the schema below — the hook
-/// contract treats every one of those cases as "nothing to check"
-/// (`{"warnings":[]}`), never as facts defaulted enough to run the rules on.
-///
-/// The caller (the function hooks module) always sends well-typed facts, so
-/// this parses strictly rather than leniently: a wrong-typed field is the
-/// caller's bug, and guessing a default for it would only manufacture a
-/// false-positive warning.
-///
-/// - `fork`: JSON bool, required. Missing or wrong-typed → reject.
-/// - `parent_model`: JSON string, required. Missing or wrong-typed → reject.
-/// - `model`, `resolved_model`: JSON string, `null`, or absent — all three
-///   mean "not specified". Any other type → reject.
-/// - `subagent_type`: JSON string or absent (absent defaults to `""`). Any
-///   other type, including `null` → reject.
 pub fn parse_spawn_facts(raw: &str) -> Option<SpawnFacts> {
     let value = serde_json::from_str::<Value>(raw).ok()?;
 
     let fork = value.get("fork")?.as_bool()?;
     let parent_model = value.get("parent_model")?.as_str()?.to_string();
-    let model = optional_nullable_string(&value, "model")?;
-    let resolved_model = optional_nullable_string(&value, "resolved_model")?;
+    let model = optional_nullable_string(&value, "model")?.into_specified();
+    let resolved_model = optional_nullable_string(&value, "resolved_model")?.into_specified();
     let subagent_type = optional_string(&value, "subagent_type")?;
 
     Some(SpawnFacts {
@@ -37,22 +21,31 @@ pub fn parse_spawn_facts(raw: &str) -> Option<SpawnFacts> {
     })
 }
 
-/// Reads a field that may be a JSON string, explicit `null`, or absent — all
-/// three are valid and mean "not specified" (empty string also collapses to
-/// "not specified"). Any other JSON type means the payload is malformed, so
-/// this returns `None` to signal "give up parsing the whole payload".
-fn optional_nullable_string(value: &Value, key: &str) -> Option<Option<String>> {
+/// A field read as a JSON string, `null`, or absent key — the three shapes
+/// `optional_nullable_string` accepts.
+enum NullableField {
+    Unspecified,
+    Value(String),
+}
+
+impl NullableField {
+    fn into_specified(self) -> Option<String> {
+        match self {
+            NullableField::Unspecified => None,
+            NullableField::Value(s) if s.is_empty() => None,
+            NullableField::Value(s) => Some(s),
+        }
+    }
+}
+
+fn optional_nullable_string(value: &Value, key: &str) -> Option<NullableField> {
     match value.get(key) {
-        None => Some(None),
-        Some(Value::Null) => Some(None),
-        Some(Value::String(s)) => Some(Some(s.clone()).filter(|s| !s.is_empty())),
+        None | Some(Value::Null) => Some(NullableField::Unspecified),
+        Some(Value::String(s)) => Some(NullableField::Value(s.clone())),
         Some(_) => None,
     }
 }
 
-/// Reads a field that may be a JSON string or absent (absent defaults to
-/// `""`). Any other JSON type — including explicit `null` — means the
-/// payload is malformed, so this returns `None` ("give up parsing").
 fn optional_string(value: &Value, key: &str) -> Option<String> {
     match value.get(key) {
         None => Some(String::new()),
@@ -73,7 +66,6 @@ mod tests {
 
     #[test]
     fn missing_required_fields_reject_the_payload() {
-        // `{}` is missing `fork` and `parent_model`, both required.
         assert_eq!(parse_spawn_facts("{}"), None);
     }
 

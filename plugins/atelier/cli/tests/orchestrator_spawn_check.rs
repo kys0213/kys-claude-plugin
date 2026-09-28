@@ -148,18 +148,14 @@ fn rule_b_silent_on_fork_even_above_cap() {
 
 #[test]
 fn full_model_ids_are_all_detected() {
-    // claude-opus-5-5 under claude-fable-5-1 parent: within cap, no warning.
     assert!(warnings_for(&payload("\"claude-opus-5-5\"", "claude-fable-5-1", false)).is_empty());
-    // claude-sonnet-5 under claude-sonnet-5 parent: at cap, no warning.
     assert!(warnings_for(&payload("\"claude-sonnet-5\"", "claude-sonnet-5", false)).is_empty());
-    // claude-haiku-4-5-20251001 under claude-haiku-4-5-20251001 parent: at cap.
     assert!(warnings_for(&payload(
         "\"claude-haiku-4-5-20251001\"",
         "claude-haiku-4-5-20251001",
         false
     ))
     .is_empty());
-    // claude-fable-5-1 under claude-opus-5-5 parent: above cap, warns.
     assert_eq!(
         warnings_for(&payload("\"claude-fable-5-1\"", "claude-opus-5-5", false)).len(),
         1
@@ -197,11 +193,6 @@ fn empty_stdin_yields_empty_warnings() {
 }
 
 // --- Strict input schema ------------------------------------------------------
-//
-// The caller (function hooks module) always sends well-typed facts. A
-// wrong-typed field is the caller's bug, and defaulting it leniently would
-// manufacture a false-positive warning — so any of these must yield no
-// verdict at all (`{"warnings":[]}`), not a rule-A warning.
 
 #[test]
 fn fork_as_string_yields_no_verdict() {

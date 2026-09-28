@@ -19,12 +19,6 @@ type SpawnFact = {
   subagent_type: string
 }
 
-/**
- * Runs `atelier orchestrator <sub>`, feeding it `stdin` and parsing its
- * stdout as JSON. Returns `undefined` on anything that keeps the result from
- * being trustworthy (spawn failure, non-zero exit, unparsable stdout) so the
- * caller can fall back to the original hook result.
- */
 async function runOrchestrator(
   $: EngineInterface,
   sub: string,
@@ -52,11 +46,6 @@ async function runOrchestrator(
   }
 }
 
-/**
- * Calls `atelier orchestrator spawn-check` with `fact` and returns its
- * `warnings`, or `undefined` when the call failed or answered a shape other
- * than `{ warnings: string[] }`.
- */
 async function spawnCheck(
   $: EngineInterface,
   fact: SpawnFact,
@@ -76,11 +65,6 @@ async function spawnCheck(
   return warnings as readonly string[]
 }
 
-/**
- * Calls `atelier orchestrator compact-note` and returns its `instructions`,
- * or `undefined` when the call failed or answered a shape other than
- * `{ instructions: string }`.
- */
 async function compactNote($: EngineInterface): Promise<string | undefined> {
   const parsed = await runOrchestrator($, 'compact-note')
 
@@ -93,12 +77,6 @@ async function compactNote($: EngineInterface): Promise<string | undefined> {
   return typeof instructions === 'string' ? instructions : undefined
 }
 
-/**
- * Registers the plugin's function hooks: `agent.spawn` records dispatch
- * facts, `tool.call { tool: 'Agent' }` asks `spawn-check` for warnings and
- * attaches them as `context`, and `session.compact` (main loop only) asks
- * `compact-note` for orchestrator run-state preservation instructions.
- */
 export function register(on: On): void {
   const facts = new Map<string, SpawnFact>()
 

@@ -47,11 +47,6 @@ pub enum Commands {
     CompactNote,
 }
 
-/// Parses `argv` (including the leading program name) with the orchestrator
-/// clap surface and runs the selected command. Always returns 0 — a parse
-/// failure prints clap's own message and still exits 0, matching
-/// `session::run_from`'s guarantee that no argv this binary receives can
-/// signal failure through the exit code.
 pub fn run_from<I, T>(argv: I) -> i32
 where
     I: IntoIterator<Item = T>,
@@ -68,21 +63,14 @@ where
     }
 }
 
-/// The spawn-check command's only stdout write: one line of `{"warnings":
-/// [...]}`, even when empty.
 fn emit_spawn_check(warnings: &[String]) {
     println!("{}", serde_json::json!({ "warnings": warnings }));
 }
 
-/// The compact-note command's only stdout write: one line of
-/// `{"instructions": "..."}`.
 fn emit_compact_note(instructions: &str) {
     println!("{}", serde_json::json!({ "instructions": instructions }));
 }
 
-/// Runs a parsed orchestrator CLI. Always returns 0 — same reasoning as
-/// `session::run`: this binary is called from a hooks-module adapter that
-/// must never see this process fail the run it is instrumenting.
 pub fn run(cli: Cli) -> i32 {
     let command = match cli.command {
         Some(c) => c,
