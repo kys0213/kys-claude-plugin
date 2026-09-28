@@ -48,6 +48,11 @@ jobs:
           else
             echo "atelier_changed=false" >> $GITHUB_OUTPUT
           fi
+          if echo "$CHANGED" | grep -qE '^plugins/atelier/(hooks|tests)/'; then
+            echo "atelier_hooks_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "atelier_hooks_changed=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Setup Rust
         if: steps.check_rust.outputs.sw_changed == 'true' || steps.check_rust.outputs.atelier_changed == 'true'
@@ -88,6 +93,34 @@ jobs:
         run: |
           cargo check --locked
           cargo test --locked
+
+      # ── atelier function hooks (early access) ──
+      # claude plugin validate/test 는 CLAUDE_CODE_ENABLE_FUNCTION_HOOKS surface 를 스캔한다 —
+      # early access 라 버전마다 표면이 바뀔 수 있어 CLI 버전을 고정한다 (무관한 PR 이 깨지는 것 방지).
+      - name: Setup Node
+        if: steps.check_rust.outputs.atelier_hooks_changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Claude Code CLI
+        if: steps.check_rust.outputs.atelier_hooks_changed == 'true'
+        run: npm install -g @anthropic-ai/claude-code@2.1.283
+
+      - name: atelier plugin validate
+        if: steps.check_rust.outputs.atelier_hooks_changed == 'true'
+        env:
+          DISABLE_AUTOUPDATER: '1'
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+        run: claude plugin validate plugins/atelier
+
+      - name: atelier plugin test (function hooks)
+        if: steps.check_rust.outputs.atelier_hooks_changed == 'true'
+        env:
+          CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1'
+          DISABLE_AUTOUPDATER: '1'
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+        run: claude plugin test plugins/atelier
 
       - name: Check PR title format
         env:

@@ -1,6 +1,7 @@
 ---
 paths:
   - "**/hooks/**"
+  - "**/tests/*.test.ts"
   - "**/cli/src/git/commands/hook.rs"
   - "**/cli/src/git/commands/guard.rs"
   - "**/scripts/*-hook.sh"
@@ -70,6 +71,23 @@ atelier autopilot check stagnation               # stdin payload 해석
   하위 수단이다. 단 이때도 settings.json 에 기록되는 것은 `.sh` 경로가 아니라
   **CLI 커맨드 직접**(`atelier git guard ...`) 형태라 PATH 해석으로 버전 비의존이다.
 
+### function hooks 모듈은 TS 형태의 shim
+
+`hooks.json` 의 `modules`(예: `hooks/*.ts`)로 등록하는 function hooks 모듈도 위 shim 원칙의
+적용 대상이다 — 언어만 TypeScript 일 뿐 책임은 같다.
+
+- 모듈은 이벤트 사실(payload)을 CLI 입력 JSON 으로 옮기고, CLI 출력 JSON 을 이벤트 결과(경고
+  문구·`context`·`instructions` 등)로 옮기는 **변환만** 한다. 정규식·문자열 해석·비교·임계값
+  판정 같은 결정 로직은 두지 않는다 — 전부 CLI 서브커맨드로 위임한다.
+- CLI 호출이 실패하면(바이너리 없음·exit ≠ 0·stdout 파싱 실패·timeout) **원래 이벤트 결과를 그대로
+  돌려준다** (fail-open). hook 이 세션을 깨뜨리거나 이벤트를 막는 부작용을 내면 안 된다.
+- 모듈 테스트(`claude plugin test`)는 어댑터 계약만 고정한다 — 보내는 argv/stdin 모양, 받은 CLI
+  출력을 이벤트 결과로 바꾸는 변환, CLI 실패 시 fail-open 경로. 판정 규칙 자체(경계값·분기)의
+  테스트는 CLI 쪽 언어의 블랙박스 테스트가 소유한다 — 모듈 테스트에서 규칙을 재검증하지 않는다.
+- function hooks 가 early access 인 동안은 기존 classic `hooks`(command hook)를 모듈로 이관해
+  없애지 않는다 — 플래그 없는 세션이 그 hook 을 완전히 잃는다. 새로 결정적으로 판정 가능해진
+  기능만 모듈로 추가하고, classic hook 은 공존시킨다.
+
 ## 판단 기준
 
 | 대상 | 위치 | 이유 |
@@ -78,6 +96,7 @@ atelier autopilot check stagnation               # stdin payload 해석
 | 바이너리 보장·버전 확인 | shim (`.sh`) | 부트스트랩은 CLI 가 없을 때 동작해야 함 |
 | 플러그인 번들 `.sh` hook 등록 | `hooks/hooks.json` (plugin-declared) | 실행 시점 `${CLAUDE_PLUGIN_ROOT}` 해석 → frozen 없음 |
 | setup 시점 값 주입 hook 등록 | `git setup guard` (내부에서 `hook register`) | 프로젝트별 값 주입 필요, PATH 해석으로 버전 비의존 |
+| function hooks 이벤트 어댑터 | `hooks/register.ts` (`hooks.json` 의 `modules`) | 이벤트 ↔ CLI JSON 변환만, 판정은 CLI |
 
 헷갈리면 "두 번 호출해서 결과가 항상 같아야 하나?"를 묻는다. 같아야 하면 CLI,
 부트스트랩(바이너리가 아직 없을 수 있음)이면 shim.

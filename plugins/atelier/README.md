@@ -65,6 +65,7 @@ atelier는 단일 Rust crate(`cli/`)로 빌드되며, 바이너리 `atelier` 하
 atelier drift <check|sync>                # setup 이 복사한 산출물의 드리프트 판정/갱신 (shell 스크립트 → Rust 포팅)
 atelier git <reviews|guard|hook>          # git-utils 의 기계적 호출 표면 (TypeScript → Rust 포팅)
 atelier session <baseline|simplify-check|push-check> # 세션 경계 인식 hook (SessionStart / Stop)
+atelier orchestrator <spawn-check|compact-note>      # function hooks 모듈이 위임하는 결정적 판정 (아래 §Function hooks)
 ```
 
 `drift` 는 `/atelier:update`·`/atelier:setup` 명세가 호출하는 결정적 도구입니다.
@@ -84,6 +85,29 @@ HEAD 이후 커밋된 파일)` 이 코드 파일을 포함할 때만 `/simplify`
 판정 조건과 push 정책은 `skills/git/SKILL.md` §열린 PR 최신화 원칙 이 단일 출처입니다).
 
 기존 `git-utils` 호출 호환을 위한 alias는 `/atelier:setup`이 안내합니다.
+
+## Function hooks (early access)
+
+`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude` 로 켠 세션에서만 `hooks/register.ts`(`hooks.json`
+의 `modules`)가 로드되어 orchestrator 규약 일부를 경고로 집행합니다 — 전부 **경고일 뿐 차단하지
+않습니다**:
+
+- Agent 도구로 sub-agent 를 띄울 때 `model` 을 지정하지 않으면(fork 제외) 모델에게 경고를 덧붙입니다.
+- 지정한 model 이 메인 model 의 집행 위임 상한(Fable→Opus, Opus→Opus, Sonnet→Sonnet, Haiku→Haiku)을
+  넘으면 경고합니다(자문 소집은 상한 예외라 차단·경고하지 않습니다).
+- 메인 대화가 compaction 될 때 orchestrator 런 상태(epic 이름·log_dir·task 상태 등)를 요약에
+  보존하라는 지시를 덧붙입니다.
+
+판정은 전부 CLI(`atelier orchestrator spawn-check` / `atelier orchestrator compact-note`)가
+하고, 모듈은 이벤트 ↔ CLI JSON 어댑터입니다(`.claude/rules/tool-layer-boundary.md`). CLI 바이너리가
+없거나 호출이 실패하면 모듈은 아무 것도 덧붙이지 않습니다(fail-open).
+
+- **플래그가 없으면** 모듈은 로드되지 않고 기존 classic hook(`hooks.json` 의 `hooks`)만 그대로
+  동작합니다 — 이 기능이 없어도 세션은 정상입니다.
+- early access 라 docs·changelog 에 없고, 확인한 동작 버전은 `2.1.283`(플래그 on/off)·`2.1.274`
+  (classic 공존)입니다. 표면이 버전마다 바뀔 수 있어 CI 는 CLI 버전을 고정해 검증합니다.
+- CLI 에 새 서브커맨드가 추가되므로 이 기능을 쓰려면 먼저 `/atelier:update` 로 `atelier` 바이너리를
+  갱신해야 합니다.
 
 ## 상태
 
