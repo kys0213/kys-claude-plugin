@@ -166,6 +166,24 @@ fn full_model_ids_are_all_detected() {
     );
 }
 
+// --- Rule B: opus parent within cap (non-blocking finding 3) -----------------
+
+#[test]
+fn rule_b_opus_parent_allows_sonnet_delegation() {
+    let warnings = warnings_for(&payload("\"sonnet\"", "claude-opus-5-5", false));
+    assert!(warnings.is_empty());
+}
+
+#[test]
+fn rule_b_opus_parent_allows_haiku_delegation() {
+    let warnings = warnings_for(&payload(
+        "\"claude-haiku-4-5-20251001\"",
+        "claude-opus-5-5",
+        false,
+    ));
+    assert!(warnings.is_empty());
+}
+
 // --- Parse failure ------------------------------------------------------------
 
 #[test]
@@ -176,6 +194,70 @@ fn unparseable_stdin_yields_empty_warnings() {
 #[test]
 fn empty_stdin_yields_empty_warnings() {
     assert!(warnings_for("").is_empty());
+}
+
+// --- Strict input schema (finding 2) ------------------------------------------
+//
+// The caller (function hooks module) always sends well-typed facts. A
+// wrong-typed field is the caller's bug, and defaulting it leniently would
+// manufacture a false-positive warning — so any of these must yield no
+// verdict at all (`{"warnings":[]}`), not a rule-A warning.
+
+#[test]
+fn fork_as_string_yields_no_verdict() {
+    let stdin = r#"{"model":null,"resolved_model":null,"parent_model":"claude-opus-5-5","fork":"true","subagent_type":"x"}"#;
+    assert!(warnings_for(stdin).is_empty());
+}
+
+#[test]
+fn missing_fork_yields_no_verdict() {
+    let stdin = r#"{"model":null,"resolved_model":null,"parent_model":"claude-opus-5-5","subagent_type":"x"}"#;
+    assert!(warnings_for(stdin).is_empty());
+}
+
+#[test]
+fn missing_parent_model_yields_no_verdict() {
+    let stdin = r#"{"model":null,"resolved_model":null,"fork":false,"subagent_type":"x"}"#;
+    assert!(warnings_for(stdin).is_empty());
+}
+
+#[test]
+fn parent_model_as_number_yields_no_verdict() {
+    let stdin = r#"{"model":null,"resolved_model":null,"parent_model":123,"fork":false,"subagent_type":"x"}"#;
+    assert!(warnings_for(stdin).is_empty());
+}
+
+#[test]
+fn model_as_number_yields_no_verdict() {
+    let stdin = r#"{"model":123,"resolved_model":null,"parent_model":"claude-opus-5-5","fork":false,"subagent_type":"x"}"#;
+    assert!(warnings_for(stdin).is_empty());
+}
+
+#[test]
+fn resolved_model_as_bool_yields_no_verdict() {
+    let stdin = r#"{"model":null,"resolved_model":true,"parent_model":"claude-opus-5-5","fork":false,"subagent_type":"x"}"#;
+    assert!(warnings_for(stdin).is_empty());
+}
+
+#[test]
+fn subagent_type_as_number_yields_no_verdict() {
+    let stdin = r#"{"model":null,"resolved_model":null,"parent_model":"claude-opus-5-5","fork":false,"subagent_type":123}"#;
+    assert!(warnings_for(stdin).is_empty());
+}
+
+#[test]
+fn missing_model_key_still_warns_rule_a() {
+    let stdin = r#"{"resolved_model":null,"parent_model":"claude-opus-5-5","fork":false,"subagent_type":"general-purpose"}"#;
+    let warnings = warnings_for(stdin);
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("model 을 지정하지 않은"));
+}
+
+#[test]
+fn null_model_still_warns_rule_a() {
+    let warnings = warnings_for(&payload("null", "claude-opus-5-5", false));
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("model 을 지정하지 않은"));
 }
 
 // --- Hook contract: never a nonzero exit -------------------------------------

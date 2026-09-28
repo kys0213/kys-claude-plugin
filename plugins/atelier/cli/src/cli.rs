@@ -9,7 +9,7 @@ use clap::Parser;
 #[command(
     name = "atelier",
     version,
-    about = "Unified development workflow CLI (drift, git, session)"
+    about = "Unified development workflow CLI (drift, git, session, orchestrator)"
 )]
 pub struct AtelierCli {
     #[command(subcommand)]
