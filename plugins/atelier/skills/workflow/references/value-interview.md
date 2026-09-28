@@ -46,4 +46,4 @@ scaffold 시 프로젝트 가치관을 수집하는 인터뷰 카테고리와, �
 | 안전·금지 규칙 ("절대 하지 마라") | CLAUDE.md 또는 `.claude/rules/` (`paths:` 없이) | 세션 내내 유지 필요 — `paths:` 규칙은 `/compact` 후 자동 재주입 안 됨 (`rules-design.md` §재주입 한계) |
 | 아키텍처 레이어별 코딩 규칙 | `.claude/rules/` + `paths:` | 특정 파일 수정 시에만 필요 |
 
-CLAUDE.md 섹션의 구체적인 템플릿과 예시는 scaffold 절차(`references/scaffold-protocol.md`)가 인터뷰 결과를 기반으로 생성합니다.
+CLAUDE.md 섹션의 구체적인 템플릿과 예시는 scaffold 절차(`references/scaffold-protocol.md`)가 인터뷰 결과를 기반으로 생성합니다. 이 표의 "CLAUDE.md"는 프로젝트 지침 파일을 뜻하며, AGENTS.md만 쓰는 프로젝트에서는 AGENTS.md가 대상입니다 (scaffold-protocol Step 3 §대상 파일 선택).
