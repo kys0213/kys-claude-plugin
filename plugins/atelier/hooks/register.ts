@@ -1,16 +1,9 @@
 import type { EngineInterface, On } from 'claude-code'
 
 /**
- * This module is an adapter, not a policy engine: every judgment (whether a
- * dispatch needs a warning, what a compaction note should say) is made by
- * the `atelier` CLI (`atelier orchestrator spawn-check` / `compact-note`).
- * The hooks below only carry event facts into the CLI's input JSON and the
- * CLI's output JSON back into the event's result.
- *
  * Every CLI call is fail-open: a missing binary, a non-zero exit, a timeout
  * or output that does not parse as the expected shape all fall back to
- * returning the original hook result untouched, exactly like the plugin's
- * existing classic hooks never break a session.
+ * returning the original hook result untouched.
  */
 
 /**
