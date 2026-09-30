@@ -5,6 +5,7 @@
 //! atelier session baseline        --project-dir <dir>   # SessionStart
 //! atelier session simplify-check  --project-dir <dir>   # Stop
 //! atelier session push-check      --project-dir <dir>   # Stop
+//! atelier session ensure-env      --settings <file> --key <K> --value <V>  # SessionStart
 //! ```
 //!
 //! Output contract: every command reads the hook payload from stdin, writes to
@@ -17,6 +18,7 @@
 //! before any of this code runs.
 //!
 //! What stdout carries differs by command: `baseline` prints nothing,
+//! `ensure-env` prints one line only when it added the key or declined to,
 //! `simplify-check` prints at most an advisory banner, and `push-check` may
 //! print a Stop `{"decision":"block","reason":…}` document — still on exit 0,
 //! which is how Claude Code reads a structured block.
@@ -32,6 +34,7 @@ use crate::session::commands::simplify::{render_banner, SimplifyDecision};
 use crate::session::commands::SessionDeps;
 use crate::session::core::baseline::{FsBaselineStore, DEFAULT_TTL};
 use crate::session::core::repo::create_repo_reader;
+use crate::session::core::settings_env::FsSettingsFile;
 use crate::shared::process::{default_project_dir, read_stdin_raw};
 use clap::{Parser, Subcommand};
 
@@ -67,6 +70,19 @@ pub enum Commands {
         /// Project the git reads are anchored to (hook cwd may differ — #780)
         #[arg(long = "project-dir")]
         project_dir: Option<String>,
+    },
+    /// SessionStart: add `env.<key>` to a settings file when it is absent
+    #[command(name = "ensure-env")]
+    EnsureEnv {
+        /// Settings file to edit (e.g. `~/.claude/settings.json`)
+        #[arg(long)]
+        settings: String,
+        /// Environment variable name under `env`
+        #[arg(long)]
+        key: String,
+        /// Value written when the key is absent; an existing value is kept
+        #[arg(long)]
+        value: String,
     },
 }
 
@@ -171,6 +187,17 @@ pub fn run(cli: Cli) -> i32 {
                 open_pr: &github,
             };
             emit_push_check(&commands::push_check::run(&deps, payload.stop_hook_active));
+        }
+        Commands::EnsureEnv {
+            settings,
+            key,
+            value,
+        } => {
+            let file = FsSettingsFile::new(&settings);
+            let outcome = commands::ensure_env::run(&file, &key, &value);
+            if let Some(line) = commands::ensure_env::render(&outcome, &settings, &key, &value) {
+                println!("{line}");
+            }
         }
     }
     0

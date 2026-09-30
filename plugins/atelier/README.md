@@ -64,7 +64,7 @@ atelier는 단일 Rust crate(`cli/`)로 빌드되며, 바이너리 `atelier` 하
 ```
 atelier drift <check|sync>                # setup 이 복사한 산출물의 드리프트 판정/갱신 (shell 스크립트 → Rust 포팅)
 atelier git <reviews|guard|hook>          # git-utils 의 기계적 호출 표면 (TypeScript → Rust 포팅)
-atelier session <baseline|simplify-check|push-check> # 세션 경계 인식 hook (SessionStart / Stop)
+atelier session <baseline|simplify-check|push-check|ensure-env> # 세션 경계 인식 hook (SessionStart / Stop)
 atelier orchestrator <spawn-check|compact-note>      # function hooks 모듈이 위임하는 결정적 판정 (아래 §Function hooks)
 ```
 
@@ -83,6 +83,25 @@ HEAD 이후 커밋된 파일)` 이 코드 파일을 포함할 때만 `/simplify`
 `push-check` 는 Stop 시점에 **열린 PR 이 있는 브랜치가 upstream 보다 ahead** 이면
 `{"decision":"block","reason":...}` 를 stdout 에 내보내 세션 종료를 막습니다 (항상 exit 0 —
 판정 조건과 push 정책은 `skills/git/SKILL.md` §열린 PR 최신화 원칙 이 단일 출처입니다).
+
+## Agent team 자동 활성화
+
+orchestrator 의 아키텍트 협의체·자문단은 agent team(Claude Code 실험 기능)이 있어야 돕니다.
+SessionStart hook `hooks/ensure-agent-teams.sh` 가 `~/.claude/settings.json`(`CLAUDE_CONFIG_DIR` 가 있으면
+그 아래)의 `env` 에 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` 가 **없을 때만** `"1"` 로 추가합니다.
+
+- **동의**: plugin `userConfig` 의 `agent_teams`(기본 켜짐)입니다. plugin 을 켤 때 묻고,
+  `/plugin configure atelier` 로 바꿀 수 있어요.
+- **적용 시점**: Claude Code 는 env 를 시작할 때 읽으므로 **추가한 다음 세션부터** 켜져요.
+- **끄기**: settings 의 값을 `"0"` 으로 두세요. 키가 있으면 값과 무관하게 다시 쓰지 않아요.
+- **안전장치**: 쓰기 전 `<file>.bak-<timestamp>` 백업, temp 파일 → rename 으로 교체, 기존 키 순서·파일 권한 유지.
+  settings 가 심링크(dotfiles)면 링크를 그대로 두고 대상 파일에 써요.
+  JSON 이 깨졌거나 `env` 가 객체가 아니면 파일을 건드리지 않고 이유만 한 줄 알려요.
+- **적용 범위**: user scope 라 atelier 밖의 세션에도 켜져요. `-p`·Agent SDK 같은 비대화형 실행에서는
+  켜져 있어도 teammate 가 뜨지 않아요.
+
+판정·쓰기는 `atelier session ensure-env --settings <file> --key <K> --value <V>` 가 하고, shim 은
+동의·이미 켜짐·CLI 미설치를 보고 건너뛰기만 해요.
 
 기존 `git-utils` 호출 호환을 위한 alias는 `/atelier:setup`이 안내합니다.
 
