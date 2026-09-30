@@ -183,6 +183,50 @@ describe('register', () => {
     expect(second.context).toBeUndefined()
   })
 
+  test('a spawn that fires during the Agent call still gets spawn-check warnings', async ($, on) => {
+    const calls: string[] = []
+
+    on('process.run', ($, e) => {
+      calls.push(e.argv.join(' '))
+
+      return {
+        value: { exitCode: 0, stdout: JSON.stringify({ warnings: ['w'] }), stderr: '' },
+      }
+    })
+
+    const result = await Fixtures.dispatchSpawningDuringCall($, on, {
+      spawnResult: { model: 'claude-sonnet-4-5-20250929' },
+      outcome: { result: 'hi' },
+    })
+
+    expect(result.context).toEqual(['w'])
+    expect(calls).toEqual(['atelier orchestrator spawn-check'])
+  })
+
+  test('a throw after a spawn during the Agent call clears the fact for the next call', async ($, on) => {
+    on('process.run', () => ({
+      value: { exitCode: 0, stdout: JSON.stringify({ warnings: ['w'] }), stderr: '' },
+    }))
+
+    await expect(
+      Fixtures.dispatchSpawningDuringCall($, on, {
+        spawnResult: { model: 'claude-sonnet-4-5-20250929' },
+        outcome: new Error('boom'),
+      }),
+    ).rejects.toThrow()
+
+    const call = {
+      tool: 'Agent',
+      tool_use_id: Fixtures.TOOL_USE_ID,
+      subagent_type: 'general-purpose',
+      description: 'say hi',
+      prompt: 'say hi',
+    } as never
+    const second = await $.tool.call(call)
+
+    expect(second.context).toBeUndefined()
+  })
+
   test('main compaction gets the compact-note appended to instructions', async ($, on) => {
     on('process.run', () => ({
       value: {

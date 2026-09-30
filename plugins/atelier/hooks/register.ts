@@ -70,14 +70,19 @@ export function register(on: On): void {
   })
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
-    const key = e.tool_use_id
-    const fact = key === undefined ? undefined : facts.get(key)
+    let r: Awaited<ReturnType<typeof next>>
+    let fact: SpawnFact | undefined
 
-    if (key !== undefined) {
-      facts.delete(key)
+    try {
+      r = await next(e)
+    } finally {
+      const key = e.tool_use_id
+
+      if (key !== undefined) {
+        fact = facts.get(key)
+        facts.delete(key)
+      }
     }
-
-    const r = await next(e)
 
     if (fact === undefined || r.deny !== undefined || r.isError) {
       return r
