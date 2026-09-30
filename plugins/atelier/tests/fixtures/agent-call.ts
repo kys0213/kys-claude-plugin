@@ -6,17 +6,12 @@ import type {
 } from 'claude-code'
 
 /**
- * The `tool_use_id` shared by a dispatch's `agent.spawn` and its
- * `tool.call { tool: 'Agent' }`.
- *
  * The test harness's static call scan refuses a `$` call made from inside a
  * hook a test registers with `on(...)` (only the test function's own body
  * may call `$`), so `$.agent.spawn` cannot be nested in a `tool.call` hook.
- * Both `$.agent.spawn` and `$.tool.call` honor a `tool_use_id` given in their
- * input, so the pairing is reproduced by top-level calls sharing this
- * constant. `dispatchAgentCall` runs spawn then call; `dispatchSpawningDuringCall`
- * holds the call open while the top level spawns, which is the engine's order
- * (`agent.spawn` fires during `next`).
+ * Both honor a `tool_use_id` given in their input, so top-level calls sharing
+ * `TOOL_USE_ID` stand in for the pairing. The engine fires `agent.spawn`
+ * during the Agent call's `next`, not before it.
  */
 const TOOL_USE_ID = 'toolu_1'
 
@@ -54,11 +49,7 @@ async function dispatchAgentCall(
   } as never)
 }
 
-/**
- * Runs the Agent call and fires `agent.spawn` while the call's `next` is still
- * in flight. The below-plugin `tool.call` handler waits for the spawn, then
- * settles with `outcome` (a result, or an Error to throw); later calls return a plain result.
- */
+/** Fires `agent.spawn` while the Agent call's `next` is still in flight. */
 async function dispatchSpawningDuringCall(
   $: EngineInterface,
   on: On,
