@@ -1,9 +1,5 @@
-//! Black-box tests for `session ensure-env`: add one `env` key to a settings
-//! file only when absent, keep every existing value and key order, and never
-//! rewrite a file that does not parse.
-
 use assert_cmd::Command;
-use atelier::session::commands::ensure_env::{run, EnsureEnvOutcome};
+use atelier::session::commands::ensure_env::{EnsureEnvCommand, EnsureEnvOutcome};
 use atelier::session::core::settings_env::{ensure_env_key, EnvEdit, FsSettingsFile, SettingsFile};
 use serde_json::Value;
 use std::cell::RefCell;
@@ -20,8 +16,6 @@ fn added(edit: EnvEdit) -> String {
         other => panic!("expected Add, got {other:?}"),
     }
 }
-
-// ── pure edit ──────────────────────────────────────────────────────────────
 
 #[test]
 fn missing_file_becomes_env_only_settings() {
@@ -90,8 +84,6 @@ fn empty_file_is_treated_as_missing() {
     assert_eq!(v, serde_json::json!({ "env": { KEY: "1" } }));
 }
 
-// ── command over an in-memory file ─────────────────────────────────────────
-
 #[derive(Default)]
 struct MemFile {
     content: RefCell<Option<String>>,
@@ -122,10 +114,13 @@ impl SettingsFile for MemFile {
 fn second_run_is_a_no_op() {
     let file = MemFile::default();
     assert_eq!(
-        run(&file, KEY, "1"),
+        EnsureEnvCommand::new(&file).run(KEY, "1"),
         EnsureEnvOutcome::Added { backup: None }
     );
-    assert_eq!(run(&file, KEY, "1"), EnsureEnvOutcome::AlreadySet);
+    assert_eq!(
+        EnsureEnvCommand::new(&file).run(KEY, "1"),
+        EnsureEnvOutcome::AlreadySet
+    );
     assert_eq!(*file.writes.borrow(), 1);
 }
 
@@ -136,7 +131,7 @@ fn backup_is_reported_when_a_file_existed() {
         ..Default::default()
     };
     assert_eq!(
-        run(&file, KEY, "1"),
+        EnsureEnvCommand::new(&file).run(KEY, "1"),
         EnsureEnvOutcome::Added {
             backup: Some("mem.bak".to_string())
         }
@@ -150,7 +145,7 @@ fn unusable_or_unwritable_settings_are_skipped_with_a_reason() {
         ..Default::default()
     };
     assert!(matches!(
-        run(&broken, KEY, "1"),
+        EnsureEnvCommand::new(&broken).run(KEY, "1"),
         EnsureEnvOutcome::Skipped(_)
     ));
     assert_eq!(*broken.writes.borrow(), 0);
@@ -160,12 +155,10 @@ fn unusable_or_unwritable_settings_are_skipped_with_a_reason() {
         ..Default::default()
     };
     assert!(matches!(
-        run(&read_only, KEY, "1"),
+        EnsureEnvCommand::new(&read_only).run(KEY, "1"),
         EnsureEnvOutcome::Skipped(_)
     ));
 }
-
-// ── real filesystem ────────────────────────────────────────────────────────
 
 fn names(dir: &std::path::Path) -> Vec<String> {
     let mut v: Vec<String> = std::fs::read_dir(dir)
@@ -243,8 +236,6 @@ fn fs_keeps_the_file_mode() {
     let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
 }
-
-// ── end to end ─────────────────────────────────────────────────────────────
 
 fn atelier() -> Command {
     Command::cargo_bin("atelier").expect("locate `atelier` cargo binary")

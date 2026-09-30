@@ -1,24 +1,14 @@
-//! Adds one key to the `env` object of a Claude Code settings file. It only
-//! ever adds: a key already present keeps its value whatever it is, and a file
-//! that does not parse as a settings object is never rewritten.
-
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 
-/// What `ensure_env_key` decided for a settings document.
 #[derive(Debug, PartialEq)]
 pub enum EnvEdit {
-    /// The key was absent; this is the full new file content.
+    /// The whole new file content, not a patch.
     Add(String),
-    /// The key is already set, to this value. Nothing to write.
     Present(Value),
-    /// The document cannot be edited safely (not JSON, not an object, or an
-    /// `env` that is not an object). Nothing to write.
     Unusable(String),
 }
 
-/// Decides the edit for `existing` (the file content, `None` when the file is
-/// absent). An empty or whitespace-only file counts as absent.
 pub fn ensure_env_key(existing: Option<&str>, key: &str, value: &str) -> EnvEdit {
     let mut settings = match existing.map(str::trim).filter(|s| !s.is_empty()) {
         None => Map::new(),
@@ -46,24 +36,13 @@ pub fn ensure_env_key(existing: Option<&str>, key: &str, value: &str) -> EnvEdit
     EnvEdit::Add(content)
 }
 
-/// The settings file the command edits. Injected so the command can be tested
-/// in memory.
 pub trait SettingsFile {
-    /// The file content, or `None` when it does not exist.
+    /// `Ok(None)` when the file does not exist.
     fn read(&self) -> Result<Option<String>, String>;
-    /// Replaces the file with `content`, returning the backup path when a
-    /// previous file was saved aside.
+    /// Returns the backup path when a previous file existed.
     fn replace(&self, content: &str) -> Result<Option<String>, String>;
 }
 
-/// `SettingsFile` over a real path. `replace` copies an existing file to a
-/// timestamped backup, then writes a sibling temp file and renames it over the
-/// target, so a crash mid-write cannot leave a truncated settings file.
-///
-/// A symlinked settings file (dotfiles setups) is written through to its
-/// target: renaming over the link itself would swap it for a plain file. The
-/// previous file's permissions are carried over, since a fresh temp file gets
-/// the umask default.
 pub struct FsSettingsFile {
     path: PathBuf,
 }
@@ -91,6 +70,8 @@ impl SettingsFile for FsSettingsFile {
 
     fn replace(&self, content: &str) -> Result<Option<String>, String> {
         let existing = std::fs::metadata(&self.path).ok();
+        // rename over a symlink replaces the link itself with a plain file, so
+        // write through to the resolved target.
         let target = match existing {
             Some(_) => std::fs::canonicalize(&self.path).map_err(|e| e.to_string())?,
             None => self.path.clone(),
@@ -113,6 +94,7 @@ impl SettingsFile for FsSettingsFile {
 
         let tmp = sibling(&target, &format!(".atelier-tmp-{}", std::process::id()));
         let written = std::fs::write(&tmp, content)
+            // A fresh temp file gets the umask default, not the old file's mode.
             .and_then(|()| match &existing {
                 Some(meta) => std::fs::set_permissions(&tmp, meta.permissions()),
                 None => Ok(()),

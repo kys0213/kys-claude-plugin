@@ -28,6 +28,7 @@ pub mod core;
 
 use crate::git::core::git::create_git_service;
 use crate::git::core::github::create_github_service;
+use crate::session::commands::ensure_env::EnsureEnvCommand;
 use crate::session::commands::payload::SessionPayload;
 use crate::session::commands::push_check::{render_block_json, PushCheckDecision, PushCheckDeps};
 use crate::session::commands::simplify::{render_banner, SimplifyDecision};
@@ -194,7 +195,7 @@ pub fn run(cli: Cli) -> i32 {
             value,
         } => {
             let file = FsSettingsFile::new(&settings);
-            let outcome = commands::ensure_env::run(&file, &key, &value);
+            let outcome = EnsureEnvCommand::new(&file).run(&key, &value);
             if let Some(line) = commands::ensure_env::render(&outcome, &settings, &key, &value) {
                 println!("{line}");
             }

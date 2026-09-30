@@ -1,38 +1,39 @@
-//! `session ensure-env` command — makes sure a settings file's `env` carries a
-//! key, adding it only when absent. Which key, which value and which file are
-//! all arguments; whether to run at all is the calling shim's decision.
-
 use crate::session::core::settings_env::{ensure_env_key, EnvEdit, SettingsFile};
 
 #[derive(Debug, PartialEq)]
 pub enum EnsureEnvOutcome {
-    /// The key was written. `backup` is where the previous file was saved.
     Added { backup: Option<String> },
-    /// The key was already present; nothing was written.
     AlreadySet,
-    /// Nothing was written, for this reason (unreadable, unparseable or
-    /// unwritable settings).
     Skipped(String),
 }
 
-pub fn run(file: &dyn SettingsFile, key: &str, value: &str) -> EnsureEnvOutcome {
-    let existing = match file.read() {
-        Ok(existing) => existing,
-        Err(e) => return EnsureEnvOutcome::Skipped(format!("cannot read settings: {e}")),
-    };
-    match ensure_env_key(existing.as_deref(), key, value) {
-        EnvEdit::Present(_) => EnsureEnvOutcome::AlreadySet,
-        EnvEdit::Unusable(reason) => EnsureEnvOutcome::Skipped(reason),
-        EnvEdit::Add(content) => match file.replace(&content) {
-            Ok(backup) => EnsureEnvOutcome::Added { backup },
-            Err(e) => EnsureEnvOutcome::Skipped(format!("cannot write settings: {e}")),
-        },
+pub struct EnsureEnvCommand<'a> {
+    file: &'a dyn SettingsFile,
+}
+
+impl<'a> EnsureEnvCommand<'a> {
+    pub fn new(file: &'a dyn SettingsFile) -> Self {
+        Self { file }
+    }
+
+    pub fn run(&self, key: &str, value: &str) -> EnsureEnvOutcome {
+        let existing = match self.file.read() {
+            Ok(existing) => existing,
+            Err(e) => return EnsureEnvOutcome::Skipped(format!("cannot read settings: {e}")),
+        };
+        match ensure_env_key(existing.as_deref(), key, value) {
+            EnvEdit::Present(_) => EnsureEnvOutcome::AlreadySet,
+            EnvEdit::Unusable(reason) => EnsureEnvOutcome::Skipped(reason),
+            EnvEdit::Add(content) => match self.file.replace(&content) {
+                Ok(backup) => EnsureEnvOutcome::Added { backup },
+                Err(e) => EnsureEnvOutcome::Skipped(format!("cannot write settings: {e}")),
+            },
+        }
     }
 }
 
-/// The line a SessionStart hook prints for the outcome, or `None` when there
-/// is nothing to say. SessionStart stdout reaches the model as context, so the
-/// text is written for it to relay to the user.
+/// SessionStart stdout reaches the model as context, not the user directly, so
+/// the line is phrased for the model to relay.
 pub fn render(outcome: &EnsureEnvOutcome, path: &str, key: &str, value: &str) -> Option<String> {
     match outcome {
         EnsureEnvOutcome::AlreadySet => None,
