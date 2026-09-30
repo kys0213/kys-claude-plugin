@@ -29,13 +29,119 @@ fn payload(model: &str, parent_model: &str, fork: bool) -> String {
     )
 }
 
+fn payload_resolved(model: &str, resolved: &str, parent_model: &str) -> String {
+    format!(
+        r#"{{"model":{model},"resolved_model":{resolved},"parent_model":"{parent_model}","fork":false,"subagent_type":"general-purpose"}}"#
+    )
+}
+
+// --- Resolved-model judgement -------------------------------------------------
+
+#[test]
+fn inherit_warns_when_resolved_equals_parent() {
+    let w = warnings_for(&payload_resolved(
+        "null",
+        "\" Claude-Opus-5-5 \"",
+        "claude-opus-5-5",
+    ));
+    assert_eq!(w.len(), 1);
+    assert!(w[0].contains("상속해"));
+    assert!(w[0].contains("Claude-Opus-5-5"));
+}
+
+#[test]
+fn inherit_silent_when_definition_picked_lower_model() {
+    let w = warnings_for(&payload_resolved(
+        "null",
+        "\"claude-haiku-4-5-20251001\"",
+        "claude-opus-5-5",
+    ));
+    assert!(w.is_empty(), "{w:?}");
+}
+
+#[test]
+fn inherit_warns_when_resolved_missing() {
+    let w = warnings_for(&payload_resolved("null", "null", "claude-opus-5-5"));
+    assert_eq!(w.len(), 1);
+    assert!(w[0].contains("부모 model(claude-opus-5-5)"));
+}
+
+#[test]
+fn fable_parent_inheriting_fable_yields_inherit_and_cap_warnings() {
+    let w = warnings_for(&payload_resolved(
+        "null",
+        "\"claude-fable-5-1\"",
+        "claude-fable-5-1",
+    ));
+    assert_eq!(w.len(), 2, "{w:?}");
+    assert!(w[0].contains("상속해"));
+    assert!(w[1].contains("집행 위임 상한"));
+    assert!(w[1].contains("상속돼 실행됐습니다"));
+}
+
+#[test]
+fn opus_parent_definition_picking_fable_yields_cap_warning_only() {
+    let w = warnings_for(&payload_resolved(
+        "null",
+        "\"claude-fable-5-1\"",
+        "claude-opus-5-5",
+    ));
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(w[0].contains("집행 위임 상한"));
+    assert!(!w[0].contains("상속해"));
+}
+
+#[test]
+fn explicit_model_ignores_resolved_model() {
+    let w = warnings_for(&payload_resolved(
+        "\"opus\"",
+        "\"claude-fable-5-1\"",
+        "claude-fable-5-1",
+    ));
+    assert!(w.is_empty(), "{w:?}");
+}
+
+#[test]
+fn cap_warning_for_explicit_model_says_delegated() {
+    let w = warnings_for(&payload("\"claude-fable-5-1\"", "claude-opus-5-5", false));
+    assert_eq!(w.len(), 1);
+    assert!(w[0].contains("위임했습니다"));
+}
+
+#[test]
+fn warnings_are_self_contained() {
+    let mut all = warnings_for(&payload_resolved(
+        "null",
+        "\"claude-fable-5-1\"",
+        "claude-fable-5-1",
+    ));
+    all.extend(warnings_for(&payload(
+        "\"claude-fable-5-1\"",
+        "claude-opus-5-5",
+        false,
+    )));
+    assert_eq!(all.len(), 3);
+    for w in &all {
+        assert!(w.starts_with("[atelier]"));
+        assert!(!w.contains("불변식"), "{w}");
+        assert!(!w.contains("표 1"), "{w}");
+        assert!(!w.contains("시작 tier"), "{w}");
+        assert!(w.contains("다시 실행할 필요는 없"), "{w}");
+        assert!(w.contains("다음 dispatch 부터"), "{w}");
+    }
+    let cap = all.iter().find(|w| w.contains("집행 위임 상한")).unwrap();
+    assert!(cap.contains("`opus`"), "{cap}");
+    assert!(!cap.contains("Opus"), "{cap}");
+    assert!(cap.contains("자문 소집이라면 무시해도"), "{cap}");
+}
+
 // --- Rule A: model unspecified ---------------------------------------------
 
 #[test]
 fn rule_a_warns_on_null_model() {
     let warnings = warnings_for(&payload("null", "claude-opus-5-5", false));
     assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("model 을 지정하지 않은"));
+    assert!(warnings[0].contains("상속해"));
 }
 
 #[test]
@@ -74,7 +180,7 @@ fn rule_b_fable_parent_allows_opus_delegation() {
 fn rule_b_fable_parent_warns_on_fable_delegation() {
     let warnings = warnings_for(&payload("\"claude-fable-5-1\"", "claude-fable-5-1", false));
     assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("tier 상한 초과"));
+    assert!(warnings[0].contains("집행 위임 상한"));
 }
 
 #[test]
@@ -236,14 +342,14 @@ fn missing_model_key_still_warns_rule_a() {
     let stdin = r#"{"resolved_model":null,"parent_model":"claude-opus-5-5","fork":false,"subagent_type":"general-purpose"}"#;
     let warnings = warnings_for(stdin);
     assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("model 을 지정하지 않은"));
+    assert!(warnings[0].contains("상속해"));
 }
 
 #[test]
 fn null_model_still_warns_rule_a() {
     let warnings = warnings_for(&payload("null", "claude-opus-5-5", false));
     assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("model 을 지정하지 않은"));
+    assert!(warnings[0].contains("상속해"));
 }
 
 // --- Hook contract: never a nonzero exit -------------------------------------

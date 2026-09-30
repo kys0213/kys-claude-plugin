@@ -30,6 +30,15 @@ impl Tier {
         }
     }
 
+    pub fn alias(self) -> &'static str {
+        match self {
+            Tier::Haiku => "haiku",
+            Tier::Sonnet => "sonnet",
+            Tier::Opus => "opus",
+            Tier::Fable => "fable",
+        }
+    }
+
     pub fn execution_cap(self) -> Tier {
         match self {
             Tier::Fable => Tier::Opus,
