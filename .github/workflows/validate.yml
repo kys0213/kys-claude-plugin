@@ -43,7 +43,7 @@ jobs:
           else
             echo "sw_changed=false" >> $GITHUB_OUTPUT
           fi
-          if echo "$CHANGED" | grep -q '^plugins/atelier/cli/'; then
+          if echo "$CHANGED" | grep -qE '^plugins/atelier/(cli/|skills/orchestrator/SKILL\.md)'; then
             echo "atelier_changed=true" >> $GITHUB_OUTPUT
           else
             echo "atelier_changed=false" >> $GITHUB_OUTPUT

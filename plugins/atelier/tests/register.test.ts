@@ -120,6 +120,69 @@ describe('register', () => {
     expect(called).toBe(false)
   })
 
+  test('an Agent call that resolves to isError gets no context and no CLI call', async ($, on) => {
+    let called = false
+
+    on('process.run', () => {
+      called = true
+
+      return {
+        value: { exitCode: 0, stdout: JSON.stringify({ warnings: ['w'] }), stderr: '' },
+      }
+    })
+
+    const result = await Fixtures.dispatchAgentCall($, on, {
+      spawnResult: { model: 'claude-sonnet-4-5-20250929' },
+      callResult: { result: 'failed', isError: true },
+    })
+
+    expect(result.context).toBeUndefined()
+    expect(called).toBe(false)
+  })
+
+  test('a throwing Agent call still clears the spawn fact', async ($, on) => {
+    on('process.run', () => ({
+      value: { exitCode: 0, stdout: JSON.stringify({ warnings: ['w'] }), stderr: '' },
+    }))
+    on('agent.spawn', () => ({ model: 'claude-sonnet-4-5-20250929' }))
+
+    let attempts = 0
+
+    on('tool.call', { tool: 'Agent' }, () => {
+      attempts += 1
+
+      if (attempts === 1) {
+        throw new Error('boom')
+      }
+
+      return { result: 'hi' }
+    })
+
+    await $.agent.spawn({
+      tool_use_id: Fixtures.TOOL_USE_ID,
+      prompt: 'say hi',
+      description: 'say hi',
+      subagentType: 'general-purpose',
+      parentModel: Fixtures.PARENT_MODEL,
+      fork: false,
+    } as never)
+
+    const call = {
+      tool: 'Agent',
+      tool_use_id: Fixtures.TOOL_USE_ID,
+      subagent_type: 'general-purpose',
+      description: 'say hi',
+      prompt: 'say hi',
+    } as never
+
+    await expect($.tool.call(call)).rejects.toThrow()
+
+    const second = await $.tool.call(call)
+
+    expect(attempts).toBe(2)
+    expect(second.context).toBeUndefined()
+  })
+
   test('main compaction gets the compact-note appended to instructions', async ($, on) => {
     on('process.run', () => ({
       value: {

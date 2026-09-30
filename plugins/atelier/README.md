@@ -92,9 +92,12 @@ HEAD 이후 커밋된 파일)` 이 코드 파일을 포함할 때만 `/simplify`
 의 `modules`)가 로드되어 orchestrator 규약 일부를 경고로 집행합니다 — 전부 **경고일 뿐 차단하지
 않습니다**:
 
-- Agent 도구로 sub-agent 를 띄울 때 `model` 을 지정하지 않으면(fork 제외) 모델에게 경고를 덧붙입니다.
-- 지정한 model 이 메인 model 의 집행 위임 상한(Fable→Opus, Opus→Opus, Sonnet→Sonnet, Haiku→Haiku)을
-  넘으면 경고합니다(자문 소집은 상한 예외라 차단·경고하지 않습니다).
+- Agent 도구로 sub-agent 를 띄울 때 `model` 을 지정하지 않아 **실제로 메인 model 을 상속한 경우**(fork
+  제외)에만 경고합니다. 에이전트 정의가 다른 모델을 고른 타입(내장 Explore 등)에는 경고하지 않으며,
+  정의가 우연히 메인과 같은 모델을 고르면 상속과 구분할 수 없어 경고가 나갑니다.
+- 메인 model 의 집행 위임 상한(Fable→Opus, Opus→Opus, Sonnet→Sonnet, Haiku→Haiku)을 넘으면
+  경고합니다. 요청 model 이 없으면 실제 실행 모델로 검사하므로, Fable 메인이 model 없이 띄워 Fable 이
+  상속된 경우도 잡힙니다. 자문 소집에도 이 경고가 붙지만 문구가 무시해도 됨을 안내합니다.
 - 메인 대화가 compaction 될 때 orchestrator 런 상태(epic 이름·log_dir·task 상태 등)를 요약에
   보존하라는 지시를 덧붙입니다.
 
@@ -106,8 +109,14 @@ HEAD 이후 커밋된 파일)` 이 코드 파일을 포함할 때만 `/simplify`
   동작합니다 — 이 기능이 없어도 세션은 정상입니다.
 - early access 라 docs·changelog 에 없고, 확인한 동작 버전은 `2.1.283`(플래그 on/off)·`2.1.274`
   (classic 공존)입니다. 표면이 버전마다 바뀔 수 있어 CI 는 CLI 버전을 고정해 검증합니다.
-- CLI 에 새 서브커맨드가 추가되므로 이 기능을 쓰려면 먼저 `/atelier:update` 로 `atelier` 바이너리를
-  갱신해야 합니다.
+- 경고는 호출 **후**에 붙으므로 첫 호출은 막지 못합니다. 이번 호출을 재실행할 필요는 없고, 다음
+  dispatch 부터 바로잡으면 됩니다.
+- 한계: tier 를 판별할 수 없는 모델 id(Bedrock 추론 프로필 ARN, 게이트웨이 id 등)에서는 상한 검사가
+  꺼집니다.
+- 한계: `atelier` CLI 가 이 서브커맨드 이전 버전이면 경고가 조용히 붙지 않으므로 `/atelier:update` 로
+  바이너리를 갱신해야 합니다.
+- 개발자: 에디터 타입이 필요하면 plugin 디렉토리에서 `/plugin-types` 를 실행합니다(생성물은 커밋하지
+  않습니다).
 
 ## 상태
 
