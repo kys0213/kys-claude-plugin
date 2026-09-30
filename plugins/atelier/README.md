@@ -93,7 +93,7 @@ HEAD 이후 커밋된 파일)` 이 코드 파일을 포함할 때만 `/simplify`
 않습니다**:
 
 - Agent 도구로 sub-agent 를 띄울 때 `model` 을 지정하지 않아 **실제로 메인 model 을 상속한 경우**(fork
-  제외)에만 경고합니다. 에이전트 정의가 다른 모델을 고른 타입(내장 Explore 등)에는 경고하지 않으며,
+  제외)에만 경고합니다. 에이전트 정의가 다른 모델을 고른 타입(예: frontmatter 에 `model` 을 지정한 에이전트)에는 경고하지 않으며,
   정의가 우연히 메인과 같은 모델을 고르면 상속과 구분할 수 없어 경고가 나갑니다.
 - 메인 model 의 집행 위임 상한(Fable→Opus, Opus→Opus, Sonnet→Sonnet, Haiku→Haiku)을 넘으면
   경고합니다. 요청 model 이 없으면 실제 실행 모델로 검사하므로, Fable 메인이 model 없이 띄워 Fable 이
