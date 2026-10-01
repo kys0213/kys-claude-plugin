@@ -21,5 +21,13 @@
   "skills": [
     "./skills"
   ],
-  "version": "0.25.0"
+  "version": "0.25.0",
+  "userConfig": {
+    "agent_teams": {
+      "type": "boolean",
+      "title": "Enable agent teams",
+      "description": "orchestrator 의 아키텍트 협의체·자문단이 쓰는 agent team(실험 기능)을 켭니다. 켜 두면 SessionStart 에서 ~/.claude/settings.json 의 env 에 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=\"1\" 을 없을 때만 추가하고, 다음 세션부터 적용됩니다. 이미 있는 값(\"0\" 포함)은 바꾸지 않습니다.",
+      "default": true
+    }
+  }
 }
