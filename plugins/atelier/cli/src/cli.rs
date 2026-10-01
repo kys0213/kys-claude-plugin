@@ -9,7 +9,7 @@ use clap::Parser;
 #[command(
     name = "atelier",
     version,
-    about = "Unified development workflow CLI (drift, git, session, orchestrator, rules)"
+    about = "Unified development workflow CLI (drift, git, session, orchestrator)"
 )]
 pub struct AtelierCli {
     #[command(subcommand)]
@@ -46,13 +46,6 @@ pub enum AtelierCommand {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Which .claude/rules documents apply to a change set (match)
-    #[command(disable_help_flag = true)]
-    Rules {
-        /// Arguments forwarded verbatim to the rules subsystem
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<String>,
-    },
 }
 
 /// Parses argv and dispatches to the selected subsystem, returning a process
@@ -76,10 +69,6 @@ pub fn run() -> i32 {
         AtelierCommand::Orchestrator { args } => {
             let argv = std::iter::once("orchestrator".to_string()).chain(args);
             crate::orchestrator::run_from(argv)
-        }
-        AtelierCommand::Rules { args } => {
-            let argv = std::iter::once("rules".to_string()).chain(args);
-            crate::rules::run_from(argv)
         }
     }
 }
