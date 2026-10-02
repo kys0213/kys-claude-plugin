@@ -177,13 +177,33 @@ impl Shell {
     }
 }
 
-/// Whether the first unresolved component of `raw`, the one right below the
-/// literal prefix, could expand to `hooks` or a later `..` climbs back to it.
-fn may_name_hooks_dir(raw: &str) -> bool {
-    let mut parts = raw.split('/');
-    let first = parts.find(|c| c.contains(['*', '?', '[', '{', '$', '`']));
-    let climbs_back = parts.any(|c| c == "..");
-    climbs_back || first.is_none_or(|c| glob_may_match(c.as_bytes(), b"hooks"))
+/// Whether an unresolved path whose literal part is `prefix` may land in a
+/// `.git/hooks` directory. `raw` from its first unresolved component on is
+/// checked for a component that could expand to `hooks` right below a `.git`,
+/// and for a `..` that could climb back into a `.git` it names.
+fn may_reach_hooks_dir(prefix: &Path, raw: &str) -> bool {
+    if is_hooks_path(prefix) {
+        return true;
+    }
+    let parts: Vec<&str> = raw.split('/').collect();
+    let Some(first) = parts
+        .iter()
+        .position(|c| c.contains(['*', '?', '[', '{', '$', '`']))
+    else {
+        return prefix.ends_with(".git");
+    };
+    let rest = &parts[first..];
+    let names_git = prefix.components().any(|c| c.as_os_str() == ".git") || rest.contains(&".git");
+    if names_git && rest.contains(&"..") {
+        return true;
+    }
+    let below_git = |i: usize| match i {
+        0 => prefix.ends_with(".git"),
+        _ => rest[i - 1] == ".git",
+    };
+    rest.iter()
+        .enumerate()
+        .any(|(i, c)| below_git(i) && glob_may_match(c.as_bytes(), b"hooks"))
 }
 
 /// `*`/`?` glob match; a bracket expression or expansion matches anything.
@@ -491,7 +511,7 @@ impl Analyzer<'_> {
                     raw,
                 } => literal_prefix
                     .as_ref()
-                    .filter(|p| is_hooks_path(p) || p.ends_with(".git") && may_name_hooks_dir(raw)),
+                    .filter(|p| may_reach_hooks_dir(p, raw)),
             };
             if let Some(p) = place {
                 let token = p.display().to_string();

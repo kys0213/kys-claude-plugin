@@ -1641,6 +1641,9 @@ fn writes_into_the_hooks_directory_are_hook_bypass() {
         "rm -f .git/info/../hoo*/pre-commit",
         "cd .git && rm -f hoo*/pre-commit",
         "rm -f .git/x*/../hooks/pre-commit",
+        "rm -f .git/refs/h*/../../hooks/pre-commit",
+        "rm -f sub/x*/../../.git/hooks/pre-commit",
+        "rm -f */.git/hooks/pre-commit",
         "echo exit 0 > .git/hooks/pre-commit",
         "cd .git && rm hooks/commit-msg",
     ] {
@@ -1652,6 +1655,7 @@ fn writes_into_the_hooks_directory_are_hook_bypass() {
         "rm .github/hooks.md",
         "rm -f .git/*.lock",
         "rm -f .git/refs/*/old",
+        "rm -rf .git/rebase-*",
     ] {
         assert_no_bypass(cmd);
     }
