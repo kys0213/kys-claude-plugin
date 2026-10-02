@@ -2,8 +2,11 @@
 //! whether a write/commit on a protected branch is allowed. `GuardService`
 //! takes a `GitService` by injection so it is unit-testable with a mock git.
 
+use crate::git::core::bash_classifier::{
+    classify, Anchor, BypassHit, BypassRule, ClassifyInput, Hit, HitKind, OpaqueCause,
+};
 use crate::git::core::git::GitService;
-use crate::git::types::{GuardInput, GuardOutput, GuardTarget, GuardVerdict};
+use crate::git::types::{GuardInput, GuardOutput, GuardTarget, GuardVerdict, OpaqueExecPolicy};
 use regex::Regex;
 use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
@@ -117,7 +120,13 @@ pub fn is_inside_any_git_repo(file_path: &str, project_dir: &str) -> bool {
 
 fn inside_any_git_repo(project: &Path, file_path: &str) -> bool {
     let resolved = resolve_against(project, file_path);
-    let mut dir = resolved.parent().map(PathBuf::from).unwrap_or(resolved);
+    has_git_ancestor(resolved.parent().map(PathBuf::from).unwrap_or(resolved))
+}
+
+/// True when `start` or one of its ancestors holds a `.git` entry. A `start`
+/// that does not exist yet is first lifted to its nearest existing ancestor.
+fn has_git_ancestor(start: PathBuf) -> bool {
+    let mut dir = start;
     let root = PathBuf::from("/");
 
     // Skip up to the first existing ancestor.
@@ -162,6 +171,9 @@ impl GuardService for RealGuardService<'_> {
             default_branch: None,
         };
 
+        // Bash hits that survived the prefilter; empty for the write target.
+        let mut hits: Vec<Hit> = Vec::new();
+
         // Target-specific prefilters; the payload lives on the variant (#777).
         match &input.target {
             // write guard: file outside the project directory.
@@ -177,16 +189,36 @@ impl GuardService for RealGuardService<'_> {
                     }
                 }
             }
-            // commit guard: not a git commit command → pass. Quoted segments
-            // are stripped so text arguments mentioning "git commit" don't
-            // match (#754).
-            GuardTarget::Commit { command } => {
-                let is_commit = command
-                    .as_ref()
-                    .map(|c| !c.is_empty() && GIT_COMMIT_PATTERN.is_match(&strip_quoted(c)))
-                    .unwrap_or(false);
-                if !is_commit {
-                    return pass(Some("not a git commit command"));
+            GuardTarget::Commit { command, cwd } => {
+                let Some(command) = command.as_deref().filter(|c| !c.is_empty()) else {
+                    return pass(Some("no command to inspect"));
+                };
+                let project = resolve_project_dir(&input.project_dir);
+                let cwd = cwd
+                    .as_deref()
+                    .map_or_else(|| project.clone(), |c| resolve_against(&project, c));
+                let analysis = classify(&ClassifyInput {
+                    command: command.to_string(),
+                    cwd: cwd.clone(),
+                    home: input.home.as_deref().map(PathBuf::from),
+                });
+                match analysis {
+                    Ok(analysis) => {
+                        if let Some(bypass) = analysis.bypass.first() {
+                            return GuardOutput {
+                                verdict: GuardVerdict::Block,
+                                reason: Some(bypass_reason(bypass)),
+                                current_branch: None,
+                                default_branch: None,
+                            };
+                        }
+                        hits = analysis.hits;
+                    }
+                    Err(_) => hits = unparsed_command_hits(command, &cwd),
+                }
+                hits.retain(|h| anchor_in_scope(&project, &h.anchor));
+                if hits.is_empty() {
+                    return pass(Some("no repository-changing command"));
                 }
             }
         }
@@ -245,30 +277,142 @@ impl GuardService for RealGuardService<'_> {
             };
         }
 
-        // On a protected branch → block.
-        let action = if matches!(input.target, GuardTarget::Commit { .. }) {
-            "커밋할 수 없습니다"
-        } else {
-            "파일을 수정하려 합니다"
-        };
         // Fall back to the default command when no script was supplied, so the
         // CLI router can forward the raw `Option` without embedding the policy.
         let script = match input.create_branch_script.trim() {
             "" => DEFAULT_CREATE_BRANCH_SCRIPT,
             s => s,
         };
-        let reason = [
-            format!("[Branch Guard] 보호 브랜치({current_branch})에서 {action}."),
-            "먼저 새 브랜치를 생성해주세요:".to_string(),
-            format!("  {script} <branch-name>"),
-        ]
-        .join("\n");
+        let (verdict, reason) = match definite_action(&input.target, &hits) {
+            Some(action) => (
+                GuardVerdict::Block,
+                [
+                    format!("[Branch Guard] 보호 브랜치({current_branch})에서 {action}."),
+                    "먼저 새 브랜치를 생성해주세요:".to_string(),
+                    format!("  {script} <branch-name>"),
+                ]
+                .join("\n"),
+            ),
+            None => match input.opaque_exec {
+                OpaqueExecPolicy::Allow => {
+                    return GuardOutput {
+                        verdict: GuardVerdict::Allow,
+                        reason: Some("opaque execution allowed by --opaque-exec".to_string()),
+                        current_branch: Some(current_branch),
+                        default_branch: Some(default_branch),
+                    };
+                }
+                policy => {
+                    let program = hits.first().map_or("", |h| h.program.as_str());
+                    opaque_reason(policy, &current_branch, program, script)
+                }
+            },
+        };
 
         GuardOutput {
-            verdict: GuardVerdict::Block,
+            verdict,
             reason: Some(reason),
             current_branch: Some(current_branch),
             default_branch: Some(default_branch),
         }
     }
+}
+
+/// The action to name in the block message when the target is certain to
+/// change the repo: the write target, or a commit/write hit with a resolved
+/// path. `None` means every remaining hit is uninspectable.
+fn definite_action(target: &GuardTarget, hits: &[Hit]) -> Option<&'static str> {
+    if matches!(target, GuardTarget::Write { .. }) {
+        return Some("파일을 수정하려 합니다");
+    }
+    hits.iter()
+        .filter(|h| matches!(h.anchor, Anchor::Path(_)))
+        .find_map(|h| match h.kind {
+            HitKind::Commit => Some("커밋할 수 없습니다"),
+            HitKind::Write(_) => Some("파일을 수정하려 합니다"),
+            HitKind::Opaque(_) => None,
+        })
+}
+
+fn opaque_reason(
+    policy: OpaqueExecPolicy,
+    branch: &str,
+    program: &str,
+    script: &str,
+) -> (GuardVerdict, String) {
+    let (verdict, head) = match policy {
+        OpaqueExecPolicy::Block => (
+            GuardVerdict::Block,
+            format!(
+                "[Branch Guard] 보호 브랜치({branch})에서 `{program}` 의 스크립트/대상 내부를 확인할 수 없어 차단합니다(--opaque-exec block)."
+            ),
+        ),
+        _ => (
+            GuardVerdict::Ask,
+            format!(
+                "[Branch Guard] 보호 브랜치({branch})에서 `{program}` 의 스크립트/대상 내부를 확인할 수 없어 확인을 요청합니다. 저장소 파일을 바꾸지 않는다면 승인하세요."
+            ),
+        ),
+    };
+    let reason = [
+        head,
+        "파일을 바꿔야 한다면 먼저 새 브랜치를 생성해주세요:".to_string(),
+        format!("  {script} <branch-name>"),
+    ]
+    .join("\n");
+    (verdict, reason)
+}
+
+fn bypass_reason(hit: &BypassHit) -> String {
+    let rule = match hit.rule {
+        BypassRule::NoVerifyFlag => "--no-verify",
+        BypassRule::CommitShortNoVerify => "commit -n",
+        BypassRule::HooksPathConfig => "core.hooksPath",
+        BypassRule::HooksPathEnv => "core.hooksPath env",
+        BypassRule::HookSkipEnv => "hook skip env",
+    };
+    format!(
+        "[Hook Guard] git hook 우회({rule}: {})는 프로젝트 정책상 금지입니다(브랜치 무관). hook 실패 원인을 수정한 뒤 다시 실행하세요.",
+        hit.token
+    )
+}
+
+/// Hits for a command the lexer could not read: the plain regex commit check
+/// plus an opaque hit, so a protected branch never ends in a silent allow.
+fn unparsed_command_hits(command: &str, cwd: &Path) -> Vec<Hit> {
+    let anchor = Anchor::Path(cwd.to_path_buf());
+    let mut hits = Vec::new();
+    if GIT_COMMIT_PATTERN.is_match(&strip_quoted(command)) {
+        hits.push(Hit {
+            kind: HitKind::Commit,
+            anchor: anchor.clone(),
+            program: "git".to_string(),
+        });
+    }
+    hits.push(Hit {
+        kind: HitKind::Opaque(OpaqueCause::DynamicCommand),
+        anchor,
+        program: command.split_whitespace().next().unwrap_or("").to_string(),
+    });
+    hits
+}
+
+/// Whether a hit's anchor lands in the project or in any git repo. An
+/// unresolved anchor without a literal prefix is taken to be inside the project.
+fn anchor_in_scope(project: &Path, anchor: &Anchor) -> bool {
+    let target = match anchor {
+        Anchor::Path(p) => p,
+        Anchor::Unresolved {
+            literal_prefix: Some(p),
+            ..
+        } => p,
+        Anchor::Unresolved {
+            literal_prefix: None,
+            ..
+        } => return true,
+    };
+    target
+        .strip_prefix(project)
+        .is_ok_and(|rel| !rel.starts_with(".."))
+        || has_git_ancestor(target.clone())
 }

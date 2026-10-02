@@ -5,7 +5,9 @@
 
 use crate::git::core::guard::GuardService;
 use crate::git::core::pr_guard::PrGuardService;
-use crate::git::types::{GuardCommandTarget, GuardDecision, GuardInput, GuardTarget, PrGuardInput};
+use crate::git::types::{
+    GuardCommandTarget, GuardDecision, GuardInput, GuardTarget, OpaqueExecPolicy, PrGuardInput,
+};
 
 /// PreToolUse hook payload fields the guard targets consume. `parse` is
 /// swallow-all — any read/JSON failure yields all-`None`, preserving the TS
@@ -15,6 +17,8 @@ use crate::git::types::{GuardCommandTarget, GuardDecision, GuardInput, GuardTarg
 pub struct HookPayload {
     pub command: Option<String>,
     pub file_path: Option<String>,
+    /// Top-level `cwd` every hook payload carries.
+    pub cwd: Option<String>,
 }
 
 impl HookPayload {
@@ -23,6 +27,7 @@ impl HookPayload {
             Ok(v) => HookPayload {
                 command: v["tool_input"]["command"].as_str().map(|s| s.to_string()),
                 file_path: v["tool_input"]["file_path"].as_str().map(|s| s.to_string()),
+                cwd: v["cwd"].as_str().map(|s| s.to_string()),
             },
             Err(_) => HookPayload::default(),
         }
@@ -57,6 +62,7 @@ impl GuardTargetKind {
             }),
             Self::Commit => GuardCommandTarget::Branch(GuardTarget::Commit {
                 command: payload.command,
+                cwd: payload.cwd,
             }),
             Self::Pr => GuardCommandTarget::Pr {
                 command: payload.command,
@@ -78,6 +84,8 @@ pub struct GuardCommandInput {
     pub create_branch_script: String,
     pub default_branch: Option<String>,
     pub protected_branches: Option<Vec<String>>,
+    pub opaque_exec: OpaqueExecPolicy,
+    pub home: Option<String>,
 }
 
 /// Routes the target to its guard service and returns the unified decision.
@@ -92,6 +100,8 @@ pub fn run(deps: &GuardCommandDeps, input: &GuardCommandInput) -> GuardDecision 
                 create_branch_script: input.create_branch_script.clone(),
                 default_branch: input.default_branch.clone(),
                 protected_branches: input.protected_branches.clone(),
+                opaque_exec: input.opaque_exec,
+                home: input.home.clone(),
             })
             .into(),
     }

@@ -1068,6 +1068,24 @@ fn unterminated_heredoc_swallows_the_rest() {
 }
 
 #[test]
+fn commit_message_heredoc_inside_substitution_is_a_plain_commit() {
+    for body in [
+        "fix: don't break it's flow",
+        "fix: don't break flow",
+        "fix: \"quoted",
+    ] {
+        let cmd = format!("git commit -m \"$(cat <<'EOF'\n{body}\nEOF\n)\"");
+        let a = classify(&input(&cmd))
+            .unwrap_or_else(|e| panic!("lex error {e:?} for heredoc body {body:?}"));
+        assert!(a.bypass.is_empty(), "{a:?}");
+        assert!(
+            a.hits.iter().any(|h| h.kind == HitKind::Commit),
+            "expected a commit hit, got {a:?}"
+        );
+    }
+}
+
+#[test]
 fn comments_run_to_end_of_line() {
     for cmd in [
         "ls # rm -rf x",

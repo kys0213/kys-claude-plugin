@@ -67,8 +67,24 @@ pub struct ReviewsOutput {
 /// guard with a tool command) are unrepresentable (#777).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GuardTarget {
-    Write { file_path: Option<String> },
-    Commit { command: Option<String> },
+    Write {
+        file_path: Option<String>,
+    },
+    Commit {
+        command: Option<String>,
+        /// Shell cwd the hook reported; `None` falls back to the project dir.
+        cwd: Option<String>,
+    },
+}
+
+/// What the guard does on a protected branch when a command's effect cannot be
+/// inspected (scripts, interpreters, unresolvable targets).
+#[derive(clap::ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OpaqueExecPolicy {
+    Block,
+    #[default]
+    Ask,
+    Allow,
 }
 
 /// Full guard surface the CLI dispatches on. Branch targets route to the
@@ -87,6 +103,9 @@ pub struct GuardInput {
     pub create_branch_script: String,
     pub default_branch: Option<String>,
     pub protected_branches: Option<Vec<String>>,
+    pub opaque_exec: OpaqueExecPolicy,
+    /// `$HOME` as read by the CLI edge, used to expand `~` in command targets.
+    pub home: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,13 +132,20 @@ pub struct GuardDecision {
 }
 
 impl GuardDecision {
-    /// PreToolUse hook exit contract: block → 2 (deny signal); allow and ask → 0.
-    /// Lives on the decision type so the CLI edge only prints and returns.
+    /// `2` is the deny signal Claude Code reads from a PreToolUse hook.
     pub fn exit_code(&self) -> i32 {
         match self.verdict {
             GuardVerdict::Block => 2,
             GuardVerdict::Allow | GuardVerdict::Ask => 0,
         }
+    }
+
+    /// Deny reason for stderr; `None` unless the verdict is `Block`.
+    pub fn stderr_message(&self) -> Option<&str> {
+        if self.verdict != GuardVerdict::Block {
+            return None;
+        }
+        self.reason.as_deref()
     }
 
     /// PreToolUse permission JSON for an `Ask` verdict; `None` for the others.

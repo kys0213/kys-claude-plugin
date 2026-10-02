@@ -9,7 +9,7 @@ use atelier::git::core::guard::GuardService;
 use atelier::git::core::pr_guard::PrGuardService;
 use atelier::git::types::{
     GuardCommandTarget, GuardDecision, GuardInput, GuardOutput, GuardTarget, GuardVerdict,
-    PrGuardInput, PrGuardOutput,
+    OpaqueExecPolicy, PrGuardInput, PrGuardOutput,
 };
 
 /// Branch guard stub: blocks, echoing the received target in the reason so
@@ -54,6 +54,8 @@ fn input_with(target: GuardCommandTarget) -> GuardCommandInput {
         create_branch_script: "git switch -c".to_string(),
         default_branch: None,
         protected_branches: None,
+        opaque_exec: OpaqueExecPolicy::Ask,
+        home: None,
     }
 }
 
@@ -80,6 +82,7 @@ fn commit_target_routes_to_branch_guard() {
     let decision = run(
         &deps(&branch, &pr),
         &input_with(GuardCommandTarget::Branch(GuardTarget::Commit {
+            cwd: None,
             command: Some("git commit -m x".to_string()),
         })),
     );
@@ -125,6 +128,54 @@ fn hook_payload_parses_command_and_file_path() {
 }
 
 #[test]
+fn hook_payload_parses_top_level_cwd() {
+    let payload = HookPayload::parse(r#"{"cwd":"/work/sub","tool_input":{"command":"ls"}}"#);
+    assert_eq!(payload.cwd.as_deref(), Some("/work/sub"));
+    assert_eq!(HookPayload::parse(r#"{"tool_input":{}}"#).cwd, None);
+}
+
+#[test]
+fn block_decision_supplies_stderr_message_and_others_do_not() {
+    let decision = |verdict| GuardDecision {
+        verdict,
+        reason: Some("why".to_string()),
+    };
+    assert_eq!(decision(GuardVerdict::Block).stderr_message(), Some("why"));
+    assert_eq!(decision(GuardVerdict::Ask).stderr_message(), None);
+    assert_eq!(decision(GuardVerdict::Allow).stderr_message(), None);
+}
+
+#[test]
+fn opaque_exec_policy_and_home_reach_the_branch_guard() {
+    struct Echo;
+    impl GuardService for Echo {
+        fn check(&self, input: &GuardInput) -> GuardOutput {
+            GuardOutput {
+                verdict: GuardVerdict::Allow,
+                reason: Some(format!("{:?} {:?}", input.opaque_exec, input.home)),
+                current_branch: None,
+                default_branch: None,
+            }
+        }
+    }
+    let pr = StubPrGuard;
+    let echo = Echo;
+    let mut input = input_with(GuardCommandTarget::Branch(GuardTarget::Write {
+        file_path: None,
+    }));
+    input.opaque_exec = OpaqueExecPolicy::Block;
+    input.home = Some("/home/u".to_string());
+    let decision = run(
+        &GuardCommandDeps {
+            branch_guard: &echo,
+            pr_guard: &pr,
+        },
+        &input,
+    );
+    assert_eq!(decision.reason.as_deref(), Some("Block Some(\"/home/u\")"));
+}
+
+#[test]
 fn hook_payload_swallows_malformed_json() {
     assert_eq!(HookPayload::parse("not json"), HookPayload::default());
     assert_eq!(HookPayload::parse(""), HookPayload::default());
@@ -156,6 +207,7 @@ fn guard_target_kind_binds_only_its_payload_field() {
     let payload = HookPayload {
         command: Some("git commit".to_string()),
         file_path: Some("src/main.rs".to_string()),
+        cwd: Some("/work/sub".to_string()),
     };
     assert_eq!(
         GuardTargetKind::Write.into_target(payload.clone()),
@@ -167,6 +219,7 @@ fn guard_target_kind_binds_only_its_payload_field() {
         GuardTargetKind::Commit.into_target(payload.clone()),
         GuardCommandTarget::Branch(GuardTarget::Commit {
             command: Some("git commit".to_string()),
+            cwd: Some("/work/sub".to_string()),
         })
     );
     assert_eq!(

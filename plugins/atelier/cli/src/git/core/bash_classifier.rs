@@ -646,12 +646,21 @@ impl Lexer {
     /// Copies a balanced `( … )` group verbatim, starting at the `(`.
     fn scan_parens(&mut self, w: &mut Word) -> Result<(), LexError> {
         let mut depth = 0usize;
+        let mut pending_heredocs: Vec<(String, bool)> = Vec::new();
         loop {
             let Some(c) = self.next() else {
                 return Err(LexError::UnterminatedSubstitution);
             };
             w.text.push(c);
             match c {
+                '<' if self.peek() == Some('<') && self.peek_at(1) != Some('<') => {
+                    self.copy_heredoc_opener(w, &mut pending_heredocs);
+                }
+                '\n' if !pending_heredocs.is_empty() => {
+                    for (delimiter, strip_tabs) in std::mem::take(&mut pending_heredocs) {
+                        self.copy_heredoc_body(w, &delimiter, strip_tabs);
+                    }
+                }
                 '(' => depth += 1,
                 ')' => {
                     depth -= 1;
@@ -680,6 +689,58 @@ impl Lexer {
                     }
                 },
                 _ => {}
+            }
+        }
+    }
+
+    /// Copies the rest of a `<<[-]DELIM` opener (the first `<` is already in
+    /// `w`) and records its delimiter so the body can be copied unscanned.
+    fn copy_heredoc_opener(&mut self, w: &mut Word, pending: &mut Vec<(String, bool)>) {
+        w.text.push('<');
+        self.pos += 1;
+        let strip_tabs = self.peek() == Some('-');
+        if strip_tabs {
+            w.text.push('-');
+            self.pos += 1;
+        }
+        while let Some(c @ (' ' | '\t')) = self.peek() {
+            w.text.push(c);
+            self.pos += 1;
+        }
+        let mut delimiter = String::new();
+        while let Some(c) = self.peek().filter(|c| !is_word_end(*c)) {
+            w.text.push(c);
+            self.pos += 1;
+            if !matches!(c, '\'' | '"' | '\\') {
+                delimiter.push(c);
+            }
+        }
+        if !delimiter.is_empty() {
+            pending.push((delimiter, strip_tabs));
+        }
+    }
+
+    /// Copies heredoc body lines verbatim through the delimiter line, so quotes
+    /// and parentheses inside the body never reach the paren scanner.
+    fn copy_heredoc_body(&mut self, w: &mut Word, delimiter: &str, strip_tabs: bool) {
+        while self.pos < self.chars.len() {
+            let start = self.pos;
+            while self.pos < self.chars.len() && self.chars[self.pos] != '\n' {
+                self.pos += 1;
+            }
+            let line: String = self.chars[start..self.pos].iter().collect();
+            w.text.push_str(&line);
+            if self.pos < self.chars.len() {
+                self.pos += 1;
+                w.text.push('\n');
+            }
+            let line = if strip_tabs {
+                line.trim_start_matches('\t')
+            } else {
+                line.as_str()
+            };
+            if line.trim_end_matches('\r') == delimiter {
+                break;
             }
         }
     }

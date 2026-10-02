@@ -18,8 +18,8 @@ use crate::git::core::github::create_github_service;
 use crate::git::core::guard::create_guard_service;
 use crate::git::core::pr_guard::create_pr_guard_service;
 use crate::git::types::{
-    CmdResult, GuardDecision, GuardVerdict, HookListInput, HookRegisterInput, HookScope,
-    HookUnregisterInput, ReviewsInput,
+    CmdResult, GuardDecision, HookListInput, HookRegisterInput, HookScope, HookUnregisterInput,
+    OpaqueExecPolicy, ReviewsInput,
 };
 use crate::shared::process::{default_project_dir, read_stdin_raw};
 use clap::{Parser, Subcommand};
@@ -52,6 +52,9 @@ pub enum Commands {
         default_branch: Option<String>,
         #[arg(long = "protected-branches")]
         protected_branches: Option<String>,
+        /// Protected-branch policy for commands whose effect can't be inspected
+        #[arg(long = "opaque-exec", value_enum, default_value_t = OpaqueExecPolicy::Ask)]
+        opaque_exec: OpaqueExecPolicy,
     },
     /// Deprecated alias of `guard pr`
     #[command(name = "pr-guard")]
@@ -111,15 +114,12 @@ impl HookFs for RealHookFs {
     }
 }
 
-/// Prints the decision (ask JSON to stdout, block reason to stderr) and
-/// returns its exit code — both contracts live on `GuardDecision`.
 fn guard_exit(decision: GuardDecision) -> i32 {
     if let Some(json) = decision.ask_stdout() {
         println!("{json}");
-    } else if decision.verdict == GuardVerdict::Block {
-        if let Some(reason) = &decision.reason {
-            eprintln!("{reason}");
-        }
+    }
+    if let Some(reason) = decision.stderr_message() {
+        eprintln!("{reason}");
     }
     decision.exit_code()
 }
@@ -180,6 +180,7 @@ pub fn run(cli: Cli) -> i32 {
             create_branch_script,
             default_branch,
             protected_branches,
+            opaque_exec,
         } => {
             // Validate the target before touching stdin: an invalid target
             // must print usage immediately (not block on a missing pipe) and
@@ -219,6 +220,8 @@ pub fn run(cli: Cli) -> i32 {
                 create_branch_script,
                 default_branch,
                 protected_branches: protected,
+                opaque_exec,
+                home: std::env::var("HOME").ok(),
             };
             guard_exit(commands::guard::run(&deps, &input))
         }
