@@ -1577,6 +1577,9 @@ fn cd_that_may_not_have_run_leaves_the_cwd_unknown() {
         "cd /tmp || true; rm a",
         "true && cd /tmp; rm a",
         "cd /tmp || echo no\nrm a",
+        "cd /tmp || { echo no; }; rm a",
+        "cd /tmp || { false && exit 1; }; rm a",
+        "cd /tmp || { [ -n \"$F\" ] || exit 1; }; rm a",
     ] {
         assert_hits(
             cmd,
@@ -1593,6 +1596,7 @@ fn cd_that_certainly_ran_moves_the_cwd() {
         "cd /tmp || exit 1; rm a",
         "cd /tmp || return; rm a",
         "cd /tmp || { echo no; exit 1; }; rm a",
+        "cd /tmp || { exit 1; }; rm a",
         "{ cd /tmp; }; rm a",
         "f() (true); { cd /tmp; }; rm a",
     ] {
@@ -1631,6 +1635,8 @@ fn writes_into_the_hooks_directory_are_hook_bypass() {
         "rm -f .git/hoo*/pre-commit",
         "cp a .git/hook?/pre-commit",
         "echo hi > .git/hoo*/pre-commit",
+        "rm -rf .git/*",
+        "rm -f .git/$D/pre-commit",
         "echo exit 0 > .git/hooks/pre-commit",
         "cd .git && rm hooks/commit-msg",
     ] {
@@ -1640,6 +1646,8 @@ fn writes_into_the_hooks_directory_are_hook_bypass() {
         "cat .git/hooks/pre-commit",
         "ls .git/hooks",
         "rm .github/hooks.md",
+        "rm -f .git/*.lock",
+        "rm -f .git/refs/*/old",
     ] {
         assert_no_bypass(cmd);
     }

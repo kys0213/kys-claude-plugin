@@ -177,6 +177,27 @@ impl Shell {
     }
 }
 
+/// Whether the component after `.git` in an unresolved path could expand to
+/// `hooks`.
+fn may_name_hooks_dir(raw: &str) -> bool {
+    let parts: Vec<&str> = raw.split('/').collect();
+    parts
+        .windows(2)
+        .filter(|w| w[0] == ".git")
+        .any(|w| glob_may_match(w[1].as_bytes(), b"hooks"))
+}
+
+/// `*`/`?` glob match; a bracket expression or expansion matches anything.
+fn glob_may_match(pattern: &[u8], name: &[u8]) -> bool {
+    match pattern.first() {
+        None => name.is_empty(),
+        Some(b'[' | b'$' | b'`' | b'{') => true,
+        Some(b'*') => (0..=name.len()).any(|i| glob_may_match(&pattern[1..], &name[i..])),
+        Some(b'?') => !name.is_empty() && glob_may_match(&pattern[1..], &name[1..]),
+        Some(c) => name.first() == Some(c) && glob_may_match(&pattern[1..], &name[1..]),
+    }
+}
+
 fn starts_exit(seg: &Segment) -> bool {
     seg.words
         .first()
@@ -277,15 +298,17 @@ impl Analyzer<'_> {
         {
             sh.or_group = None;
         }
+        let mut group_head = false;
         if let Some(saved) = sh.or_saved.take() {
             if opens_group {
                 sh.or_group = Some((saved, sh.frames.len()));
+                group_head = true;
             } else if starts_exit(&segment) {
                 sh.cwd = saved;
                 sh.list_cwd = sh.cwd.clone();
             }
         }
-        if starts_exit(&segment) {
+        if (head || group_head) && starts_exit(&segment) {
             if let Some((saved, _)) = sh.or_group.take() {
                 sh.cwd = saved;
                 sh.list_cwd = sh.cwd.clone();
@@ -464,9 +487,12 @@ impl Analyzer<'_> {
         if matches!(kind, HitKind::Write(_)) {
             let place = match &anchor {
                 Anchor::Path(p) => Some(p).filter(|p| is_hooks_path(p)),
-                Anchor::Unresolved { literal_prefix, .. } => literal_prefix
+                Anchor::Unresolved {
+                    literal_prefix,
+                    raw,
+                } => literal_prefix
                     .as_ref()
-                    .filter(|p| is_hooks_path(p) || p.ends_with(".git")),
+                    .filter(|p| is_hooks_path(p) || p.ends_with(".git") && may_name_hooks_dir(raw)),
             };
             if let Some(p) = place {
                 let token = p.display().to_string();
