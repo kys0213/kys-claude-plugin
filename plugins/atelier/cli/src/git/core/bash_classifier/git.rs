@@ -1,7 +1,7 @@
 use super::analyzer::{Analyzer, Env};
-use super::args::{short_value, split_eq, Place};
+use super::args::{short_value, split_eq};
 use super::lexer::Word;
-use super::{BypassRule, HitKind, WriteRule};
+use super::{Anchor, BypassRule, HitKind, WriteRule};
 
 const HOOK_SUBCOMMANDS: &[&str] = &[
     "commit",
@@ -37,7 +37,7 @@ const GIT_VALUED_LONG: &[&str] = &[
 ];
 
 impl Analyzer<'_> {
-    pub(super) fn git_cmd(&mut self, args: &[Word], env: &Env, cwd: &Place) {
+    pub(super) fn git_cmd(&mut self, args: &[Word], env: &Env, cwd: &Anchor) {
         let mut dir = cwd.clone();
         let mut i = 0;
         let mut sub = None;
@@ -80,7 +80,7 @@ impl Analyzer<'_> {
             self.scan_hook_flags(name, rest);
         }
         match name {
-            "commit" => self.push_hit(HitKind::Commit, &program, dir.to_anchor()),
+            "commit" => self.push_hit(HitKind::Commit, &program, dir.clone()),
             "apply" => {
                 let read_only = rest.iter().any(|w| {
                     w.is("--check") || w.is("--stat") || w.is("--numstat") || w.is("--summary")

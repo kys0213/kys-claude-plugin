@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use super::args::{assignment, is_device, normalize, program_name, Place};
-use super::interpreters::is_interpreter;
+use super::args::{assignment, is_device, normalize, program_name};
+use super::interpreters::{is_interpreter, is_shell};
 use super::lexer::{lex, RedirOp, Sep, Tok, Word};
 use super::{
     Anchor, BashAnalysis, BypassHit, BypassRule, Hit, HitKind, LexError, OpaqueCause, Wrapper,
@@ -18,7 +18,7 @@ pub(super) type Env = Vec<(String, String)>;
 
 /// State a segment leaves for the following segments of the same shell.
 enum Effect {
-    Cd(Place),
+    Cd(Anchor),
     Env(Vec<(String, String)>),
 }
 
@@ -64,14 +64,14 @@ impl Analyzer<'_> {
     pub(super) fn run_script(
         &mut self,
         src: &str,
-        cwd: &Place,
+        cwd: &Anchor,
         env: &Env,
         depth: usize,
     ) -> Result<(), LexError> {
         let toks = lex(src)?;
         let mut cwd = cwd.clone();
         let mut env = env.clone();
-        let mut saved: Vec<(Place, Env)> = Vec::new();
+        let mut saved: Vec<(Anchor, Env)> = Vec::new();
         let mut seg = Segment::default();
         let mut after_pipe = false;
         for tok in toks {
@@ -103,7 +103,7 @@ impl Analyzer<'_> {
     fn flush(
         &mut self,
         seg: &mut Segment,
-        cwd: &mut Place,
+        cwd: &mut Anchor,
         env: &mut Env,
         depth: usize,
         propagate: bool,
@@ -127,21 +127,34 @@ impl Analyzer<'_> {
         }
     }
 
-    fn scan_substitutions(&mut self, seg: &Segment, cwd: &Place, env: &Env, depth: usize) {
+    fn scan_substitutions(&mut self, seg: &Segment, cwd: &Anchor, env: &Env, depth: usize) {
         let targets = seg.redirs.iter().filter_map(|(_, t)| t.as_ref());
         for word in seg.words.iter().chain(targets) {
             for body in &word.subs {
-                if depth >= MAX_WRAPPER_DEPTH || self.run_script(body, cwd, env, depth + 1).is_err()
-                {
-                    self.opaque(OpaqueCause::Substitution, "$(", cwd);
-                }
+                self.run_nested(body, cwd, env, depth, OpaqueCause::Substitution, "$(");
             }
+        }
+    }
+
+    /// Runs `src` one level deeper; past the depth limit or on a lex failure
+    /// the nested script counts as one opaque execution.
+    pub(super) fn run_nested(
+        &mut self,
+        src: &str,
+        cwd: &Anchor,
+        env: &Env,
+        depth: usize,
+        cause: OpaqueCause,
+        program: &str,
+    ) {
+        if depth >= MAX_WRAPPER_DEPTH || self.run_script(src, cwd, env, depth + 1).is_err() {
+            self.opaque(cause, program, cwd);
         }
     }
 
     /// Returns the state change the segment leaves behind for later segments
     /// of the same shell.
-    fn segment(&mut self, seg: &Segment, cwd: &Place, env: &Env, depth: usize) -> Option<Effect> {
+    fn segment(&mut self, seg: &Segment, cwd: &Anchor, env: &Env, depth: usize) -> Option<Effect> {
         self.scan_substitutions(seg, cwd, env, depth);
         for (op, target) in &seg.redirs {
             if let (RedirOp::Out, Some(target)) = (op, target) {
@@ -167,7 +180,7 @@ impl Analyzer<'_> {
         };
         match program_name(first) {
             "cd" => Some(Effect::Cd(self.cd_target(&words[1..], cwd))),
-            name @ ("pushd" | "popd") => Some(Effect::Cd(Place::unknown(name))),
+            name @ ("pushd" | "popd") => Some(Effect::Cd(Anchor::unknown(name))),
             "export" => Some(Effect::Env(assignments(&words[1..]))),
             "declare" | "typeset" if exports(&words[1..]) => {
                 Some(Effect::Env(assignments(&words[1..])))
@@ -179,7 +192,7 @@ impl Analyzer<'_> {
         }
     }
 
-    fn cd_target(&self, args: &[Word], cwd: &Place) -> Place {
+    fn cd_target(&self, args: &[Word], cwd: &Anchor) -> Anchor {
         let mut rest = args;
         while let Some(w) = rest.first() {
             if w.is("--") {
@@ -193,10 +206,10 @@ impl Analyzer<'_> {
         }
         match rest.first() {
             None => match self.home {
-                Some(h) => Place::Known(normalize(h)),
-                None => Place::unknown("~"),
+                Some(h) => Anchor::Path(normalize(h)),
+                None => Anchor::unknown("~"),
             },
-            Some(w) if w.is("-") => Place::unknown("-"),
+            Some(w) if w.is("-") => Anchor::unknown("-"),
             Some(w) => self.resolve(cwd, w),
         }
     }
@@ -214,19 +227,19 @@ impl Analyzer<'_> {
         Some((format!("{home}{rest}"), w.dyn_at.map(|i| i - 1 + shift)))
     }
 
-    pub(super) fn resolve(&self, base: &Place, w: &Word) -> Place {
+    pub(super) fn resolve(&self, base: &Anchor, w: &Word) -> Anchor {
         let Some((text, dyn_at)) = self.expand_tilde(w) else {
-            return Place::unknown(&w.text);
+            return Anchor::unknown(&w.text);
         };
         let is_abs = text.starts_with('/');
         let Some(idx) = dyn_at else {
             return match base {
-                _ if is_abs => Place::Known(normalize(Path::new(&text))),
-                Place::Known(b) => Place::Known(normalize(&b.join(&text))),
-                Place::Dynamic {
+                _ if is_abs => Anchor::Path(normalize(Path::new(&text))),
+                Anchor::Path(b) => Anchor::Path(normalize(&b.join(&text))),
+                Anchor::Unresolved {
                     literal_prefix,
                     raw,
-                } => Place::Dynamic {
+                } => Anchor::Unresolved {
                     literal_prefix: literal_prefix.clone(),
                     raw: format!("{raw}/{text}"),
                 },
@@ -239,22 +252,22 @@ impl Analyzer<'_> {
             None => "",
         };
         if is_abs {
-            return Place::Dynamic {
+            return Anchor::Unresolved {
                 literal_prefix: Some(normalize(Path::new(dir_part))),
                 raw: text,
             };
         }
         if idx == 0 && matches!(text[idx..].chars().next(), Some('$' | '`' | '<' | '>')) {
-            return Place::unknown(&text);
+            return Anchor::unknown(&text);
         }
         let (prefix_base, raw) = match base {
-            Place::Known(b) => (Some(b.clone()), text.clone()),
-            Place::Dynamic {
+            Anchor::Path(b) => (Some(b.clone()), text.clone()),
+            Anchor::Unresolved {
                 literal_prefix,
                 raw: base_raw,
             } => (literal_prefix.clone(), format!("{base_raw}/{text}")),
         };
-        Place::Dynamic {
+        Anchor::Unresolved {
             literal_prefix: prefix_base.map(|p| normalize(&p.join(dir_part))),
             raw,
         }
@@ -277,8 +290,8 @@ impl Analyzer<'_> {
         });
     }
 
-    pub(super) fn opaque(&mut self, cause: OpaqueCause, program: &str, cwd: &Place) {
-        self.push_hit(HitKind::Opaque(cause), program, cwd.to_anchor());
+    pub(super) fn opaque(&mut self, cause: OpaqueCause, program: &str, cwd: &Anchor) {
+        self.push_hit(HitKind::Opaque(cause), program, cwd.clone());
     }
 
     pub(super) fn write_target(
@@ -286,25 +299,25 @@ impl Analyzer<'_> {
         rule: WriteRule,
         program: &str,
         target: &Word,
-        cwd: &Place,
+        cwd: &Anchor,
     ) {
         if target.text.is_empty() {
             return;
         }
         let place = self.resolve(cwd, target);
-        if matches!(&place, Place::Known(p) if is_device(p)) {
+        if matches!(&place, Anchor::Path(p) if is_device(p)) {
             return;
         }
-        self.push_hit(HitKind::Write(rule), program, place.to_anchor());
+        self.push_hit(HitKind::Write(rule), program, place);
     }
 
-    pub(super) fn write_place(&mut self, rule: WriteRule, program: &str, place: &Place) {
-        self.push_hit(HitKind::Write(rule), program, place.to_anchor());
+    pub(super) fn write_place(&mut self, rule: WriteRule, program: &str, place: &Anchor) {
+        self.push_hit(HitKind::Write(rule), program, place.clone());
     }
 
     // ---- command dispatch ----
 
-    pub(super) fn command(&mut self, words: &[Word], env: &Env, cwd: &Place, depth: usize) {
+    pub(super) fn command(&mut self, words: &[Word], env: &Env, cwd: &Anchor, depth: usize) {
         let Some(prog) = words.first() else { return };
         let args = &words[1..];
         if prog.dyn_at == Some(0) && prog.text.starts_with(['$', '`']) {
@@ -317,7 +330,7 @@ impl Analyzer<'_> {
             "sudo" => self.sudo_cmd(args, env, cwd, depth),
             "nohup" => {
                 if self.can_unwrap(Wrapper::Nohup, name, cwd, depth) {
-                    self.inner(args, env, cwd, depth);
+                    self.command(args, env, cwd, depth + 1);
                 }
             }
             "time" => self.time_cmd(args, env, cwd, depth),
@@ -325,7 +338,7 @@ impl Analyzer<'_> {
             "timeout" => self.timeout_cmd(args, env, cwd, depth),
             "xargs" => self.xargs_cmd(args, env, cwd, depth),
             "find" => self.find_cmd(args, env, cwd, depth),
-            "bash" | "sh" | "zsh" | "dash" | "ksh" => self.shell_cmd(name, args, env, cwd, depth),
+            _ if is_shell(name) => self.shell_cmd(name, args, env, cwd, depth),
             "eval" => self.opaque(OpaqueCause::Eval, name, cwd),
             "source" | "." => {
                 let file = args.first().map_or("", |w| w.text.as_str());

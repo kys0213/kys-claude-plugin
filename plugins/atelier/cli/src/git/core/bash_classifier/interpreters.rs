@@ -1,31 +1,23 @@
 use super::analyzer::Analyzer;
-use super::args::Place;
 use super::lexer::Word;
-use super::OpaqueCause;
+use super::{Anchor, OpaqueCause};
 
 impl Analyzer<'_> {
-    pub(super) fn interpreter(&mut self, name: &str, args: &[Word], cwd: &Place) {
+    pub(super) fn interpreter(&mut self, name: &str, args: &[Word], cwd: &Anchor) {
         if !is_trusted_invocation(name, args) {
             self.opaque(OpaqueCause::Interpreter(name.to_string()), name, cwd);
         }
     }
 }
 
+pub(super) fn is_shell(name: &str) -> bool {
+    matches!(name, "bash" | "sh" | "zsh" | "dash" | "ksh")
+}
+
 pub(super) fn is_interpreter(name: &str) -> bool {
     matches!(
         name,
-        "node"
-            | "nodejs"
-            | "deno"
-            | "bun"
-            | "ruby"
-            | "perl"
-            | "php"
-            | "bash"
-            | "sh"
-            | "zsh"
-            | "dash"
-            | "ksh"
+        "node" | "nodejs" | "deno" | "bun" | "ruby" | "perl" | "php"
     ) || name
         .strip_prefix("python")
         .is_some_and(|version| version.chars().all(|c| c.is_ascii_digit() || c == '.'))

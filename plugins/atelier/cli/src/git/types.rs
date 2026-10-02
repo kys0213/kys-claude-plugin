@@ -108,7 +108,7 @@ pub struct GuardInput {
     pub home: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GuardVerdict {
     Allow,
     Ask,

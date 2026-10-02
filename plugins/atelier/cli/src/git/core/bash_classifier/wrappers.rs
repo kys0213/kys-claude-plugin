@@ -1,14 +1,14 @@
 use super::analyzer::{Analyzer, Env, MAX_WRAPPER_DEPTH};
-use super::args::{assignment, short_value, split_eq, Place};
+use super::args::{assignment, long_value, short_value, split_eq};
 use super::lexer::Word;
-use super::{OpaqueCause, Wrapper, WriteRule};
+use super::{Anchor, OpaqueCause, Wrapper, WriteRule};
 
 impl Analyzer<'_> {
     pub(super) fn can_unwrap(
         &mut self,
         wrapper: Wrapper,
         name: &str,
-        cwd: &Place,
+        cwd: &Anchor,
         depth: usize,
     ) -> bool {
         if depth >= MAX_WRAPPER_DEPTH {
@@ -18,13 +18,7 @@ impl Analyzer<'_> {
         true
     }
 
-    pub(super) fn inner(&mut self, rest: &[Word], env: &Env, cwd: &Place, depth: usize) {
-        if !rest.is_empty() {
-            self.command(rest, env, cwd, depth + 1);
-        }
-    }
-
-    pub(super) fn env_cmd(&mut self, args: &[Word], env: &Env, cwd: &Place, depth: usize) {
+    pub(super) fn env_cmd(&mut self, args: &[Word], env: &Env, cwd: &Anchor, depth: usize) {
         if !self.can_unwrap(Wrapper::Env, "env", cwd, depth) {
             return;
         }
@@ -69,10 +63,10 @@ impl Analyzer<'_> {
                 }
             }
         }
-        self.inner(&args[i.min(args.len())..], &env, &inner_cwd, depth);
+        self.command(&args[i.min(args.len())..], &env, &inner_cwd, depth + 1);
     }
 
-    pub(super) fn sudo_cmd(&mut self, args: &[Word], env: &Env, cwd: &Place, depth: usize) {
+    pub(super) fn sudo_cmd(&mut self, args: &[Word], env: &Env, cwd: &Anchor, depth: usize) {
         if !self.can_unwrap(Wrapper::Sudo, "sudo", cwd, depth) {
             return;
         }
@@ -101,12 +95,8 @@ impl Analyzer<'_> {
                         return;
                     }
                     "chdir" => {
-                        let dir = if attached {
-                            Some(w.slice_from(2 + name.len() + 1))
-                        } else {
-                            i += 1;
-                            args.get(i - 1).cloned()
-                        };
+                        let (dir, extra) = long_value(w, name, attached, args.get(i));
+                        i += extra;
                         if let Some(dir) = dir {
                             inner_cwd = self.resolve(&inner_cwd, &dir);
                         }
@@ -144,10 +134,10 @@ impl Analyzer<'_> {
                 }
             }
         }
-        self.inner(&args[i.min(args.len())..], &env, &inner_cwd, depth);
+        self.command(&args[i.min(args.len())..], &env, &inner_cwd, depth + 1);
     }
 
-    pub(super) fn time_cmd(&mut self, args: &[Word], env: &Env, cwd: &Place, depth: usize) {
+    pub(super) fn time_cmd(&mut self, args: &[Word], env: &Env, cwd: &Anchor, depth: usize) {
         if !self.can_unwrap(Wrapper::Time, "time", cwd, depth) {
             return;
         }
@@ -162,10 +152,10 @@ impl Analyzer<'_> {
                 1
             };
         }
-        self.inner(&args[i.min(args.len())..], env, cwd, depth);
+        self.command(&args[i.min(args.len())..], env, cwd, depth + 1);
     }
 
-    pub(super) fn command_cmd(&mut self, args: &[Word], env: &Env, cwd: &Place, depth: usize) {
+    pub(super) fn command_cmd(&mut self, args: &[Word], env: &Env, cwd: &Anchor, depth: usize) {
         if !self.can_unwrap(Wrapper::Command, "command", cwd, depth) {
             return;
         }
@@ -179,10 +169,10 @@ impl Analyzer<'_> {
             }
             i += 1;
         }
-        self.inner(&args[i..], env, cwd, depth);
+        self.command(&args[i..], env, cwd, depth + 1);
     }
 
-    pub(super) fn timeout_cmd(&mut self, args: &[Word], env: &Env, cwd: &Place, depth: usize) {
+    pub(super) fn timeout_cmd(&mut self, args: &[Word], env: &Env, cwd: &Anchor, depth: usize) {
         if !self.can_unwrap(Wrapper::Timeout, "timeout", cwd, depth) {
             return;
         }
@@ -211,10 +201,10 @@ impl Analyzer<'_> {
             self.opaque(OpaqueCause::Wrapper(Wrapper::Timeout), "timeout", cwd);
             return;
         }
-        self.inner(&args[i + 1..], env, cwd, depth);
+        self.command(&args[i + 1..], env, cwd, depth + 1);
     }
 
-    pub(super) fn xargs_cmd(&mut self, args: &[Word], env: &Env, cwd: &Place, depth: usize) {
+    pub(super) fn xargs_cmd(&mut self, args: &[Word], env: &Env, cwd: &Anchor, depth: usize) {
         if !self.can_unwrap(Wrapper::Xargs, "xargs", cwd, depth) {
             return;
         }
@@ -293,7 +283,7 @@ impl Analyzer<'_> {
         self.command(&command, env, cwd, depth + 1);
     }
 
-    pub(super) fn find_cmd(&mut self, args: &[Word], env: &Env, cwd: &Place, depth: usize) {
+    pub(super) fn find_cmd(&mut self, args: &[Word], env: &Env, cwd: &Anchor, depth: usize) {
         let start = args
             .iter()
             .position(|w| !(w.is("-H") || w.is("-L") || w.is("-P")))
@@ -347,7 +337,7 @@ impl Analyzer<'_> {
         name: &str,
         args: &[Word],
         env: &Env,
-        cwd: &Place,
+        cwd: &Anchor,
         depth: usize,
     ) {
         let mut i = 0;
@@ -382,10 +372,14 @@ impl Analyzer<'_> {
             self.opaque(OpaqueCause::Wrapper(Wrapper::ShellC), name, cwd);
             return;
         };
-        if depth >= MAX_WRAPPER_DEPTH || self.run_script(&script.text, cwd, env, depth + 1).is_err()
-        {
-            self.opaque(OpaqueCause::Wrapper(Wrapper::ShellC), name, cwd);
-        }
+        self.run_nested(
+            &script.text,
+            cwd,
+            env,
+            depth,
+            OpaqueCause::Wrapper(Wrapper::ShellC),
+            name,
+        );
     }
 }
 

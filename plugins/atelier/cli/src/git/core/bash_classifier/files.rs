@@ -1,10 +1,10 @@
 use super::analyzer::Analyzer;
-use super::args::{assignment, parse_args, short_value, split_eq, Place};
+use super::args::{assignment, long_value, parse_args, short_value, split_eq};
 use super::lexer::Word;
-use super::WriteRule;
+use super::{Anchor, WriteRule};
 
 impl Analyzer<'_> {
-    pub(super) fn sed_cmd(&mut self, args: &[Word], cwd: &Place) {
+    pub(super) fn sed_cmd(&mut self, args: &[Word], cwd: &Anchor) {
         let mut in_place = false;
         let mut has_script = false;
         let mut positionals: Vec<&Word> = Vec::new();
@@ -70,81 +70,40 @@ impl Analyzer<'_> {
         }
     }
 
-    pub(super) fn awk_cmd(&mut self, args: &[Word], cwd: &Place) {
-        let mut in_place = false;
-        let mut has_program = false;
-        let mut positionals: Vec<&Word> = Vec::new();
-        let mut options_ended = false;
-        let mut i = 0;
-        while i < args.len() {
-            let w = &args[i];
-            i += 1;
-            if options_ended || !w.is_flag() {
-                positionals.push(w);
-                continue;
-            }
-            if w.is("--") {
-                options_ended = true;
-                continue;
-            }
-            if let Some(long) = w.text.strip_prefix("--") {
-                let (name, attached) = split_eq(long);
-                let value = if attached {
-                    Some(w.slice_from(2 + name.len() + 1))
-                } else {
-                    None
-                };
-                match name {
-                    "include" => {
-                        let value = value.or_else(|| args.get(i).cloned());
-                        in_place |= value.is_some_and(|v| v.text == "inplace");
-                        i += usize::from(!attached);
-                    }
-                    "file" | "source" | "exec" => {
-                        has_program = true;
-                        i += usize::from(!attached);
-                    }
-                    "assign" | "field-separator" => i += usize::from(!attached),
-                    _ => {}
-                }
-                continue;
-            }
-            for (ci, ch) in w.text[1..].char_indices() {
-                let after = 1 + ci + ch.len_utf8();
-                match ch {
-                    'i' => {
-                        let (value, extra) = short_value(w, after, args.get(i));
-                        in_place |= value.is_some_and(|v| v.text == "inplace");
-                        i += extra;
-                        break;
-                    }
-                    'f' | 'e' | 'E' => {
-                        has_program = true;
-                        i += short_value(w, after, args.get(i)).1;
-                        break;
-                    }
-                    'v' | 'F' => {
-                        i += short_value(w, after, args.get(i)).1;
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-        }
+    pub(super) fn awk_cmd(&mut self, args: &[Word], cwd: &Anchor) {
+        let parsed = parse_args(
+            args,
+            "ifeEvF",
+            &[
+                "include",
+                "file",
+                "source",
+                "exec",
+                "assign",
+                "field-separator",
+            ],
+        );
+        let in_place = parsed
+            .values(&["i", "include"])
+            .iter()
+            .any(|v| v.text == "inplace");
         if !in_place {
             return;
         }
+        let has_program = ["f", "e", "E", "file", "source", "exec"]
+            .iter()
+            .any(|n| parsed.has(n));
         let files = if has_program {
-            &positionals[..]
+            &parsed.positionals[..]
         } else {
-            positionals.get(1..).unwrap_or(&[])
+            parsed.positionals.get(1..).unwrap_or(&[])
         };
         for file in files.iter().filter(|f| assignment(f).is_none()) {
             self.write_target(WriteRule::InPlaceEdit, "awk", file, cwd);
         }
     }
 
-    pub(super) fn perl_cmd(&mut self, args: &[Word], cwd: &Place) {
+    pub(super) fn perl_cmd(&mut self, args: &[Word], cwd: &Anchor) {
         let mut in_place = false;
         let mut has_code = false;
         let mut positionals: Vec<&Word> = Vec::new();
@@ -198,7 +157,7 @@ impl Analyzer<'_> {
 
     // ---- file operations ----
 
-    pub(super) fn file_ops(&mut self, name: &str, args: &[Word], cwd: &Place) {
+    pub(super) fn file_ops(&mut self, name: &str, args: &[Word], cwd: &Anchor) {
         let (short_valued, long_valued): (&str, &[&str]) = match name {
             "touch" => ("drt", &["date", "reference"]),
             "mkdir" => ("m", &["mode"]),
@@ -211,7 +170,7 @@ impl Analyzer<'_> {
         }
     }
 
-    pub(super) fn mv_cmd(&mut self, args: &[Word], cwd: &Place) {
+    pub(super) fn mv_cmd(&mut self, args: &[Word], cwd: &Anchor) {
         let parsed = parse_args(args, "tS", &["target-directory", "suffix"]);
         for w in &parsed.positionals {
             self.write_target(WriteRule::FileOp, "mv", w, cwd);
@@ -221,7 +180,7 @@ impl Analyzer<'_> {
         }
     }
 
-    pub(super) fn copy_like(&mut self, name: &str, args: &[Word], cwd: &Place) {
+    pub(super) fn copy_like(&mut self, name: &str, args: &[Word], cwd: &Anchor) {
         let (short_valued, long_valued): (&str, &[&str]) = if name == "install" {
             (
                 "tmgoS",
@@ -249,7 +208,7 @@ impl Analyzer<'_> {
         }
     }
 
-    pub(super) fn dd_cmd(&mut self, args: &[Word], cwd: &Place) {
+    pub(super) fn dd_cmd(&mut self, args: &[Word], cwd: &Anchor) {
         for w in args {
             if w.text.starts_with("of=") {
                 self.write_target(WriteRule::DdOutput, "dd", &w.slice_from(3), cwd);
@@ -257,7 +216,7 @@ impl Analyzer<'_> {
         }
     }
 
-    pub(super) fn patch_cmd(&mut self, args: &[Word], cwd: &Place) {
+    pub(super) fn patch_cmd(&mut self, args: &[Word], cwd: &Anchor) {
         let parsed = parse_args(
             args,
             "dioprBVYzFDg",
@@ -290,7 +249,7 @@ impl Analyzer<'_> {
         }
     }
 
-    pub(super) fn tar_cmd(&mut self, args: &[Word], cwd: &Place) {
+    pub(super) fn tar_cmd(&mut self, args: &[Word], cwd: &Anchor) {
         let mut extract = false;
         let mut dir = cwd.clone();
         let mut i = 0;
@@ -306,12 +265,8 @@ impl Analyzer<'_> {
                 match name {
                     "extract" | "get" => extract = true,
                     "directory" => {
-                        let value = if attached {
-                            Some(w.slice_from(2 + name.len() + 1))
-                        } else {
-                            i += 1;
-                            args.get(i - 1).cloned()
-                        };
+                        let (value, extra) = long_value(w, name, attached, args.get(i));
+                        i += extra;
                         if let Some(value) = value {
                             dir = self.resolve(&dir, &value);
                         }
@@ -364,7 +319,7 @@ impl Analyzer<'_> {
         }
     }
 
-    pub(super) fn unzip_cmd(&mut self, args: &[Word], cwd: &Place) {
+    pub(super) fn unzip_cmd(&mut self, args: &[Word], cwd: &Anchor) {
         let mut dir = cwd.clone();
         let mut listing = false;
         let mut operands = 0;
@@ -404,7 +359,7 @@ impl Analyzer<'_> {
         }
     }
 
-    pub(super) fn curl_cmd(&mut self, args: &[Word], cwd: &Place) {
+    pub(super) fn curl_cmd(&mut self, args: &[Word], cwd: &Anchor) {
         let parsed = parse_args(
             args,
             "AbcCdDeEFHKmoPQrtTuUwxXyYz",
@@ -421,7 +376,7 @@ impl Analyzer<'_> {
         }
     }
 
-    pub(super) fn wget_cmd(&mut self, args: &[Word], cwd: &Place) {
+    pub(super) fn wget_cmd(&mut self, args: &[Word], cwd: &Anchor) {
         let parsed = parse_args(args, "OPoaeitTwQ", &["output-document", "directory-prefix"]);
         for target in parsed.values(&["O", "output-document"]) {
             if !target.is("-") {
@@ -433,7 +388,7 @@ impl Analyzer<'_> {
         }
     }
 
-    pub(super) fn rsync_cmd(&mut self, args: &[Word], cwd: &Place) {
+    pub(super) fn rsync_cmd(&mut self, args: &[Word], cwd: &Anchor) {
         let parsed = parse_args(
             args,
             "eBfMT",

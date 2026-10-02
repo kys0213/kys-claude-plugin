@@ -59,12 +59,10 @@ impl Word {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Sep {
-    Semi,
-    And,
-    Or,
+    /// `;`, `&&`, `||` or a newline: the next command runs in the same shell.
+    List,
     Pipe,
     Amp,
-    Newline,
     LParen,
     RParen,
 }
@@ -111,7 +109,7 @@ pub(super) fn lex(src: &str) -> Result<Vec<Tok>, LexError> {
             '\\' if lx.peek_at(1) == Some('\n') => lx.pos += 2,
             '\n' => {
                 lx.pos += 1;
-                lx.toks.push(Tok::Sep(Sep::Newline));
+                lx.toks.push(Tok::Sep(Sep::List));
                 lx.skip_heredoc_bodies();
             }
             '#' => {
@@ -124,7 +122,7 @@ pub(super) fn lex(src: &str) -> Result<Vec<Tok>, LexError> {
                 if lx.peek() == Some(';') {
                     lx.pos += 1;
                 }
-                lx.toks.push(Tok::Sep(Sep::Semi));
+                lx.toks.push(Tok::Sep(Sep::List));
             }
             '&' => lx.ampersand(),
             '|' => lx.pipe(),
@@ -197,7 +195,7 @@ impl Lexer {
             }
             Some('&') => {
                 self.pos += 2;
-                self.toks.push(Tok::Sep(Sep::And));
+                self.toks.push(Tok::Sep(Sep::List));
             }
             _ => {
                 self.pos += 1;
@@ -210,7 +208,7 @@ impl Lexer {
         match self.peek_at(1) {
             Some('|') => {
                 self.pos += 2;
-                self.toks.push(Tok::Sep(Sep::Or));
+                self.toks.push(Tok::Sep(Sep::List));
             }
             Some('&') => {
                 self.pos += 2;
@@ -301,24 +299,7 @@ impl Lexer {
 
     fn skip_heredoc_bodies(&mut self) {
         for (delimiter, strip_tabs) in std::mem::take(&mut self.heredocs) {
-            while self.pos < self.chars.len() {
-                let start = self.pos;
-                while self.pos < self.chars.len() && self.chars[self.pos] != '\n' {
-                    self.pos += 1;
-                }
-                let line: String = self.chars[start..self.pos].iter().collect();
-                if self.pos < self.chars.len() {
-                    self.pos += 1;
-                }
-                let line = if strip_tabs {
-                    line.trim_start_matches('\t')
-                } else {
-                    line.as_str()
-                };
-                if line.trim_end_matches('\r') == delimiter {
-                    break;
-                }
-            }
+            self.scan_heredoc_body(&delimiter, strip_tabs, None);
         }
     }
 
@@ -491,7 +472,7 @@ impl Lexer {
                 }
                 '\n' if !pending_heredocs.is_empty() => {
                     for (delimiter, strip_tabs) in std::mem::take(&mut pending_heredocs) {
-                        self.copy_heredoc_body(w, &delimiter, strip_tabs);
+                        self.scan_heredoc_body(&delimiter, strip_tabs, Some(&mut w.text));
                     }
                 }
                 '(' => depth += 1,
@@ -553,19 +534,29 @@ impl Lexer {
         }
     }
 
-    /// Copies heredoc body lines verbatim through the delimiter line, so quotes
-    /// and parentheses inside the body never reach the paren scanner.
-    fn copy_heredoc_body(&mut self, w: &mut Word, delimiter: &str, strip_tabs: bool) {
+    /// Consumes heredoc body lines through the delimiter line, so quotes and
+    /// parentheses inside the body never reach the paren scanner. With a
+    /// `sink`, the lines are also copied there verbatim.
+    fn scan_heredoc_body(
+        &mut self,
+        delimiter: &str,
+        strip_tabs: bool,
+        mut sink: Option<&mut String>,
+    ) {
         while self.pos < self.chars.len() {
             let start = self.pos;
             while self.pos < self.chars.len() && self.chars[self.pos] != '\n' {
                 self.pos += 1;
             }
             let line: String = self.chars[start..self.pos].iter().collect();
-            w.text.push_str(&line);
+            if let Some(sink) = sink.as_deref_mut() {
+                sink.push_str(&line);
+            }
             if self.pos < self.chars.len() {
                 self.pos += 1;
-                w.text.push('\n');
+                if let Some(sink) = sink.as_deref_mut() {
+                    sink.push('\n');
+                }
             }
             let line = if strip_tabs {
                 line.trim_start_matches('\t')

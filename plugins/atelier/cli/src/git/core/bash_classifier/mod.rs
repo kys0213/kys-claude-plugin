@@ -14,7 +14,7 @@ mod wrappers;
 use std::path::PathBuf;
 
 use analyzer::Analyzer;
-use args::{normalize, Place};
+use args::normalize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassifyInput {
@@ -130,7 +130,7 @@ pub fn classify(input: &ClassifyInput) -> Result<BashAnalysis, LexError> {
         home: input.home.as_deref(),
         out: BashAnalysis::default(),
     };
-    let cwd = Place::Known(normalize(&input.cwd));
+    let cwd = Anchor::Path(normalize(&input.cwd));
     analyzer.run_script(&input.command, &cwd, &Vec::new(), 0)?;
     Ok(analyzer.out)
 }

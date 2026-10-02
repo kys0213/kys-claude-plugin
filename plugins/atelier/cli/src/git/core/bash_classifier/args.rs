@@ -3,37 +3,14 @@ use std::path::{Component, Path, PathBuf};
 use super::lexer::Word;
 use super::Anchor;
 
-#[derive(Debug, Clone)]
-pub(super) enum Place {
-    Known(PathBuf),
-    Dynamic {
-        literal_prefix: Option<PathBuf>,
-        raw: String,
-    },
-}
-
-impl Place {
-    pub(super) fn unknown(raw: &str) -> Place {
-        Place::Dynamic {
+impl Anchor {
+    pub(super) fn unknown(raw: &str) -> Anchor {
+        Anchor::Unresolved {
             literal_prefix: None,
             raw: raw.to_string(),
         }
     }
-
-    pub(super) fn to_anchor(&self) -> Anchor {
-        match self {
-            Place::Known(p) => Anchor::Path(p.clone()),
-            Place::Dynamic {
-                literal_prefix,
-                raw,
-            } => Anchor::Unresolved {
-                literal_prefix: literal_prefix.clone(),
-                raw: raw.clone(),
-            },
-        }
-    }
 }
-
 pub(super) fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for comp in path.components() {
@@ -94,6 +71,21 @@ pub(super) fn short_value(w: &Word, after: usize, next: Option<&Word>) -> (Optio
     }
 }
 
+/// Value of a long option: the attached `--name=value` rest, else the next
+/// argument (reported as one extra consumed word).
+pub(super) fn long_value(
+    w: &Word,
+    name: &str,
+    attached: bool,
+    next: Option<&Word>,
+) -> (Option<Word>, usize) {
+    if attached {
+        (Some(w.slice_from(2 + name.len() + 1)), 0)
+    } else {
+        (next.cloned(), 1)
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Parsed {
     pub(super) positionals: Vec<Word>,
@@ -137,15 +129,13 @@ pub(super) fn parse_args(args: &[Word], short_valued: &str, long_valued: &[&str]
             continue;
         }
         if let Some(long) = w.text.strip_prefix("--") {
-            match long.split_once('=') {
-                Some((name, _)) => parsed
-                    .opts
-                    .push((name.to_string(), Some(w.slice_from(2 + name.len() + 1)))),
-                None if long_valued.contains(&long) => {
-                    parsed.opts.push((long.to_string(), args.get(i).cloned()));
-                    i += 1;
-                }
-                None => parsed.opts.push((long.to_string(), None)),
+            let (name, attached) = split_eq(long);
+            if attached || long_valued.contains(&name) {
+                let (value, extra) = long_value(w, name, attached, args.get(i));
+                parsed.opts.push((name.to_string(), value));
+                i += extra;
+            } else {
+                parsed.opts.push((name.to_string(), None));
             }
             continue;
         }

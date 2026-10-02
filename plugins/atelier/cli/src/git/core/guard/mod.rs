@@ -115,16 +115,15 @@ impl Touch {
                 raw,
             } => (literal_prefix.clone(), raw.clone(), false),
         };
-        let (action, program) = match (&hit.kind, certain) {
-            (HitKind::Commit, true) => (Action::Commit, "git commit".to_string()),
-            (HitKind::Commit, false) => (Action::MaybeModify, "git commit".to_string()),
-            (HitKind::Write(_), true) => (Action::Modify, hit.program.clone()),
-            _ => (Action::MaybeModify, hit.program.clone()),
+        let action = match (&hit.kind, certain) {
+            (HitKind::Commit, true) => Action::Commit,
+            (HitKind::Write(_), true) => Action::Modify,
+            _ => Action::MaybeModify,
         };
         Touch {
             place,
             action,
-            subject: format!("Bash `{program}` → {shown}"),
+            subject: format!("Bash `{}` → {shown}", hit.program),
         }
     }
 
@@ -194,14 +193,6 @@ fn output(
     }
 }
 
-fn rank(verdict: GuardVerdict) -> u8 {
-    match verdict {
-        GuardVerdict::Allow => 0,
-        GuardVerdict::Ask => 1,
-        GuardVerdict::Block => 2,
-    }
-}
-
 fn protection_rule(
     branch: &str,
     default_branch: &str,
@@ -236,6 +227,10 @@ impl GuardService for RealGuardService<'_> {
             script,
         };
 
+        if scene.touches.is_empty() {
+            return pass(Some(scene.nothing_in_scope));
+        }
+
         let project_root = find_repo_root(&project);
         let mut groups: Vec<(Scope, Vec<&Touch>)> = Vec::new();
         for touch in &scene.touches {
@@ -263,9 +258,10 @@ impl GuardService for RealGuardService<'_> {
                 }
                 Scope::Root(root) => {
                     let git = self.factory.at(root);
-                    let pin = same_repository(root, project_root.as_deref())
-                        .then_some(input.default_branch.as_deref())
-                        .flatten();
+                    let pin = input
+                        .default_branch
+                        .as_deref()
+                        .filter(|_| same_repository(root, project_root.as_deref()));
                     self.judge_repo(&case, git.as_ref(), root, pin, touches)
                 }
             };
@@ -273,7 +269,7 @@ impl GuardService for RealGuardService<'_> {
                 return out;
             }
             strongest = match strongest {
-                Some(current) if rank(current.verdict) >= rank(out.verdict) => Some(current),
+                Some(current) if current.verdict >= out.verdict => Some(current),
                 _ => Some(out),
             };
         }
@@ -454,7 +450,7 @@ fn unparsed_command_hits(command: &str, cwd: &Path) -> Vec<Hit> {
         hits.push(Hit {
             kind: HitKind::Commit,
             anchor: anchor.clone(),
-            program: "git".to_string(),
+            program: "git commit".to_string(),
         });
     }
     hits.push(Hit {

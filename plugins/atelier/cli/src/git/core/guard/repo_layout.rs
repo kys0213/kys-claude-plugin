@@ -39,14 +39,7 @@ pub fn is_inside_project_dir(file_path: &str, project_dir: &str) -> bool {
 }
 
 fn inside_project_dir(project: &Path, file_path: &str) -> bool {
-    let file = resolve_against(project, file_path);
-    match file.strip_prefix(project) {
-        Ok(rel) => {
-            // rel == '' (same dir) or a normal relative descendant.
-            rel.as_os_str().is_empty() || !rel.starts_with("..")
-        }
-        Err(_) => false,
-    }
+    is_under(project, &resolve_against(project, file_path))
 }
 
 /// Port of TS `isInsideAnyGitRepo`: walks up from the file's directory looking
