@@ -1364,6 +1364,8 @@ fn writes_after_a_switch_that_may_have_failed_are_judged_on_the_current_branch()
         "git switch -c feat; echo hi > a",
         "git switch -c feat || rm a",
         "git switch -c feat && echo ok; rm a",
+        "git switch -c feat && git checkout main && git commit -m y",
+        "git switch -c feat && git switch - && rm a",
     ] {
         assert_eq!(judge("main", cmd).verdict, GuardVerdict::Block, "{cmd:?}");
     }

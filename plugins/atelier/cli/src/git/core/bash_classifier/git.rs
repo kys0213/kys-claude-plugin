@@ -99,7 +99,8 @@ impl Analyzer<'_> {
             "config" => self.check_config_command(rest),
             "switch" | "checkout" => {
                 if let Some(branch) = switch_target(name, rest) {
-                    self.pending_switch = Some(BranchSwitch { repo: dir, branch });
+                    self.pending_switch =
+                        Some(branch.map(|branch| BranchSwitch { repo: dir, branch }));
                 }
             }
             _ => {}
@@ -212,21 +213,29 @@ fn contains_hooks_path(value: &str) -> bool {
 
 /// The branch `git switch`/`git checkout` leaves checked out. `checkout`
 /// counts only with `-b`/`-B`/`--orphan`, since its bare operand may be a path.
-fn switch_target(sub: &str, rest: &[Word]) -> Option<String> {
+/// The branch a `switch`/`checkout` moves to: `None` when it restores paths
+/// instead, `Some(None)` when it switches to a branch that can't be named.
+fn switch_target(sub: &str, rest: &[Word]) -> Option<Option<String>> {
     let parsed = parse_args(rest, "cCbB", &["create", "force-create", "orphan"]);
     let created = match sub {
         "switch" => parsed.value(&["c", "C", "create", "force-create", "orphan"]),
         _ => parsed.value(&["b", "B", "orphan"]),
     };
     if let Some(branch) = created {
-        return Some(branch.text.clone()).filter(|b| !b.is_empty());
+        return Some(Some(branch.text.clone()).filter(|b| !b.is_empty()));
     }
-    if sub != "switch" || parsed.has("d") || parsed.has("detach") {
-        return None;
+    if sub != "switch" {
+        let restores_paths = rest.iter().any(|w| w.is("--"));
+        return (!restores_paths).then_some(None);
     }
-    parsed
-        .positionals
-        .first()
-        .filter(|w| !w.is("-") && w.dyn_at.is_none())
-        .map(|w| w.text.clone())
+    if parsed.has("d") || parsed.has("detach") {
+        return Some(None);
+    }
+    Some(
+        parsed
+            .positionals
+            .first()
+            .filter(|w| !w.is("-") && w.dyn_at.is_none())
+            .map(|w| w.text.clone()),
+    )
 }

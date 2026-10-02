@@ -60,8 +60,9 @@ pub(super) struct Analyzer<'a> {
     pub(super) out: BashAnalysis,
     /// A branch switch whose `&&` chain the current segment belongs to.
     pub(super) switch: Option<BranchSwitch>,
-    /// A branch switch made by the segment being analyzed.
-    pub(super) pending_switch: Option<BranchSwitch>,
+    /// A branch switch made by the segment being analyzed; `Some(None)` when
+    /// the branch it lands on can't be named.
+    pub(super) pending_switch: Option<Option<BranchSwitch>>,
 }
 
 /// Shell state carried from one segment of a script to the next.
@@ -75,6 +76,9 @@ struct Shell {
     list_conditional: bool,
     /// The cwd a `cd` set before a `||`, kept for a following `exit`.
     or_saved: Option<Anchor>,
+    /// `or_saved` carried into the brace group after the `||`, with the frame
+    /// depth inside that group.
+    or_group: Option<(Anchor, usize)>,
     /// The next segment starts an and-or list.
     head: bool,
     /// The next brace group is a function body that may never run.
@@ -95,6 +99,7 @@ impl Shell {
             list_cwd: cwd.clone(),
             list_conditional: false,
             or_saved: None,
+            or_group: None,
             head: true,
             func_pending: false,
         }
@@ -121,6 +126,7 @@ impl Shell {
             }
             Sep::Seq | Sep::Amp => self.end_list(),
             Sep::LParen => {
+                self.func_pending = false;
                 self.frames
                     .push(Frame::Subshell(self.cwd.clone(), self.env.clone()));
                 self.end_list();
@@ -169,6 +175,12 @@ impl Shell {
             }
         }
     }
+}
+
+fn starts_exit(seg: &Segment) -> bool {
+    seg.words
+        .first()
+        .is_some_and(|w| matches!(w.text.as_str(), "exit" | "return"))
 }
 
 /// `name` or `function name` right before `()`: a function definition.
@@ -242,7 +254,7 @@ impl Analyzer<'_> {
     fn carry_switch(&mut self, chained: bool) {
         let made = self.pending_switch.take();
         if chained {
-            if made.is_some() {
+            if let Some(made) = made {
                 self.switch = made;
             }
         } else {
@@ -252,14 +264,29 @@ impl Analyzer<'_> {
 
     fn flush(&mut self, seg: &mut Segment, sh: &mut Shell, depth: usize, propagate: bool) {
         let mut segment = std::mem::take(seg);
+        let opens_group = segment
+            .words
+            .first()
+            .is_some_and(|w| w.is("{") && !w.quoted);
         segment.words = sh.enter_groups(&segment.words).to_vec();
         let head = std::mem::replace(&mut sh.head, false);
+        if sh
+            .or_group
+            .as_ref()
+            .is_some_and(|(_, d)| sh.frames.len() < *d)
+        {
+            sh.or_group = None;
+        }
         if let Some(saved) = sh.or_saved.take() {
-            if segment
-                .words
-                .first()
-                .is_some_and(|w| matches!(w.text.as_str(), "exit" | "return"))
-            {
+            if opens_group {
+                sh.or_group = Some((saved, sh.frames.len()));
+            } else if starts_exit(&segment) {
+                sh.cwd = saved;
+                sh.list_cwd = sh.cwd.clone();
+            }
+        }
+        if starts_exit(&segment) {
+            if let Some((saved, _)) = sh.or_group.take() {
                 sh.cwd = saved;
                 sh.list_cwd = sh.cwd.clone();
             }
@@ -436,10 +463,12 @@ impl Analyzer<'_> {
     pub(super) fn push_hit(&mut self, kind: HitKind, program: &str, anchor: Anchor) {
         if matches!(kind, HitKind::Write(_)) {
             let place = match &anchor {
-                Anchor::Path(p) => Some(p),
-                Anchor::Unresolved { literal_prefix, .. } => literal_prefix.as_ref(),
+                Anchor::Path(p) => Some(p).filter(|p| is_hooks_path(p)),
+                Anchor::Unresolved { literal_prefix, .. } => literal_prefix
+                    .as_ref()
+                    .filter(|p| is_hooks_path(p) || p.ends_with(".git")),
             };
-            if let Some(p) = place.filter(|p| is_hooks_path(p)) {
+            if let Some(p) = place {
                 let token = p.display().to_string();
                 self.push_bypass(BypassRule::HooksDirWrite, &token);
             }

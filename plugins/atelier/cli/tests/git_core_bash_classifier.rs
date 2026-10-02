@@ -1592,7 +1592,9 @@ fn cd_that_certainly_ran_moves_the_cwd() {
         "cd /tmp; rm a",
         "cd /tmp || exit 1; rm a",
         "cd /tmp || return; rm a",
+        "cd /tmp || { echo no; exit 1; }; rm a",
         "{ cd /tmp; }; rm a",
+        "f() (true); { cd /tmp; }; rm a",
     ] {
         assert_single_write(cmd, WriteRule::FileOp, "/tmp/a");
     }
@@ -1626,6 +1628,9 @@ fn writes_into_the_hooks_directory_are_hook_bypass() {
         "rm -f /work/proj/.git/hooks/*",
         "mv .git/hooks/pre-commit /tmp/",
         "chmod -x .git/hooks/pre-commit",
+        "rm -f .git/hoo*/pre-commit",
+        "cp a .git/hook?/pre-commit",
+        "echo hi > .git/hoo*/pre-commit",
         "echo exit 0 > .git/hooks/pre-commit",
         "cd .git && rm hooks/commit-msg",
     ] {
@@ -1703,5 +1708,21 @@ fn a_switch_that_may_have_failed_does_not_carry_over() {
     assert_eq!(
         branches("git switch -c feat && rm a; rm b"),
         vec![switched(CWD, "feat"), None]
+    );
+}
+
+#[test]
+fn a_later_switch_to_an_unnamed_branch_ends_the_carried_switch() {
+    for cmd in [
+        "git switch -c feat && git checkout main && rm a",
+        "git checkout -b feat && git checkout main && rm a",
+        "git switch -c feat && git switch - && rm a",
+        "git switch -c feat && git switch \"$B\" && rm a",
+    ] {
+        assert_eq!(branches(cmd), vec![None], "{cmd:?}");
+    }
+    assert_eq!(
+        branches("git switch -c feat && git checkout -- a && rm a"),
+        vec![switched(CWD, "feat")]
     );
 }
