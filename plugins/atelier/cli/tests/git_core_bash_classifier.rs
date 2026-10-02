@@ -1637,6 +1637,10 @@ fn writes_into_the_hooks_directory_are_hook_bypass() {
         "echo hi > .git/hoo*/pre-commit",
         "rm -rf .git/*",
         "rm -f .git/$D/pre-commit",
+        "rm -f .git//hoo*/pre-commit",
+        "rm -f .git/info/../hoo*/pre-commit",
+        "cd .git && rm -f hoo*/pre-commit",
+        "rm -f .git/x*/../hooks/pre-commit",
         "echo exit 0 > .git/hooks/pre-commit",
         "cd .git && rm hooks/commit-msg",
     ] {

@@ -177,14 +177,13 @@ impl Shell {
     }
 }
 
-/// Whether the component after `.git` in an unresolved path could expand to
-/// `hooks`.
+/// Whether the first unresolved component of `raw`, the one right below the
+/// literal prefix, could expand to `hooks` or a later `..` climbs back to it.
 fn may_name_hooks_dir(raw: &str) -> bool {
-    let parts: Vec<&str> = raw.split('/').collect();
-    parts
-        .windows(2)
-        .filter(|w| w[0] == ".git")
-        .any(|w| glob_may_match(w[1].as_bytes(), b"hooks"))
+    let mut parts = raw.split('/');
+    let first = parts.find(|c| c.contains(['*', '?', '[', '{', '$', '`']));
+    let climbs_back = parts.any(|c| c == "..");
+    climbs_back || first.is_none_or(|c| glob_may_match(c.as_bytes(), b"hooks"))
 }
 
 /// `*`/`?` glob match; a bracket expression or expansion matches anything.
