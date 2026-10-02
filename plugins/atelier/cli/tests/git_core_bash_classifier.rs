@@ -236,9 +236,12 @@ fn harmless_config_and_env_pass() {
 fn bypass_and_commit_are_both_reported() {
     let a = analyze("git commit --no-verify -m x");
     assert_eq!(a.bypass.len(), 1);
+    assert_eq!(a.bypass[0].rule, BypassRule::NoVerifyFlag);
     assert_eq!(a.bypass[0].token, "--no-verify");
-    assert_eq!(a.hits.len(), 1);
-    assert_eq!(a.hits[0].kind, HitKind::Commit);
+    assert_hits(
+        "git commit --no-verify -m x",
+        vec![(HitKind::Commit, path(CWD))],
+    );
 }
 
 // ---- C: commit anchors ---------------------------------------------------
@@ -643,8 +646,13 @@ fn tilde_needs_home() {
         home: None,
     })
     .unwrap();
-    assert_eq!(a.hits.len(), 1);
-    assert_eq!(a.hits[0].anchor, unresolved(None, "~/x"));
+    assert_eq!(
+        a.hits
+            .into_iter()
+            .map(|h| (h.kind, h.anchor))
+            .collect::<Vec<_>>(),
+        vec![write(WriteRule::FileOp, unresolved(None, "~/x"))]
+    );
     assert_hits(
         "rm ~other/x",
         vec![write(WriteRule::FileOp, unresolved(None, "~other/x"))],
@@ -689,25 +697,14 @@ fn cd_does_not_leak_out_of_subshells_pipes_or_background() {
 
 #[test]
 fn cd_to_unknown_place_makes_relative_targets_unresolved() {
-    for cmd in [
-        "cd $X && rm f",
-        "cd \"$X\"; rm f",
-        "cd - && rm f",
-        "pushd sub && rm f",
-        "cd $(mktemp -d) && rm f",
+    for (cmd, raw) in [
+        ("cd $X && rm f", "$X/f"),
+        ("cd \"$X\"; rm f", "$X/f"),
+        ("cd - && rm f", "-/f"),
+        ("pushd sub && rm f", "pushd/f"),
+        ("cd $(mktemp -d) && rm f", "$(mktemp -d)/f"),
     ] {
-        let hits = pairs(cmd);
-        assert_eq!(hits.len(), 1, "{cmd:?}");
-        match &hits[0] {
-            (
-                HitKind::Write(WriteRule::FileOp),
-                Anchor::Unresolved {
-                    literal_prefix: None,
-                    ..
-                },
-            ) => {}
-            other => panic!("{cmd:?}: unexpected {other:?}"),
-        }
+        assert_hits(cmd, vec![write(WriteRule::FileOp, unresolved(None, raw))]);
     }
     assert_single_write("cd $X && rm /abs/f", WriteRule::FileOp, "/abs/f");
     assert_hits(
@@ -802,10 +799,27 @@ fn xargs_inner_command_gets_unknown_stdin_targets() {
         "git ls-files | xargs -0 -n 5 rm",
         vec![write(WriteRule::FileOp, unresolved(None, "<stdin>"))],
     );
-    assert_hits(
+    for cmd in [
         "xargs -I{} rm {}",
-        vec![write(WriteRule::FileOp, path("/work/proj/{}"))],
+        "xargs -I % rm %",
+        "xargs -i rm {}",
+        "xargs --replace=@ rm @",
+        "xargs --replace rm {}",
+        "xargs -n1 -I{} rm -f {}",
+    ] {
+        assert_hits(
+            cmd,
+            vec![write(WriteRule::FileOp, unresolved(None, "<stdin>"))],
+        );
+    }
+    assert_hits(
+        "xargs -I{} rm dir/{}",
+        vec![write(
+            WriteRule::FileOp,
+            unresolved(Some("/work/proj/dir"), "dir/<stdin>"),
+        )],
     );
+    assert_single_write("xargs -I{} rm fixed", WriteRule::FileOp, "/work/proj/fixed");
     assert_hits(
         "xargs -I{} cp {} /tmp/out",
         vec![write(WriteRule::CopyDest, path("/tmp/out"))],
@@ -859,6 +873,12 @@ fn wrapper_nesting_is_limited_to_depth_two() {
     assert_single_write("sudo env rm f", WriteRule::FileOp, "/work/proj/f");
     assert_hits("sudo env nohup rm f", vec![wrapper(Wrapper::Nohup)]);
     assert_hits("nohup time command rm f", vec![wrapper(Wrapper::Command)]);
+    assert_hits("sudo env xargs rm", vec![wrapper(Wrapper::Xargs)]);
+    assert_hits("sudo env time rm f", vec![wrapper(Wrapper::Time)]);
+    assert_hits(
+        "sudo env find . -exec rm {} \\;",
+        vec![wrapper(Wrapper::FindExec)],
+    );
     assert_single_write(
         r#"bash -c "bash -c 'rm f'""#,
         WriteRule::FileOp,
@@ -872,14 +892,20 @@ fn wrapper_nesting_is_limited_to_depth_two() {
 
 #[test]
 fn bypass_inside_wrappers_is_found() {
-    for cmd in [
-        "bash -c \"git commit --no-verify -m x\"",
-        "sudo git commit -n -m x",
-        "env -i git -c core.hooksPath=/x commit",
-        "xargs git commit --no-verify",
-        "nohup git push --no-verify &",
+    for (cmd, rule) in [
+        (
+            "bash -c \"git commit --no-verify -m x\"",
+            BypassRule::NoVerifyFlag,
+        ),
+        ("sudo git commit -n -m x", BypassRule::CommitShortNoVerify),
+        (
+            "env -i git -c core.hooksPath=/x commit",
+            BypassRule::HooksPathConfig,
+        ),
+        ("xargs git commit --no-verify", BypassRule::NoVerifyFlag),
+        ("nohup git push --no-verify &", BypassRule::NoVerifyFlag),
     ] {
-        assert!(!analyze(cmd).bypass.is_empty(), "{cmd:?}");
+        assert_bypass(cmd, rule);
     }
 }
 
@@ -947,10 +973,14 @@ fn script_paths_eval_and_dynamic_commands_are_opaque() {
         ))],
     );
     assert_hits(
-        "/opt/tool/run.sh",
+        "../tools/run.sh",
         vec![opaque(OpaqueCause::ScriptFile(
-            "/opt/tool/run.sh".to_string(),
+            "../tools/run.sh".to_string(),
         ))],
+    );
+    assert_hits(
+        "a/b",
+        vec![opaque(OpaqueCause::ScriptFile("a/b".to_string()))],
     );
     assert_hits("eval \"$X\"", vec![opaque(OpaqueCause::Eval)]);
     assert_hits("$CMD arg", vec![opaque(OpaqueCause::DynamicCommand)]);
@@ -1083,10 +1113,13 @@ fn separators_split_commands() {
         "if true; then rm a; rm b; fi",
         "! rm a; rm b",
     ] {
-        let hits = pairs(cmd);
-        assert_eq!(hits.len(), 2, "{cmd:?}: {hits:?}");
-        assert_eq!(hits[0].1, path("/work/proj/a"), "{cmd:?}");
-        assert_eq!(hits[1].1, path("/work/proj/b"), "{cmd:?}");
+        assert_hits(
+            cmd,
+            vec![
+                write(WriteRule::FileOp, path("/work/proj/a")),
+                write(WriteRule::FileOp, path("/work/proj/b")),
+            ],
+        );
     }
 }
 
@@ -1096,11 +1129,60 @@ fn line_continuation_joins_words() {
 }
 
 #[test]
-fn quoted_words_are_not_flags() {
-    assert_no_bypass("git commit '--no-verify'");
+fn quoted_flags_are_still_flags() {
+    for (cmd, rule) in [
+        ("git commit '--no-verify'", BypassRule::NoVerifyFlag),
+        (r#"git commit "--no-verify""#, BypassRule::NoVerifyFlag),
+        (r"git commit --no\-verify", BypassRule::NoVerifyFlag),
+        (r#"git commit "-n""#, BypassRule::CommitShortNoVerify),
+        (
+            r#"git "-c" core.hooksPath=x commit"#,
+            BypassRule::HooksPathConfig,
+        ),
+        (
+            "git '-c' core.hooksPath=x commit -m x",
+            BypassRule::HooksPathConfig,
+        ),
+    ] {
+        assert_bypass(cmd, rule);
+    }
     assert_hits(
-        "git apply '--check' p",
-        vec![write(WriteRule::GitWrite, path(CWD))],
+        "git '-C' dir commit -m x",
+        vec![(HitKind::Commit, path("/work/proj/dir"))],
+    );
+    assert_single_write("sed '-i' s/a/b/ f", WriteRule::InPlaceEdit, "/work/proj/f");
+    assert_single_write(
+        "find build '-delete'",
+        WriteRule::FindDelete,
+        "/work/proj/build",
+    );
+}
+
+#[test]
+fn quoted_option_values_are_still_not_flags() {
+    for cmd in [
+        r#"git commit -m "-n""#,
+        "git commit -m '--no-verify'",
+        r#"git commit -m "--no-verify""#,
+        "git commit -F '--no-verify'",
+    ] {
+        assert_no_bypass(cmd);
+    }
+    assert_single_write("sed -i '' s/a/b/ f", WriteRule::InPlaceEdit, "/work/proj/f");
+}
+
+#[test]
+fn quoted_check_flag_makes_git_apply_read_only() {
+    assert_clean("git apply '--check' p");
+    assert_clean(r#"git apply "--stat" p"#);
+}
+
+#[test]
+fn quoted_tar_and_find_options_are_still_options() {
+    assert_single_write("tar '-xf' a.tgz", WriteRule::Extract, CWD);
+    assert_hits(
+        "find . '-exec' rm {} \\;",
+        vec![write(WriteRule::FileOp, unresolved(Some(CWD), "./*"))],
     );
 }
 
@@ -1121,8 +1203,9 @@ fn unterminated_constructs_are_errors() {
 
 #[test]
 fn escaped_quote_does_not_open_a_string() {
-    assert!(classify(&input("echo \\\"git commit")).is_ok());
-    assert!(classify(&input("echo \\'x")).is_ok());
+    assert_clean("echo \\\"git commit");
+    assert_clean("echo \\'x");
+    assert_single_write("echo \\\"a > f", WriteRule::Redirect, "/work/proj/f");
 }
 
 // ---- purity -----------------------------------------------------------
@@ -1167,4 +1250,249 @@ fn mixed_pipeline_reports_every_hit_in_order() {
             ),
         ],
     );
+}
+
+// ---- persistent environment ------------------------------------------------
+
+#[test]
+fn exported_hook_env_applies_to_later_segments() {
+    for (cmd, rule) in [
+        ("export HUSKY=0; git commit -m x", BypassRule::HookSkipEnv),
+        ("export HUSKY=0 && git push", BypassRule::HookSkipEnv),
+        ("HUSKY=0; git commit -m x", BypassRule::HookSkipEnv),
+        ("SKIP=lint\ngit commit -m x", BypassRule::HookSkipEnv),
+        (
+            "declare -x HUSKY=0; git commit -m x",
+            BypassRule::HookSkipEnv,
+        ),
+        (
+            "export FOO=1 SKIP=x; git commit -m x",
+            BypassRule::HookSkipEnv,
+        ),
+        (
+            "export GIT_CONFIG_KEY_0=core.hooksPath; git commit -m x",
+            BypassRule::HooksPathEnv,
+        ),
+        (
+            "export HUSKY=0; bash -c 'git commit -m x'",
+            BypassRule::HookSkipEnv,
+        ),
+        (
+            "export HUSKY=0; env git commit -m x",
+            BypassRule::HookSkipEnv,
+        ),
+        (
+            "{ export HUSKY=0; git commit -m x; }",
+            BypassRule::HookSkipEnv,
+        ),
+    ] {
+        assert_bypass(cmd, rule);
+    }
+}
+
+#[test]
+fn persistent_env_does_not_leak_or_misfire() {
+    for cmd in [
+        "(export HUSKY=0); git commit -m x",
+        "export HUSKY=0 | git commit -m x",
+        "HUSKY=0 & git commit -m x",
+        "export HUSKY=0; export HUSKY=1; git commit -m x",
+        "HUSKY=0; HUSKY=1; git commit -m x",
+        "export HUSKY=0; git status",
+        "export HUSKY=1; git commit -m x",
+        "declare HUSKY=0; git commit -m x",
+        "export FOO=1; git commit -m x",
+    ] {
+        assert_no_bypass(cmd);
+    }
+}
+
+#[test]
+fn persistent_env_assignments_are_not_hits() {
+    assert_hits(
+        "export HUSKY=0; git commit -m x",
+        vec![(HitKind::Commit, path(CWD))],
+    );
+    assert_clean("export FOO=bar");
+}
+
+// ---- absolute-path programs ------------------------------------------------
+
+#[test]
+fn absolute_path_programs_are_classified_by_basename() {
+    assert_clean("/usr/bin/ls");
+    assert_clean("/usr/local/bin/cargo test");
+    assert_clean("/opt/tool/run.sh");
+    assert_single_write("/bin/rm f", WriteRule::FileOp, "/work/proj/f");
+    assert_hits("/usr/bin/python3 x.py", vec![interpreter("python3")]);
+}
+
+// ---- command substitution --------------------------------------------------
+
+#[test]
+fn command_substitution_bodies_are_classified() {
+    for cmd in [
+        "echo $(rm f)",
+        "echo `rm f`",
+        "echo \"$(rm f)\"",
+        "echo \"`rm f`\"",
+        "echo x > /dev/null $(rm f)",
+        "echo pre$(rm f)post",
+    ] {
+        assert_single_write(cmd, WriteRule::FileOp, "/work/proj/f");
+    }
+    assert_single_write(
+        "cd sub && echo $(rm f)",
+        WriteRule::FileOp,
+        "/work/proj/sub/f",
+    );
+    assert_single_write(
+        "echo $(cd sub && rm f)",
+        WriteRule::FileOp,
+        "/work/proj/sub/f",
+    );
+    assert_single_write("echo $(echo `rm f`)", WriteRule::FileOp, "/work/proj/f");
+}
+
+#[test]
+fn command_substitution_finds_bypass_commits_and_opaque_runs() {
+    assert_bypass(
+        "echo $(git commit --no-verify -m x)",
+        BypassRule::NoVerifyFlag,
+    );
+    assert_bypass("echo `git commit -n -m x`", BypassRule::CommitShortNoVerify);
+    assert_hits(
+        "echo $(git commit -m x)",
+        vec![(HitKind::Commit, path(CWD))],
+    );
+    assert_hits("echo $(node x.js)", vec![interpreter("node")]);
+}
+
+#[test]
+fn substitution_does_not_leak_cwd_or_run_inside_single_quotes_or_heredocs() {
+    assert_single_write("echo $(cd sub); rm f", WriteRule::FileOp, "/work/proj/f");
+    assert_clean("echo '$(rm f)'");
+    assert_clean("echo '`rm f`'");
+    assert_clean("echo $((1 + 2))");
+    assert_clean("echo $((a > b))");
+    assert_clean("cat <<EOF\n$(rm f)\nEOF");
+}
+
+#[test]
+fn substitution_nesting_beyond_depth_two_is_opaque() {
+    assert_single_write("echo $(echo $(rm f))", WriteRule::FileOp, "/work/proj/f");
+    assert_hits(
+        "echo $(echo $(echo $(rm f)))",
+        vec![opaque(OpaqueCause::Substitution)],
+    );
+    assert_hits(
+        "bash -c 'echo $(echo $(rm f))'",
+        vec![opaque(OpaqueCause::Substitution)],
+    );
+}
+
+#[test]
+fn unlexable_substitution_body_is_opaque() {
+    assert_hits("echo `echo 'x`", vec![opaque(OpaqueCause::Substitution)]);
+}
+
+// ---- source ------------------------------------------------------------------
+
+#[test]
+fn source_and_dot_are_opaque_script_files() {
+    assert_hits(
+        "source x.sh",
+        vec![opaque(OpaqueCause::ScriptFile("x.sh".to_string()))],
+    );
+    assert_hits(
+        ". ./env.sh",
+        vec![opaque(OpaqueCause::ScriptFile("./env.sh".to_string()))],
+    );
+    assert_hits(
+        "cd sub && source x.sh",
+        vec![(
+            HitKind::Opaque(OpaqueCause::ScriptFile("x.sh".to_string())),
+            path("/work/proj/sub"),
+        )],
+    );
+}
+
+// ---- W3 additions: downloads and rsync ---------------------------------------
+
+#[test]
+fn download_tools_write_their_output_targets() {
+    for (cmd, target) in [
+        ("curl -o out.bin http://x", "/work/proj/out.bin"),
+        ("curl http://x -o out.bin", "/work/proj/out.bin"),
+        ("curl --output out.bin http://x", "/work/proj/out.bin"),
+        ("curl --output=out.bin http://x", "/work/proj/out.bin"),
+        ("curl -sSLo out.bin http://x", "/work/proj/out.bin"),
+        ("curl -o /abs/f http://x", "/abs/f"),
+        ("curl -H 'X: a' -o out.bin http://x", "/work/proj/out.bin"),
+        ("curl --output-dir d -o f http://x", "/work/proj/d/f"),
+        ("wget -O out.bin http://x", "/work/proj/out.bin"),
+        (
+            "wget --output-document=out.bin http://x",
+            "/work/proj/out.bin",
+        ),
+        (
+            "wget --output-document out.bin http://x",
+            "/work/proj/out.bin",
+        ),
+        ("wget -P dl http://x", "/work/proj/dl"),
+        ("wget --directory-prefix=dl http://x", "/work/proj/dl"),
+    ] {
+        assert_single_write(cmd, WriteRule::Download, target);
+    }
+    assert_hits(
+        "curl -o a http://x -o b",
+        vec![
+            write(WriteRule::Download, path("/work/proj/a")),
+            write(WriteRule::Download, path("/work/proj/b")),
+        ],
+    );
+}
+
+#[test]
+fn downloads_to_stdout_or_nowhere_pass() {
+    for cmd in [
+        "curl http://x",
+        "curl -s http://x | cat",
+        "curl -o - http://x",
+        "curl -o /dev/null http://x",
+        "curl -HContent-Type:x http://x",
+        "wget -O - http://x",
+        "wget -qO- http://x",
+        "wget http://x",
+    ] {
+        assert_clean(cmd);
+    }
+}
+
+#[test]
+fn rsync_writes_its_destination() {
+    for (cmd, dest) in [
+        ("rsync -a src/ dest/", "/work/proj/dest"),
+        ("rsync -av a b dest", "/work/proj/dest"),
+        ("rsync -a --exclude x src/ /abs/dest", "/abs/dest"),
+        ("rsync -e ssh -a src dest", "/work/proj/dest"),
+        ("rsync a b", "/work/proj/b"),
+    ] {
+        assert_single_write(cmd, WriteRule::CopyDest, dest);
+    }
+}
+
+#[test]
+fn rsync_without_local_destination_passes() {
+    for cmd in [
+        "rsync -a src/",
+        "rsync -an src dest",
+        "rsync --dry-run src dest",
+        "rsync --list-only src dest",
+        "rsync -a src host:dest",
+        "rsync -a src user@host:/dest",
+        "rsync -a src rsync://host/mod",
+    ] {
+        assert_clean(cmd);
+    }
 }

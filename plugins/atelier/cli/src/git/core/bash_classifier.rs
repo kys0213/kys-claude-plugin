@@ -54,6 +54,7 @@ pub enum WriteRule {
     FileOp,
     CopyDest,
     DdOutput,
+    Download,
     FindDelete,
     Patch,
     Extract,
@@ -66,6 +67,7 @@ pub enum OpaqueCause {
     ScriptFile(String),
     Eval,
     DynamicCommand,
+    Substitution,
     Wrapper(Wrapper),
 }
 
@@ -84,6 +86,8 @@ pub enum Wrapper {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Anchor {
+    /// A normalized path that need not exist. The effect lands at or below it,
+    /// so consumers resolve it by walking up its ancestors.
     Path(PathBuf),
     Unresolved {
         literal_prefix: Option<PathBuf>,
@@ -168,6 +172,8 @@ struct Word {
     /// Byte index in `text` of the first expansion or glob character.
     dyn_at: Option<usize>,
     tilde: bool,
+    /// Bodies of the `$(…)` and backtick substitutions inside the word.
+    subs: Vec<String>,
 }
 
 impl Word {
@@ -198,11 +204,11 @@ impl Word {
     }
 
     fn is(&self, s: &str) -> bool {
-        !self.quoted && self.text == s
+        self.text == s
     }
 
     fn is_flag(&self) -> bool {
-        !self.quoted && self.text.len() > 1 && self.text.starts_with('-')
+        self.text.len() > 1 && self.text.starts_with('-')
     }
 
     fn slice_from(&self, offset: usize) -> Word {
@@ -211,6 +217,7 @@ impl Word {
             quoted: self.quoted,
             dyn_at: self.dyn_at.and_then(|i| i.checked_sub(offset)),
             tilde: false,
+            subs: Vec::new(),
         }
     }
 }
@@ -592,9 +599,16 @@ impl Lexer {
     fn read_dollar(&mut self, w: &mut Word, in_double_quotes: bool) -> Result<(), LexError> {
         match self.peek_at(1) {
             Some('(') => {
+                let arithmetic = self.peek_at(2) == Some('(');
                 w.push_dyn('$');
                 self.pos += 1;
-                self.scan_parens(w)
+                let open = w.text.len();
+                self.scan_parens(w)?;
+                if !arithmetic {
+                    let body = w.text[open + 1..w.text.len() - 1].to_string();
+                    w.subs.push(body);
+                }
+                Ok(())
             }
             Some('{') => {
                 w.push_dyn('$');
@@ -673,6 +687,7 @@ impl Lexer {
     fn read_backtick(&mut self, w: &mut Word) -> Result<(), LexError> {
         w.push_dyn('`');
         self.pos += 1;
+        let open = w.text.len();
         loop {
             let Some(c) = self.next() else {
                 return Err(LexError::UnterminatedSubstitution);
@@ -683,6 +698,8 @@ impl Lexer {
                     w.text.push(n);
                 }
             } else if c == '`' {
+                w.subs
+                    .push(unescape_backtick(&w.text[open..w.text.len() - 1]));
                 return Ok(());
             }
         }
@@ -776,6 +793,20 @@ impl Place {
     }
 }
 
+fn unescape_backtick(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut chars = body.chars().peekable();
+    while let Some(c) = chars.next() {
+        match (c, chars.peek()) {
+            ('\\', Some('`' | '\\' | '$')) => {
+                out.extend(chars.next());
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for comp in path.components() {
@@ -819,6 +850,27 @@ fn assignment(w: &Word) -> Option<(String, String)> {
     Some((name.to_string(), value.to_string()))
 }
 
+/// State a segment leaves for the following segments of the same shell.
+enum Effect {
+    Cd(Place),
+    Env(Vec<(String, String)>),
+}
+
+fn set_env(env: &mut Env, (name, value): (String, String)) {
+    env.retain(|(n, _)| *n != name);
+    env.push((name, value));
+}
+
+fn assignments(args: &[Word]) -> Vec<(String, String)> {
+    args.iter().filter_map(assignment).collect()
+}
+
+fn exports(args: &[Word]) -> bool {
+    args.iter()
+        .take_while(|w| w.is_flag())
+        .any(|w| w.text[1..].contains('x'))
+}
+
 fn split_eq(s: &str) -> (&str, bool) {
     match s.split_once('=') {
         Some((name, _)) => (name, true),
@@ -848,6 +900,14 @@ impl Parsed {
             .iter()
             .find(|(n, _)| names.contains(&n.as_str()))
             .and_then(|(_, v)| v.as_ref())
+    }
+
+    fn values(&self, names: &[&str]) -> Vec<&Word> {
+        self.opts
+            .iter()
+            .filter(|(n, _)| names.contains(&n.as_str()))
+            .filter_map(|(_, v)| v.as_ref())
+            .collect()
     }
 
     fn has(&self, name: &str) -> bool {
@@ -931,7 +991,8 @@ impl Analyzer<'_> {
     ) -> Result<(), LexError> {
         let toks = lex(src)?;
         let mut cwd = cwd.clone();
-        let mut saved: Vec<Place> = Vec::new();
+        let mut env = env.clone();
+        let mut saved: Vec<(Place, Env)> = Vec::new();
         let mut seg = Segment::default();
         let mut after_pipe = false;
         for tok in toks {
@@ -941,12 +1002,13 @@ impl Analyzer<'_> {
                 Tok::Sep(sep) => {
                     let before_pipe = sep == Sep::Pipe;
                     let propagate = !after_pipe && !before_pipe && sep != Sep::Amp;
-                    self.flush(&mut seg, &mut cwd, env, depth, propagate);
+                    self.flush(&mut seg, &mut cwd, &mut env, depth, propagate);
                     match sep {
-                        Sep::LParen => saved.push(cwd.clone()),
+                        Sep::LParen => saved.push((cwd.clone(), env.clone())),
                         Sep::RParen => {
-                            if let Some(outer) = saved.pop() {
-                                cwd = outer;
+                            if let Some((outer_cwd, outer_env)) = saved.pop() {
+                                cwd = outer_cwd;
+                                env = outer_env;
                             }
                         }
                         _ => {}
@@ -955,7 +1017,7 @@ impl Analyzer<'_> {
                 }
             }
         }
-        self.flush(&mut seg, &mut cwd, env, depth, !after_pipe);
+        self.flush(&mut seg, &mut cwd, &mut env, depth, !after_pipe);
         Ok(())
     }
 
@@ -963,7 +1025,7 @@ impl Analyzer<'_> {
         &mut self,
         seg: &mut Segment,
         cwd: &mut Place,
-        env: &Env,
+        env: &mut Env,
         depth: usize,
         propagate: bool,
     ) {
@@ -971,36 +1033,66 @@ impl Analyzer<'_> {
         if segment.words.is_empty() && segment.redirs.is_empty() {
             return;
         }
-        if let Some(next) = self.segment(&segment, cwd, env, depth) {
-            if propagate {
-                *cwd = next;
+        let effect = self.segment(&segment, cwd, env, depth);
+        if !propagate {
+            return;
+        }
+        match effect {
+            Some(Effect::Cd(next)) => *cwd = next,
+            Some(Effect::Env(assigned)) => {
+                for kv in assigned {
+                    set_env(env, kv);
+                }
+            }
+            None => {}
+        }
+    }
+
+    fn scan_substitutions(&mut self, seg: &Segment, cwd: &Place, env: &Env, depth: usize) {
+        let targets = seg.redirs.iter().filter_map(|(_, t)| t.as_ref());
+        for word in seg.words.iter().chain(targets) {
+            for body in &word.subs {
+                if depth >= MAX_WRAPPER_DEPTH || self.run_script(body, cwd, env, depth + 1).is_err()
+                {
+                    self.opaque(OpaqueCause::Substitution, "$(", cwd);
+                }
             }
         }
     }
 
-    /// Returns the new cwd when the segment is a directory change.
-    fn segment(&mut self, seg: &Segment, cwd: &Place, env: &Env, depth: usize) -> Option<Place> {
+    /// Returns the state change the segment leaves behind for later segments
+    /// of the same shell.
+    fn segment(&mut self, seg: &Segment, cwd: &Place, env: &Env, depth: usize) -> Option<Effect> {
+        self.scan_substitutions(seg, cwd, env, depth);
         for (op, target) in &seg.redirs {
             if let (RedirOp::Out, Some(target)) = (op, target) {
                 self.write_target(WriteRule::Redirect, ">", target, cwd);
             }
         }
         let mut env = env.clone();
+        let mut assigned: Vec<(String, String)> = Vec::new();
         let mut words: &[Word] = &seg.words;
         while let Some(first) = words.first() {
             if !first.quoted && RESERVED.contains(&first.text.as_str()) {
                 words = &words[1..];
             } else if let Some(kv) = assignment(first) {
-                env.push(kv);
+                set_env(&mut env, kv.clone());
+                assigned.push(kv);
                 words = &words[1..];
             } else {
                 break;
             }
         }
-        let first = words.first()?;
+        let Some(first) = words.first() else {
+            return (!assigned.is_empty()).then_some(Effect::Env(assigned));
+        };
         match program_name(first) {
-            "cd" => Some(self.cd_target(&words[1..], cwd)),
-            name @ ("pushd" | "popd") => Some(Place::unknown(name)),
+            "cd" => Some(Effect::Cd(self.cd_target(&words[1..], cwd))),
+            name @ ("pushd" | "popd") => Some(Effect::Cd(Place::unknown(name))),
+            "export" => Some(Effect::Env(assignments(&words[1..]))),
+            "declare" | "typeset" if exports(&words[1..]) => {
+                Some(Effect::Env(assignments(&words[1..])))
+            }
             _ => {
                 self.command(words, &env, cwd, depth);
                 None
@@ -1150,6 +1242,10 @@ impl Analyzer<'_> {
             "find" => self.find_cmd(args, env, cwd, depth),
             "bash" | "sh" | "zsh" | "dash" | "ksh" => self.shell_cmd(name, args, env, cwd, depth),
             "eval" => self.opaque(OpaqueCause::Eval, name, cwd),
+            "source" | "." => {
+                let file = args.first().map_or("", |w| w.text.as_str());
+                self.opaque(OpaqueCause::ScriptFile(file.to_string()), name, cwd);
+            }
             "git" => self.git_cmd(args, env, cwd),
             "sed" => self.sed_cmd(args, cwd),
             "awk" | "gawk" => self.awk_cmd(args, cwd),
@@ -1163,8 +1259,11 @@ impl Analyzer<'_> {
             "patch" => self.patch_cmd(args, cwd),
             "tar" => self.tar_cmd(args, cwd),
             "unzip" => self.unzip_cmd(args, cwd),
+            "curl" => self.curl_cmd(args, cwd),
+            "wget" => self.wget_cmd(args, cwd),
+            "rsync" => self.rsync_cmd(args, cwd),
             _ if is_interpreter(name) => self.interpreter(name, args, cwd),
-            _ if prog.text.contains('/') => {
+            _ if prog.text.contains('/') && !prog.text.starts_with('/') => {
                 self.opaque(OpaqueCause::ScriptFile(prog.text.clone()), name, cwd)
             }
             _ => {}
@@ -1381,7 +1480,7 @@ impl Analyzer<'_> {
         if !self.can_unwrap(Wrapper::Xargs, "xargs", cwd, depth) {
             return;
         }
-        let mut replace = false;
+        let mut replace: Option<String> = None;
         let mut i = 0;
         while let Some(w) = args.get(i) {
             if !w.is_flag() {
@@ -1394,7 +1493,14 @@ impl Analyzer<'_> {
             if let Some(long) = w.text.strip_prefix("--") {
                 let (name, attached) = split_eq(long);
                 match name {
-                    "replace" => replace = true,
+                    "replace" => {
+                        let marker = if attached {
+                            &long[name.len() + 1..]
+                        } else {
+                            "{}"
+                        };
+                        replace = Some(marker.to_string());
+                    }
                     "max-args" | "max-procs" | "max-lines" | "max-chars" | "delimiter"
                     | "arg-file" | "eof" | "process-slot-var" => {
                         if !attached {
@@ -1409,12 +1515,20 @@ impl Analyzer<'_> {
                 let after = 1 + ci + ch.len_utf8();
                 match ch {
                     'I' | 'n' | 'L' | 'P' | 's' | 'd' | 'E' | 'a' | 'J' | 'S' => {
-                        replace |= ch == 'I';
-                        i += short_value(w, after, args.get(i)).1;
+                        let (value, extra) = short_value(w, after, args.get(i));
+                        if ch == 'I' {
+                            replace = value.map(|v| v.text);
+                        }
+                        i += extra;
                         break;
                     }
                     'i' => {
-                        replace = true;
+                        let marker = if after < w.text.len() {
+                            &w.text[after..]
+                        } else {
+                            "{}"
+                        };
+                        replace = Some(marker.to_string());
                         break;
                     }
                     'l' | 'e' => break,
@@ -1426,10 +1540,18 @@ impl Analyzer<'_> {
         if rest.is_empty() {
             return;
         }
-        let mut command = rest.to_vec();
-        if !replace {
-            command.push(Word::stdin_placeholder());
-        }
+        let command: Vec<Word> = match replace.as_deref() {
+            Some(marker) if !marker.is_empty() => rest
+                .iter()
+                .map(|w| substitute_stdin_marker(w, marker))
+                .collect(),
+            Some(_) => rest.to_vec(),
+            None => {
+                let mut command = rest.to_vec();
+                command.push(Word::stdin_placeholder());
+                command
+            }
+        };
         self.command(&command, env, cwd, depth + 1);
     }
 
@@ -1457,7 +1579,7 @@ impl Analyzer<'_> {
                 }
                 continue;
             }
-            if !matches!(w.text.as_str(), "-exec" | "-execdir" | "-ok" | "-okdir") || w.quoted {
+            if !matches!(w.text.as_str(), "-exec" | "-execdir" | "-ok" | "-okdir") {
                 continue;
             }
             let Some(len) = expr[i..]
@@ -1982,9 +2104,6 @@ impl Analyzer<'_> {
             let w = &args[i];
             let first = i == 0;
             i += 1;
-            if w.quoted {
-                continue;
-            }
             if let Some(long) = w.text.strip_prefix("--") {
                 if long.is_empty() {
                     break;
@@ -2091,6 +2210,83 @@ impl Analyzer<'_> {
         }
     }
 
+    fn curl_cmd(&mut self, args: &[Word], cwd: &Place) {
+        let parsed = parse_args(
+            args,
+            "AbcCdDeEFHKmoPQrtTuUwxXyYz",
+            &["output", "output-dir"],
+        );
+        let base = match parsed.value(&["output-dir"]) {
+            Some(dir) => self.resolve(cwd, dir),
+            None => cwd.clone(),
+        };
+        for target in parsed.values(&["o", "output"]) {
+            if !target.is("-") {
+                self.write_target(WriteRule::Download, "curl", target, &base);
+            }
+        }
+    }
+
+    fn wget_cmd(&mut self, args: &[Word], cwd: &Place) {
+        let parsed = parse_args(args, "OPoaeitTwQ", &["output-document", "directory-prefix"]);
+        for target in parsed.values(&["O", "output-document"]) {
+            if !target.is("-") {
+                self.write_target(WriteRule::Download, "wget", target, cwd);
+            }
+        }
+        for dir in parsed.values(&["P", "directory-prefix"]) {
+            self.write_target(WriteRule::Download, "wget", dir, cwd);
+        }
+    }
+
+    fn rsync_cmd(&mut self, args: &[Word], cwd: &Place) {
+        let parsed = parse_args(
+            args,
+            "eBfMT",
+            &[
+                "rsh",
+                "rsync-path",
+                "filter",
+                "exclude",
+                "exclude-from",
+                "include",
+                "include-from",
+                "files-from",
+                "partial-dir",
+                "backup-dir",
+                "temp-dir",
+                "log-file",
+                "bwlimit",
+                "port",
+                "timeout",
+                "max-size",
+                "min-size",
+                "compare-dest",
+                "copy-dest",
+                "link-dest",
+                "suffix",
+                "chmod",
+                "chown",
+                "usermap",
+                "groupmap",
+                "block-size",
+                "compress-level",
+                "skip-compress",
+                "out-format",
+                "info",
+                "debug",
+            ],
+        );
+        if parsed.has("n") || parsed.has("dry-run") || parsed.has("list-only") {
+            return;
+        }
+        if let [_, .., dest] = parsed.positionals.as_slice() {
+            if !is_remote_spec(&dest.text) {
+                self.write_target(WriteRule::CopyDest, "rsync", dest, cwd);
+            }
+        }
+    }
+
     // ---- opaque executions ----
 
     fn interpreter(&mut self, name: &str, args: &[Word], cwd: &Place) {
@@ -2098,6 +2294,11 @@ impl Analyzer<'_> {
             self.opaque(OpaqueCause::Interpreter(name.to_string()), name, cwd);
         }
     }
+}
+
+fn is_remote_spec(text: &str) -> bool {
+    text.split_once(':')
+        .is_some_and(|(host, _)| !host.contains('/'))
 }
 
 fn contains_hooks_path(value: &str) -> bool {
@@ -2120,6 +2321,18 @@ fn substitute_find_placeholder(word: &Word, root: &Word) -> Word {
         quoted: root.quoted,
         dyn_at: root.dyn_at.or(Some(root.text.len() + 1)),
         tilde: root.tilde,
+        subs: Vec::new(),
+    }
+}
+
+fn substitute_stdin_marker(word: &Word, marker: &str) -> Word {
+    let Some(at) = word.text.find(marker) else {
+        return word.clone();
+    };
+    Word {
+        text: word.text.replace(marker, "<stdin>"),
+        dyn_at: Some(word.dyn_at.map_or(at, |d| d.min(at))),
+        ..word.clone()
     }
 }
 
