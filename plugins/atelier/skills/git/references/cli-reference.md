@@ -38,16 +38,24 @@ atelier git reviews [pr-number]
 ## 2. Tool Guard (branch 보호 · PR 중복)
 
 ```bash
-atelier git guard <write|commit|pr> --project-dir=<p> [--create-branch-script=<s>] [--default-branch=<b>] [--protected-branches=<csv>]
+atelier git guard <write|commit|pr> --project-dir=<p> [--create-branch-script=<s>] [--default-branch=<b>] [--protected-branches=<csv>] [--opaque-exec <block|ask|allow>]
 ```
 
-- `write`/`commit`: 보호 브랜치에서 차단 시 exit 2, 통과 시 exit 0. 차단 메시지의 브랜치 생성 안내는
+- `write`/`commit`: 보호 브랜치에서 차단 시 exit 2 + stderr, 통과 시 exit 0, 확인 요청(Ask) 시 exit 0 + stdout JSON (아래). 차단 메시지의 브랜치 생성 안내는
   `--create-branch-script` 값(기본 `git switch -c`)을 출력한다.
+- `commit` (Bash matcher) 판정:
+  - **hook 우회 — 브랜치 무관 차단**: `--no-verify`(commit/push/merge/am/rebase, 위치·축약·인용 무관), `commit -n`/`-an`류, `core.hooksPath`(`git -c`·`--config-env`·`git config`·`GIT_CONFIG_*`), `HUSKY=0`, `SKIP=`(env 접두·export·영구 대입). 메시지는 `[Hook Guard] ...(브랜치 무관)`, exit 2.
+  - **보호 브랜치 파일 수정 — 차단**: 리다이렉트, in-place `sed`/`perl`/`awk`, `rm`/`mv`/`cp`/`touch`/`mkdir`/`tee`/`truncate`/`install`/`ln`/`dd`, `find -delete`/`-exec`, `patch`, `tar -x`, `unzip`, `curl -o`, `wget -O`, `rsync`, `git apply/am/rm/mv`·`stash pop|apply` (`env`/`sudo`/`nohup`/`timeout`/`time`/`command`/`xargs`/`bash -c`·명령 치환 경유 포함). 대상은 그 대상이 속한 저장소의 브랜치로 판정하고(다른 저장소/worktree 는 그 저장소 브랜치, 프로젝트 `--default-branch` pin 은 같은 저장소의 linked worktree 에도 적용), 어떤 저장소에도 속하지 않으면 통과한다. `write` 도 같은 규칙이다.
+  - **내부를 확인할 수 없는 실행** (`node`/`python`/`ruby`/`perl`/`deno`/`bun`/`sh` + 스크립트·인라인 코드, `./x`, `source`, `eval`, 파싱 불가 명령, 해석 안 되는 `$VAR` 대상): `--opaque-exec` 정책을 따른다.
+- `--opaque-exec <block|ask|allow>` (기본 `ask`): 위 내부 불명 실행에 대한 **보호 브랜치** 정책. `block` = exit 2, `allow` = exit 0, `ask` = exit 0 + stdout 에
+  `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"...","additionalContext":"..."}}` 한 줄을 출력해 사용자 확인을 요청한다. 보호 브랜치가 아니면 영향 없다.
+- 차단 메시지 구성(#865): 현재 브랜치, 대상 저장소, 프로젝트(+ 명령 cwd), 발동 규칙(기본 브랜치 pin/자동 감지·develop·`--protected-branches`), "가드를 의심하기 전에 브랜치부터 확인" 안내, 해소 명령. payload 최상위 `cwd` 를 명령 cwd 로 읽는다.
+- **알려진 한계 (정책상 통과)**: 신뢰 도구(`cargo`, `npm`/`pnpm`/`yarn run|test|install|ci`, `npx`, `pnpm dlx`, `make`, `python -m pytest|unittest`, `node --test`, `bun`/`deno test`), 절대경로 스크립트(`/x/run.sh`), alias·셸 함수·스크립트 내부, `curl -O`·옵션 없는 `wget`. `$TMPDIR` 같은 미해석 대상은 ask. 다른 저장소의 기본 브랜치 감지가 실패하면 fail-open (기존과 동일).
 - `pr`: 현재 브랜치에 열린 PR 이 있으면 `gh pr create` 차단 (exit 2). branch 옵션 불필요. legacy alias: `atelier git pr-guard`.
 - `--default-branch` 미지정 시 guard 가 런타임에 readonly 감지(`origin/HEAD` → main/develop/master 추측)한다.
   이 값을 박는 것은 `atelier git setup guard` 의 책임이다 (§4).
 
-> **이 명령은 hook 런타임이다.** stdin 으로 PreToolUse 페이로드를 받고 exit 2 로 차단을 신호한다.
+> **이 명령은 hook 런타임이다.** stdin 으로 PreToolUse 페이로드를 받고 exit 2 로 차단, exit 0 + stdout JSON 으로 확인 요청(Ask)을 신호한다.
 > 등록·설치용으로 호출하지 않는다 — 그건 §4 다.
 
 ## 3. Hook 관리

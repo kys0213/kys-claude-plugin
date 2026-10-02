@@ -156,16 +156,26 @@ hook 차단 여부와 **별개로 에이전트 스스로 지키는 정책**입�
 
 ## Default Branch Guard (PreToolUse Hook)
 
-기본 브랜치에서 Write/Edit 도구 사용 또는 git commit 시도 시 **즉시 차단**하고 브랜치 생성을 제안합니다.
+보호 브랜치(기본 브랜치·`develop`·추가 지정 브랜치)에서 저장소 파일을 바꾸는 시도는 **즉시 차단**하고 브랜치 생성을 제안합니다. hook 우회는 브랜치와 무관하게 항상 차단합니다.
 
-| Hook | Matcher | 차단 대상 |
+| Hook | Matcher | 검사 대상 |
 |------|---------|----------|
-| Write/Edit Guard | `Write\|Edit` | 파일 생성/수정 |
-| Commit Guard | `Bash` | `git commit` 명령 |
+| Write/Edit Guard | `Write\|Edit` | 파일 생성/수정 (Write 도구) |
+| Commit Guard | `Bash` | `git commit`, git 저장소 안 파일을 바꾸는 Bash 명령, hook 우회 |
+
+Commit Guard(`guard commit`)가 보는 Bash 명령:
+
+- **hook 우회 (브랜치 무관 차단, `[Hook Guard]`)**: `--no-verify`(commit/push/merge/am/rebase, 위치·축약·인용 무관), `commit -n`(`-an` 같은 묶음 포함), `core.hooksPath` 변경(`git -c`·`--config-env`·`git config`·`GIT_CONFIG_*` env), `HUSKY=0`, `SKIP=`(env 접두·export·영구 대입). hook 이 실패하면 우회하지 말고 원인을 고칩니다.
+- **보호 브랜치에서 파일 수정 (차단)**: 리다이렉트, `sed`/`perl`/`awk` in-place, `rm`·`mv`·`cp`·`touch`·`mkdir`·`tee`·`truncate`·`install`·`ln`·`dd`, `find -delete`/`-exec`, `patch`, `tar -x`, `unzip`, `curl -o`, `wget -O`, `rsync`, `git apply/am/rm/mv`·`stash pop|apply`. `env`·`sudo`·`nohup`·`timeout`·`time`·`command`·`xargs`·`bash -c`·명령 치환을 통해서도 판정합니다. 어떤 저장소에도 속하지 않는 경로는 통과합니다.
+- **내부를 확인할 수 없는 실행 (`--opaque-exec`, 기본 확인 요청)**: 스크립트·인라인 코드를 실행하는 `node`/`python`/`ruby`/`perl`/`deno`/`bun`/`sh`, `./x`, `source`, `eval`, 파싱 불가 명령, 해석 안 되는 `$VAR` 대상.
 
 1. PreToolUse hook → `atelier git guard write` 또는 `atelier git guard commit` 실행
-2. 기본 브랜치이면 exit 2로 차단 → Claude가 `git switch -c`로 새 브랜치 생성 → 재시도 시 pass
-3. 네트워크 호출 없이 로컬 캐시만 사용. rebase/merge/detached HEAD 상태와 기본 브랜치 감지 실패 시에는 차단하지 않음 (안전)
+2. hook 우회면 브랜치와 무관하게 exit 2 로 차단. 보호 브랜치에서 수정이 확정되면 exit 2 로 차단 → Claude가 `git switch -c`로 새 브랜치 생성 → 재시도 시 pass
+3. 내부를 확인할 수 없는 실행은 exit 0 + stdout JSON(`permissionDecision: "ask"`)으로 사용자 확인을 요청합니다. 저장소 파일을 바꾸지 않는 실행이면 승인하고, 바꾼다면 새 브랜치를 먼저 만듭니다.
+4. 각 대상은 **그 대상이 속한 저장소의 브랜치**로 판정합니다 (다른 저장소·worktree 는 그 저장소의 브랜치 기준). Write 도구도 같은 규칙입니다.
+5. 네트워크 호출 없이 로컬 캐시만 사용. rebase/merge/detached HEAD 상태와 기본 브랜치 감지 실패 시에는 차단하지 않음 (안전)
+
+차단 메시지는 현재 브랜치·대상 저장소·프로젝트(명령 cwd)·발동 규칙·브랜치 확인 안내·해소 명령 순서로 나옵니다. **가드 오작동을 의심하기 전에 메시지의 브랜치부터 확인합니다.** 알려진 한계(정책상 통과): `cargo`·`npm`/`pnpm`/`yarn run|test|install|ci`·`npx`·`make`·테스트 러너 등 신뢰 도구와 스크립트 내부, 절대경로 스크립트, alias·셸 함수는 검사하지 않습니다.
 
 hook 의 등록·비활성화·재설정은 통합 setup 의 hook 관리 모드가 담당합니다.
 
