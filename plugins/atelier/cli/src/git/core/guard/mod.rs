@@ -10,7 +10,7 @@ mod repo_layout;
 pub use repo_layout::{find_repo_root, is_inside_any_git_repo, is_inside_project_dir};
 
 use crate::git::core::bash_classifier::{
-    classify, Anchor, ClassifyInput, Hit, HitKind, OpaqueCause,
+    classify, Anchor, ClassifyInput, Hit, HitKind, OpaqueCause, WriteRule,
 };
 use crate::git::core::git::{GitService, GitServiceFactory};
 use crate::git::types::{
@@ -102,6 +102,9 @@ pub(super) enum Action {
 struct Touch {
     /// Where the effect lands; `None` means "somewhere in the project".
     place: Option<PathBuf>,
+    /// The effect may reach paths below `place` (a recursive operation or an
+    /// unresolved glob), so a `place` above the project still touches it.
+    reaches_below: bool,
     action: Action,
     subject: String,
 }
@@ -115,6 +118,16 @@ impl Touch {
                 raw,
             } => (literal_prefix.clone(), raw.clone(), false),
         };
+        let reaches_below = !certain
+            || matches!(
+                hit.kind,
+                HitKind::Write(
+                    WriteRule::FileOp
+                        | WriteRule::FindDelete
+                        | WriteRule::Extract
+                        | WriteRule::Patch
+                )
+            );
         let action = match (&hit.kind, certain) {
             (HitKind::Commit, true) => Action::Commit,
             (HitKind::Write(_), true) => Action::Modify,
@@ -122,6 +135,7 @@ impl Touch {
         };
         Touch {
             place,
+            reaches_below,
             action,
             subject: format!("Bash `{}` → {shown}", hit.program),
         }
@@ -133,6 +147,7 @@ impl Touch {
             .map_or_else(|| project_dir.to_string(), |p| p.display().to_string());
         Touch {
             place: resolved,
+            reaches_below: false,
             action: Action::Modify,
             subject: format!("Write → {shown}"),
         }
@@ -165,6 +180,7 @@ fn scope_of(touch: &Touch, project: &Path, project_root: Option<&Path>) -> Optio
         Some(root) if Some(root.as_path()) == project_root => Some(Scope::Project),
         Some(root) => Some(Scope::Root(root)),
         None if is_under(project, place) => Some(Scope::Project),
+        None if touch.reaches_below && is_under(place, project) => Some(Scope::Project),
         None => None,
     }
 }

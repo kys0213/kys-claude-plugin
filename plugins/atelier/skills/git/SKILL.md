@@ -165,8 +165,8 @@ hook 차단 여부와 **별개로 에이전트 스스로 지키는 정책**입�
 
 Commit Guard(`guard commit`)가 보는 Bash 명령:
 
-- **hook 우회 (브랜치 무관 차단, `[Hook Guard]`)**: `--no-verify`(commit/push/merge/am/rebase, 위치·축약·인용 무관), `commit -n`(`-an` 같은 묶음 포함), `core.hooksPath` 변경(`git -c`·`--config-env`·`git config`, env 의 `GIT_CONFIG_PARAMETERS`(core.hooksPath 포함)·`GIT_CONFIG_KEY_<n>=core.hooksPath`), `HUSKY=0`, `SKIP=`(env 접두·export·영구 대입). env 우회(`HUSKY=0`·`SKIP=`·`GIT_CONFIG_*`)는 git 서브커맨드가 commit/push/merge/am/rebase/pull/cherry-pick/revert 일 때만 판정합니다. hook 이 실패하면 우회하지 말고 원인을 고칩니다.
-- **보호 브랜치에서 파일 수정 (차단)**: 리다이렉트, `sed`/`perl`/`awk` in-place, `rm`·`mv`·`cp`·`touch`·`mkdir`·`tee`·`truncate`·`install`·`ln`·`dd`, `find -delete`/`-exec`, `patch`, `tar -x`, `unzip`, `curl -o`, `wget -O`, `rsync`, `git apply/am/rm/mv`·`stash pop|apply`. `env`·`sudo`·`nohup`·`timeout`·`time`·`command`·`xargs`·`bash -c`·명령 치환을 통해서도 판정합니다. 어떤 저장소에도 속하지 않는 경로는 통과합니다.
+- **hook 우회 (브랜치 무관 차단, `[Hook Guard]`)**: `--no-verify`(commit/push/merge/am/rebase/pull, 위치·축약·인용 무관), `commit -n`(`-an` 같은 묶음 포함), `core.hooksPath` 변경(`git -c`·`--config-env`·`git config`, env 의 `GIT_CONFIG_PARAMETERS`(core.hooksPath 포함)·`GIT_CONFIG_KEY_<n>=core.hooksPath`), `HUSKY=0`, `SKIP=`(env 접두·export·영구 대입). env 우회(`HUSKY=0`·`SKIP=`·`GIT_CONFIG_*`)는 git 서브커맨드가 commit/push/merge/am/rebase/pull/cherry-pick/revert 일 때만 판정합니다. hook 이 실패하면 우회하지 말고 원인을 고칩니다.
+- **보호 브랜치에서 파일 수정 (차단)**: 리다이렉트, `sed`/`perl`/`awk` in-place, `rm`·`mv`·`cp`·`touch`·`mkdir`·`tee`·`truncate`·`install`·`ln`·`dd`, `find -delete`/`-exec`, `patch`, `tar -x`, `unzip`, `curl -o`, `wget -O`, `rsync`, `git apply/am/rm/mv`·`stash pop|apply`. `env`·`sudo`·`nohup`·`timeout`·`time`·`command`·`exec`·`builtin`·`xargs`·`bash -c`·명령 치환을 통해서도 판정합니다. 어떤 저장소에도 속하지 않는 경로는 통과하되, 저장소를 품은 상위 폴더를 재귀로 지우거나 푸는 명령(`rm -rf ..`, `find .. -delete`, `tar -x -C ..`)은 그 저장소 기준으로 판정합니다.
 - **내부를 확인할 수 없는 실행 (`--opaque-exec`, 기본 확인 요청)**: 스크립트·인라인 코드를 실행하는 `node`/`python`/`ruby`/`perl`/`deno`/`bun`/`sh`, `./x`, `source`, `eval`, 파싱 불가 명령, 해석 안 되는 `$VAR` 대상.
 
 1. PreToolUse hook → `atelier git guard write` 또는 `atelier git guard commit` 실행

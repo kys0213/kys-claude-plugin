@@ -76,7 +76,7 @@ impl Analyzer<'_> {
         if HOOK_SUBCOMMANDS.contains(&name) {
             self.check_hook_env(env);
         }
-        if matches!(name, "commit" | "push" | "merge" | "am" | "rebase") {
+        if matches!(name, "commit" | "push" | "merge" | "am" | "rebase" | "pull") {
             self.scan_hook_flags(name, rest);
         }
         match name {
@@ -125,7 +125,7 @@ impl Analyzer<'_> {
     fn scan_hook_flags(&mut self, sub: &str, rest: &[Word]) {
         let short_valued = match sub {
             "commit" => "mFCct",
-            "merge" => "mFsX",
+            "merge" | "pull" => "mFsX",
             "push" => "o",
             "rebase" => "xsXC",
             _ => "",

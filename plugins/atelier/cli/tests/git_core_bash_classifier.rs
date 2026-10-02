@@ -103,6 +103,8 @@ fn no_verify_flag_is_bypass_for_hook_running_subcommands() {
         "git merge --no-verify feat",
         "git am --no-verify p.patch",
         "git rebase --no-verify main",
+        "git pull --no-verify",
+        "git pull -s ours --no-verify origin main",
         "git commit --no-veri -m x",
         "git commit --no-verify=1 -m x",
         "git -C /tmp/x commit --no-verify",
@@ -124,6 +126,7 @@ fn no_verify_text_that_is_not_a_flag_passes() {
         "echo --no-verify",
         "git commit --no-ver -m x",
         "git log --no-verify",
+        "git pull -n",
         "git status",
     ] {
         assert_no_bypass(cmd);
@@ -742,6 +745,9 @@ fn transparent_wrappers_classify_the_inner_command() {
         "sh -c \"rm f\"",
         "bash -lc 'rm f'",
         "bash -c 'echo hi; rm f'",
+        "exec rm f",
+        "exec -a name rm f",
+        "builtin rm f",
     ] {
         assert_single_write(cmd, WriteRule::FileOp, "/work/proj/f");
     }

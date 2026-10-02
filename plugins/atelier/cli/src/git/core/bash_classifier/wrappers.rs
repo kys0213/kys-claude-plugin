@@ -137,6 +137,20 @@ impl Analyzer<'_> {
         self.command(&args[i.min(args.len())..], &env, &inner_cwd, depth + 1);
     }
 
+    pub(super) fn exec_cmd(&mut self, args: &[Word], env: &Env, cwd: &Anchor, depth: usize) {
+        let mut i = 0;
+        while let Some(w) = args.get(i) {
+            if !w.is_flag() {
+                break;
+            }
+            i += if w.is("-a") { 2 } else { 1 };
+            if w.is("--") {
+                break;
+            }
+        }
+        self.command(&args[i.min(args.len())..], env, cwd, depth);
+    }
+
     pub(super) fn time_cmd(&mut self, args: &[Word], env: &Env, cwd: &Anchor, depth: usize) {
         if !self.can_unwrap(Wrapper::Time, "time", cwd, depth) {
             return;

@@ -709,6 +709,26 @@ fn targets_outside_every_repo_are_allowed_without_git() {
 }
 
 #[test]
+fn recursive_writes_on_a_directory_above_the_project_are_judged() {
+    let repo = repo_dir();
+    for cmd in ["rm -rf ..", "find .. -delete"] {
+        let out = check(on_branch("main"), &bash_input(repo.path(), cmd, None));
+        assert_eq!(out.verdict, GuardVerdict::Block, "command: {cmd:?}");
+    }
+    let out = check(
+        on_branch("main"),
+        &bash_input(repo.path(), "rm -rf ../*/src", None),
+    );
+    assert_eq!(out.verdict, GuardVerdict::Ask);
+}
+
+#[test]
+fn copying_into_a_directory_above_the_project_is_allowed() {
+    let repo = repo_dir();
+    assert_allowed_without_git(repo.path(), "cp a ..", None);
+}
+
+#[test]
 fn payload_cwd_outside_every_repo_makes_relative_effects_pass() {
     let repo = repo_dir();
     let outside = tempfile::tempdir().unwrap();

@@ -340,6 +340,8 @@ impl Analyzer<'_> {
             "find" => self.find_cmd(args, env, cwd, depth),
             _ if is_shell(name) => self.shell_cmd(name, args, env, cwd, depth),
             "eval" => self.opaque(OpaqueCause::Eval, name, cwd),
+            "builtin" => self.command(args, env, cwd, depth),
+            "exec" => self.exec_cmd(args, env, cwd, depth),
             "source" | "." => {
                 let file = args.first().map_or("", |w| w.text.as_str());
                 self.opaque(OpaqueCause::ScriptFile(file.to_string()), name, cwd);
