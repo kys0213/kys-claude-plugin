@@ -7,6 +7,7 @@
 
 use crate::git::types::{Divergence, GitSpecialState};
 use crate::shared::shell::{exec, ExecOptions};
+use std::path::Path;
 
 /// The one repo mutation the git subsystem performs, kept off `GitService` on
 /// purpose: that trait's contract forbids mutation because the guard calls it
@@ -35,6 +36,21 @@ pub trait GitService {
     /// all — no upstream configured, an empty repo, a detached HEAD, a
     /// directory outside any work tree. Absence is "unknown", never zero drift.
     fn upstream_divergence(&self) -> Option<Divergence>;
+}
+
+/// Builds a `GitService` anchored at a repository root, so the guard can judge
+/// a write by the repository it lands in rather than only the project's.
+pub trait GitServiceFactory {
+    fn at(&self, root: &Path) -> Box<dyn GitService>;
+}
+
+/// Factory of `RealGitService`s pinned to the requested root.
+pub struct RealGitServiceFactory;
+
+impl GitServiceFactory for RealGitServiceFactory {
+    fn at(&self, root: &Path) -> Box<dyn GitService> {
+        Box::new(create_git_service(Some(root.to_string_lossy().to_string())))
+    }
 }
 
 /// Parses `git rev-list --left-right --count <upstream>...HEAD` output — two

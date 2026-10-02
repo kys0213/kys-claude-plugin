@@ -2,6 +2,7 @@
 //! Each module declares a `*Service` trait plus a real shell-backed
 //! implementation so commands depend on abstractions, not the git/gh CLIs.
 
+pub mod bash_classifier;
 pub mod git;
 pub mod github;
 pub mod guard;

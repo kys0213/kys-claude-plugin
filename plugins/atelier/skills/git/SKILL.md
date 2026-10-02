@@ -156,16 +156,26 @@ hook 차단 여부와 **별개로 에이전트 스스로 지키는 정책**입�
 
 ## Default Branch Guard (PreToolUse Hook)
 
-기본 브랜치에서 Write/Edit 도구 사용 또는 git commit 시도 시 **즉시 차단**하고 브랜치 생성을 제안합니다.
+보호 브랜치(기본 브랜치·`develop`·추가 지정 브랜치)에서 저장소 파일을 바꾸는 시도는 **즉시 차단**하고 브랜치 생성을 제안합니다. hook 우회는 브랜치와 무관하게 항상 차단합니다.
 
-| Hook | Matcher | 차단 대상 |
+| Hook | Matcher | 검사 대상 |
 |------|---------|----------|
-| Write/Edit Guard | `Write\|Edit` | 파일 생성/수정 |
-| Commit Guard | `Bash` | `git commit` 명령 |
+| Write/Edit Guard | `Write\|Edit` | 파일 생성/수정 (Write 도구) |
+| Commit Guard | `Bash` | `git commit`, git 저장소 안 파일을 바꾸는 Bash 명령, hook 우회 |
+
+Commit Guard(`guard commit`)가 보는 Bash 명령:
+
+- **hook 우회 (브랜치 무관 차단, `[Hook Guard]`)**: `--no-verify`(commit/push/merge/am/rebase/pull, 위치·축약·인용 무관), `commit -n`(`-an` 같은 묶음 포함), `core.hooksPath` 변경(`git -c`·`--config-env`·`git config`, env 의 `GIT_CONFIG_PARAMETERS`(core.hooksPath 포함)·`GIT_CONFIG_KEY_<n>=core.hooksPath`), `HUSKY=0`, `SKIP=`(env 접두·export·영구 대입), `.git/hooks` 아래 파일의 삭제·이동·덮어쓰기·`chmod`(Write 도구 포함, `.git/hoo*` 처럼 `hooks` 와 맞을 수 있는 glob·변수 경로 포함). env 우회(`HUSKY=0`·`SKIP=`·`GIT_CONFIG_*`)는 git 서브커맨드가 commit/push/merge/am/rebase/pull/cherry-pick/revert 일 때만 판정합니다. 따옴표가 닫히지 않은 명령도 읽을 수 있는 데까지 판정합니다. hook 이 실패하면 우회하지 말고 원인을 고칩니다.
+- **보호 브랜치에서 파일 수정 (차단)**: 리다이렉트, `sed`/`perl`/`awk` in-place, `rm`·`mv`·`cp`·`touch`·`mkdir`·`tee`·`truncate`·`install`·`ln`·`dd`·`chmod`, `find -delete`/`-exec`, `patch`, `tar -x`, `unzip`, `curl -o`, `wget -O`, `rsync`, `git apply/am/rm/mv`·`stash pop|apply`. `env`·`sudo`·`nohup`·`timeout`·`time`·`command`·`exec`·`builtin`·`xargs`·`bash -c`·명령 치환(따옴표 없는 heredoc 본문 안 포함)을 통해서도 판정합니다. 어떤 저장소에도 속하지 않는 경로는 통과하되, 저장소를 품은 상위 폴더를 재귀로 지우거나 푸는 명령(`rm -rf ..`, `find .. -delete`, `tar -x -C ..`)은 그 저장소 기준으로 판정합니다.
+- **내부를 확인할 수 없는 실행 (`--opaque-exec`, 기본 확인 요청)**: 스크립트·인라인 코드를 실행하는 `node`/`python`/`ruby`/`perl`/`deno`/`bun`/`sh`, `./x`, `source`, `eval`, 파싱 불가 명령, 해석 안 되는 `$VAR` 대상.
 
 1. PreToolUse hook → `atelier git guard write` 또는 `atelier git guard commit` 실행
-2. 기본 브랜치이면 exit 2로 차단 → Claude가 `git switch -c`로 새 브랜치 생성 → 재시도 시 pass
-3. 네트워크 호출 없이 로컬 캐시만 사용. rebase/merge/detached HEAD 상태와 기본 브랜치 감지 실패 시에는 차단하지 않음 (안전)
+2. hook 우회면 브랜치와 무관하게 exit 2 로 차단. 보호 브랜치에서 수정이 확정되면 exit 2 로 차단 → Claude가 `git switch -c`로 새 브랜치 생성 → 재시도 시 pass
+3. 내부를 확인할 수 없는 실행은 exit 0 + stdout JSON(`permissionDecision: "ask"`)으로 사용자 확인을 요청합니다. 저장소 파일을 바꾸지 않는 실행이면 승인하고, 바꾼다면 새 브랜치를 먼저 만듭니다.
+4. 각 대상은 **그 대상이 속한 저장소의 브랜치**로 판정합니다 (다른 저장소·worktree 는 그 저장소의 브랜치 기준). Write 도구도 같은 규칙입니다. 같은 명령 줄에서 `git switch -c <b>`·`git switch <b>`·`git checkout -b <b>` 뒤에 `&&` 로 이어진 명령은 `<b>` 기준으로 판정하고, `;`·`||`·줄바꿈 뒤나 이름을 알 수 없는 브랜치(`git checkout main`·`git switch -`)로 다시 전환한 뒤는 원래 브랜치 기준입니다.
+5. 네트워크 호출 없이 로컬 캐시만 사용. rebase/merge/detached HEAD 상태와 기본 브랜치 감지 실패 시에는 차단하지 않음 (안전)
+
+차단 메시지는 현재 브랜치·대상 저장소·프로젝트(명령 cwd)·발동 규칙·브랜치 확인 안내·해소 명령 순서로 나옵니다. **가드 오작동을 의심하기 전에 메시지의 브랜치부터 확인합니다.** 알려진 한계(정책상 통과): 인터프리터가 아닌 도구(`cargo`·`npm`·`pnpm`·`yarn`·`npx`·`make` 등)는 아예 검사하지 않고, 인터프리터는 `python -m pytest|unittest`·`node --test`·`bun test`/`deno test` 호출만 신뢰합니다. 스크립트 내부, 절대경로 스크립트, alias·셸 함수도 검사하지 않습니다. 별도 Bash 호출로 쪼갠 우회(예: 한 호출에서 `export HUSKY=0`, 다음 호출에서 `git commit`)는 잡지 못하고, `git checkout/restore/reset/merge/pull` 의 작업 트리 변경은 쓰기로 보지 않습니다. `setup guard` 가 등록하는 hook 은 `--opaque-exec` 를 넘기지 않으므로(기본 ask 적용), 바꾸려면 hook command 에 플래그를 직접 추가합니다.
 
 hook 의 등록·비활성화·재설정은 통합 setup 의 hook 관리 모드가 담당합니다.
 

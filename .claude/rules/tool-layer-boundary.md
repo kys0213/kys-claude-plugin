@@ -24,7 +24,7 @@ paths:
 **모두 `atelier` 바이너리의 서브커맨드**로 구현한다.
 
 ```
-atelier git guard <write|commit|pr>              # PreToolUse 가드 판단
+atelier git guard <write|commit|pr>              # PreToolUse 가드 판단 (차단·확인 요청)
 atelier git hook <register|unregister|list>      # settings.json 편집
 atelier git setup guard --scope <user|project>   # guard hook 2종 등록 (감지→정리→쓰기)
 atelier autopilot check stagnation               # stdin payload 해석
@@ -32,7 +32,8 @@ atelier autopilot check stagnation               # stdin payload 해석
 
 - 동일 입력 → 동일 출력. 단위 테스트로 동작을 고정한다 (`tests/git_core_guard.rs` 등).
 - 입력은 **args / env / stdin** 으로만 받는다. "지금 상황을 보고 추측"하지 않는다.
-- PreToolUse 페이로드(JSON)는 stdin 으로 받고, 차단은 exit code(2)로 신호한다.
+- PreToolUse 페이로드(JSON)는 stdin 으로 받고, 차단은 exit code(2) + stderr 로 신호한다.
+- 사용자 확인 요청(Ask)은 exit 0 + stdout 의 `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask",...}}` JSON 으로 신호한다. exit 2 와 섞지 않는다.
 
 ### 등록 진입점은 thin shim 또는 `hook register`
 

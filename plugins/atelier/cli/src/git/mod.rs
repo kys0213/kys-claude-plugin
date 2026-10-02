@@ -13,13 +13,13 @@ pub mod types;
 
 use crate::git::commands::guard::{GuardTargetKind, HookPayload};
 use crate::git::commands::hook::{create_hook_command, HookFs};
-use crate::git::core::git::create_git_service;
+use crate::git::core::git::{create_git_service, RealGitServiceFactory};
 use crate::git::core::github::create_github_service;
 use crate::git::core::guard::create_guard_service;
 use crate::git::core::pr_guard::create_pr_guard_service;
 use crate::git::types::{
     CmdResult, GuardDecision, HookListInput, HookRegisterInput, HookScope, HookUnregisterInput,
-    ReviewsInput,
+    OpaqueExecPolicy, ReviewsInput,
 };
 use crate::shared::process::{default_project_dir, read_stdin_raw};
 use clap::{Parser, Subcommand};
@@ -52,6 +52,9 @@ pub enum Commands {
         default_branch: Option<String>,
         #[arg(long = "protected-branches")]
         protected_branches: Option<String>,
+        /// Protected-branch policy for commands whose effect can't be inspected
+        #[arg(long = "opaque-exec", value_enum, default_value_t = OpaqueExecPolicy::Ask)]
+        opaque_exec: OpaqueExecPolicy,
     },
     /// Deprecated alias of `guard pr`
     #[command(name = "pr-guard")]
@@ -111,13 +114,12 @@ impl HookFs for RealHookFs {
     }
 }
 
-/// Prints the block reason and returns the decision's exit code — the 0/2
-/// hook contract itself lives on `GuardDecision::exit_code` (#778).
 fn guard_exit(decision: GuardDecision) -> i32 {
-    if !decision.allowed {
-        if let Some(reason) = &decision.reason {
-            eprintln!("{reason}");
-        }
+    if let Some(json) = decision.ask_stdout() {
+        println!("{json}");
+    }
+    if let Some(reason) = decision.stderr_message() {
+        eprintln!("{reason}");
     }
     decision.exit_code()
 }
@@ -178,6 +180,7 @@ pub fn run(cli: Cli) -> i32 {
             create_branch_script,
             default_branch,
             protected_branches,
+            opaque_exec,
         } => {
             // Validate the target before touching stdin: an invalid target
             // must print usage immediately (not block on a missing pipe) and
@@ -204,7 +207,7 @@ pub fn run(cli: Cli) -> i32 {
             // detection reflect the project, not the hook's process cwd (worktree /
             // subagent contexts) — see #780.
             let git = create_git_service(Some(project_dir.clone()));
-            let branch_guard = create_guard_service(&git);
+            let branch_guard = create_guard_service(&git, &RealGitServiceFactory);
             let github = create_github_service(None);
             let pr_guard = create_pr_guard_service(&github);
             let deps = commands::guard::GuardCommandDeps {
@@ -217,6 +220,8 @@ pub fn run(cli: Cli) -> i32 {
                 create_branch_script,
                 default_branch,
                 protected_branches: protected,
+                opaque_exec,
+                home: std::env::var("HOME").ok(),
             };
             guard_exit(commands::guard::run(&deps, &input))
         }
