@@ -91,7 +91,7 @@ fn assert_single_write(command: &str, rule: WriteRule, target: &str) {
     assert_hits(command, vec![write(rule, path(target))]);
 }
 
-// ---- B1: --no-verify --------------------------------------------------
+// ---- hook bypass: --no-verify ----------------------------------------------
 
 #[test]
 fn no_verify_flag_is_bypass_for_hook_running_subcommands() {
@@ -130,7 +130,7 @@ fn no_verify_text_that_is_not_a_flag_passes() {
     }
 }
 
-// ---- B2: commit -n ------------------------------------------------------
+// ---- hook bypass: commit -n ------------------------------------------------
 
 #[test]
 fn commit_short_n_is_bypass() {
@@ -164,7 +164,7 @@ fn n_that_is_a_value_or_another_subcommands_flag_passes() {
     }
 }
 
-// ---- B3: hooksPath / env ----------------------------------------------
+// ---- hook bypass: hooksPath and env ----------------------------------------
 
 #[test]
 fn hooks_path_config_is_bypass() {
@@ -244,7 +244,7 @@ fn bypass_and_commit_are_both_reported() {
     );
 }
 
-// ---- C: commit anchors ---------------------------------------------------
+// ---- commit anchors --------------------------------------------------------
 
 #[test]
 fn commit_anchors_at_cwd_or_dash_c_dir() {
@@ -300,7 +300,7 @@ fn text_mentioning_commit_is_not_a_commit() {
     }
 }
 
-// ---- W1: redirects -------------------------------------------------------
+// ---- writes: redirects -----------------------------------------------------
 
 #[test]
 fn redirect_targets_are_writes() {
@@ -350,7 +350,7 @@ fn redirect_to_dynamic_target_is_unresolved() {
     );
 }
 
-// ---- W2: in-place editors ---------------------------------------------
+// ---- writes: in-place editors ----------------------------------------------
 
 #[test]
 fn in_place_editors_write_their_file_arguments() {
@@ -394,7 +394,7 @@ fn editors_without_in_place_pass() {
     }
 }
 
-// ---- W3: file operations -----------------------------------------------
+// ---- writes: file operations -----------------------------------------------
 
 #[test]
 fn file_ops_write_all_their_path_arguments() {
@@ -574,7 +574,7 @@ fn read_only_commands_are_clean() {
     }
 }
 
-// ---- W4: git working-tree writers ---------------------------------------
+// ---- writes: git working-tree writers --------------------------------------
 
 #[test]
 fn git_working_tree_writers_anchor_at_cwd_or_dash_c() {
@@ -614,7 +614,7 @@ fn git_read_only_forms_pass() {
     }
 }
 
-// ---- U: unresolved targets ----------------------------------------------
+// ---- unresolved targets ----------------------------------------------------
 
 #[test]
 fn dynamic_targets_carry_their_literal_prefix() {
@@ -909,7 +909,7 @@ fn bypass_inside_wrappers_is_found() {
     }
 }
 
-// ---- O: opaque executions ----------------------------------------------
+// ---- opaque executions -----------------------------------------------------
 
 #[test]
 fn interpreters_running_code_are_opaque_at_the_effective_cwd() {
@@ -1435,7 +1435,7 @@ fn source_and_dot_are_opaque_script_files() {
     );
 }
 
-// ---- W3 additions: downloads and rsync ---------------------------------------
+// ---- writes: downloads and rsync -------------------------------------------
 
 #[test]
 fn download_tools_write_their_output_targets() {
