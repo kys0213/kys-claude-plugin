@@ -11,9 +11,11 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use atelier::git::commands::hook::HookFs;
-use atelier::git::core::git::{GitService, OriginHeadWarmer};
+use atelier::git::core::git::{GitService, GitServiceFactory, OriginHeadWarmer};
 use atelier::git::core::github::{GitHubService, OpenPr, RepoDefaultBranch, ReviewThreadsResult};
 use atelier::git::types::{DetectedBranch, Divergence, GitSpecialState};
 
@@ -118,6 +120,41 @@ impl GitService for MockGit {
     }
     fn upstream_divergence(&self) -> Option<Divergence> {
         (self.upstream_divergence)()
+    }
+}
+
+/// Mockable `GitServiceFactory`: maps a repository root to a `MockGit` built on
+/// demand. Asking for a root nobody registered panics, so a test fails when the
+/// guard consults a repository it was not supposed to.
+#[derive(Default)]
+pub struct MockGitFactory {
+    gits: HashMap<PathBuf, Box<dyn Fn() -> MockGit>>,
+    requested: Rc<RefCell<Vec<PathBuf>>>,
+}
+
+impl MockGitFactory {
+    pub fn new() -> Self {
+        MockGitFactory::default()
+    }
+    /// Registers the git served for `root`.
+    pub fn with(mut self, root: &Path, git: impl Fn() -> MockGit + 'static) -> Self {
+        self.gits.insert(root.to_path_buf(), Box::new(git));
+        self
+    }
+    /// Roots the guard asked for, in call order; stays readable after the
+    /// factory is moved into a guard.
+    pub fn requested(&self) -> Rc<RefCell<Vec<PathBuf>>> {
+        self.requested.clone()
+    }
+}
+
+impl GitServiceFactory for MockGitFactory {
+    fn at(&self, root: &Path) -> Box<dyn GitService> {
+        self.requested.borrow_mut().push(root.to_path_buf());
+        match self.gits.get(root) {
+            Some(build) => Box::new(build()),
+            None => panic!("no git registered for root {}", root.display()),
+        }
     }
 }
 

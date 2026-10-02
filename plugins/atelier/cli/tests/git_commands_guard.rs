@@ -22,6 +22,8 @@ impl GuardService for StubBranchGuard {
             verdict: GuardVerdict::Block,
             reason: Some(format!("branch-guard: {:?}", input.target)),
             current_branch: None,
+            rule: None,
+            repo_root: None,
             default_branch: None,
         }
     }
@@ -154,6 +156,8 @@ fn opaque_exec_policy_and_home_reach_the_branch_guard() {
                 verdict: GuardVerdict::Allow,
                 reason: Some(format!("{:?} {:?}", input.opaque_exec, input.home)),
                 current_branch: None,
+                rule: None,
+                repo_root: None,
                 default_branch: None,
             }
         }

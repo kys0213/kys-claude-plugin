@@ -69,6 +69,8 @@ pub enum OpaqueCause {
     DynamicCommand,
     Substitution,
     Wrapper(Wrapper),
+    /// The command line could not be tokenized at all.
+    Unparsed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

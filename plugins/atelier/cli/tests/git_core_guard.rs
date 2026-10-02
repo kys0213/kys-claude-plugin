@@ -5,10 +5,12 @@
 mod git_mocks;
 
 use atelier::git::core::guard::{
-    create_guard_service, is_inside_any_git_repo, is_inside_project_dir, GuardService,
+    create_guard_service, find_repo_root, is_inside_any_git_repo, is_inside_project_dir,
+    GuardService,
 };
+use atelier::git::types::{DefaultBranchSource, ProtectionRule};
 use atelier::git::types::{GuardInput, GuardOutput, GuardTarget, GuardVerdict, OpaqueExecPolicy};
-use git_mocks::MockGit;
+use git_mocks::{MockGit, MockGitFactory};
 use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
@@ -25,8 +27,17 @@ fn base_input() -> GuardInput {
     }
 }
 
+/// Judges with a factory that serves no other repository: reaching one panics.
 fn check(git: MockGit, input: &GuardInput) -> atelier::git::types::GuardOutput {
-    let guard = create_guard_service(&git);
+    check_with(git, MockGitFactory::new(), input)
+}
+
+fn check_with(
+    git: MockGit,
+    factory: MockGitFactory,
+    input: &GuardInput,
+) -> atelier::git::types::GuardOutput {
+    let guard = create_guard_service(&git, &factory);
     guard.check(input)
 }
 
@@ -334,23 +345,29 @@ fn outside_project_and_outside_git_repo_passes() {
 }
 
 #[test]
-fn outside_project_but_inside_other_git_repo_blocked() {
-    // The current checkout IS a git repo; point at a file inside it from a
-    // bogus project dir to simulate "another repo".
-    let this_project = std::env::current_dir().unwrap();
-    let mut input = base_input();
-    input.project_dir = "/some/other/project".to_string();
-    input.target = GuardTarget::Write {
-        file_path: Some(
-            this_project
-                .join("Cargo.toml")
-                .to_string_lossy()
-                .to_string(),
-        ),
-    };
-    assert_eq!(
-        check(MockGit::default(), &input).verdict,
-        GuardVerdict::Block
+fn write_in_other_repo_on_feature_branch_is_allowed() {
+    let project = repo_dir();
+    let other = repo_dir();
+    let input = write_input(project.path(), &other.path().join("src/a.rs"));
+    let factory = MockGitFactory::new().with(other.path(), || on_branch("feat/x"));
+    let out = check_with(on_branch("main"), factory, &input);
+    assert_eq!(out.verdict, GuardVerdict::Allow);
+}
+
+#[test]
+fn write_in_other_repo_on_its_protected_branch_blocks_naming_that_root() {
+    let project = repo_dir();
+    let other = repo_dir();
+    let input = write_input(project.path(), &other.path().join("src/a.rs"));
+    let factory = MockGitFactory::new().with(other.path(), || on_branch("main"));
+    let out = check_with(on_branch("feat/x"), factory, &input);
+    assert_eq!(out.verdict, GuardVerdict::Block);
+    let other_root = other.path().display().to_string();
+    assert_eq!(out.repo_root.as_deref(), Some(other_root.as_str()));
+    let reason = out.reason.unwrap();
+    assert!(
+        reason.contains(&format!("대상 저장소: {other_root}")),
+        "{reason}"
     );
 }
 
@@ -719,14 +736,20 @@ fn payload_cwd_inside_project_subdir_is_judged_with_project_git() {
 }
 
 #[test]
-fn payload_cwd_in_another_repo_is_judged_with_project_git() {
+fn payload_cwd_in_another_repo_is_judged_with_that_repos_git() {
     let project = repo_dir();
     let other = repo_dir();
-    let out = check(
-        on_branch("main"),
-        &bash_input(project.path(), "git commit -m x", Some(other.path())),
+    let input = bash_input(project.path(), "git commit -m x", Some(other.path()));
+    let on_feature = MockGitFactory::new().with(other.path(), || on_branch("feat/x"));
+    assert_eq!(
+        check_with(on_branch("main"), on_feature, &input).verdict,
+        GuardVerdict::Allow
     );
-    assert_eq!(out.verdict, GuardVerdict::Block);
+    let on_main = MockGitFactory::new().with(other.path(), || on_branch("main"));
+    assert_eq!(
+        check_with(on_branch("feat/x"), on_main, &input).verdict,
+        GuardVerdict::Block
+    );
 }
 
 #[test]
@@ -771,6 +794,441 @@ fn unreadable_command_follows_opaque_policy_and_cwd_scope() {
         GuardVerdict::Block
     );
     assert_allowed_without_git(repo.path(), "echo \"unterminated", Some(outside.path()));
+}
+
+// ---- per-repository judgement ----
+
+fn write_input(project: &Path, file: &Path) -> GuardInput {
+    let mut input = base_input();
+    input.project_dir = project.to_string_lossy().to_string();
+    input.target = GuardTarget::Write {
+        file_path: Some(file.to_string_lossy().to_string()),
+    };
+    input
+}
+
+/// A linked worktree of the checkout at `main_checkout`: its `.git` is a file
+/// pointing into `<main_checkout>/.git/worktrees/<name>`.
+fn linked_worktree(main_checkout: &Path, name: &str) -> tempfile::TempDir {
+    let admin = main_checkout.join(".git/worktrees").join(name);
+    std::fs::create_dir_all(&admin).unwrap();
+    let worktree = tempfile::tempdir().unwrap();
+    std::fs::write(
+        worktree.path().join(".git"),
+        format!("gitdir: {}\n", admin.display()),
+    )
+    .unwrap();
+    worktree
+}
+
+fn on_branch_detecting(branch: &str, default: &str) -> MockGit {
+    let default = default.to_string();
+    let mut git = on_branch(branch);
+    git.detect_default_branch = Box::new(move || Ok(default.clone()));
+    git
+}
+
+fn display(path: &Path) -> String {
+    path.display().to_string()
+}
+
+#[test]
+fn find_repo_root_returns_the_nearest_ancestor_with_a_git_entry() {
+    let repo = repo_dir();
+    let nested = repo.path().join("a/b");
+    std::fs::create_dir_all(&nested).unwrap();
+    let missing = nested.join("not/yet/there.txt");
+    assert_eq!(find_repo_root(&nested), Some(repo.path().to_path_buf()));
+    assert_eq!(find_repo_root(&missing), Some(repo.path().to_path_buf()));
+
+    let inner = repo.path().join("vendor/lib");
+    std::fs::create_dir_all(&inner).unwrap();
+    std::fs::write(inner.join(".git"), "gitdir: /elsewhere\n").unwrap();
+    assert_eq!(find_repo_root(&inner.join("src/x.rs")), Some(inner.clone()));
+
+    let outside = tempfile::tempdir().unwrap();
+    assert_eq!(find_repo_root(&outside.path().join("x")), None);
+}
+
+#[test]
+fn hits_are_judged_in_each_root_and_the_strongest_verdict_wins() {
+    let project = repo_dir();
+    let other = repo_dir();
+    let cmd = format!("rm a && rm {}/b", other.path().display());
+    let input = bash_input(project.path(), &cmd, None);
+
+    let factory = MockGitFactory::new().with(other.path(), || on_branch("main"));
+    let out = check_with(on_branch("feat/x"), factory, &input);
+    assert_eq!(out.verdict, GuardVerdict::Block);
+    assert_eq!(out.repo_root, Some(display(other.path())));
+
+    let factory = MockGitFactory::new().with(other.path(), || on_branch("feat/x"));
+    let out = check_with(on_branch("main"), factory, &input);
+    assert_eq!(out.verdict, GuardVerdict::Block);
+    assert_eq!(out.repo_root, Some(display(project.path())));
+
+    let factory = MockGitFactory::new().with(other.path(), || on_branch("feat/x"));
+    let out = check_with(on_branch("feat/x"), factory, &input);
+    assert_eq!(out.verdict, GuardVerdict::Allow);
+}
+
+#[test]
+fn ask_in_one_root_loses_to_block_in_another() {
+    let project = repo_dir();
+    let other = repo_dir();
+    let cmd = format!("node x.js && rm {}/b", other.path().display());
+    let input = bash_input(project.path(), &cmd, None);
+    let factory = MockGitFactory::new().with(other.path(), || on_branch("main"));
+    let out = check_with(on_branch("main"), factory, &input);
+    assert_eq!(out.verdict, GuardVerdict::Block);
+    assert_eq!(out.repo_root, Some(display(other.path())));
+}
+
+#[test]
+fn ask_names_the_opaque_program_of_the_root_that_asked() {
+    let project = repo_dir();
+    let other = repo_dir();
+    let cmd = format!("node a.js && cd {} && python3 y.py", other.path().display());
+    let input = bash_input(project.path(), &cmd, None);
+    let factory = MockGitFactory::new().with(other.path(), || on_branch("main"));
+    let out = check_with(on_branch("feat/x"), factory, &input);
+    assert_eq!(out.verdict, GuardVerdict::Ask);
+    let reason = out.reason.unwrap();
+    assert!(reason.contains("`python3`"), "{reason}");
+    assert!(!reason.contains("`node`"), "{reason}");
+    assert!(reason.contains(&format!("대상 저장소: {}", other.path().display())));
+}
+
+#[test]
+fn unresolved_target_without_prefix_is_judged_in_the_project_root() {
+    let project = repo_dir();
+    let input = bash_input(project.path(), "rm -rf $BUILD_DIR/out", None);
+    let out = check(on_branch("main"), &input);
+    assert_eq!(out.verdict, GuardVerdict::Ask);
+    assert_eq!(out.repo_root, Some(display(project.path())));
+}
+
+#[test]
+fn project_root_hit_never_asks_the_factory() {
+    let project = repo_dir();
+    let factory = MockGitFactory::new();
+    let requested = factory.requested();
+    let input = bash_input(project.path(), "rm a", Some(&project.path().join("sub")));
+    check_with(on_branch("main"), factory, &input);
+    assert!(requested.borrow().is_empty());
+}
+
+#[test]
+fn project_that_is_not_a_repo_sends_hits_through_the_factory_without_pin() {
+    let project = tempfile::tempdir().unwrap();
+    let other = repo_dir();
+    let mut input = write_input(project.path(), &other.path().join("a.rs"));
+    input.default_branch = Some("trunk".to_string());
+
+    let factory = MockGitFactory::new().with(other.path(), || on_branch_detecting("trunk", "main"));
+    let out = check_with(panicking_git(), factory, &input);
+    assert_eq!(out.verdict, GuardVerdict::Allow, "pin must not apply");
+
+    let factory = MockGitFactory::new().with(other.path(), || on_branch_detecting("main", "main"));
+    let out = check_with(panicking_git(), factory, &input);
+    assert_eq!(out.verdict, GuardVerdict::Block);
+    assert_eq!(
+        out.rule,
+        Some(ProtectionRule::DefaultBranch {
+            source: DefaultBranchSource::Detected
+        })
+    );
+}
+
+#[test]
+fn other_repository_uses_detection_not_the_project_pin() {
+    let project = repo_dir();
+    let other = repo_dir();
+    let mut input = write_input(project.path(), &other.path().join("a.rs"));
+    input.default_branch = Some("trunk".to_string());
+    let factory = MockGitFactory::new().with(other.path(), || on_branch_detecting("trunk", "main"));
+    let out = check_with(on_branch("feat/x"), factory, &input);
+    assert_eq!(out.verdict, GuardVerdict::Allow);
+}
+
+#[test]
+fn other_repository_still_protects_develop_and_extra_branches() {
+    let project = repo_dir();
+    let other = repo_dir();
+    let mut input = write_input(project.path(), &other.path().join("a.rs"));
+    input.protected_branches = Some(vec!["staging".to_string()]);
+    for (branch, rule) in [
+        ("develop", ProtectionRule::Develop),
+        ("staging", ProtectionRule::Extra),
+    ] {
+        let factory = MockGitFactory::new().with(other.path(), move || on_branch(branch));
+        let out = check_with(on_branch("feat/x"), factory, &input);
+        assert_eq!(out.verdict, GuardVerdict::Block, "{branch}");
+        assert_eq!(out.rule, Some(rule));
+    }
+}
+
+#[test]
+fn worktree_of_the_project_repository_follows_the_project_pin() {
+    let project = repo_dir();
+    let worktree = linked_worktree(project.path(), "wt");
+    let mut input = write_input(project.path(), &worktree.path().join("a.rs"));
+    input.default_branch = Some("trunk".to_string());
+    let factory =
+        MockGitFactory::new().with(worktree.path(), || on_branch_detecting("trunk", "main"));
+    let out = check_with(on_branch("feat/x"), factory, &input);
+    assert_eq!(out.verdict, GuardVerdict::Block);
+    assert_eq!(
+        out.rule,
+        Some(ProtectionRule::DefaultBranch {
+            source: DefaultBranchSource::Pinned
+        })
+    );
+    assert_eq!(out.repo_root, Some(display(worktree.path())));
+}
+
+#[test]
+fn worktree_common_dir_is_resolved_through_commondir_file() {
+    let project = repo_dir();
+    let admin = project.path().join(".git/worktrees/wt");
+    std::fs::create_dir_all(&admin).unwrap();
+    std::fs::write(admin.join("commondir"), "../..\n").unwrap();
+    let worktree = tempfile::tempdir().unwrap();
+    std::fs::write(
+        worktree.path().join(".git"),
+        format!("gitdir: {}\n", admin.display()),
+    )
+    .unwrap();
+    let mut input = write_input(project.path(), &worktree.path().join("a.rs"));
+    input.default_branch = Some("trunk".to_string());
+    let factory =
+        MockGitFactory::new().with(worktree.path(), || on_branch_detecting("trunk", "main"));
+    assert_eq!(
+        check_with(on_branch("feat/x"), factory, &input).verdict,
+        GuardVerdict::Block
+    );
+}
+
+#[test]
+fn worktree_of_another_repository_does_not_follow_the_project_pin() {
+    let project = repo_dir();
+    let elsewhere = repo_dir();
+    let worktree = linked_worktree(elsewhere.path(), "wt");
+    let mut input = write_input(project.path(), &worktree.path().join("a.rs"));
+    input.default_branch = Some("trunk".to_string());
+    let factory =
+        MockGitFactory::new().with(worktree.path(), || on_branch_detecting("trunk", "main"));
+    assert_eq!(
+        check_with(on_branch("feat/x"), factory, &input).verdict,
+        GuardVerdict::Allow
+    );
+}
+
+#[test]
+fn write_tool_in_a_worktree_is_judged_by_the_worktree_branch() {
+    let project = repo_dir();
+    let worktree = linked_worktree(project.path(), "wt");
+    let input = write_input(project.path(), &worktree.path().join("a.rs"));
+    let factory = MockGitFactory::new().with(worktree.path(), || on_branch("feat/x"));
+    let out = check_with(on_branch("main"), factory, &input);
+    assert_eq!(out.verdict, GuardVerdict::Allow, "project is on main");
+}
+
+#[test]
+fn protection_rule_is_reported_wherever_the_protected_gate_decides() {
+    let repo = repo_dir();
+    let mut input = bash_input(repo.path(), "rm a", None);
+    input.protected_branches = Some(vec!["staging".to_string()]);
+
+    let detected = check(on_branch("main"), &input);
+    assert_eq!(
+        detected.rule,
+        Some(ProtectionRule::DefaultBranch {
+            source: DefaultBranchSource::Detected
+        })
+    );
+    assert_eq!(detected.repo_root, Some(display(repo.path())));
+
+    input.default_branch = Some("main".to_string());
+    let pinned = check(on_branch("main"), &input);
+    assert_eq!(
+        pinned.rule,
+        Some(ProtectionRule::DefaultBranch {
+            source: DefaultBranchSource::Pinned
+        })
+    );
+
+    assert_eq!(
+        check(on_branch("develop"), &input).rule,
+        Some(ProtectionRule::Develop)
+    );
+    assert_eq!(
+        check(on_branch("staging"), &input).rule,
+        Some(ProtectionRule::Extra)
+    );
+    assert_eq!(check(on_branch("feat/x"), &input).rule, None);
+}
+
+#[test]
+fn bash_block_message_names_branch_root_rule_and_remedy() {
+    let repo = repo_dir();
+    let p = display(repo.path());
+    let out = check(
+        on_branch("main"),
+        &bash_input(repo.path(), "sed -i s/a/b/ f", None),
+    );
+    let expected = [
+        format!("[Branch Guard] 보호 브랜치(main)에서 파일을 수정하려 합니다 — Bash `sed` → {p}/f"),
+        format!("- 현재 브랜치: main / 대상 저장소: {p} (프로젝트: {p})"),
+        "- 발동 규칙: 기본 브랜치 보호(자동 감지: main)".to_string(),
+        format!("가드 오작동을 의심하기 전에 `git -C {p} branch --show-current` 로 브랜치를 먼저 확인하세요."),
+        "해소: 새 브랜치를 만든 뒤 다시 시도하세요:".to_string(),
+        "  git switch -c <branch-name>".to_string(),
+    ]
+    .join("\n");
+    assert_eq!(out.reason.unwrap(), expected);
+}
+
+#[test]
+fn write_block_message_uses_the_same_layout_with_the_path() {
+    let repo = repo_dir();
+    let p = display(repo.path());
+    let mut input = write_input(repo.path(), &repo.path().join("src/a.rs"));
+    input.default_branch = Some("main".to_string());
+    let reason = check(on_branch("main"), &input).reason.unwrap();
+    let lines: Vec<&str> = reason.lines().collect();
+    assert_eq!(
+        lines[0],
+        format!(
+            "[Branch Guard] 보호 브랜치(main)에서 파일을 수정하려 합니다 — Write → {p}/src/a.rs"
+        )
+    );
+    assert_eq!(
+        lines[1],
+        format!("- 현재 브랜치: main / 대상 저장소: {p} (프로젝트: {p})")
+    );
+    assert_eq!(
+        lines[2],
+        "- 발동 규칙: 기본 브랜치 보호(--default-branch main)"
+    );
+    assert_eq!(lines.len(), 6);
+}
+
+#[test]
+fn commit_block_message_says_commit_and_shows_the_command_cwd() {
+    let repo = repo_dir();
+    let sub = repo.path().join("pkg");
+    let reason = check(
+        on_branch("develop"),
+        &bash_input(repo.path(), "git commit -m x", Some(&sub)),
+    )
+    .reason
+    .unwrap();
+    let p = display(repo.path());
+    assert!(
+        reason.starts_with(&format!(
+            "[Branch Guard] 보호 브랜치(develop)에서 커밋하려 합니다 — Bash `git commit` → {p}/pkg\n"
+        )),
+        "{reason}"
+    );
+    assert!(
+        reason.contains(&format!("(프로젝트: {p}, 명령 cwd: {p}/pkg)")),
+        "{reason}"
+    );
+    assert!(
+        reason.contains("- 발동 규칙: develop 고정 보호"),
+        "{reason}"
+    );
+}
+
+#[test]
+fn ask_message_adds_the_confirmation_notice_and_block_policy_says_so() {
+    let repo = repo_dir();
+    let mut input = bash_input(repo.path(), "python3 y.py", None);
+    let ask = check(on_branch("main"), &input).reason.unwrap();
+    assert!(ask.contains(
+        "스크립트/대상 내부를 확인할 수 없어 확인을 요청합니다. 저장소 파일을 바꾸지 않는다면 승인하세요."
+    ));
+    assert!(ask.contains("`python3`"), "{ask}");
+
+    input.opaque_exec = OpaqueExecPolicy::Block;
+    let blocked = check(on_branch("main"), &input).reason.unwrap();
+    assert!(blocked.contains("확인할 수 없어 차단합니다(--opaque-exec block)"));
+    assert!(!blocked.contains("승인하세요"));
+}
+
+#[test]
+fn custom_branch_creation_script_is_rendered_in_the_remedy() {
+    let repo = repo_dir();
+    let mut input = bash_input(repo.path(), "rm a", None);
+    input.create_branch_script = "gh wt new".to_string();
+    let reason = check(on_branch("main"), &input).reason.unwrap();
+    assert!(reason.ends_with("\n  gh wt new <branch-name>"), "{reason}");
+}
+
+#[test]
+fn unreadable_command_ask_names_the_first_word_of_the_command() {
+    let reason = judge("main", "echo \"unterminated").reason.unwrap();
+    assert!(reason.contains("`echo`"), "{reason}");
+}
+
+#[test]
+fn hook_bypass_message_shows_rule_and_token_only_when_they_differ() {
+    let repo = repo_dir();
+    let same = check(
+        panicking_git(),
+        &bash_input(repo.path(), "git commit --no-verify -m x", None),
+    )
+    .reason
+    .unwrap();
+    assert!(
+        same.starts_with("[Hook Guard] git hook 우회(--no-verify)는"),
+        "{same}"
+    );
+
+    let differs = check(
+        panicking_git(),
+        &bash_input(repo.path(), "git commit -an -m x", None),
+    )
+    .reason
+    .unwrap();
+    assert!(
+        differs.starts_with("[Hook Guard] git hook 우회(commit -n: -an)는"),
+        "{differs}"
+    );
+}
+
+#[test]
+fn bypass_blocks_before_any_repository_is_consulted() {
+    let project = repo_dir();
+    let other = repo_dir();
+    let factory = MockGitFactory::new();
+    let requested = factory.requested();
+    let cmd = format!("rm {}/a && git commit --no-verify", other.path().display());
+    let out = check_with(
+        panicking_git(),
+        factory,
+        &bash_input(project.path(), &cmd, None),
+    );
+    assert_eq!(out.verdict, GuardVerdict::Block);
+    assert!(requested.borrow().is_empty());
+}
+
+#[test]
+fn rebase_in_another_repo_passes_that_root_only() {
+    let project = repo_dir();
+    let other = repo_dir();
+    let cmd = format!("rm {}/b", other.path().display());
+    let input = bash_input(project.path(), &cmd, None);
+    let factory = MockGitFactory::new().with(other.path(), || {
+        let mut git = on_branch("main");
+        git.special_state_flags = Box::new(|| (true, false));
+        git
+    });
+    assert_eq!(
+        check_with(on_branch("main"), factory, &input).verdict,
+        GuardVerdict::Allow
+    );
 }
 
 // ---- path helpers ----

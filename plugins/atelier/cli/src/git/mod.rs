@@ -13,7 +13,7 @@ pub mod types;
 
 use crate::git::commands::guard::{GuardTargetKind, HookPayload};
 use crate::git::commands::hook::{create_hook_command, HookFs};
-use crate::git::core::git::create_git_service;
+use crate::git::core::git::{create_git_service, RealGitServiceFactory};
 use crate::git::core::github::create_github_service;
 use crate::git::core::guard::create_guard_service;
 use crate::git::core::pr_guard::create_pr_guard_service;
@@ -207,7 +207,7 @@ pub fn run(cli: Cli) -> i32 {
             // detection reflect the project, not the hook's process cwd (worktree /
             // subagent contexts) — see #780.
             let git = create_git_service(Some(project_dir.clone()));
-            let branch_guard = create_guard_service(&git);
+            let branch_guard = create_guard_service(&git, &RealGitServiceFactory);
             let github = create_github_service(None);
             let pr_guard = create_pr_guard_service(&github);
             let deps = commands::guard::GuardCommandDeps {

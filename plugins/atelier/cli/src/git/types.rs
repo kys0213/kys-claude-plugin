@@ -115,12 +115,33 @@ pub enum GuardVerdict {
     Block,
 }
 
+/// Where the protected default branch name came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefaultBranchSource {
+    /// `--default-branch` supplied by the project's guard registration.
+    Pinned,
+    /// Read from the target repository itself.
+    Detected,
+}
+
+/// Which protection rule made a branch protected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProtectionRule {
+    DefaultBranch { source: DefaultBranchSource },
+    Develop,
+    Extra,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuardOutput {
     pub verdict: GuardVerdict,
     pub reason: Option<String>,
     pub current_branch: Option<String>,
     pub default_branch: Option<String>,
+    /// Set wherever the protected-branch gate decided.
+    pub rule: Option<ProtectionRule>,
+    /// Repository root the verdict was judged in; `None` when no repository was consulted.
+    pub repo_root: Option<String>,
 }
 
 /// Unified verdict returned by the guard command after routing a target to
