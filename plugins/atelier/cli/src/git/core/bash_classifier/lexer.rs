@@ -59,8 +59,10 @@ impl Word {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Sep {
-    /// `;`, `&&`, `||` or a newline: the next command runs in the same shell.
-    List,
+    /// `;` or a newline.
+    Seq,
+    And,
+    Or,
     Pipe,
     Amp,
     LParen,
@@ -73,12 +75,17 @@ pub(super) enum RedirOp {
     In,
     HereString,
     HereDoc,
+    /// Carries the command substitutions of an expanding heredoc body.
+    HereBody,
     Dup,
 }
 
 impl RedirOp {
     pub(super) fn takes_operand(self) -> bool {
-        matches!(self, RedirOp::Out | RedirOp::In | RedirOp::HereString)
+        matches!(
+            self,
+            RedirOp::Out | RedirOp::In | RedirOp::HereString | RedirOp::HereBody
+        )
     }
 }
 
@@ -93,24 +100,28 @@ struct Lexer {
     chars: Vec<char>,
     pos: usize,
     toks: Vec<Tok>,
-    heredocs: Vec<(String, bool)>,
+    heredocs: Vec<Heredoc>,
+    /// End of input closes any open quote or substitution instead of failing.
+    lenient: bool,
 }
 
-pub(super) fn lex(src: &str) -> Result<Vec<Tok>, LexError> {
-    let mut lx = Lexer {
-        chars: src.chars().collect(),
-        pos: 0,
-        toks: Vec::new(),
-        heredocs: Vec::new(),
-    };
+struct Heredoc {
+    delimiter: String,
+    strip_tabs: bool,
+    /// An unquoted delimiter: bash expands `$(…)` and backticks in the body.
+    expands: bool,
+}
+
+pub(super) fn lex(src: &str, lenient: bool) -> Result<Vec<Tok>, LexError> {
+    let mut lx = Lexer::new(src, lenient);
     while let Some(c) = lx.peek() {
         match c {
             ' ' | '\t' | '\r' => lx.pos += 1,
             '\\' if lx.peek_at(1) == Some('\n') => lx.pos += 2,
             '\n' => {
                 lx.pos += 1;
-                lx.toks.push(Tok::Sep(Sep::List));
-                lx.skip_heredoc_bodies();
+                lx.toks.push(Tok::Sep(Sep::Seq));
+                lx.read_heredoc_bodies();
             }
             '#' => {
                 while lx.peek().is_some_and(|c| c != '\n') {
@@ -122,7 +133,7 @@ pub(super) fn lex(src: &str) -> Result<Vec<Tok>, LexError> {
                 if lx.peek() == Some(';') {
                     lx.pos += 1;
                 }
-                lx.toks.push(Tok::Sep(Sep::List));
+                lx.toks.push(Tok::Sep(Sep::Seq));
             }
             '&' => lx.ampersand(),
             '|' => lx.pipe(),
@@ -152,6 +163,24 @@ fn is_word_end(c: char) -> bool {
 }
 
 impl Lexer {
+    fn new(src: &str, lenient: bool) -> Lexer {
+        Lexer {
+            chars: src.chars().collect(),
+            pos: 0,
+            toks: Vec::new(),
+            heredocs: Vec::new(),
+            lenient,
+        }
+    }
+
+    fn unterminated(&self, err: LexError) -> Result<(), LexError> {
+        if self.lenient {
+            Ok(())
+        } else {
+            Err(err)
+        }
+    }
+
     fn peek(&self) -> Option<char> {
         self.chars.get(self.pos).copied()
     }
@@ -195,7 +224,7 @@ impl Lexer {
             }
             Some('&') => {
                 self.pos += 2;
-                self.toks.push(Tok::Sep(Sep::List));
+                self.toks.push(Tok::Sep(Sep::And));
             }
             _ => {
                 self.pos += 1;
@@ -208,7 +237,7 @@ impl Lexer {
         match self.peek_at(1) {
             Some('|') => {
                 self.pos += 2;
-                self.toks.push(Tok::Sep(Sep::List));
+                self.toks.push(Tok::Sep(Sep::Or));
             }
             Some('&') => {
                 self.pos += 2;
@@ -293,13 +322,33 @@ impl Lexer {
             return Ok(());
         }
         let word = self.read_word()?;
-        self.heredocs.push((word.text, strip_tabs));
+        self.heredocs.push(Heredoc {
+            expands: !word.quoted,
+            delimiter: word.text,
+            strip_tabs,
+        });
         Ok(())
     }
 
-    fn skip_heredoc_bodies(&mut self) {
-        for (delimiter, strip_tabs) in std::mem::take(&mut self.heredocs) {
-            self.scan_heredoc_body(&delimiter, strip_tabs, None);
+    /// Consumes the bodies of the heredocs opened on the line just ended. An
+    /// expanding body's substitutions are attached to that line's command.
+    fn read_heredoc_bodies(&mut self) {
+        for doc in std::mem::take(&mut self.heredocs) {
+            let mut body = String::new();
+            let sink = doc.expands.then_some(&mut body);
+            self.scan_heredoc_body(&doc.delimiter, doc.strip_tabs, sink);
+            let subs = substitutions_in(&body);
+            if !subs.is_empty() {
+                let at = self.toks.len() - 1;
+                let carrier = Word {
+                    text: "<<".to_string(),
+                    dyn_at: Some(0),
+                    subs,
+                    ..Word::default()
+                };
+                self.toks.insert(at, Tok::Word(carrier));
+                self.toks.insert(at, Tok::Redir(RedirOp::HereBody));
+            }
         }
     }
 
@@ -323,7 +372,10 @@ impl Lexer {
                     w.quoted = true;
                     loop {
                         match self.next() {
-                            None => return Err(LexError::UnterminatedQuote),
+                            None => {
+                                self.unterminated(LexError::UnterminatedQuote)?;
+                                break;
+                            }
                             Some('\'') => break,
                             Some(ch) => w.push_lit(ch),
                         }
@@ -383,7 +435,7 @@ impl Lexer {
     fn read_double_quoted(&mut self, w: &mut Word) -> Result<(), LexError> {
         loop {
             match self.peek() {
-                None => return Err(LexError::UnterminatedQuote),
+                None => return self.unterminated(LexError::UnterminatedQuote),
                 Some('"') => {
                     self.pos += 1;
                     return Ok(());
@@ -391,7 +443,7 @@ impl Lexer {
                 Some('\\') => {
                     self.pos += 1;
                     match self.next() {
-                        None => return Err(LexError::UnterminatedQuote),
+                        None => return self.unterminated(LexError::UnterminatedQuote),
                         Some('\n') => {}
                         Some(n @ ('$' | '`' | '"' | '\\')) => w.push_lit(n),
                         Some(n) => {
@@ -419,7 +471,8 @@ impl Lexer {
                 let open = w.text.len();
                 self.scan_parens(w)?;
                 if !arithmetic {
-                    let body = w.text[open + 1..w.text.len() - 1].to_string();
+                    let end = w.text.len() - usize::from(w.text.ends_with(')'));
+                    let body = w.text[open + 1..end].to_string();
                     w.subs.push(body);
                 }
                 Ok(())
@@ -429,7 +482,7 @@ impl Lexer {
                 self.pos += 1;
                 loop {
                     match self.next() {
-                        None => return Err(LexError::UnterminatedSubstitution),
+                        None => return self.unterminated(LexError::UnterminatedSubstitution),
                         Some(c) => {
                             w.text.push(c);
                             if c == '}' {
@@ -463,7 +516,7 @@ impl Lexer {
         let mut pending_heredocs: Vec<(String, bool)> = Vec::new();
         loop {
             let Some(c) = self.next() else {
-                return Err(LexError::UnterminatedSubstitution);
+                return self.unterminated(LexError::UnterminatedSubstitution);
             };
             w.text.push(c);
             match c {
@@ -489,7 +542,7 @@ impl Lexer {
                 }
                 '\'' | '"' => loop {
                     match self.next() {
-                        None => return Err(LexError::UnterminatedSubstitution),
+                        None => return self.unterminated(LexError::UnterminatedSubstitution),
                         Some(q) => {
                             w.text.push(q);
                             if q == '\\' && c == '"' {
@@ -575,7 +628,9 @@ impl Lexer {
         let open = w.text.len();
         loop {
             let Some(c) = self.next() else {
-                return Err(LexError::UnterminatedSubstitution);
+                self.unterminated(LexError::UnterminatedSubstitution)?;
+                w.subs.push(unescape_backtick(&w.text[open..]));
+                return Ok(());
             };
             w.text.push(c);
             if c == '\\' {
@@ -593,11 +648,11 @@ impl Lexer {
     fn read_ansi_c(&mut self, w: &mut Word) -> Result<(), LexError> {
         loop {
             match self.next() {
-                None => return Err(LexError::UnterminatedQuote),
+                None => return self.unterminated(LexError::UnterminatedQuote),
                 Some('\'') => return Ok(()),
                 Some('\\') => {
                     let Some(e) = self.next() else {
-                        return Err(LexError::UnterminatedQuote);
+                        return self.unterminated(LexError::UnterminatedQuote);
                     };
                     match e {
                         'n' => w.push_lit('\n'),
@@ -643,6 +698,25 @@ impl Lexer {
         }
         (count > 0).then_some(value)
     }
+}
+
+/// Command substitutions bash runs while expanding a heredoc body.
+fn substitutions_in(body: &str) -> Vec<String> {
+    let mut lx = Lexer::new(body, true);
+    let mut w = Word::default();
+    while let Some(c) = lx.peek() {
+        match c {
+            '\\' => lx.pos += 2,
+            '$' => {
+                let _ = lx.read_dollar(&mut w, true);
+            }
+            '`' => {
+                let _ = lx.read_backtick(&mut w);
+            }
+            _ => lx.pos += 1,
+        }
+    }
+    w.subs
 }
 
 fn unescape_backtick(body: &str) -> String {

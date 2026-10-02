@@ -2,7 +2,7 @@
 //! flags and anchored hits out.
 
 use atelier::git::core::bash_classifier::{
-    classify, Anchor, BashAnalysis, BypassRule, ClassifyInput, HitKind, LexError, OpaqueCause,
+    classify, Anchor, BashAnalysis, BranchSwitch, BypassRule, ClassifyInput, HitKind, OpaqueCause,
     Wrapper, WriteRule,
 };
 use std::path::PathBuf;
@@ -21,7 +21,7 @@ fn input(command: &str) -> ClassifyInput {
 }
 
 fn analyze(command: &str) -> BashAnalysis {
-    classify(&input(command)).unwrap_or_else(|e| panic!("lex error {e:?} for {command:?}"))
+    classify(&input(command))
 }
 
 fn pairs(command: &str) -> Vec<Pair> {
@@ -647,8 +647,7 @@ fn tilde_needs_home() {
         command: "rm ~/x".to_string(),
         cwd: PathBuf::from(CWD),
         home: None,
-    })
-    .unwrap();
+    });
     assert_eq!(
         a.hits
             .into_iter()
@@ -1039,11 +1038,30 @@ fn heredoc_body_is_never_tokenized() {
         "cat <<\"EOF\"\nit's \"unterminated\nEOF",
         "cat <<\\EOF\nrm x\nEOF",
         "cat <<-EOF\n\trm x\n\tEOF",
-        "cat <<EOF\n$(rm x)\n`rm y`\nEOF",
+        "cat <<'EOF'\n$(rm x)\n`rm y`\nEOF",
+        "cat <<EOF\n\\$(rm x) \\`rm y\\`\nEOF",
         "cat <<EOF\nline\nEOF\n",
     ] {
         assert_clean(cmd);
     }
+}
+
+#[test]
+fn substitutions_in_an_expanding_heredoc_body_are_classified() {
+    assert_hits(
+        "cat <<EOF\n$(rm x)\n`rm y`\nEOF",
+        vec![
+            write(WriteRule::FileOp, path("/work/proj/x")),
+            write(WriteRule::FileOp, path("/work/proj/y")),
+        ],
+    );
+    assert_hits(
+        "cd sub && cat <<EOF > /tmp/f\nsay \"hi\" $(rm a)\nEOF",
+        vec![
+            write(WriteRule::FileOp, path("/work/proj/sub/a")),
+            write(WriteRule::Redirect, path("/tmp/f")),
+        ],
+    );
 }
 
 #[test]
@@ -1081,9 +1099,14 @@ fn commit_message_heredoc_inside_substitution_is_a_plain_commit() {
         "fix: \"quoted",
     ] {
         let cmd = format!("git commit -m \"$(cat <<'EOF'\n{body}\nEOF\n)\"");
-        let a = classify(&input(&cmd))
-            .unwrap_or_else(|e| panic!("lex error {e:?} for heredoc body {body:?}"));
+        let a = classify(&input(&cmd));
         assert!(a.bypass.is_empty(), "{a:?}");
+        assert!(
+            !a.hits
+                .iter()
+                .any(|h| h.kind == HitKind::Opaque(OpaqueCause::Unparsed)),
+            "heredoc body {body:?} broke the lexer: {a:?}"
+        );
         assert!(
             a.hits.iter().any(|h| h.kind == HitKind::Commit),
             "expected a commit hit, got {a:?}"
@@ -1211,18 +1234,44 @@ fn quoted_tar_and_find_options_are_still_options() {
 }
 
 #[test]
-fn unterminated_constructs_are_errors() {
-    for (cmd, err) in [
-        ("echo \"abc", LexError::UnterminatedQuote),
-        ("echo 'abc", LexError::UnterminatedQuote),
-        ("echo $'abc", LexError::UnterminatedQuote),
-        ("echo $(abc", LexError::UnterminatedSubstitution),
-        ("echo `abc", LexError::UnterminatedSubstitution),
-        ("echo ${abc", LexError::UnterminatedSubstitution),
-        ("git commit -m \"msg", LexError::UnterminatedQuote),
+fn unterminated_constructs_are_read_to_the_end_and_flagged_unparsed() {
+    for cmd in [
+        "echo \"abc",
+        "echo 'abc",
+        "echo $'abc",
+        "echo $(abc",
+        "echo `abc",
+        "echo ${abc",
     ] {
-        assert_eq!(classify(&input(cmd)), Err(err), "{cmd:?}");
+        assert_hits(cmd, vec![opaque(OpaqueCause::Unparsed)]);
     }
+    assert_hits(
+        "git commit -m \"msg",
+        vec![(HitKind::Commit, path(CWD)), opaque(OpaqueCause::Unparsed)],
+    );
+}
+
+#[test]
+fn hook_bypass_is_caught_despite_an_unterminated_quote() {
+    for cmd in [
+        "git commit --no-verify -m \"x",
+        "git commit --no-verify -m x\necho \"oops",
+        "HUSKY=0 git commit -m 'x",
+    ] {
+        let a = analyze(cmd);
+        assert!(!a.bypass.is_empty(), "{cmd:?}: {a:?}");
+    }
+}
+
+#[test]
+fn writes_before_an_unterminated_quote_are_still_classified() {
+    assert_hits(
+        "rm f\necho \"oops",
+        vec![
+            write(WriteRule::FileOp, path("/work/proj/f")),
+            opaque(OpaqueCause::Unparsed),
+        ],
+    );
 }
 
 #[test]
@@ -1246,8 +1295,7 @@ fn nonexistent_cwd_and_relative_cwd_do_not_matter() {
         command: "rm f".to_string(),
         cwd: PathBuf::from("/definitely/not/here"),
         home: None,
-    })
-    .unwrap();
+    });
     assert_eq!(a.hits[0].anchor, path("/definitely/not/here/f"));
 }
 
@@ -1399,7 +1447,7 @@ fn substitution_does_not_leak_cwd_or_run_inside_single_quotes_or_heredocs() {
     assert_clean("echo '`rm f`'");
     assert_clean("echo $((1 + 2))");
     assert_clean("echo $((a > b))");
-    assert_clean("cat <<EOF\n$(rm f)\nEOF");
+    assert_clean("cat <<'EOF'\n$(rm f)\nEOF");
 }
 
 #[test]
@@ -1519,4 +1567,141 @@ fn rsync_without_local_destination_passes() {
     ] {
         assert_clean(cmd);
     }
+}
+
+// ---- conditional cd ----------------------------------------------------------
+
+#[test]
+fn cd_that_may_not_have_run_leaves_the_cwd_unknown() {
+    for cmd in [
+        "cd /tmp || true; rm a",
+        "true && cd /tmp; rm a",
+        "cd /tmp || echo no\nrm a",
+    ] {
+        assert_hits(
+            cmd,
+            vec![write(WriteRule::FileOp, unresolved(None, "cd/a"))],
+        );
+    }
+}
+
+#[test]
+fn cd_that_certainly_ran_moves_the_cwd() {
+    for cmd in [
+        "cd /tmp && rm a",
+        "cd /tmp; rm a",
+        "cd /tmp || exit 1; rm a",
+        "cd /tmp || return; rm a",
+        "{ cd /tmp; }; rm a",
+    ] {
+        assert_single_write(cmd, WriteRule::FileOp, "/tmp/a");
+    }
+}
+
+#[test]
+fn cd_inside_a_function_body_does_not_move_the_caller() {
+    for cmd in [
+        "f() { cd /tmp; }; rm a",
+        "f () { cd /tmp; }\nrm a",
+        "function f { cd /tmp; }; rm a",
+        "function f() { cd /tmp; }; rm a",
+    ] {
+        assert_single_write(cmd, WriteRule::FileOp, "/work/proj/a");
+    }
+    assert_hits(
+        "f() { cd /tmp; rm x; }; rm a",
+        vec![
+            write(WriteRule::FileOp, path("/tmp/x")),
+            write(WriteRule::FileOp, path("/work/proj/a")),
+        ],
+    );
+}
+
+// ---- hooks directory -----------------------------------------------------------
+
+#[test]
+fn writes_into_the_hooks_directory_are_hook_bypass() {
+    for cmd in [
+        "rm .git/hooks/pre-commit",
+        "rm -f /work/proj/.git/hooks/*",
+        "mv .git/hooks/pre-commit /tmp/",
+        "chmod -x .git/hooks/pre-commit",
+        "echo exit 0 > .git/hooks/pre-commit",
+        "cd .git && rm hooks/commit-msg",
+    ] {
+        assert_bypass(cmd, BypassRule::HooksDirWrite);
+    }
+    for cmd in [
+        "cat .git/hooks/pre-commit",
+        "ls .git/hooks",
+        "rm .github/hooks.md",
+    ] {
+        assert_no_bypass(cmd);
+    }
+}
+
+#[test]
+fn chmod_writes_its_files_but_not_its_mode() {
+    assert_single_write("chmod +x run.sh", WriteRule::FileOp, "/work/proj/run.sh");
+    assert_single_write("chmod -R 755 dir", WriteRule::FileOp, "/work/proj/dir");
+    assert_single_write("chmod -x run.sh", WriteRule::FileOp, "/work/proj/run.sh");
+    assert_single_write("chmod --reference=a b", WriteRule::FileOp, "/work/proj/b");
+    assert_single_write("chmod 644 /tmp/x", WriteRule::FileOp, "/tmp/x");
+}
+
+// ---- branch switch -------------------------------------------------------------
+
+fn branches(command: &str) -> Vec<Option<BranchSwitch>> {
+    analyze(command)
+        .hits
+        .into_iter()
+        .map(|h| h.on_branch)
+        .collect()
+}
+
+fn switched(repo: &str, branch: &str) -> Option<BranchSwitch> {
+    Some(BranchSwitch {
+        repo: path(repo),
+        branch: branch.to_string(),
+    })
+}
+
+#[test]
+fn effects_chained_after_a_branch_switch_land_on_the_new_branch() {
+    for cmd in [
+        "git switch -c feat && rm a",
+        "git switch --create=feat && rm a",
+        "git switch feat && rm a",
+        "git checkout -b feat && rm a",
+        "git checkout -B feat origin/main && rm a",
+    ] {
+        assert_eq!(branches(cmd), vec![switched(CWD, "feat")], "{cmd:?}");
+    }
+    assert_eq!(
+        branches("git switch -c feat && git commit -m x && echo > f"),
+        vec![switched(CWD, "feat"), switched(CWD, "feat")]
+    );
+    assert_eq!(
+        branches("git -C /other switch -c feat && rm a"),
+        vec![switched("/other", "feat")]
+    );
+}
+
+#[test]
+fn a_switch_that_may_have_failed_does_not_carry_over() {
+    for cmd in [
+        "git switch -c feat; rm a",
+        "git switch -c feat || rm a",
+        "git switch -c feat\nrm a",
+        "git checkout feat && rm a",
+        "git switch - && rm a",
+        "git switch --detach && rm a",
+        "bash -c 'git switch -c feat' && rm a",
+    ] {
+        assert_eq!(branches(cmd), vec![None], "{cmd:?}");
+    }
+    assert_eq!(
+        branches("git switch -c feat && rm a; rm b"),
+        vec![switched(CWD, "feat"), None]
+    );
 }

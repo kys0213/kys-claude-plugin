@@ -4,8 +4,8 @@ use super::args::{assignment, is_device, normalize, program_name};
 use super::interpreters::{is_interpreter, is_shell};
 use super::lexer::{lex, RedirOp, Sep, Tok, Word};
 use super::{
-    Anchor, BashAnalysis, BypassHit, BypassRule, Hit, HitKind, LexError, OpaqueCause, Wrapper,
-    WriteRule,
+    is_hooks_path, Anchor, BashAnalysis, BranchSwitch, BypassHit, BypassRule, Hit, HitKind,
+    LexError, OpaqueCause, Wrapper, WriteRule,
 };
 
 pub(super) const MAX_WRAPPER_DEPTH: usize = 2;
@@ -58,69 +58,227 @@ impl Segment {
 pub(super) struct Analyzer<'a> {
     pub(super) home: Option<&'a Path>,
     pub(super) out: BashAnalysis,
+    /// A branch switch whose `&&` chain the current segment belongs to.
+    pub(super) switch: Option<BranchSwitch>,
+    /// A branch switch made by the segment being analyzed.
+    pub(super) pending_switch: Option<BranchSwitch>,
+}
+
+/// Shell state carried from one segment of a script to the next.
+struct Shell {
+    cwd: Anchor,
+    env: Env,
+    frames: Vec<Frame>,
+    /// The cwd the current and-or list started in.
+    list_cwd: Anchor,
+    /// A `cd` in this list ran only if an earlier command succeeded.
+    list_conditional: bool,
+    /// The cwd a `cd` set before a `||`, kept for a following `exit`.
+    or_saved: Option<Anchor>,
+    /// The next segment starts an and-or list.
+    head: bool,
+    /// The next brace group is a function body that may never run.
+    func_pending: bool,
+}
+
+enum Frame {
+    Subshell(Anchor, Env),
+    Brace(Option<(Anchor, Env)>),
+}
+
+impl Shell {
+    fn new(cwd: &Anchor, env: &Env) -> Shell {
+        Shell {
+            cwd: cwd.clone(),
+            env: env.clone(),
+            frames: Vec::new(),
+            list_cwd: cwd.clone(),
+            list_conditional: false,
+            or_saved: None,
+            head: true,
+            func_pending: false,
+        }
+    }
+
+    fn end_list(&mut self) {
+        if self.list_conditional && self.cwd != self.list_cwd {
+            self.cwd = Anchor::unknown("cd");
+        }
+        self.list_cwd = self.cwd.clone();
+        self.list_conditional = false;
+        self.or_saved = None;
+        self.head = true;
+    }
+
+    fn separator(&mut self, sep: Sep) {
+        match sep {
+            Sep::And | Sep::Pipe => self.head = false,
+            Sep::Or => {
+                if self.cwd != self.list_cwd {
+                    self.or_saved = Some(std::mem::replace(&mut self.cwd, Anchor::unknown("cd")));
+                }
+                self.head = false;
+            }
+            Sep::Seq | Sep::Amp => self.end_list(),
+            Sep::LParen => {
+                self.frames
+                    .push(Frame::Subshell(self.cwd.clone(), self.env.clone()));
+                self.end_list();
+            }
+            Sep::RParen => {
+                self.end_list();
+                while let Some(frame) = self.frames.pop() {
+                    if let Frame::Subshell(cwd, env) = frame {
+                        self.cwd = cwd;
+                        self.env = env;
+                        break;
+                    }
+                }
+                self.list_cwd = self.cwd.clone();
+            }
+        }
+    }
+
+    /// Strips the brace-group and function-definition words that open a
+    /// segment, entering or leaving their frames.
+    fn enter_groups<'w>(&mut self, mut words: &'w [Word]) -> &'w [Word] {
+        loop {
+            match words.first() {
+                Some(w) if w.is("function") && !w.quoted && words.len() >= 2 => {
+                    self.func_pending = true;
+                    words = &words[2..];
+                }
+                Some(w) if w.is("{") && !w.quoted => {
+                    let saved = std::mem::take(&mut self.func_pending)
+                        .then(|| (self.cwd.clone(), self.env.clone()));
+                    self.frames.push(Frame::Brace(saved));
+                    words = &words[1..];
+                }
+                Some(w) if w.is("}") && !w.quoted => {
+                    if let Some(Frame::Brace(saved)) = self.frames.last() {
+                        if let Some((cwd, env)) = saved.clone() {
+                            self.cwd = cwd;
+                            self.env = env;
+                            self.list_cwd = self.cwd.clone();
+                        }
+                        self.frames.pop();
+                    }
+                    words = &words[1..];
+                }
+                _ => return words,
+            }
+        }
+    }
+}
+
+/// `name` or `function name` right before `()`: a function definition.
+fn is_function_head(seg: &Segment) -> bool {
+    if !seg.redirs.is_empty() {
+        return false;
+    }
+    match seg.words.as_slice() {
+        [name] => !name.quoted && name.dyn_at.is_none(),
+        [kw, _] => kw.is("function") && !kw.quoted,
+        _ => false,
+    }
 }
 
 impl Analyzer<'_> {
+    pub(super) fn new(home: Option<&Path>) -> Analyzer<'_> {
+        Analyzer {
+            home,
+            out: BashAnalysis::default(),
+            switch: None,
+            pending_switch: None,
+        }
+    }
+
     pub(super) fn run_script(
         &mut self,
         src: &str,
         cwd: &Anchor,
         env: &Env,
         depth: usize,
+        lenient: bool,
     ) -> Result<(), LexError> {
-        let toks = lex(src)?;
-        let mut cwd = cwd.clone();
-        let mut env = env.clone();
-        let mut saved: Vec<(Anchor, Env)> = Vec::new();
+        let toks = lex(src, lenient)?;
+        let outer_switch = self.switch.clone();
+        let mut sh = Shell::new(cwd, env);
         let mut seg = Segment::default();
         let mut after_pipe = false;
-        for tok in toks {
-            match tok {
-                Tok::Word(w) => seg.push_word(w),
-                Tok::Redir(op) => seg.redirs.push((op, None)),
+        let mut i = 0;
+        while i < toks.len() {
+            match &toks[i] {
+                Tok::Word(w) => seg.push_word(w.clone()),
+                Tok::Redir(op) => seg.redirs.push((*op, None)),
+                Tok::Sep(Sep::LParen)
+                    if is_function_head(&seg)
+                        && matches!(toks.get(i + 1), Some(Tok::Sep(Sep::RParen))) =>
+                {
+                    seg = Segment::default();
+                    sh.func_pending = true;
+                    i += 1;
+                }
                 Tok::Sep(sep) => {
+                    let sep = *sep;
                     let before_pipe = sep == Sep::Pipe;
                     let propagate = !after_pipe && !before_pipe && sep != Sep::Amp;
-                    self.flush(&mut seg, &mut cwd, &mut env, depth, propagate);
-                    match sep {
-                        Sep::LParen => saved.push((cwd.clone(), env.clone())),
-                        Sep::RParen => {
-                            if let Some((outer_cwd, outer_env)) = saved.pop() {
-                                cwd = outer_cwd;
-                                env = outer_env;
-                            }
-                        }
-                        _ => {}
-                    }
+                    self.flush(&mut seg, &mut sh, depth, propagate);
+                    self.carry_switch(sep == Sep::And);
+                    sh.separator(sep);
                     after_pipe = before_pipe;
                 }
             }
+            i += 1;
         }
-        self.flush(&mut seg, &mut cwd, &mut env, depth, !after_pipe);
+        self.flush(&mut seg, &mut sh, depth, !after_pipe);
+        self.pending_switch = None;
+        self.switch = outer_switch;
         Ok(())
     }
 
-    fn flush(
-        &mut self,
-        seg: &mut Segment,
-        cwd: &mut Anchor,
-        env: &mut Env,
-        depth: usize,
-        propagate: bool,
-    ) {
-        let segment = std::mem::take(seg);
+    /// A switch made by the segment just analyzed covers the rest of its `&&`
+    /// chain; any other separator ends the chain and its switch.
+    fn carry_switch(&mut self, chained: bool) {
+        let made = self.pending_switch.take();
+        if chained {
+            if made.is_some() {
+                self.switch = made;
+            }
+        } else {
+            self.switch = None;
+        }
+    }
+
+    fn flush(&mut self, seg: &mut Segment, sh: &mut Shell, depth: usize, propagate: bool) {
+        let mut segment = std::mem::take(seg);
+        segment.words = sh.enter_groups(&segment.words).to_vec();
+        let head = std::mem::replace(&mut sh.head, false);
+        if let Some(saved) = sh.or_saved.take() {
+            if segment
+                .words
+                .first()
+                .is_some_and(|w| matches!(w.text.as_str(), "exit" | "return"))
+            {
+                sh.cwd = saved;
+                sh.list_cwd = sh.cwd.clone();
+            }
+        }
         if segment.words.is_empty() && segment.redirs.is_empty() {
             return;
         }
-        let effect = self.segment(&segment, cwd, env, depth);
+        let effect = self.segment(&segment, &sh.cwd, &sh.env, depth);
         if !propagate {
             return;
         }
         match effect {
-            Some(Effect::Cd(next)) => *cwd = next,
+            Some(Effect::Cd(next)) => {
+                sh.cwd = next;
+                sh.list_conditional |= !head;
+            }
             Some(Effect::Env(assigned)) => {
                 for kv in assigned {
-                    set_env(env, kv);
+                    set_env(&mut sh.env, kv);
                 }
             }
             None => {}
@@ -147,7 +305,7 @@ impl Analyzer<'_> {
         cause: OpaqueCause,
         program: &str,
     ) {
-        if depth >= MAX_WRAPPER_DEPTH || self.run_script(src, cwd, env, depth + 1).is_err() {
+        if depth >= MAX_WRAPPER_DEPTH || self.run_script(src, cwd, env, depth + 1, false).is_err() {
             self.opaque(cause, program, cwd);
         }
     }
@@ -276,10 +434,21 @@ impl Analyzer<'_> {
     // ---- hit emission ----
 
     pub(super) fn push_hit(&mut self, kind: HitKind, program: &str, anchor: Anchor) {
+        if matches!(kind, HitKind::Write(_)) {
+            let place = match &anchor {
+                Anchor::Path(p) => Some(p),
+                Anchor::Unresolved { literal_prefix, .. } => literal_prefix.as_ref(),
+            };
+            if let Some(p) = place.filter(|p| is_hooks_path(p)) {
+                let token = p.display().to_string();
+                self.push_bypass(BypassRule::HooksDirWrite, &token);
+            }
+        }
         self.out.hits.push(Hit {
             kind,
             anchor,
             program: program.to_string(),
+            on_branch: self.switch.clone(),
         });
     }
 
@@ -354,6 +523,7 @@ impl Analyzer<'_> {
                 self.file_ops(name, args, cwd)
             }
             "mv" => self.mv_cmd(args, cwd),
+            "chmod" => self.chmod_cmd(args, cwd),
             "cp" | "install" | "ln" => self.copy_like(name, args, cwd),
             "dd" => self.dd_cmd(args, cwd),
             "patch" => self.patch_cmd(args, cwd),

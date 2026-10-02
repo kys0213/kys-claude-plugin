@@ -1,7 +1,7 @@
 use super::analyzer::{Analyzer, Env};
-use super::args::{short_value, split_eq};
+use super::args::{parse_args, short_value, split_eq};
 use super::lexer::Word;
-use super::{Anchor, BypassRule, HitKind, WriteRule};
+use super::{Anchor, BranchSwitch, BypassRule, HitKind, WriteRule};
 
 const HOOK_SUBCOMMANDS: &[&str] = &[
     "commit",
@@ -97,6 +97,11 @@ impl Analyzer<'_> {
                 }
             }
             "config" => self.check_config_command(rest),
+            "switch" | "checkout" => {
+                if let Some(branch) = switch_target(name, rest) {
+                    self.pending_switch = Some(BranchSwitch { repo: dir, branch });
+                }
+            }
             _ => {}
         }
     }
@@ -203,4 +208,25 @@ impl Analyzer<'_> {
 
 fn contains_hooks_path(value: &str) -> bool {
     value.to_ascii_lowercase().contains("core.hookspath")
+}
+
+/// The branch `git switch`/`git checkout` leaves checked out. `checkout`
+/// counts only with `-b`/`-B`/`--orphan`, since its bare operand may be a path.
+fn switch_target(sub: &str, rest: &[Word]) -> Option<String> {
+    let parsed = parse_args(rest, "cCbB", &["create", "force-create", "orphan"]);
+    let created = match sub {
+        "switch" => parsed.value(&["c", "C", "create", "force-create", "orphan"]),
+        _ => parsed.value(&["b", "B", "orphan"]),
+    };
+    if let Some(branch) = created {
+        return Some(branch.text.clone()).filter(|b| !b.is_empty());
+    }
+    if sub != "switch" || parsed.has("d") || parsed.has("detach") {
+        return None;
+    }
+    parsed
+        .positionals
+        .first()
+        .filter(|w| !w.is("-") && w.dyn_at.is_none())
+        .map(|w| w.text.clone())
 }

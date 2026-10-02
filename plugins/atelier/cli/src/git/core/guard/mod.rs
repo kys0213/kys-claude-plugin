@@ -10,7 +10,7 @@ mod repo_layout;
 pub use repo_layout::{find_repo_root, is_inside_any_git_repo, is_inside_project_dir};
 
 use crate::git::core::bash_classifier::{
-    classify, Anchor, ClassifyInput, Hit, HitKind, OpaqueCause, WriteRule,
+    classify, is_hooks_path, Anchor, BypassHit, BypassRule, ClassifyInput, Hit, HitKind, WriteRule,
 };
 use crate::git::core::git::{GitService, GitServiceFactory};
 use crate::git::types::{
@@ -18,60 +18,13 @@ use crate::git::types::{
     ProtectionRule,
 };
 use message::{bypass_reason, render_branch_report, BranchReport, Notice};
-use regex::Regex;
 use repo_layout::{is_under, resolve_against, resolve_project_dir, same_repository};
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
-
-static GIT_COMMIT_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\bgit\b.*\bcommit\b").unwrap());
 
 /// Branch-creation command shown in the block message when the caller passes no
 /// `--create-branch-script`. The default lives with the guard (the code that
 /// renders it), not the CLI router that merely forwards the flag.
 pub const DEFAULT_CREATE_BRANCH_SCRIPT: &str = "git switch -c";
-
-/// Replaces single-/double-quoted segments with a space so quoted text
-/// arguments can't false-positive the commit matcher — on a protected branch,
-/// `gh issue create --body "... git commit ..."` must not be treated as a
-/// commit (#754). Trade-off: a commit nested entirely inside quotes
-/// (`bash -c "git commit"`) is no longer matched; the guard is a guard-rail,
-/// not an escape-proof sandbox.
-fn strip_quoted(command: &str) -> String {
-    let mut out = String::with_capacity(command.len());
-    let mut chars = command.chars();
-    while let Some(c) = chars.next() {
-        match c {
-            // An escaped char never opens/closes a quote; keep it verbatim so
-            // `echo \"git commit\"` stays conservative (still matches).
-            '\\' => {
-                if let Some(next) = chars.next() {
-                    out.push(next);
-                }
-            }
-            '\'' => {
-                for q in chars.by_ref() {
-                    if q == '\'' {
-                        break;
-                    }
-                }
-                out.push(' ');
-            }
-            '"' => {
-                while let Some(q) = chars.next() {
-                    if q == '\\' {
-                        chars.next();
-                    } else if q == '"' {
-                        break;
-                    }
-                }
-                out.push(' ');
-            }
-            _ => out.push(c),
-        }
-    }
-    out
-}
 
 pub trait GuardService {
     fn check(&self, input: &GuardInput) -> GuardOutput;
@@ -105,6 +58,9 @@ struct Touch {
     /// The effect may reach paths below `place` (a recursive operation or an
     /// unresolved glob), so a `place` above the project still touches it.
     reaches_below: bool,
+    /// A branch switched to earlier in the same `&&` chain, with where the
+    /// switching git ran.
+    on_branch: Option<(Option<PathBuf>, String)>,
     action: Action,
     subject: String,
 }
@@ -133,9 +89,17 @@ impl Touch {
             (HitKind::Write(_), true) => Action::Modify,
             _ => Action::MaybeModify,
         };
+        let on_branch = hit.on_branch.as_ref().map(|s| {
+            let repo = match &s.repo {
+                Anchor::Path(p) => Some(p.clone()),
+                Anchor::Unresolved { .. } => None,
+            };
+            (repo, s.branch.clone())
+        });
         Touch {
             place,
             reaches_below,
+            on_branch,
             action,
             subject: format!("Bash `{}` → {shown}", hit.program),
         }
@@ -148,9 +112,19 @@ impl Touch {
         Touch {
             place: resolved,
             reaches_below: false,
+            on_branch: None,
             action: Action::Modify,
             subject: format!("Write → {shown}"),
         }
+    }
+
+    /// The branch this touch lands on in the repository at `root`, when an
+    /// earlier switch in its `&&` chain moved that repository.
+    fn switched_branch(&self, root: &Path) -> Option<&str> {
+        let (Some(repo), branch) = self.on_branch.as_ref()? else {
+            return None;
+        };
+        (find_repo_root(repo).as_deref() == Some(root)).then_some(branch.as_str())
     }
 
     fn is_definite(&self) -> bool {
@@ -304,16 +278,30 @@ fn pass(reason: Option<&str>) -> GuardOutput {
     }
 }
 
+fn bypass_block(hit: &BypassHit) -> GuardOutput {
+    GuardOutput {
+        reason: Some(bypass_reason(hit)),
+        verdict: GuardVerdict::Block,
+        ..pass(None)
+    }
+}
+
 fn scene_of(input: &GuardInput, project: &Path) -> Result<Scene, GuardOutput> {
     match &input.target {
-        GuardTarget::Write { file_path } => Ok(Scene {
-            touches: vec![Touch::from_write_tool(
-                file_path.as_deref().map(|f| resolve_against(project, f)),
-                &input.project_dir,
-            )],
-            cwd: None,
-            nothing_in_scope: "file is outside any git repository",
-        }),
+        GuardTarget::Write { file_path } => {
+            let resolved = file_path.as_deref().map(|f| resolve_against(project, f));
+            if let Some(path) = resolved.as_deref().filter(|p| is_hooks_path(p)) {
+                return Err(bypass_block(&BypassHit {
+                    rule: BypassRule::HooksDirWrite,
+                    token: path.display().to_string(),
+                }));
+            }
+            Ok(Scene {
+                touches: vec![Touch::from_write_tool(resolved, &input.project_dir)],
+                cwd: None,
+                nothing_in_scope: "file is outside any git repository",
+            })
+        }
         GuardTarget::Commit { command, cwd } => {
             let Some(command) = command.as_deref().filter(|c| !c.is_empty()) else {
                 return Err(pass(Some("no command to inspect")));
@@ -326,21 +314,11 @@ fn scene_of(input: &GuardInput, project: &Path) -> Result<Scene, GuardOutput> {
                 cwd: cwd.clone(),
                 home: input.home.as_deref().map(PathBuf::from),
             });
-            let hits = match analysis {
-                Ok(analysis) => {
-                    if let Some(bypass) = analysis.bypass.first() {
-                        return Err(GuardOutput {
-                            reason: Some(bypass_reason(bypass)),
-                            verdict: GuardVerdict::Block,
-                            ..pass(None)
-                        });
-                    }
-                    analysis.hits
-                }
-                Err(_) => unparsed_command_hits(command, &cwd),
-            };
+            if let Some(bypass) = analysis.bypass.first() {
+                return Err(bypass_block(bypass));
+            }
             Ok(Scene {
-                touches: hits.iter().map(Touch::from_hit).collect(),
+                touches: analysis.hits.iter().map(Touch::from_hit).collect(),
                 cwd: (cwd != project).then(|| cwd.display().to_string()),
                 nothing_in_scope: "no repository-changing command",
             })
@@ -395,19 +373,25 @@ impl RealGuardService<'_> {
         if state.detached() {
             return allow("detached HEAD");
         }
-        let branch = state.current_branch;
-
-        let Some(rule) = protection_rule(
-            &branch,
-            &default_branch,
-            source,
-            case.input.protected_branches.as_deref(),
-        ) else {
+        let current = state.current_branch;
+        let extras = case.input.protected_branches.as_deref();
+        let protected: Vec<(&Touch, &str, ProtectionRule)> = touches
+            .iter()
+            .filter_map(|t| {
+                let branch = t.switched_branch(root).unwrap_or(&current);
+                protection_rule(branch, &default_branch, source, extras).map(|r| (*t, branch, r))
+            })
+            .collect();
+        let Some(&(touch, branch, rule)) = protected
+            .iter()
+            .find(|(t, ..)| t.is_definite())
+            .or_else(|| protected.first())
+        else {
             return output(
                 GuardVerdict::Allow,
                 None,
                 root,
-                Some((&branch, &default_branch)),
+                Some((&current, &default_branch)),
                 None,
             );
         };
@@ -417,13 +401,13 @@ impl RealGuardService<'_> {
                 verdict,
                 reason,
                 root,
-                Some((&branch, &default_branch)),
+                Some((branch, &default_branch)),
                 Some(rule),
             )
         };
-        let render = |touch: &Touch, notice: Notice| {
+        let render = |notice: Notice| {
             render_branch_report(&BranchReport {
-                branch: &branch,
+                branch,
                 rule,
                 root: &root.display().to_string(),
                 project_dir: &case.input.project_dir,
@@ -435,44 +419,18 @@ impl RealGuardService<'_> {
             })
         };
 
-        if let Some(touch) = touches.iter().find(|t| t.is_definite()) {
-            return decided(GuardVerdict::Block, Some(render(touch, Notice::None)));
+        if touch.is_definite() {
+            return decided(GuardVerdict::Block, Some(render(Notice::None)));
         }
-        let Some(touch) = touches.first() else {
-            return allow("no repository-changing command");
-        };
         match case.input.opaque_exec {
             OpaqueExecPolicy::Allow => decided(
                 GuardVerdict::Allow,
                 Some("opaque execution allowed by --opaque-exec".to_string()),
             ),
-            OpaqueExecPolicy::Block => decided(
-                GuardVerdict::Block,
-                Some(render(touch, Notice::OpaqueBlocked)),
-            ),
-            OpaqueExecPolicy::Ask => {
-                decided(GuardVerdict::Ask, Some(render(touch, Notice::OpaqueAsk)))
+            OpaqueExecPolicy::Block => {
+                decided(GuardVerdict::Block, Some(render(Notice::OpaqueBlocked)))
             }
+            OpaqueExecPolicy::Ask => decided(GuardVerdict::Ask, Some(render(Notice::OpaqueAsk))),
         }
     }
-}
-
-/// Hits for a command the lexer could not read: the plain regex commit check
-/// plus an opaque hit, so a protected branch never ends in a silent allow.
-fn unparsed_command_hits(command: &str, cwd: &Path) -> Vec<Hit> {
-    let anchor = Anchor::Path(cwd.to_path_buf());
-    let mut hits = Vec::new();
-    if GIT_COMMIT_PATTERN.is_match(&strip_quoted(command)) {
-        hits.push(Hit {
-            kind: HitKind::Commit,
-            anchor: anchor.clone(),
-            program: "git commit".to_string(),
-        });
-    }
-    hits.push(Hit {
-        kind: HitKind::Opaque(OpaqueCause::Unparsed),
-        anchor,
-        program: command.split_whitespace().next().unwrap_or("").to_string(),
-    });
-    hits
 }

@@ -82,6 +82,7 @@ pub(super) fn bypass_reason(hit: &BypassHit) -> String {
         BypassRule::HooksPathConfig => "core.hooksPath",
         BypassRule::HooksPathEnv => "core.hooksPath env",
         BypassRule::HookSkipEnv => "hook skip env",
+        BypassRule::HooksDirWrite => ".git/hooks 변경",
     };
     let detail = if rule == hit.token {
         rule.to_string()

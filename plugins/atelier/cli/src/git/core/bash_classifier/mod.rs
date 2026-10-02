@@ -11,7 +11,7 @@ mod interpreters;
 mod lexer;
 mod wrappers;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use analyzer::Analyzer;
 use args::normalize;
@@ -42,6 +42,8 @@ pub enum BypassRule {
     HooksPathConfig,
     HooksPathEnv,
     HookSkipEnv,
+    /// A write into a repository's `.git/hooks` directory.
+    HooksDirWrite,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +51,16 @@ pub struct Hit {
     pub kind: HitKind,
     pub anchor: Anchor,
     pub program: String,
+    /// The branch this effect lands on when an earlier `&&`-chained command in
+    /// the same line switched branches.
+    pub on_branch: Option<BranchSwitch>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchSwitch {
+    /// Where the switching git ran; the switch applies to that repository.
+    pub repo: Anchor,
+    pub branch: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,7 +92,8 @@ pub enum OpaqueCause {
     DynamicCommand,
     Substitution,
     Wrapper(Wrapper),
-    /// The command line could not be tokenized at all.
+    /// The command line has an unterminated quote or substitution; the rest
+    /// was read as if it closed at the end of input.
     Unparsed,
 }
 
@@ -109,28 +122,31 @@ pub enum Anchor {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LexError {
+enum LexError {
     UnterminatedQuote,
     UnterminatedSubstitution,
 }
 
-impl std::fmt::Display for LexError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LexError::UnterminatedQuote => f.write_str("unterminated quote"),
-            LexError::UnterminatedSubstitution => f.write_str("unterminated substitution"),
-        }
+pub fn classify(input: &ClassifyInput) -> BashAnalysis {
+    let cwd = Anchor::Path(normalize(&input.cwd));
+    let mut analyzer = Analyzer::new(input.home.as_deref());
+    if analyzer
+        .run_script(&input.command, &cwd, &Vec::new(), 0, false)
+        .is_ok()
+    {
+        return analyzer.out;
     }
+    let mut analyzer = Analyzer::new(input.home.as_deref());
+    let _ = analyzer.run_script(&input.command, &cwd, &Vec::new(), 0, true);
+    let program = input.command.split_whitespace().next().unwrap_or("");
+    analyzer.opaque(OpaqueCause::Unparsed, program, &cwd);
+    analyzer.out
 }
 
-impl std::error::Error for LexError {}
-
-pub fn classify(input: &ClassifyInput) -> Result<BashAnalysis, LexError> {
-    let mut analyzer = Analyzer {
-        home: input.home.as_deref(),
-        out: BashAnalysis::default(),
-    };
-    let cwd = Anchor::Path(normalize(&input.cwd));
-    analyzer.run_script(&input.command, &cwd, &Vec::new(), 0)?;
-    Ok(analyzer.out)
+/// Whether `path` lies in a `.git/hooks` directory.
+pub fn is_hooks_path(path: &Path) -> bool {
+    let parts: Vec<_> = path.components().collect();
+    parts
+        .windows(2)
+        .any(|w| w[0].as_os_str() == ".git" && w[1].as_os_str() == "hooks")
 }

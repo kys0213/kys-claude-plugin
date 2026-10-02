@@ -1345,3 +1345,65 @@ fn relative_file_path_outside_project_on_default_blocks() {
         GuardVerdict::Block
     );
 }
+
+// ---- branch switch and hooks directory ----
+
+#[test]
+fn writes_chained_after_a_switch_to_a_new_branch_are_allowed() {
+    for cmd in [
+        "git switch -c feat && echo hi > a",
+        "git checkout -b feat && rm a && git commit -am x",
+    ] {
+        assert_eq!(judge("main", cmd).verdict, GuardVerdict::Allow, "{cmd:?}");
+    }
+}
+
+#[test]
+fn writes_after_a_switch_that_may_have_failed_are_judged_on_the_current_branch() {
+    for cmd in [
+        "git switch -c feat; echo hi > a",
+        "git switch -c feat || rm a",
+        "git switch -c feat && echo ok; rm a",
+    ] {
+        assert_eq!(judge("main", cmd).verdict, GuardVerdict::Block, "{cmd:?}");
+    }
+}
+
+#[test]
+fn writes_chained_after_a_switch_to_a_protected_branch_are_blocked_naming_it() {
+    let out = judge("feat/x", "git switch develop && rm a");
+    assert_eq!(out.verdict, GuardVerdict::Block);
+    assert!(out.reason.unwrap().contains("develop"));
+}
+
+#[test]
+fn a_switch_in_another_repository_does_not_move_the_project() {
+    let repo = repo_dir();
+    let other = repo_dir();
+    let cmd = format!("git -C {} switch -c feat && rm a", other.path().display());
+    let out = check(on_branch("main"), &bash_input(repo.path(), &cmd, None));
+    assert_eq!(out.verdict, GuardVerdict::Block);
+}
+
+#[test]
+fn hooks_directory_changes_are_blocked_on_every_branch() {
+    for branch in ["main", "feat/x"] {
+        let out = judge(branch, "rm .git/hooks/pre-commit");
+        assert_eq!(out.verdict, GuardVerdict::Block, "{branch}");
+        assert!(out.reason.unwrap().contains("[Hook Guard]"));
+    }
+    let repo = repo_dir();
+    let hook = repo.path().join(".git/hooks/pre-commit");
+    let out = check(on_branch("feat/x"), &write_input(repo.path(), &hook));
+    assert_eq!(out.verdict, GuardVerdict::Block);
+}
+
+#[test]
+fn hook_bypass_in_an_unterminated_command_is_blocked_on_every_branch() {
+    for cmd in [
+        "git commit --no-verify -m \"x",
+        "git commit --no-verify -m x\necho \"oops",
+    ] {
+        assert_eq!(judge("feat/x", cmd).verdict, GuardVerdict::Block, "{cmd:?}");
+    }
+}

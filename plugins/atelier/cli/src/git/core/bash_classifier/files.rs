@@ -170,6 +170,39 @@ impl Analyzer<'_> {
         }
     }
 
+    pub(super) fn chmod_cmd(&mut self, args: &[Word], cwd: &Anchor) {
+        let mut operands: Vec<&Word> = Vec::new();
+        let mut has_reference = false;
+        let mut options_ended = false;
+        let mut i = 0;
+        while let Some(w) = args.get(i) {
+            i += 1;
+            if options_ended {
+                operands.push(w);
+            } else if w.is("--") {
+                options_ended = true;
+            } else if w.text.starts_with("--reference") {
+                has_reference = true;
+                i += usize::from(!w.text.contains('='));
+            } else if !(w.text.starts_with("--")
+                || w.is_flag()
+                    && w.text[1..]
+                        .chars()
+                        .all(|c| matches!(c, 'R' | 'v' | 'c' | 'f')))
+            {
+                operands.push(w);
+            }
+        }
+        let files = if has_reference {
+            &operands[..]
+        } else {
+            operands.get(1..).unwrap_or(&[])
+        };
+        for file in files {
+            self.write_target(WriteRule::FileOp, "chmod", file, cwd);
+        }
+    }
+
     pub(super) fn mv_cmd(&mut self, args: &[Word], cwd: &Anchor) {
         let parsed = parse_args(args, "tS", &["target-directory", "suffix"]);
         for w in &parsed.positionals {
