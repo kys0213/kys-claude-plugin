@@ -7,7 +7,7 @@ mod git_mocks;
 use atelier::git::core::guard::{
     create_guard_service, is_inside_any_git_repo, is_inside_project_dir, GuardService,
 };
-use atelier::git::types::{GuardInput, GuardTarget};
+use atelier::git::types::{GuardInput, GuardTarget, GuardVerdict};
 use git_mocks::MockGit;
 
 fn base_input() -> GuardInput {
@@ -29,21 +29,21 @@ fn check(git: MockGit, input: &GuardInput) -> atelier::git::types::GuardOutput {
 fn not_a_git_repo_passes() {
     let mut git = MockGit::default();
     git.is_inside_work_tree = Box::new(|| false);
-    assert!(check(git, &base_input()).allowed);
+    assert_eq!(check(git, &base_input()).verdict, GuardVerdict::Allow);
 }
 
 #[test]
 fn rebase_passes() {
     let mut git = MockGit::default();
     git.special_state_flags = Box::new(|| (true, false));
-    assert!(check(git, &base_input()).allowed);
+    assert_eq!(check(git, &base_input()).verdict, GuardVerdict::Allow);
 }
 
 #[test]
 fn merge_passes() {
     let mut git = MockGit::default();
     git.special_state_flags = Box::new(|| (false, true));
-    assert!(check(git, &base_input()).allowed);
+    assert_eq!(check(git, &base_input()).verdict, GuardVerdict::Allow);
 }
 
 #[test]
@@ -51,19 +51,22 @@ fn detached_passes() {
     // Detached HEAD: `git branch --show-current` prints nothing.
     let mut git = MockGit::default();
     git.current_branch = Box::new(String::new);
-    assert!(check(git, &base_input()).allowed);
+    assert_eq!(check(git, &base_input()).verdict, GuardVerdict::Allow);
 }
 
 #[test]
 fn non_default_branch_passes() {
     let mut git = MockGit::default();
     git.current_branch = Box::new(|| "feat/something".to_string());
-    assert!(check(git, &base_input()).allowed);
+    assert_eq!(check(git, &base_input()).verdict, GuardVerdict::Allow);
 }
 
 #[test]
 fn default_branch_main_blocked() {
-    assert!(!check(MockGit::default(), &base_input()).allowed);
+    assert_eq!(
+        check(MockGit::default(), &base_input()).verdict,
+        GuardVerdict::Block
+    );
 }
 
 #[test]
@@ -71,7 +74,7 @@ fn default_branch_master_blocked() {
     let mut git = MockGit::default();
     git.current_branch = Box::new(|| "master".to_string());
     git.detect_default_branch = Box::new(|| Ok("master".to_string()));
-    assert!(!check(git, &base_input()).allowed);
+    assert_eq!(check(git, &base_input()).verdict, GuardVerdict::Block);
 }
 
 #[test]
@@ -79,7 +82,7 @@ fn default_branch_develop_blocked() {
     let mut git = MockGit::default();
     git.current_branch = Box::new(|| "develop".to_string());
     git.detect_default_branch = Box::new(|| Ok("develop".to_string()));
-    assert!(!check(git, &base_input()).allowed);
+    assert_eq!(check(git, &base_input()).verdict, GuardVerdict::Block);
 }
 
 #[test]
@@ -89,8 +92,9 @@ fn empty_default_branch_falls_back_to_detection() {
     // and still blocks the real default (MockGit default: current + detect = main).
     let mut input = base_input();
     input.default_branch = Some(String::new());
-    assert!(
-        !check(MockGit::default(), &input).allowed,
+    assert_eq!(
+        check(MockGit::default(), &input).verdict,
+        GuardVerdict::Block,
         "empty --default-branch must not bypass protection on the real default branch"
     );
 }
@@ -101,7 +105,7 @@ fn develop_protected_even_when_default_is_main() {
     git.current_branch = Box::new(|| "develop".to_string());
     git.detect_default_branch = Box::new(|| Ok("main".to_string()));
     let out = check(git, &base_input());
-    assert!(!out.allowed);
+    assert_eq!(out.verdict, GuardVerdict::Block);
     assert_eq!(out.current_branch.as_deref(), Some("develop"));
     assert_eq!(out.default_branch.as_deref(), Some("main"));
 }
@@ -114,7 +118,7 @@ fn extra_protected_branches_blocked() {
     let mut input = base_input();
     input.protected_branches = Some(vec!["staging".to_string(), "release".to_string()]);
     let out = check(git, &input);
-    assert!(!out.allowed);
+    assert_eq!(out.verdict, GuardVerdict::Block);
     assert_eq!(out.current_branch.as_deref(), Some("staging"));
 }
 
@@ -125,7 +129,7 @@ fn branch_not_in_protected_passes() {
     git.detect_default_branch = Box::new(|| Ok("main".to_string()));
     let mut input = base_input();
     input.protected_branches = Some(vec!["staging".to_string()]);
-    assert!(check(git, &input).allowed);
+    assert_eq!(check(git, &input).verdict, GuardVerdict::Allow);
 }
 
 #[test]
@@ -135,7 +139,7 @@ fn explicit_default_branch_used() {
     let mut input = base_input();
     input.default_branch = Some("custom-default".to_string());
     let out = check(git, &input);
-    assert!(!out.allowed);
+    assert_eq!(out.verdict, GuardVerdict::Block);
     assert_eq!(out.default_branch.as_deref(), Some("custom-default"));
 }
 
@@ -143,7 +147,7 @@ fn explicit_default_branch_used() {
 fn detect_failure_passes_safe_mode() {
     let mut git = MockGit::default();
     git.detect_default_branch = Box::new(|| Err("no remote".to_string()));
-    assert!(check(git, &base_input()).allowed);
+    assert_eq!(check(git, &base_input()).verdict, GuardVerdict::Allow);
 }
 
 #[test]
@@ -170,7 +174,10 @@ fn commit_target_not_git_commit_passes() {
     input.target = GuardTarget::Commit {
         command: Some("git push origin main".to_string()),
     };
-    assert!(check(MockGit::default(), &input).allowed);
+    assert_eq!(
+        check(MockGit::default(), &input).verdict,
+        GuardVerdict::Allow
+    );
 }
 
 #[test]
@@ -179,7 +186,10 @@ fn commit_target_git_commit_on_default_blocked() {
     input.target = GuardTarget::Commit {
         command: Some("git commit -m \"test\"".to_string()),
     };
-    assert!(!check(MockGit::default(), &input).allowed);
+    assert_eq!(
+        check(MockGit::default(), &input).verdict,
+        GuardVerdict::Block
+    );
 }
 
 #[test]
@@ -188,7 +198,10 @@ fn commit_target_compound_command_blocked() {
     input.target = GuardTarget::Commit {
         command: Some("git add . && git commit -m \"test\"".to_string()),
     };
-    assert!(!check(MockGit::default(), &input).allowed);
+    assert_eq!(
+        check(MockGit::default(), &input).verdict,
+        GuardVerdict::Block
+    );
 }
 
 #[test]
@@ -197,7 +210,10 @@ fn commit_target_git_log_passes() {
     input.target = GuardTarget::Commit {
         command: Some("git log --oneline".to_string()),
     };
-    assert!(check(MockGit::default(), &input).allowed);
+    assert_eq!(
+        check(MockGit::default(), &input).verdict,
+        GuardVerdict::Allow
+    );
 }
 
 #[test]
@@ -206,14 +222,20 @@ fn commit_target_empty_command_passes() {
     input.target = GuardTarget::Commit {
         command: Some(String::new()),
     };
-    assert!(check(MockGit::default(), &input).allowed);
+    assert_eq!(
+        check(MockGit::default(), &input).verdict,
+        GuardVerdict::Allow
+    );
 }
 
 #[test]
 fn commit_target_no_command_passes() {
     let mut input = base_input();
     input.target = GuardTarget::Commit { command: None };
-    assert!(check(MockGit::default(), &input).allowed);
+    assert_eq!(
+        check(MockGit::default(), &input).verdict,
+        GuardVerdict::Allow
+    );
 }
 
 // ---- #754: "git commit" inside quoted text must not match ----
@@ -225,7 +247,7 @@ fn commit_target_double_quoted_text_passes() {
         command: Some(r#"gh issue create --body "remember to git commit often""#.to_string()),
     };
     let out = check(MockGit::default(), &input);
-    assert!(out.allowed);
+    assert_eq!(out.verdict, GuardVerdict::Allow);
     assert_eq!(out.reason.as_deref(), Some("not a git commit command"));
 }
 
@@ -235,7 +257,10 @@ fn commit_target_single_quoted_text_passes() {
     input.target = GuardTarget::Commit {
         command: Some("gh pr comment 1 --body 'please git commit first'".to_string()),
     };
-    assert!(check(MockGit::default(), &input).allowed);
+    assert_eq!(
+        check(MockGit::default(), &input).verdict,
+        GuardVerdict::Allow
+    );
 }
 
 #[test]
@@ -246,7 +271,10 @@ fn commit_target_real_commit_with_quoted_message_blocked() {
     input.target = GuardTarget::Commit {
         command: Some(r#"git commit -m "this is not a git commit hint""#.to_string()),
     };
-    assert!(!check(MockGit::default(), &input).allowed);
+    assert_eq!(
+        check(MockGit::default(), &input).verdict,
+        GuardVerdict::Block
+    );
 }
 
 #[test]
@@ -257,7 +285,10 @@ fn commit_target_escaped_quotes_stay_conservative() {
     input.target = GuardTarget::Commit {
         command: Some(r#"echo \"git commit\""#.to_string()),
     };
-    assert!(!check(MockGit::default(), &input).allowed);
+    assert_eq!(
+        check(MockGit::default(), &input).verdict,
+        GuardVerdict::Block
+    );
 }
 
 #[test]
@@ -277,7 +308,7 @@ fn outside_project_and_outside_git_repo_passes() {
         file_path: Some("/home/user/.claude/settings.json".to_string()),
     };
     let out = check(MockGit::default(), &input);
-    assert!(out.allowed);
+    assert_eq!(out.verdict, GuardVerdict::Allow);
     assert_eq!(
         out.reason.as_deref(),
         Some("file is outside any git repository")
@@ -299,7 +330,10 @@ fn outside_project_but_inside_other_git_repo_blocked() {
                 .to_string(),
         ),
     };
-    assert!(!check(MockGit::default(), &input).allowed);
+    assert_eq!(
+        check(MockGit::default(), &input).verdict,
+        GuardVerdict::Block
+    );
 }
 
 #[test]
@@ -309,7 +343,10 @@ fn inside_project_on_default_blocked() {
     input.target = GuardTarget::Write {
         file_path: Some("/home/user/my-project/src/index.ts".to_string()),
     };
-    assert!(!check(MockGit::default(), &input).allowed);
+    assert_eq!(
+        check(MockGit::default(), &input).verdict,
+        GuardVerdict::Block
+    );
 }
 
 #[test]
@@ -321,12 +358,15 @@ fn inside_project_on_feature_passes() {
     input.target = GuardTarget::Write {
         file_path: Some("/home/user/my-project/src/index.ts".to_string()),
     };
-    assert!(check(git, &input).allowed);
+    assert_eq!(check(git, &input).verdict, GuardVerdict::Allow);
 }
 
 #[test]
 fn no_tool_file_path_runs_default_guard() {
-    assert!(!check(MockGit::default(), &base_input()).allowed);
+    assert_eq!(
+        check(MockGit::default(), &base_input()).verdict,
+        GuardVerdict::Block
+    );
 }
 
 // ---- path helpers ----
@@ -418,5 +458,8 @@ fn relative_file_path_outside_project_on_default_blocks() {
     input.target = GuardTarget::Write {
         file_path: Some("src/index.ts".to_string()),
     };
-    assert!(!check(MockGit::default(), &input).allowed);
+    assert_eq!(
+        check(MockGit::default(), &input).verdict,
+        GuardVerdict::Block
+    );
 }

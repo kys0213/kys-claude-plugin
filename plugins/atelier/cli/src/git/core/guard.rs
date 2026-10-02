@@ -3,7 +3,7 @@
 //! takes a `GitService` by injection so it is unit-testable with a mock git.
 
 use crate::git::core::git::GitService;
-use crate::git::types::{GuardInput, GuardOutput, GuardTarget};
+use crate::git::types::{GuardInput, GuardOutput, GuardTarget, GuardVerdict};
 use regex::Regex;
 use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
@@ -156,7 +156,7 @@ pub fn create_guard_service(git: &dyn GitService) -> RealGuardService<'_> {
 impl GuardService for RealGuardService<'_> {
     fn check(&self, input: &GuardInput) -> GuardOutput {
         let pass = |reason: Option<&str>| GuardOutput {
-            allowed: true,
+            verdict: GuardVerdict::Allow,
             reason: reason.map(|s| s.to_string()),
             current_branch: None,
             default_branch: None,
@@ -238,7 +238,7 @@ impl GuardService for RealGuardService<'_> {
 
         if !protected.contains(&current_branch) {
             return GuardOutput {
-                allowed: true,
+                verdict: GuardVerdict::Allow,
                 reason: None,
                 current_branch: Some(current_branch),
                 default_branch: Some(default_branch),
@@ -265,7 +265,7 @@ impl GuardService for RealGuardService<'_> {
         .join("\n");
 
         GuardOutput {
-            allowed: false,
+            verdict: GuardVerdict::Block,
             reason: Some(reason),
             current_branch: Some(current_branch),
             default_branch: Some(default_branch),

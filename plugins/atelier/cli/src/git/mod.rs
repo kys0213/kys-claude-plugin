@@ -18,8 +18,8 @@ use crate::git::core::github::create_github_service;
 use crate::git::core::guard::create_guard_service;
 use crate::git::core::pr_guard::create_pr_guard_service;
 use crate::git::types::{
-    CmdResult, GuardDecision, HookListInput, HookRegisterInput, HookScope, HookUnregisterInput,
-    ReviewsInput,
+    CmdResult, GuardDecision, GuardVerdict, HookListInput, HookRegisterInput, HookScope,
+    HookUnregisterInput, ReviewsInput,
 };
 use crate::shared::process::{default_project_dir, read_stdin_raw};
 use clap::{Parser, Subcommand};
@@ -111,10 +111,12 @@ impl HookFs for RealHookFs {
     }
 }
 
-/// Prints the block reason and returns the decision's exit code — the 0/2
-/// hook contract itself lives on `GuardDecision::exit_code` (#778).
+/// Prints the decision (ask JSON to stdout, block reason to stderr) and
+/// returns its exit code — both contracts live on `GuardDecision`.
 fn guard_exit(decision: GuardDecision) -> i32 {
-    if !decision.allowed {
+    if let Some(json) = decision.ask_stdout() {
+        println!("{json}");
+    } else if decision.verdict == GuardVerdict::Block {
         if let Some(reason) = &decision.reason {
             eprintln!("{reason}");
         }

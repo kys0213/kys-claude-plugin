@@ -89,38 +89,63 @@ pub struct GuardInput {
     pub protected_branches: Option<Vec<String>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuardVerdict {
+    Allow,
+    Ask,
+    Block,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuardOutput {
-    pub allowed: bool,
+    pub verdict: GuardVerdict,
     pub reason: Option<String>,
     pub current_branch: Option<String>,
     pub default_branch: Option<String>,
 }
 
-/// Unified allow/block decision returned by the guard command after routing
-/// a target to its service — the only contract the CLI exit mapping needs.
+/// Unified verdict returned by the guard command after routing a target to
+/// its service — the only contract the CLI exit mapping needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuardDecision {
-    pub allowed: bool,
+    pub verdict: GuardVerdict,
     pub reason: Option<String>,
 }
 
 impl GuardDecision {
-    /// PreToolUse hook exit contract: allow → 0, block → 2 (deny signal).
+    /// PreToolUse hook exit contract: block → 2 (deny signal); allow and ask → 0.
     /// Lives on the decision type so the CLI edge only prints and returns.
     pub fn exit_code(&self) -> i32 {
-        if self.allowed {
-            0
-        } else {
-            2
+        match self.verdict {
+            GuardVerdict::Block => 2,
+            GuardVerdict::Allow | GuardVerdict::Ask => 0,
         }
+    }
+
+    /// PreToolUse permission JSON for an `Ask` verdict; `None` for the others.
+    pub fn ask_stdout(&self) -> Option<String> {
+        if self.verdict != GuardVerdict::Ask {
+            return None;
+        }
+        let reason = self.reason.as_deref().unwrap_or_default();
+        Some(
+            serde_json::json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "ask",
+                    "permissionDecisionReason": reason,
+                    "additionalContext": reason,
+                }
+            })
+            .to_string(),
+        )
     }
 }
 
 impl From<GuardOutput> for GuardDecision {
     fn from(out: GuardOutput) -> Self {
         GuardDecision {
-            allowed: out.allowed,
+            verdict: out.verdict,
             reason: out.reason,
         }
     }
@@ -129,7 +154,11 @@ impl From<GuardOutput> for GuardDecision {
 impl From<PrGuardOutput> for GuardDecision {
     fn from(out: PrGuardOutput) -> Self {
         GuardDecision {
-            allowed: out.allowed,
+            verdict: if out.allowed {
+                GuardVerdict::Allow
+            } else {
+                GuardVerdict::Block
+            },
             reason: out.reason,
         }
     }
