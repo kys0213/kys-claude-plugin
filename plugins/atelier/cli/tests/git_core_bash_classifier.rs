@@ -1,0 +1,1170 @@
+//! Black-box tests for the pure Bash classifier: command text in, bypass
+//! flags and anchored hits out.
+
+use atelier::git::core::bash_classifier::{
+    classify, Anchor, BashAnalysis, BypassRule, ClassifyInput, HitKind, LexError, OpaqueCause,
+    Wrapper, WriteRule,
+};
+use std::path::PathBuf;
+
+const CWD: &str = "/work/proj";
+const HOME: &str = "/home/u";
+
+type Pair = (HitKind, Anchor);
+
+fn input(command: &str) -> ClassifyInput {
+    ClassifyInput {
+        command: command.to_string(),
+        cwd: PathBuf::from(CWD),
+        home: Some(PathBuf::from(HOME)),
+    }
+}
+
+fn analyze(command: &str) -> BashAnalysis {
+    classify(&input(command)).unwrap_or_else(|e| panic!("lex error {e:?} for {command:?}"))
+}
+
+fn pairs(command: &str) -> Vec<Pair> {
+    analyze(command)
+        .hits
+        .into_iter()
+        .map(|h| (h.kind, h.anchor))
+        .collect()
+}
+
+fn path(p: &str) -> Anchor {
+    Anchor::Path(PathBuf::from(p))
+}
+
+fn unresolved(prefix: Option<&str>, raw: &str) -> Anchor {
+    Anchor::Unresolved {
+        literal_prefix: prefix.map(PathBuf::from),
+        raw: raw.to_string(),
+    }
+}
+
+fn write(rule: WriteRule, anchor: Anchor) -> Pair {
+    (HitKind::Write(rule), anchor)
+}
+
+fn opaque(cause: OpaqueCause) -> Pair {
+    (HitKind::Opaque(cause), path(CWD))
+}
+
+fn interpreter(name: &str) -> Pair {
+    opaque(OpaqueCause::Interpreter(name.to_string()))
+}
+
+fn wrapper(w: Wrapper) -> Pair {
+    opaque(OpaqueCause::Wrapper(w))
+}
+
+fn assert_hits(command: &str, expected: Vec<Pair>) {
+    assert_eq!(pairs(command), expected, "command: {command:?}");
+}
+
+fn assert_clean(command: &str) {
+    let a = analyze(command);
+    assert!(
+        a.hits.is_empty() && a.bypass.is_empty(),
+        "expected nothing for {command:?}, got {a:?}"
+    );
+}
+
+fn assert_bypass(command: &str, rule: BypassRule) {
+    let a = analyze(command);
+    assert!(
+        a.bypass.iter().any(|b| b.rule == rule),
+        "expected {rule:?} for {command:?}, got {a:?}"
+    );
+}
+
+fn assert_no_bypass(command: &str) {
+    let a = analyze(command);
+    assert!(
+        a.bypass.is_empty(),
+        "expected no bypass for {command:?}, got {a:?}"
+    );
+}
+
+fn assert_single_write(command: &str, rule: WriteRule, target: &str) {
+    assert_hits(command, vec![write(rule, path(target))]);
+}
+
+// ---- B1: --no-verify --------------------------------------------------
+
+#[test]
+fn no_verify_flag_is_bypass_for_hook_running_subcommands() {
+    for cmd in [
+        "git commit --no-verify -m x",
+        "git commit -m x --no-verify",
+        "git push --no-verify",
+        "git push origin main --no-verify",
+        "git merge --no-verify feat",
+        "git am --no-verify p.patch",
+        "git rebase --no-verify main",
+        "git commit --no-veri -m x",
+        "git commit --no-verify=1 -m x",
+        "git -C /tmp/x commit --no-verify",
+        "git -c user.name=a commit --no-verify",
+    ] {
+        assert_bypass(cmd, BypassRule::NoVerifyFlag);
+    }
+}
+
+#[test]
+fn no_verify_text_that_is_not_a_flag_passes() {
+    for cmd in [
+        r#"git commit -m "fix --no-verify handling""#,
+        "git commit -m '--no-verify'",
+        "git commit -m --no-verify",
+        "git commit -F --no-verify",
+        "git commit -m x -- --no-verify",
+        r#"echo "git commit --no-verify""#,
+        "echo --no-verify",
+        "git commit --no-ver -m x",
+        "git log --no-verify",
+        "git status",
+    ] {
+        assert_no_bypass(cmd);
+    }
+}
+
+// ---- B2: commit -n ------------------------------------------------------
+
+#[test]
+fn commit_short_n_is_bypass() {
+    for cmd in [
+        "git commit -n -m x",
+        "git commit -an -m x",
+        "git commit -nm x",
+        "git commit -m x -n",
+        "git commit -aS -n",
+        "git commit -m x -a -n",
+    ] {
+        assert_bypass(cmd, BypassRule::CommitShortNoVerify);
+    }
+}
+
+#[test]
+fn n_that_is_a_value_or_another_subcommands_flag_passes() {
+    for cmd in [
+        "git commit -mn",
+        "git commit -m -n",
+        "git commit -F -n",
+        "git commit -Sn",
+        "git commit -uno -m x",
+        "git commit -m x",
+        "git log -n 5",
+        "git push -n",
+        "git push --dry-run",
+        "git diff -n",
+    ] {
+        assert_no_bypass(cmd);
+    }
+}
+
+// ---- B3: hooksPath / env ----------------------------------------------
+
+#[test]
+fn hooks_path_config_is_bypass() {
+    for cmd in [
+        "git -c core.hooksPath=/dev/null commit -m x",
+        "git -c core.hookspath=/x commit -m x",
+        "git -c CORE.HOOKSPATH=/x push",
+        "git --config-env=core.hooksPath=HP commit -m x",
+        "git --config-env core.hooksPath=HP commit -m x",
+        "git config core.hooksPath /dev/null",
+        "git config --global core.hooksPath /x",
+        "git config --local --unset core.hooksPath",
+        "git config --file .git/config core.hookspath x",
+        "git config set core.hooksPath /x",
+        "git config unset core.hooksPath",
+    ] {
+        assert_bypass(cmd, BypassRule::HooksPathConfig);
+    }
+}
+
+#[test]
+fn hooks_path_env_is_bypass() {
+    for cmd in [
+        r#"GIT_CONFIG_PARAMETERS="'core.hookspath'='/x'" git commit -m x"#,
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m x",
+        "env GIT_CONFIG_KEY_0=core.hooksPath git commit -m x",
+    ] {
+        assert_bypass(cmd, BypassRule::HooksPathEnv);
+    }
+}
+
+#[test]
+fn hook_skip_env_is_bypass() {
+    for cmd in [
+        "HUSKY=0 git commit -m x",
+        "SKIP=lint git commit -m x",
+        "env HUSKY=0 git commit -m x",
+        "env SKIP=lint,fmt git push",
+        "sudo -u bob env SKIP=x git push",
+        "bash -c 'HUSKY=0 git commit -m x'",
+        "HUSKY=0 bash -c 'git commit -m x'",
+    ] {
+        assert_bypass(cmd, BypassRule::HookSkipEnv);
+    }
+}
+
+#[test]
+fn harmless_config_and_env_pass() {
+    for cmd in [
+        "git config --get core.hooksPath",
+        "git config core.hooksPath",
+        "git config --list",
+        "git config user.name x",
+        "git config --global user.email a@b",
+        "git config get core.hooksPath",
+        "git -c user.name=x commit -m y",
+        "env FOO=1 git commit -m x",
+        "HUSKY=1 git commit -m x",
+        "SKIP= git commit -m x",
+        "HUSKY=0 npm test",
+        "SKIP=1 make build",
+        "HUSKY=0 git status",
+    ] {
+        assert_no_bypass(cmd);
+    }
+}
+
+#[test]
+fn bypass_and_commit_are_both_reported() {
+    let a = analyze("git commit --no-verify -m x");
+    assert_eq!(a.bypass.len(), 1);
+    assert_eq!(a.bypass[0].token, "--no-verify");
+    assert_eq!(a.hits.len(), 1);
+    assert_eq!(a.hits[0].kind, HitKind::Commit);
+}
+
+// ---- C: commit anchors ---------------------------------------------------
+
+#[test]
+fn commit_anchors_at_cwd_or_dash_c_dir() {
+    assert_hits("git commit -m x", vec![(HitKind::Commit, path(CWD))]);
+    assert_hits(
+        "git -C /other/repo commit -m x",
+        vec![(HitKind::Commit, path("/other/repo"))],
+    );
+    assert_hits(
+        "git -C sub commit -m x",
+        vec![(HitKind::Commit, path("/work/proj/sub"))],
+    );
+    assert_hits(
+        "git -C a -C b commit -m x",
+        vec![(HitKind::Commit, path("/work/proj/a/b"))],
+    );
+    assert_hits(
+        "git -c user.name=a --no-pager commit -m x",
+        vec![(HitKind::Commit, path(CWD))],
+    );
+    assert_hits(
+        "/usr/bin/git commit -m x",
+        vec![(HitKind::Commit, path(CWD))],
+    );
+    assert_hits(
+        "git status && git commit -m x",
+        vec![(HitKind::Commit, path(CWD))],
+    );
+    assert_hits(
+        "cd /other && git commit -m x",
+        vec![(HitKind::Commit, path("/other"))],
+    );
+    assert_hits(
+        r#"bash -c "git commit -m x""#,
+        vec![(HitKind::Commit, path(CWD))],
+    );
+}
+
+#[test]
+fn text_mentioning_commit_is_not_a_commit() {
+    for cmd in [
+        r#"gh issue create --body "git commit -m x""#,
+        "echo 'git commit'",
+        "git commit-tree abc",
+        "git log --oneline",
+        "git status",
+        "git push origin main",
+    ] {
+        assert!(
+            !pairs(cmd).iter().any(|(k, _)| *k == HitKind::Commit),
+            "{cmd:?}"
+        );
+    }
+}
+
+// ---- W1: redirects -------------------------------------------------------
+
+#[test]
+fn redirect_targets_are_writes() {
+    for (cmd, target) in [
+        ("echo hi > f.txt", "/work/proj/f.txt"),
+        ("echo hi >> /abs/f.txt", "/abs/f.txt"),
+        ("echo hi >| f.txt", "/work/proj/f.txt"),
+        ("echo hi &> out.log", "/work/proj/out.log"),
+        ("echo hi &>> out.log", "/work/proj/out.log"),
+        ("make 2> err.log", "/work/proj/err.log"),
+        ("echo hi 1>out.txt", "/work/proj/out.txt"),
+        ("> trunc.txt", "/work/proj/trunc.txt"),
+        ("echo hi > ~/note.txt", "/home/u/note.txt"),
+        ("echo hi > sub/../f.txt", "/work/proj/f.txt"),
+        ("echo hi > 'a b.txt'", "/work/proj/a b.txt"),
+        ("cat <<EOF > out.txt\nbody\nEOF", "/work/proj/out.txt"),
+    ] {
+        assert_single_write(cmd, WriteRule::Redirect, target);
+    }
+}
+
+#[test]
+fn non_file_redirects_pass() {
+    for cmd in [
+        "echo hi > /dev/null",
+        "echo hi >> /dev/null",
+        "echo hi > /dev/stderr",
+        "echo hi > /dev/stdout",
+        "ls 2>/dev/null",
+        "make 2>&1",
+        "make >&2",
+        "make 2>&1 | cat",
+        "cat < in.txt",
+        "cat <<< 'text'",
+        "cat <<EOF\nbody\nEOF",
+        "echo a > /dev/null 2>&1",
+    ] {
+        assert_clean(cmd);
+    }
+}
+
+#[test]
+fn redirect_to_dynamic_target_is_unresolved() {
+    assert_hits(
+        r#"echo a > "$TMPDIR/x""#,
+        vec![write(WriteRule::Redirect, unresolved(None, "$TMPDIR/x"))],
+    );
+}
+
+// ---- W2: in-place editors ---------------------------------------------
+
+#[test]
+fn in_place_editors_write_their_file_arguments() {
+    for (cmd, targets) in [
+        ("sed -i 's/a/b/' f", vec!["/work/proj/f"]),
+        ("sed -i.bak 's/a/b/' f", vec!["/work/proj/f"]),
+        ("sed --in-place 's/a/b/' f", vec!["/work/proj/f"]),
+        ("sed --in-place=.bak 's/a/b/' f", vec!["/work/proj/f"]),
+        ("sed -i '' 's/a/b/' f", vec!["/work/proj/f"]),
+        ("sed -ni 's/a/b/p' f", vec!["/work/proj/f"]),
+        (
+            "sed -i -e 's/a/b/' a b",
+            vec!["/work/proj/a", "/work/proj/b"],
+        ),
+        ("sed -i -f script.sed f", vec!["/work/proj/f"]),
+        ("sed -i 's/a/b/' /abs/f", vec!["/abs/f"]),
+        ("perl -pi -e 's/a/b/' f", vec!["/work/proj/f"]),
+        ("perl -i.bak -pe 's/a/b/' f", vec!["/work/proj/f"]),
+        ("awk -i inplace '{print}' f", vec!["/work/proj/f"]),
+        ("awk -v x=1 -i inplace '{print x}' f", vec!["/work/proj/f"]),
+    ] {
+        let expected = targets
+            .into_iter()
+            .map(|t| write(WriteRule::InPlaceEdit, path(t)))
+            .collect();
+        assert_hits(cmd, expected);
+    }
+}
+
+#[test]
+fn editors_without_in_place_pass() {
+    for cmd in [
+        "sed 's/a/b/' f",
+        "sed -n p f",
+        "sed -e 's/a/b/' f > /dev/null",
+        "awk '{print}' f",
+        "awk -f prog.awk f",
+        "grep -r x .",
+    ] {
+        assert_clean(cmd);
+    }
+}
+
+// ---- W3: file operations -----------------------------------------------
+
+#[test]
+fn file_ops_write_all_their_path_arguments() {
+    for (cmd, targets) in [
+        ("rm -rf build", vec!["/work/proj/build"]),
+        ("rm a b", vec!["/work/proj/a", "/work/proj/b"]),
+        ("rm -- -weird", vec!["/work/proj/-weird"]),
+        ("rmdir d", vec!["/work/proj/d"]),
+        ("mv a b", vec!["/work/proj/a", "/work/proj/b"]),
+        ("touch x", vec!["/work/proj/x"]),
+        ("touch -d yesterday f", vec!["/work/proj/f"]),
+        ("mkdir -p a/b", vec!["/work/proj/a/b"]),
+        ("mkdir -m 755 d", vec!["/work/proj/d"]),
+        ("truncate -s 0 log", vec!["/work/proj/log"]),
+        ("tee out.txt", vec!["/work/proj/out.txt"]),
+        ("echo x | tee -a out.txt", vec!["/work/proj/out.txt"]),
+        ("rm ../x", vec!["/work/x"]),
+        ("rm ./a/../b", vec!["/work/proj/b"]),
+        ("rm /a/./b", vec!["/a/b"]),
+        ("rm ~/x", vec!["/home/u/x"]),
+        ("rm 'a b'", vec!["/work/proj/a b"]),
+        ("rm a\\ b", vec!["/work/proj/a b"]),
+        ("rm 'a'\"b\"", vec!["/work/proj/ab"]),
+        ("rm '*.rs'", vec!["/work/proj/*.rs"]),
+        ("rm 'a$b'", vec!["/work/proj/a$b"]),
+    ] {
+        let expected = targets
+            .into_iter()
+            .map(|t| write(WriteRule::FileOp, path(t)))
+            .collect();
+        assert_hits(cmd, expected);
+    }
+}
+
+#[test]
+fn tee_to_device_and_missing_arguments_pass() {
+    for cmd in ["tee /dev/null", "rm", "touch", "echo x | tee"] {
+        assert_clean(cmd);
+    }
+}
+
+#[test]
+fn copy_like_commands_write_only_the_destination() {
+    for (cmd, rule, dest) in [
+        ("cp a b", WriteRule::CopyDest, "/work/proj/b"),
+        ("cp -r a b/", WriteRule::CopyDest, "/work/proj/b"),
+        ("cp a b c dest/", WriteRule::CopyDest, "/work/proj/dest"),
+        ("cp src/x /tmp/", WriteRule::CopyDest, "/tmp"),
+        ("cp -t dest a b", WriteRule::CopyDest, "/work/proj/dest"),
+        (
+            "cp --target-directory=dest a",
+            WriteRule::CopyDest,
+            "/work/proj/dest",
+        ),
+        (
+            "install -m 755 a bin/a",
+            WriteRule::CopyDest,
+            "/work/proj/bin/a",
+        ),
+        ("ln -s a b", WriteRule::CopyDest, "/work/proj/b"),
+        ("ln -t d a", WriteRule::CopyDest, "/work/proj/d"),
+        ("ln a", WriteRule::CopyDest, "/work/proj"),
+        ("dd if=a of=b", WriteRule::DdOutput, "/work/proj/b"),
+        ("dd of=/abs/img bs=1", WriteRule::DdOutput, "/abs/img"),
+    ] {
+        assert_single_write(cmd, rule, dest);
+    }
+}
+
+#[test]
+fn install_directory_mode_writes_every_directory() {
+    assert_hits(
+        "install -d d1 d2",
+        vec![
+            write(WriteRule::FileOp, path("/work/proj/d1")),
+            write(WriteRule::FileOp, path("/work/proj/d2")),
+        ],
+    );
+}
+
+#[test]
+fn find_delete_writes_each_root() {
+    assert_single_write("find . -name x -delete", WriteRule::FindDelete, CWD);
+    assert_single_write("find /tmp/x -delete", WriteRule::FindDelete, "/tmp/x");
+    assert_single_write(
+        "find build -type f -delete",
+        WriteRule::FindDelete,
+        "/work/proj/build",
+    );
+    assert_hits(
+        "find a b -delete",
+        vec![
+            write(WriteRule::FindDelete, path("/work/proj/a")),
+            write(WriteRule::FindDelete, path("/work/proj/b")),
+        ],
+    );
+    assert_single_write("find -delete", WriteRule::FindDelete, CWD);
+    assert_clean("find . -name x");
+    assert_clean("find . -name x -print");
+}
+
+#[test]
+fn patch_writes_dir_or_named_files() {
+    assert_single_write("patch -p1 < x.diff", WriteRule::Patch, CWD);
+    assert_single_write(
+        "patch -d sub -p1 < x.diff",
+        WriteRule::Patch,
+        "/work/proj/sub",
+    );
+    assert_single_write("patch -o out.c in.c", WriteRule::Patch, "/work/proj/out.c");
+    assert_single_write("patch f.c fix.diff", WriteRule::Patch, "/work/proj/f.c");
+    assert_single_write(
+        "patch --directory=sub -i x.diff",
+        WriteRule::Patch,
+        "/work/proj/sub",
+    );
+}
+
+#[test]
+fn tar_extract_writes_cwd_or_dash_c_dir() {
+    for (cmd, dir) in [
+        ("tar -xf a.tgz", CWD),
+        ("tar xzf a.tgz", CWD),
+        ("tar xzf a.tgz -C d", "/work/proj/d"),
+        ("tar -xf a.tgz -C /tmp/z", "/tmp/z"),
+        ("tar -xf a.tgz --directory=/tmp/z", "/tmp/z"),
+        ("tar --extract -f a.tgz", CWD),
+        ("tar -C d -xf a.tgz", "/work/proj/d"),
+    ] {
+        assert_single_write(cmd, WriteRule::Extract, dir);
+    }
+    for cmd in ["tar -tf a.tgz", "tar tzf a.tgz", "tar -czf out.tgz src"] {
+        assert_clean(cmd);
+    }
+}
+
+#[test]
+fn unzip_extract_writes_cwd_or_dash_d_dir() {
+    for (cmd, dir) in [
+        ("unzip a.zip", CWD),
+        ("unzip a.zip -d out", "/work/proj/out"),
+        ("unzip -d /tmp/x a.zip", "/tmp/x"),
+        ("unzip -o a.zip", CWD),
+    ] {
+        assert_single_write(cmd, WriteRule::Extract, dir);
+    }
+    for cmd in [
+        "unzip -l a.zip",
+        "unzip -t a.zip",
+        "unzip -p a.zip f",
+        "unzip -Z a.zip",
+    ] {
+        assert_clean(cmd);
+    }
+}
+
+#[test]
+fn read_only_commands_are_clean() {
+    for cmd in [
+        "cat f",
+        "ls -la",
+        "grep -r x .",
+        "echo hello",
+        "pwd",
+        "cargo test",
+        "cargo build --release",
+        "npm test",
+        "git status",
+        "git diff HEAD~1",
+        "git log -n 5",
+        "git stash list",
+        "gh pr view 1",
+        "",
+        "   ",
+    ] {
+        assert_clean(cmd);
+    }
+}
+
+// ---- W4: git working-tree writers ---------------------------------------
+
+#[test]
+fn git_working_tree_writers_anchor_at_cwd_or_dash_c() {
+    for (cmd, dir) in [
+        ("git apply p.diff", CWD),
+        ("git apply --index p.diff", CWD),
+        ("git -C /o apply p.diff", "/o"),
+        ("git am p.mbox", CWD),
+        ("git rm f", CWD),
+        ("git mv a b", CWD),
+        ("git stash pop", CWD),
+        ("git stash apply", CWD),
+        ("git -C sub stash pop", "/work/proj/sub"),
+    ] {
+        assert_single_write(cmd, WriteRule::GitWrite, dir);
+    }
+}
+
+#[test]
+fn git_read_only_forms_pass() {
+    for cmd in [
+        "git apply --check p.diff",
+        "git apply --stat p.diff",
+        "git apply --numstat p.diff",
+        "git apply --summary p.diff",
+        "git stash list",
+        "git stash",
+        "git stash show",
+        "git status",
+        "git diff",
+        "git log",
+        "git checkout main",
+        "git pull",
+        "git fetch",
+    ] {
+        assert_clean(cmd);
+    }
+}
+
+// ---- U: unresolved targets ----------------------------------------------
+
+#[test]
+fn dynamic_targets_carry_their_literal_prefix() {
+    for (cmd, prefix, raw) in [
+        ("rm -rf /tmp/foo*", Some("/tmp"), "/tmp/foo*"),
+        ("rm /tmp/$X/f", Some("/tmp"), "/tmp/$X/f"),
+        ("rm *.rs", Some(CWD), "*.rs"),
+        ("rm src/*.rs", Some("/work/proj/src"), "src/*.rs"),
+        ("rm a{b,c}", Some(CWD), "a{b,c}"),
+        ("rm file?.txt", Some(CWD), "file?.txt"),
+        ("rm [ab].txt", Some(CWD), "[ab].txt"),
+        ("rm $X", None, "$X"),
+        ("rm ${X}/a", None, "${X}/a"),
+        (r#"rm "$DIR/a""#, None, "$DIR/a"),
+        ("rm $(ls)", None, "$(ls)"),
+        ("rm `ls`", None, "`ls`"),
+        ("rm \"$(pwd)\"/x", None, "$(pwd)/x"),
+        (r#"rm "$HOME/x""#, None, "$HOME/x"),
+    ] {
+        assert_hits(cmd, vec![write(WriteRule::FileOp, unresolved(prefix, raw))]);
+    }
+}
+
+#[test]
+fn tilde_needs_home() {
+    let a = classify(&ClassifyInput {
+        command: "rm ~/x".to_string(),
+        cwd: PathBuf::from(CWD),
+        home: None,
+    })
+    .unwrap();
+    assert_eq!(a.hits.len(), 1);
+    assert_eq!(a.hits[0].anchor, unresolved(None, "~/x"));
+    assert_hits(
+        "rm ~other/x",
+        vec![write(WriteRule::FileOp, unresolved(None, "~other/x"))],
+    );
+    assert_single_write("rm \"~/x\"", WriteRule::FileOp, "/work/proj/~/x");
+}
+
+// ---- cd semantics ---------------------------------------------------------
+
+#[test]
+fn cd_applies_to_following_segments_of_the_same_shell() {
+    for (cmd, target) in [
+        ("cd sub && rm f", "/work/proj/sub/f"),
+        ("cd sub; rm f", "/work/proj/sub/f"),
+        ("cd sub\nrm f", "/work/proj/sub/f"),
+        ("cd /a; cd b; rm f", "/a/b/f"),
+        ("cd .. && rm f", "/work/f"),
+        ("cd ~/x && rm f", "/home/u/x/f"),
+        ("cd && rm f", "/home/u/f"),
+        ("cd -P sub && rm f", "/work/proj/sub/f"),
+        ("{ cd sub; rm f; }", "/work/proj/sub/f"),
+        ("(cd sub && rm f)", "/work/proj/sub/f"),
+        ("cd sub && cd .. && rm f", "/work/proj/f"),
+    ] {
+        assert_single_write(cmd, WriteRule::FileOp, target);
+    }
+}
+
+#[test]
+fn cd_does_not_leak_out_of_subshells_pipes_or_background() {
+    assert_hits(
+        "(cd sub && rm f); rm g",
+        vec![
+            write(WriteRule::FileOp, path("/work/proj/sub/f")),
+            write(WriteRule::FileOp, path("/work/proj/g")),
+        ],
+    );
+    assert_single_write("cd sub | rm f", WriteRule::FileOp, "/work/proj/f");
+    assert_single_write("cd sub & rm f", WriteRule::FileOp, "/work/proj/f");
+    assert_single_write("echo | cd sub; rm f", WriteRule::FileOp, "/work/proj/f");
+}
+
+#[test]
+fn cd_to_unknown_place_makes_relative_targets_unresolved() {
+    for cmd in [
+        "cd $X && rm f",
+        "cd \"$X\"; rm f",
+        "cd - && rm f",
+        "pushd sub && rm f",
+        "cd $(mktemp -d) && rm f",
+    ] {
+        let hits = pairs(cmd);
+        assert_eq!(hits.len(), 1, "{cmd:?}");
+        match &hits[0] {
+            (
+                HitKind::Write(WriteRule::FileOp),
+                Anchor::Unresolved {
+                    literal_prefix: None,
+                    ..
+                },
+            ) => {}
+            other => panic!("{cmd:?}: unexpected {other:?}"),
+        }
+    }
+    assert_single_write("cd $X && rm /abs/f", WriteRule::FileOp, "/abs/f");
+    assert_hits(
+        "cd /tmp/sub* && rm f",
+        vec![write(
+            WriteRule::FileOp,
+            unresolved(Some("/tmp"), "/tmp/sub*/f"),
+        )],
+    );
+}
+
+// ---- wrappers ------------------------------------------------------------
+
+#[test]
+fn transparent_wrappers_classify_the_inner_command() {
+    for cmd in [
+        "sudo rm f",
+        "sudo -u bob rm f",
+        "sudo -E -H rm f",
+        "sudo -- rm f",
+        "nohup rm f &",
+        "timeout 5 rm f",
+        "timeout -s KILL 5 rm f",
+        "timeout --signal=KILL 5s rm f",
+        "time rm f",
+        "time -p rm f",
+        "command rm f",
+        "command -p rm f",
+        "env FOO=1 rm f",
+        "env -i rm f",
+        "env -u X rm f",
+        "FOO=1 rm f",
+        "sudo -E env X=1 rm f",
+        "bash -c 'rm f'",
+        "sh -c \"rm f\"",
+        "bash -lc 'rm f'",
+        "bash -c 'echo hi; rm f'",
+    ] {
+        assert_single_write(cmd, WriteRule::FileOp, "/work/proj/f");
+    }
+}
+
+#[test]
+fn wrapper_directory_options_move_the_inner_cwd() {
+    assert_single_write("env -C sub rm f", WriteRule::FileOp, "/work/proj/sub/f");
+    assert_single_write("sudo -D sub rm f", WriteRule::FileOp, "/work/proj/sub/f");
+    assert_single_write(
+        "bash -c 'cd sub && rm f'",
+        WriteRule::FileOp,
+        "/work/proj/sub/f",
+    );
+    assert_single_write(
+        "cd sub && bash -c 'rm f'",
+        WriteRule::FileOp,
+        "/work/proj/sub/f",
+    );
+}
+
+#[test]
+fn wrappers_around_harmless_commands_are_clean() {
+    for cmd in [
+        "sudo ls",
+        "nohup sleep 1 &",
+        "timeout 5 sleep 1",
+        "time ls",
+        "command -v rm",
+        "command -V git",
+        "env",
+        "env FOO=1",
+        "sudo",
+        "sudo -l",
+        "bash -c 'echo hi'",
+        "xargs echo",
+        "xargs -0 -n 1 echo",
+        "find . -exec echo {} \\;",
+    ] {
+        assert_clean(cmd);
+    }
+}
+
+#[test]
+fn xargs_inner_command_gets_unknown_stdin_targets() {
+    assert_hits(
+        "xargs rm",
+        vec![write(WriteRule::FileOp, unresolved(None, "<stdin>"))],
+    );
+    assert_hits(
+        "find . -name x | xargs rm -f",
+        vec![write(WriteRule::FileOp, unresolved(None, "<stdin>"))],
+    );
+    assert_hits(
+        "git ls-files | xargs -0 -n 5 rm",
+        vec![write(WriteRule::FileOp, unresolved(None, "<stdin>"))],
+    );
+    assert_hits(
+        "xargs -I{} rm {}",
+        vec![write(WriteRule::FileOp, path("/work/proj/{}"))],
+    );
+    assert_hits(
+        "xargs -I{} cp {} /tmp/out",
+        vec![write(WriteRule::CopyDest, path("/tmp/out"))],
+    );
+}
+
+#[test]
+fn find_exec_inner_command_targets_files_under_the_roots() {
+    assert_hits(
+        "find . -exec rm {} \\;",
+        vec![write(WriteRule::FileOp, unresolved(Some(CWD), "./*"))],
+    );
+    assert_hits(
+        "find /tmp/x -exec rm {} +",
+        vec![write(
+            WriteRule::FileOp,
+            unresolved(Some("/tmp/x"), "/tmp/x/*"),
+        )],
+    );
+    assert_hits(
+        "find src -execdir rm {} \\;",
+        vec![write(
+            WriteRule::FileOp,
+            unresolved(Some("/work/proj/src"), "src/*"),
+        )],
+    );
+    assert_hits(
+        "find . -name '*.o' -exec sed -i s/a/b/ {} \\;",
+        vec![write(WriteRule::InPlaceEdit, unresolved(Some(CWD), "./*"))],
+    );
+}
+
+#[test]
+fn wrapper_that_cannot_be_unwrapped_is_opaque() {
+    for (cmd, expected) in [
+        ("find . -exec rm {}", wrapper(Wrapper::FindExec)),
+        ("timeout rm f", wrapper(Wrapper::Timeout)),
+        ("sudo -u", wrapper(Wrapper::Sudo)),
+        ("sudo -s", wrapper(Wrapper::Sudo)),
+        ("env -S 'a b' rm", wrapper(Wrapper::Env)),
+        ("env --bogus rm f", wrapper(Wrapper::Env)),
+        ("bash -c", wrapper(Wrapper::ShellC)),
+        ("bash -c \"unterminated 'quote\"", wrapper(Wrapper::ShellC)),
+    ] {
+        assert_hits(cmd, vec![expected]);
+    }
+}
+
+#[test]
+fn wrapper_nesting_is_limited_to_depth_two() {
+    assert_single_write("sudo env rm f", WriteRule::FileOp, "/work/proj/f");
+    assert_hits("sudo env nohup rm f", vec![wrapper(Wrapper::Nohup)]);
+    assert_hits("nohup time command rm f", vec![wrapper(Wrapper::Command)]);
+    assert_single_write(
+        r#"bash -c "bash -c 'rm f'""#,
+        WriteRule::FileOp,
+        "/work/proj/f",
+    );
+    assert_hits(
+        r##"bash -c "bash -c \"bash -c 'rm f'\"""##,
+        vec![wrapper(Wrapper::ShellC)],
+    );
+}
+
+#[test]
+fn bypass_inside_wrappers_is_found() {
+    for cmd in [
+        "bash -c \"git commit --no-verify -m x\"",
+        "sudo git commit -n -m x",
+        "env -i git -c core.hooksPath=/x commit",
+        "xargs git commit --no-verify",
+        "nohup git push --no-verify &",
+    ] {
+        assert!(!analyze(cmd).bypass.is_empty(), "{cmd:?}");
+    }
+}
+
+// ---- O: opaque executions ----------------------------------------------
+
+#[test]
+fn interpreters_running_code_are_opaque_at_the_effective_cwd() {
+    for (cmd, name) in [
+        ("node x.js", "node"),
+        ("node -e 'console.log(1)'", "node"),
+        ("python3 script.py", "python3"),
+        ("python -c 'print(1)'", "python"),
+        ("python3.11 x.py", "python3.11"),
+        ("/usr/bin/python3 x.py", "python3"),
+        ("python -m pip install x", "python"),
+        ("ruby x.rb", "ruby"),
+        ("perl script.pl", "perl"),
+        ("perl -e 'print 1'", "perl"),
+        ("deno run x.ts", "deno"),
+        ("bun x.ts", "bun"),
+        ("php x.php", "php"),
+        ("bash script.sh", "bash"),
+        ("sh x.sh arg", "sh"),
+        ("zsh x.zsh", "zsh"),
+        ("node", "node"),
+        ("echo 'print(1)' | python3", "python3"),
+        ("PYTHONPATH=. python3 x.py", "python3"),
+    ] {
+        assert_hits(cmd, vec![interpreter(name)]);
+    }
+}
+
+#[test]
+fn opaque_anchor_is_the_effective_cwd_not_the_script_path() {
+    assert_hits("node /other/repo/x.js", vec![interpreter("node")]);
+    assert_hits(
+        "cd sub && python3 /elsewhere/x.py",
+        vec![(
+            HitKind::Opaque(OpaqueCause::Interpreter("python3".to_string())),
+            path("/work/proj/sub"),
+        )],
+    );
+    assert_hits(
+        "(cd /tmp && node x.js); node y.js",
+        vec![
+            (
+                HitKind::Opaque(OpaqueCause::Interpreter("node".to_string())),
+                path("/tmp"),
+            ),
+            interpreter("node"),
+        ],
+    );
+}
+
+#[test]
+fn script_paths_eval_and_dynamic_commands_are_opaque() {
+    assert_hits(
+        "./x",
+        vec![opaque(OpaqueCause::ScriptFile("./x".to_string()))],
+    );
+    assert_hits(
+        "scripts/run.sh --flag",
+        vec![opaque(OpaqueCause::ScriptFile(
+            "scripts/run.sh".to_string(),
+        ))],
+    );
+    assert_hits(
+        "/opt/tool/run.sh",
+        vec![opaque(OpaqueCause::ScriptFile(
+            "/opt/tool/run.sh".to_string(),
+        ))],
+    );
+    assert_hits("eval \"$X\"", vec![opaque(OpaqueCause::Eval)]);
+    assert_hits("$CMD arg", vec![opaque(OpaqueCause::DynamicCommand)]);
+    assert_hits(
+        "bash -c \"$CMD\"",
+        vec![opaque(OpaqueCause::DynamicCommand)],
+    );
+}
+
+#[test]
+fn trusted_tools_pass() {
+    for cmd in [
+        "python -m pytest",
+        "python3 -m pytest -q tests",
+        "python -m unittest discover",
+        "node --test",
+        "node --test tests/",
+        "node --version",
+        "python --version",
+        "python3 -V",
+        "ruby --version",
+        "bash --version",
+        "bun test",
+        "deno test",
+        "cargo test",
+        "cargo clippy --all-targets",
+        "npm test",
+        "npm run build",
+        "npm install",
+        "npm ci",
+        "pnpm run lint",
+        "pnpm install",
+        "pnpm dlx create-x",
+        "yarn test",
+        "npx vitest",
+        "make build",
+        "make",
+    ] {
+        assert_clean(cmd);
+    }
+}
+
+// ---- lexer ----------------------------------------------------------------
+
+#[test]
+fn heredoc_body_is_never_tokenized() {
+    for cmd in [
+        "cat <<EOF\nrm -rf /\nEOF",
+        "cat <<'EOF'\nit's\nEOF",
+        "cat <<\"EOF\"\nit's \"unterminated\nEOF",
+        "cat <<\\EOF\nrm x\nEOF",
+        "cat <<-EOF\n\trm x\n\tEOF",
+        "cat <<EOF\n$(rm x)\n`rm y`\nEOF",
+        "cat <<EOF\nline\nEOF\n",
+    ] {
+        assert_clean(cmd);
+    }
+}
+
+#[test]
+fn commands_around_heredocs_are_still_classified() {
+    assert_hits(
+        "cat <<EOF > f\nbody\nEOF\nrm g",
+        vec![
+            write(WriteRule::Redirect, path("/work/proj/f")),
+            write(WriteRule::FileOp, path("/work/proj/g")),
+        ],
+    );
+    assert_hits(
+        "cat <<A <<B > f\none\nA\ntwo\nB\nrm g",
+        vec![
+            write(WriteRule::Redirect, path("/work/proj/f")),
+            write(WriteRule::FileOp, path("/work/proj/g")),
+        ],
+    );
+    assert_hits(
+        "rm a <<EOF\nbody\nEOF",
+        vec![write(WriteRule::FileOp, path("/work/proj/a"))],
+    );
+}
+
+#[test]
+fn unterminated_heredoc_swallows_the_rest() {
+    assert_clean("cat <<EOF\nrm x");
+}
+
+#[test]
+fn comments_run_to_end_of_line() {
+    for cmd in [
+        "ls # rm -rf x",
+        "# git commit --no-verify",
+        "ls #it's fine",
+        "echo a;# rm x",
+    ] {
+        assert_clean(cmd);
+    }
+    assert_single_write("echo a#b > f", WriteRule::Redirect, "/work/proj/f");
+    assert_single_write(
+        "echo \"# not a comment\" > f",
+        WriteRule::Redirect,
+        "/work/proj/f",
+    );
+    assert_single_write("echo '#' > f", WriteRule::Redirect, "/work/proj/f");
+    assert_hits(
+        "# note\nrm f",
+        vec![write(WriteRule::FileOp, path("/work/proj/f"))],
+    );
+    assert_single_write("echo ${#X} > f", WriteRule::Redirect, "/work/proj/f");
+}
+
+#[test]
+fn ansi_c_quotes_are_literal() {
+    assert_single_write("rm $'a b'", WriteRule::FileOp, "/work/proj/a b");
+    assert_single_write("rm $'a\\tb'", WriteRule::FileOp, "/work/proj/a\tb");
+    assert_single_write("echo $'it\\'s' > f", WriteRule::Redirect, "/work/proj/f");
+    assert_single_write("rm $'a$b'", WriteRule::FileOp, "/work/proj/a$b");
+}
+
+#[test]
+fn separators_split_commands() {
+    for cmd in [
+        "rm a; rm b",
+        "rm a && rm b",
+        "rm a || rm b",
+        "rm a & rm b",
+        "rm a\nrm b",
+        "rm a | rm b",
+        "(rm a) ; (rm b)",
+        "{ rm a; rm b; }",
+        "if true; then rm a; rm b; fi",
+        "! rm a; rm b",
+    ] {
+        let hits = pairs(cmd);
+        assert_eq!(hits.len(), 2, "{cmd:?}: {hits:?}");
+        assert_eq!(hits[0].1, path("/work/proj/a"), "{cmd:?}");
+        assert_eq!(hits[1].1, path("/work/proj/b"), "{cmd:?}");
+    }
+}
+
+#[test]
+fn line_continuation_joins_words() {
+    assert_single_write("rm \\\nf", WriteRule::FileOp, "/work/proj/f");
+}
+
+#[test]
+fn quoted_words_are_not_flags() {
+    assert_no_bypass("git commit '--no-verify'");
+    assert_hits(
+        "git apply '--check' p",
+        vec![write(WriteRule::GitWrite, path(CWD))],
+    );
+}
+
+#[test]
+fn unterminated_constructs_are_errors() {
+    for (cmd, err) in [
+        ("echo \"abc", LexError::UnterminatedQuote),
+        ("echo 'abc", LexError::UnterminatedQuote),
+        ("echo $'abc", LexError::UnterminatedQuote),
+        ("echo $(abc", LexError::UnterminatedSubstitution),
+        ("echo `abc", LexError::UnterminatedSubstitution),
+        ("echo ${abc", LexError::UnterminatedSubstitution),
+        ("git commit -m \"msg", LexError::UnterminatedQuote),
+    ] {
+        assert_eq!(classify(&input(cmd)), Err(err), "{cmd:?}");
+    }
+}
+
+#[test]
+fn escaped_quote_does_not_open_a_string() {
+    assert!(classify(&input("echo \\\"git commit")).is_ok());
+    assert!(classify(&input("echo \\'x")).is_ok());
+}
+
+// ---- purity -----------------------------------------------------------
+
+#[test]
+fn same_input_gives_same_output() {
+    let cmd = "cd sub && sed -i 's/a/b/' f; git commit -n -m x; node x.js";
+    assert_eq!(analyze(cmd), analyze(cmd));
+}
+
+#[test]
+fn nonexistent_cwd_and_relative_cwd_do_not_matter() {
+    let a = classify(&ClassifyInput {
+        command: "rm f".to_string(),
+        cwd: PathBuf::from("/definitely/not/here"),
+        home: None,
+    })
+    .unwrap();
+    assert_eq!(a.hits[0].anchor, path("/definitely/not/here/f"));
+}
+
+#[test]
+fn hit_reports_the_program_that_matched() {
+    let a = analyze("sed -i s/a/b/ f");
+    assert_eq!(a.hits[0].program, "sed");
+    let a = analyze("git -C /o apply p");
+    assert_eq!(a.hits[0].program, "git apply");
+    let a = analyze("echo x > f");
+    assert_eq!(a.hits[0].program, ">");
+}
+
+#[test]
+fn mixed_pipeline_reports_every_hit_in_order() {
+    assert_hits(
+        "cd sub && sed -i 's/a/b/' f && git commit -m x && node run.js",
+        vec![
+            write(WriteRule::InPlaceEdit, path("/work/proj/sub/f")),
+            (HitKind::Commit, path("/work/proj/sub")),
+            (
+                HitKind::Opaque(OpaqueCause::Interpreter("node".to_string())),
+                path("/work/proj/sub"),
+            ),
+        ],
+    );
+}
