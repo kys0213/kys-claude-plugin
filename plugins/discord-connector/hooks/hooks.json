@@ -1,0 +1,4 @@
+{
+  "description": "Discord 에서 시작한 실행(DISCORD_CONNECTOR_* env)에서만 AskUserQuestion 을 Discord 버튼 질문으로 중계하고, auto 모드 권한 거부를 스레드에 알린다. 표식 env 가 없으면 그대로 통과시킨다.",
+  "modules": ["./register.ts"]
+}

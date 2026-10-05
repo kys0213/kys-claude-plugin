@@ -92,6 +92,19 @@
       "name": "openclaw-docker",
       "source": "./plugins/openclaw-docker",
       "version": "0.2.0"
+    },
+    {
+      "category": "integration",
+      "description": "Discord 멘션을 headless Claude 실행으로 연결하고 실행 중 질문을 Discord 버튼으로 중계",
+      "keywords": [
+        "discord",
+        "connector",
+        "headless",
+        "hitl"
+      ],
+      "name": "discord-connector",
+      "source": "./plugins/discord-connector",
+      "version": "0.1.0"
     }
   ]
 }
