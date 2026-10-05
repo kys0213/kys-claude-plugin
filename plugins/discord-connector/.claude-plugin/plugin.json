@@ -8,5 +8,5 @@
   ],
   "description": "Discord 멘션을 headless Claude 실행으로 연결하고, 실행 중 질문을 Discord 버튼으로 중계하는 connector",
   "name": "discord-connector",
-  "version": "0.1.0"
+  "version": "0.2.0"
 }
