@@ -18,8 +18,8 @@ related_paths: []
 - 훅 실행 환경에는 `DISCORD_BOT_TOKEN` 환경변수가 넘어오지 않아요. 훅 stdout 은 버려지고, stderr 는 백그라운드 데몬이라 보이지 않아요.
   - 영향 1: 플러그인이 `discord` 명령을 부르려면 토큰이 CLI config 파일에 있어야 해요 (`discord init`). 사전 조건이에요.
   - 영향 2: 플러그인은 자체 로그를 남겨요 ([failure-policy](failure-policy.md)).
-- `on_message` 는 argv 배열 하나예요. 플러그인은 설정 명령(`/discord-connector:setup`)으로 고정된 실행 경로를 설치하고 설정 줄을 안내해요.
-  - 왜: 플러그인 버전이 담긴 경로를 CLI 설정에 박으면 업데이트 때마다 깨져요.
+- `on_message` 는 argv 배열 하나예요. 여기에 등록하는 플러그인 실행 경로는 플러그인을 업데이트해도 바뀌지 않아야 해요.
+  - 왜: 경로가 바뀌면 CLI 설정을 매번 고쳐야 해요.
 
 ### stdin JSON
 
@@ -102,7 +102,7 @@ related_paths: []
 
 ## 작업 디렉토리는 CLI 가 정해요
 
-- 채널→디렉토리 매핑과 기본 디렉토리는 CLI 설정 `~/.areum/discord/config.json` 에 있어요. 플러그인은 설정 파일을 갖지 않아요.
+- 채널→디렉토리 매핑과 기본 디렉토리는 CLI 설정에 있어요. 플러그인은 설정 파일을 갖지 않아요.
   - `workdirs`: `{ "<채널 ID 또는 channels 별칭>": "<디렉토리>" }`
   - `default_workdir`: 매핑이 없을 때 쓰는 기본 디렉토리
   - 경로는 절대경로이거나 `~/` 로 시작해야 해요.

@@ -58,7 +58,7 @@ related_paths: []
 - `send --reply-to`(답장)를 쓰지 않아요.
   - 왜: CLI `send` 는 답장 알림을 끄지 않아요. 그래서 Discord 가 답장 대상 작성자를 멘션으로 넣고, 그 작성자가 봇 자신이면 다시 트리거돼요.
 - 본문의 봇 멘션 `<@봇ID>`·`<@!봇ID>` 를 일반 텍스트로 바꿔 무력화해요. 봇 ID 는 훅 입력의 `bot_user_id` 예요.
-  - 왜: `trigger_bots` 에 봇 자신이 있으면, 봇 멘션이 든 메시지가 다시 트리거돼요.
+  - 왜: `trigger_bots`(봇이 쓴 메시지도 훅을 부르게 허용하는 CLI 설정, [discord-cli-contract](discord-cli-contract.md#필터는-cli-가-맡아요))에 봇 자신이 있으면, 봇 멘션이 든 메시지가 다시 트리거돼요.
 
 ## 에러 처리
 

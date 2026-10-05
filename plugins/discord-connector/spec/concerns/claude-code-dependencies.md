@@ -14,16 +14,16 @@ related_paths: []
 
 | 확인된 동작 | 플러그인에 미치는 영향 |
 |-------------|------------------------|
-| `AskUserQuestion` 은 `--permission-prompt-tool stdio` 를 붙여야 headless(`-p`) 도구 목록에 들어와요 | 실행 때마다 이 옵션이 필요해요. 빠지면 Claude 가 질문을 못 해요 |
+| `AskUserQuestion` 은 `--permission-prompt-tool stdio` 를 붙여야 headless(`-p`) 도구 목록에 들어와요 | 플러그인은 headless 실행을 `claude -p --permission-mode auto --permission-prompt-tool stdio --output-format json --model sonnet` 으로 해요. 이어가기 때는 `--resume <session_id>` 를 더해요. `--permission-prompt-tool stdio` 는 실행 때마다 필요해요. 빠지면 Claude 가 질문을 못 해요 |
 | 도구 호출을 가로채는 hook 이 `{result:{questions, answers}}` 를 돌려주면 Claude 가 답을 받아 이어가요 | 질문 중계는 이 형식으로 답해야 해요. 다른 형식은 `Stream closed` 로 실패했어요 |
 | hook 이 외부 프로세스를 기다리는 상한은 10분이에요 (그보다 짧은 대기는 hook 시간 예산 10초에서 끊겨요) | 버튼 질문 마감은 10분 이하여야 해요. 플러그인은 9분으로 해요 |
-| auto 모드에서는 일반 도구에 승인 지점(`PermissionRequest`)이 없어요. 자동 판단 모델이 허용·거부를 정하고, 거부되면 `PermissionDenied` 가 발생해요 | 승인 버튼은 만들 수 없고 거부 알림만 가능해요 |
-| `--model haiku` 에서는 auto 가 적용되지 않고 default 모드가 됐어요 (sonnet 은 auto) | 모델은 sonnet 으로 고정해요. 설정 항목이 아니에요. haiku 에서는 쓰기마다 승인이 필요해져요 |
+| `--permission-mode auto` 에서는 일반 도구에 승인 지점(`PermissionRequest`)이 없어요. 자동 판단 모델이 허용·거부를 정하고, 거부되면 `PermissionDenied` 가 발생해요 | 승인 버튼은 만들 수 없고 거부 알림만 가능해요 |
+| `--model haiku` 에서는 auto 가 적용되지 않고 default 모드가 됐어요 (sonnet 은 auto) | 모델은 `--model sonnet` 으로 고정해요. 설정 항목이 아니에요. haiku 에서는 쓰기마다 승인이 필요해져요 |
 | `--resume <session_id>` 로 이전 대화가 이어져요 | 스레드별 대화 이어가기의 근거예요 ([conversation-session](conversation-session.md)) |
 
 ## 정책
 
-- 플러그인은 `DISCORD_CONNECTOR_THREAD_ID`, `DISCORD_CONNECTOR_REQUESTER_ID` 환경 변수가 있는 실행에만 개입해요. 없으면(터미널 세션 포함) 그대로 통과해요.
+- 플러그인은 Discord 에서 시작한 실행임을 식별하는 표식(스레드·요청자 정보)이 있을 때만 개입해요. 없으면(터미널 세션 포함) 그대로 통과해요.
   - 왜: Discord 에서 시작하지 않은 세션에 영향을 주지 않기 위해서예요.
 - 질문 마감은 9분이고, 안내에 마감 시각을 표시해요.
 - multiSelect 질문은 `ask create --multi-select` 로 올려요. 답은 라벨들을 하나의 답 문자열로 합쳐 돌려줘요.
