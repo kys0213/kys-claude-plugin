@@ -14,12 +14,12 @@ import (
 
 // Result represents a version validation result
 type Result struct {
-	File    string   `json:"file"`
-	Type    string   `json:"type"`
-	Plugin  string   `json:"plugin,omitempty"`
-	Valid   bool     `json:"valid"`
-	Errors  []string `json:"errors,omitempty"`
-	Error   string   `json:"error,omitempty"`
+	File   string   `json:"file"`
+	Type   string   `json:"type"`
+	Plugin string   `json:"plugin,omitempty"`
+	Valid  bool     `json:"valid"`
+	Errors []string `json:"errors,omitempty"`
+	Error  string   `json:"error,omitempty"`
 }
 
 // Results contains all validation results

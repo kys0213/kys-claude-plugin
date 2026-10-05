@@ -503,8 +503,8 @@ func validateHookMD(filePath string) Result {
 
 func validateSensitiveData(filePath string) Result {
 	result := Result{
-		File: filePath,
-		Type: "sensitive-data",
+		File:  filePath,
+		Type:  "sensitive-data",
 		Valid: true,
 	}
 

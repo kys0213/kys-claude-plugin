@@ -50,12 +50,12 @@ type Results struct {
 
 // LayerFile represents a parsed file with its detected layer
 type LayerFile struct {
-	Path    string
-	Layer   Layer
-	Plugin  string // plugin name (directory name)
-	Body    string // markdown body (after frontmatter)
-	Lines   []string
-	Parsed  *parser.ParseResult
+	Path   string
+	Layer  Layer
+	Plugin string // plugin name (directory name)
+	Body   string // markdown body (after frontmatter)
+	Lines  []string
+	Parsed *parser.ParseResult
 }
 
 // Validate runs all architecture validations
@@ -92,10 +92,10 @@ func collectLayerFiles(repoRoot string) ([]LayerFile, error) {
 	var files []LayerFile
 
 	patterns := map[string]Layer{
-		"plugins/*/commands/*.md":      LayerCommand,
-		"plugins/*/skills/*/SKILL.md":  LayerSkill,
-		"plugins/*/skills/SKILL.md":    LayerSkill,
-		"plugins/*/agents/*.md":        LayerAgent,
+		"plugins/*/commands/*.md":     LayerCommand,
+		"plugins/*/skills/*/SKILL.md": LayerSkill,
+		"plugins/*/skills/SKILL.md":   LayerSkill,
+		"plugins/*/agents/*.md":       LayerAgent,
 	}
 
 	globber := repofs.NewGlobber(repoRoot)
