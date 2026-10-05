@@ -9,17 +9,17 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/bmatcuk/doublestar/v4"
+	"github.com/kys0213/kys-claude-plugin/tools/validate/internal/repofs"
 )
 
 // Result represents a version validation result
 type Result struct {
-	File    string   `json:"file"`
-	Type    string   `json:"type"`
-	Plugin  string   `json:"plugin,omitempty"`
-	Valid   bool     `json:"valid"`
-	Errors  []string `json:"errors,omitempty"`
-	Error   string   `json:"error,omitempty"`
+	File   string   `json:"file"`
+	Type   string   `json:"type"`
+	Plugin string   `json:"plugin,omitempty"`
+	Valid  bool     `json:"valid"`
+	Errors []string `json:"errors,omitempty"`
+	Error  string   `json:"error,omitempty"`
 }
 
 // Results contains all validation results
@@ -36,7 +36,7 @@ func Validate(repoRoot string) (*Results, error) {
 	marketplaceFile := filepath.Join(repoRoot, ".claude-plugin", "marketplace.json")
 
 	// 1. Individual plugin.json version format validation
-	pluginFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "**/plugin.json")
+	pluginFiles := repofs.Glob(repoRoot, "**/plugin.json")
 	for _, file := range pluginFiles {
 		fullPath := filepath.Join(repoRoot, file)
 		result := validateVersionFormat(fullPath)

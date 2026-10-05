@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/kys0213/kys-claude-plugin/tools/validate/internal/parser"
+	"github.com/kys0213/kys-claude-plugin/tools/validate/internal/repofs"
 )
 
 // Result represents a path validation result
@@ -35,7 +35,7 @@ func Validate(repoRoot string) (*Results, error) {
 	results := &Results{}
 
 	// 1. Skill reference paths
-	skillFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "**/skills/*/SKILL.md")
+	skillFiles := repofs.Glob(repoRoot, "**/skills/*/SKILL.md")
 	for _, file := range skillFiles {
 		fullPath := filepath.Join(repoRoot, file)
 		pathResults := validateSkillPaths(fullPath)
@@ -49,7 +49,7 @@ func Validate(repoRoot string) (*Results, error) {
 	}
 
 	// 2. Agent reference paths
-	agentFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "**/agents/*.md")
+	agentFiles := repofs.Glob(repoRoot, "**/agents/*.md")
 	for _, file := range agentFiles {
 		fullPath := filepath.Join(repoRoot, file)
 		pathResults := validateDocumentPaths(fullPath, repoRoot)
@@ -63,7 +63,7 @@ func Validate(repoRoot string) (*Results, error) {
 	}
 
 	// 3. Command reference paths
-	commandFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "**/commands/*.md")
+	commandFiles := repofs.Glob(repoRoot, "**/commands/*.md")
 	for _, file := range commandFiles {
 		fullPath := filepath.Join(repoRoot, file)
 		pathResults := validateDocumentPaths(fullPath, repoRoot)
@@ -90,7 +90,7 @@ func Validate(repoRoot string) (*Results, error) {
 	}
 
 	// 5. Strict path encapsulation check
-	pluginJSONFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "**/plugin.json")
+	pluginJSONFiles := repofs.Glob(repoRoot, "**/plugin.json")
 	for _, file := range pluginJSONFiles {
 		// Skip marketplace.json's plugin.json
 		fullPath := filepath.Join(repoRoot, file)
@@ -108,7 +108,7 @@ func Validate(repoRoot string) (*Results, error) {
 	}
 
 	// 6. Markdown internal link validation (skip node_modules)
-	allMdFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "plugins/**/*.md")
+	allMdFiles := repofs.Glob(repoRoot, "plugins/**/*.md")
 	for _, file := range allMdFiles {
 		if strings.Contains(file, "node_modules/") {
 			continue

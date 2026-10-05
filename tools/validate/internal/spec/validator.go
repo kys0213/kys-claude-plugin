@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/kys0213/kys-claude-plugin/tools/validate/internal/parser"
+	"github.com/kys0213/kys-claude-plugin/tools/validate/internal/repofs"
 )
 
 // Result represents a validation result
@@ -46,7 +46,7 @@ func Validate(repoRoot string) (*Results, error) {
 	results := &Results{}
 
 	// 1. plugin.json validation
-	pluginFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "**/plugin.json")
+	pluginFiles := repofs.Glob(repoRoot, "**/plugin.json")
 	for _, file := range pluginFiles {
 		result := validatePluginJSON(repoRoot + "/" + file)
 		if result.Valid {
@@ -78,7 +78,7 @@ func Validate(repoRoot string) (*Results, error) {
 	}
 
 	// 3. SKILL.md validation
-	skillFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "**/skills/*/SKILL.md")
+	skillFiles := repofs.Glob(repoRoot, "**/skills/*/SKILL.md")
 	for _, file := range skillFiles {
 		result := validateSkillMD(repoRoot+"/"+file, results)
 		if result.Valid {
@@ -89,7 +89,7 @@ func Validate(repoRoot string) (*Results, error) {
 	}
 
 	// 4. Agent validation
-	agentFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "**/agents/*.md")
+	agentFiles := repofs.Glob(repoRoot, "**/agents/*.md")
 	for _, file := range agentFiles {
 		result := validateAgentMD(repoRoot + "/" + file)
 		if result.Valid {
@@ -100,7 +100,7 @@ func Validate(repoRoot string) (*Results, error) {
 	}
 
 	// 5. Command validation
-	commandFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "**/commands/*.md")
+	commandFiles := repofs.Glob(repoRoot, "**/commands/*.md")
 	for _, file := range commandFiles {
 		result := validateCommandMD(repoRoot + "/" + file)
 		if result.Valid {
@@ -111,7 +111,7 @@ func Validate(repoRoot string) (*Results, error) {
 	}
 
 	// 6. Hooks validation
-	hookFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "**/hooks/*.md")
+	hookFiles := repofs.Glob(repoRoot, "**/hooks/*.md")
 	for _, file := range hookFiles {
 		result := validateHookMD(repoRoot + "/" + file)
 		if result.Valid {
@@ -124,7 +124,7 @@ func Validate(repoRoot string) (*Results, error) {
 	// 7. Sensitive data detection
 	sensitivePatterns := []string{"**/scripts/*.sh", "**/scripts/*.js", "**/skills/*/SKILL.md"}
 	for _, pattern := range sensitivePatterns {
-		files, _ := doublestar.Glob(os.DirFS(repoRoot), pattern)
+		files := repofs.Glob(repoRoot, pattern)
 		for _, file := range files {
 			result := validateSensitiveData(repoRoot + "/" + file)
 			if result.Valid {
@@ -484,8 +484,8 @@ func validateHookMD(filePath string) Result {
 
 func validateSensitiveData(filePath string) Result {
 	result := Result{
-		File: filePath,
-		Type: "sensitive-data",
+		File:  filePath,
+		Type:  "sensitive-data",
 		Valid: true,
 	}
 
