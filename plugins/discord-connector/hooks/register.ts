@@ -2,6 +2,8 @@ import type { EngineInterface, On } from 'claude-code'
 
 import {
   ASK_TIMEOUT_SECONDS,
+  BACKGROUND_BLOCKED,
+  isBackgroundRequest,
   NO_ANSWER,
   formatAskCreateFailure,
   formatPermissionDenied,
@@ -152,6 +154,26 @@ export function register(on: On): void {
     }
 
     return { result: { questions: e.questions, answers } } as never
+  })
+
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    if (!isBackgroundRequest(e) || (await readContext($)) === undefined) {
+      return next(e)
+    }
+
+    await writeLog($, 'Bash 백그라운드 실행을 막았어요')
+
+    return { deny: BACKGROUND_BLOCKED }
+  })
+
+  on('agent.spawn', async ($, e, next) => {
+    if (!isBackgroundRequest({ run_in_background: e.background }) || (await readContext($)) === undefined) {
+      return next(e)
+    }
+
+    await writeLog($, `서브에이전트 백그라운드 실행을 막았어요 (${e.subagentType})`)
+
+    return { deny: BACKGROUND_BLOCKED }
   })
 
   on('classic.PermissionDenied', async ($, e, next) => {

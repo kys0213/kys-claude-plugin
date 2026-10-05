@@ -131,3 +131,10 @@ export function formatPermissionDenied(toolName: string, reason: string): string
     '다시 진행하려면 이 스레드에서 봇을 멘션해 재지시해 주세요.',
   ].join('\n')
 }
+
+export const BACKGROUND_BLOCKED =
+  '이 실행은 Discord 에서 시작돼 턴이 끝나면 종료돼요. 백그라운드 결과는 사용자에게 전달되지 않으니 run_in_background 없이 포그라운드로 다시 실행하세요.'
+
+export function isBackgroundRequest(input: { run_in_background?: unknown }): boolean {
+  return input.run_in_background === true
+}

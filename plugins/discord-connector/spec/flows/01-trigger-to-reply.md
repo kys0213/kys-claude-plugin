@@ -59,6 +59,7 @@ sequenceDiagram
 - 이슈 채널 새 글과 멘션이 동시에 해당하면 훅은 메시지당 한 번만 호출돼요.
 - 스레드 안 멘션 없는 글은 단계 1에서 걸러져요.
 - `trigger_bots` 에 든 봇의 메시지도 `author.bot: true` 로 도착해요. 같은 단계로 처리해요.
+- 실행 중 Claude 가 백그라운드 실행을 시도하면 막고 포그라운드로 다시 하게 해요. 왜: 턴이 끝나면 프로세스가 종료돼 백그라운드 결과가 돌아오지 않아요 ([claude-code-dependencies](../concerns/claude-code-dependencies.md)).
 - 결과 게시 규칙(스레드 안에만, 답장 미사용, 봇 멘션 무력화)은 [conversation-session](../concerns/conversation-session.md) 의 "게시 규칙"이에요. 왜: 결과가 다시 트리거되는 무한 루프를 막아요.
 
 ## 관련 문서

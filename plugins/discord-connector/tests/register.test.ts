@@ -362,3 +362,65 @@ describe('PermissionDenied notice', () => {
     expect(runs).toHaveLength(0)
   })
 })
+
+describe('background run block', () => {
+  const BG_MESSAGE = 'run_in_background 없이 포그라운드로 다시 실행하세요'
+
+  const bash = ($: any, input: Record<string, unknown>) =>
+    $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_b', command: 'sleep 5', ...input } as never)
+
+  const spawn = ($: any, background: boolean) =>
+    $.agent.spawn({ prompt: 'p', description: 'd', background } as never)
+
+  function stubBeneath(on: Parameters<typeof mock.env>[0]) {
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ran' } }) as never)
+    on('agent.spawn', () => ({ model: 'sonnet', agentId: 'a1' }))
+  }
+
+  test('a background Bash call in a Discord run is refused with a foreground hint, logged, and posts nothing', async ($, on) => {
+    boot(on, ENV)
+    const runs = recordProcess(on, () => ok({}))
+    const files = recordFs(on)
+    stubBeneath(on)
+
+    const result = await bash($, { run_in_background: true })
+
+    expect(result.deny).toContain(BG_MESSAGE)
+    expect(runs).toHaveLength(0)
+    expect(files[LOG]).toContain('백그라운드')
+  })
+
+  test('a background subagent in a Discord run is refused with a foreground hint, logged, and posts nothing', async ($, on) => {
+    boot(on, ENV)
+    const runs = recordProcess(on, () => ok({}))
+    const files = recordFs(on)
+    stubBeneath(on)
+
+    const result = await spawn($, true)
+
+    expect(result.deny).toContain(BG_MESSAGE)
+    expect(runs).toHaveLength(0)
+    expect(files[LOG]).toContain('백그라운드')
+  })
+
+  test('foreground calls in a Discord run pass through', async ($, on) => {
+    boot(on, ENV)
+    recordProcess(on, () => ok({}))
+    stubBeneath(on)
+
+    expect((await bash($, {})).deny).toBeUndefined()
+    expect((await bash($, { run_in_background: false })).deny).toBeUndefined()
+    expect((await spawn($, false)).deny).toBeUndefined()
+  })
+
+  test('without the Discord run markers background calls pass through untouched', async ($, on) => {
+    boot(on, {})
+    recordProcess(on, () => ok({}))
+    const files = recordFs(on)
+    stubBeneath(on)
+
+    expect((await bash($, { run_in_background: true })).deny).toBeUndefined()
+    expect((await spawn($, true)).deny).toBeUndefined()
+    expect(files).toEqual({})
+  })
+})
