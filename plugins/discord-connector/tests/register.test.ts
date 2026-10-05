@@ -52,8 +52,24 @@ function askCli(waitReply: Reply, createReply: Reply = ok({ ask_id: 'A1', status
   }
 }
 
+const LOG = '/home/tester/.areum/discord-connector/logs/hook.log'
+
+function recordFs(on: Parameters<typeof mock.env>[0]) {
+  const files: Record<string, string> = {}
+
+  on('fs.exists', (_$, e) => ({ value: e.path in files }))
+  on('fs.read', (_$, e) => ({ value: files[e.path] ?? '' }))
+  on('fs.write', (_$, e) => {
+    files[e.path] = e.text
+
+    return { value: undefined }
+  })
+
+  return files
+}
+
 function boot(on: Parameters<typeof mock.env>[0], env: Record<string, string>) {
-  mock.env(on, env)
+  mock.env(on, { HOME: '/home/tester', ...env })
   mock.clock(on, { now: 1_000_000_000 })
   on('classic.PermissionDenied', () => ({}))
 }
@@ -172,6 +188,148 @@ describe('AskUserQuestion relay', () => {
     expect(created).not.toContain('<@999>')
     expect(created).not.toContain('<@!999>')
     expect(created).toContain('@999 괜찮아요? @999')
+  })
+})
+
+describe('bot mentions in failure notices', () => {
+  test('an ask create failure reason never carries the bot mention', async ($, on) => {
+    boot(on, ENV)
+    const runs = recordProcess(
+      on,
+      askCli(ok({}), { exitCode: 1, stdout: JSON.stringify({ ok: false, command: 'ask', error: 'boom <@999> <@!999>' }) }),
+    )
+
+    await call($, [SINGLE])
+
+    expect(runs[1]?.stdin).toContain('boom @999 @999')
+    expect(runs[1]?.stdin).not.toContain('<@999>')
+    expect(runs[1]?.stdin).not.toContain('<@!999>')
+  })
+
+  test('an option limit error never carries the bot mention', async ($, on) => {
+    boot(on, ENV)
+    const runs = recordProcess(on, askCli(ok({})))
+    const longLabel = { ...SINGLE, options: [{ label: `<@999>${'x'.repeat(100)}` }] }
+
+    await call($, [longLabel])
+
+    expect(runs[0]?.stdin).toContain('@999')
+    expect(runs[0]?.stdin).not.toContain('<@999>')
+  })
+})
+
+describe('ask wait results', () => {
+  const unanswered: [string, Reply][] = [
+    ['pending', ok({ status: 'pending' })],
+    ['an answered result without a value', ok({ status: 'answered', kind: 'choice' })],
+    ['an answered result with a malformed value', ok({ status: 'answered', kind: 'choice', value: 42 })],
+    ['data that is not an object', ok('nope')],
+  ]
+
+  for (const [name, reply] of unanswered) {
+    test(`${name} answers with the no-answer text and is logged`, async ($, on) => {
+      boot(on, ENV)
+      recordProcess(on, askCli(reply))
+      const files = recordFs(on)
+
+      const result = await call($, [SINGLE])
+
+      expect(result).toEqual({ result: { questions: [SINGLE], answers: { [SINGLE.question]: NO_ANSWER } } })
+      expect(files[LOG]).toContain('ask wait')
+    })
+  }
+
+  test('a text answer is used as the answer', async ($, on) => {
+    boot(on, ENV)
+    recordProcess(on, askCli(ok({ status: 'answered', kind: 'text', value: '자유 입력' })))
+
+    const result = await call($, [SINGLE])
+
+    expect(result).toEqual({ result: { questions: [SINGLE], answers: { [SINGLE.question]: '자유 입력' } } })
+  })
+})
+
+describe('hook log', () => {
+  test('a thrown ask wait is logged and answered with the no-answer text', async ($, on) => {
+    boot(on, ENV)
+    const files = recordFs(on)
+    on('process.run', (_$, e) => {
+      if (e.argv[3] === 'wait') return { deny: 'wait exploded' }
+
+      return { value: { exitCode: 0, stdout: JSON.stringify({ ok: true, data: { ask_id: 'A1' } }), stderr: '' } }
+    })
+
+    const result = await call($, [SINGLE])
+
+    expect(result).toEqual({ result: { questions: [SINGLE], answers: { [SINGLE.question]: NO_ANSWER } } })
+    expect(files[LOG]).toContain('wait exploded')
+  })
+
+  test('a failed ask create is logged with its reason', async ($, on) => {
+    boot(on, ENV)
+    recordProcess(on, askCli(ok({}), { exitCode: 1, stdout: JSON.stringify({ ok: false, command: 'ask', error: 'daemon not running' }) }))
+    const files = recordFs(on)
+
+    await call($, [SINGLE])
+
+    expect(files[LOG]).toContain('ask create')
+    expect(files[LOG]).toContain('daemon not running')
+  })
+
+  test('a failed notification is logged and the flow continues', async ($, on) => {
+    boot(on, ENV)
+    const files = recordFs(on)
+    on('process.run', () => ({ deny: 'send exploded' }))
+
+    const result = await $.classic.PermissionDenied({ tool_name: 'Bash', tool_input: {}, tool_use_id: 't1', reason: 'r' } as never)
+
+    expect(result).toEqual({})
+    expect(files[LOG]).toContain('send exploded')
+  })
+
+  test('a notification that exits non-zero is logged', async ($, on) => {
+    boot(on, ENV)
+    recordProcess(on, () => ({ exitCode: 1, stdout: '', stderr: 'no daemon' }))
+    const files = recordFs(on)
+
+    await $.classic.PermissionDenied({ tool_name: 'Bash', tool_input: {}, tool_use_id: 't1', reason: 'r' } as never)
+
+    expect(files[LOG]).toContain('no daemon')
+  })
+
+  test('a log write failure does not change the answer', async ($, on) => {
+    boot(on, ENV)
+    recordProcess(on, askCli(ok({ status: 'timed_out' })))
+    on('fs.exists', () => ({ deny: 'disk gone' }))
+
+    const result = await call($, [SINGLE])
+
+    expect(result).toEqual({ result: { questions: [SINGLE], answers: { [SINGLE.question]: NO_ANSWER } } })
+  })
+
+  test('only some run markers is a logged contract violation and the call passes through', async ($, on) => {
+    boot(on, { DISCORD_CONNECTOR_THREAD_ID: '111' })
+    const runs = recordProcess(on, () => ok({}))
+    const files = recordFs(on)
+    on('tool.call', { tool: 'AskUserQuestion' }, () => ({ result: { questions: [], answers: { passthrough: 'yes' } } }) as never)
+
+    const result = await call($, [SINGLE])
+
+    expect(runs).toHaveLength(0)
+    expect(result).toEqual({ result: { questions: [], answers: { passthrough: 'yes' } } })
+    expect(files[LOG]).toContain('DISCORD_CONNECTOR_REQUESTER_ID')
+    expect(files[LOG]).toContain('DISCORD_CONNECTOR_BOT_ID')
+  })
+
+  test('no run markers at all leaves no log', async ($, on) => {
+    boot(on, {})
+    recordProcess(on, () => ok({}))
+    const files = recordFs(on)
+    on('tool.call', { tool: 'AskUserQuestion' }, () => ({ result: { questions: [], answers: {} } }) as never)
+
+    await call($, [SINGLE])
+
+    expect(files).toEqual({})
   })
 })
 

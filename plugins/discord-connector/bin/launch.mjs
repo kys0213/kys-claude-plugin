@@ -4,6 +4,7 @@ import {
   appendFileSync,
   closeSync,
   existsSync,
+  linkSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -143,19 +144,60 @@ function tryCreateLock(path) {
   }
 }
 
-function lockIsStale(path) {
-  const pid = Number.parseInt(readFileSync(path, 'utf8'), 10)
+const LOCK_ATTEMPTS = 5
+
+function readLockHolder(path) {
+  try {
+    const content = readFileSync(path, 'utf8')
+    return { content, mtimeMs: statSync(path).mtimeMs }
+  } catch (err) {
+    if (err.code === 'ENOENT') return undefined
+    throw err
+  }
+}
+
+function isStale({ content, mtimeMs }) {
+  const pid = Number.parseInt(content, 10)
   if (Number.isInteger(pid) && pid > 0) return !isAlive(pid)
-  return Date.now() - statSync(path).mtimeMs > STALE_UNPARSEABLE_LOCK_MS
+  return Date.now() - mtimeMs > STALE_UNPARSEABLE_LOCK_MS
+}
+
+// 잠금 파일이 없어지는 순간은 정상 경합이다 — 오류가 아니라 획득 재시도로 다룬다.
+// 회수는 rename 으로 잠금을 먼저 떼어낸 뒤 판정한 내용과 같은지 확인해, 그 사이 다른 프로세스가 새로 만든 잠금을 지우지 않는다.
+function reclaimStale(path, observed) {
+  const moved = `${path}.stale.${process.pid}`
+  try {
+    renameSync(path, moved)
+  } catch (err) {
+    if (err.code === 'ENOENT') return
+    throw err
+  }
+  const taken = readLockHolder(moved)
+  if (taken && taken.content === observed.content) {
+    unlinkSync(moved)
+    log(`죽은 프로세스의 잠금을 회수해요: ${path}`)
+    return
+  }
+  if (taken) {
+    try {
+      linkSync(moved, path)
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err
+    }
+    unlinkSync(moved)
+  }
 }
 
 export function acquireLock(threadId) {
   const path = join(ensureDir(join(stateRoot(), 'locks')), `${threadId}.lock`)
-  if (tryCreateLock(path)) return path
-  if (!lockIsStale(path)) return undefined
-  log(`죽은 프로세스의 잠금을 회수해요: ${path}`)
-  unlinkSync(path)
-  return tryCreateLock(path) ? path : undefined
+  for (let attempt = 0; attempt < LOCK_ATTEMPTS; attempt++) {
+    if (tryCreateLock(path)) return path
+    const holder = readLockHolder(path)
+    if (!holder) continue
+    if (!isStale(holder)) return undefined
+    reclaimStale(path, holder)
+  }
+  return undefined
 }
 
 function statePath(threadId) {
@@ -341,6 +383,7 @@ async function main() {
     return 1
   }
 
+  // 테스트가 분리 실행을 끄고 같은 프로세스에서 흐름을 검증하기 위한 스위치
   const inline = process.env.DISCORD_CONNECTOR_DETACHED === '1' || process.env.DISCORD_CONNECTOR_NO_DETACH === '1'
   if (!inline) {
     detach(raw)

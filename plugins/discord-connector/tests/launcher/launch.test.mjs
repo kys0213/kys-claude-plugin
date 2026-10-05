@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { existsSync, mkdirSync, symlinkSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
@@ -88,6 +88,20 @@ function writeThreadState(thread, state) {
   const dir = join(home, '.areum', 'discord-connector', 'threads')
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, `${thread}.json`), JSON.stringify(state))
+}
+
+function threadStatePath(thread) {
+  const dir = join(home, '.areum', 'discord-connector', 'threads')
+  mkdirSync(dir, { recursive: true })
+  return join(dir, `${thread}.json`)
+}
+
+function pathWithoutClaude() {
+  const bin = join(root, 'bin-without-claude')
+  mkdirSync(bin)
+  for (const f of ['discord', 'discord.cjs']) symlinkSync(join(FAKE_BIN, f), join(bin, f))
+  symlinkSync(process.execPath, join(bin, 'node'))
+  return `${bin}:/usr/bin:/bin`
 }
 
 function readThreadState(thread) {
@@ -221,6 +235,27 @@ describe('locking', () => {
     assert.ok(!existsSync(lockPath('T9')))
   })
 
+  test('launchers racing for a dead pid lock end in a run or the busy notice, never a plugin error', async () => {
+    const dead = spawnSync(process.execPath, ['-e', '']).pid
+    writeLock('T9', String(dead))
+    const input = JSON.stringify(event({ is_thread: true, channel_id: 'T9' }))
+
+    const exits = await Promise.all(
+      Array.from({ length: 12 }, () => {
+        const child = spawn(process.execPath, [LAUNCH], {
+          env: { PATH: `${FAKE_BIN}:${dirname(process.execPath)}:/usr/bin:/bin`, HOME: home, FAKE_DIR: fakeDir, DISCORD_CONNECTOR_NO_DETACH: '1' },
+        })
+        child.stdin.end(input)
+        return new Promise(res => child.on('close', code => res(code)))
+      }),
+    )
+
+    assert.deepEqual(exits, Array(12).fill(0))
+    for (const s of sends()) assert.ok(!/플러그인 실행 오류/.test(s.stdin), s.stdin)
+    assert.ok(claudeCalls().length >= 1)
+    assert.ok(!existsSync(lockPath('T9')))
+  })
+
   test('the lock is released after a successful run', () => {
     launch(event({ is_thread: true, channel_id: 'T9' }))
 
@@ -264,6 +299,29 @@ describe('failures are posted and release the lock', () => {
     assert.match(sends()[0].stdin, /session_id/)
   })
 
+  test('a corrupt thread state posts a plugin error to the thread and releases the lock', () => {
+    writeFileSync(threadStatePath('T9'), '{ broken')
+
+    const r = launch(event({ is_thread: true, channel_id: 'T9' }))
+
+    assert.equal(r.status, 1)
+    assert.equal(claudeCalls().length, 0)
+    assert.equal(sends().length, 1)
+    assert.equal(sends()[0].args[2], 'T9')
+    assert.match(sends()[0].stdin, /플러그인 실행 오류/)
+    assert.ok(!existsSync(lockPath('T9')))
+  })
+
+  test('a claude executable that cannot start posts an error summary and releases the lock', () => {
+    const r = launch(event({ is_thread: true, channel_id: 'T9' }), { PATH: pathWithoutClaude() })
+
+    assert.equal(r.status, 0)
+    assert.equal(sends().length, 1)
+    assert.equal(sends()[0].args[2], 'T9')
+    assert.match(sends()[0].stdin, /Claude 를 실행하지 못했어요/)
+    assert.ok(!existsSync(lockPath('T9')))
+  })
+
   test('a send failure still releases the lock', () => {
     setBehavior({ discordFail: 'send' })
 
@@ -274,23 +332,65 @@ describe('failures are posted and release the lock', () => {
   })
 })
 
+function assertPostingRules(posts, threadId) {
+  assert.ok(posts.length > 0, 'a post was expected')
+  for (const p of posts) {
+    assert.deepEqual(p.args.slice(0, 3), ['--json', 'send', threadId])
+    assert.deepEqual(p.args.slice(3), ['-', '--split'])
+    assert.ok(!p.args.includes('--reply-to'))
+    assert.ok(!p.stdin.includes('<@999>') && !p.stdin.includes('<@!999>'), p.stdin)
+  }
+}
+
 describe('posting rules', () => {
-  test('every post uses send --split from stdin, never --reply-to, and neutralizes bot mentions', () => {
-    launch(event())
-    setBehavior({ claude: { exit: 1, stdout: '', stderr: 'err <@999> <@!999>' } })
+  test('the result post neutralizes bot mentions', () => {
     launch(event({ is_thread: true, channel_id: 'T9' }))
+
+    assertPostingRules(sends(), 'T9')
+    assert.match(sends()[0].stdin, /done @999 and @999/)
+  })
+
+  test('the claude failure post follows the rules', () => {
+    setBehavior({ claude: { exit: 1, stdout: '', stderr: 'err <@999> <@!999>' } })
+
+    launch(event({ is_thread: true, channel_id: 'T9' }))
+
+    assertPostingRules(sends(), 'T9')
+    assert.match(sends()[0].stdin, /err @999 @999/)
+  })
+
+  test('the busy notice follows the rules', () => {
     writeLock('T8', String(process.pid))
+
     launch(event({ is_thread: true, channel_id: 'T8' }))
 
-    const posts = sends()
-    assert.equal(posts.length, 3)
-    for (const p of posts) {
-      assert.deepEqual(p.args.slice(0, 2), ['--json', 'send'])
-      assert.deepEqual(p.args.slice(3), ['-', '--split'])
-      assert.ok(!p.args.includes('--reply-to'))
-      assert.ok(!p.stdin.includes('<@999>') && !p.stdin.includes('<@!999>'), p.stdin)
-    }
-    assert.match(posts[0].stdin, /done @999 and @999/)
+    assertPostingRules(sends(), 'T8')
+  })
+
+  test('the vanished cwd post follows the rules', () => {
+    writeThreadState('T9', { session_id: 's', cwd: join(root, 'gone <@999> <@!999>') })
+
+    launch(event({ is_thread: true, channel_id: 'T9' }))
+
+    assertPostingRules(sends(), 'T9')
+    assert.match(sends()[0].stdin, /gone @999 @999/)
+  })
+
+  test('the plugin execution error post follows the rules', () => {
+    writeFileSync(threadStatePath('T9'), '<@999> <@!999> {')
+
+    launch(event({ is_thread: true, channel_id: 'T9' }))
+
+    assertPostingRules(sends(), 'T9')
+    assert.match(sends()[0].stdin, /플러그인 실행 오류/)
+    assert.match(sends()[0].stdin, /@999 @999/)
+  })
+
+  test('the spawn failure post follows the rules', () => {
+    launch(event({ is_thread: true, channel_id: 'T9' }), { PATH: pathWithoutClaude() })
+
+    assertPostingRules(sends(), 'T9')
+    assert.match(sends()[0].stdin, /Claude 를 실행하지 못했어요/)
   })
 
   test('the thread name never carries the bot mention', () => {
@@ -320,6 +420,7 @@ describe('input validation', () => {
 
     assert.equal(r.status, 1)
     assert.equal(calls().length, 0)
+    assert.match(readFileSync(join(home, '.areum', 'discord-connector', 'logs', 'launcher.log'), 'utf8'), /입력 검증 실패.*JSON 이 아니에요/)
   })
 })
 

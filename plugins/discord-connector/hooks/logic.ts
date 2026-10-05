@@ -87,24 +87,36 @@ export function parseAskId(stdout: string): string | undefined {
   return typeof id === 'string' && id !== '' ? id : undefined
 }
 
-export function interpretAskWait(stdout: string): string {
+export type AskWaitOutcome = { answer: string } | { unanswered: string }
+
+export function interpretAskWait(stdout: string): AskWaitOutcome {
   const data = envelopeData(stdout)
 
-  if (data === undefined || data.status !== 'answered') {
-    return NO_ANSWER
+  if (data === undefined) {
+    return { unanswered: `응답이 성공 엔벨로프가 아니에요: ${stdout.slice(-300)}` }
+  }
+
+  if (data.status !== 'answered') {
+    return { unanswered: `상태가 answered 가 아니에요: ${String(data.status)}` }
   }
 
   const value = data.value
 
   if (typeof value === 'string') {
-    return value
+    return { answer: value }
   }
 
   if (Array.isArray(value) && value.every(v => typeof v === 'string')) {
-    return value.join(', ')
+    return { answer: value.join(', ') }
   }
 
-  return NO_ANSWER
+  return { unanswered: `answered 인데 value 형식이 달라요: ${JSON.stringify(value)}` }
+}
+
+export const LOG_RELATIVE_PATH = '.areum/discord-connector/logs/hook.log'
+
+export function formatLogLine(epochMs: number, message: string): string {
+  return `${new Date(epochMs).toISOString()} ${message}\n`
 }
 
 export function formatAskCreateFailure(reason: string): string {
