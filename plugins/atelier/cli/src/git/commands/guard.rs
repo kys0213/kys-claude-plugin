@@ -1,4 +1,4 @@
-//! `guard` command — the single dispatch point for all guard targets (#777).
+//! `guard` command — the single dispatch point for all guard targets.
 //! Branch targets (write/commit) route to `core::guard::GuardService`, the
 //! `pr` target routes to `core::pr_guard::PrGuardService`. Both collapse into
 //! a `GuardDecision` so the CLI layer only maps allow/block to exit codes.
@@ -12,7 +12,7 @@ use crate::git::types::{
 /// PreToolUse hook payload fields the guard targets consume. `parse` is
 /// swallow-all — any read/JSON failure yields all-`None`, preserving the TS
 /// `readHookStdin` behavior. Lives in the command layer so the payload schema
-/// is deterministic, testable logic; the CLI edge only reads stdin (#778).
+/// is deterministic, testable logic; the CLI edge only reads stdin.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HookPayload {
     pub command: Option<String>,

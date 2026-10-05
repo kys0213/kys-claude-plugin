@@ -93,7 +93,7 @@ fn register_same_matcher_different_command_appends_to_group() {
 
 #[test]
 fn register_same_matcher_multiple_commands_coexist() {
-    // setup scenario (#772): PreToolUse/Bash holds commit guard + autopilot
+    // setup scenario: PreToolUse/Bash holds commit guard + autopilot
     // hooks side by side — registering one must not clobber the others.
     let fs = MockFs::new();
     let hook = create_hook_command(&fs);

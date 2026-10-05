@@ -64,7 +64,7 @@ pub struct ReviewsOutput {
 
 /// Branch-guard target as a data-bearing enum: each variant carries exactly
 /// the tool payload its check consumes, so invalid combinations (e.g. a write
-/// guard with a tool command) are unrepresentable (#777).
+/// guard with a tool command) are unrepresentable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GuardTarget {
     Write {
@@ -329,7 +329,7 @@ impl HookScope {
 
     /// Whether a detected default branch may be baked into the guard command.
     /// User scope must not: one global pin forces a single repository's default
-    /// branch onto every project (#810). The setup-time `origin/HEAD` warm-up
+    /// branch onto every project. The setup-time `origin/HEAD` warm-up
     /// lets the guard's read-only detection resolve non-standard defaults at
     /// runtime instead, so dropping the pin costs no protection.
     pub fn pins_default_branch(&self) -> bool {
@@ -380,7 +380,7 @@ pub struct PrGuardOutput {
 
 /// Special-state snapshot taken in a single round-trip: carrying the current
 /// branch here lets the guard read rebase/merge/detached *and* the branch from
-/// one `get_special_state` call instead of a second subprocess (#778).
+/// one `get_special_state` call instead of a second subprocess.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitSpecialState {
     pub rebase: bool,

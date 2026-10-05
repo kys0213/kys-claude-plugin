@@ -6,7 +6,7 @@
 //! "inside a repo" line in exactly one place.
 //!
 //! Every read is pinned to `project_dir` via `git -C`: a Stop hook's process
-//! cwd can be a worktree or a subagent's directory, not the project (#780).
+//! cwd can be a worktree or a subagent's directory, not the project.
 //! Every failure collapses to "nothing" — these back an advisory hook that must
 //! stay silent in an empty repo, outside a repo, or after a rebase dropped the
 //! baseline commit.
