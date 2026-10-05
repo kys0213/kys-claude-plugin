@@ -10,8 +10,11 @@
 # 종료 코드: 실패 검사 수 > 0 이면 1, 아니면 0
 #
 # 의존: bash / grep / sed / awk 만. GNU 전용 옵션 미사용 (macOS·Linux 공통).
+# 로케일은 LC_ALL=C 로 고정한다 — awk 구현마다 다른 멀티바이트 처리(macOS awk 는
+# substr 로 자른 바이트 조각을 UTF-8 로 해석하다 오류)를 없애 판정을 같게 한다.
 
 set -u
+export LC_ALL=C
 
 # ---------------------------------------------------------------------------
 # 설정 — 설계와 함께 고쳐야 하는 값들
@@ -155,7 +158,7 @@ TMPDIR_CDG=$(mktemp -d "${TMPDIR:-/tmp}/cdg.XXXXXX") || exit 2
 trap 'rm -rf "$TMPDIR_CDG"' EXIT INT TERM
 
 FILES="$TMPDIR_CDG/files"
-find "$ROOT" -name '*.md' -type f | LC_ALL=C sort > "$FILES"
+find "$ROOT" -name '*.md' -type f | sort > "$FILES"
 if [ ! -s "$FILES" ]; then
   echo "[FAIL] (0) 입력: $ROOT — md 파일이 없다"
   echo "checks: $TOTAL_CHECKS, failed: $TOTAL_CHECKS"
