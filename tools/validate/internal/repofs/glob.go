@@ -1,30 +1,46 @@
 package repofs
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
 )
 
-var excludedPrefixes = []string{".claude/worktrees/"}
+// Globber matches patterns under a repository root, leaving out directories
+// that hold other checkouts of the repository.
+type Globber struct {
+	RepoRoot         string
+	ExcludedPrefixes []string
+}
 
-// Glob matches pattern under repoRoot, leaving out directories that hold
-// other checkouts of the repository.
-func Glob(repoRoot, pattern string) []string {
-	matches, _ := doublestar.Glob(os.DirFS(repoRoot), pattern)
+// NewGlobber creates a Globber that excludes `.claude/worktrees/`.
+func NewGlobber(repoRoot string) *Globber {
+	return &Globber{
+		RepoRoot:         repoRoot,
+		ExcludedPrefixes: []string{".claude/worktrees/"},
+	}
+}
+
+// Glob returns the paths, relative to RepoRoot, that match pattern.
+func (g *Globber) Glob(pattern string) ([]string, error) {
+	matches, err := doublestar.Glob(os.DirFS(g.RepoRoot), pattern)
+	if err != nil {
+		return nil, fmt.Errorf("glob %q: %w", pattern, err)
+	}
 
 	kept := matches[:0]
 	for _, m := range matches {
-		if !isExcluded(m) {
+		if !g.isExcluded(m) {
 			kept = append(kept, m)
 		}
 	}
-	return kept
+	return kept, nil
 }
 
-func isExcluded(rel string) bool {
-	for _, prefix := range excludedPrefixes {
+func (g *Globber) isExcluded(rel string) bool {
+	for _, prefix := range g.ExcludedPrefixes {
 		if strings.HasPrefix(rel, prefix) {
 			return true
 		}

@@ -33,9 +33,13 @@ var markdownLinkRegex = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
 // Validate runs all path validations
 func Validate(repoRoot string) (*Results, error) {
 	results := &Results{}
+	globber := repofs.NewGlobber(repoRoot)
 
 	// 1. Skill reference paths
-	skillFiles := repofs.Glob(repoRoot, "**/skills/*/SKILL.md")
+	skillFiles, err := globber.Glob("**/skills/*/SKILL.md")
+	if err != nil {
+		return nil, err
+	}
 	for _, file := range skillFiles {
 		fullPath := filepath.Join(repoRoot, file)
 		pathResults := validateSkillPaths(fullPath)
@@ -49,7 +53,10 @@ func Validate(repoRoot string) (*Results, error) {
 	}
 
 	// 2. Agent reference paths
-	agentFiles := repofs.Glob(repoRoot, "**/agents/*.md")
+	agentFiles, err := globber.Glob("**/agents/*.md")
+	if err != nil {
+		return nil, err
+	}
 	for _, file := range agentFiles {
 		fullPath := filepath.Join(repoRoot, file)
 		pathResults := validateDocumentPaths(fullPath, repoRoot)
@@ -63,7 +70,10 @@ func Validate(repoRoot string) (*Results, error) {
 	}
 
 	// 3. Command reference paths
-	commandFiles := repofs.Glob(repoRoot, "**/commands/*.md")
+	commandFiles, err := globber.Glob("**/commands/*.md")
+	if err != nil {
+		return nil, err
+	}
 	for _, file := range commandFiles {
 		fullPath := filepath.Join(repoRoot, file)
 		pathResults := validateDocumentPaths(fullPath, repoRoot)
@@ -90,7 +100,10 @@ func Validate(repoRoot string) (*Results, error) {
 	}
 
 	// 5. Strict path encapsulation check
-	pluginJSONFiles := repofs.Glob(repoRoot, "**/plugin.json")
+	pluginJSONFiles, err := globber.Glob("**/plugin.json")
+	if err != nil {
+		return nil, err
+	}
 	for _, file := range pluginJSONFiles {
 		// Skip marketplace.json's plugin.json
 		fullPath := filepath.Join(repoRoot, file)
@@ -108,7 +121,10 @@ func Validate(repoRoot string) (*Results, error) {
 	}
 
 	// 6. Markdown internal link validation (skip node_modules)
-	allMdFiles := repofs.Glob(repoRoot, "plugins/**/*.md")
+	allMdFiles, err := globber.Glob("plugins/**/*.md")
+	if err != nil {
+		return nil, err
+	}
 	for _, file := range allMdFiles {
 		if strings.Contains(file, "node_modules/") {
 			continue
