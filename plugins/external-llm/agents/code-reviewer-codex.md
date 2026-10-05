@@ -36,7 +36,7 @@ Target: [base 브랜치명 또는 빈 값]
 scope, target, 관점 정보를 스크립트에 전달합니다:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-codex-review.sh "[scope]" "[target]" "[관점 포함 리뷰 프롬프트]"
+${CLAUDE_PLUGIN_ROOT}/scripts/call-codex-review.sh "[scope]" "[target]" "[관점 포함 리뷰 프롬프트]"
 ```
 
 ### Step 3: 결과 읽어서 출력

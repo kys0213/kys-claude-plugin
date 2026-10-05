@@ -18,13 +18,13 @@ Google Gemini CLI를 사용하여 임의의 프롬프트를 실행하는 범용 
 
 1. **프롬프트 받기**: 사용자의 프롬프트를 그대로 전달
 2. **파일 경로 수집** (선택): 프롬프트에 파일이 언급되면 Glob으로 수집
-3. **스크립트 호출**: common/scripts/call-gemini.sh 실행
+3. **스크립트 호출**: scripts/call-gemini.sh 실행
 4. **결과 반환**: 출력 파일 내용을 사용자에게 전달
 
 ## 스크립트 호출
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-gemini.sh "[프롬프트]"
+${CLAUDE_PLUGIN_ROOT}/scripts/call-gemini.sh "[프롬프트]"
 ```
 
 스크립트가 자동으로:

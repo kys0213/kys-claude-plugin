@@ -24,7 +24,7 @@ MainAgent로부터 자연어 리뷰 프롬프트를 받습니다.
 프롬프트를 **그대로** 스크립트에 전달합니다:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-gemini.sh "[전체 프롬프트]"
+${CLAUDE_PLUGIN_ROOT}/scripts/call-gemini.sh "[전체 프롬프트]"
 ```
 
 스크립트가 자동으로:
