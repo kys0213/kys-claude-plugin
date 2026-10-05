@@ -1,4 +1,4 @@
-//! Dispatch tests for the unified `guard` command (#777): branch targets must
+//! Dispatch tests for the unified `guard` command: branch targets must
 //! route to the branch guard, the pr target to the PR guard — verified through
 //! the public command API with stub services.
 
@@ -118,7 +118,7 @@ fn check_pr_maps_output_to_decision() {
     assert!(decision.reason.unwrap().starts_with("pr-guard:"));
 }
 
-// ---- #778: PreToolUse payload parsing / target binding / exit mapping ----
+// ---- PreToolUse payload parsing / target binding / exit mapping ----
 
 #[test]
 fn hook_payload_parses_command_and_file_path() {

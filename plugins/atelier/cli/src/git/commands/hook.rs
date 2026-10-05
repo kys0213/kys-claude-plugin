@@ -113,7 +113,7 @@ fn purge_prefixes(settings: &mut Value, prefixes: &[String]) -> Vec<String> {
 /// command string: any prior registration of the same command (under any
 /// matcher) is removed, then the command is appended to the matcher group — so
 /// several commands can share one matcher (e.g. multiple PreToolUse/Bash
-/// guards, #772) and re-registering is idempotent. No I/O happens here; the
+/// guards) and re-registering is idempotent. No I/O happens here; the
 /// batch writes once after every registration has been applied.
 fn apply_registration(
     settings: &mut Value,

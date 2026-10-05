@@ -84,7 +84,7 @@ pub struct MockGit {
     pub current_branch: Box<dyn Fn() -> String>,
     pub detect_default_branch: Box<dyn Fn() -> R<String>>,
     /// `(rebase, merge)` flags for `get_special_state`; `current_branch` is the
-    /// branch the snapshot reports, mirroring `RealGitService` (#778).
+    /// branch the snapshot reports, mirroring `RealGitService`.
     pub special_state_flags: Box<dyn Fn() -> (bool, bool)>,
     /// Drift against `@{upstream}`. Defaults to `None` — the honest answer for
     /// a repository nobody configured an upstream on.

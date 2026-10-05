@@ -4,7 +4,7 @@
 
 /// Reads stdin to a string (empty on read failure). Parsing the payload is
 /// command logic (`HookPayload::parse` / `SessionPayload::parse`); only the I/O
-/// lives here (#778).
+/// lives here.
 pub fn read_stdin_raw() -> String {
     use std::io::Read as _;
     let mut buf = String::new();

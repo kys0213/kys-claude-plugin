@@ -4,7 +4,7 @@ use std::path::{Component, Path, PathBuf};
 /// the filesystem. A relative `path` is anchored at `base` rather than the
 /// process cwd — the guard runs as a PreToolUse hook whose cwd may differ from
 /// the project (worktree / subagent contexts), so resolving against cwd
-/// mis-judges relative `file_path`s (#780).
+/// mis-judges relative `file_path`s.
 pub(super) fn resolve_against(base: &Path, path: &str) -> PathBuf {
     let path = Path::new(path);
     let mut out = if path.is_absolute() {
@@ -33,7 +33,7 @@ pub(super) fn resolve_project_dir(project_dir: &str) -> PathBuf {
 
 /// Port of TS `isInsideProjectDir`: true when `file_path` is the project dir
 /// itself or strictly inside it (no `..` escape, not a sibling prefix match).
-/// Relative `file_path`s are resolved against `project_dir` (#780).
+/// Relative `file_path`s are resolved against `project_dir`.
 pub fn is_inside_project_dir(file_path: &str, project_dir: &str) -> bool {
     inside_project_dir(&resolve_project_dir(project_dir), file_path)
 }
@@ -45,7 +45,7 @@ fn inside_project_dir(project: &Path, file_path: &str) -> bool {
 /// Port of TS `isInsideAnyGitRepo`: walks up from the file's directory looking
 /// for a `.git` entry, skipping non-existent leading directories first.
 /// Relative `file_path`s are resolved against `project_dir`, not the process
-/// cwd, so the walk starts inside the project (#780).
+/// cwd, so the walk starts inside the project.
 pub fn is_inside_any_git_repo(file_path: &str, project_dir: &str) -> bool {
     inside_any_git_repo(&resolve_project_dir(project_dir), file_path)
 }

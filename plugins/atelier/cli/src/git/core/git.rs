@@ -11,7 +11,7 @@ use std::path::Path;
 
 /// The one repo mutation the git subsystem performs, kept off `GitService` on
 /// purpose: that trait's contract forbids mutation because the guard calls it
-/// on every PreToolUse invocation (#779). Warming `origin/HEAD` is a setup-time
+/// on every PreToolUse invocation. Warming `origin/HEAD` is a setup-time
 /// act — once, deliberately — so it gets its own trait and only setup depends
 /// on it (ISP).
 pub trait OriginHeadWarmer {
@@ -25,10 +25,10 @@ pub trait OriginHeadWarmer {
 pub trait GitService {
     /// Detects the repository's default branch. MUST NOT mutate repo state
     /// (no `git remote set-head`): the branch guard calls this on every
-    /// PreToolUse invocation (#779), so it has to stay a pure read. Method 1
+    /// PreToolUse invocation, so it has to stay a pure read. Method 1
     /// reads the cached `refs/remotes/origin/HEAD`; Method 3 probes common
     /// branch names. (Setup warms `origin/HEAD` once so Method 1 resolves
-    /// non-standard defaults — see commands/setup.md.)
+    /// non-standard defaults.)
     fn detect_default_branch(&self) -> Result<String, String>;
     fn is_inside_work_tree(&self) -> bool;
     fn get_special_state(&self) -> GitSpecialState;
@@ -132,7 +132,7 @@ impl RealGitService {
 impl OriginHeadWarmer for RealGitService {
     fn warm_origin_head(&self) -> bool {
         // Runs in the service's pinned cwd, so setup warms the project repo
-        // rather than whatever directory the session happens to sit in (#780).
+        // rather than whatever directory the session happens to sit in.
         let (_, exit) = self.git_safe(&["remote", "set-head", "origin", "--auto"]);
         exit == 0
     }
@@ -140,7 +140,7 @@ impl OriginHeadWarmer for RealGitService {
 
 impl GitService for RealGitService {
     fn detect_default_branch(&self) -> Result<String, String> {
-        // Method 1 + Method 3 only — no `set-head` write (see #779).
+        // Method 1 + Method 3 only — no `set-head` write.
         self.read_origin_head()
             .or_else(|| self.probe_common_default())
             .ok_or_else(|| NO_DEFAULT_BRANCH.to_string())

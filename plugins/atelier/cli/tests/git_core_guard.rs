@@ -262,7 +262,7 @@ fn commit_target_no_command_passes() {
     );
 }
 
-// ---- #754: "git commit" inside quoted text must not match ----
+// ---- "git commit" inside quoted text must not match ----
 
 #[test]
 fn commit_target_double_quoted_text_passes() {
@@ -1297,7 +1297,7 @@ fn is_inside_any_git_repo_cases() {
     assert!(!is_inside_any_git_repo("/tmp/random-file.txt", cwd_str));
 }
 
-// ---- #780: relative file_path is anchored at project_dir, not process cwd ----
+// ---- relative file_path is anchored at project_dir, not process cwd ----
 
 #[test]
 fn relative_file_path_resolved_against_project_dir() {

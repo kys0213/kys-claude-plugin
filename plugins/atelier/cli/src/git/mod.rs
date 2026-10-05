@@ -205,7 +205,7 @@ pub fn run(cli: Cli) -> i32 {
             let create_branch_script = create_branch_script.unwrap_or_default();
             // Pin the git service to project_dir so special-state / default-branch
             // detection reflect the project, not the hook's process cwd (worktree /
-            // subagent contexts) — see #780.
+            // subagent contexts).
             let git = create_git_service(Some(project_dir.clone()));
             let branch_guard = create_guard_service(&git, &RealGitServiceFactory);
             let github = create_github_service(None);
@@ -227,7 +227,7 @@ pub fn run(cli: Cli) -> i32 {
         }
         Commands::PrGuard => {
             // Legacy alias of `guard pr` — kept so hooks registered before
-            // the unified `guard` surface (#777) keep working.
+            // the unified `guard` surface keep working.
             let github = create_github_service(None);
             let pr_guard = create_pr_guard_service(&github);
             let payload = HookPayload::parse(&read_stdin_raw());
@@ -299,7 +299,7 @@ pub fn run(cli: Cli) -> i32 {
             } => {
                 // Both services are pinned to the project directory: the
                 // warm-up must touch that repo's origin/HEAD, and `gh` infers
-                // the repository from its cwd's remote (#780).
+                // the repository from its cwd's remote.
                 let git = create_git_service(Some(project_dir.clone()));
                 let github = create_github_service(Some(project_dir.clone()));
                 let fs = RealHookFs;

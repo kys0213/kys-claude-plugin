@@ -1,4 +1,4 @@
-/// Integration tests for prompt role filtering (#202).
+/// Integration tests for prompt role filtering.
 ///
 /// Verifies that the v3 indexing pipeline correctly classifies prompts
 /// by role (human/system/meta) and that the prompts perspective filters

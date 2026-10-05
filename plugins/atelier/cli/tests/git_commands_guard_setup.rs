@@ -183,7 +183,7 @@ fn falls_back_to_git_detection_when_gh_is_unavailable() {
 #[test]
 fn user_scope_never_pins_default_branch() {
     // A single global pin would force one repository's default branch onto
-    // every project (#810); the origin/HEAD warm-up covers it at runtime.
+    // every project; the origin/HEAD warm-up covers it at runtime.
     let fs = MockFs::new();
     let out = ok(setup(
         &fs,
