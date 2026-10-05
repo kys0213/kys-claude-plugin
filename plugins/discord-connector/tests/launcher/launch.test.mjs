@@ -199,6 +199,7 @@ describe('claude invocation', () => {
     assert.ok(args[1].includes('https://discord.com/channels/G1/T9'))
     assert.ok(args[1].includes('이거 고쳐줘'))
     assert.ok(!args[1].includes('<@999>'))
+    assert.ok(args[1].includes('최종 답은 이 Discord 스레드에 그대로 게시돼요'))
   })
 
   test('env carries thread, requester and bot ids', () => {

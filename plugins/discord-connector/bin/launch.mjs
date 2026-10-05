@@ -58,7 +58,7 @@ export function validateEvent(raw) {
 
 export function buildPrompt(event, threadId) {
   const link = `https://discord.com/channels/${event.guild_id}/${threadId}`
-  return `스레드: ${link}\n\n${stripBotMention(event.content, event.bot_user_id)}`
+  return `스레드: ${link}\n당신의 최종 답은 이 Discord 스레드에 그대로 게시돼요. 스레드에 직접 글을 올릴 필요는 없어요.\n\n${stripBotMention(event.content, event.bot_user_id)}`
 }
 
 export function buildClaudeArgs(prompt, sessionId, pluginRoot = PLUGIN_ROOT) {
