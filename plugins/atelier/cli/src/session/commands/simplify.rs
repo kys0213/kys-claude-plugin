@@ -117,8 +117,7 @@ pub fn decide(input: &SimplifyInput) -> SimplifyDecision {
     }
 }
 
-/// Renders the suggestion banner. Divider and title are unchanged from the
-/// shell hook; the count sentence now states what is actually counted.
+/// Renders the suggestion text the model receives as Stop context.
 pub fn render_banner(files: &[String], total: usize) -> String {
     const DIVIDER: &str = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
     let mut listed: Vec<String> = files.iter().map(|f| format!("    {f}")).collect();
@@ -136,9 +135,25 @@ pub fn render_banner(files: &[String], total: usize) -> String {
     )
 }
 
+/// Serialises a notification into the Stop hook's `additionalContext` document.
+/// Built through `serde_json` rather than string concatenation so a file name
+/// containing a quote or a newline can never produce invalid JSON.
+pub fn render_context_json(decision: &SimplifyDecision) -> Option<String> {
+    let SimplifyDecision::Notify { files, total } = decision else {
+        return None;
+    };
+    let payload = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "Stop",
+            "additionalContext": render_banner(files, *total),
+        }
+    });
+    Some(payload.to_string())
+}
+
 /// Gathers the decision inputs, decides, and records the session as notified
 /// so the banner appears once. Returns the decision; printing is the CLI
-/// edge's job (one place, so #725 has a single call site to change).
+/// edge's job.
 pub fn run(deps: &SessionDeps, session_id: &str) -> SimplifyDecision {
     if !is_valid_session_id(session_id) {
         return SimplifyDecision::Silent(SilentReason::NoSessionId);

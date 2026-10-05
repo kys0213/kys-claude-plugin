@@ -4,7 +4,9 @@
 
 mod session_mocks;
 
-use atelier::session::commands::simplify::{run, SilentReason, SimplifyDecision};
+use atelier::session::commands::simplify::{
+    render_context_json, run, SilentReason, SimplifyDecision,
+};
 use atelier::session::commands::SessionDeps;
 use atelier::session::core::baseline::BaselineStore;
 use session_mocks::{baseline, paths, MemRepo, MemStore, SESSION};
@@ -186,4 +188,43 @@ fn silent_when_baseline_absent_and_records_it() {
     assert_eq!(recorded.head.as_deref(), Some("head5"));
     assert_eq!(recorded.dirty, paths(&["src/pre-existing.rs"]));
     assert!(!recorded.notified);
+}
+
+fn context_of(files: &[&str], total: usize) -> serde_json::Value {
+    let decision = SimplifyDecision::Notify {
+        files: files.iter().map(|f| f.to_string()).collect(),
+        total,
+    };
+    let json = render_context_json(&decision).expect("Notify renders a document");
+    serde_json::from_str(&json).expect("rendered output is valid JSON")
+}
+
+#[test]
+fn notify_renders_stop_additional_context() {
+    let doc = context_of(&["src/lib.rs"], 1);
+
+    assert_eq!(doc["hookSpecificOutput"]["hookEventName"], "Stop");
+    let context = doc["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .expect("additionalContext is a string");
+    assert!(context.contains("/simplify"));
+    assert!(context.contains("src/lib.rs"));
+}
+
+#[test]
+fn notify_with_quote_in_file_name_still_parses() {
+    let doc = context_of(&["src/we\"ird\nname.rs"], 1);
+
+    let context = doc["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(context.contains("we\"ird\nname.rs"));
+}
+
+#[test]
+fn silent_renders_nothing() {
+    assert_eq!(
+        render_context_json(&SimplifyDecision::Silent(SilentReason::DocsOnly)),
+        None
+    );
 }
