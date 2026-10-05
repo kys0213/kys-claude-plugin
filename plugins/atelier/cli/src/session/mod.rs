@@ -19,7 +19,9 @@
 //!
 //! What stdout carries differs by command: `baseline` prints nothing,
 //! `ensure-env` prints one line only when it added the key or declined to,
-//! `simplify-check` prints at most an advisory banner, and `push-check` may
+//! `simplify-check` prints at most a Stop
+//! `{"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":…}}`
+//! document (plain Stop stdout never reaches the model), and `push-check` may
 //! print a Stop `{"decision":"block","reason":…}` document — still on exit 0,
 //! which is how Claude Code reads a structured block.
 
@@ -31,7 +33,7 @@ use crate::git::core::github::create_github_service;
 use crate::session::commands::ensure_env::EnsureEnvCommand;
 use crate::session::commands::payload::SessionPayload;
 use crate::session::commands::push_check::{render_block_json, PushCheckDecision, PushCheckDeps};
-use crate::session::commands::simplify::{render_banner, SimplifyDecision};
+use crate::session::commands::simplify::{render_context_json, SimplifyDecision};
 use crate::session::commands::SessionDeps;
 use crate::session::core::baseline::{FsBaselineStore, DEFAULT_TTL};
 use crate::session::core::repo::create_repo_reader;
@@ -54,21 +56,21 @@ pub struct Cli {
 pub enum Commands {
     /// SessionStart: record the repository state this session starts from
     Baseline {
-        /// Project the git reads are anchored to (hook cwd may differ — #780)
+        /// Project the git reads are anchored to (hook cwd may differ)
         #[arg(long = "project-dir")]
         project_dir: Option<String>,
     },
     /// Stop: suggest `/simplify` when this session changed code
     #[command(name = "simplify-check")]
     SimplifyCheck {
-        /// Project the git reads are anchored to (hook cwd may differ — #780)
+        /// Project the git reads are anchored to (hook cwd may differ)
         #[arg(long = "project-dir")]
         project_dir: Option<String>,
     },
     /// Stop: block when a branch with an open PR has unpushed commits
     #[command(name = "push-check")]
     PushCheck {
-        /// Project the git reads are anchored to (hook cwd may differ — #780)
+        /// Project the git reads are anchored to (hook cwd may differ)
         #[arg(long = "project-dir")]
         project_dir: Option<String>,
     },
@@ -102,11 +104,11 @@ fn resolve_project_dir(flag: Option<String>, payload: &SessionPayload) -> String
     )
 }
 
-/// The simplify banner's only stdout write. #725 (moving hook output to
-/// `hookSpecificOutput.additionalContext`) has exactly this one site to change.
+/// The simplify check's only stdout write: the Stop `additionalContext`
+/// document, or nothing at all.
 fn emit(decision: &SimplifyDecision) {
-    if let SimplifyDecision::Notify { files, total } = decision {
-        print!("{}", render_banner(files, *total));
+    if let Some(json) = render_context_json(decision) {
+        println!("{json}");
     }
 }
 
@@ -178,7 +180,7 @@ pub fn run(cli: Cli) -> i32 {
             emit(&commands::simplify::run(deps, id));
         }),
         Commands::PushCheck { project_dir } => {
-            // Both services pin their reads to the project (#780) — a Stop
+            // Both services pin their reads to the project — a Stop
             // hook's process cwd can be a worktree or a subagent's directory.
             let dir = resolve_project_dir(project_dir, &payload);
             let git = create_git_service(Some(dir.clone()));
