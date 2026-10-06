@@ -104,6 +104,18 @@ function pathWithoutClaude() {
   return `${bin}:/usr/bin:/bin`
 }
 
+function pathWithGit(fakeGitStderr) {
+  const bin = join(root, 'bin-git-variant')
+  mkdirSync(bin)
+  for (const f of ['discord', 'discord.cjs', 'claude', 'claude.cjs']) symlinkSync(join(FAKE_BIN, f), join(bin, f))
+  symlinkSync(process.execPath, join(bin, 'node'))
+  symlinkSync('/usr/bin/dirname', join(bin, 'dirname'))
+  if (fakeGitStderr) {
+    writeFileSync(join(bin, 'git'), `#!/bin/sh\necho "${fakeGitStderr}" >&2\nexit 128\n`, { mode: 0o755 })
+  }
+  return bin
+}
+
 function initRepo(dir) {
   const git = (...args) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { cwd: dir, encoding: 'utf8' })
   assert.equal(git('init', '-q').status, 0)
@@ -248,6 +260,65 @@ describe('per-thread worktree', () => {
     assert.equal(r.status, 0)
     assert.equal(claudeCalls().length, 0)
     assert.match(sends()[0].stdin, /기록된 작업 디렉토리가 없어졌어요/)
+    assert.ok(!existsSync(lockPath('T9')))
+  })
+
+  test('a first run from a subdirectory runs there and records the worktree under the repository root', () => {
+    initRepo(workdir)
+    const sub = join(workdir, 'sub')
+    mkdirSync(sub)
+
+    launch(event({ is_thread: true, channel_id: 'T9', cwd: sub }))
+
+    const call = claudeCalls()[0]
+    assert.equal(realpathSync(call.cwd), sub)
+    assert.equal(argAfter(call.args, '--worktree'), 'discord-T9')
+    assert.equal(readThreadState('T9').cwd, join(workdir, '.claude', 'worktrees', 'discord-T9'))
+  })
+
+  const assertGitFailureSurfaced = r => {
+    assert.equal(r.status, 1)
+    assert.equal(claudeCalls().length, 0)
+    assert.equal(sends().length, 1)
+    assert.equal(sends()[0].args[2], 'T9')
+    assert.match(sends()[0].stdin, /플러그인 실행 오류/)
+    assert.ok(!existsSync(lockPath('T9')))
+  }
+
+  test('a git failure other than "not a repository" posts an error with its stderr, runs nothing and releases the lock', () => {
+    initRepo(workdir)
+
+    const r = launch(event({ is_thread: true, channel_id: 'T9' }), { PATH: pathWithGit('fatal: detected dubious ownership') })
+
+    assertGitFailureSurfaced(r)
+    assert.match(sends()[0].stdin, /dubious ownership/)
+  })
+
+  test('a missing git executable posts an error, runs nothing and releases the lock', () => {
+    const r = launch(event({ is_thread: true, channel_id: 'T9' }), { PATH: pathWithGit() })
+
+    assertGitFailureSurfaced(r)
+  })
+
+  test('a thread state without a worktree field resumes in the recorded cwd without --worktree', () => {
+    writeThreadState('T9', { session_id: 'stored-sid', cwd: workdir })
+
+    launch(event({ is_thread: true, channel_id: 'T9' }))
+
+    const call = claudeCalls()[0]
+    assert.equal(argAfter(call.args, '--resume'), 'stored-sid')
+    assert.ok(!call.args.includes('--worktree'))
+    assert.equal(call.cwd, workdir)
+  })
+
+  test('a non-boolean worktree field in the thread state posts a plugin error and runs nothing', () => {
+    writeThreadState('T9', { session_id: 'stored-sid', cwd: workdir, worktree: 'yes' })
+
+    const r = launch(event({ is_thread: true, channel_id: 'T9' }))
+
+    assert.equal(r.status, 1)
+    assert.equal(claudeCalls().length, 0)
+    assert.match(sends()[0].stdin, /플러그인 실행 오류/)
     assert.ok(!existsSync(lockPath('T9')))
   })
 

@@ -283,7 +283,9 @@ function createThread(event) {
 function gitToplevel(cwd) {
   const r = spawnSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' })
   if (r.error) throw new Error(`git 실행 실패: ${r.error.message}`)
-  return r.status === 0 ? r.stdout.trim() : undefined
+  if (r.status === 0) return r.stdout.trim()
+  if (/not a git repository/i.test(r.stderr)) return undefined
+  throw new Error(`git 판별 실패 (exit ${r.status}): ${r.stderr.trim()}`)
 }
 
 function runClaude(args, cwd, env) {
