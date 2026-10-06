@@ -104,6 +104,12 @@ function pathWithoutClaude() {
   return `${bin}:/usr/bin:/bin`
 }
 
+function initRepo(dir) {
+  const git = (...args) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { cwd: dir, encoding: 'utf8' })
+  assert.equal(git('init', '-q').status, 0)
+  assert.equal(git('commit', '-q', '--allow-empty', '-m', 'init').status, 0)
+}
+
 function readThreadState(thread) {
   return JSON.parse(readFileSync(join(home, '.areum', 'discord-connector', 'threads', `${thread}.json`), 'utf8'))
 }
@@ -155,7 +161,8 @@ describe('session continuity and working directory', () => {
     const call = claudeCalls()[0]
     assert.equal(call.cwd, workdir)
     assert.ok(!call.args.includes('--resume'))
-    assert.deepEqual(readThreadState('T9'), { session_id: 'sid-1', cwd: workdir })
+    assert.ok(!call.args.includes('--worktree'))
+    assert.deepEqual(readThreadState('T9'), { session_id: 'sid-1', cwd: workdir, worktree: false })
   })
 
   test('the next run resumes the stored session in the stored cwd even if stdin cwd differs', () => {
@@ -181,6 +188,73 @@ describe('session continuity and working directory', () => {
     assert.equal(sends().length, 1)
     assert.match(sends()[0].stdin, /기록된 작업 디렉토리가 없어졌어요/)
     assert.ok(!existsSync(lockPath('T9')))
+  })
+})
+
+describe('per-thread worktree', () => {
+  const argAfter = (args, flag) => args[args.indexOf(flag) + 1]
+
+  test('a first run in a git repository passes --worktree, runs in the repository and records the worktree path', () => {
+    initRepo(workdir)
+
+    launch(event({ is_thread: true, channel_id: 'T9' }))
+
+    const call = claudeCalls()[0]
+    assert.equal(argAfter(call.args, '--worktree'), 'discord-T9')
+    assert.ok(!call.args.includes('--resume'))
+    assert.equal(call.cwd, workdir)
+    assert.deepEqual(readThreadState('T9'), {
+      session_id: 'sid-1',
+      cwd: join(workdir, '.claude', 'worktrees', 'discord-T9'),
+      worktree: true,
+    })
+  })
+
+  test('a first run outside a git repository passes no --worktree and records the cwd', () => {
+    launch(event({ is_thread: true, channel_id: 'T9' }))
+
+    assert.ok(!claudeCalls()[0].args.includes('--worktree'))
+    assert.deepEqual(readThreadState('T9'), { session_id: 'sid-1', cwd: workdir, worktree: false })
+  })
+
+  test('a resume of a worktree thread passes --resume and --worktree and runs in the recorded worktree path', () => {
+    const wt = join(workdir, '.claude', 'worktrees', 'discord-T9')
+    mkdirSync(wt, { recursive: true })
+    writeThreadState('T9', { session_id: 'stored-sid', cwd: wt, worktree: true })
+
+    launch(event({ is_thread: true, channel_id: 'T9' }))
+
+    const call = claudeCalls()[0]
+    assert.equal(argAfter(call.args, '--resume'), 'stored-sid')
+    assert.equal(argAfter(call.args, '--worktree'), 'discord-T9')
+    assert.equal(call.cwd, wt)
+    assert.deepEqual(readThreadState('T9'), { session_id: 'sid-1', cwd: wt, worktree: true })
+  })
+
+  test('a resume of a non-worktree thread passes no --worktree', () => {
+    writeThreadState('T9', { session_id: 'stored-sid', cwd: workdir, worktree: false })
+
+    launch(event({ is_thread: true, channel_id: 'T9' }))
+
+    assert.equal(argAfter(claudeCalls()[0].args, '--resume'), 'stored-sid')
+    assert.ok(!claudeCalls()[0].args.includes('--worktree'))
+  })
+
+  test('a vanished recorded worktree posts an error to the thread, runs nothing and releases the lock', () => {
+    writeThreadState('T9', { session_id: 'stored-sid', cwd: join(workdir, '.claude', 'worktrees', 'discord-T9'), worktree: true })
+
+    const r = launch(event({ is_thread: true, channel_id: 'T9' }))
+
+    assert.equal(r.status, 0)
+    assert.equal(claudeCalls().length, 0)
+    assert.match(sends()[0].stdin, /기록된 작업 디렉토리가 없어졌어요/)
+    assert.ok(!existsSync(lockPath('T9')))
+  })
+
+  test('claude stdin is connected to /dev/null', () => {
+    launch(event({ is_thread: true, channel_id: 'T9' }))
+
+    assert.equal(claudeCalls()[0].stdinIsDevNull, true)
   })
 })
 

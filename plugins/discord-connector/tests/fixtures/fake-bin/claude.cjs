@@ -1,4 +1,4 @@
-const { appendFileSync, readFileSync, existsSync } = require('node:fs')
+const { appendFileSync, readFileSync, existsSync, fstatSync, statSync } = require('node:fs')
 const { join } = require('node:path')
 
 const dir = process.env.FAKE_DIR
@@ -7,7 +7,7 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.sta
 
 appendFileSync(
   join(dir, 'calls.jsonl'),
-  `${JSON.stringify({ tool: 'claude', args: process.argv.slice(2), cwd: process.cwd(), env })}\n`,
+  `${JSON.stringify({ tool: 'claude', args: process.argv.slice(2), cwd: process.cwd(), env, stdinIsDevNull: fstatSync(0).rdev === statSync('/dev/null').rdev && fstatSync(0).isCharacterDevice() })}\n`,
 )
 
 const behaviorPath = join(dir, 'behavior.json')

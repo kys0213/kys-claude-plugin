@@ -30,7 +30,7 @@ Discord 에서 봇을 멘션하면 Claude 가 일하고 결과를 같은 스레�
 
 | 경로 | 내용 |
 |------|------|
-| `threads/<스레드 ID>.json` | `session_id`, 첫 실행 디렉토리 |
+| `threads/<스레드 ID>.json` | `session_id`, 작업 공간 경로(`cwd`), worktree 여부(`worktree`) |
 | `locks/<스레드 ID>.lock` | 실행 중인 런처의 pid. 죽은 pid 의 잠금은 다음 실행이 회수해요 |
 | `logs/launcher.log` | 런처 로그 (claude JSON 결과 포함). 훅 stdout 은 버려지고 stderr 는 안 보이니 사후 단서는 이 파일뿐이에요 |
 
@@ -39,8 +39,26 @@ Discord 에서 봇을 멘션하면 Claude 가 일하고 결과를 같은 스레�
 런처는 아래처럼 `claude` 를 실행해요. 모델은 sonnet 고정이고, `--permission-prompt-tool stdio` 가 있어야 `AskUserQuestion` 이 도구 목록에 들어와요.
 
 ```
-claude -p <프롬프트> --permission-mode auto --permission-prompt-tool stdio --output-format json --model sonnet [--resume <session_id>] --plugin-dir <이 플러그인 루트>
+claude -p <프롬프트> --permission-mode auto --permission-prompt-tool stdio --output-format json --model sonnet [--resume <session_id>] [--worktree discord-<스레드 ID>] --plugin-dir <이 플러그인 루트>
 ```
+
+`--worktree` 는 작업 디렉토리가 git 저장소일 때만 붙어요. 저장소가 아니면 그 디렉토리에서 바로 실행해요. `claude` 의 stdin 은 `/dev/null` 로 연결해요.
+
+## 스레드별 worktree
+
+작업 디렉토리가 git 저장소면 스레드마다 `<저장소>/.claude/worktrees/discord-<스레드 ID>` 에서 실행해요. 브랜치는 `worktree-discord-<스레드 ID>` 예요. 런처는 worktree 를 자동으로 지우지 않아요. 아래 절차로 직접 정리해요.
+
+- 대상 저장소가 `.claude/worktrees/` 를 무시하지 않으면 그 저장소의 `.gitignore` 에 `.claude/worktrees/` 를 추가해요.
+- 남은 worktree 확인: `git -C <저장소> worktree list`
+- 정리 (스레드 하나): 아래 명령을 순서대로 실행해요. `<저장소>` 와 `<스레드 ID>` 만 바꿔요.
+
+```bash
+git -C <저장소> worktree unlock <저장소>/.claude/worktrees/discord-<스레드 ID>
+git -C <저장소> worktree remove --force <저장소>/.claude/worktrees/discord-<스레드 ID>
+git -C <저장소> branch -D worktree-discord-<스레드 ID>
+```
+
+`remove --force` 는 커밋하지 않은 변경도 지워요. 필요한 변경은 먼저 커밋하거나 옮겨 두세요.
 
 ## 주의
 

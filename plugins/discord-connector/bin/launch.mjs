@@ -61,7 +61,17 @@ export function buildPrompt(event, threadId) {
   return `스레드: ${link}\n당신의 최종 답은 이 Discord 스레드에 그대로 게시돼요. 스레드에 직접 글을 올릴 필요는 없어요.\n\n${stripBotMention(event.content, event.bot_user_id)}`
 }
 
-export function buildClaudeArgs(prompt, sessionId, pluginRoot = PLUGIN_ROOT) {
+export function worktreeName(threadId) {
+  return `discord-${threadId}`
+}
+
+// 판단만 하고 git 은 부르지 않는다 — 저장소 최상위(toplevel)는 호출자가 넘긴다. 저장소가 아니면 toplevel 은 undefined.
+export function planWorkspace(cwd, threadId, toplevel) {
+  if (toplevel === undefined) return { runCwd: cwd, workspace: cwd, worktree: false }
+  return { runCwd: cwd, workspace: join(toplevel, '.claude', 'worktrees', worktreeName(threadId)), worktree: true }
+}
+
+export function buildClaudeArgs(prompt, { sessionId, worktree } = {}, pluginRoot = PLUGIN_ROOT) {
   const args = [
     '-p',
     prompt,
@@ -75,6 +85,7 @@ export function buildClaudeArgs(prompt, sessionId, pluginRoot = PLUGIN_ROOT) {
     'sonnet',
   ]
   if (sessionId) args.push('--resume', sessionId)
+  if (worktree) args.push('--worktree', worktree)
   args.push('--plugin-dir', pluginRoot)
   return args
 }
@@ -208,10 +219,10 @@ function loadThreadState(threadId) {
   const path = statePath(threadId)
   if (!existsSync(path)) return undefined
   const state = JSON.parse(readFileSync(path, 'utf8'))
-  if (typeof state.session_id !== 'string' || typeof state.cwd !== 'string') {
+  if (typeof state.session_id !== 'string' || typeof state.cwd !== 'string' || (state.worktree !== undefined && typeof state.worktree !== 'boolean')) {
     throw new Error(`스레드 상태 형식이 달라요: ${path}`)
   }
-  return state
+  return { ...state, worktree: state.worktree === true }
 }
 
 function saveThreadState(threadId, state) {
@@ -269,6 +280,12 @@ function createThread(event) {
   return data.thread_id
 }
 
+function gitToplevel(cwd) {
+  const r = spawnSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' })
+  if (r.error) throw new Error(`git 실행 실패: ${r.error.message}`)
+  return r.status === 0 ? r.stdout.trim() : undefined
+}
+
 function runClaude(args, cwd, env) {
   return new Promise(resolvePromise => {
     const child = spawn('claude', args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -281,7 +298,7 @@ function runClaude(args, cwd, env) {
   })
 }
 
-async function execute(event, threadId) {
+async function execute(event, threadId, git = { toplevel: gitToplevel }) {
   const botId = event.bot_user_id
   const prior = loadThreadState(threadId)
 
@@ -290,8 +307,13 @@ async function execute(event, threadId) {
     return
   }
 
-  const cwd = prior ? prior.cwd : event.cwd
-  const args = buildClaudeArgs(buildPrompt(event, threadId), prior?.session_id)
+  const plan = prior
+    ? { runCwd: prior.cwd, workspace: prior.cwd, worktree: prior.worktree }
+    : planWorkspace(event.cwd, threadId, git.toplevel(event.cwd))
+  const args = buildClaudeArgs(buildPrompt(event, threadId), {
+    sessionId: prior?.session_id,
+    worktree: plan.worktree ? worktreeName(threadId) : undefined,
+  })
   const env = {
     ...process.env,
     DISCORD_CONNECTOR_THREAD_ID: threadId,
@@ -299,8 +321,8 @@ async function execute(event, threadId) {
     DISCORD_CONNECTOR_BOT_ID: botId,
   }
 
-  log(`claude 실행: cwd=${cwd} resume=${prior?.session_id ?? '-'} thread=${threadId}`)
-  const run = await runClaude(args, cwd, env)
+  log(`claude 실행: cwd=${plan.runCwd} worktree=${plan.worktree} resume=${prior?.session_id ?? '-'} thread=${threadId}`)
+  const run = await runClaude(args, plan.runCwd, env)
   log(`claude 종료: code=${run.code} signal=${run.signal} stdout=${run.stdout}${run.stderr ? ` stderr=${run.stderr}` : ''}`)
 
   if (run.spawnError) {
@@ -317,7 +339,7 @@ async function execute(event, threadId) {
     return
   }
 
-  saveThreadState(threadId, { session_id: parsed.sessionId, cwd })
+  saveThreadState(threadId, { session_id: parsed.sessionId, cwd: plan.workspace, worktree: plan.worktree })
   post(threadId, botId, parsed.result)
 }
 
