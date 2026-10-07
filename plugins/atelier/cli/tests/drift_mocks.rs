@@ -1,6 +1,5 @@
-//! Shared test doubles and fixtures for the drift subsystem tests, following
-//! the same convention as `session_mocks`. The filesystem and the backup clock
-//! are in-memory, so the drift rules are pinned without touching a real
+//! Shared test doubles and fixtures for the drift subsystem tests. The
+//! filesystem and the backup clock are in-memory, so the drift rules are pinned without touching a real
 //! CLAUDE.md or a temp directory — and the write log lets refusal tests assert
 //! that a rejected sync performed *zero* writes.
 //!
