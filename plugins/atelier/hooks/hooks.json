@@ -12,10 +12,6 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-baseline.sh"
-          },
-          {
-            "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/ensure-agent-teams.sh"
           }
         ]
@@ -25,10 +21,6 @@
       {
         "matcher": "*",
         "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/suggest-simplify.sh"
-          },
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/push-check.sh"

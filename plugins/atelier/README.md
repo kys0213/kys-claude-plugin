@@ -16,7 +16,7 @@
 | `github-autopilot` | 0.30.1 | **제거됨** — 에이전트 스웜이 클로드만으로 동작하게 되어 GitHub 이슈 구동 autopilot 루프를 걷어내고, 자율 개발은 `skills/orchestrator/`(기본 자율 주행)가 담당 |
 | `spec-kit` | 0.7.1 | `skills/spec-write/`, `templates/spec/` |
 | `workflow-guide` | 0.6.0 | `agents/workflow/*`, `skills/{workflow,agent-design-principles}/`, `rules/` |
-| `coding-style` | 0.3.0 | `templates/claude-md/`, `hooks/{suggest-simplify,session-baseline}.sh` (판정은 `cli/src/session/`) |
+| `coding-style` | 0.3.0 | `templates/claude-md/` — `/simplify` 제안 hook 은 제거하고, 단순화 검토는 orchestrator 검토 게이트의 단순화 관점이 맡음 |
 | `orchestrator` | 0.2.0 | `skills/orchestrator/`(+references) |
 
 흡수된 6개 plugin은 저장소에서 **제거되었습니다** — git history만 참조 가능하며, 후속 개발은 atelier에서만 진행합니다. `autodev`, `develop-workflow`도 함께 제거되었습니다. 마이그레이션 이력은 [`plans/atelier/03-migration.md`](../../plans/atelier/03-migration.md)를 참조하세요.
@@ -64,7 +64,7 @@ atelier는 단일 Rust crate(`cli/`)로 빌드되며, 바이너리 `atelier` 하
 ```
 atelier drift <check|sync>                # setup 이 복사한 산출물의 드리프트 판정/갱신 (shell 스크립트 → Rust 포팅)
 atelier git <reviews|guard|hook>          # git-utils 의 기계적 호출 표면 (TypeScript → Rust 포팅)
-atelier session <baseline|simplify-check|push-check|ensure-env> # 세션 경계 인식 hook (SessionStart / Stop)
+atelier session <push-check|ensure-env>   # 세션 경계 hook (SessionStart / Stop)
 atelier orchestrator <spawn-check|compact-note>      # function hooks 모듈이 위임하는 결정적 판정 (아래 §Function hooks)
 ```
 
@@ -73,12 +73,6 @@ atelier orchestrator <spawn-check|compact-note>      # function hooks 모듈이 
 비교해 `<check>=<STATUS>` 라인으로 보고하고 (exit 0 무드리프트 / 1 드리프트 / 2 오류),
 `sync --target <claude-md|rules>` 는 백업(`<file>.bak-<timestamp>`) 후 해당 산출물만
 원본으로 갱신합니다 — 신규 설치는 하지 않습니다 (setup 담당).
-
-`session` 은 "이 세션이 무엇을 바꿨는가"를 판정합니다. SessionStart 에 저장소 상태
-(HEAD + dirty 목록)를 `${TMPDIR:-/tmp}/atelier-sessions/<session_id>.json` 에 기록하고
-(없을 때만 — resume/compact 안전), Stop 에 `(현재 dirty − 베이스라인 dirty) ∪ (베이스라인
-HEAD 이후 커밋된 파일)` 이 코드 파일을 포함할 때만 `/simplify` 를 제안합니다. 세션당 1회,
-비차단(항상 exit 0)입니다.
 
 `push-check` 는 Stop 시점에 **열린 PR 이 있는 브랜치가 upstream 보다 ahead** 이면
 `{"decision":"block","reason":...}` 를 stdout 에 내보내 세션 종료를 막습니다 (항상 exit 0 —
