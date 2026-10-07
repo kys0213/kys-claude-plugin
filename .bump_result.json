@@ -2,13 +2,13 @@
   "dry_run": false,
   "results": [
     {
-      "plugin": "discord-connector",
-      "old_version": "0.2.0",
-      "new_version": "0.3.0",
-      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/discord-connector/.claude-plugin/plugin.json",
+      "plugin": "atelier",
+      "old_version": "0.27.3",
+      "new_version": "0.28.0",
+      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/atelier/.claude-plugin/plugin.json",
       "marketplace_updated": true,
-      "cargo_toml_updated": false,
-      "cargo_lock_updated": false
+      "cargo_toml_updated": true,
+      "cargo_lock_updated": true
     }
   ]
 }
