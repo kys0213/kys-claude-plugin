@@ -16,7 +16,7 @@
 
 1. spec 확정 게이트 — spec 입력 런이면 미결 스캔부터. 미결이 있으면 계약도 세우지 않는다 (`SKILL.md §정지 조건`).
 2. 예산·가드레일 값을 정해 자율 계약을 세우고 시작 보고를 한 번 낸다 (`references/contracts.md §예산과 가드레일 값` · `references/contracts.md §사용자 보고 형식`).
-3. 분해 — 구현 dispatch 가 있는 자율 런은 아키텍트 협의체로 간다. 진입 전에 커밋된 합의·승인 plan 이 있으면 그것을 쓴다 (`references/contracts.md §설계 승인 마커`). 그 밖의 런은 복잡·모호하면 협의체, 아니면(확정 spec · 단순 요청) 메인이 직접.
+3. 분해 — 구현 dispatch 가 있는 자율 런은 아키텍트 협의체로 간다. 진입 전에 커밋된 합의·승인 plan 이 있으면 그것을 쓴다 (`references/contracts.md §설계 승인 마커`). 그 밖의 런은 복잡·모호하면 협의체, 아니면(확정 spec · 단순 요청) 메인이 직접. 어느 쪽이든 편집 대상 파일마다 규칙 위반을 조사하고, 그 결과로 선행 정리 task 를 도출한다 (`references/contracts.md §task 도출 계약`).
 4. plan 기록과 task 도출 — 승인 이벤트 뒤 메인이 plan 을 커밋하고, 그 경로를 근거로 승인 마커를 세운 다음 task 를 도출해 등록한다. 이 순서는 바꾸지 않는다 — 마커가 실존하는 plan 을 가리켜야 한다 (`references/contracts.md §plan 기록` · `references/contracts.md §설계 승인 마커` · `references/contracts.md §task 도출 계약`).
 5. 실행 계획 — 병렬과 순차, 위임 형태, 격리 여부, 세울 게이트 관점을 표에서 읽는다 (`SKILL.md §기본값 표`).
 6. 위임과 진행 추적 — 완료 알림 수령으로 진행한다. 무거운 경로면 dispatch 직후 생성 가드, 완료 알림 직후 토폴로지 가드.
