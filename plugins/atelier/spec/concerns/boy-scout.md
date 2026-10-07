@@ -1,5 +1,10 @@
 ---
-related_paths: []
+related_paths:
+  - plugins/atelier/skills/grill/references/design-generation.md
+  - plugins/atelier/skills/orchestrator/SKILL.md
+  - plugins/atelier/skills/orchestrator/references/contracts.md
+  - plugins/atelier/skills/orchestrator/references/procedures.md
+  - plugins/atelier/templates/claude-md/CLAUDE.md
 ---
 
 # 보이스카웃 원칙
