@@ -32,14 +32,6 @@ HITL 이면 같은 순서로 진행하되 계획 확정 · 게이트 결과 · �
 
 worktree 는 항상 epic 브랜치 위의 격리 수단이고, 메인은 epic 브랜치의 메인 working tree 에 머문다.
 
-```
-main
-  └─ <epic>                                ← 메인 (읽기 · dispatch · 보고)
-       ├─ worktree A → <epic>-t<id>-<slug>    (base = <epic>)
-       ├─ worktree B → <epic>-t<id>-<slug>    (base = <epic>)
-       └─ worktree C → <epic>-t<id>-<slug>    (base = <epic>)
-```
-
 1. 진입 확인 — `git branch --show-current` 가 epic 브랜치이고 `git rev-parse --show-toplevel` 이 메인 working tree 인가.
 2. `git worktree list --porcelain` 으로 스냅샷을 뜬다.
 3. 격리 위임을 **한 건만** 이번 메시지에 싣는다 — 작업 브랜치는 `<epic>-t<id>-<slug>`, prompt 에 실을 것은 `references/contracts.md §prompt 필수 포함 요소`.
