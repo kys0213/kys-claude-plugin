@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/kys0213/kys-claude-plugin/tools/validate/internal/parser"
+	"github.com/kys0213/kys-claude-plugin/tools/validate/internal/repofs"
 )
 
 // Result represents a validation result
@@ -44,9 +44,13 @@ var (
 // Validate runs all spec validations
 func Validate(repoRoot string) (*Results, error) {
 	results := &Results{}
+	globber := repofs.NewGlobber(repoRoot)
 
 	// 1. plugin.json validation
-	pluginFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "**/plugin.json")
+	pluginFiles, err := globber.Glob("**/plugin.json")
+	if err != nil {
+		return nil, err
+	}
 	for _, file := range pluginFiles {
 		result := validatePluginJSON(repoRoot + "/" + file)
 		if result.Valid {
@@ -78,7 +82,10 @@ func Validate(repoRoot string) (*Results, error) {
 	}
 
 	// 3. SKILL.md validation
-	skillFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "**/skills/*/SKILL.md")
+	skillFiles, err := globber.Glob("**/skills/*/SKILL.md")
+	if err != nil {
+		return nil, err
+	}
 	for _, file := range skillFiles {
 		result := validateSkillMD(repoRoot+"/"+file, results)
 		if result.Valid {
@@ -89,7 +96,10 @@ func Validate(repoRoot string) (*Results, error) {
 	}
 
 	// 4. Agent validation
-	agentFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "**/agents/*.md")
+	agentFiles, err := globber.Glob("**/agents/*.md")
+	if err != nil {
+		return nil, err
+	}
 	for _, file := range agentFiles {
 		result := validateAgentMD(repoRoot + "/" + file)
 		if result.Valid {
@@ -100,7 +110,10 @@ func Validate(repoRoot string) (*Results, error) {
 	}
 
 	// 5. Command validation
-	commandFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "**/commands/*.md")
+	commandFiles, err := globber.Glob("**/commands/*.md")
+	if err != nil {
+		return nil, err
+	}
 	for _, file := range commandFiles {
 		result := validateCommandMD(repoRoot + "/" + file)
 		if result.Valid {
@@ -111,7 +124,10 @@ func Validate(repoRoot string) (*Results, error) {
 	}
 
 	// 6. Hooks validation
-	hookFiles, _ := doublestar.Glob(os.DirFS(repoRoot), "**/hooks/*.md")
+	hookFiles, err := globber.Glob("**/hooks/*.md")
+	if err != nil {
+		return nil, err
+	}
 	for _, file := range hookFiles {
 		result := validateHookMD(repoRoot + "/" + file)
 		if result.Valid {
@@ -124,7 +140,10 @@ func Validate(repoRoot string) (*Results, error) {
 	// 7. Sensitive data detection
 	sensitivePatterns := []string{"**/scripts/*.sh", "**/scripts/*.js", "**/skills/*/SKILL.md"}
 	for _, pattern := range sensitivePatterns {
-		files, _ := doublestar.Glob(os.DirFS(repoRoot), pattern)
+		files, err := globber.Glob(pattern)
+		if err != nil {
+			return nil, err
+		}
 		for _, file := range files {
 			result := validateSensitiveData(repoRoot + "/" + file)
 			if result.Valid {
@@ -484,8 +503,8 @@ func validateHookMD(filePath string) Result {
 
 func validateSensitiveData(filePath string) Result {
 	result := Result{
-		File: filePath,
-		Type: "sensitive-data",
+		File:  filePath,
+		Type:  "sensitive-data",
 		Valid: true,
 	}
 

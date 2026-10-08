@@ -338,3 +338,36 @@ description: A test skill
 		})
 	}
 }
+
+func TestValidateSkipsClaudeWorktrees(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	write := func(rel, content string) {
+		path := filepath.Join(tmpDir, rel)
+		os.MkdirAll(filepath.Dir(path), 0755)
+		os.WriteFile(path, []byte(content), 0644)
+	}
+	write("plugins/my-plugin/.claude-plugin/plugin.json", `{"name": "my-plugin", "version": "1.0.0"}`)
+	write(".claude-plugin/marketplace.json", `{
+		"name": "test-repo",
+		"owner": {"name": "test"},
+		"plugins": [
+			{"name": "my-plugin", "source": "./plugins/my-plugin", "version": "1.0.0"}
+		]
+	}`)
+	write(".claude/worktrees/other/plugins/orphan/.claude-plugin/plugin.json", `{"name": "orphan", "version": "0.1.0"}`)
+
+	results, err := Validate(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, r := range append(results.Passed, results.Failed...) {
+		if strings.Contains(r.File, ".claude/worktrees") {
+			t.Errorf("worktree file was validated: %s", r.File)
+		}
+	}
+	if len(results.Failed) != 0 {
+		t.Errorf("expected no failures, got %v", results.Failed)
+	}
+}
