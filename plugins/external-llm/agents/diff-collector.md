@@ -24,7 +24,7 @@ MainAgent로부터 scope와 target 정보를 받습니다:
 ### Step 2: get-diff.sh 실행
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/../../common/scripts/get-diff.sh "[scope]" "[target]"
+${CLAUDE_PLUGIN_ROOT}/scripts/get-diff.sh "[scope]" "[target]"
 ```
 
 스크립트가 자동으로:

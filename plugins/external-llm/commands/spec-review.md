@@ -104,10 +104,10 @@ Agent Teams가 비활성이면 Task 4개를 `run_in_background=true`로 병렬 �
 1. 대상 파일을 Read로 읽기
 2. 자신의 관점으로 직접 Claude 분석 수행
 3. Codex에 동일한 분석 요청:
-   `bash ${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-codex.sh "[프롬프트]"`
+   `bash ${CLAUDE_PLUGIN_ROOT}/scripts/call-codex.sh "[프롬프트]"`
    → 결과 파일 Read
 4. Gemini에 동일한 분석 요청:
-   `bash ${CLAUDE_PLUGIN_ROOT}/../../common/scripts/call-gemini.sh "[프롬프트]"`
+   `bash ${CLAUDE_PLUGIN_ROOT}/scripts/call-gemini.sh "[프롬프트]"`
    → 결과 파일 Read
 5. 3-LLM 컨센서스 도출
 
