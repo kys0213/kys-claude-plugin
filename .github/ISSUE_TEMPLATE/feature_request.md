@@ -25,7 +25,6 @@ assignees: ""
 
 - [ ] atelier
 - [ ] hud
-- [ ] external-llm
 - [ ] suggest-workflow
 - [ ] barrier-sync
 - [ ] openclaw-docker
