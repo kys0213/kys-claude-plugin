@@ -10,9 +10,6 @@ Claude Code 플러그인 모음
 
 # atelier 플러그인 설치 (spec 설계 → 리뷰 → 구현 → git/PR 워크플로우 통합)
 /plugin install atelier@kys-claude-plugin
-
-# external-llm 플러그인 설치 (외부 LLM 호출)
-/plugin install external-llm@kys-claude-plugin
 ```
 
 ## 구조
@@ -21,12 +18,10 @@ Claude Code 플러그인 모음
 kys-claude-plugin/
 ├── common/
 │   └── scripts/           # 공유 스크립트
-│       ├── call-codex.sh
-│       └── call-gemini.sh
+│       └── render-template.sh
 │
 └── plugins/
     ├── atelier/           # 통합 개발 워크플로우 (spec 설계 → 리뷰 → 구현 → git/PR)
-    ├── external-llm/      # 외부 LLM 호출 인프라
     ├── hud/               # Claude Code 상태줄 (색상·진행률·클릭 링크)
     ├── suggest-workflow/  # 세션 분석 기반 워크플로우 제안
     ├── barrier-sync/      # 병렬 백그라운드 Task 동기화 (FIFO barrier)
@@ -53,19 +48,6 @@ kys-claude-plugin/
 **사용:**
 ```bash
 claude --plugin-dir /path/to/plugins/atelier
-```
-
-### external-llm
-
-외부 LLM(OpenAI Codex, Google Gemini) 호출 인프라
-
-**Commands:**
-- `/invoke-codex` - Codex CLI 범용 호출
-- `/invoke-gemini` - Gemini CLI 범용 호출
-
-**사용:**
-```bash
-claude --plugin-dir /path/to/plugins/external-llm
 ```
 
 ## 개발

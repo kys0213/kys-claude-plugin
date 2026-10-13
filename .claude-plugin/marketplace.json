@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "description": "통합 개발 워크플로우, 외부 LLM 인프라, Git 자동화 등 Claude Code 플러그인 모음",
+  "description": "통합 개발 워크플로우, Git 자동화 등 Claude Code 플러그인 모음",
   "name": "kys-claude-plugin",
   "owner": {
     "name": "kys0213"
@@ -22,19 +22,6 @@
       "name": "atelier",
       "source": "./plugins/atelier",
       "version": "0.30.0"
-    },
-    {
-      "category": "integration",
-      "description": "외부 LLM(OpenAI Codex, Google Gemini) 호출 인프라",
-      "keywords": [
-        "codex",
-        "gemini",
-        "external-llm"
-      ],
-      "name": "external-llm",
-      "source": "./plugins/external-llm",
-      "strict": false,
-      "version": "0.9.0"
     },
     {
       "category": "productivity",
