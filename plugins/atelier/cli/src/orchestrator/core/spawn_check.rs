@@ -1,7 +1,7 @@
-//! Deterministic `agent.spawn` dispatch-rule checks. Both rules only apply
+//! Deterministic `agent.spawn` dispatch-rule checks. Every rule only applies
 //! to non-fork dispatches — a fork inherits the parent process wholesale and
-//! never picks a model at all, so neither "model unspecified" nor "tier cap
-//! exceeded" can be judged.
+//! never picks a model or an effort at all, so none of "model unspecified",
+//! "tier cap exceeded" or "effort unspecified" can be judged.
 
 use super::tier::Tier;
 
@@ -15,6 +15,18 @@ pub struct SpawnFacts {
     pub parent_model: String,
     pub fork: bool,
     pub subagent_type: String,
+    pub effort: EffortFact,
+}
+
+/// What the dispatch said about its reasoning effort.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum EffortFact {
+    /// The payload carried no effort at all (an adapter that predates the
+    /// field), so whether the dispatch set one cannot be judged.
+    #[default]
+    Unknown,
+    Unspecified,
+    Given(String),
 }
 
 fn is_unspecified(model: &Option<String>) -> bool {
@@ -88,11 +100,26 @@ fn rule_tier_cap_exceeded(facts: &SpawnFacts) -> Option<String> {
     ))
 }
 
+fn rule_effort_unspecified(facts: &SpawnFacts) -> Option<String> {
+    if facts.fork || facts.effort != EffortFact::Unspecified {
+        return None;
+    }
+    Some(format!(
+        "[atelier] 이 sub-agent({})는 effort 를 지정하지 않아 기본 effort 로 실행됐습니다. \
+         이미 실행된 호출이라 다시 실행할 필요는 없고, 다음 dispatch 부터 작업에 맞는 effort 를 명시하세요.",
+        facts.subagent_type
+    ))
+}
+
 pub fn check(facts: &SpawnFacts) -> Vec<String> {
-    [rule_inherited_model(facts), rule_tier_cap_exceeded(facts)]
-        .into_iter()
-        .flatten()
-        .collect()
+    [
+        rule_inherited_model(facts),
+        rule_tier_cap_exceeded(facts),
+        rule_effort_unspecified(facts),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 #[cfg(test)]
@@ -106,7 +133,26 @@ mod tests {
             parent_model: "claude-opus-5-5".to_string(),
             fork: false,
             subagent_type: "general-purpose".to_string(),
+            effort: EffortFact::Given("medium".to_string()),
         }
+    }
+
+    #[test]
+    fn warns_when_effort_unspecified() {
+        let mut f = facts();
+        f.model = Some("sonnet".to_string());
+        f.effort = EffortFact::Unspecified;
+        let warnings = check(&f);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("effort"));
+    }
+
+    #[test]
+    fn silent_when_effort_unknown() {
+        let mut f = facts();
+        f.model = Some("sonnet".to_string());
+        f.effort = EffortFact::Unknown;
+        assert!(check(&f).is_empty());
     }
 
     #[test]

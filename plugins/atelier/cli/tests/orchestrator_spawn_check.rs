@@ -281,6 +281,71 @@ fn rule_b_opus_parent_allows_haiku_delegation() {
     assert!(warnings.is_empty());
 }
 
+// --- Rule C: effort unspecified ---------------------------------------------
+
+fn payload_effort(model: &str, effort: &str, fork: bool) -> String {
+    format!(
+        r#"{{"model":{model},"resolved_model":"claude-opus-5-5","parent_model":"claude-opus-5-5","fork":{fork},"subagent_type":"general-purpose","effort":{effort}}}"#
+    )
+}
+
+#[test]
+fn rule_c_warns_on_null_effort() {
+    let w = warnings_for(&payload_effort("\"sonnet\"", "null", false));
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(w[0].contains("effort"), "{w:?}");
+    assert!(w[0].contains("general-purpose"), "{w:?}");
+}
+
+#[test]
+fn rule_c_warns_on_blank_effort() {
+    let w = warnings_for(&payload_effort("\"sonnet\"", "\"  \"", false));
+    assert_eq!(w.len(), 1, "{w:?}");
+}
+
+#[test]
+fn rule_c_silent_when_effort_given() {
+    let w = warnings_for(&payload_effort("\"sonnet\"", "\"low\"", false));
+    assert!(w.is_empty(), "{w:?}");
+}
+
+#[test]
+fn rule_c_silent_on_fork() {
+    let w = warnings_for(&payload_effort("null", "null", true));
+    assert!(w.is_empty(), "{w:?}");
+}
+
+#[test]
+fn rule_c_silent_when_effort_key_absent() {
+    let w = warnings_for(&payload("\"sonnet\"", "claude-opus-5-5", false));
+    assert!(w.is_empty(), "{w:?}");
+}
+
+#[test]
+fn rule_c_follows_model_warnings() {
+    let w = warnings_for(&payload_effort("null", "null", false));
+    assert_eq!(w.len(), 2, "{w:?}");
+    assert!(w[0].contains("상속해"), "{w:?}");
+    assert!(w[1].contains("effort"), "{w:?}");
+}
+
+#[test]
+fn rule_c_warning_is_self_contained() {
+    let w = warnings_for(&payload_effort("\"sonnet\"", "null", false));
+    let effort = &w[0];
+    assert!(effort.starts_with("[atelier]"), "{effort}");
+    assert!(!effort.contains("불변식"), "{effort}");
+    assert!(!effort.contains("표 1"), "{effort}");
+    assert!(effort.contains("다시 실행할 필요는 없"), "{effort}");
+    assert!(effort.contains("다음 dispatch 부터"), "{effort}");
+}
+
+#[test]
+fn effort_as_number_yields_no_verdict() {
+    let w = warnings_for(&payload_effort("null", "3", false));
+    assert!(w.is_empty(), "{w:?}");
+}
+
 // --- Parse failure ------------------------------------------------------------
 
 #[test]

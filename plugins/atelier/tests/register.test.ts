@@ -39,7 +39,27 @@ describe('register', () => {
       parent_model: Fixtures.PARENT_MODEL,
       fork: false,
       subagent_type: 'general-purpose',
+      effort: null,
     })
+  })
+
+  test("the Agent call's effort reaches spawn-check", async ($, on) => {
+    const stdins: (string | undefined)[] = []
+
+    on('process.run', ($, e) => {
+      stdins.push(e.init?.stdin)
+
+      return { value: { exitCode: 0, stdout: JSON.stringify({ warnings: [] }), stderr: '' } }
+    })
+
+    await Fixtures.dispatchAgentCall($, on, {
+      model: 'haiku',
+      effort: 'low',
+      spawnResult: { model: 'claude-haiku-5-5' },
+    })
+
+    expect(stdins).toHaveLength(1)
+    expect(JSON.parse(stdins[0] ?? '{}')).toMatchObject({ model: 'haiku', effort: 'low' })
   })
 
   test('no warnings from spawn-check leaves the result untouched', async ($, on) => {

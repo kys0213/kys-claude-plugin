@@ -88,7 +88,8 @@ export function register(on: On): void {
       return r
     }
 
-    const warnings = await askCli($, 'spawn-check', decodeWarnings, [], JSON.stringify(fact))
+    const payload = { ...fact, effort: e.effort ?? null }
+    const warnings = await askCli($, 'spawn-check', decodeWarnings, [], JSON.stringify(payload))
 
     if (warnings.length === 0) {
       return r

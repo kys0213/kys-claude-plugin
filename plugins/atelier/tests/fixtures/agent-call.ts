@@ -22,6 +22,7 @@ async function dispatchAgentCall(
   on: On,
   opts: {
     model?: string
+    effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
     fork?: boolean
     spawnResult: AgentSpawnResult
     callResult?: ToolCallResult<'Agent'>
@@ -46,6 +47,7 @@ async function dispatchAgentCall(
     subagent_type: 'general-purpose',
     description: 'say hi',
     prompt: 'say hi',
+    effort: opts.effort,
   } as never)
 }
 

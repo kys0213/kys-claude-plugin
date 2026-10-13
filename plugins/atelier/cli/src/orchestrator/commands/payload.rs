@@ -1,6 +1,6 @@
 //! Stdin payload for `orchestrator spawn-check`.
 
-use crate::orchestrator::core::spawn_check::SpawnFacts;
+use crate::orchestrator::core::spawn_check::{EffortFact, SpawnFacts};
 use serde_json::Value;
 
 pub fn parse_spawn_facts(raw: &str) -> Option<SpawnFacts> {
@@ -11,6 +11,7 @@ pub fn parse_spawn_facts(raw: &str) -> Option<SpawnFacts> {
     let model = optional_nullable_string(&value, "model")?.into_specified();
     let resolved_model = optional_nullable_string(&value, "resolved_model")?.into_specified();
     let subagent_type = optional_string(&value, "subagent_type")?;
+    let effort = effort_fact(&value)?;
 
     Some(SpawnFacts {
         model,
@@ -18,6 +19,18 @@ pub fn parse_spawn_facts(raw: &str) -> Option<SpawnFacts> {
         parent_model,
         fork,
         subagent_type,
+        effort,
+    })
+}
+
+fn effort_fact(value: &Value) -> Option<EffortFact> {
+    if value.get("effort").is_none() {
+        return Some(EffortFact::Unknown);
+    }
+    let effort = optional_nullable_string(value, "effort")?.into_specified();
+    Some(match effort {
+        Some(e) if !e.trim().is_empty() => EffortFact::Given(e),
+        _ => EffortFact::Unspecified,
     })
 }
 
@@ -132,6 +145,31 @@ mod tests {
             parse_spawn_facts(
                 r#"{"fork":false,"parent_model":"claude-opus-5-5","subagent_type":null}"#
             ),
+            None
+        );
+    }
+
+    #[test]
+    fn effort_key_absent_null_or_given() {
+        let base = r#""fork":false,"parent_model":"claude-opus-5-5""#;
+        let effort_of = |extra: &str| {
+            parse_spawn_facts(&format!("{{{base}{extra}}}"))
+                .expect("valid JSON")
+                .effort
+        };
+        assert_eq!(effort_of(""), EffortFact::Unknown);
+        assert_eq!(effort_of(r#","effort":null"#), EffortFact::Unspecified);
+        assert_eq!(effort_of(r#","effort":" ""#), EffortFact::Unspecified);
+        assert_eq!(
+            effort_of(r#","effort":"low""#),
+            EffortFact::Given("low".to_string())
+        );
+    }
+
+    #[test]
+    fn wrong_typed_effort_rejects_the_payload() {
+        assert_eq!(
+            parse_spawn_facts(r#"{"fork":false,"parent_model":"claude-opus-5-5","effort":3}"#),
             None
         );
     }
