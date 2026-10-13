@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Use this skill for any multi-unit work delegated to sub-agents, agent-teams, or worktrees — parallel fan-out, sequential pipelines, long-running agent teams, autonomous self-driving runs (decompose→dispatch→merge without human intervention), document deliverables (writing reports, specs, or write-up docs is also delegated Write work), multi-branch research and investigation (codebase surveys, side-effect analysis, comparing options — read-only work counts too), or any moment the main agent is about to use Edit/Write directly (delegate instead). Scope is set by scale, not by kind. Requests count alike in Korean or English. "자율주행" (also "자율 모드") is this plugin's term for an autonomous run carried through to the end.
+description: Use this skill for any multi-unit work delegated to sub-agents, agent-teams, or worktrees — parallel fan-out, sequential pipelines, long-running agent teams, autonomous self-driving runs (decompose→dispatch→merge without human intervention), document deliverables (writing reports, specs, or write-up docs is also delegated Write work), research and investigation (codebase surveys, the impact or side effects of a change, root-cause hunts, comparing options — read-only work counts too), or any moment the main agent is about to use Edit/Write directly (delegate instead). Scope is set by scale, not by kind. Requests count alike in Korean or English. "자율주행" (also "자율 모드") is this plugin's term for an autonomous run carried through to the end.
 version: 0.1.0
 ---
 
