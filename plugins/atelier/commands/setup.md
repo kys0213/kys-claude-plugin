@@ -10,14 +10,13 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 모듈을 선택해 설치하고, 기존 frozen plugin 경로로 등록된 hook 을 atelier 로 마이그레이션합니다.
 
 > ⚠️ 기본적으로 모든 hook 은 user scope(`~/.claude/settings.json`)에 등록됩니다.
-> 등록은 LLM 이 settings.json 을 직접 편집하지 않고 **atelier CLI** 로 수행합니다
-> (`.claude/rules/tool-layer-boundary.md`).
+> 등록은 LLM 이 settings.json 을 직접 편집하지 않고 **atelier CLI** 로 수행합니다.
 > - Default Branch Guard 2종 → `atelier git setup guard --scope <user|project>` (감지·마이그레이션·등록을 한 번에)
 > - 그 외 개별 hook → `atelier git hook register ... --project-dir "$HOME"`
 
 setup 이 settings.json 에 등록하는 hook 은 **CLI 직접 호출 형태뿐**입니다 (`atelier git guard write ...` — 바이너리가 PATH 에서 해석되므로 버전 비의존). 이는 setup 시점에 프로젝트별 값(예: `--default-branch <감지값>`)을 주입해야 하기 때문입니다.
 
-> 플러그인에 번들된 `.sh` hook(`check-cli-version`·`push-check`·`ensure-agent-teams`)은 플러그인이 `hooks/hooks.json` 으로 직접 선언합니다. 모두 비차단(exit 0)이라 모든 세션에 적용돼도 안전합니다 — 사용자 설정을 쓰는 `ensure-agent-teams` 는 userConfig `agent_teams` 동의로 self-gate 합니다 (README §Agent team 자동 활성화). setup 이 따로 등록하지 않습니다. `${CLAUDE_PLUGIN_ROOT}` 가 hook 실행 시점에 활성 버전으로 해석돼 frozen 이 없습니다 (`.claude/rules/tool-layer-boundary.md`).
+> 플러그인에 번들된 `.sh` hook(`check-cli-version`·`push-check`·`ensure-agent-teams`)은 플러그인이 `hooks/hooks.json` 으로 직접 선언합니다. 모두 비차단(exit 0)이라 모든 세션에 적용돼도 안전합니다 — 사용자 설정을 쓰는 `ensure-agent-teams` 는 userConfig `agent_teams` 동의로 self-gate 합니다. setup 이 따로 등록하지 않습니다. `${CLAUDE_PLUGIN_ROOT}` 가 hook 실행 시점에 활성 버전으로 해석돼 frozen 이 없습니다.
 
 ## Step 0 — atelier CLI 보장 (공통 선행)
 
@@ -75,11 +74,11 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
    `Error: ...` 를 stderr 에 출력하고 exit 1 이므로, 이후 Step 을 진행하지 말고 사용자에게 안내합니다.
 
    > 서브커맨드의 수행 순서·플래그 의미(warm-up·감지·마이그레이션·등록, `--scope`, `--dry-run`, 멱등성)는
-   > `skills/git/references/cli-reference.md` §4. Guard hook 설치 (`setup guard`) 가 단일 출처입니다.
+   > `git` skill 이 정합니다.
 
 ## Step 2b — workflow 모듈
 
-`workflow` skill 의 §"설계 원칙 룰 설치" 절차를 수행합니다:
+설계 원칙 룰을 설치합니다:
 
 1. `.claude/rules/` 디렉토리가 없으면 생성, 대상 파일이 존재하면 덮어쓸지 AskUserQuestion 으로 확인
 2. `${CLAUDE_PLUGIN_ROOT}/rules/agent-design-principles.md` 를 **내용 수정 없이 그대로** `.claude/rules/agent-design-principles.md` 에 복사
@@ -95,12 +94,12 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 - 선택지: `[user (~/.claude/rules/atelier/ — 이 머신의 모든 프로젝트)]` `[project (<project>/.claude/rules/atelier/ — 이 레포 팀 공유, 버전 관리)]` `[둘 다]`
 - 선택된 스코프마다: 대상 디렉토리가 없으면 생성, 파일이 이미 존재하면 덮어쓸지 확인 후 `${CLAUDE_PLUGIN_ROOT}/rules/policies/` 의 정책 파일들을 **내용 수정 없이 그대로** 복사
 
-> 설치 대상 파일 목록은 CLI 의 `POLICY_RULES` 매니페스트(`drift/core/types.rs`)가 단일 출처입니다 — 이후 드리프트 점검·동기화(`drift check` / `drift sync --target user-rules|project-rules`)와 같은 목록을 봅니다.
+> 설치 대상 파일 목록은 atelier CLI 가 소유합니다 — 이후 드리프트 점검·동기화(`drift check` / `drift sync --target user-rules|project-rules`)와 같은 목록을 봅니다.
 
 ## Step 3 — 기존 hook 마이그레이션 (frozen → atelier)
 
 기존 6개 plugin 사용자는 `~/.claude/settings.json` 에 **frozen plugin 경로**의 hook 이 박혀 있습니다.
-이를 atelier 로 재작성합니다. 현재 절차는 아래가 전부이며, 설계 배경은 `plans/atelier/03-migration.md §A.3` (plan — 시점 기록) 참조.
+이를 atelier 로 재작성합니다. 현재 절차는 아래가 전부입니다.
 
 ```
 1. atelier git hook list --project-dir "$HOME" 으로 현재 등록 현황 조회 (없으면 skip)

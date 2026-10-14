@@ -1,9 +1,7 @@
-//! Git reads consumed by the branch guard — a trimmed port of
-//! `git-utils/src/core/git.ts`. After the git CLI was narrowed to its
-//! mechanical surface (guard/hook/reviews), the guard is the only consumer of
+//! Git reads consumed by the branch guard. The guard is the only consumer of
 //! `GitService`, so the trait exposes just the three reads it needs;
-//! `RealGitService` shells out via `shared::shell`. Commit/branch/PR flows now
-//! run as plain git/gh under the `git` skill's conventions, not through here.
+//! `RealGitService` shells out via `shared::shell`. Commit/branch/PR flows
+//! run as plain git/gh, not through here.
 
 use crate::git::types::{Divergence, GitSpecialState};
 use crate::shared::shell::{exec, ExecOptions};

@@ -22,7 +22,7 @@ version: 0.1.0
 | 7 | 브랜치·tree 가 어긋난 채로 진행 | 복구 절차를 먼저 돌리고(변경은 보존한다) 그다음 정지·보고 |
 | 8 | 머지 직후 가드 생략 | 매 머지 직후 넷을 확인 — 브랜치가 epic 이고 tree clean · HEAD 가 방금 통합한 후보의 tip · author 방침 판정을 거침(방침 없음이면 기본값 적용 사실을 기록) · in-flight worktree 가 epic 최신 HEAD 기준 |
 | 9 | epic 브랜치를 rebase, 또는 작업 브랜치를 그냥 merge | 통합은 rebase 후 fast-forward 전용 머지로 고정. 역방향 drift 흡수도 merge 로 하고 흡수 커밋 메시지에 merge 임을 명시 |
-| 10 | 메인이 충돌을 직접 편집, task 를 갈아치워 충돌 카운터를 리셋 | 전담 위임(해결 전략의 단일 출처는 `git` skill 의 충돌 해결 문서). 카운터는 파일 기준으로 누적 |
+| 10 | 메인이 충돌을 직접 편집, task 를 갈아치워 충돌 카운터를 리셋 | 전담 위임(해결 전략은 `git` skill 이 정한다). 카운터는 파일 기준으로 누적 |
 | 11 | 개별 worktree·중간 브랜치의 green 으로 완료 선언, red 를 메인이 직접 고쳐 green | epic 최종 HEAD 에서 integration_verify 계약 명령 green(tracked 변경이 없는 런은 해당 없음으로 기록) + 그 HEAD sha 명시. 회귀 원인은 수정 위임 |
 | 12 | 계획 밖 tracked 편집을 선-dispatch 후-체크 | 편집 dispatch 전에 토폴로지·격리를 late gate 로 먼저 세우고 전환 사유를 기록 |
 | 13 | 빈 자리를 silent fallback 으로 메움 | inert 구현 또는 미구현 예외로 드러내고, 미결 seam 을 결정 기록과 종료 보고에 깃발로 남긴다 |

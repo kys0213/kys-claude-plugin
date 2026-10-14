@@ -76,7 +76,7 @@ Glob: .claude/rules/*.md
 기존 규칙 파일이 있으면:
 - 각 파일의 `paths:` frontmatter 확인
 - 코드베이스 레이어 대비 누락된 규칙 파악
-- 각 규칙의 로딩 모드(`paths:` 유무)가 규칙 성격과 일치하는지 판정 — 기준은 workflow skill `references/rules-design.md` §4 분석 기준 (paths 없음 자체는 결함이 아님)
+- 각 규칙의 로딩 모드(`paths:` 유무)가 규칙 성격과 일치하는지 판정 — 기준은 workflow skill 의 로딩 모드 분석 기준 (paths 없음 자체는 결함이 아님)
 
 ### Step 4: 실제 파일 패턴 샘플링 및 범용화
 
@@ -98,7 +98,7 @@ Glob: **/*.module.ts
 
 #### 범용 패턴 변환
 
-샘플링된 파일 경로에서 레이어(역할)와 컨테이너(위치)를 분리하고, 컨테이너를 `**/`로 추상화합니다. 구체적인 판별 기준과 알고리즘은 **workflow skill `references/rules-design.md` §paths 범용화 원칙**을 적용합니다.
+샘플링된 파일 경로에서 레이어(역할)와 컨테이너(위치)를 분리하고, 컨테이너를 `**/`로 추상화합니다. 구체적인 판별 기준과 알고리즘은 **workflow skill 의 paths 범용화 원칙**을 적용합니다.
 
 ### Step 5: 컨벤션 검증
 
@@ -109,7 +109,7 @@ Glob: **/*.module.ts
 3. **불일치 처리**:
    - 의도하지 않은 파일이 매칭되면 → 패턴을 좁힘
    - 패턴이 올바르지만 파일이 컨벤션에 맞지 않으면 → 규칙 설명에 주석으로 예외 사항을 기록
-4. **체크리스트**: workflow skill `references/rules-design.md` §paths 범용화 원칙의 체크리스트 항목을 확인
+4. **체크리스트**: workflow skill 의 paths 범용화 원칙 체크리스트 항목을 확인
 
 ### Step 6: 프로젝트 맥락 자동감지
 

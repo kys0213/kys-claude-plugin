@@ -1,12 +1,3 @@
----
-related_paths:
-  - plugins/atelier/skills/grill/references/design-generation.md
-  - plugins/atelier/skills/orchestrator/SKILL.md
-  - plugins/atelier/skills/orchestrator/references/contracts.md
-  - plugins/atelier/skills/orchestrator/references/procedures.md
-  - plugins/atelier/templates/claude-md/CLAUDE.md
----
-
 # 보이스카웃 원칙
 
 > atelier로 한 작업은 손댄 파일을 프로젝트 규칙에 맞는 상태로 남겨요. 손대지 않은 파일은 바꾸지 않아요.
