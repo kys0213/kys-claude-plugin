@@ -1,0 +1,134 @@
+[
+  {
+    "query": "TODO.md 의 세 작업 병렬로 처리해줘",
+    "expect": true,
+    "files": {
+      "src/order.ts": "export interface Item { price: number; qty: number }\n\nexport function calcTotal(items: Item[], discount = 0): number {\n  const sum = items.reduce((acc, i) => acc + i.price * i.qty, 0)\n  return Math.round(sum * (1 - discount))\n}\n",
+      "src/payment.ts": "import { calcTotal, Item } from './order'\n\nconst MAX_RETRY = 3\n\nexport async function charge(items: Item[], pay: (amount: number) => Promise<void>) {\n  const amount = calcTotal(items, 0.1)\n  for (let i = 0; i < MAX_RETRY; i++) {\n    try { return await pay(amount) } catch { /* retry immediately */ }\n  }\n  throw new Error('payment failed')\n}\n",
+      "src/invoice.ts": "import { calcTotal, Item } from './order'\n\nexport function renderInvoice(items: Item[]): string {\n  return `Total: ${calcTotal(items)}`\n}\n",
+      "README.md": "# shop\n\nA tiny order service. Orders recieve a total from calcTotal.\n",
+      "TODO.md": "# TODO\n1. payment.ts: 재시도 사이에 지수 백오프(1s/2s/4s) 넣기\n2. invoice.ts: 합계를 통화 형식(1,234원)으로 출력\n3. order.ts: discount 가 0~1 범위를 벗어나면 에러 던지기\n"
+    }
+  },
+  {
+    "query": "TODO.md 에 있는 거 자율주행으로 끝까지 해줘",
+    "expect": true,
+    "files": {
+      "src/order.ts": "export interface Item { price: number; qty: number }\n\nexport function calcTotal(items: Item[], discount = 0): number {\n  const sum = items.reduce((acc, i) => acc + i.price * i.qty, 0)\n  return Math.round(sum * (1 - discount))\n}\n",
+      "src/payment.ts": "import { calcTotal, Item } from './order'\n\nconst MAX_RETRY = 3\n\nexport async function charge(items: Item[], pay: (amount: number) => Promise<void>) {\n  const amount = calcTotal(items, 0.1)\n  for (let i = 0; i < MAX_RETRY; i++) {\n    try { return await pay(amount) } catch { /* retry immediately */ }\n  }\n  throw new Error('payment failed')\n}\n",
+      "src/invoice.ts": "import { calcTotal, Item } from './order'\n\nexport function renderInvoice(items: Item[]): string {\n  return `Total: ${calcTotal(items)}`\n}\n",
+      "README.md": "# shop\n\nA tiny order service. Orders recieve a total from calcTotal.\n",
+      "TODO.md": "# TODO\n1. payment.ts: 재시도 사이에 지수 백오프(1s/2s/4s) 넣기\n2. invoice.ts: 합계를 통화 형식(1,234원)으로 출력\n3. order.ts: discount 가 0~1 범위를 벗어나면 에러 던지기\n"
+    }
+  },
+  {
+    "query": "hands-off: finish everything in TODO.md without asking me",
+    "expect": true,
+    "files": {
+      "src/order.ts": "export interface Item { price: number; qty: number }\n\nexport function calcTotal(items: Item[], discount = 0): number {\n  const sum = items.reduce((acc, i) => acc + i.price * i.qty, 0)\n  return Math.round(sum * (1 - discount))\n}\n",
+      "src/payment.ts": "import { calcTotal, Item } from './order'\n\nconst MAX_RETRY = 3\n\nexport async function charge(items: Item[], pay: (amount: number) => Promise<void>) {\n  const amount = calcTotal(items, 0.1)\n  for (let i = 0; i < MAX_RETRY; i++) {\n    try { return await pay(amount) } catch { /* retry immediately */ }\n  }\n  throw new Error('payment failed')\n}\n",
+      "src/invoice.ts": "import { calcTotal, Item } from './order'\n\nexport function renderInvoice(items: Item[]): string {\n  return `Total: ${calcTotal(items)}`\n}\n",
+      "README.md": "# shop\n\nA tiny order service. Orders recieve a total from calcTotal.\n",
+      "TODO.md": "# TODO\n1. payment.ts: 재시도 사이에 지수 백오프(1s/2s/4s) 넣기\n2. invoice.ts: 합계를 통화 형식(1,234원)으로 출력\n3. order.ts: discount 가 0~1 범위를 벗어나면 에러 던지기\n"
+    }
+  },
+  {
+    "query": "split TODO.md into tasks and run them with parallel sub-agents",
+    "expect": true,
+    "files": {
+      "src/order.ts": "export interface Item { price: number; qty: number }\n\nexport function calcTotal(items: Item[], discount = 0): number {\n  const sum = items.reduce((acc, i) => acc + i.price * i.qty, 0)\n  return Math.round(sum * (1 - discount))\n}\n",
+      "src/payment.ts": "import { calcTotal, Item } from './order'\n\nconst MAX_RETRY = 3\n\nexport async function charge(items: Item[], pay: (amount: number) => Promise<void>) {\n  const amount = calcTotal(items, 0.1)\n  for (let i = 0; i < MAX_RETRY; i++) {\n    try { return await pay(amount) } catch { /* retry immediately */ }\n  }\n  throw new Error('payment failed')\n}\n",
+      "src/invoice.ts": "import { calcTotal, Item } from './order'\n\nexport function renderInvoice(items: Item[]): string {\n  return `Total: ${calcTotal(items)}`\n}\n",
+      "README.md": "# shop\n\nA tiny order service. Orders recieve a total from calcTotal.\n",
+      "TODO.md": "# TODO\n1. payment.ts: 재시도 사이에 지수 백오프(1s/2s/4s) 넣기\n2. invoice.ts: 합계를 통화 형식(1,234원)으로 출력\n3. order.ts: discount 가 0~1 범위를 벗어나면 에러 던지기\n"
+    }
+  },
+  {
+    "query": "payment.ts 의 재시도 로직을 바꾸면 영향 범위가 어디까지인지 조사해줘",
+    "expect": true,
+    "files": {
+      "src/order.ts": "export interface Item { price: number; qty: number }\n\nexport function calcTotal(items: Item[], discount = 0): number {\n  const sum = items.reduce((acc, i) => acc + i.price * i.qty, 0)\n  return Math.round(sum * (1 - discount))\n}\n",
+      "src/payment.ts": "import { calcTotal, Item } from './order'\n\nconst MAX_RETRY = 3\n\nexport async function charge(items: Item[], pay: (amount: number) => Promise<void>) {\n  const amount = calcTotal(items, 0.1)\n  for (let i = 0; i < MAX_RETRY; i++) {\n    try { return await pay(amount) } catch { /* retry immediately */ }\n  }\n  throw new Error('payment failed')\n}\n",
+      "src/invoice.ts": "import { calcTotal, Item } from './order'\n\nexport function renderInvoice(items: Item[]): string {\n  return `Total: ${calcTotal(items)}`\n}\n",
+      "README.md": "# shop\n\nA tiny order service. Orders recieve a total from calcTotal.\n",
+      "TODO.md": "# TODO\n1. payment.ts: 재시도 사이에 지수 백오프(1s/2s/4s) 넣기\n2. invoice.ts: 합계를 통화 형식(1,234원)으로 출력\n3. order.ts: discount 가 0~1 범위를 벗어나면 에러 던지기\n"
+    }
+  },
+  {
+    "query": "investigate why invoice totals differ from what payment charges and find the root cause",
+    "expect": true,
+    "files": {
+      "src/order.ts": "export interface Item { price: number; qty: number }\n\nexport function calcTotal(items: Item[], discount = 0): number {\n  const sum = items.reduce((acc, i) => acc + i.price * i.qty, 0)\n  return Math.round(sum * (1 - discount))\n}\n",
+      "src/payment.ts": "import { calcTotal, Item } from './order'\n\nconst MAX_RETRY = 3\n\nexport async function charge(items: Item[], pay: (amount: number) => Promise<void>) {\n  const amount = calcTotal(items, 0.1)\n  for (let i = 0; i < MAX_RETRY; i++) {\n    try { return await pay(amount) } catch { /* retry immediately */ }\n  }\n  throw new Error('payment failed')\n}\n",
+      "src/invoice.ts": "import { calcTotal, Item } from './order'\n\nexport function renderInvoice(items: Item[]): string {\n  return `Total: ${calcTotal(items)}`\n}\n",
+      "README.md": "# shop\n\nA tiny order service. Orders recieve a total from calcTotal.\n",
+      "TODO.md": "# TODO\n1. payment.ts: 재시도 사이에 지수 백오프(1s/2s/4s) 넣기\n2. invoice.ts: 합계를 통화 형식(1,234원)으로 출력\n3. order.ts: discount 가 0~1 범위를 벗어나면 에러 던지기\n"
+    }
+  },
+  {
+    "query": "이 코드베이스 구조 파악해서 아키텍처 리포트 문서로 정리해줘",
+    "expect": true,
+    "files": {
+      "src/order.ts": "export interface Item { price: number; qty: number }\n\nexport function calcTotal(items: Item[], discount = 0): number {\n  const sum = items.reduce((acc, i) => acc + i.price * i.qty, 0)\n  return Math.round(sum * (1 - discount))\n}\n",
+      "src/payment.ts": "import { calcTotal, Item } from './order'\n\nconst MAX_RETRY = 3\n\nexport async function charge(items: Item[], pay: (amount: number) => Promise<void>) {\n  const amount = calcTotal(items, 0.1)\n  for (let i = 0; i < MAX_RETRY; i++) {\n    try { return await pay(amount) } catch { /* retry immediately */ }\n  }\n  throw new Error('payment failed')\n}\n",
+      "src/invoice.ts": "import { calcTotal, Item } from './order'\n\nexport function renderInvoice(items: Item[]): string {\n  return `Total: ${calcTotal(items)}`\n}\n",
+      "README.md": "# shop\n\nA tiny order service. Orders recieve a total from calcTotal.\n",
+      "TODO.md": "# TODO\n1. payment.ts: 재시도 사이에 지수 백오프(1s/2s/4s) 넣기\n2. invoice.ts: 합계를 통화 형식(1,234원)으로 출력\n3. order.ts: discount 가 0~1 범위를 벗어나면 에러 던지기\n"
+    }
+  },
+  {
+    "query": "결제 재시도 방식 두세 가지 방안 비교해서 정리해줘",
+    "expect": true,
+    "files": {
+      "src/order.ts": "export interface Item { price: number; qty: number }\n\nexport function calcTotal(items: Item[], discount = 0): number {\n  const sum = items.reduce((acc, i) => acc + i.price * i.qty, 0)\n  return Math.round(sum * (1 - discount))\n}\n",
+      "src/payment.ts": "import { calcTotal, Item } from './order'\n\nconst MAX_RETRY = 3\n\nexport async function charge(items: Item[], pay: (amount: number) => Promise<void>) {\n  const amount = calcTotal(items, 0.1)\n  for (let i = 0; i < MAX_RETRY; i++) {\n    try { return await pay(amount) } catch { /* retry immediately */ }\n  }\n  throw new Error('payment failed')\n}\n",
+      "src/invoice.ts": "import { calcTotal, Item } from './order'\n\nexport function renderInvoice(items: Item[]): string {\n  return `Total: ${calcTotal(items)}`\n}\n",
+      "README.md": "# shop\n\nA tiny order service. Orders recieve a total from calcTotal.\n",
+      "TODO.md": "# TODO\n1. payment.ts: 재시도 사이에 지수 백오프(1s/2s/4s) 넣기\n2. invoice.ts: 합계를 통화 형식(1,234원)으로 출력\n3. order.ts: discount 가 0~1 범위를 벗어나면 에러 던지기\n"
+    }
+  },
+  {
+    "query": "src/order.ts 의 calcTotal 함수 이름을 computeTotal 로 바꿔줘",
+    "expect": false,
+    "files": {
+      "src/order.ts": "export interface Item { price: number; qty: number }\n\nexport function calcTotal(items: Item[], discount = 0): number {\n  const sum = items.reduce((acc, i) => acc + i.price * i.qty, 0)\n  return Math.round(sum * (1 - discount))\n}\n",
+      "src/payment.ts": "import { calcTotal, Item } from './order'\n\nconst MAX_RETRY = 3\n\nexport async function charge(items: Item[], pay: (amount: number) => Promise<void>) {\n  const amount = calcTotal(items, 0.1)\n  for (let i = 0; i < MAX_RETRY; i++) {\n    try { return await pay(amount) } catch { /* retry immediately */ }\n  }\n  throw new Error('payment failed')\n}\n",
+      "src/invoice.ts": "import { calcTotal, Item } from './order'\n\nexport function renderInvoice(items: Item[]): string {\n  return `Total: ${calcTotal(items)}`\n}\n",
+      "README.md": "# shop\n\nA tiny order service. Orders recieve a total from calcTotal.\n",
+      "TODO.md": "# TODO\n1. payment.ts: 재시도 사이에 지수 백오프(1s/2s/4s) 넣기\n2. invoice.ts: 합계를 통화 형식(1,234원)으로 출력\n3. order.ts: discount 가 0~1 범위를 벗어나면 에러 던지기\n"
+    }
+  },
+  {
+    "query": "README.md 오타 하나 고쳐줘 (recieve -> receive)",
+    "expect": false,
+    "files": {
+      "src/order.ts": "export interface Item { price: number; qty: number }\n\nexport function calcTotal(items: Item[], discount = 0): number {\n  const sum = items.reduce((acc, i) => acc + i.price * i.qty, 0)\n  return Math.round(sum * (1 - discount))\n}\n",
+      "src/payment.ts": "import { calcTotal, Item } from './order'\n\nconst MAX_RETRY = 3\n\nexport async function charge(items: Item[], pay: (amount: number) => Promise<void>) {\n  const amount = calcTotal(items, 0.1)\n  for (let i = 0; i < MAX_RETRY; i++) {\n    try { return await pay(amount) } catch { /* retry immediately */ }\n  }\n  throw new Error('payment failed')\n}\n",
+      "src/invoice.ts": "import { calcTotal, Item } from './order'\n\nexport function renderInvoice(items: Item[]): string {\n  return `Total: ${calcTotal(items)}`\n}\n",
+      "README.md": "# shop\n\nA tiny order service. Orders recieve a total from calcTotal.\n",
+      "TODO.md": "# TODO\n1. payment.ts: 재시도 사이에 지수 백오프(1s/2s/4s) 넣기\n2. invoice.ts: 합계를 통화 형식(1,234원)으로 출력\n3. order.ts: discount 가 0~1 범위를 벗어나면 에러 던지기\n"
+    }
+  },
+  {
+    "query": "src/order.ts 가 뭐 하는 파일인지 한 줄로 알려줘",
+    "expect": false,
+    "files": {
+      "src/order.ts": "export interface Item { price: number; qty: number }\n\nexport function calcTotal(items: Item[], discount = 0): number {\n  const sum = items.reduce((acc, i) => acc + i.price * i.qty, 0)\n  return Math.round(sum * (1 - discount))\n}\n",
+      "src/payment.ts": "import { calcTotal, Item } from './order'\n\nconst MAX_RETRY = 3\n\nexport async function charge(items: Item[], pay: (amount: number) => Promise<void>) {\n  const amount = calcTotal(items, 0.1)\n  for (let i = 0; i < MAX_RETRY; i++) {\n    try { return await pay(amount) } catch { /* retry immediately */ }\n  }\n  throw new Error('payment failed')\n}\n",
+      "src/invoice.ts": "import { calcTotal, Item } from './order'\n\nexport function renderInvoice(items: Item[]): string {\n  return `Total: ${calcTotal(items)}`\n}\n",
+      "README.md": "# shop\n\nA tiny order service. Orders recieve a total from calcTotal.\n",
+      "TODO.md": "# TODO\n1. payment.ts: 재시도 사이에 지수 백오프(1s/2s/4s) 넣기\n2. invoice.ts: 합계를 통화 형식(1,234원)으로 출력\n3. order.ts: discount 가 0~1 범위를 벗어나면 에러 던지기\n"
+    }
+  },
+  {
+    "query": "what does git rebase --onto do?",
+    "expect": false,
+    "files": {
+      "src/order.ts": "export interface Item { price: number; qty: number }\n\nexport function calcTotal(items: Item[], discount = 0): number {\n  const sum = items.reduce((acc, i) => acc + i.price * i.qty, 0)\n  return Math.round(sum * (1 - discount))\n}\n",
+      "src/payment.ts": "import { calcTotal, Item } from './order'\n\nconst MAX_RETRY = 3\n\nexport async function charge(items: Item[], pay: (amount: number) => Promise<void>) {\n  const amount = calcTotal(items, 0.1)\n  for (let i = 0; i < MAX_RETRY; i++) {\n    try { return await pay(amount) } catch { /* retry immediately */ }\n  }\n  throw new Error('payment failed')\n}\n",
+      "src/invoice.ts": "import { calcTotal, Item } from './order'\n\nexport function renderInvoice(items: Item[]): string {\n  return `Total: ${calcTotal(items)}`\n}\n",
+      "README.md": "# shop\n\nA tiny order service. Orders recieve a total from calcTotal.\n",
+      "TODO.md": "# TODO\n1. payment.ts: 재시도 사이에 지수 백오프(1s/2s/4s) 넣기\n2. invoice.ts: 합계를 통화 형식(1,234원)으로 출력\n3. order.ts: discount 가 0~1 범위를 벗어나면 에러 던지기\n"
+    }
+  }
+]
