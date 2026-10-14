@@ -304,8 +304,7 @@ fn block_reason_names_the_branch_pr_and_counts_and_points_at_the_next_step() {
     assert!(reason.contains("#11"), "{reason}");
     assert!(reason.contains("로컬 전용 커밋: 2개"), "{reason}");
     assert!(reason.contains("git push"), "{reason}");
-    // The delegation pointer is the only policy the reason carries.
-    assert!(reason.contains("push 권한 거부 시 사용자 위임"), "{reason}");
+    assert!(reason.contains("사용자에게 위임"), "{reason}");
     // A "0개" remote-only line would read as drift that is not there, and
     // nothing is behind, so nothing suggests a rebase.
     assert!(!reason.contains("원격 전용"), "{reason}");
@@ -313,16 +312,14 @@ fn block_reason_names_the_branch_pr_and_counts_and_points_at_the_next_step() {
 }
 
 #[test]
-fn block_reason_defers_the_rebase_judgement_to_the_git_skill_when_behind() {
+fn block_reason_leaves_the_update_judgement_to_the_agent_when_behind() {
     let reason = block_reason(Scenario {
         divergence: Some(div(4, 2)),
         ..Default::default()
     });
 
     assert!(reason.contains("원격 전용 커밋: 4개"), "{reason}");
-    assert!(reason.contains("열린 PR 최신화 원칙"), "{reason}");
-    // The policy body itself lives in the skill and is never restated here —
-    // two copies of a rule drift apart.
+    assert!(reason.contains("반영할지 판단"), "{reason}");
     assert!(!reason.contains("--force-with-lease"), "{reason}");
 }
 

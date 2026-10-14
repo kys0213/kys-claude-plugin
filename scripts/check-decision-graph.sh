@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-decision-graph.sh — orchestrator 축소판 스킬 문서의 상시 검사 8종
+# check-decision-graph.sh — orchestrator 축소판 스킬 문서의 상시 검사 7종
 #
 # 규약: .claude/rules/decision-graph.md
 #
@@ -98,23 +98,7 @@ no-progress'
 # 멀리서 나오는 숫자는 들어오지 않는다.
 BUDGET_WINDOW_TOKENS=3
 
-# 외부 계약 표면. 사라지면 CI 는 통과하나
-# 외부 스킬의 `§절 이름` 참조가 조용히 죽는다.
-#
-# `spec 확정 게이트` 만 heading 이 아니라 SKILL.md `## 정지 조건` 표의
-# 조건 셀이다 — 외부 스킬이 그 행을 이름으로 지목한다.
-EXTERNAL_ROW_TABLE='정지 조건'
-EXTERNAL_ROW_COLUMN='조건'
-EXTERNAL_ROW='spec 확정 게이트'
-# 나머지 셋은 `## ` heading 으로 세 파일 합쳐 정확히 1곳.
-EXTERNAL_SECTIONS='대화 스킬의 자율 어댑테이션
-설계 승인 마커
-머지 대상: epic 브랜치'
-EXTERNAL_FILES='SKILL.md
-references/contracts.md
-references/procedures.md'
-
-TOTAL_CHECKS=8
+TOTAL_CHECKS=7
 
 # ---------------------------------------------------------------------------
 # 인자
@@ -467,53 +451,6 @@ check_9_budget_leak() {
 }
 
 # ---------------------------------------------------------------------------
-# (11) 외부 계약 표면 실존
-#      절 이름 3 — `## ` heading 으로 세 파일 합쳐 정확히 1곳
-#      행 이름 1 — SKILL.md `## 정지 조건` 표의 조건 셀로 정확히 1회 (heading 아님)
-#      파일 3   — 스킬 디렉토리 안에 실존
-# ---------------------------------------------------------------------------
-check_11_external_surface() {
-  begin_check
-  : > "$TMPDIR_CDG/out11"
-
-  printf '%s\n' "$EXTERNAL_SECTIONS" | while IFS= read -r sec; do
-    [ -n "$sec" ] || continue
-    cnt=$(awk -F'\t' -v s="$sec" '$1 == "HEAD" && $4 == 2 && $5 == s { n++ } END { print n + 0 }' "$SCAN")
-    if [ "$cnt" -ne 1 ]; then
-      printf '%s\t0\t외부가 지목하는 절 이름 `§%s` 이 `## ` heading 으로 %s곳 — 정확히 1곳이어야 한다\n' \
-        "$ROOT" "$sec" "$cnt" >> "$TMPDIR_CDG/out11"
-    fi
-  done
-
-  # `spec 확정 게이트` — 정지 조건 표의 조건 셀로 정확히 1회, heading 으로는 0회.
-  rowcnt=$(table_column "$SKILL_FILE" "$EXTERNAL_ROW_TABLE" "$EXTERNAL_ROW_COLUMN" \
-    | awk -F'\t' -v s="$EXTERNAL_ROW" '$2 == s { n++ } END { print n + 0 }')
-  if [ "$rowcnt" -ne 1 ]; then
-    printf '%s\t0\t외부가 지목하는 행 이름 `%s` 이 SKILL.md `## %s` 표의 %s 셀로 %s회 — 정확히 1회여야 한다\n' \
-      "$SKILL_FILE" "$EXTERNAL_ROW" "$EXTERNAL_ROW_TABLE" "$EXTERNAL_ROW_COLUMN" "$rowcnt" >> "$TMPDIR_CDG/out11"
-  fi
-  headcnt=$(awk -F'\t' -v s="$EXTERNAL_ROW" '$1 == "HEAD" && $5 == s { n++ } END { print n + 0 }' "$SCAN")
-  if [ "$headcnt" -ne 0 ]; then
-    printf '%s\t0\t`%s` 이 heading 으로도 %s곳에 있다 — 정지 조건 표의 행으로만 둔다\n' \
-      "$ROOT" "$EXTERNAL_ROW" "$headcnt" >> "$TMPDIR_CDG/out11"
-  fi
-
-  printf '%s\n' "$EXTERNAL_FILES" | while IFS= read -r fn; do
-    [ -n "$fn" ] || continue
-    if [ ! -f "$ROOT/$fn" ]; then
-      printf '%s\t0\t외부가 canonical 로 지목하는 파일 `%s` 이 없다\n' "$ROOT" "$fn" >> "$TMPDIR_CDG/out11"
-    fi
-  done
-
-  while IFS="$(printf '\t')" read -r f l msg; do
-    [ -n "${f:-}" ] || continue
-    fail 11 "외부 계약 표면 실존" "$f:$l" "$msg"
-  done < "$TMPDIR_CDG/out11"
-  CUR_FAILS=$(awk 'END { print NR }' "$TMPDIR_CDG/out11")
-  end_check 11 "외부 계약 표면 실존"
-}
-
-# ---------------------------------------------------------------------------
 # (12) 금지→대신 행 형식 — 각 행이 "금지" 와 "대신" 을 모두 갖는가
 # ---------------------------------------------------------------------------
 check_12_invariant_rows() {
@@ -559,7 +496,6 @@ check_5_limits
 check_6_forbidden_headings
 check_7_no_mermaid
 check_9_budget_leak
-check_11_external_surface
 check_12_invariant_rows
 check_13_stop_rows
 

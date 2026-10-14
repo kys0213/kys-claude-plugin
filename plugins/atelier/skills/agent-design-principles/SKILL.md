@@ -77,7 +77,7 @@ Service 계층이 여러 Repository와 Domain 객체를 조율하듯이, Sub-age
 
 #### model 선택 기준
 
-특정 모델명을 작업 유형에 고정 매핑하지 않는다. 대신 **작업의 난이도·리스크·되돌리기 비용**에 역량을 맞추고, dispatch 시점마다 재평가한다 — 되돌리기 쉬운 단순 작업엔 가벼운 모델을, 판단 오류의 대가가 큰 작업(아키텍처 설계, 비가역 변경)엔 강한 모델을 배정한다. 추론 깊이(effort)는 모델과 독립된 축으로 함께 정한다. 구체적인 model · effort 배정 기준과 재평가 절차는 `orchestrator` `SKILL.md §기본값 표` 의 표 1(집행 tier)이 canonical 이다.
+특정 모델명을 작업 유형에 고정 매핑하지 않는다. 대신 **작업의 난이도·리스크·되돌리기 비용**에 역량을 맞추고, dispatch 시점마다 재평가한다 — 되돌리기 쉬운 단순 작업엔 가벼운 모델을, 판단 오류의 대가가 큰 작업(아키텍처 설계, 비가역 변경)엔 강한 모델을 배정한다. 추론 깊이(effort)는 모델과 독립된 축으로 함께 정한다. 구체적인 model · effort 배정 기준과 재평가 절차는 `orchestrator` skill 이 정한다.
 
 #### tools 최소 권한 원칙
 
@@ -139,7 +139,7 @@ Claude는 시작 시 **모든 Skill의 메타데이터**(name/description)를 �
 
 - **Command** (`commands/`): User 만 발동. 모델이 멋대로 실행하면 곤란한 것(비용·비가역·명시적 셋업). 예: setup.
 - **user-invocable Skill** (`skills/`, `user-invocable: true`): User + 모델 맥락 자동 발동. 도메인이 맞으면 모델이 알아서 꺼내써야 하는 것. 예: git, grill, spec-write, communicate, workflow, orchestrator.
-- **Protocol Skill** (`skills/`, `user-invocable: false`): 단독 호출은 무의미하고 특정 커맨드/상위 skill 이 내부 디스패치하는 절차 본문. 예: orchestrator 의 `references/` 프로토콜 문서.
+- **Protocol Skill** (`skills/`, `user-invocable: false`): 단독 호출은 무의미하고 특정 커맨드/상위 skill 이 내부 디스패치하는 절차 본문.
 - **Reference Skill** (`skills/`, `user-invocable: false`): 단독으로 읽어도 의미 있는 durable 전문성·지식 본문. 커맨드가 디스패치하지 않고, 모델이나 다른 컴포넌트(agent 의 `skills:` 선언, rule 포인터)가 맥락에서 on-demand 로 로드한다. 예: 이 `agent-design-principles` skill 자체. (항상-적용 컨벤션은 §3.5 에 따라 rule 로 내려가므로, 여기 남는 건 가끔 로드하는 전문성뿐이다.)
 
 ---

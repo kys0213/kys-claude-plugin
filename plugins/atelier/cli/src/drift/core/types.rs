@@ -2,9 +2,8 @@
 //! check and sync, the check report whose exit code *is* the CLI contract, and
 //! the sync report that renders the `synced:` line.
 //!
-//! The constants live here as the single source of truth (the role
-//! `drift-common.sh` played for the shell scripts): if check and sync each
-//! carried their own copy, editing one side would silently desynchronize
+//! The constants live here as the single source of truth: if check and sync
+//! each carried their own copy, editing one side would silently desynchronize
 //! judgement from writing.
 
 /// Block markers in the user CLAUDE.md. Matched on **whole-line equality**
@@ -27,13 +26,18 @@ pub const RULES_COPY_REL: &str = ".claude/rules/agent-design-principles.md";
 /// stray file in the source dir never ships. Distributing a new policy file =
 /// add it here and under `rules/policies/`.
 pub const TEMPLATE_POLICY_RULES_DIR_REL: &str = "rules/policies";
-pub const POLICY_RULES: &[&str] = &["spec-writing.md", "rules-writing.md", "plan-writing.md"];
+pub const POLICY_RULES: &[&str] = &[
+    "spec-writing.md",
+    "rules-writing.md",
+    "plan-writing.md",
+    "doc-dependency.md",
+];
 
 /// Project-relative directory the project-scope policy copies live in.
 pub const PROJECT_RULES_DIR_REL: &str = ".claude/rules/atelier";
 
-/// Check names as they appear on stdout — `commands/update.md` branches on
-/// these exact strings. Policy findings render as `user-rules/<file>` /
+/// Check names as they appear on stdout — callers branch on these exact
+/// strings. Policy findings render as `user-rules/<file>` /
 /// `project-rules/<file>` per installed scope (assembled in
 /// `commands/check.rs`).
 pub const CLAUDE_MD_CHECK: &str = "claude-md-coding-style-block";
@@ -150,7 +154,7 @@ pub enum ArtifactStatus {
 }
 
 impl ArtifactStatus {
-    /// The stdout token — the strings `commands/update.md` branches on.
+    /// The stdout token callers branch on.
     pub fn as_str(&self) -> &'static str {
         match self {
             ArtifactStatus::Ok => "OK",
@@ -205,8 +209,7 @@ impl CheckReport {
         }
     }
 
-    /// One line per finding plus the summary line, exactly the format the
-    /// `/atelier:update` spec consumes.
+    /// One line per finding plus the summary line — the stdout contract.
     pub fn render(&self) -> String {
         let mut out = String::new();
         for finding in &self.findings {

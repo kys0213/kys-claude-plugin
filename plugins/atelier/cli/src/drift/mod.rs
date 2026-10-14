@@ -1,28 +1,25 @@
-//! Drift subsystem — Rust port of the `check-drift.sh` / `sync-artifact.sh`
-//! scripts: judges whether the artifacts `/atelier:setup` copied (the
-//! CLAUDE.md coding-style block, the project rules copy) still match the
-//! plugin sources, and deterministically re-syncs one of them on request.
+//! Drift subsystem: judges whether the installed artifacts (the CLAUDE.md
+//! coding-style block, the rules copies) still match the plugin sources, and
+//! deterministically re-syncs one of them on request.
 //!
 //! ```text
 //! atelier drift check --plugin-root <dir> [--claude-md <path>] [--project-dir <dir>]
 //! atelier drift sync  --target <claude-md|rules> --plugin-root <dir> [...]
 //! ```
 //!
-//! Exit-code contract (preserved from the shell scripts):
+//! Exit-code contract:
 //! - `check`: 0 no drift (OK / NOT_INSTALLED only), 1 drift found, 2 usage or
 //!   plugin-source error. The 0/1 split lives on `CheckReport::exit_code`.
 //! - `sync`: 0 synced, 2 usage error / target not installed or corrupted /
 //!   plugin source missing.
 //!
-//! Deliberate decision: exit 2 is reused from the shell contract even though
-//! `git guard` reserves 2 for its hook-deny signal — drift commands are never
-//! registered as Claude Code hooks (they are invoked from the `/atelier:update`
-//! and `/atelier:setup` command specs), so 2 cannot be misread as "block" here
-//! (see `git/mod.rs` on why the guard installer avoids it).
+//! Exit 2 is shared with `git guard`'s hook-deny signal. Drift commands are
+//! never registered as Claude Code hooks, so 2 cannot be misread as "block"
+//! here.
 //!
-//! Output is human text, not JSON: the consumer spec (`commands/update.md`)
-//! branches on the `<check>=<STATUS>` line format and relays the `synced:`
-//! line (backup path included) verbatim to the user.
+//! Output is human text, not JSON: callers branch on the `<check>=<STATUS>`
+//! line format and relay the `synced:` line (backup path included) verbatim
+//! to the user.
 
 pub mod commands;
 pub mod core;
@@ -111,8 +108,7 @@ impl PathArgs {
     }
 }
 
-/// The error edge: every failure is `Error: <message>` on stderr with exit 2,
-/// the shell scripts' usage/refusal contract.
+/// The error edge: every failure is `Error: <message>` on stderr with exit 2.
 fn fail(message: &str) -> i32 {
     eprintln!("Error: {message}");
     2

@@ -37,7 +37,7 @@ setup 이 스냅샷으로 복사한 산출물이 현재 플러그인 원본과 �
 |---|---|
 | `~/.claude/CLAUDE.md` 의 `[coding-style:begin]~[end]` 블록 | `templates/claude-md/CLAUDE.md` |
 | `<project>/.claude/rules/agent-design-principles.md` | `rules/agent-design-principles.md` |
-| `~/.claude/rules/atelier/*.md` (user scope 정책 룰) | `rules/policies/*.md` (CLI 의 `POLICY_RULES` 매니페스트) |
+| `~/.claude/rules/atelier/*.md` (user scope 정책 룰) | `rules/policies/*.md` (목록은 atelier CLI 가 소유) |
 | `<project>/.claude/rules/atelier/*.md` (project scope 정책 룰) | 위와 동일 — 스코프별 복사본을 각각 판정 |
 
 - 출력은 `<check>=<STATUS>` 라인(STATUS: `OK` | `DRIFTED` | `NOT_INSTALLED`)과 요약 한 줄입니다
@@ -106,10 +106,12 @@ rules/agent-design-principles.md=OK
 user-rules/spec-writing.md=OK
 user-rules/rules-writing.md=OK
 user-rules/plan-writing.md=OK
+user-rules/doc-dependency.md=OK
 project-rules/spec-writing.md=NOT_INSTALLED (./.claude/rules/atelier/spec-writing.md)
 project-rules/rules-writing.md=NOT_INSTALLED (./.claude/rules/atelier/rules-writing.md)
 project-rules/plan-writing.md=NOT_INSTALLED (./.claude/rules/atelier/plan-writing.md)
-→ 8 checked, 0 drifted, 3 missing
+project-rules/doc-dependency.md=NOT_INSTALLED (./.claude/rules/atelier/doc-dependency.md)
+→ 10 checked, 0 drifted, 4 missing
 ```
 
 **CLAUDE.md 블록 드리프트 → 자동 갱신:**
@@ -120,10 +122,12 @@ rules/agent-design-principles.md=NOT_INSTALLED (./.claude/rules/agent-design-pri
 user-rules/spec-writing.md=OK
 user-rules/rules-writing.md=OK
 user-rules/plan-writing.md=OK
+user-rules/doc-dependency.md=OK
 project-rules/spec-writing.md=NOT_INSTALLED (./.claude/rules/atelier/spec-writing.md)
 project-rules/rules-writing.md=NOT_INSTALLED (./.claude/rules/atelier/rules-writing.md)
 project-rules/plan-writing.md=NOT_INSTALLED (./.claude/rules/atelier/plan-writing.md)
-→ 8 checked, 1 drifted, 4 missing
+project-rules/doc-dependency.md=NOT_INSTALLED (./.claude/rules/atelier/doc-dependency.md)
+→ 10 checked, 1 drifted, 5 missing
 ```
 
 ```

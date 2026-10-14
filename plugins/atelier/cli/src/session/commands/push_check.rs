@@ -99,9 +99,9 @@ pub fn run(deps: &PushCheckDeps, stop_hook_active: bool) -> PushCheckDecision {
     }
 }
 
-/// Renders the block reason Claude is shown: the situation, then a pointer to
-/// the policy that decides what to do about it. The policy itself is stated
-/// once, in the git skill, and is never restated here.
+/// Renders the block reason Claude is shown: the situation and the next step.
+/// How to bring the branch up to date stays the agent's judgement — the reason
+/// never prescribes a rebase or force-push.
 fn render_reason(branch: &str, pr_number: i64, ahead: u32, behind: u32) -> String {
     let behind_line = if behind > 0 {
         format!("  원격 전용 커밋: {behind}개\n")
@@ -109,7 +109,7 @@ fn render_reason(branch: &str, pr_number: i64, ahead: u32, behind: u32) -> Strin
         String::new()
     };
     let next_step = if behind > 0 {
-        "원격이 앞서 있습니다 — rebase 여부는 git skill §열린 PR 최신화 원칙 에 따라 판단한 뒤 push 하세요."
+        "원격이 앞서 있습니다 — 원격 커밋을 반영할지 판단한 뒤 push 하세요."
     } else {
         "`git push` 로 원격을 최신화한 뒤 종료하세요."
     };
@@ -120,7 +120,7 @@ fn render_reason(branch: &str, pr_number: i64, ahead: u32, behind: u32) -> Strin
          \x20 로컬 전용 커밋: {ahead}개\n\
          {behind_line}\n\
          {next_step}\n\n\
-         push 가 거부되면 재시도하지 말고 git skill §push 권한 거부 시 사용자 위임 을 따르세요."
+         push 가 거부되면 재시도하지 말고 push 명령을 사용자에게 위임하세요."
     )
 }
 

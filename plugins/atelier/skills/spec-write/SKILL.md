@@ -8,7 +8,7 @@ version: 1.0.0
 
 합의된 설계를 **스펙 문서 계층으로 적는** 스킬입니다. 설계를 *생각하고 도전하는 대화*는 `grill`에서 끝내고, 여기서는 그 결과를 정해진 구조와 깊이로 형식화합니다.
 
-이 skill 이 소유하는 것은 **무엇을 어떤 구조·깊이로 쓸 것인가의 기준**(DESIGN/concerns/flows 템플릿, 깊이 분리, `related_paths` 규약)입니다. 실제 파일 Write 는 `orchestrator` skill 이 위임하는 sub-agent 가 수행하며, 메인 에이전트는 Write 를 위임할 뿐 직접 실행하지 않습니다.
+이 skill 이 소유하는 것은 **무엇을 어떤 구조·깊이로 쓸 것인가의 기준**(DESIGN/concerns/flows 템플릿, 깊이 분리)입니다. 실제 파일 Write 는 `orchestrator` skill 이 위임하는 sub-agent 가 수행하며, 메인 에이전트는 Write 를 위임할 뿐 직접 실행하지 않습니다.
 
 ## 진입 라우팅 (의도 → 흐름)
 
@@ -23,11 +23,11 @@ version: 1.0.0
 
 ## 작성 절차·형식
 
-스펙 문서의 진입 전 맥락, 깊이 기준, 작성 원칙, 출력 구조(DESIGN/concerns/flows 템플릿), `related_paths` 규약은 `references/authoring.md` 에서 progressive disclosure 로 로드합니다.
+스펙 문서의 진입 전 맥락, 깊이 기준, 작성 원칙, 출력 구조(DESIGN/concerns/flows 템플릿)는 `references/authoring.md` 에서 progressive disclosure 로 로드합니다.
 
 | reference | 언제 로드 | 내용 |
 |---|---|---|
-| `references/authoring.md` | `write`/`write-detail` 수행 시 | 진입 전 맥락, 깊이 기준, 작성 원칙, 출력 구조(DESIGN/concerns/flows), related_paths |
+| `references/authoring.md` | `write`/`write-detail` 수행 시 | 진입 전 맥락, 깊이 기준, 작성 원칙, 출력 구조(DESIGN/concerns/flows) |
 
 ## 위임 흐름 (orchestrator 연계)
 
@@ -37,13 +37,13 @@ version: 1.0.0
 
 - ❌ 합의되지 않은 설계를 spec-write 단계에서 즉흥적으로 결정 → `grill` 로 돌아가 먼저 합의한다.
 - ❌ write-detail 에서 Big Picture 내용을 다시 풀어씀 → DESIGN.md 를 링크로 참조하고 상세만 적는다.
-- ❌ `related_paths` 를 추정으로 채움 → 확신 없으면 비워둔다. 틀린 경로는 없는 것보다 나쁘다.
+- ❌ 코드 경로·식별자·plan 을 spec 에 적음 → spec 은 정책만 적는다. 코드나 plan 이 바뀔 때마다 spec 을 따라 고치게 된다.
 - ❌ 승인 전에 파일을 먼저 저장 → 내용 제시 → 승인 → orchestrator 위임 Write 순서를 지킨다.
 - ❌ 다이어그램을 ASCII 로 작성 → mermaid 가 기본이고 ASCII 는 표현이 어색한 경우의 예외다 (형식 기준은 `references/authoring.md`).
 
 ## 공통 원칙
 
 - **합의 후 형식화** — 설계 결정은 `grill` 대화에서 합의한다. spec-write 는 합의된 내용을 구조화할 뿐, 새 설계 결정을 임의로 내리지 않는다.
-- 작성 원칙(승인 전 저장 금지·`related_paths`·깊이 분리)과 출력 구조는 `references/authoring.md` 가 canonical 이다.
+- 작성 원칙(승인 전 저장 금지·코드·plan 비참조·깊이 분리)과 출력 구조는 `references/authoring.md` 가 canonical 이다.
 - **작성 주체 분리** — spec-write 는 구조·문체 기준의 단일 출처이고, 승인된 내용의 실제 파일 Write 는 `orchestrator` 가 조율하는 sub-agent 가 수행한다.
 - **문서 계층 일관성** — DESIGN.md 의 상세 문서 표와 concerns/flows 의 관련 문서 표가 서로를 가리키는 양방향 링크를 유지한다.
