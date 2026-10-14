@@ -27,7 +27,12 @@ pub const RULES_COPY_REL: &str = ".claude/rules/agent-design-principles.md";
 /// stray file in the source dir never ships. Distributing a new policy file =
 /// add it here and under `rules/policies/`.
 pub const TEMPLATE_POLICY_RULES_DIR_REL: &str = "rules/policies";
-pub const POLICY_RULES: &[&str] = &["spec-writing.md", "rules-writing.md", "plan-writing.md"];
+pub const POLICY_RULES: &[&str] = &[
+    "spec-writing.md",
+    "rules-writing.md",
+    "plan-writing.md",
+    "doc-dependency.md",
+];
 
 /// Project-relative directory the project-scope policy copies live in.
 pub const PROJECT_RULES_DIR_REL: &str = ".claude/rules/atelier";
