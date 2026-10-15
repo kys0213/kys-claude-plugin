@@ -24,7 +24,8 @@ set -u
 #
 # `###` 이름(표 1~7, SKILL.md §기본값 표 소속)도 등재해 둔다 — 레벨만 바뀌어도 통과하도록.
 # 검사가 강제하는 대상은 `##` 뿐이다.
-STRUCT_HEADING_WHITELIST='불변식
+STRUCT_HEADING_WHITELIST='원칙
+불변식
 정지 조건
 표준 절차
 기본값 표
