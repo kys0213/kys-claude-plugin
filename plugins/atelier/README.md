@@ -102,32 +102,33 @@ SessionStart hook `hooks/ensure-agent-teams.sh` 가 `~/.claude/settings.json`(`C
 ## Function hooks (early access)
 
 `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude` 로 켠 세션에서만 `hooks/register.ts`(`hooks.json`
-의 `modules`)가 로드되어 orchestrator 규약 일부를 경고로 집행합니다 — 전부 **경고일 뿐 차단하지
-않습니다**:
+의 `modules`)가 로드되어 orchestrator 규약 일부를 집행합니다. model 미지정만 **차단**하고, 나머지는
+경고입니다:
 
-- Agent 도구로 sub-agent 를 띄울 때 `model` 을 지정하지 않아 **실제로 메인 model 을 상속한 경우**(fork
-  제외)에만 경고합니다. 에이전트 정의가 다른 모델을 고른 타입(예: frontmatter 에 `model` 을 지정한 에이전트)에는 경고하지 않으며,
-  정의가 우연히 메인과 같은 모델을 고르면 상속과 구분할 수 없어 경고가 나갑니다.
-- 메인 model 의 집행 위임 상한(Fable→Opus, Opus→Opus, Sonnet→Sonnet, Haiku→Haiku)을 넘으면
-  경고합니다. 요청 model 이 없으면 실제 실행 모델로 검사하므로, Fable 메인이 model 없이 띄워 Fable 이
-  상속된 경우도 잡힙니다. 자문 소집에도 이 경고가 붙지만 문구가 무시해도 됨을 안내합니다.
+- Agent 도구로 sub-agent 를 띄울 때 `model` 을 지정하지 않으면(fork 제외) **띄우기 전에 차단**하고,
+  model 과 effort 를 지정해 다시 호출하라는 사유를 돌려줍니다. 모델은 그 자리에서 고쳐 다시 호출합니다.
+  차단은 실행 전에만 할 수 있어 실제로 어떤 모델이 정해질지 모르는 시점에 판정합니다. 그래서 에이전트
+  정의가 모델을 정해 둔 타입(예: frontmatter 에 `model` 을 지정한 에이전트)도 `model` 없이 띄우면 차단됩니다.
+- 메인 model 의 집행 위임 상한(Fable→Opus, Opus→Opus, Sonnet→Sonnet, Haiku→Haiku)을 넘는 `model`
+  을 지정하면 경고합니다. 자문 소집은 상한을 정당하게 넘으므로 차단하지 않고, 경고 문구가 무시해도 됨을
+  안내합니다.
 - 메인 대화가 compaction 될 때 orchestrator 런 상태(epic 이름·log_dir·task 상태 등)를 요약에
   보존하라는 지시를 덧붙입니다.
 
 판정은 전부 CLI(`atelier orchestrator spawn-check` / `atelier orchestrator compact-note`)가
 하고, 모듈은 이벤트 ↔ CLI JSON 어댑터입니다(`.claude/rules/tool-layer-boundary.md`). CLI 바이너리가
-없거나 호출이 실패하면 모듈은 아무 것도 덧붙이지 않습니다(fail-open).
+없거나 호출이 실패하면 모듈은 차단도 경고도 하지 않고 그대로 통과시킵니다(fail-open).
 
 - **플래그가 없으면** 모듈은 로드되지 않고 기존 classic hook(`hooks.json` 의 `hooks`)만 그대로
   동작합니다 — 이 기능이 없어도 세션은 정상입니다.
 - early access 라 docs·changelog 에 없고, 확인한 동작 버전은 `2.1.283`(플래그 on/off)·`2.1.274`
   (classic 공존)입니다. 표면이 버전마다 바뀔 수 있어 CI 는 CLI 버전을 고정해 검증합니다.
-- 경고는 호출 **후**에 붙으므로 첫 호출은 막지 못합니다. 이번 호출을 재실행할 필요는 없고, 다음
+- 상한 경고는 호출 **후**에 붙으므로 그 호출은 막지 못합니다. 이번 호출을 재실행할 필요는 없고, 다음
   dispatch 부터 바로잡으면 됩니다.
 - 한계: tier 를 판별할 수 없는 모델 id(Bedrock 추론 프로필 ARN, 게이트웨이 id 등)에서는 상한 검사가
   꺼집니다.
-- 한계: `atelier` CLI 가 이 서브커맨드 이전 버전이면 경고가 조용히 붙지 않으므로 `/atelier:update` 로
-  바이너리를 갱신해야 합니다.
+- 한계: `atelier` CLI 가 이 서브커맨드 이전 버전이면 차단·경고가 조용히 빠지므로 `/atelier:update` 로
+  바이너리를 갱신해야 합니다. 차단 이전 버전의 CLI 는 model 미지정을 경고로만 돌려줍니다.
 - 개발자: 에디터 타입이 필요하면 plugin 디렉토리에서 `/plugin-types` 를 실행합니다(생성물은 커밋하지
   않습니다).
 

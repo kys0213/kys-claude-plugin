@@ -35,7 +35,7 @@ describe('register', () => {
     expect(calls[0]?.argv).toEqual(['atelier', 'orchestrator', 'spawn-check'])
     expect(JSON.parse(calls[0]?.stdin ?? '{}')).toEqual({
       model: null,
-      resolved_model: 'claude-sonnet-4-5-20250929',
+      resolved_model: null,
       parent_model: Fixtures.PARENT_MODEL,
       fork: false,
       subagent_type: 'general-purpose',
@@ -80,14 +80,75 @@ describe('register', () => {
     })
   }
 
-  test('a denied Agent call stays denied, with no context and no CLI call', async ($, on) => {
-    let called = false
+  test('a spawn-check deny blocks the spawn with its reason', async ($, on) => {
+    on('process.run', () => ({
+      value: {
+        exitCode: 0,
+        stdout: JSON.stringify({ deny: 'pick a model', warnings: [] }),
+        stderr: '',
+      },
+    }))
+    on('agent.spawn', () => ({ model: 'claude-sonnet-4-5-20250929' }))
 
-    on('process.run', () => {
-      called = true
+    const result = await Fixtures.spawnAgent($, {})
 
-      return { value: { exitCode: 0, stdout: JSON.stringify({ warnings: [] }), stderr: '' } }
+    expect(result).toEqual({ deny: 'pick a model' })
+  })
+
+  test('a spawn-check deny leaves no warnings for the Agent call', async ($, on) => {
+    on('process.run', () => ({
+      value: {
+        exitCode: 0,
+        stdout: JSON.stringify({ deny: 'pick a model', warnings: ['w'] }),
+        stderr: '',
+      },
+    }))
+
+    const result = await Fixtures.dispatchAgentCall($, on, {
+      spawnResult: { model: 'claude-sonnet-4-5-20250929' },
     })
+
+    expect(result.context).toBeUndefined()
+  })
+
+  test('a spawn denied downstream stays denied and keeps no warnings', async ($, on) => {
+    on('process.run', () => ({
+      value: { exitCode: 0, stdout: JSON.stringify({ deny: null, warnings: ['w'] }), stderr: '' },
+    }))
+    on('agent.spawn', () => ({ deny: 'not allowed' }))
+    on('tool.call', { tool: 'Agent' }, () => ({ result: 'hi' }))
+
+    const spawned = await Fixtures.spawnAgent($, { model: 'opus' })
+    const result = await $.tool.call({
+      tool: 'Agent',
+      tool_use_id: Fixtures.TOOL_USE_ID,
+      subagent_type: 'general-purpose',
+      description: 'say hi',
+      prompt: 'say hi',
+    } as never)
+
+    expect(spawned).toEqual({ deny: 'not allowed' })
+    expect(result.context).toBeUndefined()
+  })
+
+  for (const [label, stdout] of [
+    ['a non-string deny', JSON.stringify({ deny: 123, warnings: [] })],
+    ['stdout that is not JSON', 'not json'],
+  ] as const) {
+    test(`${label} from spawn-check lets the spawn through`, async ($, on) => {
+      on('process.run', () => ({ value: { exitCode: 0, stdout, stderr: '' } }))
+      on('agent.spawn', () => ({ model: 'claude-sonnet-4-5-20250929' }))
+
+      const result = await Fixtures.spawnAgent($, {})
+
+      expect(result).toEqual({ model: 'claude-sonnet-4-5-20250929' })
+    })
+  }
+
+  test('a denied Agent call stays denied, with no context', async ($, on) => {
+    on('process.run', () => ({
+      value: { exitCode: 0, stdout: JSON.stringify({ warnings: ['w'] }), stderr: '' },
+    }))
 
     const result = await Fixtures.dispatchAgentCall($, on, {
       spawnResult: { model: 'claude-sonnet-4-5-20250929' },
@@ -95,7 +156,6 @@ describe('register', () => {
     })
 
     expect(result).toEqual({ deny: 'not allowed' })
-    expect(called).toBe(false)
   })
 
   test('an Agent call with no matching agent.spawn never calls the CLI', async ($, on) => {
@@ -120,16 +180,10 @@ describe('register', () => {
     expect(called).toBe(false)
   })
 
-  test('an Agent call that resolves to isError gets no context and no CLI call', async ($, on) => {
-    let called = false
-
-    on('process.run', () => {
-      called = true
-
-      return {
-        value: { exitCode: 0, stdout: JSON.stringify({ warnings: ['w'] }), stderr: '' },
-      }
-    })
+  test('an Agent call that resolves to isError gets no context', async ($, on) => {
+    on('process.run', () => ({
+      value: { exitCode: 0, stdout: JSON.stringify({ warnings: ['w'] }), stderr: '' },
+    }))
 
     const result = await Fixtures.dispatchAgentCall($, on, {
       spawnResult: { model: 'claude-sonnet-4-5-20250929' },
@@ -137,7 +191,6 @@ describe('register', () => {
     })
 
     expect(result.context).toBeUndefined()
-    expect(called).toBe(false)
   })
 
   test('a spawn that fires during the Agent call still gets spawn-check warnings', async ($, on) => {

@@ -1,10 +1,5 @@
 import type { EngineInterface, On } from 'claude-code'
 
-/**
- * The `agent.spawn` facts a dispatch needs for `spawn-check`, held from
- * `agent.spawn` until the matching `tool.call { tool: 'Agent' }` consumes
- * them, keyed by the shared `tool_use_id`.
- */
 type SpawnFact = {
   model: string | null
   resolved_model: string | null
@@ -12,6 +7,8 @@ type SpawnFact = {
   fork: boolean
   subagent_type: string
 }
+
+type SpawnVerdict = { deny: string | null; warnings: readonly string[] }
 
 async function askCli<T>(
   $: EngineInterface,
@@ -28,17 +25,26 @@ async function askCli<T>(
   }
 }
 
-function decodeWarnings(parsed: unknown): readonly string[] | undefined {
+/** An absent `deny` reads as allow, so an older CLI that emits only `warnings` still decodes. */
+function decodeVerdict(parsed: unknown): SpawnVerdict | undefined {
   if (typeof parsed !== 'object' || parsed === null) {
     return undefined
   }
 
-  const warnings = (parsed as Record<string, unknown>).warnings
+  const { deny, warnings } = parsed as Record<string, unknown>
 
-  return Array.isArray(warnings) && warnings.every(w => typeof w === 'string')
-    ? (warnings as readonly string[])
-    : undefined
+  if (deny !== undefined && deny !== null && typeof deny !== 'string') {
+    return undefined
+  }
+
+  if (!Array.isArray(warnings) || !warnings.every(w => typeof w === 'string')) {
+    return undefined
+  }
+
+  return { deny: deny ?? null, warnings: warnings as readonly string[] }
 }
+
+const ALLOW: SpawnVerdict = { deny: null, warnings: [] }
 
 function decodeInstructions(parsed: unknown): string | undefined {
   if (typeof parsed !== 'object' || parsed === null) {
@@ -51,19 +57,31 @@ function decodeInstructions(parsed: unknown): string | undefined {
 }
 
 export function register(on: On): void {
-  const facts = new Map<string, SpawnFact>()
+  /**
+   * Warnings from `agent.spawn`, held until the matching
+   * `tool.call { tool: 'Agent' }` attaches them, keyed by the shared `tool_use_id`.
+   */
+  const pending = new Map<string, readonly string[]>()
 
   on('agent.spawn', async ($, e, next) => {
+    /** The engine only honors a deny returned in place of `next`, so the resolved model is not known yet. */
+    const fact: SpawnFact = {
+      model: e.model ?? null,
+      resolved_model: null,
+      parent_model: e.parentModel,
+      fork: e.fork,
+      subagent_type: e.subagentType,
+    }
+    const verdict = await askCli($, 'spawn-check', decodeVerdict, ALLOW, JSON.stringify(fact))
+
+    if (verdict.deny !== null) {
+      return { deny: verdict.deny }
+    }
+
     const r = await next(e)
 
-    if (r.deny === undefined) {
-      facts.set(e.tool_use_id, {
-        model: e.model ?? null,
-        resolved_model: r.model ?? null,
-        parent_model: e.parentModel,
-        fork: e.fork,
-        subagent_type: e.subagentType,
-      })
+    if (r.deny === undefined && verdict.warnings.length > 0) {
+      pending.set(e.tool_use_id, verdict.warnings)
     }
 
     return r
@@ -71,7 +89,7 @@ export function register(on: On): void {
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
     let r: Awaited<ReturnType<typeof next>>
-    let fact: SpawnFact | undefined
+    let warnings: readonly string[] | undefined
 
     try {
       r = await next(e)
@@ -79,18 +97,12 @@ export function register(on: On): void {
       const key = e.tool_use_id
 
       if (key !== undefined) {
-        fact = facts.get(key)
-        facts.delete(key)
+        warnings = pending.get(key)
+        pending.delete(key)
       }
     }
 
-    if (fact === undefined || r.deny !== undefined || r.isError) {
-      return r
-    }
-
-    const warnings = await askCli($, 'spawn-check', decodeWarnings, [], JSON.stringify(fact))
-
-    if (warnings.length === 0) {
+    if (warnings === undefined || r.deny !== undefined || r.isError) {
       return r
     }
 

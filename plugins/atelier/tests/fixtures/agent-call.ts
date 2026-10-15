@@ -17,6 +17,21 @@ const TOOL_USE_ID = 'toolu_1'
 
 const PARENT_MODEL = 'claude-haiku-4-5-20251001'
 
+async function spawnAgent(
+  $: EngineInterface,
+  opts: { model?: string; fork?: boolean },
+): Promise<AgentSpawnResult> {
+  return $.agent.spawn({
+    tool_use_id: TOOL_USE_ID,
+    prompt: 'say hi',
+    description: 'say hi',
+    subagentType: 'general-purpose',
+    parentModel: PARENT_MODEL,
+    fork: opts.fork ?? false,
+    model: opts.model,
+  } as never)
+}
+
 async function dispatchAgentCall(
   $: EngineInterface,
   on: On,
@@ -30,15 +45,7 @@ async function dispatchAgentCall(
   on('agent.spawn', () => opts.spawnResult)
   on('tool.call', { tool: 'Agent' }, () => opts.callResult ?? { result: 'hi' })
 
-  await $.agent.spawn({
-    tool_use_id: TOOL_USE_ID,
-    prompt: 'say hi',
-    description: 'say hi',
-    subagentType: 'general-purpose',
-    parentModel: PARENT_MODEL,
-    fork: opts.fork ?? false,
-    model: opts.model,
-  } as never)
+  await spawnAgent($, opts)
 
   return $.tool.call({
     tool: 'Agent',
@@ -119,4 +126,10 @@ async function dispatchSpawningDuringCall(
   return outcome.value
 }
 
-export default { TOOL_USE_ID, PARENT_MODEL, dispatchAgentCall, dispatchSpawningDuringCall }
+export default {
+  TOOL_USE_ID,
+  PARENT_MODEL,
+  spawnAgent,
+  dispatchAgentCall,
+  dispatchSpawningDuringCall,
+}

@@ -1,4 +1,5 @@
-//! Deterministic `agent.spawn` dispatch-rule checks. Both rules only apply
+//! Deterministic `agent.spawn` dispatch-rule checks: an unspecified model is
+//! denied, a tier-cap overrun only warns. Both rules only apply
 //! to non-fork dispatches — a fork inherits the parent process wholesale and
 //! never picks a model at all, so neither "model unspecified" nor "tier cap
 //! exceeded" can be judged.
@@ -39,21 +40,34 @@ fn resolved(facts: &SpawnFacts) -> Option<&str> {
         .filter(|s| !s.is_empty())
 }
 
+/// A denied dispatch never runs, so it carries no post-run warning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Verdict {
+    Deny(String),
+    Allow { warnings: Vec<String> },
+}
+
 fn rule_inherited_model(facts: &SpawnFacts) -> Option<String> {
     if facts.fork || !is_unspecified(&facts.model) {
         return None;
     }
     let inherited = match resolved(facts) {
-        None => format!("부모 model({}) 을 상속해", facts.parent_model.trim()),
+        None => format!(
+            "부모 model({}) 을 상속하거나 에이전트 정의의 model 을 따릅니다",
+            facts.parent_model.trim()
+        ),
         Some(r) if normalized(r) == normalized(&facts.parent_model) => {
-            format!("부모 model 을 상속해 {r} 로")
+            format!("부모 model 을 상속해 {r} 로 실행됩니다")
         }
         Some(_) => return None,
     };
+    let cap_hint = Tier::detect(&facts.parent_model)
+        .map(|t| format!(" 집행 위임 상한은 `{}` 입니다.", t.execution_cap().alias()))
+        .unwrap_or_default();
     Some(format!(
-        "[atelier] 이 sub-agent({})는 {} 실행됐습니다. \
-         이미 실행된 호출이라 다시 실행할 필요는 없고, 다음 dispatch 부터 작업에 맞는 model 을 명시하세요.",
-        facts.subagent_type, inherited
+        "[atelier] model 을 지정하지 않은 sub-agent({}) dispatch 를 막았습니다 — 그대로면 {}. \
+         작업에 맞는 model 과 effort 를 지정해 다시 호출하세요.{}",
+        facts.subagent_type, inherited, cap_hint
     ))
 }
 
@@ -74,8 +88,6 @@ fn rule_tier_cap_exceeded(facts: &SpawnFacts) -> Option<String> {
     }
     let cause = if requested {
         "위임했습니다"
-    } else if normalized(effective) == normalized(&facts.parent_model) {
-        "상속돼 실행됐습니다"
     } else {
         "실행됐습니다"
     };
@@ -88,11 +100,13 @@ fn rule_tier_cap_exceeded(facts: &SpawnFacts) -> Option<String> {
     ))
 }
 
-pub fn check(facts: &SpawnFacts) -> Vec<String> {
-    [rule_inherited_model(facts), rule_tier_cap_exceeded(facts)]
-        .into_iter()
-        .flatten()
-        .collect()
+pub fn check(facts: &SpawnFacts) -> Verdict {
+    match rule_inherited_model(facts) {
+        Some(reason) => Verdict::Deny(reason),
+        None => Verdict::Allow {
+            warnings: rule_tier_cap_exceeded(facts).into_iter().collect(),
+        },
+    }
 }
 
 #[cfg(test)]
@@ -109,25 +123,30 @@ mod tests {
         }
     }
 
-    #[test]
-    fn warns_when_model_unspecified_and_not_fork() {
-        let warnings = check(&facts());
-        assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("상속해"));
+    fn allowed() -> Verdict {
+        Verdict::Allow { warnings: vec![] }
     }
 
     #[test]
-    fn silent_when_fork() {
+    fn denies_when_model_unspecified_and_not_fork() {
+        let Verdict::Deny(reason) = check(&facts()) else {
+            panic!("expected deny");
+        };
+        assert!(reason.contains("상속"));
+    }
+
+    #[test]
+    fn allows_fork() {
         let mut f = facts();
         f.fork = true;
-        assert!(check(&f).is_empty());
+        assert_eq!(check(&f), allowed());
     }
 
     #[test]
-    fn silent_when_model_explicit_and_within_cap() {
+    fn allows_explicit_model_within_cap() {
         let mut f = facts();
         f.model = Some("claude-opus-5-5".to_string());
-        assert!(check(&f).is_empty());
+        assert_eq!(check(&f), allowed());
     }
 
     #[test]
@@ -135,16 +154,18 @@ mod tests {
         let mut f = facts();
         f.parent_model = "claude-sonnet-5".to_string();
         f.model = Some("claude-opus-5-5".to_string());
-        let warnings = check(&f);
+        let Verdict::Allow { warnings } = check(&f) else {
+            panic!("cap overrun is a warning, not a deny");
+        };
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("집행 위임 상한"));
     }
 
     #[test]
-    fn silent_when_tier_undetectable() {
+    fn allows_undetectable_tier() {
         let mut f = facts();
         f.model = Some("gpt-5".to_string());
         f.parent_model = "gpt-5".to_string();
-        assert!(check(&f).is_empty());
+        assert_eq!(check(&f), allowed());
     }
 }
