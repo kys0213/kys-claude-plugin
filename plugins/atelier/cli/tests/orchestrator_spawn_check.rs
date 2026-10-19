@@ -5,7 +5,12 @@ fn atelier() -> Command {
     Command::cargo_bin("atelier").expect("locate `atelier` cargo binary")
 }
 
-fn warnings_for(stdin: &str) -> Vec<String> {
+struct Verdict {
+    deny: Option<String>,
+    warnings: Vec<String>,
+}
+
+fn verdict_for(stdin: &str) -> Verdict {
     let output = atelier()
         .args(["orchestrator", "spawn-check"])
         .write_stdin(stdin)
@@ -15,12 +20,34 @@ fn warnings_for(stdin: &str) -> Vec<String> {
         .stdout
         .clone();
     let value: Value = serde_json::from_slice(&output).expect("valid JSON on stdout");
-    value["warnings"]
+    let deny = match &value["deny"] {
+        Value::Null => None,
+        Value::String(s) => Some(s.clone()),
+        other => panic!("deny is null or a string, got {other}"),
+    };
+    let warnings = value["warnings"]
         .as_array()
         .expect("warnings is an array")
         .iter()
         .map(|w| w.as_str().expect("warning is a string").to_string())
-        .collect()
+        .collect();
+    Verdict { deny, warnings }
+}
+
+fn warnings_for(stdin: &str) -> Vec<String> {
+    let v = verdict_for(stdin);
+    assert_eq!(v.deny, None, "unexpected deny");
+    v.warnings
+}
+
+fn deny_for(stdin: &str) -> String {
+    let v = verdict_for(stdin);
+    assert!(
+        v.warnings.is_empty(),
+        "a denied dispatch never runs, so it carries no post-run warning: {:?}",
+        v.warnings
+    );
+    v.deny.expect("dispatch should be denied")
 }
 
 fn payload(model: &str, parent_model: &str, fork: bool) -> String {
@@ -35,22 +62,21 @@ fn payload_resolved(model: &str, resolved: &str, parent_model: &str) -> String {
     )
 }
 
-// --- Resolved-model judgement -------------------------------------------------
+// --- Rule A: model unspecified is denied -----------------------------------
 
 #[test]
-fn inherit_warns_when_resolved_equals_parent() {
-    let w = warnings_for(&payload_resolved(
+fn inherit_denied_when_resolved_equals_parent() {
+    let d = deny_for(&payload_resolved(
         "null",
         "\" Claude-Opus-5-5 \"",
         "claude-opus-5-5",
     ));
-    assert_eq!(w.len(), 1);
-    assert!(w[0].contains("상속해"));
-    assert!(w[0].contains("Claude-Opus-5-5"));
+    assert!(d.contains("상속"), "{d}");
+    assert!(d.contains("Claude-Opus-5-5"), "{d}");
 }
 
 #[test]
-fn inherit_silent_when_definition_picked_lower_model() {
+fn inherit_allowed_when_definition_picked_lower_model() {
     let w = warnings_for(&payload_resolved(
         "null",
         "\"claude-haiku-4-5-20251001\"",
@@ -60,23 +86,25 @@ fn inherit_silent_when_definition_picked_lower_model() {
 }
 
 #[test]
-fn inherit_warns_when_resolved_missing() {
-    let w = warnings_for(&payload_resolved("null", "null", "claude-opus-5-5"));
-    assert_eq!(w.len(), 1);
-    assert!(w[0].contains("부모 model(claude-opus-5-5)"));
+fn inherit_denied_when_resolved_missing() {
+    let d = deny_for(&payload_resolved("null", "null", "claude-opus-5-5"));
+    assert!(d.contains("부모 model(claude-opus-5-5)"), "{d}");
 }
 
 #[test]
-fn fable_parent_inheriting_fable_yields_inherit_and_cap_warnings() {
-    let w = warnings_for(&payload_resolved(
+fn fable_parent_inheriting_fable_is_denied_with_cap_hint() {
+    let d = deny_for(&payload_resolved(
         "null",
         "\"claude-fable-5-1\"",
         "claude-fable-5-1",
     ));
-    assert_eq!(w.len(), 2, "{w:?}");
-    assert!(w[0].contains("상속해"));
-    assert!(w[1].contains("집행 위임 상한"));
-    assert!(w[1].contains("상속돼 실행됐습니다"));
+    assert!(d.contains("`opus`"), "{d}");
+}
+
+#[test]
+fn deny_hint_omits_cap_when_parent_tier_undetectable() {
+    let d = deny_for(&payload_resolved("null", "null", "gpt-5"));
+    assert!(!d.contains("상한"), "{d}");
 }
 
 #[test]
@@ -88,7 +116,7 @@ fn opus_parent_definition_picking_fable_yields_cap_warning_only() {
     ));
     assert_eq!(w.len(), 1, "{w:?}");
     assert!(w[0].contains("집행 위임 상한"));
-    assert!(!w[0].contains("상속해"));
+    assert!(w[0].contains("실행됐습니다"));
 }
 
 #[test]
@@ -109,61 +137,54 @@ fn cap_warning_for_explicit_model_says_delegated() {
 }
 
 #[test]
-fn warnings_are_self_contained() {
-    let mut all = warnings_for(&payload_resolved(
+fn messages_are_self_contained() {
+    let deny = deny_for(&payload_resolved(
         "null",
         "\"claude-fable-5-1\"",
         "claude-fable-5-1",
     ));
-    all.extend(warnings_for(&payload(
-        "\"claude-fable-5-1\"",
-        "claude-opus-5-5",
-        false,
-    )));
-    assert_eq!(all.len(), 3);
-    for w in &all {
-        assert!(w.starts_with("[atelier]"));
-        assert!(!w.contains("불변식"), "{w}");
-        assert!(!w.contains("표 1"), "{w}");
-        assert!(!w.contains("시작 tier"), "{w}");
-        assert!(w.contains("다시 실행할 필요는 없"), "{w}");
-        assert!(w.contains("다음 dispatch 부터"), "{w}");
+    let cap = warnings_for(&payload("\"claude-fable-5-1\"", "claude-opus-5-5", false));
+    assert_eq!(cap.len(), 1);
+    let cap = &cap[0];
+    for m in [&deny, cap] {
+        assert!(m.starts_with("[atelier]"), "{m}");
+        assert!(!m.contains("불변식"), "{m}");
+        assert!(!m.contains("표 1"), "{m}");
+        assert!(!m.contains("시작 tier"), "{m}");
     }
-    let cap = all.iter().find(|w| w.contains("집행 위임 상한")).unwrap();
+    assert!(deny.contains("다시 호출"), "{deny}");
+    assert!(deny.contains("model"), "{deny}");
+    assert!(deny.contains("effort"), "{deny}");
+    assert!(cap.contains("다시 실행할 필요는 없"), "{cap}");
+    assert!(cap.contains("다음 dispatch 부터"), "{cap}");
     assert!(cap.contains("`opus`"), "{cap}");
     assert!(!cap.contains("Opus"), "{cap}");
     assert!(cap.contains("자문 소집이라면 무시해도"), "{cap}");
 }
 
-// --- Rule A: model unspecified ---------------------------------------------
-
 #[test]
-fn rule_a_warns_on_null_model() {
-    let warnings = warnings_for(&payload("null", "claude-opus-5-5", false));
-    assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("상속해"));
+fn rule_a_denies_null_model() {
+    deny_for(&payload("null", "claude-opus-5-5", false));
 }
 
 #[test]
-fn rule_a_warns_on_blank_model() {
-    let warnings = warnings_for(&payload("\"   \"", "claude-opus-5-5", false));
-    assert_eq!(warnings.len(), 1);
+fn rule_a_denies_blank_model() {
+    deny_for(&payload("\"   \"", "claude-opus-5-5", false));
 }
 
 #[test]
-fn rule_a_warns_on_inherit_case_insensitive() {
-    let warnings = warnings_for(&payload("\"INHERIT\"", "claude-opus-5-5", false));
-    assert_eq!(warnings.len(), 1);
+fn rule_a_denies_inherit_case_insensitive() {
+    deny_for(&payload("\"INHERIT\"", "claude-opus-5-5", false));
 }
 
 #[test]
-fn rule_a_silent_on_fork() {
+fn rule_a_allows_fork() {
     let warnings = warnings_for(&payload("null", "claude-opus-5-5", true));
     assert!(warnings.is_empty());
 }
 
 #[test]
-fn rule_a_silent_when_model_given() {
+fn rule_a_allows_given_model() {
     let warnings = warnings_for(&payload("\"claude-opus-5-5\"", "claude-opus-5-5", false));
     assert!(warnings.is_empty());
 }
@@ -338,18 +359,10 @@ fn subagent_type_as_number_yields_no_verdict() {
 }
 
 #[test]
-fn missing_model_key_still_warns_rule_a() {
+fn missing_model_key_still_denies_rule_a() {
     let stdin = r#"{"resolved_model":null,"parent_model":"claude-opus-5-5","fork":false,"subagent_type":"general-purpose"}"#;
-    let warnings = warnings_for(stdin);
-    assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("상속해"));
-}
-
-#[test]
-fn null_model_still_warns_rule_a() {
-    let warnings = warnings_for(&payload("null", "claude-opus-5-5", false));
-    assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("상속해"));
+    let d = deny_for(stdin);
+    assert!(d.contains("상속"), "{d}");
 }
 
 // --- Hook contract: never a nonzero exit -------------------------------------

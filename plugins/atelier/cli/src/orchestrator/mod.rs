@@ -2,7 +2,7 @@
 //! Claude Code function hooks module (`plugins/atelier/hooks/register.ts`)
 //! calls as an adapter: it moves `agent.spawn`/`tool.call`/`session.compact`
 //! event facts into these commands' stdin and moves the JSON result back
-//! into the event's `context`/`instructions`.
+//! into the event's `deny`/`context`/`instructions`.
 //!
 //! ```text
 //! atelier orchestrator spawn-check     # agent.spawn + tool.call{Agent}
@@ -20,7 +20,7 @@ pub mod core;
 
 use crate::orchestrator::commands::compact_note;
 use crate::orchestrator::commands::payload::parse_spawn_facts;
-use crate::orchestrator::core::spawn_check::check;
+use crate::orchestrator::core::spawn_check::{check, Verdict};
 use crate::shared::process::read_stdin_raw;
 use clap::{Parser, Subcommand};
 
@@ -37,8 +37,8 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// agent.spawn / tool.call{Agent}: warn on model-unspecified or
-    /// tier-cap-exceeded dispatch
+    /// agent.spawn / tool.call{Agent}: deny a model-unspecified dispatch,
+    /// warn on a tier-cap-exceeded one
     #[command(name = "spawn-check")]
     SpawnCheck,
     /// session.compact (main loop only): instruct the summarizer to preserve
@@ -63,8 +63,12 @@ where
     }
 }
 
-fn emit_spawn_check(warnings: &[String]) {
-    println!("{}", serde_json::json!({ "warnings": warnings }));
+fn emit_spawn_check(verdict: &Verdict) {
+    let value = match verdict {
+        Verdict::Deny(reason) => serde_json::json!({ "deny": reason, "warnings": [] }),
+        Verdict::Allow { warnings } => serde_json::json!({ "deny": null, "warnings": warnings }),
+    };
+    println!("{value}");
 }
 
 fn emit_compact_note(instructions: &str) {
@@ -84,10 +88,10 @@ pub fn run(cli: Cli) -> i32 {
 
     match command {
         Commands::SpawnCheck => {
-            let warnings = parse_spawn_facts(&read_stdin_raw())
+            let verdict = parse_spawn_facts(&read_stdin_raw())
                 .map(|facts| check(&facts))
-                .unwrap_or_default();
-            emit_spawn_check(&warnings);
+                .unwrap_or(Verdict::Allow { warnings: vec![] });
+            emit_spawn_check(&verdict);
         }
         Commands::CompactNote => {
             emit_compact_note(&compact_note::instructions());
