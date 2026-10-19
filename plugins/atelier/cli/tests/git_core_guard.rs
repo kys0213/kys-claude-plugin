@@ -1173,7 +1173,9 @@ fn ask_message_adds_the_confirmation_notice_and_block_policy_says_so() {
 
     input.opaque_exec = OpaqueExecPolicy::Block;
     let blocked = check(on_branch("main"), &input).reason.unwrap();
-    assert!(blocked.contains("확인할 수 없어 차단합니다(--opaque-exec block)"));
+    assert!(blocked.contains("스크립트/대상 내부를 확인할 수 없어 차단합니다."));
+    assert!(blocked.contains("인터프리터·스크립트 없이"), "{blocked}");
+    assert!(blocked.contains("git switch -c <branch-name>"), "{blocked}");
     assert!(!blocked.contains("승인하세요"));
 }
 

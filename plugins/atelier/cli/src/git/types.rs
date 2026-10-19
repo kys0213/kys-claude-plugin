@@ -81,8 +81,8 @@ pub enum GuardTarget {
 /// inspected (scripts, interpreters, unresolvable targets).
 #[derive(clap::ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OpaqueExecPolicy {
-    Block,
     #[default]
+    Block,
     Ask,
     Allow,
 }

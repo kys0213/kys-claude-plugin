@@ -53,7 +53,7 @@ pub enum Commands {
         #[arg(long = "protected-branches")]
         protected_branches: Option<String>,
         /// Protected-branch policy for commands whose effect can't be inspected
-        #[arg(long = "opaque-exec", value_enum, default_value_t = OpaqueExecPolicy::Ask)]
+        #[arg(long = "opaque-exec", value_enum, default_value_t = OpaqueExecPolicy::Block)]
         opaque_exec: OpaqueExecPolicy,
     },
     /// Deprecated alias of `guard pr`

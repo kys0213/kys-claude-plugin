@@ -95,6 +95,59 @@ fn git_hook_list_empty_in_temp_project() {
         .stdout(predicate::str::contains("{}"));
 }
 
+fn repo_on_branch(branch: &str) -> tempfile::TempDir {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q", "-b", branch]);
+    git(&["commit", "-q", "--allow-empty", "-m", "init"]);
+    tmp
+}
+
+fn guard_commit(repo: &std::path::Path, command: &str) -> assert_cmd::assert::Assert {
+    let payload = serde_json::json!({
+        "tool_input": { "command": command },
+        "cwd": repo.to_str().unwrap(),
+    });
+    atelier()
+        .args([
+            "git",
+            "guard",
+            "commit",
+            "--project-dir",
+            repo.to_str().unwrap(),
+            "--default-branch",
+            "main",
+        ])
+        .write_stdin(payload.to_string())
+        .assert()
+}
+
+#[test]
+fn git_guard_commit_blocks_opaque_exec_on_protected_branch_by_default() {
+    let repo = repo_on_branch("main");
+    guard_commit(repo.path(), "python3 -c 'print(1)'")
+        .code(2)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("확인할 수 없어 차단합니다"))
+        .stderr(predicate::str::contains("git switch -c <branch-name>"));
+}
+
+#[test]
+fn git_guard_commit_passes_opaque_exec_on_work_branch() {
+    let repo = repo_on_branch("feature");
+    guard_commit(repo.path(), "python3 -c 'print(1)'")
+        .success()
+        .stdout(predicate::str::is_empty());
+}
+
 #[test]
 fn git_setup_guard_never_exits_two() {
     // `setup guard` installs hooks, it is not one. Exit 2 is Claude Code's

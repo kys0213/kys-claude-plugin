@@ -63,7 +63,8 @@ pub(super) fn render_branch_report(r: &BranchReport) -> String {
                 .to_string(),
         ),
         Notice::OpaqueBlocked => lines.push(
-            "스크립트/대상 내부를 확인할 수 없어 차단합니다(--opaque-exec block).".to_string(),
+            "스크립트/대상 내부를 확인할 수 없어 차단합니다. 저장소 파일을 바꾸지 않는 조회라면 인터프리터·스크립트 없이(`ls`·`cat`·`grep` 등) 다시 시도하세요."
+                .to_string(),
         ),
     }
     lines.push(format!(
