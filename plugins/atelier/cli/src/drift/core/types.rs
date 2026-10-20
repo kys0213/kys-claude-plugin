@@ -1,30 +1,12 @@
-//! Domain types of the drift subsystem: the marker/path constants shared by
-//! check and sync, the check report whose exit code *is* the CLI contract, and
-//! the sync report that renders the `synced:` line.
-//!
-//! The constants live here as the single source of truth: if check and sync
-//! each carried their own copy, editing one side would silently desynchronize
-//! judgement from writing.
-
-/// Block markers in the user CLAUDE.md. Matched on **whole-line equality**
-/// only, never as substrings — a prose mention of the marker text inside a
-/// longer line must not toggle the block.
 pub const BEGIN_MARKER: &str = "<!-- [coding-style:begin] DO NOT REMOVE THIS LINE -->";
 pub const END_MARKER: &str = "<!-- [coding-style:end] DO NOT REMOVE THIS LINE -->";
 
-/// Plugin-root-relative source paths (the template file itself contains both
-/// markers) and the project-relative location of the rules copy.
 pub const TEMPLATE_CLAUDE_MD_REL: &str = "templates/claude-md/CLAUDE.md";
 pub const TEMPLATE_RULES_REL: &str = "rules/agent-design-principles.md";
 pub const RULES_COPY_REL: &str = ".claude/rules/agent-design-principles.md";
 
-/// Policy rules: plugin sources under `rules/policies/`, installed verbatim
-/// into the user rules directory (default `~/.claude/rules/atelier`) and/or
-/// the project rules directory (`<project>/.claude/rules/atelier`) — the
-/// installer chooses scope. The manifest is an explicit list, not a directory
-/// scan, so what setup installs and drift judges is pinned by the binary — a
-/// stray file in the source dir never ships. Distributing a new policy file =
-/// add it here and under `rules/policies/`.
+/// An explicit list, not a directory scan: shipping a new policy file means
+/// adding it both here and under `rules/policies/`.
 pub const TEMPLATE_POLICY_RULES_DIR_REL: &str = "rules/policies";
 pub const POLICY_RULES: &[&str] = &[
     "spec-writing.md",
@@ -33,22 +15,15 @@ pub const POLICY_RULES: &[&str] = &[
     "doc-dependency.md",
 ];
 
-/// Project-relative directory the project-scope policy copies live in.
 pub const PROJECT_RULES_DIR_REL: &str = ".claude/rules/atelier";
 
-/// Check names as they appear on stdout — callers branch on these exact
-/// strings. Policy findings render as `user-rules/<file>` /
-/// `project-rules/<file>` per installed scope (assembled in
-/// `commands/check.rs`).
+/// Callers branch on these exact strings.
 pub const CLAUDE_MD_CHECK: &str = "claude-md-coding-style-block";
 pub const RULES_CHECK: &str = "rules/agent-design-principles.md";
 
-/// Marker occurrences in a line sequence. One scan shared by check
-/// (judgement) and sync (range replacement), so the two sides can never
-/// disagree about where the block is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MarkerScan {
-    /// Index of the first begin/end marker line, `None` when absent.
+    /// Index of the first begin/end marker line.
     pub begin: Option<usize>,
     pub end: Option<usize>,
     pub begin_count: usize,
@@ -80,19 +55,12 @@ pub fn scan_markers(lines: &[&str]) -> MarkerScan {
     scan
 }
 
-/// A decoded artifact read. `NonUtf8` is a judgement input, not an error:
-/// user-side artifacts may legitimately hold bytes the UTF-8 plugin sources
-/// can never equal, and check must report that as drift instead of dying with
-/// the exit-2 error contract reserved for plugin-source/usage failures.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArtifactContent {
     Utf8(String),
     NonUtf8,
 }
 
-/// Which installed copy a `drift sync` run updates. A closed enum rather than
-/// a string so an unknown target dies at the clap boundary (exit 2), never
-/// deep inside the command.
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SyncTarget {
     /// The `[coding-style]` marker range inside the user CLAUDE.md.
@@ -105,18 +73,11 @@ pub enum SyncTarget {
     ProjectRules,
 }
 
-/// The three roots every drift command derives its file paths from. Resolved
-/// once at the CLI edge (defaults included), so the commands never consult the
-/// environment themselves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DriftPaths {
-    /// Plugin root the source files live under.
     pub plugin_root: String,
-    /// The user CLAUDE.md holding the coding-style block.
     pub claude_md: String,
-    /// Project root the rules copy lives under.
     pub project_dir: String,
-    /// Directory the user-scope rules copies live in.
     pub user_rules_dir: String,
 }
 
@@ -144,12 +105,11 @@ impl DriftPaths {
     }
 }
 
-/// Per-artifact judgement. `NotInstalled` is deliberately not drift: update
-/// never installs, so a missing artifact is a report, not a problem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactStatus {
     Ok,
     Drifted,
+    New,
     NotInstalled,
 }
 
@@ -159,17 +119,16 @@ impl ArtifactStatus {
         match self {
             ArtifactStatus::Ok => "OK",
             ArtifactStatus::Drifted => "DRIFTED",
+            ArtifactStatus::New => "NEW",
             ArtifactStatus::NotInstalled => "NOT_INSTALLED",
         }
     }
 }
 
-/// One `<check>=<STATUS> [detail]` judgement line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckFinding {
     pub name: String,
     pub status: ArtifactStatus,
-    /// Path or reason shown in parentheses; OK findings carry none.
     pub detail: Option<String>,
 }
 
@@ -182,8 +141,6 @@ impl CheckFinding {
     }
 }
 
-/// The full `drift check` result. Rendering and the exit-code policy both
-/// live on the type so the CLI edge only prints and returns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckReport {
     pub findings: Vec<CheckFinding>,
@@ -194,22 +151,14 @@ impl CheckReport {
         self.findings.iter().filter(|f| f.status == status).count()
     }
 
-    fn drifted(&self) -> usize {
-        self.count(ArtifactStatus::Drifted)
-    }
-
-    /// Shell-compatible check contract: drift found → 1, otherwise 0
-    /// (NOT_INSTALLED alone is not drift). Errors (exit 2) never reach a
-    /// report — they surface as `Err` before one is built.
     pub fn exit_code(&self) -> i32 {
-        if self.drifted() > 0 {
+        if self.count(ArtifactStatus::Drifted) + self.count(ArtifactStatus::New) > 0 {
             1
         } else {
             0
         }
     }
 
-    /// One line per finding plus the summary line — the stdout contract.
     pub fn render(&self) -> String {
         let mut out = String::new();
         for finding in &self.findings {
@@ -217,36 +166,35 @@ impl CheckReport {
             out.push('\n');
         }
         out.push_str(&format!(
-            "→ {} checked, {} drifted, {} missing\n",
+            "→ {} checked, {} drifted, {} new, {} missing\n",
             self.findings.len(),
-            self.drifted(),
+            self.count(ArtifactStatus::Drifted),
+            self.count(ArtifactStatus::New),
             self.count(ArtifactStatus::NotInstalled)
         ));
         out
     }
 }
 
-/// A completed `drift sync` write: which target, where, and the backup taken
-/// before the overwrite.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncReport {
     pub target: SyncTarget,
     pub path: String,
-    pub backup: String,
+    pub backup: Option<String>,
 }
 
 impl SyncReport {
-    /// The `synced:` stdout line, preserving the two shell formats.
-    /// Newline-terminated like `CheckReport::render`, so the CLI edge prints
-    /// both reports the same way.
     pub fn render(&self) -> String {
+        let Some(backup) = &self.backup else {
+            return format!("installed: {}\n", self.path);
+        };
         match self.target {
             SyncTarget::ClaudeMd => format!(
-                "synced: coding-style block in {} (backup: {})\n",
-                self.path, self.backup
+                "synced: coding-style block in {} (backup: {backup})\n",
+                self.path
             ),
             SyncTarget::Rules | SyncTarget::UserRules | SyncTarget::ProjectRules => {
-                format!("synced: {} (backup: {})\n", self.path, self.backup)
+                format!("synced: {} (backup: {backup})\n", self.path)
             }
         }
     }

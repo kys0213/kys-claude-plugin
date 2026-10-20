@@ -1,7 +1,3 @@
-//! Black-box tests for the `drift check` judgement. The filesystem is an
-//! in-memory double, so every status rule (OK / DRIFTED / NOT_INSTALLED) and
-//! the report's exit-code contract are pinned without real files.
-
 mod drift_mocks;
 
 use atelier::drift::commands::check;
@@ -13,9 +9,6 @@ fn run(fs: &MemFs) -> Result<CheckReport, String> {
     check::run(&deps(fs, &clock), &paths())
 }
 
-/// One `<prefix><file>=<STATUS> (detail)` line per manifest entry, in
-/// manifest order — the detail column is derived from the file like the
-/// command derives it.
 fn scope_lines(prefix: &str, status: &str, detail: Option<fn(&str) -> String>) -> String {
     POLICY_RULES
         .iter()
@@ -26,8 +19,6 @@ fn scope_lines(prefix: &str, status: &str, detail: Option<fn(&str) -> String>) -
         .collect()
 }
 
-/// The user-scope block followed by the project-scope block, as check renders
-/// them.
 fn policy_lines(status: &str, detail: bool) -> String {
     let user: Option<fn(&str) -> String> = detail.then_some(user_rule_copy as fn(&str) -> String);
     let project: Option<fn(&str) -> String> =
@@ -41,7 +32,6 @@ fn policy_lines(status: &str, detail: bool) -> String {
 
 #[test]
 fn all_in_sync_reports_ok_and_exit_zero() {
-    // In-sync copies of every artifact report OK with no detail, exit 0.
     let fs = MemFs::with_sources("shared body");
     fs.insert(
         USER_CLAUDE_MD,
@@ -57,7 +47,7 @@ fn all_in_sync_reports_ok_and_exit_zero() {
         format!(
             "claude-md-coding-style-block=OK\n\
              rules/agent-design-principles.md=OK\n\
-             {}→ {} checked, 0 drifted, 0 missing\n",
+             {}→ {} checked, 0 drifted, 0 new, 0 missing\n",
             policy_lines("OK", false),
             2 + 2 * POLICY_RULES.len()
         )
@@ -67,7 +57,6 @@ fn all_in_sync_reports_ok_and_exit_zero() {
 
 #[test]
 fn all_drifted_reports_drifted_and_exit_one() {
-    // Any content difference inside the block / copies is DRIFTED, exit 1.
     let fs = MemFs::with_sources("new body");
     fs.insert(USER_CLAUDE_MD, &block("old body"));
     fs.insert(RULES_COPY, "locally edited\n");
@@ -82,7 +71,7 @@ fn all_drifted_reports_drifted_and_exit_one() {
         format!(
             "claude-md-coding-style-block=DRIFTED ({USER_CLAUDE_MD})\n\
              rules/agent-design-principles.md=DRIFTED ({RULES_COPY})\n\
-             {}→ {} checked, {} drifted, 0 missing\n",
+             {}→ {} checked, {} drifted, 0 new, 0 missing\n",
             policy_lines("DRIFTED", true),
             2 + 2 * POLICY_RULES.len(),
             2 + 2 * POLICY_RULES.len()
@@ -93,7 +82,6 @@ fn all_drifted_reports_drifted_and_exit_one() {
 
 #[test]
 fn all_absent_reports_not_installed_and_exit_zero() {
-    // NOT_INSTALLED is a report, not drift — missing artifacts still exit 0.
     let fs = MemFs::with_sources("body");
 
     let report = run(&fs).unwrap();
@@ -102,7 +90,7 @@ fn all_absent_reports_not_installed_and_exit_zero() {
         format!(
             "claude-md-coding-style-block=NOT_INSTALLED ({USER_CLAUDE_MD})\n\
              rules/agent-design-principles.md=NOT_INSTALLED ({RULES_COPY})\n\
-             {}→ {} checked, 0 drifted, {} missing\n",
+             {}→ {} checked, 0 drifted, 0 new, {} missing\n",
             policy_lines("NOT_INSTALLED", true),
             2 + 2 * POLICY_RULES.len(),
             2 + 2 * POLICY_RULES.len()
@@ -112,8 +100,45 @@ fn all_absent_reports_not_installed_and_exit_zero() {
 }
 
 #[test]
+fn missing_manifest_file_in_installed_scope_is_new_and_exit_one() {
+    let fs = MemFs::with_sources("shared body");
+    fs.insert(USER_CLAUDE_MD, &block("shared body"));
+    fs.insert(RULES_COPY, RULES_BODY);
+    fs.install_user_rule_copies();
+    let added = POLICY_RULES[POLICY_RULES.len() - 1];
+    fs.files.borrow_mut().remove(&user_rule_copy(added));
+
+    let report = run(&fs).unwrap();
+    let rendered = report.render();
+    assert!(rendered.contains(&format!(
+        "user-rules/{added}=NEW ({})\n",
+        user_rule_copy(added)
+    )));
+    assert!(rendered.contains(&format!(
+        "project-rules/{added}=NOT_INSTALLED ({})\n",
+        project_rule_copy(added)
+    )));
+    assert!(rendered.ends_with(&format!(
+        "→ {} checked, 0 drifted, 1 new, {} missing\n",
+        2 + 2 * POLICY_RULES.len(),
+        POLICY_RULES.len()
+    )));
+    assert_eq!(report.exit_code(), 1);
+}
+
+#[test]
+fn new_is_judged_per_scope() {
+    let fs = MemFs::with_sources("body");
+    let added = POLICY_RULES[POLICY_RULES.len() - 1];
+    fs.insert(&project_rule_copy(POLICY_RULES[0]), USER_RULE_BODY);
+
+    let rendered = run(&fs).unwrap().render();
+    assert!(rendered.contains(&format!("project-rules/{added}=NEW")));
+    assert!(rendered.contains(&format!("user-rules/{added}=NOT_INSTALLED")));
+}
+
+#[test]
 fn claude_md_without_any_marker_is_not_installed() {
-    // A CLAUDE.md that exists but carries neither marker is NOT_INSTALLED.
     let fs = MemFs::with_sources("body");
     fs.insert(USER_CLAUDE_MD, "# just my own notes\n");
 
@@ -126,7 +151,6 @@ fn claude_md_without_any_marker_is_not_installed() {
 
 #[test]
 fn begin_marker_missing_is_drifted() {
-    // End marker without begin is a broken block — DRIFTED, not NOT_INSTALLED.
     let fs = MemFs::with_sources("body");
     fs.insert(USER_CLAUDE_MD, &format!("body\n{END_MARKER}\n"));
 
@@ -139,7 +163,6 @@ fn begin_marker_missing_is_drifted() {
 
 #[test]
 fn end_marker_missing_is_drifted() {
-    // Begin marker without end is the mirror-image broken block.
     let fs = MemFs::with_sources("body");
     fs.insert(USER_CLAUDE_MD, &format!("{BEGIN_MARKER}\nbody\n"));
 
@@ -152,8 +175,6 @@ fn end_marker_missing_is_drifted() {
 
 #[test]
 fn marker_substring_mention_does_not_match() {
-    // Markers match on whole-line equality only — a prose mention of the
-    // marker text inside a longer line must not start the block.
     let fs = MemFs::with_sources("shared body");
     fs.insert(
         USER_CLAUDE_MD,
@@ -173,7 +194,6 @@ fn marker_substring_mention_does_not_match() {
 
 #[test]
 fn missing_plugin_source_is_an_error() {
-    // A missing plugin source makes judgement impossible — error, not finding.
     let fs = MemFs::default();
     fs.insert(TEMPLATE_CLAUDE_MD, &block("body"));
 
@@ -186,8 +206,6 @@ fn missing_plugin_source_is_an_error() {
 
 #[test]
 fn missing_user_rule_source_is_an_error() {
-    // The manifest's user-rule sources are judged the same way: absence is an
-    // environment error, not a finding.
     let fs = MemFs::with_sources("body");
     fs.files.borrow_mut().remove(TEMPLATE_USER_RULE);
 
@@ -200,8 +218,6 @@ fn missing_user_rule_source_is_an_error() {
 
 #[test]
 fn crlf_identical_block_reports_ok() {
-    // check judges content, not bytes: lines() strips \r, so a CRLF-encoded
-    // but semantically identical block is OK (sync is the strict side).
     let fs = MemFs::with_sources("shared body");
     fs.insert(USER_CLAUDE_MD, &block("shared body").replace('\n', "\r\n"));
     fs.insert(RULES_COPY, RULES_BODY);
@@ -215,8 +231,6 @@ fn crlf_identical_block_reports_ok() {
 
 #[test]
 fn non_utf8_user_claude_md_is_drifted_not_an_error() {
-    // A user file the UTF-8 source can never equal is drift, not an exit-2
-    // error (exit 2 is documented as plugin-source/usage failure).
     let fs = MemFs::with_sources("body");
     fs.insert_bytes(USER_CLAUDE_MD, b"\xff\xfe not utf-8");
 
@@ -229,7 +243,6 @@ fn non_utf8_user_claude_md_is_drifted_not_an_error() {
 
 #[test]
 fn non_utf8_rules_copy_is_drifted_not_an_error() {
-    // The rules copy gets the same treatment: undecodable → DRIFTED finding.
     let fs = MemFs::with_sources("body");
     fs.insert_bytes(RULES_COPY, b"\xff\xfe not utf-8");
 
@@ -242,7 +255,6 @@ fn non_utf8_rules_copy_is_drifted_not_an_error() {
 
 #[test]
 fn non_utf8_user_rule_copy_is_drifted_not_an_error() {
-    // User-rules copies share the verbatim-copy judgement.
     let fs = MemFs::with_sources("body");
     fs.insert_bytes(USER_RULE_COPY, b"\xff\xfe not utf-8");
 
