@@ -1,7 +1,3 @@
-//! End-to-end black-box tests for `atelier drift ...` — the routing layer and
-//! the shell-compatible exit-code contract (0 no drift / 1 drift / 2 error),
-//! exercised against the real binary with TempDir fixtures.
-
 mod drift_mocks;
 
 use assert_cmd::Command;
@@ -23,9 +19,6 @@ fn write(path: &str, content: &str) {
     std::fs::write(path, content).unwrap();
 }
 
-/// A TempDir holding a plugin root (both source files, template block body
-/// `tpl_body`), plus a fake user CLAUDE.md location and a project dir that
-/// `install` populates.
 struct Fixture {
     tmp: tempfile::TempDir,
 }
@@ -49,7 +42,6 @@ impl Fixture {
         fx
     }
 
-    /// Absolute path of `rel` inside the fixture's TempDir.
     fn at(&self, rel: &str) -> String {
         self.tmp.path().join(rel).to_str().unwrap().to_string()
     }
@@ -88,7 +80,6 @@ impl Fixture {
         }
     }
 
-    /// The path-flag set every drift invocation against this fixture takes.
     fn path_flags(&self) -> [String; 8] {
         [
             "--plugin-root".into(),
@@ -118,7 +109,6 @@ impl Fixture {
 
 #[test]
 fn drift_bare_prints_help_and_exits_zero() {
-    // Bare `atelier drift` prints help + exit 0, like the other subsystems.
     atelier()
         .arg("drift")
         .assert()
@@ -128,7 +118,6 @@ fn drift_bare_prints_help_and_exits_zero() {
 
 #[test]
 fn drift_check_in_sync_exits_zero() {
-    // Every artifact matching its source → OK lines, summary, exit 0.
     let fx = Fixture::new("shared body");
     fx.install("shared body");
     fx.check()
@@ -151,7 +140,6 @@ fn drift_check_in_sync_exits_zero() {
 
 #[test]
 fn drift_sync_user_rules_then_check_roundtrip() {
-    // sync --target user-rules brings an edited copy back to the source.
     let fx = Fixture::new("body");
     fx.install("body");
     write(
@@ -186,8 +174,7 @@ fn drift_new_manifest_file_check_sync_roundtrip() {
 }
 
 #[test]
-fn drift_check_drifted_exits_one() {
-    // A stale block is a finding (exit 1), not an error.
+fn drift_check_drifted_is_a_finding_not_an_error() {
     let fx = Fixture::new("new body");
     fx.install("old body");
     fx.check().assert().code(1).stdout(predicate::str::contains(
@@ -196,9 +183,7 @@ fn drift_check_drifted_exits_one() {
 }
 
 #[test]
-fn drift_sync_then_check_roundtrip() {
-    // sync brings a drifted block back in line: the follow-up check exits 0
-    // and a timestamped backup of the pre-sync file exists.
+fn drift_sync_then_check_roundtrip_leaves_backup() {
     let fx = Fixture::new("new body");
     fx.install("old body");
     fx.sync("claude-md")
@@ -225,7 +210,6 @@ fn drift_sync_then_check_roundtrip() {
 
 #[test]
 fn drift_sync_bad_target_is_clap_usage_error() {
-    // --target is a closed enum; an unknown value fails at the clap boundary.
     let fx = Fixture::new("body");
     atelier()
         .args([
@@ -243,7 +227,6 @@ fn drift_sync_bad_target_is_clap_usage_error() {
 
 #[test]
 fn drift_check_missing_plugin_source_exits_two() {
-    // An empty plugin root cannot be judged against — error contract, exit 2.
     let tmp = tempfile::TempDir::new().unwrap();
     atelier()
         .args([

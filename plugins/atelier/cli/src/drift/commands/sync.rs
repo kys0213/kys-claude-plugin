@@ -1,22 +1,8 @@
-//! `drift sync` — deterministically updates one installed copy from its plugin
-//! source. Every refusal happens **before any write**, so a refused target
-//! stays byte-for-byte untouched.
-//!
-//! On the success path the pre-sync content is backed up to
-//! `<file>.bak-<timestamp>` before the overwrite — the one undo lever a
-//! deterministic writer can offer.
-
 use crate::drift::commands::{read_source, scope_installed, DriftDeps};
 use crate::drift::core::types::{
     scan_markers, ArtifactContent, DriftPaths, SyncReport, SyncTarget, POLICY_RULES,
 };
 
-/// Routes the target to its sync routine. A target is one `--target` value,
-/// not one file: the policy targets cover every `POLICY_RULES` copy of their
-/// scope (or the single manifest entry `name` selects — check judges per
-/// file, so sync must be able to act per file without clobbering copies the
-/// user chose to keep), so the result is a report list (single-element for
-/// the other targets).
 pub fn run(
     deps: &DriftDeps,
     paths: &DriftPaths,
@@ -60,17 +46,14 @@ pub fn run(
     }
 }
 
-/// Backs `content` (the target's pre-sync state) up next to the target,
-/// returning the backup path.
 fn backup(deps: &DriftDeps, target_path: &str, content: &str) -> Result<String, String> {
     let backup_path = format!("{target_path}.bak-{}", deps.clock.backup_timestamp());
     deps.fs.write(&backup_path, content)?;
     Ok(backup_path)
 }
 
-/// Reads a sync *target*, refusing what cannot be rewritten byte-faithfully:
-/// non-UTF-8 bytes cannot even be backed up through the string-based write
-/// path. Refusals happen before any write, so the target stays untouched.
+/// Non-UTF-8 bytes cannot go through the `&str` write path, not even into a
+/// backup, so such a target is refused.
 fn read_target(deps: &DriftDeps, path: &str) -> Result<String, String> {
     match deps.fs.read(path)? {
         ArtifactContent::Utf8(content) => Ok(content),
@@ -93,10 +76,8 @@ fn sync_claude_md(deps: &DriftDeps, paths: &DriftPaths) -> Result<SyncReport, St
     }
 
     let content = read_target(deps, user_path)?;
-    // The line-based rebuild below would silently convert every CRLF ending
-    // in the file to LF — user content *outside* the markers included. check
-    // stays lenient about CRLF (it only judges content); sync must refuse
-    // what it cannot preserve byte-faithfully.
+    // The line-based rebuild below would convert every CRLF ending in the
+    // file to LF — user content outside the markers included.
     if content.contains('\r') {
         return Err(format!(
             "{user_path} uses CRLF line endings — convert to LF or run /atelier:setup to reinstall"
@@ -104,9 +85,8 @@ fn sync_claude_md(deps: &DriftDeps, paths: &DriftPaths) -> Result<SyncReport, St
     }
     let lines: Vec<&str> = content.lines().collect();
     let scan = scan_markers(&lines);
-    // The range replacement is only safe against exactly one well-ordered
-    // marker pair — forcing it through duplicated or reversed markers would
-    // destroy user content outside the block.
+    // Replacing through duplicated or reversed markers would destroy user
+    // content outside the block.
     let (begin_idx, end_idx) = match (scan.begin, scan.end) {
         (None, None) => {
             return Err(format!(
@@ -137,9 +117,8 @@ fn sync_claude_md(deps: &DriftDeps, paths: &DriftPaths) -> Result<SyncReport, St
     let template = read_source(deps, &template_path)?;
     let backup_path = backup(deps, user_path, &content)?;
 
-    // Replace the marker range (inclusive) with the full template line
-    // sequence — the template carries both markers itself. Every line gets a
-    // trailing '\n' (join-plus-final-newline semantics).
+    // The template carries both markers itself, so it replaces the marker
+    // range inclusively.
     let mut new_content = String::with_capacity(content.len() + template.len());
     let merged = lines[..begin_idx]
         .iter()
@@ -150,9 +129,6 @@ fn sync_claude_md(deps: &DriftDeps, paths: &DriftPaths) -> Result<SyncReport, St
         new_content.push_str(line);
         new_content.push('\n');
     }
-    // Faithful to the previous `join("\n")` + `push('\n')`: an all-empty
-    // merge (empty template, block spanning the whole file) still writes a
-    // single newline.
     if new_content.is_empty() {
         new_content.push('\n');
     }
@@ -165,14 +141,6 @@ fn sync_claude_md(deps: &DriftDeps, paths: &DriftPaths) -> Result<SyncReport, St
     })
 }
 
-/// Syncs verbatim-copy artifacts — the write-side mirror of
-/// `check_verbatim_copy`: the project rules copy and every policy copy share
-/// one contract, `(copy, template)` pairs overwritten wholesale.
-///
-/// The pair list syncs as a unit: every source and every installed copy is
-/// validated (and read) before the first write, so a refusal anywhere leaves
-/// all copies byte-for-byte untouched. One timestamp stamps every backup of
-/// the run.
 fn sync_verbatim_copies(
     deps: &DriftDeps,
     target: SyncTarget,

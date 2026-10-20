@@ -1,26 +1,12 @@
-//! Drift subsystem: judges whether the installed artifacts (the CLAUDE.md
-//! coding-style block, the rules copies) still match the plugin sources, and
-//! deterministically re-syncs one of them on request.
+//! Drift subsystem: judges whether the setup-copied artifacts still match the
+//! plugin sources, and re-syncs them on request.
 //!
-//! ```text
-//! atelier drift check --plugin-root <dir> [--claude-md <path>] [--project-dir <dir>]
-//! atelier drift sync  --target <claude-md|rules> --plugin-root <dir> [...]
-//! ```
+//! Errors exit 2, the same code `git guard` uses to deny a hook. Drift commands
+//! are never registered as Claude Code hooks, so 2 cannot be misread as
+//! "block" here.
 //!
-//! Exit-code contract:
-//! - `check`: 0 nothing to sync (OK / NOT_INSTALLED only), 1 DRIFTED or NEW
-//!   found, 2 usage or plugin-source error. The 0/1 split lives on
-//!   `CheckReport::exit_code`.
-//! - `sync`: 0 synced, 2 usage error / target not installed or corrupted /
-//!   plugin source missing.
-//!
-//! Exit 2 is shared with `git guard`'s hook-deny signal. Drift commands are
-//! never registered as Claude Code hooks, so 2 cannot be misread as "block"
-//! here.
-//!
-//! Output is human text, not JSON: callers branch on the `<check>=<STATUS>`
-//! line format and relay the `synced:` line (backup path included) or the
-//! `installed:` line verbatim to the user.
+//! Output is human text, not JSON, and callers parse it line by line — every
+//! rendered line format is a contract.
 
 pub mod commands;
 pub mod core;
@@ -64,7 +50,6 @@ pub enum Commands {
     },
 }
 
-/// The flag set every drift command shares.
 #[derive(Args)]
 pub struct PathArgs {
     /// Plugin root holding the source template and rules files
@@ -83,9 +68,6 @@ pub struct PathArgs {
 }
 
 impl PathArgs {
-    /// Resolves the flags into concrete paths — the only place defaults (and
-    /// therefore the environment) are consulted; the commands take resolved
-    /// paths. HOME is only required for the paths actually left to default.
     fn resolve(self) -> Result<DriftPaths, String> {
         fn home_based(explicit: Option<String>, flag: &str, rel: &str) -> Result<String, String> {
             match explicit {
@@ -110,14 +92,12 @@ impl PathArgs {
     }
 }
 
-/// The error edge: every failure is `Error: <message>` on stderr with exit 2.
 fn fail(message: &str) -> i32 {
     eprintln!("Error: {message}");
     2
 }
 
-/// Parses `argv` (including the leading program name) with the drift clap
-/// surface and runs the selected command, returning a process exit code.
+/// `argv` includes the leading program name.
 pub fn run_from<I, T>(argv: I) -> i32
 where
     I: IntoIterator<Item = T>,
@@ -126,8 +106,6 @@ where
     run(Cli::parse_from(argv))
 }
 
-/// Runs a parsed drift CLI, returning a process exit code. The subsystem's
-/// only stdout render site — commands return values, never print.
 pub fn run(cli: Cli) -> i32 {
     let command = match cli.command {
         Some(c) => c,
@@ -145,8 +123,6 @@ pub fn run(cli: Cli) -> i32 {
         fs: &fs,
         clock: &clock,
     };
-    // Both arms share the resolve → run → render pipeline; only the rendered
-    // text and the exit code differ (check's 0/1 split lives on the report).
     let (rendered, code) = match command {
         Commands::Check { args } => {
             match args

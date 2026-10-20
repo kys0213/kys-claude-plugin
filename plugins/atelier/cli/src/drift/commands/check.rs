@@ -1,25 +1,9 @@
-//! `drift check` — judges whether the installed copies (CLAUDE.md block, rules
-//! copy) still match their plugin sources. Read-only by construction: the
-//! command never calls `ArtifactFs::write`.
-//!
-//! A missing plugin source is an `Err` (judgement is impossible), while a
-//! missing *installed* artifact is a finding. The same line splits encoding
-//! problems: an undecodable *user* file is a DRIFTED finding (it cannot equal
-//! the UTF-8 source), while an undecodable *source* is an error.
-//!
-//! check is deliberately more lenient than sync about line endings: `lines()`
-//! strips `\r`, so a CRLF-encoded but semantically identical block reports OK
-//! — check judges content, while sync refuses to rewrite what it cannot
-//! preserve byte-faithfully (see `sync.rs`).
-
 use crate::drift::commands::{read_source, scope_installed, DriftDeps};
 use crate::drift::core::types::{
     scan_markers, ArtifactContent, ArtifactStatus, CheckFinding, CheckReport, DriftPaths,
     CLAUDE_MD_CHECK, POLICY_RULES, RULES_CHECK,
 };
 
-/// Judges every artifact (CLAUDE.md block, rules copy, policy copies in both
-/// scopes) against its plugin source.
 pub fn run(deps: &DriftDeps, paths: &DriftPaths) -> Result<CheckReport, String> {
     let template_claude_md = paths.template_claude_md();
     let template_rules = paths.template_rules();
@@ -103,8 +87,6 @@ fn check_claude_md(
         ));
     }
     let content = match deps.fs.read(user_path)? {
-        // Undecodable user file: it differs from the UTF-8 source by
-        // definition — drift, not an exit-2 error.
         ArtifactContent::NonUtf8 => {
             return Ok(finding(
                 CLAUDE_MD_CHECK,
@@ -117,7 +99,6 @@ fn check_claude_md(
     let lines: Vec<&str> = content.lines().collect();
     let scan = scan_markers(&lines);
     match (scan.begin, scan.end) {
-        // No trace of the block: not installed, not broken.
         (None, None) => Ok(finding(
             CLAUDE_MD_CHECK,
             ArtifactStatus::NotInstalled,
@@ -134,11 +115,10 @@ fn check_claude_md(
             Some("end marker missing"),
         )),
         (Some(begin), Some(end)) => {
-            // The template file itself contains both markers, so the marker
-            // range (inclusive) compares against the template's full line
-            // sequence. Duplicated or reversed markers can never equal a
-            // template holding exactly one well-ordered pair, so the count
-            // and order guards reject them as DRIFTED without a compare.
+            // The template carries both markers, so the inclusive marker range
+            // compares against the whole template. `lines()` strips `\r`, so a
+            // CRLF block with the template's content is OK here even though
+            // sync refuses to rewrite it.
             let template = read_source(deps, template_path)?;
             let intact = scan.begin_count == 1
                 && scan.end_count == 1
@@ -157,9 +137,6 @@ fn check_claude_md(
     }
 }
 
-/// Judges one verbatim-copied artifact (the project rules copy and every
-/// policy copy share this contract: setup copies the file unchanged, so
-/// identical content is the judgement).
 fn check_verbatim_copy(
     deps: &DriftDeps,
     name: &str,
@@ -171,7 +148,6 @@ fn check_verbatim_copy(
         return Ok(finding(name, absent, Some(copy_path)));
     }
     let copy = match deps.fs.read(copy_path)? {
-        // Undecodable copy: differs from the UTF-8 source — drift, not error.
         ArtifactContent::NonUtf8 => {
             return Ok(finding(
                 name,
