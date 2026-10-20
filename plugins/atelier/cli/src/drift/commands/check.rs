@@ -3,11 +3,9 @@
 //! command never calls `ArtifactFs::write`.
 //!
 //! A missing plugin source is an `Err` (judgement is impossible), while a
-//! missing *installed* artifact is a finding: NEW when it is a manifest file
-//! absent from an installed policy scope, NOT_INSTALLED otherwise. The same
-//! line splits encoding problems: an undecodable *user* file is a DRIFTED
-//! finding (it cannot equal the UTF-8 source), while an undecodable *source*
-//! is an error.
+//! missing *installed* artifact is a finding. The same line splits encoding
+//! problems: an undecodable *user* file is a DRIFTED finding (it cannot equal
+//! the UTF-8 source), while an undecodable *source* is an error.
 //!
 //! check is deliberately more lenient than sync about line endings: `lines()`
 //! strips `\r`, so a CRLF-encoded but semantically identical block reports OK
@@ -48,48 +46,38 @@ pub fn run(deps: &DriftDeps, paths: &DriftPaths) -> Result<CheckReport, String> 
             ArtifactStatus::NotInstalled,
         )?,
     ];
-    let user_copies: Vec<String> = POLICY_RULES
-        .iter()
-        .map(|name| paths.user_rule_copy(name))
-        .collect();
-    let project_copies: Vec<String> = POLICY_RULES
-        .iter()
-        .map(|name| paths.project_rule_copy(name))
-        .collect();
-    findings.extend(check_policy_scope(
-        deps,
-        "user-rules",
-        &user_copies,
-        &policy_templates,
-    )?);
-    findings.extend(check_policy_scope(
-        deps,
-        "project-rules",
-        &project_copies,
-        &policy_templates,
-    )?);
+    findings.extend(check_policy_scope(deps, paths, "user-rules", |name| {
+        paths.user_rule_copy(name)
+    })?);
+    findings.extend(check_policy_scope(deps, paths, "project-rules", |name| {
+        paths.project_rule_copy(name)
+    })?);
     Ok(CheckReport { findings })
 }
 
-/// Judges one policy scope's copies, `copies` and `templates` both in
-/// `POLICY_RULES` order.
 fn check_policy_scope(
     deps: &DriftDeps,
+    paths: &DriftPaths,
     prefix: &str,
-    copies: &[String],
-    templates: &[String],
+    copy_of: impl Fn(&str) -> String,
 ) -> Result<Vec<CheckFinding>, String> {
-    let absent = if scope_installed(deps, copies) {
+    let copies: Vec<String> = POLICY_RULES.iter().map(|name| copy_of(name)).collect();
+    let absent = if scope_installed(deps, &copies) {
         ArtifactStatus::New
     } else {
         ArtifactStatus::NotInstalled
     };
     POLICY_RULES
         .iter()
-        .zip(copies)
-        .zip(templates)
-        .map(|((name, copy), template)| {
-            check_verbatim_copy(deps, &format!("{prefix}/{name}"), copy, template, absent)
+        .zip(&copies)
+        .map(|(name, copy)| {
+            check_verbatim_copy(
+                deps,
+                &format!("{prefix}/{name}"),
+                copy,
+                &paths.template_policy_rule(name),
+                absent,
+            )
         })
         .collect()
 }
@@ -171,8 +159,7 @@ fn check_claude_md(
 
 /// Judges one verbatim-copied artifact (the project rules copy and every
 /// policy copy share this contract: setup copies the file unchanged, so
-/// identical content is the judgement). `absent` is the status an absent copy
-/// reports.
+/// identical content is the judgement).
 fn check_verbatim_copy(
     deps: &DriftDeps,
     name: &str,

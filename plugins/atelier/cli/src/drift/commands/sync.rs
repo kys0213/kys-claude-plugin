@@ -1,9 +1,6 @@
 //! `drift sync` — deterministically updates one installed copy from its plugin
-//! source. It never installs a module or scope: a missing or corrupted target
-//! is refused with an error **before any write**, so every refusal leaves the
-//! target byte-for-byte untouched (setup owns installation and repair). The
-//! one exception is a manifest file missing from an already installed policy
-//! scope — check reports it NEW, and sync writes it fresh.
+//! source. Every refusal happens **before any write**, so a refused target
+//! stays byte-for-byte untouched.
 //!
 //! On the success path the pre-sync content is backed up to
 //! `<file>.bak-<timestamp>` before the overwrite — the one undo lever a
@@ -170,9 +167,7 @@ fn sync_claude_md(deps: &DriftDeps, paths: &DriftPaths) -> Result<SyncReport, St
 
 /// Syncs verbatim-copy artifacts — the write-side mirror of
 /// `check_verbatim_copy`: the project rules copy and every policy copy share
-/// one contract, `(copy, template)` pairs overwritten wholesale. With
-/// `install_missing`, an absent copy is written fresh (no backup) instead of
-/// refused.
+/// one contract, `(copy, template)` pairs overwritten wholesale.
 ///
 /// The pair list syncs as a unit: every source and every installed copy is
 /// validated (and read) before the first write, so a refusal anywhere leaves

@@ -28,10 +28,6 @@ fn read_source(deps: &DriftDeps, path: &str) -> Result<String, String> {
     }
 }
 
-/// A policy scope counts as installed once any of its manifest copies exists:
-/// the installer chose that scope, so a manifest file missing from it is owed
-/// (check reports NEW, sync installs it). An empty scope was never chosen.
-/// check and sync both ask here so judgement and writing cannot disagree.
 fn scope_installed(deps: &DriftDeps, copies: &[String]) -> bool {
     copies.iter().any(|copy| deps.fs.exists(copy))
 }

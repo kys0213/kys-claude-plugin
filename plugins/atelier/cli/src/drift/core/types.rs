@@ -144,11 +144,6 @@ impl DriftPaths {
     }
 }
 
-/// Per-artifact judgement. `New` and `NotInstalled` are both absent copies:
-/// `New` is a manifest file missing from a policy scope that already holds
-/// other copies (the installer chose that scope, so the file is owed), while
-/// `NotInstalled` is an artifact or scope the installer never chose — a
-/// report, not drift.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactStatus {
     Ok,
@@ -199,10 +194,8 @@ impl CheckReport {
         self.findings.iter().filter(|f| f.status == status).count()
     }
 
-    /// Shell-compatible check contract: something for sync to do (DRIFTED or
-    /// NEW) → 1, otherwise 0 (NOT_INSTALLED alone is not drift). Errors
-    /// (exit 2) never reach a report — they surface as `Err` before one is
-    /// built.
+    /// Errors (exit 2) never reach a report — they surface as `Err` before
+    /// one is built.
     pub fn exit_code(&self) -> i32 {
         if self.count(ArtifactStatus::Drifted) + self.count(ArtifactStatus::New) > 0 {
             1
@@ -230,8 +223,7 @@ impl CheckReport {
 }
 
 /// A completed `drift sync` write: which target, where, and the backup taken
-/// before the overwrite — `None` when the file was newly installed, since
-/// there was nothing to back up.
+/// before the overwrite.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncReport {
     pub target: SyncTarget,
@@ -240,8 +232,7 @@ pub struct SyncReport {
 }
 
 impl SyncReport {
-    /// The `synced:` stdout line (preserving the two shell formats), or the
-    /// `installed:` line for a newly installed file.
+    /// The `synced:` stdout line, preserving the two shell formats.
     /// Newline-terminated like `CheckReport::render`, so the CLI edge prints
     /// both reports the same way.
     pub fn render(&self) -> String {
