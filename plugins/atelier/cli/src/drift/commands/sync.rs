@@ -1,13 +1,15 @@
 //! `drift sync` — deterministically updates one installed copy from its plugin
-//! source. It never installs: a missing or corrupted target is refused with an
-//! error **before any write**, so every refusal leaves the target byte-for-byte
-//! untouched (setup owns installation and repair).
+//! source. It never installs a module or scope: a missing or corrupted target
+//! is refused with an error **before any write**, so every refusal leaves the
+//! target byte-for-byte untouched (setup owns installation and repair). The
+//! one exception is a manifest file missing from an already installed policy
+//! scope — check reports it NEW, and sync writes it fresh.
 //!
 //! On the success path the pre-sync content is backed up to
 //! `<file>.bak-<timestamp>` before the overwrite — the one undo lever a
 //! deterministic writer can offer.
 
-use crate::drift::commands::{read_source, DriftDeps};
+use crate::drift::commands::{read_source, scope_installed, DriftDeps};
 use crate::drift::core::types::{
     scan_markers, ArtifactContent, DriftPaths, SyncReport, SyncTarget, POLICY_RULES,
 };
@@ -43,18 +45,20 @@ pub fn run(
             deps,
             target,
             &[(paths.rules_copy(), paths.template_rules())],
+            false,
         ),
         SyncTarget::UserRules | SyncTarget::ProjectRules => {
             let copy = |file: &str| match target {
                 SyncTarget::UserRules => paths.user_rule_copy(file),
                 _ => paths.project_rule_copy(file),
             };
+            let scope: Vec<String> = POLICY_RULES.iter().map(|file| copy(file)).collect();
             let pairs: Vec<(String, String)> = POLICY_RULES
                 .iter()
                 .filter(|file| name.is_none_or(|n| n == **file))
                 .map(|file| (copy(file), paths.template_policy_rule(file)))
                 .collect();
-            sync_verbatim_copies(deps, target, &pairs)
+            sync_verbatim_copies(deps, target, &pairs, scope_installed(deps, &scope))
         }
     }
 }
@@ -160,13 +164,15 @@ fn sync_claude_md(deps: &DriftDeps, paths: &DriftPaths) -> Result<SyncReport, St
     Ok(SyncReport {
         target: SyncTarget::ClaudeMd,
         path: user_path.clone(),
-        backup: backup_path,
+        backup: Some(backup_path),
     })
 }
 
 /// Syncs verbatim-copy artifacts — the write-side mirror of
-/// `check_verbatim_copy`: the project rules copy and every user-rules copy
-/// share one contract, `(copy, template)` pairs overwritten wholesale.
+/// `check_verbatim_copy`: the project rules copy and every policy copy share
+/// one contract, `(copy, template)` pairs overwritten wholesale. With
+/// `install_missing`, an absent copy is written fresh (no backup) instead of
+/// refused.
 ///
 /// The pair list syncs as a unit: every source and every installed copy is
 /// validated (and read) before the first write, so a refusal anywhere leaves
@@ -176,16 +182,20 @@ fn sync_verbatim_copies(
     deps: &DriftDeps,
     target: SyncTarget,
     pairs: &[(String, String)],
+    install_missing: bool,
 ) -> Result<Vec<SyncReport>, String> {
     let mut jobs = Vec::new();
     for (copy_path, template_path) in pairs {
         if !deps.fs.exists(template_path) {
             return Err(format!("plugin source file not found: {template_path}"));
         }
-        if !deps.fs.exists(copy_path) {
+        let current = if deps.fs.exists(copy_path) {
+            Some(read_target(deps, copy_path)?)
+        } else if install_missing {
+            None
+        } else {
             return Err(format!("not installed: {copy_path} — run /atelier:setup"));
-        }
-        let current = read_target(deps, copy_path)?;
+        };
         let source = read_source(deps, template_path)?;
         jobs.push((copy_path, current, source));
     }
@@ -193,13 +203,19 @@ fn sync_verbatim_copies(
     let stamp = deps.clock.backup_timestamp();
     let mut reports = Vec::new();
     for (copy_path, current, source) in jobs {
-        let backup_path = format!("{copy_path}.bak-{stamp}");
-        deps.fs.write(&backup_path, &current)?;
+        let backup = match current {
+            Some(current) => {
+                let backup_path = format!("{copy_path}.bak-{stamp}");
+                deps.fs.write(&backup_path, &current)?;
+                Some(backup_path)
+            }
+            None => None,
+        };
         deps.fs.write(copy_path, &source)?;
         reports.push(SyncReport {
             target,
             path: copy_path.clone(),
-            backup: backup_path,
+            backup,
         });
     }
     Ok(reports)

@@ -144,7 +144,7 @@ fn drift_check_in_sync_exits_zero() {
             POLICY_RULES[0]
         )))
         .stdout(predicate::str::contains(format!(
-            "→ {} checked, 0 drifted, 0 missing",
+            "→ {} checked, 0 drifted, 0 new, 0 missing",
             2 + 2 * POLICY_RULES.len()
         )));
 }
@@ -162,6 +162,26 @@ fn drift_sync_user_rules_then_check_roundtrip() {
         .assert()
         .success()
         .stdout(predicate::str::contains("synced: "));
+    fx.check().assert().success();
+}
+
+#[test]
+fn drift_new_manifest_file_check_sync_roundtrip() {
+    let fx = Fixture::new("body");
+    fx.install("body");
+    let added = POLICY_RULES[POLICY_RULES.len() - 1];
+    let copy = format!("{}/{added}", fx.user_rules_dir());
+    std::fs::remove_file(&copy).unwrap();
+
+    fx.check()
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(format!("user-rules/{added}=NEW")));
+    fx.sync("user-rules")
+        .args(["--name", added])
+        .assert()
+        .success()
+        .stdout(format!("installed: {copy}\n"));
     fx.check().assert().success();
 }
 

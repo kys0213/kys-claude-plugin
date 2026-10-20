@@ -31,7 +31,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 
 > Step 0 은 *setup 시점* 바이너리를 보장하고, plugin-declared SessionStart hook(`check-cli-version`)이
 > *이후 버전 드리프트*를 알립니다 — 둘이 한 쌍입니다.
-> 이미 설치된 환경의 버전 동기화(CLI 갱신 + 복사형 산출물 드리프트 점검·갱신)는 setup 대신 `/atelier:update` 를 실행하세요 — 신규 모듈 설치·hook 등록은 하지 않습니다.
+> 이미 설치된 환경의 버전 동기화(CLI 갱신 + 복사형 산출물 드리프트 점검·갱신 + 설치한 스코프에 새로 추가된 정책 룰 설치)는 setup 대신 `/atelier:update` 를 실행하세요 — 고르지 않은 모듈·스코프 설치와 hook 등록은 하지 않습니다.
 
 ## Step 1 — 설치 모듈 선택
 
@@ -52,7 +52,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 > atelier drift check --plugin-root "${CLAUDE_PLUGIN_ROOT}" --project-dir "${CLAUDE_PROJECT_DIR:-.}"
 > ```
 >
-> `DRIFTED` 로 보고된 산출물의 모듈(`style` → CLAUDE.md 블록·user rules 복사본, `workflow` → rules 복사본)만 다시 선택하면 됩니다.
+> `DRIFTED`·`NEW` 는 `/atelier:update` 가 처리합니다. setup 에서는 `NOT_INSTALLED` 로 보고된 산출물의 모듈(`style` → CLAUDE.md 블록·정책 룰 스코프, `workflow` → rules 복사본) 중 새로 설치할 것만 선택하면 됩니다.
 
 > 이미 설치된 환경에서 guard hook 만 비활성화/재설정하려면 Step 5 (hook 관리 모드)로 바로 진행합니다.
 

@@ -8,8 +8,9 @@
 //! ```
 //!
 //! Exit-code contract:
-//! - `check`: 0 no drift (OK / NOT_INSTALLED only), 1 drift found, 2 usage or
-//!   plugin-source error. The 0/1 split lives on `CheckReport::exit_code`.
+//! - `check`: 0 nothing to sync (OK / NOT_INSTALLED only), 1 DRIFTED or NEW
+//!   found, 2 usage or plugin-source error. The 0/1 split lives on
+//!   `CheckReport::exit_code`.
 //! - `sync`: 0 synced, 2 usage error / target not installed or corrupted /
 //!   plugin source missing.
 //!
@@ -18,8 +19,8 @@
 //! here.
 //!
 //! Output is human text, not JSON: callers branch on the `<check>=<STATUS>`
-//! line format and relay the `synced:` line (backup path included) verbatim
-//! to the user.
+//! line format and relay the `synced:` line (backup path included) or the
+//! `installed:` line verbatim to the user.
 
 pub mod commands;
 pub mod core;
@@ -48,7 +49,8 @@ pub enum Commands {
         #[command(flatten)]
         args: PathArgs,
     },
-    /// Update one installed copy from its plugin source (never installs)
+    /// Update one installed copy from its plugin source (installs only manifest
+    /// files missing from an already installed policy scope)
     Sync {
         /// Which installed copy to update
         #[arg(long = "target", value_enum)]

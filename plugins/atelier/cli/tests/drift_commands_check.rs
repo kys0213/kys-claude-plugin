@@ -1,5 +1,5 @@
 //! Black-box tests for the `drift check` judgement. The filesystem is an
-//! in-memory double, so every status rule (OK / DRIFTED / NOT_INSTALLED) and
+//! in-memory double, so every status rule (OK / DRIFTED / NEW / NOT_INSTALLED) and
 //! the report's exit-code contract are pinned without real files.
 
 mod drift_mocks;
@@ -57,7 +57,7 @@ fn all_in_sync_reports_ok_and_exit_zero() {
         format!(
             "claude-md-coding-style-block=OK\n\
              rules/agent-design-principles.md=OK\n\
-             {}→ {} checked, 0 drifted, 0 missing\n",
+             {}→ {} checked, 0 drifted, 0 new, 0 missing\n",
             policy_lines("OK", false),
             2 + 2 * POLICY_RULES.len()
         )
@@ -82,7 +82,7 @@ fn all_drifted_reports_drifted_and_exit_one() {
         format!(
             "claude-md-coding-style-block=DRIFTED ({USER_CLAUDE_MD})\n\
              rules/agent-design-principles.md=DRIFTED ({RULES_COPY})\n\
-             {}→ {} checked, {} drifted, 0 missing\n",
+             {}→ {} checked, {} drifted, 0 new, 0 missing\n",
             policy_lines("DRIFTED", true),
             2 + 2 * POLICY_RULES.len(),
             2 + 2 * POLICY_RULES.len()
@@ -102,13 +102,51 @@ fn all_absent_reports_not_installed_and_exit_zero() {
         format!(
             "claude-md-coding-style-block=NOT_INSTALLED ({USER_CLAUDE_MD})\n\
              rules/agent-design-principles.md=NOT_INSTALLED ({RULES_COPY})\n\
-             {}→ {} checked, 0 drifted, {} missing\n",
+             {}→ {} checked, 0 drifted, 0 new, {} missing\n",
             policy_lines("NOT_INSTALLED", true),
             2 + 2 * POLICY_RULES.len(),
             2 + 2 * POLICY_RULES.len()
         )
     );
     assert_eq!(report.exit_code(), 0);
+}
+
+#[test]
+fn missing_manifest_file_in_installed_scope_is_new_and_exit_one() {
+    let fs = MemFs::with_sources("shared body");
+    fs.insert(USER_CLAUDE_MD, &block("shared body"));
+    fs.insert(RULES_COPY, RULES_BODY);
+    fs.install_user_rule_copies();
+    let added = POLICY_RULES[POLICY_RULES.len() - 1];
+    fs.files.borrow_mut().remove(&user_rule_copy(added));
+
+    let report = run(&fs).unwrap();
+    let rendered = report.render();
+    assert!(rendered.contains(&format!(
+        "user-rules/{added}=NEW ({})\n",
+        user_rule_copy(added)
+    )));
+    assert!(rendered.contains(&format!(
+        "project-rules/{added}=NOT_INSTALLED ({})\n",
+        project_rule_copy(added)
+    )));
+    assert!(rendered.ends_with(&format!(
+        "→ {} checked, 0 drifted, 1 new, {} missing\n",
+        2 + 2 * POLICY_RULES.len(),
+        POLICY_RULES.len()
+    )));
+    assert_eq!(report.exit_code(), 1);
+}
+
+#[test]
+fn new_is_judged_per_scope() {
+    let fs = MemFs::with_sources("body");
+    let added = POLICY_RULES[POLICY_RULES.len() - 1];
+    fs.insert(&project_rule_copy(POLICY_RULES[0]), USER_RULE_BODY);
+
+    let rendered = run(&fs).unwrap().render();
+    assert!(rendered.contains(&format!("project-rules/{added}=NEW")));
+    assert!(rendered.contains(&format!("user-rules/{added}=NOT_INSTALLED")));
 }
 
 #[test]

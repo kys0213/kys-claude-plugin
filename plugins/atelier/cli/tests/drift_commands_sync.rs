@@ -150,6 +150,60 @@ fn sync_project_rules_with_name_syncs_only_that_file() {
 }
 
 #[test]
+fn sync_named_new_file_installs_it_without_backup() {
+    let fs = MemFs::with_sources("body");
+    fs.install_user_rule_copies();
+    let added = POLICY_RULES[POLICY_RULES.len() - 1];
+    fs.files.borrow_mut().remove(&user_rule_copy(added));
+
+    let line = run_named(&fs, SyncTarget::UserRules, Some(added)).unwrap();
+    assert_eq!(line, format!("installed: {}\n", user_rule_copy(added)));
+    assert_eq!(fs.content(&user_rule_copy(added)).unwrap(), USER_RULE_BODY);
+    assert_eq!(fs.write_count(), 1);
+}
+
+#[test]
+fn sync_scope_installs_new_files_and_overwrites_existing_ones() {
+    let fs = MemFs::with_sources("body");
+    fs.install_project_rule_copies();
+    fs.insert(PROJECT_RULE_COPY, "locally edited\n");
+    let added = POLICY_RULES[POLICY_RULES.len() - 1];
+    fs.files.borrow_mut().remove(&project_rule_copy(added));
+
+    let lines = run(&fs, SyncTarget::ProjectRules).unwrap();
+    let expected: String = POLICY_RULES
+        .iter()
+        .map(|name| {
+            let copy = project_rule_copy(name);
+            if *name == added {
+                format!("installed: {copy}\n")
+            } else {
+                format!("synced: {copy} (backup: {copy}.bak-{TS})\n")
+            }
+        })
+        .collect();
+    assert_eq!(lines, expected);
+    assert_eq!(
+        fs.content(&project_rule_copy(added)).unwrap(),
+        USER_RULE_BODY
+    );
+    assert_eq!(fs.content(PROJECT_RULE_COPY).unwrap(), USER_RULE_BODY);
+}
+
+#[test]
+fn refuses_named_file_when_scope_has_no_copies_with_zero_writes() {
+    let fs = MemFs::with_sources("body");
+    fs.install_user_rule_copies();
+
+    let err = run_named(&fs, SyncTarget::ProjectRules, Some(POLICY_RULES[0])).unwrap_err();
+    assert_eq!(
+        err,
+        format!("not installed: {PROJECT_RULE_COPY} — run /atelier:setup")
+    );
+    assert_eq!(fs.write_count(), 0);
+}
+
+#[test]
 fn refuses_unknown_user_rule_name_with_zero_writes() {
     // --name is validated against the manifest before anything is touched.
     let fs = MemFs::with_sources("body");

@@ -3,17 +3,18 @@
 //! command never calls `ArtifactFs::write`.
 //!
 //! A missing plugin source is an `Err` (judgement is impossible), while a
-//! missing *installed* artifact is a NOT_INSTALLED finding — update never
-//! installs, so absence is a report, not a failure. The same line splits
-//! encoding problems: an undecodable *user* file is a DRIFTED finding (it
-//! cannot equal the UTF-8 source), while an undecodable *source* is an error.
+//! missing *installed* artifact is a finding: NEW when it is a manifest file
+//! absent from an installed policy scope, NOT_INSTALLED otherwise. The same
+//! line splits encoding problems: an undecodable *user* file is a DRIFTED
+//! finding (it cannot equal the UTF-8 source), while an undecodable *source*
+//! is an error.
 //!
 //! check is deliberately more lenient than sync about line endings: `lines()`
 //! strips `\r`, so a CRLF-encoded but semantically identical block reports OK
 //! — check judges content, while sync refuses to rewrite what it cannot
 //! preserve byte-faithfully (see `sync.rs`).
 
-use crate::drift::commands::{read_source, DriftDeps};
+use crate::drift::commands::{read_source, scope_installed, DriftDeps};
 use crate::drift::core::types::{
     scan_markers, ArtifactContent, ArtifactStatus, CheckFinding, CheckReport, DriftPaths,
     CLAUDE_MD_CHECK, POLICY_RULES, RULES_CHECK,
@@ -39,27 +40,58 @@ pub fn run(deps: &DriftDeps, paths: &DriftPaths) -> Result<CheckReport, String> 
 
     let mut findings = vec![
         check_claude_md(deps, &paths.claude_md, &template_claude_md)?,
-        check_verbatim_copy(deps, RULES_CHECK, &paths.rules_copy(), &template_rules)?,
+        check_verbatim_copy(
+            deps,
+            RULES_CHECK,
+            &paths.rules_copy(),
+            &template_rules,
+            ArtifactStatus::NotInstalled,
+        )?,
     ];
-    // Policy copies are judged per scope: the installer chooses user and/or
-    // project scope, so an uninstalled scope reports NOT_INSTALLED (not drift).
-    for (name, template) in POLICY_RULES.iter().zip(&policy_templates) {
-        findings.push(check_verbatim_copy(
-            deps,
-            &format!("user-rules/{name}"),
-            &paths.user_rule_copy(name),
-            template,
-        )?);
-    }
-    for (name, template) in POLICY_RULES.iter().zip(&policy_templates) {
-        findings.push(check_verbatim_copy(
-            deps,
-            &format!("project-rules/{name}"),
-            &paths.project_rule_copy(name),
-            template,
-        )?);
-    }
+    let user_copies: Vec<String> = POLICY_RULES
+        .iter()
+        .map(|name| paths.user_rule_copy(name))
+        .collect();
+    let project_copies: Vec<String> = POLICY_RULES
+        .iter()
+        .map(|name| paths.project_rule_copy(name))
+        .collect();
+    findings.extend(check_policy_scope(
+        deps,
+        "user-rules",
+        &user_copies,
+        &policy_templates,
+    )?);
+    findings.extend(check_policy_scope(
+        deps,
+        "project-rules",
+        &project_copies,
+        &policy_templates,
+    )?);
     Ok(CheckReport { findings })
+}
+
+/// Judges one policy scope's copies, `copies` and `templates` both in
+/// `POLICY_RULES` order.
+fn check_policy_scope(
+    deps: &DriftDeps,
+    prefix: &str,
+    copies: &[String],
+    templates: &[String],
+) -> Result<Vec<CheckFinding>, String> {
+    let absent = if scope_installed(deps, copies) {
+        ArtifactStatus::New
+    } else {
+        ArtifactStatus::NotInstalled
+    };
+    POLICY_RULES
+        .iter()
+        .zip(copies)
+        .zip(templates)
+        .map(|((name, copy), template)| {
+            check_verbatim_copy(deps, &format!("{prefix}/{name}"), copy, template, absent)
+        })
+        .collect()
 }
 
 fn finding(name: &str, status: ArtifactStatus, detail: Option<&str>) -> CheckFinding {
@@ -138,16 +170,18 @@ fn check_claude_md(
 }
 
 /// Judges one verbatim-copied artifact (the project rules copy and every
-/// user-rules copy share this contract: setup copies the file unchanged, so
-/// identical content is the judgement).
+/// policy copy share this contract: setup copies the file unchanged, so
+/// identical content is the judgement). `absent` is the status an absent copy
+/// reports.
 fn check_verbatim_copy(
     deps: &DriftDeps,
     name: &str,
     copy_path: &str,
     template_path: &str,
+    absent: ArtifactStatus,
 ) -> Result<CheckFinding, String> {
     if !deps.fs.exists(copy_path) {
-        return Ok(finding(name, ArtifactStatus::NotInstalled, Some(copy_path)));
+        return Ok(finding(name, absent, Some(copy_path)));
     }
     let copy = match deps.fs.read(copy_path)? {
         // Undecodable copy: differs from the UTF-8 source — drift, not error.
