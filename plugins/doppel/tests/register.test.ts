@@ -162,6 +162,21 @@ describe('session events', () => {
     expect(bodyOf(sent[0])).toMatchObject({ surface: 'terminal', launched_by: 'user' })
   })
 
+  test('DOPPEL_DISABLE keeps a session off doppel entirely', async ($, on) => {
+    const clock = boot(on, { DOPPEL_DISABLE: '1' })
+    const sent = daemon(on)
+    const spawned = noAttach(on)
+    terminalAnswers(on, clock, 'answer')
+
+    await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: false })
+    await clock.settle()
+    const result = await ask($)
+
+    expect(sent).toHaveLength(0)
+    expect(spawned).toHaveLength(0)
+    expect(result).toMatchObject({ result: { answers: { [QUESTION.question]: '메모리' } } })
+  })
+
   test('main-loop turns and tool failures are reported; subagent turns are not', async ($, on) => {
     const clock = boot(on)
     const sent = daemon(on)

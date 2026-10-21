@@ -56,16 +56,17 @@ let ended = false
 let heartbeat: { cancel: () => void } | undefined
 
 async function context($: EngineInterface): Promise<Context | undefined> {
-  const [home, override, thread, requester, bot] = await Promise.all([
+  const [home, override, disabled, thread, requester, bot] = await Promise.all([
     $.env.get('HOME'),
     $.env.get('DOPPEL_SOCKET'),
+    $.env.get('DOPPEL_DISABLE'),
     $.env.get('DISCORD_CONNECTOR_THREAD_ID'),
     $.env.get('DISCORD_CONNECTOR_REQUESTER_ID'),
     $.env.get('DISCORD_CONNECTOR_BOT_ID'),
   ])
   const socket = socketPath(home, override)
 
-  if (socket === undefined) {
+  if (socket === undefined || disabled === '1') {
     return undefined
   }
 
