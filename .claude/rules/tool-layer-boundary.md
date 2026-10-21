@@ -49,7 +49,8 @@ atelier autopilot check stagnation               # stdin payload 해석
   { "command": "atelier git guard commit" }
 
   // ✅ shim 경유가 필요하면 리터럴 ${CLAUDE_PLUGIN_ROOT} 보존 (expand 금지)
-  { "command": "${CLAUDE_PLUGIN_ROOT}/hooks/check-cli-version.sh" }
+  //    경로에 공백이 있어도 한 단어로 넘어가도록 큰따옴표로 감싼다 (plugin validate 경고)
+  { "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/check-cli-version.sh\"" }
 
   // ❌ 실행 시점 절대경로로 expand — 버전 업데이트 시 깨짐
   { "command": "bash /Users/me/.claude/plugins/cache/.../0.30.0/hooks/guard.sh" }

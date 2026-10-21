@@ -8,11 +8,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/check-cli-version.sh"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/check-cli-version.sh\""
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/ensure-agent-teams.sh"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/ensure-agent-teams.sh\""
           }
         ]
       }
@@ -23,7 +23,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/push-check.sh"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/push-check.sh\""
           }
         ]
       }
