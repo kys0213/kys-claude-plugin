@@ -104,37 +104,6 @@ fn sync_user_rules_with_name_syncs_only_that_file() {
 }
 
 #[test]
-fn sync_project_rules_overwrites_copy_and_backs_up() {
-    let fs = MemFs::with_sources("body");
-    fs.install_project_rule_copies();
-    fs.insert(PROJECT_RULE_COPY, "locally edited\n");
-
-    let lines = run(&fs, SyncTarget::ProjectRules).unwrap();
-    let expected: String = POLICY_RULES
-        .iter()
-        .map(|name| {
-            let copy = project_rule_copy(name);
-            format!("synced: {copy} (backup: {copy}.bak-{TS})\n")
-        })
-        .collect();
-    assert_eq!(lines, expected);
-    assert_eq!(fs.content(PROJECT_RULE_COPY).unwrap(), USER_RULE_BODY);
-}
-
-#[test]
-fn sync_project_rules_with_name_syncs_only_that_file() {
-    let fs = MemFs::with_sources("body");
-    fs.insert(PROJECT_RULE_COPY, "locally edited\n");
-
-    let line = run_named(&fs, SyncTarget::ProjectRules, Some(POLICY_RULES[0])).unwrap();
-    assert_eq!(
-        line,
-        format!("synced: {PROJECT_RULE_COPY} (backup: {PROJECT_RULE_COPY}.bak-{TS})\n")
-    );
-    assert_eq!(fs.write_count(), 2);
-}
-
-#[test]
 fn sync_named_new_file_installs_it_without_backup() {
     let fs = MemFs::with_sources("body");
     fs.install_user_rule_copies();
@@ -150,16 +119,16 @@ fn sync_named_new_file_installs_it_without_backup() {
 #[test]
 fn sync_scope_installs_new_files_and_overwrites_existing_ones() {
     let fs = MemFs::with_sources("body");
-    fs.install_project_rule_copies();
-    fs.insert(PROJECT_RULE_COPY, "locally edited\n");
+    fs.install_user_rule_copies();
+    fs.insert(USER_RULE_COPY, "locally edited\n");
     let added = POLICY_RULES[POLICY_RULES.len() - 1];
-    fs.files.borrow_mut().remove(&project_rule_copy(added));
+    fs.files.borrow_mut().remove(&user_rule_copy(added));
 
-    let lines = run(&fs, SyncTarget::ProjectRules).unwrap();
+    let lines = run(&fs, SyncTarget::UserRules).unwrap();
     let expected: String = POLICY_RULES
         .iter()
         .map(|name| {
-            let copy = project_rule_copy(name);
+            let copy = user_rule_copy(name);
             if *name == added {
                 format!("installed: {copy}\n")
             } else {
@@ -168,22 +137,19 @@ fn sync_scope_installs_new_files_and_overwrites_existing_ones() {
         })
         .collect();
     assert_eq!(lines, expected);
-    assert_eq!(
-        fs.content(&project_rule_copy(added)).unwrap(),
-        USER_RULE_BODY
-    );
-    assert_eq!(fs.content(PROJECT_RULE_COPY).unwrap(), USER_RULE_BODY);
+    assert_eq!(fs.content(&user_rule_copy(added)).unwrap(), USER_RULE_BODY);
+    assert_eq!(fs.content(USER_RULE_COPY).unwrap(), USER_RULE_BODY);
 }
 
 #[test]
 fn refuses_named_file_when_scope_has_no_copies_with_zero_writes() {
     let fs = MemFs::with_sources("body");
-    fs.install_user_rule_copies();
+    fs.insert(RULES_COPY, RULES_BODY);
 
-    let err = run_named(&fs, SyncTarget::ProjectRules, Some(POLICY_RULES[0])).unwrap_err();
+    let err = run_named(&fs, SyncTarget::UserRules, Some(POLICY_RULES[0])).unwrap_err();
     assert_eq!(
         err,
-        format!("not installed: {PROJECT_RULE_COPY} — run /atelier:setup")
+        format!("not installed: {USER_RULE_COPY} — run /atelier:setup")
     );
     assert_eq!(fs.write_count(), 0);
 }
@@ -204,10 +170,7 @@ fn refuses_name_on_non_policy_target_with_zero_writes() {
     fs.insert(RULES_COPY, RULES_BODY);
 
     let err = run_named(&fs, SyncTarget::Rules, Some(POLICY_RULES[0])).unwrap_err();
-    assert_eq!(
-        err,
-        "--name is only supported with --target user-rules or project-rules"
-    );
+    assert_eq!(err, "--name is only supported with --target user-rules");
     assert_eq!(fs.write_count(), 0);
 }
 

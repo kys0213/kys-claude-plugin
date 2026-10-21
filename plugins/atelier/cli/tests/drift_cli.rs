@@ -2,7 +2,7 @@ mod drift_mocks;
 
 use assert_cmd::Command;
 use atelier::drift::core::types::{
-    POLICY_RULES, RULES_COPY_REL, TEMPLATE_CLAUDE_MD_REL, TEMPLATE_POLICY_RULES_DIR_REL,
+    POLICY_RULES, RULES_COPY_NAME, TEMPLATE_CLAUDE_MD_REL, TEMPLATE_POLICY_RULES_DIR_REL,
     TEMPLATE_RULES_REL,
 };
 use drift_mocks::{block, RULES_BODY, USER_RULE_BODY};
@@ -54,10 +54,6 @@ impl Fixture {
         self.at("home/.claude/CLAUDE.md")
     }
 
-    fn project_dir(&self) -> String {
-        self.at("proj")
-    }
-
     fn user_rules_dir(&self) -> String {
         self.at("home/.claude/rules/atelier")
     }
@@ -68,26 +64,20 @@ impl Fixture {
             &format!("# mine\n{}tail\n", block(claude_md_body)),
         );
         write(
-            &format!("{}/{RULES_COPY_REL}", self.project_dir()),
+            &format!("{}/{RULES_COPY_NAME}", self.user_rules_dir()),
             RULES_BODY,
         );
         for name in POLICY_RULES {
             write(&format!("{}/{name}", self.user_rules_dir()), USER_RULE_BODY);
-            write(
-                &format!("{}/.claude/rules/atelier/{name}", self.project_dir()),
-                USER_RULE_BODY,
-            );
         }
     }
 
-    fn path_flags(&self) -> [String; 8] {
+    fn path_flags(&self) -> [String; 6] {
         [
             "--plugin-root".into(),
             self.plugin_root(),
             "--claude-md".into(),
             self.claude_md(),
-            "--project-dir".into(),
-            self.project_dir(),
             "--user-rules-dir".into(),
             self.user_rules_dir(),
         ]
@@ -129,12 +119,8 @@ fn drift_check_in_sync_exits_zero() {
             POLICY_RULES[0]
         )))
         .stdout(predicate::str::contains(format!(
-            "project-rules/{}=OK",
-            POLICY_RULES[0]
-        )))
-        .stdout(predicate::str::contains(format!(
             "→ {} checked, 0 drifted, 0 new, 0 missing",
-            2 + 2 * POLICY_RULES.len()
+            2 + POLICY_RULES.len()
         )));
 }
 

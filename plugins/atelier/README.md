@@ -70,10 +70,10 @@ atelier orchestrator <spawn-check|compact-note>      # function hooks 모듈이 
 ```
 
 `drift` 는 `/atelier:update`·`/atelier:setup` 명세가 호출하는 결정적 도구입니다.
-`check` 는 CLAUDE.md `[coding-style]` 블록과 `.claude/rules` 복사본을 플러그인 원본과
+`check` 는 CLAUDE.md `[coding-style]` 블록과 `~/.claude/rules/atelier/` 룰 복사본을 플러그인 원본과
 비교해 `<check>=<STATUS>` 라인으로 보고하고 (exit 0 무드리프트 / 1 드리프트 / 2 오류),
-`sync --target <claude-md|rules>` 는 백업(`<file>.bak-<timestamp>`) 후 해당 산출물만
-원본으로 갱신합니다 — 신규 설치는 하지 않습니다 (setup 담당).
+`sync --target <claude-md|rules|user-rules>` 는 백업(`<file>.bak-<timestamp>`) 후 해당 산출물만
+원본으로 갱신합니다 — 신규 설치는 setup 담당이고, sync 는 이미 설치한 정책 룰에 새 버전이 추가한 파일만 채웁니다. 룰은 user scope 에만 설치합니다.
 
 `push-check` 는 Stop 시점에 **열린 PR 이 있는 브랜치가 upstream 보다 ahead** 이면
 `{"decision":"block","reason":...}` 를 stdout 에 내보내 세션 종료를 막습니다 (항상 exit 0 —

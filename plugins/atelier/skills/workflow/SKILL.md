@@ -21,10 +21,10 @@ version: 1.0.0
 
 ## 설계 원칙 룰 설치
 
-플러그인 내부의 룰 원본을 프로젝트에 복사합니다:
+플러그인 내부의 룰 원본을 user scope(`~/.claude/rules/atelier/`)에 복사합니다. 모든 프로젝트에 공통으로 깔리는 베이스 룰이라 프로젝트 `.claude/rules/` 에는 설치하지 않습니다:
 
-1. `.claude/rules/` 디렉토리가 없으면 생성. 대상 파일이 이미 존재하면 덮어쓸지 확인 (`--force` 의도 시 즉시 덮어쓰기)
-2. `${CLAUDE_PLUGIN_ROOT}/rules/agent-design-principles.md` 를 Read 하여 **내용 수정 없이 그대로** `.claude/rules/agent-design-principles.md` 에 Write
+1. `~/.claude/rules/atelier/` 디렉토리가 없으면 생성. 대상 파일이 이미 존재하면 덮어쓸지 확인 (`--force` 의도 시 즉시 덮어쓰기)
+2. `${CLAUDE_PLUGIN_ROOT}/rules/agent-design-principles.md` 를 Read 하여 **내용 수정 없이 그대로** `~/.claude/rules/atelier/agent-design-principles.md` 에 Write
 3. 기존 `.claude/{commands,agents,skills}/**/*.md` 가 감지되면 workflow-reviewer 로 설계 원칙 준수 리뷰를 제안
 
 ## references 로드 가이드

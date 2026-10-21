@@ -14,7 +14,6 @@ pub mod core;
 use crate::drift::commands::DriftDeps;
 use crate::drift::core::artifact::{create_artifact_fs, create_backup_clock};
 use crate::drift::core::types::{DriftPaths, SyncTarget};
-use crate::shared::process::default_project_dir;
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
@@ -41,8 +40,7 @@ pub enum Commands {
         /// Which installed copy to update
         #[arg(long = "target", value_enum)]
         target: SyncTarget,
-        /// user-rules / project-rules only: sync this one manifest file
-        /// instead of all of them
+        /// user-rules only: sync this one manifest file instead of all of them
         #[arg(long = "name")]
         name: Option<String>,
         #[command(flatten)]
@@ -58,9 +56,6 @@ pub struct PathArgs {
     /// User CLAUDE.md path (default: $HOME/.claude/CLAUDE.md)
     #[arg(long = "claude-md")]
     claude_md: Option<String>,
-    /// Project root the rules copy lives under (default: the process cwd)
-    #[arg(long = "project-dir")]
-    project_dir: Option<String>,
     /// Directory the user-scope rules copies live in
     /// (default: $HOME/.claude/rules/atelier)
     #[arg(long = "user-rules-dir")]
@@ -82,7 +77,6 @@ impl PathArgs {
         Ok(DriftPaths {
             plugin_root: self.plugin_root,
             claude_md: home_based(self.claude_md, "--claude-md", ".claude/CLAUDE.md")?,
-            project_dir: default_project_dir(self.project_dir),
             user_rules_dir: home_based(
                 self.user_rules_dir,
                 "--user-rules-dir",

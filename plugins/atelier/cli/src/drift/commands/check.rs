@@ -30,22 +30,15 @@ pub fn run(deps: &DriftDeps, paths: &DriftPaths) -> Result<CheckReport, String> 
             ArtifactStatus::NotInstalled,
         )?,
     ];
-    findings.extend(check_policy_scope(deps, paths, "user-rules", |name| {
-        paths.user_rule_copy(name)
-    })?);
-    findings.extend(check_policy_scope(deps, paths, "project-rules", |name| {
-        paths.project_rule_copy(name)
-    })?);
+    findings.extend(check_policy_scope(deps, paths)?);
     Ok(CheckReport { findings })
 }
 
-fn check_policy_scope(
-    deps: &DriftDeps,
-    paths: &DriftPaths,
-    prefix: &str,
-    copy_of: impl Fn(&str) -> String,
-) -> Result<Vec<CheckFinding>, String> {
-    let copies: Vec<String> = POLICY_RULES.iter().map(|name| copy_of(name)).collect();
+fn check_policy_scope(deps: &DriftDeps, paths: &DriftPaths) -> Result<Vec<CheckFinding>, String> {
+    let copies: Vec<String> = POLICY_RULES
+        .iter()
+        .map(|name| paths.user_rule_copy(name))
+        .collect();
     let absent = if scope_installed(deps, &copies) {
         ArtifactStatus::New
     } else {
@@ -57,7 +50,7 @@ fn check_policy_scope(
         .map(|(name, copy)| {
             check_verbatim_copy(
                 deps,
-                &format!("{prefix}/{name}"),
+                &format!("user-rules/{name}"),
                 copy,
                 &paths.template_policy_rule(name),
                 absent,

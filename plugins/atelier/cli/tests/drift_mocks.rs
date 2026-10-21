@@ -20,18 +20,16 @@ pub const TS: &str = "20260821-120000";
 
 pub const PLUGIN_ROOT: &str = "/plugin";
 pub const USER_CLAUDE_MD: &str = "/home/u/.claude/CLAUDE.md";
-pub const PROJECT_DIR: &str = "/proj";
 pub const USER_RULES_DIR: &str = "/home/u/.claude/rules/atelier";
 
-/// Paths the commands derive from the fixture roots above. The three policy
+/// Paths the commands derive from the fixture roots above. The two policy
 /// constants are the paths of `POLICY_RULES[0]`, for tests that target one
 /// file.
 pub const TEMPLATE_CLAUDE_MD: &str = "/plugin/templates/claude-md/CLAUDE.md";
 pub const TEMPLATE_RULES: &str = "/plugin/rules/agent-design-principles.md";
-pub const RULES_COPY: &str = "/proj/.claude/rules/agent-design-principles.md";
+pub const RULES_COPY: &str = "/home/u/.claude/rules/atelier/agent-design-principles.md";
 pub const TEMPLATE_USER_RULE: &str = "/plugin/rules/policies/spec-writing.md";
 pub const USER_RULE_COPY: &str = "/home/u/.claude/rules/atelier/spec-writing.md";
-pub const PROJECT_RULE_COPY: &str = "/proj/.claude/rules/atelier/spec-writing.md";
 
 /// Fixture-root paths of one policy manifest entry.
 pub fn template_policy_rule(name: &str) -> String {
@@ -39,9 +37,6 @@ pub fn template_policy_rule(name: &str) -> String {
 }
 pub fn user_rule_copy(name: &str) -> String {
     format!("{USER_RULES_DIR}/{name}")
-}
-pub fn project_rule_copy(name: &str) -> String {
-    format!("{PROJECT_DIR}/.claude/rules/atelier/{name}")
 }
 
 /// Canonical rules source bodies used by the fixtures.
@@ -59,7 +54,6 @@ pub fn paths() -> DriftPaths {
     DriftPaths {
         plugin_root: PLUGIN_ROOT.to_string(),
         claude_md: USER_CLAUDE_MD.to_string(),
-        project_dir: PROJECT_DIR.to_string(),
         user_rules_dir: USER_RULES_DIR.to_string(),
     }
 }
@@ -102,13 +96,6 @@ impl MemFs {
     pub fn install_user_rule_copies(&self) {
         for name in POLICY_RULES {
             self.insert(&user_rule_copy(name), USER_RULE_BODY);
-        }
-    }
-
-    /// Installs every project-scope policy copy in sync with its source.
-    pub fn install_project_rule_copies(&self) {
-        for name in POLICY_RULES {
-            self.insert(&project_rule_copy(name), USER_RULE_BODY);
         }
     }
 

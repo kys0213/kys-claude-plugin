@@ -3,7 +3,7 @@ pub const END_MARKER: &str = "<!-- [coding-style:end] DO NOT REMOVE THIS LINE --
 
 pub const TEMPLATE_CLAUDE_MD_REL: &str = "templates/claude-md/CLAUDE.md";
 pub const TEMPLATE_RULES_REL: &str = "rules/agent-design-principles.md";
-pub const RULES_COPY_REL: &str = ".claude/rules/agent-design-principles.md";
+pub const RULES_COPY_NAME: &str = "agent-design-principles.md";
 
 /// An explicit list, not a directory scan: shipping a new policy file means
 /// adding it both here and under `rules/policies/`.
@@ -14,8 +14,6 @@ pub const POLICY_RULES: &[&str] = &[
     "plan-writing.md",
     "doc-dependency.md",
 ];
-
-pub const PROJECT_RULES_DIR_REL: &str = ".claude/rules/atelier";
 
 /// Callers branch on these exact strings.
 pub const CLAUDE_MD_CHECK: &str = "claude-md-coding-style-block";
@@ -65,19 +63,16 @@ pub enum ArtifactContent {
 pub enum SyncTarget {
     /// The `[coding-style]` marker range inside the user CLAUDE.md.
     ClaudeMd,
-    /// The project-local rules copy.
+    /// The agent-design-principles copy in the user rules directory.
     Rules,
     /// The user-scope policy copies (`POLICY_RULES`, or one via `--name`).
     UserRules,
-    /// The project-scope policy copies (`POLICY_RULES`, or one via `--name`).
-    ProjectRules,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DriftPaths {
     pub plugin_root: String,
     pub claude_md: String,
-    pub project_dir: String,
     pub user_rules_dir: String,
 }
 
@@ -89,7 +84,7 @@ impl DriftPaths {
         format!("{}/{}", self.plugin_root, TEMPLATE_RULES_REL)
     }
     pub fn rules_copy(&self) -> String {
-        format!("{}/{}", self.project_dir, RULES_COPY_REL)
+        format!("{}/{}", self.user_rules_dir, RULES_COPY_NAME)
     }
     pub fn template_policy_rule(&self, name: &str) -> String {
         format!(
@@ -99,9 +94,6 @@ impl DriftPaths {
     }
     pub fn user_rule_copy(&self, name: &str) -> String {
         format!("{}/{}", self.user_rules_dir, name)
-    }
-    pub fn project_rule_copy(&self, name: &str) -> String {
-        format!("{}/{}/{}", self.project_dir, PROJECT_RULES_DIR_REL, name)
     }
 }
 
@@ -193,7 +185,7 @@ impl SyncReport {
                 "synced: coding-style block in {} (backup: {backup})\n",
                 self.path
             ),
-            SyncTarget::Rules | SyncTarget::UserRules | SyncTarget::ProjectRules => {
+            SyncTarget::Rules | SyncTarget::UserRules => {
                 format!("synced: {} (backup: {backup})\n", self.path)
             }
         }
