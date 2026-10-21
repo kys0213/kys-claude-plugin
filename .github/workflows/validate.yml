@@ -53,6 +53,11 @@ jobs:
           else
             echo "atelier_hooks_changed=false" >> $GITHUB_OUTPUT
           fi
+          if echo "$CHANGED" | grep -qE '^plugins/atelier/(scripts|tests)/report/'; then
+            echo "atelier_report_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "atelier_report_changed=false" >> $GITHUB_OUTPUT
+          fi
           if echo "$CHANGED" | grep -q '^plugins/discord-connector/'; then
             echo "discord_connector_changed=true" >> $GITHUB_OUTPUT
           else
@@ -103,7 +108,7 @@ jobs:
       # claude plugin validate/test 는 CLAUDE_CODE_ENABLE_FUNCTION_HOOKS surface 를 스캔한다 —
       # early access 라 버전마다 표면이 바뀔 수 있어 CLI 버전을 고정한다 (무관한 PR 이 깨지는 것 방지).
       - name: Setup Node
-        if: steps.check_rust.outputs.atelier_hooks_changed == 'true' || steps.check_rust.outputs.discord_connector_changed == 'true'
+        if: steps.check_rust.outputs.atelier_hooks_changed == 'true' || steps.check_rust.outputs.atelier_report_changed == 'true' || steps.check_rust.outputs.discord_connector_changed == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -126,6 +131,10 @@ jobs:
           DISABLE_AUTOUPDATER: '1'
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
         run: claude plugin test plugins/atelier
+
+      - name: atelier report script tests
+        if: steps.check_rust.outputs.atelier_report_changed == 'true'
+        run: node --test 'plugins/atelier/tests/report/**/*.test.mjs'
 
       # ── discord-connector ──
       - name: discord-connector launcher tests

@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title data-fill>대상·행위·시점이 드러나는 제목 (검색어가 된다)</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d1d9e0; --panel: #f6f8fa;
+    --accent: #0969da; --fact: #1a7f37; --guess: #9a6700; --unknown: #cf222e;
+    --bluf-bg: #ddf4ff; --bluf-line: #54aeff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #3d444d; --panel: #151b23;
+      --accent: #4493f8; --fact: #3fb950; --guess: #d29922; --unknown: #f85149;
+      --bluf-bg: #0c2d6b; --bluf-line: #1f6feb;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.7 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    word-break: keep-all; overflow-wrap: anywhere;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.75rem; line-height: 1.35; margin: 0 0 8px; }
+  h2 { font-size: 1.3rem; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 1.05rem; margin: 24px 0 8px; }
+  .meta { color: var(--muted); font-size: 0.9rem; margin: 0; }
+  .bluf { margin: 24px 0; padding: 16px 20px; background: var(--bluf-bg); border-left: 4px solid var(--bluf-line); border-radius: 6px; }
+  .bluf p { margin: 0 0 6px; }
+  .bluf p:last-child { margin-bottom: 0; }
+  a { color: var(--accent); }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.88em; }
+  code { background: var(--panel); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--panel); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.95rem; display: block; overflow-x: auto; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--panel); }
+  details { margin: 12px 0; border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px; }
+  summary { cursor: pointer; font-weight: 600; }
+  .tag { display: inline-block; font-size: 0.75rem; font-weight: 700; padding: 0 6px; border-radius: 10px; border: 1px solid currentColor; margin-right: 4px; vertical-align: 1px; }
+  .tag.fact { color: var(--fact); }
+  .tag.guess { color: var(--guess); }
+  .tag.unknown { color: var(--unknown); }
+  .diagram, pre.mermaid { margin: 16px 0; padding: 12px; background: #ffffff; color: #1f2328; border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; text-align: center; }
+  .diagram svg, pre.mermaid svg { max-width: 100%; height: auto; }
+  .diagram .diagram-source { text-align: left; }
+  pre.mermaid.failed::before, html[data-diagrams="offline"] pre.mermaid::before {
+    display: block; margin-bottom: 8px; font-family: sans-serif; font-weight: 700; color: #cf222e; text-align: left;
+  }
+  pre.mermaid.failed::before { content: "다이어그램 문법 오류 — 아래는 원본이에요"; }
+  html[data-diagrams="offline"] pre.mermaid::before { content: "다이어그램을 불러오지 못했어요 (네트워크 확인) — 아래는 원본이에요"; }
+  ol.sources { font-size: 0.92rem; }
+  footer { margin-top: 48px; color: var(--muted); font-size: 0.85rem; }
+  @media print {
+    :root { --bg: #ffffff; --fg: #000000; --panel: #f6f8fa; }
+    main { max-width: none; padding: 0; }
+    details { border: none; padding: 0; }
+    details > summary { list-style: none; }
+    a::after { content: " (" attr(href) ")"; font-size: 0.8em; color: #59636e; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 data-fill>대상·행위·시점이 드러나는 제목</h1>
+    <p class="meta"><span data-fill>YYYY-MM-DD</span> · 대상 독자: <span data-fill>누가 읽는가</span> · 작성: <span data-fill>작성자</span></p>
+  </header>
+
+  <section class="bluf" aria-label="결론">
+    <p><strong>결론</strong> — <span data-fill>첫 문단만 읽어도 결정할 수 있는 결론 2~3문장</span></p>
+    <p><strong>할 일</strong> — <span data-fill>독자가 할 일 (무엇을·언제까지). 없으면 "할 일 없음"</span></p>
+  </section>
+
+  <section>
+    <h2>왜</h2>
+    <p data-fill>계기·문제 상황·배경</p>
+  </section>
+
+  <section>
+    <h2>무엇을</h2>
+    <ul>
+      <li data-fill>실제로 바뀐 것·찾은 것 (파일·모듈·동작 단위). 근거 번호를 붙인다 [1]</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>어떻게</h2>
+    <p data-fill>고른 접근</p>
+    <pre class="mermaid" data-fill>flowchart LR
+  A[본문에 나온 것만] --> B[노드로 쓴다]</pre>
+    <h3>버린 선택지</h3>
+    <ul>
+      <li data-fill>선택지 — 버린 이유</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>확인 방법</h2>
+    <ol>
+      <li data-fill>독자가 따라할 수 있는 검증 단계 (한 단계에 동작 하나)</li>
+    </ol>
+  </section>
+
+  <details>
+    <summary>상세</summary>
+    <p data-fill>필요한 사람만 펼쳐 보는 내용. 없으면 이 블록을 지운다</p>
+  </details>
+
+  <section>
+    <h2>근거</h2>
+    <p class="meta"><span class="tag fact">사실</span> 확인함 · <span class="tag guess">추정</span> 판단·해석 · <span class="tag unknown">미확인</span> 확인 안 됨</p>
+    <ol class="sources">
+      <li data-fill><code>경로:라인</code>, 실행한 명령과 출력, 링크</li>
+    </ol>
+  </section>
+
+  <footer>이 페이지는 내용을 보여 주는 화면이에요. 판단은 위 근거의 원본으로 확인해요.</footer>
+</main>
+
+<!-- mermaid:start -->
+<script type="module">
+  const root = document.documentElement
+  const blocks = [...document.querySelectorAll('pre.mermaid')]
+  const errors = []
+  if (blocks.length === 0) {
+    root.dataset.diagrams = 'none'
+  } else {
+    try {
+      const { default: mermaid } = await import('https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs')
+      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'neutral' })
+      for (const [i, el] of blocks.entries()) {
+        try {
+          const { svg } = await mermaid.render(`diagram-${i}`, el.textContent)
+          el.innerHTML = svg
+        } catch (e) {
+          errors.push({ index: i, message: String(e?.message ?? e) })
+          el.classList.add('failed')
+        }
+      }
+      root.dataset.diagrams = errors.length ? 'error' : 'ok'
+    } catch (e) {
+      errors.push({ index: -1, message: String(e?.message ?? e) })
+      root.dataset.diagrams = 'offline'
+    }
+  }
+  window.__diagramErrors = errors
+</script>
+<!-- mermaid:end -->
+</body>
+</html>

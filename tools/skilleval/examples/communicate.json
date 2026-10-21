@@ -42,6 +42,13 @@
     }
   },
   {
+    "query": "notes/incident-0917.md 보고 장애 원인 분석 레포트 만들어줘",
+    "expect": true,
+    "files": {
+      "notes/incident-0917.md": "# 2026-09-17 결제 중복 승인\n- 14:02 웹훅 재전송과 재시도 큐가 같은 주문을 동시에 처리\n- idempotency key 가 요청 ID 기반이라 두 경로에서 달랐음\n- 14:40 key 를 주문 ID 기반으로 변경, 중복 0건\n- 남은 것: 과거 중복 건 환불 7건\n"
+    }
+  },
+  {
     "query": "auth.py 의 타임스탬프 검증에 버그 있는지 보고 고쳐줘",
     "expect": false,
     "files": {
