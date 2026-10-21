@@ -1,0 +1,9 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "author": {
+    "name": "kys0213"
+  },
+  "description": "Claude 세션을 로컬 doppel 데몬에 연결해 세션 상태를 보고하고, 질문·권한 확인을 터미널과 doppel UI 중 먼저 온 답으로 중계",
+  "name": "doppel",
+  "version": "0.1.0"
+}
