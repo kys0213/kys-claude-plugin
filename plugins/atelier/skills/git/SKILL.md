@@ -122,6 +122,7 @@ gh pr view --json number,state                          # 현재 브랜치의 �
 
 - **핵심은 브랜치 수 제한이 아니라 PR 생성 권한을 요청 단위 1곳으로 모으는 것** — 내부 분해 단위에는 PR 권한을 주지 않는다.
 - orchestrator가 요청 1건을 Task 여러 개로 분해하는 것, sub-agent worktree 브랜치가 여러 개 생기는 것은 이 규칙과 충돌하지 않는다 — Task 분해·worktree 브랜치는 이 규칙이 말하는 '단위'가 아니다. worktree 브랜치는 PR 없이 epic 브랜치로 수렴 후 삭제된다 — 그 머지 대상은 `orchestrator` skill 이 정한다.
+- 예외 — `orchestrator` 가 작업 단위별 PR(`per-pr`)로 진입해 사용자가 그룹표를 승인한 런은 그룹 하나가 요청 1건이다. 분할 결정을 이미 받은 경우라 그룹마다 PR 1개를 만들고, PR 생성 권한은 그 런의 메인에 있다. 작업자(worktree) 에게는 여전히 PR 권한을 주지 않는다.
 - PR 분할(스태킹 포함)이 필요하다고 판단되면 **만들기 전에** 분할 근거를 사용자에게 보고하고 결정을 받은 뒤 진행한다 (예: 대형 마이그레이션처럼 리뷰 가능성 때문에 분할이 나은 경우).
 - PR 생성 전 base 브랜치를 확정 보고한다 — 위 §커밋·push·PR 워크플로우 4번의 base 관계 확인 절차와 연결된다.
 
@@ -198,6 +199,6 @@ hook 의 등록·비활성화·재설정은 통합 setup 의 hook 관리 모드�
 ## 핵심 원칙
 
 1. **작은 단위 커밋**: TODO별로 명확한 진행상황 추적
-2. **외부 병합은 PR Only**: 외부로 나가는 병합(요청 단위 결과를 base 브랜치에 반영)은 반드시 Pull Request를 통해서만. 내부 분해 단위(worktree 브랜치)는 PR 없이 epic 브랜치로 로컬 수렴 후 삭제한다 (§PR 단위 원칙 참조).
+2. **외부 병합은 PR Only**: 외부로 나가는 병합(요청 단위 결과를 base 브랜치에 반영)은 반드시 Pull Request를 통해서만. 내부 분해 단위(worktree 브랜치)는 PR 없이 epic 브랜치로 로컬 수렴 후 삭제한다. 승인된 `per-pr` 런은 예외다 (§PR 단위 원칙 참조).
 3. **도구 경계 준수**: hook·guard·reviews 는 `atelier git` CLI, 커밋·브랜치·PR 은 컨벤션을 적용한 plain git/gh
 4. **Rebase 우선**: merge 대신 rebase로 깔끔한 히스토리 유지

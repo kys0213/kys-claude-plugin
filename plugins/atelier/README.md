@@ -32,7 +32,7 @@ Epic 2 ([#766](https://github.com/kys0213/kys-claude-plugin/issues/766))에서 c
 /atelier:communicate  # 맥락 전달 작문 기준 (독자 수준·맥락 이전·채널 적응) — 공유/보고/문서 작성 시 사용, 보고서는 HTML 레포트
 /atelier:git          # git 워크플로우 (커밋·push·PR·충돌 해결·리뷰 정리·이슈 우선순위)
 /atelier:workflow     # 컨벤션 scaffold·.claude/rules 설계·설계 원칙 룰 설치·워크플로우 리뷰
-/atelier:orchestrator # 위임/병렬 분해·worktree 격리·머지 조정 (기본 자율 주행, HITL opt-out)
+/atelier:orchestrator # 위임/병렬 분해·worktree 격리·머지 조정 (기본 자율 주행, HITL opt-out, 이슈 묶음은 그룹별 PR 로 전달 가능)
 /atelier:grill        # 설계를 대화로 생성(발산→수렴)하거나 이미 있는 계획을 심문 (빈틈·가정 드러내기)
 ```
 
