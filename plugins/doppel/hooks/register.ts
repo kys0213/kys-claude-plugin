@@ -4,6 +4,7 @@ import {
   ALLOW,
   DENY,
   HEARTBEAT_MS,
+  PERMISSION_GRACE_MS,
   REMOTE_DENY,
   WAIT_PROCESS_TIMEOUT_MS,
   WAIT_SECONDS,
@@ -355,14 +356,23 @@ export function register(on: On): void {
       return next(e)
     }
 
+    const local = next(e)
+    const early = await Promise.race([
+      local.then(result => ({ settled: true as const, result })),
+      $.clock.sleep(PERMISSION_GRACE_MS).then(() => ({ settled: false as const })),
+    ])
+
+    if (early.settled) {
+      return early.result
+    }
+
     const question = permissionQuestion(e.tool, input)
     const ask = await openAsk($, ctx, toolUseId, 'permission', [question])
 
     if (ask === undefined) {
-      return next(e)
+      return local
     }
 
-    const local = next(e)
     const winner = await Promise.race([
       local.then(result => ({ source: 'session' as const, result })),
       awaitRemote($, ask).then(remote => ({ source: 'remote' as const, remote })),

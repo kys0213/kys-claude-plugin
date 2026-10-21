@@ -6,6 +6,13 @@ export const DEFAULT_DEFER_AFTER_MS = 120_000
 
 export const HEARTBEAT_MS = 30_000
 
+/**
+ * `$.tool.check` queries skip the auto-mode classifier, so a call the classifier is
+ * about to allow still reads as `ask`. Relaying only after this long keeps those
+ * calls out of the inbox.
+ */
+export const PERMISSION_GRACE_MS = 1_500
+
 export const ATTACH_BACKOFF_MS = { first: 1_000, max: 30_000 } as const
 
 export const SUMMARY_CHARS = 300

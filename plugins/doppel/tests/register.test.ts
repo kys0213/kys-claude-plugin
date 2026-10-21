@@ -317,7 +317,7 @@ describe('AskUserQuestion race', () => {
 describe('permission relay', () => {
   const PERMISSION_Q = 'Bash 실행 허용: make deploy'
 
-  function bash(on: On, $: any, clock: ReturnType<typeof mock.clock>, firstCall: 'hang' | 'deny') {
+  function bash(on: On, $: any, clock: ReturnType<typeof mock.clock>, firstCall: 'hang' | 'deny' | 'late-deny') {
     const decisions: string[] = []
 
     on('tool.check', () => ({ decision: 'ask' }))
@@ -334,6 +334,10 @@ describe('permission relay', () => {
         await clock.sleep(3_600_000)
       }
 
+      if (firstCall === 'late-deny') {
+        await clock.sleep(5_000)
+      }
+
       return { deny: 'denied in the terminal' }
     })
 
@@ -348,7 +352,9 @@ describe('permission relay', () => {
     waits(on, clock, [waitStdout('answered', { [PERMISSION_Q]: 'allow' }, 'doppel-ui')])
     const decisions = bash(on, $, clock, 'hang')
 
-    const result = await call($)
+    const pending = call($)
+    await clock.advance(1_500)
+    const result = await pending
 
     expect(bodyOf(posted(sent, '/v1/asks')[0])).toMatchObject({
       tool_use_id: 'toolu_b',
@@ -369,7 +375,9 @@ describe('permission relay', () => {
     waits(on, clock, [waitStdout('answered', { [PERMISSION_Q]: 'deny' }, 'doppel-ui')])
     bash(on, $, clock, 'hang')
 
-    const result = await call($)
+    const pending = call($)
+    await clock.advance(1_500)
+    const result = await pending
 
     expect(result.deny).toBe('사용자가 doppel 에서 실행을 거부했어요')
     expect(bodyOf(posted(sent, '/v1/asks/ask-000001/close')[0])).toEqual({
@@ -378,7 +386,26 @@ describe('permission relay', () => {
     })
   })
 
-  test('a terminal deny closes the ask as denied by the session', async ($, on) => {
+  test('a terminal deny after the grace window closes the ask as denied by the session', async ($, on) => {
+    const clock = boot(on)
+    const sent = asksDaemon(on)
+    waits(on, clock, ['hang'])
+    bash(on, $, clock, 'late-deny')
+
+    const pending = call($)
+    await clock.advance(1_500)
+    expect(posted(sent, '/v1/asks')).toHaveLength(1)
+    await clock.advance(5_000)
+    const result = await pending
+
+    expect(result.deny).toBe('denied in the terminal')
+    expect(bodyOf(posted(sent, '/v1/asks/ask-000001/close')[0])).toEqual({
+      answers: { [PERMISSION_Q]: 'deny' },
+      answered_by: 'session',
+    })
+  })
+
+  test('a call the session decides within the grace window opens no ask', async ($, on) => {
     const clock = boot(on)
     const sent = asksDaemon(on)
     waits(on, clock, ['hang'])
@@ -387,10 +414,7 @@ describe('permission relay', () => {
     const result = await call($)
 
     expect(result.deny).toBe('denied in the terminal')
-    expect(bodyOf(posted(sent, '/v1/asks/ask-000001/close')[0])).toEqual({
-      answers: { [PERMISSION_Q]: 'deny' },
-      answered_by: 'session',
-    })
+    expect(posted(sent, '/v1/asks')).toHaveLength(0)
   })
 
   test('a call the engine does not ask about is not relayed', async ($, on) => {
