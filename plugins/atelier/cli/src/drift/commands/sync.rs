@@ -10,10 +10,8 @@ pub fn run(
     name: Option<&str>,
 ) -> Result<Vec<SyncReport>, String> {
     if let Some(name) = name {
-        if !matches!(target, SyncTarget::UserRules | SyncTarget::ProjectRules) {
-            return Err(
-                "--name is only supported with --target user-rules or project-rules".to_string(),
-            );
+        if target != SyncTarget::UserRules {
+            return Err("--name is only supported with --target user-rules".to_string());
         }
         if !POLICY_RULES.contains(&name) {
             return Err(format!(
@@ -30,16 +28,15 @@ pub fn run(
             &[(paths.rules_copy(), paths.template_rules())],
             false,
         ),
-        SyncTarget::UserRules | SyncTarget::ProjectRules => {
-            let copy = |file: &str| match target {
-                SyncTarget::UserRules => paths.user_rule_copy(file),
-                _ => paths.project_rule_copy(file),
-            };
-            let scope: Vec<String> = POLICY_RULES.iter().map(|file| copy(file)).collect();
+        SyncTarget::UserRules => {
+            let scope: Vec<String> = POLICY_RULES
+                .iter()
+                .map(|file| paths.user_rule_copy(file))
+                .collect();
             let pairs: Vec<(String, String)> = POLICY_RULES
                 .iter()
                 .filter(|file| name.is_none_or(|n| n == **file))
-                .map(|file| (copy(file), paths.template_policy_rule(file)))
+                .map(|file| (paths.user_rule_copy(file), paths.template_policy_rule(file)))
                 .collect();
             sync_verbatim_copies(deps, target, &pairs, scope_installed(deps, &scope))
         }

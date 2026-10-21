@@ -9,25 +9,17 @@ fn run(fs: &MemFs) -> Result<CheckReport, String> {
     check::run(&deps(fs, &clock), &paths())
 }
 
-fn scope_lines(prefix: &str, status: &str, detail: Option<fn(&str) -> String>) -> String {
+fn policy_lines(status: &str, detail: bool) -> String {
     POLICY_RULES
         .iter()
-        .map(|name| match detail {
-            Some(detail) => format!("{prefix}{name}={status} ({})\n", detail(name)),
-            None => format!("{prefix}{name}={status}\n"),
+        .map(|name| {
+            if detail {
+                format!("user-rules/{name}={status} ({})\n", user_rule_copy(name))
+            } else {
+                format!("user-rules/{name}={status}\n")
+            }
         })
         .collect()
-}
-
-fn policy_lines(status: &str, detail: bool) -> String {
-    let user: Option<fn(&str) -> String> = detail.then_some(user_rule_copy as fn(&str) -> String);
-    let project: Option<fn(&str) -> String> =
-        detail.then_some(project_rule_copy as fn(&str) -> String);
-    format!(
-        "{}{}",
-        scope_lines("user-rules/", status, user),
-        scope_lines("project-rules/", status, project)
-    )
 }
 
 #[test]
@@ -39,7 +31,6 @@ fn all_in_sync_reports_ok_and_exit_zero() {
     );
     fs.insert(RULES_COPY, RULES_BODY);
     fs.install_user_rule_copies();
-    fs.install_project_rule_copies();
 
     let report = run(&fs).unwrap();
     assert_eq!(
@@ -49,7 +40,7 @@ fn all_in_sync_reports_ok_and_exit_zero() {
              rules/agent-design-principles.md=OK\n\
              {}→ {} checked, 0 drifted, 0 new, 0 missing\n",
             policy_lines("OK", false),
-            2 + 2 * POLICY_RULES.len()
+            2 + POLICY_RULES.len()
         )
     );
     assert_eq!(report.exit_code(), 0);
@@ -62,7 +53,6 @@ fn all_drifted_reports_drifted_and_exit_one() {
     fs.insert(RULES_COPY, "locally edited\n");
     for name in POLICY_RULES {
         fs.insert(&user_rule_copy(name), "locally edited\n");
-        fs.insert(&project_rule_copy(name), "locally edited\n");
     }
 
     let report = run(&fs).unwrap();
@@ -73,8 +63,8 @@ fn all_drifted_reports_drifted_and_exit_one() {
              rules/agent-design-principles.md=DRIFTED ({RULES_COPY})\n\
              {}→ {} checked, {} drifted, 0 new, 0 missing\n",
             policy_lines("DRIFTED", true),
-            2 + 2 * POLICY_RULES.len(),
-            2 + 2 * POLICY_RULES.len()
+            2 + POLICY_RULES.len(),
+            2 + POLICY_RULES.len()
         )
     );
     assert_eq!(report.exit_code(), 1);
@@ -92,8 +82,8 @@ fn all_absent_reports_not_installed_and_exit_zero() {
              rules/agent-design-principles.md=NOT_INSTALLED ({RULES_COPY})\n\
              {}→ {} checked, 0 drifted, 0 new, {} missing\n",
             policy_lines("NOT_INSTALLED", true),
-            2 + 2 * POLICY_RULES.len(),
-            2 + 2 * POLICY_RULES.len()
+            2 + POLICY_RULES.len(),
+            2 + POLICY_RULES.len()
         )
     );
     assert_eq!(report.exit_code(), 0);
@@ -114,27 +104,21 @@ fn missing_manifest_file_in_installed_scope_is_new_and_exit_one() {
         "user-rules/{added}=NEW ({})\n",
         user_rule_copy(added)
     )));
-    assert!(rendered.contains(&format!(
-        "project-rules/{added}=NOT_INSTALLED ({})\n",
-        project_rule_copy(added)
-    )));
     assert!(rendered.ends_with(&format!(
-        "→ {} checked, 0 drifted, 1 new, {} missing\n",
-        2 + 2 * POLICY_RULES.len(),
-        POLICY_RULES.len()
+        "→ {} checked, 0 drifted, 1 new, 0 missing\n",
+        2 + POLICY_RULES.len()
     )));
     assert_eq!(report.exit_code(), 1);
 }
 
 #[test]
-fn new_is_judged_per_scope() {
+fn rules_copy_alone_leaves_policy_scope_not_installed() {
     let fs = MemFs::with_sources("body");
-    let added = POLICY_RULES[POLICY_RULES.len() - 1];
-    fs.insert(&project_rule_copy(POLICY_RULES[0]), USER_RULE_BODY);
+    fs.insert(RULES_COPY, RULES_BODY);
 
     let rendered = run(&fs).unwrap().render();
-    assert!(rendered.contains(&format!("project-rules/{added}=NEW")));
-    assert!(rendered.contains(&format!("user-rules/{added}=NOT_INSTALLED")));
+    assert!(rendered.contains("rules/agent-design-principles.md=OK\n"));
+    assert!(rendered.contains(&policy_lines("NOT_INSTALLED", true)));
 }
 
 #[test]
