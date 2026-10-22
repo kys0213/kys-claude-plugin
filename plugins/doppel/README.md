@@ -14,6 +14,8 @@ Claude 세션을 이 컴퓨터의 doppel 데몬에 연결해요. 세션 상태(�
 | `hooks/register.ts` | function hook 어댑터. 세션 이벤트 전송, `doppel attach` 유지, 질문·권한 경주 |
 | `hooks/logic.ts` | 요청 본문 만들기, 데몬·CLI 응답 해석 같은 순수 변환 |
 | `hooks/reactive.ts` | 이벤트 스트림용 최소 연산자(`Subject`·`map`·`filter`·`scan`·`merge`). rxjs 를 번들하지 않아요 |
+| `skills/brief/SKILL.md` | 데몬이 `--brief` 로 부르는 `/doppel:brief`. 질문의 판례 번들을 읽고 추천·새 의견을 JSON 하나로 답해요 |
+| `skills/triage/SKILL.md` | 데몬이 `--propose` 로 부르는 `/doppel:triage`. 들어온 카드의 번들을 읽고 프로젝트·우선순위 제안을 JSON 하나로 답해요 |
 
 ## 사전 조건
 
