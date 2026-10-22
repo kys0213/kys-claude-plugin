@@ -23,6 +23,12 @@ export const DEFERRED_ANSWER = '사용자 판단 보류 중 — doppel 이 답�
 
 export const REMOTE_DENY = '사용자가 doppel 에서 실행을 거부했어요'
 
+/**
+ * `answered_by` for an ask another plugin's hook settled first; the answer itself
+ * is in the transcript, which `doppel ingest sessions` reads.
+ */
+export const ANSWERED_ELSEWHERE = 'elsewhere'
+
 export const ALLOW = 'allow'
 
 export const DENY = 'deny'

@@ -283,6 +283,22 @@ describe('AskUserQuestion race', () => {
     expect(result).toEqual({ result: { questions: [QUESTION], answers: { [QUESTION.question]: '메모리' } } })
   })
 
+  test('an ask another hook settled first is closed as answered elsewhere', async ($, on) => {
+    const clock = boot(on)
+    const sent = asksDaemon(on)
+    waits(on, clock, ['hang'])
+    terminalAnswers(on, clock, 'hang')
+
+    void ask($)
+    await clock.settle()
+    await $.session
+      .append({ message: { type: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'B' }] } } as never)
+      .catch(() => undefined)
+    await clock.settle()
+
+    expect(bodyOf(posted(sent, '/v1/asks/ask-000001/close')[0])).toEqual({ answered_by: 'elsewhere' })
+  })
+
   test('a headless session defers an unanswered question', async ($, on) => {
     const clock = boot(on, { DOPPEL_ASK_DEFER_AFTER_MS: '0' })
     const sent = asksDaemon(on)

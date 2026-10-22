@@ -2,6 +2,7 @@ import type { EngineInterface, On } from 'claude-code'
 
 import {
   ALLOW,
+  ANSWERED_ELSEWHERE,
   DENY,
   HEARTBEAT_MS,
   PERMISSION_GRACE_MS,
@@ -50,6 +51,13 @@ const heartbeats = new Subject<SessionEvent>()
 let stopOutbound: Unsubscribe | undefined
 
 const allowedByRemote = new Set<string>()
+
+/**
+ * Asks this module opened and has not settled, by tool_use_id. When a hook above
+ * this one wins the race, this module's dispatch is abandoned without a result;
+ * the tool-result row is then the only sign the call was answered.
+ */
+const unsettled = new Map<string, { ctx: Context; askId: string }>()
 
 let headless = false
 let ended = false
@@ -298,11 +306,14 @@ export function register(on: On): void {
     }
 
     const questions = e.questions as readonly Question[]
-    const ask = await openAsk($, ctx, e.tool_use_id, 'ask', questions)
+    const toolUseId = e.tool_use_id
+    const ask = await openAsk($, ctx, toolUseId, 'ask', questions)
 
     if (ask === undefined) {
       return next(e)
     }
+
+    unsettled.set(toolUseId, { ctx, askId: ask.ask_id })
 
     const deferAt = headless
       ? (await $.clock.now()) + deferAfterMs(await $.env.get('DOPPEL_ASK_DEFER_AFTER_MS'))
@@ -311,6 +322,8 @@ export function register(on: On): void {
       next(e).then(result => ({ source: 'session' as const, result })),
       awaitRemote($, ask, deferAt).then(remote => ({ source: 'remote' as const, remote })),
     ])
+
+    unsettled.delete(toolUseId)
 
     if (winner.source === 'session') {
       await closeAsk($, ctx, ask.ask_id, answersOf(winner.result), 'session')
@@ -327,6 +340,21 @@ export function register(on: On): void {
     await closeAsk($, ctx, ask.ask_id, winner.remote.answers, winner.remote.answeredBy)
 
     return { result: { questions, answers: winner.remote.answers } } as never
+  })
+
+  on('session.append', async ($, e, next) => {
+    const content = Array.isArray(e.message.content) ? e.message.content : []
+
+    for (const block of content as readonly { type?: string; tool_use_id?: string }[]) {
+      const pending = block.type === 'tool_result' && block.tool_use_id ? unsettled.get(block.tool_use_id) : undefined
+
+      if (pending !== undefined && block.tool_use_id) {
+        unsettled.delete(block.tool_use_id)
+        await closeAsk($, pending.ctx, pending.askId, undefined, ANSWERED_ELSEWHERE)
+      }
+    }
+
+    return next(e)
   })
 
   on('tool.check', async ($, e, next) => {
@@ -374,10 +402,14 @@ export function register(on: On): void {
       return local
     }
 
+    unsettled.set(toolUseId, { ctx, askId: ask.ask_id })
+
     const winner = await Promise.race([
       local.then(result => ({ source: 'session' as const, result })),
       awaitRemote($, ask).then(remote => ({ source: 'remote' as const, remote })),
     ])
+
+    unsettled.delete(toolUseId)
 
     if (winner.source === 'session') {
       const choice = deniedOf(winner.result) ? DENY : ALLOW
