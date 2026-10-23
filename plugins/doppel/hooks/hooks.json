@@ -1,0 +1,4 @@
+{
+  "description": "세션 이벤트를 doppel 데몬에 보내고, AskUserQuestion·권한 확인을 터미널과 doppel 중 먼저 온 답으로 확정한다. 데몬에 닿지 못하면 아무것도 바꾸지 않는다.",
+  "modules": ["./register.ts"]
+}
