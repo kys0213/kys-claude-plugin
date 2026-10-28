@@ -8,7 +8,7 @@ allowed-tools: ["Bash", "AskUserQuestion"]
 
 설치된 atelier CLI 와 setup 이 복사한 산출물을 활성 플러그인 버전으로 동기화합니다. 이미 설치한 모듈을 새 버전과 같게 맞춥니다. 기존 파일을 갱신하고, **정책 룰을 설치했다면 새 버전이 추가한 정책 룰도 설치합니다**. setup 에서 고르지 않은 모듈은 설치하지 않으니, 모듈 설치·hook 등록이 필요하면 `/atelier:setup` 을 사용하세요.
 
-rules 복사본 덮어쓰기 확인(Step 3)을 제외하면 사용자 선택이 필요 없으므로 질문 없이 바로 실행합니다. 질문이 불가능한 자동화·headless 경로에서는 rules 덮어쓰기를 **건너뛰기(기본값)** 로 처리하고 보고만 남깁니다 — 나머지 단계는 그대로 동작합니다.
+rules 복사본 덮어쓰기 확인(Step 3·4)을 제외하면 사용자 선택이 필요 없으므로 질문 없이 바로 실행합니다. 질문이 불가능한 자동화·headless 경로에서는 rules 덮어쓰기를 **건너뛰기(기본값)** 로 처리하고 보고만 남깁니다 — 나머지 단계는 그대로 동작합니다.
 
 ## 실행
 
@@ -84,6 +84,21 @@ atelier drift sync --target user-rules --name <파일명> --plugin-root "${CLAUD
 출력은 파일마다 `installed: <경로>` 한 줄입니다.
 
 **`NOT_INSTALLED`** → 건너뜁니다. 사용자가 setup 에서 고르지 않은 모듈이므로 설치하지 않고, 필요 시 `/atelier:setup` 을 안내만 합니다.
+
+### Step 4 — 프로젝트 코드 스타일 룰 (설치된 경우만)
+
+`/atelier:code-style` 이 현재 프로젝트(`${CLAUDE_PROJECT_DIR:-.}`)에 언어 룰을 설치했는지 점검합니다. 다른 프로젝트는 점검하지 않습니다:
+
+```bash
+atelier code-style check --plugin-root "${CLAUDE_PLUGIN_ROOT}" --project-dir "${CLAUDE_PROJECT_DIR:-.}"
+```
+
+- exit 2 이고 stderr 가 `Error: no code-style language installed` 로 시작하면 설치된 언어가 없는 것입니다. 건너뛰고 보고에도 쓰지 않습니다. 그 밖의 exit 2 는 stderr 원문과 함께 보고합니다.
+- `NEW` 만 있으면 묻지 않고 갱신합니다. `DRIFTED`·`ORPHANED` 가 있으면 Step 3 rules 복사본과 같이 AskUserQuestion 으로 확인한 뒤에만 갱신하고, headless 에서는 건너뜁니다:
+  ```bash
+  atelier code-style update --plugin-root "${CLAUDE_PLUGIN_ROOT}" --project-dir "${CLAUDE_PROJECT_DIR:-.}"
+  ```
+- 판정·갱신 규칙은 `/atelier:code-style` 이 단일 출처입니다.
 
 ## 결과 보고
 

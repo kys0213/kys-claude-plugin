@@ -67,13 +67,18 @@ atelier drift <check|sync>                # setup 이 복사한 산출물의 드
 atelier git <reviews|guard|hook>          # git-utils 의 기계적 호출 표면 (TypeScript → Rust 포팅)
 atelier session <push-check|ensure-env>   # 세션 경계 hook (SessionStart / Stop)
 atelier orchestrator <spawn-check|compact-note>      # function hooks 모듈이 위임하는 결정적 판정 (아래 §Function hooks)
+atelier code-style <install|update|check> # 프로젝트 언어별 코드 스타일 룰 설치·갱신·점검 (/atelier:code-style)
 ```
 
 `drift` 는 `/atelier:update`·`/atelier:setup` 명세가 호출하는 결정적 도구입니다.
 `check` 는 CLAUDE.md `[coding-style]` 블록과 `~/.claude/rules/atelier/` 룰 복사본을 플러그인 원본과
 비교해 `<check>=<STATUS>` 라인으로 보고하고 (exit 0 무드리프트 / 1 드리프트 / 2 오류),
 `sync --target <claude-md|rules|user-rules>` 는 백업(`<file>.bak-<timestamp>`) 후 해당 산출물만
-원본으로 갱신합니다 — 신규 설치는 setup 담당이고, sync 는 이미 설치한 정책 룰에 새 버전이 추가한 파일만 채웁니다. 룰은 user scope 에만 설치합니다.
+원본으로 갱신합니다 — 신규 설치는 setup 담당이고, sync 는 이미 설치한 정책 룰에 새 버전이 추가한 파일만 채웁니다. drift 가 다루는 룰은 user scope 에만 설치합니다.
+
+`code-style` 은 `/atelier:code-style`·`/atelier:update` 명세가 호출합니다. `rules/code-style/<언어>/` 와 `common/` 원본을
+프로젝트 `.claude/rules/atelier/code-style/` 에 복사하고, 같은 `<name>=<STATUS>` 형식과 exit 규칙으로 점검합니다
+(원본에서 없어진 룰은 `ORPHANED`). 언어 룰은 프로젝트 성격에 따르고 팀과 공유돼야 해서 프로젝트 scope 에 둡니다.
 
 `push-check` 는 Stop 시점에 **열린 PR 이 있는 브랜치가 upstream 보다 ahead** 이면
 `{"decision":"block","reason":...}` 를 stdout 에 내보내 세션 종료를 막습니다 (항상 exit 0 —

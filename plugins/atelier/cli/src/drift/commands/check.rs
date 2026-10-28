@@ -130,7 +130,7 @@ fn check_claude_md(
     }
 }
 
-fn check_verbatim_copy(
+pub(crate) fn check_verbatim_copy(
     deps: &DriftDeps,
     name: &str,
     copy_path: &str,

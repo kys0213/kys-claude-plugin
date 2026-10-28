@@ -54,7 +54,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 >
 > `DRIFTED`·`NEW` 는 `/atelier:update` 가 처리합니다. setup 에서는 `NOT_INSTALLED` 로 보고된 산출물의 모듈(`style` → CLAUDE.md 블록·정책 룰, `workflow` → rules 복사본) 중 새로 설치할 것만 선택하면 됩니다.
 
-> 룰은 전부 user scope(`~/.claude/rules/atelier/`)에만 설치합니다. 모든 프로젝트에 공통으로 깔리는 베이스 룰이라 레포마다 복사하지 않습니다.
+> setup 이 설치하는 룰은 전부 user scope(`~/.claude/rules/atelier/`)에만 설치합니다. 모든 프로젝트에 공통으로 깔리는 베이스 룰이라 레포마다 복사하지 않습니다. 언어별 코드 스타일 룰(Go·Rust)은 프로젝트 성격에 따르므로 setup 이 아니라 `/atelier:code-style` 이 프로젝트 `.claude/rules/atelier/code-style/` 에 설치합니다.
 
 > 이미 설치된 환경에서 guard hook 만 비활성화/재설정하려면 Step 5 (hook 관리 모드)로 바로 진행합니다.
 
