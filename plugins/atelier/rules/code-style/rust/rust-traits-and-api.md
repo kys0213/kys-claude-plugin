@@ -1,13 +1,13 @@
 ---
 name: rust-traits-and-api
-description: Rust 트레이트와 공개 API 설계 — 표준 트레이트·derive, 제네릭 vs dyn, 트레이트를 정의할 때, 매크로 절제, non_exhaustive, must_use
+description: Rust 공개 API 설계 — 표준 트레이트·derive, 확장 트레이트 소유, 라이브러리 함수 입출력, 매크로 절제, non_exhaustive, must_use, const fn
 paths:
-  - "**/*.rs"
+  - "**/lib.rs"
 ---
 
 # Rust 트레이트와 API
 
-출처: Google Rust Style Guide — Traits, Macros, Other Rust features(Implement expected API sets together, `#[doc(hidden)]`, `const` functions, Avoid overloading, `#[non_exhaustive]`, `#[must_use]`).
+출처: Google Rust Style Guide — Traits, Function inputs and outputs, Macros, Other Rust features(Implement expected API sets together, `#[doc(hidden)]`, `const` functions, Avoid overloading, `#[non_exhaustive]`, `#[must_use]`).
 
 ## 트레이트 구현
 
@@ -29,13 +29,9 @@ paths:
 | 공개 필드 타입 | 모든 하위 필드가 구현한 트레이트를 구현하는 것을 고려한다 |
 
 - DO: 주요 생성 경로인 `From` 구현에는 명시적 생성자(`new()`, `from_foo()`)를 짝지어 둔다.
-- DO: 함수 옵션 묶음으로 쓰는 전부-공개 필드 구조체는 `Default` 를 구현해 `..Default::default()` 갱신 문법을 쓸 수 있게 한다.
 
-## 트레이트를 정의할 때
+## 확장 트레이트
 
-- DO: 트레이트는 다음 목적에만 정의한다 — 제네릭 프로그래밍(`T: Trait` 제약), `impl Trait`/`dyn Trait` 로 받거나 돌려주기, 확장 트레이트. 테스트용 fake 를 주입하는 경계는 제네릭 제약이나 `dyn Trait` 로 받으므로 허용 목적에 해당한다.
-- DON'T: 코드를 정리하려는 목적만으로 트레이트를 만든다. 그 밖의 경우는 고유 구현(`impl Type`)을 쓴다.
-- DO (라이브러리): 함수 매개변수는 `dyn Trait` 보다 제네릭(`T: Trait`, `impl Trait`)을 받는다. 간접 호출 비용이 없고 인라인이 가능하다. 코드 크기가 중요하면 예외.
 - DO: 확장 트레이트(다른 크레이트의 타입에 메서드만 더하는 트레이트)는 `~Ext` 접미사를 붙이고, 원래 타입을 소유한 팀이 소유한다.
 
 ```rust
@@ -44,6 +40,14 @@ trait ForeignTypeExt {
 }
 impl ForeignTypeExt for foreign_crate::ForeignType { /* ... */ }
 ```
+
+## 라이브러리 함수 입출력
+
+- DO (라이브러리): 입력을 순회만 한다면 `impl IntoIterator` 나 이터레이터를 받는다. 애플리케이션 코드는 코드가 단순해지면 `&[T]` 를 받아도 된다.
+- 권장 (라이브러리): 호출 쪽이 여러 타입을 들고 있을 가능성이 크고 호출부 편의가 중요하면 `impl Into<T>` 를 받는다. 코드 크기·추론 비용과 저울질한다.
+- DON'T (애플리케이션): `impl Into<T>` 인자를 쓴다.
+- 권장 (라이브러리): `Vec<T>` 보다 이터레이터(구체 타입 또는 `impl Iterator`)를 반환한다. 호출 쪽이 수집·순회·연결을 고를 수 있다.
+- 다음이면 `Vec<T>` 반환이 맞다: 대부분의 호출 쪽이 어차피 벡터를 만든다, 구현이 자연스럽게 벡터를 만든다, 임의 인덱싱이 필요하다, `for` 루프가 더 맞고 할당 비용이 문제되지 않는다, 새 컬렉션 생성이 함수의 목적이다, 이미 있는 벡터를 돌려준다. 애플리케이션 코드는 이터레이터의 유연성·성능이 분명히 필요하지 않으면 `Vec<T>` 를 반환해도 된다.
 
 ## 매크로
 

@@ -15,8 +15,9 @@ allowed-tools: ["Bash", "AskUserQuestion"]
 | `${CLAUDE_PLUGIN_ROOT}/rules/code-style/<언어>/*.md` | `<프로젝트>/.claude/rules/atelier/code-style/<언어>/*.md` |
 | `${CLAUDE_PLUGIN_ROOT}/rules/code-style/common/*.md` | `<프로젝트>/.claude/rules/atelier/code-style/common/*.md` |
 
-- 언어 하나라도 설치하면 `common/`(언어 공통 취향 룰)도 함께 설치됩니다. 언어 룰이 common 룰을 참조합니다.
+- 언어 하나라도 설치하면 `common/`(언어 공통 취향 룰)도 함께 설치됩니다. 언어 룰과 함께 로드돼 같이 적용됩니다.
 - common 룰과 언어 룰(Google 가이드)이 충돌하면 common 룰이 우선합니다.
+- 룰은 **파일 이름으로 나눠 로드**됩니다. 언어의 모든 파일에는 작은 core 룰만 로드되고, 역할별 룰은 그 역할의 파일 이름(예: `*_test.go`, `main.go`, `errors.go`, `config.go`, `*_client.go`, `*_worker.go`, `doc.go`)을 Read 로 열 때만 로드됩니다. 파일 이름 컨벤션은 함께 설치되는 core 룰이 알려 줍니다. 기존 프로젝트의 파일 이름이 다르면 역할 룰이 로드되지 않으니, 설치 뒤 사용자에게 이 점을 안내합니다.
 
 ## Step 0 — atelier CLI 보장
 

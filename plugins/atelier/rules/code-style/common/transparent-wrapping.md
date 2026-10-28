@@ -2,13 +2,22 @@
 name: transparent-wrapping
 description: 래퍼(미들웨어·인터셉터·데코레이터)는 감싼 대상의 완료 시점·에러·인자를 바꾸지 않는다
 paths:
-  - "**/*.go"
-  - "**/*.rs"
+  - "**/*_client.go"
+  - "**/*_adapter.go"
+  - "**/*_repository.go"
+  - "**/*_handler.go"
+  - "**/*_middleware.go"
+  - "**/client.rs"
+  - "**/*_client.rs"
+  - "**/*_adapter.rs"
+  - "**/adapter/**/*.rs"
+  - "**/*_repository.rs"
+  - "**/*_handler.rs"
+  - "**/middleware.rs"
+  - "**/*_middleware.rs"
 ---
 
 # 투명한 래핑 (Transparent Wrapping)
-
-언어 공통 취향 룰이다. 언어별 룰(Google 스타일 가이드)과 충돌하면 이 룰을 따른다.
 
 래퍼(미들웨어, 인터셉터, 데코레이터, 계측·로깅·재시도를 덧씌우는 감싸기)는 **감싼 대상과 같은 계약**을 지킨다. 호출하는 쪽은 래퍼가 있든 없든 같은 결과를 받아야 한다. 래퍼가 계약을 바꾸면, 래퍼를 끼우거나 빼는 것만으로 동작이 달라져 원인을 찾기 어렵다.
 

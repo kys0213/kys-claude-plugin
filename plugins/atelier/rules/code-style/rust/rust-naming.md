@@ -1,8 +1,8 @@
 ---
 name: rust-naming
-description: Rust 이름 규칙 — as_/to_/into_ 변환, 접근자(foo/foo_mut/set_foo/with_foo), new/try_new/from_foo 생성자, Ext 접미사, 수명·제네릭 이름, 약어 금지
+description: Rust 공개 API 이름 규칙 — as_/to_/into_ 변환, 접근자(foo/foo_mut/set_foo/with_foo), new/try_new/from_foo 생성자, Ext 접미사, 수명·제네릭 이름, 약어 금지
 paths:
-  - "**/*.rs"
+  - "**/lib.rs"
 ---
 
 # Rust 이름
@@ -37,7 +37,7 @@ fn into_inner(self) -> T
 | `replace_foo(foo)` | 설정하고 이전 값을 돌려준다 |
 | `with_foo(f)` / `with_mut_foo(f)` | 클로저로 접근한다. 읽기·쓰기 둘 다 필요할 때만 `with_mut_` 를 나누고, 하나뿐이면 `with_foo` |
 
-- DO: 클로저 접근자(`with_foo`)는 값이 내부 가변성 래퍼(`Mutex`, `RefCell`) 안에 있을 때 쓴다. `MutexGuard` 같은 RAII 객체를 돌려주면 구현 세부가 새어 나간다. 변경 뒤 후속 작업·검증이 필요한데 값을 clone 할 수 없어 `set_foo` 를 쓸 수 없을 때도 쓴다. 클로저의 반환값을 그대로 돌려준다.
+- DO: 클로저 접근자(`with_foo`)는 값이 내부 가변성 래퍼(`Mutex`, `RefCell`) 안에 있을 때(RAII 가드를 돌려주면 구현 세부가 샌다), 또는 변경 뒤 후속 작업·검증이 필요한데 값을 clone 할 수 없어 `set_foo` 를 못 쓸 때 쓴다. 클로저의 반환값을 그대로 돌려준다.
 
 ```rust
 impl Session {

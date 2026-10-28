@@ -1,13 +1,13 @@
 ---
 name: rust-docs
-description: Rust 문서 주석의 형식 — ///·//! 구분, Markdown, 문장 형태, panic·unsafe 불변식 기록, SAFETY 주석
+description: Rust 문서 주석의 형식 — ///·//! 구분, 크레이트 문서, Markdown, 문장 형태, Panics·Safety 절, 예제
 paths:
-  - "**/*.rs"
+  - "**/lib.rs"
 ---
 
 # Rust 문서 주석
 
-출처: Google Rust Style Guide — When and how to write documentation, Other Rust features(Unsafe code).
+출처: Google Rust Style Guide — When and how to write documentation.
 
 이 룰은 Rust 문서 주석의 형식만 다룬다. 가이드의 "공개 API 에는 문서 주석을 단다(`missing_docs` lint)"는 따르지 않는다 — 공개 여부만으로 문서 주석을 의무화하지 않고, 이름·시그니처로 알 수 없는 사용 계약·전제조건·실패 조건이 있을 때만 쓴다. `missing_docs` lint 를 켠 프로젝트는 프로젝트 룰로 이 룰을 덮어쓴다.
 
@@ -52,14 +52,3 @@ pub fn remove(&mut self, index: usize) -> T { /* ... */ }
 - DON'T: 언어 기초를 설명한다 (`/// A mock implementation of the FileSystem trait` 를 `impl FileSystem for MockFileSystem` 위에).
 - DON'T: 함수 이름을 그대로 풀어 쓴다 (`/// Removes an element.` 를 `remove_element` 위에).
 - 스스로 설명되는 enum variant 에는 문서를 달지 않는다.
-
-## `SAFETY:` 주석
-
-- DO: 모든 `unsafe` 블록 바로 위에 `// SAFETY:` 로 시작하는 주석을 달아, 이 코드가 왜 올바른지(어떤 불변식이 어디서 보장되는지) 적는다. 이것은 주석으로 남길 "비자명한 제약"의 대표 사례다.
-- DO: unsafe 의 기술적 근거 — 왜 안전한 코드로 쓰지 않았는지, 성능이 이유라면 벤치마크가 있는지 — 를 블록 단위 또는 파일·빌드 단위로 남긴다.
-
-```rust
-// SAFETY: `idx` was bounds-checked against `self.len` above, and `self.ptr`
-// points to `self.len` initialized elements.
-let value = unsafe { *self.ptr.add(idx) };
-```

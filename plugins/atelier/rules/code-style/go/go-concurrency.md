@@ -1,8 +1,10 @@
 ---
 name: go-concurrency
-description: Go 고루틴 수명 관리, 동기 함수 선호, context 전달 규칙(첫 매개변수·구조체 저장 금지·커스텀 타입 금지), 채널 방향
+description: Go 동시성 파일(worker·pool·scheduler) — 고루틴 수명 관리, 동기 함수 선호, errgroup, context 전달, 채널 방향
 paths:
-  - "**/*.go"
+  - "**/*_worker.go"
+  - "**/*_pool.go"
+  - "**/*_scheduler.go"
 ---
 
 # Go 동시성
@@ -45,6 +47,7 @@ func (w *Worker) Run() {
 
 - DO: 결과를 직접 반환하고, 콜백·채널 작업을 반환 전에 끝내는 동기 함수를 기본으로 쓴다. 고루틴이 호출 안에 머물러 수명을 따지기 쉽고, 테스트에서 폴링·동기화가 필요 없다.
 - DON'T: 비동기 API 를 기본으로 만들지 않는다. 동시성이 필요하면 호출자가 별도 고루틴에서 호출하면 된다. 호출자 쪽에서 불필요한 동시성을 걷어내기는 어렵다.
+- 권장: 관련 작업 묶음에서 첫 에러만 의미 있으면 `errgroup` 으로 모은다.
 
 ## context
 

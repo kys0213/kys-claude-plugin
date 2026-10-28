@@ -69,7 +69,8 @@ func main() {
 }
 ```
 
-- 진입점의 루트 context 는 `context.Background()` 로 만든다. side-effect import(`import _`)는 진입점에 모은다. `Must` 함수는 초기화 시점에만 쓴다.
+- 진입점(`main`, `init`)의 루트 context 는 `context.Background()` 로 만든다. side-effect import(`import _`)는 진입점에 모은다. `Must` 함수는 초기화 시점에만 쓴다.
+- 권장: 내부 상태가 복구 불가능하게 깨진 경우에만 프로그램을 끝내고, 이때도 `panic` 보다 로그 후 종료를 쓴다.
 
 ## 서브커맨드 CLI
 

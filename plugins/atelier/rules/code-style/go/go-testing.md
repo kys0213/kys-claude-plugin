@@ -35,7 +35,7 @@ if got, want := obj.Type, "post"; got != want {
 
 - DO: 실패한 함수와 입력을 밝힌다. 형식은 `YourFunc(%v) = %v, want %v`. 입력이 크면 케이스 설명을 붙여 출력한다.
 - DO: 실제 값을 먼저, 기대 값을 나중에 쓴다. "actual/expected" 대신 "got/want" 를 쓴다.
-- DO: 큰 값은 diff 로 출력하고 방향을 적는다 (`(-want +got)`). diff 앞에 줄바꿈을 넣는다.
+- DO: 큰 값은 diff 로 출력하고 방향을 적는다 (`(-want +got)`). diff 앞에 줄바꿈을 넣는다. `cmp.Diff` 인자 순서는 주변 코드에 맞추되 메시지의 방향 표기와 일치시킨다.
 - DO: 문자열은 `%q`, 작은 구조체는 `%+v` 로 출력한다. 셋업 실패는 간단히 적어도 된다.
 
 ```go
@@ -120,3 +120,12 @@ for _, tc := range tests {
 - 권장: 셋업은 필요한 테스트에서 명시적으로 호출한다. `init` 이나 패키지 변수로 모든 테스트에 셋업을 걸지 않는다 — 단독 실행이 느려지고 실패하기 쉽다.
 - 권장: 비싸고 일부 테스트만 쓰며 정리가 필요 없는 셋업은 `sync.Once` 로 공유한다. 패키지 전체가 정리까지 필요한 비싼 자원을 쓸 때만 `TestMain` 을 검토한다.
 - DO: 테스트는 같은 패키지(`package foo`)에 둘 수 있다. 공개 API 만 검사하거나 순환 의존이 생기면 `package foo_test` 를 쓴다.
+
+## 테스트 더블
+
+출처: best-practices §Test double and helper packages, §Interfaces
+
+- 권장: 테스트 더블을 실제 구현과 같은 API 패키지에서 공개하지 않는다. 더블 패키지는 원본 이름 뒤에 `test` 를 붙인다 (`creditcard` → `creditcardtest`).
+- 권장: 더블이 한 종류면 `Stub` 처럼 짧게, 여러 행동이면 `AlwaysCharges`/`AlwaysDeclines` 처럼 행동으로, 여러 타입이면 `StubService` 처럼 타입을 붙인다.
+- 권장: 테스트 안에서 더블을 담는 변수는 실제 타입과 구분되게 짓는다 (`spyCC`).
+- 권장: 협력자는 전역 치환이 아니라 생성자·인자 주입으로 바꿔 넣는다.
