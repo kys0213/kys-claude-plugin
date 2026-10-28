@@ -1,7 +1,7 @@
 ---
 name: workflow
 description: 에이전트 워크플로우·컨벤션 설계의 단일 진입점. "컨벤션 잡아줘", ".claude/rules 만들어줘/점검해줘", "CLAUDE.md 정리", "에이전트 설계 원칙 룰 설치", "기존 command/agent/skill 리뷰" 같은 요청에 사용합니다. 슬래시로 직접 호출하거나 맥락에서 모델이 자동 호출합니다. 코드베이스 분석 기반 .claude/rules 구조 설계 지식 포함.
-version: 1.0.0
+version: 1.0.1
 ---
 
 # workflow
@@ -21,7 +21,7 @@ version: 1.0.0
 
 ## 설계 원칙 룰 설치
 
-플러그인 내부의 룰 원본을 user scope(`~/.claude/rules/atelier/`)에 복사합니다. 모든 프로젝트에 공통으로 깔리는 베이스 룰이라 프로젝트 `.claude/rules/` 에는 설치하지 않습니다:
+플러그인 내부의 룰 원본을 user scope(`~/.claude/rules/atelier/`)에 복사합니다. 모든 프로젝트에 공통으로 깔리는 베이스 룰이라 프로젝트 `.claude/rules/` 에는 설치하지 않습니다 (언어별 코드 스타일 룰은 atelier 의 `code-style` 커맨드가 프로젝트에 설치합니다):
 
 1. `~/.claude/rules/atelier/` 디렉토리가 없으면 생성. 대상 파일이 이미 존재하면 덮어쓸지 확인 (`--force` 의도 시 즉시 덮어쓰기)
 2. `${CLAUDE_PLUGIN_ROOT}/rules/agent-design-principles.md` 를 Read 하여 **내용 수정 없이 그대로** `~/.claude/rules/atelier/agent-design-principles.md` 에 Write
