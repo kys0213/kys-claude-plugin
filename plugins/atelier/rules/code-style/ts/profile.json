@@ -1,0 +1,56 @@
+{
+  "roles": {
+    "source": [
+      "**/*.ts",
+      "**/*.tsx",
+      "**/*.mts",
+      "**/*.cts",
+      "**/*.js",
+      "**/*.jsx",
+      "**/*.mjs",
+      "**/*.cjs"
+    ],
+    "config": [
+      "**/config.ts",
+      "**/config/**/*.ts",
+      "**/config.js",
+      "**/config/**/*.js"
+    ],
+    "boundary": [
+      "**/*.client.ts",
+      "**/*-client.ts",
+      "**/*.adapter.ts",
+      "**/*-adapter.ts",
+      "**/*.repository.ts",
+      "**/*-repository.ts",
+      "**/*.handler.ts",
+      "**/*-handler.ts",
+      "**/*.middleware.ts",
+      "**/*-middleware.ts",
+      "**/*.client.js",
+      "**/*-client.js",
+      "**/*.adapter.js",
+      "**/*-adapter.js",
+      "**/*.repository.js",
+      "**/*-repository.js",
+      "**/*.handler.js",
+      "**/*-handler.js",
+      "**/*.middleware.js",
+      "**/*-middleware.js"
+    ],
+    "test": [
+      "**/*.test.ts",
+      "**/*.spec.ts",
+      "**/*.test.tsx",
+      "**/*.spec.tsx",
+      "**/*.test.js",
+      "**/*.spec.js",
+      "**/*.test.jsx",
+      "**/*.spec.jsx",
+      "**/__tests__/**/*.ts",
+      "**/__tests__/**/*.tsx",
+      "**/__tests__/**/*.js",
+      "**/__tests__/**/*.jsx"
+    ]
+  }
+}
