@@ -1,4 +1,4 @@
-use crate::code_style::commands::{judge, select_groups, CodeStyleDeps, WhenOmitted};
+use crate::code_style::commands::{with_common, CodeStyleDeps, Workspace};
 use crate::code_style::core::types::{CheckReport, CodeStylePaths};
 
 pub fn run(
@@ -6,8 +6,11 @@ pub fn run(
     paths: &CodeStylePaths,
     langs: &[String],
 ) -> Result<CheckReport, String> {
-    let groups = select_groups(deps, paths, langs, WhenOmitted::InstalledLangs)?;
-    let findings = judge(deps, paths, &groups)?
+    let ws = Workspace::load(deps, paths)?;
+    let langs = ws.requested_or_installed(langs)?;
+    let profiles = ws.profiles_with(&langs)?;
+    let findings = ws
+        .judge(&with_common(&langs), &profiles)?
         .into_iter()
         .map(|rule| rule.finding)
         .collect();

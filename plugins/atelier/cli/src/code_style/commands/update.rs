@@ -1,4 +1,4 @@
-use crate::code_style::commands::{apply, judge, select_groups, CodeStyleDeps, WhenOmitted};
+use crate::code_style::commands::{sync, CodeStyleDeps, Workspace};
 use crate::code_style::core::types::{ApplyReport, CodeStylePaths};
 
 pub fn run(
@@ -6,6 +6,7 @@ pub fn run(
     paths: &CodeStylePaths,
     langs: &[String],
 ) -> Result<ApplyReport, String> {
-    let groups = select_groups(deps, paths, langs, WhenOmitted::InstalledLangs)?;
-    apply(deps, judge(deps, paths, &groups)?)
+    let ws = Workspace::load(deps, paths)?;
+    let langs = ws.requested_or_installed(langs)?;
+    sync(&ws, &langs)
 }

@@ -1,9 +1,7 @@
 ---
 name: cohesion
 description: 코드를 소비 concern 기준으로 묶고, 사용처 수로 지역 배치·공유 승격을 정하며, 위임만 하는 층은 걷어낸다
-paths:
-  - "**/*.go"
-  - "**/*.rs"
+roles: [source]
 ---
 
 # 응집

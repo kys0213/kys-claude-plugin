@@ -1,20 +1,7 @@
 ---
 name: transparent-wrapping
 description: 래퍼(미들웨어·인터셉터·데코레이터)는 감싼 대상의 완료 시점·에러·인자를 바꾸지 않는다
-paths:
-  - "**/*_client.go"
-  - "**/*_adapter.go"
-  - "**/*_repository.go"
-  - "**/*_handler.go"
-  - "**/*_middleware.go"
-  - "**/client.rs"
-  - "**/*_client.rs"
-  - "**/*_adapter.rs"
-  - "**/adapter/**/*.rs"
-  - "**/*_repository.rs"
-  - "**/*_handler.rs"
-  - "**/middleware.rs"
-  - "**/*_middleware.rs"
+roles: [boundary]
 ---
 
 # 투명한 래핑 (Transparent Wrapping)

@@ -1,13 +1,7 @@
 ---
 name: config-loading
 description: 환경변수·설정은 설정 계층 한 곳에서 타입 있는 값으로 읽어 주입하고, 필수 설정 누락은 시작 시점에 실패시킨다
-paths:
-  - "**/config.go"
-  - "**/options.go"
-  - "**/config/**/*.go"
-  - "**/config.rs"
-  - "**/options.rs"
-  - "**/config/**/*.rs"
+roles: [config]
 ---
 
 # 설정 읽기

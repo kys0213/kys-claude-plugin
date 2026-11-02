@@ -37,12 +37,108 @@ pub fn source(group: &str, file: &str) -> String {
     format!("{PLUGIN_ROOT}/rules/code-style/{group}/{file}")
 }
 
+pub fn profile_path(lang: &str) -> String {
+    source(lang, "profile.json")
+}
+
 pub fn copy(group: &str, file: &str) -> String {
     format!("{PROJECT_DIR}/.claude/rules/atelier/code-style/{group}/{file}")
 }
 
+pub fn record_path() -> String {
+    format!("{PROJECT_DIR}/.claude/rules/atelier/code-style/installed.json")
+}
+
+/// The source glob every fixture common rule (`roles: [source]`) renders to.
+pub fn source_glob(lang: &str) -> &'static str {
+    match lang {
+        "go" => "**/*.go",
+        "rust" => "**/*.rs",
+        other => panic!("no fixture profile {other}"),
+    }
+}
+
+pub fn profile_json(lang: &str) -> String {
+    let ext = source_glob(lang).trim_start_matches("**/*");
+    format!(
+        "{{\"roles\": {{\"source\": [\"{}\"], \"config\": [\"**/config{ext}\"], \
+         \"boundary\": [\"**/*_client{ext}\"], \"test\": [\"**/*_test{ext}\"]}}}}\n",
+        source_glob(lang)
+    )
+}
+
+/// A source file's content: a language rule is plain, a common rule declares
+/// `roles: [source]`.
 pub fn body(group: &str, file: &str) -> String {
-    format!("# {group}/{file}\n\n- DO keep it simple\n")
+    if group == "common" {
+        common_source(file, "roles: [source]")
+    } else {
+        format!("# {group}/{file}\n\n- DO keep it simple\n")
+    }
+}
+
+pub fn common_source(file: &str, roles_line: &str) -> String {
+    format!("---\nname: {file}\n{roles_line}\n---\n\n# common/{file}\n")
+}
+
+/// What a fixture common rule installs as for `langs`.
+pub fn rendered(file: &str, langs: &[&str]) -> String {
+    let mut sorted = langs.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    let globs: String = sorted
+        .iter()
+        .map(|lang| format!("  - \"{}\"\n", source_glob(lang)))
+        .collect();
+    format!("---\nname: {file}\npaths:\n{globs}---\n\n# common/{file}\n")
+}
+
+/// What `group/file` installs as when `langs` are installed.
+pub fn expected(group: &str, file: &str, langs: &[&str]) -> String {
+    if group == "common" {
+        rendered(file, langs)
+    } else {
+        body(group, file)
+    }
+}
+
+pub fn record_json(langs: &[&str], rules: &[&str]) -> String {
+    let list = |items: Vec<String>| -> String {
+        if items.is_empty() {
+            "[]".to_string()
+        } else {
+            let lines: Vec<String> = items.iter().map(|i| format!("    \"{i}\"")).collect();
+            format!("[\n{}\n  ]", lines.join(",\n"))
+        }
+    };
+    let mut langs: Vec<String> = langs.iter().map(|l| l.to_string()).collect();
+    langs.sort();
+    langs.dedup();
+    let mut rules: Vec<String> = rules.iter().map(|r| r.to_string()).collect();
+    rules.sort();
+    rules.dedup();
+    format!(
+        "{{\n  \"langs\": {},\n  \"rules\": {}\n}}\n",
+        list(langs),
+        list(rules)
+    )
+}
+
+/// Every `group/file` name a full install of `langs` records.
+pub fn all_rules(langs: &[&str]) -> Vec<String> {
+    let mut names = Vec::new();
+    for group in langs.iter().copied().chain(["common"]) {
+        for file in rules_of(group) {
+            names.push(format!("{group}/{file}"));
+        }
+    }
+    names
+}
+
+pub fn full_record(langs: &[&str]) -> String {
+    let rules = all_rules(langs);
+    let refs: Vec<&str> = rules.iter().map(String::as_str).collect();
+    record_json(langs, &refs)
 }
 
 pub fn paths() -> CodeStylePaths {
@@ -65,13 +161,37 @@ pub struct MemFs {
 }
 
 impl MemFs {
-    /// Every fixture source (go, rust, common) and nothing installed.
+    /// Every fixture source (go, rust, common) with profiles, nothing installed.
     pub fn with_sources() -> Self {
         let fs = MemFs::default();
         for group in ["go", "rust", "common"] {
             for file in rules_of(group) {
                 fs.insert(&source(group, file), &body(group, file));
             }
+        }
+        for lang in ["go", "rust"] {
+            fs.insert(&profile_path(lang), &profile_json(lang));
+        }
+        fs
+    }
+
+    /// Sources plus a full, in-sync install of `langs` with its record.
+    pub fn installed(langs: &[&str]) -> Self {
+        let fs = MemFs::installed_without_record(langs);
+        fs.insert(&record_path(), &full_record(langs));
+        fs
+    }
+
+    /// Sources plus an in-sync install of `langs` from before install records.
+    pub fn installed_without_record(langs: &[&str]) -> Self {
+        let fs = MemFs::with_sources();
+        for lang in langs {
+            for file in rules_of(lang) {
+                fs.insert(&copy(lang, file), &body(lang, file));
+            }
+        }
+        for file in COMMON_RULES {
+            fs.insert(&copy("common", file), &rendered(file, langs));
         }
         fs
     }
@@ -92,13 +212,6 @@ impl MemFs {
 
     pub fn mkdir(&self, path: &str) {
         self.empty_dirs.borrow_mut().insert(path.to_string());
-    }
-
-    /// Installs every fixture source of `group` verbatim.
-    pub fn install_group(&self, group: &str) {
-        for file in rules_of(group) {
-            self.insert(&copy(group, file), &body(group, file));
-        }
     }
 
     pub fn content(&self, path: &str) -> Option<String> {

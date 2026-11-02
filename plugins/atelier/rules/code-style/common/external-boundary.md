@@ -1,20 +1,7 @@
 ---
 name: external-boundary
 description: 외부 시스템과 닿는 코드는 어댑터로 묶어 코어는 추상에만 의존시키고, 외부 데이터는 전용 타입으로 한 번 디코드해 넘긴다
-paths:
-  - "**/*_client.go"
-  - "**/*_adapter.go"
-  - "**/*_repository.go"
-  - "**/*_handler.go"
-  - "**/*_middleware.go"
-  - "**/client.rs"
-  - "**/*_client.rs"
-  - "**/*_adapter.rs"
-  - "**/adapter/**/*.rs"
-  - "**/*_repository.rs"
-  - "**/*_handler.rs"
-  - "**/middleware.rs"
-  - "**/*_middleware.rs"
+roles: [boundary]
 ---
 
 # 외부 경계

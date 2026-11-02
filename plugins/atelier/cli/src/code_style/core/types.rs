@@ -1,5 +1,3 @@
-use crate::drift::core::types::ArtifactStatus;
-
 pub const SOURCE_ROOT_REL: &str = "rules/code-style";
 pub const INSTALL_ROOT_REL: &str = ".claude/rules/atelier/code-style";
 
@@ -8,6 +6,12 @@ pub const INSTALL_ROOT_REL: &str = ".claude/rules/atelier/code-style";
 pub const COMMON_GROUP: &str = "common";
 
 pub const RULE_EXT: &str = ".md";
+
+/// Beside the group directories in the install root.
+pub const RECORD_FILE: &str = "installed.json";
+
+/// Inside each language source directory; never installed.
+pub const PROFILE_FILE: &str = "profile.json";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeStylePaths {
@@ -28,6 +32,12 @@ impl CodeStylePaths {
     pub fn install_dir(&self, group: &str) -> String {
         format!("{}/{group}", self.install_root())
     }
+    pub fn record_path(&self) -> String {
+        format!("{}/{RECORD_FILE}", self.install_root())
+    }
+    pub fn profile_path(&self, lang: &str) -> String {
+        format!("{}/{PROFILE_FILE}", self.source_dir(lang))
+    }
 }
 
 /// The report name of one rule file — callers branch on this exact string.
@@ -41,6 +51,8 @@ pub enum RuleStatus {
     Drifted,
     New,
     Orphaned,
+    /// Handed to the project once and deleted there since — left out on purpose.
+    Excluded,
 }
 
 impl RuleStatus {
@@ -51,19 +63,7 @@ impl RuleStatus {
             RuleStatus::Drifted => "DRIFTED",
             RuleStatus::New => "NEW",
             RuleStatus::Orphaned => "ORPHANED",
-        }
-    }
-}
-
-/// A rule whose copy is absent is `New` whichever absent-status the drift
-/// judgement was handed: a code-style group is judged only once selected, so
-/// "not installed" has no per-file meaning here.
-impl From<ArtifactStatus> for RuleStatus {
-    fn from(status: ArtifactStatus) -> Self {
-        match status {
-            ArtifactStatus::Ok => RuleStatus::Ok,
-            ArtifactStatus::Drifted => RuleStatus::Drifted,
-            ArtifactStatus::New | ArtifactStatus::NotInstalled => RuleStatus::New,
+            RuleStatus::Excluded => "EXCLUDED",
         }
     }
 }
@@ -95,7 +95,11 @@ impl CheckReport {
     }
 
     pub fn exit_code(&self) -> i32 {
-        if self.findings.iter().any(|f| f.status != RuleStatus::Ok) {
+        let actionable = |status: RuleStatus| match status {
+            RuleStatus::Ok | RuleStatus::Excluded => false,
+            RuleStatus::Drifted | RuleStatus::New | RuleStatus::Orphaned => true,
+        };
+        if self.findings.iter().any(|f| actionable(f.status)) {
             1
         } else {
             0
@@ -109,11 +113,12 @@ impl CheckReport {
             out.push('\n');
         }
         out.push_str(&format!(
-            "→ {} checked, {} drifted, {} new, {} orphaned\n",
+            "→ {} checked, {} drifted, {} new, {} orphaned, {} excluded\n",
             self.findings.len(),
             self.count(RuleStatus::Drifted),
             self.count(RuleStatus::New),
-            self.count(RuleStatus::Orphaned)
+            self.count(RuleStatus::Orphaned),
+            self.count(RuleStatus::Excluded)
         ));
         out
     }
@@ -144,11 +149,13 @@ impl AppliedChange {
     }
 }
 
-/// What install/update changed. `unchanged` counts the copies already OK.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What a command changed. `unchanged` counts the copies already OK,
+/// `excluded` the rules the project left out and that stayed out.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ApplyReport {
     pub changes: Vec<AppliedChange>,
     pub unchanged: usize,
+    pub excluded: usize,
 }
 
 impl ApplyReport {
@@ -163,11 +170,12 @@ impl ApplyReport {
             out.push('\n');
         }
         out.push_str(&format!(
-            "→ {} installed, {} synced, {} removed, {} unchanged\n",
+            "→ {} installed, {} synced, {} removed, {} unchanged, {} excluded\n",
             self.count(|a| matches!(a, ApplyAction::Installed)),
             self.count(|a| matches!(a, ApplyAction::Synced { .. })),
             self.count(|a| matches!(a, ApplyAction::Removed { .. })),
-            self.unchanged
+            self.unchanged,
+            self.excluded
         ));
         out
     }

@@ -6,6 +6,14 @@ fn atelier() -> Command {
     Command::cargo_bin("atelier").expect("locate `atelier` cargo binary")
 }
 
+const COMMON_RULE: &str = "---\nroles: [source]\n---\n# common\n";
+
+fn profile(ext: &str) -> String {
+    format!(
+        "{{\"roles\": {{\"source\": [\"**/*.{ext}\"], \"config\": [], \"boundary\": [], \"test\": []}}}}\n"
+    )
+}
+
 fn write(path: &str, content: &str) {
     let path = Path::new(path);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -25,10 +33,12 @@ impl Fixture {
             ("go", "go-errors.md"),
             ("go", "go-naming.md"),
             ("rust", "rust-naming.md"),
-            ("common", "comments.md"),
         ] {
             write(&fx.source(group, file), &format!("# {group}/{file}\n"));
         }
+        write(&fx.source("common", "comments.md"), COMMON_RULE);
+        write(&fx.source("go", "profile.json"), &profile("go"));
+        write(&fx.source("rust", "profile.json"), &profile("rs"));
         std::fs::create_dir_all(fx.project_dir()).unwrap();
         fx
     }
@@ -87,7 +97,7 @@ fn install_go_installs_common_and_check_is_ok() {
             fx.copy("common", "comments.md")
         )))
         .stdout(predicate::str::contains(
-            "→ 3 installed, 0 synced, 0 removed, 0 unchanged",
+            "→ 3 installed, 0 synced, 0 removed, 0 unchanged, 0 excluded",
         ));
     assert!(Path::new(&fx.copy("go", "go-naming.md")).is_file());
     assert!(!Path::new(&fx.copy("rust", "rust-naming.md")).exists());
@@ -96,8 +106,59 @@ fn install_go_installs_common_and_check_is_ok() {
         "code-style/common/comments.md=OK\n\
          code-style/go/go-errors.md=OK\n\
          code-style/go/go-naming.md=OK\n\
-         → 3 checked, 0 drifted, 0 new, 0 orphaned\n",
+         → 3 checked, 0 drifted, 0 new, 0 orphaned, 0 excluded\n",
     );
+    assert_eq!(
+        std::fs::read_to_string(fx.copy("common", "comments.md")).unwrap(),
+        "---\npaths:\n  - \"**/*.go\"\n---\n# common\n"
+    );
+    assert!(Path::new(&fx.at("project/.claude/rules/atelier/code-style/installed.json")).is_file());
+}
+
+#[test]
+fn deleted_copy_is_excluded_until_restored() {
+    let fx = Fixture::new();
+    fx.cmd("install", &["go"]).assert().success();
+    std::fs::remove_file(fx.copy("common", "comments.md")).unwrap();
+
+    fx.cmd("check", &[])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "code-style/common/comments.md=EXCLUDED",
+        ));
+    fx.cmd("update", &[]).assert().success();
+    assert!(!Path::new(&fx.copy("common", "comments.md")).exists());
+
+    atelier()
+        .args(["code-style", "restore", "--plugin-root", &fx.plugin_root()])
+        .args(["--project-dir", &fx.project_dir()])
+        .args(["--rule", "common/comments.md"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "installed: {}",
+            fx.copy("common", "comments.md")
+        )));
+    fx.cmd("check", &[])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("code-style/common/comments.md=OK"));
+}
+
+#[test]
+fn uninstall_drops_the_language_and_rerenders_common() {
+    let fx = Fixture::new();
+    fx.cmd("install", &["go", "rust"]).assert().success();
+
+    fx.cmd("uninstall", &["rust"]).assert().success();
+
+    assert!(!Path::new(&fx.copy("rust", "rust-naming.md")).exists());
+    assert_eq!(
+        std::fs::read_to_string(fx.copy("common", "comments.md")).unwrap(),
+        "---\npaths:\n  - \"**/*.go\"\n---\n# common\n"
+    );
+    fx.cmd("check", &[]).assert().success();
 }
 
 #[test]
@@ -158,7 +219,7 @@ fn modified_source_is_drifted_then_update_restores_ok_with_backup() {
 fn new_source_file_is_new_then_update_installs_it() {
     let fx = Fixture::new();
     fx.cmd("install", &["go"]).assert().success();
-    write(&fx.source("common", "testing.md"), "# testing\n");
+    write(&fx.source("common", "testing.md"), COMMON_RULE);
 
     fx.cmd("check", &[])
         .assert()

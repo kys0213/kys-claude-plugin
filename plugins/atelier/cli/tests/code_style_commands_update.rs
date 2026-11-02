@@ -16,18 +16,14 @@ fn check_exit(fs: &MemFs) -> i32 {
         .exit_code()
 }
 
-fn installed_go_and_common() -> MemFs {
-    let fs = MemFs::with_sources();
-    fs.install_group("go");
-    fs.install_group("common");
-    fs
-}
-
 #[test]
 fn drifted_new_and_orphaned_are_all_resolved_then_check_is_clean() {
-    let fs = installed_go_and_common();
+    let fs = MemFs::installed(&["go"]);
     fs.insert(&copy("go", "go-naming.md"), "locally edited\n");
-    fs.insert(&source("common", "testing.md"), "# testing\n");
+    fs.insert(
+        &source("common", "testing.md"),
+        &body("common", "testing.md"),
+    );
     fs.delete(&source("go", "go-errors.md"));
 
     let report = run(&fs, &[]).unwrap();
@@ -38,7 +34,7 @@ fn drifted_new_and_orphaned_are_all_resolved_then_check_is_clean() {
         report.render(),
         format!(
             "installed: {}\nremoved: {} (backup: {errors_bak})\nsynced: {} (backup: {naming_bak})\n\
-             → 1 installed, 1 synced, 1 removed, 2 unchanged\n",
+             → 1 installed, 1 synced, 1 removed, 2 unchanged, 0 excluded\n",
             copy("common", "testing.md"),
             copy("go", "go-errors.md"),
             copy("go", "go-naming.md"),
@@ -48,15 +44,27 @@ fn drifted_new_and_orphaned_are_all_resolved_then_check_is_clean() {
     assert_eq!(fs.content(&errors_bak), Some(body("go", "go-errors.md")));
     assert_eq!(fs.content(&copy("go", "go-errors.md")), None);
     assert_eq!(
-        fs.content(&copy("common", "testing.md")).as_deref(),
-        Some("# testing\n")
+        fs.content(&copy("common", "testing.md")),
+        Some(rendered("testing.md", &["go"]))
+    );
+    assert_eq!(
+        fs.content(&record_path()),
+        Some(record_json(
+            &["go"],
+            &[
+                "common/cohesion.md",
+                "common/comments.md",
+                "common/testing.md",
+                "go/go-naming.md"
+            ]
+        ))
     );
     assert_eq!(check_exit(&fs), 0);
 }
 
 #[test]
 fn omitted_lang_leaves_languages_not_installed_alone() {
-    let fs = installed_go_and_common();
+    let fs = MemFs::installed(&["go"]);
 
     run(&fs, &[]).unwrap();
 
@@ -66,10 +74,7 @@ fn omitted_lang_leaves_languages_not_installed_alone() {
 
 #[test]
 fn explicit_lang_limits_update_to_that_language_and_common() {
-    let fs = MemFs::with_sources();
-    fs.install_group("go");
-    fs.install_group("rust");
-    fs.install_group("common");
+    let fs = MemFs::installed(&["go", "rust"]);
     fs.insert(&copy("go", "go-naming.md"), "locally edited\n");
     fs.insert(&copy("rust", "rust-naming.md"), "locally edited\n");
 
@@ -86,8 +91,66 @@ fn explicit_lang_limits_update_to_that_language_and_common() {
 }
 
 #[test]
+fn explicit_lang_still_renders_common_for_every_installed_language() {
+    let fs = MemFs::installed(&["go", "rust"]);
+    fs.insert(
+        &copy("common", "cohesion.md"),
+        &rendered("cohesion.md", &["rust"]),
+    );
+
+    run(&fs, &["rust"]).unwrap();
+
+    assert_eq!(
+        fs.content(&copy("common", "cohesion.md")),
+        Some(rendered("cohesion.md", &["go", "rust"]))
+    );
+}
+
+#[test]
+fn excluded_rule_is_not_reinstalled() {
+    let fs = MemFs::installed(&["go"]);
+    fs.delete(&copy("go", "go-naming.md"));
+
+    let report = run(&fs, &[]).unwrap();
+
+    assert!(report.render().ends_with("1 excluded\n"));
+    assert_eq!(fs.content(&copy("go", "go-naming.md")), None);
+    assert_eq!(fs.mutation_count(), 0);
+}
+
+#[test]
+fn install_without_record_gets_a_record_on_first_update() {
+    let fs = MemFs::installed_without_record(&["go"]);
+    fs.insert(&copy("common", "cohesion.md"), "---\nold paths\n---\n");
+
+    let report = run(&fs, &[]).unwrap();
+
+    assert!(report.render().contains(&format!(
+        "synced: {} (backup: ",
+        copy("common", "cohesion.md")
+    )));
+    assert_eq!(fs.content(&record_path()), Some(full_record(&["go"])));
+    assert_eq!(check_exit(&fs), 0);
+}
+
+#[test]
+fn language_removed_from_plugin_is_cleaned_and_dropped_from_record() {
+    let fs = MemFs::installed(&["go"]);
+    fs.insert(&copy("python", "py-naming.md"), "# py\n");
+    let mut rules = all_rules(&["go"]);
+    rules.push("python/py-naming.md".to_string());
+    let refs: Vec<&str> = rules.iter().map(String::as_str).collect();
+    fs.insert(&record_path(), &record_json(&["go", "python"], &refs));
+
+    run(&fs, &[]).unwrap();
+
+    assert_eq!(fs.content(&copy("python", "py-naming.md")), None);
+    assert_eq!(fs.content(&record_path()), Some(full_record(&["go"])));
+}
+
+#[test]
 fn non_utf8_copy_is_refused_before_any_write() {
-    let fs = installed_go_and_common();
+    let fs = MemFs::installed(&["go"]);
     fs.insert(&source("go", "go-testing.md"), "# testing\n");
     fs.insert_bytes(&copy("go", "go-naming.md"), &[0xff, 0xfe]);
 
