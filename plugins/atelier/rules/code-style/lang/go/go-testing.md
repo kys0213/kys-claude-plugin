@@ -50,14 +50,12 @@ if diff := cmp.Diff(want, got); diff != "" {
 
 - DO: 구조체·슬라이스·맵은 필드를 하나씩 비교하지 말고 기대 값을 만들어 `cmp.Equal`/`cmp.Diff` 로 통째로 비교한다. 필요하면 `cmpopts` 로 조정한다.
 - DON'T: `reflect.DeepEqual` 로 비교하지 않는다. 비공개 필드 등 구현 세부에 민감하다. `cmp` 는 테스트 전용이므로 프로덕션 코드에서 쓰지 않는다.
-- DON'T: 내가 소유하지 않은 패키지의 출력 안정성에 기대지 않는다. JSON 바이트를 문자열로 비교하지 말고 파싱해서 의미로 비교한다.
 - DO: 반환값이 여럿이면 구조체로 묶지 말고 각각 비교한다.
 
 ## 에러 검사
 
 출처: decisions §Test error semantics
 
-- DON'T: 에러 종류를 메시지 문자열로 검사하지 않는다. 메시지 문구가 바뀌면 깨지는 변경 감지 테스트가 된다.
 - DO: 의미 비교는 `errors.Is` 또는 `cmp` 와 `cmpopts.EquateErrors` 로 한다.
 - DO: 에러 발생 여부만 중요하면 `wantErr bool` 로 두고 `(err != nil) != tc.wantErr` 로 비교한다.
 
@@ -74,8 +72,7 @@ if diff := cmp.Diff(want, got); diff != "" {
 
 출처: decisions §Table-driven tests, §Subtests, §Identifying the row, best-practices §Use field names in struct literals
 
-- DO: 같은 검증 로직으로 여러 입력을 볼 때 테이블 테스트를 쓴다. 행마다 다른 분기 로직이 필요해지면 테스트 함수를 나눈다 (예: 정상 출력용 테이블과 에러용 테이블).
-- DON'T: 행을 인덱스로 식별하지 않는다 (`"case #%d"`). 이름 필드나 입력을 실패 메시지에 넣는다.
+- 권장: 정상 출력용 테이블과 에러용 테이블은 나눈다. 행 식별에 `"case #%d"` 를 쓰지 않는다.
 - 권장: 테스트 케이스 구조체는 필드명을 써서 초기화하고, 케이스와 무관한 0값 필드는 생략한다.
 - DO: 서브테스트는 서로의 실행 결과나 상태에 기대지 않는다. 각각 단독으로 `-run` 될 수 있어야 한다.
 - DO: 서브테스트 이름은 짧은 식별자처럼 짓는다. 공백·슬래시를 피하고, 긴 설명은 별도 필드에 둔다.

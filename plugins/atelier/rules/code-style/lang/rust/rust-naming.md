@@ -1,6 +1,6 @@
 ---
 name: rust-naming
-description: Rust 공개 API 이름 규칙 — as_/to_/into_ 변환, 접근자(foo/foo_mut/set_foo/with_foo), new/try_new/from_foo 생성자, Ext 접미사, 수명·제네릭 이름, 약어 금지
+description: Rust 공개 API 이름 규칙 — as_/to_/into_ 변환, 접근자(foo/foo_mut/set_foo/with_foo), new/try_new/from_foo 생성자, Ext 접미사, 수명·제네릭 이름
 paths:
   - "**/lib.rs"
 ---
@@ -66,8 +66,3 @@ impl Session {
 struct Parser<'src> { input: &'src str }
 fn copy<R: Read, W: Write>(reader: R, writer: W) -> io::Result<u64>
 ```
-
-## 약어
-
-- DON'T: 프로젝트 밖 사람이 모를 약어(두문자어 포함)를 쓴다. 단어 중간 글자를 빼서 줄이지 않는다 (`cnt`, `msg_q`).
-- 예외: 위키백과에 실릴 만큼 흔한 약어, 프로젝트 밖에서도 헷갈리지 않을 약어(`IpAddr`). 그래도 기본은 줄이지 않는 쪽이다.

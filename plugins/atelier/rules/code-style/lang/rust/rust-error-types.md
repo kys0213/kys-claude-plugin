@@ -12,9 +12,8 @@ paths:
 
 ## enum variant 로 분류한다
 
-- DO: 호출 쪽이 가를 필요가 있는 실패 종류는 에러를 정의한 곳이 enum variant 로 선언한다. 처리부는 variant 로 `match` 한다.
-- DON'T: 에러 메시지 문자열(`to_string()`, `Display` 출력)을 비교·검색해 종류를 가른다. 메시지 문구를 고치면 분류가 조용히 깨진다.
-- DO: 하위 에러를 감쌀 때 원인을 variant 의 필드나 `source()` 로 보존해 호출 쪽이 판별할 수 있게 한다.
+- DO: 호출 쪽이 가를 실패 종류는 enum variant 로 선언하고, 처리부는 variant 로 `match` 한다. `to_string()`·`Display` 출력으로 가르지 않는다.
+- DO: 하위 에러의 원인은 variant 의 필드나 `source()` 로 보존한다.
 
 ```rust
 #[derive(Debug)]

@@ -12,8 +12,8 @@ paths:
 
 ## main 이전 코드 금지
 
-- DON'T: `main()` 전에 코드가 실행되게 한다 (`ctor` 크레이트 같은 기법). 초기화 순서가 보이지 않고 실패를 다룰 곳이 없다.
-- DO: 초기화는 `main` 에서 명시적으로 호출한다.
+- DON'T: `ctor` 크레이트 같은 기법으로 `main()` 전에 코드를 실행한다.
+- DO: `std::process::exit` 는 drop 을 실행하지 않는다. 본문은 `Result` 를 돌려주는 함수로 빼고, `main` 은 그 결과로 종료 코드를 정한다 (`fn main() -> ExitCode` 도 된다).
 
 ## panic
 

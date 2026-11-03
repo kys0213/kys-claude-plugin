@@ -20,14 +20,13 @@ paths:
 - 프로젝트가 panic 을 전면 금지하고 불변식 위반까지 `Result` 로 보고하기로 했다면 따른다.
 - DO: panic 하지 않음은 `unwrap` 대신 패턴 매칭(`if let Some(v) = opt`)으로 증명한다.
 - DO: 타입으로 표현 못 한 불변식은 `expect("이유")` 로 남긴다.
-- DON'T: 에러 메시지 문자열(`to_string()`)을 비교해 종류를 가른다. variant 로 `match` 한다.
 - DON'T: 1st-party 코드에서 `panic::catch_unwind` 로 복구한다 (`panic=abort` 에서 안 되고, panic 은 고칠 버그).
 
 ## `match` 와 단언
 
 - DO: `match` 는 아는 variant 를 모두 나열한다. `#[non_exhaustive]` enum 은 관심 없는·미래 variant 만 와일드카드 팔에 둔다 (`Shape::Triangle | _ => {}`).
 - DON'T: 아는 variant 를 `_ =>` 로 덮는다. 일부만 관심 있으면 `if let`·`let ... else` 를 쓰고, `match` 가 더 깔끔할 때만 허용한다.
-- DO: `assert!` 에 왜 성립해야 하는지, 실패 값, 오용인지 버그인지를 문맥 문자열로 적는다. 조건을 되풀이하지 않는다.
+- DO: `assert!` 의 문맥 문자열에 오용인지 버그인지도 적는다.
 
 ## unsafe
 

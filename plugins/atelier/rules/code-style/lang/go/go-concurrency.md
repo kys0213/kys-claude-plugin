@@ -1,6 +1,6 @@
 ---
 name: go-concurrency
-description: Go 동시성 파일(worker·pool·scheduler) — 고루틴 수명 관리, 동기 함수 선호, errgroup, context 전달, 채널 방향
+description: Go 동시성 파일(worker·pool·scheduler) — WaitGroup·신호 채널로 고루틴 기다리기, errgroup, context 전달 규칙, 채널 방향
 paths:
   - "**/*_worker.go"
   - "**/*_pool.go"
@@ -13,9 +13,8 @@ paths:
 
 출처: decisions §Goroutine lifetimes
 
-- DO: 고루틴을 띄울 때는 언제, 어떻게 끝나는지가 코드에서 보이게 한다. 동기화 코드는 한 함수 스코프 안에 가두고, 로직은 동기 함수로 뽑는다.
-- DO: 띄운 고루틴이 함수보다 오래 살지 않게 기다린다 (`sync.WaitGroup`, 신호 채널 등). 취소는 `context.Context` 로 전달한다.
-- DON'T: 끝나는 시점을 모르는 고루틴을 띄우지 않는다. 채널 송수신에 막힌 고루틴은 GC 가 회수하지 않아 누수된다. 그래도 수명이 분명하지 않으면 언제·왜 끝나는지 주석으로 남긴다.
+- DO: 띄운 고루틴이 함수보다 오래 살지 않게 `sync.WaitGroup`·신호 채널로 기다린다. 취소는 `context.Context` 로 전달한다.
+- DON'T: 수명을 모르는 고루틴을 띄운다. 채널 송수신에 막힌 고루틴은 GC 가 회수하지 않아 누수된다. 그래도 수명이 분명하지 않으면 언제·왜 끝나는지 주석으로 남긴다.
 - DON'T: 닫힌 채널에 보내지 않는다 (panic). 결과가 더는 필요 없다고 아직 쓰이는 입력을 수정하지 않는다 (data race).
 
 ```go
@@ -41,12 +40,11 @@ func (w *Worker) Run() {
 }
 ```
 
-## 동기 함수 선호
+## 작업 묶음
 
 출처: decisions §Synchronous functions
 
-- DO: 결과를 직접 반환하고, 콜백·채널 작업을 반환 전에 끝내는 동기 함수를 기본으로 쓴다. 고루틴이 호출 안에 머물러 수명을 따지기 쉽고, 테스트에서 폴링·동기화가 필요 없다.
-- DON'T: 비동기 API 를 기본으로 만들지 않는다. 동시성이 필요하면 호출자가 별도 고루틴에서 호출하면 된다. 호출자 쪽에서 불필요한 동시성을 걷어내기는 어렵다.
+- DO: 콜백·채널 작업은 반환 전에 끝낸다. 고루틴이 호출 안에 머물면 테스트에서 폴링·동기화가 필요 없다.
 - 권장: 관련 작업 묶음에서 첫 에러만 의미 있으면 `errgroup` 으로 모은다.
 
 ## context

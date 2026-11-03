@@ -1,6 +1,6 @@
 ---
 name: go-principles
-description: Go 가독성 원칙의 우선순위, gofmt·줄 길이, 최소 메커니즘, 지역 일관성과 언어 공통 룰과의 적용 순서
+description: Go 가독성 원칙의 우선순위, gofmt·줄 길이, 최소 메커니즘, 지역 일관성과 base·앱 성격 룰과의 적용 순서
 paths:
   - "**/*.go"
 ---
@@ -9,7 +9,7 @@ paths:
 
 Google Go 스타일 가이드를 옮긴 것이다. decisions 출처는 DO/DON'T, best-practices 출처는 "권장"으로 표기한다.
 
-**언어 공통 룰과 Go 룰이 충돌하면 언어 공통 룰을 따른다.**
+**base 룰(언어 무관)·앱 성격 룰과 Go 룰이 충돌하면 base·앱 성격 룰을 따른다.**
 
 출처: guide §Style principles, §Formatting, §Line length, §Least mechanism, §Local consistency, decisions §Non-decisions
 
