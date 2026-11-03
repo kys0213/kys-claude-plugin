@@ -25,7 +25,8 @@ impl Fixture {
             ("go", "go-errors.md"),
             ("go", "go-naming.md"),
             ("rust", "rust-naming.md"),
-            ("common", "comments.md"),
+            ("base", "comments.md"),
+            ("cli", "cli-output.md"),
         ] {
             write(&fx.source(group, file), &format!("# {group}/{file}\n"));
         }
@@ -46,7 +47,12 @@ impl Fixture {
     }
 
     fn source(&self, group: &str, file: &str) -> String {
-        self.at(&format!("plugin/rules/code-style/{group}/{file}"))
+        let dir = match group {
+            "base" => "base".to_string(),
+            "cli" => format!("app/{group}"),
+            lang => format!("lang/{lang}"),
+        };
+        self.at(&format!("plugin/rules/code-style/{dir}/{file}"))
     }
 
     fn copy(&self, group: &str, file: &str) -> String {
@@ -76,7 +82,7 @@ fn code_style_bare_prints_help_and_exits_zero() {
 }
 
 #[test]
-fn install_go_installs_common_and_check_is_ok() {
+fn install_go_installs_base_and_check_is_ok() {
     let fx = Fixture::new();
 
     fx.cmd("install", &["go"])
@@ -84,20 +90,83 @@ fn install_go_installs_common_and_check_is_ok() {
         .success()
         .stdout(predicate::str::contains(format!(
             "installed: {}",
-            fx.copy("common", "comments.md")
+            fx.copy("base", "comments.md")
         )))
         .stdout(predicate::str::contains(
-            "→ 3 installed, 0 synced, 0 removed, 0 unchanged",
+            "→ 3 installed, 0 synced, 0 removed, 0 unchanged, 0 excluded",
         ));
     assert!(Path::new(&fx.copy("go", "go-naming.md")).is_file());
     assert!(!Path::new(&fx.copy("rust", "rust-naming.md")).exists());
 
     fx.cmd("check", &[]).assert().success().stdout(
-        "code-style/common/comments.md=OK\n\
+        "code-style/base/comments.md=OK\n\
          code-style/go/go-errors.md=OK\n\
          code-style/go/go-naming.md=OK\n\
-         → 3 checked, 0 drifted, 0 new, 0 orphaned\n",
+         → 3 checked, 0 drifted, 0 new, 0 orphaned, 0 excluded\n",
     );
+    assert!(Path::new(&fx.at("project/.claude/rules/atelier/code-style/installed.json")).is_file());
+}
+
+#[test]
+fn install_with_app_installs_it_beside_the_language() {
+    let fx = Fixture::new();
+
+    fx.cmd("install", &["go"])
+        .args(["--app", "cli"])
+        .assert()
+        .success();
+
+    assert_eq!(
+        std::fs::read_to_string(fx.copy("cli", "cli-output.md")).unwrap(),
+        "# cli/cli-output.md\n"
+    );
+    fx.cmd("check", &[])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("code-style/cli/cli-output.md=OK"));
+}
+
+#[test]
+fn deleted_copy_is_excluded_until_restored() {
+    let fx = Fixture::new();
+    fx.cmd("install", &["go"]).assert().success();
+    std::fs::remove_file(fx.copy("base", "comments.md")).unwrap();
+
+    fx.cmd("check", &[])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "code-style/base/comments.md=EXCLUDED",
+        ));
+    fx.cmd("update", &[]).assert().success();
+    assert!(!Path::new(&fx.copy("base", "comments.md")).exists());
+
+    atelier()
+        .args(["code-style", "restore", "--plugin-root", &fx.plugin_root()])
+        .args(["--project-dir", &fx.project_dir()])
+        .args(["--rule", "base/comments.md"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "installed: {}",
+            fx.copy("base", "comments.md")
+        )));
+    fx.cmd("check", &[])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("code-style/base/comments.md=OK"));
+}
+
+#[test]
+fn uninstall_drops_the_language_and_keeps_the_rest() {
+    let fx = Fixture::new();
+    fx.cmd("install", &["go", "rust"]).assert().success();
+
+    fx.cmd("uninstall", &["rust"]).assert().success();
+
+    assert!(!Path::new(&fx.copy("rust", "rust-naming.md")).exists());
+    assert!(Path::new(&fx.copy("base", "comments.md")).is_file());
+    fx.cmd("check", &[]).assert().success();
 }
 
 #[test]
@@ -158,18 +227,18 @@ fn modified_source_is_drifted_then_update_restores_ok_with_backup() {
 fn new_source_file_is_new_then_update_installs_it() {
     let fx = Fixture::new();
     fx.cmd("install", &["go"]).assert().success();
-    write(&fx.source("common", "testing.md"), "# testing\n");
+    write(&fx.source("base", "testing.md"), "# testing\n");
 
     fx.cmd("check", &[])
         .assert()
         .code(1)
-        .stdout(predicate::str::contains("code-style/common/testing.md=NEW"));
+        .stdout(predicate::str::contains("code-style/base/testing.md=NEW"));
     fx.cmd("update", &[])
         .assert()
         .success()
         .stdout(predicate::str::contains(format!(
             "installed: {}",
-            fx.copy("common", "testing.md")
+            fx.copy("base", "testing.md")
         )));
     fx.cmd("check", &[]).assert().success();
 }

@@ -1,11 +1,12 @@
-use crate::code_style::commands::{apply, judge, select_groups, CodeStyleDeps, WhenOmitted};
-use crate::code_style::core::types::{ApplyReport, CodeStylePaths};
+use crate::code_style::commands::{sync, CodeStyleDeps, Workspace};
+use crate::code_style::core::types::{ApplyReport, CodeStylePaths, Selection};
 
 pub fn run(
     deps: &CodeStyleDeps,
     paths: &CodeStylePaths,
-    langs: &[String],
+    selection: &Selection,
 ) -> Result<ApplyReport, String> {
-    let groups = select_groups(deps, paths, langs, WhenOmitted::InstalledLangs)?;
-    apply(deps, judge(deps, paths, &groups)?)
+    let ws = Workspace::load(deps, paths)?;
+    let groups = ws.selected_or_installed(selection)?;
+    sync(&ws, groups)
 }

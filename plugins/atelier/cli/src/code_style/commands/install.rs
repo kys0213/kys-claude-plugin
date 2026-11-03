@@ -1,11 +1,18 @@
-use crate::code_style::commands::{apply, judge, select_groups, CodeStyleDeps, WhenOmitted};
-use crate::code_style::core::types::{ApplyReport, CodeStylePaths};
+use crate::code_style::commands::{join, sync, CodeStyleDeps, Workspace};
+use crate::code_style::core::types::{ApplyReport, CodeStylePaths, Selection};
 
 pub fn run(
     deps: &CodeStyleDeps,
     paths: &CodeStylePaths,
-    langs: &[String],
+    selection: &Selection,
 ) -> Result<ApplyReport, String> {
-    let groups = select_groups(deps, paths, langs, WhenOmitted::Refuse)?;
-    apply(deps, judge(deps, paths, &groups)?)
+    let ws = Workspace::load(deps, paths)?;
+    if selection.langs.is_empty() {
+        return Err(format!(
+            "at least one --lang is required (one of: {})",
+            join(&ws.langs)
+        ));
+    }
+    let groups = ws.selected(selection)?;
+    sync(&ws, groups)
 }

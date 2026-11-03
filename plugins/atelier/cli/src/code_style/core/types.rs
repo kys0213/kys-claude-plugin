@@ -1,13 +1,46 @@
-use crate::drift::core::types::ArtifactStatus;
-
 pub const SOURCE_ROOT_REL: &str = "rules/code-style";
 pub const INSTALL_ROOT_REL: &str = ".claude/rules/atelier/code-style";
 
-/// The group every language install brings along. It is a directory beside
-/// the language directories, never a `--lang` value.
-pub const COMMON_GROUP: &str = "common";
+/// Source subdirectories holding one directory per language / app kind.
+pub const LANG_SOURCE_DIR: &str = "lang";
+pub const APP_SOURCE_DIR: &str = "app";
 
 pub const RULE_EXT: &str = ".md";
+
+/// Beside the group directories in the install root.
+pub const RECORD_FILE: &str = "installed.json";
+
+/// One installable set of rules. Every install brings `Base` along; it is
+/// never a `--lang` or `--app` value.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Group {
+    Base,
+    Lang(String),
+    App(String),
+}
+
+impl Group {
+    /// The directory name the group installs under.
+    pub fn name(&self) -> &str {
+        match self {
+            Group::Base => "base",
+            Group::Lang(name) | Group::App(name) => name,
+        }
+    }
+}
+
+/// The languages and apps a command was asked to work on.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Selection {
+    pub langs: Vec<String>,
+    pub apps: Vec<String>,
+}
+
+impl Selection {
+    pub fn is_empty(&self) -> bool {
+        self.langs.is_empty() && self.apps.is_empty()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeStylePaths {
@@ -22,17 +55,31 @@ impl CodeStylePaths {
     pub fn install_root(&self) -> String {
         format!("{}/{INSTALL_ROOT_REL}", self.project_dir)
     }
-    pub fn source_dir(&self, group: &str) -> String {
-        format!("{}/{group}", self.source_root())
+    pub fn lang_source_root(&self) -> String {
+        format!("{}/{LANG_SOURCE_DIR}", self.source_root())
     }
-    pub fn install_dir(&self, group: &str) -> String {
-        format!("{}/{group}", self.install_root())
+    pub fn app_source_root(&self) -> String {
+        format!("{}/{APP_SOURCE_DIR}", self.source_root())
+    }
+    pub fn source_dir(&self, group: &Group) -> String {
+        match group {
+            Group::Base => format!("{}/{}", self.source_root(), group.name()),
+            Group::Lang(name) => format!("{}/{name}", self.lang_source_root()),
+            Group::App(name) => format!("{}/{name}", self.app_source_root()),
+        }
+    }
+    /// Installed groups sit side by side, whatever their kind.
+    pub fn install_dir(&self, group: &Group) -> String {
+        format!("{}/{}", self.install_root(), group.name())
+    }
+    pub fn record_path(&self) -> String {
+        format!("{}/{RECORD_FILE}", self.install_root())
     }
 }
 
 /// The report name of one rule file — callers branch on this exact string.
-pub fn rule_name(group: &str, file: &str) -> String {
-    format!("code-style/{group}/{file}")
+pub fn rule_name(group: &Group, file: &str) -> String {
+    format!("code-style/{}/{file}", group.name())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +88,8 @@ pub enum RuleStatus {
     Drifted,
     New,
     Orphaned,
+    /// Handed to the project once and deleted there since — left out on purpose.
+    Excluded,
 }
 
 impl RuleStatus {
@@ -51,19 +100,7 @@ impl RuleStatus {
             RuleStatus::Drifted => "DRIFTED",
             RuleStatus::New => "NEW",
             RuleStatus::Orphaned => "ORPHANED",
-        }
-    }
-}
-
-/// A rule whose copy is absent is `New` whichever absent-status the drift
-/// judgement was handed: a code-style group is judged only once selected, so
-/// "not installed" has no per-file meaning here.
-impl From<ArtifactStatus> for RuleStatus {
-    fn from(status: ArtifactStatus) -> Self {
-        match status {
-            ArtifactStatus::Ok => RuleStatus::Ok,
-            ArtifactStatus::Drifted => RuleStatus::Drifted,
-            ArtifactStatus::New | ArtifactStatus::NotInstalled => RuleStatus::New,
+            RuleStatus::Excluded => "EXCLUDED",
         }
     }
 }
@@ -95,7 +132,11 @@ impl CheckReport {
     }
 
     pub fn exit_code(&self) -> i32 {
-        if self.findings.iter().any(|f| f.status != RuleStatus::Ok) {
+        let actionable = |status: RuleStatus| match status {
+            RuleStatus::Ok | RuleStatus::Excluded => false,
+            RuleStatus::Drifted | RuleStatus::New | RuleStatus::Orphaned => true,
+        };
+        if self.findings.iter().any(|f| actionable(f.status)) {
             1
         } else {
             0
@@ -109,11 +150,12 @@ impl CheckReport {
             out.push('\n');
         }
         out.push_str(&format!(
-            "→ {} checked, {} drifted, {} new, {} orphaned\n",
+            "→ {} checked, {} drifted, {} new, {} orphaned, {} excluded\n",
             self.findings.len(),
             self.count(RuleStatus::Drifted),
             self.count(RuleStatus::New),
-            self.count(RuleStatus::Orphaned)
+            self.count(RuleStatus::Orphaned),
+            self.count(RuleStatus::Excluded)
         ));
         out
     }
@@ -144,11 +186,13 @@ impl AppliedChange {
     }
 }
 
-/// What install/update changed. `unchanged` counts the copies already OK.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What a command changed. `unchanged` counts the copies already OK,
+/// `excluded` the rules the project left out and that stayed out.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ApplyReport {
     pub changes: Vec<AppliedChange>,
     pub unchanged: usize,
+    pub excluded: usize,
 }
 
 impl ApplyReport {
@@ -163,11 +207,12 @@ impl ApplyReport {
             out.push('\n');
         }
         out.push_str(&format!(
-            "→ {} installed, {} synced, {} removed, {} unchanged\n",
+            "→ {} installed, {} synced, {} removed, {} unchanged, {} excluded\n",
             self.count(|a| matches!(a, ApplyAction::Installed)),
             self.count(|a| matches!(a, ApplyAction::Synced { .. })),
             self.count(|a| matches!(a, ApplyAction::Removed { .. })),
-            self.unchanged
+            self.unchanged,
+            self.excluded
         ));
         out
     }
