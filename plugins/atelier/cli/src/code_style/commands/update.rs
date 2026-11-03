@@ -1,12 +1,12 @@
 use crate::code_style::commands::{sync, CodeStyleDeps, Workspace};
-use crate::code_style::core::types::{ApplyReport, CodeStylePaths};
+use crate::code_style::core::types::{ApplyReport, CodeStylePaths, Selection};
 
 pub fn run(
     deps: &CodeStyleDeps,
     paths: &CodeStylePaths,
-    langs: &[String],
+    selection: &Selection,
 ) -> Result<ApplyReport, String> {
     let ws = Workspace::load(deps, paths)?;
-    let langs = ws.requested_or_installed(langs)?;
-    sync(&ws, &langs)
+    let groups = ws.selected_or_installed(selection)?;
+    sync(&ws, groups)
 }

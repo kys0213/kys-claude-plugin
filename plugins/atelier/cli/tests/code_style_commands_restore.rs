@@ -11,42 +11,47 @@ fn run(fs: &MemFs, rules: &[&str]) -> Result<ApplyReport, String> {
 
 fn check_exit(fs: &MemFs) -> i32 {
     let clock = FixedClock;
-    check::run(&deps(fs, &clock), &paths(), &[])
+    check::run(&deps(fs, &clock), &paths(), &select(&[], &[]))
         .unwrap()
         .exit_code()
 }
 
 #[test]
-fn excluded_common_rule_is_restored_rendered_and_check_is_ok() {
-    let fs = MemFs::installed(&["go", "rust"]);
-    fs.delete(&copy("common", "comments.md"));
+fn excluded_base_rule_is_restored_and_check_is_ok() {
+    let fs = MemFs::installed(&["go"]);
+    fs.delete(&copy("base", "comments.md"));
 
-    let report = run(&fs, &["common/comments.md"]).unwrap();
+    let report = run(&fs, &["base/comments.md"]).unwrap();
 
     assert_eq!(
         report.render(),
         format!(
             "installed: {}\n→ 1 installed, 0 synced, 0 removed, 0 unchanged, 0 excluded\n",
-            copy("common", "comments.md")
+            copy("base", "comments.md")
         )
     );
     assert_eq!(
-        fs.content(&copy("common", "comments.md")),
-        Some(rendered("comments.md", &["go", "rust"]))
+        fs.content(&copy("base", "comments.md")),
+        Some(body("base", "comments.md"))
     );
     assert_eq!(check_exit(&fs), 0);
 }
 
 #[test]
-fn excluded_language_rule_is_restored_verbatim() {
-    let fs = MemFs::installed(&["go"]);
+fn excluded_language_and_app_rules_are_restored() {
+    let fs = MemFs::installed_with(&["go"], &["cli"]);
     fs.delete(&copy("go", "go-naming.md"));
+    fs.delete(&copy("cli", "cli-output.md"));
 
-    run(&fs, &["go/go-naming.md"]).unwrap();
+    run(&fs, &["go/go-naming.md", "cli/cli-output.md"]).unwrap();
 
     assert_eq!(
         fs.content(&copy("go", "go-naming.md")),
         Some(body("go", "go-naming.md"))
+    );
+    assert_eq!(
+        fs.content(&copy("cli", "cli-output.md")),
+        Some(body("cli", "cli-output.md"))
     );
 }
 
@@ -65,14 +70,14 @@ fn rule_already_present_is_left_as_is() {
 }
 
 #[test]
-fn rule_of_a_language_not_installed_is_an_error() {
+fn rule_of_a_group_not_installed_is_an_error() {
     let fs = MemFs::installed(&["go"]);
 
     let err = run(&fs, &["rust/rust-naming.md"]).unwrap_err();
 
     assert_eq!(
         err,
-        "rust/rust-naming.md: language rust is not installed (installed: go)"
+        "rust/rust-naming.md: rust is not installed (installed: go)"
     );
     assert_eq!(fs.mutation_count(), 0);
 }
@@ -81,9 +86,9 @@ fn rule_of_a_language_not_installed_is_an_error() {
 fn rule_without_source_is_an_error() {
     let fs = MemFs::installed(&["go"]);
 
-    let err = run(&fs, &["common/nope.md"]).unwrap_err();
+    let err = run(&fs, &["base/nope.md"]).unwrap_err();
 
-    assert_eq!(err, "unknown rule: common/nope.md");
+    assert_eq!(err, "unknown rule: base/nope.md");
 }
 
 #[test]
@@ -94,7 +99,7 @@ fn rule_not_shaped_group_slash_file_is_an_error() {
 
     assert_eq!(
         err,
-        "invalid rule: comments.md — expected <group>/<file>.md, e.g. common/comments.md"
+        "invalid rule: comments.md — expected <group>/<file>.md, e.g. base/comments.md"
     );
 }
 
@@ -108,6 +113,6 @@ fn restore_requires_a_rule() {
 #[test]
 fn nothing_installed_is_an_error() {
     let fs = MemFs::with_sources();
-    let err = run(&fs, &["common/comments.md"]).unwrap_err();
+    let err = run(&fs, &["base/comments.md"]).unwrap_err();
     assert!(err.starts_with("no code-style language installed"), "{err}");
 }

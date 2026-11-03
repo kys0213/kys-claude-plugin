@@ -4,17 +4,15 @@ pub mod restore;
 pub mod uninstall;
 pub mod update;
 
-use crate::code_style::core::profile::Profile;
 use crate::code_style::core::record::InstallRecord;
-use crate::code_style::core::render::render_common;
 use crate::code_style::core::rule_fs::RuleTreeFs;
 use crate::code_style::core::types::{
-    rule_name, AppliedChange, ApplyAction, ApplyReport, CodeStylePaths, RuleFinding, RuleStatus,
-    COMMON_GROUP, RULE_EXT,
+    rule_name, AppliedChange, ApplyAction, ApplyReport, CodeStylePaths, Group, RuleFinding,
+    RuleStatus, Selection, RULE_EXT,
 };
 use crate::drift::core::artifact::BackupClock;
 use crate::drift::core::types::ArtifactContent;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 pub struct CodeStyleDeps<'a> {
     pub fs: &'a dyn RuleTreeFs,
@@ -39,130 +37,146 @@ enum Fix {
 struct Workspace<'w> {
     deps: &'w CodeStyleDeps<'w>,
     paths: &'w CodeStylePaths,
-    available: BTreeSet<String>,
-    installed: BTreeSet<String>,
+    langs: BTreeSet<String>,
+    apps: BTreeSet<String>,
+    installed: BTreeSet<Group>,
     record: Option<InstallRecord>,
 }
 
 impl<'w> Workspace<'w> {
     fn load(deps: &'w CodeStyleDeps<'w>, paths: &'w CodeStylePaths) -> Result<Self, String> {
-        for dir in [paths.source_root(), paths.source_dir(COMMON_GROUP)] {
+        for dir in [paths.source_root(), paths.source_dir(&Group::Base)] {
             if !deps.fs.is_dir(&dir) {
                 return Err(format!("plugin source directory not found: {dir}"));
             }
         }
-        let available = lang_dirs(deps, &paths.source_root())?;
+        let langs = subdirs(deps, &paths.lang_source_root())?;
+        let apps = subdirs(deps, &paths.app_source_root())?;
+        if let Some(name) = langs.intersection(&apps).next() {
+            return Err(format!(
+                "{name} is both a language and an app in the plugin sources"
+            ));
+        }
         let record = load_record(deps, paths)?;
         let installed = match &record {
-            Some(record) => record.langs().clone(),
-            None if deps.fs.is_dir(&paths.install_root()) => {
-                lang_dirs(deps, &paths.install_root())?
-            }
-            None => BTreeSet::new(),
+            Some(record) => record.groups().into_iter().collect(),
+            None => subdirs(deps, &paths.install_root())?
+                .into_iter()
+                .filter(|dir| dir != Group::Base.name())
+                .map(Group::Lang)
+                .collect(),
         };
         Ok(Workspace {
             deps,
             paths,
-            available,
+            langs,
+            apps,
             installed,
             record,
         })
     }
 
-    fn installed_or_err(&self) -> Result<&BTreeSet<String>, String> {
-        if self.installed.is_empty() {
+    fn installed_langs(&self) -> BTreeSet<String> {
+        self.installed
+            .iter()
+            .filter_map(|group| match group {
+                Group::Lang(name) => Some(name.clone()),
+                Group::Base | Group::App(_) => None,
+            })
+            .collect()
+    }
+
+    fn installed_apps(&self) -> BTreeSet<String> {
+        self.installed
+            .iter()
+            .filter_map(|group| match group {
+                Group::App(name) => Some(name.clone()),
+                Group::Base | Group::Lang(_) => None,
+            })
+            .collect()
+    }
+
+    fn require_installed(&self) -> Result<(), String> {
+        if self.installed_langs().is_empty() {
             return Err(format!(
                 "no code-style language installed in {} — pass --lang or run install",
                 self.paths.install_root()
             ));
         }
-        Ok(&self.installed)
+        Ok(())
     }
 
-    fn available_list(&self) -> String {
-        join(&self.available)
-    }
-
-    fn requested_langs(&self, requested: &[String]) -> Result<BTreeSet<String>, String> {
-        for lang in requested {
-            if !self.available.contains(lang) {
+    /// The selected languages and apps, each checked against the plugin.
+    fn selected(&self, selection: &Selection) -> Result<BTreeSet<Group>, String> {
+        let mut groups = BTreeSet::new();
+        for lang in &selection.langs {
+            if !self.langs.contains(lang) {
                 return Err(format!(
                     "unknown language: {lang} — expected one of: {}",
-                    self.available_list()
+                    join(&self.langs)
                 ));
             }
+            groups.insert(Group::Lang(lang.clone()));
         }
-        Ok(requested.iter().cloned().collect())
-    }
-
-    /// The requested languages, or every installed one when none is given.
-    fn requested_or_installed(&self, requested: &[String]) -> Result<BTreeSet<String>, String> {
-        if requested.is_empty() {
-            Ok(self.installed_or_err()?.clone())
-        } else {
-            self.requested_langs(requested)
-        }
-    }
-
-    /// Profiles of the languages common rules render for: the installed ones
-    /// plus `extra`, limited to languages the plugin still ships.
-    fn profiles_with(&self, extra: &BTreeSet<String>) -> Result<BTreeMap<String, Profile>, String> {
-        let langs: BTreeSet<String> = self.installed.union(extra).cloned().collect();
-        self.profiles_of(&langs)
-    }
-
-    fn profiles_of(&self, langs: &BTreeSet<String>) -> Result<BTreeMap<String, Profile>, String> {
-        let mut profiles = BTreeMap::new();
-        for lang in langs.intersection(&self.available) {
-            let path = self.paths.profile_path(lang);
-            if !self.deps.fs.exists(&path) {
-                return Err(format!("language profile not found: {path}"));
+        for app in &selection.apps {
+            if !self.apps.contains(app) {
+                return Err(format!(
+                    "unknown app: {app} — expected one of: {}",
+                    join(&self.apps)
+                ));
             }
-            let profile = Profile::parse(&read_source(self.deps, &path)?)
-                .map_err(|e| format!("{path}: {e}"))?;
-            profiles.insert(lang.clone(), profile);
+            groups.insert(Group::App(app.clone()));
         }
-        Ok(profiles)
+        Ok(groups)
     }
 
-    fn sources(&self, group: &str) -> Result<BTreeSet<String>, String> {
+    /// The selection, or every installed language and app when it is empty.
+    fn selected_or_installed(&self, selection: &Selection) -> Result<BTreeSet<Group>, String> {
+        if selection.is_empty() {
+            self.require_installed()?;
+            Ok(self.installed.clone())
+        } else {
+            self.selected(selection)
+        }
+    }
+
+    fn ships(&self, group: &Group) -> bool {
+        match group {
+            Group::Base => true,
+            Group::Lang(name) => self.langs.contains(name),
+            Group::App(name) => self.apps.contains(name),
+        }
+    }
+
+    fn sources(&self, group: &Group) -> Result<BTreeSet<String>, String> {
+        if !self.ships(group) {
+            return Ok(BTreeSet::new());
+        }
         rule_files(self.deps, &self.paths.source_dir(group))
     }
 
-    fn copies(&self, group: &str) -> Result<BTreeSet<String>, String> {
+    fn copies(&self, group: &Group) -> Result<BTreeSet<String>, String> {
         rule_files(self.deps, &self.paths.install_dir(group))
     }
 
-    fn copy_path(&self, group: &str, file: &str) -> String {
+    fn copy_path(&self, group: &Group, file: &str) -> String {
         format!("{}/{file}", self.paths.install_dir(group))
     }
 
-    fn knows(&self, group: &str, file: &str) -> bool {
+    fn knows(&self, group: &Group, file: &str) -> bool {
         self.record
             .as_ref()
             .is_some_and(|record| record.has_rule(group, file))
     }
 
-    fn expected(
-        &self,
-        group: &str,
-        file: &str,
-        profiles: &BTreeMap<String, Profile>,
-    ) -> Result<String, String> {
-        let path = format!("{}/{file}", self.paths.source_dir(group));
-        let source = read_source(self.deps, &path)?;
-        if group == COMMON_GROUP {
-            render_common(&source, profiles).map_err(|e| format!("{path}: {e}"))
-        } else {
-            Ok(source)
-        }
+    fn source_content(&self, group: &Group, file: &str) -> Result<String, String> {
+        read_source(
+            self.deps,
+            &format!("{}/{file}", self.paths.source_dir(group)),
+        )
     }
 
-    fn judge(
-        &self,
-        groups: &BTreeSet<String>,
-        profiles: &BTreeMap<String, Profile>,
-    ) -> Result<Vec<JudgedRule>, String> {
+    fn judge(&self, groups: &BTreeSet<Group>) -> Result<Vec<JudgedRule>, String> {
         let mut judged = Vec::new();
         for group in groups {
             let sources = self.sources(group)?;
@@ -178,7 +192,7 @@ impl<'w> Workspace<'w> {
                     });
                     continue;
                 }
-                let expected = self.expected(group, file, profiles)?;
+                let expected = self.source_content(group, file)?;
                 let (finding, fix) = if !copies.contains(file) {
                     if self.knows(group, file) {
                         (finding(name, RuleStatus::Excluded, None), Fix::Keep)
@@ -213,6 +227,26 @@ impl<'w> Workspace<'w> {
         Ok(judged)
     }
 
+    /// Every copy of the groups, marked for removal.
+    fn removals(&self, groups: &BTreeSet<Group>) -> Result<Vec<JudgedRule>, String> {
+        let mut judged = Vec::new();
+        for group in groups {
+            for file in self.copies(group)? {
+                let copy = self.copy_path(group, &file);
+                judged.push(JudgedRule {
+                    finding: finding(
+                        rule_name(group, &file),
+                        RuleStatus::Orphaned,
+                        Some(copy.clone()),
+                    ),
+                    copy,
+                    fix: Fix::Remove,
+                });
+            }
+        }
+        Ok(judged)
+    }
+
     /// The record to update: the stored one, or for an install made before
     /// records existed, one rebuilt from the copies present.
     fn base_record(&self) -> Result<InstallRecord, String> {
@@ -220,12 +254,12 @@ impl<'w> Workspace<'w> {
             return Ok(record.clone());
         }
         let mut record = InstallRecord::default();
-        for lang in &self.installed {
-            record.add_lang(lang);
-            record.set_group_rules(lang, self.copies(lang)?);
+        if self.installed.is_empty() {
+            return Ok(record);
         }
-        if !self.installed.is_empty() {
-            record.set_group_rules(COMMON_GROUP, self.copies(COMMON_GROUP)?);
+        for group in self.installed.iter().chain([&Group::Base]) {
+            record.add(group);
+            record.set_rules(group, self.copies(group)?);
         }
         Ok(record)
     }
@@ -248,22 +282,19 @@ impl<'w> Workspace<'w> {
     }
 }
 
-/// install and update: bring `langs` and the common rules in line, then
-/// record what the project now has.
-fn sync(ws: &Workspace, langs: &BTreeSet<String>) -> Result<ApplyReport, String> {
-    let profiles = ws.profiles_with(langs)?;
-    let groups = with_common(langs);
-    let judged = ws.judge(&groups, &profiles)?;
+/// install and update: bring the groups and base in line, then record what
+/// the project now has.
+fn sync(ws: &Workspace, groups: BTreeSet<Group>) -> Result<ApplyReport, String> {
+    let groups = with_base(groups);
+    let judged = ws.judge(&groups)?;
 
     let mut record = ws.base_record()?;
     for group in &groups {
-        if group == COMMON_GROUP || ws.available.contains(group) {
-            if group != COMMON_GROUP {
-                record.add_lang(group);
-            }
-            record.set_group_rules(group, ws.sources(group)?);
+        if ws.ships(group) {
+            record.add(group);
+            record.set_rules(group, ws.sources(group)?);
         } else {
-            record.remove_lang(group);
+            record.remove(group);
         }
     }
 
@@ -272,9 +303,8 @@ fn sync(ws: &Workspace, langs: &BTreeSet<String>) -> Result<ApplyReport, String>
     Ok(report)
 }
 
-fn with_common(langs: &BTreeSet<String>) -> BTreeSet<String> {
-    let mut groups = langs.clone();
-    groups.insert(COMMON_GROUP.to_string());
+fn with_base(mut groups: BTreeSet<Group>) -> BTreeSet<Group> {
+    groups.insert(Group::Base);
     groups
 }
 
@@ -287,6 +317,9 @@ fn finding(name: String, status: RuleStatus, detail: Option<String>) -> RuleFind
 }
 
 fn join(items: &BTreeSet<String>) -> String {
+    if items.is_empty() {
+        return "none".to_string();
+    }
     items.iter().cloned().collect::<Vec<_>>().join(", ")
 }
 
@@ -304,14 +337,12 @@ fn load_record(
         .map_err(|e| format!("{path}: {e}"))
 }
 
-fn lang_dirs(deps: &CodeStyleDeps, root: &str) -> Result<BTreeSet<String>, String> {
-    Ok(deps
-        .fs
-        .list_dir(root)?
-        .dirs
-        .into_iter()
-        .filter(|dir| dir != COMMON_GROUP)
-        .collect())
+/// Subdirectory names of `dir`; a missing directory has none.
+fn subdirs(deps: &CodeStyleDeps, dir: &str) -> Result<BTreeSet<String>, String> {
+    if !deps.fs.is_dir(dir) {
+        return Ok(BTreeSet::new());
+    }
+    Ok(deps.fs.list_dir(dir)?.dirs.into_iter().collect())
 }
 
 /// Rule file names in `dir`; a missing directory holds none.

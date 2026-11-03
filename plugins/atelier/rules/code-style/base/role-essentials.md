@@ -1,7 +1,9 @@
 ---
 name: role-essentials
 description: 역할 파일 이름과 무관하게 어느 파일에서나 지키는 설정·외부 경계·래퍼·테스트의 핵심 한 줄 규칙
-roles: [source]
+paths:
+  - "**/*.go"
+  - "**/*.rs"
 ---
 
 # 역할별 핵심 (어느 파일에서나)

@@ -1,178 +1,85 @@
-use atelier::code_style::core::profile::Profile;
 use atelier::code_style::core::record::InstallRecord;
-use atelier::code_style::core::render::render_common;
-use atelier::code_style::core::role::Role;
-use std::collections::BTreeMap;
+use atelier::code_style::core::types::Group;
 
-fn profile(source: &[&str], test: &[&str]) -> Profile {
-    let list = |globs: &[&str]| {
-        globs
-            .iter()
-            .map(|g| format!("\"{g}\""))
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
-    Profile::parse(&format!(
-        "{{\"roles\": {{\"source\": [{}], \"config\": [], \"boundary\": [], \"test\": [{}]}}}}",
-        list(source),
-        list(test)
-    ))
-    .unwrap()
+fn lang(name: &str) -> Group {
+    Group::Lang(name.to_string())
 }
 
-fn profiles(entries: &[(&str, Profile)]) -> BTreeMap<String, Profile> {
-    entries
-        .iter()
-        .map(|(lang, p)| (lang.to_string(), p.clone()))
-        .collect()
+fn app(name: &str) -> Group {
+    Group::App(name.to_string())
 }
 
 #[test]
-fn role_parses_every_known_name() {
-    for (name, role) in [
-        ("source", Role::Source),
-        ("config", Role::Config),
-        ("boundary", Role::Boundary),
-        ("test", Role::Test),
-    ] {
-        assert_eq!(Role::parse(name), Ok(role));
-        assert_eq!(role.as_str(), name);
-    }
-}
-
-#[test]
-fn unknown_role_is_an_error() {
+fn groups_sort_base_then_languages_then_apps() {
+    let mut groups = vec![app("cli"), lang("rust"), Group::Base, lang("go")];
+    groups.sort();
     assert_eq!(
-        Role::parse("docs"),
-        Err("unknown role: docs — expected one of: source, config, boundary, test".to_string())
-    );
-}
-
-#[test]
-fn profile_missing_a_role_is_an_error() {
-    let err = Profile::parse("{\"roles\": {\"source\": [], \"config\": [], \"boundary\": []}}")
-        .unwrap_err();
-    assert!(err.contains("test"), "{err}");
-}
-
-#[test]
-fn profile_with_unknown_role_is_an_error() {
-    let err = Profile::parse(
-        "{\"roles\": {\"source\": [], \"config\": [], \"boundary\": [], \"test\": [], \"docs\": []}}",
-    )
-    .unwrap_err();
-    assert!(err.contains("docs"), "{err}");
-}
-
-#[test]
-fn render_replaces_roles_with_paths_in_language_then_role_then_profile_order() {
-    let source = "---\nname: x\nroles: [test, source]\ndescription: d\n---\n\n# body\n";
-    let langs = profiles(&[
-        ("rust", profile(&["**/*.rs"], &["**/tests/**/*.rs"])),
-        ("go", profile(&["**/*.go"], &["**/*_test.go", "**/*.go"])),
-    ]);
-
-    let out = render_common(source, &langs).unwrap();
-
-    assert_eq!(
-        out,
-        "---\nname: x\npaths:\n  - \"**/*_test.go\"\n  - \"**/*.go\"\n  \
-         - \"**/tests/**/*.rs\"\n  - \"**/*.rs\"\ndescription: d\n---\n\n# body\n"
-    );
-}
-
-#[test]
-fn render_ignores_a_roles_line_outside_the_frontmatter() {
-    let source = "---\nroles: [source]\n---\nroles: [test]\n";
-    let langs = profiles(&[("go", profile(&["**/*.go"], &["**/*_test.go"]))]);
-
-    let out = render_common(source, &langs).unwrap();
-
-    assert_eq!(out, "---\npaths:\n  - \"**/*.go\"\n---\nroles: [test]\n");
-}
-
-#[test]
-fn render_with_no_matching_path_is_an_error() {
-    let source = "---\nroles: [test]\n---\n";
-    let langs = profiles(&[("go", profile(&["**/*.go"], &[]))]);
-
-    assert_eq!(
-        render_common(source, &langs),
-        Err("roles [test] match no path for languages: go".to_string())
-    );
-}
-
-#[test]
-fn render_without_frontmatter_is_an_error() {
-    let langs = profiles(&[("go", profile(&["**/*.go"], &[]))]);
-    assert_eq!(
-        render_common("# body\n", &langs),
-        Err("a common rule needs a frontmatter with roles".to_string())
-    );
-}
-
-#[test]
-fn render_without_roles_is_an_error() {
-    let langs = profiles(&[("go", profile(&["**/*.go"], &[]))]);
-    assert_eq!(
-        render_common("---\nname: x\n---\n", &langs),
-        Err("a common rule needs a frontmatter with roles".to_string())
-    );
-}
-
-#[test]
-fn render_with_empty_roles_is_an_error() {
-    let langs = profiles(&[("go", profile(&["**/*.go"], &[]))]);
-    assert_eq!(
-        render_common("---\nroles: []\n---\n", &langs),
-        Err("roles must list at least one role, e.g. roles: [source]".to_string())
+        groups,
+        vec![Group::Base, lang("go"), lang("rust"), app("cli")]
     );
 }
 
 #[test]
 fn record_round_trips_sorted_and_deduplicated() {
     let mut record = InstallRecord::default();
-    record.add_lang("rust");
-    record.add_lang("go");
-    record.set_group_rules("go", ["b.md".to_string(), "a.md".to_string()]);
-    record.set_group_rules("common", ["c.md".to_string()]);
+    record.add(&lang("rust"));
+    record.add(&lang("go"));
+    record.add(&app("cli"));
+    record.set_rules(&lang("go"), ["b.md".to_string(), "a.md".to_string()]);
+    record.set_rules(&Group::Base, ["c.md".to_string()]);
 
     let json = record.render();
 
     assert_eq!(
         json,
-        "{\n  \"langs\": [\n    \"go\",\n    \"rust\"\n  ],\n  \"rules\": [\n    \
-         \"common/c.md\",\n    \"go/a.md\",\n    \"go/b.md\"\n  ]\n}\n"
+        "{\n  \"langs\": [\n    \"go\",\n    \"rust\"\n  ],\n  \"apps\": [\n    \"cli\"\n  ],\n  \
+         \"rules\": [\n    \"base/c.md\",\n    \"go/a.md\",\n    \"go/b.md\"\n  ]\n}\n"
     );
     assert_eq!(InstallRecord::parse(&json), Ok(record));
 }
 
 #[test]
-fn record_set_group_rules_replaces_only_that_group() {
+fn set_rules_replaces_only_that_group() {
     let mut record = InstallRecord::default();
-    record.set_group_rules("go", ["a.md".to_string()]);
-    record.set_group_rules("common", ["c.md".to_string()]);
+    record.set_rules(&lang("go"), ["a.md".to_string()]);
+    record.set_rules(&Group::Base, ["c.md".to_string()]);
 
-    record.set_group_rules("go", ["b.md".to_string()]);
+    record.set_rules(&lang("go"), ["b.md".to_string()]);
 
-    assert!(record.has_rule("go", "b.md"));
-    assert!(!record.has_rule("go", "a.md"));
-    assert!(record.has_rule("common", "c.md"));
+    assert!(record.has_rule(&lang("go"), "b.md"));
+    assert!(!record.has_rule(&lang("go"), "a.md"));
+    assert!(record.has_rule(&Group::Base, "c.md"));
 }
 
 #[test]
-fn record_remove_lang_drops_its_rules() {
+fn remove_drops_the_group_and_its_rules() {
     let mut record = InstallRecord::default();
-    record.add_lang("go");
-    record.set_group_rules("go", ["a.md".to_string()]);
+    record.add(&app("cli"));
+    record.set_rules(&app("cli"), ["a.md".to_string()]);
 
-    record.remove_lang("go");
+    record.remove(&app("cli"));
 
-    assert!(record.langs().is_empty());
-    assert!(!record.has_rule("go", "a.md"));
+    assert!(record.apps().is_empty());
+    assert!(!record.has_rule(&app("cli"), "a.md"));
+}
+
+#[test]
+fn installed_groups_list_languages_then_apps() {
+    let mut record = InstallRecord::default();
+    record.add(&app("cli"));
+    record.add(&lang("go"));
+
+    assert_eq!(record.groups(), vec![lang("go"), app("cli")]);
 }
 
 #[test]
 fn record_with_unknown_field_is_an_error() {
-    assert!(InstallRecord::parse("{\"langs\": [], \"rules\": [], \"extra\": 1}").is_err());
+    assert!(
+        InstallRecord::parse("{\"langs\": [], \"apps\": [], \"rules\": [], \"extra\": 1}").is_err()
+    );
+}
+
+#[test]
+fn record_without_apps_is_an_error() {
+    assert!(InstallRecord::parse("{\"langs\": [], \"rules\": []}").is_err());
 }

@@ -1,7 +1,9 @@
 ---
 name: closed-value-sets
 description: 닫힌 값 집합은 전용 타입과 망라 분기로 다루고, 밖에서 온 값은 경계에서 해석해 모르는 값은 실패시킨다
-roles: [source]
+paths:
+  - "**/*.go"
+  - "**/*.rs"
 ---
 
 # 닫힌 값 집합과 빨리 실패

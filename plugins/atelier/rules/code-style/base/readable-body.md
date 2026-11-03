@@ -1,7 +1,9 @@
 ---
 name: readable-body
 description: 진입 함수 본문은 단계가 한눈에 보이는 의사코드 수준으로 쓰고, 세부는 하위 함수나 협력자에 위임한다
-roles: [source]
+paths:
+  - "**/*.go"
+  - "**/*.rs"
 ---
 
 # 읽히는 본문

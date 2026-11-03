@@ -1,13 +1,15 @@
+use crate::code_style::core::types::Group;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-/// What a project has installed: its languages, and every rule
+/// What a project has installed: its languages and apps, and every rule
 /// (`<group>/<file>`) handed to it — including those it has since deleted,
 /// which is how a deleted copy reads as excluded rather than new.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InstallRecord {
     langs: BTreeSet<String>,
+    apps: BTreeSet<String>,
     rules: BTreeSet<String>,
 }
 
@@ -26,26 +28,53 @@ impl InstallRecord {
         &self.langs
     }
 
-    pub fn has_rule(&self, group: &str, file: &str) -> bool {
+    pub fn apps(&self) -> &BTreeSet<String> {
+        &self.apps
+    }
+
+    /// The installed languages and apps (never `Base`), in group order.
+    pub fn groups(&self) -> Vec<Group> {
+        let langs = self.langs.iter().cloned().map(Group::Lang);
+        let apps = self.apps.iter().cloned().map(Group::App);
+        langs.chain(apps).collect()
+    }
+
+    pub fn has_rule(&self, group: &Group, file: &str) -> bool {
         self.rules.contains(&rule_key(group, file))
     }
 
-    pub fn add_lang(&mut self, lang: &str) {
-        self.langs.insert(lang.to_string());
+    pub fn add(&mut self, group: &Group) {
+        match group {
+            Group::Base => {}
+            Group::Lang(name) => {
+                self.langs.insert(name.clone());
+            }
+            Group::App(name) => {
+                self.apps.insert(name.clone());
+            }
+        }
     }
 
-    pub fn add_rule(&mut self, group: &str, file: &str) {
+    /// Drops the group and every rule recorded under it.
+    pub fn remove(&mut self, group: &Group) {
+        match group {
+            Group::Base => {}
+            Group::Lang(name) => {
+                self.langs.remove(name);
+            }
+            Group::App(name) => {
+                self.apps.remove(name);
+            }
+        }
+        self.set_rules(group, []);
+    }
+
+    pub fn add_rule(&mut self, group: &Group, file: &str) {
         self.rules.insert(rule_key(group, file));
     }
 
-    /// Drops the language and every rule recorded under it.
-    pub fn remove_lang(&mut self, lang: &str) {
-        self.langs.remove(lang);
-        self.set_group_rules(lang, []);
-    }
-
-    pub fn set_group_rules(&mut self, group: &str, files: impl IntoIterator<Item = String>) {
-        let prefix = format!("{group}/");
+    pub fn set_rules(&mut self, group: &Group, files: impl IntoIterator<Item = String>) {
+        let prefix = format!("{}/", group.name());
         self.rules.retain(|rule| !rule.starts_with(&prefix));
         for file in files {
             self.rules.insert(rule_key(group, &file));
@@ -53,6 +82,6 @@ impl InstallRecord {
     }
 }
 
-fn rule_key(group: &str, file: &str) -> String {
-    format!("{group}/{file}")
+fn rule_key(group: &Group, file: &str) -> String {
+    format!("{}/{file}", group.name())
 }

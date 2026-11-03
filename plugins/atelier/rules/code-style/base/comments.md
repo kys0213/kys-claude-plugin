@@ -1,7 +1,9 @@
 ---
 name: comments
 description: 주석(doc·테스트 주석 포함)에는 코드만 봐서는 모르는 why·gotcha·비자명한 제약만 적는다
-roles: [source]
+paths:
+  - "**/*.go"
+  - "**/*.rs"
 ---
 
 # 주석

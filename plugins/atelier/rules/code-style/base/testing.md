@@ -1,7 +1,10 @@
 ---
 name: testing
 description: 테스트는 의존성 주입·AAA·한 테스트 한 행동으로 쓰고, 외부 인프라 의존 여부 하나로 CI 포함 여부를 가른다
-roles: [test]
+paths:
+  - "**/*_test.go"
+  - "**/tests/**/*.rs"
+  - "**/tests.rs"
 ---
 
 # 테스트 (Testing)

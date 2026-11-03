@@ -1,10 +1,7 @@
-use crate::code_style::commands::{
-    apply, finding, join, CodeStyleDeps, Fix, JudgedRule, Workspace,
-};
+use crate::code_style::commands::{apply, finding, CodeStyleDeps, Fix, JudgedRule, Workspace};
 use crate::code_style::core::types::{
-    rule_name, ApplyReport, CodeStylePaths, RuleStatus, COMMON_GROUP, RULE_EXT,
+    rule_name, ApplyReport, CodeStylePaths, Group, RuleStatus, RULE_EXT,
 };
-use std::collections::BTreeSet;
 
 /// Puts excluded rules (`<group>/<file>`) back; a rule whose copy is present
 /// is left as it is.
@@ -17,13 +14,12 @@ pub fn run(
         return Err("at least one --rule is required".to_string());
     }
     let ws = Workspace::load(deps, paths)?;
-    let installed = ws.installed_or_err()?;
+    ws.require_installed()?;
     let targets = rules
         .iter()
-        .map(|rule| target(&ws, installed, rule))
+        .map(|rule| target(&ws, rule))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let profiles = ws.profiles_with(&BTreeSet::new())?;
     let mut record = ws.base_record()?;
     let mut judged = Vec::new();
     for (group, file) in targets {
@@ -39,7 +35,7 @@ pub fn run(
         } else {
             JudgedRule {
                 finding: finding(name, RuleStatus::New, Some(copy.clone())),
-                fix: Fix::Install(ws.expected(&group, &file, &profiles)?),
+                fix: Fix::Install(ws.source_content(&group, &file)?),
                 copy,
             }
         };
@@ -51,27 +47,30 @@ pub fn run(
     Ok(report)
 }
 
-fn target(
-    ws: &Workspace,
-    installed: &BTreeSet<String>,
-    rule: &str,
-) -> Result<(String, String), String> {
-    let (group, file) = rule
+fn target(ws: &Workspace, rule: &str) -> Result<(Group, String), String> {
+    let (name, file) = rule
         .split_once('/')
-        .filter(|(group, file)| {
-            !group.is_empty() && !file.contains('/') && file.ends_with(RULE_EXT)
-        })
+        .filter(|(name, file)| !name.is_empty() && !file.contains('/') && file.ends_with(RULE_EXT))
         .ok_or_else(|| {
-            format!("invalid rule: {rule} — expected <group>/<file>.md, e.g. common/comments.md")
+            format!("invalid rule: {rule} — expected <group>/<file>.md, e.g. base/comments.md")
         })?;
-    if group != COMMON_GROUP && !installed.contains(group) {
-        return Err(format!(
-            "{rule}: language {group} is not installed (installed: {})",
-            join(installed)
-        ));
-    }
-    if !ws.sources(group)?.contains(file) {
+    let group = if name == Group::Base.name() {
+        Group::Base
+    } else {
+        ws.installed
+            .iter()
+            .find(|group| group.name() == name)
+            .cloned()
+            .ok_or_else(|| {
+                let installed: Vec<&str> = ws.installed.iter().map(Group::name).collect();
+                format!(
+                    "{rule}: {name} is not installed (installed: {})",
+                    installed.join(", ")
+                )
+            })?
+    };
+    if !ws.sources(&group)?.contains(file) {
         return Err(format!("unknown rule: {rule}"));
     }
-    Ok((group.to_string(), file.to_string()))
+    Ok((group, file.to_string()))
 }

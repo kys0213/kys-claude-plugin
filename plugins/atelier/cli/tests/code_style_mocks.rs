@@ -9,7 +9,7 @@
 
 use atelier::code_style::commands::CodeStyleDeps;
 use atelier::code_style::core::rule_fs::{DirEntries, RuleTreeFs};
-use atelier::code_style::core::types::CodeStylePaths;
+use atelier::code_style::core::types::{CodeStylePaths, Selection};
 use atelier::drift::core::artifact::{ArtifactFs, BackupClock};
 use atelier::drift::core::types::ArtifactContent;
 use std::cell::RefCell;
@@ -22,23 +22,33 @@ pub const PROJECT_DIR: &str = "/proj";
 
 pub const GO_RULES: &[&str] = &["go-errors.md", "go-naming.md"];
 pub const RUST_RULES: &[&str] = &["rust-naming.md"];
-pub const COMMON_RULES: &[&str] = &["cohesion.md", "comments.md"];
+pub const BASE_RULES: &[&str] = &["cohesion.md", "comments.md"];
+pub const CLI_RULES: &[&str] = &["cli-output.md"];
+pub const LIBRARY_RULES: &[&str] = &["library-api.md"];
 
 pub fn rules_of(group: &str) -> &'static [&'static str] {
     match group {
         "go" => GO_RULES,
         "rust" => RUST_RULES,
-        "common" => COMMON_RULES,
+        "base" => BASE_RULES,
+        "cli" => CLI_RULES,
+        "library" => LIBRARY_RULES,
         other => panic!("no fixture group {other}"),
     }
 }
 
-pub fn source(group: &str, file: &str) -> String {
-    format!("{PLUGIN_ROOT}/rules/code-style/{group}/{file}")
+/// Where a group's sources live under the plugin's `rules/code-style`.
+pub fn source_dir(group: &str) -> String {
+    let rel = match group {
+        "base" => "base".to_string(),
+        "cli" | "library" => format!("app/{group}"),
+        lang => format!("lang/{lang}"),
+    };
+    format!("{PLUGIN_ROOT}/rules/code-style/{rel}")
 }
 
-pub fn profile_path(lang: &str) -> String {
-    source(lang, "profile.json")
+pub fn source(group: &str, file: &str) -> String {
+    format!("{}/{file}", source_dir(group))
 }
 
 pub fn copy(group: &str, file: &str) -> String {
@@ -49,61 +59,15 @@ pub fn record_path() -> String {
     format!("{PROJECT_DIR}/.claude/rules/atelier/code-style/installed.json")
 }
 
-/// The source glob every fixture common rule (`roles: [source]`) renders to.
-pub fn source_glob(lang: &str) -> &'static str {
-    match lang {
-        "go" => "**/*.go",
-        "rust" => "**/*.rs",
-        other => panic!("no fixture profile {other}"),
-    }
-}
-
-pub fn profile_json(lang: &str) -> String {
-    let ext = source_glob(lang).trim_start_matches("**/*");
-    format!(
-        "{{\"roles\": {{\"source\": [\"{}\"], \"config\": [\"**/config{ext}\"], \
-         \"boundary\": [\"**/*_client{ext}\"], \"test\": [\"**/*_test{ext}\"]}}}}\n",
-        source_glob(lang)
-    )
-}
-
-/// A source file's content: a language rule is plain, a common rule declares
-/// `roles: [source]`.
 pub fn body(group: &str, file: &str) -> String {
-    if group == "common" {
-        common_source(file, "roles: [source]")
-    } else {
-        format!("# {group}/{file}\n\n- DO keep it simple\n")
-    }
+    format!("# {group}/{file}\n\n- DO keep it simple\n")
 }
 
-pub fn common_source(file: &str, roles_line: &str) -> String {
-    format!("---\nname: {file}\n{roles_line}\n---\n\n# common/{file}\n")
-}
-
-/// What a fixture common rule installs as for `langs`.
-pub fn rendered(file: &str, langs: &[&str]) -> String {
-    let mut sorted = langs.to_vec();
-    sorted.sort();
-    sorted.dedup();
-    let globs: String = sorted
-        .iter()
-        .map(|lang| format!("  - \"{}\"\n", source_glob(lang)))
-        .collect();
-    format!("---\nname: {file}\npaths:\n{globs}---\n\n# common/{file}\n")
-}
-
-/// What `group/file` installs as when `langs` are installed.
-pub fn expected(group: &str, file: &str, langs: &[&str]) -> String {
-    if group == "common" {
-        rendered(file, langs)
-    } else {
-        body(group, file)
-    }
-}
-
-pub fn record_json(langs: &[&str], rules: &[&str]) -> String {
-    let list = |items: Vec<String>| -> String {
+pub fn record_json(langs: &[&str], apps: &[&str], rules: &[&str]) -> String {
+    let list = |items: &[&str]| -> String {
+        let mut items: Vec<&str> = items.to_vec();
+        items.sort();
+        items.dedup();
         if items.is_empty() {
             "[]".to_string()
         } else {
@@ -111,23 +75,18 @@ pub fn record_json(langs: &[&str], rules: &[&str]) -> String {
             format!("[\n{}\n  ]", lines.join(",\n"))
         }
     };
-    let mut langs: Vec<String> = langs.iter().map(|l| l.to_string()).collect();
-    langs.sort();
-    langs.dedup();
-    let mut rules: Vec<String> = rules.iter().map(|r| r.to_string()).collect();
-    rules.sort();
-    rules.dedup();
     format!(
-        "{{\n  \"langs\": {},\n  \"rules\": {}\n}}\n",
+        "{{\n  \"langs\": {},\n  \"apps\": {},\n  \"rules\": {}\n}}\n",
         list(langs),
+        list(apps),
         list(rules)
     )
 }
 
-/// Every `group/file` name a full install of `langs` records.
-pub fn all_rules(langs: &[&str]) -> Vec<String> {
+/// Every `group/file` name a full install of `groups` (plus base) records.
+pub fn all_rules(groups: &[&str]) -> Vec<String> {
     let mut names = Vec::new();
-    for group in langs.iter().copied().chain(["common"]) {
+    for group in groups.iter().copied().chain(["base"]) {
         for file in rules_of(group) {
             names.push(format!("{group}/{file}"));
         }
@@ -135,10 +94,11 @@ pub fn all_rules(langs: &[&str]) -> Vec<String> {
     names
 }
 
-pub fn full_record(langs: &[&str]) -> String {
-    let rules = all_rules(langs);
+pub fn full_record(langs: &[&str], apps: &[&str]) -> String {
+    let groups: Vec<&str> = langs.iter().chain(apps).copied().collect();
+    let rules = all_rules(&groups);
     let refs: Vec<&str> = rules.iter().map(String::as_str).collect();
-    record_json(langs, &refs)
+    record_json(langs, apps, &refs)
 }
 
 pub fn paths() -> CodeStylePaths {
@@ -152,6 +112,13 @@ pub fn langs(names: &[&str]) -> Vec<String> {
     names.iter().map(|n| n.to_string()).collect()
 }
 
+pub fn select(langs: &[&str], apps: &[&str]) -> Selection {
+    Selection {
+        langs: langs.iter().map(|n| n.to_string()).collect(),
+        apps: apps.iter().map(|n| n.to_string()).collect(),
+    }
+}
+
 #[derive(Default)]
 pub struct MemFs {
     pub files: RefCell<BTreeMap<String, Vec<u8>>>,
@@ -161,39 +128,44 @@ pub struct MemFs {
 }
 
 impl MemFs {
-    /// Every fixture source (go, rust, common) with profiles, nothing installed.
+    /// Every fixture source (base, go, rust, cli, library), nothing installed.
     pub fn with_sources() -> Self {
         let fs = MemFs::default();
-        for group in ["go", "rust", "common"] {
+        for group in ["base", "go", "rust", "cli", "library"] {
             for file in rules_of(group) {
                 fs.insert(&source(group, file), &body(group, file));
             }
-        }
-        for lang in ["go", "rust"] {
-            fs.insert(&profile_path(lang), &profile_json(lang));
         }
         fs
     }
 
     /// Sources plus a full, in-sync install of `langs` with its record.
     pub fn installed(langs: &[&str]) -> Self {
-        let fs = MemFs::installed_without_record(langs);
-        fs.insert(&record_path(), &full_record(langs));
+        MemFs::installed_with(langs, &[])
+    }
+
+    pub fn installed_with(langs: &[&str], apps: &[&str]) -> Self {
+        let fs = MemFs::with_sources();
+        for group in langs.iter().chain(apps).copied().chain(["base"]) {
+            fs.install_group(group);
+        }
+        fs.insert(&record_path(), &full_record(langs, apps));
         fs
     }
 
     /// Sources plus an in-sync install of `langs` from before install records.
     pub fn installed_without_record(langs: &[&str]) -> Self {
         let fs = MemFs::with_sources();
-        for lang in langs {
-            for file in rules_of(lang) {
-                fs.insert(&copy(lang, file), &body(lang, file));
-            }
-        }
-        for file in COMMON_RULES {
-            fs.insert(&copy("common", file), &rendered(file, langs));
+        for group in langs.iter().copied().chain(["base"]) {
+            fs.install_group(group);
         }
         fs
+    }
+
+    pub fn install_group(&self, group: &str) {
+        for file in rules_of(group) {
+            self.insert(&copy(group, file), &body(group, file));
+        }
     }
 
     pub fn insert(&self, path: &str, content: &str) {

@@ -1,17 +1,46 @@
 pub const SOURCE_ROOT_REL: &str = "rules/code-style";
 pub const INSTALL_ROOT_REL: &str = ".claude/rules/atelier/code-style";
 
-/// The group every language install brings along. It is a directory beside
-/// the language directories, never a `--lang` value.
-pub const COMMON_GROUP: &str = "common";
+/// Source subdirectories holding one directory per language / app kind.
+pub const LANG_SOURCE_DIR: &str = "lang";
+pub const APP_SOURCE_DIR: &str = "app";
 
 pub const RULE_EXT: &str = ".md";
 
 /// Beside the group directories in the install root.
 pub const RECORD_FILE: &str = "installed.json";
 
-/// Inside each language source directory; never installed.
-pub const PROFILE_FILE: &str = "profile.json";
+/// One installable set of rules. Every install brings `Base` along; it is
+/// never a `--lang` or `--app` value.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Group {
+    Base,
+    Lang(String),
+    App(String),
+}
+
+impl Group {
+    /// The directory name the group installs under.
+    pub fn name(&self) -> &str {
+        match self {
+            Group::Base => "base",
+            Group::Lang(name) | Group::App(name) => name,
+        }
+    }
+}
+
+/// The languages and apps a command was asked to work on.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Selection {
+    pub langs: Vec<String>,
+    pub apps: Vec<String>,
+}
+
+impl Selection {
+    pub fn is_empty(&self) -> bool {
+        self.langs.is_empty() && self.apps.is_empty()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeStylePaths {
@@ -26,23 +55,31 @@ impl CodeStylePaths {
     pub fn install_root(&self) -> String {
         format!("{}/{INSTALL_ROOT_REL}", self.project_dir)
     }
-    pub fn source_dir(&self, group: &str) -> String {
-        format!("{}/{group}", self.source_root())
+    pub fn lang_source_root(&self) -> String {
+        format!("{}/{LANG_SOURCE_DIR}", self.source_root())
     }
-    pub fn install_dir(&self, group: &str) -> String {
-        format!("{}/{group}", self.install_root())
+    pub fn app_source_root(&self) -> String {
+        format!("{}/{APP_SOURCE_DIR}", self.source_root())
+    }
+    pub fn source_dir(&self, group: &Group) -> String {
+        match group {
+            Group::Base => format!("{}/{}", self.source_root(), group.name()),
+            Group::Lang(name) => format!("{}/{name}", self.lang_source_root()),
+            Group::App(name) => format!("{}/{name}", self.app_source_root()),
+        }
+    }
+    /// Installed groups sit side by side, whatever their kind.
+    pub fn install_dir(&self, group: &Group) -> String {
+        format!("{}/{}", self.install_root(), group.name())
     }
     pub fn record_path(&self) -> String {
         format!("{}/{RECORD_FILE}", self.install_root())
     }
-    pub fn profile_path(&self, lang: &str) -> String {
-        format!("{}/{PROFILE_FILE}", self.source_dir(lang))
-    }
 }
 
 /// The report name of one rule file — callers branch on this exact string.
-pub fn rule_name(group: &str, file: &str) -> String {
-    format!("code-style/{group}/{file}")
+pub fn rule_name(group: &Group, file: &str) -> String {
+    format!("code-style/{}/{file}", group.name())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

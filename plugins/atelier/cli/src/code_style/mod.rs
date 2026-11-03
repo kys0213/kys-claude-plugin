@@ -1,7 +1,6 @@
-//! Code-style subsystem: installs the plugin's per-language rule files (plus
-//! the shared `common` group, rendered for the installed languages) into a
-//! project's `.claude/rules`, judges the installed copies against what they
-//! should hold, and brings them back in line.
+//! Code-style subsystem: installs the plugin's base, per-language and
+//! per-app-kind rule files into a project's `.claude/rules`, judges the
+//! installed copies against the sources, and brings them back in line.
 //!
 //! Errors exit 2, like `drift`. Output is human text parsed line by line —
 //! every rendered line format is a contract.
@@ -10,7 +9,7 @@ pub mod commands;
 pub mod core;
 
 use crate::code_style::commands::CodeStyleDeps;
-use crate::code_style::core::types::CodeStylePaths;
+use crate::code_style::core::types::{CodeStylePaths, Selection};
 use crate::drift::core::artifact::{create_artifact_fs, create_backup_clock};
 use crate::shared::process::default_project_dir;
 use clap::{Args, Parser, Subcommand};
@@ -28,8 +27,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Install the given languages' rules and the common rules rendered for
-    /// every installed language
+    /// Install the given languages' and apps' rules and the base rules
     Install {
         #[command(flatten)]
         args: StyleArgs,
@@ -53,8 +51,8 @@ pub enum Commands {
         #[arg(long = "rule")]
         rules: Vec<String>,
     },
-    /// Back up and remove the given languages' rules and re-render the common
-    /// rules for the languages left
+    /// Back up and remove the given languages' and apps' rules; removing the
+    /// last language removes everything
     Uninstall {
         #[command(flatten)]
         args: StyleArgs,
@@ -63,7 +61,7 @@ pub enum Commands {
 
 #[derive(Args)]
 pub struct Location {
-    /// Plugin root holding rules/code-style/<group>/
+    /// Plugin root holding rules/code-style/{base,lang/<lang>,app/<app>}/
     #[arg(long = "plugin-root")]
     plugin_root: String,
     /// Project whose .claude/rules/atelier/code-style is managed (default: cwd)
@@ -84,16 +82,24 @@ impl Location {
 pub struct StyleArgs {
     #[command(flatten)]
     location: Location,
-    /// Language directory under rules/code-style (e.g. go, rust); repeatable.
-    /// Required by install and uninstall; update and check default to every
-    /// language installed in the project
+    /// Language directory under rules/code-style/lang (e.g. go, rust);
+    /// repeatable. Install needs at least one
     #[arg(long = "lang")]
     langs: Vec<String>,
+    /// App kind directory under rules/code-style/app (e.g. cli, library);
+    /// repeatable. Update and check default to every installed language and
+    /// app when neither --lang nor --app is given
+    #[arg(long = "app")]
+    apps: Vec<String>,
 }
 
 impl StyleArgs {
-    fn split(self) -> (CodeStylePaths, Vec<String>) {
-        (self.location.paths(), self.langs)
+    fn split(self) -> (CodeStylePaths, Selection) {
+        let selection = Selection {
+            langs: self.langs,
+            apps: self.apps,
+        };
+        (self.location.paths(), selection)
     }
 }
 
@@ -130,23 +136,23 @@ pub fn run(cli: Cli) -> i32 {
     };
     let result = match command {
         Commands::Install { args } => {
-            let (paths, langs) = args.split();
-            commands::install::run(&deps, &paths, &langs).map(|r| (r.render(), 0))
+            let (paths, selection) = args.split();
+            commands::install::run(&deps, &paths, &selection).map(|r| (r.render(), 0))
         }
         Commands::Update { args } => {
-            let (paths, langs) = args.split();
-            commands::update::run(&deps, &paths, &langs).map(|r| (r.render(), 0))
+            let (paths, selection) = args.split();
+            commands::update::run(&deps, &paths, &selection).map(|r| (r.render(), 0))
         }
         Commands::Check { args } => {
-            let (paths, langs) = args.split();
-            commands::check::run(&deps, &paths, &langs).map(|r| (r.render(), r.exit_code()))
+            let (paths, selection) = args.split();
+            commands::check::run(&deps, &paths, &selection).map(|r| (r.render(), r.exit_code()))
         }
         Commands::Restore { location, rules } => {
             commands::restore::run(&deps, &location.paths(), &rules).map(|r| (r.render(), 0))
         }
         Commands::Uninstall { args } => {
-            let (paths, langs) = args.split();
-            commands::uninstall::run(&deps, &paths, &langs).map(|r| (r.render(), 0))
+            let (paths, selection) = args.split();
+            commands::uninstall::run(&deps, &paths, &selection).map(|r| (r.render(), 0))
         }
     };
     match result {
