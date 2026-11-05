@@ -1,8 +1,5 @@
-//! Stdin payload for `kanban board`: `{"sessions": [<v1 record>, ...]}`.
-//!
-//! A record this version cannot read (another `v`, a missing or wrong-typed
-//! field) is skipped, never expired, so a newer module's records survive an
-//! older CLI.
+//! Stdin payload for `kanban board`: `{"sessions": [<v1 record>, ...]}`. A
+//! record this version cannot read is dropped here, before the board sees it.
 
 use crate::kanban::core::board::{Event, SessionFact};
 use serde_json::Value;

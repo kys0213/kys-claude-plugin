@@ -33,7 +33,6 @@ type Entry = {
   /** The event to append; `null` only refreshes the heartbeat. */
   name: string | null
   detail?: string | null
-  /** Overwrites these fields. */
   set?: Fields
   /** Fills these fields only while they are still `null`. */
   fill?: Fields
@@ -119,7 +118,7 @@ async function writeRecord($: EngineInterface, entry: Entry): Promise<void> {
     ? [...base.events, { name: entry.name as string, detail: entry.detail ?? null, at: now }].slice(-MAX_EVENTS)
     : base.events
 
-  /** Any later entry revives a record a `/clear` ended under the same id. */
+  /** Only `set` keeps `ended_reason`: a session that still records after its end is live again. */
   await $.store.set(key, {
     ...base,
     ...filled(base, entry.fill ?? {}),
@@ -140,32 +139,32 @@ async function record($: EngineInterface, s: KanbanState, entry: Entry): Promise
   await s.writes
 }
 
-function decodeBoard(stdout: string): BoardView {
+function parseObject(stdout: string): Record<string, unknown> | null {
   try {
-    const parsed = JSON.parse(stdout) as Record<string, unknown>
+    const parsed: unknown = JSON.parse(stdout)
 
-    if (typeof parsed.error === 'string') {
-      return { kind: 'error', message: parsed.error }
-    }
-
-    if (Array.isArray(parsed.columns)) {
-      return { kind: 'board', columns: parsed.columns as Column[] }
-    }
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : null
   } catch {
-    /** falls through to the generic error */
+    return null
+  }
+}
+
+function decodeBoard(parsed: Record<string, unknown> | null): BoardView {
+  if (typeof parsed?.error === 'string') {
+    return { kind: 'error', message: parsed.error }
+  }
+
+  if (Array.isArray(parsed?.columns)) {
+    return { kind: 'board', columns: parsed.columns as Column[] }
   }
 
   return { kind: 'error', message: 'atelier kanban board 의 출력을 읽지 못했어요' }
 }
 
-function expiredIds(stdout: string): string[] {
-  try {
-    const expired = (JSON.parse(stdout) as Record<string, unknown>).expired
+function expiredIds(parsed: Record<string, unknown> | null): string[] {
+  const expired = parsed?.expired
 
-    return Array.isArray(expired) ? expired.filter((x): x is string => typeof x === 'string') : []
-  } catch {
-    return []
-  }
+  return Array.isArray(expired) ? expired.filter((x): x is string => typeof x === 'string') : []
 }
 
 async function snapshot($: EngineInterface): Promise<unknown[]> {
@@ -195,9 +194,11 @@ async function refresh($: EngineInterface, s: KanbanState): Promise<void> {
     if (r.exitCode !== 0) {
       s.view = { kind: 'error', message: `atelier kanban board 가 exit ${r.exitCode} 로 끝났어요` }
     } else {
-      s.view = decodeBoard(r.stdout)
+      const parsed = parseObject(r.stdout)
 
-      for (const id of expiredIds(r.stdout)) {
+      s.view = decodeBoard(parsed)
+
+      for (const id of expiredIds(parsed)) {
         await $.store.delete(KEY_PREFIX + id)
       }
     }
@@ -284,7 +285,7 @@ export function registerKanban(on: On): void {
   })
 
   on('classic.UserPromptSubmit', async ($, e, next) => {
-    if (typeof e.session_title === 'string' && e.session_title.trim() !== '') {
+    if (typeof e.session_title === 'string') {
       await record($, s, { name: null, set: { title: e.session_title } })
     }
 

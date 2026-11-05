@@ -20,7 +20,7 @@ pub struct SessionFact {
     pub started_at: u64,
     pub heartbeat_at: u64,
     pub ended_reason: Option<String>,
-    /// Oldest first, as the hooks module appends them.
+    /// Oldest first.
     pub events: Vec<Event>,
 }
 
@@ -88,8 +88,27 @@ pub struct Board {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+enum WaitReason {
+    /// The tool asking, when the event names it.
+    Permission(Option<String>),
+    Question,
+    Input,
+}
+
+impl WaitReason {
+    fn label(&self) -> String {
+        match self {
+            WaitReason::Permission(Some(tool)) => format!("권한 요청: {tool}"),
+            WaitReason::Permission(None) => "권한 요청".to_string(),
+            WaitReason::Question => "질문".to_string(),
+            WaitReason::Input => "입력 요청".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum State {
-    NeedsInput(String),
+    NeedsInput(WaitReason),
     Working,
     Idle,
 }
@@ -105,16 +124,17 @@ enum Signal {
 }
 
 fn signal_of(event: &Event) -> Signal {
-    let needs = |reason: String| Signal::Set(State::NeedsInput(reason));
+    let needs = |reason: WaitReason| Signal::Set(State::NeedsInput(reason));
     match (event.name.as_str(), event.detail.as_deref()) {
         ("prompt.submit" | "turn.start", _) => Signal::Set(State::Working),
         ("classic.PostToolUse" | "classic.PostToolUseFailure", _) => Signal::Set(State::Working),
         ("turn.complete" | "session.start", _) => Signal::Set(State::Idle),
-        ("classic.PermissionRequest", Some("AskUserQuestion")) => needs("질문".to_string()),
-        ("classic.PermissionRequest", Some(tool)) => needs(format!("권한 요청: {tool}")),
-        ("classic.PermissionRequest", None) => needs("권한 요청".to_string()),
-        ("classic.Notification", Some("permission_prompt")) => needs("권한 요청".to_string()),
-        ("classic.Notification", Some("elicitation_dialog")) => needs("입력 요청".to_string()),
+        ("classic.PermissionRequest", Some("AskUserQuestion")) => needs(WaitReason::Question),
+        ("classic.PermissionRequest", tool) => {
+            needs(WaitReason::Permission(tool.map(str::to_string)))
+        }
+        ("classic.Notification", Some("permission_prompt")) => needs(WaitReason::Permission(None)),
+        ("classic.Notification", Some("elicitation_dialog")) => needs(WaitReason::Input),
         ("classic.Notification", Some("idle_prompt")) => Signal::Set(State::Idle),
         ("ui.spinner", _) => Signal::Resumed,
         _ => Signal::Nothing,
@@ -125,10 +145,8 @@ fn same_kind(a: &State, b: &State) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b)
 }
 
-/// Replays the events oldest first. A state that repeats keeps its first
-/// event, so the age is how long the session has been in it, and a wait for
-/// input keeps its first, more specific reason (a `permission_prompt`
-/// notification after its request).
+/// A `permission_prompt` notification follows the request it repeats, so a
+/// repeated state keeps its first event and that event's reason.
 fn current_state(fact: &SessionFact) -> (State, u64) {
     let mut current: Option<(State, u64)> = None;
     for event in &fact.events {
@@ -193,7 +211,7 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
         (Column::Stale, None, fact.heartbeat_at)
     } else {
         match current_state(fact) {
-            (State::NeedsInput(reason), at) => (Column::NeedsInput, Some(reason), at),
+            (State::NeedsInput(reason), at) => (Column::NeedsInput, Some(reason.label()), at),
             (State::Working, at) => (Column::Working, None, at),
             (State::Idle, at) => (Column::Idle, None, at),
         }
@@ -284,7 +302,10 @@ mod tests {
         ]);
         assert_eq!(
             current_state(&f),
-            (State::NeedsInput("권한 요청: Bash".to_string()), 20)
+            (
+                State::NeedsInput(WaitReason::Permission(Some("Bash".to_string()))),
+                20
+            )
         );
     }
 
@@ -297,7 +318,10 @@ mod tests {
         ]);
         assert_eq!(
             current_state(&f),
-            (State::NeedsInput("권한 요청: Edit".to_string()), 30)
+            (
+                State::NeedsInput(WaitReason::Permission(Some("Edit".to_string()))),
+                30
+            )
         );
     }
 
