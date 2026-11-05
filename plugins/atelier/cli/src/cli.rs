@@ -1,7 +1,6 @@
-//! Top-level atelier clap router. Dispatches `atelier <subsystem> <args...>` to
-//! the absorbed subsystems by re-parsing the trailing args with each
-//! subsystem's own clap surface. This keeps the subsystems' argument grammars
-//! independent and unchanged from their standalone CLIs.
+//! Top-level atelier clap router. Dispatches `atelier <subsystem> <args...>` by
+//! re-parsing the trailing args with each subsystem's own clap surface, so each
+//! subsystem owns its argument grammar, `--help` and `--version`.
 
 use clap::Parser;
 
@@ -62,9 +61,7 @@ pub enum AtelierCommand {
     },
 }
 
-/// Parses argv and dispatches to the selected subsystem, returning a process
-/// exit code. Each subsystem re-parses its own args so its grammar (and
-/// `--help`/`--version`) behaves exactly as the standalone CLI did.
+/// Returns the process exit code of the selected subsystem.
 pub fn run() -> i32 {
     let cli = AtelierCli::parse();
     match cli.command {
