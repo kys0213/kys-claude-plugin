@@ -88,9 +88,15 @@ atelier autopilot check stagnation               # stdin payload 해석
 - 모듈 테스트(`claude plugin test`)는 어댑터 계약만 고정한다 — 보내는 argv/stdin 모양, 받은 CLI
   출력을 이벤트 결과로 바꾸는 변환, CLI 실패 시 fail-open 경로. 판정 규칙 자체(경계값·분기)의
   테스트는 CLI 쪽 언어의 블랙박스 테스트가 소유한다 — 모듈 테스트에서 규칙을 재검증하지 않는다.
-- function hooks 가 early access 인 동안은 기존 classic `hooks`(command hook)를 모듈로 이관해
-  없애지 않는다 — 플래그 없는 세션이 그 hook 을 완전히 잃는다. 새로 결정적으로 판정 가능해진
-  기능만 모듈로 추가하고, classic hook 은 공존시킨다.
+- 모드(function hooks)는 Claude Code v2.1.287 부터 플래그 없이 기본으로 켜진다. 그래도 기존
+  classic `hooks`(command hook)를 모듈로 옮기는 것은 별도 작업으로 다룬다 — 모드가 꺼진 세션
+  (`--safe-mode`·`disableAllHooks`·구버전)에서 그 hook 이 함께 사라진다. 새 기능은 모듈에 두고,
+  기존 classic hook 은 공존시킨다.
+- `modules` 에는 경로를 하나만 쓴다. 기능별 코드는 별도 파일(`hooks/<기능>.ts`)에 두고
+  `register.ts` 의 `register(on)` 에서 `register<기능>(on)` 을 부른다.
+- `claude plugin validate` 가 강제하는 형태를 따른다: `on()` 의 이벤트 이름은 문자열 리터럴이고,
+  `$` 는 파일 최상위에 선언한(또는 import 한) 함수에만 넘긴다. 모듈 상태는 `register` 안에서 만든
+  객체로 그 함수들에 넘긴다.
 
 ## 판단 기준
 

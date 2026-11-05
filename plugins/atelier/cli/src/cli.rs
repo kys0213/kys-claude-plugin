@@ -9,7 +9,7 @@ use clap::Parser;
 #[command(
     name = "atelier",
     version,
-    about = "Unified development workflow CLI (drift, code-style, git, session, orchestrator)"
+    about = "Unified development workflow CLI (drift, code-style, git, session, orchestrator, kanban)"
 )]
 pub struct AtelierCli {
     #[command(subcommand)]
@@ -53,6 +53,13 @@ pub enum AtelierCommand {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Session kanban board for the hooks module's pane
+    #[command(disable_help_flag = true)]
+    Kanban {
+        /// Arguments forwarded verbatim to the kanban subsystem
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 /// Parses argv and dispatches to the selected subsystem, returning a process
@@ -80,6 +87,10 @@ pub fn run() -> i32 {
         AtelierCommand::Orchestrator { args } => {
             let argv = std::iter::once("orchestrator".to_string()).chain(args);
             crate::orchestrator::run_from(argv)
+        }
+        AtelierCommand::Kanban { args } => {
+            let argv = std::iter::once("kanban".to_string()).chain(args);
+            crate::kanban::run_from(argv)
         }
     }
 }
