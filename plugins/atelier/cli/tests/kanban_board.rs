@@ -34,6 +34,8 @@ fn board(sessions: Value) -> Value {
             "24h",
             "--self",
             "self-id",
+            "--width",
+            "100",
         ],
         &json!({ "sessions": sessions }).to_string(),
     )
@@ -512,6 +514,8 @@ fn malformed_stdin_reports_an_error_and_still_exits_zero() {
         "2m",
         "--expire-after",
         "24h",
+        "--width",
+        "100",
     ];
     for stdin in ["", "not json", "{}", r#"{"sessions": 3}"#] {
         let b = board_with(&args, stdin);
@@ -540,6 +544,8 @@ fn durations_accept_each_unit() {
                 stale,
                 "--expire-after",
                 "30d",
+                "--width",
+                "100",
             ],
             &json!({ "sessions": [s] }).to_string(),
         );
@@ -555,9 +561,27 @@ fn durations_accept_each_unit() {
 fn missing_or_invalid_arguments_print_no_board() {
     let stdin = json!({ "sessions": [] }).to_string();
     for args in [
-        vec!["--stale-after", "2m", "--expire-after", "24h"],
-        vec!["--now", "1", "--expire-after", "24h"],
-        vec!["--now", "1", "--stale-after", "2m"],
+        vec![
+            "--stale-after",
+            "2m",
+            "--expire-after",
+            "24h",
+            "--width",
+            "100",
+        ],
+        vec!["--now", "1", "--expire-after", "24h", "--width", "100"],
+        vec!["--now", "1", "--stale-after", "2m", "--width", "100"],
+        vec!["--now", "1", "--stale-after", "2m", "--expire-after", "24h"],
+        vec![
+            "--now",
+            "1",
+            "--stale-after",
+            "2m",
+            "--expire-after",
+            "24h",
+            "--width",
+            "wide",
+        ],
         vec![
             "--now",
             "1",
@@ -565,6 +589,8 @@ fn missing_or_invalid_arguments_print_no_board() {
             "2 minutes",
             "--expire-after",
             "24h",
+            "--width",
+            "100",
         ],
         vec![
             "--now",
@@ -573,6 +599,8 @@ fn missing_or_invalid_arguments_print_no_board() {
             "2m",
             "--expire-after",
             "24h",
+            "--width",
+            "100",
         ],
     ] {
         let out = atelier()
@@ -589,4 +617,73 @@ fn missing_or_invalid_arguments_print_no_board() {
             "{args:?} printed a board"
         );
     }
+}
+
+fn layout_at(width: &str) -> Value {
+    let now = NOW.to_string();
+    board_with(
+        &[
+            "--now",
+            &now,
+            "--stale-after",
+            "2m",
+            "--expire-after",
+            "24h",
+            "--width",
+            width,
+        ],
+        &json!({ "sessions": [] }).to_string(),
+    )["layout"]
+        .clone()
+}
+
+#[test]
+fn a_pane_wide_enough_for_every_column_lays_them_side_by_side() {
+    assert_eq!(
+        layout_at("100"),
+        json!({ "direction": "row", "column_width": 24, "column_gap": 1 })
+    );
+    assert_eq!(
+        layout_at("88"),
+        json!({ "direction": "row", "column_width": 21, "column_gap": 1 })
+    );
+}
+
+#[test]
+fn a_narrower_pane_stacks_the_columns_at_full_width() {
+    assert_eq!(
+        layout_at("87"),
+        json!({ "direction": "column", "column_width": 87, "column_gap": 1 })
+    );
+    assert_eq!(
+        layout_at("0"),
+        json!({ "direction": "column", "column_width": 0, "column_gap": 1 })
+    );
+}
+
+#[test]
+fn columns_and_cards_carry_the_lines_the_pane_draws() {
+    let b = board(json!([
+        session(
+            "other",
+            json!([event("classic.PermissionRequest", Some("Bash"), 3 * MIN)])
+        ),
+        session("self-id", json!([event("turn.complete", None, 5 * SEC)])),
+    ]));
+    let column = |id: &str| {
+        b["columns"]
+            .as_array()
+            .expect("columns")
+            .iter()
+            .find(|c| c["id"] == id)
+            .expect("column")
+            .clone()
+    };
+    assert_eq!(column("needs_input")["heading"], "입력 대기 1");
+    assert_eq!(column("working")["heading"], "작업 중 0");
+    assert_eq!(
+        cards_in(&b, "needs_input")[0]["headline"],
+        "project-a · 권한 요청: Bash · 3m"
+    );
+    assert_eq!(cards_in(&b, "idle")[0]["headline"], "▶ project-a · 5s");
 }

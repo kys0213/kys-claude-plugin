@@ -81,6 +81,16 @@ pub struct Card {
     pub is_self: bool,
 }
 
+impl Card {
+    pub fn headline(&self) -> String {
+        let marker = if self.is_self { "▶ " } else { "" };
+        match &self.reason {
+            Some(reason) => format!("{marker}{} · {reason} · {}", self.label, self.age),
+            None => format!("{marker}{} · {}", self.label, self.age),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Board {
     pub columns: Vec<(Column, Vec<Card>)>,

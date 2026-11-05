@@ -10,7 +10,6 @@ const CLI_TIMEOUT_MS = 5_000
 /** Bounds what one session keeps in the store every session shares (4 MiB in all). */
 const MAX_EVENTS = 8
 const MAX_PROMPT_CHARS = 500
-const COLUMN_MIN_WIDTH = 22
 
 type KanbanEvent = { name: string; detail: string | null; at: number }
 
@@ -42,20 +41,15 @@ type Entry = {
   sessionId?: string
 }
 
-type Card = {
-  session_id: string
-  label: string
-  subtitle: string | null
-  reason: string | null
-  age: string
-  is_self: boolean
-}
+type Card = { session_id: string; headline: string; subtitle: string | null; is_self: boolean }
 
-type Column = { id: string; title: string; cards: Card[] }
+type Column = { id: string; heading: string; cards: Card[] }
+
+type Layout = { direction: 'row' | 'column'; column_width: number; column_gap: number }
 
 type BoardView =
   | { kind: 'loading' }
-  | { kind: 'board'; columns: Column[] }
+  | { kind: 'board'; columns: Column[]; layout: Layout; width: number }
   | { kind: 'error'; message: string }
 
 type KanbanState = {
@@ -65,6 +59,9 @@ type KanbanState = {
   timersStarted: boolean
   /** Whether the next spinner draw is recorded: once after each other event. */
   spinnerArmed: boolean
+  /** The pane width the last drawing had; the board is asked for that width. */
+  width: number
+  refreshing: boolean
 }
 
 function isRecord(value: unknown): value is SessionRecord {
@@ -149,13 +146,13 @@ function parseObject(stdout: string): Record<string, unknown> | null {
   }
 }
 
-function decodeBoard(parsed: Record<string, unknown> | null): BoardView {
+function decodeBoard(parsed: Record<string, unknown> | null, width: number): BoardView {
   if (typeof parsed?.error === 'string') {
     return { kind: 'error', message: parsed.error }
   }
 
-  if (Array.isArray(parsed?.columns)) {
-    return { kind: 'board', columns: parsed.columns as Column[] }
+  if (Array.isArray(parsed?.columns) && typeof parsed?.layout === 'object' && parsed.layout !== null) {
+    return { kind: 'board', columns: parsed.columns as Column[], layout: parsed.layout as Layout, width }
   }
 
   return { kind: 'error', message: 'atelier kanban board 의 출력을 읽지 못했어요' }
@@ -174,6 +171,13 @@ async function snapshot($: EngineInterface): Promise<unknown[]> {
 }
 
 async function refresh($: EngineInterface, s: KanbanState): Promise<void> {
+  if (s.refreshing) {
+    return
+  }
+
+  s.refreshing = true
+  const width = s.width
+
   try {
     const sessions = await snapshot($)
     const argv = [
@@ -186,6 +190,8 @@ async function refresh($: EngineInterface, s: KanbanState): Promise<void> {
       STALE_AFTER,
       '--expire-after',
       EXPIRE_AFTER,
+      '--width',
+      String(width),
       '--self',
       await $.session.id(),
     ]
@@ -196,7 +202,7 @@ async function refresh($: EngineInterface, s: KanbanState): Promise<void> {
     } else {
       const parsed = parseObject(r.stdout)
 
-      s.view = decodeBoard(parsed)
+      s.view = decodeBoard(parsed, width)
 
       for (const id of expiredIds(parsed)) {
         await $.store.delete(KEY_PREFIX + id)
@@ -204,6 +210,8 @@ async function refresh($: EngineInterface, s: KanbanState): Promise<void> {
     }
   } catch {
     s.view = { kind: 'error', message: 'atelier CLI 를 실행하지 못했어요 — /atelier:update 로 설치·갱신하세요' }
+  } finally {
+    s.refreshing = false
   }
 
   $.ui.invalidate('ui.render')
@@ -253,19 +261,14 @@ async function startSession($: EngineInterface, s: KanbanState): Promise<void> {
   }
 }
 
-function cardLine(card: Card): string {
-  const marker = card.is_self ? '▶ ' : ''
-  const tail = card.reason ? `${card.reason} · ${card.age}` : card.age
-
-  return `${marker}${card.label} · ${tail}`
-}
-
 export function registerKanban(on: On): void {
   const s: KanbanState = {
     view: { kind: 'loading' },
     writes: Promise.resolve(),
     timersStarted: false,
     spinnerArmed: false,
+    width: 0,
+    refreshing: false,
   }
 
   on('session.start', async ($, e, next) => {
@@ -354,6 +357,7 @@ export function registerKanban(on: On): void {
   on('ui.render', { component: 'Pane', requestId: 'kanban' }, async ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
     const view = s.view
+    s.width = e.props.bodyColumns
 
     if (view.kind === 'loading') {
       return Text({ dimColor: true, children: ['세션을 불러오는 중…'] })
@@ -363,27 +367,28 @@ export function registerKanban(on: On): void {
       return Text({ color: 'red', children: [view.message] })
     }
 
-    const count = view.columns.length
-    const isWide = e.props.bodyColumns >= count * COLUMN_MIN_WIDTH
-    const width = isWide ? Math.floor((e.props.bodyColumns - (count - 1)) / count) : e.props.bodyColumns
-    /** Side by side each column is a bordered box; stacked, a heading and indented cards, to save rows. */
-    const frame = isWide
-      ? { width, borderStyle: 'round' as const, paddingX: 1 }
-      : { width, marginBottom: 1 }
+    if (view.width !== s.width) {
+      void refresh($, s)
+    }
+
+    const { direction, column_width: width, column_gap: columnGap } = view.layout
+    const isRow = direction === 'row'
+    /** Stacked columns drop their borders to save rows. */
+    const frame = isRow ? { width, borderStyle: 'round' as const, paddingX: 1 } : { width, marginBottom: 1 }
     const columns = view.columns.map(col =>
       Box({
         key: col.id,
         flexDirection: 'column',
         ...frame,
         children: [
-          Text({ bold: true, dimColor: col.cards.length === 0, children: [`${col.title} ${col.cards.length}`] }),
+          Text({ bold: true, dimColor: col.cards.length === 0, children: [col.heading] }),
           ...col.cards.map(card =>
             Box({
               key: card.session_id,
               flexDirection: 'column',
-              paddingLeft: isWide ? 0 : 2,
+              paddingLeft: isRow ? 0 : 2,
               children: [
-                Text({ bold: card.is_self, wrap: 'truncate', children: [cardLine(card)] }),
+                Text({ bold: card.is_self, wrap: 'truncate', children: [card.headline] }),
                 ...(card.subtitle ? [Text({ dimColor: true, wrap: 'truncate', children: [card.subtitle] })] : []),
               ],
             }),
@@ -392,6 +397,6 @@ export function registerKanban(on: On): void {
       }),
     )
 
-    return Box({ flexDirection: isWide ? 'row' : 'column', columnGap: 1, children: columns })
+    return Box({ flexDirection: direction, columnGap, children: columns })
   })
 }

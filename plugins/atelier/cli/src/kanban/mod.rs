@@ -2,7 +2,7 @@
 //! `$.store` into the board its pane draws.
 //!
 //! ```text
-//! atelier kanban board --now <unix-ms> --stale-after <dur> --expire-after <dur> [--self <id>]
+//! atelier kanban board --now <unix-ms> --stale-after <dur> --expire-after <dur> --width <cols> [--self <id>]
 //! ```
 //!
 //! Output contract: stdin JSON in, one line of stdout JSON out, and **always
@@ -16,6 +16,7 @@ pub mod core;
 use crate::kanban::commands::payload::parse_sessions;
 use crate::kanban::core::board::{build, Board, BoardParams, Card};
 use crate::kanban::core::duration::parse_millis;
+use crate::kanban::core::layout::{fit, Layout};
 use crate::shared::process::read_stdin_raw;
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
@@ -44,6 +45,9 @@ pub enum Commands {
         /// Heartbeat silence after which a session is dropped (e.g. 24h)
         #[arg(long, value_parser = parse_millis)]
         expire_after: u64,
+        /// The pane's width in columns, which decides the board's layout
+        #[arg(long)]
+        width: u32,
         /// The calling session's id, marked `is_self`
         #[arg(long = "self")]
         self_id: Option<String>,
@@ -72,10 +76,19 @@ fn card_json(card: &Card) -> Value {
         "reason": card.reason,
         "age": card.age,
         "is_self": card.is_self,
+        "headline": card.headline(),
     })
 }
 
-fn board_json(board: &Board) -> Value {
+fn layout_json(layout: &Layout) -> Value {
+    json!({
+        "direction": layout.direction.id(),
+        "column_width": layout.column_width,
+        "column_gap": layout.column_gap,
+    })
+}
+
+fn board_json(board: &Board, layout: &Layout) -> Value {
     let columns: Vec<Value> = board
         .columns
         .iter()
@@ -83,11 +96,12 @@ fn board_json(board: &Board) -> Value {
             json!({
                 "id": column.id(),
                 "title": column.title(),
+                "heading": format!("{} {}", column.title(), cards.len()),
                 "cards": cards.iter().map(card_json).collect::<Vec<_>>(),
             })
         })
         .collect();
-    json!({ "columns": columns, "expired": board.expired })
+    json!({ "columns": columns, "expired": board.expired, "layout": layout_json(layout) })
 }
 
 pub fn run(cli: Cli) -> i32 {
@@ -103,6 +117,7 @@ pub fn run(cli: Cli) -> i32 {
             now,
             stale_after,
             expire_after,
+            width,
             self_id,
         } => {
             let params = BoardParams {
@@ -112,7 +127,11 @@ pub fn run(cli: Cli) -> i32 {
                 self_id,
             };
             let out = match parse_sessions(&read_stdin_raw()) {
-                Ok(sessions) => board_json(&build(&sessions, &params)),
+                Ok(sessions) => {
+                    let board = build(&sessions, &params);
+                    let layout = fit(width, board.columns.len() as u32);
+                    board_json(&board, &layout)
+                }
                 Err(error) => json!({ "error": error }),
             };
             println!("{out}");

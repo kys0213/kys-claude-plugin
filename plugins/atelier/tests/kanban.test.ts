@@ -7,31 +7,32 @@ const SELF = 'self-session'
 const START = 1_800_000_000_000
 const KEY = `kanban:session:${SELF}`
 
+const ROW = { direction: 'row', column_width: 24, column_gap: 1 }
+
 const BOARD = {
   columns: [
     {
       id: 'needs_input',
-      title: '입력 대기',
+      heading: '입력 대기 1',
       cards: [
         {
           session_id: 'other',
-          label: 'project-b',
+          headline: 'project-b · 권한 요청: Bash · 3m',
           subtitle: 'Fix login bug',
-          reason: '권한 요청: Bash',
-          age: '3m',
           is_self: false,
         },
       ],
     },
-    { id: 'working', title: '작업 중', cards: [] },
+    { id: 'working', heading: '작업 중 0', cards: [] },
     {
       id: 'idle',
-      title: '쉬는 중',
-      cards: [{ session_id: SELF, label: 'project-a', subtitle: null, reason: null, age: '5s', is_self: true }],
+      heading: '쉬는 중 1',
+      cards: [{ session_id: SELF, headline: '▶ project-a · 5s', subtitle: null, is_self: true }],
     },
-    { id: 'stale', title: '응답 없음', cards: [] },
+    { id: 'stale', heading: '응답 없음 0', cards: [] },
   ],
   expired: ['gone'],
+  layout: ROW,
 }
 
 type Run = { argv: readonly string[]; stdin?: string }
@@ -44,10 +45,9 @@ type World = {
 }
 
 /** Stands for the engine beneath the plugin: one session, its store, its clock, the CLI. */
-function world(on: On, cli: () => { exitCode: number; stdout: string } | 'missing' = () => ({
-  exitCode: 0,
-  stdout: JSON.stringify(BOARD),
-})): World {
+type FakeCli = (argv: readonly string[]) => { exitCode: number; stdout: string } | 'missing'
+
+function world(on: On, cli: FakeCli = () => ({ exitCode: 0, stdout: JSON.stringify(BOARD) })): World {
   const store: Record<string, unknown> = {}
   const runs: Run[] = []
   const shown = { value: false }
@@ -85,7 +85,7 @@ function world(on: On, cli: () => { exitCode: number; stdout: string } | 'missin
   on('ui.invalidate', () => ({ value: undefined }))
   on('process.run', ($, e) => {
     runs.push({ argv: e.argv, stdin: e.init?.stdin })
-    const out = cli()
+    const out = cli(e.argv)
 
     if (out === 'missing') {
       return { deny: 'ENOENT: Executable not found in $PATH' }
@@ -313,6 +313,8 @@ describe('kanban pane', () => {
       '2m',
       '--expire-after',
       '24h',
+      '--width',
+      '0',
       '--self',
       SELF,
     ])
@@ -345,7 +347,7 @@ describe('kanban pane', () => {
   })
 
   for (const surface of ['terminal', 'desktop'] as const) {
-    test(`the board draws each column with its cards on ${surface}`, async ($, on) => {
+    test(`the board draws the CLI's headings and lines on ${surface}`, async ($, on) => {
       world(on)
 
       await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
@@ -359,6 +361,18 @@ describe('kanban pane', () => {
       await ui.unmount()
     })
   }
+
+  test('the board is asked again for the width the pane is drawn at', async ($, on) => {
+    const w = world(on)
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await w.clock.settle()
+
+    const widths = w.runs.map(r => r.argv[r.argv.indexOf('--width') + 1])
+    expect(widths).toEqual(['0', '100'])
+    await ui.unmount()
+  })
 
   test('a missing CLI draws a hint instead of the board', async ($, on) => {
     world(on, () => 'missing')
@@ -388,13 +402,17 @@ describe('kanban pane', () => {
     })
   }
 
-  test('a narrow pane stacks the columns', async ($, on) => {
-    world(on)
+  test('a stacked layout from the CLI still draws every column', async ($, on) => {
+    world(on, () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({ ...BOARD, layout: { direction: 'column', column_width: 40, column_gap: 1 } }),
+    }))
 
     await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
     const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 40 }, surface: 'terminal' })
 
     expect((await ui.find({ type: 'Text', text: /입력 대기 1/ }))?.text).toBe('입력 대기 1')
+    expect((await ui.find({ type: 'Text', text: /응답 없음 0/ }))?.text).toBe('응답 없음 0')
     await ui.unmount()
   })
 })
