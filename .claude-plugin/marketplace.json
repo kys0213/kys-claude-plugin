@@ -92,6 +92,19 @@
       "name": "discord-connector",
       "source": "./plugins/discord-connector",
       "version": "0.3.0"
+    },
+    {
+      "category": "integration",
+      "description": "Claude 세션을 로컬 doppel 데몬에 연결해 세션 상태를 보고하고 질문·권한 확인을 터미널과 doppel 중 먼저 온 답으로 중계",
+      "keywords": [
+        "doppel",
+        "session",
+        "hitl",
+        "relay"
+      ],
+      "name": "doppel",
+      "source": "./plugins/doppel",
+      "version": "0.1.0"
     }
   ]
 }
