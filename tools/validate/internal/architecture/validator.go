@@ -2,12 +2,11 @@ package architecture
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/kys0213/kys-claude-plugin/tools/validate/internal/parser"
+	"github.com/kys0213/kys-claude-plugin/tools/validate/internal/repofs"
 )
 
 // Layer represents a layer in the layered architecture
@@ -51,12 +50,12 @@ type Results struct {
 
 // LayerFile represents a parsed file with its detected layer
 type LayerFile struct {
-	Path    string
-	Layer   Layer
-	Plugin  string // plugin name (directory name)
-	Body    string // markdown body (after frontmatter)
-	Lines   []string
-	Parsed  *parser.ParseResult
+	Path   string
+	Layer  Layer
+	Plugin string // plugin name (directory name)
+	Body   string // markdown body (after frontmatter)
+	Lines  []string
+	Parsed *parser.ParseResult
 }
 
 // Validate runs all architecture validations
@@ -93,14 +92,18 @@ func collectLayerFiles(repoRoot string) ([]LayerFile, error) {
 	var files []LayerFile
 
 	patterns := map[string]Layer{
-		"plugins/*/commands/*.md":      LayerCommand,
-		"plugins/*/skills/*/SKILL.md":  LayerSkill,
-		"plugins/*/skills/SKILL.md":    LayerSkill,
-		"plugins/*/agents/*.md":        LayerAgent,
+		"plugins/*/commands/*.md":     LayerCommand,
+		"plugins/*/skills/*/SKILL.md": LayerSkill,
+		"plugins/*/skills/SKILL.md":   LayerSkill,
+		"plugins/*/agents/*.md":       LayerAgent,
 	}
 
+	globber := repofs.NewGlobber(repoRoot)
 	for pattern, layer := range patterns {
-		matches, _ := doublestar.Glob(os.DirFS(repoRoot), pattern)
+		matches, err := globber.Glob(pattern)
+		if err != nil {
+			return nil, err
+		}
 		for _, match := range matches {
 			fullPath := filepath.Join(repoRoot, match)
 
