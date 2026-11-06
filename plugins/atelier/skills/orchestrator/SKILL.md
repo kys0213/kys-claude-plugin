@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Use this skill for any multi-unit work delegated to sub-agents, agent-teams, or worktrees — parallel fan-out, sequential pipelines, long-running agent teams, autonomous self-driving runs (decompose→dispatch→merge without human intervention), document deliverables (writing reports, specs, or write-up docs is also delegated Write work), research and investigation (codebase surveys, the impact or side effects of a change, root-cause hunts, comparing options — read-only work counts too), or any moment the main agent is about to use Edit/Write directly (delegate instead). Scope is set by scale, not by kind. Requests count alike in Korean or English. "자율주행" (also "자율 모드") is this plugin's term for an autonomous run carried through to the end.
+description: Use this skill for any multi-unit work delegated to sub-agents, agent-teams, or worktrees — parallel fan-out, sequential pipelines, long-running agent teams, autonomous self-driving runs (decompose→dispatch→merge without human intervention), document deliverables (writing reports, specs, or write-up docs is also delegated Write work), research and investigation (codebase surveys, the impact or side effects of a change, root-cause hunts, comparing options — read-only work counts too), batches of independent issues delivered as one PR per group, or any moment the main agent is about to use Edit/Write directly (delegate instead). Scope is set by scale, not by kind. Requests count alike in Korean or English. "자율주행" (also "자율 모드") is this plugin's term for an autonomous run carried through to the end.
 version: 0.1.0
 ---
 
@@ -20,10 +20,10 @@ version: 0.1.0
 | 5 | 편집 도구의 파일 경로에 부모 repo 절대경로 | worktree 절대경로만 — 어긋나면 worktree 경로로 재지정 |
 | 6 | 격리 위임을 한 메시지에 여러 건 싣거나 생성 확인 전에 다음 건을 싣는 것, 가드 명령을 worktree 안에서 실행 | 한 건씩 싣고 worktree 목록에 등장했는지 확인한 뒤 진행. 가드 세 명령(`references/procedures.md §직렬 dispatch 와 토폴로지`)은 메인 working tree 에서 |
 | 7 | 브랜치·tree 가 어긋난 채로 진행 | 복구 절차를 먼저 돌리고(변경은 보존한다) 그다음 정지·보고 |
-| 8 | 머지 직후 가드 생략 | 매 머지 직후 넷을 확인 — 브랜치가 epic 이고 tree clean · HEAD 가 방금 통합한 후보의 tip · author 방침 판정을 거침(방침 없음이면 기본값 적용 사실을 기록) · in-flight worktree 가 epic 최신 HEAD 기준 |
-| 9 | epic 브랜치를 rebase, 또는 작업 브랜치를 그냥 merge | 통합은 rebase 후 fast-forward 전용 머지로 고정. 역방향 drift 흡수도 merge 로 하고 흡수 커밋 메시지에 merge 임을 명시 |
+| 8 | 머지 직후 가드 생략 | 매 머지 직후 넷을 확인 — 브랜치가 epic 이고 tree clean · HEAD 가 방금 통합한 후보의 tip · author 방침 판정을 거침(방침 없음이면 기본값 적용 사실을 기록) · in-flight worktree 가 epic 최신 HEAD 기준. `per-pr` 은 매 PR 생성 직후 같은 가드를 돌리되 HEAD 대신 PR head sha 가 작업 브랜치 tip 인지 본다 |
+| 9 | epic 브랜치를 rebase, 또는 작업 브랜치를 그냥 merge · `per-pr` 에서 기본 브랜치로 머지 | 통합은 rebase 후 fast-forward 전용 머지로 고정. 역방향 drift 흡수도 merge 로 하고 흡수 커밋 메시지에 merge 임을 명시. `per-pr` 은 epic 으로 모으지 않고 작업 브랜치마다 기본 브랜치로 PR 을 여는 데까지 — 머지는 사람 |
 | 10 | 메인이 충돌을 직접 편집, task 를 갈아치워 충돌 카운터를 리셋 | 전담 위임(해결 전략은 `git` skill 이 정한다). 카운터는 파일 기준으로 누적 |
-| 11 | 개별 worktree·중간 브랜치의 green 으로 완료 선언, red 를 메인이 직접 고쳐 green | epic 최종 HEAD 에서 integration_verify 계약 명령 green(tracked 변경이 없는 런은 해당 없음으로 기록) + 그 HEAD sha 명시. 회귀 원인은 수정 위임 |
+| 11 | 개별 worktree·중간 브랜치의 green 으로 완료 선언, red 를 메인이 직접 고쳐 green | epic 최종 HEAD(`per-pr` 은 작업 브랜치 HEAD 마다 — 그 브랜치가 곧 최종이다)에서 integration_verify 계약 명령 green(tracked 변경이 없는 런은 해당 없음으로 기록) + 그 HEAD sha 명시. 회귀 원인은 수정 위임 |
 | 12 | 계획 밖 tracked 편집을 선-dispatch 후-체크 | 편집 dispatch 전에 토폴로지·격리를 late gate 로 먼저 세우고 전환 사유를 기록 |
 | 13 | 빈 자리를 silent fallback 으로 메움 | inert 구현 또는 미구현 예외로 드러내고, 미결 seam 을 결정 기록과 종료 보고에 깃발로 남긴다 |
 | 14 | 증거 없는 claim 을 취합, 같은 전략 반복을 교차 검증으로 인정 | 모든 claim 에 실행 명령 원문과 `file:line`, 없으면 `NOT FOUND — searched with <명령>`. 부재 주장은 축을 바꾼 둘 이상의 전략으로 |
@@ -42,13 +42,14 @@ version: 0.1.0
 | 1 | **spec 확정 게이트** | 미결 섹션에 `없음` 아닌 항목 / 본문의 미확정 표지가 기각되지 않음 / 게이트 verdict 가 spec 미해소 | hard stop — 예산과 무관. 계약도 세우지 않고, 입력 spec 집합을 좁혀 부분 진입하지 않는다 | 심문으로 미결 0 → spec 반영 → 같은 판정 재실행 후 재진입. 재위임 예산 미소모 |
 | 2 | 계획 밖 tracked 편집 | 경량으로 판정한 런에서 계획에 없던 tracked 편집이 필요해짐 | 편집 dispatch 를 시작하지 않는다 | 토폴로지·격리를 late gate 로 세운 뒤 무거운 경로로 전환(역방향 없음) |
 | 3 | 토폴로지 위반 | 메인의 브랜치가 확보한 epic 과 다름 / tree dirty / dispatch 직후 worktree 미등장 / HEAD 가 통합 후보 tip 과 다름 | 복구 후 정지. 후속 dispatch 중단 | 복구 성공 + 발생 지점을 붙여 보고 → 사용자 결정 |
-| 4 | 되돌리기 어렵거나 epic 경계 밖 행위 | 강제 push · 기본 브랜치 머지 · 배포 · 외부 서비스 호출 · 데이터 삭제 / 의도가 갈리는 충돌 / 도메인 의미 결정 / 계획 승인 불가 / authorship 방침을 지금 처리로 지킬 수 없음 | 즉시 정지·보고 — 예산이 남아 있어도. 자문 권고가 멈추는 판단을 대체하지 않는다 | 사용자 승인 또는 결정. 부분 머지 상태를 함께 보고 |
+| 4 | 되돌리기 어렵거나 epic 경계 밖 행위 | 강제 push · 기본 브랜치 머지 · 배포 · 외부 서비스 호출(`per-pr` 에서 승인된 그룹의 push · PR 생성은 제외) · 데이터 삭제 / 의도가 갈리는 충돌 / 도메인 의미 결정 / 계획 승인 불가 / authorship 방침을 지금 처리로 지킬 수 없음 | 즉시 정지·보고 — 예산이 남아 있어도. 자문 권고가 멈추는 판단을 대체하지 않는다 | 사용자 승인 또는 결정. 부분 머지 상태를 함께 보고 |
 | 5 | 통합 검증 실패 | 계약이 지정한 시점의 검증이 red / 최종 HEAD integration_verify red | 머지 전 시점이면 그 머지를, 머지 후 시점이면 후속 루프를 중단. 완료 선언 금지 | 원인 파악 → 수정 위임 → 최종 HEAD 재실행, HEAD sha 와 함께 보고 |
 | 6 | 예산 소진 / 무진전 | 루프·시간·턴 상한 도달 / 연속 무진전이 한도 도달(진전 = 머지된 브랜치 수·통과 테스트 수·종료 조건 충족 항목 수) / 재위임 예산 소진 | 예산 소진 종료 — 진전 없는 재분해 반복 금지 | 사용자가 예산을 올리거나 범위를 좁힌다. 진전 측정값과 남은 작업 제출 |
 | 7 | 협의체 라운드 소진 | 라운드 예산 소진 후에도 심문 verdict 가 pass 아님 / verdict 에 도메인 의미 결정 포함 | 검증되지 않은 분해로 dispatch 하지 않는다 — 예산 소진은 통과가 아니라 정지다 | 사용자 결정 또는 tie-break 자문 1회 후 그 결과를 근거로 보고 |
-| 8 | 공유 전제 실패 (외부 환경) | 위임·머지 경로가 실제로 거치는 공유 의존(CLI 인증·필수 외부 서비스 도달)의 read-only 확인 실패 | dispatch 를 시작하지 않고 즉시 보고. 부분 dispatch 로 밀어붙이지 않는다 | 무엇을 확인하다 실패했는지 + 해제 방법을 함께 내고, 전제 복구 후 재진입 |
+| 8 | 공유 전제 실패 (외부 환경) | 위임·머지 경로가 실제로 거치는 공유 의존(CLI 인증·필수 외부 서비스 도달 · `per-pr` 의 작업 브랜치 push · PR 생성 권한)의 read-only 확인 실패 | dispatch 를 시작하지 않고 즉시 보고. 부분 dispatch 로 밀어붙이지 않는다 | 무엇을 확인하다 실패했는지 + 해제 방법을 함께 내고, 전제 복구 후 재진입 |
 | 9 | 같은 원인으로 연속 실패 (외부 환경) | 여러 dispatch 가 동일 외부 원인(gateway 오류·API 오류·rate limit)으로 반복 실패 | 루프를 멈춘다. 추정으로 prompt 를 고쳐 다시 던지지 않는다 | 환경 복구 확인 후 재개, 또는 사용자가 다른 경로를 지시 |
 | 10 | 계획과 다른 치명적 결함 → HITL 전환 | 자율 런 중 spec·설계의 전제를 무너뜨리는 결함 발견(도메인 의미 오염 · 데이터 손상 위험 · 아키텍처 전제 붕괴) | 자율을 중단하고 HITL 로 전환. 남은 계획을 자율 재량으로 재설계하지 않는다 | 결함·영향 범위·산출물 상태·선택지를 한 번에 보고 → 사용자가 계획 갱신·재개 승인 |
+| 11 | 그룹 범위 이탈 (`per-pr`) | 작업자가 그룹의 예상 파일 밖 편집이 필요하다고 보고 / PR 생성 직전 재확인에서 다른 그룹과 변경 파일이 겹침 | 그 그룹의 PR 을 만들지 않는다. 겹치지 않는 그룹은 계속 진행 | 사용자가 범위 확장을 승인하면 그 그룹만 재진입, 아니면 그 그룹을 다음 배치(새 plan)로 미룬다 |
 
 ## 표준 절차
 ```
@@ -59,8 +60,8 @@ version: 0.1.0
 4. 위임      한 건씩, 매 건 표 1 의 tier · effort 로 `model` · `effort` 명시 — 격리 dispatch 는 생성 확인 전에 다음 건을 싣지 않는다
 5. 모니터    기대 완료 시간을 정해 두고 도착하는 완료 알림으로 진행한다
 6. 게이트    세운 모든 관점이 pass 여야 승급, 관점마다 다른 agent
-7. 머지      한 후보씩 rebase 후 fast-forward 전용 머지, 매 머지 직후 가드
-8. 최종      epic 최종 HEAD integration_verify 계약 명령 green(tracked 변경 없으면 해당 없음) + HEAD sha 명시
+7. 머지      한 후보씩 rebase 후 fast-forward 전용 머지, 매 머지 직후 가드 (`per-pr` 은 후보마다 겹침 재확인 → 8 의 검증 → push → PR 생성 → 직후 가드)
+8. 최종      epic 최종 HEAD(`per-pr` 은 7 안에서 작업 브랜치 HEAD 마다) integration_verify 계약 명령 green(tracked 변경 없으면 해당 없음) + HEAD sha 명시
 9. 보고      종료 사유 · 3분류 건수 · 핸드오프 · 머지 결과 · 결정 요약
 ```
 
@@ -111,6 +112,7 @@ effort 는 tier 와 독립된 축이다 — 같은 tier 안에서 추론 깊이�
 |---|---|
 | 변경 파일 집합이 disjoint 이고 작업 간 의존성 없음 | 병렬 |
 | 작업 간 의존성 있음 | 순차 |
+| `per-pr` 에서 의존성 있음 또는 overlap 이 hot-spot | 같은 그룹으로 묶거나 다음 배치로 — 모을 통합 지점이 없어 stacked PR · 통합 task 분리를 쓰지 않는다 |
 | overlap 이 전부 hot-spot (의도는 안 겹치는데 같은 라인 근처에 항목 추가) | 병렬 유지 + 통합 task 1개를 순차로 분리 |
 | overlap 이 내용 충돌 | 순차 |
 | read-only 조사 (충돌 축에 걸리는 것이 없음) | 병렬 기본 — 관점이 하나뿐이라는 근거가 없으면 복수 관점 |
@@ -156,6 +158,7 @@ effort 는 tier 와 독립된 축이다 — 같은 tier 안에서 추론 깊이�
 | 우선순위 왼쪽부터 — 단계별 확인 명시 / 종료 조건 판정 가능 / 판정 불가 | HITL / 자율(기본값) / 진입 보류 — 합의 전까지 HITL 규칙 |
 | 산출물이 파일(tracked 변경 · 문서 파일 · 외부 시스템 쓰기)이면 / 응답 텍스트뿐이면 | Task 등록 / 미등록 |
 | 계획된 산출물에 tracked 변경 있음 / 없음 / repo 밖 편집 | 무거운 경로 / 경량 경로 / 격리 불가 · 순차로 낮춤 · 보고 |
+| 전달 방식 — 사용자가 작업 단위별 PR 을 명시 / 그 밖 | `per-pr`(그룹 하나 = task 하나 = PR 하나) / `converge`(기본값). 상황을 보고 추측해 `per-pr` 로 바꾸지 않는다 |
 
 ## 계약과 절차
 | 지금 무엇이 필요한가 | 파일 |
