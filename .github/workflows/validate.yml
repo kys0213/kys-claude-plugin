@@ -104,9 +104,9 @@ jobs:
           cargo check --locked
           cargo test --locked
 
-      # ── atelier function hooks (early access) ──
-      # claude plugin validate/test 는 CLAUDE_CODE_ENABLE_FUNCTION_HOOKS surface 를 스캔한다 —
-      # early access 라 버전마다 표면이 바뀔 수 있어 CLI 버전을 고정한다 (무관한 PR 이 깨지는 것 방지).
+      # ── atelier mods (function hooks) ──
+      # claude plugin validate/test 는 모드 API 를 스캔한다 — 버전마다 표면이 바뀔 수 있어
+      # CLI 버전을 고정한다 (무관한 PR 이 깨지는 것 방지).
       - name: Setup Node
         if: steps.check_rust.outputs.atelier_hooks_changed == 'true' || steps.check_rust.outputs.atelier_report_changed == 'true' || steps.check_rust.outputs.discord_connector_changed == 'true'
         uses: actions/setup-node@v4
@@ -115,7 +115,7 @@ jobs:
 
       - name: Install Claude Code CLI
         if: steps.check_rust.outputs.atelier_hooks_changed == 'true' || steps.check_rust.outputs.discord_connector_changed == 'true'
-        run: npm install -g @anthropic-ai/claude-code@2.1.283
+        run: npm install -g @anthropic-ai/claude-code@2.1.318
 
       - name: atelier plugin validate
         if: steps.check_rust.outputs.atelier_hooks_changed == 'true'
@@ -124,10 +124,9 @@ jobs:
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
         run: claude plugin validate plugins/atelier
 
-      - name: atelier plugin test (function hooks)
+      - name: atelier plugin test (mods)
         if: steps.check_rust.outputs.atelier_hooks_changed == 'true'
         env:
-          CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1'
           DISABLE_AUTOUPDATER: '1'
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
         run: claude plugin test plugins/atelier
@@ -148,10 +147,9 @@ jobs:
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
         run: claude plugin validate plugins/discord-connector
 
-      - name: discord-connector plugin test (function hooks)
+      - name: discord-connector plugin test (mods)
         if: steps.check_rust.outputs.discord_connector_changed == 'true'
         env:
-          CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: '1'
           DISABLE_AUTOUPDATER: '1'
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
         run: claude plugin test plugins/discord-connector

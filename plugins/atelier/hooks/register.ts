@@ -1,5 +1,7 @@
 import type { EngineInterface, On } from 'claude-code'
 
+import { registerKanban } from './kanban'
+
 type SpawnFact = {
   model: string | null
   resolved_model: string | null
@@ -125,4 +127,6 @@ export function register(on: On): void {
       instructions: e.instructions ? `${e.instructions}\n\n${note}` : note,
     })
   })
+
+  registerKanban(on)
 }

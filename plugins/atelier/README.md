@@ -107,11 +107,26 @@ SessionStart hook `hooks/ensure-agent-teams.sh` 가 `~/.claude/settings.json`(`C
 
 기존 `git-utils` 호출 호환을 위한 alias는 `/atelier:setup`이 안내합니다.
 
-## Function hooks (early access)
+## 모드 (function hooks)
 
-`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude` 로 켠 세션에서만 `hooks/register.ts`(`hooks.json`
-의 `modules`)가 로드되어 orchestrator 규약 일부를 집행합니다. model 미지정만 **차단**하고, 나머지는
-경고입니다:
+`hooks/register.ts`(`hooks.json` 의 `modules`)는 Claude Code 모드로 로드됩니다. 모드는 Claude Code
+v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러그인을 설치하면 함께 동작합니다.
+
+### 세션 칸반
+
+`/kanban` 을 입력하면 이 머신에서 atelier 가 켜진 Claude Code 세션 전체를 칸반 pane 으로 보여줍니다.
+다시 입력하면 닫힙니다. 컬럼은 **입력 대기 → 작업 중 → 쉬는 중 → 응답 없음** 이고, 카드에는 저장소
+이름·그 컬럼에 머문 시간·세션 제목(없으면 첫 프롬프트)이 나옵니다.
+
+- 세션마다 모드가 이벤트 사실을 모드 저장소(`$.store`, 같은 머신의 세션이 공유)에 기록하고, 30초마다
+  생존 신호를 남깁니다. 생존 신호가 2분 끊긴 세션은 응답 없음, 24시간 끊기거나 정상 종료한 세션은 사라집니다.
+- 판정은 `atelier kanban board` 가 하고, 모듈은 기록과 그리기만 합니다. CLI 가 없으면 pane 에 안내 한 줄만
+  나옵니다.
+- 상세 규격: [`spec/concerns/session-kanban.md`](spec/concerns/session-kanban.md)
+
+### orchestrator 규약 집행
+
+orchestrator 규약 일부를 집행합니다. model 미지정만 **차단**하고, 나머지는 경고입니다:
 
 - Agent 도구로 sub-agent 를 띄울 때 `model` 을 지정하지 않으면(fork 제외) **띄우기 전에 차단**하고,
   model 과 effort 를 지정해 다시 호출하라는 사유를 돌려줍니다. 모델은 그 자리에서 고쳐 다시 호출합니다.
@@ -127,10 +142,9 @@ SessionStart hook `hooks/ensure-agent-teams.sh` 가 `~/.claude/settings.json`(`C
 하고, 모듈은 이벤트 ↔ CLI JSON 어댑터입니다(`.claude/rules/tool-layer-boundary.md`). CLI 바이너리가
 없거나 호출이 실패하면 모듈은 차단도 경고도 하지 않고 그대로 통과시킵니다(fail-open).
 
-- **플래그가 없으면** 모듈은 로드되지 않고 기존 classic hook(`hooks.json` 의 `hooks`)만 그대로
-  동작합니다 — 이 기능이 없어도 세션은 정상입니다.
-- early access 라 docs·changelog 에 없고, 확인한 동작 버전은 `2.1.283`(플래그 on/off)·`2.1.274`
-  (classic 공존)입니다. 표면이 버전마다 바뀔 수 있어 CI 는 CLI 버전을 고정해 검증합니다.
+- **모드가 꺼진 세션**(`--safe-mode`, `disableAllHooks`, v2.1.287 미만)에서는 모듈이 로드되지 않고
+  기존 classic hook(`hooks.json` 의 `hooks`)만 그대로 동작합니다 — 이 기능이 없어도 세션은 정상입니다.
+- 모드 API 는 버전마다 바뀔 수 있어 CI 는 Claude Code 버전을 고정해 검증합니다(현재 `2.1.318`).
 - 상한 경고는 호출 **후**에 붙으므로 그 호출은 막지 못합니다. 이번 호출을 재실행할 필요는 없고, 다음
   dispatch 부터 바로잡으면 됩니다.
 - 한계: tier 를 판별할 수 없는 모델 id(Bedrock 추론 프로필 ARN, 게이트웨이 id 등)에서는 상한 검사가

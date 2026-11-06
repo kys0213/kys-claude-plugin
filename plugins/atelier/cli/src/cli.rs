@@ -1,7 +1,6 @@
-//! Top-level atelier clap router. Dispatches `atelier <subsystem> <args...>` to
-//! the absorbed subsystems by re-parsing the trailing args with each
-//! subsystem's own clap surface. This keeps the subsystems' argument grammars
-//! independent and unchanged from their standalone CLIs.
+//! Top-level atelier clap router. Dispatches `atelier <subsystem> <args...>` by
+//! re-parsing the trailing args with each subsystem's own clap surface, so each
+//! subsystem owns its argument grammar, `--help` and `--version`.
 
 use clap::Parser;
 
@@ -9,7 +8,7 @@ use clap::Parser;
 #[command(
     name = "atelier",
     version,
-    about = "Unified development workflow CLI (drift, code-style, git, session, orchestrator)"
+    about = "Unified development workflow CLI (drift, code-style, git, session, orchestrator, kanban)"
 )]
 pub struct AtelierCli {
     #[command(subcommand)]
@@ -53,11 +52,16 @@ pub enum AtelierCommand {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Session kanban board for the hooks module's pane
+    #[command(disable_help_flag = true)]
+    Kanban {
+        /// Arguments forwarded verbatim to the kanban subsystem
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
-/// Parses argv and dispatches to the selected subsystem, returning a process
-/// exit code. Each subsystem re-parses its own args so its grammar (and
-/// `--help`/`--version`) behaves exactly as the standalone CLI did.
+/// Returns the process exit code of the selected subsystem.
 pub fn run() -> i32 {
     let cli = AtelierCli::parse();
     match cli.command {
@@ -80,6 +84,10 @@ pub fn run() -> i32 {
         AtelierCommand::Orchestrator { args } => {
             let argv = std::iter::once("orchestrator".to_string()).chain(args);
             crate::orchestrator::run_from(argv)
+        }
+        AtelierCommand::Kanban { args } => {
+            let argv = std::iter::once("kanban".to_string()).chain(args);
+            crate::kanban::run_from(argv)
         }
     }
 }
