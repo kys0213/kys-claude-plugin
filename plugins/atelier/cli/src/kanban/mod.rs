@@ -1,13 +1,19 @@
 //! Kanban subsystem — turns the session facts the hooks module keeps in
-//! `$.store` into the board its pane draws.
+//! `$.store` into the board its pane draws, and carries requests between
+//! sessions through their inboxes.
 //!
 //! ```text
 //! atelier kanban board --now <unix-ms> --stale-after <dur> --expire-after <dur> --width <cols> [--self <id>]
 //! atelier kanban answer
+//! atelier kanban send --session <id> --from <pane|agent> [--from-label <label>] --text <text>
+//! atelier kanban stop --session <id> --turn <turn-id>
+//! atelier kanban inbox <dir|clear> --session <id>
+//! atelier kanban inbox take --session <id> --now <unix-ms> --ttl <dur> [--turn <running-turn-id>]
+//! atelier kanban spawn --cwd <repo-root> --text <text> [--worktree <name>] [--from-label <label>]
 //! ```
 //!
-//! Output contract: stdin JSON in, one line of stdout JSON out, and **always
-//! exit 0**. Unreadable stdin prints `{"error": ...}`; an argument error
+//! Output contract: one line of stdout JSON out, and **always exit 0**. A
+//! refused or failed request prints `{"error": ...}`; an argument error
 //! prints clap's message to stderr and nothing to stdout, so the caller's
 //! JSON parse fails and it shows its own fallback.
 
@@ -15,6 +21,7 @@ pub mod commands;
 pub mod core;
 
 use crate::kanban::commands::payload::{parse_answer_request, parse_sessions};
+use crate::kanban::commands::requests;
 use crate::kanban::core::answer::compose;
 use crate::kanban::core::board::{build, Action, Board, BoardParams, Card};
 use crate::kanban::core::detail::Detail;
@@ -59,6 +66,71 @@ pub enum Commands {
     },
     /// An open question and the picks made on the board → one answer per question
     Answer,
+    /// Leaves a prompt in a session's inbox
+    Send {
+        #[arg(long)]
+        session: String,
+        /// `pane` for a person on the board, `agent` for a model
+        #[arg(long)]
+        from: String,
+        /// Names the sending session in an agent prompt's header
+        #[arg(long)]
+        from_label: Option<String>,
+        #[arg(long, allow_hyphen_values = true)]
+        text: String,
+    },
+    /// Leaves a stop for one turn in a session's inbox
+    Stop {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        turn: String,
+    },
+    /// A session's own inbox
+    Inbox {
+        #[command(subcommand)]
+        command: InboxCommand,
+    },
+    /// Starts a background session at a repository's main working tree
+    Spawn {
+        #[arg(long)]
+        cwd: String,
+        #[arg(long, allow_hyphen_values = true)]
+        text: String,
+        /// Runs the session in a new git worktree of this name
+        #[arg(long, allow_hyphen_values = true)]
+        worktree: Option<String>,
+        #[arg(long)]
+        from_label: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum InboxCommand {
+    /// Where the inbox is
+    Dir {
+        #[arg(long)]
+        session: String,
+    },
+    /// Claims every request and says which to act on
+    Take {
+        #[arg(long)]
+        session: String,
+        /// Current time, unix milliseconds
+        #[arg(long)]
+        now: u64,
+        /// Age after which a request is dropped (e.g. 60s)
+        #[arg(long, value_parser = parse_millis)]
+        ttl: u64,
+        /// The turn the session runs now; absent while it waits for a prompt
+        #[arg(long)]
+        turn: Option<String>,
+    },
+    /// Removes the inbox and what is left in it
+    Clear {
+        #[arg(long)]
+        session: String,
+    },
 }
 
 pub fn run_from<I, T>(argv: I) -> i32
@@ -225,6 +297,38 @@ pub fn run(cli: Cli) -> i32 {
             };
             println!("{out}");
         }
+        Commands::Send {
+            session,
+            from,
+            from_label,
+            text,
+        } => println!(
+            "{}",
+            requests::send(&session, &from, from_label.as_deref(), &text)
+        ),
+        Commands::Stop { session, turn } => println!("{}", requests::stop(&session, &turn)),
+        Commands::Inbox { command } => {
+            let out = match command {
+                InboxCommand::Dir { session } => requests::dir(&session),
+                InboxCommand::Take {
+                    session,
+                    now,
+                    ttl,
+                    turn,
+                } => requests::take(&session, now, ttl, turn.as_deref()),
+                InboxCommand::Clear { session } => requests::clear(&session),
+            };
+            println!("{out}");
+        }
+        Commands::Spawn {
+            cwd,
+            text,
+            worktree,
+            from_label,
+        } => println!(
+            "{}",
+            requests::spawn(&cwd, &text, worktree.as_deref(), from_label.as_deref())
+        ),
     }
     0
 }

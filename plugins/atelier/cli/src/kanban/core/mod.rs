@@ -6,4 +6,5 @@ pub mod layout;
 pub mod progress;
 pub mod question;
 pub mod repos;
+pub mod request;
 pub mod text;
