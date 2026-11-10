@@ -132,3 +132,61 @@ fn spawn_reports_what_a_failed_launch_printed() {
     let out = e.requests().spawn("/w/api", "x", None, None);
     assert_eq!(out["error"], "새 세션을 띄우지 못했어요: not logged in");
 }
+
+#[test]
+fn a_permit_answer_is_waited_for_by_the_permission_it_names() {
+    let e = Edges::default();
+    let out = e.requests().permit("s-1", "p-1", "allow");
+    assert_eq!(
+        out,
+        json!({ "queued": { "session_id": "s-1", "id": "p-1", "kind": "permit" } })
+    );
+    assert!(e.inbox.ids("s-1").is_empty());
+
+    assert_eq!(
+        e.requests().wait_permit("s-1", "p-2", NOW, TTL, 2_000),
+        json!({ "decision": null })
+    );
+    assert_eq!(
+        e.requests().wait_permit("s-1", "p-1", NOW, TTL, 2_000),
+        json!({ "decision": "allow" })
+    );
+    assert_eq!(
+        e.requests().wait_permit("s-1", "p-1", NOW, TTL, 2_000),
+        json!({ "decision": null })
+    );
+}
+
+#[test]
+fn waiting_for_a_permit_pauses_until_the_wait_is_over() {
+    let e = Edges::default();
+    e.requests().wait_permit("s-1", "p-1", NOW, TTL, 1_000);
+    assert_eq!(*e.pause.paused_ms.borrow(), 1_000);
+}
+
+#[test]
+fn a_permit_answer_older_than_the_ttl_is_dropped() {
+    let e = Edges::default();
+    e.requests().permit("s-1", "p-1", "deny");
+    *e.inbox.age_ms.borrow_mut() = TTL + 1;
+    assert_eq!(
+        e.requests().wait_permit("s-1", "p-1", NOW, TTL, 2_000),
+        json!({ "decision": null, "status": "expired" })
+    );
+}
+
+#[test]
+fn a_permit_needs_allow_or_deny_and_plain_ids() {
+    let e = Edges::default();
+    for (session, request, decision) in [
+        ("s-1", "p-1", "maybe"),
+        ("s/1", "p-1", "allow"),
+        ("s-1", "../p", "allow"),
+    ] {
+        let out = e.requests().permit(session, request, decision);
+        assert!(
+            out["error"].is_string(),
+            "{session} {request} {decision} → {out}"
+        );
+    }
+}

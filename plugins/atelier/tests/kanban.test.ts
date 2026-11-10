@@ -106,7 +106,10 @@ type World = {
   aborted: string[]
 }
 
-type FakeCli = (argv: readonly string[]) => { exitCode: number; stdout: string } | 'missing'
+type CliOut = { exitCode: number; stdout: string } | 'missing'
+
+/** A CLI that answers later (a promise) stands for one still running. */
+type FakeCli = (argv: readonly string[]) => CliOut | Promise<CliOut>
 
 function boardAndAnswers(board: unknown): FakeCli {
   return argv =>
@@ -157,9 +160,9 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
     value: shown.value ? [{ id: 'kanban', title: '세션 칸반', isShown: true, isFocused: false, isPlaced: true }] : [],
   }))
   on('ui.invalidate', () => ({ value: undefined }))
-  on('process.run', ($, e) => {
+  on('process.run', async ($, e) => {
     runs.push({ argv: e.argv, stdin: e.init?.stdin })
-    const out = cli(e.argv)
+    const out = await cli(e.argv)
 
     if (out === 'missing') {
       return { deny: 'ENOENT: Executable not found in $PATH' }
@@ -862,7 +865,7 @@ describe('kanban details and requests', () => {
       tool_input: { command: 'npm publish', timeout: 5 },
       permission_mode: 'default',
     } as never)
-    expect(rec().permission).toEqual({ tool: 'Bash', input: { command: 'npm publish' }, at: START })
+    expect(rec().permission).toEqual({ id: null, tool: 'Bash', input: { command: 'npm publish' }, at: START })
     expect(rec().pending_context).toBe('Tests pass. Publishing.')
     expect(rec().permission_mode).toBe('default')
 
@@ -1061,5 +1064,159 @@ describe('kanban details and requests', () => {
     const back = await $.ui.mount(narrow)
     expect((await back.find({ type: 'Text', text: /쉬는 중 2/ }))?.text).toBe('쉬는 중 2')
     await back.unmount()
+  })
+})
+
+describe('kanban permission answers', () => {
+  function permitWorld(on: On, decisions: unknown[]) {
+    let calls = 0
+    const w = world(on, argv => {
+      if (argv[2] === 'inbox' && argv[3] === 'dir') {
+        return { exitCode: 0, stdout: JSON.stringify({ dir: INBOX_DIR }) }
+      }
+
+      if (argv[2] === 'inbox' && argv[3] === 'wait-permit') {
+        const decision = decisions[Math.min(calls, decisions.length - 1)]
+        calls += 1
+
+        return { exitCode: 0, stdout: JSON.stringify({ decision }) }
+      }
+
+      return { exitCode: 0, stdout: JSON.stringify(BOARD) }
+    })
+
+    return { w, calls: () => calls }
+  }
+
+  test('a permission request waits for a kanban answer and gives it as the decision', async ($, on) => {
+    const { w } = permitWorld(on, [null, 'allow'])
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await $.turn.start({ text: 'go', turnId: 't-1' })
+    const r = await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'npm publish' } } as never)
+
+    expect(r).toEqual({ decision: { behavior: 'allow' } })
+    const waits = w.runs.filter(x => x.argv[3] === 'wait-permit')
+    expect(waits).toHaveLength(2)
+    expect(waits[0]?.argv).toEqual([
+      'atelier',
+      'kanban',
+      'inbox',
+      'wait-permit',
+      '--session',
+      SELF,
+      '--request',
+      `t-1-${START}`,
+      '--now',
+      String(START),
+      '--ttl',
+      '60s',
+      '--for',
+      '2s',
+    ])
+    expect(eventNames(w).at(-1)).toBe('kanban.answer')
+    expect((stored(w) as Record<string, unknown>).permission).toBeNull()
+  })
+
+  test('a deny from the kanban refuses the tool with a reason', async ($, on) => {
+    permitWorld(on, ['deny'])
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    const r = await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} } as never)
+
+    expect(r).toEqual({ decision: { behavior: 'deny', message: '사람이 칸반에서 이 도구 실행을 거부했어요' } })
+  })
+
+  test('an answer in the dialog ends the wait without a decision', async ($, on) => {
+    let release: () => void = () => undefined
+    let started: () => void = () => undefined
+    const waiting = new Promise<void>(resolve => {
+      started = resolve
+    })
+    let waits = 0
+    world(on, argv => {
+      if (argv[3] === 'dir') {
+        return { exitCode: 0, stdout: JSON.stringify({ dir: INBOX_DIR }) }
+      }
+
+      if (argv[3] === 'wait-permit') {
+        waits += 1
+        started()
+
+        return new Promise(resolve => {
+          release = () => resolve({ exitCode: 0, stdout: JSON.stringify({ decision: null }) })
+        })
+      }
+
+      return { exitCode: 0, stdout: JSON.stringify(BOARD) }
+    })
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    const pending = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} } as never)
+    await waiting
+    await $.classic.PostToolUse({ tool_name: 'Bash', tool_input: {}, tool_response: {} } as never)
+    release()
+
+    expect(await pending).toEqual({})
+    expect(waits).toBe(1)
+  })
+
+  test('without an inbox the request is recorded without an id and nothing waits', async ($, on) => {
+    const w = world(on)
+
+    const r = await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'ls' } } as never)
+
+    expect(r).toEqual({})
+    expect((stored(w) as Record<string, unknown>).permission).toEqual({ id: null, tool: 'Bash', input: { command: 'ls' }, at: START })
+    expect(w.runs.filter(x => x.argv[3] === 'wait-permit')).toHaveLength(0)
+  })
+
+  test('a permission card answers with the pressed verdict', async ($, on) => {
+    const board = {
+      ...BOARD,
+      columns: [
+        {
+          id: 'needs_input',
+          heading: '입력 대기 1',
+          cards: [
+            {
+              session_id: 'asker',
+              headline: 'api · 권한 요청: Bash · 1m',
+              subtitle: null,
+              is_self: false,
+              turn_id: 't-3',
+              permission_id: 't-3-9',
+              actions: ['permit', 'stop'],
+              detail: { sections: [{ title: '기다리는 것', lines: ['Bash: npm publish'] }], decision: null, delivery: null },
+            },
+          ],
+        },
+        ...BOARD.columns.slice(1),
+      ],
+    }
+    const w = world(on, routes({ board, permit: { queued: { session_id: 'asker', id: 't-3-9', kind: 'permit' } } }))
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    await ui.press({ key: 'card:asker' })
+    await ui.unmount()
+
+    const opened = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    expect(await opened.find({ key: 'detail:asker:deny' })).toBeDefined()
+    await opened.press({ key: 'detail:asker:allow' })
+    await w.clock.settle()
+    await opened.unmount()
+
+    expect(w.runs.find(r => r.argv[2] === 'permit')?.argv).toEqual([
+      'atelier',
+      'kanban',
+      'permit',
+      '--session',
+      'asker',
+      '--request',
+      't-3-9',
+      '--decision',
+      'allow',
+    ])
   })
 })

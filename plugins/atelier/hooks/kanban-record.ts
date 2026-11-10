@@ -50,7 +50,8 @@ export type SessionRecord = {
   events: KanbanEvent[]
   activity?: Activity | null
   recent?: Activity[]
-  permission?: Activity | null
+  /** `id` names the request for a kanban answer; null when this session cannot take one. */
+  permission?: (Activity & { id: string | null }) | null
   decision?: Decision | null
   inbox?: Delivery | null
   tasks?: Record<string, TaskRecord>

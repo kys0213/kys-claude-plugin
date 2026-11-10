@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use atelier::kanban::commands::inbox::{Claimed, IdSource, InboxStore};
+use atelier::kanban::commands::inbox::{Claimed, IdSource, InboxStore, Pause};
 use atelier::kanban::commands::requests::KanbanRequests;
 use atelier::kanban::commands::spawn::{Launched, Launcher, RepoProbe};
 use atelier::kanban::core::spawn::RepoPaths;
@@ -17,6 +17,7 @@ use atelier::kanban::core::spawn::RepoPaths;
 #[derive(Default)]
 pub struct MemInbox {
     pub files: RefCell<BTreeMap<String, BTreeMap<String, String>>>,
+    pub permits: RefCell<BTreeMap<(String, String), String>>,
     pub age_ms: RefCell<u64>,
 }
 
@@ -64,6 +65,43 @@ impl InboxStore for MemInbox {
     fn clear(&self, session: &str) -> Result<(), String> {
         self.files.borrow_mut().remove(session);
         Ok(())
+    }
+
+    fn put_permit(&self, session: &str, request: &str, contents: &str) -> Result<(), String> {
+        self.permits.borrow_mut().insert(
+            (session.to_string(), request.to_string()),
+            contents.to_string(),
+        );
+        Ok(())
+    }
+
+    fn take_permit(
+        &self,
+        session: &str,
+        request: &str,
+        _now: u64,
+    ) -> Result<Option<Claimed>, String> {
+        let taken = self
+            .permits
+            .borrow_mut()
+            .remove(&(session.to_string(), request.to_string()));
+        Ok(taken.map(|contents| Claimed {
+            id: request.to_string(),
+            age_ms: *self.age_ms.borrow(),
+            contents: Some(contents),
+        }))
+    }
+}
+
+/// Counts what it was asked to wait instead of waiting.
+#[derive(Default)]
+pub struct CountingPause {
+    pub paused_ms: RefCell<u64>,
+}
+
+impl Pause for CountingPause {
+    fn pause(&self, ms: u64) {
+        *self.paused_ms.borrow_mut() += ms;
     }
 }
 
@@ -143,6 +181,7 @@ impl Launcher for FakeLauncher {
 
 pub struct Edges {
     pub inbox: MemInbox,
+    pub pause: CountingPause,
     pub ids: CountingIds,
     pub probe: MapProbe,
     pub launcher: FakeLauncher,
@@ -152,6 +191,7 @@ impl Default for Edges {
     fn default() -> Edges {
         Edges {
             inbox: MemInbox::default(),
+            pause: CountingPause::default(),
             ids: CountingIds::default(),
             probe: MapProbe::default(),
             launcher: FakeLauncher::printing("backgrounded · abc123\n"),
@@ -163,6 +203,7 @@ impl Edges {
     pub fn requests(&self) -> KanbanRequests<'_> {
         KanbanRequests {
             inbox: &self.inbox,
+            pause: &self.pause,
             ids: &self.ids,
             probe: &self.probe,
             launcher: &self.launcher,

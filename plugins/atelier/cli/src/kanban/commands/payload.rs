@@ -56,6 +56,10 @@ fn parse_record(value: &Value) -> Option<SessionFact> {
             .map(parse_activity)
             .collect::<Option<Vec<_>>>()?,
         permission: optional(value, "permission", parse_activity)?,
+        permission_id: match value.get("permission") {
+            Some(permission @ Value::Object(_)) => nullable_string(permission, "id")?,
+            _ => None,
+        },
         decision: optional(value, "decision", parse_decision)?,
         inbox: optional(value, "inbox", parse_delivery)?,
         tasks: optional_object(value, "tasks")?

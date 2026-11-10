@@ -15,7 +15,7 @@ import {
 } from './kanban-ask'
 import { type DetailCard, type DetailState, detailBlock, newDetailState, pruneDetail, toggleSelected } from './kanban-detail'
 import { CLI_MISSING, cli, runKanban } from './kanban-cli'
-import { type InboxState, deliverRequests, findInbox } from './kanban-inbox'
+import { type InboxState, awaitPermit, deliverRequests, endPermit, findInbox } from './kanban-inbox'
 import { type Activity, KEY_PREFIX, MAX_FIELD_CHARS, type SessionRecord, record, recordPrompt } from './kanban-record'
 
 const PANE = 'kanban'
@@ -302,6 +302,7 @@ export function registerKanban(on: On): void {
     inboxDir: null,
     turnId: null,
     taking: false,
+    permitting: null,
   }
 
   on('session.start', async ($, e, next) => {
@@ -346,6 +347,8 @@ export function registerKanban(on: On): void {
       if (s.turnId === e.turnId) {
         s.turnId = null
       }
+
+      endPermit(s)
 
       await record($, s, {
         name: 'turn.complete',
@@ -491,19 +494,35 @@ export function registerKanban(on: On): void {
   on('classic.PermissionRequest', async ($, e, next) => {
     const isQuestion = e.tool_name === 'AskUserQuestion'
     const context = isQuestion ? null : await lastReply($)
+    const now = await $.clock.now()
+    const id = isQuestion || s.inboxDir === null ? null : `${s.turnId ?? 'turn'}-${now}`
 
     await record($, s, {
       name: 'classic.PermissionRequest',
       detail: e.tool_name,
-      update: (_, now) => ({
+      update: () => ({
         ...modeOf(e),
         ...(isQuestion
           ? {}
-          : { permission: { tool: e.tool_name, input: stringFields(e.tool_input), at: now }, pending_context: context }),
+          : { permission: { id, tool: e.tool_name, input: stringFields(e.tool_input), at: now }, pending_context: context }),
       }),
     })
 
-    return next(e)
+    if (id === null) {
+      return next(e)
+    }
+
+    const verdict = await awaitPermit($, s, id)
+
+    if (verdict === null) {
+      return next(e)
+    }
+
+    await record($, s, { name: 'kanban.answer', update: () => ({ permission: null }) })
+
+    return verdict === 'allow'
+      ? { decision: { behavior: 'allow' as const } }
+      : { decision: { behavior: 'deny' as const, message: '사람이 칸반에서 이 도구 실행을 거부했어요' } }
   })
 
   on('classic.Notification', async ($, e, next) => {
@@ -513,6 +532,7 @@ export function registerKanban(on: On): void {
   })
 
   on('classic.PostToolUse', async ($, e, next) => {
+    endPermit(s)
     await record($, s, {
       name: 'classic.PostToolUse',
       detail: e.tool_name,
@@ -523,6 +543,7 @@ export function registerKanban(on: On): void {
   })
 
   on('classic.PostToolUseFailure', async ($, e, next) => {
+    endPermit(s)
     await record($, s, { name: 'classic.PostToolUseFailure', detail: e.tool_name, update: () => ({ permission: null }) })
 
     return next(e)

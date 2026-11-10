@@ -2,12 +2,15 @@
 //! JSON file per request. A request is written under a hidden temp name and
 //! renamed into place, and claimed by renaming it away before it is read, so a
 //! reader never sees half a file and no two readers take the same one.
+//! Answers to a permission request wait apart, in `permits/<request id>.json`,
+//! for the hook that asked.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const SUFFIX: &str = ".json";
+const PERMITS: &str = "permits";
 
 pub struct Claimed {
     pub id: String,
@@ -22,6 +25,25 @@ pub trait InboxStore {
     /// Claims and removes every finished request, oldest first.
     fn claim_all(&self, session: &str, now: u64) -> Result<Vec<Claimed>, String>;
     fn clear(&self, session: &str) -> Result<(), String>;
+    fn put_permit(&self, session: &str, request: &str, contents: &str) -> Result<(), String>;
+    fn take_permit(
+        &self,
+        session: &str,
+        request: &str,
+        now: u64,
+    ) -> Result<Option<Claimed>, String>;
+}
+
+pub trait Pause {
+    fn pause(&self, ms: u64);
+}
+
+pub struct ThreadPause;
+
+impl Pause for ThreadPause {
+    fn pause(&self, ms: u64) {
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+    }
 }
 
 pub trait IdSource {
@@ -51,6 +73,29 @@ impl FsInbox {
     }
 }
 
+fn place(dir: &Path, name: &str, contents: &str) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| format!("inbox 를 만들지 못했어요: {e}"))?;
+    let temp = dir.join(format!(".{name}.tmp"));
+    fs::write(&temp, contents).map_err(|e| format!("요청을 쓰지 못했어요: {e}"))?;
+    fs::rename(&temp, dir.join(format!("{name}{SUFFIX}")))
+        .map_err(|e| format!("요청을 놓지 못했어요: {e}"))
+}
+
+/// `None` when another reader claimed the file first or it is not there.
+fn claim(dir: &Path, name: &str, now: u64) -> Option<Claimed> {
+    let path = dir.join(format!("{name}{SUFFIX}"));
+    let age_ms = age_ms(&path, now);
+    let taking = dir.join(format!(".{name}.taking"));
+    fs::rename(&path, &taking).ok()?;
+    let contents = fs::read_to_string(&taking).ok();
+    let _ = fs::remove_file(&taking);
+    Some(Claimed {
+        id: name.to_string(),
+        age_ms,
+        contents,
+    })
+}
+
 fn age_ms(path: &Path, now: u64) -> u64 {
     let modified = fs::metadata(path)
         .and_then(|m| m.modified())
@@ -67,12 +112,7 @@ impl InboxStore for FsInbox {
     }
 
     fn put(&self, session: &str, id: &str, contents: &str) -> Result<(), String> {
-        let dir = self.dir(session)?;
-        fs::create_dir_all(&dir).map_err(|e| format!("inbox 를 만들지 못했어요: {e}"))?;
-        let temp = dir.join(format!(".{id}.tmp"));
-        fs::write(&temp, contents).map_err(|e| format!("요청을 쓰지 못했어요: {e}"))?;
-        fs::rename(&temp, dir.join(format!("{id}{SUFFIX}")))
-            .map_err(|e| format!("요청을 놓지 못했어요: {e}"))
+        place(&self.dir(session)?, id, contents)
     }
 
     fn claim_all(&self, session: &str, now: u64) -> Result<Vec<Claimed>, String> {
@@ -87,23 +127,7 @@ impl InboxStore for FsInbox {
             .filter_map(|name| name.strip_suffix(SUFFIX).map(str::to_string))
             .collect();
         ids.sort();
-        let mut claimed = Vec::new();
-        for id in ids {
-            let path = dir.join(format!("{id}{SUFFIX}"));
-            let age_ms = age_ms(&path, now);
-            let taking = dir.join(format!(".{id}.taking"));
-            if fs::rename(&path, &taking).is_err() {
-                continue;
-            }
-            let contents = fs::read_to_string(&taking).ok();
-            let _ = fs::remove_file(&taking);
-            claimed.push(Claimed {
-                id,
-                age_ms,
-                contents,
-            });
-        }
-        Ok(claimed)
+        Ok(ids.iter().filter_map(|id| claim(&dir, id, now)).collect())
     }
 
     fn clear(&self, session: &str) -> Result<(), String> {
@@ -112,6 +136,19 @@ impl InboxStore for FsInbox {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(format!("inbox 를 지우지 못했어요: {e}")),
         }
+    }
+
+    fn put_permit(&self, session: &str, request: &str, contents: &str) -> Result<(), String> {
+        place(&self.dir(session)?.join(PERMITS), request, contents)
+    }
+
+    fn take_permit(
+        &self,
+        session: &str,
+        request: &str,
+        now: u64,
+    ) -> Result<Option<Claimed>, String> {
+        Ok(claim(&self.dir(session)?.join(PERMITS), request, now))
     }
 }
 

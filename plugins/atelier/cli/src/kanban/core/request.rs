@@ -32,10 +32,35 @@ impl Sender {
     }
 }
 
+/// A person's answer to a permission dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
+    Allow,
+    Deny,
+}
+
+impl Verdict {
+    pub fn id(self) -> &'static str {
+        match self {
+            Verdict::Allow => "allow",
+            Verdict::Deny => "deny",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Verdict> {
+        match raw {
+            "allow" => Some(Verdict::Allow),
+            "deny" => Some(Verdict::Deny),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestKind {
     Prompt,
     Stop,
+    Permit,
 }
 
 impl RequestKind {
@@ -43,6 +68,7 @@ impl RequestKind {
         match self {
             RequestKind::Prompt => "prompt",
             RequestKind::Stop => "stop",
+            RequestKind::Permit => "permit",
         }
     }
 
@@ -50,6 +76,7 @@ impl RequestKind {
         match raw {
             "prompt" => Some(RequestKind::Prompt),
             "stop" => Some(RequestKind::Stop),
+            "permit" => Some(RequestKind::Permit),
             _ => None,
         }
     }
@@ -65,6 +92,11 @@ pub enum Request {
     Stop {
         turn_id: String,
     },
+    /// The answer to the permission request the asking session named.
+    Permit {
+        request_id: String,
+        verdict: Verdict,
+    },
 }
 
 impl Request {
@@ -72,7 +104,18 @@ impl Request {
         match self {
             Request::Prompt { .. } => RequestKind::Prompt,
             Request::Stop { .. } => RequestKind::Stop,
+            Request::Permit { .. } => RequestKind::Permit,
         }
+    }
+
+    pub fn permit(request_id: &str, verdict: &str) -> Result<Request, String> {
+        check_id("permission", request_id)?;
+        let verdict = Verdict::parse(verdict)
+            .ok_or_else(|| format!("--decision 은 allow 또는 deny 예요 (받은 값: {verdict})"))?;
+        Ok(Request::Permit {
+            request_id: request_id.to_string(),
+            verdict,
+        })
     }
 
     pub fn prompt(body: &str, from: Sender, from_label: Option<&str>) -> Result<Request, String> {
@@ -116,6 +159,15 @@ impl Request {
             Request::Stop { turn_id } => {
                 json!({ "v": VERSION, "kind": "stop", "turn_id": turn_id })
             }
+            Request::Permit {
+                request_id,
+                verdict,
+            } => json!({
+                "v": VERSION,
+                "kind": "permit",
+                "request_id": request_id,
+                "decision": verdict.id(),
+            }),
         }
     }
 
@@ -132,6 +184,11 @@ impl Request {
             )
             .ok(),
             RequestKind::Stop => Request::stop(value.get("turn_id")?.as_str()?).ok(),
+            RequestKind::Permit => Request::permit(
+                value.get("request_id")?.as_str()?,
+                value.get("decision")?.as_str()?,
+            )
+            .ok(),
         }
     }
 }
@@ -270,7 +327,7 @@ pub fn take(
                             taken.push(Taken::Stop { turn_id });
                             Status::Delivered
                         }
-                        Request::Stop { .. } => Status::Stale,
+                        Request::Stop { .. } | Request::Permit { .. } => Status::Stale,
                         Request::Prompt { .. } if running_turn.is_some() || prompted => {
                             Status::Busy
                         }

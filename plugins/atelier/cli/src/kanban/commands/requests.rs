@@ -1,14 +1,17 @@
 //! The request commands: validate the arguments, do one step through the
 //! injected edges, answer one JSON value.
 
-use crate::kanban::commands::inbox::{IdSource, InboxStore};
+use crate::kanban::commands::inbox::{IdSource, InboxStore, Pause};
 use crate::kanban::commands::spawn::{Launcher, RepoProbe};
 use crate::kanban::core::request::{self, check_id, Found, Request, Sender, Taken};
 use crate::kanban::core::spawn::{is_main_root, launch_args, short_id};
 use serde_json::{json, Value};
 
+const PERMIT_POLL_MS: u64 = 200;
+
 pub struct KanbanRequests<'a> {
     pub inbox: &'a dyn InboxStore,
+    pub pause: &'a dyn Pause,
     pub ids: &'a dyn IdSource,
     pub probe: &'a dyn RepoProbe,
     pub launcher: &'a dyn Launcher,
@@ -47,6 +50,53 @@ impl KanbanRequests<'_> {
 
     pub fn stop(&self, session: &str, turn: &str) -> Value {
         self.queue(session, Request::stop(turn))
+    }
+
+    pub fn permit(&self, session: &str, request: &str, decision: &str) -> Value {
+        answer((|| {
+            check_id("session", session)?;
+            let permit = Request::permit(request, decision)?;
+            self.inbox
+                .put_permit(session, request, &permit.to_json().to_string())?;
+            Ok(
+                json!({ "queued": { "session_id": session, "id": request, "kind": permit.kind().id() } }),
+            )
+        })())
+    }
+
+    /// Waits up to `for_ms` for the answer to `request`, claiming it.
+    pub fn wait_permit(
+        &self,
+        session: &str,
+        request: &str,
+        now: u64,
+        ttl_ms: u64,
+        for_ms: u64,
+    ) -> Value {
+        answer((|| {
+            check_id("session", session)?;
+            check_id("permission", request)?;
+            let mut waited = 0;
+            loop {
+                if let Some(claimed) = self.inbox.take_permit(session, request, now + waited)? {
+                    if claimed.age_ms > ttl_ms {
+                        return Ok(json!({ "decision": null, "status": "expired" }));
+                    }
+                    return Ok(match claimed.contents.as_deref().and_then(Request::parse) {
+                        Some(Request::Permit { verdict, .. }) => {
+                            json!({ "decision": verdict.id() })
+                        }
+                        _ => json!({ "decision": null, "status": "invalid" }),
+                    });
+                }
+                if waited >= for_ms {
+                    return Ok(json!({ "decision": null }));
+                }
+                let step = PERMIT_POLL_MS.min(for_ms - waited);
+                self.pause.pause(step);
+                waited += step;
+            }
+        })())
     }
 
     pub fn dir(&self, session: &str) -> Value {

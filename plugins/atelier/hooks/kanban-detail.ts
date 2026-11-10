@@ -11,6 +11,7 @@ export type DetailCard = {
   headline: string
   actions?: string[]
   turn_id?: string | null
+  permission_id?: string | null
   detail?: { sections: Section[]; decision: DecisionView | null; delivery: string | null }
 }
 
@@ -143,6 +144,33 @@ function stopBlock($: EngineInterface, s: DetailState, els: Elements, card: Deta
   })
 }
 
+async function permit($: EngineInterface, s: DetailState, card: DetailCard, decision: 'allow' | 'deny'): Promise<void> {
+  if (typeof card.permission_id === 'string') {
+    await request(
+      $,
+      s,
+      card,
+      ['permit', '--session', card.session_id, '--request', card.permission_id, '--decision', decision],
+      decision === 'allow' ? '허용을 보냈어요' : '거부를 보냈어요',
+    )
+  }
+}
+
+function permitBlock($: EngineInterface, s: DetailState, els: Elements, card: DetailCard): Child {
+  const { Box, Button } = els
+  const id = card.session_id
+
+  return Box({
+    key: `detail:${id}:permit`,
+    flexDirection: 'row',
+    columnGap: 1,
+    children: [
+      Button({ key: `detail:${id}:allow`, label: '허용', variant: 'primary', onPress: () => void permit($, s, card, 'allow') }),
+      Button({ key: `detail:${id}:deny`, label: '거부', onPress: () => void permit($, s, card, 'deny') }),
+    ],
+  })
+}
+
 function decisionBlock($: EngineInterface, s: DetailState, els: Elements, card: DetailCard): Child[] {
   const { Box, Text, Button } = els
   const decision = card.detail?.decision
@@ -207,6 +235,7 @@ export function detailBlock(
         }),
       ),
       ...(actions.includes('decide') ? decisionBlock($, s, els, card) : []),
+      ...(actions.includes('permit') ? [permitBlock($, s, els, card)] : []),
       ...(actions.includes('send') ? [sendBlock($, s, els, card)] : []),
       ...(actions.includes('stop') ? [stopBlock($, s, els, card)] : []),
       ...(actions.includes('answer') ? [Text({ dimColor: true, children: ['질문은 아래 질문 칸에서 답해요'] })] : []),

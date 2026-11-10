@@ -416,3 +416,37 @@ fn spawn_reports_a_launcher_that_did_not_background_a_session() {
         "{out}"
     );
 }
+
+#[test]
+fn a_permit_lands_beside_the_requests_and_is_taken_by_its_permission() {
+    let w = World::new();
+    w.kanban(&[
+        "permit",
+        "--session",
+        "s-1",
+        "--request",
+        "t-1-5",
+        "--decision",
+        "deny",
+    ]);
+    assert!(w.inbox("s-1").join("permits").join("t-1-5.json").exists());
+    assert_eq!(w.take("s-1", None), json!({ "actions": [], "results": [] }));
+
+    let now = now_ms().to_string();
+    let out = w.kanban(&[
+        "inbox",
+        "wait-permit",
+        "--session",
+        "s-1",
+        "--request",
+        "t-1-5",
+        "--now",
+        &now,
+        "--ttl",
+        "60s",
+        "--for",
+        "0ms",
+    ]);
+    assert_eq!(out, json!({ "decision": "deny" }));
+    assert!(!w.inbox("s-1").join("permits").join("t-1-5.json").exists());
+}

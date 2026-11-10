@@ -8,7 +8,7 @@
 pub mod commands;
 pub mod core;
 
-use crate::kanban::commands::inbox::{ClockIds, FsInbox};
+use crate::kanban::commands::inbox::{ClockIds, FsInbox, ThreadPause};
 use crate::kanban::commands::payload::{parse_answer_request, parse_sessions};
 use crate::kanban::commands::requests::KanbanRequests;
 use crate::kanban::commands::spawn::{ClaudeLauncher, GitProbe};
@@ -76,6 +76,17 @@ pub enum RequestCommand {
         #[arg(long, allow_hyphen_values = true)]
         text: String,
     },
+    /// Leaves the answer to one permission request for the session that asked
+    Permit {
+        #[arg(long)]
+        session: String,
+        /// The permission request's id, as the board's card names it
+        #[arg(long)]
+        request: String,
+        /// `allow` or `deny`
+        #[arg(long)]
+        decision: String,
+    },
     /// Leaves a stop for one turn in a session's inbox
     Stop {
         #[arg(long)]
@@ -123,6 +134,22 @@ pub enum InboxCommand {
         #[arg(long)]
         turn: Option<String>,
     },
+    /// Waits a little for the answer to one permission request
+    WaitPermit {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        request: String,
+        /// Current time, unix milliseconds
+        #[arg(long)]
+        now: u64,
+        /// Age after which an answer is dropped (e.g. 60s)
+        #[arg(long, value_parser = parse_millis)]
+        ttl: u64,
+        /// How long to wait for it (e.g. 2s)
+        #[arg(long = "for", value_parser = parse_millis)]
+        wait: u64,
+    },
     /// Removes the inbox and what is left in it
     Clear {
         #[arg(long)]
@@ -159,6 +186,7 @@ fn card_json(card: &Card) -> Value {
         "repo_root": card.repo_root,
         "permission_mode": card.permission_mode,
         "turn_id": card.turn_id,
+        "permission_id": card.permission_id,
         "actions": action_ids(&card.actions),
         "detail": detail_json(&card.detail),
         "asks": card.asks.iter().map(ask_json).collect::<Vec<_>>(),
@@ -260,6 +288,7 @@ fn run_request(command: RequestCommand) -> Value {
     let inbox = FsInbox::from_env();
     let requests = KanbanRequests {
         inbox: &inbox,
+        pause: &ThreadPause,
         ids: &ClockIds,
         probe: &GitProbe,
         launcher: &ClaudeLauncher,
@@ -275,6 +304,11 @@ fn run_request(command: RequestCommand) -> Value {
             None => json!({ "error": format!("--from 은 pane 또는 agent 예요 (받은 값: {from})") }),
         },
         RequestCommand::Stop { session, turn } => requests.stop(&session, &turn),
+        RequestCommand::Permit {
+            session,
+            request,
+            decision,
+        } => requests.permit(&session, &request, &decision),
         RequestCommand::Inbox { command } => match command {
             InboxCommand::Dir { session } => requests.dir(&session),
             InboxCommand::Take {
@@ -283,6 +317,13 @@ fn run_request(command: RequestCommand) -> Value {
                 ttl,
                 turn,
             } => requests.take(&session, now, ttl, turn.as_deref()),
+            InboxCommand::WaitPermit {
+                session,
+                request,
+                now,
+                ttl,
+                wait,
+            } => requests.wait_permit(&session, &request, now, ttl, wait),
             InboxCommand::Clear { session } => requests.clear(&session),
         },
         RequestCommand::Spawn {

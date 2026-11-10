@@ -68,7 +68,7 @@ atelier git <reviews|guard|hook>          # git-utils 의 기계적 호출 표�
 atelier session <push-check|ensure-env>   # 세션 경계 hook (SessionStart / Stop)
 atelier orchestrator <spawn-check|compact-note>      # function hooks 모듈이 위임하는 결정적 판정 (아래 §Function hooks)
 atelier code-style <install|update|check|restore|uninstall> # 프로젝트 코드 스타일 룰(base·언어·앱 성격) 설치·갱신·점검·제어 (/atelier:code-style)
-atelier kanban <board|answer|send|stop|inbox|spawn>          # 세션 칸반 판정과 세션 사이 요청 전달 (아래 §세션 칸반)
+atelier kanban <board|answer|send|stop|permit|inbox|spawn>   # 세션 칸반 판정과 세션 사이 요청 전달 (아래 §세션 칸반)
 ```
 
 `drift` 는 `/atelier:update`·`/atelier:setup` 명세가 호출하는 결정적 도구입니다.
@@ -124,16 +124,16 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   입력 요청을 기다리는 세션입니다. 질문은 보드 아래에 펼쳐져, 선택지를 누르거나 직접 입력한 뒤 **보내기** 를
   누르면 그 세션의 질문 화면이 닫히고 사람이 답한 것처럼 이어갑니다.
 - 카드 제목을 누르면 그 컬럼에 맞는 상세가 열립니다.
-  - 입력 대기: 요청·기다리기 직전 응답·기다리는 것(권한 요청의 명령 등), 결정 요청은 답 버튼, 그리고 **중지**.
+  - 입력 대기: 요청·기다리기 직전 응답·기다리는 것(권한 요청의 명령 등), 권한 요청은 **허용**·**거부**, 결정 요청은 답 버튼, 그리고 **중지**.
   - 작업 중: 요청·할 일 목록·최근 도구, 그리고 **중지**(한 번 더 눌러 확인).
   - 쉬는 중: 직전 요청·직전 응답, 그리고 **입력해 보내기** — 그 세션의 새 턴으로 실행됩니다.
   - 좁은 pane 에서는 상세가 보드 자리를 대신하고 **뒤로** 로 돌아갑니다.
 - pane 은 `ctrl+x tab` 이나 클릭으로 포커스하고, Tab 으로 버튼 사이를 옮깁니다. 데스크톱에서도 같습니다.
-- 카드에서 그 세션 화면으로 이동하는 기능은 없고, 권한 확인에 허용·거부로 답할 수도 없습니다(그 세션에서
-  답하거나 칸반에서 중지).
+- 권한 요청의 허용·거부는 그 세션의 권한 창에 답한 것과 같고, 창에서 먼저 답하면 그쪽이 쓰입니다. 카드에서 그 세션
+  화면으로 이동하는 기능은 없습니다.
 - 세션마다 모드가 이벤트 사실을 모드 저장소(`$.store`, 같은 머신의 세션이 공유)에 기록하고, 30초마다
   생존 신호를 남깁니다. 생존 신호가 2분 끊긴 세션은 응답 없음, 24시간 끊기거나 정상 종료한 세션은 사라집니다.
-- 보내기·중지는 받는 세션의 inbox(`<CLAUDE_CONFIG_DIR 또는 ~/.claude>/atelier/kanban/inbox/<세션>/`)에 남는
+- 보내기·중지·권한 답은 받는 세션의 inbox(`<CLAUDE_CONFIG_DIR 또는 ~/.claude>/atelier/kanban/inbox/<세션>/`)에 남는
   요청이고, 받는 세션이 2초마다 한 번씩만 가져갑니다. 작업 중일 때 온 프롬프트·60초 지난 요청·끝난 턴의 중지는
   실행하지 않고 버립니다.
 - **오케스트레이터**: 읽기 전용 모드 툴 `kanban_board` 로 레포별 세션 목록을 읽고, 쉬는 세션에는

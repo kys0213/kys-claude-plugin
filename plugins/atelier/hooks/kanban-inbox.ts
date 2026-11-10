@@ -4,6 +4,9 @@ import { cli } from './kanban-cli'
 import { MAX_FIELD_CHARS, type RecordState, record, recordPrompt } from './kanban-record'
 
 const REQUEST_TTL = '60s'
+const PERMIT_WAIT = '2s'
+/** Bounds one permission wait to about half an hour of two-second waits. */
+const MAX_PERMIT_WAITS = 900
 
 type Taken = { kind: 'prompt'; text: string; body: string; from: string } | { kind: 'stop'; turn_id: string }
 
@@ -15,6 +18,8 @@ export type InboxState = RecordState & {
   /** The main loop's running turn. */
   turnId: string | null
   taking: boolean
+  /** The permission request whose kanban answer a hook waits for. */
+  permitting: string | null
 }
 
 export async function findInbox($: EngineInterface, s: InboxState): Promise<void> {
@@ -111,4 +116,51 @@ export async function deliverRequests($: EngineInterface, s: InboxState): Promis
   } finally {
     s.taking = false
   }
+}
+
+/**
+ * Waits for the kanban answer to permission request `id` while the engine shows its own dialog.
+ * Each wait is a CLI call in flight, which a hook's time budget does not count.
+ */
+export async function awaitPermit($: EngineInterface, s: InboxState, id: string): Promise<'allow' | 'deny' | null> {
+  const self = await $.session.id()
+  s.permitting = id
+
+  try {
+    for (let i = 0; i < MAX_PERMIT_WAITS && s.permitting === id; i++) {
+      const out = await cli($, [
+        'inbox',
+        'wait-permit',
+        '--session',
+        self,
+        '--request',
+        id,
+        '--now',
+        String(await $.clock.now()),
+        '--ttl',
+        REQUEST_TTL,
+        '--for',
+        PERMIT_WAIT,
+      ])
+
+      if (out === null || typeof out.error === 'string') {
+        return null
+      }
+
+      if (out.decision === 'allow' || out.decision === 'deny') {
+        return out.decision
+      }
+    }
+
+    return null
+  } finally {
+    if (s.permitting === id) {
+      s.permitting = null
+    }
+  }
+}
+
+/** The dialog was answered, or the turn moved on: a waiting hook stops at its next wait. */
+export function endPermit(s: InboxState): void {
+  s.permitting = null
 }

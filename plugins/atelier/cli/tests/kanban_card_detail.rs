@@ -384,6 +384,28 @@ fn a_long_todo_list_folds_the_completed_items() {
 }
 
 #[test]
+fn a_permission_the_mod_can_take_an_answer_for_offers_allow_and_deny() {
+    let (_, card) = only(json!([session(
+        "s",
+        json!([event("classic.PermissionRequest", Some("Bash"), 10 * SEC)]),
+        json!({
+            "turn_id": "t-1",
+            "permission": { "id": "t-1-7", "tool": "Bash", "input": { "command": "npm publish" }, "at": NOW - 10 * SEC },
+        })
+    )]));
+    assert_eq!(actions(&card), ["permit", "stop"]);
+    assert_eq!(card["permission_id"], "t-1-7");
+
+    let (_, older) = only(json!([session(
+        "s",
+        json!([event("classic.PermissionRequest", Some("Bash"), 10 * SEC)]),
+        json!({ "turn_id": "t-1", "permission": { "tool": "Bash", "input": {}, "at": NOW - 10 * SEC } })
+    )]));
+    assert_eq!(actions(&older), ["stop"]);
+    assert_eq!(older["permission_id"], Value::Null);
+}
+
+#[test]
 fn a_permission_wait_shows_what_it_asks_for_and_the_reply_before_it() {
     let (column, card) = only(json!([session(
         "s",

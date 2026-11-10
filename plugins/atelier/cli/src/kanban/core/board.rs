@@ -42,6 +42,9 @@ pub struct SessionFact {
     pub recent: Vec<Activity>,
     /// The permission request the session raised last, until its tool ends.
     pub permission: Option<Activity>,
+    /// The id the mod takes a kanban answer for that request by; absent when
+    /// the mod cannot take one.
+    pub permission_id: Option<String>,
     /// The decision the last turn ended on, until the next turn starts.
     pub decision: Option<Decision>,
     pub inbox: Option<Delivery>,
@@ -104,6 +107,8 @@ pub enum Action {
     Answer,
     /// Reply with one of the options the turn ended on.
     Decide,
+    /// Allow or deny the permission request.
+    Permit,
     Send,
     Stop,
 }
@@ -113,6 +118,7 @@ impl Action {
         match self {
             Action::Answer => "answer",
             Action::Decide => "decide",
+            Action::Permit => "permit",
             Action::Send => "send",
             Action::Stop => "stop",
         }
@@ -133,6 +139,7 @@ pub struct Card {
     pub repo_root: Option<String>,
     pub permission_mode: Option<String>,
     pub turn_id: Option<String>,
+    pub permission_id: Option<String>,
     pub actions: Vec<Action>,
     pub detail: Detail,
     /// Open questions, oldest first; empty unless the session waits on one.
@@ -333,6 +340,10 @@ fn actions_of(state: Option<&State>, fact: &SessionFact) -> Vec<Action> {
             [Some(Action::Answer), stop].into_iter().flatten().collect()
         }
         Some(State::NeedsInput(WaitReason::Decision)) => vec![Action::Decide, Action::Send],
+        Some(State::NeedsInput(WaitReason::Permission(_))) => {
+            let permit = fact.permission_id.as_ref().map(|_| Action::Permit);
+            [permit, stop].into_iter().flatten().collect()
+        }
         Some(State::NeedsInput(_) | State::Working) => stop.into_iter().collect(),
         Some(State::Idle) => vec![Action::Send],
     }
@@ -407,6 +418,10 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
             repo_root: fact.repo_root.clone(),
             permission_mode: fact.permission_mode.clone(),
             turn_id: fact.turn_id.clone(),
+            permission_id: match state {
+                Some(State::NeedsInput(WaitReason::Permission(_))) => fact.permission_id.clone(),
+                _ => None,
+            },
             actions: actions_of(state.as_ref(), fact),
             detail,
             asks: if is_question { asks } else { Vec::new() },
