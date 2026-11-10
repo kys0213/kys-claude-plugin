@@ -94,11 +94,10 @@ worktree 는 항상 epic 브랜치 위의 격리 수단이고, 메인은 epic �
 
 ## 세션 칸반으로 작업자 부리기
 
-같은 머신의 다른 Claude Code 세션(레포별 작업자)에게 일을 맡길 때의 순서다. 결과는 그 세션이 만들고, 이 런은 맡기고 확인만 한다.
+같은 머신의 다른 Claude Code 세션(레포별 작업자)에게 일을 맡길 때의 순서다. 어느 세션에 맡길지, 새로 띄울지는 모델이 정한다.
 
-1. 보드를 읽는다 — 모드 툴 `mcp__atelier__kanban_board`(지연 로드면 ToolSearch 로 먼저 불러온다)가 `repos` 로 레포(메인 작업 트리 `root`)별 세션의 `column` · `cwd` · `permission_mode` · `actions` 를 준다. 툴이 없거나 `error` 면 칸반 위임을 하지 않고 그 사실을 보고한다.
-2. 맡길 곳을 정한다 — 그 레포에 `actions` 에 `send` 가 있는(쉬는 중인) 세션이 있으면 그 세션에, 없으면 새로 띄운다. 입력 대기·작업 중 세션에는 보내지 않는다.
-3. 보낸다 — `atelier kanban send --session <session_id> --from agent --from-label <이 세션의 레포 이름> --text <일>` 을 Bash 로 부른다. 일은 그 세션만 읽고도 끝낼 수 있게 쓴다(목표 · 파일 · 완료 조건).
-4. 띄운다 — `atelier kanban spawn --cwd <root> --from-label <이 세션의 레포 이름> --text <일>`. 그 `root` 를 `cwd` 로 쓰는 살아 있는 세션이 이미 있으면 `--worktree <소문자-이름>` 을 붙여 체크아웃을 나눈다. `root` 가 없는 레포(저장소 밖 세션)에는 띄우지 않는다.
-5. 결과를 읽는다 — 출력 JSON 의 `queued` · `spawned` 를 확인하고, `error` 면 그 문장 그대로 보고한다. 보낸 일은 다음 보드 읽기에서 대상 카드의 `detail.delivery` 로 전달 여부를 확인한다(`busy` · `expired` 면 다시 고른다).
-6. 완료를 확인한다 — 완료 알림은 오지 않는다. 사용자가 다시 묻거나 다음 단계가 그 결과에 기대면 보드를 다시 읽는다. 작업자가 권한 요청으로 멈춰 있으면 사용자에게 그 세션에서 답하도록 보고한다.
+1. 보드를 읽는다 — 모드 툴 `mcp__atelier__kanban_board`(지연 로드면 ToolSearch 로 먼저 불러온다)의 `repos` 가 레포(메인 작업 트리 `root`)별 세션의 `column` · `cwd` · `permission_mode` · `actions` · `subtitle` · `last_line` · `delivery` 를 준다.
+2. 보낸다 — `actions` 에 `send` 가 있는 세션에만 `atelier kanban send --session <session_id> --from agent --from-label <이 세션의 레포 이름> --text <일>` 을 Bash 로 부른다. 일은 그 세션만 읽고도 끝낼 수 있게 쓴다(목표 · 파일 · 완료 조건).
+3. 띄운다 — `atelier kanban spawn --cwd <root> --from-label <이 세션의 레포 이름> --text <일>` 을 Bash 로 부른다. 그 `root` 를 `cwd` 로 쓰는 세션이 보드에 있으면 `--worktree <소문자-이름>` 을 붙인다.
+4. 출력을 읽는다 — `queued` · `spawned` 는 맡겨진 것이고, `error` 는 그 문장 그대로 보고한다. 보낸 일이 실행됐는지는 다음 보드 읽기의 그 세션 `delivery` 다.
+5. 완료 알림은 오지 않는다 — 결과가 필요한 시점에 보드를 다시 읽는다.

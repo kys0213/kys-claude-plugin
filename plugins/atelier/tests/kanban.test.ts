@@ -106,7 +106,6 @@ type World = {
   aborted: string[]
 }
 
-/** Stands for the engine beneath the plugin: one session, its store, its clock, the CLI. */
 type FakeCli = (argv: readonly string[]) => { exitCode: number; stdout: string } | 'missing'
 
 function boardAndAnswers(board: unknown): FakeCli {
@@ -116,6 +115,7 @@ function boardAndAnswers(board: unknown): FakeCli {
       : { exitCode: 0, stdout: JSON.stringify(board) }
 }
 
+/** Stands for the engine beneath the plugin: one session, its store, its clock, the CLI. */
 function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   const store: Record<string, unknown> = {}
   const runs: Run[] = []

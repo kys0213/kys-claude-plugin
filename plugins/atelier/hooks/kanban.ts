@@ -14,8 +14,9 @@ import {
   pruneDrafts,
 } from './kanban-ask'
 import { type DetailCard, type DetailState, detailBlock, newDetailState, pruneDetail, toggleSelected } from './kanban-detail'
-import { type InboxState, cli, deliverRequests, findInbox } from './kanban-inbox'
-import { type Activity, KEY_PREFIX, MAX_FIELD_CHARS, type SessionRecord, record } from './kanban-record'
+import { CLI_MISSING, cli, runKanban } from './kanban-cli'
+import { type InboxState, deliverRequests, findInbox } from './kanban-inbox'
+import { type Activity, KEY_PREFIX, MAX_FIELD_CHARS, type SessionRecord, record, recordPrompt } from './kanban-record'
 
 const PANE = 'kanban'
 const BOARD_TOOL = 'kanban_board'
@@ -23,9 +24,6 @@ const HEARTBEAT_MS = 30_000
 const REFRESH_MS = 2_000
 const STALE_AFTER = '2m'
 const EXPIRE_AFTER = '24h'
-const CLI_TIMEOUT_MS = 5_000
-const MAX_PROMPT_CHARS = 500
-const MAX_LAST_PROMPT_CHARS = 2_000
 const MAX_REPLY_CHARS = 1_000
 const MAX_TODOS = 50
 const MAX_RECENT = 5
@@ -73,16 +71,6 @@ function withoutAsk(base: SessionRecord, toolUseId: string): Partial<SessionReco
   return { asks: open }
 }
 
-function parseObject(stdout: string): Record<string, unknown> | null {
-  try {
-    const parsed: unknown = JSON.parse(stdout)
-
-    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : null
-  } catch {
-    return null
-  }
-}
-
 function decodeBoard(parsed: Record<string, unknown> | null, width: number): BoardView {
   if (typeof parsed?.error === 'string') {
     return { kind: 'error', message: parsed.error }
@@ -109,9 +97,7 @@ async function snapshot($: EngineInterface): Promise<{ keys: string[]; sessions:
 }
 
 async function runBoard($: EngineInterface, sessions: unknown[], width: number) {
-  const argv = [
-    'atelier',
-    'kanban',
+  const args = [
     'board',
     '--now',
     String(await $.clock.now()),
@@ -125,7 +111,7 @@ async function runBoard($: EngineInterface, sessions: unknown[], width: number) 
     await $.session.id(),
   ]
 
-  return $.process.run(argv, { stdin: JSON.stringify({ sessions }), timeoutMs: CLI_TIMEOUT_MS })
+  return runKanban($, args, JSON.stringify({ sessions }))
 }
 
 async function dropExpired($: EngineInterface, keys: string[], ids: string[]): Promise<void> {
@@ -150,10 +136,12 @@ async function refresh($: EngineInterface, s: KanbanState): Promise<void> {
     const { keys, sessions } = await snapshot($)
     const r = await runBoard($, sessions, width)
 
-    if (r.exitCode !== 0) {
-      s.view = { kind: 'error', message: `atelier kanban board 가 exit ${r.exitCode} 로 끝났어요` }
+    if (r.kind === 'exit') {
+      s.view = { kind: 'error', message: `atelier kanban board 가 exit ${r.code} 로 끝났어요` }
+    } else if (r.kind === 'missing') {
+      s.view = { kind: 'error', message: CLI_MISSING }
     } else {
-      const parsed = parseObject(r.stdout)
+      const parsed = r.kind === 'json' ? r.value : null
 
       s.view = decodeBoard(parsed, width)
 
@@ -167,7 +155,7 @@ async function refresh($: EngineInterface, s: KanbanState): Promise<void> {
       await dropExpired($, keys, expiredIds(parsed))
     }
   } catch {
-    s.view = { kind: 'error', message: 'atelier CLI 를 실행하지 못했어요 — /atelier:update 로 설치·갱신하세요' }
+    s.view = { kind: 'error', message: CLI_MISSING }
   } finally {
     s.refreshing = false
   }
@@ -177,19 +165,25 @@ async function refresh($: EngineInterface, s: KanbanState): Promise<void> {
 
 /** The board as the orchestrator reads it: repositories and their sessions, no cards or layout. */
 async function boardForTool($: EngineInterface): Promise<string> {
+  let r: Awaited<ReturnType<typeof runBoard>>
+
   try {
-    const { sessions } = await snapshot($)
-    const r = await runBoard($, sessions, 0)
-    const parsed = r.exitCode === 0 ? parseObject(r.stdout) : null
-
-    if (parsed === null || typeof parsed.error === 'string' || !Array.isArray(parsed.repos)) {
-      return JSON.stringify({ error: typeof parsed?.error === 'string' ? parsed.error : 'atelier kanban board 를 읽지 못했어요' })
-    }
-
-    return JSON.stringify({ repos: parsed.repos })
+    r = await runBoard($, (await snapshot($)).sessions, 0)
   } catch {
-    return JSON.stringify({ error: 'atelier CLI 를 실행하지 못했어요 — /atelier:update 로 설치·갱신하세요' })
+    return JSON.stringify({ error: CLI_MISSING })
   }
+
+  if (r.kind === 'missing') {
+    return JSON.stringify({ error: CLI_MISSING })
+  }
+
+  const parsed = r.kind === 'json' ? r.value : null
+
+  if (parsed === null || typeof parsed.error === 'string' || !Array.isArray(parsed.repos)) {
+    return JSON.stringify({ error: typeof parsed?.error === 'string' ? parsed.error : 'atelier kanban board 를 읽지 못했어요' })
+  }
+
+  return JSON.stringify({ repos: parsed.repos })
 }
 
 async function isPaneShown($: EngineInterface): Promise<boolean> {
@@ -324,16 +318,7 @@ export function registerKanban(on: On): void {
     if (e.command === undefined && e.isMeta !== true) {
       const isPerson = e.origin === undefined || PERSON_ORIGINS.includes(e.origin.kind)
 
-      await record($, s, {
-        name: 'prompt.submit',
-        ...(isPerson ? { fill: { first_prompt: e.text.slice(0, MAX_PROMPT_CHARS) } } : {}),
-        update: base => ({
-          ...(isPerson ? { last_prompt: e.text.slice(0, MAX_LAST_PROMPT_CHARS) } : { last_prompt: base.last_prompt ?? null }),
-          decision: null,
-          pending_context: null,
-          permission: null,
-        }),
-      })
+      await recordPrompt($, s, isPerson ? e.text : null)
     }
 
     return next(e)
@@ -586,14 +571,12 @@ export function registerKanban(on: On): void {
     const selected = cards.find(c => c.session_id === s.detail.selected)
     const asks = askBlocks($, s, els, cards)
 
-    /** Stacked, an opened card takes the board's place: the pane is too narrow for both. */
     if (!isRow && selected !== undefined) {
       const detail = detailBlock($, s.detail, els, selected, () => toggleSelected($, s.detail, selected.session_id))
 
       return Box({ flexDirection: 'column', children: [detail, ...asks] })
     }
 
-    /** Stacked columns drop their borders to save rows. */
     const frame = isRow ? { width, borderStyle: 'round' as const, paddingX: 1 } : { width, marginBottom: 1 }
     const columns = view.columns.map(col =>
       Box({

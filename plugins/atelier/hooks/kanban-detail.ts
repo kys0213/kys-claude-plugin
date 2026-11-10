@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code'
 
-import { cli } from './kanban-inbox'
+import { CLI_MISSING, cli } from './kanban-cli'
 
 type Section = { title: string; lines: string[] }
 
@@ -62,7 +62,7 @@ async function request($: EngineInterface, s: DetailState, card: DetailCard, arg
   if (out !== null && typeof out.queued === 'object') {
     s.notes.set(card.session_id, { text: sent, isError: false })
   } else {
-    const reason = typeof out?.error === 'string' ? out.error : 'atelier CLI 를 실행하지 못했어요 — /atelier:update 로 설치·갱신하세요'
+    const reason = typeof out?.error === 'string' ? out.error : CLI_MISSING
 
     s.notes.set(card.session_id, { text: reason, isError: true })
   }

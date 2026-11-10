@@ -1,10 +1,9 @@
 import type { EngineInterface } from 'claude-code'
 
-import { MAX_FIELD_CHARS, type RecordState, record } from './kanban-record'
+import { cli } from './kanban-cli'
+import { MAX_FIELD_CHARS, type RecordState, record, recordPrompt } from './kanban-record'
 
-const CLI_TIMEOUT_MS = 5_000
 const REQUEST_TTL = '60s'
-const MAX_PROMPT_CHARS = 2_000
 
 type Taken = { kind: 'prompt'; text: string; body: string; from: string } | { kind: 'stop'; turn_id: string }
 
@@ -18,26 +17,15 @@ export type InboxState = RecordState & {
   taking: boolean
 }
 
-export async function cli($: EngineInterface, args: string[]): Promise<Record<string, unknown> | null> {
-  try {
-    const r = await $.process.run(['atelier', 'kanban', ...args], { timeoutMs: CLI_TIMEOUT_MS })
-    const parsed: unknown = r.exitCode === 0 ? JSON.parse(r.stdout) : null
-
-    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : null
-  } catch {
-    return null
-  }
-}
-
 export async function findInbox($: EngineInterface, s: InboxState): Promise<void> {
   const out = await cli($, ['inbox', 'dir', '--session', await $.session.id()])
 
   s.inboxDir = typeof out?.dir === 'string' ? out.dir : null
 }
 
-async function hasRequests($: EngineInterface, dir: string): Promise<boolean> {
+async function hasEntries($: EngineInterface, dir: string): Promise<boolean> {
   try {
-    return (await $.fs.list(dir)).some(e => e.kind === 'file' && !e.name.startsWith('.') && e.name.endsWith('.json'))
+    return (await $.fs.list(dir)).length > 0
   } catch {
     return false
   }
@@ -72,16 +60,7 @@ async function act($: EngineInterface, s: InboxState, taken: Taken): Promise<voi
   }
 
   /** The submitting plugin's own prompt.submit hooks do not see the prompt, so it is recorded here. */
-  await record($, s, {
-    name: 'prompt.submit',
-    fill: { first_prompt: taken.body.slice(0, 500) },
-    update: () => ({
-      last_prompt: taken.body.slice(0, MAX_PROMPT_CHARS),
-      decision: null,
-      pending_context: null,
-      permission: null,
-    }),
-  })
+  await recordPrompt($, s, taken.body)
   void $.prompt.submit({ text: taken.text }).catch(() => undefined)
 }
 
@@ -89,7 +68,7 @@ async function act($: EngineInterface, s: InboxState, taken: Taken): Promise<voi
 export async function deliverRequests($: EngineInterface, s: InboxState): Promise<void> {
   const dir = s.inboxDir
 
-  if (dir === null || s.taking || !(await hasRequests($, dir))) {
+  if (dir === null || s.taking || !(await hasEntries($, dir))) {
     return
   }
 
