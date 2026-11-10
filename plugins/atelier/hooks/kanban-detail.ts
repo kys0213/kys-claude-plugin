@@ -100,8 +100,7 @@ function sendBlock($: EngineInterface, s: DetailState, els: Elements, card: Deta
 
   return Input({
     key: `detail:${card.session_id}:send`,
-    label: '요청 ',
-    placeholder: '이 세션에 맡길 일',
+    placeholder: '이 세션에 맡길 일을 입력하고 Enter',
     value: s.drafts.get(card.session_id) ?? '',
     submitLabel: '보내기',
     onInput: (value: string) => {
@@ -180,11 +179,12 @@ function decisionBlock($: EngineInterface, s: DetailState, els: Elements, card: 
   }
 
   return [
-    ...(decision.recap ? [Text({ dimColor: true, children: [decision.recap] })] : []),
+    ...(decision.recap ? [Text({ children: [decision.recap] })] : []),
     Text({ bold: true, children: [decision.ask] }),
     Box({
       key: `detail:${card.session_id}:options`,
       flexDirection: 'row',
+      flexWrap: 'wrap',
       columnGap: 1,
       children: decision.options.map((label, i) =>
         Button({
@@ -198,49 +198,69 @@ function decisionBlock($: EngineInterface, s: DetailState, els: Elements, card: 
   ]
 }
 
+function sectionBlock(els: Elements, section: Section, index: number): Child {
+  const { Box, Text } = els
+
+  return Box({
+    key: `section:${index}`,
+    flexDirection: 'column',
+    children: [
+      Text({ bold: true, children: [section.title] }),
+      Box({
+        key: 'lines',
+        flexDirection: 'column',
+        paddingLeft: 2,
+        children: section.lines.map(line => Text({ children: [line] })),
+      }),
+    ],
+  })
+}
+
 export function detailBlock(
   $: EngineInterface,
   s: DetailState,
   els: Elements,
   card: DetailCard,
-  onBack: (() => void) | null,
+  close: { label: string; onPress: () => void },
 ): Child {
   const { Box, Text, Button } = els
   const actions = card.actions ?? []
   const note = s.notes.get(card.session_id)
   const delivery = card.detail?.delivery
+  const offers = [
+    ...(actions.includes('decide') ? decisionBlock($, s, els, card) : []),
+    ...(actions.includes('permit') ? [permitBlock($, s, els, card)] : []),
+    ...(actions.includes('send') ? [sendBlock($, s, els, card)] : []),
+    ...(actions.includes('stop') ? [stopBlock($, s, els, card)] : []),
+    ...(actions.includes('answer') ? [Text({ dimColor: true, children: ['질문은 아래 질문 카드에서 답해요'] })] : []),
+  ]
+  const status = [
+    ...(note === undefined ? [] : [Text({ color: note.isError ? 'red' : undefined, dimColor: !note.isError, children: [note.text] })]),
+    ...(delivery ? [Text({ dimColor: true, children: [delivery] })] : []),
+  ]
 
   return Box({
     key: `detail:${card.session_id}`,
     flexDirection: 'column',
     marginTop: 1,
+    rowGap: 1,
+    borderStyle: 'round',
+    borderDimColor: true,
+    paddingX: 1,
     children: [
       Box({
         key: 'head',
         flexDirection: 'row',
+        justifyContent: 'space-between',
         columnGap: 1,
         children: [
           Text({ bold: true, wrap: 'truncate', children: [card.headline] }),
-          ...(onBack === null ? [] : [Button({ key: `detail:${card.session_id}:back`, label: '뒤로', onPress: onBack })]),
+          Button({ key: `detail:${card.session_id}:back`, label: close.label, plain: true, dimColor: true, onPress: close.onPress }),
         ],
       }),
-      ...(card.detail?.sections ?? []).map((section, i) =>
-        Box({
-          key: `section:${i}`,
-          flexDirection: 'column',
-          children: [
-            Text({ underline: true, children: [section.title] }),
-            ...section.lines.map(line => Text({ dimColor: true, children: [line] })),
-          ],
-        }),
-      ),
-      ...(actions.includes('decide') ? decisionBlock($, s, els, card) : []),
-      ...(actions.includes('permit') ? [permitBlock($, s, els, card)] : []),
-      ...(actions.includes('send') ? [sendBlock($, s, els, card)] : []),
-      ...(actions.includes('stop') ? [stopBlock($, s, els, card)] : []),
-      ...(actions.includes('answer') ? [Text({ dimColor: true, children: ['질문은 아래 질문 칸에서 답해요'] })] : []),
-      ...(note === undefined ? [] : [Text({ color: note.isError ? 'red' : undefined, dimColor: !note.isError, children: [note.text] })]),
-      ...(delivery ? [Text({ dimColor: true, children: [delivery] })] : []),
+      ...(card.detail?.sections ?? []).map((section, i) => sectionBlock(els, section, i)),
+      ...(offers.length === 0 ? [] : [Box({ key: 'offers', flexDirection: 'column', rowGap: 1, children: offers })]),
+      ...(status.length === 0 ? [] : [Box({ key: 'status', flexDirection: 'column', children: status })]),
     ],
   })
 }

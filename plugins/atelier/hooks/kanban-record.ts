@@ -5,7 +5,8 @@ export const KEY_PREFIX = 'kanban:session:'
 const MAX_EVENTS = 8
 export const MAX_FIELD_CHARS = 200
 const MAX_FIRST_PROMPT_CHARS = 500
-const MAX_LAST_PROMPT_CHARS = 2_000
+const MAX_PROMPT_CHARS = 1_000
+const MAX_PROMPTS = 5
 
 type KanbanEvent = { name: string; detail: string | null; at: number }
 
@@ -39,7 +40,10 @@ export type SessionRecord = {
   permission_mode?: string | null
   title: string | null
   first_prompt: string | null
+  /** Written by versions before `prompts`; read only. */
   last_prompt?: string | null
+  /** The newest prompts, oldest first, with `prompt.submit`'s origin kind or `kanban`. */
+  prompts?: { text: string; origin: string; at: number }[]
   last_answer?: string | null
   /** The reply just before the session started waiting mid-turn. */
   pending_context?: string | null
@@ -158,13 +162,13 @@ export async function record($: EngineInterface, s: RecordState, entry: Entry): 
   await s.writes
 }
 
-/** A prompt that starts work; `text` is null when no person wrote it, which keeps the request on record. */
-export async function recordPrompt($: EngineInterface, s: RecordState, text: string | null): Promise<void> {
+/** A prompt that starts work, kept with where it came from. */
+export async function recordPrompt($: EngineInterface, s: RecordState, text: string, origin: string): Promise<void> {
   await record($, s, {
     name: 'prompt.submit',
-    ...(text === null ? {} : { fill: { first_prompt: text.slice(0, MAX_FIRST_PROMPT_CHARS) } }),
-    update: base => ({
-      last_prompt: text === null ? (base.last_prompt ?? null) : text.slice(0, MAX_LAST_PROMPT_CHARS),
+    fill: { first_prompt: text.slice(0, MAX_FIRST_PROMPT_CHARS) },
+    update: (base, now) => ({
+      prompts: [...(base.prompts ?? []), { text: text.slice(0, MAX_PROMPT_CHARS), origin, at: now }].slice(-MAX_PROMPTS),
       decision: null,
       pending_context: null,
       permission: null,

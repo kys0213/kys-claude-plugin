@@ -168,6 +168,14 @@ export function pruneDrafts(s: AskState, cards: readonly AskCard[]): void {
   }
 }
 
+function optionMark(isMulti: boolean, isPicked: boolean): string {
+  if (isMulti) {
+    return isPicked ? '☑ ' : '☐ '
+  }
+
+  return isPicked ? '● ' : '○ '
+}
+
 function questionBlock(
   $: EngineInterface,
   s: AskState,
@@ -181,34 +189,42 @@ function questionBlock(
   const question = ask.questions[index] as AskQuestion
   const pick = picksOf(s, key, ask.questions.length)[index] ?? { options: [], text: null }
   const typed = pick.text ?? ''
+  const count = ask.questions.length
 
   return Box({
     key: `q:${index}`,
     flexDirection: 'column',
     children: [
-      Text({ children: [`[${question.header}] ${question.question}`] }),
-      ...question.options.map((option, oi) =>
-        Box({
-          key: `o:${oi}`,
-          flexDirection: 'row',
-          columnGap: 1,
-          children: [
-            Button({
-              key: `ask:${key}:${index}:${oi}`,
-              label: `${pick.options.includes(option.label) ? '✓ ' : ''}${option.label}`,
-              onPress: () => pressOption($, s, key, ask, index, option.label),
-            }),
-            ...(option.description ? [Text({ dimColor: true, wrap: 'truncate', children: [option.description] })] : []),
-          ],
-        }),
-      ),
-      Input({
-        key: `ask:${key}:${index}:text`,
-        label: '직접 입력 ',
-        placeholder: '선택 대신 글로 답하기',
-        value: typed,
-        submitLabel: '적용',
-        onSubmit: (value: string) => typeAnswer($, s, key, ask, index, value),
+      Text({ dimColor: true, children: [count > 1 ? `${index + 1}/${count} · ${question.header}` : question.header] }),
+      Text({ bold: true, children: [question.question] }),
+      Box({
+        key: 'options',
+        flexDirection: 'column',
+        paddingLeft: 1,
+        children: question.options.map((option, oi) =>
+          Button({
+            key: `ask:${key}:${index}:${oi}`,
+            plain: true,
+            onPress: () => pressOption($, s, key, ask, index, option.label),
+            children: [
+              Text({ children: [optionMark(question.multi_select, pick.options.includes(option.label)), option.label] }),
+              ...(option.description ? [Text({ dimColor: true, children: [`  ${option.description}`] })] : []),
+            ],
+          }),
+        ),
+      }),
+      Box({
+        key: 'typed',
+        paddingLeft: 1,
+        children: [
+          Input({
+            key: `ask:${key}:${index}:text`,
+            placeholder: '✎ 직접 입력…',
+            value: typed,
+            submitLabel: '적용',
+            onSubmit: (value: string) => typeAnswer($, s, key, ask, index, value),
+          }),
+        ],
       }),
       ...(typed.trim() === '' ? [] : [Text({ dimColor: true, wrap: 'truncate', children: [`답: ${typed}`] })]),
     ],
@@ -224,18 +240,39 @@ function askBlock($: EngineInterface, s: AskState, els: Elements, card: AskCard,
     key: `ask:${key}`,
     flexDirection: 'column',
     marginTop: 1,
+    rowGap: 1,
+    borderStyle: 'round',
+    borderDimColor: true,
+    paddingX: 1,
     children: [
-      Text({ bold: true, wrap: 'truncate', children: [`질문 · ${card.headline}`] }),
+      Box({
+        key: 'head',
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        columnGap: 1,
+        children: [
+          Text({ bold: true, children: ['질문'] }),
+          Text({ dimColor: true, wrap: 'truncate', children: [card.headline] }),
+        ],
+      }),
       ...ask.questions.map((_, index) => questionBlock($, s, els, card, ask, index)),
-      ...(error === undefined ? [] : [Text({ color: 'red', children: [error] })]),
-      s.sent.has(key)
-        ? Text({ dimColor: true, children: ['보냈어요 — 세션이 받으면 사라져요'] })
-        : Button({
-            key: `ask:${key}:send`,
-            label: '보내기',
-            variant: 'primary',
-            onPress: () => void sendAnswer($, s, card, ask),
-          }),
+      Box({
+        key: 'foot',
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        columnGap: 1,
+        children: [
+          ...(error === undefined ? [] : [Text({ color: 'red', children: [error] })]),
+          s.sent.has(key)
+            ? Text({ dimColor: true, children: ['보냈어요 — 세션이 받으면 사라져요'] })
+            : Button({
+                key: `ask:${key}:send`,
+                label: '답 보내기',
+                variant: 'primary',
+                onPress: () => void sendAnswer($, s, card, ask),
+              }),
+        ],
+      }),
     ],
   })
 }
