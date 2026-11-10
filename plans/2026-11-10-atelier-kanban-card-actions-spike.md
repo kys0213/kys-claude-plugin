@@ -28,3 +28,29 @@
 - SDK host 모드(`-p --input-format stream-json --permission-prompt-tool stdio`, host 가 6초 뒤 허용)로 확인한 순서: `tool.call` 시작 → `tool.check`(approver `host`, `ask`) → `classic.PermissionRequest` → (host 응답) → `classic.Notification(permission_prompt)` → `classic.PostToolUse` → `tool.call` 끝. **Spinner 는 한 번도 그려지지 않았다.** `permission_prompt` 알림은 요청 약 6초 뒤에 오는 "아직 기다림" 알림이다(터미널 spike 와 같은 간격).
 - 그러니 SDK host 에서도 이벤트만으로는 입력 대기로 가야 한다. 남은 원인 후보는 데스크톱이 창을 띄운 동안 Spinner 를 그려서 "입력 대기 뒤 Spinner = 답함" 규칙이 곧바로 작업 중으로 바꾸는 것이다 — 데스크톱은 여기서 확인할 수 없다.
 - 조정: 질문은 이벤트 순서가 아니라 **열린 질문 기록(`asks`)이 있는 동안 입력 대기**로 판정한다. 기록은 모드가 `tool.call{AskUserQuestion}` 의 시작·끝에서 직접 열고 닫으므로 화면의 Spinner 규칙과 무관하다. 권한 요청은 같은 방법이 없어(승인 순간 이벤트 없음) 지금 규칙을 유지하고, 데스크톱 동작은 사용자 확인으로 남긴다.
+
+## 추가 spike (Fable 자문 이후)
+
+- 모드 툴 훅이 `next(e)` 를 부르면 core 권한 단계가 돈다 — manual 에서 툴 입력이 보이는 권한 창이 떴다. 그러나 허용하면 "답한 훅이 없음", 거부하면 "사용자가 원하지 않음" 오류로 끝나고, 둘 다 `isError` 라 **오류 글로만 구분된다.**
+- 권한 창이 열린 채로 `$.turn.abort` → 창이 닫히고 턴이 `aborted` 로 끝난다. → 입력 대기(권한) 카드에도 중지를 줄 수 있다.
+- `$.session.repo()` 는 `{ root, remote, internal, name }` 이고 `root` 는 worktree 라도 메인 작업 트리다. `name` 은 내부 레포가 아니면 null 이라 지금 카드 이름이 대부분 cwd 이름이었다.
+- `prompt.submit` 의 `origin.kind`: `composer`·`bridge`·`sdk`·`task-notification`·`scheduled-trigger`·`plugin` 등.
+- `$.fs` 에는 삭제가 없다. classic 훅 입력에는 `permission_mode` 가 있다.
+- `claude --bg` 의 short id 는 session id 의 접두다 (`claude agents --json`).
+
+## 설계 조정 (자문 반영)
+
+| 선행 plan | 조정 | 이유 |
+|---|---|---|
+| 모드 툴 `kanban_send`·`kanban_spawn` | **CLI 명령 `atelier kanban send`·`spawn` 을 오케스트레이터 스킬이 Bash 로 부른다.** 모드 툴은 읽기 전용 `kanban_board` 하나만 | 모드 툴은 권한 단계를 건너뛰거나(답할 때) 결과를 글로만 구분한다(next 할 때). Bash 는 manual·auto 분류기·bypass·allow 규칙을 그대로 따른다 — 사용자 결정 "권한 모드를 따름" |
+| 요청을 store 키로 전달 | CLI 가 `<config>/atelier/kanban/inbox/<sid>/<id>.json` 에 temp→rename 으로 쓴다. 받는 모드는 `$.fs.list` 로 보고, 파일이 있을 때만 `atelier kanban inbox take` 를 부른다 | CLI 는 store 를 쓸 수 없다. rename 은 원자적이라 반쯤 쓴 파일을 읽지 않는다. 만료·작업 중 거절·삭제를 CLI 가 한다 |
+| 만료·중복 없음 | 요청에 `at`·`id`. `take` 는 파일을 먼저 지우고(최대 1회) TTL(60초) 지난 것·작업 중일 때 온 프롬프트를 거절한다. 결과(`delivered`·`busy`·`expired`)를 기록에 남겨 카드에 보인다 | 죽었다 살아난 세션의 늦은 실행, 동시 보내기의 중복 실행 |
+| 중지 키 `kanban:stop:<sid>:<turn_id>` | 같은 inbox 의 `stop` 요청(`turn_id` 포함). 입력 대기 카드에도 중지 | 위와 같은 전달 경로. 권한 창이 열려도 중지가 된다 |
+| 권한 승인 `[허용]`·`[거부]` | 뺀다 | spike 3 |
+| 레포 = `repo.name` | `repo_root`(`repo.root`)·`remote` 를 기록하고 이름·묶음·spawn 위치를 이것으로 | `name` 은 거의 늘 null |
+| spawn 허용 = 보드의 레포 | `spawn --cwd` 는 그 경로가 git 메인 작업 트리 루트일 때만, `--worktree` 이름은 `[a-z0-9-]+` 만. 프롬프트 앞에 늘 머리말을 붙여 `-` 로 시작하지 않는다. short id 를 돌려준다 | 경로·옵션 주입 방지. 세션 수 상한·같은 체크아웃 회피는 스킬 절차 |
+| `last_answer` 만 | 질문·권한·결정 요청 시점에 마지막 응답 글을 `pending_context` 로 | 턴 중간 대기의 맥락은 이전 턴 응답이 아니다 |
+| 부제목 = 태그 걷기 | 사람 프롬프트(`composer`·`bridge`·`sdk`)만 기록, CLI 가 `<system-reminder>` 를 걷고 `first_prompt` 가 비면 `last_prompt` 로 | task-notification 오염, 500자 잘림 뒤 걷기 문제 |
+| 상세 전체 | CLI 가 줄 수를 정해 자른다(요청 3줄·응답 6줄·할 일은 진행 항목 주변). 세로 배치에서는 상세가 보드 자리를 대신하고 `[뒤로]` | dock pane 폭 |
+| 권한 모드 비교로 보내기 제한 | 하지 않는다. 대상 세션의 `permission_mode` 를 보드에 보이고, 보내기 자체가 보내는 쪽 권한 확인을 거친다 | 보내는 글은 사람 또는 분류기가 승인한다. 비교 규칙은 auto 작업자를 막는다 |
+| 작업자 완료 알림 | v1 은 보드를 다시 읽는다 | 범위 |
