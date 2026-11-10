@@ -16,7 +16,11 @@ export type AskQuestion = {
 
 type AskRecord = { questions: AskQuestion[]; at: number }
 
-type Activity = { tool: string; input: Record<string, string>; at: number }
+export type Activity = { tool: string; input: Record<string, string>; at: number }
+
+type Decision = { ask: string; recap: string | null; options: string[]; at: number }
+
+type Delivery = { id: string; kind: string; status: string; at: number }
 
 type TaskRecord = { subject: string; active: string | null; status: string }
 
@@ -27,13 +31,26 @@ export type SessionRecord = {
   session_id: string
   cwd: string
   repo: string | null
+  /** The main working tree of the session's repository. */
+  repo_root?: string | null
+  remote?: string | null
+  permission_mode?: string | null
   title: string | null
   first_prompt: string | null
+  last_prompt?: string | null
+  last_answer?: string | null
+  /** The reply just before the session started waiting mid-turn. */
+  pending_context?: string | null
+  turn_id?: string | null
   started_at: number
   heartbeat_at: number
   ended_reason: string | null
   events: KanbanEvent[]
   activity?: Activity | null
+  recent?: Activity[]
+  permission?: Activity | null
+  decision?: Decision | null
+  inbox?: Delivery | null
   tasks?: Record<string, TaskRecord>
   todos?: TodoRecord[]
   asks?: Record<string, AskRecord>
@@ -81,6 +98,8 @@ async function freshRecord($: EngineInterface, id: string, now: number): Promise
     session_id: id,
     cwd: await $.session.cwd(),
     repo: repo?.name ?? null,
+    repo_root: repo?.root ?? null,
+    remote: repo?.remote ?? null,
     title: null,
     first_prompt: null,
     started_at: now,

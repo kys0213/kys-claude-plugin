@@ -99,6 +99,11 @@ type World = {
   shown: { value: boolean }
   /** Answers the AskUserQuestion dialog the engine has open, as the person would. */
   dialog: { answer: ((answers: Record<string, string>) => void) | null }
+  /** The file names in this session's inbox directory. */
+  inbox: { files: string[] }
+  messages: { value: { role: 'user' | 'assistant'; text: string; toolUses: never[] }[] }
+  submitted: string[]
+  aborted: string[]
 }
 
 /** Stands for the engine beneath the plugin: one session, its store, its clock, the CLI. */
@@ -116,6 +121,10 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   const runs: Run[] = []
   const shown = { value: false }
   const dialog: World['dialog'] = { answer: null }
+  const inbox: World['inbox'] = { files: [] }
+  const messages: World['messages'] = { value: [] }
+  const submitted: string[] = []
+  const aborted: string[] = []
 
   on('store.get', ($, e) => ({ value: store[e.key] }))
   on('store.set', ($, e) => {
@@ -158,8 +167,22 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
 
     return { value: { ...out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
+  on('fs.list', () => ({
+    value: inbox.files.map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: START, isLink: false })),
+  }))
+  on('session.messages', () => ({ value: messages.value as never }))
+  on('turn.abort', ($, e) => {
+    aborted.push(e.turnId)
+
+    return { value: undefined }
+  })
+  on('tool.register', () => ({ value: { tool: 'mcp__atelier__kanban_board' } as never }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('prompt.submit', ($, e) => {
+    submitted.push(e.text)
+
+    return { text: e.text }
+  })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
@@ -182,7 +205,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
     return { result: {} }
   })
 
-  return { store, clock, runs, shown, dialog }
+  return { store, clock, runs, shown, dialog, inbox, messages, submitted, aborted }
 }
 
 type StoredRecord = {
@@ -202,6 +225,10 @@ type StoredRecord = {
 
 function stored(w: World): StoredRecord {
   return w.store[KEY] as StoredRecord
+}
+
+function boardRuns(w: World): Run[] {
+  return w.runs.filter(r => r.argv[2] === 'board')
 }
 
 function eventNames(w: World): string[] {
@@ -232,6 +259,8 @@ describe('kanban recording', () => {
       session_id: SELF,
       cwd: '/work/project-a',
       repo: null,
+      repo_root: null,
+      remote: null,
       title: null,
       first_prompt: null,
       started_at: START,
@@ -476,8 +505,8 @@ describe('kanban pane', () => {
     const ran = await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
 
     expect(ran).toEqual({ text: '세션 칸반을 열었어요.' })
-    expect(w.runs).toHaveLength(1)
-    expect(w.runs[0]?.argv).toEqual([
+    expect(boardRuns(w)).toHaveLength(1)
+    expect(boardRuns(w)[0]?.argv).toEqual([
       'atelier',
       'kanban',
       'board',
@@ -492,7 +521,7 @@ describe('kanban pane', () => {
       '--self',
       SELF,
     ])
-    const sent = JSON.parse(w.runs[0]?.stdin ?? '{}') as { sessions: { session_id: string }[] }
+    const sent = JSON.parse(boardRuns(w)[0]?.stdin ?? '{}') as { sessions: { session_id: string }[] }
     expect(sent.sessions.map(r => r.session_id).sort()).toEqual(['gone', SELF])
     expect(w.store['kanban:session:gone']).toBeUndefined()
     expect(w.store['unrelated']).toEqual({ keep: true })
@@ -524,11 +553,11 @@ describe('kanban pane', () => {
 
     await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
     await w.clock.advance(6_000)
-    expect(w.runs).toHaveLength(0)
+    expect(boardRuns(w)).toHaveLength(0)
 
     w.shown.value = true
     await w.clock.advance(2_000)
-    expect(w.runs).toHaveLength(1)
+    expect(boardRuns(w)).toHaveLength(1)
   })
 
   for (const surface of ['terminal', 'desktop'] as const) {
@@ -554,7 +583,7 @@ describe('kanban pane', () => {
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     await w.clock.settle()
 
-    const widths = w.runs.map(r => r.argv[r.argv.indexOf('--width') + 1])
+    const widths = boardRuns(w).map(r => r.argv[r.argv.indexOf('--width') + 1])
     expect(widths).toEqual(['0', '100'])
     await ui.unmount()
   })
@@ -688,5 +717,349 @@ describe('kanban pane', () => {
     expect(w.store['kanban:answer:other:tu-1']).toBeUndefined()
     expect(await after.find({ key: 'ask:other:tu-1:send' })).toBeDefined()
     await after.unmount()
+  })
+})
+
+const INBOX_DIR = '/home/me/.claude/atelier/kanban/inbox/self-session'
+
+/** Answers each kanban subcommand from a table; a missing entry answers `{}`. */
+function routes(table: Record<string, unknown>): FakeCli {
+  return argv => {
+    const name = argv[2] === 'inbox' ? `inbox ${argv[3]}` : (argv[2] ?? '')
+
+    return { exitCode: 0, stdout: JSON.stringify(table[name] ?? {}) }
+  }
+}
+
+const DETAIL_BOARD = {
+  ...BOARD,
+  columns: [
+    { id: 'needs_input', heading: '입력 대기 0', cards: [] },
+    {
+      id: 'working',
+      heading: '작업 중 1',
+      cards: [
+        {
+          session_id: 'busy',
+          headline: 'api · 2m',
+          subtitle: 'Ship it',
+          is_self: false,
+          turn_id: 't-9',
+          actions: ['stop'],
+          detail: { sections: [{ title: '요청', lines: ['Ship it'] }], decision: null, delivery: null },
+        },
+      ],
+    },
+    {
+      id: 'idle',
+      heading: '쉬는 중 2',
+      cards: [
+        {
+          session_id: 'calm',
+          headline: 'web · 5m',
+          subtitle: 'Fix CSS',
+          last_line: '직전: Fixed the header.',
+          is_self: false,
+          actions: ['send'],
+          detail: {
+            sections: [{ title: '직전 응답', lines: ['Fixed the header.'] }],
+            decision: null,
+            delivery: '보낸 요청: 전달됐어요 · 4s',
+          },
+        },
+        {
+          session_id: 'wrap',
+          headline: 'docs · 결정 요청 · 1m',
+          subtitle: 'Draft spec',
+          is_self: false,
+          actions: ['decide', 'send'],
+          detail: {
+            sections: [],
+            decision: { ask: '초안대로 진행할까요?', recap: '초안을 정리했어요.', options: ['초안대로 진행', '고칠 행 있음'] },
+            delivery: null,
+          },
+        },
+      ],
+    },
+    { id: 'stale', heading: '응답 없음 0', cards: [] },
+  ],
+  repos: [{ label: 'api', root: '/w/api', sessions: [] }],
+}
+
+describe('kanban details and requests', () => {
+  test('a prompt that no person typed starts work but is not kept as the request', async ($, on) => {
+    const w = world(on)
+
+    await $.prompt.submit({ text: 'fix the login bug', origin: { kind: 'composer' } } as never)
+    await $.prompt.submit({ text: '<task-notification>done</task-notification>', origin: { kind: 'task-notification' } } as never)
+
+    expect(stored(w).first_prompt).toBe('fix the login bug')
+    expect((stored(w) as Record<string, unknown>).last_prompt).toBe('fix the login bug')
+    expect(eventNames(w)).toEqual(['prompt.submit', 'prompt.submit'])
+  })
+
+  test('a turn keeps its id, its recent tools and its reply', async ($, on) => {
+    const w = world(on)
+    const rec = () => stored(w) as Record<string, unknown>
+
+    await $.turn.start({ text: 'go', turnId: 't-1' })
+    for (const n of [1, 2, 3, 4, 5, 6]) {
+      await $.tool.call({ tool: 'Read', file_path: `/w/f${n}.ts` } as never)
+    }
+    expect(rec().turn_id).toBe('t-1')
+    expect((rec().recent as { input: { file_path: string } }[]).map(a => a.input.file_path)).toEqual([
+      '/w/f2.ts',
+      '/w/f3.ts',
+      '/w/f4.ts',
+      '/w/f5.ts',
+      '/w/f6.ts',
+    ])
+
+    await $.turn.complete({ turnId: 't-1', answer: 'All done.', durationMs: 1, isAborted: false } as never)
+    expect(rec().turn_id).toBeNull()
+    expect(rec().last_answer).toBe('All done.')
+  })
+
+  test('a WrapUp that asks leaves a decision until the next turn', async ($, on) => {
+    const w = world(on)
+    const rec = () => stored(w) as Record<string, unknown>
+
+    await $.tool.call({
+      tool: 'WrapUp',
+      recap: '초안을 정리했어요.',
+      ask: '초안대로 진행할까요?',
+      blocked: true,
+      actions: [{ label: '초안대로 진행' }, { label: '고칠 행 있음' }, { action: 'verify' }],
+    } as never)
+    expect(rec().decision).toEqual({
+      ask: '초안대로 진행할까요?',
+      recap: '초안을 정리했어요.',
+      options: ['초안대로 진행', '고칠 행 있음'],
+      at: START,
+    })
+
+    await $.turn.start({ text: 'go', turnId: 't-2' })
+    expect(rec().decision).toBeNull()
+  })
+
+  test('a WrapUp without a question leaves no decision', async ($, on) => {
+    const w = world(on)
+
+    await $.tool.call({ tool: 'WrapUp', recap: 'Done.' } as never)
+    expect((stored(w) as Record<string, unknown>).decision).toBeUndefined()
+  })
+
+  test('a permission request keeps what it asks for and the reply before it, until the tool ends', async ($, on) => {
+    const w = world(on)
+    const rec = () => stored(w) as Record<string, unknown>
+
+    w.messages.value = [
+      { role: 'user', text: 'release', toolUses: [] },
+      { role: 'assistant', text: 'Tests pass. Publishing.', toolUses: [] },
+    ]
+    await $.classic.PermissionRequest({
+      tool_name: 'Bash',
+      tool_input: { command: 'npm publish', timeout: 5 },
+      permission_mode: 'default',
+    } as never)
+    expect(rec().permission).toEqual({ tool: 'Bash', input: { command: 'npm publish' }, at: START })
+    expect(rec().pending_context).toBe('Tests pass. Publishing.')
+    expect(rec().permission_mode).toBe('default')
+
+    await $.classic.PostToolUse({ tool_name: 'Bash', tool_input: {}, tool_response: {} } as never)
+    expect(rec().permission).toBeNull()
+  })
+
+  test('the inbox is found at start and taken only when a request is waiting', async ($, on) => {
+    const w = world(
+      on,
+      routes({
+        'inbox dir': { dir: INBOX_DIR },
+        'inbox take': {
+          actions: [{ kind: 'prompt', text: 'Run lint', body: 'Run lint', from: 'pane' }],
+          results: [{ id: 'r1', kind: 'prompt', status: 'delivered' }],
+        },
+      }),
+    )
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    expect(w.runs.map(r => r.argv.slice(2, 4))).toEqual([['inbox', 'dir']])
+
+    await w.clock.advance(4_000)
+    expect(w.runs.filter(r => r.argv[3] === 'take')).toHaveLength(0)
+
+    w.inbox.files = ['.123.tmp', '123-1.json']
+    await w.clock.advance(2_000)
+    const take = w.runs.find(r => r.argv[3] === 'take')
+    expect(take?.argv).toEqual([
+      'atelier',
+      'kanban',
+      'inbox',
+      'take',
+      '--session',
+      SELF,
+      '--now',
+      String(START + 6_000),
+      '--ttl',
+      '60s',
+    ])
+    expect(w.submitted).toEqual(['Run lint'])
+    const rec = stored(w) as Record<string, unknown>
+    expect(rec.last_prompt).toBe('Run lint')
+    expect(eventNames(w).at(-1)).toBe('prompt.submit')
+    expect(rec.inbox).toEqual({ id: 'r1', kind: 'prompt', status: 'delivered', at: START + 6_000 })
+  })
+
+  test('a stop for the running turn aborts it', async ($, on) => {
+    const w = world(
+      on,
+      routes({
+        'inbox dir': { dir: INBOX_DIR },
+        'inbox take': {
+          actions: [{ kind: 'stop', turn_id: 't-7' }],
+          results: [{ id: 'r2', kind: 'stop', status: 'delivered' }],
+        },
+      }),
+    )
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await $.turn.start({ text: 'go', turnId: 't-7' })
+    w.inbox.files = ['1-1.json']
+    await w.clock.advance(2_000)
+
+    const take = w.runs.find(r => r.argv[3] === 'take')
+    expect(take?.argv.slice(-2)).toEqual(['--turn', 't-7'])
+    expect(w.aborted).toEqual(['t-7'])
+  })
+
+  test('an expired session also loses its inbox', async ($, on) => {
+    const w = world(on)
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    expect(w.runs.find(r => r.argv[3] === 'clear')?.argv).toEqual(['atelier', 'kanban', 'inbox', 'clear', '--session', 'gone'])
+  })
+
+  test('the orchestrator reads the board grouped by repository through the board tool', async ($, on) => {
+    world(on, routes({ board: DETAIL_BOARD }))
+
+    const r = await $.tool.call({ tool: 'mcp__atelier__kanban_board' } as never)
+    const out = JSON.parse((r as { result: string }).result) as { repos: unknown }
+    expect(out.repos).toEqual([{ label: 'api', root: '/w/api', sessions: [] }])
+  })
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    test(`pressing an idle card opens its detail and sends a prompt on ${surface}`, async ($, on) => {
+      const w = world(on, routes({ board: DETAIL_BOARD, send: { queued: { session_id: 'calm', id: 'r', kind: 'prompt' } } }))
+
+      await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+      const ui = await $.ui.mount({ ...PANE, surface })
+
+      expect((await ui.find({ type: 'Text', text: /직전: / }))?.text).toBe('직전: Fixed the header.')
+      expect(await ui.find({ key: 'detail:calm:send' })).toBeUndefined()
+
+      await ui.press({ key: 'card:calm' })
+      await ui.unmount()
+      const opened = await $.ui.mount({ ...PANE, surface })
+      expect((await opened.find({ type: 'Text', text: /보낸 요청/ }))?.text).toBe('보낸 요청: 전달됐어요 · 4s')
+      await opened.input({ key: 'detail:calm:send', text: 'Add dark mode' })
+      await w.clock.settle()
+      await opened.unmount()
+      const after = await $.ui.mount({ ...PANE, surface })
+
+      expect(w.runs.find(r => r.argv[2] === 'send')?.argv).toEqual([
+        'atelier',
+        'kanban',
+        'send',
+        '--session',
+        'calm',
+        '--from',
+        'pane',
+        '--from-label',
+        SELF,
+        '--text',
+        'Add dark mode',
+      ])
+      expect((await after.find({ type: 'Text', text: /^보냈어요/ }))?.text).toBe('보냈어요 — 세션이 받으면 시작해요')
+      await after.unmount()
+    })
+  }
+
+  test('stopping a working card asks once more before it sends the stop', async ($, on) => {
+    const w = world(on, routes({ board: DETAIL_BOARD, stop: { queued: { session_id: 'busy', id: 'r', kind: 'stop' } } }))
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+    await ui.press({ key: 'card:busy' })
+    await ui.unmount()
+    const opened = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await opened.press({ key: 'detail:busy:stop' })
+    expect(w.runs.find(r => r.argv[2] === 'stop')).toBeUndefined()
+    await opened.unmount()
+
+    const confirming = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await confirming.press({ key: 'detail:busy:stop-yes' })
+    await w.clock.settle()
+    await confirming.unmount()
+    expect(w.runs.find(r => r.argv[2] === 'stop')?.argv).toEqual([
+      'atelier',
+      'kanban',
+      'stop',
+      '--session',
+      'busy',
+      '--turn',
+      't-9',
+    ])
+  })
+
+  test('a decision card sends the option pressed as the reply', async ($, on) => {
+    const w = world(on, routes({ board: DETAIL_BOARD, send: { queued: { session_id: 'wrap', id: 'r', kind: 'prompt' } } }))
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+
+    await ui.press({ key: 'card:wrap' })
+    await ui.unmount()
+    const opened = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    expect((await opened.find({ type: 'Text', text: /진행할까요/ }))?.text).toBe('초안대로 진행할까요?')
+    await opened.press({ key: 'detail:wrap:option:1' })
+    await w.clock.settle()
+
+    expect(w.runs.find(r => r.argv[2] === 'send')?.argv.at(-1)).toBe('고칠 행 있음')
+    await opened.unmount()
+  })
+
+  test('a refused send shows why', async ($, on) => {
+    world(on, routes({ board: DETAIL_BOARD, send: { error: '보낼 글이 비어 있어요' } }))
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+    await ui.press({ key: 'card:calm' })
+    await ui.unmount()
+    const opened = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await opened.input({ key: 'detail:calm:send', text: ' ' })
+    await opened.unmount()
+    const after = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect((await after.find({ type: 'Text', text: /비어 있어요/ }))?.text).toBe('보낼 글이 비어 있어요')
+    await after.unmount()
+  })
+
+  test('in a stacked pane an opened card takes the board’s place until going back', async ($, on) => {
+    world(on, routes({ board: { ...DETAIL_BOARD, layout: { direction: 'column', column_width: 40, column_gap: 1 } } }))
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 40 }, surface: 'terminal' })
+
+    const narrow = { ...PANE, props: { ...PANE.props, bodyColumns: 40 }, surface: 'terminal' as const }
+    await ui.press({ key: 'card:busy' })
+    await ui.unmount()
+    const opened = await $.ui.mount(narrow)
+    expect(await opened.find({ type: 'Text', text: /쉬는 중 2/ })).toBeUndefined()
+    await opened.press({ key: 'detail:busy:back' })
+    await opened.unmount()
+    const back = await $.ui.mount(narrow)
+    expect((await back.find({ type: 'Text', text: /쉬는 중 2/ }))?.text).toBe('쉬는 중 2')
+    await back.unmount()
   })
 })
