@@ -35,6 +35,61 @@ const BOARD = {
   layout: ROW,
 }
 
+const COLOR = {
+  question: 'Which color?',
+  header: 'Color',
+  multi_select: false,
+  options: [
+    { label: 'Red', description: 'warm' },
+    { label: 'Blue', description: 'cool' },
+  ],
+}
+
+const PETS = {
+  question: 'Which pets?',
+  header: 'Pets',
+  multi_select: true,
+  options: [
+    { label: 'Cat', description: null },
+    { label: 'Dog', description: null },
+    { label: 'Fish', description: null },
+  ],
+}
+
+const ASKING_BOARD = {
+  ...BOARD,
+  columns: [
+    {
+      id: 'needs_input',
+      heading: '입력 대기 1',
+      cards: [
+        {
+          session_id: 'other',
+          headline: 'project-b · 질문 · 1m',
+          subtitle: 'Fix login bug',
+          progress: '할 일 1/3 · Running tests',
+          is_self: false,
+          asks: [{ tool_use_id: 'tu-1', questions: [COLOR, PETS] }],
+        },
+      ],
+    },
+    ...BOARD.columns.slice(1),
+  ],
+}
+
+/** What the asking session's AskUserQuestion call sends, in the tool's own spelling. */
+const TOOL_QUESTIONS = [
+  {
+    question: 'Which color?',
+    header: 'Color',
+    multiSelect: false,
+    options: [
+      { label: 'Red', description: 'warm' },
+      { label: 'Blue', description: 'cool' },
+    ],
+  },
+]
+
 type Run = { argv: readonly string[]; stdin?: string }
 
 type World = {
@@ -42,15 +97,25 @@ type World = {
   clock: ReturnType<typeof mock.clock>
   runs: Run[]
   shown: { value: boolean }
+  /** Answers the AskUserQuestion dialog the engine has open, as the person would. */
+  dialog: { answer: ((answers: Record<string, string>) => void) | null }
 }
 
 /** Stands for the engine beneath the plugin: one session, its store, its clock, the CLI. */
 type FakeCli = (argv: readonly string[]) => { exitCode: number; stdout: string } | 'missing'
 
-function world(on: On, cli: FakeCli = () => ({ exitCode: 0, stdout: JSON.stringify(BOARD) })): World {
+function boardAndAnswers(board: unknown): FakeCli {
+  return argv =>
+    argv[2] === 'answer'
+      ? { exitCode: 0, stdout: JSON.stringify({ answers: ['Blue', 'Cat, Fish'] }) }
+      : { exitCode: 0, stdout: JSON.stringify(board) }
+}
+
+function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   const store: Record<string, unknown> = {}
   const runs: Run[] = []
   const shown = { value: false }
+  const dialog: World['dialog'] = { answer: null }
 
   on('store.get', ($, e) => ({ value: store[e.key] }))
   on('store.set', ($, e) => {
@@ -103,8 +168,21 @@ function world(on: On, cli: FakeCli = () => ({ exitCode: 0, stdout: JSON.stringi
   on('classic.Notification', () => ({}))
   on('classic.PostToolUse', () => ({}))
   on('classic.PostToolUseFailure', () => ({}))
+  on('tool.call', ($, e) => {
+    if (e.tool === 'AskUserQuestion') {
+      return new Promise(resolve => {
+        dialog.answer = answers => resolve({ result: { questions: e.questions, answers } })
+      })
+    }
 
-  return { store, clock, runs, shown }
+    if (e.tool === 'TaskCreate') {
+      return { result: { task: { id: '1', subject: e.subject } } }
+    }
+
+    return { result: {} }
+  })
+
+  return { store, clock, runs, shown, dialog }
 }
 
 type StoredRecord = {
@@ -116,6 +194,10 @@ type StoredRecord = {
   heartbeat_at: number
   ended_reason: string | null
   events: { name: string; detail: string | null; at: number }[]
+  activity?: unknown
+  tasks?: unknown
+  todos?: unknown
+  asks?: Record<string, unknown>
 }
 
 function stored(w: World): StoredRecord {
@@ -291,6 +373,98 @@ describe('kanban recording', () => {
   })
 })
 
+describe('kanban progress and questions', () => {
+  test('a main loop tool call is kept as the activity with its string fields cut, until the turn ends', async ($, on) => {
+    const w = world(on)
+
+    await $.tool.call({ tool: 'Bash', command: 'x'.repeat(300), description: 'Run tests', timeout: 5 })
+
+    expect(stored(w).activity).toEqual({
+      tool: 'Bash',
+      input: { command: 'x'.repeat(200), description: 'Run tests' },
+      at: START,
+    })
+    expect(eventNames(w)).toEqual([])
+
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+
+    expect(stored(w).activity).toBeNull()
+  })
+
+  test('TodoWrite replaces the to-do list and the Task tools merge into the task list', async ($, on) => {
+    const w = world(on)
+
+    await $.tool.call({
+      tool: 'TodoWrite',
+      todos: [
+        { content: 'a', status: 'completed', activeForm: 'Doing a' },
+        { content: 'b', status: 'in_progress', activeForm: 'Doing b' },
+      ],
+    })
+    await $.tool.call({ tool: 'TaskCreate', subject: 'Write tests', description: 'd', activeForm: 'Writing tests' })
+    await $.tool.call({ tool: 'TaskUpdate', taskId: '1', status: 'in_progress' })
+    await $.tool.call({ tool: 'TaskUpdate', taskId: '9', status: 'completed' })
+
+    expect(stored(w).todos).toEqual([
+      { status: 'completed', active: 'Doing a' },
+      { status: 'in_progress', active: 'Doing b' },
+    ])
+    expect(stored(w).tasks).toEqual({
+      '1': { subject: 'Write tests', active: 'Writing tests', status: 'in_progress' },
+      '9': { subject: '', active: null, status: 'completed' },
+    })
+  })
+
+  test('an open question is recorded and a kanban answer closes it as the person would', async ($, on) => {
+    const w = world(on)
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    const call = $.tool.call({ tool: 'AskUserQuestion', questions: TOOL_QUESTIONS })
+    await w.clock.settle()
+
+    const [id] = Object.keys(stored(w).asks ?? {})
+    expect(stored(w).asks?.[id as string]).toEqual({ at: START, questions: [COLOR] })
+
+    w.store[`kanban:answer:${SELF}:${id}`] = { v: 1, answers: ['Blue'] }
+    await w.clock.advance(2_000)
+    const r = await call
+
+    expect(r.result).toEqual({ questions: TOOL_QUESTIONS, answers: { 'Which color?': 'Blue' } })
+    expect(stored(w).asks).toEqual({})
+    expect(eventNames(w)).toContain('kanban.answer')
+    expect(w.store[`kanban:answer:${SELF}:${id}`]).toBeUndefined()
+  })
+
+  test('an answer in the dialog wins and leaves no kanban event', async ($, on) => {
+    const w = world(on)
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    const call = $.tool.call({ tool: 'AskUserQuestion', questions: TOOL_QUESTIONS })
+    await w.clock.settle()
+    w.dialog.answer?.({ 'Which color?': 'Red' })
+    const r = await call
+
+    expect(r.result).toEqual({ questions: TOOL_QUESTIONS, answers: { 'Which color?': 'Red' } })
+    expect(stored(w).asks).toEqual({})
+    expect(eventNames(w)).not.toContain('kanban.answer')
+  })
+
+  test('an answer that is not a list of strings is left unread', async ($, on) => {
+    const w = world(on)
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    void $.tool.call({ tool: 'AskUserQuestion', questions: TOOL_QUESTIONS })
+    await w.clock.settle()
+    const [id] = Object.keys(stored(w).asks ?? {})
+    w.store[`kanban:answer:${SELF}:${id}`] = { v: 1, answers: [1] }
+    await w.clock.advance(2_000)
+
+    expect(Object.keys(stored(w).asks ?? {})).toEqual([id])
+    w.dialog.answer?.({ 'Which color?': 'Red' })
+    await w.clock.settle()
+  })
+})
+
 describe('kanban pane', () => {
   test('/kanban opens the pane and asks the CLI for the board of every kanban record', async ($, on) => {
     const w = world(on)
@@ -322,6 +496,17 @@ describe('kanban pane', () => {
     expect(sent.sessions.map(r => r.session_id).sort()).toEqual(['gone', SELF])
     expect(w.store['kanban:session:gone']).toBeUndefined()
     expect(w.store['unrelated']).toEqual({ keep: true })
+  })
+
+  test('an expired session takes its leftover kanban answers with it', async ($, on) => {
+    const w = world(on)
+
+    w.store['kanban:answer:gone:tu-1'] = { v: 1, answers: ['Red'] }
+    w.store['kanban:answer:other:tu-2'] = { v: 1, answers: ['Red'] }
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+
+    expect(w.store['kanban:answer:gone:tu-1']).toBeUndefined()
+    expect(w.store['kanban:answer:other:tu-2']).toBeDefined()
   })
 
   test('/kanban again closes the pane', async ($, on) => {
@@ -414,5 +599,94 @@ describe('kanban pane', () => {
     expect((await ui.find({ type: 'Text', text: /입력 대기 1/ }))?.text).toBe('입력 대기 1')
     expect((await ui.find({ type: 'Text', text: /응답 없음 0/ }))?.text).toBe('응답 없음 0')
     await ui.unmount()
+  })
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    test(`a waiting question is drawn under the board with its options on ${surface}`, async ($, on) => {
+      world(on, boardAndAnswers(ASKING_BOARD))
+
+      await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+      const ui = await $.ui.mount({ ...PANE, surface })
+
+      expect((await ui.find({ type: 'Text', text: /할 일 1\/3/ }))?.text).toBe('할 일 1/3 · Running tests')
+      expect((await ui.find({ type: 'Text', text: /^질문 · / }))?.text).toBe('질문 · project-b · 질문 · 1m')
+      expect((await ui.find({ type: 'Text', text: /Which color/ }))?.text).toBe('[Color] Which color?')
+      expect(await ui.find({ key: 'ask:other:tu-1:0:1' })).toBeDefined()
+      expect(await ui.find({ key: 'ask:other:tu-1:1:text' })).toBeDefined()
+      expect(await ui.find({ key: 'ask:other:tu-1:send' })).toBeDefined()
+      await ui.unmount()
+    })
+  }
+
+  test('the picks go to atelier kanban answer and its answers to the asking session', async ($, on) => {
+    const w = world(on, boardAndAnswers(ASKING_BOARD))
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+    await ui.press({ key: 'ask:other:tu-1:0:0' })
+    await ui.press({ key: 'ask:other:tu-1:0:1' })
+    for (const option of [2, 0, 1, 1]) {
+      await ui.press({ key: `ask:other:tu-1:1:${option}` })
+    }
+    await ui.press({ key: 'ask:other:tu-1:send' })
+    await w.clock.settle()
+
+    const sent = w.runs.find(r => r.argv[2] === 'answer')
+    expect(sent?.argv).toEqual(['atelier', 'kanban', 'answer'])
+    expect(JSON.parse(sent?.stdin ?? '{}')).toEqual({
+      questions: [COLOR, PETS],
+      picks: [
+        { options: ['Blue'], text: null },
+        { options: ['Fish', 'Cat'], text: null },
+      ],
+    })
+    expect(w.store['kanban:answer:other:tu-1']).toEqual({ v: 1, answers: ['Blue', 'Cat, Fish'] })
+    await ui.unmount()
+
+    const after = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect((await after.find({ key: 'ask:other:tu-1:0:1' }))?.text).toBe('✓ Blue')
+    expect((await after.find({ key: 'ask:other:tu-1:1:2' }))?.text).toBe('✓ Fish')
+    expect((await after.find({ key: 'ask:other:tu-1:1:1' }))?.text).toBe('Dog')
+    expect((await after.find({ type: 'Text', text: /보냈어요/ }))?.text).toBe('보냈어요 — 세션이 받으면 사라져요')
+    expect(await after.find({ key: 'ask:other:tu-1:send' })).toBeUndefined()
+    await after.unmount()
+  })
+
+  test('typed text replaces the picked options of that question', async ($, on) => {
+    const w = world(on, boardAndAnswers(ASKING_BOARD))
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+    await ui.press({ key: 'ask:other:tu-1:0:0' })
+    await ui.input({ key: 'ask:other:tu-1:0:text', text: 'Green' })
+    await ui.press({ key: 'ask:other:tu-1:send' })
+    await w.clock.settle()
+
+    const sent = w.runs.find(r => r.argv[2] === 'answer')
+    expect(JSON.parse(sent?.stdin ?? '{}').picks[0]).toEqual({ options: [], text: 'Green' })
+    await ui.unmount()
+  })
+
+  test('a refused answer shows the reason and writes nothing', async ($, on) => {
+    const w = world(on, argv =>
+      argv[2] === 'answer'
+        ? { exitCode: 0, stdout: JSON.stringify({ error: '답하지 않은 질문이 있어요: Pets' }) }
+        : { exitCode: 0, stdout: JSON.stringify(ASKING_BOARD) },
+    )
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+    await ui.press({ key: 'ask:other:tu-1:send' })
+    await w.clock.settle()
+    await ui.unmount()
+
+    const after = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect((await after.find({ type: 'Text', text: /답하지 않은/ }))?.text).toBe('답하지 않은 질문이 있어요: Pets')
+    expect(w.store['kanban:answer:other:tu-1']).toBeUndefined()
+    expect(await after.find({ key: 'ask:other:tu-1:send' })).toBeDefined()
+    await after.unmount()
   })
 })

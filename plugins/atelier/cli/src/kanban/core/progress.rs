@@ -1,0 +1,135 @@
+//! The progress line of a card: the to-do count and the item in progress,
+//! and while working the tool the session is running.
+
+use super::text::{cut, fold};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Deleted,
+    /// A status this version does not know: counted, never done.
+    Other,
+}
+
+impl ItemStatus {
+    pub fn parse(raw: &str) -> ItemStatus {
+        match raw {
+            "pending" => ItemStatus::Pending,
+            "in_progress" => ItemStatus::InProgress,
+            "completed" => ItemStatus::Completed,
+            "deleted" => ItemStatus::Deleted,
+            _ => ItemStatus::Other,
+        }
+    }
+}
+
+/// One entry of the Task list (`subject`, maybe `active`) or of TodoWrite
+/// (`active` only).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkItem {
+    pub status: ItemStatus,
+    pub subject: Option<String>,
+    pub active: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Activity {
+    pub tool: String,
+    /// The tool input's string fields, by name.
+    pub input: Vec<(String, String)>,
+    pub at: u64,
+}
+
+const CUT_CHARS: usize = 40;
+
+/// Tried in order; the first non-blank one names what the tool works on.
+const TARGET_FIELDS: [&str; 11] = [
+    "description",
+    "file_path",
+    "notebook_path",
+    "pattern",
+    "url",
+    "query",
+    "skill",
+    "command",
+    "subject",
+    "prompt",
+    "path",
+];
+
+const PATH_FIELDS: [&str; 3] = ["file_path", "notebook_path", "path"];
+
+pub struct ProgressFacts<'a> {
+    pub tasks: &'a [WorkItem],
+    pub todos: &'a [WorkItem],
+    /// `None` when the card's column does not show the running tool.
+    pub activity: Option<&'a Activity>,
+}
+
+pub fn progress_line(facts: &ProgressFacts) -> Option<String> {
+    let parts: Vec<String> = [
+        todo_part(facts.tasks, facts.todos),
+        facts.activity.map(activity_part),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+fn todo_part(tasks: &[WorkItem], todos: &[WorkItem]) -> Option<String> {
+    let items = if tasks.is_empty() { todos } else { tasks };
+    let live: Vec<&WorkItem> = items
+        .iter()
+        .filter(|i| i.status != ItemStatus::Deleted)
+        .collect();
+    if live.is_empty() {
+        return None;
+    }
+    let done = live
+        .iter()
+        .filter(|i| i.status == ItemStatus::Completed)
+        .count();
+    let count = format!("할 일 {done}/{}", live.len());
+    let current = live
+        .iter()
+        .find(|i| i.status == ItemStatus::InProgress)
+        .and_then(|i| i.active.as_deref().or(i.subject.as_deref()))
+        .map(fold)
+        .filter(|s| !s.is_empty());
+    Some(match current {
+        Some(current) => format!("{count} · {}", cut(&current, CUT_CHARS)),
+        None => count,
+    })
+}
+
+fn activity_part(activity: &Activity) -> String {
+    let target = TARGET_FIELDS.iter().find_map(|field| {
+        let value = activity
+            .input
+            .iter()
+            .find(|(name, _)| name == field)
+            .map(|(_, value)| fold(value))
+            .filter(|v| !v.is_empty())?;
+        Some(if PATH_FIELDS.contains(field) {
+            file_name(&value)
+        } else {
+            value
+        })
+    });
+    match target {
+        Some(target) => format!("▸ {}: {}", activity.tool, cut(&target, CUT_CHARS)),
+        None => format!("▸ {}", activity.tool),
+    }
+}
+
+fn file_name(path: &str) -> String {
+    path.trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(path)
+        .to_string()
+}

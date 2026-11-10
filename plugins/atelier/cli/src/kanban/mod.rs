@@ -3,6 +3,7 @@
 //!
 //! ```text
 //! atelier kanban board --now <unix-ms> --stale-after <dur> --expire-after <dur> --width <cols> [--self <id>]
+//! atelier kanban answer
 //! ```
 //!
 //! Output contract: stdin JSON in, one line of stdout JSON out, and **always
@@ -13,10 +14,12 @@
 pub mod commands;
 pub mod core;
 
-use crate::kanban::commands::payload::parse_sessions;
+use crate::kanban::commands::payload::{parse_answer_request, parse_sessions};
+use crate::kanban::core::answer::compose;
 use crate::kanban::core::board::{build, Board, BoardParams, Card};
 use crate::kanban::core::duration::parse_millis;
 use crate::kanban::core::layout::{fit, Layout};
+use crate::kanban::core::question::{Ask, Question};
 use crate::shared::process::read_stdin_raw;
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
@@ -52,6 +55,8 @@ pub enum Commands {
         #[arg(long = "self")]
         self_id: Option<String>,
     },
+    /// An open question and the picks made on the board → one answer per question
+    Answer,
 }
 
 pub fn run_from<I, T>(argv: I) -> i32
@@ -77,6 +82,28 @@ fn card_json(card: &Card) -> Value {
         "age": card.age,
         "is_self": card.is_self,
         "headline": card.headline(),
+        "progress": card.progress,
+        "asks": card.asks.iter().map(ask_json).collect::<Vec<_>>(),
+    })
+}
+
+fn ask_json(ask: &Ask) -> Value {
+    json!({
+        "tool_use_id": ask.tool_use_id,
+        "questions": ask.questions.iter().map(question_json).collect::<Vec<_>>(),
+    })
+}
+
+fn question_json(question: &Question) -> Value {
+    json!({
+        "question": question.question,
+        "header": question.header,
+        "multi_select": question.multi_select,
+        "options": question
+            .options
+            .iter()
+            .map(|o| json!({ "label": o.label, "description": o.description }))
+            .collect::<Vec<_>>(),
     })
 }
 
@@ -132,6 +159,15 @@ pub fn run(cli: Cli) -> i32 {
                     let layout = fit(width, board.columns.len() as u32);
                     board_json(&board, &layout)
                 }
+                Err(error) => json!({ "error": error }),
+            };
+            println!("{out}");
+        }
+        Commands::Answer => {
+            let out = match parse_answer_request(&read_stdin_raw())
+                .and_then(|(questions, picks)| compose(&questions, &picks))
+            {
+                Ok(answers) => json!({ "answers": answers }),
                 Err(error) => json!({ "error": error }),
             };
             println!("{out}");

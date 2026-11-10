@@ -1,8 +1,12 @@
-//! Stdin payload for `kanban board`: `{"sessions": [<v1 record>, ...]}`. A
-//! record this version cannot read is dropped here, before the board sees it.
+//! Stdin payloads: `kanban board` takes `{"sessions": [<v1 record>, ...]}`,
+//! `kanban answer` takes `{"questions": [...], "picks": [...]}`. A record this
+//! version cannot read is dropped here, before the board sees it.
 
+use crate::kanban::core::answer::Pick;
 use crate::kanban::core::board::{Event, SessionFact};
-use serde_json::Value;
+use crate::kanban::core::progress::{Activity, ItemStatus, WorkItem};
+use crate::kanban::core::question::{Ask, Question, QuestionOption};
+use serde_json::{Map, Value};
 
 const VERSION: u64 = 1;
 
@@ -34,6 +38,120 @@ fn parse_record(value: &Value) -> Option<SessionFact> {
             .iter()
             .map(parse_event)
             .collect::<Option<Vec<_>>>()?,
+        activity: match value.get("activity") {
+            None | Some(Value::Null) => None,
+            Some(activity) => Some(parse_activity(activity)?),
+        },
+        tasks: optional_object(value, "tasks")?
+            .map(parse_tasks)
+            .unwrap_or(Some(Vec::new()))?,
+        todos: optional_array(value, "todos")?
+            .iter()
+            .map(parse_todo)
+            .collect::<Option<Vec<_>>>()?,
+        asks: optional_object(value, "asks")?
+            .map(|asks| {
+                asks.iter()
+                    .map(|(id, ask)| parse_ask(id, ask))
+                    .collect::<Option<Vec<_>>>()
+            })
+            .unwrap_or(Some(Vec::new()))?,
+    })
+}
+
+fn parse_activity(value: &Value) -> Option<Activity> {
+    let input = value
+        .get("input")?
+        .as_object()?
+        .iter()
+        .map(|(name, v)| Some((name.clone(), v.as_str()?.to_string())))
+        .collect::<Option<Vec<_>>>()?;
+    Some(Activity {
+        tool: value.get("tool")?.as_str()?.to_string(),
+        input,
+        at: value.get("at")?.as_u64()?,
+    })
+}
+
+/// Task ids are the engine's counters ("1", "2", ... "10"), so they are
+/// ordered as numbers where they are numbers.
+fn parse_tasks(tasks: &Map<String, Value>) -> Option<Vec<WorkItem>> {
+    let mut entries: Vec<(&String, &Value)> = tasks.iter().collect();
+    entries.sort_by_key(|(id, _)| (id.parse::<u64>().unwrap_or(u64::MAX), (*id).clone()));
+    entries
+        .into_iter()
+        .map(|(_, task)| {
+            Some(WorkItem {
+                status: ItemStatus::parse(task.get("status")?.as_str()?),
+                subject: Some(task.get("subject")?.as_str()?.to_string()),
+                active: nullable_string(task, "active")?,
+            })
+        })
+        .collect()
+}
+
+fn parse_todo(value: &Value) -> Option<WorkItem> {
+    Some(WorkItem {
+        status: ItemStatus::parse(value.get("status")?.as_str()?),
+        subject: None,
+        active: Some(value.get("active")?.as_str()?.to_string()),
+    })
+}
+
+fn parse_ask(tool_use_id: &str, value: &Value) -> Option<Ask> {
+    Some(Ask {
+        tool_use_id: tool_use_id.to_string(),
+        questions: parse_questions(value.get("questions")?)?,
+        at: value.get("at")?.as_u64()?,
+    })
+}
+
+fn parse_questions(value: &Value) -> Option<Vec<Question>> {
+    value.as_array()?.iter().map(parse_question).collect()
+}
+
+fn parse_question(value: &Value) -> Option<Question> {
+    Some(Question {
+        question: value.get("question")?.as_str()?.to_string(),
+        header: value.get("header")?.as_str()?.to_string(),
+        multi_select: value.get("multi_select")?.as_bool()?,
+        options: value
+            .get("options")?
+            .as_array()?
+            .iter()
+            .map(|option| {
+                Some(QuestionOption {
+                    label: option.get("label")?.as_str()?.to_string(),
+                    description: nullable_string(option, "description")?,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?,
+    })
+}
+
+pub fn parse_answer_request(raw: &str) -> Result<(Vec<Question>, Vec<Pick>), String> {
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    let questions = value
+        .get("questions")
+        .and_then(parse_questions)
+        .ok_or_else(|| "stdin has no readable `questions` array".to_string())?;
+    let picks = value
+        .get("picks")
+        .and_then(Value::as_array)
+        .and_then(|picks| picks.iter().map(parse_pick).collect::<Option<Vec<_>>>())
+        .ok_or_else(|| "stdin has no readable `picks` array".to_string())?;
+    Ok((questions, picks))
+}
+
+fn parse_pick(value: &Value) -> Option<Pick> {
+    Some(Pick {
+        options: value
+            .get("options")?
+            .as_array()?
+            .iter()
+            .map(|label| Some(label.as_str()?.to_string()))
+            .collect::<Option<Vec<_>>>()?,
+        text: nullable_string(value, "text")?,
     })
 }
 
@@ -43,6 +161,26 @@ fn parse_event(value: &Value) -> Option<Event> {
         detail: nullable_string(value, "detail")?,
         at: value.get("at")?.as_u64()?,
     })
+}
+
+/// Outer `None` rejects a wrong-typed field; absent and `null` both read as
+/// empty.
+fn optional_object<'a>(value: &'a Value, key: &str) -> Option<Option<&'a Map<String, Value>>> {
+    match value.get(key) {
+        None | Some(Value::Null) => Some(None),
+        Some(Value::Object(map)) => Some(Some(map)),
+        Some(_) => None,
+    }
+}
+
+/// Outer `None` rejects a wrong-typed field; absent and `null` both read as
+/// empty.
+fn optional_array<'a>(value: &'a Value, key: &str) -> Option<&'a [Value]> {
+    match value.get(key) {
+        None | Some(Value::Null) => Some(&[]),
+        Some(Value::Array(items)) => Some(items),
+        Some(_) => None,
+    }
 }
 
 /// Outer `None` rejects a wrong-typed field; absent and `null` both read as
