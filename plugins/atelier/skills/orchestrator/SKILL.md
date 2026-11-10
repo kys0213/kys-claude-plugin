@@ -173,6 +173,6 @@ effort 는 tier 와 독립된 축이다 — 같은 tier 안에서 추론 깊이�
 | 지금 무엇이 필요한가 | 파일 |
 |---|---|
 | 도구 확보 · 브랜치 규약 · prompt 필수 요소 · 기록 형식 · plan 기록 · 예산 값 · 보고 형식 | `references/contracts.md` |
-| 진입 · 자율 루프 · 직렬 dispatch · 복구 · worktree 정리 · 머지 · 최종 게이트 · 협의체 · 자문 | `references/procedures.md` |
+| 진입 · 자율 루프 · 직렬 dispatch · 복구 · worktree 정리 · 머지 · 최종 게이트 · 협의체 · 자문 · 세션 칸반 작업자 | `references/procedures.md` |
 
 진입 시 여는 것은 `contracts.md` 와 `procedures.md §진입 절차` 다 — 나머지 절차 절은 도달한 순간 읽는다.
