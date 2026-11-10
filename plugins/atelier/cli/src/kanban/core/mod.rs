@@ -4,6 +4,7 @@ pub mod detail;
 pub mod duration;
 pub mod layout;
 pub mod progress;
+pub mod prompt;
 pub mod question;
 pub mod repos;
 pub mod request;

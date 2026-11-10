@@ -641,8 +641,12 @@ describe('kanban pane', () => {
       const ui = await $.ui.mount({ ...PANE, surface })
 
       expect((await ui.find({ type: 'Text', text: /할 일 1\/3/ }))?.text).toBe('할 일 1/3 · Running tests')
-      expect((await ui.find({ type: 'Text', text: /^질문 · / }))?.text).toBe('질문 · project-b · 질문 · 1m')
-      expect((await ui.find({ type: 'Text', text: /Which color/ }))?.text).toBe('[Color] Which color?')
+      expect((await ui.find({ type: 'Text', text: /^질문$/ }))?.text).toBe('질문')
+      expect((await ui.find({ type: 'Text', text: /project-b · 질문/ }))?.text).toBe('project-b · 질문 · 1m')
+      expect((await ui.find({ type: 'Text', text: /^1\/2 · / }))?.text).toBe('1/2 · Color')
+      expect((await ui.find({ type: 'Text', text: /Which color/ }))?.text).toBe('Which color?')
+      expect((await ui.find({ key: 'ask:other:tu-1:0:0' }))?.text).toBe('○ Red  warm')
+      expect((await ui.find({ key: 'ask:other:tu-1:1:0' }))?.text).toBe('☐ Cat')
       expect(await ui.find({ key: 'ask:other:tu-1:0:1' })).toBeDefined()
       expect(await ui.find({ key: 'ask:other:tu-1:1:text' })).toBeDefined()
       expect(await ui.find({ key: 'ask:other:tu-1:send' })).toBeDefined()
@@ -677,9 +681,9 @@ describe('kanban pane', () => {
     await ui.unmount()
 
     const after = await $.ui.mount({ ...PANE, surface: 'terminal' })
-    expect((await after.find({ key: 'ask:other:tu-1:0:1' }))?.text).toBe('✓ Blue')
-    expect((await after.find({ key: 'ask:other:tu-1:1:2' }))?.text).toBe('✓ Fish')
-    expect((await after.find({ key: 'ask:other:tu-1:1:1' }))?.text).toBe('Dog')
+    expect((await after.find({ key: 'ask:other:tu-1:0:1' }))?.text).toBe('● Blue  cool')
+    expect((await after.find({ key: 'ask:other:tu-1:1:2' }))?.text).toBe('☑ Fish')
+    expect((await after.find({ key: 'ask:other:tu-1:1:1' }))?.text).toBe('☐ Dog')
     expect((await after.find({ type: 'Text', text: /보냈어요/ }))?.text).toBe('보냈어요 — 세션이 받으면 사라져요')
     expect(await after.find({ key: 'ask:other:tu-1:send' })).toBeUndefined()
     await after.unmount()
@@ -790,15 +794,34 @@ const DETAIL_BOARD = {
 }
 
 describe('kanban details and requests', () => {
-  test('a prompt that no person typed starts work but is not kept as the request', async ($, on) => {
+  test('every prompt is kept with where it came from, the newest five', async ($, on) => {
     const w = world(on)
 
     await $.prompt.submit({ text: 'fix the login bug', origin: { kind: 'composer' } } as never)
     await $.prompt.submit({ text: '<task-notification>done</task-notification>', origin: { kind: 'task-notification' } } as never)
+    for (const n of [1, 2, 3, 4]) {
+      await $.prompt.submit({ text: `step ${n}`, origin: { kind: 'sdk' } } as never)
+    }
 
+    const prompts = (stored(w) as Record<string, unknown>).prompts as { text: string; origin: string }[]
     expect(stored(w).first_prompt).toBe('fix the login bug')
-    expect((stored(w) as Record<string, unknown>).last_prompt).toBe('fix the login bug')
-    expect(eventNames(w)).toEqual(['prompt.submit', 'prompt.submit'])
+    expect(prompts.map(p => [p.origin, p.text])).toEqual([
+      ['task-notification', '<task-notification>done</task-notification>'],
+      ['sdk', 'step 1'],
+      ['sdk', 'step 2'],
+      ['sdk', 'step 3'],
+      ['sdk', 'step 4'],
+    ])
+    expect(eventNames(w).filter(n => n === 'prompt.submit')).toHaveLength(6)
+  })
+
+  test('a long prompt is cut to bound the shared store', async ($, on) => {
+    const w = world(on)
+
+    await $.prompt.submit({ text: 'x'.repeat(5_000), origin: { kind: 'composer' } } as never)
+
+    const prompts = (stored(w) as Record<string, unknown>).prompts as { text: string }[]
+    expect(prompts[0]?.text).toHaveLength(1_000)
   })
 
   test('a turn keeps its id, its recent tools and its reply', async ($, on) => {
@@ -908,7 +931,7 @@ describe('kanban details and requests', () => {
     ])
     expect(w.submitted).toEqual(['Run lint'])
     const rec = stored(w) as Record<string, unknown>
-    expect(rec.last_prompt).toBe('Run lint')
+    expect((rec.prompts as { text: string; origin: string }[]).at(-1)).toEqual({ text: 'Run lint', origin: 'kanban', at: START + 6_000 })
     expect(eventNames(w).at(-1)).toBe('prompt.submit')
     expect(rec.inbox).toEqual({ id: 'r1', kind: 'prompt', status: 'delivered', at: START + 6_000 })
   })

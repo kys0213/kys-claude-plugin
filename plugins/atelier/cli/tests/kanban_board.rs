@@ -1,65 +1,7 @@
-use assert_cmd::Command;
+mod kanban_support;
+
+use kanban_support::{atelier, board, board_with, event, session, session_with, MIN, NOW, SEC};
 use serde_json::{json, Value};
-
-const NOW: u64 = 1_800_000_000_000;
-const SEC: u64 = 1_000;
-const MIN: u64 = 60 * SEC;
-
-fn atelier() -> Command {
-    Command::cargo_bin("atelier").expect("locate `atelier` cargo binary")
-}
-
-fn board_with(args: &[&str], stdin: &str) -> Value {
-    let output = atelier()
-        .args(["kanban", "board"])
-        .args(args)
-        .write_stdin(stdin)
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    serde_json::from_slice(&output).expect("valid JSON on stdout")
-}
-
-fn board(sessions: Value) -> Value {
-    let now = NOW.to_string();
-    board_with(
-        &[
-            "--now",
-            &now,
-            "--stale-after",
-            "2m",
-            "--expire-after",
-            "24h",
-            "--self",
-            "self-id",
-            "--width",
-            "100",
-        ],
-        &json!({ "sessions": sessions }).to_string(),
-    )
-}
-
-fn session(id: &str, events: Value) -> Value {
-    json!({
-        "v": 1,
-        "session_id": id,
-        "cwd": "/work/project-a",
-        "repo": null,
-        "title": null,
-        "first_prompt": null,
-        "started_at": NOW - 30 * MIN,
-        "heartbeat_at": NOW - 5 * SEC,
-        "ended_reason": null,
-        "events": events,
-    })
-}
-
-fn event(name: &str, detail: Option<&str>, ago: u64) -> Value {
-    json!({ "name": name, "detail": detail, "at": NOW - ago })
-}
-
 fn column_ids(board: &Value) -> Vec<String> {
     board["columns"]
         .as_array()
@@ -688,14 +630,6 @@ fn columns_and_cards_carry_the_lines_the_pane_draws() {
     assert_eq!(cards_in(&b, "idle")[0]["headline"], "▶ project-a · 5s");
 }
 
-fn session_with(id: &str, events: Value, extra: Value) -> Value {
-    let mut record = session(id, events);
-    for (key, value) in extra.as_object().expect("extra fields") {
-        record[key] = value.clone();
-    }
-    record
-}
-
 fn only_card(sessions: Value) -> Value {
     let b = board(sessions);
     column_ids(&b)
@@ -901,7 +835,8 @@ fn an_open_question_is_carried_on_the_card_while_it_waits() {
 fn a_question_is_not_offered_once_the_session_moved_on() {
     let asks = json!({ "tu-1": { "questions": [color_question()], "at": NOW - 9 * SEC } });
     for events in [
-        json!([event("classic.PermissionRequest", Some("Bash"), 5 * SEC)]),
+        json!([event("turn.complete", None, 5 * SEC)]),
+        json!([event("turn.start", None, 5 * SEC)]),
         json!([
             event(
                 "classic.PermissionRequest",

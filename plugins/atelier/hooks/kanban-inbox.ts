@@ -65,7 +65,7 @@ async function act($: EngineInterface, s: InboxState, taken: Taken): Promise<voi
   }
 
   /** The submitting plugin's own prompt.submit hooks do not see the prompt, so it is recorded here. */
-  await recordPrompt($, s, taken.body)
+  await recordPrompt($, s, taken.body, 'kanban')
   void $.prompt.submit({ text: taken.text }).catch(() => undefined)
 }
 

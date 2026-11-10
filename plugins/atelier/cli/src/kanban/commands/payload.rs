@@ -9,6 +9,7 @@ use crate::kanban::core::answer::Pick;
 use crate::kanban::core::board::{Event, SessionFact};
 use crate::kanban::core::detail::{Decision, Delivery, DeliveryStatus};
 use crate::kanban::core::progress::{Activity, ItemStatus, WorkItem};
+use crate::kanban::core::prompt::PromptFact;
 use crate::kanban::core::question::{Ask, Question, QuestionOption};
 use crate::kanban::core::request::{RequestKind, Status};
 use serde_json::{Map, Value};
@@ -38,6 +39,10 @@ fn parse_record(value: &Value) -> Option<SessionFact> {
         title: nullable_string(value, "title")?,
         first_prompt: nullable_string(value, "first_prompt")?,
         last_prompt: nullable_string(value, "last_prompt")?,
+        prompts: optional_array(value, "prompts")?
+            .iter()
+            .map(parse_prompt)
+            .collect::<Option<Vec<_>>>()?,
         last_answer: nullable_string(value, "last_answer")?,
         pending_context: nullable_string(value, "pending_context")?,
         turn_id: nullable_string(value, "turn_id")?,
@@ -89,6 +94,14 @@ fn parse_activity(value: &Value) -> Option<Activity> {
     Some(Activity {
         tool: value.get("tool")?.as_str()?.to_string(),
         input,
+        at: value.get("at")?.as_u64()?,
+    })
+}
+
+fn parse_prompt(value: &Value) -> Option<PromptFact> {
+    Some(PromptFact {
+        text: value.get("text")?.as_str()?.to_string(),
+        origin: value.get("origin")?.as_str()?.to_string(),
         at: value.get("at")?.as_u64()?,
     })
 }

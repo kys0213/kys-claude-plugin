@@ -29,8 +29,6 @@ const MAX_TODOS = 50
 const MAX_RECENT = 5
 /** Keys a `tool.call` input carries beside the tool's own arguments. */
 const RESERVED_INPUT_KEYS = ['tool', 'tool_use_id', 'agentId', 'requestMeta', 'consent']
-/** Where a prompt a person typed comes from; the rest (task notifications, triggers, plugins) are not theirs. */
-const PERSON_ORIGINS = ['composer', 'bridge', 'sdk']
 
 type Card = AskCard & DetailCard & { subtitle: string | null; progress?: string | null; last_line?: string | null; is_self: boolean }
 
@@ -317,9 +315,7 @@ export function registerKanban(on: On): void {
 
   on('prompt.submit', async ($, e, next) => {
     if (e.command === undefined && e.isMeta !== true) {
-      const isPerson = e.origin === undefined || PERSON_ORIGINS.includes(e.origin.kind)
-
-      await recordPrompt($, s, isPerson ? e.text : null)
+      await recordPrompt($, s, e.text, e.origin?.kind ?? 'unknown')
     }
 
     return next(e)
@@ -456,12 +452,8 @@ export function registerKanban(on: On): void {
   })
 
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
-    const id = e.tool_use_id
-
-    if (id === undefined) {
-      return next(e)
-    }
-
+    /** `tool_use_id` is optional on the call; without one the question is answerable under its own id. */
+    const id = e.tool_use_id ?? `ask-${await $.clock.now()}`
     const fromKanban = awaitAnswer(s, id)
     const context = await lastReply($)
     let answered = false
@@ -593,7 +585,10 @@ export function registerKanban(on: On): void {
     const asks = askBlocks($, s, els, cards)
 
     if (!isRow && selected !== undefined) {
-      const detail = detailBlock($, s.detail, els, selected, () => toggleSelected($, s.detail, selected.session_id))
+      const detail = detailBlock($, s.detail, els, selected, {
+        label: '뒤로',
+        onPress: () => toggleSelected($, s.detail, selected.session_id),
+      })
 
       return Box({ flexDirection: 'column', children: [detail, ...asks] })
     }
@@ -612,7 +607,10 @@ export function registerKanban(on: On): void {
     )
 
     const board = Box({ key: 'board', flexDirection: direction, columnGap, children: columns })
-    const detail = selected === undefined ? [] : [detailBlock($, s.detail, els, selected, null)]
+    const detail =
+      selected === undefined
+        ? []
+        : [detailBlock($, s.detail, els, selected, { label: '닫기', onPress: () => toggleSelected($, s.detail, selected.session_id) })]
 
     return detail.length === 0 && asks.length === 0
       ? board
