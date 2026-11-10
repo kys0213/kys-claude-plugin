@@ -687,3 +687,250 @@ fn columns_and_cards_carry_the_lines_the_pane_draws() {
     );
     assert_eq!(cards_in(&b, "idle")[0]["headline"], "▶ project-a · 5s");
 }
+
+fn session_with(id: &str, events: Value, extra: Value) -> Value {
+    let mut record = session(id, events);
+    for (key, value) in extra.as_object().expect("extra fields") {
+        record[key] = value.clone();
+    }
+    record
+}
+
+fn only_card(sessions: Value) -> Value {
+    let b = board(sessions);
+    column_ids(&b)
+        .iter()
+        .flat_map(|col| cards_in(&b, col))
+        .next()
+        .expect("one card")
+}
+
+const TASKS: &str = r#"{
+    "1": { "subject": "Plan", "active": null, "status": "completed" },
+    "2": { "subject": "Test", "active": "Running tests", "status": "in_progress" },
+    "3": { "subject": "Ship", "active": null, "status": "pending" },
+    "4": { "subject": "Drop", "active": null, "status": "deleted" }
+}"#;
+
+fn tasks() -> Value {
+    serde_json::from_str(TASKS).expect("tasks fixture")
+}
+
+fn bash_activity() -> Value {
+    json!({ "tool": "Bash", "input": { "command": "cargo test", "description": "Run tests" }, "at": NOW - SEC })
+}
+
+#[test]
+fn an_answer_from_the_kanban_means_working() {
+    assert_eq!(
+        column_of(json!([
+            event(
+                "classic.PermissionRequest",
+                Some("AskUserQuestion"),
+                20 * SEC
+            ),
+            event("kanban.answer", None, 10 * SEC),
+        ])),
+        "working"
+    );
+}
+
+#[test]
+fn progress_counts_tasks_without_deleted_ones_and_names_the_one_in_progress() {
+    let card = only_card(json!([session_with(
+        "s",
+        json!([event("turn.complete", None, SEC)]),
+        json!({ "tasks": tasks() })
+    )]));
+    assert_eq!(card["progress"], "할 일 1/3 · Running tests");
+}
+
+#[test]
+fn progress_falls_back_to_the_subject_then_to_todo_write() {
+    let card = only_card(json!([session_with(
+        "s",
+        json!([event("turn.complete", None, SEC)]),
+        json!({ "tasks": { "7": { "subject": "Write docs", "active": null, "status": "in_progress" } } })
+    )]));
+    assert_eq!(card["progress"], "할 일 0/1 · Write docs");
+
+    let card = only_card(json!([session_with(
+        "s",
+        json!([event("turn.complete", None, SEC)]),
+        json!({ "todos": [
+            { "status": "completed", "active": "Reading" },
+            { "status": "in_progress", "active": "Writing docs" },
+        ] })
+    )]));
+    assert_eq!(card["progress"], "할 일 1/2 · Writing docs");
+}
+
+#[test]
+fn tasks_win_over_todo_write_when_both_exist() {
+    let card = only_card(json!([session_with(
+        "s",
+        json!([event("turn.complete", None, SEC)]),
+        json!({ "tasks": tasks(), "todos": [{ "status": "completed", "active": "x" }] })
+    )]));
+    assert_eq!(card["progress"], "할 일 1/3 · Running tests");
+}
+
+#[test]
+fn the_current_tool_is_shown_only_while_working() {
+    let working = only_card(json!([session_with(
+        "s",
+        json!([event("turn.start", None, SEC)]),
+        json!({ "activity": bash_activity(), "tasks": tasks() })
+    )]));
+    assert_eq!(
+        working["progress"],
+        "할 일 1/3 · Running tests · ▸ Bash: Run tests"
+    );
+
+    let idle = only_card(json!([session_with(
+        "s",
+        json!([event("turn.complete", None, SEC)]),
+        json!({ "activity": bash_activity() })
+    )]));
+    assert_eq!(idle["progress"], Value::Null);
+}
+
+#[test]
+fn the_tool_target_is_the_first_known_field_with_paths_cut_to_the_file_name() {
+    let progress = |tool: &str, input: Value| {
+        only_card(json!([session_with(
+            "s",
+            json!([event("turn.start", None, SEC)]),
+            json!({ "activity": { "tool": tool, "input": input, "at": NOW - SEC } })
+        )]))["progress"]
+            .clone()
+    };
+    assert_eq!(
+        progress(
+            "Edit",
+            json!({ "file_path": "/w/src/main.rs", "old_string": "a" })
+        ),
+        "▸ Edit: main.rs"
+    );
+    assert_eq!(
+        progress("Grep", json!({ "pattern": "fn main", "path": "/w/src" })),
+        "▸ Grep: fn main"
+    );
+    assert_eq!(
+        progress("Bash", json!({ "command": "ls\n  -la" })),
+        "▸ Bash: ls -la"
+    );
+    assert_eq!(progress("TaskList", json!({})), "▸ TaskList");
+    assert_eq!(
+        progress("Bash", json!({ "description": "x".repeat(50) })),
+        format!("▸ Bash: {}…", "x".repeat(39))
+    );
+}
+
+#[test]
+fn a_stale_session_shows_no_progress() {
+    let mut record = session_with(
+        "s",
+        json!([event("turn.start", None, 10 * MIN)]),
+        json!({ "activity": bash_activity(), "tasks": tasks() }),
+    );
+    record["heartbeat_at"] = json!(NOW - 5 * MIN);
+    let card = only_card(json!([record]));
+    assert_eq!(card["progress"], Value::Null);
+}
+
+fn color_question() -> Value {
+    json!({
+        "question": "Which color?",
+        "header": "Color",
+        "multi_select": false,
+        "options": [
+            { "label": "Red", "description": "warm" },
+            { "label": "Blue", "description": "cool" },
+        ],
+    })
+}
+
+#[test]
+fn an_open_question_is_carried_on_the_card_while_it_waits() {
+    let asks = json!({
+        "tu-2": { "questions": [color_question()], "at": NOW - 5 * SEC },
+        "tu-1": { "questions": [color_question()], "at": NOW - 9 * SEC },
+    });
+    let card = only_card(json!([session_with(
+        "s",
+        json!([event(
+            "classic.PermissionRequest",
+            Some("AskUserQuestion"),
+            5 * SEC
+        )]),
+        json!({ "asks": asks })
+    )]));
+    assert_eq!(
+        card["asks"],
+        json!([
+            {
+                "tool_use_id": "tu-1",
+                "questions": [{
+                    "question": "Which color?",
+                    "header": "Color",
+                    "multi_select": false,
+                    "options": [
+                        { "label": "Red", "description": "warm" },
+                        { "label": "Blue", "description": "cool" },
+                    ],
+                }],
+            },
+            {
+                "tool_use_id": "tu-2",
+                "questions": [{
+                    "question": "Which color?",
+                    "header": "Color",
+                    "multi_select": false,
+                    "options": [
+                        { "label": "Red", "description": "warm" },
+                        { "label": "Blue", "description": "cool" },
+                    ],
+                }],
+            },
+        ])
+    );
+}
+
+#[test]
+fn a_question_is_not_offered_once_the_session_moved_on() {
+    let asks = json!({ "tu-1": { "questions": [color_question()], "at": NOW - 9 * SEC } });
+    for events in [
+        json!([event("classic.PermissionRequest", Some("Bash"), 5 * SEC)]),
+        json!([
+            event(
+                "classic.PermissionRequest",
+                Some("AskUserQuestion"),
+                9 * SEC
+            ),
+            event("classic.PostToolUse", Some("AskUserQuestion"), 5 * SEC),
+        ]),
+    ] {
+        let card = only_card(json!([session_with("s", events, json!({ "asks": asks }))]));
+        assert_eq!(card["asks"], json!([]));
+    }
+}
+
+#[test]
+fn a_malformed_progress_or_question_field_skips_the_record() {
+    for extra in [
+        json!({ "activity": { "tool": 7, "input": {}, "at": NOW } }),
+        json!({ "tasks": { "1": { "subject": "a", "status": 3 } } }),
+        json!({ "todos": [{ "status": "pending" }] }),
+        json!({ "asks": { "tu": { "questions": "nope", "at": NOW } } }),
+    ] {
+        let b = board(json!([session_with(
+            "s",
+            json!([event("turn.start", None, SEC)]),
+            extra.clone()
+        )]));
+        let total: usize = column_ids(&b).iter().map(|c| cards_in(&b, c).len()).sum();
+        assert_eq!(total, 0, "{extra}");
+        assert!(expired(&b).is_empty(), "{extra}");
+    }
+}

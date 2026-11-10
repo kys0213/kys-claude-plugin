@@ -2,6 +2,9 @@
 //! thresholds and every fact, so one snapshot always yields one board.
 
 use super::duration::age_label;
+use super::progress::{progress_line, Activity, ProgressFacts, WorkItem};
+use super::question::Ask;
+use super::text::{cut, fold};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
@@ -22,6 +25,12 @@ pub struct SessionFact {
     pub ended_reason: Option<String>,
     /// Oldest first.
     pub events: Vec<Event>,
+    /// The tool the main loop runs now; cleared when a turn ends.
+    pub activity: Option<Activity>,
+    pub tasks: Vec<WorkItem>,
+    pub todos: Vec<WorkItem>,
+    /// AskUserQuestion calls still open.
+    pub asks: Vec<Ask>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +88,9 @@ pub struct Card {
     pub reason: Option<String>,
     pub age: String,
     pub is_self: bool,
+    pub progress: Option<String>,
+    /// Open questions, oldest first; empty unless the session waits on one.
+    pub asks: Vec<Ask>,
 }
 
 impl Card {
@@ -136,7 +148,7 @@ enum Signal {
 fn signal_of(event: &Event) -> Signal {
     let needs = |reason: WaitReason| Signal::Set(State::NeedsInput(reason));
     match (event.name.as_str(), event.detail.as_deref()) {
-        ("prompt.submit" | "turn.start", _) => Signal::Set(State::Working),
+        ("prompt.submit" | "turn.start" | "kanban.answer", _) => Signal::Set(State::Working),
         ("classic.PostToolUse" | "classic.PostToolUseFailure", _) => Signal::Set(State::Working),
         ("turn.complete" | "session.start", _) => Signal::Set(State::Idle),
         ("classic.PermissionRequest", Some("AskUserQuestion")) => needs(WaitReason::Question),
@@ -199,14 +211,18 @@ fn subtitle_of(fact: &SessionFact) -> Option<String> {
     let folded = [&fact.title, &fact.first_prompt]
         .into_iter()
         .flatten()
-        .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "))
+        .map(|s| fold(s))
         .find(|s| !s.is_empty())?;
-    if folded.chars().count() <= SUBTITLE_CHARS {
-        return Some(folded);
-    }
-    let mut cut: String = folded.chars().take(SUBTITLE_CHARS - 1).collect();
-    cut.push('…');
-    Some(cut)
+    Some(cut(&folded, SUBTITLE_CHARS))
+}
+
+fn open_asks(fact: &SessionFact) -> Vec<Ask> {
+    let mut asks = fact.asks.clone();
+    asks.sort_by(|a, b| {
+        a.at.cmp(&b.at)
+            .then_with(|| a.tool_use_id.cmp(&b.tool_use_id))
+    });
+    asks
 }
 
 struct Placed {
@@ -217,14 +233,24 @@ struct Placed {
 
 fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
     let silent_for = params.now.saturating_sub(fact.heartbeat_at);
-    let (column, reason, since) = if silent_for > params.stale_after {
-        (Column::Stale, None, fact.heartbeat_at)
-    } else {
-        match current_state(fact) {
-            (State::NeedsInput(reason), at) => (Column::NeedsInput, Some(reason.label()), at),
-            (State::Working, at) => (Column::Working, None, at),
-            (State::Idle, at) => (Column::Idle, None, at),
-        }
+    let state = (silent_for <= params.stale_after).then(|| current_state(fact));
+    let (column, reason, since) = match &state {
+        None => (Column::Stale, None, fact.heartbeat_at),
+        Some((State::NeedsInput(reason), at)) => (Column::NeedsInput, Some(reason.label()), *at),
+        Some((State::Working, at)) => (Column::Working, None, *at),
+        Some((State::Idle, at)) => (Column::Idle, None, *at),
+    };
+    let progress = match column {
+        Column::Stale => None,
+        _ => progress_line(&ProgressFacts {
+            tasks: &fact.tasks,
+            todos: &fact.todos,
+            activity: fact.activity.as_ref().filter(|_| column == Column::Working),
+        }),
+    };
+    let asks = match state {
+        Some((State::NeedsInput(WaitReason::Question), _)) => open_asks(fact),
+        _ => Vec::new(),
     };
     Placed {
         column,
@@ -236,6 +262,8 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
             reason,
             age: age_label(params.now.saturating_sub(since)),
             is_self: params.self_id.as_deref() == Some(fact.session_id.as_str()),
+            progress,
+            asks,
         },
     }
 }
@@ -300,6 +328,10 @@ mod tests {
             heartbeat_at: 100,
             ended_reason: None,
             events,
+            activity: None,
+            tasks: Vec::new(),
+            todos: Vec::new(),
+            asks: Vec::new(),
         }
     }
 

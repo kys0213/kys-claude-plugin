@@ -1,47 +1,32 @@
 import type { EngineInterface, On } from 'claude-code'
 
+import {
+  type AskCard,
+  type AskState,
+  answerKey,
+  answerKeysOf,
+  answersByQuestion,
+  askBlocks,
+  askOf,
+  awaitAnswer,
+  deliverAnswers,
+  newAskState,
+  pruneDrafts,
+} from './kanban-ask'
+import { KEY_PREFIX, MAX_FIELD_CHARS, type RecordState, type SessionRecord, record } from './kanban-record'
+
 const PANE = 'kanban'
-const KEY_PREFIX = 'kanban:session:'
 const HEARTBEAT_MS = 30_000
 const REFRESH_MS = 2_000
 const STALE_AFTER = '2m'
 const EXPIRE_AFTER = '24h'
 const CLI_TIMEOUT_MS = 5_000
-/** Bounds what one session keeps in the store every session shares (4 MiB in all). */
-const MAX_EVENTS = 8
 const MAX_PROMPT_CHARS = 500
+const MAX_TODOS = 50
+/** Keys a `tool.call` input carries beside the tool's own arguments. */
+const RESERVED_INPUT_KEYS = ['tool', 'tool_use_id', 'agentId', 'requestMeta', 'consent']
 
-type KanbanEvent = { name: string; detail: string | null; at: number }
-
-type SessionRecord = {
-  v: 1
-  session_id: string
-  cwd: string
-  repo: string | null
-  title: string | null
-  first_prompt: string | null
-  started_at: number
-  heartbeat_at: number
-  ended_reason: string | null
-  events: KanbanEvent[]
-}
-
-type Fields = Partial<Pick<SessionRecord, 'title' | 'first_prompt' | 'ended_reason'>>
-
-type Entry = {
-  /** The event to append; `null` only refreshes the heartbeat. */
-  name: string | null
-  detail?: string | null
-  set?: Fields
-  /** Fills these fields only while they are still `null`. */
-  fill?: Fields
-  /** Appends `name` only when the session has no record yet. */
-  onlyIfNew?: boolean
-  /** The session the entry belongs to; this session when left out. */
-  sessionId?: string
-}
-
-type Card = { session_id: string; headline: string; subtitle: string | null; is_self: boolean }
+type Card = AskCard & { subtitle: string | null; progress?: string | null; is_self: boolean }
 
 type Column = { id: string; heading: string; cards: Card[] }
 
@@ -52,88 +37,27 @@ type BoardView =
   | { kind: 'board'; columns: Column[]; layout: Layout; width: number }
   | { kind: 'error'; message: string }
 
-type KanbanState = {
-  view: BoardView
-  /** Serializes this process's read-modify-write of its own record. */
-  writes: Promise<void>
-  timersStarted: boolean
-  /** Whether the next spinner draw is recorded: once after each other event. */
-  spinnerArmed: boolean
-  /** The pane width the last drawing had; the board is asked for that width. */
-  width: number
-  refreshing: boolean
-}
-
-function isRecord(value: unknown): value is SessionRecord {
-  if (typeof value !== 'object' || value === null) {
-    return false
+type KanbanState = RecordState &
+  AskState & {
+    view: BoardView
+    timersStarted: boolean
+    /** The pane width the last drawing had; the board is asked for that width. */
+    width: number
+    refreshing: boolean
   }
 
-  const r = value as Record<string, unknown>
-
-  return r.v === 1 && typeof r.session_id === 'string' && Array.isArray(r.events)
+function stringFields(input: object): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(input)
+      .filter(([key, value]) => typeof value === 'string' && !RESERVED_INPUT_KEYS.includes(key))
+      .map(([key, value]) => [key, (value as string).slice(0, MAX_FIELD_CHARS)]),
+  )
 }
 
-async function freshRecord($: EngineInterface, id: string, now: number): Promise<SessionRecord> {
-  const repo = await $.session.repo()
+function withoutAsk(base: SessionRecord, toolUseId: string): Partial<SessionRecord> {
+  const { [toolUseId]: _closed, ...open } = base.asks ?? {}
 
-  return {
-    v: 1,
-    session_id: id,
-    cwd: await $.session.cwd(),
-    repo: repo?.name ?? null,
-    title: null,
-    first_prompt: null,
-    started_at: now,
-    heartbeat_at: now,
-    ended_reason: null,
-    events: [],
-  }
-}
-
-function filled(base: SessionRecord, fill: Fields): Fields {
-  const out: Fields = {}
-
-  for (const key of Object.keys(fill) as (keyof Fields)[]) {
-    if (base[key] === null) {
-      out[key] = fill[key]
-    }
-  }
-
-  return out
-}
-
-async function writeRecord($: EngineInterface, entry: Entry): Promise<void> {
-  const id = entry.sessionId ?? (await $.session.id())
-  const key = KEY_PREFIX + id
-  const now = await $.clock.now()
-  const stored = await $.store.get(key)
-  const prior = isRecord(stored) ? stored : null
-  const base = prior ?? (await freshRecord($, id, now))
-  const appends = entry.name !== null && (entry.onlyIfNew !== true || prior === null)
-  const events = appends
-    ? [...base.events, { name: entry.name as string, detail: entry.detail ?? null, at: now }].slice(-MAX_EVENTS)
-    : base.events
-
-  /** Only `set` keeps `ended_reason`: a session that still records after its end is live again. */
-  await $.store.set(key, {
-    ...base,
-    ...filled(base, entry.fill ?? {}),
-    ended_reason: null,
-    ...(entry.set ?? {}),
-    heartbeat_at: now,
-    events,
-  })
-}
-
-/** Never rejects: a lost write only leaves the board a step behind. */
-async function record($: EngineInterface, s: KanbanState, entry: Entry): Promise<void> {
-  if (entry.name !== null) {
-    s.spinnerArmed = entry.name !== 'ui.spinner'
-  }
-
-  s.writes = s.writes.then(() => writeRecord($, entry)).catch(() => undefined)
-  await s.writes
+  return { asks: open }
 }
 
 function parseObject(stdout: string): Record<string, unknown> | null {
@@ -164,10 +88,11 @@ function expiredIds(parsed: Record<string, unknown> | null): string[] {
   return Array.isArray(expired) ? expired.filter((x): x is string => typeof x === 'string') : []
 }
 
-async function snapshot($: EngineInterface): Promise<unknown[]> {
-  const keys = (await $.store.keys()).filter(k => k.startsWith(KEY_PREFIX))
+async function snapshot($: EngineInterface): Promise<{ keys: string[]; sessions: unknown[] }> {
+  const keys = await $.store.keys()
+  const sessions = await Promise.all(keys.filter(k => k.startsWith(KEY_PREFIX)).map(k => $.store.get(k)))
 
-  return Promise.all(keys.map(k => $.store.get(k)))
+  return { keys, sessions }
 }
 
 async function refresh($: EngineInterface, s: KanbanState): Promise<void> {
@@ -179,7 +104,7 @@ async function refresh($: EngineInterface, s: KanbanState): Promise<void> {
   const width = s.width
 
   try {
-    const sessions = await snapshot($)
+    const { keys, sessions } = await snapshot($)
     const argv = [
       'atelier',
       'kanban',
@@ -204,8 +129,14 @@ async function refresh($: EngineInterface, s: KanbanState): Promise<void> {
 
       s.view = decodeBoard(parsed, width)
 
+      if (s.view.kind === 'board') {
+        pruneDrafts(s, s.view.columns.flatMap(c => c.cards))
+      }
+
       for (const id of expiredIds(parsed)) {
-        await $.store.delete(KEY_PREFIX + id)
+        for (const key of [KEY_PREFIX + id, ...answerKeysOf(keys, id)]) {
+          await $.store.delete(key)
+        }
       }
     }
   } catch {
@@ -223,6 +154,8 @@ async function isPaneShown($: EngineInterface): Promise<boolean> {
 
 async function tick($: EngineInterface, s: KanbanState): Promise<void> {
   try {
+    await deliverAnswers($, s)
+
     if (await isPaneShown($)) {
       await refresh($, s)
     }
@@ -263,6 +196,7 @@ async function startSession($: EngineInterface, s: KanbanState): Promise<void> {
 
 export function registerKanban(on: On): void {
   const s: KanbanState = {
+    ...newAskState(),
     view: { kind: 'loading' },
     writes: Promise.resolve(),
     timersStarted: false,
@@ -305,10 +239,109 @@ export function registerKanban(on: On): void {
 
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
-      await record($, s, { name: 'turn.complete' })
+      await record($, s, { name: 'turn.complete', update: () => ({ activity: null }) })
     }
 
     return next(e)
+  })
+
+  on('tool.call', async ($, e, next) => {
+    if (e.agentId === undefined) {
+      const input = stringFields(e)
+
+      await record($, s, { name: null, update: (_, now) => ({ activity: { tool: e.tool, input, at: now } }) })
+    }
+
+    return next(e)
+  })
+
+  on('tool.call', { tool: 'TodoWrite' }, async ($, e, next) => {
+    const r = await next(e)
+
+    if (e.agentId === undefined && r.deny === undefined && !r.isError) {
+      const todos = e.todos
+        .slice(0, MAX_TODOS)
+        .map(t => ({ status: t.status, active: t.activeForm.slice(0, MAX_FIELD_CHARS) }))
+
+      await record($, s, { name: null, update: () => ({ todos }) })
+    }
+
+    return r
+  })
+
+  on('tool.call', { tool: 'TaskCreate' }, async ($, e, next) => {
+    const r = await next(e)
+
+    if (r.deny === undefined && !r.isError) {
+      const task = {
+        subject: e.subject.slice(0, MAX_FIELD_CHARS),
+        active: e.activeForm?.slice(0, MAX_FIELD_CHARS) ?? null,
+        status: 'pending',
+      }
+      const id = r.result.task.id
+
+      await record($, s, { name: null, update: base => ({ tasks: { ...base.tasks, [id]: task } }) })
+    }
+
+    return r
+  })
+
+  on('tool.call', { tool: 'TaskUpdate' }, async ($, e, next) => {
+    const r = await next(e)
+
+    if (r.deny === undefined && !r.isError) {
+      const changed = {
+        ...(e.subject === undefined ? {} : { subject: e.subject.slice(0, MAX_FIELD_CHARS) }),
+        ...(e.activeForm === undefined ? {} : { active: e.activeForm.slice(0, MAX_FIELD_CHARS) }),
+        ...(e.status === undefined ? {} : { status: e.status }),
+      }
+
+      await record($, s, {
+        name: null,
+        update: base => {
+          const prior = base.tasks?.[e.taskId] ?? { subject: '', active: null, status: 'pending' }
+
+          return { tasks: { ...base.tasks, [e.taskId]: { ...prior, ...changed } } }
+        },
+      })
+    }
+
+    return r
+  })
+
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
+    const id = e.tool_use_id
+
+    if (id === undefined) {
+      return next(e)
+    }
+
+    const fromKanban = awaitAnswer(s, id)
+    let answered = false
+
+    await record($, s, {
+      name: null,
+      update: (base, now) => ({ asks: { ...base.asks, [id]: askOf(e.questions, now) } }),
+    })
+
+    try {
+      const won = await Promise.race([
+        next(e).then(r => ({ local: r })),
+        fromKanban.then(answers => ({ answers })),
+      ])
+
+      if ('local' in won) {
+        return won.local
+      }
+
+      answered = true
+
+      return { result: { questions: e.questions, answers: answersByQuestion(e.questions, won.answers) } }
+    } finally {
+      s.waiters.delete(id)
+      await $.store.delete(answerKey(await $.session.id(), id))
+      await record($, s, { name: answered ? 'kanban.answer' : null, update: base => withoutAsk(base, id) })
+    }
   })
 
   on('classic.PermissionRequest', async ($, e, next) => {
@@ -355,7 +388,8 @@ export function registerKanban(on: On): void {
   })
 
   on('ui.render', { component: 'Pane', requestId: 'kanban' }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
+    const els = $.ui.resolve(e)
+    const { Box, Text } = els
     const view = s.view
     s.width = e.props.bodyColumns
 
@@ -390,6 +424,7 @@ export function registerKanban(on: On): void {
               children: [
                 Text({ bold: card.is_self, wrap: 'truncate', children: [card.headline] }),
                 ...(card.subtitle ? [Text({ dimColor: true, wrap: 'truncate', children: [card.subtitle] })] : []),
+                ...(card.progress ? [Text({ dimColor: true, wrap: 'truncate', children: [card.progress] })] : []),
               ],
             }),
           ),
@@ -397,6 +432,9 @@ export function registerKanban(on: On): void {
       }),
     )
 
-    return Box({ flexDirection: direction, columnGap, children: columns })
+    const board = Box({ key: 'board', flexDirection: direction, columnGap, children: columns })
+    const asks = askBlocks($, s, els, view.columns.flatMap(c => c.cards))
+
+    return asks.length === 0 ? board : Box({ flexDirection: 'column', children: [board, ...asks] })
   })
 }
