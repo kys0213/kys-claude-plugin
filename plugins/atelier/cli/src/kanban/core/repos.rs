@@ -1,5 +1,4 @@
-//! The board's cards grouped by repository, for an orchestrator choosing
-//! where to send work.
+//! The board's cards grouped by repository.
 
 use super::board::{Action, Board, Column};
 

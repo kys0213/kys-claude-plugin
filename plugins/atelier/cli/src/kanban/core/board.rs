@@ -101,13 +101,10 @@ impl Column {
 /// What the board offers to do with a card.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
-    /// Answer the open questions.
     Answer,
     /// Reply with one of the options the turn ended on.
     Decide,
-    /// Send a prompt.
     Send,
-    /// Stop the running turn.
     Stop,
 }
 
@@ -225,8 +222,6 @@ fn signal_of(event: &Event) -> Signal {
     }
 }
 
-/// Whether the session went past a question opened before this event: a
-/// prompt, an answer, a tool result, a turn end or another tool's request.
 fn moves_past_a_question(event: &Event) -> bool {
     match (event.name.as_str(), event.detail.as_deref()) {
         ("classic.PermissionRequest", Some(ASK_TOOL)) => false,
@@ -243,8 +238,6 @@ fn moves_past_a_question(event: &Event) -> bool {
     }
 }
 
-/// The questions still open: each recorded without a later event that
-/// moved the session past it, oldest first.
 fn open_asks(fact: &SessionFact) -> Vec<Ask> {
     let mut asks: Vec<Ask> = fact
         .asks

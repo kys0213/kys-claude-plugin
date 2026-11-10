@@ -309,6 +309,7 @@ fn requests_are_refused_for_bad_ids_and_empty_text() {
             "   ",
         ],
         vec!["stop", "--session", "s/1", "--turn", "t"],
+        vec!["send", "--session", "s-1", "--from", "robot", "--text", "x"],
         vec!["inbox", "dir", "--session", ""],
     ] {
         let out = w.kanban(&args);

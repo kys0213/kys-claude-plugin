@@ -2,26 +2,16 @@
 //! `$.store` into the board its pane draws, and carries requests between
 //! sessions through their inboxes.
 //!
-//! ```text
-//! atelier kanban board --now <unix-ms> --stale-after <dur> --expire-after <dur> --width <cols> [--self <id>]
-//! atelier kanban answer
-//! atelier kanban send --session <id> --from <pane|agent> [--from-label <label>] --text <text>
-//! atelier kanban stop --session <id> --turn <turn-id>
-//! atelier kanban inbox <dir|clear> --session <id>
-//! atelier kanban inbox take --session <id> --now <unix-ms> --ttl <dur> [--turn <running-turn-id>]
-//! atelier kanban spawn --cwd <repo-root> --text <text> [--worktree <name>] [--from-label <label>]
-//! ```
-//!
-//! Output contract: one line of stdout JSON out, and **always exit 0**. A
-//! refused or failed request prints `{"error": ...}`; an argument error
-//! prints clap's message to stderr and nothing to stdout, so the caller's
-//! JSON parse fails and it shows its own fallback.
+//! Every subcommand prints one line of JSON and exits 0; a refused or failed
+//! request prints `{"error": ...}`.
 
 pub mod commands;
 pub mod core;
 
+use crate::kanban::commands::inbox::{ClockIds, FsInbox};
 use crate::kanban::commands::payload::{parse_answer_request, parse_sessions};
-use crate::kanban::commands::requests;
+use crate::kanban::commands::requests::KanbanRequests;
+use crate::kanban::commands::spawn::{ClaudeLauncher, GitProbe};
 use crate::kanban::core::answer::compose;
 use crate::kanban::core::board::{build, Action, Board, BoardParams, Card};
 use crate::kanban::core::detail::Detail;
@@ -29,6 +19,7 @@ use crate::kanban::core::duration::parse_millis;
 use crate::kanban::core::layout::{fit, Layout};
 use crate::kanban::core::question::{Ask, Question};
 use crate::kanban::core::repos::{group, Repo};
+use crate::kanban::core::request::Sender;
 use crate::shared::process::read_stdin_raw;
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
@@ -66,6 +57,12 @@ pub enum Commands {
     },
     /// An open question and the picks made on the board → one answer per question
     Answer,
+    #[command(flatten)]
+    Request(RequestCommand),
+}
+
+#[derive(Subcommand)]
+pub enum RequestCommand {
     /// Leaves a prompt in a session's inbox
     Send {
         #[arg(long)]
@@ -258,6 +255,44 @@ fn board_json(board: &Board, layout: &Layout) -> Value {
     })
 }
 
+fn run_request(command: RequestCommand) -> Value {
+    let inbox = FsInbox::from_env();
+    let requests = KanbanRequests {
+        inbox: &inbox,
+        ids: &ClockIds,
+        probe: &GitProbe,
+        launcher: &ClaudeLauncher,
+    };
+    match command {
+        RequestCommand::Send {
+            session,
+            from,
+            from_label,
+            text,
+        } => match Sender::parse(&from) {
+            Some(from) => requests.send(&session, from, from_label.as_deref(), &text),
+            None => json!({ "error": format!("--from 은 pane 또는 agent 예요 (받은 값: {from})") }),
+        },
+        RequestCommand::Stop { session, turn } => requests.stop(&session, &turn),
+        RequestCommand::Inbox { command } => match command {
+            InboxCommand::Dir { session } => requests.dir(&session),
+            InboxCommand::Take {
+                session,
+                now,
+                ttl,
+                turn,
+            } => requests.take(&session, now, ttl, turn.as_deref()),
+            InboxCommand::Clear { session } => requests.clear(&session),
+        },
+        RequestCommand::Spawn {
+            cwd,
+            text,
+            worktree,
+            from_label,
+        } => requests.spawn(&cwd, &text, worktree.as_deref(), from_label.as_deref()),
+    }
+}
+
 pub fn run(cli: Cli) -> i32 {
     let Some(command) = cli.command else {
         use clap::CommandFactory;
@@ -299,38 +334,7 @@ pub fn run(cli: Cli) -> i32 {
             };
             println!("{out}");
         }
-        Commands::Send {
-            session,
-            from,
-            from_label,
-            text,
-        } => println!(
-            "{}",
-            requests::send(&session, &from, from_label.as_deref(), &text)
-        ),
-        Commands::Stop { session, turn } => println!("{}", requests::stop(&session, &turn)),
-        Commands::Inbox { command } => {
-            let out = match command {
-                InboxCommand::Dir { session } => requests::dir(&session),
-                InboxCommand::Take {
-                    session,
-                    now,
-                    ttl,
-                    turn,
-                } => requests::take(&session, now, ttl, turn.as_deref()),
-                InboxCommand::Clear { session } => requests::clear(&session),
-            };
-            println!("{out}");
-        }
-        Commands::Spawn {
-            cwd,
-            text,
-            worktree,
-            from_label,
-        } => println!(
-            "{}",
-            requests::spawn(&cwd, &text, worktree.as_deref(), from_label.as_deref())
-        ),
+        Commands::Request(command) => println!("{}", run_request(command)),
     }
     0
 }

@@ -1,12 +1,16 @@
 //! Stdin payloads: `kanban board` takes `{"sessions": [<v1 record>, ...]}`,
 //! `kanban answer` takes `{"questions": [...], "picks": [...]}`. A record this
 //! version cannot read is dropped here, before the board sees it.
+//!
+//! The field readers answer `None` for a field of the wrong type, which drops
+//! the record, and read an absent field the same as `null`.
 
 use crate::kanban::core::answer::Pick;
 use crate::kanban::core::board::{Event, SessionFact};
-use crate::kanban::core::detail::{Decision, Delivery};
+use crate::kanban::core::detail::{Decision, Delivery, DeliveryStatus};
 use crate::kanban::core::progress::{Activity, ItemStatus, WorkItem};
 use crate::kanban::core::question::{Ask, Question, QuestionOption};
+use crate::kanban::core::request::{RequestKind, Status};
 use serde_json::{Map, Value};
 
 const VERSION: u64 = 1;
@@ -98,16 +102,17 @@ fn parse_decision(value: &Value) -> Option<Decision> {
 }
 
 fn parse_delivery(value: &Value) -> Option<Delivery> {
+    let status = value.get("status")?.as_str()?;
     Some(Delivery {
         id: value.get("id")?.as_str()?.to_string(),
-        kind: value.get("kind")?.as_str()?.to_string(),
-        status: value.get("status")?.as_str()?.to_string(),
+        kind: RequestKind::parse(value.get("kind")?.as_str()?),
+        status: Status::parse(status)
+            .map(DeliveryStatus::Known)
+            .unwrap_or_else(|| DeliveryStatus::Unknown(status.to_string())),
         at: value.get("at")?.as_u64()?,
     })
 }
 
-/// Outer `None` rejects a field `parse` cannot read; absent and `null` both
-/// read as unset.
 fn optional<T>(value: &Value, key: &str, parse: fn(&Value) -> Option<T>) -> Option<Option<T>> {
     match value.get(key) {
         None | Some(Value::Null) => Some(None),
@@ -205,8 +210,6 @@ fn parse_event(value: &Value) -> Option<Event> {
     })
 }
 
-/// Outer `None` rejects a wrong-typed field; absent and `null` both read as
-/// empty.
 fn optional_object<'a>(value: &'a Value, key: &str) -> Option<Option<&'a Map<String, Value>>> {
     match value.get(key) {
         None | Some(Value::Null) => Some(None),
@@ -215,8 +218,6 @@ fn optional_object<'a>(value: &'a Value, key: &str) -> Option<Option<&'a Map<Str
     }
 }
 
-/// Outer `None` rejects a wrong-typed field; absent and `null` both read as
-/// empty.
 fn optional_array<'a>(value: &'a Value, key: &str) -> Option<&'a [Value]> {
     match value.get(key) {
         None | Some(Value::Null) => Some(&[]),
@@ -225,8 +226,6 @@ fn optional_array<'a>(value: &'a Value, key: &str) -> Option<&'a [Value]> {
     }
 }
 
-/// Outer `None` rejects a wrong-typed field; absent and `null` both read as
-/// unset.
 fn nullable_string(value: &Value, key: &str) -> Option<Option<String>> {
     match value.get(key) {
         None | Some(Value::Null) => Some(None),

@@ -32,6 +32,29 @@ impl Sender {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestKind {
+    Prompt,
+    Stop,
+}
+
+impl RequestKind {
+    pub fn id(self) -> &'static str {
+        match self {
+            RequestKind::Prompt => "prompt",
+            RequestKind::Stop => "stop",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<RequestKind> {
+        match raw {
+            "prompt" => Some(RequestKind::Prompt),
+            "stop" => Some(RequestKind::Stop),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     Prompt {
@@ -45,10 +68,10 @@ pub enum Request {
 }
 
 impl Request {
-    pub fn kind(&self) -> &'static str {
+    pub fn kind(&self) -> RequestKind {
         match self {
-            Request::Prompt { .. } => "prompt",
-            Request::Stop { .. } => "stop",
+            Request::Prompt { .. } => RequestKind::Prompt,
+            Request::Stop { .. } => RequestKind::Stop,
         }
     }
 
@@ -101,15 +124,14 @@ impl Request {
         if value.get("v")?.as_u64()? != VERSION {
             return None;
         }
-        match value.get("kind")?.as_str()? {
-            "prompt" => Request::prompt(
+        match RequestKind::parse(value.get("kind")?.as_str()?)? {
+            RequestKind::Prompt => Request::prompt(
                 value.get("text")?.as_str()?,
                 Sender::parse(value.get("from")?.as_str()?)?,
                 value.get("from_label").and_then(Value::as_str),
             )
             .ok(),
-            "stop" => Request::stop(value.get("turn_id")?.as_str()?).ok(),
-            _ => None,
+            RequestKind::Stop => Request::stop(value.get("turn_id")?.as_str()?).ok(),
         }
     }
 }
@@ -169,8 +191,6 @@ pub fn check_slug(name: &str) -> Result<(), String> {
     }
 }
 
-/// One inbox file as found: its id, how old it is, and the request if it
-/// could be read.
 pub struct Found {
     pub id: String,
     pub age_ms: u64,
@@ -208,17 +228,27 @@ impl Status {
             Status::Invalid => "invalid",
         }
     }
+
+    pub fn parse(raw: &str) -> Option<Status> {
+        [
+            Status::Delivered,
+            Status::Busy,
+            Status::Expired,
+            Status::Stale,
+            Status::Invalid,
+        ]
+        .into_iter()
+        .find(|s| s.id() == raw)
+    }
 }
 
 pub struct Outcome {
     pub id: String,
-    pub kind: &'static str,
+    /// `None` for a request that could not be read.
+    pub kind: Option<RequestKind>,
     pub status: Status,
 }
 
-/// Decides each request in the order found: a stop acts only on the turn it
-/// names, a prompt only while no turn runs and none was taken before it, and
-/// nothing older than `ttl_ms`.
 pub fn take(
     found: Vec<Found>,
     running_turn: Option<&str>,
@@ -229,9 +259,9 @@ pub fn take(
     let mut prompted = false;
     for item in found {
         let (kind, status) = match item.request {
-            None => ("unknown", Status::Invalid),
+            None => (None, Status::Invalid),
             Some(request) => {
-                let kind = request.kind();
+                let kind = Some(request.kind());
                 let status = if item.age_ms > ttl_ms {
                     Status::Expired
                 } else {

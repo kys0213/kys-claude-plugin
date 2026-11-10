@@ -438,6 +438,24 @@ fn the_last_delivery_of_a_kanban_request_is_shown() {
 }
 
 #[test]
+fn each_delivery_outcome_reads_as_a_sentence() {
+    for (kind, status, line) in [
+        ("prompt", "delivered", "보낸 요청: 전달됐어요 · 4s"),
+        ("prompt", "expired", "보낸 요청: 시간이 지나 버렸어요 · 4s"),
+        ("stop", "stale", "중지 요청: 끝난 턴이라 버렸어요 · 4s"),
+        ("unknown", "invalid", "보낸 요청: invalid · 4s"),
+        ("prompt", "queued-later", "보낸 요청: queued-later · 4s"),
+    ] {
+        let (_, card) = only(json!([session(
+            "s",
+            json!([event("turn.complete", None, 5 * SEC)]),
+            json!({ "inbox": { "id": "r1", "kind": kind, "status": status, "at": NOW - 4 * SEC } })
+        )]));
+        assert_eq!(card["detail"]["delivery"], line, "{kind} {status}");
+    }
+}
+
+#[test]
 fn cards_carry_where_the_session_runs_and_its_permission_mode() {
     let (_, card) = only(json!([session(
         "s",

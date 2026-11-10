@@ -1,22 +1,26 @@
-//! Starts a background Claude Code session (`claude --bg`) at a repository's
-//! main working tree, optionally in a new git worktree.
+//! The process edges of `kanban spawn`: git for where the session would run,
+//! `claude --bg` to start it.
 
-use crate::kanban::core::request::{agent_header, check_slug};
-use std::path::Path;
+use crate::kanban::core::spawn::RepoPaths;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub struct SpawnArgs<'a> {
-    pub cwd: &'a str,
-    pub text: &'a str,
-    pub worktree: Option<&'a str>,
-    pub from_label: Option<&'a str>,
+pub trait RepoProbe {
+    /// `None` when `cwd` is not an absolute path inside a git repository.
+    fn paths(&self, cwd: &str) -> Option<RepoPaths>;
 }
 
-pub struct Spawned {
-    pub short_id: String,
-    pub cwd: String,
-    pub worktree: Option<String>,
+pub struct Launched {
+    pub success: bool,
+    pub stdout: String,
+    pub stderr: String,
 }
+
+pub trait Launcher {
+    fn launch(&self, cwd: &str, args: &[String]) -> Result<Launched, String>;
+}
+
+pub struct GitProbe;
 
 fn git(cwd: &str, args: &[&str]) -> Option<String> {
     let out = Command::new("git")
@@ -30,88 +34,36 @@ fn git(cwd: &str, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// Accepts only the top of a repository's main working tree: a linked
-/// worktree's git dir is `.git/worktrees/<name>`, the main one's is `.git`.
-fn check_root(cwd: &str) -> Result<(), String> {
-    let refuse = || {
-        Err(format!(
-            "`{cwd}` 는 git 저장소의 메인 작업 트리 루트가 아니에요"
-        ))
-    };
-    if !Path::new(cwd).is_absolute() {
-        return refuse();
-    }
-    let (Some(top), Some(git_dir)) = (
-        git(cwd, &["rev-parse", "--show-toplevel"]),
-        git(cwd, &["rev-parse", "--absolute-git-dir"]),
-    ) else {
-        return refuse();
-    };
-    let same = |a: &str, b: &Path| std::fs::canonicalize(a).ok() == std::fs::canonicalize(b).ok();
-    if same(&top, Path::new(cwd)) && same(&git_dir, &Path::new(&top).join(".git")) {
-        Ok(())
-    } else {
-        refuse()
-    }
+fn resolved(path: &Path) -> Option<PathBuf> {
+    std::fs::canonicalize(path).ok()
 }
 
-fn short_id(stdout: &str) -> Option<String> {
-    let rest = stdout.split("backgrounded").nth(1)?;
-    rest.trim_start_matches(|c: char| c.is_whitespace() || c == '·')
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .next()
-        .filter(|id| !id.is_empty())
-        .map(str::to_string)
-}
-
-pub fn spawn(args: &SpawnArgs) -> Result<Spawned, String> {
-    check_root(args.cwd)?;
-    if let Some(name) = args.worktree {
-        check_slug(name)?;
-    }
-    let body = args.text.trim();
-    if body.is_empty() {
-        return Err("맡길 일이 비어 있어요".to_string());
-    }
-    let prompt = format!("{}\n\n{body}", agent_header(args.from_label));
-    let mut command = Command::new("claude");
-    command.current_dir(args.cwd).arg("--bg");
-    if let Some(name) = args.worktree {
-        command.args(["--worktree", name]);
-    }
-    let out = command
-        .arg(prompt)
-        .output()
-        .map_err(|e| format!("claude 를 실행하지 못했어요: {e}"))?;
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    match short_id(&stdout) {
-        Some(short_id) if out.status.success() => Ok(Spawned {
-            short_id,
-            cwd: args.cwd.to_string(),
-            worktree: args.worktree.map(str::to_string),
-        }),
-        _ => {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            let said = [stdout.trim(), stderr.trim()]
-                .into_iter()
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-                .join(" / ");
-            Err(format!("새 세션을 띄우지 못했어요: {said}"))
+impl RepoProbe for GitProbe {
+    fn paths(&self, cwd: &str) -> Option<RepoPaths> {
+        if !Path::new(cwd).is_absolute() {
+            return None;
         }
+        Some(RepoPaths {
+            cwd: resolved(Path::new(cwd))?,
+            top: resolved(Path::new(&git(cwd, &["rev-parse", "--show-toplevel"])?))?,
+            git_dir: resolved(Path::new(&git(cwd, &["rev-parse", "--absolute-git-dir"])?))?,
+        })
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub struct ClaudeLauncher;
 
-    #[test]
-    fn the_short_id_follows_the_backgrounded_mark() {
-        assert_eq!(
-            short_id("backgrounded · 6d652fd9\n  claude agents"),
-            Some("6d652fd9".to_string())
-        );
-        assert_eq!(short_id("nothing here"), None);
+impl Launcher for ClaudeLauncher {
+    fn launch(&self, cwd: &str, args: &[String]) -> Result<Launched, String> {
+        let out = Command::new("claude")
+            .current_dir(cwd)
+            .args(args)
+            .output()
+            .map_err(|e| format!("claude 를 실행하지 못했어요: {e}"))?;
+        Ok(Launched {
+            success: out.status.success(),
+            stdout: String::from_utf8_lossy(&out.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&out.stderr).to_string(),
+        })
     }
 }

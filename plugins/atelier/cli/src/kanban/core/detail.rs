@@ -2,8 +2,10 @@
 //! decision a turn ended on, and how the last kanban request went.
 
 use super::duration::age_label;
-use super::progress::{tool_line, Activity, ItemStatus, WorkItem};
-use super::request::strip_agent_header;
+use super::progress::{
+    first_field, item_text, live_items, tool_line, Activity, ItemStatus, WorkItem,
+};
+use super::request::{strip_agent_header, RequestKind, Status};
 use super::text::{cut, fold, strip_controls, strip_reminders};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,11 +16,18 @@ pub struct Decision {
     pub at: u64,
 }
 
+/// A status a newer CLI wrote that this one does not know is shown as written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeliveryStatus {
+    Known(Status),
+    Unknown(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Delivery {
     pub id: String,
-    pub kind: String,
-    pub status: String,
+    pub kind: Option<RequestKind>,
+    pub status: DeliveryStatus,
     pub at: u64,
 }
 
@@ -34,7 +43,6 @@ pub enum Phase {
     Stale,
 }
 
-/// The facts a detail is drawn from.
 pub struct DetailFacts<'a> {
     pub last_prompt: Option<&'a str>,
     pub last_answer: Option<&'a str>,
@@ -108,26 +116,11 @@ fn wait_lines(permission: Option<&Activity>) -> Vec<String> {
     let Some(permission) = permission else {
         return Vec::new();
     };
-    let target = WAIT_FIELDS.iter().find_map(|field| {
-        permission
-            .input
-            .iter()
-            .find(|(name, _)| name == field)
-            .map(|(_, value)| fold(value))
-            .filter(|v| !v.is_empty())
-    });
+    let target = first_field(&permission.input, &WAIT_FIELDS).map(|(_, value)| value);
     vec![match target {
         Some(target) => format!("{}: {}", permission.tool, cut(&target, WAIT_CHARS)),
         None => permission.tool.clone(),
     }]
-}
-
-fn item_text(item: &WorkItem) -> Option<String> {
-    let text = match item.status {
-        ItemStatus::InProgress => item.active.as_deref().or(item.subject.as_deref()),
-        _ => item.subject.as_deref().or(item.active.as_deref()),
-    };
-    text.map(fold).filter(|t| !t.is_empty())
 }
 
 fn mark(status: ItemStatus) -> &'static str {
@@ -139,11 +132,7 @@ fn mark(status: ItemStatus) -> &'static str {
 }
 
 fn todo_lines(tasks: &[WorkItem], todos: &[WorkItem]) -> Vec<String> {
-    let items = if tasks.is_empty() { todos } else { tasks };
-    let live: Vec<&WorkItem> = items
-        .iter()
-        .filter(|i| i.status != ItemStatus::Deleted)
-        .collect();
+    let live = live_items(tasks, todos);
     let line = |item: &&WorkItem| {
         item_text(item).map(|t| format!("{} {}", mark(item.status), cut(&t, LINE_CHARS)))
     };
@@ -175,16 +164,17 @@ fn recent_lines(recent: &[Activity], now: u64) -> Vec<String> {
 }
 
 fn delivery_line(inbox: &Delivery, now: u64) -> String {
-    let kind = match inbox.kind.as_str() {
-        "stop" => "중지 요청",
-        _ => "보낸 요청",
+    let kind = match inbox.kind {
+        Some(RequestKind::Stop) => "중지 요청",
+        Some(RequestKind::Prompt) | None => "보낸 요청",
     };
-    let status = match inbox.status.as_str() {
-        "delivered" => "전달됐어요",
-        "busy" => "작업 중이라 받지 않았어요",
-        "expired" => "시간이 지나 버렸어요",
-        "stale" => "끝난 턴이라 버렸어요",
-        other => other,
+    let status = match &inbox.status {
+        DeliveryStatus::Known(Status::Delivered) => "전달됐어요",
+        DeliveryStatus::Known(Status::Busy) => "작업 중이라 받지 않았어요",
+        DeliveryStatus::Known(Status::Expired) => "시간이 지나 버렸어요",
+        DeliveryStatus::Known(Status::Stale) => "끝난 턴이라 버렸어요",
+        DeliveryStatus::Known(Status::Invalid) => "invalid",
+        DeliveryStatus::Unknown(raw) => raw,
     };
     format!(
         "{kind}: {status} · {}",

@@ -1,39 +1,21 @@
-//! The request commands: each validates its arguments, does its one I/O step
-//! and answers one JSON value.
+//! The request commands: validate the arguments, do one step through the
+//! injected edges, answer one JSON value.
 
-use crate::kanban::commands::inbox;
-use crate::kanban::commands::spawn::{self, SpawnArgs};
-use crate::kanban::core::request::{self, Request, Sender, Taken};
+use crate::kanban::commands::inbox::{IdSource, InboxStore};
+use crate::kanban::commands::spawn::{Launcher, RepoProbe};
+use crate::kanban::core::request::{self, check_id, Found, Request, Sender, Taken};
+use crate::kanban::core::spawn::{is_main_root, launch_args, short_id};
 use serde_json::{json, Value};
 
-fn error(message: String) -> Value {
-    json!({ "error": message })
+pub struct KanbanRequests<'a> {
+    pub inbox: &'a dyn InboxStore,
+    pub ids: &'a dyn IdSource,
+    pub probe: &'a dyn RepoProbe,
+    pub launcher: &'a dyn Launcher,
 }
 
-fn queue(session: &str, request: Result<Request, String>) -> Value {
-    let queued = request.and_then(|r| inbox::put(session, &r).map(|id| (id, r.kind())));
-    match queued {
-        Ok((id, kind)) => json!({ "queued": { "session_id": session, "id": id, "kind": kind } }),
-        Err(e) => error(e),
-    }
-}
-
-pub fn send(session: &str, from: &str, from_label: Option<&str>, text: &str) -> Value {
-    let request = Sender::parse(from)
-        .ok_or_else(|| format!("--from 은 pane 또는 agent 예요 (받은 값: {from})"))
-        .and_then(|from| Request::prompt(text, from, from_label));
-    queue(session, request)
-}
-
-pub fn stop(session: &str, turn: &str) -> Value {
-    queue(session, Request::stop(turn))
-}
-
-pub fn dir(session: &str) -> Value {
-    match inbox::inbox_dir(session) {
-        Ok(dir) => json!({ "dir": dir.display().to_string() }),
-        Err(e) => error(e),
-    }
+fn answer(result: Result<Value, String>) -> Value {
+    result.unwrap_or_else(|e| json!({ "error": e }))
 }
 
 fn taken_json(taken: &Taken) -> Value {
@@ -45,40 +27,97 @@ fn taken_json(taken: &Taken) -> Value {
     }
 }
 
-pub fn take(session: &str, now: u64, ttl_ms: u64, turn: Option<&str>) -> Value {
-    match inbox::claim_all(session, now) {
-        Ok(found) => {
+impl KanbanRequests<'_> {
+    fn queue(&self, session: &str, request: Result<Request, String>) -> Value {
+        answer((|| {
+            check_id("session", session)?;
+            let request = request?;
+            let id = self.ids.next_id();
+            self.inbox
+                .put(session, &id, &request.to_json().to_string())?;
+            Ok(
+                json!({ "queued": { "session_id": session, "id": id, "kind": request.kind().id() } }),
+            )
+        })())
+    }
+
+    pub fn send(&self, session: &str, from: Sender, from_label: Option<&str>, text: &str) -> Value {
+        self.queue(session, Request::prompt(text, from, from_label))
+    }
+
+    pub fn stop(&self, session: &str, turn: &str) -> Value {
+        self.queue(session, Request::stop(turn))
+    }
+
+    pub fn dir(&self, session: &str) -> Value {
+        answer(check_id("session", session).and_then(|()| {
+            let dir = self.inbox.dir(session)?;
+            Ok(json!({ "dir": dir.display().to_string() }))
+        }))
+    }
+
+    pub fn take(&self, session: &str, now: u64, ttl_ms: u64, turn: Option<&str>) -> Value {
+        answer(check_id("session", session).and_then(|()| {
+            let found = self
+                .inbox
+                .claim_all(session, now)?
+                .into_iter()
+                .map(|c| Found {
+                    id: c.id,
+                    age_ms: c.age_ms,
+                    request: c.contents.as_deref().and_then(Request::parse),
+                })
+                .collect();
             let (taken, outcomes) = request::take(found, turn, ttl_ms);
-            json!({
+            Ok(json!({
                 "actions": taken.iter().map(taken_json).collect::<Vec<_>>(),
                 "results": outcomes
                     .iter()
-                    .map(|o| json!({ "id": o.id, "kind": o.kind, "status": o.status.id() }))
+                    .map(|o| json!({
+                        "id": o.id,
+                        "kind": o.kind.map_or("unknown", |k| k.id()),
+                        "status": o.status.id(),
+                    }))
                     .collect::<Vec<_>>(),
-            })
-        }
-        Err(e) => error(e),
+            }))
+        }))
     }
-}
 
-pub fn clear(session: &str) -> Value {
-    match inbox::clear(session) {
-        Ok(()) => json!({ "cleared": session }),
-        Err(e) => error(e),
+    pub fn clear(&self, session: &str) -> Value {
+        answer(check_id("session", session).and_then(|()| {
+            self.inbox.clear(session)?;
+            Ok(json!({ "cleared": session }))
+        }))
     }
-}
 
-pub fn spawn(cwd: &str, text: &str, worktree: Option<&str>, from_label: Option<&str>) -> Value {
-    let args = SpawnArgs {
-        cwd,
-        text,
-        worktree,
-        from_label,
-    };
-    match spawn::spawn(&args) {
-        Ok(s) => json!({
-            "spawned": { "short_id": s.short_id, "cwd": s.cwd, "worktree": s.worktree }
-        }),
-        Err(e) => error(e),
+    pub fn spawn(
+        &self,
+        cwd: &str,
+        text: &str,
+        worktree: Option<&str>,
+        from_label: Option<&str>,
+    ) -> Value {
+        answer((|| {
+            if !self.probe.paths(cwd).is_some_and(|p| is_main_root(&p)) {
+                return Err(format!(
+                    "`{cwd}` 는 git 저장소의 메인 작업 트리 루트가 아니에요"
+                ));
+            }
+            let args = launch_args(text, worktree, from_label)?;
+            let out = self.launcher.launch(cwd, &args)?;
+            match short_id(&out.stdout) {
+                Some(short_id) if out.success => Ok(json!({
+                    "spawned": { "short_id": short_id, "cwd": cwd, "worktree": worktree }
+                })),
+                _ => {
+                    let said = [out.stdout.trim(), out.stderr.trim()]
+                        .into_iter()
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(" / ");
+                    Err(format!("새 세션을 띄우지 못했어요: {said}"))
+                }
+            }
+        })())
     }
 }
