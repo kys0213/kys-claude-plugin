@@ -4,6 +4,8 @@ export const KEY_PREFIX = 'kanban:session:'
 /** Bounds what one session keeps in the store every session shares (4 MiB in all). */
 const MAX_EVENTS = 8
 export const MAX_FIELD_CHARS = 200
+const MAX_FIRST_PROMPT_CHARS = 500
+const MAX_LAST_PROMPT_CHARS = 2_000
 
 type KanbanEvent = { name: string; detail: string | null; at: number }
 
@@ -16,7 +18,11 @@ export type AskQuestion = {
 
 type AskRecord = { questions: AskQuestion[]; at: number }
 
-type Activity = { tool: string; input: Record<string, string>; at: number }
+export type Activity = { tool: string; input: Record<string, string>; at: number }
+
+type Decision = { ask: string; recap: string | null; options: string[]; at: number }
+
+type Delivery = { id: string; kind: string; status: string; at: number }
 
 type TaskRecord = { subject: string; active: string | null; status: string }
 
@@ -27,13 +33,27 @@ export type SessionRecord = {
   session_id: string
   cwd: string
   repo: string | null
+  /** The main working tree of the session's repository. */
+  repo_root?: string | null
+  remote?: string | null
+  permission_mode?: string | null
   title: string | null
   first_prompt: string | null
+  last_prompt?: string | null
+  last_answer?: string | null
+  /** The reply just before the session started waiting mid-turn. */
+  pending_context?: string | null
+  turn_id?: string | null
   started_at: number
   heartbeat_at: number
   ended_reason: string | null
   events: KanbanEvent[]
   activity?: Activity | null
+  recent?: Activity[]
+  /** `id` names the request for a kanban answer; null when this session cannot take one. */
+  permission?: (Activity & { id: string | null }) | null
+  decision?: Decision | null
+  inbox?: Delivery | null
   tasks?: Record<string, TaskRecord>
   todos?: TodoRecord[]
   asks?: Record<string, AskRecord>
@@ -81,6 +101,8 @@ async function freshRecord($: EngineInterface, id: string, now: number): Promise
     session_id: id,
     cwd: await $.session.cwd(),
     repo: repo?.name ?? null,
+    repo_root: repo?.root ?? null,
+    remote: repo?.remote ?? null,
     title: null,
     first_prompt: null,
     started_at: now,
@@ -134,4 +156,18 @@ export async function record($: EngineInterface, s: RecordState, entry: Entry): 
 
   s.writes = s.writes.then(() => writeRecord($, entry)).catch(() => undefined)
   await s.writes
+}
+
+/** A prompt that starts work; `text` is null when no person wrote it, which keeps the request on record. */
+export async function recordPrompt($: EngineInterface, s: RecordState, text: string | null): Promise<void> {
+  await record($, s, {
+    name: 'prompt.submit',
+    ...(text === null ? {} : { fill: { first_prompt: text.slice(0, MAX_FIRST_PROMPT_CHARS) } }),
+    update: base => ({
+      last_prompt: text === null ? (base.last_prompt ?? null) : text.slice(0, MAX_LAST_PROMPT_CHARS),
+      decision: null,
+      pending_context: null,
+      permission: null,
+    }),
+  })
 }

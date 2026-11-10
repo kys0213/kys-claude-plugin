@@ -64,7 +64,6 @@ const PATH_FIELDS: [&str; 3] = ["file_path", "notebook_path", "path"];
 pub struct ProgressFacts<'a> {
     pub tasks: &'a [WorkItem],
     pub todos: &'a [WorkItem],
-    /// `None` when the card's column does not show the running tool.
     pub activity: Option<&'a Activity>,
 }
 
@@ -79,12 +78,43 @@ pub fn progress_line(facts: &ProgressFacts) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
-fn todo_part(tasks: &[WorkItem], todos: &[WorkItem]) -> Option<String> {
+/// The to-do list a session keeps: its Task list when it has one, else its
+/// TodoWrite list, without deleted items.
+pub fn live_items<'a>(tasks: &'a [WorkItem], todos: &'a [WorkItem]) -> Vec<&'a WorkItem> {
     let items = if tasks.is_empty() { todos } else { tasks };
-    let live: Vec<&WorkItem> = items
+    items
         .iter()
         .filter(|i| i.status != ItemStatus::Deleted)
-        .collect();
+        .collect()
+}
+
+/// The words an item is shown by: what it is doing while in progress, else
+/// what it is.
+pub fn item_text(item: &WorkItem) -> Option<String> {
+    let text = match item.status {
+        ItemStatus::InProgress => item.active.as_deref().or(item.subject.as_deref()),
+        _ => item.subject.as_deref().or(item.active.as_deref()),
+    };
+    text.map(fold).filter(|t| !t.is_empty())
+}
+
+/// The first of `fields` the input holds non-blank, with its name.
+pub fn first_field<'a>(
+    input: &[(String, String)],
+    fields: &[&'a str],
+) -> Option<(&'a str, String)> {
+    fields.iter().find_map(|field| {
+        input
+            .iter()
+            .find(|(name, _)| name == field)
+            .map(|(_, value)| fold(value))
+            .filter(|v| !v.is_empty())
+            .map(|v| (*field, v))
+    })
+}
+
+fn todo_part(tasks: &[WorkItem], todos: &[WorkItem]) -> Option<String> {
+    let live = live_items(tasks, todos);
     if live.is_empty() {
         return None;
     }
@@ -96,9 +126,7 @@ fn todo_part(tasks: &[WorkItem], todos: &[WorkItem]) -> Option<String> {
     let current = live
         .iter()
         .find(|i| i.status == ItemStatus::InProgress)
-        .and_then(|i| i.active.as_deref().or(i.subject.as_deref()))
-        .map(fold)
-        .filter(|s| !s.is_empty());
+        .and_then(|i| item_text(i));
     Some(match current {
         Some(current) => format!("{count} · {}", cut(&current, CUT_CHARS)),
         None => count,
@@ -106,22 +134,21 @@ fn todo_part(tasks: &[WorkItem], todos: &[WorkItem]) -> Option<String> {
 }
 
 fn activity_part(activity: &Activity) -> String {
-    let target = TARGET_FIELDS.iter().find_map(|field| {
-        let value = activity
-            .input
-            .iter()
-            .find(|(name, _)| name == field)
-            .map(|(_, value)| fold(value))
-            .filter(|v| !v.is_empty())?;
-        Some(if PATH_FIELDS.contains(field) {
+    format!("▸ {}", tool_line(activity))
+}
+
+/// `<tool>: <what it works on>`, the target cut to fit a card line.
+pub fn tool_line(activity: &Activity) -> String {
+    let target = first_field(&activity.input, &TARGET_FIELDS).map(|(field, value)| {
+        if PATH_FIELDS.contains(&field) {
             file_name(&value)
         } else {
             value
-        })
+        }
     });
     match target {
-        Some(target) => format!("▸ {}: {}", activity.tool, cut(&target, CUT_CHARS)),
-        None => format!("▸ {}", activity.tool),
+        Some(target) => format!("{}: {}", activity.tool, cut(&target, CUT_CHARS)),
+        None => activity.tool.clone(),
     }
 }
 

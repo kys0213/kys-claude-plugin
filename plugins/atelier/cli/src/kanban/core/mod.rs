@@ -1,7 +1,11 @@
 pub mod answer;
 pub mod board;
+pub mod detail;
 pub mod duration;
 pub mod layout;
 pub mod progress;
 pub mod question;
+pub mod repos;
+pub mod request;
+pub mod spawn;
 pub mod text;

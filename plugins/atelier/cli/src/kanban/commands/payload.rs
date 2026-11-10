@@ -1,11 +1,16 @@
 //! Stdin payloads: `kanban board` takes `{"sessions": [<v1 record>, ...]}`,
 //! `kanban answer` takes `{"questions": [...], "picks": [...]}`. A record this
 //! version cannot read is dropped here, before the board sees it.
+//!
+//! The field readers answer `None` for a field of the wrong type, which drops
+//! the record, and read an absent field the same as `null`.
 
 use crate::kanban::core::answer::Pick;
 use crate::kanban::core::board::{Event, SessionFact};
+use crate::kanban::core::detail::{Decision, Delivery, DeliveryStatus};
 use crate::kanban::core::progress::{Activity, ItemStatus, WorkItem};
 use crate::kanban::core::question::{Ask, Question, QuestionOption};
+use crate::kanban::core::request::{RequestKind, Status};
 use serde_json::{Map, Value};
 
 const VERSION: u64 = 1;
@@ -27,8 +32,15 @@ fn parse_record(value: &Value) -> Option<SessionFact> {
         session_id: value.get("session_id")?.as_str()?.to_string(),
         cwd: value.get("cwd")?.as_str()?.to_string(),
         repo: nullable_string(value, "repo")?,
+        repo_root: nullable_string(value, "repo_root")?,
+        remote: nullable_string(value, "remote")?,
+        permission_mode: nullable_string(value, "permission_mode")?,
         title: nullable_string(value, "title")?,
         first_prompt: nullable_string(value, "first_prompt")?,
+        last_prompt: nullable_string(value, "last_prompt")?,
+        last_answer: nullable_string(value, "last_answer")?,
+        pending_context: nullable_string(value, "pending_context")?,
+        turn_id: nullable_string(value, "turn_id")?,
         started_at: value.get("started_at")?.as_u64()?,
         heartbeat_at: value.get("heartbeat_at")?.as_u64()?,
         ended_reason: nullable_string(value, "ended_reason")?,
@@ -38,10 +50,18 @@ fn parse_record(value: &Value) -> Option<SessionFact> {
             .iter()
             .map(parse_event)
             .collect::<Option<Vec<_>>>()?,
-        activity: match value.get("activity") {
-            None | Some(Value::Null) => None,
-            Some(activity) => Some(parse_activity(activity)?),
+        activity: optional(value, "activity", parse_activity)?,
+        recent: optional_array(value, "recent")?
+            .iter()
+            .map(parse_activity)
+            .collect::<Option<Vec<_>>>()?,
+        permission: optional(value, "permission", parse_activity)?,
+        permission_id: match value.get("permission") {
+            Some(permission @ Value::Object(_)) => nullable_string(permission, "id")?,
+            _ => None,
         },
+        decision: optional(value, "decision", parse_decision)?,
+        inbox: optional(value, "inbox", parse_delivery)?,
         tasks: optional_object(value, "tasks")?
             .map(parse_tasks)
             .unwrap_or(Some(Vec::new()))?,
@@ -71,6 +91,37 @@ fn parse_activity(value: &Value) -> Option<Activity> {
         input,
         at: value.get("at")?.as_u64()?,
     })
+}
+
+fn parse_decision(value: &Value) -> Option<Decision> {
+    Some(Decision {
+        ask: value.get("ask")?.as_str()?.to_string(),
+        recap: nullable_string(value, "recap")?,
+        options: optional_array(value, "options")?
+            .iter()
+            .map(|o| Some(o.as_str()?.to_string()))
+            .collect::<Option<Vec<_>>>()?,
+        at: value.get("at")?.as_u64()?,
+    })
+}
+
+fn parse_delivery(value: &Value) -> Option<Delivery> {
+    let status = value.get("status")?.as_str()?;
+    Some(Delivery {
+        id: value.get("id")?.as_str()?.to_string(),
+        kind: RequestKind::parse(value.get("kind")?.as_str()?),
+        status: Status::parse(status)
+            .map(DeliveryStatus::Known)
+            .unwrap_or_else(|| DeliveryStatus::Unknown(status.to_string())),
+        at: value.get("at")?.as_u64()?,
+    })
+}
+
+fn optional<T>(value: &Value, key: &str, parse: fn(&Value) -> Option<T>) -> Option<Option<T>> {
+    match value.get(key) {
+        None | Some(Value::Null) => Some(None),
+        Some(field) => parse(field).map(Some),
+    }
 }
 
 /// Task ids are the engine's counters ("1", "2", ... "10"), so they are
@@ -163,8 +214,6 @@ fn parse_event(value: &Value) -> Option<Event> {
     })
 }
 
-/// Outer `None` rejects a wrong-typed field; absent and `null` both read as
-/// empty.
 fn optional_object<'a>(value: &'a Value, key: &str) -> Option<Option<&'a Map<String, Value>>> {
     match value.get(key) {
         None | Some(Value::Null) => Some(None),
@@ -173,8 +222,6 @@ fn optional_object<'a>(value: &'a Value, key: &str) -> Option<Option<&'a Map<Str
     }
 }
 
-/// Outer `None` rejects a wrong-typed field; absent and `null` both read as
-/// empty.
 fn optional_array<'a>(value: &'a Value, key: &str) -> Option<&'a [Value]> {
     match value.get(key) {
         None | Some(Value::Null) => Some(&[]),
@@ -183,8 +230,6 @@ fn optional_array<'a>(value: &'a Value, key: &str) -> Option<&'a [Value]> {
     }
 }
 
-/// Outer `None` rejects a wrong-typed field; absent and `null` both read as
-/// unset.
 fn nullable_string(value: &Value, key: &str) -> Option<Option<String>> {
     match value.get(key) {
         None | Some(Value::Null) => Some(None),

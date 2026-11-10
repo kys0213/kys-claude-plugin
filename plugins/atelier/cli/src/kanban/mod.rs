@@ -1,25 +1,25 @@
 //! Kanban subsystem — turns the session facts the hooks module keeps in
-//! `$.store` into the board its pane draws.
+//! `$.store` into the board its pane draws, and carries requests between
+//! sessions through their inboxes.
 //!
-//! ```text
-//! atelier kanban board --now <unix-ms> --stale-after <dur> --expire-after <dur> --width <cols> [--self <id>]
-//! atelier kanban answer
-//! ```
-//!
-//! Output contract: stdin JSON in, one line of stdout JSON out, and **always
-//! exit 0**. Unreadable stdin prints `{"error": ...}`; an argument error
-//! prints clap's message to stderr and nothing to stdout, so the caller's
-//! JSON parse fails and it shows its own fallback.
+//! Every subcommand prints one line of JSON and exits 0; a refused or failed
+//! request prints `{"error": ...}`.
 
 pub mod commands;
 pub mod core;
 
+use crate::kanban::commands::inbox::{ClockIds, FsInbox, ThreadPause};
 use crate::kanban::commands::payload::{parse_answer_request, parse_sessions};
+use crate::kanban::commands::requests::KanbanRequests;
+use crate::kanban::commands::spawn::{ClaudeLauncher, GitProbe};
 use crate::kanban::core::answer::compose;
-use crate::kanban::core::board::{build, Board, BoardParams, Card};
+use crate::kanban::core::board::{build, Action, Board, BoardParams, Card};
+use crate::kanban::core::detail::Detail;
 use crate::kanban::core::duration::parse_millis;
 use crate::kanban::core::layout::{fit, Layout};
 use crate::kanban::core::question::{Ask, Question};
+use crate::kanban::core::repos::{group, Repo};
+use crate::kanban::core::request::Sender;
 use crate::shared::process::read_stdin_raw;
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
@@ -57,6 +57,104 @@ pub enum Commands {
     },
     /// An open question and the picks made on the board → one answer per question
     Answer,
+    #[command(flatten)]
+    Request(RequestCommand),
+}
+
+#[derive(Subcommand)]
+pub enum RequestCommand {
+    /// Leaves a prompt in a session's inbox
+    Send {
+        #[arg(long)]
+        session: String,
+        /// `pane` for a person on the board, `agent` for a model
+        #[arg(long)]
+        from: String,
+        /// Names the sending session in an agent prompt's header
+        #[arg(long)]
+        from_label: Option<String>,
+        #[arg(long, allow_hyphen_values = true)]
+        text: String,
+    },
+    /// Leaves the answer to one permission request for the session that asked
+    Permit {
+        #[arg(long)]
+        session: String,
+        /// The permission request's id, as the board's card names it
+        #[arg(long)]
+        request: String,
+        /// `allow` or `deny`
+        #[arg(long)]
+        decision: String,
+    },
+    /// Leaves a stop for one turn in a session's inbox
+    Stop {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        turn: String,
+    },
+    /// A session's own inbox
+    Inbox {
+        #[command(subcommand)]
+        command: InboxCommand,
+    },
+    /// Starts a background session at a repository's main working tree
+    Spawn {
+        #[arg(long)]
+        cwd: String,
+        #[arg(long, allow_hyphen_values = true)]
+        text: String,
+        /// Runs the session in a new git worktree of this name
+        #[arg(long, allow_hyphen_values = true)]
+        worktree: Option<String>,
+        #[arg(long)]
+        from_label: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum InboxCommand {
+    /// Where the inbox is
+    Dir {
+        #[arg(long)]
+        session: String,
+    },
+    /// Claims every request and says which to act on
+    Take {
+        #[arg(long)]
+        session: String,
+        /// Current time, unix milliseconds
+        #[arg(long)]
+        now: u64,
+        /// Age after which a request is dropped (e.g. 60s)
+        #[arg(long, value_parser = parse_millis)]
+        ttl: u64,
+        /// The turn the session runs now; absent while it waits for a prompt
+        #[arg(long)]
+        turn: Option<String>,
+    },
+    /// Waits a little for the answer to one permission request
+    WaitPermit {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        request: String,
+        /// Current time, unix milliseconds
+        #[arg(long)]
+        now: u64,
+        /// Age after which an answer is dropped (e.g. 60s)
+        #[arg(long, value_parser = parse_millis)]
+        ttl: u64,
+        /// How long to wait for it (e.g. 2s)
+        #[arg(long = "for", value_parser = parse_millis)]
+        wait: u64,
+    },
+    /// Removes the inbox and what is left in it
+    Clear {
+        #[arg(long)]
+        session: String,
+    },
 }
 
 pub fn run_from<I, T>(argv: I) -> i32
@@ -83,7 +181,56 @@ fn card_json(card: &Card) -> Value {
         "is_self": card.is_self,
         "headline": card.headline(),
         "progress": card.progress,
+        "last_line": card.last_line,
+        "cwd": card.cwd,
+        "repo_root": card.repo_root,
+        "permission_mode": card.permission_mode,
+        "turn_id": card.turn_id,
+        "permission_id": card.permission_id,
+        "actions": action_ids(&card.actions),
+        "detail": detail_json(&card.detail),
         "asks": card.asks.iter().map(ask_json).collect::<Vec<_>>(),
+    })
+}
+
+fn action_ids(actions: &[Action]) -> Vec<&'static str> {
+    actions.iter().map(|a| a.id()).collect()
+}
+
+fn detail_json(detail: &Detail) -> Value {
+    json!({
+        "sections": detail
+            .sections
+            .iter()
+            .map(|s| json!({ "title": s.title, "lines": s.lines }))
+            .collect::<Vec<_>>(),
+        "decision": detail.decision.as_ref().map(|d| json!({
+            "ask": d.ask,
+            "recap": d.recap,
+            "options": d.options,
+        })),
+        "delivery": detail.delivery,
+    })
+}
+
+fn repo_json(repo: &Repo) -> Value {
+    json!({
+        "label": repo.label,
+        "root": repo.root,
+        "sessions": repo
+            .sessions
+            .iter()
+            .map(|s| json!({
+                "session_id": s.session_id,
+                "column": s.column.id(),
+                "cwd": s.cwd,
+                "permission_mode": s.permission_mode,
+                "actions": action_ids(&s.actions),
+                "subtitle": s.subtitle,
+                "last_line": s.last_line,
+                "delivery": s.delivery,
+            }))
+            .collect::<Vec<_>>(),
     })
 }
 
@@ -128,7 +275,64 @@ fn board_json(board: &Board, layout: &Layout) -> Value {
             })
         })
         .collect();
-    json!({ "columns": columns, "expired": board.expired, "layout": layout_json(layout) })
+    let repos: Vec<Value> = group(board).iter().map(repo_json).collect();
+    json!({
+        "columns": columns,
+        "repos": repos,
+        "expired": board.expired,
+        "layout": layout_json(layout),
+    })
+}
+
+fn run_request(command: RequestCommand) -> Value {
+    let inbox = FsInbox::from_env();
+    let requests = KanbanRequests {
+        inbox: &inbox,
+        pause: &ThreadPause,
+        ids: &ClockIds,
+        probe: &GitProbe,
+        launcher: &ClaudeLauncher,
+    };
+    match command {
+        RequestCommand::Send {
+            session,
+            from,
+            from_label,
+            text,
+        } => match Sender::parse(&from) {
+            Some(from) => requests.send(&session, from, from_label.as_deref(), &text),
+            None => json!({ "error": format!("--from 은 pane 또는 agent 예요 (받은 값: {from})") }),
+        },
+        RequestCommand::Stop { session, turn } => requests.stop(&session, &turn),
+        RequestCommand::Permit {
+            session,
+            request,
+            decision,
+        } => requests.permit(&session, &request, &decision),
+        RequestCommand::Inbox { command } => match command {
+            InboxCommand::Dir { session } => requests.dir(&session),
+            InboxCommand::Take {
+                session,
+                now,
+                ttl,
+                turn,
+            } => requests.take(&session, now, ttl, turn.as_deref()),
+            InboxCommand::WaitPermit {
+                session,
+                request,
+                now,
+                ttl,
+                wait,
+            } => requests.wait_permit(&session, &request, now, ttl, wait),
+            InboxCommand::Clear { session } => requests.clear(&session),
+        },
+        RequestCommand::Spawn {
+            cwd,
+            text,
+            worktree,
+            from_label,
+        } => requests.spawn(&cwd, &text, worktree.as_deref(), from_label.as_deref()),
+    }
 }
 
 pub fn run(cli: Cli) -> i32 {
@@ -172,6 +376,7 @@ pub fn run(cli: Cli) -> i32 {
             };
             println!("{out}");
         }
+        Commands::Request(command) => println!("{}", run_request(command)),
     }
     0
 }

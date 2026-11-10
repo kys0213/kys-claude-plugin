@@ -91,3 +91,13 @@ worktree 는 항상 epic 브랜치 위의 격리 수단이고, 메인은 epic �
 2. 관점을 정하고, 그 관점의 자문 teammate 가 이미 있으면 재사용해 델타 패킷만 보낸다. 없을 때만 관점마다 자문자를 하나씩 team member 로 배경 소집한다 — 이름은 세션 안에서 유니크하게, 역량은 메인보다 상위로 지정한다. 패킷은 `references/contracts.md §자문 계약`, 사용자 제약이 있으면 `references/contracts.md §역할별 모델 제약` 이 앞선다.
 3. 첫 자문자가 뜬 직후 spawn 확인을 한다 — 왕복이 성립하지 않으면 한 번 재판정하고, 그래도 아니면 폴백 없이 자문을 생략한다 — 에스컬레이션 직전이면 원래 에스컬레이션으로, `적극` 신호면 생략 사유(왕복 조율 비가용)를 기록하고 메인이 정해 진행한다.
 4. 권고를 모아 채택 판단을 내리고 기록한다 — 자문자는 게이트가 아니라 입력이다. 무거운 경로는 소집 전후로 토폴로지 가드를 돌린다 (`references/contracts.md §기록 위치와 형식`).
+
+## 세션 칸반으로 작업자 부리기
+
+같은 머신의 다른 Claude Code 세션(레포별 작업자)에게 일을 맡길 때의 순서다. 어느 세션에 맡길지, 새로 띄울지는 모델이 정한다.
+
+1. 보드를 읽는다 — 모드 툴 `mcp__atelier__kanban_board`(지연 로드면 ToolSearch 로 먼저 불러온다)의 `repos` 가 레포(메인 작업 트리 `root`)별 세션의 `column` · `cwd` · `permission_mode` · `actions` · `subtitle` · `last_line` · `delivery` 를 준다.
+2. 보낸다 — `actions` 에 `send` 가 있는 세션에만 `atelier kanban send --session <session_id> --from agent --from-label <이 세션의 레포 이름> --text <일>` 을 Bash 로 부른다. 일은 그 세션만 읽고도 끝낼 수 있게 쓴다(목표 · 파일 · 완료 조건).
+3. 띄운다 — `atelier kanban spawn --cwd <root> --from-label <이 세션의 레포 이름> --text <일>` 을 Bash 로 부른다. 그 `root` 를 `cwd` 로 쓰는 세션이 보드에 있으면 `--worktree <소문자-이름>` 을 붙인다.
+4. 출력을 읽는다 — `queued` · `spawned` 는 맡겨진 것이고, `error` 는 그 문장 그대로 보고한다. 보낸 일이 실행됐는지는 다음 보드 읽기의 그 세션 `delivery` 다.
+5. 완료 알림은 오지 않는다 — 결과가 필요한 시점에 보드를 다시 읽는다.

@@ -1,6 +1,7 @@
 //! Session facts → kanban board. Pure: the caller supplies `now`, the
 //! thresholds and every fact, so one snapshot always yields one board.
 
+use super::detail::{self, Decision, Delivery, Detail, DetailFacts, Phase};
 use super::duration::age_label;
 use super::progress::{progress_line, Activity, ProgressFacts, WorkItem};
 use super::question::Ask;
@@ -13,13 +14,23 @@ pub struct Event {
     pub at: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SessionFact {
     pub session_id: String,
     pub cwd: String,
     pub repo: Option<String>,
+    /// The main working tree of the session's repository.
+    pub repo_root: Option<String>,
+    pub remote: Option<String>,
+    pub permission_mode: Option<String>,
     pub title: Option<String>,
     pub first_prompt: Option<String>,
+    pub last_prompt: Option<String>,
+    pub last_answer: Option<String>,
+    /// The reply just before the session started waiting mid-turn.
+    pub pending_context: Option<String>,
+    /// The main loop's running turn; absent between turns.
+    pub turn_id: Option<String>,
     pub started_at: u64,
     pub heartbeat_at: u64,
     pub ended_reason: Option<String>,
@@ -27,9 +38,19 @@ pub struct SessionFact {
     pub events: Vec<Event>,
     /// The tool the main loop runs now; cleared when a turn ends.
     pub activity: Option<Activity>,
+    /// The main loop's latest tool calls this turn.
+    pub recent: Vec<Activity>,
+    /// The permission request the session raised last, until its tool ends.
+    pub permission: Option<Activity>,
+    /// The id the mod takes a kanban answer for that request by; absent when
+    /// the mod cannot take one.
+    pub permission_id: Option<String>,
+    /// The decision the last turn ended on, until the next turn starts.
+    pub decision: Option<Decision>,
+    pub inbox: Option<Delivery>,
     pub tasks: Vec<WorkItem>,
     pub todos: Vec<WorkItem>,
-    /// AskUserQuestion calls still open.
+    /// AskUserQuestion calls the mod has open.
     pub asks: Vec<Ask>,
 }
 
@@ -80,6 +101,30 @@ impl Column {
     }
 }
 
+/// What the board offers to do with a card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    Answer,
+    /// Reply with one of the options the turn ended on.
+    Decide,
+    /// Allow or deny the permission request.
+    Permit,
+    Send,
+    Stop,
+}
+
+impl Action {
+    pub fn id(self) -> &'static str {
+        match self {
+            Action::Answer => "answer",
+            Action::Decide => "decide",
+            Action::Permit => "permit",
+            Action::Send => "send",
+            Action::Stop => "stop",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Card {
     pub session_id: String,
@@ -89,6 +134,14 @@ pub struct Card {
     pub age: String,
     pub is_self: bool,
     pub progress: Option<String>,
+    pub last_line: Option<String>,
+    pub cwd: String,
+    pub repo_root: Option<String>,
+    pub permission_mode: Option<String>,
+    pub turn_id: Option<String>,
+    pub permission_id: Option<String>,
+    pub actions: Vec<Action>,
+    pub detail: Detail,
     /// Open questions, oldest first; empty unless the session waits on one.
     pub asks: Vec<Ask>,
 }
@@ -114,6 +167,7 @@ enum WaitReason {
     /// The tool asking, when the event names it.
     Permission(Option<String>),
     Question,
+    Decision,
     Input,
 }
 
@@ -123,7 +177,17 @@ impl WaitReason {
             WaitReason::Permission(Some(tool)) => format!("권한 요청: {tool}"),
             WaitReason::Permission(None) => "권한 요청".to_string(),
             WaitReason::Question => "질문".to_string(),
+            WaitReason::Decision => "결정 요청".to_string(),
             WaitReason::Input => "입력 요청".to_string(),
+        }
+    }
+
+    fn phase(&self) -> Phase {
+        match self {
+            WaitReason::Permission(_) => Phase::Permission,
+            WaitReason::Question => Phase::Question,
+            WaitReason::Decision => Phase::Decision,
+            WaitReason::Input => Phase::Input,
         }
     }
 }
@@ -138,12 +202,14 @@ enum State {
 enum Signal {
     Set(State),
     /// The engine drew its spinner again. No event marks a person answering a
-    /// permission dialog, but the spinner is hidden while one is open, so its
-    /// return after a wait for input is the answer. It also draws after a
-    /// turn ends, so it means nothing after any other state.
+    /// permission dialog, but the terminal hides the spinner while one is
+    /// open, so its return after a wait for input is the answer. It also draws
+    /// after a turn ends, so it means nothing after any other state.
     Resumed,
     Nothing,
 }
+
+const ASK_TOOL: &str = "AskUserQuestion";
 
 fn signal_of(event: &Event) -> Signal {
     let needs = |reason: WaitReason| Signal::Set(State::NeedsInput(reason));
@@ -151,7 +217,7 @@ fn signal_of(event: &Event) -> Signal {
         ("prompt.submit" | "turn.start" | "kanban.answer", _) => Signal::Set(State::Working),
         ("classic.PostToolUse" | "classic.PostToolUseFailure", _) => Signal::Set(State::Working),
         ("turn.complete" | "session.start", _) => Signal::Set(State::Idle),
-        ("classic.PermissionRequest", Some("AskUserQuestion")) => needs(WaitReason::Question),
+        ("classic.PermissionRequest", Some(ASK_TOOL)) => needs(WaitReason::Question),
         ("classic.PermissionRequest", tool) => {
             needs(WaitReason::Permission(tool.map(str::to_string)))
         }
@@ -163,13 +229,48 @@ fn signal_of(event: &Event) -> Signal {
     }
 }
 
+fn moves_past_a_question(event: &Event) -> bool {
+    match (event.name.as_str(), event.detail.as_deref()) {
+        ("classic.PermissionRequest", Some(ASK_TOOL)) => false,
+        ("classic.PermissionRequest", _) => true,
+        (name, _) => matches!(
+            name,
+            "prompt.submit"
+                | "turn.complete"
+                | "session.start"
+                | "kanban.answer"
+                | "classic.PostToolUse"
+                | "classic.PostToolUseFailure"
+        ),
+    }
+}
+
+fn open_asks(fact: &SessionFact) -> Vec<Ask> {
+    let mut asks: Vec<Ask> = fact
+        .asks
+        .iter()
+        .filter(|ask| {
+            !fact
+                .events
+                .iter()
+                .any(|e| e.at > ask.at && moves_past_a_question(e))
+        })
+        .cloned()
+        .collect();
+    asks.sort_by(|a, b| {
+        a.at.cmp(&b.at)
+            .then_with(|| a.tool_use_id.cmp(&b.tool_use_id))
+    });
+    asks
+}
+
 fn same_kind(a: &State, b: &State) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b)
 }
 
 /// A `permission_prompt` notification follows the request it repeats, so a
 /// repeated state keeps its first event and that event's reason.
-fn current_state(fact: &SessionFact) -> (State, u64) {
+fn event_state(fact: &SessionFact) -> (State, u64) {
     let mut current: Option<(State, u64)> = None;
     for event in &fact.events {
         let waiting = matches!(current, Some((State::NeedsInput(_), _)));
@@ -186,21 +287,36 @@ fn current_state(fact: &SessionFact) -> (State, u64) {
     current.unwrap_or((State::Idle, fact.started_at))
 }
 
-fn label_of(fact: &SessionFact) -> String {
-    let repo_name = fact
-        .repo
-        .as_deref()
-        .and_then(|r| r.rsplit('/').next())
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    if let Some(name) = repo_name {
-        return name.to_string();
+/// An open question waits whatever the events say, as some surfaces draw the
+/// spinner under a dialog; a decision left by the last turn waits once the
+/// turn is over.
+fn current_state(fact: &SessionFact, asks: &[Ask]) -> (State, u64) {
+    if let Some(first) = asks.first() {
+        return (State::NeedsInput(WaitReason::Question), first.at);
     }
-    fact.cwd
-        .trim_end_matches('/')
-        .rsplit('/')
+    match event_state(fact) {
+        (State::Idle, at) if fact.decision.is_some() => {
+            (State::NeedsInput(WaitReason::Decision), at)
+        }
+        other => other,
+    }
+}
+
+fn last_path_part(path: &str) -> Option<&str> {
+    path.trim_end_matches('/')
+        .rsplit(['/', ':'])
         .next()
+        .map(|s| s.trim_end_matches(".git"))
+        .map(str::trim)
         .filter(|s| !s.is_empty())
+}
+
+fn label_of(fact: &SessionFact) -> String {
+    [&fact.repo, &fact.remote, &fact.repo_root]
+        .into_iter()
+        .flatten()
+        .find_map(|s| last_path_part(s))
+        .or_else(|| last_path_part(&fact.cwd))
         .unwrap_or("/")
         .to_string()
 }
@@ -208,21 +324,38 @@ fn label_of(fact: &SessionFact) -> String {
 const SUBTITLE_CHARS: usize = 60;
 
 fn subtitle_of(fact: &SessionFact) -> Option<String> {
-    let folded = [&fact.title, &fact.first_prompt]
+    let folded = [&fact.title, &fact.first_prompt, &fact.last_prompt]
         .into_iter()
         .flatten()
-        .map(|s| fold(s))
+        .map(|s| fold(&detail::clean(s)))
         .find(|s| !s.is_empty())?;
     Some(cut(&folded, SUBTITLE_CHARS))
 }
 
-fn open_asks(fact: &SessionFact) -> Vec<Ask> {
-    let mut asks = fact.asks.clone();
-    asks.sort_by(|a, b| {
-        a.at.cmp(&b.at)
-            .then_with(|| a.tool_use_id.cmp(&b.tool_use_id))
-    });
-    asks
+fn actions_of(state: Option<&State>, fact: &SessionFact) -> Vec<Action> {
+    let stop = fact.turn_id.as_ref().map(|_| Action::Stop);
+    match state {
+        None => Vec::new(),
+        Some(State::NeedsInput(WaitReason::Question)) => {
+            [Some(Action::Answer), stop].into_iter().flatten().collect()
+        }
+        Some(State::NeedsInput(WaitReason::Decision)) => vec![Action::Decide, Action::Send],
+        Some(State::NeedsInput(WaitReason::Permission(_))) => {
+            let permit = fact.permission_id.as_ref().map(|_| Action::Permit);
+            [permit, stop].into_iter().flatten().collect()
+        }
+        Some(State::NeedsInput(_) | State::Working) => stop.into_iter().collect(),
+        Some(State::Idle) => vec![Action::Send],
+    }
+}
+
+fn phase_of(state: Option<&State>) -> Phase {
+    match state {
+        None => Phase::Stale,
+        Some(State::NeedsInput(reason)) => reason.phase(),
+        Some(State::Working) => Phase::Working,
+        Some(State::Idle) => Phase::Idle,
+    }
 }
 
 struct Placed {
@@ -233,13 +366,15 @@ struct Placed {
 
 fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
     let silent_for = params.now.saturating_sub(fact.heartbeat_at);
-    let state = (silent_for <= params.stale_after).then(|| current_state(fact));
+    let asks = open_asks(fact);
+    let state = (silent_for <= params.stale_after).then(|| current_state(fact, &asks));
     let (column, reason, since) = match &state {
         None => (Column::Stale, None, fact.heartbeat_at),
         Some((State::NeedsInput(reason), at)) => (Column::NeedsInput, Some(reason.label()), *at),
         Some((State::Working, at)) => (Column::Working, None, *at),
         Some((State::Idle, at)) => (Column::Idle, None, *at),
     };
+    let state = state.map(|(s, _)| s);
     let progress = match column {
         Column::Stale => None,
         _ => progress_line(&ProgressFacts {
@@ -248,10 +383,22 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
             activity: fact.activity.as_ref().filter(|_| column == Column::Working),
         }),
     };
-    let asks = match state {
-        Some((State::NeedsInput(WaitReason::Question), _)) => open_asks(fact),
-        _ => Vec::new(),
-    };
+    let detail = detail::build(
+        phase_of(state.as_ref()),
+        &DetailFacts {
+            last_prompt: fact.last_prompt.as_deref(),
+            last_answer: fact.last_answer.as_deref(),
+            pending_context: fact.pending_context.as_deref(),
+            permission: fact.permission.as_ref(),
+            decision: fact.decision.as_ref(),
+            tasks: &fact.tasks,
+            todos: &fact.todos,
+            recent: &fact.recent,
+            inbox: fact.inbox.as_ref(),
+        },
+        params.now,
+    );
+    let is_question = matches!(state, Some(State::NeedsInput(WaitReason::Question)));
     Placed {
         column,
         sort_at: since,
@@ -263,7 +410,21 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
             age: age_label(params.now.saturating_sub(since)),
             is_self: params.self_id.as_deref() == Some(fact.session_id.as_str()),
             progress,
-            asks,
+            last_line: match column {
+                Column::Idle => detail::last_line(fact.last_answer.as_deref()),
+                _ => None,
+            },
+            cwd: fact.cwd.clone(),
+            repo_root: fact.repo_root.clone(),
+            permission_mode: fact.permission_mode.clone(),
+            turn_id: fact.turn_id.clone(),
+            permission_id: match state {
+                Some(State::NeedsInput(WaitReason::Permission(_))) => fact.permission_id.clone(),
+                _ => None,
+            },
+            actions: actions_of(state.as_ref(), fact),
+            detail,
+            asks: if is_question { asks } else { Vec::new() },
         },
     }
 }
@@ -321,17 +482,10 @@ mod tests {
         SessionFact {
             session_id: "s".to_string(),
             cwd: "/w/p".to_string(),
-            repo: None,
-            title: None,
-            first_prompt: None,
             started_at: 1,
             heartbeat_at: 100,
-            ended_reason: None,
             events,
-            activity: None,
-            tasks: Vec::new(),
-            todos: Vec::new(),
-            asks: Vec::new(),
+            ..SessionFact::default()
         }
     }
 
@@ -343,7 +497,7 @@ mod tests {
             event("classic.Notification", Some("permission_prompt"), 26),
         ]);
         assert_eq!(
-            current_state(&f),
+            event_state(&f),
             (
                 State::NeedsInput(WaitReason::Permission(Some("Bash".to_string()))),
                 20
@@ -359,7 +513,7 @@ mod tests {
             event("classic.PermissionRequest", Some("Edit"), 30),
         ]);
         assert_eq!(
-            current_state(&f),
+            event_state(&f),
             (
                 State::NeedsInput(WaitReason::Permission(Some("Edit".to_string()))),
                 30
@@ -369,6 +523,14 @@ mod tests {
 
     #[test]
     fn no_state_event_falls_back_to_started_at() {
-        assert_eq!(current_state(&fact(vec![])), (State::Idle, 1));
+        assert_eq!(event_state(&fact(vec![])), (State::Idle, 1));
+    }
+
+    #[test]
+    fn the_label_part_of_a_remote_or_path_drops_the_git_suffix() {
+        assert_eq!(last_path_part("git@h:o/r.git"), Some("r"));
+        assert_eq!(last_path_part("git@h:r.git"), Some("r"));
+        assert_eq!(last_path_part("/w/p/"), Some("p"));
+        assert_eq!(last_path_part("/"), None);
     }
 }
