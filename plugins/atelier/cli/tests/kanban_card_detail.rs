@@ -503,3 +503,111 @@ fn a_wrong_typed_detail_field_skips_the_record() {
         .sum();
     assert_eq!(total, 0);
 }
+
+#[test]
+fn a_question_stays_open_through_a_queued_prompt_and_other_tools() {
+    let (column, card) = only(json!([session_with(
+        "s",
+        json!([
+            event(
+                "classic.PermissionRequest",
+                Some("AskUserQuestion"),
+                30 * SEC
+            ),
+            event("prompt.submit", None, 20 * SEC),
+            event("classic.PostToolUse", Some("Bash"), 15 * SEC),
+            event("classic.PermissionRequest", Some("Bash"), 10 * SEC),
+        ]),
+        json!({ "asks": color_ask(30 * SEC) })
+    )]));
+    assert_eq!(column, "needs_input");
+    assert_eq!(card["reason"], "질문");
+    assert_eq!(card["asks"][0]["tool_use_id"], "tu-1");
+}
+
+#[test]
+fn a_question_ends_with_its_own_result_or_the_turn() {
+    for ended in [
+        event("classic.PostToolUse", Some("AskUserQuestion"), 5 * SEC),
+        event(
+            "classic.PostToolUseFailure",
+            Some("AskUserQuestion"),
+            5 * SEC,
+        ),
+        event("kanban.answer", None, 5 * SEC),
+        event("turn.complete", None, 5 * SEC),
+    ] {
+        let (_, card) = only(json!([session_with(
+            "s",
+            json!([event("turn.start", None, 30 * SEC), ended.clone()]),
+            json!({ "asks": color_ask(10 * SEC) })
+        )]));
+        assert_eq!(card["asks"], json!([]), "{ended}");
+    }
+}
+
+#[test]
+fn the_spinner_does_not_end_a_question_even_without_its_record() {
+    let (column, card) = only(json!([session_with(
+        "s",
+        json!([
+            event(
+                "classic.PermissionRequest",
+                Some("AskUserQuestion"),
+                20 * SEC
+            ),
+            event("ui.spinner", None, 19 * SEC),
+        ]),
+        json!({})
+    )]));
+    assert_eq!(column, "needs_input");
+    assert_eq!(card["reason"], "질문");
+}
+
+#[test]
+fn the_request_shown_is_the_latest_one_a_person_wrote() {
+    let (_, card) = only(json!([session_with(
+        "s",
+        json!([event("turn.complete", None, 5 * SEC)]),
+        json!({
+            "last_prompt": "<side-sessions-event>None of the sessions</side-sessions-event>",
+            "prompts": [
+                { "text": "Fix CORS", "origin": "composer", "at": NOW - 9 * MIN },
+                { "text": "Run lint", "origin": "kanban", "at": NOW - 8 * MIN },
+                { "text": "<side-sessions-event>None of the sessions you started is working now</side-sessions-event>", "origin": "sdk", "at": NOW - 7 * MIN },
+                { "text": "<task-notification>done</task-notification>", "origin": "task-notification", "at": NOW - 6 * MIN },
+                { "text": "Scheduled check", "origin": "scheduled-trigger", "at": NOW - 5 * MIN },
+            ],
+        })
+    )]));
+    assert_eq!(
+        section(&card, "직전 요청"),
+        Some(vec!["Run lint".to_string()])
+    );
+}
+
+#[test]
+fn an_event_written_as_a_first_prompt_is_not_the_subtitle() {
+    let (_, card) = only(json!([session_with(
+        "s",
+        json!([event("turn.complete", None, 5 * SEC)]),
+        json!({
+            "first_prompt": "<side-sessions-event>None of the sessions you started is working now",
+            "prompts": [{ "text": "Fix CORS", "origin": "sdk", "at": NOW - MIN }],
+        })
+    )]));
+    assert_eq!(card["subtitle"], "Fix CORS");
+}
+
+#[test]
+fn a_record_without_prompts_still_shows_its_last_prompt() {
+    let (_, card) = only(json!([session_with(
+        "s",
+        json!([event("turn.complete", None, 5 * SEC)]),
+        json!({ "last_prompt": "Old style record" })
+    )]));
+    assert_eq!(
+        section(&card, "직전 요청"),
+        Some(vec!["Old style record".to_string()])
+    );
+}

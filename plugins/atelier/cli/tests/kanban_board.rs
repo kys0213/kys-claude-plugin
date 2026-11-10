@@ -835,7 +835,8 @@ fn an_open_question_is_carried_on_the_card_while_it_waits() {
 fn a_question_is_not_offered_once_the_session_moved_on() {
     let asks = json!({ "tu-1": { "questions": [color_question()], "at": NOW - 9 * SEC } });
     for events in [
-        json!([event("classic.PermissionRequest", Some("Bash"), 5 * SEC)]),
+        json!([event("turn.complete", None, 5 * SEC)]),
+        json!([event("turn.start", None, 5 * SEC)]),
         json!([
             event(
                 "classic.PermissionRequest",

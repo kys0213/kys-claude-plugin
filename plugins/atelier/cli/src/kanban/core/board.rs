@@ -4,6 +4,7 @@
 use super::detail::{self, Decision, Delivery, Detail, DetailFacts, Phase};
 use super::duration::age_label;
 use super::progress::{progress_line, Activity, ProgressFacts, WorkItem};
+use super::prompt::{is_wrapped_event, latest_person_prompt, PromptFact};
 use super::question::Ask;
 use super::text::{cut, fold};
 
@@ -26,6 +27,8 @@ pub struct SessionFact {
     pub title: Option<String>,
     pub first_prompt: Option<String>,
     pub last_prompt: Option<String>,
+    /// Oldest first.
+    pub prompts: Vec<PromptFact>,
     pub last_answer: Option<String>,
     /// The reply just before the session started waiting mid-turn.
     pub pending_context: Option<String>,
@@ -229,18 +232,14 @@ fn signal_of(event: &Event) -> Signal {
     }
 }
 
+/// A question's own result, an answer from the board, or a turn boundary; a
+/// prompt queued while the dialog is open or another tool's events are not.
 fn moves_past_a_question(event: &Event) -> bool {
     match (event.name.as_str(), event.detail.as_deref()) {
-        ("classic.PermissionRequest", Some(ASK_TOOL)) => false,
-        ("classic.PermissionRequest", _) => true,
+        ("classic.PostToolUse" | "classic.PostToolUseFailure", detail) => detail == Some(ASK_TOOL),
         (name, _) => matches!(
             name,
-            "prompt.submit"
-                | "turn.complete"
-                | "session.start"
-                | "kanban.answer"
-                | "classic.PostToolUse"
-                | "classic.PostToolUseFailure"
+            "turn.start" | "turn.complete" | "session.start" | "kanban.answer"
         ),
     }
 }
@@ -273,14 +272,15 @@ fn same_kind(a: &State, b: &State) -> bool {
 fn event_state(fact: &SessionFact) -> (State, u64) {
     let mut current: Option<(State, u64)> = None;
     for event in &fact.events {
-        let waiting = matches!(current, Some((State::NeedsInput(_), _)));
+        let resumable =
+            matches!(current, Some((State::NeedsInput(ref r), _)) if *r != WaitReason::Question);
         match signal_of(event) {
             Signal::Set(state)
                 if current
                     .as_ref()
                     .is_some_and(|(cur, _)| same_kind(cur, &state)) => {}
             Signal::Set(state) => current = Some((state, event.at)),
-            Signal::Resumed if waiting => current = Some((State::Working, event.at)),
+            Signal::Resumed if resumable => current = Some((State::Working, event.at)),
             Signal::Resumed | Signal::Nothing => {}
         }
     }
@@ -324,12 +324,20 @@ fn label_of(fact: &SessionFact) -> String {
 const SUBTITLE_CHARS: usize = 60;
 
 fn subtitle_of(fact: &SessionFact) -> Option<String> {
-    let folded = [&fact.title, &fact.first_prompt, &fact.last_prompt]
+    let first = fact
+        .first_prompt
+        .as_deref()
+        .filter(|p| !is_wrapped_event(p));
+    let folded = [fact.title.as_deref(), first, person_prompt(fact)]
         .into_iter()
         .flatten()
         .map(|s| fold(&detail::clean(s)))
         .find(|s| !s.is_empty())?;
     Some(cut(&folded, SUBTITLE_CHARS))
+}
+
+fn person_prompt(fact: &SessionFact) -> Option<&str> {
+    latest_person_prompt(&fact.prompts, fact.last_prompt.as_deref())
 }
 
 fn actions_of(state: Option<&State>, fact: &SessionFact) -> Vec<Action> {
@@ -386,7 +394,7 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
     let detail = detail::build(
         phase_of(state.as_ref()),
         &DetailFacts {
-            last_prompt: fact.last_prompt.as_deref(),
+            last_prompt: person_prompt(fact),
             last_answer: fact.last_answer.as_deref(),
             pending_context: fact.pending_context.as_deref(),
             permission: fact.permission.as_ref(),
