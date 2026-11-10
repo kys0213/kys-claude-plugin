@@ -200,6 +200,7 @@ fn repo_json(repo: &Repo) -> Value {
                 "actions": action_ids(&s.actions),
                 "subtitle": s.subtitle,
                 "last_line": s.last_line,
+                "delivery": s.delivery,
             }))
             .collect::<Vec<_>>(),
     })

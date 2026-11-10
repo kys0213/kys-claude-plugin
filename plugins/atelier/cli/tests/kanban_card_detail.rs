@@ -472,7 +472,7 @@ fn sessions_are_grouped_by_repository_root_for_the_orchestrator() {
     let idle = session(
         "a1",
         json!([event("turn.complete", None, 5 * SEC)]),
-        json!({ "repo_root": "/w/api", "remote": "git@h:o/api.git", "permission_mode": "default", "last_prompt": "Fix CORS", "last_answer": "Fixed CORS." }),
+        json!({ "repo_root": "/w/api", "remote": "git@h:o/api.git", "permission_mode": "default", "last_prompt": "Fix CORS", "last_answer": "Fixed CORS.", "inbox": { "id": "r1", "kind": "prompt", "status": "delivered", "at": NOW - 4 * SEC } }),
     );
     let mut worktree = session(
         "a2",
@@ -490,15 +490,15 @@ fn sessions_are_grouped_by_repository_root_for_the_orchestrator() {
                 "label": "api",
                 "root": "/w/api",
                 "sessions": [
-                    { "session_id": "a2", "column": "working", "cwd": "/w/api/.claude/worktrees/x", "permission_mode": null, "actions": ["stop"], "subtitle": null, "last_line": null },
-                    { "session_id": "a1", "column": "idle", "cwd": "/work/project-a", "permission_mode": "default", "actions": ["send"], "subtitle": "Fix CORS", "last_line": "직전: Fixed CORS." },
+                    { "session_id": "a2", "column": "working", "cwd": "/w/api/.claude/worktrees/x", "permission_mode": null, "actions": ["stop"], "subtitle": null, "last_line": null, "delivery": null },
+                    { "session_id": "a1", "column": "idle", "cwd": "/work/project-a", "permission_mode": "default", "actions": ["send"], "subtitle": "Fix CORS", "last_line": "직전: Fixed CORS.", "delivery": "보낸 요청: 전달됐어요 · 4s" },
                 ],
             },
             {
                 "label": "notes",
                 "root": null,
                 "sessions": [
-                    { "session_id": "n1", "column": "idle", "cwd": "/tmp/notes", "permission_mode": null, "actions": ["send"], "subtitle": null, "last_line": null },
+                    { "session_id": "n1", "column": "idle", "cwd": "/tmp/notes", "permission_mode": null, "actions": ["send"], "subtitle": null, "last_line": null, "delivery": null },
                 ],
             },
         ])
