@@ -1,47 +1,7 @@
-use assert_cmd::Command;
+mod kanban_support;
+
+use kanban_support::{board, event, session_with, MIN, NOW, SEC};
 use serde_json::{json, Value};
-
-const NOW: u64 = 1_800_000_000_000;
-const SEC: u64 = 1_000;
-const MIN: u64 = 60 * SEC;
-
-fn board(sessions: Value) -> Value {
-    let output = Command::cargo_bin("atelier")
-        .expect("locate `atelier` cargo binary")
-        .args(["kanban", "board", "--now", &NOW.to_string()])
-        .args(["--stale-after", "2m", "--expire-after", "24h"])
-        .args(["--width", "100", "--self", "self-id"])
-        .write_stdin(json!({ "sessions": sessions }).to_string())
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    serde_json::from_slice(&output).expect("valid JSON on stdout")
-}
-
-fn session(id: &str, events: Value, extra: Value) -> Value {
-    let mut record = json!({
-        "v": 1,
-        "session_id": id,
-        "cwd": "/work/project-a",
-        "repo": null,
-        "title": null,
-        "first_prompt": null,
-        "started_at": NOW - 30 * MIN,
-        "heartbeat_at": NOW - 5 * SEC,
-        "ended_reason": null,
-        "events": events,
-    });
-    for (key, value) in extra.as_object().expect("extra fields") {
-        record[key] = value.clone();
-    }
-    record
-}
-
-fn event(name: &str, detail: Option<&str>, ago: u64) -> Value {
-    json!({ "name": name, "detail": detail, "at": NOW - ago })
-}
 
 fn only(sessions: Value) -> (String, Value) {
     let b = board(sessions);
@@ -107,7 +67,7 @@ fn decision() -> Value {
 
 #[test]
 fn an_open_question_waits_for_input_even_when_no_permission_event_came() {
-    let (column, card) = only(json!([session(
+    let (column, card) = only(json!([session_with(
         "s",
         json!([event("turn.start", None, 30 * SEC)]),
         json!({ "asks": color_ask(10 * SEC) })
@@ -120,7 +80,7 @@ fn an_open_question_waits_for_input_even_when_no_permission_event_came() {
 
 #[test]
 fn an_open_question_waits_for_input_even_after_the_spinner_redraws() {
-    let (column, _) = only(json!([session(
+    let (column, _) = only(json!([session_with(
         "s",
         json!([
             event(
@@ -137,7 +97,7 @@ fn an_open_question_waits_for_input_even_after_the_spinner_redraws() {
 
 #[test]
 fn a_stale_session_with_an_open_question_is_still_stale() {
-    let mut record = session("s", json!([]), json!({ "asks": color_ask(10 * MIN) }));
+    let mut record = session_with("s", json!([]), json!({ "asks": color_ask(10 * MIN) }));
     record["heartbeat_at"] = json!(NOW - 10 * MIN);
     let (column, _) = only(json!([record]));
     assert_eq!(column, "stale");
@@ -145,7 +105,7 @@ fn a_stale_session_with_an_open_question_is_still_stale() {
 
 #[test]
 fn a_decision_left_at_the_end_of_a_turn_waits_for_input() {
-    let (column, card) = only(json!([session(
+    let (column, card) = only(json!([session_with(
         "s",
         json!([event("turn.complete", None, 15 * SEC)]),
         json!({ "decision": decision() })
@@ -166,7 +126,7 @@ fn a_decision_left_at_the_end_of_a_turn_waits_for_input() {
 
 #[test]
 fn a_decision_means_nothing_once_a_new_turn_runs() {
-    let (column, card) = only(json!([session(
+    let (column, card) = only(json!([session_with(
         "s",
         json!([
             event("turn.complete", None, 30 * SEC),
@@ -180,7 +140,7 @@ fn a_decision_means_nothing_once_a_new_turn_runs() {
 
 #[test]
 fn each_column_offers_its_own_actions() {
-    let working = session(
+    let working = session_with(
         "w",
         json!([event("turn.start", None, 5 * SEC)]),
         json!({ "turn_id": "t-1" }),
@@ -189,28 +149,28 @@ fn each_column_offers_its_own_actions() {
     assert_eq!(actions(&card), ["stop"]);
     assert_eq!(card["turn_id"], "t-1");
 
-    let idle = session(
+    let idle = session_with(
         "i",
         json!([event("turn.complete", None, 5 * SEC)]),
         json!({}),
     );
     assert_eq!(actions(&only(json!([idle])).1), ["send"]);
 
-    let asking = session(
+    let asking = session_with(
         "q",
         json!([event("turn.start", None, 30 * SEC)]),
         json!({ "asks": color_ask(10 * SEC), "turn_id": "t-3" }),
     );
     assert_eq!(actions(&only(json!([asking])).1), ["answer", "stop"]);
 
-    let permission = session(
+    let permission = session_with(
         "p",
         json!([event("classic.PermissionRequest", Some("Bash"), 10 * SEC)]),
         json!({ "turn_id": "t-4" }),
     );
     assert_eq!(actions(&only(json!([permission])).1), ["stop"]);
 
-    let mut stale = session(
+    let mut stale = session_with(
         "x",
         json!([event("turn.start", None, 10 * MIN)]),
         json!({ "turn_id": "t-5" }),
@@ -221,7 +181,7 @@ fn each_column_offers_its_own_actions() {
 
 #[test]
 fn the_kanban_request_header_is_not_shown_as_the_subtitle_or_the_prompt() {
-    let (_, card) = only(json!([session(
+    let (_, card) = only(json!([session_with(
         "s",
         json!([event("turn.complete", None, 5 * SEC)]),
         json!({
@@ -238,7 +198,7 @@ fn the_kanban_request_header_is_not_shown_as_the_subtitle_or_the_prompt() {
 
 #[test]
 fn injected_reminders_are_stripped_from_the_subtitle_and_the_prompt() {
-    let (_, card) = only(json!([session(
+    let (_, card) = only(json!([session_with(
         "s",
         json!([event("turn.complete", None, 5 * SEC)]),
         json!({
@@ -255,7 +215,7 @@ fn injected_reminders_are_stripped_from_the_subtitle_and_the_prompt() {
 
 #[test]
 fn a_first_prompt_that_is_only_a_cut_reminder_falls_back_to_the_last_prompt() {
-    let (_, card) = only(json!([session(
+    let (_, card) = only(json!([session_with(
         "s",
         json!([event("turn.complete", None, 5 * SEC)]),
         json!({
@@ -268,7 +228,8 @@ fn a_first_prompt_that_is_only_a_cut_reminder_falls_back_to_the_last_prompt() {
 
 #[test]
 fn the_label_comes_from_the_remote_then_the_repo_root() {
-    let label = |extra: Value| only(json!([session("s", json!([]), extra)])).1["label"].clone();
+    let label =
+        |extra: Value| only(json!([session_with("s", json!([]), extra)])).1["label"].clone();
     assert_eq!(
         label(
             json!({ "remote": "git@github.com:kys0213/kys-claude-plugin.git", "repo_root": "/w/x" })
@@ -291,7 +252,7 @@ fn the_label_comes_from_the_remote_then_the_repo_root() {
 
 #[test]
 fn an_idle_card_shows_what_was_done_just_before() {
-    let (_, card) = only(json!([session(
+    let (_, card) = only(json!([session_with(
         "s",
         json!([event("turn.complete", None, 5 * SEC)]),
         json!({
@@ -320,7 +281,7 @@ fn an_idle_card_shows_what_was_done_just_before() {
 
 #[test]
 fn a_working_card_shows_the_request_the_whole_todo_list_and_the_recent_tools() {
-    let (_, card) = only(json!([session(
+    let (_, card) = only(json!([session_with(
         "s",
         json!([event("turn.start", None, 30 * SEC)]),
         json!({
@@ -368,7 +329,7 @@ fn a_long_todo_list_folds_the_completed_items() {
         .collect();
     todos.push(json!({ "status": "in_progress", "active": "now" }));
     todos.push(json!({ "status": "pending", "active": "next" }));
-    let (_, card) = only(json!([session(
+    let (_, card) = only(json!([session_with(
         "s",
         json!([event("turn.start", None, 30 * SEC)]),
         json!({ "todos": todos })
@@ -385,7 +346,7 @@ fn a_long_todo_list_folds_the_completed_items() {
 
 #[test]
 fn a_permission_the_mod_can_take_an_answer_for_offers_allow_and_deny() {
-    let (_, card) = only(json!([session(
+    let (_, card) = only(json!([session_with(
         "s",
         json!([event("classic.PermissionRequest", Some("Bash"), 10 * SEC)]),
         json!({
@@ -396,7 +357,7 @@ fn a_permission_the_mod_can_take_an_answer_for_offers_allow_and_deny() {
     assert_eq!(actions(&card), ["permit", "stop"]);
     assert_eq!(card["permission_id"], "t-1-7");
 
-    let (_, older) = only(json!([session(
+    let (_, older) = only(json!([session_with(
         "s",
         json!([event("classic.PermissionRequest", Some("Bash"), 10 * SEC)]),
         json!({ "turn_id": "t-1", "permission": { "tool": "Bash", "input": {}, "at": NOW - 10 * SEC } })
@@ -407,7 +368,7 @@ fn a_permission_the_mod_can_take_an_answer_for_offers_allow_and_deny() {
 
 #[test]
 fn a_permission_wait_shows_what_it_asks_for_and_the_reply_before_it() {
-    let (column, card) = only(json!([session(
+    let (column, card) = only(json!([session_with(
         "s",
         json!([event("classic.PermissionRequest", Some("Bash"), 10 * SEC)]),
         json!({
@@ -435,7 +396,7 @@ fn a_permission_wait_shows_what_it_asks_for_and_the_reply_before_it() {
 
 #[test]
 fn control_characters_are_dropped_from_replies() {
-    let (_, card) = only(json!([session(
+    let (_, card) = only(json!([session_with(
         "s",
         json!([event("turn.complete", None, 5 * SEC)]),
         json!({ "last_answer": "\u{1b}[31mred\u{1b}[0m done\u{7}" })
@@ -448,7 +409,7 @@ fn control_characters_are_dropped_from_replies() {
 
 #[test]
 fn the_last_delivery_of_a_kanban_request_is_shown() {
-    let (_, card) = only(json!([session(
+    let (_, card) = only(json!([session_with(
         "s",
         json!([event("turn.complete", None, 5 * SEC)]),
         json!({ "inbox": { "id": "r1", "kind": "prompt", "status": "busy", "at": NOW - 4 * SEC } })
@@ -468,7 +429,7 @@ fn each_delivery_outcome_reads_as_a_sentence() {
         ("unknown", "invalid", "보낸 요청: invalid · 4s"),
         ("prompt", "queued-later", "보낸 요청: queued-later · 4s"),
     ] {
-        let (_, card) = only(json!([session(
+        let (_, card) = only(json!([session_with(
             "s",
             json!([event("turn.complete", None, 5 * SEC)]),
             json!({ "inbox": { "id": "r1", "kind": kind, "status": status, "at": NOW - 4 * SEC } })
@@ -479,7 +440,7 @@ fn each_delivery_outcome_reads_as_a_sentence() {
 
 #[test]
 fn cards_carry_where_the_session_runs_and_its_permission_mode() {
-    let (_, card) = only(json!([session(
+    let (_, card) = only(json!([session_with(
         "s",
         json!([]),
         json!({ "repo_root": "/work/project-a", "permission_mode": "auto" })
@@ -491,18 +452,18 @@ fn cards_carry_where_the_session_runs_and_its_permission_mode() {
 
 #[test]
 fn sessions_are_grouped_by_repository_root_for_the_orchestrator() {
-    let idle = session(
+    let idle = session_with(
         "a1",
         json!([event("turn.complete", None, 5 * SEC)]),
         json!({ "repo_root": "/w/api", "remote": "git@h:o/api.git", "permission_mode": "default", "last_prompt": "Fix CORS", "last_answer": "Fixed CORS.", "inbox": { "id": "r1", "kind": "prompt", "status": "delivered", "at": NOW - 4 * SEC } }),
     );
-    let mut worktree = session(
+    let mut worktree = session_with(
         "a2",
         json!([event("turn.start", None, 5 * SEC)]),
         json!({ "repo_root": "/w/api", "remote": "git@h:o/api.git", "turn_id": "t" }),
     );
     worktree["cwd"] = json!("/w/api/.claude/worktrees/x");
-    let mut notes = session("n1", json!([]), json!({}));
+    let mut notes = session_with("n1", json!([]), json!({}));
     notes["cwd"] = json!("/tmp/notes");
     let b = board(json!([idle, worktree, notes]));
     assert_eq!(
@@ -529,7 +490,7 @@ fn sessions_are_grouped_by_repository_root_for_the_orchestrator() {
 
 #[test]
 fn a_wrong_typed_detail_field_skips_the_record() {
-    let b = board(json!([session(
+    let b = board(json!([session_with(
         "s",
         json!([]),
         json!({ "decision": "yes" })
