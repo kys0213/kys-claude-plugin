@@ -1,9 +1,9 @@
 import type { EngineInterface } from 'claude-code'
 
+import { CLI_MISSING, runKanban } from './kanban-cli'
 import { type AskQuestion, MAX_FIELD_CHARS } from './kanban-record'
 
 const ANSWER_PREFIX = 'kanban:answer:'
-const CLI_TIMEOUT_MS = 5_000
 const MAX_QUESTION_CHARS = 1_000
 
 type ToolQuestion = {
@@ -134,23 +134,22 @@ async function sendAnswer($: EngineInterface, s: AskState, card: AskCard, ask: C
   const key = draftKey(card, ask)
   const picks = picksOf(s, key, ask.questions.length)
 
-  try {
-    const r = await $.process.run(['atelier', 'kanban', 'answer'], {
-      stdin: JSON.stringify({ questions: ask.questions, picks }),
-      timeoutMs: CLI_TIMEOUT_MS,
-    })
-    const parsed = r.exitCode === 0 ? (JSON.parse(r.stdout) as Record<string, unknown>) : null
-    const answers = Array.isArray(parsed?.answers) ? parsed.answers : null
+  const r = await runKanban($, ['answer'], JSON.stringify({ questions: ask.questions, picks }))
+  const parsed = r.kind === 'json' ? r.value : null
+  const answers = Array.isArray(parsed?.answers) ? parsed.answers : null
 
-    if (answers !== null) {
+  if (r.kind === 'missing') {
+    s.errors.set(key, CLI_MISSING)
+  } else if (answers !== null) {
+    try {
       await $.store.set(answerKey(card.session_id, ask.tool_use_id), { v: 1, answers })
       s.sent.add(key)
       s.errors.delete(key)
-    } else {
-      s.errors.set(key, typeof parsed?.error === 'string' ? parsed.error : 'atelier kanban answer 의 출력을 읽지 못했어요')
+    } catch {
+      s.errors.set(key, CLI_MISSING)
     }
-  } catch {
-    s.errors.set(key, 'atelier CLI 를 실행하지 못했어요 — /atelier:update 로 설치·갱신하세요')
+  } else {
+    s.errors.set(key, typeof parsed?.error === 'string' ? parsed.error : 'atelier kanban answer 의 출력을 읽지 못했어요')
   }
 
   $.ui.invalidate('ui.render')
