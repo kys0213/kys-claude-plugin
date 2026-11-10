@@ -123,11 +123,21 @@ pub fn prompt_text(body: &str, from: Sender, from_label: Option<&str>) -> String
     }
 }
 
+const HEADER_OPEN: &str = "[칸반 요청 · ";
+
 pub fn agent_header(from_label: Option<&str>) -> String {
     match from_label {
-        Some(label) => format!("[칸반 요청 · {label} 세션의 오케스트레이터]"),
-        None => "[칸반 요청 · 오케스트레이터]".to_string(),
+        Some(label) => format!("{HEADER_OPEN}{label} 세션의 오케스트레이터]"),
+        None => format!("{HEADER_OPEN}오케스트레이터]"),
     }
+}
+
+/// The prompt without the header `agent_header` put in front of it.
+pub fn strip_agent_header(text: &str) -> &str {
+    text.strip_prefix(HEADER_OPEN)
+        .and_then(|rest| rest.split_once(']'))
+        .map(|(_, body)| body.trim_start())
+        .unwrap_or(text)
 }
 
 pub fn check_id(what: &str, id: &str) -> Result<(), String> {

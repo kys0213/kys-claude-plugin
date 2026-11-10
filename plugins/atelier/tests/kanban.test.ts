@@ -943,8 +943,8 @@ describe('kanban details and requests', () => {
     world(on, routes({ board: DETAIL_BOARD }))
 
     const r = await $.tool.call({ tool: 'mcp__atelier__kanban_board' } as never)
-    const out = JSON.parse((r as { result: string }).result) as { repos: unknown }
-    expect(out.repos).toEqual([{ label: 'api', root: '/w/api', sessions: [] }])
+    const out = JSON.parse((r as { result: string }).result) as Record<string, unknown>
+    expect(out).toEqual({ repos: [{ label: 'api', root: '/w/api', sessions: [] }] })
   })
 
   for (const surface of ['terminal', 'desktop'] as const) {

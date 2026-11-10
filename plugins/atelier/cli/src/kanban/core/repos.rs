@@ -10,6 +10,8 @@ pub struct RepoSession {
     pub cwd: String,
     pub permission_mode: Option<String>,
     pub actions: Vec<Action>,
+    pub subtitle: Option<String>,
+    pub last_line: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +35,8 @@ pub fn group(board: &Board) -> Vec<Repo> {
                 cwd: card.cwd.clone(),
                 permission_mode: card.permission_mode.clone(),
                 actions: card.actions.clone(),
+                subtitle: card.subtitle.clone(),
+                last_line: card.last_line.clone(),
             };
             match repos.iter_mut().find(|(k, _)| *k == key) {
                 Some((_, repo)) => repo.sessions.push(session),

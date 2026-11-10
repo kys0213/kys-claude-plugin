@@ -175,7 +175,7 @@ async function refresh($: EngineInterface, s: KanbanState): Promise<void> {
   $.ui.invalidate('ui.render')
 }
 
-/** The board as the orchestrator reads it: repositories and their sessions, no layout. */
+/** The board as the orchestrator reads it: repositories and their sessions, no cards or layout. */
 async function boardForTool($: EngineInterface): Promise<string> {
   try {
     const { sessions } = await snapshot($)
@@ -186,7 +186,7 @@ async function boardForTool($: EngineInterface): Promise<string> {
       return JSON.stringify({ error: typeof parsed?.error === 'string' ? parsed.error : 'atelier kanban board 를 읽지 못했어요' })
     }
 
-    return JSON.stringify({ repos: parsed.repos, columns: parsed.columns })
+    return JSON.stringify({ repos: parsed.repos })
   } catch {
     return JSON.stringify({ error: 'atelier CLI 를 실행하지 못했어요 — /atelier:update 로 설치·갱신하세요' })
   }

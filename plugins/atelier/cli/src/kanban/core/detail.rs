@@ -3,6 +3,7 @@
 
 use super::duration::age_label;
 use super::progress::{tool_line, Activity, ItemStatus, WorkItem};
+use super::request::strip_agent_header;
 use super::text::{cut, fold, strip_controls, strip_reminders};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,7 +81,7 @@ const WAIT_FIELDS: [&str; 8] = [
 ];
 
 pub fn clean(raw: &str) -> String {
-    strip_controls(&strip_reminders(raw))
+    strip_controls(strip_agent_header(strip_reminders(raw).trim_start()))
 }
 
 fn prompt_lines(raw: Option<&str>) -> Vec<String> {

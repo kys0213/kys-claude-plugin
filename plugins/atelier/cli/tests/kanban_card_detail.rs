@@ -220,6 +220,23 @@ fn each_column_offers_its_own_actions() {
 }
 
 #[test]
+fn the_kanban_request_header_is_not_shown_as_the_subtitle_or_the_prompt() {
+    let (_, card) = only(json!([session(
+        "s",
+        json!([event("turn.complete", None, 5 * SEC)]),
+        json!({
+            "first_prompt": "[칸반 요청 · api 세션의 오케스트레이터]\n\nAdd a health check",
+            "last_prompt": "[칸반 요청 · 오케스트레이터]\n\nRun lint",
+        })
+    )]));
+    assert_eq!(card["subtitle"], "Add a health check");
+    assert_eq!(
+        section(&card, "직전 요청"),
+        Some(vec!["Run lint".to_string()])
+    );
+}
+
+#[test]
 fn injected_reminders_are_stripped_from_the_subtitle_and_the_prompt() {
     let (_, card) = only(json!([session(
         "s",
@@ -437,7 +454,7 @@ fn sessions_are_grouped_by_repository_root_for_the_orchestrator() {
     let idle = session(
         "a1",
         json!([event("turn.complete", None, 5 * SEC)]),
-        json!({ "repo_root": "/w/api", "remote": "git@h:o/api.git", "permission_mode": "default" }),
+        json!({ "repo_root": "/w/api", "remote": "git@h:o/api.git", "permission_mode": "default", "last_prompt": "Fix CORS", "last_answer": "Fixed CORS." }),
     );
     let mut worktree = session(
         "a2",
@@ -455,15 +472,15 @@ fn sessions_are_grouped_by_repository_root_for_the_orchestrator() {
                 "label": "api",
                 "root": "/w/api",
                 "sessions": [
-                    { "session_id": "a2", "column": "working", "cwd": "/w/api/.claude/worktrees/x", "permission_mode": null, "actions": ["stop"] },
-                    { "session_id": "a1", "column": "idle", "cwd": "/work/project-a", "permission_mode": "default", "actions": ["send"] },
+                    { "session_id": "a2", "column": "working", "cwd": "/w/api/.claude/worktrees/x", "permission_mode": null, "actions": ["stop"], "subtitle": null, "last_line": null },
+                    { "session_id": "a1", "column": "idle", "cwd": "/work/project-a", "permission_mode": "default", "actions": ["send"], "subtitle": "Fix CORS", "last_line": "직전: Fixed CORS." },
                 ],
             },
             {
                 "label": "notes",
                 "root": null,
                 "sessions": [
-                    { "session_id": "n1", "column": "idle", "cwd": "/tmp/notes", "permission_mode": null, "actions": ["send"] },
+                    { "session_id": "n1", "column": "idle", "cwd": "/tmp/notes", "permission_mode": null, "actions": ["send"], "subtitle": null, "last_line": null },
                 ],
             },
         ])
