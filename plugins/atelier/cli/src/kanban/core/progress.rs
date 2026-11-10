@@ -106,6 +106,11 @@ fn todo_part(tasks: &[WorkItem], todos: &[WorkItem]) -> Option<String> {
 }
 
 fn activity_part(activity: &Activity) -> String {
+    format!("▸ {}", tool_line(activity))
+}
+
+/// `<tool>: <what it works on>`, the target cut to fit a card line.
+pub fn tool_line(activity: &Activity) -> String {
     let target = TARGET_FIELDS.iter().find_map(|field| {
         let value = activity
             .input
@@ -120,8 +125,8 @@ fn activity_part(activity: &Activity) -> String {
         })
     });
     match target {
-        Some(target) => format!("▸ {}: {}", activity.tool, cut(&target, CUT_CHARS)),
-        None => format!("▸ {}", activity.tool),
+        Some(target) => format!("{}: {}", activity.tool, cut(&target, CUT_CHARS)),
+        None => activity.tool.clone(),
     }
 }
 

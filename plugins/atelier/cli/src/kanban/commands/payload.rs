@@ -4,6 +4,7 @@
 
 use crate::kanban::core::answer::Pick;
 use crate::kanban::core::board::{Event, SessionFact};
+use crate::kanban::core::detail::{Decision, Delivery};
 use crate::kanban::core::progress::{Activity, ItemStatus, WorkItem};
 use crate::kanban::core::question::{Ask, Question, QuestionOption};
 use serde_json::{Map, Value};
@@ -27,8 +28,15 @@ fn parse_record(value: &Value) -> Option<SessionFact> {
         session_id: value.get("session_id")?.as_str()?.to_string(),
         cwd: value.get("cwd")?.as_str()?.to_string(),
         repo: nullable_string(value, "repo")?,
+        repo_root: nullable_string(value, "repo_root")?,
+        remote: nullable_string(value, "remote")?,
+        permission_mode: nullable_string(value, "permission_mode")?,
         title: nullable_string(value, "title")?,
         first_prompt: nullable_string(value, "first_prompt")?,
+        last_prompt: nullable_string(value, "last_prompt")?,
+        last_answer: nullable_string(value, "last_answer")?,
+        pending_context: nullable_string(value, "pending_context")?,
+        turn_id: nullable_string(value, "turn_id")?,
         started_at: value.get("started_at")?.as_u64()?,
         heartbeat_at: value.get("heartbeat_at")?.as_u64()?,
         ended_reason: nullable_string(value, "ended_reason")?,
@@ -38,10 +46,14 @@ fn parse_record(value: &Value) -> Option<SessionFact> {
             .iter()
             .map(parse_event)
             .collect::<Option<Vec<_>>>()?,
-        activity: match value.get("activity") {
-            None | Some(Value::Null) => None,
-            Some(activity) => Some(parse_activity(activity)?),
-        },
+        activity: optional(value, "activity", parse_activity)?,
+        recent: optional_array(value, "recent")?
+            .iter()
+            .map(parse_activity)
+            .collect::<Option<Vec<_>>>()?,
+        permission: optional(value, "permission", parse_activity)?,
+        decision: optional(value, "decision", parse_decision)?,
+        inbox: optional(value, "inbox", parse_delivery)?,
         tasks: optional_object(value, "tasks")?
             .map(parse_tasks)
             .unwrap_or(Some(Vec::new()))?,
@@ -71,6 +83,36 @@ fn parse_activity(value: &Value) -> Option<Activity> {
         input,
         at: value.get("at")?.as_u64()?,
     })
+}
+
+fn parse_decision(value: &Value) -> Option<Decision> {
+    Some(Decision {
+        ask: value.get("ask")?.as_str()?.to_string(),
+        recap: nullable_string(value, "recap")?,
+        options: optional_array(value, "options")?
+            .iter()
+            .map(|o| Some(o.as_str()?.to_string()))
+            .collect::<Option<Vec<_>>>()?,
+        at: value.get("at")?.as_u64()?,
+    })
+}
+
+fn parse_delivery(value: &Value) -> Option<Delivery> {
+    Some(Delivery {
+        id: value.get("id")?.as_str()?.to_string(),
+        kind: value.get("kind")?.as_str()?.to_string(),
+        status: value.get("status")?.as_str()?.to_string(),
+        at: value.get("at")?.as_u64()?,
+    })
+}
+
+/// Outer `None` rejects a field `parse` cannot read; absent and `null` both
+/// read as unset.
+fn optional<T>(value: &Value, key: &str, parse: fn(&Value) -> Option<T>) -> Option<Option<T>> {
+    match value.get(key) {
+        None | Some(Value::Null) => Some(None),
+        Some(field) => parse(field).map(Some),
+    }
 }
 
 /// Task ids are the engine's counters ("1", "2", ... "10"), so they are

@@ -16,10 +16,12 @@ pub mod core;
 
 use crate::kanban::commands::payload::{parse_answer_request, parse_sessions};
 use crate::kanban::core::answer::compose;
-use crate::kanban::core::board::{build, Board, BoardParams, Card};
+use crate::kanban::core::board::{build, Action, Board, BoardParams, Card};
+use crate::kanban::core::detail::Detail;
 use crate::kanban::core::duration::parse_millis;
 use crate::kanban::core::layout::{fit, Layout};
 use crate::kanban::core::question::{Ask, Question};
+use crate::kanban::core::repos::{group, Repo};
 use crate::shared::process::read_stdin_raw;
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
@@ -83,7 +85,52 @@ fn card_json(card: &Card) -> Value {
         "is_self": card.is_self,
         "headline": card.headline(),
         "progress": card.progress,
+        "last_line": card.last_line,
+        "cwd": card.cwd,
+        "repo_root": card.repo_root,
+        "permission_mode": card.permission_mode,
+        "turn_id": card.turn_id,
+        "actions": action_ids(&card.actions),
+        "detail": detail_json(&card.detail),
         "asks": card.asks.iter().map(ask_json).collect::<Vec<_>>(),
+    })
+}
+
+fn action_ids(actions: &[Action]) -> Vec<&'static str> {
+    actions.iter().map(|a| a.id()).collect()
+}
+
+fn detail_json(detail: &Detail) -> Value {
+    json!({
+        "sections": detail
+            .sections
+            .iter()
+            .map(|s| json!({ "title": s.title, "lines": s.lines }))
+            .collect::<Vec<_>>(),
+        "decision": detail.decision.as_ref().map(|d| json!({
+            "ask": d.ask,
+            "recap": d.recap,
+            "options": d.options,
+        })),
+        "delivery": detail.delivery,
+    })
+}
+
+fn repo_json(repo: &Repo) -> Value {
+    json!({
+        "label": repo.label,
+        "root": repo.root,
+        "sessions": repo
+            .sessions
+            .iter()
+            .map(|s| json!({
+                "session_id": s.session_id,
+                "column": s.column.id(),
+                "cwd": s.cwd,
+                "permission_mode": s.permission_mode,
+                "actions": action_ids(&s.actions),
+            }))
+            .collect::<Vec<_>>(),
     })
 }
 
@@ -128,7 +175,13 @@ fn board_json(board: &Board, layout: &Layout) -> Value {
             })
         })
         .collect();
-    json!({ "columns": columns, "expired": board.expired, "layout": layout_json(layout) })
+    let repos: Vec<Value> = group(board).iter().map(repo_json).collect();
+    json!({
+        "columns": columns,
+        "repos": repos,
+        "expired": board.expired,
+        "layout": layout_json(layout),
+    })
 }
 
 pub fn run(cli: Cli) -> i32 {
