@@ -118,6 +118,7 @@ type World = {
   /** What `$.agent.list()` answers. */
   agents: { value: { id: string; description: string; type: string; status: string; teammateId?: string }[] }
   invalidated: string[]
+  toasts: string[]
   /** What the engine draws in the band above the prompt, beneath the plugin. */
   band: { value: unknown }
   /** Runs a tool call other than AskUserQuestion, as the engine would with its dialogs; unset answers `{ result: {} }`. */
@@ -158,6 +159,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   const aborted: string[] = []
   const agents: World['agents'] = { value: [] }
   const invalidated: string[] = []
+  const toasts: string[] = []
   const band: World['band'] = { value: { type: 'Box', props: {}, children: [] } }
   const tools: World['tools'] = { run: null }
   const prompt: World['prompt'] = { draft: '', drop: null, contexts: [] }
@@ -193,6 +195,11 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
     value: shown.value ? [{ id: 'kanban', title: '세션 칸반', isShown: true, isFocused: false, isPlaced: true }] : [],
   }))
   on('ui.render', { component: 'AbovePrompt' }, () => band.value as never)
+  on('ui.toast', ($, e) => {
+    toasts.push(e.text)
+
+    return { value: undefined }
+  })
   on('ui.invalidate', ($, e) => {
     invalidated.push(e.event)
 
@@ -273,7 +280,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
     return { result: {} }
   })
 
-  return { store, clock, runs, shown, dialog, inbox, disk, messages, submitted, aborted, agents, invalidated, band, tools, prompt }
+  return { store, clock, runs, shown, dialog, inbox, disk, messages, submitted, aborted, agents, invalidated, toasts, band, tools, prompt }
 }
 
 type StoredRecord = {
@@ -2576,6 +2583,7 @@ describe('kanban delegate', () => {
     context?: string | null
     deliver_ids?: string[]
     report_due?: boolean
+    report_at_error?: string | null
     state?: unknown
   }
 
@@ -2587,6 +2595,7 @@ describe('kanban delegate', () => {
       deliver_ids: [WAIT_ID],
       attach_to: ['composer', 'bridge'],
       report_due: false,
+      report_at_error: null,
       state: { pending: [{ id: WAIT_ID, since: START }], delivered: [] },
       ...wake,
     }
@@ -2785,6 +2794,20 @@ describe('kanban delegate', () => {
 
     const argv = wakeRuns(w)[0]?.argv ?? []
     expect(argv[argv.indexOf('--report-at') + 1]).toBe('09:30')
+  })
+
+  test('a report time the CLI refused is told once and the wake goes on', { options: { kanban_report_at: '9:00' } }, async ($, on) => {
+    const error = '--report-at 은 `HH:MM`(00:00~23:59) 이에요 (받은 값: 9:00)'
+    const w = world(on, delegating([{ submit: SAID, report_at_error: error }, { report_at_error: error }]))
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await turnOn($)
+    await w.clock.advance(2_000)
+    await w.clock.advance(2_000)
+
+    expect(wakeRuns(w).length).toBeGreaterThan(1)
+    expect(w.toasts).toEqual([error])
+    expect(w.submitted).toEqual([SAID])
   })
 
   test('the inbox record keeps how the last request came in', async ($, on) => {

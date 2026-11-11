@@ -538,20 +538,44 @@ fn several_things_to_say_go_in_one_prompt() {
 }
 
 #[test]
-fn a_report_time_that_is_not_hh_mm_is_refused() {
+fn a_report_time_that_is_not_hh_mm_leaves_the_report_off_and_says_why() {
     let home = Home::default();
 
     let out = wake_as(
         &home,
         DELEGATE,
-        json!([main_session()]),
+        json!([main_session(), asking(color())]),
         empty_state(),
         NOW,
-        "6pm",
+        "9:00",
+        "0",
+    );
+    let woke = wake_as(
+        &home,
+        DELEGATE,
+        json!([main_session(), asking(color())]),
+        with_draft(&out, 0),
+        NOW + 10 * SEC,
+        "9:00",
         "0",
     );
 
-    assert!(out["error"].is_string(), "{out}");
+    assert!(out.get("error").is_none(), "{out}");
+    assert!(out["report_at_error"].as_str().unwrap().contains("9:00"));
+    assert_eq!(woke["report_due"], json!(false));
+    assert_eq!(
+        woke["submit"],
+        json!("[칸반 위임] 입력 대기 1건\n- w question tu-1")
+    );
+}
+
+#[test]
+fn a_valid_report_time_carries_no_report_time_error() {
+    let home = Home::default();
+
+    let out = wake(&home, json!([main_session()]), empty_state(), NOW);
+
+    assert_eq!(out["report_at_error"], Value::Null);
 }
 
 #[test]

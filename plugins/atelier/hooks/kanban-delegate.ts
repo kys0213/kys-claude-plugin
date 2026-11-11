@@ -19,6 +19,8 @@ type DelegateMemory = {
   waking: boolean
   /** `kanban_report_at` from the plugin's options. */
   reportAt: string
+  /** The report time error the person was last told, so each is shown once. */
+  toldReportAt: string | null
 }
 
 export type DelegateState = RecordState & { delegate: DelegateMemory }
@@ -30,6 +32,7 @@ export function newDelegateMemory(reportAt: unknown): DelegateMemory {
     offer: null,
     waking: false,
     reportAt: typeof reportAt === 'string' ? reportAt : DEFAULT_REPORT_AT,
+    toldReportAt: null,
   }
 }
 
@@ -143,6 +146,13 @@ export async function wakeDelegate($: EngineInterface, s: DelegateState, session
       return
     }
 
+    const reportAtError = typeof out.report_at_error === 'string' ? out.report_at_error : null
+
+    if (reportAtError !== null && reportAtError !== memory.toldReportAt) {
+      $.ui.toast(reportAtError)
+    }
+
+    memory.toldReportAt = reportAtError
     memory.pending = pendingOf(state.pending)
     memory.delivered = strings(state.delivered)
     const ids = strings(out.deliver_ids)

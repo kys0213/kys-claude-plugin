@@ -172,9 +172,7 @@ impl KanbanDelegate<'_> {
         })())
     }
 
-    /// The report due at `now`, when the ledger holds none since it fell due.
-    fn report_due(&self, clock: &WakeClock) -> Result<Option<ReportDue>, String> {
-        let at = ReportAt::parse(clock.report_at)?;
+    fn report_due(&self, at: ReportAt, clock: &WakeClock) -> Result<Option<ReportDue>, String> {
         let due_at = at.last_due(clock.now, clock.utc_offset);
         let lines = |months: Vec<crate::kanban::core::ledger::MonthFile>| -> Vec<String> {
             months.into_iter().flat_map(|m| m.lines).collect()
@@ -194,7 +192,6 @@ impl KanbanDelegate<'_> {
     pub fn wake(&self, raw: &str, clock: &WakeClock) -> Value {
         answer((|| {
             check_id("session", clock.session)?;
-            ReportAt::parse(clock.report_at)?;
             let stdin = parse_wake(raw)?;
             let board = build(&stdin.sessions, &board_params(clock.now));
             let delegate = delegate_of(&board);
@@ -202,6 +199,7 @@ impl KanbanDelegate<'_> {
                 .sessions
                 .iter()
                 .find(|s| s.session_id == clock.session);
+            let report_at = ReportAt::parse(clock.report_at);
             let woke = match me {
                 Some(me) if delegate.is(clock.session) => wake(
                     &board,
@@ -212,12 +210,17 @@ impl KanbanDelegate<'_> {
                         now: clock.now,
                         draft_len: stdin.draft_len,
                         state: stdin.state,
-                        report: self.report_due(clock).unwrap_or(None),
+                        report: report_at
+                            .as_ref()
+                            .ok()
+                            .and_then(|at| self.report_due(*at, clock).unwrap_or(None)),
                     },
                 ),
                 _ => Wake::default(),
             };
-            Ok(wake_json(&woke))
+            let mut out = wake_json(&woke);
+            out["report_at_error"] = json!(report_at.err());
+            Ok(out)
         })())
     }
 
