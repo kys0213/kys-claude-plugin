@@ -34,6 +34,12 @@ pub fn lexical(path: &Path) -> PathBuf {
     out
 }
 
+/// Claude Code's file tools expand a leading `~` to a home directory, which is
+/// not known here.
+fn is_from_home(path: &str) -> bool {
+    path.starts_with('~')
+}
+
 /// Where a session's paths are judged from: its repository's main working
 /// tree and the directory its commands run in.
 pub struct Scope<'a> {
@@ -50,11 +56,13 @@ impl Scope<'_> {
     }
 
     /// Whether `arg`, relative to the working directory, resolves inside the
-    /// repository. Without a repository nothing is inside.
+    /// repository. Without a repository nothing is inside, and neither is a
+    /// path from a home directory.
     pub fn contains(&self, arg: &str) -> bool {
-        self.absolute(arg).is_some_and(|(target, root)| {
-            self.paths.real(&target).starts_with(self.paths.real(root))
-        })
+        !is_from_home(arg)
+            && self.absolute(arg).is_some_and(|(target, root)| {
+                self.paths.real(&target).starts_with(self.paths.real(root))
+            })
     }
 
     /// `arg` relative to the repository root, `.` for the root itself; `None`
@@ -519,14 +527,191 @@ fn check_spec(name: &str, spec: &Spec, args: &[String]) -> Checked {
         }
         Shape::Filter { max_paths } => {
             let mut rest = positionals.into_iter();
-            if rest.next().is_none() {
-                return Err(name.to_string());
-            }
+            let filter = rest.next().ok_or_else(|| name.to_string())?;
+            check_jq_filter(&filter)?;
             paths.extend(at_most(rest.collect(), max_paths)?);
         }
         Shape::Revs { .. } => {}
     }
     Ok(Reads { paths })
+}
+
+/// The names a jq filter may call: keywords, literals and builtins that only
+/// compute on their input.
+const JQ_NAMES: &[&str] = &[
+    "if",
+    "then",
+    "elif",
+    "else",
+    "end",
+    "and",
+    "or",
+    "not",
+    "try",
+    "catch",
+    "true",
+    "false",
+    "null",
+    "length",
+    "utf8bytelength",
+    "keys",
+    "keys_unsorted",
+    "values",
+    "has",
+    "in",
+    "map",
+    "map_values",
+    "path",
+    "paths",
+    "leaf_paths",
+    "del",
+    "to_entries",
+    "from_entries",
+    "with_entries",
+    "select",
+    "empty",
+    "error",
+    "add",
+    "any",
+    "all",
+    "flatten",
+    "range",
+    "floor",
+    "ceil",
+    "round",
+    "sqrt",
+    "fabs",
+    "abs",
+    "tostring",
+    "tonumber",
+    "type",
+    "sort",
+    "sort_by",
+    "group_by",
+    "min",
+    "max",
+    "min_by",
+    "max_by",
+    "unique",
+    "unique_by",
+    "reverse",
+    "contains",
+    "inside",
+    "startswith",
+    "endswith",
+    "ltrimstr",
+    "rtrimstr",
+    "trim",
+    "ltrim",
+    "rtrim",
+    "explode",
+    "implode",
+    "split",
+    "join",
+    "ascii_downcase",
+    "ascii_upcase",
+    "test",
+    "match",
+    "capture",
+    "scan",
+    "splits",
+    "sub",
+    "gsub",
+    "recurse",
+    "tojson",
+    "fromjson",
+    "first",
+    "last",
+    "nth",
+    "limit",
+    "until",
+    "while",
+    "repeat",
+    "indices",
+    "index",
+    "rindex",
+    "isempty",
+    "objects",
+    "arrays",
+    "strings",
+    "numbers",
+    "booleans",
+    "nulls",
+    "iterables",
+    "scalars",
+    "getpath",
+    "tostream",
+    "fromstream",
+    "truncate_stream",
+    "transpose",
+    "walk",
+    "todate",
+    "fromdate",
+];
+
+/// Every bare name in a jq filter must be one of `JQ_NAMES`; a field (`.name`),
+/// a variable (`$name`) or a format (`@name`) is not a call. Comments are read
+/// as code: a name in one is checked too.
+fn check_jq_filter(filter: &str) -> Result<(), String> {
+    let chars: Vec<char> = filter.chars().collect();
+    // Paren depth inside each open `\(` interpolation, innermost last.
+    let mut interpolations: Vec<usize> = Vec::new();
+    let mut in_string = false;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if in_string {
+            match c {
+                '"' => in_string = false,
+                '\\' if chars.get(i + 1) == Some(&'(') => {
+                    interpolations.push(0);
+                    in_string = false;
+                    i += 1;
+                }
+                '\\' => i += 1,
+                _ => {}
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '(' => {
+                if let Some(depth) = interpolations.last_mut() {
+                    *depth += 1;
+                }
+            }
+            ')' => match interpolations.last_mut() {
+                Some(0) => {
+                    interpolations.pop();
+                    in_string = true;
+                }
+                Some(depth) => *depth -= 1,
+                None => {}
+            },
+            c if c.is_ascii_alphanumeric() || c == '_' => {
+                let start = i;
+                while chars
+                    .get(i + 1)
+                    .is_some_and(|c| c.is_ascii_alphanumeric() || *c == '_')
+                {
+                    i += 1;
+                }
+                let word: String = chars[start..=i].iter().collect();
+                let called = !c.is_ascii_digit()
+                    && !matches!(
+                        start.checked_sub(1).map(|p| chars[p]),
+                        Some('.' | '$' | '@')
+                    );
+                if called && !JQ_NAMES.contains(&word.as_str()) {
+                    return Err(word);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    Ok(())
 }
 
 const FIND_FLAGS: [&str; 13] = [
@@ -665,6 +850,10 @@ pub fn check_permission(tool: &str, input: &[(String, String)], scope: &Scope) -
         "Glob" => {
             let base = field(input, "path").unwrap_or("");
             let pattern = field(input, "pattern").unwrap_or("");
+            let climbs = pattern.split(['/', '{', ',', '}']).any(|part| part == "..");
+            if climbs || is_from_home(pattern) {
+                return vec![Refusal::OutsideRepo];
+            }
             let under = Path::new(base).join(glob_base(pattern));
             inside(&[base.to_string(), under.to_string_lossy().into_owned()])
         }

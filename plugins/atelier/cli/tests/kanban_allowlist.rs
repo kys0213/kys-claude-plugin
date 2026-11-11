@@ -104,6 +104,36 @@ fn a_dollar_sign_is_an_expansion_even_inside_single_quotes() {
 }
 
 #[test]
+fn jq_filters_that_read_the_environment_or_other_files_are_not_allowlisted() {
+    for (command, word) in [
+        ("jq -r env f", "env"),
+        ("jq 'include \"x\"; .' f", "include"),
+        ("jq 'import \"x\" as m; .' f", "import"),
+        ("jq -r '\"\\(env)\"' f", "env"),
+        ("jq -c 'input' f", "input"),
+        ("jq -c '[inputs]' f", "inputs"),
+        ("jq -r 'input_filename' f", "input_filename"),
+        ("jq -r '.a # keys\n| get_search_list' f", "get_search_list"),
+    ] {
+        assert_refused_with(command, &format!("not_allowlisted:{word}"));
+    }
+}
+
+#[test]
+fn jq_filters_of_fields_and_pure_builtins_are_proxyable() {
+    for command in [
+        "jq -r .name package.json",
+        "jq '.env' f",
+        "jq -r '.a | keys | map(select(. != \"input\")) | length' f",
+        "jq -r '\"\\(.a) env\"' f",
+        "jq -c 'if .a then 1e3 else null end' f",
+        "jq -r '.[] | @sh' f",
+    ] {
+        assert_proxyable(command);
+    }
+}
+
+#[test]
 fn paths_outside_the_repository_are_refused() {
     for command in ["cat /etc/passwd", "ls ../other"] {
         assert_refused_with(command, "outside_repo");
@@ -167,6 +197,40 @@ fn file_reading_tools_are_proxyable_only_inside_the_repository() {
         json!({ "pattern": "../**/*.rs" }),
     ));
     assert!(blocked(&glob).contains(&"outside_repo".to_string()));
+}
+
+#[test]
+fn file_tool_paths_from_the_home_directory_are_outside_the_repository() {
+    for (tool, input) in [
+        ("Read", json!({ "file_path": "~/.ssh/id_rsa" })),
+        ("Grep", json!({ "pattern": "key", "path": "~/.aws" })),
+        ("Glob", json!({ "pattern": "*", "path": "~" })),
+        ("Glob", json!({ "pattern": "~/.ssh/*" })),
+    ] {
+        let wait = wait_of(asking_permission(tool, input.clone()));
+        assert_eq!(wait["proxyable"], false, "{tool} {input}");
+        assert!(
+            blocked(&wait).contains(&"outside_repo".to_string()),
+            "{tool} {input}: {:?}",
+            blocked(&wait)
+        );
+    }
+}
+
+#[test]
+fn a_glob_pattern_climbing_out_after_a_wildcard_is_outside_the_repository() {
+    let wait = wait_of(asking_permission(
+        "Glob",
+        json!({ "pattern": "*/../../etc/*" }),
+    ));
+    assert_eq!(wait["proxyable"], false);
+    assert!(blocked(&wait).contains(&"outside_repo".to_string()));
+
+    let inside = wait_of(asking_permission(
+        "Glob",
+        json!({ "pattern": "src/**/*.rs" }),
+    ));
+    assert_eq!(inside["proxyable"], true);
 }
 
 #[test]
