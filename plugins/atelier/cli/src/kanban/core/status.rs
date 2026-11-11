@@ -2,8 +2,7 @@
 //! the board's order, as entries or as a table a person reads.
 
 use super::board::{Board, Card, Column};
-
-const SHORT_ID_CHARS: usize = 8;
+use super::text::short_id;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
@@ -41,7 +40,7 @@ pub fn select<'a>(board: &'a Board, session: Option<&str>) -> Vec<(Column, Vec<&
 }
 
 fn line(card: &Card) -> String {
-    let short: String = card.session_id.chars().take(SHORT_ID_CHARS).collect();
+    let short = short_id(&card.session_id);
     format!("  {}  {short}", card.headline())
 }
 

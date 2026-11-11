@@ -14,11 +14,11 @@ use crate::kanban::core::precedent::{mode, Book, Mode, Setting};
 use crate::kanban::core::prompt::decides_as_person;
 use crate::kanban::core::replay::{kind_stats, KindStats, KINDS};
 use crate::kanban::core::request::check_id;
+use crate::kanban::core::text::short_id;
 use crate::kanban::core::wake::{attach_to, wake, ReportDue, Wake, WakeInput};
 use serde_json::{json, Map, Value};
 
 const DELEGATE_SCOPE: &str = "delegate";
-const SHORT_ID_CHARS: usize = 8;
 
 pub struct KanbanDelegate<'a> {
     pub records: &'a dyn RecordStore,
@@ -53,10 +53,6 @@ fn board_params(now: u64) -> BoardParams {
         expire_after: EXPIRE_AFTER_MS,
         self_id: None,
     }
-}
-
-fn short(id: &str) -> String {
-    id.chars().take(SHORT_ID_CHARS).collect()
 }
 
 fn comparison_line(stats: &KindStats) -> String {
@@ -131,7 +127,7 @@ impl KanbanDelegate<'_> {
                         .into_iter()
                         .chain(before.conflicts)
                         .filter(|id| id != typed.session)
-                        .map(|id| short(&id))
+                        .map(|id| short_id(&id))
                         .collect();
                     self.set(setting(DELEGATE_SCOPE, "on", Some(typed.session)))?;
                     let mut text = format!(

@@ -13,14 +13,13 @@ use super::matchkey::{answer_fp, digest};
 use super::precedent::Book;
 use super::question::{Ask, Question, QuestionOption};
 use super::request::{check_id, Verdict};
-use super::text::{defuse_marker, js_len, MARKER_WORD};
+use super::text::{defuse_marker, js_len, short_id, MARKER_WORD};
 use super::wait::{permission_line, Subject, Wait};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 const VERSION: u64 = 1;
 pub const RELAY_TTL_MS: u64 = 30 * 60 * 1_000;
-const SHORT_ID_CHARS: usize = 8;
 const ALLOW_LABEL: &str = "허용";
 const DENY_LABEL: &str = "거부";
 const ID_BYTES: usize = 4;
@@ -548,7 +547,7 @@ pub fn frame(
     if matches!(shown.wait.subject, Subject::Input) || asked.blocks.len() != questions.len() {
         return Ok(None);
     }
-    let short: String = shown.session_id.chars().take(SHORT_ID_CHARS).collect();
+    let short = short_id(shown.session_id);
     let header = format!(
         "칸반 대기 · {} · {short} · {}{}",
         defuse_marker(shown.label),

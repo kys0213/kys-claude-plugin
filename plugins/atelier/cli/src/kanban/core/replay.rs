@@ -35,7 +35,6 @@ impl KindStats {
         self.compared - self.agreed
     }
 
-    /// A recommendation only: a person decides.
     pub fn promotable(&self) -> bool {
         self.compared >= PROMOTE_AFTER
             && self.disagreed() <= MAX_DISAGREED
@@ -47,14 +46,11 @@ impl KindStats {
     }
 }
 
-/// A wait a precedent could have answered when it was answered, but for its
-/// kind: a decision is never answered on precedents and still compared.
 fn comparable(entry: &Entry) -> bool {
     let decision = Blocked::Decision.id();
     entry.key.is_some() && entry.blocked.iter().all(|b| *b == decision)
 }
 
-/// Whether the precedents before `entry` would have answered it, and alike.
 fn compare(book: &Book, entry: &Entry) -> Option<bool> {
     let key = DecisionKey::parse(entry.key.as_deref()?).ok()?;
     let matched = judge(&book.before(entry), &key, entry.at);

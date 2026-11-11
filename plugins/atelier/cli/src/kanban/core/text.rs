@@ -3,6 +3,7 @@
 
 const REMINDER_OPEN: &str = "<system-reminder>";
 const REMINDER_CLOSE: &str = "</system-reminder>";
+const SHORT_ID_CHARS: usize = 8;
 
 pub fn fold(raw: &str) -> String {
     raw.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -55,6 +56,11 @@ pub fn strip_controls(raw: &str) -> String {
 /// the mod cuts recorded texts by it.
 pub fn js_len(text: &str) -> u64 {
     text.encode_utf16().count() as u64
+}
+
+/// The first `SHORT_ID_CHARS` chars of a session id.
+pub fn short_id(id: &str) -> String {
+    id.chars().take(SHORT_ID_CHARS).collect()
 }
 
 /// Cuts `text` to `max` chars, the last one an ellipsis when it was longer.

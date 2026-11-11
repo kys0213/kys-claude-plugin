@@ -38,7 +38,7 @@ pub struct Delivery {
     pub id: String,
     pub kind: Option<RequestKind>,
     pub status: DeliveryStatus,
-    /// How the request came in; absent in a record from before it was kept.
+    /// How the request came in; `None` when unknown.
     pub via: Option<Via>,
     pub at: u64,
 }
