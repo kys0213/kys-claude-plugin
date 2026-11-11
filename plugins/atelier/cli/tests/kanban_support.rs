@@ -6,6 +6,7 @@
 
 use assert_cmd::Command;
 use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
 
 pub const NOW: u64 = 1_800_000_000_000;
 pub const SEC: u64 = 1_000;
@@ -72,4 +73,36 @@ pub fn session_with(id: &str, events: Value, extra: Value) -> Value {
         record[key] = value.clone();
     }
     record
+}
+
+/// Runs `atelier kanban <args>` with its config directory at `config`.
+pub fn kanban_in(config: &Path, args: &[&str]) -> Value {
+    let output = atelier()
+        .env("CLAUDE_CONFIG_DIR", config)
+        .arg("kanban")
+        .args(args)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    serde_json::from_slice(&output).expect("valid JSON on stdout")
+}
+
+pub fn record_path(config: &Path, id: &str) -> PathBuf {
+    let out = kanban_in(config, &["record-path", "--session", id]);
+    PathBuf::from(out["path"].as_str().expect("record-path names a path"))
+}
+
+/// Leaves `contents` where the mod leaves the session's record copy.
+pub fn put_copy(config: &Path, id: &str, contents: &str) {
+    let path = record_path(config, id);
+    std::fs::create_dir_all(path.parent().expect("copy has a directory")).expect("make dir");
+    std::fs::write(path, contents).expect("write copy");
+}
+
+pub fn status_in(config: &Path, args: &[&str]) -> Value {
+    let mut full = vec!["status"];
+    full.extend_from_slice(args);
+    kanban_in(config, &full)
 }

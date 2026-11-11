@@ -26,6 +26,12 @@ pub fn parse_sessions(raw: &str) -> Result<Vec<SessionFact>, String> {
     Ok(records.iter().filter_map(parse_record).collect())
 }
 
+/// One session's record copy; `None` when it is not JSON or not a record this
+/// version reads.
+pub fn parse_record_copy(raw: &str) -> Option<SessionFact> {
+    parse_record(&serde_json::from_str(raw).ok()?)
+}
+
 fn parse_record(value: &Value) -> Option<SessionFact> {
     if value.get("v")?.as_u64()? != VERSION {
         return None;

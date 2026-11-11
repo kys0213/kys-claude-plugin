@@ -102,6 +102,18 @@ impl Column {
         }
     }
 
+    /// Every id must name a column; an empty list names none.
+    pub fn parse_all(ids: &[String]) -> Result<Vec<Column>, String> {
+        ids.iter()
+            .map(|id| {
+                Column::ALL
+                    .into_iter()
+                    .find(|column| column.id() == id)
+                    .ok_or_else(|| format!("모르는 컬럼이에요: {id}"))
+            })
+            .collect()
+    }
+
     fn longest_waiting_first(self) -> bool {
         matches!(self, Column::NeedsInput | Column::Working)
     }
@@ -166,6 +178,17 @@ impl Card {
 pub struct Board {
     pub columns: Vec<(Column, Vec<Card>)>,
     pub expired: Vec<String>,
+}
+
+impl Board {
+    /// Keeps the named columns in the board's order; `expired` stays whole.
+    /// An empty list keeps every column.
+    pub fn only(mut self, columns: &[Column]) -> Board {
+        if !columns.is_empty() {
+            self.columns.retain(|(column, _)| columns.contains(column));
+        }
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

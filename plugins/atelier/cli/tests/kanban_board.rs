@@ -869,3 +869,73 @@ fn a_malformed_progress_or_question_field_skips_the_record() {
         assert!(expired(&b).is_empty(), "{extra}");
     }
 }
+
+fn board_of_columns(columns: &[&str]) -> Value {
+    let now = NOW.to_string();
+    let mut args = vec![
+        "--now",
+        &now,
+        "--stale-after",
+        "2m",
+        "--expire-after",
+        "24h",
+        "--width",
+        "100",
+    ];
+    for column in columns {
+        args.extend(["--column", column]);
+    }
+    let sessions = json!({ "sessions": [
+        session("w", json!([event("turn.start", None, SEC)])),
+        session("i", json!([event("session.start", None, MIN)])),
+        session_with(
+            "old",
+            json!([event("session.start", None, 25 * 60 * MIN)]),
+            json!({ "heartbeat_at": NOW - 25 * 60 * MIN }),
+        ),
+    ] });
+    board_with(&args, &sessions.to_string())
+}
+
+#[test]
+fn column_keeps_only_the_named_columns_in_columns_and_repos() {
+    let b = board_of_columns(&["working", "idle"]);
+
+    assert_eq!(column_ids(&b), vec!["working", "idle"]);
+    let in_repos: Vec<&str> = b["repos"][0]["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["column"].as_str().unwrap())
+        .collect();
+    assert_eq!(in_repos, vec!["working", "idle"]);
+}
+
+#[test]
+fn column_alone_leaves_the_others_out() {
+    let b = board_of_columns(&["idle"]);
+
+    assert_eq!(column_ids(&b), vec!["idle"]);
+}
+
+#[test]
+fn column_does_not_hide_expired_sessions_from_the_drop_list() {
+    let b = board_of_columns(&["idle"]);
+
+    assert_eq!(expired(&b), vec!["old"]);
+}
+
+#[test]
+fn without_column_the_board_is_unchanged() {
+    let b = board_of_columns(&[]);
+
+    assert_eq!(column_ids(&b).len(), 4);
+}
+
+#[test]
+fn an_unknown_column_is_refused_by_board() {
+    let b = board_of_columns(&["done"]);
+
+    assert!(b["error"].as_str().unwrap().contains("done"));
+    assert!(b.get("columns").is_none());
+}

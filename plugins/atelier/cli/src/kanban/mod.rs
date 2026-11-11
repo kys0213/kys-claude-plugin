@@ -10,19 +10,22 @@ pub mod core;
 
 use crate::kanban::commands::inbox::{ClockIds, FsInbox, ThreadPause};
 use crate::kanban::commands::payload::{parse_answer_request, parse_sessions};
+use crate::kanban::commands::records::{FsRecords, KanbanRecords, StatusQuery};
 use crate::kanban::commands::requests::KanbanRequests;
 use crate::kanban::commands::spawn::{ClaudeLauncher, GitProbe};
 use crate::kanban::core::answer::compose;
-use crate::kanban::core::board::{build, Action, Board, BoardParams, Card};
+use crate::kanban::core::board::{build, Action, Board, BoardParams, Card, Column};
 use crate::kanban::core::detail::Detail;
 use crate::kanban::core::duration::parse_millis;
 use crate::kanban::core::layout::{fit, Layout};
 use crate::kanban::core::question::{Ask, Question};
 use crate::kanban::core::repos::{group, Repo};
 use crate::kanban::core::request::Sender;
+use crate::kanban::core::status::{render_text, select, Format};
 use crate::shared::process::read_stdin_raw;
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Parser)]
 #[command(
@@ -54,6 +57,34 @@ pub enum Commands {
         /// The calling session's id, marked `is_self`
         #[arg(long = "self")]
         self_id: Option<String>,
+        /// Keeps only this column (repeatable): needs_input, working, idle, stale
+        #[arg(long = "column")]
+        columns: Vec<String>,
+    },
+    /// The board of the sessions' record copies, read without the pane
+    Status {
+        /// Keeps only this column (repeatable): needs_input, working, idle, stale
+        #[arg(long = "column")]
+        columns: Vec<String>,
+        /// Lists only this session
+        #[arg(long)]
+        session: Option<String>,
+        /// Current time, unix milliseconds; the system clock when absent
+        #[arg(long)]
+        now: Option<u64>,
+        /// `json` or `text`
+        #[arg(long, default_value = "json")]
+        format: String,
+    },
+    /// Where a session's record copy is
+    RecordPath {
+        #[arg(long)]
+        session: String,
+    },
+    /// Removes a session's record copy and inbox
+    Forget {
+        #[arg(long)]
+        session: String,
     },
     /// An open question and the picks made on the board → one answer per question
     Answer,
@@ -284,6 +315,65 @@ fn board_json(board: &Board, layout: &Layout) -> Value {
     })
 }
 
+fn with_records<T>(run: impl FnOnce(&KanbanRecords) -> T) -> T {
+    let store = FsRecords::from_env();
+    let inbox = FsInbox::from_env();
+    run(&KanbanRecords {
+        store: &store,
+        inbox: &inbox,
+    })
+}
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn status_entry_json(column: Column, card: &Card) -> Value {
+    json!({
+        "session_id": card.session_id,
+        "label": card.label,
+        "repo_root": card.repo_root,
+        "cwd": card.cwd,
+        "column": column.id(),
+        "age": card.age,
+        "subtitle": card.subtitle,
+        "permission_mode": card.permission_mode,
+        "actions": action_ids(&card.actions),
+        "last_line": card.last_line,
+        "delivery": card.detail.delivery,
+    })
+}
+
+fn run_status(
+    columns: Vec<String>,
+    session: Option<String>,
+    now: Option<u64>,
+    format: &str,
+) -> String {
+    let now = now.unwrap_or_else(now_millis);
+    let query = StatusQuery {
+        columns,
+        session,
+        now,
+    };
+    let shown = Format::parse(format)
+        .and_then(|format| with_records(|r| r.status(&query)).map(|board| (format, board)));
+    match shown {
+        Ok((Format::Json, board)) => {
+            let sessions: Vec<Value> = select(&board, query.session.as_deref())
+                .into_iter()
+                .map(|(column, card)| status_entry_json(column, card))
+                .collect();
+            json!({ "now": now, "sessions": sessions }).to_string()
+        }
+        Ok((Format::Text, board)) => render_text(&board, query.session.as_deref()),
+        Err(error) => json!({ "error": error }).to_string(),
+    }
+}
+
 fn run_request(command: RequestCommand) -> Value {
     let inbox = FsInbox::from_env();
     let requests = KanbanRequests {
@@ -350,6 +440,7 @@ pub fn run(cli: Cli) -> i32 {
             expire_after,
             width,
             self_id,
+            columns,
         } => {
             let params = BoardParams {
                 now,
@@ -357,9 +448,11 @@ pub fn run(cli: Cli) -> i32 {
                 expire_after,
                 self_id,
             };
-            let out = match parse_sessions(&read_stdin_raw()) {
-                Ok(sessions) => {
-                    let board = build(&sessions, &params);
+            let out = match Column::parse_all(&columns)
+                .and_then(|only| Ok((only, parse_sessions(&read_stdin_raw())?)))
+            {
+                Ok((only, sessions)) => {
+                    let board = build(&sessions, &params).only(&only);
                     let layout = fit(width, board.columns.len() as u32);
                     board_json(&board, &layout)
                 }
@@ -367,6 +460,14 @@ pub fn run(cli: Cli) -> i32 {
             };
             println!("{out}");
         }
+        Commands::Status {
+            columns,
+            session,
+            now,
+            format,
+        } => println!("{}", run_status(columns, session, now, &format)),
+        Commands::RecordPath { session } => println!("{}", with_records(|r| r.path(&session))),
+        Commands::Forget { session } => println!("{}", with_records(|r| r.forget(&session))),
         Commands::Answer => {
             let out = match parse_answer_request(&read_stdin_raw())
                 .and_then(|(questions, picks)| compose(&questions, &picks))

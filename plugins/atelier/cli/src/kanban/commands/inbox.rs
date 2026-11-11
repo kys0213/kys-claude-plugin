@@ -55,20 +55,23 @@ pub struct FsInbox {
     root: Result<PathBuf, String>,
 }
 
+/// `$CLAUDE_CONFIG_DIR`, else `$HOME/.claude`.
+pub fn config_dir() -> Result<PathBuf, String> {
+    std::env::var_os("CLAUDE_CONFIG_DIR")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|h| !h.is_empty())
+                .map(|home| PathBuf::from(home).join(".claude"))
+        })
+        .ok_or_else(|| "CLAUDE_CONFIG_DIR 도 HOME 도 없어요".to_string())
+}
+
 impl FsInbox {
-    /// Under `$CLAUDE_CONFIG_DIR`, else `$HOME/.claude`.
     pub fn from_env() -> FsInbox {
-        let config = std::env::var_os("CLAUDE_CONFIG_DIR")
-            .filter(|d| !d.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("HOME")
-                    .filter(|h| !h.is_empty())
-                    .map(|home| PathBuf::from(home).join(".claude"))
-            })
-            .ok_or_else(|| "CLAUDE_CONFIG_DIR 도 HOME 도 없어요".to_string());
         FsInbox {
-            root: config.map(|c| c.join("atelier").join("kanban").join("inbox")),
+            root: config_dir().map(|c| c.join("atelier").join("kanban").join("inbox")),
         }
     }
 }
