@@ -14,6 +14,8 @@ pub struct Event {
     pub name: String,
     pub detail: Option<String>,
     pub at: u64,
+    /// Raised by a subagent's or teammate's loop, not the main loop.
+    pub by_agent: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -366,24 +368,99 @@ fn advance(current: Option<(State, u64)>, next: State, at: u64) -> (State, u64) 
     }
 }
 
-fn event_state(fact: &SessionFact) -> (State, u64) {
-    let mut current: Option<(State, u64)> = None;
-    for event in &fact.events {
+/// The state the events reach. A wait an agent's loop raises holds the state
+/// before it, and the end of that wait returns there: the agent's own tools
+/// say nothing about the main loop.
+struct Tracker {
+    current: Option<(State, u64)>,
+    held: Option<(State, u64)>,
+    started_at: u64,
+}
+
+impl Tracker {
+    fn new(started_at: u64) -> Tracker {
+        Tracker {
+            current: None,
+            held: None,
+            started_at,
+        }
+    }
+
+    fn state(&self) -> Option<&State> {
+        self.current.as_ref().map(|(state, _)| state)
+    }
+
+    fn move_to(&mut self, next: State, at: u64) {
+        self.current = Some(advance(self.current.take(), next, at));
+    }
+
+    fn hold_for(&mut self, wait: WaitReason, at: u64) {
+        if !matches!(self.state(), Some(State::NeedsInput(_))) {
+            self.held = Some(
+                self.current
+                    .clone()
+                    .unwrap_or((State::Idle, self.started_at)),
+            );
+        }
+        self.move_to(State::NeedsInput(wait), at);
+    }
+
+    /// Whether a held state was there to return to.
+    fn release(&mut self) -> bool {
+        match self.held.take() {
+            Some(back) => {
+                self.current = Some(back);
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn on_agent(&mut self, event: &Event) {
+        match signal_of(event) {
+            Signal::Set(State::NeedsInput(wait)) => self.hold_for(wait, event.at),
+            Signal::Set(State::Working) => {
+                self.release();
+            }
+            _ => {}
+        }
+    }
+
+    fn on_main(&mut self, event: &Event) {
         let resumable =
-            matches!(current, Some((State::NeedsInput(ref r), _)) if *r != WaitReason::Question);
-        let backgrounded = matches!(current, Some((State::Background { .. }, _)));
+            matches!(self.state(), Some(State::NeedsInput(r)) if *r != WaitReason::Question);
+        let backgrounded = matches!(self.state(), Some(State::Background { .. }));
         let next = match signal_of(event) {
             Signal::Set(state) => Some(state),
             Signal::TurnEnded(left) => Some(after_turn(left, event.at)),
             Signal::IdlePrompt if !backgrounded => Some(State::Idle),
+            Signal::Resumed if resumable && self.release() => None,
             Signal::Resumed if resumable => Some(State::Working),
             Signal::IdlePrompt | Signal::Resumed | Signal::Nothing => None,
         };
         if let Some(next) = next {
-            current = Some(advance(current, next, event.at));
+            if !matches!(next, State::NeedsInput(_)) {
+                self.held = None;
+            }
+            self.move_to(next, event.at);
         }
     }
-    current.unwrap_or((State::Idle, fact.started_at))
+
+    fn finish(self) -> (State, u64) {
+        self.current.unwrap_or((State::Idle, self.started_at))
+    }
+}
+
+fn event_state(fact: &SessionFact) -> (State, u64) {
+    let mut tracker = Tracker::new(fact.started_at);
+    for event in &fact.events {
+        if event.by_agent {
+            tracker.on_agent(event);
+        } else {
+            tracker.on_main(event);
+        }
+    }
+    tracker.finish()
 }
 
 /// An open question waits whatever the events say, as some surfaces draw the
@@ -441,13 +518,11 @@ fn label_of(fact: &SessionFact) -> String {
 const SUBTITLE_CHARS: usize = 60;
 
 fn subtitle_of(fact: &SessionFact) -> Option<String> {
-    let first = fact
-        .first_prompt
-        .as_deref()
-        .filter(|p| !is_wrapped_event(p));
-    let folded = [fact.title.as_deref(), first, person_prompt(fact)]
+    let folded = [fact.title.as_deref(), fact.first_prompt.as_deref()]
         .into_iter()
         .flatten()
+        .filter(|p| !is_wrapped_event(p))
+        .chain(person_prompt(fact))
         .map(|s| fold(&detail::clean(s)))
         .find(|s| !s.is_empty())?;
     Some(cut(&folded, SUBTITLE_CHARS))
@@ -646,6 +721,7 @@ mod tests {
             name: name.to_string(),
             detail: detail.map(str::to_string),
             at,
+            by_agent: false,
         }
     }
 

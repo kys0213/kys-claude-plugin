@@ -1,6 +1,6 @@
 mod kanban_support;
 
-use kanban_support::{board, event, session_with, MIN, NOW, SEC};
+use kanban_support::{agent_event, board, event, session_with, MIN, NOW, SEC};
 use serde_json::{json, Value};
 
 /// The column and card of the one session on the board.
@@ -231,6 +231,98 @@ fn a_running_turn_shows_its_tool_not_the_background() {
     );
     assert_eq!(column, "working");
     assert_eq!(card["progress"], "▸ Read: b.rs");
+}
+
+#[test]
+fn a_subagent_finishing_a_tool_keeps_the_background_work() {
+    let (column, card) = placed(
+        json!([
+            event("turn.start", None, 5 * MIN),
+            event("turn.complete", Some("subagent"), 4 * MIN),
+            agent_event("classic.PostToolUse", Some("Bash"), 3 * MIN),
+            agent_event("classic.PostToolUseFailure", Some("Read"), 2 * MIN),
+        ]),
+        json!({ "agents": [agent("running", false)] }),
+    );
+    assert_eq!(column, "working");
+    assert_eq!(card["age"], "5m");
+    assert_eq!(card["progress"], "▸ 백그라운드: 에이전트 1");
+}
+
+#[test]
+fn the_idle_prompt_after_a_subagent_tool_does_not_end_background_work() {
+    assert_eq!(
+        column(
+            json!([
+                event("turn.start", None, 5 * MIN),
+                event("turn.complete", Some("subagent"), 4 * MIN),
+                agent_event("classic.PostToolUse", Some("Bash"), 3 * MIN),
+                event("classic.Notification", Some("idle_prompt"), 2 * MIN),
+            ]),
+            json!({})
+        ),
+        "working"
+    );
+}
+
+#[test]
+fn a_subagent_permission_request_waits_for_input_then_returns_to_the_background() {
+    let asked = json!([
+        event("turn.start", None, 6 * MIN),
+        event("turn.complete", Some("subagent"), 5 * MIN),
+        agent_event("classic.PermissionRequest", Some("Bash"), 3 * MIN),
+        event(
+            "classic.Notification",
+            Some("permission_prompt"),
+            3 * MIN - 6 * SEC
+        ),
+    ]);
+    let (column, card) = placed(asked.clone(), json!({}));
+    assert_eq!(column, "needs_input");
+    assert_eq!(card["reason"], "권한 요청: Bash");
+    assert_eq!(card["age"], "3m");
+
+    for answer in [
+        agent_event("classic.PostToolUse", Some("Bash"), MIN),
+        agent_event("kanban.answer", None, MIN),
+        event("ui.spinner", None, MIN),
+    ] {
+        let mut events = asked.as_array().expect("events").clone();
+        events.push(answer.clone());
+        let (column, card) = placed(Value::Array(events), json!({}));
+        assert_eq!(column, "working", "{answer}");
+        assert_eq!(card["age"], "6m", "{answer}");
+        assert_eq!(card["progress"], "▸ 백그라운드 작업", "{answer}");
+    }
+}
+
+#[test]
+fn a_subagent_finishing_a_tool_does_not_answer_the_main_loops_permission_request() {
+    let (column, card) = placed(
+        json!([
+            event("turn.start", None, 3 * MIN),
+            event("classic.PermissionRequest", Some("Bash"), 2 * MIN),
+            agent_event("classic.PostToolUse", Some("Read"), MIN),
+        ]),
+        json!({}),
+    );
+    assert_eq!(column, "needs_input");
+    assert_eq!(card["reason"], "권한 요청: Bash");
+    assert_eq!(card["age"], "2m");
+}
+
+#[test]
+fn a_subagent_finishing_a_tool_does_not_wake_an_idle_session() {
+    assert_eq!(
+        column(
+            json!([
+                event("turn.complete", None, 2 * MIN),
+                agent_event("classic.PostToolUse", Some("Bash"), MIN),
+            ]),
+            json!({})
+        ),
+        "idle"
+    );
 }
 
 #[test]

@@ -700,6 +700,7 @@ export function registerKanban(on: On, options: PluginOptions = {}): void {
       await record($, s, {
         name: via === null ? null : 'kanban.answer',
         detail: via,
+        byAgent: e.agentId !== undefined,
         update: base => withoutAsk(base, id),
       })
     }
@@ -718,6 +719,7 @@ export function registerKanban(on: On, options: PluginOptions = {}): void {
     await record($, s, {
       name: 'classic.PermissionRequest',
       detail: e.tool_name,
+      byAgent: e.agent_id !== undefined,
       update: () => ({ ...modeOf(e), ...(permission === null ? {} : { permission, pending_context: context }) }),
     })
 
@@ -732,7 +734,12 @@ export function registerKanban(on: On, options: PluginOptions = {}): void {
     }
 
     await recordPermit($, call, permission, verdict)
-    await record($, s, { name: 'kanban.answer', detail: verdict.via, update: () => ({ permission: null }) })
+    await record($, s, {
+      name: 'kanban.answer',
+      detail: verdict.via,
+      byAgent: e.agent_id !== undefined,
+      update: () => ({ permission: null }),
+    })
 
     return verdict.decision === 'allow'
       ? { decision: { behavior: 'allow' as const } }
@@ -751,6 +758,7 @@ export function registerKanban(on: On, options: PluginOptions = {}): void {
     await record($, s, {
       name: 'classic.PostToolUse',
       detail: e.tool_name,
+      byAgent: e.agent_id !== undefined,
       update: () => ({ ...modeOf(e), permission: null }),
     })
 
@@ -760,7 +768,12 @@ export function registerKanban(on: On, options: PluginOptions = {}): void {
   on('classic.PostToolUseFailure', async ($, e, next) => {
     endPermit(s)
     ranCall(s, e.tool_use_id, 'PostToolUseFailure')
-    await record($, s, { name: 'classic.PostToolUseFailure', detail: e.tool_name, update: () => ({ permission: null }) })
+    await record($, s, {
+      name: 'classic.PostToolUseFailure',
+      detail: e.tool_name,
+      byAgent: e.agent_id !== undefined,
+      update: () => ({ permission: null }),
+    })
 
     return next(e)
   })
