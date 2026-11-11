@@ -2,7 +2,7 @@
 //! entry per line. Every write holds an exclusive lock on `.lock` beside the
 //! month files, so lines added at once never mix and a prune never loses one.
 
-use crate::kanban::commands::inbox::config_dir;
+use crate::kanban::commands::inbox::{config_dir, replace_file};
 use crate::kanban::core::ledger::MonthFile;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -87,13 +87,10 @@ fn read_months(dir: &Path) -> Result<Vec<MonthFile>, String> {
 }
 
 fn write_month(dir: &Path, month: &MonthFile) -> Result<(), String> {
-    let temp = dir.join(format!(".{}.tmp", month.month));
     let mut contents = month.lines.join("\n");
     contents.push('\n');
-    fs::write(&temp, contents)
-        .map_err(|e| format!("장부 {} 를 쓰지 못했어요: {e}", month.month))?;
-    fs::rename(&temp, month_path(dir, &month.month))
-        .map_err(|e| format!("장부 {} 를 놓지 못했어요: {e}", month.month))
+    replace_file(&month_path(dir, &month.month), &contents)
+        .map_err(|e| format!("장부 {} 를 쓰지 못했어요: {e}", month.month))
 }
 
 impl LedgerStore for FsLedger {

@@ -76,11 +76,18 @@ impl FsInbox {
     }
 }
 
+/// Writes `contents` under a hidden temp name beside `target` and renames it
+/// over `target`, so a reader sees the old file or the whole new one.
+pub fn replace_file(target: &Path, contents: &str) -> std::io::Result<()> {
+    let name = target.file_name().unwrap_or_default().to_string_lossy();
+    let temp = target.with_file_name(format!(".{name}.tmp"));
+    fs::write(&temp, contents)?;
+    fs::rename(&temp, target)
+}
+
 fn place(dir: &Path, name: &str, contents: &str) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| format!("inbox 를 만들지 못했어요: {e}"))?;
-    let temp = dir.join(format!(".{name}.tmp"));
-    fs::write(&temp, contents).map_err(|e| format!("요청을 쓰지 못했어요: {e}"))?;
-    fs::rename(&temp, dir.join(format!("{name}{SUFFIX}")))
+    replace_file(&dir.join(format!("{name}{SUFFIX}")), contents)
         .map_err(|e| format!("요청을 놓지 못했어요: {e}"))
 }
 

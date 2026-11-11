@@ -8,7 +8,7 @@ use super::board::{PermissionAsk, WaitOn, Waiting};
 use super::detail::Decision;
 use super::mask::mask;
 use super::matchkey::{answer_fp, digest, sentence};
-use super::origin::is_person;
+use super::prompt::decides_as_person;
 use super::question::Ask;
 use super::request::{Verdict, Via};
 use super::text::cut;
@@ -471,7 +471,10 @@ fn decision_draft(decision: &Decision, by: &DecisionBy, text: &str, wait: &Wait)
         return None;
     };
     let (source, origin) = match by {
-        DecisionBy::Prompt { origin } => (Source::session(is_person(origin)), Some(origin.clone())),
+        DecisionBy::Prompt { origin } => (
+            Source::session(decides_as_person(origin)),
+            Some(origin.clone()),
+        ),
         DecisionBy::Inbox(via) => (Source::inbox(*via), None),
     };
     Some(Draft {
@@ -491,8 +494,7 @@ fn decision_draft(decision: &Decision, by: &DecisionBy, text: &str, wait: &Wait)
     })
 }
 
-/// The entries one answer leaves: one per answered question, one for a
-/// permission or a decision, none when the facts show no answer.
+/// What one answer leaves in the ledger.
 pub fn entries(facts: &Facts, paths: &dyn RealPaths) -> Vec<Entry> {
     let waiting = Waiting {
         on: facts.wait_on(),
@@ -570,9 +572,7 @@ fn line_at(line: &str) -> Option<u64> {
         .as_u64()
 }
 
-/// The months with lines older than `max_age_ms` or without a time dropped,
-/// then the oldest lines dropped until all of them with their line ends fit
-/// in `max_bytes`. A month left without lines is dropped.
+/// The months kept within `max_age_ms` and `max_bytes`, and what was dropped.
 pub fn prune(
     mut months: Vec<MonthFile>,
     now: u64,

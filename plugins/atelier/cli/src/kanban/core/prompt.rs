@@ -1,5 +1,6 @@
-//! Which of a session's prompts a person wrote: one typed in the session, or
-//! sent from the board, that is not an event the host wrapped in a tag.
+//! Which of a session's prompts count as a person's, by the engine's
+//! `origin.kind`. The ledger counts no `sdk` or board prompt as a person's
+//! decision, though the board shows both as a person's prompt.
 
 use super::detail::clean;
 
@@ -11,7 +12,8 @@ pub struct PromptFact {
     pub at: u64,
 }
 
-const PERSON_ORIGINS: [&str; 4] = ["composer", "bridge", "sdk", "kanban"];
+const SHOWN_AS_PERSON: [&str; 4] = ["composer", "bridge", "sdk", "kanban"];
+const DECIDING_AS_PERSON: [&str; 2] = ["composer", "bridge"];
 
 /// `<name ...>…`: how hosts hand a session events (`<task-notification>`,
 /// `<side-sessions-event>`) through the same door as a typed prompt.
@@ -28,8 +30,14 @@ pub fn is_wrapped_event(text: &str) -> bool {
         && rest[name_len..].starts_with(|c: char| c == '>' || c.is_whitespace())
 }
 
-fn is_person(prompt: &PromptFact) -> bool {
-    PERSON_ORIGINS.contains(&prompt.origin.as_str()) && !is_wrapped_event(&prompt.text)
+fn shows_as_person_prompt(prompt: &PromptFact) -> bool {
+    SHOWN_AS_PERSON.contains(&prompt.origin.as_str()) && !is_wrapped_event(&prompt.text)
+}
+
+/// Whether a prompt of this `origin.kind` answering an open decision is a
+/// person's decision; a kind this version does not know is not.
+pub fn decides_as_person(origin: &str) -> bool {
+    DECIDING_AS_PERSON.contains(&origin)
 }
 
 /// The newest prompt a person wrote; for a record from before prompts were
@@ -42,7 +50,7 @@ pub fn latest_person_prompt<'a>(
         return prompts
             .iter()
             .rev()
-            .find(|p| is_person(p))
+            .find(|p| shows_as_person_prompt(p))
             .map(|p| p.text.as_str());
     }
     last_prompt.filter(|p| !is_wrapped_event(p))

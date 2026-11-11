@@ -263,8 +263,6 @@ fn bind_refuses_facts_it_cannot_read() {
     }
 }
 
-// --- who decided: the source table ---
-
 #[test]
 fn a_question_answered_in_its_own_dialog_is_a_persons_decision() {
     let dir = TempDir::new().unwrap();
@@ -487,8 +485,6 @@ fn a_prompt_from_anyone_but_a_person_while_a_decision_is_open_is_no_persons_deci
     }
 }
 
-// --- keys, answer fingerprints and what the wait was then ---
-
 #[test]
 fn every_kind_carries_an_answer_fingerprint_so_opposite_permission_answers_show() {
     let dir = TempDir::new().unwrap();
@@ -680,8 +676,6 @@ fn a_question_cut_when_recorded_has_no_key() {
     assert_eq!(entry["key"], Value::Null);
     assert_eq!(entry["proxyable"], false);
 }
-
-// --- masking ---
 
 #[test]
 fn a_secret_is_masked_before_it_is_kept_and_marks_the_answer_it_changed() {
@@ -892,8 +886,6 @@ fn a_long_answer_is_cut() {
     );
 }
 
-// --- reading ---
-
 #[test]
 fn list_is_newest_first_and_skips_lines_it_cannot_read() {
     let dir = TempDir::new().unwrap();
@@ -1000,8 +992,6 @@ fn record_refuses_facts_it_cannot_read() {
     assert!(list(dir.path(), &[]).is_empty());
 }
 
-// --- keeping ---
-
 fn write_month(config: &Path, month: &str, lines: &[String]) {
     let dir = ledger_dir(config);
     fs::create_dir_all(&dir).unwrap();
@@ -1083,8 +1073,6 @@ fn prune_of_an_empty_ledger_drops_nothing() {
         json!({ "entries": 0, "files": 0 })
     );
 }
-
-// --- adding under the lock ---
 
 fn lock_file(config: &Path) -> fs::File {
     let dir = ledger_dir(config);

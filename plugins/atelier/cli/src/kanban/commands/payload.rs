@@ -342,7 +342,7 @@ pub fn parse_bash_command(raw: &str) -> Result<String, String> {
 
 /// What `ledger record` takes: when, the session and where it runs, the wait
 /// as its record keeps it under `question`, `permission` or `decision`, and
-/// `answer`, how the answer came in. Who decided is not read from it.
+/// `answer`, how the answer came in.
 pub fn parse_ledger_facts(raw: &str) -> Result<Facts, String> {
     let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
     let at = value
@@ -451,8 +451,6 @@ fn required_bool(value: &Value, key: &str, what: &str) -> Result<bool, String> {
         .ok_or_else(|| format!("`{what}` is not a boolean"))
 }
 
-/// The dialog's answers in the call's order: one that is not text is no
-/// answer, and a call that ended in an error or a deny answered nothing.
 fn dialog_answers(answer: &Value, answers: &[Value]) -> Result<Vec<Option<String>>, String> {
     let is_error = required_bool(answer, "is_error", "answer.is_error")?;
     let denied = required_bool(answer, "denied", "answer.denied")?;

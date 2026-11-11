@@ -16,7 +16,7 @@ type LedgerWait =
   | { permission: PermissionFacts }
   | { decision: DecisionFacts }
 
-/** How the answer came in, as `ledger record` reads it; who decided is left to the CLI. */
+/** How the answer came in, as `ledger record` reads it. */
 type LedgerAnswer =
   | { path: 'session'; answers: unknown[]; afk_timeout_ms: unknown; is_error: boolean; denied: boolean }
   | { path: 'session'; post: string | null; is_error: boolean }
@@ -98,7 +98,6 @@ export async function recordQuestion(
   await recordAnswer($, { question: { tool_use_id: toolUseId, ...ask } }, answer)
 }
 
-/** A tool call starts: a permission request it raises is tied to it. */
 export function startCall(s: LedgerState, toolUseId: string | undefined, tool: string): void {
   if (toolUseId !== undefined) {
     s.calls.set(toolUseId, { tool, permission: null, post: null, settled: false })
@@ -125,7 +124,6 @@ export async function askedPermission(
   return call
 }
 
-/** A PostToolUse or PostToolUseFailure came for the call. */
 export function ranCall(s: LedgerState, toolUseId: string, post: string): void {
   const call = s.calls.get(toolUseId)
 
