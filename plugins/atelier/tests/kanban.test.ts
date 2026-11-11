@@ -104,6 +104,8 @@ type World = {
   messages: { value: { role: 'user' | 'assistant'; text: string; toolUses: never[] }[] }
   submitted: string[]
   aborted: string[]
+  /** What `$.agent.list()` answers. */
+  agents: { value: { id: string; description: string; type: string; status: string; teammateId?: string }[] }
 }
 
 type CliOut = { exitCode: number; stdout: string } | 'missing'
@@ -128,6 +130,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   const messages: World['messages'] = { value: [] }
   const submitted: string[] = []
   const aborted: string[] = []
+  const agents: World['agents'] = { value: [] }
 
   on('store.get', ($, e) => ({ value: store[e.key] }))
   on('store.set', ($, e) => {
@@ -174,6 +177,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
     value: inbox.files.map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: START, isLink: false })),
   }))
   on('session.messages', () => ({ value: messages.value as never }))
+  on('agent.list', () => ({ value: agents.value as never }))
   on('turn.abort', ($, e) => {
     aborted.push(e.turnId)
 
@@ -194,6 +198,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   on('classic.Notification', () => ({}))
   on('classic.PostToolUse', () => ({}))
   on('classic.PostToolUseFailure', () => ({}))
+  on('classic.Stop', () => ({}))
   on('tool.call', ($, e) => {
     if (e.tool === 'AskUserQuestion') {
       return new Promise(resolve => {
@@ -208,7 +213,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
     return { result: {} }
   })
 
-  return { store, clock, runs, shown, dialog, inbox, messages, submitted, aborted }
+  return { store, clock, runs, shown, dialog, inbox, messages, submitted, aborted, agents }
 }
 
 type StoredRecord = {
@@ -224,6 +229,7 @@ type StoredRecord = {
   tasks?: unknown
   todos?: unknown
   asks?: Record<string, unknown>
+  agents?: unknown
 }
 
 function stored(w: World): StoredRecord {
@@ -402,6 +408,86 @@ describe('kanban recording', () => {
 
     expect(stored(w).heartbeat_at).toBe(START + 30_000)
     expect(eventNames(w)).toEqual(['session.start'])
+  })
+})
+
+const TEAM = [
+  { id: 'a1', description: 'Review', type: 'general-purpose', status: 'running' },
+  { id: 'a2', description: 'Scout', type: 'teammate', status: 'idle', teammateId: 'scout@team' },
+]
+
+function stop(types: string[], agentId?: string): never {
+  const background_tasks = types.map((type, i) => ({ id: `t${i}`, type, status: 'running', description: 'd' }))
+
+  return { stop_hook_active: false, background_tasks, ...(agentId === undefined ? {} : { agent_id: agentId }) } as never
+}
+
+function turnEnds(w: World): (string | null)[] {
+  return stored(w)
+    .events.filter(e => e.name === 'turn.complete')
+    .map(e => e.detail)
+}
+
+describe('kanban background work', () => {
+  test('a turn end carries the task types its Stop left running, and the agents as listed then', async ($, on) => {
+    const w = world(on)
+    w.agents.value = TEAM
+
+    await $.turn.start({ text: 'fan out', turnId: 't1' })
+    await $.classic.Stop(stop(['subagent', 'shell', 'teammate']))
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+
+    expect(turnEnds(w)).toEqual(['subagent,shell,teammate'])
+    expect(stored(w).agents).toEqual([
+      { status: 'running', teammate: false },
+      { status: 'idle', teammate: true },
+    ])
+  })
+
+  test('a Stop that comes after the turn end fills that turn end', async ($, on) => {
+    const w = world(on)
+
+    await $.turn.start({ text: 'fan out', turnId: 't1' })
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+    await $.classic.Stop(stop(['workflow']))
+
+    expect(turnEnds(w)).toEqual(['workflow'])
+    expect(eventNames(w)).toEqual(['turn.start', 'turn.complete'])
+  })
+
+  test('a turn end with nothing left, or no Stop of its own, carries no detail', async ($, on) => {
+    const w = world(on)
+
+    await $.turn.start({ text: 'a', turnId: 't1' })
+    await $.classic.Stop(stop([]))
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+    await $.turn.start({ text: 'b', turnId: 't2' })
+    await $.classic.Stop(stop(['subagent']))
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
+    await $.turn.start({ text: 'c', turnId: 't3' })
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't3', reason: 'aborted' } as never)
+
+    expect(turnEnds(w)).toEqual([null, 'subagent', null])
+  })
+
+  test('a subagent loop Stop is not the main loop turn end', async ($, on) => {
+    const w = world(on)
+
+    await $.turn.start({ text: 'a', turnId: 't1' })
+    await $.classic.Stop(stop(['subagent'], 'a1'))
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+
+    expect(turnEnds(w)).toEqual([null])
+  })
+
+  test('the heartbeat keeps the agent list current', async ($, on) => {
+    const w = world(on)
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    w.agents.value = [{ ...TEAM[1], status: 'running' }]
+    await w.clock.advance(30_000)
+
+    expect(stored(w).agents).toEqual([{ status: 'running', teammate: true }])
   })
 })
 

@@ -1,6 +1,7 @@
 //! Session facts → kanban board. Pure: the caller supplies `now`, the
 //! thresholds and every fact, so one snapshot always yields one board.
 
+use super::background::{self, AgentFact, Left};
 use super::detail::{self, Decision, Delivery, Detail, DetailFacts, Phase};
 use super::duration::age_label;
 use super::progress::{progress_line, Activity, ProgressFacts, WorkItem};
@@ -55,6 +56,8 @@ pub struct SessionFact {
     pub todos: Vec<WorkItem>,
     /// AskUserQuestion calls the mod has open.
     pub asks: Vec<Ask>,
+    /// The session's agent loops as the mod last listed them.
+    pub agents: Vec<AgentFact>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,7 +202,18 @@ impl WaitReason {
 enum State {
     NeedsInput(WaitReason),
     Working,
+    /// The main loop's turn ended with work still running in the background.
+    Background {
+        left: Left,
+        ended_at: u64,
+    },
     Idle,
+}
+
+impl State {
+    fn is_busy(&self) -> bool {
+        matches!(self, State::Working | State::Background { .. })
+    }
 }
 
 enum Signal {
@@ -209,6 +223,8 @@ enum Signal {
     /// open, so its return after a wait for input is the answer. It also draws
     /// after a turn ends, so it means nothing after any other state.
     Resumed,
+    TurnEnded(Left),
+    IdlePrompt,
     Nothing,
 }
 
@@ -219,14 +235,15 @@ fn signal_of(event: &Event) -> Signal {
     match (event.name.as_str(), event.detail.as_deref()) {
         ("prompt.submit" | "turn.start" | "kanban.answer", _) => Signal::Set(State::Working),
         ("classic.PostToolUse" | "classic.PostToolUseFailure", _) => Signal::Set(State::Working),
-        ("turn.complete" | "session.start", _) => Signal::Set(State::Idle),
+        ("turn.complete", left) => Signal::TurnEnded(background::left_by(left)),
+        ("session.start", _) => Signal::Set(State::Idle),
         ("classic.PermissionRequest", Some(ASK_TOOL)) => needs(WaitReason::Question),
         ("classic.PermissionRequest", tool) => {
             needs(WaitReason::Permission(tool.map(str::to_string)))
         }
         ("classic.Notification", Some("permission_prompt")) => needs(WaitReason::Permission(None)),
         ("classic.Notification", Some("elicitation_dialog")) => needs(WaitReason::Input),
-        ("classic.Notification", Some("idle_prompt")) => Signal::Set(State::Idle),
+        ("classic.Notification", Some("idle_prompt")) => Signal::IdlePrompt,
         ("ui.spinner", _) => Signal::Resumed,
         _ => Signal::Nothing,
     }
@@ -267,21 +284,39 @@ fn same_kind(a: &State, b: &State) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b)
 }
 
+fn after_turn(left: Left, ended_at: u64) -> State {
+    match left {
+        Left::Nothing => State::Idle,
+        left => State::Background { left, ended_at },
+    }
+}
+
 /// A `permission_prompt` notification follows the request it repeats, so a
-/// repeated state keeps its first event and that event's reason.
+/// repeated state keeps its first event and that event's reason. Work that
+/// goes on across turn ends keeps the time it began.
+fn advance(current: Option<(State, u64)>, next: State, at: u64) -> (State, u64) {
+    match current {
+        Some((cur, since)) if cur.is_busy() && next.is_busy() => (next, since),
+        Some((cur, since)) if same_kind(&cur, &next) => (cur, since),
+        _ => (next, at),
+    }
+}
+
 fn event_state(fact: &SessionFact) -> (State, u64) {
     let mut current: Option<(State, u64)> = None;
     for event in &fact.events {
         let resumable =
             matches!(current, Some((State::NeedsInput(ref r), _)) if *r != WaitReason::Question);
-        match signal_of(event) {
-            Signal::Set(state)
-                if current
-                    .as_ref()
-                    .is_some_and(|(cur, _)| same_kind(cur, &state)) => {}
-            Signal::Set(state) => current = Some((state, event.at)),
-            Signal::Resumed if resumable => current = Some((State::Working, event.at)),
-            Signal::Resumed | Signal::Nothing => {}
+        let backgrounded = matches!(current, Some((State::Background { .. }, _)));
+        let next = match signal_of(event) {
+            Signal::Set(state) => Some(state),
+            Signal::TurnEnded(left) => Some(after_turn(left, event.at)),
+            Signal::IdlePrompt if !backgrounded => Some(State::Idle),
+            Signal::Resumed if resumable => Some(State::Working),
+            Signal::IdlePrompt | Signal::Resumed | Signal::Nothing => None,
+        };
+        if let Some(next) = next {
+            current = Some(advance(current, next, event.at));
         }
     }
     current.unwrap_or((State::Idle, fact.started_at))
@@ -289,15 +324,33 @@ fn event_state(fact: &SessionFact) -> (State, u64) {
 
 /// An open question waits whatever the events say, as some surfaces draw the
 /// spinner under a dialog; a decision left by the last turn waits once the
-/// turn is over.
+/// turn is over. Agents work on without the main loop hearing of it, so their
+/// last listing settles a turn end that left teammates or listed nothing.
 fn current_state(fact: &SessionFact, asks: &[Ask]) -> (State, u64) {
     if let Some(first) = asks.first() {
         return (State::NeedsInput(WaitReason::Question), first.at);
     }
+    let agents_work = background::any_agent_working(&fact.agents);
     match event_state(fact) {
-        (State::Idle, at) if fact.decision.is_some() => {
+        (State::Idle, at) | (State::Background { ended_at: at, .. }, _)
+            if fact.decision.is_some() =>
+        {
             (State::NeedsInput(WaitReason::Decision), at)
         }
+        (
+            State::Background {
+                left: Left::Team,
+                ended_at,
+            },
+            _,
+        ) if !agents_work => (State::Idle, ended_at),
+        (State::Idle, at) if agents_work => (
+            State::Background {
+                left: Left::Team,
+                ended_at: at,
+            },
+            at,
+        ),
         other => other,
     }
 }
@@ -352,7 +405,9 @@ fn actions_of(state: Option<&State>, fact: &SessionFact) -> Vec<Action> {
             let permit = fact.permission_id.as_ref().map(|_| Action::Permit);
             [permit, stop].into_iter().flatten().collect()
         }
-        Some(State::NeedsInput(_) | State::Working) => stop.into_iter().collect(),
+        Some(State::NeedsInput(_) | State::Working | State::Background { .. }) => {
+            stop.into_iter().collect()
+        }
         Some(State::Idle) => vec![Action::Send],
     }
 }
@@ -361,7 +416,7 @@ fn phase_of(state: Option<&State>) -> Phase {
     match state {
         None => Phase::Stale,
         Some(State::NeedsInput(reason)) => reason.phase(),
-        Some(State::Working) => Phase::Working,
+        Some(State::Working | State::Background { .. }) => Phase::Working,
         Some(State::Idle) => Phase::Idle,
     }
 }
@@ -379,16 +434,22 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
     let (column, reason, since) = match &state {
         None => (Column::Stale, None, fact.heartbeat_at),
         Some((State::NeedsInput(reason), at)) => (Column::NeedsInput, Some(reason.label()), *at),
-        Some((State::Working, at)) => (Column::Working, None, *at),
+        Some((State::Working | State::Background { .. }, at)) => (Column::Working, None, *at),
         Some((State::Idle, at)) => (Column::Idle, None, *at),
     };
     let state = state.map(|(s, _)| s);
+    let background = matches!(state, Some(State::Background { .. }))
+        .then(|| background::background_line(last_turn_end(fact), &fact.agents));
     let progress = match column {
         Column::Stale => None,
         _ => progress_line(&ProgressFacts {
             tasks: &fact.tasks,
             todos: &fact.todos,
-            activity: fact.activity.as_ref().filter(|_| column == Column::Working),
+            activity: fact
+                .activity
+                .as_ref()
+                .filter(|_| matches!(state, Some(State::Working))),
+            background: background.as_deref(),
         }),
     };
     let detail = detail::build(
@@ -435,6 +496,14 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
             asks: if is_question { asks } else { Vec::new() },
         },
     }
+}
+
+fn last_turn_end(fact: &SessionFact) -> Option<&str> {
+    fact.events
+        .iter()
+        .rev()
+        .find(|e| e.name == "turn.complete")
+        .and_then(|e| e.detail.as_deref())
 }
 
 fn is_expired(fact: &SessionFact, params: &BoardParams) -> bool {

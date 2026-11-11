@@ -8,7 +8,7 @@ const MAX_FIRST_PROMPT_CHARS = 500
 const MAX_PROMPT_CHARS = 1_000
 const MAX_PROMPTS = 5
 
-type KanbanEvent = { name: string; detail: string | null; at: number }
+export type KanbanEvent = { name: string; detail: string | null; at: number }
 
 export type AskQuestion = {
   question: string
@@ -28,6 +28,8 @@ type Delivery = { id: string; kind: string; status: string; at: number }
 type TaskRecord = { subject: string; active: string | null; status: string }
 
 type TodoRecord = { status: string; active: string }
+
+export type AgentRecord = { status: string; teammate: boolean }
 
 export type SessionRecord = {
   v: 1
@@ -61,6 +63,8 @@ export type SessionRecord = {
   tasks?: Record<string, TaskRecord>
   todos?: TodoRecord[]
   asks?: Record<string, AskRecord>
+  /** The session's agent loops as `$.agent.list()` gave them last. */
+  agents?: AgentRecord[]
 }
 
 type Fields = Partial<Pick<SessionRecord, 'title' | 'first_prompt' | 'ended_reason'>>
@@ -135,10 +139,12 @@ async function writeRecord($: EngineInterface, entry: Entry): Promise<void> {
   const stored = await $.store.get(key)
   const prior = isRecord(stored) ? stored : null
   const base = prior ?? (await freshRecord($, id, now))
+  const updated = entry.update?.(base, now) ?? {}
   const appends = entry.name !== null && (entry.onlyIfNew !== true || prior === null)
+  const kept = updated.events ?? base.events
   const events = appends
-    ? [...base.events, { name: entry.name as string, detail: entry.detail ?? null, at: now }].slice(-MAX_EVENTS)
-    : base.events
+    ? [...kept, { name: entry.name as string, detail: entry.detail ?? null, at: now }].slice(-MAX_EVENTS)
+    : kept
 
   /** Only `set` keeps `ended_reason`: a session that still records after its end is live again. */
   await $.store.set(key, {
@@ -146,7 +152,7 @@ async function writeRecord($: EngineInterface, entry: Entry): Promise<void> {
     ...filled(base, entry.fill ?? {}),
     ended_reason: null,
     ...(entry.set ?? {}),
-    ...(entry.update?.(base, now) ?? {}),
+    ...updated,
     heartbeat_at: now,
     events,
   })

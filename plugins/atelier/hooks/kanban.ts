@@ -16,7 +16,16 @@ import {
 import { type DetailCard, type DetailState, detailBlock, newDetailState, pruneDetail, toggleSelected } from './kanban-detail'
 import { CLI_MISSING, cli, runKanban } from './kanban-cli'
 import { type InboxState, awaitPermit, deliverRequests, endPermit, findInbox } from './kanban-inbox'
-import { type Activity, KEY_PREFIX, MAX_FIELD_CHARS, type SessionRecord, record, recordPrompt } from './kanban-record'
+import {
+  type Activity,
+  KEY_PREFIX,
+  type KanbanEvent,
+  MAX_FIELD_CHARS,
+  type RecordState,
+  type SessionRecord,
+  record,
+  recordPrompt,
+} from './kanban-record'
 
 const PANE = 'kanban'
 const BOARD_TOOL = 'kanban_board'
@@ -27,6 +36,8 @@ const EXPIRE_AFTER = '24h'
 const MAX_REPLY_CHARS = 1_000
 const MAX_TODOS = 50
 const MAX_RECENT = 5
+const MAX_AGENTS = 50
+const MAX_LEFT_TASKS = 50
 /** Keys a `tool.call` input carries beside the tool's own arguments. */
 const RESERVED_INPUT_KEYS = ['tool', 'tool_use_id', 'agentId', 'requestMeta', 'consent']
 
@@ -41,9 +52,17 @@ type BoardView =
   | { kind: 'board'; columns: Column[]; layout: Layout; width: number }
   | { kind: 'error'; message: string }
 
+type TurnEnd = {
+  /** The background task types the main loop's Stop listed, for its `turn.complete` to carry. */
+  left: string | null
+  /** Whether this turn's `turn.complete` is recorded: a Stop after it fills that event's detail. */
+  completed: boolean
+}
+
 type KanbanState = InboxState &
   AskState & {
     detail: DetailState
+    turnEnd: TurnEnd
     view: BoardView
     timersStarted: boolean
     /** The pane width the last drawing had; the board is asked for that width. */
@@ -85,6 +104,28 @@ function expiredIds(parsed: Record<string, unknown> | null): string[] {
   const expired = parsed?.expired
 
   return Array.isArray(expired) ? expired.filter((x): x is string => typeof x === 'string') : []
+}
+
+async function agentsOf($: EngineInterface): Promise<Partial<SessionRecord>> {
+  try {
+    const agents = await $.agent.list()
+
+    return { agents: agents.slice(0, MAX_AGENTS).map(a => ({ status: a.status, teammate: a.teammateId !== undefined })) }
+  } catch {
+    return {}
+  }
+}
+
+async function heartbeat($: EngineInterface, s: RecordState): Promise<void> {
+  const agents = await agentsOf($)
+
+  await record($, s, { name: null, update: () => agents })
+}
+
+function withLastTurnEnd(events: KanbanEvent[], detail: string): KanbanEvent[] {
+  const last = events.map(e => e.name).lastIndexOf('turn.complete')
+
+  return events.map((e, i) => (i === last ? { ...e, detail } : e))
 }
 
 async function snapshot($: EngineInterface): Promise<{ keys: string[]; sessions: unknown[] }> {
@@ -260,7 +301,7 @@ async function startSession($: EngineInterface, s: KanbanState): Promise<void> {
 
   if (!s.timersStarted) {
     s.timersStarted = true
-    $.clock.every(HEARTBEAT_MS, () => void record($, s, { name: null }))
+    $.clock.every(HEARTBEAT_MS, () => void heartbeat($, s))
     $.clock.every(REFRESH_MS, () => void tick($, s))
   }
 }
@@ -291,6 +332,7 @@ export function registerKanban(on: On): void {
   const s: KanbanState = {
     ...newAskState(),
     detail: newDetailState(),
+    turnEnd: { left: null, completed: false },
     view: { kind: 'loading' },
     writes: Promise.resolve(),
     timersStarted: false,
@@ -332,6 +374,7 @@ export function registerKanban(on: On): void {
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
       s.turnId = e.turnId
+      s.turnEnd = { left: null, completed: false }
       await record($, s, { name: 'turn.start', update: () => ({ turn_id: e.turnId, recent: [], decision: null }) })
     }
 
@@ -346,8 +389,12 @@ export function registerKanban(on: On): void {
 
       endPermit(s)
 
+      const left = s.turnEnd.left
+      s.turnEnd = { left: null, completed: true }
+
       await record($, s, {
         name: 'turn.complete',
+        detail: left,
         update: base => ({
           activity: null,
           turn_id: null,
@@ -356,6 +403,26 @@ export function registerKanban(on: On): void {
           last_answer: e.answer.trim() === '' ? (base.last_answer ?? null) : e.answer.slice(0, MAX_REPLY_CHARS),
         }),
       })
+    }
+
+    return next(e)
+  })
+
+  on('classic.Stop', async ($, e, next) => {
+    if (e.agent_id === undefined) {
+      const types = (e.background_tasks ?? []).slice(0, MAX_LEFT_TASKS).map(t => t.type)
+      const left = types.length === 0 ? null : types.join(',')
+      const agents = await agentsOf($)
+
+      if (s.turnEnd.completed) {
+        await record($, s, {
+          name: null,
+          update: base => ({ ...agents, ...(left === null ? {} : { events: withLastTurnEnd(base.events, left) }) }),
+        })
+      } else {
+        s.turnEnd.left = left
+        await record($, s, { name: null, update: () => agents })
+      }
     }
 
     return next(e)

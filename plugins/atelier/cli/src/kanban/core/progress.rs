@@ -65,12 +65,15 @@ pub struct ProgressFacts<'a> {
     pub tasks: &'a [WorkItem],
     pub todos: &'a [WorkItem],
     pub activity: Option<&'a Activity>,
+    /// What runs in the background once the turn ended.
+    pub background: Option<&'a str>,
 }
 
 pub fn progress_line(facts: &ProgressFacts) -> Option<String> {
     let parts: Vec<String> = [
         todo_part(facts.tasks, facts.todos),
         facts.activity.map(activity_part),
+        facts.background.map(str::to_string),
     ]
     .into_iter()
     .flatten()
