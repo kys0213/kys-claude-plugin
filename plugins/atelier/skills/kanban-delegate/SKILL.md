@@ -30,8 +30,8 @@ version: 1.0.0
 |---|---|
 | 입력 대기 목록 | `atelier kanban status --column needs_input` |
 | 한 세션의 대기·물어 받은 답 | `atelier kanban status --session <session_id>` → `sessions[].wait`, `wait.relays` |
-| 선례 판정 | `atelier kanban ledger match --key <결정 키> --now <ms>` |
-| 선례 건 찾기 | `atelier kanban ledger list --key <결정 키> --decided-by human` |
+| 선례 판정·대리 근거 | `atelier kanban ledger match --key <결정 키> --now <ms>` → `eligible`·`mode`·`answer`·`precedent_ids` |
+| 추천 근거 확인 | `atelier kanban ledger list --key <결정 키>` |
 | 질문 대리 답 | `atelier kanban reply --session <S> --ask <wait.id> --answer <답>…(질문 순서) --from agent --precedent <질문 순번>:<장부 id>… --reason <근거> --now <ms>` |
 | 권한 대리 허용 | `atelier kanban permit --session <S> --request <wait.id> --decision allow --from agent --precedent 1:<장부 id>… --reason <근거> --now <ms>` |
 | 물어 받은 답 전달 | `reply …`·`permit …`·`decide --session <S> --at <wait.id> --text <답>` 에 `--from agent --relay <relay id> --now <ms>` |
@@ -71,7 +71,7 @@ version: 1.0.0
 4. 결정 키마다 `ledger match` 를 부른다. 질문이 여럿이면 질문마다 부른다.
 5. 모든 키가 `eligible: true` 이고 `mode: "act"` 이고, 원칙 3 에 걸리지 않으면 **대신 답한다**(4절).
 6. 하나라도 `eligible: true` 이고 `mode: "shadow"` 면 **추천 없이** 묻는다. 선택지는 대기의 원래 순서 그대로 두고, 본문에 추천·근거를 쓰지 않는다. 지켜보기 비교는 CLI 가 장부로 계산하므로 아무것도 기록하지 않는다.
-7. 그 밖(`eligible: false`)이면 추천안을 만들어 묻는다. 추천은 `references/profile.md` 의 프로필과, 같은 키의 사람 결정(`ledger list --key`)을 근거로 쓴다.
+7. 그 밖(`eligible: false`)이면 추천안을 만들어 묻는다. 추천은 `references/profile.md` 의 프로필과, 같은 키의 장부 건(`ledger list --key`, 대리 답은 빼고 읽는다)을 근거로 쓴다. `ledger list` 는 추천 근거를 확인하는 데만 쓰고 대리 선례를 고르는 데 쓰지 않는다.
 
 ### 3. 사용자에게 묻기
 
@@ -94,8 +94,8 @@ AskUserQuestion 하나에 대기 하나. 형식은 `references/ask.md` 를 따�
 
 ### 4. 대신 답하기
 
-1. 질문마다 선례 건을 고른다: `ledger list --key <키> --decided-by human` 의 결과(최신순)에서 `answer` 가 `match.answer` 와 같고, 선택지에서 직접 고른 건(`free_text`·`inferred`·`answer_masked` 가 모두 `false`)을 최신부터 1~5건.
-2. `reply`(질문) 또는 `permit --decision allow`(권한)를 `--precedent <질문 순번>:<id>…` 와 `--reason` 으로 보낸다. 질문 순번은 1부터.
+1. 질문마다 그 키의 `match.precedent_ids` 를 그대로 선례로 쓴다. 고르거나 빼거나 더하지 않는다 — 어느 건이 선례가 되는지는 CLI 가 정한다. 비어 있으면 대신 답하지 않고 묻는다.
+2. `reply`(질문) 또는 `permit --decision allow`(권한)를 id 마다 `--precedent <질문 순번>:<id>` 와 `--reason` 으로 보낸다. 질문 순번은 1부터, 답은 `match.answer` 그대로.
 3. 출력이 `queued` 면 메인 대화에 한 줄로 알린다: `<레포> · <질문 요지> → <답> 으로 대신 답했어요 (선례 <n>건, 최근 <날짜>)`. 사용자가 뒤집을 수 있게 대리 답이라는 것을 분명히 쓴다.
 4. 출력이 `error` 면 그 문장과 함께 묻기로 간다.
 
@@ -140,10 +140,9 @@ AskUserQuestion 하나에 대기 하나. 형식은 `references/ask.md` 를 따�
 깨우기: `- 3f2a… question toolu_01Ab…`
 
 1. `status --session 3f2a…` → 단일 선택 질문 1개, `proxyable: true`, 키 `q1:9c…`.
-2. `ledger match --key q1:9c… --now …` → `eligible: true`, `mode: "act"`, `answer: "rebase"`, `support: {direct: 3, approved: 0}`.
-3. `ledger list --key q1:9c… --decided-by human` → 직접 고른 `rebase` 3건.
-4. `reply --session 3f2a… --ask toolu_01Ab… --answer rebase --from agent --precedent 1:<id1> --precedent 1:<id2> --precedent 1:<id3> --reason "같은 질문에 직접 rebase 3건, 최근 11-09" --now …`
-5. 메인 대화: `api 레포 · 머지 방식 질문 → rebase 로 대신 답했어요 (선례 3건, 최근 11-09)`.
+2. `ledger match --key q1:9c… --now …` → `eligible: true`, `mode: "act"`, `answer: "rebase"`, `support: {direct: 3, approved: 0}`, `precedent_ids: [<id1>, <id2>, <id3>]`.
+3. `reply --session 3f2a… --ask toolu_01Ab… --answer rebase --from agent --precedent 1:<id1> --precedent 1:<id2> --precedent 1:<id3> --reason "같은 질문에 직접 rebase 3건, 최근 11-09" --now …`
+4. 메인 대화: `api 레포 · 머지 방식 질문 → rebase 로 대신 답했어요 (선례 3건, 최근 11-09)`.
 
 ### 권한 대기 — 지켜보기 단계
 
