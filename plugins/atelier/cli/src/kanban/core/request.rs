@@ -119,7 +119,7 @@ pub enum Request {
     },
 }
 
-/// Refuses a model's answer: nothing yet can tell one worth taking.
+/// Refuses `--from agent`.
 pub fn check_answerer(from: Sender) -> Result<(), String> {
     match from {
         Sender::Pane => Ok(()),
@@ -281,7 +281,7 @@ impl Request {
             RequestKind::Permit => Request::permit(
                 value.get("request_id")?.as_str()?,
                 value.get("decision")?.as_str()?,
-                // A permit with no sender was left by a pane that named none.
+                // A permit with no `from` reads as the pane.
                 match value.get("from") {
                     None => Sender::Pane,
                     Some(_) => from()?,

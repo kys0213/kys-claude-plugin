@@ -87,7 +87,6 @@ fn judge_command(command: &Simple, depth: usize) -> Option<String> {
     })
 }
 
-/// The scripts the shell would run for this command beyond its own words.
 fn nested_scripts(command: &Simple) -> Vec<String> {
     let substitutions = command
         .argv

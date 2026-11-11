@@ -3,7 +3,7 @@ import type { EngineInterface } from 'claude-code'
 import { CLI_MISSING, queueRequest, runKanban } from './kanban-cli'
 import { type AskQuestion, MAX_FIELD_CHARS } from './kanban-record'
 
-/** The store key a pane of an older mod leaves its answers under; read beside the inbox while such a pane may run. */
+/** The store key prefix of answers left in the store; `deliverAnswers` takes them beside the inbox. */
 const ANSWER_PREFIX = 'kanban:answer:'
 const MAX_QUESTION_CHARS = 1_000
 
