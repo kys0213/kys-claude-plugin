@@ -6,7 +6,7 @@
 
 use super::allowlist::RealPaths;
 use super::board::{PermissionAsk, WaitOn, Waiting};
-use super::ledger::{DecidedBy, Entry, EntryKind};
+use super::ledger::{DecidedBy, Entry, EntryKind, DAY_MS};
 use super::mask::mask;
 use super::matchkey::{answer_fp, digest};
 use super::progress::Activity;
@@ -20,7 +20,6 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 
 const VERSION: u64 = 1;
-const DAY_MS: u64 = 24 * 60 * 60 * 1_000;
 pub const WINDOW_MS: u64 = 90 * DAY_MS;
 const MIN_DIRECT: usize = 2;
 const MIN_WITH_APPROVED: usize = 3;

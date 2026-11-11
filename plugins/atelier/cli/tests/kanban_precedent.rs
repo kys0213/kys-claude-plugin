@@ -1,54 +1,38 @@
 use serde_json::{json, Value};
 use std::fs;
+use std::ops::Deref;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
 mod kanban_support;
-use kanban_support::{atelier, js_len, now_ms, question, question_lengths, REPO, SEC};
+use kanban_support::{js_len, now_ms, question, question_lengths, Home, REPO, SEC};
 
 const HOUR: u64 = 60 * 60 * SEC;
 const DAY: u64 = 24 * HOUR;
 
 struct World {
-    config: TempDir,
+    home: Home,
     now: u64,
+}
+
+impl Deref for World {
+    type Target = Home;
+
+    fn deref(&self) -> &Home {
+        &self.home
+    }
 }
 
 impl World {
     fn new() -> World {
         World {
-            config: TempDir::new().expect("config dir"),
+            home: Home::default(),
             now: now_ms(),
         }
     }
 
-    fn run(&self, args: &[&str], stdin: &str) -> Value {
-        let output = atelier()
-            .env("CLAUDE_CONFIG_DIR", self.config.path())
-            .arg("kanban")
-            .args(args)
-            .write_stdin(stdin)
-            .assert()
-            .success()
-            .get_output()
-            .stdout
-            .clone();
-        serde_json::from_slice(&output).expect("valid JSON on stdout")
-    }
-
-    fn kanban(&self, args: &[&str]) -> Value {
-        self.run(args, "")
-    }
-
     fn ledger_dir(&self) -> PathBuf {
-        self.config.path().join("atelier/kanban/ledger")
-    }
-
-    fn inbox(&self, session: &str) -> PathBuf {
-        self.config
-            .path()
-            .join("atelier/kanban/inbox")
-            .join(session)
+        self.config().join("atelier/kanban/ledger")
     }
 
     fn record_all(&self, facts: Value) -> Vec<String> {

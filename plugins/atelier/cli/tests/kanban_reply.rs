@@ -1,49 +1,29 @@
-use assert_cmd::Command;
 use serde_json::{json, Value};
 use std::fs;
-use std::path::PathBuf;
+use std::ops::Deref;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
-use tempfile::TempDir;
 
 mod kanban_support;
-use kanban_support::now_ms;
+use kanban_support::{now_ms, Home};
 
 struct World {
-    config: TempDir,
+    home: Home,
+}
+
+impl Deref for World {
+    type Target = Home;
+
+    fn deref(&self) -> &Home {
+        &self.home
+    }
 }
 
 impl World {
     fn new() -> World {
         World {
-            config: TempDir::new().expect("config dir"),
+            home: Home::default(),
         }
-    }
-
-    fn run(&self, args: &[&str], stdin: &str) -> Value {
-        let output = Command::cargo_bin("atelier")
-            .expect("locate `atelier` cargo binary")
-            .arg("kanban")
-            .args(args)
-            .env("CLAUDE_CONFIG_DIR", self.config.path())
-            .write_stdin(stdin)
-            .assert()
-            .success()
-            .get_output()
-            .stdout
-            .clone();
-        serde_json::from_slice(&output).expect("valid JSON on stdout")
-    }
-
-    fn kanban(&self, args: &[&str]) -> Value {
-        self.run(args, "")
-    }
-
-    fn inbox(&self, session: &str) -> PathBuf {
-        self.config
-            .path()
-            .join("atelier/kanban/inbox")
-            .join(session)
     }
 
     fn take(&self, session: &str, turn: Option<&str>, open: Value) -> Value {
@@ -224,7 +204,7 @@ fn a_take_without_waits_stdin_ends_while_stdin_stays_open() {
             "--ttl",
             "60s",
         ])
-        .env("CLAUDE_CONFIG_DIR", w.config.path())
+        .env("CLAUDE_CONFIG_DIR", w.config())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -348,7 +328,7 @@ fn agent_answers_without_precedents_are_refused() {
         let out = w.kanban(&args);
         assert!(out["error"].is_string(), "{args:?} → {out}");
     }
-    assert!(!w.config.path().join("atelier").exists());
+    assert!(!w.config().join("atelier").exists());
 }
 
 #[test]
@@ -488,7 +468,7 @@ fn answers_that_cannot_be_read_are_refused_before_anything_is_written() {
         let out = w.kanban(&args);
         assert!(out["error"].is_string(), "{args:?} → {out}");
     }
-    assert!(!w.config.path().join("atelier").exists());
+    assert!(!w.config().join("atelier").exists());
 }
 
 #[test]
@@ -837,7 +817,7 @@ fn a_nonce_that_is_not_an_id_is_refused_before_anything_is_written() {
         let out = w.kanban(&args);
         assert!(out["error"].is_string(), "{args:?} → {out}");
     }
-    assert!(!w.config.path().join("atelier").exists());
+    assert!(!w.config().join("atelier").exists());
 }
 
 #[test]

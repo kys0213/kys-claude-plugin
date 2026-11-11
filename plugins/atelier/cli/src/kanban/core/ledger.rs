@@ -20,7 +20,7 @@ use serde_json::Value;
 const VERSION: u64 = 1;
 const MAX_TEXT_CHARS: usize = 500;
 const ID_BYTES: usize = 4;
-const DAY_MS: u64 = 24 * 60 * 60 * 1_000;
+pub const DAY_MS: u64 = 24 * 60 * 60 * 1_000;
 pub const MAX_AGE_MS: u64 = 180 * DAY_MS;
 pub const MAX_BYTES: u64 = 50 * 1024 * 1024;
 pub const DEFAULT_LIMIT: usize = 50;

@@ -237,14 +237,23 @@ fn parse_ask(tool_use_id: &str, value: &Value) -> Option<Ask> {
 }
 
 fn parse_questions(value: &Value) -> Option<Vec<Question>> {
-    value.as_array()?.iter().map(parse_question).collect()
+    value
+        .as_array()?
+        .iter()
+        .map(|q| parse_question(q, MULTI_SELECT))
+        .collect()
 }
 
-fn parse_question(value: &Value) -> Option<Question> {
+/// The multi-select key of a question as payloads carry it, and as the
+/// AskUserQuestion call holds it.
+const MULTI_SELECT: &str = "multi_select";
+const TOOL_MULTI_SELECT: &str = "multiSelect";
+
+fn parse_question(value: &Value, multi_select_key: &str) -> Option<Question> {
     Some(Question {
         question: value.get("question")?.as_str()?.to_string(),
         header: value.get("header")?.as_str()?.to_string(),
-        multi_select: value.get("multi_select")?.as_bool()?,
+        multi_select: value.get(multi_select_key)?.as_bool()?,
         options: value
             .get("options")?
             .as_array()?
@@ -316,27 +325,10 @@ fn parse_open_ask(value: &Value) -> Option<OpenAsk> {
     Some(OpenAsk {
         id: value.get("id")?.as_str()?.to_string(),
         questions: questions.len(),
-        whole: questions.iter().map(parse_tool_question).collect(),
-    })
-}
-
-/// One question as the AskUserQuestion call holds it.
-fn parse_tool_question(value: &Value) -> Option<Question> {
-    Some(Question {
-        question: value.get("question")?.as_str()?.to_string(),
-        header: value.get("header")?.as_str()?.to_string(),
-        multi_select: value.get("multiSelect")?.as_bool()?,
-        options: value
-            .get("options")?
-            .as_array()?
+        whole: questions
             .iter()
-            .map(|option| {
-                Some(QuestionOption {
-                    label: option.get("label")?.as_str()?.to_string(),
-                    description: nullable_string(option, "description")?,
-                })
-            })
-            .collect::<Option<Vec<_>>>()?,
+            .map(|q| parse_question(q, TOOL_MULTI_SELECT))
+            .collect(),
     })
 }
 

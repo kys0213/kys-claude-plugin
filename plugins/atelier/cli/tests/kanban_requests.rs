@@ -1,22 +1,30 @@
-use assert_cmd::Command;
 use serde_json::{json, Value};
 use std::fs;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
 mod kanban_support;
-use kanban_support::now_ms;
+use kanban_support::{now_ms, stdout_json, Home};
 
 struct World {
-    config: TempDir,
+    home: Home,
     bin: TempDir,
+}
+
+impl Deref for World {
+    type Target = Home;
+
+    fn deref(&self) -> &Home {
+        &self.home
+    }
 }
 
 impl World {
     fn new() -> World {
         World {
-            config: TempDir::new().expect("config dir"),
+            home: Home::default(),
             bin: TempDir::new().expect("bin dir"),
         }
     }
@@ -27,25 +35,7 @@ impl World {
             self.bin.path().display(),
             std::env::var("PATH").unwrap_or_default()
         );
-        let output = Command::cargo_bin("atelier")
-            .expect("locate `atelier` cargo binary")
-            .arg("kanban")
-            .args(args)
-            .env("CLAUDE_CONFIG_DIR", self.config.path())
-            .env("PATH", path)
-            .assert()
-            .success()
-            .get_output()
-            .stdout
-            .clone();
-        serde_json::from_slice(&output).expect("valid JSON on stdout")
-    }
-
-    fn inbox(&self, session: &str) -> PathBuf {
-        self.config
-            .path()
-            .join("atelier/kanban/inbox")
-            .join(session)
+        stdout_json(self.command().args(args).env("PATH", path))
     }
 
     fn files(&self, session: &str) -> Vec<String> {
@@ -310,7 +300,7 @@ fn requests_are_refused_for_bad_ids_and_empty_text() {
         let out = w.kanban(&args);
         assert!(out["error"].is_string(), "{args:?} → {out}");
     }
-    assert!(!w.config.path().join("atelier").exists());
+    assert!(!w.config().join("atelier").exists());
 }
 
 #[test]
@@ -338,12 +328,10 @@ fn a_sender_other_than_pane_or_agent_is_refused_before_anything_is_written() {
             "allow",
         ],
     ] {
-        let output = Command::cargo_bin("atelier")
-            .expect("locate `atelier` cargo binary")
-            .arg("kanban")
+        let output = w
+            .command()
             .args(&args)
             .args(["--from", "robot"])
-            .env("CLAUDE_CONFIG_DIR", w.config.path())
             .output()
             .expect("run atelier");
         assert!(output.stdout.is_empty(), "{args:?}");
@@ -352,7 +340,7 @@ fn a_sender_other_than_pane_or_agent_is_refused_before_anything_is_written() {
             "{args:?}"
         );
     }
-    assert!(!w.config.path().join("atelier").exists());
+    assert!(!w.config().join("atelier").exists());
 }
 
 fn git_repo() -> TempDir {

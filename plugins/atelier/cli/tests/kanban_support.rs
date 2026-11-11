@@ -8,6 +8,7 @@ use assert_cmd::Command;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tempfile::TempDir;
 
 pub const NOW: u64 = 1_800_000_000_000;
 pub const SEC: u64 = 1_000;
@@ -22,6 +23,52 @@ pub fn now_ms() -> u64 {
 
 pub fn atelier() -> Command {
     Command::cargo_bin("atelier").expect("locate `atelier` cargo binary")
+}
+
+/// The JSON a command that succeeds prints.
+pub fn stdout_json(command: &mut Command) -> Value {
+    let output = command.assert().success().get_output().stdout.clone();
+    serde_json::from_slice(&output).expect("valid JSON on stdout")
+}
+
+/// A config directory of its own for `atelier kanban` runs.
+pub struct Home {
+    config: TempDir,
+}
+
+impl Default for Home {
+    fn default() -> Home {
+        Home {
+            config: TempDir::new().expect("config dir"),
+        }
+    }
+}
+
+impl Home {
+    pub fn config(&self) -> &Path {
+        self.config.path()
+    }
+
+    /// `atelier kanban`, its config directory set, before its arguments.
+    pub fn command(&self) -> Command {
+        let mut command = atelier();
+        command
+            .env("CLAUDE_CONFIG_DIR", self.config())
+            .arg("kanban");
+        command
+    }
+
+    pub fn run(&self, args: &[&str], stdin: &str) -> Value {
+        stdout_json(self.command().args(args).write_stdin(stdin))
+    }
+
+    pub fn kanban(&self, args: &[&str]) -> Value {
+        self.run(args, "")
+    }
+
+    pub fn inbox(&self, session: &str) -> PathBuf {
+        self.config().join("atelier/kanban/inbox").join(session)
+    }
 }
 
 pub fn board_with(args: &[&str], stdin: &str) -> Value {
