@@ -48,6 +48,7 @@ export function askOf(questions: readonly ToolQuestion[], at: number) {
         description: o.description?.slice(0, MAX_FIELD_CHARS) ?? null,
       })),
     })),
+    orig_len: { question: questions.map(q => q.question.length), labels: questions.map(q => q.options.map(o => o.label.length)) },
   }
 }
 

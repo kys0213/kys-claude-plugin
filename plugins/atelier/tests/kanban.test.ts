@@ -101,6 +101,8 @@ type World = {
   dialog: { answer: ((answers: Record<string, string>) => void) | null }
   /** The file names in this session's inbox directory. */
   inbox: { files: string[] }
+  /** What the plugin wrote to disk, by path; `fails` makes the next writes fail. */
+  disk: { files: Record<string, string>; fails: boolean }
   messages: { value: { role: 'user' | 'assistant'; text: string; toolUses: never[] }[] }
   submitted: string[]
   aborted: string[]
@@ -130,6 +132,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   const shown = { value: false }
   const dialog: World['dialog'] = { answer: null }
   const inbox: World['inbox'] = { files: [] }
+  const disk: World['disk'] = { files: {}, fails: false }
   const messages: World['messages'] = { value: [] }
   const submitted: string[] = []
   const aborted: string[] = []
@@ -186,6 +189,15 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   on('fs.list', () => ({
     value: inbox.files.map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: START, isLink: false })),
   }))
+  on('fs.write', ($, e) => {
+    if (disk.fails) {
+      return { deny: 'EACCES: permission denied' }
+    }
+
+    disk.files[e.path] = e.text
+
+    return { value: undefined }
+  })
   on('session.messages', () => ({ value: messages.value as never }))
   on('agent.list', () => ({ value: agents.value as never }))
   on('turn.abort', ($, e) => {
@@ -223,7 +235,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
     return { result: {} }
   })
 
-  return { store, clock, runs, shown, dialog, inbox, messages, submitted, aborted, agents, invalidated, band }
+  return { store, clock, runs, shown, dialog, inbox, disk, messages, submitted, aborted, agents, invalidated, band }
 }
 
 type StoredRecord = {
@@ -621,7 +633,11 @@ describe('kanban progress and questions', () => {
     await w.clock.settle()
 
     const [id] = Object.keys(stored(w).asks ?? {})
-    expect(stored(w).asks?.[id as string]).toEqual({ at: START, questions: [COLOR] })
+    expect(stored(w).asks?.[id as string]).toEqual({
+      at: START,
+      questions: [COLOR],
+      orig_len: { question: [12], labels: [[3, 4]] },
+    })
 
     w.store[`kanban:answer:${SELF}:${id}`] = { v: 1, answers: ['Blue'] }
     await w.clock.advance(2_000)
@@ -1104,6 +1120,7 @@ describe('kanban details and requests', () => {
       recap: '초안을 정리했어요.',
       options: ['초안대로 진행', '고칠 행 있음'],
       at: START,
+      orig_len: { ask: 11, options: [7, 7] },
     })
 
     await $.turn.start({ text: 'go', turnId: 't-2' })
@@ -1130,7 +1147,13 @@ describe('kanban details and requests', () => {
       tool_input: { command: 'npm publish', timeout: 5 },
       permission_mode: 'default',
     } as never)
-    expect(rec().permission).toEqual({ id: null, tool: 'Bash', input: { command: 'npm publish' }, at: START })
+    expect(rec().permission).toEqual({
+      id: null,
+      tool: 'Bash',
+      input: { command: 'npm publish' },
+      input_len: { command: 11 },
+      at: START,
+    })
     expect(rec().pending_context).toBe('Tests pass. Publishing.')
     expect(rec().permission_mode).toBe('default')
 
@@ -1151,7 +1174,7 @@ describe('kanban details and requests', () => {
     )
 
     await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
-    expect(w.runs.map(r => r.argv.slice(2, 4))).toEqual([['inbox', 'dir']])
+    expect(w.runs.filter(r => r.argv[2] === 'inbox').map(r => r.argv.slice(2, 4))).toEqual([['inbox', 'dir']])
 
     await w.clock.advance(4_000)
     expect(w.runs.filter(r => r.argv[3] === 'take')).toHaveLength(0)
@@ -1200,11 +1223,12 @@ describe('kanban details and requests', () => {
     expect(w.aborted).toEqual(['t-7'])
   })
 
-  test('an expired session also loses its inbox', async ($, on) => {
+  test('an expired session is forgotten, which clears its inbox and record copy', async ($, on) => {
     const w = world(on)
 
     await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
-    expect(w.runs.find(r => r.argv[3] === 'clear')?.argv).toEqual(['atelier', 'kanban', 'inbox', 'clear', '--session', 'gone'])
+    expect(w.runs.filter(r => r.argv[2] === 'forget').map(r => r.argv)).toEqual([['atelier', 'kanban', 'forget', '--session', 'gone']])
+    expect(w.store['kanban:session:gone']).toBeUndefined()
   })
 
   test('the orchestrator reads the board grouped by repository through the board tool', async ($, on) => {
@@ -1479,7 +1503,13 @@ describe('kanban permission answers', () => {
     const r = await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'ls' } } as never)
 
     expect(r).toEqual({})
-    expect((stored(w) as Record<string, unknown>).permission).toEqual({ id: null, tool: 'Bash', input: { command: 'ls' }, at: START })
+    expect((stored(w) as Record<string, unknown>).permission).toEqual({
+      id: null,
+      tool: 'Bash',
+      input: { command: 'ls' },
+      input_len: { command: 2 },
+      at: START,
+    })
     expect(w.runs.filter(x => x.argv[3] === 'wait-permit')).toHaveLength(0)
   })
 
@@ -1530,5 +1560,82 @@ describe('kanban permission answers', () => {
       '--decision',
       'allow',
     ])
+  })
+})
+
+const COPY = '/home/me/.claude/atelier/kanban/records/self-session.json'
+
+describe('kanban record copy', () => {
+  test('every record leaves a copy of the stored record where the CLI named it', async ($, on) => {
+    const w = world(on, routes({ 'record-path': { path: COPY } }))
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    expect(JSON.parse(w.disk.files[COPY] as string)).toEqual(stored(w))
+
+    await $.turn.start({ text: 'go', turnId: 't-1' })
+    expect(JSON.parse(w.disk.files[COPY] as string)).toEqual(stored(w))
+    expect(eventNames(w)).toContain('turn.start')
+  })
+
+  test('the CLI is asked for the copy path once per session', async ($, on) => {
+    const w = world(on, routes({ 'record-path': { path: COPY } }))
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await $.turn.start({ text: 'go', turnId: 't-1' })
+
+    const asks = w.runs.filter(r => r.argv[2] === 'record-path')
+    expect(asks.map(r => r.argv)).toEqual([['atelier', 'kanban', 'record-path', '--session', SELF]])
+  })
+
+  test('a CLI that cannot name the path leaves the store written and no copy', async ($, on) => {
+    const w = world(on, () => ({ exitCode: 1, stdout: '' }))
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+
+    expect(stored(w).session_id).toBe(SELF)
+    expect(w.disk.files).toEqual({})
+  })
+
+  test('a missing CLI leaves the store written and no copy', async ($, on) => {
+    const w = world(on, () => 'missing')
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+
+    expect(stored(w).session_id).toBe(SELF)
+    expect(w.disk.files).toEqual({})
+  })
+
+  test('a failed copy write is redone by the next record', async ($, on) => {
+    const w = world(on, routes({ 'record-path': { path: COPY } }))
+
+    w.disk.fails = true
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    expect(w.disk.files).toEqual({})
+
+    w.disk.fails = false
+    await $.turn.start({ text: 'go', turnId: 't-1' })
+    expect(JSON.parse(w.disk.files[COPY] as string)).toEqual(stored(w))
+  })
+
+  test('a long permission input keeps its original lengths beside the cut text', async ($, on) => {
+    const w = world(on)
+
+    await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'x'.repeat(300), timeout: 5 } } as never)
+
+    const permission = (stored(w) as Record<string, unknown>).permission as { input: Record<string, string>; input_len: Record<string, number> }
+    expect(permission.input.command).toHaveLength(200)
+    expect(permission.input_len).toEqual({ command: 300 })
+  })
+
+  test('a long question keeps its original lengths beside the cut text', async ($, on) => {
+    const w = world(on)
+    const long = [{ ...TOOL_QUESTIONS[0], question: 'q'.repeat(1_500), options: [{ label: 'l'.repeat(250) }] }]
+
+    void $.tool.call({ tool: 'AskUserQuestion', questions: long } as never)
+    await w.clock.settle()
+
+    const [ask] = Object.values(stored(w).asks ?? {}) as { questions: { question: string }[]; orig_len: unknown }[]
+    expect(ask?.questions[0]?.question).toHaveLength(1_000)
+    expect(ask?.orig_len).toEqual({ question: [1_500], labels: [[250]] })
   })
 })

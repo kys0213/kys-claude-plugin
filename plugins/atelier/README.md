@@ -68,7 +68,7 @@ atelier git <reviews|guard|hook>          # git-utils 의 기계적 호출 표�
 atelier session <push-check|ensure-env>   # 세션 경계 hook (SessionStart / Stop)
 atelier orchestrator <spawn-check|compact-note>      # function hooks 모듈이 위임하는 결정적 판정 (아래 §Function hooks)
 atelier code-style <install|update|check|restore|uninstall> # 프로젝트 코드 스타일 룰(base·언어·앱 성격) 설치·갱신·점검·제어 (/atelier:code-style)
-atelier kanban <board|answer|send|stop|permit|inbox|spawn>   # 세션 칸반 판정과 세션 사이 요청 전달 (아래 §세션 칸반)
+atelier kanban <board|status|record-path|forget|answer|send|stop|permit|inbox|spawn>   # 세션 칸반 판정과 세션 사이 요청 전달 (아래 §세션 칸반)
 ```
 
 `drift` 는 `/atelier:update`·`/atelier:setup` 명세가 호출하는 결정적 도구입니다.
@@ -142,6 +142,12 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
 - 보내기·중지·권한 답은 받는 세션의 inbox(`<CLAUDE_CONFIG_DIR 또는 ~/.claude>/atelier/kanban/inbox/<세션>/`)에 남는
   요청이고, 받는 세션이 2초마다 한 번씩만 가져갑니다. 작업 중일 때 온 프롬프트·60초 지난 요청·끝난 턴의 중지는
   실행하지 않고 버립니다.
+- **터미널에서 보기**: pane 없이 같은 보드를 `atelier kanban status` 로 읽습니다. 세션마다 모드가 기록을 쓸 때
+  남기는 기록 사본(`<CLAUDE_CONFIG_DIR 또는 ~/.claude>/atelier/kanban/records/<세션>.json`)을 읽으므로 모드가 꺼진
+  세션은 보이지 않고, 읽을 수 없는 사본은 그 세션만 빠집니다.
+  `--column <needs_input|working|idle|stale>`(여러 번 가능), `--session <id>`, `--format json|text`(기본 json),
+  `--now <ms>`(없으면 지금 시각)를 받고, 모르는 컬럼·형식은 거부합니다. `atelier kanban board` 도 `--column` 을 받습니다.
+  `atelier kanban forget --session <id>` 는 그 세션의 기록 사본과 inbox 를 지웁니다(24시간 끊긴 세션을 모드가 지울 때 씁니다).
 - **오케스트레이터**: 읽기 전용 모드 툴 `kanban_board` 로 레포별 세션 목록을 읽고, 쉬는 세션에는
   `atelier kanban send --session <id> --from agent --from-label <이 세션> --text <일>` 로 맡기고, 레포에
   세션이 없으면 `atelier kanban spawn --cwd <메인 작업 트리 루트> [--worktree <이름>] --text <일>` 로

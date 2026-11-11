@@ -83,6 +83,19 @@ function stringFields(input: unknown): Record<string, string> {
   )
 }
 
+/** The length each string field had before `stringFields` cut it. */
+function fieldLengths(input: unknown): Record<string, number> {
+  if (typeof input !== 'object' || input === null) {
+    return {}
+  }
+
+  return Object.fromEntries(
+    Object.entries(input)
+      .filter(([key, value]) => typeof value === 'string' && !RESERVED_INPUT_KEYS.includes(key))
+      .map(([key, value]) => [key, (value as string).length]),
+  )
+}
+
 function withoutAsk(base: SessionRecord, toolUseId: string): Partial<SessionRecord> {
   const { [toolUseId]: _closed, ...open } = base.asks ?? {}
 
@@ -160,7 +173,7 @@ async function dropExpired($: EngineInterface, keys: string[], ids: string[]): P
       await $.store.delete(key)
     }
 
-    await cli($, ['inbox', 'clear', '--session', id])
+    await cli($, ['forget', '--session', id])
   }
 }
 
@@ -347,6 +360,7 @@ export function registerKanban(on: On): void {
     turnEnd: { left: null, completed: false },
     view: { kind: 'loading' },
     writes: Promise.resolve(),
+    copyPaths: new Map(),
     timersStarted: false,
     spinnerArmed: false,
     width: 0,
@@ -464,11 +478,20 @@ export function registerKanban(on: On): void {
       const options = (e.actions ?? [])
         .flatMap(a => ('label' in a && typeof a.label === 'string' ? [a.label.slice(0, MAX_FIELD_CHARS)] : []))
         .slice(0, 4)
+      const optionLengths = (e.actions ?? [])
+        .flatMap(a => ('label' in a && typeof a.label === 'string' ? [a.label.length] : []))
+        .slice(0, 4)
 
       await record($, s, {
         name: null,
         update: (_, now) => ({
-          decision: { ask: ask.slice(0, MAX_FIELD_CHARS), recap: e.recap.slice(0, MAX_REPLY_CHARS), options, at: now },
+          decision: {
+            ask: ask.slice(0, MAX_FIELD_CHARS),
+            recap: e.recap.slice(0, MAX_REPLY_CHARS),
+            options,
+            at: now,
+            orig_len: { ask: ask.length, options: optionLengths },
+          },
         }),
       })
     }
@@ -575,7 +598,7 @@ export function registerKanban(on: On): void {
         ...modeOf(e),
         ...(isQuestion
           ? {}
-          : { permission: { id, tool: e.tool_name, input: stringFields(e.tool_input), at: now }, pending_context: context }),
+          : { permission: { id, tool: e.tool_name, input: stringFields(e.tool_input), input_len: fieldLengths(e.tool_input), at: now }, pending_context: context }),
       }),
     })
 
