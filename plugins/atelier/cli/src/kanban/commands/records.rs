@@ -6,6 +6,7 @@ use crate::kanban::commands::inbox::{config_dir, InboxStore};
 use crate::kanban::commands::payload::parse_record_copy;
 use crate::kanban::core::allowlist::RealPaths;
 use crate::kanban::core::board::{build, Board, BoardParams, Card, Column, Waiting};
+use crate::kanban::core::delegate::delegate_of;
 use crate::kanban::core::question::Question;
 use crate::kanban::core::relay::{frame, Shown};
 use crate::kanban::core::request::check_id;
@@ -15,8 +16,8 @@ use std::fs;
 use std::path::PathBuf;
 
 const SUFFIX: &str = ".json";
-const STALE_AFTER_MS: u64 = 2 * 60 * 1_000;
-const EXPIRE_AFTER_MS: u64 = 24 * 60 * 60 * 1_000;
+pub const STALE_AFTER_MS: u64 = 2 * 60 * 1_000;
+pub const EXPIRE_AFTER_MS: u64 = 24 * 60 * 60 * 1_000;
 
 pub trait RecordStore {
     fn path(&self, session: &str) -> Result<PathBuf, String>;
@@ -145,14 +146,25 @@ impl KanbanRecords<'_> {
     }
 
     /// The questions rewritten over the wait their first line names, as the
-    /// board of the record copies shows it at `now`, and that wait.
-    pub fn relay_frame(&self, questions: &[Question], now: u64) -> Value {
+    /// board of the record copies shows it at `now`, and that wait. Only the
+    /// delegate `session` frames; another session's questions stay as asked.
+    pub fn relay_frame(&self, questions: &[Question], session: &str, now: u64) -> Value {
+        let unframed = || {
+            json!({
+                "questions": questions.iter().map(tool_question_json).collect::<Vec<_>>(),
+                "target": null,
+            })
+        };
         answer((|| {
+            check_id("session", session)?;
             let board = self.status(&StatusQuery {
                 columns: Vec::new(),
                 session: None,
                 now,
             })?;
+            if !delegate_of(&board).is(session) {
+                return Ok(unframed());
+            }
             let waits: Vec<(&Card, &Waiting, Wait)> = board
                 .columns
                 .iter()
@@ -181,10 +193,7 @@ impl KanbanRecords<'_> {
                     "questions": framed.iter().map(tool_question_json).collect::<Vec<_>>(),
                     "target": frame.to_json(),
                 }),
-                None => json!({
-                    "questions": questions.iter().map(tool_question_json).collect::<Vec<_>>(),
-                    "target": null,
-                }),
+                None => unframed(),
             })
         })())
     }

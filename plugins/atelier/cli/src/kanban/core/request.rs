@@ -74,6 +74,12 @@ impl Via {
             Via::Agent => "agent",
         }
     }
+
+    pub fn parse(raw: &str) -> Option<Via> {
+        [Via::Pane, Via::Terminal, Via::Agent]
+            .into_iter()
+            .find(|via| via.id() == raw)
+    }
 }
 
 /// A nonce the pane left for the answering session, for one kind of answer.

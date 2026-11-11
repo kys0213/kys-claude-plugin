@@ -1,3 +1,4 @@
+pub mod delegate;
 pub mod inbox;
 pub mod ledger;
 pub mod ledger_store;

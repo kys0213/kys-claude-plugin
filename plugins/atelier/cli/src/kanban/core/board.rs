@@ -61,6 +61,8 @@ pub struct SessionFact {
     pub asks: Vec<Ask>,
     /// The session's agent loops as the mod last listed them.
     pub agents: Vec<AgentFact>,
+    /// When a person turned this session into the delegate; absent while it is not one.
+    pub delegate_since: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,6 +173,9 @@ pub struct Card {
     pub asks: Vec<Ask>,
     /// What a session in the needs-input column waits on.
     pub waiting: Option<Waiting>,
+    pub delegate_since: Option<u64>,
+    /// How the last kanban request this session took went.
+    pub inbox: Option<Delivery>,
 }
 
 /// The permission request a session waits on, with the lengths its input had.
@@ -563,6 +568,8 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
             detail,
             asks: if is_question { asks } else { Vec::new() },
             waiting,
+            delegate_since: fact.delegate_since,
+            inbox: fact.inbox.clone(),
         },
     }
 }

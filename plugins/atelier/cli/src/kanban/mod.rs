@@ -8,6 +8,9 @@
 pub mod commands;
 pub mod core;
 
+use crate::kanban::commands::delegate::{
+    delegate_json, status_delegate_json, KanbanDelegate, Typed, WakeClock,
+};
 use crate::kanban::commands::inbox::{ClockIds, FsInbox, ThreadPause};
 use crate::kanban::commands::ledger::{KanbanLedger, ListArgs};
 use crate::kanban::commands::ledger_store::{read_book, FsLedger};
@@ -22,6 +25,7 @@ use crate::kanban::commands::spawn::{ClaudeLauncher, GitProbe};
 use crate::kanban::core::answer::compose;
 use crate::kanban::core::bash_guard::refusal;
 use crate::kanban::core::board::{build, Action, Board, BoardParams, Card, Column, Waiting};
+use crate::kanban::core::delegate::delegate_of;
 use crate::kanban::core::detail::Detail;
 use crate::kanban::core::duration::parse_millis;
 use crate::kanban::core::layout::{fit, Layout};
@@ -104,6 +108,28 @@ pub enum Commands {
         /// Current time, unix milliseconds
         #[arg(long)]
         now: u64,
+        /// The asking session; only the delegate session frames
+        #[arg(long)]
+        session: String,
+    },
+    /// `/kanban <args>` as the mod saw it run → what to tell the person
+    Command {
+        #[arg(long)]
+        session: String,
+        /// Current time, unix milliseconds
+        #[arg(long)]
+        now: u64,
+        /// The run's `origin.kind`
+        #[arg(long)]
+        origin: String,
+        /// Everything typed after `/kanban`
+        #[arg(long, allow_hyphen_values = true)]
+        args: String,
+    },
+    /// The delegate session's wakes and daily reports
+    Delegate {
+        #[command(subcommand)]
+        command: DelegateCommandArgs,
     },
     /// An open question and the picks made on the board → one answer per question
     Answer,
@@ -116,6 +142,30 @@ pub enum Commands {
     },
     #[command(flatten)]
     Request(RequestCommand),
+}
+
+#[derive(Subcommand)]
+pub enum DelegateCommandArgs {
+    /// The records and the delegate's state on stdin → what to say now, and how
+    Wake {
+        #[arg(long)]
+        session: String,
+        /// Current time, unix milliseconds
+        #[arg(long)]
+        now: u64,
+        /// The local time of day the daily report falls due, `HH:MM`
+        #[arg(long)]
+        report_at: String,
+        /// The local clock's minutes east of UTC
+        #[arg(long, allow_hyphen_values = true)]
+        utc_offset: i64,
+    },
+    /// Leaves the daily report given at `now`
+    Report {
+        /// Current time, unix milliseconds
+        #[arg(long)]
+        now: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -141,6 +191,12 @@ pub enum LedgerCommand {
         entry: String,
         #[arg(long, allow_hyphen_values = true)]
         reason: String,
+        /// Current time, unix milliseconds
+        #[arg(long)]
+        now: u64,
+    },
+    /// Each kind's mode and shadow comparisons, and the keys turned off
+    Stats {
         /// Current time, unix milliseconds
         #[arg(long)]
         now: u64,
@@ -576,6 +632,7 @@ fn board_json(board: &Board, layout: &Layout) -> Value {
     json!({
         "columns": columns,
         "repos": repos,
+        "delegate": delegate_json(&delegate_of(board)),
         "expired": board.expired,
         "layout": layout_json(layout),
     })
@@ -588,6 +645,15 @@ fn with_records<T>(run: impl FnOnce(&KanbanRecords) -> T) -> T {
         store: &store,
         inbox: &inbox,
         paths: &FsPaths,
+    })
+}
+
+fn with_delegate(run: impl FnOnce(&KanbanDelegate) -> Value) -> Value {
+    let records = FsRecords::from_env();
+    let ledger = FsLedger::from_env();
+    run(&KanbanDelegate {
+        records: &records,
+        ledger: &ledger,
     })
 }
 
@@ -642,7 +708,9 @@ fn run_status(
                 .flat_map(|(column, cards)| cards.into_iter().map(move |card| (column, card)))
                 .map(|(column, card)| status_entry_json(column, card, &relays))
                 .collect();
-            json!({ "now": now, "sessions": sessions }).to_string()
+            let book = read_book(&FsLedger::from_env()).ok();
+            let delegate = status_delegate_json(&delegate_of(&board), book.as_ref(), now);
+            json!({ "now": now, "delegate": delegate, "sessions": sessions }).to_string()
         }
         Ok((Format::Text, board)) => defuse_marker(&render_text(&board, query.session.as_deref())),
         Err(error) => json!({ "error": error }).to_string(),
@@ -661,6 +729,7 @@ fn run_ledger(command: LedgerCommand) -> Value {
         LedgerCommand::List(args) => ledger.list(*args),
         LedgerCommand::Match { key, now } => ledger.matched(&key, now),
         LedgerCommand::Revoke { entry, reason, now } => ledger.revoke(&entry, &reason, now),
+        LedgerCommand::Stats { now } => ledger.stats(now),
         LedgerCommand::Prune { now } => ledger.prune(now),
     }
 }
@@ -836,9 +905,9 @@ pub fn run(cli: Cli) -> i32 {
         } => println!("{}", run_status(columns, session, now, &format)),
         Commands::RecordPath { session } => println!("{}", with_records(|r| r.path(&session))),
         Commands::Forget { session } => println!("{}", with_records(|r| r.forget(&session))),
-        Commands::RelayFrame { now } => {
+        Commands::RelayFrame { now, session } => {
             let out = match parse_tool_questions(&read_stdin_raw()) {
-                Ok(questions) => with_records(|r| r.relay_frame(&questions, now)),
+                Ok(questions) => with_records(|r| r.relay_frame(&questions, &session, now)),
                 Err(error) => json!({ "error": error }),
             };
             println!("{out}");
@@ -856,6 +925,45 @@ pub fn run(cli: Cli) -> i32 {
             let out = match parse_bash_command(&read_stdin_raw()) {
                 Ok(command) => json!({ "deny": refusal(&command) }),
                 Err(error) => json!({ "error": error }),
+            };
+            println!("{out}");
+        }
+        Commands::Command {
+            session,
+            now,
+            origin,
+            args,
+        } => println!(
+            "{}",
+            with_delegate(|d| d.command(&Typed {
+                session: &session,
+                now,
+                origin: &origin,
+                args: &args,
+            }))
+        ),
+        Commands::Delegate { command } => {
+            let out = match command {
+                DelegateCommandArgs::Wake {
+                    session,
+                    now,
+                    report_at,
+                    utc_offset,
+                } => {
+                    let raw = read_stdin_raw();
+                    with_delegate(|d| {
+                        d.wake(
+                            &raw,
+                            &WakeClock {
+                                session: &session,
+                                now,
+                                report_at: &report_at,
+                                utc_offset,
+                            },
+                        )
+                    })
+                }
+                DelegateCommandArgs::Report { now } => with_delegate(|d| d.report(now)),
             };
             println!("{out}");
         }

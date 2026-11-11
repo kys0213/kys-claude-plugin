@@ -36,6 +36,14 @@ impl World {
             worker,
         };
         put_record(w.config(), &w.worker);
+        put_record(
+            w.config(),
+            &session_with(
+                MAIN,
+                json!([event("session.start", None, MIN)]),
+                json!({ "cwd": "/work/main", "delegate_since": NOW - 10 * MIN }),
+            ),
+        );
         w
     }
 
@@ -49,7 +57,7 @@ impl World {
     fn frame(&self, questions: Value) -> Value {
         let now = NOW.to_string();
         self.run(
-            &["relay-frame", "--now", &now],
+            &["relay-frame", "--now", &now, "--session", MAIN],
             &json!({ "questions": questions }).to_string(),
         )
     }

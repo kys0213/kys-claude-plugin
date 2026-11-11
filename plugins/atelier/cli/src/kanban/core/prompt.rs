@@ -13,7 +13,8 @@ pub struct PromptFact {
 }
 
 const SHOWN_AS_PERSON: [&str; 4] = ["composer", "bridge", "sdk", "kanban"];
-const DECIDING_AS_PERSON: [&str; 2] = ["composer", "bridge"];
+/// The `origin.kind`s of what a person typed or sent.
+pub const PERSON_ORIGINS: [&str; 2] = ["composer", "bridge"];
 
 /// `<name ...>…`: how hosts hand a session events (`<task-notification>`,
 /// `<side-sessions-event>`) through the same door as a typed prompt.
@@ -38,7 +39,7 @@ fn shows_as_person_prompt(prompt: &PromptFact) -> bool {
 /// Whether a prompt of this `origin.kind` answering an open decision is a
 /// person's decision; a kind this version does not know is not.
 pub fn decides_as_person(origin: &str) -> bool {
-    DECIDING_AS_PERSON.contains(&origin)
+    PERSON_ORIGINS.contains(&origin)
 }
 
 /// The newest prompt a person wrote; for a record from before prompts were

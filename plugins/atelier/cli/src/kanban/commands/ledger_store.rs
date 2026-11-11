@@ -17,6 +17,12 @@ pub trait LedgerStore {
     fn append(&self, month: &str, lines: &[String]) -> Result<(), String>;
     /// Every month file, empty when the ledger was never written.
     fn read(&self) -> Result<Vec<MonthFile>, String>;
+    /// The month files from `month` on.
+    fn read_from(&self, month: &str) -> Result<Vec<MonthFile>, String> {
+        let mut months = self.read()?;
+        months.retain(|m| m.month.as_str() >= month);
+        Ok(months)
+    }
     /// Under the lock: reads every month, writes back what `change` keeps,
     /// and removes the months it leaves out.
     fn rewrite(
@@ -65,7 +71,7 @@ fn month_path(dir: &Path, month: &str) -> PathBuf {
     dir.join(format!("{month}{SUFFIX}"))
 }
 
-fn read_months(dir: &Path) -> Result<Vec<MonthFile>, String> {
+fn read_months(dir: &Path, from: &str) -> Result<Vec<MonthFile>, String> {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -76,6 +82,7 @@ fn read_months(dir: &Path) -> Result<Vec<MonthFile>, String> {
         .filter_map(|e| e.file_name().to_str().map(str::to_string))
         .filter(|name| !name.starts_with('.'))
         .filter_map(|name| name.strip_suffix(SUFFIX).map(str::to_string))
+        .filter(|month| month.as_str() >= from)
         .collect();
     months.sort();
     months
@@ -117,7 +124,11 @@ impl LedgerStore for FsLedger {
     }
 
     fn read(&self) -> Result<Vec<MonthFile>, String> {
-        read_months(&self.root.clone()?)
+        read_months(&self.root.clone()?, "")
+    }
+
+    fn read_from(&self, month: &str) -> Result<Vec<MonthFile>, String> {
+        read_months(&self.root.clone()?, month)
     }
 
     fn rewrite(
@@ -125,7 +136,7 @@ impl LedgerStore for FsLedger {
         change: &mut dyn FnMut(Vec<MonthFile>) -> Vec<MonthFile>,
     ) -> Result<(), String> {
         self.locked(|dir| {
-            let before = read_months(dir)?;
+            let before = read_months(dir, "")?;
             let after = change(before.clone());
             for month in &before {
                 match after.iter().find(|m| m.month == month.month) {

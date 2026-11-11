@@ -5,7 +5,7 @@ use super::duration::age_label;
 use super::progress::{
     first_field, item_text, live_items, tool_line, Activity, ItemStatus, WorkItem,
 };
-use super::request::{strip_agent_header, RequestKind, Status};
+use super::request::{strip_agent_header, RequestKind, Status, Via};
 use super::text::{cut, fold, strip_controls, strip_reminders};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +38,8 @@ pub struct Delivery {
     pub id: String,
     pub kind: Option<RequestKind>,
     pub status: DeliveryStatus,
+    /// How the request came in; absent in a record from before it was kept.
+    pub via: Option<Via>,
     pub at: u64,
 }
 

@@ -3,7 +3,8 @@
 //! what the session waits on and the nonces the pane left for it,
 //! `inbox wait-permit` those nonces and the request it waits on, `guard-bash`
 //! the Bash tool's input,
-//! `ledger record` what a mod knows of one answer. A record this version cannot
+//! `ledger record` what a mod knows of one answer, `delegate wake` the records
+//! and the delegate's own state. A record this version cannot
 //! read is dropped here, before the board sees it.
 //!
 //! The field readers answer `None` for a field of the wrong type, which drops
@@ -23,6 +24,7 @@ use crate::kanban::core::relay::Frame;
 use crate::kanban::core::request::{
     check_id, LeftNonce, Nonce, OpenAsk, PaneNonces, RequestKind, Status, Verdict, Via, Waits,
 };
+use crate::kanban::core::wake::{Pending, WakeState};
 use serde_json::{Map, Value};
 
 const VERSION: u64 = 1;
@@ -108,6 +110,50 @@ fn parse_record(value: &Value) -> Option<SessionFact> {
             .iter()
             .map(parse_agent)
             .collect::<Option<Vec<_>>>()?,
+        delegate_since: nullable_u64(value, "delegate_since")?,
+    })
+}
+
+/// What `delegate wake` reads on stdin: the sessions' records and what the
+/// delegate's mod kept and sees.
+pub struct WakeStdin {
+    pub sessions: Vec<SessionFact>,
+    pub state: WakeState,
+    pub draft_len: u64,
+}
+
+/// `{"sessions": [<v1 record>, ...], "state": {"pending": [{"id", "since"}],
+/// "delivered": [<id>], "draft_len": <n>}}`; an absent state is an empty one.
+pub fn parse_wake(raw: &str) -> Result<WakeStdin, String> {
+    let sessions = parse_sessions(raw)?;
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    let state = value.get("state").cloned().unwrap_or(Value::Null);
+    let unreadable = |what: &str| format!("`state.{what}` is not what `delegate wake` gave");
+    let pending = optional_array(&state, "pending")
+        .ok_or_else(|| unreadable("pending"))?
+        .iter()
+        .map(|p| {
+            Some(Pending {
+                id: p.get("id")?.as_str()?.to_string(),
+                since: p.get("since")?.as_u64()?,
+            })
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| unreadable("pending"))?;
+    let delivered = optional_array(&state, "delivered")
+        .ok_or_else(|| unreadable("delivered"))?
+        .iter()
+        .map(|id| id.as_str().map(str::to_string))
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| unreadable("delivered"))?;
+    let draft_len = match state.get("draft_len") {
+        None | Some(Value::Null) => 0,
+        Some(n) => n.as_u64().ok_or_else(|| unreadable("draft_len"))?,
+    };
+    Ok(WakeStdin {
+        sessions,
+        state: WakeState { pending, delivered },
+        draft_len,
     })
 }
 
@@ -192,6 +238,10 @@ fn parse_delivery(value: &Value) -> Option<Delivery> {
         status: Status::parse(status)
             .map(DeliveryStatus::Known)
             .unwrap_or_else(|| DeliveryStatus::Unknown(status.to_string())),
+        via: value
+            .get("via")
+            .and_then(Value::as_str)
+            .and_then(Via::parse),
         at: value.get("at")?.as_u64()?,
     })
 }
@@ -674,6 +724,14 @@ fn nullable_string(value: &Value, key: &str) -> Option<Option<String>> {
     match value.get(key) {
         None | Some(Value::Null) => Some(None),
         Some(Value::String(s)) => Some(Some(s.clone())),
+        Some(_) => None,
+    }
+}
+
+fn nullable_u64(value: &Value, key: &str) -> Option<Option<u64>> {
+    match value.get(key) {
+        None | Some(Value::Null) => Some(None),
+        Some(Value::Number(n)) => n.as_u64().map(Some),
         Some(_) => None,
     }
 }

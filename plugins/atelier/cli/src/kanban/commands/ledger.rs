@@ -1,6 +1,6 @@
 //! The ledger commands: record what a mod saw of one answer, list entries,
-//! judge a key's precedents, revoke a proxy answer, prune old ones. Each
-//! answers one JSON value.
+//! judge a key's precedents, revoke a proxy answer, replay the shadow
+//! comparisons, prune old ones. Each answers one JSON value.
 
 use crate::kanban::commands::ledger_store::{read_book, LedgerStore};
 use crate::kanban::commands::payload::{parse_bind_facts, parse_ledger_facts};
@@ -11,6 +11,7 @@ use crate::kanban::core::ledger::{
 };
 use crate::kanban::core::precedent::{judge, revoke, Auth, Book, DecisionKey};
 use crate::kanban::core::relay::answered;
+use crate::kanban::core::replay::{disabled_keys, stats};
 use serde_json::{json, Value};
 
 pub struct KanbanLedger<'a> {
@@ -180,6 +181,44 @@ impl KanbanLedger<'_> {
             Ok(json!({
                 "revoked": { "id": revoked.id, "entry": revoked.entry, "key": revoked.key }
             }))
+        })())
+    }
+
+    /// Each kind's mode and shadow comparisons at `now`, and the keys off.
+    pub fn stats(&self, now: u64) -> Value {
+        answer((|| {
+            let book = read_book(self.store)?;
+            let kinds: serde_json::Map<String, Value> = stats(&book, now)
+                .iter()
+                .map(|s| {
+                    let stats = json!({
+                        "mode": s.mode.id(),
+                        "compared": s.compared,
+                        "agreed": s.agreed,
+                        "disagreed": s.disagreed(),
+                        "recent5_agreed": s.recent_agreed,
+                        "promotable": s.promotable(),
+                        "progress": s.progress(),
+                        "demoted_reason": s
+                            .demoted
+                            .then_some("7일 안에 대리 답이 2번 뒤집혀 지켜보기로 돌아갔어요"),
+                    });
+                    (s.kind.id().to_string(), stats)
+                })
+                .collect();
+            let disabled: Vec<Value> = disabled_keys(&book, now)
+                .iter()
+                .map(|d| {
+                    json!({
+                        "key": d.key,
+                        "kind": d.kind.id(),
+                        "entry": d.entry,
+                        "at": d.at,
+                        "reason": d.reason,
+                    })
+                })
+                .collect();
+            Ok(json!({ "now": now, "kinds": kinds, "disabled_keys": disabled }))
         })())
     }
 

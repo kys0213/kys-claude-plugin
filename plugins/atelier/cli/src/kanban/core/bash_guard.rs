@@ -16,6 +16,8 @@ const AS_PERSON: &[&str] = &["reply", "permit", "decide", "send"];
 const MOD_ONLY: &[&[&str]] = &[
     &["forget"],
     &["relay-frame"],
+    &["command"],
+    &["delegate", "report"],
     &["ledger", "record"],
     &["ledger", "bind"],
     &["ledger", "prune"],

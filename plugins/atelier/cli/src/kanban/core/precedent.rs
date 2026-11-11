@@ -101,7 +101,7 @@ pub enum Proxied {
 }
 
 impl Proxied {
-    fn kind(self) -> EntryKind {
+    pub fn kind(self) -> EntryKind {
         match self {
             Proxied::Question => EntryKind::Question,
             Proxied::Permission => EntryKind::Permission,
@@ -143,7 +143,8 @@ impl Revoke {
 }
 
 /// A delegate setting a person's slash command left: `scope` a kind or
-/// `delegate`, `value` `act`, `shadow`, `on` or `off`.
+/// `delegate`, `value` `act`, `shadow`, `on` or `off`; `session` names the
+/// session a `delegate` setting turned on or off.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Setting {
     v: u64,
@@ -154,6 +155,31 @@ pub struct Setting {
     pub scope: String,
     pub value: String,
     pub origin: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+}
+
+impl Setting {
+    pub fn new(at: u64, scope: &str, value: &str, origin: &str, session: Option<&str>) -> Setting {
+        let suffix = digest(
+            &[scope, value, origin, session.unwrap_or(""), &at.to_string()],
+            ID_BYTES,
+        );
+        Setting {
+            v: VERSION,
+            tag: SettingTag::Setting,
+            id: format!("S{at}-{suffix}"),
+            at,
+            scope: scope.to_string(),
+            value: value.to_string(),
+            origin: origin.to_string(),
+            session: session.map(str::to_string),
+        }
+    }
+
+    pub fn to_line(&self) -> String {
+        serde_json::to_string(self).expect("a setting serializes")
+    }
 }
 
 /// The ledger as precedents read it; lines of no kind this version reads are
@@ -200,17 +226,44 @@ impl Book {
     pub fn relay_uses(&self) -> &[RelayUse] {
         &self.relay_uses
     }
+
+    pub fn revokes(&self) -> &[Revoke] {
+        &self.revokes
+    }
+
+    /// What the ledger held of `entry`'s key before `entry` was added: the
+    /// key's earlier entries and revokes.
+    pub fn before(&self, entry: &Entry) -> Book {
+        let key = entry.key.as_deref();
+        let earlier = (entry.at, entry.id.as_str());
+        Book {
+            entries: self
+                .entries
+                .iter()
+                .filter(|e| e.key.as_deref() == key && (e.at, e.id.as_str()) < earlier)
+                .cloned()
+                .collect(),
+            revokes: self
+                .revokes
+                .iter()
+                .filter(|r| Some(r.key.as_str()) == key && r.at < entry.at)
+                .cloned()
+                .collect(),
+            settings: Vec::new(),
+            relay_uses: Vec::new(),
+        }
+    }
 }
 
 fn seen(at: u64, now: u64) -> bool {
     at <= now
 }
 
-fn in_window(entry: &Entry, now: u64) -> bool {
+pub fn in_window(entry: &Entry, now: u64) -> bool {
     seen(entry.at, now) && entry.at >= now.saturating_sub(WINDOW_MS)
 }
 
-fn is_human(entry: &Entry) -> bool {
+pub fn is_human(entry: &Entry) -> bool {
     entry.decided_by == Some(DecidedBy::Human)
 }
 
@@ -267,7 +320,7 @@ where
     items.max_by(|a, b| at(a).cmp(&at(b)))
 }
 
-fn disabled(book: &Book, key: &str, now: u64) -> bool {
+pub fn disabled(book: &Book, key: &str, now: u64) -> bool {
     let Some(revoke) = newest(
         book.revokes
             .iter()
@@ -289,13 +342,9 @@ fn disabled(book: &Book, key: &str, now: u64) -> bool {
     !agreeing.values().any(|n| *n >= DIRECT_TO_REENABLE)
 }
 
-/// Whether a kind answers on precedents now: a person's latest `act` for it,
-/// not turned over twice within any week since. A decision never does.
-pub fn mode(book: &Book, kind: EntryKind, now: u64) -> Mode {
-    if kind == EntryKind::Decision {
-        return Mode::Shadow;
-    }
-    let latest = newest(
+/// A person's latest `act` or `shadow` for a kind, when it is `act`.
+fn latest_act(book: &Book, kind: EntryKind, now: u64) -> Option<&Setting> {
+    newest(
         book.settings.iter().filter(|s| {
             s.scope == kind.id()
                 && seen(s.at, now)
@@ -303,24 +352,40 @@ pub fn mode(book: &Book, kind: EntryKind, now: u64) -> Mode {
                 && Mode::parse(&s.value).is_some()
         }),
         |s| (s.at, s.id.as_str()),
-    );
-    let Some(setting) = latest.filter(|s| Mode::parse(&s.value) == Some(Mode::Act)) else {
-        return Mode::Shadow;
-    };
+    )
+    .filter(|s| Mode::parse(&s.value) == Some(Mode::Act))
+}
+
+/// Whether proxy answers of a kind were turned over twice within a week
+/// after `since`.
+fn revoked_twice(book: &Book, kind: EntryKind, since: u64, now: u64) -> bool {
     let mut revoked: Vec<u64> = book
         .revokes
         .iter()
-        .filter(|r| r.kind == kind && r.at > setting.at && seen(r.at, now))
+        .filter(|r| r.kind == kind && r.at > since && seen(r.at, now))
         .map(|r| r.at)
         .collect();
     revoked.sort_unstable();
-    let demoted = revoked
+    revoked
         .windows(REVOKES_TO_DEMOTE)
-        .any(|w| w[REVOKES_TO_DEMOTE - 1] - w[0] < DEMOTE_WINDOW_MS);
-    if demoted {
-        Mode::Shadow
-    } else {
-        Mode::Act
+        .any(|w| w[REVOKES_TO_DEMOTE - 1] - w[0] < DEMOTE_WINDOW_MS)
+}
+
+/// Whether a kind a person set to `act` is back in `shadow` for its revokes.
+pub fn demoted(book: &Book, kind: EntryKind, now: u64) -> bool {
+    kind != EntryKind::Decision
+        && latest_act(book, kind, now).is_some_and(|s| revoked_twice(book, kind, s.at, now))
+}
+
+/// Whether a kind answers on precedents now: a person's latest `act` for it,
+/// not turned over twice within any week since. A decision never does.
+pub fn mode(book: &Book, kind: EntryKind, now: u64) -> Mode {
+    if kind == EntryKind::Decision {
+        return Mode::Shadow;
+    }
+    match latest_act(book, kind, now) {
+        Some(setting) if !revoked_twice(book, kind, setting.at, now) => Mode::Act,
+        _ => Mode::Shadow,
     }
 }
 
