@@ -339,7 +339,7 @@ fn a_marker_on_the_first_line_becomes_the_header_over_the_wait_as_recorded() {
 
     assert_eq!(
         framed["target"],
-        json!({ "session": "w", "wait": PERMIT, "kind": "permission" })
+        json!({ "session": "w", "wait": PERMIT, "kind": "permission", "recommended": ["허용"] })
     );
     let text = text_of(&framed["questions"][0]);
     let lines: Vec<&str> = text.lines().collect();
@@ -411,6 +411,38 @@ fn a_permission_is_asked_with_allow_and_deny() {
     let question = &w.frame(questions)["questions"][0];
 
     assert_eq!(labels(question), vec!["허용", "거부"]);
+}
+
+#[test]
+fn a_permissions_options_say_only_what_the_verdict_does() {
+    let w = World::new(asking_bash("rm -rf build"));
+    let mut questions = json!([ask(&marked("w", PERMIT, "괜찮을까요?"), &["거부", "허용"])]);
+    questions[0]["options"][1]["description"] = json!("only runs `ls`");
+
+    let question = &w.frame(questions)["questions"][0];
+
+    assert_eq!(labels(question), vec!["거부", "허용"]);
+    assert_eq!(question["options"][0]["description"], "실행하지 않아요");
+    assert_eq!(
+        question["options"][1]["description"],
+        "위 머리말의 명령을 실행해요"
+    );
+}
+
+#[test]
+fn the_first_option_each_question_shows_is_its_recommendation() {
+    let w = World::new(asking(json!([
+        question("Which color?", &["Red", "Blue"], false),
+        question("Which size?", &["S", "M"], false),
+    ])));
+    let questions = json!([
+        ask(&marked("w", "tu-1", "색은?"), &["Blue", "Red"]),
+        ask("크기는?", &["X", "Y"]),
+    ]);
+
+    let framed = w.frame(questions);
+
+    assert_eq!(framed["target"]["recommended"], json!(["Blue", "S"]));
 }
 
 #[test]
@@ -592,27 +624,35 @@ fn an_entry_that_is_no_relay_cannot_be_sent_on() {
 }
 
 #[test]
-fn recommended_goes_with_a_relay_only() {
+fn an_agent_answer_names_no_recommendation_of_its_own() {
     let w = World::new(color_worker());
+    let id = w.relayed(color_ask("색은?"), &["Blue"], NOW);
     let now = (NOW + MIN).to_string();
 
-    let out = w.kanban(&[
-        "reply",
-        "--session",
-        "w",
-        "--ask",
-        "tu-1",
-        "--answer",
-        "Blue",
-        "--from",
-        "agent",
-        "--recommended",
-        "Blue",
-        "--now",
-        &now,
-    ]);
-
-    assert!(refused(&out), "{out}");
+    w.command()
+        .args([
+            "reply",
+            "--session",
+            "w",
+            "--ask",
+            "tu-1",
+            "--answer",
+            "Blue",
+            "--from",
+            "agent",
+            "--relay",
+            &id,
+            "--recommended",
+            "Blue",
+            "--now",
+            &now,
+        ])
+        .assert()
+        .stdout("")
+        .stderr(predicates::str::contains(
+            "unexpected argument '--recommended'",
+        ));
+    assert!(!w.inbox("w").exists());
 }
 
 #[test]
@@ -770,39 +810,103 @@ fn a_relayed_deny_is_taken_as_well() {
 
 // ---- the answer the waiting session took ----
 
-#[test]
-fn an_answer_taken_on_a_relay_is_the_persons_decision_with_the_relay_it_came_on() {
-    let w = World::new(color_worker());
-    let facts = |recommended: &str, at: u64| {
-        json!({
-            "at": at, "session": "w", "repo_root": REPO, "cwd": REPO, "permission_mode": null,
-            "question": {
-                "tool_use_id": "tu-1",
-                "questions": [question("Which color?", &["Red", "Blue"], false)],
-                "at": NOW - 10 * SEC,
-                "orig_len": { "question": [12], "labels": [[3, 4]] },
-            },
-            "answer": {
-                "path": "inbox", "via": "agent", "answers": ["Blue"],
-                "auth": { "relay": "L1-abcd", "recommended": recommended },
-            },
-        })
-    };
-    let approved = w.run(&["ledger", "record"], &facts("Blue", NOW + MIN).to_string());
-    let other = w.run(
-        &["ledger", "record"],
-        &facts("Red", NOW + 2 * MIN).to_string(),
-    );
+/// What the waiting session's mod records once it took `answer` on `relay`.
+fn took_facts(relay: &str, answer: &str, at: u64) -> Value {
+    json!({
+        "at": at, "session": "w", "repo_root": REPO, "cwd": REPO, "permission_mode": null,
+        "question": {
+            "tool_use_id": "tu-1",
+            "questions": [question("Which color?", &["Red", "Blue"], false)],
+            "at": NOW - 10 * SEC,
+            "orig_len": { "question": [12], "labels": [[3, 4]] },
+        },
+        "answer": {
+            "path": "inbox", "via": "agent", "answers": [answer],
+            "auth": { "relay": relay },
+        },
+    })
+}
 
-    let entry = w.entry(approved["recorded"][0].as_str().expect("id"));
+impl World {
+    fn took(&self, relay: &str, answer: &str, at: u64) -> Value {
+        let out = self.run(
+            &["ledger", "record"],
+            &took_facts(relay, answer, at).to_string(),
+        );
+        let id = out["recorded"][0]
+            .as_str()
+            .unwrap_or_else(|| panic!("a recorded id, got {out}"));
+        self.entry(id)
+    }
+}
+
+#[test]
+fn a_person_picking_the_first_option_shown_approves_the_recommendation() {
+    let w = World::new(color_worker());
+    let questions = json!([ask(&marked("w", "tu-1", "추천은 Blue"), &["Blue", "Red"])]);
+
+    let id = w.relayed(questions, &["Blue"], NOW);
+
+    let relay = w.entry(&id);
+    assert_eq!(relay["recommended"], "Blue");
+    assert_eq!(relay["approved"], true);
+    let entry = w.took(&id, "Blue", NOW + MIN);
     assert_eq!(entry["decided_by"], "human");
     assert_eq!(entry["via"], "agent");
-    assert_eq!(entry["relay"], "L1-abcd");
+    assert_eq!(entry["relay"], id);
     assert_eq!(entry["recommended"], "Blue");
     assert_eq!(entry["approved"], true);
     assert_eq!(entry["precedents"], json!([]));
-    assert_eq!(
-        w.entry(other["recorded"][0].as_str().expect("id"))["approved"],
-        false
+}
+
+#[test]
+fn a_person_picking_another_option_decides_directly() {
+    let w = World::new(color_worker());
+    let questions = json!([ask(&marked("w", "tu-1", "추천은 Blue"), &["Blue", "Red"])]);
+
+    let id = w.relayed(questions, &["Red"], NOW);
+
+    assert_eq!(w.entry(&id)["approved"], false);
+    let entry = w.took(&id, "Red", NOW + MIN);
+    assert_eq!(entry["recommended"], "Blue");
+    assert_eq!(entry["approved"], false);
+}
+
+#[test]
+fn a_question_asked_with_no_recommendation_still_counts_its_first_option_as_one() {
+    let w = World::new(color_worker());
+
+    let id = w.relayed(color_ask("색은?"), &["Red"], NOW);
+
+    assert_eq!(w.took(&id, "Red", NOW + MIN)["approved"], true);
+}
+
+#[test]
+fn an_approved_relay_counts_as_an_approved_recommendation_for_its_key() {
+    let w = World::new(color_worker());
+    let questions = json!([ask(&marked("w", "tu-1", "추천은 Blue"), &["Blue", "Red"])]);
+    let id = w.relayed(questions, &["Blue"], NOW);
+    let key = w.took(&id, "Blue", NOW + MIN)["key"]
+        .as_str()
+        .expect("key")
+        .to_string();
+    let now = (NOW + 2 * MIN).to_string();
+
+    let matched = w.kanban(&["ledger", "match", "--key", &key, "--now", &now]);
+
+    assert_eq!(matched["support"], json!({ "direct": 0, "approved": 1 }));
+}
+
+#[test]
+fn an_answer_taken_on_a_relay_the_ledger_lacks_is_not_recorded() {
+    let w = World::new(color_worker());
+
+    let out = w.run(
+        &["ledger", "record"],
+        &took_facts("L1-abcd", "Blue", NOW + MIN).to_string(),
     );
+
+    assert!(refused(&out), "{out}");
+    let listed = w.kanban(&["ledger", "list"]);
+    assert_eq!(listed["entries"], json!([]));
 }

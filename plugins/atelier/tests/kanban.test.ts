@@ -2399,7 +2399,7 @@ describe('kanban ledger', () => {
 })
 
 describe('kanban relay frame', () => {
-  const TARGET = { session: 'other', wait: 'tu-1', kind: 'question' }
+  const TARGET = { session: 'other', wait: 'tu-1', kind: 'question', recommended: ['Red'] }
   const FRAMED = [
     {
       question: '칸반 대기 · project-b · other · 질문\nWhich color?\n선택지: Red / Blue\n\n색은?',
@@ -2507,6 +2507,7 @@ describe('kanban relay frame', () => {
   for (const [name, cli] of [
     ['a missing CLI', (() => 'missing') as FakeCli],
     ['a CLI that names no wait', framing({ questions: TOOL_QUESTIONS, target: null })],
+    ['a CLI target with no recommendation', framing({ questions: FRAMED, target: { session: 'other', wait: 'tu-1', kind: 'question' } })],
     ['a CLI error', framing({ error: '표지가 가리키는 대기 `other tu-1` 를 찾지 못했어요' })],
   ] as const) {
     test(`${name} draws the questions as asked and binds them to no wait`, async ($, on) => {

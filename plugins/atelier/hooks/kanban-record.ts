@@ -1,6 +1,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { cli } from './kanban-cli'
+import type { RelayTarget } from './kanban-relay'
 
 export const KEY_PREFIX = 'kanban:session:'
 
@@ -81,7 +82,7 @@ export type SessionRecord = {
   todos?: TodoRecord[]
   asks?: Record<string, AskRecord>
   /** The wait each open question was framed over, by tool_use_id, as `relay-frame` named it. */
-  relay_frames?: Record<string, { session: string; wait: string; kind: string }>
+  relay_frames?: Record<string, RelayTarget>
   /** The session's agent loops as `$.agent.list()` gave them last. */
   agents?: AgentRecord[]
 }

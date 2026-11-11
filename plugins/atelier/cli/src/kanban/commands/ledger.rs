@@ -9,7 +9,8 @@ use crate::kanban::core::ledger::{
     entries, month_of, permission_call, prune, select, DecidedBy, Entry, EntryKind, EntryVia,
     ListQuery, Pruned, DEFAULT_LIMIT, MAX_AGE_MS, MAX_BYTES, MAX_LIMIT,
 };
-use crate::kanban::core::precedent::{judge, revoke, DecisionKey};
+use crate::kanban::core::precedent::{judge, revoke, Auth, Book, DecisionKey};
+use crate::kanban::core::relay::answered;
 use serde_json::{json, Value};
 
 pub struct KanbanLedger<'a> {
@@ -112,7 +113,17 @@ impl KanbanLedger<'_> {
     pub fn record(&self, raw: &str) -> Value {
         answer((|| {
             let facts = parse_ledger_facts(raw)?;
-            let kept = entries(&facts, self.paths);
+            let relay = facts.auth.as_ref().and_then(Auth::relay);
+            let book = match relay {
+                Some(_) => read_book(self.store)?,
+                None => Book::default(),
+            };
+            let relayed = match relay {
+                Some(relay) => answered(&book, relay)
+                    .ok_or_else(|| format!("장부에 물어 받은 답 `{}` 가 없어요", relay.id))?,
+                None => Vec::new(),
+            };
+            let kept = entries(&facts, &relayed, self.paths)?;
             if !kept.is_empty() {
                 let lines: Vec<String> = kept.iter().map(Entry::to_line).collect();
                 self.store.append(&month_of(facts.at), &lines)?;

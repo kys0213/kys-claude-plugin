@@ -11,7 +11,7 @@ use super::matchkey::{answer_fp, digest, sentence};
 use super::precedent::Auth;
 use super::prompt::decides_as_person;
 use super::question::Ask;
-use super::relay::{relay_answer, Target};
+use super::relay::{relay_answer, Frame, Target};
 use super::request::{Verdict, Via};
 use super::text::cut;
 use super::wait::{derive, Place, Subject, Wait};
@@ -237,7 +237,7 @@ pub struct Facts {
     pub auth: Option<Auth>,
     /// The wait a question this session asked was framed over; its answer
     /// is kept as a relay for that wait, never as a question of its own.
-    pub relay_frame: Option<Target>,
+    pub relay_frame: Option<Frame>,
 }
 
 impl Facts {
@@ -307,6 +307,14 @@ struct Draft {
     origin: Option<String>,
     /// The wait a relay answers.
     target: Option<Target>,
+    recommendation: Option<Recommendation>,
+}
+
+/// The option a person was shown first, and whether they picked it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Recommendation {
+    recommended: String,
+    approved: bool,
 }
 
 fn kept(text: &str) -> String {
@@ -352,7 +360,6 @@ fn finish(draft: Draft, facts: &Facts, wait: &Wait) -> Entry {
         .filter(|_| draft.source.via == EntryVia::Agent);
     let precedents = auth.and_then(Auth::precedents);
     let relay = auth.and_then(Auth::relay);
-    let recommended = relay.and_then(|r| r.recommended.as_deref());
     let q = draft.question.map_or(1, |(index, _)| index + 1);
     let masked = mask(&draft.answer);
     let q_index = draft.question.map(|(index, _)| index.to_string());
@@ -398,9 +405,8 @@ fn finish(draft: Draft, facts: &Facts, wait: &Wait) -> Entry {
         blocked: wait.blocked.iter().map(|b| kept(&b.id())).collect(),
         permission_mode: facts.permission_mode.clone(),
         outcome: Outcome::Used,
-        recommended: recommended.map(kept),
-        approved: recommended
-            .is_some_and(|r| answer_fp(&relay_answer(draft.kind, r)) == answer_fp(&draft.answer)),
+        recommended: draft.recommendation.as_ref().map(|r| kept(&r.recommended)),
+        approved: draft.recommendation.as_ref().is_some_and(|r| r.approved),
         precedents: precedents.map_or_else(Vec::new, |p| {
             p.ids_for(q).into_iter().map(str::to_string).collect()
         }),
@@ -418,9 +424,10 @@ fn relay_drafts(
     ask: &Ask,
     by: QuestionBy,
     answers: &[Option<String>],
-    target: &Target,
+    frame: &Frame,
     wait: &Wait,
 ) -> Vec<Draft> {
+    let target = &frame.target;
     let via = match by {
         QuestionBy::Dialog { afk: false } => EntryVia::Session,
         QuestionBy::Inbox(Via::Pane) => EntryVia::Pane,
@@ -432,15 +439,18 @@ fn relay_drafts(
         return Vec::new();
     };
     let given: Option<Vec<&str>> = answers.iter().map(Option::as_deref).collect();
-    let Some(given) = given.filter(|g| g.len() == questions.len()) else {
+    let Some(given) =
+        given.filter(|g| g.len() == questions.len() && frame.recommended.len() == questions.len())
+    else {
         return Vec::new();
     };
     let count = questions.len();
     questions
         .iter()
         .zip(given)
+        .zip(&frame.recommended)
         .enumerate()
-        .map(|(index, (shown, picked))| {
+        .map(|(index, ((shown, picked), recommended))| {
             let labels: Vec<String> = shown
                 .question
                 .options
@@ -472,6 +482,11 @@ fn relay_drafts(
                 },
                 origin: None,
                 target: Some(target.clone()),
+                recommendation: recommended.as_ref().map(|recommended| Recommendation {
+                    recommended: recommended.clone(),
+                    approved: answer_fp(&relay_answer(target.kind, recommended))
+                        == answer_fp(&relay_answer(target.kind, picked)),
+                }),
             }
         })
         .collect()
@@ -519,6 +534,7 @@ fn question_drafts(
                 source,
                 origin: None,
                 target: None,
+                recommendation: None,
             })
         })
         .collect()
@@ -555,6 +571,7 @@ fn permission_draft(ask: &PermissionAsk, by: PermitBy, wait: &Wait) -> Option<Dr
         source,
         origin: None,
         target: None,
+        recommendation: None,
     })
 }
 
@@ -584,11 +601,25 @@ fn decision_draft(decision: &Decision, by: &DecisionBy, text: &str, wait: &Wait)
         source,
         origin,
         target: None,
+        recommendation: None,
     })
 }
 
-/// What one answer leaves in the ledger.
-pub fn entries(facts: &Facts, paths: &dyn RealPaths) -> Vec<Entry> {
+fn relayed_recommendation(draft: &Draft, relayed: &[&Entry]) -> Option<Recommendation> {
+    let entry = relayed.get(draft.question.map_or(0, |(index, _)| index))?;
+    Some(Recommendation {
+        recommended: entry.recommended.clone()?,
+        approved: entry.approved,
+    })
+}
+
+/// What one answer leaves in the ledger; `relayed` are the entries of the
+/// relay an agent's answer was sent on, one per question.
+pub fn entries(
+    facts: &Facts,
+    relayed: &[&Entry],
+    paths: &dyn RealPaths,
+) -> Result<Vec<Entry>, String> {
     let waiting = Waiting {
         on: facts.wait_on(),
         since: facts.at,
@@ -597,8 +628,8 @@ pub fn entries(facts: &Facts, paths: &dyn RealPaths) -> Vec<Entry> {
     };
     let wait = derive(&waiting, &facts.place(), paths);
     let drafts = match (&facts.answered, &facts.relay_frame) {
-        (Answered::Question { ask, by, answers }, Some(target)) => {
-            relay_drafts(ask, *by, answers, target, &wait)
+        (Answered::Question { ask, by, answers }, Some(frame)) => {
+            relay_drafts(ask, *by, answers, frame, &wait)
         }
         (Answered::Question { ask, by, answers }, None) => {
             question_drafts(ask, *by, answers, &wait)
@@ -613,9 +644,18 @@ pub fn entries(facts: &Facts, paths: &dyn RealPaths) -> Vec<Entry> {
                 .collect()
         }
     };
+    let sent_on_relay = facts.auth.as_ref().and_then(Auth::relay).is_some();
     drafts
         .into_iter()
-        .map(|draft| finish(draft, facts, &wait))
+        .map(|mut draft| {
+            if sent_on_relay && draft.source.via == EntryVia::Agent {
+                draft.recommendation = Some(
+                    relayed_recommendation(&draft, relayed)
+                        .ok_or("물어 받은 답의 추천을 장부에서 찾지 못했어요")?,
+                );
+            }
+            Ok(finish(draft, facts, &wait))
+        })
         .collect()
 }
 

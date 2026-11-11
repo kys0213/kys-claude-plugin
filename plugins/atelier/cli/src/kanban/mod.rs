@@ -264,9 +264,6 @@ pub struct ProofArgs {
     /// wait's `relays` names it
     #[arg(long)]
     relay: Option<String>,
-    /// The option recommended when the person was asked, with `--relay`
-    #[arg(long, allow_hyphen_values = true)]
-    recommended: Option<String>,
     /// When the precedents or the relay are judged, unix milliseconds; the system clock when absent
     #[arg(long)]
     now: Option<u64>,
@@ -278,7 +275,6 @@ impl ProofArgs {
             precedents: &self.precedents,
             reason: self.reason.as_deref(),
             relay: self.relay.as_deref(),
-            recommended: self.recommended.as_deref(),
             now: self.now.unwrap_or_else(now_millis),
         }
     }

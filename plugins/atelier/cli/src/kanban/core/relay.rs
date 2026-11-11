@@ -25,7 +25,6 @@ const SHORT_ID_CHARS: usize = 8;
 const ALLOW_LABEL: &str = "허용";
 const DENY_LABEL: &str = "거부";
 const ID_BYTES: usize = 4;
-const MAX_RECOMMENDED_CHARS: usize = 500;
 
 /// The wait a relay answers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,46 +60,59 @@ impl Target {
     }
 }
 
-/// The relay an agent answer names, and the option the main agent
-/// recommended when it asked.
+/// The wait a question was framed over, and the first option of each question
+/// as the person was shown them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Relay {
-    pub id: String,
-    pub recommended: Option<String>,
+pub struct Frame {
+    pub target: Target,
+    pub recommended: Vec<Option<String>>,
 }
 
-impl Relay {
-    pub fn new(id: &str, recommended: Option<&str>) -> Result<Relay, String> {
-        check_id("ledger entry", id)?;
-        let recommended = match recommended.map(str::trim) {
-            None => None,
-            Some("") => return Err("추천(--recommended)이 비어 있어요".to_string()),
-            Some(r) if r.chars().count() > MAX_RECOMMENDED_CHARS => {
-                return Err(format!(
-                    "추천(--recommended)이 {MAX_RECOMMENDED_CHARS}자를 넘어요"
-                ))
-            }
-            Some(r) => Some(r.to_string()),
-        };
-        Ok(Relay {
-            id: id.to_string(),
+impl Frame {
+    pub fn to_json(&self) -> Value {
+        let mut value = self.target.to_json();
+        value["recommended"] = json!(self.recommended);
+        value
+    }
+
+    pub fn from_json(value: &Value) -> Result<Frame, String> {
+        let refuse = || "relay target `recommended` is a list of labels or nulls".to_string();
+        let recommended = value
+            .get("recommended")
+            .and_then(Value::as_array)
+            .ok_or_else(refuse)?
+            .iter()
+            .map(|r| match r {
+                Value::Null => Ok(None),
+                Value::String(label) => Ok(Some(label.clone())),
+                _ => Err(refuse()),
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Frame {
+            target: Target::from_json(value)?,
             recommended,
         })
     }
+}
+
+/// The relay an agent answer names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Relay {
+    pub id: String,
+}
+
+impl Relay {
+    pub fn new(id: &str) -> Result<Relay, String> {
+        check_id("ledger entry", id)?;
+        Ok(Relay { id: id.to_string() })
+    }
 
     pub fn to_json(&self) -> Value {
-        match &self.recommended {
-            Some(recommended) => json!({ "relay": self.id, "recommended": recommended }),
-            None => json!({ "relay": self.id }),
-        }
+        json!({ "relay": self.id })
     }
 
     pub fn from_json(value: &Value) -> Option<Relay> {
-        let recommended = match value.get("recommended") {
-            None | Some(Value::Null) => None,
-            Some(r) => Some(r.as_str()?),
-        };
-        Relay::new(value.get("relay")?.as_str()?, recommended).ok()
+        Relay::new(value.get("relay")?.as_str()?).ok()
     }
 }
 
@@ -184,6 +196,13 @@ fn group<'a>(book: &'a Book, first: &Entry) -> Vec<&'a Entry> {
         .collect();
     group.sort_by_key(|e| e.q_index);
     group
+}
+
+/// The entries the person's answer `relay` names left, one per question, in
+/// order; `None` when the ledger holds no such relay.
+pub fn answered<'a>(book: &'a Book, relay: &Relay) -> Option<Vec<&'a Entry>> {
+    let entry = book.entry(&relay.id).filter(|e| is_relay(e))?;
+    Some(group(book, entry))
 }
 
 fn is_used(book: &Book, group: &[&Entry]) -> bool {
@@ -321,20 +340,35 @@ fn cut_note(texts: &[Kept]) -> String {
 struct Asked {
     kind: EntryKind,
     blocks: Vec<String>,
-    options: Vec<Option<Vec<QuestionOption>>>,
+    options: Vec<Offered>,
     multi_select: Vec<bool>,
     kept: Vec<Kept>,
+}
+
+/// The options a wait's answer must be one of.
+enum Offered {
+    Any,
+    /// The wait's own labels, each with what the main agent wrote of it.
+    Labels(Vec<QuestionOption>),
+    /// Labels whose descriptions say what the answer does, whatever the main
+    /// agent wrote of them.
+    Fixed(Vec<QuestionOption>),
 }
 
 fn options_line(labels: impl Iterator<Item = String>) -> String {
     format!("선택지: {}", labels.collect::<Vec<_>>().join(" / "))
 }
 
+const VERDICTS: [(&str, &str); 2] = [
+    (ALLOW_LABEL, "위 머리말의 명령을 실행해요"),
+    (DENY_LABEL, "실행하지 않아요"),
+];
+
 fn verdict_options() -> Vec<QuestionOption> {
-    [ALLOW_LABEL, DENY_LABEL]
-        .map(|label| QuestionOption {
+    VERDICTS
+        .map(|(label, description)| QuestionOption {
             label: label.to_string(),
-            description: None,
+            description: Some(description.to_string()),
         })
         .to_vec()
 }
@@ -367,7 +401,7 @@ fn asked(on: &WaitOn) -> Option<Asked> {
                 options: ask
                     .questions
                     .iter()
-                    .map(|q| Some(q.options.clone()))
+                    .map(|q| Offered::Labels(q.options.clone()))
                     .collect(),
                 multi_select: ask.questions.iter().map(|q| q.multi_select).collect(),
                 kept: kept_texts,
@@ -395,7 +429,7 @@ fn asked(on: &WaitOn) -> Option<Asked> {
             Some(Asked {
                 kind: EntryKind::Permission,
                 blocks: vec![block],
-                options: vec![Some(verdict_options())],
+                options: vec![Offered::Fixed(verdict_options())],
                 multi_select: vec![false],
                 kept: vec![kept_text],
             })
@@ -416,16 +450,20 @@ fn asked(on: &WaitOn) -> Option<Asked> {
                     options_line(decision.options.iter().cloned())
                 )
             };
-            let options = (2..=4).contains(&decision.options.len()).then(|| {
-                decision
-                    .options
-                    .iter()
-                    .map(|label| QuestionOption {
-                        label: label.clone(),
-                        description: None,
-                    })
-                    .collect()
-            });
+            let options = if (2..=4).contains(&decision.options.len()) {
+                Offered::Labels(
+                    decision
+                        .options
+                        .iter()
+                        .map(|label| QuestionOption {
+                            label: label.clone(),
+                            description: None,
+                        })
+                        .collect(),
+                )
+            } else {
+                Offered::Any
+            };
             Some(Asked {
                 kind: EntryKind::Decision,
                 blocks: vec![block],
@@ -459,22 +497,31 @@ fn sorted_labels(options: &[QuestionOption]) -> Vec<&str> {
     labels
 }
 
-/// The options the person picks from: the main agent's, in its order and
-/// with its descriptions, when they are the wait's own labels; else the
-/// wait's own.
-fn options_for(
-    given: &[QuestionOption],
-    required: Option<&[QuestionOption]>,
-) -> Vec<QuestionOption> {
-    let Some(required) = required else {
-        return given.iter().map(defused_option).collect();
+/// The options the person picks from, in the main agent's order when it
+/// gave the wait's own labels.
+fn options_for(given: &[QuestionOption], offered: &Offered) -> Vec<QuestionOption> {
+    let (required, own_descriptions) = match offered {
+        Offered::Any => return given.iter().map(defused_option).collect(),
+        Offered::Labels(required) => (required, true),
+        Offered::Fixed(required) => (required, false),
     };
-    let source = if sorted_labels(given) == sorted_labels(required) {
-        given
-    } else {
-        required
-    };
-    source.iter().map(defused_option).collect()
+    if sorted_labels(given) != sorted_labels(required) {
+        return required.iter().map(defused_option).collect();
+    }
+    given
+        .iter()
+        .map(|option| {
+            let source = if own_descriptions {
+                option
+            } else {
+                required
+                    .iter()
+                    .find(|r| r.label == option.label)
+                    .unwrap_or(option)
+            };
+            defused_option(source)
+        })
+        .collect()
 }
 
 fn joined(parts: &[&str]) -> String {
@@ -492,7 +539,7 @@ fn joined(parts: &[&str]) -> String {
 pub fn frame(
     questions: &[Question],
     board: &[Shown],
-) -> Result<Option<(Vec<Question>, Target)>, String> {
+) -> Result<Option<(Vec<Question>, Frame)>, String> {
     let Some((session, wait)) = questions.first().and_then(|q| marker(&q.question)) else {
         return Ok(None);
     };
@@ -513,7 +560,7 @@ pub fn frame(
         kind_label(asked.kind),
         cut_note(&asked.kept)
     );
-    let rewritten = questions
+    let rewritten: Vec<Question> = questions
         .iter()
         .enumerate()
         .map(|(i, given)| {
@@ -529,16 +576,26 @@ pub fn frame(
                 question: text,
                 header: defuse_marker(&given.header),
                 multi_select: asked.multi_select[i],
-                options: options_for(&given.options, asked.options[i].as_deref()),
+                options: options_for(&given.options, &asked.options[i]),
             }
         })
+        .collect();
+    let recommended = rewritten
+        .iter()
+        .map(|q| q.options.first().map(|o| o.label.clone()))
         .collect();
     let target = Target {
         session: session.to_string(),
         wait: wait.to_string(),
         kind: asked.kind,
     };
-    Ok(Some((rewritten, target)))
+    Ok(Some((
+        rewritten,
+        Frame {
+            target,
+            recommended,
+        },
+    )))
 }
 
 #[cfg(test)]

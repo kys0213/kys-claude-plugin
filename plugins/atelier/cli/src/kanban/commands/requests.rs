@@ -28,8 +28,6 @@ pub struct Proof<'a> {
     pub precedents: &'a [String],
     pub reason: Option<&'a str>,
     pub relay: Option<&'a str>,
-    /// The option the main agent recommended when it asked, for a relay.
-    pub recommended: Option<&'a str>,
     /// When the precedents or the relay are judged, unix milliseconds.
     pub now: u64,
 }
@@ -40,7 +38,7 @@ impl Proof<'_> {
     }
 
     fn is_empty(&self) -> bool {
-        !self.has_precedents() && self.relay.is_none() && self.recommended.is_none()
+        !self.has_precedents() && self.relay.is_none()
     }
 }
 
@@ -206,8 +204,7 @@ impl KanbanRequests<'_> {
         if answerer.from == Sender::Pane {
             if !proof.is_empty() {
                 return Err(
-                    "`--precedent`·`--reason`·`--relay`·`--recommended` 는 `--from agent` 에만 붙여요"
-                        .to_string(),
+                    "`--precedent`·`--reason`·`--relay` 는 `--from agent` 에만 붙여요".to_string(),
                 );
             }
             return Ok(None);
@@ -219,7 +216,7 @@ impl KanbanRequests<'_> {
                         .to_string(),
                 );
             }
-            let relay = Relay::new(id, proof.recommended)?;
+            let relay = Relay::new(id)?;
             relay::check(
                 &read_book(self.ledger)?,
                 &relay,
@@ -228,9 +225,6 @@ impl KanbanRequests<'_> {
                 proof.now,
             )?;
             return Ok(Some(Auth::Relay(relay)));
-        }
-        if proof.recommended.is_some() {
-            return Err("추천(`--recommended`)은 물어 받은 답(`--relay`)에만 붙여요".to_string());
         }
         let proxied = sent.proxied.ok_or(
             "결정 요청은 아직 대신 답하지 않아요 — 물어 받은 답(`--relay`)만 전달해요".to_string(),

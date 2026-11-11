@@ -4,14 +4,19 @@ import type { ToolQuestion } from './kanban-ask'
 import { cli } from './kanban-cli'
 
 /** The wait a framed question asks about, as `relay-frame` named it; passed on untouched. */
-export type RelayTarget = { session: string; wait: string; kind: string }
+export type RelayTarget = { session: string; wait: string; kind: string; recommended: (string | null)[] }
 
 export type Framed = { questions: ToolQuestion[]; target: RelayTarget }
 
 function isTarget(value: unknown): value is RelayTarget {
   const t = value as Record<string, unknown> | null
 
-  return typeof t?.session === 'string' && typeof t.wait === 'string' && typeof t.kind === 'string'
+  return (
+    typeof t?.session === 'string' &&
+    typeof t.wait === 'string' &&
+    typeof t.kind === 'string' &&
+    Array.isArray(t.recommended)
+  )
 }
 
 /**

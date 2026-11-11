@@ -177,9 +177,9 @@ impl KanbanRecords<'_> {
                 })
                 .collect();
             Ok(match frame(questions, &shown)? {
-                Some((framed, target)) => json!({
+                Some((framed, frame)) => json!({
                     "questions": framed.iter().map(tool_question_json).collect::<Vec<_>>(),
-                    "target": target.to_json(),
+                    "target": frame.to_json(),
                 }),
                 None => json!({
                     "questions": questions.iter().map(tool_question_json).collect::<Vec<_>>(),

@@ -19,7 +19,7 @@ use crate::kanban::core::precedent::{Auth, SessionPlace};
 use crate::kanban::core::progress::{Activity, ItemStatus, WorkItem};
 use crate::kanban::core::prompt::PromptFact;
 use crate::kanban::core::question::{Ask, AskLengths, Question, QuestionOption};
-use crate::kanban::core::relay::Target;
+use crate::kanban::core::relay::Frame;
 use crate::kanban::core::request::{
     check_id, LeftNonce, Nonce, OpenAsk, PaneNonces, RequestKind, Status, Verdict, Via, Waits,
 };
@@ -445,7 +445,7 @@ pub fn parse_ledger_facts(raw: &str) -> Result<Facts, String> {
     }?;
     let relay_frame = match value.get("relay_frame") {
         None | Some(Value::Null) => None,
-        Some(frame) => Some(Target::from_json(frame)?),
+        Some(frame) => Some(Frame::from_json(frame)?),
     };
     Ok(Facts {
         at,
