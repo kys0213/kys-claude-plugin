@@ -8,13 +8,13 @@ mod args;
 mod files;
 mod git;
 mod interpreters;
-mod lexer;
+pub(crate) mod lexer;
 mod wrappers;
 
 use std::path::{Path, PathBuf};
 
+use crate::shared::path::normalize;
 use analyzer::Analyzer;
-use args::normalize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassifyInput {
@@ -122,7 +122,7 @@ pub enum Anchor {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LexError {
+pub(crate) enum LexError {
     UnterminatedQuote,
     UnterminatedSubstitution,
 }

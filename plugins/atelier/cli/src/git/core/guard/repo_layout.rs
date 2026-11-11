@@ -1,4 +1,6 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
+
+use crate::shared::path::normalize;
 
 /// Lexically collapses `.`/`..` in `path` (relative to `base`) without touching
 /// the filesystem. A relative `path` is anchored at `base` rather than the
@@ -6,22 +8,7 @@ use std::path::{Component, Path, PathBuf};
 /// the project (worktree / subagent contexts), so resolving against cwd
 /// mis-judges relative `file_path`s.
 pub(super) fn resolve_against(base: &Path, path: &str) -> PathBuf {
-    let path = Path::new(path);
-    let mut out = if path.is_absolute() {
-        PathBuf::new()
-    } else {
-        base.to_path_buf()
-    };
-    for comp in path.components() {
-        match comp {
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
+    normalize(&base.join(path))
 }
 
 /// Resolves `project_dir` itself, anchoring a relative project dir at the

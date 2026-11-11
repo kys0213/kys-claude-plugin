@@ -2,9 +2,9 @@
 //! is `<kind><rule version>:` and the first 128 bits of the SHA-256 of the
 //! normalized parts, in hex.
 
-use super::allowlist::{field, Scope};
+use super::allowlist::{field, shell_line, Scope};
 use super::question::Question;
-use super::shellwords::split;
+use super::text::fold;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
@@ -12,19 +12,15 @@ const PART: char = '\u{1f}';
 const ITEM: char = '\u{1e}';
 const KEY_BYTES: usize = 16;
 
-/// Whitespace folded, control chars dropped, ASCII lowercased, and the
+/// Control chars read as spaces, whitespace folded, ASCII lowercased, and the
 /// trailing `? ？ . 。 !` taken off.
 pub fn sentence(raw: &str) -> String {
     let spaced: String = raw
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
-    let folded = spaced
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_ascii_lowercase();
-    folded
+    fold(&spaced)
+        .to_ascii_lowercase()
         .trim_end_matches(['?', '？', '.', '。', '!', ' '])
         .to_string()
 }
@@ -39,7 +35,6 @@ fn key(kind: &str, parts: &[&str]) -> String {
     format!("{kind}1:{hex}")
 }
 
-/// The normalized labels as a set: sorted, each once.
 fn label_set<'a>(labels: impl Iterator<Item = &'a str>) -> String {
     let mut set: Vec<String> = labels.map(sentence).collect();
     set.sort();
@@ -91,7 +86,7 @@ fn parent_dir(path: &str) -> String {
 pub fn permission_target(tool: &str, input: &[(String, String)], scope: &Scope) -> Option<String> {
     match tool {
         "Bash" => {
-            let line = split(field(input, "command")?);
+            let line = shell_line(field(input, "command")?);
             if !line.is_simple() {
                 return None;
             }

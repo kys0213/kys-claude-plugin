@@ -289,9 +289,9 @@ fn wait_json(waiting: Option<&Waiting>, place: &Place) -> Value {
         "request": wait.request,
         "context": wait.context,
     });
-    let fields = match &wait.subject {
-        Subject::Question(questions) => json!({
-            "questions": questions
+    match &wait.subject {
+        Subject::Question(questions) => {
+            out["questions"] = questions
                 .iter()
                 .map(|q| {
                     let mut shown = question_json(&q.question);
@@ -299,26 +299,23 @@ fn wait_json(waiting: Option<&Waiting>, place: &Place) -> Value {
                     shown["key_label"] = json!(q.key_label);
                     shown
                 })
-                .collect::<Vec<_>>(),
-        }),
-        Subject::Permission(p) => json!({
-            "tool": p.tool,
-            "target": p.target,
-            "truncated": p.truncated,
-            "key": p.key,
-            "key_label": p.key_label,
-            "read_only": p.read_only,
-        }),
-        Subject::Decision(d) => json!({
-            "ask": d.ask,
-            "recap": d.recap,
-            "options": d.options,
-            "key": d.key,
-        }),
-        Subject::Input => json!({}),
-    };
-    for (name, value) in fields.as_object().into_iter().flatten() {
-        out[name] = value.clone();
+                .collect();
+        }
+        Subject::Permission(p) => {
+            out["tool"] = json!(p.tool);
+            out["target"] = json!(p.target);
+            out["truncated"] = json!(p.truncated);
+            out["key"] = json!(p.key);
+            out["key_label"] = json!(p.key_label);
+            out["read_only"] = json!(p.read_only);
+        }
+        Subject::Decision(d) => {
+            out["ask"] = json!(d.ask);
+            out["recap"] = json!(d.recap);
+            out["options"] = json!(d.options);
+            out["key"] = json!(d.key);
+        }
+        Subject::Input => {}
     }
     out["proxyable"] = json!(wait.proxyable());
     out["blocked"] = json!(wait.blocked.iter().map(Blocked::id).collect::<Vec<_>>());

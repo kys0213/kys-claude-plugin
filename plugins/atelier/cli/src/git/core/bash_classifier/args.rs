@@ -1,4 +1,4 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 
 use super::lexer::Word;
 use super::Anchor;
@@ -10,23 +10,6 @@ impl Anchor {
             raw: raw.to_string(),
         }
     }
-}
-pub(super) fn normalize(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for comp in path.components() {
-        match comp {
-            Component::CurDir => {}
-            Component::ParentDir => match out.components().next_back() {
-                Some(Component::Normal(_)) => {
-                    out.pop();
-                }
-                Some(Component::RootDir | Component::Prefix(_)) => {}
-                _ => out.push(".."),
-            },
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
 }
 
 pub(super) fn is_device(path: &Path) -> bool {

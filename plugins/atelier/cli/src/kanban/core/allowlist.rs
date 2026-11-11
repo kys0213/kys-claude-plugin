@@ -3,35 +3,13 @@
 //! an allowed command, option or argument count. Anything not listed is
 //! refused.
 
-use super::shellwords::{split, ShellIssue};
-use std::path::{Component, Path, PathBuf};
+use crate::git::core::bash_classifier::lexer::{lex, Tok};
+use crate::shared::path::normalize;
+use std::path::{Path, PathBuf};
 
 /// Resolves a path to the one the file system would open.
 pub trait RealPaths {
     fn real(&self, path: &Path) -> PathBuf;
-}
-
-/// Resolves `.` and `..` by name alone, touching no file system.
-pub struct Lexical;
-
-impl RealPaths for Lexical {
-    fn real(&self, path: &Path) -> PathBuf {
-        lexical(path)
-    }
-}
-
-pub fn lexical(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
-            other => out.push(other),
-        }
-    }
-    out
 }
 
 /// Claude Code's file tools expand a leading `~` to a home directory, which is
@@ -72,8 +50,8 @@ impl Scope<'_> {
             return None;
         }
         let (target, root) = self.absolute(arg)?;
-        let rel = lexical(&target)
-            .strip_prefix(lexical(root))
+        let rel = normalize(&target)
+            .strip_prefix(normalize(root))
             .ok()?
             .to_string_lossy()
             .into_owned();
@@ -88,6 +66,81 @@ pub enum Refusal {
     /// The first word, option or argument no rule allows.
     NotAllowlisted(String),
     OutsideRepo,
+}
+
+fn push(list: &mut Vec<Refusal>, refusal: Refusal) {
+    if !list.contains(&refusal) {
+        list.push(refusal);
+    }
+}
+
+/// A command line split into the words of each simple command, without
+/// expanding anything, and why it is not one plain command.
+#[derive(Debug, Default)]
+pub struct ShellLine {
+    pub commands: Vec<Vec<String>>,
+    pub refusals: Vec<Refusal>,
+}
+
+impl ShellLine {
+    pub fn is_simple(&self) -> bool {
+        self.refusals.is_empty() && self.commands.len() == 1
+    }
+}
+
+fn is_assignment(word: &str) -> bool {
+    word.split_once('=').is_some_and(|(name, _)| {
+        let mut chars = name.chars();
+        chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
+}
+
+/// Split with the git guard's lexer, and stricter than the shell where that
+/// lexer cannot tell: a `$` or backtick is an expansion even inside single
+/// quotes, a leading `NAME=…` is one even when quoted, and so is any word with
+/// `=~` or `:~`. A `\r` makes the line compound, since the lexer splits words
+/// at it and the shell does not. A `#` comment is dropped, as the shell does.
+pub fn shell_line(command: &str) -> ShellLine {
+    let mut line = ShellLine::default();
+    if command.contains(['$', '`']) {
+        push(&mut line.refusals, Refusal::Expansion);
+    }
+    let toks = match lex(command, false) {
+        Ok(toks) if !command.contains('\r') => toks,
+        _ => {
+            push(&mut line.refusals, Refusal::Compound);
+            lex(command, true).unwrap_or_default()
+        }
+    };
+    let mut argv: Vec<String> = Vec::new();
+    for tok in toks {
+        match tok {
+            Tok::Word(word) => {
+                let expands = word.dyn_at.is_some()
+                    || word.tilde
+                    || (argv.is_empty() && is_assignment(&word.text))
+                    || word.text.contains("=~")
+                    || word.text.contains(":~");
+                if expands {
+                    push(&mut line.refusals, Refusal::Expansion);
+                }
+                argv.push(word.text);
+            }
+            Tok::Sep(_) | Tok::Redir(_) => {
+                push(&mut line.refusals, Refusal::Compound);
+                if !argv.is_empty() {
+                    line.commands.push(std::mem::take(&mut argv));
+                }
+            }
+        }
+    }
+    if !argv.is_empty() {
+        line.commands.push(argv);
+    }
+    line
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -388,7 +441,6 @@ fn is_number(value: &str) -> bool {
         && digits.len() - numeric.len() <= 2
 }
 
-/// What an allowed command reads: the arguments that name files.
 struct Reads {
     paths: Vec<String>,
 }
@@ -756,7 +808,7 @@ fn check_git(args: &[String]) -> Checked {
     check_spec(sub, spec, &args[1..])
 }
 
-/// One simple command's words: `Err` names the first word no rule allows.
+/// `Err` names the first word no rule allows.
 fn check_command(argv: &[String]) -> Checked {
     let (name, args) = argv.split_first().ok_or_else(String::new)?;
     match name.as_str() {
@@ -769,24 +821,9 @@ fn check_command(argv: &[String]) -> Checked {
     }
 }
 
-fn push(list: &mut Vec<Refusal>, refusal: Refusal) {
-    if !list.contains(&refusal) {
-        list.push(refusal);
-    }
-}
-
 fn check_bash(command: &str, scope: &Scope) -> Vec<Refusal> {
-    let line = split(command);
-    let mut refusals = Vec::new();
-    for issue in &line.issues {
-        push(
-            &mut refusals,
-            match issue {
-                ShellIssue::Compound => Refusal::Compound,
-                ShellIssue::Expansion => Refusal::Expansion,
-            },
-        );
-    }
+    let line = shell_line(command);
+    let mut refusals = line.refusals;
     if line.commands.is_empty() {
         push(&mut refusals, Refusal::NotAllowlisted("Bash".to_string()));
     }
@@ -806,8 +843,6 @@ fn check_bash(command: &str, scope: &Scope) -> Vec<Refusal> {
     refusals
 }
 
-/// The directory a glob pattern's literal part names, before its first
-/// wildcard.
 fn glob_base(pattern: &str) -> &str {
     let literal = pattern
         .find(['*', '?', '[', '{'])
@@ -920,10 +955,86 @@ mod tests {
         assert_eq!(glob_base("/*"), "/");
     }
 
+    struct Lexical;
+
+    impl RealPaths for Lexical {
+        fn real(&self, path: &Path) -> PathBuf {
+            normalize(path)
+        }
+    }
+
+    fn words(command: &str) -> Vec<Vec<String>> {
+        shell_line(command).commands
+    }
+
     #[test]
-    fn lexical_paths_resolve_dot_dot_by_name() {
-        assert_eq!(lexical(Path::new("/a/b/../c/./d")), PathBuf::from("/a/c/d"));
-        assert_eq!(lexical(Path::new("/../a")), PathBuf::from("/a"));
+    fn quotes_and_escapes_join_into_one_word() {
+        assert_eq!(
+            words(r#"grep -e 'a b' "c\"d" e\ f"#),
+            vec![vec!["grep", "-e", "a b", "c\"d", "e f"]]
+        );
+        assert!(shell_line("grep 'a|b' x").is_simple());
+    }
+
+    #[test]
+    fn operators_split_commands_and_mark_the_line_compound() {
+        let line = shell_line("cat a && rm b");
+        assert_eq!(line.commands, vec![vec!["cat", "a"], vec!["rm", "b"]]);
+        assert_eq!(line.refusals, vec![Refusal::Compound]);
+        for command in ["ls 'a", "ls a\rb", "ls\nrm a", "cat <<E\nx\nE"] {
+            assert!(
+                shell_line(command).refusals.contains(&Refusal::Compound),
+                "{command:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn expansions_are_refused_wherever_the_shell_might_expand() {
+        for command in [
+            "cat '$x'",
+            "cat ~/a",
+            "cat ~",
+            "cat a=~/b",
+            "ls *.rs",
+            "cat {a,b}",
+            "cat {1..3}",
+            "X=1 ls",
+            "X='1' ls",
+            "'X=1' ls",
+        ] {
+            assert_eq!(
+                shell_line(command).refusals,
+                vec![Refusal::Expansion],
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn literal_tildes_braces_and_quoted_globs_are_words() {
+        for command in [
+            "git log HEAD~3",
+            "git show HEAD@{1}",
+            "ls '*'",
+            "cat \"~/a\"",
+            "ls a # ; rm b",
+        ] {
+            assert!(shell_line(command).is_simple(), "{command}");
+        }
+    }
+
+    #[test]
+    fn a_jq_filter_calls_only_listed_names() {
+        assert_eq!(check_jq_filter(".a | keys"), Ok(()));
+        assert_eq!(check_jq_filter(".env | .input"), Ok(()));
+        assert_eq!(check_jq_filter("\"input \\(.a)\""), Ok(()));
+        assert_eq!(check_jq_filter("\"\\(env)\""), Err("env".to_string()));
+        assert_eq!(
+            check_jq_filter("\"\\(\"\\(input)\")\""),
+            Err("input".to_string())
+        );
+        assert_eq!(check_jq_filter("def f: 1; f"), Err("def".to_string()));
     }
 
     #[test]

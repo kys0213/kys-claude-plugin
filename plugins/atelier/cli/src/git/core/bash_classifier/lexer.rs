@@ -1,12 +1,12 @@
 use super::LexError;
 
 #[derive(Debug, Clone, Default)]
-pub(super) struct Word {
-    pub(super) text: String,
-    pub(super) quoted: bool,
+pub(crate) struct Word {
+    pub(crate) text: String,
+    pub(crate) quoted: bool,
     /// Byte index in `text` of the first expansion or glob character.
-    pub(super) dyn_at: Option<usize>,
-    pub(super) tilde: bool,
+    pub(crate) dyn_at: Option<usize>,
+    pub(crate) tilde: bool,
     /// Bodies of the `$(…)` and backtick substitutions inside the word.
     pub(super) subs: Vec<String>,
 }
@@ -58,7 +58,7 @@ impl Word {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Sep {
+pub(crate) enum Sep {
     /// `;` or a newline.
     Seq,
     And,
@@ -70,7 +70,7 @@ pub(super) enum Sep {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RedirOp {
+pub(crate) enum RedirOp {
     Out,
     In,
     HereString,
@@ -90,7 +90,7 @@ impl RedirOp {
 }
 
 #[derive(Debug, Clone)]
-pub(super) enum Tok {
+pub(crate) enum Tok {
     Word(Word),
     Sep(Sep),
     Redir(RedirOp),
@@ -112,7 +112,7 @@ struct Heredoc {
     expands: bool,
 }
 
-pub(super) fn lex(src: &str, lenient: bool) -> Result<Vec<Tok>, LexError> {
+pub(crate) fn lex(src: &str, lenient: bool) -> Result<Vec<Tok>, LexError> {
     let mut lx = Lexer::new(src, lenient);
     while let Some(c) = lx.peek() {
         match c {

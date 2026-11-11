@@ -1,12 +1,13 @@
 use std::path::Path;
 
-use super::args::{assignment, is_device, normalize, program_name};
+use super::args::{assignment, is_device, program_name};
 use super::interpreters::{is_interpreter, is_shell};
 use super::lexer::{lex, RedirOp, Sep, Tok, Word};
 use super::{
     is_hooks_path, Anchor, BashAnalysis, BranchSwitch, BypassHit, BypassRule, Hit, HitKind,
     LexError, OpaqueCause, Wrapper, WriteRule,
 };
+use crate::shared::path::normalize;
 
 pub(super) const MAX_WRAPPER_DEPTH: usize = 2;
 

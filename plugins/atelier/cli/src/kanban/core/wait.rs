@@ -6,10 +6,10 @@
 use super::allowlist::{check_permission, RealPaths, Refusal, Scope};
 use super::board::{PermissionAsk, WaitOn, Waiting};
 use super::detail::{prompt_lines, reply_lines, Decision, WAIT_FIELDS};
-use super::guard::irreversible;
 use super::matchkey::{decision_key, permission_key, permission_target, question_key, sentence};
 use super::progress::first_field;
 use super::question::{Ask, Question};
+use super::text::fold;
 
 /// Why a wait is not one a precedent may answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,29 +112,43 @@ pub struct Place<'a> {
 }
 
 impl Place<'_> {
-    /// The repository a key belongs to: its main working tree, else the
-    /// session's directory.
     fn repo(&self) -> &str {
         self.repo_root.unwrap_or(self.cwd)
     }
 }
 
-/// Blocked reasons in the order found, each once.
-#[derive(Default)]
-struct Reasons(Vec<Blocked>);
-
-impl Reasons {
-    fn add(&mut self, reason: Blocked) {
-        if !self.0.contains(&reason) {
-            self.0.push(reason);
-        }
+fn add_if(blocked: &mut Vec<Blocked>, cond: bool, reason: Blocked) {
+    if cond && !blocked.contains(&reason) {
+        blocked.push(reason);
     }
+}
 
-    fn add_if(&mut self, cond: bool, reason: Blocked) {
-        if cond {
-            self.add(reason);
-        }
-    }
+/// Words that point at acts hard to take back, matched as case-insensitive
+/// substrings of the whitespace-folded text, so they also hit inside longer
+/// words.
+const IRREVERSIBLE: [&str; 15] = [
+    "force",
+    "push -f",
+    "reset --hard",
+    "merge",
+    "deploy",
+    "release",
+    "publish",
+    "drop",
+    "rm -rf",
+    "delete",
+    "배포",
+    "삭제",
+    "강제",
+    "머지",
+    "릴리스",
+];
+
+fn irreversible<'a>(texts: impl IntoIterator<Item = &'a str>) -> bool {
+    texts.into_iter().any(|text| {
+        let folded = fold(text).to_lowercase();
+        IRREVERSIBLE.iter().any(|marker| folded.contains(marker))
+    })
 }
 
 /// The mod cuts by UTF-16 code units, as JavaScript counts a string.
@@ -161,7 +175,7 @@ fn question_cut(ask: &Ask, index: usize, question: &Question) -> bool {
     text_cut || labels_cut
 }
 
-fn question_wait(ask: &Ask, place: &Place, reasons: &mut Reasons) -> Subject {
+fn question_wait(ask: &Ask, place: &Place, blocked: &mut Vec<Blocked>) -> Subject {
     let waits = ask
         .questions
         .iter()
@@ -174,10 +188,10 @@ fn question_wait(ask: &Ask, place: &Place, reasons: &mut Reasons) -> Subject {
                     std::iter::once(o.label.as_str()).chain(o.description.as_deref())
                 }));
             let key = (!cut).then(|| question_key(place.repo(), question));
-            reasons.add_if(question.multi_select, Blocked::MultiSelect);
-            reasons.add_if(cut, Blocked::Truncated);
-            reasons.add_if(irreversible(texts), Blocked::Irreversible);
-            reasons.add_if(key.is_none(), Blocked::NoKey);
+            add_if(blocked, question.multi_select, Blocked::MultiSelect);
+            add_if(blocked, cut, Blocked::Truncated);
+            add_if(blocked, irreversible(texts), Blocked::Irreversible);
+            add_if(blocked, key.is_none(), Blocked::NoKey);
             QuestionWait {
                 question: question.clone(),
                 key,
@@ -188,7 +202,6 @@ fn question_wait(ask: &Ask, place: &Place, reasons: &mut Reasons) -> Subject {
     Subject::Question(waits)
 }
 
-/// Every recorded field must have its length, and none may have been cut.
 fn permission_cut(ask: &PermissionAsk) -> bool {
     let Some(lengths) = &ask.input_len else {
         return true;
@@ -209,7 +222,7 @@ fn permission_wait(
     ask: &PermissionAsk,
     place: &Place,
     paths: &dyn RealPaths,
-    reasons: &mut Reasons,
+    blocked: &mut Vec<Blocked>,
 ) -> Subject {
     let scope = Scope {
         root: place.repo_root,
@@ -235,11 +248,11 @@ fn permission_wait(
             target,
         )
     });
-    reasons.add_if(truncated, Blocked::Truncated);
+    add_if(blocked, truncated, Blocked::Truncated);
     for refusal in &refusals {
-        reasons.add(Blocked::Refused(refusal.clone()));
+        add_if(blocked, true, Blocked::Refused(refusal.clone()));
     }
-    reasons.add_if(key.is_none(), Blocked::NoKey);
+    add_if(blocked, key.is_none(), Blocked::NoKey);
     Subject::Permission(PermissionWait {
         tool: tool.to_string(),
         target: match first_field(input, &WAIT_FIELDS) {
@@ -266,15 +279,15 @@ fn decision_cut(decision: &Decision) -> bool {
             .any(|(option, len)| was_cut(option, *len))
 }
 
-fn decision_wait(decision: &Decision, place: &Place, reasons: &mut Reasons) -> Subject {
+fn decision_wait(decision: &Decision, place: &Place, blocked: &mut Vec<Blocked>) -> Subject {
     let cut = decision_cut(decision);
     let key = (!cut).then(|| decision_key(place.repo(), &decision.ask, &decision.options));
     let texts =
         std::iter::once(decision.ask.as_str()).chain(decision.options.iter().map(String::as_str));
-    reasons.add(Blocked::Decision);
-    reasons.add_if(cut, Blocked::Truncated);
-    reasons.add_if(irreversible(texts), Blocked::Irreversible);
-    reasons.add_if(key.is_none(), Blocked::NoKey);
+    add_if(blocked, true, Blocked::Decision);
+    add_if(blocked, cut, Blocked::Truncated);
+    add_if(blocked, irreversible(texts), Blocked::Irreversible);
+    add_if(blocked, key.is_none(), Blocked::NoKey);
     Subject::Decision(DecisionWait {
         ask: decision.ask.clone(),
         recap: decision.recap.clone(),
@@ -284,22 +297,22 @@ fn decision_wait(decision: &Decision, place: &Place, reasons: &mut Reasons) -> S
 }
 
 pub fn derive(waiting: &Waiting, place: &Place, paths: &dyn RealPaths) -> Wait {
-    let mut reasons = Reasons::default();
+    let mut blocked = Vec::new();
     let (id, subject) = match &waiting.on {
         WaitOn::Question(ask) => (
             Some(ask.tool_use_id.clone()),
-            question_wait(ask, place, &mut reasons),
+            question_wait(ask, place, &mut blocked),
         ),
         WaitOn::Permission(ask) => (
             ask.id.clone(),
-            permission_wait(ask, place, paths, &mut reasons),
+            permission_wait(ask, place, paths, &mut blocked),
         ),
         WaitOn::Decision(decision) => (
             Some(decision.at.to_string()),
-            decision_wait(decision, place, &mut reasons),
+            decision_wait(decision, place, &mut blocked),
         ),
         WaitOn::Input => {
-            reasons.add(Blocked::Input);
+            blocked.push(Blocked::Input);
             (None, Subject::Input)
         }
     };
@@ -310,13 +323,20 @@ pub fn derive(waiting: &Waiting, place: &Place, paths: &dyn RealPaths) -> Wait {
         request: prompt_lines(waiting.request.as_deref()).into_iter().next(),
         context: (!context.is_empty()).then(|| context.join("\n")),
         subject,
-        blocked: reasons.0,
+        blocked,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markers_match_in_any_case_and_spacing() {
+        assert!(irreversible(["Git PUSH   -f origin"]));
+        assert!(irreversible(["fine", "Deleted files"]));
+        assert!(!irreversible(["Which color?", "Red"]));
+    }
 
     #[test]
     fn lengths_compare_in_utf16_code_units() {
