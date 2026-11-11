@@ -796,6 +796,30 @@ describe('kanban pane', () => {
     })
   }
 
+  test("a card's detail shows only that session's questions", async ($, on) => {
+    world(on, boardAndAnswers(ASKING_BOARD))
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    await ui.press({ key: `card:${SELF}` })
+    await ui.unmount()
+
+    const other = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    expect(await other.find({ key: `detail:${SELF}` })).toBeDefined()
+    expect(await other.find({ key: 'ask:other:tu-1:send' })).toBeUndefined()
+    await other.press({ key: `detail:${SELF}:back` })
+    await other.unmount()
+
+    const board = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    await board.press({ key: 'card:other' })
+    await board.unmount()
+
+    const asking = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    expect(await asking.find({ key: 'detail:other' })).toBeDefined()
+    expect(await asking.find({ key: 'ask:other:tu-1:send' })).toBeDefined()
+    await asking.unmount()
+  })
+
   test('the picks go to atelier kanban answer and its answers to the asking session', async ($, on) => {
     const w = world(on, boardAndAnswers(ASKING_BOARD))
 
