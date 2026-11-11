@@ -6,6 +6,7 @@
 //! the record, and read an absent field the same as `null`.
 
 use crate::kanban::core::answer::Pick;
+use crate::kanban::core::background::{AgentFact, AgentStatus};
 use crate::kanban::core::board::{Event, SessionFact};
 use crate::kanban::core::detail::{Decision, Delivery, DeliveryStatus};
 use crate::kanban::core::progress::{Activity, ItemStatus, WorkItem};
@@ -81,6 +82,17 @@ fn parse_record(value: &Value) -> Option<SessionFact> {
                     .collect::<Option<Vec<_>>>()
             })
             .unwrap_or(Some(Vec::new()))?,
+        agents: optional_array(value, "agents")?
+            .iter()
+            .map(parse_agent)
+            .collect::<Option<Vec<_>>>()?,
+    })
+}
+
+fn parse_agent(value: &Value) -> Option<AgentFact> {
+    Some(AgentFact {
+        status: AgentStatus::parse(value.get("status")?.as_str()?),
+        teammate: value.get("teammate")?.as_bool()?,
     })
 }
 
