@@ -695,6 +695,80 @@ fn a_decision_key_never_acts() {
     assert_eq!(w.matched(&w.key_of(&a))["mode"], "shadow");
 }
 
+fn precedent_ids(matched: &Value) -> Vec<String> {
+    matched["precedent_ids"]
+        .as_array()
+        .unwrap_or_else(|| panic!("precedent_ids in {matched}"))
+        .iter()
+        .map(|id| id.as_str().expect("id").to_string())
+        .collect()
+}
+
+#[test]
+fn match_names_only_a_persons_own_picks_of_its_answer_in_the_window_newest_first() {
+    let w = World::new();
+    for days in [93, 92, 91] {
+        w.record(picked(w.now - days * DAY, "Red"));
+    }
+    w.record(picked(w.now - 94 * DAY, "Blue"));
+    let older = w.record(picked(w.now - 3 * DAY, "Red"));
+    let newer = w.record(picked(w.now - 2 * DAY, "Red"));
+    w.record(by_inbox(w.now - DAY, "terminal", "Red"));
+    w.record(by_inbox(w.now - DAY, "agent", "Red"));
+    for (hours, flag) in [(3, "inferred"), (2, "answer_masked"), (1, "free_text")] {
+        let id = w.record(picked(w.now - hours * HOUR, "Red"));
+        w.rewrite_lines(|mut line| {
+            if line["id"] == id {
+                line[flag] = json!(true);
+            }
+            line
+        });
+    }
+    let key = w.key_of(&newer);
+
+    let matched = w.matched(&key);
+
+    assert_eq!(matched["eligible"], true, "{matched}");
+    assert_eq!(precedent_ids(&matched), vec![newer.clone(), older.clone()]);
+
+    w.act("question");
+    let named = precedent_ids(&matched);
+    let ids: Vec<(usize, &str)> = named.iter().map(|id| (1, id.as_str())).collect();
+    let out = w.reply("tu-9", &["Red"], &ids);
+    assert_eq!(out["queued"]["kind"], "answer", "{out}");
+}
+
+#[test]
+fn match_names_at_most_five_precedents() {
+    let w = World::new();
+    let ids: Vec<String> = (1..=7)
+        .map(|days| w.record(picked(w.now - days * DAY, "Red")))
+        .collect();
+
+    let matched = w.matched(&w.key_of(&ids[0]));
+
+    assert_eq!(precedent_ids(&matched), ids[..5].to_vec());
+}
+
+#[test]
+fn match_names_no_precedents_for_a_key_that_is_not_eligible() {
+    let w = World::new();
+    let (a, _) = two_reds(&w);
+    let key = w.key_of(&a);
+    w.record(picked(w.now - HOUR, "Blue"));
+
+    let conflicted = w.matched(&key);
+    assert_eq!(conflicted["eligible"], false);
+    assert_eq!(precedent_ids(&conflicted), Vec::<String>::new());
+
+    let w = World::new();
+    let one = w.record(picked(w.now - DAY, "Red"));
+    assert_eq!(
+        precedent_ids(&w.matched(&w.key_of(&one))),
+        Vec::<String>::new()
+    );
+}
+
 #[test]
 fn match_refuses_a_key_that_is_not_a_decision_key() {
     let w = World::new();

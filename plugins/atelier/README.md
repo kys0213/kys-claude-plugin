@@ -214,12 +214,14 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
     은 최신순으로 읽고, 읽을 수 없는 줄은 건너뜁니다. `atelier kanban ledger prune --now <ms>` 는 180일 지난 건과,
     전체가 50MB 를 넘으면 오래된 건부터 지웁니다.
   - `atelier kanban ledger match --key <결정 키> --now <ms>` 는 그 키의 선례를 판정합니다:
-    `{key, eligible, answer, answer_fp, support: {direct, approved}, conflicts, disabled, mode, reasons}`.
+    `{key, eligible, answer, answer_fp, support: {direct, approved}, conflicts, disabled, mode, reasons, precedent_ids}`.
     지지는 `--now` 전 90일 안의 사람의 결정 중 선택지에서 직접 고른 것(자유 입력·추론한 거부·가려서 바뀐 답 제외)이고,
     직접 2건 이상이거나 추천 승인과 합쳐 3건 이상이어야 합니다. 같은 창의 사람의 결정(추론·자유 입력 포함)이 모두 같은
     답이어야 하고(다른 답의 수가 `conflicts`), 키가 꺼져 있지 않아야 `eligible` 입니다. `reasons` 는 `support`·
     `conflict`·`disabled` 입니다. `mode` 는 그 종류의 단계(`shadow`·`act`)로, 사람이 입력한 위임 설정 중 가장 최근 것이
     `act` 이고 그 뒤 7일 안에 대리 답을 2번 뒤집지 않았을 때만 `act` 입니다. 결정 요청은 늘 `shadow` 입니다.
+    `precedent_ids` 는 `eligible` 일 때 그 답(`answer`)을 지지하는 창 안의 결정 id 를 최신순으로 최대 5개 주고, 아니면 빈
+    배열입니다 — 그대로 `--precedent <질문 순번>:<id>` 로 넘기면 됩니다.
     위임 설정은 사람이 입력한 `/kanban delegate act|shadow <종류>` 만 남깁니다(아래 §칸반 위임).
   - `atelier kanban ledger stats --now <ms>` 는 장부를 시간순으로 다시 읽어 지켜보기 비교를 셉니다. 90일 안의 사람의
     결정(세션 화면·pane·메인 대화 어느 길이든)마다 그 결정 전의 장부만으로 그 키가 `eligible` 이었는지를 보고, 그랬다면
@@ -256,8 +258,8 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
     보고를 낸 뒤 모드가 `atelier kanban delegate report --now <ms>` 로 남기고 `ledger prune` 을 부릅니다. 그 시각에 위임
     세션이 없었으면 다음에 위임 세션이 살아 있을 때 한 번 냅니다. 보고 내용은 `kanban-delegate` skill 이 씁니다.
   - 메인 에이전트(`kanban-delegate` skill): `[칸반 위임]` 프롬프트를 받으면 대기마다 `status --session` 으로 `wait` 를 읽고,
-    `proxyable` 이고 결정 키마다 `ledger match` 가 `eligible`·`act` 이면 선례 답(`match.answer`) 그대로 `--precedent` 로 대신
-    답합니다. 결정 요청, `proxyable` 이 아닌 대기, 지켜보기 단계는 메인 대화에서 대기 표지를 첫 줄에 둔 AskUserQuestion 으로
+    `proxyable` 이고 결정 키마다 `ledger match` 가 `eligible`·`act` 이면 선례 답(`match.answer`)을 `match.precedent_ids` 그대로
+    `--precedent` 로 대신 답합니다. 결정 요청, `proxyable` 이 아닌 대기, 지켜보기 단계는 메인 대화에서 대기 표지를 첫 줄에 둔 AskUserQuestion 으로
     묻고(지켜보기에서 선례가 있으면 추천 없이, 그 밖은 추천을 첫 선택지로), 사용자의 답을 `wait.relays` 의 id 로 `--relay`
     전달합니다. 사용자가 대리 답을 뒤집으면 `ledger revoke` 를 남깁니다. 위임 켜기·올리기는 사용자가 직접 입력하도록 안내만 합니다.
   - 성향 프로필: 추천 근거로만 쓰는 머신 로컬 파일 `<CLAUDE_CONFIG_DIR 또는 ~/.claude>/atelier/kanban/profile.md` 입니다.

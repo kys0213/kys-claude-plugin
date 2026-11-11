@@ -169,6 +169,7 @@ impl KanbanLedger<'_> {
                 "disabled": m.disabled,
                 "mode": m.mode.id(),
                 "reasons": m.reasons.iter().map(|r| r.id()).collect::<Vec<_>>(),
+                "precedent_ids": m.precedent_ids,
             }))
         })())
     }

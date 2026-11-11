@@ -311,6 +311,9 @@ pub struct Match {
     pub disabled: bool,
     pub mode: Mode,
     pub reasons: Vec<Shortfall>,
+    /// When eligible, the newest supporting decisions of `answer`, at most
+    /// `MAX_PRECEDENTS`: ids an agent answer may be sent on.
+    pub precedent_ids: Vec<String>,
 }
 
 fn newest<'a, T>(items: impl Iterator<Item = &'a T>, at: fn(&T) -> (u64, &str)) -> Option<&'a T>
@@ -417,13 +420,13 @@ pub fn judge(book: &Book, key: &DecisionKey, now: u64) -> Match {
         .max_by_key(|(_, counted)| **counted)
         .map_or((None, 0), |(fp, (count, _))| (Some(*fp), *count));
     let conflicts = humans.len() - agreeing;
-    let precedent = newest(
-        humans
-            .iter()
-            .copied()
-            .filter(|e| supports(e) && Some(e.answer_fp.as_str()) == most),
-        |e| (e.at, e.id.as_str()),
-    );
+    let mut backing: Vec<&Entry> = humans
+        .iter()
+        .copied()
+        .filter(|e| supports(e) && Some(e.answer_fp.as_str()) == most)
+        .collect();
+    backing.sort_by(|a, b| (b.at, b.id.as_str()).cmp(&(a.at, a.id.as_str())));
+    let precedent = backing.first().copied();
     let disabled = disabled(book, key.as_str(), now);
     let mut reasons = Vec::new();
     if support.direct < MIN_DIRECT && support.direct + support.approved < MIN_WITH_APPROVED {
@@ -435,9 +438,19 @@ pub fn judge(book: &Book, key: &DecisionKey, now: u64) -> Match {
     if disabled {
         reasons.push(Shortfall::Disabled);
     }
+    let eligible = reasons.is_empty();
+    let precedent_ids = if eligible {
+        backing
+            .iter()
+            .take(MAX_PRECEDENTS)
+            .map(|e| e.id.clone())
+            .collect()
+    } else {
+        Vec::new()
+    };
     Match {
         key: key.as_str().to_string(),
-        eligible: reasons.is_empty(),
+        eligible,
         answer: precedent.map(|e| e.answer.clone()),
         answer_fp: precedent.map(|e| e.answer_fp.clone()),
         support,
@@ -445,6 +458,7 @@ pub fn judge(book: &Book, key: &DecisionKey, now: u64) -> Match {
         disabled,
         mode: mode(book, key.kind(), now),
         reasons,
+        precedent_ids,
     }
 }
 
