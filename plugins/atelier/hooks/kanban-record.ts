@@ -168,6 +168,26 @@ export async function record($: EngineInterface, s: RecordState, entry: Entry): 
   await s.writes
 }
 
+/** A new run of an ended session: what it waited on and did is dropped, its conversation is kept. */
+export function rerun(base: SessionRecord, now: number): Partial<SessionRecord> {
+  if (base.ended_reason === null) {
+    return {}
+  }
+
+  return {
+    started_at: now,
+    events: [{ name: 'session.start', detail: null, at: now }],
+    pending_context: null,
+    turn_id: null,
+    activity: null,
+    recent: [],
+    permission: null,
+    decision: null,
+    asks: {},
+    agents: [],
+  }
+}
+
 /** A prompt that starts work, kept with where it came from. */
 export async function recordPrompt($: EngineInterface, s: RecordState, text: string, origin: string): Promise<void> {
   await record($, s, {
