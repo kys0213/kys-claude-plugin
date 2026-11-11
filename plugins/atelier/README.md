@@ -233,7 +233,7 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   위임 설정 줄을 남깁니다. 출력 `{text, delegate_since?}` 의 `text` 가 명령의 답이고, `delegate_since`(`on` 은 지금 시각,
   `off` 는 `null`)가 있으면 모드가 기록에 남깁니다.
   - `/kanban delegate on|off` — 이 세션을 위임 세션으로 켜고 끕니다. 살아 있는(응답 없음이 아닌) 위임 세션이 둘 이상이면
-    가장 최근에 켠 하나만 동작하고, `status` 와 `board`(`kanban_board` 포함)의 `delegate: {session_id, since, conflicts}` 가
+    가장 최근에 켠 하나만 동작하고, `status` 와 `board`·`kanban_board` 의 `delegate: {session_id, since, conflicts}` 가
     그것과 나머지를 보여 줍니다. `status` 의 `delegate` 에는 종류별 단계 `modes` 와 지켜보기 진행도 `progress`(`"n/10"`)도 실립니다.
   - `/kanban delegate act question|permission` — 그 종류를 대신 답하기로 올립니다. 권고(`promotable`)에 못 미쳐도 받고,
     답에 지금의 비교·불일치·최근 5건 일치·권고를 한 줄로 보여 줍니다. `/kanban delegate act decision` 은

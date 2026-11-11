@@ -1518,16 +1518,17 @@ describe('kanban details and requests', () => {
     expect(out).toEqual({ repos: [{ label: 'api', root: '/w/api', sessions: [] }] })
   })
 
-  test('the board tool passes its columns to the board and its waits back as they came', async ($, on) => {
+  test('the board tool passes its columns to the board and its waits and delegate back as they came', async ($, on) => {
     const wait = { kind: 'permission', id: 'p-1', proxyable: true, blocked: [] }
     const repos = [{ label: 'api', root: '/w/api', sessions: [{ session_id: 'w', column: 'needs_input', wait }] }]
-    const w = world(on, routes({ board: { ...DETAIL_BOARD, repos } }))
+    const delegate = { session_id: 'm', since: START, conflicts: [] }
+    const w = world(on, routes({ board: { ...DETAIL_BOARD, repos, delegate } }))
 
     const r = await $.tool.call({ tool: 'mcp__atelier__kanban_board', column: ['needs_input', 'idle'] } as never)
 
     const argv = w.runs.find(run => run.argv[2] === 'board')?.argv ?? []
     expect(argv.slice(-4)).toEqual(['--column', 'needs_input', '--column', 'idle'])
-    expect(JSON.parse((r as { result: string }).result)).toEqual({ repos })
+    expect(JSON.parse((r as { result: string }).result)).toEqual({ repos, delegate })
   })
 
   test('the board tool reports the error the board gives for an unknown column', async ($, on) => {
