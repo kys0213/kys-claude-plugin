@@ -1,13 +1,15 @@
 //! The ledger commands: record what a mod saw of one answer, list entries,
-//! prune old ones. Each answers one JSON value.
+//! judge a key's precedents, revoke a proxy answer, prune old ones. Each
+//! answers one JSON value.
 
-use crate::kanban::commands::ledger_store::LedgerStore;
+use crate::kanban::commands::ledger_store::{read_book, LedgerStore};
 use crate::kanban::commands::payload::{parse_bind_facts, parse_ledger_facts};
 use crate::kanban::core::allowlist::RealPaths;
 use crate::kanban::core::ledger::{
     entries, month_of, permission_call, prune, select, DecidedBy, Entry, EntryKind, EntryVia,
     ListQuery, Pruned, DEFAULT_LIMIT, MAX_AGE_MS, MAX_BYTES, MAX_LIMIT,
 };
+use crate::kanban::core::precedent::{judge, revoke, DecisionKey};
 use serde_json::{json, Value};
 
 pub struct KanbanLedger<'a> {
@@ -137,6 +139,36 @@ impl KanbanLedger<'_> {
                 .filter_map(|line| Entry::parse(line))
                 .collect();
             Ok(json!({ "entries": select(read, &query) }))
+        })())
+    }
+
+    /// What the precedents of `key` allow at `now`.
+    pub fn matched(&self, key: &str, now: u64) -> Value {
+        answer((|| {
+            let key = DecisionKey::parse(key)?;
+            let m = judge(&read_book(self.store)?, &key, now);
+            Ok(json!({
+                "key": m.key,
+                "eligible": m.eligible,
+                "answer": m.answer,
+                "answer_fp": m.answer_fp,
+                "support": { "direct": m.support.direct, "approved": m.support.approved },
+                "conflicts": m.conflicts,
+                "disabled": m.disabled,
+                "mode": m.mode.id(),
+                "reasons": m.reasons.iter().map(|r| r.id()).collect::<Vec<_>>(),
+            }))
+        })())
+    }
+
+    /// Turns proxy answer `entry` over, which turns its key off.
+    pub fn revoke(&self, entry: &str, reason: &str, now: u64) -> Value {
+        answer((|| {
+            let revoked = revoke(&read_book(self.store)?, entry, reason, now)?;
+            self.store.append(&month_of(now), &[revoked.to_line()])?;
+            Ok(json!({
+                "revoked": { "id": revoked.id, "entry": revoked.entry, "key": revoked.key }
+            }))
         })())
     }
 

@@ -13,10 +13,11 @@ use crate::kanban::commands::ledger::{KanbanLedger, ListArgs};
 use crate::kanban::commands::ledger_store::FsLedger;
 use crate::kanban::commands::paths::FsPaths;
 use crate::kanban::commands::payload::{
-    parse_answer_request, parse_bash_command, parse_pane_nonces, parse_sessions, parse_waits,
+    parse_answer_request, parse_bash_command, parse_pane_nonces, parse_permit_wait, parse_sessions,
+    parse_waits,
 };
 use crate::kanban::commands::records::{FsRecords, KanbanRecords, StatusQuery};
-use crate::kanban::commands::requests::{Answerer, KanbanRequests};
+use crate::kanban::commands::requests::{Answerer, KanbanRequests, PermitTiming, Proof};
 use crate::kanban::commands::spawn::{ClaudeLauncher, GitProbe};
 use crate::kanban::core::answer::compose;
 use crate::kanban::core::bash_guard::refusal;
@@ -115,6 +116,25 @@ pub enum LedgerCommand {
     Bind,
     /// Entries, newest first
     List(Box<ListArgs>),
+    /// Whether a decision key's precedents let the main agent answer for it
+    Match {
+        #[arg(long)]
+        key: String,
+        /// Current time, unix milliseconds
+        #[arg(long)]
+        now: u64,
+    },
+    /// Turns a proxy answer over, which turns its decision key off
+    Revoke {
+        /// The proxy answer's ledger entry id
+        #[arg(long)]
+        entry: String,
+        #[arg(long, allow_hyphen_values = true)]
+        reason: String,
+        /// Current time, unix milliseconds
+        #[arg(long)]
+        now: u64,
+    },
     /// Drops entries older than 180 days, then the oldest past 50 MB
     Prune {
         /// Current time, unix milliseconds
@@ -154,6 +174,8 @@ pub enum RequestCommand {
         /// The pane's one-time token, carried to the answering session as given
         #[arg(long)]
         nonce: Option<String>,
+        #[command(flatten)]
+        proof: ProofArgs,
     },
     /// Leaves the answers to one open question for the session that asked
     Reply {
@@ -171,6 +193,8 @@ pub enum RequestCommand {
         /// The pane's one-time token, carried to the answering session as given
         #[arg(long)]
         nonce: Option<String>,
+        #[command(flatten)]
+        proof: ProofArgs,
     },
     /// Leaves the reply to the decision a session's last turn ended on
     Decide {
@@ -187,6 +211,8 @@ pub enum RequestCommand {
         /// The pane's one-time token, carried to the answering session as given
         #[arg(long)]
         nonce: Option<String>,
+        #[command(flatten)]
+        proof: ProofArgs,
     },
     /// Leaves a stop for one turn in a session's inbox
     Stop {
@@ -212,6 +238,35 @@ pub enum RequestCommand {
         #[arg(long)]
         from_label: Option<String>,
     },
+}
+
+/// What a model's answer is sent on.
+#[derive(clap::Args)]
+pub struct ProofArgs {
+    /// `<question>:<ledger entry id>` of a person's decision the answer
+    /// follows (repeatable; `1` for a permission request)
+    #[arg(long = "precedent")]
+    precedents: Vec<String>,
+    /// Why the precedents fit, up to 200 characters
+    #[arg(long, allow_hyphen_values = true)]
+    reason: Option<String>,
+    /// The relayed answer's ledger entry id
+    #[arg(long)]
+    relay: Option<String>,
+    /// When the precedents are judged, unix milliseconds; the system clock when absent
+    #[arg(long)]
+    now: Option<u64>,
+}
+
+impl ProofArgs {
+    fn proof(&self) -> Proof<'_> {
+        Proof {
+            precedents: &self.precedents,
+            reason: self.reason.as_deref(),
+            relay: self.relay.as_deref(),
+            now: self.now.unwrap_or_else(now_millis),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -257,8 +312,12 @@ pub enum InboxCommand {
         wait: u64,
         /// Reads the nonces the pane left on stdin; without it stdin is left
         /// unread and the answer comes through the terminal
-        #[arg(long)]
+        #[arg(long, conflicts_with = "wait_stdin")]
         nonces_stdin: bool,
+        /// Reads the nonces and the request the session waits on, its input
+        /// whole, on stdin; only then is a model's answer judged
+        #[arg(long)]
+        wait_stdin: bool,
     },
     /// Removes the inbox and what is left in it
     Clear {
@@ -545,18 +604,23 @@ fn run_ledger(command: LedgerCommand) -> Value {
         LedgerCommand::Record => ledger.record(&read_stdin_raw()),
         LedgerCommand::Bind => KanbanLedger::bind(&read_stdin_raw()),
         LedgerCommand::List(args) => ledger.list(*args),
+        LedgerCommand::Match { key, now } => ledger.matched(&key, now),
+        LedgerCommand::Revoke { entry, reason, now } => ledger.revoke(&entry, &reason, now),
         LedgerCommand::Prune { now } => ledger.prune(now),
     }
 }
 
 fn run_request(command: RequestCommand) -> Value {
     let inbox = FsInbox::from_env();
+    let ledger = FsLedger::from_env();
     let requests = KanbanRequests {
         inbox: &inbox,
         pause: &ThreadPause,
         ids: &ClockIds,
         probe: &GitProbe,
         launcher: &ClaudeLauncher,
+        ledger: &ledger,
+        paths: &FsPaths,
     };
     match command {
         RequestCommand::Send {
@@ -572,6 +636,7 @@ fn run_request(command: RequestCommand) -> Value {
             decision,
             from,
             nonce,
+            proof,
         } => requests.permit(
             &session,
             &request,
@@ -579,6 +644,7 @@ fn run_request(command: RequestCommand) -> Value {
             Answerer {
                 from,
                 nonce: nonce.as_deref(),
+                proof: proof.proof(),
             },
         ),
         RequestCommand::Reply {
@@ -587,6 +653,7 @@ fn run_request(command: RequestCommand) -> Value {
             answers,
             from,
             nonce,
+            proof,
         } => requests.reply(
             &session,
             &ask,
@@ -594,6 +661,7 @@ fn run_request(command: RequestCommand) -> Value {
             Answerer {
                 from,
                 nonce: nonce.as_deref(),
+                proof: proof.proof(),
             },
         ),
         RequestCommand::Decide {
@@ -602,6 +670,7 @@ fn run_request(command: RequestCommand) -> Value {
             text,
             from,
             nonce,
+            proof,
         } => requests.decide(
             &session,
             &at,
@@ -609,6 +678,7 @@ fn run_request(command: RequestCommand) -> Value {
             Answerer {
                 from,
                 nonce: nonce.as_deref(),
+                proof: proof.proof(),
             },
         ),
         RequestCommand::Inbox { command } => match command {
@@ -635,10 +705,28 @@ fn run_request(command: RequestCommand) -> Value {
                 ttl,
                 wait,
                 nonces_stdin,
-            } => match parse_pane_nonces(&nonces_stdin.then(read_stdin_raw).unwrap_or_default()) {
-                Ok(nonces) => requests.wait_permit(&session, &request, now, ttl, wait, nonces),
-                Err(error) => json!({ "error": error }),
-            },
+                wait_stdin,
+            } => {
+                let timing = PermitTiming {
+                    now,
+                    ttl_ms: ttl,
+                    for_ms: wait,
+                };
+                let raw = (nonces_stdin || wait_stdin)
+                    .then(read_stdin_raw)
+                    .unwrap_or_default();
+                let read = if wait_stdin {
+                    parse_permit_wait(&raw)
+                } else {
+                    parse_pane_nonces(&raw).map(|nonces| (nonces, None))
+                };
+                match read {
+                    Ok((nonces, held)) => {
+                        requests.wait_permit(&session, &request, timing, nonces, held.as_ref())
+                    }
+                    Err(error) => json!({ "error": error }),
+                }
+            }
             InboxCommand::Clear { session } => requests.clear(&session),
         },
         RequestCommand::Spawn {

@@ -1,6 +1,8 @@
 //! Requests one session leaves for another through its inbox: a prompt to
 //! run or a stop for the running turn, and which of them a session takes.
 
+use super::precedent::{Auth, SessionPlace};
+use super::question::Question;
 use serde_json::{json, Value};
 
 const VERSION: u64 = 1;
@@ -139,6 +141,21 @@ fn with_nonce(mut value: Value, nonce: Option<&Nonce>) -> Value {
     value
 }
 
+fn with_auth(mut value: Value, auth: Option<&Auth>) -> Value {
+    if let (Some(auth), Some(fields)) = (auth, value.as_object_mut()) {
+        fields.insert("auth".to_string(), auth.to_json());
+    }
+    value
+}
+
+/// `Some(None)` without an `auth`; `None` for one that does not read.
+fn read_auth(value: &Value) -> Option<Option<Auth>> {
+    match value.get("auth") {
+        None => Some(None),
+        Some(auth) => Auth::from_json(auth).map(Some),
+    }
+}
+
 /// A person's answer to a permission dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
@@ -212,6 +229,7 @@ pub enum Request {
         verdict: Verdict,
         from: Sender,
         nonce: Option<Nonce>,
+        auth: Option<Auth>,
     },
     /// One answer per question of the open AskUserQuestion call it names.
     Answer {
@@ -219,6 +237,7 @@ pub enum Request {
         answers: Vec<String>,
         from: Sender,
         nonce: Option<Nonce>,
+        auth: Option<Auth>,
     },
     /// The reply to the decision a turn ended on, named by when it was left.
     Decide {
@@ -227,16 +246,6 @@ pub enum Request {
         from: Sender,
         nonce: Option<Nonce>,
     },
-}
-
-/// Refuses `--from agent`.
-pub fn check_answerer(from: Sender) -> Result<(), String> {
-    match from {
-        Sender::Pane => Ok(()),
-        Sender::Agent => Err(
-            "메인 에이전트의 답(`--from agent`)은 아직 받지 않아요 — 장부가 필요해요".to_string(),
-        ),
-    }
 }
 
 fn check_text(what: &str, text: &str) -> Result<String, String> {
@@ -293,6 +302,7 @@ impl Request {
             verdict,
             from,
             nonce,
+            auth: None,
         })
     }
 
@@ -314,7 +324,17 @@ impl Request {
                 .collect::<Result<_, _>>()?,
             from,
             nonce,
+            auth: None,
         })
+    }
+
+    /// The request with the precedents it is sent on; only an answer to a
+    /// question or a permission request carries them.
+    pub fn with_auth(mut self, given: Option<Auth>) -> Request {
+        if let Request::Permit { auth, .. } | Request::Answer { auth, .. } = &mut self {
+            *auth = given;
+        }
+        self
     }
 
     pub fn decide(
@@ -371,30 +391,38 @@ impl Request {
                 verdict,
                 from,
                 nonce,
-            } => with_nonce(
-                json!({
-                    "v": VERSION,
-                    "kind": "permit",
-                    "request_id": request_id,
-                    "decision": verdict.id(),
-                    "from": from.id(),
-                }),
-                nonce.as_ref(),
+                auth,
+            } => with_auth(
+                with_nonce(
+                    json!({
+                        "v": VERSION,
+                        "kind": "permit",
+                        "request_id": request_id,
+                        "decision": verdict.id(),
+                        "from": from.id(),
+                    }),
+                    nonce.as_ref(),
+                ),
+                auth.as_ref(),
             ),
             Request::Answer {
                 tool_use_id,
                 answers,
                 from,
                 nonce,
-            } => with_nonce(
-                json!({
-                    "v": VERSION,
-                    "kind": "answer",
-                    "tool_use_id": tool_use_id,
-                    "answers": answers,
-                    "from": from.id(),
-                }),
-                nonce.as_ref(),
+                auth,
+            } => with_auth(
+                with_nonce(
+                    json!({
+                        "v": VERSION,
+                        "kind": "answer",
+                        "tool_use_id": tool_use_id,
+                        "answers": answers,
+                        "from": from.id(),
+                    }),
+                    nonce.as_ref(),
+                ),
+                auth.as_ref(),
             ),
             Request::Decide {
                 decision_at,
@@ -438,14 +466,18 @@ impl Request {
                 },
                 Nonce::read(&value).ok()?,
             )
-            .ok(),
+            .ok()?
+            .with_auth(read_auth(&value)?)
+            .into(),
             RequestKind::Answer => Request::answer(
                 value.get("tool_use_id")?.as_str()?,
                 &strings(value.get("answers")?)?,
                 from()?,
                 Nonce::read(&value).ok()?,
             )
-            .ok(),
+            .ok()?
+            .with_auth(read_auth(&value)?)
+            .into(),
             RequestKind::Decide => Request::decide(
                 value.get("decision_at")?.as_str()?,
                 value.get("text")?.as_str()?,
@@ -457,12 +489,13 @@ impl Request {
     }
 }
 
-/// An AskUserQuestion call the taking session has open, and how many
-/// questions it asks.
+/// An AskUserQuestion call the taking session has open, how many questions
+/// it asks, and the questions whole when they read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenAsk {
     pub id: String,
     pub questions: usize,
+    pub whole: Option<Vec<Question>>,
 }
 
 /// What the taking session waits on now: an answer or a decide that names
@@ -472,6 +505,7 @@ pub struct Waits {
     pub asks: Vec<OpenAsk>,
     /// The id of the decision its last turn ended on.
     pub decision_at: Option<String>,
+    pub place: Option<SessionPlace>,
 }
 
 /// The prompt a model-written request runs as: under a header naming where it
@@ -550,6 +584,7 @@ pub enum Taken {
         answers: Vec<String>,
         from: Sender,
         via: Via,
+        auth: Option<Auth>,
     },
     /// Runs as a prompt, the text as typed.
     Decide {
@@ -604,6 +639,8 @@ pub struct Outcome {
     pub status: Status,
     /// `None` for a request that answers no wait.
     pub via: Option<Via>,
+    /// Why a model's answer was refused.
+    pub reason: Option<String>,
 }
 
 /// What one take acts on, what became of each request, and the nonces it used up.
@@ -613,15 +650,21 @@ pub struct Took {
     pub used: Vec<LeftNonce>,
 }
 
+/// Judges a model's answers to an open question against the precedents
+/// they are sent on.
+pub type Vet<'a> = &'a dyn Fn(&OpenAsk, &[String], &Auth) -> Result<(), String>;
+
 /// Which requests one take acts on: at most one prompt, and each open
 /// question answered once.
 struct Taker<'a> {
     running_turn: Option<&'a str>,
     waits: &'a Waits,
     nonces: PaneNonces,
+    vet: Vet<'a>,
     prompted: bool,
     answered: Vec<String>,
     taken: Vec<Taken>,
+    refusal: Option<String>,
 }
 
 impl Taker<'_> {
@@ -640,20 +683,17 @@ impl Taker<'_> {
                 self.deliver(Taken::Stop { turn_id })
             }
             Request::Stop { .. } | Request::Permit { .. } => Status::Stale,
-            Request::Answer {
+            Request::Decide {
                 from: Sender::Agent,
                 ..
-            }
-            | Request::Decide {
-                from: Sender::Agent,
-                ..
-            } => Status::Refused,
+            } => self.refuse("결정 요청은 대신 답하지 않아요".to_string()),
             Request::Answer {
                 tool_use_id,
                 answers,
                 from,
                 nonce,
-            } => self.answer(tool_use_id, answers, from, nonce),
+                auth,
+            } => self.answer(tool_use_id, answers, from, nonce, auth),
             Request::Decide { decision_at, .. }
                 if self.waits.decision_at.as_deref() != Some(decision_at.as_str()) =>
             {
@@ -690,49 +730,80 @@ impl Taker<'_> {
         }
     }
 
+    fn refuse(&mut self, reason: String) -> Status {
+        self.refusal = Some(reason);
+        Status::Refused
+    }
+
+    /// `Ok` for an answer this session takes: a person's, or a model's its
+    /// precedents vouch for.
+    fn vouched(
+        &self,
+        ask: &OpenAsk,
+        answers: &[String],
+        from: Sender,
+        auth: Option<&Auth>,
+    ) -> Result<(), String> {
+        match (from, auth) {
+            (Sender::Pane, _) => Ok(()),
+            (Sender::Agent, None) => Err("메인 에이전트의 답에 선례가 없어요".to_string()),
+            (Sender::Agent, Some(auth)) => (self.vet)(ask, answers, auth),
+        }
+    }
+
     fn answer(
         &mut self,
         tool_use_id: String,
         answers: Vec<String>,
         from: Sender,
         nonce: Option<Nonce>,
+        auth: Option<Auth>,
     ) -> Status {
         let open = self
             .waits
             .asks
             .iter()
             .find(|ask| ask.id == tool_use_id && !self.answered.contains(&ask.id));
-        match open {
-            None => Status::Stale,
-            Some(ask) if ask.questions != answers.len() => Status::Invalid,
-            Some(_) => {
-                self.answered.push(tool_use_id.clone());
-                let via = self.nonces.spend(RequestKind::Answer, from, nonce.as_ref());
-                self.deliver(Taken::Answer {
-                    tool_use_id,
-                    answers,
-                    from,
-                    via,
-                })
-            }
+        let ask = match open {
+            None => return Status::Stale,
+            Some(ask) if ask.questions != answers.len() => return Status::Invalid,
+            Some(ask) => ask,
+        };
+        if let Err(reason) = self.vouched(ask, &answers, from, auth.as_ref()) {
+            return self.refuse(reason);
         }
+        self.answered.push(tool_use_id.clone());
+        let via = self.nonces.spend(RequestKind::Answer, from, nonce.as_ref());
+        self.deliver(Taken::Answer {
+            tool_use_id,
+            answers,
+            from,
+            via,
+            auth: auth.filter(|_| from == Sender::Agent),
+        })
     }
 }
 
-pub fn take(
-    found: Vec<Found>,
-    running_turn: Option<&str>,
-    waits: &Waits,
-    nonces: PaneNonces,
-    ttl_ms: u64,
-) -> Took {
+/// What one take is judged against.
+pub struct Taking<'a> {
+    pub running_turn: Option<&'a str>,
+    pub waits: &'a Waits,
+    pub nonces: PaneNonces,
+    pub ttl_ms: u64,
+    pub vet: Vet<'a>,
+}
+
+pub fn take(found: Vec<Found>, taking: Taking) -> Took {
+    let ttl_ms = taking.ttl_ms;
     let mut taker = Taker {
-        running_turn,
-        waits,
-        nonces,
+        running_turn: taking.running_turn,
+        waits: taking.waits,
+        nonces: taking.nonces,
+        vet: taking.vet,
         prompted: false,
         answered: Vec::new(),
         taken: Vec::new(),
+        refusal: None,
     };
     let outcomes = found
         .into_iter()
@@ -752,6 +823,7 @@ pub fn take(
                 kind,
                 status,
                 via,
+                reason: taker.refusal.take(),
             }
         })
         .collect();
@@ -789,10 +861,13 @@ mod tests {
         }];
         let took = take(
             found,
-            Some("t"),
-            &Waits::default(),
-            PaneNonces::default(),
-            5,
+            Taking {
+                running_turn: Some("t"),
+                waits: &Waits::default(),
+                nonces: PaneNonces::default(),
+                ttl_ms: 5,
+                vet: &|_, _, _| Ok(()),
+            },
         );
         assert!(took.taken.is_empty());
         assert_eq!(took.outcomes[0].status, Status::Expired);

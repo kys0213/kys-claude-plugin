@@ -1,18 +1,21 @@
 //! Stdin payloads: `kanban board` takes `{"sessions": [<v1 record>, ...]}`,
 //! `kanban answer` takes `{"questions": [...], "picks": [...]}`, `inbox take`
 //! what the session waits on and the nonces the pane left for it,
-//! `inbox wait-permit` those nonces, `guard-bash` the Bash tool's input,
+//! `inbox wait-permit` those nonces and the request it waits on, `guard-bash`
+//! the Bash tool's input,
 //! `ledger record` what a mod knows of one answer. A record this version cannot
 //! read is dropped here, before the board sees it.
 //!
 //! The field readers answer `None` for a field of the wrong type, which drops
 //! the record, and read an absent field the same as `null`.
 
+use crate::kanban::commands::requests::PermitWait;
 use crate::kanban::core::answer::Pick;
 use crate::kanban::core::background::{AgentFact, AgentStatus};
 use crate::kanban::core::board::{Event, PermissionAsk, SessionFact};
 use crate::kanban::core::detail::{Decision, DecisionLengths, Delivery, DeliveryStatus};
 use crate::kanban::core::ledger::{Answered, DecisionBy, Facts, OpenCall, PermitBy, QuestionBy};
+use crate::kanban::core::precedent::{Auth, SessionPlace};
 use crate::kanban::core::progress::{Activity, ItemStatus, WorkItem};
 use crate::kanban::core::prompt::PromptFact;
 use crate::kanban::core::question::{Ask, AskLengths, Question, QuestionOption};
@@ -283,7 +286,10 @@ fn parse_pick(value: &Value) -> Option<Pick> {
 }
 
 /// What `inbox take` waits on: `{"asks": [{"id", "questions": [...]}],
-/// "decision": {"at", ...} | null}`. Empty stdin waits on nothing.
+/// "decision": {"at", ...} | null, "place": {"repo_root", "cwd",
+/// "permission_mode"}}`, each ask's questions as the call holds them. Empty
+/// stdin waits on nothing; asks or a place that do not read whole judge no
+/// model's answer.
 pub fn parse_waits(raw: &str) -> Result<Waits, String> {
     if raw.trim().is_empty() {
         return Ok(Waits::default());
@@ -298,14 +304,74 @@ pub fn parse_waits(raw: &str) -> Result<Waits, String> {
             Some(fields) => Some(Some(fields.get("at")?.as_u64()?.to_string())),
         })
         .ok_or_else(|| "stdin has no readable `decision`".to_string())?;
-    Ok(Waits { asks, decision_at })
+    Ok(Waits {
+        asks,
+        decision_at,
+        place: value.get("place").and_then(parse_place),
+    })
 }
 
 fn parse_open_ask(value: &Value) -> Option<OpenAsk> {
+    let questions = value.get("questions")?.as_array()?;
     Some(OpenAsk {
         id: value.get("id")?.as_str()?.to_string(),
-        questions: value.get("questions")?.as_array()?.len(),
+        questions: questions.len(),
+        whole: questions.iter().map(parse_tool_question).collect(),
     })
+}
+
+/// One question as the AskUserQuestion call holds it.
+fn parse_tool_question(value: &Value) -> Option<Question> {
+    Some(Question {
+        question: value.get("question")?.as_str()?.to_string(),
+        header: value.get("header")?.as_str()?.to_string(),
+        multi_select: value.get("multiSelect")?.as_bool()?,
+        options: value
+            .get("options")?
+            .as_array()?
+            .iter()
+            .map(|option| {
+                Some(QuestionOption {
+                    label: option.get("label")?.as_str()?.to_string(),
+                    description: nullable_string(option, "description")?,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?,
+    })
+}
+
+fn parse_place(value: &Value) -> Option<SessionPlace> {
+    Some(SessionPlace {
+        repo_root: nullable_string(value, "repo_root")?,
+        cwd: value.get("cwd")?.as_str()?.to_string(),
+        permission_mode: nullable_string(value, "permission_mode")?,
+    })
+}
+
+/// What `inbox wait-permit --wait-stdin` takes: the nonces as
+/// `parse_pane_nonces` reads them, and the request the session waits on,
+/// `{"place": {...}, "permission": {"tool", "input": {<name>: <string>}}}`,
+/// its input whole. A request that does not read judges no model's answer.
+pub fn parse_permit_wait(raw: &str) -> Result<(PaneNonces, Option<PermitWait>), String> {
+    let nonces = parse_pane_nonces(raw)?;
+    if raw.trim().is_empty() {
+        return Ok((nonces, None));
+    }
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    let wait = (|| {
+        let permission = value.get("permission")?;
+        Some(PermitWait {
+            place: parse_place(value.get("place")?)?,
+            tool: permission.get("tool")?.as_str()?.to_string(),
+            input: permission
+                .get("input")?
+                .as_object()?
+                .iter()
+                .map(|(name, v)| Some((name.clone(), v.as_str()?.to_string())))
+                .collect::<Option<Vec<_>>>()?,
+        })
+    })();
+    Ok((nonces, wait))
 }
 
 /// The nonces the pane left for the session, beside what it waits on:
@@ -367,6 +433,10 @@ pub fn parse_ledger_facts(raw: &str) -> Result<Facts, String> {
         .filter(|a| a.is_object())
         .ok_or_else(|| "stdin has no `answer` object".to_string())?;
     let way = Way::read(answer)?;
+    let auth = match way {
+        Way::Inbox(Via::Agent) => answer.get("auth").and_then(Auth::from_json),
+        Way::Inbox(Via::Pane | Via::Terminal) | Way::Session => None,
+    };
     let waits: Vec<&str> = ["question", "permission", "decision"]
         .into_iter()
         .filter(|kind| !matches!(value.get(*kind), None | Some(Value::Null)))
@@ -387,6 +457,7 @@ pub fn parse_ledger_facts(raw: &str) -> Result<Facts, String> {
         cwd: cwd.to_string(),
         permission_mode,
         answered,
+        auth,
     })
 }
 

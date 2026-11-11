@@ -21,7 +21,8 @@ export type CardAsk = { tool_use_id: string; questions: AskQuestion[] }
 
 export type AskCard = { session_id: string; headline: string; asks?: CardAsk[] }
 
-export type KanbanAnswer = { answers: string[]; via: Via }
+/** `auth`: what a model's answer was sent on, as the CLI gave it. */
+export type KanbanAnswer = { answers: string[]; via: Via; auth?: unknown }
 
 type Waiter = { questions: readonly ToolQuestion[]; resolve: (answer: KanbanAnswer) => void }
 

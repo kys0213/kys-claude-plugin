@@ -2,27 +2,72 @@
 //! injected edges, answer one JSON value.
 
 use crate::kanban::commands::inbox::{IdSource, InboxStore, Pause};
+use crate::kanban::commands::ledger_store::{read_book, LedgerStore};
 use crate::kanban::commands::spawn::{Launcher, RepoProbe};
+use crate::kanban::core::allowlist::RealPaths;
+use crate::kanban::core::precedent::{
+    vouch, whole_permission_wait, whole_question_wait, Auth, Precedent, Proxied, SessionPlace,
+};
 use crate::kanban::core::request::{
-    self, check_answerer, check_id, Found, LeftNonce, Nonce, PaneNonces, Request, RequestKind,
-    Sender, Taken, Waits,
+    self, check_id, Found, LeftNonce, Nonce, OpenAsk, PaneNonces, Request, RequestKind, Sender,
+    Taken, Taking, Verdict, Waits,
 };
 use crate::kanban::core::spawn::{is_main_root, launch_args, short_id};
 use serde_json::{json, Value};
+use std::cell::OnceCell;
 
 const PERMIT_POLL_MS: u64 = 200;
 
-/// Who sends an answer, and the nonce the pane left with it.
+/// What a model's answer is sent on, as given.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Proof<'a> {
+    /// `<question>:<ledger entry id>` each.
+    pub precedents: &'a [String],
+    pub reason: Option<&'a str>,
+    pub relay: Option<&'a str>,
+    /// When the precedents are judged, unix milliseconds.
+    pub now: u64,
+}
+
+impl Proof<'_> {
+    fn is_empty(&self) -> bool {
+        self.precedents.is_empty() && self.reason.is_none() && self.relay.is_none()
+    }
+}
+
+/// Who sends an answer, the nonce the pane left with it, and what a model
+/// sends it on.
 #[derive(Debug, Clone, Copy)]
 pub struct Answerer<'a> {
     pub from: Sender,
     pub nonce: Option<&'a str>,
+    pub proof: Proof<'a>,
 }
 
 impl From<Sender> for Answerer<'_> {
     fn from(from: Sender) -> Self {
-        Answerer { from, nonce: None }
+        Answerer {
+            from,
+            nonce: None,
+            proof: Proof::default(),
+        }
     }
+}
+
+/// The permission request a session waits on, as the request holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermitWait {
+    pub place: SessionPlace,
+    pub tool: String,
+    pub input: Vec<(String, String)>,
+}
+
+/// When a permission wait runs, how old an answer may be, and how long it waits.
+#[derive(Debug, Clone, Copy)]
+pub struct PermitTiming {
+    pub now: u64,
+    pub ttl_ms: u64,
+    pub for_ms: u64,
 }
 
 pub struct KanbanRequests<'a> {
@@ -31,6 +76,8 @@ pub struct KanbanRequests<'a> {
     pub ids: &'a dyn IdSource,
     pub probe: &'a dyn RepoProbe,
     pub launcher: &'a dyn Launcher,
+    pub ledger: &'a dyn LedgerStore,
+    pub paths: &'a dyn RealPaths,
 }
 
 fn answer(result: Result<Value, String>) -> Value {
@@ -48,13 +95,17 @@ fn taken_json(taken: &Taken) -> Value {
             answers,
             from,
             via,
-        } => json!({
-            "kind": "answer",
-            "tool_use_id": tool_use_id,
-            "answers": answers,
-            "from": from.id(),
-            "via": via.id(),
-        }),
+            auth,
+        } => with_auth(
+            json!({
+                "kind": "answer",
+                "tool_use_id": tool_use_id,
+                "answers": answers,
+                "from": from.id(),
+                "via": via.id(),
+            }),
+            auth.as_ref(),
+        ),
         Taken::Decide {
             decision_at,
             text,
@@ -78,6 +129,16 @@ fn outcome_json(outcome: &request::Outcome) -> Value {
     });
     if let (Some(via), Some(fields)) = (outcome.via, value.as_object_mut()) {
         fields.insert("via".to_string(), json!(via.id()));
+    }
+    if let (Some(reason), Some(fields)) = (&outcome.reason, value.as_object_mut()) {
+        fields.insert("reason".to_string(), json!(reason));
+    }
+    value
+}
+
+fn with_auth(mut value: Value, auth: Option<&Auth>) -> Value {
+    if let (Some(auth), Some(fields)) = (auth, value.as_object_mut()) {
+        fields.insert("auth".to_string(), auth.to_json());
     }
     value
 }
@@ -109,15 +170,63 @@ impl KanbanRequests<'_> {
         })())
     }
 
+    /// What a model's answer is sent on, when its precedents vouch for it; a
+    /// person's answer carries nothing.
+    fn auth(
+        &self,
+        answerer: &Answerer,
+        proxied: Option<Proxied>,
+        answers: &[String],
+    ) -> Result<Option<Auth>, String> {
+        let proof = answerer.proof;
+        if answerer.from == Sender::Pane {
+            if !proof.is_empty() {
+                return Err(
+                    "`--precedent`·`--reason`·`--relay` 는 `--from agent` 에만 붙여요".to_string(),
+                );
+            }
+            return Ok(None);
+        }
+        let proxied = proxied.ok_or("결정 요청은 아직 대신 답하지 않아요".to_string())?;
+        if proof.relay.is_some() {
+            return Err("물어 받은 답(`--relay`)은 아직 받지 않아요".to_string());
+        }
+        let Some(reason) = proof.reason.filter(|_| !proof.precedents.is_empty()) else {
+            return Err(
+                "메인 에이전트의 답(`--from agent`)은 선례 `--precedent <질문 순번>:<장부 id>` 와 근거 `--reason` 이 있어야 해요"
+                    .to_string(),
+            );
+        };
+        let precedents = proof
+            .precedents
+            .iter()
+            .map(|p| Precedent::parse(p))
+            .collect::<Result<Vec<_>, _>>()?;
+        let auth = Auth::new(precedents, reason)?;
+        vouch(
+            &read_book(self.ledger)?,
+            proxied,
+            &auth.claims(answers)?,
+            None,
+            proof.now,
+        )?;
+        Ok(Some(auth))
+    }
+
     fn queue_answer(
         &self,
         session: &str,
         answerer: Answerer,
+        sent: (Option<Proxied>, &[String]),
         request: impl FnOnce(Sender, Option<Nonce>) -> Result<Request, String>,
     ) -> Value {
-        let request = check_answerer(answerer.from)
-            .and_then(|()| answerer.nonce.map(Nonce::parse).transpose())
-            .and_then(|nonce| request(answerer.from, nonce));
+        let (proxied, answers) = sent;
+        let request = (|| {
+            let nonce = answerer.nonce.map(Nonce::parse).transpose()?;
+            let request = request(answerer.from, nonce)?;
+            let auth = self.auth(&answerer, proxied, answers)?;
+            Ok(request.with_auth(auth))
+        })();
         self.queue(session, request)
     }
 
@@ -131,14 +240,17 @@ impl KanbanRequests<'_> {
 
     /// Leaves one answer per question for the open question `ask` names.
     pub fn reply(&self, session: &str, ask: &str, answers: &[String], answerer: Answerer) -> Value {
-        self.queue_answer(session, answerer, |from, nonce| {
-            Request::answer(ask, answers, from, nonce)
-        })
+        self.queue_answer(
+            session,
+            answerer,
+            (Some(Proxied::Question), answers),
+            |from, nonce| Request::answer(ask, answers, from, nonce),
+        )
     }
 
     /// Leaves the reply to the decision that `at` names.
     pub fn decide(&self, session: &str, at: &str, text: &str, answerer: Answerer) -> Value {
-        self.queue_answer(session, answerer, |from, nonce| {
+        self.queue_answer(session, answerer, (None, &[]), |from, nonce| {
             Request::decide(at, text, from, nonce)
         })
     }
@@ -150,9 +262,37 @@ impl KanbanRequests<'_> {
         decision: &str,
         answerer: Answerer,
     ) -> Value {
-        self.queue_answer(session, answerer, |from, nonce| {
-            Request::permit(request, decision, from, nonce)
-        })
+        let answers = [decision.to_string()];
+        self.queue_answer(
+            session,
+            answerer,
+            (Some(Proxied::Permission), &answers),
+            |from, nonce| Request::permit(request, decision, from, nonce),
+        )
+    }
+
+    /// Whether the precedents vouch for a model's verdict on the request as
+    /// the waiting session holds it.
+    fn vet_permit(
+        &self,
+        request: &str,
+        verdict: Verdict,
+        auth: Option<&Auth>,
+        wait: Option<&PermitWait>,
+        now: u64,
+    ) -> Result<(), String> {
+        let auth = auth.ok_or("메인 에이전트의 답에 선례가 없어요".to_string())?;
+        let wait = wait.ok_or("받는 세션이 원래 요청을 넘기지 않았어요".to_string())?;
+        let whole =
+            whole_permission_wait(request, &wait.tool, &wait.input, &wait.place, self.paths);
+        let answers = [verdict.id().to_string()];
+        vouch(
+            &read_book(self.ledger)?,
+            Proxied::Permission,
+            &auth.claims(&answers)?,
+            Some(&whole),
+            now,
+        )
     }
 
     /// Waits up to `for_ms` for the answer to `request`, claiming it.
@@ -160,11 +300,15 @@ impl KanbanRequests<'_> {
         &self,
         session: &str,
         request: &str,
-        now: u64,
-        ttl_ms: u64,
-        for_ms: u64,
+        timing: PermitTiming,
         mut nonces: PaneNonces,
+        wait: Option<&PermitWait>,
     ) -> Value {
+        let PermitTiming {
+            now,
+            ttl_ms,
+            for_ms,
+        } = timing;
         answer((|| {
             check_id("session", session)?;
             check_id("permission", request)?;
@@ -179,21 +323,32 @@ impl KanbanRequests<'_> {
                             verdict,
                             from,
                             nonce,
+                            auth,
                             ..
                         }) => {
                             let via = nonces.spend(RequestKind::Permit, from, nonce.as_ref());
-                            match check_answerer(from) {
-                                Err(_) => json!({
+                            let vouched = match from {
+                                Sender::Pane => Ok(()),
+                                Sender::Agent => {
+                                    self.vet_permit(request, verdict, auth.as_ref(), wait, now)
+                                }
+                            };
+                            match vouched {
+                                Err(reason) => json!({
                                     "decision": null,
                                     "status": "refused",
                                     "via": via.id(),
+                                    "reason": reason,
                                 }),
-                                Ok(()) => json!({
-                                    "decision": verdict.id(),
-                                    "from": from.id(),
-                                    "via": via.id(),
-                                    "used_nonces": used_json(nonces.used()),
-                                }),
+                                Ok(()) => with_auth(
+                                    json!({
+                                        "decision": verdict.id(),
+                                        "from": from.id(),
+                                        "via": via.id(),
+                                        "used_nonces": used_json(nonces.used()),
+                                    }),
+                                    auth.as_ref().filter(|_| from == Sender::Agent),
+                                ),
                             }
                         }
                         _ => json!({ "decision": null, "status": "invalid" }),
@@ -238,7 +393,34 @@ impl KanbanRequests<'_> {
                     request: c.contents.as_deref().and_then(Request::parse),
                 })
                 .collect();
-            let took = request::take(found, turn, waits, nonces, ttl_ms);
+            let book = OnceCell::new();
+            let vet = |ask: &OpenAsk, answers: &[String], auth: &Auth| {
+                let book = book
+                    .get_or_init(|| read_book(self.ledger))
+                    .as_ref()
+                    .map_err(Clone::clone)?;
+                let (Some(questions), Some(place)) = (&ask.whole, &waits.place) else {
+                    return Err("받는 세션이 원래 질문을 넘기지 않았어요".to_string());
+                };
+                let wait = whole_question_wait(&ask.id, questions, place, self.paths);
+                vouch(
+                    book,
+                    Proxied::Question,
+                    &auth.claims(answers)?,
+                    Some(&wait),
+                    now,
+                )
+            };
+            let took = request::take(
+                found,
+                Taking {
+                    running_turn: turn,
+                    waits,
+                    nonces,
+                    ttl_ms,
+                    vet: &vet,
+                },
+            );
             Ok(json!({
                 "actions": took.taken.iter().map(taken_json).collect::<Vec<_>>(),
                 "results": took.outcomes.iter().map(outcome_json).collect::<Vec<_>>(),

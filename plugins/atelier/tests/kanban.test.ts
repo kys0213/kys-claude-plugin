@@ -6,6 +6,8 @@ tier('user')
 const SELF = 'self-session'
 const START = 1_800_000_000_000
 const KEY = `kanban:session:${SELF}`
+/** Where the test session runs, as `inbox take` and `inbox wait-permit` are told. */
+const SESSION_PLACE = { repo_root: null, cwd: '/work/project-a', permission_mode: null }
 
 const ROW = { direction: 'row', column_width: 24, column_gap: 1 }
 
@@ -684,6 +686,7 @@ describe('kanban progress and questions', () => {
     expect(JSON.parse(take?.stdin ?? '{}')).toEqual({
       asks: [{ id: 'tu-9', questions: TOOL_QUESTIONS }],
       decision: null,
+      place: SESSION_PLACE,
       nonces: [],
     })
     expect(r.result).toEqual({ questions: TOOL_QUESTIONS, answers: { 'Which color?': 'Blue' } })
@@ -1411,7 +1414,7 @@ describe('kanban details and requests', () => {
       '60s',
       '--waits-stdin',
     ])
-    expect(JSON.parse(take?.stdin ?? '{}')).toEqual({ asks: [], decision: null, nonces: [] })
+    expect(JSON.parse(take?.stdin ?? '{}')).toEqual({ asks: [], decision: null, place: SESSION_PLACE, nonces: [] })
     expect(w.submitted).toEqual(['Run lint'])
     const rec = stored(w) as Record<string, unknown>
     expect((rec.prompts as { text: string; origin: string }[]).at(-1)).toEqual({ text: 'Run lint', origin: 'kanban', at: START + 6_000 })
@@ -1756,9 +1759,9 @@ describe('kanban permission answers', () => {
       '60s',
       '--for',
       '2s',
-      '--nonces-stdin',
+      '--wait-stdin',
     ])
-    expect(JSON.parse(waits[0]?.stdin ?? '{}')).toEqual({ nonces: [] })
+    expect(JSON.parse(waits[0]?.stdin ?? '{}')).toEqual({ nonces: [], place: SESSION_PLACE, permission: { tool: 'Bash', input: { command: 'npm publish' } } })
     expect(eventNames(w).at(-1)).toBe('kanban.answer')
     expect((stored(w) as Record<string, unknown>).permission).toBeNull()
   })
@@ -1891,6 +1894,8 @@ describe('kanban permission answers', () => {
         { kind: 'permit', nonce: 'n-1' },
         { kind: 'answer', nonce: 'n-2' },
       ],
+      place: SESSION_PLACE,
+      permission: { tool: 'Bash', input: {} },
     })
     expect(answerVia(w)).toBe('pane')
     expect(nonceKeys(w)).toEqual([`kanban:nonce:${SELF}:answer:n-2`])
@@ -2221,6 +2226,85 @@ describe('kanban ledger', () => {
     expect(recorded(w)).toEqual([
       { ...PLACE, permission: { ...GIT_STATUS, id: `t-1-${START}` }, answer: { path: 'inbox', via: 'pane', decision: 'allow' } },
     ])
+  })
+
+  const AUTH = { precedents: [{ q: 1, id: 'L1-aaaa' }], reason: '선례' }
+
+  test('a model permit the CLI took leaves the precedents it gave with the answer', async ($, on) => {
+    const w = world(
+      on,
+      binding(argv => {
+        if (argv[3] === 'dir') {
+          return { exitCode: 0, stdout: JSON.stringify({ dir: INBOX_DIR }) }
+        }
+
+        if (argv[3] === 'wait-permit') {
+          return { exitCode: 0, stdout: JSON.stringify({ decision: 'allow', from: 'agent', via: 'agent', auth: AUTH }) }
+        }
+
+        return { exitCode: 0, stdout: JSON.stringify(BOARD) }
+      }),
+    )
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await $.turn.start({ text: 'go', turnId: 't-1' })
+    await askingCall(w, $ as never, async () => ({ result: {} }))
+
+    expect(recorded(w)).toEqual([
+      {
+        ...PLACE,
+        permission: { ...GIT_STATUS, id: `t-1-${START}` },
+        answer: { path: 'inbox', via: 'agent', decision: 'allow', auth: AUTH },
+      },
+    ])
+  })
+
+  test('a model answer the CLI took leaves the precedents it gave with the answers', async ($, on) => {
+    const answering = { exitCode: 0, stdout: '' }
+    const w = world(on, argv => {
+      if (argv[3] === 'dir') {
+        return { exitCode: 0, stdout: JSON.stringify({ dir: INBOX_DIR }) }
+      }
+
+      return argv[3] === 'take' ? answering : { exitCode: 0, stdout: JSON.stringify(BOARD) }
+    })
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    const call = $.tool.call({ tool: 'AskUserQuestion', questions: TOOL_QUESTIONS, tool_use_id: 'tu-9' } as never)
+    await w.clock.settle()
+    answering.stdout = JSON.stringify({
+      actions: [{ kind: 'answer', tool_use_id: 'tu-9', answers: ['Red'], from: 'agent', via: 'agent', auth: AUTH }],
+      results: [{ id: 'r1', kind: 'answer', status: 'delivered', via: 'agent' }],
+    })
+    w.inbox.files = ['r1.json']
+    await w.clock.advance(2_000)
+    await call
+
+    expect(recorded(w)).toEqual([
+      { ...PLACE, at: START + 2_000, question: COLOR_ASK, answer: { path: 'inbox', via: 'agent', answers: ['Red'], auth: AUTH } },
+    ])
+  })
+
+  test('a permit wait hands the CLI the request input uncut', async ($, on) => {
+    const w = world(on, argv => {
+      if (argv[3] === 'dir') {
+        return { exitCode: 0, stdout: JSON.stringify({ dir: INBOX_DIR }) }
+      }
+
+      if (argv[3] === 'wait-permit') {
+        return { exitCode: 0, stdout: JSON.stringify({ decision: 'deny', from: 'pane', via: 'pane' }) }
+      }
+
+      return { exitCode: 0, stdout: JSON.stringify(BOARD) }
+    })
+    const command = `cat ${'a/'.repeat(150)}x`
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command, timeout: 5 } } as never)
+
+    const wait = w.runs.find(x => x.argv[3] === 'wait-permit')
+    expect(JSON.parse(wait?.stdin ?? '{}').permission).toEqual({ tool: 'Bash', input: { command } })
+    expect((stored(w) as { permission: unknown }).permission).toBeNull()
   })
 
   test('a prompt while a decision is open leaves the prompt and where it came from', async ($, on) => {

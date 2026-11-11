@@ -1,11 +1,20 @@
 mod kanban_mocks;
 
+use atelier::kanban::commands::requests::PermitTiming;
 use atelier::kanban::core::request::{OpenAsk, PaneNonces, Sender, Waits};
 use kanban_mocks::{Edges, FakeLauncher, MapProbe};
 use serde_json::json;
 
 const NOW: u64 = 1_800_000_000_000;
 const TTL: u64 = 60_000;
+
+fn timing(for_ms: u64) -> PermitTiming {
+    PermitTiming {
+        now: NOW,
+        ttl_ms: TTL,
+        for_ms,
+    }
+}
 
 #[test]
 fn a_sent_prompt_is_queued_under_the_next_id_and_taken_once() {
@@ -168,17 +177,17 @@ fn a_permit_answer_is_waited_for_by_the_permission_it_names() {
 
     assert_eq!(
         e.requests()
-            .wait_permit("s-1", "p-2", NOW, TTL, 2_000, PaneNonces::default()),
+            .wait_permit("s-1", "p-2", timing(2_000), PaneNonces::default(), None),
         json!({ "decision": null })
     );
     assert_eq!(
         e.requests()
-            .wait_permit("s-1", "p-1", NOW, TTL, 2_000, PaneNonces::default()),
+            .wait_permit("s-1", "p-1", timing(2_000), PaneNonces::default(), None),
         json!({ "decision": "allow", "from": "pane", "via": "terminal", "used_nonces": [] })
     );
     assert_eq!(
         e.requests()
-            .wait_permit("s-1", "p-1", NOW, TTL, 2_000, PaneNonces::default()),
+            .wait_permit("s-1", "p-1", timing(2_000), PaneNonces::default(), None),
         json!({ "decision": null })
     );
 }
@@ -187,7 +196,7 @@ fn a_permit_answer_is_waited_for_by_the_permission_it_names() {
 fn waiting_for_a_permit_pauses_until_the_wait_is_over() {
     let e = Edges::default();
     e.requests()
-        .wait_permit("s-1", "p-1", NOW, TTL, 1_000, PaneNonces::default());
+        .wait_permit("s-1", "p-1", timing(1_000), PaneNonces::default(), None);
     assert_eq!(*e.pause.paused_ms.borrow(), 1_000);
 }
 
@@ -199,7 +208,7 @@ fn a_permit_answer_older_than_the_ttl_is_dropped() {
     *e.inbox.age_ms.borrow_mut() = TTL + 1;
     assert_eq!(
         e.requests()
-            .wait_permit("s-1", "p-1", NOW, TTL, 2_000, PaneNonces::default()),
+            .wait_permit("s-1", "p-1", timing(2_000), PaneNonces::default(), None),
         json!({ "decision": null, "status": "expired" })
     );
 }
@@ -233,9 +242,11 @@ fn open(asks: &[(&str, usize)], decision_at: Option<&str>) -> Waits {
             .map(|(id, questions)| OpenAsk {
                 id: id.to_string(),
                 questions: *questions,
+                whole: None,
             })
             .collect(),
         decision_at: decision_at.map(str::to_string),
+        place: None,
     }
 }
 
@@ -312,7 +323,7 @@ fn an_expired_answer_is_expired_before_it_is_judged() {
 }
 
 #[test]
-fn agent_answers_are_refused_and_nothing_is_queued() {
+fn agent_answers_without_precedents_are_refused_and_nothing_is_queued() {
     let e = Edges::default();
     for out in [
         e.requests()
@@ -322,12 +333,7 @@ fn agent_answers_are_refused_and_nothing_is_queued() {
         e.requests()
             .permit("s-1", "p-1", "allow", Sender::Agent.into()),
     ] {
-        assert!(
-            out["error"]
-                .as_str()
-                .is_some_and(|e| e.contains("장부가 필요해요")),
-            "{out}"
-        );
+        assert!(out["error"].is_string(), "{out}");
     }
     assert!(e.inbox.ids("s-1").is_empty());
     assert!(e.inbox.permits.borrow().is_empty());

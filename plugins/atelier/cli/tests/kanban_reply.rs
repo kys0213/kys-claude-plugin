@@ -308,7 +308,7 @@ fn a_decide_arriving_while_a_turn_runs_is_busy() {
 }
 
 #[test]
-fn agent_answers_are_refused_until_the_ledger_exists() {
+fn agent_answers_without_precedents_are_refused() {
     let w = World::new();
     for args in [
         vec![
@@ -346,8 +346,7 @@ fn agent_answers_are_refused_until_the_ledger_exists() {
         ],
     ] {
         let out = w.kanban(&args);
-        let error = out["error"].as_str().unwrap_or_default();
-        assert!(error.contains("장부가 필요해요"), "{args:?} → {out}");
+        assert!(out["error"].is_string(), "{args:?} → {out}");
     }
     assert!(!w.config.path().join("atelier").exists());
 }
@@ -424,7 +423,7 @@ fn an_agent_permit_left_in_the_inbox_is_refused_by_the_waiting_session() {
     .expect("write");
     assert_eq!(
         w.wait_permit("s-1", "p-1"),
-        json!({ "decision": null, "status": "refused", "via": "agent" })
+        json!({ "decision": null, "status": "refused", "via": "agent", "reason": "메인 에이전트의 답에 선례가 없어요" })
     );
 }
 
@@ -709,7 +708,7 @@ fn an_agent_answer_with_the_nonce_left_for_the_pane_stays_the_agents() {
     assert_eq!(taken["used_nonces"], json!([]));
     assert_eq!(
         w.wait_permit_with("s-1", "p-1", Some(json!([left("permit", "n-3")]))),
-        json!({ "decision": null, "status": "refused", "via": "agent" })
+        json!({ "decision": null, "status": "refused", "via": "agent", "reason": "메인 에이전트의 답에 선례가 없어요" })
     );
 }
 

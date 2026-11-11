@@ -120,6 +120,18 @@ export function isRecord(value: unknown): value is SessionRecord {
   return r.v === 1 && typeof r.session_id === 'string' && Array.isArray(r.events)
 }
 
+/** Where this session runs, as its record keeps it, for the CLI to judge keys and paths against. */
+export async function placeOf(
+  $: EngineInterface,
+  rec: SessionRecord | null,
+): Promise<{ repo_root: string | null; cwd: string; permission_mode: string | null }> {
+  return {
+    repo_root: rec?.repo_root ?? null,
+    cwd: rec?.cwd ?? (await $.session.cwd()),
+    permission_mode: rec?.permission_mode ?? null,
+  }
+}
+
 async function freshRecord($: EngineInterface, id: string, now: number): Promise<SessionRecord> {
   const repo = await $.session.repo()
 

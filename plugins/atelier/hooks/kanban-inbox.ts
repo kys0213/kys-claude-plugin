@@ -4,7 +4,16 @@ import { type AskState, answerAsk, openAsks } from './kanban-ask'
 import { cli } from './kanban-cli'
 import { recordDecide } from './kanban-ledger'
 import { type Via, dropUsedNonces, leftNonces, viaOf } from './kanban-nonce'
-import { KEY_PREFIX, MAX_FIELD_CHARS, type RecordState, isRecord, record, recordPrompt } from './kanban-record'
+import {
+  KEY_PREFIX,
+  MAX_FIELD_CHARS,
+  type RecordState,
+  type SessionRecord,
+  isRecord,
+  placeOf,
+  record,
+  recordPrompt,
+} from './kanban-record'
 
 const REQUEST_TTL = '60s'
 const PERMIT_WAIT = '2s'
@@ -14,7 +23,7 @@ const MAX_PERMIT_WAITS = 900
 type Taken =
   | { kind: 'prompt'; text: string; body: string; from: string }
   | { kind: 'stop'; turn_id: string }
-  | { kind: 'answer'; tool_use_id: string; answers: string[]; from: string; via?: unknown }
+  | { kind: 'answer'; tool_use_id: string; answers: string[]; from: string; via?: unknown; auth?: unknown }
   | { kind: 'decide'; decision_at: string; text: string; from: string; via?: unknown }
 
 type Result = { id: string; kind: string; status: string }
@@ -77,7 +86,7 @@ async function act($: EngineInterface, s: InboxState & AskState, taken: Taken): 
   }
 
   if (taken.kind === 'answer') {
-    answerAsk(s, taken.tool_use_id, { answers: taken.answers, via: viaOf(taken.via) })
+    answerAsk(s, taken.tool_use_id, { answers: taken.answers, via: viaOf(taken.via), auth: taken.auth })
 
     return
   }
@@ -92,12 +101,22 @@ async function act($: EngineInterface, s: InboxState & AskState, taken: Taken): 
   void $.prompt.submit({ text: taken.text }).catch(() => undefined)
 }
 
-/** What this session waits on and the nonces the pane left for it, for `inbox take` to judge answers and decides against. */
-async function waits($: EngineInterface, s: AskState, self: string): Promise<string> {
+async function storedRecord($: EngineInterface, self: string): Promise<SessionRecord | null> {
   const stored = await $.store.get(KEY_PREFIX + self)
-  const decision = isRecord(stored) ? (stored.decision ?? null) : null
 
-  return JSON.stringify({ asks: openAsks(s), decision, nonces: await leftNonces($, self) })
+  return isRecord(stored) ? stored : null
+}
+
+/** What this session waits on, where it runs and the nonces the pane left for it, for `inbox take` to judge answers and decides against. */
+async function waits($: EngineInterface, s: AskState, self: string): Promise<string> {
+  const rec = await storedRecord($, self)
+
+  return JSON.stringify({
+    asks: openAsks(s),
+    decision: rec?.decision ?? null,
+    place: await placeOf($, rec),
+    nonces: await leftNonces($, self),
+  })
 }
 
 /** Takes what other sessions left in this session's inbox, at most once per request. */
@@ -160,13 +179,16 @@ export async function deliverRequests($: EngineInterface, s: InboxState & AskSta
 /**
  * Waits for the kanban answer to permission request `id` while the engine shows its own dialog.
  * Each wait is a CLI call in flight, which a hook's time budget does not count.
+ * `request` is the tool and its input whole, for the CLI to judge a model's answer against.
  */
 export async function awaitPermit(
   $: EngineInterface,
   s: InboxState,
   id: string,
-): Promise<{ decision: 'allow' | 'deny'; via: Via } | null> {
+  request: { tool: string; input: Record<string, string> },
+): Promise<{ decision: 'allow' | 'deny'; via: Via; auth?: unknown } | null> {
   const self = await $.session.id()
+  const place = await placeOf($, await storedRecord($, self))
   s.permitting = id
 
   try {
@@ -186,9 +208,9 @@ export async function awaitPermit(
           REQUEST_TTL,
           '--for',
           PERMIT_WAIT,
-          '--nonces-stdin',
+          '--wait-stdin',
         ],
-        JSON.stringify({ nonces: await leftNonces($, self) }),
+        JSON.stringify({ nonces: await leftNonces($, self), place, permission: request }),
       )
 
       if (out === null || typeof out.error === 'string') {
@@ -198,7 +220,7 @@ export async function awaitPermit(
       if (out.decision === 'allow' || out.decision === 'deny') {
         await dropUsedNonces($, self, out.used_nonces)
 
-        return { decision: out.decision, via: viaOf(out.via) }
+        return { decision: out.decision, via: viaOf(out.via), auth: out.auth }
       }
     }
 

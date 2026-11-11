@@ -147,8 +147,19 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   - 결정 요청: `atelier kanban decide --session <id> --at <결정 id> --text <답> --from pane` — 상세에서 직접 입력한
     글도 그 결정의 답으로 갑니다. 결정 id 는 `wait.id` 입니다.
   - 권한 요청: `atelier kanban permit --session <id> --request <요청 id> --decision allow|deny --from pane`
-  - `--from agent`(메인 에이전트의 답)는 아직 세 명령 모두 거부합니다(`장부가 필요해요`). 받는 세션도 그런 답을
-    쓰지 않고 버립니다.
+  - `--from agent`(메인 에이전트의 답)는 선례를 근거로 한 질문 답과 권한 허용만 받습니다:
+    `reply … --from agent --precedent <질문 순번>:<장부 id>… --reason <200자 이하> [--now <ms>]`,
+    `permit … --decision allow --from agent --precedent 1:<장부 id>… --reason …`. 질문마다 선례 1~5건을 줍니다.
+    보내는 CLI 가 장부로 먼저 확인합니다 — 선례가 사람이 선택지에서 직접 고른 90일 안의 결정인지, 한 질문의 선례가
+    같은 결정 키인지, 보낸 답이 선례 답과 같은 지문인지(권한은 `allow` 만), 그 키가 아래 `ledger match` 로 `eligible` 이고
+    그 종류가 대신 답하기 단계(`act`)인지. 하나라도 아니면 남기지 않습니다. 결정 요청(`decide`)과 물어 받은 답
+    (`--relay`)은 아직 거부합니다.
+  - 받는 세션은 같은 확인을 자기 원래 대기로 다시 합니다. 질문은 `inbox take` 가 stdin 으로 받은 질문 원문과 세션
+    위치(`place`)로, 권한은 `inbox wait-permit --wait-stdin`(stdin `{nonces, place, permission: {tool, input}}`, 입력은
+    잘리지 않은 그대로)으로 결정 키·대신 답할 수 있는지(경로는 링크를 따라간 실제 위치로)를 판정하고, 선례 키가 그
+    질문·요청의 키와 같고 질문 답이 원래 선택지 라벨 중 하나일 때만 씁니다. 아니면 `refused` 와 이유(`reason`)를 남기고
+    버립니다(`대리 조건이 맞지 않아 버렸어요`). 원래 대기를 넘기지 않는 옛 모드(`--nonces-stdin`)는 메인 에이전트의
+    답을 모두 버립니다. 쓴 답은 장부에 대리로 남고, 그 질문의 선례 id(`precedents`)와 근거(`reason`)가 함께 남습니다.
 - **사람 위장 막기**: 모델·서브에이전트의 Bash 명령에 `kanban` 이 들어 있으면 모드가 `atelier kanban guard-bash`
   (stdin `{command}` → `{deny}`)로 확인합니다. `reply`·`permit`·`decide`·`send` 에 `--from pane` 을 붙인 호출과
   모드만 부르는 `forget`·`ledger record`·`ledger bind`·`ledger prune`·`relay-frame` 은 막습니다. 셸 낱말로 판정하므로 변수·eval·스크립트 파일로
@@ -170,6 +181,17 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
     [--decided-by human|proxy] [--via session|pane|terminal|agent] [--key] [--search <글>] [--limit N(기본 50, 최대 500)]`
     은 최신순으로 읽고, 읽을 수 없는 줄은 건너뜁니다. `atelier kanban ledger prune --now <ms>` 는 180일 지난 건과,
     전체가 50MB 를 넘으면 오래된 건부터 지웁니다.
+  - `atelier kanban ledger match --key <결정 키> --now <ms>` 는 그 키의 선례를 판정합니다:
+    `{key, eligible, answer, answer_fp, support: {direct, approved}, conflicts, disabled, mode, reasons}`.
+    지지는 `--now` 전 90일 안의 사람의 결정 중 선택지에서 직접 고른 것(자유 입력·추론한 거부·가려서 바뀐 답 제외)이고,
+    직접 2건 이상이거나 추천 승인과 합쳐 3건 이상이어야 합니다. 같은 창의 사람의 결정(추론·자유 입력 포함)이 모두 같은
+    답이어야 하고(다른 답의 수가 `conflicts`), 키가 꺼져 있지 않아야 `eligible` 입니다. `reasons` 는 `support`·
+    `conflict`·`disabled` 입니다. `mode` 는 그 종류의 단계(`shadow`·`act`)로, 사람이 입력한 위임 설정 중 가장 최근 것이
+    `act` 이고 그 뒤 7일 안에 대리 답을 2번 뒤집지 않았을 때만 `act` 입니다. 결정 요청은 늘 `shadow` 입니다.
+    위임 설정을 남기는 명령은 아직 없어서 지금은 모든 종류가 `shadow` 이고, 메인 에이전트의 답은 받지 않습니다.
+  - `atelier kanban ledger revoke --entry <대리 답 id> --reason <200자 이하> --now <ms>` 는 사용자가 뒤집은 대리 답을
+    남기고 그 결정 키를 끕니다. 대리 답만 뒤집을 수 있고, 뒤집은 뒤 그 키에 사람의 직접 결정 2건이 같은 답이면 다시
+    켜집니다. `ledger list` 는 뒤집기·위임 설정 줄을 보이지 않습니다.
 - **터미널에서 보기**: pane 없이 같은 보드를 `atelier kanban status` 로 읽습니다. 세션마다 모드가 기록을 쓸 때
   남기는 기록 사본(`<CLAUDE_CONFIG_DIR 또는 ~/.claude>/atelier/kanban/records/<세션>.json`)을 읽으므로 모드가 꺼진
   세션은 보이지 않고, 읽을 수 없는 사본은 그 세션만 빠집니다.

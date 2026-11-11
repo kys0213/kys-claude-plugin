@@ -3,7 +3,7 @@ import type { EngineInterface } from 'claude-code'
 import type { ToolQuestion } from './kanban-ask'
 import { cli } from './kanban-cli'
 import type { Via } from './kanban-nonce'
-import { type AskQuestion, type AskLengths, KEY_PREFIX, type SessionRecord, isRecord } from './kanban-record'
+import { type AskQuestion, type AskLengths, KEY_PREFIX, type SessionRecord, isRecord, placeOf } from './kanban-record'
 
 /** A permission request as the record keeps it. */
 export type PermissionFacts = NonNullable<SessionRecord['permission']>
@@ -21,9 +21,14 @@ type LedgerAnswer =
   | { path: 'session'; answers: unknown[]; afk_timeout_ms: unknown; is_error: boolean; denied: boolean }
   | { path: 'session'; post: string | null; is_error: boolean }
   | { path: 'session'; text: string; origin: string }
-  | { path: 'inbox'; via: Via; answers: string[] }
-  | { path: 'inbox'; via: Via; decision: 'allow' | 'deny' }
+  | { path: 'inbox'; via: Via; answers: string[]; auth?: unknown }
+  | { path: 'inbox'; via: Via; decision: 'allow' | 'deny'; auth?: unknown }
   | { path: 'inbox'; via: Via; text: string }
+
+/** The precedents a model's answer was sent on, as the CLI gave them, passed on untouched. */
+function authOf(auth: unknown): { auth?: unknown } {
+  return auth === undefined ? {} : { auth }
+}
 
 /** A tool call in flight, the permission request it raised and the post event that came for it. */
 type Call = { tool: string; permission: PermissionFacts | null; post: string | null; settled: boolean }
@@ -54,9 +59,7 @@ async function recordAnswer($: EngineInterface, wait: LedgerWait, answer: Ledger
       JSON.stringify({
         at: await $.clock.now(),
         session: await $.session.id(),
-        repo_root: rec?.repo_root ?? null,
-        cwd: rec?.cwd ?? (await $.session.cwd()),
-        permission_mode: rec?.permission_mode ?? null,
+        ...(await placeOf($, rec)),
         ...wait,
         answer,
       }),
@@ -91,9 +94,12 @@ export async function recordQuestion(
   toolUseId: string,
   ask: AskFacts,
   questions: readonly ToolQuestion[],
-  won: { local: unknown } | { answers: string[]; via: Via },
+  won: { local: unknown } | { answers: string[]; via: Via; auth?: unknown },
 ): Promise<void> {
-  const answer = 'local' in won ? dialogAnswer(questions, won.local) : { path: 'inbox' as const, via: won.via, answers: won.answers }
+  const answer =
+    'local' in won
+      ? dialogAnswer(questions, won.local)
+      : { path: 'inbox' as const, via: won.via, answers: won.answers, ...authOf(won.auth) }
 
   await recordAnswer($, { question: { tool_use_id: toolUseId, ...ask } }, answer)
 }
@@ -137,13 +143,13 @@ export async function recordPermit(
   $: EngineInterface,
   call: Call | null,
   permission: PermissionFacts,
-  verdict: { decision: 'allow' | 'deny'; via: Via },
+  verdict: { decision: 'allow' | 'deny'; via: Via; auth?: unknown },
 ): Promise<void> {
   if (call !== null) {
     call.settled = true
   }
 
-  await recordAnswer($, { permission }, { path: 'inbox', via: verdict.via, decision: verdict.decision })
+  await recordAnswer($, { permission }, { path: 'inbox', via: verdict.via, decision: verdict.decision, ...authOf(verdict.auth) })
 }
 
 /** The call ended: a permission dialog it raised is recorded with how the call went after it. */

@@ -86,29 +86,26 @@ type KanbanState = InboxState &
     refreshing: boolean
   }
 
-function stringFields(input: unknown): Record<string, string> {
+/** The tool input's string fields, uncut. */
+function wholeFields(input: unknown): Record<string, string> {
   if (typeof input !== 'object' || input === null) {
     return {}
   }
 
   return Object.fromEntries(
-    Object.entries(input)
-      .filter(([key, value]) => typeof value === 'string' && !RESERVED_INPUT_KEYS.includes(key))
-      .map(([key, value]) => [key, (value as string).slice(0, MAX_FIELD_CHARS)]),
+    Object.entries(input).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string' && !RESERVED_INPUT_KEYS.includes(entry[0]),
+    ),
   )
+}
+
+function stringFields(input: unknown): Record<string, string> {
+  return Object.fromEntries(Object.entries(wholeFields(input)).map(([key, value]) => [key, value.slice(0, MAX_FIELD_CHARS)]))
 }
 
 /** The length each string field had before `stringFields` cut it. */
 function fieldLengths(input: unknown): Record<string, number> {
-  if (typeof input !== 'object' || input === null) {
-    return {}
-  }
-
-  return Object.fromEntries(
-    Object.entries(input)
-      .filter(([key, value]) => typeof value === 'string' && !RESERVED_INPUT_KEYS.includes(key))
-      .map(([key, value]) => [key, (value as string).length]),
-  )
+  return Object.fromEntries(Object.entries(wholeFields(input)).map(([key, value]) => [key, value.length]))
 }
 
 function withoutAsk(base: SessionRecord, toolUseId: string): Partial<SessionRecord> {
@@ -681,7 +678,7 @@ export function registerKanban(on: On): void {
       return next(e)
     }
 
-    const verdict = await awaitPermit($, s, id)
+    const verdict = await awaitPermit($, s, id, { tool: e.tool_name, input: wholeFields(e.tool_input) })
 
     if (verdict === null) {
       return next(e)

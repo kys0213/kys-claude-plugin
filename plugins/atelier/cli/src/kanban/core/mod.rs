@@ -9,6 +9,7 @@ pub mod layout;
 pub mod ledger;
 pub mod mask;
 pub mod matchkey;
+pub mod precedent;
 pub mod progress;
 pub mod prompt;
 pub mod question;

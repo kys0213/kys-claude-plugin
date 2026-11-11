@@ -6,11 +6,14 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use atelier::kanban::commands::inbox::{Claimed, IdSource, InboxStore, Pause};
+use atelier::kanban::commands::ledger_store::LedgerStore;
 use atelier::kanban::commands::requests::KanbanRequests;
 use atelier::kanban::commands::spawn::{Launched, Launcher, RepoProbe};
+use atelier::kanban::core::allowlist::RealPaths;
+use atelier::kanban::core::ledger::MonthFile;
 use atelier::kanban::core::spawn::RepoPaths;
 
 /// Requests by session and id; `age_ms` is what every claimed request reads as.
@@ -179,12 +182,60 @@ impl Launcher for FakeLauncher {
     }
 }
 
+/// Ledger lines by month.
+#[derive(Default)]
+pub struct MemLedger {
+    pub months: RefCell<BTreeMap<String, Vec<String>>>,
+}
+
+impl LedgerStore for MemLedger {
+    fn append(&self, month: &str, lines: &[String]) -> Result<(), String> {
+        self.months
+            .borrow_mut()
+            .entry(month.to_string())
+            .or_default()
+            .extend(lines.iter().cloned());
+        Ok(())
+    }
+
+    fn read(&self) -> Result<Vec<MonthFile>, String> {
+        Ok(self
+            .months
+            .borrow()
+            .iter()
+            .map(|(month, lines)| MonthFile {
+                month: month.clone(),
+                lines: lines.clone(),
+            })
+            .collect())
+    }
+
+    fn rewrite(
+        &self,
+        change: &mut dyn FnMut(Vec<MonthFile>) -> Vec<MonthFile>,
+    ) -> Result<(), String> {
+        let kept = change(self.read()?);
+        *self.months.borrow_mut() = kept.into_iter().map(|m| (m.month, m.lines)).collect();
+        Ok(())
+    }
+}
+
+/// Every path is where it is named.
+pub struct NamedPaths;
+
+impl RealPaths for NamedPaths {
+    fn real(&self, path: &Path) -> PathBuf {
+        path.to_path_buf()
+    }
+}
+
 pub struct Edges {
     pub inbox: MemInbox,
     pub pause: CountingPause,
     pub ids: CountingIds,
     pub probe: MapProbe,
     pub launcher: FakeLauncher,
+    pub ledger: MemLedger,
 }
 
 impl Default for Edges {
@@ -195,6 +246,7 @@ impl Default for Edges {
             ids: CountingIds::default(),
             probe: MapProbe::default(),
             launcher: FakeLauncher::printing("backgrounded · abc123\n"),
+            ledger: MemLedger::default(),
         }
     }
 }
@@ -207,6 +259,8 @@ impl Edges {
             ids: &self.ids,
             probe: &self.probe,
             launcher: &self.launcher,
+            ledger: &self.ledger,
+            paths: &NamedPaths,
         }
     }
 }

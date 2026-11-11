@@ -8,6 +8,7 @@ use super::board::{PermissionAsk, WaitOn, Waiting};
 use super::detail::Decision;
 use super::mask::mask;
 use super::matchkey::{answer_fp, digest, sentence};
+use super::precedent::Auth;
 use super::prompt::decides_as_person;
 use super::question::Ask;
 use super::request::{Verdict, Via};
@@ -231,6 +232,8 @@ pub struct Facts {
     pub cwd: String,
     pub permission_mode: Option<String>,
     pub answered: Answered,
+    /// What a model's answer was sent on; kept for an agent's answer only.
+    pub auth: Option<Auth>,
 }
 
 impl Facts {
@@ -337,6 +340,11 @@ fn is_free_text(answer: &str, options: Option<&[String]>) -> bool {
 }
 
 fn finish(draft: Draft, facts: &Facts, wait: &Wait) -> Entry {
+    let auth = facts
+        .auth
+        .as_ref()
+        .filter(|_| draft.source.via == EntryVia::Agent);
+    let q = draft.question.map_or(1, |(index, _)| index + 1);
     let masked = mask(&draft.answer);
     let q_index = draft.question.map(|(index, _)| index.to_string());
     let asked = serde_json::to_string(&draft.asked).expect("what was asked serializes");
@@ -379,8 +387,10 @@ fn finish(draft: Draft, facts: &Facts, wait: &Wait) -> Entry {
         outcome: Outcome::Used,
         recommended: None,
         approved: false,
-        precedents: Vec::new(),
-        reason: None,
+        precedents: auth.map_or_else(Vec::new, |auth| {
+            auth.ids_for(q).into_iter().map(str::to_string).collect()
+        }),
+        reason: auth.map(|auth| kept(auth.reason())),
         relay: None,
         target_session: None,
         target_wait: None,

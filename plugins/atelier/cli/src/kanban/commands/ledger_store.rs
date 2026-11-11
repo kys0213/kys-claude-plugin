@@ -4,6 +4,7 @@
 
 use crate::kanban::commands::inbox::{config_dir, replace_file};
 use crate::kanban::core::ledger::MonthFile;
+use crate::kanban::core::precedent::Book;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -22,6 +23,14 @@ pub trait LedgerStore {
         &self,
         change: &mut dyn FnMut(Vec<MonthFile>) -> Vec<MonthFile>,
     ) -> Result<(), String>;
+}
+
+/// Every line of the ledger, as precedents read it.
+pub fn read_book(store: &dyn LedgerStore) -> Result<Book, String> {
+    let months = store.read()?;
+    Ok(Book::read(
+        months.iter().flat_map(|m| &m.lines).map(String::as_str),
+    ))
 }
 
 pub struct FsLedger {
