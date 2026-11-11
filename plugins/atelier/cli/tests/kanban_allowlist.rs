@@ -113,9 +113,28 @@ fn jq_filters_that_read_the_environment_or_other_files_are_not_allowlisted() {
         ("jq -c 'input' f", "input"),
         ("jq -c '[inputs]' f", "inputs"),
         ("jq -r 'input_filename' f", "input_filename"),
-        ("jq -r '.a # keys\n| get_search_list' f", "get_search_list"),
     ] {
         assert_refused_with(command, &format!("not_allowlisted:{word}"));
+    }
+}
+
+#[test]
+fn jq_filters_with_a_comment_are_not_allowlisted() {
+    for command in [
+        "jq -r '. # x' f",
+        "jq -r '. # \"\n| env # \"' package.json",
+        "jq -r '.a # keys\n| get_search_list' f",
+        "jq -r '. # \\\n| env' f",
+        "jq -r '\"\\(. # x\n)\"' f",
+    ] {
+        assert_refused_with(command, "not_allowlisted:#");
+    }
+}
+
+#[test]
+fn a_hash_inside_a_jq_string_is_proxyable() {
+    for command in ["jq -r '\"a#b\"' f", "jq -r '\"\\(\"#\") x#\"' f"] {
+        assert_proxyable(command);
     }
 }
 

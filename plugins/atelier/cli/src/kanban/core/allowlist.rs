@@ -702,8 +702,9 @@ const JQ_NAMES: &[&str] = &[
 ];
 
 /// Every bare name in a jq filter must be one of `JQ_NAMES`; a field (`.name`),
-/// a variable (`$name`) or a format (`@name`) is not a call. Comments are read
-/// as code: a name in one is checked too.
+/// a variable (`$name`) or a format (`@name`) is not a call. A `#` outside a
+/// string is refused: jq reads it as a comment, which can hide a quote that
+/// would desync this scan, and jq 1.7.1 continues a comment past a `\` newline.
 fn check_jq_filter(filter: &str) -> Result<(), String> {
     let chars: Vec<char> = filter.chars().collect();
     // Paren depth inside each open `\(` interpolation, innermost last.
@@ -728,6 +729,7 @@ fn check_jq_filter(filter: &str) -> Result<(), String> {
         }
         match c {
             '"' => in_string = true,
+            '#' => return Err("#".to_string()),
             '(' => {
                 if let Some(depth) = interpolations.last_mut() {
                     *depth += 1;
