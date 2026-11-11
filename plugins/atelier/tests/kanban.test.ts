@@ -111,6 +111,8 @@ type World = {
   invalidated: string[]
   /** What the engine draws in the band above the prompt, beneath the plugin. */
   band: { value: unknown }
+  /** Runs a tool call other than AskUserQuestion, as the engine would with its dialogs; unset answers `{ result: {} }`. */
+  tools: { run: ((e: { tool: string; tool_use_id?: string }) => Promise<unknown>) | null }
 }
 
 type CliOut = { exitCode: number; stdout: string } | 'missing'
@@ -146,6 +148,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   const agents: World['agents'] = { value: [] }
   const invalidated: string[] = []
   const band: World['band'] = { value: { type: 'Box', props: {}, children: [] } }
+  const tools: World['tools'] = { run: null }
 
   on('store.get', ($, e) => ({ value: store[e.key] }))
   on('store.set', ($, e) => {
@@ -239,10 +242,14 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
       return { result: { task: { id: '1', subject: e.subject } } }
     }
 
+    if (tools.run !== null) {
+      return tools.run(e) as never
+    }
+
     return { result: {} }
   })
 
-  return { store, clock, runs, shown, dialog, inbox, disk, messages, submitted, aborted, agents, invalidated, band }
+  return { store, clock, runs, shown, dialog, inbox, disk, messages, submitted, aborted, agents, invalidated, band, tools }
 }
 
 type StoredRecord = {
@@ -2028,5 +2035,197 @@ describe('kanban record copy', () => {
     const [ask] = Object.values(stored(w).asks ?? {}) as { questions: { question: string }[]; orig_len: unknown }[]
     expect(ask?.questions[0]?.question).toHaveLength(1_000)
     expect(ask?.orig_len).toEqual({ question: [1_500], labels: [[250]] })
+  })
+})
+
+describe('kanban ledger', () => {
+  const PLACE = { at: START, session: SELF, repo_root: null, cwd: '/work/project-a', permission_mode: null }
+  const COLOR_ASK = { tool_use_id: 'tu-9', at: START, questions: [COLOR], orig_len: { question: [12], labels: [[3, 4]] } }
+  const GIT_STATUS = { id: null, tool: 'Bash', input: { command: 'git status' }, input_len: { command: 10 }, at: START }
+  const DECISION = { ask: '진행할까요?', recap: '정리했어요.', options: ['진행'], at: START, orig_len: { ask: 6, options: [2] } }
+  const WRAP_UP = { tool: 'WrapUp', recap: '정리했어요.', ask: '진행할까요?', blocked: true, actions: [{ label: '진행' }] }
+
+  function ledgerRuns(w: World): Run[] {
+    return w.runs.filter(r => r.argv[2] === 'ledger')
+  }
+
+  function recorded(w: World): unknown[] {
+    return ledgerRuns(w).map(r => JSON.parse(r.stdin ?? '{}'))
+  }
+
+  type Engine = { classic: { PermissionRequest: (e: never) => Promise<unknown> }; tool: { call: (e: never) => Promise<unknown> } }
+
+  /** A Bash call that raises a permission dialog, then ends as `after` says once it was answered. */
+  function askingCall(w: World, $: Engine, after: (id: string) => Promise<unknown>): Promise<unknown> {
+    w.tools.run = async e => {
+      await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'git status' } } as never)
+
+      return after(e.tool_use_id ?? '')
+    }
+
+    return $.tool.call({ tool: 'Bash', command: 'git status', tool_use_id: 'tu-5' } as never)
+  }
+
+  test('a question answered in its own dialog leaves its answers, by question, through ledger record', async ($, on) => {
+    const w = world(on)
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    const call = $.tool.call({ tool: 'AskUserQuestion', questions: TOOL_QUESTIONS, tool_use_id: 'tu-9' } as never)
+    await w.clock.settle()
+    w.dialog.answer?.({ 'Which color?': 'Red' })
+    await call
+
+    expect(ledgerRuns(w).map(r => r.argv)).toEqual([['atelier', 'kanban', 'ledger', 'record']])
+    expect(recorded(w)).toEqual([
+      { ...PLACE, question: COLOR_ASK, answer: { path: 'session', answers: ['Red'], afk_timeout_ms: null } },
+    ])
+  })
+
+  test('a question the kanban answered leaves the way the CLI said it came', async ($, on) => {
+    const answering = { exitCode: 0, stdout: '' }
+    const w = world(on, argv => {
+      if (argv[3] === 'dir') {
+        return { exitCode: 0, stdout: JSON.stringify({ dir: INBOX_DIR }) }
+      }
+
+      return argv[3] === 'take' ? answering : { exitCode: 0, stdout: JSON.stringify(BOARD) }
+    })
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    const call = $.tool.call({ tool: 'AskUserQuestion', questions: TOOL_QUESTIONS, tool_use_id: 'tu-9' } as never)
+    await w.clock.settle()
+    answering.stdout = JSON.stringify({
+      actions: [{ kind: 'answer', tool_use_id: 'tu-9', answers: ['Blue'], from: 'pane', via: 'pane' }],
+      results: [{ id: 'r1', kind: 'answer', status: 'delivered', via: 'pane' }],
+    })
+    w.inbox.files = ['r1.json']
+    await w.clock.advance(2_000)
+    await call
+
+    expect(recorded(w)).toEqual([
+      { ...PLACE, at: START + 2_000, question: COLOR_ASK, answer: { path: 'inbox', via: 'pane', answers: ['Blue'] } },
+    ])
+  })
+
+  test('a permission dialog whose tool then ran leaves its PostToolUse', async ($, on) => {
+    const w = world(on)
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await askingCall(w, $ as never, async id => {
+      await $.classic.PostToolUse({ tool_name: 'Bash', tool_input: {}, tool_response: {}, tool_use_id: id } as never)
+
+      return { result: {} }
+    })
+
+    expect(recorded(w)).toEqual([
+      { ...PLACE, permission: GIT_STATUS, answer: { path: 'session', post: 'PostToolUse', is_error: false } },
+    ])
+  })
+
+  test('a permission dialog whose tool failed after it ran leaves its PostToolUseFailure', async ($, on) => {
+    const w = world(on)
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await askingCall(w, $ as never, async id => {
+      await $.classic.PostToolUseFailure({ tool_name: 'Bash', tool_input: {}, tool_use_id: id, error: 'exit 1' } as never)
+
+      return { isError: true, result: 'exit 1' }
+    })
+
+    expect(recorded(w)).toEqual([
+      { ...PLACE, permission: GIT_STATUS, answer: { path: 'session', post: 'PostToolUseFailure', is_error: true } },
+    ])
+  })
+
+  test('a permission dialog that ended in an error without the tool running leaves just the error', async ($, on) => {
+    const w = world(on)
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await askingCall(w, $ as never, async () => ({ isError: true, result: "The user doesn't want to proceed with this tool use." }))
+
+    expect(recorded(w)).toEqual([{ ...PLACE, permission: GIT_STATUS, answer: { path: 'session', post: null, is_error: true } }])
+  })
+
+  test('a tool call that raised no permission dialog leaves nothing', async ($, on) => {
+    const w = world(on)
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await $.tool.call({ tool: 'Bash', command: 'git status', tool_use_id: 'tu-5' } as never)
+
+    expect(ledgerRuns(w)).toEqual([])
+  })
+
+  test('a permission the kanban answered leaves the way the CLI said it came, and not the run after it', async ($, on) => {
+    const w = world(on, argv => {
+      if (argv[3] === 'dir') {
+        return { exitCode: 0, stdout: JSON.stringify({ dir: INBOX_DIR }) }
+      }
+
+      if (argv[3] === 'wait-permit') {
+        return { exitCode: 0, stdout: JSON.stringify({ decision: 'allow', from: 'pane', via: 'pane' }) }
+      }
+
+      return { exitCode: 0, stdout: JSON.stringify(BOARD) }
+    })
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await $.turn.start({ text: 'go', turnId: 't-1' })
+    await askingCall(w, $ as never, async id => {
+      await $.classic.PostToolUse({ tool_name: 'Bash', tool_input: {}, tool_response: {}, tool_use_id: id } as never)
+
+      return { result: {} }
+    })
+
+    expect(recorded(w)).toEqual([
+      { ...PLACE, permission: { ...GIT_STATUS, id: `t-1-${START}` }, answer: { path: 'inbox', via: 'pane', decision: 'allow' } },
+    ])
+  })
+
+  test('a prompt while a decision is open leaves the prompt and where it came from', async ($, on) => {
+    const w = world(on)
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await $.tool.call(WRAP_UP as never)
+    await $.prompt.submit({ text: '진행', origin: { kind: 'composer' } } as never)
+    await $.prompt.submit({ text: '다음 일', origin: { kind: 'composer' } } as never)
+
+    expect(recorded(w)).toEqual([
+      { ...PLACE, decision: DECISION, answer: { path: 'session', text: '진행', origin: 'composer' } },
+    ])
+  })
+
+  test('a decide the kanban delivered leaves the way the CLI said it came', async ($, on) => {
+    const w = world(
+      on,
+      routes({
+        'inbox dir': { dir: INBOX_DIR },
+        'inbox take': {
+          actions: [{ kind: 'decide', decision_at: String(START), text: '진행', from: 'pane', via: 'terminal' }],
+          results: [{ id: 'r1', kind: 'decide', status: 'delivered', via: 'terminal' }],
+        },
+      }),
+    )
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await $.tool.call(WRAP_UP as never)
+    w.inbox.files = ['r1.json']
+    await w.clock.advance(2_000)
+
+    expect(recorded(w)).toEqual([
+      { ...PLACE, at: START + 2_000, decision: DECISION, answer: { path: 'inbox', via: 'terminal', text: '진행' } },
+    ])
+  })
+
+  test('a missing CLI loses only the entry, and the answer goes on', async ($, on) => {
+    const w = world(on, () => 'missing')
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    const call = $.tool.call({ tool: 'AskUserQuestion', questions: TOOL_QUESTIONS, tool_use_id: 'tu-9' } as never)
+    await w.clock.settle()
+    w.dialog.answer?.({ 'Which color?': 'Red' })
+    const r = await call
+
+    expect(r.result).toEqual({ questions: TOOL_QUESTIONS, answers: { 'Which color?': 'Red' } })
+    expect(ledgerRuns(w)).toHaveLength(1)
   })
 })

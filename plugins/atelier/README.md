@@ -153,6 +153,20 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   (stdin `{command}` → `{deny}`)로 확인합니다. `reply`·`permit`·`decide`·`send` 에 `--from pane` 을 붙인 호출과
   모드만 부르는 `forget`·`ledger record`·`relay-frame` 은 막습니다. 셸 낱말로 판정하므로 변수·eval·스크립트 파일로
   감싼 호출은 막지 못하고, CLI 가 없거나 실패하면 통과시킵니다.
+- **결정 장부**: 세션마다 모드가 입력 대기에 받은 답을 `atelier kanban ledger record`(stdin 에 그 대기의 기록과 답이
+  들어온 길)로 남기고, CLI 가 이 머신의 `<CLAUDE_CONFIG_DIR 또는 ~/.claude>/atelier/kanban/ledger/<YYYY-MM>.jsonl` 에
+  한 줄씩 잠금 아래 덧붙입니다. 남기는 답은 질문 화면에서 직접 고른 답(질문마다 한 건, 자리를 비운 사이 저절로 닫힌
+  것은 사람의 결정이 아님), 권한 창의 답(그 뒤 도구가 실행됐으면 허용, 실행 없이 오류로 끝났으면 "추론한 거부"),
+  결정 요청이 떠 있는 동안 들어온 다음 프롬프트(사람이 입력한 것만 사람의 결정), 그리고 inbox 로 전달된 답입니다.
+  inbox 답은 CLI 가 판정한 길로 정합니다: pane → 사람의 결정, 셸 명령(`terminal`) → 출처를 확인할 수 없는 답, 에이전트
+  → 대리. 누가 결정했는지는 어떤 인자로도 받지 않습니다.
+  - 한 건에는 결정 키, 답의 지문(정리한 답의 SHA-256 앞 128비트, 종류 무관), 그때 대신 답할 수 있는 대기였는지
+    (`proxyable`·`blocked`)가 함께 남습니다. 묻고 답한 글은 비밀처럼 보이는 값(토큰·키·비밀번호·인증 헤더·긴 무작위
+    문자열)을 `[masked]` 로 가리고 500자로 자르며, 가려서 답이 바뀐 건은 `answer_masked` 로 표시합니다.
+  - `atelier kanban ledger list [--since|--until <ms>] [--kind question|permission|decision]… [--repo] [--session]
+    [--decided-by human|proxy] [--via session|pane|terminal|agent] [--key] [--search <글>] [--limit N(기본 50, 최대 500)]`
+    은 최신순으로 읽고, 읽을 수 없는 줄은 건너뜁니다. `atelier kanban ledger prune --now <ms>` 는 180일 지난 건과,
+    전체가 50MB 를 넘으면 오래된 건부터 지웁니다.
 - **터미널에서 보기**: pane 없이 같은 보드를 `atelier kanban status` 로 읽습니다. 세션마다 모드가 기록을 쓸 때
   남기는 기록 사본(`<CLAUDE_CONFIG_DIR 또는 ~/.claude>/atelier/kanban/records/<세션>.json`)을 읽으므로 모드가 꺼진
   세션은 보이지 않고, 읽을 수 없는 사본은 그 세션만 빠집니다.

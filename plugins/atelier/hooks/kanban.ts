@@ -16,6 +16,18 @@ import {
 import { type DetailCard, type DetailState, detailBlock, newDetailState, pruneDetail, toggleSelected } from './kanban-detail'
 import { CLI_MISSING, cli, runKanban } from './kanban-cli'
 import { type InboxState, awaitPermit, deliverRequests, endPermit, findInbox } from './kanban-inbox'
+import {
+  type LedgerState,
+  type PermissionFacts,
+  askedPermission,
+  endCall,
+  newLedgerState,
+  ranCall,
+  recordDecisionPrompt,
+  recordPermit,
+  recordQuestion,
+  startCall,
+} from './kanban-ledger'
 import { NONCE_PREFIX, type Via } from './kanban-nonce'
 import {
   type Activity,
@@ -63,7 +75,8 @@ type TurnEnd = {
 }
 
 type KanbanState = InboxState &
-  AskState & {
+  AskState &
+  LedgerState & {
     detail: DetailState
     turnEnd: TurnEnd
     view: BoardView
@@ -394,6 +407,7 @@ function drawCard($: EngineInterface, s: KanbanState, els: ReturnType<EngineInte
 export function registerKanban(on: On): void {
   const s: KanbanState = {
     ...newAskState(),
+    ...newLedgerState(),
     detail: newDetailState(),
     turnEnd: { left: null, completed: false },
     view: { kind: 'loading' },
@@ -423,7 +437,10 @@ export function registerKanban(on: On): void {
 
   on('prompt.submit', async ($, e, next) => {
     if (e.command === undefined && e.isMeta !== true) {
-      await recordPrompt($, s, e.text, e.origin?.kind ?? 'unknown')
+      const origin = e.origin?.kind ?? 'unknown'
+
+      await recordDecisionPrompt($, e.text, origin)
+      await recordPrompt($, s, e.text, origin)
     }
 
     return next(e)
@@ -508,7 +525,16 @@ export function registerKanban(on: On): void {
       })
     }
 
-    return next(e)
+    startCall(s, e.tool_use_id, e.tool)
+    let r: Awaited<ReturnType<typeof next>> | null = null
+
+    try {
+      r = await next(e)
+
+      return r
+    } finally {
+      await endCall($, s, e.tool_use_id, r)
+    }
   })
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
@@ -600,11 +626,12 @@ export function registerKanban(on: On): void {
     const id = e.tool_use_id ?? `ask-${await $.clock.now()}`
     const fromKanban = awaitAnswer(s, id, e.questions)
     const context = await lastReply($)
+    const asked = askOf(e.questions, await $.clock.now())
     let via: Via | null = null
 
     await record($, s, {
       name: null,
-      update: (base, now) => ({ asks: { ...base.asks, [id]: askOf(e.questions, now) }, pending_context: context }),
+      update: base => ({ asks: { ...base.asks, [id]: asked }, pending_context: context }),
     })
 
     try {
@@ -614,10 +641,13 @@ export function registerKanban(on: On): void {
       ])
 
       if ('local' in won) {
+        await recordQuestion($, id, asked, e.questions, won)
+
         return won.local
       }
 
       via = won.answer.via
+      await recordQuestion($, id, asked, e.questions, won.answer)
 
       return { result: { questions: e.questions, answers: answersByQuestion(e.questions, won.answer.answers) } }
     } finally {
@@ -636,19 +666,18 @@ export function registerKanban(on: On): void {
     const context = isQuestion ? null : await lastReply($)
     const now = await $.clock.now()
     const id = isQuestion || s.inboxDir === null ? null : `${s.turnId ?? 'turn'}-${now}`
+    const permission: PermissionFacts | null = isQuestion
+      ? null
+      : { id, tool: e.tool_name, input: stringFields(e.tool_input), input_len: fieldLengths(e.tool_input), at: now }
+    const call = permission === null ? null : askedPermission(s, e.tool_name, permission)
 
     await record($, s, {
       name: 'classic.PermissionRequest',
       detail: e.tool_name,
-      update: () => ({
-        ...modeOf(e),
-        ...(isQuestion
-          ? {}
-          : { permission: { id, tool: e.tool_name, input: stringFields(e.tool_input), input_len: fieldLengths(e.tool_input), at: now }, pending_context: context }),
-      }),
+      update: () => ({ ...modeOf(e), ...(permission === null ? {} : { permission, pending_context: context }) }),
     })
 
-    if (id === null) {
+    if (id === null || permission === null) {
       return next(e)
     }
 
@@ -658,6 +687,7 @@ export function registerKanban(on: On): void {
       return next(e)
     }
 
+    await recordPermit($, call, permission, verdict)
     await record($, s, { name: 'kanban.answer', detail: verdict.via, update: () => ({ permission: null }) })
 
     return verdict.decision === 'allow'
@@ -673,6 +703,7 @@ export function registerKanban(on: On): void {
 
   on('classic.PostToolUse', async ($, e, next) => {
     endPermit(s)
+    ranCall(s, e.tool_use_id, 'PostToolUse')
     await record($, s, {
       name: 'classic.PostToolUse',
       detail: e.tool_name,
@@ -684,6 +715,7 @@ export function registerKanban(on: On): void {
 
   on('classic.PostToolUseFailure', async ($, e, next) => {
     endPermit(s)
+    ranCall(s, e.tool_use_id, 'PostToolUseFailure')
     await record($, s, { name: 'classic.PostToolUseFailure', detail: e.tool_name, update: () => ({ permission: null }) })
 
     return next(e)

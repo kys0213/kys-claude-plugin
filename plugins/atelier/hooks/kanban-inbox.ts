@@ -2,6 +2,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { type AskState, answerAsk, openAsks } from './kanban-ask'
 import { cli } from './kanban-cli'
+import { recordDecide } from './kanban-ledger'
 import { type Via, dropUsedNonces, leftNonces, viaOf } from './kanban-nonce'
 import { KEY_PREFIX, MAX_FIELD_CHARS, type RecordState, isRecord, record, recordPrompt } from './kanban-record'
 
@@ -82,6 +83,7 @@ async function act($: EngineInterface, s: InboxState & AskState, taken: Taken): 
   }
 
   if (taken.kind === 'decide') {
+    await recordDecide($, taken.text, viaOf(taken.via))
     await record($, s, { name: 'kanban.answer', detail: viaOf(taken.via) })
   }
 
