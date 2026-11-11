@@ -16,6 +16,7 @@ import {
 import { type DetailCard, type DetailState, detailBlock, newDetailState, pruneDetail, toggleSelected } from './kanban-detail'
 import { CLI_MISSING, cli, runKanban } from './kanban-cli'
 import { type InboxState, awaitPermit, deliverRequests, endPermit, findInbox } from './kanban-inbox'
+import { type Via, nonceKeysOf } from './kanban-nonce'
 import {
   type Activity,
   KEY_PREFIX,
@@ -170,7 +171,7 @@ async function runBoard($: EngineInterface, sessions: unknown[], width: number, 
 
 async function dropExpired($: EngineInterface, keys: string[], ids: string[]): Promise<void> {
   for (const id of ids) {
-    for (const key of [KEY_PREFIX + id, ...answerKeysOf(keys, id)]) {
+    for (const key of [KEY_PREFIX + id, ...answerKeysOf(keys, id), ...nonceKeysOf(keys, id)]) {
       await $.store.delete(key)
     }
 
@@ -596,7 +597,7 @@ export function registerKanban(on: On): void {
     const id = e.tool_use_id ?? `ask-${await $.clock.now()}`
     const fromKanban = awaitAnswer(s, id, e.questions)
     const context = await lastReply($)
-    let answered = false
+    let via: Via | null = null
 
     await record($, s, {
       name: null,
@@ -606,20 +607,24 @@ export function registerKanban(on: On): void {
     try {
       const won = await Promise.race([
         next(e).then(r => ({ local: r })),
-        fromKanban.then(answers => ({ answers })),
+        fromKanban.then(answer => ({ answer })),
       ])
 
       if ('local' in won) {
         return won.local
       }
 
-      answered = true
+      via = won.answer.via
 
-      return { result: { questions: e.questions, answers: answersByQuestion(e.questions, won.answers) } }
+      return { result: { questions: e.questions, answers: answersByQuestion(e.questions, won.answer.answers) } }
     } finally {
       s.waiters.delete(id)
       await $.store.delete(answerKey(await $.session.id(), id))
-      await record($, s, { name: answered ? 'kanban.answer' : null, update: base => withoutAsk(base, id) })
+      await record($, s, {
+        name: via === null ? null : 'kanban.answer',
+        detail: via,
+        update: base => withoutAsk(base, id),
+      })
     }
   })
 
@@ -650,9 +655,9 @@ export function registerKanban(on: On): void {
       return next(e)
     }
 
-    await record($, s, { name: 'kanban.answer', update: () => ({ permission: null }) })
+    await record($, s, { name: 'kanban.answer', detail: verdict.via, update: () => ({ permission: null }) })
 
-    return verdict === 'allow'
+    return verdict.decision === 'allow'
       ? { decision: { behavior: 'allow' as const } }
       : { decision: { behavior: 'deny' as const, message: '사람이 칸반에서 이 도구 실행을 거부했어요' } }
   })

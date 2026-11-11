@@ -14,7 +14,7 @@ use crate::kanban::commands::payload::{
     parse_answer_request, parse_bash_command, parse_sessions, parse_waits,
 };
 use crate::kanban::commands::records::{FsRecords, KanbanRecords, StatusQuery};
-use crate::kanban::commands::requests::KanbanRequests;
+use crate::kanban::commands::requests::{Answerer, KanbanRequests};
 use crate::kanban::commands::spawn::{ClaudeLauncher, GitProbe};
 use crate::kanban::core::answer::compose;
 use crate::kanban::core::bash_guard::refusal;
@@ -128,6 +128,9 @@ pub enum RequestCommand {
         /// `pane` for a person on the board or a terminal, `agent` for a model
         #[arg(long, value_parser = parse_sender)]
         from: Sender,
+        /// The pane's one-time token, carried to the answering session as given
+        #[arg(long)]
+        nonce: Option<String>,
     },
     /// Leaves the answers to one open question for the session that asked
     Reply {
@@ -142,6 +145,9 @@ pub enum RequestCommand {
         /// `pane` for a person on the board or a terminal, `agent` for a model
         #[arg(long, value_parser = parse_sender)]
         from: Sender,
+        /// The pane's one-time token, carried to the answering session as given
+        #[arg(long)]
+        nonce: Option<String>,
     },
     /// Leaves the reply to the decision a session's last turn ended on
     Decide {
@@ -155,6 +161,9 @@ pub enum RequestCommand {
         /// `pane` for a person on the board or a terminal, `agent` for a model
         #[arg(long, value_parser = parse_sender)]
         from: Sender,
+        /// The pane's one-time token, carried to the answering session as given
+        #[arg(long)]
+        nonce: Option<String>,
     },
     /// Leaves a stop for one turn in a session's inbox
     Stop {
@@ -520,19 +529,46 @@ fn run_request(command: RequestCommand) -> Value {
             request,
             decision,
             from,
-        } => requests.permit(&session, &request, &decision, from),
+            nonce,
+        } => requests.permit(
+            &session,
+            &request,
+            &decision,
+            Answerer {
+                from,
+                nonce: nonce.as_deref(),
+            },
+        ),
         RequestCommand::Reply {
             session,
             ask,
             answers,
             from,
-        } => requests.reply(&session, &ask, &answers, from),
+            nonce,
+        } => requests.reply(
+            &session,
+            &ask,
+            &answers,
+            Answerer {
+                from,
+                nonce: nonce.as_deref(),
+            },
+        ),
         RequestCommand::Decide {
             session,
             at,
             text,
             from,
-        } => requests.decide(&session, &at, &text, from),
+            nonce,
+        } => requests.decide(
+            &session,
+            &at,
+            &text,
+            Answerer {
+                from,
+                nonce: nonce.as_deref(),
+            },
+        ),
         RequestCommand::Inbox { command } => match command {
             InboxCommand::Dir { session } => requests.dir(&session),
             InboxCommand::Take {

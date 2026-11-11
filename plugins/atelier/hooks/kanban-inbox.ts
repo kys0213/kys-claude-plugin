@@ -2,6 +2,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { type AskState, answerAsk, openAsks } from './kanban-ask'
 import { cli } from './kanban-cli'
+import { type Via, viaOf } from './kanban-nonce'
 import { KEY_PREFIX, MAX_FIELD_CHARS, type RecordState, isRecord, record, recordPrompt } from './kanban-record'
 
 const REQUEST_TTL = '60s'
@@ -12,8 +13,8 @@ const MAX_PERMIT_WAITS = 900
 type Taken =
   | { kind: 'prompt'; text: string; body: string; from: string }
   | { kind: 'stop'; turn_id: string }
-  | { kind: 'answer'; tool_use_id: string; answers: string[]; from: string }
-  | { kind: 'decide'; decision_at: string; text: string; from: string }
+  | { kind: 'answer'; tool_use_id: string; answers: string[]; from: string; nonce?: unknown }
+  | { kind: 'decide'; decision_at: string; text: string; from: string; nonce?: unknown }
 
 type Result = { id: string; kind: string; status: string }
 
@@ -75,9 +76,13 @@ async function act($: EngineInterface, s: InboxState & AskState, taken: Taken): 
   }
 
   if (taken.kind === 'answer') {
-    answerAsk(s, taken.tool_use_id, taken.answers)
+    answerAsk(s, taken.tool_use_id, { answers: taken.answers, via: await viaOf($, 'answer', taken.nonce) })
 
     return
+  }
+
+  if (taken.kind === 'decide') {
+    await record($, s, { name: 'kanban.answer', detail: await viaOf($, 'decide', taken.nonce) })
   }
 
   /** The submitting plugin's own prompt.submit hooks do not see the prompt, so it is recorded here. */
@@ -152,7 +157,11 @@ export async function deliverRequests($: EngineInterface, s: InboxState & AskSta
  * Waits for the kanban answer to permission request `id` while the engine shows its own dialog.
  * Each wait is a CLI call in flight, which a hook's time budget does not count.
  */
-export async function awaitPermit($: EngineInterface, s: InboxState, id: string): Promise<'allow' | 'deny' | null> {
+export async function awaitPermit(
+  $: EngineInterface,
+  s: InboxState,
+  id: string,
+): Promise<{ decision: 'allow' | 'deny'; via: Via } | null> {
   const self = await $.session.id()
   s.permitting = id
 
@@ -178,7 +187,7 @@ export async function awaitPermit($: EngineInterface, s: InboxState, id: string)
       }
 
       if (out.decision === 'allow' || out.decision === 'deny') {
-        return out.decision
+        return { decision: out.decision, via: await viaOf($, 'permit', out.nonce) }
       }
     }
 

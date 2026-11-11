@@ -4,12 +4,25 @@
 use crate::kanban::commands::inbox::{IdSource, InboxStore, Pause};
 use crate::kanban::commands::spawn::{Launcher, RepoProbe};
 use crate::kanban::core::request::{
-    self, check_answerer, check_id, Found, Request, Sender, Taken, Waits,
+    self, check_answerer, check_id, with_nonce, Found, Nonce, Request, Sender, Taken, Waits,
 };
 use crate::kanban::core::spawn::{is_main_root, launch_args, short_id};
 use serde_json::{json, Value};
 
 const PERMIT_POLL_MS: u64 = 200;
+
+/// Who sends an answer, and the nonce the pane left with it.
+#[derive(Debug, Clone, Copy)]
+pub struct Answerer<'a> {
+    pub from: Sender,
+    pub nonce: Option<&'a str>,
+}
+
+impl From<Sender> for Answerer<'_> {
+    fn from(from: Sender) -> Self {
+        Answerer { from, nonce: None }
+    }
+}
 
 pub struct KanbanRequests<'a> {
     pub inbox: &'a dyn InboxStore,
@@ -33,22 +46,30 @@ fn taken_json(taken: &Taken) -> Value {
             tool_use_id,
             answers,
             from,
-        } => json!({
-            "kind": "answer",
-            "tool_use_id": tool_use_id,
-            "answers": answers,
-            "from": from.id(),
-        }),
+            nonce,
+        } => with_nonce(
+            json!({
+                "kind": "answer",
+                "tool_use_id": tool_use_id,
+                "answers": answers,
+                "from": from.id(),
+            }),
+            nonce.as_ref(),
+        ),
         Taken::Decide {
             decision_at,
             text,
             from,
-        } => json!({
-            "kind": "decide",
-            "decision_at": decision_at,
-            "text": text,
-            "from": from.id(),
-        }),
+            nonce,
+        } => with_nonce(
+            json!({
+                "kind": "decide",
+                "decision_at": decision_at,
+                "text": text,
+                "from": from.id(),
+            }),
+            nonce.as_ref(),
+        ),
     }
 }
 
@@ -78,10 +99,13 @@ impl KanbanRequests<'_> {
     fn queue_answer(
         &self,
         session: &str,
-        from: Sender,
-        request: impl FnOnce() -> Result<Request, String>,
+        answerer: Answerer,
+        request: impl FnOnce(Sender, Option<Nonce>) -> Result<Request, String>,
     ) -> Value {
-        self.queue(session, check_answerer(from).and_then(|()| request()))
+        let request = check_answerer(answerer.from)
+            .and_then(|()| answerer.nonce.map(Nonce::parse).transpose())
+            .and_then(|nonce| request(answerer.from, nonce));
+        self.queue(session, request)
     }
 
     pub fn send(&self, session: &str, from: Sender, from_label: Option<&str>, text: &str) -> Value {
@@ -93,17 +117,29 @@ impl KanbanRequests<'_> {
     }
 
     /// Leaves one answer per question for the open question `ask` names.
-    pub fn reply(&self, session: &str, ask: &str, answers: &[String], from: Sender) -> Value {
-        self.queue_answer(session, from, || Request::answer(ask, answers, from))
+    pub fn reply(&self, session: &str, ask: &str, answers: &[String], answerer: Answerer) -> Value {
+        self.queue_answer(session, answerer, |from, nonce| {
+            Request::answer(ask, answers, from, nonce)
+        })
     }
 
     /// Leaves the reply to the decision that `at` names.
-    pub fn decide(&self, session: &str, at: &str, text: &str, from: Sender) -> Value {
-        self.queue_answer(session, from, || Request::decide(at, text, from))
+    pub fn decide(&self, session: &str, at: &str, text: &str, answerer: Answerer) -> Value {
+        self.queue_answer(session, answerer, |from, nonce| {
+            Request::decide(at, text, from, nonce)
+        })
     }
 
-    pub fn permit(&self, session: &str, request: &str, decision: &str, from: Sender) -> Value {
-        self.queue_answer(session, from, || Request::permit(request, decision, from))
+    pub fn permit(
+        &self,
+        session: &str,
+        request: &str,
+        decision: &str,
+        answerer: Answerer,
+    ) -> Value {
+        self.queue_answer(session, answerer, |from, nonce| {
+            Request::permit(request, decision, from, nonce)
+        })
     }
 
     /// Waits up to `for_ms` for the answer to `request`, claiming it.
@@ -128,9 +164,15 @@ impl KanbanRequests<'_> {
                         Some(Request::Permit { from, .. }) if check_answerer(from).is_err() => {
                             json!({ "decision": null, "status": "refused" })
                         }
-                        Some(Request::Permit { verdict, from, .. }) => {
-                            json!({ "decision": verdict.id(), "from": from.id() })
-                        }
+                        Some(Request::Permit {
+                            verdict,
+                            from,
+                            nonce,
+                            ..
+                        }) => with_nonce(
+                            json!({ "decision": verdict.id(), "from": from.id() }),
+                            nonce.as_ref(),
+                        ),
                         _ => json!({ "decision": null, "status": "invalid" }),
                     });
                 }

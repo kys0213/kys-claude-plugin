@@ -523,3 +523,136 @@ fn unreadable_open_waits_are_refused_and_the_inbox_is_left_alone() {
     assert!(out["error"].is_string(), "{out}");
     assert_eq!(fs::read_dir(w.inbox("s-1")).expect("inbox").count(), 1);
 }
+
+#[test]
+fn a_pane_reply_carries_its_nonce_to_the_session_that_takes_it() {
+    let w = World::new();
+    w.kanban(&[
+        "reply",
+        "--session",
+        "s-1",
+        "--ask",
+        "tu-1",
+        "--answer",
+        "Blue",
+        "--from",
+        "pane",
+        "--nonce",
+        "n-1",
+    ]);
+    let taken = w.take("s-1", None, open_ask("tu-1", 1));
+    assert_eq!(
+        taken["actions"],
+        json!([{ "kind": "answer", "tool_use_id": "tu-1", "answers": ["Blue"], "from": "pane", "nonce": "n-1" }])
+    );
+}
+
+#[test]
+fn a_pane_decide_carries_its_nonce_to_the_session_that_takes_it() {
+    let w = World::new();
+    w.kanban(&[
+        "decide",
+        "--session",
+        "s-1",
+        "--at",
+        "1700",
+        "--text",
+        "네",
+        "--from",
+        "pane",
+        "--nonce",
+        "n-2",
+    ]);
+    let taken = w.take("s-1", None, open_decision(1700));
+    assert_eq!(
+        taken["actions"],
+        json!([{ "kind": "decide", "decision_at": "1700", "text": "네", "from": "pane", "nonce": "n-2" }])
+    );
+}
+
+#[test]
+fn a_pane_permit_carries_its_nonce_to_the_waiting_session() {
+    let w = World::new();
+    w.kanban(&[
+        "permit",
+        "--session",
+        "s-1",
+        "--request",
+        "p-1",
+        "--decision",
+        "allow",
+        "--from",
+        "pane",
+        "--nonce",
+        "n-3",
+    ]);
+    assert_eq!(
+        w.wait_permit("s-1", "p-1"),
+        json!({ "decision": "allow", "from": "pane", "nonce": "n-3" })
+    );
+}
+
+#[test]
+fn a_nonce_that_is_not_an_id_is_refused_before_anything_is_written() {
+    let w = World::new();
+    for args in [
+        vec![
+            "reply",
+            "--session",
+            "s-1",
+            "--ask",
+            "tu-1",
+            "--answer",
+            "a",
+            "--from",
+            "pane",
+            "--nonce",
+            "a b",
+        ],
+        vec![
+            "permit",
+            "--session",
+            "s-1",
+            "--request",
+            "p-1",
+            "--decision",
+            "allow",
+            "--from",
+            "pane",
+            "--nonce",
+            "",
+        ],
+        vec![
+            "decide",
+            "--session",
+            "s-1",
+            "--at",
+            "1700",
+            "--text",
+            "네",
+            "--from",
+            "pane",
+            "--nonce",
+            "../n",
+        ],
+    ] {
+        let out = w.kanban(&args);
+        assert!(out["error"].is_string(), "{args:?} → {out}");
+    }
+    assert!(!w.config.path().join("atelier").exists());
+}
+
+#[test]
+fn an_answer_left_in_the_inbox_with_an_unreadable_nonce_is_invalid() {
+    let w = World::new();
+    fs::create_dir_all(w.inbox("s-1")).expect("inbox");
+    fs::write(
+        w.inbox("s-1").join("1-1.json"),
+        json!({ "v": 1, "kind": "answer", "tool_use_id": "tu-1", "answers": ["Blue"], "from": "pane", "nonce": 7 })
+            .to_string(),
+    )
+    .expect("write");
+    let taken = w.take("s-1", None, open_ask("tu-1", 1));
+    assert_eq!(taken["actions"], json!([]));
+    assert_eq!(taken["results"][0]["status"], "invalid");
+}

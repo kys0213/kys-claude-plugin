@@ -32,6 +32,37 @@ impl Sender {
     }
 }
 
+/// The one-time token the pane leaves with an answer; carried, never judged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Nonce(String);
+
+impl Nonce {
+    pub fn parse(raw: &str) -> Result<Nonce, String> {
+        check_id("nonce", raw)?;
+        Ok(Nonce(raw.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// `Some(None)` when the request names none, `None` when it names one unreadably.
+    fn read(value: &Value) -> Option<Option<Nonce>> {
+        match value.get("nonce") {
+            None => Some(None),
+            Some(raw) => Nonce::parse(raw.as_str()?).ok().map(Some),
+        }
+    }
+}
+
+/// Puts `nonce` beside the other fields when there is one.
+pub fn with_nonce(mut value: Value, nonce: Option<&Nonce>) -> Value {
+    if let (Some(nonce), Some(fields)) = (nonce, value.as_object_mut()) {
+        fields.insert("nonce".to_string(), json!(nonce.as_str()));
+    }
+    value
+}
+
 /// A person's answer to a permission dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
@@ -104,18 +135,21 @@ pub enum Request {
         request_id: String,
         verdict: Verdict,
         from: Sender,
+        nonce: Option<Nonce>,
     },
     /// One answer per question of the open AskUserQuestion call it names.
     Answer {
         tool_use_id: String,
         answers: Vec<String>,
         from: Sender,
+        nonce: Option<Nonce>,
     },
     /// The reply to the decision a turn ended on, named by when it was left.
     Decide {
         decision_at: String,
         text: String,
         from: Sender,
+        nonce: Option<Nonce>,
     },
 }
 
@@ -159,7 +193,12 @@ impl Request {
         }
     }
 
-    pub fn permit(request_id: &str, verdict: &str, from: Sender) -> Result<Request, String> {
+    pub fn permit(
+        request_id: &str,
+        verdict: &str,
+        from: Sender,
+        nonce: Option<Nonce>,
+    ) -> Result<Request, String> {
         check_id("permission", request_id)?;
         let verdict = Verdict::parse(verdict)
             .ok_or_else(|| format!("--decision 은 allow 또는 deny 예요 (받은 값: {verdict})"))?;
@@ -167,10 +206,16 @@ impl Request {
             request_id: request_id.to_string(),
             verdict,
             from,
+            nonce,
         })
     }
 
-    pub fn answer(tool_use_id: &str, answers: &[String], from: Sender) -> Result<Request, String> {
+    pub fn answer(
+        tool_use_id: &str,
+        answers: &[String],
+        from: Sender,
+        nonce: Option<Nonce>,
+    ) -> Result<Request, String> {
         check_id("question", tool_use_id)?;
         if answers.is_empty() {
             return Err("답이 없어요 — 질문마다 --answer 를 하나씩 주세요".to_string());
@@ -182,15 +227,22 @@ impl Request {
                 .map(|a| check_text("답", a).map(|_| a.clone()))
                 .collect::<Result<_, _>>()?,
             from,
+            nonce,
         })
     }
 
-    pub fn decide(decision_at: &str, text: &str, from: Sender) -> Result<Request, String> {
+    pub fn decide(
+        decision_at: &str,
+        text: &str,
+        from: Sender,
+        nonce: Option<Nonce>,
+    ) -> Result<Request, String> {
         check_id("decision", decision_at)?;
         Ok(Request::Decide {
             decision_at: decision_at.to_string(),
             text: check_text("결정 답", text)?,
             from,
+            nonce,
         })
     }
 
@@ -232,35 +284,47 @@ impl Request {
                 request_id,
                 verdict,
                 from,
-            } => json!({
-                "v": VERSION,
-                "kind": "permit",
-                "request_id": request_id,
-                "decision": verdict.id(),
-                "from": from.id(),
-            }),
+                nonce,
+            } => with_nonce(
+                json!({
+                    "v": VERSION,
+                    "kind": "permit",
+                    "request_id": request_id,
+                    "decision": verdict.id(),
+                    "from": from.id(),
+                }),
+                nonce.as_ref(),
+            ),
             Request::Answer {
                 tool_use_id,
                 answers,
                 from,
-            } => json!({
-                "v": VERSION,
-                "kind": "answer",
-                "tool_use_id": tool_use_id,
-                "answers": answers,
-                "from": from.id(),
-            }),
+                nonce,
+            } => with_nonce(
+                json!({
+                    "v": VERSION,
+                    "kind": "answer",
+                    "tool_use_id": tool_use_id,
+                    "answers": answers,
+                    "from": from.id(),
+                }),
+                nonce.as_ref(),
+            ),
             Request::Decide {
                 decision_at,
                 text,
                 from,
-            } => json!({
-                "v": VERSION,
-                "kind": "decide",
-                "decision_at": decision_at,
-                "text": text,
-                "from": from.id(),
-            }),
+                nonce,
+            } => with_nonce(
+                json!({
+                    "v": VERSION,
+                    "kind": "decide",
+                    "decision_at": decision_at,
+                    "text": text,
+                    "from": from.id(),
+                }),
+                nonce.as_ref(),
+            ),
         }
     }
 
@@ -286,18 +350,21 @@ impl Request {
                     None => Sender::Pane,
                     Some(_) => from()?,
                 },
+                Nonce::read(&value)?,
             )
             .ok(),
             RequestKind::Answer => Request::answer(
                 value.get("tool_use_id")?.as_str()?,
                 &strings(value.get("answers")?)?,
                 from()?,
+                Nonce::read(&value)?,
             )
             .ok(),
             RequestKind::Decide => Request::decide(
                 value.get("decision_at")?.as_str()?,
                 value.get("text")?.as_str()?,
                 from()?,
+                Nonce::read(&value)?,
             )
             .ok(),
         }
@@ -396,12 +463,14 @@ pub enum Taken {
         tool_use_id: String,
         answers: Vec<String>,
         from: Sender,
+        nonce: Option<Nonce>,
     },
     /// Runs as a prompt, the text as typed.
     Decide {
         decision_at: String,
         text: String,
         from: Sender,
+        nonce: Option<Nonce>,
     },
 }
 
@@ -487,7 +556,8 @@ impl Taker<'_> {
                 tool_use_id,
                 answers,
                 from,
-            } => self.answer(tool_use_id, answers, from),
+                nonce,
+            } => self.answer(tool_use_id, answers, from, nonce),
             Request::Decide { decision_at, .. }
                 if self.waits.decision_at.as_deref() != Some(decision_at.as_str()) =>
             {
@@ -498,12 +568,14 @@ impl Taker<'_> {
                 decision_at,
                 text,
                 from,
+                nonce,
             } => {
                 self.prompted = true;
                 self.deliver(Taken::Decide {
                     decision_at,
                     text,
                     from,
+                    nonce,
                 })
             }
             Request::Prompt {
@@ -521,7 +593,13 @@ impl Taker<'_> {
         }
     }
 
-    fn answer(&mut self, tool_use_id: String, answers: Vec<String>, from: Sender) -> Status {
+    fn answer(
+        &mut self,
+        tool_use_id: String,
+        answers: Vec<String>,
+        from: Sender,
+        nonce: Option<Nonce>,
+    ) -> Status {
         let open = self
             .waits
             .asks
@@ -536,6 +614,7 @@ impl Taker<'_> {
                     tool_use_id,
                     answers,
                     from,
+                    nonce,
                 })
             }
         }
@@ -585,9 +664,10 @@ mod tests {
         let stop = Request::stop("t-1").expect("stop");
         assert_eq!(Request::parse(&stop.to_json().to_string()), Some(stop));
         let answers = ["Red".to_string()];
-        let answer = Request::answer("tu-1", &answers, Sender::Pane).expect("answer");
+        let nonce = Nonce::parse("n-1").ok();
+        let answer = Request::answer("tu-1", &answers, Sender::Pane, nonce).expect("answer");
         assert_eq!(Request::parse(&answer.to_json().to_string()), Some(answer));
-        let decide = Request::decide("1700", "네", Sender::Pane).expect("decide");
+        let decide = Request::decide("1700", "네", Sender::Pane, None).expect("decide");
         assert_eq!(Request::parse(&decide.to_json().to_string()), Some(decide));
     }
 

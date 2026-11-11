@@ -138,7 +138,9 @@ fn spawn_reports_what_a_failed_launch_printed() {
 #[test]
 fn a_permit_answer_is_waited_for_by_the_permission_it_names() {
     let e = Edges::default();
-    let out = e.requests().permit("s-1", "p-1", "allow", Sender::Pane);
+    let out = e
+        .requests()
+        .permit("s-1", "p-1", "allow", Sender::Pane.into());
     assert_eq!(
         out,
         json!({ "queued": { "session_id": "s-1", "id": "p-1", "kind": "permit" } })
@@ -169,7 +171,8 @@ fn waiting_for_a_permit_pauses_until_the_wait_is_over() {
 #[test]
 fn a_permit_answer_older_than_the_ttl_is_dropped() {
     let e = Edges::default();
-    e.requests().permit("s-1", "p-1", "deny", Sender::Pane);
+    e.requests()
+        .permit("s-1", "p-1", "deny", Sender::Pane.into());
     *e.inbox.age_ms.borrow_mut() = TTL + 1;
     assert_eq!(
         e.requests().wait_permit("s-1", "p-1", NOW, TTL, 2_000),
@@ -187,7 +190,7 @@ fn a_permit_needs_allow_or_deny_and_plain_ids() {
     ] {
         let out = e
             .requests()
-            .permit(session, request, decision, Sender::Pane);
+            .permit(session, request, decision, Sender::Pane.into());
         assert!(
             out["error"].is_string(),
             "{session} {request} {decision} → {out}"
@@ -217,13 +220,13 @@ fn a_reply_reaches_its_open_question_once() {
     let e = Edges::default();
     let out = e
         .requests()
-        .reply("s-1", "tu-1", &answers(&["Red"]), Sender::Pane);
+        .reply("s-1", "tu-1", &answers(&["Red"]), Sender::Pane.into());
     assert_eq!(
         out,
         json!({ "queued": { "session_id": "s-1", "id": "r1", "kind": "answer" } })
     );
     e.requests()
-        .reply("s-1", "tu-1", &answers(&["Blue"]), Sender::Pane);
+        .reply("s-1", "tu-1", &answers(&["Blue"]), Sender::Pane.into());
 
     let taken = e
         .requests()
@@ -244,7 +247,8 @@ fn a_reply_reaches_its_open_question_once() {
 #[test]
 fn a_decide_counts_as_the_one_prompt_a_take_runs() {
     let e = Edges::default();
-    e.requests().decide("s-1", "1700", "네", Sender::Pane);
+    e.requests()
+        .decide("s-1", "1700", "네", Sender::Pane.into());
     e.requests().send("s-1", Sender::Pane, None, "later");
     let taken = e
         .requests()
@@ -260,7 +264,7 @@ fn a_decide_counts_as_the_one_prompt_a_take_runs() {
 fn an_expired_answer_is_expired_before_it_is_judged() {
     let e = Edges::default();
     e.requests()
-        .reply("s-1", "tu-1", &answers(&["Red"]), Sender::Pane);
+        .reply("s-1", "tu-1", &answers(&["Red"]), Sender::Pane.into());
     *e.inbox.age_ms.borrow_mut() = TTL + 1;
     let taken = e
         .requests()
@@ -273,9 +277,11 @@ fn agent_answers_are_refused_and_nothing_is_queued() {
     let e = Edges::default();
     for out in [
         e.requests()
-            .reply("s-1", "tu-1", &answers(&["Red"]), Sender::Agent),
-        e.requests().decide("s-1", "1700", "네", Sender::Agent),
-        e.requests().permit("s-1", "p-1", "allow", Sender::Agent),
+            .reply("s-1", "tu-1", &answers(&["Red"]), Sender::Agent.into()),
+        e.requests()
+            .decide("s-1", "1700", "네", Sender::Agent.into()),
+        e.requests()
+            .permit("s-1", "p-1", "allow", Sender::Agent.into()),
     ] {
         assert!(
             out["error"]
@@ -291,6 +297,6 @@ fn agent_answers_are_refused_and_nothing_is_queued() {
 #[test]
 fn a_reply_needs_at_least_one_answer() {
     let e = Edges::default();
-    let out = e.requests().reply("s-1", "tu-1", &[], Sender::Pane);
+    let out = e.requests().reply("s-1", "tu-1", &[], Sender::Pane.into());
     assert!(out["error"].is_string(), "{out}");
 }

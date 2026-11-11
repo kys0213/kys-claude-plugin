@@ -1,6 +1,7 @@
 import type { EngineInterface } from 'claude-code'
 
-import { CLI_MISSING, queueRequest, runKanban } from './kanban-cli'
+import { CLI_MISSING, runKanban } from './kanban-cli'
+import { type Via, queuePaneAnswer } from './kanban-nonce'
 import { type AskQuestion, MAX_FIELD_CHARS } from './kanban-record'
 
 /** The store key prefix of answers left in the store; `deliverAnswers` takes them beside the inbox. */
@@ -20,7 +21,9 @@ export type CardAsk = { tool_use_id: string; questions: AskQuestion[] }
 
 export type AskCard = { session_id: string; headline: string; asks?: CardAsk[] }
 
-type Waiter = { questions: readonly ToolQuestion[]; resolve: (answers: string[]) => void }
+export type KanbanAnswer = { answers: string[]; via: Via }
+
+type Waiter = { questions: readonly ToolQuestion[]; resolve: (answer: KanbanAnswer) => void }
 
 export type AskState = {
   /** Open AskUserQuestion calls of this session, by tool_use_id, resolved by a kanban answer. */
@@ -63,7 +66,7 @@ export function answerKeysOf(keys: readonly string[], sessionId: string): string
   return keys.filter(k => k.startsWith(`${ANSWER_PREFIX}${sessionId}:`))
 }
 
-export function awaitAnswer(s: AskState, toolUseId: string, questions: readonly ToolQuestion[]): Promise<string[]> {
+export function awaitAnswer(s: AskState, toolUseId: string, questions: readonly ToolQuestion[]): Promise<KanbanAnswer> {
   return new Promise(resolve => s.waiters.set(toolUseId, { questions, resolve }))
 }
 
@@ -73,8 +76,8 @@ export function openAsks(s: AskState): { id: string; questions: readonly ToolQue
 }
 
 /** Closes open question `toolUseId` with the answers taken for it; a question no longer open is left alone. */
-export function answerAsk(s: AskState, toolUseId: string, answers: string[]): void {
-  s.waiters.get(toolUseId)?.resolve(answers)
+export function answerAsk(s: AskState, toolUseId: string, answer: KanbanAnswer): void {
+  s.waiters.get(toolUseId)?.resolve(answer)
 }
 
 /** Keys each answer by the asking call's own question, whatever the record cut. */
@@ -109,7 +112,7 @@ export async function deliverAnswers($: EngineInterface, s: AskState): Promise<v
 
     if (answers !== null) {
       await $.store.delete(key)
-      waiter.resolve(answers)
+      waiter.resolve({ answers, via: 'terminal' })
     }
   }
 }
@@ -155,7 +158,7 @@ async function sendAnswer($: EngineInterface, s: AskState, card: AskCard, ask: C
   if (r.kind === 'missing') {
     s.errors.set(key, CLI_MISSING)
   } else if (answers !== null) {
-    const refused = await queueRequest($, [
+    const refused = await queuePaneAnswer($, card.session_id, 'answer', [
       'reply',
       '--session',
       card.session_id,
