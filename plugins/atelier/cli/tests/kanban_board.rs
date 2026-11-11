@@ -561,22 +561,36 @@ fn missing_or_invalid_arguments_print_no_board() {
     }
 }
 
-fn layout_at(width: &str) -> Value {
+fn layout_with(width: &str, extra: &[&str]) -> Value {
     let now = NOW.to_string();
-    board_with(
-        &[
-            "--now",
-            &now,
-            "--stale-after",
-            "2m",
-            "--expire-after",
-            "24h",
-            "--width",
-            width,
-        ],
-        &json!({ "sessions": [] }).to_string(),
-    )["layout"]
-        .clone()
+    let mut args = vec![
+        "--now",
+        &now,
+        "--stale-after",
+        "2m",
+        "--expire-after",
+        "24h",
+        "--width",
+        width,
+    ];
+    args.extend_from_slice(extra);
+    board_with(&args, &json!({ "sessions": [] }).to_string())["layout"].clone()
+}
+
+fn layout_at(width: &str) -> Value {
+    layout_with(width, &[])
+}
+
+#[test]
+fn the_layout_is_fitted_to_the_columns_kept() {
+    assert_eq!(
+        layout_with("60", &["--column", "working", "--column", "idle"]),
+        json!({ "direction": "row", "column_width": 29, "column_gap": 1 })
+    );
+    assert_eq!(
+        layout_with("40", &["--column", "working"]),
+        json!({ "direction": "row", "column_width": 40, "column_gap": 1 })
+    );
 }
 
 #[test]

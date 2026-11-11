@@ -16,8 +16,8 @@ const EXPIRE_AFTER_MS: u64 = 24 * 60 * 60 * 1_000;
 
 pub trait RecordStore {
     fn path(&self, session: &str) -> Result<PathBuf, String>;
-    /// Every copy's contents in file-name order; refused when the directory
-    /// is not there.
+    /// Every copy's contents in file-name order; empty when no copy was
+    /// ever written.
     fn read_all(&self) -> Result<Vec<String>, String>;
     /// Succeeds when there is no copy.
     fn remove(&self, session: &str) -> Result<(), String>;
@@ -42,12 +42,16 @@ impl RecordStore for FsRecords {
 
     fn read_all(&self) -> Result<Vec<String>, String> {
         let dir = self.root.clone()?;
-        let entries = fs::read_dir(&dir).map_err(|e| {
-            format!(
-                "기록 사본 디렉터리를 읽지 못했어요 ({}): {e}",
-                dir.display()
-            )
-        })?;
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => {
+                return Err(format!(
+                    "기록 사본 디렉터리를 읽지 못했어요 ({}): {e}",
+                    dir.display()
+                ))
+            }
+        };
         let mut names: Vec<String> = entries
             .filter_map(Result::ok)
             .filter_map(|e| e.file_name().to_str().map(str::to_string))
@@ -102,7 +106,6 @@ impl KanbanRecords<'_> {
         })())
     }
 
-    /// The board of the readable copies, narrowed to the chosen columns.
     pub fn status(&self, query: &StatusQuery) -> Result<Board, String> {
         let columns = Column::parse_all(&query.columns)?;
         if let Some(session) = &query.session {

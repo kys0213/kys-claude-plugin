@@ -1,8 +1,8 @@
 mod kanban_support;
 
 use kanban_support::{
-    atelier, event, kanban_in, put_copy, record_path, session, session_with, status_in, MIN, NOW,
-    SEC,
+    atelier, event, kanban_in, put_copy, put_record, record_path, session, session_with, status_in,
+    MIN, NOW, SEC,
 };
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -29,14 +29,6 @@ fn idle(id: &str) -> Value {
     session(id, json!([event("session.start", None, MIN)]))
 }
 
-fn put(config: &TempDir, record: &Value) {
-    put_copy(
-        config.path(),
-        record["session_id"].as_str().expect("id"),
-        &record.to_string(),
-    );
-}
-
 fn ids(out: &Value) -> Vec<&str> {
     out["sessions"]
         .as_array()
@@ -49,9 +41,9 @@ fn ids(out: &Value) -> Vec<&str> {
 #[test]
 fn lists_sessions_from_the_copies_in_board_order() {
     let config = TempDir::new().unwrap();
-    put(&config, &working("w1"));
-    put(&config, &idle("i1"));
-    put(&config, &asking("a1"));
+    put_record(config.path(), &working("w1"));
+    put_record(config.path(), &idle("i1"));
+    put_record(config.path(), &asking("a1"));
 
     let out = status_in(config.path(), &["--now", &now_arg()]);
 
@@ -65,14 +57,14 @@ fn lists_sessions_from_the_copies_in_board_order() {
 #[test]
 fn a_broken_copy_drops_only_its_session() {
     let config = TempDir::new().unwrap();
-    put(&config, &working("w1"));
+    put_record(config.path(), &working("w1"));
     put_copy(config.path(), "broken", "{not json");
     put_copy(
         config.path(),
         "wrongver",
         r#"{"v":9,"session_id":"wrongver"}"#,
     );
-    put(&config, &asking("a1"));
+    put_record(config.path(), &asking("a1"));
 
     let out = status_in(config.path(), &["--now", &now_arg()]);
 
@@ -82,9 +74,9 @@ fn a_broken_copy_drops_only_its_session() {
 #[test]
 fn column_may_repeat_to_pick_several() {
     let config = TempDir::new().unwrap();
-    put(&config, &working("w1"));
-    put(&config, &idle("i1"));
-    put(&config, &asking("a1"));
+    put_record(config.path(), &working("w1"));
+    put_record(config.path(), &idle("i1"));
+    put_record(config.path(), &asking("a1"));
 
     let one = status_in(config.path(), &["--now", &now_arg(), "--column", "working"]);
     let two = status_in(
@@ -106,7 +98,7 @@ fn column_may_repeat_to_pick_several() {
 #[test]
 fn an_unknown_column_is_refused() {
     let config = TempDir::new().unwrap();
-    put(&config, &working("w1"));
+    put_record(config.path(), &working("w1"));
 
     let out = status_in(config.path(), &["--now", &now_arg(), "--column", "done"]);
 
@@ -117,8 +109,8 @@ fn an_unknown_column_is_refused() {
 #[test]
 fn a_fixed_now_gives_the_same_output() {
     let config = TempDir::new().unwrap();
-    put(&config, &working("w1"));
-    put(&config, &asking("a1"));
+    put_record(config.path(), &working("w1"));
+    put_record(config.path(), &asking("a1"));
 
     let first = status_in(config.path(), &["--now", &now_arg()]);
     let second = status_in(config.path(), &["--now", &now_arg()]);
@@ -131,13 +123,13 @@ fn a_fixed_now_gives_the_same_output() {
 #[test]
 fn a_copy_silent_for_over_a_day_is_hidden() {
     let config = TempDir::new().unwrap();
-    put(&config, &working("fresh"));
+    put_record(config.path(), &working("fresh"));
     let old = session_with(
         "old",
         json!([event("turn.start", None, 25 * 60 * MIN)]),
         json!({ "heartbeat_at": NOW - 25 * 60 * MIN }),
     );
-    put(&config, &old);
+    put_record(config.path(), &old);
 
     let out = status_in(config.path(), &["--now", &now_arg()]);
 
@@ -152,7 +144,7 @@ fn a_silent_copy_shows_as_stale() {
         json!([event("turn.start", None, 10 * MIN)]),
         json!({ "heartbeat_at": NOW - 10 * MIN }),
     );
-    put(&config, &quiet);
+    put_record(config.path(), &quiet);
 
     let out = status_in(config.path(), &["--now", &now_arg()]);
 
@@ -162,8 +154,8 @@ fn a_silent_copy_shows_as_stale() {
 #[test]
 fn session_picks_one_session() {
     let config = TempDir::new().unwrap();
-    put(&config, &working("w1"));
-    put(&config, &asking("a1"));
+    put_record(config.path(), &working("w1"));
+    put_record(config.path(), &asking("a1"));
 
     let out = status_in(config.path(), &["--now", &now_arg(), "--session", "w1"]);
 
@@ -173,8 +165,8 @@ fn session_picks_one_session() {
 #[test]
 fn text_format_prints_a_heading_per_column_and_a_line_per_session() {
     let config = TempDir::new().unwrap();
-    put(&config, &asking("abcdefgh-1234"));
-    put(&config, &working("w1"));
+    put_record(config.path(), &asking("abcdefgh-1234"));
+    put_record(config.path(), &working("w1"));
 
     let output = atelier()
         .env("CLAUDE_CONFIG_DIR", config.path())
@@ -194,18 +186,19 @@ fn text_format_prints_a_heading_per_column_and_a_line_per_session() {
 }
 
 #[test]
-fn without_a_records_directory_status_is_refused() {
+fn without_a_records_directory_status_is_an_empty_board() {
     let config = TempDir::new().unwrap();
 
     let out = status_in(config.path(), &["--now", &now_arg()]);
 
-    assert!(out["error"].is_string());
+    assert!(out["error"].is_null());
+    assert!(ids(&out).is_empty());
 }
 
 #[test]
 fn an_unknown_format_is_refused() {
     let config = TempDir::new().unwrap();
-    put(&config, &working("w1"));
+    put_record(config.path(), &working("w1"));
 
     let out = status_in(config.path(), &["--now", &now_arg(), "--format", "yaml"]);
 
@@ -236,8 +229,8 @@ fn record_path_refuses_an_id_that_leaves_the_directory() {
 #[test]
 fn forget_removes_the_copy_and_the_inbox() {
     let config = TempDir::new().unwrap();
-    put(&config, &working("w1"));
-    put(&config, &working("w2"));
+    put_record(config.path(), &working("w1"));
+    put_record(config.path(), &working("w2"));
     kanban_in(
         config.path(),
         &["send", "--session", "w1", "--from", "pane", "--text", "hi"],

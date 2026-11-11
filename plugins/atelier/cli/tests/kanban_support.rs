@@ -101,6 +101,11 @@ pub fn put_copy(config: &Path, id: &str, contents: &str) {
     std::fs::write(path, contents).expect("write copy");
 }
 
+pub fn put_record(config: &Path, record: &Value) {
+    let id = record["session_id"].as_str().expect("id");
+    put_copy(config, id, &record.to_string());
+}
+
 pub fn status_in(config: &Path, args: &[&str]) -> Value {
     let mut full = vec!["status"];
     full.extend_from_slice(args);
