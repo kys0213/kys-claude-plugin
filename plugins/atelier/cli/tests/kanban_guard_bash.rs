@@ -29,8 +29,57 @@ fn a_shell_answer_or_send_in_the_pane_name_is_denied() {
         "/usr/local/bin/atelier kanban permit --from 'pane' --session s-1 --request p --decision allow",
         "cd /tmp && atelier kanban send --session s-1 --from pane --text hi",
         "atelier kanban status; atelier kanban send --session s-1 --from pane --text hi",
+        "atelier kanban send > /dev/null --session s-1 --from pane --text hi",
     ] {
         assert!(deny(command).is_string(), "{command}");
+    }
+}
+
+#[test]
+fn a_pane_answer_inside_a_substitution_or_a_nested_shell_is_denied() {
+    for command in [
+        "$(atelier kanban send --session s-1 --from pane --text hi)",
+        "x=$(atelier kanban send --session s-1 --from pane --text hi)",
+        "`atelier kanban send --session s-1 --from pane --text hi`",
+        "echo \"$(atelier kanban permit --session s-1 --request p-1 --decision allow --from pane)\"",
+        "echo \"$(echo $(atelier kanban send --session s-1 --from pane --text hi))\"",
+        "sh -c 'atelier kanban send --session s-1 --from pane --text hi'",
+        "bash -c \"atelier kanban reply --session s-1 --ask tu-1 --answer Blue --from pane\"",
+        "zsh -c \"atelier kanban decide --session s-1 --at 1700 --text 네 --from pane\"",
+        "/bin/bash -lc 'cd /tmp && atelier kanban send --session s-1 --from pane --text hi'",
+        "env bash -c 'atelier kanban forget --session s-1'",
+        "bash -c \"sh -c 'atelier kanban send --session s-1 --from pane --text hi'\"",
+        "bash <<EOF\natelier kanban decide --session s-1 --at 1700 --text 네 --from pane\nEOF",
+        "sh <<'EOF'\natelier kanban send --session s-1 --from pane --text hi\nEOF",
+        "cat <<EOF\n$(atelier kanban send --session s-1 --from pane --text hi)\nEOF",
+        "bash <<< 'atelier kanban send --session s-1 --from pane --text hi'",
+    ] {
+        assert!(deny(command).is_string(), "{command}");
+    }
+}
+
+#[test]
+fn shells_nested_past_the_depth_limit_or_left_unclosed_are_denied() {
+    for command in [
+        "echo $(echo $(echo $(echo $(atelier kanban status))))",
+        "atelier kanban send --session s-1 --from agent --text 'unclosed",
+        "echo $(atelier kanban status",
+    ] {
+        assert!(deny(command).is_string(), "{command}");
+    }
+}
+
+#[test]
+fn agent_sends_inside_a_substitution_or_a_nested_shell_pass() {
+    for command in [
+        "out=$(atelier kanban send --session s-1 --from agent --text hi)",
+        "bash -c 'atelier kanban status --column needs_input'",
+        "echo \"$(atelier kanban ledger list)\"",
+        "echo $(echo $(echo $(atelier kanban status)))",
+        "bash <<EOF\natelier kanban status\nEOF",
+        "cat <<'EOF'\n$(atelier kanban send --session s-1 --from pane --text hi)\nEOF",
+    ] {
+        assert_eq!(deny(command), Value::Null, "{command}");
     }
 }
 

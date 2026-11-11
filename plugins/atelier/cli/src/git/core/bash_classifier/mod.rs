@@ -7,7 +7,7 @@ mod analyzer;
 mod args;
 mod files;
 mod git;
-mod interpreters;
+pub(crate) mod interpreters;
 pub(crate) mod lexer;
 mod wrappers;
 
