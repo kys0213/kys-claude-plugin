@@ -13,7 +13,15 @@ use crate::git::core::bash_classifier::lexer::{
 
 const KANBAN: &str = "kanban";
 const AS_PERSON: &[&str] = &["reply", "permit", "decide", "send"];
-const MOD_ONLY: &[&[&str]] = &[&["forget"], &["relay-frame"], &["ledger", "record"]];
+const MOD_ONLY: &[&[&str]] = &[
+    &["forget"],
+    &["relay-frame"],
+    &["ledger", "record"],
+    &["inbox", "take"],
+    &["inbox", "wait-permit"],
+    &["inbox", "dir"],
+    &["inbox", "clear"],
+];
 const SCRIPT_READERS: &[&str] = &["source", "."];
 /// Scripts nested deeper than this are refused unread.
 const MAX_DEPTH: usize = 3;

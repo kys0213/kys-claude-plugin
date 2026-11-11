@@ -159,6 +159,24 @@ fn the_mod_only_commands_are_denied() {
 }
 
 #[test]
+fn the_inbox_commands_only_the_mode_runs_are_denied() {
+    for command in [
+        "atelier kanban inbox take --session s-1 --now 1 --ttl 60s",
+        "atelier kanban inbox take --session s-1 --now 1 --ttl 60s --waits-stdin < waits.json",
+        "atelier kanban inbox wait-permit --session s-1 --request p-1 --now 1 --ttl 60s --for 2s",
+        "atelier kanban inbox dir --session s-1",
+        "atelier kanban inbox clear --session s-1",
+        "bash -c 'atelier kanban inbox take --session s-1 --now 1 --ttl 60s'",
+    ] {
+        let reason = deny(command);
+        assert!(
+            reason.as_str().is_some_and(|r| r.contains("모드만")),
+            "{command} → {reason}"
+        );
+    }
+}
+
+#[test]
 fn agent_sends_reads_and_other_commands_pass() {
     for command in [
         "atelier kanban send --session s-1 --from agent --text 'Fix lint'",
