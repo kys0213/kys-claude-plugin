@@ -34,7 +34,11 @@ Epic 2 ([#766](https://github.com/kys0213/kys-claude-plugin/issues/766))에서 c
 /atelier:workflow     # 컨벤션 scaffold·.claude/rules 설계·설계 원칙 룰 설치·워크플로우 리뷰
 /atelier:orchestrator # 위임/병렬 분해·worktree 격리·머지 조정 (기본 자율 주행, HITL opt-out)
 /atelier:grill        # 설계를 대화로 생성(발산→수렴)하거나 이미 있는 계획을 심문 (빈틈·가정 드러내기)
+/atelier:kanban-delegate # 칸반 위임 세션에서 다른 세션의 입력 대기를 선례로 대신 답하거나 사용자에게 물어 전달, 위임 보고
 ```
+
+`kanban-delegate` 는 성향 프로필의 근거로 suggest-workflow 의 인사이트·지난 대화 검색을 쓰므로 `plugin.json` 에
+`dependencies: ["suggest-workflow"]` 를 선언합니다. suggest-workflow 가 없거나 색인이 비면 그 근거 없이 동작합니다.
 
 ### 유지 command (deliberate 진입점)
 
@@ -251,6 +255,14 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   - 일일 보고: `kanban_report_at`(플러그인 설정, 기본 `18:00`, 로컬 시각) 이후 장부에 보고가 없으면 `report_due` 입니다. `HH:MM` 이 아니면 보고만 끄고 깨우기는 계속하며, 이유(`report_at_error`)를 toast 로 한 번 알립니다.
     보고를 낸 뒤 모드가 `atelier kanban delegate report --now <ms>` 로 남기고 `ledger prune` 을 부릅니다. 그 시각에 위임
     세션이 없었으면 다음에 위임 세션이 살아 있을 때 한 번 냅니다. 보고 내용은 `kanban-delegate` skill 이 씁니다.
+  - 메인 에이전트(`kanban-delegate` skill): `[칸반 위임]` 프롬프트를 받으면 대기마다 `status --session` 으로 `wait` 를 읽고,
+    `proxyable` 이고 결정 키마다 `ledger match` 가 `eligible`·`act` 이면 선례 답(`match.answer`) 그대로 `--precedent` 로 대신
+    답합니다. 결정 요청, `proxyable` 이 아닌 대기, 지켜보기 단계는 메인 대화에서 대기 표지를 첫 줄에 둔 AskUserQuestion 으로
+    묻고(지켜보기에서 선례가 있으면 추천 없이, 그 밖은 추천을 첫 선택지로), 사용자의 답을 `wait.relays` 의 id 로 `--relay`
+    전달합니다. 사용자가 대리 답을 뒤집으면 `ledger revoke` 를 남깁니다. 위임 켜기·올리기는 사용자가 직접 입력하도록 안내만 합니다.
+  - 성향 프로필: 추천 근거로만 쓰는 머신 로컬 파일 `<CLAUDE_CONFIG_DIR 또는 ~/.claude>/atelier/kanban/profile.md` 입니다.
+    장부의 사람 결정, 사용자 전역·메인 레포 지침과 자동 메모리, suggest-workflow 인사이트·지난 대화에서 만들고(worker 레포
+    지침은 제외), 바꿀 것은 일일 보고에 제안으로만 실어 사용자가 받아들인 것만 반영합니다.
   - 받는 세션은 마지막 inbox 결과의 출처(`via`)를 기록에 남기고(권한 답이 버려졌을 때도), 위임 세션은 그중 메인 에이전트의
     답이 위임을 켠 뒤 버려진 것만 `전달 실패` 로 봅니다.
   - 규격: [`spec/concerns/kanban-delegate.md`](spec/concerns/kanban-delegate.md)
