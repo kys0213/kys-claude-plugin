@@ -8,7 +8,8 @@ const MAX_FIRST_PROMPT_CHARS = 500
 const MAX_PROMPT_CHARS = 1_000
 const MAX_PROMPTS = 5
 
-export type KanbanEvent = { name: string; detail: string | null; at: number }
+/** `agent` marks an event a subagent's or teammate's loop raised. */
+export type KanbanEvent = { name: string; detail: string | null; at: number; agent?: true }
 
 export type AskQuestion = {
   question: string
@@ -73,6 +74,8 @@ export type Entry = {
   /** The event to append; `null` only refreshes the heartbeat. */
   name: string | null
   detail?: string | null
+  /** Whether a subagent's or teammate's loop raised the event. */
+  byAgent?: boolean
   set?: Fields
   /** Fills these fields only while they are still `null`. */
   fill?: Fields
@@ -143,7 +146,10 @@ async function writeRecord($: EngineInterface, entry: Entry): Promise<void> {
   const appends = entry.name !== null && (entry.onlyIfNew !== true || prior === null)
   const kept = updated.events ?? base.events
   const events = appends
-    ? [...kept, { name: entry.name as string, detail: entry.detail ?? null, at: now }].slice(-MAX_EVENTS)
+    ? [
+        ...kept,
+        { name: entry.name as string, detail: entry.detail ?? null, at: now, ...(entry.byAgent === true ? { agent: true as const } : {}) },
+      ].slice(-MAX_EVENTS)
     : kept
 
   /** Only `set` keeps `ended_reason`: a session that still records after its end is live again. */

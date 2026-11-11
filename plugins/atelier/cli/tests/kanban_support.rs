@@ -66,6 +66,11 @@ pub fn event(name: &str, detail: Option<&str>, ago: u64) -> Value {
     json!({ "name": name, "detail": detail, "at": NOW - ago })
 }
 
+/// An event a subagent's or teammate's loop raised in the session.
+pub fn agent_event(name: &str, detail: Option<&str>, ago: u64) -> Value {
+    json!({ "name": name, "detail": detail, "at": NOW - ago, "agent": true })
+}
+
 pub fn session_with(id: &str, events: Value, extra: Value) -> Value {
     let mut record = session(id, events);
     for (key, value) in extra.as_object().expect("extra fields") {
