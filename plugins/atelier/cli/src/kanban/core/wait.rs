@@ -10,7 +10,7 @@ use super::mask::mask;
 use super::matchkey::{decision_key, permission_key, permission_target, question_key, sentence};
 use super::progress::first_field;
 use super::question::{Ask, Question};
-use super::text::fold;
+use super::text::{fold, js_len};
 
 /// Why a wait is not one a precedent may answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,9 +155,8 @@ fn irreversible<'a>(texts: impl IntoIterator<Item = &'a str>) -> bool {
     })
 }
 
-/// The mod cuts by UTF-16 code units, as JavaScript counts a string.
 fn was_cut(stored: &str, original: u64) -> bool {
-    (stored.encode_utf16().count() as u64) < original
+    js_len(stored) < original
 }
 
 fn question_cut(ask: &Ask, index: usize, question: &Question) -> bool {
@@ -222,6 +221,15 @@ fn permission_cut(ask: &PermissionAsk) -> bool {
     fields_cut || unrecorded
 }
 
+/// What a permission wait is shown as, `<tool>: <its first wait field>`, and
+/// the name of that field.
+pub fn permission_line(tool: &str, input: &[(String, String)]) -> (String, Option<&'static str>) {
+    match first_field(input, &WAIT_FIELDS) {
+        Some((field, value)) => (format!("{tool}: {value}"), Some(field)),
+        None => (tool.to_string(), None),
+    }
+}
+
 fn permission_wait(
     ask: &PermissionAsk,
     place: &Place,
@@ -259,10 +267,7 @@ fn permission_wait(
     add_if(blocked, key.is_none(), Blocked::NoKey);
     Subject::Permission(PermissionWait {
         tool: tool.to_string(),
-        target: match first_field(input, &WAIT_FIELDS) {
-            Some((_, value)) => format!("{tool}: {value}"),
-            None => tool.to_string(),
-        },
+        target: permission_line(tool, input).0,
         truncated,
         key_label: target.map(|target| format!("{tool} {target}")),
         key,

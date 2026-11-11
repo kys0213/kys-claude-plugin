@@ -51,6 +51,12 @@ pub fn strip_controls(raw: &str) -> String {
     out
 }
 
+/// The length of `text` as JavaScript counts a string, in UTF-16 code units;
+/// the mod cuts recorded texts by it.
+pub fn js_len(text: &str) -> u64 {
+    text.encode_utf16().count() as u64
+}
+
 /// Cuts `text` to `max` chars, the last one an ellipsis when it was longer.
 pub fn cut(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
@@ -61,7 +67,8 @@ pub fn cut(text: &str, max: usize) -> String {
     out
 }
 
-const MARKER_WORD: &str = "kanban-wait";
+/// The word after `[` that opens a wait marker.
+pub const MARKER_WORD: &str = "kanban-wait";
 
 /// Every `[kanban-wait`, in any ASCII case, with its bracket made full-width
 /// (`［`) so it no longer reads as a wait marker.

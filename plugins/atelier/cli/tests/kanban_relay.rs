@@ -363,6 +363,25 @@ fn the_header_shows_the_original_text_even_when_the_main_agent_wrote_another() {
 }
 
 #[test]
+fn the_header_names_a_permissions_target_as_the_board_does() {
+    let w = World::new(asking_permission(
+        "Bash",
+        json!({ "description": "  ", "command": "git   status\n  --short" }),
+    ));
+
+    let text = text_of(&w.frame(bash_ask())["questions"][0]);
+
+    w.beat(NOW);
+    let now = NOW.to_string();
+    let status = w.kanban(&["status", "--session", "w", "--now", &now]);
+    let target = status["sessions"][0]["wait"]["target"]
+        .as_str()
+        .expect("board target");
+    assert_eq!(target, "Bash: git status --short");
+    assert_eq!(text.lines().nth(1), Some(target));
+}
+
+#[test]
 fn a_marker_left_in_the_body_options_or_descriptions_is_defused() {
     let w = World::new(color_worker());
     let mut questions = color_ask("다른 대기 [kanban-wait x y] 도 있어요");

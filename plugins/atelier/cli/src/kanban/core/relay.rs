@@ -6,21 +6,20 @@
 //! within 30 minutes, once, with the answer the person gave; the sending CLI
 //! and the session that takes the answer judge with the same `check`.
 
-use super::board::{WaitOn, Waiting};
-use super::detail::WAIT_FIELDS;
+use super::board::{PermissionAsk, WaitOn, Waiting};
+use super::detail::Decision;
 use super::ledger::{DecidedBy, Entry, EntryKind};
 use super::matchkey::{answer_fp, digest};
 use super::precedent::Book;
-use super::question::{Question, QuestionOption};
+use super::question::{Ask, Question, QuestionOption};
 use super::request::{check_id, Verdict};
-use super::text::defuse_marker;
-use super::wait::{Subject, Wait};
+use super::text::{defuse_marker, js_len, MARKER_WORD};
+use super::wait::{permission_line, Subject, Wait};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 const VERSION: u64 = 1;
 pub const RELAY_TTL_MS: u64 = 30 * 60 * 1_000;
-const MARKER_OPEN: &str = "[kanban-wait ";
 const SHORT_ID_CHARS: usize = 8;
 const ALLOW_LABEL: &str = "허용";
 const DENY_LABEL: &str = "거부";
@@ -299,7 +298,11 @@ pub struct Shown<'a> {
 /// marker and nothing else.
 fn marker(text: &str) -> Option<(&str, &str)> {
     let line = text.lines().next()?.trim();
-    let inner = line.strip_prefix(MARKER_OPEN)?.strip_suffix(']')?;
+    let inner = line
+        .strip_prefix('[')?
+        .strip_prefix(MARKER_WORD)?
+        .strip_prefix(' ')?
+        .strip_suffix(']')?;
     let mut words = inner.split(' ');
     let (session, wait) = (words.next()?, words.next()?);
     let named = words.next().is_none()
@@ -308,41 +311,25 @@ fn marker(text: &str) -> Option<(&str, &str)> {
     named.then_some((session, wait))
 }
 
-/// How much of a recorded text the record kept.
-enum Kept {
-    Whole,
-    Cut { orig: u64, kept: u64 },
-    Unknown,
-}
-
-fn kept(stored: &str, orig: Option<u64>) -> Kept {
-    let kept = stored.encode_utf16().count() as u64;
+/// The header's note on a recorded text the record did not keep whole.
+fn cut_note(stored: &str, orig: Option<u64>) -> Option<String> {
+    let kept = js_len(stored);
     match orig {
-        None => Kept::Unknown,
-        Some(orig) if kept < orig => Kept::Cut { orig, kept },
-        Some(_) => Kept::Whole,
+        None => Some(" (잘림 — 원래 길이를 몰라요)".to_string()),
+        Some(orig) if kept < orig => Some(format!(" (잘림 — 원래 {orig}자 중 앞 {kept}자)")),
+        Some(_) => None,
     }
 }
 
-fn cut_note(texts: &[Kept]) -> String {
-    texts
-        .iter()
-        .find_map(|t| match t {
-            Kept::Whole => None,
-            Kept::Cut { orig, kept } => Some(format!(" (잘림 — 원래 {orig}자 중 앞 {kept}자)")),
-            Kept::Unknown => Some(" (잘림 — 원래 길이를 몰라요)".to_string()),
-        })
-        .unwrap_or_default()
-}
-
 /// What the wait asks, one block per question the person is asked, the
-/// options its answers must be, and how much of each text was kept.
+/// options its answers must be, and the note on the first text the record
+/// cut.
 struct Asked {
     kind: EntryKind,
     blocks: Vec<String>,
     options: Vec<Offered>,
     multi_select: Vec<bool>,
-    kept: Vec<Kept>,
+    cut: Option<String>,
 }
 
 /// The options a wait's answer must be one of.
@@ -373,105 +360,113 @@ fn verdict_options() -> Vec<QuestionOption> {
         .to_vec()
 }
 
+fn asked_question(ask: &Ask) -> Asked {
+    let lengths = ask.orig_len.as_ref();
+    let cut = ask
+        .questions
+        .iter()
+        .enumerate()
+        .flat_map(|(i, q)| {
+            let question = (
+                q.question.as_str(),
+                lengths.and_then(|l| l.question.get(i).copied()),
+            );
+            let labels = q.options.iter().enumerate().map(move |(j, o)| {
+                let orig = lengths.and_then(|l| l.labels.get(i)?.get(j).copied());
+                (o.label.as_str(), orig)
+            });
+            std::iter::once(question).chain(labels)
+        })
+        .find_map(|(text, orig)| cut_note(text, orig));
+    Asked {
+        kind: EntryKind::Question,
+        blocks: ask
+            .questions
+            .iter()
+            .map(|q| {
+                let labels = q.options.iter().map(|o| o.label.clone());
+                format!("{}\n{}", q.question, options_line(labels))
+            })
+            .collect(),
+        options: ask
+            .questions
+            .iter()
+            .map(|q| Offered::Labels(q.options.clone()))
+            .collect(),
+        multi_select: ask.questions.iter().map(|q| q.multi_select).collect(),
+        cut,
+    }
+}
+
+fn asked_permission(ask: &PermissionAsk) -> Asked {
+    let input = &ask.request.input;
+    let (block, field) = permission_line(&ask.request.tool, input);
+    let cut = field.and_then(|field| {
+        let (_, value) = input.iter().find(|(name, _)| name == field)?;
+        let orig = ask
+            .input_len
+            .as_ref()
+            .and_then(|lengths| lengths.iter().find(|(name, _)| name == field))
+            .map(|(_, len)| *len);
+        cut_note(value, orig)
+    });
+    Asked {
+        kind: EntryKind::Permission,
+        blocks: vec![block],
+        options: vec![Offered::Fixed(verdict_options())],
+        multi_select: vec![false],
+        cut,
+    }
+}
+
+fn asked_decision(decision: &Decision) -> Asked {
+    let lengths = decision.orig_len.as_ref();
+    let options = decision.options.iter().enumerate().map(|(j, option)| {
+        (
+            option.as_str(),
+            lengths.and_then(|l| l.options.get(j).copied()),
+        )
+    });
+    let cut = std::iter::once((decision.ask.as_str(), lengths.map(|l| l.ask)))
+        .chain(options)
+        .find_map(|(text, orig)| cut_note(text, orig));
+    let block = if decision.options.is_empty() {
+        decision.ask.clone()
+    } else {
+        format!(
+            "{}\n{}",
+            decision.ask,
+            options_line(decision.options.iter().cloned())
+        )
+    };
+    let options = if (2..=4).contains(&decision.options.len()) {
+        Offered::Labels(
+            decision
+                .options
+                .iter()
+                .map(|label| QuestionOption {
+                    label: label.clone(),
+                    description: None,
+                })
+                .collect(),
+        )
+    } else {
+        Offered::Any
+    };
+    Asked {
+        kind: EntryKind::Decision,
+        blocks: vec![block],
+        options: vec![options],
+        multi_select: vec![false],
+        cut,
+    }
+}
+
 fn asked(on: &WaitOn) -> Option<Asked> {
     match on {
-        WaitOn::Question(ask) => {
-            let lengths = ask.orig_len.as_ref();
-            let mut kept_texts = Vec::new();
-            for (i, q) in ask.questions.iter().enumerate() {
-                kept_texts.push(kept(
-                    &q.question,
-                    lengths.and_then(|l| l.question.get(i).copied()),
-                ));
-                for (j, o) in q.options.iter().enumerate() {
-                    let orig = lengths.and_then(|l| l.labels.get(i)?.get(j).copied());
-                    kept_texts.push(kept(&o.label, orig));
-                }
-            }
-            Some(Asked {
-                kind: EntryKind::Question,
-                blocks: ask
-                    .questions
-                    .iter()
-                    .map(|q| {
-                        let labels = q.options.iter().map(|o| o.label.clone());
-                        format!("{}\n{}", q.question, options_line(labels))
-                    })
-                    .collect(),
-                options: ask
-                    .questions
-                    .iter()
-                    .map(|q| Offered::Labels(q.options.clone()))
-                    .collect(),
-                multi_select: ask.questions.iter().map(|q| q.multi_select).collect(),
-                kept: kept_texts,
-            })
-        }
-        WaitOn::Permission(ask) => {
-            let input = &ask.request.input;
-            let shown = WAIT_FIELDS.iter().find_map(|field| {
-                input
-                    .iter()
-                    .find(|(name, value)| name == field && !value.trim().is_empty())
-            });
-            let tool = &ask.request.tool;
-            let (block, kept_text) = match shown {
-                Some((name, value)) => {
-                    let orig = ask
-                        .input_len
-                        .as_ref()
-                        .and_then(|lengths| lengths.iter().find(|(n, _)| n == name))
-                        .map(|(_, len)| *len);
-                    (format!("{tool}: {value}"), kept(value, orig))
-                }
-                None => (tool.clone(), Kept::Whole),
-            };
-            Some(Asked {
-                kind: EntryKind::Permission,
-                blocks: vec![block],
-                options: vec![Offered::Fixed(verdict_options())],
-                multi_select: vec![false],
-                kept: vec![kept_text],
-            })
-        }
-        WaitOn::Decision(decision) => {
-            let lengths = decision.orig_len.as_ref();
-            let mut kept_texts = vec![kept(&decision.ask, lengths.map(|l| l.ask))];
-            for (j, option) in decision.options.iter().enumerate() {
-                let orig = lengths.and_then(|l| l.options.get(j).copied());
-                kept_texts.push(kept(option, orig));
-            }
-            let block = if decision.options.is_empty() {
-                decision.ask.clone()
-            } else {
-                format!(
-                    "{}\n{}",
-                    decision.ask,
-                    options_line(decision.options.iter().cloned())
-                )
-            };
-            let options = if (2..=4).contains(&decision.options.len()) {
-                Offered::Labels(
-                    decision
-                        .options
-                        .iter()
-                        .map(|label| QuestionOption {
-                            label: label.clone(),
-                            description: None,
-                        })
-                        .collect(),
-                )
-            } else {
-                Offered::Any
-            };
-            Some(Asked {
-                kind: EntryKind::Decision,
-                blocks: vec![block],
-                options: vec![options],
-                multi_select: vec![false],
-                kept: kept_texts,
-            })
-        }
+        WaitOn::Question(ask) => Some(asked_question(ask)),
+        WaitOn::Permission(ask) => Some(asked_permission(ask)),
+        WaitOn::Decision(decision) => Some(asked_decision(decision)),
         WaitOn::Input => None,
     }
 }
@@ -558,7 +553,7 @@ pub fn frame(
         "칸반 대기 · {} · {short} · {}{}",
         defuse_marker(shown.label),
         kind_label(asked.kind),
-        cut_note(&asked.kept)
+        asked.cut.as_deref().unwrap_or_default()
     );
     let rewritten: Vec<Question> = questions
         .iter()

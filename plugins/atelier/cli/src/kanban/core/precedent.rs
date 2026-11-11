@@ -14,7 +14,7 @@ use super::prompt::decides_as_person;
 use super::question::{Ask, AskLengths, Question};
 use super::relay::{Relay, RelayUse};
 use super::request::{check_id, Verdict};
-use super::text::cut;
+use super::text::{cut, js_len};
 use super::wait::{derive, Place, Subject, Wait};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -699,10 +699,6 @@ impl SessionPlace {
             permission_mode: self.permission_mode.as_deref(),
         }
     }
-}
-
-fn js_len(text: &str) -> u64 {
-    text.encode_utf16().count() as u64
 }
 
 fn whole(on: WaitOn, place: &SessionPlace, paths: &dyn RealPaths) -> Wait {
