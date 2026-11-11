@@ -25,14 +25,23 @@ pub fn sentence(raw: &str) -> String {
         .to_string()
 }
 
-fn key(kind: &str, parts: &[&str]) -> String {
+/// The first `bytes` bytes of the SHA-256 of the parts joined, in hex.
+pub fn digest(parts: &[&str], bytes: usize) -> String {
     let joined = parts.join(&PART.to_string());
-    let digest = Sha256::digest(joined.as_bytes());
-    let hex: String = digest[..KEY_BYTES]
+    Sha256::digest(joined.as_bytes())[..bytes]
         .iter()
         .map(|b| format!("{b:02x}"))
-        .collect();
-    format!("{kind}1:{hex}")
+        .collect()
+}
+
+fn key(kind: &str, parts: &[&str]) -> String {
+    format!("{kind}1:{}", digest(parts, KEY_BYTES))
+}
+
+/// One answer's fingerprint: the same for answers that read the same as a
+/// `sentence`, whatever the kind of wait.
+pub fn answer_fp(answer: &str) -> String {
+    digest(&[&sentence(answer)], KEY_BYTES)
 }
 
 fn label_set<'a>(labels: impl Iterator<Item = &'a str>) -> String {

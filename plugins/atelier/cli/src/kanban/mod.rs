@@ -9,6 +9,8 @@ pub mod commands;
 pub mod core;
 
 use crate::kanban::commands::inbox::{ClockIds, FsInbox, ThreadPause};
+use crate::kanban::commands::ledger::{KanbanLedger, ListArgs};
+use crate::kanban::commands::ledger_store::FsLedger;
 use crate::kanban::commands::paths::FsPaths;
 use crate::kanban::commands::payload::{
     parse_answer_request, parse_bash_command, parse_pane_nonces, parse_sessions, parse_waits,
@@ -96,8 +98,27 @@ pub enum Commands {
     Answer,
     /// The Bash tool's input on stdin → why a model may not run it, if it may not
     GuardBash,
+    /// The decisions taken for this machine's waits
+    Ledger {
+        #[command(subcommand)]
+        command: LedgerCommand,
+    },
     #[command(flatten)]
     Request(RequestCommand),
+}
+
+#[derive(Subcommand)]
+pub enum LedgerCommand {
+    /// What a session saw of one answer it took, on stdin → its entries
+    Record,
+    /// Entries, newest first
+    List(Box<ListArgs>),
+    /// Drops entries older than 180 days, then the oldest past 50 MB
+    Prune {
+        /// Current time, unix milliseconds
+        #[arg(long)]
+        now: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -512,6 +533,19 @@ fn run_status(
     }
 }
 
+fn run_ledger(command: LedgerCommand) -> Value {
+    let store = FsLedger::from_env();
+    let ledger = KanbanLedger {
+        store: &store,
+        paths: &FsPaths,
+    };
+    match command {
+        LedgerCommand::Record => ledger.record(&read_stdin_raw()),
+        LedgerCommand::List(args) => ledger.list(*args),
+        LedgerCommand::Prune { now } => ledger.prune(now),
+    }
+}
+
 fn run_request(command: RequestCommand) -> Value {
     let inbox = FsInbox::from_env();
     let requests = KanbanRequests {
@@ -672,6 +706,7 @@ pub fn run(cli: Cli) -> i32 {
             };
             println!("{out}");
         }
+        Commands::Ledger { command } => println!("{}", run_ledger(command)),
         Commands::Request(command) => println!("{}", run_request(command)),
     }
     0

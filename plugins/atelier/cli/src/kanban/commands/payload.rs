@@ -1,21 +1,23 @@
 //! Stdin payloads: `kanban board` takes `{"sessions": [<v1 record>, ...]}`,
 //! `kanban answer` takes `{"questions": [...], "picks": [...]}`, `inbox take`
 //! what the session waits on and the nonces the pane left for it,
-//! `inbox wait-permit` those nonces, `guard-bash` the Bash tool's input. A record
-//! this version cannot read is dropped here, before the board sees it.
+//! `inbox wait-permit` those nonces, `guard-bash` the Bash tool's input,
+//! `ledger record` what a mod knows of one answer. A record this version cannot
+//! read is dropped here, before the board sees it.
 //!
 //! The field readers answer `None` for a field of the wrong type, which drops
 //! the record, and read an absent field the same as `null`.
 
 use crate::kanban::core::answer::Pick;
 use crate::kanban::core::background::{AgentFact, AgentStatus};
-use crate::kanban::core::board::{Event, SessionFact};
+use crate::kanban::core::board::{Event, PermissionAsk, SessionFact};
 use crate::kanban::core::detail::{Decision, DecisionLengths, Delivery, DeliveryStatus};
+use crate::kanban::core::ledger::{Answered, DecisionBy, Facts, PermitBy, QuestionBy};
 use crate::kanban::core::progress::{Activity, ItemStatus, WorkItem};
 use crate::kanban::core::prompt::PromptFact;
 use crate::kanban::core::question::{Ask, AskLengths, Question, QuestionOption};
 use crate::kanban::core::request::{
-    LeftNonce, Nonce, OpenAsk, PaneNonces, RequestKind, Status, Waits,
+    check_id, LeftNonce, Nonce, OpenAsk, PaneNonces, RequestKind, Status, Verdict, Via, Waits,
 };
 use serde_json::{Map, Value};
 
@@ -336,6 +338,173 @@ pub fn parse_bash_command(raw: &str) -> Result<String, String> {
         .and_then(Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| "stdin has no `command` string".to_string())
+}
+
+/// What `ledger record` takes: when, the session and where it runs, the wait
+/// as its record keeps it under `question`, `permission` or `decision`, and
+/// `answer`, how the answer came in. Who decided is not read from it.
+pub fn parse_ledger_facts(raw: &str) -> Result<Facts, String> {
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    let at = value
+        .get("at")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "stdin has no `at` time".to_string())?;
+    let session = value
+        .get("session")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "stdin has no `session`".to_string())?;
+    check_id("session", session)?;
+    let cwd = value
+        .get("cwd")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "stdin has no `cwd`".to_string())?;
+    let repo_root = nullable_string(&value, "repo_root")
+        .ok_or_else(|| "`repo_root` is not a string".to_string())?;
+    let permission_mode = nullable_string(&value, "permission_mode")
+        .ok_or_else(|| "`permission_mode` is not a string".to_string())?;
+    let answer = value
+        .get("answer")
+        .filter(|a| a.is_object())
+        .ok_or_else(|| "stdin has no `answer` object".to_string())?;
+    let way = Way::read(answer)?;
+    let waits: Vec<&str> = ["question", "permission", "decision"]
+        .into_iter()
+        .filter(|kind| !matches!(value.get(*kind), None | Some(Value::Null)))
+        .collect();
+    let answered = match waits.as_slice() {
+        ["question"] => parse_answered_question(&value["question"], answer, way),
+        ["permission"] => parse_answered_permission(&value["permission"], answer, way),
+        ["decision"] => parse_answered_decision(&value["decision"], answer, way),
+        _ => Err(
+            "stdin names no wait, or more than one: give one of `question`, `permission`, `decision`"
+                .to_string(),
+        ),
+    }?;
+    Ok(Facts {
+        at,
+        session: session.to_string(),
+        repo_root,
+        cwd: cwd.to_string(),
+        permission_mode,
+        answered,
+    })
+}
+
+/// How an answer came in: the asking session's own screen, or its inbox as
+/// the CLI judged it there. A `via` it did not name proves nothing.
+#[derive(Clone, Copy)]
+enum Way {
+    Session,
+    Inbox(Via),
+}
+
+impl Way {
+    fn read(answer: &Value) -> Result<Way, String> {
+        match answer.get("path").and_then(Value::as_str) {
+            Some("session") => Ok(Way::Session),
+            Some("inbox") => Ok(Way::Inbox(
+                match answer.get("via").and_then(Value::as_str) {
+                    Some("pane") => Via::Pane,
+                    Some("agent") => Via::Agent,
+                    _ => Via::Terminal,
+                },
+            )),
+            _ => Err("`answer.path` is `session` or `inbox`".to_string()),
+        }
+    }
+}
+
+fn parse_answered_question(wait: &Value, answer: &Value, way: Way) -> Result<Answered, String> {
+    let unreadable = || "`question` is not a recorded question".to_string();
+    let id = wait
+        .get("tool_use_id")
+        .and_then(Value::as_str)
+        .ok_or_else(unreadable)?;
+    let ask = parse_ask(id, wait).ok_or_else(unreadable)?;
+    let answers = answer
+        .get("answers")
+        .and_then(Value::as_array)
+        .and_then(|answers| {
+            answers
+                .iter()
+                .map(|a| match a {
+                    Value::Null => Some(None),
+                    Value::String(s) => Some(Some(s.clone())),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()
+        })
+        .ok_or_else(|| "`answer.answers` is not a list of answers".to_string())?;
+    let by = match way {
+        Way::Session => QuestionBy::Dialog {
+            afk: !matches!(answer.get("afk_timeout_ms"), None | Some(Value::Null)),
+        },
+        Way::Inbox(via) => QuestionBy::Inbox(via),
+    };
+    Ok(Answered::Question { ask, by, answers })
+}
+
+fn parse_answered_permission(wait: &Value, answer: &Value, way: Way) -> Result<Answered, String> {
+    let unreadable = || "`permission` is not a recorded permission request".to_string();
+    let ask = PermissionAsk {
+        id: nullable_string(wait, "id").ok_or_else(unreadable)?,
+        request: parse_activity(wait).ok_or_else(unreadable)?,
+        input_len: optional(wait, "input_len", parse_field_lengths).ok_or_else(unreadable)?,
+    };
+    let by = match way {
+        Way::Session => PermitBy::Dialog {
+            ran: match answer.get("post") {
+                None | Some(Value::Null) => false,
+                Some(post)
+                    if matches!(post.as_str(), Some("PostToolUse" | "PostToolUseFailure")) =>
+                {
+                    true
+                }
+                Some(_) => {
+                    return Err(
+                        "`answer.post` is `PostToolUse`, `PostToolUseFailure` or null".to_string(),
+                    )
+                }
+            },
+            is_error: answer
+                .get("is_error")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| "`answer.is_error` is not a boolean".to_string())?,
+        },
+        Way::Inbox(via) => PermitBy::Inbox {
+            via,
+            verdict: answer
+                .get("decision")
+                .and_then(Value::as_str)
+                .and_then(Verdict::parse)
+                .ok_or_else(|| "`answer.decision` is `allow` or `deny`".to_string())?,
+        },
+    };
+    Ok(Answered::Permission { ask, by })
+}
+
+fn parse_answered_decision(wait: &Value, answer: &Value, way: Way) -> Result<Answered, String> {
+    let decision =
+        parse_decision(wait).ok_or_else(|| "`decision` is not a recorded decision".to_string())?;
+    let text = answer
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "`answer.text` is not a string".to_string())?;
+    let by = match way {
+        Way::Session => DecisionBy::Prompt {
+            origin: answer
+                .get("origin")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "`answer.origin` is not a string".to_string())?
+                .to_string(),
+        },
+        Way::Inbox(via) => DecisionBy::Inbox(via),
+    };
+    Ok(Answered::Decision {
+        decision,
+        by,
+        text: text.to_string(),
+    })
 }
 
 fn parse_event(value: &Value) -> Option<Event> {

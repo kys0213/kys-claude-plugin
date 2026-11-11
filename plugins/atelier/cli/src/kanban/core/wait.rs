@@ -112,7 +112,7 @@ pub struct Place<'a> {
 }
 
 impl Place<'_> {
-    fn repo(&self) -> &str {
+    pub fn repo(&self) -> &str {
         self.repo_root.unwrap_or(self.cwd)
     }
 }
