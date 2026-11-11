@@ -6,6 +6,7 @@
 use super::allowlist::{check_permission, RealPaths, Refusal, Scope};
 use super::board::{PermissionAsk, WaitOn, Waiting};
 use super::detail::{prompt_lines, reply_lines, Decision, WAIT_FIELDS};
+use super::mask::mask;
 use super::matchkey::{decision_key, permission_key, permission_target, question_key, sentence};
 use super::progress::first_field;
 use super::question::{Ask, Question};
@@ -26,13 +27,16 @@ pub enum Blocked {
 }
 
 impl Blocked {
+    /// The reason as shown and kept; a refused word is masked.
     pub fn id(&self) -> String {
         match self {
             Blocked::MultiSelect => "multi_select".to_string(),
             Blocked::Truncated => "truncated".to_string(),
             Blocked::Refused(Refusal::Compound) => "compound".to_string(),
             Blocked::Refused(Refusal::Expansion) => "expansion".to_string(),
-            Blocked::Refused(Refusal::NotAllowlisted(word)) => format!("not_allowlisted:{word}"),
+            Blocked::Refused(Refusal::NotAllowlisted(word)) => {
+                format!("not_allowlisted:{}", mask(word))
+            }
             Blocked::Refused(Refusal::OutsideRepo) => "outside_repo".to_string(),
             Blocked::Irreversible => "guard:irreversible".to_string(),
             Blocked::Decision => "decision".to_string(),

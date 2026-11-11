@@ -210,6 +210,37 @@ fn status_entries_carry_the_wait_too() {
 }
 
 #[test]
+fn a_reason_naming_a_secret_word_is_masked_on_the_board_and_in_status() {
+    for (command, secret) in [
+        ("PGPASSWORD=hunter2 psql -h db", "hunter2"),
+        (
+            "GITHUB_TOKEN=ghp_aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3z gh pr list",
+            "ghp_aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3z",
+        ),
+        ("https://alice:hunter2@example.com/repo.git", "hunter2"),
+    ] {
+        let config = TempDir::new().unwrap();
+        put_record(config.path(), &asking_bash(command));
+        let status = status_in(config.path(), &["--now", &NOW.to_string()]);
+
+        for wait in [
+            wait_of(asking_bash(command)),
+            status["sessions"][0]["wait"].clone(),
+        ] {
+            let reasons = blocked(&wait);
+            assert!(
+                reasons.iter().any(|r| r.starts_with("not_allowlisted:")),
+                "{command}: {reasons:?}"
+            );
+            assert!(
+                reasons.iter().all(|r| !r.contains(secret)),
+                "{command}: {reasons:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn the_same_facts_give_the_same_wait() {
     let record = asking(json!([question("Which color?", &["Red", "Blue"], false)]));
     assert_eq!(wait_of(record.clone()), wait_of(record));

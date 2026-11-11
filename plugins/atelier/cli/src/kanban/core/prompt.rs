@@ -30,6 +30,7 @@ pub fn is_wrapped_event(text: &str) -> bool {
         && rest[name_len..].starts_with(|c: char| c == '>' || c.is_whitespace())
 }
 
+/// For display: sdk and kanban requests count, events wrapped in a tag do not.
 fn shows_as_person_prompt(prompt: &PromptFact) -> bool {
     SHOWN_AS_PERSON.contains(&prompt.origin.as_str()) && !is_wrapped_event(&prompt.text)
 }

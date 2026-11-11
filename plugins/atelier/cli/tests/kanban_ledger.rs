@@ -781,6 +781,43 @@ fn no_kept_field_of_a_permission_entry_carries_the_secret_in_its_target() {
 }
 
 #[test]
+fn a_command_refused_for_a_secret_word_keeps_the_reason_masked() {
+    for (command, secret) in [
+        ("PGPASSWORD=hunter2 psql -h db", "hunter2"),
+        (
+            "GITHUB_TOKEN=ghp_aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3z gh pr list",
+            "ghp_aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3z",
+        ),
+        ("https://alice:hunter2@example.com/repo.git", "hunter2"),
+    ] {
+        let dir = TempDir::new().unwrap();
+        record(
+            dir.path(),
+            &permission_facts(
+                NOW,
+                command,
+                json!({ "path": "session", "post": "PostToolUse", "is_error": false }),
+            ),
+        );
+
+        let line = fs::read_dir(ledger_dir(dir.path()))
+            .unwrap()
+            .map(|file| fs::read_to_string(file.unwrap().path()).unwrap())
+            .collect::<String>();
+        let entry = only(dir.path());
+        assert!(
+            entry["blocked"]
+                .as_array()
+                .expect("blocked")
+                .iter()
+                .any(|reason| reason.as_str().unwrap().starts_with("not_allowlisted:")),
+            "{command}: {entry}"
+        );
+        assert!(!line.contains(secret), "{command}: {line}");
+    }
+}
+
+#[test]
 fn no_kept_field_of_a_question_or_decision_entry_carries_the_secret() {
     let dir = TempDir::new().unwrap();
     record(

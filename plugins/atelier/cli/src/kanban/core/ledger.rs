@@ -12,7 +12,7 @@ use super::prompt::decides_as_person;
 use super::question::Ask;
 use super::request::{Verdict, Via};
 use super::text::cut;
-use super::wait::{derive, Blocked, Place, Subject, Wait};
+use super::wait::{derive, Place, Subject, Wait};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -374,7 +374,7 @@ fn finish(draft: Draft, facts: &Facts, wait: &Wait) -> Entry {
         inferred: draft.source.inferred,
         origin: draft.origin,
         proxyable: wait.proxyable(),
-        blocked: wait.blocked.iter().map(Blocked::id).collect(),
+        blocked: wait.blocked.iter().map(|b| kept(&b.id())).collect(),
         permission_mode: facts.permission_mode.clone(),
         outcome: Outcome::Used,
         recommended: None,
