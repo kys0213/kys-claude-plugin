@@ -1280,6 +1280,7 @@ describe('kanban details and requests', () => {
       String(START + 6_000),
       '--ttl',
       '60s',
+      '--waits-stdin',
     ])
     expect(JSON.parse(take?.stdin ?? '{}')).toEqual({ asks: [], decision: null })
     expect(w.submitted).toEqual(['Run lint'])

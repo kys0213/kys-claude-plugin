@@ -117,6 +117,7 @@ export async function deliverRequests($: EngineInterface, s: InboxState & AskSta
         String(now),
         '--ttl',
         REQUEST_TTL,
+        '--waits-stdin',
         ...(s.turnId === null ? [] : ['--turn', s.turnId]),
       ],
       await waits($, s, self),

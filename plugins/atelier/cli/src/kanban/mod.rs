@@ -24,7 +24,7 @@ use crate::kanban::core::duration::parse_millis;
 use crate::kanban::core::layout::{fit, Layout};
 use crate::kanban::core::question::{Ask, Question};
 use crate::kanban::core::repos::{group, Repo};
-use crate::kanban::core::request::Sender;
+use crate::kanban::core::request::{Sender, Waits};
 use crate::kanban::core::status::{render_text, select, Format};
 use crate::kanban::core::text::defuse_marker;
 use crate::kanban::core::wait::{derive, Blocked, Place, Subject};
@@ -189,8 +189,7 @@ pub enum InboxCommand {
         #[arg(long)]
         session: String,
     },
-    /// Claims every request and says which to act on; stdin names the open
-    /// questions and decision
+    /// Claims every request and says which to act on
     Take {
         #[arg(long)]
         session: String,
@@ -203,6 +202,10 @@ pub enum InboxCommand {
         /// The turn the session runs now; absent while it waits for a prompt
         #[arg(long)]
         turn: Option<String>,
+        /// Reads the open questions and decision on stdin; without it stdin
+        /// is left unread and the session waits on none
+        #[arg(long)]
+        waits_stdin: bool,
     },
     /// Waits a little for the answer to one permission request
     WaitPermit {
@@ -545,7 +548,11 @@ fn run_request(command: RequestCommand) -> Value {
                 now,
                 ttl,
                 turn,
-            } => match parse_waits(&read_stdin_raw()) {
+                waits_stdin,
+            } => match waits_stdin
+                .then(read_stdin_raw)
+                .map_or(Ok(Waits::default()), |raw| parse_waits(&raw))
+            {
                 Ok(waits) => requests.take(&session, now, ttl, turn.as_deref(), &waits),
                 Err(error) => json!({ "error": error }),
             },

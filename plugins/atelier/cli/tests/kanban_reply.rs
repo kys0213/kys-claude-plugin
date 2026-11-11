@@ -2,7 +2,8 @@ use assert_cmd::Command;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::Stdio;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
 
 fn now_ms() -> String {
@@ -61,6 +62,7 @@ impl World {
             &now,
             "--ttl",
             "60s",
+            "--waits-stdin",
         ];
         if let Some(turn) = turn {
             args.extend(["--turn", turn]);
@@ -165,7 +167,7 @@ fn an_answer_whose_count_differs_from_the_questions_is_invalid() {
 }
 
 #[test]
-fn a_take_without_the_open_waits_finds_every_answer_stale() {
+fn a_take_without_waits_stdin_leaves_stdin_unread_and_finds_every_answer_stale() {
     let w = World::new();
     w.kanban(&[
         "reply",
@@ -189,9 +191,45 @@ fn a_take_without_the_open_waits_finds_every_answer_stale() {
             "--ttl",
             "60s",
         ],
-        "",
+        &open_ask("tu-1", 1).to_string(),
     );
     assert_eq!(taken["results"][0]["status"], "stale");
+}
+
+#[test]
+fn a_take_without_waits_stdin_ends_while_stdin_stays_open() {
+    let w = World::new();
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("atelier"))
+        .args([
+            "kanban",
+            "inbox",
+            "take",
+            "--session",
+            "s-1",
+            "--now",
+            &now_ms(),
+            "--ttl",
+            "60s",
+        ])
+        .env("CLAUDE_CONFIG_DIR", w.config.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn atelier");
+    let stdin = child.stdin.take();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("poll atelier") {
+            break Some(status);
+        }
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    drop(stdin);
+    assert!(status.is_some_and(|s| s.success()), "take waited on stdin");
 }
 
 #[test]
@@ -494,6 +532,7 @@ fn unreadable_open_waits_are_refused_and_the_inbox_is_left_alone() {
             &now_ms(),
             "--ttl",
             "60s",
+            "--waits-stdin",
         ],
         "not json",
     );
