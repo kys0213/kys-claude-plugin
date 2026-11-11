@@ -248,7 +248,7 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
     `[칸반 위임] 일일 보고 — 직전 보고 이후(--since <ms>)`. 모드는 `submit` 을 `$.prompt.submit` 으로 내고, `context` 는
     `attach_to` 의 출처(사람이 입력한 것)인 다음 프롬프트에 붙입니다. 엔진이 받아들였을 때만 `deliver_ids` 를 다음
     `state.delivered` 로 넘기므로 실패한 것은 다음 tick 에 다시 판정됩니다. CLI 가 없거나 실패하면 아무것도 내지 않습니다.
-  - 일일 보고: `kanban_report_at`(플러그인 설정, 기본 `18:00`, 로컬 시각) 이후 장부에 보고가 없으면 `report_due` 입니다.
+  - 일일 보고: `kanban_report_at`(플러그인 설정, 기본 `18:00`, 로컬 시각) 이후 장부에 보고가 없으면 `report_due` 입니다. `HH:MM` 이 아니면 보고만 끄고 깨우기는 계속하며, 이유(`report_at_error`)를 toast 로 한 번 알립니다.
     보고를 낸 뒤 모드가 `atelier kanban delegate report --now <ms>` 로 남기고 `ledger prune` 을 부릅니다. 그 시각에 위임
     세션이 없었으면 다음에 위임 세션이 살아 있을 때 한 번 냅니다. 보고 내용은 `kanban-delegate` skill 이 씁니다.
   - 받는 세션은 마지막 inbox 결과의 출처(`via`)를 기록에 남기고(권한 답이 버려졌을 때도), 위임 세션은 그중 메인 에이전트의
