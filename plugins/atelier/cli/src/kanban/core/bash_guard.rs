@@ -1,17 +1,20 @@
 //! Which kanban calls a model's shell command may not make: the ones that
 //! speak as a person on the board, and the ones only the hooks module makes.
-//! Judged on the words the shell would split, without expanding variables;
-//! the scripts of command substitutions and of nested shells are judged the
+//! Judged on the words the shell would split, without expanding variables.
+//! What a shell would run besides — command and process substitutions, `-c`
+//! scripts, a shell's heredoc or here-string, the words piped into a shell
+//! and a process substitution a shell reads as its script — is judged the
 //! same way.
 
 use crate::git::core::bash_classifier::interpreters::{is_shell, shell_script, ShellScript};
 use crate::git::core::bash_classifier::lexer::{
-    lex_with_heredocs, HeredocBody, RedirOp, Tok, Word,
+    lex_with_heredocs, HeredocBody, RedirOp, Sep, Tok, Word,
 };
 
 const KANBAN: &str = "kanban";
 const AS_PERSON: &[&str] = &["reply", "permit", "decide", "send"];
 const MOD_ONLY: &[&[&str]] = &[&["forget"], &["relay-frame"], &["ledger", "record"]];
+const SCRIPT_READERS: &[&str] = &["source", "."];
 /// Scripts nested deeper than this are refused unread.
 const MAX_DEPTH: usize = 3;
 
@@ -26,14 +29,21 @@ fn judge_script(script: &str, depth: usize) -> Option<String> {
             "셸 안의 셸이 {MAX_DEPTH}겹을 넘어 읽지 않았어요 — 칸반 명령은 바로 부르세요"
         ));
     }
-    let Ok((toks, bodies)) = lex_with_heredocs(script, false) else {
-        return Some(
-            "닫히지 않은 따옴표나 명령 치환이 있어 셸이 나누는 대로 읽지 못했어요".to_string(),
-        );
+    let commands = match parse(script) {
+        Ok(commands) => commands,
+        Err(reason) => return Some(reason),
     };
-    simple_commands(toks, &bodies)
+    commands
         .iter()
-        .find_map(|command| judge_command(command, depth))
+        .enumerate()
+        .find_map(|(at, command)| judge_command(command, piped_into(&commands, at), depth))
+}
+
+fn parse(script: &str) -> Result<Vec<Simple>, String> {
+    let (toks, bodies) = lex_with_heredocs(script, false).map_err(|_| {
+        "닫히지 않은 따옴표나 명령 치환이 있어 셸이 나누는 대로 읽지 못했어요".to_string()
+    })?;
+    Ok(simple_commands(toks, &bodies))
 }
 
 #[derive(Default)]
@@ -43,6 +53,7 @@ struct Simple {
     operands: Vec<Word>,
     /// What a here-string or heredoc gives the command on stdin.
     input: Vec<String>,
+    after_pipe: bool,
 }
 
 fn simple_commands(toks: Vec<Tok>, bodies: &[HeredocBody]) -> Vec<Simple> {
@@ -53,9 +64,12 @@ fn simple_commands(toks: Vec<Tok>, bodies: &[HeredocBody]) -> Vec<Simple> {
             break;
         };
         match tok {
-            Tok::Sep(_) => {
+            Tok::Sep(sep) => {
                 operand_of = None;
-                commands.push(Simple::default());
+                commands.push(Simple {
+                    after_pipe: sep == Sep::Pipe,
+                    ..Simple::default()
+                });
             }
             Tok::Redir(RedirOp::HereDoc) => current.input.extend(
                 bodies
@@ -78,31 +92,104 @@ fn simple_commands(toks: Vec<Tok>, bodies: &[HeredocBody]) -> Vec<Simple> {
     commands
 }
 
-fn judge_command(command: &Simple, depth: usize) -> Option<String> {
-    let argv: Vec<String> = command.argv.iter().map(|w| w.text.clone()).collect();
-    kanban_args(&argv).and_then(judge).or_else(|| {
-        nested_scripts(command)
-            .iter()
-            .find_map(|script| judge_script(script, depth + 1))
-    })
+/// The commands earlier in the pipeline of `commands[at]`.
+fn piped_into(commands: &[Simple], at: usize) -> &[Simple] {
+    let start = commands[..=at]
+        .iter()
+        .rposition(|command| !command.after_pipe)
+        .unwrap_or(0);
+    &commands[start..at]
 }
 
-fn nested_scripts(command: &Simple) -> Vec<String> {
-    let substitutions = command
-        .argv
-        .iter()
-        .chain(&command.operands)
-        .flat_map(|word| word.subs.iter().cloned());
+fn judge_command(command: &Simple, piped: &[Simple], depth: usize) -> Option<String> {
+    let argv: Vec<String> = command.argv.iter().map(|w| w.text.clone()).collect();
+    if let Some(reason) = kanban_args(&argv).and_then(judge) {
+        return Some(reason);
+    }
+    match scripts_run_by(command, piped) {
+        Ok(scripts) => scripts
+            .iter()
+            .find_map(|script| judge_script(script, depth + 1)),
+        Err(reason) => Some(reason),
+    }
+}
+
+fn scripts_run_by(command: &Simple, piped: &[Simple]) -> Result<Vec<String>, String> {
+    let words = || command.argv.iter().chain(&command.operands);
+    let mut scripts: Vec<String> = words()
+        .flat_map(|word| word.subs.iter().cloned())
+        .chain(words().filter_map(process_body).map(str::to_string))
+        .collect();
     let shell = command
         .argv
         .iter()
-        .position(|word| word.text.rsplit('/').next().is_some_and(is_shell));
-    let shell_scripts = match shell.map(|at| shell_script(&command.argv[at + 1..])) {
-        Some(ShellScript::Inline(script)) => vec![script.text.clone()],
-        Some(ShellScript::Input) => command.input.clone(),
-        Some(ShellScript::Missing) | None => Vec::new(),
-    };
-    substitutions.chain(shell_scripts).collect()
+        .position(|word| runs_shell(program(word)));
+    let script_reader = command
+        .argv
+        .first()
+        .is_some_and(|word| SCRIPT_READERS.contains(&program(word)));
+    match shell.map(|at| shell_script(&command.argv[at + 1..])) {
+        Some(ShellScript::Inline(script)) => scripts.push(script.text.clone()),
+        Some(ShellScript::Input) => {
+            scripts.extend(command.input.iter().cloned());
+            scripts.extend(output_of(piped));
+            scripts.extend(process_outputs(command)?);
+        }
+        Some(ShellScript::Missing) => {}
+        None if script_reader => scripts.extend(process_outputs(command)?),
+        None => {}
+    }
+    Ok(scripts)
+}
+
+fn program(word: &Word) -> &str {
+    word.text.rsplit('/').next().unwrap_or("")
+}
+
+fn runs_shell(name: &str) -> bool {
+    // fish stays out of the shared `is_shell`: the git classifier would then
+    // read fish scripts and stdin as bash ones.
+    is_shell(name) || name == "fish"
+}
+
+/// The body of a `<(…)` or `>(…)` word.
+fn process_body(word: &Word) -> Option<&str> {
+    if word.quoted || word.dyn_at != Some(0) {
+        return None;
+    }
+    word.text
+        .strip_prefix("<(")
+        .or_else(|| word.text.strip_prefix(">("))
+        .and_then(|rest| rest.strip_suffix(')'))
+}
+
+fn process_outputs(command: &Simple) -> Result<Vec<String>, String> {
+    let mut scripts = Vec::new();
+    for body in command.argv.iter().filter_map(process_body) {
+        scripts.extend(output_of(&parse(body)?));
+    }
+    Ok(scripts)
+}
+
+/// What `producers` may print for a shell to run: each argument, the
+/// arguments joined as `echo` prints them, and their heredocs and here-strings.
+fn output_of(producers: &[Simple]) -> Vec<String> {
+    producers
+        .iter()
+        .flat_map(|producer| {
+            let words: Vec<String> = producer
+                .argv
+                .iter()
+                .skip(1)
+                .map(|w| w.text.clone())
+                .collect();
+            let joined = words.join(" ");
+            words
+                .into_iter()
+                .chain([joined])
+                .chain(producer.input.iter().cloned())
+        })
+        .collect()
 }
 
 fn kanban_args(argv: &[String]) -> Option<&[String]> {

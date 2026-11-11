@@ -59,6 +59,70 @@ fn a_pane_answer_inside_a_substitution_or_a_nested_shell_is_denied() {
 }
 
 #[test]
+fn a_pane_answer_in_a_fish_script_is_denied() {
+    for command in [
+        "fish -c 'atelier kanban send --session s-1 --from pane --text hi'",
+        "fish <<EOF\natelier kanban send --session s-1 --from pane --text hi\nEOF",
+    ] {
+        assert!(deny(command).is_string(), "{command}");
+    }
+}
+
+#[test]
+fn a_pane_answer_piped_into_a_shell_is_denied() {
+    for command in [
+        "echo 'atelier kanban send --session s-1 --from pane --text hi' | bash",
+        "printf '%s\\n' 'atelier kanban send --session s-1 --from pane --text hi' | sh",
+        "echo 'atelier kanban send --session s-1 --from pane --text hi' | bash -s",
+        "echo atelier kanban send --session s-1 --from pane --text hi | zsh",
+        "echo 'atelier kanban forget --session s-1' | tee log | dash",
+        "echo 'atelier kanban send --session s-1 --from pane --text hi' | fish",
+        "cat <<EOF | bash\natelier kanban send --session s-1 --from pane --text hi\nEOF",
+        "cat <<< 'atelier kanban send --session s-1 --from pane --text hi' | /bin/ksh",
+    ] {
+        assert!(deny(command).is_string(), "{command}");
+    }
+}
+
+#[test]
+fn words_piped_into_a_shell_that_do_not_parse_are_denied() {
+    let command = "echo \"atelier kanban send --session s-1 --text 'unclosed\" | bash";
+
+    assert!(deny(command).is_string(), "{command}");
+}
+
+#[test]
+fn a_pane_answer_inside_a_process_substitution_is_denied() {
+    for command in [
+        "bash <(echo 'atelier kanban send --session s-1 --from pane --text hi')",
+        "source <(echo 'atelier kanban send --session s-1 --from pane --text hi')",
+        ". <(echo 'atelier kanban send --session s-1 --from pane --text hi')",
+        "diff <(atelier kanban send --session s-1 --from pane --text hi) x",
+        "echo hi | tee >(atelier kanban forget --session s-1)",
+    ] {
+        assert!(deny(command).is_string(), "{command}");
+    }
+}
+
+#[test]
+fn text_naming_the_kanban_that_no_shell_runs_passes() {
+    for command in [
+        "git commit -m \"fix kanban send --from pane wording\"",
+        "grep -r \"kanban\" src",
+        "echo hi | bash",
+        "echo 'atelier kanban status' | bash",
+        "echo 'atelier kanban send --session s-1 --from pane --text hi' | grep kanban",
+        "bash -c 'atelier kanban status'",
+        "atelier kanban send --session s-1 --from agent --text hi",
+        "echo 'atelier kanban send --session s-1 --from agent --text hi' | bash",
+        "diff <(atelier kanban status) <(atelier kanban ledger list)",
+        "bash <(echo 'atelier kanban status')",
+    ] {
+        assert_eq!(deny(command), Value::Null, "{command}");
+    }
+}
+
+#[test]
 fn shells_nested_past_the_depth_limit_or_left_unclosed_are_denied() {
     for command in [
         "echo $(echo $(echo $(echo $(atelier kanban status))))",
