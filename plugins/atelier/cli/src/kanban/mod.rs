@@ -301,7 +301,7 @@ fn board_json(board: &Board, layout: &Layout) -> Value {
             json!({
                 "id": column.id(),
                 "title": column.title(),
-                "heading": format!("{} {}", column.title(), cards.len()),
+                "heading": column.heading(cards.len()),
                 "cards": cards.iter().map(card_json).collect::<Vec<_>>(),
             })
         })
@@ -365,6 +365,7 @@ fn run_status(
         Ok((Format::Json, board)) => {
             let sessions: Vec<Value> = select(&board, query.session.as_deref())
                 .into_iter()
+                .flat_map(|(column, cards)| cards.into_iter().map(move |card| (column, card)))
                 .map(|(column, card)| status_entry_json(column, card))
                 .collect();
             json!({ "now": now, "sessions": sessions }).to_string()

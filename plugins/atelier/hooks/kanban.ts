@@ -475,12 +475,10 @@ export function registerKanban(on: On): void {
     const ask = typeof e.ask === 'string' ? e.ask.trim() : ''
 
     if (e.agentId === undefined && ask !== '') {
-      const options = (e.actions ?? [])
-        .flatMap(a => ('label' in a && typeof a.label === 'string' ? [a.label.slice(0, MAX_FIELD_CHARS)] : []))
+      const labels = (e.actions ?? [])
+        .flatMap(a => ('label' in a && typeof a.label === 'string' ? [a.label] : []))
         .slice(0, 4)
-      const optionLengths = (e.actions ?? [])
-        .flatMap(a => ('label' in a && typeof a.label === 'string' ? [a.label.length] : []))
-        .slice(0, 4)
+      const options = labels.map(label => label.slice(0, MAX_FIELD_CHARS))
 
       await record($, s, {
         name: null,
@@ -490,7 +488,7 @@ export function registerKanban(on: On): void {
             recap: e.recap.slice(0, MAX_REPLY_CHARS),
             options,
             at: now,
-            orig_len: { ask: ask.length, options: optionLengths },
+            orig_len: { ask: ask.length, options: labels.map(label => label.length) },
           },
         }),
       })

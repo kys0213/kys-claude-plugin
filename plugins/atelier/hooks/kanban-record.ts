@@ -145,7 +145,7 @@ function filled(base: SessionRecord, fill: Fields): Fields {
   return out
 }
 
-/** Leaves the record where `atelier kanban status` reads it; a failed write is redone by the next record. */
+/** Leaves the record where `atelier kanban status` reads it. */
 async function writeCopy($: EngineInterface, paths: Map<string, string>, id: string, value: SessionRecord): Promise<void> {
   try {
     let path = paths.get(id)
@@ -161,9 +161,10 @@ async function writeCopy($: EngineInterface, paths: Map<string, string>, id: str
       paths.set(id, path)
     }
 
+    /** `$.fs.write` creates the file and its directories as needed (engine type doc). */
     await $.fs.write(path, JSON.stringify(value))
   } catch {
-    /** the copy is rewritten with the next record */
+    /** a failed write is redone by the next record */
   }
 }
 

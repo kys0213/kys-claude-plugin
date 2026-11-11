@@ -102,6 +102,10 @@ impl Column {
         }
     }
 
+    pub fn heading(self, count: usize) -> String {
+        format!("{} {count}", self.title())
+    }
+
     /// Every id must name a column; an empty list names none.
     pub fn parse_all(ids: &[String]) -> Result<Vec<Column>, String> {
         ids.iter()
