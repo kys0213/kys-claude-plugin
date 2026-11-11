@@ -661,13 +661,14 @@ export function registerKanban(on: On): void {
     const isRow = direction === 'row'
     const cards = view.columns.flatMap(c => c.cards)
     const selected = cards.find(c => c.session_id === s.detail.selected)
-    const asks = askBlocks($, s, els, cards)
 
     if (selected !== undefined) {
       const detail = detailBlock($, s.detail, els, selected, () => toggleSelected($, s.detail, selected.session_id))
 
-      return Box({ flexDirection: 'column', children: [detail, ...asks] })
+      return Box({ flexDirection: 'column', children: [detail, ...askBlocks($, s, els, [selected])] })
     }
+
+    const asks = askBlocks($, s, els, cards)
 
     const frame = isRow ? { width, borderStyle: 'round' as const, paddingX: 1 } : { width, marginBottom: 1 }
     const columns = view.columns.map(col =>
