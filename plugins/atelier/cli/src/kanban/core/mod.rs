@@ -13,6 +13,7 @@ pub mod precedent;
 pub mod progress;
 pub mod prompt;
 pub mod question;
+pub mod relay;
 pub mod repos;
 pub mod request;
 pub mod spawn;

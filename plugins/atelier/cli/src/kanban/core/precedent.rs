@@ -12,6 +12,7 @@ use super::matchkey::{answer_fp, digest};
 use super::progress::Activity;
 use super::prompt::decides_as_person;
 use super::question::{Ask, AskLengths, Question};
+use super::relay::{Relay, RelayUse};
 use super::request::{check_id, Verdict};
 use super::text::cut;
 use super::wait::{derive, Place, Subject, Wait};
@@ -162,6 +163,7 @@ pub struct Book {
     entries: Vec<Entry>,
     revokes: Vec<Revoke>,
     settings: Vec<Setting>,
+    relay_uses: Vec<RelayUse>,
 }
 
 impl Book {
@@ -180,6 +182,8 @@ impl Book {
                 .filter(|s| s.v == VERSION)
             {
                 book.settings.push(setting);
+            } else if let Some(used) = RelayUse::parse(line) {
+                book.relay_uses.push(used);
             }
         }
         book
@@ -187,6 +191,14 @@ impl Book {
 
     pub fn entry(&self, id: &str) -> Option<&Entry> {
         self.entries.iter().find(|e| e.id == id)
+    }
+
+    pub fn entries(&self) -> &[Entry] {
+        &self.entries
+    }
+
+    pub fn relay_uses(&self) -> &[RelayUse] {
+        &self.relay_uses
     }
 }
 
@@ -398,9 +410,48 @@ impl Precedent {
 
 /// The precedents an agent answer is sent on, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Auth {
+pub struct Precedents {
     precedents: Vec<Precedent>,
     reason: String,
+}
+
+/// What an agent answer is sent on: a person's precedents, or the answer a
+/// person gave when the main agent asked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Auth {
+    Precedents(Precedents),
+    Relay(Relay),
+}
+
+impl Auth {
+    pub fn precedents(&self) -> Option<&Precedents> {
+        match self {
+            Auth::Precedents(precedents) => Some(precedents),
+            Auth::Relay(_) => None,
+        }
+    }
+
+    pub fn relay(&self) -> Option<&Relay> {
+        match self {
+            Auth::Relay(relay) => Some(relay),
+            Auth::Precedents(_) => None,
+        }
+    }
+
+    pub fn to_json(&self) -> Value {
+        match self {
+            Auth::Precedents(precedents) => precedents.to_json(),
+            Auth::Relay(relay) => relay.to_json(),
+        }
+    }
+
+    pub fn from_json(value: &Value) -> Option<Auth> {
+        if value.get("relay").is_some() {
+            Relay::from_json(value).map(Auth::Relay)
+        } else {
+            Precedents::from_json(value).map(Auth::Precedents)
+        }
+    }
 }
 
 /// One answer and the entries named for it.
@@ -410,8 +461,8 @@ pub struct Claim<'a> {
     pub precedents: Vec<&'a str>,
 }
 
-impl Auth {
-    pub fn new(precedents: Vec<Precedent>, reason: &str) -> Result<Auth, String> {
+impl Precedents {
+    pub fn new(precedents: Vec<Precedent>, reason: &str) -> Result<Precedents, String> {
         let reason = reason.trim();
         if reason.is_empty() {
             return Err("근거(--reason)가 비어 있어요".to_string());
@@ -429,7 +480,7 @@ impl Auth {
         if let Some((q, _)) = per_question.iter().find(|(_, n)| **n > MAX_PRECEDENTS) {
             return Err(format!("{q}번 질문의 선례가 {MAX_PRECEDENTS}개를 넘어요"));
         }
-        Ok(Auth {
+        Ok(Precedents {
             precedents,
             reason: reason.to_string(),
         })
@@ -489,7 +540,7 @@ impl Auth {
         })
     }
 
-    pub fn from_json(value: &Value) -> Option<Auth> {
+    pub fn from_json(value: &Value) -> Option<Precedents> {
         let precedents = value
             .get("precedents")?
             .as_array()?
@@ -500,7 +551,7 @@ impl Auth {
                 Precedent::parse(&format!("{q}:{id}")).ok()
             })
             .collect::<Option<Vec<_>>>()?;
-        Auth::new(precedents, value.get("reason")?.as_str()?).ok()
+        Precedents::new(precedents, value.get("reason")?.as_str()?).ok()
     }
 }
 

@@ -67,6 +67,15 @@ export function awaitAnswer(s: AskState, toolUseId: string, questions: readonly 
   return new Promise(resolve => s.waiters.set(toolUseId, { questions, resolve }))
 }
 
+/** The questions open question `toolUseId` is drawn with now, for `inbox take` to judge answers against. */
+export function reask(s: AskState, toolUseId: string, questions: readonly ToolQuestion[]): void {
+  const waiter = s.waiters.get(toolUseId)
+
+  if (waiter !== undefined) {
+    s.waiters.set(toolUseId, { ...waiter, questions })
+  }
+}
+
 /** The open questions as `inbox take` reads them, each with the call's own questions. */
 export function openAsks(s: AskState): { id: string; questions: readonly ToolQuestion[] }[] {
   return [...s.waiters].map(([id, waiter]) => ({ id, questions: waiter.questions }))

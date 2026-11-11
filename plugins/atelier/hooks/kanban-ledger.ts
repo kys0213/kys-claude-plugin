@@ -3,6 +3,7 @@ import type { EngineInterface } from 'claude-code'
 import type { ToolQuestion } from './kanban-ask'
 import { cli } from './kanban-cli'
 import type { Via } from './kanban-nonce'
+import type { RelayTarget } from './kanban-relay'
 import { type AskQuestion, type AskLengths, KEY_PREFIX, type SessionRecord, isRecord, placeOf } from './kanban-record'
 
 /** A permission request as the record keeps it. */
@@ -12,7 +13,11 @@ type DecisionFacts = NonNullable<SessionRecord['decision']>
 
 /** The wait an answer was for, as this session's record keeps it; `ledger record` reads one of them. */
 type LedgerWait =
-  | { question: { tool_use_id: string; questions: AskQuestion[]; at: number; orig_len: AskLengths } }
+  | {
+      question: { tool_use_id: string; questions: AskQuestion[]; at: number; orig_len: AskLengths }
+      /** The wait the question was framed over; its answer is then a relay for that wait. */
+      relay_frame?: RelayTarget
+    }
   | { permission: PermissionFacts }
   | { decision: DecisionFacts }
 
@@ -23,7 +28,7 @@ type LedgerAnswer =
   | { path: 'session'; text: string; origin: string }
   | { path: 'inbox'; via: Via; answers: string[]; auth?: unknown }
   | { path: 'inbox'; via: Via; decision: 'allow' | 'deny'; auth?: unknown }
-  | { path: 'inbox'; via: Via; text: string }
+  | { path: 'inbox'; via: Via; text: string; auth?: unknown }
 
 /** The precedents a model's answer was sent on, as the CLI gave them, passed on untouched. */
 function authOf(auth: unknown): { auth?: unknown } {
@@ -88,20 +93,28 @@ function dialogAnswer(questions: readonly ToolQuestion[], r: unknown): LedgerAns
   }
 }
 
-/** Records the answers an AskUserQuestion call took: its dialog's result, or the kanban's answers and `via`. */
+/**
+ * Records the answers an AskUserQuestion call took: its dialog's result, or the kanban's answers and `via`.
+ * `frame` is the wait the questions were framed over, null for questions asked as they came.
+ */
 export async function recordQuestion(
   $: EngineInterface,
   toolUseId: string,
   ask: AskFacts,
   questions: readonly ToolQuestion[],
   won: { local: unknown } | { answers: string[]; via: Via; auth?: unknown },
+  frame: RelayTarget | null,
 ): Promise<void> {
   const answer =
     'local' in won
       ? dialogAnswer(questions, won.local)
       : { path: 'inbox' as const, via: won.via, answers: won.answers, ...authOf(won.auth) }
 
-  await recordAnswer($, { question: { tool_use_id: toolUseId, ...ask } }, answer)
+  await recordAnswer(
+    $,
+    { question: { tool_use_id: toolUseId, ...ask }, ...(frame === null ? {} : { relay_frame: frame }) },
+    answer,
+  )
 }
 
 export function startCall(s: LedgerState, toolUseId: string | undefined, tool: string): void {
@@ -178,11 +191,11 @@ export async function recordDecisionPrompt($: EngineInterface, text: string, ori
   }
 }
 
-/** A decide the kanban delivered is recorded with the `via` the CLI gave it. */
-export async function recordDecide($: EngineInterface, text: string, via: Via): Promise<void> {
+/** A decide the kanban delivered is recorded with the `via` the CLI gave it, and what a model's was sent on. */
+export async function recordDecide($: EngineInterface, text: string, via: Via, auth?: unknown): Promise<void> {
   const decision = (await storedRecord($))?.decision
 
   if (decision !== null && decision !== undefined) {
-    await recordAnswer($, { decision }, { path: 'inbox', via, text })
+    await recordAnswer($, { decision }, { path: 'inbox', via, text, ...authOf(auth) })
   }
 }

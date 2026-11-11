@@ -403,7 +403,7 @@ fn an_agent_permit_left_in_the_inbox_is_refused_by_the_waiting_session() {
     .expect("write");
     assert_eq!(
         w.wait_permit("s-1", "p-1"),
-        json!({ "decision": null, "status": "refused", "via": "agent", "reason": "메인 에이전트의 답에 선례가 없어요" })
+        json!({ "decision": null, "status": "refused", "via": "agent", "reason": "메인 에이전트의 답에 선례도 물어 받은 답도 없어요" })
     );
 }
 
@@ -688,7 +688,7 @@ fn an_agent_answer_with_the_nonce_left_for_the_pane_stays_the_agents() {
     assert_eq!(taken["used_nonces"], json!([]));
     assert_eq!(
         w.wait_permit_with("s-1", "p-1", Some(json!([left("permit", "n-3")]))),
-        json!({ "decision": null, "status": "refused", "via": "agent", "reason": "메인 에이전트의 답에 선례가 없어요" })
+        json!({ "decision": null, "status": "refused", "via": "agent", "reason": "메인 에이전트의 답에 선례도 물어 받은 답도 없어요" })
     );
 }
 

@@ -4,8 +4,12 @@
 
 use crate::kanban::commands::inbox::{config_dir, InboxStore};
 use crate::kanban::commands::payload::parse_record_copy;
-use crate::kanban::core::board::{build, Board, BoardParams, Column};
+use crate::kanban::core::allowlist::RealPaths;
+use crate::kanban::core::board::{build, Board, BoardParams, Card, Column, Waiting};
+use crate::kanban::core::question::Question;
+use crate::kanban::core::relay::{frame, Shown};
 use crate::kanban::core::request::check_id;
+use crate::kanban::core::wait::{derive, Place, Wait};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
@@ -82,6 +86,20 @@ pub struct StatusQuery {
 pub struct KanbanRecords<'a> {
     pub store: &'a dyn RecordStore,
     pub inbox: &'a dyn InboxStore,
+    pub paths: &'a dyn RealPaths,
+}
+
+fn tool_question_json(question: &Question) -> Value {
+    json!({
+        "question": question.question,
+        "header": question.header,
+        "multiSelect": question.multi_select,
+        "options": question
+            .options
+            .iter()
+            .map(|o| json!({ "label": o.label, "description": o.description.as_deref().unwrap_or("") }))
+            .collect::<Vec<_>>(),
+    })
 }
 
 fn answer(result: Result<Value, String>) -> Value {
@@ -125,12 +143,58 @@ impl KanbanRecords<'_> {
         };
         Ok(build(&sessions, &params).only(&columns))
     }
+
+    /// The questions rewritten over the wait their first line names, as the
+    /// board of the record copies shows it at `now`, and that wait.
+    pub fn relay_frame(&self, questions: &[Question], now: u64) -> Value {
+        answer((|| {
+            let board = self.status(&StatusQuery {
+                columns: Vec::new(),
+                session: None,
+                now,
+            })?;
+            let waits: Vec<(&Card, &Waiting, Wait)> = board
+                .columns
+                .iter()
+                .flat_map(|(_, cards)| cards)
+                .filter_map(|card| {
+                    let waiting = card.waiting.as_ref()?;
+                    let place = Place {
+                        repo_root: card.repo_root.as_deref(),
+                        cwd: &card.cwd,
+                        permission_mode: card.permission_mode.as_deref(),
+                    };
+                    Some((card, waiting, derive(waiting, &place, self.paths)))
+                })
+                .collect();
+            let shown: Vec<Shown> = waits
+                .iter()
+                .map(|(card, waiting, wait)| Shown {
+                    label: &card.label,
+                    session_id: &card.session_id,
+                    waiting,
+                    wait,
+                })
+                .collect();
+            Ok(match frame(questions, &shown)? {
+                Some((framed, target)) => json!({
+                    "questions": framed.iter().map(tool_question_json).collect::<Vec<_>>(),
+                    "target": target.to_json(),
+                }),
+                None => json!({
+                    "questions": questions.iter().map(tool_question_json).collect::<Vec<_>>(),
+                    "target": null,
+                }),
+            })
+        })())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::kanban::commands::inbox::Claimed;
+    use crate::kanban::commands::paths::FsPaths;
     use std::cell::RefCell;
 
     struct Copies(Vec<String>);
@@ -195,6 +259,7 @@ mod tests {
         let records = KanbanRecords {
             store: &store,
             inbox: &inbox,
+            paths: &FsPaths,
         };
 
         let board = records.status(&query(&[])).expect("board");
@@ -210,6 +275,7 @@ mod tests {
         let records = KanbanRecords {
             store: &store,
             inbox: &inbox,
+            paths: &FsPaths,
         };
 
         records.forget("s1");

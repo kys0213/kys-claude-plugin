@@ -12,6 +12,8 @@ import {
   deliverAnswers,
   newAskState,
   pruneDrafts,
+  reask,
+  type ToolQuestion,
 } from './kanban-ask'
 import { type DetailCard, type DetailState, detailBlock, newDetailState, pruneDetail, toggleSelected } from './kanban-detail'
 import { CLI_MISSING, cli, runKanban } from './kanban-cli'
@@ -29,6 +31,7 @@ import {
   startCall,
 } from './kanban-ledger'
 import { NONCE_PREFIX, type Via } from './kanban-nonce'
+import { type RelayTarget, frameQuestions } from './kanban-relay'
 import {
   type Activity,
   KEY_PREFIX,
@@ -108,10 +111,16 @@ function fieldLengths(input: unknown): Record<string, number> {
   return Object.fromEntries(Object.entries(wholeFields(input)).map(([key, value]) => [key, value.length]))
 }
 
+function withoutFrame(base: SessionRecord, toolUseId: string): Partial<SessionRecord> {
+  const { [toolUseId]: _closed, ...open } = base.relay_frames ?? {}
+
+  return { relay_frames: open }
+}
+
 function withoutAsk(base: SessionRecord, toolUseId: string): Partial<SessionRecord> {
   const { [toolUseId]: _closed, ...open } = base.asks ?? {}
 
-  return { asks: open }
+  return { asks: open, ...withoutFrame(base, toolUseId) }
 }
 
 function decodeBoard(parsed: Record<string, unknown> | null, width: number): BoardView {
@@ -621,32 +630,57 @@ export function registerKanban(on: On): void {
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     /** `tool_use_id` is optional on the call; without one the question is answerable under its own id. */
     const id = e.tool_use_id ?? `ask-${await $.clock.now()}`
-    const fromKanban = awaitAnswer(s, id, e.questions)
+    const framed = e.agentId === undefined ? await frameQuestions($, e.questions) : null
+    let questions: readonly ToolQuestion[] = framed?.questions ?? e.questions
+    let frame: RelayTarget | null = framed?.target ?? null
+    const fromKanban = awaitAnswer(s, id, questions)
     const context = await lastReply($)
-    const asked = askOf(e.questions, await $.clock.now())
+    const at = await $.clock.now()
+    let asked = askOf(questions, at)
     let via: Via | null = null
 
     await record($, s, {
       name: null,
-      update: base => ({ asks: { ...base.asks, [id]: asked }, pending_context: context }),
+      update: base => ({
+        asks: { ...base.asks, [id]: asked },
+        pending_context: context,
+        ...(frame === null ? {} : { relay_frames: { ...base.relay_frames, [id]: frame } }),
+      }),
     })
 
+    /** The dialog with the framed questions; one the engine refuses is drawn as the call asked, bound to no wait. */
+    const dialog = async () => {
+      if (frame !== null) {
+        try {
+          return await next({ ...e, questions: questions as typeof e.questions })
+        } catch {
+          questions = e.questions
+          frame = null
+          asked = askOf(questions, at)
+          reask(s, id, questions)
+          await record($, s, {
+            name: null,
+            update: base => ({ asks: { ...base.asks, [id]: asked }, ...withoutFrame(base, id) }),
+          })
+        }
+      }
+
+      return next(e)
+    }
+
     try {
-      const won = await Promise.race([
-        next(e).then(r => ({ local: r })),
-        fromKanban.then(answer => ({ answer })),
-      ])
+      const won = await Promise.race([dialog().then(r => ({ local: r })), fromKanban.then(answer => ({ answer }))])
 
       if ('local' in won) {
-        await recordQuestion($, id, asked, e.questions, won)
+        await recordQuestion($, id, asked, questions, won, frame)
 
         return won.local
       }
 
       via = won.answer.via
-      await recordQuestion($, id, asked, e.questions, won.answer)
+      await recordQuestion($, id, asked, questions, won.answer, frame)
 
-      return { result: { questions: e.questions, answers: answersByQuestion(e.questions, won.answer.answers) } }
+      return { result: { questions, answers: answersByQuestion(questions, won.answer.answers) } }
     } finally {
       s.waiters.delete(id)
       await $.store.delete(answerKey(await $.session.id(), id))

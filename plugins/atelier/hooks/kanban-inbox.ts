@@ -24,7 +24,7 @@ type Taken =
   | { kind: 'prompt'; text: string; body: string; from: string }
   | { kind: 'stop'; turn_id: string }
   | { kind: 'answer'; tool_use_id: string; answers: string[]; from: string; via?: unknown; auth?: unknown }
-  | { kind: 'decide'; decision_at: string; text: string; from: string; via?: unknown }
+  | { kind: 'decide'; decision_at: string; text: string; from: string; via?: unknown; auth?: unknown }
 
 type Result = { id: string; kind: string; status: string }
 
@@ -92,7 +92,7 @@ async function act($: EngineInterface, s: InboxState & AskState, taken: Taken): 
   }
 
   if (taken.kind === 'decide') {
-    await recordDecide($, taken.text, viaOf(taken.via))
+    await recordDecide($, taken.text, viaOf(taken.via), taken.auth)
     await record($, s, { name: 'kanban.answer', detail: viaOf(taken.via) })
   }
 

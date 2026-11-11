@@ -245,6 +245,7 @@ pub enum Request {
         text: String,
         from: Sender,
         nonce: Option<Nonce>,
+        auth: Option<Auth>,
     },
 }
 
@@ -328,10 +329,12 @@ impl Request {
         })
     }
 
-    /// The request with the precedents it is sent on; only an answer to a
-    /// question or a permission request carries them.
+    /// The request with what it is sent on; only an answer to a wait carries it.
     pub fn with_auth(mut self, given: Option<Auth>) -> Request {
-        if let Request::Permit { auth, .. } | Request::Answer { auth, .. } = &mut self {
+        if let Request::Permit { auth, .. }
+        | Request::Answer { auth, .. }
+        | Request::Decide { auth, .. } = &mut self
+        {
             *auth = given;
         }
         self
@@ -349,6 +352,7 @@ impl Request {
             text: check_text("결정 답", text)?,
             from,
             nonce,
+            auth: None,
         })
     }
 
@@ -429,15 +433,19 @@ impl Request {
                 text,
                 from,
                 nonce,
-            } => with_nonce(
-                json!({
-                    "v": VERSION,
-                    "kind": "decide",
-                    "decision_at": decision_at,
-                    "text": text,
-                    "from": from.id(),
-                }),
-                nonce.as_ref(),
+                auth,
+            } => with_auth(
+                with_nonce(
+                    json!({
+                        "v": VERSION,
+                        "kind": "decide",
+                        "decision_at": decision_at,
+                        "text": text,
+                        "from": from.id(),
+                    }),
+                    nonce.as_ref(),
+                ),
+                auth.as_ref(),
             ),
         }
     }
@@ -484,7 +492,9 @@ impl Request {
                 from()?,
                 Nonce::read(&value).ok()?,
             )
-            .ok(),
+            .ok()?
+            .with_auth(read_auth(&value)?)
+            .into(),
         }
     }
 }
@@ -592,6 +602,7 @@ pub enum Taken {
         text: String,
         from: Sender,
         via: Via,
+        auth: Option<Auth>,
     },
 }
 
@@ -650,9 +661,19 @@ pub struct Took {
     pub used: Vec<LeftNonce>,
 }
 
-/// Judges a model's answers to an open question against the precedents
-/// they are sent on.
-pub type Vet<'a> = &'a dyn Fn(&OpenAsk, &[String], &Auth) -> Result<(), String>;
+/// Why a model's answer that is sent on nothing is refused.
+pub const UNVOUCHED: &str = "메인 에이전트의 답에 선례도 물어 받은 답도 없어요";
+
+/// The wait a model's answer is for.
+#[derive(Debug, Clone, Copy)]
+pub enum Answering<'a> {
+    Ask(&'a OpenAsk),
+    /// The decision's id.
+    Decision(&'a str),
+}
+
+/// Judges a model's answers to an open wait against what they are sent on.
+pub type Vet<'a> = &'a dyn Fn(Answering, &[String], &Auth) -> Result<(), String>;
 
 /// Which requests one take acts on: at most one prompt, and each open
 /// question answered once.
@@ -685,8 +706,11 @@ impl Taker<'_> {
             Request::Stop { .. } | Request::Permit { .. } => Status::Stale,
             Request::Decide {
                 from: Sender::Agent,
+                auth,
                 ..
-            } => self.refuse("결정 요청은 대신 답하지 않아요".to_string()),
+            } if auth.as_ref().and_then(Auth::relay).is_none() => {
+                self.refuse("결정 요청은 대신 답하지 않아요".to_string())
+            }
             Request::Answer {
                 tool_use_id,
                 answers,
@@ -705,7 +729,13 @@ impl Taker<'_> {
                 text,
                 from,
                 nonce,
+                auth,
             } => {
+                let on = Answering::Decision(&decision_at);
+                let vouched = self.vouched(on, std::slice::from_ref(&text), from, auth.as_ref());
+                if let Err(reason) = vouched {
+                    return self.refuse(reason);
+                }
                 self.prompted = true;
                 let via = self.nonces.spend(RequestKind::Decide, from, nonce.as_ref());
                 self.deliver(Taken::Decide {
@@ -713,6 +743,7 @@ impl Taker<'_> {
                     text,
                     from,
                     via,
+                    auth: auth.filter(|_| from == Sender::Agent),
                 })
             }
             Request::Prompt {
@@ -735,19 +766,19 @@ impl Taker<'_> {
         Status::Refused
     }
 
-    /// `Ok` for an answer this session takes: a person's, or a model's its
-    /// precedents vouch for.
+    /// `Ok` for an answer this session takes: a person's, or a model's that
+    /// what it is sent on vouches for.
     fn vouched(
         &self,
-        ask: &OpenAsk,
+        on: Answering,
         answers: &[String],
         from: Sender,
         auth: Option<&Auth>,
     ) -> Result<(), String> {
         match (from, auth) {
             (Sender::Pane, _) => Ok(()),
-            (Sender::Agent, None) => Err("메인 에이전트의 답에 선례가 없어요".to_string()),
-            (Sender::Agent, Some(auth)) => (self.vet)(ask, answers, auth),
+            (Sender::Agent, None) => Err(UNVOUCHED.to_string()),
+            (Sender::Agent, Some(auth)) => (self.vet)(on, answers, auth),
         }
     }
 
@@ -769,7 +800,7 @@ impl Taker<'_> {
             Some(ask) if ask.questions != answers.len() => return Status::Invalid,
             Some(ask) => ask,
         };
-        if let Err(reason) = self.vouched(ask, &answers, from, auth.as_ref()) {
+        if let Err(reason) = self.vouched(Answering::Ask(ask), &answers, from, auth.as_ref()) {
             return self.refuse(reason);
         }
         self.answered.push(tool_use_id.clone());

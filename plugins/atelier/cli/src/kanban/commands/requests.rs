@@ -5,12 +5,15 @@ use crate::kanban::commands::inbox::{IdSource, InboxStore, Pause};
 use crate::kanban::commands::ledger_store::{read_book, LedgerStore};
 use crate::kanban::commands::spawn::{Launcher, RepoProbe};
 use crate::kanban::core::allowlist::RealPaths;
+use crate::kanban::core::ledger::{month_of, EntryKind};
 use crate::kanban::core::precedent::{
-    vouch, whole_permission_wait, whole_question_wait, Auth, Precedent, Proxied, SessionPlace,
+    vouch, whole_permission_wait, whole_question_wait, Auth, Precedent, Precedents, Proxied,
+    SessionPlace,
 };
+use crate::kanban::core::relay::{self, Relay, Target};
 use crate::kanban::core::request::{
-    self, check_id, Found, LeftNonce, Nonce, OpenAsk, PaneNonces, Request, RequestKind, Sender,
-    Taken, Taking, Verdict, Waits,
+    self, check_id, Answering, Found, LeftNonce, Nonce, PaneNonces, Request, RequestKind, Sender,
+    Taken, Taking, Verdict, Waits, UNVOUCHED,
 };
 use crate::kanban::core::spawn::{is_main_root, launch_args, short_id};
 use serde_json::{json, Value};
@@ -25,14 +28,28 @@ pub struct Proof<'a> {
     pub precedents: &'a [String],
     pub reason: Option<&'a str>,
     pub relay: Option<&'a str>,
-    /// When the precedents are judged, unix milliseconds.
+    /// The option the main agent recommended when it asked, for a relay.
+    pub recommended: Option<&'a str>,
+    /// When the precedents or the relay are judged, unix milliseconds.
     pub now: u64,
 }
 
 impl Proof<'_> {
-    fn is_empty(&self) -> bool {
-        self.precedents.is_empty() && self.reason.is_none() && self.relay.is_none()
+    fn has_precedents(&self) -> bool {
+        !self.precedents.is_empty() || self.reason.is_some()
     }
+
+    fn is_empty(&self) -> bool {
+        !self.has_precedents() && self.relay.is_none() && self.recommended.is_none()
+    }
+}
+
+/// What an answer is sent for: the kind of precedents that may vouch for it,
+/// where it goes, and the answers in order.
+struct Sent<'a> {
+    proxied: Option<Proxied>,
+    target: Target,
+    answers: &'a [String],
 }
 
 /// Who sends an answer, the nonce the pane left with it, and what a model
@@ -84,6 +101,14 @@ fn answer(result: Result<Value, String>) -> Value {
     result.unwrap_or_else(|e| json!({ "error": e }))
 }
 
+fn target(session: &str, wait: &str, kind: EntryKind) -> Target {
+    Target {
+        session: session.to_string(),
+        wait: wait.to_string(),
+        kind,
+    }
+}
+
 fn taken_json(taken: &Taken) -> Value {
     match taken {
         Taken::Prompt { text, body, from } => {
@@ -111,13 +136,17 @@ fn taken_json(taken: &Taken) -> Value {
             text,
             from,
             via,
-        } => json!({
-            "kind": "decide",
-            "decision_at": decision_at,
-            "text": text,
-            "from": from.id(),
-            "via": via.id(),
-        }),
+            auth,
+        } => with_auth(
+            json!({
+                "kind": "decide",
+                "decision_at": decision_at,
+                "text": text,
+                "from": from.id(),
+                "via": via.id(),
+            }),
+            auth.as_ref(),
+        ),
     }
 }
 
@@ -170,30 +199,45 @@ impl KanbanRequests<'_> {
         })())
     }
 
-    /// What a model's answer is sent on, when its precedents vouch for it; a
-    /// person's answer carries nothing.
-    fn auth(
-        &self,
-        answerer: &Answerer,
-        proxied: Option<Proxied>,
-        answers: &[String],
-    ) -> Result<Option<Auth>, String> {
+    /// What a model's answer is sent on, when a relay or its precedents
+    /// vouch for it; a person's answer carries nothing.
+    fn auth(&self, answerer: &Answerer, sent: &Sent) -> Result<Option<Auth>, String> {
         let proof = answerer.proof;
         if answerer.from == Sender::Pane {
             if !proof.is_empty() {
                 return Err(
-                    "`--precedent`·`--reason`·`--relay` 는 `--from agent` 에만 붙여요".to_string(),
+                    "`--precedent`·`--reason`·`--relay`·`--recommended` 는 `--from agent` 에만 붙여요"
+                        .to_string(),
                 );
             }
             return Ok(None);
         }
-        let proxied = proxied.ok_or("결정 요청은 아직 대신 답하지 않아요".to_string())?;
-        if proof.relay.is_some() {
-            return Err("물어 받은 답(`--relay`)은 아직 받지 않아요".to_string());
+        if let Some(id) = proof.relay {
+            if proof.has_precedents() {
+                return Err(
+                    "물어 받은 답(`--relay`)과 선례(`--precedent`·`--reason`)는 함께 쓰지 않아요"
+                        .to_string(),
+                );
+            }
+            let relay = Relay::new(id, proof.recommended)?;
+            relay::check(
+                &read_book(self.ledger)?,
+                &relay,
+                &sent.target,
+                sent.answers,
+                proof.now,
+            )?;
+            return Ok(Some(Auth::Relay(relay)));
         }
+        if proof.recommended.is_some() {
+            return Err("추천(`--recommended`)은 물어 받은 답(`--relay`)에만 붙여요".to_string());
+        }
+        let proxied = sent.proxied.ok_or(
+            "결정 요청은 아직 대신 답하지 않아요 — 물어 받은 답(`--relay`)만 전달해요".to_string(),
+        )?;
         let Some(reason) = proof.reason.filter(|_| !proof.precedents.is_empty()) else {
             return Err(
-                "메인 에이전트의 답(`--from agent`)은 선례 `--precedent <질문 순번>:<장부 id>` 와 근거 `--reason` 이 있어야 해요"
+                "메인 에이전트의 답(`--from agent`)은 물어 받은 답 `--relay <장부 id>` 또는 선례 `--precedent <질문 순번>:<장부 id>` 와 근거 `--reason` 이 있어야 해요"
                     .to_string(),
             );
         };
@@ -202,32 +246,48 @@ impl KanbanRequests<'_> {
             .iter()
             .map(|p| Precedent::parse(p))
             .collect::<Result<Vec<_>, _>>()?;
-        let auth = Auth::new(precedents, reason)?;
+        let precedents = Precedents::new(precedents, reason)?;
         vouch(
             &read_book(self.ledger)?,
             proxied,
-            &auth.claims(answers)?,
+            &precedents.claims(sent.answers)?,
             None,
             proof.now,
         )?;
-        Ok(Some(auth))
+        Ok(Some(Auth::Precedents(precedents)))
     }
 
     fn queue_answer(
         &self,
         session: &str,
         answerer: Answerer,
-        sent: (Option<Proxied>, &[String]),
+        sent: Sent,
         request: impl FnOnce(Sender, Option<Nonce>) -> Result<Request, String>,
     ) -> Value {
-        let (proxied, answers) = sent;
         let request = (|| {
+            check_id("session", session)?;
             let nonce = answerer.nonce.map(Nonce::parse).transpose()?;
             let request = request(answerer.from, nonce)?;
-            let auth = self.auth(&answerer, proxied, answers)?;
+            let auth = self.auth(&answerer, &sent)?;
             Ok(request.with_auth(auth))
         })();
         self.queue(session, request)
+    }
+
+    /// Checks `relay` for the wait the taking session holds and spends it,
+    /// so no other answer goes on it.
+    fn spend_relay(
+        &self,
+        relay: &Relay,
+        target: &Target,
+        answers: &[String],
+        now: u64,
+    ) -> Result<(), String> {
+        relay::check(&read_book(self.ledger)?, relay, target, answers, now)?;
+        self.ledger.append(
+            &month_of(now),
+            &[relay::spend(relay, target, now).to_line()],
+        )
     }
 
     pub fn send(&self, session: &str, from: Sender, from_label: Option<&str>, text: &str) -> Value {
@@ -240,17 +300,25 @@ impl KanbanRequests<'_> {
 
     /// Leaves one answer per question for the open question `ask` names.
     pub fn reply(&self, session: &str, ask: &str, answers: &[String], answerer: Answerer) -> Value {
-        self.queue_answer(
-            session,
-            answerer,
-            (Some(Proxied::Question), answers),
-            |from, nonce| Request::answer(ask, answers, from, nonce),
-        )
+        let sent = Sent {
+            proxied: Some(Proxied::Question),
+            target: target(session, ask, EntryKind::Question),
+            answers,
+        };
+        self.queue_answer(session, answerer, sent, |from, nonce| {
+            Request::answer(ask, answers, from, nonce)
+        })
     }
 
     /// Leaves the reply to the decision that `at` names.
     pub fn decide(&self, session: &str, at: &str, text: &str, answerer: Answerer) -> Value {
-        self.queue_answer(session, answerer, (None, &[]), |from, nonce| {
+        let answers = [text.to_string()];
+        let sent = Sent {
+            proxied: None,
+            target: target(session, at, EntryKind::Decision),
+            answers: &answers,
+        };
+        self.queue_answer(session, answerer, sent, |from, nonce| {
             Request::decide(at, text, from, nonce)
         })
     }
@@ -263,33 +331,45 @@ impl KanbanRequests<'_> {
         answerer: Answerer,
     ) -> Value {
         let answers = [decision.to_string()];
-        self.queue_answer(
-            session,
-            answerer,
-            (Some(Proxied::Permission), &answers),
-            |from, nonce| Request::permit(request, decision, from, nonce),
-        )
+        let sent = Sent {
+            proxied: Some(Proxied::Permission),
+            target: target(session, request, EntryKind::Permission),
+            answers: &answers,
+        };
+        self.queue_answer(session, answerer, sent, |from, nonce| {
+            Request::permit(request, decision, from, nonce)
+        })
     }
 
-    /// Whether the precedents vouch for a model's verdict on the request as
-    /// the waiting session holds it.
+    /// Whether a model's verdict on `request` goes: on a relay of it, or on
+    /// precedents that vouch for it on the request as the waiting session
+    /// holds it.
     fn vet_permit(
         &self,
-        request: &str,
+        target: &Target,
         verdict: Verdict,
         auth: Option<&Auth>,
         wait: Option<&PermitWait>,
         now: u64,
     ) -> Result<(), String> {
-        let auth = auth.ok_or("메인 에이전트의 답에 선례가 없어요".to_string())?;
-        let wait = wait.ok_or("받는 세션이 원래 요청을 넘기지 않았어요".to_string())?;
-        let whole =
-            whole_permission_wait(request, &wait.tool, &wait.input, &wait.place, self.paths);
         let answers = [verdict.id().to_string()];
+        let precedents = match auth {
+            None => return Err(UNVOUCHED.to_string()),
+            Some(Auth::Relay(relay)) => return self.spend_relay(relay, target, &answers, now),
+            Some(Auth::Precedents(precedents)) => precedents,
+        };
+        let wait = wait.ok_or("받는 세션이 원래 요청을 넘기지 않았어요".to_string())?;
+        let whole = whole_permission_wait(
+            &target.wait,
+            &wait.tool,
+            &wait.input,
+            &wait.place,
+            self.paths,
+        );
         vouch(
             &read_book(self.ledger)?,
             Proxied::Permission,
-            &auth.claims(&answers)?,
+            &precedents.claims(&answers)?,
             Some(&whole),
             now,
         )
@@ -329,9 +409,13 @@ impl KanbanRequests<'_> {
                             let via = nonces.spend(RequestKind::Permit, from, nonce.as_ref());
                             let vouched = match from {
                                 Sender::Pane => Ok(()),
-                                Sender::Agent => {
-                                    self.vet_permit(request, verdict, auth.as_ref(), wait, now)
-                                }
+                                Sender::Agent => self.vet_permit(
+                                    &target(session, request, EntryKind::Permission),
+                                    verdict,
+                                    auth.as_ref(),
+                                    wait,
+                                    now,
+                                ),
                             };
                             match vouched {
                                 Err(reason) => json!({
@@ -394,7 +478,21 @@ impl KanbanRequests<'_> {
                 })
                 .collect();
             let book = OnceCell::new();
-            let vet = |ask: &OpenAsk, answers: &[String], auth: &Auth| {
+            let vet = |on: Answering, answers: &[String], auth: &Auth| {
+                let (precedents, ask) = match (auth, on) {
+                    (Auth::Relay(relay), Answering::Ask(ask)) => {
+                        let target = target(session, &ask.id, EntryKind::Question);
+                        return self.spend_relay(relay, &target, answers, now);
+                    }
+                    (Auth::Relay(relay), Answering::Decision(at)) => {
+                        let target = target(session, at, EntryKind::Decision);
+                        return self.spend_relay(relay, &target, answers, now);
+                    }
+                    (Auth::Precedents(_), Answering::Decision(_)) => {
+                        return Err("결정 요청은 대신 답하지 않아요".to_string())
+                    }
+                    (Auth::Precedents(precedents), Answering::Ask(ask)) => (precedents, ask),
+                };
                 let book = book
                     .get_or_init(|| read_book(self.ledger))
                     .as_ref()
@@ -406,7 +504,7 @@ impl KanbanRequests<'_> {
                 vouch(
                     book,
                     Proxied::Question,
-                    &auth.claims(answers)?,
+                    &precedents.claims(answers)?,
                     Some(&wait),
                     now,
                 )

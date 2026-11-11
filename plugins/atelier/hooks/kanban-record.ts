@@ -80,6 +80,8 @@ export type SessionRecord = {
   tasks?: Record<string, TaskRecord>
   todos?: TodoRecord[]
   asks?: Record<string, AskRecord>
+  /** The wait each open question was framed over, by tool_use_id, as `relay-frame` named it. */
+  relay_frames?: Record<string, { session: string; wait: string; kind: string }>
   /** The session's agent loops as `$.agent.list()` gave them last. */
   agents?: AgentRecord[]
 }

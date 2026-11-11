@@ -19,6 +19,7 @@ use crate::kanban::core::precedent::{Auth, SessionPlace};
 use crate::kanban::core::progress::{Activity, ItemStatus, WorkItem};
 use crate::kanban::core::prompt::PromptFact;
 use crate::kanban::core::question::{Ask, AskLengths, Question, QuestionOption};
+use crate::kanban::core::relay::Target;
 use crate::kanban::core::request::{
     check_id, LeftNonce, Nonce, OpenAsk, PaneNonces, RequestKind, Status, Verdict, Via, Waits,
 };
@@ -442,6 +443,10 @@ pub fn parse_ledger_facts(raw: &str) -> Result<Facts, String> {
                 .to_string(),
         ),
     }?;
+    let relay_frame = match value.get("relay_frame") {
+        None | Some(Value::Null) => None,
+        Some(frame) => Some(Target::from_json(frame)?),
+    };
     Ok(Facts {
         at,
         session: session.to_string(),
@@ -450,7 +455,24 @@ pub fn parse_ledger_facts(raw: &str) -> Result<Facts, String> {
         permission_mode,
         answered,
         auth,
+        relay_frame,
     })
+}
+
+/// What `relay-frame` takes: `{"questions": [...]}`, as the AskUserQuestion
+/// call holds them.
+pub fn parse_tool_questions(raw: &str) -> Result<Vec<Question>, String> {
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    value
+        .get("questions")
+        .and_then(Value::as_array)
+        .and_then(|questions| {
+            questions
+                .iter()
+                .map(|q| parse_question(q, TOOL_MULTI_SELECT))
+                .collect::<Option<Vec<_>>>()
+        })
+        .ok_or_else(|| "stdin has no readable `questions` array".to_string())
 }
 
 /// What `ledger bind` takes: the permission request's `tool` and the

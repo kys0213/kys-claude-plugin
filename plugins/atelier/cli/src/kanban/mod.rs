@@ -10,11 +10,11 @@ pub mod core;
 
 use crate::kanban::commands::inbox::{ClockIds, FsInbox, ThreadPause};
 use crate::kanban::commands::ledger::{KanbanLedger, ListArgs};
-use crate::kanban::commands::ledger_store::FsLedger;
+use crate::kanban::commands::ledger_store::{read_book, FsLedger};
 use crate::kanban::commands::paths::FsPaths;
 use crate::kanban::commands::payload::{
     parse_answer_request, parse_bash_command, parse_pane_nonces, parse_permit_wait, parse_sessions,
-    parse_waits,
+    parse_tool_questions, parse_waits,
 };
 use crate::kanban::commands::records::{FsRecords, KanbanRecords, StatusQuery};
 use crate::kanban::commands::requests::{Answerer, KanbanRequests, PermitTiming, Proof};
@@ -25,7 +25,9 @@ use crate::kanban::core::board::{build, Action, Board, BoardParams, Card, Column
 use crate::kanban::core::detail::Detail;
 use crate::kanban::core::duration::parse_millis;
 use crate::kanban::core::layout::{fit, Layout};
+use crate::kanban::core::precedent::Book;
 use crate::kanban::core::question::{Ask, Question};
+use crate::kanban::core::relay::unused;
 use crate::kanban::core::repos::{group, Repo};
 use crate::kanban::core::request::Sender;
 use crate::kanban::core::status::{render_text, select, Format};
@@ -34,6 +36,7 @@ use crate::kanban::core::wait::{derive, Blocked, Place, Subject};
 use crate::shared::process::read_stdin_raw;
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
+use std::cell::OnceCell;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Parser)]
@@ -94,6 +97,13 @@ pub enum Commands {
     Forget {
         #[arg(long)]
         session: String,
+    },
+    /// An AskUserQuestion call's questions on stdin → them rewritten over the
+    /// wait their first line names, and that wait
+    RelayFrame {
+        /// Current time, unix milliseconds
+        #[arg(long)]
+        now: u64,
     },
     /// An open question and the picks made on the board → one answer per question
     Answer,
@@ -250,10 +260,14 @@ pub struct ProofArgs {
     /// Why the precedents fit, up to 200 characters
     #[arg(long, allow_hyphen_values = true)]
     reason: Option<String>,
-    /// The relayed answer's ledger entry id
+    /// The ledger entry id of the answer a person gave when asked, as the
+    /// wait's `relays` names it
     #[arg(long)]
     relay: Option<String>,
-    /// When the precedents are judged, unix milliseconds; the system clock when absent
+    /// The option recommended when the person was asked, with `--relay`
+    #[arg(long, allow_hyphen_values = true)]
+    recommended: Option<String>,
+    /// When the precedents or the relay are judged, unix milliseconds; the system clock when absent
     #[arg(long)]
     now: Option<u64>,
 }
@@ -264,6 +278,7 @@ impl ProofArgs {
             precedents: &self.precedents,
             reason: self.reason.as_deref(),
             relay: self.relay.as_deref(),
+            recommended: self.recommended.as_deref(),
             now: self.now.unwrap_or_else(now_millis),
         }
     }
@@ -406,7 +421,7 @@ fn repo_json(repo: &Repo) -> Value {
                 "subtitle": s.subtitle,
                 "last_line": s.last_line,
                 "delivery": s.delivery,
-                "wait": wait_json(s.waiting.as_ref(), &place),
+                "wait": wait_json(s.waiting.as_ref(), &place, None),
             })
         })
         .collect();
@@ -417,7 +432,43 @@ fn repo_json(repo: &Repo) -> Value {
     }))
 }
 
-fn wait_json(waiting: Option<&Waiting>, place: &Place) -> Value {
+/// The relays the ledger keeps for one session's waits, read once on demand.
+struct RelayBook {
+    book: OnceCell<Option<Book>>,
+    now: u64,
+}
+
+impl RelayBook {
+    fn new(now: u64) -> RelayBook {
+        RelayBook {
+            book: OnceCell::new(),
+            now,
+        }
+    }
+
+    /// The unused relays for `wait` of `session`; none when the ledger cannot be read.
+    fn json(&self, session: &str, wait: &str) -> Value {
+        let book = self
+            .book
+            .get_or_init(|| read_book(&FsLedger::from_env()).ok());
+        let found = book
+            .as_ref()
+            .map(|book| unused(book, session, wait, self.now))
+            .unwrap_or_default();
+        found
+            .iter()
+            .map(|r| json!({ "id": r.id, "answer": r.answers, "at": r.at }))
+            .collect()
+    }
+}
+
+/// `relays` lists what the wait may be answered on, for `status`; the
+/// board leaves it out.
+fn wait_json(
+    waiting: Option<&Waiting>,
+    place: &Place,
+    relays: Option<(&RelayBook, &str)>,
+) -> Value {
     let Some(waiting) = waiting else {
         return Value::Null;
     };
@@ -459,6 +510,12 @@ fn wait_json(waiting: Option<&Waiting>, place: &Place) -> Value {
     }
     out["proxyable"] = json!(wait.proxyable());
     out["blocked"] = json!(wait.blocked.iter().map(Blocked::id).collect::<Vec<_>>());
+    if let Some((book, session)) = relays {
+        out["relays"] = match &wait.id {
+            Some(id) => book.json(session, id),
+            None => json!([]),
+        };
+    }
     out
 }
 
@@ -534,6 +591,7 @@ fn with_records<T>(run: impl FnOnce(&KanbanRecords) -> T) -> T {
     run(&KanbanRecords {
         store: &store,
         inbox: &inbox,
+        paths: &FsPaths,
     })
 }
 
@@ -544,7 +602,7 @@ fn now_millis() -> u64 {
         .unwrap_or(0)
 }
 
-fn status_entry_json(column: Column, card: &Card) -> Value {
+fn status_entry_json(column: Column, card: &Card, relays: &RelayBook) -> Value {
     let place = Place {
         repo_root: card.repo_root.as_deref(),
         cwd: &card.cwd,
@@ -562,7 +620,7 @@ fn status_entry_json(column: Column, card: &Card) -> Value {
         "actions": action_ids(&card.actions),
         "last_line": card.last_line,
         "delivery": card.detail.delivery,
-        "wait": wait_json(card.waiting.as_ref(), &place),
+        "wait": wait_json(card.waiting.as_ref(), &place, Some((relays, &card.session_id))),
     }))
 }
 
@@ -582,10 +640,11 @@ fn run_status(
         .and_then(|format| with_records(|r| r.status(&query)).map(|board| (format, board)));
     match shown {
         Ok((Format::Json, board)) => {
+            let relays = RelayBook::new(now);
             let sessions: Vec<Value> = select(&board, query.session.as_deref())
                 .into_iter()
                 .flat_map(|(column, cards)| cards.into_iter().map(move |card| (column, card)))
-                .map(|(column, card)| status_entry_json(column, card))
+                .map(|(column, card)| status_entry_json(column, card, &relays))
                 .collect();
             json!({ "now": now, "sessions": sessions }).to_string()
         }
@@ -781,6 +840,13 @@ pub fn run(cli: Cli) -> i32 {
         } => println!("{}", run_status(columns, session, now, &format)),
         Commands::RecordPath { session } => println!("{}", with_records(|r| r.path(&session))),
         Commands::Forget { session } => println!("{}", with_records(|r| r.forget(&session))),
+        Commands::RelayFrame { now } => {
+            let out = match parse_tool_questions(&read_stdin_raw()) {
+                Ok(questions) => with_records(|r| r.relay_frame(&questions, now)),
+                Err(error) => json!({ "error": error }),
+            };
+            println!("{out}");
+        }
         Commands::Answer => {
             let out = match parse_answer_request(&read_stdin_raw())
                 .and_then(|(questions, picks)| compose(&questions, &picks))

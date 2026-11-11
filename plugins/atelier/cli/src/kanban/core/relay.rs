@@ -1,0 +1,566 @@
+//! Relays: the answer a person gave to a question the main agent asked about
+//! another session's wait. The question names the wait on its first line;
+//! `frame` turns that line into a fixed header over the wait as its session
+//! recorded it, and the person's answer is kept as relay entries bound to the
+//! wait. An agent answer sent on a relay passes `check` for that wait only,
+//! within 30 minutes, once, with the answer the person gave; the sending CLI
+//! and the session that takes the answer judge with the same `check`.
+
+use super::board::{WaitOn, Waiting};
+use super::detail::WAIT_FIELDS;
+use super::ledger::{DecidedBy, Entry, EntryKind};
+use super::matchkey::{answer_fp, digest};
+use super::precedent::Book;
+use super::question::{Question, QuestionOption};
+use super::request::{check_id, Verdict};
+use super::text::defuse_marker;
+use super::wait::{Subject, Wait};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+const VERSION: u64 = 1;
+pub const RELAY_TTL_MS: u64 = 30 * 60 * 1_000;
+const MARKER_OPEN: &str = "[kanban-wait ";
+const SHORT_ID_CHARS: usize = 8;
+const ALLOW_LABEL: &str = "허용";
+const DENY_LABEL: &str = "거부";
+const ID_BYTES: usize = 4;
+const MAX_RECOMMENDED_CHARS: usize = 500;
+
+/// The wait a relay answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Target {
+    pub session: String,
+    pub wait: String,
+    pub kind: EntryKind,
+}
+
+impl Target {
+    pub fn to_json(&self) -> Value {
+        json!({ "session": self.session, "wait": self.wait, "kind": self.kind.id() })
+    }
+
+    pub fn from_json(value: &Value) -> Result<Target, String> {
+        let field = |name: &str| {
+            value
+                .get(name)
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("relay target has no `{name}`"))
+        };
+        let session = field("session")?;
+        let wait = field("wait")?;
+        check_id("session", session)?;
+        check_id("wait", wait)?;
+        let kind = EntryKind::parse(field("kind")?)
+            .ok_or_else(|| "relay target `kind` is question, permission or decision".to_string())?;
+        Ok(Target {
+            session: session.to_string(),
+            wait: wait.to_string(),
+            kind,
+        })
+    }
+}
+
+/// The relay an agent answer names, and the option the main agent
+/// recommended when it asked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Relay {
+    pub id: String,
+    pub recommended: Option<String>,
+}
+
+impl Relay {
+    pub fn new(id: &str, recommended: Option<&str>) -> Result<Relay, String> {
+        check_id("ledger entry", id)?;
+        let recommended = match recommended.map(str::trim) {
+            None => None,
+            Some("") => return Err("추천(--recommended)이 비어 있어요".to_string()),
+            Some(r) if r.chars().count() > MAX_RECOMMENDED_CHARS => {
+                return Err(format!(
+                    "추천(--recommended)이 {MAX_RECOMMENDED_CHARS}자를 넘어요"
+                ))
+            }
+            Some(r) => Some(r.to_string()),
+        };
+        Ok(Relay {
+            id: id.to_string(),
+            recommended,
+        })
+    }
+
+    pub fn to_json(&self) -> Value {
+        match &self.recommended {
+            Some(recommended) => json!({ "relay": self.id, "recommended": recommended }),
+            None => json!({ "relay": self.id }),
+        }
+    }
+
+    pub fn from_json(value: &Value) -> Option<Relay> {
+        let recommended = match value.get("recommended") {
+            None | Some(Value::Null) => None,
+            Some(r) => Some(r.as_str()?),
+        };
+        Relay::new(value.get("relay")?.as_str()?, recommended).ok()
+    }
+}
+
+/// The answer a relay keeps for what a person picked: a permission's label
+/// stands for its verdict.
+pub fn relay_answer(kind: EntryKind, picked: &str) -> String {
+    match (kind, picked.trim()) {
+        (EntryKind::Permission, ALLOW_LABEL) => Verdict::Allow.id().to_string(),
+        (EntryKind::Permission, DENY_LABEL) => Verdict::Deny.id().to_string(),
+        _ => picked.to_string(),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum UsedTag {
+    RelayUsed,
+}
+
+/// A relay an answer went on, as the session that took the answer left it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelayUse {
+    v: u64,
+    #[serde(rename = "type")]
+    tag: UsedTag,
+    pub id: String,
+    pub at: u64,
+    pub relay: String,
+    pub session: String,
+    pub wait: String,
+}
+
+impl RelayUse {
+    pub fn parse(line: &str) -> Option<RelayUse> {
+        serde_json::from_str::<RelayUse>(line)
+            .ok()
+            .filter(|u| u.v == VERSION)
+    }
+
+    pub fn to_line(&self) -> String {
+        serde_json::to_string(self).expect("a relay use serializes")
+    }
+}
+
+/// The line that spends `relay` on `target` at `now`.
+pub fn spend(relay: &Relay, target: &Target, now: u64) -> RelayUse {
+    let suffix = digest(
+        &[&relay.id, &target.session, &target.wait, &now.to_string()],
+        ID_BYTES,
+    );
+    RelayUse {
+        v: VERSION,
+        tag: UsedTag::RelayUsed,
+        id: format!("U{now}-{suffix}"),
+        at: now,
+        relay: relay.id.clone(),
+        session: target.session.clone(),
+        wait: target.wait.clone(),
+    }
+}
+
+fn is_relay(entry: &Entry) -> bool {
+    entry.target_session.is_some()
+        && entry.target_wait.is_some()
+        && entry.decided_by == Some(DecidedBy::Human)
+}
+
+/// The entries one person's answer left, one per question, in order.
+fn group<'a>(book: &'a Book, first: &Entry) -> Vec<&'a Entry> {
+    let mut group: Vec<&Entry> = book
+        .entries()
+        .iter()
+        .filter(|e| {
+            is_relay(e)
+                && e.session == first.session
+                && e.wait_id == first.wait_id
+                && e.at == first.at
+                && e.target_session == first.target_session
+                && e.target_wait == first.target_wait
+        })
+        .collect();
+    group.sort_by_key(|e| e.q_index);
+    group
+}
+
+fn is_used(book: &Book, group: &[&Entry]) -> bool {
+    book.relay_uses()
+        .iter()
+        .any(|u| group.iter().any(|e| e.id == u.relay))
+}
+
+fn is_fresh(at: u64, now: u64) -> bool {
+    at <= now && now - at <= RELAY_TTL_MS
+}
+
+/// Whether `answers` may go to `target` on `relay` at `now`.
+pub fn check(
+    book: &Book,
+    relay: &Relay,
+    target: &Target,
+    answers: &[String],
+    now: u64,
+) -> Result<(), String> {
+    let id = &relay.id;
+    let entry = book
+        .entry(id)
+        .ok_or_else(|| format!("장부에 물어 받은 답 `{id}` 가 없어요"))?;
+    if !is_relay(entry) {
+        return Err(format!("`{id}` 는 물어 받은 답이 아니에요"));
+    }
+    let group = group(book, entry);
+    if is_used(book, &group) {
+        return Err(format!("물어 받은 답 `{id}` 는 이미 전달했어요"));
+    }
+    if !is_fresh(entry.at, now) {
+        return Err(format!("물어 받은 답 `{id}` 는 받은 지 30분이 지났어요"));
+    }
+    let bound = entry.target_session.as_deref() == Some(target.session.as_str())
+        && entry.target_wait.as_deref() == Some(target.wait.as_str())
+        && entry.kind == target.kind;
+    if !bound {
+        return Err(format!("물어 받은 답 `{id}` 는 다른 대기의 답이에요"));
+    }
+    if group.len() != answers.len() {
+        return Err("답 수가 물어 받은 답과 달라요".to_string());
+    }
+    for (index, (kept, sent)) in group.iter().zip(answers).enumerate() {
+        if answer_fp(&relay_answer(target.kind, sent)) != kept.answer_fp {
+            return Err(format!("{}번 답이 물어 받은 답과 달라요", index + 1));
+        }
+    }
+    Ok(())
+}
+
+/// A relay not yet sent on, as `status` lists it for its wait.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unused {
+    pub id: String,
+    pub answers: Vec<String>,
+    pub at: u64,
+}
+
+/// The relays `wait` of `session` may still be answered on at `now`, newest first.
+pub fn unused(book: &Book, session: &str, wait: &str, now: u64) -> Vec<Unused> {
+    let mut found: Vec<Unused> = book
+        .entries()
+        .iter()
+        .filter(|e| {
+            is_relay(e)
+                && e.q_index.unwrap_or(0) == 0
+                && e.target_session.as_deref() == Some(session)
+                && e.target_wait.as_deref() == Some(wait)
+                && is_fresh(e.at, now)
+        })
+        .filter_map(|first| {
+            let group = group(book, first);
+            (!is_used(book, &group)).then(|| Unused {
+                id: first.id.clone(),
+                answers: group.iter().map(|e| e.answer.clone()).collect(),
+                at: first.at,
+            })
+        })
+        .collect();
+    found.sort_by(|a, b| b.at.cmp(&a.at).then_with(|| b.id.cmp(&a.id)));
+    found
+}
+
+/// A session on the board with the wait it shows, as `frame` looks it up.
+pub struct Shown<'a> {
+    pub label: &'a str,
+    pub session_id: &'a str,
+    pub waiting: &'a Waiting,
+    pub wait: &'a Wait,
+}
+
+/// The session and wait the first line of `text` names, when that line is a
+/// marker and nothing else.
+fn marker(text: &str) -> Option<(&str, &str)> {
+    let line = text.lines().next()?.trim();
+    let inner = line.strip_prefix(MARKER_OPEN)?.strip_suffix(']')?;
+    let mut words = inner.split(' ');
+    let (session, wait) = (words.next()?, words.next()?);
+    let named = words.next().is_none()
+        && check_id("session", session).is_ok()
+        && check_id("wait", wait).is_ok();
+    named.then_some((session, wait))
+}
+
+/// How much of a recorded text the record kept.
+enum Kept {
+    Whole,
+    Cut { orig: u64, kept: u64 },
+    Unknown,
+}
+
+fn kept(stored: &str, orig: Option<u64>) -> Kept {
+    let kept = stored.encode_utf16().count() as u64;
+    match orig {
+        None => Kept::Unknown,
+        Some(orig) if kept < orig => Kept::Cut { orig, kept },
+        Some(_) => Kept::Whole,
+    }
+}
+
+fn cut_note(texts: &[Kept]) -> String {
+    texts
+        .iter()
+        .find_map(|t| match t {
+            Kept::Whole => None,
+            Kept::Cut { orig, kept } => Some(format!(" (잘림 — 원래 {orig}자 중 앞 {kept}자)")),
+            Kept::Unknown => Some(" (잘림 — 원래 길이를 몰라요)".to_string()),
+        })
+        .unwrap_or_default()
+}
+
+/// What the wait asks, one block per question the person is asked, the
+/// options its answers must be, and how much of each text was kept.
+struct Asked {
+    kind: EntryKind,
+    blocks: Vec<String>,
+    options: Vec<Option<Vec<QuestionOption>>>,
+    multi_select: Vec<bool>,
+    kept: Vec<Kept>,
+}
+
+fn options_line(labels: impl Iterator<Item = String>) -> String {
+    format!("선택지: {}", labels.collect::<Vec<_>>().join(" / "))
+}
+
+fn verdict_options() -> Vec<QuestionOption> {
+    [ALLOW_LABEL, DENY_LABEL]
+        .map(|label| QuestionOption {
+            label: label.to_string(),
+            description: None,
+        })
+        .to_vec()
+}
+
+fn asked(on: &WaitOn) -> Option<Asked> {
+    match on {
+        WaitOn::Question(ask) => {
+            let lengths = ask.orig_len.as_ref();
+            let mut kept_texts = Vec::new();
+            for (i, q) in ask.questions.iter().enumerate() {
+                kept_texts.push(kept(
+                    &q.question,
+                    lengths.and_then(|l| l.question.get(i).copied()),
+                ));
+                for (j, o) in q.options.iter().enumerate() {
+                    let orig = lengths.and_then(|l| l.labels.get(i)?.get(j).copied());
+                    kept_texts.push(kept(&o.label, orig));
+                }
+            }
+            Some(Asked {
+                kind: EntryKind::Question,
+                blocks: ask
+                    .questions
+                    .iter()
+                    .map(|q| {
+                        let labels = q.options.iter().map(|o| o.label.clone());
+                        format!("{}\n{}", q.question, options_line(labels))
+                    })
+                    .collect(),
+                options: ask
+                    .questions
+                    .iter()
+                    .map(|q| Some(q.options.clone()))
+                    .collect(),
+                multi_select: ask.questions.iter().map(|q| q.multi_select).collect(),
+                kept: kept_texts,
+            })
+        }
+        WaitOn::Permission(ask) => {
+            let input = &ask.request.input;
+            let shown = WAIT_FIELDS.iter().find_map(|field| {
+                input
+                    .iter()
+                    .find(|(name, value)| name == field && !value.trim().is_empty())
+            });
+            let tool = &ask.request.tool;
+            let (block, kept_text) = match shown {
+                Some((name, value)) => {
+                    let orig = ask
+                        .input_len
+                        .as_ref()
+                        .and_then(|lengths| lengths.iter().find(|(n, _)| n == name))
+                        .map(|(_, len)| *len);
+                    (format!("{tool}: {value}"), kept(value, orig))
+                }
+                None => (tool.clone(), Kept::Whole),
+            };
+            Some(Asked {
+                kind: EntryKind::Permission,
+                blocks: vec![block],
+                options: vec![Some(verdict_options())],
+                multi_select: vec![false],
+                kept: vec![kept_text],
+            })
+        }
+        WaitOn::Decision(decision) => {
+            let lengths = decision.orig_len.as_ref();
+            let mut kept_texts = vec![kept(&decision.ask, lengths.map(|l| l.ask))];
+            for (j, option) in decision.options.iter().enumerate() {
+                let orig = lengths.and_then(|l| l.options.get(j).copied());
+                kept_texts.push(kept(option, orig));
+            }
+            let block = if decision.options.is_empty() {
+                decision.ask.clone()
+            } else {
+                format!(
+                    "{}\n{}",
+                    decision.ask,
+                    options_line(decision.options.iter().cloned())
+                )
+            };
+            let options = (2..=4).contains(&decision.options.len()).then(|| {
+                decision
+                    .options
+                    .iter()
+                    .map(|label| QuestionOption {
+                        label: label.clone(),
+                        description: None,
+                    })
+                    .collect()
+            });
+            Some(Asked {
+                kind: EntryKind::Decision,
+                blocks: vec![block],
+                options: vec![options],
+                multi_select: vec![false],
+                kept: kept_texts,
+            })
+        }
+        WaitOn::Input => None,
+    }
+}
+
+fn kind_label(kind: EntryKind) -> &'static str {
+    match kind {
+        EntryKind::Question => "질문",
+        EntryKind::Permission => "권한 요청",
+        EntryKind::Decision => "결정 요청",
+    }
+}
+
+fn defused_option(option: &QuestionOption) -> QuestionOption {
+    QuestionOption {
+        label: option.label.clone(),
+        description: option.description.as_deref().map(defuse_marker),
+    }
+}
+
+fn sorted_labels(options: &[QuestionOption]) -> Vec<&str> {
+    let mut labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
+    labels.sort_unstable();
+    labels
+}
+
+/// The options the person picks from: the main agent's, in its order and
+/// with its descriptions, when they are the wait's own labels; else the
+/// wait's own.
+fn options_for(
+    given: &[QuestionOption],
+    required: Option<&[QuestionOption]>,
+) -> Vec<QuestionOption> {
+    let Some(required) = required else {
+        return given.iter().map(defused_option).collect();
+    };
+    let source = if sorted_labels(given) == sorted_labels(required) {
+        given
+    } else {
+        required
+    };
+    source.iter().map(defused_option).collect()
+}
+
+fn joined(parts: &[&str]) -> String {
+    parts
+        .iter()
+        .filter(|p| !p.trim().is_empty())
+        .copied()
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// The questions rewritten over the wait their first line names, and that
+/// wait; `None` when they name none they may be bound to, and an error when
+/// the wait named is not on the board.
+pub fn frame(
+    questions: &[Question],
+    board: &[Shown],
+) -> Result<Option<(Vec<Question>, Target)>, String> {
+    let Some((session, wait)) = questions.first().and_then(|q| marker(&q.question)) else {
+        return Ok(None);
+    };
+    let shown = board
+        .iter()
+        .find(|s| s.session_id == session && s.wait.id.as_deref() == Some(wait))
+        .ok_or_else(|| format!("표지가 가리키는 대기 `{session} {wait}` 를 찾지 못했어요"))?;
+    let Some(asked) = asked(&shown.waiting.on) else {
+        return Ok(None);
+    };
+    if matches!(shown.wait.subject, Subject::Input) || asked.blocks.len() != questions.len() {
+        return Ok(None);
+    }
+    let short: String = shown.session_id.chars().take(SHORT_ID_CHARS).collect();
+    let header = format!(
+        "칸반 대기 · {} · {short} · {}{}",
+        defuse_marker(shown.label),
+        kind_label(asked.kind),
+        cut_note(&asked.kept)
+    );
+    let rewritten = questions
+        .iter()
+        .enumerate()
+        .map(|(i, given)| {
+            let block = defuse_marker(&asked.blocks[i]);
+            let text = if i == 0 {
+                let body = given.question.split_once('\n').map_or("", |(_, rest)| rest);
+                let head = format!("{header}\n{block}");
+                joined(&[&head, &defuse_marker(body)])
+            } else {
+                joined(&[&block, &defuse_marker(&given.question)])
+            };
+            Question {
+                question: text,
+                header: defuse_marker(&given.header),
+                multi_select: asked.multi_select[i],
+                options: options_for(&given.options, asked.options[i].as_deref()),
+            }
+        })
+        .collect();
+    let target = Target {
+        session: session.to_string(),
+        wait: wait.to_string(),
+        kind: asked.kind,
+    };
+    Ok(Some((rewritten, target)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_marker_is_the_first_line_alone_with_two_ids() {
+        assert_eq!(marker("[kanban-wait s w]\nbody"), Some(("s", "w")));
+        assert_eq!(marker("  [kanban-wait s w]  "), Some(("s", "w")));
+        assert_eq!(marker("x [kanban-wait s w]"), None);
+        assert_eq!(marker("[kanban-wait s w x]"), None);
+        assert_eq!(marker("[kanban-wait s]"), None);
+        assert_eq!(marker("[kanban-wait s w/x]"), None);
+        assert_eq!(marker("body\n[kanban-wait s w]"), None);
+    }
+
+    #[test]
+    fn a_permission_label_stands_for_its_verdict() {
+        assert_eq!(relay_answer(EntryKind::Permission, "허용"), "allow");
+        assert_eq!(relay_answer(EntryKind::Permission, "거부"), "deny");
+        assert_eq!(relay_answer(EntryKind::Permission, "allow"), "allow");
+        assert_eq!(relay_answer(EntryKind::Question, "허용"), "허용");
+    }
+}

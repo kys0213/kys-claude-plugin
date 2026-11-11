@@ -147,19 +147,42 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   - 결정 요청: `atelier kanban decide --session <id> --at <결정 id> --text <답> --from pane` — 상세에서 직접 입력한
     글도 그 결정의 답으로 갑니다. 결정 id 는 `wait.id` 입니다.
   - 권한 요청: `atelier kanban permit --session <id> --request <요청 id> --decision allow|deny --from pane`
-  - `--from agent`(메인 에이전트의 답)는 선례를 근거로 한 질문 답과 권한 허용만 받습니다:
+  - `--from agent`(메인 에이전트의 답)는 물어 받은 답(`--relay`) 또는 선례(`--precedent`·`--reason`) 중 정확히
+    하나를 붙여야 받습니다.
+  - 선례: 질문 답과 권한 허용만 받습니다 —
     `reply … --from agent --precedent <질문 순번>:<장부 id>… --reason <200자 이하> [--now <ms>]`,
     `permit … --decision allow --from agent --precedent 1:<장부 id>… --reason …`. 질문마다 선례 1~5건을 줍니다.
     보내는 CLI 가 장부로 먼저 확인합니다 — 선례가 사람이 선택지에서 직접 고른 90일 안의 결정인지, 한 질문의 선례가
     같은 결정 키인지, 보낸 답이 선례 답과 같은 지문인지(권한은 `allow` 만), 그 키가 아래 `ledger match` 로 `eligible` 이고
-    그 종류가 대신 답하기 단계(`act`)인지. 하나라도 아니면 남기지 않습니다. 결정 요청(`decide`)과 물어 받은 답
-    (`--relay`)은 아직 거부합니다.
-  - 받는 세션은 같은 확인을 자기 원래 대기로 다시 합니다. 질문은 `inbox take` 가 stdin 으로 받은 질문 원문과 세션
+    그 종류가 대신 답하기 단계(`act`)인지. 하나라도 아니면 남기지 않습니다. 결정 요청(`decide`)은 선례로 받지 않습니다.
+  - 물어 받은 답: 사람이 메인 대화에서 고른 답을 그 대기에 전달합니다 — `reply …`·`permit …`·`decide …` 에
+    `--from agent --relay <장부 id> [--recommended <물을 때 추천한 선택지>] [--now <ms>]`. 장부 id 는 아래
+    `status` 의 `wait.relays[].id` 입니다. 사람이 직접 답한 것이라 대신 답하기 단계(`act`)·대신 답할 수 있는 대기인지와
+    상관없이 받고, 결정 요청도 받습니다. 보내는 CLI 가 장부로 먼저 확인합니다 — 물어 받은 답인지, 아직 전달하지
+    않았는지, 받은 지 30분 안인지, 이 `--session` 과 대기(`--ask`·`--request`·`--at`)의 답인지, 보낸 답이 사람이 고른
+    답과 같은 지문인지(권한은 `허용`→`allow`, `거부`→`deny`).
+  - 받는 세션은 같은 확인을 자기 원래 대기로 다시 합니다. 물어 받은 답은 같은 확인을 통과하면 장부에 "썼음"
+    (`relay_used`) 줄을 남겨 다시 쓸 수 없게 하고, 그 답은 사람의 결정(`human`, 들어온 길 `agent`)으로 남으며 물어 받은
+    답 id(`relay`)와 추천(`recommended`), 추천을 그대로 골랐는지(`approved`)가 함께 남습니다.
+  - 선례로 보낸 답도 받는 세션이 자기 원래 대기로 다시 확인합니다. 질문은 `inbox take` 가 stdin 으로 받은 질문 원문과 세션
     위치(`place`)로, 권한은 `inbox wait-permit --wait-stdin`(stdin `{nonces, place, permission: {tool, input}}`, 입력은
     잘리지 않은 그대로)으로 결정 키·대신 답할 수 있는지(경로는 링크를 따라간 실제 위치로)를 판정하고, 선례 키가 그
     질문·요청의 키와 같고 질문 답이 원래 선택지 라벨 중 하나일 때만 씁니다. 아니면 `refused` 와 이유(`reason`)를 남기고
     버립니다(`대리 조건이 맞지 않아 버렸어요`). 원래 대기를 넘기지 않는 옛 모드(`--nonces-stdin`)는 메인 에이전트의
     답을 모두 버립니다. 쓴 답은 장부에 대리로 남고, 그 질문의 선례 id(`precedents`)와 근거(`reason`)가 함께 남습니다.
+- **대기 표지와 머리말**: 메인 에이전트가 다른 세션의 대기를 사용자에게 물을 때 AskUserQuestion 의 첫 질문 첫 줄을
+  `[kanban-wait <세션 id> <대기 id>]` 로 씁니다(대기 하나에 질문 하나, 질문 대기면 그 질문 수만큼 같은 순서로; 권한·결정
+  요청은 질문 하나). 모드가 그 질문을 띄우기 전에 `atelier kanban relay-frame --now <ms>`(stdin `{questions}` →
+  `{questions, target}`)에 넘기고, CLI 가 기록 사본에서 그 대기를 찾아 표지 줄을 `칸반 대기 · <레포> · <세션 짧은 id> ·
+  <질문|권한 요청|결정 요청>` 머리말로 바꾸고 그 아래에 기록 사본의 원문(권한은 `도구: 대상`, 질문·결정은 질문과 선택지)을
+  붙입니다. 기록이 원문을 잘랐으면 머리말 끝에 `(잘림 — 원래 N자 중 앞 M자)` 를 붙입니다. 선택지는 그 대기의 라벨(권한은
+  `허용`·`거부`)이고, 메인 에이전트가 같은 라벨을 다른 순서로 줬으면 그 순서와 설명을 씁니다. 나머지 글의 표지 문자열은
+  무력화합니다. 첫 줄이 표지가 아니거나(둘째 질문 이후의 표지·본문의 표지는 효력 없음), 질문 수가 대기와 다르면
+  질문을 그대로 두고(`target: null`), 표지가 가리키는 대기가 없으면 `{error}` 입니다. 어느 쪽이든, 그리고 CLI 가 실패하거나
+  엔진이 다시 쓴 질문을 받지 않으면 모드는 원래 질문을 띄우고 대기에 묶지 않습니다. 묶은 질문은 기록의
+  `relay_frames[<tool_use_id>]` 에 대상이 남고, 사람이 그 질문 화면에서 직접 답했거나 pane 에서 답했을 때만 장부에 물어 받은
+  답(대상 `target_session`·`target_wait`, 결정 키 없음 — 선례로 세지 않음)이 남습니다. 메인 에이전트의 답이나 셸 명령의
+  답으로 끝났거나 자리를 비운 사이 닫혔으면 남지 않습니다. 서브에이전트의 질문은 묶지 않습니다.
 - **사람 위장 막기**: 모델·서브에이전트의 Bash 명령에 `kanban` 이 들어 있으면 모드가 `atelier kanban guard-bash`
   (stdin `{command}` → `{deny}`)로 확인합니다. `reply`·`permit`·`decide`·`send` 에 `--from pane` 을 붙인 호출과
   모드만 부르는 `forget`·`ledger record`·`ledger bind`·`ledger prune`·`relay-frame` 은 막습니다. 셸 낱말로 판정하므로 변수·eval·스크립트 파일로
@@ -188,7 +211,8 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
     답이어야 하고(다른 답의 수가 `conflicts`), 키가 꺼져 있지 않아야 `eligible` 입니다. `reasons` 는 `support`·
     `conflict`·`disabled` 입니다. `mode` 는 그 종류의 단계(`shadow`·`act`)로, 사람이 입력한 위임 설정 중 가장 최근 것이
     `act` 이고 그 뒤 7일 안에 대리 답을 2번 뒤집지 않았을 때만 `act` 입니다. 결정 요청은 늘 `shadow` 입니다.
-    위임 설정을 남기는 명령은 아직 없어서 지금은 모든 종류가 `shadow` 이고, 메인 에이전트의 답은 받지 않습니다.
+    위임 설정을 남기는 명령은 아직 없어서 지금은 모든 종류가 `shadow` 이고, 메인 에이전트의 선례 답은 받지 않습니다
+    (물어 받은 답은 받습니다).
   - `atelier kanban ledger revoke --entry <대리 답 id> --reason <200자 이하> --now <ms>` 는 사용자가 뒤집은 대리 답을
     남기고 그 결정 키를 끕니다. 대리 답만 뒤집을 수 있고, 뒤집은 뒤 그 키에 사람의 직접 결정 2건이 같은 답이면 다시
     켜집니다. `ledger list` 는 뒤집기·위임 설정 줄을 보이지 않습니다.
@@ -206,7 +230,8 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   `guard:irreversible`·`decision`·`input`·`no_key`)입니다. 권한 요청은 레포 안의 파일 읽기 도구(`Read`·`Glob`·`Grep`)와,
   명령마다 정해 둔 읽기 옵션과 인자 개수만 쓴 셸 명령만 대신 답할 수 있는 종류이고 그 밖은 모두 거부합니다. 경로는
   심볼릭 링크를 따라간 실제 위치로 레포 안인지 봅니다. worker 가 쓴 글 안의 `[kanban-wait` 는 `［kanban-wait` 로
-  바꿔 내보내고, 결정 키는 바꾸기 전 글로 셉니다.
+  바꿔 내보내고, 결정 키는 바꾸기 전 글로 셉니다. `status` 의 `wait` 에는 그 대기에 아직 전달하지 않은 30분 안의
+  물어 받은 답 `relays: [{id, answer: [질문마다 답], at}]`(최신순)도 실립니다. 장부를 읽지 못하면 빈 목록입니다.
 - **오케스트레이터**: 읽기 전용 모드 툴 `kanban_board`(`column` 으로 컬럼을 고를 수 있음)로 레포별 세션 목록을 읽고, 쉬는 세션에는
   `atelier kanban send --session <id> --from agent --from-label <이 세션> --text <일>` 로 맡기고, 레포에
   세션이 없으면 `atelier kanban spawn --cwd <메인 작업 트리 루트> [--worktree <이름>] --text <일>` 로

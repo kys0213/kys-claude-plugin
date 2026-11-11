@@ -99,8 +99,15 @@ type World = {
   clock: ReturnType<typeof mock.clock>
   runs: Run[]
   shown: { value: boolean }
-  /** Answers the AskUserQuestion dialog the engine has open, as the person would. */
-  dialog: { answer: ((answers: Record<string, string>) => void) | null }
+  /**
+   * Answers the AskUserQuestion dialog the engine has open, as the person would; `questions` are the ones it drew.
+   * `refuses` stands for the engine refusing a call whose questions it says yes to.
+   */
+  dialog: {
+    answer: ((answers: Record<string, string>) => void) | null
+    questions?: unknown
+    refuses?: (questions: unknown) => boolean
+  }
   /** The file names in this session's inbox directory. */
   inbox: { files: string[] }
   /** What the plugin wrote to disk, by path; `fails` makes the next writes fail. */
@@ -235,6 +242,12 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   on('classic.Stop', () => ({}))
   on('tool.call', ($, e) => {
     if (e.tool === 'AskUserQuestion') {
+      if (dialog.refuses?.(e.questions) === true) {
+        throw new Error('the questions do not fit the tool schema')
+      }
+
+      dialog.questions = e.questions
+
       return new Promise(resolve => {
         dialog.answer = answers => resolve({ result: { questions: e.questions, answers } })
       })
@@ -2353,5 +2366,191 @@ describe('kanban ledger', () => {
 
     expect(r.result).toEqual({ questions: TOOL_QUESTIONS, answers: { 'Which color?': 'Red' } })
     expect(ledgerRuns(w)).toHaveLength(1)
+  })
+
+  test('a decide taken on a relay leaves what the CLI said it came on', async ($, on) => {
+    const w = world(
+      on,
+      routes({
+        'inbox dir': { dir: INBOX_DIR },
+        'inbox take': {
+          actions: [
+            { kind: 'decide', decision_at: String(START), text: '진행', from: 'agent', via: 'agent', auth: { relay: 'L1-r' } },
+          ],
+          results: [{ id: 'r1', kind: 'decide', status: 'delivered', via: 'agent' }],
+        },
+      }),
+    )
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await $.tool.call(WRAP_UP as never)
+    w.inbox.files = ['r1.json']
+    await w.clock.advance(2_000)
+
+    expect(recorded(w)).toEqual([
+      {
+        ...PLACE,
+        at: START + 2_000,
+        decision: DECISION,
+        answer: { path: 'inbox', via: 'agent', text: '진행', auth: { relay: 'L1-r' } },
+      },
+    ])
+  })
+})
+
+describe('kanban relay frame', () => {
+  const TARGET = { session: 'other', wait: 'tu-1', kind: 'question' }
+  const FRAMED = [
+    {
+      question: '칸반 대기 · project-b · other · 질문\nWhich color?\n선택지: Red / Blue\n\n색은?',
+      header: 'Color',
+      multiSelect: false,
+      options: [
+        { label: 'Red', description: 'warm' },
+        { label: 'Blue', description: 'cool' },
+      ],
+    },
+  ]
+  const FRAMED_ASK = {
+    tool_use_id: 'tu-9',
+    at: START,
+    questions: [{ ...COLOR, question: FRAMED[0]?.question }],
+    orig_len: { question: [FRAMED[0]?.question.length], labels: [[3, 4]] },
+  }
+  const ASKED = { tool_use_id: 'tu-9', at: START, questions: [COLOR], orig_len: { question: [12], labels: [[3, 4]] } }
+  const PLACE = { at: START, session: SELF, repo_root: null, cwd: '/work/project-a', permission_mode: null }
+  const CHOSE = { path: 'session', afk_timeout_ms: null, is_error: false, denied: false }
+
+  /** A CLI whose `relay-frame` answers `framed`; every other command answers the board. */
+  function framing(framed: unknown): FakeCli {
+    return argv =>
+      argv[2] === 'relay-frame'
+        ? { exitCode: 0, stdout: JSON.stringify(framed) }
+        : { exitCode: 0, stdout: JSON.stringify(BOARD) }
+  }
+
+  function recorded(w: World): unknown[] {
+    return w.runs.filter(r => r.argv[2] === 'ledger' && r.argv[3] === 'record').map(r => JSON.parse(r.stdin ?? '{}'))
+  }
+
+  function frames(w: World): unknown {
+    return (stored(w) as { relay_frames?: unknown }).relay_frames
+  }
+
+  /** Opens the dialog and lets the hooks settle; `call` ends once it is answered. */
+  async function ask($: { tool: { call: (e: never) => Promise<unknown> } }, w: World, e: object = {}) {
+    const call = $.tool.call({ tool: 'AskUserQuestion', questions: TOOL_QUESTIONS, tool_use_id: 'tu-9', ...e } as never)
+    await w.clock.settle()
+
+    return { call: call as Promise<{ result?: unknown }> }
+  }
+
+  test('the questions go to relay-frame and the dialog draws them as it rewrote them', async ($, on) => {
+    const w = world(on, framing({ questions: FRAMED, target: TARGET }))
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    const { call } = await ask($, w)
+
+    const run = w.runs.find(r => r.argv[2] === 'relay-frame')
+    expect(run?.argv.slice(0, 4)).toEqual(['atelier', 'kanban', 'relay-frame', '--now'])
+    expect(JSON.parse(run?.stdin ?? '{}')).toEqual({ questions: TOOL_QUESTIONS })
+    expect(w.dialog.questions).toEqual(FRAMED)
+    expect(frames(w)).toEqual({ 'tu-9': TARGET })
+
+    w.dialog.answer?.({ [FRAMED[0]?.question ?? '']: 'Blue' })
+    const r = await call
+
+    expect(r.result).toEqual({ questions: FRAMED, answers: { [FRAMED[0]?.question ?? '']: 'Blue' } })
+    expect(recorded(w)).toEqual([{ ...PLACE, question: FRAMED_ASK, relay_frame: TARGET, answer: { ...CHOSE, answers: ['Blue'] } }])
+    expect(frames(w)).toEqual({})
+  })
+
+  test('a framed question the pane answered is recorded with its frame too', async ($, on) => {
+    const answering = { exitCode: 0, stdout: '' }
+    const w = world(on, argv => {
+      if (argv[2] === 'relay-frame') {
+        return { exitCode: 0, stdout: JSON.stringify({ questions: FRAMED, target: TARGET }) }
+      }
+
+      if (argv[3] === 'dir') {
+        return { exitCode: 0, stdout: JSON.stringify({ dir: INBOX_DIR }) }
+      }
+
+      return argv[3] === 'take' ? answering : { exitCode: 0, stdout: JSON.stringify(BOARD) }
+    })
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    const { call } = await ask($, w)
+    const take = w.runs.length
+    answering.stdout = JSON.stringify({
+      actions: [{ kind: 'answer', tool_use_id: 'tu-9', answers: ['Red'], from: 'pane', via: 'pane' }],
+      results: [{ id: 'r1', kind: 'answer', status: 'delivered', via: 'pane' }],
+    })
+    w.inbox.files = ['r1.json']
+    await w.clock.advance(2_000)
+    const r = await call
+
+    const taken = w.runs.slice(take).find(x => x.argv[3] === 'take')
+    expect(JSON.parse(taken?.stdin ?? '{}').asks).toEqual([{ id: 'tu-9', questions: FRAMED }])
+    expect(r.result).toEqual({ questions: FRAMED, answers: { [FRAMED[0]?.question ?? '']: 'Red' } })
+    expect(recorded(w)).toEqual([
+      {
+        ...PLACE,
+        at: START + 2_000,
+        question: FRAMED_ASK,
+        relay_frame: TARGET,
+        answer: { path: 'inbox', via: 'pane', answers: ['Red'] },
+      },
+    ])
+  })
+
+  for (const [name, cli] of [
+    ['a missing CLI', (() => 'missing') as FakeCli],
+    ['a CLI that names no wait', framing({ questions: TOOL_QUESTIONS, target: null })],
+    ['a CLI error', framing({ error: '표지가 가리키는 대기 `other tu-1` 를 찾지 못했어요' })],
+  ] as const) {
+    test(`${name} draws the questions as asked and binds them to no wait`, async ($, on) => {
+      const w = world(on, cli)
+
+      await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+      const { call } = await ask($, w)
+
+      expect(w.dialog.questions).toEqual(TOOL_QUESTIONS)
+      expect(frames(w) ?? {}).toEqual({})
+
+      w.dialog.answer?.({ 'Which color?': 'Red' })
+      const r = await call
+
+      expect(r.result).toEqual({ questions: TOOL_QUESTIONS, answers: { 'Which color?': 'Red' } })
+      expect(recorded(w)).toEqual([{ ...PLACE, question: ASKED, answer: { ...CHOSE, answers: ['Red'] } }])
+    })
+  }
+
+  test('questions the engine refuses as rewritten are drawn as asked and bound to no wait', async ($, on) => {
+    const w = world(on, framing({ questions: FRAMED, target: TARGET }))
+    w.dialog.refuses = questions => JSON.stringify(questions) !== JSON.stringify(TOOL_QUESTIONS)
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    const { call } = await ask($, w)
+
+    expect(w.dialog.questions).toEqual(TOOL_QUESTIONS)
+    expect(frames(w)).toEqual({})
+    expect((stored(w).asks?.['tu-9'] as { questions: unknown }).questions).toEqual([COLOR])
+
+    w.dialog.answer?.({ 'Which color?': 'Red' })
+    const r = await call
+
+    expect(r.result).toEqual({ questions: TOOL_QUESTIONS, answers: { 'Which color?': 'Red' } })
+    expect(recorded(w)).toEqual([{ ...PLACE, question: ASKED, answer: { ...CHOSE, answers: ['Red'] } }])
+  })
+
+  test("a subagent's question is not framed", async ($, on) => {
+    const w = world(on, framing({ questions: FRAMED, target: TARGET }))
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await ask($, w, { agentId: 'a1' })
+
+    expect(w.runs.some(r => r.argv[2] === 'relay-frame')).toBe(false)
+    expect(w.dialog.questions).toEqual(TOOL_QUESTIONS)
   })
 })
