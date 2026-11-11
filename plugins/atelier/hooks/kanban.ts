@@ -669,6 +669,7 @@ export function registerKanban(on: On): void {
       Box({
         key: col.id,
         flexDirection: 'column',
+        rowGap: 1,
         ...frame,
         children: [
           Text({ bold: true, dimColor: col.cards.length === 0, children: [col.heading] }),
