@@ -106,6 +106,7 @@ type World = {
   aborted: string[]
   /** What `$.agent.list()` answers. */
   agents: { value: { id: string; description: string; type: string; status: string; teammateId?: string }[] }
+  invalidated: string[]
 }
 
 type CliOut = { exitCode: number; stdout: string } | 'missing'
@@ -131,6 +132,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   const submitted: string[] = []
   const aborted: string[] = []
   const agents: World['agents'] = { value: [] }
+  const invalidated: string[] = []
 
   on('store.get', ($, e) => ({ value: store[e.key] }))
   on('store.set', ($, e) => {
@@ -162,7 +164,11 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   on('ui.panes', () => ({
     value: shown.value ? [{ id: 'kanban', title: '세션 칸반', isShown: true, isFocused: false, isPlaced: true }] : [],
   }))
-  on('ui.invalidate', () => ({ value: undefined }))
+  on('ui.invalidate', ($, e) => {
+    invalidated.push(e.event)
+
+    return { value: undefined }
+  })
   on('process.run', async ($, e) => {
     runs.push({ argv: e.argv, stdin: e.init?.stdin })
     const out = await cli(e.argv)
@@ -213,7 +219,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
     return { result: {} }
   })
 
-  return { store, clock, runs, shown, dialog, inbox, messages, submitted, aborted, agents }
+  return { store, clock, runs, shown, dialog, inbox, messages, submitted, aborted, agents, invalidated }
 }
 
 type StoredRecord = {
@@ -254,6 +260,20 @@ const PANE = {
     bodyColumns: 100,
     placement: 'dock',
     scroll: { offset: 0, bodyRows: 30 },
+    view: {},
+  },
+} as const
+
+const BAND = {
+  plugin: 'atelier',
+  component: 'AbovePrompt',
+  props: {
+    hasSurvey: false,
+    isCollapsed: false,
+    isWorking: false,
+    maxRows: 10,
+    bodyColumns: 100,
+    scroll: { offset: 0, bodyRows: 9 },
     view: {},
   },
 } as const
@@ -691,6 +711,58 @@ describe('kanban pane', () => {
 
     expect(ran).toEqual({ text: '세션 칸반을 닫았어요.' })
     expect(w.shown.value).toBe(false)
+  })
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    test(`the band button on ${surface} opens the pane and then closes it`, async ($, on) => {
+      const w = world(on)
+
+      const closed = await $.ui.mount({ ...BAND, surface })
+      expect((await closed.find({ key: 'kanban:toggle' }))?.text).toBe('세션 칸반 열기')
+      await closed.press({ key: 'kanban:toggle' })
+      await closed.unmount()
+
+      expect(w.shown.value).toBe(true)
+      expect(boardRuns(w)).toHaveLength(1)
+
+      const open = await $.ui.mount({ ...BAND, surface })
+      expect((await open.find({ key: 'kanban:toggle' }))?.text).toBe('세션 칸반 닫기')
+      await open.press({ key: 'kanban:toggle' })
+      await open.unmount()
+
+      expect(w.shown.value).toBe(false)
+    })
+  }
+
+  test('closing the pane redraws the band', async ($, on) => {
+    const w = world(on)
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    w.invalidated.length = 0
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+
+    expect(w.shown.value).toBe(false)
+    expect(w.invalidated).toContain('ui.render')
+  })
+
+  test('the band button yields to a survey', async ($, on) => {
+    world(on)
+
+    const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, hasSurvey: true }, surface: 'desktop' })
+
+    expect(await ui.find({ key: 'kanban:toggle' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test("the band button sits above another plugin's band", async ($, on) => {
+    world(on)
+    on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'Text', props: {}, children: ['other band'] }) as never)
+
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+
+    expect(await ui.find({ key: 'kanban:toggle' })).toBeDefined()
+    expect((await ui.find({ type: 'Text', text: /other band/ }))?.text).toBe('other band')
+    await ui.unmount()
   })
 
   test('the timer refreshes only while the pane is shown', async ($, on) => {
