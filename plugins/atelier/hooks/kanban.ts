@@ -306,20 +306,27 @@ async function startSession($: EngineInterface, s: KanbanState): Promise<void> {
   }
 }
 
-function drawCard($: EngineInterface, s: KanbanState, els: ReturnType<EngineInterface['ui']['resolve']>, card: Card, isRow: boolean) {
+function openCard($: EngineInterface, s: KanbanState, sessionId: string): void {
+  toggleSelected($, s.detail, sessionId)
+  void $.ui.scroll({ in: PANE, to: 'start' }).catch(() => undefined)
+}
+
+function drawCard($: EngineInterface, s: KanbanState, els: ReturnType<EngineInterface['ui']['resolve']>, card: Card) {
   const { Box, Text, Button } = els
-  const isOpen = s.detail.selected === card.session_id
 
   return Box({
     key: card.session_id,
     flexDirection: 'column',
-    paddingLeft: isRow ? 0 : 2,
+    borderStyle: 'round',
+    borderDimColor: true,
+    hover: { borderDimColor: false },
+    paddingX: 1,
     children: [
       Button({
         key: `card:${card.session_id}`,
         plain: true,
-        onPress: () => toggleSelected($, s.detail, card.session_id),
-        children: [Text({ bold: card.is_self || isOpen, wrap: 'truncate', children: [`${isOpen ? '▾ ' : ''}${card.headline}`] })],
+        onPress: () => openCard($, s, card.session_id),
+        children: [Text({ bold: card.is_self, wrap: 'truncate', children: [card.headline] })],
       }),
       ...(card.subtitle ? [Text({ dimColor: true, wrap: 'truncate', children: [card.subtitle] })] : []),
       ...(card.progress ? [Text({ dimColor: true, wrap: 'truncate', children: [card.progress] })] : []),
@@ -651,11 +658,8 @@ export function registerKanban(on: On): void {
     const selected = cards.find(c => c.session_id === s.detail.selected)
     const asks = askBlocks($, s, els, cards)
 
-    if (!isRow && selected !== undefined) {
-      const detail = detailBlock($, s.detail, els, selected, {
-        label: '뒤로',
-        onPress: () => toggleSelected($, s.detail, selected.session_id),
-      })
+    if (selected !== undefined) {
+      const detail = detailBlock($, s.detail, els, selected, () => toggleSelected($, s.detail, selected.session_id))
 
       return Box({ flexDirection: 'column', children: [detail, ...asks] })
     }
@@ -668,19 +672,13 @@ export function registerKanban(on: On): void {
         ...frame,
         children: [
           Text({ bold: true, dimColor: col.cards.length === 0, children: [col.heading] }),
-          ...col.cards.map(card => drawCard($, s, els, card, isRow)),
+          ...col.cards.map(card => drawCard($, s, els, card)),
         ],
       }),
     )
 
     const board = Box({ key: 'board', flexDirection: direction, columnGap, children: columns })
-    const detail =
-      selected === undefined
-        ? []
-        : [detailBlock($, s.detail, els, selected, { label: '닫기', onPress: () => toggleSelected($, s.detail, selected.session_id) })]
 
-    return detail.length === 0 && asks.length === 0
-      ? board
-      : Box({ flexDirection: 'column', children: [board, ...detail, ...asks] })
+    return asks.length === 0 ? board : Box({ flexDirection: 'column', children: [board, ...asks] })
   })
 }

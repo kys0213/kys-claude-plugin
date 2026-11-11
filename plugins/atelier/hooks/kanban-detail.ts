@@ -221,7 +221,7 @@ export function detailBlock(
   s: DetailState,
   els: Elements,
   card: DetailCard,
-  close: { label: string; onPress: () => void },
+  onBack: () => void,
 ): Child {
   const { Box, Text, Button } = els
   const actions = card.actions ?? []
@@ -242,7 +242,6 @@ export function detailBlock(
   return Box({
     key: `detail:${card.session_id}`,
     flexDirection: 'column',
-    marginTop: 1,
     rowGap: 1,
     borderStyle: 'round',
     borderDimColor: true,
@@ -251,11 +250,10 @@ export function detailBlock(
       Box({
         key: 'head',
         flexDirection: 'row',
-        justifyContent: 'space-between',
-        columnGap: 1,
+        columnGap: 2,
         children: [
+          Button({ key: `detail:${card.session_id}:back`, label: '← 보드', plain: true, dimColor: true, onPress: onBack }),
           Text({ bold: true, wrap: 'truncate', children: [card.headline] }),
-          Button({ key: `detail:${card.session_id}:back`, label: close.label, plain: true, dimColor: true, onPress: close.onPress }),
         ],
       }),
       ...(card.detail?.sections ?? []).map((section, i) => sectionBlock(els, section, i)),

@@ -582,20 +582,20 @@ fn layout_at(width: &str) -> Value {
 #[test]
 fn a_pane_wide_enough_for_every_column_lays_them_side_by_side() {
     assert_eq!(
-        layout_at("100"),
-        json!({ "direction": "row", "column_width": 24, "column_gap": 1 })
+        layout_at("120"),
+        json!({ "direction": "row", "column_width": 29, "column_gap": 1 })
     );
     assert_eq!(
-        layout_at("88"),
-        json!({ "direction": "row", "column_width": 21, "column_gap": 1 })
+        layout_at("107"),
+        json!({ "direction": "row", "column_width": 26, "column_gap": 1 })
     );
 }
 
 #[test]
 fn a_narrower_pane_stacks_the_columns_at_full_width() {
     assert_eq!(
-        layout_at("87"),
-        json!({ "direction": "column", "column_width": 87, "column_gap": 1 })
+        layout_at("106"),
+        json!({ "direction": "column", "column_width": 106, "column_gap": 1 })
     );
     assert_eq!(
         layout_at("0"),
