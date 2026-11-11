@@ -25,6 +25,7 @@ import {
   type SessionRecord,
   record,
   recordPrompt,
+  rerun,
 } from './kanban-record'
 
 const PANE = 'kanban'
@@ -295,7 +296,11 @@ async function startSession($: EngineInterface, s: KanbanState): Promise<void> {
   await record($, s, {
     name: 'session.start',
     onlyIfNew: true,
-    update: base => ({ repo_root: base.repo_root ?? repo?.root ?? null, remote: base.remote ?? repo?.remote ?? null }),
+    update: (base, now) => ({
+      repo_root: base.repo_root ?? repo?.root ?? null,
+      remote: base.remote ?? repo?.remote ?? null,
+      ...rerun(base, now),
+    }),
   })
   await findInbox($, s)
 

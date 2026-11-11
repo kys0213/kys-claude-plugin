@@ -368,6 +368,62 @@ describe('kanban recording', () => {
     expect(stored(w).ended_reason).toBeNull()
   })
 
+  test('a session resumed after its end starts idle, keeping the conversation but no wait from the last run', async ($, on) => {
+    const w = world(on)
+    const prompts = [{ text: 'fix the login bug', origin: 'typed', at: START - 9_000 }]
+    const tasks = { '1': { subject: 'Write tests', active: null, status: 'pending' } }
+
+    w.store[KEY] = {
+      v: 1,
+      session_id: SELF,
+      cwd: '/work/project-a',
+      repo: 'project-a',
+      title: 'Login fix',
+      first_prompt: 'fix the login bug',
+      prompts,
+      last_answer: 'Shall I merge?',
+      pending_context: 'Running the suite',
+      turn_id: 't9',
+      started_at: START - 10_000,
+      heartbeat_at: START - 5_000,
+      ended_reason: 'prompt_input_exit',
+      events: [
+        { name: 'turn.start', detail: null, at: START - 8_000 },
+        { name: 'turn.complete', detail: null, at: START - 6_000 },
+        { name: 'session.end', detail: 'prompt_input_exit', at: START - 5_000 },
+      ],
+      activity: { tool: 'Bash', input: { command: 'ls' }, at: START - 7_000 },
+      recent: [{ tool: 'Bash', input: { command: 'ls' }, at: START - 7_000 }],
+      permission: { tool: 'Bash', input: { command: 'rm' }, at: START - 7_000, id: 'p1' },
+      decision: { ask: 'Merge?', recap: null, options: ['Yes', 'No'], at: START - 6_000 },
+      asks: { 'tu-1': { questions: [COLOR], at: START - 7_000 } },
+      agents: [{ status: 'running', teammate: false }],
+      tasks,
+    }
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+
+    expect(w.store[KEY]).toMatchObject({
+      title: 'Login fix',
+      first_prompt: 'fix the login bug',
+      prompts,
+      last_answer: 'Shall I merge?',
+      tasks,
+      ended_reason: null,
+      started_at: START,
+      heartbeat_at: START,
+      events: [{ name: 'session.start', detail: null, at: START }],
+      pending_context: null,
+      turn_id: null,
+      activity: null,
+      recent: [],
+      permission: null,
+      decision: null,
+      asks: {},
+      agents: [],
+    })
+  })
+
   test('the spinner is recorded once after each other event, never on its own', async ($, on) => {
     const w = world(on)
 
