@@ -55,8 +55,85 @@ impl Nonce {
     }
 }
 
+/// Where an answer came from: the pane that left the nonce it carries, a
+/// model, or a person whose way in nothing proves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Via {
+    Pane,
+    Terminal,
+    Agent,
+}
+
+impl Via {
+    pub fn id(self) -> &'static str {
+        match self {
+            Via::Pane => "pane",
+            Via::Terminal => "terminal",
+            Via::Agent => "agent",
+        }
+    }
+}
+
+/// A nonce the pane left for the answering session, for one kind of answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeftNonce {
+    pub kind: RequestKind,
+    pub nonce: Nonce,
+}
+
+impl LeftNonce {
+    pub fn to_json(&self) -> Value {
+        json!({ "kind": self.kind.id(), "nonce": self.nonce.as_str() })
+    }
+}
+
+/// The nonces the pane left for the answering session, and those its answers used up.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PaneNonces {
+    left: Vec<LeftNonce>,
+    used: Vec<LeftNonce>,
+}
+
+impl PaneNonces {
+    pub fn new(left: Vec<LeftNonce>) -> PaneNonces {
+        PaneNonces {
+            left,
+            used: Vec::new(),
+        }
+    }
+
+    fn proving(&self, kind: RequestKind, from: Sender, nonce: Option<&Nonce>) -> Option<usize> {
+        let nonce = nonce.filter(|_| from == Sender::Pane)?;
+        self.left
+            .iter()
+            .position(|left| left.kind == kind && left.nonce == *nonce)
+    }
+
+    pub fn via(&self, kind: RequestKind, from: Sender, nonce: Option<&Nonce>) -> Via {
+        match (from, self.proving(kind, from, nonce)) {
+            (Sender::Agent, _) => Via::Agent,
+            (Sender::Pane, Some(_)) => Via::Pane,
+            (Sender::Pane, None) => Via::Terminal,
+        }
+    }
+
+    /// `via`, and a nonce that proved the pane is used up: a second answer
+    /// carrying it comes through the terminal.
+    pub fn spend(&mut self, kind: RequestKind, from: Sender, nonce: Option<&Nonce>) -> Via {
+        let via = self.via(kind, from, nonce);
+        if let Some(at) = self.proving(kind, from, nonce) {
+            self.used.push(self.left.remove(at));
+        }
+        via
+    }
+
+    pub fn used(&self) -> &[LeftNonce] {
+        &self.used
+    }
+}
+
 /// Puts `nonce` beside the other fields when there is one.
-pub fn with_nonce(mut value: Value, nonce: Option<&Nonce>) -> Value {
+fn with_nonce(mut value: Value, nonce: Option<&Nonce>) -> Value {
     if let (Some(nonce), Some(fields)) = (nonce, value.as_object_mut()) {
         fields.insert("nonce".to_string(), json!(nonce.as_str()));
     }
@@ -190,6 +267,16 @@ impl Request {
             Request::Permit { .. } => RequestKind::Permit,
             Request::Answer { .. } => RequestKind::Answer,
             Request::Decide { .. } => RequestKind::Decide,
+        }
+    }
+
+    /// Who answered and the nonce they sent, for the requests that answer a wait.
+    pub fn answerer(&self) -> Option<(Sender, Option<&Nonce>)> {
+        match self {
+            Request::Permit { from, nonce, .. }
+            | Request::Answer { from, nonce, .. }
+            | Request::Decide { from, nonce, .. } => Some((*from, nonce.as_ref())),
+            Request::Prompt { .. } | Request::Stop { .. } => None,
         }
     }
 
@@ -463,14 +550,14 @@ pub enum Taken {
         tool_use_id: String,
         answers: Vec<String>,
         from: Sender,
-        nonce: Option<Nonce>,
+        via: Via,
     },
     /// Runs as a prompt, the text as typed.
     Decide {
         decision_at: String,
         text: String,
         from: Sender,
-        nonce: Option<Nonce>,
+        via: Via,
     },
 }
 
@@ -516,6 +603,15 @@ pub struct Outcome {
     /// `None` for a request that could not be read.
     pub kind: Option<RequestKind>,
     pub status: Status,
+    /// `None` for a request that answers no wait.
+    pub via: Option<Via>,
+}
+
+/// What one take acts on, what became of each request, and the nonces it used up.
+pub struct Took {
+    pub taken: Vec<Taken>,
+    pub outcomes: Vec<Outcome>,
+    pub used: Vec<LeftNonce>,
 }
 
 /// Which requests one take acts on: at most one prompt, and each open
@@ -523,6 +619,7 @@ pub struct Outcome {
 struct Taker<'a> {
     running_turn: Option<&'a str>,
     waits: &'a Waits,
+    nonces: PaneNonces,
     prompted: bool,
     answered: Vec<String>,
     taken: Vec<Taken>,
@@ -571,11 +668,12 @@ impl Taker<'_> {
                 nonce,
             } => {
                 self.prompted = true;
+                let via = self.nonces.spend(RequestKind::Decide, from, nonce.as_ref());
                 self.deliver(Taken::Decide {
                     decision_at,
                     text,
                     from,
-                    nonce,
+                    via,
                 })
             }
             Request::Prompt {
@@ -610,11 +708,12 @@ impl Taker<'_> {
             Some(ask) if ask.questions != answers.len() => Status::Invalid,
             Some(_) => {
                 self.answered.push(tool_use_id.clone());
+                let via = self.nonces.spend(RequestKind::Answer, from, nonce.as_ref());
                 self.deliver(Taken::Answer {
                     tool_use_id,
                     answers,
                     from,
-                    nonce,
+                    via,
                 })
             }
         }
@@ -625,11 +724,13 @@ pub fn take(
     found: Vec<Found>,
     running_turn: Option<&str>,
     waits: &Waits,
+    nonces: PaneNonces,
     ttl_ms: u64,
-) -> (Vec<Taken>, Vec<Outcome>) {
+) -> Took {
     let mut taker = Taker {
         running_turn,
         waits,
+        nonces,
         prompted: false,
         answered: Vec::new(),
         taken: Vec::new(),
@@ -638,6 +739,10 @@ pub fn take(
         .into_iter()
         .map(|item| {
             let kind = item.request.as_ref().map(Request::kind);
+            let via = item.request.as_ref().and_then(|request| {
+                let (from, nonce) = request.answerer()?;
+                Some(taker.nonces.via(request.kind(), from, nonce))
+            });
             let status = match item.request {
                 None => Status::Invalid,
                 Some(_) if item.age_ms > ttl_ms => Status::Expired,
@@ -647,10 +752,15 @@ pub fn take(
                 id: item.id,
                 kind,
                 status,
+                via,
             }
         })
         .collect();
-    (taker.taken, outcomes)
+    Took {
+        used: taker.nonces.used().to_vec(),
+        taken: taker.taken,
+        outcomes,
+    }
 }
 
 #[cfg(test)]
@@ -678,8 +788,14 @@ mod tests {
             age_ms: 10,
             request: Some(Request::stop("t").expect("stop")),
         }];
-        let (taken, outcomes) = take(found, Some("t"), &Waits::default(), 5);
-        assert!(taken.is_empty());
-        assert_eq!(outcomes[0].status, Status::Expired);
+        let took = take(
+            found,
+            Some("t"),
+            &Waits::default(),
+            PaneNonces::default(),
+            5,
+        );
+        assert!(took.taken.is_empty());
+        assert_eq!(took.outcomes[0].status, Status::Expired);
     }
 }

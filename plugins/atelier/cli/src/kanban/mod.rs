@@ -11,7 +11,7 @@ pub mod core;
 use crate::kanban::commands::inbox::{ClockIds, FsInbox, ThreadPause};
 use crate::kanban::commands::paths::FsPaths;
 use crate::kanban::commands::payload::{
-    parse_answer_request, parse_bash_command, parse_sessions, parse_waits,
+    parse_answer_request, parse_bash_command, parse_pane_nonces, parse_sessions, parse_waits,
 };
 use crate::kanban::commands::records::{FsRecords, KanbanRecords, StatusQuery};
 use crate::kanban::commands::requests::{Answerer, KanbanRequests};
@@ -24,7 +24,7 @@ use crate::kanban::core::duration::parse_millis;
 use crate::kanban::core::layout::{fit, Layout};
 use crate::kanban::core::question::{Ask, Question};
 use crate::kanban::core::repos::{group, Repo};
-use crate::kanban::core::request::{Sender, Waits};
+use crate::kanban::core::request::Sender;
 use crate::kanban::core::status::{render_text, select, Format};
 use crate::kanban::core::text::defuse_marker;
 use crate::kanban::core::wait::{derive, Blocked, Place, Subject};
@@ -211,8 +211,9 @@ pub enum InboxCommand {
         /// The turn the session runs now; absent while it waits for a prompt
         #[arg(long)]
         turn: Option<String>,
-        /// Reads the open questions and decision on stdin; without it stdin
-        /// is left unread and the session waits on none
+        /// Reads the open questions, the decision and the nonces the pane
+        /// left on stdin; without it stdin is left unread, the session waits
+        /// on none and every answer comes through the terminal
         #[arg(long)]
         waits_stdin: bool,
     },
@@ -231,6 +232,10 @@ pub enum InboxCommand {
         /// How long to wait for it (e.g. 2s)
         #[arg(long = "for", value_parser = parse_millis)]
         wait: u64,
+        /// Reads the nonces the pane left on stdin; without it stdin is left
+        /// unread and the answer comes through the terminal
+        #[arg(long)]
+        nonces_stdin: bool,
     },
     /// Removes the inbox and what is left in it
     Clear {
@@ -577,20 +582,26 @@ fn run_request(command: RequestCommand) -> Value {
                 ttl,
                 turn,
                 waits_stdin,
-            } => match waits_stdin
-                .then(read_stdin_raw)
-                .map_or(Ok(Waits::default()), |raw| parse_waits(&raw))
-            {
-                Ok(waits) => requests.take(&session, now, ttl, turn.as_deref(), &waits),
-                Err(error) => json!({ "error": error }),
-            },
+            } => {
+                let raw = waits_stdin.then(read_stdin_raw).unwrap_or_default();
+                match parse_waits(&raw).and_then(|waits| Ok((waits, parse_pane_nonces(&raw)?))) {
+                    Ok((waits, nonces)) => {
+                        requests.take(&session, now, ttl, turn.as_deref(), &waits, nonces)
+                    }
+                    Err(error) => json!({ "error": error }),
+                }
+            }
             InboxCommand::WaitPermit {
                 session,
                 request,
                 now,
                 ttl,
                 wait,
-            } => requests.wait_permit(&session, &request, now, ttl, wait),
+                nonces_stdin,
+            } => match parse_pane_nonces(&nonces_stdin.then(read_stdin_raw).unwrap_or_default()) {
+                Ok(nonces) => requests.wait_permit(&session, &request, now, ttl, wait, nonces),
+                Err(error) => json!({ "error": error }),
+            },
             InboxCommand::Clear { session } => requests.clear(&session),
         },
         RequestCommand::Spawn {

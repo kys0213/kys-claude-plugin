@@ -1,6 +1,7 @@
 //! Stdin payloads: `kanban board` takes `{"sessions": [<v1 record>, ...]}`,
 //! `kanban answer` takes `{"questions": [...], "picks": [...]}`, `inbox take`
-//! what the session waits on, `guard-bash` the Bash tool's input. A record
+//! what the session waits on and the nonces the pane left for it,
+//! `inbox wait-permit` those nonces, `guard-bash` the Bash tool's input. A record
 //! this version cannot read is dropped here, before the board sees it.
 //!
 //! The field readers answer `None` for a field of the wrong type, which drops
@@ -13,7 +14,9 @@ use crate::kanban::core::detail::{Decision, DecisionLengths, Delivery, DeliveryS
 use crate::kanban::core::progress::{Activity, ItemStatus, WorkItem};
 use crate::kanban::core::prompt::PromptFact;
 use crate::kanban::core::question::{Ask, AskLengths, Question, QuestionOption};
-use crate::kanban::core::request::{OpenAsk, RequestKind, Status, Waits};
+use crate::kanban::core::request::{
+    LeftNonce, Nonce, OpenAsk, PaneNonces, RequestKind, Status, Waits,
+};
 use serde_json::{Map, Value};
 
 const VERSION: u64 = 1;
@@ -300,6 +303,28 @@ fn parse_open_ask(value: &Value) -> Option<OpenAsk> {
     Some(OpenAsk {
         id: value.get("id")?.as_str()?.to_string(),
         questions: value.get("questions")?.as_array()?.len(),
+    })
+}
+
+/// The nonces the pane left for the session, beside what it waits on:
+/// `{"nonces": [{"kind", "nonce"}]}`, `kind` an answer's request kind. An entry
+/// that does not read proves nothing and is skipped. Empty stdin left none.
+pub fn parse_pane_nonces(raw: &str) -> Result<PaneNonces, String> {
+    if raw.trim().is_empty() {
+        return Ok(PaneNonces::default());
+    }
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    let left = optional_array(&value, "nonces")
+        .ok_or_else(|| "stdin has no readable `nonces` array".to_string())?;
+    Ok(PaneNonces::new(
+        left.iter().filter_map(parse_left_nonce).collect(),
+    ))
+}
+
+fn parse_left_nonce(value: &Value) -> Option<LeftNonce> {
+    Some(LeftNonce {
+        kind: RequestKind::parse(value.get("kind")?.as_str()?)?,
+        nonce: Nonce::parse(value.get("nonce")?.as_str()?).ok()?,
     })
 }
 

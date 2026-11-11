@@ -267,7 +267,7 @@ fn taking_an_empty_or_missing_inbox_gives_nothing() {
     let w = World::new();
     assert_eq!(
         w.take("never", None),
-        json!({ "actions": [], "results": [] })
+        json!({ "actions": [], "results": [], "used_nonces": [] })
     );
 }
 
@@ -469,7 +469,10 @@ fn a_permit_lands_beside_the_requests_and_is_taken_by_its_permission() {
         "pane",
     ]);
     assert!(w.inbox("s-1").join("permits").join("t-1-5.json").exists());
-    assert_eq!(w.take("s-1", None), json!({ "actions": [], "results": [] }));
+    assert_eq!(
+        w.take("s-1", None),
+        json!({ "actions": [], "results": [], "used_nonces": [] })
+    );
 
     let now = now_ms().to_string();
     let out = w.kanban(&[
@@ -486,6 +489,9 @@ fn a_permit_lands_beside_the_requests_and_is_taken_by_its_permission() {
         "--for",
         "0ms",
     ]);
-    assert_eq!(out, json!({ "decision": "deny", "from": "pane" }));
+    assert_eq!(
+        out,
+        json!({ "decision": "deny", "from": "pane", "via": "terminal", "used_nonces": [] })
+    );
     assert!(!w.inbox("s-1").join("permits").join("t-1-5.json").exists());
 }

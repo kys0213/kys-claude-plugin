@@ -1,6 +1,6 @@
 mod kanban_mocks;
 
-use atelier::kanban::core::request::{OpenAsk, Sender, Waits};
+use atelier::kanban::core::request::{OpenAsk, PaneNonces, Sender, Waits};
 use kanban_mocks::{Edges, FakeLauncher, MapProbe};
 use serde_json::json;
 
@@ -17,7 +17,14 @@ fn a_sent_prompt_is_queued_under_the_next_id_and_taken_once() {
     );
     assert_eq!(e.inbox.ids("s-1"), ["r1"]);
 
-    let taken = e.requests().take("s-1", NOW, TTL, None, &Waits::default());
+    let taken = e.requests().take(
+        "s-1",
+        NOW,
+        TTL,
+        None,
+        &Waits::default(),
+        PaneNonces::default(),
+    );
     assert_eq!(
         taken["actions"],
         json!([{ "kind": "prompt", "text": "Run lint", "body": "Run lint", "from": "pane" }])
@@ -41,9 +48,14 @@ fn a_request_older_than_the_ttl_is_expired_whatever_its_kind() {
     e.requests().send("s-1", Sender::Pane, None, "late");
     e.requests().stop("s-1", "t-1");
     *e.inbox.age_ms.borrow_mut() = TTL + 1;
-    let out = e
-        .requests()
-        .take("s-1", NOW, TTL, Some("t-1"), &Waits::default());
+    let out = e.requests().take(
+        "s-1",
+        NOW,
+        TTL,
+        Some("t-1"),
+        &Waits::default(),
+        PaneNonces::default(),
+    );
     assert_eq!(out["actions"], json!([]));
     assert_eq!(
         out["results"],
@@ -58,7 +70,14 @@ fn a_request_older_than_the_ttl_is_expired_whatever_its_kind() {
 fn an_unreadable_request_reports_an_unknown_kind() {
     let e = Edges::default();
     e.inbox.put_raw("s-1", "r9", "{\"v\":2}");
-    let out = e.requests().take("s-1", NOW, TTL, None, &Waits::default());
+    let out = e.requests().take(
+        "s-1",
+        NOW,
+        TTL,
+        None,
+        &Waits::default(),
+        PaneNonces::default(),
+    );
     assert_eq!(
         out["results"],
         json!([{ "id": "r9", "kind": "unknown", "status": "invalid" }])
@@ -148,15 +167,18 @@ fn a_permit_answer_is_waited_for_by_the_permission_it_names() {
     assert!(e.inbox.ids("s-1").is_empty());
 
     assert_eq!(
-        e.requests().wait_permit("s-1", "p-2", NOW, TTL, 2_000),
+        e.requests()
+            .wait_permit("s-1", "p-2", NOW, TTL, 2_000, PaneNonces::default()),
         json!({ "decision": null })
     );
     assert_eq!(
-        e.requests().wait_permit("s-1", "p-1", NOW, TTL, 2_000),
-        json!({ "decision": "allow", "from": "pane" })
+        e.requests()
+            .wait_permit("s-1", "p-1", NOW, TTL, 2_000, PaneNonces::default()),
+        json!({ "decision": "allow", "from": "pane", "via": "terminal", "used_nonces": [] })
     );
     assert_eq!(
-        e.requests().wait_permit("s-1", "p-1", NOW, TTL, 2_000),
+        e.requests()
+            .wait_permit("s-1", "p-1", NOW, TTL, 2_000, PaneNonces::default()),
         json!({ "decision": null })
     );
 }
@@ -164,7 +186,8 @@ fn a_permit_answer_is_waited_for_by_the_permission_it_names() {
 #[test]
 fn waiting_for_a_permit_pauses_until_the_wait_is_over() {
     let e = Edges::default();
-    e.requests().wait_permit("s-1", "p-1", NOW, TTL, 1_000);
+    e.requests()
+        .wait_permit("s-1", "p-1", NOW, TTL, 1_000, PaneNonces::default());
     assert_eq!(*e.pause.paused_ms.borrow(), 1_000);
 }
 
@@ -175,7 +198,8 @@ fn a_permit_answer_older_than_the_ttl_is_dropped() {
         .permit("s-1", "p-1", "deny", Sender::Pane.into());
     *e.inbox.age_ms.borrow_mut() = TTL + 1;
     assert_eq!(
-        e.requests().wait_permit("s-1", "p-1", NOW, TTL, 2_000),
+        e.requests()
+            .wait_permit("s-1", "p-1", NOW, TTL, 2_000, PaneNonces::default()),
         json!({ "decision": null, "status": "expired" })
     );
 }
@@ -228,18 +252,23 @@ fn a_reply_reaches_its_open_question_once() {
     e.requests()
         .reply("s-1", "tu-1", &answers(&["Blue"]), Sender::Pane.into());
 
-    let taken = e
-        .requests()
-        .take("s-1", NOW, TTL, Some("t-1"), &open(&[("tu-1", 1)], None));
+    let taken = e.requests().take(
+        "s-1",
+        NOW,
+        TTL,
+        Some("t-1"),
+        &open(&[("tu-1", 1)], None),
+        PaneNonces::default(),
+    );
     assert_eq!(
         taken["actions"],
-        json!([{ "kind": "answer", "tool_use_id": "tu-1", "answers": ["Red"], "from": "pane" }])
+        json!([{ "kind": "answer", "tool_use_id": "tu-1", "answers": ["Red"], "from": "pane", "via": "terminal" }])
     );
     assert_eq!(
         taken["results"],
         json!([
-            { "id": "r1", "kind": "answer", "status": "delivered" },
-            { "id": "r2", "kind": "answer", "status": "stale" },
+            { "id": "r1", "kind": "answer", "status": "delivered", "via": "terminal" },
+            { "id": "r2", "kind": "answer", "status": "stale", "via": "terminal" },
         ])
     );
 }
@@ -250,12 +279,17 @@ fn a_decide_counts_as_the_one_prompt_a_take_runs() {
     e.requests()
         .decide("s-1", "1700", "네", Sender::Pane.into());
     e.requests().send("s-1", Sender::Pane, None, "later");
-    let taken = e
-        .requests()
-        .take("s-1", NOW, TTL, None, &open(&[], Some("1700")));
+    let taken = e.requests().take(
+        "s-1",
+        NOW,
+        TTL,
+        None,
+        &open(&[], Some("1700")),
+        PaneNonces::default(),
+    );
     assert_eq!(
         taken["actions"],
-        json!([{ "kind": "decide", "decision_at": "1700", "text": "네", "from": "pane" }])
+        json!([{ "kind": "decide", "decision_at": "1700", "text": "네", "from": "pane", "via": "terminal" }])
     );
     assert_eq!(taken["results"][1]["status"], "busy");
 }
@@ -266,9 +300,14 @@ fn an_expired_answer_is_expired_before_it_is_judged() {
     e.requests()
         .reply("s-1", "tu-1", &answers(&["Red"]), Sender::Pane.into());
     *e.inbox.age_ms.borrow_mut() = TTL + 1;
-    let taken = e
-        .requests()
-        .take("s-1", NOW, TTL, None, &open(&[("tu-1", 1)], None));
+    let taken = e.requests().take(
+        "s-1",
+        NOW,
+        TTL,
+        None,
+        &open(&[("tu-1", 1)], None),
+        PaneNonces::default(),
+    );
     assert_eq!(taken["results"][0]["status"], "expired");
 }
 

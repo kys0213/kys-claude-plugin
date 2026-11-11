@@ -4,7 +4,8 @@
 use crate::kanban::commands::inbox::{IdSource, InboxStore, Pause};
 use crate::kanban::commands::spawn::{Launcher, RepoProbe};
 use crate::kanban::core::request::{
-    self, check_answerer, check_id, with_nonce, Found, Nonce, Request, Sender, Taken, Waits,
+    self, check_answerer, check_id, Found, LeftNonce, Nonce, PaneNonces, Request, RequestKind,
+    Sender, Taken, Waits,
 };
 use crate::kanban::core::spawn::{is_main_root, launch_args, short_id};
 use serde_json::{json, Value};
@@ -46,31 +47,43 @@ fn taken_json(taken: &Taken) -> Value {
             tool_use_id,
             answers,
             from,
-            nonce,
-        } => with_nonce(
-            json!({
-                "kind": "answer",
-                "tool_use_id": tool_use_id,
-                "answers": answers,
-                "from": from.id(),
-            }),
-            nonce.as_ref(),
-        ),
+            via,
+        } => json!({
+            "kind": "answer",
+            "tool_use_id": tool_use_id,
+            "answers": answers,
+            "from": from.id(),
+            "via": via.id(),
+        }),
         Taken::Decide {
             decision_at,
             text,
             from,
-            nonce,
-        } => with_nonce(
-            json!({
-                "kind": "decide",
-                "decision_at": decision_at,
-                "text": text,
-                "from": from.id(),
-            }),
-            nonce.as_ref(),
-        ),
+            via,
+        } => json!({
+            "kind": "decide",
+            "decision_at": decision_at,
+            "text": text,
+            "from": from.id(),
+            "via": via.id(),
+        }),
     }
+}
+
+fn outcome_json(outcome: &request::Outcome) -> Value {
+    let mut value = json!({
+        "id": outcome.id,
+        "kind": outcome.kind.map_or("unknown", |k| k.id()),
+        "status": outcome.status.id(),
+    });
+    if let (Some(via), Some(fields)) = (outcome.via, value.as_object_mut()) {
+        fields.insert("via".to_string(), json!(via.id()));
+    }
+    value
+}
+
+fn used_json(used: &[LeftNonce]) -> Value {
+    used.iter().map(LeftNonce::to_json).collect()
 }
 
 impl KanbanRequests<'_> {
@@ -150,6 +163,7 @@ impl KanbanRequests<'_> {
         now: u64,
         ttl_ms: u64,
         for_ms: u64,
+        mut nonces: PaneNonces,
     ) -> Value {
         answer((|| {
             check_id("session", session)?;
@@ -161,18 +175,27 @@ impl KanbanRequests<'_> {
                         return Ok(json!({ "decision": null, "status": "expired" }));
                     }
                     return Ok(match claimed.contents.as_deref().and_then(Request::parse) {
-                        Some(Request::Permit { from, .. }) if check_answerer(from).is_err() => {
-                            json!({ "decision": null, "status": "refused" })
-                        }
                         Some(Request::Permit {
                             verdict,
                             from,
                             nonce,
                             ..
-                        }) => with_nonce(
-                            json!({ "decision": verdict.id(), "from": from.id() }),
-                            nonce.as_ref(),
-                        ),
+                        }) => {
+                            let via = nonces.spend(RequestKind::Permit, from, nonce.as_ref());
+                            match check_answerer(from) {
+                                Err(_) => json!({
+                                    "decision": null,
+                                    "status": "refused",
+                                    "via": via.id(),
+                                }),
+                                Ok(()) => json!({
+                                    "decision": verdict.id(),
+                                    "from": from.id(),
+                                    "via": via.id(),
+                                    "used_nonces": used_json(nonces.used()),
+                                }),
+                            }
+                        }
                         _ => json!({ "decision": null, "status": "invalid" }),
                     });
                 }
@@ -202,6 +225,7 @@ impl KanbanRequests<'_> {
         ttl_ms: u64,
         turn: Option<&str>,
         waits: &Waits,
+        nonces: PaneNonces,
     ) -> Value {
         answer(check_id("session", session).and_then(|()| {
             let found = self
@@ -214,17 +238,11 @@ impl KanbanRequests<'_> {
                     request: c.contents.as_deref().and_then(Request::parse),
                 })
                 .collect();
-            let (taken, outcomes) = request::take(found, turn, waits, ttl_ms);
+            let took = request::take(found, turn, waits, nonces, ttl_ms);
             Ok(json!({
-                "actions": taken.iter().map(taken_json).collect::<Vec<_>>(),
-                "results": outcomes
-                    .iter()
-                    .map(|o| json!({
-                        "id": o.id,
-                        "kind": o.kind.map_or("unknown", |k| k.id()),
-                        "status": o.status.id(),
-                    }))
-                    .collect::<Vec<_>>(),
+                "actions": took.taken.iter().map(taken_json).collect::<Vec<_>>(),
+                "results": took.outcomes.iter().map(outcome_json).collect::<Vec<_>>(),
+                "used_nonces": used_json(&took.used),
             }))
         }))
     }

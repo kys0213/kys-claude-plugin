@@ -66,8 +66,12 @@ impl World {
     }
 
     fn wait_permit(&self, session: &str, request: &str) -> Value {
+        self.wait_permit_with(session, request, None)
+    }
+
+    fn wait_permit_with(&self, session: &str, request: &str, nonces: Option<Value>) -> Value {
         let now = now_ms().to_string();
-        self.kanban(&[
+        let mut args = vec![
             "inbox",
             "wait-permit",
             "--session",
@@ -80,7 +84,12 @@ impl World {
             "60s",
             "--for",
             "0ms",
-        ])
+        ];
+        let stdin = nonces.map_or(String::new(), |nonces| {
+            args.push("--nonces-stdin");
+            json!({ "nonces": nonces }).to_string()
+        });
+        self.run(&args, &stdin)
     }
 }
 
@@ -93,6 +102,15 @@ fn open_ask(id: &str, questions: usize) -> Value {
 
 fn open_decision(at: u64) -> Value {
     json!({ "asks": [], "decision": { "at": at, "ask": "진행할까요?", "options": ["네"] } })
+}
+
+fn with_nonces(mut open: Value, nonces: Value) -> Value {
+    open["nonces"] = nonces;
+    open
+}
+
+fn left(kind: &str, nonce: &str) -> Value {
+    json!({ "kind": kind, "nonce": nonce })
 }
 
 #[test]
@@ -117,7 +135,7 @@ fn a_pane_reply_reaches_the_open_question_it_names() {
     let taken = w.take("s-1", Some("t-1"), open_ask("tu-1", 2));
     assert_eq!(
         taken["actions"],
-        json!([{ "kind": "answer", "tool_use_id": "tu-1", "answers": ["Blue", "Cat, Fish"], "from": "pane" }])
+        json!([{ "kind": "answer", "tool_use_id": "tu-1", "answers": ["Blue", "Cat, Fish"], "from": "pane", "via": "terminal" }])
     );
     assert_eq!(taken["results"][0]["kind"], "answer");
     assert_eq!(taken["results"][0]["status"], "delivered");
@@ -246,7 +264,7 @@ fn a_pane_decide_answers_the_decision_it_names_as_typed() {
     let taken = w.take("s-1", None, open_decision(1700));
     assert_eq!(
         taken["actions"],
-        json!([{ "kind": "decide", "decision_at": "1700", "text": "초안대로 진행", "from": "pane" }])
+        json!([{ "kind": "decide", "decision_at": "1700", "text": "초안대로 진행", "from": "pane", "via": "terminal" }])
     );
     assert_eq!(taken["results"][0]["status"], "delivered");
 }
@@ -373,7 +391,7 @@ fn a_pane_permit_is_taken_with_where_it_came_from() {
     ]);
     assert_eq!(
         w.wait_permit("s-1", "p-1"),
-        json!({ "decision": "allow", "from": "pane" })
+        json!({ "decision": "allow", "from": "pane", "via": "terminal", "used_nonces": [] })
     );
 }
 
@@ -389,7 +407,7 @@ fn a_permit_written_before_senders_were_named_is_read_as_the_pane() {
     .expect("write");
     assert_eq!(
         w.wait_permit("s-1", "p-1"),
-        json!({ "decision": "deny", "from": "pane" })
+        json!({ "decision": "deny", "from": "pane", "via": "terminal", "used_nonces": [] })
     );
 }
 
@@ -406,7 +424,7 @@ fn an_agent_permit_left_in_the_inbox_is_refused_by_the_waiting_session() {
     .expect("write");
     assert_eq!(
         w.wait_permit("s-1", "p-1"),
-        json!({ "decision": null, "status": "refused" })
+        json!({ "decision": null, "status": "refused", "via": "agent" })
     );
 }
 
@@ -524,8 +542,41 @@ fn unreadable_open_waits_are_refused_and_the_inbox_is_left_alone() {
     assert_eq!(fs::read_dir(w.inbox("s-1")).expect("inbox").count(), 1);
 }
 
+fn reply_with_nonce(w: &World, ask: &str, nonce: &str) {
+    w.kanban(&[
+        "reply",
+        "--session",
+        "s-1",
+        "--ask",
+        ask,
+        "--answer",
+        "Blue",
+        "--from",
+        "pane",
+        "--nonce",
+        nonce,
+    ]);
+}
+
 #[test]
-fn a_pane_reply_carries_its_nonce_to_the_session_that_takes_it() {
+fn a_pane_reply_with_the_nonce_left_for_it_comes_through_the_pane() {
+    let w = World::new();
+    reply_with_nonce(&w, "tu-1", "n-1");
+    let taken = w.take(
+        "s-1",
+        None,
+        with_nonces(open_ask("tu-1", 1), json!([left("answer", "n-1")])),
+    );
+    assert_eq!(
+        taken["actions"],
+        json!([{ "kind": "answer", "tool_use_id": "tu-1", "answers": ["Blue"], "from": "pane", "via": "pane" }])
+    );
+    assert_eq!(taken["results"][0]["via"], "pane");
+    assert_eq!(taken["used_nonces"], json!([left("answer", "n-1")]));
+}
+
+#[test]
+fn a_pane_reply_without_a_nonce_comes_through_the_terminal() {
     let w = World::new();
     w.kanban(&[
         "reply",
@@ -537,18 +588,133 @@ fn a_pane_reply_carries_its_nonce_to_the_session_that_takes_it() {
         "Blue",
         "--from",
         "pane",
-        "--nonce",
-        "n-1",
     ]);
-    let taken = w.take("s-1", None, open_ask("tu-1", 1));
+    let taken = w.take(
+        "s-1",
+        None,
+        with_nonces(open_ask("tu-1", 1), json!([left("answer", "n-1")])),
+    );
+    assert_eq!(taken["actions"][0]["via"], "terminal");
+    assert_eq!(taken["used_nonces"], json!([]));
+}
+
+#[test]
+fn a_nonce_left_for_another_kind_or_a_different_nonce_comes_through_the_terminal() {
+    let w = World::new();
+    reply_with_nonce(&w, "tu-1", "n-1");
+    let taken = w.take(
+        "s-1",
+        None,
+        with_nonces(
+            open_ask("tu-1", 1),
+            json!([
+                left("decide", "n-1"),
+                left("permit", "n-1"),
+                left("answer", "n-2")
+            ]),
+        ),
+    );
+    assert_eq!(taken["actions"][0]["via"], "terminal");
+    assert_eq!(taken["used_nonces"], json!([]));
+}
+
+#[test]
+fn nonce_entries_that_do_not_read_are_skipped() {
+    let w = World::new();
+    reply_with_nonce(&w, "tu-1", "n-1");
+    let taken = w.take(
+        "s-1",
+        None,
+        with_nonces(
+            open_ask("tu-1", 1),
+            json!([
+                { "kind": "answer", "nonce": 7 },
+                { "kind": "reply", "nonce": "n-1" },
+                "n-1",
+                left("answer", "n-1")
+            ]),
+        ),
+    );
+    assert_eq!(taken["actions"][0]["via"], "pane");
+}
+
+#[test]
+fn the_same_nonce_counts_as_the_pane_only_once_in_one_take() {
+    let w = World::new();
+    reply_with_nonce(&w, "tu-1", "n-1");
+    reply_with_nonce(&w, "tu-2", "n-1");
+    let open = json!({
+        "asks": [{ "id": "tu-1", "questions": [{}] }, { "id": "tu-2", "questions": [{}] }],
+        "decision": null,
+        "nonces": [left("answer", "n-1")],
+    });
+    let taken = w.take("s-1", None, open);
+    let vias: Vec<&Value> = taken["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .map(|a| &a["via"])
+        .collect();
+    assert_eq!(vias, [&json!("pane"), &json!("terminal")]);
+    assert_eq!(taken["used_nonces"], json!([left("answer", "n-1")]));
+}
+
+#[test]
+fn a_nonce_the_session_already_used_up_comes_through_the_terminal() {
+    let w = World::new();
+    reply_with_nonce(&w, "tu-1", "n-1");
+    let first = w.take(
+        "s-1",
+        None,
+        with_nonces(open_ask("tu-1", 1), json!([left("answer", "n-1")])),
+    );
+    assert_eq!(first["actions"][0]["via"], "pane");
+
+    reply_with_nonce(&w, "tu-2", "n-1");
+    let second = w.take("s-1", None, with_nonces(open_ask("tu-2", 1), json!([])));
+    assert_eq!(second["actions"][0]["via"], "terminal");
+}
+
+#[test]
+fn an_agent_answer_with_the_nonce_left_for_the_pane_stays_the_agents() {
+    let w = World::new();
+    fs::create_dir_all(w.inbox("s-1").join("permits")).expect("inbox");
+    fs::write(
+        w.inbox("s-1").join("1-1.json"),
+        json!({ "v": 1, "kind": "answer", "tool_use_id": "tu-1", "answers": ["Blue"], "from": "agent", "nonce": "n-1" })
+            .to_string(),
+    )
+    .expect("write");
+    fs::write(
+        w.inbox("s-1").join("1-2.json"),
+        json!({ "v": 1, "kind": "decide", "decision_at": "1700", "text": "네", "from": "agent", "nonce": "n-2" })
+            .to_string(),
+    )
+    .expect("write");
+    fs::write(
+        w.inbox("s-1").join("permits/p-1.json"),
+        json!({ "v": 1, "kind": "permit", "request_id": "p-1", "decision": "allow", "from": "agent", "nonce": "n-3" })
+            .to_string(),
+    )
+    .expect("write");
+    let open = json!({
+        "asks": [{ "id": "tu-1", "questions": [{}] }],
+        "decision": { "at": 1700 },
+        "nonces": [left("answer", "n-1"), left("decide", "n-2")],
+    });
+    let taken = w.take("s-1", None, open);
+    assert_eq!(taken["actions"], json!([]));
+    assert_eq!(taken["results"][0]["via"], "agent");
+    assert_eq!(taken["results"][1]["via"], "agent");
+    assert_eq!(taken["used_nonces"], json!([]));
     assert_eq!(
-        taken["actions"],
-        json!([{ "kind": "answer", "tool_use_id": "tu-1", "answers": ["Blue"], "from": "pane", "nonce": "n-1" }])
+        w.wait_permit_with("s-1", "p-1", Some(json!([left("permit", "n-3")]))),
+        json!({ "decision": null, "status": "refused", "via": "agent" })
     );
 }
 
 #[test]
-fn a_pane_decide_carries_its_nonce_to_the_session_that_takes_it() {
+fn a_pane_decide_with_the_nonce_left_for_it_comes_through_the_pane() {
     let w = World::new();
     w.kanban(&[
         "decide",
@@ -563,33 +729,66 @@ fn a_pane_decide_carries_its_nonce_to_the_session_that_takes_it() {
         "--nonce",
         "n-2",
     ]);
-    let taken = w.take("s-1", None, open_decision(1700));
+    let taken = w.take(
+        "s-1",
+        None,
+        with_nonces(open_decision(1700), json!([left("decide", "n-2")])),
+    );
     assert_eq!(
         taken["actions"],
-        json!([{ "kind": "decide", "decision_at": "1700", "text": "네", "from": "pane", "nonce": "n-2" }])
+        json!([{ "kind": "decide", "decision_at": "1700", "text": "네", "from": "pane", "via": "pane" }])
     );
+    assert_eq!(taken["used_nonces"], json!([left("decide", "n-2")]));
 }
 
-#[test]
-fn a_pane_permit_carries_its_nonce_to_the_waiting_session() {
-    let w = World::new();
+fn permit_with_nonce(w: &World, request: &str, nonce: &str) {
     w.kanban(&[
         "permit",
         "--session",
         "s-1",
         "--request",
-        "p-1",
+        request,
         "--decision",
         "allow",
         "--from",
         "pane",
         "--nonce",
-        "n-3",
+        nonce,
     ]);
+}
+
+#[test]
+fn a_pane_permit_with_the_nonce_left_for_it_comes_through_the_pane() {
+    let w = World::new();
+    permit_with_nonce(&w, "p-1", "n-3");
+    assert_eq!(
+        w.wait_permit_with("s-1", "p-1", Some(json!([left("permit", "n-3")]))),
+        json!({ "decision": "allow", "from": "pane", "via": "pane", "used_nonces": [left("permit", "n-3")] })
+    );
+}
+
+#[test]
+fn a_permit_wait_without_nonces_stdin_finds_every_permit_through_the_terminal() {
+    let w = World::new();
+    permit_with_nonce(&w, "p-1", "n-3");
     assert_eq!(
         w.wait_permit("s-1", "p-1"),
-        json!({ "decision": "allow", "from": "pane", "nonce": "n-3" })
+        json!({ "decision": "allow", "from": "pane", "via": "terminal", "used_nonces": [] })
     );
+}
+
+#[test]
+fn unreadable_nonce_facts_are_refused_and_the_inbox_is_left_alone() {
+    let w = World::new();
+    reply_with_nonce(&w, "tu-1", "n-1");
+    let out = w.take("s-1", None, with_nonces(open_ask("tu-1", 1), json!("n-1")));
+    assert!(out["error"].is_string(), "{out}");
+    assert_eq!(fs::read_dir(w.inbox("s-1")).expect("inbox").count(), 1);
+
+    permit_with_nonce(&w, "p-1", "n-3");
+    let out = w.wait_permit_with("s-1", "p-1", Some(json!({ "kind": "permit" })));
+    assert!(out["error"].is_string(), "{out}");
+    assert!(w.inbox("s-1").join("permits/p-1.json").exists());
 }
 
 #[test]

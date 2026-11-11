@@ -674,19 +674,63 @@ describe('kanban progress and questions', () => {
     const r = await call
 
     const take = w.runs.find(x => x.argv[3] === 'take')
-    expect(JSON.parse(take?.stdin ?? '{}')).toEqual({ asks: [{ id: 'tu-9', questions: TOOL_QUESTIONS }], decision: null })
+    expect(JSON.parse(take?.stdin ?? '{}')).toEqual({
+      asks: [{ id: 'tu-9', questions: TOOL_QUESTIONS }],
+      decision: null,
+      nonces: [],
+    })
     expect(r.result).toEqual({ questions: TOOL_QUESTIONS, answers: { 'Which color?': 'Blue' } })
     expect(stored(w).asks).toEqual({})
     expect(eventNames(w)).toContain('kanban.answer')
   })
 
-  for (const [label, left, via] of [
-    ['the nonce the pane left for its question', `kanban:nonce:${SELF}:answer:n-1`, 'pane'],
-    ['a nonce the pane never left', null, 'terminal'],
-    ['a nonce the pane left for another session', 'kanban:nonce:other:answer:n-1', 'terminal'],
-    ['a nonce the pane left for a decision', `kanban:nonce:${SELF}:decide:n-1`, 'terminal'],
+  test('an inbox take sends the nonces the pane left for this session and drops the ones the CLI used', async ($, on) => {
+    const answering = { exitCode: 0, stdout: '' }
+    const w = world(on, argv => {
+      if (argv[3] === 'dir') {
+        return { exitCode: 0, stdout: JSON.stringify({ dir: INBOX_DIR }) }
+      }
+
+      return argv[3] === 'take' ? answering : { exitCode: 0, stdout: JSON.stringify(BOARD) }
+    })
+
+    w.store[`kanban:nonce:${SELF}:answer:n-1`] = { session: SELF, kind: 'answer', nonce: 'n-1', at: START }
+    w.store[`kanban:nonce:${SELF}:decide:n-2`] = { session: SELF, kind: 'decide', nonce: 'n-2', at: START }
+    w.store[`kanban:nonce:${SELF}:permit:n-3`] = { session: SELF, kind: 'permit', at: START }
+    w.store['kanban:nonce:other:answer:n-4'] = { session: 'other', kind: 'answer', nonce: 'n-4', at: START }
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    const call = $.tool.call({ tool: 'AskUserQuestion', questions: TOOL_QUESTIONS, tool_use_id: 'tu-9' } as never)
+    await w.clock.settle()
+    answering.stdout = JSON.stringify({
+      actions: [{ kind: 'answer', tool_use_id: 'tu-9', answers: ['Blue'], from: 'pane', via: 'pane' }],
+      results: [{ id: 'r1', kind: 'answer', status: 'delivered', via: 'pane' }],
+      used_nonces: [{ kind: 'answer', nonce: 'n-1' }],
+    })
+    w.inbox.files = ['r1.json']
+    await w.clock.advance(2_000)
+    await call
+
+    const take = w.runs.find(x => x.argv[3] === 'take')
+    expect(JSON.parse(take?.stdin ?? '{}').nonces).toEqual([
+      { kind: 'answer', nonce: 'n-1' },
+      { kind: 'decide', nonce: 'n-2' },
+    ])
+    expect(nonceKeys(w)).toEqual([
+      `kanban:nonce:${SELF}:decide:n-2`,
+      `kanban:nonce:${SELF}:permit:n-3`,
+      'kanban:nonce:other:answer:n-4',
+    ])
+  })
+
+  for (const [said, via] of [
+    ['pane', 'pane'],
+    ['terminal', 'terminal'],
+    ['agent', 'agent'],
+    [undefined, 'terminal'],
+    ['somewhere', 'terminal'],
   ] as const) {
-    test(`an inbox answer with ${label} comes in through the ${via}`, async ($, on) => {
+    test(`an inbox answer the CLI says came via ${String(said)} is recorded as via ${via}`, async ($, on) => {
       const answering = { exitCode: 0, stdout: '' }
       const w = world(on, argv => {
         if (argv[3] === 'dir') {
@@ -696,15 +740,11 @@ describe('kanban progress and questions', () => {
         return argv[3] === 'take' ? answering : { exitCode: 0, stdout: JSON.stringify(BOARD) }
       })
 
-      if (left !== null) {
-        w.store[left] = { session: SELF, kind: 'answer', at: START }
-      }
-
       await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
       const call = $.tool.call({ tool: 'AskUserQuestion', questions: TOOL_QUESTIONS, tool_use_id: 'tu-9' } as never)
       await w.clock.settle()
       answering.stdout = JSON.stringify({
-        actions: [{ kind: 'answer', tool_use_id: 'tu-9', answers: ['Blue'], from: 'pane', nonce: 'n-1' }],
+        actions: [{ kind: 'answer', tool_use_id: 'tu-9', answers: ['Blue'], from: 'pane', via: said }],
         results: [{ id: 'r1', kind: 'answer', status: 'delivered' }],
       })
       w.inbox.files = ['r1.json']
@@ -713,7 +753,6 @@ describe('kanban progress and questions', () => {
 
       expect(r.result).toEqual({ questions: TOOL_QUESTIONS, answers: { 'Which color?': 'Blue' } })
       expect(answerVia(w)).toBe(via)
-      expect(nonceKeys(w)).toEqual(via === 'pane' || left === null ? [] : [left])
     })
   }
 
@@ -1065,7 +1104,12 @@ describe('kanban pane', () => {
       'pane',
     ])
     expect(reply.nonce).toMatch(/^[A-Za-z0-9-]{32,}$/)
-    expect(w.store[`kanban:nonce:other:answer:${reply.nonce}`]).toEqual({ session: 'other', kind: 'answer', at: START })
+    expect(w.store[`kanban:nonce:other:answer:${reply.nonce}`]).toEqual({
+      session: 'other',
+      kind: 'answer',
+      nonce: reply.nonce,
+      at: START,
+    })
     expect(w.store['kanban:answer:other:tu-1']).toBeUndefined()
     await ui.unmount()
 
@@ -1360,7 +1404,7 @@ describe('kanban details and requests', () => {
       '60s',
       '--waits-stdin',
     ])
-    expect(JSON.parse(take?.stdin ?? '{}')).toEqual({ asks: [], decision: null })
+    expect(JSON.parse(take?.stdin ?? '{}')).toEqual({ asks: [], decision: null, nonces: [] })
     expect(w.submitted).toEqual(['Run lint'])
     const rec = stored(w) as Record<string, unknown>
     expect((rec.prompts as { text: string; origin: string }[]).at(-1)).toEqual({ text: 'Run lint', origin: 'kanban', at: START + 6_000 })
@@ -1374,12 +1418,13 @@ describe('kanban details and requests', () => {
       routes({
         'inbox dir': { dir: INBOX_DIR },
         'inbox take': {
-          actions: [{ kind: 'decide', decision_at: String(START), text: '초안대로 진행', from: 'pane', nonce: 'n-1' }],
-          results: [{ id: 'r1', kind: 'decide', status: 'delivered' }],
+          actions: [{ kind: 'decide', decision_at: String(START), text: '초안대로 진행', from: 'pane', via: 'pane' }],
+          results: [{ id: 'r1', kind: 'decide', status: 'delivered', via: 'pane' }],
+          used_nonces: [{ kind: 'decide', nonce: 'n-1' }],
         },
       }),
     )
-    w.store[`kanban:nonce:${SELF}:decide:n-1`] = { session: SELF, kind: 'decide', at: START }
+    w.store[`kanban:nonce:${SELF}:decide:n-1`] = { session: SELF, kind: 'decide', nonce: 'n-1', at: START }
 
     await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
     await $.tool.call({
@@ -1704,7 +1749,9 @@ describe('kanban permission answers', () => {
       '60s',
       '--for',
       '2s',
+      '--nonces-stdin',
     ])
+    expect(JSON.parse(waits[0]?.stdin ?? '{}')).toEqual({ nonces: [] })
     expect(eventNames(w).at(-1)).toBe('kanban.answer')
     expect((stored(w) as Record<string, unknown>).permission).toBeNull()
   })
@@ -1821,32 +1868,42 @@ describe('kanban permission answers', () => {
     expect(nonceKeys(w)).toEqual([`kanban:nonce:asker:permit:${permit.nonce}`])
   })
 
-  test('a pane permit taken with its nonce counts as the pane, once', async ($, on) => {
-    const { w } = permitWorld(on, [{ decision: 'allow', from: 'pane', nonce: 'n-1' }])
-    w.store[`kanban:nonce:${SELF}:permit:n-1`] = { session: SELF, kind: 'permit', at: START }
+  test('a permit wait sends the nonces the pane left and drops the one the CLI used', async ($, on) => {
+    const { w } = permitWorld(on, [
+      { decision: 'allow', from: 'pane', via: 'pane', used_nonces: [{ kind: 'permit', nonce: 'n-1' }] },
+    ])
+    w.store[`kanban:nonce:${SELF}:permit:n-1`] = { session: SELF, kind: 'permit', nonce: 'n-1', at: START }
+    w.store[`kanban:nonce:${SELF}:answer:n-2`] = { session: SELF, kind: 'answer', nonce: 'n-2', at: START }
 
     await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
     await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} } as never)
 
+    const wait = w.runs.find(x => x.argv[3] === 'wait-permit')
+    expect(JSON.parse(wait?.stdin ?? '{}')).toEqual({
+      nonces: [
+        { kind: 'permit', nonce: 'n-1' },
+        { kind: 'answer', nonce: 'n-2' },
+      ],
+    })
     expect(answerVia(w)).toBe('pane')
-    expect(nonceKeys(w)).toEqual([])
-
-    await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} } as never)
-
-    expect(answerVia(w)).toBe('terminal')
-  })
-
-  test('a permit without a nonce the pane left is still the decision, through the terminal', async ($, on) => {
-    const { w } = permitWorld(on, [{ decision: 'deny', from: 'pane', nonce: 'n-2' }])
-    w.store[`kanban:nonce:${SELF}:answer:n-2`] = { session: SELF, kind: 'answer', at: START }
-
-    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
-    const r = await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} } as never)
-
-    expect(r).toEqual({ decision: { behavior: 'deny', message: '사람이 칸반에서 이 도구 실행을 거부했어요' } })
-    expect(answerVia(w)).toBe('terminal')
     expect(nonceKeys(w)).toEqual([`kanban:nonce:${SELF}:answer:n-2`])
   })
+
+  for (const [said, via] of [
+    ['pane', 'pane'],
+    ['agent', 'agent'],
+    [undefined, 'terminal'],
+  ] as const) {
+    test(`a permit the CLI says came via ${String(said)} is the decision, recorded as via ${via}`, async ($, on) => {
+      const { w } = permitWorld(on, [{ decision: 'deny', from: 'pane', via: said }])
+
+      await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+      const r = await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} } as never)
+
+      expect(r).toEqual({ decision: { behavior: 'deny', message: '사람이 칸반에서 이 도구 실행을 거부했어요' } })
+      expect(answerVia(w)).toBe(via)
+    })
+  }
 })
 
 describe('kanban shell guard', () => {
