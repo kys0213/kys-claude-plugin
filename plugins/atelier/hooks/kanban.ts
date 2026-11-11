@@ -639,6 +639,27 @@ export function registerKanban(on: On): void {
     return next(e)
   })
 
+  on('ui.close', { id: PANE }, async ($, e, next) => {
+    await next(e)
+    $.ui.invalidate('ui.render')
+  })
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) {
+      return next(e)
+    }
+
+    const { Box, Button } = $.ui.resolve(e)
+    const below = await next(e)
+    const button = Button({
+      key: 'kanban:toggle',
+      label: (await isPaneShown($)) ? '세션 칸반 닫기' : '세션 칸반 열기',
+      onPress: () => void toggle($, s),
+    })
+
+    return Box({ flexDirection: 'column', children: below ? [button, below] : [button] })
+  })
+
   on('ui.render', { component: 'Pane', requestId: 'kanban' }, async ($, e) => {
     const els = $.ui.resolve(e)
     const { Box, Text } = els
