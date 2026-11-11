@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code'
 
-import { CLI_MISSING, cli } from './kanban-cli'
+import { queueRequest } from './kanban-cli'
 
 type Section = { title: string; lines: string[] }
 
@@ -58,15 +58,9 @@ export function pruneDetail(s: DetailState, cards: readonly DetailCard[]): void 
 }
 
 async function request($: EngineInterface, s: DetailState, card: DetailCard, args: string[], sent: string) {
-  const out = await cli($, args)
+  const refused = await queueRequest($, args)
 
-  if (out !== null && typeof out.queued === 'object') {
-    s.notes.set(card.session_id, { text: sent, isError: false })
-  } else {
-    const reason = typeof out?.error === 'string' ? out.error : CLI_MISSING
-
-    s.notes.set(card.session_id, { text: reason, isError: true })
-  }
+  s.notes.set(card.session_id, refused === null ? { text: sent, isError: false } : { text: refused, isError: true })
 
   $.ui.invalidate('ui.render')
 }

@@ -107,8 +107,8 @@ pub enum RequestCommand {
         #[arg(long)]
         session: String,
         /// `pane` for a person on the board, `agent` for a model
-        #[arg(long)]
-        from: String,
+        #[arg(long, value_parser = parse_sender)]
+        from: Sender,
         /// Names the sending session in an agent prompt's header
         #[arg(long)]
         from_label: Option<String>,
@@ -126,8 +126,8 @@ pub enum RequestCommand {
         #[arg(long)]
         decision: String,
         /// `pane` for a person on the board or a terminal, `agent` for a model
-        #[arg(long)]
-        from: String,
+        #[arg(long, value_parser = parse_sender)]
+        from: Sender,
     },
     /// Leaves the answers to one open question for the session that asked
     Reply {
@@ -140,8 +140,8 @@ pub enum RequestCommand {
         #[arg(long = "answer", allow_hyphen_values = true)]
         answers: Vec<String>,
         /// `pane` for a person on the board or a terminal, `agent` for a model
-        #[arg(long)]
-        from: String,
+        #[arg(long, value_parser = parse_sender)]
+        from: Sender,
     },
     /// Leaves the reply to the decision a session's last turn ended on
     Decide {
@@ -153,8 +153,8 @@ pub enum RequestCommand {
         #[arg(long, allow_hyphen_values = true)]
         text: String,
         /// `pane` for a person on the board or a terminal, `agent` for a model
-        #[arg(long)]
-        from: String,
+        #[arg(long, value_parser = parse_sender)]
+        from: Sender,
     },
     /// Leaves a stop for one turn in a session's inbox
     Stop {
@@ -228,6 +228,10 @@ pub enum InboxCommand {
         #[arg(long)]
         session: String,
     },
+}
+
+fn parse_sender(raw: &str) -> Result<Sender, String> {
+    Sender::parse(raw).ok_or_else(|| format!("pane 또는 agent 예요 (받은 값: {raw})"))
 }
 
 pub fn run_from<I, T>(argv: I) -> i32
@@ -494,14 +498,6 @@ fn run_status(
     }
 }
 
-/// Runs `send` as the sender `--from` names, or refuses a name it does not know.
-fn sent(from: &str, send: impl FnOnce(Sender) -> Value) -> Value {
-    match Sender::parse(from) {
-        Some(from) => send(from),
-        None => json!({ "error": format!("--from 은 pane 또는 agent 예요 (받은 값: {from})") }),
-    }
-}
-
 fn run_request(command: RequestCommand) -> Value {
     let inbox = FsInbox::from_env();
     let requests = KanbanRequests {
@@ -517,30 +513,26 @@ fn run_request(command: RequestCommand) -> Value {
             from,
             from_label,
             text,
-        } => sent(&from, |from| {
-            requests.send(&session, from, from_label.as_deref(), &text)
-        }),
+        } => requests.send(&session, from, from_label.as_deref(), &text),
         RequestCommand::Stop { session, turn } => requests.stop(&session, &turn),
         RequestCommand::Permit {
             session,
             request,
             decision,
             from,
-        } => sent(&from, |from| {
-            requests.permit(&session, &request, &decision, from)
-        }),
+        } => requests.permit(&session, &request, &decision, from),
         RequestCommand::Reply {
             session,
             ask,
             answers,
             from,
-        } => sent(&from, |from| requests.reply(&session, &ask, &answers, from)),
+        } => requests.reply(&session, &ask, &answers, from),
         RequestCommand::Decide {
             session,
             at,
             text,
             from,
-        } => sent(&from, |from| requests.decide(&session, &at, &text, from)),
+        } => requests.decide(&session, &at, &text, from),
         RequestCommand::Inbox { command } => match command {
             InboxCommand::Dir { session } => requests.dir(&session),
             InboxCommand::Take {

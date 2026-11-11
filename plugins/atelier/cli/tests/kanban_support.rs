@@ -1,4 +1,4 @@
-//! Shared builders for the `kanban board` black-box tests.
+//! Shared builders for the `kanban` black-box tests.
 //!
 //! `#![allow(dead_code)]` because each test binary uses only part of them
 //! (Cargo compiles this module into every test crate that declares it).
@@ -7,10 +7,18 @@
 use assert_cmd::Command;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const NOW: u64 = 1_800_000_000_000;
 pub const SEC: u64 = 1_000;
 pub const MIN: u64 = 60 * SEC;
+
+pub fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_millis() as u64
+}
 
 pub fn atelier() -> Command {
     Command::cargo_bin("atelier").expect("locate `atelier` cargo binary")

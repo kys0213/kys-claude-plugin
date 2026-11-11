@@ -44,3 +44,14 @@ export async function cli($: EngineInterface, args: string[], stdin?: string): P
 
   return r.kind === 'json' ? r.value : null
 }
+
+/** Runs a command that leaves a request in an inbox; null once it is queued, else why not. */
+export async function queueRequest($: EngineInterface, args: string[]): Promise<string | null> {
+  const out = await cli($, args)
+
+  if (out !== null && typeof out.queued === 'object') {
+    return null
+  }
+
+  return typeof out?.error === 'string' ? out.error : CLI_MISSING
+}

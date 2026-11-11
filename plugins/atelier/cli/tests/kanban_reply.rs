@@ -3,16 +3,11 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
-fn now_ms() -> String {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock after epoch")
-        .as_millis()
-        .to_string()
-}
+mod kanban_support;
+use kanban_support::now_ms;
 
 struct World {
     config: TempDir,
@@ -52,7 +47,7 @@ impl World {
     }
 
     fn take(&self, session: &str, turn: Option<&str>, open: Value) -> Value {
-        let now = now_ms();
+        let now = now_ms().to_string();
         let mut args = vec![
             "inbox",
             "take",
@@ -71,7 +66,7 @@ impl World {
     }
 
     fn wait_permit(&self, session: &str, request: &str) -> Value {
-        let now = now_ms();
+        let now = now_ms().to_string();
         self.kanban(&[
             "inbox",
             "wait-permit",
@@ -187,7 +182,7 @@ fn a_take_without_waits_stdin_leaves_stdin_unread_and_finds_every_answer_stale()
             "--session",
             "s-1",
             "--now",
-            &now_ms(),
+            &now_ms().to_string(),
             "--ttl",
             "60s",
         ],
@@ -207,7 +202,7 @@ fn a_take_without_waits_stdin_ends_while_stdin_stays_open() {
             "--session",
             "s-1",
             "--now",
-            &now_ms(),
+            &now_ms().to_string(),
             "--ttl",
             "60s",
         ])
@@ -472,17 +467,6 @@ fn answers_that_cannot_be_read_are_refused_before_anything_is_written() {
             "--from",
             "pane",
         ],
-        vec![
-            "reply",
-            "--session",
-            "s-1",
-            "--ask",
-            "tu-1",
-            "--answer",
-            "a",
-            "--from",
-            "robot",
-        ],
     ] {
         let out = w.kanban(&args);
         assert!(out["error"].is_string(), "{args:?} → {out}");
@@ -529,7 +513,7 @@ fn unreadable_open_waits_are_refused_and_the_inbox_is_left_alone() {
             "--session",
             "s-1",
             "--now",
-            &now_ms(),
+            &now_ms().to_string(),
             "--ttl",
             "60s",
             "--waits-stdin",

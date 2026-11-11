@@ -57,13 +57,31 @@ impl KanbanRequests<'_> {
         answer((|| {
             check_id("session", session)?;
             let request = request?;
-            let id = self.ids.next_id();
-            self.inbox
-                .put(session, &id, &request.to_json().to_string())?;
+            let contents = request.to_json().to_string();
+            let id = match &request {
+                Request::Permit { request_id, .. } => {
+                    self.inbox.put_permit(session, request_id, &contents)?;
+                    request_id.clone()
+                }
+                _ => {
+                    let id = self.ids.next_id();
+                    self.inbox.put(session, &id, &contents)?;
+                    id
+                }
+            };
             Ok(
                 json!({ "queued": { "session_id": session, "id": id, "kind": request.kind().id() } }),
             )
         })())
+    }
+
+    fn queue_answer(
+        &self,
+        session: &str,
+        from: Sender,
+        request: impl FnOnce() -> Result<Request, String>,
+    ) -> Value {
+        self.queue(session, check_answerer(from).and_then(|()| request()))
     }
 
     pub fn send(&self, session: &str, from: Sender, from_label: Option<&str>, text: &str) -> Value {
@@ -76,31 +94,16 @@ impl KanbanRequests<'_> {
 
     /// Leaves one answer per question for the open question `ask` names.
     pub fn reply(&self, session: &str, ask: &str, answers: &[String], from: Sender) -> Value {
-        self.queue(
-            session,
-            check_answerer(from).and_then(|()| Request::answer(ask, answers, from)),
-        )
+        self.queue_answer(session, from, || Request::answer(ask, answers, from))
     }
 
     /// Leaves the reply to the decision that `at` names.
     pub fn decide(&self, session: &str, at: &str, text: &str, from: Sender) -> Value {
-        self.queue(
-            session,
-            check_answerer(from).and_then(|()| Request::decide(at, text, from)),
-        )
+        self.queue_answer(session, from, || Request::decide(at, text, from))
     }
 
     pub fn permit(&self, session: &str, request: &str, decision: &str, from: Sender) -> Value {
-        answer((|| {
-            check_id("session", session)?;
-            check_answerer(from)?;
-            let permit = Request::permit(request, decision, from)?;
-            self.inbox
-                .put_permit(session, request, &permit.to_json().to_string())?;
-            Ok(
-                json!({ "queued": { "session_id": session, "id": request, "kind": permit.kind().id() } }),
-            )
-        })())
+        self.queue_answer(session, from, || Request::permit(request, decision, from))
     }
 
     /// Waits up to `for_ms` for the answer to `request`, claiming it.

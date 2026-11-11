@@ -2,15 +2,11 @@ use assert_cmd::Command;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock after epoch")
-        .as_millis() as u64
-}
+mod kanban_support;
+use kanban_support::now_ms;
 
 struct World {
     config: TempDir,
@@ -309,11 +305,52 @@ fn requests_are_refused_for_bad_ids_and_empty_text() {
             "   ",
         ],
         vec!["stop", "--session", "s/1", "--turn", "t"],
-        vec!["send", "--session", "s-1", "--from", "robot", "--text", "x"],
         vec!["inbox", "dir", "--session", ""],
     ] {
         let out = w.kanban(&args);
         assert!(out["error"].is_string(), "{args:?} → {out}");
+    }
+    assert!(!w.config.path().join("atelier").exists());
+}
+
+#[test]
+fn a_sender_other_than_pane_or_agent_is_refused_before_anything_is_written() {
+    let w = World::new();
+    for args in [
+        vec!["send", "--session", "s-1", "--text", "x"],
+        vec![
+            "reply",
+            "--session",
+            "s-1",
+            "--ask",
+            "tu-1",
+            "--answer",
+            "a",
+        ],
+        vec!["decide", "--session", "s-1", "--at", "1700", "--text", "네"],
+        vec![
+            "permit",
+            "--session",
+            "s-1",
+            "--request",
+            "p-1",
+            "--decision",
+            "allow",
+        ],
+    ] {
+        let output = Command::cargo_bin("atelier")
+            .expect("locate `atelier` cargo binary")
+            .arg("kanban")
+            .args(&args)
+            .args(["--from", "robot"])
+            .env("CLAUDE_CONFIG_DIR", w.config.path())
+            .output()
+            .expect("run atelier");
+        assert!(output.stdout.is_empty(), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("pane 또는 agent"),
+            "{args:?}"
+        );
     }
     assert!(!w.config.path().join("atelier").exists());
 }

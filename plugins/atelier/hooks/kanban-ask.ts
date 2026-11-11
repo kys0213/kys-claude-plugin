@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code'
 
-import { CLI_MISSING, cli, runKanban } from './kanban-cli'
+import { CLI_MISSING, queueRequest, runKanban } from './kanban-cli'
 import { type AskQuestion, MAX_FIELD_CHARS } from './kanban-record'
 
 /** The store key a pane of an older mod leaves its answers under; read beside the inbox while such a pane may run. */
@@ -155,7 +155,7 @@ async function sendAnswer($: EngineInterface, s: AskState, card: AskCard, ask: C
   if (r.kind === 'missing') {
     s.errors.set(key, CLI_MISSING)
   } else if (answers !== null) {
-    const out = await cli($, [
+    const refused = await queueRequest($, [
       'reply',
       '--session',
       card.session_id,
@@ -166,11 +166,11 @@ async function sendAnswer($: EngineInterface, s: AskState, card: AskCard, ask: C
       'pane',
     ])
 
-    if (out !== null && typeof out.queued === 'object') {
+    if (refused === null) {
       s.sent.add(key)
       s.errors.delete(key)
     } else {
-      s.errors.set(key, typeof out?.error === 'string' ? out.error : CLI_MISSING)
+      s.errors.set(key, refused)
     }
   } else {
     s.errors.set(key, typeof parsed?.error === 'string' ? parsed.error : 'atelier kanban answer 의 출력을 읽지 못했어요')
