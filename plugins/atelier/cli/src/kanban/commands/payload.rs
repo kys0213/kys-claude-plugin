@@ -12,7 +12,7 @@ use crate::kanban::core::answer::Pick;
 use crate::kanban::core::background::{AgentFact, AgentStatus};
 use crate::kanban::core::board::{Event, PermissionAsk, SessionFact};
 use crate::kanban::core::detail::{Decision, DecisionLengths, Delivery, DeliveryStatus};
-use crate::kanban::core::ledger::{Answered, DecisionBy, Facts, PermitBy, QuestionBy};
+use crate::kanban::core::ledger::{Answered, DecisionBy, Facts, OpenCall, PermitBy, QuestionBy};
 use crate::kanban::core::progress::{Activity, ItemStatus, WorkItem};
 use crate::kanban::core::prompt::PromptFact;
 use crate::kanban::core::question::{Ask, AskLengths, Question, QuestionOption};
@@ -390,6 +390,36 @@ pub fn parse_ledger_facts(raw: &str) -> Result<Facts, String> {
     })
 }
 
+/// What `ledger bind` takes: the permission request's `tool` and the
+/// session's `calls` in flight, `{"tool_use_id", "tool", "permission"}` each,
+/// `permission` whether a request is already bound to it.
+pub fn parse_bind_facts(raw: &str) -> Result<(String, Vec<OpenCall>), String> {
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    let tool = value
+        .get("tool")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "stdin has no `tool`".to_string())?;
+    let calls = value
+        .get("calls")
+        .and_then(Value::as_array)
+        .and_then(|calls| {
+            calls
+                .iter()
+                .map(parse_open_call)
+                .collect::<Option<Vec<_>>>()
+        })
+        .ok_or_else(|| "stdin has no readable `calls` array".to_string())?;
+    Ok((tool.to_string(), calls))
+}
+
+fn parse_open_call(value: &Value) -> Option<OpenCall> {
+    Some(OpenCall {
+        tool_use_id: value.get("tool_use_id")?.as_str()?.to_string(),
+        tool: value.get("tool")?.as_str()?.to_string(),
+        has_permission: value.get("permission")?.as_bool()?,
+    })
+}
+
 /// How an answer came in: the asking session's own screen, or its inbox as
 /// the CLI judged it there. A `via` it did not name proves nothing.
 #[derive(Clone, Copy)]
@@ -414,6 +444,39 @@ impl Way {
     }
 }
 
+fn required_bool(value: &Value, key: &str, what: &str) -> Result<bool, String> {
+    value
+        .get(key)
+        .and_then(Value::as_bool)
+        .ok_or_else(|| format!("`{what}` is not a boolean"))
+}
+
+/// The dialog's answers in the call's order: one that is not text is no
+/// answer, and a call that ended in an error or a deny answered nothing.
+fn dialog_answers(answer: &Value, answers: &[Value]) -> Result<Vec<Option<String>>, String> {
+    let is_error = required_bool(answer, "is_error", "answer.is_error")?;
+    let denied = required_bool(answer, "denied", "answer.denied")?;
+    if is_error || denied {
+        return Ok(Vec::new());
+    }
+    Ok(answers
+        .iter()
+        .map(|a| a.as_str().map(str::to_string))
+        .collect())
+}
+
+fn inbox_answers(answers: &[Value]) -> Result<Vec<Option<String>>, String> {
+    answers
+        .iter()
+        .map(|a| match a {
+            Value::Null => Some(None),
+            Value::String(s) => Some(Some(s.clone())),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| "`answer.answers` is not a list of answers".to_string())
+}
+
 fn parse_answered_question(wait: &Value, answer: &Value, way: Way) -> Result<Answered, String> {
     let unreadable = || "`question` is not a recorded question".to_string();
     let id = wait
@@ -421,25 +484,18 @@ fn parse_answered_question(wait: &Value, answer: &Value, way: Way) -> Result<Ans
         .and_then(Value::as_str)
         .ok_or_else(unreadable)?;
     let ask = parse_ask(id, wait).ok_or_else(unreadable)?;
-    let answers = answer
+    let given = answer
         .get("answers")
         .and_then(Value::as_array)
-        .and_then(|answers| {
-            answers
-                .iter()
-                .map(|a| match a {
-                    Value::Null => Some(None),
-                    Value::String(s) => Some(Some(s.clone())),
-                    _ => None,
-                })
-                .collect::<Option<Vec<_>>>()
-        })
-        .ok_or_else(|| "`answer.answers` is not a list of answers".to_string())?;
-    let by = match way {
-        Way::Session => QuestionBy::Dialog {
-            afk: !matches!(answer.get("afk_timeout_ms"), None | Some(Value::Null)),
-        },
-        Way::Inbox(via) => QuestionBy::Inbox(via),
+        .ok_or_else(|| "`answer.answers` is not a list".to_string())?;
+    let (by, answers) = match way {
+        Way::Session => (
+            QuestionBy::Dialog {
+                afk: answer.get("afk_timeout_ms").is_some_and(Value::is_number),
+            },
+            dialog_answers(answer, given)?,
+        ),
+        Way::Inbox(via) => (QuestionBy::Inbox(via), inbox_answers(given)?),
     };
     Ok(Answered::Question { ask, by, answers })
 }

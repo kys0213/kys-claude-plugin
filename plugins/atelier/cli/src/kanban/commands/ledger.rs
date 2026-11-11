@@ -2,11 +2,11 @@
 //! prune old ones. Each answers one JSON value.
 
 use crate::kanban::commands::ledger_store::LedgerStore;
-use crate::kanban::commands::payload::parse_ledger_facts;
+use crate::kanban::commands::payload::{parse_bind_facts, parse_ledger_facts};
 use crate::kanban::core::allowlist::RealPaths;
 use crate::kanban::core::ledger::{
-    entries, month_of, prune, select, DecidedBy, Entry, EntryKind, EntryVia, ListQuery, Pruned,
-    DEFAULT_LIMIT, MAX_AGE_MS, MAX_BYTES, MAX_LIMIT,
+    entries, month_of, permission_call, prune, select, DecidedBy, Entry, EntryKind, EntryVia,
+    ListQuery, Pruned, DEFAULT_LIMIT, MAX_AGE_MS, MAX_BYTES, MAX_LIMIT,
 };
 use serde_json::{json, Value};
 
@@ -117,6 +117,13 @@ impl KanbanLedger<'_> {
             }
             Ok(json!({ "recorded": kept.iter().map(|e| e.id.as_str()).collect::<Vec<_>>() }))
         })())
+    }
+
+    pub fn bind(raw: &str) -> Value {
+        answer(
+            parse_bind_facts(raw)
+                .map(|(tool, calls)| json!({ "call": permission_call(&tool, &calls) })),
+        )
     }
 
     pub fn list(&self, args: ListArgs) -> Value {

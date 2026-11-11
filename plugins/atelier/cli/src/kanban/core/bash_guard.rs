@@ -17,6 +17,8 @@ const MOD_ONLY: &[&[&str]] = &[
     &["forget"],
     &["relay-frame"],
     &["ledger", "record"],
+    &["ledger", "bind"],
+    &["ledger", "prune"],
     &["inbox", "take"],
     &["inbox", "wait-permit"],
     &["inbox", "dir"],

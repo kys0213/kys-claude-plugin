@@ -669,7 +669,7 @@ export function registerKanban(on: On): void {
     const permission: PermissionFacts | null = isQuestion
       ? null
       : { id, tool: e.tool_name, input: stringFields(e.tool_input), input_len: fieldLengths(e.tool_input), at: now }
-    const call = permission === null ? null : askedPermission(s, e.tool_name, permission)
+    const call = permission === null ? null : await askedPermission($, s, e.tool_name, permission)
 
     await record($, s, {
       name: 'classic.PermissionRequest',

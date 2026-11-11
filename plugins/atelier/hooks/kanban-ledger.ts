@@ -18,7 +18,7 @@ type LedgerWait =
 
 /** How the answer came in, as `ledger record` reads it; who decided is left to the CLI. */
 type LedgerAnswer =
-  | { path: 'session'; answers: (string | null)[]; afk_timeout_ms: number | null }
+  | { path: 'session'; answers: unknown[]; afk_timeout_ms: unknown; is_error: boolean; denied: boolean }
   | { path: 'session'; post: string | null; is_error: boolean }
   | { path: 'session'; text: string; origin: string }
   | { path: 'inbox'; via: Via; answers: string[] }
@@ -68,26 +68,20 @@ async function recordAnswer($: EngineInterface, wait: LedgerWait, answer: Ledger
 
 type AskFacts = { at: number; questions: AskQuestion[]; orig_len: AskLengths }
 
-/** The dialog's own answers, one per question in the call's order; null when the call ended without them. */
-function dialogAnswer(questions: readonly ToolQuestion[], r: unknown): LedgerAnswer | null {
-  const result = (r as { result?: unknown; isError?: unknown; deny?: unknown } | null) ?? {}
-  const answers = (result.result as { answers?: unknown } | undefined)?.answers
-
-  if (result.isError === true || result.deny !== undefined || typeof answers !== 'object' || answers === null) {
-    return null
+/** How the call ended, with what its dialog keyed under each question, in the call's order. */
+function dialogAnswer(questions: readonly ToolQuestion[], r: unknown): LedgerAnswer {
+  const ended = (r ?? {}) as {
+    result?: { answers?: Record<string, unknown> | null; afkTimeoutMs?: unknown } | null
+    isError?: unknown
+    deny?: unknown
   }
-
-  const byQuestion = answers as Record<string, unknown>
-  const afk = (result.result as { afkTimeoutMs?: unknown }).afkTimeoutMs
 
   return {
     path: 'session',
-    answers: questions.map(q => {
-      const answer = byQuestion[q.question]
-
-      return typeof answer === 'string' ? answer : null
-    }),
-    afk_timeout_ms: typeof afk === 'number' ? afk : null,
+    answers: questions.map(q => ended.result?.answers?.[q.question] ?? null),
+    afk_timeout_ms: ended.result?.afkTimeoutMs ?? null,
+    is_error: ended.isError === true,
+    denied: ended.deny !== undefined,
   }
 }
 
@@ -101,9 +95,7 @@ export async function recordQuestion(
 ): Promise<void> {
   const answer = 'local' in won ? dialogAnswer(questions, won.local) : { path: 'inbox' as const, via: won.via, answers: won.answers }
 
-  if (answer !== null) {
-    await recordAnswer($, { question: { tool_use_id: toolUseId, ...ask } }, answer)
-  }
+  await recordAnswer($, { question: { tool_use_id: toolUseId, ...ask } }, answer)
 }
 
 /** A tool call starts: a permission request it raises is tied to it. */
@@ -113,18 +105,21 @@ export function startCall(s: LedgerState, toolUseId: string | undefined, tool: s
   }
 }
 
-/**
- * Ties a permission request to the one call in flight for its tool that has none yet.
- * With none, or more than one, it is tied to no call and its dialog answer is not recorded.
- */
-export function askedPermission(s: LedgerState, tool: string, permission: PermissionFacts): Call | null {
-  const open = [...s.calls.values()].filter(call => call.tool === tool && call.permission === null)
+/** Ties a permission request to the call in flight `ledger bind` names; none when it names none or fails. */
+export async function askedPermission(
+  $: EngineInterface,
+  s: LedgerState,
+  tool: string,
+  permission: PermissionFacts,
+): Promise<Call | null> {
+  const calls = [...s.calls].map(([id, call]) => ({ tool_use_id: id, tool: call.tool, permission: call.permission !== null }))
+  const out = await cli($, ['ledger', 'bind'], JSON.stringify({ tool, calls }))
+  const call = typeof out?.call === 'string' ? s.calls.get(out.call) : undefined
 
-  if (open.length !== 1) {
+  if (call === undefined) {
     return null
   }
 
-  const [call] = open as [Call]
   call.permission = permission
 
   return call

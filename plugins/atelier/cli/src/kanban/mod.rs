@@ -111,6 +111,8 @@ pub enum Commands {
 pub enum LedgerCommand {
     /// What a session saw of one answer it took, on stdin → its entries
     Record,
+    /// A permission request's tool and the calls in flight, on stdin → the call it belongs to
+    Bind,
     /// Entries, newest first
     List(Box<ListArgs>),
     /// Drops entries older than 180 days, then the oldest past 50 MB
@@ -541,6 +543,7 @@ fn run_ledger(command: LedgerCommand) -> Value {
     };
     match command {
         LedgerCommand::Record => ledger.record(&read_stdin_raw()),
+        LedgerCommand::Bind => KanbanLedger::bind(&read_stdin_raw()),
         LedgerCommand::List(args) => ledger.list(*args),
         LedgerCommand::Prune { now } => ledger.prune(now),
     }

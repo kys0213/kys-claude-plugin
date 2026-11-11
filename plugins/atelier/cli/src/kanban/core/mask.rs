@@ -5,14 +5,25 @@ use std::sync::LazyLock;
 
 const MASK: &str = "[masked]";
 
-/// `name: value` with a secret-sounding name: the name and separator stay.
+/// `name: value` with a name that ends in a secret-sounding word, so
+/// `DB_PASSWORD=` and `"client_secret":` count: the name and separator stay,
+/// and a quoted value keeps its quotes.
 static NAMED: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(?i)\b(api[_-]?key|token|secret|password|passwd|authorization)(\s*[:=]\s*)(?:bearer\s+)?\S+",
-    )
+    Regex::new(concat!(
+        r#"(?i)(api[_-]?key|token|secret|password|passwd|authorization)(["']?\s*[:=]\s*)"#,
+        r#"(?:bearer\s+)?("[^"]*"|'[^']*'|\S+)"#,
+    ))
     .unwrap()
 });
 static BEARER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\b(bearer\s+)\S+").unwrap());
+/// The password of a URL's `user:password@`.
+static USERINFO: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(://[^/\s:@]+:)[^/\s@]+@").unwrap());
+/// mysql's `-p<password>`, glued to the flag, on a line that runs a mysql or
+/// mariadb client; `-p` alone prompts and `-P` is the port.
+static MYSQL_P: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(\b(?:mysql|mariadb)[\w-]*\b[^\n|;&]*?\s(?-i:-p))\S+").unwrap()
+});
 static SHAPED: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         r"sk-[A-Za-z0-9_-]{16,}",
@@ -37,9 +48,20 @@ fn random_looking(run: &str) -> bool {
     hex || mixed
 }
 
+fn masked_value(value: &str) -> String {
+    match value.chars().next() {
+        Some(quote @ ('"' | '\'')) => format!("{quote}{MASK}{quote}"),
+        _ => MASK.to_string(),
+    }
+}
+
 pub fn mask(text: &str) -> String {
-    let named = NAMED.replace_all(text, |c: &Captures| format!("{}{}{MASK}", &c[1], &c[2]));
-    let bearer = BEARER.replace_all(&named, |c: &Captures| format!("{}{MASK}", &c[1]));
+    let named = NAMED.replace_all(text, |c: &Captures| {
+        format!("{}{}{}", &c[1], &c[2], masked_value(&c[3]))
+    });
+    let userinfo = USERINFO.replace_all(&named, |c: &Captures| format!("{}{MASK}@", &c[1]));
+    let mysql = MYSQL_P.replace_all(&userinfo, |c: &Captures| format!("{}{MASK}", &c[1]));
+    let bearer = BEARER.replace_all(&mysql, |c: &Captures| format!("{}{MASK}", &c[1]));
     let shaped = SHAPED.replace_all(&bearer, MASK);
     RUN.replace_all(&shaped, |c: &Captures| {
         if random_looking(&c[0]) {

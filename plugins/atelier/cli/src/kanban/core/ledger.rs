@@ -339,12 +339,15 @@ fn is_free_text(answer: &str, options: Option<&[String]>) -> bool {
 fn finish(draft: Draft, facts: &Facts, wait: &Wait) -> Entry {
     let masked = mask(&draft.answer);
     let q_index = draft.question.map(|(index, _)| index.to_string());
+    let asked = serde_json::to_string(&draft.asked).expect("what was asked serializes");
     let suffix = digest(
         &[
             &facts.session,
             draft.wait_id.as_deref().unwrap_or(""),
             q_index.as_deref().unwrap_or(""),
             &facts.at.to_string(),
+            draft.key.as_deref().unwrap_or(""),
+            &asked,
             &draft.answer,
         ],
         ID_BYTES,
@@ -509,6 +512,28 @@ pub fn entries(facts: &Facts, paths: &dyn RealPaths) -> Vec<Entry> {
         .into_iter()
         .map(|draft| finish(draft, facts, &wait))
         .collect()
+}
+
+/// A tool call in flight in a session, and whether a permission request is
+/// already bound to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenCall {
+    pub tool_use_id: String,
+    pub tool: String,
+    pub has_permission: bool,
+}
+
+/// The call a permission request for `tool` belongs to: the one call of that
+/// tool still without a request. With none, or more than one, it belongs to
+/// no call, since the request names no call itself.
+pub fn permission_call<'a>(tool: &str, calls: &'a [OpenCall]) -> Option<&'a str> {
+    let mut open = calls
+        .iter()
+        .filter(|call| call.tool == tool && !call.has_permission);
+    match (open.next(), open.next()) {
+        (Some(call), None) => Some(&call.tool_use_id),
+        _ => None,
+    }
 }
 
 /// `YYYY-MM` of a unix-millisecond time, in UTC.

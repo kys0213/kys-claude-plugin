@@ -2046,11 +2046,17 @@ describe('kanban ledger', () => {
   const WRAP_UP = { tool: 'WrapUp', recap: '정리했어요.', ask: '진행할까요?', blocked: true, actions: [{ label: '진행' }] }
 
   function ledgerRuns(w: World): Run[] {
-    return w.runs.filter(r => r.argv[2] === 'ledger')
+    return w.runs.filter(r => r.argv[2] === 'ledger' && r.argv[3] === 'record')
   }
 
   function recorded(w: World): unknown[] {
     return ledgerRuns(w).map(r => JSON.parse(r.stdin ?? '{}'))
+  }
+
+  /** A CLI whose `ledger bind` names call `tu-5`; every other command goes to `rest`. */
+  function binding(rest: FakeCli = boardAndAnswers(BOARD)): FakeCli {
+    return argv =>
+      argv[2] === 'ledger' && argv[3] === 'bind' ? { exitCode: 0, stdout: JSON.stringify({ call: 'tu-5' }) } : rest(argv)
   }
 
   type Engine = { classic: { PermissionRequest: (e: never) => Promise<unknown> }; tool: { call: (e: never) => Promise<unknown> } }
@@ -2077,7 +2083,7 @@ describe('kanban ledger', () => {
 
     expect(ledgerRuns(w).map(r => r.argv)).toEqual([['atelier', 'kanban', 'ledger', 'record']])
     expect(recorded(w)).toEqual([
-      { ...PLACE, question: COLOR_ASK, answer: { path: 'session', answers: ['Red'], afk_timeout_ms: null } },
+      { ...PLACE, question: COLOR_ASK, answer: { path: 'session', answers: ['Red'], afk_timeout_ms: null, is_error: false, denied: false } },
     ])
   })
 
@@ -2108,7 +2114,7 @@ describe('kanban ledger', () => {
   })
 
   test('a permission dialog whose tool then ran leaves its PostToolUse', async ($, on) => {
-    const w = world(on)
+    const w = world(on, binding())
 
     await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
     await askingCall(w, $ as never, async id => {
@@ -2123,7 +2129,7 @@ describe('kanban ledger', () => {
   })
 
   test('a permission dialog whose tool failed after it ran leaves its PostToolUseFailure', async ($, on) => {
-    const w = world(on)
+    const w = world(on, binding())
 
     await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
     await askingCall(w, $ as never, async id => {
@@ -2138,7 +2144,7 @@ describe('kanban ledger', () => {
   })
 
   test('a permission dialog that ended in an error without the tool running leaves just the error', async ($, on) => {
-    const w = world(on)
+    const w = world(on, binding())
 
     await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
     await askingCall(w, $ as never, async () => ({ isError: true, result: "The user doesn't want to proceed with this tool use." }))
@@ -2155,18 +2161,54 @@ describe('kanban ledger', () => {
     expect(ledgerRuns(w)).toEqual([])
   })
 
+  test('a permission request asks ledger bind with its tool and the calls in flight', async ($, on) => {
+    const w = world(on, binding())
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await askingCall(w, $ as never, async () => ({ result: {} }))
+
+    const binds = w.runs.filter(r => r.argv[2] === 'ledger' && r.argv[3] === 'bind')
+    expect(binds.map(r => r.argv)).toEqual([['atelier', 'kanban', 'ledger', 'bind']])
+    expect(binds.map(r => JSON.parse(r.stdin ?? '{}'))).toEqual([
+      { tool: 'Bash', calls: [{ tool_use_id: 'tu-5', tool: 'Bash', permission: false }] },
+    ])
+  })
+
+  test('a permission request ledger bind names no call for leaves nothing, and the call goes on', async ($, on) => {
+    const w = world(on)
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    const r = await askingCall(w, $ as never, async () => ({ isError: true, result: 'no' }))
+
+    expect(r).toEqual({ isError: true, result: 'no' })
+    expect(ledgerRuns(w)).toEqual([])
+  })
+
+  test('a permission request whose ledger bind fails leaves nothing, and the call goes on', async ($, on) => {
+    const w = world(on, () => 'missing')
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    const r = await askingCall(w, $ as never, async () => ({ isError: true, result: 'no' }))
+
+    expect(r).toEqual({ isError: true, result: 'no' })
+    expect(ledgerRuns(w)).toHaveLength(0)
+  })
+
   test('a permission the kanban answered leaves the way the CLI said it came, and not the run after it', async ($, on) => {
-    const w = world(on, argv => {
-      if (argv[3] === 'dir') {
-        return { exitCode: 0, stdout: JSON.stringify({ dir: INBOX_DIR }) }
-      }
+    const w = world(
+      on,
+      binding(argv => {
+        if (argv[3] === 'dir') {
+          return { exitCode: 0, stdout: JSON.stringify({ dir: INBOX_DIR }) }
+        }
 
-      if (argv[3] === 'wait-permit') {
-        return { exitCode: 0, stdout: JSON.stringify({ decision: 'allow', from: 'pane', via: 'pane' }) }
-      }
+        if (argv[3] === 'wait-permit') {
+          return { exitCode: 0, stdout: JSON.stringify({ decision: 'allow', from: 'pane', via: 'pane' }) }
+        }
 
-      return { exitCode: 0, stdout: JSON.stringify(BOARD) }
-    })
+        return { exitCode: 0, stdout: JSON.stringify(BOARD) }
+      }),
+    )
 
     await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
     await $.turn.start({ text: 'go', turnId: 't-1' })

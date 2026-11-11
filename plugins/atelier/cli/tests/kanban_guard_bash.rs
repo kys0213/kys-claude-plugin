@@ -153,6 +153,9 @@ fn the_mod_only_commands_are_denied() {
         "atelier kanban forget --session s-1",
         "atelier kanban ledger record < fact.json",
         "atelier kanban relay-frame --now 1",
+        "atelier kanban ledger prune --now 1",
+        "bash -c 'atelier kanban ledger prune --now 1'",
+        "atelier kanban ledger bind < calls.json",
     ] {
         assert!(deny(command).is_string(), "{command}");
     }

@@ -125,6 +125,144 @@ fn source(entry: &Value) -> (Value, Value) {
     (entry["decided_by"].clone(), entry["via"].clone())
 }
 
+/// What the session's own question dialog ended with: its answers, in the
+/// call's question order, and how the call ended.
+fn dialog(answers: Value) -> Value {
+    json!({
+        "path": "session",
+        "answers": answers,
+        "afk_timeout_ms": null,
+        "is_error": false,
+        "denied": false,
+    })
+}
+
+#[test]
+fn a_question_call_that_ended_in_an_error_or_a_deny_leaves_nothing() {
+    for ended in [json!({ "is_error": true }), json!({ "denied": true })] {
+        let dir = TempDir::new().unwrap();
+        let ids = record(
+            dir.path(),
+            &question_facts(NOW, color(), with(dialog(json!(["Red"])), ended.clone())),
+        );
+
+        assert!(ids.is_empty(), "{ended}");
+        assert!(list(dir.path(), &[]).is_empty(), "{ended}");
+    }
+}
+
+#[test]
+fn a_dialog_answer_that_is_not_text_is_no_answer() {
+    let dir = TempDir::new().unwrap();
+    let questions = json!([
+        question("Which color?", &["Red", "Blue"], false),
+        question("Which size?", &["S", "M"], false),
+    ]);
+    let ids = record(
+        dir.path(),
+        &question_facts(NOW, questions, dialog(json!([{ "picked": "Red" }, "M"]))),
+    );
+
+    assert_eq!(ids.len(), 1);
+    assert_eq!(only(dir.path())["q_index"], 1);
+}
+
+#[test]
+fn only_a_numeric_afk_timeout_marks_the_dialog_as_resolved_while_away() {
+    for (afk, decided_by) in [
+        (json!(60_000), Value::Null),
+        (Value::Null, json!("human")),
+        (json!("soon"), json!("human")),
+    ] {
+        let dir = TempDir::new().unwrap();
+        record(
+            dir.path(),
+            &question_facts(
+                NOW,
+                color(),
+                with(dialog(json!(["Red"])), json!({ "afk_timeout_ms": afk })),
+            ),
+        );
+
+        assert_eq!(only(dir.path())["decided_by"], decided_by, "{afk}");
+    }
+}
+
+#[test]
+fn entries_for_different_waits_at_the_same_moment_get_different_ids() {
+    let dir = TempDir::new().unwrap();
+    let ran = json!({ "path": "session", "post": "PostToolUse", "is_error": false });
+    let first = record(
+        dir.path(),
+        &permission_facts(NOW, "git status", ran.clone()),
+    );
+    let second = record(dir.path(), &permission_facts(NOW, "git diff", ran));
+
+    assert_eq!(first.len(), 1);
+    assert_eq!(second.len(), 1);
+    assert_ne!(first[0], second[0]);
+}
+
+fn bind(stdin: &Value) -> Value {
+    let output = atelier()
+        .args(["kanban", "ledger", "bind"])
+        .write_stdin(stdin.to_string())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    serde_json::from_slice(&output).expect("valid JSON on stdout")
+}
+
+fn open_call(id: &str, tool: &str, permission: bool) -> Value {
+    json!({ "tool_use_id": id, "tool": tool, "permission": permission })
+}
+
+#[test]
+fn a_permission_request_binds_to_the_one_call_of_its_tool_without_one() {
+    let out = bind(&json!({
+        "tool": "Bash",
+        "calls": [
+            open_call("tu-1", "Bash", true),
+            open_call("tu-2", "Bash", false),
+            open_call("tu-3", "Read", false),
+        ],
+    }));
+
+    assert_eq!(out, json!({ "call": "tu-2" }));
+}
+
+#[test]
+fn a_permission_request_with_two_candidate_calls_or_none_binds_to_nothing() {
+    for calls in [
+        json!([
+            open_call("tu-1", "Bash", false),
+            open_call("tu-2", "Bash", false)
+        ]),
+        json!([
+            open_call("tu-1", "Bash", true),
+            open_call("tu-2", "Read", false)
+        ]),
+        json!([]),
+    ] {
+        let out = bind(&json!({ "tool": "Bash", "calls": calls }));
+
+        assert_eq!(out, json!({ "call": null }), "{calls}");
+    }
+}
+
+#[test]
+fn bind_refuses_facts_it_cannot_read() {
+    for stdin in [
+        json!({}),
+        json!({ "tool": "Bash" }),
+        json!({ "tool": "Bash", "calls": [{ "tool_use_id": "tu-1", "tool": "Bash" }] }),
+    ] {
+        assert!(bind(&stdin)["error"].is_string(), "{stdin}");
+    }
+}
+
 // --- who decided: the source table ---
 
 #[test]
@@ -132,11 +270,7 @@ fn a_question_answered_in_its_own_dialog_is_a_persons_decision() {
     let dir = TempDir::new().unwrap();
     record(
         dir.path(),
-        &question_facts(
-            NOW,
-            color(),
-            json!({ "path": "session", "answers": ["Red"] }),
-        ),
+        &question_facts(NOW, color(), dialog(json!(["Red"]))),
     );
 
     let entry = only(dir.path());
@@ -159,7 +293,7 @@ fn a_dialog_that_resolved_itself_while_the_person_was_away_is_no_persons_decisio
         &question_facts(
             NOW,
             color(),
-            json!({ "path": "session", "answers": ["Red"], "afk_timeout_ms": 60_000 }),
+            with(dialog(json!(["Red"])), json!({ "afk_timeout_ms": 60_000 })),
         ),
     );
 
@@ -171,11 +305,7 @@ fn a_typed_answer_outside_the_options_is_free_text() {
     let dir = TempDir::new().unwrap();
     record(
         dir.path(),
-        &question_facts(
-            NOW,
-            color(),
-            json!({ "path": "session", "answers": ["Green"] }),
-        ),
+        &question_facts(NOW, color(), dialog(json!(["Green"]))),
     );
 
     assert_eq!(only(dir.path())["free_text"], true);
@@ -410,27 +540,15 @@ fn a_question_fingerprint_is_the_normalized_label() {
     let dir = TempDir::new().unwrap();
     record(
         dir.path(),
-        &question_facts(
-            NOW,
-            color(),
-            json!({ "path": "session", "answers": ["Red"] }),
-        ),
+        &question_facts(NOW, color(), dialog(json!(["Red"]))),
     );
     record(
         dir.path(),
-        &question_facts(
-            NOW + 1,
-            color(),
-            json!({ "path": "session", "answers": ["  red. "] }),
-        ),
+        &question_facts(NOW + 1, color(), dialog(json!(["  red. "]))),
     );
     record(
         dir.path(),
-        &question_facts(
-            NOW + 2,
-            color(),
-            json!({ "path": "session", "answers": ["Blue"] }),
-        ),
+        &question_facts(NOW + 2, color(), dialog(json!(["Blue"]))),
     );
 
     let fps: Vec<Value> = list(dir.path(), &[])
@@ -470,11 +588,7 @@ fn a_wait_of_two_questions_leaves_one_entry_per_question() {
     ]);
     let ids = record(
         dir.path(),
-        &question_facts(
-            NOW,
-            questions,
-            json!({ "path": "session", "answers": ["Red", "M"] }),
-        ),
+        &question_facts(NOW, questions, dialog(json!(["Red", "M"]))),
     );
     assert_eq!(ids.len(), 2);
     assert_ne!(ids[0], ids[1]);
@@ -509,11 +623,7 @@ fn a_question_left_unanswered_leaves_no_entry_for_it() {
     ]);
     let ids = record(
         dir.path(),
-        &question_facts(
-            NOW,
-            questions,
-            json!({ "path": "session", "answers": [null, "M"] }),
-        ),
+        &question_facts(NOW, questions, dialog(json!([null, "M"]))),
     );
 
     assert_eq!(ids.len(), 1);
@@ -527,18 +637,14 @@ fn an_entry_keeps_whether_its_wait_could_then_be_answered_by_a_precedent() {
     let dir = TempDir::new().unwrap();
     record(
         dir.path(),
-        &question_facts(
-            NOW,
-            color(),
-            json!({ "path": "session", "answers": ["Red"] }),
-        ),
+        &question_facts(NOW, color(), dialog(json!(["Red"]))),
     );
     record(
         dir.path(),
         &question_facts(
             NOW + 1,
             json!([question("Which pets?", &["Cat", "Dog"], true)]),
-            json!({ "path": "session", "answers": ["Cat, Dog"] }),
+            dialog(json!(["Cat, Dog"])),
         ),
     );
     record(
@@ -566,11 +672,7 @@ fn an_entry_keeps_whether_its_wait_could_then_be_answered_by_a_precedent() {
 fn a_question_cut_when_recorded_has_no_key() {
     let dir = TempDir::new().unwrap();
     let questions = color();
-    let mut facts = question_facts(
-        NOW,
-        questions,
-        json!({ "path": "session", "answers": ["Red"] }),
-    );
+    let mut facts = question_facts(NOW, questions, dialog(json!(["Red"])));
     facts["question"]["orig_len"]["question"] = json!([500]);
     record(dir.path(), &facts);
 
@@ -615,11 +717,115 @@ fn a_secret_is_masked_before_it_is_kept_and_marks_the_answer_it_changed() {
 }
 
 #[test]
+fn a_secret_under_a_prefixed_or_quoted_name_in_a_url_or_a_mysql_flag_is_masked() {
+    let cases = [
+        ("GITHUB_TOKEN=ghx_notreal123", "GITHUB_TOKEN=[masked]"),
+        ("DB_PASSWORD=hunter2", "DB_PASSWORD=[masked]"),
+        ("client_secret=s3cr3tval", "client_secret=[masked]"),
+        ("access_token=abc123def", "access_token=[masked]"),
+        (
+            "export DB_PASSWORD=hunter2 && make",
+            "export DB_PASSWORD=[masked] && make",
+        ),
+        (r#"{"password": "hunter2"}"#, r#"{"password": "[masked]"}"#),
+        (
+            r#"{"api_key":"abc def","user":"bob"}"#,
+            r#"{"api_key":"[masked]","user":"bob"}"#,
+        ),
+        (
+            "git clone https://alice:hunter2@example.com/r.git",
+            "git clone https://alice:[masked]@example.com/r.git",
+        ),
+        (
+            "mysql -u root -phunter2 app",
+            "mysql -u root -p[masked] app",
+        ),
+        ("mysqldump -phunter2 app", "mysqldump -p[masked] app"),
+    ];
+    for (said, kept) in cases {
+        let dir = TempDir::new().unwrap();
+        record(
+            dir.path(),
+            &decision_facts(
+                NOW,
+                json!({ "path": "session", "text": said, "origin": "composer" }),
+            ),
+        );
+
+        let entry = only(dir.path());
+        assert_eq!(entry["answer"], kept, "{said}");
+        assert_eq!(entry["answer_masked"], true, "{said}");
+    }
+}
+
+#[test]
+fn no_kept_field_of_a_permission_entry_carries_the_secret_in_its_target() {
+    for command in [
+        "export DB_PASSWORD=hunter2",
+        "curl -H 'X-Api-Key: hunter2' https://example.com",
+        "git clone https://alice:hunter2@example.com/r.git",
+        "mysql -h db -phunter2 app",
+        r#"echo '{"password": "hunter2"}' > cfg.json"#,
+    ] {
+        let dir = TempDir::new().unwrap();
+        record(
+            dir.path(),
+            &permission_facts(
+                NOW,
+                command,
+                json!({ "path": "session", "post": "PostToolUse", "is_error": false }),
+            ),
+        );
+
+        let entry = only(dir.path());
+        assert!(!entry.to_string().contains("hunter2"), "{command}: {entry}");
+        assert!(entry["asked"]["target"]
+            .as_str()
+            .expect("target")
+            .contains("[masked]"));
+    }
+}
+
+#[test]
+fn no_kept_field_of_a_question_or_decision_entry_carries_the_secret() {
+    let dir = TempDir::new().unwrap();
+    record(
+        dir.path(),
+        &question_facts(
+            NOW,
+            json!([question(
+                "Use DB_PASSWORD=hunter2?",
+                &["Yes, client_secret=hunter2", "No"],
+                false
+            )]),
+            dialog(json!(["Yes, client_secret=hunter2"])),
+        ),
+    );
+    record(
+        dir.path(),
+        &decision_facts(
+            NOW + 1,
+            json!({ "path": "session", "text": "use https://alice:hunter2@example.com", "origin": "composer" }),
+        ),
+    );
+
+    let entries = list(dir.path(), &[]);
+    assert_eq!(entries.len(), 2);
+    for entry in entries {
+        assert!(!entry.to_string().contains("hunter2"), "{entry}");
+    }
+}
+
+#[test]
 fn words_that_only_look_long_are_kept_as_said() {
     for said in [
         "초안대로 진행",
         "/home/user/kys-claude-plugin/plugins/atelier/cli/src/kanban",
         "tokens are fine",
+        "mkdir -p build && cp -pr a b",
+        "mysql -P3306 -p app",
+        "open https://example.com:8080/a@b",
+        "my_tokens: 3",
     ] {
         let dir = TempDir::new().unwrap();
         record(
@@ -645,7 +851,7 @@ fn what_was_asked_is_masked_while_the_key_comes_from_the_text_as_asked() {
         question_facts(
             at,
             json!([question(text, &["Yes", "No"], false)]),
-            json!({ "path": "session", "answers": ["Yes"] }),
+            dialog(json!(["Yes"])),
         )
     };
     record(dir.path(), &ask(NOW, secret));
@@ -693,11 +899,7 @@ fn list_is_newest_first_and_skips_lines_it_cannot_read() {
     let dir = TempDir::new().unwrap();
     record(
         dir.path(),
-        &question_facts(
-            NOW,
-            color(),
-            json!({ "path": "session", "answers": ["Red"] }),
-        ),
+        &question_facts(NOW, color(), dialog(json!(["Red"]))),
     );
     let file = fs::read_dir(ledger_dir(dir.path()))
         .expect("ledger dir")
@@ -710,11 +912,7 @@ fn list_is_newest_first_and_skips_lines_it_cannot_read() {
     writeln!(handle, "{{\"v\":99}}").unwrap();
     record(
         dir.path(),
-        &question_facts(
-            NOW + 1,
-            color(),
-            json!({ "path": "session", "answers": ["Blue"] }),
-        ),
+        &question_facts(NOW + 1, color(), dialog(json!(["Blue"]))),
     );
 
     let answers: Vec<Value> = list(dir.path(), &[])
@@ -729,11 +927,7 @@ fn list_filters_by_what_it_is_given() {
     let dir = TempDir::new().unwrap();
     record(
         dir.path(),
-        &question_facts(
-            NOW,
-            color(),
-            json!({ "path": "session", "answers": ["Red"] }),
-        ),
+        &question_facts(NOW, color(), dialog(json!(["Red"]))),
     );
     record(
         dir.path(),
@@ -790,11 +984,7 @@ fn record_refuses_facts_it_cannot_read() {
             json!({ "answer": { "path": "session", "answers": ["Red"] } }),
         ),
         with(
-            question_facts(
-                NOW,
-                color(),
-                json!({ "path": "session", "answers": ["Red"] }),
-            ),
+            question_facts(NOW, color(), dialog(json!(["Red"]))),
             json!({ "session": "bad id!" }),
         ),
         question_facts(
@@ -932,11 +1122,7 @@ fn a_record_waits_for_the_ledger_lock_and_then_adds_its_whole_line() {
 
     let mut child = spawn_record(
         dir.path(),
-        &question_facts(
-            NOW,
-            color(),
-            json!({ "path": "session", "answers": ["Red"] }),
-        ),
+        &question_facts(NOW, color(), dialog(json!(["Red"]))),
     );
     std::thread::sleep(Duration::from_millis(300));
     assert!(child.try_wait().expect("poll").is_none());
@@ -955,11 +1141,7 @@ fn many_records_at_once_never_mix_their_lines() {
         .map(|i| {
             spawn_record(
                 dir.path(),
-                &question_facts(
-                    NOW + i,
-                    color(),
-                    json!({ "path": "session", "answers": ["Red"] }),
-                ),
+                &question_facts(NOW + i, color(), dialog(json!(["Red"]))),
             )
         })
         .collect();
