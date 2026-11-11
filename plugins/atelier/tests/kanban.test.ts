@@ -107,6 +107,8 @@ type World = {
   /** What `$.agent.list()` answers. */
   agents: { value: { id: string; description: string; type: string; status: string; teammateId?: string }[] }
   invalidated: string[]
+  /** What the engine draws in the band above the prompt, beneath the plugin. */
+  band: { value: unknown }
 }
 
 type CliOut = { exitCode: number; stdout: string } | 'missing'
@@ -133,6 +135,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   const aborted: string[] = []
   const agents: World['agents'] = { value: [] }
   const invalidated: string[] = []
+  const band: World['band'] = { value: { type: 'Box', props: {}, children: [] } }
 
   on('store.get', ($, e) => ({ value: store[e.key] }))
   on('store.set', ($, e) => {
@@ -164,6 +167,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   on('ui.panes', () => ({
     value: shown.value ? [{ id: 'kanban', title: '세션 칸반', isShown: true, isFocused: false, isPlaced: true }] : [],
   }))
+  on('ui.render', { component: 'AbovePrompt' }, () => band.value as never)
   on('ui.invalidate', ($, e) => {
     invalidated.push(e.event)
 
@@ -219,7 +223,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
     return { result: {} }
   })
 
-  return { store, clock, runs, shown, dialog, inbox, messages, submitted, aborted, agents, invalidated }
+  return { store, clock, runs, shown, dialog, inbox, messages, submitted, aborted, agents, invalidated, band }
 }
 
 type StoredRecord = {
@@ -755,8 +759,8 @@ describe('kanban pane', () => {
   })
 
   test("the band button sits above another plugin's band", async ($, on) => {
-    world(on)
-    on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'Text', props: {}, children: ['other band'] }) as never)
+    const w = world(on)
+    w.band.value = { type: 'Text', props: {}, children: ['other band'] }
 
     const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
 
