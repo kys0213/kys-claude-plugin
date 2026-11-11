@@ -119,10 +119,17 @@ type CliOut = { exitCode: number; stdout: string } | 'missing'
 type FakeCli = (argv: readonly string[]) => CliOut | Promise<CliOut>
 
 function boardAndAnswers(board: unknown): FakeCli {
-  return argv =>
-    argv[2] === 'answer'
-      ? { exitCode: 0, stdout: JSON.stringify({ answers: ['Blue', 'Cat, Fish'] }) }
-      : { exitCode: 0, stdout: JSON.stringify(board) }
+  return argv => {
+    if (argv[2] === 'answer') {
+      return { exitCode: 0, stdout: JSON.stringify({ answers: ['Blue', 'Cat, Fish'] }) }
+    }
+
+    if (argv[2] === 'reply') {
+      return { exitCode: 0, stdout: JSON.stringify({ queued: { session_id: 'other', id: 'r1', kind: 'answer' } }) }
+    }
+
+    return { exitCode: 0, stdout: JSON.stringify(board) }
+  }
 }
 
 /** Stands for the engine beneath the plugin: one session, its store, its clock, the CLI. */
@@ -625,7 +632,39 @@ describe('kanban progress and questions', () => {
     })
   })
 
-  test('an open question is recorded and a kanban answer closes it as the person would', async ($, on) => {
+  test('an answer taken from the inbox closes the open question it names as the person would', async ($, on) => {
+    const answering = { exitCode: 0, stdout: '' }
+    const w = world(on, argv => {
+      if (argv[3] === 'dir') {
+        return { exitCode: 0, stdout: JSON.stringify({ dir: INBOX_DIR }) }
+      }
+
+      if (argv[3] === 'take') {
+        return answering
+      }
+
+      return { exitCode: 0, stdout: JSON.stringify(BOARD) }
+    })
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    const call = $.tool.call({ tool: 'AskUserQuestion', questions: TOOL_QUESTIONS, tool_use_id: 'tu-9' } as never)
+    await w.clock.settle()
+    answering.stdout = JSON.stringify({
+      actions: [{ kind: 'answer', tool_use_id: 'tu-9', answers: ['Blue'], from: 'pane' }],
+      results: [{ id: 'r1', kind: 'answer', status: 'delivered' }],
+    })
+    w.inbox.files = ['r1.json']
+    await w.clock.advance(2_000)
+    const r = await call
+
+    const take = w.runs.find(x => x.argv[3] === 'take')
+    expect(JSON.parse(take?.stdin ?? '{}')).toEqual({ asks: [{ id: 'tu-9', questions: TOOL_QUESTIONS }], decision: null })
+    expect(r.result).toEqual({ questions: TOOL_QUESTIONS, answers: { 'Which color?': 'Blue' } })
+    expect(stored(w).asks).toEqual({})
+    expect(eventNames(w)).toContain('kanban.answer')
+  })
+
+  test('an answer an older pane left in the store still closes the question', async ($, on) => {
     const w = world(on)
 
     await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
@@ -912,7 +951,7 @@ describe('kanban pane', () => {
     await asking.unmount()
   })
 
-  test('the picks go to atelier kanban answer and its answers to the asking session', async ($, on) => {
+  test('the picks go to atelier kanban answer and its answers to the asking session through reply', async ($, on) => {
     const w = world(on, boardAndAnswers(ASKING_BOARD))
 
     await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
@@ -935,7 +974,22 @@ describe('kanban pane', () => {
         { options: ['Fish', 'Cat'], text: null },
       ],
     })
-    expect(w.store['kanban:answer:other:tu-1']).toEqual({ v: 1, answers: ['Blue', 'Cat, Fish'] })
+    expect(w.runs.find(r => r.argv[2] === 'reply')?.argv).toEqual([
+      'atelier',
+      'kanban',
+      'reply',
+      '--session',
+      'other',
+      '--ask',
+      'tu-1',
+      '--answer',
+      'Blue',
+      '--answer',
+      'Cat, Fish',
+      '--from',
+      'pane',
+    ])
+    expect(w.store['kanban:answer:other:tu-1']).toBeUndefined()
     await ui.unmount()
 
     const after = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -979,7 +1033,29 @@ describe('kanban pane', () => {
 
     const after = await $.ui.mount({ ...PANE, surface: 'terminal' })
     expect((await after.find({ type: 'Text', text: /답하지 않은/ }))?.text).toBe('답하지 않은 질문이 있어요: Pets')
-    expect(w.store['kanban:answer:other:tu-1']).toBeUndefined()
+    expect(w.runs.find(r => r.argv[2] === 'reply')).toBeUndefined()
+    expect(await after.find({ key: 'ask:other:tu-1:send' })).toBeDefined()
+    await after.unmount()
+  })
+
+  test('a refused reply shows the reason and lets the answer be sent again', async ($, on) => {
+    const w = world(on, argv => {
+      if (argv[2] === 'reply') {
+        return { exitCode: 0, stdout: JSON.stringify({ error: '답이 비어 있어요' }) }
+      }
+
+      return boardAndAnswers(ASKING_BOARD)(argv)
+    })
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+    await ui.press({ key: 'ask:other:tu-1:send' })
+    await w.clock.settle()
+    await ui.unmount()
+
+    const after = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect((await after.find({ type: 'Text', text: /비어 있어요/ }))?.text).toBe('답이 비어 있어요')
     expect(await after.find({ key: 'ask:other:tu-1:send' })).toBeDefined()
     await after.unmount()
   })
@@ -1040,7 +1116,7 @@ const DETAIL_BOARD = {
           actions: ['decide', 'send'],
           detail: {
             sections: [],
-            decision: { ask: '초안대로 진행할까요?', recap: '초안을 정리했어요.', options: ['초안대로 진행', '고칠 행 있음'] },
+            decision: { id: '1700', ask: '초안대로 진행할까요?', recap: '초안을 정리했어요.', options: ['초안대로 진행', '고칠 행 있음'] },
             delivery: null,
           },
         },
@@ -1205,11 +1281,43 @@ describe('kanban details and requests', () => {
       '--ttl',
       '60s',
     ])
+    expect(JSON.parse(take?.stdin ?? '{}')).toEqual({ asks: [], decision: null })
     expect(w.submitted).toEqual(['Run lint'])
     const rec = stored(w) as Record<string, unknown>
     expect((rec.prompts as { text: string; origin: string }[]).at(-1)).toEqual({ text: 'Run lint', origin: 'kanban', at: START + 6_000 })
     expect(eventNames(w).at(-1)).toBe('prompt.submit')
     expect(rec.inbox).toEqual({ id: 'r1', kind: 'prompt', status: 'delivered', at: START + 6_000 })
+  })
+
+  test('a decide taken from the inbox runs as typed, and the take names the decision left open', async ($, on) => {
+    const w = world(
+      on,
+      routes({
+        'inbox dir': { dir: INBOX_DIR },
+        'inbox take': {
+          actions: [{ kind: 'decide', decision_at: String(START), text: '초안대로 진행', from: 'pane' }],
+          results: [{ id: 'r1', kind: 'decide', status: 'delivered' }],
+        },
+      }),
+    )
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await $.tool.call({
+      tool: 'WrapUp',
+      recap: '초안을 정리했어요.',
+      ask: '초안대로 진행할까요?',
+      blocked: true,
+      actions: [{ label: '초안대로 진행' }],
+    } as never)
+    w.inbox.files = ['r1.json']
+    await w.clock.advance(2_000)
+
+    const take = w.runs.find(r => r.argv[3] === 'take')
+    expect(JSON.parse(take?.stdin ?? '{}').decision).toMatchObject({ at: START, ask: '초안대로 진행할까요?' })
+    expect(w.submitted).toEqual(['초안대로 진행'])
+    const rec = stored(w) as Record<string, unknown>
+    expect((rec.prompts as { text: string; origin: string }[]).at(-1)?.origin).toBe('kanban')
+    expect(rec.decision).toBeNull()
   })
 
   test('a stop for the running turn aborts it', async ($, on) => {
@@ -1335,8 +1443,8 @@ describe('kanban details and requests', () => {
     ])
   })
 
-  test('a decision card sends the option pressed as the reply', async ($, on) => {
-    const w = world(on, routes({ board: DETAIL_BOARD, send: { queued: { session_id: 'wrap', id: 'r', kind: 'prompt' } } }))
+  test('a decision card answers that decision with the option pressed', async ($, on) => {
+    const w = world(on, routes({ board: DETAIL_BOARD, decide: { queued: { session_id: 'wrap', id: 'r', kind: 'decide' } } }))
 
     await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
     const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -1348,8 +1456,38 @@ describe('kanban details and requests', () => {
     await opened.press({ key: 'detail:wrap:option:1' })
     await w.clock.settle()
 
-    expect(w.runs.find(r => r.argv[2] === 'send')?.argv.at(-1)).toBe('고칠 행 있음')
+    expect(w.runs.find(r => r.argv[2] === 'decide')?.argv).toEqual([
+      'atelier',
+      'kanban',
+      'decide',
+      '--session',
+      'wrap',
+      '--at',
+      '1700',
+      '--text',
+      '고칠 행 있음',
+      '--from',
+      'pane',
+    ])
+    expect(w.runs.find(r => r.argv[2] === 'send')).toBeUndefined()
     await opened.unmount()
+  })
+
+  test('text typed on a decision card answers that decision too', async ($, on) => {
+    const w = world(on, routes({ board: DETAIL_BOARD, decide: { queued: { session_id: 'wrap', id: 'r', kind: 'decide' } } }))
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+    await ui.press({ key: 'card:wrap' })
+    await ui.unmount()
+    const opened = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await opened.input({ key: 'detail:wrap:send', text: '3행만 고쳐 주세요' })
+    await w.clock.settle()
+    await opened.unmount()
+
+    expect(w.runs.find(r => r.argv[2] === 'decide')?.argv.slice(-4)).toEqual(['--text', '3행만 고쳐 주세요', '--from', 'pane'])
+    expect(w.runs.find(r => r.argv[2] === 'send')).toBeUndefined()
   })
 
   test('a refused send shows why', async ($, on) => {
@@ -1590,7 +1728,57 @@ describe('kanban permission answers', () => {
       't-3-9',
       '--decision',
       'allow',
+      '--from',
+      'pane',
     ])
+  })
+})
+
+describe('kanban shell guard', () => {
+  const KANBAN_SEND = 'atelier kanban send --session s-1 --from pane --text hi'
+
+  test("a model's shell command naming the kanban is denied as the CLI says", async ($, on) => {
+    const w = world(on, routes({ 'guard-bash': { deny: '모델은 --from agent 로 보내요' } }))
+
+    const r = await $.tool.call({ tool: 'Bash', command: KANBAN_SEND } as never)
+
+    expect(r).toEqual({ deny: '모델은 --from agent 로 보내요' })
+    const guard = w.runs.find(x => x.argv[2] === 'guard-bash')
+    expect(guard?.argv).toEqual(['atelier', 'kanban', 'guard-bash'])
+    expect(JSON.parse(guard?.stdin ?? '{}')).toEqual({ command: KANBAN_SEND })
+  })
+
+  test("a subagent's shell command is checked the same way", async ($, on) => {
+    world(on, routes({ 'guard-bash': { deny: 'no' } }))
+
+    const r = await $.tool.call({ tool: 'Bash', command: KANBAN_SEND, agentId: 'a1' } as never)
+
+    expect(r).toEqual({ deny: 'no' })
+  })
+
+  test('a command the CLI lets through runs', async ($, on) => {
+    world(on, routes({ 'guard-bash': { deny: null } }))
+
+    const r = await $.tool.call({ tool: 'Bash', command: 'atelier kanban send --from agent --session s --text x' } as never)
+
+    expect(r.deny).toBeUndefined()
+  })
+
+  test('a command that never names the kanban does not ask the CLI', async ($, on) => {
+    const w = world(on, routes({ 'guard-bash': { deny: 'no' } }))
+
+    const r = await $.tool.call({ tool: 'Bash', command: 'git status' } as never)
+
+    expect(r.deny).toBeUndefined()
+    expect(w.runs.find(x => x.argv[2] === 'guard-bash')).toBeUndefined()
+  })
+
+  test('a missing or failing CLI lets the command run', async ($, on) => {
+    world(on, () => 'missing')
+
+    const r = await $.tool.call({ tool: 'Bash', command: KANBAN_SEND } as never)
+
+    expect(r.deny).toBeUndefined()
   })
 })
 

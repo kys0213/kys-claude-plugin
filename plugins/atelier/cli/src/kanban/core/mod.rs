@@ -1,6 +1,7 @@
 pub mod allowlist;
 pub mod answer;
 pub mod background;
+pub mod bash_guard;
 pub mod board;
 pub mod detail;
 pub mod duration;

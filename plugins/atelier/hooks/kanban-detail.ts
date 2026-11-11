@@ -4,7 +4,7 @@ import { CLI_MISSING, cli } from './kanban-cli'
 
 type Section = { title: string; lines: string[] }
 
-type DecisionView = { ask: string; recap: string | null; options: string[] }
+type DecisionView = { id: string; ask: string; recap: string | null; options: string[] }
 
 export type DetailCard = {
   session_id: string
@@ -71,16 +71,19 @@ async function request($: EngineInterface, s: DetailState, card: DetailCard, arg
   $.ui.invalidate('ui.render')
 }
 
-async function send($: EngineInterface, s: DetailState, card: DetailCard, text: string): Promise<void> {
-  const self = await $.session.id()
+/** What the card's input sends: the reply to the decision it shows, else a prompt. */
+async function sendArgs($: EngineInterface, card: DetailCard, text: string): Promise<string[]> {
+  const decision = card.detail?.decision
 
-  await request(
-    $,
-    s,
-    card,
-    ['send', '--session', card.session_id, '--from', 'pane', '--from-label', self, '--text', text],
-    '보냈어요 — 세션이 받으면 시작해요',
-  )
+  if (decision) {
+    return ['decide', '--session', card.session_id, '--at', decision.id, '--text', text, '--from', 'pane']
+  }
+
+  return ['send', '--session', card.session_id, '--from', 'pane', '--from-label', await $.session.id(), '--text', text]
+}
+
+async function send($: EngineInterface, s: DetailState, card: DetailCard, text: string): Promise<void> {
+  await request($, s, card, await sendArgs($, card, text), '보냈어요 — 세션이 받으면 시작해요')
 
   if (!s.notes.get(card.session_id)?.isError) {
     s.drafts.delete(card.session_id)
@@ -149,7 +152,7 @@ async function permit($: EngineInterface, s: DetailState, card: DetailCard, deci
       $,
       s,
       card,
-      ['permit', '--session', card.session_id, '--request', card.permission_id, '--decision', decision],
+      ['permit', '--session', card.session_id, '--request', card.permission_id, '--decision', decision, '--from', 'pane'],
       decision === 'allow' ? '허용을 보냈어요' : '거부를 보냈어요',
     )
   }

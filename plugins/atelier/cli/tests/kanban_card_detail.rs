@@ -116,6 +116,7 @@ fn a_decision_left_at_the_end_of_a_turn_waits_for_input() {
     assert_eq!(
         card["detail"]["decision"],
         json!({
+            "id": (NOW - 20 * SEC).to_string(),
             "ask": "이 설계 초안대로 확정 spec 작성을 시작할까요?",
             "recap": "S3 채널 최소 설계 초안을 정리했어요.",
             "options": ["초안대로 진행", "고칠 행 있음"],
@@ -426,6 +427,25 @@ fn each_delivery_outcome_reads_as_a_sentence() {
         ("prompt", "delivered", "보낸 요청: 전달됐어요 · 4s"),
         ("prompt", "expired", "보낸 요청: 시간이 지나 버렸어요 · 4s"),
         ("stop", "stale", "중지 요청: 끝난 턴이라 버렸어요 · 4s"),
+        ("answer", "delivered", "질문 답: 전달됐어요 · 4s"),
+        ("answer", "stale", "질문 답: 끝난 질문이라 버렸어요 · 4s"),
+        (
+            "answer",
+            "invalid",
+            "질문 답: 답 수가 맞지 않아 버렸어요 · 4s",
+        ),
+        ("decide", "stale", "결정 답: 끝난 결정이라 버렸어요 · 4s"),
+        ("decide", "busy", "결정 답: 작업 중이라 받지 않았어요 · 4s"),
+        (
+            "answer",
+            "refused",
+            "질문 답: 대리 조건이 맞지 않아 버렸어요 · 4s",
+        ),
+        (
+            "permit",
+            "refused",
+            "권한 답: 대리 조건이 맞지 않아 버렸어요 · 4s",
+        ),
         ("unknown", "invalid", "보낸 요청: invalid · 4s"),
         ("prompt", "queued-later", "보낸 요청: queued-later · 4s"),
     ] {

@@ -39,8 +39,8 @@ export async function runKanban($: EngineInterface, args: string[], stdin?: stri
 }
 
 /** The JSON object the command printed; null for any failure. */
-export async function cli($: EngineInterface, args: string[]): Promise<Record<string, unknown> | null> {
-  const r = await runKanban($, args)
+export async function cli($: EngineInterface, args: string[], stdin?: string): Promise<Record<string, unknown> | null> {
+  const r = await runKanban($, args, stdin)
 
   return r.kind === 'json' ? r.value : null
 }

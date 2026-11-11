@@ -428,6 +428,8 @@ fn a_permit_lands_beside_the_requests_and_is_taken_by_its_permission() {
         "t-1-5",
         "--decision",
         "deny",
+        "--from",
+        "pane",
     ]);
     assert!(w.inbox("s-1").join("permits").join("t-1-5.json").exists());
     assert_eq!(w.take("s-1", None), json!({ "actions": [], "results": [] }));
@@ -447,6 +449,6 @@ fn a_permit_lands_beside_the_requests_and_is_taken_by_its_permission() {
         "--for",
         "0ms",
     ]);
-    assert_eq!(out, json!({ "decision": "deny" }));
+    assert_eq!(out, json!({ "decision": "deny", "from": "pane" }));
     assert!(!w.inbox("s-1").join("permits").join("t-1-5.json").exists());
 }

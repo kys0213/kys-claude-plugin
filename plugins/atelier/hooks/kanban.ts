@@ -249,6 +249,20 @@ async function boardForTool($: EngineInterface, column: unknown): Promise<string
   return JSON.stringify({ repos: parsed.repos })
 }
 
+/**
+ * Why a shell command of the model or a subagent may not run, as `guard-bash` says; null lets it run.
+ * Only a command naming the kanban is asked about, and a CLI that fails lets it run.
+ */
+async function guardBash($: EngineInterface, command: unknown): Promise<string | null> {
+  if (typeof command !== 'string' || !command.includes('kanban')) {
+    return null
+  }
+
+  const out = await cli($, ['guard-bash'], JSON.stringify({ command }))
+
+  return typeof out?.deny === 'string' ? out.deny : null
+}
+
 async function isPaneShown($: EngineInterface): Promise<boolean> {
   return (await $.ui.panes()).some(p => p.id === PANE && p.isShown)
 }
@@ -493,6 +507,12 @@ export function registerKanban(on: On): void {
     return next(e)
   })
 
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const deny = await guardBash($, e.command)
+
+    return deny === null ? next(e) : { deny }
+  })
+
   on('tool.call', { tool: 'WrapUp' }, async ($, e, next) => {
     const ask = typeof e.ask === 'string' ? e.ask.trim() : ''
 
@@ -574,7 +594,7 @@ export function registerKanban(on: On): void {
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     /** `tool_use_id` is optional on the call; without one the question is answerable under its own id. */
     const id = e.tool_use_id ?? `ask-${await $.clock.now()}`
-    const fromKanban = awaitAnswer(s, id)
+    const fromKanban = awaitAnswer(s, id, e.questions)
     const context = await lastReply($)
     let answered = false
 

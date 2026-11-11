@@ -1,6 +1,7 @@
 //! Stdin payloads: `kanban board` takes `{"sessions": [<v1 record>, ...]}`,
-//! `kanban answer` takes `{"questions": [...], "picks": [...]}`. A record this
-//! version cannot read is dropped here, before the board sees it.
+//! `kanban answer` takes `{"questions": [...], "picks": [...]}`, `inbox take`
+//! what the session waits on, `guard-bash` the Bash tool's input. A record
+//! this version cannot read is dropped here, before the board sees it.
 //!
 //! The field readers answer `None` for a field of the wrong type, which drops
 //! the record, and read an absent field the same as `null`.
@@ -12,7 +13,7 @@ use crate::kanban::core::detail::{Decision, DecisionLengths, Delivery, DeliveryS
 use crate::kanban::core::progress::{Activity, ItemStatus, WorkItem};
 use crate::kanban::core::prompt::PromptFact;
 use crate::kanban::core::question::{Ask, AskLengths, Question, QuestionOption};
-use crate::kanban::core::request::{RequestKind, Status};
+use crate::kanban::core::request::{OpenAsk, RequestKind, Status, Waits};
 use serde_json::{Map, Value};
 
 const VERSION: u64 = 1;
@@ -274,6 +275,42 @@ fn parse_pick(value: &Value) -> Option<Pick> {
             .collect::<Option<Vec<_>>>()?,
         text: nullable_string(value, "text")?,
     })
+}
+
+/// What `inbox take` waits on: `{"asks": [{"id", "questions": [...]}],
+/// "decision": {"at", ...} | null}`. Empty stdin waits on nothing.
+pub fn parse_waits(raw: &str) -> Result<Waits, String> {
+    if raw.trim().is_empty() {
+        return Ok(Waits::default());
+    }
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    let asks = optional_array(&value, "asks")
+        .and_then(|asks| asks.iter().map(parse_open_ask).collect::<Option<Vec<_>>>())
+        .ok_or_else(|| "stdin has no readable `asks` array".to_string())?;
+    let decision_at = optional_object(&value, "decision")
+        .and_then(|decision| match decision {
+            None => Some(None),
+            Some(fields) => Some(Some(fields.get("at")?.as_u64()?.to_string())),
+        })
+        .ok_or_else(|| "stdin has no readable `decision`".to_string())?;
+    Ok(Waits { asks, decision_at })
+}
+
+fn parse_open_ask(value: &Value) -> Option<OpenAsk> {
+    Some(OpenAsk {
+        id: value.get("id")?.as_str()?.to_string(),
+        questions: value.get("questions")?.as_array()?.len(),
+    })
+}
+
+/// The Bash tool's input: `{"command": ...}`.
+pub fn parse_bash_command(raw: &str) -> Result<String, String> {
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    value
+        .get("command")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "stdin has no `command` string".to_string())
 }
 
 fn parse_event(value: &Value) -> Option<Event> {

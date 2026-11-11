@@ -1,12 +1,13 @@
 import type { EngineInterface } from 'claude-code'
 
-import { CLI_MISSING, runKanban } from './kanban-cli'
+import { CLI_MISSING, cli, runKanban } from './kanban-cli'
 import { type AskQuestion, MAX_FIELD_CHARS } from './kanban-record'
 
+/** The store key a pane of an older mod leaves its answers under; read beside the inbox while such a pane may run. */
 const ANSWER_PREFIX = 'kanban:answer:'
 const MAX_QUESTION_CHARS = 1_000
 
-type ToolQuestion = {
+export type ToolQuestion = {
   question: string
   header: string
   multiSelect: boolean
@@ -19,9 +20,11 @@ export type CardAsk = { tool_use_id: string; questions: AskQuestion[] }
 
 export type AskCard = { session_id: string; headline: string; asks?: CardAsk[] }
 
+type Waiter = { questions: readonly ToolQuestion[]; resolve: (answers: string[]) => void }
+
 export type AskState = {
   /** Open AskUserQuestion calls of this session, by tool_use_id, resolved by a kanban answer. */
-  waiters: Map<string, (answers: string[]) => void>
+  waiters: Map<string, Waiter>
   /** The picks made on this pane, by `draftKey`. */
   drafts: Map<string, Pick[]>
   sent: Set<string>
@@ -60,8 +63,18 @@ export function answerKeysOf(keys: readonly string[], sessionId: string): string
   return keys.filter(k => k.startsWith(`${ANSWER_PREFIX}${sessionId}:`))
 }
 
-export function awaitAnswer(s: AskState, toolUseId: string): Promise<string[]> {
-  return new Promise(resolve => s.waiters.set(toolUseId, resolve))
+export function awaitAnswer(s: AskState, toolUseId: string, questions: readonly ToolQuestion[]): Promise<string[]> {
+  return new Promise(resolve => s.waiters.set(toolUseId, { questions, resolve }))
+}
+
+/** The open questions as `inbox take` reads them, each with the call's own questions. */
+export function openAsks(s: AskState): { id: string; questions: readonly ToolQuestion[] }[] {
+  return [...s.waiters].map(([id, waiter]) => ({ id, questions: waiter.questions }))
+}
+
+/** Closes open question `toolUseId` with the answers taken for it; a question no longer open is left alone. */
+export function answerAsk(s: AskState, toolUseId: string, answers: string[]): void {
+  s.waiters.get(toolUseId)?.resolve(answers)
 }
 
 /** Keys each answer by the asking call's own question, whatever the record cut. */
@@ -90,13 +103,13 @@ export async function deliverAnswers($: EngineInterface, s: AskState): Promise<v
 
   const self = await $.session.id()
 
-  for (const [id, resolve] of [...s.waiters]) {
+  for (const [id, waiter] of [...s.waiters]) {
     const key = answerKey(self, id)
     const answers = decodeAnswers(await $.store.get(key))
 
     if (answers !== null) {
       await $.store.delete(key)
-      resolve(answers)
+      waiter.resolve(answers)
     }
   }
 }
@@ -142,12 +155,22 @@ async function sendAnswer($: EngineInterface, s: AskState, card: AskCard, ask: C
   if (r.kind === 'missing') {
     s.errors.set(key, CLI_MISSING)
   } else if (answers !== null) {
-    try {
-      await $.store.set(answerKey(card.session_id, ask.tool_use_id), { v: 1, answers })
+    const out = await cli($, [
+      'reply',
+      '--session',
+      card.session_id,
+      '--ask',
+      ask.tool_use_id,
+      ...answers.flatMap(a => ['--answer', String(a)]),
+      '--from',
+      'pane',
+    ])
+
+    if (out !== null && typeof out.queued === 'object') {
       s.sent.add(key)
       s.errors.delete(key)
-    } catch {
-      s.errors.set(key, CLI_MISSING)
+    } else {
+      s.errors.set(key, typeof out?.error === 'string' ? out.error : CLI_MISSING)
     }
   } else {
     s.errors.set(key, typeof parsed?.error === 'string' ? parsed.error : 'atelier kanban answer 의 출력을 읽지 못했어요')

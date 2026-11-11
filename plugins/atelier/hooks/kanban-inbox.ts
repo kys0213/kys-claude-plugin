@@ -1,14 +1,19 @@
 import type { EngineInterface } from 'claude-code'
 
+import { type AskState, answerAsk, openAsks } from './kanban-ask'
 import { cli } from './kanban-cli'
-import { MAX_FIELD_CHARS, type RecordState, record, recordPrompt } from './kanban-record'
+import { KEY_PREFIX, MAX_FIELD_CHARS, type RecordState, isRecord, record, recordPrompt } from './kanban-record'
 
 const REQUEST_TTL = '60s'
 const PERMIT_WAIT = '2s'
 /** Bounds one permission wait to about half an hour of two-second waits. */
 const MAX_PERMIT_WAITS = 900
 
-type Taken = { kind: 'prompt'; text: string; body: string; from: string } | { kind: 'stop'; turn_id: string }
+type Taken =
+  | { kind: 'prompt'; text: string; body: string; from: string }
+  | { kind: 'stop'; turn_id: string }
+  | { kind: 'answer'; tool_use_id: string; answers: string[]; from: string }
+  | { kind: 'decide'; decision_at: string; text: string; from: string }
 
 type Result = { id: string; kind: string; status: string }
 
@@ -45,7 +50,12 @@ function isTaken(value: unknown): value is Taken {
 
   return (
     (t.kind === 'prompt' && typeof t.text === 'string' && typeof t.body === 'string') ||
-    (t.kind === 'stop' && typeof t.turn_id === 'string')
+    (t.kind === 'stop' && typeof t.turn_id === 'string') ||
+    (t.kind === 'answer' &&
+      typeof t.tool_use_id === 'string' &&
+      Array.isArray(t.answers) &&
+      t.answers.every(a => typeof a === 'string')) ||
+    (t.kind === 'decide' && typeof t.text === 'string')
   )
 }
 
@@ -55,7 +65,7 @@ function isResult(value: unknown): value is Result {
   return typeof r?.id === 'string' && typeof r.kind === 'string' && typeof r.status === 'string'
 }
 
-async function act($: EngineInterface, s: InboxState, taken: Taken): Promise<void> {
+async function act($: EngineInterface, s: InboxState & AskState, taken: Taken): Promise<void> {
   if (taken.kind === 'stop') {
     if (s.turnId === taken.turn_id) {
       await $.turn.abort({ turnId: taken.turn_id })
@@ -64,13 +74,27 @@ async function act($: EngineInterface, s: InboxState, taken: Taken): Promise<voi
     return
   }
 
+  if (taken.kind === 'answer') {
+    answerAsk(s, taken.tool_use_id, taken.answers)
+
+    return
+  }
+
   /** The submitting plugin's own prompt.submit hooks do not see the prompt, so it is recorded here. */
-  await recordPrompt($, s, taken.body, 'kanban')
+  await recordPrompt($, s, taken.kind === 'decide' ? taken.text : taken.body, 'kanban')
   void $.prompt.submit({ text: taken.text }).catch(() => undefined)
 }
 
+/** What this session waits on, for `inbox take` to judge answers and decides against. */
+async function waits($: EngineInterface, s: AskState, self: string): Promise<string> {
+  const stored = await $.store.get(KEY_PREFIX + self)
+  const decision = isRecord(stored) ? (stored.decision ?? null) : null
+
+  return JSON.stringify({ asks: openAsks(s), decision })
+}
+
 /** Takes what other sessions left in this session's inbox, at most once per request. */
-export async function deliverRequests($: EngineInterface, s: InboxState): Promise<void> {
+export async function deliverRequests($: EngineInterface, s: InboxState & AskState): Promise<void> {
   const dir = s.inboxDir
 
   if (dir === null || s.taking || !(await hasEntries($, dir))) {
@@ -81,17 +105,22 @@ export async function deliverRequests($: EngineInterface, s: InboxState): Promis
 
   try {
     const now = await $.clock.now()
-    const out = await cli($, [
-      'inbox',
-      'take',
-      '--session',
-      await $.session.id(),
-      '--now',
-      String(now),
-      '--ttl',
-      REQUEST_TTL,
-      ...(s.turnId === null ? [] : ['--turn', s.turnId]),
-    ])
+    const self = await $.session.id()
+    const out = await cli(
+      $,
+      [
+        'inbox',
+        'take',
+        '--session',
+        self,
+        '--now',
+        String(now),
+        '--ttl',
+        REQUEST_TTL,
+        ...(s.turnId === null ? [] : ['--turn', s.turnId]),
+      ],
+      await waits($, s, self),
+    )
     const actions = Array.isArray(out?.actions) ? out.actions.filter(isTaken) : []
     const results = Array.isArray(out?.results) ? out.results.filter(isResult) : []
     const last = results.at(-1)

@@ -3,7 +3,9 @@
 
 use crate::kanban::commands::inbox::{IdSource, InboxStore, Pause};
 use crate::kanban::commands::spawn::{Launcher, RepoProbe};
-use crate::kanban::core::request::{self, check_id, Found, Request, Sender, Taken};
+use crate::kanban::core::request::{
+    self, check_answerer, check_id, Found, Request, Sender, Taken, Waits,
+};
 use crate::kanban::core::spawn::{is_main_root, launch_args, short_id};
 use serde_json::{json, Value};
 
@@ -27,6 +29,26 @@ fn taken_json(taken: &Taken) -> Value {
             json!({ "kind": "prompt", "text": text, "body": body, "from": from.id() })
         }
         Taken::Stop { turn_id } => json!({ "kind": "stop", "turn_id": turn_id }),
+        Taken::Answer {
+            tool_use_id,
+            answers,
+            from,
+        } => json!({
+            "kind": "answer",
+            "tool_use_id": tool_use_id,
+            "answers": answers,
+            "from": from.id(),
+        }),
+        Taken::Decide {
+            decision_at,
+            text,
+            from,
+        } => json!({
+            "kind": "decide",
+            "decision_at": decision_at,
+            "text": text,
+            "from": from.id(),
+        }),
     }
 }
 
@@ -52,10 +74,27 @@ impl KanbanRequests<'_> {
         self.queue(session, Request::stop(turn))
     }
 
-    pub fn permit(&self, session: &str, request: &str, decision: &str) -> Value {
+    /// Leaves one answer per question for the open question `ask` names.
+    pub fn reply(&self, session: &str, ask: &str, answers: &[String], from: Sender) -> Value {
+        self.queue(
+            session,
+            check_answerer(from).and_then(|()| Request::answer(ask, answers, from)),
+        )
+    }
+
+    /// Leaves the reply to the decision that `at` names.
+    pub fn decide(&self, session: &str, at: &str, text: &str, from: Sender) -> Value {
+        self.queue(
+            session,
+            check_answerer(from).and_then(|()| Request::decide(at, text, from)),
+        )
+    }
+
+    pub fn permit(&self, session: &str, request: &str, decision: &str, from: Sender) -> Value {
         answer((|| {
             check_id("session", session)?;
-            let permit = Request::permit(request, decision)?;
+            check_answerer(from)?;
+            let permit = Request::permit(request, decision, from)?;
             self.inbox
                 .put_permit(session, request, &permit.to_json().to_string())?;
             Ok(
@@ -83,8 +122,11 @@ impl KanbanRequests<'_> {
                         return Ok(json!({ "decision": null, "status": "expired" }));
                     }
                     return Ok(match claimed.contents.as_deref().and_then(Request::parse) {
-                        Some(Request::Permit { verdict, .. }) => {
-                            json!({ "decision": verdict.id() })
+                        Some(Request::Permit { from, .. }) if check_answerer(from).is_err() => {
+                            json!({ "decision": null, "status": "refused" })
+                        }
+                        Some(Request::Permit { verdict, from, .. }) => {
+                            json!({ "decision": verdict.id(), "from": from.id() })
                         }
                         _ => json!({ "decision": null, "status": "invalid" }),
                     });
@@ -106,7 +148,16 @@ impl KanbanRequests<'_> {
         }))
     }
 
-    pub fn take(&self, session: &str, now: u64, ttl_ms: u64, turn: Option<&str>) -> Value {
+    /// Claims every request and says which to act on, judged against what
+    /// the session waits on now.
+    pub fn take(
+        &self,
+        session: &str,
+        now: u64,
+        ttl_ms: u64,
+        turn: Option<&str>,
+        waits: &Waits,
+    ) -> Value {
         answer(check_id("session", session).and_then(|()| {
             let found = self
                 .inbox
@@ -118,7 +169,7 @@ impl KanbanRequests<'_> {
                     request: c.contents.as_deref().and_then(Request::parse),
                 })
                 .collect();
-            let (taken, outcomes) = request::take(found, turn, ttl_ms);
+            let (taken, outcomes) = request::take(found, turn, waits, ttl_ms);
             Ok(json!({
                 "actions": taken.iter().map(taken_json).collect::<Vec<_>>(),
                 "results": outcomes

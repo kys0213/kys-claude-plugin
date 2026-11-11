@@ -10,11 +10,14 @@ pub mod core;
 
 use crate::kanban::commands::inbox::{ClockIds, FsInbox, ThreadPause};
 use crate::kanban::commands::paths::FsPaths;
-use crate::kanban::commands::payload::{parse_answer_request, parse_sessions};
+use crate::kanban::commands::payload::{
+    parse_answer_request, parse_bash_command, parse_sessions, parse_waits,
+};
 use crate::kanban::commands::records::{FsRecords, KanbanRecords, StatusQuery};
 use crate::kanban::commands::requests::KanbanRequests;
 use crate::kanban::commands::spawn::{ClaudeLauncher, GitProbe};
 use crate::kanban::core::answer::compose;
+use crate::kanban::core::bash_guard::refusal;
 use crate::kanban::core::board::{build, Action, Board, BoardParams, Card, Column, Waiting};
 use crate::kanban::core::detail::Detail;
 use crate::kanban::core::duration::parse_millis;
@@ -91,6 +94,8 @@ pub enum Commands {
     },
     /// An open question and the picks made on the board → one answer per question
     Answer,
+    /// The Bash tool's input on stdin → why a model may not run it, if it may not
+    GuardBash,
     #[command(flatten)]
     Request(RequestCommand),
 }
@@ -120,6 +125,36 @@ pub enum RequestCommand {
         /// `allow` or `deny`
         #[arg(long)]
         decision: String,
+        /// `pane` for a person on the board or a terminal, `agent` for a model
+        #[arg(long)]
+        from: String,
+    },
+    /// Leaves the answers to one open question for the session that asked
+    Reply {
+        #[arg(long)]
+        session: String,
+        /// The question's tool_use_id, as the board's wait names it
+        #[arg(long)]
+        ask: String,
+        /// One per question, in the questions' order
+        #[arg(long = "answer", allow_hyphen_values = true)]
+        answers: Vec<String>,
+        /// `pane` for a person on the board or a terminal, `agent` for a model
+        #[arg(long)]
+        from: String,
+    },
+    /// Leaves the reply to the decision a session's last turn ended on
+    Decide {
+        #[arg(long)]
+        session: String,
+        /// The decision's id, as the board's wait names it
+        #[arg(long)]
+        at: String,
+        #[arg(long, allow_hyphen_values = true)]
+        text: String,
+        /// `pane` for a person on the board or a terminal, `agent` for a model
+        #[arg(long)]
+        from: String,
     },
     /// Leaves a stop for one turn in a session's inbox
     Stop {
@@ -154,7 +189,8 @@ pub enum InboxCommand {
         #[arg(long)]
         session: String,
     },
-    /// Claims every request and says which to act on
+    /// Claims every request and says which to act on; stdin names the open
+    /// questions and decision
     Take {
         #[arg(long)]
         session: String,
@@ -239,6 +275,7 @@ fn detail_json(detail: &Detail) -> Value {
             .map(|s| json!({ "title": s.title, "lines": s.lines }))
             .collect::<Vec<_>>(),
         "decision": detail.decision.as_ref().map(|d| json!({
+            "id": d.at.to_string(),
             "ask": d.ask,
             "recap": d.recap,
             "options": d.options,
@@ -454,6 +491,14 @@ fn run_status(
     }
 }
 
+/// Runs `send` as the sender `--from` names, or refuses a name it does not know.
+fn sent(from: &str, send: impl FnOnce(Sender) -> Value) -> Value {
+    match Sender::parse(from) {
+        Some(from) => send(from),
+        None => json!({ "error": format!("--from 은 pane 또는 agent 예요 (받은 값: {from})") }),
+    }
+}
+
 fn run_request(command: RequestCommand) -> Value {
     let inbox = FsInbox::from_env();
     let requests = KanbanRequests {
@@ -469,16 +514,30 @@ fn run_request(command: RequestCommand) -> Value {
             from,
             from_label,
             text,
-        } => match Sender::parse(&from) {
-            Some(from) => requests.send(&session, from, from_label.as_deref(), &text),
-            None => json!({ "error": format!("--from 은 pane 또는 agent 예요 (받은 값: {from})") }),
-        },
+        } => sent(&from, |from| {
+            requests.send(&session, from, from_label.as_deref(), &text)
+        }),
         RequestCommand::Stop { session, turn } => requests.stop(&session, &turn),
         RequestCommand::Permit {
             session,
             request,
             decision,
-        } => requests.permit(&session, &request, &decision),
+            from,
+        } => sent(&from, |from| {
+            requests.permit(&session, &request, &decision, from)
+        }),
+        RequestCommand::Reply {
+            session,
+            ask,
+            answers,
+            from,
+        } => sent(&from, |from| requests.reply(&session, &ask, &answers, from)),
+        RequestCommand::Decide {
+            session,
+            at,
+            text,
+            from,
+        } => sent(&from, |from| requests.decide(&session, &at, &text, from)),
         RequestCommand::Inbox { command } => match command {
             InboxCommand::Dir { session } => requests.dir(&session),
             InboxCommand::Take {
@@ -486,7 +545,10 @@ fn run_request(command: RequestCommand) -> Value {
                 now,
                 ttl,
                 turn,
-            } => requests.take(&session, now, ttl, turn.as_deref()),
+            } => match parse_waits(&read_stdin_raw()) {
+                Ok(waits) => requests.take(&session, now, ttl, turn.as_deref(), &waits),
+                Err(error) => json!({ "error": error }),
+            },
             InboxCommand::WaitPermit {
                 session,
                 request,
@@ -553,6 +615,13 @@ pub fn run(cli: Cli) -> i32 {
                 .and_then(|(questions, picks)| compose(&questions, &picks))
             {
                 Ok(answers) => json!({ "answers": answers }),
+                Err(error) => json!({ "error": error }),
+            };
+            println!("{out}");
+        }
+        Commands::GuardBash => {
+            let out = match parse_bash_command(&read_stdin_raw()) {
+                Ok(command) => json!({ "deny": refusal(&command) }),
                 Err(error) => json!({ "error": error }),
             };
             println!("{out}");

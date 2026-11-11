@@ -68,7 +68,7 @@ atelier git <reviews|guard|hook>          # git-utils 의 기계적 호출 표�
 atelier session <push-check|ensure-env>   # 세션 경계 hook (SessionStart / Stop)
 atelier orchestrator <spawn-check|compact-note>      # function hooks 모듈이 위임하는 결정적 판정 (아래 §Function hooks)
 atelier code-style <install|update|check|restore|uninstall> # 프로젝트 코드 스타일 룰(base·언어·앱 성격) 설치·갱신·점검·제어 (/atelier:code-style)
-atelier kanban <board|status|record-path|forget|answer|send|stop|permit|inbox|spawn>   # 세션 칸반 판정과 세션 사이 요청 전달 (아래 §세션 칸반)
+atelier kanban <board|status|record-path|forget|answer|guard-bash|send|stop|permit|reply|decide|inbox|spawn>   # 세션 칸반 판정과 세션 사이 요청 전달 (아래 §세션 칸반)
 ```
 
 `drift` 는 `/atelier:update`·`/atelier:setup` 명세가 호출하는 결정적 도구입니다.
@@ -139,9 +139,20 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   화면으로 이동하는 기능은 없습니다.
 - 세션마다 모드가 이벤트 사실을 모드 저장소(`$.store`, 같은 머신의 세션이 공유)에 기록하고, 30초마다
   생존 신호를 남깁니다. 생존 신호가 2분 끊긴 세션은 응답 없음, 24시간 끊기거나 정상 종료한 세션은 사라집니다.
-- 보내기·중지·권한 답은 받는 세션의 inbox(`<CLAUDE_CONFIG_DIR 또는 ~/.claude>/atelier/kanban/inbox/<세션>/`)에 남는
-  요청이고, 받는 세션이 2초마다 한 번씩만 가져갑니다. 작업 중일 때 온 프롬프트·60초 지난 요청·끝난 턴의 중지는
-  실행하지 않고 버립니다.
+- 보내기·중지·질문 답·결정 답·권한 답은 받는 세션의 inbox(`<CLAUDE_CONFIG_DIR 또는 ~/.claude>/atelier/kanban/inbox/<세션>/`)에 남는
+  요청이고, 받는 세션이 2초마다 한 번씩만 가져갑니다. 작업 중일 때 온 프롬프트·60초 지난 요청·끝난 턴의 중지·
+  끝난 질문의 답·답 수가 질문 수와 다른 답·바뀌었거나 사라진 결정의 답은 실행하지 않고 버립니다.
+- **답하기 명령**: pane 의 답은 아래 명령으로 나갑니다. 사람이 터미널에서 같은 명령을 쓸 때도 `--from pane` 을 붙입니다.
+  - 질문: `atelier kanban reply --session <id> --ask <tool_use_id> --answer <답>…(질문 순서대로) --from pane`
+  - 결정 요청: `atelier kanban decide --session <id> --at <결정 id> --text <답> --from pane` — 상세에서 직접 입력한
+    글도 그 결정의 답으로 갑니다. 결정 id 는 `wait.id` 입니다.
+  - 권한 요청: `atelier kanban permit --session <id> --request <요청 id> --decision allow|deny --from pane`
+  - `--from agent`(메인 에이전트의 답)는 아직 세 명령 모두 거부합니다(`장부가 필요해요`). 받는 세션도 그런 답을
+    쓰지 않고 버립니다.
+- **사람 위장 막기**: 모델·서브에이전트의 Bash 명령에 `kanban` 이 들어 있으면 모드가 `atelier kanban guard-bash`
+  (stdin `{command}` → `{deny}`)로 확인합니다. `reply`·`permit`·`decide`·`send` 에 `--from pane` 을 붙인 호출과
+  모드만 부르는 `forget`·`ledger record`·`relay-frame` 은 막습니다. 셸 낱말로 판정하므로 변수·eval·스크립트 파일로
+  감싼 호출은 막지 못하고, CLI 가 없거나 실패하면 통과시킵니다.
 - **터미널에서 보기**: pane 없이 같은 보드를 `atelier kanban status` 로 읽습니다. 세션마다 모드가 기록을 쓸 때
   남기는 기록 사본(`<CLAUDE_CONFIG_DIR 또는 ~/.claude>/atelier/kanban/records/<세션>.json`)을 읽으므로 모드가 꺼진
   세션은 보이지 않고, 읽을 수 없는 사본은 그 세션만 빠집니다.

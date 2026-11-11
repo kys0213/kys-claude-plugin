@@ -61,6 +61,8 @@ pub enum RequestKind {
     Prompt,
     Stop,
     Permit,
+    Answer,
+    Decide,
 }
 
 impl RequestKind {
@@ -69,16 +71,21 @@ impl RequestKind {
             RequestKind::Prompt => "prompt",
             RequestKind::Stop => "stop",
             RequestKind::Permit => "permit",
+            RequestKind::Answer => "answer",
+            RequestKind::Decide => "decide",
         }
     }
 
     pub fn parse(raw: &str) -> Option<RequestKind> {
-        match raw {
-            "prompt" => Some(RequestKind::Prompt),
-            "stop" => Some(RequestKind::Stop),
-            "permit" => Some(RequestKind::Permit),
-            _ => None,
-        }
+        [
+            RequestKind::Prompt,
+            RequestKind::Stop,
+            RequestKind::Permit,
+            RequestKind::Answer,
+            RequestKind::Decide,
+        ]
+        .into_iter()
+        .find(|k| k.id() == raw)
     }
 }
 
@@ -96,7 +103,49 @@ pub enum Request {
     Permit {
         request_id: String,
         verdict: Verdict,
+        from: Sender,
     },
+    /// One answer per question of the open AskUserQuestion call it names.
+    Answer {
+        tool_use_id: String,
+        answers: Vec<String>,
+        from: Sender,
+    },
+    /// The reply to the decision a turn ended on, named by when it was left.
+    Decide {
+        decision_at: String,
+        text: String,
+        from: Sender,
+    },
+}
+
+/// Refuses a model's answer: nothing yet can tell one worth taking.
+pub fn check_answerer(from: Sender) -> Result<(), String> {
+    match from {
+        Sender::Pane => Ok(()),
+        Sender::Agent => Err(
+            "메인 에이전트의 답(`--from agent`)은 아직 받지 않아요 — 장부가 필요해요".to_string(),
+        ),
+    }
+}
+
+fn check_text(what: &str, text: &str) -> Result<String, String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(format!("{what}이 비어 있어요"));
+    }
+    if text.chars().count() > MAX_TEXT_CHARS {
+        return Err(format!("{what}이 {MAX_TEXT_CHARS}자를 넘어요"));
+    }
+    Ok(text.to_string())
+}
+
+fn strings(value: &Value) -> Option<Vec<String>> {
+    value
+        .as_array()?
+        .iter()
+        .map(|a| Some(a.as_str()?.to_string()))
+        .collect()
 }
 
 impl Request {
@@ -105,29 +154,49 @@ impl Request {
             Request::Prompt { .. } => RequestKind::Prompt,
             Request::Stop { .. } => RequestKind::Stop,
             Request::Permit { .. } => RequestKind::Permit,
+            Request::Answer { .. } => RequestKind::Answer,
+            Request::Decide { .. } => RequestKind::Decide,
         }
     }
 
-    pub fn permit(request_id: &str, verdict: &str) -> Result<Request, String> {
+    pub fn permit(request_id: &str, verdict: &str, from: Sender) -> Result<Request, String> {
         check_id("permission", request_id)?;
         let verdict = Verdict::parse(verdict)
             .ok_or_else(|| format!("--decision 은 allow 또는 deny 예요 (받은 값: {verdict})"))?;
         Ok(Request::Permit {
             request_id: request_id.to_string(),
             verdict,
+            from,
+        })
+    }
+
+    pub fn answer(tool_use_id: &str, answers: &[String], from: Sender) -> Result<Request, String> {
+        check_id("question", tool_use_id)?;
+        if answers.is_empty() {
+            return Err("답이 없어요 — 질문마다 --answer 를 하나씩 주세요".to_string());
+        }
+        Ok(Request::Answer {
+            tool_use_id: tool_use_id.to_string(),
+            answers: answers
+                .iter()
+                .map(|a| check_text("답", a).map(|_| a.clone()))
+                .collect::<Result<_, _>>()?,
+            from,
+        })
+    }
+
+    pub fn decide(decision_at: &str, text: &str, from: Sender) -> Result<Request, String> {
+        check_id("decision", decision_at)?;
+        Ok(Request::Decide {
+            decision_at: decision_at.to_string(),
+            text: check_text("결정 답", text)?,
+            from,
         })
     }
 
     pub fn prompt(body: &str, from: Sender, from_label: Option<&str>) -> Result<Request, String> {
-        let body = body.trim();
-        if body.is_empty() {
-            return Err("보낼 글이 비어 있어요".to_string());
-        }
-        if body.chars().count() > MAX_TEXT_CHARS {
-            return Err(format!("보낼 글이 {MAX_TEXT_CHARS}자를 넘어요"));
-        }
         Ok(Request::Prompt {
-            body: body.to_string(),
+            body: check_text("보낼 글", body)?,
             from,
             from_label: from_label
                 .map(str::trim)
@@ -162,11 +231,35 @@ impl Request {
             Request::Permit {
                 request_id,
                 verdict,
+                from,
             } => json!({
                 "v": VERSION,
                 "kind": "permit",
                 "request_id": request_id,
                 "decision": verdict.id(),
+                "from": from.id(),
+            }),
+            Request::Answer {
+                tool_use_id,
+                answers,
+                from,
+            } => json!({
+                "v": VERSION,
+                "kind": "answer",
+                "tool_use_id": tool_use_id,
+                "answers": answers,
+                "from": from.id(),
+            }),
+            Request::Decide {
+                decision_at,
+                text,
+                from,
+            } => json!({
+                "v": VERSION,
+                "kind": "decide",
+                "decision_at": decision_at,
+                "text": text,
+                "from": from.id(),
             }),
         }
     }
@@ -176,10 +269,11 @@ impl Request {
         if value.get("v")?.as_u64()? != VERSION {
             return None;
         }
+        let from = || Sender::parse(value.get("from")?.as_str()?);
         match RequestKind::parse(value.get("kind")?.as_str()?)? {
             RequestKind::Prompt => Request::prompt(
                 value.get("text")?.as_str()?,
-                Sender::parse(value.get("from")?.as_str()?)?,
+                from()?,
                 value.get("from_label").and_then(Value::as_str),
             )
             .ok(),
@@ -187,10 +281,44 @@ impl Request {
             RequestKind::Permit => Request::permit(
                 value.get("request_id")?.as_str()?,
                 value.get("decision")?.as_str()?,
+                // A permit with no sender was left by a pane that named none.
+                match value.get("from") {
+                    None => Sender::Pane,
+                    Some(_) => from()?,
+                },
+            )
+            .ok(),
+            RequestKind::Answer => Request::answer(
+                value.get("tool_use_id")?.as_str()?,
+                &strings(value.get("answers")?)?,
+                from()?,
+            )
+            .ok(),
+            RequestKind::Decide => Request::decide(
+                value.get("decision_at")?.as_str()?,
+                value.get("text")?.as_str()?,
+                from()?,
             )
             .ok(),
         }
     }
+}
+
+/// An AskUserQuestion call the taking session has open, and how many
+/// questions it asks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenAsk {
+    pub id: String,
+    pub questions: usize,
+}
+
+/// What the taking session waits on now: an answer or a decide that names
+/// anything else is stale.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Waits {
+    pub asks: Vec<OpenAsk>,
+    /// The id of the decision its last turn ended on.
+    pub decision_at: Option<String>,
 }
 
 /// The prompt a model-written request runs as: under a header naming where it
@@ -264,6 +392,17 @@ pub enum Taken {
     Stop {
         turn_id: String,
     },
+    Answer {
+        tool_use_id: String,
+        answers: Vec<String>,
+        from: Sender,
+    },
+    /// Runs as a prompt, the text as typed.
+    Decide {
+        decision_at: String,
+        text: String,
+        from: Sender,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -273,6 +412,8 @@ pub enum Status {
     Expired,
     Stale,
     Invalid,
+    /// A model's answer the taking session would not take.
+    Refused,
 }
 
 impl Status {
@@ -283,6 +424,7 @@ impl Status {
             Status::Expired => "expired",
             Status::Stale => "stale",
             Status::Invalid => "invalid",
+            Status::Refused => "refused",
         }
     }
 
@@ -293,6 +435,7 @@ impl Status {
             Status::Expired,
             Status::Stale,
             Status::Invalid,
+            Status::Refused,
         ]
         .into_iter()
         .find(|s| s.id() == raw)
@@ -306,56 +449,129 @@ pub struct Outcome {
     pub status: Status,
 }
 
+/// Which requests one take acts on: at most one prompt, and each open
+/// question answered once.
+struct Taker<'a> {
+    running_turn: Option<&'a str>,
+    waits: &'a Waits,
+    prompted: bool,
+    answered: Vec<String>,
+    taken: Vec<Taken>,
+}
+
+impl Taker<'_> {
+    fn deliver(&mut self, taken: Taken) -> Status {
+        self.taken.push(taken);
+        Status::Delivered
+    }
+
+    fn is_busy(&self) -> bool {
+        self.running_turn.is_some() || self.prompted
+    }
+
+    fn judge(&mut self, request: Request) -> Status {
+        match request {
+            Request::Stop { turn_id } if self.running_turn == Some(turn_id.as_str()) => {
+                self.deliver(Taken::Stop { turn_id })
+            }
+            Request::Stop { .. } | Request::Permit { .. } => Status::Stale,
+            Request::Answer {
+                from: Sender::Agent,
+                ..
+            }
+            | Request::Decide {
+                from: Sender::Agent,
+                ..
+            } => Status::Refused,
+            Request::Answer {
+                tool_use_id,
+                answers,
+                from,
+            } => self.answer(tool_use_id, answers, from),
+            Request::Decide { decision_at, .. }
+                if self.waits.decision_at.as_deref() != Some(decision_at.as_str()) =>
+            {
+                Status::Stale
+            }
+            Request::Decide { .. } | Request::Prompt { .. } if self.is_busy() => Status::Busy,
+            Request::Decide {
+                decision_at,
+                text,
+                from,
+            } => {
+                self.prompted = true;
+                self.deliver(Taken::Decide {
+                    decision_at,
+                    text,
+                    from,
+                })
+            }
+            Request::Prompt {
+                body,
+                from,
+                from_label,
+            } => {
+                self.prompted = true;
+                self.deliver(Taken::Prompt {
+                    text: prompt_text(&body, from, from_label.as_deref()),
+                    body,
+                    from,
+                })
+            }
+        }
+    }
+
+    fn answer(&mut self, tool_use_id: String, answers: Vec<String>, from: Sender) -> Status {
+        let open = self
+            .waits
+            .asks
+            .iter()
+            .find(|ask| ask.id == tool_use_id && !self.answered.contains(&ask.id));
+        match open {
+            None => Status::Stale,
+            Some(ask) if ask.questions != answers.len() => Status::Invalid,
+            Some(_) => {
+                self.answered.push(tool_use_id.clone());
+                self.deliver(Taken::Answer {
+                    tool_use_id,
+                    answers,
+                    from,
+                })
+            }
+        }
+    }
+}
+
 pub fn take(
     found: Vec<Found>,
     running_turn: Option<&str>,
+    waits: &Waits,
     ttl_ms: u64,
 ) -> (Vec<Taken>, Vec<Outcome>) {
-    let mut taken = Vec::new();
-    let mut outcomes = Vec::new();
-    let mut prompted = false;
-    for item in found {
-        let (kind, status) = match item.request {
-            None => (None, Status::Invalid),
-            Some(request) => {
-                let kind = Some(request.kind());
-                let status = if item.age_ms > ttl_ms {
-                    Status::Expired
-                } else {
-                    match request {
-                        Request::Stop { turn_id } if running_turn == Some(turn_id.as_str()) => {
-                            taken.push(Taken::Stop { turn_id });
-                            Status::Delivered
-                        }
-                        Request::Stop { .. } | Request::Permit { .. } => Status::Stale,
-                        Request::Prompt { .. } if running_turn.is_some() || prompted => {
-                            Status::Busy
-                        }
-                        Request::Prompt {
-                            body,
-                            from,
-                            from_label,
-                        } => {
-                            prompted = true;
-                            taken.push(Taken::Prompt {
-                                text: prompt_text(&body, from, from_label.as_deref()),
-                                body,
-                                from,
-                            });
-                            Status::Delivered
-                        }
-                    }
-                };
-                (kind, status)
+    let mut taker = Taker {
+        running_turn,
+        waits,
+        prompted: false,
+        answered: Vec::new(),
+        taken: Vec::new(),
+    };
+    let outcomes = found
+        .into_iter()
+        .map(|item| {
+            let kind = item.request.as_ref().map(Request::kind);
+            let status = match item.request {
+                None => Status::Invalid,
+                Some(_) if item.age_ms > ttl_ms => Status::Expired,
+                Some(request) => taker.judge(request),
+            };
+            Outcome {
+                id: item.id,
+                kind,
+                status,
             }
-        };
-        outcomes.push(Outcome {
-            id: item.id,
-            kind,
-            status,
-        });
-    }
-    (taken, outcomes)
+        })
+        .collect();
+    (taker.taken, outcomes)
 }
 
 #[cfg(test)]
@@ -368,6 +584,11 @@ mod tests {
         assert_eq!(Request::parse(&prompt.to_json().to_string()), Some(prompt));
         let stop = Request::stop("t-1").expect("stop");
         assert_eq!(Request::parse(&stop.to_json().to_string()), Some(stop));
+        let answers = ["Red".to_string()];
+        let answer = Request::answer("tu-1", &answers, Sender::Pane).expect("answer");
+        assert_eq!(Request::parse(&answer.to_json().to_string()), Some(answer));
+        let decide = Request::decide("1700", "네", Sender::Pane).expect("decide");
+        assert_eq!(Request::parse(&decide.to_json().to_string()), Some(decide));
     }
 
     #[test]
@@ -377,7 +598,7 @@ mod tests {
             age_ms: 10,
             request: Some(Request::stop("t").expect("stop")),
         }];
-        let (taken, outcomes) = take(found, Some("t"), 5);
+        let (taken, outcomes) = take(found, Some("t"), &Waits::default(), 5);
         assert!(taken.is_empty());
         assert_eq!(outcomes[0].status, Status::Expired);
     }

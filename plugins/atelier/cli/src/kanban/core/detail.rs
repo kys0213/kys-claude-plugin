@@ -177,15 +177,27 @@ fn delivery_line(inbox: &Delivery, now: u64) -> String {
     let kind = match inbox.kind {
         Some(RequestKind::Stop) => "중지 요청",
         Some(RequestKind::Permit) => "권한 답",
+        Some(RequestKind::Answer) => "질문 답",
+        Some(RequestKind::Decide) => "결정 답",
         Some(RequestKind::Prompt) | None => "보낸 요청",
     };
-    let status = match &inbox.status {
-        DeliveryStatus::Known(Status::Delivered) => "전달됐어요",
-        DeliveryStatus::Known(Status::Busy) => "작업 중이라 받지 않았어요",
-        DeliveryStatus::Known(Status::Expired) => "시간이 지나 버렸어요",
-        DeliveryStatus::Known(Status::Stale) => "끝난 턴이라 버렸어요",
-        DeliveryStatus::Known(Status::Invalid) => "invalid",
-        DeliveryStatus::Unknown(raw) => raw,
+    let status = match (&inbox.status, inbox.kind) {
+        (DeliveryStatus::Known(Status::Delivered), _) => "전달됐어요",
+        (DeliveryStatus::Known(Status::Busy), _) => "작업 중이라 받지 않았어요",
+        (DeliveryStatus::Known(Status::Expired), _) => "시간이 지나 버렸어요",
+        (DeliveryStatus::Known(Status::Stale), Some(RequestKind::Answer)) => {
+            "끝난 질문이라 버렸어요"
+        }
+        (DeliveryStatus::Known(Status::Stale), Some(RequestKind::Decide)) => {
+            "끝난 결정이라 버렸어요"
+        }
+        (DeliveryStatus::Known(Status::Stale), _) => "끝난 턴이라 버렸어요",
+        (DeliveryStatus::Known(Status::Invalid), Some(RequestKind::Answer)) => {
+            "답 수가 맞지 않아 버렸어요"
+        }
+        (DeliveryStatus::Known(Status::Invalid), _) => "invalid",
+        (DeliveryStatus::Known(Status::Refused), _) => "대리 조건이 맞지 않아 버렸어요",
+        (DeliveryStatus::Unknown(raw), _) => raw,
     };
     format!(
         "{kind}: {status} · {}",
