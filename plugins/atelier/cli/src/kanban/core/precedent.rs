@@ -279,7 +279,7 @@ fn disabled(book: &Book, key: &str, now: u64) -> bool {
 }
 
 /// Whether a kind answers on precedents now: a person's latest `act` for it,
-/// not since turned over twice within a week. A decision never does.
+/// not turned over twice within any week since. A decision never does.
 pub fn mode(book: &Book, kind: EntryKind, now: u64) -> Mode {
     if kind == EntryKind::Decision {
         return Mode::Shadow;
@@ -296,17 +296,17 @@ pub fn mode(book: &Book, kind: EntryKind, now: u64) -> Mode {
     let Some(setting) = latest.filter(|s| Mode::parse(&s.value) == Some(Mode::Act)) else {
         return Mode::Shadow;
     };
-    let recent = book
+    let mut revoked: Vec<u64> = book
         .revokes
         .iter()
-        .filter(|r| {
-            r.kind == kind
-                && r.at > setting.at
-                && seen(r.at, now)
-                && r.at > now.saturating_sub(DEMOTE_WINDOW_MS)
-        })
-        .count();
-    if recent >= REVOKES_TO_DEMOTE {
+        .filter(|r| r.kind == kind && r.at > setting.at && seen(r.at, now))
+        .map(|r| r.at)
+        .collect();
+    revoked.sort_unstable();
+    let demoted = revoked
+        .windows(REVOKES_TO_DEMOTE)
+        .any(|w| w[REVOKES_TO_DEMOTE - 1] - w[0] < DEMOTE_WINDOW_MS);
+    if demoted {
         Mode::Shadow
     } else {
         Mode::Act

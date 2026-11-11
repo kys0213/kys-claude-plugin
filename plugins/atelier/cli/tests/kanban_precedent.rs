@@ -644,7 +644,47 @@ fn a_kind_acts_only_on_a_persons_latest_setting_and_steps_back_after_two_revokes
     assert_eq!(w.matched(&question_key)["mode"], "act");
     w.revoke(&y, w.now - 2 * DAY);
     assert_eq!(w.matched(&question_key)["mode"], "shadow");
-    assert_eq!(w.matched_at(&question_key, w.now + 6 * DAY)["mode"], "act");
+    assert_eq!(
+        w.matched_at(&question_key, w.now + 6 * DAY)["mode"],
+        "shadow"
+    );
+    assert_eq!(
+        w.matched_at(&question_key, w.now + 60 * DAY)["mode"],
+        "shadow"
+    );
+}
+
+#[test]
+fn a_demoted_kind_acts_again_only_on_a_persons_newer_act() {
+    let w = World::new();
+    let (a, _) = two_reds(&w);
+    let question_key = w.key_of(&a);
+    w.act("question");
+    let x = w.record(by_inbox(w.now - 6 * DAY, "agent", "Red"));
+    let y = w.record(by_inbox(w.now - 5 * DAY, "agent", "Red"));
+    w.revoke(&x, w.now - 4 * DAY);
+    w.revoke(&y, w.now - 3 * DAY);
+    assert_eq!(w.matched(&question_key)["mode"], "shadow");
+
+    w.set("question", "act", "sdk", w.now - 2 * DAY);
+    assert_eq!(w.matched(&question_key)["mode"], "shadow");
+
+    w.set("question", "act", "composer", w.now - DAY);
+    assert_eq!(w.matched(&question_key)["mode"], "act");
+}
+
+#[test]
+fn two_revokes_more_than_a_week_apart_do_not_demote_a_kind() {
+    let w = World::new();
+    let (a, _) = two_reds(&w);
+    let question_key = w.key_of(&a);
+    w.act("question");
+    let x = w.record(by_inbox(w.now - 9 * DAY - HOUR, "agent", "Red"));
+    let y = w.record(by_inbox(w.now - 2 * DAY, "agent", "Red"));
+    w.revoke(&x, w.now - 9 * DAY);
+    w.revoke(&y, w.now - DAY);
+
+    assert_eq!(w.matched(&question_key)["mode"], "act");
 }
 
 #[test]
