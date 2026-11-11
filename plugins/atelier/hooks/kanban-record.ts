@@ -41,7 +41,8 @@ type Decision = {
   orig_len?: { ask: number; options: number[] }
 }
 
-type Delivery = { id: string; kind: string; status: string; at: number }
+/** `via` is how the request came in, as the CLI judged it. */
+type Delivery = { id: string; kind: string; status: string; via?: string; at: number }
 
 type TaskRecord = { subject: string; active: string | null; status: string }
 
@@ -85,6 +86,8 @@ export type SessionRecord = {
   relay_frames?: Record<string, RelayTarget>
   /** The session's agent loops as `$.agent.list()` gave them last. */
   agents?: AgentRecord[]
+  /** When a person's `/kanban delegate on` made this session the delegate; null once turned off. */
+  delegate_since?: number | null
 }
 
 type Fields = Partial<Pick<SessionRecord, 'title' | 'first_prompt' | 'ended_reason'>>
@@ -245,6 +248,7 @@ export function rerun(base: SessionRecord, now: number): Partial<SessionRecord> 
     decision: null,
     asks: {},
     agents: [],
+    delegate_since: null,
   }
 }
 

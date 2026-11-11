@@ -122,6 +122,8 @@ type World = {
   band: { value: unknown }
   /** Runs a tool call other than AskUserQuestion, as the engine would with its dialogs; unset answers `{ result: {} }`. */
   tools: { run: ((e: { tool: string; tool_use_id?: string }) => Promise<unknown>) | null }
+  /** The prompt box's draft, a refusal the engine gives every prompt, and the context each prompt entered with. */
+  prompt: { draft: string; drop: string | null; contexts: (readonly string[] | undefined)[] }
 }
 
 type CliOut = { exitCode: number; stdout: string } | 'missing'
@@ -158,6 +160,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   const invalidated: string[] = []
   const band: World['band'] = { value: { type: 'Box', props: {}, children: [] } }
   const tools: World['tools'] = { run: null }
+  const prompt: World['prompt'] = { draft: '', drop: null, contexts: [] }
 
   on('store.get', ($, e) => ({ value: store[e.key] }))
   on('store.set', ($, e) => {
@@ -227,10 +230,16 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   on('tool.register', () => ({ value: { tool: 'mcp__atelier__kanban_board' } as never }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('prompt.submit', ($, e) => {
+    if (prompt.drop !== null) {
+      return { drop: prompt.drop }
+    }
+
     submitted.push(e.text)
+    prompt.contexts.push(e.context)
 
     return { text: e.text }
   })
+  on('prompt.read', () => ({ value: { text: prompt.draft, cursor: prompt.draft.length } }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
@@ -264,7 +273,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
     return { result: {} }
   })
 
-  return { store, clock, runs, shown, dialog, inbox, disk, messages, submitted, aborted, agents, invalidated, band, tools }
+  return { store, clock, runs, shown, dialog, inbox, disk, messages, submitted, aborted, agents, invalidated, band, tools, prompt }
 }
 
 type StoredRecord = {
@@ -2452,7 +2461,7 @@ describe('kanban relay frame', () => {
     const { call } = await ask($, w)
 
     const run = w.runs.find(r => r.argv[2] === 'relay-frame')
-    expect(run?.argv.slice(0, 4)).toEqual(['atelier', 'kanban', 'relay-frame', '--now'])
+    expect(run?.argv).toEqual(['atelier', 'kanban', 'relay-frame', '--now', String(START), '--session', SELF])
     expect(JSON.parse(run?.stdin ?? '{}')).toEqual({ questions: TOOL_QUESTIONS })
     expect(w.dialog.questions).toEqual(FRAMED)
     expect(frames(w)).toEqual({ 'tu-9': TARGET })
@@ -2553,5 +2562,249 @@ describe('kanban relay frame', () => {
 
     expect(w.runs.some(r => r.argv[2] === 'relay-frame')).toBe(false)
     expect(w.dialog.questions).toEqual(TOOL_QUESTIONS)
+  })
+})
+
+describe('kanban delegate', () => {
+  const WAIT_ID = 'wait:w:question:tu-1'
+  const SAID = '[칸반 위임] 입력 대기 1건\n- w question tu-1'
+  const ON = { text: '칸반 위임을 켰어요', delegate_since: START }
+
+  type Wake = {
+    submit?: string | null
+    context?: string | null
+    deliver_ids?: string[]
+    report_due?: boolean
+    state?: unknown
+  }
+
+  function wakeOut(wake: Wake) {
+    return {
+      delegate: true,
+      submit: null,
+      context: null,
+      deliver_ids: [WAIT_ID],
+      attach_to: ['composer', 'bridge'],
+      report_due: false,
+      state: { pending: [{ id: WAIT_ID, since: START }], delivered: [] },
+      ...wake,
+    }
+  }
+
+  /** A CLI that turns delegation on, and answers each `delegate wake` with the next of `wakes`, the last one after. */
+  function delegating(wakes: Wake[], command: unknown = ON): FakeCli {
+    let n = 0
+
+    return argv => {
+      if (argv[2] === 'command') {
+        return { exitCode: 0, stdout: JSON.stringify(command) }
+      }
+
+      if (argv[2] === 'delegate' && argv[3] === 'wake') {
+        const wake = wakes[Math.min(n, wakes.length - 1)] ?? {}
+        n += 1
+
+        return { exitCode: 0, stdout: JSON.stringify(wakeOut(wake)) }
+      }
+
+      return { exitCode: 0, stdout: JSON.stringify(argv[2] === 'board' ? BOARD : {}) }
+    }
+  }
+
+  function wakeRuns(w: World): Run[] {
+    return w.runs.filter(r => r.argv[2] === 'delegate' && r.argv[3] === 'wake')
+  }
+
+  function sentState(run: Run | undefined): unknown {
+    return (JSON.parse(run?.stdin ?? '{}') as { state?: unknown }).state
+  }
+
+  async function turnOn($: { command: { run: (e: never) => Promise<unknown> } }) {
+    return $.command.run({ command: 'kanban', args: 'delegate on', origin: { kind: 'composer' } } as never)
+  }
+
+  test('/kanban delegate hands the CLI its arguments and origin, and keeps the delegate_since it names', async ($, on) => {
+    const w = world(on, delegating([]))
+
+    const ran = await turnOn($)
+
+    expect(ran).toEqual({ text: '칸반 위임을 켰어요' })
+    expect(w.runs.find(r => r.argv[2] === 'command')?.argv).toEqual([
+      'atelier',
+      'kanban',
+      'command',
+      '--session',
+      SELF,
+      '--now',
+      String(START),
+      '--origin',
+      'composer',
+      '--args',
+      'delegate on',
+    ])
+    expect((stored(w) as Record<string, unknown>).delegate_since).toBe(START)
+    expect(w.shown.value).toBe(false)
+    expect(boardRuns(w)).toHaveLength(0)
+  })
+
+  test('a command the CLI refuses shows why and leaves the record as it was', async ($, on) => {
+    const w = world(on, delegating([], { error: '사람이 입력한 `/kanban delegate` 만 받아요 (출처: plugin)' }))
+
+    const ran = await $.command.run({ command: 'kanban', args: 'delegate on', origin: { kind: 'plugin', name: 'x' } } as never)
+
+    expect(ran).toEqual({ text: '사람이 입력한 `/kanban delegate` 만 받아요 (출처: plugin)' })
+    expect(w.runs.find(r => r.argv[2] === 'command')?.argv.slice(7, 9)).toEqual(['--origin', 'plugin'])
+    expect(w.store[KEY]).toBeUndefined()
+  })
+
+  test('a missing CLI says so and turns nothing on', async ($, on) => {
+    const w = world(on, () => 'missing')
+
+    const ran = await turnOn($)
+
+    expect(ran).toEqual({ text: 'atelier CLI 를 실행하지 못했어요 — /atelier:update 로 설치·갱신하세요' })
+    expect(w.store[KEY]).toBeUndefined()
+  })
+
+  test('a session never turned on does not ask for a wake', async ($, on) => {
+    const w = world(on, delegating([{ submit: SAID }]))
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await w.clock.advance(4_000)
+
+    expect(wakeRuns(w)).toHaveLength(0)
+    expect(w.submitted).toEqual([])
+  })
+
+  test('a delegate submits the prompt the wake gives and hands its ids back as delivered', async ($, on) => {
+    const w = world(on, delegating([{ submit: SAID }, {}]))
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await turnOn($)
+    w.prompt.draft = 'half typed'
+    await w.clock.advance(2_000)
+
+    const first = wakeRuns(w)[0]
+    const now = START + 2_000
+    expect(first?.argv).toEqual([
+      'atelier',
+      'kanban',
+      'delegate',
+      'wake',
+      '--session',
+      SELF,
+      '--now',
+      String(now),
+      '--report-at',
+      '18:00',
+      '--utc-offset',
+      String(-new Date(now).getTimezoneOffset()),
+    ])
+    const sent = JSON.parse(first?.stdin ?? '{}') as { sessions: { session_id: string }[]; state: unknown }
+    expect(sent.sessions.map(r => r.session_id)).toEqual([SELF])
+    expect(sent.state).toEqual({ pending: [], delivered: [], draft_len: 10 })
+    expect(w.submitted).toEqual([SAID])
+
+    await w.clock.advance(2_000)
+    expect(sentState(wakeRuns(w)[1])).toEqual({
+      pending: [{ id: WAIT_ID, since: START }],
+      delivered: [WAIT_ID],
+      draft_len: 10,
+    })
+  })
+
+  test('a prompt the engine drops leaves its ids undelivered', async ($, on) => {
+    const w = world(on, delegating([{ submit: SAID }, {}]))
+    w.prompt.drop = 'a Stop stands'
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await turnOn($)
+    await w.clock.advance(4_000)
+
+    expect(sentState(wakeRuns(w)[1])).toEqual({ pending: [{ id: WAIT_ID, since: START }], delivered: [], draft_len: 0 })
+  })
+
+  test("a context rides on the person's next prompt and only then counts as delivered", async ($, on) => {
+    const w = world(on, delegating([{ context: SAID }, {}]))
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await turnOn($)
+    await w.clock.advance(2_000)
+    expect(w.submitted).toEqual([])
+
+    await $.prompt.submit({ text: 'from a plugin', origin: { kind: 'plugin', name: 'x' } } as never)
+    await $.prompt.submit({ text: 'what is next?', origin: { kind: 'composer' } } as never)
+    await $.prompt.submit({ text: 'and then?', origin: { kind: 'composer' } } as never)
+
+    expect(w.prompt.contexts).toEqual([undefined, [SAID], undefined])
+    await w.clock.advance(2_000)
+    expect((sentState(wakeRuns(w)[1]) as { delivered: string[] }).delivered).toEqual([WAIT_ID])
+  })
+
+  test('a daily report delivered is left in the ledger and the ledger is pruned', async ($, on) => {
+    const w = world(on, delegating([{ submit: '[칸반 위임] 일일 보고 — 직전 보고 이후(--since 0)', report_due: true }, {}]))
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await turnOn($)
+    await w.clock.advance(2_000)
+
+    const after = w.runs.filter(r => (r.argv[2] === 'delegate' && r.argv[3] === 'report') || (r.argv[2] === 'ledger' && r.argv[3] === 'prune'))
+    expect(after.map(r => r.argv.slice(2))).toEqual([
+      ['delegate', 'report', '--now', String(START + 2_000)],
+      ['ledger', 'prune', '--now', String(START + 2_000)],
+    ])
+  })
+
+  for (const [name, cli] of [
+    ['a missing CLI', (() => 'missing') as FakeCli],
+    ['a CLI error', ((argv: readonly string[]) =>
+      argv[2] === 'command'
+        ? { exitCode: 0, stdout: JSON.stringify(ON) }
+        : { exitCode: 0, stdout: JSON.stringify({ error: '--report-at 은 `HH:MM` 이에요' }) }) as FakeCli],
+  ] as const) {
+    test(`${name} on a wake says nothing`, async ($, on) => {
+      const w = world(on, cli)
+
+      await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+      w.store[KEY] = { ...(w.store[KEY] as object), delegate_since: START }
+      await w.clock.advance(4_000)
+      await $.prompt.submit({ text: 'hi', origin: { kind: 'composer' } } as never)
+
+      expect(w.submitted).toEqual(['hi'])
+      expect(w.prompt.contexts).toEqual([undefined])
+    })
+  }
+
+  test('the report time comes from the plugin options', { options: { kanban_report_at: '09:30' } }, async ($, on) => {
+    const w = world(on, delegating([{}]))
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await turnOn($)
+    await w.clock.advance(2_000)
+
+    const argv = wakeRuns(w)[0]?.argv ?? []
+    expect(argv[argv.indexOf('--report-at') + 1]).toBe('09:30')
+  })
+
+  test('the inbox record keeps how the last request came in', async ($, on) => {
+    const w = world(
+      on,
+      routes({
+        'inbox dir': { dir: INBOX_DIR },
+        'inbox take': { actions: [], results: [{ id: 'r1', kind: 'answer', status: 'refused', via: 'agent' }] },
+      }),
+    )
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    w.inbox.files = ['r1.json']
+    await w.clock.advance(2_000)
+
+    expect((stored(w) as Record<string, unknown>).inbox).toEqual({
+      id: 'r1',
+      kind: 'answer',
+      status: 'refused',
+      via: 'agent',
+      at: START + 2_000,
+    })
   })
 })

@@ -26,7 +26,7 @@ type Taken =
   | { kind: 'answer'; tool_use_id: string; answers: string[]; from: string; via?: unknown; auth?: unknown }
   | { kind: 'decide'; decision_at: string; text: string; from: string; via?: unknown; auth?: unknown }
 
-type Result = { id: string; kind: string; status: string }
+type Result = { id: string; kind: string; status: string; via?: unknown }
 
 export type InboxState = RecordState & {
   /** This session's inbox directory; null until the CLI named it, or when it could not. */
@@ -119,6 +119,22 @@ async function waits($: EngineInterface, s: AskState, self: string): Promise<str
   })
 }
 
+/** Keeps how the last kanban request this session took went, and how it came in when the CLI said. */
+async function recordDelivery($: EngineInterface, s: InboxState, result: Result, at: number): Promise<void> {
+  await record($, s, {
+    name: null,
+    update: () => ({
+      inbox: {
+        id: result.id.slice(0, MAX_FIELD_CHARS),
+        kind: result.kind.slice(0, MAX_FIELD_CHARS),
+        status: result.status.slice(0, MAX_FIELD_CHARS),
+        ...(typeof result.via === 'string' ? { via: result.via.slice(0, MAX_FIELD_CHARS) } : {}),
+        at,
+      },
+    }),
+  })
+}
+
 /** Takes what other sessions left in this session's inbox, at most once per request. */
 export async function deliverRequests($: EngineInterface, s: InboxState & AskState): Promise<void> {
   const dir = s.inboxDir
@@ -159,17 +175,7 @@ export async function deliverRequests($: EngineInterface, s: InboxState & AskSta
     }
 
     if (last !== undefined) {
-      await record($, s, {
-        name: null,
-        update: () => ({
-          inbox: {
-            id: last.id.slice(0, MAX_FIELD_CHARS),
-            kind: last.kind.slice(0, MAX_FIELD_CHARS),
-            status: last.status.slice(0, MAX_FIELD_CHARS),
-            at: now,
-          },
-        }),
-      })
+      await recordDelivery($, s, last, now)
     }
   } finally {
     s.taking = false
@@ -221,6 +227,10 @@ export async function awaitPermit(
         await dropUsedNonces($, self, out.used_nonces)
 
         return { decision: out.decision, via: viaOf(out.via), auth: out.auth }
+      }
+
+      if (typeof out.status === 'string') {
+        await recordDelivery($, s, { id, kind: 'permit', status: out.status, via: out.via }, await $.clock.now())
       }
     }
 

@@ -1,4 +1,4 @@
-import type { EngineInterface, On } from 'claude-code'
+import type { EngineInterface, On, PluginOptions } from 'claude-code'
 
 import {
   ANSWER_PREFIX,
@@ -17,6 +17,7 @@ import {
 } from './kanban-ask'
 import { type DetailCard, type DetailState, detailBlock, newDetailState, pruneDetail, toggleSelected } from './kanban-detail'
 import { CLI_MISSING, cli, runKanban } from './kanban-cli'
+import { type DelegateState, newDelegateMemory, runDelegateCommand, submitWithOffer, wakeDelegate } from './kanban-delegate'
 import { type InboxState, awaitPermit, deliverRequests, endPermit, findInbox } from './kanban-inbox'
 import {
   type LedgerState,
@@ -79,7 +80,8 @@ type TurnEnd = {
 
 type KanbanState = InboxState &
   AskState &
-  LedgerState & {
+  LedgerState &
+  DelegateState & {
     detail: DetailState
     turnEnd: TurnEnd
     view: BoardView
@@ -291,6 +293,8 @@ async function isPaneShown($: EngineInterface): Promise<boolean> {
 }
 
 async function tick($: EngineInterface, s: KanbanState): Promise<void> {
+  void wakeDelegate($, s, async () => (await snapshot($)).sessions)
+
   try {
     await deliverAnswers($, s)
     await deliverRequests($, s)
@@ -301,6 +305,11 @@ async function tick($: EngineInterface, s: KanbanState): Promise<void> {
   } catch {
     /** a failed tick waits for the next one */
   }
+}
+
+/** `/kanban` alone opens or closes the pane; with arguments it is a delegate command, the pane left as it is. */
+async function runCommand($: EngineInterface, s: KanbanState, e: { args: string; origin?: { kind: string } }): Promise<string> {
+  return e.args.trim() === '' ? toggle($, s) : runDelegateCommand($, s, e.args, e.origin?.kind ?? 'unknown')
 }
 
 async function toggle($: EngineInterface, s: KanbanState): Promise<string> {
@@ -335,7 +344,10 @@ function modeOf(e: { permission_mode?: string }): Partial<SessionRecord> {
 
 async function startSession($: EngineInterface, s: KanbanState): Promise<void> {
   try {
-    await $.command.register({ name: 'kanban', description: '로컬 Claude 세션 칸반 pane 을 열고 닫아요' })
+    await $.command.register({
+      name: 'kanban',
+      description: '로컬 Claude 세션 칸반 pane 을 열고 닫아요 · delegate on|off|act <종류>|shadow <종류> 로 칸반 위임을 다뤄요',
+    })
   } catch {
     /** the pane is still reachable once a later reload registers it */
   }
@@ -410,7 +422,7 @@ function drawCard($: EngineInterface, s: KanbanState, els: ReturnType<EngineInte
   })
 }
 
-export function registerKanban(on: On): void {
+export function registerKanban(on: On, options: PluginOptions = {}): void {
   const s: KanbanState = {
     ...newAskState(),
     ...newLedgerState(),
@@ -427,6 +439,7 @@ export function registerKanban(on: On): void {
     turnId: null,
     taking: false,
     permitting: null,
+    delegate: newDelegateMemory(options.kanban_report_at),
   }
 
   on('session.start', async ($, e, next) => {
@@ -435,7 +448,7 @@ export function registerKanban(on: On): void {
     return next(e)
   })
 
-  on('command.run', { command: 'kanban' }, async $ => ({ text: await toggle($, s) }))
+  on('command.run', { command: 'kanban' }, async ($, e) => ({ text: await runCommand($, s, e) }))
 
   on('tool.call', { tool: 'mcp__atelier__kanban_board' }, async ($, e) => ({
     result: await boardForTool($, (e as { column?: unknown }).column),
@@ -449,7 +462,7 @@ export function registerKanban(on: On): void {
       await recordPrompt($, s, e.text, origin)
     }
 
-    return next(e)
+    return submitWithOffer($, s, e, next)
   })
 
   on('classic.UserPromptSubmit', async ($, e, next) => {

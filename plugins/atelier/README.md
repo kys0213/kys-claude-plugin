@@ -68,7 +68,7 @@ atelier git <reviews|guard|hook>          # git-utils 의 기계적 호출 표�
 atelier session <push-check|ensure-env>   # 세션 경계 hook (SessionStart / Stop)
 atelier orchestrator <spawn-check|compact-note>      # function hooks 모듈이 위임하는 결정적 판정 (아래 §Function hooks)
 atelier code-style <install|update|check|restore|uninstall> # 프로젝트 코드 스타일 룰(base·언어·앱 성격) 설치·갱신·점검·제어 (/atelier:code-style)
-atelier kanban <board|status|record-path|forget|answer|guard-bash|send|stop|permit|reply|decide|inbox|spawn>   # 세션 칸반 판정과 세션 사이 요청 전달 (아래 §세션 칸반)
+atelier kanban <board|status|record-path|forget|relay-frame|answer|guard-bash|command|delegate|ledger|send|stop|permit|reply|decide|inbox|spawn>   # 세션 칸반 판정과 세션 사이 요청 전달 (아래 §세션 칸반)
 ```
 
 `drift` 는 `/atelier:update`·`/atelier:setup` 명세가 호출하는 결정적 도구입니다.
@@ -116,7 +116,7 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
 ### 세션 칸반
 
 `/kanban` 을 입력하면 이 머신에서 atelier 가 켜진 Claude Code 세션 전체를 칸반 pane 으로 보여줍니다.
-다시 입력하면 닫힙니다. 터미널과 데스크톱 앱에서는 프롬프트 위의 `세션 칸반 열기`/`세션 칸반 닫기` 버튼으로도
+다시 입력하면 닫힙니다(`/kanban delegate …` 처럼 인자를 붙이면 pane 은 그대로 두고 아래 §칸반 위임 명령으로 다룹니다). 터미널과 데스크톱 앱에서는 프롬프트 위의 `세션 칸반 열기`/`세션 칸반 닫기` 버튼으로도
 열고 닫을 수 있습니다. 컬럼은 **입력 대기 → 작업 중 → 쉬는 중 → 응답 없음** 이고, 카드에는 저장소
 이름·그 컬럼에 머문 시간·세션 제목(없으면 첫 프롬프트)과 진행 상황(할 일 진척, 작업 중이면 지금 실행 중인
 도구), 쉬는 중이면 직전 응답 첫 줄이 나옵니다.
@@ -173,15 +173,16 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
     답을 모두 버립니다. 쓴 답은 장부에 대리로 남고, 그 질문의 선례 id(`precedents`)와 근거(`reason`)가 함께 남습니다.
 - **대기 표지와 머리말**: 메인 에이전트가 다른 세션의 대기를 사용자에게 물을 때 AskUserQuestion 의 첫 질문 첫 줄을
   `[kanban-wait <세션 id> <대기 id>]` 로 씁니다(대기 하나에 질문 하나, 질문 대기면 그 질문 수만큼 같은 순서로; 권한·결정
-  요청은 질문 하나). 모드가 그 질문을 띄우기 전에 `atelier kanban relay-frame --now <ms>`(stdin `{questions}` →
-  `{questions, target}`, `target` 은 `{session, wait, kind, recommended}`)에 넘기고, CLI 가 기록 사본에서 그 대기를 찾아 표지 줄을 `칸반 대기 · <레포> · <세션 짧은 id> ·
+  요청은 질문 하나). 모드가 그 질문을 띄우기 전에 `atelier kanban relay-frame --now <ms> --session <이 세션>`(stdin `{questions}` →
+  `{questions, target}`, `target` 은 `{session, wait, kind, recommended}`)에 넘기고, 이 세션이 위임 세션(기록 사본으로 판정한
+  보드의 `delegate`)일 때만 CLI 가 기록 사본에서 그 대기를 찾아 표지 줄을 `칸반 대기 · <레포> · <세션 짧은 id> ·
   <질문|권한 요청|결정 요청>` 머리말로 바꾸고 그 아래에 기록 사본의 원문(권한은 `도구: 대상`, 질문·결정은 질문과 선택지)을
   붙입니다. 기록이 원문을 잘랐으면 머리말 끝에 `(잘림 — 원래 N자 중 앞 M자)` 를 붙입니다. 선택지는 그 대기의 라벨(권한은
   `허용`·`거부`)이고, 메인 에이전트가 같은 라벨을 다른 순서로 줬으면 그 순서와 설명을 씁니다. 나머지 글의 표지 문자열은
   무력화합니다. 권한의 선택지 설명은 메인 에이전트가 쓴 것 대신 `위 머리말의 명령을 실행해요`·`실행하지 않아요` 로 씁니다.
   질문마다 사람에게 보인 첫 선택지가 그 질문의 추천(`target.recommended`, 질문 순서대로)입니다 — 메인 에이전트가 추천
   없이 물었어도 첫 선택지를 추천으로 칩니다. 첫 줄이 표지가 아니거나(둘째 질문 이후의 표지·본문의 표지는 효력 없음), 질문 수가 대기와 다르면
-  질문을 그대로 두고(`target: null`), 표지가 가리키는 대기가 없으면 `{error}` 입니다. 어느 쪽이든, 그리고 CLI 가 실패하거나
+  질문을 그대로 두고(`target: null`, 위임 세션이 아닐 때도 같음), 표지가 가리키는 대기가 없으면 `{error}` 입니다. 어느 쪽이든, 그리고 CLI 가 실패하거나
   엔진이 다시 쓴 질문을 받지 않으면 모드는 원래 질문을 띄우고 대기에 묶지 않습니다. 묶은 질문은 기록의
   `relay_frames[<tool_use_id>]` 에 `target` 이 그대로 남고, 사람이 그 질문 화면에서 직접 답했거나 pane 에서 답했을 때만 장부에
   물어 받은 답(대상 `target_session`·`target_wait`, 추천 `recommended`, 추천을 골랐는지 `approved`, 결정 키 없음 — 선례로
@@ -189,7 +190,7 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   답으로 끝났거나 자리를 비운 사이 닫혔으면 남지 않습니다. 서브에이전트의 질문은 묶지 않습니다.
 - **사람 위장 막기**: 모델·서브에이전트의 Bash 명령에 `kanban` 이 들어 있으면 모드가 `atelier kanban guard-bash`
   (stdin `{command}` → `{deny}`)로 확인합니다. `reply`·`permit`·`decide`·`send` 에 `--from pane` 을 붙인 호출과
-  모드만 부르는 `forget`·`ledger record`·`ledger bind`·`ledger prune`·`relay-frame` 은 막습니다. 셸 낱말로 판정하므로 변수·eval·스크립트 파일로
+  모드만 부르는 `forget`·`ledger record`·`ledger bind`·`ledger prune`·`relay-frame`·`command`·`delegate report` 는 막습니다. 셸 낱말로 판정하므로 변수·eval·스크립트 파일로
   감싼 호출은 막지 못하고, CLI 가 없거나 실패하면 통과시킵니다.
 - **결정 장부**: 세션마다 모드가 입력 대기에 받은 답을 `atelier kanban ledger record`(stdin 에 그 대기의 기록과 답이
   들어온 길)로 남기고, CLI 가 이 머신의 `<CLAUDE_CONFIG_DIR 또는 ~/.claude>/atelier/kanban/ledger/<YYYY-MM>.jsonl` 에
@@ -215,11 +216,44 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
     답이어야 하고(다른 답의 수가 `conflicts`), 키가 꺼져 있지 않아야 `eligible` 입니다. `reasons` 는 `support`·
     `conflict`·`disabled` 입니다. `mode` 는 그 종류의 단계(`shadow`·`act`)로, 사람이 입력한 위임 설정 중 가장 최근 것이
     `act` 이고 그 뒤 7일 안에 대리 답을 2번 뒤집지 않았을 때만 `act` 입니다. 결정 요청은 늘 `shadow` 입니다.
-    위임 설정을 남기는 명령은 아직 없어서 지금은 모든 종류가 `shadow` 이고, 메인 에이전트의 선례 답은 받지 않습니다
-    (물어 받은 답은 받습니다).
+    위임 설정은 사람이 입력한 `/kanban delegate act|shadow <종류>` 만 남깁니다(아래 §칸반 위임).
+  - `atelier kanban ledger stats --now <ms>` 는 장부를 시간순으로 다시 읽어 지켜보기 비교를 셉니다. 90일 안의 사람의
+    결정(세션 화면·pane·메인 대화 어느 길이든)마다 그 결정 전의 장부만으로 그 키가 `eligible` 이었는지를 보고, 그랬다면
+    비교 1건, 그때의 선례 답이 사람의 답과 같으면 일치입니다(결정 요청도 셉니다). 출력은
+    `{now, kinds: {question|permission|decision: {mode, compared, agreed, disagreed, recent5_agreed, promotable,
+    progress: "n/10", demoted_reason}}, disabled_keys: [{key, kind, entry, at, reason}]}` 이고, `promotable` 은 비교
+    10건 이상·불일치 1건 이하·최근 5건 모두 일치일 때의 권고입니다. `demoted_reason` 은 `act` 로 올린 종류가 7일 안 두 번의
+    뒤집기로 지켜보기로 돌아갔을 때의 이유입니다.
   - `atelier kanban ledger revoke --entry <대리 답 id> --reason <200자 이하> --now <ms>` 는 사용자가 뒤집은 대리 답을
     남기고 그 결정 키를 끕니다. 대리 답만 뒤집을 수 있고, 뒤집은 뒤 그 키에 사람의 직접 결정 2건이 같은 답이면 다시
     켜집니다. `ledger list` 는 뒤집기·위임 설정 줄을 보이지 않습니다.
+- **칸반 위임**: 메인 세션에서 `/kanban delegate on` 을 입력하면 그 세션이 위임 세션이 되어 다른 세션의 입력 대기를
+  모아 받습니다. 모드는 `/kanban <인자>` 를 실행 출처(`origin.kind`)와 함께 `atelier kanban command --session <이 세션>
+  --now <ms> --origin <출처> --args <인자>` 에 넘기고, CLI 가 사람이 입력한 것(`composer`·`bridge`)일 때만 받아 장부에
+  위임 설정 줄을 남깁니다. 출력 `{text, delegate_since?}` 의 `text` 가 명령의 답이고, `delegate_since`(`on` 은 지금 시각,
+  `off` 는 `null`)가 있으면 모드가 기록에 남깁니다.
+  - `/kanban delegate on|off` — 이 세션을 위임 세션으로 켜고 끕니다. 살아 있는(응답 없음이 아닌) 위임 세션이 둘 이상이면
+    가장 최근에 켠 하나만 동작하고, `status` 와 `board`(`kanban_board` 포함)의 `delegate: {session_id, since, conflicts}` 가
+    그것과 나머지를 보여 줍니다. `status` 의 `delegate` 에는 종류별 단계 `modes` 와 지켜보기 진행도 `progress`(`"n/10"`)도 실립니다.
+  - `/kanban delegate act question|permission` — 그 종류를 대신 답하기로 올립니다. 권고(`promotable`)에 못 미쳐도 받고,
+    답에 지금의 비교·불일치·최근 5건 일치·권고를 한 줄로 보여 줍니다. `/kanban delegate act decision` 은
+    `결정 요청은 아직 대신 답하지 않아요` 로 거부합니다. `/kanban delegate shadow question|permission|decision` 은 지켜보기로 내립니다.
+  - 깨우기: 켜진 세션의 모드는 2초마다 `atelier kanban delegate wake --session <이 세션> --now <ms> --report-at <HH:MM>
+    --utc-offset <분>` 에 stdin `{sessions: [기록…], state: {pending, delivered, draft_len}}` 를 넘기고, CLI 가
+    `{delegate, submit, context, deliver_ids, attach_to, report_due, state}` 로 답합니다. 새 대기는 10초 모으고, 위임 세션이
+    턴을 돌리지 않고 입력 칸이 비었고 사람이 마지막으로 입력한 지 30초가 지났으면 `submit` 을, 아니면 `context` 를 줍니다.
+    처음 본 지 3분이 지난 것은 턴이 쉬기만 하면 `submit` 입니다. 메인 에이전트의 답이 받는 세션에서 버려진 것(`전달 실패`)과
+    일일 보고는 모으지 않습니다. 프롬프트에는 세션·대기 id 만 들어갑니다:
+    `[칸반 위임] 전달 실패 <n>건` / `[칸반 위임] 입력 대기 <n>건` 아래에 `- <세션 id> <종류> <id>[ <결과>]` 줄,
+    `[칸반 위임] 일일 보고 — 직전 보고 이후(--since <ms>)`. 모드는 `submit` 을 `$.prompt.submit` 으로 내고, `context` 는
+    `attach_to` 의 출처(사람이 입력한 것)인 다음 프롬프트에 붙입니다. 엔진이 받아들였을 때만 `deliver_ids` 를 다음
+    `state.delivered` 로 넘기므로 실패한 것은 다음 tick 에 다시 판정됩니다. CLI 가 없거나 실패하면 아무것도 내지 않습니다.
+  - 일일 보고: `kanban_report_at`(플러그인 설정, 기본 `18:00`, 로컬 시각) 이후 장부에 보고가 없으면 `report_due` 입니다.
+    보고를 낸 뒤 모드가 `atelier kanban delegate report --now <ms>` 로 남기고 `ledger prune` 을 부릅니다. 그 시각에 위임
+    세션이 없었으면 다음에 위임 세션이 살아 있을 때 한 번 냅니다. 보고 내용은 `kanban-delegate` skill 이 씁니다.
+  - 받는 세션은 마지막 inbox 결과의 출처(`via`)를 기록에 남기고(권한 답이 버려졌을 때도), 위임 세션은 그중 메인 에이전트의
+    답이 위임을 켠 뒤 버려진 것만 `전달 실패` 로 봅니다.
+  - 규격: [`spec/concerns/kanban-delegate.md`](spec/concerns/kanban-delegate.md)
 - **터미널에서 보기**: pane 없이 같은 보드를 `atelier kanban status` 로 읽습니다. 세션마다 모드가 기록을 쓸 때
   남기는 기록 사본(`<CLAUDE_CONFIG_DIR 또는 ~/.claude>/atelier/kanban/records/<세션>.json`)을 읽으므로 모드가 꺼진
   세션은 보이지 않고, 읽을 수 없는 사본은 그 세션만 빠집니다.
