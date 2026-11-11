@@ -49,6 +49,9 @@ pub struct SessionFact {
     /// The id the mod takes a kanban answer for that request by; absent when
     /// the mod cannot take one.
     pub permission_id: Option<String>,
+    /// The length each of `permission`'s input fields had before the mod cut
+    /// it, in UTF-16 code units; absent when the record has none.
+    pub permission_input_len: Option<Vec<(String, u64)>>,
     /// The decision the last turn ended on, until the next turn starts.
     pub decision: Option<Decision>,
     pub inbox: Option<Delivery>,
@@ -166,6 +169,35 @@ pub struct Card {
     pub detail: Detail,
     /// Open questions, oldest first; empty unless the session waits on one.
     pub asks: Vec<Ask>,
+    /// What a session in the needs-input column waits on.
+    pub waiting: Option<Waiting>,
+}
+
+/// The permission request a session waits on, with the lengths its input had.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermissionAsk {
+    pub id: Option<String>,
+    pub request: Activity,
+    pub input_len: Option<Vec<(String, u64)>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WaitOn {
+    /// The oldest open question.
+    Question(Ask),
+    Permission(PermissionAsk),
+    Decision(Decision),
+    Input,
+}
+
+/// The facts of one wait as recorded: what it is on, since when, the person's
+/// latest prompt and the reply just before it, uncut by the board.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Waiting {
+    pub on: WaitOn,
+    pub since: u64,
+    pub request: Option<String>,
+    pub context: Option<String>,
 }
 
 impl Card {
@@ -495,6 +527,15 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
         params.now,
     );
     let is_question = matches!(state, Some(State::NeedsInput(WaitReason::Question)));
+    let waiting = match &state {
+        Some(State::NeedsInput(reason)) => wait_on(reason, fact, &asks).map(|on| Waiting {
+            on,
+            since,
+            request: person_prompt(fact).map(str::to_string),
+            context: fact.pending_context.clone(),
+        }),
+        _ => None,
+    };
     Placed {
         column,
         sort_at: since,
@@ -521,7 +562,26 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
             actions: actions_of(state.as_ref(), fact),
             detail,
             asks: if is_question { asks } else { Vec::new() },
+            waiting,
         },
+    }
+}
+
+/// `None` when the record lacks what the wait is on: a permission request
+/// whose event came without a recorded request, or a decision state without
+/// its decision.
+fn wait_on(reason: &WaitReason, fact: &SessionFact, asks: &[Ask]) -> Option<WaitOn> {
+    match reason {
+        WaitReason::Question => asks.first().cloned().map(WaitOn::Question),
+        WaitReason::Permission(_) => fact.permission.as_ref().map(|request| {
+            WaitOn::Permission(PermissionAsk {
+                id: fact.permission_id.clone(),
+                request: request.clone(),
+                input_len: fact.permission_input_len.clone(),
+            })
+        }),
+        WaitReason::Decision => fact.decision.clone().map(WaitOn::Decision),
+        WaitReason::Input => Some(WaitOn::Input),
     }
 }
 

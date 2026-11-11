@@ -14,6 +14,16 @@ pub struct Decision {
     pub recap: Option<String>,
     pub options: Vec<String>,
     pub at: u64,
+    /// Absent when the record has none.
+    pub orig_len: Option<DecisionLengths>,
+}
+
+/// The lengths before the mod cut the texts, in UTF-16 code units; `options`
+/// has one length for every option offered, kept or not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecisionLengths {
+    pub ask: u64,
+    pub options: Vec<u64>,
 }
 
 /// A status a newer CLI wrote that this one does not know is shown as written.
@@ -77,7 +87,7 @@ const TODO_LINES: usize = 8;
 const RECENT_LINES: usize = 5;
 
 /// Tried in order for what a permission request is about; paths stay whole.
-const WAIT_FIELDS: [&str; 8] = [
+pub const WAIT_FIELDS: [&str; 8] = [
     "command",
     "file_path",
     "notebook_path",
@@ -92,14 +102,14 @@ pub fn clean(raw: &str) -> String {
     strip_controls(strip_agent_header(strip_reminders(raw).trim_start()))
 }
 
-fn prompt_lines(raw: Option<&str>) -> Vec<String> {
+pub fn prompt_lines(raw: Option<&str>) -> Vec<String> {
     raw.map(|p| fold(&clean(p)))
         .filter(|p| !p.is_empty())
         .map(|p| vec![cut(&p, PROMPT_CHARS)])
         .unwrap_or_default()
 }
 
-fn reply_lines(raw: Option<&str>) -> Vec<String> {
+pub fn reply_lines(raw: Option<&str>) -> Vec<String> {
     let Some(raw) = raw else {
         return Vec::new();
     };

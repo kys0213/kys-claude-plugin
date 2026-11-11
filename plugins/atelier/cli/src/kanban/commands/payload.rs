@@ -8,10 +8,10 @@
 use crate::kanban::core::answer::Pick;
 use crate::kanban::core::background::{AgentFact, AgentStatus};
 use crate::kanban::core::board::{Event, SessionFact};
-use crate::kanban::core::detail::{Decision, Delivery, DeliveryStatus};
+use crate::kanban::core::detail::{Decision, DecisionLengths, Delivery, DeliveryStatus};
 use crate::kanban::core::progress::{Activity, ItemStatus, WorkItem};
 use crate::kanban::core::prompt::PromptFact;
-use crate::kanban::core::question::{Ask, Question, QuestionOption};
+use crate::kanban::core::question::{Ask, AskLengths, Question, QuestionOption};
 use crate::kanban::core::request::{RequestKind, Status};
 use serde_json::{Map, Value};
 
@@ -70,6 +70,12 @@ fn parse_record(value: &Value) -> Option<SessionFact> {
         permission: optional(value, "permission", parse_activity)?,
         permission_id: match value.get("permission") {
             Some(permission @ Value::Object(_)) => nullable_string(permission, "id")?,
+            _ => None,
+        },
+        permission_input_len: match value.get("permission") {
+            Some(permission @ Value::Object(_)) => {
+                optional(permission, "input_len", parse_field_lengths)?
+            }
             _ => None,
         },
         decision: optional(value, "decision", parse_decision)?,
@@ -133,6 +139,38 @@ fn parse_decision(value: &Value) -> Option<Decision> {
             .map(|o| Some(o.as_str()?.to_string()))
             .collect::<Option<Vec<_>>>()?,
         at: value.get("at")?.as_u64()?,
+        orig_len: optional(value, "orig_len", parse_decision_lengths)?,
+    })
+}
+
+fn parse_decision_lengths(value: &Value) -> Option<DecisionLengths> {
+    Some(DecisionLengths {
+        ask: value.get("ask")?.as_u64()?,
+        options: parse_lengths(value.get("options")?)?,
+    })
+}
+
+fn parse_lengths(value: &Value) -> Option<Vec<u64>> {
+    value.as_array()?.iter().map(Value::as_u64).collect()
+}
+
+fn parse_field_lengths(value: &Value) -> Option<Vec<(String, u64)>> {
+    value
+        .as_object()?
+        .iter()
+        .map(|(name, len)| Some((name.clone(), len.as_u64()?)))
+        .collect()
+}
+
+fn parse_ask_lengths(value: &Value) -> Option<AskLengths> {
+    Some(AskLengths {
+        question: parse_lengths(value.get("question")?)?,
+        labels: value
+            .get("labels")?
+            .as_array()?
+            .iter()
+            .map(parse_lengths)
+            .collect::<Option<Vec<_>>>()?,
     })
 }
 
@@ -185,6 +223,7 @@ fn parse_ask(tool_use_id: &str, value: &Value) -> Option<Ask> {
         tool_use_id: tool_use_id.to_string(),
         questions: parse_questions(value.get("questions")?)?,
         at: value.get("at")?.as_u64()?,
+        orig_len: optional(value, "orig_len", parse_ask_lengths)?,
     })
 }
 

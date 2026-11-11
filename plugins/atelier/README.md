@@ -148,7 +148,16 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   `--column <needs_input|working|idle|stale>`(여러 번 가능), `--session <id>`, `--format json|text`(기본 json),
   `--now <ms>`(없으면 지금 시각)를 받고, 모르는 컬럼·형식은 거부합니다. `atelier kanban board` 도 `--column` 을 받습니다.
   `atelier kanban forget --session <id>` 는 그 세션의 기록 사본과 inbox 를 지웁니다(24시간 끊긴 세션을 모드가 지울 때 씁니다).
-- **오케스트레이터**: 읽기 전용 모드 툴 `kanban_board` 로 레포별 세션 목록을 읽고, 쉬는 세션에는
+- **기다리는 것(`wait`)**: `status` 의 세션과 `board`·`kanban_board` 의 `repos[].sessions[]` 는 입력 대기 세션에
+  `wait` 를 싣습니다(아니면 `null`). 종류(`question`·`permission`·`decision`·`input`), id, 기다리기 시작한 시각,
+  사람이 쓴 최근 요청과 기다리기 직전 응답, 질문·선택지 또는 도구·대상 또는 결정의 질문·선택지, 결정마다의
+  결정 키(`q1:`·`p1:`·`d1:` + SHA-256 앞 128비트), 그리고 선례로 대신 답할 수 있는 종류인지(`proxyable`)와 아니라면
+  그 이유(`blocked`: `multi_select`·`truncated`·`not_allowlisted:<낱말>`·`outside_repo`·`compound`·`expansion`·
+  `guard:irreversible`·`decision`·`input`·`no_key`)입니다. 권한 요청은 레포 안의 파일 읽기 도구(`Read`·`Glob`·`Grep`)와,
+  명령마다 정해 둔 읽기 옵션과 인자 개수만 쓴 셸 명령만 대신 답할 수 있는 종류이고 그 밖은 모두 거부합니다. 경로는
+  심볼릭 링크를 따라간 실제 위치로 레포 안인지 봅니다. worker 가 쓴 글 안의 `[kanban-wait` 는 `［kanban-wait` 로
+  바꿔 내보내고, 결정 키는 바꾸기 전 글로 셉니다.
+- **오케스트레이터**: 읽기 전용 모드 툴 `kanban_board`(`column` 으로 컬럼을 고를 수 있음)로 레포별 세션 목록을 읽고, 쉬는 세션에는
   `atelier kanban send --session <id> --from agent --from-label <이 세션> --text <일>` 로 맡기고, 레포에
   세션이 없으면 `atelier kanban spawn --cwd <메인 작업 트리 루트> [--worktree <이름>] --text <일>` 로
   `claude --bg` 세션을 띄웁니다. Bash 로 부르므로 오케스트레이터 세션의 권한 규칙을 그대로 따릅니다.

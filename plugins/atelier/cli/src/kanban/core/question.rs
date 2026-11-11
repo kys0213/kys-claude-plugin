@@ -14,9 +14,19 @@ pub struct Question {
     pub options: Vec<QuestionOption>,
 }
 
+/// The lengths the texts had before the mod cut them, in UTF-16 code units:
+/// per question, then per question's option labels.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AskLengths {
+    pub question: Vec<u64>,
+    pub labels: Vec<Vec<u64>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ask {
     pub tool_use_id: String,
     pub questions: Vec<Question>,
     pub at: u64,
+    /// Absent when the record has none.
+    pub orig_len: Option<AskLengths>,
 }

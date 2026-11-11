@@ -473,15 +473,15 @@ fn sessions_are_grouped_by_repository_root_for_the_orchestrator() {
                 "label": "api",
                 "root": "/w/api",
                 "sessions": [
-                    { "session_id": "a2", "column": "working", "cwd": "/w/api/.claude/worktrees/x", "permission_mode": null, "actions": ["stop"], "subtitle": null, "last_line": null, "delivery": null },
-                    { "session_id": "a1", "column": "idle", "cwd": "/work/project-a", "permission_mode": "default", "actions": ["send"], "subtitle": "Fix CORS", "last_line": "직전: Fixed CORS.", "delivery": "보낸 요청: 전달됐어요 · 4s" },
+                    { "session_id": "a2", "column": "working", "cwd": "/w/api/.claude/worktrees/x", "permission_mode": null, "actions": ["stop"], "subtitle": null, "last_line": null, "delivery": null, "wait": null },
+                    { "session_id": "a1", "column": "idle", "cwd": "/work/project-a", "permission_mode": "default", "actions": ["send"], "subtitle": "Fix CORS", "last_line": "직전: Fixed CORS.", "delivery": "보낸 요청: 전달됐어요 · 4s", "wait": null },
                 ],
             },
             {
                 "label": "notes",
                 "root": null,
                 "sessions": [
-                    { "session_id": "n1", "column": "idle", "cwd": "/tmp/notes", "permission_mode": null, "actions": ["send"], "subtitle": null, "last_line": null, "delivery": null },
+                    { "session_id": "n1", "column": "idle", "cwd": "/tmp/notes", "permission_mode": null, "actions": ["send"], "subtitle": null, "last_line": null, "delivery": null, "wait": null },
                 ],
             },
         ])

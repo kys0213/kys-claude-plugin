@@ -9,12 +9,13 @@ pub mod commands;
 pub mod core;
 
 use crate::kanban::commands::inbox::{ClockIds, FsInbox, ThreadPause};
+use crate::kanban::commands::paths::FsPaths;
 use crate::kanban::commands::payload::{parse_answer_request, parse_sessions};
 use crate::kanban::commands::records::{FsRecords, KanbanRecords, StatusQuery};
 use crate::kanban::commands::requests::KanbanRequests;
 use crate::kanban::commands::spawn::{ClaudeLauncher, GitProbe};
 use crate::kanban::core::answer::compose;
-use crate::kanban::core::board::{build, Action, Board, BoardParams, Card, Column};
+use crate::kanban::core::board::{build, Action, Board, BoardParams, Card, Column, Waiting};
 use crate::kanban::core::detail::Detail;
 use crate::kanban::core::duration::parse_millis;
 use crate::kanban::core::layout::{fit, Layout};
@@ -22,6 +23,8 @@ use crate::kanban::core::question::{Ask, Question};
 use crate::kanban::core::repos::{group, Repo};
 use crate::kanban::core::request::Sender;
 use crate::kanban::core::status::{render_text, select, Format};
+use crate::kanban::core::text::defuse_marker;
+use crate::kanban::core::wait::{derive, Blocked, Place, Subject};
 use crate::shared::process::read_stdin_raw;
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
@@ -245,13 +248,16 @@ fn detail_json(detail: &Detail) -> Value {
 }
 
 fn repo_json(repo: &Repo) -> Value {
-    json!({
-        "label": repo.label,
-        "root": repo.root,
-        "sessions": repo
-            .sessions
-            .iter()
-            .map(|s| json!({
+    let sessions: Vec<Value> = repo
+        .sessions
+        .iter()
+        .map(|s| {
+            let place = Place {
+                repo_root: repo.root.as_deref(),
+                cwd: &s.cwd,
+                permission_mode: s.permission_mode.as_deref(),
+            };
+            json!({
                 "session_id": s.session_id,
                 "column": s.column.id(),
                 "cwd": s.cwd,
@@ -260,9 +266,79 @@ fn repo_json(repo: &Repo) -> Value {
                 "subtitle": s.subtitle,
                 "last_line": s.last_line,
                 "delivery": s.delivery,
-            }))
-            .collect::<Vec<_>>(),
-    })
+                "wait": wait_json(s.waiting.as_ref(), &place),
+            })
+        })
+        .collect();
+    defused(json!({
+        "label": repo.label,
+        "root": repo.root,
+        "sessions": sessions,
+    }))
+}
+
+fn wait_json(waiting: Option<&Waiting>, place: &Place) -> Value {
+    let Some(waiting) = waiting else {
+        return Value::Null;
+    };
+    let wait = derive(waiting, place, &FsPaths);
+    let mut out = json!({
+        "kind": wait.kind(),
+        "id": wait.id,
+        "since": wait.since,
+        "request": wait.request,
+        "context": wait.context,
+    });
+    let fields = match &wait.subject {
+        Subject::Question(questions) => json!({
+            "questions": questions
+                .iter()
+                .map(|q| {
+                    let mut shown = question_json(&q.question);
+                    shown["key"] = json!(q.key);
+                    shown["key_label"] = json!(q.key_label);
+                    shown
+                })
+                .collect::<Vec<_>>(),
+        }),
+        Subject::Permission(p) => json!({
+            "tool": p.tool,
+            "target": p.target,
+            "truncated": p.truncated,
+            "key": p.key,
+            "key_label": p.key_label,
+            "read_only": p.read_only,
+        }),
+        Subject::Decision(d) => json!({
+            "ask": d.ask,
+            "recap": d.recap,
+            "options": d.options,
+            "key": d.key,
+        }),
+        Subject::Input => json!({}),
+    };
+    for (name, value) in fields.as_object().into_iter().flatten() {
+        out[name] = value.clone();
+    }
+    out["proxyable"] = json!(wait.proxyable());
+    out["blocked"] = json!(wait.blocked.iter().map(Blocked::id).collect::<Vec<_>>());
+    out
+}
+
+/// Every string with its wait marker defused; what the delegate reads of a
+/// worker's words cannot pass for a marker.
+fn defused(value: Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(defuse_marker(&text)),
+        Value::Array(items) => Value::Array(items.into_iter().map(defused).collect()),
+        Value::Object(fields) => Value::Object(
+            fields
+                .into_iter()
+                .map(|(name, value)| (name, defused(value)))
+                .collect(),
+        ),
+        other => other,
+    }
 }
 
 fn ask_json(ask: &Ask) -> Value {
@@ -332,7 +408,12 @@ fn now_millis() -> u64 {
 }
 
 fn status_entry_json(column: Column, card: &Card) -> Value {
-    json!({
+    let place = Place {
+        repo_root: card.repo_root.as_deref(),
+        cwd: &card.cwd,
+        permission_mode: card.permission_mode.as_deref(),
+    };
+    defused(json!({
         "session_id": card.session_id,
         "label": card.label,
         "repo_root": card.repo_root,
@@ -344,7 +425,8 @@ fn status_entry_json(column: Column, card: &Card) -> Value {
         "actions": action_ids(&card.actions),
         "last_line": card.last_line,
         "delivery": card.detail.delivery,
-    })
+        "wait": wait_json(card.waiting.as_ref(), &place),
+    }))
 }
 
 fn run_status(
@@ -370,7 +452,7 @@ fn run_status(
                 .collect();
             json!({ "now": now, "sessions": sessions }).to_string()
         }
-        Ok((Format::Text, board)) => render_text(&board, query.session.as_deref()),
+        Ok((Format::Text, board)) => defuse_marker(&render_text(&board, query.session.as_deref())),
         Err(error) => json!({ "error": error }).to_string(),
     }
 }

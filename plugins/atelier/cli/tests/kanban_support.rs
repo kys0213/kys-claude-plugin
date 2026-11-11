@@ -111,3 +111,115 @@ pub fn status_in(config: &Path, args: &[&str]) -> Value {
     full.extend_from_slice(args);
     kanban_in(config, &full)
 }
+
+pub const REPO: &str = "/work/project-a";
+
+/// The UTF-16 length the mod records, as JavaScript's `.length` counts.
+pub fn js_len(text: &str) -> usize {
+    text.encode_utf16().count()
+}
+
+/// A session at `repo` waiting on one permission request for `tool`, its
+/// input recorded whole with the length facts the mod writes.
+pub fn asking_permission_at(repo: &str, cwd: &str, tool: &str, input: Value) -> Value {
+    let lengths: serde_json::Map<String, Value> = input
+        .as_object()
+        .expect("input fields")
+        .iter()
+        .map(|(k, v)| (k.clone(), json!(js_len(v.as_str().expect("string field")))))
+        .collect();
+    session_with(
+        "w",
+        json!([event("classic.PermissionRequest", Some(tool), 10 * SEC)]),
+        json!({
+            "cwd": cwd,
+            "repo_root": repo,
+            "permission_mode": "default",
+            "permission": {
+                "id": "t-1-7",
+                "tool": tool,
+                "input": input,
+                "input_len": lengths,
+                "at": NOW - 10 * SEC,
+            },
+        }),
+    )
+}
+
+pub fn asking_permission(tool: &str, input: Value) -> Value {
+    asking_permission_at(REPO, REPO, tool, input)
+}
+
+pub fn asking_bash(command: &str) -> Value {
+    asking_permission("Bash", json!({ "command": command }))
+}
+
+/// The `wait` of the only session on the board.
+pub fn wait_of(record: Value) -> Value {
+    let b = board(json!([record]));
+    b["repos"][0]["sessions"][0]["wait"].clone()
+}
+
+pub fn blocked(wait: &Value) -> Vec<String> {
+    wait["blocked"]
+        .as_array()
+        .expect("blocked list")
+        .iter()
+        .map(|r| r.as_str().expect("reason").to_string())
+        .collect()
+}
+
+pub fn question(text: &str, labels: &[&str], multi: bool) -> Value {
+    json!({
+        "question": text,
+        "header": "Pick",
+        "multi_select": multi,
+        "options": labels
+            .iter()
+            .map(|l| json!({ "label": l, "description": null }))
+            .collect::<Vec<_>>(),
+    })
+}
+
+/// The lengths the mod records for `questions` when nothing was cut.
+pub fn question_lengths(questions: &Value) -> Value {
+    let list = questions.as_array().expect("questions");
+    let labels = |q: &Value| -> Vec<usize> {
+        q["options"]
+            .as_array()
+            .expect("options")
+            .iter()
+            .map(|o| js_len(o["label"].as_str().expect("label")))
+            .collect()
+    };
+    json!({
+        "question": list
+            .iter()
+            .map(|q| js_len(q["question"].as_str().expect("text")))
+            .collect::<Vec<_>>(),
+        "labels": list.iter().map(labels).collect::<Vec<_>>(),
+    })
+}
+
+/// A session at `REPO` waiting on one AskUserQuestion call with these
+/// recorded questions and length facts.
+pub fn asking_with_lengths(questions: Value, orig_len: Value) -> Value {
+    session_with(
+        "w",
+        json!([event(
+            "classic.PermissionRequest",
+            Some("AskUserQuestion"),
+            10 * SEC
+        )]),
+        json!({
+            "cwd": REPO,
+            "repo_root": REPO,
+            "asks": { "tu-1": { "questions": questions, "at": NOW - 10 * SEC, "orig_len": orig_len } },
+        }),
+    )
+}
+
+pub fn asking(questions: Value) -> Value {
+    let orig_len = question_lengths(&questions);
+    asking_with_lengths(questions, orig_len)
+}

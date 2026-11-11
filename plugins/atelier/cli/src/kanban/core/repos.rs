@@ -1,6 +1,6 @@
 //! The board's cards grouped by repository.
 
-use super::board::{Action, Board, Column};
+use super::board::{Action, Board, Column, Waiting};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoSession {
@@ -12,6 +12,7 @@ pub struct RepoSession {
     pub subtitle: Option<String>,
     pub last_line: Option<String>,
     pub delivery: Option<String>,
+    pub waiting: Option<Waiting>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +39,7 @@ pub fn group(board: &Board) -> Vec<Repo> {
                 subtitle: card.subtitle.clone(),
                 last_line: card.last_line.clone(),
                 delivery: card.detail.delivery.clone(),
+                waiting: card.waiting.clone(),
             };
             match repos.iter_mut().find(|(k, _)| *k == key) {
                 Some((_, repo)) => repo.sessions.push(session),

@@ -61,9 +61,33 @@ pub fn cut(text: &str, max: usize) -> String {
     out
 }
 
+const MARKER_WORD: &str = "kanban-wait";
+
+/// Every `[kanban-wait`, in any ASCII case, with its bracket made full-width
+/// (`［`) so it no longer reads as a wait marker.
+pub fn defuse_marker(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for (at, c) in text.char_indices() {
+        let rest = &text.as_bytes()[at + c.len_utf8()..];
+        let marks = c == '['
+            && rest.len() >= MARKER_WORD.len()
+            && rest[..MARKER_WORD.len()].eq_ignore_ascii_case(MARKER_WORD.as_bytes());
+        out.push(if marks { '［' } else { c });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn defuse_marker_changes_only_the_bracket_of_a_marker() {
+        assert_eq!(
+            defuse_marker("a [Kanban-Wait s w] [kanban] [kanban-wai"),
+            "a ［Kanban-Wait s w] [kanban] [kanban-wai"
+        );
+    }
 
     #[test]
     fn cut_keeps_text_that_fits_and_marks_what_it_drops() {

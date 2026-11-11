@@ -1127,6 +1127,17 @@ describe('kanban details and requests', () => {
     expect(rec().decision).toBeNull()
   })
 
+  test('a WrapUp offering more options than kept counts every option in its lengths', async ($, on) => {
+    const w = world(on)
+    const actions = ['a', 'bb', 'c', 'd', 'eee'].map(label => ({ label }))
+
+    await $.tool.call({ tool: 'WrapUp', recap: 'r', ask: 'Pick one', blocked: true, actions } as never)
+
+    const decision = (stored(w) as Record<string, unknown>).decision as { options: string[]; orig_len: unknown }
+    expect(decision.options).toEqual(['a', 'bb', 'c', 'd'])
+    expect(decision.orig_len).toEqual({ ask: 8, options: [1, 2, 1, 1, 3] })
+  })
+
   test('a WrapUp without a question leaves no decision', async ($, on) => {
     const w = world(on)
 
@@ -1237,6 +1248,26 @@ describe('kanban details and requests', () => {
     const r = await $.tool.call({ tool: 'mcp__atelier__kanban_board' } as never)
     const out = JSON.parse((r as { result: string }).result) as Record<string, unknown>
     expect(out).toEqual({ repos: [{ label: 'api', root: '/w/api', sessions: [] }] })
+  })
+
+  test('the board tool passes its columns to the board and its waits back as they came', async ($, on) => {
+    const wait = { kind: 'permission', id: 'p-1', proxyable: true, blocked: [] }
+    const repos = [{ label: 'api', root: '/w/api', sessions: [{ session_id: 'w', column: 'needs_input', wait }] }]
+    const w = world(on, routes({ board: { ...DETAIL_BOARD, repos } }))
+
+    const r = await $.tool.call({ tool: 'mcp__atelier__kanban_board', column: ['needs_input', 'idle'] } as never)
+
+    const argv = w.runs.find(run => run.argv[2] === 'board')?.argv ?? []
+    expect(argv.slice(-4)).toEqual(['--column', 'needs_input', '--column', 'idle'])
+    expect(JSON.parse((r as { result: string }).result)).toEqual({ repos })
+  })
+
+  test('the board tool reports the error the board gives for an unknown column', async ($, on) => {
+    world(on, routes({ board: { error: '모르는 컬럼이에요: done' } }))
+
+    const r = await $.tool.call({ tool: 'mcp__atelier__kanban_board', column: ['done'] } as never)
+
+    expect(JSON.parse((r as { result: string }).result)).toEqual({ error: '모르는 컬럼이에요: done' })
   })
 
   for (const surface of ['terminal', 'desktop'] as const) {
