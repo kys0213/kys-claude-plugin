@@ -1,6 +1,6 @@
 //! How the board's columns fit a pane of a given width.
 
-const COLUMN_MIN_WIDTH: u32 = 22;
+const COLUMN_MIN_WIDTH: u32 = 26;
 const COLUMN_GAP: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,7 +27,7 @@ pub struct Layout {
 
 pub fn fit(width: u32, columns: u32) -> Layout {
     let gaps = columns.saturating_sub(1) * COLUMN_GAP;
-    if columns > 0 && width >= columns * COLUMN_MIN_WIDTH {
+    if columns > 0 && width >= columns * COLUMN_MIN_WIDTH + gaps {
         Layout {
             direction: Direction::Row,
             column_width: (width - gaps) / columns,

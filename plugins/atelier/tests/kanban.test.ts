@@ -1157,22 +1157,69 @@ describe('kanban details and requests', () => {
     await after.unmount()
   })
 
-  test('in a stacked pane an opened card takes the board’s place until going back', async ($, on) => {
-    world(on, routes({ board: { ...DETAIL_BOARD, layout: { direction: 'column', column_width: 40, column_gap: 1 } } }))
+  for (const [label, layout, columns] of [
+    ['a side-by-side', { direction: 'row', column_width: 24, column_gap: 1 }, 100],
+    ['a stacked', { direction: 'column', column_width: 40, column_gap: 1 }, 40],
+  ] as const) {
+    test(`in ${label} pane an opened card takes the board’s place until going back to it`, async ($, on) => {
+      world(on, routes({ board: { ...DETAIL_BOARD, layout } }))
 
+      await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+      const pane = { ...PANE, props: { ...PANE.props, bodyColumns: columns }, surface: 'terminal' as const }
+      const ui = await $.ui.mount(pane)
+
+      await ui.press({ key: 'card:busy' })
+      await ui.unmount()
+      const opened = await $.ui.mount(pane)
+      expect(await opened.find({ type: 'Text', text: /쉬는 중 2/ })).toBeUndefined()
+      expect((await opened.find({ type: 'Text', text: /Ship it/ }))?.text).toBe('Ship it')
+      expect((await opened.find({ key: 'detail:busy:back' }))?.text).toBe('← 보드')
+      await opened.press({ key: 'detail:busy:back' })
+      await opened.unmount()
+      const back = await $.ui.mount(pane)
+      expect((await back.find({ type: 'Text', text: /쉬는 중 2/ }))?.text).toBe('쉬는 중 2')
+      expect(await back.find({ key: 'detail:busy:back' })).toBeUndefined()
+      await back.unmount()
+    })
+  }
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    test(`each card is drawn as its own bordered box on ${surface}`, async ($, on) => {
+      world(on, routes({ board: DETAIL_BOARD }))
+
+      await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+      const ui = await $.ui.mount({ ...PANE, surface })
+
+      for (const id of ['busy', 'calm', 'wrap']) {
+        const box = await ui.find({ type: 'Box', key: id })
+        expect(box?.props.borderStyle).toBe('round')
+        expect(box?.props.borderDimColor).toBe(true)
+      }
+      await ui.unmount()
+    })
+  }
+
+  test('an opened card that leaves the board takes the pane back to the board', async ($, on) => {
+    const board = { value: DETAIL_BOARD as typeof DETAIL_BOARD }
+    const w = world(on, argv => routes({ board: board.value })(argv))
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
     await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
-    const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 40 }, surface: 'terminal' })
-
-    const narrow = { ...PANE, props: { ...PANE.props, bodyColumns: 40 }, surface: 'terminal' as const }
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     await ui.press({ key: 'card:busy' })
     await ui.unmount()
-    const opened = await $.ui.mount(narrow)
-    expect(await opened.find({ type: 'Text', text: /쉬는 중 2/ })).toBeUndefined()
-    await opened.press({ key: 'detail:busy:back' })
-    await opened.unmount()
-    const back = await $.ui.mount(narrow)
-    expect((await back.find({ type: 'Text', text: /쉬는 중 2/ }))?.text).toBe('쉬는 중 2')
-    await back.unmount()
+
+    board.value = {
+      ...DETAIL_BOARD,
+      columns: DETAIL_BOARD.columns.map(c => (c.id === 'working' ? { ...c, heading: '작업 중 0', cards: [] } : c)),
+    }
+    w.shown.value = true
+    await w.clock.advance(2_000)
+
+    const after = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect((await after.find({ type: 'Text', text: /쉬는 중 2/ }))?.text).toBe('쉬는 중 2')
+    expect(await after.find({ key: 'detail:busy:back' })).toBeUndefined()
+    await after.unmount()
   })
 })
 
