@@ -3,6 +3,12 @@ import type { EngineInterface } from 'claude-code'
 import { cli } from './kanban-cli'
 
 export const KEY_PREFIX = 'kanban:session:'
+
+/** The store keys under `prefix` that belong to session `sessionId`. */
+export function sessionKeysOf(keys: readonly string[], prefix: string, sessionId: string): string[] {
+  return keys.filter(k => k.startsWith(`${prefix}${sessionId}:`))
+}
+
 /** Bounds what one session keeps in the store every session shares (4 MiB in all). */
 const MAX_EVENTS = 8
 export const MAX_FIELD_CHARS = 200

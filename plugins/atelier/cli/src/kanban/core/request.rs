@@ -46,11 +46,11 @@ impl Nonce {
         &self.0
     }
 
-    /// `Some(None)` when the request names none, `None` when it names one unreadably.
-    fn read(value: &Value) -> Option<Option<Nonce>> {
+    fn read(value: &Value) -> Result<Option<Nonce>, String> {
         match value.get("nonce") {
-            None => Some(None),
-            Some(raw) => Nonce::parse(raw.as_str()?).ok().map(Some),
+            None => Ok(None),
+            Some(Value::String(raw)) => Nonce::parse(raw).map(Some),
+            Some(other) => Err(format!("nonce `{other}` 는 문자열이 아니에요")),
         }
     }
 }
@@ -132,7 +132,6 @@ impl PaneNonces {
     }
 }
 
-/// Puts `nonce` beside the other fields when there is one.
 fn with_nonce(mut value: Value, nonce: Option<&Nonce>) -> Value {
     if let (Some(nonce), Some(fields)) = (nonce, value.as_object_mut()) {
         fields.insert("nonce".to_string(), json!(nonce.as_str()));
@@ -437,21 +436,21 @@ impl Request {
                     None => Sender::Pane,
                     Some(_) => from()?,
                 },
-                Nonce::read(&value)?,
+                Nonce::read(&value).ok()?,
             )
             .ok(),
             RequestKind::Answer => Request::answer(
                 value.get("tool_use_id")?.as_str()?,
                 &strings(value.get("answers")?)?,
                 from()?,
-                Nonce::read(&value)?,
+                Nonce::read(&value).ok()?,
             )
             .ok(),
             RequestKind::Decide => Request::decide(
                 value.get("decision_at")?.as_str()?,
                 value.get("text")?.as_str()?,
                 from()?,
-                Nonce::read(&value)?,
+                Nonce::read(&value).ok()?,
             )
             .ok(),
         }

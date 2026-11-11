@@ -5,7 +5,7 @@ import { type Via, queuePaneAnswer } from './kanban-nonce'
 import { type AskQuestion, MAX_FIELD_CHARS } from './kanban-record'
 
 /** The store key prefix of answers left in the store; `deliverAnswers` takes them beside the inbox. */
-const ANSWER_PREFIX = 'kanban:answer:'
+export const ANSWER_PREFIX = 'kanban:answer:'
 const MAX_QUESTION_CHARS = 1_000
 
 export type ToolQuestion = {
@@ -60,10 +60,6 @@ export function askOf(questions: readonly ToolQuestion[], at: number) {
 
 export function answerKey(sessionId: string, toolUseId: string): string {
   return `${ANSWER_PREFIX}${sessionId}:${toolUseId}`
-}
-
-export function answerKeysOf(keys: readonly string[], sessionId: string): string[] {
-  return keys.filter(k => k.startsWith(`${ANSWER_PREFIX}${sessionId}:`))
 }
 
 export function awaitAnswer(s: AskState, toolUseId: string, questions: readonly ToolQuestion[]): Promise<KanbanAnswer> {

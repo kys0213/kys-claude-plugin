@@ -1,8 +1,9 @@
 import type { EngineInterface } from 'claude-code'
 
 import { queueRequest } from './kanban-cli'
+import { sessionKeysOf } from './kanban-record'
 
-const NONCE_PREFIX = 'kanban:nonce:'
+export const NONCE_PREFIX = 'kanban:nonce:'
 /** Bounds the nonces of answers no session took, in the store every session shares. */
 const MAX_NONCES = 32
 
@@ -16,10 +17,6 @@ type LeftNonce = { kind: string; nonce: string }
 
 function nonceKey(sessionId: string, kind: string, nonce: string): string {
   return `${NONCE_PREFIX}${sessionId}:${kind}:${nonce}`
-}
-
-export function nonceKeysOf(keys: readonly string[], sessionId: string): string[] {
-  return keys.filter(k => k.startsWith(`${NONCE_PREFIX}${sessionId}:`))
 }
 
 function isLeftNonce(value: unknown): value is LeftNonce {
@@ -74,7 +71,7 @@ export async function leftNonces($: EngineInterface, self: string): Promise<Left
   try {
     const nonces: LeftNonce[] = []
 
-    for (const key of nonceKeysOf(await $.store.keys(), self)) {
+    for (const key of sessionKeysOf(await $.store.keys(), NONCE_PREFIX, self)) {
       const value = await $.store.get(key)
 
       if (isLeftNonce(value)) {

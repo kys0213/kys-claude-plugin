@@ -1,10 +1,10 @@
 import type { EngineInterface, On } from 'claude-code'
 
 import {
+  ANSWER_PREFIX,
   type AskCard,
   type AskState,
   answerKey,
-  answerKeysOf,
   answersByQuestion,
   askBlocks,
   askOf,
@@ -16,7 +16,7 @@ import {
 import { type DetailCard, type DetailState, detailBlock, newDetailState, pruneDetail, toggleSelected } from './kanban-detail'
 import { CLI_MISSING, cli, runKanban } from './kanban-cli'
 import { type InboxState, awaitPermit, deliverRequests, endPermit, findInbox } from './kanban-inbox'
-import { type Via, nonceKeysOf } from './kanban-nonce'
+import { NONCE_PREFIX, type Via } from './kanban-nonce'
 import {
   type Activity,
   KEY_PREFIX,
@@ -27,6 +27,7 @@ import {
   record,
   recordPrompt,
   rerun,
+  sessionKeysOf,
 } from './kanban-record'
 
 const PANE = 'kanban'
@@ -171,7 +172,9 @@ async function runBoard($: EngineInterface, sessions: unknown[], width: number, 
 
 async function dropExpired($: EngineInterface, keys: string[], ids: string[]): Promise<void> {
   for (const id of ids) {
-    for (const key of [KEY_PREFIX + id, ...answerKeysOf(keys, id), ...nonceKeysOf(keys, id)]) {
+    const owned = [KEY_PREFIX + id, ...sessionKeysOf(keys, ANSWER_PREFIX, id), ...sessionKeysOf(keys, NONCE_PREFIX, id)]
+
+    for (const key of owned) {
       await $.store.delete(key)
     }
 
