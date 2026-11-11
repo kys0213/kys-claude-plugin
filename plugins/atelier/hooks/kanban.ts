@@ -558,7 +558,11 @@ export function registerKanban(on: On): void {
     } finally {
       s.waiters.delete(id)
       await $.store.delete(answerKey(await $.session.id(), id))
-      await record($, s, { name: answered ? 'kanban.answer' : null, update: base => withoutAsk(base, id) })
+      await record($, s, {
+        name: answered ? 'kanban.answer' : null,
+        byAgent: e.agentId !== undefined,
+        update: base => withoutAsk(base, id),
+      })
     }
   })
 
@@ -571,6 +575,7 @@ export function registerKanban(on: On): void {
     await record($, s, {
       name: 'classic.PermissionRequest',
       detail: e.tool_name,
+      byAgent: e.agent_id !== undefined,
       update: () => ({
         ...modeOf(e),
         ...(isQuestion
@@ -589,7 +594,7 @@ export function registerKanban(on: On): void {
       return next(e)
     }
 
-    await record($, s, { name: 'kanban.answer', update: () => ({ permission: null }) })
+    await record($, s, { name: 'kanban.answer', byAgent: e.agent_id !== undefined, update: () => ({ permission: null }) })
 
     return verdict === 'allow'
       ? { decision: { behavior: 'allow' as const } }
@@ -607,6 +612,7 @@ export function registerKanban(on: On): void {
     await record($, s, {
       name: 'classic.PostToolUse',
       detail: e.tool_name,
+      byAgent: e.agent_id !== undefined,
       update: () => ({ ...modeOf(e), permission: null }),
     })
 
@@ -615,7 +621,12 @@ export function registerKanban(on: On): void {
 
   on('classic.PostToolUseFailure', async ($, e, next) => {
     endPermit(s)
-    await record($, s, { name: 'classic.PostToolUseFailure', detail: e.tool_name, update: () => ({ permission: null }) })
+    await record($, s, {
+      name: 'classic.PostToolUseFailure',
+      detail: e.tool_name,
+      byAgent: e.agent_id !== undefined,
+      update: () => ({ permission: null }),
+    })
 
     return next(e)
   })

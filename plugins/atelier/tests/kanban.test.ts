@@ -361,6 +361,23 @@ describe('kanban recording', () => {
       ['classic.Notification', 'idle_prompt'],
       ['classic.PostToolUse', 'Bash'],
     ])
+    expect(stored(w).events.some(e => 'agent' in e)).toBe(false)
+  })
+
+  test('tool events a subagent raises are marked as the agent’s', async ($, on) => {
+    const w = world(on)
+
+    await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {}, agent_id: 'a1' } as never)
+    await $.classic.PostToolUse({ tool_name: 'Bash', tool_input: {}, tool_response: {}, tool_use_id: 'u1', agent_id: 'a1' } as never)
+    await $.classic.PostToolUseFailure({ tool_name: 'Read', tool_input: {}, tool_use_id: 'u2', error: 'x', agent_id: 'a1' } as never)
+    await $.classic.PostToolUse({ tool_name: 'Edit', tool_input: {}, tool_response: {}, tool_use_id: 'u3' } as never)
+
+    expect(stored(w).events.map(e => [e.name, e.detail, e.agent ?? false])).toEqual([
+      ['classic.PermissionRequest', 'Bash', true],
+      ['classic.PostToolUse', 'Bash', true],
+      ['classic.PostToolUseFailure', 'Read', true],
+      ['classic.PostToolUse', 'Edit', false],
+    ])
   })
 
   test('only the newest events are kept', async ($, on) => {

@@ -600,6 +600,19 @@ fn an_event_written_as_a_first_prompt_is_not_the_subtitle() {
 }
 
 #[test]
+fn an_event_set_as_the_session_title_is_not_the_subtitle() {
+    let (_, card) = only(json!([session_with(
+        "s",
+        json!([event("turn.complete", None, 5 * SEC)]),
+        json!({
+            "title": "<task-notification> <task-id>a0258</task-id>",
+            "first_prompt": "Fix CORS",
+        })
+    )]));
+    assert_eq!(card["subtitle"], "Fix CORS");
+}
+
+#[test]
 fn a_record_without_prompts_still_shows_its_last_prompt() {
     let (_, card) = only(json!([session_with(
         "s",

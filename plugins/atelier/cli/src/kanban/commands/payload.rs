@@ -236,7 +236,16 @@ fn parse_event(value: &Value) -> Option<Event> {
         name: value.get("name")?.as_str()?.to_string(),
         detail: nullable_string(value, "detail")?,
         at: value.get("at")?.as_u64()?,
+        by_agent: optional_bool(value, "agent")?,
     })
+}
+
+fn optional_bool(value: &Value, key: &str) -> Option<bool> {
+    match value.get(key) {
+        None | Some(Value::Null) => Some(false),
+        Some(Value::Bool(b)) => Some(*b),
+        Some(_) => None,
+    }
 }
 
 fn optional_object<'a>(value: &'a Value, key: &str) -> Option<Option<&'a Map<String, Value>>> {
