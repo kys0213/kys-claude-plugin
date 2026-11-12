@@ -1,13 +1,14 @@
 //! The ledger commands: record what a mod saw of one answer, list entries,
-//! judge a key's precedents, revoke a proxy answer, replay the shadow
-//! comparisons, prune old ones. Each answers one JSON value.
+//! count how a period's entries were decided, judge a key's precedents,
+//! revoke a proxy answer, replay the shadow comparisons, prune old ones.
+//! Each answers one JSON value.
 
 use crate::kanban::commands::ledger_store::{read_book, LedgerStore};
 use crate::kanban::commands::payload::{parse_bind_facts, parse_ledger_facts};
 use crate::kanban::core::allowlist::RealPaths;
 use crate::kanban::core::ledger::{
-    entries, month_of, permission_call, prune, select, DecidedBy, Entry, EntryKind, EntryVia,
-    ListQuery, Pruned, DEFAULT_LIMIT, MAX_AGE_MS, MAX_BYTES, MAX_LIMIT,
+    entries, month_of, permission_call, prune, select, summarize, DecidedBy, Entry, EntryKind,
+    EntryVia, ListQuery, Pruned, DEFAULT_LIMIT, MAX_AGE_MS, MAX_BYTES, MAX_LIMIT,
 };
 use crate::kanban::core::precedent::{judge, revoke, Auth, Book, DecisionKey};
 use crate::kanban::core::relay::answered;
@@ -140,17 +141,34 @@ impl KanbanLedger<'_> {
         )
     }
 
+    fn read_entries(&self) -> Result<Vec<Entry>, String> {
+        Ok(self
+            .store
+            .read()?
+            .iter()
+            .flat_map(|month| &month.lines)
+            .filter_map(|line| Entry::parse(line))
+            .collect())
+    }
+
     pub fn list(&self, args: ListArgs) -> Value {
         answer((|| {
             let query = args.query()?;
-            let read: Vec<Entry> = self
-                .store
-                .read()?
-                .iter()
-                .flat_map(|month| &month.lines)
-                .filter_map(|line| Entry::parse(line))
-                .collect();
-            Ok(json!({ "entries": select(read, &query) }))
+            Ok(json!({ "entries": select(self.read_entries()?, &query) }))
+        })())
+    }
+
+    pub fn summary(&self, since: u64, until: Option<u64>) -> Value {
+        answer((|| {
+            let s = summarize(&self.read_entries()?, since, until);
+            Ok(json!({
+                "since": since,
+                "until": until,
+                "relayed": { "count": s.relayed, "approved": s.relayed_approved },
+                "proxied": s.proxied,
+                "direct": { "session": s.direct_session, "pane": s.direct_pane },
+                "terminal": s.terminal,
+            }))
         })())
     }
 

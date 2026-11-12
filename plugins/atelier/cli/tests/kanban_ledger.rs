@@ -8,9 +8,9 @@ use tempfile::TempDir;
 mod kanban_support;
 use kanban_support::{
     atelier, chose, color, color_and_size, decision_facts, errored, inbox_answer, inbox_verdict,
-    kanban_in, ledger_dir, permission_facts_with, place_at, question, question_facts_with, ran,
-    record_facts, run_record, session_post, spawn_kanban, stdout_json, typed_decision,
-    typed_decision_from, with, DAY, NOW, REPO,
+    kanban_command, kanban_in, ledger_dir, permission_facts_with, place_at, question,
+    question_facts_with, ran, record_facts, run_record, session_post, spawn_kanban, stdout_json,
+    typed_decision, typed_decision_from, with, DAY, NOW, REPO,
 };
 
 fn list(config: &Path, args: &[&str]) -> Vec<Value> {
@@ -796,6 +796,146 @@ fn list_refuses_what_it_does_not_know() {
         let out = kanban_in(dir.path(), args);
         assert!(out["error"].is_string(), "{args:?}: {out}");
     }
+}
+
+fn summary(config: &Path, args: &[&str]) -> Value {
+    let mut full = vec!["ledger", "summary"];
+    full.extend_from_slice(args);
+    kanban_in(config, &full)
+}
+
+fn counts(out: &Value) -> Value {
+    json!({
+        "relayed": out["relayed"],
+        "proxied": out["proxied"],
+        "direct": out["direct"],
+        "terminal": out["terminal"],
+    })
+}
+
+fn zero() -> Value {
+    json!({
+        "relayed": { "count": 0, "approved": 0 },
+        "proxied": 0,
+        "direct": { "session": 0, "pane": 0 },
+        "terminal": 0,
+    })
+}
+
+#[test]
+fn summary_counts_each_way_an_answer_was_decided() {
+    let dir = TempDir::new().unwrap();
+    record_choice(dir.path(), NOW, "Red");
+    record_facts(
+        dir.path(),
+        &permission_facts(NOW + 1, "git status", errored()),
+    );
+    record_facts(
+        dir.path(),
+        &question_facts(NOW + 2, color(), inbox_answer("pane", "Blue")),
+    );
+    record_facts(
+        dir.path(),
+        &question_facts(NOW + 3, color(), inbox_answer("terminal", "Blue")),
+    );
+    record_facts(
+        dir.path(),
+        &permission_facts(NOW + 4, "git status", inbox_verdict("agent", "allow")),
+    );
+
+    let out = summary(dir.path(), &["--since", "0"]);
+
+    assert_eq!(
+        counts(&out),
+        json!({
+            "relayed": { "count": 0, "approved": 0 },
+            "proxied": 1,
+            "direct": { "session": 2, "pane": 1 },
+            "terminal": 1,
+        })
+    );
+}
+
+#[test]
+fn summary_leaves_out_answers_no_one_is_known_to_have_decided() {
+    let dir = TempDir::new().unwrap();
+    record_facts(
+        dir.path(),
+        &question_facts(
+            NOW,
+            color(),
+            with(chose(json!(["Red"])), json!({ "afk_timeout_ms": 60_000 })),
+        ),
+    );
+    record_facts(
+        dir.path(),
+        &decision_facts(NOW + 1, typed_decision_from("초안대로 진행", "sdk")),
+    );
+
+    assert_eq!(counts(&summary(dir.path(), &["--since", "0"])), zero());
+}
+
+#[test]
+fn summary_counts_the_same_period_list_keeps() {
+    let dir = TempDir::new().unwrap();
+    for at in [NOW - 1, NOW, NOW + 1, NOW + 2] {
+        record_choice(dir.path(), at, "Red");
+    }
+    let since = NOW.to_string();
+    let until = (NOW + 1).to_string();
+
+    for args in [
+        vec!["--since", since.as_str()],
+        vec!["--since", since.as_str(), "--until", until.as_str()],
+    ] {
+        let out = summary(dir.path(), &args);
+        let mut listed = args.clone();
+        listed.extend(["--limit", "500"]);
+
+        assert_eq!(
+            out["direct"]["session"],
+            list(dir.path(), &listed).len(),
+            "{args:?}"
+        );
+    }
+    assert_eq!(
+        summary(dir.path(), &["--since", &since])["direct"]["session"],
+        3
+    );
+    assert_eq!(
+        summary(dir.path(), &["--since", &since, "--until", &until])["direct"]["session"],
+        2
+    );
+}
+
+#[test]
+fn summary_names_the_period_it_counted() {
+    let dir = TempDir::new().unwrap();
+
+    assert_eq!(summary(dir.path(), &["--since", "5"])["since"], 5);
+    assert_eq!(summary(dir.path(), &["--since", "5"])["until"], Value::Null);
+    assert_eq!(
+        summary(dir.path(), &["--since", "5", "--until", "9"])["until"],
+        9
+    );
+}
+
+#[test]
+fn summary_of_an_empty_ledger_counts_nothing() {
+    let dir = TempDir::new().unwrap();
+
+    assert_eq!(counts(&summary(dir.path(), &["--since", "0"])), zero());
+}
+
+#[test]
+fn summary_wants_the_start_of_its_period() {
+    let dir = TempDir::new().unwrap();
+
+    kanban_command(dir.path())
+        .args(["ledger", "summary"])
+        .assert()
+        .stdout("")
+        .stderr(predicates::str::contains("--since"));
 }
 
 #[test]

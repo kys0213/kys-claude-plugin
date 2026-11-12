@@ -800,6 +800,48 @@ pub fn select(entries: Vec<Entry>, query: &ListQuery) -> Vec<Entry> {
     kept
 }
 
+/// How the entries of a period were decided.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Summary {
+    pub relayed: usize,
+    pub relayed_approved: usize,
+    pub proxied: usize,
+    pub direct_session: usize,
+    pub direct_pane: usize,
+    pub terminal: usize,
+}
+
+impl Summary {
+    fn add(&mut self, entry: &Entry) {
+        if entry.target_session.is_some() {
+            self.relayed += 1;
+            self.relayed_approved += usize::from(entry.approved);
+            return;
+        }
+        match (entry.decided_by, entry.via) {
+            (Some(DecidedBy::Proxy), _) => self.proxied += 1,
+            (Some(DecidedBy::Human), EntryVia::Session) => self.direct_session += 1,
+            (Some(DecidedBy::Human), EntryVia::Pane) => self.direct_pane += 1,
+            (_, EntryVia::Terminal) => self.terminal += 1,
+            (Some(DecidedBy::Human), EntryVia::Agent) | (None, _) => {}
+        }
+    }
+}
+
+/// The summary of the entries `ledger list` keeps from `since` up to `until`.
+pub fn summarize(entries: &[Entry], since: u64, until: Option<u64>) -> Summary {
+    let period = ListQuery {
+        since: Some(since),
+        until,
+        ..ListQuery::default()
+    };
+    let mut summary = Summary::default();
+    for entry in entries.iter().filter(|e| period.keeps(e)) {
+        summary.add(entry);
+    }
+    summary
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -193,6 +193,15 @@ pub enum LedgerCommand {
     Bind,
     /// Entries, newest first
     List(Box<ListArgs>),
+    /// How the entries `list` keeps for a period were decided, counted
+    Summary {
+        /// Counted from this time on, unix milliseconds
+        #[arg(long)]
+        since: u64,
+        /// Counted up to this time, unix milliseconds
+        #[arg(long)]
+        until: Option<u64>,
+    },
     /// Whether a decision key's precedents let the main agent answer for it
     Match {
         #[arg(long)]
@@ -763,6 +772,7 @@ fn run_ledger(command: LedgerCommand) -> Value {
         LedgerCommand::Record => ledger.record(&read_stdin_raw()),
         LedgerCommand::Bind => KanbanLedger::bind(&read_stdin_raw()),
         LedgerCommand::List(args) => ledger.list(*args),
+        LedgerCommand::Summary { since, until } => ledger.summary(since, until),
         LedgerCommand::Match { key, now } => ledger.matched(&key, now),
         LedgerCommand::Revoke { entry, reason, now } => ledger.revoke(&entry, &reason, now),
         LedgerCommand::Stats { now } => ledger.stats(now),

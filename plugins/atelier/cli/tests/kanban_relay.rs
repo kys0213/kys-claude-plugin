@@ -812,6 +812,22 @@ fn a_question_asked_with_no_recommendation_still_counts_its_first_option_as_one(
 }
 
 #[test]
+fn summary_counts_each_relay_once_with_its_approval_and_never_as_a_direct_answer() {
+    let w = World::new(color_worker());
+    let approved = w.relayed(blue_recommended(), &["Blue"], NOW);
+    w.took(&approved, "Blue", NOW + MIN);
+    let framed = w.frame(blue_recommended());
+    w.record_relay(&framed, NOW + 2 * MIN, inbox_answer("pane", "Red"));
+
+    let out = w.kanban(&["ledger", "summary", "--since", "0"]);
+
+    assert_eq!(out["relayed"], json!({ "count": 2, "approved": 1 }));
+    assert_eq!(out["direct"], json!({ "session": 0, "pane": 0 }));
+    assert_eq!(out["proxied"], 0);
+    assert_eq!(out["terminal"], 0);
+}
+
+#[test]
 fn an_approved_relay_counts_as_an_approved_recommendation_for_its_key() {
     let w = World::new(color_worker());
     let questions = blue_recommended();
