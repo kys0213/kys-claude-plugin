@@ -152,7 +152,7 @@ fn test_normalization_preserves_core_content() {
 }
 
 #[test]
-fn test_normalization_empty_after_stripping() {
+fn test_normalization_keeps_suffix_only_prompts_non_empty() {
     let only_suffixes = vec!["해줘", "해주세요", "하세요"];
     let miner = SuffixMiner::default();
     let suffixes = miner.mine(&only_suffixes);
@@ -193,7 +193,7 @@ fn test_clustering_similar_prompts_group_together() {
 }
 
 #[test]
-fn test_clustering_different_topics_separate() {
+fn test_clustering_mixed_topics_finds_a_topic_pattern() {
     let entries = vec![
         make_entry("타입을 명시해줘", 1000),
         make_entry("타입을 명시해주세요", 2000),
@@ -225,7 +225,7 @@ fn test_clustering_different_topics_separate() {
 }
 
 #[test]
-fn test_type_classification_directive() {
+fn test_cluster_detected_for_directive_prompts() {
     let entries = vec![
         make_entry("항상 타입을 명시해줘", 1000),
         make_entry("반드시 타입을 명시해주세요", 2000),
@@ -256,7 +256,7 @@ fn test_type_classification_directive() {
 }
 
 #[test]
-fn test_type_classification_convention() {
+fn test_cluster_detected_for_convention_prompts() {
     let entries = vec![
         make_entry("camelCase로 작성해줘", 1000),
         make_entry("camelCase 사용해주세요", 2000),
@@ -287,7 +287,7 @@ fn test_type_classification_convention() {
 }
 
 #[test]
-fn test_type_classification_preference() {
+fn test_cluster_detected_for_preference_prompts() {
     let entries = vec![
         make_entry("async/await 선호해요", 1000),
         make_entry("async/await 쓰는 게 좋아요", 2000),
@@ -318,7 +318,7 @@ fn test_type_classification_preference() {
 }
 
 #[test]
-fn test_type_classification_correction() {
+fn test_correction_prompts_counted_or_patterns_non_empty() {
     let entries = vec![
         make_entry("아니야, 타입을 명시해야 해", 1000),
         make_entry("아니야 에러 처리 필요해", 2000),
@@ -388,7 +388,7 @@ fn test_full_pipeline_korean_prompts() {
 }
 
 #[test]
-fn test_full_pipeline_with_bm25_ranking() {
+fn test_full_pipeline_bm25_scores_non_negative() {
     let entries = vec![
         make_entry("타입을 명시해줘", 1000),
         make_entry("타입을 명시해주세요", 2000),
@@ -525,7 +525,7 @@ fn test_full_pipeline_respects_max_patterns() {
 }
 
 #[test]
-fn test_depth_narrow_produces_results() {
+fn test_depth_narrow_counts_all_entries() {
     let entries = vec![
         make_entry("타입을 명시해줘", 1000),
         make_entry("타입을 명시해주세요", 2000),
