@@ -1,4 +1,5 @@
 pub mod check;
+pub mod cli;
 pub mod install;
 pub mod restore;
 pub mod uninstall;
