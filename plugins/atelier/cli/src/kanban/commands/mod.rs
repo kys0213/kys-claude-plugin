@@ -15,9 +15,7 @@ pub mod records;
 pub mod requests;
 pub mod spawn;
 
-pub use self::args::{
-    Cli, Commands, DelegateCommandArgs, InboxCommand, LedgerCommand, ProofArgs, RequestCommand,
-};
+use self::args::{Cli, Commands, DelegateCommandArgs, InboxCommand, LedgerCommand, RequestCommand};
 use crate::kanban::commands::delegate::{
     attach_json, delegate_json, status_delegate_json, KanbanDelegate, Typed, WakeClock,
 };
