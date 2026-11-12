@@ -67,8 +67,6 @@ pub enum Commands {
     },
 }
 
-/// Resolves the project anchor: the explicit flag first, then the payload cwd,
-/// then the process cwd. Never guesses beyond those documented fallbacks.
 fn resolve_project_dir(flag: Option<String>, payload: &SessionPayload) -> String {
     default_project_dir(
         flag.filter(|d| !d.is_empty())
@@ -76,18 +74,13 @@ fn resolve_project_dir(flag: Option<String>, payload: &SessionPayload) -> String
     )
 }
 
-/// The push check's only stdout write: the Stop hook's block document, or
-/// nothing at all. Exit stays 0 either way — the JSON *is* the block signal.
 fn emit_push_check(decision: &PushCheckDecision) {
     if let Some(json) = render_block_json(decision) {
         println!("{json}");
     }
 }
 
-/// Parses `argv` (including the leading program name) with the session clap
-/// surface and runs the selected command. Always returns 0 — a parse failure
-/// prints clap's own message and still exits 0, so no argv this binary does
-/// understand can turn a Stop into a block.
+/// `argv` includes the leading program name.
 pub fn run_from<I, T>(argv: I) -> i32
 where
     I: IntoIterator<Item = T>,
@@ -104,10 +97,6 @@ where
     }
 }
 
-/// Runs a parsed session CLI. Always returns 0: a Stop hook's exit 2 means
-/// "block on stderr", so any non-zero return here would turn a crash into a
-/// session that cannot end. `push-check`'s block travels in the stdout
-/// document instead.
 pub fn run(cli: Cli) -> i32 {
     let command = match cli.command {
         Some(c) => c,
