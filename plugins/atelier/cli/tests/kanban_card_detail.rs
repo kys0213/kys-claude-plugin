@@ -259,6 +259,10 @@ fn an_idle_card_shows_what_was_done_just_before() {
         sections(&card),
         [
             (
+                "작업".to_string(),
+                vec!["위치: /work/project-a".to_string()]
+            ),
+            (
                 "직전 요청".to_string(),
                 vec!["Fix the flaky test".to_string()]
             ),
@@ -270,6 +274,136 @@ fn an_idle_card_shows_what_was_done_just_before() {
                 ]
             ),
         ]
+    );
+}
+
+fn prompt(text: &str, origin: &str, ago: u64) -> Value {
+    json!({ "text": text, "origin": origin, "at": NOW - ago })
+}
+
+#[test]
+fn an_idle_detail_opens_with_the_work_and_the_requests_that_led_here() {
+    let card = idle_card(json!({
+        "title": "Test the gateway path guard",
+        "first_prompt": "Test the gateway path guard",
+        "prompts": [
+            prompt("Try a traversal through the REST proxy", "composer", 20 * MIN),
+            prompt("<task-notification>done</task-notification>", "composer", 15 * MIN),
+            prompt("Background check finished", "scheduled", 12 * MIN),
+            prompt("What about %2e%2e?", "bridge", 10 * MIN),
+            prompt("Isn't logging in with the CLI enough?", "composer", 2 * MIN),
+        ],
+        "last_answer": "Yes, the CLI login is in place.",
+        "todos": [
+            { "status": "completed", "active": "Logging in" },
+            { "status": "pending", "active": "Writing the report" },
+        ],
+    }));
+    assert_eq!(
+        sections(&card),
+        [
+            (
+                "작업".to_string(),
+                vec![
+                    "Test the gateway path guard".to_string(),
+                    "위치: /work/project-a".to_string()
+                ]
+            ),
+            (
+                "이전 요청".to_string(),
+                vec![
+                    "Try a traversal through the REST proxy · 20m".to_string(),
+                    "What about %2e%2e? · 10m".to_string()
+                ]
+            ),
+            (
+                "직전 요청".to_string(),
+                vec!["Isn't logging in with the CLI enough?".to_string()]
+            ),
+            (
+                "직전 응답".to_string(),
+                vec!["Yes, the CLI login is in place.".to_string()]
+            ),
+            (
+                "할 일".to_string(),
+                vec![
+                    "✓ Logging in".to_string(),
+                    "· Writing the report".to_string()
+                ]
+            ),
+        ]
+    );
+}
+
+#[test]
+fn the_work_falls_back_to_the_first_prompt_and_skips_one_a_request_already_shows() {
+    let fallback = idle_card(json!({
+        "first_prompt": "<system-reminder>worktree</system-reminder> Migrate the users table",
+        "prompts": [prompt("Use an online migration", "composer", MIN)],
+    }));
+    assert_eq!(
+        section(&fallback, "작업"),
+        Some(vec![
+            "Migrate the users table".to_string(),
+            "위치: /work/project-a".to_string()
+        ])
+    );
+
+    let repeated = idle_card(json!({
+        "first_prompt": "Migrate the users table",
+        "prompts": [
+            prompt("Migrate the users table", "composer", 5 * MIN),
+            prompt("Use an online migration", "composer", MIN),
+        ],
+    }));
+    assert_eq!(
+        section(&repeated, "작업"),
+        Some(vec!["위치: /work/project-a".to_string()])
+    );
+    assert_eq!(
+        section(&repeated, "이전 요청"),
+        Some(vec!["Migrate the users table · 5m".to_string()])
+    );
+}
+
+#[test]
+fn every_column_opens_with_the_work() {
+    let extra = json!({ "title": "Ship 1.2", "turn_id": "t-1" });
+    let waiting = session_with(
+        "p",
+        json!([event("classic.PermissionRequest", Some("Bash"), 10 * SEC)]),
+        extra.clone(),
+    );
+    let working = session_with(
+        "w",
+        json!([event("turn.start", None, 5 * SEC)]),
+        extra.clone(),
+    );
+    let mut stale = session_with("x", json!([event("turn.start", None, 10 * MIN)]), extra);
+    stale["heartbeat_at"] = json!(NOW - 10 * MIN);
+    for record in [waiting, working, stale] {
+        let (column, card) = only(json!([record]));
+        assert_eq!(
+            sections(&card).first().map(|(title, _)| title.as_str()),
+            Some("작업"),
+            "{column}"
+        );
+    }
+}
+
+#[test]
+fn a_stale_detail_keeps_the_todo_list() {
+    let mut record = session_with(
+        "s",
+        json!([event("turn.start", None, 10 * MIN)]),
+        json!({ "todos": [{ "status": "in_progress", "active": "Running tests" }] }),
+    );
+    record["heartbeat_at"] = json!(NOW - 10 * MIN);
+    let (column, card) = only(json!([record]));
+    assert_eq!(column, "stale");
+    assert_eq!(
+        section(&card, "할 일"),
+        Some(vec!["▸ Running tests".to_string()])
     );
 }
 
@@ -296,6 +430,10 @@ fn a_working_card_shows_the_request_the_whole_todo_list_and_the_recent_tools() {
     assert_eq!(
         sections(&card),
         [
+            (
+                "작업".to_string(),
+                vec!["위치: /work/project-a".to_string()]
+            ),
             ("요청".to_string(), vec!["Ship the release".to_string()]),
             (
                 "할 일".to_string(),
@@ -375,6 +513,10 @@ fn a_permission_wait_shows_what_it_asks_for_and_the_reply_before_it() {
     assert_eq!(
         sections(&card),
         [
+            (
+                "작업".to_string(),
+                vec!["위치: /work/project-a".to_string()]
+            ),
             (
                 "기다리는 것".to_string(),
                 vec!["Bash: npm publish".to_string()]

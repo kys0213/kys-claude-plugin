@@ -43,13 +43,17 @@ pub fn latest_person_prompt<'a>(
     last_prompt: Option<&'a str>,
 ) -> Option<&'a str> {
     if !prompts.is_empty() {
-        return prompts
-            .iter()
-            .rev()
-            .find(|p| shows_as_person_prompt(p))
-            .map(|p| p.text.as_str());
+        return person_prompts(prompts).last().map(|p| p.text.as_str());
     }
     last_prompt.filter(|p| !is_wrapped_event(p))
+}
+
+/// The prompts the board shows as a person's, oldest first.
+pub fn person_prompts(prompts: &[PromptFact]) -> Vec<&PromptFact> {
+    prompts
+        .iter()
+        .filter(|p| shows_as_person_prompt(p))
+        .collect()
 }
 
 #[cfg(test)]

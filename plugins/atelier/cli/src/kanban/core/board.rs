@@ -5,7 +5,7 @@ use super::background::{self, AgentFact, Left};
 use super::detail::{self, Decision, Delivery, Detail, DetailFacts, Phase};
 use super::duration::age_label;
 use super::progress::{progress_line, Activity, ProgressFacts, WorkItem};
-use super::prompt::{is_wrapped_event, latest_person_prompt, PromptFact};
+use super::prompt::{is_wrapped_event, latest_person_prompt, person_prompts, PromptFact};
 use super::question::Ask;
 use super::text::{cut, fold};
 
@@ -509,15 +509,33 @@ fn label_of(fact: &SessionFact) -> String {
 
 const SUBTITLE_CHARS: usize = 60;
 
-fn subtitle_of(fact: &SessionFact) -> Option<String> {
-    let folded = [fact.title.as_deref(), fact.first_prompt.as_deref()]
+fn named_work(fact: &SessionFact) -> impl Iterator<Item = &str> {
+    [fact.title.as_deref(), fact.first_prompt.as_deref()]
         .into_iter()
         .flatten()
         .filter(|p| !is_wrapped_event(p))
+}
+
+fn has_text(raw: &str) -> bool {
+    !fold(&detail::clean(raw)).is_empty()
+}
+
+fn subtitle_of(fact: &SessionFact) -> Option<String> {
+    let folded = named_work(fact)
         .chain(person_prompt(fact))
         .map(|s| fold(&detail::clean(s)))
         .find(|s| !s.is_empty())?;
     Some(cut(&folded, SUBTITLE_CHARS))
+}
+
+fn work_of(fact: &SessionFact) -> Option<&str> {
+    named_work(fact).find(|s| has_text(s))
+}
+
+fn earlier_person_prompts(fact: &SessionFact) -> Vec<&PromptFact> {
+    let mut person = person_prompts(&fact.prompts);
+    person.pop();
+    person
 }
 
 fn person_prompt(fact: &SessionFact) -> Option<&str> {
@@ -583,9 +601,13 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
             background: background.as_deref(),
         }),
     };
+    let earlier_prompts = earlier_person_prompts(fact);
     let detail = detail::build(
         phase_of(state.as_ref()),
         &DetailFacts {
+            work: work_of(fact),
+            cwd: &fact.cwd,
+            earlier_prompts: &earlier_prompts,
             last_prompt: person_prompt(fact),
             last_answer: fact.last_answer.as_deref(),
             pending_context: fact.pending_context.as_deref(),
