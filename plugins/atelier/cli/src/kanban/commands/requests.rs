@@ -42,8 +42,6 @@ impl Proof<'_> {
     }
 }
 
-/// What an answer is sent for: the kind of precedents that may vouch for it,
-/// where it goes, and the answers in order.
 struct Sent<'a> {
     proxied: Option<Proxied>,
     target: Target,

@@ -1,10 +1,4 @@
-//! Stdin payloads: `kanban board` takes `{"sessions": [<v1 record>, ...]}`,
-//! `kanban answer` takes `{"questions": [...], "picks": [...]}`, `inbox take`
-//! what the session waits on and the nonces the pane left for it,
-//! `inbox wait-permit` those nonces and the request it waits on, `guard-bash`
-//! the Bash tool's input,
-//! `ledger record` what a mod knows of one answer, `delegate wake` the records
-//! and the delegate's own state. A record this version cannot
+//! Stdin payloads of the kanban subcommands. A record this version cannot
 //! read is dropped here, before the board sees it.
 //!
 //! The field readers answer `None` for a field of the wrong type, which drops

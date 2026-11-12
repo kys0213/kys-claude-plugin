@@ -18,7 +18,7 @@ pub(super) fn resolve_project_dir(project_dir: &str) -> PathBuf {
     resolve_against(&cwd, project_dir)
 }
 
-/// Port of TS `isInsideProjectDir`: true when `file_path` is the project dir
+/// True when `file_path` is the project dir
 /// itself or strictly inside it (no `..` escape, not a sibling prefix match).
 /// Relative `file_path`s are resolved against `project_dir`.
 pub fn is_inside_project_dir(file_path: &str, project_dir: &str) -> bool {
@@ -29,8 +29,8 @@ fn inside_project_dir(project: &Path, file_path: &str) -> bool {
     is_under(project, &resolve_against(project, file_path))
 }
 
-/// Port of TS `isInsideAnyGitRepo`: walks up from the file's directory looking
-/// for a `.git` entry, skipping non-existent leading directories first.
+/// Walks up from the file's directory looking for a `.git` entry, skipping
+/// non-existent leading directories first.
 /// Relative `file_path`s are resolved against `project_dir`, not the process
 /// cwd, so the walk starts inside the project.
 pub fn is_inside_any_git_repo(file_path: &str, project_dir: &str) -> bool {

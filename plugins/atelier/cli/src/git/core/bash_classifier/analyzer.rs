@@ -224,7 +224,6 @@ fn starts_exit(seg: &Segment) -> bool {
         .is_some_and(|w| matches!(w.text.as_str(), "exit" | "return"))
 }
 
-/// `name` or `function name` right before `()`: a function definition.
 fn is_function_head(seg: &Segment) -> bool {
     if !seg.redirs.is_empty() {
         return false;
@@ -380,8 +379,6 @@ impl Analyzer<'_> {
         }
     }
 
-    /// Returns the state change the segment leaves behind for later segments
-    /// of the same shell.
     fn segment(&mut self, seg: &Segment, cwd: &Anchor, env: &Env, depth: usize) -> Option<Effect> {
         self.scan_substitutions(seg, cwd, env, depth);
         for (op, target) in &seg.redirs {
