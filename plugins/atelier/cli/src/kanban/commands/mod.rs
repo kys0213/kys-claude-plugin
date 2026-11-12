@@ -139,8 +139,7 @@ impl<'a> RelayBook<'a> {
     }
 }
 
-/// `relays` lists what a wait may be answered on, for `status`; the board
-/// leaves it out.
+/// `relays` lists what a wait may be answered on.
 struct WaitView<'a> {
     paths: &'a dyn RealPaths,
     relays: Option<&'a RelayBook<'a>>,
