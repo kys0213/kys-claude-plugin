@@ -2,8 +2,9 @@
 //! `$.store` into the board its pane draws, and carries requests between
 //! sessions through their inboxes.
 //!
-//! Every subcommand prints one line of JSON and exits 0; a refused or failed
-//! request prints `{"error": ...}`.
+//! Every run exits 0. A subcommand prints one line of JSON, `{"error": ...}`
+//! for a refused or failed request. Arguments clap cannot take print clap's
+//! own text instead and no JSON: a usage error on stderr, help on stdout.
 
 pub mod commands;
 pub mod core;

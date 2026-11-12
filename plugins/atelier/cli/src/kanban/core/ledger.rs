@@ -828,7 +828,7 @@ impl Summary {
     }
 }
 
-/// The summary of the entries `ledger list` keeps from `since` up to `until`.
+/// An entry at `until` itself is counted too.
 pub fn summarize(entries: &[Entry], since: u64, until: Option<u64>) -> Summary {
     let period = ListQuery {
         since: Some(since),
