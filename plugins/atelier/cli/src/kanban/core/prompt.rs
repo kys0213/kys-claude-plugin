@@ -13,7 +13,7 @@ pub struct PromptFact {
 }
 
 const SHOWN_AS_PERSON: [&str; 4] = ["composer", "bridge", "sdk", "kanban"];
-pub const PERSON_ORIGINS: [&str; 2] = ["composer", "bridge"];
+const PERSON_ORIGINS: [&str; 2] = ["composer", "bridge"];
 
 /// `<name ...>…`: how hosts hand a session events (`<task-notification>`,
 /// `<side-sessions-event>`) through the same door as a typed prompt.
