@@ -321,22 +321,14 @@ fn run_legacy(cli: LegacyArgs) -> Result<()> {
         let db_path = resolve_db_path(None, &project_path)?;
         let sessions_dir = resolve_sessions_dir(&project_path)?;
 
-        if sessions_dir.exists() {
+        let store = if sessions_dir.exists() {
             let store = db::SqliteStore::open(&db_path)?;
             index::run(&store, &sessions_dir)?;
             eprintln!("Index DB: {}", db_path.display());
-
-            return cache::run(
-                &project_path,
-                &depth,
-                cli.threshold,
-                cli.top,
-                cli.decay,
-                &stopwords,
-                &tuning,
-                Some(&store as &dyn db::QueryRepository),
-            );
-        }
+            Some(store)
+        } else {
+            None
+        };
 
         return cache::run(
             &project_path,
@@ -346,7 +338,7 @@ fn run_legacy(cli: LegacyArgs) -> Result<()> {
             cli.decay,
             &stopwords,
             &tuning,
-            None,
+            store.as_ref().map(|s| s as &dyn db::QueryRepository),
         );
     }
 
