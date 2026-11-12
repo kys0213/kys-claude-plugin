@@ -1,8 +1,5 @@
 //! Errors exit 2, which Claude Code reads as "block" from a hook — safe only
 //! while drift commands are not registered as hooks.
-//!
-//! Output is human text, not JSON, and callers parse it line by line — every
-//! rendered line format is a contract.
 
 use crate::drift::commands;
 use crate::drift::commands::DriftDeps;

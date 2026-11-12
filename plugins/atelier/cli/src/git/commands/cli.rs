@@ -1,8 +1,3 @@
-//! Output contract:
-//! - success: pretty-printed JSON of the command `data` on stdout, exit 0.
-//! - command error: `Error: <message>` on stderr, exit 1.
-//! - guard/pr-guard block: reason on stderr, exit 2.
-
 use crate::git::commands;
 use crate::git::commands::guard::{GuardTargetKind, HookPayload};
 use crate::git::commands::hook::{create_hook_command, HookFs};
@@ -70,8 +65,6 @@ pub enum Commands {
     },
 }
 
-/// Kept off `Commands::Guard`: guard's exit 2 is Claude Code's "block", so an
-/// install failure routed through it would read as a denial.
 #[derive(Subcommand)]
 pub enum SetupCommand {
     /// Detect the default branch and register the write/commit guard hooks
@@ -185,8 +178,6 @@ pub fn run(cli: Cli) -> i32 {
                     .collect::<Vec<_>>()
             });
             let project_dir = default_project_dir(project_dir);
-            // Forward the flag as-is; the guard core supplies its own default
-            // (DEFAULT_CREATE_BRANCH_SCRIPT) when this is empty.
             let create_branch_script = create_branch_script.unwrap_or_default();
             // Pin the git service to project_dir so special-state / default-branch
             // detection reflect the project, not the hook's process cwd (worktree /
@@ -211,6 +202,7 @@ pub fn run(cli: Cli) -> i32 {
             guard_exit(commands::guard::run(&deps, &input))
         }
         Commands::PrGuard => {
+            // Hooks already in users' settings.json call `pr-guard`; removing it breaks them.
             let github = create_github_service(None);
             let pr_guard = create_pr_guard_service(&github);
             let payload = HookPayload::parse(&read_stdin_raw());

@@ -107,7 +107,6 @@ impl<'w> Workspace<'w> {
         Ok(())
     }
 
-    /// The selected languages and apps, each checked against the plugin.
     fn selected(&self, selection: &Selection) -> Result<BTreeSet<Group>, String> {
         let mut groups = BTreeSet::new();
         for lang in &selection.langs {
@@ -131,7 +130,6 @@ impl<'w> Workspace<'w> {
         Ok(groups)
     }
 
-    /// The selection, or every installed language and app when it is empty.
     fn selected_or_installed(&self, selection: &Selection) -> Result<BTreeSet<Group>, String> {
         if selection.is_empty() {
             self.require_installed()?;
@@ -228,7 +226,6 @@ impl<'w> Workspace<'w> {
         Ok(judged)
     }
 
-    /// Every copy of the groups, marked for removal.
     fn removals(&self, groups: &BTreeSet<Group>) -> Result<Vec<JudgedRule>, String> {
         let mut judged = Vec::new();
         for group in groups {
@@ -283,8 +280,6 @@ impl<'w> Workspace<'w> {
     }
 }
 
-/// install and update: bring the groups and base in line, then record what
-/// the project now has.
 fn sync(ws: &Workspace, groups: BTreeSet<Group>) -> Result<ApplyReport, String> {
     let groups = with_base(groups);
     let judged = ws.judge(&groups)?;
@@ -338,7 +333,6 @@ fn load_record(
         .map_err(|e| format!("{path}: {e}"))
 }
 
-/// Subdirectory names of `dir`; a missing directory has none.
 fn subdirs(deps: &CodeStyleDeps, dir: &str) -> Result<BTreeSet<String>, String> {
     if !deps.fs.is_dir(dir) {
         return Ok(BTreeSet::new());
@@ -346,7 +340,6 @@ fn subdirs(deps: &CodeStyleDeps, dir: &str) -> Result<BTreeSet<String>, String> 
     Ok(deps.fs.list_dir(dir)?.dirs.into_iter().collect())
 }
 
-/// Rule file names in `dir`; a missing directory holds none.
 fn rule_files(deps: &CodeStyleDeps, dir: &str) -> Result<BTreeSet<String>, String> {
     if !deps.fs.is_dir(dir) {
         return Ok(BTreeSet::new());
