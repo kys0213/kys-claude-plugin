@@ -167,13 +167,7 @@ pub fn run() -> Result<()> {
 }
 
 fn run_index(args: IndexArgs) -> Result<()> {
-    let project_path = match &args.project {
-        Some(p) => p.clone(),
-        None => std::env::current_dir()
-            .context("failed to get current directory")?
-            .to_string_lossy()
-            .to_string(),
-    };
+    let project_path = project_path_or_cwd(args.project)?;
 
     let db_path = resolve_db_path(args.db.as_deref(), &project_path)?;
 
@@ -189,13 +183,7 @@ fn run_index(args: IndexArgs) -> Result<()> {
 }
 
 fn run_query(args: QueryArgs) -> Result<()> {
-    let project_path = match &args.project {
-        Some(p) => p.clone(),
-        None => std::env::current_dir()
-            .context("failed to get current directory")?
-            .to_string_lossy()
-            .to_string(),
-    };
+    let project_path = project_path_or_cwd(args.project)?;
 
     let db_path = resolve_db_path(args.db.as_deref(), &project_path)?;
 
@@ -221,6 +209,16 @@ fn run_query(args: QueryArgs) -> Result<()> {
         params,
         args.session_filter.as_deref(),
     )
+}
+
+fn project_path_or_cwd(project: Option<String>) -> Result<String> {
+    match project {
+        Some(p) => Ok(p),
+        None => Ok(std::env::current_dir()
+            .context("failed to get current directory")?
+            .to_string_lossy()
+            .to_string()),
+    }
 }
 
 fn resolve_db_path(db: Option<&std::path::Path>, project_path: &str) -> Result<PathBuf> {
@@ -266,13 +264,7 @@ fn run_legacy(cli: LegacyArgs) -> Result<()> {
 
     let depth: AnalysisDepth = cli.depth.parse().map_err(|e: String| anyhow::anyhow!(e))?;
 
-    let project_path = match cli.project {
-        Some(p) => p,
-        None => std::env::current_dir()
-            .context("failed to get current directory")?
-            .to_string_lossy()
-            .to_string(),
-    };
+    let project_path = project_path_or_cwd(cli.project)?;
 
     let since_ms = cli
         .since
