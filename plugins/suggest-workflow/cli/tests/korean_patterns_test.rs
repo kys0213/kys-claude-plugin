@@ -155,7 +155,7 @@ fn test_normalization_strips_korean_suffixes() {
 fn test_normalization_preserves_core_content() {
     let prompt = "항상 타입을 명시해줘";
     let miner = SuffixMiner::default();
-    let suffixes = miner.mine(&vec![prompt]);
+    let suffixes = miner.mine(&[prompt]);
 
     let normalized = miner.normalize(prompt, &suffixes);
 
@@ -403,7 +403,7 @@ fn test_full_pipeline_korean_prompts() {
         &StopwordSet::load(&[]),
     );
 
-    assert!(result.patterns.len() > 0, "Should produce patterns");
+    assert!(!result.patterns.is_empty(), "Should produce patterns");
     assert_eq!(result.total, entries.len(), "Should count all entries");
 
     for p in &result.patterns {
