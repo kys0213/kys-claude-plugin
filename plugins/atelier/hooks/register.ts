@@ -27,7 +27,7 @@ async function askCli<T>(
   }
 }
 
-/** An absent `deny` reads as allow, so an older CLI that emits only `warnings` still decodes. */
+/** An absent `deny` reads as allow. */
 function decodeVerdict(parsed: unknown): SpawnVerdict | undefined {
   if (typeof parsed !== 'object' || parsed === null) {
     return undefined

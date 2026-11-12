@@ -36,7 +36,13 @@ function authOf(auth: unknown): { auth?: unknown } {
 }
 
 /** A tool call in flight, the permission request it raised and the post event that came for it. */
-type Call = { tool: string; permission: PermissionFacts | null; post: string | null; settled: boolean }
+type Call = {
+  tool: string
+  permission: PermissionFacts | null
+  post: string | null
+  /** The kanban answered its permission request, so the call's own end records nothing more. */
+  settled: boolean
+}
 
 export type LedgerState = {
   /** Tool calls in flight, by tool_use_id. */
@@ -53,7 +59,6 @@ async function storedRecord($: EngineInterface): Promise<SessionRecord | null> {
   return isRecord(stored) ? stored : null
 }
 
-/** Leaves one answer in the ledger. Never rejects: a failing CLI loses only that entry. */
 async function recordAnswer($: EngineInterface, wait: LedgerWait, answer: LedgerAnswer): Promise<void> {
   try {
     const rec = await storedRecord($)
@@ -76,7 +81,6 @@ async function recordAnswer($: EngineInterface, wait: LedgerWait, answer: Ledger
 
 type AskFacts = { at: number; questions: AskQuestion[]; orig_len: AskLengths }
 
-/** How the call ended, with what its dialog keyed under each question, in the call's order. */
 function dialogAnswer(questions: readonly ToolQuestion[], r: unknown): LedgerAnswer {
   const ended = (r ?? {}) as {
     result?: { answers?: Record<string, unknown> | null; afkTimeoutMs?: unknown } | null
@@ -151,7 +155,6 @@ export function ranCall(s: LedgerState, toolUseId: string, post: string): void {
   }
 }
 
-/** The kanban answered the permission request: the call's own end says nothing more about it. */
 export async function recordPermit(
   $: EngineInterface,
   call: Call | null,
@@ -165,7 +168,6 @@ export async function recordPermit(
   await recordAnswer($, { permission }, { path: 'inbox', via: verdict.via, decision: verdict.decision, ...authOf(verdict.auth) })
 }
 
-/** The call ended: a permission dialog it raised is recorded with how the call went after it. */
 export async function endCall($: EngineInterface, s: LedgerState, toolUseId: string | undefined, r: unknown): Promise<void> {
   const call = toolUseId === undefined ? undefined : s.calls.get(toolUseId)
 

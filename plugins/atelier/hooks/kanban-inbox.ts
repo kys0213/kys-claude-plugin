@@ -107,7 +107,6 @@ async function storedRecord($: EngineInterface, self: string): Promise<SessionRe
   return isRecord(stored) ? stored : null
 }
 
-/** What this session waits on, where it runs and the nonces the pane left for it, for `inbox take` to judge answers and decides against. */
 async function waits($: EngineInterface, s: AskState, self: string): Promise<string> {
   const rec = await storedRecord($, self)
 
@@ -119,7 +118,6 @@ async function waits($: EngineInterface, s: AskState, self: string): Promise<str
   })
 }
 
-/** Keeps how the last kanban request this session took went, and how it came in when the CLI said. */
 async function recordDelivery($: EngineInterface, s: InboxState, result: Result, at: number): Promise<void> {
   await record($, s, {
     name: null,

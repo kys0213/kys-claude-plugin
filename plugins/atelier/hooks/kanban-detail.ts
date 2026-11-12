@@ -72,7 +72,6 @@ async function request($: EngineInterface, s: DetailState, card: DetailCard, que
   $.ui.invalidate('ui.render')
 }
 
-/** What the card's input sends: the reply to the decision it shows, else a prompt. */
 async function sendArgs($: EngineInterface, card: DetailCard, text: string): Promise<Queued> {
   const decision = card.detail?.decision
 

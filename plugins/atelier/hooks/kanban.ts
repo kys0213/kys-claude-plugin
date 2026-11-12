@@ -91,7 +91,6 @@ type KanbanState = InboxState &
     refreshing: boolean
   }
 
-/** The tool input's string fields, uncut. */
 function wholeFields(input: unknown): Record<string, string> {
   if (typeof input !== 'object' || input === null) {
     return {}
@@ -242,7 +241,6 @@ async function refresh($: EngineInterface, s: KanbanState): Promise<void> {
   $.ui.invalidate('ui.render')
 }
 
-/** The tool's `column` input as the column ids it names; a lone id counts as one. */
 function columnsOf(column: unknown): string[] {
   if (typeof column === 'string') {
     return [column]
@@ -251,7 +249,6 @@ function columnsOf(column: unknown): string[] {
   return Array.isArray(column) ? column.filter((c): c is string => typeof c === 'string') : []
 }
 
-/** The board as the orchestrator reads it: repositories and their sessions and the delegate, no cards or layout. */
 async function boardForTool($: EngineInterface, column: unknown): Promise<string> {
   let r: Awaited<ReturnType<typeof runBoard>>
 
@@ -307,7 +304,6 @@ async function tick($: EngineInterface, s: KanbanState): Promise<void> {
   }
 }
 
-/** `/kanban` alone opens or closes the pane; with arguments it is a delegate command, the pane left as it is. */
 async function runCommand($: EngineInterface, s: KanbanState, e: { args: string; origin?: { kind: string } }): Promise<string> {
   return e.args.trim() === '' ? toggle($, s) : runDelegateCommand($, s, e.args, e.origin?.kind ?? 'unknown')
 }
@@ -326,7 +322,6 @@ async function toggle($: EngineInterface, s: KanbanState): Promise<string> {
   return opened.isPlaced ? '세션 칸반을 열었어요.' : '세션 칸반을 열었지만 이 화면에는 놓을 자리가 없어요.'
 }
 
-/** The reply the model wrote last, read when the session starts to wait mid-turn. */
 async function lastReply($: EngineInterface): Promise<string | null> {
   try {
     const messages = await $.session.messages()

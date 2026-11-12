@@ -62,7 +62,6 @@ export type SessionRecord = {
   permission_mode?: string | null
   title: string | null
   first_prompt: string | null
-  /** Written by versions before `prompts`; read only. */
   last_prompt?: string | null
   /** The newest prompts, oldest first, with `prompt.submit`'s origin kind or `kanban`. */
   prompts?: { text: string; origin: string; at: number }[]
@@ -172,7 +171,6 @@ function filled(base: SessionRecord, fill: Fields): Fields {
   return out
 }
 
-/** Leaves the record where `atelier kanban status` reads it. */
 async function writeCopy($: EngineInterface, paths: Map<string, string>, id: string, value: SessionRecord): Promise<void> {
   try {
     let path = paths.get(id)
@@ -188,7 +186,7 @@ async function writeCopy($: EngineInterface, paths: Map<string, string>, id: str
       paths.set(id, path)
     }
 
-    /** `$.fs.write` creates the file and its directories as needed (engine type doc). */
+    /** `$.fs.write` creates the file and its directories as needed. */
     await $.fs.write(path, JSON.stringify(value))
   } catch {
     /** a failed write is redone by the next record */
