@@ -1,4 +1,5 @@
 pub mod check;
+pub mod cli;
 pub mod sync;
 
 use crate::drift::core::artifact::{ArtifactFs, BackupClock};
