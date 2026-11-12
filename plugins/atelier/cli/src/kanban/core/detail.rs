@@ -15,7 +15,6 @@ pub struct Decision {
     pub recap: Option<String>,
     pub options: Vec<String>,
     pub at: u64,
-    /// Absent when the record has none.
     pub orig_len: Option<DecisionLengths>,
 }
 
@@ -39,7 +38,6 @@ pub struct Delivery {
     pub id: String,
     pub kind: Option<RequestKind>,
     pub status: DeliveryStatus,
-    /// How the request came in; `None` when unknown.
     pub via: Option<Via>,
     pub at: u64,
 }
