@@ -72,7 +72,7 @@ atelier git <reviews|guard|hook>          # git-utils 의 기계적 호출 표�
 atelier session <push-check|ensure-env>   # 세션 경계 hook (SessionStart / Stop)
 atelier orchestrator <spawn-check|compact-note>      # function hooks 모듈이 위임하는 결정적 판정 (아래 §Function hooks)
 atelier code-style <install|update|check|restore|uninstall> # 프로젝트 코드 스타일 룰(base·언어·앱 성격) 설치·갱신·점검·제어 (/atelier:code-style)
-atelier kanban <board|status|record-path|forget|relay-frame|answer|guard-bash|prune-nonces|command|delegate|ledger|send|stop|permit|reply|decide|inbox|spawn>   # 세션 칸반 판정과 세션 사이 요청 전달 (아래 §세션 칸반)
+atelier kanban <status|…>                 # 세션 칸반 판정과 세션 사이 요청 전달 (아래 §세션 칸반)
 ```
 
 `drift` 는 `/atelier:update`·`/atelier:setup` 명세가 호출하는 결정적 도구입니다.
