@@ -1,11 +1,10 @@
 use serde_json::{json, Value};
-use std::fs;
 
 mod kanban_support;
 use kanban_support::{
-    asking, asking_bash, asking_permission, chose, event, home_deref, js_len, place_json,
-    put_record, question, question_lengths, refused, run_record, session_with, Home, MIN, NOW,
-    REPO, SEC,
+    asking, asking_bash, asking_permission, chose, color_and_size, decision_waiting, event,
+    home_deref, inbox_answer, js_len, place_json, put_record, question, question_lengths, refused,
+    run_record, session_with, Home, MIN, NOW, REPO, SEC,
 };
 
 /// The delegate session that asks the person on the main conversation.
@@ -107,8 +106,7 @@ impl World {
 
     fn relays(&self, at: u64) -> Value {
         self.beat(at);
-        let now = at.to_string();
-        let out = self.kanban(&["status", "--session", "w", "--now", &now]);
+        let out = self.status_at(at, &["--session", "w"]);
         out["sessions"][0]["wait"]["relays"].clone()
     }
 
@@ -156,15 +154,6 @@ impl World {
         self.home
             .wait_permit("w", PERMIT, at, TTL, Some(("--wait-stdin", &facts)))
     }
-
-    fn leave(&self, name: &str, request: Value) {
-        fs::create_dir_all(self.inbox("w")).expect("inbox");
-        fs::write(
-            self.inbox("w").join(format!("{name}.json")),
-            request.to_string(),
-        )
-        .expect("write");
-    }
 }
 
 /// A question the main agent writes in the tool's own spelling.
@@ -205,6 +194,10 @@ fn color_ask(body: &str) -> Value {
     json!([ask(&marked("w", "tu-1", body), &["Red", "Blue"])])
 }
 
+fn blue_recommended() -> Value {
+    json!([ask(&marked("w", "tu-1", "추천은 Blue"), &["Blue", "Red"])])
+}
+
 fn bash_ask() -> Value {
     json!([ask(
         &marked("w", PERMIT, "git status 를 허용할까요?"),
@@ -213,20 +206,7 @@ fn bash_ask() -> Value {
 }
 
 fn deciding_worker() -> Value {
-    session_with(
-        "w",
-        json!([event("turn.complete", None, 10 * SEC)]),
-        json!({
-            "repo_root": REPO,
-            "decision": {
-                "ask": "Ship it?",
-                "recap": "Tests pass.",
-                "options": ["Ship", "Wait"],
-                "at": NOW - 10 * SEC,
-                "orig_len": { "ask": 8, "options": [4, 4] },
-            },
-        }),
-    )
+    decision_waiting("Ship it?", Some("Tests pass."), &["Ship", "Wait"])
 }
 
 fn decision_id() -> String {
@@ -309,8 +289,7 @@ fn the_header_names_a_permissions_target_as_the_board_does() {
     let text = text_of(&w.frame(bash_ask())["questions"][0]);
 
     w.beat(NOW);
-    let now = NOW.to_string();
-    let status = w.kanban(&["status", "--session", "w", "--now", &now]);
+    let status = w.status_at(NOW, &["--session", "w"]);
     let target = status["sessions"][0]["wait"]["target"]
         .as_str()
         .expect("board target");
@@ -351,7 +330,7 @@ fn a_question_target_shows_its_question_and_options_and_keeps_their_labels() {
 #[test]
 fn options_in_another_order_keep_the_main_agents_order_and_descriptions() {
     let w = World::new(color_worker());
-    let questions = json!([ask(&marked("w", "tu-1", "추천은 Blue"), &["Blue", "Red"])]);
+    let questions = blue_recommended();
 
     let question = &w.frame(questions)["questions"][0];
 
@@ -387,10 +366,7 @@ fn a_permissions_options_say_only_what_the_verdict_does() {
 
 #[test]
 fn the_first_option_each_question_shows_is_its_recommendation() {
-    let w = World::new(asking(json!([
-        question("Which color?", &["Red", "Blue"], false),
-        question("Which size?", &["S", "M"], false),
-    ])));
+    let w = World::new(asking(color_and_size()));
     let questions = json!([
         ask(&marked("w", "tu-1", "색은?"), &["Blue", "Red"]),
         ask("크기는?", &["X", "Y"]),
@@ -429,10 +405,7 @@ fn a_marker_on_the_second_question_binds_nothing() {
 
 #[test]
 fn a_question_count_other_than_the_waits_binds_nothing() {
-    let w = World::new(asking(json!([
-        question("Which color?", &["Red", "Blue"], false),
-        question("Which size?", &["S", "M"], false),
-    ])));
+    let w = World::new(asking(color_and_size()));
 
     let framed = w.frame(color_ask("색은?"));
 
@@ -476,11 +449,7 @@ fn a_framed_question_answered_on_the_pane_leaves_a_relay() {
     let w = World::new(color_worker());
     let framed = w.frame(color_ask("색은?"));
 
-    let ids = w.record_relay(
-        &framed,
-        NOW,
-        json!({ "path": "inbox", "via": "pane", "answers": ["Red"] }),
-    );
+    let ids = w.record_relay(&framed, NOW, inbox_answer("pane", "Red"));
 
     assert_eq!(ids.len(), 1);
     assert_eq!(w.entry(&ids[0])["via"], "pane");
@@ -492,8 +461,8 @@ fn a_framed_question_no_person_answered_leaves_no_relay() {
     let framed = w.frame(color_ask("색은?"));
 
     for answer in [
-        json!({ "path": "inbox", "via": "agent", "answers": ["Red"] }),
-        json!({ "path": "inbox", "via": "terminal", "answers": ["Red"] }),
+        inbox_answer("agent", "Red"),
+        inbox_answer("terminal", "Red"),
         json!({ "path": "session", "answers": ["Red"], "afk_timeout_ms": 60000, "is_error": false, "denied": false }),
     ] {
         assert_eq!(
@@ -642,8 +611,9 @@ fn a_decision_is_answered_with_the_text_the_person_chose() {
 fn a_decision_is_still_never_answered_on_precedents() {
     let w = World::new(deciding_worker());
     w.leave(
+        "w",
         "1-1",
-        json!({
+        &json!({
             "v": 1, "kind": "decide", "decision_at": decision_id(), "text": "Ship", "from": "agent",
             "auth": { "precedents": [{ "q": 1, "id": "L1-aaaa" }], "reason": "r" },
         }),
@@ -663,7 +633,7 @@ fn the_waiting_session_takes_a_relayed_answer_once() {
     let w = World::new(color_worker());
     let id = w.relayed(color_ask("색은?"), &["Blue"], NOW);
     assert!(queued(&w.reply("w", "tu-1", &["Blue"], &id, NOW + MIN)));
-    w.leave("9-9", relayed_answer("tu-1", "Blue", &id));
+    w.leave("w", "9-9", &relayed_answer("tu-1", "Blue", &id));
 
     let taken = w.take(open_color("tu-1"), NOW + MIN);
 
@@ -693,9 +663,9 @@ fn the_waiting_session_takes_a_relayed_answer_once() {
 fn a_used_relay_left_again_in_the_inbox_is_refused() {
     let w = World::new(color_worker());
     let id = w.relayed(color_ask("색은?"), &["Blue"], NOW);
-    w.leave("1-1", relayed_answer("tu-1", "Blue", &id));
+    w.leave("w", "1-1", &relayed_answer("tu-1", "Blue", &id));
     w.take(open_color("tu-1"), NOW + MIN);
-    w.leave("2-1", relayed_answer("tu-1", "Blue", &id));
+    w.leave("w", "2-1", &relayed_answer("tu-1", "Blue", &id));
 
     let taken = w.take(open_color("tu-1"), NOW + 2 * MIN);
 
@@ -707,7 +677,7 @@ fn a_used_relay_left_again_in_the_inbox_is_refused() {
 fn a_relay_left_for_another_wait_is_refused_by_the_session_that_takes_it() {
     let w = World::new(color_worker());
     let id = w.relayed(color_ask("색은?"), &["Blue"], NOW);
-    w.leave("1-1", relayed_answer("tu-2", "Blue", &id));
+    w.leave("w", "1-1", &relayed_answer("tu-2", "Blue", &id));
 
     let taken = w.take(open_color("tu-2"), NOW + MIN);
 
@@ -720,7 +690,7 @@ fn a_relay_left_for_another_wait_is_refused_by_the_session_that_takes_it() {
 fn a_relay_older_than_30_minutes_is_refused_by_the_session_that_takes_it() {
     let w = World::new(color_worker());
     let id = w.relayed(color_ask("색은?"), &["Blue"], NOW);
-    w.leave("1-1", relayed_answer("tu-1", "Blue", &id));
+    w.leave("w", "1-1", &relayed_answer("tu-1", "Blue", &id));
 
     let taken = w.take(open_color("tu-1"), NOW + 31 * MIN);
 
@@ -781,7 +751,7 @@ impl World {
 #[test]
 fn a_person_picking_the_first_option_shown_approves_the_recommendation() {
     let w = World::new(color_worker());
-    let questions = json!([ask(&marked("w", "tu-1", "추천은 Blue"), &["Blue", "Red"])]);
+    let questions = blue_recommended();
 
     let id = w.relayed(questions, &["Blue"], NOW);
 
@@ -800,7 +770,7 @@ fn a_person_picking_the_first_option_shown_approves_the_recommendation() {
 #[test]
 fn a_person_picking_another_option_decides_directly() {
     let w = World::new(color_worker());
-    let questions = json!([ask(&marked("w", "tu-1", "추천은 Blue"), &["Blue", "Red"])]);
+    let questions = blue_recommended();
 
     let id = w.relayed(questions, &["Red"], NOW);
 
@@ -822,15 +792,14 @@ fn a_question_asked_with_no_recommendation_still_counts_its_first_option_as_one(
 #[test]
 fn an_approved_relay_counts_as_an_approved_recommendation_for_its_key() {
     let w = World::new(color_worker());
-    let questions = json!([ask(&marked("w", "tu-1", "추천은 Blue"), &["Blue", "Red"])]);
+    let questions = blue_recommended();
     let id = w.relayed(questions, &["Blue"], NOW);
     let key = w.took(&id, "Blue", NOW + MIN)["key"]
         .as_str()
         .expect("key")
         .to_string();
-    let now = (NOW + 2 * MIN).to_string();
 
-    let matched = w.kanban(&["ledger", "match", "--key", &key, "--now", &now]);
+    let matched = w.ledger_match(&key, NOW + 2 * MIN);
 
     assert_eq!(matched["support"], json!({ "direct": 0, "approved": 1 }));
 }

@@ -96,7 +96,6 @@ impl InboxStore for MemInbox {
     }
 }
 
-/// Counts what it was asked to wait instead of waiting.
 #[derive(Default)]
 pub struct CountingPause {
     pub paused_ms: RefCell<u64>,
@@ -108,7 +107,6 @@ impl Pause for CountingPause {
     }
 }
 
-/// `r1`, `r2`, ... in order.
 #[derive(Default)]
 pub struct CountingIds {
     next: RefCell<u32>,
@@ -122,7 +120,6 @@ impl IdSource for CountingIds {
     }
 }
 
-/// Answers `paths` from a table keyed by cwd.
 #[derive(Default)]
 pub struct MapProbe {
     pub repos: BTreeMap<String, (String, String)>,
@@ -154,7 +151,6 @@ impl RepoProbe for MapProbe {
     }
 }
 
-/// Records each launch and answers with `out`.
 pub struct FakeLauncher {
     pub out: Result<(bool, String, String), String>,
     pub launches: RefCell<Vec<(String, Vec<String>)>>,
@@ -182,7 +178,6 @@ impl Launcher for FakeLauncher {
     }
 }
 
-/// Ledger lines by month.
 #[derive(Default)]
 pub struct MemLedger {
     pub months: RefCell<BTreeMap<String, Vec<String>>>,
@@ -220,7 +215,6 @@ impl LedgerStore for MemLedger {
     }
 }
 
-/// Every path is where it is named.
 pub struct NamedPaths;
 
 impl RealPaths for NamedPaths {

@@ -24,8 +24,7 @@ fn command(home: &Home, origin: &str, args: &str) -> Value {
 }
 
 fn mode_of(home: &Home, key: &str) -> Value {
-    let now = (NOW + SEC).to_string();
-    home.kanban(&["ledger", "match", "--key", key, "--now", &now])["mode"].clone()
+    home.ledger_match(key, NOW + SEC)["mode"].clone()
 }
 
 fn delegate_record(id: &str, since: u64) -> Value {
@@ -124,15 +123,7 @@ fn shadow_steps_a_kind_back_from_acting() {
     ]);
 
     assert!(shadow["text"].is_string(), "{shadow}");
-    let now = (NOW + 2 * SEC).to_string();
-    let mode = home.kanban(&[
-        "ledger",
-        "match",
-        "--key",
-        ANY_PERMISSION_KEY,
-        "--now",
-        &now,
-    ]);
+    let mode = home.ledger_match(ANY_PERMISSION_KEY, NOW + 2 * SEC);
     assert_eq!(mode["mode"], json!("shadow"));
 }
 
@@ -172,8 +163,7 @@ fn status_names_the_live_delegate_turned_on_last_and_the_others_as_conflicts() {
     gone["heartbeat_at"] = json!(NOW - 10 * MIN);
     put_record(home.config(), &gone);
 
-    let now = NOW.to_string();
-    let out = home.kanban(&["status", "--now", &now]);
+    let out = home.status_at(NOW, &[]);
 
     let delegate = &out["delegate"];
     assert_eq!(delegate["session_id"], json!("new"));
@@ -194,8 +184,7 @@ fn status_without_a_delegate_says_so() {
     let home = Home::default();
     put_record(home.config(), &asking(color()));
 
-    let now = NOW.to_string();
-    let out = home.kanban(&["status", "--now", &now]);
+    let out = home.status_at(NOW, &[]);
 
     assert_eq!(out["delegate"]["session_id"], Value::Null);
     assert_eq!(out["delegate"]["conflicts"], json!([]));

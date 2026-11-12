@@ -2,7 +2,8 @@ use serde_json::{json, Value};
 
 mod kanban_support;
 use kanban_support::{
-    chose, decision_facts, home_deref, now_ms, question, question_facts, with, Home, DAY, HOUR,
+    chose, decision_facts, home_deref, inbox_answer, now_ms, question, question_facts,
+    typed_decision, with, Home, DAY, HOUR,
 };
 
 struct World {
@@ -68,10 +69,6 @@ fn which(text: &str) -> Value {
     json!([question(text, &["Red", "Blue"], false)])
 }
 
-fn inbox(via: &str, label: &str) -> Value {
-    json!({ "path": "inbox", "via": via, "answers": [label] })
-}
-
 const RED: &str = "Red";
 const BLUE: &str = "Blue";
 
@@ -79,9 +76,9 @@ const BLUE: &str = "Blue";
 fn every_persons_decision_after_two_agreeing_ones_is_compared_whatever_way_it_came() {
     let w = World::new();
     w.picks("Which color?", &[RED, RED]);
-    w.answer_by("Which color?", inbox("pane", RED));
+    w.answer_by("Which color?", inbox_answer("pane", RED));
     w.picks("Which color?", &[RED]);
-    let relayed = w.answer_by("Which color?", inbox("agent", RED));
+    let relayed = w.answer_by("Which color?", inbox_answer("agent", RED));
     w.rewrite(
         &relayed,
         json!({ "decided_by": "human", "relay": "L1-00000000" }),
@@ -99,8 +96,8 @@ fn every_persons_decision_after_two_agreeing_ones_is_compared_whatever_way_it_ca
 fn proxy_and_terminal_answers_are_not_compared() {
     let w = World::new();
     w.picks("Which color?", &[RED, RED]);
-    w.answer_by("Which color?", inbox("agent", RED));
-    w.answer_by("Which color?", inbox("terminal", BLUE));
+    w.answer_by("Which color?", inbox_answer("agent", RED));
+    w.answer_by("Which color?", inbox_answer("terminal", BLUE));
 
     let stats = w.question_stats();
 
@@ -193,10 +190,7 @@ fn decisions_are_compared_though_they_never_act() {
     let w = World::new();
     for _ in 0..3 {
         let at = w.tick();
-        w.record(decision_facts(
-            at,
-            json!({ "path": "session", "text": "초안대로 진행", "origin": "composer" }),
-        ));
+        w.record(decision_facts(at, typed_decision("초안대로 진행")));
     }
 
     let stats = w.stats()["kinds"]["decision"].clone();
@@ -212,7 +206,7 @@ fn a_kind_two_revokes_stepped_back_names_why() {
     w.add_ledger_line(
         json!({ "v": 1, "type": "setting", "id": "S1", "at": w.now - 10 * DAY, "scope": "question", "value": "act", "origin": "composer" }),
     );
-    let proxy = w.answer_by("Which color?", inbox("agent", RED));
+    let proxy = w.answer_by("Which color?", inbox_answer("agent", RED));
     for (n, at) in [w.now - 3 * DAY, w.now - 2 * DAY].into_iter().enumerate() {
         let out = w.kanban(&[
             "ledger",

@@ -4,8 +4,9 @@ use tempfile::TempDir;
 
 mod kanban_support;
 use kanban_support::{
-    chose, color, home_deref, js_len, now_ms, permission_facts, place_at, place_json, question,
-    question_facts, refused, with, Home, DAY, HOUR, REPO, SEC,
+    chose, color, color_and_size, errored, home_deref, inbox_answer, inbox_verdict, js_len, now_ms,
+    permission_facts, place_at, place_json, question, question_facts, ran, refused, typed_decision,
+    with, Home, DAY, HOUR, REPO, SEC,
 };
 
 struct World {
@@ -59,7 +60,7 @@ impl World {
     }
 
     fn matched_at(&self, key: &str, now: u64) -> Value {
-        self.kanban(&["ledger", "match", "--key", key, "--now", &now.to_string()])
+        self.ledger_match(key, now)
     }
 
     fn revoke(&self, entry: &str, at: u64) -> Value {
@@ -110,25 +111,6 @@ impl World {
         self.home
             .wait_permit("w", request, self.now, "60s", Some((flag, &stdin)))
     }
-
-    fn leave(&self, id: &str, request: Value) {
-        fs::create_dir_all(self.inbox("w")).expect("inbox");
-        fs::write(
-            self.inbox("w").join(format!("{id}.json")),
-            request.to_string(),
-        )
-        .expect("write");
-    }
-
-    fn leave_permit(&self, request_id: &str, request: Value) {
-        let permits = self.inbox("w").join("permits");
-        fs::create_dir_all(&permits).expect("permits");
-        fs::write(
-            permits.join(format!("{request_id}.json")),
-            request.to_string(),
-        )
-        .expect("write");
-    }
 }
 
 fn proof(precedents: &[(usize, &str)], now: u64) -> Vec<String> {
@@ -154,23 +136,7 @@ fn picked(at: u64, label: &str) -> Value {
 }
 
 fn by_inbox(at: u64, via: &str, label: &str) -> Value {
-    question_facts(
-        at,
-        color(),
-        json!({ "path": "inbox", "via": via, "answers": [label] }),
-    )
-}
-
-fn ran() -> Value {
-    json!({ "path": "session", "post": "PostToolUse", "is_error": false })
-}
-
-fn errored() -> Value {
-    json!({ "path": "session", "post": null, "is_error": true })
-}
-
-fn verdict(via: &str, decision: &str) -> Value {
-    json!({ "path": "inbox", "via": via, "decision": decision })
+    question_facts(at, color(), inbox_answer(via, label))
 }
 
 fn two_reds(w: &World) -> (String, String) {
@@ -426,7 +392,7 @@ fn answers_no_person_picked_from_the_options_do_not_support() {
 
 #[test]
 fn any_human_deny_conflicts_with_allows_for_a_permission_key() {
-    for deny in [errored(), verdict("pane", "deny")] {
+    for deny in [errored(), inbox_verdict("pane", "deny")] {
         let w = World::new();
         let a = w.record(permission_facts(REPO, w.now - 3 * DAY, "git status", ran()));
         w.record(permission_facts(REPO, w.now - 2 * DAY, "git status", ran()));
@@ -528,7 +494,7 @@ fn a_decision_key_never_acts() {
     let prompt = |at: u64| {
         let mut facts = with(
             place_at(at, REPO),
-            json!({ "decision": decision, "answer": { "path": "session", "text": "네", "origin": "composer" } }),
+            json!({ "decision": decision, "answer": typed_decision("네") }),
         );
         facts["decision"]["at"] = json!(at - 10 * SEC);
         facts
@@ -686,8 +652,9 @@ fn the_taker_refuses_an_answer_unlike_its_precedents_or_outside_the_options() {
     let auth =
         json!({ "precedents": [{ "q": 1, "id": a }, { "q": 1, "id": b }], "reason": "선례" });
     w.leave(
+        "w",
         "1-1",
-        json!({ "v": 1, "kind": "answer", "tool_use_id": "tu-9", "answers": ["Blue"], "from": "agent", "auth": auth }),
+        &json!({ "v": 1, "kind": "answer", "tool_use_id": "tu-9", "answers": ["Blue"], "from": "agent", "auth": auth }),
     );
 
     let taken = w.take(open(json!([asked_color()])));
@@ -712,13 +679,13 @@ fn a_permission_deny_is_never_sent_or_taken_for_the_agent() {
         REPO,
         w.now - 2 * DAY,
         "git status",
-        verdict("pane", "deny"),
+        inbox_verdict("pane", "deny"),
     ));
     let b = w.record(permission_facts(
         REPO,
         w.now - DAY,
         "git status",
-        verdict("pane", "deny"),
+        inbox_verdict("pane", "deny"),
     ));
     w.act("permission");
     assert_eq!(w.matched(&w.key_of(&a))["eligible"], true);
@@ -727,8 +694,9 @@ fn a_permission_deny_is_never_sent_or_taken_for_the_agent() {
     assert!(refused(&out), "{out}");
 
     w.leave_permit(
+        "w",
         "p-1",
-        json!({ "v": 1, "kind": "permit", "request_id": "p-1", "decision": "deny", "from": "agent",
+        &json!({ "v": 1, "kind": "permit", "request_id": "p-1", "decision": "deny", "from": "agent",
                 "auth": { "precedents": [{ "q": 1, "id": a }, { "q": 1, "id": b }], "reason": "선례" } }),
     );
     let out = w.wait_permit("p-1", "--wait-stdin", bash_wait(REPO, "git status"));
@@ -769,10 +737,7 @@ fn an_agent_allow_on_eligible_precedents_is_taken_against_the_whole_request() {
 #[test]
 fn every_question_needs_its_own_precedents_of_its_own_key() {
     let w = World::new();
-    let two = json!([
-        question("Which color?", &["Red", "Blue"], false),
-        question("Which size?", &["S", "M"], false),
-    ]);
+    let two = color_and_size();
     let mut colors = Vec::new();
     let mut sizes = Vec::new();
     for at in [w.now - 2 * DAY, w.now - DAY] {
@@ -1027,10 +992,7 @@ fn the_agent_never_answers_a_decision() {
 #[test]
 fn a_proxy_answer_keeps_the_precedents_it_was_sent_on_and_why() {
     let w = World::new();
-    let two = json!([
-        question("Which color?", &["Red", "Blue"], false),
-        question("Which size?", &["S", "M"], false),
-    ]);
+    let two = color_and_size();
     let ids = w.record_all(question_facts(
         w.now,
         two,

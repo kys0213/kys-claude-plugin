@@ -31,6 +31,10 @@ impl World {
         stdout_json(self.command().args(args).env("PATH", path))
     }
 
+    fn send_pane(&self, text: &str) -> Value {
+        self.kanban(&["send", "--session", "s-1", "--from", "pane", "--text", text])
+    }
+
     fn files(&self, session: &str) -> Vec<String> {
         let mut names: Vec<String> = fs::read_dir(self.inbox(session))
             .map(|dir| {
@@ -79,15 +83,7 @@ fn inbox_dir_is_under_the_claude_config_dir() {
 #[test]
 fn a_sent_prompt_is_queued_as_one_finished_file() {
     let w = World::new();
-    let out = w.kanban(&[
-        "send",
-        "--session",
-        "s-1",
-        "--from",
-        "pane",
-        "--text",
-        "Run the tests",
-    ]);
+    let out = w.send_pane("Run the tests");
     assert_eq!(out["queued"]["session_id"], "s-1");
     assert_eq!(out["queued"]["kind"], "prompt");
     let files = w.files("s-1");
@@ -98,15 +94,7 @@ fn a_sent_prompt_is_queued_as_one_finished_file() {
 #[test]
 fn taking_delivers_a_pane_prompt_as_typed_and_removes_it() {
     let w = World::new();
-    w.kanban(&[
-        "send",
-        "--session",
-        "s-1",
-        "--from",
-        "pane",
-        "--text",
-        "Run the tests",
-    ]);
+    w.send_pane("Run the tests");
     let out = w.take("s-1", None);
     assert_eq!(
         out["actions"],
@@ -143,15 +131,7 @@ fn an_agent_prompt_is_delivered_under_a_header_naming_where_it_came_from() {
 #[test]
 fn a_prompt_arriving_while_a_turn_runs_is_refused_not_queued() {
     let w = World::new();
-    w.kanban(&[
-        "send",
-        "--session",
-        "s-1",
-        "--from",
-        "pane",
-        "--text",
-        "Later",
-    ]);
+    w.send_pane("Later");
     let out = w.take("s-1", Some("t-1"));
     assert_eq!(out["actions"], json!([]));
     assert_eq!(out["results"][0]["status"], "busy");
@@ -161,24 +141,8 @@ fn a_prompt_arriving_while_a_turn_runs_is_refused_not_queued() {
 #[test]
 fn only_the_first_of_several_prompts_is_delivered() {
     let w = World::new();
-    w.kanban(&[
-        "send",
-        "--session",
-        "s-1",
-        "--from",
-        "pane",
-        "--text",
-        "One",
-    ]);
-    w.kanban(&[
-        "send",
-        "--session",
-        "s-1",
-        "--from",
-        "pane",
-        "--text",
-        "Two",
-    ]);
+    w.send_pane("One");
+    w.send_pane("Two");
     let out = w.take("s-1", None);
     assert_eq!(out["actions"].as_array().expect("actions").len(), 1);
     assert_eq!(out["actions"][0]["body"], "One");
@@ -188,15 +152,7 @@ fn only_the_first_of_several_prompts_is_delivered() {
 #[test]
 fn a_prompt_older_than_the_ttl_is_dropped() {
     let w = World::new();
-    w.kanban(&[
-        "send",
-        "--session",
-        "s-1",
-        "--from",
-        "pane",
-        "--text",
-        "Old",
-    ]);
+    w.send_pane("Old");
     let file = w.inbox("s-1").join(&w.files("s-1")[0]);
     age(&file, Duration::from_secs(120));
     let out = w.take("s-1", None);
@@ -224,8 +180,7 @@ fn a_stop_reaches_only_the_turn_it_was_meant_for() {
 #[test]
 fn an_unreadable_request_is_dropped_as_invalid() {
     let w = World::new();
-    fs::create_dir_all(w.inbox("s-1")).expect("inbox");
-    fs::write(w.inbox("s-1").join("1-1.json"), "not json").expect("write");
+    w.leave_raw("s-1", "1-1.json", "not json");
     let out = w.take("s-1", None);
     assert_eq!(out["results"][0]["status"], "invalid");
     assert!(w.files("s-1").is_empty());
@@ -243,7 +198,7 @@ fn taking_an_empty_or_missing_inbox_gives_nothing() {
 #[test]
 fn clearing_removes_a_session_inbox() {
     let w = World::new();
-    w.kanban(&["send", "--session", "s-1", "--from", "pane", "--text", "x"]);
+    w.send_pane("x");
     assert_eq!(
         w.kanban(&["inbox", "clear", "--session", "s-1"]),
         json!({ "cleared": "s-1" })

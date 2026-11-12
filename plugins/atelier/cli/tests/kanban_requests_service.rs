@@ -5,7 +5,7 @@ use atelier::kanban::commands::requests::PermitTiming;
 use atelier::kanban::core::request::{OpenAsk, PaneNonces, Sender, Waits};
 use kanban_mocks::{Edges, FakeLauncher, MapProbe};
 use kanban_support::NOW;
-use serde_json::json;
+use serde_json::{json, Value};
 
 const TTL: u64 = 60_000;
 
@@ -177,18 +177,15 @@ fn a_permit_answer_is_waited_for_by_the_permission_it_names() {
     assert!(e.inbox.ids("s-1").is_empty());
 
     assert_eq!(
-        e.requests()
-            .wait_permit("s-1", "p-2", timing(2_000), PaneNonces::default(), None),
+        wait_permit(&e, "s-1", "p-2", 2_000),
         json!({ "decision": null })
     );
     assert_eq!(
-        e.requests()
-            .wait_permit("s-1", "p-1", timing(2_000), PaneNonces::default(), None),
+        wait_permit(&e, "s-1", "p-1", 2_000),
         json!({ "decision": "allow", "from": "pane", "via": "terminal", "used_nonces": [] })
     );
     assert_eq!(
-        e.requests()
-            .wait_permit("s-1", "p-1", timing(2_000), PaneNonces::default(), None),
+        wait_permit(&e, "s-1", "p-1", 2_000),
         json!({ "decision": null })
     );
 }
@@ -196,8 +193,7 @@ fn a_permit_answer_is_waited_for_by_the_permission_it_names() {
 #[test]
 fn waiting_for_a_permit_pauses_until_the_wait_is_over() {
     let e = Edges::default();
-    e.requests()
-        .wait_permit("s-1", "p-1", timing(1_000), PaneNonces::default(), None);
+    wait_permit(&e, "s-1", "p-1", 1_000);
     assert_eq!(*e.pause.paused_ms.borrow(), 1_000);
 }
 
@@ -208,8 +204,7 @@ fn a_permit_answer_older_than_the_ttl_is_dropped() {
         .permit("s-1", "p-1", "deny", Sender::Pane.into());
     *e.inbox.age_ms.borrow_mut() = TTL + 1;
     assert_eq!(
-        e.requests()
-            .wait_permit("s-1", "p-1", timing(2_000), PaneNonces::default(), None),
+        wait_permit(&e, "s-1", "p-1", 2_000),
         json!({ "decision": null, "status": "expired" })
     );
 }
@@ -230,6 +225,16 @@ fn a_permit_needs_allow_or_deny_and_plain_ids() {
             "{session} {request} {decision} → {out}"
         );
     }
+}
+
+fn wait_permit(e: &Edges, session: &str, request: &str, for_ms: u64) -> Value {
+    e.requests().wait_permit(
+        session,
+        request,
+        timing(for_ms),
+        PaneNonces::default(),
+        None,
+    )
 }
 
 fn answers(list: &[&str]) -> Vec<String> {

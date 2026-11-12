@@ -88,6 +88,13 @@ fn wake(home: &Home, sessions: Value, state: Value, now: u64) -> Value {
 }
 
 /// The state a wake hands back once the mod delivered what it offered.
+fn first_seen_asking() -> (Home, Value, Value) {
+    let home = reported_home();
+    let sessions = json!([main_session(), asking(color())]);
+    let out = first_seen(&home, &sessions);
+    (home, sessions, out)
+}
+
 fn delivered_after(out: &Value) -> Value {
     let mut next = out["state"].clone();
     let mut ids = next["delivered"].as_array().cloned().unwrap_or_default();
@@ -129,9 +136,7 @@ fn a_new_wait_is_gathered_for_ten_seconds_before_anything_is_said() {
 
 #[test]
 fn after_ten_seconds_an_idle_delegate_with_an_empty_box_gets_a_prompt_of_ids_only() {
-    let home = reported_home();
-    let sessions = json!([main_session(), asking(color())]);
-    let out = first_seen(&home, &sessions);
+    let (home, sessions, out) = first_seen_asking();
 
     let woke = wake(&home, sessions, with_draft(&out, 0), NOW + 10 * SEC);
 
@@ -145,9 +150,7 @@ fn after_ten_seconds_an_idle_delegate_with_an_empty_box_gets_a_prompt_of_ids_onl
 
 #[test]
 fn a_draft_in_the_box_turns_the_prompt_into_context_for_the_next_prompt() {
-    let home = reported_home();
-    let sessions = json!([main_session(), asking(color())]);
-    let out = first_seen(&home, &sessions);
+    let (home, sessions, out) = first_seen_asking();
 
     let woke = wake(&home, sessions, with_draft(&out, 12), NOW + 10 * SEC);
 
@@ -209,9 +212,7 @@ fn only_a_persons_prompt_in_the_last_thirty_seconds_holds_the_prompt_back() {
 
 #[test]
 fn three_minutes_after_a_wait_was_first_seen_an_idle_turn_gets_the_prompt_despite_a_draft() {
-    let home = reported_home();
-    let sessions = json!([main_session(), asking(color())]);
-    let out = first_seen(&home, &sessions);
+    let (home, sessions, out) = first_seen_asking();
 
     let before = wake(
         &home,
@@ -244,9 +245,7 @@ fn three_minutes_on_a_running_turn_still_waits_for_the_turn() {
 
 #[test]
 fn a_delivered_wait_is_not_offered_again() {
-    let home = reported_home();
-    let sessions = json!([main_session(), asking(color())]);
-    let out = first_seen(&home, &sessions);
+    let (home, sessions, out) = first_seen_asking();
     let woke = wake(&home, sessions.clone(), with_draft(&out, 0), NOW + 10 * SEC);
 
     let again = wake(&home, sessions, delivered_after(&woke), NOW + 20 * SEC);
@@ -259,9 +258,7 @@ fn a_delivered_wait_is_not_offered_again() {
 
 #[test]
 fn a_prompt_that_was_not_delivered_stays_pending_and_is_offered_again() {
-    let home = reported_home();
-    let sessions = json!([main_session(), asking(color())]);
-    let out = first_seen(&home, &sessions);
+    let (home, sessions, out) = first_seen_asking();
     let woke = wake(&home, sessions.clone(), with_draft(&out, 0), NOW + 10 * SEC);
 
     let again = wake(&home, sessions, with_draft(&woke, 0), NOW + 12 * SEC);
@@ -276,9 +273,7 @@ fn a_prompt_that_was_not_delivered_stays_pending_and_is_offered_again() {
 
 #[test]
 fn a_wait_that_ended_leaves_pending_and_delivered() {
-    let home = reported_home();
-    let sessions = json!([main_session(), asking(color())]);
-    let out = first_seen(&home, &sessions);
+    let (home, sessions, out) = first_seen_asking();
     let woke = wake(&home, sessions, with_draft(&out, 0), NOW + 10 * SEC);
     let mut state = delivered_after(&woke);
     state["pending"] = json!([{ "id": "wait:gone:question:tu-0", "since": NOW }]);

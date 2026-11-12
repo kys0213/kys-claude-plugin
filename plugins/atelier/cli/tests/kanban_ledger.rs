@@ -7,9 +7,10 @@ use tempfile::TempDir;
 
 mod kanban_support;
 use kanban_support::{
-    atelier, chose, color, decision_facts, kanban_in, ledger_dir, permission_facts_with, place_at,
-    question, question_facts_with, record_facts, run_record, spawn_kanban, stdout_json, with, DAY,
-    NOW, REPO,
+    atelier, chose, color, color_and_size, decision_facts, errored, inbox_answer, inbox_verdict,
+    kanban_in, ledger_dir, permission_facts_with, place_at, question, question_facts_with, ran,
+    record_facts, run_record, session_post, spawn_kanban, stdout_json, typed_decision,
+    typed_decision_from, with, DAY, NOW, REPO,
 };
 
 fn list(config: &Path, args: &[&str]) -> Vec<Value> {
@@ -36,6 +37,16 @@ fn permission_facts(at: u64, command: &str, answer: Value) -> Value {
     permission_facts_with("t-1-7", REPO, at, command, answer)
 }
 
+fn record_choice(config: &Path, at: u64, label: &str) {
+    record_facts(config, &question_facts(at, color(), chose(json!([label]))));
+}
+
+fn kept_after_typing(text: &str) -> Value {
+    let dir = TempDir::new().unwrap();
+    record_facts(dir.path(), &decision_facts(NOW, typed_decision(text)));
+    only(dir.path())
+}
+
 fn source(entry: &Value) -> (Value, Value) {
     (entry["decided_by"].clone(), entry["via"].clone())
 }
@@ -57,10 +68,7 @@ fn a_question_call_that_ended_in_an_error_or_a_deny_leaves_nothing() {
 #[test]
 fn a_dialog_answer_that_is_not_text_is_no_answer() {
     let dir = TempDir::new().unwrap();
-    let questions = json!([
-        question("Which color?", &["Red", "Blue"], false),
-        question("Which size?", &["S", "M"], false),
-    ]);
+    let questions = color_and_size();
     let ids = record_facts(
         dir.path(),
         &question_facts(NOW, questions, chose(json!([{ "picked": "Red" }, "M"]))),
@@ -94,12 +102,8 @@ fn only_a_numeric_afk_timeout_marks_the_dialog_as_resolved_while_away() {
 #[test]
 fn entries_for_different_waits_at_the_same_moment_get_different_ids() {
     let dir = TempDir::new().unwrap();
-    let ran = json!({ "path": "session", "post": "PostToolUse", "is_error": false });
-    let first = record_facts(
-        dir.path(),
-        &permission_facts(NOW, "git status", ran.clone()),
-    );
-    let second = record_facts(dir.path(), &permission_facts(NOW, "git diff", ran));
+    let first = record_facts(dir.path(), &permission_facts(NOW, "git status", ran()));
+    let second = record_facts(dir.path(), &permission_facts(NOW, "git diff", ran()));
 
     assert_eq!(first.len(), 1);
     assert_eq!(second.len(), 1);
@@ -165,10 +169,7 @@ fn bind_refuses_facts_it_cannot_read() {
 #[test]
 fn a_question_answered_in_its_own_dialog_is_a_persons_decision() {
     let dir = TempDir::new().unwrap();
-    record_facts(
-        dir.path(),
-        &question_facts(NOW, color(), chose(json!(["Red"]))),
-    );
+    record_choice(dir.path(), NOW, "Red");
 
     let entry = only(dir.path());
     assert_eq!(source(&entry), (json!("human"), json!("session")));
@@ -200,10 +201,7 @@ fn a_dialog_that_resolved_itself_while_the_person_was_away_is_no_persons_decisio
 #[test]
 fn a_typed_answer_outside_the_options_is_free_text() {
     let dir = TempDir::new().unwrap();
-    record_facts(
-        dir.path(),
-        &question_facts(NOW, color(), chose(json!(["Green"]))),
-    );
+    record_choice(dir.path(), NOW, "Green");
 
     assert_eq!(only(dir.path())["free_text"], true);
 }
@@ -218,19 +216,11 @@ fn an_inbox_answer_is_judged_by_the_way_the_cli_said_it_came() {
         let dir = TempDir::new().unwrap();
         record_facts(
             dir.path(),
-            &question_facts(
-                NOW,
-                color(),
-                json!({ "path": "inbox", "via": via, "answers": ["Blue"] }),
-            ),
+            &question_facts(NOW, color(), inbox_answer(via, "Blue")),
         );
         record_facts(
             dir.path(),
-            &permission_facts(
-                NOW + 1,
-                "git status",
-                json!({ "path": "inbox", "via": via, "decision": "allow" }),
-            ),
+            &permission_facts(NOW + 1, "git status", inbox_verdict(via, "allow")),
         );
         record_facts(
             dir.path(),
@@ -253,11 +243,7 @@ fn a_way_the_cli_did_not_name_proves_nothing() {
     let dir = TempDir::new().unwrap();
     record_facts(
         dir.path(),
-        &question_facts(
-            NOW,
-            color(),
-            json!({ "path": "inbox", "via": "somewhere", "answers": ["Blue"] }),
-        ),
+        &question_facts(NOW, color(), inbox_answer("somewhere", "Blue")),
     );
 
     assert_eq!(source(&only(dir.path())), (Value::Null, json!("terminal")));
@@ -269,7 +255,10 @@ fn who_decided_is_never_taken_from_the_facts() {
     let mut facts = question_facts(
         NOW,
         color(),
-        json!({ "path": "inbox", "via": "terminal", "answers": ["Blue"], "decided_by": "human" }),
+        with(
+            inbox_answer("terminal", "Blue"),
+            json!({ "decided_by": "human" }),
+        ),
     );
     facts["decided_by"] = json!("human");
     record_facts(dir.path(), &facts);
@@ -286,7 +275,7 @@ fn a_permission_dialog_whose_tool_then_ran_was_allowed_by_the_person() {
             &permission_facts(
                 NOW,
                 "git status",
-                json!({ "path": "session", "post": post, "is_error": post == "PostToolUseFailure" }),
+                session_post(json!(post), post == "PostToolUseFailure"),
             ),
         );
 
@@ -305,14 +294,7 @@ fn a_permission_dialog_whose_tool_then_ran_was_allowed_by_the_person() {
 #[test]
 fn a_permission_dialog_that_ended_in_an_error_without_the_tool_running_is_an_inferred_deny() {
     let dir = TempDir::new().unwrap();
-    record_facts(
-        dir.path(),
-        &permission_facts(
-            NOW,
-            "git status",
-            json!({ "path": "session", "post": null, "is_error": true }),
-        ),
-    );
+    record_facts(dir.path(), &permission_facts(NOW, "git status", errored()));
 
     let entry = only(dir.path());
     assert_eq!(source(&entry), (json!("human"), json!("session")));
@@ -325,11 +307,7 @@ fn a_permission_dialog_with_neither_a_run_nor_an_error_leaves_nothing() {
     let dir = TempDir::new().unwrap();
     let ids = record_facts(
         dir.path(),
-        &permission_facts(
-            NOW,
-            "git status",
-            json!({ "path": "session", "post": null, "is_error": false }),
-        ),
+        &permission_facts(NOW, "git status", session_post(Value::Null, false)),
     );
 
     assert!(ids.is_empty());
@@ -342,10 +320,7 @@ fn a_prompt_typed_or_sent_by_a_person_while_a_decision_is_open_is_their_decision
         let dir = TempDir::new().unwrap();
         record_facts(
             dir.path(),
-            &decision_facts(
-                NOW,
-                json!({ "path": "session", "text": "초안대로 진행", "origin": origin }),
-            ),
+            &decision_facts(NOW, typed_decision_from("초안대로 진행", origin)),
         );
 
         let entry = only(dir.path());
@@ -374,10 +349,7 @@ fn a_prompt_from_anyone_but_a_person_while_a_decision_is_open_is_no_persons_deci
         let dir = TempDir::new().unwrap();
         record_facts(
             dir.path(),
-            &decision_facts(
-                NOW,
-                json!({ "path": "session", "text": "초안대로 진행", "origin": origin }),
-            ),
+            &decision_facts(NOW, typed_decision_from("초안대로 진행", origin)),
         );
 
         assert_eq!(only(dir.path())["decided_by"], Value::Null, "{origin}");
@@ -387,34 +359,15 @@ fn a_prompt_from_anyone_but_a_person_while_a_decision_is_open_is_no_persons_deci
 #[test]
 fn every_kind_carries_an_answer_fingerprint_so_opposite_permission_answers_show() {
     let dir = TempDir::new().unwrap();
-    let session_dialog = |post: Value, is_error: bool| json!({ "path": "session", "post": post, "is_error": is_error });
+    record_facts(dir.path(), &permission_facts(NOW, "git status", ran()));
+    record_facts(dir.path(), &permission_facts(NOW + 1, "git status", ran()));
     record_facts(
         dir.path(),
-        &permission_facts(
-            NOW,
-            "git status",
-            session_dialog(json!("PostToolUse"), false),
-        ),
+        &permission_facts(NOW + 2, "git status", errored()),
     );
     record_facts(
         dir.path(),
-        &permission_facts(
-            NOW + 1,
-            "git status",
-            session_dialog(json!("PostToolUse"), false),
-        ),
-    );
-    record_facts(
-        dir.path(),
-        &permission_facts(NOW + 2, "git status", session_dialog(Value::Null, true)),
-    );
-    record_facts(
-        dir.path(),
-        &permission_facts(
-            NOW + 3,
-            "git status",
-            json!({ "path": "inbox", "via": "pane", "decision": "deny" }),
-        ),
+        &permission_facts(NOW + 3, "git status", inbox_verdict("pane", "deny")),
     );
 
     let entries = list(dir.path(), &[]);
@@ -441,18 +394,12 @@ fn every_kind_carries_an_answer_fingerprint_so_opposite_permission_answers_show(
 #[test]
 fn a_question_fingerprint_is_the_normalized_label() {
     let dir = TempDir::new().unwrap();
-    record_facts(
-        dir.path(),
-        &question_facts(NOW, color(), chose(json!(["Red"]))),
-    );
+    record_choice(dir.path(), NOW, "Red");
     record_facts(
         dir.path(),
         &question_facts(NOW + 1, color(), chose(json!(["  red. "]))),
     );
-    record_facts(
-        dir.path(),
-        &question_facts(NOW + 2, color(), chose(json!(["Blue"]))),
-    );
+    record_choice(dir.path(), NOW + 2, "Blue");
 
     let fps: Vec<Value> = list(dir.path(), &[])
         .iter()
@@ -465,12 +412,7 @@ fn a_question_fingerprint_is_the_normalized_label() {
 #[test]
 fn a_decision_fingerprint_is_the_normalized_reply() {
     let dir = TempDir::new().unwrap();
-    let reply = |at: u64, text: &str| {
-        decision_facts(
-            at,
-            json!({ "path": "session", "text": text, "origin": "composer" }),
-        )
-    };
+    let reply = |at: u64, text: &str| decision_facts(at, typed_decision(text));
     record_facts(dir.path(), &reply(NOW, "초안대로 진행"));
     record_facts(dir.path(), &reply(NOW + 1, "초안대로  진행"));
     record_facts(dir.path(), &reply(NOW + 2, "다시 쓰기"));
@@ -485,10 +427,7 @@ fn a_decision_fingerprint_is_the_normalized_reply() {
 #[test]
 fn a_wait_of_two_questions_leaves_one_entry_per_question() {
     let dir = TempDir::new().unwrap();
-    let questions = json!([
-        question("Which color?", &["Red", "Blue"], false),
-        question("Which size?", &["S", "M"], false),
-    ]);
+    let questions = color_and_size();
     let ids = record_facts(
         dir.path(),
         &question_facts(NOW, questions, chose(json!(["Red", "M"]))),
@@ -520,10 +459,7 @@ fn a_wait_of_two_questions_leaves_one_entry_per_question() {
 #[test]
 fn a_question_left_unanswered_leaves_no_entry_for_it() {
     let dir = TempDir::new().unwrap();
-    let questions = json!([
-        question("Which color?", &["Red", "Blue"], false),
-        question("Which size?", &["S", "M"], false),
-    ]);
+    let questions = color_and_size();
     let ids = record_facts(
         dir.path(),
         &question_facts(NOW, questions, chose(json!([null, "M"]))),
@@ -538,10 +474,7 @@ fn a_question_left_unanswered_leaves_no_entry_for_it() {
 #[test]
 fn an_entry_keeps_whether_its_wait_could_then_be_answered_by_a_precedent() {
     let dir = TempDir::new().unwrap();
-    record_facts(
-        dir.path(),
-        &question_facts(NOW, color(), chose(json!(["Red"]))),
-    );
+    record_choice(dir.path(), NOW, "Red");
     record_facts(
         dir.path(),
         &question_facts(
@@ -552,11 +485,7 @@ fn an_entry_keeps_whether_its_wait_could_then_be_answered_by_a_precedent() {
     );
     record_facts(
         dir.path(),
-        &permission_facts(
-            NOW + 2,
-            "rm -rf build",
-            json!({ "path": "session", "post": "PostToolUse", "is_error": false }),
-        ),
+        &permission_facts(NOW + 2, "rm -rf build", ran()),
     );
 
     let entries = list(dir.path(), &[]);
@@ -602,16 +531,7 @@ fn a_secret_is_masked_before_it_is_kept_and_marks_the_answer_it_changed() {
         (b64, "[masked]"),
     ];
     for (said, kept) in cases {
-        let dir = TempDir::new().unwrap();
-        record_facts(
-            dir.path(),
-            &decision_facts(
-                NOW,
-                json!({ "path": "session", "text": said, "origin": "composer" }),
-            ),
-        );
-
-        let entry = only(dir.path());
+        let entry = kept_after_typing(said);
         assert_eq!(entry["answer"], kept, "{said}");
         assert_eq!(entry["answer_masked"], true, "{said}");
     }
@@ -644,16 +564,7 @@ fn a_secret_under_a_prefixed_or_quoted_name_in_a_url_or_a_mysql_flag_is_masked()
         ("mysqldump -phunter2 app", "mysqldump -p[masked] app"),
     ];
     for (said, kept) in cases {
-        let dir = TempDir::new().unwrap();
-        record_facts(
-            dir.path(),
-            &decision_facts(
-                NOW,
-                json!({ "path": "session", "text": said, "origin": "composer" }),
-            ),
-        );
-
-        let entry = only(dir.path());
+        let entry = kept_after_typing(said);
         assert_eq!(entry["answer"], kept, "{said}");
         assert_eq!(entry["answer_masked"], true, "{said}");
     }
@@ -669,14 +580,7 @@ fn no_kept_field_of_a_permission_entry_carries_the_secret_in_its_target() {
         r#"echo '{"password": "hunter2"}' > cfg.json"#,
     ] {
         let dir = TempDir::new().unwrap();
-        record_facts(
-            dir.path(),
-            &permission_facts(
-                NOW,
-                command,
-                json!({ "path": "session", "post": "PostToolUse", "is_error": false }),
-            ),
-        );
+        record_facts(dir.path(), &permission_facts(NOW, command, ran()));
 
         let entry = only(dir.path());
         assert!(!entry.to_string().contains("hunter2"), "{command}: {entry}");
@@ -698,14 +602,7 @@ fn a_command_refused_for_a_secret_word_keeps_the_reason_masked() {
         ("https://alice:hunter2@example.com/repo.git", "hunter2"),
     ] {
         let dir = TempDir::new().unwrap();
-        record_facts(
-            dir.path(),
-            &permission_facts(
-                NOW,
-                command,
-                json!({ "path": "session", "post": "PostToolUse", "is_error": false }),
-            ),
-        );
+        record_facts(dir.path(), &permission_facts(NOW, command, ran()));
 
         let line = fs::read_dir(ledger_dir(dir.path()))
             .unwrap()
@@ -743,7 +640,7 @@ fn no_kept_field_of_a_question_or_decision_entry_carries_the_secret() {
         dir.path(),
         &decision_facts(
             NOW + 1,
-            json!({ "path": "session", "text": "use https://alice:hunter2@example.com", "origin": "composer" }),
+            typed_decision("use https://alice:hunter2@example.com"),
         ),
     );
 
@@ -765,16 +662,7 @@ fn words_that_only_look_long_are_kept_as_said() {
         "open https://example.com:8080/a@b",
         "my_tokens: 3",
     ] {
-        let dir = TempDir::new().unwrap();
-        record_facts(
-            dir.path(),
-            &decision_facts(
-                NOW,
-                json!({ "path": "session", "text": said, "origin": "composer" }),
-            ),
-        );
-
-        let entry = only(dir.path());
+        let entry = kept_after_typing(said);
         assert_eq!(entry["answer"], said);
         assert_eq!(entry["answer_masked"], false);
     }
@@ -812,13 +700,7 @@ fn what_was_asked_is_masked_while_the_key_comes_from_the_text_as_asked() {
 fn a_long_answer_is_cut() {
     let dir = TempDir::new().unwrap();
     let long = "가".repeat(800);
-    record_facts(
-        dir.path(),
-        &decision_facts(
-            NOW,
-            json!({ "path": "session", "text": long, "origin": "composer" }),
-        ),
-    );
+    record_facts(dir.path(), &decision_facts(NOW, typed_decision(&long)));
 
     assert_eq!(
         only(dir.path())["answer"]
@@ -833,10 +715,7 @@ fn a_long_answer_is_cut() {
 #[test]
 fn list_is_newest_first_and_skips_lines_it_cannot_read() {
     let dir = TempDir::new().unwrap();
-    record_facts(
-        dir.path(),
-        &question_facts(NOW, color(), chose(json!(["Red"]))),
-    );
+    record_choice(dir.path(), NOW, "Red");
     let file = fs::read_dir(ledger_dir(dir.path()))
         .expect("ledger dir")
         .filter_map(Result::ok)
@@ -846,10 +725,7 @@ fn list_is_newest_first_and_skips_lines_it_cannot_read() {
     let mut handle = fs::OpenOptions::new().append(true).open(&file).unwrap();
     writeln!(handle, "{{not json").unwrap();
     writeln!(handle, "{{\"v\":99}}").unwrap();
-    record_facts(
-        dir.path(),
-        &question_facts(NOW + 1, color(), chose(json!(["Blue"]))),
-    );
+    record_choice(dir.path(), NOW + 1, "Blue");
 
     let answers: Vec<Value> = list(dir.path(), &[])
         .iter()
@@ -861,22 +737,12 @@ fn list_is_newest_first_and_skips_lines_it_cannot_read() {
 #[test]
 fn list_filters_by_what_it_is_given() {
     let dir = TempDir::new().unwrap();
+    record_choice(dir.path(), NOW, "Red");
     record_facts(
         dir.path(),
-        &question_facts(NOW, color(), chose(json!(["Red"]))),
+        &permission_facts(NOW + 1, "git status", inbox_verdict("terminal", "allow")),
     );
-    record_facts(
-        dir.path(),
-        &permission_facts(
-            NOW + 1,
-            "git status",
-            json!({ "path": "inbox", "via": "terminal", "decision": "allow" }),
-        ),
-    );
-    let mut other = decision_facts(
-        NOW + 2,
-        json!({ "path": "session", "text": "다시 쓰기", "origin": "composer" }),
-    );
+    let mut other = decision_facts(NOW + 2, typed_decision("다시 쓰기"));
     other["session"] = json!("x");
     record_facts(dir.path(), &other);
 
@@ -946,10 +812,7 @@ fn kept_entry(at: u64, padding: usize) -> String {
     let dir = TempDir::new().unwrap();
     record_facts(
         dir.path(),
-        &decision_facts(
-            at,
-            json!({ "path": "session", "text": "x".repeat(padding.min(400)), "origin": "composer" }),
-        ),
+        &decision_facts(at, typed_decision(&"x".repeat(padding.min(400)))),
     );
     let mut entry = only(dir.path());
     entry["asked"]["pad"] = json!(" ".repeat(padding));

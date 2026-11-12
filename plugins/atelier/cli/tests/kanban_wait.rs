@@ -1,8 +1,8 @@
 mod kanban_support;
 
 use kanban_support::{
-    asking, asking_bash, blocked, board, color, event, put_record, question, session_with,
-    status_in, wait_of, NOW, REPO, SEC,
+    asking, asking_bash, blocked, board, color, decision_waiting, decision_waiting_with, event,
+    put_record, question, session_with, status_in, wait_of, NOW, REPO, SEC,
 };
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -88,20 +88,7 @@ fn a_permission_wait_names_the_request_the_tool_and_its_target() {
 
 #[test]
 fn a_decision_wait_carries_its_ask_and_options() {
-    let record = session_with(
-        "w",
-        json!([event("turn.complete", None, 10 * SEC)]),
-        json!({
-            "repo_root": REPO,
-            "decision": {
-                "ask": "Ship it?",
-                "recap": "Tests pass.",
-                "options": ["Ship", "Wait"],
-                "at": NOW - 10 * SEC,
-                "orig_len": { "ask": 8, "options": [4, 4] },
-            },
-        }),
-    );
+    let record = decision_waiting("Ship it?", Some("Tests pass."), &["Ship", "Wait"]);
     let wait = wait_of(record);
     assert_eq!(wait["kind"], "decision");
     assert_eq!(wait["id"], (NOW - 10 * SEC).to_string());
@@ -114,19 +101,11 @@ fn a_decision_wait_carries_its_ask_and_options() {
 
 #[test]
 fn a_decision_whose_options_were_dropped_is_truncated() {
-    let record = session_with(
-        "w",
-        json!([event("turn.complete", None, 10 * SEC)]),
-        json!({
-            "repo_root": REPO,
-            "decision": {
-                "ask": "Pick",
-                "recap": null,
-                "options": ["A", "B", "C", "D"],
-                "at": NOW - 10 * SEC,
-                "orig_len": { "ask": 4, "options": [1, 1, 1, 1, 1] },
-            },
-        }),
+    let record = decision_waiting_with(
+        "Pick",
+        None,
+        &["A", "B", "C", "D"],
+        json!({ "ask": 4, "options": [1, 1, 1, 1, 1] }),
     );
     let wait = wait_of(record);
     assert_eq!(wait["key"], Value::Null);

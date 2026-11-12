@@ -100,7 +100,6 @@ pub fn record_facts(config: &Path, facts: &Value) -> Vec<String> {
         .collect()
 }
 
-/// A config directory of its own for `atelier kanban` runs.
 pub struct Home {
     config: TempDir,
 }
@@ -136,6 +135,36 @@ impl Home {
 
     pub fn ledger_dir(&self) -> PathBuf {
         ledger_dir(self.config())
+    }
+
+    pub fn leave_raw(&self, session: &str, file: &str, contents: &str) {
+        let path = self.inbox(session).join(file);
+        fs::create_dir_all(path.parent().expect("inbox file has a directory")).expect("inbox");
+        fs::write(path, contents).expect("write");
+    }
+
+    pub fn leave(&self, session: &str, name: &str, request: &Value) {
+        self.leave_raw(session, &format!("{name}.json"), &request.to_string());
+    }
+
+    pub fn leave_permit(&self, session: &str, request_id: &str, request: &Value) {
+        self.leave_raw(
+            session,
+            &format!("permits/{request_id}.json"),
+            &request.to_string(),
+        );
+    }
+
+    pub fn ledger_match(&self, key: &str, at: u64) -> Value {
+        self.kanban(&["ledger", "match", "--key", key, "--now", &at.to_string()])
+    }
+
+    pub fn status_at(&self, at: u64, extra: &[&str]) -> Value {
+        let mut args = vec!["status", "--now"];
+        let now = at.to_string();
+        args.push(&now);
+        args.extend(extra);
+        self.kanban(&args)
     }
 
     pub fn record_all(&self, facts: Value) -> Vec<String> {
@@ -257,21 +286,32 @@ pub fn board_with(args: &[&str], stdin: &str) -> Value {
     )
 }
 
+pub fn board_args(width: &str, extra: &[&str]) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "--now",
+        &NOW.to_string(),
+        "--stale-after",
+        "2m",
+        "--expire-after",
+        "24h",
+        "--width",
+        width,
+    ]
+    .map(String::from)
+    .to_vec();
+    args.extend(extra.iter().map(|arg| arg.to_string()));
+    args
+}
+
+pub fn board_at(width: &str, extra: &[&str], stdin: &str) -> Value {
+    let args = board_args(width, extra);
+    board_with(&args.iter().map(String::as_str).collect::<Vec<_>>(), stdin)
+}
+
 pub fn board(sessions: Value) -> Value {
-    let now = NOW.to_string();
-    board_with(
-        &[
-            "--now",
-            &now,
-            "--stale-after",
-            "2m",
-            "--expire-after",
-            "24h",
-            "--self",
-            "self-id",
-            "--width",
-            "100",
-        ],
+    board_at(
+        "100",
+        &["--self", "self-id"],
         &json!({ "sessions": sessions }).to_string(),
     )
 }
@@ -438,6 +478,13 @@ pub fn asking(questions: Value) -> Value {
     asking_with_lengths(questions, orig_len)
 }
 
+pub fn color_and_size() -> Value {
+    json!([
+        question("Which color?", &["Red", "Blue"], false),
+        question("Which size?", &["S", "M"], false),
+    ])
+}
+
 pub fn color() -> Value {
     json!([question("Which color?", &["Red", "Blue"], false)])
 }
@@ -513,4 +560,63 @@ pub fn decision_facts(at: u64, answer: Value) -> Value {
             "answer": answer,
         }),
     )
+}
+
+pub fn typed_decision_from(text: &str, origin: &str) -> Value {
+    json!({ "path": "session", "text": text, "origin": origin })
+}
+
+pub fn typed_decision(text: &str) -> Value {
+    typed_decision_from(text, "composer")
+}
+
+pub fn inbox_answer(via: &str, label: &str) -> Value {
+    json!({ "path": "inbox", "via": via, "answers": [label] })
+}
+
+pub fn inbox_verdict(via: &str, decision: &str) -> Value {
+    json!({ "path": "inbox", "via": via, "decision": decision })
+}
+
+pub fn session_post(post: Value, is_error: bool) -> Value {
+    json!({ "path": "session", "post": post, "is_error": is_error })
+}
+
+pub fn ran() -> Value {
+    session_post(json!("PostToolUse"), false)
+}
+
+pub fn errored() -> Value {
+    session_post(Value::Null, true)
+}
+
+pub fn decision_waiting_with(
+    ask: &str,
+    recap: Option<&str>,
+    options: &[&str],
+    orig_len: Value,
+) -> Value {
+    session_with(
+        "w",
+        json!([event("turn.complete", None, 10 * SEC)]),
+        json!({
+            "cwd": REPO,
+            "repo_root": REPO,
+            "decision": {
+                "ask": ask,
+                "recap": recap,
+                "options": options,
+                "at": NOW - 10 * SEC,
+                "orig_len": orig_len,
+            },
+        }),
+    )
+}
+
+pub fn decision_waiting(ask: &str, recap: Option<&str>, options: &[&str]) -> Value {
+    let orig_len = json!({
+        "ask": js_len(ask),
+        "options": options.iter().map(|o| js_len(o)).collect::<Vec<_>>(),
+    });
+    decision_waiting_with(ask, recap, options, orig_len)
 }

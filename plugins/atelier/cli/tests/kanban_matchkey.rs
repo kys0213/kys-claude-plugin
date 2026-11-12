@@ -1,8 +1,8 @@
 mod kanban_support;
 
 use kanban_support::{
-    asking, asking_bash, asking_permission_at, asking_with_lengths, blocked, question,
-    question_lengths, session_with, wait_of, NOW, REPO, SEC,
+    asking, asking_bash, asking_permission_at, asking_with_lengths, blocked, color_and_size,
+    decision_waiting, question, question_lengths, wait_of, REPO,
 };
 use serde_json::{json, Value};
 
@@ -18,24 +18,6 @@ fn permission_key(repo: &str, command: &str) -> Value {
         json!({ "command": command }),
     ))["key"]
         .clone()
-}
-
-fn decision_waiting(ask: &str, options: &[&str]) -> Value {
-    session_with(
-        "w",
-        json!([{ "name": "turn.complete", "detail": null, "at": NOW - 10 * SEC }]),
-        json!({
-            "cwd": REPO,
-            "repo_root": REPO,
-            "decision": {
-                "ask": ask,
-                "recap": "done",
-                "options": options,
-                "at": NOW - 10 * SEC,
-                "orig_len": { "ask": ask.len(), "options": options.iter().map(|o| o.len()).collect::<Vec<_>>() },
-            },
-        }),
-    )
 }
 
 fn hex_after(key: &Value, prefix: &str) -> String {
@@ -84,10 +66,7 @@ fn different_options_or_selection_mode_change_the_key() {
 
 #[test]
 fn each_question_of_a_call_has_its_own_key() {
-    let wait = wait_of(asking(json!([
-        question("Which color?", &["Red", "Blue"], false),
-        question("Which size?", &["S", "M"], false),
-    ])));
+    let wait = wait_of(asking(color_and_size()));
     assert_ne!(wait["questions"][0]["key"], wait["questions"][1]["key"]);
     assert_eq!(
         wait["questions"][0]["key"],
@@ -142,8 +121,12 @@ fn a_permission_key_label_names_the_tool_and_the_target() {
 
 #[test]
 fn a_decision_key_ignores_option_order_and_is_never_proxyable() {
-    let a = wait_of(decision_waiting("Ship it?", &["Ship", "Wait"]));
-    let b = wait_of(decision_waiting("ship it", &["Wait", "Ship"]));
+    let a = wait_of(decision_waiting(
+        "Ship it?",
+        Some("done"),
+        &["Ship", "Wait"],
+    ));
+    let b = wait_of(decision_waiting("ship it", Some("done"), &["Wait", "Ship"]));
     hex_after(&a["key"], "d1:");
     assert_eq!(a["key"], b["key"]);
     assert_eq!(a["proxyable"], false);
