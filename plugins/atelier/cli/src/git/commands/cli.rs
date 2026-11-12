@@ -233,13 +233,7 @@ pub fn run(cli: Cli) -> i32 {
                         timeout,
                         project_dir,
                     };
-                    match hook.register(&input) {
-                        Ok(result) => output(result),
-                        Err(e) => {
-                            eprintln!("Error: {e}");
-                            1
-                        }
-                    }
+                    output(hook.register(&input).unwrap_or_else(CmdResult::Err))
                 }
                 Some("unregister") => {
                     let input = HookUnregisterInput {
@@ -247,26 +241,14 @@ pub fn run(cli: Cli) -> i32 {
                         command: args.get(1).cloned().unwrap_or_default(),
                         project_dir,
                     };
-                    match hook.unregister(&input) {
-                        Ok(result) => output(result),
-                        Err(e) => {
-                            eprintln!("Error: {e}");
-                            1
-                        }
-                    }
+                    output(hook.unregister(&input).unwrap_or_else(CmdResult::Err))
                 }
                 Some("list") => {
                     let input = HookListInput {
                         hook_type: args.first().cloned().filter(|s| !s.is_empty()),
                         project_dir,
                     };
-                    match hook.list(&input) {
-                        Ok(result) => output(result),
-                        Err(e) => {
-                            eprintln!("Error: {e}");
-                            1
-                        }
-                    }
+                    output(hook.list(&input).unwrap_or_else(CmdResult::Err))
                 }
                 _ => {
                     eprintln!("Usage: atelier git hook <register|unregister|list> [args...]");
