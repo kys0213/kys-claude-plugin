@@ -151,7 +151,7 @@ pub fn parse_wake(raw: &str) -> Result<WakeStdin, String> {
     })
 }
 
-/// The pane's nonce keys, oldest first.
+/// The plugin store's keys, oldest first.
 pub fn parse_nonce_keys(raw: &str) -> Result<Vec<String>, String> {
     let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
     value
