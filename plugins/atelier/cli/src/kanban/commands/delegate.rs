@@ -255,7 +255,6 @@ fn wake_json(woke: &Wake) -> Value {
     })
 }
 
-/// The board's delegate: who it is, since when, and the others turned on.
 pub fn delegate_json(delegate: &Delegate) -> Value {
     json!({
         "session_id": delegate.session_id,

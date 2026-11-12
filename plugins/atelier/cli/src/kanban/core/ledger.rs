@@ -417,9 +417,6 @@ fn finish(draft: Draft, facts: &Facts, wait: &Wait) -> Entry {
     }
 }
 
-/// The relay entries a person's answer to a question framed over `target`
-/// leaves: one per question, when the person answered every question in
-/// the asking dialog or on the pane, else none.
 fn relay_drafts(
     ask: &Ask,
     by: QuestionBy,

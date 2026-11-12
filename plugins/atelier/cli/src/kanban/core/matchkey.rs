@@ -19,11 +19,8 @@ const KEY_KINDS: [EntryKind; 3] = [
     EntryKind::Decision,
 ];
 
-/// Hex digits after a key's prefix.
 pub const KEY_HEX_LEN: usize = KEY_BYTES * 2;
 
-/// Control chars read as spaces, whitespace folded, ASCII lowercased, and the
-/// trailing `? ？ . 。 !` taken off.
 pub fn sentence(raw: &str) -> String {
     let spaced: String = raw
         .chars()
@@ -35,7 +32,6 @@ pub fn sentence(raw: &str) -> String {
         .to_string()
 }
 
-/// The first `bytes` bytes of the SHA-256 of the parts joined, in hex.
 pub fn digest(parts: &[&str], bytes: usize) -> String {
     let joined = parts.join(&PART.to_string());
     Sha256::digest(joined.as_bytes())[..bytes]
@@ -53,7 +49,6 @@ fn key_prefix(kind: EntryKind) -> String {
     format!("{tag}{RULE_VERSION}")
 }
 
-/// The kind a key's prefix (the part before `:`) names.
 pub fn kind_of_prefix(prefix: &str) -> Option<EntryKind> {
     KEY_KINDS
         .into_iter()

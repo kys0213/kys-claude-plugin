@@ -135,7 +135,6 @@ impl Revoke {
     }
 }
 
-/// What a setting is for: a kind of wait, or the delegate session itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SettingScope {
@@ -166,7 +165,6 @@ impl From<EntryKind> for SettingScope {
     }
 }
 
-/// What a setting sets: a kind's `Mode`, or the delegate `On` or `Off`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SettingValue {
@@ -418,7 +416,6 @@ pub fn disabled(book: &Book, key: &str, now: u64) -> bool {
     !agreeing.values().any(|n| *n >= DIRECT_TO_REENABLE)
 }
 
-/// A person's latest `act` or `shadow` for a kind, when it is `act`.
 fn latest_act(book: &Book, kind: EntryKind, now: u64) -> Option<&Setting> {
     newest(
         book.settings.iter().filter(|s| {
@@ -432,8 +429,6 @@ fn latest_act(book: &Book, kind: EntryKind, now: u64) -> Option<&Setting> {
     .filter(|s| s.value.mode() == Some(Mode::Act))
 }
 
-/// Whether proxy answers of a kind were turned over twice within a week
-/// after `since`.
 fn revoked_twice(book: &Book, kind: EntryKind, since: u64, now: u64) -> bool {
     let mut revoked: Vec<u64> = book
         .revokes
@@ -447,14 +442,11 @@ fn revoked_twice(book: &Book, kind: EntryKind, since: u64, now: u64) -> bool {
         .any(|w| w[REVOKES_TO_DEMOTE - 1] - w[0] < DEMOTE_WINDOW_MS)
 }
 
-/// Whether a kind a person set to `act` is back in `shadow` for its revokes.
 pub fn demoted(book: &Book, kind: EntryKind, now: u64) -> bool {
     kind != EntryKind::Decision
         && latest_act(book, kind, now).is_some_and(|s| revoked_twice(book, kind, s.at, now))
 }
 
-/// Whether a kind answers on precedents now: a person's latest `act` for it,
-/// not turned over twice within any week since. A decision never does.
 pub fn mode(book: &Book, kind: EntryKind, now: u64) -> Mode {
     if kind == EntryKind::Decision {
         return Mode::Shadow;
@@ -567,8 +559,6 @@ pub struct Precedents {
     reason: String,
 }
 
-/// What an agent answer is sent on: a person's precedents, or the answer a
-/// person gave when the main agent asked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Auth {
     Precedents(Precedents),
@@ -646,7 +636,6 @@ impl Precedents {
         &self.reason
     }
 
-    /// The entry ids named for question `q`, in the order given.
     pub fn ids_for(&self, q: usize) -> Vec<&str> {
         self.precedents
             .iter()

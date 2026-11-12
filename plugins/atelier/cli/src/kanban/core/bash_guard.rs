@@ -27,7 +27,6 @@ const MOD_ONLY: &[&[&str]] = &[
     &["inbox", "clear"],
 ];
 const SCRIPT_READERS: &[&str] = &["source", "."];
-/// Scripts nested deeper than this are refused unread.
 const MAX_DEPTH: usize = 3;
 
 /// Why the command may not run, or `None` when it may.
@@ -104,7 +103,6 @@ fn simple_commands(toks: Vec<Tok>, bodies: &[HeredocBody]) -> Vec<Simple> {
     commands
 }
 
-/// The commands earlier in the pipeline of `commands[at]`.
 fn piped_into(commands: &[Simple], at: usize) -> &[Simple] {
     let start = commands[..=at]
         .iter()
@@ -182,8 +180,6 @@ fn process_outputs(command: &Simple) -> Result<Vec<String>, String> {
     Ok(scripts)
 }
 
-/// What `producers` may print for a shell to run: each argument, the
-/// arguments joined as `echo` prints them, and their heredocs and here-strings.
 fn output_of(producers: &[Simple]) -> Vec<String> {
     producers
         .iter()

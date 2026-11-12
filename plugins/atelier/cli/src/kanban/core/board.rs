@@ -113,7 +113,6 @@ impl Column {
         format!("{} {count}", self.title())
     }
 
-    /// Every id must name a column; an empty list names none.
     pub fn parse_all(ids: &[String]) -> Result<Vec<Column>, String> {
         ids.iter()
             .map(|id| {
@@ -315,7 +314,6 @@ fn signal_of(event: &Event) -> Signal {
     }
 }
 
-/// Whether the event takes the session out of a pending question dialog.
 fn moves_past_a_question(event: &Event) -> bool {
     match (event.name.as_str(), event.detail.as_deref()) {
         ("classic.PostToolUse" | "classic.PostToolUseFailure", detail) => detail == Some(ASK_TOOL),
@@ -356,9 +354,7 @@ fn after_turn(left: Left, ended_at: u64) -> State {
     }
 }
 
-/// A `permission_prompt` notification follows the request it repeats, so a
-/// repeated state keeps its first event and that event's reason. Work that
-/// goes on across turn ends keeps the time it began.
+/// A `permission_prompt` notification follows the request it repeats.
 fn advance(current: Option<(State, u64)>, next: State, at: u64) -> (State, u64) {
     match current {
         Some((cur, since)) if cur.is_busy() && next.is_busy() => (next, since),
@@ -404,7 +400,6 @@ impl Tracker {
         self.move_to(State::NeedsInput(wait), at);
     }
 
-    /// Whether a held state was there to return to.
     fn release(&mut self) -> bool {
         match self.held.take() {
             Some(back) => {

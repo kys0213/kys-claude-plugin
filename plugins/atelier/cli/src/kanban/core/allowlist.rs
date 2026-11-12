@@ -153,7 +153,6 @@ struct Spec {
     valued: &'static [(&'static str, Arg)],
     /// Short options whose value must be attached (`-U3`).
     attached: &'static [(&'static str, Arg)],
-    /// Accepts `-<N>`.
     dash_number: bool,
     shape: Shape,
 }
@@ -806,7 +805,6 @@ fn check_git(args: &[String]) -> Checked {
     check_spec(sub, spec, &args[1..])
 }
 
-/// `Err` names the first word no rule allows.
 fn check_command(argv: &[String]) -> Checked {
     let (name, args) = argv.split_first().ok_or_else(String::new)?;
     match name.as_str() {
