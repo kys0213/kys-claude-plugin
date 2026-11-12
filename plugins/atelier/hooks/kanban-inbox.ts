@@ -78,7 +78,8 @@ function isResult(value: unknown): value is Result {
 
 async function act($: EngineInterface, s: InboxState & AskState, taken: Taken): Promise<void> {
   if (taken.kind === 'stop') {
-    await $.turn.abort({ turnId: taken.turn_id })
+    /** Rejects once the turn ended after the take named it; the rest of the take still goes. */
+    await $.turn.abort({ turnId: taken.turn_id }).catch(() => undefined)
 
     return
   }

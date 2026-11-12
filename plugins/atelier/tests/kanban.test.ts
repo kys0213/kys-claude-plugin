@@ -115,6 +115,8 @@ type World = {
   messages: { value: { role: 'user' | 'assistant'; text: string; toolUses: never[] }[] }
   submitted: string[]
   aborted: string[]
+  /** Makes `$.turn.abort` reject, as the engine does for a turn that is no longer running. */
+  abort: { refuses: boolean }
   /** What `$.agent.list()` answers. */
   agents: { value: { id: string; description: string; type: string; status: string; teammateId?: string }[] }
   invalidated: string[]
@@ -157,6 +159,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   const messages: World['messages'] = { value: [] }
   const submitted: string[] = []
   const aborted: string[] = []
+  const abort: World['abort'] = { refuses: false }
   const agents: World['agents'] = { value: [] }
   const invalidated: string[] = []
   const toasts: string[] = []
@@ -230,6 +233,10 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   on('session.messages', () => ({ value: messages.value as never }))
   on('agent.list', () => ({ value: agents.value as never }))
   on('turn.abort', ($, e) => {
+    if (abort.refuses) {
+      return { deny: 'not the running turn' }
+    }
+
     aborted.push(e.turnId)
 
     return { value: undefined }
@@ -280,7 +287,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
     return { result: {} }
   })
 
-  return { store, clock, runs, shown, dialog, inbox, disk, messages, submitted, aborted, agents, invalidated, toasts, band, tools, prompt }
+  return { store, clock, runs, shown, dialog, inbox, disk, messages, submitted, aborted, abort, agents, invalidated, toasts, band, tools, prompt }
 }
 
 type StoredRecord = {
@@ -1533,6 +1540,34 @@ describe('kanban details and requests', () => {
     const take = w.runs.find(r => r.argv[3] === 'take')
     expect(take?.argv.slice(-2)).toEqual(['--turn', 't-7'])
     expect(w.aborted).toEqual(['t-7'])
+  })
+
+  test('a stop whose turn ended before the abort still lets the rest of its take through', async ($, on) => {
+    const w = world(
+      on,
+      routes({
+        'inbox dir': { dir: INBOX_DIR },
+        'inbox take': {
+          actions: [
+            { kind: 'stop', turn_id: 't-7' },
+            { kind: 'prompt', text: 'Run lint', body: 'Run lint', from: 'pane' },
+          ],
+          results: [
+            { id: 'r2', kind: 'stop', status: 'delivered' },
+            { id: 'r3', kind: 'prompt', status: 'delivered' },
+          ],
+        },
+      }),
+    )
+    w.abort.refuses = true
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await $.turn.start({ text: 'go', turnId: 't-7' })
+    w.inbox.files = ['1-1.json']
+    await w.clock.advance(2_000)
+
+    expect(w.submitted).toEqual(['Run lint'])
+    expect((stored(w) as Record<string, unknown>).inbox).toEqual({ id: 'r3', kind: 'prompt', status: 'delivered', at: START + 2_000 })
   })
 
   test('an expired session is forgotten, which clears its inbox and record copy', async ($, on) => {
