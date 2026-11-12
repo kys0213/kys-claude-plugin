@@ -159,7 +159,7 @@ pub fn spend(relay: &Relay, target: &Target, now: u64) -> RelayUse {
     }
 }
 
-fn is_relay(entry: &Entry) -> bool {
+pub(crate) fn is_relay(entry: &Entry) -> bool {
     entry.target_session.is_some()
         && entry.target_wait.is_some()
         && entry.decided_by == Some(DecidedBy::Human)

@@ -138,26 +138,23 @@ impl KanbanLedger<'_> {
         )
     }
 
-    fn read_entries(&self) -> Result<Vec<Entry>, String> {
-        Ok(self
-            .store
-            .read()?
-            .iter()
-            .flat_map(|month| &month.lines)
-            .filter_map(|line| Entry::parse(line))
-            .collect())
-    }
-
     pub fn list(&self, args: ListArgs) -> Value {
         answer((|| {
             let query = args.query()?;
-            Ok(json!({ "entries": select(self.read_entries()?, &query) }))
+            let read: Vec<Entry> = self
+                .store
+                .read()?
+                .iter()
+                .flat_map(|month| &month.lines)
+                .filter_map(|line| Entry::parse(line))
+                .collect();
+            Ok(json!({ "entries": select(read, &query) }))
         })())
     }
 
     pub fn summary(&self, since: u64, until: Option<u64>) -> Value {
         answer((|| {
-            let s = summarize(&self.read_entries()?, since, until);
+            let s = summarize(read_book(self.store)?.entries(), since, until);
             Ok(json!({
                 "since": since,
                 "until": until,

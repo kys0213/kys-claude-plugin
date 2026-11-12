@@ -11,7 +11,7 @@ use super::matchkey::{answer_fp, digest, sentence};
 use super::precedent::Auth;
 use super::prompt::decides_as_person;
 use super::question::Ask;
-use super::relay::{relay_answer, Frame, Target};
+use super::relay::{is_relay, relay_answer, Frame, Target};
 use super::request::{Verdict, Via};
 use super::text::cut;
 use super::wait::{derive, Place, Subject, Wait};
@@ -813,7 +813,7 @@ pub struct Summary {
 
 impl Summary {
     fn add(&mut self, entry: &Entry) {
-        if entry.target_session.is_some() {
+        if is_relay(entry) {
             self.relayed += 1;
             self.relayed_approved += usize::from(entry.approved);
             return;
