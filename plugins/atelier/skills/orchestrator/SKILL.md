@@ -1,12 +1,12 @@
 ---
 name: orchestrator
-description: Use this skill for any multi-unit work delegated to sub-agents, agent-teams, or worktrees — parallel fan-out, sequential pipelines, long-running agent teams, autonomous self-driving runs (decompose→dispatch→merge without human intervention), document deliverables (writing reports, specs, or write-up docs is also delegated Write work), research and investigation (codebase surveys, the impact or side effects of a change, root-cause hunts, comparing options — read-only work counts too), or any moment the main agent is about to use Edit/Write directly (delegate instead). Scope is set by scale, not by kind. Requests count alike in Korean or English. "자율주행" (also "자율 모드") is this plugin's term for an autonomous run carried through to the end.
+description: Use this skill for any multi-unit work delegated to sub-agents, agent-teams, or worktrees — parallel fan-out, sequential pipelines, long-running agent teams, autonomous self-driving runs (decompose→dispatch→merge without human intervention), document deliverables that span several files or sections, and research that sweeps many files when only the conclusion is needed (codebase surveys, the impact or side effects of a change, root-cause hunts, comparing options). Scope is set by scale, not by kind. A single unit of work that closes in a handful of tool calls — one edit, a lookup whose target is known — is done by the main agent without this skill. Requests count alike in Korean or English. "자율주행" (also "자율 모드") is this plugin's term for an autonomous run carried through to the end.
 version: 0.1.0
 ---
 
 # Orchestrator Skill
 여러 단위로 벌어지는 일을 분해 · 위임 · 통합한다. **적용 범위는 작업의 종류가 아니라 규모로 갈리고, 사용자가 명시한 위임 요구가 규모 판정보다 앞선다** — 구현이냐 문서냐 조사냐로 가르면 read-only 리서치가 부당하게 빠진다.
-한 턴에 닫히는 단일 파일 단순 편집은 열지 않는다 — 다만 열지 않기로 한 근거를 한 줄 남긴다(근거 없는 생략은 판정이 아니다).
+몇 번의 도구 호출로 닫히는 단일 단위 작업(한 갈래로 끝나는 편집 · 대상이 정해진 조회)은 열지 않는다 — 위임은 맥락 재전달과 토큰 비용을 치르므로 얻는 것이 그보다 클 때만 연다.
 판단은 모델이 한다. 이 문서가 소유하는 것은 넷뿐이다 — 불변식 · 정지 조건 · 환경 계약 · 기본값.
 
 ## 불변식
