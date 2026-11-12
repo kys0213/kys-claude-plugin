@@ -112,7 +112,7 @@ pub fn clean(raw: &str) -> String {
 }
 
 pub fn prompt_lines(raw: Option<&str>) -> Vec<String> {
-    raw.map(|p| fold(&clean(p)))
+    raw.map(folded)
         .filter(|p| !p.is_empty())
         .map(|p| vec![cut(&p, PROMPT_CHARS)])
         .unwrap_or_default()
@@ -131,7 +131,7 @@ pub fn reply_lines(raw: Option<&str>) -> Vec<String> {
         .collect()
 }
 
-fn folded(raw: &str) -> String {
+pub fn folded(raw: &str) -> String {
     fold(&clean(raw))
 }
 

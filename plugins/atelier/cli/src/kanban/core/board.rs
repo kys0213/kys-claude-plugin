@@ -7,7 +7,7 @@ use super::duration::age_label;
 use super::progress::{progress_line, Activity, ProgressFacts, WorkItem};
 use super::prompt::{is_wrapped_event, latest_person_prompt, person_prompts, PromptFact};
 use super::question::Ask;
-use super::text::{cut, fold};
+use super::text::cut;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
@@ -516,20 +516,16 @@ fn named_work(fact: &SessionFact) -> impl Iterator<Item = &str> {
         .filter(|p| !is_wrapped_event(p))
 }
 
-fn has_text(raw: &str) -> bool {
-    !fold(&detail::clean(raw)).is_empty()
-}
-
 fn subtitle_of(fact: &SessionFact) -> Option<String> {
     let folded = named_work(fact)
         .chain(person_prompt(fact))
-        .map(|s| fold(&detail::clean(s)))
+        .map(detail::folded)
         .find(|s| !s.is_empty())?;
     Some(cut(&folded, SUBTITLE_CHARS))
 }
 
 fn work_of(fact: &SessionFact) -> Option<&str> {
-    named_work(fact).find(|s| has_text(s))
+    named_work(fact).find(|s| !detail::folded(s).is_empty())
 }
 
 fn earlier_person_prompts(fact: &SessionFact) -> Vec<&PromptFact> {
