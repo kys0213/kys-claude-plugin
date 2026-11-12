@@ -70,7 +70,8 @@ impl DecisionKey {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Mode {
     Shadow,
     Act,
@@ -81,14 +82,6 @@ impl Mode {
         match self {
             Mode::Shadow => "shadow",
             Mode::Act => "act",
-        }
-    }
-
-    fn parse(raw: &str) -> Option<Mode> {
-        match raw {
-            "shadow" => Some(Mode::Shadow),
-            "act" => Some(Mode::Act),
-            _ => None,
         }
     }
 }
@@ -142,8 +135,76 @@ impl Revoke {
     }
 }
 
-/// A delegate setting a person's slash command left: `scope` a kind or
-/// `delegate`, `value` `act`, `shadow`, `on` or `off`; `session` names the
+/// What a setting is for: a kind of wait, or the delegate session itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingScope {
+    Question,
+    Permission,
+    Decision,
+    Delegate,
+}
+
+impl SettingScope {
+    pub fn id(self) -> &'static str {
+        match self {
+            SettingScope::Question => EntryKind::Question.id(),
+            SettingScope::Permission => EntryKind::Permission.id(),
+            SettingScope::Decision => EntryKind::Decision.id(),
+            SettingScope::Delegate => "delegate",
+        }
+    }
+}
+
+impl From<EntryKind> for SettingScope {
+    fn from(kind: EntryKind) -> SettingScope {
+        match kind {
+            EntryKind::Question => SettingScope::Question,
+            EntryKind::Permission => SettingScope::Permission,
+            EntryKind::Decision => SettingScope::Decision,
+        }
+    }
+}
+
+/// What a setting sets: a kind's `Mode`, or the delegate `On` or `Off`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingValue {
+    Act,
+    Shadow,
+    On,
+    Off,
+}
+
+impl SettingValue {
+    pub fn id(self) -> &'static str {
+        match self {
+            SettingValue::Act => Mode::Act.id(),
+            SettingValue::Shadow => Mode::Shadow.id(),
+            SettingValue::On => "on",
+            SettingValue::Off => "off",
+        }
+    }
+
+    fn mode(self) -> Option<Mode> {
+        match self {
+            SettingValue::Act => Some(Mode::Act),
+            SettingValue::Shadow => Some(Mode::Shadow),
+            SettingValue::On | SettingValue::Off => None,
+        }
+    }
+}
+
+impl From<Mode> for SettingValue {
+    fn from(mode: Mode) -> SettingValue {
+        match mode {
+            Mode::Act => SettingValue::Act,
+            Mode::Shadow => SettingValue::Shadow,
+        }
+    }
+}
+
+/// A delegate setting a person's slash command left; `session` names the
 /// session a `delegate` setting turned on or off.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Setting {
@@ -152,17 +213,29 @@ pub struct Setting {
     tag: SettingTag,
     pub id: String,
     pub at: u64,
-    pub scope: String,
-    pub value: String,
+    pub scope: SettingScope,
+    pub value: SettingValue,
     pub origin: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
 }
 
 impl Setting {
-    pub fn new(at: u64, scope: &str, value: &str, origin: &str, session: Option<&str>) -> Setting {
+    pub fn new(
+        at: u64,
+        scope: SettingScope,
+        value: SettingValue,
+        origin: &str,
+        session: Option<&str>,
+    ) -> Setting {
         let suffix = digest(
-            &[scope, value, origin, session.unwrap_or(""), &at.to_string()],
+            &[
+                scope.id(),
+                value.id(),
+                origin,
+                session.unwrap_or(""),
+                &at.to_string(),
+            ],
             ID_BYTES,
         );
         Setting {
@@ -170,8 +243,8 @@ impl Setting {
             tag: SettingTag::Setting,
             id: format!("S{at}-{suffix}"),
             at,
-            scope: scope.to_string(),
-            value: value.to_string(),
+            scope,
+            value,
             origin: origin.to_string(),
             session: session.map(str::to_string),
         }
@@ -349,14 +422,14 @@ pub fn disabled(book: &Book, key: &str, now: u64) -> bool {
 fn latest_act(book: &Book, kind: EntryKind, now: u64) -> Option<&Setting> {
     newest(
         book.settings.iter().filter(|s| {
-            s.scope == kind.id()
+            s.scope == SettingScope::from(kind)
                 && seen(s.at, now)
                 && decides_as_person(&s.origin)
-                && Mode::parse(&s.value).is_some()
+                && s.value.mode().is_some()
         }),
         |s| (s.at, s.id.as_str()),
     )
-    .filter(|s| Mode::parse(&s.value) == Some(Mode::Act))
+    .filter(|s| s.value.mode() == Some(Mode::Act))
 }
 
 /// Whether proxy answers of a kind were turned over twice within a week

@@ -10,15 +10,13 @@ use crate::kanban::core::delegate::{
     delegate_of, kind_name, last_report, Delegate, DelegateCommand, Report, ReportAt,
 };
 use crate::kanban::core::ledger::{month_of, EntryKind};
-use crate::kanban::core::precedent::{mode, Book, Mode, Setting};
+use crate::kanban::core::precedent::{mode, Book, Mode, Setting, SettingScope, SettingValue};
 use crate::kanban::core::prompt::decides_as_person;
 use crate::kanban::core::replay::{kind_stats, KindStats, KINDS};
 use crate::kanban::core::request::check_id;
 use crate::kanban::core::text::short_id;
 use crate::kanban::core::wake::{attach_to, wake, ReportDue, Wake, WakeInput};
 use serde_json::{json, Map, Value};
-
-const DELEGATE_SCOPE: &str = "delegate";
 
 pub struct KanbanDelegate<'a> {
     pub records: &'a dyn RecordStore,
@@ -112,7 +110,7 @@ impl KanbanDelegate<'_> {
                 ));
             }
             let now = typed.now;
-            let setting = |scope: &str, value: &str, session: Option<&str>| {
+            let setting = |scope: SettingScope, value: SettingValue, session: Option<&str>| {
                 Setting::new(now, scope, value, typed.origin, session)
             };
             match command {
@@ -129,7 +127,11 @@ impl KanbanDelegate<'_> {
                         .filter(|id| id != typed.session)
                         .map(|id| short_id(&id))
                         .collect();
-                    self.set(setting(DELEGATE_SCOPE, "on", Some(typed.session)))?;
+                    self.set(setting(
+                        SettingScope::Delegate,
+                        SettingValue::On,
+                        Some(typed.session),
+                    ))?;
                     let mut text = format!(
                         "칸반 위임을 켰어요 — 이 세션이 다른 세션의 입력 대기를 받아요. 단계: {}.",
                         modes_line(&book, now)
@@ -143,13 +145,17 @@ impl KanbanDelegate<'_> {
                     Ok(json!({ "text": text, "delegate_since": now }))
                 }
                 DelegateCommand::Off => {
-                    self.set(setting(DELEGATE_SCOPE, "off", Some(typed.session)))?;
+                    self.set(setting(
+                        SettingScope::Delegate,
+                        SettingValue::Off,
+                        Some(typed.session),
+                    ))?;
                     Ok(json!({ "text": "칸반 위임을 껐어요.", "delegate_since": null }))
                 }
                 DelegateCommand::Act(proxied) => {
                     let kind = proxied.kind();
                     let stats = kind_stats(&read_book(self.ledger)?, kind, now);
-                    self.set(setting(kind.id(), Mode::Act.id(), None))?;
+                    self.set(setting(kind.into(), Mode::Act.into(), None))?;
                     Ok(json!({
                         "text": format!(
                             "{}을 대신 답하기로 올렸어요. {}.",
@@ -159,7 +165,7 @@ impl KanbanDelegate<'_> {
                     }))
                 }
                 DelegateCommand::Shadow(kind) => {
-                    self.set(setting(kind.id(), Mode::Shadow.id(), None))?;
+                    self.set(setting(kind.into(), Mode::Shadow.into(), None))?;
                     Ok(json!({
                         "text": format!("{}을 지켜보기로 내렸어요.", kind_name(kind))
                     }))
