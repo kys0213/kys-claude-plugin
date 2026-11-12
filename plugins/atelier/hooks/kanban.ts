@@ -642,7 +642,7 @@ export function registerKanban(on: On, options: PluginOptions = {}): void {
     const context = await lastReply($)
     const at = await $.clock.now()
     let asked = askOf(questions, at)
-    let via: Via | null = null
+    let answered: { via: Via } | null = null
 
     await record($, s, {
       name: null,
@@ -682,7 +682,7 @@ export function registerKanban(on: On, options: PluginOptions = {}): void {
         return won.local
       }
 
-      via = won.answer.via
+      answered = { via: won.answer.via }
       await recordQuestion($, id, asked, questions, won.answer, frame)
 
       return { result: { questions, answers: answersByQuestion(questions, won.answer.answers) } }
@@ -690,8 +690,8 @@ export function registerKanban(on: On, options: PluginOptions = {}): void {
       s.waiters.delete(id)
       await $.store.delete(answerKey(await $.session.id(), id))
       await record($, s, {
-        name: via === null ? null : 'kanban.answer',
-        detail: via,
+        name: answered === null ? null : 'kanban.answer',
+        detail: answered?.via ?? null,
         byAgent: e.agentId !== undefined,
         update: base => withoutAsk(base, id),
       })

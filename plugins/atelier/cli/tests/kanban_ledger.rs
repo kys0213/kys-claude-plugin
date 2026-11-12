@@ -239,6 +239,28 @@ fn an_inbox_answer_is_judged_by_the_way_the_cli_said_it_came() {
 }
 
 #[test]
+fn an_inbox_answer_whose_way_the_cli_did_not_name_came_through_the_terminal() {
+    for via in [Value::Null, json!("somewhere"), json!(3)] {
+        let dir = TempDir::new().unwrap();
+        let mut answer = inbox_answer("pane", "Blue");
+        answer["via"] = via.clone();
+        let mut verdict = inbox_verdict("pane", "allow");
+        verdict.as_object_mut().expect("verdict").remove("via");
+        record_facts(dir.path(), &question_facts(NOW, color(), answer));
+        record_facts(
+            dir.path(),
+            &permission_facts(NOW + 1, "git status", verdict),
+        );
+
+        let entries = list(dir.path(), &[]);
+        assert_eq!(entries.len(), 2, "{via}");
+        for entry in entries {
+            assert_eq!(source(&entry), (Value::Null, json!("terminal")), "{via}");
+        }
+    }
+}
+
+#[test]
 fn a_way_the_cli_did_not_name_proves_nothing() {
     let dir = TempDir::new().unwrap();
     record_facts(

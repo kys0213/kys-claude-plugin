@@ -1,16 +1,14 @@
 import type { EngineInterface } from 'claude-code'
 
-import { queueRequest } from './kanban-cli'
+import { cli, queueRequest } from './kanban-cli'
 import { sessionKeysOf } from './kanban-record'
 
 export const NONCE_PREFIX = 'kanban:nonce:'
-/** Bounds the nonces of answers no session took, in the store every session shares. */
-const MAX_NONCES = 32
 
 export type AnswerKind = 'answer' | 'permit' | 'decide'
 
-/** Where an answer came from, as `inbox take` and `inbox wait-permit` say. */
-export type Via = 'pane' | 'terminal' | 'agent'
+/** Where an answer came from, as `inbox take` and `inbox wait-permit` named it; passed on untouched. */
+export type Via = string | null
 
 /** A nonce the pane left for a session, as the CLI reads it and names it used. */
 type LeftNonce = { kind: string; nonce: string }
@@ -27,8 +25,10 @@ function isLeftNonce(value: unknown): value is LeftNonce {
 
 async function dropOldNonces($: EngineInterface): Promise<void> {
   const keys = (await $.store.keys()).filter(k => k.startsWith(NONCE_PREFIX))
+  const out = await cli($, ['prune-nonces'], JSON.stringify({ keys }))
+  const drop = Array.isArray(out?.drop) ? out.drop.filter((k): k is string => typeof k === 'string') : []
 
-  for (const key of keys.slice(0, Math.max(0, keys.length - MAX_NONCES))) {
+  for (const key of drop) {
     await $.store.delete(key)
   }
 }
@@ -100,7 +100,6 @@ export async function dropUsedNonces($: EngineInterface, self: string, used: unk
   }
 }
 
-/** The CLI's `via`; one it does not name proves nothing. */
 export function viaOf(value: unknown): Via {
-  return value === 'pane' || value === 'agent' ? value : 'terminal'
+  return typeof value === 'string' ? value : null
 }

@@ -9,15 +9,15 @@ pub mod commands;
 pub mod core;
 
 use crate::kanban::commands::delegate::{
-    delegate_json, status_delegate_json, KanbanDelegate, Typed, WakeClock,
+    attach_json, delegate_json, status_delegate_json, KanbanDelegate, Typed, WakeClock,
 };
 use crate::kanban::commands::inbox::{ClockIds, FsInbox, ThreadPause};
 use crate::kanban::commands::ledger::{KanbanLedger, ListArgs};
 use crate::kanban::commands::ledger_store::{read_book, FsLedger, LedgerStore};
 use crate::kanban::commands::paths::FsPaths;
 use crate::kanban::commands::payload::{
-    parse_answer_request, parse_bash_command, parse_pane_nonces, parse_permit_wait, parse_sessions,
-    parse_tool_questions, parse_waits,
+    parse_answer_request, parse_bash_command, parse_nonce_keys, parse_pane_nonces,
+    parse_permit_wait, parse_sessions, parse_tool_questions, parse_waits,
 };
 use crate::kanban::commands::records::{FsRecords, KanbanRecords, StatusQuery};
 use crate::kanban::commands::requests::{Answerer, KanbanRequests, PermitTiming, Proof};
@@ -30,6 +30,7 @@ use crate::kanban::core::delegate::delegate_of;
 use crate::kanban::core::detail::Detail;
 use crate::kanban::core::duration::parse_millis;
 use crate::kanban::core::layout::{fit, Layout};
+use crate::kanban::core::nonce::past_cap;
 use crate::kanban::core::precedent::Book;
 use crate::kanban::core::question::{Ask, Question};
 use crate::kanban::core::relay::unused;
@@ -38,6 +39,7 @@ use crate::kanban::core::request::Sender;
 use crate::kanban::core::status::{render_text, select, Format};
 use crate::kanban::core::text::defuse_marker;
 use crate::kanban::core::wait::{derive, Blocked, Place, Subject};
+use crate::kanban::core::wake::NextPrompt;
 use crate::shared::process::read_stdin_raw;
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
@@ -136,6 +138,8 @@ pub enum Commands {
     Answer,
     /// The Bash tool's input on stdin → why a model may not run it, if it may not
     GuardBash,
+    /// The pane's nonce keys on stdin, oldest first → the ones past the cap to delete
+    PruneNonces,
     /// The decisions taken for this machine's waits
     Ledger {
         #[command(subcommand)]
@@ -166,6 +170,18 @@ pub enum DelegateCommandArgs {
         /// Current time, unix milliseconds
         #[arg(long)]
         now: u64,
+    },
+    /// A prompt entering the delegate session → whether the wake's context rides on it
+    Attach {
+        /// The prompt's `origin.kind`
+        #[arg(long, allow_hyphen_values = true)]
+        origin: String,
+        /// The prompt runs a slash command
+        #[arg(long)]
+        slash_command: bool,
+        /// The prompt is a meta prompt
+        #[arg(long)]
+        meta: bool,
     },
 }
 
@@ -948,6 +964,13 @@ pub fn run(cli: Cli) -> i32 {
             };
             println!("{out}");
         }
+        Commands::PruneNonces => {
+            let out = match parse_nonce_keys(&read_stdin_raw()) {
+                Ok(keys) => json!({ "drop": past_cap(&keys) }),
+                Err(error) => json!({ "error": error }),
+            };
+            println!("{out}");
+        }
         Commands::Command {
             session,
             now,
@@ -984,6 +1007,15 @@ pub fn run(cli: Cli) -> i32 {
                     })
                 }
                 DelegateCommandArgs::Report { now } => with_delegate(|d| d.report(now)),
+                DelegateCommandArgs::Attach {
+                    origin,
+                    slash_command,
+                    meta,
+                } => attach_json(&NextPrompt {
+                    origin: &origin,
+                    slash_command,
+                    meta,
+                }),
             };
             println!("{out}");
         }

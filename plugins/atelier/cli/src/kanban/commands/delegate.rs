@@ -15,7 +15,9 @@ use crate::kanban::core::prompt::decides_as_person;
 use crate::kanban::core::replay::{kind_stats, KindStats, KINDS};
 use crate::kanban::core::request::check_id;
 use crate::kanban::core::text::short_id;
-use crate::kanban::core::wake::{attach_to, wake, ReportDue, Wake, WakeInput};
+use crate::kanban::core::wake::{
+    attaches, report_at_toast, wake, NextPrompt, ReportDue, Wake, WakeInput,
+};
 use serde_json::{json, Map, Value};
 
 pub struct KanbanDelegate<'a> {
@@ -220,8 +222,13 @@ impl KanbanDelegate<'_> {
                 ),
                 _ => Wake::default(),
             };
+            let error = report_at.err();
             let mut out = wake_json(&woke);
-            out["report_at_error"] = json!(report_at.err());
+            out["toast"] = json!(report_at_toast(
+                error.as_deref(),
+                stdin.told_report_at.as_deref()
+            ));
+            out["report_at_error"] = json!(error);
             Ok(out)
         })())
     }
@@ -241,7 +248,6 @@ fn wake_json(woke: &Wake) -> Value {
         "submit": woke.submit,
         "context": woke.context,
         "deliver_ids": woke.deliver_ids,
-        "attach_to": attach_to(),
         "report_due": woke.report_due,
         "state": {
             "pending": woke
@@ -253,6 +259,10 @@ fn wake_json(woke: &Wake) -> Value {
             "delivered": woke.state.delivered,
         },
     })
+}
+
+pub fn attach_json(prompt: &NextPrompt) -> Value {
+    json!({ "attach": attaches(prompt) })
 }
 
 pub fn delegate_json(delegate: &Delegate) -> Value {

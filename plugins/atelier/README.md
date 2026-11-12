@@ -72,7 +72,7 @@ atelier git <reviews|guard|hook>          # git-utils 의 기계적 호출 표�
 atelier session <push-check|ensure-env>   # 세션 경계 hook (SessionStart / Stop)
 atelier orchestrator <spawn-check|compact-note>      # function hooks 모듈이 위임하는 결정적 판정 (아래 §Function hooks)
 atelier code-style <install|update|check|restore|uninstall> # 프로젝트 코드 스타일 룰(base·언어·앱 성격) 설치·갱신·점검·제어 (/atelier:code-style)
-atelier kanban <board|status|record-path|forget|relay-frame|answer|guard-bash|command|delegate|ledger|send|stop|permit|reply|decide|inbox|spawn>   # 세션 칸반 판정과 세션 사이 요청 전달 (아래 §세션 칸반)
+atelier kanban <board|status|record-path|forget|relay-frame|answer|guard-bash|prune-nonces|command|delegate|ledger|send|stop|permit|reply|decide|inbox|spawn>   # 세션 칸반 판정과 세션 사이 요청 전달 (아래 §세션 칸반)
 ```
 
 `drift` 는 `/atelier:update`·`/atelier:setup` 명세가 호출하는 결정적 도구입니다.
@@ -152,6 +152,9 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   - 결정 요청: `atelier kanban decide --session <id> --at <결정 id> --text <답> --from pane` — 상세에서 직접 입력한
     글도 그 결정의 답으로 갑니다. 결정 id 는 `wait.id` 입니다.
   - 권한 요청: `atelier kanban permit --session <id> --request <요청 id> --decision allow|deny --from pane`
+  - pane 은 답마다 한 번만 쓰는 확인 값(`--nonce`)을 플러그인 저장소에 남기고, 남길 때마다 저장소의 확인 값 키를 오래된
+    순으로 `atelier kanban prune-nonces`(stdin `{keys}` → `{drop}`)에 넘겨 가장 최근 32개 밖의 키를 지웁니다. CLI 가 없거나
+    실패하면 지우지 않습니다.
   - `--from agent`(메인 에이전트의 답)는 물어 받은 답(`--relay`) 또는 선례(`--precedent`·`--reason`) 중 정확히
     하나를 붙여야 받습니다.
   - 선례: 질문 답과 권한 허용만 받습니다 —
@@ -247,16 +250,19 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
     답에 지금의 비교·불일치·최근 5건 일치·권고를 한 줄로 보여 줍니다. `/kanban delegate act decision` 은
     `결정 요청은 아직 대신 답하지 않아요` 로 거부합니다. `/kanban delegate shadow question|permission|decision` 은 지켜보기로 내립니다.
   - 깨우기: 켜진 세션의 모드는 2초마다 `atelier kanban delegate wake --session <이 세션> --now <ms> --report-at <HH:MM>
-    --utc-offset <분>` 에 stdin `{sessions: [기록…], state: {pending, delivered, draft_len}}` 를 넘기고, CLI 가
-    `{delegate, submit, context, deliver_ids, attach_to, report_due, state}` 로 답합니다. 새 대기는 10초 모으고, 위임 세션이
+    --utc-offset <분>` 에 stdin `{sessions: [기록…], state: {pending, delivered, draft_len}, told_report_at}` 를 넘기고, CLI 가
+    `{delegate, submit, context, deliver_ids, report_due, report_at_error, toast, state}` 로 답합니다. `state.delivered` 는 같은 id 를
+    한 번만 남깁니다. 새 대기는 10초 모으고, 위임 세션이
     턴을 돌리지 않고 입력 칸이 비었고 사람이 마지막으로 입력한 지 30초가 지났으면 `submit` 을, 아니면 `context` 를 줍니다.
     처음 본 지 3분이 지난 것은 턴이 쉬기만 하면 `submit` 입니다. 메인 에이전트의 답이 받는 세션에서 버려진 것(`전달 실패`)과
     일일 보고는 모으지 않습니다. 프롬프트에는 세션·대기 id 만 들어갑니다:
     `[칸반 위임] 전달 실패 <n>건` / `[칸반 위임] 입력 대기 <n>건` 아래에 `- <세션 id> <종류> <id>[ <결과>]` 줄,
     `[칸반 위임] 일일 보고 — 직전 보고 이후(--since <ms>)`. 모드는 `submit` 을 `$.prompt.submit` 으로 내고, `context` 는
-    `attach_to` 의 출처(사람이 입력한 것)인 다음 프롬프트에 붙입니다. 엔진이 받아들였을 때만 `deliver_ids` 를 다음
+    다음 프롬프트마다 `atelier kanban delegate attach --origin <origin.kind> [--slash-command] [--meta]`(→ `{attach}`)에
+    물어 `attach` 인 프롬프트(사람이 입력한 것, 슬래시 명령·meta 프롬프트 제외)에 붙입니다. 엔진이 받아들였을 때만 `deliver_ids` 를 다음
     `state.delivered` 로 넘기므로 실패한 것은 다음 tick 에 다시 판정됩니다. CLI 가 없거나 실패하면 아무것도 내지 않습니다.
-  - 일일 보고: `kanban_report_at`(플러그인 설정, 기본 `18:00`, 로컬 시각) 이후 장부에 보고가 없으면 `report_due` 입니다. `HH:MM` 이 아니면 보고만 끄고 깨우기는 계속하며, 이유(`report_at_error`)를 toast 로 한 번 알립니다.
+  - 일일 보고: `kanban_report_at`(플러그인 설정, 기본 `18:00`, 로컬 시각) 이후 장부에 보고가 없으면 `report_due` 입니다. `HH:MM` 이 아니면 보고만 끄고 깨우기는 계속하며, 이유(`report_at_error`)를 toast 로 한 번 알립니다 — 모드가 지난
+    `report_at_error` 를 다음 깨우기의 `told_report_at` 으로 넘기고, CLI 는 그와 다른 이유일 때만 `toast` 에 싣습니다.
     보고를 낸 뒤 모드가 `atelier kanban delegate report --now <ms>` 로 남기고 `ledger prune` 을 부릅니다. 그 시각에 위임
     세션이 없었으면 다음에 위임 세션이 살아 있을 때 한 번 냅니다. 보고 내용은 `kanban-delegate` skill 이 씁니다.
   - 메인 에이전트(`kanban-delegate` skill): `[칸반 위임]` 프롬프트를 받으면 대기마다 `status --session` 으로 `wait` 를 읽고,

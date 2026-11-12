@@ -780,13 +780,10 @@ describe('kanban progress and questions', () => {
   })
 
   for (const [said, via] of [
-    ['pane', 'pane'],
-    ['terminal', 'terminal'],
     ['agent', 'agent'],
-    [undefined, 'terminal'],
-    ['somewhere', 'terminal'],
+    [undefined, null],
   ] as const) {
-    test(`an inbox answer the CLI says came via ${String(said)} is recorded as via ${via}`, async ($, on) => {
+    test(`an inbox answer the CLI says came via ${String(said)} is recorded with that via as given`, async ($, on) => {
       const answering = { exitCode: 0, stdout: '' }
       const w = world(on, argv => {
         if (argv[3] === 'dir') {
@@ -913,23 +910,35 @@ describe('kanban pane', () => {
     expect(nonceKeys(w)).toEqual(['kanban:nonce:other:permit:n-2'])
   })
 
-  test('the pane keeps only its newest nonces', async ($, on) => {
-    const w = world(on, boardAndAnswers(ASKING_BOARD))
-    const old = Array.from({ length: 32 }, (_, i) => `kanban:nonce:other:answer:old-${i}`)
+  for (const [name, pruned, kept] of [
+    ['the nonces prune-nonces names are deleted', { drop: ['kanban:nonce:other:answer:old-0'] }, ['kanban:nonce:other:answer:old-1']],
+    ['a prune-nonces that fails deletes no nonce', 'missing', ['kanban:nonce:other:answer:old-0', 'kanban:nonce:other:answer:old-1']],
+  ] as const) {
+    test(`a pane answer hands every nonce key to prune-nonces: ${name}`, async ($, on) => {
+      const answers = boardAndAnswers(ASKING_BOARD)
+      const w = world(on, argv =>
+        argv[2] === 'prune-nonces' ? (pruned === 'missing' ? 'missing' : { exitCode: 0, stdout: JSON.stringify(pruned) }) : answers(argv),
+      )
+      const old = ['kanban:nonce:other:answer:old-0', 'kanban:nonce:other:answer:old-1']
 
-    for (const key of old) {
-      w.store[key] = { session: 'other', kind: 'answer', at: START }
-    }
+      for (const key of old) {
+        w.store[key] = { session: 'other', kind: 'answer', at: START }
+      }
 
-    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
-    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-    await ui.press({ key: 'ask:other:tu-1:send' })
-    await w.clock.settle()
-    await ui.unmount()
+      await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+      const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+      await ui.press({ key: 'ask:other:tu-1:send' })
+      await w.clock.settle()
+      await ui.unmount()
 
-    const { nonce } = paneAnswer(w.runs.find(r => r.argv[2] === 'reply'))
-    expect(nonceKeys(w)).toEqual([...old.slice(1), `kanban:nonce:other:answer:${nonce}`])
-  })
+      const { nonce } = paneAnswer(w.runs.find(r => r.argv[2] === 'reply'))
+      const left = `kanban:nonce:other:answer:${nonce}`
+      const prune = w.runs.find(r => r.argv[2] === 'prune-nonces')
+      expect(prune?.argv).toEqual(['atelier', 'kanban', 'prune-nonces'])
+      expect(JSON.parse(prune?.stdin ?? '{}')).toEqual({ keys: [...old, left] })
+      expect(nonceKeys(w)).toEqual([...kept, left])
+    })
+  }
 
   test('/kanban again closes the pane', async ($, on) => {
     const w = world(on)
@@ -1950,10 +1959,9 @@ describe('kanban permission answers', () => {
 
   for (const [said, via] of [
     ['pane', 'pane'],
-    ['agent', 'agent'],
-    [undefined, 'terminal'],
+    [undefined, null],
   ] as const) {
-    test(`a permit the CLI says came via ${String(said)} is the decision, recorded as via ${via}`, async ($, on) => {
+    test(`a permit the CLI says came via ${String(said)} is the decision, recorded with that via as given`, async ($, on) => {
       const { w } = permitWorld(on, [{ decision: 'deny', from: 'pane', via: said }])
 
       await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
@@ -2608,6 +2616,7 @@ describe('kanban delegate', () => {
     deliver_ids?: string[]
     report_due?: boolean
     report_at_error?: string | null
+    toast?: string | null
     state?: unknown
   }
 
@@ -2617,21 +2626,31 @@ describe('kanban delegate', () => {
       submit: null,
       context: null,
       deliver_ids: [WAIT_ID],
-      attach_to: ['composer', 'bridge'],
       report_due: false,
       report_at_error: null,
+      toast: null,
       state: { pending: [{ id: WAIT_ID, since: START }], delivered: [] },
       ...wake,
     }
   }
 
-  /** A CLI that turns delegation on, and answers each `delegate wake` with the next of `wakes`, the last one after. */
-  function delegating(wakes: Wake[], command: unknown = ON): FakeCli {
+  /**
+   * A CLI that turns delegation on, and answers each `delegate wake` with the next of `wakes`, the last one after;
+   * `delegate attach` answers the next of `attaches`, then no.
+   */
+  function delegating(wakes: Wake[], command: unknown = ON, attaches: boolean[] = []): FakeCli {
     let n = 0
+    let attached = 0
 
     return argv => {
       if (argv[2] === 'command') {
         return { exitCode: 0, stdout: JSON.stringify(command) }
+      }
+
+      if (argv[2] === 'delegate' && argv[3] === 'attach') {
+        attached += 1
+
+        return { exitCode: 0, stdout: JSON.stringify({ attach: attaches[attached - 1] ?? false }) }
       }
 
       if (argv[2] === 'delegate' && argv[3] === 'wake') {
@@ -2647,6 +2666,10 @@ describe('kanban delegate', () => {
 
   function wakeRuns(w: World): Run[] {
     return w.runs.filter(r => r.argv[2] === 'delegate' && r.argv[3] === 'wake')
+  }
+
+  function attachRuns(w: World): (readonly string[])[] {
+    return w.runs.filter(r => r.argv[2] === 'delegate' && r.argv[3] === 'attach').map(r => r.argv.slice(2))
   }
 
   function sentState(run: Run | undefined): unknown {
@@ -2758,8 +2781,8 @@ describe('kanban delegate', () => {
     expect(sentState(wakeRuns(w)[1])).toEqual({ pending: [{ id: WAIT_ID, since: START }], delivered: [], draft_len: 0 })
   })
 
-  test("a context rides on the person's next prompt and only then counts as delivered", async ($, on) => {
-    const w = world(on, delegating([{ context: SAID }, {}]))
+  test('a context rides on the next prompt delegate attach lets it, and only then counts as delivered', async ($, on) => {
+    const w = world(on, delegating([{ context: SAID }, {}], ON, [false, true]))
 
     await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
     await turnOn($)
@@ -2770,9 +2793,44 @@ describe('kanban delegate', () => {
     await $.prompt.submit({ text: 'what is next?', origin: { kind: 'composer' } } as never)
     await $.prompt.submit({ text: 'and then?', origin: { kind: 'composer' } } as never)
 
+    expect(attachRuns(w)).toEqual([
+      ['delegate', 'attach', '--origin', 'plugin'],
+      ['delegate', 'attach', '--origin', 'composer'],
+    ])
     expect(w.prompt.contexts).toEqual([undefined, [SAID], undefined])
     await w.clock.advance(2_000)
     expect((sentState(wakeRuns(w)[1]) as { delivered: string[] }).delivered).toEqual([WAIT_ID])
+  })
+
+  test('delegate attach is told when the prompt is a slash command or a meta prompt', async ($, on) => {
+    const w = world(on, delegating([{ context: SAID }, {}]))
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await turnOn($)
+    await w.clock.advance(2_000)
+    await $.prompt.submit({ text: '/compact', command: 'compact', origin: { kind: 'composer' } } as never)
+    await $.prompt.submit({ text: 'note', isMeta: true } as never)
+
+    expect(attachRuns(w)).toEqual([
+      ['delegate', 'attach', '--origin', 'composer', '--slash-command'],
+      ['delegate', 'attach', '--origin', '', '--meta'],
+    ])
+    expect(w.prompt.contexts).toEqual([undefined, undefined])
+  })
+
+  test('an attach the CLI cannot answer leaves the prompt as typed and the context offered', async ($, on) => {
+    const delegate = delegating([{ context: SAID }, {}], ON, [true])
+    let failing = true
+    const w = world(on, argv => (failing && argv[3] === 'attach' ? 'missing' : delegate(argv)))
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    await turnOn($)
+    await w.clock.advance(2_000)
+    await $.prompt.submit({ text: 'what is next?', origin: { kind: 'composer' } } as never)
+    failing = false
+    await $.prompt.submit({ text: 'and now?', origin: { kind: 'composer' } } as never)
+
+    expect(w.prompt.contexts).toEqual([undefined, [SAID]])
   })
 
   test('a daily report delivered is left in the ledger and the ledger is pruned', async ($, on) => {
@@ -2820,16 +2878,17 @@ describe('kanban delegate', () => {
     expect(argv[argv.indexOf('--report-at') + 1]).toBe('09:30')
   })
 
-  test('a report time the CLI refused is told once and the wake goes on', { options: { kanban_report_at: '9:00' } }, async ($, on) => {
+  test('the toast a wake names is shown, and its report time error goes back to the next wake', async ($, on) => {
     const error = '--report-at 은 `HH:MM`(00:00~23:59) 이에요 (받은 값: 9:00)'
-    const w = world(on, delegating([{ submit: SAID, report_at_error: error }, { report_at_error: error }]))
+    const w = world(on, delegating([{ submit: SAID, report_at_error: error, toast: error }, { report_at_error: error }]))
 
     await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
     await turnOn($)
     await w.clock.advance(2_000)
     await w.clock.advance(2_000)
 
-    expect(wakeRuns(w).length).toBeGreaterThan(1)
+    const told = wakeRuns(w).map(r => (JSON.parse(r.stdin ?? '{}') as { told_report_at?: unknown }).told_report_at)
+    expect(told.slice(0, 2)).toEqual([null, error])
     expect(w.toasts).toEqual([error])
     expect(w.submitted).toEqual([SAID])
   })

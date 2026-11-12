@@ -145,7 +145,6 @@ fn after_ten_seconds_an_idle_delegate_with_an_empty_box_gets_a_prompt_of_ids_onl
     assert!(!prompt.contains("color"), "no worker text: {prompt}");
     assert_eq!(woke["context"], Value::Null);
     assert_eq!(woke["deliver_ids"], json!([WAIT]));
-    assert_eq!(woke["attach_to"], json!(["composer", "bridge"]));
 }
 
 #[test]
@@ -559,6 +558,104 @@ fn a_report_time_that_is_not_hh_mm_leaves_the_report_off_and_says_why() {
         woke["submit"],
         json!("[칸반 위임] 입력 대기 1건\n- w question tu-1")
     );
+}
+
+/// A wake whose mod last told the person `told` about the report time.
+fn told_wake(home: &Home, report_at: &str, told: Value) -> Value {
+    let mut me = main_session();
+    me["heartbeat_at"] = json!(NOW - 5 * SEC);
+    let now = NOW.to_string();
+    home.run(
+        &[
+            "delegate",
+            "wake",
+            "--session",
+            DELEGATE,
+            "--now",
+            &now,
+            "--report-at",
+            report_at,
+            "--utc-offset",
+            "0",
+        ],
+        &json!({ "sessions": [me], "state": empty_state(), "told_report_at": told }).to_string(),
+    )
+}
+
+#[test]
+fn a_report_time_error_is_a_toast_until_the_mod_told_it() {
+    let home = Home::default();
+
+    let first = told_wake(&home, "9:00", Value::Null);
+    let error = first["report_at_error"].clone();
+    let again = told_wake(&home, "9:00", error.clone());
+    let other = told_wake(&home, "25:00", error.clone());
+
+    assert!(
+        error.as_str().is_some_and(|e| e.contains("9:00")),
+        "{first}"
+    );
+    assert_eq!(first["toast"], error);
+    assert_eq!(again["toast"], Value::Null);
+    assert!(
+        other["toast"].as_str().is_some_and(|e| e.contains("25:00")),
+        "{other}"
+    );
+}
+
+#[test]
+fn a_valid_report_time_is_no_toast_whatever_was_told() {
+    let home = Home::default();
+
+    let out = told_wake(&home, "18:00", json!("--report-at 은 `HH:MM` 이에요"));
+
+    assert_eq!(out["toast"], Value::Null);
+    assert_eq!(out["report_at_error"], Value::Null);
+}
+
+#[test]
+fn delivered_ids_handed_back_twice_are_kept_once() {
+    let home = Home::default();
+    let sessions = json!([
+        main_session(),
+        asking(color()),
+        failed_delivery("agent", "stale", NOW - SEC)
+    ]);
+    let failure = "fail:w2:r-7";
+
+    let out = wake(
+        &home,
+        sessions,
+        state(json!([]), json!([WAIT, failure, WAIT, failure]), 0),
+        NOW,
+    );
+
+    assert_eq!(out["state"]["delivered"], json!([WAIT, failure]));
+}
+
+fn attaches(args: &[&str]) -> Value {
+    let mut full = vec!["delegate", "attach"];
+    full.extend(args);
+    Home::default().kanban(&full)["attach"].clone()
+}
+
+#[test]
+fn a_context_rides_only_on_a_prompt_a_person_typed() {
+    for origin in ["composer", "bridge"] {
+        assert_eq!(attaches(&["--origin", origin]), json!(true), "{origin}");
+    }
+    for origin in ["plugin", "loop", "unknown", ""] {
+        assert_eq!(attaches(&["--origin", origin]), json!(false), "{origin}");
+    }
+}
+
+#[test]
+fn a_context_does_not_ride_on_a_slash_command_or_a_meta_prompt() {
+    assert_eq!(
+        attaches(&["--origin", "composer", "--slash-command"]),
+        json!(false)
+    );
+    assert_eq!(attaches(&["--origin", "composer", "--meta"]), json!(false));
 }
 
 #[test]

@@ -7,7 +7,7 @@
 use super::board::{Board, Column, SessionFact, Waiting};
 use super::delegate::Delegate;
 use super::detail::{Delivery, DeliveryStatus};
-use super::prompt::{decides_as_person, PERSON_ORIGINS};
+use super::prompt::decides_as_person;
 use super::request::{check_id, RequestKind, Status, Via};
 
 const GATHER_MS: u64 = 10 * 1_000;
@@ -56,8 +56,22 @@ pub struct Wake {
     pub report_due: bool,
 }
 
-pub fn attach_to() -> &'static [&'static str] {
-    &PERSON_ORIGINS
+/// A prompt entering the delegate session, as the mod saw it submitted.
+pub struct NextPrompt<'a> {
+    /// The prompt's `origin.kind`.
+    pub origin: &'a str,
+    pub slash_command: bool,
+    pub meta: bool,
+}
+
+/// Whether a wake's context rides on `prompt`: only on one a person typed.
+pub fn attaches(prompt: &NextPrompt) -> bool {
+    !prompt.slash_command && !prompt.meta && decides_as_person(prompt.origin)
+}
+
+/// The report time error to show, unless it is the one the mod last told.
+pub fn report_at_toast(error: Option<&str>, told: Option<&str>) -> Option<String> {
+    error.filter(|e| Some(*e) != told).map(str::to_string)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -195,14 +209,12 @@ pub fn wake(board: &Board, delegate: &Delegate, me: &SessionFact, input: WakeInp
     let now = input.now;
     let found = items(board, delegate, &input);
     let is_current = |id: &str| found.iter().any(|item| item.id == id);
-    let mut delivered: Vec<String> = input
-        .state
-        .delivered
-        .iter()
-        .filter(|id| is_current(id))
-        .cloned()
-        .collect();
-    delivered.dedup();
+    let mut delivered: Vec<String> = Vec::new();
+    for id in input.state.delivered.iter().filter(|id| is_current(id)) {
+        if !delivered.contains(id) {
+            delivered.push(id.clone());
+        }
+    }
     let over = delivered.len().saturating_sub(MAX_KEPT);
     let delivered = delivered.split_off(over);
     let pending = newest(

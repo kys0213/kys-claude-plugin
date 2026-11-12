@@ -8,7 +8,7 @@ export const DEFAULT_REPORT_AT = '18:00'
 type Pending = { id: string; since: number }
 
 /** What `delegate wake` offered as context for the person's next prompt. */
-type Offer = { context: string; ids: string[]; attachTo: string[]; report: boolean }
+type Offer = { context: string; ids: string[]; report: boolean }
 
 type DelegateMemory = {
   /** What the last wake handed back, for the next one. */
@@ -19,7 +19,7 @@ type DelegateMemory = {
   waking: boolean
   /** `kanban_report_at` from the plugin's options. */
   reportAt: string
-  /** The report time error the person was last told, so each is shown once. */
+  /** The report time error the last wake named, for the next one to judge against. */
   toldReportAt: string | null
 }
 
@@ -81,7 +81,7 @@ export async function runDelegateCommand($: EngineInterface, s: DelegateState, a
 }
 
 async function delivered($: EngineInterface, s: DelegateState, ids: readonly string[], report: boolean): Promise<void> {
-  s.delegate.delivered = [...s.delegate.delivered, ...ids.filter(id => !s.delegate.delivered.includes(id))]
+  s.delegate.delivered = [...s.delegate.delivered, ...ids]
 
   if (report) {
     const now = String(await $.clock.now())
@@ -138,6 +138,7 @@ export async function wakeDelegate($: EngineInterface, s: DelegateState, session
       JSON.stringify({
         sessions: await sessions(),
         state: { pending: memory.pending, delivered: memory.delivered, draft_len: draft.text.length },
+        told_report_at: memory.toldReportAt,
       }),
     )
     const state = out?.state as Record<string, unknown> | undefined
@@ -146,19 +147,16 @@ export async function wakeDelegate($: EngineInterface, s: DelegateState, session
       return
     }
 
-    const reportAtError = typeof out.report_at_error === 'string' ? out.report_at_error : null
-
-    if (reportAtError !== null && reportAtError !== memory.toldReportAt) {
-      $.ui.toast(reportAtError)
+    if (typeof out.toast === 'string') {
+      $.ui.toast(out.toast)
     }
 
-    memory.toldReportAt = reportAtError
+    memory.toldReportAt = typeof out.report_at_error === 'string' ? out.report_at_error : null
     memory.pending = pendingOf(state.pending)
     memory.delivered = strings(state.delivered)
     const ids = strings(out.deliver_ids)
     const report = out.report_due === true
-    memory.offer =
-      typeof out.context === 'string' ? { context: out.context, ids, attachTo: strings(out.attach_to), report } : null
+    memory.offer = typeof out.context === 'string' ? { context: out.context, ids, report } : null
 
     if (typeof out.submit === 'string') {
       const r = await $.prompt.submit({ text: out.submit })
@@ -174,16 +172,32 @@ export async function wakeDelegate($: EngineInterface, s: DelegateState, session
   }
 }
 
-/** A person's prompt carries the context the last wake offered; it counts as delivered once the prompt entered. */
+async function attaches($: EngineInterface, e: PromptSubmitInput): Promise<boolean> {
+  const out = await cli($, [
+    'delegate',
+    'attach',
+    '--origin',
+    e.origin?.kind ?? '',
+    ...(e.command === undefined ? [] : ['--slash-command']),
+    ...(e.isMeta === true ? ['--meta'] : []),
+  ])
+
+  return out?.attach === true
+}
+
+/**
+ * The prompt carries the context the last wake offered when `delegate attach` says it may;
+ * it counts as delivered once the prompt entered.
+ */
 export async function submitWithOffer(
   $: EngineInterface,
   s: DelegateState,
   e: PromptSubmitInput,
   next: (e: PromptSubmitInput) => Promise<PromptSubmitResult>,
 ): Promise<PromptSubmitResult> {
-  const offer = s.delegate.offer
+  const offer = s.delegate.offer === null || !(await attaches($, e)) ? null : s.delegate.offer
 
-  if (offer === null || e.command !== undefined || e.isMeta === true || !offer.attachTo.includes(e.origin?.kind ?? '')) {
+  if (offer === null) {
     return next(e)
   }
 

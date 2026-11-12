@@ -110,6 +110,8 @@ pub struct WakeStdin {
     pub sessions: Vec<SessionFact>,
     pub state: WakeState,
     pub draft_len: u64,
+    /// The report time error the mod last told the person.
+    pub told_report_at: Option<String>,
 }
 
 /// An absent `state` is an empty one.
@@ -139,11 +141,28 @@ pub fn parse_wake(raw: &str) -> Result<WakeStdin, String> {
         None | Some(Value::Null) => 0,
         Some(n) => n.as_u64().ok_or_else(|| unreadable("draft_len"))?,
     };
+    let told_report_at = nullable_string(&value, "told_report_at")
+        .ok_or_else(|| "`told_report_at` is not a string".to_string())?;
     Ok(WakeStdin {
         sessions,
         state: WakeState { pending, delivered },
         draft_len,
+        told_report_at,
     })
+}
+
+/// The pane's nonce keys, oldest first.
+pub fn parse_nonce_keys(raw: &str) -> Result<Vec<String>, String> {
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    value
+        .get("keys")
+        .and_then(Value::as_array)
+        .and_then(|keys| {
+            keys.iter()
+                .map(|k| k.as_str().map(str::to_string))
+                .collect::<Option<Vec<_>>>()
+        })
+        .ok_or_else(|| "stdin has no `keys` array of strings".to_string())
 }
 
 fn parse_agent(value: &Value) -> Option<AgentFact> {
