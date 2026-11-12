@@ -17,7 +17,7 @@ import {
 } from './kanban-ask'
 import { type DetailCard, type DetailState, detailBlock, newDetailState, pruneDetail, toggleSelected } from './kanban-detail'
 import { CLI_MISSING, cli, runKanban } from './kanban-cli'
-import { type DelegateState, newDelegateMemory, runDelegateCommand, submitWithOffer, wakeDelegate } from './kanban-delegate'
+import { type DelegateState, newDelegateMemory, runKanbanCommand, submitWithOffer, wakeDelegate } from './kanban-delegate'
 import { type InboxState, awaitPermit, deliverRequests, endPermit, findInbox } from './kanban-inbox'
 import {
   type LedgerState,
@@ -302,7 +302,15 @@ async function tick($: EngineInterface, s: KanbanState): Promise<void> {
 }
 
 async function runCommand($: EngineInterface, s: KanbanState, e: { args: string; origin?: { kind: string } }): Promise<string> {
-  return e.args.trim() === '' ? toggle($, s) : runDelegateCommand($, s, e.args, e.origin?.kind ?? 'unknown')
+  const ran = await runKanbanCommand($, s, e.args, e.origin?.kind ?? 'unknown')
+
+  if (!ran.toggle) {
+    return ran.text
+  }
+
+  const toggled = await toggle($, s)
+
+  return ran.text ?? toggled
 }
 
 async function toggle($: EngineInterface, s: KanbanState): Promise<string> {

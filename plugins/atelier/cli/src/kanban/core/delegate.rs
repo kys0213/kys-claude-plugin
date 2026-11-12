@@ -54,6 +54,14 @@ pub fn delegate_of(board: &Board) -> Delegate {
 
 /// What `/kanban <args>` asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KanbanCommand {
+    /// A bare `/kanban`: open the pane, or close it.
+    TogglePane,
+    Delegate(DelegateCommand),
+}
+
+/// What `/kanban delegate <args>` asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DelegateCommand {
     On,
     Off,
@@ -63,20 +71,24 @@ pub enum DelegateCommand {
 
 const USAGE: &str = "`/kanban delegate on|off`, `/kanban delegate act question|permission`, `/kanban delegate shadow question|permission|decision` 중 하나예요";
 
-impl DelegateCommand {
-    pub fn parse(args: &str) -> Result<DelegateCommand, String> {
+impl KanbanCommand {
+    pub fn parse(args: &str) -> Result<KanbanCommand, String> {
         let words: Vec<&str> = args.split_whitespace().collect();
         let refuse = || format!("{USAGE} (받은 값: {})", args.trim());
+        let delegate = |command| Ok(KanbanCommand::Delegate(command));
         match words.as_slice() {
-            ["delegate", "on"] => Ok(DelegateCommand::On),
-            ["delegate", "off"] => Ok(DelegateCommand::Off),
-            ["delegate", "act", "question"] => Ok(DelegateCommand::Act(Proxied::Question)),
-            ["delegate", "act", "permission"] => Ok(DelegateCommand::Act(Proxied::Permission)),
+            [] => Ok(KanbanCommand::TogglePane),
+            ["delegate", "on"] => delegate(DelegateCommand::On),
+            ["delegate", "off"] => delegate(DelegateCommand::Off),
+            ["delegate", "act", "question"] => delegate(DelegateCommand::Act(Proxied::Question)),
+            ["delegate", "act", "permission"] => {
+                delegate(DelegateCommand::Act(Proxied::Permission))
+            }
             ["delegate", "act", "decision"] => {
                 Err("결정 요청은 아직 대신 답하지 않아요".to_string())
             }
             ["delegate", "shadow", kind] => EntryKind::parse(kind)
-                .map(DelegateCommand::Shadow)
+                .map(|kind| KanbanCommand::Delegate(DelegateCommand::Shadow(kind)))
                 .ok_or_else(refuse),
             _ => Err(refuse()),
         }

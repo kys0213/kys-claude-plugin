@@ -128,6 +128,20 @@ fn shadow_steps_a_kind_back_from_acting() {
 }
 
 #[test]
+fn a_bare_kanban_from_any_origin_toggles_the_pane_and_sets_nothing() {
+    for origin in ["composer", "plugin", "unknown"] {
+        for args in ["", "  "] {
+            let home = Home::default();
+
+            let out = command(&home, origin, args);
+
+            assert_eq!(out, json!({ "toggle": true }), "{origin} {args:?}");
+            assert_eq!(mode_of(&home, ANY_QUESTION_KEY), json!("shadow"));
+        }
+    }
+}
+
+#[test]
 fn arguments_that_are_not_a_delegate_command_are_refused() {
     let home = Home::default();
 

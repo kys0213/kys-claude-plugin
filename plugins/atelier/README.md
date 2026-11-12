@@ -242,7 +242,8 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   모아 받습니다. 모드는 `/kanban <인자>` 를 실행 출처(`origin.kind`)와 함께 `atelier kanban command --session <이 세션>
   --now <ms> --origin <출처> --args <인자>` 에 넘기고, CLI 가 사람이 입력한 것(`composer`·`bridge`)일 때만 받아 장부에
   위임 설정 줄을 남깁니다. 출력 `{text, delegate_since?}` 의 `text` 가 명령의 답이고, `delegate_since`(`on` 은 지금 시각,
-  `off` 는 `null`)가 있으면 모드가 기록에 남깁니다.
+  `off` 는 `null`)가 있으면 모드가 기록에 남깁니다. 인자가 없는 `/kanban` 은 출처와 상관없이 `{toggle: true}` 로 답하고
+  모드가 pane 을 열거나 닫습니다. CLI 가 없거나 실패하면 모드는 pane 을 열거나 닫고 CLI 를 실행하지 못했다고 답합니다.
   - `/kanban delegate on|off` — 이 세션을 위임 세션으로 켜고 끕니다. 살아 있는(응답 없음이 아닌) 위임 세션이 둘 이상이면
     가장 최근에 켠 하나만 동작하고, `status` 와 `board`·`kanban_board` 의 `delegate: {session_id, since, conflicts}` 가
     그것과 나머지를 보여 줍니다. `status` 의 `delegate` 에는 종류별 단계 `modes` 와 지켜보기 진행도 `progress`(`"n/10"`)도 실립니다.

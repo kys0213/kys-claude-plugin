@@ -148,6 +148,14 @@ function boardAndAnswers(board: unknown): FakeCli {
   }
 }
 
+/** A bare `/kanban` as the CLI answers it, unless the fake CLI is missing or names `toggle` itself. */
+async function withPaneToggle(cli: FakeCli, argv: readonly string[]): Promise<CliOut> {
+  const out = await cli(argv)
+  const bare = argv[2] === 'command' && argv[argv.indexOf('--args') + 1]?.trim() === ''
+
+  return bare && out !== 'missing' && !out.stdout.includes('"toggle"') ? { exitCode: 0, stdout: JSON.stringify({ toggle: true }) } : out
+}
+
 /** Stands for the engine beneath the plugin: one session, its store, its clock, the CLI. */
 function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   const store: Record<string, unknown> = {}
@@ -210,7 +218,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   })
   on('process.run', async ($, e) => {
     runs.push({ argv: e.argv, stdin: e.init?.stdin })
-    const out = await cli(e.argv)
+    const out = await withPaneToggle(cli, e.argv)
 
     if (out === 'missing') {
       return { deny: 'ENOENT: Executable not found in $PATH' }
@@ -956,6 +964,36 @@ describe('kanban pane', () => {
       expect(w.store['unrelated']).toEqual({ keep: true })
     })
   }
+
+  test('/kanban hands the CLI its bare arguments and toggles the pane only when the CLI says so', async ($, on) => {
+    let toggle = false
+    const w = world(on, argv =>
+      argv[2] === 'command'
+        ? { exitCode: 0, stdout: JSON.stringify(toggle ? { toggle } : { toggle, error: '아직 몰라요' }) }
+        : { exitCode: 0, stdout: JSON.stringify(BOARD) },
+    )
+
+    const refused = await $.command.run({ command: 'kanban', args: ' ', origin: { kind: 'plugin', name: 'x' } } as never)
+
+    expect(w.runs.find(r => r.argv[2] === 'command')?.argv.slice(7)).toEqual(['--origin', 'plugin', '--args', ' '])
+    expect(refused).toEqual({ text: '아직 몰라요' })
+    expect(w.shown.value).toBe(false)
+
+    toggle = true
+    const ran = await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+
+    expect(ran).toEqual({ text: '세션 칸반을 열었어요.' })
+    expect(w.shown.value).toBe(true)
+  })
+
+  test('a missing CLI still toggles the pane on /kanban and says the CLI is missing', async ($, on) => {
+    const w = world(on, () => 'missing')
+
+    const ran = await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+
+    expect(ran).toEqual({ text: 'atelier CLI 를 실행하지 못했어요 — /atelier:update 로 설치·갱신하세요' })
+    expect(w.shown.value).toBe(true)
+  })
 
   test('/kanban again closes the pane', async ($, on) => {
     const w = world(on)

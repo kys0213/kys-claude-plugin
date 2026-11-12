@@ -115,7 +115,7 @@ pub enum Commands {
         #[arg(long)]
         session: String,
     },
-    /// `/kanban <args>` as the mod saw it run → what to tell the person
+    /// `/kanban <args>` as the mod saw it run → whether to toggle the pane, or what to tell the person
     Command {
         #[arg(long)]
         session: String,

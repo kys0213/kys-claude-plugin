@@ -7,7 +7,7 @@ use crate::kanban::commands::payload::{parse_record_copy, parse_wake};
 use crate::kanban::commands::records::{RecordStore, EXPIRE_AFTER_MS, STALE_AFTER_MS};
 use crate::kanban::core::board::{build, Board, BoardParams, SessionFact};
 use crate::kanban::core::delegate::{
-    delegate_of, kind_name, last_report, Delegate, DelegateCommand, Report, ReportAt,
+    delegate_of, kind_name, last_report, Delegate, DelegateCommand, KanbanCommand, Report, ReportAt,
 };
 use crate::kanban::core::ledger::{month_of, EntryKind};
 use crate::kanban::core::precedent::{mode, Book, Mode, Setting, SettingScope, SettingValue};
@@ -99,12 +99,15 @@ impl KanbanDelegate<'_> {
             .append(&month_of(setting.at), &[setting.to_line()])
     }
 
-    /// A person's `/kanban <args>`: what to tell them, and for `on` and `off`
-    /// the session's new `delegate_since`.
+    /// `/kanban <args>`: `toggle` for a bare one, else what to tell the
+    /// person, and for `on` and `off` the session's new `delegate_since`.
     pub fn command(&self, typed: &Typed) -> Value {
         answer((|| {
             check_id("session", typed.session)?;
-            let command = DelegateCommand::parse(typed.args)?;
+            let command = match KanbanCommand::parse(typed.args)? {
+                KanbanCommand::TogglePane => return Ok(json!({ "toggle": true })),
+                KanbanCommand::Delegate(command) => command,
+            };
             if !decides_as_person(typed.origin) {
                 return Err(format!(
                     "사람이 입력한 `/kanban delegate` 만 받아요 (출처: {})",
