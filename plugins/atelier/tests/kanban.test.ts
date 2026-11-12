@@ -1744,6 +1744,44 @@ describe('kanban details and requests', () => {
     ])
   })
 
+  test('removing a stale card asks once more, then clears it as its expiry would', async ($, on) => {
+    const dead = {
+      session_id: 'dead',
+      headline: 'temp · 6h',
+      subtitle: null,
+      is_self: false,
+      actions: ['forget'],
+      detail: { sections: [], decision: null, delivery: null },
+    }
+    const board = {
+      ...DETAIL_BOARD,
+      expired: [],
+      columns: [...DETAIL_BOARD.columns.slice(0, 3), { id: 'stale', heading: '응답 없음 1', cards: [dead] }],
+    }
+    const w = world(on, routes({ board, forget: { forgot: 'dead' } }))
+    w.store['kanban:session:dead'] = { v: 1, session_id: 'dead', events: [] }
+    w.store['kanban:answer:dead:q-1'] = { answers: ['Blue'] }
+    w.store['kanban:nonce:dead:answer:n-1'] = { session: 'dead', kind: 'answer', at: START }
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'card:dead' })
+    await ui.unmount()
+
+    const opened = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await opened.press({ key: 'detail:dead:forget' })
+    expect(w.runs.find(r => r.argv[2] === 'forget')).toBeUndefined()
+    await opened.unmount()
+
+    const confirming = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await confirming.press({ key: 'detail:dead:forget-yes' })
+    await w.clock.settle()
+    await confirming.unmount()
+
+    expect(w.runs.filter(r => r.argv[2] === 'forget').map(r => r.argv)).toEqual([['atelier', 'kanban', 'forget', '--session', 'dead']])
+    expect(Object.keys(w.store).filter(k => k.includes(':dead'))).toEqual([])
+  })
+
   test('a decision card answers that decision with the option pressed', async ($, on) => {
     const w = world(on, routes({ board: DETAIL_BOARD, decide: { queued: { session_id: 'wrap', id: 'r', kind: 'decide' } } }))
 

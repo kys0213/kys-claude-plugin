@@ -186,7 +186,7 @@ fn each_column_offers_its_own_actions() {
         json!({ "turn_id": "t-5" }),
     );
     stale["heartbeat_at"] = json!(NOW - 10 * MIN);
-    assert!(actions(&only(json!([stale])).1).is_empty());
+    assert_eq!(actions(&only(json!([stale])).1), ["forget"]);
 }
 
 #[test]
