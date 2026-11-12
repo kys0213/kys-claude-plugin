@@ -8,7 +8,7 @@ version: 1.0.0
 
 합의된 설계를 **스펙 문서 계층으로 적는** 스킬입니다. 설계를 *생각하고 도전하는 대화*는 `grill`에서 끝내고, 여기서는 그 결과를 정해진 구조와 깊이로 형식화합니다.
 
-이 skill 이 소유하는 것은 **무엇을 어떤 구조·깊이로 쓸 것인가의 기준**(DESIGN/concerns/flows 템플릿, 깊이 분리)입니다. 실제 파일 Write 는 `orchestrator` skill 이 위임하는 sub-agent 가 수행하며, 메인 에이전트는 Write 를 위임할 뿐 직접 실행하지 않습니다.
+이 skill 이 소유하는 것은 **무엇을 어떤 구조·깊이로 쓸 것인가의 기준**(DESIGN/concerns/flows 템플릿, 깊이 분리)입니다. 실제 파일 Write 는 규모에 따라 메인 에이전트가 직접 하거나, 여러 문서로 벌어지면 `orchestrator` skill 로 위임합니다.
 
 ## 진입 라우팅 (의도 → 흐름)
 
@@ -31,19 +31,19 @@ version: 1.0.0
 
 ## 위임 흐름 (orchestrator 연계)
 
-`orchestrator` skill 은 문서 산출물 요청(스펙 작성)을 감지하면 실제 Write 를 sub-agent 에 위임한다. spec-write 는 그 sub-agent 가 따를 구조·깊이·형식 기준의 지식 출처다 — dispatch 프롬프트에 `references/authoring.md` 의 기준을 포함시켜 sub-agent 가 동일한 규약으로 작성하도록 한다.
+스펙 작성이 여러 문서로 벌어져 `orchestrator` skill 로 위임하면, spec-write 는 그 sub-agent 가 따를 구조·깊이·형식 기준의 지식 출처다 — dispatch 프롬프트에 `references/authoring.md` 의 기준을 포함시켜 sub-agent 가 동일한 규약으로 작성하도록 한다. 문서 하나로 닫히면 메인이 같은 기준으로 직접 쓴다.
 
 ## 흔한 실수
 
 - ❌ 합의되지 않은 설계를 spec-write 단계에서 즉흥적으로 결정 → `grill` 로 돌아가 먼저 합의한다.
 - ❌ write-detail 에서 Big Picture 내용을 다시 풀어씀 → DESIGN.md 를 링크로 참조하고 상세만 적는다.
 - ❌ 코드 경로·식별자·plan 을 spec 에 적음 → spec 은 정책만 적는다. 코드나 plan 이 바뀔 때마다 spec 을 따라 고치게 된다.
-- ❌ 승인 전에 파일을 먼저 저장 → 내용 제시 → 승인 → orchestrator 위임 Write 순서를 지킨다.
+- ❌ 승인 전에 파일을 먼저 저장 → 내용 제시 → 승인 → Write 순서를 지킨다. spec 은 제품 정책이라 사용자 승인 지점이다.
 - ❌ 다이어그램을 ASCII 로 작성 → mermaid 가 기본이고 ASCII 는 표현이 어색한 경우의 예외다 (형식 기준은 `references/authoring.md`).
 
 ## 공통 원칙
 
 - **합의 후 형식화** — 설계 결정은 `grill` 대화에서 합의한다. spec-write 는 합의된 내용을 구조화할 뿐, 새 설계 결정을 임의로 내리지 않는다.
 - 작성 원칙(승인 전 저장 금지·코드·plan 비참조·깊이 분리)과 출력 구조는 `references/authoring.md` 가 canonical 이다.
-- **작성 주체 분리** — spec-write 는 구조·문체 기준의 단일 출처이고, 승인된 내용의 실제 파일 Write 는 `orchestrator` 가 조율하는 sub-agent 가 수행한다.
+- **작성 주체 분리** — spec-write 는 구조·문체 기준의 단일 출처이고, 승인된 내용의 실제 파일 Write 는 규모에 따라 메인이 직접 하거나 `orchestrator` 로 위임한다. 어느 쪽이든 같은 기준을 따른다.
 - **문서 계층 일관성** — DESIGN.md 의 상세 문서 표와 concerns/flows 의 관련 문서 표가 서로를 가리키는 양방향 링크를 유지한다.
