@@ -33,9 +33,6 @@ static SHAPED: LazyLock<Regex> = LazyLock::new(|| {
     ))
     .unwrap()
 });
-/// A run long enough for a key; it is masked only when it reads as hex with
-/// digits and letters, or mixes upper and lower case and digits, so plain
-/// words and lower-case paths stay.
 static RUN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z0-9+/=_-]{40,}").unwrap());
 
 fn random_looking(run: &str) -> bool {

@@ -315,8 +315,7 @@ fn signal_of(event: &Event) -> Signal {
     }
 }
 
-/// A question's own result, an answer from the board, or a turn boundary; a
-/// prompt queued while the dialog is open or another tool's events are not.
+/// Whether the event takes the session out of a pending question dialog.
 fn moves_past_a_question(event: &Event) -> bool {
     match (event.name.as_str(), event.detail.as_deref()) {
         ("classic.PostToolUse" | "classic.PostToolUseFailure", detail) => detail == Some(ASK_TOOL),
@@ -464,9 +463,7 @@ fn event_state(fact: &SessionFact) -> (State, u64) {
 }
 
 /// An open question waits whatever the events say, as some surfaces draw the
-/// spinner under a dialog; a decision left by the last turn waits once the
-/// turn is over. Agents work on without the main loop hearing of it, so their
-/// last listing settles a turn end that left teammates or listed nothing.
+/// spinner under a dialog.
 fn current_state(fact: &SessionFact, asks: &[Ask]) -> (State, u64) {
     if let Some(first) = asks.first() {
         return (State::NeedsInput(WaitReason::Question), first.at);
@@ -649,9 +646,6 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
     }
 }
 
-/// `None` when the record lacks what the wait is on: a permission request
-/// whose event came without a recorded request, or a decision state without
-/// its decision.
 fn wait_on(reason: &WaitReason, fact: &SessionFact, asks: &[Ask]) -> Option<WaitOn> {
     match reason {
         WaitReason::Question => asks.first().cloned().map(WaitOn::Question),

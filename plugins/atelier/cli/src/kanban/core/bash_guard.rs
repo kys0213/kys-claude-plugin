@@ -164,7 +164,6 @@ fn runs_shell(name: &str) -> bool {
     is_shell(name) || name == "fish"
 }
 
-/// The body of a `<(…)` or `>(…)` word.
 fn process_body(word: &Word) -> Option<&str> {
     if word.quoted || word.dyn_at != Some(0) {
         return None;

@@ -88,10 +88,8 @@ fn parent_dir(path: &str) -> String {
     }
 }
 
-/// What a permission request's key groups by: a shell command's first two
-/// words, a file tool's directory inside the repository, a fetched URL's
-/// host, else the tool's name. `None` for a shell line that is not one
-/// simple command or a path outside the repository.
+/// What a permission request's key groups by. `None` for a shell line that is
+/// not one simple command or a path outside the repository.
 pub fn permission_target(tool: &str, input: &[(String, String)], scope: &Scope) -> Option<String> {
     match tool {
         "Bash" => {

@@ -700,11 +700,9 @@ fn claim_key<'b>(
     key.ok_or_else(|| "선례가 없어요".to_string())
 }
 
-/// Whether the answers may go on the precedents they name: each claim's
-/// entries are a person's own picks under one key, of the answer sent, the key
-/// is eligible and its kind acts. With the wait, as the asking call holds it,
-/// the wait is one a precedent may answer, each claim's key is the key of its
-/// question or request there, and a question's answer is one of its labels.
+/// Whether the answers may go on the precedents they name; the reason when
+/// not. With the wait as the asking call holds it, the claims are checked
+/// against it as well.
 pub fn vouch(
     book: &Book,
     proxied: Proxied,

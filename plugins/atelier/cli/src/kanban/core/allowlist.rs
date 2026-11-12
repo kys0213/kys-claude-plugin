@@ -98,11 +98,7 @@ fn is_assignment(word: &str) -> bool {
     })
 }
 
-/// Split with the git guard's lexer, and stricter than the shell where that
-/// lexer cannot tell: a `$` or backtick is an expansion even inside single
-/// quotes, a leading `NAME=…` is one even when quoted, and so is any word with
-/// `=~` or `:~`. A `\r` makes the line compound, since the lexer splits words
-/// at it and the shell does not. A `#` comment is dropped, as the shell does.
+/// A command line split into words, with the reasons to refuse it.
 pub fn shell_line(command: &str) -> ShellLine {
     let mut line = ShellLine::default();
     if command.contains(['$', '`']) {
