@@ -139,6 +139,8 @@ pub enum Action {
     Permit,
     Send,
     Stop,
+    /// Clear the card of a session gone silent, as its expiry would.
+    Forget,
 }
 
 impl Action {
@@ -149,6 +151,7 @@ impl Action {
             Action::Permit => "permit",
             Action::Send => "send",
             Action::Stop => "stop",
+            Action::Forget => "forget",
         }
     }
 }
@@ -541,7 +544,7 @@ fn person_prompt(fact: &SessionFact) -> Option<&str> {
 fn actions_of(state: Option<&State>, fact: &SessionFact) -> Vec<Action> {
     let stop = fact.turn_id.as_ref().map(|_| Action::Stop);
     match state {
-        None => Vec::new(),
+        None => vec![Action::Forget],
         Some(State::NeedsInput(WaitReason::Question)) => {
             [Some(Action::Answer), stop].into_iter().flatten().collect()
         }

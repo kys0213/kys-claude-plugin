@@ -21,7 +21,7 @@ export type DetailState = {
   selected: string | null
   /** What was typed to send, by session. */
   drafts: Map<string, string>
-  /** Sessions whose stop waits for a second press. */
+  /** Sessions whose stop or removal waits for a second press. */
   confirming: Set<string>
   /** The last outcome of a request from this pane, by session. */
   notes: Map<string, { text: string; isError: boolean }>
@@ -97,8 +97,6 @@ async function send($: EngineInterface, s: DetailState, card: DetailCard, text: 
 }
 
 async function stop($: EngineInterface, s: DetailState, card: DetailCard): Promise<void> {
-  s.confirming.delete(card.session_id)
-
   if (typeof card.turn_id === 'string') {
     await request($, s, card, { args: ['stop', '--session', card.session_id, '--turn', card.turn_id], answer: null }, '중지를 보냈어요')
   }
@@ -119,14 +117,17 @@ function sendBlock($: EngineInterface, s: DetailState, els: Elements, card: Deta
   })
 }
 
-function stopBlock($: EngineInterface, s: DetailState, els: Elements, card: DetailCard): Child {
+type Confirm = { action: string; label: string; sure: string; onConfirm: () => void }
+
+/** A button that acts only after a second press on its `sure` label. */
+function confirmBlock($: EngineInterface, s: DetailState, els: Elements, card: DetailCard, c: Confirm): Child {
   const { Box, Button } = els
   const id = card.session_id
 
   if (!s.confirming.has(id)) {
     return Button({
-      key: `detail:${id}:stop`,
-      label: '중지',
+      key: `detail:${id}:${c.action}`,
+      label: c.label,
       onPress: () => {
         s.confirming.add(id)
         $.ui.invalidate('ui.render')
@@ -139,9 +140,17 @@ function stopBlock($: EngineInterface, s: DetailState, els: Elements, card: Deta
     flexDirection: 'row',
     columnGap: 1,
     children: [
-      Button({ key: `detail:${id}:stop-yes`, label: '정말 중지', variant: 'primary', onPress: () => void stop($, s, card) }),
       Button({
-        key: `detail:${id}:stop-no`,
+        key: `detail:${id}:${c.action}-yes`,
+        label: c.sure,
+        variant: 'primary',
+        onPress: () => {
+          s.confirming.delete(id)
+          c.onConfirm()
+        },
+      }),
+      Button({
+        key: `detail:${id}:${c.action}-no`,
         label: '취소',
         onPress: () => {
           s.confirming.delete(id)
@@ -228,13 +237,13 @@ function sectionBlock(els: Elements, section: Section, index: number): Child {
   })
 }
 
-export function detailBlock(
-  $: EngineInterface,
-  s: DetailState,
-  els: Elements,
-  card: DetailCard,
-  onBack: () => void,
-): Child {
+export type DetailHandlers = {
+  back: () => void
+  /** Clears the card and what its session left, as its expiry would. */
+  forget: () => Promise<void>
+}
+
+export function detailBlock($: EngineInterface, s: DetailState, els: Elements, card: DetailCard, on: DetailHandlers): Child {
   const { Box, Text, Button } = els
   const actions = card.actions ?? []
   const note = s.notes.get(card.session_id)
@@ -243,7 +252,12 @@ export function detailBlock(
     ...(actions.includes('decide') ? decisionBlock($, s, els, card) : []),
     ...(actions.includes('permit') ? [permitBlock($, s, els, card)] : []),
     ...(actions.includes('send') ? [sendBlock($, s, els, card)] : []),
-    ...(actions.includes('stop') ? [stopBlock($, s, els, card)] : []),
+    ...(actions.includes('stop')
+      ? [confirmBlock($, s, els, card, { action: 'stop', label: '중지', sure: '정말 중지', onConfirm: () => void stop($, s, card) })]
+      : []),
+    ...(actions.includes('forget')
+      ? [confirmBlock($, s, els, card, { action: 'forget', label: '보드에서 지우기', sure: '정말 지우기', onConfirm: () => void on.forget() })]
+      : []),
     ...(actions.includes('answer') ? [Text({ dimColor: true, children: ['질문은 아래 질문 카드에서 답해요'] })] : []),
   ]
   const status = [
@@ -264,7 +278,7 @@ export function detailBlock(
         flexDirection: 'row',
         columnGap: 2,
         children: [
-          Button({ key: `detail:${card.session_id}:back`, label: '← 보드', plain: true, dimColor: true, onPress: onBack }),
+          Button({ key: `detail:${card.session_id}:back`, label: '← 보드', plain: true, dimColor: true, onPress: on.back }),
           Text({ bold: true, wrap: 'truncate', children: [card.headline] }),
         ],
       }),

@@ -190,7 +190,8 @@ async function runBoard($: EngineInterface, sessions: unknown[], width: number, 
   return runKanban($, args, JSON.stringify({ sessions }))
 }
 
-async function dropExpired($: EngineInterface, keys: string[], ids: string[]): Promise<void> {
+/** Removes what the sessions left in the store and their record copies and inboxes. */
+async function dropSessions($: EngineInterface, keys: string[], ids: string[]): Promise<void> {
   for (const id of ids) {
     const owned = [KEY_PREFIX + id, ...sessionKeysOf(keys, ANSWER_PREFIX, id), ...sessionKeysOf(keys, NONCE_PREFIX, id)]
 
@@ -200,6 +201,11 @@ async function dropExpired($: EngineInterface, keys: string[], ids: string[]): P
 
     await cli($, ['forget', '--session', id])
   }
+}
+
+async function forget($: EngineInterface, s: KanbanState, sessionId: string): Promise<void> {
+  await dropSessions($, await $.store.keys(), [sessionId])
+  await refresh($, s)
 }
 
 async function refresh($: EngineInterface, s: KanbanState): Promise<void> {
@@ -230,7 +236,7 @@ async function refresh($: EngineInterface, s: KanbanState): Promise<void> {
         pruneDetail(s.detail, cards)
       }
 
-      await dropExpired($, keys, expiredIds(parsed))
+      await dropSessions($, keys, expiredIds(parsed))
     }
   } catch {
     s.view = { kind: 'error', message: CLI_MISSING }
@@ -836,7 +842,10 @@ export function registerKanban(on: On, options: PluginOptions = {}): void {
     const selected = cards.find(c => c.session_id === s.detail.selected)
 
     if (selected !== undefined) {
-      const detail = detailBlock($, s.detail, els, selected, () => toggleSelected($, s.detail, selected.session_id))
+      const detail = detailBlock($, s.detail, els, selected, {
+        back: () => toggleSelected($, s.detail, selected.session_id),
+        forget: () => forget($, s, selected.session_id),
+      })
 
       return Box({ flexDirection: 'column', children: [detail, ...askBlocks($, s, els, [selected])] })
     }
