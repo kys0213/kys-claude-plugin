@@ -1,10 +1,5 @@
-//! Relays: the answer a person gave to a question the main agent asked about
-//! another session's wait. The question names the wait on its first line;
-//! `frame` turns that line into a fixed header over the wait as its session
-//! recorded it, and the person's answer is kept as relay entries bound to the
-//! wait. An agent answer sent on a relay passes `check` for that wait only,
-//! within 30 minutes, once, with the answer the person gave; the sending CLI
-//! and the session that takes the answer judge with the same `check`.
+//! Relays: a person's answer to a question the main agent asked about another
+//! session's wait.
 
 use super::board::{PermissionAsk, WaitOn, Waiting};
 use super::detail::Decision;
@@ -24,7 +19,6 @@ const ALLOW_LABEL: &str = "허용";
 const DENY_LABEL: &str = "거부";
 const ID_BYTES: usize = 4;
 
-/// The wait a relay answers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Target {
     pub session: String,
@@ -93,7 +87,6 @@ impl Frame {
     }
 }
 
-/// The relay an agent answer names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Relay {
     pub id: String,
@@ -130,7 +123,6 @@ enum UsedTag {
     RelayUsed,
 }
 
-/// A relay an answer went on, as the session that took the answer left it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RelayUse {
     v: u64,
@@ -155,7 +147,6 @@ impl RelayUse {
     }
 }
 
-/// The line that spends `relay` on `target` at `now`.
 pub fn spend(relay: &Relay, target: &Target, now: u64) -> RelayUse {
     let suffix = digest(
         &[&relay.id, &target.session, &target.wait, &now.to_string()],
@@ -178,7 +169,6 @@ fn is_relay(entry: &Entry) -> bool {
         && entry.decided_by == Some(DecidedBy::Human)
 }
 
-/// The entries one person's answer left, one per question, in order.
 fn group<'a>(book: &'a Book, first: &Entry) -> Vec<&'a Entry> {
     let mut group: Vec<&Entry> = book
         .entries()
@@ -196,8 +186,6 @@ fn group<'a>(book: &'a Book, first: &Entry) -> Vec<&'a Entry> {
     group
 }
 
-/// The entries the person's answer `relay` names left, one per question, in
-/// order; `None` when the ledger holds no such relay.
 pub fn answered<'a>(book: &'a Book, relay: &Relay) -> Option<Vec<&'a Entry>> {
     let entry = book.entry(&relay.id).filter(|e| is_relay(e))?;
     Some(group(book, entry))
@@ -213,7 +201,6 @@ fn is_fresh(at: u64, now: u64) -> bool {
     at <= now && now - at <= RELAY_TTL_MS
 }
 
-/// Whether `answers` may go to `target` on `relay` at `now`.
 pub fn check(
     book: &Book,
     relay: &Relay,
@@ -252,7 +239,6 @@ pub fn check(
     Ok(())
 }
 
-/// A relay not yet sent on, as `status` lists it for its wait.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unused {
     pub id: String,
@@ -260,7 +246,6 @@ pub struct Unused {
     pub at: u64,
 }
 
-/// The relays `wait` of `session` may still be answered on at `now`, newest first.
 pub fn unused(book: &Book, session: &str, wait: &str, now: u64) -> Vec<Unused> {
     let mut found: Vec<Unused> = book
         .entries()
@@ -285,7 +270,6 @@ pub fn unused(book: &Book, session: &str, wait: &str, now: u64) -> Vec<Unused> {
     found
 }
 
-/// A session on the board with the wait it shows, as `frame` looks it up.
 pub struct Shown<'a> {
     pub label: &'a str,
     pub session_id: &'a str,
@@ -293,8 +277,6 @@ pub struct Shown<'a> {
     pub wait: &'a Wait,
 }
 
-/// The session and wait the first line of `text` names, when that line is a
-/// marker and nothing else.
 fn marker(text: &str) -> Option<(&str, &str)> {
     let line = text.lines().next()?.trim();
     let inner = line
@@ -310,7 +292,6 @@ fn marker(text: &str) -> Option<(&str, &str)> {
     named.then_some((session, wait))
 }
 
-/// The header's note on a recorded text the record did not keep whole.
 fn cut_note(stored: &str, orig: Option<u64>) -> Option<String> {
     let kept = js_len(stored);
     match orig {
@@ -320,9 +301,6 @@ fn cut_note(stored: &str, orig: Option<u64>) -> Option<String> {
     }
 }
 
-/// What the wait asks, one block per question the person is asked, the
-/// options its answers must be, and the note on the first text the record
-/// cut.
 struct Asked {
     kind: EntryKind,
     blocks: Vec<String>,
@@ -331,7 +309,6 @@ struct Asked {
     cut: Option<String>,
 }
 
-/// The options a wait's answer must be one of.
 enum Offered {
     Any,
     /// The wait's own labels, each with what the main agent wrote of it.
@@ -527,9 +504,6 @@ fn joined(parts: &[&str]) -> String {
         .join("\n\n")
 }
 
-/// The questions rewritten over the wait their first line names, and that
-/// wait; `None` when they name none they may be bound to, and an error when
-/// the wait named is not on the board.
 pub fn frame(
     questions: &[Question],
     board: &[Shown],

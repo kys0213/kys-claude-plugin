@@ -82,7 +82,6 @@ impl Via {
     }
 }
 
-/// A nonce the pane left for the answering session, for one kind of answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LeftNonce {
     pub kind: RequestKind,
@@ -95,7 +94,6 @@ impl LeftNonce {
     }
 }
 
-/// The nonces the pane left for the answering session, and those its answers used up.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PaneNonces {
     left: Vec<LeftNonce>,
@@ -162,7 +160,6 @@ fn read_auth(value: &Value) -> Option<Option<Auth>> {
     }
 }
 
-/// A person's answer to a permission dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
     Allow,
@@ -229,7 +226,6 @@ pub enum Request {
     Stop {
         turn_id: String,
     },
-    /// The answer to the permission request the asking session named.
     Permit {
         request_id: String,
         verdict: Verdict,
@@ -285,7 +281,6 @@ impl Request {
         }
     }
 
-    /// Who answered and the nonce they sent, for the requests that answer a wait.
     pub fn answerer(&self) -> Option<(Sender, Option<&Nonce>)> {
         match self {
             Request::Permit { from, nonce, .. }
@@ -505,8 +500,6 @@ impl Request {
     }
 }
 
-/// An AskUserQuestion call the taking session has open, how many questions
-/// it asks, and the questions whole when they read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenAsk {
     pub id: String,
@@ -542,7 +535,6 @@ pub fn agent_header(from_label: Option<&str>) -> String {
     }
 }
 
-/// The prompt without the header `agent_header` put in front of it.
 pub fn strip_agent_header(text: &str) -> &str {
     text.strip_prefix(HEADER_OPEN)
         .and_then(|rest| rest.split_once(']'))
@@ -619,7 +611,6 @@ pub enum Status {
     Expired,
     Stale,
     Invalid,
-    /// A model's answer the taking session would not take.
     Refused,
 }
 
@@ -656,33 +647,25 @@ pub struct Outcome {
     pub status: Status,
     /// `None` for a request that answers no wait.
     pub via: Option<Via>,
-    /// Why a model's answer was refused.
     pub reason: Option<String>,
 }
 
-/// What one take acts on, what became of each request, and the nonces it used up.
 pub struct Took {
     pub taken: Vec<Taken>,
     pub outcomes: Vec<Outcome>,
     pub used: Vec<LeftNonce>,
 }
 
-/// Why a model's answer that is sent on nothing is refused.
 pub const UNVOUCHED: &str = "메인 에이전트의 답에 선례도 물어 받은 답도 없어요";
 
-/// The wait a model's answer is for.
 #[derive(Debug, Clone, Copy)]
 pub enum Answering<'a> {
     Ask(&'a OpenAsk),
-    /// The decision's id.
     Decision(&'a str),
 }
 
-/// Judges a model's answers to an open wait against what they are sent on.
 pub type Vet<'a> = &'a dyn Fn(Answering, &[String], &Auth) -> Result<(), String>;
 
-/// Which requests one take acts on: at most one prompt, and each open
-/// question answered once.
 struct Taker<'a> {
     running_turn: Option<&'a str>,
     waits: &'a Waits,
@@ -772,8 +755,6 @@ impl Taker<'_> {
         Status::Refused
     }
 
-    /// `Ok` for an answer this session takes: a person's, or a model's that
-    /// what it is sent on vouches for.
     fn vouched(
         &self,
         on: Answering,
@@ -821,7 +802,6 @@ impl Taker<'_> {
     }
 }
 
-/// What one take is judged against.
 pub struct Taking<'a> {
     pub running_turn: Option<&'a str>,
     pub waits: &'a Waits,

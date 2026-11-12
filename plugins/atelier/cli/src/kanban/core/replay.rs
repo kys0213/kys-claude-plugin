@@ -17,14 +17,12 @@ pub const KINDS: [EntryKind; 3] = [
     EntryKind::Decision,
 ];
 
-/// One kind's comparisons in the window, and its mode.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KindStats {
     pub kind: EntryKind,
     pub mode: Mode,
     pub compared: usize,
     pub agreed: usize,
-    /// Of the newest comparisons, up to five.
     pub recent_agreed: usize,
     /// A person set it to act, and revokes stepped it back.
     pub demoted: bool,

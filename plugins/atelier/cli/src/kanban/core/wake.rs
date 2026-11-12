@@ -16,7 +16,6 @@ const HOLD_MS: u64 = 3 * 60 * 1_000;
 const MAX_KEPT: usize = 200;
 const HEADER: &str = "[칸반 위임]";
 
-/// Something to say, first seen at `since`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pending {
     pub id: String,
@@ -57,7 +56,6 @@ pub struct Wake {
     pub report_due: bool,
 }
 
-/// The origins of a prompt a context may ride on.
 pub fn attach_to() -> &'static [&'static str] {
     &PERSON_ORIGINS
 }
@@ -195,8 +193,6 @@ fn newest(mut kept: Vec<Pending>) -> Vec<Pending> {
     kept.split_off(over)
 }
 
-/// What the delegate's mod says now; `me` is its own record, `delegate` the
-/// sessions' delegate.
 pub fn wake(board: &Board, delegate: &Delegate, me: &SessionFact, input: WakeInput) -> Wake {
     if !delegate.is(input.me) {
         return Wake::default();

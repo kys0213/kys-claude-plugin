@@ -13,7 +13,6 @@ pub struct PromptFact {
 }
 
 const SHOWN_AS_PERSON: [&str; 4] = ["composer", "bridge", "sdk", "kanban"];
-/// The `origin.kind`s of what a person typed or sent.
 pub const PERSON_ORIGINS: [&str; 2] = ["composer", "bridge"];
 
 /// `<name ...>…`: how hosts hand a session events (`<task-notification>`,
@@ -31,19 +30,14 @@ pub fn is_wrapped_event(text: &str) -> bool {
         && rest[name_len..].starts_with(|c: char| c == '>' || c.is_whitespace())
 }
 
-/// For display: sdk and kanban requests count, events wrapped in a tag do not.
 fn shows_as_person_prompt(prompt: &PromptFact) -> bool {
     SHOWN_AS_PERSON.contains(&prompt.origin.as_str()) && !is_wrapped_event(&prompt.text)
 }
 
-/// Whether a prompt of this `origin.kind` answering an open decision is a
-/// person's decision; a kind this version does not know is not.
 pub fn decides_as_person(origin: &str) -> bool {
     PERSON_ORIGINS.contains(&origin)
 }
 
-/// The newest prompt a person wrote; for a record from before prompts were
-/// kept, its last prompt unless that is an event.
 pub fn latest_person_prompt<'a>(
     prompts: &'a [PromptFact],
     last_prompt: Option<&'a str>,

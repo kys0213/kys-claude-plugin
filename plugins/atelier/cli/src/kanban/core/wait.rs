@@ -12,7 +12,6 @@ use super::progress::first_field;
 use super::question::{Ask, Question};
 use super::text::{fold, js_len};
 
-/// Why a wait is not one a precedent may answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Blocked {
     MultiSelect,
@@ -108,7 +107,6 @@ impl Wait {
     }
 }
 
-/// The session a wait belongs to, as far as judging it needs.
 pub struct Place<'a> {
     pub repo_root: Option<&'a str>,
     pub cwd: &'a str,
@@ -221,8 +219,6 @@ fn permission_cut(ask: &PermissionAsk) -> bool {
     fields_cut || unrecorded
 }
 
-/// What a permission wait is shown as, `<tool>: <its first wait field>`, and
-/// the name of that field.
 pub fn permission_line(tool: &str, input: &[(String, String)]) -> (String, Option<&'static str>) {
     match first_field(input, &WAIT_FIELDS) {
         Some((field, value)) => (format!("{tool}: {value}"), Some(field)),

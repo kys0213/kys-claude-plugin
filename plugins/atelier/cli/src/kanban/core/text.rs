@@ -26,7 +26,6 @@ pub fn strip_reminders(raw: &str) -> String {
     out
 }
 
-/// Drops ANSI escape sequences and control characters but line breaks.
 pub fn strip_controls(raw: &str) -> String {
     let mut out = String::new();
     let mut chars = raw.chars().peekable();
@@ -58,12 +57,10 @@ pub fn js_len(text: &str) -> u64 {
     text.encode_utf16().count() as u64
 }
 
-/// The first `SHORT_ID_CHARS` chars of a session id.
 pub fn short_id(id: &str) -> String {
     id.chars().take(SHORT_ID_CHARS).collect()
 }
 
-/// Cuts `text` to `max` chars, the last one an ellipsis when it was longer.
 pub fn cut(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         return text.to_string();
@@ -73,7 +70,6 @@ pub fn cut(text: &str, max: usize) -> String {
     out
 }
 
-/// The word after `[` that opens a wait marker.
 pub const MARKER_WORD: &str = "kanban-wait";
 
 /// Every `[kanban-wait`, in any ASCII case, with its bracket made full-width

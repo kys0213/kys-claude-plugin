@@ -27,6 +27,5 @@ pub struct Ask {
     pub tool_use_id: String,
     pub questions: Vec<Question>,
     pub at: u64,
-    /// Absent when the record has none.
     pub orig_len: Option<AskLengths>,
 }
