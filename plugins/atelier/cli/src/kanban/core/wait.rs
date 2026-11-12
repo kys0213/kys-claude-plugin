@@ -6,6 +6,7 @@
 use super::allowlist::{check_permission, RealPaths, Refusal, Scope};
 use super::board::{PermissionAsk, WaitOn, Waiting};
 use super::detail::{prompt_lines, reply_lines, Decision, WAIT_FIELDS};
+use super::ledger::EntryKind;
 use super::mask::mask;
 use super::matchkey::{decision_key, permission_key, permission_target, question_key, sentence};
 use super::progress::first_field;
@@ -95,10 +96,10 @@ pub struct Wait {
 impl Wait {
     pub fn kind(&self) -> &'static str {
         match self.subject {
-            Subject::Question(_) => "question",
-            Subject::Permission(_) => "permission",
-            Subject::Decision(_) => "decision",
-            Subject::Input => "input",
+            Subject::Question(_) => EntryKind::Question.id(),
+            Subject::Permission(_) => EntryKind::Permission.id(),
+            Subject::Decision(_) => EntryKind::Decision.id(),
+            Subject::Input => INPUT_KIND,
         }
     }
 
@@ -301,24 +302,38 @@ fn decision_wait(decision: &Decision, place: &Place, blocked: &mut Vec<Blocked>)
     })
 }
 
+const INPUT_KIND: &str = "input";
+
+impl WaitOn {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            WaitOn::Question(_) => EntryKind::Question.id(),
+            WaitOn::Permission(_) => EntryKind::Permission.id(),
+            WaitOn::Decision(_) => EntryKind::Decision.id(),
+            WaitOn::Input => INPUT_KIND,
+        }
+    }
+
+    pub fn id(&self) -> Option<String> {
+        match self {
+            WaitOn::Question(ask) => Some(ask.tool_use_id.clone()),
+            WaitOn::Permission(ask) => ask.id.clone(),
+            WaitOn::Decision(decision) => Some(decision.at.to_string()),
+            WaitOn::Input => None,
+        }
+    }
+}
+
 pub fn derive(waiting: &Waiting, place: &Place, paths: &dyn RealPaths) -> Wait {
     let mut blocked = Vec::new();
-    let (id, subject) = match &waiting.on {
-        WaitOn::Question(ask) => (
-            Some(ask.tool_use_id.clone()),
-            question_wait(ask, place, &mut blocked),
-        ),
-        WaitOn::Permission(ask) => (
-            ask.id.clone(),
-            permission_wait(ask, place, paths, &mut blocked),
-        ),
-        WaitOn::Decision(decision) => (
-            Some(decision.at.to_string()),
-            decision_wait(decision, place, &mut blocked),
-        ),
+    let id = waiting.on.id();
+    let subject = match &waiting.on {
+        WaitOn::Question(ask) => question_wait(ask, place, &mut blocked),
+        WaitOn::Permission(ask) => permission_wait(ask, place, paths, &mut blocked),
+        WaitOn::Decision(decision) => decision_wait(decision, place, &mut blocked),
         WaitOn::Input => {
             blocked.push(Blocked::Input);
-            (None, Subject::Input)
+            Subject::Input
         }
     };
     let context = reply_lines(waiting.context.as_deref());

@@ -4,7 +4,7 @@
 //! prompt of its own while the person leaves the session alone, else beside
 //! the person's next prompt; it counts as said once the mod delivered it.
 
-use super::board::{Board, Column, SessionFact, WaitOn, Waiting};
+use super::board::{Board, Column, SessionFact, Waiting};
 use super::delegate::Delegate;
 use super::detail::{Delivery, DeliveryStatus};
 use super::prompt::{decides_as_person, PERSON_ORIGINS};
@@ -74,12 +74,7 @@ struct Item {
 }
 
 fn wait_item(session: &str, waiting: &Waiting) -> Option<Item> {
-    let (kind, id) = match &waiting.on {
-        WaitOn::Question(ask) => ("question", Some(ask.tool_use_id.clone())),
-        WaitOn::Permission(ask) => ("permission", ask.id.clone()),
-        WaitOn::Decision(decision) => ("decision", Some(decision.at.to_string())),
-        WaitOn::Input => ("input", None),
-    };
+    let (kind, id) = (waiting.on.kind(), waiting.on.id());
     if id
         .as_deref()
         .is_some_and(|id| check_id("wait", id).is_err())
