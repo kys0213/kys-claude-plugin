@@ -271,12 +271,9 @@ async function boardForTool($: EngineInterface, column: unknown): Promise<string
   return JSON.stringify({ repos: parsed.repos, ...(parsed.delegate === undefined ? {} : { delegate: parsed.delegate }) })
 }
 
-/**
- * Why a shell command of the model or a subagent may not run, as `guard-bash` says; null lets it run.
- * Only a command naming the kanban is asked about, and a CLI that fails lets it run.
- */
+/** Why a shell command of the model or a subagent may not run, as `guard-bash` says; null lets it run, as does a CLI that fails. */
 async function guardBash($: EngineInterface, command: unknown): Promise<string | null> {
-  if (typeof command !== 'string' || !command.includes('kanban')) {
+  if (typeof command !== 'string') {
     return null
   }
 

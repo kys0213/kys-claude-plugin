@@ -127,6 +127,49 @@ fn shells_nested_past_the_depth_limit_or_left_unclosed_are_denied() {
 }
 
 #[test]
+fn an_unreadable_command_that_never_spells_the_kanban_passes() {
+    for command in [
+        "echo 'unclosed",
+        "echo $(date",
+        "echo $(echo $(echo $(echo $(date))))",
+    ] {
+        assert_eq!(deny(command), Value::Null, "{command}");
+    }
+}
+
+#[test]
+fn an_unreadable_command_spelling_the_kanban_through_quotes_is_denied() {
+    for command in [
+        "atelier kan\"\"ban status 'unclosed",
+        "echo $(echo $(echo $(echo $(atelier 'kan'ban status))))",
+    ] {
+        assert!(deny(command).is_string(), "{command}");
+    }
+}
+
+#[test]
+fn a_kanban_word_split_by_quotes_is_judged_as_the_shell_joins_it() {
+    for command in [
+        "atelier kan\"\"ban send --session s-1 --from pane --text hi",
+        "atelier 'kan'ban forget --session s-1",
+        "atelier kan\\ban permit --session s-1 --request p-1 --decision allow --from pane",
+    ] {
+        assert!(deny(command).is_string(), "{command}");
+    }
+}
+
+#[test]
+fn a_command_that_never_names_the_kanban_passes() {
+    for command in [
+        "git status",
+        "for f in *.rs; do echo $f; done",
+        "echo $(( $(wc -l < f) + 1 ))",
+    ] {
+        assert_eq!(deny(command), Value::Null, "{command}");
+    }
+}
+
+#[test]
 fn agent_sends_inside_a_substitution_or_a_nested_shell_pass() {
     for command in [
         "out=$(atelier kanban send --session s-1 --from agent --text hi)",

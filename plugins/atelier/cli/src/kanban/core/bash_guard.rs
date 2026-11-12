@@ -4,7 +4,8 @@
 //! What a shell would run besides — command and process substitutions, `-c`
 //! scripts, a shell's heredoc or here-string, the words piped into a shell
 //! and a process substitution a shell reads as its script — is judged the
-//! same way.
+//! same way. A script it cannot read is refused only when its text, quotes
+//! and escapes dropped, still spells the kanban.
 
 use crate::git::core::bash_classifier::interpreters::{is_shell, shell_script, ShellScript};
 use crate::git::core::bash_classifier::lexer::{
@@ -36,18 +37,31 @@ pub fn refusal(command: &str) -> Option<String> {
 
 fn judge_script(script: &str, depth: usize) -> Option<String> {
     if depth > MAX_DEPTH {
-        return Some(format!(
-            "셸 안의 셸이 {MAX_DEPTH}겹을 넘어 읽지 않았어요 — 칸반 명령은 바로 부르세요"
-        ));
+        return unread(
+            script,
+            format!("셸 안의 셸이 {MAX_DEPTH}겹을 넘어 읽지 않았어요 — 칸반 명령은 바로 부르세요"),
+        );
     }
     let commands = match parse(script) {
         Ok(commands) => commands,
-        Err(reason) => return Some(reason),
+        Err(reason) => return unread(script, reason),
     };
     commands
         .iter()
         .enumerate()
         .find_map(|(at, command)| judge_command(command, piped_into(&commands, at), depth))
+}
+
+fn unread(script: &str, reason: String) -> Option<String> {
+    spells_kanban(script).then_some(reason)
+}
+
+fn spells_kanban(script: &str) -> bool {
+    script
+        .chars()
+        .filter(|c| !matches!(c, '\'' | '"' | '\\'))
+        .collect::<String>()
+        .contains(KANBAN)
 }
 
 fn parse(script: &str) -> Result<Vec<Simple>, String> {
@@ -175,7 +189,11 @@ fn process_body(word: &Word) -> Option<&str> {
 fn process_outputs(command: &Simple) -> Result<Vec<String>, String> {
     let mut scripts = Vec::new();
     for body in command.argv.iter().filter_map(process_body) {
-        scripts.extend(output_of(&parse(body)?));
+        match parse(body) {
+            Ok(producers) => scripts.extend(output_of(&producers)),
+            Err(reason) if spells_kanban(body) => return Err(reason),
+            Err(_) => {}
+        }
     }
     Ok(scripts)
 }

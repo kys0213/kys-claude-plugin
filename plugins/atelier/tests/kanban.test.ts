@@ -1995,22 +1995,29 @@ describe('kanban shell guard', () => {
     expect(r.deny).toBeUndefined()
   })
 
-  test('a command that never names the kanban does not ask the CLI', async ($, on) => {
+  test('every shell command is handed to the CLI, whatever it names', async ($, on) => {
     const w = world(on, routes({ 'guard-bash': { deny: 'no' } }))
 
-    const r = await $.tool.call({ tool: 'Bash', command: 'git status' } as never)
+    const r = await $.tool.call({ tool: 'Bash', command: 'atelier kan""ban send --from pane' } as never)
 
-    expect(r.deny).toBeUndefined()
-    expect(w.runs.find(x => x.argv[2] === 'guard-bash')).toBeUndefined()
+    expect(r).toEqual({ deny: 'no' })
+    const guard = w.runs.find(x => x.argv[2] === 'guard-bash')
+    expect(JSON.parse(guard?.stdin ?? '{}')).toEqual({ command: 'atelier kan""ban send --from pane' })
   })
 
-  test('a missing or failing CLI lets the command run', async ($, on) => {
-    world(on, () => 'missing')
+  for (const [name, cli] of [
+    ['a missing CLI', (() => 'missing') as FakeCli],
+    ['a CLI that exits non-zero', (() => ({ exitCode: 1, stdout: '' })) as FakeCli],
+    ['a CLI error', routes({ 'guard-bash': { error: 'stdin is not JSON' } })],
+  ] as const) {
+    test(`${name} lets the command run`, async ($, on) => {
+      world(on, cli)
 
-    const r = await $.tool.call({ tool: 'Bash', command: KANBAN_SEND } as never)
+      const r = await $.tool.call({ tool: 'Bash', command: KANBAN_SEND } as never)
 
-    expect(r.deny).toBeUndefined()
-  })
+      expect(r.deny).toBeUndefined()
+    })
+  }
 })
 
 const COPY = '/home/me/.claude/atelier/kanban/records/self-session.json'

@@ -193,10 +193,11 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   물어 받은 답(대상 `target_session`·`target_wait`, 추천 `recommended`, 추천을 골랐는지 `approved`, 결정 키 없음 — 선례로
   세지 않음)이 남습니다. 메인 에이전트의 답이나 셸 명령의
   답으로 끝났거나 자리를 비운 사이 닫혔으면 남지 않습니다. 서브에이전트의 질문은 묶지 않습니다.
-- **사람 위장 막기**: 모델·서브에이전트의 Bash 명령에 `kanban` 이 들어 있으면 모드가 `atelier kanban guard-bash`
+- **사람 위장 막기**: 모델·서브에이전트의 Bash 명령마다 모드가 `atelier kanban guard-bash`
   (stdin `{command}` → `{deny}`)로 확인합니다. `reply`·`permit`·`decide`·`send` 에 `--from pane` 을 붙인 호출과
-  모드만 부르는 `forget`·`ledger record`·`ledger bind`·`ledger prune`·`relay-frame`·`command`·`delegate report` 는 막습니다. 셸 낱말로 판정하므로 변수·eval·스크립트 파일로
-  감싼 호출은 막지 못하고, CLI 가 없거나 실패하면 통과시킵니다.
+  모드만 부르는 `forget`·`ledger record`·`ledger bind`·`ledger prune`·`relay-frame`·`command`·`delegate report` 는 막습니다. 셸 낱말로 판정하므로 따옴표로
+  쪼갠 낱말은 셸이 잇는 대로 읽지만, 변수·eval·스크립트 파일로 감싼 호출은 막지 못합니다. 셸이 나누는 대로 읽지 못한 명령은
+  따옴표·역슬래시를 빼고도 `kanban` 이 적혀 있을 때만 막습니다. CLI 가 없거나 실패하면 통과시킵니다.
 - **결정 장부**: 세션마다 모드가 입력 대기에 받은 답을 `atelier kanban ledger record`(stdin 에 그 대기의 기록과 답이
   들어온 길)로 남기고, CLI 가 이 머신의 `<CLAUDE_CONFIG_DIR 또는 ~/.claude>/atelier/kanban/ledger/<YYYY-MM>.jsonl` 에
   한 줄씩 잠금 아래 덧붙입니다. 남기는 답은 질문 화면에서 직접 고른 답(질문마다 한 건, 자리를 비운 사이 저절로 닫힌
