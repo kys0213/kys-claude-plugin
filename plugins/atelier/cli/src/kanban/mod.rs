@@ -138,7 +138,7 @@ pub enum Commands {
     Answer,
     /// The Bash tool's input on stdin → why a model may not run it, if it may not
     GuardBash,
-    /// The pane's nonce keys on stdin, oldest first → the ones past the cap to delete
+    /// The plugin store's keys on stdin, oldest first → the nonce keys past the cap to delete
     PruneNonces,
     /// The decisions taken for this machine's waits
     Ledger {

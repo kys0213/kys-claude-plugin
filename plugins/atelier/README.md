@@ -152,8 +152,8 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   - 결정 요청: `atelier kanban decide --session <id> --at <결정 id> --text <답> --from pane` — 상세에서 직접 입력한
     글도 그 결정의 답으로 갑니다. 결정 id 는 `wait.id` 입니다.
   - 권한 요청: `atelier kanban permit --session <id> --request <요청 id> --decision allow|deny --from pane`
-  - pane 은 답마다 한 번만 쓰는 확인 값(`--nonce`)을 플러그인 저장소에 남기고, 남길 때마다 저장소의 확인 값 키를 오래된
-    순으로 `atelier kanban prune-nonces`(stdin `{keys}` → `{drop}`)에 넘겨 가장 최근 32개 밖의 키를 지웁니다. CLI 가 없거나
+  - pane 은 답마다 한 번만 쓰는 확인 값(`--nonce`)을 플러그인 저장소에 남기고, 남길 때마다 저장소의 키 전체를 오래된
+    순으로 `atelier kanban prune-nonces`(stdin `{keys}` → `{drop}`)에 넘겨 CLI 가 고른 키(확인 값 키 중 가장 최근 32개 밖)를 지웁니다. CLI 가 없거나
     실패하면 지우지 않습니다.
   - `--from agent`(메인 에이전트의 답)는 물어 받은 답(`--relay`) 또는 선례(`--precedent`·`--reason`) 중 정확히
     하나를 붙여야 받습니다.

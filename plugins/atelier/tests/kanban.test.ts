@@ -921,13 +921,21 @@ describe('kanban pane', () => {
     ['the nonces prune-nonces names are deleted', { drop: ['kanban:nonce:other:answer:old-0'] }, ['kanban:nonce:other:answer:old-1']],
     ['a prune-nonces that fails deletes no nonce', 'missing', ['kanban:nonce:other:answer:old-0', 'kanban:nonce:other:answer:old-1']],
   ] as const) {
-    test(`a pane answer hands every nonce key to prune-nonces: ${name}`, async ($, on) => {
+    test(`a pane answer hands every store key to prune-nonces: ${name}`, async ($, on) => {
       const answers = boardAndAnswers(ASKING_BOARD)
-      const w = world(on, argv =>
-        argv[2] === 'prune-nonces' ? (pruned === 'missing' ? 'missing' : { exitCode: 0, stdout: JSON.stringify(pruned) }) : answers(argv),
-      )
+      let storeKeys: string[] = []
+      const w = world(on, argv => {
+        if (argv[2] !== 'prune-nonces') {
+          return answers(argv)
+        }
+
+        storeKeys = Object.keys(w.store)
+
+        return pruned === 'missing' ? 'missing' : { exitCode: 0, stdout: JSON.stringify(pruned) }
+      })
       const old = ['kanban:nonce:other:answer:old-0', 'kanban:nonce:other:answer:old-1']
 
+      w.store['unrelated'] = { keep: true }
       for (const key of old) {
         w.store[key] = { session: 'other', kind: 'answer', at: START }
       }
@@ -942,8 +950,10 @@ describe('kanban pane', () => {
       const left = `kanban:nonce:other:answer:${nonce}`
       const prune = w.runs.find(r => r.argv[2] === 'prune-nonces')
       expect(prune?.argv).toEqual(['atelier', 'kanban', 'prune-nonces'])
-      expect(JSON.parse(prune?.stdin ?? '{}')).toEqual({ keys: [...old, left] })
+      expect(JSON.parse(prune?.stdin ?? '{}')).toEqual({ keys: storeKeys })
+      expect(storeKeys).toEqual(expect.arrayContaining(['unrelated', ...old, left]))
       expect(nonceKeys(w)).toEqual([...kept, left])
+      expect(w.store['unrelated']).toEqual({ keep: true })
     })
   }
 

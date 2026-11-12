@@ -24,8 +24,7 @@ function isLeftNonce(value: unknown): value is LeftNonce {
 }
 
 async function dropOldNonces($: EngineInterface): Promise<void> {
-  const keys = (await $.store.keys()).filter(k => k.startsWith(NONCE_PREFIX))
-  const out = await cli($, ['prune-nonces'], JSON.stringify({ keys }))
+  const out = await cli($, ['prune-nonces'], JSON.stringify({ keys: await $.store.keys() }))
   const drop = Array.isArray(out?.drop) ? out.drop.filter((k): k is string => typeof k === 'string') : []
 
   for (const key of drop) {
