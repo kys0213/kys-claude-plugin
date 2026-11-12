@@ -13,7 +13,7 @@ use crate::kanban::commands::delegate::{
 };
 use crate::kanban::commands::inbox::{ClockIds, FsInbox, ThreadPause};
 use crate::kanban::commands::ledger::{KanbanLedger, ListArgs};
-use crate::kanban::commands::ledger_store::{read_book, FsLedger};
+use crate::kanban::commands::ledger_store::{read_book, FsLedger, LedgerStore};
 use crate::kanban::commands::paths::FsPaths;
 use crate::kanban::commands::payload::{
     parse_answer_request, parse_bash_command, parse_pane_nonces, parse_permit_wait, parse_sessions,
@@ -22,6 +22,7 @@ use crate::kanban::commands::payload::{
 use crate::kanban::commands::records::{FsRecords, KanbanRecords, StatusQuery};
 use crate::kanban::commands::requests::{Answerer, KanbanRequests, PermitTiming, Proof};
 use crate::kanban::commands::spawn::{ClaudeLauncher, GitProbe};
+use crate::kanban::core::allowlist::RealPaths;
 use crate::kanban::core::answer::compose;
 use crate::kanban::core::bash_guard::refusal;
 use crate::kanban::core::board::{build, Action, Board, BoardParams, Card, Column, Waiting};
@@ -454,7 +455,7 @@ fn detail_json(detail: &Detail) -> Value {
     })
 }
 
-fn repo_json(repo: &Repo) -> Value {
+fn repo_json(repo: &Repo, paths: &dyn RealPaths) -> Value {
     let sessions: Vec<Value> = repo
         .sessions
         .iter()
@@ -473,7 +474,7 @@ fn repo_json(repo: &Repo) -> Value {
                 "subtitle": s.subtitle,
                 "last_line": s.last_line,
                 "delivery": s.delivery,
-                "wait": wait_json(s.waiting.as_ref(), &place, None),
+                "wait": wait_json(s.waiting.as_ref(), &place, paths, None),
             })
         })
         .collect();
@@ -485,14 +486,16 @@ fn repo_json(repo: &Repo) -> Value {
 }
 
 /// The relays the ledger keeps for one session's waits, read once on demand.
-struct RelayBook {
+struct RelayBook<'a> {
+    store: &'a dyn LedgerStore,
     book: OnceCell<Option<Book>>,
     now: u64,
 }
 
-impl RelayBook {
-    fn new(now: u64) -> RelayBook {
+impl<'a> RelayBook<'a> {
+    fn new(store: &'a dyn LedgerStore, now: u64) -> RelayBook<'a> {
         RelayBook {
+            store,
             book: OnceCell::new(),
             now,
         }
@@ -500,9 +503,7 @@ impl RelayBook {
 
     /// The unused relays for `wait` of `session`; none when the ledger cannot be read.
     fn json(&self, session: &str, wait: &str) -> Value {
-        let book = self
-            .book
-            .get_or_init(|| read_book(&FsLedger::from_env()).ok());
+        let book = self.book.get_or_init(|| read_book(self.store).ok());
         let found = book
             .as_ref()
             .map(|book| unused(book, session, wait, self.now))
@@ -519,12 +520,13 @@ impl RelayBook {
 fn wait_json(
     waiting: Option<&Waiting>,
     place: &Place,
+    paths: &dyn RealPaths,
     relays: Option<(&RelayBook, &str)>,
 ) -> Value {
     let Some(waiting) = waiting else {
         return Value::Null;
     };
-    let wait = derive(waiting, place, &FsPaths);
+    let wait = derive(waiting, place, paths);
     let mut out = json!({
         "kind": wait.kind(),
         "id": wait.id,
@@ -571,8 +573,7 @@ fn wait_json(
     out
 }
 
-/// Every string with its wait marker defused; what the delegate reads of a
-/// worker's words cannot pass for a marker.
+/// Every string with its wait marker defused.
 fn defused(value: Value) -> Value {
     match value {
         Value::String(text) => Value::String(defuse_marker(&text)),
@@ -615,7 +616,7 @@ fn layout_json(layout: &Layout) -> Value {
     })
 }
 
-fn board_json(board: &Board, layout: &Layout) -> Value {
+fn board_json(board: &Board, layout: &Layout, paths: &dyn RealPaths) -> Value {
     let columns: Vec<Value> = board
         .columns
         .iter()
@@ -628,7 +629,10 @@ fn board_json(board: &Board, layout: &Layout) -> Value {
             })
         })
         .collect();
-    let repos: Vec<Value> = group(board).iter().map(repo_json).collect();
+    let repos: Vec<Value> = group(board)
+        .iter()
+        .map(|repo| repo_json(repo, paths))
+        .collect();
     json!({
         "columns": columns,
         "repos": repos,
@@ -664,7 +668,12 @@ fn now_millis() -> u64 {
         .unwrap_or(0)
 }
 
-fn status_entry_json(column: Column, card: &Card, relays: &RelayBook) -> Value {
+fn status_entry_json(
+    column: Column,
+    card: &Card,
+    paths: &dyn RealPaths,
+    relays: &RelayBook,
+) -> Value {
     let place = Place {
         repo_root: card.repo_root.as_deref(),
         cwd: &card.cwd,
@@ -682,7 +691,12 @@ fn status_entry_json(column: Column, card: &Card, relays: &RelayBook) -> Value {
         "actions": action_ids(&card.actions),
         "last_line": card.last_line,
         "delivery": card.detail.delivery,
-        "wait": wait_json(card.waiting.as_ref(), &place, Some((relays, &card.session_id))),
+        "wait": wait_json(
+            card.waiting.as_ref(),
+            &place,
+            paths,
+            Some((relays, &card.session_id)),
+        ),
     }))
 }
 
@@ -702,13 +716,14 @@ fn run_status(
         .and_then(|format| with_records(|r| r.status(&query)).map(|board| (format, board)));
     match shown {
         Ok((Format::Json, board)) => {
-            let relays = RelayBook::new(now);
+            let ledger = FsLedger::from_env();
+            let relays = RelayBook::new(&ledger, now);
             let sessions: Vec<Value> = select(&board, query.session.as_deref())
                 .into_iter()
                 .flat_map(|(column, cards)| cards.into_iter().map(move |card| (column, card)))
-                .map(|(column, card)| status_entry_json(column, card, &relays))
+                .map(|(column, card)| status_entry_json(column, card, &FsPaths, &relays))
                 .collect();
-            let book = read_book(&FsLedger::from_env()).ok();
+            let book = read_book(&ledger).ok();
             let delegate = status_delegate_json(&delegate_of(&board), book.as_ref(), now);
             json!({ "now": now, "delegate": delegate, "sessions": sessions }).to_string()
         }
@@ -891,7 +906,7 @@ pub fn run(cli: Cli) -> i32 {
                 Ok((only, sessions)) => {
                     let board = build(&sessions, &params).only(&only);
                     let layout = fit(width, board.columns.len() as u32);
-                    board_json(&board, &layout)
+                    board_json(&board, &layout, &FsPaths)
                 }
                 Err(error) => json!({ "error": error }),
             };
