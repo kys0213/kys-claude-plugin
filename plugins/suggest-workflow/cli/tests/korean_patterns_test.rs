@@ -91,9 +91,15 @@ fn test_suffix_miner_single_prompt() {
     let prompts = vec!["타입을 명시해줘"];
     let miner = SuffixMiner::new(2, 10, 0.5);
 
-    let _suffixes = miner.mine(&prompts);
-    // Single prompt with min_support=2 should not produce mined suffixes.
-    // The returned suffixes (if any) are all fallback.
+    let suffixes = miner.mine(&prompts);
+    let fallbacks = ["해줘", "해주세요", "하세요", "해", "줘"];
+    assert!(
+        suffixes
+            .iter()
+            .all(|s| fallbacks.contains(&s.text.as_str())),
+        "Single prompt should yield only fallback suffixes, got {:?}",
+        suffixes
+    );
 }
 
 #[test]
