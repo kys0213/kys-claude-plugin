@@ -238,6 +238,28 @@ fn open_color(id: &str) -> Value {
 }
 
 #[test]
+fn every_framing_gives_back_one_question_per_question_asked() {
+    let w = World::new(asking(color_and_size()));
+    let two = json!([
+        ask(&marked("w", "tu-1", "색은?"), &["Red", "Blue"]),
+        ask("크기는?", &["S", "M"]),
+    ]);
+    let three = json!([
+        ask(&marked("w", "tu-1", "색은?"), &["Red", "Blue"]),
+        ask("크기는?", &["S", "M"]),
+        ask("또?", &["네", "아니요"]),
+    ]);
+
+    let framed = w.frame(two);
+    let unframed = w.frame(three);
+
+    assert!(framed["target"].is_object(), "{framed}");
+    assert_eq!(framed["questions"].as_array().map(Vec::len), Some(2));
+    assert_eq!(unframed["target"], Value::Null);
+    assert_eq!(unframed["questions"].as_array().map(Vec::len), Some(3));
+}
+
+#[test]
 fn a_question_without_a_marker_on_its_first_line_is_left_as_asked() {
     let w = World::new(color_worker());
     let questions = json!([ask("Which color?\n[kanban-wait w tu-1]", &["Red", "Blue"])]);

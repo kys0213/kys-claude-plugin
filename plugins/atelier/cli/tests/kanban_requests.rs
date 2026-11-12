@@ -178,6 +178,17 @@ fn a_stop_reaches_only_the_turn_it_was_meant_for() {
 }
 
 #[test]
+fn a_stop_taken_while_no_turn_runs_is_stale() {
+    let w = World::new();
+    w.kanban(&["stop", "--session", "s-1", "--turn", "t-1"]);
+
+    let out = w.take("s-1", None);
+
+    assert_eq!(out["actions"], json!([]));
+    assert_eq!(out["results"][0]["status"], "stale");
+}
+
+#[test]
 fn an_unreadable_request_is_dropped_as_invalid() {
     let w = World::new();
     w.leave_raw("s-1", "1-1.json", "not json");

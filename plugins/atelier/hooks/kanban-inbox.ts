@@ -78,9 +78,7 @@ function isResult(value: unknown): value is Result {
 
 async function act($: EngineInterface, s: InboxState & AskState, taken: Taken): Promise<void> {
   if (taken.kind === 'stop') {
-    if (s.turnId === taken.turn_id) {
-      await $.turn.abort({ turnId: taken.turn_id })
-    }
+    await $.turn.abort({ turnId: taken.turn_id })
 
     return
   }

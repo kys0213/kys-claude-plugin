@@ -19,10 +19,7 @@ function isTarget(value: unknown): value is RelayTarget {
   )
 }
 
-/**
- * The questions as `relay-frame` rewrote them over the wait their first line names, and that wait.
- * Null leaves them as asked: no wait named, a session that is not the delegate, or a CLI that failed.
- */
+/** The questions as `relay-frame` rewrote them over the wait their first line names, and that wait; null when it named none or failed. */
 export async function frameQuestions($: EngineInterface, questions: readonly ToolQuestion[]): Promise<Framed | null> {
   const out = await cli(
     $,
@@ -30,7 +27,7 @@ export async function frameQuestions($: EngineInterface, questions: readonly Too
     JSON.stringify({ questions }),
   )
 
-  if (!isTarget(out?.target) || !Array.isArray(out.questions) || out.questions.length !== questions.length) {
+  if (!isTarget(out?.target) || !Array.isArray(out.questions)) {
     return null
   }
 
