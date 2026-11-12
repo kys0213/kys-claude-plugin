@@ -304,13 +304,7 @@ async function tick($: EngineInterface, s: KanbanState): Promise<void> {
 async function runCommand($: EngineInterface, s: KanbanState, e: { args: string; origin?: { kind: string } }): Promise<string> {
   const ran = await runKanbanCommand($, s, e.args, e.origin?.kind ?? 'unknown')
 
-  if (!ran.toggle) {
-    return ran.text
-  }
-
-  const toggled = await toggle($, s)
-
-  return ran.text ?? toggled
+  return ran.toggle ? toggle($, s) : ran.text
 }
 
 async function toggle($: EngineInterface, s: KanbanState): Promise<string> {

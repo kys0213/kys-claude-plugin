@@ -46,16 +46,13 @@ function pendingOf(value: unknown): Pending[] {
     : []
 }
 
-/**
- * `/kanban <args>` as a person or anything else ran it: whether to toggle the pane, the CLI's answer,
- * and the record's `delegate_since` when it named one. A CLI that did not answer toggles the pane, which shows why.
- */
+/** `/kanban <args>` as a person or anything else ran it, keeping the record's `delegate_since` when the CLI named one. */
 export async function runKanbanCommand(
   $: EngineInterface,
   s: DelegateState,
   args: string,
   origin: string,
-): Promise<{ toggle: true; text: string | null } | { toggle: false; text: string }> {
+): Promise<{ toggle: true } | { toggle: false; text: string }> {
   const out = await cli($, [
     'command',
     '--session',
@@ -69,11 +66,11 @@ export async function runKanbanCommand(
   ])
 
   if (out === null) {
-    return { toggle: true, text: CLI_MISSING }
+    return { toggle: false, text: CLI_MISSING }
   }
 
   if (out.toggle === true) {
-    return { toggle: true, text: null }
+    return { toggle: true }
   }
 
   if (typeof out.error === 'string') {

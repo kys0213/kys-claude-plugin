@@ -148,12 +148,20 @@ function boardAndAnswers(board: unknown): FakeCli {
   }
 }
 
-/** A bare `/kanban` as the CLI answers it, unless the fake CLI is missing or names `toggle` itself. */
+const PANE_TOGGLES: CliOut = { exitCode: 0, stdout: JSON.stringify({ toggle: true }) }
+
+/** A bare `/kanban` as the CLI answers it, unless the fake CLI fails or names `toggle` itself. */
 async function withPaneToggle(cli: FakeCli, argv: readonly string[]): Promise<CliOut> {
   const out = await cli(argv)
   const bare = argv[2] === 'command' && argv[argv.indexOf('--args') + 1]?.trim() === ''
+  const answered = out !== 'missing' && out.exitCode === 0 && out.stdout.trim().startsWith('{')
 
-  return bare && out !== 'missing' && !out.stdout.includes('"toggle"') ? { exitCode: 0, stdout: JSON.stringify({ toggle: true }) } : out
+  return bare && answered && !out.stdout.includes('"toggle"') ? PANE_TOGGLES : out
+}
+
+/** A CLI that answers `/kanban` with a toggle and every other call with `out`. */
+function failingBoard(out: CliOut): FakeCli {
+  return argv => (argv[2] === 'command' ? PANE_TOGGLES : out)
 }
 
 /** Stands for the engine beneath the plugin: one session, its store, its clock, the CLI. */
@@ -986,14 +994,30 @@ describe('kanban pane', () => {
     expect(w.shown.value).toBe(true)
   })
 
-  test('a missing CLI still toggles the pane on /kanban and says the CLI is missing', async ($, on) => {
-    const w = world(on, () => 'missing')
+  for (const [failure, out] of [
+    ['a missing CLI', 'missing'],
+    ['a CLI that exits non-zero', { exitCode: 1, stdout: '' }],
+    ['a CLI whose output is not JSON', { exitCode: 0, stdout: 'nope' }],
+  ] as const) {
+    for (const args of ['', 'delegate off']) {
+      for (const open of [false, true]) {
+        test(`${failure} leaves the ${open ? 'open' : 'closed'} pane as it is on /kanban ${JSON.stringify(args)} and says why`, async ($, on) => {
+          let failing = false
+          const w = world(on, argv => (failing && argv[2] === 'command' ? out : boardAndAnswers(BOARD)(argv)))
 
-    const ran = await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+          if (open) {
+            await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+          }
 
-    expect(ran).toEqual({ text: 'atelier CLI 를 실행하지 못했어요 — /atelier:update 로 설치·갱신하세요' })
-    expect(w.shown.value).toBe(true)
-  })
+          failing = true
+          const ran = await $.command.run({ command: 'kanban', args, origin: { kind: 'composer' } } as never)
+
+          expect(ran).toEqual({ text: 'atelier CLI 를 실행하지 못했어요 — /atelier:update 로 설치·갱신하세요' })
+          expect(w.shown.value).toBe(open)
+        })
+      }
+    }
+  }
 
   test('/kanban again closes the pane', async ($, on) => {
     const w = world(on)
@@ -1098,7 +1122,7 @@ describe('kanban pane', () => {
   })
 
   test('a missing CLI draws a hint instead of the board', async ($, on) => {
-    world(on, () => 'missing')
+    world(on, failingBoard('missing'))
 
     await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -1113,7 +1137,7 @@ describe('kanban pane', () => {
     ['an error from the CLI', { exitCode: 0, stdout: JSON.stringify({ error: 'stdin is not JSON' }) }, /stdin is not JSON/],
   ] as const) {
     test(`${label} draws the error and deletes nothing`, async ($, on) => {
-      const w = world(on, () => out)
+      const w = world(on, failingBoard(out))
 
       w.store['kanban:session:gone'] = { v: 1, session_id: 'gone', events: [] }
       await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
