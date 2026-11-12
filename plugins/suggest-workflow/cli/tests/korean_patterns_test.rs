@@ -5,7 +5,6 @@ use suggest_workflow::analyzers::tacit::analyze_tacit_knowledge;
 use suggest_workflow::analyzers::tuning::TuningConfig;
 use suggest_workflow::types::{HistoryEntry, TacitPattern};
 
-/// Helper to construct HistoryEntry with display and timestamp
 fn make_entry(display: &str, ts: i64) -> HistoryEntry {
     HistoryEntry {
         display: display.to_string(),
@@ -14,21 +13,15 @@ fn make_entry(display: &str, ts: i64) -> HistoryEntry {
     }
 }
 
-/// Helper: resolve a DepthConfig with a custom similarity threshold
 fn config_with_similarity(similarity: f64) -> DepthConfig {
     let mut config = AnalysisDepth::Normal.resolve();
     config.similarity_threshold = similarity;
     config
 }
 
-/// Default config for most tests
 fn default_config() -> DepthConfig {
     config_with_similarity(0.3)
 }
-
-// ============================================================================
-// SUFFIX MINER UNIT TESTS
-// ============================================================================
 
 #[test]
 fn test_suffix_miner_basic_korean() {
@@ -42,10 +35,8 @@ fn test_suffix_miner_basic_korean() {
     let miner = SuffixMiner::default();
     let suffixes = miner.mine(&prompts);
 
-    // Should find common Korean suffixes
     assert!(!suffixes.is_empty(), "Should discover Korean suffixes");
 
-    // Check that suffixes contain expected patterns
     let suffix_strs: Vec<String> = suffixes.iter().map(|s| s.text.clone()).collect();
     let has_haejwo = suffix_strs
         .iter()
@@ -62,14 +53,12 @@ fn test_suffix_miner_frequency_threshold() {
         "코드를 리팩토링하세요",
     ];
 
-    let miner_low = SuffixMiner::new(2, 10, 0.1); // Lower threshold
-    let miner_high = SuffixMiner::new(2, 10, 0.5); // Higher threshold
+    let miner_low = SuffixMiner::new(2, 10, 0.1);
+    let miner_high = SuffixMiner::new(2, 10, 0.5);
 
     let suffixes_low = miner_low.mine(&prompts);
     let suffixes_high = miner_high.mine(&prompts);
 
-    // Lower threshold should find more or equal suffixes (excluding fallbacks)
-    // With frequency field removed, compare total suffix counts directly
     assert!(
         suffixes_low.len() >= suffixes_high.len(),
         "Lower threshold should find more or equal real suffixes"
@@ -104,7 +93,6 @@ fn test_suffix_miner_single_prompt() {
 
 #[test]
 fn test_suffix_miner_byte_safety() {
-    // Various Korean strings with different byte lengths
     let prompts = vec![
         "가나다라마바사",
         "😀 이모지와 한글",
@@ -114,13 +102,8 @@ fn test_suffix_miner_byte_safety() {
     ];
 
     let miner = SuffixMiner::default();
-    // Should not panic
     let _suffixes = miner.mine(&prompts);
 }
-
-// ============================================================================
-// NORMALIZATION TESTS
-// ============================================================================
 
 #[test]
 fn test_normalization_strips_korean_suffixes() {
@@ -133,16 +116,13 @@ fn test_normalization_strips_korean_suffixes() {
     let miner = SuffixMiner::default();
     let suffixes = miner.mine(&variations);
 
-    // Normalize each variation
     let normalized: Vec<_> = variations
         .iter()
         .map(|v| miner.normalize(v, &suffixes))
         .collect();
 
-    // All variations should normalize to similar content
     assert!(!normalized.is_empty(), "Should produce normalized prompts");
 
-    // Check that normalized versions strip polite endings
     for norm in &normalized {
         assert!(
             !norm.content.contains("해줘")
@@ -185,10 +165,6 @@ fn test_normalization_empty_after_stripping() {
         );
     }
 }
-
-// ============================================================================
-// CLUSTERING TESTS
-// ============================================================================
 
 #[test]
 fn test_clustering_similar_prompts_group_together() {
@@ -248,14 +224,6 @@ fn test_clustering_different_topics_separate() {
     );
 }
 
-// ============================================================================
-// TYPE CLASSIFICATION TESTS
-// ============================================================================
-
-// Type classification is now delegated to Phase 2 (LLM).
-// These tests verify that patterns are still detected as clusters
-// with their content preserved for LLM classification.
-
 #[test]
 fn test_type_classification_directive() {
     let entries = vec![
@@ -276,7 +244,6 @@ fn test_type_classification_directive() {
         &StopwordSet::load(&[]),
     );
 
-    // Pattern should be detected as a cluster (type classification is Phase 2's job)
     let has_pattern = result
         .patterns
         .iter()
@@ -379,10 +346,6 @@ fn test_type_classification_correction() {
         }
     }
 }
-
-// ============================================================================
-// FULL PIPELINE INTEGRATION TESTS
-// ============================================================================
 
 #[test]
 fn test_full_pipeline_korean_prompts() {
@@ -561,10 +524,6 @@ fn test_full_pipeline_respects_max_patterns() {
     );
 }
 
-// ============================================================================
-// DEPTH PRESET TESTS
-// ============================================================================
-
 #[test]
 fn test_depth_narrow_produces_results() {
     let entries = vec![
@@ -587,11 +546,10 @@ fn test_depth_narrow_produces_results() {
     );
 
     assert_eq!(result.total, entries.len());
-    // Narrow has higher similarity threshold so may find fewer patterns
 }
 
 #[test]
-fn test_depth_wide_finds_more_patterns() {
+fn test_depth_wide_and_narrow_count_same_entries() {
     let entries = vec![
         make_entry("타입을 명시해줘", 1000),
         make_entry("타입을 명시해주세요", 2000),
@@ -621,8 +579,6 @@ fn test_depth_wide_finds_more_patterns() {
         &StopwordSet::load(&[]),
     );
 
-    // Wide (lower similarity threshold) should merge more clusters → potentially fewer but larger patterns
-    // Or with lower thresholds, discover more. Just verify both work.
     assert_eq!(narrow.total, wide.total);
 }
 
@@ -632,7 +588,6 @@ fn test_depth_config_values() {
     let normal = AnalysisDepth::Normal.resolve();
     let wide = AnalysisDepth::Wide.resolve();
 
-    // Narrow should be more conservative
     assert!(narrow.sentence_split_min_tokens > normal.sentence_split_min_tokens);
     assert!(normal.sentence_split_min_tokens > wide.sentence_split_min_tokens);
 
@@ -666,10 +621,6 @@ fn test_depth_from_str() {
     );
     assert!("invalid".parse::<AnalysisDepth>().is_err());
 }
-
-// ============================================================================
-// BYTE SAFETY TESTS
-// ============================================================================
 
 #[test]
 fn test_byte_safety_mixed_unicode() {
@@ -730,10 +681,6 @@ fn test_byte_safety_long_korean_text() {
         &StopwordSet::load(&[]),
     );
 }
-
-// ============================================================================
-// EDGE CASES
-// ============================================================================
 
 #[test]
 fn test_edge_case_empty_input() {
@@ -906,8 +853,5 @@ fn test_edge_case_similarity_threshold_variation() {
         &StopwordSet::load(&[]),
     );
 
-    // Higher similarity threshold = stricter clustering = more groups
-    // Lower similarity threshold = more aggressive merging = fewer groups
-    // Both should work without error
     assert!(result_high.total == result_low.total);
 }
