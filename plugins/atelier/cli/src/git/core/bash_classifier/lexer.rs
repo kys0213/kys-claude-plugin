@@ -538,7 +538,6 @@ impl Lexer {
         }
     }
 
-    /// Copies a balanced `( … )` group verbatim, starting at the `(`.
     fn scan_parens(&mut self, w: &mut Word) -> Result<(), LexError> {
         let mut depth = 0usize;
         let mut pending_heredocs: Vec<(String, bool)> = Vec::new();
@@ -588,8 +587,6 @@ impl Lexer {
         }
     }
 
-    /// Copies the rest of a `<<[-]DELIM` opener (the first `<` is already in
-    /// `w`) and records its delimiter so the body can be copied unscanned.
     fn copy_heredoc_opener(&mut self, w: &mut Word, pending: &mut Vec<(String, bool)>) {
         w.text.push('<');
         self.pos += 1;
@@ -728,7 +725,6 @@ impl Lexer {
     }
 }
 
-/// Command substitutions bash runs while expanding a heredoc body.
 fn substitutions_in(body: &str) -> Vec<String> {
     let mut lx = Lexer::new(body, true);
     let mut w = Word::default();

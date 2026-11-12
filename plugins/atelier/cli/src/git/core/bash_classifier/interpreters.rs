@@ -14,17 +14,12 @@ pub(crate) fn is_shell(name: &str) -> bool {
     matches!(name, "bash" | "sh" | "zsh" | "dash" | "ksh")
 }
 
-/// Where a shell invocation's script comes from.
 pub(crate) enum ShellScript<'a> {
-    /// The word after `-c`.
     Inline(&'a Word),
-    /// `-c` with nothing after it.
     Missing,
-    /// No `-c`: a script file or stdin.
     Input,
 }
 
-/// Reads a shell's arguments up to its first operand.
 pub(crate) fn shell_script(args: &[Word]) -> ShellScript<'_> {
     let mut i = 0;
     while let Some(w) = args.get(i) {

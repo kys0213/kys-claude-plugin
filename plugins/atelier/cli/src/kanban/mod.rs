@@ -307,7 +307,6 @@ pub enum RequestCommand {
     },
 }
 
-/// What a model's answer is sent on.
 #[derive(clap::Args)]
 pub struct ProofArgs {
     /// `<question>:<ledger entry id>` of a person's decision the answer
@@ -455,37 +454,6 @@ fn detail_json(detail: &Detail) -> Value {
     })
 }
 
-fn repo_json(repo: &Repo, paths: &dyn RealPaths) -> Value {
-    let sessions: Vec<Value> = repo
-        .sessions
-        .iter()
-        .map(|s| {
-            let place = Place {
-                repo_root: repo.root.as_deref(),
-                cwd: &s.cwd,
-                permission_mode: s.permission_mode.as_deref(),
-            };
-            json!({
-                "session_id": s.session_id,
-                "column": s.column.id(),
-                "cwd": s.cwd,
-                "permission_mode": s.permission_mode,
-                "actions": action_ids(&s.actions),
-                "subtitle": s.subtitle,
-                "last_line": s.last_line,
-                "delivery": s.delivery,
-                "wait": wait_json(s.waiting.as_ref(), &place, paths, None),
-            })
-        })
-        .collect();
-    defused(json!({
-        "label": repo.label,
-        "root": repo.root,
-        "sessions": sessions,
-    }))
-}
-
-/// The relays the ledger keeps for one session's waits, read once on demand.
 struct RelayBook<'a> {
     store: &'a dyn LedgerStore,
     book: OnceCell<Option<Book>>,
@@ -501,7 +469,6 @@ impl<'a> RelayBook<'a> {
         }
     }
 
-    /// The unused relays for `wait` of `session`; none when the ledger cannot be read.
     fn json(&self, session: &str, wait: &str) -> Value {
         let book = self.book.get_or_init(|| read_book(self.store).ok());
         let found = book
@@ -515,65 +482,144 @@ impl<'a> RelayBook<'a> {
     }
 }
 
-/// `relays` lists what the wait may be answered on, for `status`; the
-/// board leaves it out.
-fn wait_json(
-    waiting: Option<&Waiting>,
-    place: &Place,
-    paths: &dyn RealPaths,
-    relays: Option<(&RelayBook, &str)>,
-) -> Value {
-    let Some(waiting) = waiting else {
-        return Value::Null;
-    };
-    let wait = derive(waiting, place, paths);
-    let mut out = json!({
-        "kind": wait.kind(),
-        "id": wait.id,
-        "since": wait.since,
-        "request": wait.request,
-        "context": wait.context,
-    });
-    match &wait.subject {
-        Subject::Question(questions) => {
-            out["questions"] = questions
-                .iter()
-                .map(|q| {
-                    let mut shown = question_json(&q.question);
-                    shown["key"] = json!(q.key);
-                    shown["key_label"] = json!(q.key_label);
-                    shown
-                })
-                .collect();
-        }
-        Subject::Permission(p) => {
-            out["tool"] = json!(p.tool);
-            out["target"] = json!(p.target);
-            out["truncated"] = json!(p.truncated);
-            out["key"] = json!(p.key);
-            out["key_label"] = json!(p.key_label);
-            out["read_only"] = json!(p.read_only);
-        }
-        Subject::Decision(d) => {
-            out["ask"] = json!(d.ask);
-            out["recap"] = json!(d.recap);
-            out["options"] = json!(d.options);
-            out["key"] = json!(d.key);
-        }
-        Subject::Input => {}
-    }
-    out["proxyable"] = json!(wait.proxyable());
-    out["blocked"] = json!(wait.blocked.iter().map(Blocked::id).collect::<Vec<_>>());
-    if let Some((book, session)) = relays {
-        out["relays"] = match &wait.id {
-            Some(id) => book.json(session, id),
-            None => json!([]),
-        };
-    }
-    out
+/// `relays` lists what a wait may be answered on, for `status`; the board
+/// leaves it out.
+struct WaitView<'a> {
+    paths: &'a dyn RealPaths,
+    relays: Option<&'a RelayBook<'a>>,
 }
 
-/// Every string with its wait marker defused.
+impl WaitView<'_> {
+    fn repo_json(&self, repo: &Repo) -> Value {
+        let sessions: Vec<Value> = repo
+            .sessions
+            .iter()
+            .map(|s| {
+                let place = Place {
+                    repo_root: repo.root.as_deref(),
+                    cwd: &s.cwd,
+                    permission_mode: s.permission_mode.as_deref(),
+                };
+                json!({
+                    "session_id": s.session_id,
+                    "column": s.column.id(),
+                    "cwd": s.cwd,
+                    "permission_mode": s.permission_mode,
+                    "actions": action_ids(&s.actions),
+                    "subtitle": s.subtitle,
+                    "last_line": s.last_line,
+                    "delivery": s.delivery,
+                    "wait": self.wait_json(s.waiting.as_ref(), &place, &s.session_id),
+                })
+            })
+            .collect();
+        defused(json!({
+            "label": repo.label,
+            "root": repo.root,
+            "sessions": sessions,
+        }))
+    }
+
+    fn wait_json(&self, waiting: Option<&Waiting>, place: &Place, session: &str) -> Value {
+        let Some(waiting) = waiting else {
+            return Value::Null;
+        };
+        let wait = derive(waiting, place, self.paths);
+        let mut out = json!({
+            "kind": wait.kind(),
+            "id": wait.id,
+            "since": wait.since,
+            "request": wait.request,
+            "context": wait.context,
+        });
+        match &wait.subject {
+            Subject::Question(questions) => {
+                out["questions"] = questions
+                    .iter()
+                    .map(|q| {
+                        let mut shown = question_json(&q.question);
+                        shown["key"] = json!(q.key);
+                        shown["key_label"] = json!(q.key_label);
+                        shown
+                    })
+                    .collect();
+            }
+            Subject::Permission(p) => {
+                out["tool"] = json!(p.tool);
+                out["target"] = json!(p.target);
+                out["truncated"] = json!(p.truncated);
+                out["key"] = json!(p.key);
+                out["key_label"] = json!(p.key_label);
+                out["read_only"] = json!(p.read_only);
+            }
+            Subject::Decision(d) => {
+                out["ask"] = json!(d.ask);
+                out["recap"] = json!(d.recap);
+                out["options"] = json!(d.options);
+                out["key"] = json!(d.key);
+            }
+            Subject::Input => {}
+        }
+        out["proxyable"] = json!(wait.proxyable());
+        out["blocked"] = json!(wait.blocked.iter().map(Blocked::id).collect::<Vec<_>>());
+        if let Some(book) = self.relays {
+            out["relays"] = match &wait.id {
+                Some(id) => book.json(session, id),
+                None => json!([]),
+            };
+        }
+        out
+    }
+
+    fn board_json(&self, board: &Board, layout: &Layout) -> Value {
+        let columns: Vec<Value> = board
+            .columns
+            .iter()
+            .map(|(column, cards)| {
+                json!({
+                    "id": column.id(),
+                    "title": column.title(),
+                    "heading": column.heading(cards.len()),
+                    "cards": cards.iter().map(card_json).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        let repos: Vec<Value> = group(board)
+            .iter()
+            .map(|repo| self.repo_json(repo))
+            .collect();
+        json!({
+            "columns": columns,
+            "repos": repos,
+            "delegate": delegate_json(&delegate_of(board)),
+            "expired": board.expired,
+            "layout": layout_json(layout),
+        })
+    }
+
+    fn status_entry_json(&self, column: Column, card: &Card) -> Value {
+        let place = Place {
+            repo_root: card.repo_root.as_deref(),
+            cwd: &card.cwd,
+            permission_mode: card.permission_mode.as_deref(),
+        };
+        defused(json!({
+            "session_id": card.session_id,
+            "label": card.label,
+            "repo_root": card.repo_root,
+            "cwd": card.cwd,
+            "column": column.id(),
+            "age": card.age,
+            "subtitle": card.subtitle,
+            "permission_mode": card.permission_mode,
+            "actions": action_ids(&card.actions),
+            "last_line": card.last_line,
+            "delivery": card.detail.delivery,
+            "wait": self.wait_json(card.waiting.as_ref(), &place, &card.session_id),
+        }))
+    }
+}
+
 fn defused(value: Value) -> Value {
     match value {
         Value::String(text) => Value::String(defuse_marker(&text)),
@@ -616,32 +662,6 @@ fn layout_json(layout: &Layout) -> Value {
     })
 }
 
-fn board_json(board: &Board, layout: &Layout, paths: &dyn RealPaths) -> Value {
-    let columns: Vec<Value> = board
-        .columns
-        .iter()
-        .map(|(column, cards)| {
-            json!({
-                "id": column.id(),
-                "title": column.title(),
-                "heading": column.heading(cards.len()),
-                "cards": cards.iter().map(card_json).collect::<Vec<_>>(),
-            })
-        })
-        .collect();
-    let repos: Vec<Value> = group(board)
-        .iter()
-        .map(|repo| repo_json(repo, paths))
-        .collect();
-    json!({
-        "columns": columns,
-        "repos": repos,
-        "delegate": delegate_json(&delegate_of(board)),
-        "expired": board.expired,
-        "layout": layout_json(layout),
-    })
-}
-
 fn with_records<T>(run: impl FnOnce(&KanbanRecords) -> T) -> T {
     let store = FsRecords::from_env();
     let inbox = FsInbox::from_env();
@@ -650,6 +670,25 @@ fn with_records<T>(run: impl FnOnce(&KanbanRecords) -> T) -> T {
         inbox: &inbox,
         paths: &FsPaths,
     })
+}
+
+fn with_board_view<T>(run: impl FnOnce(&WaitView) -> T) -> T {
+    run(&WaitView {
+        paths: &FsPaths,
+        relays: None,
+    })
+}
+
+fn with_status_view<T>(now: u64, run: impl FnOnce(&WaitView, &FsLedger) -> T) -> T {
+    let ledger = FsLedger::from_env();
+    let relays = RelayBook::new(&ledger, now);
+    run(
+        &WaitView {
+            paths: &FsPaths,
+            relays: Some(&relays),
+        },
+        &ledger,
+    )
 }
 
 fn with_delegate(run: impl FnOnce(&KanbanDelegate) -> Value) -> Value {
@@ -668,38 +707,6 @@ fn now_millis() -> u64 {
         .unwrap_or(0)
 }
 
-fn status_entry_json(
-    column: Column,
-    card: &Card,
-    paths: &dyn RealPaths,
-    relays: &RelayBook,
-) -> Value {
-    let place = Place {
-        repo_root: card.repo_root.as_deref(),
-        cwd: &card.cwd,
-        permission_mode: card.permission_mode.as_deref(),
-    };
-    defused(json!({
-        "session_id": card.session_id,
-        "label": card.label,
-        "repo_root": card.repo_root,
-        "cwd": card.cwd,
-        "column": column.id(),
-        "age": card.age,
-        "subtitle": card.subtitle,
-        "permission_mode": card.permission_mode,
-        "actions": action_ids(&card.actions),
-        "last_line": card.last_line,
-        "delivery": card.detail.delivery,
-        "wait": wait_json(
-            card.waiting.as_ref(),
-            &place,
-            paths,
-            Some((relays, &card.session_id)),
-        ),
-    }))
-}
-
 fn run_status(
     columns: Vec<String>,
     session: Option<String>,
@@ -715,18 +722,16 @@ fn run_status(
     let shown = Format::parse(format)
         .and_then(|format| with_records(|r| r.status(&query)).map(|board| (format, board)));
     match shown {
-        Ok((Format::Json, board)) => {
-            let ledger = FsLedger::from_env();
-            let relays = RelayBook::new(&ledger, now);
+        Ok((Format::Json, board)) => with_status_view(now, |view, ledger| {
             let sessions: Vec<Value> = select(&board, query.session.as_deref())
                 .into_iter()
                 .flat_map(|(column, cards)| cards.into_iter().map(move |card| (column, card)))
-                .map(|(column, card)| status_entry_json(column, card, &FsPaths, &relays))
+                .map(|(column, card)| view.status_entry_json(column, card))
                 .collect();
-            let book = read_book(&ledger).ok();
+            let book = read_book(ledger).ok();
             let delegate = status_delegate_json(&delegate_of(&board), book.as_ref(), now);
             json!({ "now": now, "delegate": delegate, "sessions": sessions }).to_string()
-        }
+        }),
         Ok((Format::Text, board)) => defuse_marker(&render_text(&board, query.session.as_deref())),
         Err(error) => json!({ "error": error }).to_string(),
     }
@@ -906,7 +911,7 @@ pub fn run(cli: Cli) -> i32 {
                 Ok((only, sessions)) => {
                     let board = build(&sessions, &params).only(&only);
                     let layout = fit(width, board.columns.len() as u32);
-                    board_json(&board, &layout, &FsPaths)
+                    with_board_view(|view| view.board_json(&board, &layout))
                 }
                 Err(error) => json!({ "error": error }),
             };

@@ -55,7 +55,6 @@ pub struct FsInbox {
     root: Result<PathBuf, String>,
 }
 
-/// `$CLAUDE_CONFIG_DIR`, else `$HOME/.claude`.
 pub fn config_dir() -> Result<PathBuf, String> {
     std::env::var_os("CLAUDE_CONFIG_DIR")
         .filter(|d| !d.is_empty())
@@ -162,7 +161,6 @@ impl InboxStore for FsInbox {
     }
 }
 
-/// Wall-clock nanoseconds and the process id.
 pub struct ClockIds;
 
 impl IdSource for ClockIds {

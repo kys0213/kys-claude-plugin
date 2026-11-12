@@ -17,7 +17,6 @@ pub trait LedgerStore {
     fn append(&self, month: &str, lines: &[String]) -> Result<(), String>;
     /// Every month file, empty when the ledger was never written.
     fn read(&self) -> Result<Vec<MonthFile>, String>;
-    /// The month files from `month` on.
     fn read_from(&self, month: &str) -> Result<Vec<MonthFile>, String> {
         let mut months = self.read()?;
         months.retain(|m| m.month.as_str() >= month);
@@ -31,7 +30,6 @@ pub trait LedgerStore {
     ) -> Result<(), String>;
 }
 
-/// Every line of the ledger, as precedents read it.
 pub fn read_book(store: &dyn LedgerStore) -> Result<Book, String> {
     let months = store.read()?;
     Ok(Book::read(

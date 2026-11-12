@@ -195,8 +195,6 @@ impl KanbanRequests<'_> {
         })())
     }
 
-    /// What a model's answer is sent on, when a relay or its precedents
-    /// vouch for it; a person's answer carries nothing.
     fn auth(&self, answerer: &Answerer, sent: &Sent) -> Result<Option<Auth>, String> {
         let proof = answerer.proof;
         if answerer.from == Sender::Pane {
@@ -266,8 +264,6 @@ impl KanbanRequests<'_> {
         self.queue(session, request)
     }
 
-    /// Checks `relay` for the wait the taking session holds and spends it,
-    /// so no other answer goes on it.
     fn spend_relay(
         &self,
         relay: &Relay,
@@ -290,7 +286,6 @@ impl KanbanRequests<'_> {
         self.queue(session, Request::stop(turn))
     }
 
-    /// Leaves one answer per question for the open question `ask` names.
     pub fn reply(&self, session: &str, ask: &str, answers: &[String], answerer: Answerer) -> Value {
         let sent = Sent {
             proxied: Some(Proxied::Question),
@@ -302,7 +297,6 @@ impl KanbanRequests<'_> {
         })
     }
 
-    /// Leaves the reply to the decision that `at` names.
     pub fn decide(&self, session: &str, at: &str, text: &str, answerer: Answerer) -> Value {
         let answers = [text.to_string()];
         let sent = Sent {
@@ -333,9 +327,6 @@ impl KanbanRequests<'_> {
         })
     }
 
-    /// Whether a model's verdict on `request` goes: on a relay of it, or on
-    /// precedents that vouch for it on the request as the waiting session
-    /// holds it.
     fn vet_permit(
         &self,
         target: &Target,
@@ -367,7 +358,6 @@ impl KanbanRequests<'_> {
         )
     }
 
-    /// Waits up to `for_ms` for the answer to `request`, claiming it.
     pub fn wait_permit(
         &self,
         session: &str,
@@ -447,8 +437,6 @@ impl KanbanRequests<'_> {
         }))
     }
 
-    /// Claims every request and says which to act on, judged against what
-    /// the session waits on now.
     pub fn take(
         &self,
         session: &str,

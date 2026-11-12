@@ -2,8 +2,6 @@
 
 use std::path::{Component, Path, PathBuf};
 
-/// Collapses `.` and `..` by name. A `..` at the root stays at the root; a
-/// leading `..` of a relative path is kept.
 pub fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for comp in path.components() {

@@ -32,8 +32,6 @@ pub fn parse_sessions(raw: &str) -> Result<Vec<SessionFact>, String> {
     Ok(records.iter().filter_map(parse_record).collect())
 }
 
-/// One session's record copy; `None` when it is not JSON or not a record this
-/// version reads.
 pub fn parse_record_copy(raw: &str) -> Option<SessionFact> {
     parse_record(&serde_json::from_str(raw).ok()?)
 }
@@ -108,16 +106,13 @@ fn parse_record(value: &Value) -> Option<SessionFact> {
     })
 }
 
-/// What `delegate wake` reads on stdin: the sessions' records and what the
-/// delegate's mod kept and sees.
 pub struct WakeStdin {
     pub sessions: Vec<SessionFact>,
     pub state: WakeState,
     pub draft_len: u64,
 }
 
-/// `{"sessions": [<v1 record>, ...], "state": {"pending": [{"id", "since"}],
-/// "delivered": [<id>], "draft_len": <n>}}`; an absent state is an empty one.
+/// An absent `state` is an empty one.
 pub fn parse_wake(raw: &str) -> Result<WakeStdin, String> {
     let sessions = parse_sessions(raw)?;
     let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
@@ -339,11 +334,8 @@ fn parse_pick(value: &Value) -> Option<Pick> {
     })
 }
 
-/// What `inbox take` waits on: `{"asks": [{"id", "questions": [...]}],
-/// "decision": {"at", ...} | null, "place": {"repo_root", "cwd",
-/// "permission_mode"}}`, each ask's questions as the call holds them. Empty
-/// stdin waits on nothing; asks or a place that do not read whole judge no
-/// model's answer.
+/// Empty stdin waits on nothing; asks or a place that do not read whole judge
+/// no model's answer.
 pub fn parse_waits(raw: &str) -> Result<Waits, String> {
     if raw.trim().is_empty() {
         return Ok(Waits::default());
@@ -385,10 +377,7 @@ fn parse_place(value: &Value) -> Option<SessionPlace> {
     })
 }
 
-/// What `inbox wait-permit --wait-stdin` takes: the nonces as
-/// `parse_pane_nonces` reads them, and the request the session waits on,
-/// `{"place": {...}, "permission": {"tool", "input": {<name>: <string>}}}`,
-/// its input whole. A request that does not read judges no model's answer.
+/// A request that does not read whole judges no model's answer.
 pub fn parse_permit_wait(raw: &str) -> Result<(PaneNonces, Option<PermitWait>), String> {
     let nonces = parse_pane_nonces(raw)?;
     if raw.trim().is_empty() {
@@ -411,9 +400,8 @@ pub fn parse_permit_wait(raw: &str) -> Result<(PaneNonces, Option<PermitWait>), 
     Ok((nonces, wait))
 }
 
-/// The nonces the pane left for the session, beside what it waits on:
-/// `{"nonces": [{"kind", "nonce"}]}`, `kind` an answer's request kind. An entry
-/// that does not read proves nothing and is skipped. Empty stdin left none.
+/// An entry that does not read proves nothing and is skipped. Empty stdin
+/// left none.
 pub fn parse_pane_nonces(raw: &str) -> Result<PaneNonces, String> {
     if raw.trim().is_empty() {
         return Ok(PaneNonces::default());
@@ -433,7 +421,6 @@ fn parse_left_nonce(value: &Value) -> Option<LeftNonce> {
     })
 }
 
-/// The Bash tool's input: `{"command": ...}`.
 pub fn parse_bash_command(raw: &str) -> Result<String, String> {
     let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
     value
@@ -443,9 +430,6 @@ pub fn parse_bash_command(raw: &str) -> Result<String, String> {
         .ok_or_else(|| "stdin has no `command` string".to_string())
 }
 
-/// What `ledger record` takes: when, the session and where it runs, the wait
-/// as its record keeps it under `question`, `permission` or `decision`, and
-/// `answer`, how the answer came in.
 pub fn parse_ledger_facts(raw: &str) -> Result<Facts, String> {
     let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
     let at = value
@@ -503,8 +487,6 @@ pub fn parse_ledger_facts(raw: &str) -> Result<Facts, String> {
     })
 }
 
-/// What `relay-frame` takes: `{"questions": [...]}`, as the AskUserQuestion
-/// call holds them.
 pub fn parse_tool_questions(raw: &str) -> Result<Vec<Question>, String> {
     let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
     value
@@ -519,9 +501,6 @@ pub fn parse_tool_questions(raw: &str) -> Result<Vec<Question>, String> {
         .ok_or_else(|| "stdin has no readable `questions` array".to_string())
 }
 
-/// What `ledger bind` takes: the permission request's `tool` and the
-/// session's `calls` in flight, `{"tool_use_id", "tool", "permission"}` each,
-/// `permission` whether a request is already bound to it.
 pub fn parse_bind_facts(raw: &str) -> Result<(String, Vec<OpenCall>), String> {
     let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
     let tool = value
@@ -549,8 +528,7 @@ fn parse_open_call(value: &Value) -> Option<OpenCall> {
     })
 }
 
-/// How an answer came in: the asking session's own screen, or its inbox as
-/// the CLI judged it there. A `via` it did not name proves nothing.
+/// A `via` the payload did not name proves nothing.
 #[derive(Clone, Copy)]
 enum Way {
     Session,

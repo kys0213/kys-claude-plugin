@@ -145,9 +145,6 @@ impl KanbanRecords<'_> {
         Ok(build(&sessions, &params).only(&columns))
     }
 
-    /// The questions rewritten over the wait their first line names, as the
-    /// board of the record copies shows it at `now`, and that wait. Only the
-    /// delegate `session` frames; another session's questions stay as asked.
     pub fn relay_frame(&self, questions: &[Question], session: &str, now: u64) -> Value {
         let unframed = || {
             json!({

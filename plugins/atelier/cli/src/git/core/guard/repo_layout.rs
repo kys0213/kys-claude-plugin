@@ -2,25 +2,18 @@ use std::path::{Path, PathBuf};
 
 use crate::shared::path::normalize;
 
-/// Lexically collapses `.`/`..` in `path` (relative to `base`) without touching
-/// the filesystem. A relative `path` is anchored at `base` rather than the
-/// process cwd — the guard runs as a PreToolUse hook whose cwd may differ from
-/// the project (worktree / subagent contexts), so resolving against cwd
-/// mis-judges relative `file_path`s.
+/// A relative `path` is anchored at `base`, not the process cwd: the guard runs
+/// as a PreToolUse hook whose cwd may differ from the project (worktree /
+/// subagent contexts).
 pub(super) fn resolve_against(base: &Path, path: &str) -> PathBuf {
     normalize(&base.join(path))
 }
 
-/// Resolves `project_dir` itself, anchoring a relative project dir at the
-/// process cwd (the project dir is the anchor, so there is no better base).
 pub(super) fn resolve_project_dir(project_dir: &str) -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
     resolve_against(&cwd, project_dir)
 }
 
-/// True when `file_path` is the project dir
-/// itself or strictly inside it (no `..` escape, not a sibling prefix match).
-/// Relative `file_path`s are resolved against `project_dir`.
 pub fn is_inside_project_dir(file_path: &str, project_dir: &str) -> bool {
     inside_project_dir(&resolve_project_dir(project_dir), file_path)
 }
@@ -29,10 +22,6 @@ fn inside_project_dir(project: &Path, file_path: &str) -> bool {
     is_under(project, &resolve_against(project, file_path))
 }
 
-/// Walks up from the file's directory looking for a `.git` entry, skipping
-/// non-existent leading directories first.
-/// Relative `file_path`s are resolved against `project_dir`, not the process
-/// cwd, so the walk starts inside the project.
 pub fn is_inside_any_git_repo(file_path: &str, project_dir: &str) -> bool {
     inside_any_git_repo(&resolve_project_dir(project_dir), file_path)
 }
@@ -43,8 +32,7 @@ fn inside_any_git_repo(project: &Path, file_path: &str) -> bool {
 }
 
 /// Nearest ancestor of `path` (itself included) that holds a `.git` entry — a
-/// directory for a main checkout, a file for a linked worktree. A `path` that
-/// does not exist yet is first lifted to its nearest existing ancestor.
+/// directory for a main checkout, a file for a linked worktree.
 pub fn find_repo_root(path: &Path) -> Option<PathBuf> {
     let fs_root = Path::new("/");
     let mut dir = path.to_path_buf();
@@ -100,7 +88,6 @@ fn common_git_dir(root: &Path) -> Option<PathBuf> {
     Some(canonical(common))
 }
 
-/// Whether `root` and `project_root` are checkouts of one repository.
 pub(super) fn same_repository(root: &Path, project_root: Option<&Path>) -> bool {
     let Some(project_root) = project_root else {
         return false;

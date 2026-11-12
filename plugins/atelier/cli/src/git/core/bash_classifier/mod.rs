@@ -42,7 +42,6 @@ pub enum BypassRule {
     HooksPathConfig,
     HooksPathEnv,
     HookSkipEnv,
-    /// A write into a repository's `.git/hooks` directory.
     HooksDirWrite,
 }
 
@@ -143,7 +142,6 @@ pub fn classify(input: &ClassifyInput) -> BashAnalysis {
     analyzer.out
 }
 
-/// Whether `path` lies in a `.git/hooks` directory.
 pub fn is_hooks_path(path: &Path) -> bool {
     let parts: Vec<_> = path.components().collect();
     parts

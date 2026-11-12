@@ -154,7 +154,6 @@ impl KanbanLedger<'_> {
         })())
     }
 
-    /// What the precedents of `key` allow at `now`.
     pub fn matched(&self, key: &str, now: u64) -> Value {
         answer((|| {
             let key = DecisionKey::parse(key)?;
@@ -174,7 +173,6 @@ impl KanbanLedger<'_> {
         })())
     }
 
-    /// Turns proxy answer `entry` over, which turns its key off.
     pub fn revoke(&self, entry: &str, reason: &str, now: u64) -> Value {
         answer((|| {
             let revoked = revoke(&read_book(self.store)?, entry, reason, now)?;
@@ -185,7 +183,6 @@ impl KanbanLedger<'_> {
         })())
     }
 
-    /// Each kind's mode and shadow comparisons at `now`, and the keys off.
     pub fn stats(&self, now: u64) -> Value {
         answer((|| {
             let book = read_book(self.store)?;

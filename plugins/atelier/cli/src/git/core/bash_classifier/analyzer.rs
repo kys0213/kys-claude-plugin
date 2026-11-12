@@ -17,7 +17,6 @@ const RESERVED: &[&str] = &[
 
 pub(super) type Env = Vec<(String, String)>;
 
-/// State a segment leaves for the following segments of the same shell.
 enum Effect {
     Cd(Anchor),
     Env(Vec<(String, String)>),
@@ -66,7 +65,6 @@ pub(super) struct Analyzer<'a> {
     pub(super) pending_switch: Option<Option<BranchSwitch>>,
 }
 
-/// Shell state carried from one segment of a script to the next.
 struct Shell {
     cwd: Anchor,
     env: Env,
@@ -146,8 +144,6 @@ impl Shell {
         }
     }
 
-    /// Strips the brace-group and function-definition words that open a
-    /// segment, entering or leaving their frames.
     fn enter_groups<'w>(&mut self, mut words: &'w [Word]) -> &'w [Word] {
         loop {
             match words.first() {
@@ -178,10 +174,6 @@ impl Shell {
     }
 }
 
-/// Whether an unresolved path whose literal part is `prefix` may land in a
-/// `.git/hooks` directory. `raw` from its first unresolved component on is
-/// checked for a component that could expand to `hooks` right below a `.git`,
-/// and for a `..` that could climb back into a `.git` it names.
 fn may_reach_hooks_dir(prefix: &Path, raw: &str) -> bool {
     if is_hooks_path(prefix) {
         return true;
@@ -207,7 +199,6 @@ fn may_reach_hooks_dir(prefix: &Path, raw: &str) -> bool {
         .any(|(i, c)| below_git(i) && glob_may_match(c.as_bytes(), b"hooks"))
 }
 
-/// `*`/`?` glob match; a bracket expression or expansion matches anything.
 fn glob_may_match(pattern: &[u8], name: &[u8]) -> bool {
     match pattern.first() {
         None => name.is_empty(),
@@ -289,8 +280,6 @@ impl Analyzer<'_> {
         Ok(())
     }
 
-    /// A switch made by the segment just analyzed covers the rest of its `&&`
-    /// chain; any other separator ends the chain and its switch.
     fn carry_switch(&mut self, chained: bool) {
         let made = self.pending_switch.take();
         if chained {
@@ -363,8 +352,6 @@ impl Analyzer<'_> {
         }
     }
 
-    /// Runs `src` one level deeper; past the depth limit or on a lex failure
-    /// the nested script counts as one opaque execution.
     pub(super) fn run_nested(
         &mut self,
         src: &str,
@@ -498,8 +485,6 @@ impl Analyzer<'_> {
         }
     }
 
-    // ---- hit emission ----
-
     pub(super) fn push_hit(&mut self, kind: HitKind, program: &str, anchor: Anchor) {
         if matches!(kind, HitKind::Write(_)) {
             let place = match &anchor {
@@ -555,8 +540,6 @@ impl Analyzer<'_> {
     pub(super) fn write_place(&mut self, rule: WriteRule, program: &str, place: &Anchor) {
         self.push_hit(HitKind::Write(rule), program, place.clone());
     }
-
-    // ---- command dispatch ----
 
     pub(super) fn command(&mut self, words: &[Word], env: &Env, cwd: &Anchor, depth: usize) {
         let Some(prog) = words.first() else { return };

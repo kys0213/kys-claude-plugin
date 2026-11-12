@@ -44,8 +44,6 @@ pub(super) fn split_eq(s: &str) -> (&str, bool) {
     }
 }
 
-/// Value of a short option inside a bundle: the attached rest, else the next
-/// argument (reported as one extra consumed word).
 pub(super) fn short_value(w: &Word, after: usize, next: Option<&Word>) -> (Option<Word>, usize) {
     if after < w.text.len() {
         (Some(w.slice_from(after)), 0)
@@ -54,8 +52,6 @@ pub(super) fn short_value(w: &Word, after: usize, next: Option<&Word>) -> (Optio
     }
 }
 
-/// Value of a long option: the attached `--name=value` rest, else the next
-/// argument (reported as one extra consumed word).
 pub(super) fn long_value(
     w: &Word,
     name: &str,
