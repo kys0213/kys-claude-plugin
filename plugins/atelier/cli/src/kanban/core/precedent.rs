@@ -8,7 +8,7 @@ use super::allowlist::RealPaths;
 use super::board::{PermissionAsk, WaitOn, Waiting};
 use super::ledger::{DecidedBy, Entry, EntryKind, DAY_MS};
 use super::mask::mask;
-use super::matchkey::{answer_fp, digest};
+use super::matchkey::{answer_fp, digest, key_prefixes, kind_of_prefix, KEY_HEX_LEN};
 use super::progress::Activity;
 use super::prompt::decides_as_person;
 use super::question::{Ask, AskLengths, Question};
@@ -31,7 +31,7 @@ pub const MAX_PRECEDENTS: usize = 5;
 pub const MAX_REASON_CHARS: usize = 200;
 const ID_BYTES: usize = 4;
 
-/// A decision key as `ledger record` makes them: `<q|p|d>1:` and 32 hex digits.
+/// A decision key as `ledger record` makes them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecisionKey {
     text: String,
@@ -40,15 +40,15 @@ pub struct DecisionKey {
 
 impl DecisionKey {
     pub fn parse(raw: &str) -> Result<DecisionKey, String> {
-        let refuse = || format!("결정 키 `{raw}` 는 `q1:`·`p1:`·`d1:` 와 32자리 16진수예요");
-        let (prefix, digits) = raw.split_once(':').ok_or_else(refuse)?;
-        let kind = match prefix {
-            "q1" => EntryKind::Question,
-            "p1" => EntryKind::Permission,
-            "d1" => EntryKind::Decision,
-            _ => return Err(refuse()),
+        let refuse = || {
+            format!(
+                "결정 키 `{raw}` 는 `{}` 와 {KEY_HEX_LEN}자리 16진수예요",
+                key_prefixes().join("`·`")
+            )
         };
-        let hex = digits.len() == 32
+        let (prefix, digits) = raw.split_once(':').ok_or_else(refuse)?;
+        let kind = kind_of_prefix(prefix).ok_or_else(refuse)?;
+        let hex = digits.len() == KEY_HEX_LEN
             && digits
                 .chars()
                 .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c));

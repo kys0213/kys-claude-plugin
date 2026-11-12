@@ -3,6 +3,7 @@
 //! normalized parts, in hex.
 
 use super::allowlist::{field, shell_line, Scope};
+use super::ledger::EntryKind;
 use super::question::Question;
 use super::text::fold;
 use sha2::{Digest, Sha256};
@@ -11,6 +12,15 @@ use std::path::Path;
 const PART: char = '\u{1f}';
 const ITEM: char = '\u{1e}';
 const KEY_BYTES: usize = 16;
+const RULE_VERSION: u32 = 1;
+const KEY_KINDS: [EntryKind; 3] = [
+    EntryKind::Question,
+    EntryKind::Permission,
+    EntryKind::Decision,
+];
+
+/// Hex digits after a key's prefix.
+pub const KEY_HEX_LEN: usize = KEY_BYTES * 2;
 
 /// Control chars read as spaces, whitespace folded, ASCII lowercased, and the
 /// trailing `? ？ . 。 !` taken off.
@@ -34,8 +44,32 @@ pub fn digest(parts: &[&str], bytes: usize) -> String {
         .collect()
 }
 
-fn key(kind: &str, parts: &[&str]) -> String {
-    format!("{kind}1:{}", digest(parts, KEY_BYTES))
+fn key_prefix(kind: EntryKind) -> String {
+    let tag = match kind {
+        EntryKind::Question => 'q',
+        EntryKind::Permission => 'p',
+        EntryKind::Decision => 'd',
+    };
+    format!("{tag}{RULE_VERSION}")
+}
+
+/// The kind a key's prefix (the part before `:`) names.
+pub fn kind_of_prefix(prefix: &str) -> Option<EntryKind> {
+    KEY_KINDS
+        .into_iter()
+        .find(|kind| key_prefix(*kind) == prefix)
+}
+
+/// Every prefix a key may start with, as `q1:`.
+pub fn key_prefixes() -> Vec<String> {
+    KEY_KINDS
+        .into_iter()
+        .map(|kind| format!("{}:", key_prefix(kind)))
+        .collect()
+}
+
+fn key(kind: EntryKind, parts: &[&str]) -> String {
+    format!("{}:{}", key_prefix(kind), digest(parts, KEY_BYTES))
 }
 
 /// One answer's fingerprint: the same for answers that read the same as a
@@ -58,16 +92,19 @@ pub fn question_key(repo: &str, question: &Question) -> String {
     } else {
         "single"
     };
-    key("q", &[repo, &sentence(&question.question), &labels, mode])
+    key(
+        EntryKind::Question,
+        &[repo, &sentence(&question.question), &labels, mode],
+    )
 }
 
 pub fn decision_key(repo: &str, ask: &str, options: &[String]) -> String {
     let set = label_set(options.iter().map(String::as_str));
-    key("d", &[repo, &sentence(ask), &set])
+    key(EntryKind::Decision, &[repo, &sentence(ask), &set])
 }
 
 pub fn permission_key(repo: &str, mode: &str, tool: &str, target: &str) -> String {
-    key("p", &[repo, mode, tool, target])
+    key(EntryKind::Permission, &[repo, mode, tool, target])
 }
 
 fn host(url: &str) -> Option<String> {
@@ -137,7 +174,10 @@ mod tests {
 
     #[test]
     fn keys_differ_by_kind() {
-        assert_ne!(key("q", &["a"]), key("d", &["a"]));
-        assert_eq!(key("q", &["a"]).len(), "q1:".len() + 32);
+        assert_ne!(
+            key(EntryKind::Question, &["a"]),
+            key(EntryKind::Decision, &["a"])
+        );
+        assert_eq!(key(EntryKind::Question, &["a"]).len(), "q1:".len() + 32);
     }
 }
