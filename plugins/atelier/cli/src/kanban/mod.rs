@@ -3,8 +3,10 @@
 //! sessions through their inboxes.
 //!
 //! Every run exits 0. A subcommand prints one line of JSON, `{"error": ...}`
-//! for a refused or failed request. Arguments clap cannot take print clap's
-//! own text instead and no JSON: a usage error on stderr, help on stdout.
+//! for a refused or failed request, except `status --format text`, which
+//! prints the board as plain lines. Arguments clap cannot take print clap's
+//! own text instead: a usage error on stderr, help on stdout. With no
+//! subcommand, help is printed on stdout.
 
 pub mod commands;
 pub mod core;
