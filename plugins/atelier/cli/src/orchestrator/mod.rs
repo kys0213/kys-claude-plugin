@@ -4,4 +4,4 @@
 pub mod commands;
 pub mod core;
 
-pub use commands::{run, run_from, Cli, Commands};
+pub use commands::run_from;
