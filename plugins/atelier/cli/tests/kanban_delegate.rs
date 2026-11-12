@@ -2,10 +2,9 @@ use serde_json::{json, Value};
 
 mod kanban_support;
 use kanban_support::{
-    asking, board, event, put_record, question, session_with, Home, MIN, NOW, SEC,
+    asking, board, color, event, put_record, session_with, Home, HOUR, MIN, NOW, SEC,
 };
 
-const HOUR: u64 = 60 * MIN;
 const ANY_QUESTION_KEY: &str = "q1:00000000000000000000000000000000";
 const ANY_PERMISSION_KEY: &str = "p1:00000000000000000000000000000000";
 
@@ -35,10 +34,6 @@ fn delegate_record(id: &str, since: u64) -> Value {
         json!([event("session.start", None, MIN)]),
         json!({ "delegate_since": since }),
     )
-}
-
-fn color() -> Value {
-    json!([question("Which color?", &["Red", "Blue"], false)])
 }
 
 #[test]

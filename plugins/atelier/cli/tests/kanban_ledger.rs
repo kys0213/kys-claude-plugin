@@ -1,38 +1,16 @@
 use serde_json::{json, Value};
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::path::Path;
 use std::time::Duration;
 use tempfile::TempDir;
 
 mod kanban_support;
-use kanban_support::{atelier, js_len, kanban_in, question, question_lengths, NOW, REPO, SEC};
-
-const DAY: u64 = 24 * 60 * 60 * SEC;
-
-fn run_record(config: &Path, facts: &Value) -> Value {
-    let output = atelier()
-        .env("CLAUDE_CONFIG_DIR", config)
-        .args(["kanban", "ledger", "record"])
-        .write_stdin(facts.to_string())
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    serde_json::from_slice(&output).expect("valid JSON on stdout")
-}
-
-fn record(config: &Path, facts: &Value) -> Vec<String> {
-    let out = run_record(config, facts);
-    out["recorded"]
-        .as_array()
-        .unwrap_or_else(|| panic!("recorded ids, got {out}"))
-        .iter()
-        .map(|id| id.as_str().expect("id").to_string())
-        .collect()
-}
+use kanban_support::{
+    atelier, chose, color, decision_facts, kanban_in, ledger_dir, permission_facts_with, place_at,
+    question, question_facts_with, record_facts, run_record, spawn_kanban, stdout_json, with, DAY,
+    NOW, REPO,
+};
 
 fn list(config: &Path, args: &[&str]) -> Vec<Value> {
     let mut full = vec!["ledger", "list"];
@@ -50,100 +28,25 @@ fn only(config: &Path) -> Value {
     entries[0].clone()
 }
 
-fn ledger_dir(config: &Path) -> PathBuf {
-    config.join("atelier/kanban/ledger")
-}
-
-fn place(at: u64) -> Value {
-    json!({
-        "at": at,
-        "session": "w",
-        "repo_root": REPO,
-        "cwd": REPO,
-        "permission_mode": "default",
-    })
-}
-
-fn with(mut base: Value, extra: Value) -> Value {
-    for (key, value) in extra.as_object().expect("fields") {
-        base[key] = value.clone();
-    }
-    base
-}
-
 fn question_facts(at: u64, questions: Value, answer: Value) -> Value {
-    let orig_len = question_lengths(&questions);
-    with(
-        place(at),
-        json!({
-            "question": { "tool_use_id": "tu-1", "questions": questions, "at": at - 10 * SEC, "orig_len": orig_len },
-            "answer": answer,
-        }),
-    )
-}
-
-fn color() -> Value {
-    json!([question("Which color?", &["Red", "Blue"], false)])
-}
-
-fn bash_permission(at: u64, command: &str) -> Value {
-    json!({
-        "id": "t-1-7",
-        "tool": "Bash",
-        "input": { "command": command },
-        "input_len": { "command": js_len(command) },
-        "at": at - 10 * SEC,
-    })
+    question_facts_with("tu-1", at, questions, answer)
 }
 
 fn permission_facts(at: u64, command: &str, answer: Value) -> Value {
-    with(
-        place(at),
-        json!({ "permission": bash_permission(at, command), "answer": answer }),
-    )
-}
-
-fn decision_facts(at: u64, answer: Value) -> Value {
-    let ask = "초안대로 진행할까요?";
-    let options = ["초안대로 진행", "다시 쓰기"];
-    with(
-        place(at),
-        json!({
-            "decision": {
-                "at": at - 10 * SEC,
-                "ask": ask,
-                "recap": "초안을 정리했어요.",
-                "options": options,
-                "orig_len": { "ask": js_len(ask), "options": options.map(js_len) },
-            },
-            "answer": answer,
-        }),
-    )
+    permission_facts_with("t-1-7", REPO, at, command, answer)
 }
 
 fn source(entry: &Value) -> (Value, Value) {
     (entry["decided_by"].clone(), entry["via"].clone())
 }
 
-/// What the session's own question dialog ended with: its answers, in the
-/// call's question order, and how the call ended.
-fn dialog(answers: Value) -> Value {
-    json!({
-        "path": "session",
-        "answers": answers,
-        "afk_timeout_ms": null,
-        "is_error": false,
-        "denied": false,
-    })
-}
-
 #[test]
 fn a_question_call_that_ended_in_an_error_or_a_deny_leaves_nothing() {
     for ended in [json!({ "is_error": true }), json!({ "denied": true })] {
         let dir = TempDir::new().unwrap();
-        let ids = record(
+        let ids = record_facts(
             dir.path(),
-            &question_facts(NOW, color(), with(dialog(json!(["Red"])), ended.clone())),
+            &question_facts(NOW, color(), with(chose(json!(["Red"])), ended.clone())),
         );
 
         assert!(ids.is_empty(), "{ended}");
@@ -158,9 +61,9 @@ fn a_dialog_answer_that_is_not_text_is_no_answer() {
         question("Which color?", &["Red", "Blue"], false),
         question("Which size?", &["S", "M"], false),
     ]);
-    let ids = record(
+    let ids = record_facts(
         dir.path(),
-        &question_facts(NOW, questions, dialog(json!([{ "picked": "Red" }, "M"]))),
+        &question_facts(NOW, questions, chose(json!([{ "picked": "Red" }, "M"]))),
     );
 
     assert_eq!(ids.len(), 1);
@@ -175,12 +78,12 @@ fn only_a_numeric_afk_timeout_marks_the_dialog_as_resolved_while_away() {
         (json!("soon"), json!("human")),
     ] {
         let dir = TempDir::new().unwrap();
-        record(
+        record_facts(
             dir.path(),
             &question_facts(
                 NOW,
                 color(),
-                with(dialog(json!(["Red"])), json!({ "afk_timeout_ms": afk })),
+                with(chose(json!(["Red"])), json!({ "afk_timeout_ms": afk })),
             ),
         );
 
@@ -192,11 +95,11 @@ fn only_a_numeric_afk_timeout_marks_the_dialog_as_resolved_while_away() {
 fn entries_for_different_waits_at_the_same_moment_get_different_ids() {
     let dir = TempDir::new().unwrap();
     let ran = json!({ "path": "session", "post": "PostToolUse", "is_error": false });
-    let first = record(
+    let first = record_facts(
         dir.path(),
         &permission_facts(NOW, "git status", ran.clone()),
     );
-    let second = record(dir.path(), &permission_facts(NOW, "git diff", ran));
+    let second = record_facts(dir.path(), &permission_facts(NOW, "git diff", ran));
 
     assert_eq!(first.len(), 1);
     assert_eq!(second.len(), 1);
@@ -204,15 +107,11 @@ fn entries_for_different_waits_at_the_same_moment_get_different_ids() {
 }
 
 fn bind(stdin: &Value) -> Value {
-    let output = atelier()
-        .args(["kanban", "ledger", "bind"])
-        .write_stdin(stdin.to_string())
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    serde_json::from_slice(&output).expect("valid JSON on stdout")
+    stdout_json(
+        atelier()
+            .args(["kanban", "ledger", "bind"])
+            .write_stdin(stdin.to_string()),
+    )
 }
 
 fn open_call(id: &str, tool: &str, permission: bool) -> Value {
@@ -266,9 +165,9 @@ fn bind_refuses_facts_it_cannot_read() {
 #[test]
 fn a_question_answered_in_its_own_dialog_is_a_persons_decision() {
     let dir = TempDir::new().unwrap();
-    record(
+    record_facts(
         dir.path(),
-        &question_facts(NOW, color(), dialog(json!(["Red"]))),
+        &question_facts(NOW, color(), chose(json!(["Red"]))),
     );
 
     let entry = only(dir.path());
@@ -286,12 +185,12 @@ fn a_question_answered_in_its_own_dialog_is_a_persons_decision() {
 #[test]
 fn a_dialog_that_resolved_itself_while_the_person_was_away_is_no_persons_decision() {
     let dir = TempDir::new().unwrap();
-    record(
+    record_facts(
         dir.path(),
         &question_facts(
             NOW,
             color(),
-            with(dialog(json!(["Red"])), json!({ "afk_timeout_ms": 60_000 })),
+            with(chose(json!(["Red"])), json!({ "afk_timeout_ms": 60_000 })),
         ),
     );
 
@@ -301,9 +200,9 @@ fn a_dialog_that_resolved_itself_while_the_person_was_away_is_no_persons_decisio
 #[test]
 fn a_typed_answer_outside_the_options_is_free_text() {
     let dir = TempDir::new().unwrap();
-    record(
+    record_facts(
         dir.path(),
-        &question_facts(NOW, color(), dialog(json!(["Green"]))),
+        &question_facts(NOW, color(), chose(json!(["Green"]))),
     );
 
     assert_eq!(only(dir.path())["free_text"], true);
@@ -317,7 +216,7 @@ fn an_inbox_answer_is_judged_by_the_way_the_cli_said_it_came() {
         ("agent", json!("proxy")),
     ] {
         let dir = TempDir::new().unwrap();
-        record(
+        record_facts(
             dir.path(),
             &question_facts(
                 NOW,
@@ -325,7 +224,7 @@ fn an_inbox_answer_is_judged_by_the_way_the_cli_said_it_came() {
                 json!({ "path": "inbox", "via": via, "answers": ["Blue"] }),
             ),
         );
-        record(
+        record_facts(
             dir.path(),
             &permission_facts(
                 NOW + 1,
@@ -333,7 +232,7 @@ fn an_inbox_answer_is_judged_by_the_way_the_cli_said_it_came() {
                 json!({ "path": "inbox", "via": via, "decision": "allow" }),
             ),
         );
-        record(
+        record_facts(
             dir.path(),
             &decision_facts(
                 NOW + 2,
@@ -352,7 +251,7 @@ fn an_inbox_answer_is_judged_by_the_way_the_cli_said_it_came() {
 #[test]
 fn a_way_the_cli_did_not_name_proves_nothing() {
     let dir = TempDir::new().unwrap();
-    record(
+    record_facts(
         dir.path(),
         &question_facts(
             NOW,
@@ -373,7 +272,7 @@ fn who_decided_is_never_taken_from_the_facts() {
         json!({ "path": "inbox", "via": "terminal", "answers": ["Blue"], "decided_by": "human" }),
     );
     facts["decided_by"] = json!("human");
-    record(dir.path(), &facts);
+    record_facts(dir.path(), &facts);
 
     assert_eq!(only(dir.path())["decided_by"], Value::Null);
 }
@@ -382,7 +281,7 @@ fn who_decided_is_never_taken_from_the_facts() {
 fn a_permission_dialog_whose_tool_then_ran_was_allowed_by_the_person() {
     for post in ["PostToolUse", "PostToolUseFailure"] {
         let dir = TempDir::new().unwrap();
-        record(
+        record_facts(
             dir.path(),
             &permission_facts(
                 NOW,
@@ -406,7 +305,7 @@ fn a_permission_dialog_whose_tool_then_ran_was_allowed_by_the_person() {
 #[test]
 fn a_permission_dialog_that_ended_in_an_error_without_the_tool_running_is_an_inferred_deny() {
     let dir = TempDir::new().unwrap();
-    record(
+    record_facts(
         dir.path(),
         &permission_facts(
             NOW,
@@ -424,7 +323,7 @@ fn a_permission_dialog_that_ended_in_an_error_without_the_tool_running_is_an_inf
 #[test]
 fn a_permission_dialog_with_neither_a_run_nor_an_error_leaves_nothing() {
     let dir = TempDir::new().unwrap();
-    let ids = record(
+    let ids = record_facts(
         dir.path(),
         &permission_facts(
             NOW,
@@ -441,7 +340,7 @@ fn a_permission_dialog_with_neither_a_run_nor_an_error_leaves_nothing() {
 fn a_prompt_typed_or_sent_by_a_person_while_a_decision_is_open_is_their_decision() {
     for origin in ["composer", "bridge"] {
         let dir = TempDir::new().unwrap();
-        record(
+        record_facts(
             dir.path(),
             &decision_facts(
                 NOW,
@@ -473,7 +372,7 @@ fn a_prompt_from_anyone_but_a_person_while_a_decision_is_open_is_no_persons_deci
         "unknown",
     ] {
         let dir = TempDir::new().unwrap();
-        record(
+        record_facts(
             dir.path(),
             &decision_facts(
                 NOW,
@@ -488,20 +387,28 @@ fn a_prompt_from_anyone_but_a_person_while_a_decision_is_open_is_no_persons_deci
 #[test]
 fn every_kind_carries_an_answer_fingerprint_so_opposite_permission_answers_show() {
     let dir = TempDir::new().unwrap();
-    let dialog = |post: Value, is_error: bool| json!({ "path": "session", "post": post, "is_error": is_error });
-    record(
+    let session_dialog = |post: Value, is_error: bool| json!({ "path": "session", "post": post, "is_error": is_error });
+    record_facts(
         dir.path(),
-        &permission_facts(NOW, "git status", dialog(json!("PostToolUse"), false)),
+        &permission_facts(
+            NOW,
+            "git status",
+            session_dialog(json!("PostToolUse"), false),
+        ),
     );
-    record(
+    record_facts(
         dir.path(),
-        &permission_facts(NOW + 1, "git status", dialog(json!("PostToolUse"), false)),
+        &permission_facts(
+            NOW + 1,
+            "git status",
+            session_dialog(json!("PostToolUse"), false),
+        ),
     );
-    record(
+    record_facts(
         dir.path(),
-        &permission_facts(NOW + 2, "git status", dialog(Value::Null, true)),
+        &permission_facts(NOW + 2, "git status", session_dialog(Value::Null, true)),
     );
-    record(
+    record_facts(
         dir.path(),
         &permission_facts(
             NOW + 3,
@@ -534,17 +441,17 @@ fn every_kind_carries_an_answer_fingerprint_so_opposite_permission_answers_show(
 #[test]
 fn a_question_fingerprint_is_the_normalized_label() {
     let dir = TempDir::new().unwrap();
-    record(
+    record_facts(
         dir.path(),
-        &question_facts(NOW, color(), dialog(json!(["Red"]))),
+        &question_facts(NOW, color(), chose(json!(["Red"]))),
     );
-    record(
+    record_facts(
         dir.path(),
-        &question_facts(NOW + 1, color(), dialog(json!(["  red. "]))),
+        &question_facts(NOW + 1, color(), chose(json!(["  red. "]))),
     );
-    record(
+    record_facts(
         dir.path(),
-        &question_facts(NOW + 2, color(), dialog(json!(["Blue"]))),
+        &question_facts(NOW + 2, color(), chose(json!(["Blue"]))),
     );
 
     let fps: Vec<Value> = list(dir.path(), &[])
@@ -564,9 +471,9 @@ fn a_decision_fingerprint_is_the_normalized_reply() {
             json!({ "path": "session", "text": text, "origin": "composer" }),
         )
     };
-    record(dir.path(), &reply(NOW, "초안대로 진행"));
-    record(dir.path(), &reply(NOW + 1, "초안대로  진행"));
-    record(dir.path(), &reply(NOW + 2, "다시 쓰기"));
+    record_facts(dir.path(), &reply(NOW, "초안대로 진행"));
+    record_facts(dir.path(), &reply(NOW + 1, "초안대로  진행"));
+    record_facts(dir.path(), &reply(NOW + 2, "다시 쓰기"));
 
     let entries = list(dir.path(), &[]);
     assert_eq!(entries[1]["answer_fp"], entries[2]["answer_fp"]);
@@ -582,9 +489,9 @@ fn a_wait_of_two_questions_leaves_one_entry_per_question() {
         question("Which color?", &["Red", "Blue"], false),
         question("Which size?", &["S", "M"], false),
     ]);
-    let ids = record(
+    let ids = record_facts(
         dir.path(),
-        &question_facts(NOW, questions, dialog(json!(["Red", "M"]))),
+        &question_facts(NOW, questions, chose(json!(["Red", "M"]))),
     );
     assert_eq!(ids.len(), 2);
     assert_ne!(ids[0], ids[1]);
@@ -617,9 +524,9 @@ fn a_question_left_unanswered_leaves_no_entry_for_it() {
         question("Which color?", &["Red", "Blue"], false),
         question("Which size?", &["S", "M"], false),
     ]);
-    let ids = record(
+    let ids = record_facts(
         dir.path(),
-        &question_facts(NOW, questions, dialog(json!([null, "M"]))),
+        &question_facts(NOW, questions, chose(json!([null, "M"]))),
     );
 
     assert_eq!(ids.len(), 1);
@@ -631,19 +538,19 @@ fn a_question_left_unanswered_leaves_no_entry_for_it() {
 #[test]
 fn an_entry_keeps_whether_its_wait_could_then_be_answered_by_a_precedent() {
     let dir = TempDir::new().unwrap();
-    record(
+    record_facts(
         dir.path(),
-        &question_facts(NOW, color(), dialog(json!(["Red"]))),
+        &question_facts(NOW, color(), chose(json!(["Red"]))),
     );
-    record(
+    record_facts(
         dir.path(),
         &question_facts(
             NOW + 1,
             json!([question("Which pets?", &["Cat", "Dog"], true)]),
-            dialog(json!(["Cat, Dog"])),
+            chose(json!(["Cat, Dog"])),
         ),
     );
-    record(
+    record_facts(
         dir.path(),
         &permission_facts(
             NOW + 2,
@@ -668,9 +575,9 @@ fn an_entry_keeps_whether_its_wait_could_then_be_answered_by_a_precedent() {
 fn a_question_cut_when_recorded_has_no_key() {
     let dir = TempDir::new().unwrap();
     let questions = color();
-    let mut facts = question_facts(NOW, questions, dialog(json!(["Red"])));
+    let mut facts = question_facts(NOW, questions, chose(json!(["Red"])));
     facts["question"]["orig_len"]["question"] = json!([500]);
-    record(dir.path(), &facts);
+    record_facts(dir.path(), &facts);
 
     let entry = only(dir.path());
     assert_eq!(entry["key"], Value::Null);
@@ -696,7 +603,7 @@ fn a_secret_is_masked_before_it_is_kept_and_marks_the_answer_it_changed() {
     ];
     for (said, kept) in cases {
         let dir = TempDir::new().unwrap();
-        record(
+        record_facts(
             dir.path(),
             &decision_facts(
                 NOW,
@@ -738,7 +645,7 @@ fn a_secret_under_a_prefixed_or_quoted_name_in_a_url_or_a_mysql_flag_is_masked()
     ];
     for (said, kept) in cases {
         let dir = TempDir::new().unwrap();
-        record(
+        record_facts(
             dir.path(),
             &decision_facts(
                 NOW,
@@ -762,7 +669,7 @@ fn no_kept_field_of_a_permission_entry_carries_the_secret_in_its_target() {
         r#"echo '{"password": "hunter2"}' > cfg.json"#,
     ] {
         let dir = TempDir::new().unwrap();
-        record(
+        record_facts(
             dir.path(),
             &permission_facts(
                 NOW,
@@ -791,7 +698,7 @@ fn a_command_refused_for_a_secret_word_keeps_the_reason_masked() {
         ("https://alice:hunter2@example.com/repo.git", "hunter2"),
     ] {
         let dir = TempDir::new().unwrap();
-        record(
+        record_facts(
             dir.path(),
             &permission_facts(
                 NOW,
@@ -820,7 +727,7 @@ fn a_command_refused_for_a_secret_word_keeps_the_reason_masked() {
 #[test]
 fn no_kept_field_of_a_question_or_decision_entry_carries_the_secret() {
     let dir = TempDir::new().unwrap();
-    record(
+    record_facts(
         dir.path(),
         &question_facts(
             NOW,
@@ -829,10 +736,10 @@ fn no_kept_field_of_a_question_or_decision_entry_carries_the_secret() {
                 &["Yes, client_secret=hunter2", "No"],
                 false
             )]),
-            dialog(json!(["Yes, client_secret=hunter2"])),
+            chose(json!(["Yes, client_secret=hunter2"])),
         ),
     );
-    record(
+    record_facts(
         dir.path(),
         &decision_facts(
             NOW + 1,
@@ -859,7 +766,7 @@ fn words_that_only_look_long_are_kept_as_said() {
         "my_tokens: 3",
     ] {
         let dir = TempDir::new().unwrap();
-        record(
+        record_facts(
             dir.path(),
             &decision_facts(
                 NOW,
@@ -882,11 +789,11 @@ fn what_was_asked_is_masked_while_the_key_comes_from_the_text_as_asked() {
         question_facts(
             at,
             json!([question(text, &["Yes", "No"], false)]),
-            dialog(json!(["Yes"])),
+            chose(json!(["Yes"])),
         )
     };
-    record(dir.path(), &ask(NOW, secret));
-    record(dir.path(), &ask(NOW + 1, plain));
+    record_facts(dir.path(), &ask(NOW, secret));
+    record_facts(dir.path(), &ask(NOW + 1, plain));
 
     let entries = list(dir.path(), &[]);
     assert_eq!(
@@ -905,7 +812,7 @@ fn what_was_asked_is_masked_while_the_key_comes_from_the_text_as_asked() {
 fn a_long_answer_is_cut() {
     let dir = TempDir::new().unwrap();
     let long = "가".repeat(800);
-    record(
+    record_facts(
         dir.path(),
         &decision_facts(
             NOW,
@@ -926,9 +833,9 @@ fn a_long_answer_is_cut() {
 #[test]
 fn list_is_newest_first_and_skips_lines_it_cannot_read() {
     let dir = TempDir::new().unwrap();
-    record(
+    record_facts(
         dir.path(),
-        &question_facts(NOW, color(), dialog(json!(["Red"]))),
+        &question_facts(NOW, color(), chose(json!(["Red"]))),
     );
     let file = fs::read_dir(ledger_dir(dir.path()))
         .expect("ledger dir")
@@ -939,9 +846,9 @@ fn list_is_newest_first_and_skips_lines_it_cannot_read() {
     let mut handle = fs::OpenOptions::new().append(true).open(&file).unwrap();
     writeln!(handle, "{{not json").unwrap();
     writeln!(handle, "{{\"v\":99}}").unwrap();
-    record(
+    record_facts(
         dir.path(),
-        &question_facts(NOW + 1, color(), dialog(json!(["Blue"]))),
+        &question_facts(NOW + 1, color(), chose(json!(["Blue"]))),
     );
 
     let answers: Vec<Value> = list(dir.path(), &[])
@@ -954,11 +861,11 @@ fn list_is_newest_first_and_skips_lines_it_cannot_read() {
 #[test]
 fn list_filters_by_what_it_is_given() {
     let dir = TempDir::new().unwrap();
-    record(
+    record_facts(
         dir.path(),
-        &question_facts(NOW, color(), dialog(json!(["Red"]))),
+        &question_facts(NOW, color(), chose(json!(["Red"]))),
     );
-    record(
+    record_facts(
         dir.path(),
         &permission_facts(
             NOW + 1,
@@ -971,7 +878,7 @@ fn list_filters_by_what_it_is_given() {
         json!({ "path": "session", "text": "다시 쓰기", "origin": "composer" }),
     );
     other["session"] = json!("x");
-    record(dir.path(), &other);
+    record_facts(dir.path(), &other);
 
     let count = |args: &[&str]| list(dir.path(), args).len();
     assert_eq!(count(&[]), 3);
@@ -1009,11 +916,11 @@ fn record_refuses_facts_it_cannot_read() {
     for facts in [
         json!({}),
         with(
-            place(NOW),
+            place_at(NOW, REPO),
             json!({ "answer": { "path": "session", "answers": ["Red"] } }),
         ),
         with(
-            question_facts(NOW, color(), dialog(json!(["Red"]))),
+            question_facts(NOW, color(), chose(json!(["Red"]))),
             json!({ "session": "bad id!" }),
         ),
         question_facts(
@@ -1037,7 +944,7 @@ fn write_month(config: &Path, month: &str, lines: &[String]) {
 
 fn kept_entry(at: u64, padding: usize) -> String {
     let dir = TempDir::new().unwrap();
-    record(
+    record_facts(
         dir.path(),
         &decision_facts(
             at,
@@ -1123,13 +1030,7 @@ fn lock_file(config: &Path) -> fs::File {
 }
 
 fn spawn_record(config: &Path, facts: &Value) -> std::process::Child {
-    let mut child = Command::new(assert_cmd::cargo::cargo_bin("atelier"))
-        .env("CLAUDE_CONFIG_DIR", config)
-        .args(["kanban", "ledger", "record"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("spawn atelier");
+    let mut child = spawn_kanban(config, &["ledger", "record"]);
     child
         .stdin
         .take()
@@ -1147,7 +1048,7 @@ fn a_record_waits_for_the_ledger_lock_and_then_adds_its_whole_line() {
 
     let mut child = spawn_record(
         dir.path(),
-        &question_facts(NOW, color(), dialog(json!(["Red"]))),
+        &question_facts(NOW, color(), chose(json!(["Red"]))),
     );
     std::thread::sleep(Duration::from_millis(300));
     assert!(child.try_wait().expect("poll").is_none());
@@ -1166,7 +1067,7 @@ fn many_records_at_once_never_mix_their_lines() {
         .map(|i| {
             spawn_record(
                 dir.path(),
-                &question_facts(NOW + i, color(), dialog(json!(["Red"]))),
+                &question_facts(NOW + i, color(), chose(json!(["Red"]))),
             )
         })
         .collect();

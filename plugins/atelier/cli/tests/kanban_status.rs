@@ -1,8 +1,8 @@
 mod kanban_support;
 
 use kanban_support::{
-    atelier, event, kanban_in, put_copy, put_record, record_path, session, session_with, status_in,
-    MIN, NOW, SEC,
+    event, kanban_command, kanban_in, put_copy, put_record, record_path, session, session_with,
+    status_in, MIN, NOW, SEC,
 };
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -168,9 +168,8 @@ fn text_format_prints_a_heading_per_column_and_a_line_per_session() {
     put_record(config.path(), &asking("abcdefgh-1234"));
     put_record(config.path(), &working("w1"));
 
-    let output = atelier()
-        .env("CLAUDE_CONFIG_DIR", config.path())
-        .args(["kanban", "status", "--now", &now_arg(), "--format", "text"])
+    let output = kanban_command(config.path())
+        .args(["status", "--now", &now_arg(), "--format", "text"])
         .assert()
         .success()
         .get_output()

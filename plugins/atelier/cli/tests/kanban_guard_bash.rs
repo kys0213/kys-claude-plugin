@@ -1,17 +1,10 @@
-use assert_cmd::Command;
 use serde_json::{json, Value};
 
+mod kanban_support;
+use kanban_support::{atelier, stdout_json};
+
 fn guard(stdin: &str) -> Value {
-    let output = Command::cargo_bin("atelier")
-        .expect("locate `atelier` cargo binary")
-        .args(["kanban", "guard-bash"])
-        .write_stdin(stdin)
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-    serde_json::from_slice(&output).expect("valid JSON on stdout")
+    stdout_json(atelier().args(["kanban", "guard-bash"]).write_stdin(stdin))
 }
 
 fn deny(command: &str) -> Value {

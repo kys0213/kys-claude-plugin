@@ -1,8 +1,8 @@
 mod kanban_support;
 
 use kanban_support::{
-    asking, asking_bash, blocked, board, event, put_record, question, session_with, status_in,
-    wait_of, NOW, REPO, SEC,
+    asking, asking_bash, blocked, board, color, event, put_record, question, session_with,
+    status_in, wait_of, NOW, REPO, SEC,
 };
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -26,11 +26,7 @@ fn a_session_that_does_not_wait_has_no_wait() {
 
 #[test]
 fn a_question_wait_carries_the_questions_their_keys_and_the_context() {
-    let wait = wait_of(with_prompt_and_context(asking(json!([question(
-        "Which color?",
-        &["Red", "Blue"],
-        false
-    )]))));
+    let wait = wait_of(with_prompt_and_context(asking(color())));
     assert_eq!(wait["kind"], "question");
     assert_eq!(wait["id"], "tu-1");
     assert_eq!(wait["since"], json!(NOW - 10 * SEC));
@@ -242,6 +238,6 @@ fn a_reason_naming_a_secret_word_is_masked_on_the_board_and_in_status() {
 
 #[test]
 fn the_same_facts_give_the_same_wait() {
-    let record = asking(json!([question("Which color?", &["Red", "Blue"], false)]));
+    let record = asking(color());
     assert_eq!(wait_of(record.clone()), wait_of(record));
 }

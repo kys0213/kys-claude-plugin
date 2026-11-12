@@ -1,11 +1,12 @@
 mod kanban_mocks;
+mod kanban_support;
 
 use atelier::kanban::commands::requests::PermitTiming;
 use atelier::kanban::core::request::{OpenAsk, PaneNonces, Sender, Waits};
 use kanban_mocks::{Edges, FakeLauncher, MapProbe};
+use kanban_support::NOW;
 use serde_json::json;
 
-const NOW: u64 = 1_800_000_000_000;
 const TTL: u64 = 60_000;
 
 fn timing(for_ms: u64) -> PermitTiming {

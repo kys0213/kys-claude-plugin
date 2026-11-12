@@ -1,12 +1,9 @@
 use serde_json::{json, Value};
-use std::fs;
-use std::ops::Deref;
 
 mod kanban_support;
-use kanban_support::{js_len, now_ms, question, question_lengths, Home, REPO, SEC};
-
-const HOUR: u64 = 60 * 60 * SEC;
-const DAY: u64 = 24 * HOUR;
+use kanban_support::{
+    chose, decision_facts, home_deref, now_ms, question, question_facts, with, Home, DAY, HOUR,
+};
 
 struct World {
     home: Home,
@@ -15,13 +12,7 @@ struct World {
     next: std::cell::Cell<u64>,
 }
 
-impl Deref for World {
-    type Target = Home;
-
-    fn deref(&self) -> &Home {
-        &self.home
-    }
-}
+home_deref!(World);
 
 impl World {
     fn new() -> World {
@@ -38,53 +29,29 @@ impl World {
         self.now - hours * HOUR
     }
 
-    fn record(&self, facts: Value) -> String {
-        let out = self.run(&["ledger", "record"], &facts.to_string());
-        let ids = out["recorded"]
-            .as_array()
-            .unwrap_or_else(|| panic!("recorded ids, got {out}"));
-        assert_eq!(ids.len(), 1, "one entry: {out}");
-        ids[0].as_str().expect("id").to_string()
-    }
-
-    /// A person's picks of `labels` for the question `text`, one after another.
     fn picks(&self, text: &str, labels: &[&str]) -> Vec<String> {
         labels
             .iter()
             .map(|label| {
                 let at = self.tick();
-                self.record(question_facts(at, text, chose(label)))
+                self.record(question_facts(at, which(text), chose(json!([label]))))
             })
             .collect()
     }
 
     fn answer_by(&self, text: &str, answer: Value) -> String {
         let at = self.tick();
-        self.record(question_facts(at, text, answer))
+        self.record(question_facts(at, which(text), answer))
     }
 
     fn rewrite(&self, id: &str, fields: Value) {
-        let dir = self.config().join("atelier/kanban/ledger");
-        for file in fs::read_dir(dir).expect("ledger dir") {
-            let path = file.expect("file").path();
-            if path.extension().is_none_or(|e| e != "jsonl") {
-                continue;
+        self.rewrite_lines(|line| {
+            if line["id"] == id {
+                with(line, fields.clone())
+            } else {
+                line
             }
-            let lines: Vec<String> = fs::read_to_string(&path)
-                .expect("read")
-                .lines()
-                .map(|line| {
-                    let mut value: Value = serde_json::from_str(line).expect("line");
-                    if value["id"] == id {
-                        for (key, field) in fields.as_object().expect("fields") {
-                            value[key] = field.clone();
-                        }
-                    }
-                    value.to_string()
-                })
-                .collect();
-            fs::write(&path, lines.join("\n") + "\n").expect("write");
-        }
+        });
     }
 
     fn stats(&self) -> Value {
@@ -97,26 +64,8 @@ impl World {
     }
 }
 
-fn question_facts(at: u64, text: &str, answer: Value) -> Value {
-    let questions = json!([question(text, &["Red", "Blue"], false)]);
-    json!({
-        "at": at,
-        "session": "w",
-        "repo_root": REPO,
-        "cwd": REPO,
-        "permission_mode": "default",
-        "question": {
-            "tool_use_id": format!("tu-{at}"),
-            "questions": questions,
-            "at": at - 10 * SEC,
-            "orig_len": question_lengths(&questions),
-        },
-        "answer": answer,
-    })
-}
-
-fn chose(label: &str) -> Value {
-    json!({ "path": "session", "answers": [label], "afk_timeout_ms": null, "is_error": false, "denied": false })
+fn which(text: &str) -> Value {
+    json!([question(text, &["Red", "Blue"], false)])
 }
 
 fn inbox(via: &str, label: &str) -> Value {
@@ -244,23 +193,10 @@ fn decisions_are_compared_though_they_never_act() {
     let w = World::new();
     for _ in 0..3 {
         let at = w.tick();
-        let ask = "초안대로 진행할까요?";
-        let options = ["초안대로 진행", "다시 쓰기"];
-        w.record(json!({
-            "at": at,
-            "session": "w",
-            "repo_root": REPO,
-            "cwd": REPO,
-            "permission_mode": "default",
-            "decision": {
-                "at": at - 10 * SEC,
-                "ask": ask,
-                "recap": "초안을 정리했어요.",
-                "options": options,
-                "orig_len": { "ask": js_len(ask), "options": options.map(js_len) },
-            },
-            "answer": { "path": "session", "text": "초안대로 진행", "origin": "composer" },
-        }));
+        w.record(decision_facts(
+            at,
+            json!({ "path": "session", "text": "초안대로 진행", "origin": "composer" }),
+        ));
     }
 
     let stats = w.stats()["kinds"]["decision"].clone();
@@ -270,20 +206,10 @@ fn decisions_are_compared_though_they_never_act() {
     assert_eq!(stats["mode"], json!("shadow"));
 }
 
-fn add_line(w: &World, line: Value) {
-    let dir = w.config().join("atelier/kanban/ledger");
-    fs::create_dir_all(&dir).expect("ledger dir");
-    let path = dir.join("2026-01.jsonl");
-    let mut contents = fs::read_to_string(&path).unwrap_or_default();
-    contents.push_str(&format!("{line}\n"));
-    fs::write(path, contents).expect("write");
-}
-
 #[test]
 fn a_kind_two_revokes_stepped_back_names_why() {
     let w = World::new();
-    add_line(
-        &w,
+    w.add_ledger_line(
         json!({ "v": 1, "type": "setting", "id": "S1", "at": w.now - 10 * DAY, "scope": "question", "value": "act", "origin": "composer" }),
     );
     let proxy = w.answer_by("Which color?", inbox("agent", RED));

@@ -1,25 +1,18 @@
 use serde_json::{json, Value};
 use std::fs;
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
 mod kanban_support;
-use kanban_support::{now_ms, stdout_json, Home};
+use kanban_support::{home_deref, now_ms, stdout_json, Home};
 
 struct World {
     home: Home,
     bin: TempDir,
 }
 
-impl Deref for World {
-    type Target = Home;
-
-    fn deref(&self) -> &Home {
-        &self.home
-    }
-}
+home_deref!(World);
 
 impl World {
     fn new() -> World {
@@ -50,21 +43,7 @@ impl World {
     }
 
     fn take(&self, session: &str, turn: Option<&str>) -> Value {
-        let now = now_ms().to_string();
-        let mut args = vec![
-            "inbox",
-            "take",
-            "--session",
-            session,
-            "--now",
-            &now,
-            "--ttl",
-            "60s",
-        ];
-        if let Some(turn) = turn {
-            args.extend(["--turn", turn]);
-        }
-        self.kanban(&args)
+        self.home.take(session, now_ms(), "60s", turn, None)
     }
 
     /// A fake `claude` that records its argv and cwd, then prints `out`.
@@ -462,21 +441,7 @@ fn a_permit_lands_beside_the_requests_and_is_taken_by_its_permission() {
         json!({ "actions": [], "results": [], "used_nonces": [] })
     );
 
-    let now = now_ms().to_string();
-    let out = w.kanban(&[
-        "inbox",
-        "wait-permit",
-        "--session",
-        "s-1",
-        "--request",
-        "t-1-5",
-        "--now",
-        &now,
-        "--ttl",
-        "60s",
-        "--for",
-        "0ms",
-    ]);
+    let out = w.wait_permit("s-1", "t-1-5", now_ms(), "60s", None);
     assert_eq!(
         out,
         json!({ "decision": "deny", "from": "pane", "via": "terminal", "used_nonces": [] })

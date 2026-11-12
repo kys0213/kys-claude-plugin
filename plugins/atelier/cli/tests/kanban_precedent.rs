@@ -1,27 +1,19 @@
 use serde_json::{json, Value};
 use std::fs;
-use std::ops::Deref;
-use std::path::PathBuf;
 use tempfile::TempDir;
 
 mod kanban_support;
-use kanban_support::{js_len, now_ms, question, question_lengths, Home, REPO, SEC};
-
-const HOUR: u64 = 60 * 60 * SEC;
-const DAY: u64 = 24 * HOUR;
+use kanban_support::{
+    chose, color, home_deref, js_len, now_ms, permission_facts, place_at, place_json, question,
+    question_facts, refused, with, Home, DAY, HOUR, REPO, SEC,
+};
 
 struct World {
     home: Home,
     now: u64,
 }
 
-impl Deref for World {
-    type Target = Home;
-
-    fn deref(&self) -> &Home {
-        &self.home
-    }
-}
+home_deref!(World);
 
 impl World {
     fn new() -> World {
@@ -31,57 +23,10 @@ impl World {
         }
     }
 
-    fn ledger_dir(&self) -> PathBuf {
-        self.config().join("atelier/kanban/ledger")
-    }
-
-    fn record_all(&self, facts: Value) -> Vec<String> {
-        let out = self.run(&["ledger", "record"], &facts.to_string());
-        out["recorded"]
-            .as_array()
-            .unwrap_or_else(|| panic!("recorded ids, got {out}"))
-            .iter()
-            .map(|id| id.as_str().expect("id").to_string())
-            .collect()
-    }
-
-    fn record(&self, facts: Value) -> String {
-        let ids = self.record_all(facts);
-        assert_eq!(ids.len(), 1, "one entry: {ids:?}");
-        ids[0].clone()
-    }
-
-    fn entry(&self, id: &str) -> Value {
-        let out = self.kanban(&["ledger", "list", "--limit", "500"]);
-        out["entries"]
-            .as_array()
-            .expect("entries")
-            .iter()
-            .find(|e| e["id"] == id)
-            .unwrap_or_else(|| panic!("entry {id} in {out}"))
-            .clone()
-    }
-
     fn key_of(&self, id: &str) -> String {
         self.entry(id)["key"].as_str().expect("key").to_string()
     }
 
-    fn rewrite_lines(&self, change: impl Fn(Value) -> Value) {
-        for file in fs::read_dir(self.ledger_dir()).expect("ledger dir") {
-            let path = file.expect("file").path();
-            if path.extension().is_none_or(|e| e != "jsonl") {
-                continue;
-            }
-            let lines: Vec<String> = fs::read_to_string(&path)
-                .expect("read")
-                .lines()
-                .map(|line| change(serde_json::from_str(line).expect("line")).to_string())
-                .collect();
-            fs::write(&path, lines.join("\n") + "\n").expect("write");
-        }
-    }
-
-    /// What a relayed answer the person picked as recommended leaves.
     fn approve(&self, id: &str) {
         self.rewrite_lines(|mut line| {
             if line["id"] == id {
@@ -91,18 +36,10 @@ impl World {
         });
     }
 
-    fn add_line(&self, line: Value) {
-        fs::create_dir_all(self.ledger_dir()).expect("ledger dir");
-        let path = self.ledger_dir().join("2026-01.jsonl");
-        let mut contents = fs::read_to_string(&path).unwrap_or_default();
-        contents.push_str(&format!("{line}\n"));
-        fs::write(path, contents).expect("write");
-    }
-
     /// What `/kanban delegate act|shadow <scope>` leaves.
     fn set(&self, scope: &str, value: &str, origin: &str, at: u64) {
         let id = format!("S{at}-{scope}-{value}");
-        self.add_line(json!({
+        self.add_ledger_line(json!({
             "v": 1,
             "type": "setting",
             "id": id,
@@ -166,43 +103,12 @@ impl World {
     }
 
     fn take(&self, open: Value) -> Value {
-        let now = self.now.to_string();
-        self.run(
-            &[
-                "inbox",
-                "take",
-                "--session",
-                "w",
-                "--now",
-                &now,
-                "--ttl",
-                "60s",
-                "--waits-stdin",
-            ],
-            &open.to_string(),
-        )
+        self.home.take("w", self.now, "60s", None, Some(&open))
     }
 
     fn wait_permit(&self, request: &str, flag: &str, stdin: Value) -> Value {
-        let now = self.now.to_string();
-        self.run(
-            &[
-                "inbox",
-                "wait-permit",
-                "--session",
-                "w",
-                "--request",
-                request,
-                "--now",
-                &now,
-                "--ttl",
-                "60s",
-                "--for",
-                "0ms",
-                flag,
-            ],
-            &stdin.to_string(),
-        )
+        self.home
+            .wait_permit("w", request, self.now, "60s", Some((flag, &stdin)))
     }
 
     fn leave(&self, id: &str, request: Value) {
@@ -239,44 +145,8 @@ fn proof(precedents: &[(usize, &str)], now: u64) -> Vec<String> {
     args
 }
 
-fn place_at(at: u64, repo: &str) -> Value {
-    json!({
-        "at": at,
-        "session": "w",
-        "repo_root": repo,
-        "cwd": repo,
-        "permission_mode": "default",
-    })
-}
-
-fn with(mut base: Value, extra: Value) -> Value {
-    for (key, value) in extra.as_object().expect("fields") {
-        base[key] = value.clone();
-    }
-    base
-}
-
-fn color() -> Value {
-    json!([question("Which color?", &["Red", "Blue"], false)])
-}
-
 fn size() -> Value {
     json!([question("Which size?", &["S", "M"], false)])
-}
-
-fn question_facts(at: u64, questions: Value, answer: Value) -> Value {
-    let orig_len = question_lengths(&questions);
-    with(
-        place_at(at, REPO),
-        json!({
-            "question": { "tool_use_id": format!("tu-{at}"), "questions": questions, "at": at - 10 * SEC, "orig_len": orig_len },
-            "answer": answer,
-        }),
-    )
-}
-
-fn chose(answers: Value) -> Value {
-    json!({ "path": "session", "answers": answers, "afk_timeout_ms": null, "is_error": false, "denied": false })
 }
 
 fn picked(at: u64, label: &str) -> Value {
@@ -288,22 +158,6 @@ fn by_inbox(at: u64, via: &str, label: &str) -> Value {
         at,
         color(),
         json!({ "path": "inbox", "via": via, "answers": [label] }),
-    )
-}
-
-fn permission_facts(repo: &str, at: u64, command: &str, answer: Value) -> Value {
-    with(
-        place_at(at, repo),
-        json!({
-            "permission": {
-                "id": format!("t-{at}"),
-                "tool": "Bash",
-                "input": { "command": command },
-                "input_len": { "command": js_len(command) },
-                "at": at - 10 * SEC,
-            },
-            "answer": answer,
-        }),
     )
 }
 
@@ -319,7 +173,6 @@ fn verdict(via: &str, decision: &str) -> Value {
     json!({ "path": "inbox", "via": via, "decision": decision })
 }
 
-/// Two direct picks of `Red`, a day apart.
 fn two_reds(w: &World) -> (String, String) {
     (
         w.record(picked(w.now - 2 * DAY, "Red")),
@@ -327,11 +180,6 @@ fn two_reds(w: &World) -> (String, String) {
     )
 }
 
-fn place_json(repo: &str) -> Value {
-    json!({ "repo_root": repo, "cwd": repo, "permission_mode": "default" })
-}
-
-/// The open color question as the asking call holds it, whole.
 fn asked_color() -> Value {
     json!({
         "question": "Which color?",
@@ -373,10 +221,6 @@ fn reasons(matched: &Value) -> Vec<String> {
         .iter()
         .map(|r| r.as_str().expect("reason").to_string())
         .collect()
-}
-
-fn refused(out: &Value) -> bool {
-    out["error"].is_string()
 }
 
 #[test]

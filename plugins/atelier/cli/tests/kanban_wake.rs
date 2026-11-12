@@ -1,9 +1,8 @@
 use serde_json::{json, Value};
 
 mod kanban_support;
-use kanban_support::{asking, event, question, session_with, Home, MIN, NOW, SEC};
+use kanban_support::{asking, event, question, session_with, with, Home, HOUR, MIN, NOW, SEC};
 
-const HOUR: u64 = 60 * MIN;
 const DELEGATE: &str = "m";
 const WAIT: &str = "wait:w:question:tu-1";
 
@@ -15,17 +14,15 @@ fn color() -> Value {
     )])
 }
 
-/// A delegate session, idle since a minute ago, turned on at `since`.
 fn delegate(id: &str, since: u64, extra: Value) -> Value {
-    let mut record = session_with(
-        id,
-        json!([event("session.start", None, MIN)]),
-        json!({ "cwd": "/work/main", "delegate_since": since }),
-    );
-    for (key, value) in extra.as_object().expect("extra fields") {
-        record[key] = value.clone();
-    }
-    record
+    with(
+        session_with(
+            id,
+            json!([event("session.start", None, MIN)]),
+            json!({ "cwd": "/work/main", "delegate_since": since }),
+        ),
+        extra,
+    )
 }
 
 fn main_session() -> Value {
@@ -480,13 +477,13 @@ fn the_report_time_is_read_in_the_local_time_the_offset_gives() {
         &(day_at_18_utc - 20 * HOUR).to_string(),
     ]);
 
-    // 18:00 at UTC+9 is 09:00 UTC, an hour after NOW.
+    let seoul_18 = NOW + HOUR;
     let seoul_before = wake_as(
         &home,
         DELEGATE,
         sessions.clone(),
         empty_state(),
-        NOW + HOUR - MIN,
+        seoul_18 - MIN,
         "18:00",
         "540",
     );
@@ -495,7 +492,7 @@ fn the_report_time_is_read_in_the_local_time_the_offset_gives() {
         DELEGATE,
         sessions.clone(),
         empty_state(),
-        NOW + HOUR,
+        seoul_18,
         "18:00",
         "540",
     );
@@ -504,7 +501,7 @@ fn the_report_time_is_read_in_the_local_time_the_offset_gives() {
         DELEGATE,
         sessions,
         empty_state(),
-        NOW + HOUR,
+        seoul_18,
         "18:00",
         "0",
     );

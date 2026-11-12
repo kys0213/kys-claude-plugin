@@ -1,23 +1,15 @@
 use serde_json::{json, Value};
 use std::fs;
-use std::ops::Deref;
-use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 mod kanban_support;
-use kanban_support::{now_ms, Home};
+use kanban_support::{home_deref, now_ms, spawn_kanban, Home};
 
 struct World {
     home: Home,
 }
 
-impl Deref for World {
-    type Target = Home;
-
-    fn deref(&self) -> &Home {
-        &self.home
-    }
-}
+home_deref!(World);
 
 impl World {
     fn new() -> World {
@@ -27,22 +19,7 @@ impl World {
     }
 
     fn take(&self, session: &str, turn: Option<&str>, open: Value) -> Value {
-        let now = now_ms().to_string();
-        let mut args = vec![
-            "inbox",
-            "take",
-            "--session",
-            session,
-            "--now",
-            &now,
-            "--ttl",
-            "60s",
-            "--waits-stdin",
-        ];
-        if let Some(turn) = turn {
-            args.extend(["--turn", turn]);
-        }
-        self.run(&args, &open.to_string())
+        self.home.take(session, now_ms(), "60s", turn, Some(&open))
     }
 
     fn wait_permit(&self, session: &str, request: &str) -> Value {
@@ -50,26 +27,14 @@ impl World {
     }
 
     fn wait_permit_with(&self, session: &str, request: &str, nonces: Option<Value>) -> Value {
-        let now = now_ms().to_string();
-        let mut args = vec![
-            "inbox",
-            "wait-permit",
-            "--session",
+        let facts = nonces.map(|nonces| json!({ "nonces": nonces }));
+        self.home.wait_permit(
             session,
-            "--request",
             request,
-            "--now",
-            &now,
-            "--ttl",
+            now_ms(),
             "60s",
-            "--for",
-            "0ms",
-        ];
-        let stdin = nonces.map_or(String::new(), |nonces| {
-            args.push("--nonces-stdin");
-            json!({ "nonces": nonces }).to_string()
-        });
-        self.run(&args, &stdin)
+            facts.as_ref().map(|facts| ("--nonces-stdin", facts)),
+        )
     }
 }
 
@@ -192,9 +157,9 @@ fn a_take_without_waits_stdin_leaves_stdin_unread_and_finds_every_answer_stale()
 #[test]
 fn a_take_without_waits_stdin_ends_while_stdin_stays_open() {
     let w = World::new();
-    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("atelier"))
-        .args([
-            "kanban",
+    let mut child = spawn_kanban(
+        w.config(),
+        &[
             "inbox",
             "take",
             "--session",
@@ -203,12 +168,8 @@ fn a_take_without_waits_stdin_ends_while_stdin_stays_open() {
             &now_ms().to_string(),
             "--ttl",
             "60s",
-        ])
-        .env("CLAUDE_CONFIG_DIR", w.config())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("spawn atelier");
+        ],
+    );
     let stdin = child.stdin.take();
     let deadline = Instant::now() + Duration::from_secs(10);
     let status = loop {

@@ -1,11 +1,11 @@
 use serde_json::{json, Value};
 use std::fs;
-use std::ops::Deref;
 
 mod kanban_support;
 use kanban_support::{
-    asking, asking_bash, asking_permission, event, js_len, put_record, question, question_lengths,
-    session_with, Home, MIN, NOW, REPO, SEC,
+    asking, asking_bash, asking_permission, chose, event, home_deref, js_len, place_json,
+    put_record, question, question_lengths, refused, run_record, session_with, Home, MIN, NOW,
+    REPO, SEC,
 };
 
 /// The delegate session that asks the person on the main conversation.
@@ -21,13 +21,7 @@ struct World {
     worker: Value,
 }
 
-impl Deref for World {
-    type Target = Home;
-
-    fn deref(&self) -> &Home {
-        &self.home
-    }
-}
+home_deref!(World);
 
 impl World {
     fn new(worker: Value) -> World {
@@ -99,21 +93,13 @@ impl World {
             "relay_frame": framed["target"],
             "answer": answer,
         });
-        let out = self.run(&["ledger", "record"], &facts.to_string());
-        out["recorded"]
-            .as_array()
-            .unwrap_or_else(|| panic!("recorded ids, got {out}"))
-            .iter()
-            .map(|id| id.as_str().expect("id").to_string())
-            .collect()
+        self.record_all(facts)
     }
 
-    /// Frames `questions`, and records `labels` as the person's answers in
-    /// the delegate session's own dialog at `at`.
     fn relayed(&self, questions: Value, labels: &[&str], at: u64) -> String {
         let framed = self.frame(questions);
         assert!(framed["target"].is_object(), "framed: {framed}");
-        let ids = self.record_relay(&framed, at, chose(labels));
+        let ids = self.record_relay(&framed, at, chose(json!(labels)));
         ids.first()
             .unwrap_or_else(|| panic!("a relay entry, got {ids:?}"))
             .clone()
@@ -124,17 +110,6 @@ impl World {
         let now = at.to_string();
         let out = self.kanban(&["status", "--session", "w", "--now", &now]);
         out["sessions"][0]["wait"]["relays"].clone()
-    }
-
-    fn entry(&self, id: &str) -> Value {
-        let out = self.kanban(&["ledger", "list", "--limit", "500"]);
-        out["entries"]
-            .as_array()
-            .expect("entries")
-            .iter()
-            .find(|e| e["id"] == id)
-            .unwrap_or_else(|| panic!("entry {id} in {out}"))
-            .clone()
     }
 
     fn send(&self, args: &[&str], relay: &str, at: u64) -> Value {
@@ -169,48 +144,17 @@ impl World {
     }
 
     fn take(&self, open: Value, at: u64) -> Value {
-        let now = at.to_string();
-        self.run(
-            &[
-                "inbox",
-                "take",
-                "--session",
-                "w",
-                "--now",
-                &now,
-                "--ttl",
-                TTL,
-                "--waits-stdin",
-            ],
-            &open.to_string(),
-        )
+        self.home.take("w", at, TTL, None, Some(&open))
     }
 
     fn wait_permit(&self, at: u64) -> Value {
-        let now = at.to_string();
-        self.run(
-            &[
-                "inbox",
-                "wait-permit",
-                "--session",
-                "w",
-                "--request",
-                PERMIT,
-                "--now",
-                &now,
-                "--ttl",
-                TTL,
-                "--for",
-                "0ms",
-                "--wait-stdin",
-            ],
-            &json!({
-                "nonces": [],
-                "place": place(),
-                "permission": { "tool": "Bash", "input": { "command": "git status" } },
-            })
-            .to_string(),
-        )
+        let facts = json!({
+            "nonces": [],
+            "place": place_json(REPO),
+            "permission": { "tool": "Bash", "input": { "command": "git status" } },
+        });
+        self.home
+            .wait_permit("w", PERMIT, at, TTL, Some(("--wait-stdin", &facts)))
     }
 
     fn leave(&self, name: &str, request: Value) {
@@ -221,14 +165,6 @@ impl World {
         )
         .expect("write");
     }
-}
-
-fn place() -> Value {
-    json!({ "repo_root": REPO, "cwd": REPO, "permission_mode": "default" })
-}
-
-fn chose(labels: &[&str]) -> Value {
-    json!({ "path": "session", "answers": labels, "afk_timeout_ms": null, "is_error": false, "denied": false })
 }
 
 /// A question the main agent writes in the tool's own spelling.
@@ -297,15 +233,10 @@ fn decision_id() -> String {
     (NOW - 10 * SEC).to_string()
 }
 
-fn refused(out: &Value) -> bool {
-    out["error"].is_string()
-}
-
 fn queued(out: &Value) -> bool {
     out["queued"].is_object()
 }
 
-/// The request `reply --relay` leaves for the color question, as the inbox keeps it.
 fn relayed_answer(ask: &str, answer: &str, relay: &str) -> Value {
     json!({
         "v": 1, "kind": "answer", "tool_use_id": ask, "answers": [answer], "from": "agent",
@@ -322,11 +253,9 @@ fn open_color(id: &str) -> Value {
             "options": [{ "label": "Red" }, { "label": "Blue" }],
         }] }],
         "decision": null,
-        "place": place(),
+        "place": place_json(REPO),
     })
 }
-
-// ---- relay-frame ----
 
 #[test]
 fn a_question_without_a_marker_on_its_first_line_is_left_as_asked() {
@@ -522,8 +451,6 @@ fn a_marker_naming_no_wait_is_an_error() {
     }
 }
 
-// ---- relay entries ----
-
 #[test]
 fn a_person_answering_a_framed_question_leaves_a_relay_bound_to_the_wait() {
     let w = World::new(color_worker());
@@ -587,8 +514,6 @@ fn a_permission_relay_keeps_the_verdict_the_label_stands_for() {
     assert_eq!(w.entry(&id)["answer"], "allow");
 }
 
-// ---- sending on a relay ----
-
 #[test]
 fn a_relay_carries_the_answer_the_person_gave_to_the_wait_it_names() {
     let w = World::new(color_worker());
@@ -640,12 +565,9 @@ fn an_entry_that_is_no_relay_cannot_be_sent_on() {
             "at": NOW - 10 * SEC,
             "orig_len": { "question": [12], "labels": [[3, 4]] },
         },
-        "answer": chose(&["Blue"]),
+        "answer": chose(json!(["Blue"])),
     });
-    let plain = w.run(&["ledger", "record"], &facts.to_string())["recorded"][0]
-        .as_str()
-        .expect("id")
-        .to_string();
+    let plain = w.record(facts);
 
     assert!(refused(&w.reply("w", "tu-1", &["Blue"], &plain, NOW + MIN)));
 }
@@ -708,7 +630,7 @@ fn a_decision_is_answered_with_the_text_the_person_chose() {
     assert!(refused(&decide("Wait")));
     assert!(queued(&decide("Ship")));
     let taken = w.take(
-        json!({ "asks": [], "decision": { "at": NOW - 10 * SEC }, "place": place() }),
+        json!({ "asks": [], "decision": { "at": NOW - 10 * SEC }, "place": place_json(REPO) }),
         NOW + MIN,
     );
     assert_eq!(taken["actions"][0]["kind"], "decide");
@@ -728,15 +650,13 @@ fn a_decision_is_still_never_answered_on_precedents() {
     );
 
     let taken = w.take(
-        json!({ "asks": [], "decision": { "at": NOW - 10 * SEC }, "place": place() }),
+        json!({ "asks": [], "decision": { "at": NOW - 10 * SEC }, "place": place_json(REPO) }),
         NOW + MIN,
     );
 
     assert_eq!(taken["actions"], json!([]));
     assert_eq!(taken["results"][0]["status"], "refused");
 }
-
-// ---- taking a relayed answer ----
 
 #[test]
 fn the_waiting_session_takes_a_relayed_answer_once() {
@@ -835,9 +755,6 @@ fn a_relayed_deny_is_taken_as_well() {
     assert_eq!(out["decision"], "deny");
 }
 
-// ---- the answer the waiting session took ----
-
-/// What the waiting session's mod records once it took `answer` on `relay`.
 fn took_facts(relay: &str, answer: &str, at: u64) -> Value {
     json!({
         "at": at, "session": "w", "repo_root": REPO, "cwd": REPO, "permission_mode": null,
@@ -856,14 +773,8 @@ fn took_facts(relay: &str, answer: &str, at: u64) -> Value {
 
 impl World {
     fn took(&self, relay: &str, answer: &str, at: u64) -> Value {
-        let out = self.run(
-            &["ledger", "record"],
-            &took_facts(relay, answer, at).to_string(),
-        );
-        let id = out["recorded"][0]
-            .as_str()
-            .unwrap_or_else(|| panic!("a recorded id, got {out}"));
-        self.entry(id)
+        let id = self.record(took_facts(relay, answer, at));
+        self.entry(&id)
     }
 }
 
@@ -928,10 +839,7 @@ fn an_approved_relay_counts_as_an_approved_recommendation_for_its_key() {
 fn an_answer_taken_on_a_relay_the_ledger_lacks_is_not_recorded() {
     let w = World::new(color_worker());
 
-    let out = w.run(
-        &["ledger", "record"],
-        &took_facts("L1-abcd", "Blue", NOW + MIN).to_string(),
-    );
+    let out = run_record(w.config(), &took_facts("L1-abcd", "Blue", NOW + MIN));
 
     assert!(refused(&out), "{out}");
     let listed = w.kanban(&["ledger", "list"]);
