@@ -166,8 +166,6 @@ pub fn run() -> Result<()> {
     }
 }
 
-// --- v3: index subcommand ---
-
 fn run_index(args: IndexArgs) -> Result<()> {
     let project_path = match &args.project {
         Some(p) => p.clone(),
@@ -179,7 +177,6 @@ fn run_index(args: IndexArgs) -> Result<()> {
 
     let db_path = resolve_db_path(args.db.as_deref(), &project_path)?;
 
-    // --full: delete existing DB
     if args.full {
         let _ = std::fs::remove_file(&db_path);
     }
@@ -190,8 +187,6 @@ fn run_index(args: IndexArgs) -> Result<()> {
     eprintln!("DB: {}", db_path.display());
     index::run(&store, &sessions_dir)
 }
-
-// --- v3: query subcommand ---
 
 fn run_query(args: QueryArgs) -> Result<()> {
     let project_path = match &args.project {
@@ -263,10 +258,7 @@ fn encode_project_path(raw_path: &str) -> Result<String> {
     Ok(format!("-{}", normalized[1..].replace('/', "-")))
 }
 
-// --- v2: legacy flat args ---
-
 fn run_legacy(cli: LegacyArgs) -> Result<()> {
-    // --tuning-defaults: print template and exit
     if cli.tuning_defaults {
         TuningConfig::print_defaults();
         return Ok(());
@@ -282,7 +274,6 @@ fn run_legacy(cli: LegacyArgs) -> Result<()> {
             .to_string(),
     };
 
-    // Parse date range filters
     let since_ms = cli
         .since
         .as_deref()
@@ -319,10 +310,8 @@ fn run_legacy(cli: LegacyArgs) -> Result<()> {
         (None, None) => None,
     };
 
-    // Build stopword set from defaults + config file + CLI
     let stopwords = StopwordSet::load(&cli.exclude_words);
 
-    // Build tuning config: file → defaults → CLI overrides
     let mut tuning = match &cli.tuning {
         Some(path) => TuningConfig::load_from_file(std::path::Path::new(path))
             .map_err(|e| anyhow::anyhow!(e))?,
@@ -337,7 +326,6 @@ fn run_legacy(cli: LegacyArgs) -> Result<()> {
     );
 
     if cli.cache {
-        // v3: Run index first to populate SQLite DB
         let db_path = resolve_db_path(None, &project_path)?;
         let sessions_dir = resolve_sessions_dir(&project_path)?;
 
@@ -370,7 +358,6 @@ fn run_legacy(cli: LegacyArgs) -> Result<()> {
         );
     }
 
-    // v3: Run index to populate SQLite DB (analyze also benefits from up-to-date DB)
     let db_path = resolve_db_path(None, &project_path)?;
     let sessions_dir = resolve_sessions_dir(&project_path)?;
 
