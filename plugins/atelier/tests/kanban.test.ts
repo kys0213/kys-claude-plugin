@@ -127,6 +127,11 @@ type World = {
   tools: { run: ((e: { tool: string; tool_use_id?: string }) => Promise<unknown>) | null }
   /** The prompt box's draft, a refusal the engine gives every prompt, and the context each prompt entered with. */
   prompt: { draft: string; drop: string | null; contexts: (readonly string[] | undefined)[] }
+  /**
+   * `$.model.classify`: the texts it was asked about, and which label it answers by its index —
+   * a promise for one still thinking, `'fails'` for a model that throws. Unset answers the last label.
+   */
+  model: { texts: string[]; pick: number | 'fails' | Promise<number> | null }
 }
 
 type CliOut = { exitCode: number; stdout: string } | 'missing'
@@ -182,7 +187,19 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   const band: World['band'] = { value: { type: 'Box', props: {}, children: [] } }
   const tools: World['tools'] = { run: null }
   const prompt: World['prompt'] = { draft: '', drop: null, contexts: [] }
+  const model: World['model'] = { texts: [], pick: null }
 
+  on('model.classify', async ($, e) => {
+    model.texts.push(e.text)
+
+    if (model.pick === 'fails') {
+      return { deny: 'the model is unavailable' }
+    }
+
+    const pick = await (model.pick ?? e.labels.length - 1)
+
+    return { value: e.labels[pick] }
+  })
   on('store.get', ($, e) => ({ value: store[e.key] }))
   on('store.set', ($, e) => {
     store[e.key] = JSON.parse(JSON.stringify(e.value))
@@ -303,7 +320,14 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
     return { result: {} }
   })
 
-  return { store, clock, runs, shown, dialog, inbox, disk, messages, submitted, aborted, abort, agents, invalidated, toasts, band, tools, prompt }
+  return { store, clock, runs, shown, dialog, inbox, disk, messages, submitted, aborted, abort, agents, invalidated, toasts, band, tools, prompt, model }
+}
+
+/** Lets the work a hook left running without awaiting it finish. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 20; i++) {
+    await new Promise(resolve => setTimeout(resolve, 0))
+  }
 }
 
 type StoredRecord = {
@@ -1485,6 +1509,76 @@ describe('kanban details and requests', () => {
 
     await $.tool.call({ tool: 'WrapUp', recap: 'Done.' } as never)
     expect((stored(w) as Record<string, unknown>).decision).toBeUndefined()
+  })
+
+  const ENDED = { durationMs: 1, isAborted: false, reason: 'answer' }
+
+  test('an answer the model judges waiting leaves a decision asked with its end, until the next turn', async ($, on) => {
+    const w = world(on)
+    const rec = () => stored(w) as Record<string, unknown>
+    const answer = `${'설명. '.repeat(100)}A 안과 B 안 중 어느 쪽으로 갈까요?`
+    w.model.pick = 0
+
+    await $.turn.start({ text: 'go', turnId: 't-1' })
+    await $.turn.complete({ ...ENDED, turnId: 't-1', answer: `${answer}\n` } as never)
+    await settle()
+
+    expect(w.model.texts).toEqual([`${answer}\n`])
+    expect(rec().decision).toEqual({
+      ask: answer.slice(-200),
+      recap: null,
+      options: [],
+      at: START,
+      orig_len: { ask: answer.length, options: [] },
+    })
+
+    await $.turn.start({ text: 'B 로 가요', turnId: 't-2' })
+    expect(rec().decision).toBeNull()
+  })
+
+  for (const [name, pick] of [
+    ['judges done', 1],
+    ['fails', 'fails'],
+  ] as const) {
+    test(`an answer the model ${name} on leaves no decision`, async ($, on) => {
+      const w = world(on)
+      w.model.pick = pick
+
+      await $.turn.complete({ ...ENDED, turnId: 't-1', answer: '배포까지 끝냈어요.' } as never)
+      await settle()
+
+      expect(w.model.texts).toEqual(['배포까지 끝냈어요.'])
+      expect((stored(w) as Record<string, unknown>).decision ?? null).toBeNull()
+    })
+  }
+
+  test('an aborted turn, a blank answer, or a WrapUp decision asks the model nothing', async ($, on) => {
+    const w = world(on)
+    w.model.pick = 0
+
+    await $.turn.complete({ ...ENDED, isAborted: true, turnId: 't-1', answer: '계속할까요?' } as never)
+    await $.turn.complete({ ...ENDED, turnId: 't-2', answer: '  \n' } as never)
+    await $.tool.call({ tool: 'WrapUp', recap: 'r', ask: '진행할까요?', blocked: true, actions: [{ label: '진행' }] } as never)
+    await $.turn.complete({ ...ENDED, turnId: 't-3', answer: '진행할까요?' } as never)
+    await settle()
+
+    expect(w.model.texts).toEqual([])
+    expect(((stored(w) as Record<string, unknown>).decision as { options: string[] }).options).toEqual(['진행'])
+  })
+
+  test('a verdict that comes after the next turn started is dropped', async ($, on) => {
+    const w = world(on)
+    let judge: (pick: number) => void = () => undefined
+    w.model.pick = new Promise(resolve => {
+      judge = resolve
+    })
+
+    await $.turn.complete({ ...ENDED, turnId: 't-1', answer: '계속할까요?' } as never)
+    await $.turn.start({ text: '네', turnId: 't-2' })
+    judge(0)
+    await settle()
+
+    expect((stored(w) as Record<string, unknown>).decision).toBeNull()
   })
 
   test('a permission request keeps what it asks for and the reply before it, until the tool ends', async ($, on) => {

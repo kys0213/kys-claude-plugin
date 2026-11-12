@@ -33,6 +33,7 @@ import {
 } from './kanban-ledger'
 import { NONCE_PREFIX, type Via } from './kanban-nonce'
 import { type RelayTarget, frameQuestions } from './kanban-relay'
+import { waitsForReply } from './kanban-turn-ask'
 import {
   type Activity,
   KEY_PREFIX,
@@ -387,6 +388,34 @@ async function startSession($: EngineInterface, s: KanbanState): Promise<void> {
   }
 }
 
+/**
+ * `end` is the turn end the check ran for; a turn that started since replaced it, and the verdict is dropped.
+ * The decision asks with the answer's end, where its question is.
+ */
+async function decideAtTurnEnd($: EngineInterface, s: KanbanState, answer: string, end: TurnEnd): Promise<void> {
+  if (!(await waitsForReply($, answer)) || s.turnEnd !== end) {
+    return
+  }
+
+  const asked = answer.trim()
+
+  await record($, s, {
+    name: null,
+    update: (base, now) =>
+      (base.decision ?? null) !== null
+        ? {}
+        : {
+            decision: {
+              ask: asked.slice(-MAX_FIELD_CHARS),
+              recap: null,
+              options: [],
+              at: now,
+              orig_len: { ask: asked.length, options: [] },
+            },
+          },
+  })
+}
+
 function openCard($: EngineInterface, s: KanbanState, sessionId: string): void {
   toggleSelected($, s.detail, sessionId)
   void $.ui.scroll({ in: PANE, to: 'start' }).catch(() => undefined)
@@ -486,19 +515,29 @@ export function registerKanban(on: On, options: PluginOptions = {}): void {
       endPermit(s)
 
       const left = s.turnEnd.left
-      s.turnEnd = { left: null, completed: true }
+      const end: TurnEnd = { left: null, completed: true }
+      s.turnEnd = end
+      let decided = false
 
       await record($, s, {
         name: 'turn.complete',
         detail: left,
-        update: base => ({
-          activity: null,
-          turn_id: null,
-          permission: null,
-          pending_context: null,
-          last_answer: e.answer.trim() === '' ? (base.last_answer ?? null) : e.answer.slice(0, MAX_REPLY_CHARS),
-        }),
+        update: base => {
+          decided = (base.decision ?? null) !== null
+
+          return {
+            activity: null,
+            turn_id: null,
+            permission: null,
+            pending_context: null,
+            last_answer: e.answer.trim() === '' ? (base.last_answer ?? null) : e.answer.slice(0, MAX_REPLY_CHARS),
+          }
+        },
       })
+
+      if (!e.isAborted && !decided && e.answer.trim() !== '') {
+        void decideAtTurnEnd($, s, e.answer, end)
+      }
     }
 
     return next(e)
