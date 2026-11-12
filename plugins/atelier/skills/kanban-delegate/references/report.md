@@ -7,7 +7,8 @@
 | 재료 | 명령 |
 |---|---|
 | 아직 답을 기다리는 대기 | `atelier kanban status --column needs_input` |
-| 범위 안의 장부 | `atelier kanban ledger list --since <ms> --limit 500` |
+| 범위 안 장부의 항목별 수 | `atelier kanban ledger summary --since <ms>` |
+| 범위 안의 대신 답한 건 | `atelier kanban ledger list --since <ms> --decided-by proxy --limit 500` |
 | 종류별 단계·지켜보기 비교·꺼진 키 | `atelier kanban ledger stats --now <ms>` |
 | 전달 실패 | 이 대화에 온 `[칸반 위임] 전달 실패` 줄과, `status` 의 세션별 `delivery` |
 
@@ -15,26 +16,24 @@
 
 - `<ms>` 는 일일 보고 프롬프트의 `--since` 값이다. `0` 이면 처음 보고라 장부 전체가 범위다.
 - 요청 보고는 직전 일일 보고 시각부터다. 이 대화에서 모르면 24시간 전으로 잡고 범위를 보고 첫 줄에 적는다.
-- 장부가 `--limit` 를 채워 돌아오면 더 오래된 건이 잘린 것이다. `--until` 을 가장 오래된 건의 시각으로 주고 다시 읽는다.
+- 대신 답한 건 목록이 `--limit` 를 채워 돌아오면 더 오래된 건이 잘린 것이다. `--until` 을 가장 오래된 건의 시각으로 주고 다시 읽는다. `--until` 의 시각인 건은 다시 나오니 같은 id 는 한 번만 적는다. `summary` 는 `--limit` 없이 범위 전체를 센다.
 
-장부 건 나누기(필드는 `ledger list` 의 출력 그대로):
+`summary` 출력과 보고 항목:
 
-| 보고 항목 | 장부 건 |
+| 보고 항목 | `summary` 필드 |
 |---|---|
-| 물어서 전달한 것 | `target_session` 이 있는 건 — 메인 대화에서 사용자가 고른 답. `approved` 가 추천 승인 |
-| 대신 답한 것 | `--decided-by proxy` 로 읽은 건. `precedents`·`reason` 이 근거 |
-| 사람이 직접 답한 것 | `--decided-by human` 으로 읽은 건 중 `via` 가 `session`·`pane` 인 건 |
-| 출처를 확인할 수 없는 답 | `via` 가 `terminal` 인 건 — 선례로 세지 않는다고 함께 적는다 |
-
-`via` 가 `agent` 이고 사람의 결정인 건은 물어 받은 답이 받는 세션에서 쓰인 기록이라 "물어서 전달한 것" 과 같은 결정이다. 따로 세지 않는다.
+| 물어서 전달한 것 | `relayed.count`, 그중 추천 승인 `relayed.approved` |
+| 대신 답한 것 | `proxied` |
+| 사람이 직접 답한 것 | `direct.session`·`direct.pane` |
+| 출처를 확인할 수 없는 답 | `terminal` — 선례로 세지 않는다고 함께 적는다 |
 
 ## 순서
 
 1. **아직 답을 기다리는 질문** — 지금 열린 대기. 레포·종류·요지·기다린 시간. 이 보고 뒤에 물을 것이면 그렇게 적는다.
 2. **전달 실패** — 대신 답했거나 물어 전달했는데 받는 세션이 버린 것. 레포·대기 요지·결과를 풀어 쓴 말(`expired` 시간이 지남 · `stale` 대기가 이미 끝남 · `invalid` 요청이 맞지 않음 · `refused` 받는 세션의 다시 판정에서 대리 조건이 맞지 않음). 수 옆에 출처와 한계를 늘 적는다(형식 참고) — 없을 때도.
-3. **대신 답한 것** — 건마다 레포·질문 요지·답·근거(`reason`)·선례 장부 id(`precedents`). 뒤집는 방법을 한 줄 안내한다: "틀린 대리 답이 있으면 말해 주세요 — 그 결정은 다시 묻게 돼요".
-4. **물어서 전달한 것** — 수와 추천 승인율(`approved` 인 건 / 전체). 추천 없이 물은 건도 첫 선택지가 추천으로 셈된다는 것을 승인율 옆에 적는다.
-5. **사람이 직접 답한 수** — 세션 화면·pane 별 수. 출처를 확인할 수 없는 답이 있으면 그 수.
+3. **대신 답한 것** — 수는 `proxied`. 건마다 레포·질문 요지·답·근거(`reason`)·선례 장부 id(`precedents`)는 대신 답한 건 목록에서 읽는다. 뒤집는 방법을 한 줄 안내한다: "틀린 대리 답이 있으면 말해 주세요 — 그 결정은 다시 묻게 돼요".
+4. **물어서 전달한 것** — 수(`relayed.count`)와 추천 승인(`relayed.approved` / `relayed.count`). 추천 없이 물은 건도 첫 선택지가 추천으로 셈된다는 것을 승인율 옆에 적는다.
+5. **사람이 직접 답한 수** — 세션 화면 `direct.session`·pane `direct.pane`. `terminal` 이 0 이 아니면 출처를 확인할 수 없는 답으로 그 수.
 6. **종류별 단계와 지켜보기** — `stats.kinds` 의 `question`·`permission`·`decision` 마다:
    - 단계(`mode`)와 진행도(`progress`, 예: `7/10`), 불일치(`disagreed`)
    - `promotable` 이 `true` 면 올려도 좋다고 권하고, 사용자가 입력할 문장(`/kanban delegate act question` 또는 `/kanban delegate act permission`)을 함께 적는다. 기준에 못 미쳐도 올릴 수는 있다고 덧붙인다. skill 은 올리지 않는다.

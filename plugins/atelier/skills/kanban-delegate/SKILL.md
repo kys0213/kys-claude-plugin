@@ -36,7 +36,7 @@ version: 1.0.0
 | 권한 대리 허용 | `atelier kanban permit --session <S> --request <wait.id> --decision allow --from agent --precedent 1:<장부 id>… --reason <근거> --now <ms>` |
 | 물어 받은 답 전달 | `reply …`·`permit …`·`decide --session <S> --at <wait.id> --text <답>` 에 `--from agent --relay <relay id> --now <ms>` |
 | 대리 답 뒤집기 | `atelier kanban ledger revoke --entry <대리 답 id> --reason <이유> --now <ms>` |
-| 보고 재료 | `atelier kanban ledger list --since <ms>`, `atelier kanban ledger stats --now <ms>` |
+| 보고 재료 | `atelier kanban ledger summary --since <ms>`, `atelier kanban ledger list --since <ms> --decided-by proxy`, `atelier kanban ledger stats --now <ms>` |
 
 - 결정 키는 질문이면 `wait.questions[i].key`(질문마다), 권한·결정이면 `wait.key` 다. 키가 `null` 이면 선례가 없다 — 묻는다.
 - `--reason` 은 200자 이하. 선례 수와 최근 날짜, 같은 결정이라 본 이유를 한 줄로 쓴다.
