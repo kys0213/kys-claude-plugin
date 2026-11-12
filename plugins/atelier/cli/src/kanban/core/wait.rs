@@ -56,7 +56,6 @@ pub struct QuestionWait {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionWait {
     pub tool: String,
-    /// `<tool>: <what it works on>`, or the tool alone.
     pub target: String,
     pub truncated: bool,
     pub key: Option<String>,

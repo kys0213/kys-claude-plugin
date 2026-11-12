@@ -330,7 +330,6 @@ impl Request {
         })
     }
 
-    /// The request with what it is sent on; only an answer to a wait carries it.
     pub fn with_auth(mut self, given: Option<Auth>) -> Request {
         if let Request::Permit { auth, .. }
         | Request::Answer { auth, .. }
@@ -517,8 +516,6 @@ pub struct Waits {
     pub place: Option<SessionPlace>,
 }
 
-/// The prompt a model-written request runs as: under a header naming where it
-/// came from. A person's words from the board run as typed.
 pub fn prompt_text(body: &str, from: Sender, from_label: Option<&str>) -> String {
     match from {
         Sender::Pane => body.to_string(),

@@ -24,7 +24,6 @@ pub struct Repo {
     pub sessions: Vec<RepoSession>,
 }
 
-/// Groups in label order; sessions keep the board's column and card order.
 pub fn group(board: &Board) -> Vec<Repo> {
     let mut repos: Vec<(String, Repo)> = Vec::new();
     for (column, cards) in &board.columns {

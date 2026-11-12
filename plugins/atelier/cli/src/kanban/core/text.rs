@@ -9,8 +9,8 @@ pub fn fold(raw: &str) -> String {
     raw.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Drops every `<system-reminder>` block; one left open (the record was cut
-/// inside it) drops the rest of the text.
+/// A `<system-reminder>` left open (the record was cut inside it) drops the
+/// rest of the text.
 pub fn strip_reminders(raw: &str) -> String {
     let mut out = String::new();
     let mut rest = raw;
@@ -72,8 +72,6 @@ pub fn cut(text: &str, max: usize) -> String {
 
 pub const MARKER_WORD: &str = "kanban-wait";
 
-/// Every `[kanban-wait`, in any ASCII case, with its bracket made full-width
-/// (`［`) so it no longer reads as a wait marker.
 pub fn defuse_marker(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for (at, c) in text.char_indices() {

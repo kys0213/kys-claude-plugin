@@ -22,8 +22,6 @@ impl Format {
     }
 }
 
-/// Columns in the board's order with their cards; with `session`, only that
-/// session's card and only the columns that hold it.
 pub fn select<'a>(board: &'a Board, session: Option<&str>) -> Vec<(Column, Vec<&'a Card>)> {
     board
         .columns

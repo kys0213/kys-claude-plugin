@@ -52,8 +52,6 @@ impl Target {
     }
 }
 
-/// The wait a question was framed over, and the first option of each question
-/// as the person was shown them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame {
     pub target: Target,
@@ -107,8 +105,6 @@ impl Relay {
     }
 }
 
-/// The answer a relay keeps for what a person picked: a permission's label
-/// stands for its verdict.
 pub fn relay_answer(kind: EntryKind, picked: &str) -> String {
     match (kind, picked.trim()) {
         (EntryKind::Permission, ALLOW_LABEL) => Verdict::Allow.id().to_string(),
@@ -468,8 +464,6 @@ fn sorted_labels(options: &[QuestionOption]) -> Vec<&str> {
     labels
 }
 
-/// The options the person picks from, in the main agent's order when it
-/// gave the wait's own labels.
 fn options_for(given: &[QuestionOption], offered: &Offered) -> Vec<QuestionOption> {
     let (required, own_descriptions) = match offered {
         Offered::Any => return given.iter().map(defused_option).collect(),
