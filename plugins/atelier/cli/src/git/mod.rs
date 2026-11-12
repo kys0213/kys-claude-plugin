@@ -1,4 +1,5 @@
-//! Git subsystem — Rust port of the `git-utils` TypeScript CLI.
+//! Git subsystem: PR review threads, branch and PR guard hooks, and Claude
+//! Code hook settings.
 
 pub mod commands;
 pub mod core;

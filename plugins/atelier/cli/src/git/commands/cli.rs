@@ -1,7 +1,4 @@
-//! Git clap surface (`Cli`/`Commands`), the real `HookFs` implementation, and
-//! the `run`/`run_from` entry points the top-level atelier router dispatches to.
-//!
-//! Output contract (preserved from `git-utils/src/cli.ts`):
+//! Output contract:
 //! - success: pretty-printed JSON of the command `data` on stdout, exit 0.
 //! - command error: `Error: <message>` on stderr, exit 1.
 //! - guard/pr-guard block: reason on stderr, exit 2.
@@ -73,9 +70,8 @@ pub enum Commands {
     },
 }
 
-/// Installers under `setup`. Kept off `Commands::Guard` deliberately: guard is
-/// the hook runtime whose exit 2 means "block", so an install failure routed
-/// through it would read as a denial instead of an error.
+/// Kept off `Commands::Guard`: guard's exit 2 is Claude Code's "block", so an
+/// install failure routed through it would read as a denial.
 #[derive(Subcommand)]
 pub enum SetupCommand {
     /// Detect the default branch and register the write/commit guard hooks
@@ -92,7 +88,6 @@ pub enum SetupCommand {
     },
 }
 
-/// Real filesystem for the hook command.
 struct RealHookFs;
 
 impl HookFs for RealHookFs {
@@ -120,9 +115,6 @@ fn guard_exit(decision: GuardDecision) -> i32 {
     decision.exit_code()
 }
 
-/// Prints a successful command result as pretty JSON (exit 0) or an error to
-/// stderr (exit 1), mirroring the TS `output()` helper. Works for any
-/// `Serialize` payload, including raw `serde_json::Value` (hook list).
 fn output<T: Serialize>(result: CmdResult<T>) -> i32 {
     match result {
         CmdResult::Ok(data) => {
@@ -137,8 +129,7 @@ fn output<T: Serialize>(result: CmdResult<T>) -> i32 {
     }
 }
 
-/// Parses `argv` (including the leading program name) with the git clap surface
-/// and runs the selected command, returning a process exit code.
+/// `argv` includes the leading program name.
 pub fn run_from<I, T>(argv: I) -> i32
 where
     I: IntoIterator<Item = T>,
@@ -148,11 +139,9 @@ where
     run(cli)
 }
 
-/// Runs a parsed git CLI, returning a process exit code.
 pub fn run(cli: Cli) -> i32 {
-    // No subcommand: print usage and exit 0, matching the standalone
-    // `git-utils` CLI (cli.ts prints usage + exit 0 on no args) rather than
-    // clap's default missing-subcommand error (exit 2).
+    // No subcommand: usage and exit 0, not clap's missing-subcommand error
+    // (exit 2).
     let command = match cli.command {
         Some(c) => c,
         None => {
@@ -222,8 +211,6 @@ pub fn run(cli: Cli) -> i32 {
             guard_exit(commands::guard::run(&deps, &input))
         }
         Commands::PrGuard => {
-            // Legacy alias of `guard pr` — kept so hooks registered before
-            // the unified `guard` surface keep working.
             let github = create_github_service(None);
             let pr_guard = create_pr_guard_service(&github);
             let payload = HookPayload::parse(&read_stdin_raw());

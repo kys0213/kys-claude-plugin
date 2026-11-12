@@ -1,8 +1,5 @@
-//! Drift clap surface and entry points.
-//!
-//! Errors exit 2, the same code `git guard` uses to deny a hook. Drift commands
-//! are never registered as Claude Code hooks, so 2 cannot be misread as
-//! "block" here.
+//! Errors exit 2, which Claude Code reads as "block" from a hook — safe only
+//! while drift commands are not registered as hooks.
 //!
 //! Output is human text, not JSON, and callers parse it line by line — every
 //! rendered line format is a contract.

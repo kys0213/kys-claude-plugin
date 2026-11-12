@@ -1,7 +1,5 @@
-//! Code-style clap surface and entry points.
-//!
-//! Errors exit 2, like `drift`. Output is human text parsed line by line —
-//! every rendered line format is a contract.
+//! Errors exit 2. Output is human text parsed line by line — every rendered
+//! line format is a contract.
 
 use crate::code_style::commands;
 use crate::code_style::commands::CodeStyleDeps;
