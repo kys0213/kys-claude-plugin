@@ -5,4 +5,4 @@ pub mod commands;
 pub mod core;
 pub mod types;
 
-pub use commands::cli::{run, run_from, Cli, Commands, SetupCommand};
+pub use commands::cli::run_from;
