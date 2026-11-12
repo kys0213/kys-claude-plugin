@@ -5,6 +5,7 @@ use super::duration::age_label;
 use super::progress::{
     first_field, item_text, live_items, tool_line, Activity, ItemStatus, WorkItem,
 };
+use super::prompt::PromptFact;
 use super::request::{strip_agent_header, RequestKind, Status, Via};
 use super::text::{cut, fold, strip_controls, strip_reminders};
 
@@ -14,7 +15,6 @@ pub struct Decision {
     pub recap: Option<String>,
     pub options: Vec<String>,
     pub at: u64,
-    /// Absent when the record has none.
     pub orig_len: Option<DecisionLengths>,
 }
 
@@ -38,7 +38,6 @@ pub struct Delivery {
     pub id: String,
     pub kind: Option<RequestKind>,
     pub status: DeliveryStatus,
-    /// How the request came in; `None` when unknown.
     pub via: Option<Via>,
     pub at: u64,
 }
@@ -56,6 +55,11 @@ pub enum Phase {
 }
 
 pub struct DetailFacts<'a> {
+    /// The session title, else its first prompt, as written.
+    pub work: Option<&'a str>,
+    pub cwd: &'a str,
+    /// The person's prompts before `last_prompt`, oldest first.
+    pub earlier_prompts: &'a [&'a PromptFact],
     pub last_prompt: Option<&'a str>,
     pub last_answer: Option<&'a str>,
     pub pending_context: Option<&'a str>,
@@ -87,6 +91,7 @@ const WAIT_CHARS: usize = 120;
 const LAST_LINE_CHARS: usize = 60;
 const TODO_LINES: usize = 8;
 const RECENT_LINES: usize = 5;
+const EARLIER_CHARS: usize = 120;
 
 /// Tried in order for what a permission request is about; paths stay whole.
 pub const WAIT_FIELDS: [&str; 8] = [
@@ -105,7 +110,7 @@ pub fn clean(raw: &str) -> String {
 }
 
 pub fn prompt_lines(raw: Option<&str>) -> Vec<String> {
-    raw.map(|p| fold(&clean(p)))
+    raw.map(folded)
         .filter(|p| !p.is_empty())
         .map(|p| vec![cut(&p, PROMPT_CHARS)])
         .unwrap_or_default()
@@ -121,6 +126,44 @@ pub fn reply_lines(raw: Option<&str>) -> Vec<String> {
         .filter(|l| !l.is_empty())
         .take(REPLY_LINES)
         .map(|l| cut(&l, LINE_CHARS))
+        .collect()
+}
+
+pub fn folded(raw: &str) -> String {
+    fold(&clean(raw))
+}
+
+fn work_lines(facts: &DetailFacts) -> Vec<String> {
+    let shown: Vec<String> = facts
+        .earlier_prompts
+        .iter()
+        .map(|p| p.text.as_str())
+        .chain(facts.last_prompt)
+        .map(folded)
+        .collect();
+    let work = facts
+        .work
+        .map(folded)
+        .filter(|w| !w.is_empty() && !shown.contains(w))
+        .map(|w| cut(&w, LINE_CHARS));
+    let place = Some(facts.cwd)
+        .filter(|cwd| !cwd.is_empty())
+        .map(|cwd| format!("위치: {cwd}"));
+    work.into_iter().chain(place).collect()
+}
+
+fn earlier_lines(earlier: &[&PromptFact], now: u64) -> Vec<String> {
+    earlier
+        .iter()
+        .map(|p| (folded(&p.text), p.at))
+        .filter(|(text, _)| !text.is_empty())
+        .map(|(text, at)| {
+            format!(
+                "{} · {}",
+                cut(&text, EARLIER_CHARS),
+                age_label(now.saturating_sub(at))
+            )
+        })
         .collect()
 }
 
@@ -216,33 +259,44 @@ pub fn last_line(last_answer: Option<&str>) -> Option<String> {
 }
 
 pub fn build(phase: Phase, facts: &DetailFacts, now: u64) -> Detail {
+    let work = ("작업", work_lines(facts));
+    let earlier = ("이전 요청", earlier_lines(facts.earlier_prompts, now));
     let prompt = prompt_lines(facts.last_prompt);
     let pending = reply_lines(facts.pending_context);
+    let todos = ("할 일", todo_lines(facts.tasks, facts.todos));
     let sections: Vec<(&'static str, Vec<String>)> = match phase {
         Phase::Permission => vec![
             ("기다리는 것", wait_lines(facts.permission)),
+            earlier,
             ("요청", prompt),
             ("기다리기 직전 응답", pending),
         ],
-        Phase::Question | Phase::Input => vec![("요청", prompt), ("기다리기 직전 응답", pending)],
-        Phase::Decision => vec![("요청", prompt)],
+        Phase::Question | Phase::Input => {
+            vec![earlier, ("요청", prompt), ("기다리기 직전 응답", pending)]
+        }
+        Phase::Decision => vec![earlier, ("요청", prompt)],
         Phase::Working => vec![
+            earlier,
             ("요청", prompt),
-            ("할 일", todo_lines(facts.tasks, facts.todos)),
+            todos,
             ("최근 도구", recent_lines(facts.recent, now)),
         ],
         Phase::Idle => vec![
+            earlier,
             ("직전 요청", prompt),
             ("직전 응답", reply_lines(facts.last_answer)),
+            todos,
         ],
         Phase::Stale => vec![
+            earlier,
             ("마지막 요청", prompt),
             ("마지막 응답", reply_lines(facts.last_answer)),
+            todos,
         ],
     };
     Detail {
-        sections: sections
-            .into_iter()
+        sections: std::iter::once(work)
+            .chain(sections)
             .filter(|(_, lines)| !lines.is_empty())
             .map(|(title, lines)| Section { title, lines })
             .collect(),
