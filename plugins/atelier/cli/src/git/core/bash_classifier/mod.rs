@@ -7,14 +7,14 @@ mod analyzer;
 mod args;
 mod files;
 mod git;
-mod interpreters;
-mod lexer;
+pub(crate) mod interpreters;
+pub(crate) mod lexer;
 mod wrappers;
 
 use std::path::{Path, PathBuf};
 
+use crate::shared::path::normalize;
 use analyzer::Analyzer;
-use args::normalize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassifyInput {
@@ -42,7 +42,6 @@ pub enum BypassRule {
     HooksPathConfig,
     HooksPathEnv,
     HookSkipEnv,
-    /// A write into a repository's `.git/hooks` directory.
     HooksDirWrite,
 }
 
@@ -122,7 +121,7 @@ pub enum Anchor {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LexError {
+pub(crate) enum LexError {
     UnterminatedQuote,
     UnterminatedSubstitution,
 }
@@ -143,7 +142,6 @@ pub fn classify(input: &ClassifyInput) -> BashAnalysis {
     analyzer.out
 }
 
-/// Whether `path` lies in a `.git/hooks` directory.
 pub fn is_hooks_path(path: &Path) -> bool {
     let parts: Vec<_> = path.components().collect();
     parts

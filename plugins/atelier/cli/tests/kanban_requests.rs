@@ -1,26 +1,23 @@
-use assert_cmd::Command;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock after epoch")
-        .as_millis() as u64
-}
+mod kanban_support;
+use kanban_support::{home_deref, now_ms, stdout_json, Home};
 
 struct World {
-    config: TempDir,
+    home: Home,
     bin: TempDir,
 }
+
+home_deref!(World);
 
 impl World {
     fn new() -> World {
         World {
-            config: TempDir::new().expect("config dir"),
+            home: Home::default(),
             bin: TempDir::new().expect("bin dir"),
         }
     }
@@ -31,25 +28,11 @@ impl World {
             self.bin.path().display(),
             std::env::var("PATH").unwrap_or_default()
         );
-        let output = Command::cargo_bin("atelier")
-            .expect("locate `atelier` cargo binary")
-            .arg("kanban")
-            .args(args)
-            .env("CLAUDE_CONFIG_DIR", self.config.path())
-            .env("PATH", path)
-            .assert()
-            .success()
-            .get_output()
-            .stdout
-            .clone();
-        serde_json::from_slice(&output).expect("valid JSON on stdout")
+        stdout_json(self.command().args(args).env("PATH", path))
     }
 
-    fn inbox(&self, session: &str) -> PathBuf {
-        self.config
-            .path()
-            .join("atelier/kanban/inbox")
-            .join(session)
+    fn send_pane(&self, text: &str) -> Value {
+        self.kanban(&["send", "--session", "s-1", "--from", "pane", "--text", text])
     }
 
     fn files(&self, session: &str) -> Vec<String> {
@@ -64,21 +47,7 @@ impl World {
     }
 
     fn take(&self, session: &str, turn: Option<&str>) -> Value {
-        let now = now_ms().to_string();
-        let mut args = vec![
-            "inbox",
-            "take",
-            "--session",
-            session,
-            "--now",
-            &now,
-            "--ttl",
-            "60s",
-        ];
-        if let Some(turn) = turn {
-            args.extend(["--turn", turn]);
-        }
-        self.kanban(&args)
+        self.home.take(session, now_ms(), "60s", turn, None)
     }
 
     /// A fake `claude` that records its argv and cwd, then prints `out`.
@@ -114,15 +83,7 @@ fn inbox_dir_is_under_the_claude_config_dir() {
 #[test]
 fn a_sent_prompt_is_queued_as_one_finished_file() {
     let w = World::new();
-    let out = w.kanban(&[
-        "send",
-        "--session",
-        "s-1",
-        "--from",
-        "pane",
-        "--text",
-        "Run the tests",
-    ]);
+    let out = w.send_pane("Run the tests");
     assert_eq!(out["queued"]["session_id"], "s-1");
     assert_eq!(out["queued"]["kind"], "prompt");
     let files = w.files("s-1");
@@ -133,15 +94,7 @@ fn a_sent_prompt_is_queued_as_one_finished_file() {
 #[test]
 fn taking_delivers_a_pane_prompt_as_typed_and_removes_it() {
     let w = World::new();
-    w.kanban(&[
-        "send",
-        "--session",
-        "s-1",
-        "--from",
-        "pane",
-        "--text",
-        "Run the tests",
-    ]);
+    w.send_pane("Run the tests");
     let out = w.take("s-1", None);
     assert_eq!(
         out["actions"],
@@ -178,15 +131,7 @@ fn an_agent_prompt_is_delivered_under_a_header_naming_where_it_came_from() {
 #[test]
 fn a_prompt_arriving_while_a_turn_runs_is_refused_not_queued() {
     let w = World::new();
-    w.kanban(&[
-        "send",
-        "--session",
-        "s-1",
-        "--from",
-        "pane",
-        "--text",
-        "Later",
-    ]);
+    w.send_pane("Later");
     let out = w.take("s-1", Some("t-1"));
     assert_eq!(out["actions"], json!([]));
     assert_eq!(out["results"][0]["status"], "busy");
@@ -196,24 +141,8 @@ fn a_prompt_arriving_while_a_turn_runs_is_refused_not_queued() {
 #[test]
 fn only_the_first_of_several_prompts_is_delivered() {
     let w = World::new();
-    w.kanban(&[
-        "send",
-        "--session",
-        "s-1",
-        "--from",
-        "pane",
-        "--text",
-        "One",
-    ]);
-    w.kanban(&[
-        "send",
-        "--session",
-        "s-1",
-        "--from",
-        "pane",
-        "--text",
-        "Two",
-    ]);
+    w.send_pane("One");
+    w.send_pane("Two");
     let out = w.take("s-1", None);
     assert_eq!(out["actions"].as_array().expect("actions").len(), 1);
     assert_eq!(out["actions"][0]["body"], "One");
@@ -223,15 +152,7 @@ fn only_the_first_of_several_prompts_is_delivered() {
 #[test]
 fn a_prompt_older_than_the_ttl_is_dropped() {
     let w = World::new();
-    w.kanban(&[
-        "send",
-        "--session",
-        "s-1",
-        "--from",
-        "pane",
-        "--text",
-        "Old",
-    ]);
+    w.send_pane("Old");
     let file = w.inbox("s-1").join(&w.files("s-1")[0]);
     age(&file, Duration::from_secs(120));
     let out = w.take("s-1", None);
@@ -257,10 +178,20 @@ fn a_stop_reaches_only_the_turn_it_was_meant_for() {
 }
 
 #[test]
+fn a_stop_taken_while_no_turn_runs_is_stale() {
+    let w = World::new();
+    w.kanban(&["stop", "--session", "s-1", "--turn", "t-1"]);
+
+    let out = w.take("s-1", None);
+
+    assert_eq!(out["actions"], json!([]));
+    assert_eq!(out["results"][0]["status"], "stale");
+}
+
+#[test]
 fn an_unreadable_request_is_dropped_as_invalid() {
     let w = World::new();
-    fs::create_dir_all(w.inbox("s-1")).expect("inbox");
-    fs::write(w.inbox("s-1").join("1-1.json"), "not json").expect("write");
+    w.leave_raw("s-1", "1-1.json", "not json");
     let out = w.take("s-1", None);
     assert_eq!(out["results"][0]["status"], "invalid");
     assert!(w.files("s-1").is_empty());
@@ -271,14 +202,14 @@ fn taking_an_empty_or_missing_inbox_gives_nothing() {
     let w = World::new();
     assert_eq!(
         w.take("never", None),
-        json!({ "actions": [], "results": [] })
+        json!({ "actions": [], "results": [], "used_nonces": [] })
     );
 }
 
 #[test]
 fn clearing_removes_a_session_inbox() {
     let w = World::new();
-    w.kanban(&["send", "--session", "s-1", "--from", "pane", "--text", "x"]);
+    w.send_pane("x");
     assert_eq!(
         w.kanban(&["inbox", "clear", "--session", "s-1"]),
         json!({ "cleared": "s-1" })
@@ -309,13 +240,52 @@ fn requests_are_refused_for_bad_ids_and_empty_text() {
             "   ",
         ],
         vec!["stop", "--session", "s/1", "--turn", "t"],
-        vec!["send", "--session", "s-1", "--from", "robot", "--text", "x"],
         vec!["inbox", "dir", "--session", ""],
     ] {
         let out = w.kanban(&args);
         assert!(out["error"].is_string(), "{args:?} → {out}");
     }
-    assert!(!w.config.path().join("atelier").exists());
+    assert!(!w.config().join("atelier").exists());
+}
+
+#[test]
+fn a_sender_other_than_pane_or_agent_is_refused_before_anything_is_written() {
+    let w = World::new();
+    for args in [
+        vec!["send", "--session", "s-1", "--text", "x"],
+        vec![
+            "reply",
+            "--session",
+            "s-1",
+            "--ask",
+            "tu-1",
+            "--answer",
+            "a",
+        ],
+        vec!["decide", "--session", "s-1", "--at", "1700", "--text", "네"],
+        vec![
+            "permit",
+            "--session",
+            "s-1",
+            "--request",
+            "p-1",
+            "--decision",
+            "allow",
+        ],
+    ] {
+        let output = w
+            .command()
+            .args(&args)
+            .args(["--from", "robot"])
+            .output()
+            .expect("run atelier");
+        assert!(output.stdout.is_empty(), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("pane 또는 agent"),
+            "{args:?}"
+        );
+    }
+    assert!(!w.config().join("atelier").exists());
 }
 
 fn git_repo() -> TempDir {
@@ -428,25 +398,19 @@ fn a_permit_lands_beside_the_requests_and_is_taken_by_its_permission() {
         "t-1-5",
         "--decision",
         "deny",
+        "--from",
+        "pane",
     ]);
     assert!(w.inbox("s-1").join("permits").join("t-1-5.json").exists());
-    assert_eq!(w.take("s-1", None), json!({ "actions": [], "results": [] }));
+    assert_eq!(
+        w.take("s-1", None),
+        json!({ "actions": [], "results": [], "used_nonces": [] })
+    );
 
-    let now = now_ms().to_string();
-    let out = w.kanban(&[
-        "inbox",
-        "wait-permit",
-        "--session",
-        "s-1",
-        "--request",
-        "t-1-5",
-        "--now",
-        &now,
-        "--ttl",
-        "60s",
-        "--for",
-        "0ms",
-    ]);
-    assert_eq!(out, json!({ "decision": "deny" }));
+    let out = w.wait_permit("s-1", "t-1-5", now_ms(), "60s", None);
+    assert_eq!(
+        out,
+        json!({ "decision": "deny", "from": "pane", "via": "terminal", "used_nonces": [] })
+    );
     assert!(!w.inbox("s-1").join("permits").join("t-1-5.json").exists());
 }

@@ -49,6 +49,15 @@ fn actions(card: &Value) -> Vec<String> {
         .collect()
 }
 
+fn idle_card(extra: Value) -> Value {
+    only(json!([session_with(
+        "s",
+        json!([event("turn.complete", None, 5 * SEC)]),
+        extra
+    )]))
+    .1
+}
+
 fn color_ask(ago: u64) -> Value {
     json!({ "tu-1": { "at": NOW - ago, "questions": [{
         "question": "Which color?", "header": "Color", "multi_select": false,
@@ -116,6 +125,7 @@ fn a_decision_left_at_the_end_of_a_turn_waits_for_input() {
     assert_eq!(
         card["detail"]["decision"],
         json!({
+            "id": (NOW - 20 * SEC).to_string(),
             "ask": "이 설계 초안대로 확정 spec 작성을 시작할까요?",
             "recap": "S3 채널 최소 설계 초안을 정리했어요.",
             "options": ["초안대로 진행", "고칠 행 있음"],
@@ -181,14 +191,10 @@ fn each_column_offers_its_own_actions() {
 
 #[test]
 fn the_kanban_request_header_is_not_shown_as_the_subtitle_or_the_prompt() {
-    let (_, card) = only(json!([session_with(
-        "s",
-        json!([event("turn.complete", None, 5 * SEC)]),
-        json!({
-            "first_prompt": "[칸반 요청 · api 세션의 오케스트레이터]\n\nAdd a health check",
-            "last_prompt": "[칸반 요청 · 오케스트레이터]\n\nRun lint",
-        })
-    )]));
+    let card = idle_card(json!({
+        "first_prompt": "[칸반 요청 · api 세션의 오케스트레이터]\n\nAdd a health check",
+        "last_prompt": "[칸반 요청 · 오케스트레이터]\n\nRun lint",
+    }));
     assert_eq!(card["subtitle"], "Add a health check");
     assert_eq!(
         section(&card, "직전 요청"),
@@ -198,14 +204,10 @@ fn the_kanban_request_header_is_not_shown_as_the_subtitle_or_the_prompt() {
 
 #[test]
 fn injected_reminders_are_stripped_from_the_subtitle_and_the_prompt() {
-    let (_, card) = only(json!([session_with(
-        "s",
-        json!([event("turn.complete", None, 5 * SEC)]),
-        json!({
-            "first_prompt": "<system-reminder> You are operating in a git worktree.\n</system-reminder>\nFix the login bug",
-            "last_prompt": "<system-reminder>\nworktree\n</system-reminder> Add a test",
-        })
-    )]));
+    let card = idle_card(json!({
+        "first_prompt": "<system-reminder> You are operating in a git worktree.\n</system-reminder>\nFix the login bug",
+        "last_prompt": "<system-reminder>\nworktree\n</system-reminder> Add a test",
+    }));
     assert_eq!(card["subtitle"], "Fix the login bug");
     assert_eq!(
         section(&card, "직전 요청"),
@@ -215,14 +217,10 @@ fn injected_reminders_are_stripped_from_the_subtitle_and_the_prompt() {
 
 #[test]
 fn a_first_prompt_that_is_only_a_cut_reminder_falls_back_to_the_last_prompt() {
-    let (_, card) = only(json!([session_with(
-        "s",
-        json!([event("turn.complete", None, 5 * SEC)]),
-        json!({
-            "first_prompt": "<system-reminder> You are operating in a git worktree at /w and the rest was cut",
-            "last_prompt": "Refactor the parser",
-        })
-    )]));
+    let card = idle_card(json!({
+        "first_prompt": "<system-reminder> You are operating in a git worktree at /w and the rest was cut",
+        "last_prompt": "Refactor the parser",
+    }));
     assert_eq!(card["subtitle"], "Refactor the parser");
 }
 
@@ -252,14 +250,10 @@ fn the_label_comes_from_the_remote_then_the_repo_root() {
 
 #[test]
 fn an_idle_card_shows_what_was_done_just_before() {
-    let (_, card) = only(json!([session_with(
-        "s",
-        json!([event("turn.complete", None, 5 * SEC)]),
-        json!({
-            "last_prompt": "Fix the flaky test",
-            "last_answer": "\n\nFixed the race in `worker.rs`.\n\nAll 42 tests pass now.",
-        })
-    )]));
+    let card = idle_card(json!({
+        "last_prompt": "Fix the flaky test",
+        "last_answer": "\n\nFixed the race in `worker.rs`.\n\nAll 42 tests pass now.",
+    }));
     assert_eq!(card["last_line"], "직전: Fixed the race in `worker.rs`.");
     assert_eq!(
         sections(&card),
@@ -396,11 +390,7 @@ fn a_permission_wait_shows_what_it_asks_for_and_the_reply_before_it() {
 
 #[test]
 fn control_characters_are_dropped_from_replies() {
-    let (_, card) = only(json!([session_with(
-        "s",
-        json!([event("turn.complete", None, 5 * SEC)]),
-        json!({ "last_answer": "\u{1b}[31mred\u{1b}[0m done\u{7}" })
-    )]));
+    let card = idle_card(json!({ "last_answer": "\u{1b}[31mred\u{1b}[0m done\u{7}" }));
     assert_eq!(
         section(&card, "직전 응답"),
         Some(vec!["red done".to_string()])
@@ -409,11 +399,9 @@ fn control_characters_are_dropped_from_replies() {
 
 #[test]
 fn the_last_delivery_of_a_kanban_request_is_shown() {
-    let (_, card) = only(json!([session_with(
-        "s",
-        json!([event("turn.complete", None, 5 * SEC)]),
-        json!({ "inbox": { "id": "r1", "kind": "prompt", "status": "busy", "at": NOW - 4 * SEC } })
-    )]));
+    let card = idle_card(
+        json!({ "inbox": { "id": "r1", "kind": "prompt", "status": "busy", "at": NOW - 4 * SEC } }),
+    );
     assert_eq!(
         card["detail"]["delivery"],
         "보낸 요청: 작업 중이라 받지 않았어요 · 4s"
@@ -426,6 +414,25 @@ fn each_delivery_outcome_reads_as_a_sentence() {
         ("prompt", "delivered", "보낸 요청: 전달됐어요 · 4s"),
         ("prompt", "expired", "보낸 요청: 시간이 지나 버렸어요 · 4s"),
         ("stop", "stale", "중지 요청: 끝난 턴이라 버렸어요 · 4s"),
+        ("answer", "delivered", "질문 답: 전달됐어요 · 4s"),
+        ("answer", "stale", "질문 답: 끝난 질문이라 버렸어요 · 4s"),
+        (
+            "answer",
+            "invalid",
+            "질문 답: 답 수가 맞지 않아 버렸어요 · 4s",
+        ),
+        ("decide", "stale", "결정 답: 끝난 결정이라 버렸어요 · 4s"),
+        ("decide", "busy", "결정 답: 작업 중이라 받지 않았어요 · 4s"),
+        (
+            "answer",
+            "refused",
+            "질문 답: 대리 조건이 맞지 않아 버렸어요 · 4s",
+        ),
+        (
+            "permit",
+            "refused",
+            "권한 답: 대리 조건이 맞지 않아 버렸어요 · 4s",
+        ),
         ("unknown", "invalid", "보낸 요청: invalid · 4s"),
         ("prompt", "queued-later", "보낸 요청: queued-later · 4s"),
     ] {
@@ -473,15 +480,15 @@ fn sessions_are_grouped_by_repository_root_for_the_orchestrator() {
                 "label": "api",
                 "root": "/w/api",
                 "sessions": [
-                    { "session_id": "a2", "column": "working", "cwd": "/w/api/.claude/worktrees/x", "permission_mode": null, "actions": ["stop"], "subtitle": null, "last_line": null, "delivery": null },
-                    { "session_id": "a1", "column": "idle", "cwd": "/work/project-a", "permission_mode": "default", "actions": ["send"], "subtitle": "Fix CORS", "last_line": "직전: Fixed CORS.", "delivery": "보낸 요청: 전달됐어요 · 4s" },
+                    { "session_id": "a2", "column": "working", "cwd": "/w/api/.claude/worktrees/x", "permission_mode": null, "actions": ["stop"], "subtitle": null, "last_line": null, "delivery": null, "wait": null },
+                    { "session_id": "a1", "column": "idle", "cwd": "/work/project-a", "permission_mode": "default", "actions": ["send"], "subtitle": "Fix CORS", "last_line": "직전: Fixed CORS.", "delivery": "보낸 요청: 전달됐어요 · 4s", "wait": null },
                 ],
             },
             {
                 "label": "notes",
                 "root": null,
                 "sessions": [
-                    { "session_id": "n1", "column": "idle", "cwd": "/tmp/notes", "permission_mode": null, "actions": ["send"], "subtitle": null, "last_line": null, "delivery": null },
+                    { "session_id": "n1", "column": "idle", "cwd": "/tmp/notes", "permission_mode": null, "actions": ["send"], "subtitle": null, "last_line": null, "delivery": null, "wait": null },
                 ],
             },
         ])
@@ -566,20 +573,16 @@ fn the_spinner_does_not_end_a_question_even_without_its_record() {
 
 #[test]
 fn the_request_shown_is_the_latest_one_a_person_wrote() {
-    let (_, card) = only(json!([session_with(
-        "s",
-        json!([event("turn.complete", None, 5 * SEC)]),
-        json!({
-            "last_prompt": "<side-sessions-event>None of the sessions</side-sessions-event>",
-            "prompts": [
-                { "text": "Fix CORS", "origin": "composer", "at": NOW - 9 * MIN },
-                { "text": "Run lint", "origin": "kanban", "at": NOW - 8 * MIN },
-                { "text": "<side-sessions-event>None of the sessions you started is working now</side-sessions-event>", "origin": "sdk", "at": NOW - 7 * MIN },
-                { "text": "<task-notification>done</task-notification>", "origin": "task-notification", "at": NOW - 6 * MIN },
-                { "text": "Scheduled check", "origin": "scheduled-trigger", "at": NOW - 5 * MIN },
-            ],
-        })
-    )]));
+    let card = idle_card(json!({
+        "last_prompt": "<side-sessions-event>None of the sessions</side-sessions-event>",
+        "prompts": [
+            { "text": "Fix CORS", "origin": "composer", "at": NOW - 9 * MIN },
+            { "text": "Run lint", "origin": "kanban", "at": NOW - 8 * MIN },
+            { "text": "<side-sessions-event>None of the sessions you started is working now</side-sessions-event>", "origin": "sdk", "at": NOW - 7 * MIN },
+            { "text": "<task-notification>done</task-notification>", "origin": "task-notification", "at": NOW - 6 * MIN },
+            { "text": "Scheduled check", "origin": "scheduled-trigger", "at": NOW - 5 * MIN },
+        ],
+    }));
     assert_eq!(
         section(&card, "직전 요청"),
         Some(vec!["Run lint".to_string()])
@@ -588,37 +591,25 @@ fn the_request_shown_is_the_latest_one_a_person_wrote() {
 
 #[test]
 fn an_event_written_as_a_first_prompt_is_not_the_subtitle() {
-    let (_, card) = only(json!([session_with(
-        "s",
-        json!([event("turn.complete", None, 5 * SEC)]),
-        json!({
-            "first_prompt": "<side-sessions-event>None of the sessions you started is working now",
-            "prompts": [{ "text": "Fix CORS", "origin": "sdk", "at": NOW - MIN }],
-        })
-    )]));
+    let card = idle_card(json!({
+        "first_prompt": "<side-sessions-event>None of the sessions you started is working now",
+        "prompts": [{ "text": "Fix CORS", "origin": "sdk", "at": NOW - MIN }],
+    }));
     assert_eq!(card["subtitle"], "Fix CORS");
 }
 
 #[test]
 fn an_event_set_as_the_session_title_is_not_the_subtitle() {
-    let (_, card) = only(json!([session_with(
-        "s",
-        json!([event("turn.complete", None, 5 * SEC)]),
-        json!({
-            "title": "<task-notification> <task-id>a0258</task-id>",
-            "first_prompt": "Fix CORS",
-        })
-    )]));
+    let card = idle_card(json!({
+        "title": "<task-notification> <task-id>a0258</task-id>",
+        "first_prompt": "Fix CORS",
+    }));
     assert_eq!(card["subtitle"], "Fix CORS");
 }
 
 #[test]
 fn a_record_without_prompts_still_shows_its_last_prompt() {
-    let (_, card) = only(json!([session_with(
-        "s",
-        json!([event("turn.complete", None, 5 * SEC)]),
-        json!({ "last_prompt": "Old style record" })
-    )]));
+    let card = idle_card(json!({ "last_prompt": "Old style record" }));
     assert_eq!(
         section(&card, "직전 요청"),
         Some(vec!["Old style record".to_string()])

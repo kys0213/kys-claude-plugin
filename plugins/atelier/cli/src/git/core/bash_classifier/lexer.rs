@@ -1,14 +1,14 @@
 use super::LexError;
 
 #[derive(Debug, Clone, Default)]
-pub(super) struct Word {
-    pub(super) text: String,
-    pub(super) quoted: bool,
+pub(crate) struct Word {
+    pub(crate) text: String,
+    pub(crate) quoted: bool,
     /// Byte index in `text` of the first expansion or glob character.
-    pub(super) dyn_at: Option<usize>,
-    pub(super) tilde: bool,
+    pub(crate) dyn_at: Option<usize>,
+    pub(crate) tilde: bool,
     /// Bodies of the `$(…)` and backtick substitutions inside the word.
-    pub(super) subs: Vec<String>,
+    pub(crate) subs: Vec<String>,
 }
 
 impl Word {
@@ -58,7 +58,7 @@ impl Word {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Sep {
+pub(crate) enum Sep {
     /// `;` or a newline.
     Seq,
     And,
@@ -70,7 +70,7 @@ pub(super) enum Sep {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RedirOp {
+pub(crate) enum RedirOp {
     Out,
     In,
     HereString,
@@ -81,7 +81,7 @@ pub(super) enum RedirOp {
 }
 
 impl RedirOp {
-    pub(super) fn takes_operand(self) -> bool {
+    pub(crate) fn takes_operand(self) -> bool {
         matches!(
             self,
             RedirOp::Out | RedirOp::In | RedirOp::HereString | RedirOp::HereBody
@@ -90,7 +90,7 @@ impl RedirOp {
 }
 
 #[derive(Debug, Clone)]
-pub(super) enum Tok {
+pub(crate) enum Tok {
     Word(Word),
     Sep(Sep),
     Redir(RedirOp),
@@ -101,18 +101,36 @@ struct Lexer {
     pos: usize,
     toks: Vec<Tok>,
     heredocs: Vec<Heredoc>,
+    bodies: Vec<HeredocBody>,
     /// End of input closes any open quote or substitution instead of failing.
     lenient: bool,
 }
 
 struct Heredoc {
+    /// Index of the `<<` token that opened it.
+    at: usize,
     delimiter: String,
     strip_tabs: bool,
     /// An unquoted delimiter: bash expands `$(…)` and backticks in the body.
     expands: bool,
 }
 
-pub(super) fn lex(src: &str, lenient: bool) -> Result<Vec<Tok>, LexError> {
+/// A heredoc's body, verbatim through its delimiter line, and the index of
+/// the `<<` token that opened it.
+#[derive(Debug, Clone)]
+pub(crate) struct HeredocBody {
+    pub(crate) at: usize,
+    pub(crate) text: String,
+}
+
+pub(crate) fn lex(src: &str, lenient: bool) -> Result<Vec<Tok>, LexError> {
+    lex_with_heredocs(src, lenient).map(|(toks, _)| toks)
+}
+
+pub(crate) fn lex_with_heredocs(
+    src: &str,
+    lenient: bool,
+) -> Result<(Vec<Tok>, Vec<HeredocBody>), LexError> {
     let mut lx = Lexer::new(src, lenient);
     while let Some(c) = lx.peek() {
         match c {
@@ -152,7 +170,7 @@ pub(super) fn lex(src: &str, lenient: bool) -> Result<Vec<Tok>, LexError> {
             }
         }
     }
-    Ok(lx.toks)
+    Ok((lx.toks, lx.bodies))
 }
 
 fn is_word_end(c: char) -> bool {
@@ -169,6 +187,7 @@ impl Lexer {
             pos: 0,
             toks: Vec::new(),
             heredocs: Vec::new(),
+            bodies: Vec::new(),
             lenient,
         }
     }
@@ -323,6 +342,7 @@ impl Lexer {
         }
         let word = self.read_word()?;
         self.heredocs.push(Heredoc {
+            at: self.toks.len() - 1,
             expands: !word.quoted,
             delimiter: word.text,
             strip_tabs,
@@ -330,14 +350,22 @@ impl Lexer {
         Ok(())
     }
 
-    /// Consumes the bodies of the heredocs opened on the line just ended. An
-    /// expanding body's substitutions are attached to that line's command.
+    /// Consumes and keeps the bodies of the heredocs opened on the line just
+    /// ended. An expanding body's substitutions are also attached to that
+    /// line's command.
     fn read_heredoc_bodies(&mut self) {
         for doc in std::mem::take(&mut self.heredocs) {
             let mut body = String::new();
-            let sink = doc.expands.then_some(&mut body);
-            self.scan_heredoc_body(&doc.delimiter, doc.strip_tabs, sink);
-            let subs = substitutions_in(&body);
+            self.scan_heredoc_body(&doc.delimiter, doc.strip_tabs, Some(&mut body));
+            let subs = if doc.expands {
+                substitutions_in(&body)
+            } else {
+                Vec::new()
+            };
+            self.bodies.push(HeredocBody {
+                at: doc.at,
+                text: body,
+            });
             if !subs.is_empty() {
                 let at = self.toks.len() - 1;
                 let carrier = Word {
@@ -510,7 +538,6 @@ impl Lexer {
         }
     }
 
-    /// Copies a balanced `( … )` group verbatim, starting at the `(`.
     fn scan_parens(&mut self, w: &mut Word) -> Result<(), LexError> {
         let mut depth = 0usize;
         let mut pending_heredocs: Vec<(String, bool)> = Vec::new();
@@ -560,8 +587,6 @@ impl Lexer {
         }
     }
 
-    /// Copies the rest of a `<<[-]DELIM` opener (the first `<` is already in
-    /// `w`) and records its delimiter so the body can be copied unscanned.
     fn copy_heredoc_opener(&mut self, w: &mut Word, pending: &mut Vec<(String, bool)>) {
         w.text.push('<');
         self.pos += 1;
@@ -700,7 +725,6 @@ impl Lexer {
     }
 }
 
-/// Command substitutions bash runs while expanding a heredoc body.
 fn substitutions_in(body: &str) -> Vec<String> {
     let mut lx = Lexer::new(body, true);
     let mut w = Word::default();

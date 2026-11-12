@@ -1,6 +1,15 @@
 import type { EngineInterface } from 'claude-code'
 
+import { cli } from './kanban-cli'
+import type { RelayTarget } from './kanban-relay'
+
 export const KEY_PREFIX = 'kanban:session:'
+
+/** The store keys under `prefix` that belong to session `sessionId`. */
+export function sessionKeysOf(keys: readonly string[], prefix: string, sessionId: string): string[] {
+  return keys.filter(k => k.startsWith(`${prefix}${sessionId}:`))
+}
+
 /** Bounds what one session keeps in the store every session shares (4 MiB in all). */
 const MAX_EVENTS = 8
 export const MAX_FIELD_CHARS = 200
@@ -18,13 +27,23 @@ export type AskQuestion = {
   options: { label: string; description: string | null }[]
 }
 
-type AskRecord = { questions: AskQuestion[]; at: number }
+/** Lengths before the record cut the text: per question, then per question's option labels. */
+export type AskLengths = { question: number[]; labels: number[][] }
+
+type AskRecord = { questions: AskQuestion[]; at: number; orig_len?: AskLengths }
 
 export type Activity = { tool: string; input: Record<string, string>; at: number }
 
-type Decision = { ask: string; recap: string | null; options: string[]; at: number }
+type Decision = {
+  ask: string
+  recap: string | null
+  options: string[]
+  at: number
+  orig_len?: { ask: number; options: number[] }
+}
 
-type Delivery = { id: string; kind: string; status: string; at: number }
+/** `via` is how the request came in, as the CLI judged it. */
+type Delivery = { id: string; kind: string; status: string; via?: string; at: number }
 
 type TaskRecord = { subject: string; active: string | null; status: string }
 
@@ -43,7 +62,6 @@ export type SessionRecord = {
   permission_mode?: string | null
   title: string | null
   first_prompt: string | null
-  /** Written by versions before `prompts`; read only. */
   last_prompt?: string | null
   /** The newest prompts, oldest first, with `prompt.submit`'s origin kind or `kanban`. */
   prompts?: { text: string; origin: string; at: number }[]
@@ -58,14 +76,18 @@ export type SessionRecord = {
   activity?: Activity | null
   recent?: Activity[]
   /** `id` names the request for a kanban answer; null when this session cannot take one. */
-  permission?: (Activity & { id: string | null }) | null
+  permission?: (Activity & { id: string | null; input_len?: Record<string, number> }) | null
   decision?: Decision | null
   inbox?: Delivery | null
   tasks?: Record<string, TaskRecord>
   todos?: TodoRecord[]
   asks?: Record<string, AskRecord>
+  /** The wait each open question was framed over, by tool_use_id, as `relay-frame` named it. */
+  relay_frames?: Record<string, RelayTarget>
   /** The session's agent loops as `$.agent.list()` gave them last. */
   agents?: AgentRecord[]
+  /** When a person's `/kanban delegate on` made this session the delegate; null once turned off. */
+  delegate_since?: number | null
 }
 
 type Fields = Partial<Pick<SessionRecord, 'title' | 'first_prompt' | 'ended_reason'>>
@@ -92,6 +114,8 @@ export type RecordState = {
   writes: Promise<void>
   /** Whether the next spinner draw is recorded: once after each other event. */
   spinnerArmed: boolean
+  /** Where the CLI keeps each session's record copy, by session id. */
+  copyPaths: Map<string, string>
 }
 
 export function isRecord(value: unknown): value is SessionRecord {
@@ -102,6 +126,18 @@ export function isRecord(value: unknown): value is SessionRecord {
   const r = value as Record<string, unknown>
 
   return r.v === 1 && typeof r.session_id === 'string' && Array.isArray(r.events)
+}
+
+/** Where this session runs, as its record keeps it, for the CLI to judge keys and paths against. */
+export async function placeOf(
+  $: EngineInterface,
+  rec: SessionRecord | null,
+): Promise<{ repo_root: string | null; cwd: string; permission_mode: string | null }> {
+  return {
+    repo_root: rec?.repo_root ?? null,
+    cwd: rec?.cwd ?? (await $.session.cwd()),
+    permission_mode: rec?.permission_mode ?? null,
+  }
 }
 
 async function freshRecord($: EngineInterface, id: string, now: number): Promise<SessionRecord> {
@@ -135,7 +171,29 @@ function filled(base: SessionRecord, fill: Fields): Fields {
   return out
 }
 
-async function writeRecord($: EngineInterface, entry: Entry): Promise<void> {
+async function writeCopy($: EngineInterface, paths: Map<string, string>, id: string, value: SessionRecord): Promise<void> {
+  try {
+    let path = paths.get(id)
+
+    if (path === undefined) {
+      const out = await cli($, ['record-path', '--session', id])
+
+      if (typeof out?.path !== 'string') {
+        return
+      }
+
+      path = out.path
+      paths.set(id, path)
+    }
+
+    /** `$.fs.write` creates the file and its directories as needed. */
+    await $.fs.write(path, JSON.stringify(value))
+  } catch {
+    /** a failed write is redone by the next record */
+  }
+}
+
+async function writeRecord($: EngineInterface, paths: Map<string, string>, entry: Entry): Promise<void> {
   const id = entry.sessionId ?? (await $.session.id())
   const key = KEY_PREFIX + id
   const now = await $.clock.now()
@@ -153,7 +211,7 @@ async function writeRecord($: EngineInterface, entry: Entry): Promise<void> {
     : kept
 
   /** Only `set` keeps `ended_reason`: a session that still records after its end is live again. */
-  await $.store.set(key, {
+  const next: SessionRecord = {
     ...base,
     ...filled(base, entry.fill ?? {}),
     ended_reason: null,
@@ -161,7 +219,10 @@ async function writeRecord($: EngineInterface, entry: Entry): Promise<void> {
     ...updated,
     heartbeat_at: now,
     events,
-  })
+  }
+
+  await $.store.set(key, next)
+  await writeCopy($, paths, id, next)
 }
 
 /** Never rejects: a lost write only leaves the board a step behind. */
@@ -170,7 +231,7 @@ export async function record($: EngineInterface, s: RecordState, entry: Entry): 
     s.spinnerArmed = entry.name !== 'ui.spinner'
   }
 
-  s.writes = s.writes.then(() => writeRecord($, entry)).catch(() => undefined)
+  s.writes = s.writes.then(() => writeRecord($, s.copyPaths, entry)).catch(() => undefined)
   await s.writes
 }
 
@@ -191,6 +252,7 @@ export function rerun(base: SessionRecord, now: number): Partial<SessionRecord> 
     decision: null,
     asks: {},
     agents: [],
+    delegate_since: null,
   }
 }
 

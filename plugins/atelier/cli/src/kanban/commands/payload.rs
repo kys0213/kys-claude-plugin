@@ -1,18 +1,24 @@
-//! Stdin payloads: `kanban board` takes `{"sessions": [<v1 record>, ...]}`,
-//! `kanban answer` takes `{"questions": [...], "picks": [...]}`. A record this
-//! version cannot read is dropped here, before the board sees it.
+//! Stdin payloads of the kanban subcommands. A record this version cannot
+//! read is dropped here, before the board sees it.
 //!
 //! The field readers answer `None` for a field of the wrong type, which drops
 //! the record, and read an absent field the same as `null`.
 
+use crate::kanban::commands::requests::PermitWait;
 use crate::kanban::core::answer::Pick;
 use crate::kanban::core::background::{AgentFact, AgentStatus};
-use crate::kanban::core::board::{Event, SessionFact};
-use crate::kanban::core::detail::{Decision, Delivery, DeliveryStatus};
+use crate::kanban::core::board::{Event, PermissionAsk, SessionFact};
+use crate::kanban::core::detail::{Decision, DecisionLengths, Delivery, DeliveryStatus};
+use crate::kanban::core::ledger::{Answered, DecisionBy, Facts, OpenCall, PermitBy, QuestionBy};
+use crate::kanban::core::precedent::{Auth, SessionPlace};
 use crate::kanban::core::progress::{Activity, ItemStatus, WorkItem};
 use crate::kanban::core::prompt::PromptFact;
-use crate::kanban::core::question::{Ask, Question, QuestionOption};
-use crate::kanban::core::request::{RequestKind, Status};
+use crate::kanban::core::question::{Ask, AskLengths, Question, QuestionOption};
+use crate::kanban::core::relay::Frame;
+use crate::kanban::core::request::{
+    check_id, LeftNonce, Nonce, OpenAsk, PaneNonces, RequestKind, Status, Verdict, Via, Waits,
+};
+use crate::kanban::core::wake::{Pending, WakeState};
 use serde_json::{Map, Value};
 
 const VERSION: u64 = 1;
@@ -24,6 +30,10 @@ pub fn parse_sessions(raw: &str) -> Result<Vec<SessionFact>, String> {
         .and_then(Value::as_array)
         .ok_or_else(|| "stdin has no `sessions` array".to_string())?;
     Ok(records.iter().filter_map(parse_record).collect())
+}
+
+pub fn parse_record_copy(raw: &str) -> Option<SessionFact> {
+    parse_record(&serde_json::from_str(raw).ok()?)
 }
 
 fn parse_record(value: &Value) -> Option<SessionFact> {
@@ -66,6 +76,12 @@ fn parse_record(value: &Value) -> Option<SessionFact> {
             Some(permission @ Value::Object(_)) => nullable_string(permission, "id")?,
             _ => None,
         },
+        permission_input_len: match value.get("permission") {
+            Some(permission @ Value::Object(_)) => {
+                optional(permission, "input_len", parse_field_lengths)?
+            }
+            _ => None,
+        },
         decision: optional(value, "decision", parse_decision)?,
         inbox: optional(value, "inbox", parse_delivery)?,
         tasks: optional_object(value, "tasks")?
@@ -86,7 +102,67 @@ fn parse_record(value: &Value) -> Option<SessionFact> {
             .iter()
             .map(parse_agent)
             .collect::<Option<Vec<_>>>()?,
+        delegate_since: nullable_u64(value, "delegate_since")?,
     })
+}
+
+pub struct WakeStdin {
+    pub sessions: Vec<SessionFact>,
+    pub state: WakeState,
+    pub draft_len: u64,
+    /// The report time error the mod last told the person.
+    pub told_report_at: Option<String>,
+}
+
+/// An absent `state` is an empty one.
+pub fn parse_wake(raw: &str) -> Result<WakeStdin, String> {
+    let sessions = parse_sessions(raw)?;
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    let state = value.get("state").cloned().unwrap_or(Value::Null);
+    let unreadable = |what: &str| format!("`state.{what}` is not what `delegate wake` gave");
+    let pending = optional_array(&state, "pending")
+        .ok_or_else(|| unreadable("pending"))?
+        .iter()
+        .map(|p| {
+            Some(Pending {
+                id: p.get("id")?.as_str()?.to_string(),
+                since: p.get("since")?.as_u64()?,
+            })
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| unreadable("pending"))?;
+    let delivered = optional_array(&state, "delivered")
+        .ok_or_else(|| unreadable("delivered"))?
+        .iter()
+        .map(|id| id.as_str().map(str::to_string))
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| unreadable("delivered"))?;
+    let draft_len = match state.get("draft_len") {
+        None | Some(Value::Null) => 0,
+        Some(n) => n.as_u64().ok_or_else(|| unreadable("draft_len"))?,
+    };
+    let told_report_at = nullable_string(&value, "told_report_at")
+        .ok_or_else(|| "`told_report_at` is not a string".to_string())?;
+    Ok(WakeStdin {
+        sessions,
+        state: WakeState { pending, delivered },
+        draft_len,
+        told_report_at,
+    })
+}
+
+/// The plugin store's keys, oldest first.
+pub fn parse_nonce_keys(raw: &str) -> Result<Vec<String>, String> {
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    value
+        .get("keys")
+        .and_then(Value::as_array)
+        .and_then(|keys| {
+            keys.iter()
+                .map(|k| k.as_str().map(str::to_string))
+                .collect::<Option<Vec<_>>>()
+        })
+        .ok_or_else(|| "stdin has no `keys` array of strings".to_string())
 }
 
 fn parse_agent(value: &Value) -> Option<AgentFact> {
@@ -127,6 +203,38 @@ fn parse_decision(value: &Value) -> Option<Decision> {
             .map(|o| Some(o.as_str()?.to_string()))
             .collect::<Option<Vec<_>>>()?,
         at: value.get("at")?.as_u64()?,
+        orig_len: optional(value, "orig_len", parse_decision_lengths)?,
+    })
+}
+
+fn parse_decision_lengths(value: &Value) -> Option<DecisionLengths> {
+    Some(DecisionLengths {
+        ask: value.get("ask")?.as_u64()?,
+        options: parse_lengths(value.get("options")?)?,
+    })
+}
+
+fn parse_lengths(value: &Value) -> Option<Vec<u64>> {
+    value.as_array()?.iter().map(Value::as_u64).collect()
+}
+
+fn parse_field_lengths(value: &Value) -> Option<Vec<(String, u64)>> {
+    value
+        .as_object()?
+        .iter()
+        .map(|(name, len)| Some((name.clone(), len.as_u64()?)))
+        .collect()
+}
+
+fn parse_ask_lengths(value: &Value) -> Option<AskLengths> {
+    Some(AskLengths {
+        question: parse_lengths(value.get("question")?)?,
+        labels: value
+            .get("labels")?
+            .as_array()?
+            .iter()
+            .map(parse_lengths)
+            .collect::<Option<Vec<_>>>()?,
     })
 }
 
@@ -138,6 +246,10 @@ fn parse_delivery(value: &Value) -> Option<Delivery> {
         status: Status::parse(status)
             .map(DeliveryStatus::Known)
             .unwrap_or_else(|| DeliveryStatus::Unknown(status.to_string())),
+        via: value
+            .get("via")
+            .and_then(Value::as_str)
+            .and_then(Via::parse),
         at: value.get("at")?.as_u64()?,
     })
 }
@@ -179,18 +291,28 @@ fn parse_ask(tool_use_id: &str, value: &Value) -> Option<Ask> {
         tool_use_id: tool_use_id.to_string(),
         questions: parse_questions(value.get("questions")?)?,
         at: value.get("at")?.as_u64()?,
+        orig_len: optional(value, "orig_len", parse_ask_lengths)?,
     })
 }
 
 fn parse_questions(value: &Value) -> Option<Vec<Question>> {
-    value.as_array()?.iter().map(parse_question).collect()
+    value
+        .as_array()?
+        .iter()
+        .map(|q| parse_question(q, MULTI_SELECT))
+        .collect()
 }
 
-fn parse_question(value: &Value) -> Option<Question> {
+/// The multi-select key of a question as payloads carry it, and as the
+/// AskUserQuestion call holds it.
+const MULTI_SELECT: &str = "multi_select";
+const TOOL_MULTI_SELECT: &str = "multiSelect";
+
+fn parse_question(value: &Value, multi_select_key: &str) -> Option<Question> {
     Some(Question {
         question: value.get("question")?.as_str()?.to_string(),
         header: value.get("header")?.as_str()?.to_string(),
-        multi_select: value.get("multi_select")?.as_bool()?,
+        multi_select: value.get(multi_select_key)?.as_bool()?,
         options: value
             .get("options")?
             .as_array()?
@@ -231,6 +353,340 @@ fn parse_pick(value: &Value) -> Option<Pick> {
     })
 }
 
+/// Empty stdin waits on nothing; asks or a place that do not read whole judge
+/// no model's answer.
+pub fn parse_waits(raw: &str) -> Result<Waits, String> {
+    if raw.trim().is_empty() {
+        return Ok(Waits::default());
+    }
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    let asks = optional_array(&value, "asks")
+        .and_then(|asks| asks.iter().map(parse_open_ask).collect::<Option<Vec<_>>>())
+        .ok_or_else(|| "stdin has no readable `asks` array".to_string())?;
+    let decision_at = optional_object(&value, "decision")
+        .and_then(|decision| match decision {
+            None => Some(None),
+            Some(fields) => Some(Some(fields.get("at")?.as_u64()?.to_string())),
+        })
+        .ok_or_else(|| "stdin has no readable `decision`".to_string())?;
+    Ok(Waits {
+        asks,
+        decision_at,
+        place: value.get("place").and_then(parse_place),
+    })
+}
+
+fn parse_open_ask(value: &Value) -> Option<OpenAsk> {
+    let questions = value.get("questions")?.as_array()?;
+    Some(OpenAsk {
+        id: value.get("id")?.as_str()?.to_string(),
+        questions: questions.len(),
+        whole: questions
+            .iter()
+            .map(|q| parse_question(q, TOOL_MULTI_SELECT))
+            .collect(),
+    })
+}
+
+fn parse_place(value: &Value) -> Option<SessionPlace> {
+    Some(SessionPlace {
+        repo_root: nullable_string(value, "repo_root")?,
+        cwd: value.get("cwd")?.as_str()?.to_string(),
+        permission_mode: nullable_string(value, "permission_mode")?,
+    })
+}
+
+/// A request that does not read whole judges no model's answer.
+pub fn parse_permit_wait(raw: &str) -> Result<(PaneNonces, Option<PermitWait>), String> {
+    let nonces = parse_pane_nonces(raw)?;
+    if raw.trim().is_empty() {
+        return Ok((nonces, None));
+    }
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    let wait = (|| {
+        let permission = value.get("permission")?;
+        Some(PermitWait {
+            place: parse_place(value.get("place")?)?,
+            tool: permission.get("tool")?.as_str()?.to_string(),
+            input: permission
+                .get("input")?
+                .as_object()?
+                .iter()
+                .map(|(name, v)| Some((name.clone(), v.as_str()?.to_string())))
+                .collect::<Option<Vec<_>>>()?,
+        })
+    })();
+    Ok((nonces, wait))
+}
+
+/// An entry that does not read proves nothing and is skipped. Empty stdin
+/// left none.
+pub fn parse_pane_nonces(raw: &str) -> Result<PaneNonces, String> {
+    if raw.trim().is_empty() {
+        return Ok(PaneNonces::default());
+    }
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    let left = optional_array(&value, "nonces")
+        .ok_or_else(|| "stdin has no readable `nonces` array".to_string())?;
+    Ok(PaneNonces::new(
+        left.iter().filter_map(parse_left_nonce).collect(),
+    ))
+}
+
+fn parse_left_nonce(value: &Value) -> Option<LeftNonce> {
+    Some(LeftNonce {
+        kind: RequestKind::parse(value.get("kind")?.as_str()?)?,
+        nonce: Nonce::parse(value.get("nonce")?.as_str()?).ok()?,
+    })
+}
+
+pub fn parse_bash_command(raw: &str) -> Result<String, String> {
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    value
+        .get("command")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "stdin has no `command` string".to_string())
+}
+
+pub fn parse_ledger_facts(raw: &str) -> Result<Facts, String> {
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    let at = value
+        .get("at")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "stdin has no `at` time".to_string())?;
+    let session = value
+        .get("session")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "stdin has no `session`".to_string())?;
+    check_id("session", session)?;
+    let cwd = value
+        .get("cwd")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "stdin has no `cwd`".to_string())?;
+    let repo_root = nullable_string(&value, "repo_root")
+        .ok_or_else(|| "`repo_root` is not a string".to_string())?;
+    let permission_mode = nullable_string(&value, "permission_mode")
+        .ok_or_else(|| "`permission_mode` is not a string".to_string())?;
+    let answer = value
+        .get("answer")
+        .filter(|a| a.is_object())
+        .ok_or_else(|| "stdin has no `answer` object".to_string())?;
+    let way = Way::read(answer)?;
+    let auth = match way {
+        Way::Inbox(Via::Agent) => answer.get("auth").and_then(Auth::from_json),
+        Way::Inbox(Via::Pane | Via::Terminal) | Way::Session => None,
+    };
+    let waits: Vec<&str> = ["question", "permission", "decision"]
+        .into_iter()
+        .filter(|kind| !matches!(value.get(*kind), None | Some(Value::Null)))
+        .collect();
+    let answered = match waits.as_slice() {
+        ["question"] => parse_answered_question(&value["question"], answer, way),
+        ["permission"] => parse_answered_permission(&value["permission"], answer, way),
+        ["decision"] => parse_answered_decision(&value["decision"], answer, way),
+        _ => Err(
+            "stdin names no wait, or more than one: give one of `question`, `permission`, `decision`"
+                .to_string(),
+        ),
+    }?;
+    let relay_frame = match value.get("relay_frame") {
+        None | Some(Value::Null) => None,
+        Some(frame) => Some(Frame::from_json(frame)?),
+    };
+    Ok(Facts {
+        at,
+        session: session.to_string(),
+        repo_root,
+        cwd: cwd.to_string(),
+        permission_mode,
+        answered,
+        auth,
+        relay_frame,
+    })
+}
+
+pub fn parse_tool_questions(raw: &str) -> Result<Vec<Question>, String> {
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    value
+        .get("questions")
+        .and_then(Value::as_array)
+        .and_then(|questions| {
+            questions
+                .iter()
+                .map(|q| parse_question(q, TOOL_MULTI_SELECT))
+                .collect::<Option<Vec<_>>>()
+        })
+        .ok_or_else(|| "stdin has no readable `questions` array".to_string())
+}
+
+pub fn parse_bind_facts(raw: &str) -> Result<(String, Vec<OpenCall>), String> {
+    let value: Value = serde_json::from_str(raw).map_err(|e| format!("stdin is not JSON: {e}"))?;
+    let tool = value
+        .get("tool")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "stdin has no `tool`".to_string())?;
+    let calls = value
+        .get("calls")
+        .and_then(Value::as_array)
+        .and_then(|calls| {
+            calls
+                .iter()
+                .map(parse_open_call)
+                .collect::<Option<Vec<_>>>()
+        })
+        .ok_or_else(|| "stdin has no readable `calls` array".to_string())?;
+    Ok((tool.to_string(), calls))
+}
+
+fn parse_open_call(value: &Value) -> Option<OpenCall> {
+    Some(OpenCall {
+        tool_use_id: value.get("tool_use_id")?.as_str()?.to_string(),
+        tool: value.get("tool")?.as_str()?.to_string(),
+        has_permission: value.get("permission")?.as_bool()?,
+    })
+}
+
+/// A `via` the payload did not name proves nothing.
+#[derive(Clone, Copy)]
+enum Way {
+    Session,
+    Inbox(Via),
+}
+
+impl Way {
+    fn read(answer: &Value) -> Result<Way, String> {
+        match answer.get("path").and_then(Value::as_str) {
+            Some("session") => Ok(Way::Session),
+            Some("inbox") => Ok(Way::Inbox(
+                match answer.get("via").and_then(Value::as_str) {
+                    Some("pane") => Via::Pane,
+                    Some("agent") => Via::Agent,
+                    _ => Via::Terminal,
+                },
+            )),
+            _ => Err("`answer.path` is `session` or `inbox`".to_string()),
+        }
+    }
+}
+
+fn required_bool(value: &Value, key: &str, what: &str) -> Result<bool, String> {
+    value
+        .get(key)
+        .and_then(Value::as_bool)
+        .ok_or_else(|| format!("`{what}` is not a boolean"))
+}
+
+fn dialog_answers(answer: &Value, answers: &[Value]) -> Result<Vec<Option<String>>, String> {
+    let is_error = required_bool(answer, "is_error", "answer.is_error")?;
+    let denied = required_bool(answer, "denied", "answer.denied")?;
+    if is_error || denied {
+        return Ok(Vec::new());
+    }
+    Ok(answers
+        .iter()
+        .map(|a| a.as_str().map(str::to_string))
+        .collect())
+}
+
+fn inbox_answers(answers: &[Value]) -> Result<Vec<Option<String>>, String> {
+    answers
+        .iter()
+        .map(|a| match a {
+            Value::Null => Some(None),
+            Value::String(s) => Some(Some(s.clone())),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| "`answer.answers` is not a list of answers".to_string())
+}
+
+fn parse_answered_question(wait: &Value, answer: &Value, way: Way) -> Result<Answered, String> {
+    let unreadable = || "`question` is not a recorded question".to_string();
+    let id = wait
+        .get("tool_use_id")
+        .and_then(Value::as_str)
+        .ok_or_else(unreadable)?;
+    let ask = parse_ask(id, wait).ok_or_else(unreadable)?;
+    let given = answer
+        .get("answers")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "`answer.answers` is not a list".to_string())?;
+    let (by, answers) = match way {
+        Way::Session => (
+            QuestionBy::Dialog {
+                afk: answer.get("afk_timeout_ms").is_some_and(Value::is_number),
+            },
+            dialog_answers(answer, given)?,
+        ),
+        Way::Inbox(via) => (QuestionBy::Inbox(via), inbox_answers(given)?),
+    };
+    Ok(Answered::Question { ask, by, answers })
+}
+
+fn parse_answered_permission(wait: &Value, answer: &Value, way: Way) -> Result<Answered, String> {
+    let unreadable = || "`permission` is not a recorded permission request".to_string();
+    let ask = PermissionAsk {
+        id: nullable_string(wait, "id").ok_or_else(unreadable)?,
+        request: parse_activity(wait).ok_or_else(unreadable)?,
+        input_len: optional(wait, "input_len", parse_field_lengths).ok_or_else(unreadable)?,
+    };
+    let by = match way {
+        Way::Session => PermitBy::Dialog {
+            ran: match answer.get("post") {
+                None | Some(Value::Null) => false,
+                Some(post)
+                    if matches!(post.as_str(), Some("PostToolUse" | "PostToolUseFailure")) =>
+                {
+                    true
+                }
+                Some(_) => {
+                    return Err(
+                        "`answer.post` is `PostToolUse`, `PostToolUseFailure` or null".to_string(),
+                    )
+                }
+            },
+            is_error: answer
+                .get("is_error")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| "`answer.is_error` is not a boolean".to_string())?,
+        },
+        Way::Inbox(via) => PermitBy::Inbox {
+            via,
+            verdict: answer
+                .get("decision")
+                .and_then(Value::as_str)
+                .and_then(Verdict::parse)
+                .ok_or_else(|| "`answer.decision` is `allow` or `deny`".to_string())?,
+        },
+    };
+    Ok(Answered::Permission { ask, by })
+}
+
+fn parse_answered_decision(wait: &Value, answer: &Value, way: Way) -> Result<Answered, String> {
+    let decision =
+        parse_decision(wait).ok_or_else(|| "`decision` is not a recorded decision".to_string())?;
+    let text = answer
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "`answer.text` is not a string".to_string())?;
+    let by = match way {
+        Way::Session => DecisionBy::Prompt {
+            origin: answer
+                .get("origin")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "`answer.origin` is not a string".to_string())?
+                .to_string(),
+        },
+        Way::Inbox(via) => DecisionBy::Inbox(via),
+    };
+    Ok(Answered::Decision {
+        decision,
+        by,
+        text: text.to_string(),
+    })
+}
+
 fn parse_event(value: &Value) -> Option<Event> {
     Some(Event {
         name: value.get("name")?.as_str()?.to_string(),
@@ -268,6 +724,14 @@ fn nullable_string(value: &Value, key: &str) -> Option<Option<String>> {
     match value.get(key) {
         None | Some(Value::Null) => Some(None),
         Some(Value::String(s)) => Some(Some(s.clone())),
+        Some(_) => None,
+    }
+}
+
+fn nullable_u64(value: &Value, key: &str) -> Option<Option<u64>> {
+    match value.get(key) {
+        None | Some(Value::Null) => Some(None),
+        Some(Value::Number(n)) => n.as_u64().map(Some),
         Some(_) => None,
     }
 }

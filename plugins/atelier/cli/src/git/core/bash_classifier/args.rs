@@ -1,4 +1,4 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 
 use super::lexer::Word;
 use super::Anchor;
@@ -10,23 +10,6 @@ impl Anchor {
             raw: raw.to_string(),
         }
     }
-}
-pub(super) fn normalize(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for comp in path.components() {
-        match comp {
-            Component::CurDir => {}
-            Component::ParentDir => match out.components().next_back() {
-                Some(Component::Normal(_)) => {
-                    out.pop();
-                }
-                Some(Component::RootDir | Component::Prefix(_)) => {}
-                _ => out.push(".."),
-            },
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
 }
 
 pub(super) fn is_device(path: &Path) -> bool {
@@ -61,8 +44,6 @@ pub(super) fn split_eq(s: &str) -> (&str, bool) {
     }
 }
 
-/// Value of a short option inside a bundle: the attached rest, else the next
-/// argument (reported as one extra consumed word).
 pub(super) fn short_value(w: &Word, after: usize, next: Option<&Word>) -> (Option<Word>, usize) {
     if after < w.text.len() {
         (Some(w.slice_from(after)), 0)
@@ -71,8 +52,6 @@ pub(super) fn short_value(w: &Word, after: usize, next: Option<&Word>) -> (Optio
     }
 }
 
-/// Value of a long option: the attached `--name=value` rest, else the next
-/// argument (reported as one extra consumed word).
 pub(super) fn long_value(
     w: &Word,
     name: &str,

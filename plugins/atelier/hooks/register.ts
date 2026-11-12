@@ -1,4 +1,4 @@
-import type { EngineInterface, On } from 'claude-code'
+import type { EngineInterface, On, PluginOptions } from 'claude-code'
 
 import { registerKanban } from './kanban'
 
@@ -27,7 +27,7 @@ async function askCli<T>(
   }
 }
 
-/** An absent `deny` reads as allow, so an older CLI that emits only `warnings` still decodes. */
+/** An absent `deny` reads as allow. */
 function decodeVerdict(parsed: unknown): SpawnVerdict | undefined {
   if (typeof parsed !== 'object' || parsed === null) {
     return undefined
@@ -58,7 +58,7 @@ function decodeInstructions(parsed: unknown): string | undefined {
   return typeof instructions === 'string' ? instructions : undefined
 }
 
-export function register(on: On): void {
+export function register(on: On, options: PluginOptions): void {
   /**
    * Warnings from `agent.spawn`, held until the matching
    * `tool.call { tool: 'Agent' }` attaches them, keyed by the shared `tool_use_id`.
@@ -128,5 +128,5 @@ export function register(on: On): void {
     })
   })
 
-  registerKanban(on)
+  registerKanban(on, options)
 }

@@ -1,11 +1,21 @@
 mod kanban_mocks;
+mod kanban_support;
 
-use atelier::kanban::core::request::Sender;
+use atelier::kanban::commands::requests::PermitTiming;
+use atelier::kanban::core::request::{OpenAsk, PaneNonces, Sender, Waits};
 use kanban_mocks::{Edges, FakeLauncher, MapProbe};
-use serde_json::json;
+use kanban_support::NOW;
+use serde_json::{json, Value};
 
-const NOW: u64 = 1_800_000_000_000;
 const TTL: u64 = 60_000;
+
+fn timing(for_ms: u64) -> PermitTiming {
+    PermitTiming {
+        now: NOW,
+        ttl_ms: TTL,
+        for_ms,
+    }
+}
 
 #[test]
 fn a_sent_prompt_is_queued_under_the_next_id_and_taken_once() {
@@ -17,7 +27,14 @@ fn a_sent_prompt_is_queued_under_the_next_id_and_taken_once() {
     );
     assert_eq!(e.inbox.ids("s-1"), ["r1"]);
 
-    let taken = e.requests().take("s-1", NOW, TTL, None);
+    let taken = e.requests().take(
+        "s-1",
+        NOW,
+        TTL,
+        None,
+        &Waits::default(),
+        PaneNonces::default(),
+    );
     assert_eq!(
         taken["actions"],
         json!([{ "kind": "prompt", "text": "Run lint", "body": "Run lint", "from": "pane" }])
@@ -41,7 +58,14 @@ fn a_request_older_than_the_ttl_is_expired_whatever_its_kind() {
     e.requests().send("s-1", Sender::Pane, None, "late");
     e.requests().stop("s-1", "t-1");
     *e.inbox.age_ms.borrow_mut() = TTL + 1;
-    let out = e.requests().take("s-1", NOW, TTL, Some("t-1"));
+    let out = e.requests().take(
+        "s-1",
+        NOW,
+        TTL,
+        Some("t-1"),
+        &Waits::default(),
+        PaneNonces::default(),
+    );
     assert_eq!(out["actions"], json!([]));
     assert_eq!(
         out["results"],
@@ -56,7 +80,14 @@ fn a_request_older_than_the_ttl_is_expired_whatever_its_kind() {
 fn an_unreadable_request_reports_an_unknown_kind() {
     let e = Edges::default();
     e.inbox.put_raw("s-1", "r9", "{\"v\":2}");
-    let out = e.requests().take("s-1", NOW, TTL, None);
+    let out = e.requests().take(
+        "s-1",
+        NOW,
+        TTL,
+        None,
+        &Waits::default(),
+        PaneNonces::default(),
+    );
     assert_eq!(
         out["results"],
         json!([{ "id": "r9", "kind": "unknown", "status": "invalid" }])
@@ -136,7 +167,9 @@ fn spawn_reports_what_a_failed_launch_printed() {
 #[test]
 fn a_permit_answer_is_waited_for_by_the_permission_it_names() {
     let e = Edges::default();
-    let out = e.requests().permit("s-1", "p-1", "allow");
+    let out = e
+        .requests()
+        .permit("s-1", "p-1", "allow", Sender::Pane.into());
     assert_eq!(
         out,
         json!({ "queued": { "session_id": "s-1", "id": "p-1", "kind": "permit" } })
@@ -144,15 +177,15 @@ fn a_permit_answer_is_waited_for_by_the_permission_it_names() {
     assert!(e.inbox.ids("s-1").is_empty());
 
     assert_eq!(
-        e.requests().wait_permit("s-1", "p-2", NOW, TTL, 2_000),
+        wait_permit(&e, "s-1", "p-2", 2_000),
         json!({ "decision": null })
     );
     assert_eq!(
-        e.requests().wait_permit("s-1", "p-1", NOW, TTL, 2_000),
-        json!({ "decision": "allow" })
+        wait_permit(&e, "s-1", "p-1", 2_000),
+        json!({ "decision": "allow", "from": "pane", "via": "terminal", "used_nonces": [] })
     );
     assert_eq!(
-        e.requests().wait_permit("s-1", "p-1", NOW, TTL, 2_000),
+        wait_permit(&e, "s-1", "p-1", 2_000),
         json!({ "decision": null })
     );
 }
@@ -160,17 +193,18 @@ fn a_permit_answer_is_waited_for_by_the_permission_it_names() {
 #[test]
 fn waiting_for_a_permit_pauses_until_the_wait_is_over() {
     let e = Edges::default();
-    e.requests().wait_permit("s-1", "p-1", NOW, TTL, 1_000);
+    wait_permit(&e, "s-1", "p-1", 1_000);
     assert_eq!(*e.pause.paused_ms.borrow(), 1_000);
 }
 
 #[test]
 fn a_permit_answer_older_than_the_ttl_is_dropped() {
     let e = Edges::default();
-    e.requests().permit("s-1", "p-1", "deny");
+    e.requests()
+        .permit("s-1", "p-1", "deny", Sender::Pane.into());
     *e.inbox.age_ms.borrow_mut() = TTL + 1;
     assert_eq!(
-        e.requests().wait_permit("s-1", "p-1", NOW, TTL, 2_000),
+        wait_permit(&e, "s-1", "p-1", 2_000),
         json!({ "decision": null, "status": "expired" })
     );
 }
@@ -183,10 +217,137 @@ fn a_permit_needs_allow_or_deny_and_plain_ids() {
         ("s/1", "p-1", "allow"),
         ("s-1", "../p", "allow"),
     ] {
-        let out = e.requests().permit(session, request, decision);
+        let out = e
+            .requests()
+            .permit(session, request, decision, Sender::Pane.into());
         assert!(
             out["error"].is_string(),
             "{session} {request} {decision} → {out}"
         );
     }
+}
+
+fn wait_permit(e: &Edges, session: &str, request: &str, for_ms: u64) -> Value {
+    e.requests().wait_permit(
+        session,
+        request,
+        timing(for_ms),
+        PaneNonces::default(),
+        None,
+    )
+}
+
+fn answers(list: &[&str]) -> Vec<String> {
+    list.iter().map(|a| a.to_string()).collect()
+}
+
+fn open(asks: &[(&str, usize)], decision_at: Option<&str>) -> Waits {
+    Waits {
+        asks: asks
+            .iter()
+            .map(|(id, questions)| OpenAsk {
+                id: id.to_string(),
+                questions: *questions,
+                whole: None,
+            })
+            .collect(),
+        decision_at: decision_at.map(str::to_string),
+        place: None,
+    }
+}
+
+#[test]
+fn a_reply_reaches_its_open_question_once() {
+    let e = Edges::default();
+    let out = e
+        .requests()
+        .reply("s-1", "tu-1", &answers(&["Red"]), Sender::Pane.into());
+    assert_eq!(
+        out,
+        json!({ "queued": { "session_id": "s-1", "id": "r1", "kind": "answer" } })
+    );
+    e.requests()
+        .reply("s-1", "tu-1", &answers(&["Blue"]), Sender::Pane.into());
+
+    let taken = e.requests().take(
+        "s-1",
+        NOW,
+        TTL,
+        Some("t-1"),
+        &open(&[("tu-1", 1)], None),
+        PaneNonces::default(),
+    );
+    assert_eq!(
+        taken["actions"],
+        json!([{ "kind": "answer", "tool_use_id": "tu-1", "answers": ["Red"], "from": "pane", "via": "terminal" }])
+    );
+    assert_eq!(
+        taken["results"],
+        json!([
+            { "id": "r1", "kind": "answer", "status": "delivered", "via": "terminal" },
+            { "id": "r2", "kind": "answer", "status": "stale", "via": "terminal" },
+        ])
+    );
+}
+
+#[test]
+fn a_decide_counts_as_the_one_prompt_a_take_runs() {
+    let e = Edges::default();
+    e.requests()
+        .decide("s-1", "1700", "네", Sender::Pane.into());
+    e.requests().send("s-1", Sender::Pane, None, "later");
+    let taken = e.requests().take(
+        "s-1",
+        NOW,
+        TTL,
+        None,
+        &open(&[], Some("1700")),
+        PaneNonces::default(),
+    );
+    assert_eq!(
+        taken["actions"],
+        json!([{ "kind": "decide", "decision_at": "1700", "text": "네", "from": "pane", "via": "terminal" }])
+    );
+    assert_eq!(taken["results"][1]["status"], "busy");
+}
+
+#[test]
+fn an_expired_answer_is_expired_before_it_is_judged() {
+    let e = Edges::default();
+    e.requests()
+        .reply("s-1", "tu-1", &answers(&["Red"]), Sender::Pane.into());
+    *e.inbox.age_ms.borrow_mut() = TTL + 1;
+    let taken = e.requests().take(
+        "s-1",
+        NOW,
+        TTL,
+        None,
+        &open(&[("tu-1", 1)], None),
+        PaneNonces::default(),
+    );
+    assert_eq!(taken["results"][0]["status"], "expired");
+}
+
+#[test]
+fn agent_answers_without_precedents_are_refused_and_nothing_is_queued() {
+    let e = Edges::default();
+    for out in [
+        e.requests()
+            .reply("s-1", "tu-1", &answers(&["Red"]), Sender::Agent.into()),
+        e.requests()
+            .decide("s-1", "1700", "네", Sender::Agent.into()),
+        e.requests()
+            .permit("s-1", "p-1", "allow", Sender::Agent.into()),
+    ] {
+        assert!(out["error"].is_string(), "{out}");
+    }
+    assert!(e.inbox.ids("s-1").is_empty());
+    assert!(e.inbox.permits.borrow().is_empty());
+}
+
+#[test]
+fn a_reply_needs_at_least_one_answer() {
+    let e = Edges::default();
+    let out = e.requests().reply("s-1", "tu-1", &[], Sender::Pane.into());
+    assert!(out["error"].is_string(), "{out}");
 }

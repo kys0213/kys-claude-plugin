@@ -1,0 +1,221 @@
+import type { EngineInterface, PromptSubmitInput, PromptSubmitResult } from 'claude-code'
+
+import { CLI_MISSING, cli } from './kanban-cli'
+import { KEY_PREFIX, type RecordState, isRecord, record } from './kanban-record'
+
+export const DEFAULT_REPORT_AT = '18:00'
+
+type Pending = { id: string; since: number }
+
+/** What `delegate wake` offered as context for the person's next prompt. */
+type Offer = { context: string; ids: string[]; report: boolean }
+
+type DelegateMemory = {
+  /** What the last wake handed back, for the next one. */
+  pending: Pending[]
+  delivered: string[]
+  offer: Offer | null
+  /** A wake or the prompt it submitted is in flight. */
+  waking: boolean
+  /** `kanban_report_at` from the plugin's options. */
+  reportAt: string
+  /** The report time error the last wake named, for the next one to judge against. */
+  toldReportAt: string | null
+}
+
+export type DelegateState = RecordState & { delegate: DelegateMemory }
+
+export function newDelegateMemory(reportAt: unknown): DelegateMemory {
+  return {
+    pending: [],
+    delivered: [],
+    offer: null,
+    waking: false,
+    reportAt: typeof reportAt === 'string' ? reportAt : DEFAULT_REPORT_AT,
+    toldReportAt: null,
+  }
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((x): x is string => typeof x === 'string') : []
+}
+
+function pendingOf(value: unknown): Pending[] {
+  return Array.isArray(value)
+    ? value.filter((p): p is Pending => typeof p?.id === 'string' && typeof p?.since === 'number')
+    : []
+}
+
+/** `/kanban <args>` as a person or anything else ran it, keeping the record's `delegate_since` when the CLI named one. */
+export async function runKanbanCommand(
+  $: EngineInterface,
+  s: DelegateState,
+  args: string,
+  origin: string,
+): Promise<{ toggle: true } | { toggle: false; text: string }> {
+  const out = await cli($, [
+    'command',
+    '--session',
+    await $.session.id(),
+    '--now',
+    String(await $.clock.now()),
+    '--origin',
+    origin,
+    '--args',
+    args,
+  ])
+
+  if (out === null) {
+    return { toggle: false, text: CLI_MISSING }
+  }
+
+  if (out.toggle === true) {
+    return { toggle: true }
+  }
+
+  if (typeof out.error === 'string') {
+    return { toggle: false, text: out.error }
+  }
+
+  const since = out.delegate_since
+
+  if (since === null || typeof since === 'number') {
+    await record($, s, { name: null, update: () => ({ delegate_since: since }) })
+    s.delegate.pending = []
+    s.delegate.delivered = []
+    s.delegate.offer = null
+  }
+
+  return { toggle: false, text: typeof out.text === 'string' ? out.text : CLI_MISSING }
+}
+
+async function delivered($: EngineInterface, s: DelegateState, ids: readonly string[], report: boolean): Promise<void> {
+  s.delegate.delivered = [...s.delegate.delivered, ...ids]
+
+  if (report) {
+    const now = String(await $.clock.now())
+
+    await cli($, ['delegate', 'report', '--now', now])
+    await cli($, ['ledger', 'prune', '--now', now])
+  }
+}
+
+async function isTurnedOn($: EngineInterface): Promise<boolean> {
+  const stored = await $.store.get(KEY_PREFIX + (await $.session.id()))
+
+  return isRecord(stored) && typeof stored.delegate_since === 'number'
+}
+
+/**
+ * Asks `delegate wake` what to say now, while this session is turned on: submits its prompt, or keeps
+ * its context for the person's next prompt. What went out is delivered only once the engine took it.
+ */
+export async function wakeDelegate($: EngineInterface, s: DelegateState, sessions: () => Promise<unknown[]>): Promise<void> {
+  const memory = s.delegate
+
+  if (memory.waking) {
+    return
+  }
+
+  memory.waking = true
+
+  try {
+    if (!(await isTurnedOn($))) {
+      memory.pending = []
+      memory.delivered = []
+      memory.offer = null
+
+      return
+    }
+
+    const now = await $.clock.now()
+    const draft = await $.prompt.read()
+    const out = await cli(
+      $,
+      [
+        'delegate',
+        'wake',
+        '--session',
+        await $.session.id(),
+        '--now',
+        String(now),
+        '--report-at',
+        memory.reportAt,
+        '--utc-offset',
+        String(-new Date(now).getTimezoneOffset()),
+      ],
+      JSON.stringify({
+        sessions: await sessions(),
+        state: { pending: memory.pending, delivered: memory.delivered, draft_len: draft.text.length },
+        told_report_at: memory.toldReportAt,
+      }),
+    )
+    const state = out?.state as Record<string, unknown> | undefined
+
+    if (out === null || typeof out.error === 'string' || typeof state !== 'object' || state === null) {
+      return
+    }
+
+    if (typeof out.toast === 'string') {
+      $.ui.toast(out.toast)
+    }
+
+    memory.toldReportAt = typeof out.report_at_error === 'string' ? out.report_at_error : null
+    memory.pending = pendingOf(state.pending)
+    memory.delivered = strings(state.delivered)
+    const ids = strings(out.deliver_ids)
+    const report = out.report_due === true
+    memory.offer = typeof out.context === 'string' ? { context: out.context, ids, report } : null
+
+    if (typeof out.submit === 'string') {
+      const r = await $.prompt.submit({ text: out.submit })
+
+      if (r.drop === undefined) {
+        await delivered($, s, ids, report)
+      }
+    }
+  } catch {
+    /** what was not delivered stays pending for the next wake */
+  } finally {
+    memory.waking = false
+  }
+}
+
+async function attaches($: EngineInterface, e: PromptSubmitInput): Promise<boolean> {
+  const out = await cli($, [
+    'delegate',
+    'attach',
+    '--origin',
+    e.origin?.kind ?? '',
+    ...(e.command === undefined ? [] : ['--slash-command']),
+    ...(e.isMeta === true ? ['--meta'] : []),
+  ])
+
+  return out?.attach === true
+}
+
+/**
+ * The prompt carries the context the last wake offered when `delegate attach` says it may;
+ * it counts as delivered once the prompt entered.
+ */
+export async function submitWithOffer(
+  $: EngineInterface,
+  s: DelegateState,
+  e: PromptSubmitInput,
+  next: (e: PromptSubmitInput) => Promise<PromptSubmitResult>,
+): Promise<PromptSubmitResult> {
+  const offer = s.delegate.offer === null || !(await attaches($, e)) ? null : s.delegate.offer
+
+  if (offer === null) {
+    return next(e)
+  }
+
+  s.delegate.offer = null
+  const r = await next({ ...e, context: [...(e.context ?? []), offer.context] })
+
+  if (r.drop === undefined) {
+    await delivered($, s, offer.ids, offer.report)
+  }
+
+  return r
+}

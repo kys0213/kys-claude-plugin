@@ -1,10 +1,11 @@
 import type { EngineInterface } from 'claude-code'
 
-import { CLI_MISSING, cli } from './kanban-cli'
+import { queueRequest } from './kanban-cli'
+import { type AnswerKind, queuePaneAnswer } from './kanban-nonce'
 
 type Section = { title: string; lines: string[] }
 
-type DecisionView = { ask: string; recap: string | null; options: string[] }
+type DecisionView = { id: string; ask: string; recap: string | null; options: string[] }
 
 export type DetailCard = {
   session_id: string
@@ -57,30 +58,38 @@ export function pruneDetail(s: DetailState, cards: readonly DetailCard[]): void 
   }
 }
 
-async function request($: EngineInterface, s: DetailState, card: DetailCard, args: string[], sent: string) {
-  const out = await cli($, args)
+/** The command to queue, and which answer it is when it answers a wait. */
+type Queued = { args: string[]; answer: AnswerKind | null }
 
-  if (out !== null && typeof out.queued === 'object') {
-    s.notes.set(card.session_id, { text: sent, isError: false })
-  } else {
-    const reason = typeof out?.error === 'string' ? out.error : CLI_MISSING
+async function request($: EngineInterface, s: DetailState, card: DetailCard, queued: Queued, sent: string) {
+  const refused =
+    queued.answer === null
+      ? await queueRequest($, queued.args)
+      : await queuePaneAnswer($, card.session_id, queued.answer, queued.args)
 
-    s.notes.set(card.session_id, { text: reason, isError: true })
-  }
+  s.notes.set(card.session_id, refused === null ? { text: sent, isError: false } : { text: refused, isError: true })
 
   $.ui.invalidate('ui.render')
 }
 
-async function send($: EngineInterface, s: DetailState, card: DetailCard, text: string): Promise<void> {
-  const self = await $.session.id()
+async function sendArgs($: EngineInterface, card: DetailCard, text: string): Promise<Queued> {
+  const decision = card.detail?.decision
 
-  await request(
-    $,
-    s,
-    card,
-    ['send', '--session', card.session_id, '--from', 'pane', '--from-label', self, '--text', text],
-    '보냈어요 — 세션이 받으면 시작해요',
-  )
+  if (decision) {
+    return {
+      args: ['decide', '--session', card.session_id, '--at', decision.id, '--text', text, '--from', 'pane'],
+      answer: 'decide',
+    }
+  }
+
+  return {
+    args: ['send', '--session', card.session_id, '--from', 'pane', '--from-label', await $.session.id(), '--text', text],
+    answer: null,
+  }
+}
+
+async function send($: EngineInterface, s: DetailState, card: DetailCard, text: string): Promise<void> {
+  await request($, s, card, await sendArgs($, card, text), '보냈어요 — 세션이 받으면 시작해요')
 
   if (!s.notes.get(card.session_id)?.isError) {
     s.drafts.delete(card.session_id)
@@ -91,7 +100,7 @@ async function stop($: EngineInterface, s: DetailState, card: DetailCard): Promi
   s.confirming.delete(card.session_id)
 
   if (typeof card.turn_id === 'string') {
-    await request($, s, card, ['stop', '--session', card.session_id, '--turn', card.turn_id], '중지를 보냈어요')
+    await request($, s, card, { args: ['stop', '--session', card.session_id, '--turn', card.turn_id], answer: null }, '중지를 보냈어요')
   }
 }
 
@@ -149,7 +158,10 @@ async function permit($: EngineInterface, s: DetailState, card: DetailCard, deci
       $,
       s,
       card,
-      ['permit', '--session', card.session_id, '--request', card.permission_id, '--decision', decision],
+      {
+        args: ['permit', '--session', card.session_id, '--request', card.permission_id, '--decision', decision, '--from', 'pane'],
+        answer: 'permit',
+      },
       decision === 'allow' ? '허용을 보냈어요' : '거부를 보냈어요',
     )
   }

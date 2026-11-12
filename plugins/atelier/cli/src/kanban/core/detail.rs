@@ -5,7 +5,7 @@ use super::duration::age_label;
 use super::progress::{
     first_field, item_text, live_items, tool_line, Activity, ItemStatus, WorkItem,
 };
-use super::request::{strip_agent_header, RequestKind, Status};
+use super::request::{strip_agent_header, RequestKind, Status, Via};
 use super::text::{cut, fold, strip_controls, strip_reminders};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +14,16 @@ pub struct Decision {
     pub recap: Option<String>,
     pub options: Vec<String>,
     pub at: u64,
+    /// Absent when the record has none.
+    pub orig_len: Option<DecisionLengths>,
+}
+
+/// The lengths before the mod cut the texts, in UTF-16 code units; `options`
+/// has one length for every option offered, kept or not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecisionLengths {
+    pub ask: u64,
+    pub options: Vec<u64>,
 }
 
 /// A status a newer CLI wrote that this one does not know is shown as written.
@@ -28,6 +38,8 @@ pub struct Delivery {
     pub id: String,
     pub kind: Option<RequestKind>,
     pub status: DeliveryStatus,
+    /// How the request came in; `None` when unknown.
+    pub via: Option<Via>,
     pub at: u64,
 }
 
@@ -77,7 +89,7 @@ const TODO_LINES: usize = 8;
 const RECENT_LINES: usize = 5;
 
 /// Tried in order for what a permission request is about; paths stay whole.
-const WAIT_FIELDS: [&str; 8] = [
+pub const WAIT_FIELDS: [&str; 8] = [
     "command",
     "file_path",
     "notebook_path",
@@ -92,14 +104,14 @@ pub fn clean(raw: &str) -> String {
     strip_controls(strip_agent_header(strip_reminders(raw).trim_start()))
 }
 
-fn prompt_lines(raw: Option<&str>) -> Vec<String> {
+pub fn prompt_lines(raw: Option<&str>) -> Vec<String> {
     raw.map(|p| fold(&clean(p)))
         .filter(|p| !p.is_empty())
         .map(|p| vec![cut(&p, PROMPT_CHARS)])
         .unwrap_or_default()
 }
 
-fn reply_lines(raw: Option<&str>) -> Vec<String> {
+pub fn reply_lines(raw: Option<&str>) -> Vec<String> {
     let Some(raw) = raw else {
         return Vec::new();
     };
@@ -167,15 +179,27 @@ fn delivery_line(inbox: &Delivery, now: u64) -> String {
     let kind = match inbox.kind {
         Some(RequestKind::Stop) => "중지 요청",
         Some(RequestKind::Permit) => "권한 답",
+        Some(RequestKind::Answer) => "질문 답",
+        Some(RequestKind::Decide) => "결정 답",
         Some(RequestKind::Prompt) | None => "보낸 요청",
     };
-    let status = match &inbox.status {
-        DeliveryStatus::Known(Status::Delivered) => "전달됐어요",
-        DeliveryStatus::Known(Status::Busy) => "작업 중이라 받지 않았어요",
-        DeliveryStatus::Known(Status::Expired) => "시간이 지나 버렸어요",
-        DeliveryStatus::Known(Status::Stale) => "끝난 턴이라 버렸어요",
-        DeliveryStatus::Known(Status::Invalid) => "invalid",
-        DeliveryStatus::Unknown(raw) => raw,
+    let status = match (&inbox.status, inbox.kind) {
+        (DeliveryStatus::Known(Status::Delivered), _) => "전달됐어요",
+        (DeliveryStatus::Known(Status::Busy), _) => "작업 중이라 받지 않았어요",
+        (DeliveryStatus::Known(Status::Expired), _) => "시간이 지나 버렸어요",
+        (DeliveryStatus::Known(Status::Stale), Some(RequestKind::Answer)) => {
+            "끝난 질문이라 버렸어요"
+        }
+        (DeliveryStatus::Known(Status::Stale), Some(RequestKind::Decide)) => {
+            "끝난 결정이라 버렸어요"
+        }
+        (DeliveryStatus::Known(Status::Stale), _) => "끝난 턴이라 버렸어요",
+        (DeliveryStatus::Known(Status::Invalid), Some(RequestKind::Answer)) => {
+            "답 수가 맞지 않아 버렸어요"
+        }
+        (DeliveryStatus::Known(Status::Invalid), _) => "invalid",
+        (DeliveryStatus::Known(Status::Refused), _) => "대리 조건이 맞지 않아 버렸어요",
+        (DeliveryStatus::Unknown(raw), _) => raw,
     };
     format!(
         "{kind}: {status} · {}",

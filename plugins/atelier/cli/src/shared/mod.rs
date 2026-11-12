@@ -1,6 +1,5 @@
-//! Helpers both subsystems need. `git` and `session` are siblings — neither
-//! owns the other — so anything they share lives here rather than one of them
-//! reaching into the other's internals.
+//! Helpers shared by the `git` and `session` subsystems.
 
+pub mod path;
 pub mod process;
 pub mod shell;

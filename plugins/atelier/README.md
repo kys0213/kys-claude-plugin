@@ -34,7 +34,11 @@ Epic 2 ([#766](https://github.com/kys0213/kys-claude-plugin/issues/766))에서 c
 /atelier:workflow     # 컨벤션 scaffold·.claude/rules 설계·설계 원칙 룰 설치·워크플로우 리뷰
 /atelier:orchestrator # 위임/병렬 분해·worktree 격리·머지 조정 (기본 자율 주행, HITL opt-out)
 /atelier:grill        # 설계를 대화로 생성(발산→수렴)하거나 이미 있는 계획을 심문 (빈틈·가정 드러내기)
+/atelier:kanban-delegate # 칸반 위임 세션에서 다른 세션의 입력 대기를 선례로 대신 답하거나 사용자에게 물어 전달, 위임 보고
 ```
+
+`kanban-delegate` 는 성향 프로필의 근거로 suggest-workflow 의 인사이트·지난 대화 검색을 쓰므로 `plugin.json` 에
+`dependencies: ["suggest-workflow"]` 를 선언합니다. suggest-workflow 가 없거나 색인이 비면 그 근거 없이 동작합니다.
 
 ### 유지 command (deliberate 진입점)
 
@@ -68,7 +72,7 @@ atelier git <reviews|guard|hook>          # git-utils 의 기계적 호출 표�
 atelier session <push-check|ensure-env>   # 세션 경계 hook (SessionStart / Stop)
 atelier orchestrator <spawn-check|compact-note>      # function hooks 모듈이 위임하는 결정적 판정 (아래 §Function hooks)
 atelier code-style <install|update|check|restore|uninstall> # 프로젝트 코드 스타일 룰(base·언어·앱 성격) 설치·갱신·점검·제어 (/atelier:code-style)
-atelier kanban <board|answer|send|stop|permit|inbox|spawn>   # 세션 칸반 판정과 세션 사이 요청 전달 (아래 §세션 칸반)
+atelier kanban <status|…>                 # 세션 칸반 판정과 세션 사이 요청 전달 (아래 §세션 칸반)
 ```
 
 `drift` 는 `/atelier:update`·`/atelier:setup` 명세가 호출하는 결정적 도구입니다.
@@ -117,39 +121,49 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
 
 `/kanban` 을 입력하면 이 머신에서 atelier 가 켜진 Claude Code 세션 전체를 칸반 pane 으로 보여줍니다.
 다시 입력하면 닫힙니다. 터미널과 데스크톱 앱에서는 프롬프트 위의 `세션 칸반 열기`/`세션 칸반 닫기` 버튼으로도
-열고 닫을 수 있습니다. 컬럼은 **입력 대기 → 작업 중 → 쉬는 중 → 응답 없음** 이고, 카드에는 저장소
-이름·그 컬럼에 머문 시간·세션 제목(없으면 첫 프롬프트)과 진행 상황(할 일 진척, 작업 중이면 지금 실행 중인
-도구), 쉬는 중이면 직전 응답 첫 줄이 나옵니다.
+열고 닫을 수 있습니다.
 
-- **쉬는 중** 은 턴이 끝났고 그 세션이 띄운 백그라운드 일(서브에이전트·Workflow·원격 세션·일하는 팀원)도
-  모두 멈춘 세션입니다. 오케스트레이터가 에이전트 스웜을 돌리며 턴을 끝낸 동안은 **작업 중** 이고, 카드에
-  `▸ 백그라운드: 에이전트 3 · 워크플로 1` 처럼 남은 일이 나옵니다. 백그라운드 셸(dev 서버 등)·Monitor 는 일로
-  치지 않습니다. 따로 띄운 세션에 SendMessage 로 일을 맡기고 답을 기다리는 것도 백그라운드 일이 아니어서,
-  턴이 끝나면 두 세션 모두 쉬는 중입니다.
-
-- **입력 대기** 는 권한 확인·질문(AskUserQuestion)·턴 끝의 결정 요청(데스크톱의 결정 카드, `WrapUp`)·MCP
-  입력 요청을 기다리는 세션입니다. 질문은 보드 아래에 펼쳐져, 선택지를 누르거나 직접 입력한 뒤 **보내기** 를
-  누르면 그 세션의 질문 화면이 닫히고 사람이 답한 것처럼 이어갑니다.
-- 카드 제목을 누르면 그 컬럼에 맞는 상세가 열립니다.
-  - 입력 대기: 요청·기다리기 직전 응답·기다리는 것(권한 요청의 명령 등), 권한 요청은 **허용**·**거부**, 결정 요청은 답 버튼, 그리고 **중지**.
-  - 작업 중: 요청·할 일 목록·최근 도구, 그리고 **중지**(한 번 더 눌러 확인).
-  - 쉬는 중: 직전 요청·직전 응답, 그리고 **입력해 보내기** — 그 세션의 새 턴으로 실행됩니다.
-  - 좁은 pane 에서는 상세가 보드 자리를 대신하고 **뒤로** 로 돌아갑니다.
-- pane 은 `ctrl+x tab` 이나 클릭으로 포커스하고, Tab 으로 버튼 사이를 옮깁니다. 데스크톱에서도 같습니다.
-- 권한 요청의 허용·거부는 그 세션의 권한 창에 답한 것과 같고, 창에서 먼저 답하면 그쪽이 쓰입니다. 카드에서 그 세션
+- **컬럼**: **입력 대기 → 작업 중 → 쉬는 중 → 응답 없음**. 카드에는 저장소 이름·그 컬럼에 머문 시간·세션
+  제목(없으면 첫 프롬프트)과 진행 상황(할 일 진척, 작업 중이면 지금 실행 중인 도구), 쉬는 중이면 직전 응답 첫
+  줄이 나옵니다.
+  - 오케스트레이터가 에이전트 스웜을 돌리며 턴을 끝낸 동안은 **작업 중** 이고, 카드에
+    `▸ 백그라운드: 에이전트 3 · 워크플로 1` 처럼 남은 일이 나옵니다. 백그라운드 셸(dev 서버 등)·Monitor, 따로 띄운
+    세션에 SendMessage 로 맡긴 일은 일로 치지 않습니다.
+- **답하기**: 질문(AskUserQuestion)은 보드 아래에 펼쳐집니다. 선택지를 누르거나 직접 입력한 뒤 **답 보내기** 를
+  누르면 그 세션이 사람이 답한 것처럼 이어갑니다. 권한 요청은 카드 상세의 **허용**·**거부**, 결정 요청은 답 버튼이나
+  직접 입력으로 답합니다. 그 세션 화면에서 먼저 답하면 그쪽이 쓰입니다.
+- **카드 상세**: 카드 제목을 누르면 그 컬럼에 맞는 상세가 열리고 `← 보드` 로 돌아갑니다. 쉬는 세션은
+  **입력해 보내기** 로 새 턴을 맡기고, 일하는 세션은 **중지**(한 번 더 눌러 확인)로 멈춥니다. 카드에서 그 세션
   화면으로 이동하는 기능은 없습니다.
-- 세션마다 모드가 이벤트 사실을 모드 저장소(`$.store`, 같은 머신의 세션이 공유)에 기록하고, 30초마다
-  생존 신호를 남깁니다. 생존 신호가 2분 끊긴 세션은 응답 없음, 24시간 끊기거나 정상 종료한 세션은 사라집니다.
-- 보내기·중지·권한 답은 받는 세션의 inbox(`<CLAUDE_CONFIG_DIR 또는 ~/.claude>/atelier/kanban/inbox/<세션>/`)에 남는
-  요청이고, 받는 세션이 2초마다 한 번씩만 가져갑니다. 작업 중일 때 온 프롬프트·60초 지난 요청·끝난 턴의 중지는
-  실행하지 않고 버립니다.
-- **오케스트레이터**: 읽기 전용 모드 툴 `kanban_board` 로 레포별 세션 목록을 읽고, 쉬는 세션에는
-  `atelier kanban send --session <id> --from agent --from-label <이 세션> --text <일>` 로 맡기고, 레포에
-  세션이 없으면 `atelier kanban spawn --cwd <메인 작업 트리 루트> [--worktree <이름>] --text <일>` 로
-  `claude --bg` 세션을 띄웁니다. Bash 로 부르므로 오케스트레이터 세션의 권한 규칙을 그대로 따릅니다.
-  어느 세션에 맡길지·언제 띄울지의 절차는 `orchestrator` skill 이 담습니다.
-- 판정·요청 전달은 `atelier kanban` CLI 가 하고, 모듈은 기록과 그리기만 합니다. CLI 가 없으면 pane 에 안내
-  한 줄만 나옵니다.
+- pane 은 `ctrl+x tab` 이나 클릭으로 포커스하고, Tab 으로 버튼 사이를 옮깁니다. 데스크톱에서도 같습니다.
+- **터미널에서 보기**: pane 없이 같은 보드를 읽습니다.
+
+  ```
+  atelier kanban status                        # 전체 보드 (JSON)
+  atelier kanban status --format text          # 사람이 읽는 표
+  atelier kanban status --column needs_input   # 입력 대기만
+  ```
+
+- **칸반 위임**: 메인 세션 하나에서 위임을 켜면, 다른 세션의 입력 대기를 그 세션으로 모아 받습니다. 사용자가 전에
+  같은 결정을 직접 내린 적이 있는 대기만 대신 답하고, 나머지는 메인 대화에서 물어 그 답을 전달합니다.
+
+  ```
+  /kanban delegate on                 # 이 세션을 위임 세션으로 켜기
+  /kanban delegate off                # 끄기
+  /kanban delegate act question       # 질문을 대신 답하기로 올리기 (permission 도 같음)
+  /kanban delegate shadow question    # 지켜보기로 내리기
+  ```
+
+  - 처음에는 지켜보기 단계라 대신 답하지 않고 모두 물어봅니다. 보고에 "올려도 좋음" 이 보이면 `act` 로 올리세요.
+    위임 명령은 사람이 직접 입력한 것만 받습니다.
+  - 보고: 메인 대화에서 위임 보고를 요청하면 직전 일일 보고 이후를 받고, 매일 `kanban_report_at`(플러그인 설정,
+    기본 `18:00`) 이후 일일 보고가 옵니다(`/plugin configure atelier` 로 바꿀 수 있어요).
+  - 대신 답한 것이 틀렸으면 메인 대화에서 뒤집어 달라고 말하세요. 그 결정은 다시 사용자에게 묻습니다.
+  - 규격: [`spec/concerns/kanban-delegate.md`](spec/concerns/kanban-delegate.md)
+- **오케스트레이터**: 메인 오케스트레이터는 같은 보드를 읽어 레포별로 쉬는 세션에 일을 맡기거나, 그 레포에
+  백그라운드 세션을 새로 띄웁니다. 오케스트레이터 세션의 권한 규칙을 그대로 따릅니다. 절차는 `orchestrator`
+  skill 이 담습니다.
+- `atelier` CLI 가 없으면 pane 에 안내 한 줄만 나옵니다. `/atelier:update` 로 설치·갱신하세요.
 - 상세 규격: [`spec/concerns/session-kanban.md`](spec/concerns/session-kanban.md)
 
 ### orchestrator 규약 집행

@@ -1,5 +1,6 @@
 use super::analyzer::{Analyzer, Env, MAX_WRAPPER_DEPTH};
 use super::args::{assignment, long_value, short_value, split_eq};
+use super::interpreters::{shell_script, ShellScript};
 use super::lexer::Word;
 use super::{Anchor, OpaqueCause, Wrapper, WriteRule};
 
@@ -354,37 +355,16 @@ impl Analyzer<'_> {
         cwd: &Anchor,
         depth: usize,
     ) {
-        let mut i = 0;
-        let mut script_at = None;
-        while let Some(w) = args.get(i) {
-            if !w.is_flag() || w.is("--") {
-                break;
+        let script = match shell_script(args) {
+            ShellScript::Inline(script) => script,
+            ShellScript::Missing => {
+                self.opaque(OpaqueCause::Wrapper(Wrapper::ShellC), name, cwd);
+                return;
             }
-            if w.text.starts_with("--") {
-                i += if matches!(w.text.as_str(), "--rcfile" | "--init-file") {
-                    2
-                } else {
-                    1
-                };
-                continue;
+            ShellScript::Input => {
+                self.interpreter(name, args, cwd);
+                return;
             }
-            if w.text == "-o" {
-                i += 2;
-                continue;
-            }
-            if w.text[1..].contains('c') {
-                script_at = Some(i + 1);
-                break;
-            }
-            i += 1;
-        }
-        let Some(at) = script_at else {
-            self.interpreter(name, args, cwd);
-            return;
-        };
-        let Some(script) = args.get(at) else {
-            self.opaque(OpaqueCause::Wrapper(Wrapper::ShellC), name, cwd);
-            return;
         };
         self.run_nested(
             &script.text,

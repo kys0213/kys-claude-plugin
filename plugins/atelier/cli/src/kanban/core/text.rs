@@ -3,13 +3,14 @@
 
 const REMINDER_OPEN: &str = "<system-reminder>";
 const REMINDER_CLOSE: &str = "</system-reminder>";
+const SHORT_ID_CHARS: usize = 8;
 
 pub fn fold(raw: &str) -> String {
     raw.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Drops every `<system-reminder>` block; one left open (the record was cut
-/// inside it) drops the rest of the text.
+/// A `<system-reminder>` left open (the record was cut inside it) drops the
+/// rest of the text.
 pub fn strip_reminders(raw: &str) -> String {
     let mut out = String::new();
     let mut rest = raw;
@@ -25,7 +26,6 @@ pub fn strip_reminders(raw: &str) -> String {
     out
 }
 
-/// Drops ANSI escape sequences and control characters but line breaks.
 pub fn strip_controls(raw: &str) -> String {
     let mut out = String::new();
     let mut chars = raw.chars().peekable();
@@ -51,7 +51,16 @@ pub fn strip_controls(raw: &str) -> String {
     out
 }
 
-/// Cuts `text` to `max` chars, the last one an ellipsis when it was longer.
+/// The length of `text` as JavaScript counts a string, in UTF-16 code units;
+/// the mod cuts recorded texts by it.
+pub fn js_len(text: &str) -> u64 {
+    text.encode_utf16().count() as u64
+}
+
+pub fn short_id(id: &str) -> String {
+    id.chars().take(SHORT_ID_CHARS).collect()
+}
+
 pub fn cut(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         return text.to_string();
@@ -61,9 +70,31 @@ pub fn cut(text: &str, max: usize) -> String {
     out
 }
 
+pub const MARKER_WORD: &str = "kanban-wait";
+
+pub fn defuse_marker(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for (at, c) in text.char_indices() {
+        let rest = &text.as_bytes()[at + c.len_utf8()..];
+        let marks = c == '['
+            && rest.len() >= MARKER_WORD.len()
+            && rest[..MARKER_WORD.len()].eq_ignore_ascii_case(MARKER_WORD.as_bytes());
+        out.push(if marks { '［' } else { c });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn defuse_marker_changes_only_the_bracket_of_a_marker() {
+        assert_eq!(
+            defuse_marker("a [Kanban-Wait s w] [kanban] [kanban-wai"),
+            "a ［Kanban-Wait s w] [kanban] [kanban-wai"
+        );
+    }
 
     #[test]
     fn cut_keeps_text_that_fits_and_marks_what_it_drops() {

@@ -51,6 +51,9 @@ pub struct SessionFact {
     /// The id the mod takes a kanban answer for that request by; absent when
     /// the mod cannot take one.
     pub permission_id: Option<String>,
+    /// The length each of `permission`'s input fields had before the mod cut
+    /// it, in UTF-16 code units; absent when the record has none.
+    pub permission_input_len: Option<Vec<(String, u64)>>,
     /// The decision the last turn ended on, until the next turn starts.
     pub decision: Option<Decision>,
     pub inbox: Option<Delivery>,
@@ -60,6 +63,8 @@ pub struct SessionFact {
     pub asks: Vec<Ask>,
     /// The session's agent loops as the mod last listed them.
     pub agents: Vec<AgentFact>,
+    /// When a person turned this session into the delegate; absent while it is not one.
+    pub delegate_since: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +107,21 @@ impl Column {
             Column::Idle => "쉬는 중",
             Column::Stale => "응답 없음",
         }
+    }
+
+    pub fn heading(self, count: usize) -> String {
+        format!("{} {count}", self.title())
+    }
+
+    pub fn parse_all(ids: &[String]) -> Result<Vec<Column>, String> {
+        ids.iter()
+            .map(|id| {
+                Column::ALL
+                    .into_iter()
+                    .find(|column| column.id() == id)
+                    .ok_or_else(|| format!("모르는 컬럼이에요: {id}"))
+            })
+            .collect()
     }
 
     fn longest_waiting_first(self) -> bool {
@@ -152,6 +172,38 @@ pub struct Card {
     pub detail: Detail,
     /// Open questions, oldest first; empty unless the session waits on one.
     pub asks: Vec<Ask>,
+    /// What a session in the needs-input column waits on.
+    pub waiting: Option<Waiting>,
+    pub delegate_since: Option<u64>,
+    /// How the last kanban request this session took went.
+    pub inbox: Option<Delivery>,
+}
+
+/// The permission request a session waits on, with the lengths its input had.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermissionAsk {
+    pub id: Option<String>,
+    pub request: Activity,
+    pub input_len: Option<Vec<(String, u64)>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WaitOn {
+    /// The oldest open question.
+    Question(Ask),
+    Permission(PermissionAsk),
+    Decision(Decision),
+    Input,
+}
+
+/// The facts of one wait as recorded: what it is on, since when, the person's
+/// latest prompt and the reply just before it, uncut by the board.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Waiting {
+    pub on: WaitOn,
+    pub since: u64,
+    pub request: Option<String>,
+    pub context: Option<String>,
 }
 
 impl Card {
@@ -168,6 +220,17 @@ impl Card {
 pub struct Board {
     pub columns: Vec<(Column, Vec<Card>)>,
     pub expired: Vec<String>,
+}
+
+impl Board {
+    /// Keeps the named columns in the board's order; `expired` stays whole.
+    /// An empty list keeps every column.
+    pub fn only(mut self, columns: &[Column]) -> Board {
+        if !columns.is_empty() {
+            self.columns.retain(|(column, _)| columns.contains(column));
+        }
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -251,8 +314,6 @@ fn signal_of(event: &Event) -> Signal {
     }
 }
 
-/// A question's own result, an answer from the board, or a turn boundary; a
-/// prompt queued while the dialog is open or another tool's events are not.
 fn moves_past_a_question(event: &Event) -> bool {
     match (event.name.as_str(), event.detail.as_deref()) {
         ("classic.PostToolUse" | "classic.PostToolUseFailure", detail) => detail == Some(ASK_TOOL),
@@ -293,9 +354,7 @@ fn after_turn(left: Left, ended_at: u64) -> State {
     }
 }
 
-/// A `permission_prompt` notification follows the request it repeats, so a
-/// repeated state keeps its first event and that event's reason. Work that
-/// goes on across turn ends keeps the time it began.
+/// A `permission_prompt` notification follows the request it repeats.
 fn advance(current: Option<(State, u64)>, next: State, at: u64) -> (State, u64) {
     match current {
         Some((cur, since)) if cur.is_busy() && next.is_busy() => (next, since),
@@ -341,7 +400,6 @@ impl Tracker {
         self.move_to(State::NeedsInput(wait), at);
     }
 
-    /// Whether a held state was there to return to.
     fn release(&mut self) -> bool {
         match self.held.take() {
             Some(back) => {
@@ -400,9 +458,7 @@ fn event_state(fact: &SessionFact) -> (State, u64) {
 }
 
 /// An open question waits whatever the events say, as some surfaces draw the
-/// spinner under a dialog; a decision left by the last turn waits once the
-/// turn is over. Agents work on without the main loop hearing of it, so their
-/// last listing settles a turn end that left teammates or listed nothing.
+/// spinner under a dialog.
 fn current_state(fact: &SessionFact, asks: &[Ask]) -> (State, u64) {
     if let Some(first) = asks.first() {
         return (State::NeedsInput(WaitReason::Question), first.at);
@@ -543,6 +599,15 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
         params.now,
     );
     let is_question = matches!(state, Some(State::NeedsInput(WaitReason::Question)));
+    let waiting = match &state {
+        Some(State::NeedsInput(reason)) => wait_on(reason, fact, &asks).map(|on| Waiting {
+            on,
+            since,
+            request: person_prompt(fact).map(str::to_string),
+            context: fact.pending_context.clone(),
+        }),
+        _ => None,
+    };
     Placed {
         column,
         sort_at: since,
@@ -569,7 +634,25 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
             actions: actions_of(state.as_ref(), fact),
             detail,
             asks: if is_question { asks } else { Vec::new() },
+            waiting,
+            delegate_since: fact.delegate_since,
+            inbox: fact.inbox.clone(),
         },
+    }
+}
+
+fn wait_on(reason: &WaitReason, fact: &SessionFact, asks: &[Ask]) -> Option<WaitOn> {
+    match reason {
+        WaitReason::Question => asks.first().cloned().map(WaitOn::Question),
+        WaitReason::Permission(_) => fact.permission.as_ref().map(|request| {
+            WaitOn::Permission(PermissionAsk {
+                id: fact.permission_id.clone(),
+                request: request.clone(),
+                input_len: fact.permission_input_len.clone(),
+            })
+        }),
+        WaitReason::Decision => fact.decision.clone().map(WaitOn::Decision),
+        WaitReason::Input => Some(WaitOn::Input),
     }
 }
 

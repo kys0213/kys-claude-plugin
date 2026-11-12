@@ -39,8 +39,19 @@ export async function runKanban($: EngineInterface, args: string[], stdin?: stri
 }
 
 /** The JSON object the command printed; null for any failure. */
-export async function cli($: EngineInterface, args: string[]): Promise<Record<string, unknown> | null> {
-  const r = await runKanban($, args)
+export async function cli($: EngineInterface, args: string[], stdin?: string): Promise<Record<string, unknown> | null> {
+  const r = await runKanban($, args, stdin)
 
   return r.kind === 'json' ? r.value : null
+}
+
+/** Runs a command that leaves a request in an inbox; null once it is queued, else why not. */
+export async function queueRequest($: EngineInterface, args: string[]): Promise<string | null> {
+  const out = await cli($, args)
+
+  if (out !== null && typeof out.queued === 'object') {
+    return null
+  }
+
+  return typeof out?.error === 'string' ? out.error : CLI_MISSING
 }

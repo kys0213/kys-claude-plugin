@@ -1,6 +1,8 @@
 mod kanban_support;
 
-use kanban_support::{atelier, board, board_with, event, session, session_with, MIN, NOW, SEC};
+use kanban_support::{
+    atelier, board, board_at, board_with, event, session, session_with, MIN, NOW, SEC,
+};
 use serde_json::{json, Value};
 fn column_ids(board: &Value) -> Vec<String> {
     board["columns"]
@@ -448,19 +450,8 @@ fn unknown_versions_and_malformed_records_are_skipped_not_expired() {
 
 #[test]
 fn malformed_stdin_reports_an_error_and_still_exits_zero() {
-    let now = NOW.to_string();
-    let args = [
-        "--now",
-        now.as_str(),
-        "--stale-after",
-        "2m",
-        "--expire-after",
-        "24h",
-        "--width",
-        "100",
-    ];
     for stdin in ["", "not json", "{}", r#"{"sessions": 3}"#] {
-        let b = board_with(&args, stdin);
+        let b = board_at("100", &[], stdin);
         assert!(b["error"].is_string(), "stdin {stdin:?}: {b}");
         assert!(b.get("columns").is_none());
     }
@@ -561,22 +552,24 @@ fn missing_or_invalid_arguments_print_no_board() {
     }
 }
 
+fn layout_with(width: &str, extra: &[&str]) -> Value {
+    board_at(width, extra, &json!({ "sessions": [] }).to_string())["layout"].clone()
+}
+
 fn layout_at(width: &str) -> Value {
-    let now = NOW.to_string();
-    board_with(
-        &[
-            "--now",
-            &now,
-            "--stale-after",
-            "2m",
-            "--expire-after",
-            "24h",
-            "--width",
-            width,
-        ],
-        &json!({ "sessions": [] }).to_string(),
-    )["layout"]
-        .clone()
+    layout_with(width, &[])
+}
+
+#[test]
+fn the_layout_is_fitted_to_the_columns_kept() {
+    assert_eq!(
+        layout_with("60", &["--column", "working", "--column", "idle"]),
+        json!({ "direction": "row", "column_width": 29, "column_gap": 1 })
+    );
+    assert_eq!(
+        layout_with("40", &["--column", "working"]),
+        json!({ "direction": "row", "column_width": 40, "column_gap": 1 })
+    );
 }
 
 #[test]
@@ -646,6 +639,14 @@ const TASKS: &str = r#"{
     "4": { "subject": "Drop", "active": null, "status": "deleted" }
 }"#;
 
+fn idle_card(extra: Value) -> Value {
+    only_card(json!([session_with(
+        "s",
+        json!([event("turn.complete", None, SEC)]),
+        extra
+    )]))
+}
+
 fn tasks() -> Value {
     serde_json::from_str(TASKS).expect("tasks fixture")
 }
@@ -671,41 +672,28 @@ fn an_answer_from_the_kanban_means_working() {
 
 #[test]
 fn progress_counts_tasks_without_deleted_ones_and_names_the_one_in_progress() {
-    let card = only_card(json!([session_with(
-        "s",
-        json!([event("turn.complete", None, SEC)]),
-        json!({ "tasks": tasks() })
-    )]));
+    let card = idle_card(json!({ "tasks": tasks() }));
     assert_eq!(card["progress"], "할 일 1/3 · Running tests");
 }
 
 #[test]
 fn progress_falls_back_to_the_subject_then_to_todo_write() {
-    let card = only_card(json!([session_with(
-        "s",
-        json!([event("turn.complete", None, SEC)]),
-        json!({ "tasks": { "7": { "subject": "Write docs", "active": null, "status": "in_progress" } } })
-    )]));
+    let card = idle_card(
+        json!({ "tasks": { "7": { "subject": "Write docs", "active": null, "status": "in_progress" } } }),
+    );
     assert_eq!(card["progress"], "할 일 0/1 · Write docs");
 
-    let card = only_card(json!([session_with(
-        "s",
-        json!([event("turn.complete", None, SEC)]),
-        json!({ "todos": [
+    let card = idle_card(json!({ "todos": [
             { "status": "completed", "active": "Reading" },
             { "status": "in_progress", "active": "Writing docs" },
-        ] })
-    )]));
+        ] }));
     assert_eq!(card["progress"], "할 일 1/2 · Writing docs");
 }
 
 #[test]
 fn tasks_win_over_todo_write_when_both_exist() {
-    let card = only_card(json!([session_with(
-        "s",
-        json!([event("turn.complete", None, SEC)]),
-        json!({ "tasks": tasks(), "todos": [{ "status": "completed", "active": "x" }] })
-    )]));
+    let card =
+        idle_card(json!({ "tasks": tasks(), "todos": [{ "status": "completed", "active": "x" }] }));
     assert_eq!(card["progress"], "할 일 1/3 · Running tests");
 }
 
@@ -805,27 +793,11 @@ fn an_open_question_is_carried_on_the_card_while_it_waits() {
         json!([
             {
                 "tool_use_id": "tu-1",
-                "questions": [{
-                    "question": "Which color?",
-                    "header": "Color",
-                    "multi_select": false,
-                    "options": [
-                        { "label": "Red", "description": "warm" },
-                        { "label": "Blue", "description": "cool" },
-                    ],
-                }],
+                "questions": [color_question()],
             },
             {
                 "tool_use_id": "tu-2",
-                "questions": [{
-                    "question": "Which color?",
-                    "header": "Color",
-                    "multi_select": false,
-                    "options": [
-                        { "label": "Red", "description": "warm" },
-                        { "label": "Blue", "description": "cool" },
-                    ],
-                }],
+                "questions": [color_question()],
             },
         ])
     );
@@ -868,4 +840,61 @@ fn a_malformed_progress_or_question_field_skips_the_record() {
         assert_eq!(total, 0, "{extra}");
         assert!(expired(&b).is_empty(), "{extra}");
     }
+}
+
+fn board_of_columns(columns: &[&str]) -> Value {
+    let extra: Vec<&str> = columns.iter().flat_map(|c| ["--column", c]).collect();
+    let sessions = json!({ "sessions": [
+        session("w", json!([event("turn.start", None, SEC)])),
+        session("i", json!([event("session.start", None, MIN)])),
+        session_with(
+            "old",
+            json!([event("session.start", None, 25 * 60 * MIN)]),
+            json!({ "heartbeat_at": NOW - 25 * 60 * MIN }),
+        ),
+    ] });
+    board_at("100", &extra, &sessions.to_string())
+}
+
+#[test]
+fn column_keeps_only_the_named_columns_in_columns_and_repos() {
+    let b = board_of_columns(&["working", "idle"]);
+
+    assert_eq!(column_ids(&b), vec!["working", "idle"]);
+    let in_repos: Vec<&str> = b["repos"][0]["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["column"].as_str().unwrap())
+        .collect();
+    assert_eq!(in_repos, vec!["working", "idle"]);
+}
+
+#[test]
+fn column_alone_leaves_the_others_out() {
+    let b = board_of_columns(&["idle"]);
+
+    assert_eq!(column_ids(&b), vec!["idle"]);
+}
+
+#[test]
+fn column_does_not_hide_expired_sessions_from_the_drop_list() {
+    let b = board_of_columns(&["idle"]);
+
+    assert_eq!(expired(&b), vec!["old"]);
+}
+
+#[test]
+fn without_column_the_board_is_unchanged() {
+    let b = board_of_columns(&[]);
+
+    assert_eq!(column_ids(&b).len(), 4);
+}
+
+#[test]
+fn an_unknown_column_is_refused_by_board() {
+    let b = board_of_columns(&["done"]);
+
+    assert!(b["error"].as_str().unwrap().contains("done"));
+    assert!(b.get("columns").is_none());
 }
