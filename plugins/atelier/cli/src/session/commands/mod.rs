@@ -1,7 +1,7 @@
 //! The session-boundary hook commands.
 //!
 //! ```text
-//! atelier session push-check     --project-dir <dir>   # Stop
+//! atelier session push-check      --project-dir <dir>   # Stop
 //! atelier session ensure-env      --settings <file> --key <K> --value <V>  # SessionStart
 //! ```
 //!
@@ -13,11 +13,6 @@
 //! typo or a stale flag cannot block a Stop either. The shims still force
 //! exit 0 themselves — a binary predating a subcommand fails inside clap,
 //! before any of this code runs.
-//!
-//! What stdout carries differs by command: `ensure-env` prints one line only
-//! when it added the key or declined to, and `push-check` may print a Stop
-//! `{"decision":"block","reason":…}` document — still on exit 0, which is how
-//! Claude Code reads a structured block.
 
 pub mod ensure_env;
 pub mod payload;

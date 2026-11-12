@@ -5,7 +5,7 @@
 //! `deny`/`context`/`instructions`.
 //!
 //! ```text
-//! atelier orchestrator spawn-check    # agent.spawn + tool.call{Agent}
+//! atelier orchestrator spawn-check     # agent.spawn + tool.call{Agent}
 //! atelier orchestrator compact-note    # session.compact
 //! ```
 //!
