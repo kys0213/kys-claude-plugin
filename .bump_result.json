@@ -1,14 +1,4 @@
 {
-  "dry_run": false,
-  "results": [
-    {
-      "plugin": "atelier",
-      "old_version": "0.48.0",
-      "new_version": "0.48.1",
-      "plugin_json": "/home/runner/work/kys-claude-plugin/kys-claude-plugin/plugins/atelier/.claude-plugin/plugin.json",
-      "marketplace_updated": true,
-      "cargo_toml_updated": true,
-      "cargo_lock_updated": true
-    }
-  ]
+  "message": "No plugins to bump",
+  "packages": []
 }
