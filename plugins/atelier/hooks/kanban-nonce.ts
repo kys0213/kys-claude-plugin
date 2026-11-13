@@ -5,7 +5,7 @@ import { sessionKeysOf } from './kanban-record'
 
 export const NONCE_PREFIX = 'kanban:nonce:'
 
-export type AnswerKind = 'answer' | 'permit' | 'decide'
+export type PaneKind = 'answer' | 'permit' | 'decide' | 'prompt'
 
 /** Where an answer came from, as `inbox take` and `inbox wait-permit` named it; passed on untouched. */
 export type Via = string | null
@@ -32,7 +32,7 @@ async function dropOldNonces($: EngineInterface): Promise<void> {
   }
 }
 
-async function leaveNonce($: EngineInterface, sessionId: string, kind: AnswerKind): Promise<string | null> {
+async function leaveNonce($: EngineInterface, sessionId: string, kind: PaneKind): Promise<string | null> {
   try {
     const nonce = crypto.randomUUID()
 
@@ -46,13 +46,13 @@ async function leaveNonce($: EngineInterface, sessionId: string, kind: AnswerKin
 }
 
 /**
- * Queues a pane answer with a nonce of its own for the answering session; null once queued, else why not.
- * Without a nonce the answer still goes, and comes in through the terminal.
+ * Queues a pane request with a nonce of its own for the taking session; null once queued, else why not.
+ * Without a nonce the request still goes, and comes in through the terminal.
  */
-export async function queuePaneAnswer(
+export async function queuePaneRequest(
   $: EngineInterface,
   sessionId: string,
-  kind: AnswerKind,
+  kind: PaneKind,
   args: string[],
 ): Promise<string | null> {
   const nonce = await leaveNonce($, sessionId, kind)

@@ -426,8 +426,15 @@ fn run_request(command: RequestCommand) -> Value {
             session,
             from,
             from_label,
+            nonce,
             text,
-        } => requests.send(&session, from, from_label.as_deref(), &text),
+        } => requests.send(
+            &session,
+            from,
+            from_label.as_deref(),
+            nonce.as_deref(),
+            &text,
+        ),
         RequestCommand::Stop { session, turn } => requests.stop(&session, &turn),
         RequestCommand::Permit {
             session,

@@ -207,6 +207,9 @@ pub enum RequestCommand {
         /// Names the sending session in an agent prompt's header
         #[arg(long)]
         from_label: Option<String>,
+        /// The pane's one-time token, carried to the taking session as given
+        #[arg(long)]
+        nonce: Option<String>,
         #[arg(long, allow_hyphen_values = true)]
         text: String,
     },

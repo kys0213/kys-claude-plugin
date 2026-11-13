@@ -222,6 +222,7 @@ pub enum Request {
         body: String,
         from: Sender,
         from_label: Option<String>,
+        nonce: Option<Nonce>,
     },
     Stop {
         turn_id: String,
@@ -356,7 +357,12 @@ impl Request {
         })
     }
 
-    pub fn prompt(body: &str, from: Sender, from_label: Option<&str>) -> Result<Request, String> {
+    pub fn prompt(
+        body: &str,
+        from: Sender,
+        from_label: Option<&str>,
+        nonce: Option<Nonce>,
+    ) -> Result<Request, String> {
         Ok(Request::Prompt {
             body: check_text("보낼 글", body)?,
             from,
@@ -364,6 +370,7 @@ impl Request {
                 .map(str::trim)
                 .filter(|l| !l.is_empty())
                 .map(str::to_string),
+            nonce,
         })
     }
 
@@ -380,13 +387,17 @@ impl Request {
                 body,
                 from,
                 from_label,
-            } => json!({
-                "v": VERSION,
-                "kind": "prompt",
-                "text": body,
-                "from": from.id(),
-                "from_label": from_label,
-            }),
+                nonce,
+            } => with_nonce(
+                json!({
+                    "v": VERSION,
+                    "kind": "prompt",
+                    "text": body,
+                    "from": from.id(),
+                    "from_label": from_label,
+                }),
+                nonce.as_ref(),
+            ),
             Request::Stop { turn_id } => {
                 json!({ "v": VERSION, "kind": "stop", "turn_id": turn_id })
             }
@@ -461,6 +472,7 @@ impl Request {
                 value.get("text")?.as_str()?,
                 from()?,
                 value.get("from_label").and_then(Value::as_str),
+                Nonce::read(&value).ok()?,
             )
             .ok(),
             RequestKind::Stop => Request::stop(value.get("turn_id")?.as_str()?).ok(),
@@ -580,6 +592,7 @@ pub enum Taken {
         text: String,
         body: String,
         from: Sender,
+        via: Via,
     },
     Stop {
         turn_id: String,
@@ -736,12 +749,15 @@ impl Taker<'_> {
                 body,
                 from,
                 from_label,
+                nonce,
             } => {
                 self.prompted = true;
+                let via = self.nonces.spend(RequestKind::Prompt, from, nonce.as_ref());
                 self.deliver(Taken::Prompt {
                     text: prompt_text(&body, from, from_label.as_deref()),
                     body,
                     from,
+                    via,
                 })
             }
         }
@@ -854,7 +870,10 @@ mod tests {
 
     #[test]
     fn a_request_round_trips_through_its_json() {
-        let prompt = Request::prompt(" hi ", Sender::Agent, Some("main")).expect("prompt");
+        let prompt = Request::prompt(" hi ", Sender::Agent, Some("main"), None).expect("prompt");
+        assert_eq!(Request::parse(&prompt.to_json().to_string()), Some(prompt));
+        let nonce = Nonce::parse("n-1").ok();
+        let prompt = Request::prompt("hi", Sender::Pane, None, nonce).expect("prompt");
         assert_eq!(Request::parse(&prompt.to_json().to_string()), Some(prompt));
         let stop = Request::stop("t-1").expect("stop");
         assert_eq!(Request::parse(&stop.to_json().to_string()), Some(stop));

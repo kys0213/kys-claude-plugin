@@ -126,7 +126,7 @@ type World = {
   /** Runs a tool call other than AskUserQuestion, as the engine would with its dialogs; unset answers `{ result: {} }`. */
   tools: { run: ((e: { tool: string; tool_use_id?: string }) => Promise<unknown>) | null }
   /** The prompt box's draft, a refusal the engine gives every prompt, and the context each prompt entered with. */
-  prompt: { draft: string; drop: string | null; contexts: (readonly string[] | undefined)[] }
+  prompt: { draft: string; drop: string | null; contexts: (readonly string[] | undefined)[]; asUser: boolean[] }
   /**
    * `$.model.classify`: the texts it was asked about, and which label it answers by its index —
    * a promise for one still thinking, `'fails'` for a model that throws. Unset answers the last label.
@@ -186,7 +186,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
   const toasts: string[] = []
   const band: World['band'] = { value: { type: 'Box', props: {}, children: [] } }
   const tools: World['tools'] = { run: null }
-  const prompt: World['prompt'] = { draft: '', drop: null, contexts: [] }
+  const prompt: World['prompt'] = { draft: '', drop: null, contexts: [], asUser: [] }
   const model: World['model'] = { texts: [], pick: null }
 
   on('model.classify', async ($, e) => {
@@ -283,6 +283,7 @@ function world(on: On, cli: FakeCli = boardAndAnswers(BOARD)): World {
 
     submitted.push(e.text)
     prompt.contexts.push(e.context)
+    prompt.asUser.push(e.origin?.kind === 'plugin' && e.origin.asUser === true)
 
     return { text: e.text }
   })
@@ -1614,7 +1615,7 @@ describe('kanban details and requests', () => {
       routes({
         'inbox dir': { dir: INBOX_DIR },
         'inbox take': {
-          actions: [{ kind: 'prompt', text: 'Run lint', body: 'Run lint', from: 'pane' }],
+          actions: [{ kind: 'prompt', text: 'Run lint', body: 'Run lint', from: 'pane', via: 'terminal' }],
           results: [{ id: 'r1', kind: 'prompt', status: 'delivered' }],
         },
       }),
@@ -1644,6 +1645,7 @@ describe('kanban details and requests', () => {
     ])
     expect(JSON.parse(take?.stdin ?? '{}')).toEqual({ asks: [], decision: null, place: SESSION_PLACE, nonces: [] })
     expect(w.submitted).toEqual(['Run lint'])
+    expect(w.prompt.asUser).toEqual([false])
     const rec = stored(w) as Record<string, unknown>
     expect((rec.prompts as { text: string; origin: string }[]).at(-1)).toEqual({ text: 'Run lint', origin: 'kanban', at: START + 6_000 })
     expect(eventNames(w).at(-1)).toBe('prompt.submit')
@@ -1678,12 +1680,55 @@ describe('kanban details and requests', () => {
     const take = w.runs.find(r => r.argv[3] === 'take')
     expect(JSON.parse(take?.stdin ?? '{}').decision).toMatchObject({ at: START, ask: '초안대로 진행할까요?' })
     expect(w.submitted).toEqual(['초안대로 진행'])
+    expect(w.prompt.asUser).toEqual([true])
     const rec = stored(w) as Record<string, unknown>
     expect((rec.prompts as { text: string; origin: string }[]).at(-1)?.origin).toBe('kanban')
     expect(rec.decision).toBeNull()
     expect(eventNames(w).slice(-2)).toEqual(['kanban.answer', 'prompt.submit'])
     expect(answerVia(w)).toBe('pane')
     expect(nonceKeys(w)).toEqual([])
+  })
+
+  for (const [via, asUser] of [['pane', true], ['terminal', false], ['agent', false]] as const) {
+    test(`a prompt taken from the inbox through the ${via} is submitted ${asUser ? 'as the person' : 'framed as the plugin'}`, async ($, on) => {
+      const w = world(
+        on,
+        routes({
+          'inbox dir': { dir: INBOX_DIR },
+          'inbox take': {
+            actions: [{ kind: 'prompt', text: '응', body: '응', from: via === 'agent' ? 'agent' : 'pane', via }],
+            results: [{ id: 'r1', kind: 'prompt', status: 'delivered' }],
+          },
+        }),
+      )
+
+      await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+      w.inbox.files = ['r1.json']
+      await w.clock.advance(2_000)
+
+      expect(w.submitted).toEqual(['응'])
+      expect(w.prompt.asUser).toEqual([asUser])
+    })
+  }
+
+  test('an agent decide taken from the inbox is framed as the plugin', async ($, on) => {
+    const w = world(
+      on,
+      routes({
+        'inbox dir': { dir: INBOX_DIR },
+        'inbox take': {
+          actions: [{ kind: 'decide', decision_at: String(START), text: '진행', from: 'agent', via: 'agent', auth: { relay: 'x' } }],
+          results: [{ id: 'r1', kind: 'decide', status: 'delivered', via: 'agent' }],
+        },
+      }),
+    )
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    w.inbox.files = ['r1.json']
+    await w.clock.advance(2_000)
+
+    expect(w.submitted).toEqual(['진행'])
+    expect(w.prompt.asUser).toEqual([false])
   })
 
   test('a stop for the running turn aborts it', async ($, on) => {
@@ -1792,7 +1837,8 @@ describe('kanban details and requests', () => {
       await opened.unmount()
       const after = await $.ui.mount({ ...PANE, surface })
 
-      expect(w.runs.find(r => r.argv[2] === 'send')?.argv).toEqual([
+      const sent = paneAnswer(w.runs.find(r => r.argv[2] === 'send'))
+      expect(sent.argv).toEqual([
         'atelier',
         'kanban',
         'send',
@@ -1805,6 +1851,7 @@ describe('kanban details and requests', () => {
         '--text',
         'Add dark mode',
       ])
+      expect(nonceKeys(w)).toEqual([`kanban:nonce:calm:prompt:${sent.nonce}`])
       expect((await after.find({ type: 'Text', text: /^보냈어요/ }))?.text).toBe('보냈어요 — 세션이 받으면 시작해요')
       await after.unmount()
     })
