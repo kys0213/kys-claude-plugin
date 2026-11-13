@@ -20,7 +20,9 @@ fn timing(for_ms: u64) -> PermitTiming {
 #[test]
 fn a_sent_prompt_is_queued_under_the_next_id_and_taken_once() {
     let e = Edges::default();
-    let out = e.requests().send("s-1", Sender::Pane, None, "Run lint");
+    let out = e
+        .requests()
+        .send("s-1", Sender::Pane, None, None, "Run lint");
     assert_eq!(
         out,
         json!({ "queued": { "session_id": "s-1", "id": "r1", "kind": "prompt" } })
@@ -37,7 +39,7 @@ fn a_sent_prompt_is_queued_under_the_next_id_and_taken_once() {
     );
     assert_eq!(
         taken["actions"],
-        json!([{ "kind": "prompt", "text": "Run lint", "body": "Run lint", "from": "pane" }])
+        json!([{ "kind": "prompt", "text": "Run lint", "body": "Run lint", "from": "pane", "via": "terminal" }])
     );
     assert!(e.inbox.ids("s-1").is_empty());
 }
@@ -47,7 +49,7 @@ fn a_prompt_over_the_length_limit_is_refused() {
     let e = Edges::default();
     let out = e
         .requests()
-        .send("s-1", Sender::Agent, None, &"x".repeat(8_001));
+        .send("s-1", Sender::Agent, None, None, &"x".repeat(8_001));
     assert!(out["error"].is_string(), "{out}");
     assert!(e.inbox.ids("s-1").is_empty());
 }
@@ -55,7 +57,7 @@ fn a_prompt_over_the_length_limit_is_refused() {
 #[test]
 fn a_request_older_than_the_ttl_is_expired_whatever_its_kind() {
     let e = Edges::default();
-    e.requests().send("s-1", Sender::Pane, None, "late");
+    e.requests().send("s-1", Sender::Pane, None, None, "late");
     e.requests().stop("s-1", "t-1");
     *e.inbox.age_ms.borrow_mut() = TTL + 1;
     let out = e.requests().take(
@@ -295,7 +297,7 @@ fn a_decide_counts_as_the_one_prompt_a_take_runs() {
     let e = Edges::default();
     e.requests()
         .decide("s-1", "1700", "네", Sender::Pane.into());
-    e.requests().send("s-1", Sender::Pane, None, "later");
+    e.requests().send("s-1", Sender::Pane, None, None, "later");
     let taken = e.requests().take(
         "s-1",
         NOW,

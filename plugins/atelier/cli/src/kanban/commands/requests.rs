@@ -107,8 +107,13 @@ fn target(session: &str, wait: &str, kind: EntryKind) -> Target {
 
 fn taken_json(taken: &Taken) -> Value {
     match taken {
-        Taken::Prompt { text, body, from } => {
-            json!({ "kind": "prompt", "text": text, "body": body, "from": from.id() })
+        Taken::Prompt {
+            text,
+            body,
+            from,
+            via,
+        } => {
+            json!({ "kind": "prompt", "text": text, "body": body, "from": from.id(), "via": via.id() })
         }
         Taken::Stop { turn_id } => json!({ "kind": "stop", "turn_id": turn_id }),
         Taken::Answer {
@@ -278,8 +283,19 @@ impl KanbanRequests<'_> {
         )
     }
 
-    pub fn send(&self, session: &str, from: Sender, from_label: Option<&str>, text: &str) -> Value {
-        self.queue(session, Request::prompt(text, from, from_label))
+    pub fn send(
+        &self,
+        session: &str,
+        from: Sender,
+        from_label: Option<&str>,
+        nonce: Option<&str>,
+        text: &str,
+    ) -> Value {
+        let request = nonce
+            .map(Nonce::parse)
+            .transpose()
+            .and_then(|nonce| Request::prompt(text, from, from_label, nonce));
+        self.queue(session, request)
     }
 
     pub fn stop(&self, session: &str, turn: &str) -> Value {

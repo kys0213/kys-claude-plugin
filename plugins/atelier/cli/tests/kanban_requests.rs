@@ -98,11 +98,80 @@ fn taking_delivers_a_pane_prompt_as_typed_and_removes_it() {
     let out = w.take("s-1", None);
     assert_eq!(
         out["actions"],
-        json!([{ "kind": "prompt", "text": "Run the tests", "body": "Run the tests", "from": "pane" }])
+        json!([{ "kind": "prompt", "text": "Run the tests", "body": "Run the tests", "from": "pane", "via": "terminal" }])
     );
     assert_eq!(out["results"][0]["status"], "delivered");
     assert!(w.files("s-1").is_empty());
     assert_eq!(w.take("s-1", None)["actions"], json!([]));
+}
+
+fn left(kind: &str, nonce: &str) -> Value {
+    json!({ "kind": kind, "nonce": nonce })
+}
+
+fn take_with_nonces(w: &World, nonces: Value) -> Value {
+    let facts = json!({ "asks": [], "decision": null, "nonces": nonces });
+    w.home.take("s-1", now_ms(), "60s", None, Some(&facts))
+}
+
+#[test]
+fn a_pane_prompt_with_the_nonce_left_for_it_comes_through_the_pane() {
+    let w = World::new();
+    w.kanban(&[
+        "send",
+        "--session",
+        "s-1",
+        "--from",
+        "pane",
+        "--nonce",
+        "n-1",
+        "--text",
+        "응",
+    ]);
+    let out = take_with_nonces(&w, json!([left("prompt", "n-1")]));
+    assert_eq!(
+        out["actions"],
+        json!([{ "kind": "prompt", "text": "응", "body": "응", "from": "pane", "via": "pane" }])
+    );
+    assert_eq!(out["used_nonces"], json!([left("prompt", "n-1")]));
+}
+
+#[test]
+fn a_pane_prompt_with_a_nonce_left_for_another_kind_comes_through_the_terminal() {
+    let w = World::new();
+    w.kanban(&[
+        "send",
+        "--session",
+        "s-1",
+        "--from",
+        "pane",
+        "--nonce",
+        "n-1",
+        "--text",
+        "응",
+    ]);
+    let out = take_with_nonces(&w, json!([left("decide", "n-1"), left("prompt", "n-2")]));
+    assert_eq!(out["actions"][0]["via"], "terminal");
+    assert_eq!(out["used_nonces"], json!([]));
+}
+
+#[test]
+fn an_agent_prompt_with_the_nonce_left_for_the_pane_stays_the_agents() {
+    let w = World::new();
+    w.kanban(&[
+        "send",
+        "--session",
+        "s-1",
+        "--from",
+        "agent",
+        "--nonce",
+        "n-1",
+        "--text",
+        "응",
+    ]);
+    let out = take_with_nonces(&w, json!([left("prompt", "n-1")]));
+    assert_eq!(out["actions"][0]["via"], "agent");
+    assert_eq!(out["used_nonces"], json!([]));
 }
 
 #[test]

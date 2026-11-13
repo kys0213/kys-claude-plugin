@@ -21,7 +21,7 @@ const PERMIT_WAIT = '2s'
 const MAX_PERMIT_WAITS = 900
 
 type Taken =
-  | { kind: 'prompt'; text: string; body: string; from: string }
+  | { kind: 'prompt'; text: string; body: string; from: string; via?: unknown }
   | { kind: 'stop'; turn_id: string }
   | { kind: 'answer'; tool_use_id: string; answers: string[]; from: string; via?: unknown; auth?: unknown }
   | { kind: 'decide'; decision_at: string; text: string; from: string; via?: unknown; auth?: unknown }
@@ -97,7 +97,7 @@ async function act($: EngineInterface, s: InboxState & AskState, taken: Taken): 
 
   /** The submitting plugin's own prompt.submit hooks do not see the prompt, so it is recorded here. */
   await recordPrompt($, s, taken.kind === 'decide' ? taken.text : taken.body, 'kanban')
-  void $.prompt.submit({ text: taken.text }).catch(() => undefined)
+  void $.prompt.submit({ text: taken.text, ...(viaOf(taken.via) === 'pane' ? { asUser: true as const } : {}) }).catch(() => undefined)
 }
 
 async function storedRecord($: EngineInterface, self: string): Promise<SessionRecord | null> {

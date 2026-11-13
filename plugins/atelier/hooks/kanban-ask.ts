@@ -1,7 +1,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { CLI_MISSING, runKanban } from './kanban-cli'
-import { type Via, queuePaneAnswer } from './kanban-nonce'
+import { type Via, queuePaneRequest } from './kanban-nonce'
 import { type AskQuestion, MAX_FIELD_CHARS } from './kanban-record'
 
 /** The store key prefix of answers left in the store; `deliverAnswers` takes them beside the inbox. */
@@ -164,7 +164,7 @@ async function sendAnswer($: EngineInterface, s: AskState, card: AskCard, ask: C
   if (r.kind === 'missing') {
     s.errors.set(key, CLI_MISSING)
   } else if (answers !== null) {
-    const refused = await queuePaneAnswer($, card.session_id, 'answer', [
+    const refused = await queuePaneRequest($, card.session_id, 'answer', [
       'reply',
       '--session',
       card.session_id,
