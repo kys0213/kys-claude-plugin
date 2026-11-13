@@ -110,6 +110,7 @@ function sendBlock($: EngineInterface, s: DetailState, els: Elements, card: Deta
     placeholder: '이 세션에 맡길 일을 입력하고 Enter',
     value: s.drafts.get(card.session_id) ?? '',
     submitLabel: '보내기',
+    rows: 3,
     onInput: (value: string) => {
       s.drafts.set(card.session_id, value)
     },
