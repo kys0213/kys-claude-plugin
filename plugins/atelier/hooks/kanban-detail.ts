@@ -103,17 +103,24 @@ async function stop($: EngineInterface, s: DetailState, card: DetailCard): Promi
 }
 
 function sendBlock($: EngineInterface, s: DetailState, els: Elements, card: DetailCard): Child {
-  const { Input } = els
+  const { Box, Input } = els
 
-  return Input({
-    key: `detail:${card.session_id}:send`,
-    placeholder: '이 세션에 맡길 일을 입력하고 Enter',
-    value: s.drafts.get(card.session_id) ?? '',
-    submitLabel: '보내기',
-    onInput: (value: string) => {
-      s.drafts.set(card.session_id, value)
-    },
-    onSubmit: (value: string) => void send($, s, card, value),
+  return Box({
+    key: `detail:${card.session_id}:send-row`,
+    width: '100%',
+    children: [
+      Input({
+        key: `detail:${card.session_id}:send`,
+        placeholder: '이 세션에 맡길 일을 입력하고 Enter',
+        value: s.drafts.get(card.session_id) ?? '',
+        submitLabel: '보내기',
+        rows: 3,
+        onInput: (value: string) => {
+          s.drafts.set(card.session_id, value)
+        },
+        onSubmit: (value: string) => void send($, s, card, value),
+      }),
+    ],
   })
 }
 
