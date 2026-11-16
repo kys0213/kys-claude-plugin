@@ -1,6 +1,6 @@
 mod kanban_support;
 
-use kanban_support::{agent_event, board, event, session_with, MIN, NOW, SEC};
+use kanban_support::{actions, agent_event, board, event, session_with, MIN, NOW, SEC};
 use serde_json::{json, Value};
 
 /// The column and card of the one session on the board.
@@ -27,15 +27,6 @@ fn column(events: Value, extra: Value) -> String {
 
 fn agent(status: &str, teammate: bool) -> Value {
     json!({ "status": status, "teammate": teammate })
-}
-
-fn actions(card: &Value) -> Vec<String> {
-    card["actions"]
-        .as_array()
-        .expect("actions is an array")
-        .iter()
-        .map(|a| a.as_str().expect("action id").to_string())
-        .collect()
 }
 
 #[test]
@@ -156,7 +147,7 @@ fn a_working_agent_keeps_the_session_working_even_when_the_turn_end_listed_none(
 }
 
 #[test]
-fn a_backgrounded_card_names_what_runs_and_offers_no_action() {
+fn a_backgrounded_card_names_what_runs_and_offers_only_hide() {
     let (column, card) = placed(
         json!([
             event("turn.start", None, 3 * MIN),
@@ -180,7 +171,7 @@ fn a_backgrounded_card_names_what_runs_and_offers_no_action() {
         "▸ 백그라운드: 에이전트 2 · 팀원 1 · 워크플로 1 · 원격 세션 1"
     );
     assert_eq!(card["last_line"], Value::Null);
-    assert!(actions(&card).is_empty());
+    assert_eq!(actions(&card), ["hide"]);
 }
 
 #[test]

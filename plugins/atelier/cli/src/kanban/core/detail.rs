@@ -221,6 +221,7 @@ fn recent_lines(recent: &[Activity], now: u64) -> Vec<String> {
 fn delivery_line(inbox: &Delivery, now: u64) -> String {
     let kind = match inbox.kind {
         Some(RequestKind::Stop) => "중지 요청",
+        Some(RequestKind::Hide) => "빼기 요청",
         Some(RequestKind::Permit) => "권한 답",
         Some(RequestKind::Answer) => "질문 답",
         Some(RequestKind::Decide) => "결정 답",

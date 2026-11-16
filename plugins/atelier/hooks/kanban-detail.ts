@@ -21,7 +21,7 @@ export type DetailState = {
   selected: string | null
   /** What was typed to send, by session. */
   drafts: Map<string, string>
-  /** Sessions whose stop or removal waits for a second press. */
+  /** `<session>:<action>` pairs whose action waits for a second press. */
   confirming: Set<string>
   /** The last outcome of a request from this pane, by session. */
   notes: Map<string, { text: string; isError: boolean }>
@@ -96,6 +96,15 @@ async function send($: EngineInterface, s: DetailState, card: DetailCard, text: 
   }
 }
 
+async function hide($: EngineInterface, s: DetailState, card: DetailCard): Promise<void> {
+  await request($, s, card, { args: ['hide', '--session', card.session_id], nonceKind: null }, '빼기를 보냈어요')
+
+  if (!s.notes.get(card.session_id)?.isError && s.selected === card.session_id) {
+    s.selected = null
+    $.ui.invalidate('ui.render')
+  }
+}
+
 async function stop($: EngineInterface, s: DetailState, card: DetailCard): Promise<void> {
   if (typeof card.turn_id === 'string') {
     await request($, s, card, { args: ['stop', '--session', card.session_id, '--turn', card.turn_id], nonceKind: null }, '중지를 보냈어요')
@@ -130,20 +139,21 @@ type Confirm = { action: string; label: string; sure: string; onConfirm: () => v
 function confirmBlock($: EngineInterface, s: DetailState, els: Elements, card: DetailCard, c: Confirm): Child {
   const { Box, Button } = els
   const id = card.session_id
+  const pending = `${id}:${c.action}`
 
-  if (!s.confirming.has(id)) {
+  if (!s.confirming.has(pending)) {
     return Button({
       key: `detail:${id}:${c.action}`,
       label: c.label,
       onPress: () => {
-        s.confirming.add(id)
+        s.confirming.add(pending)
         $.ui.invalidate('ui.render')
       },
     })
   }
 
   return Box({
-    key: `detail:${id}:confirm`,
+    key: `detail:${id}:${c.action}-confirm`,
     flexDirection: 'row',
     columnGap: 1,
     children: [
@@ -152,7 +162,7 @@ function confirmBlock($: EngineInterface, s: DetailState, els: Elements, card: D
         label: c.sure,
         variant: 'primary',
         onPress: () => {
-          s.confirming.delete(id)
+          s.confirming.delete(pending)
           c.onConfirm()
         },
       }),
@@ -160,7 +170,7 @@ function confirmBlock($: EngineInterface, s: DetailState, els: Elements, card: D
         key: `detail:${id}:${c.action}-no`,
         label: '취소',
         onPress: () => {
-          s.confirming.delete(id)
+          s.confirming.delete(pending)
           $.ui.invalidate('ui.render')
         },
       }),
@@ -255,16 +265,21 @@ export function detailBlock($: EngineInterface, s: DetailState, els: Elements, c
   const actions = card.actions ?? []
   const note = s.notes.get(card.session_id)
   const delivery = card.detail?.delivery
-  const offers = [
-    ...(actions.includes('decide') ? decisionBlock($, s, els, card) : []),
+  const controls = [
     ...(actions.includes('permit') ? [permitBlock($, s, els, card)] : []),
-    ...(actions.includes('send') ? [sendBlock($, s, els, card)] : []),
     ...(actions.includes('stop')
       ? [confirmBlock($, s, els, card, { action: 'stop', label: '중지', sure: '정말 중지', onConfirm: () => void stop($, s, card) })]
+      : []),
+    ...(actions.includes('hide')
+      ? [confirmBlock($, s, els, card, { action: 'hide', label: '보드에서 빼기', sure: '정말 빼기', onConfirm: () => void hide($, s, card) })]
       : []),
     ...(actions.includes('forget')
       ? [confirmBlock($, s, els, card, { action: 'forget', label: '보드에서 지우기', sure: '정말 지우기', onConfirm: () => void on.forget() })]
       : []),
+  ]
+  const offers = [
+    ...(actions.includes('decide') ? decisionBlock($, s, els, card) : []),
+    ...(actions.includes('send') ? [sendBlock($, s, els, card)] : []),
     ...(actions.includes('answer') ? [Text({ dimColor: true, children: ['질문은 아래 질문 카드에서 답해요'] })] : []),
   ]
   const status = [
@@ -289,6 +304,9 @@ export function detailBlock($: EngineInterface, s: DetailState, els: Elements, c
           Text({ bold: true, wrap: 'truncate', children: [card.headline] }),
         ],
       }),
+      ...(controls.length === 0
+        ? []
+        : [Box({ key: 'controls', flexDirection: 'row', flexWrap: 'wrap', columnGap: 2, children: controls })]),
       ...(card.detail?.sections ?? []).map((section, i) => sectionBlock(els, section, i)),
       ...(offers.length === 0 ? [] : [Box({ key: 'offers', flexDirection: 'column', rowGap: 1, children: offers })]),
       ...(status.length === 0 ? [] : [Box({ key: 'status', flexDirection: 'column', children: status })]),

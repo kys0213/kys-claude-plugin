@@ -65,6 +65,8 @@ pub struct SessionFact {
     pub agents: Vec<AgentFact>,
     /// When a person turned this session into the delegate; absent while it is not one.
     pub delegate_since: Option<u64>,
+    /// When the session took a hide from the board; absent while it is not hidden.
+    pub hidden_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,6 +143,8 @@ pub enum Action {
     Stop,
     /// Clear the card of a session gone silent, as its expiry would.
     Forget,
+    /// Leave a live session's card off the board.
+    Hide,
 }
 
 impl Action {
@@ -152,6 +156,7 @@ impl Action {
             Action::Send => "send",
             Action::Stop => "stop",
             Action::Forget => "forget",
+            Action::Hide => "hide",
         }
     }
 }
@@ -541,9 +546,9 @@ fn person_prompt(fact: &SessionFact) -> Option<&str> {
     latest_person_prompt(&fact.prompts, fact.last_prompt.as_deref())
 }
 
-fn actions_of(state: Option<&State>, fact: &SessionFact) -> Vec<Action> {
+fn actions_of(state: Option<&State>, fact: &SessionFact, is_self: bool) -> Vec<Action> {
     let stop = fact.turn_id.as_ref().map(|_| Action::Stop);
-    match state {
+    let mut actions = match state {
         None => vec![Action::Forget],
         Some(State::NeedsInput(WaitReason::Question)) => {
             [Some(Action::Answer), stop].into_iter().flatten().collect()
@@ -557,7 +562,29 @@ fn actions_of(state: Option<&State>, fact: &SessionFact) -> Vec<Action> {
             stop.into_iter().collect()
         }
         Some(State::Idle) => vec![Action::Send],
+    };
+    if is_hideable(state) && !is_self && fact.delegate_since.is_none() {
+        actions.push(Action::Hide);
     }
+    actions
+}
+
+fn is_hideable(state: Option<&State>) -> bool {
+    matches!(
+        state,
+        Some(State::Working | State::Background { .. } | State::Idle)
+    )
+}
+
+fn is_hidden(state: Option<&State>, fact: &SessionFact) -> bool {
+    let Some(hidden_at) = fact.hidden_at else {
+        return false;
+    };
+    is_hideable(state)
+        && fact.delegate_since.is_none()
+        && person_prompts(&fact.prompts)
+            .iter()
+            .all(|p| p.at <= hidden_at)
 }
 
 fn phase_of(state: Option<&State>) -> Phase {
@@ -575,10 +602,14 @@ struct Placed {
     card: Card,
 }
 
-fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
+fn place(fact: &SessionFact, params: &BoardParams) -> Option<Placed> {
     let silent_for = params.now.saturating_sub(fact.heartbeat_at);
     let asks = open_asks(fact);
     let state = (silent_for <= params.stale_after).then(|| current_state(fact, &asks));
+    if is_hidden(state.as_ref().map(|(s, _)| s), fact) {
+        return None;
+    }
+    let is_self = params.self_id.as_deref() == Some(fact.session_id.as_str());
     let (column, reason, since) = match &state {
         None => (Column::Stale, None, fact.heartbeat_at),
         Some((State::NeedsInput(reason), at)) => (Column::NeedsInput, Some(reason.label()), *at),
@@ -629,7 +660,7 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
         }),
         _ => None,
     };
-    Placed {
+    Some(Placed {
         column,
         sort_at: since,
         card: Card {
@@ -638,7 +669,7 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
             subtitle: subtitle_of(fact),
             reason,
             age: age_label(params.now.saturating_sub(since)),
-            is_self: params.self_id.as_deref() == Some(fact.session_id.as_str()),
+            is_self,
             progress,
             last_line: match column {
                 Column::Idle => detail::last_line(fact.last_answer.as_deref()),
@@ -652,14 +683,14 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Placed {
                 Some(State::NeedsInput(WaitReason::Permission(_))) => fact.permission_id.clone(),
                 _ => None,
             },
-            actions: actions_of(state.as_ref(), fact),
+            actions: actions_of(state.as_ref(), fact, is_self),
             detail,
             asks: if is_question { asks } else { Vec::new() },
             waiting,
             delegate_since: fact.delegate_since,
             inbox: fact.inbox.clone(),
         },
-    }
+    })
 }
 
 fn wait_on(reason: &WaitReason, fact: &SessionFact, asks: &[Ask]) -> Option<WaitOn> {
@@ -697,7 +728,7 @@ pub fn build(sessions: &[SessionFact], params: &BoardParams) -> Board {
         if is_expired(fact, params) {
             expired.push(fact.session_id.clone());
         } else {
-            placed.push(place(fact, params));
+            placed.extend(place(fact, params));
         }
     }
     let columns = Column::ALL

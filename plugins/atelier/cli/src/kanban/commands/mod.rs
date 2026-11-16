@@ -436,6 +436,7 @@ fn run_request(command: RequestCommand) -> Value {
             &text,
         ),
         RequestCommand::Stop { session, turn } => requests.stop(&session, &turn),
+        RequestCommand::Hide { session } => requests.hide(&session),
         RequestCommand::Permit {
             session,
             request,

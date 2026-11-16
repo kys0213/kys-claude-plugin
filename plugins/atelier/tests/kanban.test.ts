@@ -1781,6 +1781,23 @@ describe('kanban details and requests', () => {
     expect((stored(w) as Record<string, unknown>).inbox).toEqual({ id: 'r3', kind: 'prompt', status: 'delivered', at: START + 2_000 })
   })
 
+  test('a hide from the board marks the session hidden when it takes it', async ($, on) => {
+    const w = world(
+      on,
+      routes({
+        'inbox dir': { dir: INBOX_DIR },
+        'inbox take': { actions: [{ kind: 'hide' }], results: [{ id: 'r4', kind: 'hide', status: 'delivered' }] },
+      }),
+    )
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+    w.inbox.files = ['1-1.json']
+    await w.clock.advance(2_000)
+
+    expect(stored(w).hidden_at).toBe(START + 2_000)
+    expect(w.submitted).toEqual([])
+  })
+
   test('an expired session is forgotten, which clears its inbox and record copy', async ($, on) => {
     const w = world(on)
 
@@ -1883,6 +1900,40 @@ describe('kanban details and requests', () => {
       '--turn',
       't-9',
     ])
+  })
+
+  test('hiding a card asks once more, apart from stop, then queues the hide and goes back to the board', async ($, on) => {
+    const busy = { ...DETAIL_BOARD.columns[1].cards[0], actions: ['stop', 'hide'] }
+    const board = {
+      ...DETAIL_BOARD,
+      columns: DETAIL_BOARD.columns.map(c => (c.id === 'working' ? { ...c, cards: [busy] } : c)),
+    }
+    const w = world(on, routes({ board, hide: { queued: { session_id: 'busy', id: 'r', kind: 'hide' } } }))
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'card:busy' })
+    await ui.unmount()
+
+    const opened = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const boxes = (await opened.findAll({ type: 'Box' })).map(b => b.key)
+    expect(boxes).toContain('head')
+    expect(boxes.indexOf('controls')).toBeGreaterThan(boxes.indexOf('head'))
+    expect(boxes.indexOf('controls')).toBeLessThan(boxes.indexOf('section:0'))
+    await opened.press({ key: 'detail:busy:hide' })
+    expect(w.runs.find(r => r.argv[2] === 'hide')).toBeUndefined()
+    await opened.unmount()
+
+    const confirming = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect((await confirming.find({ key: 'detail:busy:stop' }))?.text).toBe('중지')
+    await confirming.press({ key: 'detail:busy:hide-yes' })
+    await w.clock.settle()
+    await confirming.unmount()
+
+    expect(w.runs.find(r => r.argv[2] === 'hide')?.argv).toEqual(['atelier', 'kanban', 'hide', '--session', 'busy'])
+    const back = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await back.find({ key: 'detail:busy:back' })).toBeUndefined()
+    await back.unmount()
   })
 
   test('removing a stale card asks once more, then clears it as its expiry would', async ($, on) => {

@@ -88,6 +88,8 @@ export type SessionRecord = {
   agents?: AgentRecord[]
   /** When a person's `/kanban delegate on` made this session the delegate; null once turned off. */
   delegate_since?: number | null
+  /** When this session took a hide from the board; null while it is not hidden. */
+  hidden_at?: number | null
 }
 
 type Fields = Partial<Pick<SessionRecord, 'title' | 'first_prompt' | 'ended_reason'>>
@@ -253,6 +255,7 @@ export function rerun(base: SessionRecord, now: number): Partial<SessionRecord> 
     asks: {},
     agents: [],
     delegate_since: null,
+    hidden_at: null,
   }
 }
 

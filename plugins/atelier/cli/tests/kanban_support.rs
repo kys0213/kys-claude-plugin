@@ -344,6 +344,16 @@ pub fn session_with(id: &str, events: Value, extra: Value) -> Value {
     with(session(id, events), extra)
 }
 
+/// The action ids a board card offers.
+pub fn actions(card: &Value) -> Vec<String> {
+    card["actions"]
+        .as_array()
+        .expect("actions is an array")
+        .iter()
+        .map(|a| a.as_str().expect("action id").to_string())
+        .collect()
+}
+
 pub fn kanban_in(config: &Path, args: &[&str]) -> Value {
     stdout_json(kanban_command(config).args(args))
 }
