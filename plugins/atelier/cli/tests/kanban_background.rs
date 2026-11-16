@@ -156,7 +156,7 @@ fn a_working_agent_keeps_the_session_working_even_when_the_turn_end_listed_none(
 }
 
 #[test]
-fn a_backgrounded_card_names_what_runs_and_offers_no_action() {
+fn a_backgrounded_card_names_what_runs_and_offers_only_hide() {
     let (column, card) = placed(
         json!([
             event("turn.start", None, 3 * MIN),
@@ -180,7 +180,7 @@ fn a_backgrounded_card_names_what_runs_and_offers_no_action() {
         "▸ 백그라운드: 에이전트 2 · 팀원 1 · 워크플로 1 · 원격 세션 1"
     );
     assert_eq!(card["last_line"], Value::Null);
-    assert!(actions(&card).is_empty());
+    assert_eq!(actions(&card), ["hide"]);
 }
 
 #[test]

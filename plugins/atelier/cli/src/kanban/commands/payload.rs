@@ -103,6 +103,7 @@ fn parse_record(value: &Value) -> Option<SessionFact> {
             .map(parse_agent)
             .collect::<Option<Vec<_>>>()?,
         delegate_since: nullable_u64(value, "delegate_since")?,
+        hidden_at: nullable_u64(value, "hidden_at")?,
     })
 }
 

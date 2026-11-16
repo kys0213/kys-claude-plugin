@@ -187,6 +187,7 @@ impl Verdict {
 pub enum RequestKind {
     Prompt,
     Stop,
+    Hide,
     Permit,
     Answer,
     Decide,
@@ -197,6 +198,7 @@ impl RequestKind {
         match self {
             RequestKind::Prompt => "prompt",
             RequestKind::Stop => "stop",
+            RequestKind::Hide => "hide",
             RequestKind::Permit => "permit",
             RequestKind::Answer => "answer",
             RequestKind::Decide => "decide",
@@ -207,6 +209,7 @@ impl RequestKind {
         [
             RequestKind::Prompt,
             RequestKind::Stop,
+            RequestKind::Hide,
             RequestKind::Permit,
             RequestKind::Answer,
             RequestKind::Decide,
@@ -227,6 +230,7 @@ pub enum Request {
     Stop {
         turn_id: String,
     },
+    Hide,
     Permit {
         request_id: String,
         verdict: Verdict,
@@ -276,6 +280,7 @@ impl Request {
         match self {
             Request::Prompt { .. } => RequestKind::Prompt,
             Request::Stop { .. } => RequestKind::Stop,
+            Request::Hide => RequestKind::Hide,
             Request::Permit { .. } => RequestKind::Permit,
             Request::Answer { .. } => RequestKind::Answer,
             Request::Decide { .. } => RequestKind::Decide,
@@ -287,7 +292,7 @@ impl Request {
             Request::Permit { from, nonce, .. }
             | Request::Answer { from, nonce, .. }
             | Request::Decide { from, nonce, .. } => Some((*from, nonce.as_ref())),
-            Request::Prompt { .. } | Request::Stop { .. } => None,
+            Request::Prompt { .. } | Request::Stop { .. } | Request::Hide => None,
         }
     }
 
@@ -401,6 +406,7 @@ impl Request {
             Request::Stop { turn_id } => {
                 json!({ "v": VERSION, "kind": "stop", "turn_id": turn_id })
             }
+            Request::Hide => json!({ "v": VERSION, "kind": "hide" }),
             Request::Permit {
                 request_id,
                 verdict,
@@ -476,6 +482,7 @@ impl Request {
             )
             .ok(),
             RequestKind::Stop => Request::stop(value.get("turn_id")?.as_str()?).ok(),
+            RequestKind::Hide => Some(Request::Hide),
             RequestKind::Permit => Request::permit(
                 value.get("request_id")?.as_str()?,
                 value.get("decision")?.as_str()?,
@@ -597,6 +604,7 @@ pub enum Taken {
     Stop {
         turn_id: String,
     },
+    Hide,
     Answer {
         tool_use_id: String,
         answers: Vec<String>,
@@ -703,6 +711,7 @@ impl Taker<'_> {
                 self.deliver(Taken::Stop { turn_id })
             }
             Request::Stop { .. } | Request::Permit { .. } => Status::Stale,
+            Request::Hide => self.deliver(Taken::Hide),
             Request::Decide {
                 from: Sender::Agent,
                 auth,
@@ -877,6 +886,8 @@ mod tests {
         assert_eq!(Request::parse(&prompt.to_json().to_string()), Some(prompt));
         let stop = Request::stop("t-1").expect("stop");
         assert_eq!(Request::parse(&stop.to_json().to_string()), Some(stop));
+        let hide = Request::Hide;
+        assert_eq!(Request::parse(&hide.to_json().to_string()), Some(hide));
         let answers = ["Red".to_string()];
         let nonce = Nonce::parse("n-1").ok();
         let answer = Request::answer("tu-1", &answers, Sender::Pane, nonce).expect("answer");

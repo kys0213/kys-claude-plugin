@@ -23,6 +23,7 @@ const MAX_PERMIT_WAITS = 900
 type Taken =
   | { kind: 'prompt'; text: string; body: string; from: string; via?: unknown }
   | { kind: 'stop'; turn_id: string }
+  | { kind: 'hide' }
   | { kind: 'answer'; tool_use_id: string; answers: string[]; from: string; via?: unknown; auth?: unknown }
   | { kind: 'decide'; decision_at: string; text: string; from: string; via?: unknown; auth?: unknown }
 
@@ -62,6 +63,7 @@ function isTaken(value: unknown): value is Taken {
   return (
     (t.kind === 'prompt' && typeof t.text === 'string' && typeof t.body === 'string') ||
     (t.kind === 'stop' && typeof t.turn_id === 'string') ||
+    t.kind === 'hide' ||
     (t.kind === 'answer' &&
       typeof t.tool_use_id === 'string' &&
       Array.isArray(t.answers) &&
@@ -80,6 +82,12 @@ async function act($: EngineInterface, s: InboxState & AskState, taken: Taken): 
   if (taken.kind === 'stop') {
     /** Rejects once the turn ended after the take named it; the rest of the take still goes. */
     await $.turn.abort({ turnId: taken.turn_id }).catch(() => undefined)
+
+    return
+  }
+
+  if (taken.kind === 'hide') {
+    await record($, s, { name: null, update: (_base, now) => ({ hidden_at: now }) })
 
     return
   }

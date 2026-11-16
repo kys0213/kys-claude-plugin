@@ -116,6 +116,7 @@ fn taken_json(taken: &Taken) -> Value {
             json!({ "kind": "prompt", "text": text, "body": body, "from": from.id(), "via": via.id() })
         }
         Taken::Stop { turn_id } => json!({ "kind": "stop", "turn_id": turn_id }),
+        Taken::Hide => json!({ "kind": "hide" }),
         Taken::Answer {
             tool_use_id,
             answers,
@@ -300,6 +301,10 @@ impl KanbanRequests<'_> {
 
     pub fn stop(&self, session: &str, turn: &str) -> Value {
         self.queue(session, Request::stop(turn))
+    }
+
+    pub fn hide(&self, session: &str) -> Value {
+        self.queue(session, Ok(Request::Hide))
     }
 
     pub fn reply(&self, session: &str, ask: &str, answers: &[String], answerer: Answerer) -> Value {

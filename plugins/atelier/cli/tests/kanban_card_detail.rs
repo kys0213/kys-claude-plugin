@@ -156,7 +156,7 @@ fn each_column_offers_its_own_actions() {
         json!({ "turn_id": "t-1" }),
     );
     let (_, card) = only(json!([working]));
-    assert_eq!(actions(&card), ["stop"]);
+    assert_eq!(actions(&card), ["stop", "hide"]);
     assert_eq!(card["turn_id"], "t-1");
 
     let idle = session_with(
@@ -164,7 +164,7 @@ fn each_column_offers_its_own_actions() {
         json!([event("turn.complete", None, 5 * SEC)]),
         json!({}),
     );
-    assert_eq!(actions(&only(json!([idle])).1), ["send"]);
+    assert_eq!(actions(&only(json!([idle])).1), ["send", "hide"]);
 
     let asking = session_with(
         "q",
@@ -622,15 +622,15 @@ fn sessions_are_grouped_by_repository_root_for_the_orchestrator() {
                 "label": "api",
                 "root": "/w/api",
                 "sessions": [
-                    { "session_id": "a2", "column": "working", "cwd": "/w/api/.claude/worktrees/x", "permission_mode": null, "actions": ["stop"], "subtitle": null, "last_line": null, "delivery": null, "wait": null },
-                    { "session_id": "a1", "column": "idle", "cwd": "/work/project-a", "permission_mode": "default", "actions": ["send"], "subtitle": "Fix CORS", "last_line": "직전: Fixed CORS.", "delivery": "보낸 요청: 전달됐어요 · 4s", "wait": null },
+                    { "session_id": "a2", "column": "working", "cwd": "/w/api/.claude/worktrees/x", "permission_mode": null, "actions": ["stop", "hide"], "subtitle": null, "last_line": null, "delivery": null, "wait": null },
+                    { "session_id": "a1", "column": "idle", "cwd": "/work/project-a", "permission_mode": "default", "actions": ["send", "hide"], "subtitle": "Fix CORS", "last_line": "직전: Fixed CORS.", "delivery": "보낸 요청: 전달됐어요 · 4s", "wait": null },
                 ],
             },
             {
                 "label": "notes",
                 "root": null,
                 "sessions": [
-                    { "session_id": "n1", "column": "idle", "cwd": "/tmp/notes", "permission_mode": null, "actions": ["send"], "subtitle": null, "last_line": null, "delivery": null, "wait": null },
+                    { "session_id": "n1", "column": "idle", "cwd": "/tmp/notes", "permission_mode": null, "actions": ["send", "hide"], "subtitle": null, "last_line": null, "delivery": null, "wait": null },
                 ],
             },
         ])

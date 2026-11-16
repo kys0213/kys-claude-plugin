@@ -276,6 +276,12 @@ pub enum RequestCommand {
         #[arg(long)]
         turn: String,
     },
+    /// Leaves a hide in a session's inbox: its card leaves the board until a
+    /// person's prompt comes after it
+    Hide {
+        #[arg(long)]
+        session: String,
+    },
     /// A session's own inbox
     Inbox {
         #[command(subcommand)]
