@@ -83,6 +83,8 @@ cargo build --release --manifest-path "$CLI_DIR/Cargo.toml"
 
 # --- 6. 설치 ---
 mkdir -p "$INSTALL_DIR"
+# 지우고 새 파일로 복사한다: macOS 는 기존 파일 위에 덮어쓴 바이너리를 이전 코드 서명과 대조해 실행 시 SIGKILL 한다
+rm -f "$BINARY_PATH"
 cp "$CLI_DIR/target/release/$BINARY_NAME" "$BINARY_PATH"
 chmod +x "$BINARY_PATH"
 
