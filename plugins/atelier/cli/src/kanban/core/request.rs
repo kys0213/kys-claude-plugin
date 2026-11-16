@@ -1,5 +1,5 @@
-//! Requests one session leaves for another through its inbox: a prompt to
-//! run or a stop for the running turn, and which of them a session takes.
+//! Requests one session leaves for another through its inbox, and which of
+//! them a session takes.
 
 use super::precedent::{Auth, SessionPlace};
 use super::question::Question;
