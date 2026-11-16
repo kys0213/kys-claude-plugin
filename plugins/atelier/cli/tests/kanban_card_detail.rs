@@ -1,6 +1,6 @@
 mod kanban_support;
 
-use kanban_support::{board, event, session_with, MIN, NOW, SEC};
+use kanban_support::{actions, board, event, session_with, MIN, NOW, SEC};
 use serde_json::{json, Value};
 
 fn only(sessions: Value) -> (String, Value) {
@@ -38,15 +38,6 @@ fn section(card: &Value, title: &str) -> Option<Vec<String>> {
         .into_iter()
         .find(|(t, _)| t == title)
         .map(|(_, lines)| lines)
-}
-
-fn actions(card: &Value) -> Vec<String> {
-    card["actions"]
-        .as_array()
-        .expect("actions")
-        .iter()
-        .map(|a| a.as_str().expect("action").to_string())
-        .collect()
 }
 
 fn idle_card(extra: Value) -> Value {

@@ -143,7 +143,7 @@ pub enum Action {
     Stop,
     /// Clear the card of a session gone silent, as its expiry would.
     Forget,
-    /// Leave a live session's card off the board until a person needs it again.
+    /// Leave a live session's card off the board.
     Hide,
 }
 
@@ -576,8 +576,6 @@ fn is_hideable(state: Option<&State>) -> bool {
     )
 }
 
-/// Hidden until a person's prompt comes after the hide; a wait, silence or
-/// the delegate role shows it regardless.
 fn is_hidden(state: Option<&State>, fact: &SessionFact) -> bool {
     let Some(hidden_at) = fact.hidden_at else {
         return false;

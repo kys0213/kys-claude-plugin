@@ -96,7 +96,6 @@ async function send($: EngineInterface, s: DetailState, card: DetailCard, text: 
   }
 }
 
-/** Back to the board once the hide is queued: the card leaves it when the session takes the hide. */
 async function hide($: EngineInterface, s: DetailState, card: DetailCard): Promise<void> {
   await request($, s, card, { args: ['hide', '--session', card.session_id], nonceKind: null }, '빼기를 보냈어요')
 

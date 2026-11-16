@@ -1,7 +1,7 @@
 mod kanban_support;
 
 use kanban_support::{
-    board, event, now_ms, put_record, session_with, status_in, with, Home, MIN, NOW, SEC,
+    actions, board, event, now_ms, put_record, session_with, status_in, with, Home, MIN, NOW, SEC,
 };
 use serde_json::{json, Value};
 
@@ -16,18 +16,14 @@ fn card_ids(board: &Value) -> Vec<String> {
 }
 
 fn actions_of(board: &Value, id: &str) -> Vec<String> {
-    board["columns"]
+    let card = board["columns"]
         .as_array()
         .expect("columns")
         .iter()
         .flat_map(|c| c["cards"].as_array().expect("cards").clone())
         .find(|card| card["session_id"] == id)
-        .unwrap_or_else(|| panic!("card {id} on the board"))["actions"]
-        .as_array()
-        .expect("actions")
-        .iter()
-        .map(|a| a.as_str().expect("action").to_string())
-        .collect()
+        .unwrap_or_else(|| panic!("card {id} on the board"));
+    actions(&card)
 }
 
 fn idle(id: &str, extra: Value) -> Value {

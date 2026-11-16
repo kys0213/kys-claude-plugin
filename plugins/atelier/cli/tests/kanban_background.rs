@@ -1,6 +1,6 @@
 mod kanban_support;
 
-use kanban_support::{agent_event, board, event, session_with, MIN, NOW, SEC};
+use kanban_support::{actions, agent_event, board, event, session_with, MIN, NOW, SEC};
 use serde_json::{json, Value};
 
 /// The column and card of the one session on the board.
@@ -27,15 +27,6 @@ fn column(events: Value, extra: Value) -> String {
 
 fn agent(status: &str, teammate: bool) -> Value {
     json!({ "status": status, "teammate": teammate })
-}
-
-fn actions(card: &Value) -> Vec<String> {
-    card["actions"]
-        .as_array()
-        .expect("actions is an array")
-        .iter()
-        .map(|a| a.as_str().expect("action id").to_string())
-        .collect()
 }
 
 #[test]
