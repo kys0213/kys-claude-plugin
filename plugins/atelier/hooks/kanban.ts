@@ -53,7 +53,8 @@ const HEARTBEAT_MS = 30_000
 const REFRESH_MS = 2_000
 const STALE_AFTER = '2m'
 const EXPIRE_AFTER = '24h'
-const MAX_REPLY_CHARS = 1_000
+const MAX_REPLY_CHARS = 8_000
+const MAX_RECAP_CHARS = 1_000
 const MAX_TODOS = 50
 const MAX_RECENT = 5
 const MAX_AGENTS = 50
@@ -613,7 +614,7 @@ export function registerKanban(on: On, options: PluginOptions = {}): void {
         update: (_, now) => ({
           decision: {
             ask: ask.slice(0, MAX_FIELD_CHARS),
-            recap: e.recap.slice(0, MAX_REPLY_CHARS),
+            recap: e.recap.slice(0, MAX_RECAP_CHARS),
             options,
             at: now,
             orig_len: { ask: ask.length, options: labels.map(label => label.length) },

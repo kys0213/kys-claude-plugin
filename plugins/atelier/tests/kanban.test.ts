@@ -1449,6 +1449,19 @@ describe('kanban details and requests', () => {
     expect(prompts[0]?.text).toHaveLength(1_000)
   })
 
+  test('a long reply keeps its first 8000 characters at the turn end and its last 8000 before a wait', async ($, on) => {
+    const w = world(on)
+    const rec = () => stored(w) as Record<string, unknown>
+    const reply = `${'a'.repeat(4_000)}${'b'.repeat(4_000)}${'c'.repeat(1_000)}`
+
+    w.messages.value = [{ role: 'assistant', text: reply, toolUses: [] }]
+    await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'ls' } } as never)
+    expect(rec().pending_context).toBe(reply.slice(-8_000))
+
+    await $.turn.complete({ turnId: 't-1', answer: reply, durationMs: 1, isAborted: false } as never)
+    expect(rec().last_answer).toBe(reply.slice(0, 8_000))
+  })
+
   test('a turn keeps its id, its recent tools and its reply', async ($, on) => {
     const w = world(on)
     const rec = () => stored(w) as Record<string, unknown>
@@ -2037,6 +2050,58 @@ describe('kanban details and requests', () => {
     const after = await $.ui.mount({ ...PANE, surface: 'terminal' })
     expect((await after.find({ type: 'Text', text: /비어 있어요/ }))?.text).toBe('보낼 글이 비어 있어요')
     await after.unmount()
+  })
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    test(`typing into the send field leaves its drawn value alone on ${surface}`, async ($, on) => {
+      world(on, routes({ board: DETAIL_BOARD }))
+
+      await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+      const ui = await $.ui.mount({ ...PANE, surface })
+      await ui.press({ key: 'card:calm' })
+      await ui.unmount()
+      const opened = await $.ui.mount({ ...PANE, surface })
+      const drawn = (await opened.find({ key: 'detail:calm:send' }))?.props.value
+
+      await opened.input({ key: 'detail:calm:send', text: '안녕하ㅅ', kind: 'change' })
+      await opened.unmount()
+      const redrawn = await $.ui.mount({ ...PANE, surface })
+
+      expect((await redrawn.find({ key: 'detail:calm:send' }))?.props.value).toBe(drawn)
+      await redrawn.unmount()
+    })
+  }
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    test(`a reply section the CLI carries as markdown is drawn whole as markdown on ${surface}`, async ($, on) => {
+      const reply = '## 정리\n\n- one\n- two\n\n어느 쪽으로 갈까요?'
+      const board = JSON.parse(JSON.stringify(DETAIL_BOARD).replace('"lines":["Fixed the header."]', `"lines":["## 정리"],"markdown":${JSON.stringify(reply)}`))
+      world(on, routes({ board }))
+
+      await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+      const ui = await $.ui.mount({ ...PANE, surface })
+      await ui.press({ key: 'card:calm' })
+      await ui.unmount()
+      const opened = await $.ui.mount({ ...PANE, surface })
+
+      expect((await opened.find({ type: 'Markdown' }))?.props.text).toBe(reply)
+      expect(await opened.find({ type: 'Text', text: '## 정리' })).toBeUndefined()
+      await opened.unmount()
+    })
+  }
+
+  test('a reply section without markdown is drawn as its lines', async ($, on) => {
+    world(on, routes({ board: DETAIL_BOARD }))
+
+    await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'card:calm' })
+    await ui.unmount()
+    const opened = await $.ui.mount({ ...PANE, surface: 'terminal' })
+
+    expect((await opened.find({ type: 'Text', text: 'Fixed the header.' }))?.text).toBe('Fixed the header.')
+    expect(await opened.find({ type: 'Markdown' })).toBeUndefined()
+    await opened.unmount()
   })
 
   for (const [label, layout, columns] of [

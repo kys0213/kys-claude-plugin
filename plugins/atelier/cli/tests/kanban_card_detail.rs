@@ -40,6 +40,16 @@ fn section(card: &Value, title: &str) -> Option<Vec<String>> {
         .map(|(_, lines)| lines)
 }
 
+fn markdown(card: &Value, title: &str) -> Value {
+    card["detail"]["sections"]
+        .as_array()
+        .expect("sections")
+        .iter()
+        .find(|s| s["title"] == title)
+        .map(|s| s["markdown"].clone())
+        .expect("section")
+}
+
 fn idle_card(extra: Value) -> Value {
     only(json!([session_with(
         "s",
@@ -519,6 +529,49 @@ fn a_permission_wait_shows_what_it_asks_for_and_the_reply_before_it() {
             ),
         ]
     );
+}
+
+const LONG_REPLY: &str = "<system-reminder>hidden</system-reminder>\n\n## 정리\n\n- one\n- two\n- three\n- four\n- five\n- six\n\n```rust\nlet x = 1;\n```\n\n어느 쪽으로 갈까요?\u{7}\n\n";
+
+const LONG_REPLY_SHOWN: &str = "## 정리\n\n- one\n- two\n- three\n- four\n- five\n- six\n\n```rust\nlet x = 1;\n```\n\n어느 쪽으로 갈까요?";
+
+#[test]
+fn an_idle_reply_is_carried_whole_as_markdown_beside_its_first_lines() {
+    let card = idle_card(json!({ "last_answer": LONG_REPLY }));
+    assert_eq!(markdown(&card, "직전 응답"), LONG_REPLY_SHOWN);
+    assert_eq!(
+        section(&card, "직전 응답"),
+        Some(
+            ["## 정리", "- one", "- two", "- three", "- four", "- five"]
+                .map(String::from)
+                .to_vec()
+        )
+    );
+}
+
+#[test]
+fn a_stale_reply_is_carried_whole_as_markdown() {
+    let (column, card) = only(json!([session_with(
+        "s",
+        json!([event("turn.complete", None, 3 * MIN)]),
+        json!({ "heartbeat_at": NOW - 3 * MIN, "last_answer": LONG_REPLY })
+    )]));
+    assert_eq!(column, "stale");
+    assert_eq!(markdown(&card, "마지막 응답"), LONG_REPLY_SHOWN);
+}
+
+#[test]
+fn the_reply_before_a_wait_is_carried_whole_as_markdown() {
+    let (_, card) = only(json!([session_with(
+        "s",
+        json!([event("classic.PermissionRequest", Some("Bash"), 10 * SEC)]),
+        json!({
+            "permission": { "tool": "Bash", "input": { "command": "npm publish" }, "at": NOW - 10 * SEC },
+            "pending_context": LONG_REPLY,
+        })
+    )]));
+    assert_eq!(markdown(&card, "기다리기 직전 응답"), LONG_REPLY_SHOWN);
+    assert_eq!(markdown(&card, "기다리는 것"), Value::Null);
 }
 
 #[test]
