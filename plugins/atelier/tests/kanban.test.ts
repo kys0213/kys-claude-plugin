@@ -2039,6 +2039,26 @@ describe('kanban details and requests', () => {
     await after.unmount()
   })
 
+  for (const surface of ['terminal', 'desktop'] as const) {
+    test(`typing into the send field leaves its drawn value alone on ${surface}`, async ($, on) => {
+      world(on, routes({ board: DETAIL_BOARD }))
+
+      await $.command.run({ command: 'kanban', args: '', origin: { kind: 'composer' } } as never)
+      const ui = await $.ui.mount({ ...PANE, surface })
+      await ui.press({ key: 'card:calm' })
+      await ui.unmount()
+      const opened = await $.ui.mount({ ...PANE, surface })
+      const drawn = (await opened.find({ key: 'detail:calm:send' }))?.props.value
+
+      await opened.input({ key: 'detail:calm:send', text: '안녕하ㅅ', kind: 'change' })
+      await opened.unmount()
+      const redrawn = await $.ui.mount({ ...PANE, surface })
+
+      expect((await redrawn.find({ key: 'detail:calm:send' }))?.props.value).toBe(drawn)
+      await redrawn.unmount()
+    })
+  }
+
   for (const [label, layout, columns] of [
     ['a side-by-side', { direction: 'row', column_width: 24, column_gap: 1 }, 100],
     ['a stacked', { direction: 'column', column_width: 40, column_gap: 1 }, 40],

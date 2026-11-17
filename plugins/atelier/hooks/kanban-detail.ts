@@ -19,8 +19,6 @@ export type DetailCard = {
 export type DetailState = {
   /** The card opened on this pane. */
   selected: string | null
-  /** What was typed to send, by session. */
-  drafts: Map<string, string>
   /** `<session>:<action>` pairs whose action waits for a second press. */
   confirming: Set<string>
   /** The last outcome of a request from this pane, by session. */
@@ -32,7 +30,7 @@ type Elements = ReturnType<EngineInterface['ui']['resolve']>
 type Child = ReturnType<Elements['Text']>
 
 export function newDetailState(): DetailState {
-  return { selected: null, drafts: new Map(), confirming: new Set(), notes: new Map() }
+  return { selected: null, confirming: new Set(), notes: new Map() }
 }
 
 export function toggleSelected($: EngineInterface, s: DetailState, sessionId: string): void {
@@ -49,11 +47,9 @@ export function pruneDetail(s: DetailState, cards: readonly DetailCard[]): void 
     s.selected = null
   }
 
-  for (const map of [s.drafts, s.notes]) {
-    for (const id of [...map.keys()]) {
-      if (!live.has(id)) {
-        map.delete(id)
-      }
+  for (const id of [...s.notes.keys()]) {
+    if (!live.has(id)) {
+      s.notes.delete(id)
     }
   }
 }
@@ -90,10 +86,6 @@ async function sendArgs($: EngineInterface, card: DetailCard, text: string): Pro
 
 async function send($: EngineInterface, s: DetailState, card: DetailCard, text: string): Promise<void> {
   await request($, s, card, await sendArgs($, card, text), '보냈어요 — 세션이 받으면 시작해요')
-
-  if (!s.notes.get(card.session_id)?.isError) {
-    s.drafts.delete(card.session_id)
-  }
 }
 
 async function hide($: EngineInterface, s: DetailState, card: DetailCard): Promise<void> {
@@ -121,12 +113,8 @@ function sendBlock($: EngineInterface, s: DetailState, els: Elements, card: Deta
       Input({
         key: `detail:${card.session_id}:send`,
         placeholder: '이 세션에 맡길 일을 입력하고 Enter',
-        value: s.drafts.get(card.session_id) ?? '',
         submitLabel: '보내기',
         rows: 3,
-        onInput: (value: string) => {
-          s.drafts.set(card.session_id, value)
-        },
         onSubmit: (value: string) => void send($, s, card, value),
       }),
     ],
