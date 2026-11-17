@@ -3,7 +3,7 @@ import type { EngineInterface } from 'claude-code'
 import { queueRequest } from './kanban-cli'
 import { type PaneKind, queuePaneRequest } from './kanban-nonce'
 
-type Section = { title: string; lines: string[] }
+type Section = { title: string; lines: string[]; markdown?: string | null }
 
 type DecisionView = { id: string; ask: string; recap: string | null; options: string[] }
 
@@ -225,7 +225,11 @@ function decisionBlock($: EngineInterface, s: DetailState, els: Elements, card: 
 }
 
 function sectionBlock(els: Elements, section: Section, index: number): Child {
-  const { Box, Text } = els
+  const { Box, Text, Markdown } = els
+  const body =
+    typeof section.markdown === 'string'
+      ? [Markdown({ key: `section:${index}:markdown`, text: section.markdown })]
+      : section.lines.map(line => Text({ children: [line] }))
 
   return Box({
     key: `section:${index}`,
@@ -236,7 +240,7 @@ function sectionBlock(els: Elements, section: Section, index: number): Child {
         key: 'lines',
         flexDirection: 'column',
         paddingLeft: 2,
-        children: section.lines.map(line => Text({ children: [line] })),
+        children: body,
       }),
     ],
   })

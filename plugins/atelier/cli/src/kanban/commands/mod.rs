@@ -97,7 +97,7 @@ fn detail_json(detail: &Detail) -> Value {
         "sections": detail
             .sections
             .iter()
-            .map(|s| json!({ "title": s.title, "lines": s.lines }))
+            .map(|s| json!({ "title": s.title, "lines": s.lines, "markdown": s.markdown }))
             .collect::<Vec<_>>(),
         "decision": detail.decision.as_ref().map(|d| json!({
             "id": d.at.to_string(),

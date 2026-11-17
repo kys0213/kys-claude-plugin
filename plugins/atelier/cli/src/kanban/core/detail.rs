@@ -75,6 +75,26 @@ pub struct DetailFacts<'a> {
 pub struct Section {
     pub title: &'static str,
     pub lines: Vec<String>,
+    /// A reply whole, cleaned, for a surface that draws markdown; `lines` keeps its first lines.
+    pub markdown: Option<String>,
+}
+
+impl Section {
+    fn lines(title: &'static str, lines: Vec<String>) -> Self {
+        Section {
+            title,
+            lines,
+            markdown: None,
+        }
+    }
+
+    fn reply(title: &'static str, raw: Option<&str>) -> Self {
+        Section {
+            title,
+            lines: reply_lines(raw),
+            markdown: reply_markdown(raw),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,6 +147,11 @@ pub fn reply_lines(raw: Option<&str>) -> Vec<String> {
         .take(REPLY_LINES)
         .map(|l| cut(&l, LINE_CHARS))
         .collect()
+}
+
+fn reply_markdown(raw: Option<&str>) -> Option<String> {
+    let text = clean(raw?).trim().to_string();
+    (!text.is_empty()).then_some(text)
 }
 
 pub fn folded(raw: &str) -> String {
@@ -260,46 +285,45 @@ pub fn last_line(last_answer: Option<&str>) -> Option<String> {
 }
 
 pub fn build(phase: Phase, facts: &DetailFacts, now: u64) -> Detail {
-    let work = ("작업", work_lines(facts));
-    let earlier = ("이전 요청", earlier_lines(facts.earlier_prompts, now));
+    let work = Section::lines("작업", work_lines(facts));
+    let earlier = Section::lines("이전 요청", earlier_lines(facts.earlier_prompts, now));
     let prompt = prompt_lines(facts.last_prompt);
-    let pending = reply_lines(facts.pending_context);
-    let todos = ("할 일", todo_lines(facts.tasks, facts.todos));
-    let sections: Vec<(&'static str, Vec<String>)> = match phase {
+    let pending = Section::reply("기다리기 직전 응답", facts.pending_context);
+    let todos = Section::lines("할 일", todo_lines(facts.tasks, facts.todos));
+    let sections: Vec<Section> = match phase {
         Phase::Permission => vec![
-            ("기다리는 것", wait_lines(facts.permission)),
+            Section::lines("기다리는 것", wait_lines(facts.permission)),
             earlier,
-            ("요청", prompt),
-            ("기다리기 직전 응답", pending),
+            Section::lines("요청", prompt),
+            pending,
         ],
         Phase::Question | Phase::Input => {
-            vec![earlier, ("요청", prompt), ("기다리기 직전 응답", pending)]
+            vec![earlier, Section::lines("요청", prompt), pending]
         }
-        Phase::Decision => vec![earlier, ("요청", prompt)],
+        Phase::Decision => vec![earlier, Section::lines("요청", prompt)],
         Phase::Working => vec![
             earlier,
-            ("요청", prompt),
+            Section::lines("요청", prompt),
             todos,
-            ("최근 도구", recent_lines(facts.recent, now)),
+            Section::lines("최근 도구", recent_lines(facts.recent, now)),
         ],
         Phase::Idle => vec![
             earlier,
-            ("직전 요청", prompt),
-            ("직전 응답", reply_lines(facts.last_answer)),
+            Section::lines("직전 요청", prompt),
+            Section::reply("직전 응답", facts.last_answer),
             todos,
         ],
         Phase::Stale => vec![
             earlier,
-            ("마지막 요청", prompt),
-            ("마지막 응답", reply_lines(facts.last_answer)),
+            Section::lines("마지막 요청", prompt),
+            Section::reply("마지막 응답", facts.last_answer),
             todos,
         ],
     };
     Detail {
         sections: std::iter::once(work)
             .chain(sections)
-            .filter(|(_, lines)| !lines.is_empty())
-            .map(|(title, lines)| Section { title, lines })
+            .filter(|s| !s.lines.is_empty())
             .collect(),
         decision: facts.decision.filter(|_| phase == Phase::Decision).cloned(),
         delivery: facts.inbox.map(|inbox| delivery_line(inbox, now)),
