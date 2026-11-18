@@ -3,6 +3,7 @@ mod kanban_support;
 
 use atelier::kanban::commands::requests::PermitTiming;
 use atelier::kanban::core::request::{OpenAsk, PaneNonces, Sender, Waits};
+use atelier::kanban::core::spawn::Via;
 use kanban_mocks::{Edges, FakeLauncher, MapProbe};
 use kanban_support::NOW;
 use serde_json::{json, Value};
@@ -102,9 +103,13 @@ fn spawn_launches_claude_bg_at_a_main_root_under_the_agent_header() {
         probe: MapProbe::default().with("/w/api", "/w/api"),
         ..Default::default()
     };
-    let out = e
-        .requests()
-        .spawn("/w/api", " Add a check ", Some("check-1"), Some("main"));
+    let out = e.requests().spawn(
+        Via::Bg,
+        "/w/api",
+        " Add a check ",
+        Some("check-1"),
+        Some("main"),
+    );
     assert_eq!(
         out,
         json!({ "spawned": { "short_id": "abc123", "cwd": "/w/api", "worktree": "check-1" } })
@@ -113,14 +118,80 @@ fn spawn_launches_claude_bg_at_a_main_root_under_the_agent_header() {
         e.launcher.launches.borrow().as_slice(),
         [(
             "/w/api".to_string(),
-            vec![
-                "--bg".to_string(),
-                "--worktree".to_string(),
-                "check-1".to_string(),
-                "[칸반 요청 · main 세션의 오케스트레이터]\n\nAdd a check".to_string(),
-            ]
+            "claude".to_string(),
+            strings(&[
+                "--bg",
+                "--worktree",
+                "check-1",
+                "[칸반 요청 · main 세션의 오케스트레이터]\n\nAdd a check",
+            ])
         )]
     );
+}
+
+#[test]
+fn spawn_via_hc_starts_an_interactive_claude_in_an_hc_terminal_that_outlives_its_parent() {
+    let e = Edges {
+        probe: MapProbe::default().with("/w/api", "/w/api"),
+        launcher: FakeLauncher::printing("{\"address\":\"t7\",\"name\":null}\n"),
+        ..Default::default()
+    };
+    let out = e.requests().spawn(
+        Via::Hc,
+        "/w/api",
+        "Add a check",
+        Some("check-1"),
+        Some("main"),
+    );
+    assert_eq!(
+        out,
+        json!({ "spawned": { "terminal": "t7", "cwd": "/w/api", "worktree": "check-1" } })
+    );
+    assert_eq!(
+        e.launcher.launches.borrow().as_slice(),
+        [(
+            "/w/api".to_string(),
+            "hc".to_string(),
+            strings(&[
+                "run",
+                "--bg",
+                "--json",
+                "--outlive-parent",
+                "--no-notify",
+                "--cwd",
+                "/w/api",
+                "--",
+                "claude",
+                "--worktree",
+                "check-1",
+                "[칸반 요청 · main 세션의 오케스트레이터]\n\nAdd a check",
+            ])
+        )]
+    );
+}
+
+#[test]
+fn spawn_via_hc_reports_output_that_names_no_terminal() {
+    for stdout in ["", "not json", "{\"name\":\"x\"}", "{\"address\":\"\"}"] {
+        let e = Edges {
+            probe: MapProbe::default().with("/w/api", "/w/api"),
+            launcher: FakeLauncher::printing(stdout),
+            ..Default::default()
+        };
+        let out = e.requests().spawn(Via::Hc, "/w/api", "x", None, None);
+        assert!(out["error"].is_string(), "{stdout:?} → {out}");
+    }
+}
+
+#[test]
+fn spawn_via_parses_only_bg_and_hc() {
+    assert_eq!(Via::parse("bg"), Ok(Via::Bg));
+    assert_eq!(Via::parse("hc"), Ok(Via::Hc));
+    assert!(Via::parse("tmux").is_err());
+}
+
+fn strings(list: &[&str]) -> Vec<String> {
+    list.iter().map(|s| s.to_string()).collect()
 }
 
 #[test]
@@ -132,7 +203,7 @@ fn spawn_refuses_a_subdirectory_or_a_linked_worktree() {
         ..Default::default()
     };
     for cwd in ["/w/api/src", "/w/api-wt", "/elsewhere"] {
-        let out = e.requests().spawn(cwd, "x", None, None);
+        let out = e.requests().spawn(Via::Bg, cwd, "x", None, None);
         assert!(out["error"].is_string(), "{cwd} → {out}");
     }
     assert!(e.launcher.launches.borrow().is_empty());
@@ -146,7 +217,7 @@ fn spawn_refuses_an_empty_task_and_a_worktree_name_over_the_limit() {
     };
     let long = "a".repeat(41);
     for (text, worktree) in [("   ", None), ("x", Some(long.as_str()))] {
-        let out = e.requests().spawn("/w/api", text, worktree, None);
+        let out = e.requests().spawn(Via::Bg, "/w/api", text, worktree, None);
         assert!(out["error"].is_string(), "{text:?} {worktree:?} → {out}");
     }
     assert!(e.launcher.launches.borrow().is_empty());
@@ -162,7 +233,7 @@ fn spawn_reports_what_a_failed_launch_printed() {
         },
         ..Default::default()
     };
-    let out = e.requests().spawn("/w/api", "x", None, None);
+    let out = e.requests().spawn(Via::Bg, "/w/api", "x", None, None);
     assert_eq!(out["error"], "새 세션을 띄우지 못했어요: not logged in");
 }
 

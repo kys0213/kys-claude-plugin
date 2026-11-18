@@ -52,14 +52,19 @@ impl World {
 
     /// A fake `claude` that records its argv and cwd, then prints `out`.
     fn fake_claude(&self, out: &str) -> PathBuf {
-        let log = self.bin.path().join("claude.log");
+        self.fake("claude", out)
+    }
+
+    /// A fake `program` that records its argv and cwd, then prints `out`.
+    fn fake(&self, program: &str, out: &str) -> PathBuf {
+        let log = self.bin.path().join(format!("{program}.log"));
         let script = format!(
             "#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"$@\" > '{}'\nprintf '%s' '{}'\n",
             log.display(),
             out
         );
-        let path = self.bin.path().join("claude");
-        fs::write(&path, script).expect("write fake claude");
+        let path = self.bin.path().join(program);
+        fs::write(&path, script).expect("write fake program");
         let mut perms = fs::metadata(&path).expect("stat").permissions();
         std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
         fs::set_permissions(&path, perms).expect("chmod");
@@ -402,6 +407,59 @@ fn spawn_starts_a_background_session_at_a_repository_root_under_a_header() {
         argv[4..].join("\n"),
         "[칸반 요청 · orchestra 세션의 오케스트레이터]\n\nAdd a health check"
     );
+}
+
+#[test]
+fn spawn_via_hc_starts_a_child_terminal_and_returns_its_address() {
+    let w = World::new();
+    let log = w.fake("hc", "{\"address\":\"t7\"}\n");
+    let repo = git_repo();
+    let root = fs::canonicalize(repo.path()).expect("canonical");
+    let root = root.display().to_string();
+    let out = w.kanban(&[
+        "spawn",
+        "--via",
+        "hc",
+        "--cwd",
+        &root,
+        "--text",
+        "Add a check",
+    ]);
+    assert_eq!(
+        out,
+        json!({ "spawned": { "terminal": "t7", "cwd": root, "worktree": null } })
+    );
+    let argv: Vec<String> = fs::read_to_string(log)
+        .expect("hc log")
+        .lines()
+        .map(str::to_string)
+        .collect();
+    assert_eq!(
+        argv[1..10],
+        [
+            "run",
+            "--bg",
+            "--json",
+            "--outlive-parent",
+            "--no-notify",
+            "--cwd",
+            root.as_str(),
+            "--",
+            "claude"
+        ]
+    );
+    assert!(!w.bin.path().join("claude.log").exists());
+}
+
+#[test]
+fn spawn_refuses_an_unknown_via() {
+    let w = World::new();
+    w.fake_claude("backgrounded · 1\n");
+    let repo = git_repo();
+    let root = repo.path().display().to_string();
+    let out = w.kanban(&["spawn", "--via", "tmux", "--cwd", &root, "--text", "x"]);
+    assert!(out["error"].is_string(), "{out}");
+    assert!(!w.bin.path().join("claude.log").exists());
 }
 
 #[test]

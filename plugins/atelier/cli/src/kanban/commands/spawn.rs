@@ -1,7 +1,7 @@
 //! The process edges of `kanban spawn`: git for where the session would run,
-//! `claude --bg` to start it.
+//! the launch program (`claude` or `hc`) to start it.
 
-use crate::kanban::core::spawn::RepoPaths;
+use crate::kanban::core::spawn::{Launch, RepoPaths};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -17,7 +17,7 @@ pub struct Launched {
 }
 
 pub trait Launcher {
-    fn launch(&self, cwd: &str, args: &[String]) -> Result<Launched, String>;
+    fn launch(&self, cwd: &str, launch: &Launch) -> Result<Launched, String>;
 }
 
 pub struct GitProbe;
@@ -51,15 +51,15 @@ impl RepoProbe for GitProbe {
     }
 }
 
-pub struct ClaudeLauncher;
+pub struct ProcessLauncher;
 
-impl Launcher for ClaudeLauncher {
-    fn launch(&self, cwd: &str, args: &[String]) -> Result<Launched, String> {
-        let out = Command::new("claude")
+impl Launcher for ProcessLauncher {
+    fn launch(&self, cwd: &str, launch: &Launch) -> Result<Launched, String> {
+        let out = Command::new(launch.program)
             .current_dir(cwd)
-            .args(args)
+            .args(&launch.args)
             .output()
-            .map_err(|e| format!("claude 를 실행하지 못했어요: {e}"))?;
+            .map_err(|e| format!("{} 를 실행하지 못했어요: {e}", launch.program))?;
         Ok(Launched {
             success: out.status.success(),
             stdout: String::from_utf8_lossy(&out.stdout).to_string(),

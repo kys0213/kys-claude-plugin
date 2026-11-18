@@ -15,7 +15,7 @@ use crate::kanban::core::request::{
     self, check_id, Answering, Found, LeftNonce, Nonce, PaneNonces, Request, RequestKind, Sender,
     Taken, Taking, Verdict, Waits, UNVOUCHED,
 };
-use crate::kanban::core::spawn::{is_main_root, launch_args, short_id};
+use crate::kanban::core::spawn::{is_main_root, launch, Task, Via};
 use serde_json::{json, Value};
 use std::cell::OnceCell;
 
@@ -537,6 +537,7 @@ impl KanbanRequests<'_> {
 
     pub fn spawn(
         &self,
+        via: Via,
         cwd: &str,
         text: &str,
         worktree: Option<&str>,
@@ -548,11 +549,15 @@ impl KanbanRequests<'_> {
                     "`{cwd}` 는 git 저장소의 메인 작업 트리 루트가 아니에요"
                 ));
             }
-            let args = launch_args(text, worktree, from_label)?;
-            let out = self.launcher.launch(cwd, &args)?;
-            match short_id(&out.stdout) {
-                Some(short_id) if out.success => Ok(json!({
-                    "spawned": { "short_id": short_id, "cwd": cwd, "worktree": worktree }
+            let task = Task {
+                text,
+                worktree,
+                from_label,
+            };
+            let out = self.launcher.launch(cwd, &launch(via, cwd, &task)?)?;
+            match via.started(&out.stdout) {
+                Some((key, handle)) if out.success => Ok(json!({
+                    "spawned": { key: handle, "cwd": cwd, "worktree": worktree }
                 })),
                 _ => {
                     let said = [out.stdout.trim(), out.stderr.trim()]

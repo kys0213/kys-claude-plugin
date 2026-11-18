@@ -289,6 +289,9 @@ pub enum RequestCommand {
     },
     /// Starts a background session at a repository's main working tree
     Spawn {
+        /// `bg` (`claude --bg`) or `hc` (a child herdr-core terminal of the caller's)
+        #[arg(long, default_value = "bg")]
+        via: String,
         #[arg(long)]
         cwd: String,
         #[arg(long, allow_hyphen_values = true)]
