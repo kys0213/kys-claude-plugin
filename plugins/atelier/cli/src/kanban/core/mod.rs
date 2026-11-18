@@ -21,6 +21,7 @@ pub mod repos;
 pub mod request;
 pub mod spawn;
 pub mod status;
+pub mod terminal;
 pub mod text;
 pub mod wait;
 pub mod wake;

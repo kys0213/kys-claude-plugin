@@ -7,6 +7,7 @@ use super::duration::age_label;
 use super::progress::{progress_line, Activity, ProgressFacts, WorkItem};
 use super::prompt::{is_wrapped_event, latest_person_prompt, person_prompts, PromptFact};
 use super::question::Ask;
+use super::terminal::TerminalEnv;
 use super::text::cut;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +28,7 @@ pub struct SessionFact {
     pub repo_root: Option<String>,
     pub remote: Option<String>,
     pub permission_mode: Option<String>,
+    pub terminal_env: TerminalEnv,
     pub title: Option<String>,
     pub first_prompt: Option<String>,
     pub last_prompt: Option<String>,
@@ -174,6 +176,8 @@ pub struct Card {
     pub cwd: String,
     pub repo_root: Option<String>,
     pub permission_mode: Option<String>,
+    /// The herdr-core terminal the session runs in, when it is its own.
+    pub hc_terminal: Option<String>,
     pub turn_id: Option<String>,
     pub permission_id: Option<String>,
     pub actions: Vec<Action>,
@@ -678,6 +682,7 @@ fn place(fact: &SessionFact, params: &BoardParams) -> Option<Placed> {
             cwd: fact.cwd.clone(),
             repo_root: fact.repo_root.clone(),
             permission_mode: fact.permission_mode.clone(),
+            hc_terminal: fact.terminal_env.hc_terminal(),
             turn_id: fact.turn_id.clone(),
             permission_id: match state {
                 Some(State::NeedsInput(WaitReason::Permission(_))) => fact.permission_id.clone(),

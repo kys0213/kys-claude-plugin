@@ -18,6 +18,7 @@ use crate::kanban::core::relay::Frame;
 use crate::kanban::core::request::{
     check_id, LeftNonce, Nonce, OpenAsk, PaneNonces, RequestKind, Status, Verdict, Via, Waits,
 };
+use crate::kanban::core::terminal::TerminalEnv;
 use crate::kanban::core::wake::{Pending, WakeState};
 use serde_json::{Map, Value};
 
@@ -47,6 +48,7 @@ fn parse_record(value: &Value) -> Option<SessionFact> {
         repo_root: nullable_string(value, "repo_root")?,
         remote: nullable_string(value, "remote")?,
         permission_mode: nullable_string(value, "permission_mode")?,
+        terminal_env: parse_terminal_env(value.get("terminal_env"))?,
         title: nullable_string(value, "title")?,
         first_prompt: nullable_string(value, "first_prompt")?,
         last_prompt: nullable_string(value, "last_prompt")?,
@@ -718,6 +720,17 @@ fn optional_array<'a>(value: &'a Value, key: &str) -> Option<&'a [Value]> {
         None | Some(Value::Null) => Some(&[]),
         Some(Value::Array(items)) => Some(items),
         Some(_) => None,
+    }
+}
+
+fn parse_terminal_env(value: Option<&Value>) -> Option<TerminalEnv> {
+    match value {
+        None | Some(Value::Null) => Some(TerminalEnv::default()),
+        Some(env) => Some(TerminalEnv {
+            hc_terminal_id: nullable_string(env, "hc_terminal_id")?,
+            herdr_env: nullable_string(env, "herdr_env")?,
+            session_kind: nullable_string(env, "session_kind")?,
+        }),
     }
 }
 

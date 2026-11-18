@@ -267,6 +267,7 @@ impl WaitView<'_> {
             "age": card.age,
             "subtitle": card.subtitle,
             "permission_mode": card.permission_mode,
+            "hc_terminal": card.hc_terminal,
             "actions": action_ids(&card.actions),
             "last_line": card.last_line,
             "delivery": card.detail.delivery,

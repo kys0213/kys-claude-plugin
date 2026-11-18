@@ -45,6 +45,7 @@ import {
   recordPrompt,
   rerun,
   sessionKeysOf,
+  terminalEnvOf,
 } from './kanban-record'
 
 const PANE = 'kanban'
@@ -376,6 +377,7 @@ async function startSession($: EngineInterface, s: KanbanState): Promise<void> {
   }
 
   const repo = await $.session.repo()
+  const terminal_env = await terminalEnvOf($)
 
   await record($, s, {
     name: 'session.start',
@@ -383,6 +385,7 @@ async function startSession($: EngineInterface, s: KanbanState): Promise<void> {
     update: (base, now) => ({
       repo_root: base.repo_root ?? repo?.root ?? null,
       remote: base.remote ?? repo?.remote ?? null,
+      terminal_env,
       ...rerun(base, now),
     }),
   })
