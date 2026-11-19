@@ -5,7 +5,7 @@ paths:
 
 # Plugin Skill 명세 컨벤션
 
-> SKILL.md 파일의 작성 형식 규칙. 설계 원칙(skill 역할 분류, SRP, Skill 폭발 방지, Skill vs Rule 경계)은 `agent-design-principles` skill §4·§5 참조.
+> SKILL.md 파일의 작성 형식 규칙. 설계 원칙(skill 역할 분류, SRP, Skill 폭발 방지, Skill vs Rule 경계)은 `agent-design-principles` skill 참조.
 
 ## 원칙
 

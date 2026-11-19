@@ -5,7 +5,7 @@ paths:
 
 # Plugin Command 명세 컨벤션
 
-> Command 명세 파일의 작성 형식 규칙. 설계 원칙(user-only 진입점, 위임 구조, 멱등성)은 `agent-design-principles` skill §3 참조. Command 는 모델이 자동 발동하면 곤란한 진입점에만 쓴다.
+> Command 명세 파일의 작성 형식 규칙. 설계 원칙(user-only 진입점, 위임 구조, 멱등성)은 `agent-design-principles` skill 참조. Command 는 모델이 자동 발동하면 곤란한 진입점에만 쓴다.
 
 ## 원칙
 

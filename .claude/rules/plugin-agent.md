@@ -5,7 +5,7 @@ paths:
 
 # Plugin Agent 명세 컨벤션
 
-> **기존** Agent 명세 파일의 유지보수 형식 규칙. 새 agent 정의는 만들지 않는다 — 격리 실행이 필요하면 `context: fork` skill 로 만든다 (`agent-design-principles` skill §2). 본문을 크게 고칠 일이 생기면 fork skill 전환을 먼저 검토한다.
+> **기존** Agent 명세 파일의 유지보수 형식 규칙. 새 agent 정의는 만들지 않는다 — 격리 실행이 필요하면 `context: fork` skill 로 만든다 (`agent-design-principles` skill). 본문을 크게 고칠 일이 생기면 fork skill 전환을 먼저 검토한다.
 
 ## 원칙
 
