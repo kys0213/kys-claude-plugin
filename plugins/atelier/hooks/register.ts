@@ -1,6 +1,4 @@
-import type { EngineInterface, On, PluginOptions } from 'claude-code'
-
-import { registerKanban } from './kanban'
+import type { EngineInterface, On } from 'claude-code'
 
 type SpawnFact = {
   model: string | null
@@ -58,7 +56,7 @@ function decodeInstructions(parsed: unknown): string | undefined {
   return typeof instructions === 'string' ? instructions : undefined
 }
 
-export function register(on: On, options: PluginOptions): void {
+export function register(on: On): void {
   /**
    * Warnings from `agent.spawn`, held until the matching
    * `tool.call { tool: 'Agent' }` attaches them, keyed by the shared `tool_use_id`.
@@ -127,6 +125,4 @@ export function register(on: On, options: PluginOptions): void {
       instructions: e.instructions ? `${e.instructions}\n\n${note}` : note,
     })
   })
-
-  registerKanban(on, options)
 }

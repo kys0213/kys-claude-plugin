@@ -1,9 +1,7 @@
 mod drift_mocks;
 
 use atelier::drift::commands::sync;
-use atelier::drift::core::types::{
-    SyncTarget, BEGIN_MARKER, END_MARKER, HERDR_MOD_FILES, POLICY_RULES,
-};
+use atelier::drift::core::types::{SyncTarget, BEGIN_MARKER, END_MARKER, POLICY_RULES};
 use drift_mocks::*;
 
 fn run_named(fs: &MemFs, target: SyncTarget, name: Option<&str>) -> Result<String, String> {
@@ -156,72 +154,6 @@ fn refuses_name_on_non_policy_target_with_zero_writes() {
     fs.insert(USER_CLAUDE_MD, &block("body"));
 
     let err = run_named(&fs, SyncTarget::ClaudeMd, Some(POLICY_RULES[0])).unwrap_err();
-    assert_eq!(err, "--name is only supported with --target user-rules");
-    assert_eq!(fs.write_count(), 0);
-}
-
-#[test]
-fn sync_herdr_mod_backs_up_and_overwrites_every_file_and_installs_new_ones() {
-    let fs = MemFs::with_sources("body");
-    fs.install_herdr_mod_copies();
-    let edited = herdr_mod_copy(HERDR_MOD_FILES[0]);
-    fs.insert(&edited, "locally edited\n");
-    let added = HERDR_MOD_FILES[HERDR_MOD_FILES.len() - 1];
-    fs.files.borrow_mut().remove(&herdr_mod_copy(added));
-
-    let lines = run(&fs, SyncTarget::HerdrMod).unwrap();
-    let expected: String = HERDR_MOD_FILES
-        .iter()
-        .map(|name| {
-            let copy = herdr_mod_copy(name);
-            if *name == added {
-                format!("installed: {copy}\n")
-            } else {
-                format!(
-                    "synced: {copy} (backup: {HERDR_MODS_DIR}/atelier-board/.{name}.bak-{TS})\n"
-                )
-            }
-        })
-        .collect();
-    assert_eq!(lines, expected);
-    for name in HERDR_MOD_FILES {
-        assert_eq!(fs.content(&herdr_mod_copy(name)).unwrap(), HERDR_MOD_BODY);
-    }
-    assert_eq!(
-        fs.content(&format!(
-            "{HERDR_MODS_DIR}/atelier-board/.{}.bak-{TS}",
-            HERDR_MOD_FILES[0]
-        ))
-        .unwrap(),
-        "locally edited\n"
-    );
-    assert!(!fs
-        .files
-        .borrow()
-        .contains_key(&format!("{edited}.bak-{TS}")));
-}
-
-#[test]
-fn refuses_herdr_mod_when_not_installed_with_zero_writes() {
-    let fs = MemFs::with_sources("body");
-
-    let err = run(&fs, SyncTarget::HerdrMod).unwrap_err();
-    assert_eq!(
-        err,
-        format!(
-            "not installed: {} — run /atelier:setup",
-            herdr_mod_copy(HERDR_MOD_FILES[0])
-        )
-    );
-    assert_eq!(fs.write_count(), 0);
-}
-
-#[test]
-fn refuses_name_on_herdr_mod_with_zero_writes() {
-    let fs = MemFs::with_sources("body");
-    fs.install_herdr_mod_copies();
-
-    let err = run_named(&fs, SyncTarget::HerdrMod, Some(HERDR_MOD_FILES[0])).unwrap_err();
     assert_eq!(err, "--name is only supported with --target user-rules");
     assert_eq!(fs.write_count(), 0);
 }

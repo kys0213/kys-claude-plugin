@@ -101,36 +101,18 @@ struct Lexer {
     pos: usize,
     toks: Vec<Tok>,
     heredocs: Vec<Heredoc>,
-    bodies: Vec<HeredocBody>,
     /// End of input closes any open quote or substitution instead of failing.
     lenient: bool,
 }
 
 struct Heredoc {
-    /// Index of the `<<` token that opened it.
-    at: usize,
     delimiter: String,
     strip_tabs: bool,
     /// An unquoted delimiter: bash expands `$(…)` and backticks in the body.
     expands: bool,
 }
 
-/// A heredoc's body, verbatim through its delimiter line, and the index of
-/// the `<<` token that opened it.
-#[derive(Debug, Clone)]
-pub(crate) struct HeredocBody {
-    pub(crate) at: usize,
-    pub(crate) text: String,
-}
-
 pub(crate) fn lex(src: &str, lenient: bool) -> Result<Vec<Tok>, LexError> {
-    lex_with_heredocs(src, lenient).map(|(toks, _)| toks)
-}
-
-pub(crate) fn lex_with_heredocs(
-    src: &str,
-    lenient: bool,
-) -> Result<(Vec<Tok>, Vec<HeredocBody>), LexError> {
     let mut lx = Lexer::new(src, lenient);
     while let Some(c) = lx.peek() {
         match c {
@@ -170,7 +152,7 @@ pub(crate) fn lex_with_heredocs(
             }
         }
     }
-    Ok((lx.toks, lx.bodies))
+    Ok(lx.toks)
 }
 
 fn is_word_end(c: char) -> bool {
@@ -187,7 +169,6 @@ impl Lexer {
             pos: 0,
             toks: Vec::new(),
             heredocs: Vec::new(),
-            bodies: Vec::new(),
             lenient,
         }
     }
@@ -342,7 +323,6 @@ impl Lexer {
         }
         let word = self.read_word()?;
         self.heredocs.push(Heredoc {
-            at: self.toks.len() - 1,
             expands: !word.quoted,
             delimiter: word.text,
             strip_tabs,
@@ -350,9 +330,8 @@ impl Lexer {
         Ok(())
     }
 
-    /// Consumes and keeps the bodies of the heredocs opened on the line just
-    /// ended. An expanding body's substitutions are also attached to that
-    /// line's command.
+    /// Consumes the bodies of the heredocs opened on the line just ended. An
+    /// expanding body's substitutions are attached to that line's command.
     fn read_heredoc_bodies(&mut self) {
         for doc in std::mem::take(&mut self.heredocs) {
             let mut body = String::new();
@@ -362,10 +341,6 @@ impl Lexer {
             } else {
                 Vec::new()
             };
-            self.bodies.push(HeredocBody {
-                at: doc.at,
-                text: body,
-            });
             if !subs.is_empty() {
                 let at = self.toks.len() - 1;
                 let carrier = Word {

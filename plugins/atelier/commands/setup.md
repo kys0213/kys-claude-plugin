@@ -1,5 +1,5 @@
 ---
-description: atelier 통합 환경을 초기화합니다 (git / style / herdr 모듈 선택 + 기존 hook 마이그레이션 + guard hook 관리)
+description: atelier 통합 환경을 초기화합니다 (git / style 모듈 선택 + 기존 hook 마이그레이션 + guard hook 관리)
 argument-hint: ""
 allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 ---
@@ -41,8 +41,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 |---|---|---|
 | `git` | GitHub 인증 확인 + `~/.git-workflow-env` 생성 + Default Branch Guard hook | git-utils setup |
 | `style` | `~/.claude/CLAUDE.md` 코딩 원칙 병합 + 문서 작성 정책 룰 설치 (`~/.claude/rules/atelier/`) | coding-style setup |
-| `herdr` | herdr-app 에 세션 칸반 패널(mod) 설치 — herdr-app 이 있을 때만 | 신규 |
-| `all` | 위 세 가지 전부 (`herdr` 는 herdr-app 이 있을 때만) | 신규 |
+| `all` | 위 두 가지 전부 | 신규 |
 
 선택된 모듈만 아래 해당 Step 을 수행합니다.
 
@@ -52,7 +51,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 > atelier drift check --plugin-root "${CLAUDE_PLUGIN_ROOT}"
 > ```
 >
-> `DRIFTED`·`NEW` 는 `/atelier:update` 가 처리합니다. setup 에서는 `NOT_INSTALLED` 로 보고된 산출물의 모듈(`style` → CLAUDE.md 블록·정책 룰) 중 새로 설치할 것만 선택하면 됩니다. `herdr` 모듈의 패널(`herdr-mod/*`)도 같습니다.
+> `DRIFTED`·`NEW` 는 `/atelier:update` 가 처리합니다. setup 에서는 `NOT_INSTALLED` 로 보고된 산출물의 모듈(`style` → CLAUDE.md 블록·정책 룰) 중 새로 설치할 것만 선택하면 됩니다.
 
 > setup 이 설치하는 룰은 전부 user scope(`~/.claude/rules/atelier/`)에만 설치합니다. 모든 프로젝트에 공통으로 깔리는 베이스 룰이라 레포마다 복사하지 않습니다. 언어별 코드 스타일 룰은 프로젝트 성격에 따르므로 setup 이 아니라 `/atelier:code-style` 이 프로젝트 `.claude/rules/atelier/code-style/` 에 설치합니다.
 
@@ -89,32 +88,6 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 - 대상 디렉토리가 없으면 생성, 파일이 이미 존재하면 덮어쓸지 확인 후 `${CLAUDE_PLUGIN_ROOT}/rules/policies/` 의 정책 파일들을 **내용 수정 없이 그대로** 복사
 
 > 설치 대상 파일 목록은 atelier CLI 가 소유합니다 — 이후 드리프트 점검·동기화(`drift check` / `drift sync --target user-rules`)와 같은 목록을 봅니다.
-
-## Step 2c — herdr 모듈
-
-herdr-app 에서 atelier 세션 칸반을 보는 패널(`atelier-board` mod)을 설치합니다. 규격은 `spec/concerns/herdr-extension.md` 입니다.
-
-1. herdr-app 이 있는지 확인합니다. 없으면 이 모듈을 건너뛰고 `herdr-app 이 없어 herdr 모듈을 건너뛰었어요` 를 보고합니다:
-   ```bash
-   command -v herdr-app
-   ```
-2. 패널을 herdr-app 의 mods 폴더에 **내용 수정 없이 그대로** 복사합니다. 이미 있으면 묻지 않고 덮어씁니다 (패널은 atelier CLI 와 함께 바뀌는 코드라 update 도 묻지 않고 갱신합니다):
-   ```bash
-   HERDR_HOME="${HERDR_APP_HOME:-$HOME/.config/herdr-app}"
-   mkdir -p "$HERDR_HOME/mods/atelier-board"
-   cp "${CLAUDE_PLUGIN_ROOT}/extensions/herdr/mods/atelier-board/"* "$HERDR_HOME/mods/atelier-board/"
-   ```
-3. herdr-app 의 패널 검사를 통과해야 설치가 끝납니다:
-   ```bash
-   herdr-app check "$HERDR_HOME/mods/atelier-board"
-   ```
-4. 단축키를 안내합니다. `keys.json` 은 **고치지 않습니다** — herdr-app 은 사용자가 한 번 고친 단축키 파일에 새 기본 단축키를 넣지 않습니다. 넣을 줄만 보여 줍니다:
-   ```json
-   "global": { "ctrl-shift-a": { "command": "pane.split", "args": { "direction": "right", "mod": "atelier-board" } } }
-   ```
-   단축키는 지금 탭의 오른쪽에 패널을 나눠 엽니다. 패널은 그 탭과 함께 저장되고, 다른 pane 처럼 닫습니다. herdr-app 의 레이아웃은 고치지 않습니다 (기본 레이아웃은 읽기 전용이고, 복제하면 앱 업데이트를 따라가지 않습니다).
-
-> 복사할 파일 목록은 atelier CLI 가 소유합니다 — 이후 드리프트 점검·동기화(`drift check` / `drift sync --target herdr-mod`)와 같은 목록을 봅니다.
 
 ## Step 3 — 기존 hook 마이그레이션 (frozen → atelier)
 
@@ -198,9 +171,6 @@ alias git-utils='atelier git'
 - `atelier git setup guard` 가 `--default-branch` 없이 guard 를 등록하고 `"defaultBranch": null` 로 보고합니다.
   실패가 아니므로 setup 은 계속 진행합니다 — 비표준 기본 브랜치 repo 에서는 보호가 제한될 수 있음을 안내합니다
 
-**herdr-app 패널 검사(`herdr-app check`) 실패:**
-- herdr 모듈 설치가 실패했다고 보고하고 검사 출력 원문을 보여 줍니다. 복사한 파일은 그대로 두고, 다른 모듈의 Step 은 계속 진행합니다
-
 **settings.json 이 깨진 JSON 인 경우:**
 - 덮어쓰기를 거부하고 `Error: <message>` 를 stderr 에 출력하며 exit 1 로 끝납니다 — 사용자에게 파일 상태를 보여주고 수동 복구를 안내합니다
 
@@ -224,18 +194,6 @@ alias git-utils='atelier git'
 
 - user scope 는 `"defaultBranch": null` 이고 `commands` 에 `--default-branch` 가 붙지 않습니다.
 - 마이그레이션이 일어나면 `"removed"` 에 정리된 옛 command 가 담깁니다 (비어 있으면 정리할 것이 없었다는 뜻).
-
-**herdr 모듈 설치:**
-```
-atelier-board 패널을 ~/.config/herdr-app/mods/atelier-board 에 설치했어요 (herdr-app check 통과).
-단축키를 쓰려면 ~/.config/herdr-app/keys.json 의 "global" 에 이 줄을 넣어 주세요:
-  "ctrl-shift-a": { "command": "pane.split", "args": { "direction": "right", "mod": "atelier-board" } }
-```
-
-**herdr-app 이 없을 때:**
-```
-herdr-app 이 없어 herdr 모듈을 건너뛰었어요.
-```
 
 **PR Guard 등 개별 hook 등록 (`hook register`):**
 ```json

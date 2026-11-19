@@ -42,7 +42,7 @@ kys-claude-plugin/
 - `/atelier:grill` - 설계를 대화로 생성하거나 이미 있는 계획을 심문
 
 **Command:**
-- `/atelier:setup` - 통합 setup (git / style / herdr 모듈 + hook 관리)
+- `/atelier:setup` - 통합 setup (git / style 모듈 + hook 관리)
 
 **사용:**
 ```bash

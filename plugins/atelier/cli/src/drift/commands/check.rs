@@ -1,7 +1,7 @@
 use crate::drift::commands::{read_source, scope_installed, DriftDeps};
 use crate::drift::core::types::{
     scan_markers, ArtifactContent, ArtifactStatus, CheckFinding, CheckReport, DriftPaths,
-    CLAUDE_MD_CHECK, HERDR_MOD_FILES, POLICY_RULES,
+    CLAUDE_MD_CHECK, POLICY_RULES,
 };
 
 pub fn run(deps: &DriftDeps, paths: &DriftPaths) -> Result<CheckReport, String> {
@@ -9,11 +9,6 @@ pub fn run(deps: &DriftDeps, paths: &DriftPaths) -> Result<CheckReport, String> 
     let scoped_templates: Vec<String> = POLICY_RULES
         .iter()
         .map(|name| paths.template_policy_rule(name))
-        .chain(
-            HERDR_MOD_FILES
-                .iter()
-                .map(|name| paths.template_herdr_mod_file(name)),
-        )
         .collect();
     for template in std::iter::once(&template_claude_md).chain(&scoped_templates) {
         if !deps.fs.exists(template) {
@@ -32,13 +27,6 @@ pub fn run(deps: &DriftDeps, paths: &DriftPaths) -> Result<CheckReport, String> 
         POLICY_RULES,
         |name| paths.user_rule_copy(name),
         |name| paths.template_policy_rule(name),
-    )?);
-    findings.extend(check_scope(
-        deps,
-        "herdr-mod",
-        HERDR_MOD_FILES,
-        |name| paths.herdr_mod_copy(name),
-        |name| paths.template_herdr_mod_file(name),
     )?);
     Ok(CheckReport { findings })
 }
