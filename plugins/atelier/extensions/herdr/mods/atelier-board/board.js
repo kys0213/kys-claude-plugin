@@ -67,21 +67,59 @@ export function moveTarget(address, agents, terminals) {
   return { command: hasPane ? 'pane.focus' : 'terminal.peek', args: { terminal: address } }
 }
 
+/**
+ * Where a card stands in herdr-app: `open` in a live terminal (the session's own first, then the
+ * one a board opened), `opening` while a board's tab has not reported its terminal for `holdMs`,
+ * else `closed`.
+ */
+export function cardState(s, terminals, now, holdMs) {
+  const live = (address) => Boolean(address) && terminals.some((t) => t.address === address && isLive(t))
+  if (live(s.hc_terminal)) return { kind: 'open', address: s.hc_terminal }
+  const opened = s.opened ?? null
+  if (live(opened?.terminal)) return { kind: 'open', address: opened.terminal }
+  if (opened && !opened.terminal && now - opened.at < holdMs) return { kind: 'opening' }
+  return { kind: 'closed' }
+}
+
+/** Claims a new tab over the opened entry this card was read with. */
+export function claimArgs(s) {
+  return ['kanban', 'opened', '--session', s.session_id, '--opening', '--seen', s.opened ? String(s.opened.at) : 'none']
+}
+
+export function releaseArgs(s, at) {
+  return ['kanban', 'opened', '--session', s.session_id, '--clear', '--seen', String(at)]
+}
+
+/** The claim's time, or why there is none. */
+export function claimed(r) {
+  const out = json(r.stdout)
+  if (typeof out?.error === 'string') return { error: out.error }
+  const at = out?.opened?.at
+  if (r.code !== 0 || typeof at !== 'number') return { error: said(r) || `exit ${r.code}` }
+  return { at }
+}
+
 /** The running Claude sessions from `claude agents --json`; null when the run gave none. */
 export function parseAgents(r) {
   const out = r.code === 0 ? json(r.stdout) : null
   return Array.isArray(out) ? out : null
 }
 
+// The tab's shell has `HC_TERMINAL_ID` of the tab itself; a background session's own hook never
+// does, so the tab reports its terminal before it starts Claude.
+const REPORT = 'atelier kanban opened --session "$1" --terminal "$HC_TERMINAL_ID" >/dev/null 2>&1'
+
 /**
- * How to open a session that has no hc terminal, from the running sessions:
- * a background session is attached, a session that is not running is resumed in its folder,
- * and a session running somewhere else is left alone so the talk doesn't get a second process.
+ * How to open a closed card, from the running sessions: a background session is attached,
+ * a session that is not running is resumed in its folder, and a session running somewhere else
+ * is left alone so the talk doesn't get a second process.
  */
 export function reopenTarget(s, running) {
   const found = running.find((a) => a.sessionId === s.session_id)
   if (found && typeof found.id !== 'string') return { kind: 'elsewhere' }
-  const argv = found ? ['claude', 'attach', found.id] : ['claude', '--resume', s.session_id]
+  const argv = found
+    ? ['sh', '-c', `${REPORT}; exec claude attach "$2"`, 'sh', s.session_id, found.id]
+    : ['sh', '-c', `${REPORT}; exec claude --resume "$1"`, 'sh', s.session_id]
   return {
     kind: found ? 'attach' : 'resume',
     command: 'tab.new',

@@ -3,6 +3,9 @@ import { describe, test } from 'node:test'
 
 import {
   boardKey,
+  cardState,
+  claimArgs,
+  claimed,
   decideArgs,
   layout,
   moveTarget,
@@ -11,6 +14,7 @@ import {
   parseStatus,
   permitArgs,
   recordsDir,
+  releaseArgs,
   reopenTarget,
   replyArgs,
 } from '../../extensions/herdr/mods/atelier-board/board.js'
@@ -99,23 +103,88 @@ describe('moveTarget', () => {
   })
 })
 
-describe('reopenTarget', () => {
-  const outside = session('s1', 'stale', { label: 'fix login', cwd: '/w/app' })
+describe('cardState', () => {
+  const HOLD = 15000
 
-  test('resumes a session that is not running, in its own folder', () => {
-    assert.deepEqual(reopenTarget(outside, [{ pid: 9, sessionId: 'other', status: 'idle' }]), {
-      kind: 'resume',
-      command: 'tab.new',
-      args: { name: 'fix login', folder: '/w/app', argv: ['claude', '--resume', 's1'] },
+  test('a card in a live terminal of its own is open there', () => {
+    assert.deepEqual(cardState(session('s', 'idle', { hc_terminal: 't1' }), [live('t1')], 0, HOLD), {
+      kind: 'open',
+      address: 't1',
     })
   })
 
+  test('a card a board opened is open in the terminal the tab reported', () => {
+    const s = session('s', 'idle', { opened: { at: 0, terminal: 't31' } })
+
+    assert.deepEqual(cardState(s, [live('t31')], 99999, HOLD), { kind: 'open', address: 't31' })
+  })
+
+  test('the session’s own terminal comes first when both are live', () => {
+    const s = session('s', 'idle', { hc_terminal: 't1', opened: { at: 0, terminal: 't31' } })
+
+    assert.equal(cardState(s, [live('t1'), live('t31')], 0, HOLD).address, 't1')
+  })
+
+  test('a dead terminal leaves the card closed, so it can be opened again', () => {
+    const exited = (address) => ({ address, parent: null, state: 'exited' })
+
+    assert.deepEqual(cardState(session('s', 'stale', { hc_terminal: 't1' }), [exited('t1')], 0, HOLD), { kind: 'closed' })
+    assert.deepEqual(
+      cardState(session('s', 'stale', { opened: { at: 0, terminal: 't31' } }), [exited('t31')], 0, HOLD),
+      { kind: 'closed' },
+    )
+    assert.deepEqual(cardState(session('s', 'stale'), [], 0, HOLD), { kind: 'closed' })
+  })
+
+  test('a tab that has not reported is opening for the hold, then closed', () => {
+    const s = session('s', 'stale', { opened: { at: 1000, terminal: null } })
+
+    assert.deepEqual(cardState(s, [], 1000 + HOLD - 1, HOLD), { kind: 'opening' })
+    assert.deepEqual(cardState(s, [], 1000 + HOLD, HOLD), { kind: 'closed' })
+  })
+})
+
+describe('opening a closed card', () => {
+  const outside = session('s1', 'stale', { label: 'fix login', cwd: '/w/app' })
+  const tabRun = (target) => target.args.argv.slice(3)
+
+  test('a claim names the entry the card was read with', () => {
+    assert.deepEqual(claimArgs(outside).slice(-2), ['--seen', 'none'])
+    assert.deepEqual(claimArgs({ ...outside, opened: { at: 42, terminal: 't2y' } }).slice(-2), ['--seen', '42'])
+    assert.deepEqual(releaseArgs(outside, 42), ['kanban', 'opened', '--session', 's1', '--clear', '--seen', '42'])
+  })
+
+  test('a claim run gives its time, or why it was refused', () => {
+    assert.deepEqual(claimed({ code: 0, stdout: '{"opened":{"session_id":"s1","at":7,"terminal":null}}', stderr: '' }), { at: 7 })
+    assert.deepEqual(claimed({ code: 0, stdout: '{"error":"그 사이 다른 보드가"}', stderr: '' }), { error: '그 사이 다른 보드가' })
+    assert.ok(typeof claimed({ code: 1, stdout: '', stderr: 'boom' }).error === 'string')
+  })
+
+  test('resumes a session that is not running, in its own folder', () => {
+    const target = reopenTarget(outside, [{ pid: 9, sessionId: 'other', status: 'idle' }])
+
+    assert.equal(target.kind, 'resume')
+    assert.equal(target.command, 'tab.new')
+    assert.equal(target.args.name, 'fix login')
+    assert.equal(target.args.folder, '/w/app')
+    assert.deepEqual(tabRun(target), ['sh', 's1'])
+    assert.match(target.args.argv[2], /exec claude --resume "\$1"$/)
+  })
+
   test('attaches to a background session by its agent id', () => {
-    assert.deepEqual(reopenTarget(outside, [{ id: 'bg-7', sessionId: 's1', state: 'blocked' }]), {
-      kind: 'attach',
-      command: 'tab.new',
-      args: { name: 'fix login', folder: '/w/app', argv: ['claude', 'attach', 'bg-7'] },
-    })
+    const target = reopenTarget(outside, [{ id: 'bg-7', sessionId: 's1', state: 'blocked' }])
+
+    assert.equal(target.kind, 'attach')
+    assert.deepEqual(tabRun(target), ['sh', 's1', 'bg-7'])
+    assert.match(target.args.argv[2], /exec claude attach "\$2"$/)
+  })
+
+  test('the new tab reports its own terminal before Claude starts', () => {
+    for (const running of [[], [{ id: 'bg-7', sessionId: 's1' }]]) {
+      const script = reopenTarget(outside, running).args.argv[2]
+
+      assert.match(script, /^atelier kanban opened --session "\$1" --terminal "\$HC_TERMINAL_ID"/)
+    }
   })
 
   test('leaves a session running somewhere else alone', () => {
