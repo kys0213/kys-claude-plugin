@@ -131,7 +131,7 @@ describe('cardState', () => {
 
     assert.deepEqual(cardState(session('s', 'stale', { hc_terminal: 't1' }), [exited('t1')], 0, HOLD), { kind: 'closed' })
     assert.deepEqual(
-      cardState(session('s', 'stale', { opened: { at: 0, terminal: 't31' } }), [exited('t31')], 0, HOLD),
+      cardState(session('s', 'stale', { opened: { at: 0, terminal: 't31' } }), [exited('t31')], HOLD, HOLD),
       { kind: 'closed' },
     )
     assert.deepEqual(cardState(session('s', 'stale'), [], 0, HOLD), { kind: 'closed' })
@@ -144,19 +144,25 @@ describe('cardState', () => {
     assert.deepEqual(cardState(s, [], 1000 + HOLD, HOLD), { kind: 'closed' })
   })
 
-  test('a live terminal back at its shell after Claude exited leaves the card closed', () => {
-    const shell = (address) => ({ ...live(address), program: { shell: true } })
-    const claude = (address) => ({ ...live(address), program: { shell: false } })
+  const claude = (address) => ({ ...live(address), program: { key: 'claude', shell: false, agent: false } })
+  const shell = (address) => ({ ...live(address), program: { key: 'shell', shell: true, agent: false } })
+  const vim = (address) => ({ ...live(address), program: { key: 'vim', shell: false, agent: false } })
 
-    assert.deepEqual(cardState(session('s', 'stale', { hc_terminal: 't2y' }), [shell('t2y')], 0, HOLD), { kind: 'closed' })
-    assert.deepEqual(
-      cardState(session('s', 'stale', { opened: { at: 0, terminal: 't2z' } }), [shell('t2z')], 0, HOLD),
-      { kind: 'closed' },
-    )
+  test('a live terminal is open only while Claude runs in it', () => {
     assert.deepEqual(cardState(session('s', 'idle', { hc_terminal: 't1' }), [claude('t1')], 0, HOLD), {
       kind: 'open',
       address: 't1',
     })
+    assert.deepEqual(cardState(session('s', 'stale', { hc_terminal: 't2y' }), [shell('t2y')], 0, HOLD), { kind: 'closed' })
+    assert.deepEqual(cardState(session('s', 'stale', { hc_terminal: 't2y' }), [vim('t2y')], 0, HOLD), { kind: 'closed' })
+  })
+
+  test('a board’s tab that reported but runs no Claude is opening for the hold, then closed', () => {
+    const s = session('s', 'stale', { opened: { at: 1000, terminal: 't2z' } })
+
+    assert.deepEqual(cardState(s, [shell('t2z')], 1000 + HOLD - 1, HOLD), { kind: 'opening' })
+    assert.deepEqual(cardState(s, [shell('t2z')], 1000 + HOLD, HOLD), { kind: 'closed' })
+    assert.deepEqual(cardState(s, [claude('t2z')], 1000, HOLD), { kind: 'open', address: 't2z' })
   })
 })
 

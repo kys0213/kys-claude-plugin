@@ -67,21 +67,23 @@ export function moveTarget(address, agents, terminals) {
   return { command: hasPane ? 'pane.focus' : 'terminal.peek', args: { terminal: address } }
 }
 
-// herdr-app keeps a terminal's interactive shell after the agent in it exits, so a live terminal
-// whose program is that shell again no longer holds the session.
-const holdsAgent = (t) => isLive(t) && t.program?.shell !== true
+// herdr-app keeps a terminal's interactive shell after the agent in it exits, and a person may
+// start another program there, so only a terminal running Claude (`program.key`, both for an
+// interactive session and an attached one) holds the session. A terminal without `program`
+// counts by its state alone.
+const holdsClaude = (t) => isLive(t) && (t.program ? t.program.key === 'claude' : true)
 
 /**
- * Where a card stands in herdr-app: `open` in a live terminal still running something other than
- * its shell (the session's own first, then the one a board opened), `opening` while a board's tab
- * has not reported its terminal for `holdMs`, else `closed`.
+ * Where a card stands in herdr-app: `open` in a live terminal running Claude (the session's own
+ * first, then the one a board opened), `opening` for `holdMs` after a board claimed a tab until
+ * Claude runs in it, else `closed`.
  */
 export function cardState(s, terminals, now, holdMs) {
-  const live = (address) => Boolean(address) && terminals.some((t) => t.address === address && holdsAgent(t))
-  if (live(s.hc_terminal)) return { kind: 'open', address: s.hc_terminal }
+  const holds = (address) => Boolean(address) && terminals.some((t) => t.address === address && holdsClaude(t))
+  if (holds(s.hc_terminal)) return { kind: 'open', address: s.hc_terminal }
   const opened = s.opened ?? null
-  if (live(opened?.terminal)) return { kind: 'open', address: opened.terminal }
-  if (opened && !opened.terminal && now - opened.at < holdMs) return { kind: 'opening' }
+  if (holds(opened?.terminal)) return { kind: 'open', address: opened.terminal }
+  if (opened && now - opened.at < holdMs) return { kind: 'opening' }
   return { kind: 'closed' }
 }
 
