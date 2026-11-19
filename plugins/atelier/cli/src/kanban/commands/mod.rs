@@ -29,7 +29,7 @@ use crate::kanban::commands::payload::{
 };
 use crate::kanban::commands::records::{FsRecords, KanbanRecords, StatusQuery};
 use crate::kanban::commands::requests::{Answerer, KanbanRequests, PermitTiming};
-use crate::kanban::commands::spawn::{GitProbe, ProcessLauncher};
+use crate::kanban::commands::spawn::{process_terminal_env, GitProbe, ProcessLauncher};
 use crate::kanban::core::allowlist::RealPaths;
 use crate::kanban::core::answer::compose;
 use crate::kanban::core::bash_guard::refusal;
@@ -544,7 +544,7 @@ fn run_request(command: RequestCommand) -> Value {
             text,
             worktree,
             from_label,
-        } => match Via::parse(&via) {
+        } => match Via::parse(&via, &process_terminal_env()) {
             Ok(via) => requests.spawn(via, &cwd, &text, worktree.as_deref(), from_label.as_deref()),
             Err(e) => json!({ "error": e }),
         },

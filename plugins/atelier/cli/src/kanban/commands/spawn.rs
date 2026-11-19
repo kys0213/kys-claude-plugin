@@ -2,6 +2,7 @@
 //! the launch program (`claude` or `hc`) to start it.
 
 use crate::kanban::core::spawn::{Launch, RepoPaths};
+use crate::kanban::core::terminal::TerminalEnv;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -18,6 +19,17 @@ pub struct Launched {
 
 pub trait Launcher {
     fn launch(&self, cwd: &str, launch: &Launch) -> Result<Launched, String>;
+}
+
+/// This process's terminal variables; `kanban spawn` runs in the caller's
+/// shell, so they are the caller's.
+pub fn process_terminal_env() -> TerminalEnv {
+    let var = |name: &str| std::env::var(name).ok();
+    TerminalEnv {
+        hc_terminal_id: var("HC_TERMINAL_ID"),
+        herdr_env: var("HERDR_ENV"),
+        session_kind: var("CLAUDE_CODE_SESSION_KIND"),
+    }
 }
 
 pub struct GitProbe;

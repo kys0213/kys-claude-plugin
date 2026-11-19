@@ -1,6 +1,7 @@
 //! Where a background session may start and what it is started with.
 
 use super::request::{check_slug, prompt_text, Sender};
+use super::terminal::TerminalEnv;
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -26,11 +27,15 @@ pub enum Via {
 }
 
 impl Via {
-    pub fn parse(id: &str) -> Result<Via, String> {
+    /// `auto` is `hc` when the caller runs in an hc terminal of its own, as
+    /// `env` (the caller's environment) says, else `bg`.
+    pub fn parse(id: &str, env: &TerminalEnv) -> Result<Via, String> {
         match id {
             "bg" => Ok(Via::Bg),
             "hc" => Ok(Via::Hc),
-            other => Err(format!("--via 는 bg 또는 hc 예요 (받은 값: {other})")),
+            "auto" if env.hc_terminal().is_some() => Ok(Via::Hc),
+            "auto" => Ok(Via::Bg),
+            other => Err(format!("--via 는 bg, hc 또는 auto 예요 (받은 값: {other})")),
         }
     }
 

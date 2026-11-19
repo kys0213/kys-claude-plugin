@@ -4,6 +4,7 @@ mod kanban_support;
 use atelier::kanban::commands::requests::PermitTiming;
 use atelier::kanban::core::request::{OpenAsk, PaneNonces, Sender, Waits};
 use atelier::kanban::core::spawn::Via;
+use atelier::kanban::core::terminal::TerminalEnv;
 use kanban_mocks::{Edges, FakeLauncher, MapProbe};
 use kanban_support::NOW;
 use serde_json::{json, Value};
@@ -184,10 +185,21 @@ fn spawn_via_hc_reports_output_that_names_no_terminal() {
 }
 
 #[test]
-fn spawn_via_parses_only_bg_and_hc() {
-    assert_eq!(Via::parse("bg"), Ok(Via::Bg));
-    assert_eq!(Via::parse("hc"), Ok(Via::Hc));
-    assert!(Via::parse("tmux").is_err());
+fn spawn_via_parses_bg_hc_and_auto_by_the_callers_terminal() {
+    let own = TerminalEnv {
+        hc_terminal_id: Some("t18".to_string()),
+        ..Default::default()
+    };
+    let inherited = TerminalEnv {
+        session_kind: Some("bg".to_string()),
+        ..own.clone()
+    };
+    assert_eq!(Via::parse("bg", &own), Ok(Via::Bg));
+    assert_eq!(Via::parse("hc", &TerminalEnv::default()), Ok(Via::Hc));
+    assert_eq!(Via::parse("auto", &own), Ok(Via::Hc));
+    assert_eq!(Via::parse("auto", &inherited), Ok(Via::Bg));
+    assert_eq!(Via::parse("auto", &TerminalEnv::default()), Ok(Via::Bg));
+    assert!(Via::parse("tmux", &own).is_err());
 }
 
 fn strings(list: &[&str]) -> Vec<String> {

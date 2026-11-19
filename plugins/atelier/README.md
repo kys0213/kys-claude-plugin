@@ -167,7 +167,7 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
 - **오케스트레이터**: 메인 오케스트레이터는 같은 보드를 읽어 레포별로 쉬는 세션에 일을 맡기거나, 그 레포에
   백그라운드 세션을 새로 띄웁니다. 오케스트레이터 세션의 권한 규칙을 그대로 따릅니다. 절차는 `orchestrator`
   skill 이 담습니다. herdr-app 터미널 안의 오케스트레이터는 작업 세션을 hc 터미널로 띄워서, 그 세션이
-  herdr-app 에 오케스트레이터의 하위 에이전트로 보입니다(`atelier kanban spawn --via hc`).
+  herdr-app 에 오케스트레이터의 하위 에이전트로 보입니다(`atelier kanban spawn --via auto`).
 - **herdr-app 패널**: [herdr-app](https://github.com/herdrdev/herdr-app) 안에서 같은 보드를 오른쪽 패널로
   봅니다. `/atelier:setup` 의 `herdr` 모듈로 설치하고, `/atelier:update` 가 새 버전으로 맞춥니다.
   - 카드를 누르면 그 세션의 터미널로 갑니다. 터미널 밖에서 도는 세션(백그라운드 세션 등)은 이동할 수 없습니다.

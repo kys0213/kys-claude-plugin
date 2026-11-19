@@ -289,7 +289,9 @@ pub enum RequestCommand {
     },
     /// Starts a background session at a repository's main working tree
     Spawn {
-        /// `bg` (`claude --bg`) or `hc` (a child herdr-core terminal of the caller's)
+        /// `bg` (`claude --bg`), `hc` (a child herdr-core terminal of the
+        /// caller's), or `auto` (`hc` when the caller runs in an hc terminal of
+        /// its own, else `bg`)
         #[arg(long, default_value = "bg")]
         via: String,
         #[arg(long)]

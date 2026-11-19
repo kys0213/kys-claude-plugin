@@ -23,12 +23,25 @@ impl World {
     }
 
     fn kanban(&self, args: &[&str]) -> Value {
+        self.kanban_in_env(args, &[])
+    }
+
+    /// Runs with only `vars` of the terminal variables set.
+    fn kanban_in_env(&self, args: &[&str], vars: &[(&str, &str)]) -> Value {
         let path = format!(
             "{}:{}",
             self.bin.path().display(),
             std::env::var("PATH").unwrap_or_default()
         );
-        stdout_json(self.command().args(args).env("PATH", path))
+        let mut command = self.command();
+        command.args(args).env("PATH", path);
+        for name in ["HC_TERMINAL_ID", "HERDR_ENV", "CLAUDE_CODE_SESSION_KIND"] {
+            command.env_remove(name);
+        }
+        for (name, value) in vars {
+            command.env(name, value);
+        }
+        stdout_json(&mut command)
     }
 
     fn send_pane(&self, text: &str) -> Value {
@@ -460,6 +473,42 @@ fn spawn_refuses_an_unknown_via() {
     let out = w.kanban(&["spawn", "--via", "tmux", "--cwd", &root, "--text", "x"]);
     assert!(out["error"].is_string(), "{out}");
     assert!(!w.bin.path().join("claude.log").exists());
+}
+
+#[test]
+fn spawn_via_auto_uses_hc_only_from_an_interactive_session_in_an_hc_terminal() {
+    let repo = git_repo();
+    let root = fs::canonicalize(repo.path()).expect("canonical");
+    let root = root.display().to_string();
+    let args = ["spawn", "--via", "auto", "--cwd", &root, "--text", "x"];
+    for (vars, launched) in [
+        (vec![("HC_TERMINAL_ID", "t18")], "hc"),
+        (
+            vec![
+                ("HC_TERMINAL_ID", "t18"),
+                ("CLAUDE_CODE_SESSION_KIND", "bg"),
+            ],
+            "claude",
+        ),
+        (
+            vec![("HC_TERMINAL_ID", "t18"), ("HERDR_ENV", "1")],
+            "claude",
+        ),
+        (vec![], "claude"),
+    ] {
+        let w = World::new();
+        w.fake_claude("backgrounded · 6d652fd9\n");
+        w.fake("hc", "{\"address\":\"t7\"}\n");
+        let out = w.kanban_in_env(&args, &vars);
+        assert!(out["spawned"].is_object(), "{vars:?} → {out}");
+        for program in ["hc", "claude"] {
+            assert_eq!(
+                w.bin.path().join(format!("{program}.log")).exists(),
+                program == launched,
+                "{vars:?} → {program}"
+            );
+        }
+    }
 }
 
 #[test]
