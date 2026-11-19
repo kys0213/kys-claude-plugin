@@ -9,6 +9,7 @@ pub mod delegate;
 pub mod inbox;
 pub mod ledger;
 pub mod ledger_store;
+pub mod opened;
 pub mod paths;
 pub mod payload;
 pub mod records;
@@ -22,6 +23,7 @@ use crate::kanban::commands::delegate::{
 use crate::kanban::commands::inbox::{ClockIds, FsInbox, ThreadPause};
 use crate::kanban::commands::ledger::KanbanLedger;
 use crate::kanban::commands::ledger_store::{read_book, FsLedger, LedgerStore};
+use crate::kanban::commands::opened::{FsOpened, KanbanOpened};
 use crate::kanban::commands::paths::FsPaths;
 use crate::kanban::commands::payload::{
     parse_answer_request, parse_bash_command, parse_nonce_keys, parse_pane_nonces,
@@ -252,7 +254,7 @@ impl WaitView<'_> {
         })
     }
 
-    fn status_entry_json(&self, column: Column, card: &Card) -> Value {
+    fn status_entry_json(&self, column: Column, card: &Card, opened: Value) -> Value {
         let place = Place {
             repo_root: card.repo_root.as_deref(),
             cwd: &card.cwd,
@@ -268,6 +270,7 @@ impl WaitView<'_> {
             "subtitle": card.subtitle,
             "permission_mode": card.permission_mode,
             "hc_terminal": card.hc_terminal,
+            "opened": opened,
             "actions": action_ids(&card.actions),
             "last_line": card.last_line,
             "delivery": card.detail.delivery,
@@ -321,10 +324,18 @@ fn layout_json(layout: &Layout) -> Value {
 fn with_records<T>(run: impl FnOnce(&KanbanRecords) -> T) -> T {
     let store = FsRecords::from_env();
     let inbox = FsInbox::from_env();
+    let opened = FsOpened::from_env();
     run(&KanbanRecords {
         store: &store,
         inbox: &inbox,
+        opened: &opened,
         paths: &FsPaths,
+    })
+}
+
+fn with_opened<T>(run: impl FnOnce(&KanbanOpened) -> T) -> T {
+    run(&KanbanOpened {
+        store: &FsOpened::from_env(),
     })
 }
 
@@ -379,11 +390,16 @@ fn run_status(
         .and_then(|format| with_records(|r| r.status(&query)).map(|board| (format, board)));
     match shown {
         Ok((Format::Json, board)) => with_status_view(now, |view, ledger| {
-            let sessions: Vec<Value> = select(&board, query.session.as_deref())
-                .into_iter()
-                .flat_map(|(column, cards)| cards.into_iter().map(move |card| (column, card)))
-                .map(|(column, card)| view.status_entry_json(column, card))
-                .collect();
+            let sessions: Vec<Value> = with_opened(|opened| {
+                select(&board, query.session.as_deref())
+                    .into_iter()
+                    .flat_map(|(column, cards)| cards.into_iter().map(move |card| (column, card)))
+                    .map(|(column, card)| {
+                        let entry = opened.get(&card.session_id).map(|o| o.to_json());
+                        view.status_entry_json(column, card, entry.unwrap_or(Value::Null))
+                    })
+                    .collect()
+            });
             let book = read_book(ledger).ok();
             let delegate = status_delegate_json(&delegate_of(&board), book.as_ref(), now);
             json!({ "now": now, "delegate": delegate, "sessions": sessions }).to_string()
@@ -594,6 +610,22 @@ pub fn run(cli: Cli) -> i32 {
         } => println!("{}", run_status(columns, session, now, &format)),
         Commands::RecordPath { session } => println!("{}", with_records(|r| r.path(&session))),
         Commands::Forget { session } => println!("{}", with_records(|r| r.forget(&session))),
+        Commands::Opened {
+            session,
+            opening,
+            terminal,
+            clear: _,
+            seen,
+            now,
+        } => {
+            let now = now.unwrap_or_else(now_millis);
+            let out = with_opened(|o| match (opening, terminal) {
+                (true, _) => o.open(&session, seen.as_deref().unwrap_or_default(), now),
+                (false, Some(terminal)) => o.report(&session, &terminal, now),
+                (false, None) => o.clear(&session, seen.as_deref()),
+            });
+            println!("{out}");
+        }
         Commands::RelayFrame { now, session } => {
             let out = match parse_tool_questions(&read_stdin_raw()) {
                 Ok(questions) => with_records(|r| r.relay_frame(&questions, &session, now)),

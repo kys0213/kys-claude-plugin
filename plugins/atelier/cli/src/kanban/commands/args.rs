@@ -60,10 +60,34 @@ pub enum Commands {
         #[arg(long)]
         session: String,
     },
-    /// Removes a session's record copy and inbox
+    /// Removes a session's record copy, inbox and opened entry
     Forget {
         #[arg(long)]
         session: String,
+    },
+    /// Where a board opened a session in herdr-app: claims a new tab, keeps
+    /// the terminal that tab reports, or clears the entry
+    #[command(group(
+        clap::ArgGroup::new("act").required(true).args(["opening", "terminal", "clear"])
+    ))]
+    Opened {
+        #[arg(long)]
+        session: String,
+        /// Claims a new tab, only over the entry `--seen` names
+        #[arg(long, requires = "seen")]
+        opening: bool,
+        /// The terminal the opened tab runs in
+        #[arg(long)]
+        terminal: Option<String>,
+        /// Removes the entry; with `--seen`, only the entry seen
+        #[arg(long)]
+        clear: bool,
+        /// The entry the board saw: `none`, or its `at`
+        #[arg(long, conflicts_with = "terminal")]
+        seen: Option<String>,
+        /// Current time, unix milliseconds; the system clock when absent
+        #[arg(long)]
+        now: Option<u64>,
     },
     /// An AskUserQuestion call's questions on stdin → them rewritten over the
     /// wait their first line names, and that wait

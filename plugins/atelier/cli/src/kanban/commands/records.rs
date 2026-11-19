@@ -3,6 +3,7 @@
 //! sees the board without the pane.
 
 use crate::kanban::commands::inbox::{config_dir, InboxStore};
+use crate::kanban::commands::opened::OpenedStore;
 use crate::kanban::commands::payload::parse_record_copy;
 use crate::kanban::core::allowlist::RealPaths;
 use crate::kanban::core::board::{build, Board, BoardParams, Card, Column, Waiting};
@@ -87,6 +88,7 @@ pub struct StatusQuery {
 pub struct KanbanRecords<'a> {
     pub store: &'a dyn RecordStore,
     pub inbox: &'a dyn InboxStore,
+    pub opened: &'a dyn OpenedStore,
     pub paths: &'a dyn RealPaths,
 }
 
@@ -121,6 +123,7 @@ impl KanbanRecords<'_> {
             check_id("session", session)?;
             self.store.remove(session)?;
             self.inbox.clear(session)?;
+            self.opened.remove(session)?;
             Ok(json!({ "forgot": session }))
         })())
     }
@@ -244,6 +247,24 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct Opened {
+        removed: RefCell<Vec<String>>,
+    }
+
+    impl OpenedStore for Opened {
+        fn read(&self, _: &str) -> Result<Option<String>, String> {
+            Ok(None)
+        }
+        fn write(&self, _: &str, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn remove(&self, session: &str) -> Result<(), String> {
+            self.removed.borrow_mut().push(session.to_string());
+            Ok(())
+        }
+    }
+
     fn copy(id: &str) -> String {
         format!(
             r#"{{"v":1,"session_id":"{id}","cwd":"/w","started_at":1,"heartbeat_at":100,"events":[{{"name":"turn.start","at":100}}]}}"#
@@ -262,9 +283,11 @@ mod tests {
     fn unreadable_copies_are_left_out_of_the_board() {
         let store = Copies(vec![copy("a"), "garbage".to_string(), copy("b")]);
         let inbox = Inbox::default();
+        let opened = Opened::default();
         let records = KanbanRecords {
             store: &store,
             inbox: &inbox,
+            opened: &opened,
             paths: &FsPaths,
         };
 
@@ -275,17 +298,20 @@ mod tests {
     }
 
     #[test]
-    fn forget_clears_the_inbox_of_that_session() {
+    fn forget_clears_the_inbox_and_opened_entry_of_that_session() {
         let store = Copies(Vec::new());
         let inbox = Inbox::default();
+        let opened = Opened::default();
         let records = KanbanRecords {
             store: &store,
             inbox: &inbox,
+            opened: &opened,
             paths: &FsPaths,
         };
 
         records.forget("s1");
 
         assert_eq!(*inbox.cleared.borrow(), vec!["s1".to_string()]);
+        assert_eq!(*opened.removed.borrow(), vec!["s1".to_string()]);
     }
 }

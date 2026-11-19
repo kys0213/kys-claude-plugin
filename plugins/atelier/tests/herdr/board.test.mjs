@@ -3,13 +3,20 @@ import { describe, test } from 'node:test'
 
 import {
   boardKey,
+  cardState,
+  claimArgs,
+  claimed,
   decideArgs,
   layout,
   moveTarget,
+  openingEnds,
   outcome,
+  parseAgents,
   parseStatus,
   permitArgs,
   recordsDir,
+  releaseArgs,
+  reopenTarget,
   replyArgs,
 } from '../../extensions/herdr/mods/atelier-board/board.js'
 
@@ -97,6 +104,133 @@ describe('moveTarget', () => {
   })
 })
 
+describe('cardState', () => {
+  const HOLD = 15000
+
+  test('a card in a live terminal of its own is open there', () => {
+    assert.deepEqual(cardState(session('s', 'idle', { hc_terminal: 't1' }), [live('t1')], 0, HOLD), {
+      kind: 'open',
+      address: 't1',
+    })
+  })
+
+  test('a card a board opened is open in the terminal the tab reported', () => {
+    const s = session('s', 'idle', { opened: { at: 0, terminal: 't31' } })
+
+    assert.deepEqual(cardState(s, [live('t31')], 99999, HOLD), { kind: 'open', address: 't31' })
+  })
+
+  test('the session’s own terminal comes first when both are live', () => {
+    const s = session('s', 'idle', { hc_terminal: 't1', opened: { at: 0, terminal: 't31' } })
+
+    assert.equal(cardState(s, [live('t1'), live('t31')], 0, HOLD).address, 't1')
+  })
+
+  test('a dead terminal leaves the card closed, so it can be opened again', () => {
+    const exited = (address) => ({ address, parent: null, state: 'exited' })
+
+    assert.deepEqual(cardState(session('s', 'stale', { hc_terminal: 't1' }), [exited('t1')], 0, HOLD), { kind: 'closed' })
+    assert.deepEqual(
+      cardState(session('s', 'stale', { opened: { at: 0, terminal: 't31' } }), [exited('t31')], HOLD, HOLD),
+      { kind: 'closed' },
+    )
+    assert.deepEqual(cardState(session('s', 'stale'), [], 0, HOLD), { kind: 'closed' })
+  })
+
+  test('a tab that has not reported is opening for the hold, then closed', () => {
+    const s = session('s', 'stale', { opened: { at: 1000, terminal: null } })
+
+    assert.deepEqual(cardState(s, [], 1000 + HOLD - 1, HOLD), { kind: 'opening' })
+    assert.deepEqual(cardState(s, [], 1000 + HOLD, HOLD), { kind: 'closed' })
+  })
+
+  const claude = (address) => ({ ...live(address), program: { key: 'claude', shell: false, agent: false } })
+  const shell = (address) => ({ ...live(address), program: { key: 'shell', shell: true, agent: false } })
+  const vim = (address) => ({ ...live(address), program: { key: 'vim', shell: false, agent: false } })
+
+  test('a live terminal is open only while Claude runs in it', () => {
+    assert.deepEqual(cardState(session('s', 'idle', { hc_terminal: 't1' }), [claude('t1')], 0, HOLD), {
+      kind: 'open',
+      address: 't1',
+    })
+    assert.deepEqual(cardState(session('s', 'stale', { hc_terminal: 't2y' }), [shell('t2y')], 0, HOLD), { kind: 'closed' })
+    assert.deepEqual(cardState(session('s', 'stale', { hc_terminal: 't2y' }), [vim('t2y')], 0, HOLD), { kind: 'closed' })
+  })
+
+  test('a board’s tab that reported but runs no Claude is opening for the hold, then closed', () => {
+    const s = session('s', 'stale', { opened: { at: 1000, terminal: 't2z' } })
+
+    assert.deepEqual(cardState(s, [shell('t2z')], 1000 + HOLD - 1, HOLD), { kind: 'opening' })
+    assert.deepEqual(cardState(s, [shell('t2z')], 1000 + HOLD, HOLD), { kind: 'closed' })
+    assert.deepEqual(cardState(s, [claude('t2z')], 1000, HOLD), { kind: 'open', address: 't2z' })
+  })
+})
+
+describe('openingEnds', () => {
+  const HOLD = 15000
+  const opening = (id, at) => session(id, 'stale', { opened: { at, terminal: null } })
+
+  test('is when the first opening card turns closed', () => {
+    assert.equal(openingEnds([opening('a', 5000), opening('b', 1000), session('c', 'idle')], [], 2000, HOLD), 1000 + HOLD)
+  })
+
+  test('is null when no card is opening', () => {
+    assert.equal(openingEnds([opening('a', 0), session('c', 'idle')], [], HOLD, HOLD), null)
+  })
+})
+
+describe('opening a closed card', () => {
+  const outside = session('s1', 'stale', { label: 'fix login', cwd: '/w/app' })
+  const tabRun = (target) => target.args.argv.slice(3)
+
+  test('a claim names the entry the card was read with', () => {
+    assert.deepEqual(claimArgs(outside).slice(-2), ['--seen', 'none'])
+    assert.deepEqual(claimArgs({ ...outside, opened: { at: 42, terminal: 't2y' } }).slice(-2), ['--seen', '42'])
+    assert.deepEqual(releaseArgs(outside, 42), ['kanban', 'opened', '--session', 's1', '--clear', '--seen', '42'])
+  })
+
+  test('a claim run gives its time, or why it was refused', () => {
+    assert.deepEqual(claimed({ code: 0, stdout: '{"opened":{"session_id":"s1","at":7,"terminal":null}}', stderr: '' }), { at: 7 })
+    assert.deepEqual(claimed({ code: 0, stdout: '{"error":"그 사이 다른 보드가"}', stderr: '' }), { error: '그 사이 다른 보드가' })
+    assert.ok(typeof claimed({ code: 1, stdout: '', stderr: 'boom' }).error === 'string')
+  })
+
+  test('resumes a session that is not running, in its own folder', () => {
+    const target = reopenTarget(outside, [{ pid: 9, sessionId: 'other', status: 'idle' }])
+
+    assert.equal(target.kind, 'resume')
+    assert.equal(target.command, 'tab.new')
+    assert.equal(target.args.name, 'fix login')
+    assert.equal(target.args.folder, '/w/app')
+    assert.deepEqual(tabRun(target), ['sh', 's1'])
+    assert.match(target.args.argv[2], /exec claude --resume "\$1"$/)
+  })
+
+  test('attaches to a background session by its agent id', () => {
+    const target = reopenTarget(outside, [{ id: 'bg-7', sessionId: 's1', state: 'blocked' }])
+
+    assert.equal(target.kind, 'attach')
+    assert.deepEqual(tabRun(target), ['sh', 's1', 'bg-7'])
+    assert.match(target.args.argv[2], /exec claude attach "\$2"$/)
+  })
+
+  test('the new tab reports its own terminal before Claude starts', () => {
+    for (const running of [[], [{ id: 'bg-7', sessionId: 's1' }]]) {
+      const script = reopenTarget(outside, running).args.argv[2]
+
+      assert.match(script, /^atelier kanban opened --session "\$1" --terminal "\$HC_TERMINAL_ID"/)
+    }
+  })
+
+  test('leaves a session running somewhere else alone', () => {
+    assert.deepEqual(reopenTarget(outside, [{ pid: 9, sessionId: 's1', status: 'busy' }]), { kind: 'elsewhere' })
+  })
+
+  test('names the tab by the session id when the session has no label', () => {
+    assert.equal(reopenTarget(session('s2', 'stale', { cwd: '/w' }), []).args.name, 's2')
+  })
+})
+
 describe('answers', () => {
   const asking = (kind, extra = {}) => session('s1', 'needs_input', { wait: { kind, id: 'w-1', ...extra } })
 
@@ -173,6 +307,17 @@ describe('reading the CLI', () => {
       { code: 0, stdout: '{"path":"probe.json"}', stderr: '' },
     ]) {
       assert.equal(recordsDir(r), null, JSON.stringify(r))
+    }
+  })
+
+  test('an agents run gives the running sessions, and nothing when it failed', () => {
+    assert.deepEqual(parseAgents({ code: 0, stdout: '[{"pid":1,"sessionId":"a"}]', stderr: '' }), [{ pid: 1, sessionId: 'a' }])
+    for (const r of [
+      { code: 1, stdout: '', stderr: 'unknown command' },
+      { code: 0, stdout: 'not json', stderr: '' },
+      { code: 0, stdout: '{"error":"x"}', stderr: '' },
+    ]) {
+      assert.equal(parseAgents(r), null, JSON.stringify(r))
     }
   })
 
