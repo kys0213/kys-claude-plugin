@@ -1,12 +1,12 @@
 ---
 name: orchestrator
-description: Use this skill for any multi-unit work delegated to sub-agents, agent-teams, or worktrees — parallel fan-out, sequential pipelines, long-running agent teams, autonomous self-driving runs (decompose→dispatch→merge without human intervention), document deliverables that span several files or sections, and research that sweeps many files when only the conclusion is needed (codebase surveys, the impact or side effects of a change, root-cause hunts, comparing options). Scope is set by scale, not by kind. A single unit of work that closes in a handful of tool calls — one edit, a lookup whose target is known — is done by the main agent without this skill. Requests count alike in Korean or English. "자율주행" (also "자율 모드") is this plugin's term for an autonomous run carried through to the end.
+description: Use this skill whenever work produces something — any edit to a tracked file regardless of size, document deliverables, and research or verification that reads several files (codebase surveys, the impact or side effects of a change, root-cause hunts, comparing options) — as well as parallel fan-out, sequential pipelines, long-running agent teams, and autonomous self-driving runs (decompose→dispatch→merge without human intervention). The main agent is the factory supervisor — it decomposes, dispatches workers, inspects their output, and feeds back on mistakes instead of doing the work itself. Scope is set by whether there is an output, not by scale. Only supervision stays with the main agent — fact checks (git state, file existence, test results), a lookup whose target is known, dispatch, inspection, integration, and chat answers. Requests count alike in Korean or English. "자율주행" (also "자율 모드") is this plugin's term for an autonomous run carried through to the end.
 version: 0.1.0
 ---
 
 # Orchestrator Skill
-여러 단위로 벌어지는 일을 분해 · 위임 · 통합한다. **적용 범위는 작업의 종류가 아니라 규모로 갈리고, 사용자가 명시한 위임 요구가 규모 판정보다 앞선다** — 구현이냐 문서냐 조사냐로 가르면 read-only 리서치가 부당하게 빠진다.
-몇 번의 도구 호출로 닫히는 단일 단위 작업(한 갈래로 끝나는 편집 · 대상이 정해진 조회)은 열지 않는다 — 위임은 맥락 재전달과 토큰 비용을 치르므로 얻는 것이 그보다 클 때만 연다.
+메인은 공장장이다 — 일을 분해 · 위임 · 검수 · 통합하고, 작업자가 틀리면 고쳐 주지 않고 findings 로 피드백해 다시 맡긴다. **적용 범위는 규모가 아니라 산출물 유무로 갈린다** — tracked 편집 · 문서 산출물 · 여러 파일을 읽는 조사는 크기와 무관하게 연다. 사용자가 직접 수행을 지시하면 그 지시가 앞선다.
+열지 않는 것은 감독 업무뿐이다(사실 확인 · 대상이 정해진 단발 조회 · 채팅 답변). 위임 비용은 메인이 직접 일해서가 아니라 표 1 의 tier · effort 를 낮춰 줄인다.
 판단은 모델이 한다. 이 문서가 소유하는 것은 넷뿐이다 — 불변식 · 정지 조건 · 환경 계약 · 기본값.
 
 ## 불변식
