@@ -130,6 +130,10 @@ lint, format, test가 실패하면 변경된 부분이 아니더라도 반드시
 ❌ perf(atelier): optimize startup        # perf는 버전 범프 미지원
 ```
 
+### PR 본문
+
+PR 본문은 `.github/pull_request_template.md` 의 4단(왜 · 무엇을 · 어떻게 · 확인 방법)을 씁니다. 작성 전에 그 파일을 Read 해 `git-workflow.md` 의 본문 스타일 규칙을 로드합니다.
+
 ## 책임 경계 (CLI vs Skill/Agent)
 
 도구와 지능을 분리합니다. 경계가 흐려지면 사용자가 생각하는 책임 범위와 작업 에이전트가 생각하는 책임 범위가 어긋나서 같은 코드를 두고 다른 기대치로 일하게 됩니다.

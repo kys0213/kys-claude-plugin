@@ -24,7 +24,7 @@ PR 타이틀은 반드시 Conventional Commits 형식을 따릅니다:
 | `ci` | CI/CD 변경 | - |
 | `chore` | 기타 (빌드, 설정 등) | - |
 | `test` | 테스트 추가/수정 | - |
-| `perf` | 성능 개선 | patch |
+| `perf` | 성능 개선 | - |
 
 ### Scope (권장)
 
