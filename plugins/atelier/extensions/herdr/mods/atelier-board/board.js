@@ -67,6 +67,28 @@ export function moveTarget(address, agents, terminals) {
   return { command: hasPane ? 'pane.focus' : 'terminal.peek', args: { terminal: address } }
 }
 
+/** The running Claude sessions from `claude agents --json`; null when the run gave none. */
+export function parseAgents(r) {
+  const out = r.code === 0 ? json(r.stdout) : null
+  return Array.isArray(out) ? out : null
+}
+
+/**
+ * How to open a session that has no hc terminal, from the running sessions:
+ * a background session is attached, a session that is not running is resumed in its folder,
+ * and a session running somewhere else is left alone so the talk doesn't get a second process.
+ */
+export function reopenTarget(s, running) {
+  const found = running.find((a) => a.sessionId === s.session_id)
+  if (found && typeof found.id !== 'string') return { kind: 'elsewhere' }
+  const argv = found ? ['claude', 'attach', found.id] : ['claude', '--resume', s.session_id]
+  return {
+    kind: found ? 'attach' : 'resume',
+    command: 'tab.new',
+    args: { name: s.label ?? s.session_id, folder: s.cwd, argv },
+  }
+}
+
 export function permitArgs(s, decision) {
   return ['kanban', 'permit', '--session', s.session_id, '--request', s.wait.id, '--decision', decision, '--from', 'pane']
 }

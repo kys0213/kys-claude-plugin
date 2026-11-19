@@ -7,9 +7,11 @@ import {
   layout,
   moveTarget,
   outcome,
+  parseAgents,
   parseStatus,
   permitArgs,
   recordsDir,
+  reopenTarget,
   replyArgs,
 } from '../../extensions/herdr/mods/atelier-board/board.js'
 
@@ -97,6 +99,34 @@ describe('moveTarget', () => {
   })
 })
 
+describe('reopenTarget', () => {
+  const outside = session('s1', 'stale', { label: 'fix login', cwd: '/w/app' })
+
+  test('resumes a session that is not running, in its own folder', () => {
+    assert.deepEqual(reopenTarget(outside, [{ pid: 9, sessionId: 'other', status: 'idle' }]), {
+      kind: 'resume',
+      command: 'tab.new',
+      args: { name: 'fix login', folder: '/w/app', argv: ['claude', '--resume', 's1'] },
+    })
+  })
+
+  test('attaches to a background session by its agent id', () => {
+    assert.deepEqual(reopenTarget(outside, [{ id: 'bg-7', sessionId: 's1', state: 'blocked' }]), {
+      kind: 'attach',
+      command: 'tab.new',
+      args: { name: 'fix login', folder: '/w/app', argv: ['claude', 'attach', 'bg-7'] },
+    })
+  })
+
+  test('leaves a session running somewhere else alone', () => {
+    assert.deepEqual(reopenTarget(outside, [{ pid: 9, sessionId: 's1', status: 'busy' }]), { kind: 'elsewhere' })
+  })
+
+  test('names the tab by the session id when the session has no label', () => {
+    assert.equal(reopenTarget(session('s2', 'stale', { cwd: '/w' }), []).args.name, 's2')
+  })
+})
+
 describe('answers', () => {
   const asking = (kind, extra = {}) => session('s1', 'needs_input', { wait: { kind, id: 'w-1', ...extra } })
 
@@ -173,6 +203,17 @@ describe('reading the CLI', () => {
       { code: 0, stdout: '{"path":"probe.json"}', stderr: '' },
     ]) {
       assert.equal(recordsDir(r), null, JSON.stringify(r))
+    }
+  })
+
+  test('an agents run gives the running sessions, and nothing when it failed', () => {
+    assert.deepEqual(parseAgents({ code: 0, stdout: '[{"pid":1,"sessionId":"a"}]', stderr: '' }), [{ pid: 1, sessionId: 'a' }])
+    for (const r of [
+      { code: 1, stdout: '', stderr: 'unknown command' },
+      { code: 0, stdout: 'not json', stderr: '' },
+      { code: 0, stdout: '{"error":"x"}', stderr: '' },
+    ]) {
+      assert.equal(parseAgents(r), null, JSON.stringify(r))
     }
   })
 

@@ -4,13 +4,29 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, checking, exec, run, terminals, theme, watchFolder } from "herdr";
-import { boardKey, decideArgs, layout, moveTarget, outcome, parseStatus, permitArgs, recordsDir, replyArgs } from "./board.js";
+import { boardKey, decideArgs, layout, moveTarget, outcome, parseAgents, parseStatus, permitArgs, recordsDir, reopenTarget, replyArgs } from "./board.js";
 
 // The board is read when a session's record changes; the slow timer only moves the ages
 // on, and the fast one stands in for the watch where the records folder can't be watched.
 const AGE_MS = 30000;
 const POLL_MS = 2000;
 const CLI_TIMEOUT_MS = 10000;
+
+// What an outside-the-terminal card says, by what its last click found.
+const OUTSIDE = {
+  elsewhere: "다른 곳에서 실행 중",
+  attach: "백그라운드 세션 · 눌러서 붙기",
+  resume: "실행 중이 아님 · 눌러서 이어 열기",
+};
+
+async function isFolder(path) {
+  if (!path) return false;
+  try {
+    return (await exec("test", ["-d", path], { timeout: CLI_TIMEOUT_MS })).code === 0;
+  } catch {
+    return false;
+  }
+}
 
 export default class AtelierBoard extends View {
   init(_props, cx) {
@@ -23,6 +39,8 @@ export default class AtelierBoard extends View {
     this.watching = false;
     this.picks = {};
     this.notes = {};
+    this.opening = {};
+    this.outside = {};
     if (checking()) return;
     cx.timer.every(AGE_MS, (cx) => this.refresh(cx, true));
     cx.timer.every(POLL_MS, (cx) => { if (!this.watching) this.refresh(cx); });
@@ -104,8 +122,37 @@ export default class AtelierBoard extends View {
   go(cx, s) {
     const target = moveTarget(s.hc_terminal, agents(), terminals());
     if (target) run(target.command, target.args);
-    else this.notes[s.session_id] = s.hc_terminal ? "터미널이 끝났어요" : "이동할 터미널이 없어요";
+    else if (s.hc_terminal) this.notes[s.session_id] = "터미널이 끝났어요";
+    else return this.reopen(cx, s);
     cx.notify();
+  }
+
+  // `claude agents --json` runs on a click only: it takes about a second, too slow for every read.
+  reopen(cx, s) {
+    const id = s.session_id;
+    if (this.opening[id]) return;
+    this.opening[id] = true;
+    this.notes[id] = "확인 중…";
+    cx.notify();
+    cx.spawn(async (cx) => {
+      let running = null;
+      try {
+        running = parseAgents(await exec("claude", ["agents", "--json"], { timeout: CLI_TIMEOUT_MS }));
+      } catch {
+        running = null;
+      }
+      const target = running ? reopenTarget(s, running) : null;
+      this.outside[id] = target?.kind;
+      if (!target) this.notes[id] = "이동할 터미널이 없어요";
+      else if (target.kind === "elsewhere") this.notes[id] = "다른 곳에서 실행 중이에요";
+      else if (!(await isFolder(s.cwd))) this.notes[id] = `세션 폴더가 없어요: ${s.cwd || "(알 수 없음)"}`;
+      else {
+        run(target.command, target.args);
+        this.notes[id] = target.kind === "attach" ? "새 탭에서 붙었어요" : "새 탭에서 이어 열었어요";
+      }
+      delete this.opening[id];
+      cx.notify();
+    });
   }
 
   button(t, id, label, onPress, on = false) {
@@ -195,7 +242,7 @@ export default class AtelierBoard extends View {
         .child(div().flex_none().text_color(t.dim).child(s.age ?? "")))
       .when(Boolean(s.subtitle), (el) => el.child(div().truncate().text_color(t.muted).child(s.subtitle)))
       .when(Boolean(s.last_line), (el) => el.child(div().truncate().text_color(t.dim).child(s.last_line)))
-      .when(!s.hc_terminal, (el) => el.child(div().text_size(11).text_color(t.dim).child("터미널 밖 세션")))
+      .when(!s.hc_terminal, (el) => el.child(div().text_size(11).text_color(t.dim).child(OUTSIDE[this.outside[s.session_id]] ?? "터미널 밖 세션 · 눌러서 열기")))
       .when(s.column === "needs_input" && Boolean(s.wait), (el) => el.child(this.waitBlock(t, s)))
       .when(Boolean(note), (el) => el.child(div().text_size(11).text_color(t.muted).child(note)));
   }
