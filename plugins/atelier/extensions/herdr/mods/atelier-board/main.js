@@ -4,7 +4,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, checking, exec, run, terminals, theme, watchFolder } from "herdr";
-import { decideArgs, layout, moveTarget, outcome, parseStatus, permitArgs, recordsDir, replyArgs } from "./board.js";
+import { boardKey, decideArgs, layout, moveTarget, outcome, parseStatus, permitArgs, recordsDir, replyArgs } from "./board.js";
 
 // The board is read when a session's record changes; the slow timer only moves the ages
 // on, and the fast one stands in for the watch where the records folder can't be watched.
@@ -19,11 +19,12 @@ export default class AtelierBoard extends View {
     this.shown = null;
     this.loading = false;
     this.again = false;
+    this.againAges = false;
     this.watching = false;
     this.picks = {};
     this.notes = {};
     if (checking()) return;
-    cx.timer.every(AGE_MS, (cx) => this.refresh(cx));
+    cx.timer.every(AGE_MS, (cx) => this.refresh(cx, true));
     cx.timer.every(POLL_MS, (cx) => { if (!this.watching) this.refresh(cx); });
     this.refresh(cx);
     this.watch(cx);
@@ -51,31 +52,33 @@ export default class AtelierBoard extends View {
     });
   }
 
-  refresh(cx) {
+  // `ages`: redraw even when only the ages moved on.
+  refresh(cx, ages = false) {
     if (this.loading) {
       this.again = true;
+      this.againAges = this.againAges || ages;
       return;
     }
     this.loading = true;
     cx.spawn(async (cx) => {
-      let out = null;
       let read;
       try {
-        const r = await exec("atelier", ["kanban", "status", "--format", "json"], { timeout: CLI_TIMEOUT_MS });
-        out = r.stdout;
-        read = parseStatus(r);
+        read = parseStatus(await exec("atelier", ["kanban", "status", "--format", "json"], { timeout: CLI_TIMEOUT_MS }));
       } catch (e) {
         read = { error: `atelier CLI 를 실행하지 못했어요: ${e?.message ?? e}` };
       }
-      const changed = out !== this.shown || (read.error ?? null) !== this.error;
-      this.shown = out;
       this.sessions = read.sessions ?? this.sessions;
+      const key = boardKey(this.sessions);
+      const changed = ages || key !== this.shown || (read.error ?? null) !== this.error;
+      this.shown = key;
       this.error = read.error ?? null;
       this.loading = false;
       if (changed) cx.notify();
       if (this.again) {
+        const againAges = this.againAges;
         this.again = false;
-        this.refresh(cx);
+        this.againAges = false;
+        this.refresh(cx, againAges);
       }
     });
   }

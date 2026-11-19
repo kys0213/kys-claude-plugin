@@ -96,6 +96,11 @@ function json(text) {
   }
 }
 
+/** What a redraw depends on: the sessions without their ages, which move on every read. */
+export function boardKey(sessions) {
+  return JSON.stringify((sessions ?? []).map(({ age: _age, ...rest }) => rest))
+}
+
 export function parseStatus(r) {
   const out = r.code === 0 ? json(r.stdout) : null
   if (Array.isArray(out?.sessions)) return { sessions: out.sessions }

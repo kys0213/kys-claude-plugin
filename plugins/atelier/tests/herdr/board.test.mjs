@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import {
+  boardKey,
   decideArgs,
   layout,
   moveTarget,
@@ -141,6 +142,14 @@ describe('reading the CLI', () => {
     assert.deepEqual(parseStatus({ code: 0, stdout: '{"now":1,"sessions":[{"session_id":"a"}]}', stderr: '' }), {
       sessions: [{ session_id: 'a' }],
     })
+  })
+
+  test('a board’s key ignores the read time and the ages, and nothing else', () => {
+    const at = (age, column = 'working') => [{ session_id: 'a', column, age, subtitle: 'x' }]
+
+    assert.equal(boardKey(at('3s')), boardKey(at('4s')))
+    assert.notEqual(boardKey(at('3s')), boardKey(at('3s', 'idle')))
+    assert.notEqual(boardKey(at('3s')), boardKey([...at('3s'), { session_id: 'b', column: 'idle', age: '1m' }]))
   })
 
   test('a status run that failed or printed no board is an error', () => {
