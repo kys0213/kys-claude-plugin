@@ -5,12 +5,13 @@ paths:
 
 # Plugin Skill 명세 컨벤션
 
-> SKILL.md 파일의 작성 형식 규칙. 설계 원칙(SRP, 정적 지식, Skill 폭발 방지)은 `agent-design-principles.md` 참조.
+> SKILL.md 파일의 작성 형식 규칙. 설계 원칙(skill 역할 분류, SRP, Skill 폭발 방지, Skill vs Rule 경계)은 `agent-design-principles` skill §4·§5 참조.
 
 ## 원칙
 
 1. **Frontmatter 필수**: `name`, `description`, `version`을 반드시 설정한다
 2. **섹션 체계**: 원칙 → 프로세스 → 예시 → 출력 형식 순서로 구조화한다
+3. **Forked Skill 은 입출력 계약 명시**: `context: fork` skill 은 호출한 쪽과 컨텍스트를 공유하지 않으므로 입력 형식·출력 형식·실패 케이스를 본문에 둔다
 
 ## DO
 
@@ -69,5 +70,6 @@ CI의 `validate` 도구가 다음을 검증합니다:
 - [ ] `name`, `description`, `version` frontmatter가 모두 설정되어 있는가?
 - [ ] Skill이 하나의 도메인만 다루는가? (과도한 분리는 없는가?)
 - [ ] 동적으로 변하는 정보가 없는가?
+- [ ] `context: fork` 라면 입력·출력 형식과 실패 케이스가 본문에 있는가?
 - [ ] 콘텐츠가 50줄 이상, 500줄 이하인가?
 - [ ] 민감 데이터가 포함되지 않았는가?

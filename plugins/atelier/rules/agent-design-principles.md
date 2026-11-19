@@ -1,7 +1,7 @@
 ---
 paths:
-  - ".claude/{commands,agents,skills}/**/*.md"
-  - "{commands,agents,skills}/**/*.md"
+  - ".claude/{commands,agents,skills,rules}/**/*.md"
+  - "{commands,agents,skills,rules}/**/*.md"
 ---
 
 # Agent Design Principles
@@ -11,8 +11,9 @@ paths:
 
 ## 적용
 
-Command / Sub-agent / Skill 명세를 만들거나 고칠 때 `agent-design-principles` skill 을 로드해 확인한다:
+Command / Skill / Rule 명세를 만들거나 고칠 때 `agent-design-principles` skill 을 로드해 확인한다:
 
+- 컴포넌트 선택: 워크플로우는 Command · Skill · Rule 로 구성한다
+- 새 agent 정의(`agents/*.md`)는 만들지 않는다. 격리 실행은 `context: fork` skill 로 한다
 - 레이어 매핑·안티패턴 체크리스트 통과
-- 진입점 분류 (Command vs user-invocable Skill)
-- 항상 적용되는 지식은 skill 아닌 CLAUDE.md/rule
+- 항상 적용되는 지식은 skill 이 아니라 CLAUDE.md / rule

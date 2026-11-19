@@ -9,6 +9,7 @@ paths:
 
 plugin.json(컴포넌트 등록)을 편집할 때:
 
-- 새 Command / Agent / Skill 은 skill 의 레이어 매핑·안티패턴 체크리스트·진입점 분류(§3.6)·지식 자리(§3.5)를 따른다.
-- 명세 형식 규칙: `plugin-skill.md` / `plugin-command.md` / `plugin-agent.md`.
+- 새 컴포넌트는 Command / Skill 만 등록한다. `agents` 배열에 새 항목을 추가하지 않는다 — 격리 실행이 필요하면 `context: fork` skill 로 만든다 (skill §2).
+- 컴포넌트 선택은 skill 의 결정 트리(§6), 진입점 분류는 §3·§4.1, 지식의 자리는 §5 를 따른다.
+- 명세 형식 규칙: `plugin-skill.md` / `plugin-command.md` (기존 agent 유지보수 시 `plugin-agent.md`).
 - 도구(결정적 변환) vs 지능(판단) 경계: `tool-layer-boundary.md`.

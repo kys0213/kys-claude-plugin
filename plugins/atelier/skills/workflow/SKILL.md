@@ -15,7 +15,7 @@ version: 1.0.1
 | "컨벤션 잡아줘", ".claude/rules 만들어줘", "규칙 scaffold" | scaffold (6단계 HITL) | scaffold-protocol → codebase-detection·rules-design·value-interview |
 | "rules gap 점검", "규칙 누락 봐줘" | scaffold (gap-only) | scaffold-protocol Step 1 에 gap-only 지시 추가 |
 | "에이전트 설계 원칙 룰 설치해줘" | rule 설치 | 아래 §"설계 원칙 룰 설치" |
-| "기존 command/agent/skill 설계 리뷰" | workflow 리뷰 | workflow-reviewer 에이전트 위임 (agent-design-principles 기준) |
+| "기존 command/skill/rule(·agent) 설계 리뷰" | workflow 리뷰 | workflow-reviewer 에이전트 위임 (agent-design-principles 기준) |
 
 입력 인자(`--gap-only`, `--force` 등 의도)가 함께 오면 그대로 적용하고, 모호하면 AskUserQuestion 으로 확인합니다.
 
@@ -25,7 +25,7 @@ version: 1.0.1
 
 1. `~/.claude/rules/atelier/` 디렉토리가 없으면 생성. 대상 파일이 이미 존재하면 덮어쓸지 확인 (`--force` 의도 시 즉시 덮어쓰기)
 2. `${CLAUDE_PLUGIN_ROOT}/rules/agent-design-principles.md` 를 Read 하여 **내용 수정 없이 그대로** `~/.claude/rules/atelier/agent-design-principles.md` 에 Write
-3. 기존 `.claude/{commands,agents,skills}/**/*.md` 가 감지되면 workflow-reviewer 로 설계 원칙 준수 리뷰를 제안
+3. 기존 `.claude/{commands,skills,rules,agents}/**/*.md` 가 감지되면 workflow-reviewer 로 설계 원칙 준수 리뷰를 제안
 
 ## references 로드 가이드
 
