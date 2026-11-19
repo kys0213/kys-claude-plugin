@@ -1,7 +1,9 @@
 mod drift_mocks;
 
 use atelier::drift::commands::check;
-use atelier::drift::core::types::{CheckReport, BEGIN_MARKER, END_MARKER, POLICY_RULES};
+use atelier::drift::core::types::{
+    CheckReport, BEGIN_MARKER, END_MARKER, HERDR_MOD_FILES, POLICY_RULES,
+};
 use drift_mocks::*;
 
 fn run(fs: &MemFs) -> Result<CheckReport, String> {
@@ -22,6 +24,24 @@ fn policy_lines(status: &str, detail: bool) -> String {
         .collect()
 }
 
+fn herdr_lines(status: &str, detail: bool) -> String {
+    HERDR_MOD_FILES
+        .iter()
+        .map(|name| {
+            if detail {
+                format!("herdr-mod/{name}={status} ({})\n", herdr_mod_copy(name))
+            } else {
+                format!("herdr-mod/{name}={status}\n")
+            }
+        })
+        .collect()
+}
+
+/// Every finding: the CLAUDE.md block, the rules copy, the policy and herdr scopes.
+fn checked() -> usize {
+    2 + POLICY_RULES.len() + HERDR_MOD_FILES.len()
+}
+
 #[test]
 fn all_in_sync_reports_ok_and_exit_zero() {
     let fs = MemFs::with_sources("shared body");
@@ -31,6 +51,7 @@ fn all_in_sync_reports_ok_and_exit_zero() {
     );
     fs.insert(RULES_COPY, RULES_BODY);
     fs.install_user_rule_copies();
+    fs.install_herdr_mod_copies();
 
     let report = run(&fs).unwrap();
     assert_eq!(
@@ -38,9 +59,10 @@ fn all_in_sync_reports_ok_and_exit_zero() {
         format!(
             "claude-md-coding-style-block=OK\n\
              rules/agent-design-principles.md=OK\n\
-             {}→ {} checked, 0 drifted, 0 new, 0 missing\n",
+             {}{}→ {} checked, 0 drifted, 0 new, 0 missing\n",
             policy_lines("OK", false),
-            2 + POLICY_RULES.len()
+            herdr_lines("OK", false),
+            checked()
         )
     );
     assert_eq!(report.exit_code(), 0);
@@ -54,6 +76,9 @@ fn all_drifted_reports_drifted_and_exit_one() {
     for name in POLICY_RULES {
         fs.insert(&user_rule_copy(name), "locally edited\n");
     }
+    for name in HERDR_MOD_FILES {
+        fs.insert(&herdr_mod_copy(name), "locally edited\n");
+    }
 
     let report = run(&fs).unwrap();
     assert_eq!(
@@ -61,10 +86,11 @@ fn all_drifted_reports_drifted_and_exit_one() {
         format!(
             "claude-md-coding-style-block=DRIFTED ({USER_CLAUDE_MD})\n\
              rules/agent-design-principles.md=DRIFTED ({RULES_COPY})\n\
-             {}→ {} checked, {} drifted, 0 new, 0 missing\n",
+             {}{}→ {} checked, {} drifted, 0 new, 0 missing\n",
             policy_lines("DRIFTED", true),
-            2 + POLICY_RULES.len(),
-            2 + POLICY_RULES.len()
+            herdr_lines("DRIFTED", true),
+            checked(),
+            checked()
         )
     );
     assert_eq!(report.exit_code(), 1);
@@ -80,10 +106,11 @@ fn all_absent_reports_not_installed_and_exit_zero() {
         format!(
             "claude-md-coding-style-block=NOT_INSTALLED ({USER_CLAUDE_MD})\n\
              rules/agent-design-principles.md=NOT_INSTALLED ({RULES_COPY})\n\
-             {}→ {} checked, 0 drifted, 0 new, {} missing\n",
+             {}{}→ {} checked, 0 drifted, 0 new, {} missing\n",
             policy_lines("NOT_INSTALLED", true),
-            2 + POLICY_RULES.len(),
-            2 + POLICY_RULES.len()
+            herdr_lines("NOT_INSTALLED", true),
+            checked(),
+            checked()
         )
     );
     assert_eq!(report.exit_code(), 0);
@@ -105,10 +132,40 @@ fn missing_manifest_file_in_installed_scope_is_new_and_exit_one() {
         user_rule_copy(added)
     )));
     assert!(rendered.ends_with(&format!(
-        "→ {} checked, 0 drifted, 1 new, 0 missing\n",
-        2 + POLICY_RULES.len()
+        "→ {} checked, 0 drifted, 1 new, {} missing\n",
+        checked(),
+        HERDR_MOD_FILES.len()
     )));
     assert_eq!(report.exit_code(), 1);
+}
+
+#[test]
+fn missing_panel_file_in_installed_herdr_mod_is_new() {
+    let fs = MemFs::with_sources("body");
+    fs.install_herdr_mod_copies();
+    let added = HERDR_MOD_FILES[HERDR_MOD_FILES.len() - 1];
+    fs.files.borrow_mut().remove(&herdr_mod_copy(added));
+
+    let report = run(&fs).unwrap();
+    let rendered = report.render();
+    assert!(rendered.contains(&format!(
+        "herdr-mod/{added}=NEW ({})\n",
+        herdr_mod_copy(added)
+    )));
+    assert!(rendered.contains(&format!("herdr-mod/{}=OK\n", HERDR_MOD_FILES[0])));
+    assert!(rendered.contains(&policy_lines("NOT_INSTALLED", true)));
+    assert_eq!(report.exit_code(), 1);
+}
+
+#[test]
+fn missing_herdr_mod_source_is_an_error() {
+    let fs = MemFs::with_sources("body");
+    fs.files
+        .borrow_mut()
+        .remove(&template_herdr_mod_file(HERDR_MOD_FILES[0]));
+
+    let err = run(&fs).unwrap_err();
+    assert!(err.contains("plugin source file not found"), "{err}");
 }
 
 #[test]

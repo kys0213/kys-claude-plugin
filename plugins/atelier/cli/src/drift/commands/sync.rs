@@ -1,6 +1,7 @@
 use crate::drift::commands::{read_source, scope_installed, DriftDeps};
 use crate::drift::core::types::{
-    scan_markers, ArtifactContent, DriftPaths, SyncReport, SyncTarget, POLICY_RULES,
+    scan_markers, ArtifactContent, DriftPaths, SyncReport, SyncTarget, HERDR_MOD_FILES,
+    POLICY_RULES,
 };
 
 pub fn run(
@@ -38,6 +39,19 @@ pub fn run(
                 .filter(|file| name.is_none_or(|n| n == **file))
                 .map(|file| (paths.user_rule_copy(file), paths.template_policy_rule(file)))
                 .collect();
+            sync_verbatim_copies(deps, target, &pairs, scope_installed(deps, &scope))
+        }
+        SyncTarget::HerdrMod => {
+            let pairs: Vec<(String, String)> = HERDR_MOD_FILES
+                .iter()
+                .map(|file| {
+                    (
+                        paths.herdr_mod_copy(file),
+                        paths.template_herdr_mod_file(file),
+                    )
+                })
+                .collect();
+            let scope: Vec<String> = pairs.iter().map(|(copy, _)| copy.clone()).collect();
             sync_verbatim_copies(deps, target, &pairs, scope_installed(deps, &scope))
         }
     }

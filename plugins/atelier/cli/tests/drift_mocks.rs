@@ -10,7 +10,7 @@
 use atelier::drift::commands::DriftDeps;
 use atelier::drift::core::artifact::{ArtifactFs, BackupClock};
 use atelier::drift::core::types::{
-    ArtifactContent, DriftPaths, BEGIN_MARKER, END_MARKER, POLICY_RULES,
+    ArtifactContent, DriftPaths, BEGIN_MARKER, END_MARKER, HERDR_MOD_FILES, POLICY_RULES,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -21,6 +21,7 @@ pub const TS: &str = "20260821-120000";
 pub const PLUGIN_ROOT: &str = "/plugin";
 pub const USER_CLAUDE_MD: &str = "/home/u/.claude/CLAUDE.md";
 pub const USER_RULES_DIR: &str = "/home/u/.claude/rules/atelier";
+pub const HERDR_MODS_DIR: &str = "/home/u/.config/herdr-app/mods";
 
 /// Paths the commands derive from the fixture roots above. The two policy
 /// constants are the paths of `POLICY_RULES[0]`, for tests that target one
@@ -39,9 +40,18 @@ pub fn user_rule_copy(name: &str) -> String {
     format!("{USER_RULES_DIR}/{name}")
 }
 
+/// Fixture-root paths of one herdr panel file.
+pub fn template_herdr_mod_file(name: &str) -> String {
+    format!("{PLUGIN_ROOT}/extensions/herdr/mods/atelier-board/{name}")
+}
+pub fn herdr_mod_copy(name: &str) -> String {
+    format!("{HERDR_MODS_DIR}/atelier-board/{name}")
+}
+
 /// Canonical rules source bodies used by the fixtures.
 pub const RULES_BODY: &str = "# Agent design principles\n\n- keep CLI deterministic\n";
 pub const USER_RULE_BODY: &str = "# Policy rule\n\n- plan is history, spec is policy\n";
+pub const HERDR_MOD_BODY: &str = "// panel\n";
 
 /// A coding-style block exactly as the template file ships it: the markers are
 /// part of the template itself.
@@ -55,6 +65,7 @@ pub fn paths() -> DriftPaths {
         plugin_root: PLUGIN_ROOT.to_string(),
         claude_md: USER_CLAUDE_MD.to_string(),
         user_rules_dir: USER_RULES_DIR.to_string(),
+        herdr_mods_dir: HERDR_MODS_DIR.to_string(),
     }
 }
 
@@ -81,7 +92,8 @@ impl MemFs {
 
     /// Fresh filesystem holding every plugin source file (template block body
     /// `tpl_body`, rules source `RULES_BODY`, every `POLICY_RULES` source as
-    /// `USER_RULE_BODY`) and nothing else.
+    /// `USER_RULE_BODY`, every `HERDR_MOD_FILES` source as `HERDR_MOD_BODY`)
+    /// and nothing else.
     pub fn with_sources(tpl_body: &str) -> Self {
         let fs = MemFs::default();
         fs.insert(TEMPLATE_CLAUDE_MD, &block(tpl_body));
@@ -89,7 +101,17 @@ impl MemFs {
         for name in POLICY_RULES {
             fs.insert(&template_policy_rule(name), USER_RULE_BODY);
         }
+        for name in HERDR_MOD_FILES {
+            fs.insert(&template_herdr_mod_file(name), HERDR_MOD_BODY);
+        }
         fs
+    }
+
+    /// Installs every herdr panel copy in sync with its source.
+    pub fn install_herdr_mod_copies(&self) {
+        for name in HERDR_MOD_FILES {
+            self.insert(&herdr_mod_copy(name), HERDR_MOD_BODY);
+        }
     }
 
     /// Installs every user-scope policy copy in sync with its source.

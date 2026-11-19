@@ -15,6 +15,12 @@ pub const POLICY_RULES: &[&str] = &[
     "doc-dependency.md",
 ];
 
+/// The herdr-app panel, copied whole into herdr-app's mods folder. An explicit
+/// list for the same reason as `POLICY_RULES`.
+pub const TEMPLATE_HERDR_MOD_DIR_REL: &str = "extensions/herdr/mods/atelier-board";
+pub const HERDR_MOD_NAME: &str = "atelier-board";
+pub const HERDR_MOD_FILES: &[&str] = &["mod.json", "main.js", "board.js"];
+
 /// Callers branch on these exact strings.
 pub const CLAUDE_MD_CHECK: &str = "claude-md-coding-style-block";
 pub const RULES_CHECK: &str = "rules/agent-design-principles.md";
@@ -67,6 +73,8 @@ pub enum SyncTarget {
     Rules,
     /// The user-scope policy copies (`POLICY_RULES`, or one via `--name`).
     UserRules,
+    /// The herdr-app panel copies (`HERDR_MOD_FILES`).
+    HerdrMod,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,6 +82,8 @@ pub struct DriftPaths {
     pub plugin_root: String,
     pub claude_md: String,
     pub user_rules_dir: String,
+    /// herdr-app's mods folder, which holds one folder per mod.
+    pub herdr_mods_dir: String,
 }
 
 impl DriftPaths {
@@ -94,6 +104,15 @@ impl DriftPaths {
     }
     pub fn user_rule_copy(&self, name: &str) -> String {
         format!("{}/{}", self.user_rules_dir, name)
+    }
+    pub fn template_herdr_mod_file(&self, name: &str) -> String {
+        format!(
+            "{}/{}/{}",
+            self.plugin_root, TEMPLATE_HERDR_MOD_DIR_REL, name
+        )
+    }
+    pub fn herdr_mod_copy(&self, name: &str) -> String {
+        format!("{}/{}/{}", self.herdr_mods_dir, HERDR_MOD_NAME, name)
     }
 }
 
@@ -185,7 +204,7 @@ impl SyncReport {
                 "synced: coding-style block in {} (backup: {backup})\n",
                 self.path
             ),
-            SyncTarget::Rules | SyncTarget::UserRules => {
+            SyncTarget::Rules | SyncTarget::UserRules | SyncTarget::HerdrMod => {
                 format!("synced: {} (backup: {backup})\n", self.path)
             }
         }

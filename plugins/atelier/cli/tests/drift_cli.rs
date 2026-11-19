@@ -2,10 +2,10 @@ mod drift_mocks;
 
 use assert_cmd::Command;
 use atelier::drift::core::types::{
-    POLICY_RULES, RULES_COPY_NAME, TEMPLATE_CLAUDE_MD_REL, TEMPLATE_POLICY_RULES_DIR_REL,
-    TEMPLATE_RULES_REL,
+    HERDR_MOD_FILES, HERDR_MOD_NAME, POLICY_RULES, RULES_COPY_NAME, TEMPLATE_CLAUDE_MD_REL,
+    TEMPLATE_HERDR_MOD_DIR_REL, TEMPLATE_POLICY_RULES_DIR_REL, TEMPLATE_RULES_REL,
 };
-use drift_mocks::{block, RULES_BODY, USER_RULE_BODY};
+use drift_mocks::{block, HERDR_MOD_BODY, RULES_BODY, USER_RULE_BODY};
 use predicates::prelude::*;
 use std::path::Path;
 
@@ -39,6 +39,12 @@ impl Fixture {
                 USER_RULE_BODY,
             );
         }
+        for name in HERDR_MOD_FILES {
+            write(
+                &fx.at(&format!("plugin/{TEMPLATE_HERDR_MOD_DIR_REL}/{name}")),
+                HERDR_MOD_BODY,
+            );
+        }
         fx
     }
 
@@ -58,6 +64,14 @@ impl Fixture {
         self.at("home/.claude/rules/atelier")
     }
 
+    fn herdr_mods_dir(&self) -> String {
+        self.at("home/.config/herdr-app/mods")
+    }
+
+    fn herdr_mod_copy(&self, name: &str) -> String {
+        format!("{}/{HERDR_MOD_NAME}/{name}", self.herdr_mods_dir())
+    }
+
     fn install(&self, claude_md_body: &str) {
         write(
             &self.claude_md(),
@@ -70,9 +84,12 @@ impl Fixture {
         for name in POLICY_RULES {
             write(&format!("{}/{name}", self.user_rules_dir()), USER_RULE_BODY);
         }
+        for name in HERDR_MOD_FILES {
+            write(&self.herdr_mod_copy(name), HERDR_MOD_BODY);
+        }
     }
 
-    fn path_flags(&self) -> [String; 6] {
+    fn path_flags(&self) -> [String; 8] {
         [
             "--plugin-root".into(),
             self.plugin_root(),
@@ -80,6 +97,8 @@ impl Fixture {
             self.claude_md(),
             "--user-rules-dir".into(),
             self.user_rules_dir(),
+            "--herdr-mods-dir".into(),
+            self.herdr_mods_dir(),
         ]
     }
 
@@ -120,7 +139,62 @@ fn drift_check_in_sync_exits_zero() {
         )))
         .stdout(predicate::str::contains(format!(
             "→ {} checked, 0 drifted, 0 new, 0 missing",
-            2 + POLICY_RULES.len()
+            2 + POLICY_RULES.len() + HERDR_MOD_FILES.len()
+        )));
+}
+
+#[test]
+fn drift_herdr_mod_check_sync_roundtrip() {
+    let fx = Fixture::new("body");
+    fx.install("body");
+    write(&fx.herdr_mod_copy(HERDR_MOD_FILES[0]), "locally edited\n");
+    let added = HERDR_MOD_FILES[HERDR_MOD_FILES.len() - 1];
+    std::fs::remove_file(fx.herdr_mod_copy(added)).unwrap();
+
+    fx.check()
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(format!(
+            "herdr-mod/{}=DRIFTED",
+            HERDR_MOD_FILES[0]
+        )))
+        .stdout(predicate::str::contains(format!("herdr-mod/{added}=NEW")));
+    fx.sync("herdr-mod")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "installed: {}",
+            fx.herdr_mod_copy(added)
+        )));
+    fx.check().assert().success();
+    assert_eq!(
+        std::fs::read_to_string(fx.herdr_mod_copy(HERDR_MOD_FILES[0])).unwrap(),
+        HERDR_MOD_BODY
+    );
+}
+
+#[test]
+fn drift_herdr_mods_dir_defaults_to_herdr_app_home() {
+    let fx = Fixture::new("body");
+    fx.install("body");
+    let app_home = fx.at("app-home");
+    write(
+        &format!("{app_home}/mods/{HERDR_MOD_NAME}/{}", HERDR_MOD_FILES[0]),
+        HERDR_MOD_BODY,
+    );
+    atelier()
+        .args(["drift", "check"])
+        .args(&fx.path_flags()[..6])
+        .env("HERDR_APP_HOME", &app_home)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(format!(
+            "herdr-mod/{}=OK",
+            HERDR_MOD_FILES[0]
+        )))
+        .stdout(predicate::str::contains(format!(
+            "herdr-mod/{}=NEW",
+            HERDR_MOD_FILES[1]
         )));
 }
 

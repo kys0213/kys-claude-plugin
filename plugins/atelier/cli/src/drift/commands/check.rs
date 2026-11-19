@@ -1,19 +1,24 @@
 use crate::drift::commands::{read_source, scope_installed, DriftDeps};
 use crate::drift::core::types::{
     scan_markers, ArtifactContent, ArtifactStatus, CheckFinding, CheckReport, DriftPaths,
-    CLAUDE_MD_CHECK, POLICY_RULES, RULES_CHECK,
+    CLAUDE_MD_CHECK, HERDR_MOD_FILES, POLICY_RULES, RULES_CHECK,
 };
 
 pub fn run(deps: &DriftDeps, paths: &DriftPaths) -> Result<CheckReport, String> {
     let template_claude_md = paths.template_claude_md();
     let template_rules = paths.template_rules();
-    let policy_templates: Vec<String> = POLICY_RULES
+    let scoped_templates: Vec<String> = POLICY_RULES
         .iter()
         .map(|name| paths.template_policy_rule(name))
+        .chain(
+            HERDR_MOD_FILES
+                .iter()
+                .map(|name| paths.template_herdr_mod_file(name)),
+        )
         .collect();
     for template in [&template_claude_md, &template_rules]
         .into_iter()
-        .chain(&policy_templates)
+        .chain(&scoped_templates)
     {
         if !deps.fs.exists(template) {
             return Err(format!("plugin source file not found: {template}"));
@@ -30,29 +35,47 @@ pub fn run(deps: &DriftDeps, paths: &DriftPaths) -> Result<CheckReport, String> 
             ArtifactStatus::NotInstalled,
         )?,
     ];
-    findings.extend(check_policy_scope(deps, paths)?);
+    findings.extend(check_scope(
+        deps,
+        "user-rules",
+        POLICY_RULES,
+        |name| paths.user_rule_copy(name),
+        |name| paths.template_policy_rule(name),
+    )?);
+    findings.extend(check_scope(
+        deps,
+        "herdr-mod",
+        HERDR_MOD_FILES,
+        |name| paths.herdr_mod_copy(name),
+        |name| paths.template_herdr_mod_file(name),
+    )?);
     Ok(CheckReport { findings })
 }
 
-fn check_policy_scope(deps: &DriftDeps, paths: &DriftPaths) -> Result<Vec<CheckFinding>, String> {
-    let copies: Vec<String> = POLICY_RULES
-        .iter()
-        .map(|name| paths.user_rule_copy(name))
-        .collect();
+/// A set of copies installed together: once any is there, a missing one is a
+/// file a newer plugin version added.
+fn check_scope(
+    deps: &DriftDeps,
+    label: &str,
+    names: &[&str],
+    copy_of: impl Fn(&str) -> String,
+    template_of: impl Fn(&str) -> String,
+) -> Result<Vec<CheckFinding>, String> {
+    let copies: Vec<String> = names.iter().map(|name| copy_of(name)).collect();
     let absent = if scope_installed(deps, &copies) {
         ArtifactStatus::New
     } else {
         ArtifactStatus::NotInstalled
     };
-    POLICY_RULES
+    names
         .iter()
         .zip(&copies)
         .map(|(name, copy)| {
             check_verbatim_copy(
                 deps,
-                &format!("user-rules/{name}"),
+                &format!("{label}/{name}"),
                 copy,
-                &paths.template_policy_rule(name),
+                &template_of(name),
                 absent,
             )
         })
