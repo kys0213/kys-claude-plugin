@@ -14,7 +14,7 @@ use atelier::kanban::commands::requests::KanbanRequests;
 use atelier::kanban::commands::spawn::{Launched, Launcher, RepoProbe};
 use atelier::kanban::core::allowlist::RealPaths;
 use atelier::kanban::core::ledger::MonthFile;
-use atelier::kanban::core::spawn::RepoPaths;
+use atelier::kanban::core::spawn::{Launch, RepoPaths};
 
 /// Requests by session and id; `age_ms` is what every claimed request reads as.
 #[derive(Default)]
@@ -151,9 +151,10 @@ impl RepoProbe for MapProbe {
     }
 }
 
+/// Launches as `(cwd, program, args)`.
 pub struct FakeLauncher {
     pub out: Result<(bool, String, String), String>,
-    pub launches: RefCell<Vec<(String, Vec<String>)>>,
+    pub launches: RefCell<Vec<(String, String, Vec<String>)>>,
 }
 
 impl FakeLauncher {
@@ -166,10 +167,12 @@ impl FakeLauncher {
 }
 
 impl Launcher for FakeLauncher {
-    fn launch(&self, cwd: &str, args: &[String]) -> Result<Launched, String> {
-        self.launches
-            .borrow_mut()
-            .push((cwd.to_string(), args.to_vec()));
+    fn launch(&self, cwd: &str, launch: &Launch) -> Result<Launched, String> {
+        self.launches.borrow_mut().push((
+            cwd.to_string(),
+            launch.program.to_string(),
+            launch.args.clone(),
+        ));
         self.out.clone().map(|(success, stdout, stderr)| Launched {
             success,
             stdout,

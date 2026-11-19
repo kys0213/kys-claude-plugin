@@ -29,7 +29,7 @@ use crate::kanban::commands::payload::{
 };
 use crate::kanban::commands::records::{FsRecords, KanbanRecords, StatusQuery};
 use crate::kanban::commands::requests::{Answerer, KanbanRequests, PermitTiming};
-use crate::kanban::commands::spawn::{ClaudeLauncher, GitProbe};
+use crate::kanban::commands::spawn::{process_terminal_env, GitProbe, ProcessLauncher};
 use crate::kanban::core::allowlist::RealPaths;
 use crate::kanban::core::answer::compose;
 use crate::kanban::core::bash_guard::refusal;
@@ -42,6 +42,7 @@ use crate::kanban::core::precedent::Book;
 use crate::kanban::core::question::{Ask, Question};
 use crate::kanban::core::relay::unused;
 use crate::kanban::core::repos::{group, Repo};
+use crate::kanban::core::spawn::Via;
 use crate::kanban::core::status::{render_text, select, Format};
 use crate::kanban::core::text::defuse_marker;
 use crate::kanban::core::wait::{derive, Blocked, Place, Subject};
@@ -266,6 +267,7 @@ impl WaitView<'_> {
             "age": card.age,
             "subtitle": card.subtitle,
             "permission_mode": card.permission_mode,
+            "hc_terminal": card.hc_terminal,
             "actions": action_ids(&card.actions),
             "last_line": card.last_line,
             "delivery": card.detail.delivery,
@@ -417,7 +419,7 @@ fn run_request(command: RequestCommand) -> Value {
         pause: &ThreadPause,
         ids: &ClockIds,
         probe: &GitProbe,
-        launcher: &ClaudeLauncher,
+        launcher: &ProcessLauncher,
         ledger: &ledger,
         paths: &FsPaths,
     };
@@ -537,11 +539,15 @@ fn run_request(command: RequestCommand) -> Value {
             InboxCommand::Clear { session } => requests.clear(&session),
         },
         RequestCommand::Spawn {
+            via,
             cwd,
             text,
             worktree,
             from_label,
-        } => requests.spawn(&cwd, &text, worktree.as_deref(), from_label.as_deref()),
+        } => match Via::parse(&via, &process_terminal_env()) {
+            Ok(via) => requests.spawn(via, &cwd, &text, worktree.as_deref(), from_label.as_deref()),
+            Err(e) => json!({ "error": e }),
+        },
     }
 }
 

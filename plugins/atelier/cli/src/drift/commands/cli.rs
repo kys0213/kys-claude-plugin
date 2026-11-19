@@ -26,7 +26,8 @@ pub enum Commands {
         args: PathArgs,
     },
     /// Update one installed copy from its plugin source (installs only manifest
-    /// files missing from an already installed policy scope)
+    /// files missing from an already installed scope: policy rules or the
+    /// herdr panel)
     Sync {
         /// Which installed copy to update
         #[arg(long = "target", value_enum)]
@@ -51,6 +52,10 @@ pub struct PathArgs {
     /// (default: $HOME/.claude/rules/atelier)
     #[arg(long = "user-rules-dir")]
     user_rules_dir: Option<String>,
+    /// herdr-app's mods folder
+    /// (default: $HERDR_APP_HOME/mods, else $HOME/.config/herdr-app/mods)
+    #[arg(long = "herdr-mods-dir")]
+    herdr_mods_dir: Option<String>,
 }
 
 impl PathArgs {
@@ -65,6 +70,11 @@ impl PathArgs {
                 }
             }
         }
+        let herdr_mods_dir = match (self.herdr_mods_dir, std::env::var("HERDR_APP_HOME")) {
+            (Some(path), _) => path,
+            (None, Ok(app_home)) if !app_home.is_empty() => format!("{app_home}/mods"),
+            (None, _) => home_based(None, "--herdr-mods-dir", ".config/herdr-app/mods")?,
+        };
         Ok(DriftPaths {
             plugin_root: self.plugin_root,
             claude_md: home_based(self.claude_md, "--claude-md", ".claude/CLAUDE.md")?,
@@ -73,6 +83,7 @@ impl PathArgs {
                 "--user-rules-dir",
                 ".claude/rules/atelier",
             )?,
+            herdr_mods_dir,
         })
     }
 }

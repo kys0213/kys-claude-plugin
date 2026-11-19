@@ -162,6 +162,56 @@ fn session_picks_one_session() {
     assert_eq!(ids(&out), vec!["w1"]);
 }
 
+fn hc_terminal_of(terminal_env: Value) -> Value {
+    let config = TempDir::new().unwrap();
+    put_record(
+        config.path(),
+        &session_with(
+            "w1",
+            json!([event("turn.start", None, 10 * SEC)]),
+            json!({ "terminal_env": terminal_env }),
+        ),
+    );
+    let out = status_in(config.path(), &["--now", &now_arg()]);
+    out["sessions"][0]["hc_terminal"].clone()
+}
+
+#[test]
+fn an_interactive_session_in_an_hc_terminal_lists_that_terminal() {
+    assert_eq!(
+        hc_terminal_of(json!({ "hc_terminal_id": "t18", "herdr_env": null, "session_kind": null })),
+        json!("t18")
+    );
+}
+
+#[test]
+fn a_session_that_only_inherited_an_hc_terminal_lists_none() {
+    for terminal_env in [
+        json!({ "hc_terminal_id": "t18", "herdr_env": null, "session_kind": "bg" }),
+        json!({ "hc_terminal_id": "t18", "herdr_env": "1", "session_kind": null }),
+        json!({ "hc_terminal_id": "", "herdr_env": null, "session_kind": null }),
+        json!({ "hc_terminal_id": null, "herdr_env": null, "session_kind": null }),
+    ] {
+        assert_eq!(
+            hc_terminal_of(terminal_env.clone()),
+            Value::Null,
+            "{terminal_env}"
+        );
+    }
+}
+
+#[test]
+fn a_record_without_terminal_facts_lists_no_hc_terminal() {
+    let config = TempDir::new().unwrap();
+    put_record(config.path(), &working("w1"));
+    let out = status_in(config.path(), &["--now", &now_arg()]);
+    assert_eq!(out["sessions"][0]["hc_terminal"], Value::Null);
+    assert!(out["sessions"][0]
+        .as_object()
+        .expect("entry")
+        .contains_key("hc_terminal"));
+}
+
 #[test]
 fn text_format_prints_a_heading_per_column_and_a_line_per_session() {
     let config = TempDir::new().unwrap();

@@ -1,7 +1,8 @@
 //! The process edges of `kanban spawn`: git for where the session would run,
-//! `claude --bg` to start it.
+//! the launch program (`claude` or `hc`) to start it.
 
-use crate::kanban::core::spawn::RepoPaths;
+use crate::kanban::core::spawn::{Launch, RepoPaths};
+use crate::kanban::core::terminal::TerminalEnv;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -17,7 +18,18 @@ pub struct Launched {
 }
 
 pub trait Launcher {
-    fn launch(&self, cwd: &str, args: &[String]) -> Result<Launched, String>;
+    fn launch(&self, cwd: &str, launch: &Launch) -> Result<Launched, String>;
+}
+
+/// This process's terminal variables; `kanban spawn` runs in the caller's
+/// shell, so they are the caller's.
+pub fn process_terminal_env() -> TerminalEnv {
+    let var = |name: &str| std::env::var(name).ok();
+    TerminalEnv {
+        hc_terminal_id: var("HC_TERMINAL_ID"),
+        herdr_env: var("HERDR_ENV"),
+        session_kind: var("CLAUDE_CODE_SESSION_KIND"),
+    }
 }
 
 pub struct GitProbe;
@@ -51,15 +63,15 @@ impl RepoProbe for GitProbe {
     }
 }
 
-pub struct ClaudeLauncher;
+pub struct ProcessLauncher;
 
-impl Launcher for ClaudeLauncher {
-    fn launch(&self, cwd: &str, args: &[String]) -> Result<Launched, String> {
-        let out = Command::new("claude")
+impl Launcher for ProcessLauncher {
+    fn launch(&self, cwd: &str, launch: &Launch) -> Result<Launched, String> {
+        let out = Command::new(launch.program)
             .current_dir(cwd)
-            .args(args)
+            .args(&launch.args)
             .output()
-            .map_err(|e| format!("claude 를 실행하지 못했어요: {e}"))?;
+            .map_err(|e| format!("{} 를 실행하지 못했어요: {e}", launch.program))?;
         Ok(Launched {
             success: out.status.success(),
             stdout: String::from_utf8_lossy(&out.stdout).to_string(),

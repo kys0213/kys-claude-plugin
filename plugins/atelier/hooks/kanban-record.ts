@@ -51,6 +51,24 @@ type TodoRecord = { status: string; active: string }
 
 export type AgentRecord = { status: string; teammate: boolean }
 
+export type TerminalEnv = { hc_terminal_id: string | null; herdr_env: string | null; session_kind: string | null }
+
+async function envOr(read: () => Promise<string | undefined>): Promise<string | null> {
+  try {
+    return (await read()) ?? null
+  } catch {
+    return null
+  }
+}
+
+export async function terminalEnvOf($: EngineInterface): Promise<TerminalEnv> {
+  return {
+    hc_terminal_id: await envOr(() => $.env.get('HC_TERMINAL_ID')),
+    herdr_env: await envOr(() => $.env.get('HERDR_ENV')),
+    session_kind: await envOr(() => $.env.get('CLAUDE_CODE_SESSION_KIND')),
+  }
+}
+
 export type SessionRecord = {
   v: 1
   session_id: string
@@ -60,6 +78,8 @@ export type SessionRecord = {
   repo_root?: string | null
   remote?: string | null
   permission_mode?: string | null
+  /** The session process's variables the CLI judges its terminal from, unset as null. */
+  terminal_env?: TerminalEnv
   title: string | null
   first_prompt: string | null
   last_prompt?: string | null

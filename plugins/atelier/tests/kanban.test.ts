@@ -415,6 +415,7 @@ describe('kanban recording', () => {
       repo: null,
       repo_root: null,
       remote: null,
+      terminal_env: { hc_terminal_id: null, herdr_env: null, session_kind: null },
       title: null,
       first_prompt: null,
       started_at: START,
@@ -429,6 +430,15 @@ describe('kanban recording', () => {
 
     expect(eventNames(w)).toEqual(['session.start', 'turn.start'])
     expect(stored(w).heartbeat_at).toBe(START + 1_000)
+  })
+
+  test('session.start records the terminal variables the session process carries, as they are', async ($, on) => {
+    const w = world(on)
+    mock.env(on, { HC_TERMINAL_ID: 't18', CLAUDE_CODE_SESSION_KIND: 'bg' })
+
+    await $.session.start({ cwd: '/work/project-a', surface: null, isInteractive: true })
+
+    expect(stored(w).terminal_env).toEqual({ hc_terminal_id: 't18', herdr_env: null, session_kind: 'bg' })
   })
 
   test('the first typed prompt is kept, later ones and slash commands are not', async ($, on) => {

@@ -138,7 +138,7 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   **보드에서 지우기**(한 번 더 눌러 확인)로 24시간을 기다리지 않고 치웁니다 — 세션이 살아나면 다시 나타납니다.
   지켜볼 필요 없는 작업 중·쉬는 중 세션은 **보드에서 빼기**(한 번 더 눌러 확인)로 숨깁니다 — 세션은 그대로 돌고,
   그 세션에 새 프롬프트를 쓰거나 입력 대기가 되면 다시 나타납니다. 이런 버튼은 `← 보드` 바로 아래에 있습니다.
-  카드에서 그 세션 화면으로 이동하는 기능은 없습니다.
+  카드에서 그 세션 화면으로 이동하는 기능은 없습니다(herdr-app 패널에서는 됩니다).
 - pane 은 `ctrl+x tab` 이나 클릭으로 포커스하고, Tab 으로 버튼 사이를 옮깁니다. 데스크톱에서도 같습니다.
 - **터미널에서 보기**: pane 없이 같은 보드를 읽습니다.
 
@@ -166,7 +166,16 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   - 규격: [`spec/concerns/kanban-delegate.md`](spec/concerns/kanban-delegate.md)
 - **오케스트레이터**: 메인 오케스트레이터는 같은 보드를 읽어 레포별로 쉬는 세션에 일을 맡기거나, 그 레포에
   백그라운드 세션을 새로 띄웁니다. 오케스트레이터 세션의 권한 규칙을 그대로 따릅니다. 절차는 `orchestrator`
-  skill 이 담습니다.
+  skill 이 담습니다. herdr-app 터미널 안의 오케스트레이터는 작업 세션을 hc 터미널로 띄워서, 그 세션이
+  herdr-app 에 오케스트레이터의 하위 에이전트로 보입니다(`atelier kanban spawn --via auto`).
+- **herdr-app 패널**: [herdr-app](https://github.com/herdrdev/herdr-app) 안에서 같은 보드를 탭 안의 패널로
+  봅니다. `/atelier:setup` 의 `herdr` 모듈로 설치하고, `/atelier:update` 가 새 버전으로 맞춥니다.
+  - 카드를 누르면 그 세션의 터미널로 갑니다. 터미널 밖에서 도는 세션(백그라운드 세션 등)은 이동할 수 없습니다.
+  - hc 터미널로 띄운 작업 세션은 부모 세션 카드 밑에 묶여 보입니다.
+  - 권한 요청은 허용·거부, 질문은 선택지, 결정 요청은 답 버튼으로 패널에서 바로 답합니다.
+  - 단축키는 `keys.json` 의 `"global"` 에 직접 넣어 씁니다. 지금 탭의 오른쪽에 패널을 나눠 엽니다:
+    `"ctrl-shift-a": { "command": "pane.split", "args": { "direction": "right", "mod": "atelier-board" } }`
+  - 규격: [`spec/concerns/herdr-extension.md`](spec/concerns/herdr-extension.md)
 - `atelier` CLI 가 없으면 pane 에 안내 한 줄만 나옵니다. `/atelier:update` 로 설치·갱신하세요.
 - 상세 규격: [`spec/concerns/session-kanban.md`](spec/concerns/session-kanban.md)
 

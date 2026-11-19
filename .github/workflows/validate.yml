@@ -58,6 +58,11 @@ jobs:
           else
             echo "atelier_report_changed=false" >> $GITHUB_OUTPUT
           fi
+          if echo "$CHANGED" | grep -qE '^plugins/atelier/(extensions/herdr|tests/herdr)/'; then
+            echo "atelier_herdr_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "atelier_herdr_changed=false" >> $GITHUB_OUTPUT
+          fi
           if echo "$CHANGED" | grep -q '^plugins/discord-connector/'; then
             echo "discord_connector_changed=true" >> $GITHUB_OUTPUT
           else
@@ -108,7 +113,7 @@ jobs:
       # claude plugin validate/test 는 모드 API 를 스캔한다 — 버전마다 표면이 바뀔 수 있어
       # CLI 버전을 고정한다 (무관한 PR 이 깨지는 것 방지).
       - name: Setup Node
-        if: steps.check_rust.outputs.atelier_hooks_changed == 'true' || steps.check_rust.outputs.atelier_report_changed == 'true' || steps.check_rust.outputs.discord_connector_changed == 'true'
+        if: steps.check_rust.outputs.atelier_hooks_changed == 'true' || steps.check_rust.outputs.atelier_report_changed == 'true' || steps.check_rust.outputs.atelier_herdr_changed == 'true' || steps.check_rust.outputs.discord_connector_changed == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -134,6 +139,10 @@ jobs:
       - name: atelier report script tests
         if: steps.check_rust.outputs.atelier_report_changed == 'true'
         run: node --test 'plugins/atelier/tests/report/**/*.test.mjs'
+
+      - name: atelier herdr panel tests
+        if: steps.check_rust.outputs.atelier_herdr_changed == 'true'
+        run: node --test 'plugins/atelier/tests/herdr/**/*.test.mjs'
 
       # ── discord-connector ──
       - name: discord-connector launcher tests
