@@ -1,12 +1,11 @@
 use crate::drift::commands::{read_source, scope_installed, DriftDeps};
 use crate::drift::core::types::{
     scan_markers, ArtifactContent, ArtifactStatus, CheckFinding, CheckReport, DriftPaths,
-    CLAUDE_MD_CHECK, HERDR_MOD_FILES, POLICY_RULES, RULES_CHECK,
+    CLAUDE_MD_CHECK, HERDR_MOD_FILES, POLICY_RULES,
 };
 
 pub fn run(deps: &DriftDeps, paths: &DriftPaths) -> Result<CheckReport, String> {
     let template_claude_md = paths.template_claude_md();
-    let template_rules = paths.template_rules();
     let scoped_templates: Vec<String> = POLICY_RULES
         .iter()
         .map(|name| paths.template_policy_rule(name))
@@ -16,25 +15,17 @@ pub fn run(deps: &DriftDeps, paths: &DriftPaths) -> Result<CheckReport, String> 
                 .map(|name| paths.template_herdr_mod_file(name)),
         )
         .collect();
-    for template in [&template_claude_md, &template_rules]
-        .into_iter()
-        .chain(&scoped_templates)
-    {
+    for template in std::iter::once(&template_claude_md).chain(&scoped_templates) {
         if !deps.fs.exists(template) {
             return Err(format!("plugin source file not found: {template}"));
         }
     }
 
-    let mut findings = vec![
-        check_claude_md(deps, &paths.claude_md, &template_claude_md)?,
-        check_verbatim_copy(
-            deps,
-            RULES_CHECK,
-            &paths.rules_copy(),
-            &template_rules,
-            ArtifactStatus::NotInstalled,
-        )?,
-    ];
+    let mut findings = vec![check_claude_md(
+        deps,
+        &paths.claude_md,
+        &template_claude_md,
+    )?];
     findings.extend(check_scope(
         deps,
         "user-rules",

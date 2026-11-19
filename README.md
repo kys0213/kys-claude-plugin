@@ -38,12 +38,11 @@ kys-claude-plugin/
 - `/atelier:spec-write` - 합의된 설계를 스펙 문서 계층(DESIGN→concerns→flows)으로 작성
 - `/atelier:communicate` - 맥락을 팀에 전달하는 작문 기준 (독자 수준·맥락 이전·채널 적응·보고서 HTML 레포트)
 - `/atelier:git` - git 워크플로우 (커밋·push·PR·충돌 해결·리뷰 정리·이슈 우선순위)
-- `/atelier:workflow` - 컨벤션 scaffold·.claude/rules 설계·설계 원칙 룰 설치
 - `/atelier:orchestrator` - 위임/병렬 분해·worktree 격리·머지 조정 (기본 자율 주행)
 - `/atelier:grill` - 설계를 대화로 생성하거나 이미 있는 계획을 심문
 
 **Command:**
-- `/atelier:setup` - 통합 setup (git / style / workflow 모듈 + hook 관리)
+- `/atelier:setup` - 통합 setup (git / style / herdr 모듈 + hook 관리)
 
 **사용:**
 ```bash

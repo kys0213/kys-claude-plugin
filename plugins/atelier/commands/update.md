@@ -8,7 +8,7 @@ allowed-tools: ["Bash", "AskUserQuestion"]
 
 설치된 atelier CLI 와 setup 이 복사한 산출물을 활성 플러그인 버전으로 동기화합니다. 이미 설치한 모듈을 새 버전과 같게 맞춥니다. 기존 파일을 갱신하고, **정책 룰을 설치했다면 새 버전이 추가한 정책 룰도 설치합니다**. setup 에서 고르지 않은 모듈은 설치하지 않으니, 모듈 설치·hook 등록이 필요하면 `/atelier:setup` 을 사용하세요.
 
-rules 복사본 덮어쓰기 확인(Step 3·4)을 제외하면 사용자 선택이 필요 없으므로 질문 없이 바로 실행합니다. 질문이 불가능한 자동화·headless 경로에서는 rules 덮어쓰기를 **건너뛰기(기본값)** 로 처리하고 보고만 남깁니다 — 나머지 단계는 그대로 동작합니다.
+룰 복사본 덮어쓰기 확인(Step 3·4)을 제외하면 사용자 선택이 필요 없으므로 질문 없이 바로 실행합니다. 질문이 불가능한 자동화·headless 경로에서는 rules 덮어쓰기를 **건너뛰기(기본값)** 로 처리하고 보고만 남깁니다 — 나머지 단계는 그대로 동작합니다.
 
 ## 실행
 
@@ -36,7 +36,6 @@ setup 이 스냅샷으로 복사한 산출물이 현재 플러그인 원본과 �
 | 점검 대상 | 원본 |
 |---|---|
 | `~/.claude/CLAUDE.md` 의 `[coding-style:begin]~[end]` 블록 | `templates/claude-md/CLAUDE.md` |
-| `~/.claude/rules/atelier/agent-design-principles.md` | `rules/agent-design-principles.md` |
 | `~/.claude/rules/atelier/<정책 룰>.md` | `rules/policies/*.md` (목록은 atelier CLI 가 소유) |
 | `<herdr-app 폴더>/mods/atelier-board/<파일>` (`$HERDR_APP_HOME`, 없으면 `~/.config/herdr-app`) | `extensions/herdr/mods/atelier-board/*` (목록은 atelier CLI 가 소유) |
 
@@ -57,22 +56,16 @@ Step 2 결과의 산출물별 STATUS 에 따라 처리합니다. 갱신의 실�
 atelier drift sync --target claude-md --plugin-root "${CLAUDE_PLUGIN_ROOT}"
 ```
 
-**`rules/agent-design-principles.md=DRIFTED`** → 스크립트는 "원본과 다르다"는 사실만 판정하며, 사용자가 의도적으로 다르게 유지하는 변형본일 수 있습니다. **반드시 AskUserQuestion 으로 확인한 뒤에만 덮어씁니다:**
+**`user-rules/<파일>=DRIFTED`** → 스크립트는 "원본과 다르다"는 사실만 판정하며, 사용자가 의도적으로 다르게 유지하는 변형본일 수 있습니다. **반드시 AskUserQuestion 으로 확인한 뒤에만 덮어씁니다:**
 
-- 질문: "rules 복사본이 플러그인 원본과 다릅니다. 플러그인 원본으로 덮어쓸까요?"
+- 질문: "정책 룰 `<파일>` 이 플러그인 원본과 다릅니다. 플러그인 원본으로 덮어쓸까요?"
 - 선택지: `[덮어쓰기 (백업 후 갱신)]` `[건너뛰기 (커스터마이즈 유지)]`
-- **덮어쓰기** 선택 시:
+- **덮어쓰기** 선택 시 check 가 파일 단위로 판정하므로 동기화도 같은 단위로 — **해당 파일만** `--name` 으로 덮어씁니다:
   ```bash
-  atelier drift sync --target rules --plugin-root "${CLAUDE_PLUGIN_ROOT}"
+  atelier drift sync --target user-rules --name <파일명> --plugin-root "${CLAUDE_PLUGIN_ROOT}"
   ```
 - **건너뛰기** 선택 시 파일을 건드리지 않고, 유지했다는 사실만 보고합니다
 - 질문할 수 없는 컨텍스트(자동화·headless)에서는 **묻지 않고 건너뛰기**로 처리합니다 — 덮어쓰기는 사용자 확인 없이는 수행하지 않습니다
-
-**`user-rules/<파일>=DRIFTED`** → rules 복사본과 같은 방식으로 처리합니다 (사용자가 편집했을 수 있으므로 AskUserQuestion 확인 후에만 덮어쓰기, headless 는 건너뛰기). check 가 파일 단위로 판정하므로 동기화도 같은 단위로 — **해당 파일만** `--name` 으로 덮어씁니다:
-
-```bash
-atelier drift sync --target user-rules --name <파일명> --plugin-root "${CLAUDE_PLUGIN_ROOT}"
-```
 
 여러 파일이 드리프트면 파일마다 확인 후 각각 실행합니다. `--name` 없이 실행하면 매니페스트의 **모든** 파일을 한 번에 덮어쓰므로(없는 파일은 새로 설치), 사용자가 전체 갱신에 동의한 경우에만 씁니다. 어느 쪽이든 덮어쓴 파일마다 `synced:` 라인이 출력됩니다.
 
@@ -109,7 +102,7 @@ atelier code-style check --plugin-root "${CLAUDE_PLUGIN_ROOT}" --project-dir "${
 ```
 
 - exit 2 이고 stderr 가 `Error: no code-style language installed` 로 시작하면 설치된 언어가 없는 것입니다. 건너뛰고 보고에도 쓰지 않습니다. 그 밖의 exit 2 는 stderr 원문과 함께 보고합니다.
-- `NEW` 만 있으면 묻지 않고 갱신합니다. `DRIFTED`·`ORPHANED` 가 있으면 Step 3 rules 복사본과 같이 AskUserQuestion 으로 확인한 뒤에만 갱신하고, headless 에서는 건너뜁니다:
+- `NEW` 만 있으면 묻지 않고 갱신합니다. `DRIFTED`·`ORPHANED` 가 있으면 Step 3 정책 룰과 같이 AskUserQuestion 으로 확인한 뒤에만 갱신하고, headless 에서는 건너뜁니다:
   ```bash
   atelier code-style update --plugin-root "${CLAUDE_PLUGIN_ROOT}" --project-dir "${CLAUDE_PROJECT_DIR:-.}"
   ```
@@ -145,7 +138,6 @@ Step 2·3 결과를 산출물별로 이어서 보고합니다:
 
 ```
 claude-md-coding-style-block=OK
-rules/agent-design-principles.md=OK
 user-rules/spec-writing.md=OK
 user-rules/rules-writing.md=OK
 user-rules/plan-writing.md=OK
@@ -153,14 +145,13 @@ user-rules/doc-dependency.md=OK
 herdr-mod/mod.json=NOT_INSTALLED (/Users/me/.config/herdr-app/mods/atelier-board/mod.json)
 herdr-mod/main.js=NOT_INSTALLED (/Users/me/.config/herdr-app/mods/atelier-board/main.js)
 herdr-mod/board.js=NOT_INSTALLED (/Users/me/.config/herdr-app/mods/atelier-board/board.js)
-→ 9 checked, 0 drifted, 0 new, 3 missing
+→ 8 checked, 0 drifted, 0 new, 3 missing
 ```
 
 **CLAUDE.md 블록 드리프트 → 자동 갱신:**
 
 ```
 claude-md-coding-style-block=DRIFTED (/Users/me/.claude/CLAUDE.md)
-rules/agent-design-principles.md=NOT_INSTALLED (/Users/me/.claude/rules/atelier/agent-design-principles.md)
 user-rules/spec-writing.md=OK
 user-rules/rules-writing.md=OK
 user-rules/plan-writing.md=OK
@@ -168,20 +159,19 @@ user-rules/doc-dependency.md=OK
 herdr-mod/mod.json=OK
 herdr-mod/main.js=OK
 herdr-mod/board.js=OK
-→ 9 checked, 1 drifted, 0 new, 1 missing
+→ 8 checked, 1 drifted, 0 new, 0 missing
 ```
 
 ```
 synced: coding-style block in /Users/me/.claude/CLAUDE.md (backup: /Users/me/.claude/CLAUDE.md.bak-20260821-093012)
 ```
 
-→ 보고 예: "CLAUDE.md 코딩 원칙 블록을 최신 템플릿으로 갱신했습니다 (백업: `~/.claude/CLAUDE.md.bak-20260821-093012`). workflow 모듈(설계 원칙 룰)은 설치되어 있지 않습니다."
+→ 보고 예: "CLAUDE.md 코딩 원칙 블록을 최신 템플릿으로 갱신했습니다 (백업: `~/.claude/CLAUDE.md.bak-20260821-093012`)."
 
 **새 정책 룰 추가 → 자동 설치:**
 
 ```
 claude-md-coding-style-block=OK
-rules/agent-design-principles.md=OK
 user-rules/spec-writing.md=OK
 user-rules/rules-writing.md=OK
 user-rules/plan-writing.md=OK
@@ -189,7 +179,7 @@ user-rules/doc-dependency.md=NEW (/Users/me/.claude/rules/atelier/doc-dependency
 herdr-mod/mod.json=OK
 herdr-mod/main.js=OK
 herdr-mod/board.js=OK
-→ 9 checked, 0 drifted, 1 new, 0 missing
+→ 8 checked, 0 drifted, 1 new, 0 missing
 ```
 
 ```
@@ -214,6 +204,6 @@ installed: /Users/me/.config/herdr-app/mods/atelier-board/board.js
 
 → 보고 예: "herdr-app 패널을 새 버전으로 갱신했습니다 (herdr-app check 통과). 이전 파일은 같은 폴더에 숨김 파일(`.main.js.bak-20260821-093012` 등)로 남겼습니다."
 
-**rules 드리프트 → 사용자가 건너뛰기 선택:**
+**정책 룰 드리프트 → 사용자가 건너뛰기 선택:**
 
-→ 보고 예: "rules 복사본이 플러그인 원본과 다르지만, 선택에 따라 커스터마이즈를 유지했습니다. 이후에도 갱신하지 않으려면 그대로 두시면 됩니다."
+→ 보고 예: "정책 룰 `spec-writing.md` 가 플러그인 원본과 다르지만, 선택에 따라 커스터마이즈를 유지했습니다. 이후에도 갱신하지 않으려면 그대로 두시면 됩니다."

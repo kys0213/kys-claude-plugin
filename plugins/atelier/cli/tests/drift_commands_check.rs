@@ -37,9 +37,9 @@ fn herdr_lines(status: &str, detail: bool) -> String {
         .collect()
 }
 
-/// Every finding: the CLAUDE.md block, the rules copy, the policy and herdr scopes.
+/// Every finding: the CLAUDE.md block, the policy and herdr scopes.
 fn checked() -> usize {
-    2 + POLICY_RULES.len() + HERDR_MOD_FILES.len()
+    1 + POLICY_RULES.len() + HERDR_MOD_FILES.len()
 }
 
 #[test]
@@ -49,7 +49,6 @@ fn all_in_sync_reports_ok_and_exit_zero() {
         USER_CLAUDE_MD,
         &format!("# mine\n{}tail\n", block("shared body")),
     );
-    fs.insert(RULES_COPY, RULES_BODY);
     fs.install_user_rule_copies();
     fs.install_herdr_mod_copies();
 
@@ -58,7 +57,6 @@ fn all_in_sync_reports_ok_and_exit_zero() {
         report.render(),
         format!(
             "claude-md-coding-style-block=OK\n\
-             rules/agent-design-principles.md=OK\n\
              {}{}→ {} checked, 0 drifted, 0 new, 0 missing\n",
             policy_lines("OK", false),
             herdr_lines("OK", false),
@@ -72,7 +70,6 @@ fn all_in_sync_reports_ok_and_exit_zero() {
 fn all_drifted_reports_drifted_and_exit_one() {
     let fs = MemFs::with_sources("new body");
     fs.insert(USER_CLAUDE_MD, &block("old body"));
-    fs.insert(RULES_COPY, "locally edited\n");
     for name in POLICY_RULES {
         fs.insert(&user_rule_copy(name), "locally edited\n");
     }
@@ -85,7 +82,6 @@ fn all_drifted_reports_drifted_and_exit_one() {
         report.render(),
         format!(
             "claude-md-coding-style-block=DRIFTED ({USER_CLAUDE_MD})\n\
-             rules/agent-design-principles.md=DRIFTED ({RULES_COPY})\n\
              {}{}→ {} checked, {} drifted, 0 new, 0 missing\n",
             policy_lines("DRIFTED", true),
             herdr_lines("DRIFTED", true),
@@ -105,7 +101,6 @@ fn all_absent_reports_not_installed_and_exit_zero() {
         report.render(),
         format!(
             "claude-md-coding-style-block=NOT_INSTALLED ({USER_CLAUDE_MD})\n\
-             rules/agent-design-principles.md=NOT_INSTALLED ({RULES_COPY})\n\
              {}{}→ {} checked, 0 drifted, 0 new, {} missing\n",
             policy_lines("NOT_INSTALLED", true),
             herdr_lines("NOT_INSTALLED", true),
@@ -120,7 +115,6 @@ fn all_absent_reports_not_installed_and_exit_zero() {
 fn missing_manifest_file_in_installed_scope_is_new_and_exit_one() {
     let fs = MemFs::with_sources("shared body");
     fs.insert(USER_CLAUDE_MD, &block("shared body"));
-    fs.insert(RULES_COPY, RULES_BODY);
     fs.install_user_rule_copies();
     let added = POLICY_RULES[POLICY_RULES.len() - 1];
     fs.files.borrow_mut().remove(&user_rule_copy(added));
@@ -169,16 +163,6 @@ fn missing_herdr_mod_source_is_an_error() {
 }
 
 #[test]
-fn rules_copy_alone_leaves_policy_scope_not_installed() {
-    let fs = MemFs::with_sources("body");
-    fs.insert(RULES_COPY, RULES_BODY);
-
-    let rendered = run(&fs).unwrap().render();
-    assert!(rendered.contains("rules/agent-design-principles.md=OK\n"));
-    assert!(rendered.contains(&policy_lines("NOT_INSTALLED", true)));
-}
-
-#[test]
 fn claude_md_without_any_marker_is_not_installed() {
     let fs = MemFs::with_sources("body");
     fs.insert(USER_CLAUDE_MD, "# just my own notes\n");
@@ -224,7 +208,6 @@ fn marker_substring_mention_does_not_match() {
             block("shared body")
         ),
     );
-    fs.insert(RULES_COPY, RULES_BODY);
 
     let report = run(&fs).unwrap();
     assert!(report
@@ -234,14 +217,14 @@ fn marker_substring_mention_does_not_match() {
 }
 
 #[test]
-fn missing_plugin_source_is_an_error() {
-    let fs = MemFs::default();
-    fs.insert(TEMPLATE_CLAUDE_MD, &block("body"));
+fn missing_claude_md_source_is_an_error() {
+    let fs = MemFs::with_sources("body");
+    fs.files.borrow_mut().remove(TEMPLATE_CLAUDE_MD);
 
     let err = run(&fs).unwrap_err();
     assert_eq!(
         err,
-        format!("plugin source file not found: {TEMPLATE_RULES}")
+        format!("plugin source file not found: {TEMPLATE_CLAUDE_MD}")
     );
 }
 
@@ -261,7 +244,6 @@ fn missing_user_rule_source_is_an_error() {
 fn crlf_identical_block_reports_ok() {
     let fs = MemFs::with_sources("shared body");
     fs.insert(USER_CLAUDE_MD, &block("shared body").replace('\n', "\r\n"));
-    fs.insert(RULES_COPY, RULES_BODY);
 
     let report = run(&fs).unwrap();
     assert!(report
@@ -279,18 +261,6 @@ fn non_utf8_user_claude_md_is_drifted_not_an_error() {
     assert!(report
         .render()
         .contains("claude-md-coding-style-block=DRIFTED (not valid UTF-8)"));
-    assert_eq!(report.exit_code(), 1);
-}
-
-#[test]
-fn non_utf8_rules_copy_is_drifted_not_an_error() {
-    let fs = MemFs::with_sources("body");
-    fs.insert_bytes(RULES_COPY, b"\xff\xfe not utf-8");
-
-    let report = run(&fs).unwrap();
-    assert!(report
-        .render()
-        .contains("rules/agent-design-principles.md=DRIFTED (not valid UTF-8)"));
     assert_eq!(report.exit_code(), 1);
 }
 

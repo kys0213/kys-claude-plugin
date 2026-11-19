@@ -113,7 +113,7 @@ user-invocable: false
 
 | 역할 | frontmatter | 쓰임 | 예 |
 |---|---|---|---|
-| 진입점 Skill | `user-invocable: true` (기본) | 사용자 `/name` + 모델 자동 발동. 도메인이 맞으면 모델이 알아서 꺼내야 하는 것 | git, grill, spec-write, workflow, orchestrator |
+| 진입점 Skill | `user-invocable: true` (기본) | 사용자 `/name` + 모델 자동 발동. 도메인이 맞으면 모델이 알아서 꺼내야 하는 것 | git, grill, spec-write, orchestrator |
 | Protocol Skill | `user-invocable: false` | 단독 호출은 무의미. 상위 command/skill 이 디스패치하는 절차 본문 | — |
 | Reference Skill | `user-invocable: false` | 단독으로도 의미 있는 durable 전문성. 맥락이나 rule 포인터로 on-demand 로드 | 이 skill 자체 |
 | Forked Skill | `context: fork` (+ `agent`) | 격리 컨텍스트가 필요한 작업. 과거 agent 정의의 자리 | 대량 파일 분석, 독립 리뷰 |

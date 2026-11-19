@@ -1,11 +1,5 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
-  "agents": [
-    "./agents/workflow/codebase-analyzer.md",
-    "./agents/workflow/document-analyzer.md",
-    "./agents/workflow/rules-generator.md",
-    "./agents/workflow/workflow-reviewer.md"
-  ],
   "author": {
     "name": "kys0213"
   },

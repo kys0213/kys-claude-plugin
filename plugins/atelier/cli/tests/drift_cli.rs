@@ -2,10 +2,10 @@ mod drift_mocks;
 
 use assert_cmd::Command;
 use atelier::drift::core::types::{
-    HERDR_MOD_FILES, HERDR_MOD_NAME, POLICY_RULES, RULES_COPY_NAME, TEMPLATE_CLAUDE_MD_REL,
-    TEMPLATE_HERDR_MOD_DIR_REL, TEMPLATE_POLICY_RULES_DIR_REL, TEMPLATE_RULES_REL,
+    HERDR_MOD_FILES, HERDR_MOD_NAME, POLICY_RULES, TEMPLATE_CLAUDE_MD_REL,
+    TEMPLATE_HERDR_MOD_DIR_REL, TEMPLATE_POLICY_RULES_DIR_REL,
 };
-use drift_mocks::{block, HERDR_MOD_BODY, RULES_BODY, USER_RULE_BODY};
+use drift_mocks::{block, HERDR_MOD_BODY, USER_RULE_BODY};
 use predicates::prelude::*;
 use std::path::Path;
 
@@ -32,7 +32,6 @@ impl Fixture {
             &fx.at(&format!("plugin/{TEMPLATE_CLAUDE_MD_REL}")),
             &block(tpl_body),
         );
-        write(&fx.at(&format!("plugin/{TEMPLATE_RULES_REL}")), RULES_BODY);
         for name in POLICY_RULES {
             write(
                 &fx.at(&format!("plugin/{TEMPLATE_POLICY_RULES_DIR_REL}/{name}")),
@@ -76,10 +75,6 @@ impl Fixture {
         write(
             &self.claude_md(),
             &format!("# mine\n{}tail\n", block(claude_md_body)),
-        );
-        write(
-            &format!("{}/{RULES_COPY_NAME}", self.user_rules_dir()),
-            RULES_BODY,
         );
         for name in POLICY_RULES {
             write(&format!("{}/{name}", self.user_rules_dir()), USER_RULE_BODY);
@@ -139,7 +134,7 @@ fn drift_check_in_sync_exits_zero() {
         )))
         .stdout(predicate::str::contains(format!(
             "→ {} checked, 0 drifted, 0 new, 0 missing",
-            2 + POLICY_RULES.len() + HERDR_MOD_FILES.len()
+            1 + POLICY_RULES.len() + HERDR_MOD_FILES.len()
         )));
 }
 

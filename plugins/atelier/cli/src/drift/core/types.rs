@@ -2,8 +2,6 @@ pub const BEGIN_MARKER: &str = "<!-- [coding-style:begin] DO NOT REMOVE THIS LIN
 pub const END_MARKER: &str = "<!-- [coding-style:end] DO NOT REMOVE THIS LINE -->";
 
 pub const TEMPLATE_CLAUDE_MD_REL: &str = "templates/claude-md/CLAUDE.md";
-pub const TEMPLATE_RULES_REL: &str = "rules/agent-design-principles.md";
-pub const RULES_COPY_NAME: &str = "agent-design-principles.md";
 
 /// An explicit list, not a directory scan: shipping a new policy file means
 /// adding it both here and under `rules/policies/`.
@@ -23,7 +21,6 @@ pub const HERDR_MOD_FILES: &[&str] = &["mod.json", "main.js", "board.js"];
 
 /// Callers branch on these exact strings.
 pub const CLAUDE_MD_CHECK: &str = "claude-md-coding-style-block";
-pub const RULES_CHECK: &str = "rules/agent-design-principles.md";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MarkerScan {
@@ -69,8 +66,6 @@ pub enum ArtifactContent {
 pub enum SyncTarget {
     /// The `[coding-style]` marker range inside the user CLAUDE.md.
     ClaudeMd,
-    /// The agent-design-principles copy in the user rules directory.
-    Rules,
     /// The user-scope policy copies (`POLICY_RULES`, or one via `--name`).
     UserRules,
     /// The herdr-app panel copies (`HERDR_MOD_FILES`).
@@ -89,12 +84,6 @@ pub struct DriftPaths {
 impl DriftPaths {
     pub fn template_claude_md(&self) -> String {
         format!("{}/{}", self.plugin_root, TEMPLATE_CLAUDE_MD_REL)
-    }
-    pub fn template_rules(&self) -> String {
-        format!("{}/{}", self.plugin_root, TEMPLATE_RULES_REL)
-    }
-    pub fn rules_copy(&self) -> String {
-        format!("{}/{}", self.user_rules_dir, RULES_COPY_NAME)
     }
     pub fn template_policy_rule(&self, name: &str) -> String {
         format!(
@@ -204,7 +193,7 @@ impl SyncReport {
                 "synced: coding-style block in {} (backup: {backup})\n",
                 self.path
             ),
-            SyncTarget::Rules | SyncTarget::UserRules | SyncTarget::HerdrMod => {
+            SyncTarget::UserRules | SyncTarget::HerdrMod => {
                 format!("synced: {} (backup: {backup})\n", self.path)
             }
         }

@@ -15,7 +15,7 @@
 | `git-utils` | 2.4.2 | `skills/git/`(+references), `cli/` (Rust 포팅) |
 | `github-autopilot` | 0.30.1 | **제거됨** — 에이전트 스웜이 클로드만으로 동작하게 되어 GitHub 이슈 구동 autopilot 루프를 걷어내고, 자율 개발은 `skills/orchestrator/`(기본 자율 주행)가 담당 |
 | `spec-kit` | 0.7.1 | `skills/spec-write/`, `templates/spec/` |
-| `workflow-guide` | 0.6.0 | `agents/workflow/*`, `skills/{workflow,agent-design-principles}/`, `rules/` |
+| `workflow-guide` | 0.6.0 | `skills/agent-design-principles/` — 컨벤션 scaffold·리뷰 흐름(`workflow` skill·agent 4종)과 설계 원칙 룰 설치는 제거 |
 | `coding-style` | 0.3.0 | `templates/claude-md/` — `/simplify` 제안 hook 은 제거하고, 단순화 검토는 orchestrator 검토 게이트의 단순화 관점이 맡음 |
 | `orchestrator` | 0.2.0 | `skills/orchestrator/`(+references) |
 
@@ -31,7 +31,6 @@ Epic 2 ([#766](https://github.com/kys0213/kys-claude-plugin/issues/766))에서 c
 /atelier:spec-write   # 합의된 설계를 스펙 문서 계층(DESIGN→concerns→flows)으로 작성
 /atelier:communicate  # 맥락 전달 작문 기준 (독자 수준·맥락 이전·채널 적응) — 공유/보고/문서 작성 시 사용, 보고서는 HTML 레포트
 /atelier:git          # git 워크플로우 (커밋·push·PR·충돌 해결·리뷰 정리·이슈 우선순위)
-/atelier:workflow     # 컨벤션 scaffold·.claude/rules 설계·설계 원칙 룰 설치·워크플로우 리뷰
 /atelier:orchestrator # 위임/병렬 분해·worktree 격리·머지 조정 (기본 자율 주행, HITL opt-out)
 /atelier:grill        # 설계를 대화로 생성(발산→수렴)하거나 이미 있는 계획을 심문 (빈틈·가정 드러내기)
 /atelier:kanban-delegate # 칸반 위임 세션에서 다른 세션의 입력 대기를 선례로 대신 답하거나 사용자에게 물어 전달, 위임 보고
@@ -43,7 +42,7 @@ Epic 2 ([#766](https://github.com/kys0213/kys-claude-plugin/issues/766))에서 c
 ### 유지 command (deliberate 진입점)
 
 ```
-/atelier:setup       # 통합 setup (git / style / workflow 모듈 + hook 관리)
+/atelier:setup       # 통합 setup (git / style / herdr 모듈 + hook 관리)
 ```
 
 자율 개발 루프는 별도 진입점 없이 `/atelier:orchestrator` 가 기본 자율 주행으로 수행합니다.

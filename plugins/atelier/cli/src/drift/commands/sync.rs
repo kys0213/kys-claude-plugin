@@ -23,12 +23,6 @@ pub fn run(
     }
     match target {
         SyncTarget::ClaudeMd => sync_claude_md(deps, paths).map(|report| vec![report]),
-        SyncTarget::Rules => sync_verbatim_copies(
-            deps,
-            target,
-            &[(paths.rules_copy(), paths.template_rules())],
-            false,
-        ),
         SyncTarget::UserRules => {
             let scope: Vec<String> = POLICY_RULES
                 .iter()
