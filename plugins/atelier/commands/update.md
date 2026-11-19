@@ -37,12 +37,11 @@ setup 이 스냅샷으로 복사한 산출물이 현재 플러그인 원본과 �
 |---|---|
 | `~/.claude/CLAUDE.md` 의 `[coding-style:begin]~[end]` 블록 | `templates/claude-md/CLAUDE.md` |
 | `~/.claude/rules/atelier/<정책 룰>.md` | `rules/policies/*.md` (목록은 atelier CLI 가 소유) |
-| `<herdr-app 폴더>/mods/atelier-board/<파일>` (`$HERDR_APP_HOME`, 없으면 `~/.config/herdr-app`) | `extensions/herdr/mods/atelier-board/*` (목록은 atelier CLI 가 소유) |
 
 - 출력은 `<check>=<STATUS>` 라인과 요약 한 줄입니다. STATUS:
   - `OK` — 원본과 일치
   - `DRIFTED` — 원본과 다름
-  - `NEW` — 정책 룰이나 herdr 패널을 설치했는데(그 묶음의 파일이 하나라도 있음) 새 버전이 추가한 파일만 없음
+  - `NEW` — 정책 룰을 설치했는데(그 묶음의 파일이 하나라도 있음) 새 버전이 추가한 파일만 없음
   - `NOT_INSTALLED` — 사용자가 설치하지 않은 산출물
 - exit code: `0` 갱신할 것 없음 / `1` `DRIFTED` 또는 `NEW` 발견 / `2` CLI 오류. **exit 1 은 실패가 아니라 Step 3 의 입력입니다**
 
@@ -77,20 +76,6 @@ atelier drift sync --target user-rules --name <파일명> --plugin-root "${CLAUD
 
 출력은 파일마다 `installed: <경로>` 한 줄입니다.
 
-**`herdr-mod/<파일>=DRIFTED` 또는 `=NEW`** → 질문 없이 바로 갱신합니다. 패널은 atelier CLI 와 함께 바뀌는 코드라, 옛 패널이 남으면 새 CLI 와 어긋납니다. headless 에서도 그대로 갱신합니다. 패널 파일 전체를 한 번에 맞춥니다 (기존 파일은 백업 후 덮어쓰고, 빠진 파일은 설치). 백업은 같은 폴더에 숨김 파일(`.<파일>.bak-<시각>`)로 남깁니다 — herdr-app 은 mod 폴더의 파일이 저장되면 그 mod 를 다시 불러오는데, 숨김 파일은 건너뜁니다:
-
-```bash
-atelier drift sync --target herdr-mod --plugin-root "${CLAUDE_PLUGIN_ROOT}"
-```
-
-갱신한 뒤 herdr-app 이 있으면 패널 검사를 돌립니다. herdr-app 은 저장된 파일을 바로 다시 불러와서 재시작이 필요 없습니다:
-
-```bash
-herdr-app check "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/atelier-board"
-```
-
-패널을 고쳐 쓰려는 사용자는 herdr-app 의 `mod.clone` 으로 다른 이름의 패널을 만들어 씁니다. `keys.json` 은 건드리지 않습니다.
-
 **`NOT_INSTALLED`** → 건너뜁니다. 사용자가 setup 에서 고르지 않은 모듈이므로 설치하지 않고, 필요 시 `/atelier:setup` 을 안내만 합니다.
 
 ### Step 4 — 프로젝트 코드 스타일 룰 (설치된 경우만)
@@ -120,7 +105,7 @@ Step 2·3 결과를 산출물별로 이어서 보고합니다:
 
 - `OK` → 최신 상태임을 알립니다
 - 갱신됨 → `atelier drift sync` 출력의 백업 경로를 함께 알립니다
-- 새로 설치됨 (`NEW`) → 새 버전에서 추가된 정책 룰이나 패널 파일을 설치했음을 경로와 함께 알립니다
+- 새로 설치됨 (`NEW`) → 새 버전에서 추가된 정책 룰을 설치했음을 경로와 함께 알립니다
 - 건너뜀 (사용자 선택) → 커스터마이즈를 유지했음을 알립니다
 - `NOT_INSTALLED` → 해당 모듈이 설치되지 않았음을 알립니다 (문제가 아니며, 필요 시 `/atelier:setup` 안내)
 
@@ -129,7 +114,6 @@ Step 2·3 결과를 산출물별로 이어서 보고합니다:
 - **Rust 툴체인 부재** (`ERROR: Rust toolchain not found.`) → https://rustup.rs/ 에서 설치 후 재실행하도록 안내하고 종료합니다. 다른 작업으로 대체하지 않습니다.
 - **빌드 실패** → cargo 에러 원문을 보여주고 종료합니다. 설정 파일을 고치려 들지 않습니다.
 - **`atelier drift check` exit 2** (`Error: ...`) → 플러그인 원본 누락 또는 인자 오류입니다. Step 1 결과는 그대로 보고하고, 드리프트 점검은 실패했음을 stderr 원문과 함께 알립니다.
-- **herdr 패널 갱신 뒤 `herdr-app check` 실패** → 갱신한 파일은 그대로 두고, 검사 출력 원문과 함께 알립니다. 다른 산출물 보고는 계속합니다.
 - **`atelier drift sync` exit 2** (`Error: ...`) → 설치하지 않은 대상, 마커 손상, 또는 인코딩 거부(CRLF·비 UTF-8 파일은 byte 보존이 불가능해 쓰지 않음)입니다. 직접 파일을 고치려 들지 말고 stderr 원문과 함께 `/atelier:setup` 재실행을 안내합니다.
 
 ## Output Examples
@@ -142,10 +126,7 @@ user-rules/spec-writing.md=OK
 user-rules/rules-writing.md=OK
 user-rules/plan-writing.md=OK
 user-rules/doc-dependency.md=OK
-herdr-mod/mod.json=NOT_INSTALLED (/Users/me/.config/herdr-app/mods/atelier-board/mod.json)
-herdr-mod/main.js=NOT_INSTALLED (/Users/me/.config/herdr-app/mods/atelier-board/main.js)
-herdr-mod/board.js=NOT_INSTALLED (/Users/me/.config/herdr-app/mods/atelier-board/board.js)
-→ 8 checked, 0 drifted, 0 new, 3 missing
+→ 5 checked, 0 drifted, 0 new, 0 missing
 ```
 
 **CLAUDE.md 블록 드리프트 → 자동 갱신:**
@@ -156,10 +137,7 @@ user-rules/spec-writing.md=OK
 user-rules/rules-writing.md=OK
 user-rules/plan-writing.md=OK
 user-rules/doc-dependency.md=OK
-herdr-mod/mod.json=OK
-herdr-mod/main.js=OK
-herdr-mod/board.js=OK
-→ 8 checked, 1 drifted, 0 new, 0 missing
+→ 5 checked, 1 drifted, 0 new, 0 missing
 ```
 
 ```
@@ -176,10 +154,7 @@ user-rules/spec-writing.md=OK
 user-rules/rules-writing.md=OK
 user-rules/plan-writing.md=OK
 user-rules/doc-dependency.md=NEW (/Users/me/.claude/rules/atelier/doc-dependency.md)
-herdr-mod/mod.json=OK
-herdr-mod/main.js=OK
-herdr-mod/board.js=OK
-→ 8 checked, 0 drifted, 1 new, 0 missing
+→ 5 checked, 0 drifted, 1 new, 0 missing
 ```
 
 ```
@@ -187,22 +162,6 @@ installed: /Users/me/.claude/rules/atelier/doc-dependency.md
 ```
 
 → 보고 예: "새 버전에서 추가된 정책 룰 `doc-dependency.md` 를 `~/.claude/rules/atelier/` 에 설치했습니다."
-
-**herdr 패널 드리프트 → 자동 갱신:**
-
-```
-herdr-mod/mod.json=OK
-herdr-mod/main.js=DRIFTED (/Users/me/.config/herdr-app/mods/atelier-board/main.js)
-herdr-mod/board.js=NEW (/Users/me/.config/herdr-app/mods/atelier-board/board.js)
-```
-
-```
-synced: /Users/me/.config/herdr-app/mods/atelier-board/mod.json (backup: /Users/me/.config/herdr-app/mods/atelier-board/.mod.json.bak-20260821-093012)
-synced: /Users/me/.config/herdr-app/mods/atelier-board/main.js (backup: /Users/me/.config/herdr-app/mods/atelier-board/.main.js.bak-20260821-093012)
-installed: /Users/me/.config/herdr-app/mods/atelier-board/board.js
-```
-
-→ 보고 예: "herdr-app 패널을 새 버전으로 갱신했습니다 (herdr-app check 통과). 이전 파일은 같은 폴더에 숨김 파일(`.main.js.bak-20260821-093012` 등)로 남겼습니다."
 
 **정책 룰 드리프트 → 사용자가 건너뛰기 선택:**
 

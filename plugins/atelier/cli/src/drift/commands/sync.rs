@@ -1,7 +1,6 @@
 use crate::drift::commands::{read_source, scope_installed, DriftDeps};
 use crate::drift::core::types::{
-    scan_markers, ArtifactContent, DriftPaths, SyncReport, SyncTarget, HERDR_MOD_FILES,
-    POLICY_RULES,
+    scan_markers, ArtifactContent, DriftPaths, SyncReport, SyncTarget, POLICY_RULES,
 };
 
 pub fn run(
@@ -33,19 +32,6 @@ pub fn run(
                 .filter(|file| name.is_none_or(|n| n == **file))
                 .map(|file| (paths.user_rule_copy(file), paths.template_policy_rule(file)))
                 .collect();
-            sync_verbatim_copies(deps, target, &pairs, scope_installed(deps, &scope))
-        }
-        SyncTarget::HerdrMod => {
-            let pairs: Vec<(String, String)> = HERDR_MOD_FILES
-                .iter()
-                .map(|file| {
-                    (
-                        paths.herdr_mod_copy(file),
-                        paths.template_herdr_mod_file(file),
-                    )
-                })
-                .collect();
-            let scope: Vec<String> = pairs.iter().map(|(copy, _)| copy.clone()).collect();
             sync_verbatim_copies(deps, target, &pairs, scope_installed(deps, &scope))
         }
     }
@@ -146,15 +132,6 @@ fn sync_claude_md(deps: &DriftDeps, paths: &DriftPaths) -> Result<SyncReport, St
     })
 }
 
-/// herdr-app reloads a mod whenever a file in its folder is saved, hidden files
-/// aside, so the panel's backups are hidden.
-fn backup_path(target: SyncTarget, copy_path: &str, stamp: &str) -> String {
-    match (target, copy_path.rsplit_once('/')) {
-        (SyncTarget::HerdrMod, Some((dir, name))) => format!("{dir}/.{name}.bak-{stamp}"),
-        _ => format!("{copy_path}.bak-{stamp}"),
-    }
-}
-
 fn sync_verbatim_copies(
     deps: &DriftDeps,
     target: SyncTarget,
@@ -182,7 +159,7 @@ fn sync_verbatim_copies(
     for (copy_path, current, source) in jobs {
         let backup = match current {
             Some(current) => {
-                let backup_path = backup_path(target, copy_path, &stamp);
+                let backup_path = format!("{copy_path}.bak-{stamp}");
                 deps.fs.write(&backup_path, &current)?;
                 Some(backup_path)
             }

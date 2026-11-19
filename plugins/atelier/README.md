@@ -33,16 +33,12 @@ Epic 2 ([#766](https://github.com/kys0213/kys-claude-plugin/issues/766))에서 c
 /atelier:git          # git 워크플로우 (커밋·push·PR·충돌 해결·리뷰 정리·이슈 우선순위)
 /atelier:orchestrator # 위임/병렬 분해·worktree 격리·머지 조정 (기본 자율 주행, HITL opt-out)
 /atelier:grill        # 설계를 대화로 생성(발산→수렴)하거나 이미 있는 계획을 심문 (빈틈·가정 드러내기)
-/atelier:kanban-delegate # 칸반 위임 세션에서 다른 세션의 입력 대기를 선례로 대신 답하거나 사용자에게 물어 전달, 위임 보고
 ```
-
-`kanban-delegate` 는 성향 프로필의 근거로 suggest-workflow 의 인사이트·지난 대화 검색을 쓰므로 `plugin.json` 에
-`dependencies: ["suggest-workflow"]` 를 선언합니다. suggest-workflow 가 없거나 색인이 비면 그 근거 없이 동작합니다.
 
 ### 유지 command (deliberate 진입점)
 
 ```
-/atelier:setup       # 통합 setup (git / style / herdr 모듈 + hook 관리)
+/atelier:setup       # 통합 setup (git / style 모듈 + hook 관리)
 ```
 
 자율 개발 루프는 별도 진입점 없이 `/atelier:orchestrator` 가 기본 자율 주행으로 수행합니다.
@@ -71,7 +67,6 @@ atelier git <reviews|guard|hook>          # git-utils 의 기계적 호출 표�
 atelier session <push-check|ensure-env>   # 세션 경계 hook (SessionStart / Stop)
 atelier orchestrator <spawn-check|compact-note>      # function hooks 모듈이 위임하는 결정적 판정 (아래 §Function hooks)
 atelier code-style <install|update|check|restore|uninstall> # 프로젝트 코드 스타일 룰(base·언어·앱 성격) 설치·갱신·점검·제어 (/atelier:code-style)
-atelier kanban <status|…>                 # 세션 칸반 판정과 세션 사이 요청 전달 (아래 §세션 칸반)
 ```
 
 `drift` 는 `/atelier:update`·`/atelier:setup` 명세가 호출하는 결정적 도구입니다.
@@ -115,71 +110,6 @@ SessionStart hook `hooks/ensure-agent-teams.sh` 가 `~/.claude/settings.json`(`C
 
 `hooks/register.ts`(`hooks.json` 의 `modules`)는 Claude Code 모드로 로드됩니다. 모드는 Claude Code
 v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러그인을 설치하면 함께 동작합니다.
-
-### 세션 칸반
-
-`/kanban` 을 입력하면 이 머신에서 atelier 가 켜진 Claude Code 세션 전체를 칸반 pane 으로 보여줍니다.
-다시 입력하면 닫힙니다. 터미널과 데스크톱 앱에서는 프롬프트 위의 `세션 칸반 열기`/`세션 칸반 닫기` 버튼으로도
-열고 닫을 수 있습니다.
-
-- **컬럼**: **입력 대기 → 작업 중 → 쉬는 중 → 응답 없음**. 카드에는 저장소 이름·그 컬럼에 머문 시간·세션
-  제목(없으면 첫 프롬프트)과 진행 상황(할 일 진척, 작업 중이면 지금 실행 중인 도구), 쉬는 중이면 직전 응답 첫
-  줄이 나옵니다.
-  - 오케스트레이터가 에이전트 스웜을 돌리며 턴을 끝낸 동안은 **작업 중** 이고, 카드에
-    `▸ 백그라운드: 에이전트 3 · 워크플로 1` 처럼 남은 일이 나옵니다. 백그라운드 셸(dev 서버 등)·Monitor, 따로 띄운
-    세션에 SendMessage 로 맡긴 일은 일로 치지 않습니다.
-- **답하기**: 질문(AskUserQuestion)은 보드 아래에 펼쳐집니다. 선택지를 누르거나 직접 입력한 뒤 **답 보내기** 를
-  누르면 그 세션이 사람이 답한 것처럼 이어갑니다. 권한 요청은 카드 상세의 **허용**·**거부**, 결정 요청은 답 버튼이나
-  직접 입력으로 답합니다. 그 세션 화면에서 먼저 답하면 그쪽이 쓰입니다.
-- **카드 상세**: 카드 제목을 누르면 그 컬럼에 맞는 상세가 열리고 `← 보드` 로 돌아갑니다. 맨 위에 세션 제목과
-  작업 디렉토리가, 요청 앞에는 그 전에 사람이 쓴 요청들이 나와서 후속 질문만 남은 세션도 무슨 작업인지 보입니다. 쉬는 세션은
-  **입력해 보내기** 로 새 턴을 맡기고, 일하는 세션은 **중지**(한 번 더 눌러 확인)로 멈춥니다. 응답 없음 카드는
-  **보드에서 지우기**(한 번 더 눌러 확인)로 24시간을 기다리지 않고 치웁니다 — 세션이 살아나면 다시 나타납니다.
-  지켜볼 필요 없는 작업 중·쉬는 중 세션은 **보드에서 빼기**(한 번 더 눌러 확인)로 숨깁니다 — 세션은 그대로 돌고,
-  그 세션에 새 프롬프트를 쓰거나 입력 대기가 되면 다시 나타납니다. 이런 버튼은 `← 보드` 바로 아래에 있습니다.
-  카드에서 그 세션 화면으로 이동하는 기능은 없습니다(herdr-app 패널에서는 됩니다).
-- pane 은 `ctrl+x tab` 이나 클릭으로 포커스하고, Tab 으로 버튼 사이를 옮깁니다. 데스크톱에서도 같습니다.
-- **터미널에서 보기**: pane 없이 같은 보드를 읽습니다.
-
-  ```
-  atelier kanban status                        # 전체 보드 (JSON)
-  atelier kanban status --format text          # 사람이 읽는 표
-  atelier kanban status --column needs_input   # 입력 대기만
-  ```
-
-- **칸반 위임**: 메인 세션 하나에서 위임을 켜면, 다른 세션의 입력 대기를 그 세션으로 모아 받습니다. 사용자가 전에
-  같은 결정을 직접 내린 적이 있는 대기만 대신 답하고, 나머지는 메인 대화에서 물어 그 답을 전달합니다.
-
-  ```
-  /kanban delegate on                 # 이 세션을 위임 세션으로 켜기
-  /kanban delegate off                # 끄기
-  /kanban delegate act question       # 질문을 대신 답하기로 올리기 (permission 도 같음)
-  /kanban delegate shadow question    # 지켜보기로 내리기
-  ```
-
-  - 처음에는 지켜보기 단계라 대신 답하지 않고 모두 물어봅니다. 보고에 "올려도 좋음" 이 보이면 `act` 로 올리세요.
-    위임 명령은 사람이 직접 입력한 것만 받습니다.
-  - 보고: 메인 대화에서 위임 보고를 요청하면 직전 일일 보고 이후를 받고, 매일 `kanban_report_at`(플러그인 설정,
-    기본 `18:00`) 이후 일일 보고가 옵니다(`/plugin configure atelier` 로 바꿀 수 있어요).
-  - 대신 답한 것이 틀렸으면 메인 대화에서 뒤집어 달라고 말하세요. 그 결정은 다시 사용자에게 묻습니다.
-  - 규격: [`spec/concerns/kanban-delegate.md`](spec/concerns/kanban-delegate.md)
-- **오케스트레이터**: 메인 오케스트레이터는 같은 보드를 읽어 레포별로 쉬는 세션에 일을 맡기거나, 그 레포에
-  백그라운드 세션을 새로 띄웁니다. 오케스트레이터 세션의 권한 규칙을 그대로 따릅니다. 절차는 `orchestrator`
-  skill 이 담습니다. herdr-app 터미널 안의 오케스트레이터는 작업 세션을 hc 터미널로 띄워서, 그 세션이
-  herdr-app 에 오케스트레이터의 하위 에이전트로 보입니다(`atelier kanban spawn --via auto`).
-- **herdr-app 패널**: [herdr-app](https://github.com/herdrdev/herdr-app) 안에서 같은 보드를 탭 안의 패널로
-  봅니다. `/atelier:setup` 의 `herdr` 모듈로 설치하고, `/atelier:update` 가 새 버전으로 맞춥니다.
-  - 카드를 누르면 그 세션의 터미널로 갑니다. 터미널이 없거나 닫힌 세션은 새 탭에서 엽니다. 실행 중이 아닌
-    세션은 `claude --resume` 으로 이어 열고, 백그라운드 세션은 `claude attach` 로 붙습니다. 다른 곳에서 실행
-    중인 세션은 열지 않고 그렇다고 표시합니다. 패널이 연 탭은 `atelier kanban opened` 로 기록해서, 다시 누르면
-    그 탭으로 가고 다른 패널에서도 같은 탭을 봅니다.
-  - hc 터미널로 띄운 작업 세션은 부모 세션 카드 밑에 묶여 보입니다.
-  - 권한 요청은 허용·거부, 질문은 선택지, 결정 요청은 답 버튼으로 패널에서 바로 답합니다.
-  - 단축키는 `keys.json` 의 `"global"` 에 직접 넣어 씁니다. 지금 탭의 오른쪽에 패널을 나눠 엽니다:
-    `"ctrl-shift-a": { "command": "pane.split", "args": { "direction": "right", "mod": "atelier-board" } }`
-  - 규격: [`spec/concerns/herdr-extension.md`](spec/concerns/herdr-extension.md)
-- `atelier` CLI 가 없으면 pane 에 안내 한 줄만 나옵니다. `/atelier:update` 로 설치·갱신하세요.
-- 상세 규격: [`spec/concerns/session-kanban.md`](spec/concerns/session-kanban.md)
 
 ### orchestrator 규약 집행
 
