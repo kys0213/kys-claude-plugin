@@ -102,6 +102,14 @@ export function parseStatus(r) {
   return { error: typeof out?.error === 'string' ? out.error : `atelier kanban status 가 실패했어요: ${said(r) || `exit ${r.code}`}` }
 }
 
+/** The folder `atelier kanban record-path` puts a session's record copy in; null when unknown. */
+export function recordsDir(r) {
+  const path = r.code === 0 ? json(r.stdout)?.path : null
+  if (typeof path !== 'string') return null
+  const cut = path.lastIndexOf('/')
+  return cut > 0 ? path.slice(0, cut) : null
+}
+
 export function outcome(r) {
   const out = json(r.stdout)
   if (typeof out?.error === 'string') return { error: out.error }

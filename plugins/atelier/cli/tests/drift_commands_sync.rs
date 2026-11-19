@@ -193,7 +193,9 @@ fn sync_herdr_mod_backs_up_and_overwrites_every_file_and_installs_new_ones() {
             if *name == added {
                 format!("installed: {copy}\n")
             } else {
-                format!("synced: {copy} (backup: {copy}.bak-{TS})\n")
+                format!(
+                    "synced: {copy} (backup: {HERDR_MODS_DIR}/atelier-board/.{name}.bak-{TS})\n"
+                )
             }
         })
         .collect();
@@ -202,9 +204,17 @@ fn sync_herdr_mod_backs_up_and_overwrites_every_file_and_installs_new_ones() {
         assert_eq!(fs.content(&herdr_mod_copy(name)).unwrap(), HERDR_MOD_BODY);
     }
     assert_eq!(
-        fs.content(&format!("{edited}.bak-{TS}")).unwrap(),
+        fs.content(&format!(
+            "{HERDR_MODS_DIR}/atelier-board/.{}.bak-{TS}",
+            HERDR_MOD_FILES[0]
+        ))
+        .unwrap(),
         "locally edited\n"
     );
+    assert!(!fs
+        .files
+        .borrow()
+        .contains_key(&format!("{edited}.bak-{TS}")));
 }
 
 #[test]

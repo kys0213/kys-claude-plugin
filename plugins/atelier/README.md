@@ -174,7 +174,7 @@ v2.1.287(Desktop v2.1.286)부터 플래그 없이 기본으로 켜지고, 플러
   - hc 터미널로 띄운 작업 세션은 부모 세션 카드 밑에 묶여 보입니다.
   - 권한 요청은 허용·거부, 질문은 선택지, 결정 요청은 답 버튼으로 패널에서 바로 답합니다.
   - 단축키는 `keys.json` 의 `"global"` 에 직접 넣어 씁니다. 지금 탭의 오른쪽에 패널을 나눠 엽니다:
-    `"ctrl-alt-k": { "command": "pane.split", "args": { "direction": "right", "mod": "atelier-board" } }`
+    `"ctrl-shift-a": { "command": "pane.split", "args": { "direction": "right", "mod": "atelier-board" } }`
   - 규격: [`spec/concerns/herdr-extension.md`](spec/concerns/herdr-extension.md)
 - `atelier` CLI 가 없으면 pane 에 안내 한 줄만 나옵니다. `/atelier:update` 로 설치·갱신하세요.
 - 상세 규격: [`spec/concerns/session-kanban.md`](spec/concerns/session-kanban.md)

@@ -118,7 +118,7 @@ herdr-app 에서 atelier 세션 칸반을 보는 패널(`atelier-board` mod)을 
    ```
 4. 단축키를 안내합니다. `keys.json` 은 **고치지 않습니다** — herdr-app 은 사용자가 한 번 고친 단축키 파일에 새 기본 단축키를 넣지 않습니다. 넣을 줄만 보여 줍니다:
    ```json
-   "global": { "ctrl-alt-k": { "command": "pane.split", "args": { "direction": "right", "mod": "atelier-board" } } }
+   "global": { "ctrl-shift-a": { "command": "pane.split", "args": { "direction": "right", "mod": "atelier-board" } } }
    ```
    단축키는 지금 탭의 오른쪽에 패널을 나눠 엽니다. 패널은 그 탭과 함께 저장되고, 다른 pane 처럼 닫습니다. herdr-app 의 레이아웃은 고치지 않습니다 (기본 레이아웃은 읽기 전용이고, 복제하면 앱 업데이트를 따라가지 않습니다).
 
@@ -237,7 +237,7 @@ alias git-utils='atelier git'
 ```
 atelier-board 패널을 ~/.config/herdr-app/mods/atelier-board 에 설치했어요 (herdr-app check 통과).
 단축키를 쓰려면 ~/.config/herdr-app/keys.json 의 "global" 에 이 줄을 넣어 주세요:
-  "ctrl-alt-k": { "command": "pane.split", "args": { "direction": "right", "mod": "atelier-board" } }
+  "ctrl-shift-a": { "command": "pane.split", "args": { "direction": "right", "mod": "atelier-board" } }
 ```
 
 **herdr-app 이 없을 때:**

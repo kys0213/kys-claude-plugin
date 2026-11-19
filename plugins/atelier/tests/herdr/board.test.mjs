@@ -8,6 +8,7 @@ import {
   outcome,
   parseStatus,
   permitArgs,
+  recordsDir,
   replyArgs,
 } from '../../extensions/herdr/mods/atelier-board/board.js'
 
@@ -149,6 +150,20 @@ describe('reading the CLI', () => {
       { code: 0, stdout: '{"error":"--format 은 json 또는 text 예요"}', stderr: '' },
     ]) {
       assert.ok(typeof parseStatus(r).error === 'string', JSON.stringify(r))
+    }
+  })
+
+  test('the records folder is the folder of a session’s record copy', () => {
+    assert.equal(
+      recordsDir({ code: 0, stdout: '{"path":"/Users/me/.claude/atelier/kanban/records/probe.json"}\n', stderr: '' }),
+      '/Users/me/.claude/atelier/kanban/records',
+    )
+    for (const r of [
+      { code: 1, stdout: '', stderr: 'boom' },
+      { code: 0, stdout: '{"error":"x"}', stderr: '' },
+      { code: 0, stdout: '{"path":"probe.json"}', stderr: '' },
+    ]) {
+      assert.equal(recordsDir(r), null, JSON.stringify(r))
     }
   })
 

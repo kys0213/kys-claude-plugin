@@ -84,7 +84,7 @@ atelier drift sync --target user-rules --name <파일명> --plugin-root "${CLAUD
 
 출력은 파일마다 `installed: <경로>` 한 줄입니다.
 
-**`herdr-mod/<파일>=DRIFTED` 또는 `=NEW`** → 질문 없이 바로 갱신합니다. 패널은 atelier CLI 와 함께 바뀌는 코드라, 옛 패널이 남으면 새 CLI 와 어긋납니다. headless 에서도 그대로 갱신합니다. 패널 파일 전체를 한 번에 맞춥니다 (기존 파일은 백업 후 덮어쓰고, 빠진 파일은 설치):
+**`herdr-mod/<파일>=DRIFTED` 또는 `=NEW`** → 질문 없이 바로 갱신합니다. 패널은 atelier CLI 와 함께 바뀌는 코드라, 옛 패널이 남으면 새 CLI 와 어긋납니다. headless 에서도 그대로 갱신합니다. 패널 파일 전체를 한 번에 맞춥니다 (기존 파일은 백업 후 덮어쓰고, 빠진 파일은 설치). 백업은 같은 폴더에 숨김 파일(`.<파일>.bak-<시각>`)로 남깁니다 — herdr-app 은 mod 폴더의 파일이 저장되면 그 mod 를 다시 불러오는데, 숨김 파일은 건너뜁니다:
 
 ```bash
 atelier drift sync --target herdr-mod --plugin-root "${CLAUDE_PLUGIN_ROOT}"
@@ -207,12 +207,12 @@ herdr-mod/board.js=NEW (/Users/me/.config/herdr-app/mods/atelier-board/board.js)
 ```
 
 ```
-synced: /Users/me/.config/herdr-app/mods/atelier-board/mod.json (backup: /Users/me/.config/herdr-app/mods/atelier-board/mod.json.bak-20260821-093012)
-synced: /Users/me/.config/herdr-app/mods/atelier-board/main.js (backup: /Users/me/.config/herdr-app/mods/atelier-board/main.js.bak-20260821-093012)
+synced: /Users/me/.config/herdr-app/mods/atelier-board/mod.json (backup: /Users/me/.config/herdr-app/mods/atelier-board/.mod.json.bak-20260821-093012)
+synced: /Users/me/.config/herdr-app/mods/atelier-board/main.js (backup: /Users/me/.config/herdr-app/mods/atelier-board/.main.js.bak-20260821-093012)
 installed: /Users/me/.config/herdr-app/mods/atelier-board/board.js
 ```
 
-→ 보고 예: "herdr-app 패널을 새 버전으로 갱신했습니다 (herdr-app check 통과). 이전 파일은 `.bak-20260821-093012` 로 남겼습니다."
+→ 보고 예: "herdr-app 패널을 새 버전으로 갱신했습니다 (herdr-app check 통과). 이전 파일은 같은 폴더에 숨김 파일(`.main.js.bak-20260821-093012` 등)로 남겼습니다."
 
 **rules 드리프트 → 사용자가 건너뛰기 선택:**
 

@@ -3,37 +3,80 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, checking, exec, run, terminals, theme } from "herdr";
-import { decideArgs, layout, moveTarget, outcome, parseStatus, permitArgs, replyArgs } from "./board.js";
+import { agents, checking, exec, run, terminals, theme, watchFolder } from "herdr";
+import { decideArgs, layout, moveTarget, outcome, parseStatus, permitArgs, recordsDir, replyArgs } from "./board.js";
 
-const REFRESH_MS = 2000;
+// The board is read when a session's record changes; the slow timer only moves the ages
+// on, and the fast one stands in for the watch where the records folder can't be watched.
+const AGE_MS = 30000;
+const POLL_MS = 2000;
 const CLI_TIMEOUT_MS = 10000;
 
 export default class AtelierBoard extends View {
   init(_props, cx) {
     this.sessions = null;
     this.error = null;
+    this.shown = null;
     this.loading = false;
+    this.again = false;
+    this.watching = false;
     this.picks = {};
     this.notes = {};
     if (checking()) return;
-    cx.timer.every(REFRESH_MS, (cx) => this.refresh(cx));
+    cx.timer.every(AGE_MS, (cx) => this.refresh(cx));
+    cx.timer.every(POLL_MS, (cx) => { if (!this.watching) this.refresh(cx); });
     this.refresh(cx);
+    this.watch(cx);
+  }
+
+  watch(cx) {
+    cx.spawn(async (cx) => {
+      let dir = null;
+      try {
+        dir = recordsDir(await exec("atelier", ["kanban", "record-path", "--session", "board"], { timeout: CLI_TIMEOUT_MS }));
+      } catch {
+        dir = null;
+      }
+      if (!dir) return;
+      this.watching = true;
+      for (;;) {
+        try {
+          await watchFolder(dir);
+        } catch {
+          this.watching = false;
+          return;
+        }
+        this.refresh(cx);
+      }
+    });
   }
 
   refresh(cx) {
-    if (this.loading) return;
+    if (this.loading) {
+      this.again = true;
+      return;
+    }
     this.loading = true;
     cx.spawn(async (cx) => {
+      let out = null;
+      let read;
       try {
-        const read = parseStatus(await exec("atelier", ["kanban", "status", "--format", "json"], { timeout: CLI_TIMEOUT_MS }));
-        this.sessions = read.sessions ?? this.sessions;
-        this.error = read.error ?? null;
+        const r = await exec("atelier", ["kanban", "status", "--format", "json"], { timeout: CLI_TIMEOUT_MS });
+        out = r.stdout;
+        read = parseStatus(r);
       } catch (e) {
-        this.error = `atelier CLI 를 실행하지 못했어요: ${e?.message ?? e}`;
+        read = { error: `atelier CLI 를 실행하지 못했어요: ${e?.message ?? e}` };
       }
+      const changed = out !== this.shown || (read.error ?? null) !== this.error;
+      this.shown = out;
+      this.sessions = read.sessions ?? this.sessions;
+      this.error = read.error ?? null;
       this.loading = false;
-      cx.notify();
+      if (changed) cx.notify();
+      if (this.again) {
+        this.again = false;
+        this.refresh(cx);
+      }
     });
   }
 
