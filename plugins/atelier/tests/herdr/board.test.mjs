@@ -9,6 +9,7 @@ import {
   decideArgs,
   layout,
   moveTarget,
+  openingEnds,
   outcome,
   parseAgents,
   parseStatus,
@@ -141,6 +142,34 @@ describe('cardState', () => {
 
     assert.deepEqual(cardState(s, [], 1000 + HOLD - 1, HOLD), { kind: 'opening' })
     assert.deepEqual(cardState(s, [], 1000 + HOLD, HOLD), { kind: 'closed' })
+  })
+
+  test('a live terminal back at its shell after Claude exited leaves the card closed', () => {
+    const shell = (address) => ({ ...live(address), program: { shell: true } })
+    const claude = (address) => ({ ...live(address), program: { shell: false } })
+
+    assert.deepEqual(cardState(session('s', 'stale', { hc_terminal: 't2y' }), [shell('t2y')], 0, HOLD), { kind: 'closed' })
+    assert.deepEqual(
+      cardState(session('s', 'stale', { opened: { at: 0, terminal: 't2z' } }), [shell('t2z')], 0, HOLD),
+      { kind: 'closed' },
+    )
+    assert.deepEqual(cardState(session('s', 'idle', { hc_terminal: 't1' }), [claude('t1')], 0, HOLD), {
+      kind: 'open',
+      address: 't1',
+    })
+  })
+})
+
+describe('openingEnds', () => {
+  const HOLD = 15000
+  const opening = (id, at) => session(id, 'stale', { opened: { at, terminal: null } })
+
+  test('is when the first opening card turns closed', () => {
+    assert.equal(openingEnds([opening('a', 5000), opening('b', 1000), session('c', 'idle')], [], 2000, HOLD), 1000 + HOLD)
+  })
+
+  test('is null when no card is opening', () => {
+    assert.equal(openingEnds([opening('a', 0), session('c', 'idle')], [], HOLD, HOLD), null)
   })
 })
 

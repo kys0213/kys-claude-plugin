@@ -4,7 +4,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, checking, exec, run, terminals, theme, watchFolder } from "herdr";
-import { boardKey, cardState, claimArgs, claimed, decideArgs, layout, moveTarget, outcome, parseAgents, parseStatus, permitArgs, recordsDir, releaseArgs, reopenTarget, replyArgs } from "./board.js";
+import { boardKey, cardState, claimArgs, claimed, decideArgs, layout, moveTarget, openingEnds, outcome, parseAgents, parseStatus, permitArgs, recordsDir, releaseArgs, reopenTarget, replyArgs } from "./board.js";
 
 // The board is read when a session's record changes; the slow timer only moves the ages
 // on, and the fast one stands in for the watch where the records folder can't be watched.
@@ -43,9 +43,16 @@ export default class AtelierBoard extends View {
     this.watching = false;
     this.picks = {};
     this.notes = {};
+    this.openingEnds = null;
     if (checking()) return;
     cx.timer.every(AGE_MS, (cx) => this.refresh(cx, true));
-    cx.timer.every(POLL_MS, (cx) => { if (!this.watching) this.refresh(cx); });
+    cx.timer.every(POLL_MS, (cx) => {
+      if (!this.watching) this.refresh(cx);
+      if (this.openingEnds !== null && Date.now() >= this.openingEnds) {
+        this.openingEnds = null;
+        cx.notify();
+      }
+    });
     this.refresh(cx);
     this.watch(cx);
   }
@@ -291,6 +298,7 @@ export default class AtelierBoard extends View {
     if (this.sessions === null) return root.child(div().text_color(t.dim).child("불러오는 중…"));
 
     const live = terminals();
+    this.openingEnds = openingEnds(this.sessions, live, Date.now(), OPENING_MS);
     return root
       .when(Boolean(this.error), (el) => el.child(div().text_size(11).text_color(t.muted).child(this.error)))
       .children(layout(this.sessions, live).map((col) =>

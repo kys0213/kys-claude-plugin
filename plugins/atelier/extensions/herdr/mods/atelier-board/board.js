@@ -67,18 +67,30 @@ export function moveTarget(address, agents, terminals) {
   return { command: hasPane ? 'pane.focus' : 'terminal.peek', args: { terminal: address } }
 }
 
+// herdr-app keeps a terminal's interactive shell after the agent in it exits, so a live terminal
+// whose program is that shell again no longer holds the session.
+const holdsAgent = (t) => isLive(t) && t.program?.shell !== true
+
 /**
- * Where a card stands in herdr-app: `open` in a live terminal (the session's own first, then the
- * one a board opened), `opening` while a board's tab has not reported its terminal for `holdMs`,
- * else `closed`.
+ * Where a card stands in herdr-app: `open` in a live terminal still running something other than
+ * its shell (the session's own first, then the one a board opened), `opening` while a board's tab
+ * has not reported its terminal for `holdMs`, else `closed`.
  */
 export function cardState(s, terminals, now, holdMs) {
-  const live = (address) => Boolean(address) && terminals.some((t) => t.address === address && isLive(t))
+  const live = (address) => Boolean(address) && terminals.some((t) => t.address === address && holdsAgent(t))
   if (live(s.hc_terminal)) return { kind: 'open', address: s.hc_terminal }
   const opened = s.opened ?? null
   if (live(opened?.terminal)) return { kind: 'open', address: opened.terminal }
   if (opened && !opened.terminal && now - opened.at < holdMs) return { kind: 'opening' }
   return { kind: 'closed' }
+}
+
+/** When the first `opening` card turns `closed`; null when no card is opening. */
+export function openingEnds(sessions, terminals, now, holdMs) {
+  const ends = sessions
+    .filter((s) => cardState(s, terminals, now, holdMs).kind === 'opening')
+    .map((s) => s.opened.at + holdMs)
+  return ends.length > 0 ? Math.min(...ends) : null
 }
 
 /** Claims a new tab over the opened entry this card was read with. */
