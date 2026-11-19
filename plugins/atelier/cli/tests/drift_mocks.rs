@@ -27,8 +27,6 @@ pub const HERDR_MODS_DIR: &str = "/home/u/.config/herdr-app/mods";
 /// constants are the paths of `POLICY_RULES[0]`, for tests that target one
 /// file.
 pub const TEMPLATE_CLAUDE_MD: &str = "/plugin/templates/claude-md/CLAUDE.md";
-pub const TEMPLATE_RULES: &str = "/plugin/rules/agent-design-principles.md";
-pub const RULES_COPY: &str = "/home/u/.claude/rules/atelier/agent-design-principles.md";
 pub const TEMPLATE_USER_RULE: &str = "/plugin/rules/policies/spec-writing.md";
 pub const USER_RULE_COPY: &str = "/home/u/.claude/rules/atelier/spec-writing.md";
 
@@ -49,7 +47,6 @@ pub fn herdr_mod_copy(name: &str) -> String {
 }
 
 /// Canonical rules source bodies used by the fixtures.
-pub const RULES_BODY: &str = "# Agent design principles\n\n- keep CLI deterministic\n";
 pub const USER_RULE_BODY: &str = "# Policy rule\n\n- plan is history, spec is policy\n";
 pub const HERDR_MOD_BODY: &str = "// panel\n";
 
@@ -91,13 +88,12 @@ impl MemFs {
     }
 
     /// Fresh filesystem holding every plugin source file (template block body
-    /// `tpl_body`, rules source `RULES_BODY`, every `POLICY_RULES` source as
-    /// `USER_RULE_BODY`, every `HERDR_MOD_FILES` source as `HERDR_MOD_BODY`)
+    /// `tpl_body`, every `POLICY_RULES` source as `USER_RULE_BODY`, every
+    /// `HERDR_MOD_FILES` source as `HERDR_MOD_BODY`)
     /// and nothing else.
     pub fn with_sources(tpl_body: &str) -> Self {
         let fs = MemFs::default();
         fs.insert(TEMPLATE_CLAUDE_MD, &block(tpl_body));
-        fs.insert(TEMPLATE_RULES, RULES_BODY);
         for name in POLICY_RULES {
             fs.insert(&template_policy_rule(name), USER_RULE_BODY);
         }

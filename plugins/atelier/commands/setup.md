@@ -1,12 +1,12 @@
 ---
-description: atelier 통합 환경을 초기화합니다 (git / style / workflow / herdr 모듈 선택 + 기존 hook 마이그레이션 + guard hook 관리)
+description: atelier 통합 환경을 초기화합니다 (git / style / herdr 모듈 선택 + 기존 hook 마이그레이션 + guard hook 관리)
 argument-hint: ""
 allowed-tools: ["Bash", "Read", "Write", "Edit", "AskUserQuestion"]
 ---
 
 # atelier setup
 
-흡수된 plugin(git-utils, coding-style, workflow-guide 등)의 설정을 단일 진입점으로 통합합니다.
+흡수된 plugin(git-utils, coding-style 등)의 설정을 단일 진입점으로 통합합니다.
 모듈을 선택해 설치하고, 기존 frozen plugin 경로로 등록된 hook 을 atelier 로 마이그레이션합니다.
 
 > ⚠️ 기본적으로 모든 hook 은 user scope(`~/.claude/settings.json`)에 등록됩니다.
@@ -41,9 +41,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 |---|---|---|
 | `git` | GitHub 인증 확인 + `~/.git-workflow-env` 생성 + Default Branch Guard hook | git-utils setup |
 | `style` | `~/.claude/CLAUDE.md` 코딩 원칙 병합 + 문서 작성 정책 룰 설치 (`~/.claude/rules/atelier/`) | coding-style setup |
-| `workflow` | `~/.claude/rules/atelier/agent-design-principles.md` 룰 설치 | workflow-guide install |
 | `herdr` | herdr-app 에 세션 칸반 패널(mod) 설치 — herdr-app 이 있을 때만 | 신규 |
-| `all` | 위 네 가지 전부 (`herdr` 는 herdr-app 이 있을 때만) | 신규 |
+| `all` | 위 세 가지 전부 (`herdr` 는 herdr-app 이 있을 때만) | 신규 |
 
 선택된 모듈만 아래 해당 Step 을 수행합니다.
 
@@ -53,7 +52,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 > atelier drift check --plugin-root "${CLAUDE_PLUGIN_ROOT}"
 > ```
 >
-> `DRIFTED`·`NEW` 는 `/atelier:update` 가 처리합니다. setup 에서는 `NOT_INSTALLED` 로 보고된 산출물의 모듈(`style` → CLAUDE.md 블록·정책 룰, `workflow` → rules 복사본) 중 새로 설치할 것만 선택하면 됩니다. `herdr` 모듈의 패널(`herdr-mod/*`)도 같습니다.
+> `DRIFTED`·`NEW` 는 `/atelier:update` 가 처리합니다. setup 에서는 `NOT_INSTALLED` 로 보고된 산출물의 모듈(`style` → CLAUDE.md 블록·정책 룰) 중 새로 설치할 것만 선택하면 됩니다. `herdr` 모듈의 패널(`herdr-mod/*`)도 같습니다.
 
 > setup 이 설치하는 룰은 전부 user scope(`~/.claude/rules/atelier/`)에만 설치합니다. 모든 프로젝트에 공통으로 깔리는 베이스 룰이라 레포마다 복사하지 않습니다. 언어별 코드 스타일 룰은 프로젝트 성격에 따르므로 setup 이 아니라 `/atelier:code-style` 이 프로젝트 `.claude/rules/atelier/code-style/` 에 설치합니다.
 
@@ -79,14 +78,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
    > 서브커맨드의 수행 순서·플래그 의미(warm-up·감지·마이그레이션·등록, `--scope`, `--dry-run`, 멱등성)는
    > `git` skill 이 정합니다.
 
-## Step 2b — workflow 모듈
-
-설계 원칙 룰을 설치합니다:
-
-1. `~/.claude/rules/atelier/` 디렉토리가 없으면 생성, 대상 파일이 존재하면 덮어쓸지 AskUserQuestion 으로 확인
-2. `${CLAUDE_PLUGIN_ROOT}/rules/agent-design-principles.md` 를 **내용 수정 없이 그대로** `~/.claude/rules/atelier/agent-design-principles.md` 에 복사
-
-## Step 2c — style 모듈
+## Step 2b — style 모듈
 
 `~/.claude/CLAUDE.md` 에 코딩 원칙 템플릿을 병합합니다 (워터마크 기반 중복 확인 — 기존 coding-style 로직 동일).
 
@@ -98,7 +90,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-binary.sh"
 
 > 설치 대상 파일 목록은 atelier CLI 가 소유합니다 — 이후 드리프트 점검·동기화(`drift check` / `drift sync --target user-rules`)와 같은 목록을 봅니다.
 
-## Step 2d — herdr 모듈
+## Step 2c — herdr 모듈
 
 herdr-app 에서 atelier 세션 칸반을 보는 패널(`atelier-board` mod)을 설치합니다. 규격은 `spec/concerns/herdr-extension.md` 입니다.
 

@@ -52,21 +52,6 @@ fn resync_is_idempotent() {
 }
 
 #[test]
-fn sync_rules_overwrites_copy_and_backs_up() {
-    let fs = MemFs::with_sources("body");
-    fs.insert(RULES_COPY, "locally edited\n");
-
-    let line = run(&fs, SyncTarget::Rules).unwrap();
-    let backup = format!("{RULES_COPY}.bak-{TS}");
-    assert_eq!(line, format!("synced: {RULES_COPY} (backup: {backup})\n"));
-    assert_eq!(fs.content(RULES_COPY).unwrap(), RULES_BODY);
-    assert_eq!(
-        fs.writes.borrow()[0],
-        (backup, "locally edited\n".to_string())
-    );
-}
-
-#[test]
 fn sync_user_rules_overwrites_every_copy_with_one_backup_timestamp() {
     let fs = MemFs::with_sources("body");
     fs.install_user_rule_copies();
@@ -146,7 +131,6 @@ fn sync_scope_installs_new_files_and_overwrites_existing_ones() {
 #[test]
 fn refuses_named_file_when_scope_has_no_copies_with_zero_writes() {
     let fs = MemFs::with_sources("body");
-    fs.insert(RULES_COPY, RULES_BODY);
 
     let err = run_named(&fs, SyncTarget::UserRules, Some(POLICY_RULES[0])).unwrap_err();
     assert_eq!(
@@ -169,9 +153,9 @@ fn refuses_unknown_user_rule_name_with_zero_writes() {
 #[test]
 fn refuses_name_on_non_policy_target_with_zero_writes() {
     let fs = MemFs::with_sources("body");
-    fs.insert(RULES_COPY, RULES_BODY);
+    fs.insert(USER_CLAUDE_MD, &block("body"));
 
-    let err = run_named(&fs, SyncTarget::Rules, Some(POLICY_RULES[0])).unwrap_err();
+    let err = run_named(&fs, SyncTarget::ClaudeMd, Some(POLICY_RULES[0])).unwrap_err();
     assert_eq!(err, "--name is only supported with --target user-rules");
     assert_eq!(fs.write_count(), 0);
 }
@@ -361,18 +345,6 @@ fn refuses_reversed_markers_with_zero_writes() {
 }
 
 #[test]
-fn refuses_when_rules_copy_absent_with_zero_writes() {
-    let fs = MemFs::with_sources("body");
-
-    let err = run(&fs, SyncTarget::Rules).unwrap_err();
-    assert_eq!(
-        err,
-        format!("not installed: {RULES_COPY} — run /atelier:setup")
-    );
-    assert_eq!(fs.write_count(), 0);
-}
-
-#[test]
 fn refuses_when_plugin_source_missing_with_zero_writes() {
     let fs = MemFs::default();
     fs.insert(USER_CLAUDE_MD, &block("body"));
@@ -413,21 +385,6 @@ fn refuses_non_utf8_claude_md_with_zero_writes() {
         err,
         format!(
             "{USER_CLAUDE_MD} is not valid UTF-8 — fix encoding or run /atelier:setup to reinstall"
-        )
-    );
-    assert_eq!(fs.write_count(), 0);
-}
-
-#[test]
-fn refuses_non_utf8_rules_copy_with_zero_writes() {
-    let fs = MemFs::with_sources("body");
-    fs.insert_bytes(RULES_COPY, b"\xff\xfe not utf-8");
-
-    let err = run(&fs, SyncTarget::Rules).unwrap_err();
-    assert_eq!(
-        err,
-        format!(
-            "{RULES_COPY} is not valid UTF-8 — fix encoding or run /atelier:setup to reinstall"
         )
     );
     assert_eq!(fs.write_count(), 0);

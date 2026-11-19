@@ -1,14 +1,8 @@
 {
-  "agents": [
-    "./agents/workflow-analyzer.md",
-    "./agents/workflow-insight.md"
-  ],
   "author": {
     "name": "kys0213"
   },
   "commands": [
-    "./commands/suggest-analyze.md",
-    "./commands/suggest-insight.md",
     "./commands/setup.md"
   ],
   "description": "세션 분석 기반 통합 워크플로우/스킬 제안 - 구조적 통계 추출 + LLM 시맨틱 해석 2-Phase 아키텍처",
@@ -28,5 +22,8 @@
     "statistical"
   ],
   "name": "suggest-workflow",
+  "skills": [
+    "./skills"
+  ],
   "version": "2.2.0"
 }
