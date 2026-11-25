@@ -119,11 +119,48 @@ async function verifyOffline(browser, file) {
 
   await page.goto(pathToFileURL(file).href, { waitUntil: 'load' })
   const missing = await page.$$eval('figure.diagram', (els) => els.filter((f) => !f.querySelector(':scope > svg')).length)
+  const overflows = []
+  for (const width of VIEWPORT_WIDTHS) {
+    await page.setViewportSize({ width, height: 800 })
+    const offenders = await page.evaluate(findHorizontalOverflow)
+    if (offenders) overflows.push(`${width}px 폭: ${offenders.length ? offenders.join(', ') : '원인 요소를 찾지 못했어요'}`)
+  }
   await page.close()
 
   if (external.length) throw new Stop(EXIT.BROKEN, `외부 리소스를 요청해요 (단일 파일이 아니에요):\n  - ${external.join('\n  - ')}`)
   if (pageErrors.length) throw new Stop(EXIT.BROKEN, `페이지 스크립트 오류:\n  - ${pageErrors.join('\n  - ')}`)
   if (missing) throw new Stop(EXIT.BROKEN, `SVG 가 없는 다이어그램이 ${missing}개 있어요.`)
+  if (overflows.length) {
+    throw new Stop(
+      EXIT.BROKEN,
+      `페이지가 가로로 넘쳐요 (표는 .table-wrap 으로 감싸고, 스타일을 따로 쓰지 않아요):\n  - ${overflows.join('\n  - ')}`,
+    )
+  }
+}
+
+// 휴대폰과 데스크톱 폭에서 페이지 전체가 가로로 스크롤되면 안 된다.
+const VIEWPORT_WIDTHS = [375, 1280]
+
+// 브라우저 안에서 실행된다. 넘치지 않으면 null, 넘치면 원인 요소 설명 목록을 돌려준다.
+function findHorizontalOverflow() {
+  const root = document.documentElement
+  if (root.scrollWidth <= root.clientWidth + 1) return null
+  const limit = root.clientWidth + 1
+  const clipped = (el) => {
+    for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+      if (['auto', 'scroll', 'hidden', 'clip'].includes(getComputedStyle(p).overflowX)) return true
+    }
+    return false
+  }
+  const over = new Set([...document.body.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > limit && !clipped(el)))
+  return [...over]
+    .filter((el) => !over.has(el.parentElement))
+    .slice(0, 5)
+    .map((el) => {
+      const cls = typeof el.className === 'string' && el.className ? `.${el.className.trim().split(/\s+/).join('.')}` : ''
+      const text = (el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 30)
+      return `<${el.tagName.toLowerCase()}${cls}> "${text}"`
+    })
 }
 
 async function main() {
