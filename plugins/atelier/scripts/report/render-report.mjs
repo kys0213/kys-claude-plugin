@@ -119,11 +119,90 @@ async function verifyOffline(browser, file) {
 
   await page.goto(pathToFileURL(file).href, { waitUntil: 'load' })
   const missing = await page.$$eval('figure.diagram', (els) => els.filter((f) => !f.querySelector(':scope > svg')).length)
+  const tabProblem = await page.evaluate(checkTabs)
+  const tabCount = await page.$$eval('.tabbar [role=tab]', (els) => els.length)
+  const overflows = []
+  const blankDiagrams = []
+  for (const width of VIEWPORT_WIDTHS) {
+    await page.setViewportSize({ width, height: 800 })
+    // 탭이 있으면 숨은 탭은 잴 수 없으니 탭마다 열어 보고 잰다.
+    for (let i = 0; i < Math.max(tabCount, 1); i++) {
+      const label = tabCount ? await page.evaluate(openTab, i) : ''
+      const where = `${width}px 폭${label ? ` "${label}" 탭` : ''}`
+      const offenders = await page.evaluate(findHorizontalOverflow)
+      if (offenders) overflows.push(`${where}: ${offenders.length ? offenders.join(', ') : '원인 요소를 찾지 못했어요'}`)
+      const blank = await page.evaluate(countBlankDiagrams)
+      if (blank) blankDiagrams.push(`${where}: ${blank}개`)
+    }
+  }
+  await page.emulateMedia({ media: 'print' })
+  const hiddenInPrint = await page.evaluate(countHiddenSections)
   await page.close()
 
   if (external.length) throw new Stop(EXIT.BROKEN, `외부 리소스를 요청해요 (단일 파일이 아니에요):\n  - ${external.join('\n  - ')}`)
   if (pageErrors.length) throw new Stop(EXIT.BROKEN, `페이지 스크립트 오류:\n  - ${pageErrors.join('\n  - ')}`)
   if (missing) throw new Stop(EXIT.BROKEN, `SVG 가 없는 다이어그램이 ${missing}개 있어요.`)
+  if (tabProblem) throw new Stop(EXIT.BROKEN, `탭이 제대로 만들어지지 않았어요: ${tabProblem}`)
+  if (blankDiagrams.length) throw new Stop(EXIT.BROKEN, `크기가 0인 다이어그램이 있어요 (숨은 자리에서 그려졌어요):\n  - ${blankDiagrams.join('\n  - ')}`)
+  if (hiddenInPrint) throw new Stop(EXIT.BROKEN, `인쇄할 때 보이지 않는 섹션이 ${hiddenInPrint}개 있어요.`)
+  if (overflows.length) {
+    throw new Stop(
+      EXIT.BROKEN,
+      `페이지가 가로로 넘쳐요 (표는 .table-wrap 으로 감싸고, 스타일을 따로 쓰지 않아요):\n  - ${overflows.join('\n  - ')}`,
+    )
+  }
+}
+
+// 휴대폰과 데스크톱 폭에서 페이지 전체가 가로로 스크롤되면 안 된다.
+const VIEWPORT_WIDTHS = [375, 1280]
+
+// 아래 함수들은 브라우저 안에서 실행된다.
+
+// 섹션이 3개 이상이면 섹션마다 탭이 하나씩 있고, 보이는 탭 패널이 하나여야 한다. 문제가 없으면 null.
+function checkTabs() {
+  const sections = document.querySelectorAll('main > section:not(.bluf)').length
+  const tabs = document.querySelectorAll('.tabbar [role=tab]').length
+  if (sections < 3) return tabs ? `섹션이 ${sections}개인데 탭이 ${tabs}개예요` : null
+  if (!document.documentElement.classList.contains('tabs')) return '탭 스크립트가 실행되지 않았어요 (<!-- tabs:start --> 블록 확인)'
+  if (tabs !== sections) return `섹션 ${sections}개, 탭 ${tabs}개 — 섹션마다 <h2> 가 있어야 해요`
+  const shown = [...document.querySelectorAll('main > section.panel')].filter((p) => p.offsetParent !== null).length
+  return shown === 1 ? null : `보이는 탭 패널이 ${shown}개예요`
+}
+
+function openTab(index) {
+  const tab = document.querySelectorAll('.tabbar [role=tab]')[index]
+  tab.click()
+  return tab.firstChild.textContent
+}
+
+function countBlankDiagrams() {
+  return [...document.querySelectorAll('figure.diagram > svg')].filter((svg) => svg.checkVisibility() && svg.getBoundingClientRect().width < 1).length
+}
+
+function countHiddenSections() {
+  return [...document.querySelectorAll('main > section')].filter((s) => getComputedStyle(s).display === 'none').length
+}
+
+// 넘치지 않으면 null, 넘치면 원인 요소 설명 목록을 돌려준다.
+function findHorizontalOverflow() {
+  const root = document.documentElement
+  if (root.scrollWidth <= root.clientWidth + 1) return null
+  const limit = root.clientWidth + 1
+  const clipped = (el) => {
+    for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+      if (['auto', 'scroll', 'hidden', 'clip'].includes(getComputedStyle(p).overflowX)) return true
+    }
+    return false
+  }
+  const over = new Set([...document.body.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > limit && !clipped(el)))
+  return [...over]
+    .filter((el) => !over.has(el.parentElement))
+    .slice(0, 5)
+    .map((el) => {
+      const cls = typeof el.className === 'string' && el.className ? `.${el.className.trim().split(/\s+/).join('.')}` : ''
+      const text = (el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 30)
+      return `<${el.tagName.toLowerCase()}${cls}> "${text}"`
+    })
 }
 
 async function main() {
