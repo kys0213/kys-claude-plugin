@@ -99,8 +99,35 @@
   pre.mermaid.failed::before { content: "다이어그램 문법 오류 — 아래는 원본이에요"; }
   html[data-diagrams="offline"] pre.mermaid::before { content: "다이어그램을 불러오지 못했어요 (네트워크 확인) — 아래는 원본이에요"; }
   ol.sources { font-size: 0.92rem; margin: 0; }
+  ol.sources > li:target { background: var(--warn-bg); }
+  a.ref { text-decoration: none; }
   footer { margin-top: 48px; color: var(--muted); font-size: 0.85rem; }
+
+  /* 탭 — 스크립트가 섹션 h2 로 만든다. 스크립트가 없으면 전부 펼쳐 보인다 */
+  [id] { scroll-margin-top: 64px; }
+  .safety {
+    display: block; width: 100%; margin: 0 0 8px; padding: 8px 14px; border: 0; border-left: 4px solid var(--unknown); border-radius: 6px;
+    background: var(--bad-bg); color: var(--fg); font: inherit; text-align: left; cursor: pointer;
+  }
+  .tabbar {
+    display: flex; gap: 4px; position: sticky; top: 0; z-index: 5; margin: 0; padding-top: 8px;
+    background: var(--bg); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: thin;
+  }
+  .tabbar button {
+    flex: none; font: inherit; font-weight: 600; color: var(--muted); background: none; border: 0;
+    border-bottom: 3px solid transparent; padding: 8px 14px; cursor: pointer; white-space: nowrap;
+  }
+  .tabbar button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+  .tabbar button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .tabbar .count { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 10px; background: var(--unknown); color: #ffffff; font-size: 0.75rem; }
+  html.tabs .panel { display: none; padding-top: 8px; }
+  html.tabs .panel.active { display: block; }
+  html.tabs .panel > h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
   @media print {
+    .tabbar, .safety { display: none !important; }
+    html.tabs .panel { display: block; }
+    html.tabs .panel > h2 { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
     :root { --bg: #ffffff; --fg: #000000; --panel: #f6f8fa; --card: #ffffff; }
     main { max-width: none; padding: 0; }
     .grid { display: block; }
@@ -188,10 +215,10 @@
     </div>
   </section>
 
-  <details>
-    <summary>상세</summary>
-    <p data-fill>필요한 사람만 펼쳐 보는 내용. Mermaid 는 넣지 않는다. 없으면 이 블록을 지운다</p>
-  </details>
+  <section>
+    <h2>상세</h2>
+    <p data-fill>필요한 사람만 보는 내용. 대상 설명의 카드가 6개를 넘으면 덜 중요한 카드를 여기로 옮긴다. 없으면 이 섹션을 지운다</p>
+  </section>
 
   <section>
     <h2>근거</h2>
@@ -203,6 +230,138 @@
 
   <footer>이 페이지는 내용을 보여 주는 화면이에요. 판단은 위 근거의 원본으로 확인해요.</footer>
 </main>
+
+<!-- tabs:start — 고치지 않는다. 섹션이 3개 이상이면 h2 로 탭을 만들고, [n] 을 근거 링크로 바꾼다 -->
+<script>
+(() => {
+  const root = document.documentElement
+  const main = document.querySelector('main')
+  const panels = [...main.querySelectorAll(':scope > section:not(.bluf)')].filter((s) => s.querySelector(':scope > h2'))
+  const sources = [...main.querySelectorAll('ol.sources > li')]
+
+  // 본문의 [n] 을 근거 n 번 링크로 바꾼다. 마우스를 올리면 근거 원문이 보인다.
+  sources.forEach((li, i) => { if (!li.id) li.id = `src-${i + 1}` })
+  const skip = 'code, pre, svg, a, script, style, ol.sources'
+  const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (/\[\d+\]/.test(n.data) && !n.parentElement.closest(skip) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
+  })
+  const texts = []
+  while (walker.nextNode()) texts.push(walker.currentNode)
+  for (const node of texts) {
+    const frag = document.createDocumentFragment()
+    let last = 0
+    for (const m of node.data.matchAll(/\[(\d+)\]/g)) {
+      const src = sources[Number(m[1]) - 1]
+      if (!src) continue
+      frag.append(node.data.slice(last, m.index))
+      const a = document.createElement('a')
+      a.className = 'ref'
+      a.href = `#${src.id}`
+      a.title = src.textContent.trim().replace(/\s+/g, ' ')
+      a.textContent = m[0]
+      frag.append(a)
+      last = m.index + m[0].length
+    }
+    frag.append(node.data.slice(last))
+    node.replaceWith(frag)
+  }
+
+  if (panels.length < 3) return
+
+  function build() {
+    const sentinel = document.createElement('div')
+    const bar = document.createElement('div')
+    bar.className = 'tabbar'
+    bar.setAttribute('role', 'tablist')
+    const tabs = panels.map((panel, i) => {
+      if (!panel.id) panel.id = `s${i + 1}`
+      panel.classList.add('panel')
+      panel.setAttribute('role', 'tabpanel')
+      panel.setAttribute('aria-labelledby', `tab-${panel.id}`)
+      const tab = document.createElement('button')
+      tab.type = 'button'
+      tab.id = `tab-${panel.id}`
+      tab.setAttribute('role', 'tab')
+      tab.setAttribute('aria-controls', panel.id)
+      tab.textContent = panel.querySelector(':scope > h2').textContent.trim()
+      const alerts = panel.querySelectorAll('.callout.danger, .callout.warn').length
+      if (alerts) {
+        const count = document.createElement('span')
+        count.className = 'count'
+        count.textContent = alerts
+        tab.append(count)
+      }
+      tab.addEventListener('click', () => activate(i, { scroll: true }))
+      bar.append(tab)
+      return tab
+    })
+
+    // 경고·주의는 탭 뒤에 숨지 않게 건수를 탭 밖에 보여 준다.
+    const danger = main.querySelectorAll('.panel .callout.danger').length
+    const warn = main.querySelectorAll('.panel .callout.warn').length
+    if (danger + warn) {
+      const owner = panels.findIndex((p) => p.querySelector('.callout.danger, .callout.warn'))
+      const strip = document.createElement('button')
+      strip.type = 'button'
+      strip.className = 'safety'
+      strip.textContent = `⚠ 경고 ${danger}건 · 주의 ${warn}건 — "${tabs[owner].firstChild.textContent}" 탭에서 확인해요`
+      strip.addEventListener('click', () => activate(owner, { scroll: true, focus: true }))
+      panels[0].before(strip)
+    }
+    panels[0].before(sentinel, bar)
+
+    function activate(index, { scroll = false, focus = false, hash = true } = {}) {
+      tabs.forEach((t, i) => {
+        const on = i === index
+        t.setAttribute('aria-selected', String(on))
+        t.tabIndex = on ? 0 : -1
+        panels[i].classList.toggle('active', on)
+      })
+      // 좁은 화면에서 선택한 탭이 탭 줄 밖에 있으면 탭 줄만 옆으로 민다 (페이지는 스크롤하지 않는다).
+      const t = tabs[index]
+      if (t.offsetLeft < bar.scrollLeft || t.offsetLeft + t.offsetWidth > bar.scrollLeft + bar.clientWidth) bar.scrollLeft = t.offsetLeft - 16
+      if (focus) tabs[index].focus()
+      if (hash) history.replaceState(null, '', `#${panels[index].id}`)
+      const top = sentinel.getBoundingClientRect().top + window.scrollY
+      if (scroll && window.scrollY > top) window.scrollTo({ top })
+    }
+
+    bar.addEventListener('keydown', (e) => {
+      const now = tabs.indexOf(document.activeElement)
+      if (now < 0) return
+      const next = { ArrowRight: now + 1, ArrowLeft: now - 1, Home: 0, End: tabs.length - 1 }[e.key]
+      if (next === undefined) return
+      e.preventDefault()
+      activate((next + tabs.length) % tabs.length, { focus: true })
+    })
+
+    // #근거 같은 링크가 다른 탭을 가리키면 그 탭을 열고 대상으로 이동한다.
+    function follow() {
+      const target = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)))
+      const index = target ? panels.findIndex((p) => p.contains(target)) : -1
+      if (index < 0) return false
+      activate(index, { hash: false })
+      if (target !== panels[index]) target.scrollIntoView({ block: 'center' })
+      return true
+    }
+    window.addEventListener('hashchange', () => follow() || activate(0, { hash: false }))
+    if (!follow()) activate(0, { hash: false })
+    root.classList.add('tabs')
+  }
+
+  // 다이어그램은 보이는 상태에서 그려야 한다. 아직 그리는 중이면 끝난 뒤에 탭을 만든다.
+  if (document.querySelector('pre.mermaid') && !root.dataset.diagrams) {
+    new MutationObserver((_, observer) => {
+      if (!root.dataset.diagrams) return
+      observer.disconnect()
+      build()
+    }).observe(root, { attributes: true, attributeFilter: ['data-diagrams'] })
+  } else {
+    build()
+  }
+})()
+</script>
+<!-- tabs:end -->
 
 <!-- mermaid:start -->
 <script type="module">

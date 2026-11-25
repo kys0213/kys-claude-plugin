@@ -48,7 +48,7 @@ Epic 2 ([#766](https://github.com/kys0213/kys-claude-plugin/issues/766))에서 c
 `output-styles/communicate.md` 가 `force-for-plugin` 으로 플러그인 활성화 시 자동 적용되어,
 매 턴의 채팅 응답을 communicate 스킬의 기준선(결론 먼저 · 해요체 단문 · 개조식 · 군더더기 제거)으로 정제합니다.
 대화 밖 독자용 산출물(슬랙 공유·PR 본문·문서)은 여전히 `/atelier:communicate` skill 이 담당합니다.
-보고서(분석·조사·진행 보고)는 표·Mermaid 다이어그램 위주의 반응형 단일 파일 HTML 레포트로 만듭니다. 다이어그램은 SVG 로 구워 넣습니다 (`scripts/report/render-report.mjs` 로 렌더링·가로 넘침 검증).
+보고서(분석·조사·진행 보고)는 표·Mermaid 다이어그램 위주에 섹션을 탭으로 넘겨 보는 반응형 단일 파일 HTML 레포트로 만듭니다. 다이어그램은 SVG 로 구워 넣습니다 (`scripts/report/render-report.mjs` 로 렌더링·탭·가로 넘침 검증).
 
 capability 슬래시(commit-and-pr, prioritize-issues, hook-config, scaffold-conventions 등)는
 모두 위 관심사 진입점으로 흡수되었습니다 — 슬래시 없이 자연어로 요청해도 해당 skill 이 자동 트리거됩니다.

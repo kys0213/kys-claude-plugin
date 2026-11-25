@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { describe, test } from 'node:test'
+import vm from 'node:vm'
 
 import { bakeDiagrams, inspectReport } from '../../scripts/report/bake.mjs'
 
@@ -25,6 +26,20 @@ describe('report template', () => {
 
   test('ships only placeholders, so an unfilled copy fails validation', () => {
     assert.ok(inspectReport(template).placeholders.length > 0)
+  })
+
+  test('every content section has an h2 the tab script can label it with', () => {
+    assert.ok(count(/<section>/g) >= 3)
+    assert.equal(count(/<section>\s*<h2>/g), count(/<section>/g))
+  })
+
+  test('keeps a parseable tab script after diagrams are baked', () => {
+    const svgs = Array.from({ length: inspectReport(template).diagrams }, () => '<svg></svg>')
+    const baked = bakeDiagrams(template, svgs)
+    const script = baked.match(/<!-- tabs:start[^>]*-->\s*<script>([\s\S]*?)<\/script>\s*<!-- tabs:end -->/)
+
+    assert.ok(script, 'tab script block is missing after bake')
+    assert.doesNotThrow(() => new vm.Script(script[1]))
   })
 
   test('requests nothing external once diagrams are baked', () => {
