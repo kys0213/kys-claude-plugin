@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { bakeDiagrams, inspectReport } from '../../scripts/report/bake.mjs'
+import { bakeDiagrams, inspectReport, judgeFile } from '../../scripts/report/bake.mjs'
 
 const LOADER = '<!-- mermaid:start -->\n<script type="module">/* loader */</script>\n<!-- mermaid:end -->'
 
@@ -71,5 +71,58 @@ describe('bakeDiagrams', () => {
     const out = bakeDiagrams(page('<pre class="mermaid">graph TD; A</pre>'), ['<svg><text>$& $1</text></svg>'])
 
     assert.match(out, /<text>\$& \$1<\/text>/)
+  })
+
+  test('writes the literal the file-only grep in html-report.md looks for', () => {
+    const out = bakeDiagrams(page('<pre class="mermaid">graph TD; A</pre><pre class="mermaid">graph TD; B</pre>'), [
+      '<svg id="a"></svg>',
+      '<svg id="b"></svg>',
+    ])
+
+    assert.equal([...out.matchAll(/<figure class="diagram"><svg/g)].length, 2)
+  })
+})
+
+describe('judgeFile', () => {
+  const baked = (svgs) => bakeDiagrams(page(svgs.map(() => '<pre class="mermaid">graph TD; A</pre>').join('')), svgs)
+
+  test('passes a baked file and counts its diagrams', () => {
+    assert.deepEqual(judgeFile(baked(['<svg></svg>', '<svg></svg>'])), { verdict: 'OK', diagrams: 2, problems: [] })
+  })
+
+  test('counts a diagram once even when its svg nests another svg', () => {
+    assert.equal(judgeFile(baked(['<svg><g><svg></svg></g></svg>'])).diagrams, 1)
+  })
+
+  test('passes a baked file without diagrams', () => {
+    assert.deepEqual(judgeFile(page('<p>only text</p>', { loader: false })), { verdict: 'OK', diagrams: 0, problems: [] })
+  })
+
+  test('calls a file with the loader still in it unverified, with or without diagrams', () => {
+    assert.equal(judgeFile(page('<pre class="mermaid">graph TD; A</pre>')).verdict, 'UNVERIFIED')
+    assert.equal(judgeFile(page('<p>only text</p>')).verdict, 'UNVERIFIED')
+  })
+
+  test('breaks on a mermaid block left without the loader', () => {
+    const result = judgeFile(page('<pre class="mermaid">graph TD; A</pre>', { loader: false }))
+
+    assert.equal(result.verdict, 'BROKEN')
+    assert.match(result.problems.join('\n'), /mermaid/)
+  })
+
+  test('breaks on a diagram figure without svg', () => {
+    const html = page('<figure class="diagram"><details class="diagram-source"><pre>x</pre></details></figure>', { loader: false })
+
+    assert.equal(judgeFile(html).verdict, 'BROKEN')
+  })
+
+  test('breaks on unfilled placeholders even before the loader is removed', () => {
+    assert.equal(judgeFile(page('<p data-fill>결론</p>')).verdict, 'BROKEN')
+  })
+
+  test('ignores a CDN url quoted as a source', () => {
+    const html = page('<li><code>https://cdn.jsdelivr.net/npm/mermaid@11.17.2/</code></li>', { loader: false })
+
+    assert.equal(judgeFile(html).verdict, 'OK')
   })
 })

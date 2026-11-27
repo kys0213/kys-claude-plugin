@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title data-fill>대상·행위·시점이 드러나는 제목 (검색어가 된다)</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d1d9e0; --panel: #f6f8fa; --card: #ffffff;
+    --accent: #0969da; --fact: #1a7f37; --guess: #9a6700; --unknown: #cf222e;
+    --bluf-bg: #ddf4ff; --bluf-line: #54aeff;
+    --ok-bg: #dafbe1; --warn-bg: #fff8c5; --bad-bg: #ffebe9; --note-bg: #ddf4ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #3d444d; --panel: #151b23; --card: #0d1117;
+      --accent: #4493f8; --fact: #3fb950; --guess: #d29922; --unknown: #f85149;
+      --bluf-bg: #0c2d6b; --bluf-line: #1f6feb;
+      --ok-bg: #12261e; --warn-bg: #272115; --bad-bg: #25171c; --note-bg: #121d2f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    word-break: keep-all; overflow-wrap: anywhere;
+  }
+  main { max-width: 1200px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.75rem; line-height: 1.35; margin: 0 0 8px; }
+  h2 { font-size: 1.3rem; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 1.05rem; margin: 0 0 8px; }
+  .meta { color: var(--muted); font-size: 0.9rem; margin: 0; }
+  a { color: var(--accent); }
+
+  /* 결론 박스 + 수치 카드 */
+  .bluf { margin: 24px 0; padding: 16px 20px; background: var(--bluf-bg); border-left: 4px solid var(--bluf-line); border-radius: 6px; }
+  .bluf p { margin: 0 0 6px; max-width: 80ch; }
+  .bluf p:last-child { margin-bottom: 0; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr)); gap: 12px; margin: 12px 0 0; }
+  .stats > div { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; min-width: 0; }
+  .stats dt { color: var(--muted); font-size: 0.85rem; }
+  .stats dd { margin: 0; font-size: 1.6rem; font-weight: 700; line-height: 1.3; }
+  .stats dd small { display: block; font-size: 0.8rem; font-weight: 400; color: var(--muted); }
+  .bluf .grid { margin-top: 12px; }
+
+  /* 반응형 카드 배치 — 넓으면 한 줄에 2~3개, 좁으면 1개. 줄마다 남는 칸 없이 채운다 */
+  .grid { display: flex; flex-wrap: wrap; gap: 16px; }
+  .grid > * { flex: 1 1 340px; min-width: 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; }
+  .grid > .span-all { flex-basis: 100%; }
+  .card > :last-child { margin-bottom: 0; }
+  .card p, .card li { max-width: 80ch; }
+  .caption { margin: 0 0 10px; color: var(--fg); }
+
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.88em; }
+  code { background: var(--panel); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--panel); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+
+  /* 표 — 넓은 표는 .table-wrap 안에서만 가로로 스크롤한다 */
+  .table-wrap { overflow-x: auto; margin: 8px 0; }
+  .table-wrap > table { display: table; width: auto; min-width: 100%; margin: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 0.93rem; display: block; overflow-x: auto; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; overflow-wrap: normal; }
+  th { background: var(--panel); white-space: nowrap; }
+  td.ok { background: var(--ok-bg); }
+  td.warn { background: var(--warn-bg); }
+  td.bad { background: var(--bad-bg); }
+
+  /* 단계 흐름 — 번호 원과 잇는 선 */
+  ol.steps { list-style: none; counter-reset: step; margin: 8px 0; padding: 0; }
+  ol.steps > li { counter-increment: step; position: relative; padding: 0 0 16px 44px; }
+  ol.steps > li::before {
+    content: counter(step); position: absolute; left: 0; top: 0; width: 30px; height: 30px; border-radius: 50%;
+    background: var(--accent); color: #ffffff; font-weight: 700; text-align: center; line-height: 30px;
+  }
+  ol.steps > li:not(:last-child)::after { content: ""; position: absolute; left: 14px; top: 32px; bottom: 2px; border-left: 2px solid var(--line); }
+  ol.steps > li:last-child { padding-bottom: 0; }
+
+  /* 경고·주의·참고 */
+  .callout { border-left: 4px solid; border-radius: 6px; padding: 10px 14px; margin: 0; }
+  .callout strong:first-child { margin-right: 6px; }
+  .callout.danger { border-color: var(--unknown); background: var(--bad-bg); }
+  .callout.warn { border-color: var(--guess); background: var(--warn-bg); }
+  .callout.note { border-color: var(--accent); background: var(--note-bg); }
+
+  details { margin: 12px 0; border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px; }
+  summary { cursor: pointer; font-weight: 600; }
+  .tag { display: inline-block; font-size: 0.75rem; font-weight: 700; padding: 0 6px; border-radius: 10px; border: 1px solid currentColor; margin-right: 4px; vertical-align: 1px; white-space: nowrap; }
+  .tag.fact { color: var(--fact); }
+  .tag.guess { color: var(--guess); }
+  .tag.unknown { color: var(--unknown); }
+
+  .diagram, pre.mermaid { margin: 8px 0; padding: 12px; background: #ffffff; color: #1f2328; border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; text-align: center; }
+  .diagram svg, pre.mermaid svg { max-width: 100%; height: auto; }
+  .diagram .diagram-source { text-align: left; }
+  pre.mermaid.failed::before, html[data-diagrams="offline"] pre.mermaid::before {
+    display: block; margin-bottom: 8px; font-family: sans-serif; font-weight: 700; color: #cf222e; text-align: left;
+  }
+  pre.mermaid.failed::before { content: "다이어그램 문법 오류 — 아래는 원본이에요"; }
+  html[data-diagrams="offline"] pre.mermaid::before { content: "다이어그램을 불러오지 못했어요 (네트워크 확인) — 아래는 원본이에요"; }
+  ol.sources { font-size: 0.92rem; margin: 0; }
+  ol.sources > li:target { background: var(--warn-bg); }
+  a.ref { text-decoration: none; }
+  footer { margin-top: 48px; color: var(--muted); font-size: 0.85rem; }
+
+  /* 탭 — 스크립트가 섹션 h2 로 만든다. 스크립트가 없으면 전부 펼쳐 보인다 */
+  [id] { scroll-margin-top: 64px; }
+  .safety {
+    display: block; width: 100%; margin: 0 0 8px; padding: 8px 14px; border: 0; border-left: 4px solid var(--unknown); border-radius: 6px;
+    background: var(--bad-bg); color: var(--fg); font: inherit; text-align: left; cursor: pointer;
+  }
+  .tabbar {
+    display: flex; gap: 4px; position: sticky; top: 0; z-index: 5; margin: 0; padding-top: 8px;
+    background: var(--bg); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: thin;
+  }
+  .tabbar button {
+    flex: none; font: inherit; font-weight: 600; color: var(--muted); background: none; border: 0;
+    border-bottom: 3px solid transparent; padding: 8px 14px; cursor: pointer; white-space: nowrap;
+  }
+  .tabbar button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+  .tabbar button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .tabbar .count { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 10px; background: var(--unknown); color: #ffffff; font-size: 0.75rem; }
+  html.tabs .panel { display: none; padding-top: 8px; }
+  html.tabs .panel.active { display: block; }
+  html.tabs .panel > h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+  @media print {
+    .tabbar, .safety { display: none !important; }
+    html.tabs .panel { display: block; }
+    html.tabs .panel > h2 { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
+    :root { --bg: #ffffff; --fg: #000000; --panel: #f6f8fa; --card: #ffffff; }
+    main { max-width: none; padding: 0; }
+    .grid { display: block; }
+    .card { margin: 0 0 12px; }
+    .card, figure, .stats > div, ol.steps > li { break-inside: avoid; }
+    .table-wrap, table, .diagram { overflow: visible; }
+    details { border: none; padding: 0; }
+    details > summary { list-style: none; }
+    .sources a::after { content: " (" attr(href) ")"; font-size: 0.8em; color: #59636e; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 data-fill>대상·바뀌는 것·시점이 드러나는 제목</h1>
+    <p class="meta"><span data-fill>YYYY-MM-DD</span> · 대상 독자: <span data-fill>누가 읽는가</span> · 작성: <span data-fill>작성자</span></p>
+    <p class="meta" data-fill>지금 → 바뀐 뒤 → 남는 위험까지 읽으면 판단할 수 있어요. 부록은 찾아볼 때만 열어요.</p>
+  </header>
+
+  <section class="bluf" aria-label="결론">
+    <p><strong>결론</strong> — <span data-fill>지금은 A 라서 ❶❷ 가 깨지고, B 로 바꾸면 풀린다는 결론 2~3문장</span></p>
+    <p><strong>할 일</strong> — <span data-fill>독자가 할 일 (무엇을·언제까지). 없으면 "할 일 없음"</span></p>
+    <!-- 구조가 바뀔 때만 남긴다. 두 장은 같은 방향, 같은 노드 이름·순서로 그리고 노드는 4개 이하로 둔다 -->
+    <div class="grid">
+      <article class="card">
+        <h3>지금</h3>
+        <p class="caption" data-fill>붉은 테두리 = 깨지는 지점 <span class="tag fact">사실</span> [1]</p>
+        <pre class="mermaid" data-fill>flowchart TD
+  A[입력] --&gt; B[❶ 깨지는 단계]
+  B --&gt; C[결과]
+  class B broken
+  classDef broken fill:#ffebe9,stroke:#cf222e,stroke-width:2px,color:#1f2328</pre>
+      </article>
+      <article class="card">
+        <h3>바뀐 뒤</h3>
+        <p class="caption" data-fill>초록 테두리 = 새로 생기거나 바뀌는 지점 <span class="tag guess">추정</span> [2]</p>
+        <pre class="mermaid" data-fill>flowchart TD
+  A[입력] --&gt; B[❶ 바뀐 단계]
+  B --&gt; C[결과]
+  class B added
+  classDef added fill:#dafbe1,stroke:#1a7f37,stroke-width:2px,color:#1f2328</pre>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>지금</h2>
+    <!-- 깨지는 지점마다 번호를 하나 단다. 같은 번호를 그림·문제 표·해결 표에 쓴다 -->
+    <div class="grid">
+      <article class="card span-all">
+        <h3 data-fill>지금 깨지는 것</h3>
+        <p class="caption" data-fill>문제 표가 말하는 것 한 줄 <span class="tag fact">사실</span> [1]</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>번호</th><th>문제</th><th>영향</th></tr></thead>
+            <tbody><tr><td data-fill>❶</td><td data-fill>무엇이 어디서 깨지나</td><td class="bad" data-fill>누가 무엇을 못 하나 (글자로도 쓴다)</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>바뀐 뒤</h2>
+    <div class="grid">
+      <article class="card span-all">
+        <h3 data-fill>바뀐 뒤 풀리는 것</h3>
+        <p class="caption" data-fill>해결 표가 말하는 것 한 줄. 번호는 지금 탭과 같다 [2]</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>번호</th><th>해결</th><th>바뀌는 곳</th></tr></thead>
+            <tbody><tr><td data-fill>❶</td><td class="ok" data-fill>어떻게 풀리나</td><td data-fill>파일·모듈·설정</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+      <article class="card span-all">
+        <h3>결정과 버린 선택지</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>결정</th><th>버린 안</th><th>버린 안이 못 푸는 번호</th><th>이유</th></tr></thead>
+            <tbody><tr><td data-fill>우리가 내린 결정</td><td data-fill>버린 안</td><td data-fill>❷</td><td data-fill>이유 [3]. 우리가 내린 결정이 없으면 이 카드를 지운다</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>남는 위험</h2>
+    <!-- 해결이 없는 번호는 여기에 같은 번호로 쓴다. 없으면 표 대신 "남는 위험 없음" 한 줄 -->
+    <div class="grid">
+      <article class="card span-all">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>번호</th><th>남는 위험</th><th>요청 (누가·언제까지)</th></tr></thead>
+            <tbody><tr><td data-fill>❷</td><td class="warn" data-fill>해결하지 않는 문제, 바꾸면서 새로 생기는 위험</td><td data-fill>독자에게 부탁하는 것</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+      <p class="callout warn" data-fill><strong>주의</strong> 장비·설정이 망가질 수 있는 것. 명령으로 시작한다. 없으면 지운다</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>확인 절차</h2>
+    <div class="grid">
+      <article class="card span-all">
+        <p class="caption" data-fill><strong>사전 조건</strong> — 따라 할 것이 없으면 이 섹션을 지운다</p>
+        <ol class="steps">
+          <li data-fill>조건이 있으면 조건을 먼저 쓰고 지시를 쓴다. 한 단계에 동작 하나. 명령은 <code>코드</code>로</li>
+        </ol>
+        <p class="caption" data-fill><strong>기대 결과</strong> — 무엇이 보이면 성공인가</p>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>부록</h2>
+    <!-- 찾아보는 값만 둔다: 값, 계약(입출력 형식), 설정, 결정 전문, 용어. 없으면 이 섹션을 지운다 -->
+    <div class="grid">
+      <article class="card">
+        <h3 data-fill>찾아보는 값 (예: 설정 값)</h3>
+        <p data-fill>건너뛰어도 판단할 수 있는 내용만 둔다</p>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>근거</h2>
+    <p class="meta"><span class="tag fact">사실</span> 확인함 · <span class="tag guess">추정</span> 판단·해석 · <span class="tag unknown">미확인</span> 확인 안 됨</p>
+    <ol class="sources">
+      <li data-fill><code>경로:라인</code>, 실행한 명령과 출력, 링크</li>
+    </ol>
+  </section>
+
+  <footer>이 페이지는 내용을 보여 주는 화면이에요. 판단은 위 근거의 원본으로 확인해요.</footer>
+</main>
+
+<!-- tabs:start — 고치지 않는다. 섹션이 3개 이상이면 h2 로 탭을 만들고, [n] 을 근거 링크로 바꾼다 -->
+<script>
+(() => {
+  const root = document.documentElement
+  const main = document.querySelector('main')
+  const panels = [...main.querySelectorAll(':scope > section:not(.bluf)')].filter((s) => s.querySelector(':scope > h2'))
+  const sources = [...main.querySelectorAll('ol.sources > li')]
+
+  // 본문의 [n] 을 근거 n 번 링크로 바꾼다. 마우스를 올리면 근거 원문이 보인다.
+  sources.forEach((li, i) => { if (!li.id) li.id = `src-${i + 1}` })
+  const skip = 'code, pre, svg, a, script, style, ol.sources'
+  const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (/\[\d+\]/.test(n.data) && !n.parentElement.closest(skip) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
+  })
+  const texts = []
+  while (walker.nextNode()) texts.push(walker.currentNode)
+  for (const node of texts) {
+    const frag = document.createDocumentFragment()
+    let last = 0
+    for (const m of node.data.matchAll(/\[(\d+)\]/g)) {
+      const src = sources[Number(m[1]) - 1]
+      if (!src) continue
+      frag.append(node.data.slice(last, m.index))
+      const a = document.createElement('a')
+      a.className = 'ref'
+      a.href = `#${src.id}`
+      a.title = src.textContent.trim().replace(/\s+/g, ' ')
+      a.textContent = m[0]
+      frag.append(a)
+      last = m.index + m[0].length
+    }
+    frag.append(node.data.slice(last))
+    node.replaceWith(frag)
+  }
+
+  if (panels.length < 3) return
+
+  function build() {
+    const sentinel = document.createElement('div')
+    const bar = document.createElement('div')
+    bar.className = 'tabbar'
+    bar.setAttribute('role', 'tablist')
+    const tabs = panels.map((panel, i) => {
+      if (!panel.id) panel.id = `s${i + 1}`
+      panel.classList.add('panel')
+      panel.setAttribute('role', 'tabpanel')
+      panel.setAttribute('aria-labelledby', `tab-${panel.id}`)
+      const tab = document.createElement('button')
+      tab.type = 'button'
+      tab.id = `tab-${panel.id}`
+      tab.setAttribute('role', 'tab')
+      tab.setAttribute('aria-controls', panel.id)
+      tab.textContent = panel.querySelector(':scope > h2').textContent.trim()
+      const alerts = panel.querySelectorAll('.callout.danger, .callout.warn').length
+      if (alerts) {
+        const count = document.createElement('span')
+        count.className = 'count'
+        count.textContent = alerts
+        tab.append(count)
+      }
+      tab.addEventListener('click', () => activate(i, { scroll: true }))
+      bar.append(tab)
+      return tab
+    })
+
+    // 경고·주의는 탭 뒤에 숨지 않게 건수를 탭 밖에 보여 준다.
+    const danger = main.querySelectorAll('.panel .callout.danger').length
+    const warn = main.querySelectorAll('.panel .callout.warn').length
+    if (danger + warn) {
+      const owner = panels.findIndex((p) => p.querySelector('.callout.danger, .callout.warn'))
+      const strip = document.createElement('button')
+      strip.type = 'button'
+      strip.className = 'safety'
+      strip.textContent = `⚠ 경고 ${danger}건 · 주의 ${warn}건 — "${tabs[owner].firstChild.textContent}" 탭에서 확인해요`
+      strip.addEventListener('click', () => activate(owner, { scroll: true, focus: true }))
+      panels[0].before(strip)
+    }
+    panels[0].before(sentinel, bar)
+
+    function activate(index, { scroll = false, focus = false, hash = true } = {}) {
+      tabs.forEach((t, i) => {
+        const on = i === index
+        t.setAttribute('aria-selected', String(on))
+        t.tabIndex = on ? 0 : -1
+        panels[i].classList.toggle('active', on)
+      })
+      // 좁은 화면에서 선택한 탭이 탭 줄 밖에 있으면 탭 줄만 옆으로 민다 (페이지는 스크롤하지 않는다).
+      const t = tabs[index]
+      if (t.offsetLeft < bar.scrollLeft || t.offsetLeft + t.offsetWidth > bar.scrollLeft + bar.clientWidth) bar.scrollLeft = t.offsetLeft - 16
+      if (focus) tabs[index].focus()
+      if (hash) history.replaceState(null, '', `#${panels[index].id}`)
+      const top = sentinel.getBoundingClientRect().top + window.scrollY
+      if (scroll && window.scrollY > top) window.scrollTo({ top })
+    }
+
+    bar.addEventListener('keydown', (e) => {
+      const now = tabs.indexOf(document.activeElement)
+      if (now < 0) return
+      const next = { ArrowRight: now + 1, ArrowLeft: now - 1, Home: 0, End: tabs.length - 1 }[e.key]
+      if (next === undefined) return
+      e.preventDefault()
+      activate((next + tabs.length) % tabs.length, { focus: true })
+    })
+
+    // #근거 같은 링크가 다른 탭을 가리키면 그 탭을 열고 대상으로 이동한다.
+    function follow() {
+      const target = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)))
+      const index = target ? panels.findIndex((p) => p.contains(target)) : -1
+      if (index < 0) return false
+      activate(index, { hash: false })
+      if (target !== panels[index]) target.scrollIntoView({ block: 'center' })
+      return true
+    }
+    window.addEventListener('hashchange', () => follow() || activate(0, { hash: false }))
+    if (!follow()) activate(0, { hash: false })
+    root.classList.add('tabs')
+  }
+
+  // 다이어그램은 보이는 상태에서 그려야 한다. 아직 그리는 중이면 끝난 뒤에 탭을 만든다.
+  if (document.querySelector('pre.mermaid') && !root.dataset.diagrams) {
+    new MutationObserver((_, observer) => {
+      if (!root.dataset.diagrams) return
+      observer.disconnect()
+      build()
+    }).observe(root, { attributes: true, attributeFilter: ['data-diagrams'] })
+  } else {
+    build()
+  }
+})()
+</script>
+<!-- tabs:end -->
+
+<!-- mermaid:start -->
+<script type="module">
+  const root = document.documentElement
+  const blocks = [...document.querySelectorAll('pre.mermaid')]
+  const errors = []
+  if (blocks.length === 0) {
+    root.dataset.diagrams = 'none'
+  } else {
+    try {
+      const { default: mermaid } = await import('https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs')
+      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'neutral' })
+      for (const [i, el] of blocks.entries()) {
+        try {
+          const { svg } = await mermaid.render(`diagram-${i}`, el.textContent)
+          el.innerHTML = svg
+        } catch (e) {
+          errors.push({ index: i, message: String(e?.message ?? e) })
+          el.classList.add('failed')
+        }
+      }
+      root.dataset.diagrams = errors.length ? 'error' : 'ok'
+    } catch (e) {
+      errors.push({ index: -1, message: String(e?.message ?? e) })
+      root.dataset.diagrams = 'offline'
+    }
+  }
+  window.__diagramErrors = errors
+</script>
+<!-- mermaid:end -->
+</body>
+</html>

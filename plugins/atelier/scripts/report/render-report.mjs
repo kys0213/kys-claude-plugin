@@ -6,10 +6,10 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 
-import { bakeDiagrams, inspectReport } from './bake.mjs'
+import { bakeDiagrams, inspectReport, judgeFile } from './bake.mjs'
 
 const EXIT = { OK: 0, BROKEN: 1, UNVERIFIED: 2 }
-const USAGE = 'usage: render-report.mjs <report.html> [--out <path>] [--mermaid-dist <dir>] [--timeout <ms>]'
+const USAGE = 'usage: render-report.mjs <report.html> [--out <path>] [--mermaid-dist <dir>] [--timeout <ms>]\n       render-report.mjs --check <report.html>'
 
 class Stop extends Error {
   constructor(code, message) {
@@ -28,6 +28,7 @@ function parseCli(argv) {
         out: { type: 'string' },
         'mermaid-dist': { type: 'string' },
         timeout: { type: 'string', default: '30000' },
+        check: { type: 'boolean', default: false },
       },
     })
   } catch (e) {
@@ -43,6 +44,7 @@ function parseCli(argv) {
     out: path.resolve(values.out ?? input),
     mermaidDist: values['mermaid-dist'] && path.resolve(values['mermaid-dist']),
     timeout: Number(values.timeout),
+    check: values.check,
   }
 }
 
@@ -205,8 +207,20 @@ function findHorizontalOverflow() {
     })
 }
 
+// 파일 상태 한 줄. 일반 실행과 --check 가 같은 판정(judgeFile)으로 끝 줄을 쓴다.
+function verdictLine(file, how) {
+  const result = judgeFile(readFileSync(file, 'utf8'))
+  if (result.verdict === 'BROKEN') throw new Stop(EXIT.BROKEN, `파일 상태가 깨졌어요:\n  - ${result.problems.join('\n  - ')}`)
+  if (result.verdict === 'UNVERIFIED') throw new Stop(EXIT.UNVERIFIED, result.problems[0])
+  return `OK: ${file} (다이어그램 ${result.diagrams}개 SVG 포함. 로더 없음. ${how})`
+}
+
 async function main() {
   const opts = parseCli(process.argv.slice(2))
+  if (opts.check) {
+    console.log(verdictLine(opts.input, '파일만 확인'))
+    return
+  }
   const html = readFileSync(opts.input, 'utf8')
   const report = inspectReport(html)
 
@@ -240,15 +254,17 @@ async function main() {
   } finally {
     await browser.close()
   }
-  const baked = report.diagrams ? `다이어그램 ${report.diagrams}개를 SVG 로 넣었어요` : '새로 넣을 다이어그램 없음'
-  console.log(`OK: ${opts.out} (${baked}. 외부 요청 없음)`)
+  console.log(verdictLine(opts.out, '외부 요청 없음'))
 }
 
 main().then(
   () => process.exit(EXIT.OK),
   (e) => {
     if (!(e instanceof Stop)) throw e
-    console.error(e.code === EXIT.UNVERIFIED ? `UNVERIFIED: ${e.message}` : `BROKEN: ${e.message}`)
+    // 판정 줄이 항상 마지막 줄이 되게, 세부 목록을 먼저 쓴다.
+    const [head, ...details] = e.message.split('\n')
+    if (details.length) console.error(details.join('\n'))
+    console.error(`${e.code === EXIT.UNVERIFIED ? 'UNVERIFIED' : 'BROKEN'}: ${head.replace(/:$/, '')}`)
     process.exit(e.code)
   },
 )
